@@ -47,10 +47,21 @@ Curated behavioral rules applied to every Claude Code session across all project
 | Clean Working Directory | Scripts must not leave intermediary files |
 | Reviews Must Check Conventions | Code reviews must check file placement, not just correctness |
 | Persistent Planning for Complex Tasks | Use a scratch `_plan.md` for multi-step tasks, delete when done |
+| Autonomy | Operate without approval except for irreversible/out-of-codebase actions |
 
 Edit `claude-global.md` to add or remove rules. To disable entirely, comment out or remove the `global-memory` line in `claude-config.txt`.
 
 The bootstrap installs these rules into a managed section of `~/.claude/CLAUDE.md` (between `<!-- claude-setup:start -->` and `<!-- claude-setup:end -->` markers). Any personal content you add outside these markers is preserved across bootstrap runs and resets.
+
+### Shell Alias (installed to ~/.zshrc)
+
+The bootstrap installs a shell alias that runs Claude Code with `--dangerously-skip-permissions`, bypassing mechanical permission prompts. The Autonomy rule in global memory provides the judgment layer — Claude still pauses for irreversible actions.
+
+```bash
+alias claude='/opt/homebrew/bin/claude --dangerously-skip-permissions'
+```
+
+These two features work as a pair: the flag removes low-level friction, the rule sets the high-level threshold.
 
 ### Custom Skills (fetched from GitHub, installed to ~/.claude/skills/)
 
