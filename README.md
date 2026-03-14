@@ -23,6 +23,18 @@ cd claude-setup
 | document-skills | anthropic-agent-skills | docx, pdf, pptx, xlsx creation and manipulation |
 | example-skills | anthropic-agent-skills | skill-creator, webapp-testing (Playwright), mcp-builder |
 
+### Subagent Plugins (from VoltAgent marketplace)
+
+| Plugin | Purpose |
+|--------|---------|
+| voltagent-core-dev | API design, backend, frontend, fullstack, mobile, WebSocket |
+| voltagent-lang | Language specialists: TypeScript, Python, React, Next.js, SQL, Go, Rust, Java + 18 more |
+| voltagent-infra | DevOps, cloud, deployment: Kubernetes, Terraform, Docker, AWS/Azure/GCP, SRE |
+| voltagent-qa-sec | Testing, security, code quality: code review, debugging, penetration testing, a11y |
+| voltagent-data-ai | Data/ML/AI: Postgres, prompt engineering, LLM architecture, data pipelines, MLOps |
+| voltagent-dev-exp | Developer productivity: refactoring, documentation, CLI tools, Git workflows, MCP |
+| voltagent-meta | Multi-agent orchestration, workflow automation, task distribution |
+
 ### Custom Skills (fetched from GitHub, installed to ~/.claude/skills/)
 
 | Skill | Source | Purpose |
