@@ -5,10 +5,10 @@ Personal Claude Code bootstrap. One script, one run, fully configured environmen
 ## Usage
 
 ```bash
-git clone git@github.com:<your-username>/claude-setup.git
+git clone git@github.com:chrisalehman/claude-setup.git
 cd claude-setup
 ./claude-bootstrap.sh        # install everything
-./claude-reset.sh            # remove interactively (prompts per item)
+./claude-reset.sh            # prompt to remove all, or item-by-item
 ./claude-reset.sh --all      # remove everything without prompting
 ```
 
@@ -65,6 +65,6 @@ claude plugin update --all
 
 Everything is defined in `claude-config.txt` — one place, no sync issues:
 
-- **New plugin:** Add to the `PLUGINS` array (format: `name@source`)
-- **New GitHub skill:** Add to the `GITHUB_SKILLS` array (format: `name|owner/repo`)
-- **New marketplace:** Add to the `MARKETPLACES` array
+- **New plugin:** Add a `plugin | name | source` line
+- **New GitHub skill:** Add a `github-skill | name | owner/repo` line
+- **New marketplace:** Add a `marketplace | name` line
