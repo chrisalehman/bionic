@@ -1,0 +1,15 @@
+# Logs
+*.log
+
+# Generated artifacts
+*.pdf
+*.png
+*.excalidraw
+
+# OS
+.DS_Store
+
+# Editor
+*.swp
+*.swo
+*~

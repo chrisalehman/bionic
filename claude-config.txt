@@ -1,0 +1,17 @@
+# claude-config.txt
+# Shared configuration for claude-bootstrap.sh and claude-reset.sh.
+# This is the single source of truth for what gets installed/removed.
+#
+# Format: type|name|source
+#   marketplace  |  name
+#   plugin       |  name  |  source
+#   github-skill |  name  |  owner/repo
+
+marketplace  | anthropics/skills
+
+plugin       | superpowers      | claude-plugins-official
+plugin       | frontend-design  | claude-plugins-official
+plugin       | document-skills  | anthropic-agent-skills
+plugin       | example-skills   | anthropic-agent-skills
+
+github-skill | excalidraw-diagram | coleam00/excalidraw-diagram-skill
