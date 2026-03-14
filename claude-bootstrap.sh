@@ -3,7 +3,7 @@
 # claude-bootstrap.sh
 # Sets up Claude Code plugins, skills, and dependencies.
 # Idempotent — safe to run multiple times; produces the same result.
-# Requires: claude CLI, git (macOS + Homebrew)
+# Requires: claude CLI (macOS + Homebrew)
 #
 set -euo pipefail
 
@@ -20,7 +20,14 @@ check_cmd() {
 }
 
 check_cmd claude  "Install with: brew install claude-code"
-check_cmd git     "Install with: xcode-select --install"
+
+# ─── Homebrew ────────────────────────────────────────────────────────────────
+
+if ! command -v brew &>/dev/null; then
+  echo "Installing Homebrew..."
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+fi
 
 # ─── Config reader ──────────────────────────────────────────────────────────
 
@@ -42,10 +49,18 @@ read_config() {
 
 ensure_cmd() {
   local cmd="$1" pkg="${2:-$1}"
-  if command -v "$cmd" &>/dev/null; then return 0; fi
-  echo -n "  Installing ${pkg}... "
+  echo -n "  ${cmd}... "
+  if command -v "$cmd" &>/dev/null; then
+    echo "✓ (already installed)"
+    return 0
+  fi
   brew install "$pkg" --quiet 2>/dev/null
   echo "✓"
+}
+
+do_install_brew_dep() {
+  local binary="$1" pkg="${2:-$1}"
+  ensure_cmd "$binary" "$pkg"
 }
 
 do_install_marketplace() {
@@ -124,10 +139,10 @@ ${end_marker}"
   echo "✓"
 }
 
-# ─── Dependencies ───────────────────────────────────────────────────────────
+# ─── Brew Dependencies ──────────────────────────────────────────────────────
 
-echo "Dependencies:"
-ensure_cmd uv
+echo "Brew dependencies:"
+read_config "brew-dep" do_install_brew_dep
 echo ""
 
 # ─── Marketplaces ────────────────────────────────────────────────────────────
