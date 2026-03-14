@@ -177,6 +177,34 @@ ${end_marker}"
   echo "✓"
 }
 
+verify_brew_dep() {
+  local binary="$1"
+  if command -v "$binary" &>/dev/null; then
+    echo "    ${binary} ✓"
+  else
+    echo "    ${binary} — not found"
+  fi
+}
+
+verify_npm_global() {
+  local pkg="$1"
+  if npm list -g --depth=0 "$pkg" &>/dev/null; then
+    echo "    ${pkg} ✓"
+  else
+    echo "    ${pkg} — not found"
+  fi
+}
+
+verify_mcp_server() {
+  local name="$1"
+  local settings=~/.claude/settings.json
+  if [ -f "$settings" ] && jq -e ".mcpServers.\"${name}\"" "$settings" &>/dev/null; then
+    echo "    ${name} ✓"
+  else
+    echo "    ${name} — not configured"
+  fi
+}
+
 # ─── Brew Dependencies ──────────────────────────────────────────────────────
 
 echo "Brew dependencies:"
@@ -256,6 +284,18 @@ echo ""
 # ─── Verification ───────────────────────────────────────────────────────────
 
 echo "Verification:"
+
+echo ""
+echo "  Brew dependencies:"
+read_config "brew-dep" verify_brew_dep
+
+echo ""
+echo "  npm globals:"
+read_config "npm-global" verify_npm_global
+
+echo ""
+echo "  MCP servers:"
+read_config "mcp-server" verify_mcp_server
 
 echo ""
 echo "  Plugins (official skills):"
