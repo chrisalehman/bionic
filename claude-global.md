@@ -14,3 +14,6 @@ Scripts and tools must not leave intermediary files (logs, temp files, artifacts
 
 ## Reviews Must Check Conventions
 When conducting code reviews, include a dedicated conventions check — file placement, naming patterns, directory structure, import style consistency — not just correctness.
+
+## Persistent Planning for Complex Tasks
+For multi-step tasks that will span many tool calls (10+), proactively create a brief `_plan.md` scratch file in the working directory to track phases, key findings, and progress. Update it as phases complete. Delete the file when the task is finished. Skip this for simple tasks, single-file edits, or quick lookups.
