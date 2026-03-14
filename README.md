@@ -46,6 +46,7 @@ Curated behavioral rules applied to every Claude Code session across all project
 | Don't Delete Generated Outputs | Never delete PDFs, diagrams, images without confirmation |
 | Clean Working Directory | Scripts must not leave intermediary files |
 | Reviews Must Check Conventions | Code reviews must check file placement, not just correctness |
+| Persistent Planning for Complex Tasks | Use a scratch `_plan.md` for multi-step tasks, delete when done |
 
 Edit `claude-global.md` to add or remove rules. To disable entirely, comment out or remove the `global-memory` line in `claude-config.txt`.
 
