@@ -77,6 +77,62 @@ do_install_github_skill() {
   echo "✓"
 }
 
+do_install_global_memory() {
+  local file="$1"
+  local source="${SCRIPT_DIR}/${file}"
+  local target=~/.claude/CLAUDE.md
+  local start_marker="<!-- claude-setup:start -->"
+  local end_marker="<!-- claude-setup:end -->"
+
+  echo -n "  ${file} → ~/.claude/CLAUDE.md... "
+
+  if [ ! -f "$source" ]; then
+    echo "ERROR: '${file}' not found in ${SCRIPT_DIR}" >&2
+    exit 1
+  fi
+
+  mkdir -p ~/.claude
+
+  local content
+  content="$(cat "$source")"
+  local section="${start_marker}
+${content}
+${end_marker}"
+
+  if [ ! -f "$target" ]; then
+    # No existing file — create with managed section
+    echo "$section" > "$target"
+  elif grep -q "$start_marker" "$target"; then
+    # Markers exist — replace managed section
+    # Write: content before markers + new section + content after markers
+    local tmp="${target}.tmp"
+    awk -v start="$start_marker" -v end="$end_marker" '
+      BEGIN { skip=0 }
+      $0 == start { skip=1; next }
+      $0 == end { skip=0; next }
+      !skip { print }
+    ' "$target" > "$tmp"
+    # Find where to insert (line number of first non-empty line from end, or append)
+    # Simpler: just write section to a new file with before/after content
+    {
+      awk -v start="$start_marker" '
+        $0 == start { exit }
+        { print }
+      ' "$target"
+      echo "$section"
+      awk -v end="$end_marker" '
+        found { print }
+        $0 == end { found=1 }
+      ' "$target"
+    } > "$tmp" && mv "$tmp" "$target"
+  else
+    # File exists, no markers — append with blank line separator
+    printf "\n%s\n" "$section" >> "$target"
+  fi
+
+  echo "✓"
+}
+
 # ─── Dependencies ───────────────────────────────────────────────────────────
 
 echo "Dependencies:"
@@ -93,6 +149,12 @@ echo ""
 
 echo "Plugins:"
 read_config "plugin" do_install_plugin
+echo ""
+
+# ─── Global Memory ─────────────────────────────────────────────────────────
+
+echo "Global memory:"
+read_config "global-memory" do_install_global_memory
 echo ""
 
 # ─── Custom Skills ───────────────────────────────────────────────────────────
@@ -128,6 +190,14 @@ for skill_dir in ~/.claude/skills/*/; do
     echo "    ${name} ⚠ (missing SKILL.md)"
   fi
 done
+
+echo ""
+echo "  Global memory:"
+if [ -f ~/.claude/CLAUDE.md ] && grep -q "<!-- claude-setup:start -->" ~/.claude/CLAUDE.md; then
+  echo "    ~/.claude/CLAUDE.md ✓"
+else
+  echo "    ~/.claude/CLAUDE.md — not installed"
+fi
 
 echo ""
 echo "Done"
