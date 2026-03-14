@@ -8,10 +8,18 @@
 #   github-skill |  name  |  owner/repo
 
 marketplace  | anthropics/skills
+marketplace  | VoltAgent/awesome-claude-code-subagents
 
-plugin       | superpowers      | claude-plugins-official
-plugin       | frontend-design  | claude-plugins-official
-plugin       | document-skills  | anthropic-agent-skills
-plugin       | example-skills   | anthropic-agent-skills
+plugin       | superpowers         | claude-plugins-official
+plugin       | frontend-design     | claude-plugins-official
+plugin       | document-skills     | anthropic-agent-skills
+plugin       | example-skills      | anthropic-agent-skills
+plugin       | voltagent-core-dev  | voltagent-subagents
+plugin       | voltagent-lang      | voltagent-subagents
+plugin       | voltagent-infra     | voltagent-subagents
+plugin       | voltagent-qa-sec    | voltagent-subagents
+plugin       | voltagent-data-ai   | voltagent-subagents
+plugin       | voltagent-dev-exp   | voltagent-subagents
+plugin       | voltagent-meta      | voltagent-subagents
 
 github-skill | excalidraw-diagram | coleam00/excalidraw-diagram-skill
