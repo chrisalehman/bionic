@@ -6,6 +6,7 @@
 #   marketplace  |  name
 #   plugin       |  name  |  source
 #   github-skill |  name  |  owner/repo
+#   global-memory |  filename
 
 marketplace  | anthropics/skills
 marketplace  | VoltAgent/awesome-claude-code-subagents
@@ -21,5 +22,7 @@ plugin       | voltagent-qa-sec    | voltagent-subagents
 plugin       | voltagent-data-ai   | voltagent-subagents
 plugin       | voltagent-dev-exp   | voltagent-subagents
 plugin       | voltagent-meta      | voltagent-subagents
+
+global-memory | claude-global.md
 
 github-skill | excalidraw-diagram | coleam00/excalidraw-diagram-skill
