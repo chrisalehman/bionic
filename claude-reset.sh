@@ -91,10 +91,54 @@ do_remove_marketplace() {
   claude plugin marketplace remove "$name" 2>/dev/null && echo "✓" || echo "✓ (already removed)"
 }
 
+do_remove_global_memory() {
+  local file="$1"
+  local target=~/.claude/CLAUDE.md
+  local start_marker="<!-- claude-setup:start -->"
+  local end_marker="<!-- claude-setup:end -->"
+
+  if ! confirm "global memory (${file})"; then
+    echo "  global memory — skipped"
+    return 0
+  fi
+
+  echo -n "  ~/.claude/CLAUDE.md... "
+
+  if [ ! -f "$target" ]; then
+    echo "✓ (already removed)"
+    return 0
+  fi
+
+  if ! grep -q "$start_marker" "$target"; then
+    echo "✓ (no managed section)"
+    return 0
+  fi
+
+  # Remove managed section using awk
+  awk -v start="$start_marker" -v end="$end_marker" '
+    $0 == start { skip=1; next }
+    $0 == end { skip=0; next }
+    !skip { print }
+  ' "$target" > "${target}.tmp" && mv "${target}.tmp" "$target"
+
+  # Delete file if only whitespace remains
+  if [ ! -s "$target" ] || ! grep -q '[^[:space:]]' "$target"; then
+    rm -f "$target"
+  fi
+
+  echo "✓"
+}
+
 # ─── Custom Skills ──────────────────────────────────────────────────────────
 
 echo "Custom skills:"
 read_config "github-skill" do_remove_skill
+echo ""
+
+# ─── Global Memory ──────────────────────────────────────────────────────────
+
+echo "Global memory:"
+read_config "global-memory" do_remove_global_memory
 echo ""
 
 # ─── Plugins ────────────────────────────────────────────────────────────────
@@ -134,4 +178,11 @@ else
 fi
 
 echo ""
-echo "Done"
+echo "  Global memory:"
+if [ -f ~/.claude/CLAUDE.md ] && grep -q "<!-- claude-setup:start -->" ~/.claude/CLAUDE.md; then
+  echo "    ~/.claude/CLAUDE.md — managed section still present"
+else
+  echo "    ~/.claude/CLAUDE.md ✓ (clean)"
+fi
+
+echo "" ; echo "Done"
