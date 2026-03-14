@@ -14,6 +14,18 @@ cd claude-setup
 
 ## What's included
 
+### CLI Tools (installed via Homebrew)
+
+| Tool | Purpose |
+|------|---------|
+| git | Version control |
+| node | JavaScript runtime |
+| pnpm | Node package manager |
+| gh | GitHub CLI |
+| jq | JSON processor |
+| ripgrep (`rg`) | Fast text search |
+| uv | Python package manager |
+
 ### Plugins (from official marketplaces)
 
 | Plugin | Source | Purpose |
@@ -71,6 +83,26 @@ These two features work as a pair: the flag removes low-level friction, the rule
 
 Custom skills are fetched from GitHub at bootstrap time, not stored in this repo.
 
+### E2E Testing (Playwright)
+
+The bootstrap installs Playwright for end-to-end browser testing:
+
+- **Test runner:** `@playwright/test` (global npm package) — run tests in any project with `npx playwright test`
+- **Browser:** Chromium (downloaded automatically)
+- **MCP server:** `@playwright/mcp` — gives Claude live browser control for interactive debugging and visual verification
+
+**Headless by default.** To see the browser UI during tests:
+
+```bash
+npx playwright test --headed
+```
+
+To initialize Playwright in a new project:
+
+```bash
+npm init playwright@latest
+```
+
 ## Repo structure
 
 ```
@@ -85,11 +117,10 @@ claude-setup/
 
 ## Prerequisites
 
-- macOS (scripts and install instructions assume macOS + Homebrew)
+- macOS (scripts assume macOS + Homebrew)
 - Claude Code CLI (`brew install claude-code`)
-- Git (included with Xcode command line tools)
 
-`uv` (Python package manager) is auto-installed by the bootstrap script if missing.
+The bootstrap script automatically installs Homebrew (if missing) and all other dependencies.
 
 ## Updating
 
@@ -104,8 +135,12 @@ Re-running the bootstrap script updates all custom skills to their latest versio
 Everything is defined in `claude-config.txt` — one place, no sync issues:
 
 ```
+brew-dep      | binary              (package = binary)
+brew-dep      | binary  | package   (when binary ≠ package name)
 marketplace   | name
-plugin        | name       | source
+plugin        | name    | source
 global-memory | filename
-github-skill  | name       | owner/repo
+github-skill  | name    | owner/repo
+npm-global    | package
+mcp-server    | name    | package
 ```
