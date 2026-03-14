@@ -35,6 +35,22 @@ cd claude-setup
 | voltagent-dev-exp | Developer productivity: refactoring, documentation, CLI tools, Git workflows, MCP |
 | voltagent-meta | Multi-agent orchestration, workflow automation, task distribution |
 
+### Global Memory (installed to ~/.claude/CLAUDE.md)
+
+Curated behavioral rules applied to every Claude Code session across all projects.
+
+| Rule | Purpose |
+|------|---------|
+| Code Review Before Push | Always invoke code review before `git push` |
+| Don't Start Duplicate Dev Servers | Check for running servers before starting another |
+| Don't Delete Generated Outputs | Never delete PDFs, diagrams, images without confirmation |
+| Clean Working Directory | Scripts must not leave intermediary files |
+| Reviews Must Check Conventions | Code reviews must check file placement, not just correctness |
+
+Edit `claude-global.md` to add or remove rules. To disable entirely, comment out or remove the `global-memory` line in `claude-config.txt`.
+
+The bootstrap installs these rules into a managed section of `~/.claude/CLAUDE.md` (between `<!-- claude-setup:start -->` and `<!-- claude-setup:end -->` markers). Any personal content you add outside these markers is preserved across bootstrap runs and resets.
+
 ### Custom Skills (fetched from GitHub, installed to ~/.claude/skills/)
 
 | Skill | Source | Purpose |
