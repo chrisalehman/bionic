@@ -65,6 +65,7 @@ Custom skills are fetched from GitHub at bootstrap time, not stored in this repo
 claude-setup/
 ├── .gitignore
 ├── claude-config.txt        # Shared config (plugins, skills, marketplaces)
+├── claude-global.md         # Global behavioral rules (installed to ~/.claude/CLAUDE.md)
 ├── claude-bootstrap.sh      # Install everything (idempotent)
 ├── claude-reset.sh          # Remove everything (interactive or --all)
 └── README.md
@@ -91,7 +92,8 @@ Re-running the bootstrap script updates all custom skills to their latest versio
 Everything is defined in `claude-config.txt` — one place, no sync issues:
 
 ```
-plugin       | name       | source
-github-skill | name       | owner/repo
-marketplace  | name
+marketplace   | name
+plugin        | name       | source
+global-memory | filename
+github-skill  | name       | owner/repo
 ```
