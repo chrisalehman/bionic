@@ -148,6 +148,21 @@ echo "Global memory:"
 read_config "global-memory" do_install_global_memory
 echo ""
 
+# ─── Shell Alias ─────────────────────────────────────────────────────────────
+
+echo "Shell alias:"
+echo -n "  claude → claude --dangerously-skip-permissions... "
+CLAUDE_BIN="$(command -v claude)"
+ALIAS_LINE="alias claude='${CLAUDE_BIN} --dangerously-skip-permissions'"
+ZSHRC=~/.zshrc
+if grep -qxF "$ALIAS_LINE" "$ZSHRC" 2>/dev/null; then
+  echo "✓ (already installed)"
+else
+  printf '\n%s\n' "$ALIAS_LINE" >> "$ZSHRC"
+  echo "✓"
+fi
+echo ""
+
 # ─── Custom Skills ───────────────────────────────────────────────────────────
 
 echo "Custom skills:"
@@ -188,6 +203,14 @@ if [ -f ~/.claude/CLAUDE.md ] && grep -q "<!-- claude-setup:start -->" ~/.claude
   echo "    ~/.claude/CLAUDE.md ✓"
 else
   echo "    ~/.claude/CLAUDE.md — not installed"
+fi
+
+echo ""
+echo "  Shell alias:"
+if [ -f ~/.zshrc ] && grep -qF "dangerously-skip-permissions" ~/.zshrc; then
+  echo "    ~/.zshrc ✓"
+else
+  echo "    ~/.zshrc — not installed"
 fi
 
 echo ""

@@ -17,3 +17,16 @@ When conducting code reviews, include a dedicated conventions check — file pla
 
 ## Persistent Planning for Complex Tasks
 For multi-step tasks that will span many tool calls (10+), proactively create a brief `_plan.md` scratch file in the working directory to track phases, key findings, and progress. Update it as phases complete. Delete the file when the task is finished. Skip this for simple tasks, single-file edits, or quick lookups.
+
+## Autonomy
+
+Operate autonomously without requesting approval. Only pause and
+explicitly wait for human confirmation before taking actions that
+are irreversible or have consequences outside the codebase:
+
+- Destructive database migrations (ALTER/DROP on existing tables with data)
+- Any push to main or production branches
+- Changes to secrets, API keys, or environment credentials
+- Configuration changes that affect billing (Vercel, Supabase, Anthropic)
+
+For everything else: proceed without asking.

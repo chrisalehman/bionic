@@ -141,6 +141,27 @@ echo "Global memory:"
 read_config "global-memory" do_remove_global_memory
 echo ""
 
+# ─── Shell Alias ─────────────────────────────────────────────────────────────
+
+echo "Shell alias:"
+ZSHRC=~/.zshrc
+if ! confirm "shell alias (dangerously-skip-permissions)"; then
+  echo "  shell alias — skipped"
+else
+  echo -n "  ~/.zshrc alias... "
+  if [ -f "$ZSHRC" ] && grep -q "alias claude=.*dangerously-skip-permissions" "$ZSHRC"; then
+    grep -v "alias claude=.*dangerously-skip-permissions" "$ZSHRC" > "${ZSHRC}.tmp" && mv "${ZSHRC}.tmp" "$ZSHRC"
+    # Delete file if only whitespace remains
+    if [ ! -s "$ZSHRC" ] || ! grep -q '[^[:space:]]' "$ZSHRC"; then
+      rm -f "$ZSHRC"
+    fi
+    echo "✓"
+  else
+    echo "✓ (already removed)"
+  fi
+fi
+echo ""
+
 # ─── Plugins ────────────────────────────────────────────────────────────────
 
 echo "Plugins:"
@@ -183,6 +204,14 @@ if [ -f ~/.claude/CLAUDE.md ] && grep -q "<!-- claude-setup:start -->" ~/.claude
   echo "    ~/.claude/CLAUDE.md — managed section still present"
 else
   echo "    ~/.claude/CLAUDE.md ✓ (clean)"
+fi
+
+echo ""
+echo "  Shell alias:"
+if [ -f ~/.zshrc ] && grep -qF "dangerously-skip-permissions" ~/.zshrc; then
+  echo "    ~/.zshrc — alias still present"
+else
+  echo "    ~/.zshrc ✓ (clean)"
 fi
 
 echo "" ; echo "Done"
