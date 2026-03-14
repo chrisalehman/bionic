@@ -104,16 +104,7 @@ ${end_marker}"
     echo "$section" > "$target"
   elif grep -q "$start_marker" "$target"; then
     # Markers exist — replace managed section
-    # Write: content before markers + new section + content after markers
     local tmp="${target}.tmp"
-    awk -v start="$start_marker" -v end="$end_marker" '
-      BEGIN { skip=0 }
-      $0 == start { skip=1; next }
-      $0 == end { skip=0; next }
-      !skip { print }
-    ' "$target" > "$tmp"
-    # Find where to insert (line number of first non-empty line from end, or append)
-    # Simpler: just write section to a new file with before/after content
     {
       awk -v start="$start_marker" '
         $0 == start { exit }
