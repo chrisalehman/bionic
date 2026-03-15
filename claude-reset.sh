@@ -188,18 +188,36 @@ echo "Global hooks:"
 if ! confirm "global hooks (~/.claude/hooks/)"; then
   echo "  hooks — skipped"
 else
-  echo -n "  ~/.claude/hooks/... "
-  if [ -d ~/.claude/hooks ] && [ "$(ls -A ~/.claude/hooks 2>/dev/null)" ]; then
-    rm -rf ~/.claude/hooks
-    # Remove hooks config from settings.json
-    settings=~/.claude/settings.json
-    if [ -f "$settings" ] && jq -e '.hooks' "$settings" &>/dev/null; then
-      tmp="${settings}.tmp"
-      jq 'del(.hooks)' "$settings" > "$tmp" && mv "$tmp" "$settings"
+  settings=~/.claude/settings.json
+  hooks_removed=0
+  # Remove only hooks that exist in this repo's hooks/ directory
+  for hook in "${SCRIPT_DIR}"/hooks/*.sh; do
+    [ -f "$hook" ] || continue
+    name="$(basename "$hook")"
+    echo -n "  ${name}... "
+    if [ -f ~/.claude/hooks/"${name}" ]; then
+      rm -f ~/.claude/hooks/"${name}"
+      echo "✓"
+    else
+      echo "✓ (already removed)"
     fi
-    echo "✓"
-  else
-    echo "✓ (already removed)"
+    hooks_removed=$((hooks_removed + 1))
+    # Remove matching entries from settings.json
+    if [ -f "$settings" ] && jq -e '.hooks.PreToolUse' "$settings" &>/dev/null; then
+      cmd="~/.claude/hooks/${name}"
+      tmp="${settings}.tmp"
+      jq --arg c "$cmd" '
+        .hooks.PreToolUse |= map(select(.hooks | all(.command != $c)))
+      ' "$settings" > "$tmp" && mv "$tmp" "$settings"
+    fi
+  done
+  # Clean up empty PreToolUse array and hooks object
+  if [ -f "$settings" ]; then
+    tmp="${settings}.tmp"
+    jq 'if .hooks.PreToolUse == [] then del(.hooks) else . end' "$settings" > "$tmp" && mv "$tmp" "$settings"
+  fi
+  if [ "$hooks_removed" -eq 0 ]; then
+    echo "  (no hooks to remove)"
   fi
 fi
 echo ""
