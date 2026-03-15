@@ -294,42 +294,51 @@ settings=~/.claude/settings.json
 if [ ! -f "$settings" ]; then
   echo '{}' > "$settings"
 fi
-# Add PreToolUse hook for protect-main if not already present
+
+# Define all managed hooks (matcher|command pairs)
+# protect-main: blocks pushes to main/master (Bash only)
+# protect-secrets: blocks writes to .env/credentials (Bash, Write, Edit)
+# protect-database: blocks destructive SQL (Bash only)
+MANAGED_HOOKS=(
+  "Bash|~/.claude/hooks/protect-main.sh"
+  "Bash|~/.claude/hooks/protect-database.sh"
+  "Write|~/.claude/hooks/protect-secrets.sh"
+  "Edit|~/.claude/hooks/protect-secrets.sh"
+  "Bash|~/.claude/hooks/protect-secrets.sh"
+)
+
+# Ensure PreToolUse array exists
 if ! jq -e '.hooks.PreToolUse' "$settings" &>/dev/null; then
   tmp="${settings}.tmp"
-  jq '.hooks = {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/protect-main.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ]
-  }' "$settings" > "$tmp" && mv "$tmp" "$settings"
-  echo "✓"
-elif jq -e '.hooks.PreToolUse[] | select(.hooks[].command == "~/.claude/hooks/protect-main.sh")' "$settings" &>/dev/null; then
-  echo "✓ (already configured)"
-else
-  # PreToolUse exists but doesn't have our hook — append
+  jq '.hooks.PreToolUse = []' "$settings" > "$tmp" && mv "$tmp" "$settings"
+fi
+
+hooks_added=0
+for entry in "${MANAGED_HOOKS[@]}"; do
+  matcher="${entry%%|*}"
+  command="${entry##*|}"
+
+  # Skip if this exact matcher+command combo already exists
+  if jq -e --arg m "$matcher" --arg c "$command" \
+    '.hooks.PreToolUse[] | select(.matcher == $m and (.hooks[] | .command == $c))' \
+    "$settings" &>/dev/null; then
+    continue
+  fi
+
   tmp="${settings}.tmp"
-  jq '.hooks.PreToolUse += [
-    {
-      "matcher": "Bash",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "~/.claude/hooks/protect-main.sh",
-          "timeout": 10
-        }
-      ]
-    }
-  ]' "$settings" > "$tmp" && mv "$tmp" "$settings"
-  echo "✓"
+  jq --arg m "$matcher" --arg c "$command" '
+    .hooks.PreToolUse += [{
+      "matcher": $m,
+      "hooks": [{"type": "command", "command": $c, "timeout": 10}]
+    }]
+  ' "$settings" > "$tmp" && mv "$tmp" "$settings"
+  hooks_added=$((hooks_added + 1))
+done
+
+if [ "$hooks_added" -gt 0 ]; then
+  echo "✓ (added ${hooks_added} hook entries)"
+else
+  echo "✓ (already configured)"
 fi
 echo ""
 
