@@ -1,6 +1,19 @@
 # claude-setup
 
-Personal Claude Code bootstrap. Two scripts, one config, fully configured environment. Idempotent — safe to re-run anytime.
+**One command. Fully autonomous AI software engineer.**
+
+Out of the box, Claude Code is a capable assistant — but it stops and asks permission for everything, has no structured workflow, and doesn't know your tools or conventions. This project fixes all of that.
+
+Run `./claude-bootstrap.sh` and you get:
+
+- **Zero-friction autonomy** — a shell alias + behavioral rules that let Claude operate continuously, pausing only for genuinely irreversible actions (destructive migrations, pushing to main, changing billing config). No more clicking "approve" 50 times per session.
+- **Full SDLC workflow** — brainstorm → plan → TDD → parallel subagent execution → code review. Claude doesn't just write code; it follows the same development process a senior engineer would.
+- **100+ specialist subagents** — TypeScript, Python, Go, Rust, Terraform, Kubernetes, PostgreSQL, security auditing, and dozens more. Claude dispatches domain experts in parallel instead of doing everything with one generalist brain.
+- **Hard guardrails where they matter** — hooks that physically block pushes to main and destructive database operations. Autonomy without recklessness.
+- **Document and design skills** — create PDFs, Word docs, spreadsheets, slide decks, diagrams, and production-grade frontend UIs directly from conversation.
+- **Live browser control** — Playwright MCP server gives Claude a real browser for E2E testing, debugging, and visual verification.
+
+The result: Claude goes from "helpful autocomplete" to an autonomous engineering team that writes, tests, reviews, and ships code while you focus on the decisions that actually need a human.
 
 ## Usage
 
@@ -116,6 +129,7 @@ npm init playwright@latest
 | Hook | Purpose |
 |------|---------|
 | protect-main.sh | Blocks direct `git push` to main/master — Claude must ask for explicit permission first |
+| protect-database.sh | Blocks destructive SQL (DROP, TRUNCATE, DELETE without WHERE, ALTER...DROP) via common DB CLIs |
 
 Hooks are hard guardrails enforced at the tool level. Unlike behavioral rules (which Claude follows voluntarily), hooks physically prevent blocked actions from executing.
 
@@ -127,7 +141,8 @@ claude-setup/
 ├── claude-config.txt        # Shared config (plugins, skills, marketplaces)
 ├── claude-global.md         # Global behavioral rules (installed to ~/.claude/CLAUDE.md)
 ├── hooks/
-│   └── protect-main.sh      # Hook: blocks git push to main/master
+│   ├── protect-main.sh      # Hook: blocks git push to main/master
+│   └── protect-database.sh  # Hook: blocks destructive SQL operations
 ├── claude-bootstrap.sh      # Install everything (idempotent)
 ├── claude-reset.sh          # Remove everything (interactive or --all)
 └── README.md

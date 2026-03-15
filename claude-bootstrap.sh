@@ -303,14 +303,10 @@ fi
 
 # Define all managed hooks (matcher|command pairs)
 # protect-main: blocks pushes to main/master (Bash only)
-# protect-secrets: blocks writes to .env/credentials (Bash, Write, Edit)
 # protect-database: blocks destructive SQL (Bash only)
 MANAGED_HOOKS=(
   "Bash|~/.claude/hooks/protect-main.sh"
   "Bash|~/.claude/hooks/protect-database.sh"
-  "Write|~/.claude/hooks/protect-secrets.sh"
-  "Edit|~/.claude/hooks/protect-secrets.sh"
-  "Bash|~/.claude/hooks/protect-secrets.sh"
 )
 
 # Ensure PreToolUse array exists
