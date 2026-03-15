@@ -14,5 +14,8 @@
 *.swo
 *~
 
+# Node
+node_modules/
+
 # Superpowers brainstorming sessions
 .superpowers/
