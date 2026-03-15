@@ -1,10 +1,11 @@
+import * as os from "node:os";
+import * as path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { loadConfig, resolveEnvValue } from "./config.js";
-import { TelegramAdapter } from "./adapters/telegram.js";
+import { createAdapter } from "./adapters/factory.js";
 import { HitlToolHandler } from "./tools.js";
-import type { ChatAdapter } from "./types.js";
 
 async function main() {
   const config = loadConfig();
@@ -24,7 +25,8 @@ async function main() {
 
     if (config && config.adapter === "telegram" && config.telegram) {
       try {
-        const adapter: ChatAdapter = new TelegramAdapter();
+        const socketPath = path.join(os.homedir(), ".claude-hitl", "sock");
+        const adapter = createAdapter(socketPath);
         const token = resolveEnvValue(config.telegram.bot_token);
         await adapter.connect({
           token,
