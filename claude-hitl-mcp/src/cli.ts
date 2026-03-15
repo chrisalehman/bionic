@@ -1,5 +1,35 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { loadConfig, saveConfig, resolveEnvValue } from "./config.js";
 import { TelegramAdapter } from "./adapters/telegram.js";
+
+function persistEnvVar(varName: string, value: string): void {
+  const zshrc = path.join(os.homedir(), ".zshrc");
+  const exportLine = `export ${varName}="${value}"`;
+  const pattern = new RegExp(`^export ${varName}=`);
+
+  if (!fs.existsSync(zshrc)) {
+    fs.writeFileSync(zshrc, exportLine + "\n", "utf-8");
+    return;
+  }
+
+  const lines = fs.readFileSync(zshrc, "utf-8").split("\n");
+  const existingIdx = lines.findIndex((line) => pattern.test(line));
+
+  if (existingIdx !== -1) {
+    if (lines[existingIdx] === exportLine) {
+      // Already set to the same value — do nothing
+      return;
+    }
+    // Replace the existing line with the new value
+    lines[existingIdx] = exportLine;
+    fs.writeFileSync(zshrc, lines.join("\n"), "utf-8");
+  } else {
+    // Append to end
+    fs.appendFileSync(zshrc, "\n" + exportLine + "\n", "utf-8");
+  }
+}
 
 const USAGE = `
 claude-hitl-mcp — Human-in-the-Loop MCP Server
@@ -26,6 +56,10 @@ async function setup() {
   }
 
   console.log("✓ Found TELEGRAM_BOT_TOKEN in environment");
+
+  // Persist token to ~/.zshrc (idempotent — updates existing or appends)
+  persistEnvVar("TELEGRAM_BOT_TOKEN", token);
+  console.log("✓ Token persisted to ~/.zshrc");
 
   const adapter = new TelegramAdapter();
   await adapter.connect({ token });

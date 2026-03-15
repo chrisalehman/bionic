@@ -91,14 +91,27 @@ do_configure_mcp_server() {
     return 0
   fi
 
-  # Merge new MCP server entry
+  # Check if the package exists as a local subdirectory with a built server
+  local local_server="${SCRIPT_DIR}/${pkg}/dist/server.js"
   local tmp="${settings}.tmp"
-  jq --arg name "$name" --arg pkg "$pkg" '
-    .mcpServers //= {} |
-    .mcpServers[$name] = { "command": "npx", "args": [$pkg] }
-  ' "$settings" > "$tmp" && mv "$tmp" "$settings"
 
-  echo "✓"
+  if [ -f "$local_server" ]; then
+    # Local package — resolve absolute path at install time
+    local abs_path
+    abs_path="$(cd "$(dirname "$local_server")" && pwd)/$(basename "$local_server")"
+    jq --arg name "$name" --arg path "$abs_path" '
+      .mcpServers //= {} |
+      .mcpServers[$name] = { "command": "node", "args": [$path] }
+    ' "$settings" > "$tmp" && mv "$tmp" "$settings"
+    echo "✓ (local)"
+  else
+    # Remote package — use npx
+    jq --arg name "$name" --arg pkg "$pkg" '
+      .mcpServers //= {} |
+      .mcpServers[$name] = { "command": "npx", "args": [$pkg] }
+    ' "$settings" > "$tmp" && mv "$tmp" "$settings"
+    echo "✓"
+  fi
 }
 
 do_install_marketplace() {
