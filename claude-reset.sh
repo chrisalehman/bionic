@@ -78,7 +78,7 @@ do_remove_plugin() {
     return 0
   fi
   echo -n "  ${plugin} (${source})... "
-  claude plugin uninstall "${plugin}@${source}" 2>/dev/null && echo "✓" || echo "✓ (already removed)"
+  claude plugin uninstall "${plugin}@${source}" &>/dev/null && echo "✓" || echo "✓ (already removed)"
 }
 
 do_remove_marketplace() {
@@ -88,7 +88,7 @@ do_remove_marketplace() {
     return 0
   fi
   echo -n "  ${name}... "
-  claude plugin marketplace remove "$name" 2>/dev/null && echo "✓" || echo "✓ (already removed)"
+  claude plugin marketplace remove "$name" &>/dev/null && echo "✓" || echo "✓ (already removed)"
 }
 
 do_remove_global_memory() {

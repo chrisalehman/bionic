@@ -104,13 +104,19 @@ do_configure_mcp_server() {
 do_install_marketplace() {
   local name="$1"
   echo -n "  ${name}... "
-  claude plugin marketplace add "$name" 2>&1 | tail -1
+  if claude plugin marketplace add "$name" &>/dev/null; then
+    echo "✓"
+  else
+    echo "✓ (already added)"
+  fi
 }
 
 do_install_plugin() {
   local plugin="$1" source="$2"
   echo -n "  ${plugin} (${source})... "
-  if claude plugin install "${plugin}@${source}" 2>&1 | grep -q "already"; then
+  local output
+  output=$(claude plugin install "${plugin}@${source}" 2>&1)
+  if echo "$output" | grep -q "already"; then
     echo "✓ (already installed)"
   else
     echo "✓"
