@@ -1,0 +1,190 @@
+import { describe, it, expect } from "vitest";
+import {
+  formatStatusMessage,
+  readPlanFile,
+  truncatePlan,
+  formatSessionDetail,
+  type StatusSession,
+} from "../../src/commands/status.js";
+
+describe("formatStatusMessage", () => {
+  it("shows no sessions message when empty", () => {
+    const msg = formatStatusMessage([], []);
+    expect(msg.text).toContain("No active Claude sessions");
+    expect(msg.buttons).toBeUndefined();
+  });
+
+  it("shows last disconnected session when no active sessions", () => {
+    const msg = formatStatusMessage([], [
+      { project: "claude-setup", lastSeen: new Date(Date.now() - 900_000) },
+    ]);
+    expect(msg.text).toContain("claude-setup");
+    expect(msg.text).toContain("disconnected");
+  });
+
+  it("shows full details for single session", () => {
+    const sessions: StatusSession[] = [{
+      sessionId: "s1",
+      project: "claude-setup",
+      worktree: "feature/status",
+      sessionContext: "Building status feature",
+      plan: "## Phase 1\n- [x] Done\n## Phase 2\n- [ ] In progress",
+      pendingCount: 1,
+      oldestPendingAge: 720,
+    }];
+    const msg = formatStatusMessage(sessions, []);
+    expect(msg.text).toContain("claude-setup");
+    expect(msg.text).toContain("feature/status");
+    expect(msg.text).toContain("Building status feature");
+    expect(msg.text).toContain("Phase 1");
+    expect(msg.text).toContain("1 pending question");
+    expect(msg.buttons).toBeUndefined();
+  });
+
+  it("shows compact summary with buttons for multiple sessions", () => {
+    const sessions: StatusSession[] = [
+      { sessionId: "s1", project: "claude-setup", plan: null, pendingCount: 1, oldestPendingAge: 720 },
+      { sessionId: "s2", project: "modamily", plan: null, pendingCount: 0 },
+    ];
+    const msg = formatStatusMessage(sessions, []);
+    expect(msg.text).toContain("#1 claude-setup");
+    expect(msg.text).toContain("#2 modamily");
+    expect(msg.buttons).toHaveLength(2);
+    expect(msg.buttons![0].callbackData).toBe("status:s1");
+  });
+
+  it("shows no pending questions when count is 0", () => {
+    const sessions: StatusSession[] = [{
+      sessionId: "s1", project: "test", plan: null, pendingCount: 0,
+    }];
+    const msg = formatStatusMessage(sessions, []);
+    expect(msg.text).toContain("No pending questions");
+  });
+
+  it("shows worktree info in compact summary for multiple sessions", () => {
+    const sessions: StatusSession[] = [
+      { sessionId: "s1", project: "proj-a", worktree: "feature/x", plan: null, pendingCount: 0 },
+      { sessionId: "s2", project: "proj-b", plan: null, pendingCount: 0 },
+    ];
+    const msg = formatStatusMessage(sessions, []);
+    expect(msg.text).toContain("feature/x");
+    expect(msg.buttons![1].callbackData).toBe("status:s2");
+    expect(msg.buttons![1].text).toContain("proj-b");
+  });
+
+  it("shows most recent disconnected session (latest lastSeen) when no active sessions", () => {
+    const msg = formatStatusMessage([], [
+      { project: "older", lastSeen: new Date(Date.now() - 3_600_000) },
+      { project: "newer", lastSeen: new Date(Date.now() - 60_000) },
+    ]);
+    expect(msg.text).toContain("newer");
+  });
+
+  it("shows no active plan when plan is null for single session", () => {
+    const sessions: StatusSession[] = [{
+      sessionId: "s1", project: "test", plan: null, pendingCount: 0,
+    }];
+    const msg = formatStatusMessage(sessions, []);
+    expect(msg.text).toContain("No active plan");
+  });
+
+  it("formats pending age correctly for single session", () => {
+    const sessions: StatusSession[] = [{
+      sessionId: "s1", project: "test", plan: null, pendingCount: 2, oldestPendingAge: 45,
+    }];
+    const msg = formatStatusMessage(sessions, []);
+    expect(msg.text).toContain("2 pending questions");
+    expect(msg.text).toContain("45s ago");
+  });
+});
+
+describe("truncatePlan", () => {
+  it("returns plan as-is when under limit", () => {
+    expect(truncatePlan("Short plan", 3000)).toBe("Short plan");
+  });
+
+  it("returns plan as-is when exactly at limit", () => {
+    const plan = "x".repeat(3000);
+    expect(truncatePlan(plan, 3000)).toBe(plan);
+  });
+
+  it("truncates and adds suffix when over limit", () => {
+    const longPlan = "x".repeat(4000);
+    const result = truncatePlan(longPlan, 3000);
+    expect(result.length).toBeLessThan(3100);
+    expect(result).toContain("truncated");
+  });
+
+  it("truncated result starts with the original content prefix", () => {
+    const longPlan = "A".repeat(4000);
+    const result = truncatePlan(longPlan, 3000);
+    expect(result.startsWith("A".repeat(3000))).toBe(true);
+  });
+});
+
+describe("readPlanFile", () => {
+  it("returns null for null cwd", () => {
+    expect(readPlanFile(null)).toBeNull();
+  });
+
+  it("returns null for nonexistent file", () => {
+    expect(readPlanFile("/tmp/nonexistent-dir-abc123")).toBeNull();
+  });
+
+  it("returns null for a directory with no _plan.md", () => {
+    expect(readPlanFile("/tmp")).toBeNull();
+  });
+});
+
+describe("formatSessionDetail", () => {
+  it("formats a full detail view", () => {
+    const session: StatusSession = {
+      sessionId: "s1",
+      project: "claude-setup",
+      worktree: "feature/x",
+      sessionContext: "Working on X",
+      plan: "Some plan",
+      pendingCount: 0,
+    };
+    const text = formatSessionDetail(session);
+    expect(text).toContain("claude-setup");
+    expect(text).toContain("feature/x");
+    expect(text).toContain("Working on X");
+    expect(text).toContain("Some plan");
+  });
+
+  it("omits worktree line when not provided", () => {
+    const session: StatusSession = {
+      sessionId: "s1",
+      project: "myproject",
+      plan: null,
+      pendingCount: 0,
+    };
+    const text = formatSessionDetail(session);
+    expect(text).not.toContain("worktree:");
+  });
+
+  it("omits context line when not provided", () => {
+    const session: StatusSession = {
+      sessionId: "s1",
+      project: "myproject",
+      plan: null,
+      pendingCount: 0,
+    };
+    const text = formatSessionDetail(session);
+    expect(text).not.toContain("Context:");
+  });
+
+  it("shows pending questions with age when pendingCount > 0", () => {
+    const session: StatusSession = {
+      sessionId: "s1",
+      project: "myproject",
+      plan: null,
+      pendingCount: 3,
+      oldestPendingAge: 7500,
+    };
+    const text = formatSessionDetail(session);
+    expect(text).toContain("3 pending questions");
+    expect(text).toContain("2h ago");
+  });
+});
