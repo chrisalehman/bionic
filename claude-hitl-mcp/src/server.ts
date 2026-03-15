@@ -14,21 +14,28 @@ async function main() {
     version: "1.0.0",
   });
 
+  // Lazy adapter initialization — don't block MCP handshake with Telegram connection
   let handler: HitlToolHandler | null = null;
+  let handlerInitialized = false;
 
-  // Initialize adapter if configured — graceful degradation on failure
-  if (config && config.adapter === "telegram" && config.telegram) {
-    try {
-      const adapter: ChatAdapter = new TelegramAdapter();
-      const token = resolveEnvValue(config.telegram.bot_token);
-      await adapter.connect({
-        token,
-        chatId: config.telegram.chat_id ? String(config.telegram.chat_id) : undefined,
-      });
-      handler = new HitlToolHandler(adapter);
-    } catch {
-      // Token missing or connection failed — tools will return error responses
+  async function getHandler(): Promise<HitlToolHandler | null> {
+    if (handlerInitialized) return handler;
+    handlerInitialized = true;
+
+    if (config && config.adapter === "telegram" && config.telegram) {
+      try {
+        const adapter: ChatAdapter = new TelegramAdapter();
+        const token = resolveEnvValue(config.telegram.bot_token);
+        await adapter.connect({
+          token,
+          chatId: config.telegram.chat_id ? String(config.telegram.chat_id) : undefined,
+        });
+        handler = new HitlToolHandler(adapter);
+      } catch {
+        // Token missing or connection failed — tools will return error responses
+      }
     }
+    return handler;
   }
 
   // Register tools
@@ -54,7 +61,8 @@ async function main() {
       timeout_minutes: z.number().optional().describe("Override default timeout"),
     },
     async (args) => {
-      if (!handler) {
+      const h = await getHandler();
+      if (!h) {
         return {
           content: [
             {
@@ -71,7 +79,7 @@ async function main() {
           ],
         };
       }
-      const result = await handler.askHuman(args);
+      const result = await h.askHuman(args);
       return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
     }
   );
@@ -88,7 +96,8 @@ async function main() {
       silent: z.boolean().optional().describe("Suppress push notification"),
     },
     async (args) => {
-      if (!handler) {
+      const h = await getHandler();
+      if (!h) {
         return {
           content: [
             {
@@ -98,7 +107,7 @@ async function main() {
           ],
         };
       }
-      const result = await handler.notifyHuman(args);
+      const result = await h.notifyHuman(args);
       return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
     }
   );
@@ -129,7 +138,8 @@ async function main() {
         .describe("Quiet hours configuration"),
     },
     async (args) => {
-      if (!handler) {
+      const h = await getHandler();
+      if (!h) {
         return {
           content: [
             {
@@ -139,7 +149,7 @@ async function main() {
           ],
         };
       }
-      const result = await handler.configureHitl(args);
+      const result = await h.configureHitl(args);
       return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
     }
   );
