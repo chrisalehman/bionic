@@ -54,7 +54,7 @@ ensure_cmd() {
     echo "✓ (already installed)"
     return 0
   fi
-  brew install "$pkg" --quiet 2>/dev/null
+  brew install "$pkg" --quiet &>/dev/null
   echo "✓"
 }
 
