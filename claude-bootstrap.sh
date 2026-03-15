@@ -106,9 +106,12 @@ do_configure_mcp_server() {
       env_json=$(jq -n --arg t "$TELEGRAM_BOT_TOKEN" '{"TELEGRAM_BOT_TOKEN": $t}')
     fi
 
-    jq --arg name "$name" --arg path "$abs_path" --argjson env "$env_json" '
+    local pkg_dir
+    pkg_dir="$(dirname "$abs_path")/.."
+    pkg_dir="$(cd "$pkg_dir" && pwd)"
+    jq --arg name "$name" --arg path "$abs_path" --argjson env "$env_json" --arg cwd "$pkg_dir" '
       .mcpServers //= {} |
-      .mcpServers[$name] = { "command": "node", "args": [$path], "env": $env }
+      .mcpServers[$name] = { "command": "node", "args": [$path], "env": $env, "cwd": $cwd }
     ' "$settings" > "$tmp" && mv "$tmp" "$settings"
     echo "✓ (local)"
   else
