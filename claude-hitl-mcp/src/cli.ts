@@ -1,8 +1,29 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { loadConfig, saveConfig, resolveEnvValue } from "./config.js";
+import * as child_process from "node:child_process";
+import { fileURLToPath } from "node:url";
+import {
+  loadConfig,
+  saveConfig,
+  resolveEnvValue,
+  migrateConfig,
+  LEGACY_CONFIG_PATH,
+  HITL_CONFIG_DIR,
+  ensureConfigDir,
+} from "./config.js";
 import { TelegramAdapter } from "./adapters/telegram.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const DEFAULT_CONFIG_PATH = path.join(HITL_CONFIG_DIR, "config.json");
+const PLIST_PATH = path.join(
+  os.homedir(),
+  "Library",
+  "LaunchAgents",
+  "com.claude-hitl.listener.plist"
+);
 
 function persistEnvVar(varName: string, value: string): void {
   const zshrc = path.join(os.homedir(), ".zshrc");
@@ -31,22 +52,76 @@ function persistEnvVar(varName: string, value: string): void {
   }
 }
 
+function buildPlistContent(nodePath: string, packageDir: string, configDir: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.claude-hitl.listener</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${nodePath}</string>
+    <string>dist/listener.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>${packageDir}</string>
+  <key>KeepAlive</key>
+  <true/>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${configDir}/listener.log</string>
+  <key>StandardErrorPath</key>
+  <string>${configDir}/listener.log</string>
+</dict>
+</plist>
+`;
+}
+
+function doInstallListener(): void {
+  const nodePath = process.execPath;
+  const packageDir = path.resolve(__dirname, "..");
+  const configDir = HITL_CONFIG_DIR;
+
+  ensureConfigDir(configDir);
+
+  const launchAgentsDir = path.join(os.homedir(), "Library", "LaunchAgents");
+  ensureConfigDir(launchAgentsDir);
+
+  const plistContent = buildPlistContent(nodePath, packageDir, configDir);
+  fs.writeFileSync(PLIST_PATH, plistContent, "utf-8");
+
+  child_process.execSync(`launchctl load "${PLIST_PATH}"`, { stdio: "inherit" });
+  console.log("Listener installed and started.");
+  console.log(`  Plist: ${PLIST_PATH}`);
+  console.log(`  Logs:  ${configDir}/listener.log`);
+}
+
 const USAGE = `
 claude-hitl-mcp — Human-in-the-Loop MCP Server
 
 Usage:
-  claude-hitl-mcp              Start MCP server (stdio mode)
-  claude-hitl-mcp setup        Interactive first-time setup
-  claude-hitl-mcp test         Send a test notification
-  claude-hitl-mcp status       Show config and connection status
+  claude-hitl-mcp                 Start MCP server (stdio mode)
+  claude-hitl-mcp setup           Interactive first-time setup
+  claude-hitl-mcp test            Send a test notification
+  claude-hitl-mcp status          Show config and connection status
+  claude-hitl-mcp install-listener    Install and start the listener daemon
+  claude-hitl-mcp uninstall-listener  Stop and remove the listener daemon
+  claude-hitl-mcp start-listener      Start the listener daemon
+  claude-hitl-mcp stop-listener       Stop the listener daemon
+  claude-hitl-mcp listener-logs       Tail the listener log file
 `;
 
 async function setup() {
-  console.log("🔧 claude-hitl setup\n");
+  console.log("claude-hitl setup\n");
+
+  // Migrate legacy config if present
+  migrateConfig(LEGACY_CONFIG_PATH, DEFAULT_CONFIG_PATH);
 
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
-    console.error("❌ TELEGRAM_BOT_TOKEN environment variable is not set.");
+    console.error("TELEGRAM_BOT_TOKEN environment variable is not set.");
     console.error("\nTo create a bot:");
     console.error("  1. Open Telegram and message @BotFather");
     console.error("  2. Send /newbot and follow the prompts");
@@ -55,20 +130,20 @@ async function setup() {
     process.exit(1);
   }
 
-  console.log("✓ Found TELEGRAM_BOT_TOKEN in environment");
+  console.log("Found TELEGRAM_BOT_TOKEN in environment");
 
   // Persist token to ~/.zshrc (idempotent — updates existing or appends)
   persistEnvVar("TELEGRAM_BOT_TOKEN", token);
-  console.log("✓ Token persisted to ~/.zshrc");
+  console.log("Token persisted to ~/.zshrc");
 
   const adapter = new TelegramAdapter();
   await adapter.connect({ token });
-  console.log("✓ Bot connected");
-  console.log("\n→ Open Telegram and send /start to your bot");
+  console.log("Bot connected");
+  console.log("\n-> Open Telegram and send /start to your bot");
   console.log("  Waiting for your message...\n");
 
   const binding = await adapter.awaitBinding();
-  console.log(`✓ Bound to user: ${binding.displayName} (chat_id: ${binding.chatId})`);
+  console.log(`Bound to user: ${binding.displayName} (chat_id: ${binding.chatId})`);
 
   const config = {
     adapter: "telegram" as const,
@@ -85,7 +160,7 @@ async function setup() {
   };
 
   saveConfig(config);
-  console.log("✓ Config written to ~/.claude-hitl.json");
+  console.log(`Config written to ${DEFAULT_CONFIG_PATH}`);
 
   // Update MCP server env in settings.json so Claude Code can pass the token
   const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
@@ -98,7 +173,7 @@ async function setup() {
           TELEGRAM_BOT_TOKEN: token,
         };
         fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
-        console.log("✓ Token added to MCP server config");
+        console.log("Token added to MCP server config");
       }
     } catch {
       // Best effort — settings.json may not exist yet
@@ -109,16 +184,26 @@ async function setup() {
     text: "Claude HITL is connected! You'll receive notifications here when Claude Code needs your input.",
     level: "success",
   });
-  console.log("✓ Test notification sent to Telegram");
+  console.log("Test notification sent to Telegram");
 
   await adapter.disconnect();
-  console.log("\n✓ Setup complete!");
+
+  // Install the listener daemon
+  try {
+    doInstallListener();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`Warning: could not install listener daemon: ${message}`);
+    console.warn("You can install it manually with: claude-hitl-mcp install-listener");
+  }
+
+  console.log("\nSetup complete!");
 }
 
 async function test() {
   const config = loadConfig();
   if (!config || !config.telegram) {
-    console.error("❌ Not configured. Run: claude-hitl-mcp setup");
+    console.error("Not configured. Run: claude-hitl-mcp setup");
     process.exit(1);
   }
 
@@ -130,11 +215,11 @@ async function test() {
   });
 
   await adapter.sendMessage({
-    text: "🧪 Test notification from claude-hitl-mcp",
+    text: "Test notification from claude-hitl-mcp",
     level: "info",
   });
 
-  console.log("✓ Test notification sent");
+  console.log("Test notification sent");
   await adapter.disconnect();
 }
 
@@ -162,12 +247,52 @@ async function status() {
       const token = resolveEnvValue(config.telegram.bot_token);
       const adapter = new TelegramAdapter();
       await adapter.connect({ token });
-      console.log("Connection: ✓ connected");
+      console.log("Connection: connected");
       await adapter.disconnect();
     } catch (err) {
-      console.log(`Connection: ✗ ${err}`);
+      console.log(`Connection: failed — ${err}`);
     }
   }
+}
+
+function installListener() {
+  doInstallListener();
+}
+
+function uninstallListener() {
+  if (fs.existsSync(PLIST_PATH)) {
+    try {
+      child_process.execSync(`launchctl unload "${PLIST_PATH}"`, { stdio: "inherit" });
+    } catch {
+      // Best effort — daemon may already be stopped
+    }
+    fs.unlinkSync(PLIST_PATH);
+    console.log("Listener daemon uninstalled.");
+  } else {
+    console.log("Listener plist not found — nothing to uninstall.");
+  }
+}
+
+function startListener() {
+  child_process.execSync("launchctl start com.claude-hitl.listener", { stdio: "inherit" });
+  console.log("Listener started.");
+}
+
+function stopListener() {
+  child_process.execSync("launchctl stop com.claude-hitl.listener", { stdio: "inherit" });
+  console.log("Listener stopped.");
+}
+
+function listenerLogs() {
+  const logPath = path.join(HITL_CONFIG_DIR, "listener.log");
+  if (!fs.existsSync(logPath)) {
+    console.error(`Log file not found: ${logPath}`);
+    process.exit(1);
+  }
+  const tail = child_process.spawn("tail", ["-f", logPath], { stdio: "inherit" });
+  tail.on("close", (code) => {
+    process.exit(code ?? 0);
+  });
 }
 
 async function startServer() {
@@ -178,22 +303,64 @@ const command = process.argv[2];
 
 switch (command) {
   case "setup":
-    setup().catch((err) => {
-      console.error("Setup failed:", err.message);
+    setup().catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("Setup failed:", message);
       process.exit(1);
     });
     break;
   case "test":
-    test().catch((err) => {
-      console.error("Test failed:", err.message);
+    test().catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("Test failed:", message);
       process.exit(1);
     });
     break;
   case "status":
-    status().catch((err) => {
-      console.error("Status failed:", err.message);
+    status().catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("Status failed:", message);
       process.exit(1);
     });
+    break;
+  case "install-listener":
+    try {
+      installListener();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("install-listener failed:", message);
+      process.exit(1);
+    }
+    break;
+  case "uninstall-listener":
+    try {
+      uninstallListener();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("uninstall-listener failed:", message);
+      process.exit(1);
+    }
+    break;
+  case "start-listener":
+    try {
+      startListener();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("start-listener failed:", message);
+      process.exit(1);
+    }
+    break;
+  case "stop-listener":
+    try {
+      stopListener();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("stop-listener failed:", message);
+      process.exit(1);
+    }
+    break;
+  case "listener-logs":
+    listenerLogs();
     break;
   default:
     if (command && command !== "--help" && command !== "-h") {
