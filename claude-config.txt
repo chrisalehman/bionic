@@ -41,3 +41,4 @@ github-skill | excalidraw-diagram | coleam00/excalidraw-diagram-skill
 
 npm-global   | @playwright/test
 mcp-server   | playwright    | @playwright/mcp
+mcp-server   | context7      | @upstash/context7-mcp@latest
