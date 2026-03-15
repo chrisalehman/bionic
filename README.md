@@ -151,3 +151,15 @@ github-skill  | name    | owner/repo
 npm-global    | package
 mcp-server    | name    | package
 ```
+
+## Optional tools
+
+The bottom of `claude-config.txt` includes commented-out tool profiles for common workflows:
+
+- **Cloud & Infrastructure** — kubectl, helm, stern, kubectx, argocd, docker, k9s
+- **GCP / AWS** — gcloud, awscli
+- **Databases** — psql, mongosh, redis, Postgres MCP server
+- **Deployment Platforms** — vercel, supabase, firebase
+- **API & Serialization** — httpie, yq, grpcurl, protobuf
+
+Uncomment what you need and re-run `./claude-bootstrap.sh`. Commented-out entries are ignored by the bootstrap and reset scripts.

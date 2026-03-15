@@ -42,3 +42,43 @@ github-skill | excalidraw-diagram | coleam00/excalidraw-diagram-skill
 npm-global   | @playwright/test
 mcp-server   | playwright    | @playwright/mcp
 mcp-server   | context7      | @upstash/context7-mcp@latest
+
+# ─── Optional: Cloud & Infrastructure ──────────────────────────────────────
+# Uncomment what you need, re-run ./claude-bootstrap.sh
+#
+# brew-dep     | kubectl
+# brew-dep     | helm
+# brew-dep     | stern
+# brew-dep     | kubectx
+# brew-dep     | argocd
+# brew-dep     | docker
+# brew-dep     | k9s
+
+# ─── Optional: GCP ────────────────────────────────────────────────────────
+# Note: gcloud requires a cask — run manually: brew install --cask google-cloud-sdk
+#
+# brew-dep     | gcloud
+
+# ─── Optional: AWS ────────────────────────────────────────────────────────
+#
+# brew-dep     | aws           | awscli
+
+# ─── Optional: Databases ──────────────────────────────────────────────────
+#
+# brew-dep     | psql          | libpq
+# brew-dep     | mongosh
+# brew-dep     | redis
+# mcp-server   | postgres      | @anthropic-ai/mcp-server-postgres
+
+# ─── Optional: Deployment Platforms ───────────────────────────────────────
+#
+# brew-dep     | vercel
+# brew-dep     | supabase
+# brew-dep     | firebase      | firebase-cli
+
+# ─── Optional: API & Serialization ───────────────────────────────────────
+#
+# brew-dep     | http          | httpie
+# brew-dep     | yq
+# brew-dep     | grpcurl
+# brew-dep     | protoc        | protobuf
