@@ -16,15 +16,19 @@ async function main() {
 
   let handler: HitlToolHandler | null = null;
 
-  // Initialize adapter if configured
+  // Initialize adapter if configured — graceful degradation on failure
   if (config && config.adapter === "telegram" && config.telegram) {
-    const adapter: ChatAdapter = new TelegramAdapter();
-    const token = resolveEnvValue(config.telegram.bot_token);
-    await adapter.connect({
-      token,
-      chatId: config.telegram.chat_id ? String(config.telegram.chat_id) : undefined,
-    });
-    handler = new HitlToolHandler(adapter);
+    try {
+      const adapter: ChatAdapter = new TelegramAdapter();
+      const token = resolveEnvValue(config.telegram.bot_token);
+      await adapter.connect({
+        token,
+        chatId: config.telegram.chat_id ? String(config.telegram.chat_id) : undefined,
+      });
+      handler = new HitlToolHandler(adapter);
+    } catch {
+      // Token missing or connection failed — tools will return error responses
+    }
   }
 
   // Register tools
