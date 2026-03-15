@@ -105,6 +105,7 @@ The listener sends `error` messages for:
 - The listener routes Telegram responses back to the correct MCP server by matching `requestId` to `sessionId`
 - `notify` messages receive a `notified` ack with the Telegram `messageId`, enabling the MCP server to return `{status: "sent", message_id}` from the `notify_human` tool
 - All existing MCP tool behavior stays the same from Claude's perspective
+- **Project name prefix:** All outbound Telegram messages (both `ask` and `notify`) are prefixed with `[project-name]` by the listener, using the `project` field from registration. This identifies which Claude session sent the message when multiple sessions are active (e.g., `[claude-setup] 📋 Plan complete`)
 - Maximum 10 concurrent MCP server connections; excess connections rejected with `error` code `max_connections`
 - `worktree` field in `register` is optional/best-effort — the MCP server determines it via `git branch --show-current` if available, otherwise omits it
 
