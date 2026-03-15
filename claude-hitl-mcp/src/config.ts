@@ -3,7 +3,9 @@ import * as path from "node:path";
 import * as os from "node:os";
 import type { HitlConfig } from "./types.js";
 
-const DEFAULT_CONFIG_PATH = path.join(os.homedir(), ".claude-hitl.json");
+export const HITL_CONFIG_DIR = path.join(os.homedir(), ".claude-hitl");
+export const LEGACY_CONFIG_PATH = path.join(os.homedir(), ".claude-hitl.json");
+const DEFAULT_CONFIG_PATH = path.join(HITL_CONFIG_DIR, "config.json");
 
 export function resolveEnvValue(value: string): string {
   if (!value.startsWith("env:")) return value;
@@ -15,6 +17,25 @@ export function resolveEnvValue(value: string): string {
     );
   }
   return envVal;
+}
+
+export function ensureConfigDir(dir: string): void {
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+export function migrateConfig(oldPath: string, newPath: string): void {
+  if (!fs.existsSync(oldPath)) return;
+
+  const newDir = path.dirname(newPath);
+  ensureConfigDir(newDir);
+
+  const content = fs.readFileSync(oldPath, "utf-8");
+
+  // Verify it parses as valid JSON before writing
+  JSON.parse(content);
+
+  fs.writeFileSync(newPath, content, "utf-8");
+  fs.unlinkSync(oldPath);
 }
 
 export function loadConfig(configPath?: string): HitlConfig | null {
@@ -31,5 +52,6 @@ export function loadConfig(configPath?: string): HitlConfig | null {
 
 export function saveConfig(config: HitlConfig, configPath?: string): void {
   const filePath = configPath ?? DEFAULT_CONFIG_PATH;
+  ensureConfigDir(path.dirname(filePath));
   fs.writeFileSync(filePath, JSON.stringify(config, null, 2) + "\n", "utf-8");
 }
