@@ -74,6 +74,7 @@ Curated behavioral rules applied to every Claude Code session across all project
 | Persistent Planning for Complex Tasks | Use a scratch `_plan.md` for multi-step tasks, delete when done |
 | Use Worktrees for Development | Never commit directly to main — use worktrees/branches, merge after review |
 | Autonomy | Operate without approval except for irreversible/out-of-codebase actions |
+| HITL Notification Priority Guide | When and how to use `ask_human`/`notify_human` with priority tiers |
 
 Edit `claude-global.md` to add or remove rules. To disable entirely, comment out or remove the `global-memory` line in `claude-config.txt`.
 
@@ -123,6 +124,40 @@ npm init playwright@latest
 |--------|---------|---------|
 | playwright | `@playwright/mcp` | Live browser control for E2E testing, debugging, and visual verification |
 | context7 | `@upstash/context7-mcp` | Up-to-date library documentation — bridges the gap when Claude's training data is stale |
+| claude-hitl | `claude-hitl-mcp` (local) | Human-in-the-loop notifications via Telegram — walk away from the terminal, respond from your phone |
+
+### Human-in-the-Loop Notifications (Telegram)
+
+The `claude-hitl-mcp` package (included in this repo) bridges Claude Code to Telegram for bidirectional human-in-the-loop interactions. When Claude is running autonomously and hits a decision point, it sends a notification to your phone and waits for your response.
+
+**Three MCP tools:**
+
+| Tool | Behavior | Use case |
+|------|----------|----------|
+| `ask_human` | Blocking — waits for response | Decisions that need human input |
+| `notify_human` | Non-blocking — fire and forget | Status updates, progress reports |
+| `configure_hitl` | Session setup | Set project context, timeout overrides, quiet hours |
+
+**Priority-tiered timeouts** — the killer feature. Instead of relying on Claude's judgment for when to block vs continue, a structural priority system enforces the rules:
+
+| Priority | On timeout | Default |
+|----------|-----------|---------|
+| `critical` | Block indefinitely + reminder pings | Never |
+| `architecture` | Return "paused" — Claude moves to other work | 2 hours |
+| `preference` | Auto-pick the marked default option | 30 min |
+| `fyi` | Never blocks (`notify_human`) | n/a |
+
+**Setup (under 2 minutes):**
+
+1. Create a Telegram bot: message `@BotFather` → `/newbot` → copy the token
+2. Set the token: `export TELEGRAM_BOT_TOKEN="your-token-here"`
+3. Run setup: `cd claude-hitl-mcp && npm install && npm run build && node dist/cli.js setup`
+4. Send `/start` to your bot in Telegram when prompted
+5. Register with Claude Code: `claude mcp add claude-hitl -e "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN" -s user -- node $(pwd)/dist/server.js`
+
+**Verify:** `node dist/cli.js test` — you should get a notification in Telegram.
+
+**Pluggable architecture:** The adapter interface supports future chat platforms (Slack, Discord). Telegram ships first because it has the simplest bot API, best mobile push notifications, and zero infrastructure (long polling, no webhooks).
 
 ### Global Hooks (installed to ~/.claude/hooks/)
 
@@ -143,6 +178,11 @@ claude-setup/
 ├── hooks/
 │   ├── protect-main.sh      # Hook: blocks git push to main/master
 │   └── protect-database.sh  # Hook: blocks destructive SQL operations
+├── claude-hitl-mcp/         # Human-in-the-loop MCP server (Telegram bridge)
+│   ├── src/                 # TypeScript source
+│   ├── tests/               # Vitest test suite (47 tests)
+│   ├── package.json
+│   └── tsup.config.ts
 ├── claude-bootstrap.sh      # Install everything (idempotent)
 ├── claude-reset.sh          # Remove everything (interactive or --all)
 └── README.md

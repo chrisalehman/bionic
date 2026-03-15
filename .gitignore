@@ -13,3 +13,6 @@
 *.swp
 *.swo
 *~
+
+# Superpowers brainstorming sessions
+.superpowers/
