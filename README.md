@@ -111,6 +111,14 @@ npm init playwright@latest
 | playwright | `@playwright/mcp` | Live browser control for E2E testing, debugging, and visual verification |
 | context7 | `@upstash/context7-mcp` | Up-to-date library documentation — bridges the gap when Claude's training data is stale |
 
+### Global Hooks (installed to ~/.claude/hooks/)
+
+| Hook | Purpose |
+|------|---------|
+| protect-main.sh | Blocks direct `git push` to main/master — Claude must ask for explicit permission first |
+
+Hooks are hard guardrails enforced at the tool level. Unlike behavioral rules (which Claude follows voluntarily), hooks physically prevent blocked actions from executing.
+
 ## Repo structure
 
 ```
@@ -118,6 +126,8 @@ claude-setup/
 ├── .gitignore
 ├── claude-config.txt        # Shared config (plugins, skills, marketplaces)
 ├── claude-global.md         # Global behavioral rules (installed to ~/.claude/CLAUDE.md)
+├── hooks/
+│   └── protect-main.sh      # Hook: blocks git push to main/master
 ├── claude-bootstrap.sh      # Install everything (idempotent)
 ├── claude-reset.sh          # Remove everything (interactive or --all)
 └── README.md
