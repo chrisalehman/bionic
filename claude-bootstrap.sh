@@ -275,6 +275,64 @@ echo -n "  excalidraw-diagram renderer... "
 echo "  ✓"
 echo ""
 
+# ─── Global Hooks ────────────────────────────────────────────────────────────
+
+echo "Global hooks:"
+mkdir -p ~/.claude/hooks
+for hook in "${SCRIPT_DIR}"/hooks/*.sh; do
+  [ -f "$hook" ] || continue
+  name="$(basename "$hook")"
+  echo -n "  ${name}... "
+  cp "$hook" ~/.claude/hooks/"$name"
+  chmod +x ~/.claude/hooks/"$name"
+  echo "✓"
+done
+
+# Merge hook config into global settings
+echo -n "  settings.json hook config... "
+settings=~/.claude/settings.json
+if [ ! -f "$settings" ]; then
+  echo '{}' > "$settings"
+fi
+# Add PreToolUse hook for protect-main if not already present
+if ! jq -e '.hooks.PreToolUse' "$settings" &>/dev/null; then
+  tmp="${settings}.tmp"
+  jq '.hooks = {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/protect-main.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }' "$settings" > "$tmp" && mv "$tmp" "$settings"
+  echo "✓"
+elif jq -e '.hooks.PreToolUse[] | select(.hooks[].command == "~/.claude/hooks/protect-main.sh")' "$settings" &>/dev/null; then
+  echo "✓ (already configured)"
+else
+  # PreToolUse exists but doesn't have our hook — append
+  tmp="${settings}.tmp"
+  jq '.hooks.PreToolUse += [
+    {
+      "matcher": "Bash",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "~/.claude/hooks/protect-main.sh",
+          "timeout": 10
+        }
+      ]
+    }
+  ]' "$settings" > "$tmp" && mv "$tmp" "$settings"
+  echo "✓"
+fi
+echo ""
+
 # ─── MCP Servers ─────────────────────────────────────────────────────────────
 
 echo "MCP servers:"
@@ -296,6 +354,13 @@ read_config "npm-global" verify_npm_global
 echo ""
 echo "  MCP servers:"
 read_config "mcp-server" verify_mcp_server
+
+echo ""
+echo "  Global hooks:"
+for hook in ~/.claude/hooks/*.sh; do
+  [ -f "$hook" ] || continue
+  echo "    $(basename "$hook") ✓"
+done
 
 echo ""
 echo "  Plugins (official skills):"

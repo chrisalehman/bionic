@@ -182,6 +182,28 @@ verify_mcp_removed() {
   fi
 }
 
+# ─── Global Hooks ──────────────────────────────────────────────────────────
+
+echo "Global hooks:"
+if ! confirm "global hooks (~/.claude/hooks/)"; then
+  echo "  hooks — skipped"
+else
+  echo -n "  ~/.claude/hooks/... "
+  if [ -d ~/.claude/hooks ] && [ "$(ls -A ~/.claude/hooks 2>/dev/null)" ]; then
+    rm -rf ~/.claude/hooks
+    # Remove hooks config from settings.json
+    settings=~/.claude/settings.json
+    if [ -f "$settings" ] && jq -e '.hooks' "$settings" &>/dev/null; then
+      tmp="${settings}.tmp"
+      jq 'del(.hooks)' "$settings" > "$tmp" && mv "$tmp" "$settings"
+    fi
+    echo "✓"
+  else
+    echo "✓ (already removed)"
+  fi
+fi
+echo ""
+
 # ─── MCP Servers ───────────────────────────────────────────────────────────
 
 echo "MCP servers:"
@@ -283,6 +305,16 @@ if [ -f ~/.zshrc ] && grep -qF "dangerously-skip-permissions" ~/.zshrc; then
   echo "    ~/.zshrc — alias still present"
 else
   echo "    ~/.zshrc ✓ (clean)"
+fi
+
+echo ""
+echo "  Global hooks:"
+if [ -d ~/.claude/hooks ] && [ "$(ls -A ~/.claude/hooks 2>/dev/null)" ]; then
+  for hook in ~/.claude/hooks/*; do
+    echo "    $(basename "$hook") — still present"
+  done
+else
+  echo "    (none installed) ✓"
 fi
 
 echo ""
