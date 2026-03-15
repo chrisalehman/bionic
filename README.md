@@ -103,6 +103,13 @@ To initialize Playwright in a new project:
 npm init playwright@latest
 ```
 
+### MCP Servers
+
+| Server | Package | Purpose |
+|--------|---------|---------|
+| playwright | `@playwright/mcp` | Live browser control for E2E testing, debugging, and visual verification |
+| context7 | `@upstash/context7-mcp` | Up-to-date library documentation — bridges the gap when Claude's training data is stale |
+
 ## Repo structure
 
 ```
