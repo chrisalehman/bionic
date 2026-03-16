@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
 
 export interface StatusSession {
@@ -38,10 +38,38 @@ export interface DisconnectedInfo {
 }
 
 /**
- * Read _plan.md from a working directory. Returns null if cwd is null or file doesn't exist.
+ * Read the most recent plan file from a working directory.
+ * Searches in priority order:
+ *   1. docs/superpowers/plans/YYYY-MM-DD-*.md (newest by filename)
+ *   2. tasks/todo.md
+ *   3. _plan.md (legacy)
+ * Returns null if cwd is null or no plan file exists.
  */
 export function readPlanFile(cwd: string | null): string | null {
   if (cwd === null) return null;
+
+  // 1. Superpowers plans directory (newest first)
+  try {
+    const plansDir = join(cwd, "docs", "superpowers", "plans");
+    const files = readdirSync(plansDir)
+      .filter((f) => /^\d{4}-\d{2}-\d{2}-.*\.md$/.test(f))
+      .sort()
+      .reverse();
+    if (files.length > 0) {
+      return readFileSync(join(plansDir, files[0]), "utf-8");
+    }
+  } catch {
+    // Directory doesn't exist — fall through
+  }
+
+  // 2. tasks/todo.md
+  try {
+    return readFileSync(join(cwd, "tasks", "todo.md"), "utf-8");
+  } catch {
+    // Not found — fall through
+  }
+
+  // 3. Legacy _plan.md
   try {
     return readFileSync(join(cwd, "_plan.md"), "utf-8");
   } catch {

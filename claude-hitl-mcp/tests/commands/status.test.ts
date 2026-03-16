@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
 import {
   formatStatusMessage,
   readPlanFile,
@@ -7,6 +10,15 @@ import {
   formatStateIndicator,
   type StatusSession,
 } from "../../src/commands/status.js";
+
+function tmpProjectDir(): string {
+  const dir = path.join(
+    os.tmpdir(),
+    `status-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
 describe("formatStatusMessage", () => {
   it("shows no sessions message when empty", () => {
@@ -142,8 +154,106 @@ describe("readPlanFile", () => {
     expect(readPlanFile("/tmp/nonexistent-dir-abc123")).toBeNull();
   });
 
-  it("returns null for a directory with no _plan.md", () => {
+  it("returns null for a directory with no plan files", () => {
     expect(readPlanFile("/tmp")).toBeNull();
+  });
+
+  it("finds plan in docs/superpowers/plans/ directory", () => {
+    const dir = tmpProjectDir();
+    try {
+      const plansDir = path.join(dir, "docs", "superpowers", "plans");
+      fs.mkdirSync(plansDir, { recursive: true });
+      fs.writeFileSync(path.join(plansDir, "2026-03-15-feature.md"), "## Plan\n- Do stuff");
+      expect(readPlanFile(dir)).toBe("## Plan\n- Do stuff");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("picks most recent plan when multiple exist", () => {
+    const dir = tmpProjectDir();
+    try {
+      const plansDir = path.join(dir, "docs", "superpowers", "plans");
+      fs.mkdirSync(plansDir, { recursive: true });
+      fs.writeFileSync(path.join(plansDir, "2026-03-13-old.md"), "Old plan");
+      fs.writeFileSync(path.join(plansDir, "2026-03-15-middle.md"), "Middle plan");
+      fs.writeFileSync(path.join(plansDir, "2026-03-16-newest.md"), "Newest plan");
+      expect(readPlanFile(dir)).toBe("Newest plan");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("finds plan in tasks/todo.md", () => {
+    const dir = tmpProjectDir();
+    try {
+      fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+      fs.writeFileSync(path.join(dir, "tasks", "todo.md"), "Task list plan");
+      expect(readPlanFile(dir)).toBe("Task list plan");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers superpowers plan over tasks/todo.md and _plan.md", () => {
+    const dir = tmpProjectDir();
+    try {
+      const plansDir = path.join(dir, "docs", "superpowers", "plans");
+      fs.mkdirSync(plansDir, { recursive: true });
+      fs.writeFileSync(path.join(plansDir, "2026-03-16-feature.md"), "Superpowers plan");
+      fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+      fs.writeFileSync(path.join(dir, "tasks", "todo.md"), "Tasks plan");
+      fs.writeFileSync(path.join(dir, "_plan.md"), "Legacy plan");
+      expect(readPlanFile(dir)).toBe("Superpowers plan");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers tasks/todo.md over _plan.md", () => {
+    const dir = tmpProjectDir();
+    try {
+      fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
+      fs.writeFileSync(path.join(dir, "tasks", "todo.md"), "Tasks plan");
+      fs.writeFileSync(path.join(dir, "_plan.md"), "Legacy plan");
+      expect(readPlanFile(dir)).toBe("Tasks plan");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to _plan.md when no other plans exist", () => {
+    const dir = tmpProjectDir();
+    try {
+      fs.writeFileSync(path.join(dir, "_plan.md"), "Legacy plan");
+      expect(readPlanFile(dir)).toBe("Legacy plan");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores non-matching files in plans directory", () => {
+    const dir = tmpProjectDir();
+    try {
+      const plansDir = path.join(dir, "docs", "superpowers", "plans");
+      fs.mkdirSync(plansDir, { recursive: true });
+      fs.writeFileSync(path.join(plansDir, "README.md"), "Not a plan");
+      fs.writeFileSync(path.join(plansDir, "notes.txt"), "Also not a plan");
+      expect(readPlanFile(dir)).toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns null when plans directory exists but is empty", () => {
+    const dir = tmpProjectDir();
+    try {
+      const plansDir = path.join(dir, "docs", "superpowers", "plans");
+      fs.mkdirSync(plansDir, { recursive: true });
+      expect(readPlanFile(dir)).toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

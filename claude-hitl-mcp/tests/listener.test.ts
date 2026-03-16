@@ -38,6 +38,19 @@ function tmpDir(): string {
   return dir;
 }
 
+/**
+ * Create a temp directory under $HOME so it passes IPC cwd validation.
+ * Caller must clean up with fs.rmSync().
+ */
+function tmpHomeDir(): string {
+  const dir = path.join(
+    os.homedir(),
+    `.claude-hitl-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 /** Wait for up to `ms` ms, polling every 10 ms, until predicate returns true. */
 async function waitFor(predicate: () => boolean, ms = 800): Promise<void> {
   const deadline = Date.now() + ms;
@@ -149,6 +162,266 @@ describe("Listener", () => {
       expect(bot.sentMessages[0].text).toContain("status-project");
 
       await client.disconnect();
+    });
+
+    it("shows plan content when session cwd has a superpowers plan file", async () => {
+      const projectDir = tmpHomeDir();
+      try {
+        const plansDir = path.join(projectDir, "docs", "superpowers", "plans");
+        fs.mkdirSync(plansDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(plansDir, "2026-03-16-my-feature.md"),
+          "## Phase 1\n- Build the thing"
+        );
+
+        const client = new IpcClient(socketPath);
+        await client.connect("sess-plan", "plan-project", projectDir);
+        await waitFor(() => listener.getIpcServer().getSessions().length === 1);
+
+        bot.simulateMessage("/status");
+        await waitFor(() => bot.sentMessages.length > 0);
+
+        expect(bot.sentMessages[0].text).toContain("Phase 1");
+        expect(bot.sentMessages[0].text).toContain("Build the thing");
+
+        await client.disconnect();
+      } finally {
+        fs.rmSync(projectDir, { recursive: true, force: true });
+      }
+    });
+
+    it("shows tasks/todo.md content when no superpowers plans exist", async () => {
+      const projectDir = tmpHomeDir();
+      try {
+        fs.mkdirSync(path.join(projectDir, "tasks"), { recursive: true });
+        fs.writeFileSync(path.join(projectDir, "tasks", "todo.md"), "Task list plan");
+
+        const client = new IpcClient(socketPath);
+        await client.connect("sess-tasks-plan", "tasks-project", projectDir);
+        await waitFor(() => listener.getIpcServer().getSessions().length === 1);
+
+        bot.simulateMessage("/status");
+        await waitFor(() => bot.sentMessages.length > 0);
+
+        expect(bot.sentMessages[0].text).toContain("Task list plan");
+
+        await client.disconnect();
+      } finally {
+        fs.rmSync(projectDir, { recursive: true, force: true });
+      }
+    });
+
+    it("shows _plan.md content as fallback when no other plans exist", async () => {
+      const projectDir = tmpHomeDir();
+      try {
+        fs.writeFileSync(path.join(projectDir, "_plan.md"), "Legacy plan content");
+
+        const client = new IpcClient(socketPath);
+        await client.connect("sess-legacy-plan", "legacy-project", projectDir);
+        await waitFor(() => listener.getIpcServer().getSessions().length === 1);
+
+        bot.simulateMessage("/status");
+        await waitFor(() => bot.sentMessages.length > 0);
+
+        expect(bot.sentMessages[0].text).toContain("Legacy plan content");
+
+        await client.disconnect();
+      } finally {
+        fs.rmSync(projectDir, { recursive: true, force: true });
+      }
+    });
+
+    it("shows 'No active plan' when session cwd has no plan files", async () => {
+      const client = new IpcClient(socketPath);
+      await client.connect("sess-noplan", "noplan-project", os.homedir());
+      await waitFor(() => listener.getIpcServer().getSessions().length === 1);
+
+      bot.simulateMessage("/status");
+      await waitFor(() => bot.sentMessages.length > 0);
+
+      expect(bot.sentMessages[0].text).toContain("No active plan");
+
+      await client.disconnect();
+    });
+
+    it("shows session context when configured", async () => {
+      const client = new IpcClient(socketPath);
+      await client.connect("sess-ctx-status", "ctx-project", os.homedir());
+      await waitFor(() => listener.getIpcServer().getSessions().length === 1);
+
+      client.sendConfigure("Building the status feature");
+      await new Promise((r) => setTimeout(r, 50));
+
+      bot.simulateMessage("/status");
+      await waitFor(() => bot.sentMessages.length > 0);
+
+      expect(bot.sentMessages[0].text).toContain("Building the status feature");
+
+      await client.disconnect();
+    });
+
+    it("shows worktree name in status", async () => {
+      const client = new IpcClient(socketPath);
+      await client.connect("sess-wt", "wt-project", os.homedir(), "feature/status-fix");
+      await waitFor(() => listener.getIpcServer().getSessions().length === 1);
+
+      bot.simulateMessage("/status");
+      await waitFor(() => bot.sentMessages.length > 0);
+
+      expect(bot.sentMessages[0].text).toContain("feature/status-fix");
+
+      await client.disconnect();
+    });
+
+    it("shows Active state for recent activity", async () => {
+      const client = new IpcClient(socketPath);
+      await client.connect("sess-active", "active-project", os.homedir());
+      await waitFor(() => listener.getIpcServer().getSessions().length === 1);
+
+      const eph = net.createConnection(socketPath);
+      await new Promise<void>((resolve) => eph.on("connect", resolve));
+      eph.write(serialize({
+        type: "activity",
+        sessionId: "sess-active",
+        toolName: "Read",
+      } as any));
+      await new Promise((r) => setTimeout(r, 100));
+      eph.destroy();
+
+      bot.simulateMessage("/status");
+      await waitFor(() => bot.sentMessages.length > 0);
+
+      expect(bot.sentMessages[0].text).toContain("Active");
+
+      await client.disconnect();
+    });
+
+    it("shows blocked state with tool name in status", async () => {
+      const client = new IpcClient(socketPath);
+      await client.connect("sess-blocked-status", "blocked-project", os.homedir());
+      await waitFor(() => listener.getIpcServer().getSessions().length === 1);
+
+      const eph = net.createConnection(socketPath);
+      await new Promise<void>((resolve) => eph.on("connect", resolve));
+      eph.write(serialize({
+        type: "blocked",
+        sessionId: "sess-blocked-status",
+        toolName: "Bash",
+        toolInput: "rm -rf /",
+      } as any));
+      await new Promise((r) => setTimeout(r, 100));
+      eph.destroy();
+
+      // Clear the blocked notification message
+      await waitFor(() => bot.sentMessages.length > 0);
+      bot.sentMessages.length = 0;
+
+      bot.simulateMessage("/status");
+      await waitFor(() => bot.sentMessages.length > 0);
+
+      expect(bot.sentMessages[0].text).toContain("Waiting for permission");
+      expect(bot.sentMessages[0].text).toContain("Bash");
+
+      await client.disconnect();
+    });
+
+    it("shows pending question count in status", async () => {
+      const client = new IpcClient(socketPath);
+      await client.connect("sess-pending", "pending-project", os.homedir());
+      await waitFor(() => listener.getIpcServer().getSessions().length === 1);
+
+      client.sendAsk("req-pending-1", "Question 1?", "preference", [{ text: "Yes" }]);
+      client.sendAsk("req-pending-2", "Question 2?", "preference", [{ text: "No" }]);
+      await waitFor(() => bot.sentMessages.length >= 2);
+      bot.sentMessages.length = 0;
+
+      bot.simulateMessage("/status");
+      await waitFor(() => bot.sentMessages.length > 0);
+
+      expect(bot.sentMessages[0].text).toContain("2 pending questions");
+
+      await client.disconnect();
+    });
+
+    it("shows compact summary with drill-down buttons for multiple sessions", async () => {
+      const client1 = new IpcClient(socketPath);
+      const client2 = new IpcClient(socketPath);
+      await client1.connect("sess-multi-1", "project-alpha", os.homedir());
+      await client2.connect("sess-multi-2", "project-beta", os.homedir());
+      await waitFor(() => listener.getIpcServer().getSessions().length === 2);
+
+      bot.simulateMessage("/status");
+      await waitFor(() => bot.sentMessages.length > 0);
+
+      const msg = bot.sentMessages[0];
+      expect(msg.text).toContain("project-alpha");
+      expect(msg.text).toContain("project-beta");
+
+      const keyboard = (msg.options as { reply_markup?: { inline_keyboard?: unknown[][] } })
+        ?.reply_markup?.inline_keyboard;
+      expect(Array.isArray(keyboard)).toBe(true);
+      expect((keyboard as unknown[][]).length).toBe(2);
+
+      await client1.disconnect();
+      await client2.disconnect();
+    });
+
+    it("drill-down button shows full detail for a specific session", async () => {
+      const client1 = new IpcClient(socketPath);
+      const client2 = new IpcClient(socketPath);
+      await client1.connect("sess-dd-1", "project-alpha", os.homedir(), "feature/alpha");
+      await client2.connect("sess-dd-2", "project-beta", os.homedir());
+      await waitFor(() => listener.getIpcServer().getSessions().length === 2);
+
+      bot.simulateMessage("/status");
+      await waitFor(() => bot.sentMessages.length > 0);
+      bot.sentMessages.length = 0;
+
+      bot.simulateCallbackQuery("status:sess-dd-1");
+      await waitFor(() => bot.sentMessages.length > 0);
+
+      const detail = bot.sentMessages[0].text;
+      expect(detail).toContain("project-alpha");
+      expect(detail).toContain("feature/alpha");
+
+      await client1.disconnect();
+      await client2.disconnect();
+    });
+
+    it("shows last disconnected session when no active sessions remain", async () => {
+      // Use a raw socket to simulate non-graceful disconnect
+      // (client.disconnect() sends deregister which is graceful and doesn't record)
+      const rawSocket = net.createConnection(socketPath);
+      await new Promise<void>((resolve) => rawSocket.on("connect", resolve));
+      rawSocket.write(serialize({
+        type: "register",
+        protocolVersion: 1,
+        sessionId: "sess-disc",
+        project: "disc-project",
+        cwd: os.homedir(),
+      } as any));
+      await new Promise((r) => setTimeout(r, 100));
+
+      // Verify session registered
+      await waitFor(() => listener.getIpcServer().getSessions().length === 1);
+
+      // Destroy socket without deregister → non-graceful disconnect → recorded
+      rawSocket.destroy();
+      await waitFor(() => listener.getIpcServer().getSessions().length === 0);
+
+      bot.simulateMessage("/status");
+      await waitFor(() => bot.sentMessages.length > 0);
+
+      expect(bot.sentMessages[0].text).toContain("No active Claude sessions");
+      expect(bot.sentMessages[0].text).toContain("disc-project");
+      expect(bot.sentMessages[0].text).toContain("disconnected");
+    });
+
+    it("drill-down for nonexistent session shows error message", async () => {
+      bot.simulateCallbackQuery("status:nonexistent-session-id");
+      await waitFor(() => bot.sentMessages.length > 0);
+
+      expect(bot.sentMessages[0].text).toContain("Session not found");
     });
   });
 
