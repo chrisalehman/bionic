@@ -47,6 +47,7 @@ export interface ActivityMessage {
   type: "activity";
   sessionId: string;
   toolName: string;
+  cwd?: string;
 }
 
 export interface BlockedMessage {
@@ -54,6 +55,7 @@ export interface BlockedMessage {
   sessionId: string;
   toolName: string;
   toolInput?: string;
+  cwd?: string;
 }
 
 export type ClientMessage =
