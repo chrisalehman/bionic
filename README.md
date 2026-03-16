@@ -155,9 +155,12 @@ The `claude-hitl-mcp` package (included in this repo) bridges Claude Code to cha
 2. Set the token: `export TELEGRAM_BOT_TOKEN="your-token-here"`
 3. Run setup: `cd claude-hitl-mcp && npm install && npm run build && node dist/cli.js setup`
 4. Send `/start` to your bot in Telegram when prompted
-5. Register with Claude Code: `claude mcp add claude-hitl -e "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN" -s user -- node $(pwd)/dist/server.js`
+
+That's it — `setup` automatically registers the MCP server globally in `~/.claude/settings.json`, installs the listener daemon, and sends a test notification. Every Claude Code session on your machine will have access to the HITL tools.
 
 **Verify:** `node dist/cli.js test` — you should get a notification in Telegram.
+
+See [`claude-hitl-mcp/README.md`](claude-hitl-mcp/README.md) for full documentation, architecture details, and troubleshooting.
 
 **Other adapters:** The adapter interface is pluggable — Slack, Discord, and other platforms can be added by implementing the `ChatAdapter` interface. See `src/adapters/telegram.ts` for the reference implementation.
 
