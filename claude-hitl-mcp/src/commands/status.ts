@@ -9,6 +9,15 @@ export interface StatusSession {
   plan: string | null;
   pendingCount: number;
   oldestPendingAge?: number; // seconds since oldest pending question
+  lastActivityAge?: number;
+  blockedOn?: string;
+  blockedAge?: number;
+}
+
+export interface StateIndicatorInput {
+  lastActivityAge?: number;
+  blockedOn?: string;
+  blockedAge?: number;
 }
 
 export interface StatusButton {
@@ -53,6 +62,29 @@ export function formatAge(seconds: number): string {
   if (seconds < 60) return `${Math.round(seconds)}s ago`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   return `${Math.floor(seconds / 3600)}h ago`;
+}
+
+/**
+ * Return a state indicator string based on activity and blocked status.
+ */
+export function formatStateIndicator(input: StateIndicatorInput): string {
+  const { lastActivityAge, blockedOn, blockedAge } = input;
+
+  if (blockedOn && (blockedAge === undefined || blockedAge <= 60)) {
+    return `⚠️ Waiting for permission (${blockedOn})`;
+  }
+
+  if (lastActivityAge === undefined) {
+    return "No activity data";
+  }
+
+  if (lastActivityAge < 30) {
+    return `🟢 Active (${formatAge(lastActivityAge)})`;
+  }
+  if (lastActivityAge <= 120) {
+    return `💭 Thinking (${formatAge(lastActivityAge)})`;
+  }
+  return `💤 Idle (${formatAge(lastActivityAge)})`;
 }
 
 /**
