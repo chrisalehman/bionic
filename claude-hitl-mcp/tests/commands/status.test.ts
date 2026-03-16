@@ -4,6 +4,7 @@ import {
   readPlanFile,
   truncatePlan,
   formatSessionDetail,
+  formatStateIndicator,
   type StatusSession,
 } from "../../src/commands/status.js";
 
@@ -96,6 +97,16 @@ describe("formatStatusMessage", () => {
     expect(msg.text).toContain("2 pending questions");
     expect(msg.text).toContain("45s ago");
   });
+
+  it("shows state indicator instead of plan first-line in multi-session compact view", () => {
+    const sessions: StatusSession[] = [
+      { sessionId: "s1", project: "proj-a", plan: null, pendingCount: 0, lastActivityAge: 5 },
+      { sessionId: "s2", project: "proj-b", plan: null, pendingCount: 0, lastActivityAge: 300 },
+    ];
+    const msg = formatStatusMessage(sessions, []);
+    expect(msg.text).toContain("Active");
+    expect(msg.text).toContain("Idle");
+  });
 });
 
 describe("truncatePlan", () => {
@@ -186,5 +197,70 @@ describe("formatSessionDetail", () => {
     const text = formatSessionDetail(session);
     expect(text).toContain("3 pending questions");
     expect(text).toContain("2h ago");
+  });
+
+  it("shows state indicator when activity data is present", () => {
+    const session: StatusSession = {
+      sessionId: "s1",
+      project: "myproject",
+      plan: null,
+      pendingCount: 0,
+      lastActivityAge: 5,
+    };
+    const text = formatSessionDetail(session);
+    expect(text).toContain("Active");
+    expect(text).toContain("5s ago");
+  });
+
+  it("shows blocked state in detail view", () => {
+    const session: StatusSession = {
+      sessionId: "s1",
+      project: "myproject",
+      plan: null,
+      pendingCount: 0,
+      blockedOn: "Bash",
+      blockedAge: 10,
+      lastActivityAge: 10,
+    };
+    const text = formatSessionDetail(session);
+    expect(text).toContain("Waiting for permission");
+    expect(text).toContain("Bash");
+  });
+});
+
+describe("formatStateIndicator", () => {
+  it("returns 'Active' when lastActivityAge < 30", () => {
+    const result = formatStateIndicator({ lastActivityAge: 12 });
+    expect(result).toContain("Active");
+    expect(result).toContain("12s ago");
+  });
+
+  it("returns 'Thinking' when lastActivityAge is 30-120", () => {
+    const result = formatStateIndicator({ lastActivityAge: 45 });
+    expect(result).toContain("Thinking");
+    expect(result).toContain("45s ago");
+  });
+
+  it("returns 'Idle' when lastActivityAge > 120", () => {
+    const result = formatStateIndicator({ lastActivityAge: 300 });
+    expect(result).toContain("Idle");
+    expect(result).toContain("5m ago");
+  });
+
+  it("returns 'Waiting for permission' when blockedOn is set", () => {
+    const result = formatStateIndicator({ lastActivityAge: 5, blockedOn: "Bash" });
+    expect(result).toContain("Waiting for permission");
+    expect(result).toContain("Bash");
+  });
+
+  it("returns 'No activity data' when lastActivityAge is undefined", () => {
+    const result = formatStateIndicator({});
+    expect(result).toContain("No activity data");
+  });
+
+  it("auto-clears blockedOn when blockedAge exceeds 60s", () => {
+    const result = formatStateIndicator({ lastActivityAge: 90, blockedOn: "Bash", blockedAge: 65 });
+    expect(result).not.toContain("Waiting for permission");
+    expect(result).toContain("Thinking");
   });
 });
