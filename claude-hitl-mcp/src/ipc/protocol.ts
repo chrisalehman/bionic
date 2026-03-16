@@ -43,12 +43,27 @@ export interface DeregisterMessage {
   sessionId: string;
 }
 
+export interface ActivityMessage {
+  type: "activity";
+  sessionId: string;
+  toolName: string;
+}
+
+export interface BlockedMessage {
+  type: "blocked";
+  sessionId: string;
+  toolName: string;
+  toolInput?: string;
+}
+
 export type ClientMessage =
   | RegisterMessage
   | ConfigureMessage
   | AskMessage
   | NotifyMessage
-  | DeregisterMessage;
+  | DeregisterMessage
+  | ActivityMessage
+  | BlockedMessage;
 
 // --- Listener → MCP Server messages ---
 
