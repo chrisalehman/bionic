@@ -259,7 +259,18 @@ export class IpcServer {
       }
     } else if (msg.type === "activity" || msg.type === "blocked") {
       const hookMsg = msg as ActivityMessage | BlockedMessage;
-      const session = this.sessions.get(hookMsg.sessionId);
+      // Try exact session ID match first, then fall back to cwd match.
+      // Hook scripts send Claude Code's internal session ID, which differs
+      // from the MCP server's random UUID used at registration.
+      let session = this.sessions.get(hookMsg.sessionId);
+      if (!session && hookMsg.cwd) {
+        for (const s of this.sessions.values()) {
+          if (s.cwd && hookMsg.cwd.startsWith(s.cwd)) {
+            session = s;
+            break;
+          }
+        }
+      }
       if (session) {
         if (hookMsg.type === "activity") {
           session.lastActivityAt = new Date();
