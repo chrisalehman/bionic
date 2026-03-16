@@ -5,6 +5,8 @@ import { IpcClient } from "../../src/ipc/client.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import * as net from "node:net";
+import { serialize } from "../../src/ipc/protocol.js";
 
 describe("IpcServer", () => {
   let server: IpcServer;
@@ -86,5 +88,96 @@ describe("IpcServer", () => {
     await server.start();
     await server.stop();
     expect(fs.existsSync(socketPath)).toBe(false);
+  });
+
+  describe("activity and blocked messages from ephemeral sockets", () => {
+    it("updates session lastActivityAt when activity message received", async () => {
+      server = new IpcServer(socketPath, { maxConnections: 10 });
+      await server.start();
+      const client = new IpcClient(socketPath);
+      await client.connect("sess-act", "test-project", "/tmp/project");
+      await new Promise((r) => setTimeout(r, 100));
+      const ephemeral = net.createConnection(socketPath);
+      await new Promise<void>((resolve) => ephemeral.on("connect", resolve));
+      ephemeral.write(serialize({
+        type: "activity",
+        sessionId: "sess-act",
+        toolName: "Bash",
+      } as any));
+      await new Promise((r) => setTimeout(r, 100));
+      ephemeral.destroy();
+      const sessions = server.getSessions();
+      expect(sessions[0].lastActivityAt).toBeInstanceOf(Date);
+      expect(sessions[0].lastActivityTool).toBe("Bash");
+      await client.disconnect();
+    });
+
+    it("sets blockedOn when blocked message received", async () => {
+      server = new IpcServer(socketPath, { maxConnections: 10 });
+      await server.start();
+      const client = new IpcClient(socketPath);
+      await client.connect("sess-blk", "test-project", "/tmp/project");
+      await new Promise((r) => setTimeout(r, 100));
+      const ephemeral = net.createConnection(socketPath);
+      await new Promise<void>((resolve) => ephemeral.on("connect", resolve));
+      ephemeral.write(serialize({
+        type: "blocked",
+        sessionId: "sess-blk",
+        toolName: "Edit",
+        toolInput: "src/main.ts",
+      } as any));
+      await new Promise((r) => setTimeout(r, 100));
+      ephemeral.destroy();
+      const sessions = server.getSessions();
+      expect(sessions[0].blockedOn).toBe("Edit");
+      expect(sessions[0].blockedAt).toBeInstanceOf(Date);
+      expect(sessions[0].lastActivityAt).toBeInstanceOf(Date);
+      await client.disconnect();
+    });
+
+    it("clears blockedOn when activity message follows blocked", async () => {
+      server = new IpcServer(socketPath, { maxConnections: 10 });
+      await server.start();
+      const client = new IpcClient(socketPath);
+      await client.connect("sess-clr", "test-project", "/tmp/project");
+      await new Promise((r) => setTimeout(r, 100));
+      let eph = net.createConnection(socketPath);
+      await new Promise<void>((resolve) => eph.on("connect", resolve));
+      eph.write(serialize({
+        type: "blocked",
+        sessionId: "sess-clr",
+        toolName: "Bash",
+      } as any));
+      await new Promise((r) => setTimeout(r, 100));
+      eph.destroy();
+      expect(server.getSessions()[0].blockedOn).toBe("Bash");
+      eph = net.createConnection(socketPath);
+      await new Promise<void>((resolve) => eph.on("connect", resolve));
+      eph.write(serialize({
+        type: "activity",
+        sessionId: "sess-clr",
+        toolName: "Read",
+      } as any));
+      await new Promise((r) => setTimeout(r, 100));
+      eph.destroy();
+      expect(server.getSessions()[0].blockedOn).toBeUndefined();
+      expect(server.getSessions()[0].lastActivityTool).toBe("Read");
+      await client.disconnect();
+    });
+
+    it("silently drops activity for unknown sessionId", async () => {
+      server = new IpcServer(socketPath, { maxConnections: 10 });
+      await server.start();
+      const ephemeral = net.createConnection(socketPath);
+      await new Promise<void>((resolve) => ephemeral.on("connect", resolve));
+      ephemeral.write(serialize({
+        type: "activity",
+        sessionId: "nonexistent",
+        toolName: "Bash",
+      } as any));
+      await new Promise((r) => setTimeout(r, 100));
+      ephemeral.destroy();
+      expect(server.getSessions()).toHaveLength(0);
+    });
   });
 });
