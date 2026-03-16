@@ -62,6 +62,19 @@ describe("HitlToolHandler", () => {
       expect(result.active_config.session_context).toBe("Working on auth");
       expect(result.active_config.timeouts.architecture).toBe(60);
     });
+
+    it("propagates plan_path via sendConfigure", async () => {
+      adapter.sendConfigure = vi.fn();
+      await handler.configureHitl({
+        session_context: "Working on X",
+        plan_path: "/path/to/plan.md",
+      });
+      expect(adapter.sendConfigure).toHaveBeenCalledWith(
+        "Working on X",
+        undefined,
+        "/path/to/plan.md",
+      );
+    });
   });
 
   describe("ask_human", () => {

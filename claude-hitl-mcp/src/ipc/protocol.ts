@@ -15,6 +15,7 @@ export interface ConfigureMessage {
   type: "configure";
   sessionId: string;
   sessionContext?: string;
+  planPath?: string;
   timeoutOverrides?: { architecture?: number; preference?: number };
 }
 

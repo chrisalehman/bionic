@@ -65,7 +65,11 @@ export interface ChatAdapter {
 
   onMessage(handler: MessageHandler): void;
 
-  sendConfigure?(sessionContext?: string, timeoutOverrides?: { architecture?: number; preference?: number }): void;
+  sendConfigure?(
+    sessionContext?: string,
+    timeoutOverrides?: { architecture?: number; preference?: number },
+    planPath?: string,
+  ): void;
 
   readonly capabilities: {
     inlineButtons: boolean;
@@ -112,6 +116,7 @@ export interface NotifyHumanResponse {
 
 export interface ConfigureHitlInput {
   session_context?: string;
+  plan_path?: string;
   timeout_overrides?: {
     critical?: null;
     architecture?: number;

@@ -214,9 +214,10 @@ export class ListenerClientAdapter implements ChatAdapter {
    */
   sendConfigure(
     sessionContext?: string,
-    timeoutOverrides?: { architecture?: number; preference?: number }
+    timeoutOverrides?: { architecture?: number; preference?: number },
+    planPath?: string,
   ): void {
     if (!this.client || !this.client.isConnected()) return;
-    this.client.sendConfigure(sessionContext, timeoutOverrides);
+    this.client.sendConfigure(sessionContext, timeoutOverrides, planPath);
   }
 }

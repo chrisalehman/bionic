@@ -236,13 +236,15 @@ export class IpcClient {
 
   sendConfigure(
     sessionContext?: string,
-    timeoutOverrides?: ConfigureMessage["timeoutOverrides"]
+    timeoutOverrides?: ConfigureMessage["timeoutOverrides"],
+    planPath?: string,
   ): void {
     const msg: ConfigureMessage = {
       type: "configure",
       sessionId: this.sessionId!,
       ...(sessionContext !== undefined ? { sessionContext } : {}),
       ...(timeoutOverrides ? { timeoutOverrides } : {}),
+      ...(planPath !== undefined ? { planPath } : {}),
     };
     this.send(msg);
   }

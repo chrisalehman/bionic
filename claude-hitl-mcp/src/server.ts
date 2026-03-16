@@ -128,6 +128,10 @@ async function main() {
         .string()
         .optional()
         .describe("Brief description of current work"),
+      plan_path: z
+        .string()
+        .optional()
+        .describe("Absolute path to the active plan file for this session"),
       timeout_overrides: z
         .object({
           architecture: z.number().optional(),
