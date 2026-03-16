@@ -1,25 +1,52 @@
-# Global Behavioral Rules
+## 1. Plan Mode Default
+- Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
+- If something goes sideways, STOP and re-plan immediately — don't keep pushing
+- Use plan mode for verification steps, not just building
+- Write detailed specs upfront to reduce ambiguity
 
-## Code Review Before Push
-Always invoke code review before running `git push`. Unreviewed code should never reach the remote.
+## 2. Subagent Strategy
+- Use subagents liberally to keep main context window clean
+- Offload research, exploration, and parallel analysis to subagents
+- For complex problems, throw more compute at it via subagents
+- One task per subagent for focused execution
 
-## Don't Start Duplicate Dev Servers
-Before starting any dev server, check if one is already running (e.g., `lsof -nP -i :3000`). If the user already has a server running in their terminal, don't start another from Claude Code.
+## 3. Self-Improvement Loop
+- After ANY correction from the user: update `tasks/lessons.md` with the pattern
+- Write rules for yourself to prevent the same mistake
+- Ruthlessly iterate on these lessons until mistake rate drops
+- Review lessons at session start for relevant project
 
-## Don't Delete Generated Outputs
-Never delete generated output files (PDFs, diagrams, images, etc.) without explicit user confirmation. Leave artifacts in place for the user to review.
+## 4. Verification Before Done
+- Never mark a task complete without proving it works
+- Diff behavior between main and your changes when relevant
+- Ask yourself: "Would a staff engineer approve this?"
+- Run tests, check logs, demonstrate correctness
 
-## Clean Working Directory
-Scripts and tools must not leave intermediary files (logs, temp files, artifacts) in the working directory. If output files are needed, the user will redirect manually.
+## 5. Demand Elegance (Balanced)
+- For non-trivial changes: pause and ask "is there a more elegant way?"
+- If a fix feels hacky: "Knowing everything I know now, implement the elegant solution"
+- Skip this for simple, obvious fixes — don't over-engineer
+- Challenge your own work before presenting it
 
-## Reviews Must Check Conventions
-When conducting code reviews, include a dedicated conventions check — file placement, naming patterns, directory structure, import style consistency — not just correctness.
+## 6. Autonomous Bug Fixing
+- When given a bug report: just fix it. Don't ask for hand-holding
+- Point at logs, errors, failing tests — then resolve them
+- Zero context switching required from the user
+- Go fix failing CI tests without being told how
 
-## Persistent Planning for Complex Tasks
-For multi-step tasks that will span many tool calls (10+), proactively create a brief `_plan.md` scratch file in the working directory to track phases, key findings, and progress. Update it as phases complete. Delete the file when the task is finished. Skip this for simple tasks, single-file edits, or quick lookups.
+## Task Management
 
-## Use Worktrees for Development
-Never commit directly to main. Use a git worktree (or feature branch) for all implementation work. Merge to main only after the work is verified and reviewed. This keeps main in a known-good state with a clean rollback point.
+1. **Plan First**: Write plan to `tasks/todo.md` with checkable items
+2. **Verify Plan**: Check in before starting implementation
+3. **Track Progress**: Mark items complete as you go
+4. **Explain Changes**: High-level summary at each step
+5. **Document Results**: Add review section to `tasks/todo.md`
+6. **Capture Lessons**: Update `tasks/lessons.md` after corrections
+
+## Core Principles
+
+- **Simplicity First**: Make every change as simple as possible. Impact minimal code.
+- **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
 
 ## Autonomy
 
