@@ -16,6 +16,7 @@ export class HitlToolHandler {
   private engine: PriorityEngine;
   private session: SessionManager;
   private sessionContext: string = "";
+  private planPath: string = "";
   private messageIdMap: Map<string, string> = new Map(); // requestId → messageId
   private reminderTimers: Map<string, ReturnType<typeof setInterval>> = new Map();
 
@@ -132,6 +133,9 @@ export class HitlToolHandler {
     if (input.session_context !== undefined) {
       this.sessionContext = input.session_context;
     }
+    if (input.plan_path !== undefined) {
+      this.planPath = input.plan_path;
+    }
 
     if (input.timeout_overrides) {
       this.engine.setTimeoutOverrides({
@@ -141,7 +145,11 @@ export class HitlToolHandler {
     }
 
     // Propagate to listener daemon if using IPC adapter
-    this.adapter.sendConfigure?.(this.sessionContext || undefined, input.timeout_overrides);
+    this.adapter.sendConfigure?.(
+      this.sessionContext || undefined,
+      input.timeout_overrides,
+      this.planPath || undefined,
+    );
 
     const archTimeout = this.engine.getTimeoutMs("architecture");
     const prefTimeout = this.engine.getTimeoutMs("preference");
