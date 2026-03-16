@@ -187,22 +187,37 @@ async function setup() {
   saveConfig(config);
   console.log(`Config written to ${DEFAULT_CONFIG_PATH}`);
 
-  // Update MCP server env in settings.json so Claude Code can pass the token
+  // Register MCP server globally in ~/.claude/settings.json (creates or updates)
   const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
-  if (fs.existsSync(settingsPath)) {
-    try {
-      const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
-      if (settings.mcpServers?.["claude-hitl"]) {
-        settings.mcpServers["claude-hitl"].env = {
-          ...settings.mcpServers["claude-hitl"].env,
-          TELEGRAM_BOT_TOKEN: token,
-        };
-        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
-        console.log("Token added to MCP server config");
-      }
-    } catch {
-      // Best effort — settings.json may not exist yet
+  try {
+    const claudeDir = path.join(os.homedir(), ".claude");
+    if (!fs.existsSync(claudeDir)) {
+      fs.mkdirSync(claudeDir, { recursive: true });
     }
+
+    const settings = fs.existsSync(settingsPath)
+      ? JSON.parse(fs.readFileSync(settingsPath, "utf-8"))
+      : {};
+
+    if (!settings.mcpServers) {
+      settings.mcpServers = {};
+    }
+
+    const serverJsPath = path.resolve(__dirname, "..", "dist", "server.js");
+    settings.mcpServers["claude-hitl"] = {
+      command: "node",
+      args: [serverJsPath],
+      env: {
+        TELEGRAM_BOT_TOKEN: token,
+      },
+    };
+
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    console.log("MCP server registered globally in ~/.claude/settings.json");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`Warning: could not register MCP server: ${message}`);
+    console.warn("Register manually: claude mcp add claude-hitl -s user -- node " + path.resolve(__dirname, "..", "dist", "server.js"));
   }
 
   await adapter.sendMessage({
