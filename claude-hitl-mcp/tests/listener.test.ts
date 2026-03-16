@@ -171,7 +171,7 @@ describe("Listener", () => {
         fs.mkdirSync(plansDir, { recursive: true });
         fs.writeFileSync(
           path.join(plansDir, "2026-03-16-my-feature.md"),
-          "## Phase 1\n- Build the thing"
+          "## Phase 1\n- [ ] Build the thing"
         );
 
         const client = new IpcClient(socketPath);
@@ -194,7 +194,7 @@ describe("Listener", () => {
       const projectDir = tmpHomeDir();
       try {
         fs.mkdirSync(path.join(projectDir, "tasks"), { recursive: true });
-        fs.writeFileSync(path.join(projectDir, "tasks", "todo.md"), "Task list plan");
+        fs.writeFileSync(path.join(projectDir, "tasks", "todo.md"), "Task list plan\n- [ ] Todo");
 
         const client = new IpcClient(socketPath);
         await client.connect("sess-tasks-plan", "tasks-project", projectDir);

@@ -5,6 +5,8 @@ import * as os from "node:os";
 import {
   formatStatusMessage,
   readPlanFile,
+  readDeclaredPlan,
+  hasUncheckedItems,
   truncatePlan,
   formatSessionDetail,
   formatStateIndicator,
@@ -163,8 +165,8 @@ describe("readPlanFile", () => {
     try {
       const plansDir = path.join(dir, "docs", "superpowers", "plans");
       fs.mkdirSync(plansDir, { recursive: true });
-      fs.writeFileSync(path.join(plansDir, "2026-03-15-feature.md"), "## Plan\n- Do stuff");
-      expect(readPlanFile(dir)).toBe("## Plan\n- Do stuff");
+      fs.writeFileSync(path.join(plansDir, "2026-03-15-feature.md"), "## Plan\n- [ ] Do stuff");
+      expect(readPlanFile(dir)).toBe("## Plan\n- [ ] Do stuff");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -175,10 +177,10 @@ describe("readPlanFile", () => {
     try {
       const plansDir = path.join(dir, "docs", "superpowers", "plans");
       fs.mkdirSync(plansDir, { recursive: true });
-      fs.writeFileSync(path.join(plansDir, "2026-03-13-old.md"), "Old plan");
-      fs.writeFileSync(path.join(plansDir, "2026-03-15-middle.md"), "Middle plan");
-      fs.writeFileSync(path.join(plansDir, "2026-03-16-newest.md"), "Newest plan");
-      expect(readPlanFile(dir)).toBe("Newest plan");
+      fs.writeFileSync(path.join(plansDir, "2026-03-13-old.md"), "Old plan\n- [ ] Old");
+      fs.writeFileSync(path.join(plansDir, "2026-03-15-middle.md"), "Middle plan\n- [ ] Mid");
+      fs.writeFileSync(path.join(plansDir, "2026-03-16-newest.md"), "Newest plan\n- [ ] Todo");
+      expect(readPlanFile(dir)).toBe("Newest plan\n- [ ] Todo");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -188,8 +190,8 @@ describe("readPlanFile", () => {
     const dir = tmpProjectDir();
     try {
       fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
-      fs.writeFileSync(path.join(dir, "tasks", "todo.md"), "Task list plan");
-      expect(readPlanFile(dir)).toBe("Task list plan");
+      fs.writeFileSync(path.join(dir, "tasks", "todo.md"), "Task list plan\n- [ ] Todo");
+      expect(readPlanFile(dir)).toBe("Task list plan\n- [ ] Todo");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -200,11 +202,11 @@ describe("readPlanFile", () => {
     try {
       const plansDir = path.join(dir, "docs", "superpowers", "plans");
       fs.mkdirSync(plansDir, { recursive: true });
-      fs.writeFileSync(path.join(plansDir, "2026-03-16-feature.md"), "Superpowers plan");
+      fs.writeFileSync(path.join(plansDir, "2026-03-16-feature.md"), "Superpowers plan\n- [ ] Todo");
       fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
-      fs.writeFileSync(path.join(dir, "tasks", "todo.md"), "Tasks plan");
+      fs.writeFileSync(path.join(dir, "tasks", "todo.md"), "Tasks plan\n- [ ] Todo");
       fs.writeFileSync(path.join(dir, "_plan.md"), "Legacy plan");
-      expect(readPlanFile(dir)).toBe("Superpowers plan");
+      expect(readPlanFile(dir)).toBe("Superpowers plan\n- [ ] Todo");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -214,9 +216,9 @@ describe("readPlanFile", () => {
     const dir = tmpProjectDir();
     try {
       fs.mkdirSync(path.join(dir, "tasks"), { recursive: true });
-      fs.writeFileSync(path.join(dir, "tasks", "todo.md"), "Tasks plan");
+      fs.writeFileSync(path.join(dir, "tasks", "todo.md"), "Tasks plan\n- [ ] Todo");
       fs.writeFileSync(path.join(dir, "_plan.md"), "Legacy plan");
-      expect(readPlanFile(dir)).toBe("Tasks plan");
+      expect(readPlanFile(dir)).toBe("Tasks plan\n- [ ] Todo");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -254,6 +256,74 @@ describe("readPlanFile", () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("skips completed plans (no unchecked items) in superpowers dir", () => {
+    const dir = tmpProjectDir();
+    try {
+      const plansDir = path.join(dir, "docs", "superpowers", "plans");
+      fs.mkdirSync(plansDir, { recursive: true });
+      fs.writeFileSync(path.join(plansDir, "2026-03-16-done.md"), "## Done\n- [x] All done");
+      expect(readPlanFile(dir)).toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("finds older plan if newest is completed", () => {
+    const dir = tmpProjectDir();
+    try {
+      const plansDir = path.join(dir, "docs", "superpowers", "plans");
+      fs.mkdirSync(plansDir, { recursive: true });
+      fs.writeFileSync(path.join(plansDir, "2026-03-16-done.md"), "## Done\n- [x] All done");
+      fs.writeFileSync(path.join(plansDir, "2026-03-15-active.md"), "## Active\n- [ ] In progress");
+      expect(readPlanFile(dir)).toBe("## Active\n- [ ] In progress");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("readDeclaredPlan", () => {
+  it("returns null for undefined path", () => {
+    expect(readDeclaredPlan(undefined)).toBeNull();
+  });
+
+  it("returns null for empty string path", () => {
+    expect(readDeclaredPlan("")).toBeNull();
+  });
+
+  it("returns null for nonexistent path", () => {
+    expect(readDeclaredPlan("/tmp/nonexistent-plan-abc123.md")).toBeNull();
+  });
+
+  it("reads content from a valid path", () => {
+    const dir = tmpProjectDir();
+    try {
+      const planPath = path.join(dir, "plan.md");
+      fs.writeFileSync(planPath, "## My Plan\n- [ ] Do thing");
+      expect(readDeclaredPlan(planPath)).toBe("## My Plan\n- [ ] Do thing");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("hasUncheckedItems", () => {
+  it("returns true when plan has unchecked items", () => {
+    expect(hasUncheckedItems("## Plan\n- [ ] Step 1\n- [x] Step 2")).toBe(true);
+  });
+
+  it("returns false when all items are checked", () => {
+    expect(hasUncheckedItems("## Plan\n- [x] Step 1\n- [x] Step 2")).toBe(false);
+  });
+
+  it("returns false when plan has no checkboxes", () => {
+    expect(hasUncheckedItems("## Plan\nJust some text")).toBe(false);
+  });
+
+  it("returns true for indented unchecked items", () => {
+    expect(hasUncheckedItems("- [x] Done\n  - [ ] Sub-task")).toBe(true);
   });
 });
 
