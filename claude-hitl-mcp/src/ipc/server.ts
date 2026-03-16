@@ -8,6 +8,8 @@ import {
   type IpcMessage,
   type ConfigureMessage,
   type RegisterMessage,
+  type ActivityMessage,
+  type BlockedMessage,
   PROTOCOL_VERSION,
   serialize,
   deserialize,
@@ -22,6 +24,10 @@ export interface SessionInfo {
   timeoutOverrides?: { architecture?: number; preference?: number };
   connectedAt: Date;
   socket: net.Socket;
+  lastActivityAt?: Date;
+  lastActivityTool?: string;
+  blockedOn?: string;
+  blockedAt?: Date;
 }
 
 export interface DisconnectedSessionInfo {
@@ -251,6 +257,26 @@ export class IpcServer {
       if (session && this.messageHandler) {
         this.messageHandler(session, msg as ClientMessage);
       }
+    } else if (msg.type === "activity" || msg.type === "blocked") {
+      const hookMsg = msg as ActivityMessage | BlockedMessage;
+      const session = this.sessions.get(hookMsg.sessionId);
+      if (session) {
+        if (hookMsg.type === "activity") {
+          session.lastActivityAt = new Date();
+          session.lastActivityTool = hookMsg.toolName;
+          session.blockedOn = undefined;
+          session.blockedAt = undefined;
+        } else {
+          session.blockedOn = hookMsg.toolName;
+          session.blockedAt = new Date();
+          session.lastActivityAt = new Date();
+          session.lastActivityTool = hookMsg.toolName;
+        }
+        if (this.messageHandler) {
+          this.messageHandler(session, hookMsg);
+        }
+      }
+      socket.destroy();
     }
   }
 
