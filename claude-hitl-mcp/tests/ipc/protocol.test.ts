@@ -5,6 +5,8 @@ import {
   serialize,
   deserialize,
   type RegisterMessage,
+  type ActivityMessage,
+  type BlockedMessage,
 } from "../../src/ipc/protocol.js";
 
 describe("IPC Protocol", () => {
@@ -59,6 +61,33 @@ describe("IPC Protocol", () => {
   describe("PROTOCOL_VERSION", () => {
     it("is 1", () => {
       expect(PROTOCOL_VERSION).toBe(1);
+    });
+  });
+
+  describe("ActivityMessage", () => {
+    it("serializes and deserializes ActivityMessage", () => {
+      const msg: ActivityMessage = {
+        type: "activity",
+        sessionId: "sess-1",
+        toolName: "Bash",
+      };
+      const line = serialize(msg);
+      const parsed = deserialize(line.trim());
+      expect(parsed).toEqual(msg);
+    });
+  });
+
+  describe("BlockedMessage", () => {
+    it("serializes and deserializes BlockedMessage", () => {
+      const msg: BlockedMessage = {
+        type: "blocked",
+        sessionId: "sess-1",
+        toolName: "Bash",
+        toolInput: "npm run build",
+      };
+      const line = serialize(msg);
+      const parsed = deserialize(line.trim());
+      expect(parsed).toEqual(msg);
     });
   });
 });
