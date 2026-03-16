@@ -38,38 +38,61 @@ export interface DisconnectedInfo {
 }
 
 /**
+ * Read a plan from a declared absolute path. Returns null if path is
+ * undefined, empty, or the file doesn't exist.
+ */
+export function readDeclaredPlan(planPath: string | undefined): string | null {
+  if (!planPath) return null;
+  try {
+    return readFileSync(planPath, "utf-8");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if a plan has unchecked items (- [ ] syntax, optionally indented).
+ * Used to filter out completed plans from filesystem discovery.
+ */
+export function hasUncheckedItems(plan: string): boolean {
+  return /^\s*- \[ \]/m.test(plan);
+}
+
+/**
  * Read the most recent plan file from a working directory.
  * Searches in priority order:
- *   1. docs/superpowers/plans/YYYY-MM-DD-*.md (newest by filename)
- *   2. tasks/todo.md
+ *   1. docs/superpowers/plans/YYYY-MM-DD-*.md (newest by filename, only with unchecked items)
+ *   2. tasks/todo.md (only if it has unchecked items)
  *   3. _plan.md (legacy)
  * Returns null if cwd is null or no plan file exists.
  */
 export function readPlanFile(cwd: string | null): string | null {
   if (cwd === null) return null;
 
-  // 1. Superpowers plans directory (newest first)
+  // 1. Superpowers plans directory (newest first, only with unchecked items)
   try {
     const plansDir = join(cwd, "docs", "superpowers", "plans");
     const files = readdirSync(plansDir)
       .filter((f) => /^\d{4}-\d{2}-\d{2}-.*\.md$/.test(f))
       .sort()
       .reverse();
-    if (files.length > 0) {
-      return readFileSync(join(plansDir, files[0]), "utf-8");
+    for (const file of files) {
+      const content = readFileSync(join(plansDir, file), "utf-8");
+      if (hasUncheckedItems(content)) return content;
     }
   } catch {
     // Directory doesn't exist — fall through
   }
 
-  // 2. tasks/todo.md
+  // 2. tasks/todo.md (only if it has unchecked items)
   try {
-    return readFileSync(join(cwd, "tasks", "todo.md"), "utf-8");
+    const content = readFileSync(join(cwd, "tasks", "todo.md"), "utf-8");
+    if (hasUncheckedItems(content)) return content;
   } catch {
     // Not found — fall through
   }
 
-  // 3. Legacy _plan.md
+  // 3. Legacy _plan.md (no filter — if it exists, it's active)
   try {
     return readFileSync(join(cwd, "_plan.md"), "utf-8");
   } catch {

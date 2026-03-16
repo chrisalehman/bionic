@@ -20,6 +20,7 @@ import {
   formatStatusMessage,
   formatSessionDetail,
   readPlanFile,
+  readDeclaredPlan,
   type StatusSession,
   type DisconnectedInfo,
 } from "./commands/status.js";
@@ -473,7 +474,7 @@ export class Listener {
         project: s.project,
         worktree: s.worktree,
         sessionContext: s.sessionContext,
-        plan: readPlanFile(s.cwd),
+        plan: readDeclaredPlan(s.planPath) ?? readPlanFile(s.cwd),
         pendingCount,
         oldestPendingAge,
         lastActivityAge: s.lastActivityAt
@@ -537,7 +538,7 @@ export class Listener {
       project: session.project,
       worktree: session.worktree,
       sessionContext: session.sessionContext,
-      plan: readPlanFile(session.cwd),
+      plan: readDeclaredPlan(session.planPath) ?? readPlanFile(session.cwd),
       pendingCount,
       oldestPendingAge,
       lastActivityAge: session.lastActivityAt
