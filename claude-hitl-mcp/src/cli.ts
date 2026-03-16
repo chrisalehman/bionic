@@ -232,7 +232,7 @@ async function setup() {
   saveConfig(config);
   console.log(`Config written to ${DEFAULT_CONFIG_PATH}`);
 
-  // Register MCP server globally in ~/.claude/settings.json (creates or updates)
+  // Register MCP server and install hooks in ~/.claude/settings.json (single read-modify-write)
   const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
   try {
     const claudeDir = path.join(os.homedir(), ".claude");
@@ -244,6 +244,7 @@ async function setup() {
       ? JSON.parse(fs.readFileSync(settingsPath, "utf-8"))
       : {};
 
+    // --- MCP server registration ---
     if (!settings.mcpServers) {
       settings.mcpServers = {};
     }
@@ -257,39 +258,23 @@ async function setup() {
       },
     };
 
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
-    console.log("MCP server registered globally in ~/.claude/settings.json");
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`Warning: could not register MCP server: ${message}`);
-    console.warn("Register manually: claude mcp add claude-hitl -s user -- node " + path.resolve(__dirname, "..", "dist", "server.js"));
-  }
-
-  // Install Claude Code hooks for activity tracking
-  try {
+    // --- Hook installation ---
     const binDir = path.resolve(__dirname, "..", "bin");
-    const activityHookPath = path.join(binDir, "hook-activity.sh");
-    const blockedHookPath = path.join(binDir, "hook-blocked.sh");
-
-    const hookSettings = fs.existsSync(settingsPath)
-      ? JSON.parse(fs.readFileSync(settingsPath, "utf-8"))
-      : {};
-
-    if (!hookSettings.hooks) {
-      hookSettings.hooks = {};
-    }
-
     const hookEvents: Record<string, string> = {
-      PostToolUse: activityHookPath,
-      PermissionRequest: blockedHookPath,
+      PostToolUse: path.join(binDir, "hook-activity.sh"),
+      PermissionRequest: path.join(binDir, "hook-blocked.sh"),
     };
 
+    if (!settings.hooks) {
+      settings.hooks = {};
+    }
+
     for (const [event, hookPath] of Object.entries(hookEvents)) {
-      if (!hookSettings.hooks[event]) {
-        hookSettings.hooks[event] = [];
+      if (!settings.hooks[event]) {
+        settings.hooks[event] = [];
       }
       // Claude Code hooks format: [{matcher?, hooks: [{type, command}]}]
-      const eventHooks = hookSettings.hooks[event] as Array<{
+      const eventHooks = settings.hooks[event] as Array<{
         matcher?: string;
         hooks: Array<{ type: string; command: string }>;
       }>;
@@ -303,11 +288,13 @@ async function setup() {
       }
     }
 
-    fs.writeFileSync(settingsPath, JSON.stringify(hookSettings, null, 2) + "\n", "utf-8");
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+    console.log("MCP server registered globally in ~/.claude/settings.json");
     console.log("Claude Code hooks installed for activity tracking");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(`Warning: could not install hooks: ${message}`);
+    console.warn(`Warning: could not register MCP server/hooks: ${message}`);
+    console.warn("Register manually: claude mcp add claude-hitl -s user -- node " + path.resolve(__dirname, "..", "dist", "server.js"));
   }
 
   await adapter.sendMessage({

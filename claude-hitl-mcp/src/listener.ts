@@ -413,8 +413,12 @@ export class Listener {
       : "";
     const fullText = `${prefix} ⚠️ Waiting for permission\n${toolLine}${inputLine}\n\nGo to terminal to approve or deny.`;
 
+    // Respect quiet hours: still deliver (permission prompts are time-sensitive)
+    // but silence the notification sound so it doesn't buzz during quiet hours.
+    const silent = this.quietState.enabled;
+
     await this.bot.sendMessage(this.opts.chatId, fullText, {
-      disable_notification: false,
+      disable_notification: silent,
     });
   }
 
@@ -453,6 +457,7 @@ export class Listener {
         lastActivityAge: s.lastActivityAt
           ? (now - s.lastActivityAt.getTime()) / 1000
           : undefined,
+        lastActivityTool: s.lastActivityTool,
         blockedOn: s.blockedOn,
         blockedAge: s.blockedAt
           ? (now - s.blockedAt.getTime()) / 1000
@@ -516,6 +521,7 @@ export class Listener {
       lastActivityAge: session.lastActivityAt
         ? (now - session.lastActivityAt.getTime()) / 1000
         : undefined,
+      lastActivityTool: session.lastActivityTool,
       blockedOn: session.blockedOn,
       blockedAge: session.blockedAt
         ? (now - session.blockedAt.getTime()) / 1000

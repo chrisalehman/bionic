@@ -10,12 +10,14 @@ export interface StatusSession {
   pendingCount: number;
   oldestPendingAge?: number; // seconds since oldest pending question
   lastActivityAge?: number;
+  lastActivityTool?: string;
   blockedOn?: string;
   blockedAge?: number;
 }
 
 export interface StateIndicatorInput {
   lastActivityAge?: number;
+  lastActivityTool?: string;
   blockedOn?: string;
   blockedAge?: number;
 }
@@ -68,7 +70,7 @@ export function formatAge(seconds: number): string {
  * Return a state indicator string based on activity and blocked status.
  */
 export function formatStateIndicator(input: StateIndicatorInput): string {
-  const { lastActivityAge, blockedOn, blockedAge } = input;
+  const { lastActivityAge, lastActivityTool, blockedOn, blockedAge } = input;
 
   if (blockedOn && (blockedAge === undefined || blockedAge <= 60)) {
     return `⚠️ Waiting for permission (${blockedOn})`;
@@ -78,13 +80,15 @@ export function formatStateIndicator(input: StateIndicatorInput): string {
     return "No activity data";
   }
 
+  const toolSuffix = lastActivityTool ? `, ${lastActivityTool}` : "";
+
   if (lastActivityAge < 30) {
-    return `🟢 Active (${formatAge(lastActivityAge)})`;
+    return `🟢 Active (${formatAge(lastActivityAge)}${toolSuffix})`;
   }
   if (lastActivityAge <= 120) {
-    return `💭 Thinking (${formatAge(lastActivityAge)})`;
+    return `💭 Thinking (${formatAge(lastActivityAge)}${toolSuffix})`;
   }
-  return `💤 Idle (${formatAge(lastActivityAge)})`;
+  return `💤 Idle (${formatAge(lastActivityAge)}${toolSuffix})`;
 }
 
 /**
@@ -106,6 +110,7 @@ export function formatSessionDetail(session: StatusSession): string {
   // State indicator
   const state = formatStateIndicator({
     lastActivityAge: session.lastActivityAge,
+    lastActivityTool: session.lastActivityTool,
     blockedOn: session.blockedOn,
     blockedAge: session.blockedAge,
   });
@@ -180,6 +185,7 @@ export function formatStatusMessage(
     // State indicator (replaces plan first-line in compact view)
     const state = formatStateIndicator({
       lastActivityAge: session.lastActivityAge,
+      lastActivityTool: session.lastActivityTool,
       blockedOn: session.blockedOn,
       blockedAge: session.blockedAge,
     });
