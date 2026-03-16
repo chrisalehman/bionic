@@ -15,29 +15,35 @@ async function main() {
     version: "1.0.0",
   });
 
-  // Lazy adapter initialization — don't block MCP handshake with Telegram connection
+  // Adapter initialization — connects to listener eagerly so /status works,
+  // but doesn't block the MCP handshake (runs after server.connect).
   let handler: HitlToolHandler | null = null;
-  let handlerInitialized = false;
+  let handlerReady: Promise<HitlToolHandler | null> | null = null;
+
+  function initHandler(): Promise<HitlToolHandler | null> {
+    if (handlerReady) return handlerReady;
+    handlerReady = (async () => {
+      if (config && config.adapter === "telegram" && config.telegram) {
+        try {
+          const socketPath = path.join(os.homedir(), ".claude-hitl", "sock");
+          const adapter = createAdapter(socketPath);
+          const token = resolveEnvValue(config.telegram.bot_token);
+          await adapter.connect({
+            token,
+            chatId: config.telegram.chat_id ? String(config.telegram.chat_id) : undefined,
+          });
+          handler = new HitlToolHandler(adapter);
+        } catch {
+          // Token missing or connection failed — tools will return error responses
+        }
+      }
+      return handler;
+    })();
+    return handlerReady;
+  }
 
   async function getHandler(): Promise<HitlToolHandler | null> {
-    if (handlerInitialized) return handler;
-    handlerInitialized = true;
-
-    if (config && config.adapter === "telegram" && config.telegram) {
-      try {
-        const socketPath = path.join(os.homedir(), ".claude-hitl", "sock");
-        const adapter = createAdapter(socketPath);
-        const token = resolveEnvValue(config.telegram.bot_token);
-        await adapter.connect({
-          token,
-          chatId: config.telegram.chat_id ? String(config.telegram.chat_id) : undefined,
-        });
-        handler = new HitlToolHandler(adapter);
-      } catch {
-        // Token missing or connection failed — tools will return error responses
-      }
-    }
-    return handler;
+    return initHandler();
   }
 
   // Register tools
@@ -149,6 +155,12 @@ async function main() {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  // Register with the listener eagerly so /status shows this session
+  // immediately, not only after the first tool call.
+  initHandler().catch(() => {
+    // Silently ignore — tools will handle the missing handler gracefully
+  });
 }
 
 main().catch(console.error);
