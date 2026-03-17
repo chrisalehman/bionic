@@ -20,8 +20,9 @@
 # Node
 node_modules/
 
-# Superpowers brainstorming sessions
+# Superpowers working files (plans, specs, brainstorming)
 .superpowers/
+docs/superpowers/
 
 # Git worktrees
 .worktrees/
