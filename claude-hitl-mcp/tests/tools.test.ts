@@ -50,6 +50,21 @@ describe("HitlToolHandler", () => {
         silent: undefined,
       });
     });
+
+    it("returns error status when adapter.sendMessage throws", async () => {
+      (adapter.sendMessage as any).mockRejectedValue(new Error("Network error"));
+      const result = await handler.notifyHuman({ message: "Test" });
+      expect(result.status).toBe("error");
+      expect(result.message_id).toBe("");
+    });
+
+    it("prefixes message with session context when configured", async () => {
+      await handler.configureHitl({ session_context: "auth-feature" });
+      await handler.notifyHuman({ message: "Done" });
+      expect(adapter.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ text: "[auth-feature]\n\nDone" }),
+      );
+    });
   });
 
   describe("configure_hitl", () => {
@@ -149,6 +164,141 @@ describe("HitlToolHandler", () => {
       expect(result.status).toBe("answered");
       expect(result.response).toBe("Actually use SQLite");
       expect(result.selected_option).toBeNull();
+    });
+
+    it("returns error when adapter.sendInteractiveMessage throws", async () => {
+      (adapter.sendInteractiveMessage as any).mockRejectedValue(new Error("Send failed"));
+      const result = await handler.askHuman({
+        message: "Pick one",
+        priority: "preference",
+        options: [{ text: "A" }],
+      });
+      expect(result.status).toBe("error");
+      expect(result.response).toContain("Failed to send message");
+      expect(result.priority).toBe("preference");
+    });
+
+    it("auto-resolves during quiet hours for preference priority", async () => {
+      await handler.configureHitl({});
+      const now = new Date();
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const currentTime = now.toLocaleTimeString("en-US", {
+        hour12: false,
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: tz,
+      });
+      const [h, m] = currentTime.split(":").map(Number);
+      const startH = (h - 1 + 24) % 24;
+      const endH = (h + 1) % 24;
+      const start = `${String(startH).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      const end = `${String(endH).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+
+      const engine = (handler as any).engine;
+      engine.setQuietHours({ start, end, timezone: tz, behavior: "skip_preference" });
+
+      const result = await handler.askHuman({
+        message: "Pick a color",
+        priority: "preference",
+        options: [{ text: "Blue", default: true }, { text: "Red" }],
+      });
+
+      expect(result.status).toBe("timed_out");
+      expect(result.timed_out_action).toBe("used_default");
+      expect(result.response).toBe("Blue");
+      expect(result.selected_option).toBe(0);
+      expect(result.response_time_seconds).toBe(0);
+      expect(adapter.sendInteractiveMessage).not.toHaveBeenCalled();
+    });
+
+    it("prefixes ask message with session context", async () => {
+      let capturedHandler: any;
+      (adapter.onMessage as any).mockImplementation((h: any) => { capturedHandler = h; });
+      handler = new HitlToolHandler(adapter);
+
+      await handler.configureHitl({ session_context: "db-migration" });
+
+      const askPromise = handler.askHuman({
+        message: "Proceed?",
+        priority: "preference",
+        options: [{ text: "Yes" }],
+        timeout_minutes: 1,
+      });
+
+      await vi.waitFor(() => { expect(adapter.sendInteractiveMessage).toHaveBeenCalled(); });
+      const callArgs = (adapter.sendInteractiveMessage as any).mock.calls[0][0];
+      expect(callArgs.text).toContain("[db-migration]");
+      expect(callArgs.text).toContain("Proceed?");
+
+      capturedHandler({
+        text: "Yes",
+        messageId: "m2",
+        isButtonTap: true,
+        selectedIndex: 0,
+        callbackData: callArgs.requestId,
+      });
+      await askPromise;
+    });
+
+    it("edits message with confirmation after response", async () => {
+      let capturedHandler: any;
+      (adapter.onMessage as any).mockImplementation((h: any) => { capturedHandler = h; });
+      handler = new HitlToolHandler(adapter);
+
+      const askPromise = handler.askHuman({
+        message: "Pick one",
+        priority: "preference",
+        options: [{ text: "A" }, { text: "B" }],
+        timeout_minutes: 1,
+      });
+
+      await vi.waitFor(() => { expect(adapter.sendInteractiveMessage).toHaveBeenCalled(); });
+      const callArgs = (adapter.sendInteractiveMessage as any).mock.calls[0][0];
+
+      capturedHandler({
+        text: "B",
+        messageId: "m2",
+        isButtonTap: true,
+        selectedIndex: 1,
+        callbackData: callArgs.requestId,
+      });
+
+      await askPromise;
+
+      expect(adapter.editMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messageId: "m2",
+          text: expect.stringContaining("Got it — continuing with: B"),
+        }),
+      );
+    });
+
+    it("does not edit message when adapter lacks messageEditing capability", async () => {
+      (adapter as any).capabilities.messageEditing = false;
+      let capturedHandler: any;
+      (adapter.onMessage as any).mockImplementation((h: any) => { capturedHandler = h; });
+      handler = new HitlToolHandler(adapter);
+
+      const askPromise = handler.askHuman({
+        message: "Pick one",
+        priority: "preference",
+        options: [{ text: "A" }],
+        timeout_minutes: 1,
+      });
+
+      await vi.waitFor(() => { expect(adapter.sendInteractiveMessage).toHaveBeenCalled(); });
+      const callArgs = (adapter.sendInteractiveMessage as any).mock.calls[0][0];
+
+      capturedHandler({
+        text: "A",
+        messageId: "m2",
+        isButtonTap: true,
+        selectedIndex: 0,
+        callbackData: callArgs.requestId,
+      });
+
+      await askPromise;
+      expect(adapter.editMessage).not.toHaveBeenCalled();
     });
   });
 });
