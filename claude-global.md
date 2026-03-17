@@ -18,6 +18,8 @@
 
 ## 4. Verification Before Done
 - Never mark a task complete without proving it works
+- Every material change must be confirmed through tests — changes without test proof are unfinished work
+- If no test infrastructure exists for what you changed, create it
 - Diff behavior between main and your changes when relevant
 - Ask yourself: "Would a staff engineer approve this?"
 - Run tests, check logs, demonstrate correctness
