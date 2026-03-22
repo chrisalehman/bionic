@@ -17,8 +17,8 @@ CMD_UPPER=$(echo "$COMMAND" | tr '[:lower:]' '[:upper:]')
 # Check if this involves a database CLI
 if echo "$COMMAND" | grep -qEi '(psql|mysql|sqlite3|mongosh|mongo |clickhouse-client|cqlsh|cockroach sql|pg_|mariadb)\b'; then
 
-  # DROP TABLE / DROP DATABASE / DROP SCHEMA / DROP INDEX
-  if echo "$CMD_UPPER" | grep -qE 'DROP\s+(TABLE|DATABASE|SCHEMA|INDEX|COLLECTION)'; then
+  # DROP TABLE / DATABASE / SCHEMA / INDEX / COLLECTION / VIEW / FUNCTION / TRIGGER / PROCEDURE / SEQUENCE / TYPE
+  if echo "$CMD_UPPER" | grep -qE 'DROP\s+(TABLE|DATABASE|SCHEMA|INDEX|COLLECTION|VIEW|FUNCTION|TRIGGER|PROCEDURE|SEQUENCE|TYPE)'; then
     echo "BLOCKED: Destructive database operation (DROP) detected." >&2
     echo "Run destructive migrations manually from your terminal." >&2
     exit 2
@@ -31,12 +31,15 @@ if echo "$COMMAND" | grep -qEi '(psql|mysql|sqlite3|mongosh|mongo |clickhouse-cl
     exit 2
   fi
 
-  # DELETE without WHERE (mass delete)
-  if echo "$CMD_UPPER" | grep -qE 'DELETE\s+FROM\s' && ! echo "$CMD_UPPER" | grep -qE 'DELETE\s+FROM\s+\S+\s+WHERE\s'; then
-    echo "BLOCKED: DELETE without WHERE clause detected." >&2
-    echo "Run destructive operations manually from your terminal." >&2
-    exit 2
-  fi
+  # DELETE without WHERE (mass delete) — check per-statement to avoid multi-statement bypass
+  while IFS= read -r stmt; do
+    stmt_upper=$(echo "$stmt" | tr '[:lower:]' '[:upper:]')
+    if echo "$stmt_upper" | grep -qE 'DELETE\s+FROM\s' && ! echo "$stmt_upper" | grep -qE 'DELETE\s+FROM\s+\S+\s+WHERE\s'; then
+      echo "BLOCKED: DELETE without WHERE clause detected." >&2
+      echo "Run destructive operations manually from your terminal." >&2
+      exit 2
+    fi
+  done <<< "$(echo "$CMD_UPPER" | tr ';' '\n')"
 
   # ALTER TABLE ... DROP COLUMN
   if echo "$CMD_UPPER" | grep -qE 'ALTER\s+TABLE\s+.*DROP\s'; then
@@ -44,10 +47,17 @@ if echo "$COMMAND" | grep -qEi '(psql|mysql|sqlite3|mongosh|mongo |clickhouse-cl
     echo "Run destructive migrations manually from your terminal." >&2
     exit 2
   fi
+
+  # MongoDB destructive operations (JavaScript method calls)
+  if echo "$COMMAND" | grep -qEi '(\.drop\(\)|\.dropDatabase\(\)|\.deleteMany\(\s*\{\s*\}\s*\))'; then
+    echo "BLOCKED: Destructive MongoDB operation detected." >&2
+    echo "Run destructive operations manually from your terminal." >&2
+    exit 2
+  fi
 fi
 
 # Also catch raw SQL piped or passed inline (e.g., echo "DROP TABLE..." | psql)
-if echo "$CMD_UPPER" | grep -qE '(DROP\s+(TABLE|DATABASE|SCHEMA)|TRUNCATE\s)' && echo "$COMMAND" | grep -qEi '(\|\s*(psql|mysql|sqlite3|mongosh)|<< )'; then
+if echo "$CMD_UPPER" | grep -qE '(DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|FUNCTION|TRIGGER|PROCEDURE)|TRUNCATE\s)' && echo "$COMMAND" | grep -qEi '(\|\s*(psql|mysql|sqlite3|mongosh)|<< )'; then
   echo "BLOCKED: Destructive SQL piped to database client." >&2
   echo "Run destructive migrations manually from your terminal." >&2
   exit 2
