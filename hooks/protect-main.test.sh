@@ -92,6 +92,10 @@ expect_block "force push --force"                     "git push --force origin m
 expect_block "force push --force-with-lease"          "git push --force-with-lease origin main"
 expect_block "push in compound command"               "cd /tmp && git push origin"
 expect_block "push with env prefix"                   "GIT_SSH_COMMAND=ssh git push origin main"
+expect_block "compound with ||"                       "false || git push origin main"
+expect_block "force push flag at end"                 "git push origin main -f"
+expect_block "force push --force at end"              "git push origin feat/x --force"
+expect_block "refspec push HEAD:main"                 "git push origin HEAD:main"
 
 # ============================================================
 # SECTION 2: On master branch — every push must be blocked
@@ -129,6 +133,10 @@ expect_block "feature: force push -f"                 "git push -f origin feat/c
 expect_block "feature: force push --force"            "git push --force origin feat/cool-thing"
 expect_block "feature: force push --force-with-lease"  "git push --force-with-lease origin feat/cool-thing"
 
+# Branch names containing "main" as substring should be allowed
+expect_allow "feature: push branch with main substring" "git push origin feat/maintain-state"
+expect_allow "feature: push domain-main branch"        "git push origin domain-main-fix"
+
 # ============================================================
 # SECTION 4: Non-push commands must always pass through
 # ============================================================
@@ -147,6 +155,8 @@ expect_allow "git branch"                             "git branch -a"
 expect_allow "echo with push in string"               "echo 'not a git push'"
 expect_allow "commit message mentioning push"          "git commit -m 'fix: close git push gaps in hook'"
 expect_allow "ls command"                             "ls -la"
+expect_allow "grep mentioning git push"               "grep 'git push' README.md"
+expect_allow "cat file with push content"             "cat deploy.sh"
 
 # ============================================================
 # Results
