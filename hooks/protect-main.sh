@@ -13,7 +13,7 @@ COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 PUSH_CMD=""
 while IFS= read -r segment; do
   # Trim leading whitespace
-  segment=$(echo "$segment" | sed 's/^[[:space:]]*//')
+  segment="${segment#"${segment%%[![:space:]]*}"}"
   if echo "$segment" | grep -qE '^(git push|GIT_|cd .* git push|env .* git push)'; then
     PUSH_CMD="$segment"
     break
@@ -27,7 +27,7 @@ while IFS= read -r segment; do
       break
     fi
   fi
-done <<< "$(echo "$COMMAND" | tr ';&' '\n')"
+done <<< "$(echo "$COMMAND" | sed 's/&&/\n/g; s/||/\n/g; s/;/\n/g')"
 
 # Skip if no actual push command found
 if [ -z "$PUSH_CMD" ]; then
@@ -35,14 +35,14 @@ if [ -z "$PUSH_CMD" ]; then
 fi
 
 # Block 1: Explicit main/master in the push command
-if echo "$PUSH_CMD" | grep -qE 'git push.*(main|master)'; then
+if echo "$PUSH_CMD" | grep -qE 'git push.*([[:space:]]|:)(main|master)([[:space:]]|$)'; then
   echo "BLOCKED: Pushing to main/master is not allowed from Claude Code." >&2
   echo "Push to main must be done manually by the user." >&2
   exit 2
 fi
 
 # Block 2: Force pushes (always dangerous)
-if echo "$PUSH_CMD" | grep -qE 'git push\s+(-f|--force|--force-with-lease)'; then
+if echo "$PUSH_CMD" | grep -qE '(^|\s)(-f|--force|--force-with-lease)(\s|$)'; then
   echo "BLOCKED: Force pushing is not allowed from Claude Code." >&2
   exit 2
 fi
