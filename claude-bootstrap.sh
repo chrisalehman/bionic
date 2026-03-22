@@ -149,6 +149,26 @@ do_install_github_skill() {
   echo "✓"
 }
 
+do_install_github_skill_pack() {
+  local name="$1" repo="$2"
+  echo -n "  ${name} (${repo})... "
+  local tmp="/tmp/claude-skill-pack-${name}"
+  rm -rf "$tmp"
+  git clone --depth 1 --quiet "https://github.com/${repo}.git" "$tmp"
+  mkdir -p ~/.claude/skills
+  local count=0
+  for skill_dir in "$tmp"/.claude/skills/*/; do
+    [ -d "$skill_dir" ] || continue
+    local skill_name
+    skill_name="$(basename "$skill_dir")"
+    rm -rf ~/.claude/skills/"${skill_name}"
+    cp -r "$skill_dir" ~/.claude/skills/"${skill_name}"
+    count=$((count + 1))
+  done
+  rm -rf "$tmp"
+  echo "✓ (${count} skills)"
+}
+
 do_install_global_memory() {
   local file="$1"
   local source="${SCRIPT_DIR}/${file}"
@@ -283,6 +303,7 @@ echo ""
 
 echo "Custom skills:"
 read_config "github-skill" do_install_github_skill
+read_config "github-skill-pack" do_install_github_skill_pack
 echo ""
 
 # ─── Skill Setup ────────────────────────────────────────────────────────────
@@ -403,7 +424,7 @@ echo "  Plugins (official skills):"
 claude plugin list 2>&1 | while IFS= read -r line; do echo "    $line"; done
 
 echo ""
-echo "  Custom skills:"
+echo "  Custom skills (global):"
 for skill_dir in ~/.claude/skills/*/; do
   [ -d "$skill_dir" ] || continue
   name="$(basename "$skill_dir")"
@@ -413,6 +434,7 @@ for skill_dir in ~/.claude/skills/*/; do
     echo "    ${name} ⚠ (missing SKILL.md)"
   fi
 done
+
 
 echo ""
 echo "  Global memory:"

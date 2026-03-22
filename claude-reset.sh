@@ -71,6 +71,33 @@ do_remove_skill() {
   fi
 }
 
+do_remove_github_skill_pack() {
+  local name="$1" repo="$2"
+  if ! confirm "${name} (all skills from ${repo})"; then
+    echo "  ${name} — skipped"
+    return 0
+  fi
+  echo -n "  ${name} (${repo})... "
+  local tmp="/tmp/claude-skill-pack-${name}"
+  rm -rf "$tmp"
+  if git clone --depth 1 --quiet "https://github.com/${repo}.git" "$tmp" 2>/dev/null; then
+    local count=0
+    for skill_dir in "$tmp"/.claude/skills/*/; do
+      [ -d "$skill_dir" ] || continue
+      local skill_name
+      skill_name="$(basename "$skill_dir")"
+      rm -rf ~/.claude/skills/"${skill_name}"
+      count=$((count + 1))
+    done
+    rm -rf "$tmp"
+    echo "✓ (${count} skills removed)"
+  else
+    echo "⚠ (cannot fetch skill list — remove ~/.claude/skills/ entries manually)"
+  fi
+  # Clean up old project-local artifacts from npx-skill era
+  rm -rf "${SCRIPT_DIR}/.agents" "${SCRIPT_DIR}/.kiro" "${SCRIPT_DIR}/skills-lock.json" "${SCRIPT_DIR}/.claude/skills"
+}
+
 do_remove_plugin() {
   local plugin="$1" source="$2"
   if ! confirm "${plugin} (${source})"; then
@@ -244,6 +271,7 @@ echo ""
 
 echo "Custom skills:"
 read_config "github-skill" do_remove_skill
+read_config "github-skill-pack" do_remove_github_skill_pack
 echo ""
 
 # ─── Global Memory ──────────────────────────────────────────────────────────

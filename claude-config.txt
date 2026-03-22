@@ -6,6 +6,7 @@
 #   marketplace   |  name
 #   plugin        |  name  |  source
 #   github-skill  |  name  |  owner/repo
+#   github-skill-pack | name | owner/repo  (multi-skill repo, each subdir = skill)
 #   global-memory |  filename
 #   brew-dep      |  binary              (package = binary)
 #   brew-dep      |  binary  |  package  (when binary ≠ package)
@@ -38,6 +39,8 @@ plugin       | voltagent-meta      | voltagent-subagents
 global-memory | claude-global.md
 
 github-skill | excalidraw-diagram | coleam00/excalidraw-diagram-skill
+
+github-skill-pack | impeccable   | pbakaus/impeccable
 
 npm-global   | @playwright/test
 mcp-server   | playwright    | @playwright/mcp
