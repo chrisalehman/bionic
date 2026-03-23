@@ -55,7 +55,7 @@ Everything lives in [`claude-config.txt`](claude-config.txt) — edit it and re-
 | **MCP servers** | playwright, context7 |
 | **Skills** | excalidraw-diagram, impeccable (20+ design skills) |
 | **Hooks** | protect-main.sh, protect-database.sh |
-| **Philosophy** | 6 principles for agentic development → [`~/.claude/CLAUDE.md`](claude-global.md) |
+| **Philosophy** | 9 principles for agentic development → [`~/.claude/CLAUDE.md`](claude-global.md) |
 | **Shell alias** | `claude` → `claude --dangerously-skip-permissions` |
 
 Optional tools (cloud, databases, deployment) are commented out at the bottom of `claude-config.txt`. Uncomment and re-run.
@@ -234,18 +234,21 @@ The file [`claude-global.md`](claude-global.md) is installed to `~/.claude/CLAUD
 
 **Why global, not project-level:** Claude Code reads both `~/.claude/CLAUDE.md` (global) and `.claude/CLAUDE.md` (project-level) — they compose. The principles here are *agent-level behavior*, not project-specific conventions. "Deploy the team," "prove it works," and "guard your context" apply regardless of what you're building. Making them global means bootstrap sets it once and every project inherits automatically — no per-project setup, no drift between repos. Project-level `CLAUDE.md` files are still the right place for project-specific instructions (coding style, architecture decisions, repo-specific boundaries). The two layers stack: global provides the base operating model, project-level adds local context.
 
-It teaches six principles and four hard boundaries:
+It teaches nine principles and four hard boundaries:
 
-**Principles** — These shape how Claude approaches work:
+**Principles** — These shape how Claude approaches work, ordered by frequency of relevance:
 
 | Principle | What it teaches | Why it matters |
 |-----------|-----------------|----------------|
-| **Deploy the team** | Use 100+ specialists in parallel. A solo agent is a wasted army. | Without this, Claude defaults to doing everything in one context window — slower, worse results, wastes the subagent infrastructure you just installed. |
-| **Guard your context** | Main conversation is for decisions. Offload research and implementation to subagents. | Context window pollution is the #1 cause of degraded Claude performance mid-session. This principle keeps the main thread clean. |
-| **Act, don't ask** | Operate autonomously. Fix bugs without hand-holding. | Claude's default behavior is overly cautious — asking permission for things a senior engineer would just do. This recalibrates. |
+| **Prefer the simpler solution** | Between two approaches, choose the one with less code, fewer moving parts. | Prevents over-engineering — Claude's default is to add abstractions and configurability that aren't needed. |
+| **Do the real work** | Don't patch around problems. When the correct solution requires restructuring, restructure. | Prevents under-engineering — Claude will sometimes hack around a problem to avoid a larger but correct change. |
+| **Match the codebase** | Follow existing patterns, conventions, and style. `grep` for precedent. | Claude's instinct is to write "correct" code from first principles rather than consistent code that matches what's already there. |
 | **Prove it works** | Never claim done without evidence. Run tests, show output. | Without this, Claude will say "I've fixed the bug" without running the test suite. Trust but verify. |
-| **Learn from corrections** | Save corrections to `memory/` immediately. Never repeat the same mistake. | Claude has no cross-session memory by default. The `memory/` folder is a persistent knowledge base that compounds across sessions. |
-| **Keep a project notebook** | Maintain `memory/` with `context.md`, `decisions.md`, `lessons.md`. | Anyone (including future Claude sessions) can open the folder and understand the project state, decisions made, and lessons learned. |
+| **Act, don't ask** | Operate autonomously. Fix bugs without hand-holding. | Claude's default behavior is overly cautious — asking permission for things a senior engineer would just do. This recalibrates. |
+| **Guard your context** | Main conversation is for decisions. Offload research and implementation to subagents. | Context window pollution is the #1 cause of degraded Claude performance mid-session. This principle keeps the main thread clean. |
+| **Deploy the team** | Use 100+ specialists in parallel. Default to subagents; reserve Agent Teams for mid-flight coordination. | Without this, Claude defaults to doing everything in one context window — slower, worse results, wastes the subagent infrastructure you just installed. |
+| **Keep a project notebook** | Maintain `.claude/memory/` with `context.md`, `decisions.md`, `lessons.md`. | Anyone (including future Claude sessions) can open the folder and understand the project state, decisions made, and lessons learned. |
+| **Learn from corrections** | Save corrections to `.claude/memory/` immediately. Never repeat the same mistake. | Claude has no cross-session memory by default. The `.claude/memory/` folder is a persistent knowledge base that compounds across sessions. |
 
 **Boundaries** — Four operations that require explicit human approval:
 
@@ -274,7 +277,7 @@ The bottom of [`claude-config.txt`](claude-config.txt) contains commented-out en
 
 ## Safety
 
-Hooks intercept `Bash` commands to catch accidental pushes to main and destructive SQL before they happen. The philosophy in [`claude-global.md`](claude-global.md) teaches Claude judgment — six principles for when to act, when to pause, and when to escalate. See [Hooks](#hooks-safety-guardrails) and [Global Philosophy](#global-philosophy-claudemd) above for details.
+Hooks intercept `Bash` commands to catch accidental pushes to main and destructive SQL before they happen. The philosophy in [`claude-global.md`](claude-global.md) teaches Claude judgment — nine principles for when to act, when to pause, and when to escalate. See [Hooks](#hooks-safety-guardrails) and [Global Philosophy](#global-philosophy-claudemd) above for details.
 
 ## Requirements
 
