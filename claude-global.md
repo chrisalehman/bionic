@@ -33,10 +33,6 @@ root. Read it at session start, update it as things change. Anyone should be abl
 to open the folder and immediately understand what you know. Transparency beats
 automation.
 
-**Learn from every correction.** When corrected, save it to `.claude/memory/`
-immediately. Write it as a rule so future sessions inherit the lesson. Never
-repeat the same mistake twice.
-
 ```
 .claude/memory/
 ├── context.md      # Active work, where we left off, current branch/state
@@ -49,6 +45,10 @@ First three files are always created on first use. `context.md` is updated at
 the end of every significant work session. `lessons.md` is append-only — never
 remove a lesson. `decisions.md` captures the "why" not the "what" — the code
 shows what, decisions shows why. Keep files curated, not append-only logs.
+
+**Learn from every correction.** When corrected, save it to `.claude/memory/`
+immediately. Write it as a rule so future sessions inherit the lesson. Never
+repeat the same mistake twice.
 
 ## Boundaries
 
