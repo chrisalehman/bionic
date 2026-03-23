@@ -430,6 +430,24 @@ do_set_env_var() {
 read_config "env-var" do_set_env_var
 echo ""
 
+# ─── Status Line ──────────────────────────────────────────────────────────────
+
+echo "Status line:"
+
+do_set_statusline() {
+  local cmd="$1"
+  echo -n "  ${cmd}... "
+  if jq -e --arg c "$cmd" '.statusLine.command == $c' "$settings" &>/dev/null; then
+    echo "✓ (already set)"
+    return
+  fi
+  tmp="${settings}.tmp"
+  jq --arg c "$cmd" '.statusLine = {"type": "command", "command": $c}' "$settings" > "$tmp" && mv "$tmp" "$settings"
+  echo "✓"
+}
+read_config "statusline" do_set_statusline
+echo ""
+
 # ─── Local Package Builds ────────────────────────────────────────────────────
 
 echo "Local packages:"
@@ -482,6 +500,14 @@ for skill_dir in ~/.claude/skills/*/; do
   fi
 done
 
+
+echo ""
+echo "  Status line:"
+if jq -e '.statusLine.command' "$settings" &>/dev/null; then
+  echo "    $(jq -r '.statusLine.command' "$settings") ✓"
+else
+  echo "    (not configured)"
+fi
 
 echo ""
 echo "  Global memory:"

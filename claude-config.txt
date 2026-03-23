@@ -13,6 +13,7 @@
 #   npm-global    |  package
 #   mcp-server    |  name   |  package
 #   env-var       |  key    |  value
+#   statusline    |  command
 
 brew-dep     | git
 brew-dep     | node
@@ -44,6 +45,8 @@ github-skill | excalidraw-diagram | coleam00/excalidraw-diagram-skill
 github-skill-pack | impeccable   | pbakaus/impeccable
 
 env-var      | CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS | 1
+
+statusline   | npx ccstatusline@latest
 
 npm-global   | @playwright/test
 mcp-server   | playwright    | @playwright/mcp

@@ -275,6 +275,29 @@ echo "Env vars:"
 read_config "env-var" do_remove_env_var
 echo ""
 
+# ─── Status Line ──────────────────────────────────────────────────────────────
+
+do_remove_statusline() {
+  local _cmd="$1"
+  if ! confirm "status line"; then
+    echo "  status line — skipped"
+    return 0
+  fi
+  local settings=~/.claude/settings.json
+  echo -n "  status line... "
+  if [ ! -f "$settings" ] || ! jq -e '.statusLine' "$settings" &>/dev/null; then
+    echo "✓ (already removed)"
+    return 0
+  fi
+  local tmp="${settings}.tmp"
+  jq 'del(.statusLine)' "$settings" > "$tmp" && mv "$tmp" "$settings"
+  echo "✓"
+}
+
+echo "Status line:"
+read_config "statusline" do_remove_statusline
+echo ""
+
 # ─── MCP Servers ───────────────────────────────────────────────────────────
 
 echo "MCP servers:"
