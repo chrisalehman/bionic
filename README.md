@@ -53,7 +53,7 @@ Everything lives in [`claude-config.txt`](claude-config.txt) — edit it and re-
 | **Plugins** | superpowers, frontend-design, document-skills, example-skills |
 | **Subagents** | voltagent-core-dev, voltagent-lang, voltagent-infra, voltagent-qa-sec, voltagent-data-ai, voltagent-dev-exp, voltagent-meta |
 | **MCP servers** | context7 |
-| **Skills** | excalidraw-diagram, impeccable (20+ design skills) |
+| **Skills** | excalidraw-diagram, impeccable (20+ design skills), bionic:rigorous-refactor, bionic:ralph-loop |
 | **Hooks** | protect-main.sh, protect-database.sh |
 | **Philosophy** | 9 principles for agentic development → [`~/.claude/CLAUDE.md`](claude-global.md) |
 | **Shell alias** | `claude` → `claude --dangerously-skip-permissions` |
@@ -74,6 +74,9 @@ bionic/
 │   ├── protect-main.sh      # Blocks pushes to main/master
 │   ├── protect-database.sh  # Blocks destructive SQL
 │   └── *.test.sh            # Hook test suites
+├── skills/                  # Bionic skills → ~/.claude/skills/
+│   ├── rigorous-refactor/   # Disciplined multi-file refactoring
+│   └── ralph-loop/          # Build-test-diagnose iteration cycle
 └── README.md
 ```
 
@@ -174,11 +177,14 @@ Generates Excalidraw diagram JSON files for visualizing workflows, architectures
 
 A skill pack from Paul Bakaus (Google) containing 20+ design skills. Installed as individual skills — each subdirectory in the repo's `.claude/skills/` becomes a separate skill in `~/.claude/skills/`. Includes: `adapt`, `animate`, `arrange`, `audit`, `bolder`, `clarify`, `colorize`, `critique`, `delight`, `distill`, `extract`, `harden`, `normalize`, `onboard`, `optimize`, `overdrive`, `polish`, `quieter`, `teach-impeccable`, `typeset`.
 
-**bionic** — `skills/` (local, shipped with this repo)
+**bionic** — `local-skill | name` (local, shipped with this repo)
 
-Custom skills that enforce engineering discipline in agentic workflows. Designed to close the gaps where agents cut corners — skipping tests, self-grading, claiming success without proof. Skills are invoked as `bionic:*`.
+Custom skills that enforce engineering discipline in agentic workflows. Designed to close the gaps where agents cut corners — skipping tests, self-grading, claiming success without proof. Installed from the `skills/` directory to `~/.claude/skills/` during bootstrap.
 
-*Coming soon: `bionic:rigorous-refactor` — enforces a strict Plan → Test → Implement → Validate state machine for complex refactors.*
+| Skill | What it enforces |
+|-------|-----------------|
+| **rigorous-refactor** | Strict state machine for complex refactors: decompose into atomic units → write failing tests → verify RED → implement → independent validation via separate agent → 3-attempt escalation limit → captured proof of completion. Prevents boil-the-ocean refactoring and self-grading. |
+| **ralph-loop** | Disciplined build-test-diagnose iteration cycle with three modes: DEBUG (stabilize first, then fix forward), GREENFIELD (research conventions, then build per PRD), RESEARCH-FIRST (exhaustive codebase mapping before implementation). Every iteration produces evidence; every exit requires verification. |
 
 ### Hooks (Safety Guardrails)
 

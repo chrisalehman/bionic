@@ -396,6 +396,7 @@ echo ""
 echo "Custom skills:"
 read_config "github-skill" do_remove_skill
 read_config "github-skill-pack" do_remove_github_skill_pack
+read_config "local-skill" do_remove_skill
 echo ""
 
 # ─── Skill Setup ────────────────────────────────────────────────────────────

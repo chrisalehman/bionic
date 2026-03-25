@@ -184,6 +184,20 @@ do_install_github_skill_pack() {
   echo "✓ (${count} skills)"
 }
 
+do_install_local_skill() {
+  local name="$1"
+  local source="${SCRIPT_DIR}/skills/${name}"
+  echo -n "  ${name} (local)... "
+  if [ ! -d "$source" ] || [ ! -f "${source}/SKILL.md" ]; then
+    echo "ERROR: skills/${name}/SKILL.md not found in ${SCRIPT_DIR}" >&2
+    exit 1
+  fi
+  mkdir -p ~/.claude/skills
+  rm -rf ~/.claude/skills/"${name}"
+  cp -r "$source" ~/.claude/skills/"${name}"
+  echo "✓"
+}
+
 do_install_global_memory() {
   local file="$1"
   local source="${SCRIPT_DIR}/${file}"
@@ -337,6 +351,7 @@ echo ""
 echo "Custom skills:"
 read_config "github-skill" do_install_github_skill
 read_config "github-skill-pack" do_install_github_skill_pack
+read_config "local-skill" do_install_local_skill
 echo ""
 
 # ─── Skill Setup ────────────────────────────────────────────────────────────
