@@ -7,6 +7,7 @@
 #   plugin        |  name  |  source
 #   github-skill  |  name  |  owner/repo
 #   github-skill-pack | name | owner/repo  (multi-skill repo, each subdir = skill)
+#   local-skill   |  name              (directory under skills/)
 #   global-memory |  filename
 #   brew-dep      |  binary              (package = binary)
 #   brew-dep      |  binary  |  package  (when binary ≠ package)
@@ -46,6 +47,9 @@ global-memory | claude-global.md
 github-skill | excalidraw-diagram | coleam00/excalidraw-diagram-skill
 
 github-skill-pack | impeccable   | pbakaus/impeccable
+
+local-skill  | rigorous-refactor
+local-skill  | ralph-loop
 
 env-var      | CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS | 1
 
