@@ -258,8 +258,18 @@ It teaches nine principles and four hard boundaries:
 | **Act, don't ask** | Operate autonomously. Fix bugs without hand-holding. | Claude's default behavior is overly cautious — asking permission for things a senior engineer would just do. This recalibrates. |
 | **Guard your context** | Main conversation is for decisions. Offload research and implementation to subagents. | Context window pollution is the #1 cause of degraded Claude performance mid-session. This principle keeps the main thread clean. |
 | **Deploy the team** | Use 100+ specialists in parallel. Default to subagents; reserve Agent Teams for mid-flight coordination. | Without this, Claude defaults to doing everything in one context window — slower, worse results, wastes the subagent infrastructure you just installed. |
-| **Keep a project notebook** | Maintain `.claude/memory/` with `context.md`, `decisions.md`, `lessons.md`. | Anyone (including future Claude sessions) can open the folder and understand the project state, decisions made, and lessons learned. |
-| **Learn from corrections** | Save corrections to `.claude/memory/` immediately. Never repeat the same mistake. | Claude has no cross-session memory by default. The `.claude/memory/` folder is a persistent knowledge base that compounds across sessions. |
+| **Keep a project notebook** | Maintain `.bionic/memory/` with an INDEX.md brain, context.md for active state, and topical files for deep context. | Anyone (including future Claude sessions) can open the folder and understand the project state, decisions made, and lessons learned. |
+| **Learn from corrections** | Save corrections to the notebook immediately. Never repeat the same mistake. | Claude has no cross-session memory by default. The notebook is a persistent knowledge base that compounds across sessions. |
+
+**Memory architecture** — The project notebook at `.bionic/memory/` is designed around two constraints: context windows are expensive, and most memories are one-liners.
+
+The system uses progressive disclosure to minimize token cost. `INDEX.md` is always loaded at session start. It has two sections: **Always Apply** for permanent one-liner rules (inlined, no file needed), and **Deep Context** for pointers to topical files that are only loaded when relevant to the task. Most memories live as single lines in the index — a file is only created when the context is too rich to summarize. This means a typical session loads 50-100 tokens of memory, not thousands.
+
+Files are organized by topic, not by type. Instead of separate `decisions.md` and `lessons.md` files that force Claude to scan everything for the one relevant entry, a single `auth-migration.md` contains every decision, lesson, and context note about auth. When working on auth, Claude loads one file. When working on deployment, it loads a different one. Irrelevant context never enters the window.
+
+Topical files carry an `updated:` date and expire after 30 days without a bump. Stale memories are worse than no memory — they cause Claude to act on outdated assumptions. The expiry protocol runs at session start: check the date, verify the memory is still accurate, prune or refresh. `INDEX.md` and `context.md` never expire.
+
+The notebook lives at `.bionic/memory/` rather than `.claude/memory/` by design. The `.claude/` directory is Claude Code's configuration namespace and gets extra permission scrutiny on every write — the wrong place for a system that reads and writes frequently. Plain markdown files in a neutral directory means zero infrastructure, full transparency, version-controllable in git, and no permission friction.
 
 **Boundaries** — Four operations that require explicit human approval:
 
