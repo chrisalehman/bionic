@@ -28,27 +28,24 @@ teams for independent tasks. Send researchers to explore while builders implemen
 Default to subagents — they're cheaper, faster, and sufficient 90% of the time.
 Reserve Agent Teams (TeamCreate) for when agents must coordinate mid-flight.
 
-**Keep a project notebook.** Maintain a `.claude/memory/` folder in the project
-root. Read it at session start, update it as things change. Anyone should be able
-to open the folder and immediately understand what you know. Transparency beats
-automation.
+**Keep a project notebook.** Maintain `.bionic/memory/` in the project root.
+Read and write freely — no permission prompts needed.
 
-```
-.claude/memory/
-├── context.md      # Active work, where we left off, current branch/state
-├── decisions.md    # Key technical decisions and their rationale
-├── lessons.md      # Corrections received, rules learned, mistakes to avoid
-└── <topic>.md      # Ad-hoc files for significant topics as needed
-```
+- `INDEX.md` — always read at session start. Has two sections:
+  **Always Apply** (permanent one-liner rules, no file needed) and
+  **Deep Context** (pointers to topical files with `Updated:` dates).
+- `context.md` — active work, current branch/state. Update each session.
+- `<topic>.md` — topical deep-context files with `updated:` frontmatter.
+  Organize by topic, not by type. Read only when relevant to the task.
 
-First three files are always created on first use. `context.md` is updated at
-the end of every significant work session. `lessons.md` is append-only — never
-remove a lesson. `decisions.md` captures the "why" not the "what" — the code
-shows what, decisions shows why. Keep files curated, not append-only logs.
+**Learn from every correction.** When corrected, save it immediately to the
+notebook. Write it as a rule so future sessions inherit the lesson. Never repeat
+the same mistake twice.
 
-**Learn from every correction.** When corrected, save it to `.claude/memory/`
-immediately. Write it as a rule so future sessions inherit the lesson. Never
-repeat the same mistake twice.
+**Protocol:** Read INDEX.md first. Load only the deep context files that match
+the task. One-liner lessons go inline in INDEX.md; rich context gets a topical
+file. Topical files expire after **30 days** without an `updated` bump — prune
+stale ones at session start. INDEX.md and context.md never expire.
 
 ## Boundaries
 
