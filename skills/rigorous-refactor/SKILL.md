@@ -1,6 +1,11 @@
 ---
 name: rigorous-refactor
 description: Use when performing complex, multi-file refactoring that requires systematic test coverage, independent validation, and proof of correctness before claiming completion
+layer: operational
+needs:
+  - superpowers:test-driven-development
+  - superpowers:verification-before-completion
+loading: deferred
 ---
 
 # Rigorous Refactor
@@ -13,7 +18,9 @@ Complex refactors fail when agents skip decomposition, self-grade their work, an
 
 **Violating the letter of this process is violating the spirit of this process.**
 
-**REQUIRED SUB-SKILLS:**
+**Layer:** Operational (method constraint). Prevents self-grading, skipping decomposition, and implementing without tests.
+
+**REQUIRED SUB-SKILLS** (declared in `needs` frontmatter):
 - `superpowers:test-driven-development` — governs the RED-GREEN cycle within each unit
 - `superpowers:verification-before-completion` — governs proof-of-completion claims
 
@@ -161,6 +168,13 @@ After all units pass individually, run **every test suite from the Phase 0 inven
 | Demo / other suites | Project-specific validation the team relies on |
 
 If any suite fails, route back to the responsible unit and re-enter the per-unit cycle. A refactor is not complete until ALL suites are green — not just the ones you know about from running `npm test`.
+
+## Sub-Skill Loading
+
+This skill references sub-skills listed in `needs`. Do not preload them.
+Load each when you reach the phase that invokes it. Release focus on a
+sub-skill's rules when you leave that phase. Depth limit: 3 layers
+(governance -> operational -> technique). Beyond that, use judgment.
 
 ## Common Rationalizations
 
