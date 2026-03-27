@@ -53,7 +53,7 @@ Everything lives in [`claude-config.txt`](claude-config.txt) — edit it and re-
 | **Plugins** | superpowers, frontend-design, document-skills, example-skills |
 | **Subagents** | voltagent-core-dev, voltagent-lang, voltagent-infra, voltagent-qa-sec, voltagent-data-ai, voltagent-dev-exp, voltagent-meta |
 | **MCP servers** | context7, trello *(optional)* |
-| **Skills** | excalidraw-diagram, impeccable (20+ design skills), bionic:rigorous-refactor, bionic:ralph-loop |
+| **Skills** | excalidraw-diagram, impeccable (20+ design skills), bionic:rigorous-refactor, bionic:ralph-loop, bionic:map-instrument-narrow, bionic:skill-factory |
 | **Hooks** | protect-main.sh, protect-database.sh |
 | **Philosophy** | 9 principles for agentic development → [`~/.claude/CLAUDE.md`](claude-global.md) |
 | **Shell alias** | `claude` → `claude --dangerously-skip-permissions` |
@@ -201,10 +201,14 @@ A skill pack from Paul Bakaus (Google) containing 20+ design skills. Installed a
 
 Custom skills that enforce engineering discipline in agentic workflows. Designed to close the gaps where agents cut corners — skipping tests, self-grading, claiming success without proof. Installed from the `skills/` directory to `~/.claude/skills/` during bootstrap.
 
-| Skill | What it enforces |
-|-------|-----------------|
-| **rigorous-refactor** | Strict state machine for complex refactors: decompose into atomic units → write failing tests → verify RED → implement → independent validation via separate agent → 3-attempt escalation limit → captured proof of completion. Prevents boil-the-ocean refactoring and self-grading. |
-| **ralph-loop** | Disciplined build-test-diagnose iteration cycle with three modes: DEBUG (stabilize first, then fix forward), GREENFIELD (research conventions, then build per PRD), RESEARCH-FIRST (exhaustive codebase mapping before implementation). Every iteration produces evidence; every exit requires verification. |
+All bionic skills follow the composability schema: every skill declares a `layer` (governance/operational/technique), `needs` (dependency list), and `loading` hint in its frontmatter. Skills compose additively — each constrains a different failure mode without contradicting the others.
+
+| Skill | Layer | What it constrains |
+|-------|-------|--------------------|
+| **ralph-loop** | Governance | Disciplined build-test-diagnose iteration cycle. Prevents skipping phases, exiting without evidence, and grinding past iteration limits. Three modes: DEBUG, GREENFIELD, RESEARCH-FIRST. |
+| **rigorous-refactor** | Operational | Strict state machine for complex refactors. Prevents self-grading, skipping decomposition, and implementing without tests. Independent validation via separate agent. |
+| **map-instrument-narrow** | Technique | Evidence-gathering for complex debugging. Prevents guessing without data, fixing without understanding, and instrumenting without architecture. MAP → INSTRUMENT → NARROW phases. |
+| **skill-factory** | Governance | Interviews the user to extract a constraint, layer, dependencies, and rationalizations, then produces a composable skill skeleton. Prevents creating skills without an identified failure mode. |
 
 ### Hooks (Safety Guardrails)
 
