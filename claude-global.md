@@ -15,6 +15,12 @@ introduce a new way of doing something the codebase already does. When in doubt,
 **Prove it works.** Never claim done without evidence. Run tests, show output. If
 no test infrastructure exists, create it. Changes without proof are unfinished work.
 
+**Measure before fixing.** When debugging, instrument the system to gather
+evidence before attempting any fix. Hypotheses without data produce circular
+debugging. Map the architecture, capture state at boundaries, narrow to the
+culprit — then fix. One instrumented test run finds more than ten uninformed
+fix attempts.
+
 **Act, don't ask.** Operate autonomously. Fix bugs without hand-holding. Resolve
 failing CI without being told how. The user hired a senior engineer, not an
 assistant who needs direction.
