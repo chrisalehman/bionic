@@ -55,7 +55,7 @@ Everything lives in [`claude-config.txt`](claude-config.txt) — edit it and re-
 | **MCP servers** | context7, trello *(optional)* |
 | **Skills** | excalidraw-diagram, impeccable (20+ design skills), bionic:rigorous-refactor, bionic:ralph-loop, bionic:map-instrument-narrow, bionic:skill-factory |
 | **Hooks** | protect-main.sh, protect-database.sh |
-| **Philosophy** | 9 principles for agentic development → [`~/.claude/CLAUDE.md`](claude-global.md) |
+| **Philosophy** | 10 principles for agentic development → [`~/.claude/CLAUDE.md`](claude-global.md) |
 | **Shell alias** | `claude` → `claude --dangerously-skip-permissions` |
 
 Optional tools (cloud, databases, deployment) are commented out at the bottom of `claude-config.txt`. Uncomment and re-run.
@@ -76,7 +76,9 @@ bionic/
 │   └── *.test.sh            # Hook test suites
 ├── skills/                  # Bionic skills → ~/.claude/skills/
 │   ├── rigorous-refactor/   # Disciplined multi-file refactoring
-│   └── ralph-loop/          # Build-test-diagnose iteration cycle
+│   ├── ralph-loop/          # Build-test-diagnose iteration cycle
+│   ├── map-instrument-narrow/ # Evidence-gathering for complex debugging
+│   └── skill-factory/       # Guided skill authoring with composability schema
 ├── ccstatusline/            # Status line config → ~/.config/ccstatusline/
 │   └── settings.json        # Model, context %, cost, git branch
 └── README.md
@@ -153,7 +155,7 @@ Plugins extend Claude Code with additional skills and agent types. Installed via
 2. **Writing Plans** — Converts approved designs into step-by-step implementation plans with explicit checkpoints.
 3. **Executing Plans** — Runs implementation plans with review gates.
 4. **Test-Driven Development** — Writes tests before implementation code.
-5. **Systematic Debugging** — Structured hypothesis → test → fix cycles instead of shotgun debugging.
+5. **Systematic Debugging** — Structured hypothesis → test → fix cycles instead of shotgun debugging. The bionic `map-instrument-narrow` skill extends this with evidence-gathering phases (MAP → INSTRUMENT → NARROW) for complex bugs.
 6. **Code Review** — Dispatches a reviewer subagent against the plan and coding standards.
 7. **Verification Before Completion** — Requires running tests and showing output before claiming done.
 
@@ -199,7 +201,7 @@ A skill pack from Paul Bakaus (Google) containing 20+ design skills. Installed a
 
 **bionic** — `local-skill | name` (local, shipped with this repo)
 
-Custom skills that enforce engineering discipline in agentic workflows. Designed to close the gaps where agents cut corners — skipping tests, self-grading, claiming success without proof. Installed from the `skills/` directory to `~/.claude/skills/` during bootstrap.
+Custom skills that enforce engineering discipline in agentic workflows. Every skill is a constraint on behavior — its value is not what it tells Claude to do, but what it prevents Claude from skipping. Designed to close the gaps where agents cut corners — skipping tests, self-grading, claiming success without proof. Installed from the `skills/` directory to `~/.claude/skills/` during bootstrap.
 
 All bionic skills follow the composability schema: every skill declares a `layer` (governance/operational/technique), `needs` (dependency list), and `loading` hint in its frontmatter. Skills compose additively — each constrains a different failure mode without contradicting the others.
 
@@ -208,7 +210,7 @@ All bionic skills follow the composability schema: every skill declares a `layer
 | **ralph-loop** | Governance | Disciplined build-test-diagnose iteration cycle. Prevents skipping phases, exiting without evidence, and grinding past iteration limits. Three modes: DEBUG, GREENFIELD, RESEARCH-FIRST. |
 | **rigorous-refactor** | Operational | Strict state machine for complex refactors. Prevents self-grading, skipping decomposition, and implementing without tests. Independent validation via separate agent. |
 | **map-instrument-narrow** | Technique | Evidence-gathering for complex debugging. Prevents guessing without data, fixing without understanding, and instrumenting without architecture. MAP → INSTRUMENT → NARROW phases. |
-| **skill-factory** | Governance | Interviews the user to extract a constraint, layer, dependencies, and rationalizations, then produces a composable skill skeleton. Prevents creating skills without an identified failure mode. |
+| **skill-factory** | Governance | Interviews the user to extract a constraint, layer, dependencies, and rationalizations, then hands off to skill-creator for file generation and eval testing. Prevents creating skills without an identified failure mode. |
 
 ### Hooks (Safety Guardrails)
 
@@ -269,7 +271,7 @@ The file [`claude-global.md`](claude-global.md) is installed to `~/.claude/CLAUD
 
 **Why global, not project-level:** Claude Code reads both `~/.claude/CLAUDE.md` (global) and `.claude/CLAUDE.md` (project-level) — they compose. The principles here are *agent-level behavior*, not project-specific conventions. "Deploy the team," "prove it works," and "guard your context" apply regardless of what you're building. Making them global means bootstrap sets it once and every project inherits automatically — no per-project setup, no drift between repos. Project-level `CLAUDE.md` files are still the right place for project-specific instructions (coding style, architecture decisions, repo-specific boundaries). The two layers stack: global provides the base operating model, project-level adds local context.
 
-It teaches nine principles and four hard boundaries:
+It teaches ten principles and four hard boundaries:
 
 **Principles** — These shape how Claude approaches work, ordered by frequency of relevance:
 
@@ -279,6 +281,7 @@ It teaches nine principles and four hard boundaries:
 | **Do the real work** | Don't patch around problems. When the correct solution requires restructuring, restructure. | Prevents under-engineering — Claude will sometimes hack around a problem to avoid a larger but correct change. |
 | **Match the codebase** | Follow existing patterns, conventions, and style. `grep` for precedent. | Claude's instinct is to write "correct" code from first principles rather than consistent code that matches what's already there. |
 | **Prove it works** | Never claim done without evidence. Run tests, show output. | Without this, Claude will say "I've fixed the bug" without running the test suite. Trust but verify. |
+| **Measure before fixing** | When debugging, instrument the system to gather evidence before attempting any fix. Map, capture, narrow, then fix. | Prevents circular debugging — without data, agents guess at causes and loop through uninformed fix attempts. The philosophical complement to the map-instrument-narrow technique skill. |
 | **Act, don't ask** | Operate autonomously. Fix bugs without hand-holding. | Claude's default behavior is overly cautious — asking permission for things a senior engineer would just do. This recalibrates. |
 | **Guard your context** | Main conversation is for decisions. Offload research and implementation to subagents. | Context window pollution is the #1 cause of degraded Claude performance mid-session. This principle keeps the main thread clean. |
 | **Deploy the team** | Use 100+ specialists in parallel. Default to subagents; reserve Agent Teams for mid-flight coordination. | Without this, Claude defaults to doing everything in one context window — slower, worse results, wastes the subagent infrastructure you just installed. |
@@ -324,7 +327,7 @@ The bottom of [`claude-config.txt`](claude-config.txt) contains entries organize
 
 ## Safety
 
-Hooks intercept `Bash` commands to catch accidental pushes to main and destructive SQL before they happen. The philosophy in [`claude-global.md`](claude-global.md) teaches Claude judgment — nine principles for when to act, when to pause, and when to escalate. See [Hooks](#hooks-safety-guardrails) and [Global Philosophy](#global-philosophy-claudemd) above for details.
+Hooks intercept `Bash` commands to catch accidental pushes to main and destructive SQL before they happen. The philosophy in [`claude-global.md`](claude-global.md) teaches Claude judgment — ten principles for when to act, when to pause, and when to escalate. See [Hooks](#hooks-safety-guardrails) and [Global Philosophy](#global-philosophy-claudemd) above for details.
 
 ## Requirements
 
