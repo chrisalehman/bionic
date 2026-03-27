@@ -1,9 +1,8 @@
 ---
 name: skill-factory
-description: Use when creating a new bionic skill — interviews the user to extract the constraint, layer, dependencies, and rationalizations, then hands off to writing-skills for file generation
+description: Use when creating a new bionic skill — interviews the user to extract the constraint, layer, dependencies, and rationalizations, then hands off to skill-creator for file generation and eval testing
 layer: governance
 needs:
-  - superpowers:writing-skills
   - document-skills:skill-creator
 loading: deferred
 ---
@@ -21,8 +20,7 @@ A skill is a constraint on behavior. Its value is not what it tells Claude to do
 **Layer:** Governance (process constraint). Constrains how skills are authored to ensure composability schema compliance.
 
 **REQUIRED SUB-SKILLS** (declared in `needs` frontmatter):
-- `superpowers:writing-skills` — handles file writing and skill verification
-- `document-skills:skill-creator` — handles eval testing, description optimization, and performance benchmarking
+- `document-skills:skill-creator` — handles file writing, eval testing, description optimization, and performance benchmarking
 
 ## The Iron Law
 
@@ -164,7 +162,7 @@ Before presenting the skeleton to the user:
 
 Present the generated skeleton to the user for review. After approval:
 
-1. Invoke `superpowers:writing-skills` to write the file to `skills/[skill-name]/SKILL.md`, then use `document-skills:skill-creator` for eval testing and description optimization
+1. Invoke `document-skills:skill-creator` to write the file to `skills/[skill-name]/SKILL.md`, run eval testing, and optimize the description trigger
 2. Add `local-skill  | [skill-name]` to `claude-config.txt`
 3. Commit both files
 
@@ -196,7 +194,7 @@ sub-skill's rules when you leave that phase. Depth limit: 3 layers
 - Skipping the rationalizations table ("I'll add those later")
 - Creating a skill that doesn't fit one constraint type (split it)
 - Presenting the skeleton without checking quality gates
-- Skipping the handoff to writing-skills (the factory doesn't write files itself)
+- Skipping the handoff to skill-creator (the factory doesn't write files itself)
 
 ## Quick Reference
 
@@ -210,4 +208,4 @@ sub-skill's rules when you leave that phase. Depth limit: 3 layers
 | **Interview Q6** | Evidence defined | Per-phase artifact list |
 | **Gate** | Failure mode exists | If not: STOP, suggest documentation instead |
 | **Generation** | Skeleton complete | All sections present, no placeholders, quality gates passed |
-| **Handoff** | User approves skeleton | Invoke writing-skills for file creation |
+| **Handoff** | User approves skeleton | Invoke skill-creator for file creation and eval testing |
