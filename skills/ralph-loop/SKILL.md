@@ -1,6 +1,13 @@
 ---
 name: ralph-loop
 description: Use when debugging broken features, implementing greenfield functionality, or researching a codebase before a complex change — any task requiring iterative build-test-diagnose cycles to reach verified working software
+layer: governance
+needs:
+  - bionic:rigorous-refactor
+  - bionic:map-instrument-narrow
+  - superpowers:systematic-debugging
+  - superpowers:verification-before-completion
+loading: deferred
 ---
 
 # Ralph Loop
@@ -13,8 +20,11 @@ Working software is produced by disciplined iteration, not heroic single passes.
 
 **Violating the letter of this process is violating the spirit of this process.**
 
-**REQUIRED SUB-SKILLS:**
+**Layer:** Governance (process constraint). Prevents skipping phases, exiting without evidence, and grinding past iteration limits.
+
+**REQUIRED SUB-SKILLS** (declared in `needs` frontmatter):
 - `bionic:rigorous-refactor` — governs test discipline within each cycle
+- `bionic:map-instrument-narrow` — governs evidence gathering when debugging hits hard/soft triggers
 - `superpowers:systematic-debugging` — governs the diagnose phase
 - `superpowers:verification-before-completion` — governs exit condition claims
 
@@ -155,6 +165,8 @@ Follow `bionic:rigorous-refactor` for test discipline. Use a separate validator 
 
 Follow `superpowers:systematic-debugging`. Root cause before next attempt. No "let me try something else" without understanding why the last thing failed.
 
+**Instrumentation trigger:** If the failure involves any hard trigger (prior fix failed without data, async/deferred execution, third-party library internals) or 2+ soft triggers (state correct at A but wrong at B, fix works in isolation but gets overridden, 3+ interacting subsystems, prior session attempted fixes without measurement), load and follow `bionic:map-instrument-narrow` before attempting another fix. Measurement before mutation.
+
 ## Exit Conditions
 
 | Mode | Exit Condition | Evidence Required |
@@ -183,6 +195,13 @@ After hitting the limit: STOP. Escalate with evidence of what you tried and why 
 - **Diagnose phase:** Can dispatch a research subagent to investigate, but main thread forms the hypothesis.
 
 **Coordination rule:** Before dispatching implementation subagents, define interfaces and contracts in the main thread. Subagents building against undefined interfaces produce inconsistent work.
+
+## Sub-Skill Loading
+
+This skill references sub-skills listed in `needs`. Do not preload them.
+Load each when you reach the phase that invokes it. Release focus on a
+sub-skill's rules when you leave that phase. Depth limit: 3 layers
+(governance -> operational -> technique). Beyond that, use judgment.
 
 ## Common Rationalizations
 
