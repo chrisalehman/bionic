@@ -30,3 +30,6 @@ docs/superpowers/
 
 # Git worktrees
 .worktrees/
+
+# Project notebook (local, not shared)
+.bionic/

@@ -49,7 +49,7 @@ Everything lives in [`claude-config.txt`](claude-config.txt) — edit it and re-
 
 | Category | What |
 |----------|------|
-| **CLI tools** | git, node, pnpm, gh, jq, ripgrep, uv, @playwright/cli + cloud (docker, gcloud, aws), deployment (stripe, vercel, supabase), API (httpie, yq, grpcurl, protoc) |
+| **CLI tools** | git, node, pnpm, gh, jq, ripgrep, uv, @playwright/cli + cloud (docker, gcloud, aws), deployment (stripe, vercel, supabase, fastlane, eas-cli), API (httpie, yq, grpcurl, protoc) |
 | **Plugins** | superpowers, frontend-design, document-skills, example-skills |
 | **Subagents** | voltagent-core-dev, voltagent-lang, voltagent-infra, voltagent-qa-sec, voltagent-data-ai, voltagent-dev-exp, voltagent-meta |
 | **MCP servers** | context7, trello *(requires env vars)* |
@@ -313,7 +313,11 @@ The bottom of [`claude-config.txt`](claude-config.txt) contains additional tools
 
 **Cloud** — `docker`, `gcloud` (requires cask: `brew install --cask google-cloud-sdk`), `aws` (package: `awscli`). For containerization and cloud infrastructure work.
 
-**Deployment Platforms** — `stripe`, `vercel`, `supabase`. For deploying directly from Claude sessions and managing payment infrastructure.
+**Deployment Platforms** — `stripe`, `vercel`, `supabase`, `fastlane`, `eas-cli`. For deploying directly from Claude sessions, managing payment infrastructure, and automating app store releases.
+
+**Fastlane** — Industry-standard iOS/Android release automation. Handles App Store Connect API, code signing (`match`), screenshots (`snapshot`/`screengrab`), TestFlight distribution, metadata management, and custom multi-step release pipelines via `Fastfile`. Uses App Store Connect API keys for authentication (generate in App Store Connect → Users and Access → Integrations → API Keys). 11+ years of active development, 41K+ GitHub stars.
+
+**EAS CLI** (`eas-cli`) — Expo Application Services CLI. The primary tool for building, submitting, and managing Expo/React Native apps. Provides `eas build`, `eas submit` (to App Store and Google Play), `eas update` (OTA updates), `eas credentials`, `eas metadata`, and more. Authentication is via Expo account (`eas login`, interactive) or `EXPO_TOKEN` environment variable for automation. Requires Node.js >= 20.0.0.
 
 **API & Serialization** — `httpie` (friendlier curl), `yq` (YAML processor, companion to jq), `grpcurl` (gRPC CLI), `protoc` (protobuf compiler). For API development and testing workflows.
 
