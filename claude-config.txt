@@ -91,6 +91,8 @@ brew-dep     | aws           | awscli
 brew-dep     | stripe        | stripe/stripe-cli/stripe
 brew-dep     | vercel        | vercel-cli
 brew-dep     | supabase
+brew-dep     | fastlane
+npm-global   | eas-cli
 # brew-dep     | firebase      | firebase-cli
 
 # ─── Optional: API & Serialization ───────────────────────────────────────
