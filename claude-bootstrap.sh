@@ -393,7 +393,6 @@ if [ -f "$ZSHRC" ] && grep -q "alias claude=.*dangerously-skip-permissions" "$ZS
   echo "✓ (migrated to markers)"
 elif grep -qF "$ZSHRC_START" "$ZSHRC" 2>/dev/null; then
   # Markers exist — replace managed section
-  local tmp="${ZSHRC}.tmp"
   {
     awk -v start="$ZSHRC_START" '
       $0 == start { exit }
@@ -404,7 +403,7 @@ elif grep -qF "$ZSHRC_START" "$ZSHRC" 2>/dev/null; then
       found { print }
       $0 == end { found=1 }
     ' "$ZSHRC"
-  } > "$tmp" && mv "$tmp" "$ZSHRC"
+  } > "${ZSHRC}.tmp" && mv "${ZSHRC}.tmp" "$ZSHRC"
   echo "✓ (already installed)"
 else
   # No markers, no alias — append
