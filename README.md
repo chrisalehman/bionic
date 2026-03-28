@@ -58,7 +58,7 @@ Everything lives in [`claude-config.txt`](claude-config.txt) — edit it and re-
 | **Philosophy** | 10 principles for agentic development → [`~/.claude/CLAUDE.md`](claude-global.md) |
 | **Shell alias** | `claude` → `claude --dangerously-skip-permissions` |
 
-Optional tools (cloud, databases, deployment) are commented out at the bottom of `claude-config.txt`. Uncomment and re-run.
+Optional tools (cloud, databases, deployment) are at the bottom of `claude-config.txt` — some active, some commented out. Toggle what you need and re-run.
 
 ## How It Works
 
@@ -319,7 +319,7 @@ The bottom of [`claude-config.txt`](claude-config.txt) contains entries organize
 
 **Databases** — `psql` (package: `libpq`), `mongosh`, `redis`. Also includes an optional `@anthropic-ai/mcp-server-postgres` MCP server that gives Claude direct PostgreSQL access via MCP tools (read-only queries, schema inspection). Enable this if you want Claude to query your database directly rather than generating SQL for you to run.
 
-**Deployment Platforms** — `vercel`, `supabase`, `firebase`. For deploying directly from Claude sessions.
+**Deployment Platforms** — `stripe`, `vercel`, `supabase`, `firebase`. For deploying directly from Claude sessions and managing payment infrastructure.
 
 **API & Serialization** — `httpie` (friendlier curl), `yq` (YAML processor, companion to jq), `grpcurl` (gRPC CLI), `protoc` (protobuf compiler). Enable for API development and testing workflows.
 
