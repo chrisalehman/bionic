@@ -107,3 +107,9 @@ brew-dep     | protoc        | protobuf
 # Set TRELLO_API_KEY and TRELLO_TOKEN in your shell environment, then uncomment and re-run.
 #
 mcp-server   | trello        | @delorenj/mcp-server-trello | TRELLO_API_KEY,TRELLO_TOKEN
+
+# ─── Optional: Observability ────────────────────────────────────────────
+# Requires a Sentry User Auth Token. Create one at https://sentry.io/settings/auth-tokens/
+# Set SENTRY_ACCESS_TOKEN in your shell environment, then re-run.
+#
+mcp-server   | sentry        | @sentry/mcp-server@latest   | SENTRY_ACCESS_TOKEN
