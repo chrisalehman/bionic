@@ -52,7 +52,7 @@ Everything lives in [`claude-config.txt`](claude-config.txt) — edit it and re-
 | **CLI tools** | git, node, pnpm, gh, jq, ripgrep, uv, @playwright/cli + cloud (docker, gcloud, aws), deployment (stripe, vercel, supabase, fastlane, eas-cli), API (httpie, yq, grpcurl, protoc) |
 | **Plugins** | superpowers, frontend-design, document-skills, example-skills |
 | **Subagents** | voltagent-core-dev, voltagent-lang, voltagent-infra, voltagent-qa-sec, voltagent-data-ai, voltagent-dev-exp, voltagent-meta |
-| **MCP servers** | context7, trello *(requires env vars)* |
+| **MCP servers** | context7, sentry *(requires env vars)*, trello *(requires env vars)* |
 | **Skills** | excalidraw-diagram, impeccable (20+ design skills), bionic:rigorous-refactor, bionic:ralph-loop, bionic:map-instrument-narrow, bionic:skill-factory |
 | **Hooks** | protect-main.sh, protect-database.sh |
 | **Philosophy** | 10 principles for agentic development → [`~/.claude/CLAUDE.md`](claude-global.md) |
@@ -70,10 +70,13 @@ bionic/
 ├── claude-global.md         # Philosophy → ~/.claude/CLAUDE.md
 ├── claude-bootstrap.sh      # Install (idempotent)
 ├── claude-reset.sh          # Remove everything
+├── test.sh                  # Run all test suites locally
 ├── hooks/                   # Safety guardrails
 │   ├── protect-main.sh      # Blocks pushes to main/master
 │   ├── protect-database.sh  # Blocks destructive SQL
 │   └── *.test.sh            # Hook test suites
+├── tests/                   # Script-level test suites
+│   └── scripts.test.sh      # Config parsing, consistency, symmetry
 ├── skills/                  # Bionic skills → ~/.claude/skills/
 │   ├── rigorous-refactor/   # Disciplined multi-file refactoring
 │   ├── ralph-loop/          # Build-test-diagnose iteration cycle
@@ -138,6 +141,22 @@ Setup:
 The bootstrap reads `TRELLO_API_KEY` and `TRELLO_TOKEN` from your environment and wires them into the MCP server configuration. If either is missing, the server is skipped with a warning.
 
 Why delorenj/mcp-server-trello over alternatives: Most actively maintained, listed in the official MCP Registry, type-safe TypeScript with built-in rate limiting and input validation. Migrated to Bun runtime for performance. Covers the core operations (boards, lists, cards, checklists, comments, attachments) without unnecessary complexity.
+
+**Sentry** — `mcp-server | sentry | @sentry/mcp-server@latest | SENTRY_ACCESS_TOKEN`
+
+Production observability. Gives Claude tools to search issues, inspect events and stack traces, analyze errors with Sentry's Seer AI, query release health, and manage projects — all through natural language. When Claude is debugging a production issue, it can pull the actual error, stack trace, and affected users directly from Sentry rather than asking you to copy-paste.
+
+Setup:
+1. Create a User Auth Token at https://sentry.io/settings/auth-tokens/ with scopes: `org:read`, `project:read`, `project:write`, `team:read`, `team:write`, `event:write`
+2. Set it in your shell environment:
+   ```bash
+   export SENTRY_ACCESS_TOKEN="your-token"
+   ```
+3. Re-run `./claude-bootstrap.sh`
+
+The bootstrap reads `SENTRY_ACCESS_TOKEN` from your environment and wires it into the MCP server configuration. If it's missing, the server is skipped with a warning.
+
+Why @sentry/mcp-server: Official Sentry MCP server maintained by the Sentry core team (including Armin Ronacher). 26 tools covering issue search, event inspection, stack trace analysis, Seer AI root cause analysis, release tracking, and project management. Supports both cloud Sentry and self-hosted instances via `SENTRY_HOST`. The only Sentry MCP server with AI-powered natural language search and embedded agent capabilities.
 
 ### Plugins & Subagents
 
@@ -322,6 +341,8 @@ The bottom of [`claude-config.txt`](claude-config.txt) contains additional tools
 **API & Serialization** — `httpie` (friendlier curl), `yq` (YAML processor, companion to jq), `grpcurl` (gRPC CLI), `protoc` (protobuf compiler). For API development and testing workflows.
 
 **Productivity Tools** — The Trello MCP server (`@delorenj/mcp-server-trello`) is enabled by default but requires `TRELLO_API_KEY` and `TRELLO_TOKEN` environment variables. If they're not set, bootstrap skips it with a warning. See [Trello](#mcp-servers) above for setup.
+
+**Observability** — The Sentry MCP server (`@sentry/mcp-server@latest`) is enabled by default but requires `SENTRY_ACCESS_TOKEN`. If it's not set, bootstrap skips it with a warning. See [Sentry](#mcp-servers) above for setup.
 
 ### Commented-Out Tools
 
