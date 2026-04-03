@@ -24,6 +24,7 @@ run_suite() {
 run_suite "${SCRIPT_DIR}/hooks/protect-main.test.sh"
 run_suite "${SCRIPT_DIR}/hooks/protect-database.test.sh"
 run_suite "${SCRIPT_DIR}/tests/scripts.test.sh"
+run_suite "${SCRIPT_DIR}/lib/platform.test.sh"
 
 echo ""
 if [ "$FAILED" -gt 0 ]; then

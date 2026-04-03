@@ -3,7 +3,7 @@
 # claude-reset.sh
 # Removes Claude Code plugins and skills installed by claude-bootstrap.sh.
 # Idempotent — safe to run multiple times; produces the same result.
-# Requires: claude CLI (brew install claude-code)
+# Requires: claude CLI + Homebrew (macOS or Linux/WSL)
 #
 # Usage:
 #   bash claude-reset.sh          # prompt before removal
@@ -11,11 +11,15 @@
 #
 set -euo pipefail
 
-cleanup() { rm -f ~/.claude/settings.json.tmp ~/.claude/CLAUDE.md.tmp ~/.zshrc.tmp; }
-trap cleanup EXIT
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG="${SCRIPT_DIR}/claude-config.txt"
+
+# ─── Platform Detection ─────────────────────────────────────────────────────
+
+source "${SCRIPT_DIR}/lib/platform.sh"
+
+cleanup() { rm -f ~/.claude/settings.json.tmp ~/.claude/CLAUDE.md.tmp "${SHELL_RC}.tmp"; }
+trap cleanup EXIT
 
 # ─── Options ─────────────────────────────────────────────────────────────────
 
@@ -394,8 +398,8 @@ else
   echo -n "  chromium... "
   if npx playwright uninstall --all 2>/dev/null; then
     echo "✓"
-  elif [ -d ~/Library/Caches/ms-playwright ]; then
-    rm -rf ~/Library/Caches/ms-playwright
+  elif [ -d "$PLAYWRIGHT_CACHE" ]; then
+    rm -rf "$PLAYWRIGHT_CACHE"
     echo "✓ (cache removed directly)"
   else
     echo "✓ (already removed)"
@@ -451,30 +455,30 @@ echo ""
 # ─── Shell Alias ─────────────────────────────────────────────────────────────
 
 echo "Shell alias:"
-ZSHRC=~/.zshrc
-ZSHRC_START="# ─── bionic:start ───"
-ZSHRC_END="# ─── bionic:end ───"
+ALIAS_RC="$SHELL_RC"
+ALIAS_START="# ─── bionic:start ───"
+ALIAS_END="# ─── bionic:end ───"
 if ! confirm "shell alias (dangerously-skip-permissions)"; then
   echo "  shell alias — skipped"
 else
-  echo -n "  ~/.zshrc alias... "
-  if [ -f "$ZSHRC" ] && grep -qF "$ZSHRC_START" "$ZSHRC"; then
+  echo -n "  ~/${SHELL_RC_NAME} alias... "
+  if [ -f "$ALIAS_RC" ] && grep -qF "$ALIAS_START" "$ALIAS_RC"; then
     # Remove marker-delimited section
-    awk -v start="$ZSHRC_START" -v end="$ZSHRC_END" '
+    awk -v start="$ALIAS_START" -v end="$ALIAS_END" '
       $0 == start { skip=1; next }
       $0 == end { skip=0; next }
       !skip { print }
-    ' "$ZSHRC" > "${ZSHRC}.tmp" && mv "${ZSHRC}.tmp" "$ZSHRC"
+    ' "$ALIAS_RC" > "${ALIAS_RC}.tmp" && mv "${ALIAS_RC}.tmp" "$ALIAS_RC"
     # Delete file if only whitespace remains
-    if [ ! -s "$ZSHRC" ] || ! grep -q '[^[:space:]]' "$ZSHRC"; then
-      rm -f "$ZSHRC"
+    if [ ! -s "$ALIAS_RC" ] || ! grep -q '[^[:space:]]' "$ALIAS_RC"; then
+      rm -f "$ALIAS_RC"
     fi
     echo "✓"
-  elif [ -f "$ZSHRC" ] && grep -q "alias claude=.*dangerously-skip-permissions" "$ZSHRC"; then
+  elif [ -f "$ALIAS_RC" ] && grep -q "alias claude=.*dangerously-skip-permissions" "$ALIAS_RC"; then
     # Fallback: remove old unmarked alias
-    grep -v "alias claude=.*dangerously-skip-permissions" "$ZSHRC" > "${ZSHRC}.tmp" && mv "${ZSHRC}.tmp" "$ZSHRC"
-    if [ ! -s "$ZSHRC" ] || ! grep -q '[^[:space:]]' "$ZSHRC"; then
-      rm -f "$ZSHRC"
+    grep -v "alias claude=.*dangerously-skip-permissions" "$ALIAS_RC" > "${ALIAS_RC}.tmp" && mv "${ALIAS_RC}.tmp" "$ALIAS_RC"
+    if [ ! -s "$ALIAS_RC" ] || ! grep -q '[^[:space:]]' "$ALIAS_RC"; then
+      rm -f "$ALIAS_RC"
     fi
     echo "✓ (removed legacy unmarked alias)"
   else
@@ -529,12 +533,12 @@ fi
 
 echo ""
 echo "  Shell alias:"
-if [ -f ~/.zshrc ] && grep -qF "# ─── bionic:start ───" ~/.zshrc; then
-  echo "    ~/.zshrc — bionic section still present"
-elif [ -f ~/.zshrc ] && grep -qF "dangerously-skip-permissions" ~/.zshrc; then
-  echo "    ~/.zshrc — legacy alias still present"
+if [ -f "$SHELL_RC" ] && grep -qF "# ─── bionic:start ───" "$SHELL_RC"; then
+  echo "    ~/${SHELL_RC_NAME} — bionic section still present"
+elif [ -f "$SHELL_RC" ] && grep -qF "dangerously-skip-permissions" "$SHELL_RC"; then
+  echo "    ~/${SHELL_RC_NAME} — legacy alias still present"
 else
-  echo "    ~/.zshrc ✓ (clean)"
+  echo "    ~/${SHELL_RC_NAME} ✓ (clean)"
 fi
 
 echo ""
@@ -581,10 +585,10 @@ fi
 
 echo ""
 echo "  Playwright browsers:"
-if [ -d ~/Library/Caches/ms-playwright ] && [ "$(ls -A ~/Library/Caches/ms-playwright 2>/dev/null)" ]; then
-  echo "    ~/Library/Caches/ms-playwright — still present"
+if [ -d "$PLAYWRIGHT_CACHE" ] && [ "$(ls -A "$PLAYWRIGHT_CACHE" 2>/dev/null)" ]; then
+  echo "    ${PLAYWRIGHT_CACHE} — still present"
 else
-  echo "    ~/Library/Caches/ms-playwright ✓ (clean)"
+  echo "    ${PLAYWRIGHT_CACHE} ✓ (clean)"
 fi
 
 echo ""
