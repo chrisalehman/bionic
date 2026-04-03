@@ -12,6 +12,7 @@
 #   brew-dep      |  binary              (package = binary)
 #   brew-dep      |  binary  |  package  (when binary ≠ package)
 #   npm-global    |  package
+#   uv-tool       |  package |  binary   (Python CLI via uv tool install; binary defaults to package)
 #   mcp-server    |  name   |  package  |  ENV_VAR1,ENV_VAR2  (optional: required env vars)
 #   env-var       |  key    |  value
 #   statusline    |  command
@@ -27,13 +28,18 @@ brew-dep     | uv
 # CLI tools installed via npm (same category, different install mechanism)
 npm-global   | @playwright/cli
 
+# CLI tools installed via uv (Python packages with CLI entry points)
+uv-tool      | notebooklm-py       | notebooklm
+
 marketplace  | anthropics/skills
 marketplace  | VoltAgent/awesome-claude-code-subagents
+marketplace  | nextlevelbuilder/ui-ux-pro-max-skill
 
 plugin       | superpowers         | claude-plugins-official
 plugin       | frontend-design     | claude-plugins-official
 plugin       | document-skills     | anthropic-agent-skills
 plugin       | example-skills      | anthropic-agent-skills
+plugin       | ui-ux-pro-max       | ui-ux-pro-max-skill
 plugin       | voltagent-core-dev  | voltagent-subagents
 plugin       | voltagent-lang      | voltagent-subagents
 plugin       | voltagent-infra     | voltagent-subagents
@@ -45,6 +51,7 @@ plugin       | voltagent-meta      | voltagent-subagents
 global-memory | claude-global.md
 
 github-skill | excalidraw-diagram | coleam00/excalidraw-diagram-skill
+github-skill | humanizer          | blader/humanizer
 
 github-skill-pack | impeccable   | pbakaus/impeccable
 

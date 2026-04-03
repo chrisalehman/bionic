@@ -83,6 +83,17 @@ do_install_npm_global() {
   fi
 }
 
+do_install_uv_tool() {
+  local pkg="$1" binary="${2:-$1}"
+  echo -n "  ${pkg} (→ ${binary})... "
+  if command -v "$binary" &>/dev/null; then
+    echo "✓ (already installed)"
+    return 0
+  fi
+  uv tool install "$pkg" --quiet 2>/dev/null
+  echo "✓"
+}
+
 do_build_local_package() {
   local pkg="$1"
   local pkg_dir="${SCRIPT_DIR}/${pkg}"
@@ -295,6 +306,16 @@ verify_npm_global() {
   fi
 }
 
+verify_uv_tool() {
+  local pkg="$1" binary="${2:-$1}"
+  if command -v "$binary" &>/dev/null; then
+    echo "    ${binary} ✓"
+  else
+    echo "    ${binary} — not found"
+    verify_errors+=("${binary} uv tool (${pkg}) — not found")
+  fi
+}
+
 verify_mcp_server() {
   local name="$1" pkg="${2:-}" env_vars="${3:-}"
   if claude mcp get "$name" &>/dev/null; then
@@ -347,6 +368,21 @@ if ! command -v npm &>/dev/null; then
   exit 1
 fi
 read_config "npm-global" do_install_npm_global
+echo ""
+
+# ─── CLI Tools (uv) ─────────────────────────────────────────────────────────
+
+echo "CLI tools (uv):"
+if ! command -v uv &>/dev/null; then
+  echo "  ERROR: uv not found — install with: brew install uv" >&2
+  exit 1
+fi
+# Ensure uv tool bin directory is on PATH (uv installs binaries to ~/.local/bin/)
+uv_bin_dir="$(uv tool dir --bin 2>/dev/null)"
+if [ -n "$uv_bin_dir" ] && [[ ":$PATH:" != *":${uv_bin_dir}:"* ]]; then
+  export PATH="${uv_bin_dir}:${PATH}"
+fi
+read_config "uv-tool" do_install_uv_tool
 echo ""
 
 # ─── Playwright Browsers ────────────────────────────────────────────────────
@@ -429,6 +465,12 @@ if [ -d ~/.claude/skills/excalidraw-diagram/references ]; then
   echo "  ✓"
 else
   echo "  excalidraw-diagram — skipped (not installed)"
+fi
+if command -v notebooklm &>/dev/null; then
+  echo -n "  notebooklm skill install... "
+  notebooklm skill install &>/dev/null && echo "✓" || echo "✓ (skill already installed)"
+else
+  echo "  notebooklm — skipped (CLI not installed)"
 fi
 echo ""
 
@@ -581,6 +623,10 @@ echo "  CLI tools (npm):"
 read_config "npm-global" verify_npm_global
 
 echo ""
+echo "  CLI tools (uv):"
+read_config "uv-tool" verify_uv_tool
+
+echo ""
 echo "  Playwright browsers:"
 if ls ~/Library/Caches/ms-playwright/chromium-* &>/dev/null; then
   echo "    chromium ✓"
@@ -595,6 +641,11 @@ if [ -d ~/.claude/skills/excalidraw-diagram/references/.venv ]; then
   echo "    excalidraw-diagram renderer ✓"
 else
   echo "    excalidraw-diagram renderer — .venv not found (skill not installed or uv sync failed)"
+fi
+if [ -f ~/.claude/skills/notebooklm/SKILL.md ]; then
+  echo "    notebooklm skill ✓"
+elif command -v notebooklm &>/dev/null; then
+  echo "    notebooklm skill — SKILL.md not found (run: notebooklm skill install)"
 fi
 
 echo ""
