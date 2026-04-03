@@ -121,6 +121,7 @@ env-var      | CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS | 1
 statusline   | npx ccstatusline@latest
 plugin       | superpowers         | claude-plugins-official
 global-memory | claude-global.md
+uv-tool      | notebooklm-py       | notebooklm
 EOF
 
 # 1a: Basic two-field entry (git) parses correctly
@@ -216,7 +217,14 @@ _check_gm() { _gm_file="$1"; }
 read_config "global-memory" _check_gm
 expect_eq "global-memory: filename parsed" "claude-global.md" "$_gm_file"
 
-# 1m: Optional f3 field is empty string when not present (not unbound variable)
+# 1m: uv-tool two-field entry (package + binary)
+_uv_pkg="" _uv_bin=""
+_check_uv() { _uv_pkg="$1"; _uv_bin="$2"; }
+read_config "uv-tool" _check_uv
+expect_eq "uv-tool: package parsed" "notebooklm-py" "$_uv_pkg"
+expect_eq "uv-tool: binary parsed" "notebooklm" "$_uv_bin"
+
+# 1n: Optional f3 field is empty string when not present (not unbound variable)
 _ctx7_f3="__unset__"
 _check_ctx7_f3() {
   if [ "$1" = "context7" ]; then
@@ -263,7 +271,7 @@ echo "=== Section 2: Config file consistency (claude-config.txt) ==="
 
 _cfg_file="$CONFIG"
 
-KNOWN_TYPES="brew-dep npm-global mcp-server plugin marketplace github-skill github-skill-pack local-skill global-memory env-var statusline"
+KNOWN_TYPES="brew-dep npm-global uv-tool mcp-server plugin marketplace github-skill github-skill-pack local-skill global-memory env-var statusline"
 
 # 2a: Every uncommented, non-blank line has at least one pipe delimiter
 _bad_lines=""
@@ -376,7 +384,7 @@ expect_true "bootstrap uses CONFIG variable from SCRIPT_DIR" grep -q 'CONFIG=.*c
 expect_true "reset uses CONFIG variable from SCRIPT_DIR" grep -q 'CONFIG=.*claude-config' "$RESET"
 
 # 3c-3k: Every config type read in bootstrap is also read in reset
-for config_type in mcp-server env-var statusline plugin global-memory github-skill local-skill npm-global marketplace; do
+for config_type in mcp-server env-var statusline plugin global-memory github-skill local-skill npm-global uv-tool marketplace; do
   expect_true "bootstrap reads type: ${config_type}" grep -q "\"${config_type}\"" "$BOOTSTRAP"
   expect_true "reset reads type: ${config_type}" grep -q "\"${config_type}\"" "$RESET"
 done

@@ -223,11 +223,33 @@ do_remove_npm_global() {
   fi
 }
 
+do_remove_uv_tool() {
+  local pkg="$1" binary="${2:-$1}"
+  if ! confirm "uv tool: ${pkg}"; then
+    echo "  ${pkg} — skipped"
+    return 0
+  fi
+  echo -n "  ${pkg}... "
+  if uv tool uninstall "$pkg" &>/dev/null; then
+    echo "✓"
+  else
+    echo "✓ (already removed)"
+  fi
+}
+
 verify_npm_global_removed() {
   local pkg="$1"
   if npm list -g --depth=0 "$pkg" &>/dev/null; then
     npm_global_found=true
     echo "    ${pkg} — still installed"
+  fi
+}
+
+verify_uv_tool_removed() {
+  local pkg="$1" binary="${2:-$1}"
+  if command -v "$binary" &>/dev/null; then
+    uv_tool_found=true
+    echo "    ${binary} — still installed"
   fi
 }
 
@@ -387,6 +409,12 @@ echo "CLI tools (npm):"
 read_config "npm-global" do_remove_npm_global
 echo ""
 
+# ─── CLI Tools (uv) ──────────────────────────────────────────────────────
+
+echo "CLI tools (uv):"
+read_config "uv-tool" do_remove_uv_tool
+echo ""
+
 # ─── CLI Tools (brew) ─────────────────────────────────────────────────────
 
 echo "CLI tools (brew):"
@@ -405,6 +433,13 @@ echo ""
 
 echo "Skill setup:"
 echo "  excalidraw-diagram renderer — not removed separately (.venv removed with skill dir; Playwright cache removed above)"
+if [ -d ~/.claude/skills/notebooklm ]; then
+  echo -n "  notebooklm skill... "
+  rm -rf ~/.claude/skills/notebooklm
+  echo "✓"
+else
+  echo "  notebooklm skill ✓ (already removed)"
+fi
 echo ""
 
 # ─── Global Memory ──────────────────────────────────────────────────────────
@@ -521,6 +556,14 @@ if ! $npm_global_found; then
 fi
 
 echo ""
+echo "  CLI tools (uv):"
+uv_tool_found=false
+read_config "uv-tool" verify_uv_tool_removed
+if ! $uv_tool_found; then
+  echo "    (none installed) ✓"
+fi
+
+echo ""
 echo "  MCP servers:"
 mcp_found=false
 read_config "mcp-server" verify_mcp_removed
@@ -550,6 +593,11 @@ if [ -d ~/.claude/skills/excalidraw-diagram/references/.venv ]; then
   echo "    excalidraw-diagram .venv — still present (skill dir not removed?)"
 else
   echo "    excalidraw-diagram .venv ✓ (clean)"
+fi
+if [ -f ~/.claude/skills/notebooklm/SKILL.md ]; then
+  echo "    notebooklm skill — SKILL.md still present"
+else
+  echo "    notebooklm skill ✓ (clean)"
 fi
 
 echo "" ; echo "Done"

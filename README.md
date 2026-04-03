@@ -49,11 +49,11 @@ Everything lives in [`claude-config.txt`](claude-config.txt) — edit it and re-
 
 | Category | What |
 |----------|------|
-| **CLI tools** | git, node, pnpm, gh, jq, ripgrep, uv, @playwright/cli + cloud (docker, gcloud, aws), deployment (stripe, vercel, supabase, fastlane, eas-cli), API (httpie, yq, grpcurl, protoc) |
-| **Plugins** | superpowers, frontend-design, document-skills, example-skills |
+| **CLI tools** | git, node, pnpm, gh, jq, ripgrep, uv, @playwright/cli, notebooklm *(via uv)* + cloud (docker, gcloud, aws), deployment (stripe, vercel, supabase, fastlane, eas-cli), API (httpie, yq, grpcurl, protoc) |
+| **Plugins** | superpowers, frontend-design, document-skills, example-skills, ui-ux-pro-max |
 | **Subagents** | voltagent-core-dev, voltagent-lang, voltagent-infra, voltagent-qa-sec, voltagent-data-ai, voltagent-dev-exp, voltagent-meta |
 | **MCP servers** | context7, sentry *(requires env vars)*, trello *(requires env vars)* |
-| **Skills** | excalidraw-diagram, impeccable (20+ design skills), bionic:rigorous-refactor, bionic:ralph-loop, bionic:map-instrument-narrow, bionic:skill-factory |
+| **Skills** | excalidraw-diagram, humanizer, notebooklm, impeccable (20+ design skills), bionic:rigorous-refactor, bionic:ralph-loop, bionic:map-instrument-narrow, bionic:skill-factory |
 | **Hooks** | protect-main.sh, protect-database.sh |
 | **Philosophy** | 10 principles for agentic development → [`~/.claude/CLAUDE.md`](claude-global.md) |
 | **Shell alias** | `claude` → `claude --dangerously-skip-permissions` |
@@ -105,8 +105,9 @@ System-level dependencies that Claude Code and the bootstrap itself depend on. M
 | **gh** | `brew-dep \| gh` | GitHub CLI. Claude uses `gh pr create`, `gh issue`, `gh api` for GitHub operations without needing browser access or tokens in env vars. |
 | **jq** | `brew-dep \| jq` | JSON processor. The bootstrap script uses jq to merge hooks, env vars, and status line config into `~/.claude/settings.json` without clobbering existing settings. Also useful for Claude when parsing API responses. |
 | **ripgrep** | `brew-dep \| rg \| ripgrep` | Claude Code's built-in `Grep` tool is powered by ripgrep (`rg`). Without it, code search falls back to slower alternatives. The binary is `rg` but the Homebrew package name is `ripgrep`, hence the two-field config entry. |
-| **uv** | `brew-dep \| uv` | Python package manager from Astral. Used exclusively for the excalidraw-diagram skill setup (`uv sync`, `uv run`). Chosen over pip/poetry for speed — installs Python dependencies in seconds, not minutes. |
+| **uv** | `brew-dep \| uv` | Python package manager from Astral. Used for the excalidraw-diagram skill setup (`uv sync`, `uv run`) and for installing Python CLI tools via `uv tool install` (e.g., notebooklm-py). Chosen over pip/poetry for speed — installs Python dependencies in seconds, not minutes. |
 | **@playwright/cli** | `npm-global \| @playwright/cli` | Token-efficient browser automation. See below. |
+| **notebooklm** | `uv-tool \| notebooklm-py \| notebooklm` | Unofficial Python CLI and agentic skill for Google NotebookLM. Provides notebook management, source handling, audio/video generation, and research capabilities. Installed via `uv tool install` into an isolated venv with the `notebooklm` binary on PATH. Requires `notebooklm login` for Google OAuth authentication. |
 
 **Playwright CLI** — Token-efficient browser automation. Where the Playwright MCP server injects full page snapshots and screenshots into Claude's context window (~114K tokens per task), the CLI keeps browser state on disk and gives Claude compact YAML snapshots and file paths (~27K tokens per task) — roughly a 4x token reduction. Claude runs `playwright-cli snapshot` to get element references, `playwright-cli click` to interact, and `playwright-cli screenshot` to capture images to disk. At no point does the full DOM or image binary enter the context window unless Claude explicitly reads those files.
 
@@ -213,6 +214,18 @@ Skills are prompt files installed to `~/.claude/skills/` that Claude can invoke 
 **excalidraw-diagram** — `github-skill | excalidraw-diagram | coleam00/excalidraw-diagram-skill`
 
 Generates Excalidraw diagram JSON files for visualizing workflows, architectures, and concepts. Includes a Python renderer (set up via `uv sync` during bootstrap) that uses Playwright to convert diagrams to images.
+
+**ui-ux-pro-max** — `marketplace | nextlevelbuilder/ui-ux-pro-max-skill` + `plugin | ui-ux-pro-max | ui-ux-pro-max-skill`
+
+Design intelligence for building professional UI/UX. Installed as a plugin via the Claude Code marketplace. Provides 67 UI styles, 161 color palettes, 57 font pairings, 25 chart types, 99 UX guidelines, and a design system generator that analyzes your project type and produces a tailored design system. Supports 15+ tech stacks (React, Next.js, Vue, Svelte, SwiftUI, Flutter, and more).
+
+**humanizer** — `github-skill | humanizer | blader/humanizer`
+
+Detects and removes 29 AI writing patterns from text, based on Wikipedia's "Signs of AI Writing" guide. Uses a two-pass process: rewrite, then self-audit for remaining AI tells. Supports voice calibration — provide a sample of your writing and it matches your sentence rhythm, word choices, and quirks. Zero dependencies, zero code — purely a structured system prompt.
+
+**notebooklm** — `uv-tool | notebooklm-py | notebooklm` + `notebooklm skill install`
+
+Unofficial Python CLI and agentic skill for Google NotebookLM (8.9k stars). Provides full NotebookLM coverage: notebooks, sources, chat, research, audio/video/slides/quiz generation, and batch operations. The CLI (`notebooklm`) is installed via `uv tool install notebooklm-py`, and the skill is installed via the built-in `notebooklm skill install` command. Requires `notebooklm login` for browser-based Google OAuth authentication.
 
 **impeccable** — `github-skill-pack | impeccable | pbakaus/impeccable`
 
