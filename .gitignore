@@ -18,8 +18,11 @@
 *.swo
 *~
 
-# Claude Code local settings (machine-specific permissions)
-.claude/settings.local.json
+# Claude Code local state (worktrees, settings)
+.claude/
+
+# Direnv (machine-specific env vars)
+.envrc
 
 # Node
 node_modules/
