@@ -16,7 +16,9 @@ Most AI tooling demos show a single agent completing a single task. That's the "
 
 **Agentic Teams** — Dispatch parallel specialist teams at a problem instead of feeding everything through one context window. Audits, refactors, migrations, feature builds, incident investigations — any problem that benefits from multiple perspectives gets decomposed across concurrent agents, each bringing domain expertise, then synthesized into a coordinated result. This is the same reason no serious org assigns one engineer to do a security review, perf analysis, and accessibility audit in one sitting. Parallelism plus specialization compounds.
 
-**Subagent SDLC Pipeline** — The superpowers plugin implements a full development lifecycle as a composable skill: brainstorm → design decisions with explicit tradeoff analysis → implementation plan → TDD → parallel execution → code review. The critical design choice: the pipeline surfaces architectural *decisions* to you rather than burying them in generated code. You make the calls that matter — technology choices, boundary definitions, consistency tradeoffs — while agents scale the implementation across a problem space you'd never tackle alone. Multi-day team efforts executed in hours, or even minutes.
+**Canonical SDLC** — Bionic's flagship pattern. A 14-step autonomous lifecycle (ideate → spec → plan → isolate → implement → verify → review → critic → document → commit → external-review → finish → ship), enforced by three coordinating hooks: governing-skill validates plan frontmatter shape, dispatch-gate routes Agent calls to the right specialist via per-phase rules, evidence-gate blocks commits that lack verifiable per-step evidence. Plan frontmatter is the single source of truth for state — `mode`, `sdlc-step`, eight discriminator flags, four opt-in flags. Evidence is three-tiered: verification (mandatory, shape-checked), handoff (mandatory across sessions, ~1300-token cap), narrative (opt-in, default off in autonomous mode). Step 0.5 confirms every flag with the user before plan-shaping; Step 12.5 strips narrative cruft on close. The loop runs unattended for hours and produces an auditable record at the end. See [`docs/canonical-sdlc.md`](docs/canonical-sdlc.md).
+
+**Subagent SDLC Pipeline (superpowers)** — A complementary, lighter-weight lifecycle from the superpowers plugin: brainstorm → design decisions with explicit tradeoff analysis → implementation plan → TDD → parallel execution → code review. Surfaces architectural *decisions* rather than burying them in generated code. Use this for one-off changes; use canonical-sdlc when the work is wave-sized and worth the audit trail.
 
 **Domain Specialists on Demand** — 100+ voltagent specialists: Kubernetes debugger, PostgreSQL optimizer, security auditor, Terraform engineer, Rust systems programmer. The problems this unlocks: harden your auth layer, optimize a critical query path, untangle a Helm chart, and audit your IAM policies — simultaneously, in a single session. You don't need to be an expert in every domain. You dispatch one.
 
@@ -53,8 +55,8 @@ Everything lives in [`claude-config.txt`](claude-config.txt) — edit it and re-
 | **Plugins** | superpowers, agent-skills, document-skills, example-skills |
 | **Subagents** | voltagent-core-dev, voltagent-lang, voltagent-infra, voltagent-qa-sec, voltagent-data-ai, voltagent-dev-exp, voltagent-meta |
 | **MCP servers** | context7, chrome-devtools, sentry *(requires env vars)*, trello *(requires env vars)* |
-| **Skills** | excalidraw-diagram, humanizer, notebooklm, impeccable (20+ design skills), bionic:rigorous-refactor, bionic:ralph-loop, bionic:map-instrument-narrow, bionic:skill-factory |
-| **Hooks** | protect-main.sh, protect-database.sh, memory-update.sh, memory-commit-save.sh, memory-cleanup.sh, canonical-sdlc-evidence-gate.sh |
+| **Skills** | **bionic:canonical-sdlc** (flagship — 14-step autonomous lifecycle), excalidraw-diagram, humanizer, notebooklm, impeccable (20+ design skills), bionic:rigorous-refactor, bionic:ralph-loop, bionic:map-instrument-narrow, bionic:skill-factory |
+| **Hooks** | protect-main.sh, protect-database.sh, memory-update.sh, memory-commit-save.sh, memory-cleanup.sh, **canonical-sdlc-evidence-gate.sh**, **canonical-sdlc-governing-skill.sh**, **canonical-sdlc-dispatch-gate.sh** |
 | **Philosophy** | 10 principles for agentic development → [`~/.claude/CLAUDE.md`](claude-global.md) |
 | **Shell alias** | `claude` → `claude --dangerously-skip-permissions` |
 
@@ -269,6 +271,7 @@ All bionic skills follow the composability schema: every skill declares a `layer
 
 | Skill | Layer | What it constrains |
 |-------|-------|--------------------|
+| **canonical-sdlc** *(flagship)* | Governance | Bionic's own 14-step autonomous SDLC. Three coordinating hooks (governing-skill, dispatch-gate, evidence-gate) enforce frontmatter shape, dispatch routing, and per-step verification evidence. Plan frontmatter is single source of truth for state. Three-tier evidence (verification + handoff + opt-in narrative). Step 0.5 wizard confirms every flag with the user; Step 12.5 strips narrative cruft on close. Multi-mode (autonomous, epic-scope, incident-response, design-refresh, spike). Full reference: [`docs/canonical-sdlc.md`](docs/canonical-sdlc.md). |
 | **ralph-loop** | Governance | Disciplined build-test-diagnose iteration cycle. Prevents skipping phases, exiting without evidence, and grinding past iteration limits. Three modes: DEBUG, GREENFIELD, RESEARCH-FIRST. |
 | **rigorous-refactor** | Operational | Strict state machine for complex refactors. Prevents self-grading, skipping decomposition, and implementing without tests. Independent validation via separate agent. |
 | **map-instrument-narrow** | Technique | Evidence-gathering for complex debugging. Prevents guessing without data, fixing without understanding, and instrumenting without architecture. MAP → INSTRUMENT → NARROW phases. |
@@ -276,7 +279,20 @@ All bionic skills follow the composability schema: every skill declares a `layer
 
 ### Hooks (Safety Guardrails + Memory Automation)
 
-Hooks are shell scripts that Claude Code invokes at defined lifecycle events. Bionic ships six: three `PreToolUse` hooks (`protect-main.sh`, `protect-database.sh`, `canonical-sdlc-evidence-gate.sh`) that hard-block dangerous or premature `Bash` commands, one `PostToolUse` hook (`memory-commit-save.sh`) that fires a memory save after each successful `git commit`, one `Stop` hook (`memory-update.sh`) that catches commitless bursts as a fallback save, and one `SessionStart` hook (`memory-cleanup.sh`) that prunes stale memory. All six are registered in `~/.claude/settings.json` by `claude-bootstrap.sh`. Safety hooks use exit code 2 to hard-block; memory hooks use JSON output to inject instructions into the conversation.
+Hooks are shell scripts that Claude Code invokes at defined lifecycle events. Bionic ships ten in two families:
+
+**Safety + canonical-sdlc enforcement** (six `PreToolUse` hooks, exit-code-2 hard-blocks):
+- `protect-main.sh`, `protect-database.sh` — block dangerous Bash commands.
+- `canonical-sdlc-evidence-gate.sh` — blocks `git commit` when the active plan's `## SDLC State` section lacks evidence for the current step. v2 plans (`evidence_schema: v2`) get per-step shape enforcement (e.g. Step 7 requires `cmd:`, `pass:`, `total:`, `output:` and `pass==total`).
+- `canonical-sdlc-governing-skill.sh` — blocks `Write`/`Edit` of plan/spec/adr files lacking valid frontmatter. v2 plans must declare `canonical_sdlc_version: 2` plus all 12 v2 flags (4 opt-in + 8 discriminator); v1 plans are grandfathered.
+- `canonical-sdlc-dispatch-gate.sh` — fires on every `Agent` tool call. Reads `.bionic/sdlc-dispatch-rules.json` and the active plan's `sdlc-step`, then either logs a mismatch (default — `dispatch_enforce: false`) or blocks the call (`dispatch_enforce: true`). Override via `dispatch_override:"<reason>"` in the prompt; logged to `.bionic/memory/dispatch-audit.md` for review.
+
+**Memory automation** (three hooks using JSON output to inject instructions):
+- `memory-commit-save.sh` (PostToolUse|Bash) — fires a memory save after each successful `git commit`.
+- `memory-update.sh` (Stop) — catches commitless bursts as a fallback save.
+- `memory-cleanup.sh` (SessionStart|startup) — prunes stale memory.
+
+All hooks are registered in `~/.claude/settings.json` by `claude-bootstrap.sh`.
 
 **protect-main.sh** — [`hooks/protect-main.sh`](hooks/protect-main.sh) → `~/.claude/hooks/protect-main.sh`
 

@@ -654,6 +654,36 @@ expect_true "evidence-gate hook reads evidence_schema from frontmatter" \
 expect_true "evidence-gate hook references the v2 schema literal" \
   grep -qE '"v2"|EVIDENCE_SCHEMA[[:space:]]*=' "$_egate"
 
+# 4r: README promotes canonical-sdlc as flagship (Wave 6 closure)
+expect_true "README has a Canonical SDLC pattern subsection" \
+  grep -q '\*\*Canonical SDLC\*\*' "${REPO}/README.md"
+expect_true "README links to docs/canonical-sdlc.md" \
+  grep -q 'docs/canonical-sdlc\.md' "${REPO}/README.md"
+expect_true "README Skills row mentions bionic:canonical-sdlc as flagship" \
+  grep -q 'bionic:canonical-sdlc' "${REPO}/README.md"
+expect_true "README Hooks list mentions all three canonical-sdlc hooks" \
+  grep -qE 'canonical-sdlc-evidence-gate.*canonical-sdlc-governing-skill.*canonical-sdlc-dispatch-gate' "${REPO}/README.md"
+
+# 4s: docs/canonical-sdlc.md tracked reference doc exists with required sections
+_canon="${REPO}/docs/canonical-sdlc.md"
+expect_true "docs/canonical-sdlc.md exists" [ -f "$_canon" ]
+if [ -f "$_canon" ]; then
+  expect_true "canonical-sdlc.md mentions v2 frontmatter schema" \
+    grep -qE 'v2 frontmatter schema|## v2 frontmatter|frontmatter schema' "$_canon"
+  expect_true "canonical-sdlc.md has migration script section" \
+    grep -qE 'migrate-frontmatter\.sh|Migrating in-flight plans' "$_canon"
+  expect_true "canonical-sdlc.md has hook behavior matrix" \
+    grep -qE 'Hook behavior matrix|hook behavior matrix' "$_canon"
+  expect_true "canonical-sdlc.md mentions empirical validation status" \
+    grep -qE 'mpirical validation|deferred validation arm' "$_canon"
+  expect_true "canonical-sdlc.md lists all five modes" \
+    grep -q 'autonomous' "$_canon" && \
+    grep -q 'epic-scope' "$_canon" && \
+    grep -q 'incident-response' "$_canon" && \
+    grep -q 'design-refresh' "$_canon" && \
+    grep -q 'spike' "$_canon"
+fi
+
 # 4q: SKILL.md documents Step 12.5 (post-merge cleanup) — Wave 5 contract
 if [ -f "$_skillmd" ]; then
   expect_true "SKILL.md has Step 12.5 — Post-merge cleanup section" \
