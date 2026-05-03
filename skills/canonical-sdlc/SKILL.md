@@ -169,6 +169,8 @@ Declare the mode at entry. The mode determines which steps apply. **`autonomous`
 
 Mode declaration is reviewable. A feature disguised as a different mode to skip steps is drift with a label; declarations must match the actual work.
 
+**Mode interaction with Step 0.5 (Configure).** The mode determines the inferred defaults for `narrative_verbose` and `dispatch_enforce`, plus whether Step 0.5 is required at all. See the Step 0.5 section below for the full table; in short: every v2 mode (anything except legacy `canonical_sdlc_version: 1` plans) goes through Step 0.5 before Step 1, and the inferred defaults match the mode's evidence discipline (autonomous strips narrative; epic-scope / incident-response / design-refresh keep narrative on by default).
+
 ### `autonomous` mode in particular (the default)
 
 This is the default because Bionic philosophy is "operate autonomously." The mode assumes no human is watching Steps 4–13 in real time, and tightens evidence discipline accordingly:
@@ -364,6 +366,117 @@ Fire on-trigger, not at a fixed step:
 ## Steps
 
 Each step has: **goal** · **action** · **completion gate** · **evidence artifact**.
+
+### Step 0.5 — Configure (entry-gate confirmation phase)
+
+The configuration phase between Always-On Prerequisites (Step 0) and Step 1. **Mandatory for new plans in v2 mode**; skipped for legacy plans (`canonical_sdlc_version: 1`).
+
+**Goal:** Set every plan-shaping flag in plan frontmatter deliberately, with explicit user confirmation. Replaces silent defaults with a single confirmation display so wrong inferences surface before they affect dispatch routing or evidence shape enforcement.
+
+**Action:** The skill executes three sub-steps in order:
+
+1. **Infer recommended values** from available context. Each inference produces a one-line reasoning string shown in the confirmation display so the user can spot bad signals immediately.
+
+   | Flag | Inference signals |
+   |---|---|
+   | `language` | Repo files: `package.json` / `tsconfig.json` → `typescript`/`javascript`; `Cargo.toml` → `rust`; `go.mod` → `go`; `pyproject.toml` / `requirements.txt` → `python`; `pom.xml` / `build.gradle` → `java`; `*.csproj` → `csharp`; `Package.swift` → `swift`; `*.kt`/`build.gradle.kts` → `kotlin`; `composer.json` → `php`; `*.sql`-only repos → `sql`. Default `none` if no marker. |
+   | `surface_type` | Conversation keywords: "REST endpoint" / "HTTP API" → `api`; "GraphQL" / "schema" → `graphql`; "dashboard" / "page" / "component" / "frontend" → `ui`; "Terraform" / "IaC" → `iac`; "ML" / "training" / "model" → `ml`; "WebSocket" / "streaming" / "realtime" → `realtime`; "iOS" / "Android" / "mobile app" → `mobile`; otherwise `system` (backend service work) or `none`. |
+   | `has_ui` | Same conversation scan — true if "UI" / "dashboard" / "page" / "component" appears. |
+   | `security_boundary` | Keywords "auth" / "authn" / "authz" / "secret" / "token" / "credential" / "PII" / "encryption" / "signing". |
+   | `perf_critical` | Keywords "performance" / "latency" / "throughput" / "p99" / "hot path" / "benchmark". |
+   | `distributed` | Keywords "queue" / "replica" / "sharded" / "service mesh" / "eventually consistent" / "leader election". |
+   | `multi_agent` | Heuristic: more than 3 voltagent specialties match across the inferred phases (e.g., a UI plan that also touches IaC and ML triggers true). |
+   | `deploy_target` | Keywords "k8s" / "kubernetes" → `k8s`; "Vercel" / "Next.js deploy" → `vercel`; "deploy" without specifics → `custom`; "data migration" / "schema change" → `migration`; no deploy mentioned → `none`. |
+   | `narrative_verbose` | Mode default — `autonomous` → `false`; `epic-scope` / `incident-response` / `design-refresh` → `true`; `spike` → `false`. |
+   | `dispatch_enforce` | Sprint-1 default `false` (log-only). The user can flip to `true` once the dispatch-audit log shows rules are calibrated for their domain. |
+   | `cleanup_on_finish` | Default `false` (opt-in). Recommended `true` for `autonomous` once the cleanup procedure is exercised. |
+   | `archived` | Default `false`. When `true`, Step 12.5 writes a pre-cleanup snapshot to `.bionic/evidence-archive/`. |
+
+2. **Present the confirmation display.** One structured block, not multiple `AskUserQuestion` calls. The literal output the skill produces:
+
+   ```
+   ═══ Plan Configuration — confirm before Step 1 ═══
+   slug: <inferred-from-conversation>
+   mode: autonomous
+
+   v2 opt-in flags:
+     narrative_verbose:  false   [strip narrative tier — recommended for autonomous]
+     dispatch_enforce:   false   [opt-in for sprint 1; flip default after evaluation]
+     cleanup_on_finish:  false   [run Step 12.5 evidence cleanup on close]
+     archived:           false   [archive on cleanup]
+
+   Discriminator flags:
+     surface_type:       api          [inferred: "REST endpoint" in convo]
+     language:           typescript   [inferred: tsconfig.json + package.json]
+     perf_critical:      false        [no perf signal — please confirm]
+     security_boundary:  false        [no auth/crypto signal — please confirm]
+     distributed:        false        [single service]
+     has_ui:             false        [no UI mentioned]
+     multi_agent:        false        [single SDLC plan]
+     deploy_target:      none         [no deploy signal]
+
+   Reply "confirm" to accept, or specify overrides:
+     e.g. "set perf_critical=true, set has_ui=true, then confirm"
+   ```
+
+   Each flag line is `  <flag>: <value> [<reasoning-or-recommendation>]`. The bracketed annotation is part of the display so the user sees the *why* and can challenge bad inferences. Recommendations like "please confirm" appear when an inference signal was absent and the skill is showing a default.
+
+3. **Block until explicit confirmation.** No timeout, no implicit acceptance, no skipping ahead. The skill cannot write any plan/spec file until the user reply matches the override DSL grammar.
+
+**Override DSL grammar.** The user's reply is parsed against:
+
+```
+reply        := overrides? "confirm"
+overrides    := override ("," override)* ","?
+override     := "set" flag "=" value
+              | "change" flag "to" value
+flag         := <known flag name from frontmatter schema>
+value        := <validates against the flag's allowed values>
+```
+
+Accepted reply forms:
+- `confirm` — accept all defaults verbatim.
+- `set perf_critical=true, confirm` — single override.
+- `set surface_type=graphql, set language=python, confirm` — multiple overrides.
+- `change surface_type to graphql, confirm` — natural-language form.
+- A complete YAML block replacing the proposed values, ending with `confirm`.
+
+Rejected (skill re-prompts with the reason):
+- Reply that doesn't end with `confirm` or `confirmed`.
+- Override referencing an unknown flag name.
+- Override with a value not in the flag's allowed set (e.g. `set surface_type=zigzag`).
+
+On accept, the skill writes the final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line, no abbreviation, no defaults compaction. The plan file then carries `canonical_sdlc_version: 2` plus all 12 v2 flags (4 opt-in + 8 discriminator), satisfying the governing-skill hook's v2 schema check.
+
+**Three-layer enforcement.** Step 0.5 is the soft layer; it's backed by hooks for failure recovery:
+
+- **Layer 1 — Soft (this skill).** SKILL.md mandates Step 0.5 between Step 0 and Step 1. Do not proceed past Step 0.5 without explicit user confirmation. This is the primary path — most plan creations go through it.
+- **Layer 2 — Hard (`canonical-sdlc-governing-skill.sh`).** Runs on `PreToolUse|Write,Edit` of any canonical-sdlc plan/spec/adr/continuation file. For `governing-skill: canonical-sdlc` + `mode: autonomous` + `canonical_sdlc_version: 2`, requires all 4 v2 opt-in flags + all 8 discriminator flags. Missing any → exit 2 with a message naming the missing flags.
+- **Layer 3 — Backstop.** If Step 0.5 was skipped (sloppy plan creation, copy-paste from an older plan, agent autopilot), Layer 2 catches the missing flags on the first `Write` of the plan file. The agent gets a clear error listing what's missing, retries via Step 0.5. Wastes one tool call but cannot ship a misconfigured plan.
+
+**Mid-plan reconfiguration.** If the user wants to flip a flag mid-plan (e.g. realizes `perf_critical` should be `true` halfway through), edit the plan-doc frontmatter directly. The dispatch-gate hook reads frontmatter fresh on every `Agent` call (no caching), so the new value takes effect immediately. There is no `canonical-sdlc reconfigure` command and no special skill state — keeping the surface area minimal. If reconfiguration turns out to be common, this rule will be revisited; expect it to remain rare.
+
+**Legacy plan handling.** Plans with `canonical_sdlc_version: 1` in frontmatter are grandfathered out:
+- Step 0.5 is **not** required for legacy plans. The skill skips it entirely.
+- The governing-skill hook skips v2 flag presence check (early-return).
+- The dispatch-gate hook skips entirely (early-return).
+- The evidence-gate hook uses presence-only path (current behavior).
+
+Existing plans get `canonical_sdlc_version: 1` via the migration sweep (`bash ~/.claude/skills/canonical-sdlc/migrate-frontmatter.sh <plan-file>`). New plans omit the field (defaulting to v2 enforcement) or set `canonical_sdlc_version: 2` explicitly.
+
+**Mode defaults.** Inferred values for `narrative_verbose` and `dispatch_enforce` follow the active mode:
+
+| Mode | `narrative_verbose` default | `dispatch_enforce` default | Step 0.5 required? |
+|---|---|---|---|
+| `autonomous` | `false` | `false` (sprint-1 log-only) | yes |
+| `epic-scope` | `true` | `false` | yes (epic plan) |
+| `incident-response` | `true` | `false` | yes |
+| `design-refresh` | `true` | `false` | yes |
+| `spike` | `false` | `false` | yes (lightweight) |
+
+**Gate:** Plan frontmatter contains `canonical_sdlc_version: 2` plus all 4 v2 opt-in flags and all 8 discriminator flags, with values matching the user's confirmed reply. The user has replied with a string ending in `confirm` or `confirmed`, parsed cleanly against the override DSL. No plan/spec file Write has occurred before this gate.
+
+**Evidence:** A line in `## SDLC State`: `Step 0.5: configured at <ISO-timestamp> via <reply-summary>` (e.g., `Step 0.5: configured at 2026-05-02T14:30Z via "set perf_critical=true, confirm"`). The line is written into the plan file's `## SDLC State` section as soon as Step 3 (Plan) creates the plan file.
 
 ### Step 1 — Ideate (`agent-skills:idea-refine`)
 - **Goal:** Pin scope and non-goals before they get encoded as requirements.
