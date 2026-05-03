@@ -121,4 +121,79 @@ if [ -z "$GOVERNING" ]; then
   exit 2
 fi
 
+# ---------- canonical-sdlc v1/v2 schema enforcement (Wave 1b) ----------
+# Schema reference: docs/bionic/plans/canonical-sdlc-autonomous-redesign.md §1.2.2 + §6.4.
+#
+# Only canonical-sdlc-governed plans are subject to this layer. Plans
+# with other governing skills (e.g. superpowers:writing-plans) keep the
+# basic governing-skill-field-only enforcement above.
+if [ "$GOVERNING" != "canonical-sdlc" ]; then
+  exit 0
+fi
+
+yaml_get() {
+  echo "$FRONTMATTER" \
+    | grep -E "^[[:space:]]*${1}[[:space:]]*:" \
+    | head -1 \
+    | sed -E "s/^[[:space:]]*${1}[[:space:]]*:[[:space:]]*//" \
+    | sed -E 's/[[:space:]]+$//'
+}
+
+SDLC_VERSION=$(yaml_get canonical_sdlc_version)
+
+# Legacy-skip: v1 plans were migrated by Wave 1a's migrate-frontmatter.sh
+# and are grandfathered out of v2 enforcement entirely. Existing
+# governing-skill: field check above is the only requirement for them.
+if [ "$SDLC_VERSION" = "1" ]; then
+  exit 0
+fi
+
+# Missing version marker on a canonical-sdlc plan: block. The migration
+# script and Step 0.5 wizard are the two ways this gets populated;
+# editing a canonical-sdlc plan without either is a process bypass.
+if [ -z "$SDLC_VERSION" ]; then
+  echo "BLOCKED: canonical-sdlc artifact '$BASENAME' is missing the 'canonical_sdlc_version:' frontmatter field." >&2
+  echo "Path: $FILE_PATH" >&2
+  echo "Fix: add one of:" >&2
+  echo "  canonical_sdlc_version: 1   # legacy-grandfathered plan (skips v2 schema enforcement)" >&2
+  echo "  canonical_sdlc_version: 2   # current schema (requires v2 opt-in flags + discriminators when mode is autonomous)" >&2
+  echo "For pre-existing plans, run: bash ~/.claude/skills/canonical-sdlc/migrate-frontmatter.sh '$FILE_PATH'" >&2
+  exit 2
+fi
+
+if [ "$SDLC_VERSION" != "2" ]; then
+  echo "BLOCKED: canonical-sdlc artifact '$BASENAME' has unsupported canonical_sdlc_version: '$SDLC_VERSION'." >&2
+  echo "Path: $FILE_PATH" >&2
+  echo "Fix: set 'canonical_sdlc_version: 1' (legacy) or 'canonical_sdlc_version: 2' (current)." >&2
+  exit 2
+fi
+
+# v2 schema: require all opt-in flags + discriminators only for autonomous
+# mode. Other modes (epic-scope, incident-response, design-refresh, spike)
+# have different rule sets and are out of scope for Wave 1b enforcement.
+MODE=$(yaml_get mode)
+if [ "$MODE" != "autonomous" ]; then
+  exit 0
+fi
+
+REQUIRED_V2_FLAGS=("narrative_verbose" "dispatch_enforce" "cleanup_on_finish" "archived")
+REQUIRED_DISCRIMINATORS=("surface_type" "language" "perf_critical" "security_boundary"
+                         "distributed" "has_ui" "multi_agent" "deploy_target")
+
+MISSING=()
+for flag in "${REQUIRED_V2_FLAGS[@]}" "${REQUIRED_DISCRIMINATORS[@]}"; do
+  if ! echo "$FRONTMATTER" | grep -qE "^[[:space:]]*${flag}[[:space:]]*:"; then
+    MISSING+=("$flag")
+  fi
+done
+
+if [ "${#MISSING[@]}" -gt 0 ]; then
+  echo "BLOCKED: canonical-sdlc autonomous-mode plan '$BASENAME' is missing required v2 frontmatter flags: ${MISSING[*]}" >&2
+  echo "Path: $FILE_PATH" >&2
+  echo "Fix: run Step 0.5 (Configure) to set these explicitly. See SKILL.md §0.5 for the wizard." >&2
+  echo "Required v2 opt-in flags:    ${REQUIRED_V2_FLAGS[*]}" >&2
+  echo "Required discriminator flags: ${REQUIRED_DISCRIMINATORS[*]}" >&2
+  exit 2
+fi
+
 exit 0
