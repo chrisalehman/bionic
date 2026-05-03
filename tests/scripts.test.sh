@@ -654,6 +654,26 @@ expect_true "evidence-gate hook reads evidence_schema from frontmatter" \
 expect_true "evidence-gate hook references the v2 schema literal" \
   grep -qE '"v2"|EVIDENCE_SCHEMA[[:space:]]*=' "$_egate"
 
+# 4q: SKILL.md documents Step 12.5 (post-merge cleanup) — Wave 5 contract
+if [ -f "$_skillmd" ]; then
+  expect_true "SKILL.md has Step 12.5 — Post-merge cleanup section" \
+    grep -qE '^### Step 12\.5 — Post-merge cleanup' "$_skillmd"
+  expect_true "SKILL.md mentions cleanup_on_finish flag" \
+    grep -q 'cleanup_on_finish' "$_skillmd"
+  expect_true "SKILL.md mentions archived flag in cleanup context" \
+    grep -qE 'archived: true|archived flag|archived: <' "$_skillmd"
+  expect_true "SKILL.md mentions cleaned: frontmatter idempotency marker" \
+    grep -qE 'cleaned:' "$_skillmd"
+  expect_true "SKILL.md mentions evidence-archive directory" \
+    grep -qE '\.bionic/evidence-archive' "$_skillmd"
+  # Required Step 12.5 evidence fields per the shape table
+  for _field in narrative-stripped handoff; do
+    expect_true "SKILL.md Step 12.5 mentions ${_field}" grep -q "$_field" "$_skillmd"
+  done
+  # Step 12.5 must appear in the verification shape table itself
+  expect_true "verification shape table has a Step 12.5 row" \
+    grep -qE '\| 12\.5 \|' "$_skillmd"
+fi
 
 # ============================================================
 # SECTION 5: Shell alias marker consistency
