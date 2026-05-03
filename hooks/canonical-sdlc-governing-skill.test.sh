@@ -174,6 +174,165 @@ if ! bash "$HOOK" <<< "$input" >/dev/null 2>&1; then
 fi
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
+# ============================================================
+# Wave 1b: canonical_sdlc_version v1/v2 enforcement
+# ============================================================
+#
+# Schema (from canonical-sdlc-autonomous-redesign.md §1.2.2 and §6.4):
+#   - canonical_sdlc_version: 1 → legacy-skip (v2 enforcement off)
+#   - canonical_sdlc_version: 2 + governing-skill: canonical-sdlc + mode: autonomous
+#       → require all 4 v2 opt-in flags + 8 discriminator flags
+#   - canonical_sdlc_version absent + governing-skill: canonical-sdlc
+#       → block with message naming the missing version field
+#   - non-canonical-sdlc governing-skill (e.g. superpowers:writing-plans)
+#       → version field not enforced (v2 schema is canonical-sdlc-specific)
+
+V1_LEGACY='---
+governing-skill: canonical-sdlc
+sdlc-step: N/A
+epic: N/A
+wave: N/A
+mode: N/A
+canonical_sdlc_version: 1
+evidence_schema: legacy
+created: 2026-04-24
+---
+
+# Body
+'
+
+# Helper to build a v2 plan with optional omissions. Pass the names of
+# flags to omit as args; everything else is included.
+build_v2_plan() {
+  local omit=" $* "
+  local out='---
+governing-skill: canonical-sdlc
+mode: autonomous
+sdlc-step: 5
+canonical_sdlc_version: 2
+'
+  local v2_flags=("narrative_verbose:false" "dispatch_enforce:false" \
+                  "cleanup_on_finish:false" "archived:false")
+  local discriminators=("surface_type:none" "language:none" \
+                        "perf_critical:false" "security_boundary:false" \
+                        "distributed:false" "has_ui:false" \
+                        "multi_agent:false" "deploy_target:none")
+  for kv in "${v2_flags[@]}" "${discriminators[@]}"; do
+    local key="${kv%%:*}"
+    local val="${kv#*:}"
+    case "$omit" in
+      *" $key "*) continue ;;
+    esac
+    out+="${key}: ${val}"$'\n'
+  done
+  out+='---
+
+# Body
+'
+  printf '%s' "$out"
+}
+
+project=$(make_project)
+
+echo "v1 (canonical_sdlc_version: 1, no v2 flags) → allow"
+run_write "$project/docs/bionic/plans/epic-01-demo/wave-01-x.plan.md" "$V1_LEGACY"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+echo "v2 with all 4 opt-in flags + 8 discriminators → allow"
+v2_full=$(build_v2_plan)
+run_write "$project/docs/bionic/plans/epic-01-demo/wave-02-y.plan.md" "$v2_full"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+echo "v2 missing dispatch_enforce → block, error names the flag"
+v2_no_enforce=$(build_v2_plan dispatch_enforce)
+run_write "$project/docs/bionic/plans/epic-01-demo/wave-03-z.plan.md" "$v2_no_enforce"
+assert_eq "exit 2" 2 "$HOOK_EXIT"
+case "$HOOK_STDERR" in
+  *dispatch_enforce*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  error mentions dispatch_enforce\n' ;;
+  *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  error missing dispatch_enforce: %q\n' "$HOOK_STDERR" ;;
+esac
+
+echo "v2 missing surface_type → block, error names the flag"
+v2_no_surface=$(build_v2_plan surface_type)
+run_write "$project/docs/bionic/plans/epic-01-demo/wave-04-q.plan.md" "$v2_no_surface"
+assert_eq "exit 2" 2 "$HOOK_EXIT"
+case "$HOOK_STDERR" in
+  *surface_type*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  error mentions surface_type\n' ;;
+  *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  error missing surface_type: %q\n' "$HOOK_STDERR" ;;
+esac
+
+echo "v2 missing multiple flags → block, error lists all of them"
+v2_multi_missing=$(build_v2_plan archived has_ui multi_agent)
+run_write "$project/docs/bionic/plans/epic-01-demo/wave-05-m.plan.md" "$v2_multi_missing"
+assert_eq "exit 2" 2 "$HOOK_EXIT"
+for flag in archived has_ui multi_agent; do
+  case "$HOOK_STDERR" in
+    *"$flag"*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  error mentions %s\n' "$flag" ;;
+    *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  error missing %s: %q\n' "$flag" "$HOOK_STDERR" ;;
+  esac
+done
+
+echo "canonical-sdlc plan with NO canonical_sdlc_version → block, error names the field"
+no_marker='---
+governing-skill: canonical-sdlc
+mode: autonomous
+sdlc-step: 0
+---
+
+# Body
+'
+run_write "$project/docs/bionic/plans/epic-01-demo/wave-06-n.plan.md" "$no_marker"
+assert_eq "exit 2" 2 "$HOOK_EXIT"
+case "$HOOK_STDERR" in
+  *canonical_sdlc_version*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  error mentions canonical_sdlc_version\n' ;;
+  *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  error missing canonical_sdlc_version: %q\n' "$HOOK_STDERR" ;;
+esac
+
+echo "v2 plan with mode != autonomous → allow (v2 schema only enforced for autonomous)"
+v2_design='---
+governing-skill: canonical-sdlc
+mode: design-refresh
+sdlc-step: 1
+canonical_sdlc_version: 2
+---
+
+# Body
+'
+run_write "$project/docs/bionic/plans/epic-01-demo/wave-07-d.plan.md" "$v2_design"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+echo "non-canonical-sdlc plan (governing-skill: superpowers:writing-plans) without version → allow"
+sp_plan='---
+governing-skill: superpowers:writing-plans
+sdlc-step: 3
+epic: epic-01-demo
+wave: wave-01-x
+mode: full
+---
+
+# Body
+'
+run_write "$project/docs/bionic/plans/epic-01-demo/wave-08-s.plan.md" "$sp_plan"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+echo "v1 legacy with governing-skill present but missing v2 flags → allow (grandfathered)"
+v1_minimal='---
+governing-skill: canonical-sdlc
+mode: autonomous
+canonical_sdlc_version: 1
+---
+
+# Body
+'
+run_write "$project/docs/bionic/plans/epic-01-demo/wave-09-l.plan.md" "$v1_minimal"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+echo "Edit on existing v1-migrated file (simulating live continuation-checkpoint.md) → allow"
+migrated="$project/docs/bionic/plans/epic-01-demo/continuation-checkpoint.md"
+printf '%s' "$V1_LEGACY" > "$migrated"
+run_edit "$migrated" "# Body" "# Updated"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
+
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then
