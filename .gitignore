@@ -10,6 +10,10 @@
 !architecture.png
 !architecture.excalidraw
 
+# Exception: canonical-sdlc skill diagrams (lifecycle, hook chain)
+!skills/canonical-sdlc/diagrams/*.png
+!skills/canonical-sdlc/diagrams/*.excalidraw
+
 # OS
 .DS_Store
 
