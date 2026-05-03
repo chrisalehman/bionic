@@ -1,0 +1,201 @@
+{
+  "schema_version": 1,
+  "default_behavior": "allow",
+  "audit_log": ".bionic/memory/dispatch-audit.md",
+  "phases": {
+    "phase_0_prereqs": [
+      { "default": true, "agent": null,
+        "note": "Main thread runs context-engineering; no specialist dispatch." }
+    ],
+
+    "phase_1_ideate": [
+      { "default": true, "agent": null,
+        "note": "Main thread runs agent-skills:idea-refine. No voltagent ideation specialist exists." }
+    ],
+
+    "phase_2_spec": [
+      { "when": "surface_type == 'api'",
+        "agent": "voltagent-core-dev:api-designer" },
+      { "when": "surface_type == 'graphql'",
+        "agent": "voltagent-core-dev:graphql-architect" },
+      { "when": "surface_type == 'ui'",
+        "agent": "voltagent-core-dev:ui-designer" },
+      { "when": "surface_type == 'system'",
+        "agent": "voltagent-meta:context-manager" },
+      { "default": true, "agent": null,
+        "note": "Main thread runs agent-skills:spec-driven-development." }
+    ],
+
+    "phase_3_plan": [
+      { "when": "multi_agent == true",
+        "agent": "voltagent-meta:agent-organizer" },
+      { "when": "surface_type == 'system'",
+        "agent": "voltagent-meta:workflow-orchestrator" },
+      { "default": true, "agent": null,
+        "note": "Main thread runs superpowers:writing-plans / agent-skills:plan." }
+    ],
+
+    "phase_4_isolate": [
+      { "default": true, "agent": null,
+        "note": "Main thread runs superpowers:using-git-worktrees. No voltagent fit." }
+    ],
+
+    "phase_5_implement": [
+      { "when": "surface_type == 'iac'",
+        "agent": "voltagent-infra:terraform-engineer" },
+      { "when": "surface_type == 'ml'",
+        "agent": "voltagent-data-ai:ml-engineer" },
+      { "when": "surface_type == 'mobile' && language == 'swift'",
+        "agent": "voltagent-lang:swift-expert" },
+      { "when": "surface_type == 'mobile' && language == 'kotlin'",
+        "agent": "voltagent-lang:kotlin-specialist" },
+      { "when": "surface_type == 'mobile'",
+        "agent": "voltagent-core-dev:mobile-developer" },
+      { "when": "surface_type == 'realtime'",
+        "agent": "voltagent-core-dev:websocket-engineer" },
+      { "when": "language == 'rust'",
+        "agent": "voltagent-lang:rust-engineer" },
+      { "when": "language == 'typescript'",
+        "agent": "voltagent-lang:typescript-pro" },
+      { "when": "language == 'javascript'",
+        "agent": "voltagent-lang:javascript-pro" },
+      { "when": "language == 'go'",
+        "agent": "voltagent-lang:golang-pro" },
+      { "when": "language == 'python'",
+        "agent": "voltagent-lang:python-pro" },
+      { "when": "language == 'java'",
+        "agent": "voltagent-lang:java-architect" },
+      { "when": "language == 'csharp'",
+        "agent": "voltagent-lang:csharp-developer" },
+      { "when": "language == 'cpp'",
+        "agent": "voltagent-lang:cpp-pro" },
+      { "when": "language == 'php'",
+        "agent": "voltagent-lang:php-pro" },
+      { "when": "language == 'sql'",
+        "agent": "voltagent-lang:sql-pro" },
+      { "when": "perf_critical == true",
+        "agent": "voltagent-qa-sec:performance-engineer",
+        "note": "perf-critical implementations route to perf-engineer; multi-language perf concerns route here regardless of language flag — list this rule above language rules to invert that." },
+      { "default": true, "agent": null,
+        "note": "Main thread runs agent-skills:incremental-implementation." }
+    ],
+
+    "phase_6_browser_verify": [
+      { "when": "has_ui == true",
+        "agents": [
+          "voltagent-qa-sec:accessibility-tester",
+          "voltagent-qa-sec:qa-expert"
+        ],
+        "parallel": true,
+        "note": "Always pair accessibility + QA when UI is present." },
+      { "default": true, "agent": null,
+        "note": "Main thread runs agent-skills:browser-testing-with-devtools (no UI present, hook checks console + network anyway)." }
+    ],
+
+    "phase_7_verify_done": [
+      { "always": true,
+        "agents": [
+          "voltagent-qa-sec:test-automator",
+          "voltagent-qa-sec:qa-expert"
+        ],
+        "parallel": true,
+        "note": "Test automation + QA strategy run in parallel for every wave." }
+    ],
+
+    "phase_8_review": [
+      { "when": "perf_critical == true && surface_type == 'system'",
+        "agents": [
+          "voltagent-qa-sec:code-reviewer",
+          "voltagent-qa-sec:security-auditor",
+          "voltagent-qa-sec:architect-reviewer",
+          "voltagent-qa-sec:performance-engineer"
+        ],
+        "parallel": true },
+      { "when": "perf_critical == true",
+        "agents": [
+          "voltagent-qa-sec:code-reviewer",
+          "voltagent-qa-sec:security-auditor",
+          "voltagent-qa-sec:performance-engineer"
+        ],
+        "parallel": true },
+      { "when": "surface_type == 'system'",
+        "agents": [
+          "voltagent-qa-sec:code-reviewer",
+          "voltagent-qa-sec:security-auditor",
+          "voltagent-qa-sec:architect-reviewer"
+        ],
+        "parallel": true },
+      { "always": true,
+        "agents": [
+          "voltagent-qa-sec:code-reviewer",
+          "voltagent-qa-sec:security-auditor"
+        ],
+        "parallel": true,
+        "note": "Baseline 5-axis review: code-reviewer + security-auditor always run in parallel." }
+    ],
+
+    "phase_8b_adversarial": [
+      { "when": "security_boundary == true",
+        "agent": "voltagent-qa-sec:penetration-tester" },
+      { "when": "distributed == true",
+        "agent": "voltagent-qa-sec:chaos-engineer" },
+      { "default": true,
+        "agents": [
+          "voltagent-qa-sec:error-detective",
+          "voltagent-qa-sec:debugger"
+        ],
+        "parallel": true,
+        "note": "Default adversarial pair: failure-mode hunter + subtle-bug debugger." }
+    ],
+
+    "phase_9_document": [
+      { "always": true,
+        "agent": "voltagent-dev-exp:documentation-engineer",
+        "note": "ADR/RCA docs always go through the documentation specialist." }
+    ],
+
+    "phase_10_commit": [
+      { "when": "multi_agent == true",
+        "agent": "voltagent-dev-exp:git-workflow-manager" },
+      { "default": true, "agent": null,
+        "note": "Main thread handles atomic commits via agent-skills:git-workflow-and-versioning." }
+    ],
+
+    "phase_11_external_review": [
+      { "default": true, "agent": null,
+        "note": "Main thread runs superpowers:requesting-code-review. No voltagent PR-flow specialist." }
+    ],
+
+    "phase_12_finish": [
+      { "when": "deploy_target == 'migration'",
+        "agent": "voltagent-dev-exp:legacy-modernizer" },
+      { "default": true, "agent": null,
+        "note": "Main thread runs superpowers:finishing-a-development-branch + agent-skills:code-simplification." }
+    ],
+
+    "phase_13_ship": [
+      { "when": "deploy_target == 'k8s'",
+        "agents": [
+          "voltagent-infra:deployment-engineer",
+          "voltagent-infra:kubernetes-specialist",
+          "voltagent-infra:sre-engineer"
+        ],
+        "parallel": true },
+      { "when": "deploy_target == 'vercel'",
+        "agents": [
+          "voltagent-infra:deployment-engineer",
+          "voltagent-infra:sre-engineer"
+        ],
+        "parallel": true },
+      { "when": "deploy_target == 'custom'",
+        "agents": [
+          "voltagent-infra:deployment-engineer",
+          "voltagent-infra:devops-engineer",
+          "voltagent-infra:sre-engineer"
+        ],
+        "parallel": true },
+      { "default": true, "agent": null,
+        "note": "deploy_target == 'none' → main thread + agent-skills:shipping-and-launch." }
+    ]
+  }
+}

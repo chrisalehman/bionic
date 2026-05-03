@@ -169,6 +169,8 @@ Declare the mode at entry. The mode determines which steps apply. **`autonomous`
 
 Mode declaration is reviewable. A feature disguised as a different mode to skip steps is drift with a label; declarations must match the actual work.
 
+**Mode interaction with Step 0.5 (Configure).** The mode determines the inferred defaults for `narrative_verbose` and `dispatch_enforce`, plus whether Step 0.5 is required at all. See the Step 0.5 section below for the full table; in short: every v2 mode (anything except legacy `canonical_sdlc_version: 1` plans) goes through Step 0.5 before Step 1, and the inferred defaults match the mode's evidence discipline (autonomous strips narrative; epic-scope / incident-response / design-refresh keep narrative on by default).
+
 ### `autonomous` mode in particular (the default)
 
 This is the default because Bionic philosophy is "operate autonomously." The mode assumes no human is watching Steps 4–13 in real time, and tightens evidence discipline accordingly:
@@ -350,6 +352,10 @@ Step 5 (Implement) loop:
 ## Always-On Prerequisites
 
 These load at session start, not as numbered steps:
+
+**Session-resume protocol — runs FIRST, before any other prereq.** If a plan file with `governing-skill: canonical-sdlc` and `sdlc-step: < 13` exists in `docs/bionic/plans/` (or other plan-location conventions), treat it as the active plan. Read in this order: frontmatter → `## Handoff` (if present) → `## SDLC State`. Use the handoff's `Resume point` as the literal next action. Confirm baseline by running any command from `Resume protocol`. Then proceed. The handoff is authoritative — whatever it says, the next session does. Do not re-derive state from scattered evidence; the handoff is structurally separated for exactly this purpose. Full handoff schema in the Evidence (three-tier) section below.
+
+
 - **Announce the mode** per the Load-time Announcement section.
 - `agent-skills:context-engineering` — load the right files before work begins.
 - **Memory sweep — recursive.** Read `.bionic/memory/INDEX.md`, `context.md`, AND every file they link to — especially entries under "Deep Context" or equivalent headings. INDEX.md is an *index*, not the whole notebook. Skipping its pointers means missing design decisions already captured in the repo. A stale design picked from an incomplete alternatives set is the #1 autonomous-run failure mode. Plan file conventions: **bionic (canonical)** uses `docs/bionic/plans/epic-NN-<slug>/` per the Taxonomy section; other projects may use `~/.claude/plans/` or `docs/superpowers/plans/` flat. Read prior plans in the active convention as part of the sweep — in bionic, that means walking every existing epic directory, not just the current one, and every existing incident directory.
@@ -364,6 +370,117 @@ Fire on-trigger, not at a fixed step:
 ## Steps
 
 Each step has: **goal** · **action** · **completion gate** · **evidence artifact**.
+
+### Step 0.5 — Configure (entry-gate confirmation phase)
+
+The configuration phase between Always-On Prerequisites (Step 0) and Step 1. **Mandatory for new plans in v2 mode**; skipped for legacy plans (`canonical_sdlc_version: 1`).
+
+**Goal:** Set every plan-shaping flag in plan frontmatter deliberately, with explicit user confirmation. Replaces silent defaults with a single confirmation display so wrong inferences surface before they affect dispatch routing or evidence shape enforcement.
+
+**Action:** The skill executes three sub-steps in order:
+
+1. **Infer recommended values** from available context. Each inference produces a one-line reasoning string shown in the confirmation display so the user can spot bad signals immediately.
+
+   | Flag | Inference signals |
+   |---|---|
+   | `language` | Repo files: `package.json` / `tsconfig.json` → `typescript`/`javascript`; `Cargo.toml` → `rust`; `go.mod` → `go`; `pyproject.toml` / `requirements.txt` → `python`; `pom.xml` / `build.gradle` → `java`; `*.csproj` → `csharp`; `Package.swift` → `swift`; `*.kt`/`build.gradle.kts` → `kotlin`; `composer.json` → `php`; `*.sql`-only repos → `sql`. Default `none` if no marker. |
+   | `surface_type` | Conversation keywords: "REST endpoint" / "HTTP API" → `api`; "GraphQL" / "schema" → `graphql`; "dashboard" / "page" / "component" / "frontend" → `ui`; "Terraform" / "IaC" → `iac`; "ML" / "training" / "model" → `ml`; "WebSocket" / "streaming" / "realtime" → `realtime`; "iOS" / "Android" / "mobile app" → `mobile`; otherwise `system` (backend service work) or `none`. |
+   | `has_ui` | Same conversation scan — true if "UI" / "dashboard" / "page" / "component" appears. |
+   | `security_boundary` | Keywords "auth" / "authn" / "authz" / "secret" / "token" / "credential" / "PII" / "encryption" / "signing". |
+   | `perf_critical` | Keywords "performance" / "latency" / "throughput" / "p99" / "hot path" / "benchmark". |
+   | `distributed` | Keywords "queue" / "replica" / "sharded" / "service mesh" / "eventually consistent" / "leader election". |
+   | `multi_agent` | Heuristic: more than 3 voltagent specialties match across the inferred phases (e.g., a UI plan that also touches IaC and ML triggers true). |
+   | `deploy_target` | Keywords "k8s" / "kubernetes" → `k8s`; "Vercel" / "Next.js deploy" → `vercel`; "deploy" without specifics → `custom`; "data migration" / "schema change" → `migration`; no deploy mentioned → `none`. |
+   | `narrative_verbose` | Mode default — `autonomous` → `false`; `epic-scope` / `incident-response` / `design-refresh` → `true`; `spike` → `false`. |
+   | `dispatch_enforce` | Sprint-1 default `false` (log-only). The user can flip to `true` once the dispatch-audit log shows rules are calibrated for their domain. |
+   | `cleanup_on_finish` | Default `false` (opt-in). Recommended `true` for `autonomous` once the cleanup procedure is exercised. |
+   | `archived` | Default `false`. When `true`, Step 12.5 writes a pre-cleanup snapshot to `.bionic/evidence-archive/`. |
+
+2. **Present the confirmation display.** One structured block, not multiple `AskUserQuestion` calls. The literal output the skill produces:
+
+   ```
+   ═══ Plan Configuration — confirm before Step 1 ═══
+   slug: <inferred-from-conversation>
+   mode: autonomous
+
+   v2 opt-in flags:
+     narrative_verbose:  false   [strip narrative tier — recommended for autonomous]
+     dispatch_enforce:   false   [opt-in for sprint 1; flip default after evaluation]
+     cleanup_on_finish:  false   [run Step 12.5 evidence cleanup on close]
+     archived:           false   [archive on cleanup]
+
+   Discriminator flags:
+     surface_type:       api          [inferred: "REST endpoint" in convo]
+     language:           typescript   [inferred: tsconfig.json + package.json]
+     perf_critical:      false        [no perf signal — please confirm]
+     security_boundary:  false        [no auth/crypto signal — please confirm]
+     distributed:        false        [single service]
+     has_ui:             false        [no UI mentioned]
+     multi_agent:        false        [single SDLC plan]
+     deploy_target:      none         [no deploy signal]
+
+   Reply "confirm" to accept, or specify overrides:
+     e.g. "set perf_critical=true, set has_ui=true, then confirm"
+   ```
+
+   Each flag line is `  <flag>: <value> [<reasoning-or-recommendation>]`. The bracketed annotation is part of the display so the user sees the *why* and can challenge bad inferences. Recommendations like "please confirm" appear when an inference signal was absent and the skill is showing a default.
+
+3. **Block until explicit confirmation.** No timeout, no implicit acceptance, no skipping ahead. The skill cannot write any plan/spec file until the user reply matches the override DSL grammar.
+
+**Override DSL grammar.** The user's reply is parsed against:
+
+```
+reply        := overrides? "confirm"
+overrides    := override ("," override)* ","?
+override     := "set" flag "=" value
+              | "change" flag "to" value
+flag         := <known flag name from frontmatter schema>
+value        := <validates against the flag's allowed values>
+```
+
+Accepted reply forms:
+- `confirm` — accept all defaults verbatim.
+- `set perf_critical=true, confirm` — single override.
+- `set surface_type=graphql, set language=python, confirm` — multiple overrides.
+- `change surface_type to graphql, confirm` — natural-language form.
+- A complete YAML block replacing the proposed values, ending with `confirm`.
+
+Rejected (skill re-prompts with the reason):
+- Reply that doesn't end with `confirm` or `confirmed`.
+- Override referencing an unknown flag name.
+- Override with a value not in the flag's allowed set (e.g. `set surface_type=zigzag`).
+
+On accept, the skill writes the final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line, no abbreviation, no defaults compaction. The plan file then carries `canonical_sdlc_version: 2` plus all 12 v2 flags (4 opt-in + 8 discriminator), satisfying the governing-skill hook's v2 schema check.
+
+**Three-layer enforcement.** Step 0.5 is the soft layer; it's backed by hooks for failure recovery:
+
+- **Layer 1 — Soft (this skill).** SKILL.md mandates Step 0.5 between Step 0 and Step 1. Do not proceed past Step 0.5 without explicit user confirmation. This is the primary path — most plan creations go through it.
+- **Layer 2 — Hard (`canonical-sdlc-governing-skill.sh`).** Runs on `PreToolUse|Write,Edit` of any canonical-sdlc plan/spec/adr/continuation file. For `governing-skill: canonical-sdlc` + `mode: autonomous` + `canonical_sdlc_version: 2`, requires all 4 v2 opt-in flags + all 8 discriminator flags. Missing any → exit 2 with a message naming the missing flags.
+- **Layer 3 — Backstop.** If Step 0.5 was skipped (sloppy plan creation, copy-paste from an older plan, agent autopilot), Layer 2 catches the missing flags on the first `Write` of the plan file. The agent gets a clear error listing what's missing, retries via Step 0.5. Wastes one tool call but cannot ship a misconfigured plan.
+
+**Mid-plan reconfiguration.** If the user wants to flip a flag mid-plan (e.g. realizes `perf_critical` should be `true` halfway through), edit the plan-doc frontmatter directly. The dispatch-gate hook reads frontmatter fresh on every `Agent` call (no caching), so the new value takes effect immediately. There is no `canonical-sdlc reconfigure` command and no special skill state — keeping the surface area minimal. If reconfiguration turns out to be common, this rule will be revisited; expect it to remain rare.
+
+**Legacy plan handling.** Plans with `canonical_sdlc_version: 1` in frontmatter are grandfathered out:
+- Step 0.5 is **not** required for legacy plans. The skill skips it entirely.
+- The governing-skill hook skips v2 flag presence check (early-return).
+- The dispatch-gate hook skips entirely (early-return).
+- The evidence-gate hook uses presence-only path (current behavior).
+
+Existing plans get `canonical_sdlc_version: 1` via the migration sweep (`bash ~/.claude/skills/canonical-sdlc/migrate-frontmatter.sh <plan-file>`). New plans omit the field (defaulting to v2 enforcement) or set `canonical_sdlc_version: 2` explicitly.
+
+**Mode defaults.** Inferred values for `narrative_verbose` and `dispatch_enforce` follow the active mode:
+
+| Mode | `narrative_verbose` default | `dispatch_enforce` default | Step 0.5 required? |
+|---|---|---|---|
+| `autonomous` | `false` | `false` (sprint-1 log-only) | yes |
+| `epic-scope` | `true` | `false` | yes (epic plan) |
+| `incident-response` | `true` | `false` | yes |
+| `design-refresh` | `true` | `false` | yes |
+| `spike` | `false` | `false` | yes (lightweight) |
+
+**Gate:** Plan frontmatter contains `canonical_sdlc_version: 2` plus all 4 v2 opt-in flags and all 8 discriminator flags, with values matching the user's confirmed reply. The user has replied with a string ending in `confirm` or `confirmed`, parsed cleanly against the override DSL. No plan/spec file Write has occurred before this gate.
+
+**Evidence:** A line in `## SDLC State`: `Step 0.5: configured at <ISO-timestamp> via <reply-summary>` (e.g., `Step 0.5: configured at 2026-05-02T14:30Z via "set perf_critical=true, confirm"`). The line is written into the plan file's `## SDLC State` section as soon as Step 3 (Plan) creates the plan file.
 
 ### Step 1 — Ideate (`agent-skills:idea-refine`)
 - **Goal:** Pin scope and non-goals before they get encoded as requirements.
@@ -512,6 +629,59 @@ This is the "walk away" boundary. After the plan file is complete:
 - **Gate:** The wave branch's tip commit is an ancestor of the integration branch's tip (`git merge-base --is-ancestor <wave-tip> <integration-branch>` exits 0), OR a `## Wake Note` documents the park. Worktree is removed.
 - **Evidence:** Merge SHA recorded in `## SDLC State` as Step 12's line; `git log --oneline <integration-branch>` showing the merge; worktree absent from `git worktree list`. For parked branches: Wake Note content.
 
+### Step 12.5 — Post-merge cleanup (opt-in via `cleanup_on_finish`)
+
+Runs **after Step 12's merge commit, before Step 13**. Strips narrative cruft from the plan body while preserving every byte of verification evidence and (when multi-session) the full handoff section. Only fires when frontmatter declares `cleanup_on_finish: true`; default is `false`.
+
+**Goal:** Produce a clean post-merge plan record. Cruft accumulates during execution — navigation pointers, restated state, repeated `Phase N: N/A` rows, in-summary paragraphs — and bloats the durable record. Step 12.5 trims that without touching anything load-bearing for audit.
+
+**When `cleanup_on_finish: false`** (the default in sprint-1 rollout): Step 12.5 is skipped entirely. Record `Step 12.5: n/a: cleanup_on_finish=false` in `## SDLC State` and proceed to Step 13.
+
+**When `cleanup_on_finish: true`** — execute this procedure in the same session as Step 12, before declaring the run complete:
+
+1. **Idempotency check.** Read frontmatter `cleaned:` field. If already set, this is a re-run — record `Step 12.5: n/a: already cleaned <date>` and stop. Step 12.5 is one-shot per plan.
+2. **Identify what's keep-verbatim.** Verification tier (every `Step N:` block in `## SDLC State`, all per-step body sections referenced by pointer steps — Phase 1 6-lenses + Q&A + Not Doing, Phase 2 acceptance criteria `R1..RN`, Phase 3 step list + critical-files list, Phase 7 test counts, Phase 8 5-axis review, Phase 8b critic findings, `## Assumptions`). Frontmatter. Approval-checkpoint lines that reference acceptance criteria. None of this is modified.
+3. **Decide handoff fate.** Read `## Handoff` if present. If frontmatter `session-count: 1` or no handoff section was ever written, the plan was single-session — remove the handoff section entirely (no longer needed for resume). If multi-session (`session-count >= 2`), preserve the handoff section verbatim as part of the durable record.
+4. **Strip narrative cruft.** For each pattern flagged by the narrative-tier rules (see Evidence (three-tier) → narrative tier), replace the matched section with a one-line summary:
+   - 8-line approval paragraph → `Phase 3 approved 2026-MM-DD (see archive for full text).`
+   - "In summary…" / "To recap…" trailing blocks → deleted.
+   - Navigation pointers (`Phase 3: see § Phase 3 section`) → deleted.
+   - Restated state (`- mode:` / `- current:` outside frontmatter) → deleted (state lives in frontmatter, period).
+5. **Consolidate skipped-phase rows.** Replace per-phase `Phase N: N/A — <reason>` lines in `## SDLC State` with one summary line:
+   - Before: 4 separate rows for steps 6, 9, 11, 13.
+   - After: `Skipped: 6 (no UI), 9 (no decisions), 11 (PR-less workflow), 13 (no deploy target).`
+6. **Optional archive.** When frontmatter has `archived: true`, write a pre-cleanup snapshot to `.bionic/evidence-archive/<YYYY-MM-DD>-<plan-slug>.md` BEFORE applying any of steps 4-5 above. Archive frontmatter:
+
+   ```yaml
+   ---
+   archived-from: docs/bionic/plans/<slug>/<wave>.plan.md
+   archived-at: <ISO-timestamp>
+   plan-mode: <mode>
+   plan-merge-sha: <40-hex from Step 12>
+   ---
+   ```
+
+   Body: full original plan content, untouched. The archive is append-only audit history; the live plan continues to evolve in rare reopen-for-follow-up cases. When `archived: false` (default), no snapshot is written — verification + handoff in the live plan are sufficient.
+7. **Update frontmatter.** Set `cleaned: <today-ISO-date>`. Future Step 12.5 runs short-circuit on this marker (idempotent).
+8. **Append Step 12.5 evidence.** Add a row to `## SDLC State`:
+
+   ```
+   Step 12.5:
+     cleanup: ok
+     archived: <archive-path-or-na>
+     narrative-stripped: <count of sections collapsed>
+     handoff: <kept-or-stripped>
+   ```
+
+   Or, when skipped: `Step 12.5: n/a: cleanup_on_finish=false`.
+9. **Commit the cleanup as a follow-up commit** with message `chore(plan): post-merge cleanup of <plan-slug>`. Separate commit so the cleanup diff is auditable in isolation from the wave's substantive work. The commit body lists: archive path (or `n/a`), narrative-stripped count, handoff fate, line-count delta.
+
+**Gate:** Frontmatter has `cleaned: <today>`. `## SDLC State` has a Step 12.5 evidence row matching the v2 verification shape (or `n/a: cleanup_on_finish=false`). If `archived: true`, the archive file exists and is a byte-for-byte copy of the pre-cleanup plan body. Verification evidence in the live plan is unchanged from pre-cleanup.
+
+**Evidence:** The Step 12.5 row itself; the archive path (when `archived: true`); the cleanup commit SHA.
+
+**What this is NOT:** Step 12.5 is not stale-plan cleanup (sweeping plans untouched for 30 days). That's tracked separately as a follow-up. Step 12.5 only fires after Step 12's merge commit, on the plan that was just merged. Long-tail cleanup of historical plans is out of scope for this redesign.
+
 ### Step 13 — Ship (`agent-skills:shipping-and-launch`)
 - **Goal:** Production gate with pre-launch checklist, monitoring, rollback.
 - **Action:** Run checklist; configure CI/CD (`agent-skills:ci-cd-and-automation`) if new pipelines needed. **Before declaring the wave complete**, emit `docs/bionic/plans/epic-NN-<slug>/continuation.md` summarizing the wave, the next wave, and open carry-overs (see *Continuation Artifacts* below). Always produced for wave-mode work — a wave without a continuation artifact is an unfinished wave.
@@ -576,6 +746,187 @@ When advancing from one step to the next, announce the transition explicitly in-
 
 Then invoke `Skill` to load the governing skill, or verify it's already loaded. The skill stays dominant until the next transition. Do not silently bleed instructions from a prior step's governing skill into the next step's artifact.
 
+## Evidence (three-tier)
+
+Evidence in canonical-sdlc plans falls into three tiers. Each tier has different rules for when it's written, who consumes it, and whether the hook enforces shape.
+
+| Tier | Always present? | Controlled by | Enforced by |
+|---|---|---|---|
+| **Verification** | Yes — mandatory | (no flag) | `canonical-sdlc-evidence-gate.sh` (presence + shape on v2 plans) |
+| **Handoff** | Only when plan spans sessions | (no flag — driven by session-end trigger) | Skill prose + Stop-hook checkpoint |
+| **Narrative** | Optional | `narrative_verbose: true` | Skill prose (warns when off; never blocks) |
+
+Verification records what was confirmed. Handoff carries the cross-session contract. Narrative is optional commentary. Each tier exists to solve a different problem; they don't substitute for each other.
+
+### Verification tier — mandatory, shape-checked
+
+Every step has an evidence artifact recorded as a line (or block) under `Step N:` in the plan's `## SDLC State` section. The evidence-gate hook (a `PreToolUse|Bash` hook on `git commit`) enforces presence: missing or placeholder text (TODO / pending / TBD / etc.) blocks the commit.
+
+For plans with `evidence_schema: v2` in frontmatter, the hook additionally enforces the per-step **shape table**:
+
+| Step | Required fields under `Step N:` | Notes |
+|------|---------------------------------|-------|
+| 0 | `prereqs: ok` | Smoke-test that the SDLC run is set up |
+| 1 | Pointer to `## Phase 1` body (6-lenses + Q&A + Not Doing) | Pointer-only at hook level; body shape is skill responsibility |
+| 2 | Pointer to spec body containing `R1..RN` acceptance criteria | At least 3 R-rows by skill convention |
+| 3 | Pointer to plan body containing ordered step list + critical-files list | Step count ≥ 1, critical-files non-empty |
+| 4 | `worktree:`, `base-sha:`, `branch:` | Verifiable against `git worktree list` |
+| 5 | Pointer to slice list (`abc1234 RED test`, `def5678 GREEN passing`) | At least 1 slice |
+| 6 | `devtools-trace: <path>` OR `n/a: <reason>` | Reason mandatory if skipped |
+| 7 | `cmd:`, `pass:`, `total:`, `output:` | `pass` and `total` must be integers; `pass == total` required to close the step |
+| 8 | Pointer to 5-axis review body (Correctness / Readability / Architecture / Security / Performance) | All 5 axes; PASS / FLAG / FAIL each |
+| 8b | Pointer to critic findings table (or `Findings: none`) | At least one finding row or explicit "none" |
+| 9 | `adr: <path>` OR `rca: <path>` (incident-response) OR `n/a: <reason>` | Pick one |
+| 10 | `commit:`, `subject:`, `files:` | Subject follows project commit-message convention |
+| 11 | `pr: <url>` OR `n/a: <reason>` | Local-merge workflows: `n/a: PR-less workflow` |
+| 12 | `merge:`, `worktree-removed:` | `git worktree list` confirms `worktree-removed: yes` |
+| 12.5 | `cleanup:`, `archived:`, `narrative-stripped:`, `handoff:` OR `n/a: cleanup_on_finish=false` | Only fires when `cleanup_on_finish: true` in frontmatter; `cleaned:` marker makes re-runs no-ops |
+| 13 | `deploy:`, `verified-at:`, `monitor:` OR `n/a: <reason>` | `n/a` only valid when `deploy_target: none` in frontmatter |
+
+Pointer steps (1, 2, 3, 5, 8, 8b) are presence-only at the hook level — the body shape (R-rows, critic findings, etc.) is the skill's responsibility, not the hook's, in v1. The hook will gain body validators if drift becomes a regression vector.
+
+**Block format.** When a step has multiple required fields, write them as YAML-style key/value lines indented under the `Step N:` header:
+
+```
+Step 7:
+  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: docs/bionic/plans/<slug>.plan.md#step-7
+```
+
+For single-line evidence (pointer steps, or steps with one field), the inline form is fine: `Step 5: docs/bionic/plans/<slug>.plan.md#phase-5`.
+
+**Backwards compatibility.** Plans with `evidence_schema: legacy` (or no `evidence_schema` field — the default for pre-v2 plans) skip shape enforcement entirely. The hook reverts to its pre-redesign behavior: presence + placeholder check only. Migration of existing plans is via `~/.claude/skills/canonical-sdlc/migrate-frontmatter.sh`, which sets `evidence_schema: legacy` so in-flight plans are unaffected.
+
+### Narrative tier — opt-in via `narrative_verbose`
+
+Mode-keyed defaults (set by Step 0.5):
+
+| Mode | `narrative_verbose` default | Rationale |
+|---|---|---|
+| `autonomous` | `false` | Plan is execution record, not deliverable; strip narrative cruft |
+| `epic-scope` | `true` | Synthesis IS the artifact |
+| `incident-response` | `true` | RCA narrative is the deliverable |
+| `design-refresh` | `true` | Rationale is part of the handoff to design reviewers |
+| `spike` | `false` | Timeboxed; no deliverable |
+
+When `narrative_verbose: false`, these patterns are **discouraged** in plan body (warned, never blocked):
+
+- `^Phase \d+: see` — navigation pointers (`Phase 3: see § Phase 3 section`)
+- `^- mode:` / `^- current:` outside frontmatter — restated state (state lives in frontmatter, period)
+- Repeated `^Phase \d+: N/A` lines — collapse target for Step 12.5 cleanup
+- Approval-checkpoint narrative blocks that don't reference acceptance criteria
+- Trailing summaries (`In summary…`, `To recap…`)
+
+When `narrative_verbose: true`, the same patterns are tolerated:
+
+- Plan may include narrative summaries between phase sections.
+- Step 1 6-lenses can be prose (default: bullet form).
+- Q&A resolution can include rationale beyond decision (default: decision only).
+- Approval checkpoints get full narrative (default: one-line "Approved by user 2026-MM-DD").
+
+The flag is sticky per plan. Most autonomous plans default to `false`.
+
+**Important:** `narrative_verbose` controls only the narrative tier. Verification and handoff are unaffected — a plan with `narrative_verbose: false` still produces full verification evidence at every step and a full handoff section when multi-session.
+
+### Handoff tier — multi-session contract
+
+Multi-session plans need fidelity across context resets, compactions, and pause/resume. Handoff is its own tier — separate from verification (records what was confirmed) and narrative (optional commentary). It's always preserved when a plan spans sessions, regardless of `narrative_verbose`.
+
+#### Handoff section schema
+
+A `## Handoff` section in the plan-doc body. Always preserved regardless of `narrative_verbose`. Per-field caps prevent unbounded growth:
+
+```markdown
+## Handoff
+<!-- Always preserved regardless of narrative_verbose. Updated at session end. -->
+
+### Resume point
+step: 5
+sub-task: "implement predicate evaluator in canonical-sdlc-dispatch-gate.sh"
+worktree: .worktrees/dispatch-hardening
+branch: dispatch-hardening
+last-commit: abc1234
+session-count: 2
+
+### Decisions ratified this session
+<!-- max 5 bullets, ≤120 chars each. RESET each session. -->
+- Step 0.5 confirmation uses single AskUserQuestion + DSL override
+- last_dispatched field dropped (mtime churn risk vs evidence-gate)
+
+### Tried and rejected
+<!-- max 5; "approach → reason rejected" form, ≤200 chars each. PERSISTS across sessions. -->
+- PreToolUse|Bash for Agent calls — Agent calls don't go through Bash matcher
+- Sidecar JSON for last_dispatched — reintroduces dual-source state
+
+### Discovered surprises
+<!-- max 5, ≤200 chars. Things future-you wouldn't infer from code. PERSISTS. -->
+- evidence-gate scans newest-mtime; frontmatter writes shift active-plan ordering
+
+### Open blockers
+<!-- max 5; each blocks specific step -->
+- step 5 blocked on Q8 user decision (migration script location)
+
+### Uncommitted work
+<!-- file + state, max 10 -->
+- hooks/canonical-sdlc-dispatch-gate.sh: created, predicate-eval not implemented
+
+### Resume protocol
+<!-- one paragraph, ≤300 chars. Literal first instructions for next session. -->
+Next session: read this handoff, then frontmatter, then `## SDLC State`. Continue at step 5 from sub-task above. Apply Q8 decision once user supplies. Run `bash test.sh` to confirm baseline before resuming.
+```
+
+#### Triggers — when handoff is written/updated
+
+Three trigger conditions, all skill-mandated:
+
+1. **Session end mid-plan.** `Stop` event fires while frontmatter `sdlc-step: < 13`. The skill writes/updates `## Handoff` before letting the session end.
+2. **Context-compaction risk.** When context utilization approaches the compression threshold (~90% by default), the skill proactively writes the handoff so in-progress state survives the compaction.
+3. **Explicit user trigger.** A `/checkpoint` command (or equivalent) invoked by the user — manual save point.
+
+The skill **rewrites the section in place** each trigger. Never appends. Handoff is bounded; it does not grow across sessions. A 3-session plan has the same handoff size as a 1-session plan.
+
+#### Persistence model
+
+Each handoff field falls into one of two persistence classes:
+
+**Session-scoped** (reset each session):
+- `Decisions ratified this session` — captures what was decided since the last handoff. New session starts a new list.
+
+**Cross-session** (persist across sessions; capped per-field):
+- `Resume point` — overwritten with current state.
+- `Tried and rejected` — appended within session, persists across; deduplicated; oldest entries fall off the cap.
+- `Discovered surprises` — same persistence rule as Tried-and-rejected.
+- `Open blockers` — current snapshot; closed blockers are removed.
+- `Uncommitted work` — current snapshot; committed files are removed.
+- `Resume protocol` — overwritten each session.
+
+#### Token economy
+
+Per-field caps keep the section bounded:
+
+| Field | Cap | Worst-case cost |
+|---|---|---|
+| Resume point | 6 lines | ~250 chars |
+| Decisions this session | 5 × 120 chars | ~600 chars |
+| Tried and rejected | 5 × 200 chars | ~1000 chars |
+| Discovered surprises | 5 × 200 chars | ~1000 chars |
+| Open blockers | 5 × 150 chars | ~750 chars |
+| Uncommitted work | 10 × 100 chars | ~1000 chars |
+| Resume protocol | 1 × 300 chars | ~300 chars |
+| **Section total** | | **~5000 chars / ~1300 tokens** |
+
+Read in full at session resume; not consumed during normal step work. Strictly smaller and strictly more useful than the legacy "(pending)-laced plan that drifts across sessions" pattern.
+
+#### When handoff is NOT written
+
+Single-session plans never get a handoff section. The triggers above only fire when the plan spans sessions or is at risk of doing so. If a plan picks up a handoff mid-pause and then closes within the resumed session, Step 12.5 cleanup (when `cleanup_on_finish: true`) strips the handoff because it's no longer needed for resume.
+
+#### Independence from `narrative_verbose`
+
+Handoff and narrative are independent tiers. Handoff is always kept when multi-session, regardless of `narrative_verbose`. This is the central design move that resolves the tension between "I don't read narrative evidence" and "I need handoff fidelity for multi-session plans" — handoff is structurally separated so it can be preserved while narrative is stripped.
+
 ## Continuation Artifacts
 
 Long-running epics span sessions. Continuation artifacts make session handoff automatic.
@@ -601,6 +952,8 @@ Zero user interaction. When the next session starts, it reads `continuation-chec
 Bionic installs `canonical-sdlc-evidence-gate.sh` as a `PreToolUse|Bash` hook. On any `git commit`, the hook locates the most recent plan file across `docs/bionic/plans/` (recursively across epic directories), `docs/bionic/incidents/` (incident-response), `docs/superpowers/plans/`, and `~/.claude/plans/`, reads the `## SDLC State` section, and **blocks the commit (exit 2) if the current step's evidence artifact is missing or unreadable**. The hook accepts both `Step N:` (current) and `Phase N:` (legacy) line formats for backward compatibility with in-flight plans.
 
 Plans without an `## SDLC State` section pass through unblocked — the hook only enforces against canonical-sdlc runs.
+
+**v2 shape enforcement.** When the plan's frontmatter declares `evidence_schema: v2`, the hook also validates the per-step shape table (see Evidence (three-tier) → verification tier). Missing required fields under `Step N:` block the commit with an error naming the missing field(s). Plans with `evidence_schema: legacy` (or no `evidence_schema` field) keep the original presence-only behavior — pre-v2 plans are unaffected. Pointer steps (1, 2, 3, 5, 8, 8b) are presence-only at the hook level; their body shape is the skill's responsibility, not the hook's.
 
 ## Governing-Skill Hook
 
