@@ -599,6 +599,28 @@ for hook in "${REPO}/hooks/"*.sh; do
 done
 expect_true "hooks/ contains at least one non-test hook" [ "$_hook_count" -gt 0 ]
 
+# 4n: SKILL.md documents Step 0.5 (Configure) — Wave 3 contract
+_skillmd="${REPO}/skills/canonical-sdlc/SKILL.md"
+expect_true "canonical-sdlc/SKILL.md exists" [ -f "$_skillmd" ]
+if [ -f "$_skillmd" ]; then
+  expect_true "SKILL.md has a Step 0.5 — Configure section" \
+    grep -qE '^### Step 0\.5 — Configure' "$_skillmd"
+  expect_true "SKILL.md references the override DSL keyword 'set'" \
+    grep -qE '\bset[[:space:]]+[a-z_]+=' "$_skillmd"
+  expect_true "SKILL.md references the override DSL keyword 'change ... to'" \
+    grep -qE '\bchange[[:space:]]+[a-z_]+[[:space:]]+to[[:space:]]' "$_skillmd"
+  expect_true "SKILL.md mentions confirm reply" \
+    grep -qE '"confirm"|`confirm`|reply.*confirm' "$_skillmd"
+  # All 4 v2 opt-in flags appear in Step 0.5
+  for _flag in narrative_verbose dispatch_enforce cleanup_on_finish archived; do
+    expect_true "SKILL.md Step 0.5 mentions ${_flag}" grep -q "$_flag" "$_skillmd"
+  done
+  # All 8 discriminator flags appear in Step 0.5
+  for _flag in surface_type language perf_critical security_boundary distributed has_ui multi_agent deploy_target; do
+    expect_true "SKILL.md Step 0.5 mentions ${_flag}" grep -q "$_flag" "$_skillmd"
+  done
+fi
+
 # ============================================================
 # SECTION 5: Shell alias marker consistency
 # ============================================================
