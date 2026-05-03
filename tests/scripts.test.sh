@@ -570,7 +570,26 @@ expect_true "MANAGED_HOOKS includes canonical-sdlc-evidence-gate.sh as PreToolUs
 expect_true "MANAGED_HOOKS includes memory-commit-save.sh as PostToolUse|Bash" \
   grep -qE '^\s*"PostToolUse\|Bash\|.*memory-commit-save\.sh"' "$BOOTSTRAP"
 
-# 4j: hooks/ dir contains at least one non-test hook
+# 4j: MANAGED_HOOKS includes canonical-sdlc-dispatch-gate.sh as a PreToolUse|Agent hook
+expect_true "MANAGED_HOOKS includes canonical-sdlc-dispatch-gate.sh as PreToolUse|Agent" \
+  grep -qE '^\s*"PreToolUse\|Agent\|.*canonical-sdlc-dispatch-gate\.sh"' "$BOOTSTRAP"
+
+# 4k: bootstrap seeds .bionic/sdlc-dispatch-rules.json from the canonical-sdlc skill template
+expect_true "bootstrap references the dispatch-rules template path" \
+  grep -q 'skills/canonical-sdlc/sdlc-dispatch-rules\.json' "$BOOTSTRAP"
+expect_true "bootstrap idempotency: only seeds when target missing" \
+  grep -qE 'if \[ ! -f "\$rules_target" \]|if \[ -f "\$rules_target" \]' "$BOOTSTRAP"
+
+# 4l: tracked rules-JSON template is valid JSON with all 14 phases + 8b
+_rules_template="${REPO}/skills/canonical-sdlc/sdlc-dispatch-rules.json"
+expect_true "rules template exists" [ -f "$_rules_template" ]
+if [ -f "$_rules_template" ]; then
+  expect_true "rules template is valid JSON" jq empty "$_rules_template"
+  _phase_count="$(jq '.phases | length' "$_rules_template" 2>/dev/null)"
+  expect_eq "rules template covers 14 phases + 8b (15 keys)" "15" "$_phase_count"
+fi
+
+# 4m: hooks/ dir contains at least one non-test hook
 _hook_count=0
 for hook in "${REPO}/hooks/"*.sh; do
   [ -f "$hook" ] || continue
