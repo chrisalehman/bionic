@@ -526,6 +526,7 @@ MANAGED_HOOKS=(
   "PreToolUse|Bash|~/.claude/hooks/canonical-sdlc-evidence-gate.sh"
   "PreToolUse|Write|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
+  "PreToolUse|Agent|~/.claude/hooks/canonical-sdlc-dispatch-gate.sh"
   "PostToolUse|Bash|~/.claude/hooks/memory-commit-save.sh"
   "Stop||~/.claude/hooks/memory-update.sh"
   "SessionStart|startup|~/.claude/hooks/memory-cleanup.sh"
@@ -572,6 +573,28 @@ if [ "$hooks_added" -gt 0 ]; then
   echo "✓ (added ${hooks_added} hook entries)"
 else
   echo "✓ (already configured)"
+fi
+echo ""
+
+# ─── Project-local seeds ────────────────────────────────────────────────────
+#
+# canonical-sdlc-dispatch-gate.sh reads `.bionic/sdlc-dispatch-rules.json`
+# from each project root. We seed the bionic repo's local copy from the
+# canonical-sdlc skill's tracked template if missing — idempotent so user
+# edits to the project copy are never overwritten. Other projects can opt
+# in by copying ~/.claude/skills/canonical-sdlc/sdlc-dispatch-rules.json
+# into their own .bionic/ dir.
+echo -n "Project-local dispatch rules: "
+rules_template="${SCRIPT_DIR}/skills/canonical-sdlc/sdlc-dispatch-rules.json"
+rules_target="${SCRIPT_DIR}/.bionic/sdlc-dispatch-rules.json"
+if [ ! -f "$rules_template" ]; then
+  echo "✗ (template missing: ${rules_template})"
+elif [ -f "$rules_target" ]; then
+  echo "✓ (already deployed: ${rules_target})"
+else
+  mkdir -p "${SCRIPT_DIR}/.bionic"
+  cp "$rules_template" "$rules_target"
+  echo "✓ (seeded ${rules_target})"
 fi
 echo ""
 
