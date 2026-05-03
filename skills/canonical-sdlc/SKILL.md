@@ -352,6 +352,10 @@ Step 5 (Implement) loop:
 ## Always-On Prerequisites
 
 These load at session start, not as numbered steps:
+
+**Session-resume protocol — runs FIRST, before any other prereq.** If a plan file with `governing-skill: canonical-sdlc` and `sdlc-step: < 13` exists in `docs/bionic/plans/` (or other plan-location conventions), treat it as the active plan. Read in this order: frontmatter → `## Handoff` (if present) → `## SDLC State`. Use the handoff's `Resume point` as the literal next action. Confirm baseline by running any command from `Resume protocol`. Then proceed. The handoff is authoritative — whatever it says, the next session does. Do not re-derive state from scattered evidence; the handoff is structurally separated for exactly this purpose. Full handoff schema in the Evidence (three-tier) section below.
+
+
 - **Announce the mode** per the Load-time Announcement section.
 - `agent-skills:context-engineering` — load the right files before work begins.
 - **Memory sweep — recursive.** Read `.bionic/memory/INDEX.md`, `context.md`, AND every file they link to — especially entries under "Deep Context" or equivalent headings. INDEX.md is an *index*, not the whole notebook. Skipping its pointers means missing design decisions already captured in the repo. A stale design picked from an incomplete alternatives set is the #1 autonomous-run failure mode. Plan file conventions: **bionic (canonical)** uses `docs/bionic/plans/epic-NN-<slug>/` per the Taxonomy section; other projects may use `~/.claude/plans/` or `docs/superpowers/plans/` flat. Read prior plans in the active convention as part of the sweep — in bionic, that means walking every existing epic directory, not just the current one, and every existing incident directory.
@@ -689,6 +693,186 @@ When advancing from one step to the next, announce the transition explicitly in-
 
 Then invoke `Skill` to load the governing skill, or verify it's already loaded. The skill stays dominant until the next transition. Do not silently bleed instructions from a prior step's governing skill into the next step's artifact.
 
+## Evidence (three-tier)
+
+Evidence in canonical-sdlc plans falls into three tiers. Each tier has different rules for when it's written, who consumes it, and whether the hook enforces shape.
+
+| Tier | Always present? | Controlled by | Enforced by |
+|---|---|---|---|
+| **Verification** | Yes — mandatory | (no flag) | `canonical-sdlc-evidence-gate.sh` (presence + shape on v2 plans) |
+| **Handoff** | Only when plan spans sessions | (no flag — driven by session-end trigger) | Skill prose + Stop-hook checkpoint |
+| **Narrative** | Optional | `narrative_verbose: true` | Skill prose (warns when off; never blocks) |
+
+Verification records what was confirmed. Handoff carries the cross-session contract. Narrative is optional commentary. Each tier exists to solve a different problem; they don't substitute for each other.
+
+### Verification tier — mandatory, shape-checked
+
+Every step has an evidence artifact recorded as a line (or block) under `Step N:` in the plan's `## SDLC State` section. The evidence-gate hook (a `PreToolUse|Bash` hook on `git commit`) enforces presence: missing or placeholder text (TODO / pending / TBD / etc.) blocks the commit.
+
+For plans with `evidence_schema: v2` in frontmatter, the hook additionally enforces the per-step **shape table**:
+
+| Step | Required fields under `Step N:` | Notes |
+|------|---------------------------------|-------|
+| 0 | `prereqs: ok` | Smoke-test that the SDLC run is set up |
+| 1 | Pointer to `## Phase 1` body (6-lenses + Q&A + Not Doing) | Pointer-only at hook level; body shape is skill responsibility |
+| 2 | Pointer to spec body containing `R1..RN` acceptance criteria | At least 3 R-rows by skill convention |
+| 3 | Pointer to plan body containing ordered step list + critical-files list | Step count ≥ 1, critical-files non-empty |
+| 4 | `worktree:`, `base-sha:`, `branch:` | Verifiable against `git worktree list` |
+| 5 | Pointer to slice list (`abc1234 RED test`, `def5678 GREEN passing`) | At least 1 slice |
+| 6 | `devtools-trace: <path>` OR `n/a: <reason>` | Reason mandatory if skipped |
+| 7 | `cmd:`, `pass:`, `total:`, `output:` | `pass` and `total` must be integers; `pass == total` required to close the step |
+| 8 | Pointer to 5-axis review body (Correctness / Readability / Architecture / Security / Performance) | All 5 axes; PASS / FLAG / FAIL each |
+| 8b | Pointer to critic findings table (or `Findings: none`) | At least one finding row or explicit "none" |
+| 9 | `adr: <path>` OR `rca: <path>` (incident-response) OR `n/a: <reason>` | Pick one |
+| 10 | `commit:`, `subject:`, `files:` | Subject follows project commit-message convention |
+| 11 | `pr: <url>` OR `n/a: <reason>` | Local-merge workflows: `n/a: PR-less workflow` |
+| 12 | `merge:`, `worktree-removed:` | `git worktree list` confirms `worktree-removed: yes` |
+| 13 | `deploy:`, `verified-at:`, `monitor:` OR `n/a: <reason>` | `n/a` only valid when `deploy_target: none` in frontmatter |
+
+Pointer steps (1, 2, 3, 5, 8, 8b) are presence-only at the hook level — the body shape (R-rows, critic findings, etc.) is the skill's responsibility, not the hook's, in v1. The hook will gain body validators if drift becomes a regression vector.
+
+**Block format.** When a step has multiple required fields, write them as YAML-style key/value lines indented under the `Step N:` header:
+
+```
+Step 7:
+  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: docs/bionic/plans/<slug>.plan.md#step-7
+```
+
+For single-line evidence (pointer steps, or steps with one field), the inline form is fine: `Step 5: docs/bionic/plans/<slug>.plan.md#phase-5`.
+
+**Backwards compatibility.** Plans with `evidence_schema: legacy` (or no `evidence_schema` field — the default for pre-v2 plans) skip shape enforcement entirely. The hook reverts to its pre-redesign behavior: presence + placeholder check only. Migration of existing plans is via `~/.claude/skills/canonical-sdlc/migrate-frontmatter.sh`, which sets `evidence_schema: legacy` so in-flight plans are unaffected.
+
+### Narrative tier — opt-in via `narrative_verbose`
+
+Mode-keyed defaults (set by Step 0.5):
+
+| Mode | `narrative_verbose` default | Rationale |
+|---|---|---|
+| `autonomous` | `false` | Plan is execution record, not deliverable; strip narrative cruft |
+| `epic-scope` | `true` | Synthesis IS the artifact |
+| `incident-response` | `true` | RCA narrative is the deliverable |
+| `design-refresh` | `true` | Rationale is part of the handoff to design reviewers |
+| `spike` | `false` | Timeboxed; no deliverable |
+
+When `narrative_verbose: false`, these patterns are **discouraged** in plan body (warned, never blocked):
+
+- `^Phase \d+: see` — navigation pointers (`Phase 3: see § Phase 3 section`)
+- `^- mode:` / `^- current:` outside frontmatter — restated state (state lives in frontmatter, period)
+- Repeated `^Phase \d+: N/A` lines — collapse target for Step 12.5 cleanup
+- Approval-checkpoint narrative blocks that don't reference acceptance criteria
+- Trailing summaries (`In summary…`, `To recap…`)
+
+When `narrative_verbose: true`, the same patterns are tolerated:
+
+- Plan may include narrative summaries between phase sections.
+- Step 1 6-lenses can be prose (default: bullet form).
+- Q&A resolution can include rationale beyond decision (default: decision only).
+- Approval checkpoints get full narrative (default: one-line "Approved by user 2026-MM-DD").
+
+The flag is sticky per plan. Most autonomous plans default to `false`.
+
+**Important:** `narrative_verbose` controls only the narrative tier. Verification and handoff are unaffected — a plan with `narrative_verbose: false` still produces full verification evidence at every step and a full handoff section when multi-session.
+
+### Handoff tier — multi-session contract
+
+Multi-session plans need fidelity across context resets, compactions, and pause/resume. Handoff is its own tier — separate from verification (records what was confirmed) and narrative (optional commentary). It's always preserved when a plan spans sessions, regardless of `narrative_verbose`.
+
+#### Handoff section schema
+
+A `## Handoff` section in the plan-doc body. Always preserved regardless of `narrative_verbose`. Per-field caps prevent unbounded growth:
+
+```markdown
+## Handoff
+<!-- Always preserved regardless of narrative_verbose. Updated at session end. -->
+
+### Resume point
+step: 5
+sub-task: "implement predicate evaluator in canonical-sdlc-dispatch-gate.sh"
+worktree: .worktrees/dispatch-hardening
+branch: dispatch-hardening
+last-commit: abc1234
+session-count: 2
+
+### Decisions ratified this session
+<!-- max 5 bullets, ≤120 chars each. RESET each session. -->
+- Step 0.5 confirmation uses single AskUserQuestion + DSL override
+- last_dispatched field dropped (mtime churn risk vs evidence-gate)
+
+### Tried and rejected
+<!-- max 5; "approach → reason rejected" form, ≤200 chars each. PERSISTS across sessions. -->
+- PreToolUse|Bash for Agent calls — Agent calls don't go through Bash matcher
+- Sidecar JSON for last_dispatched — reintroduces dual-source state
+
+### Discovered surprises
+<!-- max 5, ≤200 chars. Things future-you wouldn't infer from code. PERSISTS. -->
+- evidence-gate scans newest-mtime; frontmatter writes shift active-plan ordering
+
+### Open blockers
+<!-- max 5; each blocks specific step -->
+- step 5 blocked on Q8 user decision (migration script location)
+
+### Uncommitted work
+<!-- file + state, max 10 -->
+- hooks/canonical-sdlc-dispatch-gate.sh: created, predicate-eval not implemented
+
+### Resume protocol
+<!-- one paragraph, ≤300 chars. Literal first instructions for next session. -->
+Next session: read this handoff, then frontmatter, then `## SDLC State`. Continue at step 5 from sub-task above. Apply Q8 decision once user supplies. Run `bash test.sh` to confirm baseline before resuming.
+```
+
+#### Triggers — when handoff is written/updated
+
+Three trigger conditions, all skill-mandated:
+
+1. **Session end mid-plan.** `Stop` event fires while frontmatter `sdlc-step: < 13`. The skill writes/updates `## Handoff` before letting the session end.
+2. **Context-compaction risk.** When context utilization approaches the compression threshold (~90% by default), the skill proactively writes the handoff so in-progress state survives the compaction.
+3. **Explicit user trigger.** A `/checkpoint` command (or equivalent) invoked by the user — manual save point.
+
+The skill **rewrites the section in place** each trigger. Never appends. Handoff is bounded; it does not grow across sessions. A 3-session plan has the same handoff size as a 1-session plan.
+
+#### Persistence model
+
+Each handoff field falls into one of two persistence classes:
+
+**Session-scoped** (reset each session):
+- `Decisions ratified this session` — captures what was decided since the last handoff. New session starts a new list.
+
+**Cross-session** (persist across sessions; capped per-field):
+- `Resume point` — overwritten with current state.
+- `Tried and rejected` — appended within session, persists across; deduplicated; oldest entries fall off the cap.
+- `Discovered surprises` — same persistence rule as Tried-and-rejected.
+- `Open blockers` — current snapshot; closed blockers are removed.
+- `Uncommitted work` — current snapshot; committed files are removed.
+- `Resume protocol` — overwritten each session.
+
+#### Token economy
+
+Per-field caps keep the section bounded:
+
+| Field | Cap | Worst-case cost |
+|---|---|---|
+| Resume point | 6 lines | ~250 chars |
+| Decisions this session | 5 × 120 chars | ~600 chars |
+| Tried and rejected | 5 × 200 chars | ~1000 chars |
+| Discovered surprises | 5 × 200 chars | ~1000 chars |
+| Open blockers | 5 × 150 chars | ~750 chars |
+| Uncommitted work | 10 × 100 chars | ~1000 chars |
+| Resume protocol | 1 × 300 chars | ~300 chars |
+| **Section total** | | **~5000 chars / ~1300 tokens** |
+
+Read in full at session resume; not consumed during normal step work. Strictly smaller and strictly more useful than the legacy "(pending)-laced plan that drifts across sessions" pattern.
+
+#### When handoff is NOT written
+
+Single-session plans never get a handoff section. The triggers above only fire when the plan spans sessions or is at risk of doing so. If a plan picks up a handoff mid-pause and then closes within the resumed session, Step 12.5 cleanup (when `cleanup_on_finish: true`) strips the handoff because it's no longer needed for resume.
+
+#### Independence from `narrative_verbose`
+
+Handoff and narrative are independent tiers. Handoff is always kept when multi-session, regardless of `narrative_verbose`. This is the central design move that resolves the tension between "I don't read narrative evidence" and "I need handoff fidelity for multi-session plans" — handoff is structurally separated so it can be preserved while narrative is stripped.
+
 ## Continuation Artifacts
 
 Long-running epics span sessions. Continuation artifacts make session handoff automatic.
@@ -714,6 +898,8 @@ Zero user interaction. When the next session starts, it reads `continuation-chec
 Bionic installs `canonical-sdlc-evidence-gate.sh` as a `PreToolUse|Bash` hook. On any `git commit`, the hook locates the most recent plan file across `docs/bionic/plans/` (recursively across epic directories), `docs/bionic/incidents/` (incident-response), `docs/superpowers/plans/`, and `~/.claude/plans/`, reads the `## SDLC State` section, and **blocks the commit (exit 2) if the current step's evidence artifact is missing or unreadable**. The hook accepts both `Step N:` (current) and `Phase N:` (legacy) line formats for backward compatibility with in-flight plans.
 
 Plans without an `## SDLC State` section pass through unblocked — the hook only enforces against canonical-sdlc runs.
+
+**v2 shape enforcement.** When the plan's frontmatter declares `evidence_schema: v2`, the hook also validates the per-step shape table (see Evidence (three-tier) → verification tier). Missing required fields under `Step N:` block the commit with an error naming the missing field(s). Plans with `evidence_schema: legacy` (or no `evidence_schema` field) keep the original presence-only behavior — pre-v2 plans are unaffected. Pointer steps (1, 2, 3, 5, 8, 8b) are presence-only at the hook level; their body shape is the skill's responsibility, not the hook's.
 
 ## Governing-Skill Hook
 

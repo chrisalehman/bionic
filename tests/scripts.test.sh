@@ -621,6 +621,40 @@ if [ -f "$_skillmd" ]; then
   done
 fi
 
+# 4o: SKILL.md documents three-tier evidence + handoff + session-resume — Wave 4 contract
+if [ -f "$_skillmd" ]; then
+  expect_true "SKILL.md has Evidence (three-tier) section" \
+    grep -qE '^## Evidence \(three-tier\)' "$_skillmd"
+  expect_true "SKILL.md mentions verification tier" \
+    grep -qE '[Vv]erification tier' "$_skillmd"
+  expect_true "SKILL.md mentions handoff tier" \
+    grep -qE '[Hh]andoff tier' "$_skillmd"
+  expect_true "SKILL.md mentions narrative tier" \
+    grep -qE '[Nn]arrative tier' "$_skillmd"
+  expect_true "SKILL.md mentions evidence_schema: v2" \
+    grep -q 'evidence_schema: v2' "$_skillmd"
+  expect_true "SKILL.md mentions evidence_schema: legacy" \
+    grep -q 'evidence_schema: legacy' "$_skillmd"
+  expect_true "SKILL.md mentions Resume point in handoff schema" \
+    grep -qE 'Resume point' "$_skillmd"
+  expect_true "SKILL.md mentions Tried and rejected" \
+    grep -qE 'Tried and rejected' "$_skillmd"
+  expect_true "SKILL.md mentions session-resume protocol" \
+    grep -qE 'ession-resume protocol|ession Resume Protocol' "$_skillmd"
+  # Shape table fields the hook actually enforces must appear in SKILL.md
+  for _field in worktree base-sha cmd pass total output commit subject merge worktree-removed deploy verified-at monitor; do
+    expect_true "SKILL.md verification shape table mentions ${_field}" grep -q "$_field" "$_skillmd"
+  done
+fi
+
+# 4p: evidence-gate hook reads evidence_schema and supports v2 path
+_egate="${REPO}/hooks/canonical-sdlc-evidence-gate.sh"
+expect_true "evidence-gate hook reads evidence_schema from frontmatter" \
+  grep -q 'evidence_schema' "$_egate"
+expect_true "evidence-gate hook references the v2 schema literal" \
+  grep -qE '"v2"|EVIDENCE_SCHEMA[[:space:]]*=' "$_egate"
+
+
 # ============================================================
 # SECTION 5: Shell alias marker consistency
 # ============================================================

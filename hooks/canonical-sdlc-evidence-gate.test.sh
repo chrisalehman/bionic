@@ -443,6 +443,255 @@ expect_block_both "docs/superpowers/plans/ plan is honored alongside bionic" \
   "$h8g" "$p8g" 'git commit -m "x"' "placeholder"
 
 # ============================================================
+# Section 9: v2 evidence schema — shape validation
+# ============================================================
+#
+# When frontmatter declares `evidence_schema: v2`, the hook performs
+# per-step shape checks on top of the existing presence/placeholder
+# rules. Plans with `evidence_schema: legacy` (or absent — the default
+# for pre-v2 plans) keep the original presence-only behavior. See
+# canonical-sdlc-autonomous-redesign.md §2.1.
+
+echo ""
+echo "=== Section 9: v2 evidence_schema shape validation ==="
+
+# Shared helper: build a v2-frontmatter prefix block that the hook
+# parses for `evidence_schema` (and `deploy_target` for Step 13).
+v2_frontmatter() {
+  local schema="$1" deploy="${2:-none}"
+  cat <<EOF
+---
+governing-skill: canonical-sdlc
+mode: autonomous
+canonical_sdlc_version: 2
+evidence_schema: ${schema}
+deploy_target: ${deploy}
+---
+EOF
+}
+
+# 9a — legacy (evidence_schema: legacy) → existing presence-only path.
+# A free-form Step 4 line is fine; no shape complaint.
+h9a=$(make_home)
+write_plan "$h9a" "$(v2_frontmatter legacy)
+## SDLC State
+current: 4
+Phase 4: worktree at /path, base SHA abc123" > /dev/null
+expect_allow "v2-frontmatter with evidence_schema: legacy → no shape check" \
+  "$h9a" 'git commit -m "x"'
+
+# 9b — evidence_schema absent → defaults to legacy behavior.
+h9b=$(make_home)
+write_plan "$h9b" "---
+governing-skill: canonical-sdlc
+mode: autonomous
+---
+
+## SDLC State
+current: 4
+Phase 4: worktree at /path, base SHA abc123" > /dev/null
+expect_allow "frontmatter without evidence_schema → legacy behavior" \
+  "$h9b" 'git commit -m "x"'
+
+# 9c — evidence_schema: v2, Step 4 in v2 fields form, all required
+# fields present → allow.
+h9c=$(make_home)
+write_plan "$h9c" "$(v2_frontmatter v2)
+## SDLC State
+current: 4
+Step 4:
+  worktree: /Users/x/.worktrees/feature-x
+  base-sha: abc1234abc1234abc1234abc1234abc1234abc1
+  branch: feature-x" > /dev/null
+expect_allow "v2 Step 4 with all required fields → allow" \
+  "$h9c" 'git commit -m "x"'
+
+# 9d — v2, Step 4 missing 'base-sha:' → block, error names base-sha.
+h9d=$(make_home)
+write_plan "$h9d" "$(v2_frontmatter v2)
+## SDLC State
+current: 4
+Step 4:
+  worktree: /Users/x/.worktrees/feature-x
+  branch: feature-x" > /dev/null
+expect_block "v2 Step 4 missing base-sha → block" \
+  "$h9d" 'git commit -m "x"' "base-sha"
+
+# 9e — v2, Step 7 with all four fields, pass==total → allow.
+h9e=$(make_home)
+write_plan "$h9e" "$(v2_frontmatter v2)
+## SDLC State
+current: 7
+Step 7:
+  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: docs/bionic/plans/wave-04.plan.md#step-7" > /dev/null
+expect_allow "v2 Step 7 with full shape → allow" \
+  "$h9e" 'git commit -m "x"'
+
+# 9f — v2, Step 7 missing 'pass:' → block, error names pass.
+h9f=$(make_home)
+write_plan "$h9f" "$(v2_frontmatter v2)
+## SDLC State
+current: 7
+Step 7:
+  cmd: bash test.sh
+  total: 332
+  output: docs/bionic/plans/wave-04.plan.md#step-7" > /dev/null
+expect_block "v2 Step 7 missing pass field → block" \
+  "$h9f" 'git commit -m "x"' "pass"
+
+# 9g — v2, Step 7 with pass != total → block, error mentions pass and total.
+h9g=$(make_home)
+write_plan "$h9g" "$(v2_frontmatter v2)
+## SDLC State
+current: 7
+Step 7:
+  cmd: bash test.sh
+  pass: 330
+  total: 332
+  output: docs/bionic/plans/wave-04.plan.md#step-7" > /dev/null
+expect_block "v2 Step 7 pass != total → block" \
+  "$h9g" 'git commit -m "x"' "pass"
+
+# 9h — v2, Step 6 with 'n/a: <reason>' → allow (Step 6 accepts n/a).
+h9h=$(make_home)
+write_plan "$h9h" "$(v2_frontmatter v2)
+## SDLC State
+current: 6
+Step 6:
+  n/a: no UI; agent-skills:browser-testing-with-devtools sufficient" > /dev/null
+expect_allow "v2 Step 6 with n/a → allow" \
+  "$h9h" 'git commit -m "x"'
+
+# 9i — v2, Step 6 with neither devtools-trace nor n/a → block.
+h9i=$(make_home)
+write_plan "$h9i" "$(v2_frontmatter v2)
+## SDLC State
+current: 6
+Step 6:
+  notes: skipped" > /dev/null
+expect_block "v2 Step 6 missing devtools-trace and n/a → block" \
+  "$h9i" 'git commit -m "x"' "devtools-trace"
+
+# 9j — v2, Step 11 with 'n/a: PR-less workflow' → allow.
+h9j=$(make_home)
+write_plan "$h9j" "$(v2_frontmatter v2)
+## SDLC State
+current: 11
+Step 11:
+  n/a: PR-less workflow" > /dev/null
+expect_allow "v2 Step 11 with n/a: PR-less workflow → allow" \
+  "$h9j" 'git commit -m "x"'
+
+# 9k — v2, Step 11 with 'pr: <url>' → allow.
+h9k=$(make_home)
+write_plan "$h9k" "$(v2_frontmatter v2)
+## SDLC State
+current: 11
+Step 11:
+  pr: https://github.com/example/repo/pull/42" > /dev/null
+expect_allow "v2 Step 11 with pr → allow" \
+  "$h9k" 'git commit -m "x"'
+
+# 9l — v2, Step 13 with 'n/a: <reason>' AND deploy_target: none → allow.
+h9l=$(make_home)
+write_plan "$h9l" "$(v2_frontmatter v2 none)
+## SDLC State
+current: 13
+Step 13:
+  n/a: no deploy target" > /dev/null
+expect_allow "v2 Step 13 with n/a + deploy_target=none → allow" \
+  "$h9l" 'git commit -m "x"'
+
+# 9m — v2, Step 13 with 'n/a' but deploy_target: k8s → block (n/a only
+# valid when deploy_target is none).
+h9m=$(make_home)
+write_plan "$h9m" "$(v2_frontmatter v2 k8s)
+## SDLC State
+current: 13
+Step 13:
+  n/a: skipped" > /dev/null
+expect_block "v2 Step 13 n/a with deploy_target=k8s → block" \
+  "$h9m" 'git commit -m "x"' "deploy_target"
+
+# 9n — v2, Step 13 with deploy/verified-at/monitor + deploy_target: k8s
+# → allow.
+h9n=$(make_home)
+write_plan "$h9n" "$(v2_frontmatter v2 k8s)
+## SDLC State
+current: 13
+Step 13:
+  deploy: prod
+  verified-at: 2026-05-02T18:00:00Z
+  monitor: https://grafana.example.com/d/foo" > /dev/null
+expect_allow "v2 Step 13 full deploy fields + deploy_target=k8s → allow" \
+  "$h9n" 'git commit -m "x"'
+
+# 9o — v2, pointer step (Step 5) — single-line free-form is acceptable.
+# Pointer steps (1, 2, 3, 5, 8, 8b) skip shape check in v1; presence-only.
+h9o=$(make_home)
+write_plan "$h9o" "$(v2_frontmatter v2)
+## SDLC State
+current: 5
+Step 5: /docs/bionic/plans/wave-04.plan.md#phase-5" > /dev/null
+expect_allow "v2 Step 5 (pointer step) free-form → allow (no shape check)" \
+  "$h9o" 'git commit -m "x"'
+
+# 9p — v2, Step 8b (adversarial) is a pointer step — single-line allowed.
+h9p=$(make_home)
+write_plan "$h9p" "$(v2_frontmatter v2)
+## SDLC State
+current: 8b
+Step 8b: /docs/bionic/plans/wave-04.plan.md#step-8b-findings" > /dev/null
+expect_allow "v2 Step 8b (pointer step) → allow" \
+  "$h9p" 'git commit -m "x"'
+
+# 9q — v2, Step 10 with all required fields → allow.
+h9q=$(make_home)
+write_plan "$h9q" "$(v2_frontmatter v2)
+## SDLC State
+current: 10
+Step 10:
+  commit: abc1234abc1234abc1234abc1234abc1234abc1
+  subject: feat(thing): do the thing
+  files: 5" > /dev/null
+expect_allow "v2 Step 10 with required fields → allow" \
+  "$h9q" 'git commit -m "x"'
+
+# 9r — v2, Step 10 missing 'commit:' → block.
+h9r=$(make_home)
+write_plan "$h9r" "$(v2_frontmatter v2)
+## SDLC State
+current: 10
+Step 10:
+  subject: feat(thing): do the thing
+  files: 5" > /dev/null
+expect_block "v2 Step 10 missing commit field → block" \
+  "$h9r" 'git commit -m "x"' "commit"
+
+# 9s — v2, Step 12 with all required fields → allow.
+h9s=$(make_home)
+write_plan "$h9s" "$(v2_frontmatter v2)
+## SDLC State
+current: 12
+Step 12:
+  merge: abc1234abc1234abc1234abc1234abc1234abc1
+  worktree-removed: yes" > /dev/null
+expect_allow "v2 Step 12 with required fields → allow" \
+  "$h9s" 'git commit -m "x"'
+
+# 9t — placeholder check still applies under v2 (existing behavior).
+h9t=$(make_home)
+write_plan "$h9t" "$(v2_frontmatter v2)
+## SDLC State
+current: 4
+Step 4: TODO" > /dev/null
+expect_block "v2 Step 4 with placeholder TODO → block (presence layer still active)" \
+  "$h9t" 'git commit -m "x"' "placeholder"
+
+# ============================================================
 # Summary
 # ============================================================
 
