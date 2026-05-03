@@ -629,6 +629,59 @@ This is the "walk away" boundary. After the plan file is complete:
 - **Gate:** The wave branch's tip commit is an ancestor of the integration branch's tip (`git merge-base --is-ancestor <wave-tip> <integration-branch>` exits 0), OR a `## Wake Note` documents the park. Worktree is removed.
 - **Evidence:** Merge SHA recorded in `## SDLC State` as Step 12's line; `git log --oneline <integration-branch>` showing the merge; worktree absent from `git worktree list`. For parked branches: Wake Note content.
 
+### Step 12.5 — Post-merge cleanup (opt-in via `cleanup_on_finish`)
+
+Runs **after Step 12's merge commit, before Step 13**. Strips narrative cruft from the plan body while preserving every byte of verification evidence and (when multi-session) the full handoff section. Only fires when frontmatter declares `cleanup_on_finish: true`; default is `false`.
+
+**Goal:** Produce a clean post-merge plan record. Cruft accumulates during execution — navigation pointers, restated state, repeated `Phase N: N/A` rows, in-summary paragraphs — and bloats the durable record. Step 12.5 trims that without touching anything load-bearing for audit.
+
+**When `cleanup_on_finish: false`** (the default in sprint-1 rollout): Step 12.5 is skipped entirely. Record `Step 12.5: n/a: cleanup_on_finish=false` in `## SDLC State` and proceed to Step 13.
+
+**When `cleanup_on_finish: true`** — execute this procedure in the same session as Step 12, before declaring the run complete:
+
+1. **Idempotency check.** Read frontmatter `cleaned:` field. If already set, this is a re-run — record `Step 12.5: n/a: already cleaned <date>` and stop. Step 12.5 is one-shot per plan.
+2. **Identify what's keep-verbatim.** Verification tier (every `Step N:` block in `## SDLC State`, all per-step body sections referenced by pointer steps — Phase 1 6-lenses + Q&A + Not Doing, Phase 2 acceptance criteria `R1..RN`, Phase 3 step list + critical-files list, Phase 7 test counts, Phase 8 5-axis review, Phase 8b critic findings, `## Assumptions`). Frontmatter. Approval-checkpoint lines that reference acceptance criteria. None of this is modified.
+3. **Decide handoff fate.** Read `## Handoff` if present. If frontmatter `session-count: 1` or no handoff section was ever written, the plan was single-session — remove the handoff section entirely (no longer needed for resume). If multi-session (`session-count >= 2`), preserve the handoff section verbatim as part of the durable record.
+4. **Strip narrative cruft.** For each pattern flagged by the narrative-tier rules (see Evidence (three-tier) → narrative tier), replace the matched section with a one-line summary:
+   - 8-line approval paragraph → `Phase 3 approved 2026-MM-DD (see archive for full text).`
+   - "In summary…" / "To recap…" trailing blocks → deleted.
+   - Navigation pointers (`Phase 3: see § Phase 3 section`) → deleted.
+   - Restated state (`- mode:` / `- current:` outside frontmatter) → deleted (state lives in frontmatter, period).
+5. **Consolidate skipped-phase rows.** Replace per-phase `Phase N: N/A — <reason>` lines in `## SDLC State` with one summary line:
+   - Before: 4 separate rows for steps 6, 9, 11, 13.
+   - After: `Skipped: 6 (no UI), 9 (no decisions), 11 (PR-less workflow), 13 (no deploy target).`
+6. **Optional archive.** When frontmatter has `archived: true`, write a pre-cleanup snapshot to `.bionic/evidence-archive/<YYYY-MM-DD>-<plan-slug>.md` BEFORE applying any of steps 4-5 above. Archive frontmatter:
+
+   ```yaml
+   ---
+   archived-from: docs/bionic/plans/<slug>/<wave>.plan.md
+   archived-at: <ISO-timestamp>
+   plan-mode: <mode>
+   plan-merge-sha: <40-hex from Step 12>
+   ---
+   ```
+
+   Body: full original plan content, untouched. The archive is append-only audit history; the live plan continues to evolve in rare reopen-for-follow-up cases. When `archived: false` (default), no snapshot is written — verification + handoff in the live plan are sufficient.
+7. **Update frontmatter.** Set `cleaned: <today-ISO-date>`. Future Step 12.5 runs short-circuit on this marker (idempotent).
+8. **Append Step 12.5 evidence.** Add a row to `## SDLC State`:
+
+   ```
+   Step 12.5:
+     cleanup: ok
+     archived: <archive-path-or-na>
+     narrative-stripped: <count of sections collapsed>
+     handoff: <kept-or-stripped>
+   ```
+
+   Or, when skipped: `Step 12.5: n/a: cleanup_on_finish=false`.
+9. **Commit the cleanup as a follow-up commit** with message `chore(plan): post-merge cleanup of <plan-slug>`. Separate commit so the cleanup diff is auditable in isolation from the wave's substantive work. The commit body lists: archive path (or `n/a`), narrative-stripped count, handoff fate, line-count delta.
+
+**Gate:** Frontmatter has `cleaned: <today>`. `## SDLC State` has a Step 12.5 evidence row matching the v2 verification shape (or `n/a: cleanup_on_finish=false`). If `archived: true`, the archive file exists and is a byte-for-byte copy of the pre-cleanup plan body. Verification evidence in the live plan is unchanged from pre-cleanup.
+
+**Evidence:** The Step 12.5 row itself; the archive path (when `archived: true`); the cleanup commit SHA.
+
+**What this is NOT:** Step 12.5 is not stale-plan cleanup (sweeping plans untouched for 30 days). That's tracked separately as a follow-up. Step 12.5 only fires after Step 12's merge commit, on the plan that was just merged. Long-tail cleanup of historical plans is out of scope for this redesign.
+
 ### Step 13 — Ship (`agent-skills:shipping-and-launch`)
 - **Goal:** Production gate with pre-launch checklist, monitoring, rollback.
 - **Action:** Run checklist; configure CI/CD (`agent-skills:ci-cd-and-automation`) if new pipelines needed. **Before declaring the wave complete**, emit `docs/bionic/plans/epic-NN-<slug>/continuation.md` summarizing the wave, the next wave, and open carry-overs (see *Continuation Artifacts* below). Always produced for wave-mode work — a wave without a continuation artifact is an unfinished wave.
@@ -727,6 +780,7 @@ For plans with `evidence_schema: v2` in frontmatter, the hook additionally enfor
 | 10 | `commit:`, `subject:`, `files:` | Subject follows project commit-message convention |
 | 11 | `pr: <url>` OR `n/a: <reason>` | Local-merge workflows: `n/a: PR-less workflow` |
 | 12 | `merge:`, `worktree-removed:` | `git worktree list` confirms `worktree-removed: yes` |
+| 12.5 | `cleanup:`, `archived:`, `narrative-stripped:`, `handoff:` OR `n/a: cleanup_on_finish=false` | Only fires when `cleanup_on_finish: true` in frontmatter; `cleaned:` marker makes re-runs no-ops |
 | 13 | `deploy:`, `verified-at:`, `monitor:` OR `n/a: <reason>` | `n/a` only valid when `deploy_target: none` in frontmatter |
 
 Pointer steps (1, 2, 3, 5, 8, 8b) are presence-only at the hook level — the body shape (R-rows, critic findings, etc.) is the skill's responsibility, not the hook's, in v1. The hook will gain body validators if drift becomes a regression vector.
