@@ -33,20 +33,20 @@ make_home() {
   echo "$dir"
 }
 
-# Creates an isolated project dir with docs/bionic/plans/ ready to receive
+# Creates an isolated project dir with .bionic/docs/plans/ ready to receive
 # plan files. Returned path plays the CLAUDE_PROJECT_DIR role.
 make_project() {
   local dir
   dir=$(mktemp -d)
-  mkdir -p "$dir/docs/bionic/plans"
+  mkdir -p "$dir/.bionic/docs/plans"
   cleanup_dirs+=("$dir")
   echo "$dir"
 }
 
-# Writes $2 as a plan file inside $1/docs/bionic/plans/ (project-local dir).
+# Writes $2 as a plan file inside $1/.bionic/docs/plans/ (project-local dir).
 write_project_plan() {
   local project_dir="$1" content="$2" name="${3:-active.md}"
-  local path="$project_dir/docs/bionic/plans/$name"
+  local path="$project_dir/.bionic/docs/plans/$name"
   printf '%s\n' "$content" > "$path"
   touch "$path"
   echo "$path"
@@ -84,7 +84,7 @@ run_hook() {
 }
 
 # Like run_hook but also sets CLAUDE_PROJECT_DIR so the hook will scan
-# project-local plan directories (docs/bionic/plans/, docs/superpowers/plans/).
+# project-local plan directories (.bionic/docs/plans/, docs/superpowers/plans/).
 run_hook_with_project() {
   local home_dir="$1" project_dir="$2" command="$3"
   local input
@@ -340,7 +340,7 @@ expect_allow "newest plan without SDLC State — allow despite bad older plan" \
   "$h7b" 'git commit -m "x"'
 
 # ============================================================
-# Section 8: project-local plan directory (docs/bionic/plans/)
+# Section 8: project-local plan directory (.bionic/docs/plans/)
 # ============================================================
 
 echo ""
@@ -409,21 +409,21 @@ h8d=$(make_home); p8d=$(make_project)
 write_project_plan "$p8d" "## SDLC State
 current: 5
 Phase 5: TODO" "old-proj.md" > /dev/null
-touch -t 202001010000 "$p8d/docs/bionic/plans/old-proj.md" 2>/dev/null || \
-  touch -d "2020-01-01" "$p8d/docs/bionic/plans/old-proj.md" 2>/dev/null || true
+touch -t 202001010000 "$p8d/.bionic/docs/plans/old-proj.md" 2>/dev/null || \
+  touch -d "2020-01-01" "$p8d/.bionic/docs/plans/old-proj.md" 2>/dev/null || true
 write_plan "$h8d" "## SDLC State
 current: 5
 Phase 5: commit xyz green" > /dev/null
 expect_allow_both "newer global plan (good) wins over older project (bad)" \
   "$h8d" "$p8d" 'git commit -m "x"'
 
-# 8e — project dir lacks docs/bionic/plans/: hook falls back to global.
+# 8e — project dir lacks .bionic/docs/plans/: hook falls back to global.
 h8e=$(make_home)
-p8e=$(mktemp -d); cleanup_dirs+=("$p8e") # no docs/bionic/plans/ inside
+p8e=$(mktemp -d); cleanup_dirs+=("$p8e") # no .bionic/docs/plans/ inside
 write_plan "$h8e" "## SDLC State
 current: 5
 Phase 5: TODO" > /dev/null
-expect_block_both "project without docs/bionic/plans/ falls back to global plan" \
+expect_block_both "project without .bionic/docs/plans/ falls back to global plan" \
   "$h8e" "$p8e" 'git commit -m "x"' "placeholder"
 
 # 8f — CLAUDE_PROJECT_DIR unset: original behavior (global only).
@@ -526,7 +526,7 @@ Step 7:
   cmd: bash test.sh
   pass: 332
   total: 332
-  output: docs/bionic/plans/wave-04.plan.md#step-7" > /dev/null
+  output: .bionic/docs/plans/wave-04.plan.md#step-7" > /dev/null
 expect_allow "v2 Step 7 with full shape → allow" \
   "$h9e" 'git commit -m "x"'
 
@@ -538,7 +538,7 @@ current: 7
 Step 7:
   cmd: bash test.sh
   total: 332
-  output: docs/bionic/plans/wave-04.plan.md#step-7" > /dev/null
+  output: .bionic/docs/plans/wave-04.plan.md#step-7" > /dev/null
 expect_block "v2 Step 7 missing pass field → block" \
   "$h9f" 'git commit -m "x"' "pass"
 
@@ -551,7 +551,7 @@ Step 7:
   cmd: bash test.sh
   pass: 330
   total: 332
-  output: docs/bionic/plans/wave-04.plan.md#step-7" > /dev/null
+  output: .bionic/docs/plans/wave-04.plan.md#step-7" > /dev/null
 expect_block "v2 Step 7 pass != total → block" \
   "$h9g" 'git commit -m "x"' "pass"
 
@@ -635,7 +635,7 @@ h9o=$(make_home)
 write_plan "$h9o" "$(v2_frontmatter v2)
 ## SDLC State
 current: 5
-Step 5: /docs/bionic/plans/wave-04.plan.md#phase-5" > /dev/null
+Step 5: /.bionic/docs/plans/wave-04.plan.md#phase-5" > /dev/null
 expect_allow "v2 Step 5 (pointer step) free-form → allow (no shape check)" \
   "$h9o" 'git commit -m "x"'
 
@@ -644,7 +644,7 @@ h9p=$(make_home)
 write_plan "$h9p" "$(v2_frontmatter v2)
 ## SDLC State
 current: 8b
-Step 8b: /docs/bionic/plans/wave-04.plan.md#step-8b-findings" > /dev/null
+Step 8b: /.bionic/docs/plans/wave-04.plan.md#step-8b-findings" > /dev/null
 expect_allow "v2 Step 8b (pointer step) → allow" \
   "$h9p" 'git commit -m "x"'
 
@@ -690,6 +690,263 @@ current: 4
 Step 4: TODO" > /dev/null
 expect_block "v2 Step 4 with placeholder TODO → block (presence layer still active)" \
   "$h9t" 'git commit -m "x"' "placeholder"
+
+# ============================================================
+# Section 10: v3 canonical_sdlc_version shape validation
+# ============================================================
+#
+# When frontmatter declares canonical_sdlc_version: 3, the hook applies
+# the renumbered v3 shape switch. v2 (evidence_schema: v2) plans
+# continue to use the original switch.
+
+echo ""
+echo "=== Section 10: v3 canonical_sdlc_version shape validation ==="
+
+v3_frontmatter() {
+  local deploy="${1:-none}" use_wt="${2:-false}"
+  cat <<EOF
+---
+governing-skill: canonical-sdlc
+mode: autonomous
+canonical_sdlc_version: 3
+deploy_target: ${deploy}
+use_worktree: ${use_wt}
+---
+EOF
+}
+
+# 10a — v3 Step 4 (Implement) pointer step when use_worktree=false → allow.
+h10a=$(make_home)
+write_plan "$h10a" "$(v3_frontmatter none false)
+## SDLC State
+current: 4
+Step 4: <docs-root>/plans/wave-04.plan.md#step-4" > /dev/null
+expect_allow "v3 Step 4 pointer (use_worktree=false) → allow" \
+  "$h10a" 'git commit -m "x"'
+
+# 10b — v3 Step 4 with use_worktree=true and all fields → allow.
+h10b=$(make_home)
+write_plan "$h10b" "$(v3_frontmatter none true)
+## SDLC State
+current: 4
+Step 4:
+  worktree: /Users/x/.worktrees/feature-x
+  base-sha: abc1234abc1234abc1234abc1234abc1234abc1
+  branch: feature-x" > /dev/null
+expect_allow "v3 Step 4 use_worktree=true with all fields → allow" \
+  "$h10b" 'git commit -m "x"'
+
+# 10c — v3 Step 4 with use_worktree=true missing base-sha → block.
+h10c=$(make_home)
+write_plan "$h10c" "$(v3_frontmatter none true)
+## SDLC State
+current: 4
+Step 4:
+  worktree: /Users/x/.worktrees/feature-x
+  branch: feature-x" > /dev/null
+expect_block "v3 Step 4 use_worktree=true missing base-sha → block" \
+  "$h10c" 'git commit -m "x"' "base-sha"
+
+# 10d — v3 Step 5 (Browser verify) with devtools-trace → allow.
+h10d=$(make_home)
+write_plan "$h10d" "$(v3_frontmatter)
+## SDLC State
+current: 5
+Step 5:
+  devtools-trace: .bionic/tmp/devtools-trace-001.json" > /dev/null
+expect_allow "v3 Step 5 with devtools-trace → allow" \
+  "$h10d" 'git commit -m "x"'
+
+# 10e — v3 Step 5 with n/a → allow.
+h10e=$(make_home)
+write_plan "$h10e" "$(v3_frontmatter)
+## SDLC State
+current: 5
+Step 5:
+  n/a: no UI in this wave" > /dev/null
+expect_allow "v3 Step 5 with n/a → allow" \
+  "$h10e" 'git commit -m "x"'
+
+# 10f — v3 Step 5 with neither → block.
+h10f=$(make_home)
+write_plan "$h10f" "$(v3_frontmatter)
+## SDLC State
+current: 5
+Step 5:
+  notes: skipped" > /dev/null
+expect_block "v3 Step 5 missing devtools-trace and n/a → block" \
+  "$h10f" 'git commit -m "x"' "devtools-trace"
+
+# 10g — v3 Step 6 (Verify done) — moved from old Step 7.
+h10g=$(make_home)
+write_plan "$h10g" "$(v3_frontmatter)
+## SDLC State
+current: 6
+Step 6:
+  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-04.plan.md#step-6" > /dev/null
+expect_allow "v3 Step 6 full shape (cmd/pass/total/output) → allow" \
+  "$h10g" 'git commit -m "x"'
+
+# 10h — v3 Step 6 missing pass → block.
+h10h=$(make_home)
+write_plan "$h10h" "$(v3_frontmatter)
+## SDLC State
+current: 6
+Step 6:
+  cmd: bash test.sh
+  total: 332
+  output: .bionic/docs/plans/wave-04.plan.md#step-6" > /dev/null
+expect_block "v3 Step 6 missing pass → block" \
+  "$h10h" 'git commit -m "x"' "pass"
+
+# 10i — v3 Step 7 (Self-review) pointer step → allow.
+h10i=$(make_home)
+write_plan "$h10i" "$(v3_frontmatter)
+## SDLC State
+current: 7
+Step 7: .bionic/docs/plans/wave-04.plan.md#step-7-review" > /dev/null
+expect_allow "v3 Step 7 (pointer step) → allow" \
+  "$h10i" 'git commit -m "x"'
+
+# 10j — v3 Step 8 (Adversarial critic) pointer step → allow.
+h10j=$(make_home)
+write_plan "$h10j" "$(v3_frontmatter)
+## SDLC State
+current: 8
+Step 8: .bionic/docs/plans/wave-04.plan.md#step-8-critic-findings" > /dev/null
+expect_allow "v3 Step 8 (Adversarial critic pointer step) → allow" \
+  "$h10j" 'git commit -m "x"'
+
+# 10k — v3 Step 9 with adr → allow.
+h10k=$(make_home)
+write_plan "$h10k" "$(v3_frontmatter)
+## SDLC State
+current: 9
+Step 9:
+  adr: .bionic/docs/adrs/epic-01-x/adr-001-decision.md" > /dev/null
+expect_allow "v3 Step 9 with adr → allow" \
+  "$h10k" 'git commit -m "x"'
+
+# 10l — v3 Step 10 with required fields → allow.
+h10l=$(make_home)
+write_plan "$h10l" "$(v3_frontmatter)
+## SDLC State
+current: 10
+Step 10:
+  commit: abc1234abc1234abc1234abc1234abc1234abc1
+  subject: feat(thing): do the thing
+  files: 5" > /dev/null
+expect_allow "v3 Step 10 with required fields → allow" \
+  "$h10l" 'git commit -m "x"'
+
+# 10m — v3 Step 11 with pr → allow.
+h10m=$(make_home)
+write_plan "$h10m" "$(v3_frontmatter)
+## SDLC State
+current: 11
+Step 11:
+  pr: https://github.com/example/repo/pull/42" > /dev/null
+expect_allow "v3 Step 11 with pr → allow" \
+  "$h10m" 'git commit -m "x"'
+
+# 10n — v3 Step 12 with required fields → allow.
+h10n=$(make_home)
+write_plan "$h10n" "$(v3_frontmatter)
+## SDLC State
+current: 12
+Step 12:
+  merge: abc1234abc1234abc1234abc1234abc1234abc1
+  worktree-removed: n/a" > /dev/null
+expect_allow "v3 Step 12 with required fields → allow" \
+  "$h10n" 'git commit -m "x"'
+
+# 10o — v3 Step 13 (Post-merge cleanup) with required fields → allow.
+h10o=$(make_home)
+write_plan "$h10o" "$(v3_frontmatter)
+## SDLC State
+current: 13
+Step 13:
+  cleanup: ok
+  tmp-wiped: yes
+  tasks-completed: 14/14" > /dev/null
+expect_allow "v3 Step 13 (Post-merge cleanup) with required fields → allow" \
+  "$h10o" 'git commit -m "x"'
+
+# 10p — v3 Step 13 missing tmp-wiped → block.
+h10p=$(make_home)
+write_plan "$h10p" "$(v3_frontmatter)
+## SDLC State
+current: 13
+Step 13:
+  cleanup: ok
+  tasks-completed: 14/14" > /dev/null
+expect_block "v3 Step 13 missing tmp-wiped → block" \
+  "$h10p" 'git commit -m "x"' "tmp-wiped"
+
+# 10q — v3 Step 13 with n/a (cleanup_on_finish=false case) → allow.
+h10q=$(make_home)
+write_plan "$h10q" "$(v3_frontmatter)
+## SDLC State
+current: 13
+Step 13:
+  n/a: cleanup_on_finish=false" > /dev/null
+expect_allow "v3 Step 13 with n/a → allow" \
+  "$h10q" 'git commit -m "x"'
+
+# 10r — v3 Step 14 (Ship) with deploy fields → allow.
+h10r=$(make_home)
+write_plan "$h10r" "$(v3_frontmatter k8s)
+## SDLC State
+current: 14
+Step 14:
+  deploy: prod
+  verified-at: 2026-05-10T18:00:00Z
+  monitor: https://grafana.example.com/d/foo" > /dev/null
+expect_allow "v3 Step 14 with deploy fields → allow" \
+  "$h10r" 'git commit -m "x"'
+
+# 10s — v3 Step 14 with n/a + deploy_target=none → allow.
+h10s=$(make_home)
+write_plan "$h10s" "$(v3_frontmatter none)
+## SDLC State
+current: 14
+Step 14:
+  n/a: no deploy target" > /dev/null
+expect_allow "v3 Step 14 n/a + deploy_target=none → allow" \
+  "$h10s" 'git commit -m "x"'
+
+# 10t — v3 Step 14 with n/a but deploy_target=k8s → block.
+h10t=$(make_home)
+write_plan "$h10t" "$(v3_frontmatter k8s)
+## SDLC State
+current: 14
+Step 14:
+  n/a: skipped" > /dev/null
+expect_block "v3 Step 14 n/a with deploy_target=k8s → block" \
+  "$h10t" 'git commit -m "x"' "deploy_target"
+
+# 10u — v3 pointer step 1/2/3 → allow.
+for step in 1 2 3; do
+  h=$(make_home)
+  write_plan "$h" "$(v3_frontmatter)
+## SDLC State
+current: $step
+Step $step: pointer evidence here" > /dev/null
+  expect_allow "v3 Step $step (pointer step) → allow" \
+    "$h" 'git commit -m "x"'
+done
+
+# 10v — v3 placeholder check still active.
+h10v=$(make_home)
+write_plan "$h10v" "$(v3_frontmatter)
+## SDLC State
+current: 6
+Step 6: TODO" > /dev/null
+expect_block "v3 Step 6 with placeholder TODO → block" \
+  "$h10v" 'git commit -m "x"' "placeholder"
 
 # ============================================================
 # Summary

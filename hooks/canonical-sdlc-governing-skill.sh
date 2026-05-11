@@ -46,9 +46,58 @@ fi
 
 # Is the path under a canonical-sdlc artifact directory AND does the
 # basename match an enforced extension? Both must be true.
-if ! echo "$FILE_PATH" | grep -qE '/docs/bionic/(specs|plans|adrs)/'; then
+# Match files under the project's docs root (default <project>/.bionic/
+# docs/, configurable via <project>/.bionic/config.yaml `docs-root:`).
+#
+# Strategy: walk up from FILE_PATH to find the nearest `.bionic/`
+# parent — that directory's parent is the project root. From there,
+# resolve docs-root and check whether FILE_PATH lives under
+# <docs-root>/{specs,plans,adrs,incidents}/.
+find_project_root_from_path() {
+  local d
+  d=$(dirname "$1")
+  while [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
+    if [ -d "$d/.bionic" ]; then
+      echo "$d"
+      return 0
+    fi
+    d=$(dirname "$d")
+  done
+  return 1
+}
+
+resolve_docs_root() {
+  local proj="$1"
+  local config="$proj/.bionic/config.yaml"
+  if [ -f "$config" ]; then
+    local override
+    override=$(grep -E '^[[:space:]]*docs-root[[:space:]]*:' "$config" 2>/dev/null \
+      | head -1 \
+      | sed -E 's/^[[:space:]]*docs-root[[:space:]]*:[[:space:]]*//' \
+      | sed -E "s/^['\"]//;s/['\"]\$//" \
+      | sed -E 's/[[:space:]]+$//')
+    if [ -n "$override" ]; then
+      case "$override" in
+        /*) echo "$override" ;;
+        *)  echo "$proj/$override" ;;
+      esac
+      return
+    fi
+  fi
+  echo "$proj/.bionic/docs"
+}
+
+PROJECT_ROOT_FROM_PATH=$(find_project_root_from_path "$FILE_PATH" || true)
+if [ -z "$PROJECT_ROOT_FROM_PATH" ]; then
+  # File is not under any .bionic/ project tree → not a canonical artifact.
   exit 0
 fi
+DOCS_ROOT=$(resolve_docs_root "$PROJECT_ROOT_FROM_PATH")
+
+case "$FILE_PATH" in
+  "$DOCS_ROOT"/specs/*|"$DOCS_ROOT"/plans/*|"$DOCS_ROOT"/adrs/*|"$DOCS_ROOT"/incidents/*) ;;
+  *) exit 0 ;;
+esac
 
 BASENAME=$(basename "$FILE_PATH")
 ENFORCE=0
@@ -121,15 +170,18 @@ if [ -z "$GOVERNING" ]; then
   exit 2
 fi
 
-# ---------- canonical-sdlc v1/v2 schema enforcement (Wave 1b) ----------
-# Schema reference: docs/bionic/plans/canonical-sdlc-autonomous-redesign.md §1.2.2 + §6.4.
+# ---------- canonical-sdlc v1/v2/v3 schema enforcement ----------
 #
-# Only canonical-sdlc-governed plans are subject to this layer. Plans
-# with other governing skills (e.g. superpowers:writing-plans) keep the
-# basic governing-skill-field-only enforcement above.
-if [ "$GOVERNING" != "canonical-sdlc" ]; then
-  exit 0
-fi
+# Discriminator: `canonical_sdlc_version`, NOT `governing-skill`.
+# `governing-skill:` records the per-step skill that wrote a given
+# artifact — plans correctly declare `superpowers:writing-plans` because
+# Step 3 delegates to that skill. We instead read
+# `canonical_sdlc_version`, which Step 0 stamps on every canonical-sdlc
+# plan and is therefore the correct run marker.
+#
+# v1 — legacy; grandfathered, no flag enforcement.
+# v2 — legacy; grandfathered, no flag enforcement.
+# v3 — current; requires 5 discriminator flags + 2 opt-in flags.
 
 yaml_get() {
   echo "$FRONTMATTER" \
@@ -141,57 +193,48 @@ yaml_get() {
 
 SDLC_VERSION=$(yaml_get canonical_sdlc_version)
 
-# Legacy-skip: v1 plans were migrated by Wave 1a's migrate-frontmatter.sh
-# and are grandfathered out of v2 enforcement entirely. Existing
-# governing-skill: field check above is the only requirement for them.
-if [ "$SDLC_VERSION" = "1" ]; then
+# No version marker → not a canonical-sdlc plan. Plans authored under
+# other governing skills pass through with only the
+# governing-skill-field-presence check above.
+if [ -z "$SDLC_VERSION" ]; then
   exit 0
 fi
 
-# Missing version marker on a canonical-sdlc plan: block. The migration
-# script and Step 0.5 wizard are the two ways this gets populated;
-# editing a canonical-sdlc plan without either is a process bypass.
-if [ -z "$SDLC_VERSION" ]; then
-  echo "BLOCKED: canonical-sdlc artifact '$BASENAME' is missing the 'canonical_sdlc_version:' frontmatter field." >&2
-  echo "Path: $FILE_PATH" >&2
-  echo "Fix: add one of:" >&2
-  echo "  canonical_sdlc_version: 1   # legacy-grandfathered plan (skips v2 schema enforcement)" >&2
-  echo "  canonical_sdlc_version: 2   # current schema (requires v2 opt-in flags + discriminators when mode is autonomous)" >&2
-  echo "For pre-existing plans, run: bash ~/.claude/skills/canonical-sdlc/migrate-frontmatter.sh '$FILE_PATH'" >&2
-  exit 2
+# Legacy v1 and v2: grandfathered out of v3 enforcement entirely.
+if [ "$SDLC_VERSION" = "1" ] || [ "$SDLC_VERSION" = "2" ]; then
+  exit 0
 fi
 
-if [ "$SDLC_VERSION" != "2" ]; then
+if [ "$SDLC_VERSION" != "3" ]; then
   echo "BLOCKED: canonical-sdlc artifact '$BASENAME' has unsupported canonical_sdlc_version: '$SDLC_VERSION'." >&2
   echo "Path: $FILE_PATH" >&2
-  echo "Fix: set 'canonical_sdlc_version: 1' (legacy) or 'canonical_sdlc_version: 2' (current)." >&2
+  echo "Fix: set 'canonical_sdlc_version: 3' (current), or '1'/'2' for legacy plans." >&2
   exit 2
 fi
 
-# v2 schema: require all opt-in flags + discriminators only for autonomous
+# v3 schema: require all opt-in flags + discriminators only for autonomous
 # mode. Other modes (epic-scope, incident-response, design-refresh, spike)
-# have different rule sets and are out of scope for Wave 1b enforcement.
+# have different rule sets and are out of scope for v3 enforcement.
 MODE=$(yaml_get mode)
 if [ "$MODE" != "autonomous" ]; then
   exit 0
 fi
 
-REQUIRED_V2_FLAGS=("narrative_verbose" "dispatch_enforce" "cleanup_on_finish" "archived")
-REQUIRED_DISCRIMINATORS=("surface_type" "language" "perf_critical" "security_boundary"
-                         "distributed" "has_ui" "multi_agent" "deploy_target")
+REQUIRED_V3_OPT_IN=("cleanup_on_finish" "use_worktree")
+REQUIRED_DISCRIMINATORS=("surface_type" "language" "has_ui" "multi_agent" "deploy_target")
 
 MISSING=()
-for flag in "${REQUIRED_V2_FLAGS[@]}" "${REQUIRED_DISCRIMINATORS[@]}"; do
+for flag in "${REQUIRED_V3_OPT_IN[@]}" "${REQUIRED_DISCRIMINATORS[@]}"; do
   if ! echo "$FRONTMATTER" | grep -qE "^[[:space:]]*${flag}[[:space:]]*:"; then
     MISSING+=("$flag")
   fi
 done
 
 if [ "${#MISSING[@]}" -gt 0 ]; then
-  echo "BLOCKED: canonical-sdlc autonomous-mode plan '$BASENAME' is missing required v2 frontmatter flags: ${MISSING[*]}" >&2
+  echo "BLOCKED: canonical-sdlc autonomous-mode v3 plan '$BASENAME' is missing required frontmatter flags: ${MISSING[*]}" >&2
   echo "Path: $FILE_PATH" >&2
-  echo "Fix: run Step 0.5 (Configure) to set these explicitly. See SKILL.md §0.5 for the wizard." >&2
-  echo "Required v2 opt-in flags:    ${REQUIRED_V2_FLAGS[*]}" >&2
+  echo "Fix: run Step 0 (Configure) to set these explicitly. See SKILL.md §Step 0." >&2
+  echo "Required v3 opt-in flags:    ${REQUIRED_V3_OPT_IN[*]}" >&2
   echo "Required discriminator flags: ${REQUIRED_DISCRIMINATORS[*]}" >&2
   exit 2
 fi

@@ -26,9 +26,9 @@ trap cleanup EXIT
 make_project() {
   local dir
   dir=$(mktemp -d)
-  mkdir -p "$dir/docs/bionic/plans/epic-01-demo"
-  mkdir -p "$dir/docs/bionic/specs/epic-01-demo"
-  mkdir -p "$dir/docs/bionic/adrs/epic-01-demo"
+  mkdir -p "$dir/.bionic/docs/plans/epic-01-demo"
+  mkdir -p "$dir/.bionic/docs/specs/epic-01-demo"
+  mkdir -p "$dir/.bionic/docs/adrs/epic-01-demo"
   cleanup_dirs+=("$dir")
   echo "$dir"
 }
@@ -109,61 +109,61 @@ body
 project=$(make_project)
 
 echo "Write: plan file with valid frontmatter → allow"
-run_write "$project/docs/bionic/plans/epic-01-demo/wave-01-x.plan.md" "$VALID_FRONTMATTER"
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$VALID_FRONTMATTER"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
 echo "Write: plan file missing frontmatter → block"
-run_write "$project/docs/bionic/plans/epic-01-demo/wave-01-x.plan.md" "$MISSING_FM"
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$MISSING_FM"
 assert_eq "exit 2" 2 "$HOOK_EXIT"
 
 echo "Write: plan file with empty governing-skill → block"
-run_write "$project/docs/bionic/plans/epic-01-demo/wave-01-x.plan.md" "$EMPTY_GOVERNING"
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$EMPTY_GOVERNING"
 assert_eq "exit 2" 2 "$HOOK_EXIT"
 
 echo "Write: spec file with valid frontmatter → allow"
-run_write "$project/docs/bionic/specs/epic-01-demo/wave-01-x.spec.md" "$VALID_FRONTMATTER"
+run_write "$project/.bionic/docs/specs/epic-01-demo/wave-01-x.spec.md" "$VALID_FRONTMATTER"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
 echo "Write: adr file with valid frontmatter → allow"
-run_write "$project/docs/bionic/adrs/epic-01-demo/adr-001-x.md" "$VALID_FRONTMATTER"
+run_write "$project/.bionic/docs/adrs/epic-01-demo/adr-001-x.md" "$VALID_FRONTMATTER"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
 echo "Write: continuation.md with valid frontmatter → allow"
-run_write "$project/docs/bionic/plans/epic-01-demo/continuation.md" "$VALID_FRONTMATTER"
+run_write "$project/.bionic/docs/plans/epic-01-demo/continuation.md" "$VALID_FRONTMATTER"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
 echo "Write: continuation-checkpoint.md with valid frontmatter → allow"
-run_write "$project/docs/bionic/plans/epic-01-demo/continuation-checkpoint.md" "$VALID_FRONTMATTER"
+run_write "$project/.bionic/docs/plans/epic-01-demo/continuation-checkpoint.md" "$VALID_FRONTMATTER"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
 echo "Write: README.md under plans dir, no frontmatter → allow (not an enforced artifact)"
-run_write "$project/docs/bionic/plans/epic-01-demo/README.md" "# some notes"
+run_write "$project/.bionic/docs/plans/epic-01-demo/README.md" "# some notes"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
-echo "Write: .plan.md OUTSIDE docs/bionic/ → allow (hook scope is path-gated)"
+echo "Write: .plan.md OUTSIDE any .bionic/-rooted project → allow (hook scope is path-gated)"
 outside=$(mktemp -d)
 cleanup_dirs+=("$outside")
 run_write "$outside/random.plan.md" "$MISSING_FM"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
 echo "Write: adr-named file under adrs/ missing frontmatter → block"
-run_write "$project/docs/bionic/adrs/epic-01-demo/adr-007-x.md" "$MISSING_FM"
+run_write "$project/.bionic/docs/adrs/epic-01-demo/adr-007-x.md" "$MISSING_FM"
 assert_eq "exit 2" 2 "$HOOK_EXIT"
 
 echo "Edit: existing file with valid frontmatter → allow"
-existing="$project/docs/bionic/plans/epic-01-demo/wave-02-y.plan.md"
+existing="$project/.bionic/docs/plans/epic-01-demo/wave-02-y.plan.md"
 printf '%s' "$VALID_FRONTMATTER" > "$existing"
 run_edit "$existing" "Plan body" "Updated body"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
 echo "Edit: existing file missing frontmatter → block"
-bad="$project/docs/bionic/plans/epic-01-demo/wave-03-z.plan.md"
+bad="$project/.bionic/docs/plans/epic-01-demo/wave-03-z.plan.md"
 printf '%s' "$MISSING_FM" > "$bad"
 run_edit "$bad" "Plan body" "Updated body"
 assert_eq "exit 2" 2 "$HOOK_EXIT"
 
 echo "Edit: file doesn't exist (Edit would fail anyway) → block"
-run_edit "$project/docs/bionic/plans/epic-01-demo/does-not-exist.plan.md" "x" "y"
+run_edit "$project/.bionic/docs/plans/epic-01-demo/does-not-exist.plan.md" "x" "y"
 assert_eq "exit 2" 2 "$HOOK_EXIT"
 
 echo "Bash tool (non-Write/Edit) → allow"
@@ -175,17 +175,16 @@ fi
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
 # ============================================================
-# Wave 1b: canonical_sdlc_version v1/v2 enforcement
+# canonical_sdlc_version v1/v2/v3 enforcement
 # ============================================================
 #
-# Schema (from canonical-sdlc-autonomous-redesign.md §1.2.2 and §6.4):
-#   - canonical_sdlc_version: 1 → legacy-skip (v2 enforcement off)
-#   - canonical_sdlc_version: 2 + governing-skill: canonical-sdlc + mode: autonomous
-#       → require all 4 v2 opt-in flags + 8 discriminator flags
-#   - canonical_sdlc_version absent + governing-skill: canonical-sdlc
-#       → block with message naming the missing version field
-#   - non-canonical-sdlc governing-skill (e.g. superpowers:writing-plans)
-#       → version field not enforced (v2 schema is canonical-sdlc-specific)
+# Schema:
+#   - canonical_sdlc_version: 1 → legacy-skip (grandfathered)
+#   - canonical_sdlc_version: 2 → legacy-skip (grandfathered)
+#   - canonical_sdlc_version: 3 + mode: autonomous
+#       → require all 2 v3 opt-in flags + 5 discriminator flags
+#   - canonical_sdlc_version absent → not v3-managed; pass through
+#   - canonical_sdlc_version with other value → block
 
 V1_LEGACY='---
 governing-skill: canonical-sdlc
@@ -201,23 +200,30 @@ created: 2026-04-24
 # Body
 '
 
-# Helper to build a v2 plan with optional omissions. Pass the names of
+V2_LEGACY='---
+governing-skill: canonical-sdlc
+mode: autonomous
+canonical_sdlc_version: 2
+---
+
+# Body (legacy v2 plan — no v3 enforcement)
+'
+
+# Helper to build a v3 plan with optional omissions. Pass the names of
 # flags to omit as args; everything else is included.
-build_v2_plan() {
+build_v3_plan() {
   local omit=" $* "
   local out='---
 governing-skill: canonical-sdlc
 mode: autonomous
-sdlc-step: 5
-canonical_sdlc_version: 2
+sdlc-step: 4
+canonical_sdlc_version: 3
 '
-  local v2_flags=("narrative_verbose:false" "dispatch_enforce:false" \
-                  "cleanup_on_finish:false" "archived:false")
+  local opt_in=("cleanup_on_finish:true" "use_worktree:false")
   local discriminators=("surface_type:none" "language:none" \
-                        "perf_critical:false" "security_boundary:false" \
-                        "distributed:false" "has_ui:false" \
-                        "multi_agent:false" "deploy_target:none")
-  for kv in "${v2_flags[@]}" "${discriminators[@]}"; do
+                        "has_ui:false" "multi_agent:false" \
+                        "deploy_target:none")
+  for kv in "${opt_in[@]}" "${discriminators[@]}"; do
     local key="${kv%%:*}"
     local val="${kv#*:}"
     case "$omit" in
@@ -234,45 +240,58 @@ canonical_sdlc_version: 2
 
 project=$(make_project)
 
-echo "v1 (canonical_sdlc_version: 1, no v2 flags) → allow"
-run_write "$project/docs/bionic/plans/epic-01-demo/wave-01-x.plan.md" "$V1_LEGACY"
+echo "v1 (canonical_sdlc_version: 1, no v3 flags) → allow (grandfathered)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$V1_LEGACY"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
-echo "v2 with all 4 opt-in flags + 8 discriminators → allow"
-v2_full=$(build_v2_plan)
-run_write "$project/docs/bionic/plans/epic-01-demo/wave-02-y.plan.md" "$v2_full"
+echo "v2 (canonical_sdlc_version: 2, no v3 flags) → allow (grandfathered)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-01b-v2.plan.md" "$V2_LEGACY"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
-echo "v2 missing dispatch_enforce → block, error names the flag"
-v2_no_enforce=$(build_v2_plan dispatch_enforce)
-run_write "$project/docs/bionic/plans/epic-01-demo/wave-03-z.plan.md" "$v2_no_enforce"
+echo "v3 with all 2 opt-in flags + 5 discriminators → allow"
+v3_full=$(build_v3_plan)
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-02-y.plan.md" "$v3_full"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+echo "v3 missing use_worktree → block, error names the flag"
+v3_no_worktree=$(build_v3_plan use_worktree)
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-03-z.plan.md" "$v3_no_worktree"
 assert_eq "exit 2" 2 "$HOOK_EXIT"
 case "$HOOK_STDERR" in
-  *dispatch_enforce*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  error mentions dispatch_enforce\n' ;;
-  *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  error missing dispatch_enforce: %q\n' "$HOOK_STDERR" ;;
+  *use_worktree*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  error mentions use_worktree\n' ;;
+  *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  error missing use_worktree: %q\n' "$HOOK_STDERR" ;;
 esac
 
-echo "v2 missing surface_type → block, error names the flag"
-v2_no_surface=$(build_v2_plan surface_type)
-run_write "$project/docs/bionic/plans/epic-01-demo/wave-04-q.plan.md" "$v2_no_surface"
+echo "v3 missing cleanup_on_finish → block, error names the flag"
+v3_no_cleanup=$(build_v3_plan cleanup_on_finish)
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-03b-z.plan.md" "$v3_no_cleanup"
+assert_eq "exit 2" 2 "$HOOK_EXIT"
+case "$HOOK_STDERR" in
+  *cleanup_on_finish*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  error mentions cleanup_on_finish\n' ;;
+  *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  error missing cleanup_on_finish: %q\n' "$HOOK_STDERR" ;;
+esac
+
+echo "v3 missing surface_type → block, error names the flag"
+v3_no_surface=$(build_v3_plan surface_type)
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-04-q.plan.md" "$v3_no_surface"
 assert_eq "exit 2" 2 "$HOOK_EXIT"
 case "$HOOK_STDERR" in
   *surface_type*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  error mentions surface_type\n' ;;
   *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  error missing surface_type: %q\n' "$HOOK_STDERR" ;;
 esac
 
-echo "v2 missing multiple flags → block, error lists all of them"
-v2_multi_missing=$(build_v2_plan archived has_ui multi_agent)
-run_write "$project/docs/bionic/plans/epic-01-demo/wave-05-m.plan.md" "$v2_multi_missing"
+echo "v3 missing multiple flags → block, error lists all of them"
+v3_multi_missing=$(build_v3_plan has_ui multi_agent deploy_target)
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-05-m.plan.md" "$v3_multi_missing"
 assert_eq "exit 2" 2 "$HOOK_EXIT"
-for flag in archived has_ui multi_agent; do
+for flag in has_ui multi_agent deploy_target; do
   case "$HOOK_STDERR" in
     *"$flag"*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  error mentions %s\n' "$flag" ;;
     *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  error missing %s: %q\n' "$flag" "$HOOK_STDERR" ;;
   esac
 done
 
-echo "canonical-sdlc plan with NO canonical_sdlc_version → block, error names the field"
+echo "plan with NO canonical_sdlc_version → allow (not v3-managed)"
 no_marker='---
 governing-skill: canonical-sdlc
 mode: autonomous
@@ -281,24 +300,44 @@ sdlc-step: 0
 
 # Body
 '
-run_write "$project/docs/bionic/plans/epic-01-demo/wave-06-n.plan.md" "$no_marker"
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-06-n.plan.md" "$no_marker"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+echo "writing-plans plan WITH canonical_sdlc_version: 3 + autonomous + missing v3 flag → block"
+# v3 schema enforcement gates on canonical_sdlc_version, not on governing-skill.
+sp_v3_partial='---
+governing-skill: superpowers:writing-plans
+mode: autonomous
+sdlc-step: 3
+canonical_sdlc_version: 3
+cleanup_on_finish: true
+use_worktree: false
+surface_type: api
+language: typescript
+has_ui: false
+multi_agent: false
+---
+
+# Body (deploy_target intentionally missing)
+'
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-06b-sp.plan.md" "$sp_v3_partial"
 assert_eq "exit 2" 2 "$HOOK_EXIT"
 case "$HOOK_STDERR" in
-  *canonical_sdlc_version*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  error mentions canonical_sdlc_version\n' ;;
-  *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  error missing canonical_sdlc_version: %q\n' "$HOOK_STDERR" ;;
+  *deploy_target*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  error names deploy_target on writing-plans + v3 plan\n' ;;
+  *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  error missing deploy_target: %q\n' "$HOOK_STDERR" ;;
 esac
 
-echo "v2 plan with mode != autonomous → allow (v2 schema only enforced for autonomous)"
-v2_design='---
+echo "v3 plan with mode != autonomous → allow (v3 schema only enforced for autonomous)"
+v3_design='---
 governing-skill: canonical-sdlc
 mode: design-refresh
 sdlc-step: 1
-canonical_sdlc_version: 2
+canonical_sdlc_version: 3
 ---
 
 # Body
 '
-run_write "$project/docs/bionic/plans/epic-01-demo/wave-07-d.plan.md" "$v2_design"
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-07-d.plan.md" "$v3_design"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
 echo "non-canonical-sdlc plan (governing-skill: superpowers:writing-plans) without version → allow"
@@ -312,10 +351,10 @@ mode: full
 
 # Body
 '
-run_write "$project/docs/bionic/plans/epic-01-demo/wave-08-s.plan.md" "$sp_plan"
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-08-s.plan.md" "$sp_plan"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
-echo "v1 legacy with governing-skill present but missing v2 flags → allow (grandfathered)"
+echo "v1 legacy with governing-skill present but missing v3 flags → allow (grandfathered)"
 v1_minimal='---
 governing-skill: canonical-sdlc
 mode: autonomous
@@ -324,14 +363,34 @@ canonical_sdlc_version: 1
 
 # Body
 '
-run_write "$project/docs/bionic/plans/epic-01-demo/wave-09-l.plan.md" "$v1_minimal"
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-09-l.plan.md" "$v1_minimal"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
+echo "unsupported canonical_sdlc_version: 99 → block"
+bad_ver='---
+governing-skill: canonical-sdlc
+mode: autonomous
+canonical_sdlc_version: 99
+---
+
+# Body
+'
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-09b-bad.plan.md" "$bad_ver"
+assert_eq "exit 2" 2 "$HOOK_EXIT"
+
 echo "Edit on existing v1-migrated file (simulating live continuation-checkpoint.md) → allow"
-migrated="$project/docs/bionic/plans/epic-01-demo/continuation-checkpoint.md"
+migrated="$project/.bionic/docs/plans/epic-01-demo/continuation-checkpoint.md"
 printf '%s' "$V1_LEGACY" > "$migrated"
 run_edit "$migrated" "# Body" "# Updated"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+echo "docs-root override: file under docs/bionic/ in a project with .bionic/config.yaml → enforced"
+override_proj=$(mktemp -d); cleanup_dirs+=("$override_proj")
+mkdir -p "$override_proj/docs/bionic/plans/epic-99-x"
+mkdir -p "$override_proj/.bionic"
+printf '%s' "docs-root: docs/bionic" > "$override_proj/.bionic/config.yaml"
+run_write "$override_proj/docs/bionic/plans/epic-99-x/wave-01.plan.md" "$MISSING_FM"
+assert_eq "exit 2 (override path resolved; missing frontmatter blocks)" 2 "$HOOK_EXIT"
 
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
