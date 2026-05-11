@@ -472,6 +472,22 @@ echo ""
 # ─── Custom Commands ────────────────────────────────────────────────────────
 
 echo "Custom commands:"
+
+# Prune orphan commands: anything in ~/.claude/commands/ not listed in
+# claude-config.txt as a local-command entry. Renames (memory-sweep →
+# memory-compact) leave stale files behind without this step.
+if [ -d ~/.claude/commands ]; then
+  managed_commands="$(grep -E '^\s*local-command\s*\|' "$CONFIG" | sed -E 's/^[^|]+\|[[:space:]]*//;s/[[:space:]]+$//')"
+  for f in ~/.claude/commands/*.md; do
+    [ -f "$f" ] || continue
+    base="$(basename "$f" .md)"
+    if ! echo "$managed_commands" | grep -qx "$base"; then
+      rm -f "$f"
+      echo "  /${base}... ✗ removed (no longer in config)"
+    fi
+  done
+fi
+
 read_config "local-command" do_install_local_command
 echo ""
 

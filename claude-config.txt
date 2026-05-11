@@ -64,7 +64,7 @@ local-skill  | map-instrument-narrow
 local-skill  | skill-factory
 local-skill  | canonical-sdlc
 
-local-command | memory-sweep
+local-command | memory-compact
 local-command | memory-save
 
 env-var      | CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS | 1
