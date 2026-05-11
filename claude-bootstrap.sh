@@ -497,6 +497,34 @@ echo ""
 
 echo "Global hooks:"
 mkdir -p ~/.claude/hooks
+
+# Build the set of hook files present in the repo (canonical source of truth).
+declare -a repo_hooks=()
+for hook in "${SCRIPT_DIR}"/hooks/*.sh; do
+  [ -f "$hook" ] || continue
+  [[ "$(basename "$hook")" == *.test.sh ]] && continue
+  repo_hooks+=("$(basename "$hook")")
+done
+
+# Remove any installed hooks that no longer exist in the repo. The repo is
+# canonical — orphaned hooks in ~/.claude/hooks/ are deletion candidates from
+# prior refactors and must be cleaned up so they don't fire stale logic.
+removed_hooks=0
+for installed in ~/.claude/hooks/*.sh; do
+  [ -f "$installed" ] || continue
+  base="$(basename "$installed")"
+  found=0
+  for r in "${repo_hooks[@]}"; do
+    if [ "$base" = "$r" ]; then found=1; break; fi
+  done
+  if [ "$found" -eq 0 ]; then
+    rm -f "$installed"
+    echo "  ${base}... ✗ removed (no longer in repo)"
+    removed_hooks=$((removed_hooks + 1))
+  fi
+done
+
+# Install current hooks from the repo.
 for hook in "${SCRIPT_DIR}"/hooks/*.sh; do
   [ -f "$hook" ] || continue
   [[ "$(basename "$hook")" == *.test.sh ]] && continue
@@ -507,7 +535,7 @@ for hook in "${SCRIPT_DIR}"/hooks/*.sh; do
   echo "✓"
 done
 
-# Merge hook config into global settings
+# Rebuild hook config in global settings.
 echo -n "  settings.json hook config... "
 settings=~/.claude/settings.json
 if [ ! -f "$settings" ]; then
@@ -515,42 +543,31 @@ if [ ! -f "$settings" ]; then
 fi
 
 # Define all managed hooks (event|matcher_or_empty|command pairs)
-# PreToolUse and PostToolUse use a Bash matcher; SessionStart uses a
+# PreToolUse uses Bash/Write/Edit/Agent matchers; SessionStart uses a
 # source matcher (startup — don't fire on compact/clear/resume since
-# cleanup was already done for this notebook); Stop and UserPromptSubmit
-# take no matcher (Stop fires on every turn end and is debounced inside
-# the hook script; UserPromptSubmit fires on every user prompt).
+# cleanup was already done for this notebook); UserPromptSubmit takes
+# no matcher.
 MANAGED_HOOKS=(
   "PreToolUse|Bash|~/.claude/hooks/protect-main.sh"
   "PreToolUse|Bash|~/.claude/hooks/protect-database.sh"
   "PreToolUse|Bash|~/.claude/hooks/canonical-sdlc-evidence-gate.sh"
   "PreToolUse|Write|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
-  "PreToolUse|Agent|~/.claude/hooks/canonical-sdlc-dispatch-gate.sh"
-  "PostToolUse|Bash|~/.claude/hooks/memory-commit-save.sh"
-  "Stop||~/.claude/hooks/memory-update.sh"
   "SessionStart|startup|~/.claude/hooks/memory-cleanup.sh"
   "UserPromptSubmit||~/.claude/hooks/terseness-reminder.sh"
 )
 
-hooks_added=0
+# Reset .hooks to exactly the managed set. This is convergent: removing an
+# entry from MANAGED_HOOKS removes it from settings.json on the next run.
+tmp="${settings}.tmp"
+jq '.hooks = {}' "$settings" > "$tmp" && mv "$tmp" "$settings"
+
 for entry in "${MANAGED_HOOKS[@]}"; do
   IFS='|' read -r event matcher cmd <<< "$entry"
-
-  # Ensure the event array exists
+  tmp="${settings}.tmp"
   if ! jq -e --arg ev "$event" '.hooks[$ev]' "$settings" &>/dev/null; then
-    tmp="${settings}.tmp"
     jq --arg ev "$event" '.hooks[$ev] = []' "$settings" > "$tmp" && mv "$tmp" "$settings"
   fi
-
-  # Skip if this exact command already exists in the event array
-  if jq -e --arg ev "$event" --arg c "$cmd" \
-    '.hooks[$ev][] | select(.hooks[] | .command == $c)' \
-    "$settings" &>/dev/null; then
-    continue
-  fi
-
-  # Build the hook entry — with or without matcher
   tmp="${settings}.tmp"
   if [ -n "$matcher" ]; then
     jq --arg ev "$event" --arg m "$matcher" --arg c "$cmd" '
@@ -566,35 +583,42 @@ for entry in "${MANAGED_HOOKS[@]}"; do
       }]
     ' "$settings" > "$tmp" && mv "$tmp" "$settings"
   fi
-  hooks_added=$((hooks_added + 1))
 done
 
-if [ "$hooks_added" -gt 0 ]; then
-  echo "✓ (added ${hooks_added} hook entries)"
-else
-  echo "✓ (already configured)"
+echo "✓ (${#MANAGED_HOOKS[@]} managed hooks)"
+if [ "$removed_hooks" -gt 0 ]; then
+  echo "  cleaned up ${removed_hooks} stale hook file(s) from ~/.claude/hooks/"
 fi
 echo ""
 
-# ─── Project-local seeds ────────────────────────────────────────────────────
+# ─── Account-mirror symlinks ────────────────────────────────────────────────
 #
-# canonical-sdlc-dispatch-gate.sh reads `.bionic/sdlc-dispatch-rules.json`
-# from each project root. We seed the bionic repo's local copy from the
-# canonical-sdlc skill's tracked template if missing — idempotent so user
-# edits to the project copy are never overwritten. Other projects can opt
-# in by copying ~/.claude/skills/canonical-sdlc/sdlc-dispatch-rules.json
-# into their own .bionic/ dir.
-echo -n "Project-local dispatch rules: "
-rules_template="${SCRIPT_DIR}/skills/canonical-sdlc/sdlc-dispatch-rules.json"
-rules_target="${SCRIPT_DIR}/.bionic/sdlc-dispatch-rules.json"
-if [ ! -f "$rules_template" ]; then
-  echo "✗ (template missing: ${rules_template})"
-elif [ -f "$rules_target" ]; then
-  echo "✓ (already deployed: ${rules_target})"
-else
-  mkdir -p "${SCRIPT_DIR}/.bionic"
-  cp "$rules_template" "$rules_target"
-  echo "✓ (seeded ${rules_target})"
+# When multiple Claude accounts exist (~/.claude-other, ~/.claude-synthesis,
+# etc.), share the global config across them by symlinking settings.json and
+# CLAUDE.md back to the canonical ~/.claude/ copies. Auth (.claude.json),
+# history, and per-account caches stay separate.
+
+echo "Account-mirror symlinks:"
+mirror_count=0
+for mirror in ~/.claude-*; do
+  [ -d "$mirror" ] || continue
+  account="$(basename "$mirror")"
+  for f in settings.json CLAUDE.md; do
+    target="${mirror}/${f}"
+    canonical="${HOME}/.claude/${f}"
+    if [ -L "$target" ]; then
+      continue  # already symlinked
+    fi
+    if [ -f "$target" ]; then
+      mv "$target" "${target}.bak-$(date +%Y%m%d-%H%M%S)"
+    fi
+    ln -s "$canonical" "$target"
+    echo "  ${account}/${f} → ~/.claude/${f} ✓"
+    mirror_count=$((mirror_count + 1))
+  done
+done
+if [ "$mirror_count" -eq 0 ]; then
+  echo "  (no additional accounts found, or already symlinked)"
 fi
 echo ""
 
