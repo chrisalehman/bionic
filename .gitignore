@@ -43,3 +43,6 @@ docs/bionic/
 
 # Project notebook (local, not shared)
 .bionic/
+
+# Canonical-sdlc ephemeral workspace (continuation checkpoints, evidence snapshots, scratch)
+.bionic/tmp/

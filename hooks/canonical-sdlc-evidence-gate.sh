@@ -76,10 +76,36 @@ if [ -z "$PROJECT_DIR" ]; then
   PROJECT_DIR=$(pwd)
 fi
 
+# Resolve the per-project docs root: <project>/.bionic/config.yaml's
+# `docs-root:` if set, else default <project>/.bionic/docs. See
+# canonical-sdlc-dispatch-gate.sh for the same helper.
+resolve_docs_root() {
+  local proj="$1"
+  local config="$proj/.bionic/config.yaml"
+  if [ -f "$config" ]; then
+    local override
+    override=$(grep -E '^[[:space:]]*docs-root[[:space:]]*:' "$config" 2>/dev/null \
+      | head -1 \
+      | sed -E 's/^[[:space:]]*docs-root[[:space:]]*:[[:space:]]*//' \
+      | sed -E "s/^['\"]//;s/['\"]\$//" \
+      | sed -E 's/[[:space:]]+$//')
+    if [ -n "$override" ]; then
+      case "$override" in
+        /*) echo "$override" ;;
+        *)  echo "$proj/$override" ;;
+      esac
+      return
+    fi
+  fi
+  echo "$proj/.bionic/docs"
+}
+
 PLAN_DIRS=( "${HOME}/.claude/plans" )
 if [ -n "$PROJECT_DIR" ]; then
+  DOCS_ROOT=$(resolve_docs_root "$PROJECT_DIR")
   PLAN_DIRS+=(
-    "${PROJECT_DIR}/docs/bionic/plans"
+    "${DOCS_ROOT}/plans"
+    "${DOCS_ROOT}/incidents"
     "${PROJECT_DIR}/docs/superpowers/plans"
   )
 fi
@@ -124,6 +150,8 @@ frontmatter_get() {
 
 EVIDENCE_SCHEMA=$(frontmatter_get evidence_schema)
 DEPLOY_TARGET=$(frontmatter_get deploy_target)
+SDLC_VERSION=$(frontmatter_get canonical_sdlc_version)
+USE_WORKTREE=$(frontmatter_get use_worktree)
 
 # Extract the ## SDLC State section (from its header up to the next ##
 # header or EOF).
@@ -216,24 +244,56 @@ case "$NORM" in
     ;;
 esac
 
-# ---------- v2 evidence_schema shape validation ----------
-# Legacy plans (or plans without `evidence_schema` in frontmatter)
-# stop here — presence + placeholder check is the full contract.
-# `evidence_schema: v2` adds per-step required-field enforcement per
-# canonical-sdlc-autonomous-redesign.md §2.1.
+# ---------- shape validation (v2 evidence_schema or v3 plans) ----------
+# Legacy plans (no evidence_schema, no v3 marker) stop here — presence
+# + placeholder check is the full contract.
+#
+# v3 plans (canonical_sdlc_version: 3) use a renumbered shape switch:
+#   - Step 4 (Implement) — pointer step, optionally worktree fields when use_worktree=true
+#   - Step 5 (Browser verify) — devtools-trace OR n/a
+#   - Step 6 (Verify done) — cmd/pass/total/output
+#   - Step 7 (Self-review) — pointer step
+#   - Step 8 (Adversarial critic) — pointer step
+#   - Step 9 (Document) — adr OR rca OR n/a
+#   - Step 10 (Commit) — commit/subject/files
+#   - Step 11 (External review) — pr OR n/a
+#   - Step 12 (Finish branch) — merge/worktree-removed
+#   - Step 13 (Post-merge cleanup) — cleanup/tmp-wiped/tasks-completed OR n/a
+#   - Step 14 (Ship) — deploy/verified-at/monitor OR n/a
+#
+# v2 plans (canonical_sdlc_version: 2 or evidence_schema: v2) use the
+# original shape switch with old step numbers including Step 4
+# (worktree) and Step 8b (adversarial critic).
 
-if [ "$EVIDENCE_SCHEMA" != "v2" ]; then
+if [ "$SDLC_VERSION" = "3" ]; then
+  SHAPE_MODE="v3"
+elif [ "$EVIDENCE_SCHEMA" = "v2" ]; then
+  SHAPE_MODE="v2"
+else
   exit 0
 fi
 
-# Pointer steps don't get hook-side shape validation in v1 — their
-# evidence is a path or section pointer and the body validation is too
-# coupled to the plan format. Keep them at presence-only for now.
-case "$CURRENT" in
-  1|2|3|5|8|8b)
-    exit 0
-    ;;
-esac
+# Pointer steps differ between v2 and v3 due to renumbering.
+if [ "$SHAPE_MODE" = "v3" ]; then
+  case "$CURRENT" in
+    1|2|3|4|7|8)
+      # Step 4 is a pointer step in v3 BUT may include worktree fields
+      # when use_worktree=true. We let the pointer-step exit happen
+      # only when use_worktree is not true.
+      if [ "$CURRENT" = "4" ] && [ "$USE_WORKTREE" = "true" ]; then
+        : # fall through to shape check below
+      else
+        exit 0
+      fi
+      ;;
+  esac
+else
+  case "$CURRENT" in
+    1|2|3|5|8|8b)
+      exit 0
+      ;;
+  esac
+fi
 
 # Extract a value for a key from the BLOCK ("key: value" lines or
 # "key: value" appearing on the Step line directly). Returns empty if
@@ -271,66 +331,141 @@ shape_block() {
   fi
 }
 
-case "$CURRENT" in
-  4)
-    shape_block worktree base-sha branch
-    ;;
-  6)
-    if ! block_has devtools-trace && ! block_has_na; then
-      echo "BLOCKED: canonical-sdlc step 6 evidence requires either 'devtools-trace: <path>' or 'n/a: <reason>'." >&2
-      echo "Plan: $PLAN" >&2
-      echo "Fix: pick one. See SKILL.md verification shape table." >&2
-      exit 2
-    fi
-    ;;
-  7)
-    shape_block cmd pass total output
-    pass=$(block_get pass)
-    total=$(block_get total)
-    if ! echo "$pass" | grep -qE '^[0-9]+$' || ! echo "$total" | grep -qE '^[0-9]+$'; then
-      echo "BLOCKED: canonical-sdlc step 7 'pass:' and 'total:' must be integers (got pass='${pass}', total='${total}')." >&2
-      echo "Plan: $PLAN" >&2
-      exit 2
-    fi
-    if [ "$pass" -ne "$total" ]; then
-      echo "BLOCKED: canonical-sdlc step 7 evidence has pass=${pass} but total=${total}; the suite is not fully green." >&2
-      echo "Plan: $PLAN" >&2
-      echo "Fix: do not commit step 7 until pass equals total." >&2
-      exit 2
-    fi
-    ;;
-  9)
-    if ! block_has adr && ! block_has rca && ! block_has_na; then
-      echo "BLOCKED: canonical-sdlc step 9 evidence requires 'adr: <path>', 'rca: <path>' (incident-response mode), or 'n/a: <reason>'." >&2
-      echo "Plan: $PLAN" >&2
-      exit 2
-    fi
-    ;;
-  10)
-    shape_block commit subject files
-    ;;
-  11)
-    if ! block_has pr && ! block_has_na; then
-      echo "BLOCKED: canonical-sdlc step 11 evidence requires either 'pr: <url>' or 'n/a: <reason>' (e.g. 'n/a: PR-less workflow')." >&2
-      echo "Plan: $PLAN" >&2
-      exit 2
-    fi
-    ;;
-  12)
-    shape_block merge worktree-removed
-    ;;
-  13)
-    if block_has_na; then
-      if [ -n "$DEPLOY_TARGET" ] && [ "$DEPLOY_TARGET" != "none" ]; then
-        echo "BLOCKED: canonical-sdlc step 13 'n/a:' is only valid when deploy_target=none in frontmatter (got deploy_target=${DEPLOY_TARGET})." >&2
+if [ "$SHAPE_MODE" = "v3" ]; then
+  # v3 shape switch — renumbered steps.
+  case "$CURRENT" in
+    4)
+      # use_worktree=true case: require worktree/base-sha/branch fields.
+      # (When use_worktree=false we exited above as a pointer step.)
+      shape_block worktree base-sha branch
+      ;;
+    5)
+      if ! block_has devtools-trace && ! block_has_na; then
+        echo "BLOCKED: canonical-sdlc v3 step 5 evidence requires either 'devtools-trace: <path>' or 'n/a: <reason>'." >&2
         echo "Plan: $PLAN" >&2
-        echo "Fix: provide 'deploy:', 'verified-at:', and 'monitor:' fields, or change deploy_target to none." >&2
+        echo "Fix: pick one. See SKILL.md verification shape table." >&2
         exit 2
       fi
-    else
-      shape_block deploy verified-at monitor
-    fi
-    ;;
-esac
+      ;;
+    6)
+      shape_block cmd pass total output
+      pass=$(block_get pass)
+      total=$(block_get total)
+      if ! echo "$pass" | grep -qE '^[0-9]+$' || ! echo "$total" | grep -qE '^[0-9]+$'; then
+        echo "BLOCKED: canonical-sdlc v3 step 6 'pass:' and 'total:' must be integers (got pass='${pass}', total='${total}')." >&2
+        echo "Plan: $PLAN" >&2
+        exit 2
+      fi
+      if [ "$pass" -ne "$total" ]; then
+        echo "BLOCKED: canonical-sdlc v3 step 6 evidence has pass=${pass} but total=${total}; the suite is not fully green." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: do not commit step 6 until pass equals total." >&2
+        exit 2
+      fi
+      ;;
+    9)
+      if ! block_has adr && ! block_has rca && ! block_has_na; then
+        echo "BLOCKED: canonical-sdlc v3 step 9 evidence requires 'adr: <path>', 'rca: <path>' (incident-response mode), or 'n/a: <reason>'." >&2
+        echo "Plan: $PLAN" >&2
+        exit 2
+      fi
+      ;;
+    10)
+      shape_block commit subject files
+      ;;
+    11)
+      if ! block_has pr && ! block_has_na; then
+        echo "BLOCKED: canonical-sdlc v3 step 11 evidence requires either 'pr: <url>' or 'n/a: <reason>' (e.g. 'n/a: PR-less workflow')." >&2
+        echo "Plan: $PLAN" >&2
+        exit 2
+      fi
+      ;;
+    12)
+      shape_block merge worktree-removed
+      ;;
+    13)
+      if block_has_na; then
+        : # n/a is acceptable for Step 13 (cleanup_on_finish=false case)
+      else
+        shape_block cleanup tmp-wiped tasks-completed
+      fi
+      ;;
+    14)
+      if block_has_na; then
+        if [ -n "$DEPLOY_TARGET" ] && [ "$DEPLOY_TARGET" != "none" ]; then
+          echo "BLOCKED: canonical-sdlc v3 step 14 'n/a:' is only valid when deploy_target=none in frontmatter (got deploy_target=${DEPLOY_TARGET})." >&2
+          echo "Plan: $PLAN" >&2
+          echo "Fix: provide 'deploy:', 'verified-at:', and 'monitor:' fields, or change deploy_target to none." >&2
+          exit 2
+        fi
+      else
+        shape_block deploy verified-at monitor
+      fi
+      ;;
+  esac
+else
+  # v2 shape switch — original step numbers (preserved for backwards compat).
+  case "$CURRENT" in
+    4)
+      shape_block worktree base-sha branch
+      ;;
+    6)
+      if ! block_has devtools-trace && ! block_has_na; then
+        echo "BLOCKED: canonical-sdlc step 6 evidence requires either 'devtools-trace: <path>' or 'n/a: <reason>'." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: pick one. See SKILL.md verification shape table." >&2
+        exit 2
+      fi
+      ;;
+    7)
+      shape_block cmd pass total output
+      pass=$(block_get pass)
+      total=$(block_get total)
+      if ! echo "$pass" | grep -qE '^[0-9]+$' || ! echo "$total" | grep -qE '^[0-9]+$'; then
+        echo "BLOCKED: canonical-sdlc step 7 'pass:' and 'total:' must be integers (got pass='${pass}', total='${total}')." >&2
+        echo "Plan: $PLAN" >&2
+        exit 2
+      fi
+      if [ "$pass" -ne "$total" ]; then
+        echo "BLOCKED: canonical-sdlc step 7 evidence has pass=${pass} but total=${total}; the suite is not fully green." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: do not commit step 7 until pass equals total." >&2
+        exit 2
+      fi
+      ;;
+    9)
+      if ! block_has adr && ! block_has rca && ! block_has_na; then
+        echo "BLOCKED: canonical-sdlc step 9 evidence requires 'adr: <path>', 'rca: <path>' (incident-response mode), or 'n/a: <reason>'." >&2
+        echo "Plan: $PLAN" >&2
+        exit 2
+      fi
+      ;;
+    10)
+      shape_block commit subject files
+      ;;
+    11)
+      if ! block_has pr && ! block_has_na; then
+        echo "BLOCKED: canonical-sdlc step 11 evidence requires either 'pr: <url>' or 'n/a: <reason>' (e.g. 'n/a: PR-less workflow')." >&2
+        echo "Plan: $PLAN" >&2
+        exit 2
+      fi
+      ;;
+    12)
+      shape_block merge worktree-removed
+      ;;
+    13)
+      if block_has_na; then
+        if [ -n "$DEPLOY_TARGET" ] && [ "$DEPLOY_TARGET" != "none" ]; then
+          echo "BLOCKED: canonical-sdlc step 13 'n/a:' is only valid when deploy_target=none in frontmatter (got deploy_target=${DEPLOY_TARGET})." >&2
+          echo "Plan: $PLAN" >&2
+          echo "Fix: provide 'deploy:', 'verified-at:', and 'monitor:' fields, or change deploy_target to none." >&2
+          exit 2
+        fi
+      else
+        shape_block deploy verified-at monitor
+      fi
+      ;;
+  esac
+fi
 
 exit 0
