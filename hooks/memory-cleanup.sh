@@ -1,15 +1,19 @@
 #!/bin/bash
-# AUTO-CLEANUP: Scans .bionic/memory/ topical files for stale `updated:`
-# frontmatter (older than 30 days) and injects instructions for Claude
-# to verify, prune, or consolidate. Fires on SessionStart with the
-# "startup" matcher so it runs once per fresh session.
+# AUTO-CLEANUP: Scans .bionic/memory/ for two kinds of problems and
+# injects an advisory additionalContext for Claude on SessionStart.
 #
-# INDEX.md and context.md are never considered stale — only topical files
-# (<topic>.md with YAML frontmatter containing `updated:`).
+#   1. Stale topical files — <topic>.md with `updated:` frontmatter
+#      older than 30 days.
+#   2. Oversized index / journal — INDEX.md > 30 Always Apply rules
+#      or > 5 KB; context.md > 500 lines or > 50 KB.
 #
-# When stale files are found, emits hookSpecificOutput.additionalContext
-# so Claude picks up cleanup instructions silently at session start.
-# When nothing is stale, exits silently.
+# INDEX.md and context.md are never considered "stale" by the date
+# check — only topical files are date-aged. They are subject to the
+# size check.
+#
+# When anything is flagged, emits hookSpecificOutput.additionalContext
+# so Claude picks up the recommendation silently at session start.
+# Advisory only — NEVER blocks. When nothing trips, exits silently.
 #
 # Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
 
@@ -87,20 +91,83 @@ for file in "$MEMORY_DIR"/*.md; do
   fi
 done
 
-if [ -z "$STALE_LIST" ]; then
+# ---- Size audit ----
+#
+# Thresholds (in sync with commands/memory-compact.md):
+#   INDEX.md     — > 30 Always Apply rules OR > 5 KB
+#   context.md   — > 500 lines OR > 50 KB
+INDEX_FILE="$MEMORY_DIR/INDEX.md"
+CONTEXT_FILE="$MEMORY_DIR/context.md"
+
+SIZE_LIST=""
+
+# Cross-platform byte size for a regular file. Echoes 0 on missing.
+file_bytes() {
+  local f="$1"
+  [ -f "$f" ] || { echo 0; return; }
+  if [ "$(uname)" = "Darwin" ]; then
+    stat -f%z "$f" 2>/dev/null || echo 0
+  else
+    stat -c%s "$f" 2>/dev/null || echo 0
+  fi
+}
+
+if [ -f "$INDEX_FILE" ]; then
+  index_bytes=$(file_bytes "$INDEX_FILE")
+  index_lines=$(wc -l < "$INDEX_FILE" | tr -d ' ')
+  # Count Always Apply bullets: top-level "- " lines that fall under the
+  # Always Apply heading, before the next "## " heading. We approximate
+  # by counting any line that begins with "- " in the file — the typical
+  # INDEX.md is dominated by Always Apply bullets, and Deep Context
+  # pointers count toward the rule budget too (both are bullets).
+  index_bullets=$(grep -c '^- ' "$INDEX_FILE" 2>/dev/null || echo 0)
+  index_bullets=${index_bullets//[!0-9]/}
+  : "${index_bullets:=0}"
+
+  if [ "$index_bullets" -gt 30 ] || [ "$index_bytes" -gt 5120 ]; then
+    SIZE_LIST="${SIZE_LIST}- INDEX.md (${index_bullets} bullets, ${index_bytes} bytes — threshold: 30 rules / 5KB)
+"
+  fi
+fi
+
+if [ -f "$CONTEXT_FILE" ]; then
+  context_bytes=$(file_bytes "$CONTEXT_FILE")
+  context_lines=$(wc -l < "$CONTEXT_FILE" | tr -d ' ')
+  if [ "$context_lines" -gt 500 ] || [ "$context_bytes" -gt 51200 ]; then
+    SIZE_LIST="${SIZE_LIST}- context.md (${context_lines} lines, ${context_bytes} bytes — threshold: 500 lines / 50KB)
+"
+  fi
+fi
+
+# If nothing tripped, exit silently (preserve existing behavior).
+if [ -z "$STALE_LIST" ] && [ -z "$SIZE_LIST" ]; then
   exit 0
 fi
 
-# Emit additionalContext telling Claude to clean up before starting work.
-CONTEXT="Memory auto-cleanup: the following topical files in .bionic/memory/ are past their 30-day freshness window:
+# Build the advisory message. Sections only appear when their list is non-empty.
+CONTEXT="Memory auto-cleanup advisory (.bionic/memory/):"
 
-${STALE_LIST}
-Before starting the user's task, spend one pass doing the following:
-1. For each stale file, check if the content is still accurate relative to the current codebase. If yes, bump its \`updated:\` frontmatter date. If no, delete it or rewrite it.
-2. Review INDEX.md — consolidate duplicate rules, remove rules that have been superseded, and move any Always Apply entries that have grown into real context into their own topical file.
-3. Skip files that the user's task will naturally touch — those will get updated during the work.
+if [ -n "$STALE_LIST" ]; then
+  CONTEXT="${CONTEXT}
 
-Keep this fast. This is tidying, not redesign."
+Stale topical files (past 30-day freshness window):
+${STALE_LIST}"
+fi
+
+if [ -n "$SIZE_LIST" ]; then
+  CONTEXT="${CONTEXT}
+
+Oversized files — run \`/memory-compact\` to compact:
+${SIZE_LIST}"
+fi
+
+CONTEXT="${CONTEXT}
+Recommendation:
+- For stale files: verify each against the current codebase. If still accurate, bump \`updated:\`. Otherwise rewrite or delete.
+- For oversized files: invoke \`/memory-compact\` to migrate Always Apply bullets into topical files and rotate older sessions out of context.md.
+- Skip files the user's task will naturally touch — those will get updated during the work.
+
+Advisory only. Keep tidying fast — this is not redesign."
 
 jq -n --arg ctx "$CONTEXT" '{
   hookSpecificOutput: {

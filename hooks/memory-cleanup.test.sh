@@ -245,6 +245,74 @@ write_topical_file "$p7" "legit-stale.md" 50
 expect_additional_context "legit stale file listed despite malformed siblings" "$p7" "legit-stale.md"
 
 # ============================================================
+# Section 7b: Size-trigger — context.md inflated past 50KB
+# ============================================================
+
+echo ""
+echo "=== Section 7b: Oversized context.md triggers size advisory ==="
+
+p7b=$(make_project); cleanup_projects+=("$p7b")
+# Build a context.md > 50KB. A 60-char line repeated 1000 times ≈ 60KB.
+{
+  echo "---"
+  echo "updated: $(days_ago 1)"
+  echo "---"
+  echo "# Active work"
+  i=0
+  while [ "$i" -lt 1000 ]; do
+    echo "Filler line to inflate context.md past the 50KB size threshold."
+    i=$((i + 1))
+  done
+} > "$p7b/.bionic/memory/context.md"
+
+expect_additional_context "oversized context.md listed in advisory" "$p7b" "context.md"
+
+# The advisory must recommend /memory-compact when size threshold trips.
+run_hook "$p7b"
+ctx7b=$(echo "$HOOK_STDOUT" | jq -r '.hookSpecificOutput.additionalContext // empty' 2>/dev/null)
+TOTAL=$((TOTAL + 1))
+if echo "$ctx7b" | grep -q "/memory-compact"; then
+  echo "PASS: advisory recommends /memory-compact"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: advisory should recommend /memory-compact"
+  echo "  context='$ctx7b'"
+  FAIL=$((FAIL + 1))
+fi
+
+# Hook must remain advisory-only — never emit decision: block.
+TOTAL=$((TOTAL + 1))
+decision=$(echo "$HOOK_STDOUT" | jq -r '.decision // empty' 2>/dev/null)
+if [ -z "$decision" ] || [ "$decision" = "null" ]; then
+  echo "PASS: size advisory does not block"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: size advisory should not set decision (got '$decision')"
+  FAIL=$((FAIL + 1))
+fi
+
+# ============================================================
+# Section 7c: Size-trigger — INDEX.md with >30 Always Apply bullets
+# ============================================================
+
+echo ""
+echo "=== Section 7c: Oversized INDEX.md triggers size advisory ==="
+
+p7c=$(make_project); cleanup_projects+=("$p7c")
+{
+  echo "# Notebook"
+  echo ""
+  echo "## Always Apply"
+  i=0
+  while [ "$i" -lt 35 ]; do
+    echo "- Rule number $i — some terse imperative that lives in Always Apply."
+    i=$((i + 1))
+  done
+} > "$p7c/.bionic/memory/INDEX.md"
+
+expect_additional_context "oversized INDEX.md listed in advisory" "$p7c" "INDEX.md"
+
+# ============================================================
 # Section 8: cwd fallback from JSON input
 # ============================================================
 
