@@ -860,8 +860,8 @@ This prevents subagent wander.
 
 **Three-fail rule.** If the same step fails to produce valid evidence three times in a row:
 
-1. Stop. Do not attempt a fourth time.
-2. Surface the blocker to the user using the **User Decision Protocol**: framing, options for unblocking, why-it-matters.
+1. **If failures are diagnostic** (tests failing, behavior diverging, surprise output) — invoke the **Autonomous Friction Protocol** (see autonomous-mode section). The three-fail counter resets after a completed MAP-INSTRUMENT-NARROW pass yields a root cause; it does NOT reset on additional speculative fixes.
+2. **If failures are decision-related** (ambiguity, blocked-on-judgment, unclear requirement) — Stop. Do not attempt a fourth time. Surface to the user via **User Decision Protocol**: framing, options for unblocking, why-it-matters.
 3. Wait for direction.
 
 **Stop-and-wake list** (active in `autonomous`):
