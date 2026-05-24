@@ -73,6 +73,7 @@ digraph trigger {
 | **Architect** | Read source code of the system under investigation — your code AND library internals | Written analysis: call chains, async boundaries, state ownership |
 | **Git** | Assess current state — dirty files, recent changes, what's committed vs experimental | Categorized file list: keep vs experimental vs mixed |
 | **Env** | Verify infrastructure readiness — services running, build state, test tooling | Readiness report with blockers |
+| **State-Audit** | Verify inherited claims (handoff docs, prior agent assertions, checkpoint files, "95% done" claims) against actual repo state | Discrepancy list with evidence — what was claimed vs what is true now |
 
 **The architect agent is the critical one.** It reads the library source to find things like:
 - `render()` uses `requestAnimationFrame` (deferred, not synchronous)
