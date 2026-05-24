@@ -233,6 +233,24 @@ Skipping Step 1 Q&A to "save time" is the single highest-risk move.
 | 13. Post-merge cleanup | `canonical-sdlc` | — |
 | 14. Ship | `agent-skills:shipping-and-launch` | `agent-skills:ci-cd-and-automation` (new pipelines only) |
 
+#### Autonomous Friction Protocol
+
+When autonomous-mode work hits friction, **diagnose before escalating**. Friction is either:
+
+- **Diagnostic friction** — direction is clear, code misbehaves (test fails, behavior diverges from spec, surprise output). → MAP first.
+- **Decision friction** — the direction itself is in question (which approach, which abstraction, which scope). → Surface via User Decision Protocol.
+
+For diagnostic friction in autonomous mode:
+
+1. **Load `map-instrument-narrow` immediately.** Do not write speculative fix code first. Speculative-fix-before-instrumentation regresses pass rates more often than it improves them.
+2. **No fix code** until NARROW phase yields a named root cause with data evidence.
+3. **Three-fail rule applies AFTER one full MAP-INSTRUMENT-NARROW pass**, not before. If a complete pass does not yield a clean root cause, loop back to MAP (your architectural model was incomplete) — do not throw speculative fixes.
+4. **After root cause is known**, the *bubble-up vs. proceed-directly* judgment is a separate decision per the User Decision Protocol. Diagnosis ≠ permission to fix in scope; trivial fixes proceed, scope-expanding fixes surface.
+
+**Anti-pattern:** "I'll try one thing first, then instrument if it doesn't work." That "one thing" mutates state. Subsequent instrumentation captures post-attempt state, not the original bug. **MAP before any state change.**
+
+This protocol is load-bearing for every autonomous wave. It is not optional.
+
 ### `epic-scope` mode in particular
 
 `epic-scope` only runs Steps 0–3, producing the epic-level spec and plan. After `epic-scope` completes, each wave is a separate subsequent invocation — typically `autonomous`.
