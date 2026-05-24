@@ -159,13 +159,34 @@ If AFTER-A shows correct state and AFTER-B shows incorrect state, the mutation i
 | "I have a good mental model" | Mental models die with context. The architect agent's WRITTEN analysis survived and made data readable. |
 | "The broad capture is enough" | Broad capture shows WHERE the gap is. NARROW shows WHAT fills it. Both are needed. |
 
-## Red Flags — STOP and Return to MAP
+## Phase Gates
 
-- Writing fix code before NARROW phase completes
-- Instrumenting without understanding the call chain (numbers without meaning)
-- Skipping the architect agent ("I know this codebase")
-- Forming hypotheses during INSTRUMENT phase (observe first, theorize later)
-- More than 2 test runs without a root cause (incomplete MAP)
+Each phase has an explicit gate that MUST be answered before advancing. Walking past a gate is the documented dominant failure mode.
+
+### MAP → INSTRUMENT gate
+
+- [ ] Written architecture artifact exists (file, not "in my head")
+- [ ] Async boundaries and state owners are named explicitly
+- [ ] If multi-system (multiple engines / viewports / frames / runtimes): parity matrix exists showing how each system implements the relevant call chain
+- [ ] Inherited claims (handoff docs, prior agent assertions, checkpoint files) verified against current repo state — discrepancies recorded
+
+### INSTRUMENT → NARROW gate
+
+- [ ] Probes captured at least one full scenario run
+- [ ] Two adjacent boundaries show correct → incorrect transition
+- [ ] No fix code has been written
+- [ ] If pre-existing log volume exceeds your channel's cap (e.g., test-runner console limits) or drowns probes: existing noise has been silenced first
+- [ ] If async/race: probes include monotonic timestamps + per-event sequence numbers + lifecycle events
+
+### NARROW → FIX gate
+
+- [ ] Single function/call identified as the mutation point
+- [ ] WHY explained using MAP architecture (not just "X mutates Y" but "X mutates Y *because* the async boundary in `<location>` does Z")
+- [ ] Conceptual significance written: one paragraph in plain language stating what this means for the system, whether scope changes, whether prior assumptions were wrong
+
+### FIX → SCOPE-EXPANSION gate
+
+If you are tempted to apply the same fix pattern to sibling callsites (other engines, other viewports, other frames), that is a **new debugging problem**, not a continuation. Re-run MAP for the sibling scope. Cross-system parity from the MAP→INSTRUMENT gate makes sibling regressions visible before they ship.
 
 ## Quick Reference
 
