@@ -233,6 +233,24 @@ Skipping Step 1 Q&A to "save time" is the single highest-risk move.
 | 13. Post-merge cleanup | `canonical-sdlc` | — |
 | 14. Ship | `agent-skills:shipping-and-launch` | `agent-skills:ci-cd-and-automation` (new pipelines only) |
 
+#### Autonomous Friction Protocol
+
+When autonomous-mode work hits friction, **diagnose before escalating**. Friction is either:
+
+- **Diagnostic friction** — direction is clear, code misbehaves (test fails, behavior diverges from spec, surprise output). → MAP first.
+- **Decision friction** — the direction itself is in question (which approach, which abstraction, which scope). → Surface via User Decision Protocol.
+
+For diagnostic friction in autonomous mode:
+
+1. **Load `map-instrument-narrow` immediately.** Do not write speculative fix code first. Speculative-fix-before-instrumentation regresses pass rates more often than it improves them.
+2. **No fix code** until NARROW phase yields a named root cause with data evidence.
+3. **Three-fail rule applies AFTER one full MAP-INSTRUMENT-NARROW pass**, not before. If a complete pass does not yield a clean root cause, loop back to MAP (your architectural model was incomplete) — do not throw speculative fixes.
+4. **After root cause is known**, the *bubble-up vs. proceed-directly* judgment is a separate decision per the User Decision Protocol. Diagnosis ≠ permission to fix in scope; trivial fixes proceed, scope-expanding fixes surface.
+
+**Anti-pattern:** "I'll try one thing first, then instrument if it doesn't work." That "one thing" mutates state. Subsequent instrumentation captures post-attempt state, not the original bug. **MAP before any state change.**
+
+This protocol is load-bearing for every autonomous wave. It is not optional.
+
 ### `epic-scope` mode in particular
 
 `epic-scope` only runs Steps 0–3, producing the epic-level spec and plan. After `epic-scope` completes, each wave is a separate subsequent invocation — typically `autonomous`.
@@ -354,6 +372,18 @@ Every user-facing decision point (Step 1 Q&A, Step 3 approval, every Wake Note, 
 >
 > **Why it matters:** <one sentence on downstream impact>.
 
+**Pre-send gate — check before emitting any decision-point output.** If ANY of these is true, the abstraction level is wrong. Climb one rung and rewrite before sending:
+
+- [ ] Stating the question requires a filename, function name, or line number → climb to the conceptual choice the file represents.
+- [ ] Rationale per option exceeds ~25 words → you are explaining implementation, not framing the choice. Cut to the load-bearing distinction.
+- [ ] The user could not make the choice without reading the codebase first → climb until the choice is stark.
+- [ ] You are about to retry the same abstraction level the user already asked you to reframe → mandatory one-rung climb, no exceptions.
+
+**Significance tier.** For any decision that crosses a wave boundary or sets a precedent, state the tier explicitly:
+- *trivial* — local; reversible without cost.
+- *medium* — wave-scoped; reversible with rework.
+- *momentous* — cross-wave; sets a precedent; reversal is expensive.
+
 This replaces the prior `narrative_verbose` tier. Verbose narrative was never the solution; framing was.
 
 ## Ephemeral Workspace (`.bionic/tmp/`)
@@ -373,6 +403,14 @@ Plan and spec files (canonical artifacts) still live under `<docs-root>/{plans,s
 These load at session start, not as numbered steps:
 
 **Session-resume protocol — runs FIRST.** If a plan file with `governing-skill: canonical-sdlc` and `sdlc-step: < 14` exists, treat it as the active plan. Read in this order: frontmatter → `## Handoff` (if present) → `## SDLC State`. Use the handoff's `Resume point` as the literal next action. The handoff is authoritative.
+
+**Session-entry grounding gate — enumerate before declaring active artifact.** Operating against the wrong plan/wave/branch is a top-cost session failure. Before declaring the active artifact:
+
+1. `git log -10 --oneline` — what's the recent commit shape?
+2. `ls <docs-root>/plans/**/*.plan.md` AND `ls .bionic/tmp/continuation-checkpoint.md` AND `ls **/continuation.md` — what plan-class artifacts exist?
+3. Current branch name and any handoff files at canonical paths.
+4. Read `INDEX.md` + `context.md` + every linked file.
+5. **Name the active artifact explicitly** before declaring mode/wave. If the inferred active artifact contradicts the user's stated intent, HALT and surface via User Decision Protocol. Do not auto-resolve.
 
 - **Announce the mode** per the Load-time Announcement section.
 - `agent-skills:context-engineering` — load the right files before work begins.
@@ -518,6 +556,12 @@ On accept, write final values into plan frontmatter literally — every flag as 
 
 This is the "walk away" boundary. After the plan is complete, present a summary using the **User Decision Protocol**: framing, options (approve / request revisions / halt), why-it-matters. Only on explicit approval does Step 4 begin.
 
+**Wave shape locks at approval.** Once the user approves the Step 3 plan, wave scope is locked. Mid-wave discoveries (architectural gaps, related bugs, audit findings) get logged to `## Assumptions` as W+1 candidates — they do NOT reshape the current wave.
+
+- **Exception 1:** if the discovery makes the current wave structurally impossible, surface as a Wake Note and halt. The response is "this wave cannot ship," not "ship a different wave."
+- **Exception 2:** trivial corrections (one-line typo fix in a touched file) ship inline.
+- **Step 8 critic checks** for mid-wave scope drift not justified by an `## Assumptions` row.
+
 ### Step 4 — Implement (`agent-skills:incremental-implementation`)
 - **Worktree (only if `use_worktree: true`).** At the start of Step 4, before the first slice, create a git worktree at `.worktrees/<slug>` off the current branch. Record `worktree:`, `base-sha:`, `branch:` in the Step 4 evidence line. When `use_worktree: false` (default), work proceeds on the current branch.
 - **Goal:** Build in thin vertical slices with per-slice proof.
@@ -537,7 +581,7 @@ This is the "walk away" boundary. After the plan is complete, present a summary 
 - **Goal:** Real-browser evidence for UI/frontend work.
 - **Action:** Run flows in a real browser via DevTools MCP.
 - **Parallelization:** Step 5 + Step 6 can run in parallel.
-- **Gate:** Golden path + at least one edge case verified (or `n/a: <reason>` for non-UI work).
+- **Gate:** Golden path + at least one edge case verified (or `n/a: <reason>` for non-UI work). **End-to-end closure floor:** for any wave whose stated value involves user-visible behavior change, evidence MUST include a user-input → new-code trace (file:line per hop). `n/a: substrate-only` is a red flag and requires explicit justification in the wave's stated value.
 - **Evidence:** DevTools transcript or screenshot (written to `.bionic/tmp/devtools-trace-*.json` if interim).
 - **Mode weight:**
   - `design-refresh`: heavily weighted. Browser evidence per state + **`audit`** scored technical-quality report.
@@ -551,6 +595,7 @@ This is the "walk away" boundary. After the plan is complete, present a summary 
 
 ### Step 7 — Self-review (`agent-skills:code-review-and-quality`)
 - **Goal:** 5-axis review — correctness, readability, architecture, security, performance.
+- **Architecture-axis additional check:** for each new primitive/substrate added in this wave, trace user input → new code. If the chain breaks (no callsite reaches the new code), the substrate is dead and self-review is FAIL.
 - **Parallelization:** all 5 axes run in parallel (current behavior).
 - **Gate:** Every axis has an explicit verdict.
 - **Evidence:** Review notes.
@@ -842,8 +887,8 @@ This prevents subagent wander.
 
 **Three-fail rule.** If the same step fails to produce valid evidence three times in a row:
 
-1. Stop. Do not attempt a fourth time.
-2. Surface the blocker to the user using the **User Decision Protocol**: framing, options for unblocking, why-it-matters.
+1. **If failures are diagnostic** (tests failing, behavior diverging, surprise output) — invoke the **Autonomous Friction Protocol** (see autonomous-mode section). The three-fail counter resets after a completed MAP-INSTRUMENT-NARROW pass yields a root cause; it does NOT reset on additional speculative fixes.
+2. **If failures are decision-related** (ambiguity, blocked-on-judgment, unclear requirement) — Stop. Do not attempt a fourth time. Surface to the user via **User Decision Protocol**: framing, options for unblocking, why-it-matters.
 3. Wait for direction.
 
 **Stop-and-wake list** (active in `autonomous`):
