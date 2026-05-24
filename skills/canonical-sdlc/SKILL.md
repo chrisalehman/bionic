@@ -544,6 +544,12 @@ On accept, write final values into plan frontmatter literally — every flag as 
 
 This is the "walk away" boundary. After the plan is complete, present a summary using the **User Decision Protocol**: framing, options (approve / request revisions / halt), why-it-matters. Only on explicit approval does Step 4 begin.
 
+**Wave shape locks at approval.** Once the user approves the Step 3 plan, wave scope is locked. Mid-wave discoveries (architectural gaps, related bugs, audit findings) get logged to `## Assumptions` as W+1 candidates — they do NOT reshape the current wave.
+
+- **Exception 1:** if the discovery makes the current wave structurally impossible, surface as a Wake Note and halt. The response is "this wave cannot ship," not "ship a different wave."
+- **Exception 2:** trivial corrections (one-line typo fix in a touched file) ship inline.
+- **Step 8 critic checks** for mid-wave scope drift not justified by an `## Assumptions` row.
+
 ### Step 4 — Implement (`agent-skills:incremental-implementation`)
 - **Worktree (only if `use_worktree: true`).** At the start of Step 4, before the first slice, create a git worktree at `.worktrees/<slug>` off the current branch. Record `worktree:`, `base-sha:`, `branch:` in the Step 4 evidence line. When `use_worktree: false` (default), work proceeds on the current branch.
 - **Goal:** Build in thin vertical slices with per-slice proof.
