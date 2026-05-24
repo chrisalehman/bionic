@@ -569,7 +569,7 @@ This is the "walk away" boundary. After the plan is complete, present a summary 
 - **Goal:** Real-browser evidence for UI/frontend work.
 - **Action:** Run flows in a real browser via DevTools MCP.
 - **Parallelization:** Step 5 + Step 6 can run in parallel.
-- **Gate:** Golden path + at least one edge case verified (or `n/a: <reason>` for non-UI work).
+- **Gate:** Golden path + at least one edge case verified (or `n/a: <reason>` for non-UI work). **End-to-end closure floor:** for any wave whose stated value involves user-visible behavior change, evidence MUST include a user-input → new-code trace (file:line per hop). `n/a: substrate-only` is a red flag and requires explicit justification in the wave's stated value.
 - **Evidence:** DevTools transcript or screenshot (written to `.bionic/tmp/devtools-trace-*.json` if interim).
 - **Mode weight:**
   - `design-refresh`: heavily weighted. Browser evidence per state + **`audit`** scored technical-quality report.
@@ -583,6 +583,7 @@ This is the "walk away" boundary. After the plan is complete, present a summary 
 
 ### Step 7 — Self-review (`agent-skills:code-review-and-quality`)
 - **Goal:** 5-axis review — correctness, readability, architecture, security, performance.
+- **Architecture-axis additional check:** for each new primitive/substrate added in this wave, trace user input → new code. If the chain breaks (no callsite reaches the new code), the substrate is dead and self-review is FAIL.
 - **Parallelization:** all 5 axes run in parallel (current behavior).
 - **Gate:** Every axis has an explicit verdict.
 - **Evidence:** Review notes.
