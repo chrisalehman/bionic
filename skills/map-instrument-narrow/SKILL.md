@@ -1,6 +1,6 @@
 ---
 name: map-instrument-narrow
-description: Use when debugging requires understanding unfamiliar system internals before instrumentation will be interpretable — especially async execution, third-party library code, state mutations with no obvious code path between cause and effect, or when prior fix attempts failed without data
+description: Use when debugging requires understanding unfamiliar system internals before instrumentation will be interpretable — especially async execution, third-party library code, state mutations with no obvious code path between cause and effect, prior failed fix attempts, OR any diagnostic friction inside canonical-sdlc autonomous mode (loaded automatically by the Autonomous Friction Protocol)
 layer: technique
 needs: []
 loading: deferred
@@ -17,6 +17,15 @@ Observation technique for debugging complex systems. Three phases produce a data
 **Violating the letter of this process is violating the spirit of this process.**
 
 **Layer:** Technique (observation constraint). Invoked inside `systematic-debugging`'s Phase 1 "Gather Evidence" or `ralph-loop`'s DIAGNOSE phase when hard/soft triggers are met. It does not replace the scientific method — it provides the observation capability that feeds it.
+
+## Invocation
+
+This skill is invoked **proactively, not reactively**. Two canonical entry paths:
+
+1. **Autonomous-mode bridge.** `canonical-sdlc`'s Autonomous Friction Protocol loads this skill on the FIRST diagnostic friction event — not after a speculative fix has failed. If you are debugging inside an autonomous wave and this skill has not been loaded, STOP and load it before any fix code.
+2. **Hard-trigger match.** Any one of the hard triggers below (async/third-party/prior-fix-failed) invokes this skill directly, regardless of mode.
+
+If you find yourself writing fix code *before* this skill has been loaded in either path, you are violating the protocol. This is the single highest-cost debugging pattern.
 
 ## The Iron Law
 
@@ -64,6 +73,7 @@ digraph trigger {
 | **Architect** | Read source code of the system under investigation — your code AND library internals | Written analysis: call chains, async boundaries, state ownership |
 | **Git** | Assess current state — dirty files, recent changes, what's committed vs experimental | Categorized file list: keep vs experimental vs mixed |
 | **Env** | Verify infrastructure readiness — services running, build state, test tooling | Readiness report with blockers |
+| **State-Audit** | Verify inherited claims (handoff docs, prior agent assertions, checkpoint files, "95% done" claims) against actual repo state | Discrepancy list with evidence — what was claimed vs what is true now |
 
 **The architect agent is the critical one.** It reads the library source to find things like:
 - `render()` uses `requestAnimationFrame` (deferred, not synchronous)
@@ -150,13 +160,34 @@ If AFTER-A shows correct state and AFTER-B shows incorrect state, the mutation i
 | "I have a good mental model" | Mental models die with context. The architect agent's WRITTEN analysis survived and made data readable. |
 | "The broad capture is enough" | Broad capture shows WHERE the gap is. NARROW shows WHAT fills it. Both are needed. |
 
-## Red Flags — STOP and Return to MAP
+## Phase Gates
 
-- Writing fix code before NARROW phase completes
-- Instrumenting without understanding the call chain (numbers without meaning)
-- Skipping the architect agent ("I know this codebase")
-- Forming hypotheses during INSTRUMENT phase (observe first, theorize later)
-- More than 2 test runs without a root cause (incomplete MAP)
+Each phase has an explicit gate that MUST be answered before advancing. Walking past a gate is the documented dominant failure mode.
+
+### MAP → INSTRUMENT gate
+
+- [ ] Written architecture artifact exists (file, not "in my head")
+- [ ] Async boundaries and state owners are named explicitly
+- [ ] If multi-system (multiple engines / viewports / frames / runtimes): parity matrix exists showing how each system implements the relevant call chain
+- [ ] Inherited claims (handoff docs, prior agent assertions, checkpoint files) verified against current repo state — discrepancies recorded
+
+### INSTRUMENT → NARROW gate
+
+- [ ] Probes captured at least one full scenario run
+- [ ] Two adjacent boundaries show correct → incorrect transition
+- [ ] No fix code has been written
+- [ ] If pre-existing log volume exceeds your channel's cap (e.g., test-runner console limits) or drowns probes: existing noise has been silenced first
+- [ ] If async/race: probes include monotonic timestamps + per-event sequence numbers + lifecycle events
+
+### NARROW → FIX gate
+
+- [ ] Single function/call identified as the mutation point
+- [ ] WHY explained using MAP architecture (not just "X mutates Y" but "X mutates Y *because* the async boundary in `<location>` does Z")
+- [ ] Conceptual significance written: one paragraph in plain language stating what this means for the system, whether scope changes, whether prior assumptions were wrong
+
+### FIX → SCOPE-EXPANSION gate
+
+If you are tempted to apply the same fix pattern to sibling callsites (other engines, other viewports, other frames), that is a **new debugging problem**, not a continuation. Re-run MAP for the sibling scope. Cross-system parity from the MAP→INSTRUMENT gate makes sibling regressions visible before they ship.
 
 ## Quick Reference
 
