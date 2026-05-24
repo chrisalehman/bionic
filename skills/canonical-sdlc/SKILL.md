@@ -392,6 +392,14 @@ These load at session start, not as numbered steps:
 
 **Session-resume protocol — runs FIRST.** If a plan file with `governing-skill: canonical-sdlc` and `sdlc-step: < 14` exists, treat it as the active plan. Read in this order: frontmatter → `## Handoff` (if present) → `## SDLC State`. Use the handoff's `Resume point` as the literal next action. The handoff is authoritative.
 
+**Session-entry grounding gate — enumerate before declaring active artifact.** Operating against the wrong plan/wave/branch is a top-cost session failure. Before declaring the active artifact:
+
+1. `git log -10 --oneline` — what's the recent commit shape?
+2. `ls <docs-root>/plans/**/*.plan.md` AND `ls .bionic/tmp/continuation-checkpoint.md` AND `ls **/continuation.md` — what plan-class artifacts exist?
+3. Current branch name and any handoff files at canonical paths.
+4. Read `INDEX.md` + `context.md` + every linked file.
+5. **Name the active artifact explicitly** before declaring mode/wave. If the inferred active artifact contradicts the user's stated intent, HALT and surface via User Decision Protocol. Do not auto-resolve.
+
 - **Announce the mode** per the Load-time Announcement section.
 - `agent-skills:context-engineering` — load the right files before work begins.
 - **Memory sweep — recursive.** Read `.bionic/memory/INDEX.md`, `context.md`, AND every file they link to. INDEX.md is an *index*, not the whole notebook.
