@@ -372,6 +372,18 @@ Every user-facing decision point (Step 1 Q&A, Step 3 approval, every Wake Note, 
 >
 > **Why it matters:** <one sentence on downstream impact>.
 
+**Pre-send gate — check before emitting any decision-point output.** If ANY of these is true, the abstraction level is wrong. Climb one rung and rewrite before sending:
+
+- [ ] Stating the question requires a filename, function name, or line number → climb to the conceptual choice the file represents.
+- [ ] Rationale per option exceeds ~25 words → you are explaining implementation, not framing the choice. Cut to the load-bearing distinction.
+- [ ] The user could not make the choice without reading the codebase first → climb until the choice is stark.
+- [ ] You are about to retry the same abstraction level the user already asked you to reframe → mandatory one-rung climb, no exceptions.
+
+**Significance tier.** For any decision that crosses a wave boundary or sets a precedent, state the tier explicitly:
+- *trivial* — local; reversible without cost.
+- *medium* — wave-scoped; reversible with rework.
+- *momentous* — cross-wave; sets a precedent; reversal is expensive.
+
 This replaces the prior `narrative_verbose` tier. Verbose narrative was never the solution; framing was.
 
 ## Ephemeral Workspace (`.bionic/tmp/`)
