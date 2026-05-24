@@ -18,6 +18,15 @@ Observation technique for debugging complex systems. Three phases produce a data
 
 **Layer:** Technique (observation constraint). Invoked inside `systematic-debugging`'s Phase 1 "Gather Evidence" or `ralph-loop`'s DIAGNOSE phase when hard/soft triggers are met. It does not replace the scientific method — it provides the observation capability that feeds it.
 
+## Invocation
+
+This skill is invoked **proactively, not reactively**. Two canonical entry paths:
+
+1. **Autonomous-mode bridge.** `canonical-sdlc`'s Autonomous Friction Protocol loads this skill on the FIRST diagnostic friction event — not after a speculative fix has failed. If you are debugging inside an autonomous wave and this skill has not been loaded, STOP and load it before any fix code.
+2. **Hard-trigger match.** Any one of the hard triggers below (async/third-party/prior-fix-failed) invokes this skill directly, regardless of mode.
+
+If you find yourself writing fix code *before* this skill has been loaded in either path, you are violating the protocol. This is the single highest-cost debugging pattern.
+
 ## The Iron Law
 
 ```
