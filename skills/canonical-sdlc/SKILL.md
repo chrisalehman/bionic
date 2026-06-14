@@ -9,6 +9,7 @@ needs:
   - agent-skills:idea-refine
   - agent-skills:spec-driven-development
   - agent-skills:incremental-implementation
+  - browser-verify
   - agent-skills:browser-testing-with-devtools
   - agent-skills:code-review-and-quality
   - agent-skills:security-and-hardening
@@ -55,6 +56,8 @@ Violating the letter of this process is violating the spirit of this process.
 - `agent-skills:` owns **content rubrics** — spec shape, 5-axis review, 6-lens ideation, domain deep-dives (security, performance, UI). Supplies the *shape* each step's artifact should take.
 
 On overlap, route by kind, not by plugin. On ties, prefer `superpowers:`.
+
+**Tooling principle — CLI-first.** Prefer CLIs over MCP servers. An MCP server is an always-on context tax (its tool schemas load every session); a CLI is pay-per-call (zero cost until invoked). Default to the CLI for any capability a CLI covers; reserve an MCP server only for capabilities no CLI exposes, or for rare deep-inspection calls where the richer interface outweighs the context cost. In this lifecycle the only MCP-coupled step is Step 5: browser *driving* goes through `playwright-cli` (the `browser-verify` skill), and the chrome-devtools MCP is reserved for deep inspection (Lighthouse, performance-trace analysis, heap/CPU profiling, network throttling) that the CLI cannot do.
 
 **REQUIRED SUB-SKILLS** (declared in `needs`):
 - Operational and technique skills listed in the frontmatter. Load each only when the step that invokes it is active.
@@ -279,7 +282,7 @@ explore/mechanical/test (fresh `model: sonnet`). Default hint only; the Strategy
 | 2. Spec | O | `agent-skills:spec-driven-development` | — |
 | 3. Plan | O | `superpowers:writing-plans` | — |
 | 4. Implement | E + X | `agent-skills:incremental-implementation` | `superpowers:test-driven-development` (every slice); `superpowers:executing-plans` (if plan exists); `agent-skills:source-driven-development` (unfamiliar APIs); `superpowers:systematic-debugging` (surprises); `agent-skills:documentation-and-adrs` (inline ADR capture); `superpowers:using-git-worktrees` (only if `use_worktree: true`) |
-| 5. Browser verify | X | `agent-skills:browser-testing-with-devtools` | `agent-skills:frontend-ui-engineering` (production UI hardening pre-verify) |
+| 5. Browser verify | X | `browser-verify` (drives via `playwright-cli`) | `agent-skills:frontend-ui-engineering` (production UI hardening pre-verify); `agent-skills:browser-testing-with-devtools` (deep-debug only — Lighthouse / perf-trace analysis / profiling) |
 | 6. Verify done | X → O | `superpowers:verification-before-completion` | — |
 | 7. Self-review | E | `agent-skills:code-review-and-quality` | `agent-skills:security-and-hardening` (if security axis flags); `agent-skills:performance-optimization` (if performance axis flags) |
 | 8. Adversarial critic | E (independent) | subagent dispatch (**MANDATORY**) | — |
@@ -331,7 +334,7 @@ This protocol is load-bearing for every autonomous wave. It is not optional.
 | 2. Spec (repro + closure criteria) | `agent-skills:spec-driven-development` (writes `incidents/NNNN-<slug>/spec.md`) | — |
 | 3. Plan (debug + fix) | `superpowers:writing-plans` (writes `plan.md`; integration branch is typically `main` or `hotfix/<id>`) | — |
 | 4. Diagnose + Implement | `superpowers:systematic-debugging` → `agent-skills:incremental-implementation` | failing test = incident repro |
-| 5. Browser verify | `agent-skills:browser-testing-with-devtools` (N/A if non-UI) | — |
+| 5. Browser verify | `browser-verify` (drives via `playwright-cli`; N/A if non-UI) | deep-debug → `agent-skills:browser-testing-with-devtools` |
 | 6. Verify done | `superpowers:verification-before-completion` | — |
 | 7. Self-review | `agent-skills:code-review-and-quality` | — |
 | 8. Adversarial critic | subagent dispatch (**MANDATORY**) | "does the fix mask a deeper issue?" |
@@ -364,7 +367,7 @@ This protocol is load-bearing for every autonomous wave. It is not optional.
 | 2. Spec | `agent-skills:spec-driven-development` | — |
 | 3. Plan | `superpowers:writing-plans` | — |
 | 4. Implement (**loop**) | **`impeccable`** (`/impeccable craft`) | (a) craft → (b) polish + harden + normalize → (c) critique. Iterate. |
-| 5. Browser verify | `agent-skills:browser-testing-with-devtools` + **`audit`** | — |
+| 5. Browser verify | `browser-verify` (drives via `playwright-cli`) + **`audit`** | deep-debug → `agent-skills:browser-testing-with-devtools` |
 | 6. Verify done | `superpowers:verification-before-completion` | — |
 | 7. Self-review | `agent-skills:code-review-and-quality` (5 code axes only) | design quality evaluated in Step 4 critique loop |
 | 8. Adversarial critic | subagent dispatch | "find visual regressions and a11y failures" |
@@ -642,12 +645,12 @@ This is the "walk away" boundary. After the plan is complete, present a summary 
 - **Gate:** Every slice has a passing test that was RED before implementation; new assumptions logged.
 - **Evidence:** Commit history shows RED→GREEN transitions; `## Assumptions` reflects novel decisions. When `use_worktree: true`: also `worktree:`, `base-sha:`, `branch:` fields.
 
-### Step 5 — Browser verify (`agent-skills:browser-testing-with-devtools`)
+### Step 5 — Browser verify (`browser-verify`)
 - **Goal:** Real-browser evidence for UI/frontend work.
-- **Action:** Run flows in a real browser via DevTools MCP.
+- **Action:** Drive the browser via `playwright-cli` (the `browser-verify` skill): `snapshot` for element refs → `click`/`fill`/`type` to interact → `console`/`network` for runtime health → `screenshot` for visual evidence. Escalate to `agent-skills:browser-testing-with-devtools` (chrome-devtools MCP) **only** for deep inspection the CLI can't do — Lighthouse, performance-trace analysis, heap/CPU profiling, network throttling.
 - **Parallelization:** Step 5 + Step 6 can run in parallel.
 - **Gate:** Golden path + at least one edge case verified (or `n/a: <reason>` for non-UI work). **End-to-end closure floor:** for any wave whose stated value involves user-visible behavior change, evidence MUST include a user-input → new-code trace (file:line per hop). `n/a: substrate-only` is a red flag and requires explicit justification in the wave's stated value.
-- **Evidence:** DevTools transcript or screenshot (written to `.bionic/tmp/devtools-trace-*.json` if interim).
+- **Evidence:** `playwright-cli` capture — screenshot, plus a `console`/`network` check (written to `.bionic/tmp/`, recorded under the `devtools-trace:` key).
 - **Mode weight:**
   - `design-refresh`: heavily weighted. Browser evidence per state + **`audit`** scored technical-quality report.
 - **UI/UX substitution:** use `impeccable` in Step 4 and `agent-skills:frontend-ui-engineering` pre-verify.

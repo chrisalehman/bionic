@@ -57,7 +57,7 @@ Fifteen flat steps, numbered 0–14. No interstitials, no sub-steps, no hidden s
 | 2 | Spec | `agent-skills:spec-driven-development` | O | Testable contract with acceptance criteria |
 | 3 | Plan | `superpowers:writing-plans` | O | Execution contract (`## SDLC State` + `## Assumptions`); approval checkpoint before Step 4 |
 | 4 | Implement | `agent-skills:incremental-implementation` | E + X | Thin vertical slices, RED→GREEN per slice |
-| 5 | Browser verify | `agent-skills:browser-testing-with-devtools` | X | Real-browser evidence for UI work |
+| 5 | Browser verify | `browser-verify` (drives via `playwright-cli`; chrome-devtools MCP reserved for deep debug) | X | Real-browser evidence for UI work |
 | 6 | Verify done | `superpowers:verification-before-completion` | X→O | Run all suites; paste output |
 | 7 | Self-review | `agent-skills:code-review-and-quality` | E | 5-axis review (correctness, readability, architecture, security, performance) |
 | 8 | Adversarial critic | subagent dispatch (**MANDATORY**) | E (independent) | Fresh-context red-team |
