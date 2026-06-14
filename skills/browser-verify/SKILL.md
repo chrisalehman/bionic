@@ -39,7 +39,24 @@ playwright-cli install            # initialize the workspace
 playwright-cli install-browser    # install the browser binary (chromium)
 ```
 
-If the target is a local app, start the dev server first (or run it in the background) and verify it answers before driving.
+### Server lifecycle (local apps)
+
+Never drive a URL that isn't answering yet — a race against server startup is the most common false failure. Start the server, **wait for the port**, drive, then tear it down so you don't leak a process:
+
+```bash
+URL="http://localhost:3000"
+npm run dev >/tmp/devserver.log 2>&1 &   # background the server
+SERVER_PID=$!
+# wait up to ~30s for it to answer, then proceed
+for i in $(seq 1 30); do curl -sf -o /dev/null "$URL" && break || sleep 1; done
+curl -sf -o /dev/null "$URL" || { echo "server never came up:"; tail -20 /tmp/devserver.log; kill "$SERVER_PID"; exit 1; }
+
+# ... run the verify procedure against "$URL" ...
+
+kill "$SERVER_PID" 2>/dev/null   # teardown in all exit paths
+```
+
+Prefer the project's own start command (`npm run dev`, `pnpm dev`, `make serve`, etc.). If the server is already running, skip the start/teardown and just confirm it answers with the `curl` line.
 
 ## Procedure
 
@@ -65,10 +82,15 @@ playwright-cli -s="$S" open http://localhost:3000
    playwright-cli -s="$S" snapshot
    ```
 
-3. **Capture runtime health.** A page can look right and still be broken — check the two channels unit tests can't see:
+3. **Capture runtime health — and assert on it.** A page can look right and still be broken. Check the two channels unit tests can't see, and turn each into a pass/fail, not a glance:
    ```bash
-   playwright-cli -s="$S" console error     # console errors/warnings
-   playwright-cli -s="$S" network            # requests — look for 4xx/5xx, failed loads
+   # Console: the log header reports the counts — fail if any errors.
+   playwright-cli -s="$S" console error
+   #   header line: "Total messages: N (Errors: E, Warnings: W)" — require E == 0.
+
+   # Network: collect any >=400 response on a reload. Empty result = pass.
+   playwright-cli -s="$S" run-code "async (page) => { const bad=[]; page.on('response', r => { if (r.status() >= 400) bad.push(r.status() + ' ' + r.url()); }); await page.reload({ waitUntil: 'networkidle' }); return bad; }"
+   #   a non-empty array (e.g. ["404 .../api/x", "500 .../y"]) is a failed verification.
    ```
 
 4. **Capture visual evidence** straight to the ephemeral workspace (`--filename`; add `--full-page` for the whole scroll height):
@@ -87,7 +109,8 @@ playwright-cli -s="$S" open http://localhost:3000
 
 - **Always settle before inspecting.** On dynamic apps, `run-code "async (page) => { await page.waitForLoadState('networkidle'); }"` (or `waitForSelector(...)`) before `snapshot` — otherwise you read a half-rendered DOM and chase phantom failures. `run-code` takes a `(page) => {...}` function; `eval` takes `() => expr`.
 - **Refs, not guesses.** Drive off `snapshot` refs. If a ref goes stale after a DOM change, re-`snapshot`.
-- **Console + network are non-optional.** Visual pass ≠ runtime pass. A clean screenshot over a 500 response is a failed verification.
+- **Console + network are non-optional, and must be asserted, not glanced at.** Visual pass ≠ runtime pass. A clean screenshot over a 500 response is a failed verification. Use the step-3 idioms: require `Errors: 0` in the console header and an empty `>=400` array from the network reload. "Looked fine" is not evidence.
+- **Always tear down the dev server.** If you started it, `kill` it on every exit path (success, failure, early return). A leaked server poisons the next run's port.
 - **One assertion channel must be objective.** A screenshot is evidence a human reads; pair it with a `console`/`network` check or an `eval` that returns a boolean you assert on (e.g. `eval "() => document.querySelector('.success') !== null"`) — don't rely on the pixels alone.
 - **Reuse auth instead of re-logging-in.** `state-save <file>` once, then `state-load <file>` in later sessions.
 
