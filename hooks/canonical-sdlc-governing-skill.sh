@@ -200,21 +200,24 @@ if [ -z "$SDLC_VERSION" ]; then
   exit 0
 fi
 
-# Legacy v1 and v2: grandfathered out of v3 enforcement entirely.
+# Legacy v1 and v2: grandfathered out of flag enforcement entirely.
 if [ "$SDLC_VERSION" = "1" ] || [ "$SDLC_VERSION" = "2" ]; then
   exit 0
 fi
 
-if [ "$SDLC_VERSION" != "3" ]; then
+# v3 and v4 are both enforced. v4 = the v3 contract plus a required
+# `model_plan` (the Step-0 model-tier decision). v3 plans keep the prior
+# contract so in-flight plans authored before v4 are not retroactively broken.
+if [ "$SDLC_VERSION" != "3" ] && [ "$SDLC_VERSION" != "4" ]; then
   echo "BLOCKED: canonical-sdlc artifact '$BASENAME' has unsupported canonical_sdlc_version: '$SDLC_VERSION'." >&2
   echo "Path: $FILE_PATH" >&2
-  echo "Fix: set 'canonical_sdlc_version: 3' (current), or '1'/'2' for legacy plans." >&2
+  echo "Fix: set 'canonical_sdlc_version: 4' (current), '3' (prior, still enforced), or '1'/'2' for legacy plans." >&2
   exit 2
 fi
 
-# v3 schema: require all opt-in flags + discriminators only for autonomous
+# v3/v4 schema: require all opt-in flags + discriminators only for autonomous
 # mode. Other modes (epic-scope, incident-response, design-refresh, spike)
-# have different rule sets and are out of scope for v3 enforcement.
+# have different rule sets and are out of scope for enforcement.
 MODE=$(yaml_get mode)
 if [ "$MODE" != "autonomous" ]; then
   exit 0
@@ -230,12 +233,25 @@ for flag in "${REQUIRED_V3_OPT_IN[@]}" "${REQUIRED_DISCRIMINATORS[@]}"; do
   fi
 done
 
+# v4 additionally requires the confirmed `model_plan` field (the Step-0
+# model-tier decision). Checked as a separate conditional grep — NOT an
+# array element — to stay safe under `set -u` with bash 3.2's empty-array
+# expansion behaviour. v3 plans skip this and keep the prior contract.
+if [ "$SDLC_VERSION" = "4" ]; then
+  if ! echo "$FRONTMATTER" | grep -qE "^[[:space:]]*model_plan[[:space:]]*:"; then
+    MISSING+=("model_plan")
+  fi
+fi
+
 if [ "${#MISSING[@]}" -gt 0 ]; then
-  echo "BLOCKED: canonical-sdlc autonomous-mode v3 plan '$BASENAME' is missing required frontmatter flags: ${MISSING[*]}" >&2
+  echo "BLOCKED: canonical-sdlc autonomous-mode v${SDLC_VERSION} plan '$BASENAME' is missing required frontmatter flags: ${MISSING[*]}" >&2
   echo "Path: $FILE_PATH" >&2
   echo "Fix: run Step 0 (Configure) to set these explicitly. See SKILL.md §Step 0." >&2
-  echo "Required v3 opt-in flags:    ${REQUIRED_V3_OPT_IN[*]}" >&2
+  echo "Required opt-in flags:        ${REQUIRED_V3_OPT_IN[*]}" >&2
   echo "Required discriminator flags: ${REQUIRED_DISCRIMINATORS[*]}" >&2
+  if [ "$SDLC_VERSION" = "4" ]; then
+    echo "Required for v4 (added):      model_plan" >&2
+  fi
   exit 2
 fi
 
