@@ -144,7 +144,60 @@ Concretely:
 - Step 7 review: 5-axis parallel (current behavior); extend with Step 8 critics
 - Step 9 document: ADR draft + RCA draft (if applicable) in parallel
 
-The default is parallel. Justify sequential.
+The default is parallel. Justify sequential. Parallel applies to **independent, stateless** work;
+when slices share state (the one local DB, `supabase db reset`, count-based assertions), dispatch
+**serially** — one at a time, verify, then the next — regardless of fresh-vs-fork. See
+§Model & Token Strategy for which model tier and dispatch mechanism each unit should use.
+
+## Model & Token Strategy
+
+Pin the orchestrator on one strong model for the whole wave; reach the cheaper tiers **only
+through subagent dispatch**. Switching the *main* model mid-wave invalidates the prompt cache
+(and a skill cannot enforce a main-model switch anyway) — so the main model never changes; the
+tiering lives in *who you dispatch to*, not in re-configuring yourself. This is the operational
+form of "guard your context — offload to subagents."
+
+**Three tiers by role** (the default plan when `multi_agent: true`):
+
+| Tier | Role | Model | Dispatch mechanism |
+|---|---|---|---|
+| **1 · Orchestrator** | main thread — runs Steps 1–3 directly, coordinates 4–14 | **Opus 4.8 xhigh** (default) or Fable 5 high | the main session (human-set at start; **fixed all wave**) |
+| **2 · Execution** | implementation slices, refactors, Step 7 review, Step 8 critic | **Opus 4.8** | **fresh `model: opus` by default**; `fork` only when the unit genuinely needs the inherited conversation/context |
+| **3 · Explore / mechanical / test** | codebase search, fixtures, mechanical edits, test-writing | **Sonnet 4.6** | **fresh `model: sonnet`** (never a fork) |
+
+**Fresh by default, fork by exception — the cost rule.** A subagent spends tokens on two axes:
+*context* (the input it carries) and *effort* (the thinking it does). A **fork** is expensive on
+both — it inherits the entire main-thread conversation (re-paying full context on every dispatch)
+*and* the orchestrator's xhigh effort. A **fresh** subagent is cheap on both — only the brief you
+hand it, the model you pick, and the harness-default (sub-xhigh) effort. Critically, **a fresh
+subagent preserves the main thread's longevity exactly as well as a fork** — only its final
+summary returns to the main context. So for the goal of keeping the orchestrator alive, fresh
+*dominates* fork: same upside, a fraction of the spend.
+
+- **Dispatch nearly everything, fresh-first.** Under `multi_agent: true`, push almost every
+  substantive Step-4+ unit — even vanilla ones — to a **fresh** subagent. Inline only
+  truly-trivial one-line edits where even dispatch overhead exceeds the benefit.
+- **Fork only** when hand-feeding the needed context to a fresh agent would cost more than the
+  fork's inheritance overhead — i.e. genuinely context-heavy reasoning that depends on the
+  accumulated conversation. **Never fork a vanilla or mechanical task** — that is the most
+  expensive way to do the cheapest work. **Never fork to get a cheaper model** — forks ignore
+  `model` and inherit the orchestrator's (a Fable-orchestrator's forks are Fable, not Opus).
+- **Serial when slices share state** (see Parallel by Default above).
+
+**Effort is a main-thread-only dial.** There is no reasoning-effort parameter on the Agent tool.
+Set effort on the main session (`/model`); you cannot request "Opus high" for a subagent. Tier the
+*model* and the *mechanism*, never assume a selectable execution effort below the main thread.
+Forks inherit the orchestrator's effort (xhigh); fresh subagents run at their model's harness
+default.
+
+**`multi_agent: false`** — everything runs on the main orchestrator, no dispatch (Tiers 2–3 N/A).
+The main model still defaults to Opus 4.8 xhigh, but **dial-down is offered at Step 0** (Opus 4.8
+high or Sonnet 4.6) since there is nothing to offload to.
+
+**Verification carries over from the multi-agent memory** (`feedback_multi_agent_fork_orchestration`):
+verify each dispatched unit's commit *fileset* (`git show --stat` + `git status --short` for
+orphans), not just that tests are green; and the Step-8 adversarial critic must be **independent
+of whoever wrote the code** — never accept a subagent's self-graded review.
 
 ## Task Tracking (mandatory)
 
@@ -215,23 +268,27 @@ Skipping Step 1 Q&A to "save time" is the single highest-risk move.
 
 **Step → governing-skill mapping:**
 
-| Step | Governing skill | On-demand sub-skills within the step |
-|---|---|---|
-| 0. Configure | `canonical-sdlc` + `agent-skills:context-engineering` | — |
-| 1. Ideate | `agent-skills:idea-refine` | — |
-| 2. Spec | `agent-skills:spec-driven-development` | — |
-| 3. Plan | `superpowers:writing-plans` | — |
-| 4. Implement | `agent-skills:incremental-implementation` | `superpowers:test-driven-development` (every slice); `superpowers:executing-plans` (if plan exists); `agent-skills:source-driven-development` (unfamiliar APIs); `superpowers:systematic-debugging` (surprises); `agent-skills:documentation-and-adrs` (inline ADR capture); `superpowers:using-git-worktrees` (only if `use_worktree: true`) |
-| 5. Browser verify | `agent-skills:browser-testing-with-devtools` | `agent-skills:frontend-ui-engineering` (production UI hardening pre-verify) |
-| 6. Verify done | `superpowers:verification-before-completion` | — |
-| 7. Self-review | `agent-skills:code-review-and-quality` | `agent-skills:security-and-hardening` (if security axis flags); `agent-skills:performance-optimization` (if performance axis flags) |
-| 8. Adversarial critic | subagent dispatch (**MANDATORY**) | — |
-| 9. Document decisions | `agent-skills:documentation-and-adrs` | — |
-| 10. Commit (**per-step checkpoint**) | `agent-skills:git-workflow-and-versioning` | — |
-| 11. External review | `superpowers:requesting-code-review` | `superpowers:receiving-code-review` on receipt |
-| 12. Finish branch | `superpowers:finishing-a-development-branch` | — |
-| 13. Post-merge cleanup | `canonical-sdlc` | — |
-| 14. Ship | `agent-skills:shipping-and-launch` | `agent-skills:ci-cd-and-automation` (new pipelines only) |
+**Tier** = default dispatch target (see §Model & Token Strategy): **O** = orchestrator (main
+thread) · **E** = execution (fresh `model: opus`; fork only if context-heavy) · **X** =
+explore/mechanical/test (fresh `model: sonnet`). Default hint only; the Strategy section governs.
+
+| Step | Tier | Governing skill | On-demand sub-skills within the step |
+|---|---|---|---|
+| 0. Configure | O | `canonical-sdlc` + `agent-skills:context-engineering` | — |
+| 1. Ideate | O | `agent-skills:idea-refine` | — |
+| 2. Spec | O | `agent-skills:spec-driven-development` | — |
+| 3. Plan | O | `superpowers:writing-plans` | — |
+| 4. Implement | E + X | `agent-skills:incremental-implementation` | `superpowers:test-driven-development` (every slice); `superpowers:executing-plans` (if plan exists); `agent-skills:source-driven-development` (unfamiliar APIs); `superpowers:systematic-debugging` (surprises); `agent-skills:documentation-and-adrs` (inline ADR capture); `superpowers:using-git-worktrees` (only if `use_worktree: true`) |
+| 5. Browser verify | X | `agent-skills:browser-testing-with-devtools` | `agent-skills:frontend-ui-engineering` (production UI hardening pre-verify) |
+| 6. Verify done | X → O | `superpowers:verification-before-completion` | — |
+| 7. Self-review | E | `agent-skills:code-review-and-quality` | `agent-skills:security-and-hardening` (if security axis flags); `agent-skills:performance-optimization` (if performance axis flags) |
+| 8. Adversarial critic | E (independent) | subagent dispatch (**MANDATORY**) | — |
+| 9. Document decisions | O / E | `agent-skills:documentation-and-adrs` | — |
+| 10. Commit (**per-step checkpoint**) | O | `agent-skills:git-workflow-and-versioning` | — |
+| 11. External review | O | `superpowers:requesting-code-review` | `superpowers:receiving-code-review` on receipt |
+| 12. Finish branch | O | `superpowers:finishing-a-development-branch` | — |
+| 13. Post-merge cleanup | X | `canonical-sdlc` | — |
+| 14. Ship | E / O | `agent-skills:shipping-and-launch` | `agent-skills:ci-cd-and-automation` (new pipelines only) |
 
 #### Autonomous Friction Protocol
 
@@ -429,7 +486,7 @@ Each step has: **goal** · **action** · **completion gate** · **evidence artif
 
 ### Step 0 — Configure (entry-gate confirmation phase)
 
-Mandatory for new plans (`canonical_sdlc_version: 3`). Legacy plans (`canonical_sdlc_version: 1` or `2`) are grandfathered.
+Mandatory for new plans (`canonical_sdlc_version: 4`). Plans on `canonical_sdlc_version: 3` keep the prior contract (no `model_plan` required); `1`/`2` are grandfathered (no flag enforcement).
 
 **Goal:** Set every plan-shaping flag in plan frontmatter deliberately, with explicit user confirmation.
 
@@ -452,6 +509,7 @@ Mandatory for new plans (`canonical_sdlc_version: 3`). Legacy plans (`canonical_
    | `deploy_target` | "k8s" → `k8s`; "Vercel" → `vercel`; "deploy" → `custom`; "migration" → `migration`; none → `none`. |
    | `cleanup_on_finish` | Default `true`. |
    | `use_worktree` | Default `false`. Set true on explicit user override or when user says "isolate". |
+   | `model_plan` | Derived from `multi_agent` (see §Model & Token Strategy). `true` → `orchestrator=opus-4.8-xhigh; execution=opus-4.8-fresh; explore=sonnet-4.6`. `false` → `main=opus-4.8-xhigh` (dial-down to `opus-4.8-high` or `sonnet-4.6` offered). Always surfaced for explicit confirmation; written to frontmatter and **hook-enforced for `canonical_sdlc_version: 4`** autonomous plans. |
 
 3. **Present the confirmation display:**
 
@@ -470,15 +528,22 @@ Mandatory for new plans (`canonical_sdlc_version: 3`). Legacy plans (`canonical_
      surface_type:    api          [inferred: "REST endpoint" in convo]
      language:        typescript   [inferred: tsconfig.json]
      has_ui:          false        [no UI mentioned]
-     multi_agent:     false        [single SDLC plan]
+     multi_agent:     true         [default — parallel-dispatch fit; see feedback_default_multi_agent_true]
      deploy_target:   none         [no deploy signal]
 
    Opt-in flags:
      cleanup_on_finish: true       [Step 13 wipes .bionic/tmp/ on close]
      use_worktree:      false      [no isolated worktree — work on current branch]
 
+   Model plan:                     [multi_agent=true → tiered dispatch]
+     orchestrator: opus-4.8 xhigh  [default; main thread, fixed all wave]
+     execution:    opus-4.8        [fresh model:opus; fork only if context-heavy]
+     explore/test: sonnet-4.6      [fresh model:sonnet — search, mechanical, tests]
+     # multi_agent=false → single-thread: "main: opus-4.8 xhigh" (dial-down: opus-4.8 high | sonnet-4.6)
+     # orchestrator=fable-5 high → forks become Fable; execution must be fresh model:opus
+
    Reply "confirm" to accept, or specify overrides:
-     e.g. "set use_worktree=true, then confirm"
+     e.g. "set use_worktree=true, set orchestrator=fable-high, then confirm"
    ```
 
 4. **Block until explicit confirmation.** No timeout, no implicit acceptance.
@@ -494,22 +559,22 @@ override     := "set" flag "=" value
               | "change" flag "to" value
 ```
 
-Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`.
+Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set main_model=sonnet, confirm` (multi_agent=false dial-down).
 
-On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 3` plus all 5 discriminator flags and 2 opt-in flags.
+On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 4` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=opus-4.8-xhigh; execution=opus-4.8-fresh; explore=sonnet-4.6`). For v4 autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2).
 
 **Two-layer enforcement.**
 
 - **Layer 1 — Soft (this skill).** SKILL.md mandates Step 0. Do not proceed past Step 0 without explicit user confirmation.
-- **Layer 2 — Hard (`canonical-sdlc-governing-skill.sh`).** Runs on `PreToolUse|Write,Edit` of any canonical-sdlc plan/spec/adr file. For `canonical_sdlc_version: 3` + `mode: autonomous`, requires all 5 discriminator flags + 2 opt-in flags. Missing any → exit 2.
+- **Layer 2 — Hard (`canonical-sdlc-governing-skill.sh`).** Runs on `PreToolUse|Write,Edit` of any canonical-sdlc plan/spec/adr file. For `canonical_sdlc_version: 4` + `mode: autonomous`, requires all 5 discriminator flags + 2 opt-in flags + `model_plan`; for `canonical_sdlc_version: 3` it requires the 5 + 2 set only (no `model_plan`). Missing any → exit 2.
 
 **Mid-plan reconfiguration.** Edit plan frontmatter directly; the new value takes effect immediately on next hook read.
 
-**Legacy plan handling.** Plans with `canonical_sdlc_version: 1` or `2` are grandfathered — Step 0 v3 enforcement skipped.
+**Legacy plan handling.** Plans with `canonical_sdlc_version: 1` or `2` are grandfathered — flag enforcement skipped. `canonical_sdlc_version: 3` plans remain enforced under the prior 5 + 2 contract (no `model_plan`); only `4` requires `model_plan`.
 
-**Gate:** Plan frontmatter contains `canonical_sdlc_version: 3` plus all 5 discriminator and 2 opt-in flags. User reply ended with `confirm` or `confirmed`.
+**Gate:** Plan frontmatter contains `canonical_sdlc_version: 4` plus all 5 discriminator flags, 2 opt-in flags, and `model_plan`. User reply ended with `confirm` or `confirmed`.
 
-**Evidence:** A line in `## SDLC State`: `Step 0: configured at <ISO-timestamp> via <reply-summary>`.
+**Evidence:** A line in `## SDLC State`: `Step 0: configured at <ISO-timestamp> via <reply-summary>; model_plan=<confirmed tiers>`.
 
 ### Step 1 — Ideate (`agent-skills:idea-refine`)
 - **Goal:** Pin scope and non-goals before they get encoded as requirements.
@@ -709,7 +774,7 @@ sdlc-step: 3
 epic: epic-02-v2-product-pass
 wave: wave-01-checkout-refactor
 mode: autonomous
-canonical_sdlc_version: 3
+canonical_sdlc_version: 4
 ---
 ```
 
@@ -746,7 +811,7 @@ For decision-point prose to the user, see the **User Decision Protocol** section
 
 Every step has an evidence artifact recorded under `Step N:` in `## SDLC State`. The evidence-gate hook enforces presence on every `git commit`.
 
-For plans with `canonical_sdlc_version: 3`, the hook also enforces the per-step **shape table**:
+For plans with `canonical_sdlc_version: 3` or `4`, the hook also enforces the per-step **shape table** (v4 uses the v3 table — `model_plan` changes no per-step evidence shape):
 
 | Step | Required fields under `Step N:` | Notes |
 |------|---------------------------------|-------|
@@ -778,7 +843,7 @@ Step 6:
   output: <docs-root>/plans/<slug>.plan.md#step-6
 ```
 
-**Backwards compatibility.** Plans with `canonical_sdlc_version: 1` or `2` use their original shape table. v3 enforcement gates only on the v3 marker.
+**Backwards compatibility.** Plans with `canonical_sdlc_version: 1` or `2` use their original shape table. `canonical_sdlc_version: 3` and `4` share the same (v3) shape table.
 
 ### Handoff tier — multi-session contract
 
@@ -864,11 +929,11 @@ Zero user interaction. The next session reads it if present and resumes from the
 
 Bionic installs `canonical-sdlc-evidence-gate.sh` as a `PreToolUse|Bash` hook. On `git commit`, the hook locates the most recent plan, reads `## SDLC State`, and **blocks the commit (exit 2) if the current step's evidence artifact is missing or unreadable**.
 
-For `canonical_sdlc_version: 3` plans, the hook validates the per-step shape table above. For v1/v2 plans, it uses the original shape table.
+For `canonical_sdlc_version: 3` and `4` plans, the hook validates the per-step shape table above. For v1/v2 plans, it uses the original shape table.
 
 ## Governing-Skill Hook
 
-Bionic installs `canonical-sdlc-governing-skill.sh` as a `PreToolUse|Write,Edit` hook. It blocks writes to any canonical-sdlc artifact lacking `governing-skill:` frontmatter, and on `canonical_sdlc_version: 3` autonomous plans validates the 5 discriminator + 2 opt-in flag set.
+Bionic installs `canonical-sdlc-governing-skill.sh` as a `PreToolUse|Write,Edit` hook. It blocks writes to any canonical-sdlc artifact lacking `governing-skill:` frontmatter, and on `canonical_sdlc_version: 3`/`4` autonomous plans validates the 5 discriminator + 2 opt-in flag set (v4 also requires `model_plan`).
 
 ## Subagent Dispatch Convention
 
@@ -880,6 +945,7 @@ Every subagent invoked during a canonical-sdlc step must receive a prompt prefix
 4. **Artifact expected** — the evidence shape required for the step gate.
 5. **Exit condition** — when to stop and report. Includes: "do not pivot approach; surface blockers to the main thread."
 6. **Step-specific duties.** For Step 4 (implement) dispatches: *"Append a one-line entry to the plan file's `## Assumptions` section before your final commit whenever a decision resolves ambiguity. No silent choices."*
+7. **Model & dispatch tier** (see §Model & Token Strategy). Default to a **fresh** subagent: mechanical / search / test-writing → fresh `model: sonnet`; real-reasoning implementation → fresh `model: opus`. Use a **`fork`** only when the unit genuinely needs the inherited conversation/context — never to save effort (forks inherit the orchestrator's xhigh) and never to get a cheaper model (forks ignore `model`). Never switch the *main* model to run sub-work.
 
 This prevents subagent wander.
 
@@ -963,7 +1029,7 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 
 | Step | Gate | Evidence |
 |---|---|---|
-| 0. Configure | Frontmatter has `canonical_sdlc_version: 3` + 5 discriminator + 2 opt-in flags; user confirmed; TaskCreate list created | Confirmation row in `## SDLC State` |
+| 0. Configure | Frontmatter has `canonical_sdlc_version: 4` + 5 discriminator + 2 opt-in flags + `model_plan`; user confirmed; TaskCreate list created | Confirmation row in `## SDLC State` |
 | 1. Ideate | Refined idea + "Not Doing" list | Artifacts in spec; `shape` output if `design-refresh`; triage notes if `incident-response` |
 | 2. Spec | Every req has acceptance criterion | Spec doc |
 | 3. Plan | No placeholders; `integration-branch:` declared; Step 4 expanded into slice tasks | Plan file |

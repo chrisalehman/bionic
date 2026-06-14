@@ -265,7 +265,10 @@ esac
 # original shape switch with old step numbers including Step 4
 # (worktree) and Step 8b (adversarial critic).
 
-if [ "$SDLC_VERSION" = "3" ]; then
+# v4 uses the same per-step evidence shape table as v3 — the v4 bump added
+# a required `model_plan` frontmatter field (enforced by the governing-skill
+# hook), which changes no per-step evidence shape.
+if [ "$SDLC_VERSION" = "3" ] || [ "$SDLC_VERSION" = "4" ]; then
   SHAPE_MODE="v3"
 elif [ "$EVIDENCE_SCHEMA" = "v2" ]; then
   SHAPE_MODE="v2"
