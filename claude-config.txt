@@ -63,6 +63,7 @@ local-skill  | ralph-loop
 local-skill  | map-instrument-narrow
 local-skill  | skill-factory
 local-skill  | canonical-sdlc
+local-skill  | browser-verify
 
 local-command | memory-compact
 local-command | memory-save
