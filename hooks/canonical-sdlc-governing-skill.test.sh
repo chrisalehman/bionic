@@ -175,7 +175,7 @@ fi
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
 # ============================================================
-# canonical_sdlc_version v1/v2/v3 enforcement
+# canonical_sdlc_version v1/v2/v3/v4 enforcement
 # ============================================================
 #
 # Schema:
@@ -183,6 +183,8 @@ assert_eq "exit 0" 0 "$HOOK_EXIT"
 #   - canonical_sdlc_version: 2 → legacy-skip (grandfathered)
 #   - canonical_sdlc_version: 3 + mode: autonomous
 #       → require all 2 v3 opt-in flags + 5 discriminator flags
+#   - canonical_sdlc_version: 4 + mode: autonomous
+#       → require the v3 set PLUS model_plan
 #   - canonical_sdlc_version absent → not v3-managed; pass through
 #   - canonical_sdlc_version with other value → block
 
@@ -391,6 +393,87 @@ mkdir -p "$override_proj/.bionic"
 printf '%s' "docs-root: docs/bionic" > "$override_proj/.bionic/config.yaml"
 run_write "$override_proj/docs/bionic/plans/epic-99-x/wave-01.plan.md" "$MISSING_FM"
 assert_eq "exit 2 (override path resolved; missing frontmatter blocks)" 2 "$HOOK_EXIT"
+
+# ============================================================
+# canonical_sdlc_version v4 enforcement (model_plan required)
+# ============================================================
+#
+# v4 = the v3 contract (5 discriminators + 2 opt-in) PLUS a required
+# model_plan field, for autonomous mode only. v3 plans keep the prior
+# contract (no model_plan). Non-autonomous v4 plans are not flag-enforced.
+
+# Helper: build a v4 plan with optional omissions (same shape as
+# build_v3_plan, plus model_plan). Pass flag names to omit as args.
+build_v4_plan() {
+  local omit=" $* "
+  local out='---
+governing-skill: canonical-sdlc
+mode: autonomous
+sdlc-step: 4
+canonical_sdlc_version: 4
+'
+  local opt_in=("cleanup_on_finish:true" "use_worktree:false")
+  local discriminators=("surface_type:none" "language:none" \
+                        "has_ui:false" "multi_agent:true" \
+                        "deploy_target:none")
+  local v4_added=("model_plan:orchestrator=opus-4.8-xhigh; execution=opus-4.8-fresh; explore=sonnet-4.6")
+  for kv in "${opt_in[@]}" "${discriminators[@]}" "${v4_added[@]}"; do
+    local key="${kv%%:*}"
+    local val="${kv#*:}"
+    case "$omit" in
+      *" $key "*) continue ;;
+    esac
+    out+="${key}: ${val}"$'\n'
+  done
+  out+='---
+
+# Body
+'
+  printf '%s' "$out"
+}
+
+project=$(make_project)
+
+echo "v4 with all v3 flags + model_plan → allow"
+v4_full=$(build_v4_plan)
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-10-v4.plan.md" "$v4_full"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+echo "v4 missing model_plan → block, error names model_plan"
+v4_no_mp=$(build_v4_plan model_plan)
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-11-v4.plan.md" "$v4_no_mp"
+assert_eq "exit 2" 2 "$HOOK_EXIT"
+case "$HOOK_STDERR" in
+  *model_plan*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  error mentions model_plan\n' ;;
+  *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  error missing model_plan: %q\n' "$HOOK_STDERR" ;;
+esac
+
+echo "v4 missing a discriminator (multi_agent) but with model_plan → block, names multi_agent"
+v4_no_ma=$(build_v4_plan multi_agent)
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-12-v4.plan.md" "$v4_no_ma"
+assert_eq "exit 2" 2 "$HOOK_EXIT"
+case "$HOOK_STDERR" in
+  *multi_agent*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  error mentions multi_agent\n' ;;
+  *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  error missing multi_agent: %q\n' "$HOOK_STDERR" ;;
+esac
+
+echo "v3 plan does NOT require model_plan → allow (prior contract preserved)"
+v3_no_mp=$(build_v3_plan)   # build_v3_plan never emits model_plan
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-13-v3.plan.md" "$v3_no_mp"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+echo "v4 + mode != autonomous → allow (flag enforcement is autonomous-only)"
+v4_design='---
+governing-skill: canonical-sdlc
+mode: design-refresh
+sdlc-step: 1
+canonical_sdlc_version: 4
+---
+
+# Body
+'
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-14-v4d.plan.md" "$v4_design"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
 
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
