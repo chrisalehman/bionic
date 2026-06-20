@@ -4,7 +4,7 @@ description: Manually checkpoint .bionic/memory/ — update context.md with curr
 
 # Memory Save
 
-On-demand memory save. Use when you want a checkpoint mid-session — before a risky operation, after a significant decision, or when you're about to walk away. Complement to the automatic `SessionEnd` save (normal session endings) and the `/memory-sweep` audit (periodic cleanup).
+On-demand memory save. Use when you want a checkpoint mid-session — before a risky operation, after a significant decision, or when you're about to walk away. Memory saving is manual: pair this with `/memory-compact` (periodic consolidation and age-out) and the `memory-cleanup.sh` SessionStart hook (advisory staleness/size nudges). There is no automatic save — the prior `PostToolUse`/`Stop` auto-save hooks were removed.
 
 ## What to save
 
