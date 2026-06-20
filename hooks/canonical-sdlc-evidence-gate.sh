@@ -412,11 +412,14 @@ if [ "$SHAPE_MODE" = "v5" ]; then
       # marker (cleanup_on_finish=false case).
       shape_block merge worktree-removed
       cleanup_val=$(block_get cleanup)
-      if [ "$cleanup_val" = "n/a" ]; then
-        : # cleanup_on_finish=false case
-      else
-        shape_block cleanup tmp-wiped tasks-completed
-      fi
+      case "$cleanup_val" in
+        n/a|n/a:*)
+          : # cleanup_on_finish=false / already-cleaned case (reason optional)
+          ;;
+        *)
+          shape_block cleanup tmp-wiped tasks-completed
+          ;;
+      esac
       ;;
     10)
       if block_has_na; then

@@ -1159,6 +1159,18 @@ Step 9:
 expect_allow "v5 Step 9 with cleanup: n/a → allow" \
   "$h11p" 'git commit -m "x"'
 
+# 11p2 — v5 Step 9 with cleanup: n/a + reason (cleanup_on_finish=false / already cleaned) → allow.
+h11p2=$(make_home)
+write_plan "$h11p2" "$(v5_frontmatter)
+## SDLC State
+current: 9
+Step 9:
+  merge: abc1234abc1234abc1234abc1234abc1234abc1
+  worktree-removed: n/a
+  cleanup: n/a: cleanup_on_finish=false" > /dev/null
+expect_allow "v5 Step 9 with cleanup: n/a + reason → allow" \
+  "$h11p2" 'git commit -m "x"'
+
 # 11q — v5 Step 9 missing merge → block.
 h11q=$(make_home)
 write_plan "$h11q" "$(v5_frontmatter)
