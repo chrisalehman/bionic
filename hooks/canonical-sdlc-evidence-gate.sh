@@ -268,7 +268,21 @@ esac
 # v4 uses the same per-step evidence shape table as v3 — the v4 bump added
 # a required `model_plan` frontmatter field (enforced by the governing-skill
 # hook), which changes no per-step evidence shape.
-if [ "$SDLC_VERSION" = "3" ] || [ "$SDLC_VERSION" = "4" ]; then
+#
+# v5 (gate-collapse) renumbers and merges steps, so it has its own shape
+# switch:
+#   - Step 5 (Verify gate) — cmd/pass/total/output (tests modality, pass==total)
+#     AND devtools-trace OR n/a (browser modality)
+#   - Step 6 (Review gate) — pointer step
+#   - Step 7 (Document) — adr OR rca OR n/a   (was v3 Step 9)
+#   - Step 8 (External review) — pr OR n/a    (was v3 Step 11)
+#   - Step 9 (Integrate & close) — merge/worktree-removed AND cleanup triple
+#     OR cleanup: n/a   (merge of v3 Steps 12 + 13)
+#   - Step 10 (Ship) — deploy/verified-at/monitor OR n/a   (was v3 Step 14)
+#   Commit is a cross-cutting rhythm, not a numbered step (no Step 10 commit shape).
+if [ "$SDLC_VERSION" = "5" ]; then
+  SHAPE_MODE="v5"
+elif [ "$SDLC_VERSION" = "3" ] || [ "$SDLC_VERSION" = "4" ]; then
   SHAPE_MODE="v3"
 elif [ "$EVIDENCE_SCHEMA" = "v2" ]; then
   SHAPE_MODE="v2"
@@ -276,8 +290,20 @@ else
   exit 0
 fi
 
-# Pointer steps differ between v2 and v3 due to renumbering.
-if [ "$SHAPE_MODE" = "v3" ]; then
+# Pointer steps differ between schema versions due to renumbering.
+if [ "$SHAPE_MODE" = "v5" ]; then
+  case "$CURRENT" in
+    1|2|3|4|6)
+      # Step 4 is a pointer step in v5 BUT may include worktree fields when
+      # use_worktree=true; Step 6 (Review) is always a pointer step.
+      if [ "$CURRENT" = "4" ] && [ "$USE_WORKTREE" = "true" ]; then
+        : # fall through to shape check below
+      else
+        exit 0
+      fi
+      ;;
+  esac
+elif [ "$SHAPE_MODE" = "v3" ]; then
   case "$CURRENT" in
     1|2|3|4|7|8)
       # Step 4 is a pointer step in v3 BUT may include worktree fields
@@ -334,7 +360,78 @@ shape_block() {
   fi
 }
 
-if [ "$SHAPE_MODE" = "v3" ]; then
+if [ "$SHAPE_MODE" = "v5" ]; then
+  # v5 shape switch — gate-collapsed steps.
+  case "$CURRENT" in
+    4)
+      # use_worktree=true case: require worktree/base-sha/branch fields.
+      # (When use_worktree=false we exited above as a pointer step.)
+      shape_block worktree base-sha branch
+      ;;
+    5)
+      # Verify gate: tests modality (cmd/pass/total/output, pass==total) is
+      # always required; browser modality is devtools-trace OR n/a.
+      shape_block cmd pass total output
+      pass=$(block_get pass)
+      total=$(block_get total)
+      if ! echo "$pass" | grep -qE '^[0-9]+$' || ! echo "$total" | grep -qE '^[0-9]+$'; then
+        echo "BLOCKED: canonical-sdlc v5 step 5 'pass:' and 'total:' must be integers (got pass='${pass}', total='${total}')." >&2
+        echo "Plan: $PLAN" >&2
+        exit 2
+      fi
+      if [ "$pass" -ne "$total" ]; then
+        echo "BLOCKED: canonical-sdlc v5 step 5 evidence has pass=${pass} but total=${total}; the suite is not fully green." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: do not commit step 5 until pass equals total." >&2
+        exit 2
+      fi
+      if ! block_has devtools-trace && ! block_has_na; then
+        echo "BLOCKED: canonical-sdlc v5 step 5 (Verify) browser modality requires 'devtools-trace: <path>' or 'n/a: <reason>'." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: add the browser-evidence path, or 'n/a:' with a reason. See SKILL.md verification shape table." >&2
+        exit 2
+      fi
+      ;;
+    7)
+      if ! block_has adr && ! block_has rca && ! block_has_na; then
+        echo "BLOCKED: canonical-sdlc v5 step 7 evidence requires 'adr: <path>', 'rca: <path>' (incident-response mode), or 'n/a: <reason>'." >&2
+        echo "Plan: $PLAN" >&2
+        exit 2
+      fi
+      ;;
+    8)
+      if ! block_has pr && ! block_has_na; then
+        echo "BLOCKED: canonical-sdlc v5 step 8 evidence requires either 'pr: <url>' or 'n/a: <reason>' (e.g. 'n/a: PR-less workflow')." >&2
+        echo "Plan: $PLAN" >&2
+        exit 2
+      fi
+      ;;
+    9)
+      # Integrate & close: merge is always required; cleanup is the triple
+      # (cleanup/tmp-wiped/tasks-completed) OR the explicit `cleanup: n/a`
+      # marker (cleanup_on_finish=false case).
+      shape_block merge worktree-removed
+      cleanup_val=$(block_get cleanup)
+      if [ "$cleanup_val" = "n/a" ]; then
+        : # cleanup_on_finish=false case
+      else
+        shape_block cleanup tmp-wiped tasks-completed
+      fi
+      ;;
+    10)
+      if block_has_na; then
+        if [ -n "$DEPLOY_TARGET" ] && [ "$DEPLOY_TARGET" != "none" ]; then
+          echo "BLOCKED: canonical-sdlc v5 step 10 'n/a:' is only valid when deploy_target=none in frontmatter (got deploy_target=${DEPLOY_TARGET})." >&2
+          echo "Plan: $PLAN" >&2
+          echo "Fix: provide 'deploy:', 'verified-at:', and 'monitor:' fields, or change deploy_target to none." >&2
+          exit 2
+        fi
+      else
+        shape_block deploy verified-at monitor
+      fi
+      ;;
+  esac
+elif [ "$SHAPE_MODE" = "v3" ]; then
   # v3 shape switch — renumbered steps.
   case "$CURRENT" in
     4)
