@@ -205,13 +205,14 @@ if [ "$SDLC_VERSION" = "1" ] || [ "$SDLC_VERSION" = "2" ]; then
   exit 0
 fi
 
-# v3 and v4 are both enforced. v4 = the v3 contract plus a required
-# `model_plan` (the Step-0 model-tier decision). v3 plans keep the prior
-# contract so in-flight plans authored before v4 are not retroactively broken.
-if [ "$SDLC_VERSION" != "3" ] && [ "$SDLC_VERSION" != "4" ]; then
+# v3, v4, and v5 are all enforced. v4 added a required `model_plan` (the
+# Step-0 model-tier decision); v5 collapses the step set (gate model) but
+# inherits v4's flag contract unchanged. v3 plans keep the prior contract so
+# in-flight plans authored before v4 are not retroactively broken.
+if [ "$SDLC_VERSION" != "3" ] && [ "$SDLC_VERSION" != "4" ] && [ "$SDLC_VERSION" != "5" ]; then
   echo "BLOCKED: canonical-sdlc artifact '$BASENAME' has unsupported canonical_sdlc_version: '$SDLC_VERSION'." >&2
   echo "Path: $FILE_PATH" >&2
-  echo "Fix: set 'canonical_sdlc_version: 4' (current), '3' (prior, still enforced), or '1'/'2' for legacy plans." >&2
+  echo "Fix: set 'canonical_sdlc_version: 5' (current), '4'/'3' (prior, still enforced), or '1'/'2' for legacy plans." >&2
   exit 2
 fi
 
@@ -233,11 +234,11 @@ for flag in "${REQUIRED_V3_OPT_IN[@]}" "${REQUIRED_DISCRIMINATORS[@]}"; do
   fi
 done
 
-# v4 additionally requires the confirmed `model_plan` field (the Step-0
-# model-tier decision). Checked as a separate conditional grep — NOT an
-# array element — to stay safe under `set -u` with bash 3.2's empty-array
+# v4 and v5 additionally require the confirmed `model_plan` field (the
+# Step-0 model-tier decision). Checked as a separate conditional grep — NOT
+# an array element — to stay safe under `set -u` with bash 3.2's empty-array
 # expansion behaviour. v3 plans skip this and keep the prior contract.
-if [ "$SDLC_VERSION" = "4" ]; then
+if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ]; then
   if ! echo "$FRONTMATTER" | grep -qE "^[[:space:]]*model_plan[[:space:]]*:"; then
     MISSING+=("model_plan")
   fi
@@ -249,8 +250,8 @@ if [ "${#MISSING[@]}" -gt 0 ]; then
   echo "Fix: run Step 0 (Configure) to set these explicitly. See SKILL.md §Step 0." >&2
   echo "Required opt-in flags:        ${REQUIRED_V3_OPT_IN[*]}" >&2
   echo "Required discriminator flags: ${REQUIRED_DISCRIMINATORS[*]}" >&2
-  if [ "$SDLC_VERSION" = "4" ]; then
-    echo "Required for v4 (added):      model_plan" >&2
+  if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ]; then
+    echo "Required for v${SDLC_VERSION} (added):      model_plan" >&2
   fi
   exit 2
 fi
