@@ -949,6 +949,295 @@ expect_block "v3 Step 6 with placeholder TODO → block" \
   "$h10v" 'git commit -m "x"' "placeholder"
 
 # ============================================================
+# Section 11: v5 canonical_sdlc_version shape validation
+# ============================================================
+#
+# v5 collapses the step set: Step 5 = Verify gate (tests modality always +
+# browser modality devtools-trace/n-a), Step 6 = Review (pointer), Step 7 =
+# Document (was 9), Step 8 = External review (was 11), Step 9 = Integrate &
+# close (merge + cleanup, was 12+13), Step 10 = Ship (was 14). Commit is a
+# cross-cutting rhythm, no longer a numbered step.
+
+echo ""
+echo "=== Section 11: v5 canonical_sdlc_version shape validation ==="
+
+v5_frontmatter() {
+  local deploy="${1:-none}" use_wt="${2:-false}"
+  cat <<EOF
+---
+governing-skill: canonical-sdlc
+mode: autonomous
+canonical_sdlc_version: 5
+deploy_target: ${deploy}
+use_worktree: ${use_wt}
+---
+EOF
+}
+
+# 11a — v5 Step 4 (Implement) pointer step when use_worktree=false → allow.
+h11a=$(make_home)
+write_plan "$h11a" "$(v5_frontmatter none false)
+## SDLC State
+current: 4
+Step 4: <docs-root>/plans/wave-04.plan.md#step-4" > /dev/null
+expect_allow "v5 Step 4 pointer (use_worktree=false) → allow" \
+  "$h11a" 'git commit -m "x"'
+
+# 11b — v5 Step 4 with use_worktree=true and all fields → allow.
+h11b=$(make_home)
+write_plan "$h11b" "$(v5_frontmatter none true)
+## SDLC State
+current: 4
+Step 4:
+  worktree: /Users/x/.worktrees/feature-x
+  base-sha: abc1234abc1234abc1234abc1234abc1234abc1
+  branch: feature-x" > /dev/null
+expect_allow "v5 Step 4 use_worktree=true with all fields → allow" \
+  "$h11b" 'git commit -m "x"'
+
+# 11c — v5 Step 4 with use_worktree=true missing base-sha → block.
+h11c=$(make_home)
+write_plan "$h11c" "$(v5_frontmatter none true)
+## SDLC State
+current: 4
+Step 4:
+  worktree: /Users/x/.worktrees/feature-x
+  branch: feature-x" > /dev/null
+expect_block "v5 Step 4 use_worktree=true missing base-sha → block" \
+  "$h11c" 'git commit -m "x"' "base-sha"
+
+# 11d — v5 Step 5 (Verify) full shape: tests + browser devtools-trace → allow.
+h11d=$(make_home)
+write_plan "$h11d" "$(v5_frontmatter)
+## SDLC State
+current: 5
+Step 5:
+  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-04.plan.md#step-5
+  devtools-trace: .bionic/tmp/evidence-golden.png" > /dev/null
+expect_allow "v5 Step 5 Verify full (tests + browser trace) → allow" \
+  "$h11d" 'git commit -m "x"'
+
+# 11e — v5 Step 5 tests + browser n/a (non-UI wave) → allow.
+h11e=$(make_home)
+write_plan "$h11e" "$(v5_frontmatter)
+## SDLC State
+current: 5
+Step 5:
+  cmd: bash test.sh
+  pass: 100
+  total: 100
+  output: .bionic/docs/plans/wave-04.plan.md#step-5
+  n/a: no UI in this wave" > /dev/null
+expect_allow "v5 Step 5 Verify tests + browser n/a → allow" \
+  "$h11e" 'git commit -m "x"'
+
+# 11f — v5 Step 5 tests present but browser modality missing (no trace, no n/a) → block.
+h11f=$(make_home)
+write_plan "$h11f" "$(v5_frontmatter)
+## SDLC State
+current: 5
+Step 5:
+  cmd: bash test.sh
+  pass: 10
+  total: 10
+  output: x" > /dev/null
+expect_block "v5 Step 5 missing browser modality (devtools-trace/n-a) → block" \
+  "$h11f" 'git commit -m "x"' "devtools-trace"
+
+# 11g — v5 Step 5 missing pass → block.
+h11g=$(make_home)
+write_plan "$h11g" "$(v5_frontmatter)
+## SDLC State
+current: 5
+Step 5:
+  cmd: bash test.sh
+  total: 332
+  output: x
+  devtools-trace: .bionic/tmp/e.png" > /dev/null
+expect_block "v5 Step 5 missing pass → block" \
+  "$h11g" 'git commit -m "x"' "pass"
+
+# 11h — v5 Step 5 pass != total → block.
+h11h=$(make_home)
+write_plan "$h11h" "$(v5_frontmatter)
+## SDLC State
+current: 5
+Step 5:
+  cmd: bash test.sh
+  pass: 331
+  total: 332
+  output: x
+  devtools-trace: .bionic/tmp/e.png" > /dev/null
+expect_block "v5 Step 5 pass != total → block" \
+  "$h11h" 'git commit -m "x"' "not fully green"
+
+# 11i — v5 Step 6 (Review) pointer step → allow.
+h11i=$(make_home)
+write_plan "$h11i" "$(v5_frontmatter)
+## SDLC State
+current: 6
+Step 6: .bionic/docs/plans/wave-04.plan.md#step-6-review" > /dev/null
+expect_allow "v5 Step 6 (Review pointer step) → allow" \
+  "$h11i" 'git commit -m "x"'
+
+# 11j — v5 Step 7 (Document) with adr → allow.
+h11j=$(make_home)
+write_plan "$h11j" "$(v5_frontmatter)
+## SDLC State
+current: 7
+Step 7:
+  adr: .bionic/docs/adrs/epic-01-x/adr-001-decision.md" > /dev/null
+expect_allow "v5 Step 7 Document with adr → allow" \
+  "$h11j" 'git commit -m "x"'
+
+# 11k — v5 Step 7 with rca → allow.
+h11k=$(make_home)
+write_plan "$h11k" "$(v5_frontmatter)
+## SDLC State
+current: 7
+Step 7:
+  rca: .bionic/docs/incidents/0001-x/rca.md" > /dev/null
+expect_allow "v5 Step 7 Document with rca → allow" \
+  "$h11k" 'git commit -m "x"'
+
+# 11l — v5 Step 7 missing adr/rca/n-a → block.
+h11l=$(make_home)
+write_plan "$h11l" "$(v5_frontmatter)
+## SDLC State
+current: 7
+Step 7:
+  notes: forgot the decision record" > /dev/null
+expect_block "v5 Step 7 missing adr/rca/n-a → block" \
+  "$h11l" 'git commit -m "x"' "adr"
+
+# 11m — v5 Step 8 (External review) with pr → allow.
+h11m=$(make_home)
+write_plan "$h11m" "$(v5_frontmatter)
+## SDLC State
+current: 8
+Step 8:
+  pr: https://github.com/example/repo/pull/42" > /dev/null
+expect_allow "v5 Step 8 External review with pr → allow" \
+  "$h11m" 'git commit -m "x"'
+
+# 11n — v5 Step 8 with n/a → allow.
+h11n=$(make_home)
+write_plan "$h11n" "$(v5_frontmatter)
+## SDLC State
+current: 8
+Step 8:
+  n/a: PR-less workflow" > /dev/null
+expect_allow "v5 Step 8 External review with n/a → allow" \
+  "$h11n" 'git commit -m "x"'
+
+# 11o — v5 Step 9 (Integrate & close) full: merge + cleanup triple → allow.
+h11o=$(make_home)
+write_plan "$h11o" "$(v5_frontmatter)
+## SDLC State
+current: 9
+Step 9:
+  merge: abc1234abc1234abc1234abc1234abc1234abc1
+  worktree-removed: n/a
+  cleanup: ok
+  tmp-wiped: yes
+  tasks-completed: 11/11" > /dev/null
+expect_allow "v5 Step 9 Integrate & close full (merge + cleanup) → allow" \
+  "$h11o" 'git commit -m "x"'
+
+# 11p — v5 Step 9 with cleanup: n/a (cleanup_on_finish=false) → allow.
+h11p=$(make_home)
+write_plan "$h11p" "$(v5_frontmatter)
+## SDLC State
+current: 9
+Step 9:
+  merge: abc1234abc1234abc1234abc1234abc1234abc1
+  worktree-removed: n/a
+  cleanup: n/a" > /dev/null
+expect_allow "v5 Step 9 with cleanup: n/a → allow" \
+  "$h11p" 'git commit -m "x"'
+
+# 11q — v5 Step 9 missing merge → block.
+h11q=$(make_home)
+write_plan "$h11q" "$(v5_frontmatter)
+## SDLC State
+current: 9
+Step 9:
+  worktree-removed: n/a
+  cleanup: ok
+  tmp-wiped: yes
+  tasks-completed: 11/11" > /dev/null
+expect_block "v5 Step 9 missing merge → block" \
+  "$h11q" 'git commit -m "x"' "merge"
+
+# 11r — v5 Step 9 cleanup present but missing tmp-wiped → block.
+h11r=$(make_home)
+write_plan "$h11r" "$(v5_frontmatter)
+## SDLC State
+current: 9
+Step 9:
+  merge: abc1234abc1234abc1234abc1234abc1234abc1
+  worktree-removed: n/a
+  cleanup: ok
+  tasks-completed: 11/11" > /dev/null
+expect_block "v5 Step 9 cleanup present, missing tmp-wiped → block" \
+  "$h11r" 'git commit -m "x"' "tmp-wiped"
+
+# 11s — v5 Step 10 (Ship) with deploy fields → allow.
+h11s=$(make_home)
+write_plan "$h11s" "$(v5_frontmatter k8s)
+## SDLC State
+current: 10
+Step 10:
+  deploy: prod
+  verified-at: 2026-06-19T18:00:00Z
+  monitor: https://grafana.example.com/d/foo" > /dev/null
+expect_allow "v5 Step 10 Ship with deploy fields → allow" \
+  "$h11s" 'git commit -m "x"'
+
+# 11t — v5 Step 10 with n/a + deploy_target=none → allow.
+h11t=$(make_home)
+write_plan "$h11t" "$(v5_frontmatter none)
+## SDLC State
+current: 10
+Step 10:
+  n/a: no deploy target" > /dev/null
+expect_allow "v5 Step 10 n/a + deploy_target=none → allow" \
+  "$h11t" 'git commit -m "x"'
+
+# 11u — v5 Step 10 with n/a but deploy_target=k8s → block.
+h11u=$(make_home)
+write_plan "$h11u" "$(v5_frontmatter k8s)
+## SDLC State
+current: 10
+Step 10:
+  n/a: skipped" > /dev/null
+expect_block "v5 Step 10 n/a with deploy_target=k8s → block" \
+  "$h11u" 'git commit -m "x"' "deploy_target"
+
+# 11v — v5 pointer step 1/2/3 → allow.
+for step in 1 2 3; do
+  h=$(make_home)
+  write_plan "$h" "$(v5_frontmatter)
+## SDLC State
+current: $step
+Step $step: pointer evidence here" > /dev/null
+  expect_allow "v5 Step $step (pointer step) → allow" \
+    "$h" 'git commit -m "x"'
+done
+
+# 11w — v5 placeholder check still active.
+h11w=$(make_home)
+write_plan "$h11w" "$(v5_frontmatter)
+## SDLC State
+current: 5
+Step 5: TODO" > /dev/null
+expect_block "v5 Step 5 with placeholder TODO → block" \
+  "$h11w" 'git commit -m "x"' "placeholder"
+
+# ============================================================
 # Summary
 # ============================================================
 
