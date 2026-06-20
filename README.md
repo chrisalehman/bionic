@@ -16,7 +16,7 @@ Most AI tooling demos show a single agent completing a single task. That's the "
 
 **Agentic Teams** — Dispatch parallel specialist teams at a problem instead of feeding everything through one context window. Audits, refactors, migrations, feature builds, incident investigations — any problem that benefits from multiple perspectives gets decomposed across concurrent agents, each bringing domain expertise, then synthesized into a coordinated result. This is the same reason no serious org assigns one engineer to do a security review, perf analysis, and accessibility audit in one sitting. Parallelism plus specialization compounds.
 
-**Canonical SDLC** — Bionic's flagship pattern. A 14-step autonomous lifecycle (ideate → spec → plan → isolate → implement → verify → review → critic → document → commit → external-review → finish → ship), enforced by three coordinating hooks: governing-skill validates plan frontmatter shape, dispatch-gate routes Agent calls to the right specialist via per-phase rules, evidence-gate blocks commits that lack verifiable per-step evidence. Plan frontmatter is the single source of truth for state — `mode`, `sdlc-step`, eight discriminator flags, four opt-in flags. Evidence is three-tiered: verification (mandatory, shape-checked), handoff (mandatory across sessions, ~1300-token cap), narrative (opt-in, default off in autonomous mode). Step 0.5 confirms every flag with the user before plan-shaping; Step 12.5 strips narrative cruft on close. The loop runs unattended for hours and produces an auditable record at the end. See [`skills/canonical-sdlc/README.md`](skills/canonical-sdlc/README.md).
+**Canonical SDLC** — Bionic's flagship pattern. An 11-step autonomous lifecycle (configure → ideate → spec → plan → implement → verify → review → document → external-review → integrate-&-close → ship), organized around **two gates** — Verify ("does it work?", Step 5) and Review ("is it well-made?", Step 6) — plus a cross-cutting commit rhythm that fires per step rather than at a numbered position. Enforced by two coordinating hooks: governing-skill validates plan/spec/ADR frontmatter shape on write, evidence-gate blocks commits that lack verifiable per-step evidence. Plan frontmatter is the single source of truth for state — `mode`, `sdlc-step`, `canonical_sdlc_version`, five discriminator flags, two opt-in flags, and a `model_plan` line. Evidence is two-tiered: verification (mandatory, shape-checked) and handoff (preserved across sessions). Step 0 confirms every flag with the user before plan-shaping; Step 9 (Integrate & close) strips ephemera on close. The loop runs unattended for hours and produces an auditable record at the end. See [`skills/canonical-sdlc/README.md`](skills/canonical-sdlc/README.md).
 
 **Subagent SDLC Pipeline (superpowers)** — A complementary, lighter-weight lifecycle from the superpowers plugin: brainstorm → design decisions with explicit tradeoff analysis → implementation plan → TDD → parallel execution → code review. Surfaces architectural *decisions* rather than burying them in generated code. Use this for one-off changes; use canonical-sdlc when the work is wave-sized and worth the audit trail.
 
@@ -55,8 +55,8 @@ Everything lives in [`claude-config.txt`](claude-config.txt) — edit it and re-
 | **Plugins** | superpowers, agent-skills, document-skills, example-skills |
 | **Subagents** | voltagent-core-dev, voltagent-lang, voltagent-infra, voltagent-qa-sec, voltagent-data-ai, voltagent-dev-exp, voltagent-meta |
 | **MCP servers** | context7, chrome-devtools, sentry *(requires env vars)*, trello *(requires env vars)* |
-| **Skills** | **bionic:canonical-sdlc** (flagship — 14-step autonomous lifecycle), excalidraw-diagram, humanizer, notebooklm, impeccable (20+ design skills), bionic:rigorous-refactor, bionic:ralph-loop, bionic:map-instrument-narrow, bionic:skill-factory |
-| **Hooks** | protect-main.sh, protect-database.sh, memory-update.sh, memory-commit-save.sh, memory-cleanup.sh, **canonical-sdlc-evidence-gate.sh**, **canonical-sdlc-governing-skill.sh**, **canonical-sdlc-dispatch-gate.sh** |
+| **Skills** | **bionic:canonical-sdlc** (flagship — 11-step autonomous lifecycle), bionic:browser-verify, bionic:rigorous-refactor, bionic:ralph-loop, bionic:map-instrument-narrow, bionic:skill-factory, excalidraw-diagram, humanizer, notebooklm, impeccable (20+ design skills) |
+| **Hooks** | protect-main.sh, protect-database.sh, memory-cleanup.sh, terseness-reminder.sh, **canonical-sdlc-evidence-gate.sh**, **canonical-sdlc-governing-skill.sh** |
 | **Philosophy** | 10 principles for agentic development → [`~/.claude/CLAUDE.md`](claude-global.md) |
 | **Shell alias** | `claude` → `claude --dangerously-skip-permissions` |
 
@@ -77,17 +77,19 @@ bionic/
 ├── lib/                     # Shared libraries
 │   ├── platform.sh          # OS detection (macOS/Linux)
 │   └── platform.test.sh     # Platform detection tests
-├── hooks/                   # Safety guardrails
-│   ├── protect-main.sh      # Blocks pushes to main/master
-│   ├── protect-database.sh  # Blocks destructive SQL
-│   ├── memory-commit-save.sh # PostToolUse hook: auto-saves memory after each git commit
-│   ├── memory-update.sh     # Stop hook: fallback auto-save for commitless sessions
-│   ├── memory-cleanup.sh    # SessionStart hook: prunes stale topical files
-│   ├── canonical-sdlc-evidence-gate.sh # PreToolUse hook: blocks commits missing plan evidence
+├── hooks/                   # Safety guardrails + canonical-sdlc enforcement
+│   ├── protect-main.sh      # PreToolUse hook: blocks pushes to main/master
+│   ├── protect-database.sh  # PreToolUse hook: blocks destructive SQL
+│   ├── memory-cleanup.sh    # SessionStart hook: advisory staleness/size cleanup
+│   ├── terseness-reminder.sh # UserPromptSubmit hook: re-asserts terseness each turn
+│   ├── canonical-sdlc-evidence-gate.sh   # PreToolUse hook: blocks commits missing plan evidence
+│   ├── canonical-sdlc-governing-skill.sh # PreToolUse hook: blocks plan/spec writes missing frontmatter
 │   └── *.test.sh            # Hook test suites
 ├── tests/                   # Script-level test suites
 │   └── scripts.test.sh      # Config parsing, consistency, symmetry
 ├── skills/                  # Bionic skills → ~/.claude/skills/
+│   ├── canonical-sdlc/      # Flagship 11-step autonomous SDLC
+│   ├── browser-verify/      # Verify-gate browser modality (CLI-first)
 │   ├── rigorous-refactor/   # Disciplined multi-file refactoring
 │   ├── ralph-loop/          # Build-test-diagnose iteration cycle
 │   ├── map-instrument-narrow/ # Evidence-gathering for complex debugging
@@ -126,7 +128,7 @@ Why CLI over MCP for driving: The MCP server works well for short, interactive s
 
 Bionic also installs the **Chrome DevTools MCP** server (see [MCP Servers](#mcp-servers)) for the *inspection* side: perf traces, Lighthouse, network throttling, console/memory introspection. Driving and inspection are separate lanes — Playwright CLI navigates and clicks across many turns; Chrome DevTools MCP is invoked occasionally to capture deep runtime data. The token-cost concern is asymmetric: Playwright runs every turn of an autonomous loop (CLI wins), while DevTools fires once per investigation (MCP's richer interface wins).
 
-This lane split is operationalized by the **`browser-verify`** skill (`skills/browser-verify/`): `canonical-sdlc` Step 5 routes browser verification through it, and it drives via `playwright-cli`, escalating to the Chrome DevTools MCP only for the deep-inspection capabilities the CLI doesn't expose (Lighthouse, performance-trace analysis, heap/CPU profiling, network throttling). This is the concrete expression of bionic's **CLI-first** principle: prefer a pay-per-call CLI over an always-on MCP server (whose tool schemas are a standing context tax), reserving MCP for what no CLI can do.
+This lane split is operationalized by the **`browser-verify`** skill (`skills/browser-verify/`): it is the Verify gate's browser modality (`canonical-sdlc` Step 5), and it drives via `playwright-cli`, escalating to the Chrome DevTools MCP only for the deep-inspection capabilities the CLI doesn't expose (Lighthouse, performance-trace analysis, heap/CPU profiling, network throttling). This is the concrete expression of bionic's **CLI-first** principle: prefer a pay-per-call CLI over an always-on MCP server (whose tool schemas are a standing context tax), reserving MCP for what no CLI can do.
 
 The bootstrap also runs `npx playwright install chromium` to ensure the browser binary is available.
 
@@ -273,28 +275,28 @@ All bionic skills follow the composability schema: every skill declares a `layer
 
 | Skill | Layer | What it constrains |
 |-------|-------|--------------------|
-| **canonical-sdlc** *(flagship)* | Governance | Bionic's own 14-step autonomous SDLC. Three coordinating hooks (governing-skill, dispatch-gate, evidence-gate) enforce frontmatter shape, dispatch routing, and per-step verification evidence. Plan frontmatter is single source of truth for state. Three-tier evidence (verification + handoff + opt-in narrative). Step 0.5 wizard confirms every flag with the user; Step 12.5 strips narrative cruft on close. Multi-mode (autonomous, epic-scope, incident-response, design-refresh, spike). Full reference: [`skills/canonical-sdlc/README.md`](skills/canonical-sdlc/README.md). |
+| **canonical-sdlc** *(flagship)* | Governance | Bionic's own 11-step autonomous SDLC (Steps 0–10), organized around **two gates** — Verify (Step 5, "does it work?") and Review (Step 6, "is it well-made?") — plus a cross-cutting commit rhythm. Two coordinating hooks (governing-skill, evidence-gate) enforce plan/spec/ADR frontmatter shape on write and per-step verification evidence on commit. Plan frontmatter is single source of truth for state. Two-tier evidence (verification + handoff). Step 0 wizard confirms every flag with the user; Step 9 (Integrate & close) strips ephemera on close. Five modes (autonomous, epic-scope, incident-response, design-refresh, spike). Full reference: [`skills/canonical-sdlc/README.md`](skills/canonical-sdlc/README.md). |
+| **browser-verify** | Operational | The Verify gate's browser modality (Step 5). Runs golden-path and edge-case flows with console/network checks and visual evidence. Drives via the token-efficient `playwright-cli`; escalates to the Chrome DevTools MCP only for deep inspection (Lighthouse, performance traces, heap/CPU profiling, network throttling) that no CLI exposes. |
 | **ralph-loop** | Governance | Disciplined build-test-diagnose iteration cycle. Prevents skipping phases, exiting without evidence, and grinding past iteration limits. Three modes: DEBUG, GREENFIELD, RESEARCH-FIRST. |
 | **rigorous-refactor** | Operational | Strict state machine for complex refactors. Prevents self-grading, skipping decomposition, and implementing without tests. Independent validation via separate agent. |
 | **map-instrument-narrow** | Technique | Evidence-gathering for complex debugging. Prevents guessing without data, fixing without understanding, and instrumenting without architecture. MAP → INSTRUMENT → NARROW phases. |
 | **skill-factory** | Governance | Interviews the user to extract a constraint, layer, dependencies, and rationalizations, then hands off to skill-creator for file generation and eval testing. Prevents creating skills without an identified failure mode. |
 
-### Hooks (Safety Guardrails + Memory Automation)
+### Hooks (Safety Guardrails + canonical-sdlc Enforcement)
 
-Hooks are shell scripts that Claude Code invokes at defined lifecycle events. Bionic ships ten in two families:
+Hooks are shell scripts that Claude Code invokes at defined lifecycle events. Bionic ships six, in two behavioral families.
 
-**Safety + canonical-sdlc enforcement** (six `PreToolUse` hooks, exit-code-2 hard-blocks):
-- `protect-main.sh`, `protect-database.sh` — block dangerous Bash commands.
-- `canonical-sdlc-evidence-gate.sh` — blocks `git commit` when the active plan's `## SDLC State` section lacks evidence for the current step. v2 plans (`evidence_schema: v2`) get per-step shape enforcement (e.g. Step 7 requires `cmd:`, `pass:`, `total:`, `output:` and `pass==total`).
-- `canonical-sdlc-governing-skill.sh` — blocks `Write`/`Edit` of plan/spec/adr files lacking valid frontmatter. v2 plans must declare `canonical_sdlc_version: 2` plus all 12 v2 flags (4 opt-in + 8 discriminator); v1 plans are grandfathered.
-- `canonical-sdlc-dispatch-gate.sh` — fires on every `Agent` tool call. Reads `.bionic/sdlc-dispatch-rules.json` and the active plan's `sdlc-step`, then either logs a mismatch (default — `dispatch_enforce: false`) or blocks the call (`dispatch_enforce: true`). Override via `dispatch_override:"<reason>"` in the prompt; logged to `.bionic/memory/dispatch-audit.md` for review.
+**Hard blocks** (four `PreToolUse` hooks, exit-code-2 — the call never runs):
+- `protect-main.sh` (`PreToolUse|Bash`) — blocks pushes to main/master.
+- `protect-database.sh` (`PreToolUse|Bash`) — blocks destructive SQL.
+- `canonical-sdlc-evidence-gate.sh` (`PreToolUse|Bash`) — blocks `git commit` when the active plan's `## SDLC State` section lacks evidence for the current step. v3/v4/v5 plans get per-step shape enforcement (e.g. Step 5 Verify requires `cmd:`, `pass:`, `total:`, `output:` with `pass==total`, plus a `devtools-trace:` or `n/a:`); v1/v2 plans are presence-only.
+- `canonical-sdlc-governing-skill.sh` (`PreToolUse|Write, Edit`) — blocks writes to `*.plan.md` / `*.spec.md` / `adr-*.md` / `continuation*.md` under the docs root that lack non-empty `governing-skill:` frontmatter. v3 autonomous plans must also declare `canonical_sdlc_version: 3` plus the 5 discriminator + 2 opt-in flags; v4/v5 add a required `model_plan`; v1/v2 plans are grandfathered.
 
-**Memory automation** (three hooks using JSON output to inject instructions):
-- `memory-commit-save.sh` (PostToolUse|Bash) — fires a memory save after each successful `git commit`.
-- `memory-update.sh` (Stop) — catches commitless bursts as a fallback save.
-- `memory-cleanup.sh` (SessionStart|startup) — prunes stale memory.
+**Advisory / reinforcement** (two hooks using JSON output to inject context, never block):
+- `memory-cleanup.sh` (`SessionStart|startup`) — scans `.bionic/memory/` at session start and emits an advisory listing stale or oversized files.
+- `terseness-reminder.sh` (`UserPromptSubmit`) — re-asserts the CLAUDE.md terseness rules every turn to fight drift.
 
-All hooks are registered in `~/.claude/settings.json` by `claude-bootstrap.sh`.
+All six hooks are registered in `~/.claude/settings.json` by `claude-bootstrap.sh`, each with a paired `*.test.sh` suite run in CI.
 
 **protect-main.sh** — [`hooks/protect-main.sh`](hooks/protect-main.sh) → `~/.claude/hooks/protect-main.sh`
 
@@ -319,32 +321,38 @@ Prevents Claude from running destructive SQL. First checks if the command involv
 | `.drop()` / `.dropDatabase()` / `.deleteMany({})` | MongoDB destructive methods |
 | `DROP`/`TRUNCATE` piped to a DB client | Catches `echo "DROP TABLE..." \| psql` patterns |
 
-Both hooks have test suites ([`hooks/protect-main.test.sh`](hooks/protect-main.test.sh), [`hooks/protect-database.test.sh`](hooks/protect-database.test.sh)), run in CI via GitHub Actions alongside the memory hook suites.
+Both hooks have test suites ([`hooks/protect-main.test.sh`](hooks/protect-main.test.sh), [`hooks/protect-database.test.sh`](hooks/protect-database.test.sh)), run in CI via GitHub Actions alongside the canonical-sdlc and memory-cleanup suites.
 
-**memory-commit-save.sh** — [`hooks/memory-commit-save.sh`](hooks/memory-commit-save.sh) → `~/.claude/hooks/memory-commit-save.sh`
+**canonical-sdlc-governing-skill.sh** — [`hooks/canonical-sdlc-governing-skill.sh`](hooks/canonical-sdlc-governing-skill.sh) → `~/.claude/hooks/canonical-sdlc-governing-skill.sh`
 
-`PostToolUse|Bash` hook that fires a memory save right after a successful `git commit` (or `git commit --amend`). Commits are the natural unit-of-work boundary, so this produces one save per logical change and keeps `context.md`'s narrative aligned with git history. The hook splits the command on `&&`/`||`/`;`, strips quoted strings (to ignore `git commit` as prose in commit messages), and matches `git commit` as a whole word — so `git commit-tree` and `git commit-graph` don't trigger. Returns `{"decision": "block", "reason": "..."}` to inject the save instruction into Claude's context, identical to `memory-update.sh`'s mechanism.
+`PreToolUse|Write, Edit` hook that gates writes to canonical-sdlc artifacts. It walks up from the target path to the nearest `.bionic/` parent to find the project root, resolves the docs root (`<project>/.bionic/config.yaml`'s `docs-root:`, default `.bionic/docs`), and only fires when the file lives under `{specs,plans,adrs,incidents}/` and its basename matches `*.plan.md` / `*.spec.md` / `adr-*.md` / `continuation*.md`. README files, images, and supporting notes under those paths pass through.
 
-Four gates prevent over-firing:
+When in scope, the hook requires non-empty `governing-skill:` frontmatter, then routes flag enforcement by `canonical_sdlc_version`: v3 autonomous plans must carry the 5 discriminator + 2 opt-in flags; v4 and v5 add a required `model_plan` (a missing value blocks the write); v1/v2 plans are grandfathered (only `governing-skill:` is checked); an unsupported version exits 2. This makes the plan file's frontmatter the single source of truth — a malformed plan can't be written in the first place.
 
-1. **Not a commit** → silent. Non-`git commit` Bash calls exit immediately after the segmentation check. The hook does NOT currently fire on `git merge`, `git rebase --continue`, `git cherry-pick`, or `git revert` — those paths are caught by `memory-update.sh`'s 45-min fallback at turn-end.
-2. **No `.bionic/memory/`** → silent. Projects without the notebook are opt-out.
-3. **60-second debounce** via `context.md` mtime. Back-to-back commits (e.g. from subagent-driven workflows) collapse into one save. Note: any write to `context.md` — including a manual editor save or a `touch` — resets this window, so a user actively editing `context.md` at commit-time will suppress that commit's save. Accepted tradeoff; the mechanism intentionally unifies both memory hooks' debounce state via one shared file.
-4. **Circular guard** — HEAD commits whose files are all under `.bionic/memory/` skip. Prevents the save's own commit from re-triggering the save. Uses `git show -m --name-only --format= HEAD` (the `-m` matters: without it, clean merges emit empty output and would be misclassified as memory-only).
+**canonical-sdlc-evidence-gate.sh** — [`hooks/canonical-sdlc-evidence-gate.sh`](hooks/canonical-sdlc-evidence-gate.sh) → `~/.claude/hooks/canonical-sdlc-evidence-gate.sh`
 
-**memory-update.sh** — [`hooks/memory-update.sh`](hooks/memory-update.sh) → `~/.claude/hooks/memory-update.sh`
+`PreToolUse|Bash` hook that gates `git commit`. It locates the newest plan, reads its `## SDLC State` section, finds `current: N`, and blocks the commit (exit 2) if step N's evidence line is missing, empty, or a placeholder token (`todo`, `pending`, `inprogress`, `xxx`, `tbd`, `placeholder`). (`Phase N:` is accepted as a legacy alias for `Step N:`.) Plans without a `## SDLC State` section pass through — the gate only enforces against active canonical-sdlc runs.
 
-`Stop` hook that serves as the **fallback** to `memory-commit-save.sh`. Fires at turn end to catch meaningful work that hasn't been committed yet (exploratory debugging, multi-turn investigation, writing-before-committing sessions). Only fires when the project has adopted a `.bionic/memory/` notebook AND git shows meaningful activity AND `context.md` hasn't been touched in the last **45 minutes** (the longer window reflects that commit-based saves handle the common case). Returns `{"decision": "block", "reason": "..."}` to inject a save instruction that Claude executes in the same turn. The `stop_hook_active` guard prevents infinite loops.
-
-**On the "Stop hook error" label**: Claude Code's UI labels any Stop or PostToolUse hook returning `decision: block` as "Stop hook error" — this is a cosmetic label, not a real failure. Both memory hooks are working as designed; `decision: block` is the only documented mechanism that both prevents termination and injects instructions into Claude's current turn. Alternatives (`hookSpecificOutput.additionalContext`, `systemMessage`, exit code 2) are either undocumented or fail to reach Claude. Verified against the [hooks documentation](https://code.claude.com/docs/en/hooks).
-
-The activity check uses `git status --porcelain -uall` and filters out changes under `.bionic/memory/` itself (to avoid circular triggers from the save) plus `git log --since='30 minutes ago'` to catch recent commits. Non-git projects are skipped entirely.
+Shape enforcement is version-routed: v3/v4 plans run the v3 per-step shape table; v5 plans run the gate-collapsed 0–10 table (e.g. Step 5 Verify requires `cmd:`/`pass:`/`total:`/`output:` with `pass==total`, plus a `devtools-trace:` or `n/a:`; Step 9 Integrate & close requires `merge:`/`worktree-removed:` plus the cleanup-half fields or `cleanup: n/a`). v1/v2 plans are presence-only. The rule is simple: the evidence artifact must be recorded in the plan *before* the commit that closes the step. Test suite: [`hooks/canonical-sdlc-evidence-gate.test.sh`](hooks/canonical-sdlc-evidence-gate.test.sh) (and [`hooks/canonical-sdlc-governing-skill.test.sh`](hooks/canonical-sdlc-governing-skill.test.sh) for the companion hook).
 
 **memory-cleanup.sh** — [`hooks/memory-cleanup.sh`](hooks/memory-cleanup.sh) → `~/.claude/hooks/memory-cleanup.sh`
 
-`SessionStart` hook (with `startup` matcher, so it doesn't re-fire on compact/clear/resume) that scans `.bionic/memory/*.md` for topical files whose `updated:` frontmatter is older than 30 days. If any are found, emits `hookSpecificOutput.additionalContext` listing the stale files and asking Claude to verify/prune/consolidate before starting the user's task. `INDEX.md` and `context.md` never expire per the protocol. When nothing is stale, exits silently.
+`SessionStart` hook (with the `startup` matcher, so it doesn't re-fire on compact/clear/resume) that scans `.bionic/memory/` for two kinds of problem: **stale topical files** (`<topic>.md` whose `updated:` frontmatter is older than 30 days) and **oversized files** (`INDEX.md` over 30 Always-Apply rules or 5 KB; `context.md` over 500 lines or 50 KB). When anything trips, it emits `hookSpecificOutput.additionalContext` listing the offenders and recommending the fix — verify/bump/prune stale files, run `/memory-compact` on oversized ones. `INDEX.md` and `context.md` never date-expire (only topical files do), though both are subject to the size check. **Advisory only — it never blocks**, and when nothing trips it exits silently. No-op for projects without `.bionic/memory/`. Test suite: [`hooks/memory-cleanup.test.sh`](hooks/memory-cleanup.test.sh).
 
-All three memory hooks are no-ops for projects without `.bionic/memory/` — the notebook remains opt-in. Create `.bionic/memory/INDEX.md` and `.bionic/memory/context.md` in a project to activate them. Test suites live in [`hooks/memory-commit-save.test.sh`](hooks/memory-commit-save.test.sh), [`hooks/memory-update.test.sh`](hooks/memory-update.test.sh), and [`hooks/memory-cleanup.test.sh`](hooks/memory-cleanup.test.sh), run in CI alongside the safety hook suites.
+**terseness-reminder.sh** — [`hooks/terseness-reminder.sh`](hooks/terseness-reminder.sh) → `~/.claude/hooks/terseness-reminder.sh`
+
+`UserPromptSubmit` hook that re-asserts the CLAUDE.md terseness rules on every turn. CLAUDE.md is loaded once at session start; as context grows and other skills inject competing instructions, the terseness baseline gets diluted. This hook keeps a compact (<500-char) reminder in the model's attention each turn — lead with the answer, no preamble, drop hedging — with an explicit EXEMPT clause (code, diffs, commit messages, evidence blocks, the 5-axis review rubric, ADRs, plan/spec frontmatter, security warnings) so terseness can't corrupt the structured output that canonical-sdlc and other skills depend on. Disable mid-session with `touch ~/.claude/.bionic-terse-off`; re-enable by removing the flag. Fails silent — a missing `jq` or any error injects nothing rather than breaking the session. Test suite: [`hooks/terseness-reminder.test.sh`](hooks/terseness-reminder.test.sh).
+
+#### Memory: a manual-save notebook
+
+Memory is a plain-markdown project notebook at `.bionic/memory/`, not an automated capture system. Earlier versions auto-saved via `PostToolUse`/`Stop` hooks; those were removed because they forced memory updates mid-task. Today, saving is deliberate and skill-driven, while the lone `memory-cleanup.sh` hook provides advisory staleness/size nudges at session start.
+
+Two local commands do the saving (both installed by the bootstrap and invokable as `/memory-save` and `/memory-compact`):
+
+- **`/memory-save`** — an on-demand checkpoint. Updates `context.md` with current branch and session state, and adds an `INDEX.md` Always-Apply rule for any durable lesson that emerged. Minimal edits only; says "memory already current" when nothing qualifies.
+- **`/memory-compact`** — the broader cleanup pass that `memory-cleanup.sh`'s advisory points at: consolidate, summarize, age out, and migrate overgrown `INDEX.md` bullets into topical files.
+
+The notebook remains opt-in per project — create `.bionic/memory/INDEX.md` and `.bionic/memory/context.md` to activate it. The architecture (progressive disclosure via `INDEX.md`, topic-organized files, 30-day expiry) is detailed under [Global Philosophy](#global-philosophy-claudemd) below.
 
 ### Claude Code Configuration
 
@@ -442,7 +450,7 @@ These are disabled by default. Uncomment in `claude-config.txt` and re-run `./cl
 
 ## Safety
 
-Hooks intercept `Bash` commands to catch accidental pushes to main and destructive SQL before they happen. The philosophy in [`claude-global.md`](claude-global.md) teaches Claude judgment — ten principles for when to act, when to pause, and when to escalate. See [Hooks](#hooks-safety-guardrails) and [Global Philosophy](#global-philosophy-claudemd) above for details.
+Hooks intercept `Bash` commands to catch accidental pushes to main and destructive SQL before they happen. The philosophy in [`claude-global.md`](claude-global.md) teaches Claude judgment — ten principles for when to act, when to pause, and when to escalate. See [Hooks](#hooks-safety-guardrails--canonical-sdlc-enforcement) and [Global Philosophy](#global-philosophy-claudemd) above for details.
 
 ## Requirements
 
