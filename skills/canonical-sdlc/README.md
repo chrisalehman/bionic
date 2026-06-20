@@ -1,17 +1,17 @@
 # Canonical SDLC
 
-Bionic's flagship engineering pattern: a 15-step software development lifecycle that runs autonomously for hours and produces an auditable record at the end.
+Bionic's flagship engineering pattern: an 11-step software development lifecycle that runs autonomously for hours and produces an auditable record at the end.
 
 This is the human-facing reference. The skill prose Claude reads at runtime is in [`SKILL.md`](SKILL.md) — same directory.
 
-> **TL;DR.** A skill enforces 15 flat steps (0–14). Plan frontmatter is the single source of truth: `governing-skill`, `mode`, `sdlc-step`, `canonical_sdlc_version`, five discriminator flags, two opt-in flags, and a `model_plan` line. State lives in a `## SDLC State` section, one evidence line per step. Two hooks back the skill: `governing-skill` validates plan/spec/ADR frontmatter on write, and `evidence-gate` blocks commits whose current-step evidence line is missing or placeholder. Five modes: `autonomous` (default), `epic-scope`, `incident-response`, `design-refresh`, `spike`. Dispatch and model tiering are governed by prose, not a hook.
+> **TL;DR.** A skill enforces 11 flat steps (0–10) organized around **two gates** — Verify (Step 5, "does it work?") and Review (Step 6, "is it well-made?") — plus a cross-cutting **commit rhythm** that fires per step rather than at a numbered position. Plan frontmatter is the single source of truth: `governing-skill`, `mode`, `sdlc-step`, `canonical_sdlc_version`, five discriminator flags, two opt-in flags, and a `model_plan` line. State lives in a `## SDLC State` section, one evidence line per step. Two hooks back the skill: `governing-skill` validates plan/spec/ADR frontmatter on write, and `evidence-gate` blocks commits whose current-step evidence line is missing or placeholder. Five modes: `autonomous` (default), `epic-scope`, `incident-response`, `design-refresh`, `spike`. Dispatch and model tiering are governed by prose, not a hook.
 
 ---
 
 ## Contents
 
 - [Why this exists](#why-this-exists)
-- [The 15-step lifecycle](#the-15-step-lifecycle)
+- [The 11-step lifecycle](#the-11-step-lifecycle)
 - [Modes](#modes)
 - [Plan frontmatter contract](#plan-frontmatter-contract)
 - [SDLC State and the evidence model](#sdlc-state-and-the-evidence-model)
@@ -29,11 +29,11 @@ This is the human-facing reference. The skill prose Claude reads at runtime is i
 
 Most "AI does the SDLC" demos collapse the lifecycle: a brainstorm becomes code in one shot, with the spec implied, the plan unwritten, the review skipped, the audit trail missing. That works on toy problems and fails on anything wave-sized — multi-day work that touches multiple files, ships to users, and accumulates decisions a future maintainer needs.
 
-Canonical SDLC is the constraint that forces the lifecycle to stay intact. Each of the 15 steps contributes a dimension of fidelity — scope, contract, plan, isolation, proof, review, decision record, release discipline — that no other step supplies. Without enforcement, individual steps feel skippable in isolation, but the compounding loss of fidelity is invisible mid-effort and surfaces later as rework.
+Canonical SDLC is the constraint that forces the lifecycle to stay intact. Each of the 11 steps contributes a dimension of fidelity — scope, contract, plan, isolation, proof, review, decision record, release discipline — that no other step supplies. Without enforcement, individual steps feel skippable in isolation, but the compounding loss of fidelity is invisible mid-effort and surfaces later as rework.
 
 The skill plus two hooks make the lifecycle non-skippable. The plan file is the single source of truth: configuration lives in YAML frontmatter, evidence lives in the `## SDLC State` section, and decisions live in ADRs (or RCAs for incidents). Every commit must show evidence for the current step. Every plan/spec/ADR must declare the skill that produced it.
 
-The autonomous span is **Steps 4–14** — Claude walks away to build for hours and returns with merged code. Steps 1–3 (Ideate, Spec, Plan) are interactive: that's where wrong assumptions get caught cheaply. Step 3 ends with an explicit user approval before autonomous execution begins.
+The autonomous span is **Steps 4–10** — Claude walks away to build for hours and returns with merged code. Steps 1–3 (Ideate, Spec, Plan) are interactive: that's where wrong assumptions get caught cheaply. Step 3 ends with an explicit user approval before autonomous execution begins.
 
 ### The Iron Law
 
@@ -46,9 +46,9 @@ Violating the letter of this process is violating the spirit of this process.
 
 ---
 
-## The 15-step lifecycle
+## The 11-step lifecycle
 
-Fifteen flat steps, numbered 0–14. No interstitials, no sub-steps, no hidden stations — the number you see is the number that runs.
+Eleven flat steps, numbered 0–10. No interstitials, no sub-steps, no hidden stations — the number you see is the number that runs. The lifecycle is organized around **two gates** — **Verify** (Step 5, "does it work?") and **Review** (Step 6, "is it well-made?") — each decomposed by modality or stance rather than by extra numbered steps.
 
 | Step | Name | Governing skill | Tier | Purpose |
 |---|---|---|---|---|
@@ -57,16 +57,13 @@ Fifteen flat steps, numbered 0–14. No interstitials, no sub-steps, no hidden s
 | 2 | Spec | `agent-skills:spec-driven-development` | O | Testable contract with acceptance criteria |
 | 3 | Plan | `superpowers:writing-plans` | O | Execution contract (`## SDLC State` + `## Assumptions`); approval checkpoint before Step 4 |
 | 4 | Implement | `agent-skills:incremental-implementation` | E + X | Thin vertical slices, RED→GREEN per slice |
-| 5 | Browser verify | `browser-verify` (drives via `playwright-cli`; chrome-devtools MCP reserved for deep debug) | X | Real-browser evidence for UI work |
-| 6 | Verify done | `superpowers:verification-before-completion` | X→O | Run all suites; paste output |
-| 7 | Self-review | `agent-skills:code-review-and-quality` | E | 5-axis review (correctness, readability, architecture, security, performance) |
-| 8 | Adversarial critic | subagent dispatch (**MANDATORY**) | E (independent) | Fresh-context red-team |
-| 9 | Document decisions | `agent-skills:documentation-and-adrs` | O / E | ADR (or RCA for incidents) |
-| 10 | Commit | `agent-skills:git-workflow-and-versioning` | O | Per-step checkpoint commit |
-| 11 | External review | `superpowers:requesting-code-review` | O | PR / review request; receipt governed by `superpowers:receiving-code-review` |
-| 12 | Finish branch | `superpowers:finishing-a-development-branch` | O | Merge into integration branch; remove worktree |
-| 13 | Post-merge cleanup | `canonical-sdlc` | X | Wipe `.bionic/tmp/`, assert task-list integrity, strip handoff |
-| 14 | Ship | `agent-skills:shipping-and-launch` | E / O | Production gate; emit `continuation.md` |
+| 5 | Verify (gate) | `superpowers:verification-before-completion`; browser modality `browser-verify` (drives `playwright-cli`; chrome-devtools MCP reserved for deep inspection) | X→O | "Does it work?" — tests/build always; real-browser behavior when UI/user-visible |
+| 6 | Review (gate) | `agent-skills:code-review-and-quality` | E | "Is it well-made?" — 5-axis self-review (always) + adversarial critic (mandatory autonomous/incident/design-refresh) |
+| 7 | Document decisions | `agent-skills:documentation-and-adrs` | O / E | ADR (or RCA for incidents) |
+| 8 | External review | `superpowers:requesting-code-review` | O | PR / review request; receipt governed by `superpowers:receiving-code-review` |
+| 9 | Integrate & close | `superpowers:finishing-a-development-branch` + `canonical-sdlc` | O / X | Merge into integration branch + remove worktree (finish half), then wipe `.bionic/tmp/`, assert task-list integrity, strip handoff (cleanup half) |
+| 10 | Ship | `agent-skills:shipping-and-launch` | E / O | Production gate; emit `continuation.md` |
+| — | Commit rhythm (cross-cutting) | `agent-skills:git-workflow-and-versioning` | O | Not a numbered step — a per-step checkpoint-commit rhythm that fires throughout |
 
 **Tier key.** Each step has a default dispatch target (the strategy below governs; the tier is a hint):
 
@@ -78,18 +75,18 @@ Fifteen flat steps, numbered 0–14. No interstitials, no sub-steps, no hidden s
 
 The end of Step 3 is the "walk away" boundary. After the plan is complete, Claude presents a summary (framing, options to approve / request revisions / halt, why-it-matters) and **only begins Step 4 on explicit approval**.
 
-Wave scope locks at approval. Mid-wave discoveries — architectural gaps, related bugs, audit findings — get logged to `## Assumptions` as candidates for the next wave; they do not reshape the current wave. Two exceptions: a discovery that makes the current wave structurally impossible is surfaced as a Wake Note and halts; a trivial one-line correction in a touched file ships inline. The Step 8 critic checks for unjustified mid-wave scope drift.
+Wave scope locks at approval. Mid-wave discoveries — architectural gaps, related bugs, audit findings — get logged to `## Assumptions` as candidates for the next wave; they do not reshape the current wave. Two exceptions: a discovery that makes the current wave structurally impossible is surfaced as a Wake Note and halts; a trivial one-line correction in a touched file ships inline. Step 6 (Review)'s adversarial-critic stance checks for unjustified mid-wave scope drift.
 
 ### Autonomous does not mean "skip Step 1 Q&A"
 
-The autonomous span is Steps 4–14. The user-engagement sequence is:
+The autonomous span is Steps 4–10. The user-engagement sequence is:
 
 | Step | Engagement |
 |---|---|
 | 1. Ideate | **Interactive Q&A.** Extensive back-and-forth on scope, non-goals, alternatives. Mandatory in every mode. |
 | 2. Spec | **Semi-interactive.** Translate Step 1 into a testable contract; surface remaining ambiguities as Wake Notes, else proceed. |
 | 3. Plan | **Autonomous write → one approval checkpoint.** Claude writes the plan; the user approves before Step 4. |
-| 4–14 | **Fully autonomous**, within the stop-and-wake rules. |
+| 4–10 | **Fully autonomous**, within the stop-and-wake rules. |
 
 Skipping Step 1 Q&A to "save time" is the single highest-risk move.
 
@@ -101,10 +98,10 @@ Declare the mode at entry. **`autonomous` is the default** — any other mode is
 
 | Mode | When | Step shape |
 |---|---|---|
-| **`autonomous`** (default) | Any wave-level build, fix, refactor, or user-facing work | Steps 0–14; Step 8 adversarial critic **mandatory**; per-step checkpoint commits; full stop-and-wake list |
+| **`autonomous`** (default) | Any wave-level build, fix, refactor, or user-facing work | Steps 0–10; Step 6 (Review)'s adversarial-critic stance **mandatory**; per-step checkpoint commits (commit rhythm); full stop-and-wake list |
 | **`epic-scope`** | Beginning a new epic; no implementation yet; needs carving into waves | Steps 0–3 **only** → produces `epic.spec.md` + `epic.plan.md`. Short-circuits before Step 4. |
-| **`incident-response`** | Live or recent production incident | Steps 0–14, compressed: Step 1 = triage; Step 9 produces an **RCA** (not an ADR); Step 11 is **waivable** for hotfixes (retrospective review within 24h); Step 14 expands to deploy + monitor ≥1 cycle + close the monitoring gap |
-| **`design-refresh`** | Visual/UX refresh on an existing feature; no behavior change | Step 1 → `shape`; Step 4 → an `impeccable` craft→polish→critique loop with a measurable exit gate; Step 5 heavily weighted + `audit`; Step 7 reviews the 5 code axes only (design quality was scored in the Step 4 loop); Step 14 → `extract` for reusable patterns |
+| **`incident-response`** | Live or recent production incident | Steps 0–10, compressed: Step 1 = triage; Step 7 produces an **RCA** (not an ADR); Step 8 is **waivable** for hotfixes (retrospective review within 24h); Step 10 expands to deploy + monitor ≥1 cycle + close the monitoring gap |
+| **`design-refresh`** | Visual/UX refresh on an existing feature; no behavior change | Step 1 → `shape`; Step 4 → an `impeccable` craft→polish→critique loop with a measurable exit gate; Step 5 (Verify) heavily weighted + `audit`; Step 6 (Review) reviews the 5 code axes only (design quality was scored in the Step 4 loop); Step 10 → `extract` for reusable patterns |
 | **`spike`** | Timeboxed research or prototype; **no code ships** | Step 0 + woven research + a writeup at `<docs-root>/spikes/`. No worktree, no ADR, no commits to the integration branch. If a spike reveals shippable work, declare a new mode and re-enter at Step 1. |
 
 Mode declaration is reviewable. A wave-sized feature disguised as a `spike` to skip the lifecycle is drift with a label; the declaration must match the actual work.
@@ -115,7 +112,7 @@ Mode declaration is reviewable. A wave-sized feature disguised as a `spike` to s
 
 Plans declare every plan-shaping flag in YAML frontmatter. Step 0 (the wizard) writes this; the `governing-skill` hook enforces its presence on writes; the `evidence-gate` hook reads it on every commit.
 
-### Identity block (example, v4 autonomous)
+### Identity block (example, v5 autonomous)
 
 ```yaml
 ---
@@ -124,7 +121,7 @@ sdlc-step: 3
 epic: epic-02-v2-product-pass
 wave: wave-01-checkout-refactor
 mode: autonomous
-canonical_sdlc_version: 4
+canonical_sdlc_version: 5
 ---
 ```
 
@@ -132,13 +129,13 @@ For incident-response artifacts, use `incident: NNNN-<slug>` instead of `epic`/`
 
 | Field | Values | Purpose |
 |---|---|---|
-| `governing-skill` | A skill ID (`superpowers:writing-plans`, `agent-skills:idea-refine`, `canonical-sdlc`, …) | Names the skill that produced this artifact. Different artifacts carry different governing skills (Step 1 → `idea-refine`; Step 3 → `writing-plans`; Step 9 RCA → `canonical-sdlc`). |
-| `sdlc-step` | `0..14` | The step that produced this artifact. The evidence-gate hook reads `current:` in `## SDLC State`, not this field, to pick the step to validate. |
+| `governing-skill` | A skill ID (`superpowers:writing-plans`, `agent-skills:idea-refine`, `canonical-sdlc`, …) | Names the skill that produced this artifact. Different artifacts carry different governing skills (Step 1 → `idea-refine`; Step 3 → `writing-plans`; Step 7 RCA → `canonical-sdlc`). |
+| `sdlc-step` | `0..10` | The step that produced this artifact. The evidence-gate hook reads `current:` in `## SDLC State`, not this field, to pick the step to validate. |
 | `mode` | `autonomous` \| `epic-scope` \| `incident-response` \| `design-refresh` \| `spike` | Determines applicable steps, governing-skill substitutions, and default flag values. |
-| `canonical_sdlc_version` | `1`/`2` (legacy) \| `3` \| `4` (current) | Routes the hooks. See [Versioning](#versioning-and-backward-compat). |
+| `canonical_sdlc_version` | `1`/`2` (legacy) \| `3` \| `4` \| `5` (current) | Routes the hooks. See [Versioning](#versioning-and-backward-compat). |
 | `epic` / `wave` / `incident` | Identifier matching the enclosing directory | `epic-NN-<slug>` / `wave-NN-<slug>` for epic-tree work; `NNNN-<slug>` for incidents. |
 
-### Discriminator flags (5 — required on v3/v4 autonomous plans)
+### Discriminator flags (5 — required on v3/v4/v5 autonomous plans)
 
 | Flag | Values | Default |
 |---|---|---|
@@ -148,14 +145,14 @@ For incident-response artifacts, use `incident: NNNN-<slug>` instead of `epic`/`
 | `multi_agent` | bool | **`true`** |
 | `deploy_target` | `k8s` \| `vercel` \| `custom` \| `migration` \| `none` | inferred |
 
-### Opt-in flags (2 — required on v3/v4 autonomous plans)
+### Opt-in flags (2 — required on v3/v4/v5 autonomous plans)
 
 | Flag | Default | What it does |
 |---|---|---|
-| `cleanup_on_finish` | `true` | When `true`, Step 13 runs after Step 12's merge: wipes `.bionic/tmp/`, asserts task-list integrity, strips leftover handoff files. |
+| `cleanup_on_finish` | `true` | When `true`, the cleanup half of Step 9 (Integrate & close) runs after the merge half: wipes `.bionic/tmp/`, asserts task-list integrity, strips leftover handoff files. |
 | `use_worktree` | `false` | When `true`, Step 4 creates a git worktree at `.worktrees/<slug>` and records `worktree:`/`base-sha:`/`branch:` in its evidence line. |
 
-### `model_plan` (required on v4 autonomous plans)
+### `model_plan` (required on v4 and v5 autonomous plans)
 
 A single-line record of the confirmed model tiers, derived from `multi_agent` at Step 0 and surfaced for explicit confirmation:
 
@@ -163,7 +160,7 @@ A single-line record of the confirmed model tiers, derived from `multi_agent` at
 model_plan: orchestrator=opus-4.8-xhigh; execution=opus-4.8-fresh; explore=sonnet-4.6
 ```
 
-For `canonical_sdlc_version: 4` autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2). v3 plans keep the prior contract (no `model_plan`). `model_plan` changes no per-step evidence shape; it records intent only.
+For `canonical_sdlc_version: 4` and `5` autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2). v3 plans keep the prior contract (no `model_plan`). `model_plan` changes no per-step evidence shape; it records intent only.
 
 ---
 
@@ -185,9 +182,12 @@ Step 4:
   worktree: .worktrees/wave-01
   base-sha: a1b2c3d
   branch: wave-01
-Step 5: (pending)
-Step 6: (pending)
-... one line per step through Step 14 ...
+Step 5: (pending)     # Verify (gate)
+Step 6: (pending)     # Review (gate)
+Step 7: (pending)     # Document decisions
+Step 8: (pending)     # External review
+Step 9: (pending)     # Integrate & close
+Step 10: (pending)    # Ship
 ```
 
 `current: N` names the active step. When advancing, **replace `Step N: (pending)` in-place** — never append. (`Phase N:` is accepted as a legacy alias for `Step N:`.) The `## Assumptions` section sits alongside it, seeded from Step 1's "Not Doing" list plus spec ambiguities, and appended inline during Step 4.
@@ -198,12 +198,12 @@ Evidence falls into exactly two tiers:
 
 | Tier | Always present? | Enforced by |
 |---|---|---|
-| **Verification** | Yes — mandatory | `canonical-sdlc-evidence-gate.sh` (presence + per-step shape on v3/v4) |
+| **Verification** | Yes — mandatory | `canonical-sdlc-evidence-gate.sh` (presence + per-step shape on v3/v4/v5) |
 | **Handoff** | Only when a plan spans sessions | Skill prose + the Stop-hook checkpoint |
 
 There is no third "narrative" tier. Decision-point prose to the user is governed instead by the **User Decision Protocol**: frame the decision at the highest useful level of abstraction, offer numbered options each with a one-line rationale, state significance in one sentence, and keep the whole thing under ~200 words. If stating the question needs a filename or line number, the abstraction level is wrong — climb a rung and rewrite.
 
-### Per-step evidence shape (v3/v4)
+### Per-step evidence shape (v5)
 
 The evidence-gate hook checks the current step's line against this table on every `git commit`:
 
@@ -214,25 +214,22 @@ The evidence-gate hook checks the current step's line against this table on ever
 | 2 | pointer to the spec body | pointer-only |
 | 3 | pointer to the plan body | pointer-only |
 | 4 | pointer to the slice list; **or** `worktree:`/`base-sha:`/`branch:` when `use_worktree: true` | pointer-only at the hook |
-| 5 | `devtools-trace: <path>` **OR** `n/a: <reason>` | |
-| 6 | `cmd:`, `pass:`, `total:`, `output:` | `pass == total`, both integers |
-| 7 | pointer to the 5-axis review body | pointer-only |
-| 8 | pointer to critic findings | pointer-only |
-| 9 | `adr: <path>` **OR** `rca: <path>` **OR** `n/a: <reason>` | |
-| 10 | `commit:`, `subject:`, `files:` | |
-| 11 | `pr: <url>` **OR** `n/a: <reason>` | |
-| 12 | `merge:`, `worktree-removed:` | `worktree-removed: n/a` valid when no worktree was used |
-| 13 | `cleanup:`, `tmp-wiped:`, `tasks-completed:` **OR** `n/a: cleanup_on_finish=false` | |
-| 14 | `deploy:`, `verified-at:`, `monitor:` **OR** `n/a: <reason>` | `n/a` valid only when `deploy_target: none` |
+| 5 Verify | `cmd:`, `pass:`, `total:`, `output:` (`pass == total`) **AND** `devtools-trace: <path>` **OR** `n/a: <reason>` | tests/build modality always; browser modality is a trace or `n/a` |
+| 6 Review | pointer to the 5-axis review body + critic findings | pointer-only |
+| 7 Document | `adr: <path>` **OR** `rca: <path>` **OR** `n/a: <reason>` | |
+| 8 External review | `pr: <url>` **OR** `n/a: <reason>` | |
+| 9 Integrate & close | `merge:`, `worktree-removed:` **AND** (`cleanup:`, `tmp-wiped:`, `tasks-completed:` **OR** `cleanup: n/a`) | finish half + cleanup half in one atomic step |
+| 10 Ship | `deploy:`, `verified-at:`, `monitor:` **OR** `n/a: <reason>` | `n/a` valid only when `deploy_target: none` |
 
-Steps 1, 2, 3, 4, 7, and 8 are pointer-only at the hook level — the hook checks that a non-placeholder pointer exists, not its contents. Multi-field steps use YAML-style indented keys under `Step N:`:
+Steps 1, 2, 3, 4, and 6 are pointer-only at the hook level — the hook checks that a non-placeholder pointer exists, not its contents. Multi-field steps use YAML-style indented keys under `Step N:`:
 
 ```
-Step 6:
+Step 5:
   cmd: bash test.sh
   pass: 332
   total: 332
-  output: <docs-root>/plans/<slug>.plan.md#step-6
+  output: <docs-root>/plans/<slug>.plan.md#step-5
+  devtools-trace: .bionic/tmp/devtools-trace-golden.json
 ```
 
 The gate blocks (exit 2) when the current step's evidence line is missing, empty, or a placeholder token (`todo`, `pending`, `inprogress`, `xxx`, `tbd`, `placeholder`).
@@ -267,9 +264,9 @@ session-count: 2
 
 `Decisions ratified this session` resets each session; everything else persists, capped per field. The handoff is **rewritten in place** on every trigger, never appended — a 3-session plan carries the same handoff size as a 1-session plan.
 
-**Triggers:** session end mid-plan (`Stop` event with `sdlc-step: < 14`), context-compaction risk (~90% utilization), or an explicit user checkpoint.
+**Triggers:** session end mid-plan (`Stop` event with `sdlc-step: < 10`), context-compaction risk (~90% utilization), or an explicit user checkpoint.
 
-**Strip:** a plan that opens and closes within one session never gets a handoff; Step 13 strips a leftover handoff on merge.
+**Strip:** a plan that opens and closes within one session never gets a handoff; Step 9's cleanup half strips a leftover handoff on merge.
 
 ---
 
@@ -283,7 +280,7 @@ Fires on writes to `*.plan.md`, `*.spec.md`, `adr-*.md`, and `continuation*.md` 
 
 Flag enforcement is version-routed:
 - **v3 autonomous plans** — also requires the 5 discriminator flags + 2 opt-in flags.
-- **v4 autonomous plans** — same, plus a non-empty `model_plan`.
+- **v4 and v5 autonomous plans** — same, plus a non-empty `model_plan`.
 - **v1/v2 plans** — grandfathered; only the `governing-skill:` field is checked, no flag enforcement.
 - **Unsupported version** — exit 2.
 
@@ -292,7 +289,8 @@ Flag enforcement is version-routed:
 Fires on `git commit`. Locates the newest plan, reads its `## SDLC State`, finds `current: N`, and blocks the commit if step `N`'s evidence line is missing, empty, or a placeholder.
 
 Shape enforcement is version-routed:
-- **v3/v4 plans** — runs the per-step shape table above (v4 shares v3's table).
+- **v3/v4 plans** — run the v3 per-step shape table (v4 shares v3's table; pre-collapse step numbering).
+- **v5 plans** — run the v5 per-step shape table above (the gate-collapsed 0–10 shape).
 - **v1/v2 plans** — presence-only by default.
 
 ---
@@ -305,8 +303,8 @@ Three tiers by role (the default plan when `multi_agent: true`):
 
 | Tier | Role | Model | Dispatch mechanism |
 |---|---|---|---|
-| **1 · Orchestrator** | main thread — runs Steps 1–3 directly, coordinates 4–14 | Opus 4.8 xhigh (default) or Fable 5 high | the main session, fixed all wave |
-| **2 · Execution** | implementation slices, refactors, Step 7 review, Step 8 critic | Opus 4.8 | **fresh `model: opus`** by default; `fork` only when the unit genuinely needs the inherited context |
+| **1 · Orchestrator** | main thread — runs Steps 1–3 directly, coordinates 4–10 | Opus 4.8 xhigh (default) or Fable 5 high | the main session, fixed all wave |
+| **2 · Execution** | implementation slices, refactors, Step 6 review (5-axis + adversarial critic) | Opus 4.8 | **fresh `model: opus`** by default; `fork` only when the unit genuinely needs the inherited context |
 | **3 · Explore / mechanical / test** | codebase search, fixtures, mechanical edits, test-writing | Sonnet 4.6 | **fresh `model: sonnet`** (never a fork) |
 
 **Why fresh-by-default beats fork-everything.** Pushing work to subagents keeps the main thread's token count flat, which is what extends a session before a handoff is needed. The instinct to *fork* everything achieves that — but a fork inherits the entire main-thread conversation (re-paying full context every dispatch) *and* the orchestrator's xhigh effort, making it the most expensive subagent available. A **fresh** subagent preserves the main thread's longevity exactly as well (only its summary returns to main) while carrying only the brief you hand it, at the model and harness-default effort you pick. So fresh *dominates* fork for anything that doesn't genuinely need the inherited context. Fork is the exception — reserved for context-heavy reasoning; never for vanilla/mechanical work, and never to get a cheaper model (forks ignore `model` and inherit the orchestrator's).
@@ -317,7 +315,7 @@ Three tiers by role (the default plan when `multi_agent: true`):
 
 **`multi_agent: false`** collapses this to a single thread (no dispatch). The main model still defaults to Opus 4.8 xhigh but can be dialed down (Opus 4.8 high or Sonnet 4.6) at Step 0, since there is nothing to offload to.
 
-**Verification carries over.** Verify each dispatched unit's commit *fileset* (`git show --stat` plus `git status --short` for orphans), not just that tests are green; and the Step 8 adversarial critic must be **independent of whoever wrote the code** — never accept a subagent's self-graded review.
+**Verification carries over.** Verify each dispatched unit's commit *fileset* (`git show --stat` plus `git status --short` for orphans), not just that tests are green; and the Step 6 (Review) adversarial critic must be **independent of whoever wrote the code** — never accept a subagent's self-graded review.
 
 ---
 
@@ -328,21 +326,22 @@ Three tiers by role (the default plan when `multi_agent: true`):
 | Version | Status | Flag enforcement | Evidence shape |
 |---|---|---|---|
 | `1` / `2` | Legacy, grandfathered | None (only `governing-skill:` checked) | Presence-only (or the v2 shape if a `v2`-shaped plan declares it) |
-| `3` | Prior contract | 5 discriminators + 2 opt-in flags | Per-step shape table |
-| `4` | **Current** | v3 set + required `model_plan` | Per-step shape table (same as v3 — `model_plan` adds no evidence shape) |
+| `3` | Prior, still enforced | 5 discriminators + 2 opt-in flags | v3 per-step shape table (pre-collapse step numbering) |
+| `4` | Prior, still enforced | v3 set + required `model_plan` | v3 per-step shape table (v4 shares v3's — `model_plan` adds no evidence shape) |
+| `5` | **Current** | v4 set: 5 discriminators + 2 opt-in flags + required `model_plan` | v5 per-step shape table (the gate-collapsed 0–10 shape) |
 
-Legacy plans (v1/v2) run grandfathered indefinitely: the governing-skill hook checks only `governing-skill:`, and the evidence gate uses presence-only. v3 plans remain enforced under the prior 5 + 2 contract. Only v4 requires `model_plan`.
+Legacy plans (v1/v2) run grandfathered indefinitely: the governing-skill hook checks only `governing-skill:`, and the evidence gate uses presence-only. v3 plans remain enforced under the prior 5 + 2 contract. v4 and v5 require `model_plan`. v3/v4 plans run the v3 per-step shape table (v4 shares v3's); v5 plans run the v5 shape table.
 
 ---
 
 ## Configuration: the Step-0 wizard
 
-Step 0 is mandatory for new plans (`canonical_sdlc_version: 4`). It sets every plan-shaping flag deliberately, with explicit user confirmation, in four sub-steps:
+Step 0 is mandatory for new plans (`canonical_sdlc_version: 5`). It sets every plan-shaping flag deliberately, with explicit user confirmation, in four sub-steps:
 
 1. **Pre-flight environment check** — verify `.bionic/` root, resolve the docs root (`<project>/.bionic/config.yaml`'s `docs-root:`, default `.bionic/docs`), ensure `{specs,plans,adrs,incidents}/` exist, `mkdir -p .bionic/tmp/`, and verify both hooks are installed and executable.
 2. **Infer recommended values** — from repo files (`tsconfig.json` → `typescript`, `Cargo.toml` → `rust`, …) and conversation keywords (surface type, deploy target, UI).
 3. **Present the confirmation display** — flags, model plan, environment status, each with its inference rationale.
-4. **Block until explicit confirmation** — no timeout, no implicit acceptance. After confirmation, create the TaskCreate list (`0:`…`14:`).
+4. **Block until explicit confirmation** — no timeout, no implicit acceptance. After confirmation, create the TaskCreate list (`0:`…`10:`).
 
 ### The confirmation display
 
@@ -365,7 +364,7 @@ Discriminator flags:
   deploy_target:   none         [no deploy signal]
 
 Opt-in flags:
-  cleanup_on_finish: true       [Step 13 wipes .bionic/tmp/ on close]
+  cleanup_on_finish: true       [Step 9 (cleanup half) wipes .bionic/tmp/ on close]
   use_worktree:      false      [work on current branch]
 
 Model plan:                     [multi_agent=true → tiered dispatch]
@@ -397,21 +396,18 @@ Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql
 
 | Step | Gate | Evidence |
 |---|---|---|
-| 0. Configure | Frontmatter has `canonical_sdlc_version: 4` + 5 discriminator + 2 opt-in flags + `model_plan`; user confirmed; TaskCreate list created | Confirmation line in `## SDLC State` |
+| 0. Configure | Frontmatter has `canonical_sdlc_version: 5` + 5 discriminator + 2 opt-in flags + `model_plan`; user confirmed; TaskCreate list created | Confirmation line in `## SDLC State` |
 | 1. Ideate | Refined idea + "Not Doing" list; alternatives lens cites prior artifacts | Pointer to ideate body in spec |
 | 2. Spec | Every requirement has an acceptance criterion | Pointer to spec doc |
 | 3. Plan | No placeholders; `integration-branch:` declared; Step 4 expanded into slice tasks; approval | Pointer to plan body |
 | 4. Implement | Every slice has a test that was RED first; worktree created if `use_worktree: true` | Slice-list pointer; worktree fields when applicable |
-| 5. Browser verify | Golden path + edge case, or `n/a:` | `devtools-trace:` or `n/a:` |
-| 6. Verify done | All tests pass | `cmd:`/`pass:`/`total:`/`output:`, `pass == total` |
-| 7. Self-review | Every one of the 5 axes has a verdict | Pointer to review body |
-| 8. Adversarial critic | Specific issues raised or specific falsification attempts | Pointer to critic findings (mandatory in `autonomous`, `incident-response`, `design-refresh`) |
-| 9. Document decisions | Every significant decision has a record | `adr:` / `rca:` / `n/a:` |
-| 10. Commit | Atomic; scope matches spec; per-step checkpoint | `commit:`/`subject:`/`files:` |
-| 11. External review | Review request open | `pr:` or `n/a:` (waivable for incident hotfix) |
-| 12. Finish branch | Wave merged into the declared `integration-branch`; worktree removed | `merge:`/`worktree-removed:` |
-| 13. Post-merge cleanup | `.bionic/tmp/` wiped; all tasks completed; `cleaned:` stamped | `cleanup:`/`tmp-wiped:`/`tasks-completed:` or `n/a:` |
-| 14. Ship | Checklist complete; rollback documented; `continuation.md` written; gap closed (incident) | `deploy:`/`verified-at:`/`monitor:` or `n/a:` |
+| 5. Verify (gate) | Tests/build pass (`pass == total`); browser modality proven (trace) or `n/a:` | `cmd:`/`pass:`/`total:`/`output:` **and** `devtools-trace:` or `n/a:` |
+| 6. Review (gate) | Every one of the 5 axes has a verdict; adversarial critic attached (mandatory in `autonomous`, `incident-response`, `design-refresh`) | Pointer to 5-axis review body + critic findings |
+| 7. Document decisions | Every significant decision has a record | `adr:` / `rca:` / `n/a:` |
+| 8. External review | Review request open | `pr:` or `n/a:` (waivable for incident hotfix) |
+| 9. Integrate & close | Wave merged into the declared `integration-branch`; worktree removed; `.bionic/tmp/` wiped; all tasks completed; `cleaned:` stamped | `merge:`/`worktree-removed:` **and** `cleanup:`/`tmp-wiped:`/`tasks-completed:` or `cleanup: n/a` |
+| 10. Ship | Checklist complete; rollback documented; `continuation.md` written; gap closed (incident) | `deploy:`/`verified-at:`/`monitor:` or `n/a:` |
+| — Commit rhythm | Cross-cutting; per-step checkpoint commit (not a numbered step) | Atomic commits; scope matches spec |
 
 ---
 
