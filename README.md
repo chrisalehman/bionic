@@ -265,7 +265,7 @@ Unofficial Python CLI and agentic skill for Google NotebookLM (8.9k stars). Prov
 
 **impeccable** — `github-skill-pack | impeccable | pbakaus/impeccable`
 
-A skill pack from Paul Bakaus (Google) containing 20+ design skills. Installed as individual skills — each subdirectory in the repo's `.claude/skills/` becomes a separate skill in `~/.claude/skills/`. Includes: `adapt`, `animate`, `arrange`, `audit`, `bolder`, `clarify`, `colorize`, `critique`, `delight`, `distill`, `extract`, `harden`, `normalize`, `onboard`, `optimize`, `overdrive`, `polish`, `quieter`, `teach-impeccable`, `typeset`.
+A skill pack from Paul Bakaus (Google) containing 20+ design skills. Installed as individual skills — each subdirectory in the repo's `.claude/skills/` becomes a separate skill in `~/.claude/skills/`. Includes: `adapt`, `animate`, `arrange`, `audit`, `bolder`, `clarify`, `colorize`, `critique`, `delight`, `distill`, `extract`, `frontend-design`, `harden`, `impeccable`, `layout`, `normalize`, `onboard`, `optimize`, `overdrive`, `polish`, `quieter`, `shape`, `teach-impeccable`, `typeset`.
 
 **bionic** — `local-skill | name` (local, shipped with this repo)
 
