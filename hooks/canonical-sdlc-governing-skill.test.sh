@@ -475,6 +475,72 @@ canonical_sdlc_version: 4
 run_write "$project/.bionic/docs/plans/epic-01-demo/wave-14-v4d.plan.md" "$v4_design"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
+# ============================================================
+# canonical_sdlc_version v5 enforcement (gate-collapse; inherits v4 contract)
+# ============================================================
+#
+# v5 collapses Steps 5+6→Verify, 7+8→Review, 12+13→Integrate&close and
+# dissolves Commit into a cross-cutting rhythm. The governing-skill flag
+# contract is unchanged from v4: 5 discriminators + 2 opt-in + model_plan,
+# autonomous mode only.
+
+build_v5_plan() {
+  local omit=" $* "
+  local out='---
+governing-skill: canonical-sdlc
+mode: autonomous
+sdlc-step: 4
+canonical_sdlc_version: 5
+'
+  local opt_in=("cleanup_on_finish:true" "use_worktree:false")
+  local discriminators=("surface_type:none" "language:none" \
+                        "has_ui:false" "multi_agent:true" \
+                        "deploy_target:none")
+  local v5_added=("model_plan:orchestrator=opus-4.8-xhigh; execution=opus-4.8-fresh; explore=sonnet-4.6")
+  for kv in "${opt_in[@]}" "${discriminators[@]}" "${v5_added[@]}"; do
+    local key="${kv%%:*}"
+    local val="${kv#*:}"
+    case "$omit" in
+      *" $key "*) continue ;;
+    esac
+    out+="${key}: ${val}"$'\n'
+  done
+  out+='---
+
+# Body
+'
+  printf '%s' "$out"
+}
+
+project=$(make_project)
+
+echo "v5 with all v3 flags + model_plan → allow"
+v5_full=$(build_v5_plan)
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-15-v5.plan.md" "$v5_full"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+echo "v5 missing model_plan → block, error names model_plan"
+v5_no_mp=$(build_v5_plan model_plan)
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-16-v5.plan.md" "$v5_no_mp"
+assert_eq "exit 2" 2 "$HOOK_EXIT"
+case "$HOOK_STDERR" in
+  *model_plan*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  error mentions model_plan (v5)\n' ;;
+  *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  error missing model_plan (v5): %q\n' "$HOOK_STDERR" ;;
+esac
+
+echo "v5 + mode != autonomous → allow (flag enforcement is autonomous-only)"
+v5_design='---
+governing-skill: canonical-sdlc
+mode: design-refresh
+sdlc-step: 1
+canonical_sdlc_version: 5
+---
+
+# Body
+'
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-17-v5d.plan.md" "$v5_design"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
+
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then
