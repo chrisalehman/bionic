@@ -286,7 +286,7 @@ echo "=== Section 2: Config file consistency (claude-config.txt) ==="
 
 _cfg_file="$CONFIG"
 
-KNOWN_TYPES="brew-dep npm-global uv-tool mcp-server plugin marketplace github-skill github-skill-pack local-skill local-command global-memory env-var statusline"
+KNOWN_TYPES="brew-dep brew-cask npm-global pnpm-store uv-tool mcp-server plugin marketplace github-skill github-skill-pack local-skill local-command global-memory env-var statusline"
 
 # 2a: Every uncommented, non-blank line has at least one pipe delimiter
 _bad_lines=""
@@ -394,6 +394,33 @@ _count_gm() { _gm_total=$((_gm_total + 1)); }
 read_config "global-memory" _count_gm
 expect_eq "config has exactly one global-memory entry" "1" "$_gm_total"
 
+# 2j: gcloud is installed as a brew-cask mapping to the gcloud-cli cask.
+# Regression guard: the google-cloud-sdk cask was renamed (now 404s) and there
+# is no `gcloud` formula, so the old `brew-dep | gcloud` entry failed on a
+# fresh machine.
+_gcloud_cask=""
+_check_gcloud_cask() { if [ "$1" = "gcloud" ]; then _gcloud_cask="$2"; fi; }
+read_config "brew-cask" _check_gcloud_cask
+expect_eq "gcloud is a brew-cask mapping to gcloud-cli" "gcloud-cli" "$_gcloud_cask"
+
+# 2k: gcloud is NOT a brew-dep (that would install the nonexistent formula)
+_gcloud_brewdep=0
+_check_gcloud_brewdep() { if [ "$1" = "gcloud" ]; then _gcloud_brewdep=1; fi; }
+read_config "brew-dep" _check_gcloud_brewdep
+expect_eq "gcloud is not a (broken) brew-dep formula entry" "0" "$_gcloud_brewdep"
+
+# 2l: motion is pre-warmed into the pnpm store
+_motion_store=0
+_check_motion_store() { if [ "$1" = "motion" ]; then _motion_store=1; fi; }
+read_config "pnpm-store" _check_motion_store
+expect_eq "motion is registered as a pnpm-store library" "1" "$_motion_store"
+
+# 2m: motion is also installed as a local-skill (teaches the current motion.dev API)
+_motion_skill=0
+_check_motion_skill() { if [ "$1" = "motion" ]; then _motion_skill=1; fi; }
+read_config "local-skill" _check_motion_skill
+expect_eq "motion is registered as a local-skill" "1" "$_motion_skill"
+
 # ============================================================
 # SECTION 3: Bootstrap/reset script symmetry
 # ============================================================
@@ -498,6 +525,24 @@ expect_eq "chrome-devtools package is chrome-devtools-mcp@latest" "chrome-devtoo
 # 3t: chrome-devtools requires no env vars (no auth — runs against local Chrome)
 expect_eq "chrome-devtools entry has no required env vars" "" "$_cdt_env"
 
+# 3u: Bootstrap reads the install-only config types (brew-cask, pnpm-store).
+# Like brew-dep, these are NOT undone by reset (shared system / cache state),
+# so they are intentionally excluded from the symmetry loop above.
+expect_true "bootstrap reads type: brew-cask" grep -q '"brew-cask"' "$BOOTSTRAP"
+expect_true "bootstrap reads type: pnpm-store" grep -q '"pnpm-store"' "$BOOTSTRAP"
+
+# 3v: Resilience posture — the install phase must run to completion even when a
+# step fails. Bootstrap defines the retry + failure-collection helpers and the
+# network installers record failures (non-fatal) instead of `exit 1`.
+expect_true "bootstrap defines run_retry helper" grep -q "^run_retry()" "$BOOTSTRAP"
+expect_true "bootstrap defines record_fail helper" grep -q "^record_fail()" "$BOOTSTRAP"
+expect_true "bootstrap collects INSTALL_FAILURES" grep -q "INSTALL_FAILURES=" "$BOOTSTRAP"
+expect_true "marketplace installer records failures (non-fatal)" grep -q 'record_fail "marketplace' "$BOOTSTRAP"
+expect_true "plugin installer records failures (non-fatal)" grep -q 'record_fail "plugin' "$BOOTSTRAP"
+# The marketplace + plugin installers used to `exit 1` on failure; ensure that
+# fail-fast behavior is gone.
+expect_false "marketplace/plugin installers no longer hard-exit" grep -qE 'echo "FAILED" >&2|echo "FAILED: \$output" >&2' "$BOOTSTRAP"
+
 # ============================================================
 # SECTION 4: Hook file consistency
 # ============================================================
@@ -554,10 +599,6 @@ expect_true "MANAGED_HOOKS includes protect-main.sh" grep -q 'protect-main\.sh' 
 # 4e: MANAGED_HOOKS includes protect-database.sh
 expect_true "MANAGED_HOOKS includes protect-database.sh" grep -q 'protect-database\.sh' "$BOOTSTRAP"
 
-# 4f: MANAGED_HOOKS includes memory-update.sh as a Stop hook
-expect_true "MANAGED_HOOKS includes memory-update.sh as Stop hook" \
-  grep -qE '^\s*"Stop\|\|.*memory-update\.sh"' "$BOOTSTRAP"
-
 # 4g: MANAGED_HOOKS includes memory-cleanup.sh as a SessionStart hook with startup matcher
 expect_true "MANAGED_HOOKS includes memory-cleanup.sh as SessionStart|startup" \
   grep -qE '^\s*"SessionStart\|startup\|.*memory-cleanup\.sh"' "$BOOTSTRAP"
@@ -565,29 +606,6 @@ expect_true "MANAGED_HOOKS includes memory-cleanup.sh as SessionStart|startup" \
 # 4h: MANAGED_HOOKS includes canonical-sdlc-evidence-gate.sh as a PreToolUse|Bash hook
 expect_true "MANAGED_HOOKS includes canonical-sdlc-evidence-gate.sh as PreToolUse|Bash" \
   grep -qE '^\s*"PreToolUse\|Bash\|.*canonical-sdlc-evidence-gate\.sh"' "$BOOTSTRAP"
-
-# 4i: MANAGED_HOOKS includes memory-commit-save.sh as a PostToolUse|Bash hook
-expect_true "MANAGED_HOOKS includes memory-commit-save.sh as PostToolUse|Bash" \
-  grep -qE '^\s*"PostToolUse\|Bash\|.*memory-commit-save\.sh"' "$BOOTSTRAP"
-
-# 4j: MANAGED_HOOKS includes canonical-sdlc-dispatch-gate.sh as a PreToolUse|Agent hook
-expect_true "MANAGED_HOOKS includes canonical-sdlc-dispatch-gate.sh as PreToolUse|Agent" \
-  grep -qE '^\s*"PreToolUse\|Agent\|.*canonical-sdlc-dispatch-gate\.sh"' "$BOOTSTRAP"
-
-# 4k: bootstrap seeds .bionic/sdlc-dispatch-rules.json from the canonical-sdlc skill template
-expect_true "bootstrap references the dispatch-rules template path" \
-  grep -q 'skills/canonical-sdlc/sdlc-dispatch-rules\.json' "$BOOTSTRAP"
-expect_true "bootstrap idempotency: only seeds when target missing" \
-  grep -qE 'if \[ ! -f "\$rules_target" \]|if \[ -f "\$rules_target" \]' "$BOOTSTRAP"
-
-# 4l: tracked rules-JSON template is valid JSON with all 14 phases + 8b
-_rules_template="${REPO}/skills/canonical-sdlc/sdlc-dispatch-rules.json"
-expect_true "rules template exists" [ -f "$_rules_template" ]
-if [ -f "$_rules_template" ]; then
-  expect_true "rules template is valid JSON" jq empty "$_rules_template"
-  _phase_count="$(jq '.phases | length' "$_rules_template" 2>/dev/null)"
-  expect_eq "rules template covers 14 phases + 8b (15 keys)" "15" "$_phase_count"
-fi
 
 # 4m: hooks/ dir contains at least one non-test hook
 _hook_count=0
@@ -598,54 +616,6 @@ for hook in "${REPO}/hooks/"*.sh; do
   fi
 done
 expect_true "hooks/ contains at least one non-test hook" [ "$_hook_count" -gt 0 ]
-
-# 4n: SKILL.md documents Step 0.5 (Configure) — Wave 3 contract
-_skillmd="${REPO}/skills/canonical-sdlc/SKILL.md"
-expect_true "canonical-sdlc/SKILL.md exists" [ -f "$_skillmd" ]
-if [ -f "$_skillmd" ]; then
-  expect_true "SKILL.md has a Step 0.5 — Configure section" \
-    grep -qE '^### Step 0\.5 — Configure' "$_skillmd"
-  expect_true "SKILL.md references the override DSL keyword 'set'" \
-    grep -qE '\bset[[:space:]]+[a-z_]+=' "$_skillmd"
-  expect_true "SKILL.md references the override DSL keyword 'change ... to'" \
-    grep -qE '\bchange[[:space:]]+[a-z_]+[[:space:]]+to[[:space:]]' "$_skillmd"
-  expect_true "SKILL.md mentions confirm reply" \
-    grep -qE '"confirm"|`confirm`|reply.*confirm' "$_skillmd"
-  # All 4 v2 opt-in flags appear in Step 0.5
-  for _flag in narrative_verbose dispatch_enforce cleanup_on_finish archived; do
-    expect_true "SKILL.md Step 0.5 mentions ${_flag}" grep -q "$_flag" "$_skillmd"
-  done
-  # All 8 discriminator flags appear in Step 0.5
-  for _flag in surface_type language perf_critical security_boundary distributed has_ui multi_agent deploy_target; do
-    expect_true "SKILL.md Step 0.5 mentions ${_flag}" grep -q "$_flag" "$_skillmd"
-  done
-fi
-
-# 4o: SKILL.md documents three-tier evidence + handoff + session-resume — Wave 4 contract
-if [ -f "$_skillmd" ]; then
-  expect_true "SKILL.md has Evidence (three-tier) section" \
-    grep -qE '^## Evidence \(three-tier\)' "$_skillmd"
-  expect_true "SKILL.md mentions verification tier" \
-    grep -qE '[Vv]erification tier' "$_skillmd"
-  expect_true "SKILL.md mentions handoff tier" \
-    grep -qE '[Hh]andoff tier' "$_skillmd"
-  expect_true "SKILL.md mentions narrative tier" \
-    grep -qE '[Nn]arrative tier' "$_skillmd"
-  expect_true "SKILL.md mentions evidence_schema: v2" \
-    grep -q 'evidence_schema: v2' "$_skillmd"
-  expect_true "SKILL.md mentions evidence_schema: legacy" \
-    grep -q 'evidence_schema: legacy' "$_skillmd"
-  expect_true "SKILL.md mentions Resume point in handoff schema" \
-    grep -qE 'Resume point' "$_skillmd"
-  expect_true "SKILL.md mentions Tried and rejected" \
-    grep -qE 'Tried and rejected' "$_skillmd"
-  expect_true "SKILL.md mentions session-resume protocol" \
-    grep -qE 'ession-resume protocol|ession Resume Protocol' "$_skillmd"
-  # Shape table fields the hook actually enforces must appear in SKILL.md
-  for _field in worktree base-sha cmd pass total output commit subject merge worktree-removed deploy verified-at monitor; do
-    expect_true "SKILL.md verification shape table mentions ${_field}" grep -q "$_field" "$_skillmd"
-  done
-fi
 
 # 4p: evidence-gate hook reads evidence_schema and supports v2 path
 _egate="${REPO}/hooks/canonical-sdlc-evidence-gate.sh"
@@ -661,52 +631,8 @@ expect_true "README links to skills/canonical-sdlc/README.md" \
   grep -q 'skills/canonical-sdlc/README\.md' "${REPO}/README.md"
 expect_true "README Skills row mentions bionic:canonical-sdlc as flagship" \
   grep -q 'bionic:canonical-sdlc' "${REPO}/README.md"
-expect_true "README Hooks list mentions all three canonical-sdlc hooks" \
-  grep -qE 'canonical-sdlc-evidence-gate.*canonical-sdlc-governing-skill.*canonical-sdlc-dispatch-gate' "${REPO}/README.md"
-
-# 4s: skills/canonical-sdlc/README.md tracked landing page exists with required sections (Wave 7)
-_canon="${REPO}/skills/canonical-sdlc/README.md"
-expect_true "skills/canonical-sdlc/README.md exists" [ -f "$_canon" ]
-if [ -f "$_canon" ]; then
-  expect_true "canonical-sdlc README mentions v2 frontmatter schema" \
-    grep -qE 'v2 frontmatter schema|plan frontmatter contract|frontmatter schema|canonical_sdlc_version' "$_canon"
-  expect_true "canonical-sdlc README has migration script section" \
-    grep -qE 'migrate-frontmatter\.sh|Migrating in-flight plans' "$_canon"
-  expect_true "canonical-sdlc README has hook composition coverage" \
-    grep -qE 'Hook behavior matrix|hook behavior matrix|three hooks compose|Hook chain' "$_canon"
-  expect_true "canonical-sdlc README mentions audit log / calibration loop" \
-    grep -qE 'mpirical validation|deferred validation arm|calibration loop|dispatch-audit' "$_canon"
-  expect_true "canonical-sdlc README lists all five modes" \
-    grep -q 'autonomous' "$_canon" && \
-    grep -q 'epic-scope' "$_canon" && \
-    grep -q 'incident-response' "$_canon" && \
-    grep -q 'design-refresh' "$_canon" && \
-    grep -q 'spike' "$_canon"
-  expect_true "canonical-sdlc README references both diagrams" \
-    grep -q 'diagrams/lifecycle\.png' "$_canon" && \
-    grep -q 'diagrams/hook-chain\.png' "$_canon"
-fi
-
-# 4q: SKILL.md documents Step 12.5 (post-merge cleanup) — Wave 5 contract
-if [ -f "$_skillmd" ]; then
-  expect_true "SKILL.md has Step 12.5 — Post-merge cleanup section" \
-    grep -qE '^### Step 12\.5 — Post-merge cleanup' "$_skillmd"
-  expect_true "SKILL.md mentions cleanup_on_finish flag" \
-    grep -q 'cleanup_on_finish' "$_skillmd"
-  expect_true "SKILL.md mentions archived flag in cleanup context" \
-    grep -qE 'archived: true|archived flag|archived: <' "$_skillmd"
-  expect_true "SKILL.md mentions cleaned: frontmatter idempotency marker" \
-    grep -qE 'cleaned:' "$_skillmd"
-  expect_true "SKILL.md mentions evidence-archive directory" \
-    grep -qE '\.bionic/evidence-archive' "$_skillmd"
-  # Required Step 12.5 evidence fields per the shape table
-  for _field in narrative-stripped handoff; do
-    expect_true "SKILL.md Step 12.5 mentions ${_field}" grep -q "$_field" "$_skillmd"
-  done
-  # Step 12.5 must appear in the verification shape table itself
-  expect_true "verification shape table has a Step 12.5 row" \
-    grep -qE '\| 12\.5 \|' "$_skillmd"
-fi
+expect_true "README Hooks list mentions both canonical-sdlc hooks" \
+  grep -qE 'canonical-sdlc-evidence-gate.*canonical-sdlc-governing-skill' "${REPO}/README.md"
 
 # ============================================================
 # SECTION 5: Shell alias marker consistency

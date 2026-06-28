@@ -444,6 +444,13 @@ echo ""
 
 echo "CLI tools (brew):"
 echo "  (not removed — system-level tools may be used by other software)"
+echo "  (casks likewise left in place; e.g. gcloud-cli)"
+echo ""
+
+# ─── Frontend Libraries (pnpm store) ───────────────────────────────────────
+
+echo "Frontend libraries (pnpm store):"
+echo "  (not removed — the pnpm store is a shared cache; run 'pnpm store prune' to reclaim space)"
 echo ""
 
 # ─── Custom Skills ──────────────────────────────────────────────────────────

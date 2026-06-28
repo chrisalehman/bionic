@@ -12,7 +12,10 @@
 #   global-memory |  filename
 #   brew-dep      |  binary              (package = binary)
 #   brew-dep      |  binary  |  package  (when binary ≠ package)
+#   brew-cask     |  binary              (cask token = binary)
+#   brew-cask     |  binary  |  cask     (Homebrew cask; binary it provides ≠ cask token)
 #   npm-global    |  package
+#   pnpm-store    |  package             (importable JS lib pre-warmed into the pnpm store; pulled per-project via `pnpm add`)
 #   uv-tool       |  package |  binary   (Python CLI via uv tool install; binary defaults to package)
 #   mcp-server    |  name   |  package  |  ENV_VAR1,ENV_VAR2  (optional: required env vars)
 #   env-var       |  key    |  value
@@ -31,6 +34,11 @@ npm-global   | @playwright/cli
 
 # CLI tools installed via uv (Python packages with CLI entry points)
 uv-tool      | notebooklm-py       | notebooklm
+
+# Frontend libraries pre-warmed into the pnpm content-addressable store
+# (importable, no CLI). Pulled into projects with `pnpm add <pkg>`, which
+# hard-links from the store. See the `motion` skill for usage.
+pnpm-store   | motion
 
 marketplace  | anthropics/skills
 marketplace  | VoltAgent/awesome-claude-code-subagents
@@ -64,6 +72,7 @@ local-skill  | map-instrument-narrow
 local-skill  | skill-factory
 local-skill  | canonical-sdlc
 local-skill  | browser-verify
+local-skill  | motion
 
 local-command | memory-compact
 local-command | memory-save
@@ -87,9 +96,11 @@ brew-dep     | docker
 # brew-dep     | k9s
 
 # ─── Optional: GCP ────────────────────────────────────────────────────────
-# Note: gcloud requires a cask — run manually: brew install --cask google-cloud-sdk
+# The Google Cloud CLI ships as a Homebrew *cask* named `gcloud-cli` (the older
+# `google-cloud-sdk` cask was renamed and now 404s; there is no `gcloud`
+# formula). brew-cask installs it correctly and `gcloud` lands on PATH.
 #
-brew-dep     | gcloud
+brew-cask    | gcloud        | gcloud-cli
 
 # ─── Optional: AWS ────────────────────────────────────────────────────────
 #
