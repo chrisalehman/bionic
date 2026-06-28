@@ -54,6 +54,35 @@ read_config() {
   done < <(grep -v '^\s*#' "$CONFIG" | grep -v '^\s*$')
 }
 
+# ─── Resilience ──────────────────────────────────────────────────────────────
+#
+# The install phase must run to completion even when individual steps fail
+# (network blips, renamed packages, registry hiccups). Each install records its
+# failure into INSTALL_FAILURES and CONTINUES rather than aborting; the
+# end-of-run summary reports them and sets the exit code. Network operations go
+# through run_retry (exponential backoff). Genuine prerequisites (claude, brew,
+# npm, uv) still hard-fail up front — those are not recoverable mid-run.
+
+INSTALL_FAILURES=()
+RETRY_MAX="${RETRY_MAX:-3}"
+RUN_ERR=""
+
+# run_retry <cmd...> — runs cmd with stdout+stderr captured into RUN_ERR,
+# retrying up to RETRY_MAX times with exponential backoff (2s, 4s, 8s...).
+# Returns 0 on first success, 1 if every attempt fails. Never aborts the script.
+run_retry() {
+  local n=1 delay=2
+  while :; do
+    if RUN_ERR="$("$@" 2>&1)"; then return 0; fi
+    [ "$n" -ge "$RETRY_MAX" ] && return 1
+    sleep "$delay"
+    n=$((n + 1)); delay=$((delay * 2))
+  done
+}
+
+# record_fail <message> — note a non-fatal install failure for the summary.
+record_fail() { INSTALL_FAILURES+=("$1"); }
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 ensure_cmd() {
@@ -63,8 +92,32 @@ ensure_cmd() {
     echo "✓ (already installed)"
     return 0
   fi
-  brew install "$pkg" --quiet &>/dev/null
-  echo "✓"
+  if run_retry brew install "$pkg" --quiet; then
+    echo "✓"
+  else
+    echo "⚠ FAILED (continuing)"
+    record_fail "brew ${pkg}: ${RUN_ERR}"
+  fi
+  return 0
+}
+
+# Installs a Homebrew *cask* (SDKs / apps not shipped as core formulae, e.g. the
+# Google Cloud CLI). binary = the command it provides on PATH; token = the cask
+# name. Casks need `brew install --cask`, which plain ensure_cmd cannot do.
+do_install_brew_cask() {
+  local binary="$1" token="${2:-$1}"
+  echo -n "  ${binary} (cask: ${token})... "
+  if command -v "$binary" &>/dev/null || brew list --cask "$token" &>/dev/null; then
+    echo "✓ (already installed)"
+    return 0
+  fi
+  if run_retry brew install --cask "$token" --quiet; then
+    echo "✓"
+  else
+    echo "⚠ FAILED (continuing)"
+    record_fail "brew --cask ${token}: ${RUN_ERR}"
+  fi
+  return 0
 }
 
 do_install_brew_dep() {
@@ -77,10 +130,15 @@ do_install_npm_global() {
   echo -n "  ${pkg}... "
   if npm list -g --depth=0 "$pkg" &>/dev/null; then
     echo "✓ (already installed)"
-  else
-    npm install -g "$pkg" --silent 2>/dev/null
-    echo "✓"
+    return 0
   fi
+  if run_retry npm install -g "$pkg" --silent; then
+    echo "✓"
+  else
+    echo "⚠ FAILED (continuing)"
+    record_fail "npm -g ${pkg}: ${RUN_ERR}"
+  fi
+  return 0
 }
 
 do_install_uv_tool() {
@@ -90,8 +148,30 @@ do_install_uv_tool() {
     echo "✓ (already installed)"
     return 0
   fi
-  uv tool install "$pkg" --quiet 2>/dev/null
-  echo "✓"
+  if run_retry uv tool install "$pkg" --quiet; then
+    echo "✓"
+  else
+    echo "⚠ FAILED (continuing)"
+    record_fail "uv tool ${pkg}: ${RUN_ERR}"
+  fi
+  return 0
+}
+
+# Pre-warms the pnpm content-addressable store with a frontend library so that
+# `pnpm add <pkg>` in any project hard-links from the store (instant, offline).
+# A library is imported per-project — the store is a shared cache, never an
+# import path — so there is no global "already installed" state to check.
+# Always pulls @latest so re-runs refresh the cached version.
+do_install_pnpm_store() {
+  local pkg="$1"
+  echo -n "  ${pkg} (pnpm store)... "
+  if run_retry pnpm store add "${pkg}@latest"; then
+    echo "✓"
+  else
+    echo "⚠ FAILED (continuing)"
+    record_fail "pnpm store add ${pkg}: ${RUN_ERR}"
+  fi
+  return 0
 }
 
 do_build_local_package() {
@@ -161,14 +241,24 @@ do_install_marketplace() {
   local name="$1"
   echo -n "  ${name}... "
   local output
+  # First attempt is also the idempotency check: an already-added marketplace
+  # exits non-zero with "already" in the message — that's success, not a retry.
   if output=$(claude plugin marketplace add "$name" 2>&1); then
     echo "✓"
-  elif echo "$output" | grep -qi "already"; then
-    echo "✓ (already added)"
-  else
-    echo "FAILED: $output" >&2
-    exit 1
+    return 0
   fi
+  if echo "$output" | grep -qi "already"; then
+    echo "✓ (already added)"
+    return 0
+  fi
+  # Genuine failure (network, auth, bad name) — retry, then record and continue.
+  if run_retry claude plugin marketplace add "$name"; then
+    echo "✓"
+  else
+    echo "⚠ FAILED (continuing)"
+    record_fail "marketplace ${name}: ${RUN_ERR:-$output}"
+  fi
+  return 0
 }
 
 do_install_plugin() {
@@ -178,12 +268,13 @@ do_install_plugin() {
     echo "✓ (already installed)"
     return 0
   fi
-  if claude plugin install "${plugin}@${source}" &>/dev/null; then
+  if run_retry claude plugin install "${plugin}@${source}"; then
     echo "✓"
   else
-    echo "FAILED" >&2
-    exit 1
+    echo "⚠ FAILED (continuing)"
+    record_fail "plugin ${plugin}@${source}: ${RUN_ERR}"
   fi
+  return 0
 }
 
 do_install_github_skill() {
@@ -191,7 +282,12 @@ do_install_github_skill() {
   echo -n "  ${name} (${repo})... "
   local tmp="/tmp/claude-skill-${name}"
   rm -rf "$tmp"
-  git clone --depth 1 --quiet "https://github.com/${repo}.git" "$tmp"
+  if ! run_retry git clone --depth 1 --quiet "https://github.com/${repo}.git" "$tmp"; then
+    echo "⚠ FAILED (continuing)"
+    record_fail "github-skill ${name} (${repo}): ${RUN_ERR}"
+    rm -rf "$tmp"
+    return 0
+  fi
   mkdir -p ~/.claude/skills
   rm -rf ~/.claude/skills/"${name}"
   cp -r "$tmp" ~/.claude/skills/"${name}" && rm -rf ~/.claude/skills/"${name}"/.git
@@ -204,7 +300,12 @@ do_install_github_skill_pack() {
   echo -n "  ${name} (${repo})... "
   local tmp="/tmp/claude-skill-pack-${name}"
   rm -rf "$tmp"
-  git clone --depth 1 --quiet "https://github.com/${repo}.git" "$tmp"
+  if ! run_retry git clone --depth 1 --quiet "https://github.com/${repo}.git" "$tmp"; then
+    echo "⚠ FAILED (continuing)"
+    record_fail "github-skill-pack ${name} (${repo}): ${RUN_ERR}"
+    rm -rf "$tmp"
+    return 0
+  fi
   mkdir -p ~/.claude/skills
   local count=0
   for skill_dir in "$tmp"/.claude/skills/*/; do
@@ -224,8 +325,9 @@ do_install_local_skill() {
   local source="${SCRIPT_DIR}/skills/${name}"
   echo -n "  ${name} (local)... "
   if [ ! -d "$source" ] || [ ! -f "${source}/SKILL.md" ]; then
-    echo "ERROR: skills/${name}/SKILL.md not found in ${SCRIPT_DIR}" >&2
-    exit 1
+    echo "⚠ FAILED (continuing)"
+    record_fail "local-skill ${name}: skills/${name}/SKILL.md not found in ${SCRIPT_DIR}"
+    return 0
   fi
   mkdir -p ~/.claude/skills
   rm -rf ~/.claude/skills/"${name}"
@@ -238,8 +340,9 @@ do_install_local_command() {
   local source="${SCRIPT_DIR}/commands/${name}.md"
   echo -n "  /${name} (local)... "
   if [ ! -f "$source" ]; then
-    echo "ERROR: commands/${name}.md not found in ${SCRIPT_DIR}" >&2
-    exit 1
+    echo "⚠ FAILED (continuing)"
+    record_fail "local-command ${name}: commands/${name}.md not found in ${SCRIPT_DIR}"
+    return 0
   fi
   mkdir -p ~/.claude/commands
   cp "$source" ~/.claude/commands/"${name}.md"
@@ -257,8 +360,9 @@ do_install_global_memory() {
   echo -n "  ${file} → ~/.claude/CLAUDE.md... "
 
   if [ ! -f "$source" ]; then
-    echo "ERROR: '${file}' not found in ${SCRIPT_DIR}" >&2
-    exit 1
+    echo "⚠ FAILED (continuing)"
+    record_fail "global-memory ${file}: not found in ${SCRIPT_DIR}"
+    return 0
   fi
 
   mkdir -p ~/.claude
@@ -306,6 +410,16 @@ verify_brew_dep() {
   else
     echo "    ${binary} — not found"
     verify_errors+=("${binary} CLI tool — not found")
+  fi
+}
+
+verify_brew_cask() {
+  local binary="$1"
+  if command -v "$binary" &>/dev/null; then
+    echo "    ${binary} ✓"
+  else
+    echo "    ${binary} — not found"
+    verify_errors+=("${binary} (brew cask) — not found")
   fi
 }
 
@@ -373,36 +487,66 @@ echo "CLI tools (brew):"
 read_config "brew-dep" do_install_brew_dep
 echo ""
 
+# ─── CLI Tools (brew casks) ──────────────────────────────────────────────────
+
+echo "CLI tools (brew casks):"
+read_config "brew-cask" do_install_brew_cask
+echo ""
+
 # ─── CLI Tools (npm) ─────────────────────────────────────────────────────────
 
 echo "CLI tools (npm):"
+# node (hence npm) is itself a brew-dep installed above. If that failed, skip
+# the npm-globals rather than aborting the whole run — recorded for the summary.
 if ! command -v npm &>/dev/null; then
-  echo "  ERROR: npm not found — install node first" >&2
-  exit 1
+  echo "  ⚠ npm not found (node install failed?) — skipping npm globals (continuing)"
+  record_fail "npm not found — npm globals not installed (install node)"
+else
+  read_config "npm-global" do_install_npm_global
 fi
-read_config "npm-global" do_install_npm_global
 echo ""
 
 # ─── CLI Tools (uv) ─────────────────────────────────────────────────────────
 
 echo "CLI tools (uv):"
+# uv is a brew-dep installed above; skip its tools (not abort) if it's missing.
 if ! command -v uv &>/dev/null; then
-  echo "  ERROR: uv not found — install with: brew install uv" >&2
-  exit 1
+  echo "  ⚠ uv not found — skipping uv tools (continuing)"
+  record_fail "uv not found — uv tools not installed (brew install uv)"
+else
+  # Ensure uv tool bin directory is on PATH (uv installs binaries to ~/.local/bin/)
+  uv_bin_dir="$(uv tool dir --bin 2>/dev/null)"
+  if [ -n "$uv_bin_dir" ] && [[ ":$PATH:" != *":${uv_bin_dir}:"* ]]; then
+    export PATH="${uv_bin_dir}:${PATH}"
+  fi
+  read_config "uv-tool" do_install_uv_tool
 fi
-# Ensure uv tool bin directory is on PATH (uv installs binaries to ~/.local/bin/)
-uv_bin_dir="$(uv tool dir --bin 2>/dev/null)"
-if [ -n "$uv_bin_dir" ] && [[ ":$PATH:" != *":${uv_bin_dir}:"* ]]; then
-  export PATH="${uv_bin_dir}:${PATH}"
+echo ""
+
+# ─── Frontend Libraries (pnpm store) ─────────────────────────────────────────
+#
+# Pre-warm the pnpm content-addressable store with importable JS libraries
+# (e.g. motion). Projects pull them in with `pnpm add <pkg>`, which hard-links
+# from the warm store — instant and offline. See the `motion` skill for usage.
+
+echo "Frontend libraries (pnpm store):"
+if ! command -v pnpm &>/dev/null; then
+  echo "  ⚠ pnpm not found — skipping frontend library pre-warm (continuing)"
+  record_fail "pnpm not found — frontend libraries not pre-warmed"
+else
+  read_config "pnpm-store" do_install_pnpm_store
 fi
-read_config "uv-tool" do_install_uv_tool
 echo ""
 
 # ─── Playwright Browsers ────────────────────────────────────────────────────
 
 echo -n "Playwright browsers (chromium)... "
-npx playwright install chromium 2>/dev/null
-echo "✓"
+if npx playwright install chromium 2>/dev/null; then
+  echo "✓"
+else
+  echo "⚠ FAILED (continuing)"
+  record_fail "playwright chromium browser install"
+fi
 echo ""
 
 # ─── Marketplaces ────────────────────────────────────────────────────────────
@@ -496,8 +640,12 @@ echo ""
 echo "Skill setup:"
 if [ -d ~/.claude/skills/excalidraw-diagram/references ]; then
   echo -n "  excalidraw-diagram renderer... "
-  (cd ~/.claude/skills/excalidraw-diagram/references && uv sync --quiet 2>&1 && uv run playwright install chromium 2>&1) | tail -1
-  echo "  ✓"
+  if (cd ~/.claude/skills/excalidraw-diagram/references && uv sync --quiet 2>&1 && uv run playwright install chromium 2>&1) | tail -1; then
+    echo "  ✓"
+  else
+    echo "  ⚠ FAILED (continuing)"
+    record_fail "excalidraw-diagram renderer (uv sync / playwright)"
+  fi
 else
   echo "  excalidraw-diagram — skipped (not installed)"
 fi
@@ -513,6 +661,14 @@ echo ""
 
 echo "Global hooks:"
 mkdir -p ~/.claude/hooks
+
+# settings.json mutations below need jq. If its brew install failed earlier,
+# skip the jq-driven config (hooks wiring, env vars, statusline) rather than
+# aborting the whole run — recorded for the summary. Hook *files* are still
+# copied; only the settings.json wiring is skipped.
+settings=~/.claude/settings.json
+HAVE_JQ=1
+command -v jq &>/dev/null || { HAVE_JQ=0; record_fail "jq unavailable — settings.json hooks/env/statusline not configured"; }
 
 # Build the set of hook files present in the repo (canonical source of truth).
 declare -a repo_hooks=()
@@ -553,7 +709,6 @@ done
 
 # Rebuild hook config in global settings.
 echo -n "  settings.json hook config... "
-settings=~/.claude/settings.json
 if [ ! -f "$settings" ]; then
   echo '{}' > "$settings"
 fi
@@ -573,6 +728,9 @@ MANAGED_HOOKS=(
   "UserPromptSubmit||~/.claude/hooks/terseness-reminder.sh"
 )
 
+if [ "$HAVE_JQ" != 1 ]; then
+  echo "⚠ skipped (jq unavailable)"
+else
 # Reset .hooks to exactly the managed set. This is convergent: removing an
 # entry from MANAGED_HOOKS removes it from settings.json on the next run.
 tmp="${settings}.tmp"
@@ -602,6 +760,7 @@ for entry in "${MANAGED_HOOKS[@]}"; do
 done
 
 echo "✓ (${#MANAGED_HOOKS[@]} managed hooks)"
+fi
 if [ "$removed_hooks" -gt 0 ]; then
   echo "  cleaned up ${removed_hooks} stale hook file(s) from ~/.claude/hooks/"
 fi
@@ -655,7 +814,11 @@ do_set_env_var() {
   env_added=$((env_added + 1))
   echo "✓"
 }
-read_config "env-var" do_set_env_var
+if [ "$HAVE_JQ" = 1 ]; then
+  read_config "env-var" do_set_env_var
+else
+  echo "  ⚠ skipped (jq unavailable)"
+fi
 echo ""
 
 # ─── Status Line ──────────────────────────────────────────────────────────────
@@ -673,7 +836,11 @@ do_set_statusline() {
   jq --arg c "$cmd" '.statusLine = {"type": "command", "command": $c}' "$settings" > "$tmp" && mv "$tmp" "$settings"
   echo "✓"
 }
-read_config "statusline" do_set_statusline
+if [ "$HAVE_JQ" = 1 ]; then
+  read_config "statusline" do_set_statusline
+else
+  echo "  ⚠ skipped (jq unavailable)"
+fi
 echo ""
 
 # ─── ccstatusline Config ──────────────────────────────────────────────────────
@@ -710,6 +877,10 @@ echo "Verification:"
 echo ""
 echo "  CLI tools (brew):"
 read_config "brew-dep" verify_brew_dep
+
+echo ""
+echo "  CLI tools (brew casks):"
+read_config "brew-cask" verify_brew_cask
 
 echo ""
 echo "  CLI tools (npm):"
@@ -822,24 +993,34 @@ fi
 echo ""
 error_count=${#verify_errors[@]}
 warning_count=${#verify_warnings[@]}
+install_fail_count=${#INSTALL_FAILURES[@]}
 
-if [ "$error_count" -eq 0 ] && [ "$warning_count" -eq 0 ]; then
+if [ "$error_count" -eq 0 ] && [ "$warning_count" -eq 0 ] && [ "$install_fail_count" -eq 0 ]; then
   echo "Done ✓"
 else
-  if [ "$error_count" -gt 0 ]; then
-    echo "Done (${error_count} error(s), ${warning_count} warning(s))"
+  if [ "$error_count" -gt 0 ] || [ "$install_fail_count" -gt 0 ]; then
+    echo "Done (${install_fail_count} install failure(s), ${error_count} verification error(s), ${warning_count} warning(s))"
   else
     echo "Done ✓ (${warning_count} warning(s))"
   fi
-  echo ""
+  # The install phase always runs to completion. Steps that failed are listed
+  # here (with their captured error) rather than aborting the run mid-way.
+  if [ "$install_fail_count" -gt 0 ]; then
+    echo ""
+    echo "  Install failures (run completed; these steps did not — re-run to retry):"
+    for msg in "${INSTALL_FAILURES[@]}"; do
+      echo "    ✗ ${msg}"
+    done
+  fi
   if [ "$error_count" -gt 0 ]; then
-    echo "  Errors:"
+    echo ""
+    echo "  Verification errors:"
     for msg in "${verify_errors[@]}"; do
       echo "    ✗ ${msg}"
     done
   fi
   if [ "$warning_count" -gt 0 ]; then
-    if [ "$error_count" -gt 0 ]; then echo ""; fi
+    echo ""
     echo "  Warnings:"
     for msg in "${verify_warnings[@]}"; do
       echo "    ⚠ ${msg}"
@@ -847,6 +1028,6 @@ else
   fi
 fi
 
-if [ "$error_count" -gt 0 ]; then
+if [ "$error_count" -gt 0 ] || [ "$install_fail_count" -gt 0 ]; then
   exit 1
 fi
