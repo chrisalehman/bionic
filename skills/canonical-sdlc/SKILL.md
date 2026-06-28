@@ -323,10 +323,11 @@ When autonomous-mode work hits friction, **diagnose before escalating**. Frictio
 
 For diagnostic friction in autonomous mode:
 
-1. **Load `map-instrument-narrow` immediately.** Do not write speculative fix code first. Speculative-fix-before-instrumentation regresses pass rates more often than it improves them.
+1. **Load `map-instrument-narrow` immediately** and dispatch it to a **fresh subagent carrying the verbatim Rigor Mandate** (Subagent Dispatch Convention point 8). Do not write speculative fix code first. Speculative-fix-before-instrumentation regresses pass rates more often than it improves them.
 2. **No fix code** until NARROW phase yields a named root cause with data evidence.
 3. **Three-fail rule applies AFTER one full MAP-INSTRUMENT-NARROW pass**, not before. If a complete pass does not yield a clean root cause, loop back to MAP (your architectural model was incomplete) — do not throw speculative fixes.
 4. **After root cause is known**, the *bubble-up vs. proceed-directly* judgment is a separate decision per the User Decision Protocol. Diagnosis ≠ permission to fix in scope; trivial fixes proceed, scope-expanding fixes surface.
+5. **Recurse on layered root causes.** A pass yields a *confirmed* root cause plus, often, deeper or sibling causes (see `map-instrument-narrow` → **Recursive Root-Cause Detection**). The orchestrator owns the **root-cause tree** — record it in the plan's `## Assumptions` / RCA section — and dispatches a **fresh subagent per open candidate**: serial for a chain of blockages, depth-first for nested causes, each carrying the same Rigor Mandate and a clean context (never reuse the contaminated one). Bound recursion at `max_depth: 4`; when a deeper cause expands scope beyond the wave, stop and surface the tree via the User Decision Protocol. A wave's diagnosis is complete only when every tree node is `confirmed` or explicitly deferred.
 
 **Anti-pattern:** "I'll try one thing first, then instrument if it doesn't work." That "one thing" mutates state. Subsequent instrumentation captures post-attempt state, not the original bug. **MAP before any state change.**
 
@@ -961,6 +962,11 @@ Every subagent invoked during a canonical-sdlc step must receive a prompt prefix
 5. **Exit condition** — when to stop and report. Includes: "do not pivot approach; surface blockers to the main thread."
 6. **Step-specific duties.** For Step 4 (implement) dispatches: *"Append a one-line entry to the plan file's `## Assumptions` section before your final commit whenever a decision resolves ambiguity. No silent choices."*
 7. **Model & dispatch tier** (see §Model & Token Strategy). Default to a **fresh** subagent: mechanical / search / test-writing → fresh `model: sonnet`; real-reasoning implementation → fresh `model: opus`. Use a **`fork`** only when the unit genuinely needs the inherited conversation/context — never to save effort (forks inherit the orchestrator's xhigh) and never to get a cheaper model (forks ignore `model`). Never switch the *main* model to run sub-work.
+8. **Diagnostic-friction discipline (hardcoded).** Any dispatch that loads `map-instrument-narrow` — a Step 4/5 subagent that hit a bug, or a dedicated root-cause investigation — MUST include this directive **verbatim** in the subagent prompt:
+
+   > Execute map-instrument-narrow with exquisite rigor and discipline. Absolutely no corner-cutting. Walk every phase gate in order — MAP → INSTRUMENT → NARROW — and write each phase's artifact before advancing past its gate. No fix code, and no "let me just try one thing first." No ad-hoc, trial-and-error theory-hopping: the data names the root cause, not your hunches. NO FIX CODE WITHOUT DATA. NO INSTRUMENTATION WITHOUT ARCHITECTURE.
+
+   This is not paraphrasable and not optional. The canonical copy lives in `map-instrument-narrow`'s **Rigor Mandate** and in `.bionic/sdlc-dispatch-rules.json` (`diagnostic_friction.directive`); inject that exact string. Omitting it is the single most common cause of debugging that spins through ad-hoc theories instead of converging on the root cause.
 
 This prevents subagent wander.
 

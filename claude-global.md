@@ -32,6 +32,10 @@ Outside these pairs: whichever plugin has the more specific skill. On ties, `sup
 
 For large-scale efforts (new feature, architectural change, multi-day project), invoke `canonical-sdlc` at session start. It routes to the right skill per phase and enforces evidence per phase. Always prefer `idea-refine` over `brainstorming`.
 
+## Stack defaults
+
+**Web animation → motion.dev.** Default to the `motion` library for animated web UI (springs, layout/shared-element transitions, scroll- and gesture-driven motion, enter/exit). Import from `motion` (vanilla) or `motion/react` (React) — never the deprecated `framer-motion`. Add it per project with `pnpm add motion` (pre-warmed in the pnpm store). See the `motion` skill.
+
 ## Terseness (override default verbosity)
 
 Banned phrases — never produce these:
