@@ -33,6 +33,16 @@ If you find yourself writing fix code *before* this skill has been loaded in eit
 NO FIX CODE WITHOUT DATA. NO INSTRUMENTATION WITHOUT ARCHITECTURE.
 ```
 
+## Rigor Mandate
+
+This is the directive that makes the technique work. When this skill is invoked — especially by an orchestrator dispatching a subagent — run under it **verbatim**:
+
+> **Execute map-instrument-narrow with exquisite rigor and discipline. Absolutely no corner-cutting.** Walk every phase gate in order — MAP → INSTRUMENT → NARROW — and write each phase's artifact before advancing past its gate. No fix code, and no "let me just try one thing first." No ad-hoc, trial-and-error theory-hopping: the data names the root cause, not your hunches. NO FIX CODE WITHOUT DATA. NO INSTRUMENTATION WITHOUT ARCHITECTURE.
+
+**Why this is non-negotiable.** The dominant failure mode is not ignorance of the method — it is *abandoning it under pressure*: spinning through hypotheses, patching the first plausible theory, declaring victory before the data names a single culprit. That ad-hoc whack-a-mole is exactly what this technique exists to replace. Held to the discipline above, the technique reliably finds the true root cause; the rigor **is** the value, not an overhead on it.
+
+This directive is the canonical source. Orchestrators (e.g. `canonical-sdlc`) MUST inject it verbatim into every diagnostic-friction subagent prompt — see that skill's **Subagent Dispatch Convention** (point 8) and `.bionic/sdlc-dispatch-rules.json` (`diagnostic_friction.directive`).
+
 ## When to Use
 
 ```dot
@@ -188,6 +198,38 @@ Each phase has an explicit gate that MUST be answered before advancing. Walking 
 ### FIX → SCOPE-EXPANSION gate
 
 If you are tempted to apply the same fix pattern to sibling callsites (other engines, other viewports, other frames), that is a **new debugging problem**, not a continuation. Re-run MAP for the sibling scope. Cross-system parity from the MAP→INSTRUMENT gate makes sibling regressions visible before they ship.
+
+## Recursive Root-Cause Detection
+
+One pass finds one root cause. Real defects often have **more than one**. After NARROW names a culprit, you are not done until you have asked — and answered using the architectural understanding from MAP — two questions:
+
+1. **Is this cause itself caused by something upstream? (depth)** "The guard is missing" is proximate; "the guard was never wired because the initializer returned early" is deeper; "the initializer returned early because config loaded async" is deeper still. Each layer is a *new* root-cause investigation.
+2. **Are there sibling causes the same symptom is hiding? (chain)** Fixing cause A can unmask cause B that A was masking. Two independent mutations can produce one symptom.
+
+If the answer to either is yes, the deeper/sibling cause is a **fresh debugging problem** — it earns its own MAP-INSTRUMENT-NARROW pass, not a continuation of this one. Do not reason about it from the current, now-contaminated context (you have read fix code, mutated state, and formed theories). A fresh pass with a clean head is what keeps each layer rigorous.
+
+### The root-cause tree
+
+Record every cause as a node so the investigation is auditable and an orchestrator can drive the recursion:
+
+```
+{ id, statement, evidence, kind: "proximate" | "deeper" | "sibling",
+  parent_id, children: [], status: "open" | "confirmed" | "fixed" }
+```
+
+- The first NARROW result is the root node (`kind: proximate`, `parent_id: null`).
+- A depth finding adds a child under the current node (`kind: deeper`).
+- A chain finding adds a sibling under the same parent (`kind: sibling`).
+- A node is `confirmed` only when its own NARROW gate passed with data evidence.
+
+### Who runs the recursion
+
+- **Standalone use** (`ralph-loop`, direct invocation): when a node spawns children, run a fresh MAP-INSTRUMENT-NARROW pass for each, depth-first, and keep the tree in your working notes.
+- **Under an orchestrator** (`canonical-sdlc` autonomous mode): do NOT recurse in place. Emit the confirmed node plus its open children as structured candidates and hand them back. The orchestrator owns the tree and dispatches a **fresh subagent per candidate** (clean context, same Rigor Mandate). See that skill's Autonomous Friction Protocol.
+
+### Termination
+
+Stop descending when a node has no upstream cause you can name from data (a **terminal** root cause), OR at `max_depth` (default 4), OR when a deeper cause expands scope beyond the current task — at which point surface the tree to the user rather than auto-recursing further. Apply a fix per confirmed node; the whole tree feeds the RCA as "root cause" + "contributing factors" / "root-cause chain."
 
 ## Quick Reference
 
