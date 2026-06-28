@@ -286,7 +286,7 @@ echo "=== Section 2: Config file consistency (claude-config.txt) ==="
 
 _cfg_file="$CONFIG"
 
-KNOWN_TYPES="brew-dep npm-global uv-tool mcp-server plugin marketplace github-skill github-skill-pack local-skill local-command global-memory env-var statusline"
+KNOWN_TYPES="brew-dep brew-cask npm-global pnpm-store uv-tool mcp-server plugin marketplace github-skill github-skill-pack local-skill local-command global-memory env-var statusline"
 
 # 2a: Every uncommented, non-blank line has at least one pipe delimiter
 _bad_lines=""
@@ -394,6 +394,33 @@ _count_gm() { _gm_total=$((_gm_total + 1)); }
 read_config "global-memory" _count_gm
 expect_eq "config has exactly one global-memory entry" "1" "$_gm_total"
 
+# 2j: gcloud is installed as a brew-cask mapping to the gcloud-cli cask.
+# Regression guard: the google-cloud-sdk cask was renamed (now 404s) and there
+# is no `gcloud` formula, so the old `brew-dep | gcloud` entry failed on a
+# fresh machine.
+_gcloud_cask=""
+_check_gcloud_cask() { if [ "$1" = "gcloud" ]; then _gcloud_cask="$2"; fi; }
+read_config "brew-cask" _check_gcloud_cask
+expect_eq "gcloud is a brew-cask mapping to gcloud-cli" "gcloud-cli" "$_gcloud_cask"
+
+# 2k: gcloud is NOT a brew-dep (that would install the nonexistent formula)
+_gcloud_brewdep=0
+_check_gcloud_brewdep() { if [ "$1" = "gcloud" ]; then _gcloud_brewdep=1; fi; }
+read_config "brew-dep" _check_gcloud_brewdep
+expect_eq "gcloud is not a (broken) brew-dep formula entry" "0" "$_gcloud_brewdep"
+
+# 2l: motion is pre-warmed into the pnpm store
+_motion_store=0
+_check_motion_store() { if [ "$1" = "motion" ]; then _motion_store=1; fi; }
+read_config "pnpm-store" _check_motion_store
+expect_eq "motion is registered as a pnpm-store library" "1" "$_motion_store"
+
+# 2m: motion is also installed as a local-skill (teaches the current motion.dev API)
+_motion_skill=0
+_check_motion_skill() { if [ "$1" = "motion" ]; then _motion_skill=1; fi; }
+read_config "local-skill" _check_motion_skill
+expect_eq "motion is registered as a local-skill" "1" "$_motion_skill"
+
 # ============================================================
 # SECTION 3: Bootstrap/reset script symmetry
 # ============================================================
@@ -497,6 +524,24 @@ expect_eq "chrome-devtools package is chrome-devtools-mcp@latest" "chrome-devtoo
 
 # 3t: chrome-devtools requires no env vars (no auth — runs against local Chrome)
 expect_eq "chrome-devtools entry has no required env vars" "" "$_cdt_env"
+
+# 3u: Bootstrap reads the install-only config types (brew-cask, pnpm-store).
+# Like brew-dep, these are NOT undone by reset (shared system / cache state),
+# so they are intentionally excluded from the symmetry loop above.
+expect_true "bootstrap reads type: brew-cask" grep -q '"brew-cask"' "$BOOTSTRAP"
+expect_true "bootstrap reads type: pnpm-store" grep -q '"pnpm-store"' "$BOOTSTRAP"
+
+# 3v: Resilience posture — the install phase must run to completion even when a
+# step fails. Bootstrap defines the retry + failure-collection helpers and the
+# network installers record failures (non-fatal) instead of `exit 1`.
+expect_true "bootstrap defines run_retry helper" grep -q "^run_retry()" "$BOOTSTRAP"
+expect_true "bootstrap defines record_fail helper" grep -q "^record_fail()" "$BOOTSTRAP"
+expect_true "bootstrap collects INSTALL_FAILURES" grep -q "INSTALL_FAILURES=" "$BOOTSTRAP"
+expect_true "marketplace installer records failures (non-fatal)" grep -q 'record_fail "marketplace' "$BOOTSTRAP"
+expect_true "plugin installer records failures (non-fatal)" grep -q 'record_fail "plugin' "$BOOTSTRAP"
+# The marketplace + plugin installers used to `exit 1` on failure; ensure that
+# fail-fast behavior is gone.
+expect_false "marketplace/plugin installers no longer hard-exit" grep -qE 'echo "FAILED" >&2|echo "FAILED: \$output" >&2' "$BOOTSTRAP"
 
 # ============================================================
 # SECTION 4: Hook file consistency
