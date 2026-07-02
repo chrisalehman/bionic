@@ -279,6 +279,12 @@ Rules:
 - When a sub-agent finishes, the main thread updates the corresponding task.
 - Step 9 (Integrate & close) verifies all tasks are `completed` before merge.
 
+**Golden rule of display.** The task list is a signal surface, not a narration log:
+
+- **No filler.** No explanatory or decorative entries that carry no state — every task is a real unit of work with a real status.
+- **Naming convention always.** Every entry follows `<step>: <description>` / `<step>/<unit>: <description>` — no freeform titles.
+- **The current step's slices take primary billing.** While a fanned-out step has pending units (in-progress or to-do), its `<step>/<unit>` tasks are the foreground of the list; subsequent steps remain collapsed as single `N:` entries. A step expands into units only when it becomes current (Step 4's slices are the one exception — they expand at Step 3, because the plan defines them).
+
 This is non-negotiable. The list is the visible progress surface for the user.
 
 ## Non-Negotiable: TDD
@@ -569,7 +575,7 @@ Mandatory for new plans (`canonical_sdlc_version: 5`, current). `3`/`4` are prio
    | `use_worktree` | Default `false`. Set true on explicit user override or when user says "isolate". |
    | `model_plan` | Derived from `multi_agent` and the **detected session model** (read it from your own system prompt; see §Model & Token Strategy). `true` → `orchestrator=<detected, e.g. fable-5-high or opus-4.8-xhigh>; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`. `false` → `main=<detected>` (dial-down offered). If the session model is below the Opus tier, warn and recommend switching via `/model` before the wave starts. Always surfaced for explicit confirmation; written to frontmatter and **hook-enforced for `canonical_sdlc_version: 4` and `5`** autonomous plans. |
 
-3. **Present the confirmation display:**
+3. **Present the confirmation display — in full, always.** The display below is a mandatory, untruncatable artifact: every section, every flag, every line, every inference rationale, rendered as one block in the conversation. Never elide, summarize, sample ("key flags: …"), or defer any portion of it — an abbreviated display invalidates the confirmation, because the user is approving exactly what they can see. If a value is unknown, print the line with the value marked `unknown` rather than dropping the line.
 
    ```
    ═══ Plan Configuration — confirm before Step 1 ═══
@@ -608,7 +614,12 @@ Mandatory for new plans (`canonical_sdlc_version: 5`, current). `3`/`4` are prio
 
 4. **Block until explicit confirmation.** No timeout, no implicit acceptance.
 
-5. **Create TaskCreate list.** After confirmation, create a TaskCreate list with tasks `0:`, `1:`, ..., `10:` shape, one per planned step. Mark step 0 `completed` immediately.
+5. **Task-list creation is the immediate next action after approval.** The instant confirmation arrives — before any Step 1 work — run this fixed sequence:
+   1. **Announce it:** "Step 0 confirmed — creating the task list."
+   2. **Create the full TaskCreate list:** tasks `0:`, `1:`, ..., `10:`, one per planned step. Mark `0:` `completed` immediately.
+   3. **Then transition to Step 1** (idea-refine).
+
+   Nothing else runs between approval and list creation.
 
 **Override DSL grammar.** The user's reply is parsed against:
 
