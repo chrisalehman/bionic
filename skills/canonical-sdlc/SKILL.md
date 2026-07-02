@@ -183,13 +183,51 @@ through subagent dispatch**. Switching the *main* model mid-wave invalidates the
 tiering lives in *who you dispatch to*, not in re-configuring yourself. This is the operational
 form of "guard your context — offload to subagents."
 
-**Three tiers by role** (the default plan when `multi_agent: true`):
+**Aliases, never pinned versions.** Subagent dispatch uses model family aliases — `model: opus`,
+`model: sonnet` — which resolve to the top model in that family at dispatch time. The skill never
+hardcodes a version; the "currently resolves to" column below is informational and may lag
+releases without breaking anything.
 
-| Tier | Role | Model | Dispatch mechanism |
-|---|---|---|---|
-| **1 · Orchestrator** | main thread — runs Steps 1–3 directly, coordinates 4–10 | **Opus 4.8 xhigh** (default) or Fable 5 high | the main session (human-set at start; **fixed all wave**) |
-| **2 · Execution** | implementation slices, refactors, Step 6 review (5-axis + adversarial critic) | **Opus 4.8** | **fresh `model: opus` by default**; `fork` only when the unit genuinely needs the inherited conversation/context |
-| **3 · Explore / mechanical / test** | codebase search, fixtures, mechanical edits, test-writing | **Sonnet 4.6** | **fresh `model: sonnet`** (never a fork) |
+**Four tiers by role** (the default plan when `multi_agent: true`):
+
+| Tier | Role | Model spec | Currently resolves to | Dispatch mechanism |
+|---|---|---|---|---|
+| **1 · Orchestrator** | main thread — runs Steps 1–3 directly, coordinates 4–10 | **best available** (detected at Step 0): Fable @ **high** → else top Opus @ **xhigh** | Fable 5 high / Opus 4.8 xhigh | the main session (human-set at start; **fixed all wave**) |
+| **2 · Execution-complex** | slices tagged `complex`, root-cause debugging, Step 6 review (5-axis + adversarial critic) | fresh **`model: opus`** | Opus 4.8 | fresh by default; `fork` only when the unit genuinely needs the inherited conversation/context |
+| **3 · Execution-standard** | slices tagged `standard` — well-specified, single-subsystem, tests define done | fresh **`model: sonnet`** | Sonnet 5 | **fresh** (never a fork) |
+| **4 · Explore / mechanical / test** | codebase search, fixtures, mechanical edits, test-writing | fresh **`model: sonnet`** | Sonnet 5 | **fresh** (never a fork) |
+
+**Orchestrator = best available, detected at Step 0.** Orchestrator errors are the most expensive
+tokens in the system — a bad decomposition or wrong plan wastes every subagent it dispatches —
+while the orchestrator itself is a minority of wave spend (execution subagents carry the volume;
+the pinned main thread is mostly cache reads). So the orchestrator gets the highest tier
+available, at the effort that tier needs: **Fable at `high`** (its per-effort capability clears
+Opus-at-xhigh on coordination work; xhigh on Fable buys diminishing returns there) or **top Opus
+at `xhigh`**. At Step 0, read the session model from your own system prompt and derive the
+orchestrator line of `model_plan` from it. If the session model is below the Opus tier, warn and
+recommend switching via `/model` before the wave starts — still the user's call, fixed once
+confirmed.
+
+**Slice complexity routing (the execution split).** The top Sonnet is near-Opus on well-specified
+coding work at a fraction of the price — the bulk of execution volume belongs there. At Step 3,
+every Step 4 slice gets a `complexity:` tag in the plan; the tag routes the dispatch:
+
+- **`complex` → Tier 2 (fresh `model: opus`)** if ANY of: touches more than one subsystem;
+  unresolved design or architecture decisions inside the slice; ambiguous spec surface;
+  security-sensitive; expected root-cause debugging of unfamiliar internals.
+- **`standard` → Tier 3 (fresh `model: sonnet`)** when the slice is well-specified,
+  single-subsystem, and its tests define done.
+- **When uncertain, tag `complex`.** The savings come from clear-cut standard slices, not from
+  optimistic tagging — a misrouted complex slice costs more in rework than Sonnet saves.
+
+**Escalation ladder.** If a `standard` slice fails its gate **twice**, re-dispatch it as a fresh
+`model: opus` agent carrying the failure context — never a third retry on the same tier. These
+failures still count toward the three-fail rule (§Escalation Protocol).
+
+**Verification is never cheaper than authorship.** Step 6's 5-axis review and adversarial critic
+dispatch at Tier 2 (fresh `model: opus`) regardless of which tier wrote the code — Sonnet-written
+slices get Opus review. The savings live in writing, not judging. The critic additionally remains
+independent of whoever wrote the code (see Step 6).
 
 **Fresh by default, fork by exception — the cost rule.** A subagent spends tokens on two axes:
 *context* (the input it carries) and *effort* (the thinking it does). A **fork** is expensive on
@@ -208,17 +246,19 @@ summary returns to the main context. So for the goal of keeping the orchestrator
   accumulated conversation. **Never fork a vanilla or mechanical task** — that is the most
   expensive way to do the cheapest work. **Never fork to get a cheaper model** — forks ignore
   `model` and inherit the orchestrator's (a Fable-orchestrator's forks are Fable, not Opus).
+- **Under a Fable orchestrator the fork bar rises.** Fable forks pay roughly 2× Opus per token
+  AND re-pay the entire main-thread context on every dispatch. Prefer hand-feeding context to a
+  fresh `model: opus` agent even in borderline cases.
 - **Serial when slices share state** (see Parallel by Default above).
 
 **Effort is a main-thread-only dial.** There is no reasoning-effort parameter on the Agent tool.
 Set effort on the main session (`/model`); you cannot request "Opus high" for a subagent. Tier the
 *model* and the *mechanism*, never assume a selectable execution effort below the main thread.
-Forks inherit the orchestrator's effort (xhigh); fresh subagents run at their model's harness
-default.
+Forks inherit the orchestrator's effort; fresh subagents run at their model's harness default.
 
-**`multi_agent: false`** — everything runs on the main orchestrator, no dispatch (Tiers 2–3 N/A).
-The main model still defaults to Opus 4.8 xhigh, but **dial-down is offered at Step 0** (Opus 4.8
-high or Sonnet 4.6) since there is nothing to offload to.
+**`multi_agent: false`** — everything runs on the main orchestrator, no dispatch (Tiers 2–4 N/A).
+The main model is the detected session model (`main=<detected>` in `model_plan`); **dial-down is
+offered at Step 0** since there is nothing to offload to.
 
 **Verification carries over from the multi-agent memory** (`feedback_multi_agent_fork_orchestration`):
 verify each dispatched unit's commit *fileset* (`git show --stat` + `git status --short` for
@@ -296,8 +336,9 @@ Skipping Step 1 Q&A to "save time" is the single highest-risk move.
 **Step → governing-skill mapping:**
 
 **Tier** = default dispatch target (see §Model & Token Strategy): **O** = orchestrator (main
-thread) · **E** = execution (fresh `model: opus`; fork only if context-heavy) · **X** =
-explore/mechanical/test (fresh `model: sonnet`). Default hint only; the Strategy section governs.
+thread) · **E** = execution (fresh `model: opus` or `model: sonnet`, routed by the slice's
+`complexity:` tag; fork only if context-heavy) · **X** = explore/mechanical/test (fresh
+`model: sonnet`). Default hint only; the Strategy section governs.
 
 | Step | Tier | Governing skill | On-demand sub-skills |
 |---|---|---|---|
@@ -526,7 +567,7 @@ Mandatory for new plans (`canonical_sdlc_version: 5`, current). `3`/`4` are prio
    | `deploy_target` | "k8s" → `k8s`; "Vercel" → `vercel`; "deploy" → `custom`; "migration" → `migration`; none → `none`. |
    | `cleanup_on_finish` | Default `true`. |
    | `use_worktree` | Default `false`. Set true on explicit user override or when user says "isolate". |
-   | `model_plan` | Derived from `multi_agent` (see §Model & Token Strategy). `true` → `orchestrator=opus-4.8-xhigh; execution=opus-4.8-fresh; explore=sonnet-4.6`. `false` → `main=opus-4.8-xhigh` (dial-down to `opus-4.8-high` or `sonnet-4.6` offered). Always surfaced for explicit confirmation; written to frontmatter and **hook-enforced for `canonical_sdlc_version: 4` and `5`** autonomous plans. |
+   | `model_plan` | Derived from `multi_agent` and the **detected session model** (read it from your own system prompt; see §Model & Token Strategy). `true` → `orchestrator=<detected, e.g. fable-5-high or opus-4.8-xhigh>; execution=tiered(complex=opus-fresh, standard=sonnet-fresh); explore=sonnet-fresh`. `false` → `main=<detected>` (dial-down offered). If the session model is below the Opus tier, warn and recommend switching via `/model` before the wave starts. Always surfaced for explicit confirmation; written to frontmatter and **hook-enforced for `canonical_sdlc_version: 4` and `5`** autonomous plans. |
 
 3. **Present the confirmation display:**
 
@@ -553,14 +594,15 @@ Mandatory for new plans (`canonical_sdlc_version: 5`, current). `3`/`4` are prio
      use_worktree:      false      [no isolated worktree — work on current branch]
 
    Model plan:                     [multi_agent=true → tiered dispatch]
-     orchestrator: opus-4.8 xhigh  [default; main thread, fixed all wave]
-     execution:    opus-4.8        [fresh model:opus; fork only if context-heavy]
-     explore/test: sonnet-4.6      [fresh model:sonnet — search, mechanical, tests]
-     # multi_agent=false → single-thread: "main: opus-4.8 xhigh" (dial-down: opus-4.8 high | sonnet-4.6)
-     # orchestrator=fable-5 high → forks become Fable; execution must be fresh model:opus
+     orchestrator: fable-5 high    [detected session model; main thread, fixed all wave]
+     execution:    tiered          [complex → fresh model:opus · standard → fresh model:sonnet, per slice tag]
+     explore/test: sonnet          [fresh model:sonnet — search, mechanical, tests]
+     # aliases resolve to the top model per family at dispatch time
+     # multi_agent=false → single-thread: "main: <detected>" (dial-down offered)
+     # Fable orchestrator → forks are Fable at ~2× Opus: fork bar rises; prefer fresh model:opus
 
    Reply "confirm" to accept, or specify overrides:
-     e.g. "set use_worktree=true, set orchestrator=fable-high, then confirm"
+     e.g. "set use_worktree=true, set execution=opus-only, then confirm"
    ```
 
 4. **Block until explicit confirmation.** No timeout, no implicit acceptance.
@@ -576,9 +618,9 @@ override     := "set" flag "=" value
               | "change" flag "to" value
 ```
 
-Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set main_model=sonnet, confirm` (multi_agent=false dial-down).
+Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set execution=opus-only, confirm` (disable complexity routing — all execution slices dispatch fresh `model: opus`); `set main_model=sonnet, confirm` (multi_agent=false dial-down).
 
-On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 5` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=opus-4.8-xhigh; execution=opus-4.8-fresh; explore=sonnet-4.6`). For v4 and v5 autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2).
+On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 5` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; execution=tiered(complex=opus-fresh, standard=sonnet-fresh); explore=sonnet-fresh`). For v4 and v5 autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2).
 
 **Two-layer enforcement.**
 
@@ -625,6 +667,7 @@ On accept, write final values into plan frontmatter literally — every flag as 
   - `## SDLC State` — mode, **integration branch**, current step, one line per step. **When advancing, replace `Step N: (pending)` in-place.**
   - `## Assumptions` — seeded from Step 1 "Not Doing" plus spec ambiguities. Step 4 appends inline.
 - **Expand TaskCreate list.** After the plan is written, expand Step 4 (Implement) into one TaskCreate task per slice (`4/1:`, `4/2:`, …).
+- **Tag every slice's complexity.** Each Step 4 slice in the plan carries a `complexity: standard | complex` tag — this routes the slice's execution dispatch (see §Model & Token Strategy, Slice complexity routing). When uncertain, tag `complex`.
 - **Integration-branch declaration — ask once, stick to it.** Declared in `## SDLC State` via an `integration-branch: <name>` line.
   - `epic-scope`: ask the user. Record in the epic plan. Waves inherit.
   - Wave under an existing epic: copy from epic plan.
@@ -651,6 +694,7 @@ This is the "walk away" boundary. After the plan is complete, present a summary 
 - **Wrapper:** `superpowers:executing-plans` if a plan file exists.
 - **Woven:** source-driven on unfamiliar APIs; systematic-debugging on surprises; inline ADR capture on decisions.
 - **Parallelization:** if slices are independent (no shared state), dispatch parallel implementer agents.
+- **Dispatch by complexity tag:** `standard` slices → fresh `model: sonnet`; `complex` slices → fresh `model: opus`. If a `standard` slice fails its gate twice, re-dispatch it fresh `model: opus` with the failure context (see §Model & Token Strategy, Escalation ladder).
 - **Task tracking:** mark `4/<slice>: <description>` `in_progress` at slice start; `completed` immediately on slice merge.
 - **Mode substitutions:**
   - `design-refresh`: governing skill is **`impeccable`**, invoked as `/impeccable craft`. Step 4 runs as a loop: craft → polish/harden/normalize → critique → iterate.
@@ -681,6 +725,7 @@ The Review gate proves the change is well-made, by stance (see §Verification mo
 
 **Stance 1 — structured 5-axis self-review (always).**
 - **Axes:** correctness, readability, architecture, security, performance. Every axis gets an explicit PASS / FLAG / FAIL verdict.
+- **Reviewer tier:** all review agents (both stances) dispatch at Tier 2 (fresh `model: opus`) regardless of which tier wrote the code — verification is never cheaper than authorship.
 - **Architecture-axis closure check:** for each new primitive/substrate added in this wave, trace user input → new code. If the chain breaks (no callsite reaches the new code), the substrate is dead and the architecture axis is FAIL.
 - **Parallelization:** all 5 axes run in parallel.
 - **Escalations:** security axis flags → `agent-skills:security-and-hardening`. Performance axis flags → `agent-skills:performance-optimization`.
@@ -961,7 +1006,7 @@ Every subagent invoked during a canonical-sdlc step must receive a prompt prefix
 4. **Artifact expected** — the evidence shape required for the step gate.
 5. **Exit condition** — when to stop and report. Includes: "do not pivot approach; surface blockers to the main thread."
 6. **Step-specific duties.** For Step 4 (implement) dispatches: *"Append a one-line entry to the plan file's `## Assumptions` section before your final commit whenever a decision resolves ambiguity. No silent choices."*
-7. **Model & dispatch tier** (see §Model & Token Strategy). Default to a **fresh** subagent: mechanical / search / test-writing → fresh `model: sonnet`; real-reasoning implementation → fresh `model: opus`. Use a **`fork`** only when the unit genuinely needs the inherited conversation/context — never to save effort (forks inherit the orchestrator's xhigh) and never to get a cheaper model (forks ignore `model`). Never switch the *main* model to run sub-work.
+7. **Model & dispatch tier** (see §Model & Token Strategy). Default to a **fresh** subagent: mechanical / search / test-writing → fresh `model: sonnet`; implementation slices → fresh `model: sonnet` or `model: opus` per the slice's `complexity:` tag; root-cause debugging and Step 6 review → fresh `model: opus`. Use a **`fork`** only when the unit genuinely needs the inherited conversation/context — never to save effort (forks inherit the orchestrator's effort) and never to get a cheaper model (forks ignore `model`; under a Fable orchestrator a fork costs ~2× an Opus fork). Never switch the *main* model to run sub-work.
 8. **Diagnostic-friction discipline (hardcoded).** Any dispatch that loads `map-instrument-narrow` — a Step 4/5 subagent that hit a bug, or a dedicated root-cause investigation — MUST include this directive **verbatim** in the subagent prompt:
 
    > Execute map-instrument-narrow with exquisite rigor and discipline. Absolutely no corner-cutting. Walk every phase gate in order — MAP → INSTRUMENT → NARROW — and write each phase's artifact before advancing past its gate. No fix code, and no "let me just try one thing first." No ad-hoc, trial-and-error theory-hopping: the data names the root cause, not your hunches. NO FIX CODE WITHOUT DATA. NO INSTRUMENTATION WITHOUT ARCHITECTURE.
@@ -973,6 +1018,8 @@ This prevents subagent wander.
 ## Escalation Protocol
 
 **Three-fail rule.** If the same step fails to produce valid evidence three times in a row:
+
+> Interplay with the model-tier escalation ladder: a `standard` slice that fails twice on `model: sonnet` re-dispatches on `model: opus` (§Model & Token Strategy) — that Opus attempt is the third and final try before this rule fires. Tier escalation happens *within* the three-fail budget, not in addition to it.
 
 1. **If failures are diagnostic** (tests failing, behavior diverging, surprise output) — invoke the **Autonomous Friction Protocol** (see autonomous-mode section). The three-fail counter resets after a completed MAP-INSTRUMENT-NARROW pass yields a root cause; it does NOT reset on additional speculative fixes.
 2. **If failures are decision-related** (ambiguity, blocked-on-judgment, unclear requirement) — Stop. Do not attempt a fourth time. Surface to the user via **User Decision Protocol**: framing, options for unblocking, why-it-matters.
