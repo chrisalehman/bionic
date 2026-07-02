@@ -567,7 +567,7 @@ Mandatory for new plans (`canonical_sdlc_version: 5`, current). `3`/`4` are prio
    | `deploy_target` | "k8s" → `k8s`; "Vercel" → `vercel`; "deploy" → `custom`; "migration" → `migration`; none → `none`. |
    | `cleanup_on_finish` | Default `true`. |
    | `use_worktree` | Default `false`. Set true on explicit user override or when user says "isolate". |
-   | `model_plan` | Derived from `multi_agent` and the **detected session model** (read it from your own system prompt; see §Model & Token Strategy). `true` → `orchestrator=<detected, e.g. fable-5-high or opus-4.8-xhigh>; execution=tiered(complex=opus-fresh, standard=sonnet-fresh); explore=sonnet-fresh`. `false` → `main=<detected>` (dial-down offered). If the session model is below the Opus tier, warn and recommend switching via `/model` before the wave starts. Always surfaced for explicit confirmation; written to frontmatter and **hook-enforced for `canonical_sdlc_version: 4` and `5`** autonomous plans. |
+   | `model_plan` | Derived from `multi_agent` and the **detected session model** (read it from your own system prompt; see §Model & Token Strategy). `true` → `orchestrator=<detected, e.g. fable-5-high or opus-4.8-xhigh>; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`. `false` → `main=<detected>` (dial-down offered). If the session model is below the Opus tier, warn and recommend switching via `/model` before the wave starts. Always surfaced for explicit confirmation; written to frontmatter and **hook-enforced for `canonical_sdlc_version: 4` and `5`** autonomous plans. |
 
 3. **Present the confirmation display:**
 
@@ -593,16 +593,17 @@ Mandatory for new plans (`canonical_sdlc_version: 5`, current). `3`/`4` are prio
      cleanup_on_finish: true       [Step 9 wipes .bionic/tmp/ on close]
      use_worktree:      false      [no isolated worktree — work on current branch]
 
-   Model plan:                     [multi_agent=true → tiered dispatch]
-     orchestrator: fable-5 high    [detected session model; main thread, fixed all wave]
-     execution:    tiered          [complex → fresh model:opus · standard → fresh model:sonnet, per slice tag]
-     explore/test: sonnet          [fresh model:sonnet — search, mechanical, tests]
+   Model plan:                      [multi_agent=true → tiered dispatch]
+     orchestrator:  fable-5 high    [detected session model; main thread, fixed all wave]
+     exec-complex:  opus            [fresh model:opus — slices tagged complex, debugging, Step 6 review]
+     exec-standard: sonnet          [fresh model:sonnet — slices tagged standard]
+     explore/test:  sonnet          [fresh model:sonnet — search, mechanical, tests]
      # aliases resolve to the top model per family at dispatch time
      # multi_agent=false → single-thread: "main: <detected>" (dial-down offered)
      # Fable orchestrator → forks are Fable at ~2× Opus: fork bar rises; prefer fresh model:opus
 
    Reply "confirm" to accept, or specify overrides:
-     e.g. "set use_worktree=true, set execution=opus-only, then confirm"
+     e.g. "set use_worktree=true, set exec-standard=opus, then confirm"
    ```
 
 4. **Block until explicit confirmation.** No timeout, no implicit acceptance.
@@ -618,9 +619,9 @@ override     := "set" flag "=" value
               | "change" flag "to" value
 ```
 
-Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set execution=opus-only, confirm` (disable complexity routing — all execution slices dispatch fresh `model: opus`); `set main_model=sonnet, confirm` (multi_agent=false dial-down).
+Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set exec-standard=opus, confirm` (route standard slices to opus too — equivalent to disabling complexity routing); `set exec-complex=sonnet, confirm` (accepted but discouraged; warn before applying); `set execution=opus-only, confirm` (shorthand for `exec-standard=opus`); `set main_model=sonnet, confirm` (multi_agent=false dial-down).
 
-On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 5` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; execution=tiered(complex=opus-fresh, standard=sonnet-fresh); explore=sonnet-fresh`). For v4 and v5 autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2).
+On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 5` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`). For v4 and v5 autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2).
 
 **Two-layer enforcement.**
 

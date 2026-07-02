@@ -157,7 +157,7 @@ For incident-response artifacts, use `incident: NNNN-<slug>` instead of `epic`/`
 A single-line record of the confirmed model tiers, derived from `multi_agent` and the detected session model at Step 0 and surfaced for explicit confirmation:
 
 ```yaml
-model_plan: orchestrator=fable-5-high; execution=tiered(complex=opus-fresh, standard=sonnet-fresh); explore=sonnet-fresh
+model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh
 ```
 
 For `canonical_sdlc_version: 4` and `5` autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2). v3 plans keep the prior contract (no `model_plan`). `model_plan` changes no per-step evidence shape; it records intent only.
@@ -174,7 +174,7 @@ mode: autonomous
 integration-branch: main
 current: 4
 
-Step 0: configured at 2026-05-03T14:22Z via "set deploy_target=vercel, confirm"; model_plan=orchestrator=fable-5-high; execution=tiered(complex=opus-fresh, standard=sonnet-fresh); explore=sonnet-fresh
+Step 0: configured at 2026-05-03T14:22Z via "set deploy_target=vercel, confirm"; model_plan=orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh
 Step 1: docs-root/specs/epic-02/wave-01.spec.md#ideate
 Step 2: docs-root/specs/epic-02/wave-01.spec.md#requirements
 Step 3: #plan-body
@@ -312,7 +312,7 @@ Four tiers by role (the default plan when `multi_agent: true`):
 
 **Why the orchestrator gets the best model.** Orchestrator errors are the most expensive tokens in the system — a bad decomposition wastes every subagent it dispatches — while the orchestrator is a minority of wave spend (execution carries the volume; the pinned main thread is mostly cache reads). Fable runs at `high`, not `xhigh`: its per-effort capability clears Opus-at-xhigh on coordination work, and xhigh buys diminishing returns there.
 
-**Slice complexity routing.** At Step 3 every Step 4 slice gets a `complexity: standard | complex` tag in the plan, which routes its dispatch. Complex if any of: touches more than one subsystem, unresolved design decisions inside the slice, ambiguous spec surface, security-sensitive, expected root-cause debugging. When uncertain, tag `complex` — a misrouted slice costs more in rework than Sonnet saves. Opt out at Step 0 with `set execution=opus-only`.
+**Slice complexity routing.** At Step 3 every Step 4 slice gets a `complexity: standard | complex` tag in the plan, which routes its dispatch. Complex if any of: touches more than one subsystem, unresolved design decisions inside the slice, ambiguous spec surface, security-sensitive, expected root-cause debugging. When uncertain, tag `complex` — a misrouted slice costs more in rework than Sonnet saves. Opt out at Step 0 with `set exec-standard=opus` (shorthand: `set execution=opus-only`).
 
 **Escalation ladder.** A `standard` slice that fails its gate twice re-dispatches as a fresh `model: opus` agent carrying the failure context — never a third retry on the same tier. That Opus attempt is the third and final try before the three-fail rule fires.
 
@@ -378,13 +378,14 @@ Opt-in flags:
   cleanup_on_finish: true       [Step 9 (cleanup half) wipes .bionic/tmp/ on close]
   use_worktree:      false      [work on current branch]
 
-Model plan:                     [multi_agent=true → tiered dispatch]
-  orchestrator: fable-5 high    [detected session model; main thread, fixed all wave]
-  execution:    tiered          [complex → fresh model:opus · standard → fresh model:sonnet, per slice tag]
-  explore/test: sonnet          [fresh model:sonnet — search, mechanical, tests]
+Model plan:                      [multi_agent=true → tiered dispatch]
+  orchestrator:  fable-5 high    [detected session model; main thread, fixed all wave]
+  exec-complex:  opus            [fresh model:opus — slices tagged complex, debugging, Step 6 review]
+  exec-standard: sonnet          [fresh model:sonnet — slices tagged standard]
+  explore/test:  sonnet          [fresh model:sonnet — search, mechanical, tests]
 
 Reply "confirm" to accept, or specify overrides:
-  e.g. "set use_worktree=true, set execution=opus-only, then confirm"
+  e.g. "set use_worktree=true, set exec-standard=opus, then confirm"
 ```
 
 ### Override DSL
