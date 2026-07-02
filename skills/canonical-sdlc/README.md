@@ -68,7 +68,7 @@ Eleven flat steps, numbered 0–10. No interstitials, no sub-steps, no hidden st
 **Tier key.** Each step has a default dispatch target (the strategy below governs; the tier is a hint):
 
 - **O — orchestrator.** The main thread. Runs Steps 1–3 directly and coordinates the rest.
-- **E — execution.** A fresh `model: opus` subagent by default; fork only when the unit genuinely needs the inherited conversation.
+- **E — execution.** A fresh subagent routed by the slice's `complexity:` tag — `complex` → `model: opus`, `standard` → `model: sonnet`; fork only when the unit genuinely needs the inherited conversation.
 - **X — explore / mechanical / test.** A fresh `model: sonnet` subagent — search, fixtures, mechanical edits, test-writing.
 
 ### The approval checkpoint
@@ -154,10 +154,10 @@ For incident-response artifacts, use `incident: NNNN-<slug>` instead of `epic`/`
 
 ### `model_plan` (required on v4 and v5 autonomous plans)
 
-A single-line record of the confirmed model tiers, derived from `multi_agent` at Step 0 and surfaced for explicit confirmation:
+A single-line record of the confirmed model tiers, derived from `multi_agent` and the detected session model at Step 0 and surfaced for explicit confirmation:
 
 ```yaml
-model_plan: orchestrator=opus-4.8-xhigh; execution=opus-4.8-fresh; explore=sonnet-4.6
+model_plan: orchestrator=fable-5-high; execution=tiered(complex=opus-fresh, standard=sonnet-fresh); explore=sonnet-fresh
 ```
 
 For `canonical_sdlc_version: 4` and `5` autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2). v3 plans keep the prior contract (no `model_plan`). `model_plan` changes no per-step evidence shape; it records intent only.
@@ -174,7 +174,7 @@ mode: autonomous
 integration-branch: main
 current: 4
 
-Step 0: configured at 2026-05-03T14:22Z via "set deploy_target=vercel, confirm"; model_plan=orchestrator=opus-4.8-xhigh; execution=opus-4.8-fresh; explore=sonnet-4.6
+Step 0: configured at 2026-05-03T14:22Z via "set deploy_target=vercel, confirm"; model_plan=orchestrator=fable-5-high; execution=tiered(complex=opus-fresh, standard=sonnet-fresh); explore=sonnet-fresh
 Step 1: docs-root/specs/epic-02/wave-01.spec.md#ideate
 Step 2: docs-root/specs/epic-02/wave-01.spec.md#requirements
 Step 3: #plan-body
@@ -299,21 +299,32 @@ Shape enforcement is version-routed:
 
 canonical-sdlc pins the orchestrator on one strong model for the whole wave and reaches the cheaper tiers **only through subagent dispatch**. The reasoning is mechanical: switching the main model mid-wave invalidates the prompt cache (and a skill cannot enforce a main-model switch anyway), so the main model is fixed and the tiering lives in *who you dispatch to*.
 
-Three tiers by role (the default plan when `multi_agent: true`):
+Dispatch uses model family **aliases** (`model: opus`, `model: sonnet`) that resolve to the top model in each family at dispatch time — the skill never hardcodes a version, so it self-upgrades on every model release. The "currently resolves to" column is informational.
 
-| Tier | Role | Model | Dispatch mechanism |
-|---|---|---|---|
-| **1 · Orchestrator** | main thread — runs Steps 1–3 directly, coordinates 4–10 | Opus 4.8 xhigh (default) or Fable 5 high | the main session, fixed all wave |
-| **2 · Execution** | implementation slices, refactors, Step 6 review (5-axis + adversarial critic) | Opus 4.8 | **fresh `model: opus`** by default; `fork` only when the unit genuinely needs the inherited context |
-| **3 · Explore / mechanical / test** | codebase search, fixtures, mechanical edits, test-writing | Sonnet 4.6 | **fresh `model: sonnet`** (never a fork) |
+Four tiers by role (the default plan when `multi_agent: true`):
 
-**Why fresh-by-default beats fork-everything.** Pushing work to subagents keeps the main thread's token count flat, which is what extends a session before a handoff is needed. The instinct to *fork* everything achieves that — but a fork inherits the entire main-thread conversation (re-paying full context every dispatch) *and* the orchestrator's xhigh effort, making it the most expensive subagent available. A **fresh** subagent preserves the main thread's longevity exactly as well (only its summary returns to main) while carrying only the brief you hand it, at the model and harness-default effort you pick. So fresh *dominates* fork for anything that doesn't genuinely need the inherited context. Fork is the exception — reserved for context-heavy reasoning; never for vanilla/mechanical work, and never to get a cheaper model (forks ignore `model` and inherit the orchestrator's).
+| Tier | Role | Model spec | Currently resolves to | Dispatch mechanism |
+|---|---|---|---|---|
+| **1 · Orchestrator** | main thread — runs Steps 1–3 directly, coordinates 4–10 | best available (detected at Step 0): Fable @ high → else top Opus @ xhigh | Fable 5 high / Opus 4.8 xhigh | the main session, fixed all wave |
+| **2 · Execution-complex** | slices tagged `complex`, root-cause debugging, Step 6 review (5-axis + adversarial critic) | fresh `model: opus` | Opus 4.8 | fresh by default; `fork` only when the unit genuinely needs the inherited context |
+| **3 · Execution-standard** | slices tagged `standard` — well-specified, single-subsystem, tests define done | fresh `model: sonnet` | Sonnet 5 | **fresh** (never a fork) |
+| **4 · Explore / mechanical / test** | codebase search, fixtures, mechanical edits, test-writing | fresh `model: sonnet` | Sonnet 5 | **fresh** (never a fork) |
+
+**Why the orchestrator gets the best model.** Orchestrator errors are the most expensive tokens in the system — a bad decomposition wastes every subagent it dispatches — while the orchestrator is a minority of wave spend (execution carries the volume; the pinned main thread is mostly cache reads). Fable runs at `high`, not `xhigh`: its per-effort capability clears Opus-at-xhigh on coordination work, and xhigh buys diminishing returns there.
+
+**Slice complexity routing.** At Step 3 every Step 4 slice gets a `complexity: standard | complex` tag in the plan, which routes its dispatch. Complex if any of: touches more than one subsystem, unresolved design decisions inside the slice, ambiguous spec surface, security-sensitive, expected root-cause debugging. When uncertain, tag `complex` — a misrouted slice costs more in rework than Sonnet saves. Opt out at Step 0 with `set execution=opus-only`.
+
+**Escalation ladder.** A `standard` slice that fails its gate twice re-dispatches as a fresh `model: opus` agent carrying the failure context — never a third retry on the same tier. That Opus attempt is the third and final try before the three-fail rule fires.
+
+**Verification is never cheaper than authorship.** Step 6's 5-axis review and adversarial critic dispatch at Tier 2 (fresh `model: opus`) regardless of which tier wrote the code — Sonnet-written slices get Opus review.
+
+**Why fresh-by-default beats fork-everything.** Pushing work to subagents keeps the main thread's token count flat, which is what extends a session before a handoff is needed. The instinct to *fork* everything achieves that — but a fork inherits the entire main-thread conversation (re-paying full context every dispatch) *and* the orchestrator's effort, making it the most expensive subagent available. A **fresh** subagent preserves the main thread's longevity exactly as well (only its summary returns to main) while carrying only the brief you hand it, at the model and harness-default effort you pick. So fresh *dominates* fork for anything that doesn't genuinely need the inherited context. Fork is the exception — reserved for context-heavy reasoning; never for vanilla/mechanical work, and never to get a cheaper model (forks ignore `model` and inherit the orchestrator's). **Under a Fable orchestrator the fork bar rises further:** Fable forks cost roughly 2× an Opus fork per token, so prefer hand-feeding context to a fresh `model: opus` agent even in borderline cases.
 
 **Serial when slices share state.** Parallel dispatch applies to independent, stateless work. When slices share state — the one local DB, a `supabase db reset`, count-based assertions — dispatch serially: one at a time, verify, then the next, regardless of fresh-vs-fork.
 
-**Effort is a main-thread-only dial.** There is no reasoning-effort parameter on the Agent tool — you set effort on the main session, and you cannot request "Opus high" for a subagent. The dispatch layer tiers the *model* and the *mechanism* (fresh vs fork), not effort. Forks inherit the orchestrator's effort (xhigh); fresh subagents run at their model's harness default.
+**Effort is a main-thread-only dial.** There is no reasoning-effort parameter on the Agent tool — you set effort on the main session, and you cannot request "Opus high" for a subagent. The dispatch layer tiers the *model* and the *mechanism* (fresh vs fork), not effort. Forks inherit the orchestrator's effort; fresh subagents run at their model's harness default.
 
-**`multi_agent: false`** collapses this to a single thread (no dispatch). The main model still defaults to Opus 4.8 xhigh but can be dialed down (Opus 4.8 high or Sonnet 4.6) at Step 0, since there is nothing to offload to.
+**`multi_agent: false`** collapses this to a single thread (no dispatch). The main model is the detected session model (`main=<detected>` in `model_plan`) and can be dialed down at Step 0, since there is nothing to offload to.
 
 **Verification carries over.** Verify each dispatched unit's commit *fileset* (`git show --stat` plus `git status --short` for orphans), not just that tests are green; and the Step 6 (Review) adversarial critic must be **independent of whoever wrote the code** — never accept a subagent's self-graded review.
 
@@ -368,12 +379,12 @@ Opt-in flags:
   use_worktree:      false      [work on current branch]
 
 Model plan:                     [multi_agent=true → tiered dispatch]
-  orchestrator: opus-4.8 xhigh  [default; main thread, fixed all wave]
-  execution:    opus-4.8        [fresh model:opus; fork only if context-heavy]
-  explore/test: sonnet-4.6      [fresh model:sonnet — search, mechanical, tests]
+  orchestrator: fable-5 high    [detected session model; main thread, fixed all wave]
+  execution:    tiered          [complex → fresh model:opus · standard → fresh model:sonnet, per slice tag]
+  explore/test: sonnet          [fresh model:sonnet — search, mechanical, tests]
 
 Reply "confirm" to accept, or specify overrides:
-  e.g. "set use_worktree=true, set orchestrator=fable-high, then confirm"
+  e.g. "set use_worktree=true, set execution=opus-only, then confirm"
 ```
 
 ### Override DSL
