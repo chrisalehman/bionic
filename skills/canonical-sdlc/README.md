@@ -352,7 +352,7 @@ Step 0 is mandatory for new plans (`canonical_sdlc_version: 5`). It sets every p
 1. **Pre-flight environment check** — verify `.bionic/` root, resolve the docs root (`<project>/.bionic/config.yaml`'s `docs-root:`, default `.bionic/docs`), ensure `{specs,plans,adrs,incidents}/` exist, `mkdir -p .bionic/tmp/`, and verify both hooks are installed and executable.
 2. **Infer recommended values** — from repo files (`tsconfig.json` → `typescript`, `Cargo.toml` → `rust`, …) and conversation keywords (surface type, deploy target, UI).
 3. **Present the confirmation display** — flags, model plan, environment status, each with its inference rationale.
-4. **Block until explicit confirmation** — no timeout, no implicit acceptance. After confirmation, create the TaskCreate list (`0:`…`10:`).
+4. **Block until explicit confirmation** — no timeout, no implicit acceptance. The confirmation display must always render **in full** — never elided, summarized, or truncated; the user approves exactly what they can see. On confirmation, the immediate next action is announcing and creating the full TaskCreate list (`0:`…`10:`), then transitioning to Step 1.
 
 ### The confirmation display
 
