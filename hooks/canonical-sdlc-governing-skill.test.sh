@@ -496,7 +496,7 @@ canonical_sdlc_version: 5
   local discriminators=("surface_type:none" "language:none" \
                         "has_ui:false" "multi_agent:true" \
                         "deploy_target:none")
-  local v5_added=("model_plan:orchestrator=opus-4.8-xhigh; execution=opus-4.8-fresh; explore=sonnet-4.6")
+  local v5_added=("model_plan:orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh")
   for kv in "${opt_in[@]}" "${discriminators[@]}" "${v5_added[@]}"; do
     local key="${kv%%:*}"
     local val="${kv#*:}"
