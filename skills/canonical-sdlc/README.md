@@ -350,8 +350,8 @@ Legacy plans (v1/v2) run grandfathered indefinitely: the governing-skill hook ch
 Step 0 is mandatory for new plans (`canonical_sdlc_version: 5`). It sets every plan-shaping flag deliberately, with explicit user confirmation, in four sub-steps:
 
 1. **Pre-flight environment check** — verify `.bionic/` root, resolve the docs root (`<project>/.bionic/config.yaml`'s `docs-root:`, default `.bionic/docs`), ensure `{specs,plans,adrs,incidents}/` exist, `mkdir -p .bionic/tmp/`, and verify both hooks are installed and executable.
-2. **Infer recommended values** — from repo files (`tsconfig.json` → `typescript`, `Cargo.toml` → `rust`, …) and conversation keywords (surface type, deploy target, UI).
-3. **Present the confirmation display** — flags, model plan, environment status, each with its inference rationale.
+2. **Infer recommended values** — from repo files (`tsconfig.json` → `typescript`, `Cargo.toml` → `rust`, …) and conversation keywords (surface type, deploy target, UI). This includes the integration branch: waves inherit it from the epic plan; standalone plans default to the current mainline branch or `main`.
+3. **Present the confirmation display** — flags, model plan, environment status, integration branch, each with its inference rationale. The `integration-branch:` line is load-bearing (Step 9 merges every wave into it) and must never be dropped from the display.
 4. **Block until explicit confirmation** — no timeout, no implicit acceptance. The confirmation display must always render **in full** — never elided, summarized, or truncated; the user approves exactly what they can see. On confirmation, the immediate next action is announcing and creating the full TaskCreate list (`0:`…`10:`), then transitioning to Step 1.
 
 ### The confirmation display
@@ -366,6 +366,7 @@ environment:
 
 slug: <inferred-from-conversation>
 mode: autonomous
+integration-branch: main         [inferred: current branch — Step 9 merges every wave here]
 
 Discriminator flags:
   surface_type:    api          [inferred: "REST endpoint" in convo]
@@ -398,7 +399,7 @@ overrides := override ("," override)* ","?
 override  := "set" flag "=" value  |  "change" flag "to" value
 ```
 
-Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`. Model-plan keys are valid targets: `set orchestrator=fable-high, confirm` (multi_agent=true), or `set main_model=sonnet, confirm` (multi_agent=false dial-down). On accept, the final values are written into frontmatter literally — every flag as an explicit `<key>: <value>` line, plus `model_plan`.
+Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`; `set integration-branch=develop, confirm`. Model-plan keys are valid targets: `set orchestrator=fable-high, confirm` (multi_agent=true), or `set main_model=sonnet, confirm` (multi_agent=false dial-down). On accept, the final values are written into frontmatter literally — every flag as an explicit `<key>: <value>` line, plus `model_plan`.
 
 **Mid-plan reconfiguration:** edit the frontmatter directly; the new value takes effect on the next hook read.
 
