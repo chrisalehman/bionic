@@ -573,9 +573,10 @@ Mandatory for new plans (`canonical_sdlc_version: 5`, current). `3`/`4` are prio
    | `deploy_target` | "k8s" → `k8s`; "Vercel" → `vercel`; "deploy" → `custom`; "migration" → `migration`; none → `none`. |
    | `cleanup_on_finish` | Default `true`. |
    | `use_worktree` | Default `false`. Set true on explicit user override or when user says "isolate". |
+   | `integration_branch` | Wave under an existing epic → copy from the epic plan's `integration-branch:`. Standalone → current git branch if it is a mainline (`main`/`master`/`develop`); otherwise default `main`. `incident-response` → `main` or `hotfix/<id>`. If genuinely undeterminable, print the line with value `unknown` — never drop it. |
    | `model_plan` | Derived from `multi_agent` and the **detected session model** (read it from your own system prompt; see §Model & Token Strategy). `true` → `orchestrator=<detected, e.g. fable-5-high or opus-4.8-xhigh>; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`. `false` → `main=<detected>` (dial-down offered). If the session model is below the Opus tier, warn and recommend switching via `/model` before the wave starts. Always surfaced for explicit confirmation; written to frontmatter and **hook-enforced for `canonical_sdlc_version: 4` and `5`** autonomous plans. |
 
-3. **Present the confirmation display — in full, always.** The display below is a mandatory, untruncatable artifact: every section, every flag, every line, every inference rationale, rendered as one block in the conversation. Never elide, summarize, sample ("key flags: …"), or defer any portion of it — an abbreviated display invalidates the confirmation, because the user is approving exactly what they can see. If a value is unknown, print the line with the value marked `unknown` rather than dropping the line.
+3. **Present the confirmation display — in full, always.** The display below is a mandatory, untruncatable artifact: every section, every flag, every line, every inference rationale, rendered as one block in the conversation. Never elide, summarize, sample ("key flags: …"), or defer any portion of it — an abbreviated display invalidates the confirmation, because the user is approving exactly what they can see. If a value is unknown, print the line with the value marked `unknown` rather than dropping the line. The `integration-branch:` line is load-bearing — Step 9 merges every wave into it; a display missing this line is an invalid confirmation, exactly like a missing flag.
 
    ```
    ═══ Plan Configuration — confirm before Step 1 ═══
@@ -587,6 +588,7 @@ Mandatory for new plans (`canonical_sdlc_version: 5`, current). `3`/`4` are prio
 
    slug: <inferred-from-conversation>
    mode: autonomous
+   integration-branch: main         [inferred: current branch — Step 9 merges every wave here]
 
    Discriminator flags:
      surface_type:    api          [inferred: "REST endpoint" in convo]
@@ -630,9 +632,9 @@ override     := "set" flag "=" value
               | "change" flag "to" value
 ```
 
-Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set exec-standard=opus, confirm` (route standard slices to opus too — equivalent to disabling complexity routing); `set exec-complex=sonnet, confirm` (accepted but discouraged; warn before applying); `set execution=opus-only, confirm` (shorthand for `exec-standard=opus`); `set main_model=sonnet, confirm` (multi_agent=false dial-down).
+Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`; `set integration-branch=develop, confirm`. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set exec-standard=opus, confirm` (route standard slices to opus too — equivalent to disabling complexity routing); `set exec-complex=sonnet, confirm` (accepted but discouraged; warn before applying); `set execution=opus-only, confirm` (shorthand for `exec-standard=opus`); `set main_model=sonnet, confirm` (multi_agent=false dial-down).
 
-On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 5` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`). For v4 and v5 autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2).
+On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 5` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`). The confirmed `integration-branch` is carried forward: when the plan file is written at Step 3, its `## SDLC State` section opens with the Step-0-confirmed `integration-branch: <name>` line. For v4 and v5 autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2).
 
 **Two-layer enforcement.**
 
@@ -643,9 +645,9 @@ On accept, write final values into plan frontmatter literally — every flag as 
 
 **Legacy plan handling.** Plans with `canonical_sdlc_version: 1` or `2` are grandfathered — flag enforcement skipped. `canonical_sdlc_version: 3` plans remain enforced under the prior 5 + 2 contract (no `model_plan`); `4` and `5` require `model_plan`. The hooks treat v3/v4 evidence under the v3 shape table; v5 uses its own shape table (see §Verification tier).
 
-**Gate:** Plan frontmatter contains `canonical_sdlc_version: 5` plus all 5 discriminator flags, 2 opt-in flags, and `model_plan`. User reply ended with `confirm` or `confirmed`.
+**Gate:** Plan frontmatter contains `canonical_sdlc_version: 5` plus all 5 discriminator flags, 2 opt-in flags, and `model_plan`. The confirmation display included the `integration-branch:` line. User reply ended with `confirm` or `confirmed`.
 
-**Evidence:** A line in `## SDLC State`: `Step 0: configured at <ISO-timestamp> via <reply-summary>; model_plan=<confirmed tiers>`.
+**Evidence:** A line in `## SDLC State`: `Step 0: configured at <ISO-timestamp> via <reply-summary>; model_plan=<confirmed tiers>; integration-branch=<name>`.
 
 ### Step 1 — Ideate (`agent-skills:idea-refine`)
 - **Goal:** Pin scope and non-goals before they get encoded as requirements.
@@ -680,7 +682,7 @@ On accept, write final values into plan frontmatter literally — every flag as 
   - `## Assumptions` — seeded from Step 1 "Not Doing" plus spec ambiguities. Step 4 appends inline.
 - **Expand TaskCreate list.** After the plan is written, expand Step 4 (Implement) into one TaskCreate task per slice (`4/1:`, `4/2:`, …).
 - **Tag every slice's complexity.** Each Step 4 slice in the plan carries a `complexity: standard | complex` tag — this routes the slice's execution dispatch (see §Model & Token Strategy, Slice complexity routing). When uncertain, tag `complex`.
-- **Integration-branch declaration — ask once, stick to it.** Declared in `## SDLC State` via an `integration-branch: <name>` line.
+- **Integration-branch declaration — confirmed once at Step 0, stick to it.** Declared in `## SDLC State` via an `integration-branch: <name>` line, copied from the value confirmed in the Step 0 display. If the plan somehow reaches Step 3 without a confirmed value (legacy plan, resumed session), resolve it now:
   - `epic-scope`: ask the user. Record in the epic plan. Waves inherit.
   - Wave under an existing epic: copy from epic plan.
   - Standalone wave (no epic): ask. Default offer: `main`.
@@ -1101,6 +1103,7 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 - Improvising past a stop-and-wake trigger.
 - Step 9 closing without the wave's commits reachable from the integration branch.
 - Declaring a plan without an `integration-branch:` line.
+- Presenting a Step 0 confirmation display without the `integration-branch:` line.
 - Asking the user a wall-of-text question instead of following the **User Decision Protocol**.
 - Skipping the TaskCreate list or batching task completions at the end.
 - Single-threading a step where 2+ subtasks are clearly independent.
@@ -1109,7 +1112,7 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 
 | Step | Gate | Evidence |
 |---|---|---|
-| 0. Configure | Frontmatter has `canonical_sdlc_version: 5` + 5 discriminator + 2 opt-in flags + `model_plan`; user confirmed; TaskCreate list created | Confirmation row in `## SDLC State` |
+| 0. Configure | Frontmatter has `canonical_sdlc_version: 5` + 5 discriminator + 2 opt-in flags + `model_plan`; display included `integration-branch:`; user confirmed; TaskCreate list created | Confirmation row in `## SDLC State` |
 | 1. Ideate | Refined idea + "Not Doing" list | Artifacts in spec; `shape` output if `design-refresh`; triage notes if `incident-response` |
 | 2. Spec | Every req has acceptance criterion | Spec doc |
 | 3. Plan | No placeholders; `integration-branch:` declared; Step 4 expanded into slice tasks | Plan file |
