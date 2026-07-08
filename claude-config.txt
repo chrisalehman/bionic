@@ -61,7 +61,6 @@ plugin       | agent-skills        | addy-agent-skills
 
 global-memory | claude-global.md
 
-github-skill | excalidraw-diagram | coleam00/excalidraw-diagram-skill
 github-skill | humanizer          | blader/humanizer
 
 github-skill-pack | impeccable   | pbakaus/impeccable
@@ -71,6 +70,7 @@ local-skill  | ralph-loop
 local-skill  | map-instrument-narrow
 local-skill  | skill-factory
 local-skill  | canonical-sdlc
+local-skill  | excalidraw-diagram
 local-skill  | browser-verify
 local-skill  | motion
 
