@@ -281,15 +281,27 @@ esac
 #   - Step 10 (Ship) — deploy/verified-at/monitor OR n/a   (was v3 Step 14)
 #   Commit is a cross-cutting rhythm, not a numbered step (no Step 10 commit shape).
 #
-# v6 (current) removes the external-review step entirely, so it has its own
-# shape switch — identical to v5 except Step 8 (External review) is gone and
+# v6 removes the external-review step entirely, so it has its own shape
+# switch — identical to v5 except Step 8 (External review) is gone and
 # the tail renumbers:
 #   - Steps 5, 6, 7 — same shapes as v5
 #   - Step 8 (Integrate & close) — merge/worktree-removed AND cleanup triple
 #     OR cleanup: n/a   (was v5 Step 9)
 #   - Step 9 (Ship) — deploy/verified-at/monitor OR n/a   (was v5 Step 10)
 #   Commit remains a cross-cutting rhythm, not a numbered step.
-if [ "$SDLC_VERSION" = "6" ]; then
+#
+# v7 (current) is the v6 shape table plus ONE addition: Step 5 (Verify)
+# additionally requires a `bundle-fresh:` key — the pasted output of the
+# project's bundle-freshness proof (proves the served artifact reflects
+# the working tree before any live observation is used as evidence), or
+# `bundle-fresh: n/a: <reason>`. Universal with an n/a escape, exactly
+# like `devtools-trace:` — "not applicable" is an explicit recorded
+# decision, never a silent omission. The proof format is
+# project-specific by design; the hook validates presence, non-empty
+# value / non-empty n/a reason, and the existing placeholder ban only.
+if [ "$SDLC_VERSION" = "7" ]; then
+  SHAPE_MODE="v7"
+elif [ "$SDLC_VERSION" = "6" ]; then
   SHAPE_MODE="v6"
 elif [ "$SDLC_VERSION" = "5" ]; then
   SHAPE_MODE="v5"
@@ -302,7 +314,20 @@ else
 fi
 
 # Pointer steps differ between schema versions due to renumbering.
-if [ "$SHAPE_MODE" = "v6" ]; then
+if [ "$SHAPE_MODE" = "v7" ]; then
+  case "$CURRENT" in
+    1|2|3|4|6)
+      # Same pointer set as v6 (v7 changes only Step 5's required fields).
+      # Step 4 is a pointer step BUT may include worktree fields when
+      # use_worktree=true; Step 6 (Review) is always a pointer step.
+      if [ "$CURRENT" = "4" ] && [ "$USE_WORKTREE" = "true" ]; then
+        : # fall through to shape check below
+      else
+        exit 0
+      fi
+      ;;
+  esac
+elif [ "$SHAPE_MODE" = "v6" ]; then
   case "$CURRENT" in
     1|2|3|4|6)
       # Same pointer set as v5 (v6 only drops the external-review step, which
@@ -385,7 +410,93 @@ shape_block() {
   fi
 }
 
-if [ "$SHAPE_MODE" = "v6" ]; then
+if [ "$SHAPE_MODE" = "v7" ]; then
+  # v7 shape switch — the v6 table plus the universal Step-5 bundle-fresh
+  # key (proof or n/a-with-reason). All other steps are identical to v6.
+  case "$CURRENT" in
+    4)
+      shape_block worktree base-sha branch
+      ;;
+    5)
+      shape_block cmd pass total output
+      pass=$(block_get pass)
+      total=$(block_get total)
+      if ! echo "$pass" | grep -qE '^[0-9]+$' || ! echo "$total" | grep -qE '^[0-9]+$'; then
+        echo "BLOCKED: canonical-sdlc v7 step 5 'pass:' and 'total:' must be integers (got pass='${pass}', total='${total}')." >&2
+        echo "Plan: $PLAN" >&2
+        exit 2
+      fi
+      if [ "$pass" -ne "$total" ]; then
+        echo "BLOCKED: canonical-sdlc v7 step 5 evidence has pass=${pass} but total=${total}; the suite is not fully green." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: do not commit step 5 until pass equals total." >&2
+        exit 2
+      fi
+      if ! block_has devtools-trace && ! block_has_na; then
+        echo "BLOCKED: canonical-sdlc v7 step 5 (Verify) browser modality requires 'devtools-trace: <path>' or 'n/a: <reason>'." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: add the browser-evidence path, or 'n/a:' with a reason. See SKILL.md verification shape table." >&2
+        exit 2
+      fi
+      # Bundle-freshness proof — universal, like devtools-trace. Live
+      # observations against an unproven serve are not evidence; the
+      # served artifact must be proven to reflect the working tree, or
+      # the plan records why freshness does not apply. The proof format
+      # is project-specific — presence + non-empty value is the contract
+      # (the whole-block placeholder ban already ran above).
+      if ! block_has bundle-fresh; then
+        echo "BLOCKED: canonical-sdlc v7 step 5 requires 'bundle-fresh: <proof>' or 'bundle-fresh: n/a: <reason>'." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: run the project's bundle-freshness proof and paste its output line as 'bundle-fresh: <proof>', or record 'bundle-fresh: n/a: <reason>' for non-served targets." >&2
+        exit 2
+      fi
+      bf_val=$(block_get bundle-fresh)
+      case "$bf_val" in
+        ""|n/a|n/a:)
+          echo "BLOCKED: canonical-sdlc v7 step 5 'bundle-fresh:' needs a non-empty proof, or 'n/a: <reason>' with a non-empty reason." >&2
+          echo "Plan: $PLAN" >&2
+          echo "Fix: paste the freshness tool's output line, or give the reason freshness does not apply." >&2
+          exit 2
+          ;;
+      esac
+      ;;
+    7)
+      if ! block_has adr && ! block_has rca && ! block_has_na; then
+        echo "BLOCKED: canonical-sdlc v7 step 7 evidence requires 'adr: <path>', 'rca: <path>' (incident-response mode), or 'n/a: <reason>'." >&2
+        echo "Plan: $PLAN" >&2
+        exit 2
+      fi
+      ;;
+    8)
+      # Integrate & close: merge is always required; cleanup is the triple
+      # (cleanup/tmp-wiped/tasks-completed) OR the explicit `cleanup: n/a`
+      # marker (cleanup_on_finish=false case).
+      shape_block merge worktree-removed
+      cleanup_val=$(block_get cleanup)
+      case "$cleanup_val" in
+        n/a|n/a:*)
+          : # cleanup_on_finish=false / already-cleaned case (reason optional)
+          ;;
+        *)
+          shape_block cleanup tmp-wiped tasks-completed
+          ;;
+      esac
+      ;;
+    9)
+      # Ship.
+      if block_has_na; then
+        if [ -n "$DEPLOY_TARGET" ] && [ "$DEPLOY_TARGET" != "none" ]; then
+          echo "BLOCKED: canonical-sdlc v7 step 9 'n/a:' is only valid when deploy_target=none in frontmatter (got deploy_target=${DEPLOY_TARGET})." >&2
+          echo "Plan: $PLAN" >&2
+          echo "Fix: provide 'deploy:', 'verified-at:', and 'monitor:' fields, or change deploy_target to none." >&2
+          exit 2
+        fi
+      else
+        shape_block deploy verified-at monitor
+      fi
+      ;;
+  esac
+elif [ "$SHAPE_MODE" = "v6" ]; then
   # v6 shape switch — v5 minus the external-review step. Steps renumber:
   # v5 Step 9 (Integrate & close) → v6 Step 8; v5 Step 10 (Ship) → v6 Step 9.
   case "$CURRENT" in
