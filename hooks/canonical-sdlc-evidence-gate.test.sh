@@ -1250,6 +1250,258 @@ expect_block "v5 Step 5 with placeholder TODO → block" \
   "$h11w" 'git commit -m "x"' "placeholder"
 
 # ============================================================
+# Section 12: v6 canonical_sdlc_version shape validation
+# ============================================================
+#
+# v6 drops the external-review step from v5 (0–9 shape): Step 8 =
+# Integrate & close (was v5 Step 9), Step 9 = Ship (was v5 Step 10).
+# Step 5 shape is identical to v5. Regression-critical: v6 plans must
+# NOT require the v7 `bundle-fresh:` key, even when has_ui is true.
+
+echo ""
+echo "=== Section 12: v6 canonical_sdlc_version shape validation ==="
+
+v6_frontmatter() {
+  local deploy="${1:-none}" use_wt="${2:-false}" has_ui="${3:-false}"
+  cat <<EOF
+---
+governing-skill: canonical-sdlc
+mode: autonomous
+canonical_sdlc_version: 6
+deploy_target: ${deploy}
+use_worktree: ${use_wt}
+has_ui: ${has_ui}
+---
+EOF
+}
+
+# 12a — v6 Step 5 full shape, has_ui=true, NO bundle-fresh → allow
+# (grandfathered: the bundle-fresh requirement is v7-only).
+h12a=$(make_home)
+write_plan "$h12a" "$(v6_frontmatter none false true)
+## SDLC State
+current: 5
+Step 5:
+  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-04.plan.md#step-5
+  devtools-trace: .bionic/tmp/evidence-golden.png" > /dev/null
+expect_allow "v6 Step 5 has_ui=true without bundle-fresh → allow (grandfathered)" \
+  "$h12a" 'git commit -m "x"'
+
+# 12b — v6 Step 5 missing browser modality → block (v6 base rules intact).
+h12b=$(make_home)
+write_plan "$h12b" "$(v6_frontmatter)
+## SDLC State
+current: 5
+Step 5:
+  cmd: bash test.sh
+  pass: 10
+  total: 10
+  output: x" > /dev/null
+expect_block "v6 Step 5 missing browser modality (devtools-trace/n-a) → block" \
+  "$h12b" 'git commit -m "x"' "devtools-trace"
+
+# 12c — v6 Step 8 (Integrate & close, renumbered from v5 Step 9) → allow.
+h12c=$(make_home)
+write_plan "$h12c" "$(v6_frontmatter)
+## SDLC State
+current: 8
+Step 8:
+  merge: abc1234abc1234abc1234abc1234abc1234abc1
+  worktree-removed: n/a
+  cleanup: ok
+  tmp-wiped: yes
+  tasks-completed: 10/10" > /dev/null
+expect_allow "v6 Step 8 Integrate & close full → allow" \
+  "$h12c" 'git commit -m "x"'
+
+# 12d — v6 Step 9 (Ship, renumbered from v5 Step 10) n/a + deploy_target=none → allow.
+h12d=$(make_home)
+write_plan "$h12d" "$(v6_frontmatter none)
+## SDLC State
+current: 9
+Step 9:
+  n/a: no deploy target" > /dev/null
+expect_allow "v6 Step 9 Ship n/a + deploy_target=none → allow" \
+  "$h12d" 'git commit -m "x"'
+
+# 12e — v6 Step 6 (Review) pointer step → allow.
+h12e=$(make_home)
+write_plan "$h12e" "$(v6_frontmatter)
+## SDLC State
+current: 6
+Step 6: .bionic/docs/plans/wave-04.plan.md#step-6-review" > /dev/null
+expect_allow "v6 Step 6 (Review pointer step) → allow" \
+  "$h12e" 'git commit -m "x"'
+
+# ============================================================
+# Section 13: v7 canonical_sdlc_version — bundle-freshness gate
+# ============================================================
+#
+# v7 = v6 plus ONE addition: the Step 5 block must carry
+# `bundle-fresh: <proof>` or `bundle-fresh: n/a: <reason>` — universal
+# with an n/a escape, exactly like `devtools-trace:`. Frontmatter flags
+# (has_ui included) do NOT gate the requirement. The proof format is
+# project-specific by design — the hook validates presence + non-empty
+# value/reason + the existing placeholder ban only.
+
+echo ""
+echo "=== Section 13: v7 bundle-freshness gate ==="
+
+v7_frontmatter() {
+  local has_ui="${1:-true}" deploy="${2:-none}" use_wt="${3:-false}"
+  cat <<EOF
+---
+governing-skill: canonical-sdlc
+mode: autonomous
+canonical_sdlc_version: 7
+deploy_target: ${deploy}
+use_worktree: ${use_wt}
+has_ui: ${has_ui}
+---
+EOF
+}
+
+# Shared Step-5 body (tests + browser modalities satisfied) so each case
+# isolates the bundle-fresh variable.
+v7_step5_base="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-04.plan.md#step-5
+  devtools-trace: .bionic/tmp/evidence-golden.png"
+
+# 13a — v7 has_ui=true, Step 5 complete but NO bundle-fresh → block,
+# message names the key.
+h13a=$(make_home)
+write_plan "$h13a" "$(v7_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v7_step5_base" > /dev/null
+expect_block "v7 has_ui=true Step 5 without bundle-fresh → block" \
+  "$h13a" 'git commit -m "x"' "bundle-fresh"
+
+# 13b — v7 has_ui=true + bundle-fresh proof line → allow.
+h13b=$(make_home)
+write_plan "$h13b" "$(v7_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v7_step5_base
+  bundle-fresh: FRESH — canary token-9f3a round-tripped to dist/main.js in 4.2s" > /dev/null
+expect_allow "v7 has_ui=true + bundle-fresh proof → allow" \
+  "$h13b" 'git commit -m "x"'
+
+# 13c — v7 has_ui=true + bundle-fresh: n/a with reason → allow.
+h13c=$(make_home)
+write_plan "$h13c" "$(v7_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v7_step5_base
+  bundle-fresh: n/a: CLI tool, no served bundle" > /dev/null
+expect_allow "v7 has_ui=true + bundle-fresh: n/a with reason → allow" \
+  "$h13c" 'git commit -m "x"'
+
+# 13d — v7 has_ui=true + bundle-fresh placeholder → block (placeholder ban).
+h13d=$(make_home)
+write_plan "$h13d" "$(v7_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v7_step5_base
+  bundle-fresh: TBD" > /dev/null
+expect_block "v7 bundle-fresh: TBD → block (placeholder ban)" \
+  "$h13d" 'git commit -m "x"' "placeholder"
+
+# 13e — v7 has_ui=true + bundle-fresh: n/a with NO reason → block.
+h13e=$(make_home)
+write_plan "$h13e" "$(v7_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v7_step5_base
+  bundle-fresh: n/a" > /dev/null
+expect_block "v7 bundle-fresh: n/a without reason → block" \
+  "$h13e" 'git commit -m "x"' "bundle-fresh"
+
+# 13f — v7 has_ui=true + bundle-fresh empty value → block.
+h13f=$(make_home)
+write_plan "$h13f" "$(v7_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v7_step5_base
+  bundle-fresh:" > /dev/null
+expect_block "v7 bundle-fresh with empty value → block" \
+  "$h13f" 'git commit -m "x"' "bundle-fresh"
+
+# 13g — v7 has_ui=false, no bundle-fresh key → block (the requirement is
+# universal; frontmatter flags don't gate it).
+h13g=$(make_home)
+write_plan "$h13g" "$(v7_frontmatter false)
+## SDLC State
+current: 5
+Step 5:
+$v7_step5_base" > /dev/null
+expect_block "v7 has_ui=false without bundle-fresh → block (universal key)" \
+  "$h13g" 'git commit -m "x"' "bundle-fresh"
+
+# 13h — v7 has_ui=false + bundle-fresh: n/a with reason → allow (the n/a
+# escape is how non-served waves satisfy the universal key).
+h13h=$(make_home)
+write_plan "$h13h" "$(v7_frontmatter false)
+## SDLC State
+current: 5
+Step 5:
+$v7_step5_base
+  bundle-fresh: n/a: no served artifact in this wave" > /dev/null
+expect_allow "v7 has_ui=false + bundle-fresh: n/a with reason → allow" \
+  "$h13h" 'git commit -m "x"'
+
+# 13i — v7 has_ui=true with bundle-fresh but missing browser modality →
+# block (v6 base rules still apply under v7).
+h13i=$(make_home)
+write_plan "$h13i" "$(v7_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+  cmd: bash test.sh
+  pass: 10
+  total: 10
+  output: x
+  bundle-fresh: FRESH — canary token-9f3a round-tripped in 4.2s" > /dev/null
+expect_block "v7 Step 5 missing devtools-trace (base v6 rules intact) → block" \
+  "$h13i" 'git commit -m "x"' "devtools-trace"
+
+# 13j — v7 non-Step-5 shapes unchanged from v6: Step 8 Integrate & close → allow.
+h13j=$(make_home)
+write_plan "$h13j" "$(v7_frontmatter true)
+## SDLC State
+current: 8
+Step 8:
+  merge: abc1234abc1234abc1234abc1234abc1234abc1
+  worktree-removed: n/a
+  cleanup: ok
+  tmp-wiped: yes
+  tasks-completed: 10/10" > /dev/null
+expect_allow "v7 Step 8 Integrate & close full → allow" \
+  "$h13j" 'git commit -m "x"'
+
+# 13k — v7 pointer steps 1/2/3/6 → allow.
+for step in 1 2 3 6; do
+  h=$(make_home)
+  write_plan "$h" "$(v7_frontmatter true)
+## SDLC State
+current: $step
+Step $step: pointer evidence here" > /dev/null
+  expect_allow "v7 Step $step (pointer step) → allow" \
+    "$h" 'git commit -m "x"'
+done
+
+# ============================================================
 # Summary
 # ============================================================
 

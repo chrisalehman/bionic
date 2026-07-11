@@ -541,6 +541,74 @@ canonical_sdlc_version: 5
 run_write "$project/.bionic/docs/plans/epic-01-demo/wave-17-v5d.plan.md" "$v5_design"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
+# ============================================================
+# canonical_sdlc_version v6/v7 enforcement (inherit v4 flag contract)
+# ============================================================
+#
+# v6 drops the external-review step; v7 adds the Step-5 bundle-fresh
+# evidence key (enforced by the evidence-gate hook, not here). Neither
+# changes the governing-skill flag contract: 5 discriminators + 2 opt-in
+# + model_plan, autonomous mode only. This hook must ACCEPT both versions
+# — a version missing from its allowlist blocks every plan write.
+
+build_versioned_plan() {
+  local version="$1"; shift
+  local omit=" $* "
+  local out="---
+governing-skill: canonical-sdlc
+mode: autonomous
+sdlc-step: 4
+canonical_sdlc_version: ${version}
+"
+  local opt_in=("cleanup_on_finish:true" "use_worktree:false")
+  local discriminators=("surface_type:none" "language:none" \
+                        "has_ui:false" "multi_agent:true" \
+                        "deploy_target:none")
+  local v4_added=("model_plan:orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh")
+  for kv in "${opt_in[@]}" "${discriminators[@]}" "${v4_added[@]}"; do
+    local key="${kv%%:*}"
+    local val="${kv#*:}"
+    case "$omit" in
+      *" $key "*) continue ;;
+    esac
+    out+="${key}: ${val}"$'\n'
+  done
+  out+='---
+
+# Body
+'
+  printf '%s' "$out"
+}
+
+for version in 6 7; do
+  echo "v${version} with all v3 flags + model_plan → allow"
+  vN_full=$(build_versioned_plan "$version")
+  run_write "$project/.bionic/docs/plans/epic-01-demo/wave-18-v${version}.plan.md" "$vN_full"
+  assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+  echo "v${version} missing model_plan → block, error names model_plan"
+  vN_no_mp=$(build_versioned_plan "$version" model_plan)
+  run_write "$project/.bionic/docs/plans/epic-01-demo/wave-19-v${version}.plan.md" "$vN_no_mp"
+  assert_eq "exit 2" 2 "$HOOK_EXIT"
+  case "$HOOK_STDERR" in
+    *model_plan*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  error mentions model_plan (v%s)\n' "$version" ;;
+    *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  error missing model_plan (v%s): %q\n' "$version" "$HOOK_STDERR" ;;
+  esac
+
+  echo "v${version} + mode != autonomous → allow (flag enforcement is autonomous-only)"
+  vN_design="---
+governing-skill: canonical-sdlc
+mode: design-refresh
+sdlc-step: 1
+canonical_sdlc_version: ${version}
+---
+
+# Body
+"
+  run_write "$project/.bionic/docs/plans/epic-01-demo/wave-20-v${version}d.plan.md" "$vN_design"
+  assert_eq "exit 0" 0 "$HOOK_EXIT"
+done
+
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then
