@@ -3,12 +3,19 @@
 One engineer, mass-augmented. A single bootstrap transforms Claude Code into a fully agentic engineering team — 100+ specialists, structured SDLC, safety guardrails.
 
 ```bash
-git clone git@github.com:chrisalehman/bionic.git
+git clone https://github.com/chrisalehman/bionic.git
 cd bionic
-./claude-bootstrap.sh
+./claude-bootstrap.sh                                # core profile
+./claude-bootstrap.sh claude-config.everything.txt   # core + full catalog
 ```
 
-Re-run anytime to update. Reset with `./claude-reset.sh`.
+Re-run anytime to update. Reset with `./claude-reset.sh` (same profile arguments).
+
+**Profiles.** `claude-config.txt` is the **core** — the identity layer every machine gets. [`claude-config.everything.txt`](claude-config.everything.txt) is the **catalog** — every optional tool Bionic knows how to install (deployment platforms, gRPC, Sentry/Trello, mobile toolchain). Profiles are additive-only and layered as positional arguments; duplicate entries dedup, and for single-valued settings the last file wins. Teams can add their own `claude-config.<team>.txt` — every entry it lists must also appear in the catalog (enforced by tests).
+
+**Exit codes:** `0` success (env-gated skips and warnings included) · `1` ran to completion but some steps failed — fix the cause and re-run, it's idempotent · `2` preflight hard-fail (no network, or Homebrew / the claude CLI couldn't be installed).
+
+**Fresh Mac note:** the first run may ask for your macOS password and open the Xcode Command Line Tools dialog (Homebrew needs them) — expected; everything else is unattended.
 
 ## Patterns That Change How You Ship
 
@@ -47,20 +54,20 @@ Other things to try on day one:
 
 ## What Gets Installed
 
-Everything lives in [`claude-config.txt`](claude-config.txt) — edit it and re-run the bootstrap. Here's what unlocks those patterns:
+The **core profile** lives in [`claude-config.txt`](claude-config.txt) — edit it and re-run the bootstrap. Here's what unlocks those patterns:
 
 | Category | What |
 |----------|------|
-| **CLI tools** | git, node, pnpm, gh, jq, ripgrep, uv, @playwright/cli, @sentry/cli, notebooklm *(via uv)* + cloud (docker, gcloud, aws), deployment (stripe, vercel, supabase, fastlane, eas-cli), API (httpie, yq, grpcurl, protoc) |
-| **Plugins** | superpowers, agent-skills, document-skills, example-skills |
+| **CLI tools** | git, node, pnpm, gh, jq, ripgrep, uv, docker, yq, aws, gcloud *(cask)*, @playwright/cli, @pencil.dev/cli, notebooklm *(via uv)* |
+| **Plugins** | superpowers, agent-skills, document-skills, example-skills, frontend-design |
 | **Subagents** | voltagent-core-dev, voltagent-lang, voltagent-infra, voltagent-qa-sec, voltagent-data-ai, voltagent-dev-exp, voltagent-meta |
-| **MCP servers** | context7, chrome-devtools, sentry *(requires env vars)*, trello *(requires env vars)* |
+| **MCP servers** | context7, chrome-devtools *(Pencil's MCP server self-registers whenever the Pencil app is running — no config entry needed)* |
 | **Skills** | **bionic:canonical-sdlc** (flagship — 11-step autonomous lifecycle), bionic:browser-verify, bionic:rigorous-refactor, bionic:ralph-loop, bionic:map-instrument-narrow, bionic:skill-factory, excalidraw-diagram, humanizer, notebooklm, impeccable (20+ design skills) |
 | **Hooks** | protect-main.sh, protect-database.sh, memory-cleanup.sh, terseness-reminder.sh, **canonical-sdlc-evidence-gate.sh**, **canonical-sdlc-governing-skill.sh** |
 | **Philosophy** | 10 principles for agentic development → [`~/.claude/CLAUDE.md`](claude-global.md) |
 | **Shell alias** | `claude` → `claude --dangerously-skip-permissions` |
 
-Additional tools (Kubernetes, databases, Firebase) are commented out at the bottom of `claude-config.txt` — uncomment what you need and re-run.
+The **everything profile** ([`claude-config.everything.txt`](claude-config.everything.txt)) layers on the optional catalog: deployment platforms (stripe, vercel, supabase, fastlane, eas-cli), API tooling (httpie, grpcurl, protoc), observability (@sentry/cli + sentry MCP *(requires env vars)*), productivity (trello MCP *(requires env vars)*), plus commented sections for Kubernetes, databases, and Firebase.
 
 ## How It Works
 
@@ -68,7 +75,8 @@ Bootstrap is idempotent — run it anytime, always get the same result. Modify [
 
 ```
 bionic/
-├── claude-config.txt        # What gets installed
+├── claude-config.txt        # Core profile — what every machine gets
+├── claude-config.everything.txt  # Optional catalog — layer on with a positional arg
 ├── claude-global.md         # Philosophy → ~/.claude/CLAUDE.md
 ├── claude-bootstrap.sh      # Install (idempotent)
 ├── claude-reset.sh          # Remove everything
@@ -225,7 +233,7 @@ Short version: superpowers wins TDD, debugging, planning, code-review behavior, 
 
 #### Design & Document Skills
 
-Design-quality frontend generation is provided by the **impeccable** skill pack (see [Custom Skills](#custom-skills) below). `frontend-design` and `ui-ux-pro-max` were evaluated and removed — `impeccable` is a superset of `frontend-design` (properly attributed, stricter anti-patterns, teach-mode for project context) and avoids the trust issues on the paid `ui-ux-pro-max` tier.
+Design-quality frontend generation is provided by the **impeccable** skill pack (see [Custom Skills](#custom-skills) below) together with the **frontend-design** plugin — impeccable brings the method (audit/critique/polish rubrics, anti-patterns, teach-mode), frontend-design brings aesthetic-direction guidance for new UI; we run both. The design workflow is completed by **Pencil** (`@pencil.dev/cli` in core): design on the Pencil canvas, and its MCP server — self-registered whenever the Pencil app is running — lets Claude read and edit the `.pen` files directly. `ui-ux-pro-max` was evaluated and removed (trust issues on the paid tier, superseded by impeccable).
 
 **document-skills** (`anthropic-agent-skills`) — Document creation and manipulation. Handles PDF, DOCX, PPTX, XLSX, and CSV files. Also includes `claude-api` (Anthropic SDK integration), `mcp-builder` (MCP server creation guide), `webapp-testing` (Playwright test toolkit), `canvas-design`, `algorithmic-art`, and more.
 
@@ -420,11 +428,9 @@ The notebook lives at `.bionic/memory/` rather than `.claude/memory/` by design.
 
 The first two are hard-blocked by hooks. The last two rely on Claude's judgment informed by the philosophy. This is defense in depth — hooks catch what they can mechanically; principles cover the rest.
 
-### Active Extended Tools
+### The Everything Profile (Optional Catalog)
 
-The bottom of [`claude-config.txt`](claude-config.txt) contains additional tools organized by use case. Most are already active (uncommented) and install with the bootstrap. Here's what they provide:
-
-**Cloud** — `docker`, `gcloud` (requires cask: `brew install --cask google-cloud-sdk`), `aws` (package: `awscli`). For containerization and cloud infrastructure work.
+[`claude-config.everything.txt`](claude-config.everything.txt) is the catalog of every optional tool — install it with `./claude-bootstrap.sh claude-config.everything.txt`, or copy individual lines into a team profile. Cloud basics (`docker`, `gcloud` via the `gcloud-cli` cask, `aws`) live in core; the catalog covers the rest:
 
 **Deployment Platforms** — `stripe`, `vercel`, `supabase`, `fastlane`, `eas-cli`. For deploying directly from Claude sessions, managing payment infrastructure, and automating app store releases.
 
@@ -432,15 +438,15 @@ The bottom of [`claude-config.txt`](claude-config.txt) contains additional tools
 
 **EAS CLI** (`eas-cli`) — Expo Application Services CLI. The primary tool for building, submitting, and managing Expo/React Native apps. Provides `eas build`, `eas submit` (to App Store and Google Play), `eas update` (OTA updates), `eas credentials`, `eas metadata`, and more. Authentication is via Expo account (`eas login`, interactive) or `EXPO_TOKEN` environment variable for automation. Requires Node.js >= 20.0.0.
 
-**API & Serialization** — `httpie` (friendlier curl), `yq` (YAML processor, companion to jq), `grpcurl` (gRPC CLI), `protoc` (protobuf compiler). For API development and testing workflows.
+**API & Serialization** — `httpie` (friendlier curl), `grpcurl` (gRPC CLI), `protoc` (protobuf compiler). For API development and testing workflows. (`yq` lives in core alongside `jq`.)
 
-**Productivity Tools** — The Trello MCP server (`@delorenj/mcp-server-trello`) is enabled by default but requires `TRELLO_API_KEY` and `TRELLO_TOKEN` environment variables. If they're not set, bootstrap skips it with a warning. See [Trello](#mcp-servers) above for setup.
+**Productivity Tools** — The Trello MCP server (`@delorenj/mcp-server-trello`) requires `TRELLO_API_KEY` and `TRELLO_TOKEN` environment variables. If they're not set, bootstrap skips it with a warning. See [Trello](#mcp-servers) above for setup.
 
-**Observability** — The Sentry MCP server (`@sentry/mcp-server@latest`) is enabled by default but requires `SENTRY_ACCESS_TOKEN`. If it's not set, bootstrap skips it with a warning. See [Sentry](#mcp-servers) above for setup.
+**Observability** — `@sentry/cli` plus the Sentry MCP server (`@sentry/mcp-server@latest`), which requires `SENTRY_ACCESS_TOKEN`. If it's not set, bootstrap skips it with a warning. See [Sentry](#mcp-servers) above for setup.
 
 ### Commented-Out Tools
 
-These are disabled by default. Uncomment in `claude-config.txt` and re-run `./claude-bootstrap.sh` to enable.
+These are disabled by default. Uncomment in `claude-config.everything.txt` and re-run `./claude-bootstrap.sh claude-config.everything.txt` to enable.
 
 **Kubernetes** — `kubectl`, `helm`, `stern`, `kubectx`, `argocd`, `k9s`. Enable if you're working with Kubernetes clusters. The voltagent-infra subagents (Kubernetes specialist, Terraform engineer, etc.) will use these tools when available.
 
@@ -454,7 +460,7 @@ Hooks intercept `Bash` commands to catch accidental pushes to main and destructi
 
 ## Requirements
 
-**macOS:** Homebrew and Claude Code CLI (`brew install claude-code`).
+**macOS:** none — the bootstrap's preflight installs Homebrew and the Claude Code CLI (`npm install -g @anthropic-ai/claude-code@latest` — the npm channel; the Homebrew cask lags versions behind) if they're missing. Expect one password prompt on a fresh Mac.
 
 **Windows (WSL2):**
 

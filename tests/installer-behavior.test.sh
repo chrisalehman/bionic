@@ -92,6 +92,44 @@ demo >/dev/null; rc=$?
 [ "$rc" -eq 0 ] && ok "failing installer returns 0 (run never aborts mid-way)" || no "installer aborted (rc=$rc)"
 [ "${#INSTALL_FAILURES[@]}" -eq 1 ] && ok "the failure was recorded for the end-of-run summary" || no "failure not recorded"
 
+# 5) run_retry detaches the child's stdin (tap-install stdin-theft defense):
+# a command that drains stdin must see EOF immediately, not the caller's input.
+stdin_probe(){ drained="$(cat)"; [ -z "$drained" ]; }
+if echo "should-not-be-seen" | { run_retry stdin_probe; } ; then
+  ok "run_retry runs children with stdin detached (</dev/null)"
+else
+  no "run_retry leaked caller stdin into the child"
+fi
+
+# 6) step_fail: prints the failure line, records a well-formed STEP_RECORDS
+# entry (status|category|section|name|remediation|detail, detail last), and
+# feeds INSTALL_FAILURES.
+INSTALL_FAILURES=(); STEP_RECORDS=(); CURRENT_SECTION="TestSection"
+step_start "demo-step" >/dev/null
+step_fail network "boom|with pipe" "do the thing" > "$SBX/sf.out" 2>&1
+out="$(cat "$SBX/sf.out")"
+echo "$out" | grep -q "✗ failed (continuing)" && ok "step_fail prints '✗ failed (continuing)'" || no "step_fail output wrong: $out"
+[ "${#STEP_RECORDS[@]}" -eq 1 ] && ok "step_fail appended one STEP_RECORDS entry" || no "STEP_RECORDS length ${#STEP_RECORDS[@]}"
+IFS='|' read -r r_st r_cat r_sec r_name r_rem r_det <<< "${STEP_RECORDS[0]}"
+[ "$r_st" = "fail" ] && [ "$r_cat" = "network" ] && [ "$r_sec" = "TestSection" ] && [ "$r_name" = "demo-step" ] && [ "$r_rem" = "do the thing" ] \
+  && ok "step_fail record fields parse correctly" \
+  || no "step_fail record malformed: ${STEP_RECORDS[0]}"
+[ "$r_det" = "boom|with pipe" ] && ok "detail-last keeps embedded pipes intact" || no "detail mangled: '$r_det'"
+[ "${#INSTALL_FAILURES[@]}" -eq 1 ] && ok "step_fail feeds legacy INSTALL_FAILURES" || no "step_fail did not record_fail"
+
+# 7) step_ok after a retried success notes the attempt count.
+STEP_RECORDS=()
+flaky2_cnt="${SBX}/cnt2"; : > "$flaky2_cnt"
+flaky2(){ echo x >> "$flaky2_cnt"; [ "$(wc -l < "$flaky2_cnt" | tr -d ' ')" -ge 2 ]; }
+step_start "retry-step" >/dev/null
+if run_retry flaky2; then
+  step_ok network > "$SBX/so.out" 2>&1
+  out="$(cat "$SBX/so.out")"
+  echo "$out" | grep -q "succeeded on retry 2" && ok "step_ok reports retry count" || no "retry note missing: $out"
+else
+  no "flaky2 should succeed on attempt 2"
+fi
+
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
 echo "========================================"
