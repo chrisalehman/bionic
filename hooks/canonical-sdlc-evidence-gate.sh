@@ -304,7 +304,7 @@ esac
 # additionally requires a `drive-check:` key — proof that one trusted
 # interaction changed app state, read back semantically (not via pixels),
 # before browser-modality evidence counts. Forms: an observed state delta,
-# `drive-check: suite: <named test>` (suite-credit only via a named test
+# `drive-check: suite: <named test — what it asserts>` (suite-credit only via a named test
 # making the same real contact), or `drive-check: n/a: <reason>`. Universal
 # with an n/a escape, grandfathered like every prior key — the hook
 # validates presence, non-empty value / non-empty n/a reason, and the

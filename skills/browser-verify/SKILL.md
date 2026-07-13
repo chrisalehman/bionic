@@ -42,7 +42,7 @@ A page has two kinds of interactive surface, and they need different input:
 | **Coordinate** | `mousemove <x> <y>`, `mousedown`/`mouseup` (`right` for right-click), `mousewheel <dx> <dy>`, `press` | screen coordinates | canvas/WebGL surfaces, drag gestures, wheel, anything the a11y tree can't see |
 | **Compound** | `run-code "async (page) => { await page.mouse… }"` | Playwright `page` (Node scope) | multi-step gestures needing computed coordinates or chords |
 
-**A canvas has an empty a11y tree.** `snapshot` over it returns nothing — a ref-walk over a gesture surface silently drives *nothing* and still "completes." If `snapshot` returns no refs for the surface you must exercise, you are on the wrong rung: switch to coordinates.
+**A bare canvas typically exposes nothing to the a11y tree.** `snapshot` over it then returns no refs — a ref-walk over such a gesture surface silently drives *nothing* and still "completes." If `snapshot` returns no refs for the surface you must exercise, you are on the wrong rung: switch to coordinates.
 
 The CLI's mouse paths dispatch trusted (CDP-level, `isTrusted: true`) events, verified on a generic page. That is necessary, not sufficient: some canvas/WebGL engines gate on more than trust (readiness, provenance, specific event sequences). Never argue from the tool — prove contact with the drive-check below.
 

@@ -1506,7 +1506,7 @@ done
 # ============================================================
 #
 # v8 = v7 plus ONE addition: the Step 5 block must carry
-# `drive-check: <observed delta>` (or `suite: <named test>` /
+# `drive-check: <observed delta>` (or `suite: <named test — what it asserts>` /
 # `n/a: <reason>`) — proof that one trusted interaction changed app
 # state, read back semantically, before browser-modality evidence
 # counts. Universal with an n/a escape, exactly like `bundle-fresh:`.
@@ -1556,7 +1556,7 @@ write_plan "$h14b" "$(v8_frontmatter true)
 current: 5
 Step 5:
 $v8_step5_base
-  drive-check: drag on target surface moved app value 80/40 → 260/130 via eval readback" > /dev/null
+  drive-check: drag on target surface moved app value 3 → 7 via eval readback" > /dev/null
 expect_allow "v8 + drive-check observed delta → allow" \
   "$h14b" 'git commit -m "x"'
 
@@ -1568,7 +1568,7 @@ current: 5
 Step 5:
 $v8_step5_base
   drive-check: suite: e2e drag-updates-value.spec — real pointer input on the target surface, asserts app state delta" > /dev/null
-expect_allow "v8 + drive-check: suite: <named test> → allow" \
+expect_allow "v8 + drive-check: suite-credit form → allow" \
   "$h14c" 'git commit -m "x"'
 
 # 14d — v8 + drive-check: n/a with reason → allow.
