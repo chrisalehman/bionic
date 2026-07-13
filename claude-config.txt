@@ -1,6 +1,18 @@
-# claude-config.txt
+# claude-config.txt — CORE profile
 # Shared configuration for claude-bootstrap.sh and claude-reset.sh.
-# This is the single source of truth for what gets installed/removed.
+#
+# This file is the CORE: the identity layer every Bionic machine gets.
+# Membership test: removing an entry here would change what Bionic *is*
+# for every user. Stack-, org-, or account-specific tooling lives in
+# profile files layered on top:
+#
+#   ./claude-bootstrap.sh                                # core only
+#   ./claude-bootstrap.sh claude-config.everything.txt   # core + full catalog
+#
+# Profiles are additive-only: they can add entries and override single-valued
+# settings (env-var by key, statusline — last file wins) but never remove core
+# entries. Exact-duplicate lines across files are deduped; installs are
+# idempotent either way. claude-reset.sh accepts the same profile arguments.
 #
 # Format: type|name|source
 #   marketplace   |  name
@@ -21,6 +33,7 @@
 #   env-var       |  key    |  value
 #   statusline    |  command
 
+# ─── Foundation CLIs ────────────────────────────────────────────────────────
 brew-dep     | git
 brew-dep     | node
 brew-dep     | pnpm
@@ -28,25 +41,42 @@ brew-dep     | gh
 brew-dep     | jq
 brew-dep     | rg            | ripgrep
 brew-dep     | uv
+brew-dep     | docker
+brew-dep     | yq
+
+# ─── Cloud CLIs ─────────────────────────────────────────────────────────────
+# The Google Cloud CLI ships as a Homebrew *cask* named `gcloud-cli` (the older
+# `google-cloud-sdk` cask was renamed and now 404s; there is no `gcloud`
+# formula). brew-cask installs it correctly and `gcloud` lands on PATH.
+brew-cask    | gcloud        | gcloud-cli
+brew-dep     | aws           | awscli
 
 # CLI tools installed via npm (same category, different install mechanism)
 npm-global   | @playwright/cli
 
-# CLI tools installed via uv (Python packages with CLI entry points)
+# CLI tools installed via uv (Python packages with CLI entry points).
+# NotebookLM requires a Google account on first use.
 uv-tool      | notebooklm-py       | notebooklm
+
+# Pencil.dev design-agent CLI. Its MCP server self-registers when the Pencil
+# app (or VS Code extension) is running — no mcp-server entry needed. The
+# bootstrap report reminds users to install the app from pencil.dev.
+npm-global   | @pencil.dev/cli
 
 # Frontend libraries pre-warmed into the pnpm content-addressable store
 # (importable, no CLI). Pulled into projects with `pnpm add <pkg>`, which
 # hard-links from the store. See the `motion` skill for usage.
 pnpm-store   | motion
 
+# ─── Marketplaces & Plugins ─────────────────────────────────────────────────
 marketplace  | anthropics/skills
 marketplace  | VoltAgent/awesome-claude-code-subagents
 # marketplace  | nextlevelbuilder/ui-ux-pro-max-skill   # disabled: superseded by impeccable (see ADR / README)
 marketplace  | addyosmani/agent-skills
 
 plugin       | superpowers         | claude-plugins-official
-# plugin       | frontend-design     | claude-plugins-official   # disabled: superseded by impeccable (pbakaus/impeccable is a superset)
+# frontend-design complements impeccable (skill pack below): we use both.
+plugin       | frontend-design     | claude-plugins-official
 plugin       | document-skills     | anthropic-agent-skills
 plugin       | example-skills      | anthropic-agent-skills
 # plugin       | ui-ux-pro-max       | ui-ux-pro-max-skill       # disabled: trust issues on paid tier + superseded by impeccable
@@ -59,6 +89,7 @@ plugin       | voltagent-dev-exp   | voltagent-subagents
 plugin       | voltagent-meta      | voltagent-subagents
 plugin       | agent-skills        | addy-agent-skills
 
+# ─── Skills, Commands, Memory ───────────────────────────────────────────────
 global-memory | claude-global.md
 
 github-skill | humanizer          | blader/humanizer
@@ -77,67 +108,11 @@ local-skill  | motion
 local-command | memory-compact
 local-command | memory-save
 
+# ─── Settings ───────────────────────────────────────────────────────────────
 env-var      | CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS | 1
 
 statusline   | npx ccstatusline@latest
 
+# ─── MCP Servers ────────────────────────────────────────────────────────────
 mcp-server   | context7      | @upstash/context7-mcp@latest
 mcp-server   | chrome-devtools | chrome-devtools-mcp@latest
-
-# ─── Optional: Cloud & Infrastructure ──────────────────────────────────────
-# Uncomment what you need, re-run ./claude-bootstrap.sh
-#
-# brew-dep     | kubectl
-# brew-dep     | helm
-# brew-dep     | stern
-# brew-dep     | kubectx
-# brew-dep     | argocd
-brew-dep     | docker
-# brew-dep     | k9s
-
-# ─── Optional: GCP ────────────────────────────────────────────────────────
-# The Google Cloud CLI ships as a Homebrew *cask* named `gcloud-cli` (the older
-# `google-cloud-sdk` cask was renamed and now 404s; there is no `gcloud`
-# formula). brew-cask installs it correctly and `gcloud` lands on PATH.
-#
-brew-cask    | gcloud        | gcloud-cli
-
-# ─── Optional: AWS ────────────────────────────────────────────────────────
-#
-brew-dep     | aws           | awscli
-
-# ─── Optional: Databases ──────────────────────────────────────────────────
-#
-# brew-dep     | psql          | libpq
-# brew-dep     | mongosh
-# brew-dep     | redis
-# mcp-server   | postgres      | @anthropic-ai/mcp-server-postgres
-
-# ─── Optional: Deployment Platforms ───────────────────────────────────────
-#
-brew-dep     | stripe        | stripe/stripe-cli/stripe
-brew-dep     | vercel        | vercel-cli
-brew-dep     | supabase
-brew-dep     | fastlane
-npm-global   | eas-cli
-# brew-dep     | firebase      | firebase-cli
-
-# ─── Optional: API & Serialization ───────────────────────────────────────
-#
-brew-dep     | http          | httpie
-brew-dep     | yq
-brew-dep     | grpcurl
-brew-dep     | protoc        | protobuf
-
-# ─── Optional: Productivity Tools ───────────────────────────────────────
-# Requires Trello API credentials. Get yours at https://trello.com/app-key
-# Set TRELLO_API_KEY and TRELLO_TOKEN in your shell environment, then uncomment and re-run.
-#
-mcp-server   | trello        | @delorenj/mcp-server-trello | TRELLO_API_KEY,TRELLO_TOKEN
-
-# ─── Optional: Observability ────────────────────────────────────────────
-# Requires a Sentry User Auth Token. Create one at https://sentry.io/settings/auth-tokens/
-# Set SENTRY_ACCESS_TOKEN in your shell environment, then re-run.
-#
-npm-global   | @sentry/cli
-mcp-server   | sentry        | @sentry/mcp-server@latest   | SENTRY_ACCESS_TOKEN
