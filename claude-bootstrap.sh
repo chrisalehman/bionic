@@ -888,9 +888,13 @@ section "Playwright browsers"
 # lines when piped — log-safe), cap stalled downloads so a dead socket aborts
 # and playwright's internal retry kicks in, and --yes so npx can never prompt.
 export PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT="${PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT:-60000}"
+# playwright@latest, not bare `playwright`: bare npx resolves any stale global
+# Playwright, and old Playwright + new node hangs during zip extraction
+# (verified live: @playwright/test 1.58.2 froze under node 26.5.0; 1.61.1
+# completed). Pinning @latest removes the stale-global variable entirely.
 step_start "chromium (first install downloads ~170 MB)"
-step_stream network "run 'npx --yes playwright install chromium' by hand, then re-run ./claude-bootstrap.sh" \
-  npx --yes playwright install chromium
+step_stream network "run 'npx --yes playwright@latest install chromium' by hand, then re-run ./claude-bootstrap.sh" \
+  npx --yes playwright@latest install chromium
 
 # ─── Marketplaces ────────────────────────────────────────────────────────────
 
