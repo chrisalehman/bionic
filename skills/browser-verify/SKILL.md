@@ -1,6 +1,6 @@
 ---
 name: browser-verify
-description: Use when verifying UI/frontend behavior in a real browser — golden-path and edge-case flows, console/network checks, visual evidence. Drives the browser via the token-efficient `playwright-cli`; escalates to chrome-devtools MCP only for deep inspection (Lighthouse, performance-trace analysis, heap/CPU profiling, network throttling) that no CLI exposes. Routed by canonical-sdlc Step 5 (the Verify gate's browser modality).
+description: Use when verifying UI/frontend behavior in a real browser — golden-path and edge-case flows, console/network checks, visual evidence. Drives the browser via the token-efficient `playwright-cli`, picking the input rung by surface: ref-based commands for DOM, trusted coordinate primitives (`mousemove`/`mousedown`/`mouseup`/`mousewheel`, `page.mouse`) for canvas/gesture surfaces. Every interaction walk starts with a drive-check — proof that input actually changes app state, read back semantically. Escalates to chrome-devtools MCP only for deep inspection (Lighthouse, performance-trace analysis, heap/CPU profiling, network throttling) that no CLI exposes. Routed by canonical-sdlc Step 5 (the Verify gate's browser modality).
 layer: technique
 needs: []
 loading: deferred
@@ -31,6 +31,32 @@ Runtime verification of browser behavior using **`playwright-cli`** — bionic's
 | **Lighthouse audit, performance-trace *analysis*, heap/CPU profiling, CrUX field data, network throttling emulation** | **escalate → `agent-skills:browser-testing-with-devtools` (chrome-devtools MCP)** |
 
 The bottom row is the **only** sanctioned MCP use in this skill. If a `playwright-cli` command covers the need, the MCP is not justified.
+
+## Input rungs — pick by surface
+
+A page has two kinds of interactive surface, and they need different input:
+
+| Rung | Commands | Addresses | Use for |
+|---|---|---|---|
+| **Ref-based** | `snapshot` → `click`/`fill`/`type`/`drag`/`hover` | accessibility-tree refs | DOM elements: buttons, forms, menus, links |
+| **Coordinate** | `mousemove <x> <y>`, `mousedown`/`mouseup` (`right` for right-click), `mousewheel <dx> <dy>`, `press` | screen coordinates | canvas/WebGL surfaces, drag gestures, wheel, anything the a11y tree can't see |
+| **Compound** | `run-code "async (page) => { await page.mouse… }"` | Playwright `page` (Node scope) | multi-step gestures needing computed coordinates or chords |
+
+**A canvas has an empty a11y tree.** `snapshot` over it returns nothing — a ref-walk over a gesture surface silently drives *nothing* and still "completes." If `snapshot` returns no refs for the surface you must exercise, you are on the wrong rung: switch to coordinates.
+
+The CLI's mouse paths dispatch trusted (CDP-level, `isTrusted: true`) events, verified on a generic page. That is necessary, not sufficient: some canvas/WebGL engines gate on more than trust (readiness, provenance, specific event sequences). Never argue from the tool — prove contact with the drive-check below.
+
+**Gesture bindings are app-defined.** Verify what a gesture is bound to before asserting its effect — a wheel may be bound to scroll-through-a-collection rather than zoom; a naive "wheel = zoom" assertion no-ops and reads as a bug that isn't there.
+
+Coordinate math for canvas gestures — read the box, compute inside it, drive:
+```bash
+BOX=$(playwright-cli -s="$S" --raw eval "() => JSON.stringify(document.querySelector('canvas').getBoundingClientRect())")
+# compute e.g. a drag from 30%,50% to 70%,50% of the box in your shell or a run-code snippet
+playwright-cli -s="$S" mousemove "$X1" "$Y1"
+playwright-cli -s="$S" mousedown
+playwright-cli -s="$S" mousemove "$X2" "$Y2"
+playwright-cli -s="$S" mouseup
+```
 
 ## Setup (once per environment)
 
@@ -67,6 +93,15 @@ S="verify-<wave-slug>"
 playwright-cli -s="$S" open http://localhost:3000
 ```
 
+0. **Drive-check — prove contact before anything counts.** Before ANY interaction evidence counts, prove your input actually reaches the app: perform one cheap interaction on the surface under test and read a real application value back via `eval` — not a screenshot.
+   ```bash
+   # example shape: read state, interact, read again — assert the delta
+   playwright-cli -s="$S" --raw eval "() => appReadableState()"   # before
+   #   …one interaction on the target surface (right rung for the surface)…
+   playwright-cli -s="$S" --raw eval "() => appReadableState()"   # after — MUST differ
+   ```
+   Record the observed delta — it becomes the plan's `drive-check:` evidence (canonical-sdlc Step 5). **On failure:** switch input rung and retry once; if no rung moves state, STOP — the walk cannot produce evidence. Report "no contact" loudly; never continue into a walk that will green-wash. A drive-check failure is a finding, not an inconvenience.
+
 1. **Reconnaissance before action.** After navigating, settle the page, then snapshot to get element refs — never guess selectors.
    ```bash
    playwright-cli -s="$S" run-code "async (page) => { await page.waitForLoadState('networkidle'); }"
@@ -92,6 +127,7 @@ playwright-cli -s="$S" open http://localhost:3000
    playwright-cli -s="$S" run-code "async (page) => { const bad=[]; page.on('response', r => { if (r.status() >= 400) bad.push(r.status() + ' ' + r.url()); }); await page.reload({ waitUntil: 'networkidle' }); return bad; }"
    #   a non-empty array (e.g. ["404 .../api/x", "500 .../y"]) is a failed verification.
    ```
+   Do this **per key state**, not once per walk — and add the third channel: a page-scope `eval` of the actual application value the state is supposed to have changed (the counter, the flag, the rendered model value). A state passes when console is clean AND no ≥400 responses AND the eval'd value matches expectation. The screenshot (step 4) illustrates; it never proves.
 
 4. **Capture visual evidence** straight to the ephemeral workspace (`--filename`; add `--full-page` for the whole scroll height):
    ```bash
@@ -113,6 +149,7 @@ playwright-cli -s="$S" open http://localhost:3000
 - **Always tear down the dev server.** If you started it, `kill` it on every exit path (success, failure, early return). A leaked server poisons the next run's port.
 - **One assertion channel must be objective.** A screenshot is evidence a human reads; pair it with a `console`/`network` check or an `eval` that returns a boolean you assert on (e.g. `eval "() => document.querySelector('.success') !== null"`) — don't rely on the pixels alone.
 - **Reuse auth instead of re-logging-in.** `state-save <file>` once, then `state-load <file>` in later sessions.
+- **Prefer real-shaped data for the pre-human walk.** Mock fixtures are structurally blind to bugs that only manifest on real data shapes — a suite can stay green over a dead feature. When a requirement's stated value is real-data behavior, verify against real data (or real-shaped fixtures). And read mock-green + real-red as a locator, not a contradiction: the bug lives in exactly the layer the mock elides.
 
 ## Security boundaries
 
@@ -136,7 +173,10 @@ Step 5:
   total: 332
   output: <plan>#step-5
   devtools-trace: .bionic/tmp/evidence-<slug>-golden.png
+  drive-check: <observed delta>
 ```
+
+The `drive-check:` key (v8) records the contact proof from procedure step 0.
 
 For non-UI waves, the browser modality is `n/a: <reason>` (the tests modality is still required). **End-to-end closure floor:** for any wave whose value is user-visible behavior change, the evidence must trace user input → new code (file:line per hop); `n/a: substrate-only` is a red flag requiring explicit justification.
 
@@ -150,5 +190,7 @@ When — and only when — you need Lighthouse scores, interpreted performance t
 |---|---|
 | "Unit tests cover it, I can skip browser verify." | Unit tests miss visual regressions, focus traps, contrast, and runtime console/network errors. |
 | "The screenshot looks right, done." | Check `console error` and `network` — a clean pixel over a failed request is not a pass. |
+| "The snapshot returned nothing, but I clicked anyway." | An empty snapshot means the surface isn't a11y-addressable — you drove nothing. Switch to the coordinate rung and drive-check it. |
+| "The walk completed, so the feature works." | Completion ≠ contact. Without a drive-check and per-state semantic readback, a walk can green-wash a dead feature. |
 | "I'll just use the chrome-devtools MCP to click around." | Driving is the CLI's job. The MCP is for inspection the CLI can't do (Lighthouse, perf analysis, profiling). |
 | "I'll guess the selector." | Snapshot first; drive off refs. Guessed selectors cause flaky, token-wasting retries. |
