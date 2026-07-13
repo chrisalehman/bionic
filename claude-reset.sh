@@ -28,15 +28,35 @@ trap cleanup EXIT
 
 # ─── Options ─────────────────────────────────────────────────────────────────
 
+usage() {
+  cat <<'USAGE'
+claude-reset.sh — remove what claude-bootstrap.sh installed.
+
+Usage:
+  ./claude-reset.sh [--all] [profile-config.txt ...]
+
+  ./claude-reset.sh                                    # prompt per item
+  ./claude-reset.sh --all                              # remove everything, no prompts
+  ./claude-reset.sh --all claude-config.everything.txt # core + profile entries
+
+Pass the same profile files you bootstrapped with so profile-only entries
+(extra npm/uv tools, MCP servers) are removed too. Deliberately left in
+place: brew formulae/casks, the pnpm store, Homebrew, node, and the claude
+CLI itself. Restore anytime with ./claude-bootstrap.sh.
+USAGE
+}
+
 REMOVE_ALL=false
 for arg in "$@"; do
-  if [[ "$arg" == "--all" ]]; then
+  if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
+    usage; exit 0
+  elif [[ "$arg" == "--all" ]]; then
     REMOVE_ALL=true
   elif [ -f "$arg" ]; then
     CONFIG_FILES+=("$arg")
   else
     echo "ERROR: profile file not found: ${arg}" >&2
-    echo "Usage: ./claude-reset.sh [--all] [profile-config.txt ...]" >&2
+    echo "Run ./claude-reset.sh --help for usage." >&2
     exit 2
   fi
 done
