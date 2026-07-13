@@ -111,7 +111,7 @@ Mode declaration is reviewable. A wave-sized feature disguised as a `spike` to s
 
 Plans declare every plan-shaping flag in YAML frontmatter. Step 0 (the wizard) writes this; the `governing-skill` hook enforces its presence on writes; the `evidence-gate` hook reads it on every commit.
 
-### Identity block (example, v5 autonomous)
+### Identity block (example, v8 autonomous)
 
 ```yaml
 ---
@@ -120,7 +120,7 @@ sdlc-step: 3
 epic: epic-02-v2-product-pass
 wave: wave-01-checkout-refactor
 mode: autonomous
-canonical_sdlc_version: 6
+canonical_sdlc_version: 8
 ---
 ```
 
@@ -131,10 +131,10 @@ For incident-response artifacts, use `incident: NNNN-<slug>` instead of `epic`/`
 | `governing-skill` | A skill ID (`superpowers:writing-plans`, `agent-skills:idea-refine`, `canonical-sdlc`, …) | Names the skill that produced this artifact. Different artifacts carry different governing skills (Step 1 → `idea-refine`; Step 3 → `writing-plans`; Step 7 RCA → `canonical-sdlc`). |
 | `sdlc-step` | `0..10` | The step that produced this artifact. The evidence-gate hook reads `current:` in `## SDLC State`, not this field, to pick the step to validate. |
 | `mode` | `autonomous` \| `epic-scope` \| `incident-response` \| `design-refresh` \| `spike` | Determines applicable steps, governing-skill substitutions, and default flag values. |
-| `canonical_sdlc_version` | `1`/`2` (legacy) \| `3` \| `4` \| `5` (current) | Routes the hooks. See [Versioning](#versioning-and-backward-compat). |
+| `canonical_sdlc_version` | `1`/`2` (legacy) \| `3` \| `4` \| `5` \| `6` \| `7` \| `8` (current) | Routes the hooks. See [Versioning](#versioning-and-backward-compat). |
 | `epic` / `wave` / `incident` | Identifier matching the enclosing directory | `epic-NN-<slug>` / `wave-NN-<slug>` for epic-tree work; `NNNN-<slug>` for incidents. |
 
-### Discriminator flags (5 — required on v3/v4/v5/v6 autonomous plans)
+### Discriminator flags (5 — required on v3–v8 autonomous plans)
 
 | Flag | Values | Default |
 |---|---|---|
@@ -144,14 +144,14 @@ For incident-response artifacts, use `incident: NNNN-<slug>` instead of `epic`/`
 | `multi_agent` | bool | **`true`** |
 | `deploy_target` | `k8s` \| `vercel` \| `custom` \| `migration` \| `none` | inferred |
 
-### Opt-in flags (2 — required on v3/v4/v5/v6 autonomous plans)
+### Opt-in flags (2 — required on v3–v8 autonomous plans)
 
 | Flag | Default | What it does |
 |---|---|---|
 | `cleanup_on_finish` | `true` | When `true`, the cleanup half of Step 8 (Integrate & close) runs after the merge half: wipes `.bionic/tmp/`, asserts task-list integrity, strips leftover handoff files. |
 | `use_worktree` | `false` | When `true`, Step 4 creates a git worktree at `.worktrees/<slug>` and records `worktree:`/`base-sha:`/`branch:` in its evidence line. |
 
-### `model_plan` (required on v4, v5, and v6 autonomous plans)
+### `model_plan` (required on v4–v8 autonomous plans)
 
 A single-line record of the confirmed model tiers, derived from `multi_agent` and the detected session model at Step 0 and surfaced for explicit confirmation:
 
@@ -159,7 +159,7 @@ A single-line record of the confirmed model tiers, derived from `multi_agent` an
 model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh
 ```
 
-For `canonical_sdlc_version: 4` and `5` autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2). v3 plans keep the prior contract (no `model_plan`). `model_plan` changes no per-step evidence shape; it records intent only.
+For `canonical_sdlc_version: 4` through `8` autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2). v3 plans keep the prior contract (no `model_plan`). `model_plan` changes no per-step evidence shape; it records intent only.
 
 ---
 
@@ -196,12 +196,12 @@ Evidence falls into exactly two tiers:
 
 | Tier | Always present? | Enforced by |
 |---|---|---|
-| **Verification** | Yes — mandatory | `canonical-sdlc-evidence-gate.sh` (presence + per-step shape on v3/v4/v5/v6) |
+| **Verification** | Yes — mandatory | `canonical-sdlc-evidence-gate.sh` (presence + per-step shape on v3–v8) |
 | **Handoff** | Only when a plan spans sessions | Skill prose + the Stop-hook checkpoint |
 
 There is no third "narrative" tier. Decision-point prose to the user is governed instead by the **User Decision Protocol**: frame the decision at the highest useful level of abstraction, offer numbered options each with a one-line rationale, state significance in one sentence, and keep the whole thing under ~200 words. If stating the question needs a filename or line number, the abstraction level is wrong — climb a rung and rewrite.
 
-### Per-step evidence shape (v6)
+### Per-step evidence shape (v8)
 
 The evidence-gate hook checks the current step's line against this table on every `git commit`:
 
@@ -212,7 +212,7 @@ The evidence-gate hook checks the current step's line against this table on ever
 | 2 | pointer to the spec body | pointer-only |
 | 3 | pointer to the plan body | pointer-only |
 | 4 | pointer to the slice list; **or** `worktree:`/`base-sha:`/`branch:` when `use_worktree: true` | pointer-only at the hook |
-| 5 Verify | `cmd:`, `pass:`, `total:`, `output:` (`pass == total`) **AND** `devtools-trace: <path>` **OR** `n/a: <reason>` | tests/build modality always; browser modality is a trace or `n/a` |
+| 5 Verify | `cmd:`, `pass:`, `total:`, `output:` (`pass == total`) **AND** `devtools-trace: <path>` **OR** `n/a: <reason>` **AND** `bundle-fresh: <proof>` **OR** `bundle-fresh: n/a: <reason>` **AND** `drive-check: <observed delta>` **OR** `drive-check: suite: <named test>` **OR** `drive-check: n/a: <reason>` | tests/build modality always; browser modality is a trace or `n/a`; bundle freshness is proof or n/a-with-reason; drive-check is delta, suite-credit, or n/a-with-reason |
 | 6 Review | pointer to the 5-axis review body + critic findings | pointer-only |
 | 7 Document | `adr: <path>` **OR** `rca: <path>` **OR** `n/a: <reason>` | |
 | 8 Integrate & close | `merge:`, `worktree-removed:` **AND** (`cleanup:`, `tmp-wiped:`, `tasks-completed:` **OR** `cleanup: n/a`) | finish half + cleanup half in one atomic step |
@@ -227,7 +227,13 @@ Step 5:
   total: 332
   output: <docs-root>/plans/<slug>.plan.md#step-5
   devtools-trace: .bionic/tmp/devtools-trace-golden.json
+  bundle-fresh: FRESH — canary token-9f3a round-tripped to dist/main.js in 4.2s
+  drive-check: drag moved app value 80/40 → 260/130 via eval readback
 ```
+
+The `bundle-fresh:` value is the pasted output line of the project's freshness tool — typically a canary round-trip (a unique token written into a dev-only source file, polled for in the served artifact, then restored) proving the serve reflects the working tree, not a stale watcher. The hook validates presence and the placeholder ban, not the format — the format is project-specific by design.
+
+The `drive-check:` value is the observed state delta from one trusted interaction, read back semantically (`drive-check: <observed delta>`), a named suite test that makes the same real contact (`drive-check: suite: <named test — what it asserts>`), or `n/a: <reason>` when no browser modality applies. Like `bundle-fresh:`, the hook validates presence and the placeholder ban only — the semantics live in skill prose.
 
 The gate blocks (exit 2) when the current step's evidence line is missing, empty, or a placeholder token (`todo`, `pending`, `inprogress`, `xxx`, `tbd`, `placeholder`).
 
@@ -277,7 +283,7 @@ Fires on writes to `*.plan.md`, `*.spec.md`, `adr-*.md`, and `continuation*.md` 
 
 Flag enforcement is version-routed:
 - **v3 autonomous plans** — also requires the 5 discriminator flags + 2 opt-in flags.
-- **v4, v5, and v6 autonomous plans** — same, plus a non-empty `model_plan`.
+- **v4 through v8 autonomous plans** — same, plus a non-empty `model_plan`.
 - **v1/v2 plans** — grandfathered; only the `governing-skill:` field is checked, no flag enforcement.
 - **Unsupported version** — exit 2.
 
@@ -288,7 +294,9 @@ Fires on `git commit`. Locates the newest plan, reads its `## SDLC State`, finds
 Shape enforcement is version-routed:
 - **v3/v4 plans** — run the v3 per-step shape table (v4 shares v3's table; pre-collapse step numbering).
 - **v5 plans** — run the v5 per-step shape table (the gate-collapsed 0–10 shape, with an external-review step).
-- **v6 plans** — run the v6 per-step shape table above (v5 minus external review; 0–9).
+- **v6 plans** — run the v6 per-step shape table (v5 minus external review; 0–9).
+- **v7 plans** — run the v7 per-step shape table (v6 plus the universal Step-5 `bundle-fresh:` key).
+- **v8 plans** — run the v8 per-step shape table above (v7 plus the universal Step-5 `drive-check:` key).
 - **v1/v2 plans** — presence-only by default.
 
 ---
@@ -338,15 +346,17 @@ Four tiers by role (the default plan when `multi_agent: true`):
 | `3` | Prior, still enforced | 5 discriminators + 2 opt-in flags | v3 per-step shape table (pre-collapse step numbering) |
 | `4` | Prior, still enforced | v3 set + required `model_plan` | v3 per-step shape table (v4 shares v3's — `model_plan` adds no evidence shape) |
 | `5` | Prior, still enforced | v4 set: 5 discriminators + 2 opt-in flags + required `model_plan` | v5 per-step shape table (the gate-collapsed 0–10 shape, with an `8 External review` step) |
-| `6` | **Current** | v4 set: 5 discriminators + 2 opt-in flags + required `model_plan` | v6 per-step shape table (v5 minus the external-review step: 0–9) |
+| `6` | Prior, still enforced | v4 set: 5 discriminators + 2 opt-in flags + required `model_plan` | v6 per-step shape table (v5 minus the external-review step: 0–9; external review dropped) |
+| `7` | Prior, still enforced | v4 set: 5 discriminators + 2 opt-in flags + required `model_plan` | v7 per-step shape table (v6 plus the universal Step-5 `bundle-fresh:` key) |
+| `8` | **Current** | v4 set: 5 discriminators + 2 opt-in flags + required `model_plan` | v8 per-step shape table (v7 plus the universal Step-5 `drive-check:` key) |
 
-Legacy plans (v1/v2) run grandfathered indefinitely: the governing-skill hook checks only `governing-skill:`, and the evidence gate uses presence-only. v3 plans remain enforced under the prior 5 + 2 contract. v4, v5, and v6 require `model_plan`. v3/v4 plans run the v3 per-step shape table (v4 shares v3's); v5 plans run the v5 shape table; v6 plans run the v6 shape table.
+Legacy plans (v1/v2) run grandfathered indefinitely: the governing-skill hook checks only `governing-skill:`, and the evidence gate uses presence-only. v3 plans remain enforced under the prior 5 + 2 contract. v4 through v8 require `model_plan`. v3/v4 plans run the v3 per-step shape table (v4 shares v3's); v5 plans run the v5 shape table; v6 plans run the v6 shape table; v7 plans run the v7 shape table; v8 plans run the v8 shape table.
 
 ---
 
 ## Configuration: the Step-0 wizard
 
-Step 0 is mandatory for new plans (`canonical_sdlc_version: 6`). It sets every plan-shaping flag deliberately, with explicit user confirmation, in four sub-steps:
+Step 0 is mandatory for new plans (`canonical_sdlc_version: 8`). It sets every plan-shaping flag deliberately, with explicit user confirmation, in four sub-steps:
 
 1. **Pre-flight environment check** — verify `.bionic/` root, resolve the docs root (`<project>/.bionic/config.yaml`'s `docs-root:`, default `.bionic/docs`), ensure `{specs,plans,adrs,incidents}/` exist, `mkdir -p .bionic/tmp/`, and verify both hooks are installed and executable.
 2. **Infer recommended values** — from repo files (`tsconfig.json` → `typescript`, `Cargo.toml` → `rust`, …) and conversation keywords (surface type, deploy target, UI). This includes the integration branch: waves inherit it from the epic plan; standalone plans default to the current mainline branch or `main`.
@@ -408,12 +418,12 @@ Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql
 
 | Step | Gate | Evidence |
 |---|---|---|
-| 0. Configure | Frontmatter has `canonical_sdlc_version: 6` + 5 discriminator + 2 opt-in flags + `model_plan`; user confirmed; TaskCreate list created | Confirmation line in `## SDLC State` |
+| 0. Configure | Frontmatter has `canonical_sdlc_version: 8` + 5 discriminator + 2 opt-in flags + `model_plan`; user confirmed; TaskCreate list created | Confirmation line in `## SDLC State` |
 | 1. Ideate | Refined idea + "Not Doing" list; alternatives lens cites prior artifacts | Pointer to ideate body in spec |
 | 2. Spec | Every requirement has an acceptance criterion | Pointer to spec doc |
 | 3. Plan | No placeholders; `integration-branch:` declared; Step 4 expanded into slice tasks; approval | Pointer to plan body |
 | 4. Implement | Every slice has a test that was RED first; worktree created if `use_worktree: true` | Slice-list pointer; worktree fields when applicable |
-| 5. Verify (gate) | Tests/build pass (`pass == total`); browser modality proven (trace) or `n/a:` | `cmd:`/`pass:`/`total:`/`output:` **and** `devtools-trace:` or `n/a:` |
+| 5. Verify (gate) | Tests/build pass (`pass == total`); browser modality proven (trace) or `n/a:`; bundle freshness proven or `n/a:`; drive-check proven or `n/a:` | `cmd:`/`pass:`/`total:`/`output:` **and** `devtools-trace:` or `n/a:` **and** `bundle-fresh:` proof or `n/a:` **and** `drive-check:` delta/suite or `n/a:` |
 | 6. Review (gate) | Every one of the 5 axes has a verdict; adversarial critic attached (mandatory in `autonomous`, `incident-response`, `design-refresh`) | Pointer to 5-axis review body + critic findings |
 | 7. Document decisions | Every significant decision has a record | `adr:` / `rca:` / `n/a:` |
 | 8. Integrate & close | Wave merged into the declared `integration-branch`; worktree removed; `.bionic/tmp/` wiped; all tasks completed; `cleaned:` stamped | `merge:`/`worktree-removed:` **and** `cleanup:`/`tmp-wiped:`/`tasks-completed:` or `cleanup: n/a` |
