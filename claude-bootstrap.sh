@@ -205,7 +205,31 @@ step_fail() {
   record_fail "${STEP_NAME}: ${2}"
 }
 
+# step_stream <category> <remediation> <cmd...> — for steps expected to run
+# >30s (big downloads): stream the child's own output indented instead of
+# capturing it, so long steps have a heartbeat. The child's progress lines are
+# plain text when piped, so captured logs stay clean. No run_retry — heavy
+# downloaders retry internally, and a silent from-scratch re-download is worse
+# UX than a visible failure with a re-run remediation. Call after step_start.
+step_stream() {
+  local category="$1" remediation="$2"; shift 2
+  local name="$STEP_NAME" t0="$STEP_T0"
+  echo ""
+  if "$@" </dev/null 2>&1 | sed 's/^/    /'; then
+    step_start "$name"; STEP_T0="$t0"
+    step_ok "$category"
+  else
+    step_start "$name"; STEP_T0="$t0"
+    step_fail "$category" "failed (see output above)" "$remediation"
+  fi
+  return 0
+}
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
+
+# Formulae with heavy dependency trees (>30s installs) stream brew's own
+# progress instead of installing silently — see step_stream.
+STREAM_HEAVY_BREW=" fastlane "
 
 ensure_cmd() {
   local cmd="$1" pkg="${2:-$1}"
@@ -214,6 +238,13 @@ ensure_cmd() {
     step_cached tool
     return 0
   fi
+  case "$STREAM_HEAVY_BREW" in
+    *" ${cmd} "*)
+      step_stream network "run 'brew install ${pkg}' by hand, then re-run ./claude-bootstrap.sh" \
+        brew install "$pkg" --quiet
+      return 0
+      ;;
+  esac
   if run_retry brew install "$pkg" --quiet; then
     step_ok network
   else
@@ -232,11 +263,9 @@ do_install_brew_cask() {
     step_cached tool
     return 0
   fi
-  if run_retry brew install --cask "$token" --quiet; then
-    step_ok network
-  else
-    step_fail network "$RUN_ERR" "run 'brew install --cask ${token}' by hand, then re-run ./claude-bootstrap.sh"
-  fi
+  # Casks are the big downloads (gcloud-cli is ~600 MB) — stream brew's progress.
+  step_stream network "run 'brew install --cask ${token}' by hand, then re-run ./claude-bootstrap.sh" \
+    brew install --cask "$token" --quiet
   return 0
 }
 
@@ -858,19 +887,10 @@ section "Playwright browsers"
 # playwright's own progress instead of capturing it (it prints plain progress
 # lines when piped — log-safe), cap stalled downloads so a dead socket aborts
 # and playwright's internal retry kicks in, and --yes so npx can never prompt.
-step_start "chromium (first install downloads ~170 MB)"
-echo ""
 export PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT="${PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT:-60000}"
-_pw_t0="$STEP_T0"
-if npx --yes playwright install chromium </dev/null 2>&1 | sed 's/^/    /'; then
-  step_start "chromium"
-  STEP_T0="$_pw_t0"
-  step_ok network
-else
-  step_start "chromium"
-  STEP_T0="$_pw_t0"
-  step_fail network "download failed or stalled (see progress output above)" "run 'npx --yes playwright install chromium' by hand, then re-run ./claude-bootstrap.sh"
-fi
+step_start "chromium (first install downloads ~170 MB)"
+step_stream network "run 'npx --yes playwright install chromium' by hand, then re-run ./claude-bootstrap.sh" \
+  npx --yes playwright install chromium
 
 # ─── Marketplaces ────────────────────────────────────────────────────────────
 
@@ -970,13 +990,14 @@ read_config "local-command" do_install_local_command
 # ─── Skill Setup ────────────────────────────────────────────────────────────
 
 section "Skill setup"
+_excalidraw_setup() {
+  cd ~/.claude/skills/excalidraw-diagram/references && uv sync --quiet && uv run playwright install chromium
+}
 if [ -d ~/.claude/skills/excalidraw-diagram/references ]; then
+  # First install downloads the chromium headless shell (~90 MB) — stream it.
   step_start "excalidraw-diagram renderer"
-  if (cd ~/.claude/skills/excalidraw-diagram/references && uv sync --quiet && uv run playwright install chromium) >/dev/null 2>&1; then
-    step_ok network
-  else
-    step_fail network "uv sync / playwright install failed" "cd ~/.claude/skills/excalidraw-diagram/references && uv sync && uv run playwright install chromium"
-  fi
+  step_stream network "cd ~/.claude/skills/excalidraw-diagram/references && uv sync && uv run playwright install chromium, then re-run ./claude-bootstrap.sh" \
+    _excalidraw_setup
 else
   echo "  excalidraw-diagram — skipped (not installed)"
 fi
