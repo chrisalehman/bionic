@@ -572,6 +572,9 @@ expect_true "bootstrap defines run_retry helper" grep -q "^run_retry()" "$BOOTST
 expect_true "bootstrap defines record_fail helper" grep -q "^record_fail()" "$BOOTSTRAP"
 expect_true "bootstrap defines step_fail helper" grep -q "^step_fail()" "$BOOTSTRAP"
 expect_true "bootstrap defines step_stream helper (heartbeat for >30s downloads)" grep -q "^step_stream()" "$BOOTSTRAP"
+expect_true "bootstrap defines the read-only updates advisory" grep -q "^collect_updates()" "$BOOTSTRAP"
+# The advisory must stay read-only: no upgrade verbs outside echoed remediation text.
+expect_false "advisory never runs brew upgrade itself" grep -qE '^\s*(run_retry )?brew upgrade' "$BOOTSTRAP"
 expect_true "bootstrap collects INSTALL_FAILURES" grep -q "INSTALL_FAILURES=" "$BOOTSTRAP"
 expect_true "bootstrap collects STEP_RECORDS" grep -q "STEP_RECORDS=" "$BOOTSTRAP"
 

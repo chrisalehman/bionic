@@ -1431,6 +1431,57 @@ else
   verify_errors+=("shell alias in ~/${SHELL_RC_NAME} — not installed")
 fi
 
+# ─── Staleness advisory (read-only) ─────────────────────────────────────────
+# Version drift is a real failure class (old Playwright + new node hung
+# forever), but upgrades belong to the tools' own managers. So: detect drift
+# in managed tools, report it with the exact command to fix it, never upgrade
+# anything ourselves. Purely informational — does not affect the exit code.
+
+UPDATES=()
+
+collect_updates() {
+  # Managed package names (brew uses the package field, normalized to short
+  # names — tap-qualified entries like stripe/stripe-cli/stripe print as
+  # `stripe` in brew outdated).
+  local managed_brew="" managed_npm=""
+  _collect_brew_pkg() { local p="${2:-$1}"; managed_brew="${managed_brew} ${p##*/}"; }
+  read_config "brew-dep" _collect_brew_pkg
+  _collect_npm_pkg() { managed_npm="${managed_npm} $1"; }
+  read_config "npm-global" _collect_npm_pkg
+
+  # brew outdated exits non-zero when outdated formulae exist — capture anyway.
+  local outdated f stale=""
+  outdated="$(brew outdated --quiet 2>/dev/null || true)"
+  for f in $outdated; do
+    case " ${managed_brew} " in
+      *" ${f##*/} "*) stale="${stale} ${f##*/}" ;;
+    esac
+  done
+  stale="${stale# }"
+  [ -n "$stale" ] && UPDATES+=("brew formulae outdated: ${stale}|brew upgrade ${stale}")
+
+  # npm outdated also exits non-zero when outdated packages exist.
+  if command -v jq &>/dev/null; then
+    local pkg cur latest
+    while IFS=$'\t' read -r pkg cur latest; do
+      [ -n "$pkg" ] || continue
+      case " ${managed_npm} " in
+        *" ${pkg} "*) UPDATES+=("${pkg} ${cur} → ${latest}|npm install -g ${pkg}@latest") ;;
+      esac
+    done < <(npm outdated -g --json 2>/dev/null | jq -r 'to_entries[] | [.key, .value.current // "?", .value.latest // "?"] | @tsv' 2>/dev/null || true)
+  fi
+  return 0
+}
+
+echo ""
+echo "  Update check (advisory):"
+collect_updates
+if [ "${#UPDATES[@]}" -eq 0 ]; then
+  echo "    all managed tools current ✓"
+else
+  echo "    ${#UPDATES[@]} update(s) available — see report below"
+fi
+
 # ─── Final Report ───────────────────────────────────────────────────────────
 
 print_report() {
@@ -1573,6 +1624,18 @@ print_report() {
       echo ""
       printf '    %d. %b⚠%b %s\n' "$j" "$C_YELLOW" "$C_RESET" "$e"
       j=$((j + 1))
+    done
+    echo ""
+  fi
+
+  # Updates advisory — informational only, never affects the exit code.
+  if [ "${#UPDATES[@]}" -gt 0 ]; then
+    echo "  Updates available (${#UPDATES[@]}) — optional; nothing here blocks you."
+    local u
+    for u in ${UPDATES[@]+"${UPDATES[@]}"}; do
+      echo ""
+      printf '    • %s\n' "${u%%|*}"
+      printf '        → %s\n' "${u#*|}"
     done
     echo ""
   fi
