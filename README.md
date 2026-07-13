@@ -298,7 +298,7 @@ Hooks are shell scripts that Claude Code invokes at defined lifecycle events. Bi
 - `protect-main.sh` (`PreToolUse|Bash`) — blocks pushes to main/master.
 - `protect-database.sh` (`PreToolUse|Bash`) — blocks destructive SQL.
 - `canonical-sdlc-evidence-gate.sh` (`PreToolUse|Bash`) — blocks `git commit` when the active plan's `## SDLC State` section lacks evidence for the current step. v3–v8 plans get per-step shape enforcement (e.g. Step 5 Verify requires `cmd:`, `pass:`, `total:`, `output:` with `pass==total`, plus a `devtools-trace:` or `n/a:`, plus `bundle-fresh:` (v7+) and `drive-check:` (v8) or `n/a:`); v1/v2 plans are presence-only.
-- `canonical-sdlc-governing-skill.sh` (`PreToolUse|Write, Edit`) — blocks writes to `*.plan.md` / `*.spec.md` / `adr-*.md` / `continuation*.md` under the docs root that lack non-empty `governing-skill:` frontmatter. v3 autonomous plans must also declare `canonical_sdlc_version: 3` plus the 5 discriminator + 2 opt-in flags; v4/v5 add a required `model_plan`; v1/v2 plans are grandfathered.
+- `canonical-sdlc-governing-skill.sh` (`PreToolUse|Write, Edit`) — blocks writes to `*.plan.md` / `*.spec.md` / `adr-*.md` / `continuation*.md` under the docs root that lack non-empty `governing-skill:` frontmatter. v3 autonomous plans must also declare `canonical_sdlc_version: 3` plus the 5 discriminator + 2 opt-in flags; v4 through v8 add a required `model_plan`; v1/v2 plans are grandfathered.
 
 **Advisory / reinforcement** (two hooks using JSON output to inject context, never block):
 - `memory-cleanup.sh` (`SessionStart|startup`) — scans `.bionic/memory/` at session start and emits an advisory listing stale or oversized files.
@@ -335,7 +335,7 @@ Both hooks have test suites ([`hooks/protect-main.test.sh`](hooks/protect-main.t
 
 `PreToolUse|Write, Edit` hook that gates writes to canonical-sdlc artifacts. It walks up from the target path to the nearest `.bionic/` parent to find the project root, resolves the docs root (`<project>/.bionic/config.yaml`'s `docs-root:`, default `.bionic/docs`), and only fires when the file lives under `{specs,plans,adrs,incidents}/` and its basename matches `*.plan.md` / `*.spec.md` / `adr-*.md` / `continuation*.md`. README files, images, and supporting notes under those paths pass through.
 
-When in scope, the hook requires non-empty `governing-skill:` frontmatter, then routes flag enforcement by `canonical_sdlc_version`: v3 autonomous plans must carry the 5 discriminator + 2 opt-in flags; v4 and v5 add a required `model_plan` (a missing value blocks the write); v1/v2 plans are grandfathered (only `governing-skill:` is checked); an unsupported version exits 2. This makes the plan file's frontmatter the single source of truth — a malformed plan can't be written in the first place.
+When in scope, the hook requires non-empty `governing-skill:` frontmatter, then routes flag enforcement by `canonical_sdlc_version`: v3 autonomous plans must carry the 5 discriminator + 2 opt-in flags; v4 through v8 add a required `model_plan` (a missing value blocks the write); v1/v2 plans are grandfathered (only `governing-skill:` is checked); an unsupported version exits 2. This makes the plan file's frontmatter the single source of truth — a malformed plan can't be written in the first place.
 
 **canonical-sdlc-evidence-gate.sh** — [`hooks/canonical-sdlc-evidence-gate.sh`](hooks/canonical-sdlc-evidence-gate.sh) → `~/.claude/hooks/canonical-sdlc-evidence-gate.sh`
 
