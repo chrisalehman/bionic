@@ -892,9 +892,16 @@ export PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT="${PLAYWRIGHT_DOWNLOAD_CONNECTION_
 # Playwright, and old Playwright + new node hangs during zip extraction
 # (verified live: @playwright/test 1.58.2 froze under node 26.5.0; 1.61.1
 # completed). Pinning @latest removes the stale-global variable entirely.
+# The sed drop-filter strips playwright's "install your project's
+# dependencies first" warning box — it's aimed at per-project test setups and
+# is meaningless (but alarming) for this global browser install. sed always
+# exits 0, so pipefail still surfaces npx's own status.
+_playwright_install() {
+  npx --yes playwright@latest install chromium 2>&1 | sed '/[╔║╚]/d'
+}
 step_start "chromium (first install downloads ~170 MB)"
 step_stream network "run 'npx --yes playwright@latest install chromium' by hand, then re-run ./claude-bootstrap.sh" \
-  npx --yes playwright@latest install chromium
+  _playwright_install
 
 # ─── Marketplaces ────────────────────────────────────────────────────────────
 
