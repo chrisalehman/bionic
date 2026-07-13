@@ -149,9 +149,13 @@ OUT="$WORK/captured.log"
 docker run --rm -v "$REPO":/bionic:ro -v "$WORK":/host:ro "$IMAGE" bash /host/runner.sh > "$OUT" 2>&1 || true
 
 # ── parse + assert ──────────────────────────────────────────────────────────
-done_line="$(grep -E '^Done' "$OUT" | tail -1)"
+# The report ends with a banner + a counts line:
+#   # ─── Bootstrap complete ✓ ───...
+#   68 steps · 64 ok (51 already up to date) · 0 failed · 2 verify errors · 2 warnings · 4m 12s
+done_line="$(grep -E '^# ─── Bootstrap' "$OUT" | tail -1)"
+counts_line="$(grep -E '^  [0-9]+ steps ·' "$OUT" | tail -1)"
 calls="$(awk '/===CALLS_START===/{f=1;next}/===CALLS_END===/{f=0}f' "$OUT")"
-install_fails="$(awk '/Install failures/{f=1;next}/Verification errors|Warnings/{f=0}f' "$OUT" | grep -E '✗' || true)"
+install_fails="$(awk '/^  Failures \(/{f=1;next}/^  Warnings \(|^  Next steps/{f=0}f' "$OUT" | grep -E '✗' | grep -v '\[verify\]' || true)"
 
 PASS=0; FAIL=0
 ok() { echo "PASS: $1"; PASS=$((PASS+1)); }
@@ -160,17 +164,17 @@ has_call() { echo "$calls" | grep -qF "$1"; }
 
 echo "──────────────────────────────────────────────"
 if [ -z "$done_line" ]; then
-  no "script reached the end-of-run summary"
-  echo "    (no 'Done' line — last 15 lines of container output:)"
+  no "script reached the end-of-run report"
+  echo "    (no report banner — last 15 lines of container output:)"
   tail -15 "$OUT" | sed 's/^/      /'
 else
-  ok "script ran to completion on a fresh OS — ${done_line}"
+  ok "script ran to completion on a fresh OS — ${counts_line:-$done_line}"
 fi
 
 if [ "$MODE" = "mock" ]; then
-  echo "$done_line" | grep -q '0 install failure' \
+  echo "$counts_line" | grep -q '· 0 failed ·' \
     && ok "install phase completed with 0 failures (no mid-run abort)" \
-    || no "install phase reported failures (mock mode expects 0): ${done_line:-<none>}"
+    || no "install phase reported failures (mock mode expects 0): ${counts_line:-<none>}"
   has_call "brew install --cask gcloud-cli --quiet"            && ok "issued: brew install --cask gcloud-cli (the gcloud fix)" || no "missing gcloud cask command"
   has_call "pnpm store add motion@latest"                      && ok "issued: pnpm store add motion@latest"                   || no "missing pnpm motion command"
   has_call "claude plugin marketplace add addyosmani/agent-skills" && ok "issued: agent-skills marketplace add"               || no "missing marketplace add"
@@ -180,9 +184,10 @@ if [ "$MODE" = "mock" ]; then
   echo "since nothing is really installed. The signal is '0 install failures' + the"
   echo "correct commands above. For REAL install validation, run with --real."
 else
-  # Real mode: separate genuine failures from auth-dependent plugin/marketplace ones.
-  realf="$(echo "$install_fails" | grep -vE 'marketplace |plugin ' || true)"
-  authf="$(echo "$install_fails" | grep -E 'marketplace |plugin ' || true)"
+  # Real mode: separate genuine failures from auth-dependent plugin/marketplace
+  # ones. Report failure lines carry the section: "1. ✗ Plugins — name [cat]".
+  realf="$(echo "$install_fails" | grep -vE 'Marketplaces —|Plugins —' || true)"
+  authf="$(echo "$install_fails" | grep -E 'Marketplaces —|Plugins —' || true)"
   if [ -z "$realf" ]; then
     ok "no REAL (non-auth) install failures"
   else

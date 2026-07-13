@@ -3,7 +3,19 @@
 # claude-bootstrap.sh
 # Sets up Claude Code plugins, skills, and dependencies.
 # Idempotent — safe to run multiple times; produces the same result.
-# Requires: claude CLI + Homebrew (macOS or Linux/WSL)
+#
+# Usage:
+#   ./claude-bootstrap.sh                                # core profile
+#   ./claude-bootstrap.sh claude-config.everything.txt   # core + catalog profile
+#
+# Profile files are layered on top of claude-config.txt (core). Profiles are
+# additive-only; exact-duplicate entries are deduped; for single-valued
+# settings (env-var by key, statusline) the last file wins.
+#
+# Exit codes:
+#   0  success (including warnings and env-gated skips)
+#   1  ran to completion but one or more steps failed — fix and re-run
+#   2  could not run: hard prerequisite failed in preflight
 #
 set -euo pipefail
 
@@ -11,37 +23,69 @@ cleanup() { rm -f ~/.claude/settings.json.tmp ~/.claude/CLAUDE.md.tmp; }
 trap cleanup EXIT
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CONFIG="${SCRIPT_DIR}/claude-config.txt"
+START_TS="$(date +%s)"
 
-# ─── Prerequisite checks ────────────────────────────────────────────────────
+# ─── Config profiles ─────────────────────────────────────────────────────────
+# Core always applies; positional args are additional profile files.
 
-check_cmd() {
-  if ! command -v "$1" &>/dev/null; then
-    echo "ERROR: '$1' not found. $2" >&2
-    exit 1
+CONFIG_FILES=("${SCRIPT_DIR}/claude-config.txt")
+for arg in "$@"; do
+  if [ ! -f "$arg" ]; then
+    echo "ERROR: profile file not found: ${arg}" >&2
+    echo "Usage: ./claude-bootstrap.sh [profile-config.txt ...]" >&2
+    exit 2
   fi
-}
+  CONFIG_FILES+=("$arg")
+done
 
-check_cmd claude  "Install with: brew install claude-code"
+# ─── Structural git environment ──────────────────────────────────────────────
+# claude plugin install clones GitHub repos via SSH (git@github.com:) even for
+# public repos; fresh machines without a default GitHub SSH key fail with
+# "Permission denied (publickey)". Rewrite SSH→HTTPS for this process only —
+# the user's ~/.gitconfig is never touched. GIT_TERMINAL_PROMPT=0 converts any
+# would-be credential prompt (which would hang the run) into a fast failure
+# that run_retry captures.
+export GIT_CONFIG_COUNT=1 \
+       GIT_CONFIG_KEY_0='url.https://github.com/.insteadOf' \
+       GIT_CONFIG_VALUE_0='git@github.com:' \
+       GIT_TERMINAL_PROMPT=0
 
 # ─── Platform Detection ─────────────────────────────────────────────────────
 
 source "${SCRIPT_DIR}/lib/platform.sh"
 
-# ─── Homebrew ────────────────────────────────────────────────────────────────
+# ─── Sections ────────────────────────────────────────────────────────────────
+# Bump SECTION_TOTAL when adding a section() call.
 
-if ! command -v brew &>/dev/null; then
-  echo "Installing Homebrew..."
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-  # Re-source to pick up the newly installed brew
-  source "${SCRIPT_DIR}/lib/platform.sh"
-fi
+SECTION_TOTAL=22
+SECTION_IDX=0
+CURRENT_SECTION=""
+section() {
+  local title="$1" count="${2:-}"
+  SECTION_IDX=$((SECTION_IDX + 1))
+  CURRENT_SECTION="$title"
+  echo ""
+  if [ -n "$count" ]; then
+    printf '[%2d/%d] %s — %s items\n' "$SECTION_IDX" "$SECTION_TOTAL" "$title" "$count"
+  else
+    printf '[%2d/%d] %s\n' "$SECTION_IDX" "$SECTION_TOTAL" "$title"
+  fi
+}
+
+# Count active entries of a type across all config files (deduped).
+config_count() {
+  cat "${CONFIG_FILES[@]}" | grep -v '^\s*#' | grep -v '^\s*$' | awk '!seen[$0]++' \
+    | grep -cE "^[[:space:]]*${1}[[:space:]]*\|" || true
+}
 
 # ─── Config reader ──────────────────────────────────────────────────────────
 
-# Reads claude-config.txt and calls a callback for each entry of a given type.
-# Usage: read_config <type> <callback>
+# Reads all config files (core + profiles, deduped) and calls a callback for
+# each entry of a given type. Usage: read_config <type> <callback>
 #   callback receives: field1 field2 field3 (trimmed, pipe-delimited; f2 and f3 may be empty)
+# The callback runs with stdin redirected to /dev/null: a child that reads
+# stdin (e.g. a brew tap install's git clone) would otherwise consume the rest
+# of the config stream and silently truncate the section.
 read_config() {
   local type="$1" callback="$2"
   while IFS='|' read -r entry_type f1 f2 f3; do
@@ -50,53 +94,130 @@ read_config() {
     f1="$(echo "$f1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
     f2="$(echo "${f2:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
     f3="$(echo "${f3:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    "$callback" "$f1" "$f2" "$f3"
-  done < <(grep -v '^\s*#' "$CONFIG" | grep -v '^\s*$')
+    "$callback" "$f1" "$f2" "$f3" </dev/null
+  done < <(cat "${CONFIG_FILES[@]}" | grep -v '^\s*#' | grep -v '^\s*$' | awk '!seen[$0]++')
 }
 
 # ─── Resilience ──────────────────────────────────────────────────────────────
 #
 # The install phase must run to completion even when individual steps fail
-# (network blips, renamed packages, registry hiccups). Each install records its
-# failure into INSTALL_FAILURES and CONTINUES rather than aborting; the
-# end-of-run summary reports them and sets the exit code. Network operations go
-# through run_retry (exponential backoff). Genuine prerequisites (claude, brew,
-# npm, uv) still hard-fail up front — those are not recoverable mid-run.
+# (network blips, renamed packages, registry hiccups). Every install step
+# reports through one path — step_start then step_ok/step_cached/step_skip/
+# step_fail — which both prints the live status line and appends a uniform
+# record to STEP_RECORDS for the end-of-run report. step_fail never aborts;
+# hard failures (exit 2) live exclusively in preflight. Network operations go
+# through run_retry (exponential backoff, stdin detached).
+#
+# STEP_RECORDS entry: status|category|section|name|remediation|detail
+#   status   ∈ ok|cached|skip|warn|fail
+#   category ∈ prereq|network|auth|env|tool|config|fs|state
+#   detail is LAST so embedded pipes can't break parsing; newlines flattened.
 
 INSTALL_FAILURES=()
+STEP_RECORDS=()
 RETRY_MAX="${RETRY_MAX:-3}"
 RUN_ERR=""
+RUN_ATTEMPT=1
+STEP_NAME=""
+STEP_T0=0
+CURRENT_SECTION="${CURRENT_SECTION:-}"
 
-# run_retry <cmd...> — runs cmd with stdout+stderr captured into RUN_ERR,
-# retrying up to RETRY_MAX times with exponential backoff (2s, 4s, 8s...).
-# Returns 0 on first success, 1 if every attempt fails. Never aborts the script.
+# Color only the glyphs, only on a TTY. Piped output is byte-identical minus
+# color, so captured logs replay cleanly.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_RED=$'\033[31m'; C_BOLD=$'\033[1m'; C_RESET=$'\033[0m'
+else
+  C_GREEN=""; C_YELLOW=""; C_RED=""; C_BOLD=""; C_RESET=""
+fi
+
+# run_retry <cmd...> — runs cmd with stdout+stderr captured into RUN_ERR and
+# stdin detached, retrying up to RETRY_MAX times with exponential backoff
+# (2s, 4s, 8s...). Sets RUN_ATTEMPT to the attempt count. Returns 0 on
+# success, 1 if every attempt fails. Never aborts the script.
 run_retry() {
   local n=1 delay=2
   while :; do
-    if RUN_ERR="$("$@" 2>&1)"; then return 0; fi
-    [ "$n" -ge "$RETRY_MAX" ] && return 1
+    if RUN_ERR="$("$@" </dev/null 2>&1)"; then RUN_ATTEMPT="$n"; return 0; fi
+    if [ "$n" -ge "$RETRY_MAX" ]; then RUN_ATTEMPT="$n"; return 1; fi
     sleep "$delay"
     n=$((n + 1)); delay=$((delay * 2))
   done
 }
 
-# record_fail <message> — note a non-fatal install failure for the summary.
+# record_fail <message> — note a non-fatal install failure (legacy summary).
 record_fail() { INSTALL_FAILURES+=("$1"); }
+
+# record_step <status> <category> <name> <remediation> <detail>
+record_step() {
+  local detail="${5:-}"
+  detail="$(printf '%s' "$detail" | tr '\n' ' ' | cut -c1-160)"
+  STEP_RECORDS+=("${1}|${2}|${CURRENT_SECTION:-}|${3}|${4:-}|${detail}")
+}
+
+# step_start <display-name> — begin a step line: "  name... "
+step_start() {
+  STEP_NAME="$1"
+  STEP_T0="$(date +%s)"
+  RUN_ATTEMPT=1
+  echo -n "  ${1}... "
+}
+
+# Append " (Ns)" for steps that took ≥5s.
+_step_dur() {
+  local dt=$(( $(date +%s) - STEP_T0 ))
+  if [ "$dt" -ge 5 ]; then printf ' (%ss)' "$dt"; fi
+}
+
+# step_ok <category> [note]
+step_ok() {
+  local note="${2:-}"
+  if [ -z "$note" ] && [ "${RUN_ATTEMPT:-1}" -gt 1 ]; then
+    note="succeeded on retry ${RUN_ATTEMPT}"
+  fi
+  echo "${C_GREEN}✓${C_RESET}${note:+ (${note})}$(_step_dur)"
+  record_step ok "$1" "$STEP_NAME" "" "$note"
+}
+
+# step_cached <category> [note]
+step_cached() {
+  local note="${2:-already installed}"
+  echo "${C_GREEN}✓${C_RESET} (${note})"
+  record_step cached "$1" "$STEP_NAME" "" "$note"
+}
+
+# step_skip <category> <reason> [remediation]
+step_skip() {
+  echo "${C_YELLOW}⚠${C_RESET} skipped — ${2}"
+  record_step skip "$1" "$STEP_NAME" "${3:-}" "$2"
+}
+
+# step_warn <category> <reason> [remediation]
+step_warn() {
+  echo "${C_YELLOW}⚠${C_RESET} ${2}"
+  record_step warn "$1" "$STEP_NAME" "${3:-}" "$2"
+}
+
+# step_fail <category> <detail> [remediation] — record and CONTINUE.
+step_fail() {
+  local remediation="${3:-re-run ./claude-bootstrap.sh — completed steps are skipped}"
+  echo "${C_RED}✗${C_RESET} failed (continuing)$(_step_dur)"
+  record_step fail "$1" "$STEP_NAME" "$remediation" "$2"
+  record_fail "${STEP_NAME}: ${2}"
+}
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 ensure_cmd() {
   local cmd="$1" pkg="${2:-$1}"
-  echo -n "  ${cmd}... "
+  step_start "$cmd"
   if command -v "$cmd" &>/dev/null; then
-    echo "✓ (already installed)"
+    step_cached tool
     return 0
   fi
   if run_retry brew install "$pkg" --quiet; then
-    echo "✓"
+    step_ok network
   else
-    echo "⚠ FAILED (continuing)"
-    record_fail "brew ${pkg}: ${RUN_ERR}"
+    step_fail network "$RUN_ERR" "run 'brew install ${pkg}' by hand (if the formula was renamed, update its line in claude-config), then re-run ./claude-bootstrap.sh"
   fi
   return 0
 }
@@ -106,16 +227,15 @@ ensure_cmd() {
 # name. Casks need `brew install --cask`, which plain ensure_cmd cannot do.
 do_install_brew_cask() {
   local binary="$1" token="${2:-$1}"
-  echo -n "  ${binary} (cask: ${token})... "
+  step_start "${binary} (cask: ${token})"
   if command -v "$binary" &>/dev/null || brew list --cask "$token" &>/dev/null; then
-    echo "✓ (already installed)"
+    step_cached tool
     return 0
   fi
   if run_retry brew install --cask "$token" --quiet; then
-    echo "✓"
+    step_ok network
   else
-    echo "⚠ FAILED (continuing)"
-    record_fail "brew --cask ${token}: ${RUN_ERR}"
+    step_fail network "$RUN_ERR" "run 'brew install --cask ${token}' by hand, then re-run ./claude-bootstrap.sh"
   fi
   return 0
 }
@@ -127,32 +247,30 @@ do_install_brew_dep() {
 
 do_install_npm_global() {
   local pkg="$1"
-  echo -n "  ${pkg}... "
+  step_start "$pkg"
   if npm list -g --depth=0 "$pkg" &>/dev/null; then
-    echo "✓ (already installed)"
+    step_cached tool
     return 0
   fi
   if run_retry npm install -g "$pkg" --silent; then
-    echo "✓"
+    step_ok network
   else
-    echo "⚠ FAILED (continuing)"
-    record_fail "npm -g ${pkg}: ${RUN_ERR}"
+    step_fail network "$RUN_ERR" "run 'npm install -g ${pkg}' by hand (EACCES → fix npm's global prefix), then re-run ./claude-bootstrap.sh"
   fi
   return 0
 }
 
 do_install_uv_tool() {
   local pkg="$1" binary="${2:-$1}"
-  echo -n "  ${pkg} (→ ${binary})... "
+  step_start "${pkg} (→ ${binary})"
   if command -v "$binary" &>/dev/null; then
-    echo "✓ (already installed)"
+    step_cached tool
     return 0
   fi
   if run_retry uv tool install "$pkg" --quiet; then
-    echo "✓"
+    step_ok network
   else
-    echo "⚠ FAILED (continuing)"
-    record_fail "uv tool ${pkg}: ${RUN_ERR}"
+    step_fail network "$RUN_ERR" "run 'uv tool install ${pkg}' by hand, then re-run ./claude-bootstrap.sh"
   fi
   return 0
 }
@@ -164,12 +282,11 @@ do_install_uv_tool() {
 # Always pulls @latest so re-runs refresh the cached version.
 do_install_pnpm_store() {
   local pkg="$1"
-  echo -n "  ${pkg} (pnpm store)... "
+  step_start "${pkg} (pnpm store)"
   if run_retry pnpm store add "${pkg}@latest"; then
-    echo "✓"
+    step_ok network
   else
-    echo "⚠ FAILED (continuing)"
-    record_fail "pnpm store add ${pkg}: ${RUN_ERR}"
+    step_fail network "$RUN_ERR"
   fi
   return 0
 }
@@ -181,9 +298,14 @@ do_build_local_package() {
   # Only build if the directory has a package.json (it's a local Node package)
   [ -f "${pkg_dir}/package.json" ] || return 0
 
-  echo -n "  ${pkg} (npm install && build)... "
-  (cd "$pkg_dir" && npm install --silent 2>/dev/null && npm run build --silent 2>/dev/null)
-  echo "✓"
+  step_start "${pkg} (npm install && build)"
+  _build_local_pkg() { cd "$pkg_dir" && npm install --silent && npm run build --silent; }
+  if run_retry _build_local_pkg; then
+    step_ok network
+  else
+    step_fail network "$RUN_ERR" "cd ${pkg} && npm install && npm run build, then re-run ./claude-bootstrap.sh"
+  fi
+  return 0
 }
 
 # Registers an MCP server via claude mcp add. If env_vars is provided (comma-separated
@@ -192,11 +314,11 @@ do_build_local_package() {
 do_configure_mcp_server() {
   local name="$1" pkg="$2" env_vars="${3:-}"
 
-  echo -n "  ${name} (${pkg})... "
+  step_start "${name} (${pkg})"
 
   # Check if already configured via claude mcp
   if claude mcp get "$name" &>/dev/null; then
-    echo "✓ (already configured)"
+    step_cached state "already configured"
     return 0
   fi
 
@@ -215,7 +337,7 @@ do_configure_mcp_server() {
       fi
     done
     if [ ${#missing[@]} -gt 0 ]; then
-      echo "⚠ skipped (set ${missing[*]} in your environment, then re-run)"
+      step_skip auth "${missing[*]} not set" "export ${missing[*]} in your shell rc (the config file comments say where to get credentials), then re-run ./claude-bootstrap.sh"
       return 0
     fi
   fi
@@ -227,126 +349,153 @@ do_configure_mcp_server() {
     # Local package — resolve absolute path and register via claude mcp add
     local abs_path
     abs_path="$(cd "$(dirname "$local_server")" && pwd)/$(basename "$local_server")"
-
-    claude mcp add "$name" -s user ${env_flags[@]+"${env_flags[@]}"} -- node "$abs_path" &>/dev/null
-    echo "✓ (local)"
+    if run_retry claude mcp add "$name" -s user ${env_flags[@]+"${env_flags[@]}"} -- node "$abs_path"; then
+      step_ok network "local"
+    else
+      step_fail network "$RUN_ERR"
+    fi
   else
     # Remote package — register via claude mcp add
-    claude mcp add "$name" -s user ${env_flags[@]+"${env_flags[@]}"} -- npx -y "$pkg" &>/dev/null
-    echo "✓"
+    if run_retry claude mcp add "$name" -s user ${env_flags[@]+"${env_flags[@]}"} -- npx -y "$pkg"; then
+      step_ok network
+    else
+      step_fail network "$RUN_ERR"
+    fi
   fi
+  return 0
 }
 
 do_install_marketplace() {
   local name="$1"
-  echo -n "  ${name}... "
+  step_start "$name"
   local output
   # First attempt is also the idempotency check: an already-added marketplace
   # exits non-zero with "already" in the message — that's success, not a retry.
-  if output=$(claude plugin marketplace add "$name" 2>&1); then
-    echo "✓"
+  if output=$(claude plugin marketplace add "$name" </dev/null 2>&1); then
+    step_ok network
     return 0
   fi
   if echo "$output" | grep -qi "already"; then
-    echo "✓ (already added)"
+    step_cached state "already added"
     return 0
   fi
   # Genuine failure (network, auth, bad name) — retry, then record and continue.
   if run_retry claude plugin marketplace add "$name"; then
-    echo "✓"
+    step_ok network
   else
-    echo "⚠ FAILED (continuing)"
-    record_fail "marketplace ${name}: ${RUN_ERR:-$output}"
+    step_fail network "${RUN_ERR:-$output}" "check network access to github.com, then re-run ./claude-bootstrap.sh"
   fi
   return 0
 }
 
 do_install_plugin() {
   local plugin="$1" source="$2"
-  echo -n "  ${plugin} (${source})... "
+  step_start "${plugin} (${source})"
   if claude plugin list 2>&1 | grep -q "${plugin}@${source}"; then
-    echo "✓ (already installed)"
+    step_cached state
     return 0
   fi
   if run_retry claude plugin install "${plugin}@${source}"; then
-    echo "✓"
+    step_ok network
   else
-    echo "⚠ FAILED (continuing)"
-    record_fail "plugin ${plugin}@${source}: ${RUN_ERR}"
+    step_fail network "$RUN_ERR" "run 'claude plugin install ${plugin}@${source}' by hand, then re-run ./claude-bootstrap.sh"
   fi
   return 0
 }
 
 do_install_github_skill() {
   local name="$1" repo="$2"
-  echo -n "  ${name} (${repo})... "
+  step_start "${name} (${repo})"
   local tmp="/tmp/claude-skill-${name}"
   rm -rf "$tmp"
   if ! run_retry git clone --depth 1 --quiet "https://github.com/${repo}.git" "$tmp"; then
-    echo "⚠ FAILED (continuing)"
-    record_fail "github-skill ${name} (${repo}): ${RUN_ERR}"
+    step_fail network "$RUN_ERR"
     rm -rf "$tmp"
     return 0
   fi
   mkdir -p ~/.claude/skills
   rm -rf ~/.claude/skills/"${name}"
-  cp -r "$tmp" ~/.claude/skills/"${name}" && rm -rf ~/.claude/skills/"${name}"/.git
+  if cp -r "$tmp" ~/.claude/skills/"${name}"; then
+    rm -rf ~/.claude/skills/"${name}"/.git
+    step_ok network
+  else
+    step_fail fs "copy to ~/.claude/skills/${name} failed"
+  fi
   rm -rf "$tmp"
-  echo "✓"
+  return 0
 }
 
 do_install_github_skill_pack() {
   local name="$1" repo="$2"
-  echo -n "  ${name} (${repo})... "
+  step_start "${name} (${repo})"
   local tmp="/tmp/claude-skill-pack-${name}"
   rm -rf "$tmp"
   if ! run_retry git clone --depth 1 --quiet "https://github.com/${repo}.git" "$tmp"; then
-    echo "⚠ FAILED (continuing)"
-    record_fail "github-skill-pack ${name} (${repo}): ${RUN_ERR}"
+    step_fail network "$RUN_ERR"
     rm -rf "$tmp"
     return 0
   fi
   mkdir -p ~/.claude/skills
-  local count=0
+  # Manifest of what this pack installed, so reset can remove exactly these
+  # skills without re-cloning the repo (works offline).
+  local manifest=~/.claude/skills/.pack-${name}.manifest
+  : > "$manifest" || true
+  local count=0 copy_fail=0
   for skill_dir in "$tmp"/.claude/skills/*/; do
     [ -d "$skill_dir" ] || continue
     local skill_name
     skill_name="$(basename "$skill_dir")"
     rm -rf ~/.claude/skills/"${skill_name}"
-    cp -r "$skill_dir" ~/.claude/skills/"${skill_name}" && rm -rf ~/.claude/skills/"${skill_name}"/.git
-    count=$((count + 1))
+    if cp -r "$skill_dir" ~/.claude/skills/"${skill_name}"; then
+      rm -rf ~/.claude/skills/"${skill_name}"/.git
+      count=$((count + 1))
+      echo "$skill_name" >> "$manifest" || true
+    else
+      copy_fail=1
+    fi
   done
   rm -rf "$tmp"
-  echo "✓ (${count} skills)"
+  if [ "$copy_fail" -eq 0 ]; then
+    step_ok network "${count} skills"
+  else
+    step_fail fs "some skills failed to copy (${count} succeeded)"
+  fi
+  return 0
 }
 
 do_install_local_skill() {
   local name="$1"
   local source="${SCRIPT_DIR}/skills/${name}"
-  echo -n "  ${name} (local)... "
+  step_start "${name} (local)"
   if [ ! -d "$source" ] || [ ! -f "${source}/SKILL.md" ]; then
-    echo "⚠ FAILED (continuing)"
-    record_fail "local-skill ${name}: skills/${name}/SKILL.md not found in ${SCRIPT_DIR}"
+    step_fail config "skills/${name}/SKILL.md not found in ${SCRIPT_DIR}" "fix or remove the local-skill entry in the config file"
     return 0
   fi
   mkdir -p ~/.claude/skills
   rm -rf ~/.claude/skills/"${name}"
-  cp -r "$source" ~/.claude/skills/"${name}"
-  echo "✓"
+  if cp -r "$source" ~/.claude/skills/"${name}"; then
+    step_ok fs
+  else
+    step_fail fs "copy to ~/.claude/skills/${name} failed"
+  fi
+  return 0
 }
 
 do_install_local_command() {
   local name="$1"
   local source="${SCRIPT_DIR}/commands/${name}.md"
-  echo -n "  /${name} (local)... "
+  step_start "/${name} (local)"
   if [ ! -f "$source" ]; then
-    echo "⚠ FAILED (continuing)"
-    record_fail "local-command ${name}: commands/${name}.md not found in ${SCRIPT_DIR}"
+    step_fail config "commands/${name}.md not found in ${SCRIPT_DIR}" "fix or remove the local-command entry in the config file"
     return 0
   fi
   mkdir -p ~/.claude/commands
-  cp "$source" ~/.claude/commands/"${name}.md"
-  echo "✓"
+  if cp "$source" ~/.claude/commands/"${name}.md"; then
+    step_ok fs
+  else
+    step_fail fs "copy to ~/.claude/commands/${name}.md failed"
+  fi
+  return 0
 }
 
 do_install_global_memory() {
@@ -357,11 +506,10 @@ do_install_global_memory() {
   local end_marker="<!-- bionic:end -->"
   local old_start="<!-- claude-setup:start -->"
 
-  echo -n "  ${file} → ~/.claude/CLAUDE.md... "
+  step_start "${file} → ~/.claude/CLAUDE.md"
 
   if [ ! -f "$source" ]; then
-    echo "⚠ FAILED (continuing)"
-    record_fail "global-memory ${file}: not found in ${SCRIPT_DIR}"
+    step_fail config "${file} not found in ${SCRIPT_DIR}"
     return 0
   fi
 
@@ -380,11 +528,14 @@ ${end_marker}"
 
   if [ ! -f "$target" ]; then
     # No existing file — create with managed section
-    echo "$section" > "$target"
+    if ! echo "$section" > "$target"; then
+      step_fail fs "could not write ${target}"
+      return 0
+    fi
   elif grep -q "$start_marker" "$target"; then
     # Markers exist — replace managed section
     local tmp="${target}.tmp"
-    {
+    if ! {
       awk -v start="$start_marker" '
         $0 == start { exit }
         { print }
@@ -394,13 +545,24 @@ ${end_marker}"
         found { print }
         $0 == end { found=1 }
       ' "$target"
-    } > "$tmp" && mv "$tmp" "$target"
+    } > "$tmp"; then
+      step_fail fs "could not write ${tmp}"
+      return 0
+    fi
+    if ! mv "$tmp" "$target"; then
+      step_fail fs "could not replace ${target}"
+      return 0
+    fi
   else
     # File exists, no markers — append with blank line separator
-    printf "\n%s\n" "$section" >> "$target"
+    if ! printf "\n%s\n" "$section" >> "$target"; then
+      step_fail fs "could not append to ${target}"
+      return 0
+    fi
   fi
 
-  echo "✓"
+  step_ok fs
+  return 0
 }
 
 verify_brew_dep() {
@@ -481,38 +643,191 @@ verify_local_package_built() {
   fi
 }
 
+verify_plugin_installed() {
+  local plugin="$1" source="$2"
+  if echo "${PLUGIN_LIST_OUTPUT:-}" | grep -q "${plugin}@${source}"; then
+    echo "    ${plugin}@${source} ✓"
+  else
+    echo "    ${plugin}@${source} — not installed"
+    verify_errors+=("${plugin}@${source} plugin — not installed")
+  fi
+}
+
+# ─── Preflight ───────────────────────────────────────────────────────────────
+# Hard prerequisites and environment checks. This is the ONLY place the script
+# may exit early (exit 2). Everything after preflight records failures and
+# continues.
+
+preflight_lint_config() {
+  local known=" marketplace plugin github-skill github-skill-pack local-skill local-command global-memory brew-dep brew-cask npm-global pnpm-store uv-tool mcp-server env-var statusline "
+  local cfg lineno line trimmed t
+  for cfg in "${CONFIG_FILES[@]}"; do
+    lineno=0
+    while IFS= read -r line; do
+      lineno=$((lineno + 1))
+      trimmed="$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      [ -z "$trimmed" ] && continue
+      case "$trimmed" in "#"*) continue ;; esac
+      if [ "${trimmed#*|}" = "$trimmed" ]; then
+        echo "    $(basename "$cfg"):${lineno}: no '|' delimiter — line ignored"
+        continue
+      fi
+      t="$(echo "${trimmed%%|*}" | sed 's/[[:space:]]*$//')"
+      case "$known" in
+        *" $t "*) ;;
+        *) echo "    $(basename "$cfg"):${lineno}: unknown type '${t}' — line ignored" ;;
+      esac
+    done < "$cfg"
+  done
+}
+
+section "Preflight"
+
+# Fresh-Mac expectation setting: Homebrew's installer needs sudo and may open
+# the Xcode Command Line Tools dialog. Say so before it happens.
+if [ "$OS" = "Darwin" ] && ! command -v brew &>/dev/null; then
+  echo "  ${C_YELLOW}⚠${C_RESET} Homebrew setup will ask for your macOS password and may open the"
+  echo "    Xcode Command Line Tools dialog — this is expected on a fresh Mac."
+fi
+
+# Network reachability — everything downstream needs github.com + npm registry.
+step_start "network (github.com, registry.npmjs.org)"
+_gh_ok=0; _npm_ok=0
+if curl -fsS --max-time 5 https://api.github.com/zen >/dev/null 2>&1; then _gh_ok=1; fi
+if curl -fsS --max-time 5 https://registry.npmjs.org/-/ping >/dev/null 2>&1; then _npm_ok=1; fi
+if [ "$_gh_ok" -eq 1 ] && [ "$_npm_ok" -eq 1 ]; then
+  step_ok network
+elif [ "$_gh_ok" -eq 0 ] && [ "$_npm_ok" -eq 0 ]; then
+  echo "${C_RED}✗${C_RESET}"
+  echo ""
+  echo "  No network access to github.com or registry.npmjs.org."
+  echo "  Connect to the internet (check VPN / proxy), then re-run ./claude-bootstrap.sh"
+  exit 2
+else
+  if [ "$_gh_ok" -eq 0 ]; then
+    step_warn network "github.com unreachable — clones and plugins may fail" "check VPN/proxy"
+  else
+    step_warn network "registry.npmjs.org unreachable — npm installs may fail" "check VPN/proxy"
+  fi
+fi
+
+# Homebrew — auto-install if missing; hard-fail if that fails.
+step_start "Homebrew"
+if command -v brew &>/dev/null; then
+  step_cached prereq
+else
+  echo "installing..."
+  if /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
+    # Re-source to pick up the newly installed brew
+    source "${SCRIPT_DIR}/lib/platform.sh"
+  fi
+  step_start "Homebrew"
+  if command -v brew &>/dev/null; then
+    step_ok prereq
+  else
+    echo "${C_RED}✗${C_RESET}"
+    echo ""
+    echo "  Homebrew could not be installed. Install it manually:"
+    echo "    /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+    echo "  then re-run ./claude-bootstrap.sh"
+    exit 2
+  fi
+fi
+
+# claude CLI — auto-install via npm (the canonical channel; the Homebrew cask
+# lags many versions behind). node comes from brew first if needed.
+step_start "claude CLI"
+if command -v claude &>/dev/null; then
+  step_cached prereq "$(claude --version 2>/dev/null | head -1 || echo present)"
+else
+  if ! command -v node &>/dev/null; then
+    run_retry brew install node --quiet || true
+  fi
+  if command -v npm &>/dev/null && run_retry npm install -g @anthropic-ai/claude-code@latest; then
+    step_ok prereq "$(claude --version 2>/dev/null | head -1 || echo installed)"
+  else
+    echo "${C_RED}✗${C_RESET}"
+    echo ""
+    echo "  Could not install the claude CLI. Install it manually:"
+    echo "    npm install -g @anthropic-ai/claude-code@latest"
+    echo "  then re-run ./claude-bootstrap.sh"
+    exit 2
+  fi
+fi
+
+# claude auth — warn only; the bootstrap itself works logged out, but plugin
+# and MCP registration may not.
+step_start "claude auth"
+if [ -n "${ANTHROPIC_API_KEY:-}" ] || grep -q '"oauthAccount"' ~/.claude.json 2>/dev/null; then
+  step_ok auth "logged in"
+else
+  step_warn auth "not logged in — run 'claude' once and complete login; setup continues" "run 'claude' and log in, then re-run ./claude-bootstrap.sh if any plugin steps failed"
+fi
+
+# Config lint — warn with file:line; a typo must not brick the run.
+step_start "config ($(printf '%s ' "${CONFIG_FILES[@]##*/}" | sed 's/ $//'))"
+_lint_out="$(preflight_lint_config)"
+if [ -z "$_lint_out" ]; then
+  step_ok config
+else
+  step_warn config "config lint warnings (listed in preflight output)" "fix the flagged lines in the config file(s)"
+  printf '%s\n' "$_lint_out"
+fi
+
+# settings.json validity — a corrupt file would abort every jq write later.
+# shellcheck disable=SC2088  # display string, not a path
+step_start "~/.claude/settings.json"
+if [ ! -f ~/.claude/settings.json ]; then
+  step_ok fs "will be created"
+elif ! command -v jq &>/dev/null; then
+  step_ok fs "validity checked after jq installs"
+elif jq empty ~/.claude/settings.json &>/dev/null; then
+  step_ok fs "valid JSON"
+else
+  _bak=~/.claude/settings.json.bak-$(date +%Y%m%d-%H%M%S)
+  mv ~/.claude/settings.json "$_bak"
+  echo '{}' > ~/.claude/settings.json
+  step_warn fs "was invalid JSON — backed up and reset" "review $(basename "$_bak") in ~/.claude/ and re-apply any custom settings"
+fi
+
+# Disk space — warn under 5 GB.
+step_start "disk space"
+_free_gb="$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2 {printf "%d", $4/1048576}' || true)"
+if [ -n "$_free_gb" ] && [ "$_free_gb" -lt 5 ]; then
+  step_warn env "only ${_free_gb}GB free — installs may fail" "free up disk space"
+else
+  step_ok env "${_free_gb:-?}GB free"
+fi
+
 # ─── CLI Tools (brew) ───────────────────────────────────────────────────────
 
-echo "CLI tools (brew):"
+section "CLI tools (brew)" "$(config_count brew-dep)"
 read_config "brew-dep" do_install_brew_dep
-echo ""
 
 # ─── CLI Tools (brew casks) ──────────────────────────────────────────────────
 
-echo "CLI tools (brew casks):"
+section "CLI tools (brew casks)" "$(config_count brew-cask)"
 read_config "brew-cask" do_install_brew_cask
-echo ""
 
 # ─── CLI Tools (npm) ─────────────────────────────────────────────────────────
 
-echo "CLI tools (npm):"
+section "CLI tools (npm)" "$(config_count npm-global)"
 # node (hence npm) is itself a brew-dep installed above. If that failed, skip
 # the npm-globals rather than aborting the whole run — recorded for the summary.
 if ! command -v npm &>/dev/null; then
-  echo "  ⚠ npm not found (node install failed?) — skipping npm globals (continuing)"
-  record_fail "npm not found — npm globals not installed (install node)"
+  step_start "npm globals"
+  step_fail prereq "npm not found (node install failed?)" "brew install node, then re-run ./claude-bootstrap.sh"
 else
   read_config "npm-global" do_install_npm_global
 fi
-echo ""
 
 # ─── CLI Tools (uv) ─────────────────────────────────────────────────────────
 
-echo "CLI tools (uv):"
+section "CLI tools (uv)" "$(config_count uv-tool)"
 # uv is a brew-dep installed above; skip its tools (not abort) if it's missing.
 if ! command -v uv &>/dev/null; then
-  echo "  ⚠ uv not found — skipping uv tools (continuing)"
-  record_fail "uv not found — uv tools not installed (brew install uv)"
+  step_start "uv tools"
+  step_fail prereq "uv not found" "brew install uv, then re-run ./claude-bootstrap.sh"
 else
   # Ensure uv tool bin directory is on PATH (uv installs binaries to ~/.local/bin/)
   uv_bin_dir="$(uv tool dir --bin 2>/dev/null)"
@@ -521,7 +836,6 @@ else
   fi
   read_config "uv-tool" do_install_uv_tool
 fi
-echo ""
 
 # ─── Frontend Libraries (pnpm store) ─────────────────────────────────────────
 #
@@ -529,48 +843,42 @@ echo ""
 # (e.g. motion). Projects pull them in with `pnpm add <pkg>`, which hard-links
 # from the warm store — instant and offline. See the `motion` skill for usage.
 
-echo "Frontend libraries (pnpm store):"
+section "Frontend libraries (pnpm store)" "$(config_count pnpm-store)"
 if ! command -v pnpm &>/dev/null; then
-  echo "  ⚠ pnpm not found — skipping frontend library pre-warm (continuing)"
-  record_fail "pnpm not found — frontend libraries not pre-warmed"
+  step_start "pnpm store"
+  step_fail prereq "pnpm not found" "brew install pnpm, then re-run ./claude-bootstrap.sh"
 else
   read_config "pnpm-store" do_install_pnpm_store
 fi
-echo ""
 
 # ─── Playwright Browsers ────────────────────────────────────────────────────
 
-echo -n "Playwright browsers (chromium)... "
-if npx playwright install chromium 2>/dev/null; then
-  echo "✓"
+section "Playwright browsers"
+step_start "chromium"
+if run_retry npx playwright install chromium; then
+  step_ok network
 else
-  echo "⚠ FAILED (continuing)"
-  record_fail "playwright chromium browser install"
+  step_fail network "$RUN_ERR" "run 'npx playwright install chromium' by hand, then re-run ./claude-bootstrap.sh"
 fi
-echo ""
 
 # ─── Marketplaces ────────────────────────────────────────────────────────────
 
-echo "Marketplaces:"
+section "Marketplaces" "$(config_count marketplace)"
 read_config "marketplace" do_install_marketplace
-echo ""
 
 # ─── Plugins ─────────────────────────────────────────────────────────────────
 
-echo "Plugins:"
+section "Plugins" "$(config_count plugin)"
 read_config "plugin" do_install_plugin
-echo ""
 
 # ─── Global Memory ─────────────────────────────────────────────────────────
 
-echo "Global memory:"
+section "Global memory"
 read_config "global-memory" do_install_global_memory
-echo ""
 
 # ─── Shell Alias ─────────────────────────────────────────────────────────────
 
-echo "Shell alias:"
-echo -n "  claude → claude --dangerously-skip-permissions... "
+section "Shell alias"
 ALIAS_RC="$SHELL_RC"
 ALIAS_START="# ─── bionic:start ───"
 ALIAS_END="# ─── bionic:end ───"
@@ -579,49 +887,63 @@ ALIAS_SECTION="${ALIAS_START}
 ${ALIAS_CONTENT}
 ${ALIAS_END}"
 
-# Migrate old unmarked alias to marker-based section
-if [ -f "$ALIAS_RC" ] && grep -q "alias claude=.*dangerously-skip-permissions" "$ALIAS_RC" && ! grep -qF "$ALIAS_START" "$ALIAS_RC"; then
-  grep -v "alias claude=.*dangerously-skip-permissions" "$ALIAS_RC" > "${ALIAS_RC}.tmp" && mv "${ALIAS_RC}.tmp" "$ALIAS_RC"
-  printf '\n%s\n' "$ALIAS_SECTION" >> "$ALIAS_RC"
-  echo "✓ (migrated to markers)"
-elif grep -qF "$ALIAS_START" "$ALIAS_RC" 2>/dev/null; then
-  # Markers exist — replace managed section
-  {
-    awk -v start="$ALIAS_START" '
-      $0 == start { exit }
-      { print }
-    ' "$ALIAS_RC"
-    echo "$ALIAS_SECTION"
-    awk -v end="$ALIAS_END" '
-      found { print }
-      $0 == end { found=1 }
-    ' "$ALIAS_RC"
-  } > "${ALIAS_RC}.tmp" && mv "${ALIAS_RC}.tmp" "$ALIAS_RC"
-  echo "✓ (already installed)"
+# Writes the marker-managed alias section into $ALIAS_RC. Sets ALIAS_NOTE for
+# the status line; returns 1 on write failure.
+do_install_shell_alias() {
+  ALIAS_NOTE=""
+  # Migrate old unmarked alias to marker-based section
+  if [ -f "$ALIAS_RC" ] && grep -q "alias claude=.*dangerously-skip-permissions" "$ALIAS_RC" && ! grep -qF "$ALIAS_START" "$ALIAS_RC"; then
+    grep -v "alias claude=.*dangerously-skip-permissions" "$ALIAS_RC" > "${ALIAS_RC}.tmp" || true
+    mv "${ALIAS_RC}.tmp" "$ALIAS_RC" || return 1
+    printf '\n%s\n' "$ALIAS_SECTION" >> "$ALIAS_RC" || return 1
+    ALIAS_NOTE="migrated to markers"
+  elif grep -qF "$ALIAS_START" "$ALIAS_RC" 2>/dev/null; then
+    # Markers exist — replace managed section
+    {
+      awk -v start="$ALIAS_START" '
+        $0 == start { exit }
+        { print }
+      ' "$ALIAS_RC"
+      echo "$ALIAS_SECTION"
+      awk -v end="$ALIAS_END" '
+        found { print }
+        $0 == end { found=1 }
+      ' "$ALIAS_RC"
+    } > "${ALIAS_RC}.tmp" || return 1
+    mv "${ALIAS_RC}.tmp" "$ALIAS_RC" || return 1
+    ALIAS_NOTE="already installed"
+  else
+    # No markers, no alias — append
+    printf '\n%s\n' "$ALIAS_SECTION" >> "$ALIAS_RC" || return 1
+  fi
+  return 0
+}
+
+step_start "claude → claude --dangerously-skip-permissions"
+if do_install_shell_alias; then
+  if [ -n "$ALIAS_NOTE" ]; then step_cached fs "$ALIAS_NOTE"; else step_ok fs; fi
 else
-  # No markers, no alias — append
-  printf '\n%s\n' "$ALIAS_SECTION" >> "$ALIAS_RC"
-  echo "✓"
+  step_fail fs "could not write ${ALIAS_RC}" "check permissions on ${ALIAS_RC}, then re-run ./claude-bootstrap.sh"
 fi
-echo ""
 
 # ─── Custom Skills ───────────────────────────────────────────────────────────
 
-echo "Custom skills:"
+section "Custom skills"
 read_config "github-skill" do_install_github_skill
 read_config "github-skill-pack" do_install_github_skill_pack
 read_config "local-skill" do_install_local_skill
-echo ""
 
 # ─── Custom Commands ────────────────────────────────────────────────────────
 
-echo "Custom commands:"
+section "Custom commands" "$(config_count local-command)"
 
 # Prune orphan commands: anything in ~/.claude/commands/ not listed in
-# claude-config.txt as a local-command entry. Renames (memory-sweep →
+# the config as a local-command entry. Renames (memory-sweep →
 # memory-compact) leave stale files behind without this step.
 if [ -d ~/.claude/commands ]; then
-  managed_commands="$(grep -E '^\s*local-command\s*\|' "$CONFIG" | sed -E 's/^[^|]+\|[[:space:]]*//;s/[[:space:]]+$//')"
+  # `|| true`: a config with zero local-command entries makes grep exit 1,
+  # which pipefail + set -e would turn into a mid-run abort.
+  managed_commands="$(cat "${CONFIG_FILES[@]}" | grep -E '^\s*local-command\s*\|' | sed -E 's/^[^|]+\|[[:space:]]*//;s/[[:space:]]+$//' || true)"
   for f in ~/.claude/commands/*.md; do
     [ -f "$f" ] || continue
     base="$(basename "$f" .md)"
@@ -633,33 +955,34 @@ if [ -d ~/.claude/commands ]; then
 fi
 
 read_config "local-command" do_install_local_command
-echo ""
 
 # ─── Skill Setup ────────────────────────────────────────────────────────────
 
-echo "Skill setup:"
+section "Skill setup"
 if [ -d ~/.claude/skills/excalidraw-diagram/references ]; then
-  echo -n "  excalidraw-diagram renderer... "
-  if (cd ~/.claude/skills/excalidraw-diagram/references && uv sync --quiet 2>&1 && uv run playwright install chromium 2>&1) | tail -1; then
-    echo "  ✓"
+  step_start "excalidraw-diagram renderer"
+  if (cd ~/.claude/skills/excalidraw-diagram/references && uv sync --quiet && uv run playwright install chromium) >/dev/null 2>&1; then
+    step_ok network
   else
-    echo "  ⚠ FAILED (continuing)"
-    record_fail "excalidraw-diagram renderer (uv sync / playwright)"
+    step_fail network "uv sync / playwright install failed" "cd ~/.claude/skills/excalidraw-diagram/references && uv sync && uv run playwright install chromium"
   fi
 else
   echo "  excalidraw-diagram — skipped (not installed)"
 fi
 if command -v notebooklm &>/dev/null; then
-  echo -n "  notebooklm skill install... "
-  notebooklm skill install &>/dev/null && echo "✓" || echo "✓ (skill already installed)"
+  step_start "notebooklm skill install"
+  if notebooklm skill install &>/dev/null; then
+    step_ok tool
+  else
+    step_cached tool "skill already installed"
+  fi
 else
   echo "  notebooklm — skipped (CLI not installed)"
 fi
-echo ""
 
 # ─── Global Hooks ────────────────────────────────────────────────────────────
 
-echo "Global hooks:"
+section "Global hooks"
 mkdir -p ~/.claude/hooks
 
 # settings.json mutations below need jq. If its brew install failed earlier,
@@ -668,7 +991,11 @@ mkdir -p ~/.claude/hooks
 # copied; only the settings.json wiring is skipped.
 settings=~/.claude/settings.json
 HAVE_JQ=1
-command -v jq &>/dev/null || { HAVE_JQ=0; record_fail "jq unavailable — settings.json hooks/env/statusline not configured"; }
+if ! command -v jq &>/dev/null; then
+  HAVE_JQ=0
+  step_start "jq"
+  step_fail prereq "jq unavailable — settings.json hooks/env/statusline not configured" "brew install jq, then re-run ./claude-bootstrap.sh"
+fi
 
 # Build the set of hook files present in the repo (canonical source of truth).
 declare -a repo_hooks=()
@@ -686,7 +1013,7 @@ for installed in ~/.claude/hooks/*.sh; do
   [ -f "$installed" ] || continue
   base="$(basename "$installed")"
   found=0
-  for r in "${repo_hooks[@]}"; do
+  for r in ${repo_hooks[@]+"${repo_hooks[@]}"}; do
     if [ "$base" = "$r" ]; then found=1; break; fi
   done
   if [ "$found" -eq 0 ]; then
@@ -701,17 +1028,17 @@ for hook in "${SCRIPT_DIR}"/hooks/*.sh; do
   [ -f "$hook" ] || continue
   [[ "$(basename "$hook")" == *.test.sh ]] && continue
   name="$(basename "$hook")"
-  echo -n "  ${name}... "
-  cp "$hook" ~/.claude/hooks/"$name"
-  chmod +x ~/.claude/hooks/"$name"
-  echo "✓"
+  step_start "$name"
+  if cp "$hook" ~/.claude/hooks/"$name" && chmod +x ~/.claude/hooks/"$name"; then
+    step_ok fs
+  else
+    step_fail fs "could not install hook to ~/.claude/hooks/${name}"
+  fi
 done
 
-# Rebuild hook config in global settings.
-echo -n "  settings.json hook config... "
-if [ ! -f "$settings" ]; then
-  echo '{}' > "$settings"
-fi
+# Manifest of bionic-owned hook files, so reset can attribute and remove them
+# even if the repo's hooks/ contents change between install and reset.
+{ for r in ${repo_hooks[@]+"${repo_hooks[@]}"}; do echo "$r"; done; } > ~/.claude/hooks/.bionic-manifest || true
 
 # Define all managed hooks (event|matcher_or_empty|command pairs)
 # PreToolUse uses Bash/Write/Edit/Agent matchers; SessionStart uses a
@@ -728,43 +1055,53 @@ MANAGED_HOOKS=(
   "UserPromptSubmit||~/.claude/hooks/terseness-reminder.sh"
 )
 
+# Rebuild hook config in global settings. Resetting .hooks to exactly the
+# managed set is convergent: removing an entry from MANAGED_HOOKS removes it
+# from settings.json on the next run. Returns 1 on any write failure.
+wire_managed_hooks() {
+  local tmp="${settings}.tmp" entry event matcher cmd
+  if [ ! -f "$settings" ]; then
+    echo '{}' > "$settings" || return 1
+  fi
+  jq '.hooks = {}' "$settings" > "$tmp" || return 1
+  mv "$tmp" "$settings" || return 1
+  for entry in "${MANAGED_HOOKS[@]}"; do
+    IFS='|' read -r event matcher cmd <<< "$entry"
+    if ! jq -e --arg ev "$event" '.hooks[$ev]' "$settings" &>/dev/null; then
+      jq --arg ev "$event" '.hooks[$ev] = []' "$settings" > "$tmp" || return 1
+      mv "$tmp" "$settings" || return 1
+    fi
+    if [ -n "$matcher" ]; then
+      jq --arg ev "$event" --arg m "$matcher" --arg c "$cmd" '
+        .hooks[$ev] += [{
+          "matcher": $m,
+          "hooks": [{"type": "command", "command": $c, "timeout": 10}]
+        }]
+      ' "$settings" > "$tmp" || return 1
+      mv "$tmp" "$settings" || return 1
+    else
+      jq --arg ev "$event" --arg c "$cmd" '
+        .hooks[$ev] += [{
+          "hooks": [{"type": "command", "command": $c}]
+        }]
+      ' "$settings" > "$tmp" || return 1
+      mv "$tmp" "$settings" || return 1
+    fi
+  done
+  return 0
+}
+
+step_start "settings.json hook config"
 if [ "$HAVE_JQ" != 1 ]; then
-  echo "⚠ skipped (jq unavailable)"
+  step_skip prereq "jq unavailable" "brew install jq, then re-run ./claude-bootstrap.sh"
+elif wire_managed_hooks; then
+  step_ok fs "${#MANAGED_HOOKS[@]} managed hooks"
 else
-# Reset .hooks to exactly the managed set. This is convergent: removing an
-# entry from MANAGED_HOOKS removes it from settings.json on the next run.
-tmp="${settings}.tmp"
-jq '.hooks = {}' "$settings" > "$tmp" && mv "$tmp" "$settings"
-
-for entry in "${MANAGED_HOOKS[@]}"; do
-  IFS='|' read -r event matcher cmd <<< "$entry"
-  tmp="${settings}.tmp"
-  if ! jq -e --arg ev "$event" '.hooks[$ev]' "$settings" &>/dev/null; then
-    jq --arg ev "$event" '.hooks[$ev] = []' "$settings" > "$tmp" && mv "$tmp" "$settings"
-  fi
-  tmp="${settings}.tmp"
-  if [ -n "$matcher" ]; then
-    jq --arg ev "$event" --arg m "$matcher" --arg c "$cmd" '
-      .hooks[$ev] += [{
-        "matcher": $m,
-        "hooks": [{"type": "command", "command": $c, "timeout": 10}]
-      }]
-    ' "$settings" > "$tmp" && mv "$tmp" "$settings"
-  else
-    jq --arg ev "$event" --arg c "$cmd" '
-      .hooks[$ev] += [{
-        "hooks": [{"type": "command", "command": $c}]
-      }]
-    ' "$settings" > "$tmp" && mv "$tmp" "$settings"
-  fi
-done
-
-echo "✓ (${#MANAGED_HOOKS[@]} managed hooks)"
+  step_fail fs "could not update ${settings}" "check that ${settings} is writable and valid JSON, then re-run ./claude-bootstrap.sh"
 fi
 if [ "$removed_hooks" -gt 0 ]; then
   echo "  cleaned up ${removed_hooks} stale hook file(s) from ~/.claude/hooks/"
 fi
-echo ""
 
 # ─── Account-mirror symlinks ────────────────────────────────────────────────
 #
@@ -773,7 +1110,7 @@ echo ""
 # CLAUDE.md back to the canonical ~/.claude/ copies. Auth (.claude.json),
 # history, and per-account caches stay separate.
 
-echo "Account-mirror symlinks:"
+section "Account-mirror symlinks"
 mirror_count=0
 for mirror in ~/.claude-*; do
   [ -d "$mirror" ] || continue
@@ -785,94 +1122,107 @@ for mirror in ~/.claude-*; do
       continue  # already symlinked
     fi
     if [ -f "$target" ]; then
-      mv "$target" "${target}.bak-$(date +%Y%m%d-%H%M%S)"
+      if ! mv "$target" "${target}.bak-$(date +%Y%m%d-%H%M%S)"; then
+        step_start "${account}/${f}"
+        step_fail fs "could not back up ${target}"
+        continue
+      fi
     fi
-    ln -s "$canonical" "$target"
-    echo "  ${account}/${f} → ~/.claude/${f} ✓"
-    mirror_count=$((mirror_count + 1))
+    if ln -s "$canonical" "$target"; then
+      echo "  ${account}/${f} → ~/.claude/${f} ✓"
+      mirror_count=$((mirror_count + 1))
+    else
+      step_start "${account}/${f}"
+      step_fail fs "could not symlink ${target}"
+    fi
   done
 done
 if [ "$mirror_count" -eq 0 ]; then
   echo "  (no additional accounts found, or already symlinked)"
 fi
-echo ""
 
 # ─── Env Vars ───────────────────────────────────────────────────────────────
 
-echo "Env vars:"
+section "Env vars" "$(config_count env-var)"
 
-env_added=0
 do_set_env_var() {
   local key="$1" val="$2"
-  echo -n "  ${key}=${val}... "
+  step_start "${key}=${val}"
   if jq -e --arg k "$key" --arg v "$val" '.env[$k] == $v' "$settings" &>/dev/null; then
-    echo "✓ (already set)"
-    return
+    step_cached fs "already set"
+    return 0
   fi
-  tmp="${settings}.tmp"
-  jq --arg k "$key" --arg v "$val" '.env[$k] = $v' "$settings" > "$tmp" && mv "$tmp" "$settings"
-  env_added=$((env_added + 1))
-  echo "✓"
+  local tmp="${settings}.tmp"
+  if jq --arg k "$key" --arg v "$val" '.env[$k] = $v' "$settings" > "$tmp" && mv "$tmp" "$settings"; then
+    step_ok fs
+  else
+    step_fail fs "could not update ${settings}"
+  fi
+  return 0
 }
 if [ "$HAVE_JQ" = 1 ]; then
   read_config "env-var" do_set_env_var
 else
   echo "  ⚠ skipped (jq unavailable)"
 fi
-echo ""
 
 # ─── Status Line ──────────────────────────────────────────────────────────────
 
-echo "Status line:"
+section "Status line"
 
 do_set_statusline() {
   local cmd="$1"
-  echo -n "  ${cmd}... "
+  step_start "$cmd"
   if jq -e --arg c "$cmd" '.statusLine.command == $c' "$settings" &>/dev/null; then
-    echo "✓ (already set)"
-    return
+    step_cached fs "already set"
+    return 0
   fi
-  tmp="${settings}.tmp"
-  jq --arg c "$cmd" '.statusLine = {"type": "command", "command": $c}' "$settings" > "$tmp" && mv "$tmp" "$settings"
-  echo "✓"
+  local tmp="${settings}.tmp"
+  if jq --arg c "$cmd" '.statusLine = {"type": "command", "command": $c}' "$settings" > "$tmp" && mv "$tmp" "$settings"; then
+    step_ok fs
+  else
+    step_fail fs "could not update ${settings}"
+  fi
+  return 0
 }
 if [ "$HAVE_JQ" = 1 ]; then
   read_config "statusline" do_set_statusline
 else
   echo "  ⚠ skipped (jq unavailable)"
 fi
-echo ""
 
 # ─── ccstatusline Config ──────────────────────────────────────────────────────
 
-echo "ccstatusline config:"
-echo -n "  settings.json → ~/.config/ccstatusline/settings.json... "
-mkdir -p ~/.config/ccstatusline
-if diff -q "${SCRIPT_DIR}/ccstatusline/settings.json" ~/.config/ccstatusline/settings.json &>/dev/null; then
-  echo "✓ (already up to date)"
+section "ccstatusline config"
+step_start "settings.json → ~/.config/ccstatusline/settings.json"
+if [ ! -f "${SCRIPT_DIR}/ccstatusline/settings.json" ]; then
+  step_fail config "ccstatusline/settings.json missing from repo"
+elif diff -q "${SCRIPT_DIR}/ccstatusline/settings.json" ~/.config/ccstatusline/settings.json &>/dev/null; then
+  step_cached fs "already up to date"
 else
-  cp "${SCRIPT_DIR}/ccstatusline/settings.json" ~/.config/ccstatusline/settings.json
-  echo "✓"
+  mkdir -p ~/.config/ccstatusline
+  if cp "${SCRIPT_DIR}/ccstatusline/settings.json" ~/.config/ccstatusline/settings.json; then
+    step_ok fs
+  else
+    step_fail fs "could not write ~/.config/ccstatusline/settings.json"
+  fi
 fi
-echo ""
 
 # ─── Local Package Builds ────────────────────────────────────────────────────
 
-echo "Local packages:"
+section "Local packages"
 read_config "mcp-server" do_build_local_package
-echo ""
 
 # ─── MCP Servers ─────────────────────────────────────────────────────────────
 
-echo "MCP servers:"
+section "MCP servers" "$(config_count mcp-server)"
 read_config "mcp-server" do_configure_mcp_server
-echo ""
 
 # ─── Verification ───────────────────────────────────────────────────────────
 
 verify_errors=()
 verify_warnings=()
-echo "Verification:"
+section "Verification"
 
 echo ""
 echo "  CLI tools (brew):"
@@ -928,8 +1278,27 @@ for hook in ~/.claude/hooks/*.sh; do
 done
 
 echo ""
-echo "  Plugins (official skills):"
-claude plugin list 2>&1 | while IFS= read -r line; do echo "    $line"; done
+echo "  Hook wiring (settings.json):"
+if [ "$HAVE_JQ" = 1 ] && [ -f "$settings" ]; then
+  for entry in "${MANAGED_HOOKS[@]}"; do
+    IFS='|' read -r event matcher cmd <<< "$entry"
+    if jq -e --arg ev "$event" --arg c "$cmd" \
+        '.hooks[$ev] // [] | map(.hooks // [] | map(.command)) | flatten | index($c)' \
+        "$settings" &>/dev/null; then
+      echo "    ${event}: $(basename "$cmd") ✓"
+    else
+      echo "    ${event}: $(basename "$cmd") — not wired"
+      verify_errors+=("hook $(basename "$cmd") (${event}) — not wired in settings.json")
+    fi
+  done
+else
+  echo "    (skipped — jq or settings.json unavailable)"
+fi
+
+echo ""
+echo "  Plugins:"
+PLUGIN_LIST_OUTPUT="$(claude plugin list 2>&1 || true)"
+read_config "plugin" verify_plugin_installed
 
 echo ""
 echo "  Custom skills:"
@@ -954,7 +1323,6 @@ else
   echo "    (none installed)"
 fi
 
-
 echo ""
 echo "  Status line:"
 if jq -e '.statusLine.command' "$settings" &>/dev/null; then
@@ -978,6 +1346,8 @@ if [ -f ~/.claude/CLAUDE.md ] && grep -q "<!-- bionic:start -->" ~/.claude/CLAUD
   echo "    ~/.claude/CLAUDE.md ✓"
 else
   echo "    ~/.claude/CLAUDE.md — not installed"
+  # shellcheck disable=SC2088  # display string, not a path
+  verify_errors+=("~/.claude/CLAUDE.md — managed section not installed")
 fi
 
 echo ""
@@ -986,48 +1356,177 @@ if [ -f "$SHELL_RC" ] && grep -qF "# ─── bionic:start ───" "$SHELL_R
   echo "    ~/${SHELL_RC_NAME} ✓"
 else
   echo "    ~/${SHELL_RC_NAME} — not installed"
+  verify_errors+=("shell alias in ~/${SHELL_RC_NAME} — not installed")
 fi
 
-# ─── Summary Report ─────────────────────────────────────────────────────────
+# ─── Final Report ───────────────────────────────────────────────────────────
 
-echo ""
-error_count=${#verify_errors[@]}
-warning_count=${#verify_warnings[@]}
-install_fail_count=${#INSTALL_FAILURES[@]}
+print_report() {
+  local rec st cat sec name rem det
+  local total=0 n_ok=0 n_cached=0 n_fail=0 n_warnish=0
 
-if [ "$error_count" -eq 0 ] && [ "$warning_count" -eq 0 ] && [ "$install_fail_count" -eq 0 ]; then
-  echo "Done ✓"
-else
-  if [ "$error_count" -gt 0 ] || [ "$install_fail_count" -gt 0 ]; then
-    echo "Done (${install_fail_count} install failure(s), ${error_count} verification error(s), ${warning_count} warning(s))"
+  for rec in ${STEP_RECORDS[@]+"${STEP_RECORDS[@]}"}; do
+    st="${rec%%|*}"
+    total=$((total + 1))
+    case "$st" in
+      ok)        n_ok=$((n_ok + 1)) ;;
+      cached)    n_cached=$((n_cached + 1)) ;;
+      fail)      n_fail=$((n_fail + 1)) ;;
+      skip|warn) n_warnish=$((n_warnish + 1)) ;;
+    esac
+  done
+
+  # Verification errors not already represented by a failed install step.
+  local extra_verify=()
+  local e covered fname
+  for e in ${verify_errors[@]+"${verify_errors[@]}"}; do
+    covered=0
+    for rec in ${STEP_RECORDS[@]+"${STEP_RECORDS[@]}"}; do
+      st="${rec%%|*}"
+      [ "$st" = "fail" ] || continue
+      IFS='|' read -r st cat sec fname rem det <<< "$rec"
+      case "$e" in
+        *"$fname"*) covered=1; break ;;
+      esac
+    done
+    [ "$covered" -eq 0 ] && extra_verify+=("$e")
+  done
+  local n_verify=${#extra_verify[@]}
+  local n_bad=$((n_fail + n_verify))
+
+  # Verify-phase warnings that merely restate a skipped install step are
+  # deduped: match on the warning's first token against skip/warn names.
+  local extra_vwarn=()
+  local _tok
+  for e in ${verify_warnings[@]+"${verify_warnings[@]}"}; do
+    covered=0
+    _tok="${e%% *}"
+    for rec in ${STEP_RECORDS[@]+"${STEP_RECORDS[@]}"}; do
+      st="${rec%%|*}"
+      case "$st" in skip|warn) ;; *) continue ;; esac
+      IFS='|' read -r st cat sec name rem det <<< "$rec"
+      case "$name" in
+        "$_tok"*) covered=1; break ;;
+      esac
+    done
+    [ "$covered" -eq 0 ] && extra_vwarn+=("$e")
+  done
+  local n_warn_total=$((n_warnish + ${#extra_vwarn[@]}))
+
+  local elapsed=$(( $(date +%s) - START_TS ))
+  local mins=$((elapsed / 60)) secs=$((elapsed % 60))
+
+  echo ""
+  if [ "$n_bad" -eq 0 ]; then
+    echo "# ─── ${C_BOLD}Bootstrap complete ${C_GREEN}✓${C_RESET} ─────────────────────────────────────────"
   else
-    echo "Done ✓ (${warning_count} warning(s))"
+    echo "# ─── ${C_BOLD}Bootstrap finished — action needed ${C_RED}✗${C_RESET} ──────────────────────"
   fi
-  # The install phase always runs to completion. Steps that failed are listed
-  # here (with their captured error) rather than aborting the run mid-way.
-  if [ "$install_fail_count" -gt 0 ]; then
-    echo ""
-    echo "  Install failures (run completed; these steps did not — re-run to retry):"
-    for msg in "${INSTALL_FAILURES[@]}"; do
-      echo "    ✗ ${msg}"
-    done
-  fi
-  if [ "$error_count" -gt 0 ]; then
-    echo ""
-    echo "  Verification errors:"
-    for msg in "${verify_errors[@]}"; do
-      echo "    ✗ ${msg}"
-    done
-  fi
-  if [ "$warning_count" -gt 0 ]; then
-    echo ""
-    echo "  Warnings:"
-    for msg in "${verify_warnings[@]}"; do
-      echo "    ⚠ ${msg}"
-    done
-  fi
-fi
+  echo ""
+  printf '  %d steps · %d ok (%d already up to date) · %d failed · %d verify errors · %d warnings · %dm %02ds\n' \
+    "$total" "$((n_ok + n_cached))" "$n_cached" "$n_fail" "$n_verify" "$n_warn_total" "$mins" "$secs"
+  echo ""
 
-if [ "$error_count" -gt 0 ] || [ "$install_fail_count" -gt 0 ]; then
+  # Installed table — one row per section, glyph = worst member status.
+  echo "  Installed"
+  local sections=() s found glyph t good bad sk
+  for rec in ${STEP_RECORDS[@]+"${STEP_RECORDS[@]}"}; do
+    IFS='|' read -r st cat sec name rem det <<< "$rec"
+    [ "$sec" = "Preflight" ] && continue
+    found=0
+    for s in ${sections[@]+"${sections[@]}"}; do
+      if [ "$s" = "$sec" ]; then found=1; break; fi
+    done
+    [ "$found" -eq 0 ] && sections+=("$sec")
+  done
+  for s in ${sections[@]+"${sections[@]}"}; do
+    t=0; good=0; bad=0; sk=0
+    for rec in ${STEP_RECORDS[@]+"${STEP_RECORDS[@]}"}; do
+      IFS='|' read -r st cat sec name rem det <<< "$rec"
+      [ "$sec" = "$s" ] || continue
+      t=$((t + 1))
+      case "$st" in
+        ok|cached)  good=$((good + 1)) ;;
+        fail)       bad=$((bad + 1)) ;;
+        skip|warn)  sk=$((sk + 1)) ;;
+      esac
+    done
+    if [ "$bad" -gt 0 ]; then glyph="${C_RED}✗${C_RESET}"
+    elif [ "$sk" -gt 0 ]; then glyph="${C_YELLOW}⚠${C_RESET}"
+    else glyph="${C_GREEN}✓${C_RESET}"
+    fi
+    printf '    %b %-32s %3d/%d\n' "$glyph" "$s" "$good" "$t"
+  done
+  echo ""
+
+  # Failures with remediation.
+  if [ "$n_bad" -gt 0 ]; then
+    echo "  Failures (${n_bad}) — fix the cause, then re-run ./claude-bootstrap.sh."
+    echo "  Re-runs are idempotent: completed steps are skipped, only failures retry."
+    local i=1
+    for rec in ${STEP_RECORDS[@]+"${STEP_RECORDS[@]}"}; do
+      st="${rec%%|*}"
+      [ "$st" = "fail" ] || continue
+      IFS='|' read -r st cat sec name rem det <<< "$rec"
+      echo ""
+      printf '    %d. %b✗%b %s — %s   [%s]\n' "$i" "$C_RED" "$C_RESET" "$sec" "$name" "$cat"
+      [ -n "$det" ] && printf '         %s\n' "$det"
+      [ -n "$rem" ] && printf '         → %s\n' "$rem"
+      i=$((i + 1))
+    done
+    for e in ${extra_verify[@]+"${extra_verify[@]}"}; do
+      echo ""
+      printf '    %d. %b✗%b %s   [verify]\n' "$i" "$C_RED" "$C_RESET" "$e"
+      printf '         → re-run ./claude-bootstrap.sh; if it persists, install by hand\n'
+      i=$((i + 1))
+    done
+    echo ""
+  fi
+
+  # Warnings (env-gated skips, auth, lint).
+  if [ "$n_warn_total" -gt 0 ]; then
+    echo "  Warnings (${n_warn_total}) — optional; everything else works without them."
+    local j=1
+    for rec in ${STEP_RECORDS[@]+"${STEP_RECORDS[@]}"}; do
+      st="${rec%%|*}"
+      case "$st" in skip|warn) ;; *) continue ;; esac
+      IFS='|' read -r st cat sec name rem det <<< "$rec"
+      echo ""
+      printf '    %d. %b⚠%b %s — %s   [%s]\n' "$j" "$C_YELLOW" "$C_RESET" "$sec" "$name" "$cat"
+      [ -n "$det" ] && printf '         %s\n' "$det"
+      [ -n "$rem" ] && printf '         → %s\n' "$rem"
+      j=$((j + 1))
+    done
+    for e in ${extra_vwarn[@]+"${extra_vwarn[@]}"}; do
+      echo ""
+      printf '    %d. %b⚠%b %s\n' "$j" "$C_YELLOW" "$C_RESET" "$e"
+      j=$((j + 1))
+    done
+    echo ""
+  fi
+
+  echo "  Next steps"
+  if [ "$n_bad" -gt 0 ]; then
+    echo "    • Fix the ${n_bad} failure(s) above, then re-run ./claude-bootstrap.sh"
+  fi
+  echo "    • Restart your shell (or run: source ~/${SHELL_RC_NAME})"
+  echo "    • Run \`claude\` in any project to verify"
+  echo "    • Pencil: install the app from pencil.dev — its MCP server registers"
+  echo "      itself with Claude Code whenever the app is running"
+  if [ "$n_bad" -gt 0 ]; then
+    echo ""
+    echo "  Exit code: 1 (failures present)"
+  fi
+  echo ""
+}
+
+print_report
+
+# Exit contract: 0 success (warnings ok) · 1 step/verify failures · 2 preflight.
+_fail_count=0
+for _rec in ${STEP_RECORDS[@]+"${STEP_RECORDS[@]}"}; do
+  case "${_rec%%|*}" in fail) _fail_count=$((_fail_count + 1)) ;; esac
+done
+if [ "$_fail_count" -gt 0 ] || [ "${#verify_errors[@]}" -gt 0 ]; then
   exit 1
 fi

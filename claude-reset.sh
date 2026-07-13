@@ -6,13 +6,18 @@
 # Requires: claude CLI + Homebrew (macOS or Linux/WSL)
 #
 # Usage:
-#   bash claude-reset.sh          # prompt before removal
-#   bash claude-reset.sh --all    # remove everything without prompting
+#   bash claude-reset.sh                                   # prompt before removal
+#   bash claude-reset.sh --all                             # remove everything without prompting
+#   bash claude-reset.sh [--all] claude-config.everything.txt   # core + profile(s)
+#
+# Profile files mirror claude-bootstrap.sh: core (claude-config.txt) always
+# applies; positional args add profile files so resets stay symmetric with
+# installs.
 #
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CONFIG="${SCRIPT_DIR}/claude-config.txt"
+CONFIG_FILES=("${SCRIPT_DIR}/claude-config.txt")
 
 # ─── Platform Detection ─────────────────────────────────────────────────────
 
@@ -24,9 +29,17 @@ trap cleanup EXIT
 # ─── Options ─────────────────────────────────────────────────────────────────
 
 REMOVE_ALL=false
-if [[ "${1:-}" == "--all" ]]; then
-  REMOVE_ALL=true
-fi
+for arg in "$@"; do
+  if [[ "$arg" == "--all" ]]; then
+    REMOVE_ALL=true
+  elif [ -f "$arg" ]; then
+    CONFIG_FILES+=("$arg")
+  else
+    echo "ERROR: profile file not found: ${arg}" >&2
+    echo "Usage: ./claude-reset.sh [--all] [profile-config.txt ...]" >&2
+    exit 2
+  fi
+done
 
 if ! $REMOVE_ALL; then
   read -rp "Remove all installed plugins and skills? [y/N] " answer
@@ -53,15 +66,21 @@ read_config() {
     f1="$(echo "$f1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
     f2="$(echo "${f2:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
     f3="$(echo "${f3:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    "$callback" "$f1" "$f2" "$f3"
-  done < <(grep -v '^\s*#' "$CONFIG" | grep -v '^\s*$')
+    "$callback" "$f1" "$f2" "$f3" </dev/null
+  done < <(cat "${CONFIG_FILES[@]}" | grep -v '^\s*#' | grep -v '^\s*$' | awk '!seen[$0]++')
 }
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
+# Prompts read from /dev/tty, not stdin: callbacks run inside read_config's
+# while-read loop, where stdin is the config stream (and is detached anyway) —
+# reading it would consume config lines as answers.
 confirm() {
   if $REMOVE_ALL; then return 0; fi
-  read -rp "  Remove $1? [y/N] " answer
+  local answer
+  if ! read -rp "  Remove $1? [y/N] " answer </dev/tty 2>/dev/null; then
+    return 1
+  fi
   [[ "$answer" =~ ^[Yy]$ ]]
 }
 
@@ -102,21 +121,37 @@ do_remove_github_skill_pack() {
     return 0
   fi
   echo -n "  ${name} (${repo})... "
-  local tmp="/tmp/claude-skill-pack-${name}"
-  rm -rf "$tmp"
-  if git clone --depth 1 --quiet "https://github.com/${repo}.git" "$tmp" 2>/dev/null; then
-    local count=0
-    for skill_dir in "$tmp"/.claude/skills/*/; do
-      [ -d "$skill_dir" ] || continue
-      local skill_name
-      skill_name="$(basename "$skill_dir")"
+  # Preferred path: the manifest bootstrap wrote at install time — removes
+  # exactly what was installed, no network needed.
+  local manifest=~/.claude/skills/.pack-${name}.manifest
+  if [ -f "$manifest" ]; then
+    local count=0 skill_name
+    while IFS= read -r skill_name; do
+      [ -n "$skill_name" ] || continue
       rm -rf ~/.claude/skills/"${skill_name}"
       count=$((count + 1))
-    done
-    rm -rf "$tmp"
-    echo "✓ (${count} skills removed)"
+    done < "$manifest"
+    rm -f "$manifest"
+    echo "✓ (${count} skills removed via manifest)"
   else
-    echo "⚠ (cannot fetch skill list — remove ~/.claude/skills/ entries manually)"
+    # Fallback for packs installed before manifests existed: re-clone to
+    # enumerate the pack's skills.
+    local tmp="/tmp/claude-skill-pack-${name}"
+    rm -rf "$tmp"
+    if git clone --depth 1 --quiet "https://github.com/${repo}.git" "$tmp" 2>/dev/null; then
+      local count=0
+      for skill_dir in "$tmp"/.claude/skills/*/; do
+        [ -d "$skill_dir" ] || continue
+        local skill_name
+        skill_name="$(basename "$skill_dir")"
+        rm -rf ~/.claude/skills/"${skill_name}"
+        count=$((count + 1))
+      done
+      rm -rf "$tmp"
+      echo "✓ (${count} skills removed)"
+    else
+      echo "⚠ (no manifest and cannot fetch skill list — remove ~/.claude/skills/ entries manually)"
+    fi
   fi
   # Clean up old project-local artifacts from npx-skill era
   rm -rf "${SCRIPT_DIR}/.agents" "${SCRIPT_DIR}/.kiro" "${SCRIPT_DIR}/skills-lock.json" "${SCRIPT_DIR}/.claude/skills"
@@ -299,11 +334,21 @@ if ! confirm "global hooks (~/.claude/hooks/)"; then
 else
   settings=~/.claude/settings.json
   hooks_removed=0
-  # Remove only hooks that exist in this repo's hooks/ directory
+  # Remove the union of hooks currently in this repo's hooks/ directory and
+  # hooks recorded in the install-time manifest (.bionic-manifest) — the
+  # manifest attributes files orphaned by later repo renames/deletions.
+  _hook_names=""
   for hook in "${SCRIPT_DIR}"/hooks/*.sh; do
     [ -f "$hook" ] || continue
     [[ "$(basename "$hook")" == *.test.sh ]] && continue
-    name="$(basename "$hook")"
+    _hook_names="${_hook_names}$(basename "$hook")"$'\n'
+  done
+  if [ -f ~/.claude/hooks/.bionic-manifest ]; then
+    _hook_names="${_hook_names}$(cat ~/.claude/hooks/.bionic-manifest)"$'\n'
+  fi
+  _hook_names="$(printf '%s' "$_hook_names" | grep -v '^$' | sort -u || true)"
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
     echo -n "  ${name}... "
     if [ -f ~/.claude/hooks/"${name}" ]; then
       rm -f ~/.claude/hooks/"${name}"
@@ -326,7 +371,8 @@ else
         )
       ' "$settings" > "$tmp" && mv "$tmp" "$settings"
     fi
-  done
+  done <<< "$_hook_names"
+  rm -f ~/.claude/hooks/.bionic-manifest
   # Clean up: drop any event arrays that are now empty, then drop the
   # whole hooks object if nothing is left.
   if [ -f "$settings" ]; then
@@ -337,6 +383,42 @@ else
   if [ "$hooks_removed" -eq 0 ]; then
     echo "  (no hooks to remove)"
   fi
+fi
+echo ""
+
+# ─── Account-mirror symlinks ────────────────────────────────────────────────
+# Bootstrap symlinks ~/.claude-*/settings.json and CLAUDE.md to the canonical
+# ~/.claude/ copies, backing up any originals as <file>.bak-<ts>. Undo that:
+# remove the symlink and restore the most recent backup.
+
+echo "Account-mirror symlinks:"
+mirror_count=0
+for mirror in ~/.claude-*; do
+  [ -d "$mirror" ] || continue
+  account="$(basename "$mirror")"
+  for f in settings.json CLAUDE.md; do
+    target="${mirror}/${f}"
+    [ -L "$target" ] || continue
+    # Only touch links that point at the canonical ~/.claude copy.
+    [ "$(readlink "$target")" = "${HOME}/.claude/${f}" ] || continue
+    if ! confirm "${account}/${f} symlink"; then
+      echo "  ${account}/${f} — skipped"
+      continue
+    fi
+    echo -n "  ${account}/${f}... "
+    rm -f "$target"
+    latest_bak="$(ls -1 "${target}".bak-* 2>/dev/null | sort | tail -1 || true)"
+    if [ -n "$latest_bak" ]; then
+      mv "$latest_bak" "$target"
+      echo "✓ (symlink removed, restored $(basename "$latest_bak"))"
+    else
+      echo "✓ (symlink removed)"
+    fi
+    mirror_count=$((mirror_count + 1))
+  done
+done
+if [ "$mirror_count" -eq 0 ]; then
+  echo "  (no bionic-managed symlinks found)"
 fi
 echo ""
 

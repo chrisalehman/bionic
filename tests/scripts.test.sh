@@ -69,16 +69,17 @@ expect_contains() {
   fi
 }
 
-# ---------- setup: define read_config pointing at $_temp_config ----------
+# ---------- setup: define read_config pointing at $CONFIG_FILES ----------
 #
 # Identical to the function in both scripts. We keep it here so tests can
 # run it against a temp file without sourcing the full scripts (side effects).
 
-# _cfg_file: path to the config file that read_config operates against.
+# CONFIG_FILES: the config file(s) read_config operates against.
 # Set to a tmpfile for Section 1 parsing tests; set to $CONFIG for real-config tests.
-# The EXIT trap only cleans up $S1_TMPFILE (created here for Section 1).
-_cfg_file=""
+# The EXIT trap only cleans up the tmpfiles (created here for Section 1).
+CONFIG_FILES=()
 S1_TMPFILE="$(mktemp)"
+S1_TMPFILE2="$(mktemp)"
 
 read_config() {
   local type="$1" callback="$2"
@@ -88,12 +89,12 @@ read_config() {
     f1="$(echo "$f1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
     f2="$(echo "${f2:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
     f3="$(echo "${f3:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    "$callback" "$f1" "$f2" "$f3"
-  done < <(grep -v '^\s*#' "$_cfg_file" | grep -v '^\s*$')
+    "$callback" "$f1" "$f2" "$f3" </dev/null
+  done < <(cat "${CONFIG_FILES[@]}" | grep -v '^\s*#' | grep -v '^\s*$' | awk '!seen[$0]++')
 }
 
 cleanup() {
-  rm -f "$S1_TMPFILE"
+  rm -f "$S1_TMPFILE" "$S1_TMPFILE2"
 }
 trap cleanup EXIT
 
@@ -104,8 +105,8 @@ trap cleanup EXIT
 echo ""
 echo "=== Section 1: Config file parsing (read_config) ==="
 
-_cfg_file="$S1_TMPFILE"
-cat > "$_cfg_file" << 'EOF'
+CONFIG_FILES=("$S1_TMPFILE")
+cat > "$S1_TMPFILE" << 'EOF'
 # This is a comment — must be skipped
 brew-dep     | git
 brew-dep     | rg            | ripgrep
@@ -277,6 +278,30 @@ expect_eq "mcp-server: trello f1=name" "trello" "$_trello_f1"
 expect_eq "mcp-server: trello f2=pkg" "@delorenj/mcp-server-trello" "$_trello_f2"
 expect_eq "mcp-server: trello f3=env_vars" "TRELLO_API_KEY,TRELLO_TOKEN" "$_trello_f3"
 
+# 1r: stdin-theft regression — a callback whose child consumes stdin must NOT
+# truncate the remaining config entries. This is the bug that made a brew tap
+# install (git clone reads stdin) silently skip 6 of 17 brew deps.
+_theft_count=0
+_stdin_thief() {
+  _theft_count=$((_theft_count + 1))
+  cat > /dev/null   # would eat the rest of the config stream without </dev/null
+}
+read_config "brew-dep" _stdin_thief
+expect_eq "stdin-reading callback does not truncate the config (all 2 brew-deps seen)" "2" "$_theft_count"
+
+# 1s: profile layering — a second config file's entries are appended, and
+# exact-duplicate lines across files are deduped.
+cat > "$S1_TMPFILE2" << 'EOF'
+brew-dep     | git
+brew-dep     | extra-tool
+EOF
+CONFIG_FILES=("$S1_TMPFILE" "$S1_TMPFILE2")
+_layer_names=""
+_collect_brew() { _layer_names="${_layer_names}${1} "; }
+read_config "brew-dep" _collect_brew
+expect_eq "profile layering: core entries + profile additions, duplicates deduped" "git rg extra-tool " "$_layer_names"
+CONFIG_FILES=("$S1_TMPFILE")
+
 # ============================================================
 # SECTION 2: Config file consistency (claude-config.txt)
 # ============================================================
@@ -284,39 +309,47 @@ expect_eq "mcp-server: trello f3=env_vars" "TRELLO_API_KEY,TRELLO_TOKEN" "$_trel
 echo ""
 echo "=== Section 2: Config file consistency (claude-config.txt) ==="
 
-_cfg_file="$CONFIG"
+CONFIG_FILES=("$CONFIG")
 
 KNOWN_TYPES="brew-dep brew-cask npm-global pnpm-store uv-tool mcp-server plugin marketplace github-skill github-skill-pack local-skill local-command global-memory env-var statusline"
 
 # 2a: Every uncommented, non-blank line has at least one pipe delimiter
+# (checked across core AND all profile config files)
 _bad_lines=""
-while IFS= read -r line; do
-  stripped="$(echo "$line" | sed 's/^[[:space:]]*//')"
-  [ -z "$stripped" ] && continue
-  if echo "$stripped" | grep -q '^#'; then
-    continue
-  fi
-  if ! echo "$line" | grep -q '|'; then
-    _bad_lines="${_bad_lines}${line}\n"
-  fi
-done < "$CONFIG"
+for _cfg in "$CONFIG" "${REPO}"/claude-config.*.txt; do
+  [ -f "$_cfg" ] || continue
+  while IFS= read -r line; do
+    stripped="$(echo "$line" | sed 's/^[[:space:]]*//')"
+    [ -z "$stripped" ] && continue
+    if echo "$stripped" | grep -q '^#'; then
+      continue
+    fi
+    if ! echo "$line" | grep -q '|'; then
+      _bad_lines="${_bad_lines}$(basename "$_cfg"): ${line}\n"
+    fi
+  done < "$_cfg"
+done
 expect_eq "all uncommented non-blank lines have a pipe delimiter" "" "$_bad_lines"
 
 # 2b: Every type field on uncommented lines is a known type
+# (checked across core AND all profile config files)
 _unknown_types=""
-while IFS='|' read -r entry_type _rest; do
-  entry_type="$(echo "$entry_type" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-  found=0
-  for known in $KNOWN_TYPES; do
-    if [ "$entry_type" = "$known" ]; then
-      found=1
-      break
+for _cfg in "$CONFIG" "${REPO}"/claude-config.*.txt; do
+  [ -f "$_cfg" ] || continue
+  while IFS='|' read -r entry_type _rest; do
+    entry_type="$(echo "$entry_type" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    found=0
+    for known in $KNOWN_TYPES; do
+      if [ "$entry_type" = "$known" ]; then
+        found=1
+        break
+      fi
+    done
+    if [ "$found" -eq 0 ]; then
+      _unknown_types="${_unknown_types}${entry_type} "
     fi
-  done
-  if [ "$found" -eq 0 ]; then
-    _unknown_types="${_unknown_types}${entry_type} "
-  fi
-done < <(grep -v '^\s*#' "$CONFIG" | grep -v '^\s*$')
+  done < <(grep -v '^\s*#' "$_cfg" | grep -v '^\s*$')
+done
 expect_eq "all type fields are known types" "" "$_unknown_types"
 
 # 2c: Every local-skill entry has a skills/<name>/SKILL.md file
@@ -432,9 +465,10 @@ echo "=== Section 3: Bootstrap/reset script symmetry ==="
 expect_true "bootstrap defines read_config function" grep -q "^read_config()" "$BOOTSTRAP"
 expect_true "reset defines read_config function" grep -q "^read_config()" "$RESET"
 
-# 3b: Both scripts derive config path from SCRIPT_DIR
-expect_true "bootstrap uses CONFIG variable from SCRIPT_DIR" grep -q 'CONFIG=.*claude-config' "$BOOTSTRAP"
-expect_true "reset uses CONFIG variable from SCRIPT_DIR" grep -q 'CONFIG=.*claude-config' "$RESET"
+# 3b: Both scripts derive the core config path from SCRIPT_DIR and accept
+# profile files as positional args (CONFIG_FILES array).
+expect_true "bootstrap uses CONFIG_FILES from SCRIPT_DIR" grep -q 'CONFIG_FILES=(.*claude-config' "$BOOTSTRAP"
+expect_true "reset uses CONFIG_FILES from SCRIPT_DIR" grep -q 'CONFIG_FILES=(.*claude-config' "$RESET"
 
 # 3c-3k: Every config type read in bootstrap is also read in reset
 for config_type in mcp-server env-var statusline plugin global-memory github-skill local-skill local-command npm-global uv-tool marketplace; do
@@ -536,12 +570,80 @@ expect_true "bootstrap reads type: pnpm-store" grep -q '"pnpm-store"' "$BOOTSTRA
 # network installers record failures (non-fatal) instead of `exit 1`.
 expect_true "bootstrap defines run_retry helper" grep -q "^run_retry()" "$BOOTSTRAP"
 expect_true "bootstrap defines record_fail helper" grep -q "^record_fail()" "$BOOTSTRAP"
+expect_true "bootstrap defines step_fail helper" grep -q "^step_fail()" "$BOOTSTRAP"
 expect_true "bootstrap collects INSTALL_FAILURES" grep -q "INSTALL_FAILURES=" "$BOOTSTRAP"
-expect_true "marketplace installer records failures (non-fatal)" grep -q 'record_fail "marketplace' "$BOOTSTRAP"
-expect_true "plugin installer records failures (non-fatal)" grep -q 'record_fail "plugin' "$BOOTSTRAP"
+expect_true "bootstrap collects STEP_RECORDS" grep -q "STEP_RECORDS=" "$BOOTSTRAP"
+
+# Extract a function body from the bootstrap for content assertions.
+_fn_body() {
+  awk -v fn="$1" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP"
+}
+expect_contains "marketplace installer records failures (non-fatal)" "step_fail" "$(_fn_body do_install_marketplace)"
+expect_contains "plugin installer records failures (non-fatal)" "step_fail" "$(_fn_body do_install_plugin)"
+expect_contains "mcp installer records failures (non-fatal, retried)" "run_retry claude mcp add" "$(_fn_body do_configure_mcp_server)"
+# step_fail must keep feeding the legacy INSTALL_FAILURES array.
+expect_contains "step_fail records into INSTALL_FAILURES" "record_fail" "$(_fn_body step_fail)"
 # The marketplace + plugin installers used to `exit 1` on failure; ensure that
 # fail-fast behavior is gone.
 expect_false "marketplace/plugin installers no longer hard-exit" grep -qE 'echo "FAILED" >&2|echo "FAILED: \$output" >&2' "$BOOTSTRAP"
+
+# 3w: stdin discipline — read_config detaches the callback's stdin, and
+# run_retry detaches the child's stdin (defense in depth for the tap-install
+# stdin-theft bug).
+expect_contains "read_config detaches callback stdin" '</dev/null' "$(_fn_body read_config)"
+expect_contains "run_retry detaches child stdin" '</dev/null' "$(_fn_body run_retry)"
+
+# 3x: SSH→HTTPS structural fix — plugin installs must not depend on GitHub SSH
+# keys existing on a fresh machine.
+expect_true "bootstrap rewrites git SSH to HTTPS for its process" grep -q "GIT_CONFIG_KEY_0='url.https://github.com/.insteadOf'" "$BOOTSTRAP"
+expect_true "bootstrap disables git terminal prompts" grep -q 'GIT_TERMINAL_PROMPT=0' "$BOOTSTRAP"
+
+# 3x2: manifest symmetry — bootstrap writes install-time manifests (skill-pack
+# skills, bionic-owned hooks); reset consumes them so removal works offline and
+# survives repo renames.
+expect_true "bootstrap writes skill-pack manifest" grep -qF '.pack-${name}.manifest' "$BOOTSTRAP"
+expect_true "reset reads skill-pack manifest" grep -qF '.pack-${name}.manifest' "$RESET"
+expect_true "bootstrap writes hook manifest" grep -qF '.bionic-manifest' "$BOOTSTRAP"
+expect_true "reset consumes hook manifest" grep -qF '.bionic-manifest' "$RESET"
+
+# 3x3: reset reverts account-mirror symlinks (and restores backups)
+expect_true "reset handles account-mirror symlinks" grep -q 'Account-mirror symlinks' "$RESET"
+expect_true "reset restores mirror backups" grep -qF '.bak-' "$RESET"
+
+# 3y: profile superset rule — every active entry in any profile file must also
+# appear in claude-config.everything.txt (the catalog is the superset). Trivial
+# while everything.txt is the only profile; guards future profile additions.
+_superset_missing=""
+EVERYTHING="${REPO}/claude-config.everything.txt"
+if [ -f "$EVERYTHING" ]; then
+  for profile in "${REPO}"/claude-config.*.txt; do
+    [ "$profile" = "$EVERYTHING" ] && continue
+    while IFS= read -r line; do
+      stripped="$(echo "$line" | sed 's/^[[:space:]]*//')"
+      [ -z "$stripped" ] && continue
+      case "$stripped" in "#"*) continue ;; esac
+      if ! grep -qxF "$line" "$EVERYTHING"; then
+        _superset_missing="${_superset_missing}$(basename "$profile"): ${line}\n"
+      fi
+    done < "$profile"
+  done
+fi
+expect_eq "every profile entry appears in claude-config.everything.txt" "" "$_superset_missing"
+
+# 3z: core/everything disjoint — an active entry duplicated in both files is
+# redundant (core always applies) and hides drift.
+_overlap=""
+if [ -f "$EVERYTHING" ]; then
+  while IFS= read -r line; do
+    stripped="$(echo "$line" | sed 's/^[[:space:]]*//')"
+    [ -z "$stripped" ] && continue
+    case "$stripped" in "#"*) continue ;; esac
+    if grep -qxF "$line" "$CONFIG"; then
+      _overlap="${_overlap}${line}\n"
+    fi
+  done < "$EVERYTHING"
+fi
+expect_eq "no active entry appears in both core and everything profiles" "" "$_overlap"
 
 # ============================================================
 # SECTION 4: Hook file consistency

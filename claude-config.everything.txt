@@ -1,0 +1,48 @@
+# claude-config.everything.txt — EVERYTHING profile (superset / catalog)
+# Layered on top of core:  ./claude-bootstrap.sh claude-config.everything.txt
+#
+# This is the union of ALL optional entries Bionic knows how to install —
+# the browsable catalog, the maintainer's environment, and the config the
+# e2e tests exercise. Rule (enforced by tests/scripts.test.sh): every active
+# entry in any other profile file must also appear here.
+#
+# Same format as claude-config.txt. Reset with the same argument:
+#   ./claude-reset.sh claude-config.everything.txt
+
+# ─── Deployment Platforms ───────────────────────────────────────────────────
+brew-dep     | stripe        | stripe/stripe-cli/stripe
+brew-dep     | vercel        | vercel-cli
+brew-dep     | supabase
+brew-dep     | fastlane
+npm-global   | eas-cli
+# brew-dep     | firebase      | firebase-cli
+
+# ─── API & Serialization ────────────────────────────────────────────────────
+brew-dep     | http          | httpie
+brew-dep     | grpcurl
+brew-dep     | protoc        | protobuf
+
+# ─── Kubernetes ─────────────────────────────────────────────────────────────
+# brew-dep     | kubectl
+# brew-dep     | helm
+# brew-dep     | stern
+# brew-dep     | kubectx
+# brew-dep     | argocd
+# brew-dep     | k9s
+
+# ─── Databases ──────────────────────────────────────────────────────────────
+# brew-dep     | psql          | libpq
+# brew-dep     | mongosh
+# brew-dep     | redis
+# mcp-server   | postgres      | @anthropic-ai/mcp-server-postgres
+
+# ─── Productivity ───────────────────────────────────────────────────────────
+# Requires Trello API credentials. Get yours at https://trello.com/app-key
+# Set TRELLO_API_KEY and TRELLO_TOKEN in your shell environment, then re-run.
+mcp-server   | trello        | @delorenj/mcp-server-trello | TRELLO_API_KEY,TRELLO_TOKEN
+
+# ─── Observability ──────────────────────────────────────────────────────────
+# Requires a Sentry User Auth Token. Create one at https://sentry.io/settings/auth-tokens/
+# Set SENTRY_ACCESS_TOKEN in your shell environment, then re-run.
+npm-global   | @sentry/cli
+mcp-server   | sentry        | @sentry/mcp-server@latest   | SENTRY_ACCESS_TOKEN
