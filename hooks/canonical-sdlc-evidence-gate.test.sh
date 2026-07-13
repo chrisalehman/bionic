@@ -1502,6 +1502,194 @@ Step $step: pointer evidence here" > /dev/null
 done
 
 # ============================================================
+# Section 14: v8 canonical_sdlc_version — drive-check gate
+# ============================================================
+#
+# v8 = v7 plus ONE addition: the Step 5 block must carry
+# `drive-check: <observed delta>` (or `suite: <named test>` /
+# `n/a: <reason>`) — proof that one trusted interaction changed app
+# state, read back semantically, before browser-modality evidence
+# counts. Universal with an n/a escape, exactly like `bundle-fresh:`.
+# The hook validates presence + non-empty value/reason + the existing
+# placeholder ban only; the suite-credit semantics live in skill prose.
+
+echo ""
+echo "=== Section 14: v8 drive-check gate ==="
+
+v8_frontmatter() {
+  local has_ui="${1:-true}" deploy="${2:-none}" use_wt="${3:-false}"
+  cat <<EOF
+---
+governing-skill: canonical-sdlc
+mode: autonomous
+canonical_sdlc_version: 8
+deploy_target: ${deploy}
+use_worktree: ${use_wt}
+has_ui: ${has_ui}
+---
+EOF
+}
+
+# Shared Step-5 body (tests + browser + bundle-fresh satisfied) so each
+# case isolates the drive-check variable.
+v8_step5_base="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-04.plan.md#step-5
+  devtools-trace: .bionic/tmp/evidence-golden.png
+  bundle-fresh: FRESH — canary token-9f3a round-tripped to dist/main.js in 4.2s"
+
+# 14a — v8 Step 5 complete but NO drive-check → block, message names the key.
+h14a=$(make_home)
+write_plan "$h14a" "$(v8_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v8_step5_base" > /dev/null
+expect_block "v8 Step 5 without drive-check → block" \
+  "$h14a" 'git commit -m "x"' "drive-check"
+
+# 14b — v8 + drive-check observed-delta proof → allow.
+h14b=$(make_home)
+write_plan "$h14b" "$(v8_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v8_step5_base
+  drive-check: drag on target surface moved app value 80/40 → 260/130 via eval readback" > /dev/null
+expect_allow "v8 + drive-check observed delta → allow" \
+  "$h14b" 'git commit -m "x"'
+
+# 14c — v8 + drive-check suite-credit form → allow.
+h14c=$(make_home)
+write_plan "$h14c" "$(v8_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v8_step5_base
+  drive-check: suite: e2e drag-updates-value.spec — real pointer input on the target surface, asserts app state delta" > /dev/null
+expect_allow "v8 + drive-check: suite: <named test> → allow" \
+  "$h14c" 'git commit -m "x"'
+
+# 14d — v8 + drive-check: n/a with reason → allow.
+h14d=$(make_home)
+write_plan "$h14d" "$(v8_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v8_step5_base
+  drive-check: n/a: no browser modality in this wave" > /dev/null
+expect_allow "v8 + drive-check: n/a with reason → allow" \
+  "$h14d" 'git commit -m "x"'
+
+# 14e — v8 + drive-check placeholder → block (placeholder ban).
+h14e=$(make_home)
+write_plan "$h14e" "$(v8_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v8_step5_base
+  drive-check: TBD" > /dev/null
+expect_block "v8 drive-check: TBD → block (placeholder ban)" \
+  "$h14e" 'git commit -m "x"' "placeholder"
+
+# 14f — v8 + drive-check: n/a with NO reason → block.
+h14f=$(make_home)
+write_plan "$h14f" "$(v8_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v8_step5_base
+  drive-check: n/a" > /dev/null
+expect_block "v8 drive-check: n/a without reason → block" \
+  "$h14f" 'git commit -m "x"' "drive-check"
+
+# 14g — v8 + drive-check empty value → block.
+h14g=$(make_home)
+write_plan "$h14g" "$(v8_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v8_step5_base
+  drive-check:" > /dev/null
+expect_block "v8 drive-check with empty value → block" \
+  "$h14g" 'git commit -m "x"' "drive-check"
+
+# 14h — v8 has_ui=false: key is universal (block without; n/a satisfies).
+h14h1=$(make_home)
+write_plan "$h14h1" "$(v8_frontmatter false)
+## SDLC State
+current: 5
+Step 5:
+$v8_step5_base" > /dev/null
+expect_block "v8 has_ui=false without drive-check → block (universal key)" \
+  "$h14h1" 'git commit -m "x"' "drive-check"
+
+h14h2=$(make_home)
+write_plan "$h14h2" "$(v8_frontmatter false)
+## SDLC State
+current: 5
+Step 5:
+$v8_step5_base
+  drive-check: n/a: no interactive surface in this wave" > /dev/null
+expect_allow "v8 has_ui=false + drive-check: n/a with reason → allow" \
+  "$h14h2" 'git commit -m "x"'
+
+# 14i — v8 with drive-check but missing bundle-fresh → block (v7 base
+# rules still apply under v8).
+h14i=$(make_home)
+write_plan "$h14i" "$(v8_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+  cmd: bash test.sh
+  pass: 10
+  total: 10
+  output: x
+  devtools-trace: .bionic/tmp/evidence-golden.png
+  drive-check: click toggled app flag false → true via eval readback" > /dev/null
+expect_block "v8 Step 5 missing bundle-fresh (base v7 rules intact) → block" \
+  "$h14i" 'git commit -m "x"' "bundle-fresh"
+
+# 14j — v8 non-Step-5 shapes unchanged from v7: Step 8 → allow.
+h14j=$(make_home)
+write_plan "$h14j" "$(v8_frontmatter true)
+## SDLC State
+current: 8
+Step 8:
+  merge: abc1234abc1234abc1234abc1234abc1234abc1
+  worktree-removed: n/a
+  cleanup: ok
+  tmp-wiped: yes
+  tasks-completed: 10/10" > /dev/null
+expect_allow "v8 Step 8 Integrate & close full → allow" \
+  "$h14j" 'git commit -m "x"'
+
+# 14k — v8 pointer steps 1/2/3/6 → allow.
+for step in 1 2 3 6; do
+  h=$(make_home)
+  write_plan "$h" "$(v8_frontmatter true)
+## SDLC State
+current: $step
+Step $step: pointer evidence here" > /dev/null
+  expect_allow "v8 Step $step (pointer step) → allow" \
+    "$h" 'git commit -m "x"'
+done
+
+# 14l — GRANDFATHERING: a v7 plan at Step 5 with bundle-fresh but NO
+# drive-check must still pass after the v8 switch lands. (13b proves the
+# same shape; this case exists as the explicit named regression.)
+h14l=$(make_home)
+write_plan "$h14l" "$(v7_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v7_step5_base
+  bundle-fresh: FRESH — canary token-9f3a round-tripped to dist/main.js in 4.2s" > /dev/null
+expect_allow "GRANDFATHER: v7 Step 5 without drive-check → allow" \
+  "$h14l" 'git commit -m "x"'
+
+# ============================================================
 # Summary
 # ============================================================
 
