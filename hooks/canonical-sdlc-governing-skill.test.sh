@@ -542,7 +542,7 @@ run_write "$project/.bionic/docs/plans/epic-01-demo/wave-17-v5d.plan.md" "$v5_de
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
 # ============================================================
-# canonical_sdlc_version v6/v7 enforcement (inherit v4 flag contract)
+# canonical_sdlc_version v6/v7/v8 enforcement (inherit v4 flag contract)
 # ============================================================
 #
 # v6 drops the external-review step; v7 adds the Step-5 bundle-fresh
@@ -550,6 +550,8 @@ assert_eq "exit 0" 0 "$HOOK_EXIT"
 # changes the governing-skill flag contract: 5 discriminators + 2 opt-in
 # + model_plan, autonomous mode only. This hook must ACCEPT both versions
 # — a version missing from its allowlist blocks every plan write.
+# v8 adds the Step-5 drive-check evidence key (enforced by the
+# evidence-gate hook, not here). The flag contract is unchanged.
 
 build_versioned_plan() {
   local version="$1"; shift
@@ -580,7 +582,7 @@ canonical_sdlc_version: ${version}
   printf '%s' "$out"
 }
 
-for version in 6 7; do
+for version in 6 7 8; do
   echo "v${version} with all v3 flags + model_plan → allow"
   vN_full=$(build_versioned_plan "$version")
   run_write "$project/.bionic/docs/plans/epic-01-demo/wave-18-v${version}.plan.md" "$vN_full"
