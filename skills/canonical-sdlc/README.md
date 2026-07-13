@@ -212,7 +212,7 @@ The evidence-gate hook checks the current step's line against this table on ever
 | 2 | pointer to the spec body | pointer-only |
 | 3 | pointer to the plan body | pointer-only |
 | 4 | pointer to the slice list; **or** `worktree:`/`base-sha:`/`branch:` when `use_worktree: true` | pointer-only at the hook |
-| 5 Verify | `cmd:`, `pass:`, `total:`, `output:` (`pass == total`) **AND** `devtools-trace: <path>` **OR** `n/a: <reason>` **AND** `bundle-fresh: <proof>` **OR** `bundle-fresh: n/a: <reason>` **AND** `drive-check: <observed delta>` **OR** `drive-check: suite: <named test>` **OR** `drive-check: n/a: <reason>` | tests/build modality always; browser modality is a trace or `n/a`; bundle freshness is proof or n/a-with-reason; drive-check is delta, suite-credit, or n/a-with-reason |
+| 5 Verify | `cmd:`, `pass:`, `total:`, `output:` (`pass == total`) **AND** `devtools-trace: <path>` **OR** `n/a: <reason>` **AND** `bundle-fresh: <proof>` **OR** `bundle-fresh: n/a: <reason>` **AND** `drive-check: <observed delta>` **OR** `drive-check: suite: <named test — what it asserts>` **OR** `drive-check: n/a: <reason>` | tests/build modality always; browser modality is a trace or `n/a`; bundle freshness is proof or n/a-with-reason; drive-check is delta, suite-credit, or n/a-with-reason |
 | 6 Review | pointer to the 5-axis review body + critic findings | pointer-only |
 | 7 Document | `adr: <path>` **OR** `rca: <path>` **OR** `n/a: <reason>` | |
 | 8 Integrate & close | `merge:`, `worktree-removed:` **AND** (`cleanup:`, `tmp-wiped:`, `tasks-completed:` **OR** `cleanup: n/a`) | finish half + cleanup half in one atomic step |
@@ -228,7 +228,7 @@ Step 5:
   output: <docs-root>/plans/<slug>.plan.md#step-5
   devtools-trace: .bionic/tmp/devtools-trace-golden.json
   bundle-fresh: FRESH — canary token-9f3a round-tripped to dist/main.js in 4.2s
-  drive-check: drag moved app value 80/40 → 260/130 via eval readback
+  drive-check: drag moved app value 3 → 7 via eval readback
 ```
 
 The `bundle-fresh:` value is the pasted output line of the project's freshness tool — typically a canary round-trip (a unique token written into a dev-only source file, polled for in the served artifact, then restored) proving the serve reflects the working tree, not a stale watcher. The hook validates presence and the placeholder ban, not the format — the format is project-specific by design.
