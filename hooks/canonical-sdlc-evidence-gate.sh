@@ -290,7 +290,7 @@ esac
 #   - Step 9 (Ship) — deploy/verified-at/monitor OR n/a   (was v5 Step 10)
 #   Commit remains a cross-cutting rhythm, not a numbered step.
 #
-# v7 (current) is the v6 shape table plus ONE addition: Step 5 (Verify)
+# v7 is the v6 shape table plus ONE addition: Step 5 (Verify)
 # additionally requires a `bundle-fresh:` key — the pasted output of the
 # project's bundle-freshness proof (proves the served artifact reflects
 # the working tree before any live observation is used as evidence), or
@@ -299,7 +299,20 @@ esac
 # decision, never a silent omission. The proof format is
 # project-specific by design; the hook validates presence, non-empty
 # value / non-empty n/a reason, and the existing placeholder ban only.
-if [ "$SDLC_VERSION" = "7" ]; then
+#
+# v8 (current) is the v7 shape table plus ONE addition: Step 5 (Verify)
+# additionally requires a `drive-check:` key — proof that one trusted
+# interaction changed app state, read back semantically (not via pixels),
+# before browser-modality evidence counts. Forms: an observed state delta,
+# `drive-check: suite: <named test>` (suite-credit only via a named test
+# making the same real contact), or `drive-check: n/a: <reason>`. Universal
+# with an n/a escape, grandfathered like every prior key — the hook
+# validates presence, non-empty value / non-empty n/a reason, and the
+# existing placeholder ban only; the suite-credit semantics live in
+# SKILL.md prose. v7 and earlier plans are never retrofitted.
+if [ "$SDLC_VERSION" = "8" ]; then
+  SHAPE_MODE="v8"
+elif [ "$SDLC_VERSION" = "7" ]; then
   SHAPE_MODE="v7"
 elif [ "$SDLC_VERSION" = "6" ]; then
   SHAPE_MODE="v6"
@@ -314,7 +327,20 @@ else
 fi
 
 # Pointer steps differ between schema versions due to renumbering.
-if [ "$SHAPE_MODE" = "v7" ]; then
+if [ "$SHAPE_MODE" = "v8" ]; then
+  case "$CURRENT" in
+    1|2|3|4|6)
+      # Same pointer set as v7 (v8 changes only Step 5's required fields).
+      # Step 4 is a pointer step BUT may include worktree fields when
+      # use_worktree=true; Step 6 (Review) is always a pointer step.
+      if [ "$CURRENT" = "4" ] && [ "$USE_WORKTREE" = "true" ]; then
+        : # fall through to shape check below
+      else
+        exit 0
+      fi
+      ;;
+  esac
+elif [ "$SHAPE_MODE" = "v7" ]; then
   case "$CURRENT" in
     1|2|3|4|6)
       # Same pointer set as v6 (v7 changes only Step 5's required fields).
@@ -410,7 +436,114 @@ shape_block() {
   fi
 }
 
-if [ "$SHAPE_MODE" = "v7" ]; then
+if [ "$SHAPE_MODE" = "v8" ]; then
+  # v8 shape switch — the v7 table plus ONE addition: the Step-5
+  # drive-check key. All other steps are identical to v7.
+  case "$CURRENT" in
+    4)
+      shape_block worktree base-sha branch
+      ;;
+    5)
+      shape_block cmd pass total output
+      pass=$(block_get pass)
+      total=$(block_get total)
+      if ! echo "$pass" | grep -qE '^[0-9]+$' || ! echo "$total" | grep -qE '^[0-9]+$'; then
+        echo "BLOCKED: canonical-sdlc v8 step 5 'pass:' and 'total:' must be integers (got pass='${pass}', total='${total}')." >&2
+        echo "Plan: $PLAN" >&2
+        exit 2
+      fi
+      if [ "$pass" -ne "$total" ]; then
+        echo "BLOCKED: canonical-sdlc v8 step 5 evidence has pass=${pass} but total=${total}; the suite is not fully green." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: do not commit step 5 until pass equals total." >&2
+        exit 2
+      fi
+      if ! block_has devtools-trace && ! block_has_na; then
+        echo "BLOCKED: canonical-sdlc v8 step 5 (Verify) browser modality requires 'devtools-trace: <path>' or 'n/a: <reason>'." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: add the browser-evidence path, or 'n/a:' with a reason. See SKILL.md verification shape table." >&2
+        exit 2
+      fi
+      # Bundle-freshness proof — universal, like devtools-trace. Live
+      # observations against an unproven serve are not evidence; the
+      # served artifact must be proven to reflect the working tree, or
+      # the plan records why freshness does not apply. The proof format
+      # is project-specific — presence + non-empty value is the contract
+      # (the whole-block placeholder ban already ran above).
+      if ! block_has bundle-fresh; then
+        echo "BLOCKED: canonical-sdlc v8 step 5 requires 'bundle-fresh: <proof>' or 'bundle-fresh: n/a: <reason>'." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: run the project's bundle-freshness proof and paste its output line as 'bundle-fresh: <proof>', or record 'bundle-fresh: n/a: <reason>' for non-served targets." >&2
+        exit 2
+      fi
+      bf_val=$(block_get bundle-fresh)
+      case "$bf_val" in
+        ""|n/a|n/a:)
+          echo "BLOCKED: canonical-sdlc v8 step 5 'bundle-fresh:' needs a non-empty proof, or 'n/a: <reason>' with a non-empty reason." >&2
+          echo "Plan: $PLAN" >&2
+          echo "Fix: paste the freshness tool's output line, or give the reason freshness does not apply." >&2
+          exit 2
+          ;;
+      esac
+      # Drive-check — universal, like bundle-fresh. Proof that one trusted
+      # interaction changed app state, read back semantically (not via
+      # pixels), before browser-modality evidence counts. Forms: observed
+      # delta, suite-credit (a named test making the same real contact),
+      # or n/a-with-reason. Presence + non-empty value/reason is the
+      # contract; suite-credit semantics live in SKILL.md prose.
+      if ! block_has drive-check; then
+        echo "BLOCKED: canonical-sdlc v8 step 5 requires 'drive-check: <observed delta>' or 'drive-check: n/a: <reason>'." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: prove one trusted interaction changed app state (read the delta back semantically, not via pixels) and record the observed delta — or 'drive-check: suite: <named test — what it asserts>' when a suite test makes the same real contact, or 'drive-check: n/a: <reason>' when no browser modality applies." >&2
+        exit 2
+      fi
+      dc_val=$(block_get drive-check)
+      case "$dc_val" in
+        ""|n/a|n/a:)
+          echo "BLOCKED: canonical-sdlc v8 step 5 'drive-check:' needs a non-empty observation, or 'n/a: <reason>' with a non-empty reason." >&2
+          echo "Plan: $PLAN" >&2
+          echo "Fix: record the observed state delta, the qualifying suite test, or the reason a drive-check does not apply." >&2
+          exit 2
+          ;;
+      esac
+      ;;
+    7)
+      if ! block_has adr && ! block_has rca && ! block_has_na; then
+        echo "BLOCKED: canonical-sdlc v8 step 7 evidence requires 'adr: <path>', 'rca: <path>' (incident-response mode), or 'n/a: <reason>'." >&2
+        echo "Plan: $PLAN" >&2
+        exit 2
+      fi
+      ;;
+    8)
+      # Integrate & close: merge is always required; cleanup is the triple
+      # (cleanup/tmp-wiped/tasks-completed) OR the explicit `cleanup: n/a`
+      # marker (cleanup_on_finish=false case).
+      shape_block merge worktree-removed
+      cleanup_val=$(block_get cleanup)
+      case "$cleanup_val" in
+        n/a|n/a:*)
+          : # cleanup_on_finish=false / already-cleaned case (reason optional)
+          ;;
+        *)
+          shape_block cleanup tmp-wiped tasks-completed
+          ;;
+      esac
+      ;;
+    9)
+      # Ship.
+      if block_has_na; then
+        if [ -n "$DEPLOY_TARGET" ] && [ "$DEPLOY_TARGET" != "none" ]; then
+          echo "BLOCKED: canonical-sdlc v8 step 9 'n/a:' is only valid when deploy_target=none in frontmatter (got deploy_target=${DEPLOY_TARGET})." >&2
+          echo "Plan: $PLAN" >&2
+          echo "Fix: provide 'deploy:', 'verified-at:', and 'monitor:' fields, or change deploy_target to none." >&2
+          exit 2
+        fi
+      else
+        shape_block deploy verified-at monitor
+      fi
+      ;;
+  esac
+elif [ "$SHAPE_MODE" = "v7" ]; then
   # v7 shape switch — the v6 table plus the universal Step-5 bundle-fresh
   # key (proof or n/a-with-reason). All other steps are identical to v6.
   case "$CURRENT" in
