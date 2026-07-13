@@ -28,11 +28,40 @@ START_TS="$(date +%s)"
 # ─── Config profiles ─────────────────────────────────────────────────────────
 # Core always applies; positional args are additional profile files.
 
+usage() {
+  cat <<'USAGE'
+claude-bootstrap.sh — set up Claude Code plugins, skills, and dependencies.
+
+Usage:
+  ./claude-bootstrap.sh [profile-config.txt ...]
+
+  ./claude-bootstrap.sh                                # core profile only
+  ./claude-bootstrap.sh claude-config.everything.txt   # core + full catalog
+
+Profiles are layered on top of claude-config.txt (core): additive-only,
+exact-duplicate entries deduped, last file wins for single-valued settings
+(env-var by key, statusline). Idempotent — re-run anytime; completed steps
+are skipped. Undo with ./claude-reset.sh (same profile arguments).
+
+Environment:
+  RETRY_MAX=N     retry attempts for network steps (default 3)
+  NO_COLOR=1      disable colored glyphs
+
+Exit codes:
+  0  success (env-gated skips and warnings included)
+  1  ran to completion but one or more steps failed — fix and re-run
+  2  could not run: hard prerequisite failed in preflight
+USAGE
+}
+
 CONFIG_FILES=("${SCRIPT_DIR}/claude-config.txt")
 for arg in "$@"; do
+  case "$arg" in
+    -h|--help) usage; exit 0 ;;
+  esac
   if [ ! -f "$arg" ]; then
     echo "ERROR: profile file not found: ${arg}" >&2
-    echo "Usage: ./claude-bootstrap.sh [profile-config.txt ...]" >&2
+    echo "Run ./claude-bootstrap.sh --help for usage." >&2
     exit 2
   fi
   CONFIG_FILES+=("$arg")
