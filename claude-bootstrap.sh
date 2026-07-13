@@ -854,11 +854,22 @@ fi
 # ─── Playwright Browsers ────────────────────────────────────────────────────
 
 section "Playwright browsers"
-step_start "chromium"
-if run_retry npx playwright install chromium; then
+# The one legitimately slow step (~170 MB on first install), so: stream
+# playwright's own progress instead of capturing it (it prints plain progress
+# lines when piped — log-safe), cap stalled downloads so a dead socket aborts
+# and playwright's internal retry kicks in, and --yes so npx can never prompt.
+step_start "chromium (first install downloads ~170 MB)"
+echo ""
+export PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT="${PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT:-60000}"
+_pw_t0="$STEP_T0"
+if npx --yes playwright install chromium </dev/null 2>&1 | sed 's/^/    /'; then
+  step_start "chromium"
+  STEP_T0="$_pw_t0"
   step_ok network
 else
-  step_fail network "$RUN_ERR" "run 'npx playwright install chromium' by hand, then re-run ./claude-bootstrap.sh"
+  step_start "chromium"
+  STEP_T0="$_pw_t0"
+  step_fail network "download failed or stalled (see progress output above)" "run 'npx --yes playwright install chromium' by hand, then re-run ./claude-bootstrap.sh"
 fi
 
 # ─── Marketplaces ────────────────────────────────────────────────────────────
