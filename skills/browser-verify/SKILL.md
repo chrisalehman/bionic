@@ -54,12 +54,14 @@ The CLI's mouse paths dispatch trusted (CDP-level, `isTrusted: true`) events, ve
 Every coordinate gesture starts from the target's bounding box — read it, compute points as fractions of it, never hardcode screen pixels:
 
 ```bash
-BOX=$(playwright-cli -s="$S" --raw eval "() => JSON.stringify(document.querySelector('canvas').getBoundingClientRect())")
+BOX=$(playwright-cli -s="$S" --raw eval "() => document.querySelector('canvas').getBoundingClientRect()")
 X1=$(echo "$BOX" | jq '.x + .width*0.3 | round'); Y1=$(echo "$BOX" | jq '.y + .height*0.5 | round')
 X2=$(echo "$BOX" | jq '.x + .width*0.7 | round'); Y2=$(echo "$BOX" | jq '.y + .height*0.5 | round')
 ```
 
-**Drag** — step the pointer through at least one intermediate move; drag handlers with move-thresholds or per-move deltas miss a single jump:
+Return the object itself — do NOT `JSON.stringify` it: `--raw` already serializes the return value, and stringifying first double-encodes it into a quoted string that `jq` can't index, leaving the coordinate variables silently empty (`mousemove` with empty args drives (0,0) — a silent no-contact walk).
+
+**Drag** — step the pointer through at least one intermediate move; drag handlers with move-thresholds or per-move deltas miss a single jump (this template is a horizontal drag: `Y1 == Y2`; interpolate Y in the intermediate move for diagonal drags):
 
 ```bash
 playwright-cli -s="$S" mousemove "$X1" "$Y1"
@@ -76,7 +78,7 @@ playwright-cli -s="$S" mousemove "$X1" "$Y1"
 playwright-cli -s="$S" mousewheel 0 120
 ```
 
-**Chord (held-modifier) gesture** — keyboard state persists across CLI calls within a session: hold, gesture, release. **Always release** — a leaked modifier silently alters every subsequent action in the session.
+**Chord (held-modifier) gesture** — a held modifier persists across CLI calls within a session: hold, gesture, release. **Always release** — a leaked modifier silently alters every subsequent action in the session.
 
 ```bash
 playwright-cli -s="$S" keydown Shift
