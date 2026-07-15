@@ -1,6 +1,6 @@
 ---
 name: browser-verify
-description: Use when verifying UI/frontend behavior in a real browser — golden-path and edge-case flows, console/network checks, visual evidence. Drives the browser via the token-efficient `playwright-cli`, picking the input rung by surface: ref-based commands for DOM, trusted coordinate primitives (`mousemove`/`mousedown`/`mouseup`/`mousewheel`, `page.mouse`) for canvas/gesture surfaces. Every interaction walk starts with a drive-check — proof that input actually changes app state, read back semantically. Escalates to chrome-devtools MCP only for deep inspection (Lighthouse, performance-trace analysis, heap/CPU profiling, network throttling) that no CLI exposes. Routed by canonical-sdlc Step 5 (the Verify gate's browser modality).
+description: Use when verifying UI/frontend behavior in a real browser — golden-path and edge-case flows, console/network checks, visual evidence. Drives the browser via the token-efficient `playwright-cli`, picking the input rung by surface: ref-based commands for DOM, trusted coordinate primitives (`mousemove`/`mousedown`/`mouseup`/`mousewheel`, `page.mouse`) for canvas/gesture surfaces, keyboard (`press`/`keydown`/`keyup`) for hotkeys and held-modifier chords. Every interaction walk starts with a drive-check — proof that input actually changes app state, read back semantically. Escalates to chrome-devtools MCP only for deep inspection (Lighthouse, performance-trace analysis, heap/CPU profiling, network throttling) that no CLI exposes. Routed by canonical-sdlc Step 5 (the Verify gate's browser modality).
 layer: technique
 needs: []
 loading: deferred
@@ -40,6 +40,7 @@ A page has two kinds of interactive surface, and they need different input:
 |---|---|---|---|
 | **Ref-based** | `snapshot` → `click`/`fill`/`type`/`drag`/`hover` | accessibility-tree refs | DOM elements: buttons, forms, menus, links |
 | **Coordinate** | `mousemove <x> <y>`, `mousedown`/`mouseup` (`right` for right-click), `mousewheel <dx> <dy>`, `press` | screen coordinates | canvas/WebGL surfaces, drag gestures, wheel, anything the a11y tree can't see |
+| **Keyboard** | `press <key>` (keystroke), `keydown <key>` / `keyup <key>` (hold + release) | the focused element / page | hotkeys, tool selection; held modifiers and chords around mouse actions |
 | **Compound** | `run-code "async (page) => { await page.mouse… }"` | Playwright `page` (Node scope) | multi-step gestures needing computed coordinates or chords |
 
 **A bare canvas typically exposes nothing to the a11y tree.** `snapshot` over it then returns no refs — a ref-walk over such a gesture surface silently drives *nothing* and still "completes." If `snapshot` returns no refs for the surface you must exercise, you are on the wrong rung: switch to coordinates.
@@ -48,14 +49,63 @@ The CLI's mouse paths dispatch trusted (CDP-level, `isTrusted: true`) events, ve
 
 **Gesture bindings are app-defined.** Verify what a gesture is bound to before asserting its effect — a wheel may be bound to scroll-through-a-collection rather than zoom; a naive "wheel = zoom" assertion no-ops and reads as a bug that isn't there.
 
-Coordinate math for canvas gestures — read the box, compute inside it, drive:
+### Gesture recipes (coordinate + keyboard rungs)
+
+Every coordinate gesture starts from the target's bounding box — read it, compute points as fractions of it, never hardcode screen pixels:
+
 ```bash
 BOX=$(playwright-cli -s="$S" --raw eval "() => JSON.stringify(document.querySelector('canvas').getBoundingClientRect())")
-# compute e.g. a drag from 30%,50% to 70%,50% of the box in your shell or a run-code snippet
+X1=$(echo "$BOX" | jq '.x + .width*0.3 | round'); Y1=$(echo "$BOX" | jq '.y + .height*0.5 | round')
+X2=$(echo "$BOX" | jq '.x + .width*0.7 | round'); Y2=$(echo "$BOX" | jq '.y + .height*0.5 | round')
+```
+
+**Drag** — step the pointer through at least one intermediate move; drag handlers with move-thresholds or per-move deltas miss a single jump:
+
+```bash
+playwright-cli -s="$S" mousemove "$X1" "$Y1"
+playwright-cli -s="$S" mousedown
+playwright-cli -s="$S" mousemove "$(( (X1 + X2) / 2 ))" "$Y1"
+playwright-cli -s="$S" mousemove "$X2" "$Y2"
+playwright-cli -s="$S" mouseup
+```
+
+**Wheel at a point** — the wheel event lands at the pointer position, not the focused element: position first, then scroll.
+
+```bash
+playwright-cli -s="$S" mousemove "$X1" "$Y1"
+playwright-cli -s="$S" mousewheel 0 120
+```
+
+**Chord (held-modifier) gesture** — keyboard state persists across CLI calls within a session: hold, gesture, release. **Always release** — a leaked modifier silently alters every subsequent action in the session.
+
+```bash
+playwright-cli -s="$S" keydown Shift
 playwright-cli -s="$S" mousemove "$X1" "$Y1"
 playwright-cli -s="$S" mousedown
 playwright-cli -s="$S" mousemove "$X2" "$Y2"
 playwright-cli -s="$S" mouseup
+playwright-cli -s="$S" keyup Shift
+```
+
+**Right-button** — `mousedown right` / `mouseup right` on the coordinate rung, `click <ref> right` on the ref rung. The page receives a `contextmenu` event; apps that suppress the native menu still see it.
+
+```bash
+playwright-cli -s="$S" mousemove "$X1" "$Y1"
+playwright-cli -s="$S" mousedown right
+playwright-cli -s="$S" mouseup right
+```
+
+**Compound via `run-code`** — when a gesture needs computed coordinates and stateful sequencing in one scope:
+
+```bash
+playwright-cli -s="$S" run-code "async (page) => {
+  const box = await page.locator('canvas').boundingBox();
+  const y = box.y + box.height * 0.5;
+  const x1 = box.x + box.width * 0.3, x2 = box.x + box.width * 0.7;
+  await page.mouse.move(x1, y); await page.mouse.down();
+  await page.mouse.move((x1 + x2) / 2, y); await page.mouse.move(x2, y);
+  await page.mouse.up();
+}"
 ```
 
 ## Setup (once per environment)
@@ -83,6 +133,14 @@ kill "$SERVER_PID" 2>/dev/null   # teardown in all exit paths
 ```
 
 Prefer the project's own start command (`npm run dev`, `pnpm dev`, `make serve`, etc.). If the server is already running, skip the start/teardown and just confirm it answers with the `curl` line.
+
+### Real-browser escalation
+
+The default browser is the bundled chromium — cheapest, headless, no user disruption. Escalate only when the surface demands engine fidelity:
+
+    playwright-cli -s="$S" open --browser chrome --headed "$URL"
+
+Escalate when: WebGL/GPU-dependent rendering is under test; media/codec-dependent behavior; gesture fidelity is in doubt; or the drive-check fails on the bundled browser for reasons plausibly about the engine rather than the app. Like the deep-debug escalation, state *why* the default was insufficient — and return to the default for ordinary walks.
 
 ## Procedure
 
@@ -136,7 +194,7 @@ playwright-cli -s="$S" open http://localhost:3000
 
 5. **At least one edge case.** Drive a failure or boundary path (invalid input, empty state, error response) and confirm the UI handles it — capture its evidence too.
 
-6. **Close the session** when done:
+6. **Close the session** — on every exit path (success, failure, early stop), not just the happy end; see the reaping rule under Robustness:
    ```bash
    playwright-cli -s="$S" close
    ```
@@ -150,6 +208,8 @@ playwright-cli -s="$S" open http://localhost:3000
 - **One assertion channel must be objective.** A screenshot is evidence a human reads; pair it with a `console`/`network` check or an `eval` that returns a boolean you assert on (e.g. `eval "() => document.querySelector('.success') !== null"`) — don't rely on the pixels alone.
 - **Reuse auth instead of re-logging-in.** `state-save <file>` once, then `state-load <file>` in later sessions.
 - **Prefer real-shaped data for the pre-human walk.** Mock fixtures are structurally blind to bugs that only manifest on real data shapes — a suite can stay green over a dead feature. When a requirement's stated value is real-data behavior, verify against real data (or real-shaped fixtures). And read mock-green + real-red as a locator, not a contradiction: the bug lives in exactly the layer the mock elides.
+- **Reap every browser you open.** `close` the session on every exit path, exactly like the dev-server rule — a leaked browser holds profile locks and stale listeners that poison later walks. Sweep leftovers with `close-all` (graceful) or `kill-all` (stale/zombie processes).
+- **Never pixel-sample a WebGL canvas for proof.** Canvas pixel readback (`toDataURL`, `getImageData`, `drawImage` composite) typically reads blank/black from a WebGL canvas whose drawing buffer is not preserved (`preserveDrawingBuffer: false` is the common default) — engine-dependent, and a black read is indistinguishable from a broken render. Assert on application state via `eval` (the drive-check discipline); screenshots illustrate, they never prove.
 
 ## Security boundaries
 
