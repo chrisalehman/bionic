@@ -46,3 +46,6 @@ docs/bionic/
 
 # Canonical-sdlc ephemeral workspace (continuation checkpoints, evidence snapshots, scratch)
 .bionic/tmp/
+
+# playwright
+.playwright-cli
