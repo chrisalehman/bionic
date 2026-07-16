@@ -911,6 +911,42 @@ fi
 
 # ─── Playwright Browsers ────────────────────────────────────────────────────
 
+# Machine-global Playwright browser cache (shared by every project and
+# session on this machine). Also consumed by the Verification section.
+PLAYWRIGHT_CACHE="${PLAYWRIGHT_CACHE:-$HOME/Library/Caches/ms-playwright}"
+
+# _pw_satisfied <dry-run-cmd...> — 0 iff the CLI's dry-run reports at least
+# one "Install location:" and every reported directory carries Playwright's
+# INSTALLATION_COMPLETE marker. Dry-run never touches the cache dirlock, so
+# a warm re-run skips the real install entirely — immune to lock contention.
+# Any dry-run failure or unparseable output returns 1: fall through to the
+# real install, never skip on absent evidence.
+_pw_satisfied() {
+  local out locs loc
+  out="$("$@" 2>/dev/null)" || return 1
+  locs="$(printf '%s\n' "$out" | sed -n 's/^[[:space:]]*Install location:[[:space:]]*//p')"
+  [ -n "$locs" ] || return 1
+  while IFS= read -r loc; do
+    [ -f "${loc}/INSTALLATION_COMPLETE" ] || return 1
+  done <<< "$locs"
+  return 0
+}
+
+# _pw_lock_preflight — triage the machine-global cache lock before a real
+# install. Held by a live installer (any process, incl. another session's)
+# → return 1: the caller fails fast instead of waiting silently forever.
+# Present but orphaned → stale: remove and proceed. Absent → proceed.
+_pw_lock_preflight() {
+  local lock="${PLAYWRIGHT_CACHE}/__dirlock"
+  [ -e "$lock" ] || return 0
+  if pgrep -f "playwright.*install" >/dev/null 2>&1; then
+    return 1
+  fi
+  rm -rf "$lock"
+  echo "    removed stale browser-cache lock (${lock})"
+  return 0
+}
+
 section "Playwright browsers"
 # The one legitimately slow step (~170 MB on first install), so: stream
 # playwright's own progress instead of capturing it (it prints plain progress
