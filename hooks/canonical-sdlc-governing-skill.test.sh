@@ -380,16 +380,16 @@ canonical_sdlc_version: 99
 run_write "$project/.bionic/docs/plans/epic-01-demo/wave-09b-bad.plan.md" "$bad_ver"
 assert_eq "exit 2" 2 "$HOOK_EXIT"
 
-echo "unsupported canonical_sdlc_version: 10 → block (boundary: 9 is current, 10 is not yet minted)"
-v10_bad='---
+echo "unsupported canonical_sdlc_version: 11 → block (boundary: 10 is current, 11 is not yet minted)"
+v11_bad='---
 governing-skill: canonical-sdlc
 mode: autonomous
-canonical_sdlc_version: 10
+canonical_sdlc_version: 11
 ---
 
 # Body
 '
-run_write "$project/.bionic/docs/plans/epic-01-demo/wave-09c-v10.plan.md" "$v10_bad"
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-09c-v11.plan.md" "$v11_bad"
 assert_eq "exit 2" 2 "$HOOK_EXIT"
 
 echo "Edit on existing v1-migrated file (simulating live continuation-checkpoint.md) → allow"
@@ -591,10 +591,26 @@ canonical_sdlc_version: ${version}
 
 # Body
 '
+  # v10 additionally requires a "## Verification Matrix" section at
+  # sdlc-step >= 3 (this helper's sdlc-step: 4). This loop's job is to
+  # isolate the flag contract, not the matrix check — the dedicated
+  # v10 matrix-check cases below exercise that behavior — so give v10
+  # bodies a minimal matrix section here.
+  if [ "$version" = "10" ]; then
+    out+='
+## Verification Matrix
+
+stack-health: n/a: no long-running serve observed
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+'
+  fi
   printf '%s' "$out"
 }
 
-for version in 6 7 8 9; do
+for version in 6 7 8 9 10; do
   echo "v${version} with all v3 flags + model_plan → allow"
   vN_full=$(build_versioned_plan "$version")
   run_write "$project/.bionic/docs/plans/epic-01-demo/wave-18-v${version}.plan.md" "$vN_full"
@@ -655,6 +671,104 @@ case "$HOOK_STDERR" in
   *model_plan*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  CRLF error mentions model_plan\n' ;;
   *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  CRLF error missing model_plan: %q\n' "$HOOK_STDERR" ;;
 esac
+
+# ============================================================
+# v10: matrix-required-at-step-3 check
+# ============================================================
+#
+# v10 shares the v4+ flag contract. Additionally, when mode: autonomous,
+# the basename matches *.plan.md, and sdlc-step is numeric >= 3, CONTENT
+# must contain a line matching ^## Verification Matrix — else block.
+# v9 and earlier are grandfathered out of this check entirely.
+
+build_v10_frontmatter() {
+  local sdlc_step="$1"
+  local mode="${2:-autonomous}"
+  cat <<EOF
+---
+governing-skill: canonical-sdlc
+mode: ${mode}
+sdlc-step: ${sdlc_step}
+canonical_sdlc_version: 10
+cleanup_on_finish: true
+use_worktree: false
+surface_type: none
+language: none
+has_ui: false
+multi_agent: false
+deploy_target: none
+model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh
+---
+EOF
+}
+
+NO_MATRIX_BODY='
+# Plan body
+
+Some content without a verification matrix section.
+'
+
+WITH_MATRIX_BODY='
+# Plan body
+
+## Verification Matrix
+
+stack-health: n/a: no long-running serve observed
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+'
+
+project=$(make_project)
+
+echo "v10 autonomous plan.md sdlc-step 3 WITHOUT Verification Matrix → block"
+v10_step3_no_matrix="$(build_v10_frontmatter 3)"$'\n'"$NO_MATRIX_BODY"
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-23-v10-nomatrix.plan.md" "$v10_step3_no_matrix"
+assert_eq "exit 2" 2 "$HOOK_EXIT"
+case "$HOOK_STDERR" in
+  *"Verification Matrix"*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  error names Verification Matrix\n' ;;
+  *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  error missing Verification Matrix: %q\n' "$HOOK_STDERR" ;;
+esac
+
+echo "v10 autonomous plan.md sdlc-step 3 WITH Verification Matrix → allow"
+v10_step3_matrix="$(build_v10_frontmatter 3)"$'\n'"$WITH_MATRIX_BODY"
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-24-v10-matrix.plan.md" "$v10_step3_matrix"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+echo "v10 autonomous spec.md sdlc-step 2 without Verification Matrix → allow (not *.plan.md, and step < 3)"
+v10_step2_spec="$(build_v10_frontmatter 2)"$'\n'"$NO_MATRIX_BODY"
+run_write "$project/.bionic/docs/specs/epic-01-demo/wave-25-v10-spec.spec.md" "$v10_step2_spec"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+echo "v10 non-autonomous plan.md sdlc-step 3 without Verification Matrix → allow (matrix check is autonomous-only)"
+v10_nonauto="$(build_v10_frontmatter 3 design-refresh)"$'\n'"$NO_MATRIX_BODY"
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-26-v10-nonauto.plan.md" "$v10_nonauto"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+echo "v9 plan.md sdlc-step 3 without Verification Matrix → allow (grandfathered, no v10 matrix check)"
+v9_step3='---
+governing-skill: canonical-sdlc
+mode: autonomous
+sdlc-step: 3
+canonical_sdlc_version: 9
+cleanup_on_finish: true
+use_worktree: false
+surface_type: none
+language: none
+has_ui: false
+multi_agent: false
+deploy_target: none
+model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh
+---
+'"$NO_MATRIX_BODY"
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-27-v9-nomatrix.plan.md" "$v9_step3"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+echo "v10 continuation.md (sdlc-step 10, not *.plan.md) without Verification Matrix → allow"
+v10_continuation="$(build_v10_frontmatter 10)"$'\n'"$NO_MATRIX_BODY"
+run_write "$project/.bionic/docs/plans/epic-01-demo/continuation.md" "$v10_continuation"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
 
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
