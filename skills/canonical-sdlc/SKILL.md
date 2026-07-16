@@ -675,7 +675,21 @@ On accept, write final values into plan frontmatter literally — every flag as 
 ### Step 3 — Plan (`superpowers:writing-plans`)
 - **Goal:** Produce the execution contract that survives compaction.
 - **Action:** Write an ordered, verifiable step list with no placeholders. Every plan file must contain two structured sections:
-  - `## SDLC State` — mode, **integration branch**, current step, one line per step. **When advancing, replace `Step N: (pending)` in-place.**
+  - `## SDLC State` — opens with three literal keys: `integration-branch: <name>`, `mode: <mode>`, and `current: <N>` (the current step number — the evidence-gate hook greps `^current:` and blocks every commit if the line is missing or non-numeric; do NOT write `current-step:` or any other variant). Then one `Step N: <evidence>` line per step. **When advancing, bump `current:` and replace `Step N: (pending)` in-place.** Copyable skeleton:
+
+    ```
+    ## SDLC State
+
+    integration-branch: <name>
+    mode: <mode>
+    current: <N>
+
+    - Step 0: <evidence>
+    - Step 1: (pending)
+    - Step 2: (pending)
+    ...
+    - Step 9: (pending)
+    ```
   - `## Assumptions` — seeded from Step 1 "Not Doing" plus spec ambiguities. Step 4 appends inline.
 - **Expand TaskCreate list.** After the plan is written, expand Step 4 (Implement) into one TaskCreate task per slice (`4/1:`, `4/2:`, …).
 - **Tag every slice's complexity.** Each Step 4 slice in the plan carries a `complexity: standard | complex` tag — this routes the slice's execution dispatch (see §Model & Token Strategy, Slice complexity routing). When uncertain, tag `complex`.
@@ -821,7 +835,7 @@ Committing is **not a numbered step** — it is a cross-cutting rhythm that fire
 - **Per-step checkpoint commits.** A checkpoint commit fires after each completed step (~once per step). The cadence is the rhythm; there is no single "commit step" that defers all staging to the end.
 - **Enforced by the evidence-gate hook on every `git commit`.** The hook locates the active plan, reads `## SDLC State`, and blocks the commit (exit 2) if the **current step's** evidence artifact is missing or unreadable. The rhythm and the gate are the same mechanism seen from two sides.
 - **Commit body carries the "THINGS I DIDN'T TOUCH" summary** (per `git-workflow-and-versioning`).
-- **Update `## SDLC State` before staging.** The evidence line for the current step must be in place before `git commit`, or the gate blocks it.
+- **Update `## SDLC State` before staging.** The `current: <N>` line and the current step's evidence line must both be in place before `git commit`, or the gate blocks it.
 - **Guardrail — no per-step `commit:` evidence field.** Do NOT add a `commit:` SHA to `## SDLC State`. The hook gates the current step's *existing* evidence on commit; a redundant `commit:` field would be self-referential and adds nothing. The commit SHA lives in git, not the evidence block.
 
 ## Constraints
