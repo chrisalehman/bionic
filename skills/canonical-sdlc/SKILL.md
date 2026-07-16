@@ -166,6 +166,8 @@ when slices share state (the one local DB, `supabase db reset`, count-based asse
 
 Three objectives, in priority order, govern every dispatch decision: (1) **the orchestrator stays free** — the main thread does coordination and decisions only, heavy lifting goes to subagents, which is what lets the developer steer in real time; (2) **maximize wave/session duration** — main-context growth is the scarce resource, so subagents return summaries, never payloads; (3) **token economy serves 1 and 2** — cheaper tiers are reached **only through subagent dispatch**, a means to those goals, not an end.
 
+**What "heavy lifting" means — and what it never means.** Delegation covers *research, execution, verification, and review* — **never synthesis or judgment**. The orchestrator keeps the work only it should do: Steps 0–3 (scoping, spec, plan), slice decomposition, complexity tagging, and every approval-shaped decision stay on the main thread — the most powerful model — because an orchestrator error wastes every subagent it would dispatch. Within Steps 0–3 only *research* fans out (parallel Explore agents); the spec, plan, and decisions are written in the main thread. The Tier-1 row below encodes exactly this split.
+
 Pin the orchestrator on one strong model for the whole wave. Switching the *main* model mid-wave
 invalidates the prompt cache (and a skill cannot enforce a main-model switch anyway) — so the main
 model never changes; the tiering lives in *who you dispatch to*, not in re-configuring yourself.
