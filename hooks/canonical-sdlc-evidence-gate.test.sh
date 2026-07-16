@@ -1881,6 +1881,420 @@ expect_allow "GRANDFATHER: v8 Step 5 without stack-health → allow" \
   "$h16h" 'git commit -m "x"'
 
 # ============================================================
+# Section 17: v10 canonical_sdlc_version — Verification Matrix gate
+# ============================================================
+#
+# v10 replaces the flat Step-5 universal-key stack (bundle-fresh /
+# drive-check / stack-health) with a pre-registered Verification Matrix
+# stored in a top-level `## Verification Matrix` section of the plan. The
+# Step-5 block keeps the tests floor (cmd/pass/total/output) and gains a
+# required `auditor:` pointer; the matrix carries a per-session
+# `stack-health:` line, a tier table (one row per AC), and one indented
+# per-AC evidence block per non-waived row. Each row declares a tier
+# (T0..T4); the hook demands that tier's evidence keys (keys_for_tier) —
+# non-empty, placeholder-banned, and (on live tiers T3/T4) not self-written
+# `n/a`. A `waiver:` entry exempts a row. At `current > 5` every non-waived
+# row's auditor cell must read CONFIRMED. The matrix validates at current: 5
+# (Step-5 validator) and as a prefix check for current: 6..9.
+
+echo ""
+echo "=== Section 17: v10 Verification Matrix gate ==="
+
+v10_frontmatter() {
+  local has_ui="${1:-true}" deploy="${2:-none}" use_wt="${3:-false}"
+  cat <<EOF
+---
+governing-skill: canonical-sdlc
+mode: autonomous
+canonical_sdlc_version: 10
+deploy_target: ${deploy}
+use_worktree: ${use_wt}
+has_ui: ${has_ui}
+---
+EOF
+}
+
+# Shared Step-5 block: tests floor + the required auditor pointer.
+v10_step5_base="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
+
+# Assemble a full v10 plan: frontmatter + ## SDLC State (current + Step
+# block) + a ## Verification Matrix section. $1 current, $2 Step-block
+# body (indented lines), $3 full matrix section text.
+v10_plan() {
+  printf '%s\n## SDLC State\ncurrent: %s\nStep %s:\n%s\n\n%s\n' \
+    "$(v10_frontmatter true)" "$1" "$1" "$2" "$3"
+}
+
+# A pointer body for post-Verify steps (6..9): non-empty, non-placeholder.
+v10_step6_body="  review: .bionic/docs/plans/wave-01.plan.md#step-6-review"
+
+# --- matrix fixtures -------------------------------------------------------
+
+# Complete, valid matrix: T3 (all five fields), T1 (tier-run+readback),
+# waived T3 row. stack-health present. All auditor cells CONFIRMED/waived.
+v10_matrix_complete="## Verification Matrix
+
+stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
+| AC-2 | T1 | discharged | see AC-2 | CONFIRMED |
+| AC-3 | T3 | waived | waiver: chris 2026-07-16 env stale | waived |
+
+AC-1:
+  tier-run: https://app.example/panel — opened the panel
+  fresh: origin A rebuilt token-9f3a; origin B cdn purged
+  cold-client: fresh incognito profile, no SW cache
+  contact: clicked open — panel closed → open
+  readback: panel.visible === true via page eval
+AC-2:
+  tier-run: bash test.sh — unit suite
+  readback: 332/332 asserted"
+
+# discharged T3 row with NO matching AC evidence block (AC-1 block absent).
+v10_matrix_no_block="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
+| AC-2 | T1 | discharged | see AC-2 | CONFIRMED |
+
+AC-2:
+  tier-run: bash test.sh
+  readback: 332/332 asserted"
+
+# AC-1 readback is a placeholder token.
+v10_matrix_placeholder="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  tier-run: https://app.example/panel — opened the panel
+  fresh: origin A rebuilt token-9f3a
+  cold-client: fresh incognito profile
+  contact: clicked open — panel closed → open
+  readback: TBD"
+
+# AC-1 (T3) contact is a self-written n/a with no waiver.
+v10_matrix_live_na="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  tier-run: https://app.example/panel — opened the panel
+  fresh: origin A rebuilt token-9f3a
+  cold-client: fresh incognito profile
+  contact: n/a: not reachable quickly
+  readback: panel.visible === true via page eval"
+
+# AC-1 declared T3 but carries only the suite-credit shape (tier-run +
+# readback), missing fresh/cold-client/contact.
+v10_matrix_suite_credit="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  tier-run: suite: hermetic-x
+  readback: 12/12 asserted"
+
+# Complete matrix but AC-1 auditor verdict is REFUTED.
+v10_matrix_refuted="## Verification Matrix
+
+stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T3 | discharged | see AC-1 | REFUTED |
+| AC-2 | T1 | discharged | see AC-2 | CONFIRMED |
+| AC-3 | T3 | waived | waiver: chris 2026-07-16 env stale | waived |
+
+AC-1:
+  tier-run: https://app.example/panel — opened the panel
+  fresh: origin A rebuilt token-9f3a; origin B cdn purged
+  cold-client: fresh incognito profile, no SW cache
+  contact: clicked open — panel closed → open
+  readback: panel.visible === true via page eval
+AC-2:
+  tier-run: bash test.sh — unit suite
+  readback: 332/332 asserted"
+
+# Complete matrix; the waived row's auditor cell is empty (legal).
+v10_matrix_waived_empty="## Verification Matrix
+
+stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
+| AC-2 | T1 | discharged | see AC-2 | CONFIRMED |
+| AC-3 | T3 | waived | waiver: chris 2026-07-16 env stale |  |
+
+AC-1:
+  tier-run: https://app.example/panel — opened the panel
+  fresh: origin A rebuilt token-9f3a; origin B cdn purged
+  cold-client: fresh incognito profile, no SW cache
+  contact: clicked open — panel closed → open
+  readback: panel.visible === true via page eval
+AC-2:
+  tier-run: bash test.sh — unit suite
+  readback: 332/332 asserted"
+
+# stack-health line absent.
+v10_matrix_no_stackhealth="## Verification Matrix
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  tier-run: bash test.sh
+  readback: 40/40 asserted"
+
+# stack-health via the n/a escape.
+v10_matrix_stackhealth_na="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  tier-run: bash test.sh
+  readback: 40/40 asserted"
+
+# T0/T1/T2-only matrix — no T3 fields, no browser artifacts anywhere.
+v10_matrix_lower_tiers="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+| AC-2 | T2 | discharged | see AC-2 | CONFIRMED |
+| AC-3 | T0 | discharged | see AC-3 | CONFIRMED |
+
+AC-1:
+  tier-run: bash test.sh — unit
+  readback: 40/40 asserted
+AC-2:
+  tier-run: playwright hermetic run
+  readback: rendered rows === 5
+  fixture-fidelity: derived from captured prod payload 2026-07-10
+AC-3:
+  tier-run: pnpm build && tsc
+  readback: 0 type errors"
+
+# false-green entry with no paired rewritten entry.
+v10_matrix_false_green_unpaired="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  tier-run: bash test.sh
+  readback: 40/40 asserted
+
+false-green: hermetic-x — green over broken branch"
+
+# false-green entry WITH a paired rewritten entry.
+v10_matrix_false_green_paired="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  tier-run: bash test.sh
+  readback: 40/40 asserted
+
+false-green: hermetic-x — green over broken branch
+rewritten: fixed in commit abc123, test now RED-first"
+
+# A malformed row: a stray literal | shears an extra cell.
+v10_matrix_malformed="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T3 | discharged | see | AC-1 | CONFIRMED |
+
+AC-1:
+  tier-run: x
+  fresh: x
+  cold-client: x
+  contact: x
+  readback: x"
+
+# --- cases -----------------------------------------------------------------
+
+# 17a — complete matrix at current: 5 → allow.
+h17a=$(make_home)
+write_plan "$h17a" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
+expect_allow "v10 17a complete matrix (T3 + T1 + waived T3) at current 5 → allow" \
+  "$h17a" 'git commit -m "x"'
+
+# 17b — discharged row with NO AC evidence block → block, names the AC.
+h17b=$(make_home)
+write_plan "$h17b" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_no_block")" > /dev/null
+expect_block "v10 17b discharged T3 row with no AC block → block (names AC-1)" \
+  "$h17b" 'git commit -m "x"' "AC-1"
+
+# 17c — placeholder token in an AC evidence field → block.
+h17c=$(make_home)
+write_plan "$h17c" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_placeholder")" > /dev/null
+expect_block "v10 17c readback: TBD in AC block → block (placeholder ban)" \
+  "$h17c" 'git commit -m "x"' "placeholder"
+
+# 17d — T3 row with self-written n/a on a field, no waiver → block, points
+# at the Waiver Protocol.
+h17d=$(make_home)
+write_plan "$h17d" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_live_na")" > /dev/null
+expect_block "v10 17d T3 contact: n/a, no waiver → block (Waiver Protocol)" \
+  "$h17d" 'git commit -m "x"' "Waiver Protocol"
+
+# 17e — T3 row with only the suite-credit shape (missing fresh/cold-client/
+# contact) → block.
+h17e=$(make_home)
+write_plan "$h17e" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_suite_credit")" > /dev/null
+expect_block "v10 17e T3 suite-credit shape missing live-tier fields → block (fresh)" \
+  "$h17e" 'git commit -m "x"' "fresh"
+
+# 17f — current: 6, one row auditor REFUTED → block.
+h17f1=$(make_home)
+write_plan "$h17f1" "$(v10_plan 6 "$v10_step6_body" "$v10_matrix_refuted")" > /dev/null
+expect_block "v10 17f current 6 with a REFUTED row → block (CONFIRMED required)" \
+  "$h17f1" 'git commit -m "x"' "CONFIRMED"
+
+# 17f — current: 6, all non-waived rows CONFIRMED → allow.
+h17f2=$(make_home)
+write_plan "$h17f2" "$(v10_plan 6 "$v10_step6_body" "$v10_matrix_complete")" > /dev/null
+expect_allow "v10 17f current 6 all CONFIRMED (waived row exempt) → allow" \
+  "$h17f2" 'git commit -m "x"'
+
+# 17f — current: 6, waived row with an empty auditor cell → allow.
+h17f3=$(make_home)
+write_plan "$h17f3" "$(v10_plan 6 "$v10_step6_body" "$v10_matrix_waived_empty")" > /dev/null
+expect_allow "v10 17f current 6 waived row with empty auditor cell → allow" \
+  "$h17f3" 'git commit -m "x"'
+
+# 17g — v10 at current: 5 with NO ## Verification Matrix section → block.
+h17g=$(make_home)
+write_plan "$h17g" "$(v10_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v10_step5_base" > /dev/null
+expect_block "v10 17g current 5 with no Verification Matrix section → block" \
+  "$h17g" 'git commit -m "x"' "Verification Matrix"
+
+# 17h — matrix missing the stack-health line → block.
+h17h1=$(make_home)
+write_plan "$h17h1" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_no_stackhealth")" > /dev/null
+expect_block "v10 17h matrix missing stack-health → block" \
+  "$h17h1" 'git commit -m "x"' "stack-health"
+
+# 17h — stack-health via the n/a escape → allow.
+h17h2=$(make_home)
+write_plan "$h17h2" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_stackhealth_na")" > /dev/null
+expect_allow "v10 17h stack-health: n/a with reason → allow" \
+  "$h17h2" 'git commit -m "x"'
+
+# 17i — T0/T1/T2-only matrix, no T3 fields, no browser artifacts → allow.
+h17i=$(make_home)
+write_plan "$h17i" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_lower_tiers")" > /dev/null
+expect_allow "v10 17i lower-tier-only matrix (T0/T1/T2) → allow" \
+  "$h17i" 'git commit -m "x"'
+
+# 17j — Step-5 block missing the auditor pointer → block.
+h17j1=$(make_home)
+write_plan "$h17j1" "$(v10_plan 5 "  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5" "$v10_matrix_complete")" > /dev/null
+expect_block "v10 17j Step-5 missing auditor → block" \
+  "$h17j1" 'git commit -m "x"' "auditor"
+
+# 17j — Step-5 block missing the tests floor (cmd) → block (validator reuse).
+h17j2=$(make_home)
+write_plan "$h17j2" "$(v10_plan 5 "  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md" "$v10_matrix_complete")" > /dev/null
+expect_block "v10 17j Step-5 missing tests floor cmd → block" \
+  "$h17j2" 'git commit -m "x"' "cmd"
+
+# 17k — GRANDFATHER: a v9 plan at current: 5 with v9 keys and NO matrix must
+# still pass after the v10 switch lands (reuses the v9 fixtures).
+h17k1=$(make_home)
+write_plan "$h17k1" "$(v9_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v9_step5_base
+  stack-health: process restarts 0 → 0 across walk; no crash/OOM state change" > /dev/null
+expect_allow "GRANDFATHER: v9 Step 5 (no matrix) after v10 lands → allow" \
+  "$h17k1" 'git commit -m "x"'
+
+# 17k — same v9 plan at current: 6 (pointer step) → allow.
+h17k2=$(make_home)
+write_plan "$h17k2" "$(v9_frontmatter true)
+## SDLC State
+current: 6
+Step 6: .bionic/docs/plans/wave-04.plan.md#step-6-review" > /dev/null
+expect_allow "GRANDFATHER: v9 Step 6 pointer (no matrix) → allow" \
+  "$h17k2" 'git commit -m "x"'
+
+# 17l — false-green entry with NO paired rewritten entry → block.
+h17l1=$(make_home)
+write_plan "$h17l1" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_false_green_unpaired")" > /dev/null
+expect_block "v10 17l false-green without rewritten → block" \
+  "$h17l1" 'git commit -m "x"' "rewritten"
+
+# 17l — false-green entry WITH a paired rewritten entry → allow.
+h17l2=$(make_home)
+write_plan "$h17l2" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_false_green_paired")" > /dev/null
+expect_allow "v10 17l false-green with paired rewritten → allow" \
+  "$h17l2" 'git commit -m "x"'
+
+# 17l — no false-green entry at all (key is optional) → allow.
+h17l3=$(make_home)
+write_plan "$h17l3" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_lower_tiers")" > /dev/null
+expect_allow "v10 17l no false-green entry (optional key) → allow" \
+  "$h17l3" 'git commit -m "x"'
+
+# 17m — a malformed table row (stray literal | shears a cell) → block.
+h17m=$(make_home)
+write_plan "$h17m" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_malformed")" > /dev/null
+expect_block "v10 17m malformed row (extra literal |) → block" \
+  "$h17m" 'git commit -m "x"' "malformed"
+
+# ============================================================
 # Summary
 # ============================================================
 

@@ -326,7 +326,9 @@ esac
 # looking healthy. Same contract as its siblings: presence, non-empty
 # value / non-empty n/a reason, existing placeholder ban. v8 and earlier
 # plans are never retrofitted.
-if [ "$SDLC_VERSION" = "9" ]; then
+if [ "$SDLC_VERSION" = "10" ]; then
+  SHAPE_MODE="v10"
+elif [ "$SDLC_VERSION" = "9" ]; then
   SHAPE_MODE="v9"
 elif [ "$SDLC_VERSION" = "8" ]; then
   SHAPE_MODE="v8"
@@ -352,6 +354,7 @@ fi
 # here, so v2 always shape-checks Step 4 (unchanged from before).
 pointer_steps_for_mode() {
   case "$1" in
+    v10)         echo "1 2 3 4" ;;  # Step 6 must reach dispatch for the matrix prefix check
     v5|v6|v7|v8|v9) echo "1 2 3 4 6" ;;
     v3)          echo "1 2 3 4 7 8" ;;
     *)           echo "1 2 3 5 8 8b" ;;  # v2
@@ -591,6 +594,183 @@ validate_ship_step() {
   fi
 }
 
+# ---------- v10: pre-registered Verification Matrix ----------
+# The v10 Verify gate discharges a Verification Matrix stored in a top-level
+# `## Verification Matrix` section of the plan (separate from ## SDLC State).
+# validate_matrix_v10 parses that section — a per-session stack-health line, a
+# tier table (one row per AC), and one indented per-AC evidence block per
+# non-waived row — and fires at current: 5 (via the Step-5 validator) and as a
+# prefix check for current: 6..9 (via dispatch_modern's v10 arm).
+
+# Per-tier required evidence keys — MIRROR of the canonical table in
+# skills/canonical-sdlc/SKILL.md Step 5 ("Per-tier required evidence keys").
+# Change THAT table first; this function follows it. (R27)
+keys_for_tier() {
+  case "$1" in
+    T0|T1) echo "tier-run readback" ;;
+    T2)    echo "tier-run readback fixture-fidelity" ;;
+    T3)    echo "tier-run fresh cold-client contact readback" ;;
+    T4)    echo "user-confirmed" ;;
+  esac
+}
+
+# The `## Verification Matrix` section body (\r stripped, like SECTION at the
+# top of the hook — a separate awk pass over the whole plan).
+matrix_section() {
+  tr -d '\r' < "$PLAN" | awk '/^## Verification Matrix/{f=1;next} /^## /{f=0} f'
+}
+
+# The indented evidence block under "<AC-id>:" within MATRIX (up to the next
+# non-indented line). index()==1 anchors at line start without regex-escaping
+# the AC id, so AC-1 never matches the AC-11 block.
+matrix_block() {
+  echo "$MATRIX" | awk -v ac="$1:" '
+    index($0, ac)==1 {f=1; next}
+    /^[^[:space:]]/ {f=0}
+    f'
+}
+
+# 3-line BLOCKED/Plan/Fix emit for the v10 matrix arm (mirrors the pattern
+# every other validator uses). $1 = message tail, $2 = fix line.
+block_matrix() {
+  echo "BLOCKED: canonical-sdlc v10 step ${CURRENT} — $1" >&2
+  echo "Plan: $PLAN" >&2
+  echo "Fix: $2" >&2
+  exit 2
+}
+
+# Placeholder-token test on a single field value. The matrix section lives
+# outside ## SDLC State, so the upstream NORM ban does not cover it; this
+# mirrors that ban token-for-token.
+matrix_is_placeholder() {
+  case "$(echo "$1" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in
+    *todo*|*pending*|*inprogress*|*xxx*|*tbd*|*placeholder*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+validate_matrix_v10() {
+  local sh rows line ncols ac tier status ev aud block_txt key val
+
+  MATRIX=$(matrix_section)
+  if [ -z "$MATRIX" ]; then
+    block_matrix "the Verify gate requires a '## Verification Matrix' section (v10 contract)." \
+      "add the '## Verification Matrix' section: a stack-health line, the AC tier table, and one per-AC evidence block. See canonical-sdlc/SKILL.md Step 5."
+  fi
+
+  # stack-health: non-empty proof, or `n/a: <reason>` with a reason.
+  if ! echo "$MATRIX" | grep -qE '^[[:space:]]*stack-health[[:space:]]*:'; then
+    block_matrix "'## Verification Matrix' is missing the 'stack-health:' line." \
+      "add 'stack-health: <before/after snapshot>' or 'stack-health: n/a: <reason>' above the table."
+  fi
+  sh=$(echo "$MATRIX" | grep -E '^[[:space:]]*stack-health[[:space:]]*:' | head -1 \
+       | sed -E 's/^[[:space:]]*stack-health[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
+  case "$sh" in
+    ""|n/a|n/a:)
+      block_matrix "'stack-health:' needs a non-empty snapshot, or 'n/a: <reason>' with a non-empty reason." \
+        "paste the before/after snapshot showing no delta, or give the reason stack-health does not apply." ;;
+  esac
+
+  # false-green two-part rule: any `false-green:` entry must have a paired
+  # `rewritten:` entry, or the gate blocks (Assumption 12a).
+  if echo "$MATRIX" | grep -qE '^[[:space:]]*false-green[[:space:]]*:'; then
+    if ! echo "$MATRIX" | grep -qE '^[[:space:]]*rewritten[[:space:]]*:'; then
+      block_matrix "a 'false-green:' entry in the matrix has no paired 'rewritten:' entry." \
+        "add 'rewritten: <commit/test ref>' for the false-green test — a logged-but-unfixed false green is a blocking defect."
+    fi
+  fi
+
+  rows=$(echo "$MATRIX" | grep -E '^[[:space:]]*\|')
+  if [ -z "$rows" ]; then
+    block_matrix "'## Verification Matrix' has no tier table rows." \
+      "add the '| AC | tier | status | evidence | auditor |' table with one row per AC."
+  fi
+
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    # separator row (only pipes/dashes/colons/spaces) → skip
+    echo "$line" | grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' && continue
+    ncols=$(echo "$line" | awk -F'|' '{print NF}')
+    ac=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
+    tier=$(echo "$line"   | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$3); print $3}')
+    status=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$4); print $4}')
+    ev=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$5); print $5}')
+    aud=$(echo "$line"    | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')
+    # header row → skip
+    [ "$ac" = "AC" ] && continue
+    # malformed: a well-formed 5-cell row splits into exactly 7 fields on '|'.
+    if [ "$ncols" -ne 7 ]; then
+      block_matrix "matrix row for '${ac}' is malformed (wrong cell count — no literal '|' inside cells)." \
+        "write the row as '| AC | tier | status | evidence | auditor |' with exactly five cells and no literal pipe inside any cell."
+    fi
+    # tier enum
+    if ! echo "$tier" | grep -qE '^T[0-4]$'; then
+      block_matrix "matrix row for '${ac}' has an invalid tier '${tier}' (want T0..T4)." \
+        "set the tier cell to one of T0, T1, T2, T3, T4."
+    fi
+    block_txt=$(matrix_block "$ac")
+    # waived rows (evidence cell or the AC block carries a `waiver:` entry) are
+    # exempt from the per-tier evidence requirement.
+    if echo "$ev" | grep -qE 'waiver:' || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
+      :
+    else
+      for key in $(keys_for_tier "$tier"); do
+        if ! echo "$block_txt" | grep -qE "^[[:space:]]*${key}[[:space:]]*:"; then
+          block_matrix "matrix row '${ac}' (${tier}) is missing evidence key '${key}' in its AC block." \
+            "add '${key}: <evidence>' to the '${ac}:' block, or waive the row via the Waiver Protocol."
+        fi
+        val=$(echo "$block_txt" | grep -E "^[[:space:]]*${key}[[:space:]]*:" | head -1 \
+              | sed -E "s/^[[:space:]]*${key}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
+        if [ -z "$val" ]; then
+          block_matrix "matrix row '${ac}' (${tier}) evidence key '${key}' is empty." \
+            "record the evidence for '${key}' in the '${ac}:' block, or waive the row."
+        fi
+        if matrix_is_placeholder "$val"; then
+          block_matrix "matrix row '${ac}' (${tier}) evidence key '${key}' is a placeholder (\"${val}\")." \
+            "replace '${key}' with the real evidence before committing."
+        fi
+        # live-tier (T3/T4) fields cannot be self-written n/a — that is a
+        # downgrade, which is a user decision via the Waiver Protocol.
+        case "$tier" in
+          T3|T4)
+            case "$val" in
+              n/a|n/a:*)
+                block_matrix "matrix row '${ac}' (${tier}) key '${key}' is a self-written 'n/a' on a live tier." \
+                  "a live-tier field cannot be n/a — downgrade the row via the Waiver Protocol (record 'waiver: <user> <date> <reason>'), a user decision." ;;
+            esac ;;
+        esac
+      done
+    fi
+    # Once past the Verify gate, every non-waived row must be CONFIRMED.
+    if [ "$CURRENT" -gt 5 ] 2>/dev/null; then
+      if [ "$status" = "waived" ] || echo "$ev" | grep -qE 'waiver:' \
+         || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
+        :
+      elif [ "$aud" != "CONFIRMED" ]; then
+        block_matrix "matrix row '${ac}' auditor verdict is '${aud:-empty}', not CONFIRMED, at step ${CURRENT}." \
+          "the independent auditor must CONFIRM every non-waived row before advancing past the Verify gate, or the row must be waived."
+      fi
+    fi
+  done <<< "$rows"
+}
+
+# v10 Verify gate: tests floor (reused), a required non-empty auditor pointer,
+# then the Verification Matrix.
+validate_verify_step_v10() {
+  local aud
+  validate_tests_block v10 5
+  if ! block_has auditor; then
+    block_matrix "the Verify gate requires 'auditor: <verdict summary + report pointer>' in the Step 5 block." \
+      "record the independent auditor's one-line verdict summary and report pointer as 'auditor: ...'."
+  fi
+  aud=$(block_get auditor)
+  if [ -z "$aud" ]; then
+    block_matrix "the Step 5 'auditor:' pointer is empty." \
+      "record the auditor's verdict summary and report pointer."
+  fi
+  validate_matrix_v10
+}
+
 # Per-version dispatch for the modern (gate-collapsed) shape table. v5 keeps
 # an external-review step and numbers integrate/ship at 9/10; v6+ dropped
 # external review and renumber integrate/ship to 8/9. Step 5 (Verify) and
@@ -600,12 +780,27 @@ validate_ship_step() {
 dispatch_modern() {
   local label="$1" ext_step="" integrate_step ship_step
   case "$label" in
-    v5)          ext_step=8; integrate_step=9; ship_step=10 ;;
-    v6|v7|v8|v9) integrate_step=8; ship_step=9 ;;
+    v5)              ext_step=8; integrate_step=9; ship_step=10 ;;
+    v6|v7|v8|v9|v10) integrate_step=8; ship_step=9 ;;
   esac
+  # v10: the Verification Matrix is a prefix contract for every step from the
+  # Verify gate on — current: 5 validates it inside validate_verify_step_v10;
+  # current: 6..9 validate it here, so a REFUTED auditor blocks post-Verify
+  # commits too (Step 6 is not a v10 pointer step, so it reaches this arm).
+  if [ "$label" = "v10" ]; then
+    case "$CURRENT" in
+      6|7|8|9) validate_matrix_v10 ;;
+    esac
+  fi
   case "$CURRENT" in
     4) shape_block worktree base-sha branch ;;
-    5) validate_verify_step "$label" ;;
+    5)
+      if [ "$label" = "v10" ]; then
+        validate_verify_step_v10
+      else
+        validate_verify_step "$label"
+      fi
+      ;;
     7) validate_document_step "$label" 7 ;;
     *)
       if [ -n "$ext_step" ] && [ "$CURRENT" = "$ext_step" ]; then
@@ -620,7 +815,7 @@ dispatch_modern() {
 }
 
 case "$SHAPE_MODE" in
-  v5|v6|v7|v8|v9)
+  v5|v6|v7|v8|v9|v10)
     dispatch_modern "$SHAPE_MODE"
     ;;
   v3)
