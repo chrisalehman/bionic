@@ -239,17 +239,34 @@ if [ -z "$BLOCK_STRIPPED" ]; then
   exit 2
 fi
 
-# Placeholder detection. Compare lowercase, whitespace-stripped value
-# against a set of known placeholder tokens.
-NORM=$(echo "$BLOCK_STRIPPED" | tr '[:upper:]' '[:lower:]')
-case "$NORM" in
-  *todo*|*pending*|*inprogress*|*xxx*|*tbd*|*placeholder*)
+# Whole-value placeholder test: trim leading/trailing whitespace, lowercase,
+# then require whole-value EQUALITY against the known token set. A token that
+# merely appears as a substring of a longer value ("resolved TODOs",
+# "*.example placeholders", "status pending → done") is legal evidence.
+# "in progress" and its whitespace-free "inprogress" are both listed so
+# either spelling of the value matches.
+is_placeholder_value() {
+  local v
+  v=$(printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | tr '[:upper:]' '[:lower:]')
+  case "$v" in
+    todo|pending|"in progress"|inprogress|xxx|tbd|placeholder) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Placeholder detection. Each line of the block is checked as a whole value:
+# the text after the first ':' on a "key: value" continuation line, or the
+# whole line when it has no colon (the single-line "Step N: <value>" case,
+# which arrives here as RAW_VALUE). ${_bline#*:} yields the after-colon text
+# on colon lines and the unchanged line otherwise.
+while IFS= read -r _bline; do
+  if is_placeholder_value "${_bline#*:}"; then
     echo "BLOCKED: canonical-sdlc step ${CURRENT} evidence line is a placeholder (\"${BLOCK}\")." >&2
     echo "Plan: $PLAN" >&2
     echo "Fix: replace with the actual evidence artifact before committing." >&2
     exit 2
-    ;;
-esac
+  fi
+done <<< "$BLOCK"
 
 # ---------- shape validation (v2 evidence_schema or v3 plans) ----------
 # Legacy plans (no evidence_schema, no v3 marker) stop here — presence
@@ -640,13 +657,10 @@ block_matrix() {
 }
 
 # Placeholder-token test on a single field value. The matrix section lives
-# outside ## SDLC State, so the upstream NORM ban does not cover it; this
-# mirrors that ban token-for-token.
+# outside ## SDLC State, so the upstream ban does not cover it; this reuses
+# the same whole-value equality test (is_placeholder_value, defined above).
 matrix_is_placeholder() {
-  case "$(echo "$1" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')" in
-    *todo*|*pending*|*inprogress*|*xxx*|*tbd*|*placeholder*) return 0 ;;
-    *) return 1 ;;
-  esac
+  is_placeholder_value "$1"
 }
 
 validate_matrix_v10() {

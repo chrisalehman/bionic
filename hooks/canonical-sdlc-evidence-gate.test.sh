@@ -276,12 +276,56 @@ Phase 5: $token" > /dev/null
   expect_block "placeholder '$token'" "$h" 'git commit -m "x"' "placeholder"
 done
 
-# Case-insensitive placeholder match
+# Case-insensitive placeholder match. Under whole-value equality the ENTIRE
+# trimmed value must equal a token, so the fixture is the bare token 'Todo'
+# (was "Todo — still writing", which is prose that merely starts with the
+# token — legal under the new contract; see 5e).
 h5b=$(make_home)
 write_plan "$h5b" "## SDLC State
 current: 5
-Phase 5: Todo — still writing" > /dev/null
-expect_block "placeholder 'Todo' (mixed case)" "$h5b" 'git commit -m "x"' "placeholder"
+Phase 5: Todo" > /dev/null
+expect_block "placeholder 'Todo' (mixed case, bare token)" "$h5b" 'git commit -m "x"' "placeholder"
+
+# --- whole-value equality: the placeholder ban matches only when the whole
+# trimmed, lowercased value EQUALS a token (todo/pending/in progress/
+# inprogress/xxx/tbd/placeholder). A token appearing as a substring of a
+# longer value is legal evidence.
+
+# 5c — whole-line 'Step 5: pending' (single-line value) → block.
+h5c=$(make_home)
+write_plan "$h5c" "## SDLC State
+current: 5
+Step 5: pending" > /dev/null
+expect_block "whole-line 'Step 5: pending' → block" "$h5c" 'git commit -m "x"' "placeholder"
+
+# 5d — trim + lowercase before comparison: '  Pending  ' (padded, mixed case)
+# as a continuation value still equals the token → block.
+h5d=$(make_home)
+write_plan "$h5d" "## SDLC State
+current: 5
+Step 5:
+  readback:   Pending  " > /dev/null
+expect_block "padded mixed-case 'readback:   Pending  ' → block" "$h5d" 'git commit -m "x"' "placeholder"
+
+# 5e — a value that merely CONTAINS a token as a substring is legal:
+# 'resolved all TODOs from the last review' (contains 'todo') → allow. Under
+# the OLD substring ban this was a false block.
+h5e=$(make_home)
+write_plan "$h5e" "## SDLC State
+current: 5
+Step 5: resolved all TODOs from the last review" > /dev/null
+expect_allow "substring-only 'resolved all TODOs' → allow (whole-value equality)" \
+  "$h5e" 'git commit -m "x"'
+
+# 5f — a continuation key whose whole value equals a token still blocks:
+# 'stack-health: pending' (value 'pending') → block.
+h5f=$(make_home)
+write_plan "$h5f" "## SDLC State
+current: 5
+Step 5:
+  stack-health: pending" > /dev/null
+expect_block "continuation 'stack-health: pending' (whole value) → block" \
+  "$h5f" 'git commit -m "x"' "placeholder"
 
 # ============================================================
 # Section 6: compound commands + edge cases
@@ -1880,6 +1924,26 @@ $v8_step5_base
 expect_allow "GRANDFATHER: v8 Step 5 without stack-health → allow" \
   "$h16h" 'git commit -m "x"'
 
+# 16i — whole-value equality on the flat Step-5 block: a field VALUE that
+# merely CONTAINS a placeholder token as a substring (here output: "...
+# *.example placeholders ...") is legal — only a whole-value match blocks.
+# This was the live false block under the OLD substring ban.
+h16i=$(make_home)
+write_plan "$h16i" "$(v9_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: rendered 3 *.example placeholders in the fixture snapshot
+  devtools-trace: .bionic/tmp/evidence-golden.png
+  bundle-fresh: FRESH — canary token-9f3a round-tripped to dist/main.js in 4.2s
+  drive-check: click toggled app flag false → true via eval readback
+  stack-health: process restarts 0 → 0 across walk; no crash/OOM state change" > /dev/null
+expect_allow "v9 Step 5 output containing '*.example placeholders' substring → allow (whole-value equality)" \
+  "$h16i" 'git commit -m "x"'
+
 # ============================================================
 # Section 17: v10 canonical_sdlc_version — Verification Matrix gate
 # ============================================================
@@ -2170,6 +2234,25 @@ h17c=$(make_home)
 write_plan "$h17c" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_placeholder")" > /dev/null
 expect_block "v10 17c readback: TBD in AC block → block (placeholder ban)" \
   "$h17c" 'git commit -m "x"' "placeholder"
+
+# 17c-substr — a matrix AC field VALUE that merely CONTAINS a placeholder
+# token as a substring is legal; only a whole-value match blocks. readback:
+# 'status pending → done ...' (contains 'pending') → allow.
+v10_matrix_substr_ok="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  tier-run: bash test.sh
+  readback: status pending → done, 40/40 asserted"
+h17c2=$(make_home)
+write_plan "$h17c2" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_substr_ok")" > /dev/null
+expect_allow "v10 17c matrix readback containing 'pending' substring → allow (whole-value equality)" \
+  "$h17c2" 'git commit -m "x"'
 
 # 17d — T3 row with self-written n/a on a field, no waiver → block, points
 # at the Waiver Protocol.
