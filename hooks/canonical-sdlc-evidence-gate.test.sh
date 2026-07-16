@@ -69,7 +69,11 @@ write_plan() {
 run_hook() {
   local home_dir="$1" command="$2"
   local input
-  input=$(jq -n --arg c "$command" '{tool_input: {command: $c}}')
+  # Pin the hook's cwd to the sandbox HOME so PROJECT_DIR resolves via the
+  # documented input-cwd path instead of falling through to the runner's real
+  # pwd — otherwise the suite's verdicts would depend on whatever plan files
+  # live under the ambient working directory (a hermeticity leak).
+  input=$(jq -n --arg c "$command" --arg cwd "$home_dir" '{tool_input: {command: $c}, cwd: $cwd}')
   local tmp_err
   tmp_err=$(mktemp)
   # Capture exit code without letting errexit kill the test runner, and
@@ -88,7 +92,10 @@ run_hook() {
 run_hook_with_project() {
   local home_dir="$1" project_dir="$2" command="$3"
   local input
-  input=$(jq -n --arg c "$command" '{tool_input: {command: $c}}')
+  # CLAUDE_PROJECT_DIR (set below) already wins over cwd in the hook's
+  # resolution, but pin cwd to the project sandbox anyway so the input is
+  # hermetic and never consults the runner's real pwd.
+  input=$(jq -n --arg c "$command" --arg cwd "$project_dir" '{tool_input: {command: $c}, cwd: $cwd}')
   local tmp_err
   tmp_err=$(mktemp)
   if HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
