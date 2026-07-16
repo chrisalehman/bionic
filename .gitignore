@@ -33,10 +33,6 @@ node_modules/
 
 # Superpowers working files (plans, specs, brainstorming)
 .superpowers/
-docs/superpowers/
-
-# Bionic canonical-sdlc working files (plans, specs, dry-runs)
-docs/bionic/
 
 # Git worktrees
 .worktrees/
@@ -44,8 +40,6 @@ docs/bionic/
 # Project notebook (local, not shared)
 .bionic/
 
-# Canonical-sdlc ephemeral workspace (continuation checkpoints, evidence snapshots, scratch)
-.bionic/tmp/
-
 # playwright
 .playwright-cli
+.playwright
