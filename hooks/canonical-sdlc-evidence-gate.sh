@@ -307,7 +307,7 @@ esac
 # project-specific by design; the hook validates presence, non-empty
 # value / non-empty n/a reason, and the existing placeholder ban only.
 #
-# v8 (current) is the v7 shape table plus ONE addition: Step 5 (Verify)
+# v8 is the v7 shape table plus ONE addition: Step 5 (Verify)
 # additionally requires a `drive-check:` key — proof that one trusted
 # interaction changed app state, read back semantically (not via pixels),
 # before browser-modality evidence counts. Forms: an observed state delta,
@@ -317,7 +317,18 @@ esac
 # validates presence, non-empty value / non-empty n/a reason, and the
 # existing placeholder ban only; the suite-credit semantics live in
 # SKILL.md prose. v7 and earlier plans are never retrofitted.
-if [ "$SDLC_VERSION" = "8" ]; then
+#
+# v9 (current) = v8 + Step-5 stack-health: ONE more universal key,
+# `stack-health: <before/after snapshot, no delta>` or
+# `stack-health: n/a: <reason>` — a runtime-integrity sibling of
+# bundle-fresh (artifact) and drive-check (contact): a crash-restart
+# mid-walk can swallow the bug being probed while the app returns
+# looking healthy. Same contract as its siblings: presence, non-empty
+# value / non-empty n/a reason, existing placeholder ban. v8 and earlier
+# plans are never retrofitted.
+if [ "$SDLC_VERSION" = "9" ]; then
+  SHAPE_MODE="v9"
+elif [ "$SDLC_VERSION" = "8" ]; then
   SHAPE_MODE="v8"
 elif [ "$SDLC_VERSION" = "7" ]; then
   SHAPE_MODE="v7"
@@ -341,7 +352,7 @@ fi
 # here, so v2 always shape-checks Step 4 (unchanged from before).
 pointer_steps_for_mode() {
   case "$1" in
-    v5|v6|v7|v8) echo "1 2 3 4 6" ;;
+    v5|v6|v7|v8|v9) echo "1 2 3 4 6" ;;
     v3)          echo "1 2 3 4 7 8" ;;
     *)           echo "1 2 3 5 8 8b" ;;  # v2
   esac
@@ -410,10 +421,12 @@ step_prefix() {
 }
 
 # Universal Step-5 keys a version layers on the shared verify body, in
-# enforcement order. v7 added bundle-fresh; v8 added drive-check. A future
-# version appends ONE case arm here (and one require_na_key arm).
+# enforcement order. v7 added bundle-fresh; v8 added drive-check; v9 added
+# stack-health. A future version appends ONE case arm here (and one
+# require_na_key arm).
 step5_keys_for_version() {
   case "$1" in
+    v9) echo "bundle-fresh drive-check stack-health" ;;
     v8) echo "bundle-fresh drive-check" ;;
     v7) echo "bundle-fresh" ;;
     *)  echo "" ;;  # v5, v6: no universal Step-5 keys
@@ -439,6 +452,11 @@ require_na_key() {
         echo "Plan: $PLAN" >&2
         echo "Fix: prove one trusted interaction changed app state (read the delta back semantically, not via pixels) and record the observed delta — or 'drive-check: suite: <named test — what it asserts>' when a suite test makes the same real contact, or 'drive-check: n/a: <reason>' when no browser modality applies." >&2
         ;;
+      stack-health)
+        echo "BLOCKED: ${prefix} requires 'stack-health: <before/after snapshot>' or 'stack-health: n/a: <reason>'." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: snapshot the serving stack's runtime-integrity indicators before and after the walk and paste the no-delta result as 'stack-health: <snapshot>', or record 'stack-health: n/a: <reason>' when no long-running serve is observed." >&2
+        ;;
     esac
     exit 2
   fi
@@ -455,6 +473,11 @@ require_na_key() {
           echo "BLOCKED: ${prefix} 'drive-check:' needs a non-empty observation, or 'n/a: <reason>' with a non-empty reason." >&2
           echo "Plan: $PLAN" >&2
           echo "Fix: record the observed state delta, the qualifying suite test, or the reason a drive-check does not apply." >&2
+          ;;
+        stack-health)
+          echo "BLOCKED: ${prefix} 'stack-health:' needs a non-empty snapshot, or 'n/a: <reason>' with a non-empty reason." >&2
+          echo "Plan: $PLAN" >&2
+          echo "Fix: paste the before/after snapshot showing no delta, or give the reason stack-health does not apply." >&2
           ;;
       esac
       exit 2
@@ -577,8 +600,8 @@ validate_ship_step() {
 dispatch_modern() {
   local label="$1" ext_step="" integrate_step ship_step
   case "$label" in
-    v5)       ext_step=8; integrate_step=9; ship_step=10 ;;
-    v6|v7|v8) integrate_step=8; ship_step=9 ;;
+    v5)          ext_step=8; integrate_step=9; ship_step=10 ;;
+    v6|v7|v8|v9) integrate_step=8; ship_step=9 ;;
   esac
   case "$CURRENT" in
     4) shape_block worktree base-sha branch ;;
@@ -597,7 +620,7 @@ dispatch_modern() {
 }
 
 case "$SHAPE_MODE" in
-  v5|v6|v7|v8)
+  v5|v6|v7|v8|v9)
     dispatch_modern "$SHAPE_MODE"
     ;;
   v3)

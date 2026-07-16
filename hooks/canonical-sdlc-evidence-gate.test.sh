@@ -1736,6 +1736,151 @@ expect_allow "CRLF v8 Step 5 complete (drive-check present) → allow" \
   "$h15b" 'git commit -m "x"'
 
 # ============================================================
+# Section 16: v9 canonical_sdlc_version — universal stack-health gate
+# ============================================================
+#
+# v9 = v8 plus ONE addition: the Step 5 block must carry
+# `stack-health: <before/after snapshot, no delta>` or
+# `stack-health: n/a: <reason>` — proof that the serving stack's
+# runtime-integrity indicators (process restarts, crash/OOM state) did
+# not change across the walk, so a crash-restart mid-walk cannot swallow
+# the bug being probed while the app returns looking healthy. Universal
+# with an n/a escape, exactly like `bundle-fresh:` and `drive-check:`.
+# The hook validates presence + non-empty value/reason + the existing
+# placeholder ban only; the snapshot command is project-specific by
+# design.
+
+echo ""
+echo "=== Section 16: v9 stack-health gate ==="
+
+v9_frontmatter() {
+  local has_ui="${1:-true}" deploy="${2:-none}" use_wt="${3:-false}"
+  cat <<EOF
+---
+governing-skill: canonical-sdlc
+mode: autonomous
+canonical_sdlc_version: 9
+deploy_target: ${deploy}
+use_worktree: ${use_wt}
+has_ui: ${has_ui}
+---
+EOF
+}
+
+# Shared Step-5 body (tests + browser + bundle-fresh + drive-check
+# satisfied) so each case isolates the stack-health variable.
+v9_step5_base="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-04.plan.md#step-5
+  devtools-trace: .bionic/tmp/evidence-golden.png
+  bundle-fresh: FRESH — canary token-9f3a round-tripped to dist/main.js in 4.2s
+  drive-check: click toggled app flag false → true via eval readback"
+
+# 16a — v9 Step 5 complete (all v8 keys present) but NO stack-health →
+# block, message names the key.
+h16a=$(make_home)
+write_plan "$h16a" "$(v9_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v9_step5_base" > /dev/null
+expect_block "v9 Step 5 without stack-health → block" \
+  "$h16a" 'git commit -m "x"' "stack-health"
+
+# 16b — v9 + stack-health before/after snapshot with no delta → allow.
+h16b=$(make_home)
+write_plan "$h16b" "$(v9_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v9_step5_base
+  stack-health: process restarts 0 → 0 across walk; no crash/OOM state change" > /dev/null
+expect_allow "v9 + stack-health no-delta snapshot → allow" \
+  "$h16b" 'git commit -m "x"'
+
+# 16c — v9 + stack-health: n/a with reason → allow.
+h16c=$(make_home)
+write_plan "$h16c" "$(v9_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v9_step5_base
+  stack-health: n/a: no long-running serve observed" > /dev/null
+expect_allow "v9 + stack-health: n/a with reason → allow" \
+  "$h16c" 'git commit -m "x"'
+
+# 16d — v9 + stack-health empty value → block.
+h16d=$(make_home)
+write_plan "$h16d" "$(v9_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v9_step5_base
+  stack-health:" > /dev/null
+expect_block "v9 stack-health with empty value → block" \
+  "$h16d" 'git commit -m "x"' "stack-health"
+
+# 16e — v9 + stack-health: n/a with NO reason → block.
+h16e=$(make_home)
+write_plan "$h16e" "$(v9_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v9_step5_base
+  stack-health: n/a" > /dev/null
+expect_block "v9 stack-health: n/a without reason → block" \
+  "$h16e" 'git commit -m "x"' "stack-health"
+
+# 16f — v9 + stack-health placeholder → block (placeholder ban).
+h16f=$(make_home)
+write_plan "$h16f" "$(v9_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v9_step5_base
+  stack-health: TBD" > /dev/null
+expect_block "v9 stack-health: TBD → block (placeholder ban)" \
+  "$h16f" 'git commit -m "x"' "placeholder"
+
+# 16g — v9 non-Step-5 spot-checks: document (Step 7) and integrate
+# (Step 8) shapes unchanged from v8.
+h16g1=$(make_home)
+write_plan "$h16g1" "$(v9_frontmatter true)
+## SDLC State
+current: 7
+Step 7:
+  adr: .bionic/docs/adrs/adr-001-example.md" > /dev/null
+expect_allow "v9 Step 7 Document with adr → allow" \
+  "$h16g1" 'git commit -m "x"'
+
+h16g2=$(make_home)
+write_plan "$h16g2" "$(v9_frontmatter true)
+## SDLC State
+current: 8
+Step 8:
+  merge: abc1234abc1234abc1234abc1234abc1234abc1
+  worktree-removed: n/a
+  cleanup: ok
+  tmp-wiped: yes
+  tasks-completed: 10/10" > /dev/null
+expect_allow "v9 Step 8 Integrate & close full → allow" \
+  "$h16g2" 'git commit -m "x"'
+
+# 16h — GRANDFATHER (named regression): a v8 plan at Step 5 with all v8
+# keys (including drive-check — v8's own requirement) but NO stack-health
+# must still pass after the v9 switch lands.
+h16h=$(make_home)
+write_plan "$h16h" "$(v8_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v8_step5_base
+  drive-check: click toggled app flag false → true via eval readback" > /dev/null
+expect_allow "GRANDFATHER: v8 Step 5 without stack-health → allow" \
+  "$h16h" 'git commit -m "x"'
+
+# ============================================================
 # Summary
 # ============================================================
 
