@@ -137,7 +137,13 @@ fi
 # if the plan has any. Used to read `evidence_schema` and `deploy_target`
 # for v2 shape enforcement; absent on legacy plans, in which case the
 # hook reverts to presence-only behavior.
-FRONTMATTER=$(awk 'NR==1 && $0=="---"{f=1; next} f && $0=="---"{exit} f' "$PLAN")
+#
+# CRLF plans (\r\n line endings) would otherwise defeat the exact-match
+# `$0=="---"` comparison ("---\r" != "---"), so \r is stripped from the
+# file before either awk pass — normalizing once here means every
+# downstream parse (frontmatter values, SECTION lines, CURRENT, evidence
+# blocks) sees plain \n text.
+FRONTMATTER=$(tr -d '\r' < "$PLAN" | awk 'NR==1 && $0=="---"{f=1; next} f && $0=="---"{exit} f')
 
 frontmatter_get() {
   echo "$FRONTMATTER" \
@@ -154,8 +160,9 @@ SDLC_VERSION=$(frontmatter_get canonical_sdlc_version)
 USE_WORKTREE=$(frontmatter_get use_worktree)
 
 # Extract the ## SDLC State section (from its header up to the next ##
-# header or EOF).
-SECTION=$(awk '/^## SDLC State/{flag=1; next} /^## /{flag=0} flag' "$PLAN")
+# header or EOF). \r stripped here too, for the same CRLF reason as
+# FRONTMATTER above.
+SECTION=$(tr -d '\r' < "$PLAN" | awk '/^## SDLC State/{flag=1; next} /^## /{flag=0} flag')
 
 if [ -z "$SECTION" ]; then
   echo "BLOCKED: canonical-sdlc plan file has an empty '## SDLC State' section." >&2
