@@ -380,6 +380,18 @@ canonical_sdlc_version: 99
 run_write "$project/.bionic/docs/plans/epic-01-demo/wave-09b-bad.plan.md" "$bad_ver"
 assert_eq "exit 2" 2 "$HOOK_EXIT"
 
+echo "unsupported canonical_sdlc_version: 10 → block (boundary: 9 is current, 10 is not yet minted)"
+v10_bad='---
+governing-skill: canonical-sdlc
+mode: autonomous
+canonical_sdlc_version: 10
+---
+
+# Body
+'
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-09c-v10.plan.md" "$v10_bad"
+assert_eq "exit 2" 2 "$HOOK_EXIT"
+
 echo "Edit on existing v1-migrated file (simulating live continuation-checkpoint.md) → allow"
 migrated="$project/.bionic/docs/plans/epic-01-demo/continuation-checkpoint.md"
 printf '%s' "$V1_LEGACY" > "$migrated"
@@ -582,7 +594,7 @@ canonical_sdlc_version: ${version}
   printf '%s' "$out"
 }
 
-for version in 6 7 8; do
+for version in 6 7 8 9; do
   echo "v${version} with all v3 flags + model_plan → allow"
   vN_full=$(build_versioned_plan "$version")
   run_write "$project/.bionic/docs/plans/epic-01-demo/wave-18-v${version}.plan.md" "$vN_full"

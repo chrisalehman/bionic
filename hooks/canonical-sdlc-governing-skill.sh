@@ -213,19 +213,21 @@ if [ "$SDLC_VERSION" = "1" ] || [ "$SDLC_VERSION" = "2" ]; then
   exit 0
 fi
 
-# v3 through v8 are all enforced. v4 added a required `model_plan` (the
+# v3 through v9 are all enforced. v4 added a required `model_plan` (the
 # Step-0 model-tier decision); v5 collapses the step set (gate model); v6
 # removes the external-review step (0–9 shape); v7 adds the universal
 # Step-5 `bundle-fresh:` evidence key (enforced by the evidence-gate
 # hook — no flag change here); v8 adds the universal Step-5
 # `drive-check:` evidence key (also enforced by the evidence-gate hook,
-# not here). v4/v5/v6/v7/v8 share v4's flag contract unchanged. v3 plans
-# keep the prior contract so in-flight plans authored before v4 are not
+# not here); v9 adds the universal Step-5 `stack-health:` evidence key
+# (also enforced by the evidence-gate hook, not here — no flag change).
+# v4/v5/v6/v7/v8/v9 share v4's flag contract unchanged. v3 plans keep the
+# prior contract so in-flight plans authored before v4 are not
 # retroactively broken.
-if [ "$SDLC_VERSION" != "3" ] && [ "$SDLC_VERSION" != "4" ] && [ "$SDLC_VERSION" != "5" ] && [ "$SDLC_VERSION" != "6" ] && [ "$SDLC_VERSION" != "7" ] && [ "$SDLC_VERSION" != "8" ]; then
+if [ "$SDLC_VERSION" != "3" ] && [ "$SDLC_VERSION" != "4" ] && [ "$SDLC_VERSION" != "5" ] && [ "$SDLC_VERSION" != "6" ] && [ "$SDLC_VERSION" != "7" ] && [ "$SDLC_VERSION" != "8" ] && [ "$SDLC_VERSION" != "9" ]; then
   echo "BLOCKED: canonical-sdlc artifact '$BASENAME' has unsupported canonical_sdlc_version: '$SDLC_VERSION'." >&2
   echo "Path: $FILE_PATH" >&2
-  echo "Fix: set 'canonical_sdlc_version: 8' (current), '7'/'6'/'5'/'4'/'3' (prior, still enforced), or '1'/'2' for legacy plans." >&2
+  echo "Fix: set 'canonical_sdlc_version: 9' (current), '8'/'7'/'6'/'5'/'4'/'3' (prior, still enforced), or '1'/'2' for legacy plans." >&2
   exit 2
 fi
 
@@ -251,7 +253,7 @@ done
 # Step-0 model-tier decision). Checked as a separate conditional grep — NOT
 # an array element — to stay safe under `set -u` with bash 3.2's empty-array
 # expansion behaviour. v3 plans skip this and keep the prior contract.
-if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ] || [ "$SDLC_VERSION" = "6" ] || [ "$SDLC_VERSION" = "7" ] || [ "$SDLC_VERSION" = "8" ]; then
+if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ] || [ "$SDLC_VERSION" = "6" ] || [ "$SDLC_VERSION" = "7" ] || [ "$SDLC_VERSION" = "8" ] || [ "$SDLC_VERSION" = "9" ]; then
   if ! echo "$FRONTMATTER" | grep -qE "^[[:space:]]*model_plan[[:space:]]*:"; then
     MISSING+=("model_plan")
   fi
@@ -263,7 +265,7 @@ if [ "${#MISSING[@]}" -gt 0 ]; then
   echo "Fix: run Step 0 (Configure) to set these explicitly. See SKILL.md §Step 0." >&2
   echo "Required opt-in flags:        ${REQUIRED_V3_OPT_IN[*]}" >&2
   echo "Required discriminator flags: ${REQUIRED_DISCRIMINATORS[*]}" >&2
-  if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ] || [ "$SDLC_VERSION" = "6" ] || [ "$SDLC_VERSION" = "7" ] || [ "$SDLC_VERSION" = "8" ]; then
+  if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ] || [ "$SDLC_VERSION" = "6" ] || [ "$SDLC_VERSION" = "7" ] || [ "$SDLC_VERSION" = "8" ] || [ "$SDLC_VERSION" = "9" ]; then
     echo "Required for v${SDLC_VERSION} (added):      model_plan" >&2
   fi
   exit 2
