@@ -213,21 +213,24 @@ if [ "$SDLC_VERSION" = "1" ] || [ "$SDLC_VERSION" = "2" ]; then
   exit 0
 fi
 
-# v3 through v9 are all enforced. v4 added a required `model_plan` (the
+# v3 through v10 are all enforced. v4 added a required `model_plan` (the
 # Step-0 model-tier decision); v5 collapses the step set (gate model); v6
 # removes the external-review step (0–9 shape); v7 adds the universal
 # Step-5 `bundle-fresh:` evidence key (enforced by the evidence-gate
 # hook — no flag change here); v8 adds the universal Step-5
 # `drive-check:` evidence key (also enforced by the evidence-gate hook,
 # not here); v9 adds the universal Step-5 `stack-health:` evidence key
-# (also enforced by the evidence-gate hook, not here — no flag change).
-# v4/v5/v6/v7/v8/v9 share v4's flag contract unchanged. v3 plans keep the
-# prior contract so in-flight plans authored before v4 are not
-# retroactively broken.
-if [ "$SDLC_VERSION" != "3" ] && [ "$SDLC_VERSION" != "4" ] && [ "$SDLC_VERSION" != "5" ] && [ "$SDLC_VERSION" != "6" ] && [ "$SDLC_VERSION" != "7" ] && [ "$SDLC_VERSION" != "8" ] && [ "$SDLC_VERSION" != "9" ]; then
+# (also enforced by the evidence-gate hook, not here — no flag change);
+# v10 adds the pre-registered Verification Matrix (flag contract
+# unchanged — see the matrix-required-at-step-3 check below; the
+# per-tier evidence-key shape is enforced by the evidence-gate hook, not
+# here). v4/v5/v6/v7/v8/v9/v10 share v4's flag contract unchanged. v3
+# plans keep the prior contract so in-flight plans authored before v4
+# are not retroactively broken.
+if [ "$SDLC_VERSION" != "3" ] && [ "$SDLC_VERSION" != "4" ] && [ "$SDLC_VERSION" != "5" ] && [ "$SDLC_VERSION" != "6" ] && [ "$SDLC_VERSION" != "7" ] && [ "$SDLC_VERSION" != "8" ] && [ "$SDLC_VERSION" != "9" ] && [ "$SDLC_VERSION" != "10" ]; then
   echo "BLOCKED: canonical-sdlc artifact '$BASENAME' has unsupported canonical_sdlc_version: '$SDLC_VERSION'." >&2
   echo "Path: $FILE_PATH" >&2
-  echo "Fix: set 'canonical_sdlc_version: 9' (current), '8'/'7'/'6'/'5'/'4'/'3' (prior, still enforced), or '1'/'2' for legacy plans." >&2
+  echo "Fix: set 'canonical_sdlc_version: 10' (current), '9'/'8'/'7'/'6'/'5'/'4'/'3' (prior, still enforced), or '1'/'2' for legacy plans." >&2
   exit 2
 fi
 
@@ -253,7 +256,7 @@ done
 # Step-0 model-tier decision). Checked as a separate conditional grep — NOT
 # an array element — to stay safe under `set -u` with bash 3.2's empty-array
 # expansion behaviour. v3 plans skip this and keep the prior contract.
-if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ] || [ "$SDLC_VERSION" = "6" ] || [ "$SDLC_VERSION" = "7" ] || [ "$SDLC_VERSION" = "8" ] || [ "$SDLC_VERSION" = "9" ]; then
+if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ] || [ "$SDLC_VERSION" = "6" ] || [ "$SDLC_VERSION" = "7" ] || [ "$SDLC_VERSION" = "8" ] || [ "$SDLC_VERSION" = "9" ] || [ "$SDLC_VERSION" = "10" ]; then
   if ! echo "$FRONTMATTER" | grep -qE "^[[:space:]]*model_plan[[:space:]]*:"; then
     MISSING+=("model_plan")
   fi
@@ -265,10 +268,45 @@ if [ "${#MISSING[@]}" -gt 0 ]; then
   echo "Fix: run Step 0 (Configure) to set these explicitly. See SKILL.md §Step 0." >&2
   echo "Required opt-in flags:        ${REQUIRED_V3_OPT_IN[*]}" >&2
   echo "Required discriminator flags: ${REQUIRED_DISCRIMINATORS[*]}" >&2
-  if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ] || [ "$SDLC_VERSION" = "6" ] || [ "$SDLC_VERSION" = "7" ] || [ "$SDLC_VERSION" = "8" ] || [ "$SDLC_VERSION" = "9" ]; then
+  if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ] || [ "$SDLC_VERSION" = "6" ] || [ "$SDLC_VERSION" = "7" ] || [ "$SDLC_VERSION" = "8" ] || [ "$SDLC_VERSION" = "9" ] || [ "$SDLC_VERSION" = "10" ]; then
     echo "Required for v${SDLC_VERSION} (added):      model_plan" >&2
   fi
   exit 2
+fi
+
+# ---------- v10: pre-registered Verification Matrix required at Step 3+ ----------
+#
+# v10's Step 0 derives a "## Verification Matrix" section (per-AC tier +
+# status + evidence, locked at Step 3 approval — see canonical-sdlc
+# SKILL.md's "Verification Matrix" sub-step under Step 0). This hook
+# checks section PRESENCE only (structure, not substance); the
+# evidence-gate hook validates the per-row per-tier fields and the
+# CONFIRMED/waived auditor discipline (structure vs substance split
+# mirrors the model_plan / flag checks above).
+#
+# Scope: v10, mode: autonomous, basename *.plan.md, sdlc-step >= 3
+# (numeric). Specs, non-autonomous modes, continuation*.md, and earlier
+# schema versions are out of scope — the matrix is a plan-body artifact
+# that exists starting at Step 3 (Plan) approval.
+if [ "$SDLC_VERSION" = "10" ] && [ "$MODE" = "autonomous" ]; then
+  case "$BASENAME" in
+    *.plan.md)
+      SDLC_STEP=$(yaml_get sdlc-step)
+      case "$SDLC_STEP" in
+        ''|*[!0-9]*) ;;  # non-numeric or empty sdlc-step → not in scope
+        *)
+          if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null; then
+            if ! echo "$CONTENT" | grep -qE '^## Verification Matrix'; then
+              echo "BLOCKED: canonical-sdlc v10 autonomous plan '$BASENAME' (sdlc-step ${SDLC_STEP}) is missing a '## Verification Matrix' section." >&2
+              echo "Path: $FILE_PATH" >&2
+              echo "Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix') and lock it at Step 3 approval, or if this wave is reopened, use the Step 5–9 upgrade path in §Versioning." >&2
+              exit 2
+            fi
+          fi
+          ;;
+      esac
+      ;;
+  esac
 fi
 
 exit 0
