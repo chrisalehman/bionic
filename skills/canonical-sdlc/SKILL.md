@@ -548,7 +548,7 @@ Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are p
    - perceptual/design fidelity → **T3** (cold client), **T4** available;
    - docs/ADR ACs → **T0/none**.
 
-   Store it as a top-level `## Verification Matrix` plan section (**not** inside `## SDLC State`), row schema `| AC | tier | status | evidence | auditor |`, status starting `pending`. **Grammar:** exactly five cells per row; **no literal `|` inside a cell** (a sheared row blocks loudly). Skeleton:
+   Store it as a top-level `## Verification Matrix` plan section (**not** inside `## SDLC State`), row schema `| AC | tier | status | evidence | auditor |`, status starting `pending`. **Grammar:** exactly five cells per row; **no literal `|` inside a cell** (a sheared row blocks loudly); status is one of `pending|blocked|discharged|waived` (hook-enforced enum — the cell carries gate semantics, §Step 5). Skeleton:
 
    ```
    ## Verification Matrix
@@ -762,6 +762,8 @@ This replaces the old suite-credit escape: a green suite (T1) can never stand in
 
 **Vocabulary rule.** Say "delivered/fixed/verified" only at the row's contracted tier. Below tier, the only honest phrasing is "implemented, verification pending."
 
+**Mid-discharge commits (v10.1).** A commit made *while* Step 5 is in flight — a corrective fix found during the walk — has an honest home at `current: 5`: rows still `pending` or `blocked` are exempt from their per-tier keys, and the Step-5 `auditor:` pointer is required only once every row is discharged or waived (the auditor is the exit gate; it cannot have run mid-walk). The full contract — per-tier keys plus CONFIRMED on every non-waived row — bites on the 5→6 advance, where the hook re-validates the matrix as a prefix check. **Never regress `current:` to dodge a gate** — a plan that says `current: 4` while Verify work is underway misstates the step and silently drops the tests floor. Because `pending`/`blocked`/`waived` now carry gate semantics, the status cell is enum-checked: `pending|blocked|discharged|waived`, nothing else.
+
 #### Auditor — the Step-5 exit gate
 
 Step 5 does not close until an **Independent Verification Auditor** has ruled on every row. The auditor is a **fresh, independent** exec-complex agent (`model: opus`+) — **never** the implementer, **never** a fork of the orchestrator (a fork inherits the very context whose evidence is under audit). Its dispatch carries this mandate **verbatim** (Subagent Dispatch Convention point 9):
@@ -927,7 +929,7 @@ Every step has an evidence artifact recorded under `Step N:` in `## SDLC State`.
 | 0 | `prereqs: ok` | smoke |
 | 1, 2, 3 | pointer | presence-only |
 | 4 | pointer; also `worktree:`/`base-sha:`/`branch:` when `use_worktree: true` | presence-only |
-| 5 Verify | `cmd:`/`pass:`/`total:`/`output:` (pass==total) AND a non-empty `auditor:` pointer AND a valid `## Verification Matrix` section (below) | tests floor + auditor pointer live in `## SDLC State`; per-row tier evidence lives in the matrix section |
+| 5 Verify | `cmd:`/`pass:`/`total:`/`output:` (pass==total) AND a valid `## Verification Matrix` section (below) AND — once no row is `pending`/`blocked` — a non-empty `auditor:` pointer | tests floor lives in `## SDLC State`; per-row tier evidence lives in the matrix section; mid-discharge relaxation per v10.1 (§Step 5) |
 | 6 Review | pointer to 5-axis body + critic findings | matrix re-validated here as a prefix check — a REFUTED row blocks the commit |
 | 7 Document | `adr:` OR `rca:` OR `n/a:` | — |
 | 8 Integrate & close | `merge:`, `worktree-removed:` AND (`cleanup:`, `tmp-wiped:`, `tasks-completed:` OR `cleanup: n/a`) | — |
@@ -935,7 +937,7 @@ Every step has an evidence artifact recorded under `Step N:` in `## SDLC State`.
 
 Pointer steps in v10: 1, 2, 3, 4 — presence-only. Step 6 is deliberately **not** a pointer step, so a post-Verify commit re-runs the matrix prefix check.
 
-**`## Verification Matrix` validation** fires at `current: 5` (via the Verify gate) and `current: 6..9` (as a prefix check). The hook checks the `stack-health:` line, the tier table's grammar (T0–T4, five cells, no literal `|`), each non-waived row's per-tier keys (§Step 5) with the placeholder and live-tier-`n/a` bans, the `false-green:`/`rewritten:` pairing, and — once `current > 5` — a `CONFIRMED` auditor cell on every non-waived row. A `waiver:` entry (evidence cell or AC block) exempts its row.
+**`## Verification Matrix` validation** fires at `current: 5` (via the Verify gate) and `current: 6..9` (as a prefix check). The hook checks the `stack-health:` line, the tier table's grammar (T0–T4, five cells, no literal `|`, status enum `pending|blocked|discharged|waived`), each non-waived row's per-tier keys (§Step 5) with the placeholder and live-tier-`n/a` bans, the `false-green:`/`rewritten:` pairing, and — once `current > 5` — a `CONFIRMED` auditor cell on every non-waived row. A `waiver:` entry (evidence cell or AC block) exempts its row. **v10.1:** at `current: 5` only, `pending`/`blocked` rows skip the per-tier key check (their contract bites at the 5→6 advance), and the `auditor:` pointer is demanded only when no such row remains.
 
 **Block format** (v10). The Step-5 block in `## SDLC State`:
 
