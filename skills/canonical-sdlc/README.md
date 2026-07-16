@@ -15,10 +15,12 @@ This is the human-facing reference. The skill prose Claude reads at runtime is i
 - [Modes](#modes)
 - [Plan frontmatter contract](#plan-frontmatter-contract)
 - [SDLC State and the evidence model](#sdlc-state-and-the-evidence-model)
+- [Verification Matrix: a worked example](#verification-matrix-a-worked-example)
 - [Handoff tier](#handoff-tier)
 - [The two hooks](#the-two-hooks)
 - [Model and token strategy](#model-and-token-strategy)
 - [Versioning and backward-compat](#versioning-and-backward-compat)
+- [RCA shape](#rca-shape)
 - [Configuration: the Step-0 wizard](#configuration-the-step-0-wizard)
 - [Quick reference](#quick-reference)
 - [Pointers](#pointers)
@@ -111,7 +113,7 @@ Mode declaration is reviewable. A wave-sized feature disguised as a `spike` to s
 
 Plans declare every plan-shaping flag in YAML frontmatter. Step 0 (the wizard) writes this; the `governing-skill` hook enforces its presence on writes; the `evidence-gate` hook reads it on every commit.
 
-### Identity block (example, v9 autonomous)
+### Identity block (example, v10 autonomous)
 
 ```yaml
 ---
@@ -120,7 +122,7 @@ sdlc-step: 3
 epic: epic-02-v2-product-pass
 wave: wave-01-checkout-refactor
 mode: autonomous
-canonical_sdlc_version: 9
+canonical_sdlc_version: 10
 ---
 ```
 
@@ -131,10 +133,10 @@ For incident-response artifacts, use `incident: NNNN-<slug>` instead of `epic`/`
 | `governing-skill` | A skill ID (`superpowers:writing-plans`, `agent-skills:idea-refine`, `canonical-sdlc`, …) | Names the skill that produced this artifact. Different artifacts carry different governing skills (Step 1 → `idea-refine`; Step 3 → `writing-plans`; Step 7 RCA → `canonical-sdlc`). |
 | `sdlc-step` | `0..10` | The step that produced this artifact. The evidence-gate hook reads `current:` in `## SDLC State`, not this field, to pick the step to validate. |
 | `mode` | `autonomous` \| `epic-scope` \| `incident-response` \| `design-refresh` \| `spike` | Determines applicable steps, governing-skill substitutions, and default flag values. |
-| `canonical_sdlc_version` | `1`/`2` (legacy) \| `3` \| `4` \| `5` \| `6` \| `7` \| `8` \| `9` (current) | Routes the hooks. See [Versioning](#versioning-and-backward-compat). |
+| `canonical_sdlc_version` | `1`/`2` (legacy) \| `3` \| `4` \| `5` \| `6` \| `7` \| `8` \| `9` \| `10` (current) | Routes the hooks. See [Versioning](#versioning-and-backward-compat). |
 | `epic` / `wave` / `incident` | Identifier matching the enclosing directory | `epic-NN-<slug>` / `wave-NN-<slug>` for epic-tree work; `NNNN-<slug>` for incidents. |
 
-### Discriminator flags (5 — required on v3–v9 autonomous plans)
+### Discriminator flags (5 — required on v3–v10 autonomous plans)
 
 | Flag | Values | Default |
 |---|---|---|
@@ -144,14 +146,14 @@ For incident-response artifacts, use `incident: NNNN-<slug>` instead of `epic`/`
 | `multi_agent` | bool | **`true`** |
 | `deploy_target` | `k8s` \| `vercel` \| `custom` \| `migration` \| `none` | inferred |
 
-### Opt-in flags (2 — required on v3–v9 autonomous plans)
+### Opt-in flags (2 — required on v3–v10 autonomous plans)
 
 | Flag | Default | What it does |
 |---|---|---|
 | `cleanup_on_finish` | `true` | When `true`, the cleanup half of Step 8 (Integrate & close) runs after the merge half: wipes `.bionic/tmp/`, asserts task-list integrity, strips leftover handoff files. |
 | `use_worktree` | `false` | When `true`, Step 4 creates a git worktree at `.worktrees/<slug>` and records `worktree:`/`base-sha:`/`branch:` in its evidence line. |
 
-### `model_plan` (required on v4–v9 autonomous plans)
+### `model_plan` (required on v4–v10 autonomous plans)
 
 A single-line record of the confirmed model tiers, derived from `multi_agent` and the detected session model at Step 0 and surfaced for explicit confirmation:
 
@@ -159,7 +161,7 @@ A single-line record of the confirmed model tiers, derived from `multi_agent` an
 model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh
 ```
 
-For `canonical_sdlc_version: 4` through `9` autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2). v3 plans keep the prior contract (no `model_plan`). `model_plan` changes no per-step evidence shape; it records intent only.
+For `canonical_sdlc_version: 4` through `10` autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2). v3 plans keep the prior contract (no `model_plan`). `model_plan` changes no per-step evidence shape; it records intent only.
 
 ---
 
@@ -196,14 +198,65 @@ Evidence falls into exactly two tiers:
 
 | Tier | Always present? | Enforced by |
 |---|---|---|
-| **Verification** | Yes — mandatory | `canonical-sdlc-evidence-gate.sh` (presence + per-step shape on v3–v9) |
+| **Verification** | Yes — mandatory | `canonical-sdlc-evidence-gate.sh` (presence + per-step shape on v3–v10) |
 | **Handoff** | Only when a plan spans sessions | Skill prose + the Stop-hook checkpoint |
 
 There is no third "narrative" tier. Decision-point prose to the user is governed instead by the **User Decision Protocol**: frame the decision at the highest useful level of abstraction, offer numbered options each with a one-line rationale, state significance in one sentence, and keep the whole thing under ~200 words. If stating the question needs a filename or line number, the abstraction level is wrong — climb a rung and rewrite.
 
-### Per-step evidence shape (v9)
+### Per-step evidence shape — v10 (current)
 
-The evidence-gate hook checks the current step's line against this table on every `git commit`:
+`canonical_sdlc_version: 10` replaces the flat, ever-growing universal-key stack (`devtools-trace:` / `bundle-fresh:` / `drive-check:` / `stack-health:`) with a **pre-registered Verification Matrix**: one row per acceptance criterion, derived at Step 0 from the spec, locked at Step 3 approval, and discharged row-by-row at Step 5. The Step-5 block in `## SDLC State` shrinks to the tests floor plus one pointer:
+
+```
+Step 5:
+  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: <plan>#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md
+```
+
+The per-row evidence lives in a separate top-level `## Verification Matrix` plan section — see [Verification Matrix: a worked example](#verification-matrix-a-worked-example) for the full shape. The v10 per-step table:
+
+| Step | Required fields under `Step N:` | Notes |
+|---|---|---|
+| 0 | `prereqs: ok` | smoke |
+| 1, 2, 3 | pointer | presence-only |
+| 4 | pointer; also `worktree:`/`base-sha:`/`branch:` when `use_worktree: true` | presence-only |
+| 5 Verify | `cmd:`/`pass:`/`total:`/`output:` (`pass == total`) **AND** a non-empty `auditor:` pointer **AND** a valid `## Verification Matrix` section | tests floor + auditor pointer live in `## SDLC State`; per-row tier evidence lives in the matrix section |
+| 6 Review | pointer to 5-axis body + critic findings | the matrix is re-validated here as a prefix check — a `REFUTED` row blocks the commit |
+| 7 Document | `adr:` **OR** `rca:` **OR** `n/a:` | |
+| 8 Integrate & close | `merge:`, `worktree-removed:` **AND** (`cleanup:`, `tmp-wiped:`, `tasks-completed:` **OR** `cleanup: n/a`) | |
+| 9 Ship | `deploy:`, `verified-at:`, `monitor:` **OR** `n/a:` | `n/a` valid only when `deploy_target: none` |
+
+**Per-tier required evidence keys** — each non-waived matrix row's `<AC-id>:` block carries exactly these keys, keyed off the row's tier (browser-verify's T0–T4 ladder; T0/T1 unit-and-below, T2 hermetic, T3 live agent-drive, T4 human walk):
+
+| Tier | Required keys in the AC block |
+|---|---|
+| T0, T1 | `tier-run`, `readback` |
+| T2 | `tier-run`, `readback`, `fixture-fidelity` |
+| T3 | `tier-run`, `fresh`, `cold-client`, `contact`, `readback` |
+| T4 | `user-confirmed` |
+
+**The Tier-Discharge Rule:**
+
+> Evidence at a lower tier never discharges a higher-tier row. Evidence at a higher tier discharges lower-tier rows for the same AC.
+
+A green suite (T1) can never stand in for a T3 row — a suite run cannot honestly produce a T3 row's `fresh`/`cold-client`/`contact` fields, so the hook blocks on the missing keys rather than accepting suite-credit.
+
+**Independent Verification Auditor.** Step 5 does not close until a fresh, independent exec-complex agent (never the implementer, never a fork) has ruled CONFIRMED / REFUTED / UNVERIFIABLE on every row, re-executing at least one evidence command per tier used (cap 3). Verdicts land in the matrix's `auditor` column. The auditor falsifies the wave's **evidence**; this is distinct from the Step 6 critic, who falsifies the wave's **code** — both run, neither substitutes for the other.
+
+**Waiver Protocol.** Three moves are user decisions only, never an agent's: a tier downgrade, a self-written `n/a` on a live tier (T3/T4), and closing over a non-`CONFIRMED` row. Each is recorded on the row as `waiver: <user> <date> <one-line reason>`, which exempts that row from its per-tier keys and from the CONFIRMED requirement.
+
+**False-green pairing.** A `false-green: <test — what it lied about>` entry in the matrix section does not close the gate on its own — it must carry a paired `rewritten: <commit/test ref>` proving the test now goes RED on the broken code. A logged-but-unfixed false-green is a blocking defect.
+
+**Key-family consolidation (epic-02 `adr-001`).** v7–v9 each added one flat universal Step-5 key on its own failure axis — `bundle-fresh:` (artifact), `drive-check:` (contact), `stack-health:` (runtime) — and `adr-001` recorded a binding threshold: a *fifth* universal key would force prose-side consolidation into one structured contract rather than another bullet. v10 is that consolidation, taken pre-emptively instead of waiting for a fifth flat key: the artifact and contact axes fold into each T3 row's own `fresh`/`contact` fields (scoped to that AC's actual serving path and interaction, not a wave-wide proof), and the runtime axis survives unchanged as the matrix's once-per-session `stack-health:` line. Net effect: proof that used to be one-size-fits-all is now per-AC and per-tier, with no growth in universal keys.
+
+**Reopened-wave upgrade path (v9→v10).** The no-retrofit rule (below) has one narrow exception: a plan reopened with exactly Steps 5–9 remaining may bump `canonical_sdlc_version` to `10` by (1) the version-number change, (2) a user-approved `## Verification Matrix` covering only the reopened ACs, and (3) leaving Steps 0–4 evidence untouched under v9 rules. A plan still executing Steps 0–4 stays on its original version — declare v10 fresh at Step 0 instead.
+
+### Per-step evidence shape — v9 and earlier (kept as-shipped, never retrofitted)
+
+Plans at `canonical_sdlc_version: 9` (and the version ladder below it) keep running their own shape table exactly as it shipped — the evidence-gate hook never retrofits a newer version's requirements onto an older plan; an in-flight plan would start blocking mid-wave. The evidence-gate hook checks the current step's line against this table on every `git commit`:
 
 | Step | Required under `Step N:` | Notes |
 |---|---|---|
@@ -239,6 +292,48 @@ The `drive-check:` value is the observed state delta from one trusted interactio
 The `stack-health:` value is the before/after snapshot of the serving stack's runtime-integrity indicators — process/container restart counts, crash/OOM last-state — showing no change across the walk (`stack-health: <before/after snapshot, no delta>`), or `n/a: <reason>` when no long-running serve is observed. The snapshot command is project-specific like the freshness tool; the hook validates presence and the placeholder ban only. It catches restart/crash-shaped degradation — a crash-restart mid-walk that can swallow the exact bug being probed while the app returns looking healthy — not degradation in general.
 
 The gate blocks (exit 2) when the current step's evidence line is missing, empty, or a placeholder token (`todo`, `pending`, `inprogress`, `xxx`, `tbd`, `placeholder`).
+
+---
+
+## Verification Matrix: a worked example
+
+A generic UI wave — a "saved-views panel" feature, standing in for any project's real work — with six ACs spanning four tiers plus one waiver. This is the exact shape the evidence-gate hook validates (`validate_matrix_v10`): a `stack-health:` line, a 5-column table (`AC | tier | status | evidence | auditor`, no literal `|` inside a cell), and one indented per-AC evidence block per non-waived row.
+
+```
+## Verification Matrix
+
+stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
+| AC-2 | T3 | waived | waiver: chris 2026-07-16 staging origin down; retest next wave | waived |
+| AC-3 | T2 | discharged | see AC-3 | CONFIRMED |
+| AC-4 | T1 | discharged | see AC-4 | CONFIRMED |
+| AC-5 | T0 | discharged | see AC-5 | CONFIRMED |
+| AC-6 | T4 | discharged | see AC-6 | CONFIRMED |
+
+AC-1:
+  tier-run: https://app.example/saved-views — opened the panel from the real nav entry
+  fresh: app origin rebuilt token-7c2a; CDN-fronted asset origin purged
+  cold-client: fresh incognito profile, no service-worker or HTTP cache
+  contact: clicked "Saved Views" — panel closed → open
+  readback: panel.visible === true via page-scope eval
+AC-3:
+  tier-run: playwright hermetic run over saved-views-list.fixture.json
+  readback: rendered rows === 5, sort order matches fixture
+  fixture-fidelity: derived from a captured production saved-views payload, 2026-07-12
+AC-4:
+  tier-run: bash test.sh — sort/filter comparator unit suite
+  readback: 18/18 asserted
+AC-5:
+  tier-run: pnpm build && tsc
+  readback: 0 type errors
+AC-6:
+  user-confirmed: chris 2026-07-16 walked the panel at 3 breakpoints against the design spec
+```
+
+Reading the rows: **AC-1** (T3) is a real user-visible flow, so it carries all five live-tier fields — a suite run could never honestly produce `fresh`/`cold-client`/`contact` for it (the Tier-Discharge Rule). **AC-2** (T3) is legitimately blocked this wave by a staging outage; rather than self-write `n/a` on a live-tier field, it goes through the Waiver Protocol and is recorded `waiver: <user> <date> <reason>` — exempt from its per-tier keys and from needing a `CONFIRMED` auditor verdict. **AC-3** (T2) declares its fixture's provenance so the auditor can check the fixture structurally reaches the failure the AC guards. **AC-4** (T1) and **AC-5** (T0) are substrate-only, so `tier-run` + `readback` is the whole contract. **AC-6** (T4) is a scheduled human walk, discharged by a recorded `user-confirmed:` field — never self-confirmed by an agent. Every non-waived row's `auditor` cell reads `CONFIRMED`, meaning the Independent Verification Auditor re-executed at least one evidence command per tier used and could not falsify the row; a single `REFUTED` or `UNVERIFIABLE` cell would block Step-5 closure absent a waiver.
 
 ---
 
@@ -286,7 +381,8 @@ Fires on writes to `*.plan.md`, `*.spec.md`, `adr-*.md`, and `continuation*.md` 
 
 Flag enforcement is version-routed:
 - **v3 autonomous plans** — also requires the 5 discriminator flags + 2 opt-in flags.
-- **v4 through v9 autonomous plans** — same, plus a non-empty `model_plan`.
+- **v4 through v10 autonomous plans** — same, plus a non-empty `model_plan`.
+- **v10 autonomous plans additionally** — once `sdlc-step ≥ 3`, requires a `## Verification Matrix` section in the artifact body; a `*.plan.md` at `sdlc-step: 3`+ with no matrix section blocks the write (exit 2, message names the missing section). This is the mechanism behind the "matrix locks at Step 3 approval" rule — the hook, not just the skill prose, makes a matrix-less v10 plan unwritable past that point.
 - **v1/v2 plans** — grandfathered; only the `governing-skill:` field is checked, no flag enforcement.
 - **Unsupported version** — exit 2.
 
@@ -301,6 +397,7 @@ Shape enforcement is version-routed:
 - **v7 plans** — run the v7 per-step shape table (v6 plus the universal Step-5 `bundle-fresh:` key).
 - **v8 plans** — run the v8 per-step shape table (v7 plus the universal Step-5 `drive-check:` key).
 - **v9 plans** — run the v9 per-step shape table above (v8 plus the universal Step-5 `stack-health:` key).
+- **v10 plans** — run the v10 per-step shape table (tests floor + `auditor:` pointer, replacing the flat universal-key stack with a discharged `## Verification Matrix` section: per-tier keys, waiver/`CONFIRMED` discipline, `false-green:`/`rewritten:` pairing). Validated at `current: 5` (the Verify-gate check) and re-validated as a prefix check for `current: 6..9` — so a `REFUTED` auditor verdict discovered after Step 5 still blocks every later commit.
 - **v1/v2 plans** — presence-only by default.
 
 ---
@@ -353,20 +450,54 @@ Four tiers by role (the default plan when `multi_agent: true`):
 | `6` | Prior, still enforced | v4 set: 5 discriminators + 2 opt-in flags + required `model_plan` | v6 per-step shape table (v5 minus the external-review step: 0–9; external review dropped) |
 | `7` | Prior, still enforced | v4 set: 5 discriminators + 2 opt-in flags + required `model_plan` | v7 per-step shape table (v6 plus the universal Step-5 `bundle-fresh:` key) |
 | `8` | Prior, still enforced | v4 set: 5 discriminators + 2 opt-in flags + required `model_plan` | v8 per-step shape table (v7 plus the universal Step-5 `drive-check:` key) |
-| `9` | **Current** | v4 set: 5 discriminators + 2 opt-in flags + required `model_plan` | v9 per-step shape table (v8 plus the universal Step-5 `stack-health:` key) |
+| `9` | Prior, still enforced | v4 set: 5 discriminators + 2 opt-in flags + required `model_plan` | v9 per-step shape table (v8 plus the universal Step-5 `stack-health:` key) |
+| `10` | **Current** | v4 set: 5 discriminators + 2 opt-in flags + required `model_plan`, plus a required `## Verification Matrix` section once `sdlc-step ≥ 3` | v10 per-step shape table — replaces the flat universal-key stack with a pre-registered, per-AC `## Verification Matrix` (tier-discharge, per-tier evidence keys, independent auditor, Waiver Protocol) |
 
-Legacy plans (v1/v2) run grandfathered indefinitely: the governing-skill hook checks only `governing-skill:`, and the evidence gate uses presence-only. v3 plans remain enforced under the prior 5 + 2 contract. v4 through v9 require `model_plan`. v3/v4 plans run the v3 per-step shape table (v4 shares v3's); v5 plans run the v5 shape table; v6 plans run the v6 shape table; v7 plans run the v7 shape table; v8 plans run the v8 shape table; v9 plans run the v9 shape table.
+Legacy plans (v1/v2) run grandfathered indefinitely: the governing-skill hook checks only `governing-skill:`, and the evidence gate uses presence-only. v3 plans remain enforced under the prior 5 + 2 contract. v4 through v10 require `model_plan`. v3/v4 plans run the v3 per-step shape table (v4 shares v3's); v5 plans run the v5 shape table; v6 plans run the v6 shape table; v7 plans run the v7 shape table; v8 plans run the v8 shape table; v9 plans run the v9 shape table; v10 plans run the v10 shape table (see [Verification Matrix: a worked example](#verification-matrix-a-worked-example)). **Never retrofit a newer version's requirements onto an older plan** — an in-flight plan would start blocking mid-wave; this covers every universal-key addition (v7 `bundle-fresh:`, v8 `drive-check:`, v9 `stack-health:`) and the v10 Verification Matrix alike. The one sanctioned exception is the reopened-wave upgrade path (v9→v10; see the v10 evidence-shape section above).
+
+### Why the ladder looks like this
+
+Each version bump exists because something broke or a threshold was crossed — not because a version number felt stale:
+
+- **v5** added a gate-collapsed 0–10 shape with an `8 External review` step; **v6** dropped it again (external review folded into the Step 6 adversarial critic) — the two versions bracket a reversed experiment, not a straight-line addition.
+- **v7, v8, v9** each added exactly one universal Step-5 proof key, one failure axis at a time: `bundle-fresh:` (artifact — is the serve actually built from this working tree), `drive-check:` (contact — did a trusted interaction actually touch the app), `stack-health:` (runtime — did the serving stack survive the walk without a masking restart). Every key was proof-or-`n/a`, placeholder-banned, project-specific in format.
+- **epic-02 `adr-001`** recorded the threshold this ladder was heading toward: a *fifth* universal Step-5 key would force prose-side consolidation into one structured contract rather than another flat bullet.
+- **v10** is that consolidation, triggered pre-emptively rather than by shipping a fifth key. The flat four-key stack (`devtools-trace:`/`bundle-fresh:`/`drive-check:`/`stack-health:`) is retired for new plans in favor of the pre-registered Verification Matrix — one row per AC, tiered T0–T4, discharged by an independent auditor rather than self-graded. v9-and-earlier plans are unaffected; the retrofit ban means they keep running their original tables for the rest of their life.
+
+### Pilot and sunset (v10)
+
+> **Pilot:** the first consumer is a reopened wave using the upgrade path; the orchestrator records the overhead delta (wall-clock + agent-runs attributable to matrix + auditor). **Sunset:** any v10 element that has caught nothing across 5 waves and carries nonzero per-wave cost is a demotion candidate at the next version review.
+
+This is the same discipline v10 itself imposes on evidence — a mechanism is kept because it caught something, not because it shipped once.
+
+---
+
+## RCA shape
+
+`incident-response` mode's Step 7 produces `incidents/NNNN-<slug>/rca.md` instead of an ADR — a postmortem, backward-facing where an ADR is forward-facing. The full required shape, section by section:
+
+- **Summary** — one paragraph: what happened, impact, duration.
+- **Timeline** — detection → mitigation → fix deployed, with timestamps.
+- **Root cause** — the single underlying technical cause, stated plainly. Not a list of contributing factors; the one thing that, absent, the incident would not have happened.
+- **Contributing factors** — the conditions that turned the root cause into an actual incident (a root cause without contributing factors usually means the analysis stopped one layer too early).
+- **The fix** — what was changed, with a link to the commit(s).
+- **Prevention** — concrete measures. Each measure must link to a commit or a ticket — "we'll be more careful" is not a prevention measure.
+- **Monitoring gap analysis** — either "monitoring caught this at `<timestamp>`, no gap" with a link to the alert/dashboard, OR a description of the gap and a link to the commit that closed it. The default assumption is a gap exists; "no gap" must be proven, not assumed.
+
+An RCA missing any of these seven sections is incomplete regardless of how thorough the prose reads — the shape itself is the checklist.
 
 ---
 
 ## Configuration: the Step-0 wizard
 
-Step 0 is mandatory for new plans (`canonical_sdlc_version: 9`). It sets every plan-shaping flag deliberately, with explicit user confirmation, in four sub-steps:
+Step 0 is mandatory for new plans (`canonical_sdlc_version: 10`). It sets every plan-shaping flag deliberately, with explicit user confirmation, in six sub-steps:
 
 1. **Pre-flight environment check** — verify `.bionic/` root, resolve the docs root (`<project>/.bionic/config.yaml`'s `docs-root:`, default `.bionic/docs`), ensure `{specs,plans,adrs,incidents}/` exist, `mkdir -p .bionic/tmp/`, and verify both hooks are installed and executable.
 2. **Infer recommended values** — from repo files (`tsconfig.json` → `typescript`, `Cargo.toml` → `rust`, …) and conversation keywords (surface type, deploy target, UI). This includes the integration branch: waves inherit it from the epic plan; standalone plans default to the current mainline branch or `main`.
-3. **Present the confirmation display** — flags, model plan, environment status, integration branch, each with its inference rationale. The `integration-branch:` line is load-bearing (Step 8 merges every wave into it) and must never be dropped from the display.
-4. **Block until explicit confirmation** — no timeout, no implicit acceptance. The confirmation display must always render **in full** — never elided, summarized, or truncated; the user approves exactly what they can see. On confirmation, the immediate next action is announcing and creating the full TaskCreate list (`0:`…`9:`), then transitioning to Step 1.
+3. **Derive the Verification Matrix** — one row per acceptance criterion from the spec, tiered by the inference defaults (user-visible change → T3; engine-divergent → T2-both-engines + T3; pure substrate → T1/T2 with a one-line justification; perceptual/design fidelity → T3 cold-client, T4 available; docs/ADR → T0/none). Stored as `pending` rows; locks at Step 3 approval.
+4. **Present the confirmation display** — flags, model plan, environment status, integration branch, and **every matrix row**, each with its inference rationale. The `integration-branch:` line and the matrix block are both load-bearing (Step 8 merges every wave into the former; the latter is what Step 5 discharges) and must never be dropped from the display, even past 12 ACs.
+5. **Block until explicit confirmation** — no timeout, no implicit acceptance. The confirmation display must always render **in full** — never elided, summarized, or truncated; the user approves exactly what they can see. A matrix tier can be overridden inline (`set verify(AC-2)=T2, confirm`) before it locks.
+6. **Task-list creation is the immediate next action after approval** — announce it, create the full TaskCreate list (`0:`…`9:`), mark `0:` completed, then transition to Step 1. Nothing else runs in between.
 
 ### The confirmation display
 
@@ -399,8 +530,14 @@ Model plan:                      [multi_agent=true → tiered dispatch]
   exec-standard: sonnet          [fresh model:sonnet — slices tagged standard]
   explore/test:  sonnet          [fresh model:sonnet — search, mechanical, tests]
 
+Verification Matrix:            [locked at Step 3 approval — every row shown, never sampled]
+  stack-health: <once-per-walk-session snapshot, or n/a: reason>
+  | AC   | tier | status  | evidence | auditor |
+  | AC-1 | T3   | pending | see AC-1 |         |   [inferred: user-visible behavior → T3]
+  | AC-2 | T1   | pending | see AC-2 |         |   [inferred: pure logic → T1]
+
 Reply "confirm" to accept, or specify overrides:
-  e.g. "set use_worktree=true, set exec-standard=opus, then confirm"
+  e.g. "set use_worktree=true, set exec-standard=opus, set verify(AC-2)=T2, then confirm"
 ```
 
 ### Override DSL
@@ -408,12 +545,14 @@ Reply "confirm" to accept, or specify overrides:
 The reply is parsed against a small grammar:
 
 ```
-reply     := overrides? "confirm"
-overrides := override ("," override)* ","?
-override  := "set" flag "=" value  |  "change" flag "to" value
+reply        := overrides? "confirm"
+overrides    := override ("," override)* ","?
+override     := "set" flag "=" value
+              | "set" "verify" "(" AC-id ")" "=" tier
+              | "change" flag "to" value
 ```
 
-Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`; `set integration-branch=develop, confirm`. Model-plan keys are valid targets: `set orchestrator=fable-high, confirm` (multi_agent=true), or `set main_model=sonnet, confirm` (multi_agent=false dial-down). On accept, the final values are written into frontmatter literally — every flag as an explicit `<key>: <value>` line, plus `model_plan`.
+Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`; `set integration-branch=develop, confirm`. Model-plan keys are valid targets: `set orchestrator=fable-high, confirm` (multi_agent=true), or `set main_model=sonnet, confirm` (multi_agent=false dial-down). **Matrix tier override:** `set verify(AC-B2.1)=T2, confirm` retiers a matrix row before it locks. On accept, the final values are written into frontmatter literally — every flag as an explicit `<key>: <value>` line, plus `model_plan`; the locked `## Verification Matrix` section is written into the plan body at Step 3.
 
 **Mid-plan reconfiguration:** edit the frontmatter directly; the new value takes effect on the next hook read.
 
@@ -423,12 +562,12 @@ Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql
 
 | Step | Gate | Evidence |
 |---|---|---|
-| 0. Configure | Frontmatter has `canonical_sdlc_version: 9` + 5 discriminator + 2 opt-in flags + `model_plan`; user confirmed; TaskCreate list created | Confirmation line in `## SDLC State` |
+| 0. Configure | Frontmatter has `canonical_sdlc_version: 10` + 5 discriminator + 2 opt-in flags + `model_plan`; `## Verification Matrix` derived; user confirmed; TaskCreate list created | Confirmation line in `## SDLC State` |
 | 1. Ideate | Refined idea + "Not Doing" list; alternatives lens cites prior artifacts | Pointer to ideate body in spec |
 | 2. Spec | Every requirement has an acceptance criterion | Pointer to spec doc |
-| 3. Plan | No placeholders; `integration-branch:` declared; Step 4 expanded into slice tasks; approval | Pointer to plan body |
+| 3. Plan | No placeholders; `integration-branch:` declared; matrix locked; Step 4 expanded into slice tasks; approval | Pointer to plan body |
 | 4. Implement | Every slice has a test that was RED first; worktree created if `use_worktree: true` | Slice-list pointer; worktree fields when applicable |
-| 5. Verify (gate) | Tests/build pass (`pass == total`); browser modality proven (trace) or `n/a:`; bundle freshness proven or `n/a:`; drive-check proven or `n/a:`; stack-health proven or `n/a:` | `cmd:`/`pass:`/`total:`/`output:` **and** `devtools-trace:` or `n/a:` **and** `bundle-fresh:` proof or `n/a:` **and** `drive-check:` delta/suite or `n/a:` **and** `stack-health:` snapshot or `n/a:` |
+| 5. Verify (gate) | Tests/build pass (`pass == total`); every matrix row discharged at its tier or waived; independent auditor `CONFIRMED` on every non-waived row | `cmd:`/`pass:`/`total:`/`output:` **and** `auditor:` pointer **and** a discharged `## Verification Matrix` (v9-and-earlier plans keep their flat `devtools-trace:`/`bundle-fresh:`/`drive-check:`/`stack-health:` keys instead — see [Versioning](#versioning-and-backward-compat)) |
 | 6. Review (gate) | Every one of the 5 axes has a verdict; adversarial critic attached (mandatory in `autonomous`, `incident-response`, `design-refresh`) | Pointer to 5-axis review body + critic findings |
 | 7. Document decisions | Every significant decision has a record | `adr:` / `rca:` / `n/a:` |
 | 8. Integrate & close | Wave merged into the declared `integration-branch`; worktree removed; `.bionic/tmp/` wiped; all tasks completed; `cleaned:` stamped | `merge:`/`worktree-removed:` **and** `cleanup:`/`tmp-wiped:`/`tasks-completed:` or `cleanup: n/a` |
