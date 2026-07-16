@@ -1080,14 +1080,32 @@ read_config "local-command" do_install_local_command
 # ─── Skill Setup ────────────────────────────────────────────────────────────
 
 section "Skill setup"
+_excalidraw_dry_run() {
+  cd "$1" && uv run playwright install chromium --dry-run
+}
 _excalidraw_setup() {
-  cd ~/.claude/skills/excalidraw-diagram/references && uv sync --quiet && uv run playwright install chromium
+  cd "$1" && uv sync --quiet && uv run playwright install chromium
+}
+# Same guard→preflight→install shape as the chromium step, against the
+# python Playwright CLI (it resolves its own browser builds — the probe
+# must use *its* dry-run, not the npm one). `uv run` syncs the venv
+# implicitly, so a satisfied-skip has already done uv sync's work.
+do_setup_excalidraw_renderer() {
+  local refs="$1"
+  step_start "excalidraw-diagram renderer"
+  if _pw_satisfied _excalidraw_dry_run "$refs"; then
+    step_cached network "renderer browsers already installed"
+  elif ! _pw_lock_preflight; then
+    step_fail network "another Playwright install holds the browser-cache lock (often a second Claude session)" \
+      "finish or kill it, then re-run ./claude-bootstrap.sh"
+  else
+    step_stream network "cd ${refs} && uv sync && uv run playwright install chromium, then re-run ./claude-bootstrap.sh" \
+      _excalidraw_setup "$refs"
+  fi
 }
 if [ -d ~/.claude/skills/excalidraw-diagram/references ]; then
   # First install downloads the chromium headless shell (~90 MB) — stream it.
-  step_start "excalidraw-diagram renderer"
-  step_stream network "cd ~/.claude/skills/excalidraw-diagram/references && uv sync && uv run playwright install chromium, then re-run ./claude-bootstrap.sh" \
-    _excalidraw_setup
+  do_setup_excalidraw_renderer ~/.claude/skills/excalidraw-diagram/references
 else
   echo "  excalidraw-diagram — skipped (not installed)"
 fi
