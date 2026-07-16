@@ -53,7 +53,7 @@ chmod +x "${BIN}"/*
 
 # ---------- extract the REAL resilience block + installer functions ----------
 awk '/^# ─── Resilience ───/{f=1} f{print} /^# ─── Helpers ───/{if(f)exit}' "$BOOTSTRAP" > "$CODE"
-for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium; do
+for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer; do
   awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$CODE"
 done
 
@@ -204,6 +204,51 @@ do_install_playwright_chromium >/dev/null
 if logged "npx --yes playwright@latest install chromium"; then no "held lock must not attempt the real install"; else ok "held lock skips the real install attempt"; fi
 [ "${#INSTALL_FAILURES[@]}" -eq 1 ] && ok "held lock records exactly one failure" || no "held lock should record a failure (got ${#INSTALL_FAILURES[@]})"
 case "${INSTALL_FAILURES[0]:-}" in *"second Claude session"*) ok "failure names the second-session cause";; *) no "failure text should name the second-session cause";; esac
+rm -rf "${PLAYWRIGHT_CACHE}/__dirlock"
+cat > "${BIN}/pgrep" <<'EOF'
+#!/bin/bash
+exit 1
+EOF
+chmod +x "${BIN}/pgrep"
+
+# 10) excalidraw renderer wiring: same guard against the python playwright CLI.
+cat > "${BIN}/uv" <<EOF
+#!/bin/bash
+echo "uv \$*" >> "$LOG"
+case "\$*" in
+  *--dry-run*) cat "${PWSBX}/dryrun.txt" ;;
+esac
+exit 0
+EOF
+chmod +x "${BIN}/uv"
+REFS="${PWSBX}/refs"; mkdir -p "$REFS"
+
+# 10a) warm → dry-run probed, real install not invoked
+mkdir -p "${PWSBX}/loc-d"; touch "${PWSBX}/loc-d/INSTALLATION_COMPLETE"
+printf '  Install location:    %s\n' "${PWSBX}/loc-d" > "${PWSBX}/dryrun.txt"
+: > "$LOG"; INSTALL_FAILURES=()
+do_setup_excalidraw_renderer "$REFS" >/dev/null
+expect_log "uv run playwright install chromium --dry-run" "renderer probes via the python CLI's --dry-run"
+if logged "uv run playwright install chromium"; then no "warm cache must not run the renderer install"; else ok "warm cache skips the renderer install"; fi
+
+# 10b) cold → real setup runs (uv sync + install via _excalidraw_setup)
+rm "${PWSBX}/loc-d/INSTALLATION_COMPLETE"
+: > "$LOG"; INSTALL_FAILURES=()
+do_setup_excalidraw_renderer "$REFS" >/dev/null
+expect_log "uv sync --quiet" "cold cache syncs the venv"
+expect_log "uv run playwright install chromium" "cold cache runs the renderer install"
+
+# 10c) cold + held lock → fail fast, recorded
+mkdir -p "${PLAYWRIGHT_CACHE}/__dirlock"
+cat > "${BIN}/pgrep" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+chmod +x "${BIN}/pgrep"
+: > "$LOG"; INSTALL_FAILURES=()
+do_setup_excalidraw_renderer "$REFS" >/dev/null
+if logged "uv run playwright install chromium"; then no "held lock must not attempt the renderer install"; else ok "held lock skips the renderer install attempt"; fi
+[ "${#INSTALL_FAILURES[@]}" -eq 1 ] && ok "renderer held-lock failure recorded" || no "renderer held-lock failure missing"
 rm -rf "${PLAYWRIGHT_CACHE}/__dirlock"
 cat > "${BIN}/pgrep" <<'EOF'
 #!/bin/bash
