@@ -618,6 +618,14 @@ validate_ship_step() {
 # tier table (one row per AC), and one indented per-AC evidence block per
 # non-waived row — and fires at current: 5 (via the Step-5 validator) and as a
 # prefix check for current: 6..9 (via dispatch_modern's v10 arm).
+#
+# v10.1 (mid-discharge commits): at current: 5, rows with status
+# pending/blocked skip the per-tier key check, and the Step-5 `auditor:`
+# pointer is required only when no such row remains. The full contract —
+# per-tier keys + CONFIRMED on every non-waived row — bites on the 5→6
+# advance via the 6..9 prefix check. The status cell is enum-checked
+# (pending|blocked|discharged|waived) since the relaxation makes it
+# load-bearing.
 
 # Per-tier required evidence keys — MIRROR of the canonical table in
 # skills/canonical-sdlc/SKILL.md Step 5 ("Per-tier required evidence keys").
@@ -666,6 +674,10 @@ matrix_is_placeholder() {
 validate_matrix_v10() {
   local sh rows line ncols ac tier status ev aud block_txt key val
 
+  # v10.1: set while any row is still pending/blocked at current: 5. The
+  # Step-5 validator reads it to keep the `auditor:` pointer optional
+  # mid-walk (the auditor is the exit gate — it cannot have run yet).
+  UNDISCHARGED=0
   MATRIX=$(matrix_section)
   if [ -z "$MATRIX" ]; then
     block_matrix "the Verify gate requires a '## Verification Matrix' section (v10 contract)." \
@@ -722,11 +734,26 @@ validate_matrix_v10() {
       block_matrix "matrix row for '${ac}' has an invalid tier '${tier}' (want T0..T4)." \
         "set the tier cell to one of T0, T1, T2, T3, T4."
     fi
+    # status enum (v10.1) — the status cell is load-bearing (pending/blocked
+    # relax the Verify gate; waived relaxes everything), so a typo must
+    # block, not silently read as discharged-like.
+    case "$status" in
+      pending|blocked|discharged|waived) : ;;
+      *)
+        block_matrix "matrix row '${ac}' has an invalid status '${status:-empty}' (want pending|blocked|discharged|waived)." \
+          "set the status cell to one of: pending, blocked, discharged, waived." ;;
+    esac
     block_txt=$(matrix_block "$ac")
     # waived rows (evidence cell or the AC block carries a `waiver:` entry) are
     # exempt from the per-tier evidence requirement.
     if echo "$ev" | grep -qE 'waiver:' || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
       :
+    elif [ "$CURRENT" = "5" ] && { [ "$status" = "pending" ] || [ "$status" = "blocked" ]; }; then
+      # v10.1: a row still being discharged carries no evidence contract at
+      # the Verify gate itself — its per-tier keys bite on the 5→6 advance
+      # (the 6..9 prefix check), mirroring the CONFIRMED rule. This is what
+      # gives a mid-walk corrective commit an honest home at current: 5.
+      UNDISCHARGED=1
     else
       for key in $(keys_for_tier "$tier"); do
         if ! echo "$block_txt" | grep -qE "^[[:space:]]*${key}[[:space:]]*:"; then
@@ -776,16 +803,21 @@ validate_matrix_v10() {
 validate_verify_step_v10() {
   local aud
   validate_tests_block v10 5
-  if ! block_has auditor; then
-    block_matrix "the Verify gate requires 'auditor: <verdict summary + report pointer>' in the Step 5 block." \
-      "record the independent auditor's one-line verdict summary and report pointer as 'auditor: ...'."
-  fi
-  aud=$(block_get auditor)
-  if [ -z "$aud" ]; then
-    block_matrix "the Step 5 'auditor:' pointer is empty." \
-      "record the auditor's verdict summary and report pointer."
-  fi
   validate_matrix_v10
+  # v10.1: the auditor is the Step-5 exit gate — it cannot have run while
+  # rows are still pending/blocked, so the pointer is required only once
+  # every row is discharged or waived.
+  if [ "$UNDISCHARGED" -eq 0 ]; then
+    if ! block_has auditor; then
+      block_matrix "the Verify gate requires 'auditor: <verdict summary + report pointer>' in the Step 5 block." \
+        "record the independent auditor's one-line verdict summary and report pointer as 'auditor: ...'."
+    fi
+    aud=$(block_get auditor)
+    if [ -z "$aud" ]; then
+      block_matrix "the Step 5 'auditor:' pointer is empty." \
+        "record the auditor's verdict summary and report pointer."
+    fi
+  fi
 }
 
 # Per-version dispatch for the modern (gate-collapsed) shape table. v5 keeps

@@ -2397,6 +2397,107 @@ write_plan "$h17m" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_malformed")" > /
 expect_block "v10 17m malformed row (extra literal |) → block" \
   "$h17m" 'git commit -m "x"' "malformed"
 
+# --- v10.1: mid-discharge commits at the Verify gate ------------------------
+#
+# At current: 5 a row still being discharged (status pending/blocked) is
+# exempt from its per-tier evidence keys, and the Step-5 `auditor:` pointer
+# is required only once every row is discharged or waived — the full
+# contract bites on the 5→6 advance (the 6..9 prefix check), mirroring the
+# CONFIRMED rule. The status cell becomes load-bearing, so it gains an enum
+# check (pending|blocked|discharged|waived). Rationale: without this, a
+# corrective commit made mid-walk has no honest home — the observed
+# workaround was editing `current:` back to 4, which silently disables the
+# tests floor and misstates the step.
+
+# Step-5 block with the tests floor but NO auditor pointer — the shape of a
+# mid-walk corrective commit.
+v101_step5_noauditor="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5"
+
+# Mixed matrix mid-walk: AC-1 discharged with full T3 evidence, AC-2 still
+# pending with no AC block and an empty auditor cell.
+v101_matrix_pending="## Verification Matrix
+
+stack-health: before: process restarts 0; walk in progress
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
+| AC-2 | T3 | pending | see AC-2 |  |
+
+AC-1:
+  tier-run: https://app.example/panel — opened the panel
+  fresh: origin A rebuilt token-9f3a; origin B cdn purged
+  cold-client: fresh incognito profile, no SW cache
+  contact: clicked open — panel closed → open
+  readback: panel.visible === true via page eval"
+
+# Same shape with a blocked row (undrivable interaction, loud).
+v101_matrix_blocked="${v101_matrix_pending/| AC-2 | T3 | pending | see AC-2 |  |/| AC-2 | T3 | blocked | montage panel undrivable — see AC-2 |  |}"
+
+# Invalid status token in the status cell.
+v101_matrix_bad_status="${v101_matrix_pending/| AC-2 | T3 | pending | see AC-2 |  |/| AC-2 | T3 | done | see AC-2 |  |}"
+
+# Pending row that DOES carry a partial AC block with a live-tier n/a —
+# exempt at current: 5 (the whole per-tier check is deferred, caught when
+# the row flips to discharged or at the 6..9 prefix check).
+v101_matrix_pending_partial="$v101_matrix_pending
+AC-2:
+  contact: n/a: staging origin down"
+
+# 17n — pending row, no AC block, current: 5 → allow (mid-walk commit home).
+h17n1=$(make_home)
+write_plan "$h17n1" "$(v10_plan 5 "$v10_step5_base" "$v101_matrix_pending")" > /dev/null
+expect_allow "v10.1 17n pending row without AC block at current 5 → allow" \
+  "$h17n1" 'git commit -m "x"'
+
+# 17n — pending row AND no auditor pointer → allow (the auditor is the
+# Step-5 exit gate; it cannot have run while rows are pending).
+h17n2=$(make_home)
+write_plan "$h17n2" "$(v10_plan 5 "$v101_step5_noauditor" "$v101_matrix_pending")" > /dev/null
+expect_allow "v10.1 17n pending row + no auditor pointer at current 5 → allow" \
+  "$h17n2" 'git commit -m "x"'
+
+# 17n — blocked row, no auditor pointer → allow (same relaxation).
+h17n3=$(make_home)
+write_plan "$h17n3" "$(v10_plan 5 "$v101_step5_noauditor" "$v101_matrix_blocked")" > /dev/null
+expect_allow "v10.1 17n blocked row + no auditor pointer at current 5 → allow" \
+  "$h17n3" 'git commit -m "x"'
+
+# 17n — pending row with a partial block carrying a live-tier n/a → allow
+# at current 5 (deferred, not licensed: it blocks at discharge/advance).
+h17n4=$(make_home)
+write_plan "$h17n4" "$(v10_plan 5 "$v10_step5_base" "$v101_matrix_pending_partial")" > /dev/null
+expect_allow "v10.1 17n pending row with partial block (contact: n/a) at current 5 → allow" \
+  "$h17n4" 'git commit -m "x"'
+
+# 17o — fully discharged matrix + missing auditor pointer → still block
+# (17j1 pins the same shape; this pins it against the v10.1 relaxation).
+h17o1=$(make_home)
+write_plan "$h17o1" "$(v10_plan 5 "$v101_step5_noauditor" "$v10_matrix_complete")" > /dev/null
+expect_block "v10.1 17o fully discharged matrix + no auditor pointer → block" \
+  "$h17o1" 'git commit -m "x"' "auditor"
+
+# 17p — invalid status token → block, names the row and the enum.
+h17p1=$(make_home)
+write_plan "$h17p1" "$(v10_plan 5 "$v10_step5_base" "$v101_matrix_bad_status")" > /dev/null
+expect_block "v10.1 17p invalid status 'done' at current 5 → block (enum)" \
+  "$h17p1" 'git commit -m "x"' "invalid status"
+
+h17p2=$(make_home)
+write_plan "$h17p2" "$(v10_plan 6 "$v10_step6_body" "$v101_matrix_bad_status")" > /dev/null
+expect_block "v10.1 17p invalid status 'done' at current 6 → block (enum)" \
+  "$h17p2" 'git commit -m "x"' "invalid status"
+
+# 17q — the relaxation is 5-only: a pending row at current: 6 blocks (its
+# per-tier keys are demanded by the prefix check).
+h17q=$(make_home)
+write_plan "$h17q" "$(v10_plan 6 "$v10_step6_body" "$v101_matrix_pending")" > /dev/null
+expect_block "v10.1 17q pending row at current 6 → block (relaxation is 5-only)" \
+  "$h17q" 'git commit -m "x"' "AC-2"
+
 # ============================================================
 # Summary
 # ============================================================
