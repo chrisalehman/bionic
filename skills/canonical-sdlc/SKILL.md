@@ -42,9 +42,7 @@ loading: deferred
 
 This skill constrains how large-scale development efforts are executed. The SDLC steps exist because they lead to better outcomes — each step contributes a dimension of fidelity (scope, contract, plan, proof, review, decision record, release discipline) that no other step supplies. Without this skill, Claude truncates the lifecycle on any given effort: individual steps feel skippable in isolation, but the compounding loss of fidelity is invisible mid-effort and surfaces as rework, lost decisions, and features that look complete but aren't production-grade.
 
-**Core principle: NO STEP SKIPPED WITHOUT A DECLARED FAST-PATH. NO COMPLETION WITHOUT EVIDENCE FROM EVERY APPLICABLE STEP.**
-
-Violating the letter of this process is violating the spirit of this process.
+**Core principle: NO STEP SKIPPED WITHOUT A DECLARED FAST-PATH. NO COMPLETION WITHOUT EVIDENCE FROM EVERY APPLICABLE STEP.** (formalized below as The Iron Law).
 
 **Layer:** Governance (process constraint). Loads when a large-scale effort begins or when picking the skill for the current step.
 
@@ -55,35 +53,31 @@ Violating the letter of this process is violating the spirit of this process.
 
 On overlap, route by kind, not by plugin. On ties, prefer `superpowers:`.
 
-**Tooling principle — CLI-first.** Prefer CLIs over MCP servers. An MCP server is an always-on context tax (its tool schemas load every session); a CLI is pay-per-call (zero cost until invoked). Default to the CLI for any capability a CLI covers; reserve an MCP server only for capabilities no CLI exposes, or for rare deep-inspection calls where the richer interface outweighs the context cost. In this lifecycle the only MCP-coupled work is the **browser modality of the Verify gate (Step 5)**: browser *driving* goes through `playwright-cli` (the `browser-verify` skill), and the chrome-devtools MCP is reserved for deep inspection (Lighthouse, performance-trace analysis, heap/CPU profiling, network throttling) that the CLI cannot do.
+**Tooling principle — CLI-first.** Prefer CLIs over MCP servers. An MCP server is an always-on context tax (its tool schemas load every session); a CLI is pay-per-call (zero cost until invoked). Default to the CLI for any capability a CLI covers; reserve an MCP server only for capabilities no CLI exposes, or for rare deep-inspection calls where the richer interface outweighs the context cost. In this lifecycle the only MCP-coupled work is the **browser tiers (T2/T3) of the Verify gate (Step 5)**: browser *driving* goes through `playwright-cli` (the `browser-verify` skill), and the chrome-devtools MCP is reserved for deep inspection (Lighthouse, performance-trace analysis, heap/CPU profiling, network throttling) that the CLI cannot do.
 
-## Verification model (gate → modality → tool)
+## Verification model (gate → contract → tier → tool)
 
-Verification in this lifecycle is structured at three levels. Conflating them is what produces redundant or skipped checks.
+Verification in this lifecycle is structured at four levels. Conflating them is what produces redundant or skipped checks.
 
 - **Gate** = the principle being satisfied. Two gates: **Verify** ("does it work?", Step 5) and **Review** ("is it well-made?", Step 6).
-- **Modality** = a kind of evidence (under Verify) or a stance (under Review), each present-or-`n/a` per wave.
-  - *Verify modalities:* automated tests/build (**always**); real-browser behavior (**when UI/user-visible**); performance + accessibility (**when flagged**). The live walk is guarded by three universal proofs, one per failure axis: **bundle freshness** (artifact integrity — the serve reflects the working tree), the **drive-check** (input contact — one trusted interaction provably changed app state, read back semantically), and **stack-health** (runtime integrity — the serving stack did not crash-restart mid-walk) — live observations without them are not evidence.
-  - *Review stances:* structured 5-axis self-review (**always**); adversarial critic (**mandatory in `autonomous`, `incident-response`, `design-refresh`**; an **INDEPENDENT** agent — never self-graded).
-- **Tool** = the instrument for a modality, expressed as default → escalation. Browser modality: `playwright-cli` (default, via `browser-verify`) → escalate to the chrome-devtools MCP (`agent-skills:browser-testing-with-devtools`) **ONLY** for deep inspection the CLI can't do (Lighthouse, perf-trace analysis, heap/CPU profiling, network throttling).
+- **Contract** = the **Verification Matrix** — one row per acceptance criterion, derived at Step 0, locked at Step 3 approval (§Step 0). The Verify gate discharges the matrix row-by-row; nothing is verified "in general," only against a pre-registered row.
+- **Tier** = *how hard the evidence tries to lie*, from browser-verify's **T0–T4 ladder** (T0 static → T1 unit → T2 hermetic → T3 live agent-drive → T4 human walk). browser-verify is the canonical home of the ladder and its "the lie each tier kills" framing — reference it, do not restate it. Each matrix row carries a tier; the **Tier-Discharge Rule** (Step 5) governs how the row is discharged.
+- **Tool** = the instrument for a tier, default → escalation. Browser tiers (T2/T3): `playwright-cli` (default, via `browser-verify`) → escalate to the chrome-devtools MCP (`agent-skills:browser-testing-with-devtools`) **ONLY** for deep inspection the CLI can't do (Lighthouse, perf-trace analysis, heap/CPU profiling, network throttling).
 
-**Why the walk must be proxy-free.** Every verification tier below the live walk tests a proxy, and each proxy reports PASS at its own blind spot — silently: **input** (ref/snapshot-driven interaction works off the accessibility tree; a bare canvas typically exposes nothing to the a11y tree, so a ref-walk over a gesture surface no-ops and "completes" green), **data** (mock fixtures structurally cannot reach bugs that only manifest on real data shapes), **readback** (pixels cannot distinguish correct from broken — a screenshot of a degenerate frame satisfies "something rendered"). The walk is the only tier that can be proxy-free on all three axes; Step 5's discipline forces it to be. Mock-green + real-red is not a contradiction — it is a locator: the bug lives in exactly the layer the mock elides.
+Review is unchanged: structured 5-axis self-review (**always**) plus an **INDEPENDENT** adversarial critic (**mandatory in `autonomous`, `incident-response`, `design-refresh`** — never self-graded). The Verify-gate **auditor** and the Review-gate **critic** are distinct: the auditor falsifies the *evidence*, the critic falsifies the *code* (see Steps 5–6).
 
-**Redundancy-killing rule (Verify gate).** A modality is proven ONCE, by whatever produced it. If the automated suite already drives a real browser across all targets, the browser modality is **satisfied by that run** — with axis-qualified credit: cite the *named* test(s), and credit counts only if the cited test itself makes real contact (real input on the actual surface + a semantic assertion of app state, not pixels). Harvest screenshots + a console/network health assertion; do NOT run a second interactive drive. A suite green on mock data does not discharge a real-data-behavior requirement (see closure floor). A separate interactive drive fires only when (a) the suite doesn't exercise a real browser, or (b) the check is perceptual/exploratory and can't be reduced to an assertion (`design-refresh`).
-
-**End-to-end closure floor.** The user-input → new-code trace (file:line per hop) is a requirement of the Verify gate's browser modality, and **also** remains in the Review gate's architecture axis. A wave whose stated value involves user-visible behavior change cannot satisfy Verify with `n/a: substrate-only` without explicit justification in the wave's stated value. A requirement whose stated value is real-data behavior cannot be discharged by mock-fixture coverage, however green — it needs a real-data observation (or real-data-shaped fixtures).
+**Why lower tiers are proxies (the locator model).** Every tier below the live walk tests a proxy, and each reports PASS at its own blind spot: unit tests pass on mocked seams; hermetic tests pass on fixtures that may not match the real data shape; a ref-walk over a bare canvas drives nothing yet "completes"; a screenshot of a degenerate frame satisfies "something rendered." A higher tier exists precisely to kill the lie the tier below cannot see. Mock-green + real-red is not a contradiction but a **locator** — the bug lives in exactly the layer the proxy elides. The matrix pins each AC to the tier that can actually catch its failure, so no AC is discharged by a proxy that structurally cannot reach its bug.
 
 ### Decomposition unit per step
 
 The *slice* (atomic RED→GREEN commit) stays **exclusive to Step 4 Implement**. Other fanned-out steps decompose by their own unit:
-- **Step 5 Verify** decomposes by **modality × case** (operating over Step 4's slices).
+- **Step 5 Verify** decomposes by **matrix row** — one unit per acceptance criterion (`5/<AC-id>`), operating over Step 4's slices.
 - **Step 6 Review** decomposes by **axis × stance** (shard by subsystem on large diffs).
 - **Step 8 Integrate & close** is **atomic** — a single task.
 
-Generalize the `<step>/<unit>:` task-naming so any fanned-out step labels its units: `4/<slice>`, `5/<modality-or-case>`, `6/<axis-or-stance>`. Step 8 stays one task. See §Task Tracking.
+Generalize the `<step>/<unit>:` task-naming so any fanned-out step labels its units: `4/<slice>`, `5/<AC-id>`, `6/<axis-or-stance>`. Step 8 stays one task. See §Task Tracking.
 
-**REQUIRED SUB-SKILLS** (declared in `needs`):
-- Operational and technique skills listed in the frontmatter. Load each only when the step that invokes it is active.
+**REQUIRED SUB-SKILLS.** The `needs`-declared skills load only when the step that invokes them is active.
 
 ## Load-time Announcement
 
@@ -156,19 +150,12 @@ NO COMPLETION WITHOUT EVIDENCE FROM EVERY APPLICABLE STEP.
 
 ## Parallel by Default
 
-Every step in canonical-sdlc looks for parallelizable work. If 2+ subtasks have no
-data dependency, dispatch subagents in one Agent call batch. Reserve single-thread
-execution for genuinely sequential work or when shared-state coordination cost
-exceeds parallel speedup.
-
-Concretely:
-- Step 1 ideate: parallel-dispatch lens exploration (multiple Explore agents)
-- Step 2 spec: surface_type specialist + user-experience critic in parallel
-- Step 3 plan: research alternatives in parallel forks; converge in main thread
-- Step 4 implement: if slices are independent, parallel implementer agents
-- Step 5 verify: parallel by modality × case (the modalities share no state)
-- Step 6 review: 5-axis self-review in parallel, plus the adversarial critic(s) — multiple critic framings dispatch in parallel
-- Step 7 document: ADR draft + RCA draft (if applicable) in parallel
+Every step looks for parallelizable work. If 2+ subtasks have no data dependency,
+dispatch subagents in one Agent call batch. Concretely: Step 1 parallel lens
+exploration; Step 2 surface specialist + UX critic; Step 3 alternatives in parallel
+forks; Step 4 independent slices as parallel implementers; Step 5 parallel by matrix
+row (rows share no state); Step 6 the 5 axes plus critic framings in parallel;
+Step 7 ADR + RCA drafts.
 
 The default is parallel. Justify sequential. Parallel applies to **independent, stateless** work;
 when slices share state (the one local DB, `supabase db reset`, count-based assertions), dispatch
@@ -177,11 +164,12 @@ when slices share state (the one local DB, `supabase db reset`, count-based asse
 
 ## Model & Token Strategy
 
-Pin the orchestrator on one strong model for the whole wave; reach the cheaper tiers **only
-through subagent dispatch**. Switching the *main* model mid-wave invalidates the prompt cache
-(and a skill cannot enforce a main-model switch anyway) — so the main model never changes; the
-tiering lives in *who you dispatch to*, not in re-configuring yourself. This is the operational
-form of "guard your context — offload to subagents."
+Three objectives, in priority order, govern every dispatch decision: (1) **the orchestrator stays free** — the main thread does coordination and decisions only, heavy lifting goes to subagents, which is what lets the developer steer in real time; (2) **maximize wave/session duration** — main-context growth is the scarce resource, so subagents return summaries, never payloads; (3) **token economy serves 1 and 2** — cheaper tiers are reached **only through subagent dispatch**, a means to those goals, not an end.
+
+Pin the orchestrator on one strong model for the whole wave. Switching the *main* model mid-wave
+invalidates the prompt cache (and a skill cannot enforce a main-model switch anyway) — so the main
+model never changes; the tiering lives in *who you dispatch to*, not in re-configuring yourself.
+This is the operational form of "guard your context — offload to subagents."
 
 **Aliases, never pinned versions.** Subagent dispatch uses model family aliases — `model: opus`,
 `model: sonnet` — which resolve to the top model in that family at dispatch time. The skill never
@@ -322,11 +310,7 @@ Mode declaration is reviewable. A feature disguised as a different mode to skip 
 
 ### `autonomous` mode in particular (the default)
 
-This is the default because Bionic philosophy is "operate autonomously." The mode assumes no human is watching Steps 4–9 in real time, and tightens evidence discipline accordingly:
-
-- **Step 6 Review's adversarial critic is mandatory.**
-- **Per-step checkpoint commits** (the commit rhythm).
-- **Expanded stop-and-wake list.**
+This is the default because Bionic philosophy is "operate autonomously." The mode assumes no human is watching Steps 4–9 in real time, and tightens evidence discipline accordingly: the Step 6 adversarial critic becomes **mandatory**, per-step checkpoint commits fire (the commit rhythm), and the stop-and-wake list expands (see the Mode Selector row).
 
 **Autonomous does NOT mean "skip Step 1 Q&A."** The autonomous span is **Steps 4–9**. The user-engagement sequence is:
 
@@ -408,14 +392,7 @@ This protocol is load-bearing for every autonomous wave. It is not optional.
 | 8. Integrate & close | `superpowers:finishing-a-development-branch` (merge to declared integration branch) + `canonical-sdlc` (cleanup) | — |
 | 9. Ship + Monitor + Close gap | `agent-skills:shipping-and-launch` (deploy → monitor through ≥1 cycle → close monitoring gap) | — |
 
-**RCA required shape** (`incidents/NNNN-<slug>/rca.md`):
-- **Summary** — one paragraph: what happened, impact, duration.
-- **Timeline** — detection → mitigation → fix deployed, with timestamps.
-- **Root cause** — the single underlying technical cause, stated plainly.
-- **Contributing factors** — conditions that turned the root cause into an incident.
-- **The fix** — what was changed, link to commit(s).
-- **Prevention** — concrete measures. Each measure must link to a commit or ticket.
-- **Monitoring gap analysis** — either "monitoring caught this at <timestamp>, no gap" with link, OR a description of the gap and a link to the commit that closed it.
+**RCA required shape** (`incidents/NNNN-<slug>/rca.md`): summary, timeline, root cause, contributing factors, the fix, prevention (each measure links a commit/ticket), and monitoring-gap analysis. Full section-by-section shape and rules: see the canonical-sdlc README (`## RCA shape`).
 
 **Incident-specific stop-and-wake:** halt if the fix might mask a deeper issue, root cause is not yet established, or blast radius is larger than scoped.
 
@@ -436,16 +413,7 @@ This protocol is load-bearing for every autonomous wave. It is not optional.
 | 8. Integrate & close | `superpowers:finishing-a-development-branch` + `canonical-sdlc` (cleanup) | — |
 | 9. Ship | `agent-skills:shipping-and-launch` | **`extract`** (if reusable patterns) |
 
-**Step 4 loop structure:**
-
-```
-Step 4 (Implement) loop:
-  (a) Build    → /impeccable craft
-                 (skips shape; loads references from brief)
-  (b) Polish   → polish + harden + normalize
-  (c) Critique → critique (scored eval)
-  (d) Iterate  → If critique flags issues, classify and loop.
-```
+**Step 4 loop structure:** (a) build → `/impeccable craft` (skips shape; loads references from the brief); (b) polish + harden + normalize; (c) critique (scored eval); (d) iterate — if critique flags issues, classify and loop.
 
 **Step 4 loop exit gate:**
 - Critique's Nielsen heuristic scores ≥ 3/4 on all 10 heuristics.
@@ -502,8 +470,6 @@ Every user-facing decision point (Step 1 Q&A, Step 3 approval, every Wake Note, 
 - *medium* — wave-scoped; reversible with rework.
 - *momentous* — cross-wave; sets a precedent; reversal is expensive.
 
-This replaces the prior `narrative_verbose` tier. Verbose narrative was never the solution; framing was.
-
 ## Ephemeral Workspace (`.bionic/tmp/`)
 
 All interim files the skill writes for itself live in `.bionic/tmp/` (gitignored):
@@ -547,11 +513,11 @@ Each step has: **goal** · **action** · **completion gate** · **evidence artif
 
 ### Step 0 — Configure (entry-gate confirmation phase)
 
-Mandatory for new plans (`canonical_sdlc_version: 9`, current). `3`/`4`/`5`/`6`/`7`/`8` are prior-but-enforced (v3 requires the 5 + 2 flag set; v4 added `model_plan`, carried unchanged by v5, v6, v7, v8, and v9); `1`/`2` are grandfathered (no flag enforcement).
+Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are prior-but-enforced (v3 requires the 5 + 2 flag set; v4 added `model_plan`, carried unchanged through v9; v10 adds the Verification Matrix); `1`/`2` are grandfathered (no flag enforcement).
 
-**Goal:** Set every plan-shaping flag in plan frontmatter deliberately, with explicit user confirmation.
+**Goal:** Set every plan-shaping flag in plan frontmatter deliberately, with explicit user confirmation, and derive the Verification Matrix the wave will discharge.
 
-**Action:** Four sub-steps:
+**Action:** Six sub-steps:
 
 1. **Pre-flight environment check.**
    - **(a) Bionic root.** Check `<project>/.bionic/` exists. If absent, ask to create.
@@ -571,9 +537,41 @@ Mandatory for new plans (`canonical_sdlc_version: 9`, current). `3`/`4`/`5`/`6`/
    | `cleanup_on_finish` | Default `true`. |
    | `use_worktree` | Default `false`. Set true on explicit user override or when user says "isolate". |
    | `integration_branch` | Wave under an existing epic → copy from the epic plan's `integration-branch:`. Standalone → current git branch if it is a mainline (`main`/`master`/`develop`); otherwise default `main`. `incident-response` → `main` or `hotfix/<id>`. If genuinely undeterminable, print the line with value `unknown` — never drop it. |
-   | `model_plan` | Derived from `multi_agent` and the **detected session model** (read it from your own system prompt; see §Model & Token Strategy). `true` → `orchestrator=<detected, e.g. fable-5-high or opus-4.8-xhigh>; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`. `false` → `main=<detected>` (dial-down offered). If the session model is below the Opus tier, warn and recommend switching via `/model` before the wave starts. Always surfaced for explicit confirmation; written to frontmatter and **hook-enforced for `canonical_sdlc_version: 4` and later** autonomous plans. |
+   | `model_plan` | Derived from `multi_agent` and the **detected session model** (see §Model & Token Strategy). `true` → `orchestrator=<detected>; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`. `false` → `main=<detected>` (dial-down offered). Surfaced for confirmation; **hook-enforced for v4+** autonomous plans. |
 
-3. **Present the confirmation display — in full, always.** The display below is a mandatory, untruncatable artifact: every section, every flag, every line, every inference rationale, rendered as one block in the conversation. Never elide, summarize, sample ("key flags: …"), or defer any portion of it — an abbreviated display invalidates the confirmation, because the user is approving exactly what they can see. If a value is unknown, print the line with the value marked `unknown` rather than dropping the line. The `integration-branch:` line is load-bearing — Step 8 merges every wave into it; a display missing this line is an invalid confirmation, exactly like a missing flag.
+3. **Derive the Verification Matrix.** One row per acceptance criterion (from the Step 2 spec; a wave planned before its spec is final reconciles rows against the spec at Step 2). Each row gets a tier from browser-verify's T0–T4 ladder by these **inference defaults**:
+   - user-visible behavior change → **T3**;
+   - engine/rendering-divergent behavior → **T2 (both engines)** for the divergence AND **T3** for the user-visible AC;
+   - pure substrate/internal, no runtime surface → **T1/T2** with a one-line justification;
+   - perceptual/design fidelity → **T3** (cold client), **T4** available;
+   - docs/ADR ACs → **T0/none**.
+
+   Store it as a top-level `## Verification Matrix` plan section (**not** inside `## SDLC State`), row schema `| AC | tier | status | evidence | auditor |`, status starting `pending`. **Grammar:** exactly five cells per row; **no literal `|` inside a cell** (a sheared row blocks loudly). Skeleton:
+
+   ```
+   ## Verification Matrix
+
+   stack-health: <before/after snapshot, no delta>   # or n/a: <reason> — once per walk session
+
+   | AC | tier | status | evidence | auditor |
+   |---|---|---|---|---|
+   | AC-1 | T3 | pending | see AC-1 | |
+   | AC-2 | T1 | pending | see AC-2 | |
+
+   AC-1:
+     tier-run: <declared real surface URL + the AC's own interaction>
+     fresh: <origin A: proof; origin B: proof — every origin in the AC's serving path>
+     cold-client: <fresh profile / incognito context — how it was made cold>
+     contact: <the AC's own interaction changed app state — observed delta>
+     readback: <the AC's semantic value via page-scope eval>
+   AC-2:
+     tier-run: <suite command>
+     readback: <asserted value / pass count>
+   ```
+
+   **T4 rows** are explicitly-scheduled human-walk rows, discharged by recorded user confirmation (§Step 5). **Lock semantics:** the matrix locks at Step 3 approval; after lock, tier *upgrades* are free, while *downgrades*, self-`n/a` on a live tier, and closure over a non-CONFIRMED row are only via the **Waiver Protocol** (§Step 5). Mid-wave new ACs go to `## Assumptions` as W+1 candidates — never into the locked matrix.
+
+4. **Present the confirmation display — in full, always.** The display below is a mandatory, untruncatable artifact: every section, every flag, every line, every inference rationale, **and every matrix row**, rendered as one block in the conversation. Never elide, summarize, sample ("key flags: …"), or defer any portion of it — an abbreviated display invalidates the confirmation, because the user is approving exactly what they can see. The matrix block is rendered IN FULL under the same rule — **even past 12 ACs, print every row** (a matrix is exactly what must not be sampled). If a value is unknown, print the line with the value marked `unknown` rather than dropping the line. The `integration-branch:` line is load-bearing — Step 8 merges every wave into it; a display missing this line is an invalid confirmation, exactly like a missing flag.
 
    ```
    ═══ Plan Configuration — confirm before Step 1 ═══
@@ -607,13 +605,19 @@ Mandatory for new plans (`canonical_sdlc_version: 9`, current). `3`/`4`/`5`/`6`/
      # multi_agent=false → single-thread: "main: <detected>" (dial-down offered)
      # Fable orchestrator → forks are Fable at ~2× Opus: fork bar rises; prefer fresh model:opus
 
+   Verification Matrix:            [locked at Step 3 approval — every row shown, never sampled]
+     stack-health: <once-per-walk-session snapshot, or n/a: reason>
+     | AC   | tier | status  | evidence | auditor |
+     | AC-1 | T3   | pending | see AC-1 |         |   [inferred: user-visible behavior → T3]
+     | AC-2 | T1   | pending | see AC-2 |         |   [inferred: pure logic → T1]
+
    Reply "confirm" to accept, or specify overrides:
-     e.g. "set use_worktree=true, set exec-standard=opus, then confirm"
+     e.g. "set use_worktree=true, set exec-standard=opus, set verify(AC-2)=T2, then confirm"
    ```
 
-4. **Block until explicit confirmation.** No timeout, no implicit acceptance.
+5. **Block until explicit confirmation.** No timeout, no implicit acceptance.
 
-5. **Task-list creation is the immediate next action after approval.** The instant confirmation arrives — before any Step 1 work — run this fixed sequence:
+6. **Task-list creation is the immediate next action after approval.** The instant confirmation arrives — before any Step 1 work — run this fixed sequence:
    1. **Announce it:** "Step 0 confirmed — creating the task list."
    2. **Create the full TaskCreate list:** tasks `0:`, `1:`, ..., `9:`, one per planned step. Mark `0:` `completed` immediately.
    3. **Then transition to Step 1** (idea-refine).
@@ -626,23 +630,21 @@ Mandatory for new plans (`canonical_sdlc_version: 9`, current). `3`/`4`/`5`/`6`/
 reply        := overrides? "confirm"
 overrides    := override ("," override)* ","?
 override     := "set" flag "=" value
+              | "set" "verify" "(" AC-id ")" "=" tier
               | "change" flag "to" value
 ```
 
-Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`; `set integration-branch=develop, confirm`. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set exec-standard=opus, confirm` (route standard slices to opus too — equivalent to disabling complexity routing); `set exec-complex=sonnet, confirm` (accepted but discouraged; warn before applying); `set execution=opus-only, confirm` (shorthand for `exec-standard=opus`); `set main_model=sonnet, confirm` (multi_agent=false dial-down).
+Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`; `set integration-branch=develop, confirm`. **Matrix tier override:** `set verify(AC-B2.1)=T2, confirm` retiers a matrix row before lock. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set exec-standard=opus, confirm` (route standard slices to opus too — equivalent to disabling complexity routing); `set exec-complex=sonnet, confirm` (accepted but discouraged; warn before applying); `set execution=opus-only, confirm` (shorthand for `exec-standard=opus`); `set main_model=sonnet, confirm` (multi_agent=false dial-down).
 
-On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 9` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`). The confirmed `integration-branch` is carried forward: when the plan file is written at Step 3, its `## SDLC State` section opens with the Step-0-confirmed `integration-branch: <name>` line. For v4 and later autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2).
+On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 10` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`). The confirmed `integration-branch` and the derived `## Verification Matrix` are carried forward: when the plan file is written at Step 3, its `## SDLC State` section opens with the Step-0-confirmed `integration-branch: <name>` line, and the plan body carries the locked `## Verification Matrix` section. For v4 and later autonomous plans the governing-skill hook **requires** `model_plan`; for v10 it additionally requires the `## Verification Matrix` section at `sdlc-step ≥ 3` — a missing value blocks the write (exit 2).
 
-**Two-layer enforcement.**
-
-- **Layer 1 — Soft (this skill).** SKILL.md mandates Step 0. Do not proceed past Step 0 without explicit user confirmation.
-- **Layer 2 — Hard (`canonical-sdlc-governing-skill.sh`).** Runs on `PreToolUse|Write,Edit` of any canonical-sdlc plan/spec/adr file. For `canonical_sdlc_version: 4` or later + `mode: autonomous`, requires all 5 discriminator flags + 2 opt-in flags + `model_plan`; for `canonical_sdlc_version: 3` it requires the 5 + 2 set only (no `model_plan`). Missing any → exit 2.
+**Two-layer enforcement.** Layer 1 (soft): SKILL.md mandates Step 0 — do not proceed without explicit user confirmation. Layer 2 (hard, `canonical-sdlc-governing-skill.sh`, on `PreToolUse|Write,Edit`): for v4+ autonomous plans, a missing flag / `model_plan` / (v10) matrix section → exit 2.
 
 **Mid-plan reconfiguration.** Edit plan frontmatter directly; the new value takes effect immediately on next hook read.
 
-**Legacy plan handling.** Plans with `canonical_sdlc_version: 1` or `2` are grandfathered — flag enforcement skipped. `canonical_sdlc_version: 3` plans remain enforced under the prior 5 + 2 contract (no `model_plan`); `4` and later require `model_plan`. The hooks treat v3/v4 evidence under the v3 shape table; v5 uses its own; v6 uses its own (v5 minus the external-review step); v7 uses its own (v6 plus the universal Step-5 `bundle-fresh:` key); v8 uses its own (v7 plus the universal Step-5 `drive-check:` key); v9 uses its own (v8 plus the universal Step-5 `stack-health:` key) — see §Verification tier. DO NOT retrofit the `bundle-fresh:` requirement into v6 or earlier plans — in-flight plans would start blocking mid-wave. DO NOT retrofit the `drive-check:` requirement into v7 or earlier plans — in-flight plans would start blocking mid-wave. DO NOT retrofit the `stack-health:` requirement into v8 or earlier plans — in-flight plans would start blocking mid-wave.
+**Legacy plan handling.** `canonical_sdlc_version: 1`/`2` are grandfathered (no flag enforcement); `3`–`9` stay enforced under their own shape tables (§Versioning). **DO NOT retrofit a newer version's requirements into an older plan** — an in-flight plan would start blocking mid-wave. This covers every universal-key addition (v7 `bundle-fresh:`, v8 `drive-check:`, v9 `stack-health:`) **and the v10 Verification Matrix**: never add a matrix to a v9-or-earlier plan.
 
-**Gate:** Plan frontmatter contains `canonical_sdlc_version: 9` plus all 5 discriminator flags, 2 opt-in flags, and `model_plan`. The confirmation display included the `integration-branch:` line. User reply ended with `confirm` or `confirmed`.
+**Gate:** Plan frontmatter contains `canonical_sdlc_version: 10` plus all 5 discriminator flags, 2 opt-in flags, and `model_plan`; the derived `## Verification Matrix` exists. The confirmation display included the `integration-branch:` line and every matrix row. User reply ended with `confirm` or `confirmed`.
 
 **Evidence:** A line in `## SDLC State`: `Step 0: configured at <ISO-timestamp> via <reply-summary>; model_plan=<confirmed tiers>; integration-branch=<name>`.
 
@@ -730,23 +732,60 @@ This is the "walk away" boundary. After the plan is complete, present a summary 
 
 ### Step 5 — Verify (gate: "does it work?") (`superpowers:verification-before-completion`)
 
-The Verify gate proves the change works, by modality (see §Verification model). Decompose by **modality × case**, operating over Step 4's slices.
+The Verify gate discharges the **Verification Matrix** (§Step 0) row by row. The unit of work is the **matrix row** — one per acceptance criterion (`5/<AC-id>`), operating over Step 4's slices. A row is *discharged* when its tier's evidence is recorded and the independent auditor CONFIRMS it; otherwise it stays `pending`, `blocked`, or `waived`.
 
-- **Goal:** Evidence before assertions, across every applicable modality.
-- **Tests/build modality (always):** run all applicable test suites and the build; paste output. `pass == total` required. This is the floor — no `n/a` for the tests/build modality.
-- **Browser modality (when UI/user-visible):** drive the browser via `playwright-cli` (the `browser-verify` skill), picking the input rung by surface: **ref-based driving** (`snapshot` → `click`/`fill`/`type`) for DOM surfaces the accessibility tree can address; **trusted coordinate primitives** (`mousemove`/`mousedown`/`mouseup`/`mousewheel`, keyboard `press`/`keydown`/`keyup` for chords, or `run-code` + `page.mouse` for compound gestures) for canvas/gesture surfaces — a bare canvas typically exposes nothing to the a11y tree, so a ref-walk over it drives nothing. Some canvas/WebGL engines may reject or ignore even trusted synthetic input — the drive-check arbitrates per-surface; never assume acceptance. Assert each key state semantically (`console` + `network` + a page-scope `eval` of the actual application value — screenshots are illustration, never sole proof). Golden path + at least one edge case (or `n/a: <reason>` for non-UI work). Escalate to `agent-skills:browser-testing-with-devtools` (chrome-devtools MCP) **only** for deep inspection the CLI can't do — Lighthouse, performance-trace analysis, heap/CPU profiling, network throttling.
-- **Bundle freshness (always — proof or `n/a`):** BEFORE any live observation is used as evidence, prove the served artifact reflects the working tree via the project's freshness tool, and record the tool's output line as `bundle-fresh: <proof>`; when the wave observes no long-running served artifact, record `bundle-fresh: n/a: <reason>` instead. Like `devtools-trace:`, the key is universal — "not applicable" is an explicit recorded decision, never a silent omission. This applies to ANY long-running serve observed live, not just UI bundles — a hot-reloading API dev server curled for evidence is exactly as suspect as a stale browser bundle. Long-running dev serves go stale silently — a stalled file watcher, a serve left up for days, or a failed rebuild all keep serving the last-good artifact while every external check (HTTP 200, page loads) looks healthy, producing false regressions and false greens. A typical freshness tool is a canary round-trip: write a unique token into a dev-only source file, poll the served artifact for it, restore the file — proving watcher-alive and whole-tree-current. The tool and its output format are project-specific; the proof is not. **Strong form:** the proof precedes EVERY live observation used as evidence, not just once per wave — the hook enforces the recorded artifact; the per-observation discipline is yours.
-- **Drive-check (always — proof or `n/a`):** BEFORE any browser-modality evidence counts, prove that one trusted interaction actually changed app state and read the delta back semantically — an interaction goes in, a page-scope `eval` reads a real application value that changed. Record it as `drive-check: <observed delta>`; when the automated suite earns axis-qualified credit, `drive-check: suite: <named test — what it asserts>`; when no browser modality applies, `drive-check: n/a: <reason>`. This is the cheap gate that catches every silent no-contact cause at once — unaddressable surfaces, rejected input, stale readiness, wrong gesture binding — regardless of which tool produced it. If no input rung makes contact, the walk cannot produce evidence: report that loudly; "the walk completed" is not "the walk verified."
-- **Stack-health (always — proof or `n/a`):** BEFORE any live observation is used as evidence, snapshot the serving stack's runtime-integrity indicators — process/container restart counts, crash/OOM last-state — then re-snapshot AFTER the walk. Record the no-delta result as `stack-health: <before/after snapshot, no delta>`; when the wave observes no long-running serve, `stack-health: n/a: <reason>`. **Any delta is a blocking finding — run it to ground before the evidence banks:** a crash-restart mid-walk can swallow the exact bug being probed while the app returns looking healthy, so the run that "passed" may have stepped over the fault entirely. The snapshot command is project-specific exactly as the freshness tool is (a process-supervisor status query, a container-orchestrator restart-count read — a tool *pattern*, never a named consumer tool); the hook validates presence + non-empty value/reason + the placeholder ban ONLY. Universal, not gated on `has_ui`. **Claim scope (hard rule):** stack-health catches *restart/crash-shaped* degradation — do not claim it catches all degradation, and never assert what the snapshot did not prove.
-- **The three runtime proof axes.** Bundle-fresh, drive-check, and stack-health form one family guarding the live walk, one proof per failure axis: **artifact integrity** (`bundle-fresh:` — the served artifact reflects the working tree), **input contact** (`drive-check:` — a trusted interaction provably changed app state), and **runtime integrity** (`stack-health:` — the serving stack did not crash-restart across the walk). Each is universal, each is proof-or-`n/a`, and "not applicable" is always an explicit recorded decision, never a silent omission.
-- **Redundancy-killing rule.** A modality is proven ONCE, by whatever produced it. If the automated suite already drove a real browser across all targets, the browser modality is **satisfied by that run** — with axis-qualified credit: cite the *named* test(s), and credit counts only if the cited test itself makes real contact (real input on the actual surface + a semantic assertion of app state, not pixels). Harvest screenshots + a console/network health assertion; do NOT run a second interactive drive. A suite green on mock data does not discharge a real-data-behavior requirement (see closure floor). A separate interactive drive fires only when (a) the suite doesn't exercise a real browser, or (b) the check is perceptual/exploratory and can't be reduced to an assertion (`design-refresh`).
-- **End-to-end closure floor:** for any wave whose stated value involves user-visible behavior change, the browser-modality evidence MUST include a user-input → new-code trace (file:line per hop). `n/a: substrate-only` is a red flag and requires explicit justification in the wave's stated value. A requirement whose stated value is real-data behavior cannot be discharged by mock-fixture coverage, however green — it needs a real-data observation (or real-data-shaped fixtures). (Also re-checked in Step 6's architecture axis.)
-- **Parallelization:** parallel by modality × case — the modalities share no state.
-- **Gate:** tests/build pass (`pass == total`, output pasted) AND browser modality proven (trace) or explicitly `n/a: <reason>` AND bundle freshness proven or explicitly `bundle-fresh: n/a: <reason>` AND drive-check proven (delta or suite-credit) or explicitly `drive-check: n/a: <reason>` AND stack-health proven (before/after snapshot, no delta) or explicitly `stack-health: n/a: <reason>`.
-- **Evidence:** `cmd:`, `pass:`, `total:`, `output:` for the tests/build modality; `devtools-trace: <path>` (a `playwright-cli` screenshot + `console`/`network` check written to `.bionic/tmp/`) OR `n/a: <reason>` for the browser modality; `bundle-fresh: <proof>` OR `bundle-fresh: n/a: <reason>` for the freshness of whatever serve was observed; `drive-check: <observed delta>` OR `drive-check: suite: <named test — what it asserts>` OR `drive-check: n/a: <reason>` for the contact proof; `stack-health: <before/after snapshot, no delta>` OR `stack-health: n/a: <reason>` for the serving stack's runtime integrity.
-- **Mode weight:**
-  - `design-refresh`: **heavily weighted**. Browser evidence per state + **`audit`** scored technical-quality report. The interactive drive is justified here (perceptual/exploratory).
-- **UI/UX substitution:** use `impeccable` in Step 4 and `agent-skills:frontend-ui-engineering` pre-verify.
+- **Goal:** Every matrix row discharged (or waived); evidence before assertions.
+- **Tests/build floor (always):** run all applicable suites and the build; record `cmd:`/`pass:`/`total:`/`output:` in the Step-5 block, `pass == total` required. This is the floor — no `n/a`. It lives in `## SDLC State` alongside the `auditor:` pointer; the per-row tier evidence lives in the `## Verification Matrix` section.
+
+**Per-tier required evidence keys** (THE canonical table — the hooks mirror it and comment-point here; change this table first, R27). Each non-waived row's `<AC-id>:` block under the matrix carries exactly these keys:
+
+| Tier | Required keys in the AC block |
+|---|---|
+| T0, T1 | `tier-run`, `readback` |
+| T2 | `tier-run`, `readback`, `fixture-fidelity` |
+| T3 | `tier-run`, `fresh`, `cold-client`, `contact`, `readback` |
+| T4 | `user-confirmed` |
+
+**The Tier-Discharge Rule.** Evidence at a lower tier never discharges a higher-tier row. Evidence at a higher tier discharges lower-tier rows for the same AC.
+
+This replaces the old suite-credit escape: a green suite (T1) can never stand in for a T3 row — a suite run cannot honestly produce a T3 row's `fresh`/`cold-client`/`contact` fields, so the hook blocks the row on the missing keys and the auditor targets any fabrication.
+
+**T3 validity — the five ways a live observation lies.** A T3 row's `fresh`/`cold-client`/`contact`/`readback` fields carry browser-verify's five T3 validity conditions: artifact per-origin freshness across the AC's serving path; a cold client; feature-scoped contact with the AC's own interaction (undrivable → the row is **blocked**, loud, never silently skipped); semantic readback via page-scope eval, never pixels; and the once-per-session runtime stack-health below. browser-verify is the canonical home — see it for the full conditions; do not restate them here.
+
+**stack-health — once per walk session.** The `## Verification Matrix` section opens with a `stack-health: <before/after snapshot, no delta>` line (or `n/a: <reason>` when no long-running serve is observed), bracketing the whole walk — same value contract as v9. Any restart/crash delta is a blocking finding until run to ground.
+
+**T4 discharge.** A T4 row is discharged by recorded user confirmation — `user-confirmed: <user> <date> <what was walked>`. Agents never self-confirm a T4 row.
+
+**False-green rule (structured).** On discovering any test that passed over broken code, the gate cannot close until (1) the finding is logged as a `false-green: <test — what it lied about>` entry in the matrix section AND (2) it carries a paired `rewritten: <commit/test ref>` proving the test now goes RED on the broken code. A logged-but-unfixed false-green is a blocking defect (hook-enforced).
+
+**Vocabulary rule.** Say "delivered/fixed/verified" only at the row's contracted tier. Below tier, the only honest phrasing is "implemented, verification pending."
+
+#### Auditor — the Step-5 exit gate
+
+Step 5 does not close until an **Independent Verification Auditor** has ruled on every row. The auditor is a **fresh, independent** exec-complex agent (`model: opus`+) — **never** the implementer, **never** a fork of the orchestrator (a fork inherits the very context whose evidence is under audit). Its dispatch carries this mandate **verbatim** (Subagent Dispatch Convention point 9):
+
+> Your job is to falsify this wave's verification evidence, not to review its code. You have the Verification Matrix, the per-row evidence, and repo access. For every row: (1) confirm the evidence was produced at the declared tier — a T3 row must cite the declared real surface, its per-origin freshness proofs, a cold client, and a feature-scoped semantic readback; (2) for T2 rows, demand the fixture-fidelity declaration and check the fixture can structurally reach the failure the AC guards; (3) re-execute at least one evidence command per tier used (cap 3 total) and compare outputs. Verdict per row: CONFIRMED / REFUTED / UNVERIFIABLE. "The evidence is plausible" is not a verdict. Agreement without re-execution is not acceptable output.
+
+**Bounds:** the auditor audits the *evidence*, not the wave — it does not re-verify the feature, re-run the whole suite, or review code. Re-execution is one command per tier used, capped at 3 total. One auditor, one pass. Verdicts are recorded in the matrix `auditor` column. Any **REFUTED** or **UNVERIFIABLE** row blocks Step-5 closure absent a waiver; the hook enforces CONFIRMED-or-waived on every non-waived row once `current > 5`. The auditor is **distinct from the Step 6 critic** — the auditor falsifies the *evidence*, the critic falsifies the *code*. Both are kept.
+
+#### Waiver Protocol
+
+Three moves are user decisions, never an agent's: a tier **downgrade**, an **`n/a` on a live tier (T3/T4)**, and **closing over a non-CONFIRMED row**. Each goes through the **User Decision Protocol** and is recorded in the row as `waiver: <user> <date> <one-line reason>` (in the evidence cell or the AC block). A waived row is exempt from its per-tier evidence and from the CONFIRMED requirement. **Agents never self-write `n/a` on a live-tier field** — that is a downgrade, which is a waiver, which is the user's call.
+
+**Evidence** (v10 form). The Step-5 block in `## SDLC State`:
+
+```
+Step 5:
+  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: <plan>#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md
+```
+
+plus the discharged `## Verification Matrix` section (stack-health line + per-AC tier blocks + `auditor` column). The full auditor report is ephemeral (`.bionic/tmp/`); the per-row verdicts persist in the matrix.
+
+**Mode weight.** `design-refresh`: **heavily weighted** — T3 browser evidence per state + an `audit` scored technical-quality report; use `impeccable` in Step 4 and `agent-skills:frontend-ui-engineering` pre-verify.
 
 ### Step 6 — Review (gate: "is it well-made?") (`agent-skills:code-review-and-quality`)
 
@@ -755,7 +794,7 @@ The Review gate proves the change is well-made, by stance (see §Verification mo
 **Stance 1 — structured 5-axis self-review (always).**
 - **Axes:** correctness, readability, architecture, security, performance. Every axis gets an explicit PASS / FLAG / FAIL verdict.
 - **Reviewer tier:** all review agents (both stances) dispatch at Tier 2 (fresh `model: opus`) regardless of which tier wrote the code — verification is never cheaper than authorship.
-- **Architecture-axis closure check:** for each new primitive/substrate added in this wave, trace user input → new code. If the chain breaks (no callsite reaches the new code), the substrate is dead and the architecture axis is FAIL.
+- **Architecture-axis closure check:** for each new primitive/substrate added in this wave, trace user input → new code; also confirm the Step-5 T3 readback reached the same code (see Step 5). If the chain breaks (no callsite reaches the new code), the substrate is dead and the architecture axis is FAIL.
 - **Parallelization:** all 5 axes run in parallel.
 - **Escalations:** security axis flags → `agent-skills:security-and-hardening`. Performance axis flags → `agent-skills:performance-optimization`.
 - **Mode substitution:** `design-refresh` — review the **5 code axes only**. Design quality was already evaluated in Step 4's critique loop.
@@ -763,6 +802,7 @@ The Review gate proves the change is well-made, by stance (see §Verification mo
 **Stance 2 — adversarial critic.**
 - **Mandatory in:** `autonomous`, `incident-response`, `design-refresh`. **Optional in:** `spike`. N/A in `epic-scope`.
 - **INDEPENDENCE is non-negotiable:** the critic must be an **independent agent** — never the agent that wrote the code, never a self-graded review.
+- **Distinct from the Step-5 auditor:** the critic falsifies the *code* (this diff, this design); the Step-5 auditor falsifies the *evidence* (did the matrix rows verify at their tiers). Both run; neither substitutes for the other.
 - **Goal:** Catch what self-review missed. Fresh context, red-team framing.
 - **Action:** Dispatch a fresh-context subagent with the plan, the diff, and the Stance 1 self-review notes. Prompt template:
 
@@ -830,12 +870,8 @@ Merges the wave onto the integration branch (the **finish** half) then wipes the
 
 ## Commit rhythm (cross-cutting)
 
-Committing is **not a numbered step** — it is a cross-cutting rhythm that fires per step, not at a position. Governed by `agent-skills:git-workflow-and-versioning`.
+Committing is **not a numbered step** — it is a cross-cutting rhythm that fires per step (~once per step), never a single deferred "commit step." Governed by `agent-skills:git-workflow-and-versioning`. The evidence-gate hook enforces it on every `git commit`, blocking (exit 2) if the current step's evidence is missing — the rhythm and the gate are one mechanism. **Update `## SDLC State` before staging** (both the `current: <N>` line and the current step's evidence line), and carry the "THINGS I DIDN'T TOUCH" summary in the commit body.
 
-- **Per-step checkpoint commits.** A checkpoint commit fires after each completed step (~once per step). The cadence is the rhythm; there is no single "commit step" that defers all staging to the end.
-- **Enforced by the evidence-gate hook on every `git commit`.** The hook locates the active plan, reads `## SDLC State`, and blocks the commit (exit 2) if the **current step's** evidence artifact is missing or unreadable. The rhythm and the gate are the same mechanism seen from two sides.
-- **Commit body carries the "THINGS I DIDN'T TOUCH" summary** (per `git-workflow-and-versioning`).
-- **Update `## SDLC State` before staging.** The `current: <N>` line and the current step's evidence line must both be in place before `git commit`, or the gate blocks it.
 - **Guardrail — no per-step `commit:` evidence field.** Do NOT add a `commit:` SHA to `## SDLC State`. The hook gates the current step's *existing* evidence on commit; a redundant `commit:` field would be self-referential and adds nothing. The commit SHA lives in git, not the evidence block.
 
 ## Constraints
@@ -860,19 +896,11 @@ sdlc-step: 3
 epic: epic-02-v2-product-pass
 wave: wave-01-checkout-refactor
 mode: autonomous
-canonical_sdlc_version: 9
+canonical_sdlc_version: 10
 ---
 ```
 
-For incident-response artifacts, use `incident: NNNN-<slug>` instead of `epic`/`wave`.
-
-Field definitions:
-- `governing-skill` — the skill declared after the step's heading (Step 1 → `agent-skills:idea-refine`; Step 3 → `superpowers:writing-plans`; Step 7 ADR → `agent-skills:documentation-and-adrs`; Step 7 RCA → `canonical-sdlc`; `continuation*.md` → `canonical-sdlc`). Mode overrides: `design-refresh` Step 1 → `shape` and Step 4 → `impeccable`.
-- `sdlc-step` — the step that produced this artifact. `0` for epic-scope artifacts. `10` for `continuation.md`.
-- `epic` — `epic-NN-<slug>` matching the directory.
-- `incident` — `NNNN-<slug>` for incident-response.
-- `wave` — wave identifier; omit for epic-level and continuation.
-- `mode` — canonical-sdlc mode at declaration time.
+For incident-response artifacts, use `incident: NNNN-<slug>` instead of `epic`/`wave`. Full field definitions live in the README frontmatter table; the two load-bearing specials are `governing-skill` — the skill declared after the producing step's heading (Step 1 → `agent-skills:idea-refine`; Step 3 → `superpowers:writing-plans`; Step 7 RCA → `canonical-sdlc`; `design-refresh` overrides Step 1 → `shape`, Step 4 → `impeccable`) — and `sdlc-step`, that step's number (`0` for epic-scope artifacts, `10` for `continuation.md`).
 
 ### Transition discipline
 
@@ -884,43 +912,30 @@ Then invoke `Skill` to load the governing skill.
 
 ## Evidence (two tiers)
 
-Evidence falls into two tiers. Each tier has different rules for when it's written, who consumes it, and whether the hook enforces shape.
-
-| Tier | Always present? | Controlled by | Enforced by |
-|---|---|---|---|
-| **Verification** | Yes — mandatory | (no flag) | `canonical-sdlc-evidence-gate.sh` (presence + shape on v3–v9 plans) |
-| **Handoff** | Only when plan spans sessions | (no flag — session-end trigger) | Skill prose + Stop-hook checkpoint |
-
-For decision-point prose to the user, see the **User Decision Protocol** section above — that replaces the prior narrative tier.
+Two evidence tiers: **Verification** (always mandatory; shape-checked by `canonical-sdlc-evidence-gate.sh` on v3–v10 plans) and **Handoff** (only when a plan spans sessions; skill prose + Stop-hook checkpoint). Decision-point prose to the user is the **User Decision Protocol** above, not a tier.
 
 ### Verification tier — mandatory, shape-checked
 
-Every step has an evidence artifact recorded under `Step N:` in `## SDLC State`. The evidence-gate hook enforces presence on every `git commit`.
+Every step has an evidence artifact recorded under `Step N:` in `## SDLC State`. The evidence-gate hook enforces presence on every `git commit`, plus a per-version **shape table** on the multi-field steps. `canonical_sdlc_version: 10` uses the **v10 table below**; versions `1`–`9` keep their own tables (the full version ladder — v3 through v9, each adding one universal Step-5 key — is documented in the README). **Never retrofit an older plan to a newer table.**
 
-The per-step **shape table** the hook enforces depends on the plan's version. `canonical_sdlc_version: 9` uses the **v9 table below** — v8 plus the universal Step-5 `stack-health:` key. `canonical_sdlc_version: 8` uses the prior **v8 table** — identical to v9 minus the `stack-health:` requirement (v7 plus the universal Step-5 `drive-check:` key). `canonical_sdlc_version: 7` uses the **v7 table** — identical to v8 minus the `drive-check:` requirement (v6 plus the universal Step-5 `bundle-fresh:` key). `canonical_sdlc_version: 6` uses the **v6 table** — identical to v7 minus the `bundle-fresh:` requirement. `canonical_sdlc_version: 5` uses the **v5 table** — v6 plus an `8 External review` step, shifting Integrate & close to 9 and Ship to 10. `canonical_sdlc_version: 3` and `4` share the older **v3 table** (v4 added `model_plan` but changed no per-step evidence shape). `1`/`2` use their original table.
-
-**v9 shape table:**
+**v10 shape table:**
 
 | Step | Required fields under `Step N:` | Notes |
 |------|---------------------------------|-------|
 | 0 | `prereqs: ok` | smoke |
 | 1, 2, 3 | pointer | presence-only |
 | 4 | pointer; also `worktree:`/`base-sha:`/`branch:` when `use_worktree: true` | presence-only |
-| 5 Verify | `cmd:`, `pass:`, `total:`, `output:` (pass==total) AND `devtools-trace: <path>` OR `n/a: <reason>` AND `bundle-fresh: <proof>` OR `bundle-fresh: n/a: <reason>` AND `drive-check: <observed delta>` OR `drive-check: suite: <named test — what it asserts>` OR `drive-check: n/a: <reason>` AND `stack-health: <before/after snapshot, no delta>` OR `stack-health: n/a: <reason>` | tests modality always; browser modality is trace or n/a; bundle freshness is proof or n/a-with-reason; drive-check is delta, suite-credit, or n/a-with-reason; stack-health is a no-delta snapshot or n/a-with-reason |
-| 6 Review | pointer to 5-axis body + critic findings | presence-only |
+| 5 Verify | `cmd:`/`pass:`/`total:`/`output:` (pass==total) AND a non-empty `auditor:` pointer AND a valid `## Verification Matrix` section (below) | tests floor + auditor pointer live in `## SDLC State`; per-row tier evidence lives in the matrix section |
+| 6 Review | pointer to 5-axis body + critic findings | matrix re-validated here as a prefix check — a REFUTED row blocks the commit |
 | 7 Document | `adr:` OR `rca:` OR `n/a:` | — |
 | 8 Integrate & close | `merge:`, `worktree-removed:` AND (`cleanup:`, `tmp-wiped:`, `tasks-completed:` OR `cleanup: n/a`) | — |
 | 9 Ship | `deploy:`, `verified-at:`, `monitor:` OR `n/a:` | n/a only when `deploy_target: none` |
 
-Pointer steps in v9: 1, 2, 3, 4, 6 — presence-only at the hook level.
+Pointer steps in v10: 1, 2, 3, 4 — presence-only. Step 6 is deliberately **not** a pointer step, so a post-Verify commit re-runs the matrix prefix check.
 
-The `bundle-fresh:` value is the pasted output line of the project's freshness tool (e.g. `bundle-fresh: FRESH — canary <token> round-tripped to <served-artifact> in 4.2s`). The hook validates presence and the placeholder ban, not the format — the format is project-specific by design.
+**`## Verification Matrix` validation** fires at `current: 5` (via the Verify gate) and `current: 6..9` (as a prefix check). The hook checks the `stack-health:` line, the tier table's grammar (T0–T4, five cells, no literal `|`), each non-waived row's per-tier keys (§Step 5) with the placeholder and live-tier-`n/a` bans, the `false-green:`/`rewritten:` pairing, and — once `current > 5` — a `CONFIRMED` auditor cell on every non-waived row. A `waiver:` entry (evidence cell or AC block) exempts its row.
 
-The `drive-check:` value is the observed state delta (e.g. `drive-check: drag moved app value 3 → 7 via eval readback`), the named qualifying suite test (`drive-check: suite: <named test — what it asserts>`), or `n/a: <reason>`. The hook validates presence and the placeholder ban, not the format.
-
-The `stack-health:` value is the pasted before/after snapshot of the serving stack's runtime-integrity indicators showing no change (e.g. `stack-health: restarts 0 → 0, no crash/OOM state change`), or `n/a: <reason>` when no long-running serve is observed. Like `bundle-fresh:`, the snapshot command and its output format are project-specific by design; the hook validates presence and the placeholder ban only. It catches restart/crash-shaped degradation — a crash-restart mid-walk that returns the app looking healthy — and nothing broader.
-
-**Block format.** Multi-field steps use YAML-style indented keys under `Step N:`:
+**Block format** (v10). The Step-5 block in `## SDLC State`:
 
 ```
 Step 5:
@@ -928,13 +943,12 @@ Step 5:
   pass: 332
   total: 332
   output: <docs-root>/plans/<slug>.plan.md#step-5
-  devtools-trace: .bionic/tmp/evidence-checkout.png
-  bundle-fresh: FRESH — canary token-9f3a round-tripped to dist/main.js in 4.2s
-  drive-check: drag moved app value 3 → 7 via eval readback
-  stack-health: restarts 0 → 0, no crash/OOM state change
+  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md
 ```
 
-**Backwards compatibility.** Plans with `canonical_sdlc_version: 1` or `2` use their original shape table. `canonical_sdlc_version: 3` and `4` share the same (v3) shape table. `canonical_sdlc_version: 5` uses its own (v5) shape table (with the `8 External review` step). `canonical_sdlc_version: 6` uses its own (v6) shape table (v7 minus the `bundle-fresh:` requirement). `canonical_sdlc_version: 7` uses its own (v7) shape table (v8 minus the `drive-check:` requirement). `canonical_sdlc_version: 8` uses its own (v8) shape table (v9 minus the `stack-health:` requirement). `canonical_sdlc_version: 9` uses the v9 shape table above.
+The discharged `## Verification Matrix` section lives elsewhere in the plan body — see §Step 0 for its skeleton.
+
+**Reopened-wave upgrade path (v9→v10).** The no-retrofit rule has one narrow exception: a *reopened* plan whose remaining steps are exactly 5–9 may bump v9→v10 by (1) changing `canonical_sdlc_version` to `10`, (2) adding a user-approved `## Verification Matrix` covering only the reopened ACs, and (3) leaving its Steps 0–4 evidence untouched under v9 rules. This is the only sanctioned mid-life version bump; a plan still executing Steps 0–4 stays on its original version.
 
 ### Handoff tier — multi-session contract
 
@@ -979,19 +993,7 @@ session-count: 2
 
 #### Triggers — when handoff is written
 
-Three trigger conditions:
-
-1. **Session end mid-plan.** `Stop` event with `sdlc-step: < 10`.
-2. **Context-compaction risk.** When utilization approaches the threshold (~90%).
-3. **Explicit user trigger** (e.g., a `/checkpoint` command).
-
-The skill **rewrites the section in place** each trigger. Never appends. Handoff is bounded.
-
-#### Persistence model
-
-**Session-scoped** (reset each session): `Decisions ratified this session`.
-
-**Cross-session** (persist; capped per-field): `Resume point`, `Tried and rejected`, `Discovered surprises`, `Open blockers`, `Uncommitted work`, `Resume protocol`.
+Three triggers: session end mid-plan (`Stop` with `sdlc-step: < 10`); context-compaction risk (~90% utilization); or explicit user trigger (`/checkpoint`). The skill **rewrites the section in place** each time — never appends; handoff is bounded. Persistence is marked inline in the template (`RESET each session` vs `PERSISTS`).
 
 #### When handoff is NOT written
 
@@ -1016,15 +1018,12 @@ Frontmatter: `governing-skill: canonical-sdlc`, `sdlc-step: 10`, no `wave` field
 
 Zero user interaction. The next session reads it if present and resumes from the recorded state. Step 8's `.bionic/tmp/` wipe (cleanup half) clears this on merge.
 
-## Evidence Gate Hook
+## Hooks
 
-Bionic installs `canonical-sdlc-evidence-gate.sh` as a `PreToolUse|Bash` hook. On `git commit`, the hook locates the most recent plan, reads `## SDLC State`, and **blocks the commit (exit 2) if the current step's evidence artifact is missing or unreadable**.
+Two `PreToolUse` hooks enforce the contract (full mechanism in the README):
 
-For `canonical_sdlc_version: 9` plans, the hook validates the v9 per-step shape table above (including the universal Step-5 `stack-health:` key); for `8`, the v8 shape table (including the universal Step-5 `drive-check:` key); for `7`, the v7 shape table (including the universal Step-5 `bundle-fresh:` key); for `6`, the v6 shape table; for `5`, the v5 shape table; for `3` and `4`, the v3 shape table; for v1/v2, the original shape table.
-
-## Governing-Skill Hook
-
-Bionic installs `canonical-sdlc-governing-skill.sh` as a `PreToolUse|Write,Edit` hook. It blocks writes to any canonical-sdlc artifact lacking `governing-skill:` frontmatter, and on `canonical_sdlc_version: 3`–`9` autonomous plans validates the 5 discriminator + 2 opt-in flag set (v4 and later also require `model_plan`).
+- **`canonical-sdlc-evidence-gate.sh`** (`Bash`) — on `git commit`, blocks (exit 2) if the current step's evidence is missing or unreadable. For `canonical_sdlc_version: 10` it validates the v10 shape table and the `## Verification Matrix` (per-tier keys, waiver/CONFIRMED discipline); v1–v9 plans use their own tables, never retrofitted.
+- **`canonical-sdlc-governing-skill.sh`** (`Write,Edit`) — blocks any artifact lacking `governing-skill:` frontmatter; on v4+ autonomous plans validates the 5 discriminator + 2 opt-in flags + `model_plan`; on **v10** autonomous plans additionally requires a `## Verification Matrix` section at `sdlc-step ≥ 3`.
 
 ## Subagent Dispatch Convention
 
@@ -1042,6 +1041,7 @@ Every subagent invoked during a canonical-sdlc step must receive a prompt prefix
    > Execute map-instrument-narrow with exquisite rigor and discipline. Absolutely no corner-cutting. Walk every phase gate in order — MAP → INSTRUMENT → NARROW — and write each phase's artifact before advancing past its gate. No fix code, and no "let me just try one thing first." No ad-hoc, trial-and-error theory-hopping: the data names the root cause, not your hunches. NO FIX CODE WITHOUT DATA. NO INSTRUMENTATION WITHOUT ARCHITECTURE.
 
    This is not paraphrasable and not optional. The canonical copy lives in `map-instrument-narrow`'s **Rigor Mandate** and in `.bionic/sdlc-dispatch-rules.json` (`diagnostic_friction.directive`); inject that exact string. Omitting it is the single most common cause of debugging that spins through ad-hoc theories instead of converging on the root cause.
+9. **Auditor mandate (hardcoded).** Any Step-5 Independent Verification Auditor dispatch MUST include the Auditor Mandate **verbatim** in the subagent prompt (the canonical copy is the blockquote in §Step 5). Like point 8's Rigor Mandate, it is not paraphrasable and not optional — a paraphrased mandate is a weakened auditor.
 
 This prevents subagent wander.
 
@@ -1089,7 +1089,8 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 | "The user is in a hurry, I should skip steps" | Declare a fast-path explicitly or walk the full path. |
 | "This is just a bugfix; `autonomous` is overkill" | A bugfix is still a code change. |
 | "This is just a refactor; no spec needed" | "All existing tests still pass" is the spec. |
-| "I can skip the browser modality of Verify, the unit tests cover it" | Unit tests don't catch visual regressions, focus traps, or contrast failures. The browser modality of the Verify gate is its own evidence. |
+| "The matrix tier is too strict for this AC" | Downgrading a tier is a user decision via the Waiver Protocol, recorded in the row — never a self-service call at Verify time. |
+| "The auditor is overkill, my evidence is obviously fine" | Self-graded evidence is the exact root cause the auditor exists to kill. "Obviously fine" is the claim it falsifies. |
 | "I'm confident in my self-review; the adversarial critic is overkill" | Self-review is bounded by what you thought to check. |
 | "The assumption was obvious; no need to log it" | "Obvious" is judged from inside the moment. Log it. |
 | "I can update `## SDLC State` after the commit" | The commit rhythm requires the current step's evidence line in place *before* staging — the evidence gate hook blocks the commit otherwise. |
@@ -1098,9 +1099,6 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 | "Spike code is good, let's just ship it" | Re-enter a ship-capable mode at Step 1. |
 | "Just send the user a paragraph asking what to do" | Use the User Decision Protocol. Numbered options + rationale + why-it-matters. No walls of text. |
 | "Parallel dispatch is overhead for a small task" | The default is parallel. Justify sequential. |
-| "The serve is running and the page loads; the bundle must be current" | A stalled watcher and a failed rebuild both serve the last-good bundle silently. FRESH is proven, never assumed. |
-| "The walk completed without errors, so the feature works" | A ref-walk over a canvas completes by driving nothing; a screenshot can look right over a broken render. The drive-check + semantic readback are what make a walk evidence. |
-| "The restart counter ticked up but the app came back healthy — the walk still counts" | A mid-walk crash-restart can swallow the exact bug being probed; the restart-count delta is a blocking finding until run to ground. |
 
 ## Red Flags — STOP and Correct
 
@@ -1125,22 +1123,23 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 - Asking the user a wall-of-text question instead of following the **User Decision Protocol**.
 - Skipping the TaskCreate list or batching task completions at the end.
 - Single-threading a step where 2+ subtasks are clearly independent.
-- Presenting live-browser evidence with no bundle-freshness proof in the same session.
-- Recording browser-modality evidence with no drive-check in the same session.
-- Recording live-walk evidence with no stack-health snapshot, or treating a mid-walk restart-count delta as benign instead of a blocking finding.
+- Closing Step 5 without an independent auditor report.
+- A self-written `n/a` on a live-tier (T3/T4) matrix row (that is a Waiver Protocol decision, the user's call).
+- A RED fixture that cannot structurally reach the failure it guards (a proxy regardless of RED→GREEN history).
+- Claiming "delivered/fixed/verified" below the row's contracted tier.
 
 ## Quick Reference
 
 | Step | Gate | Evidence |
 |---|---|---|
-| 0. Configure | Frontmatter has `canonical_sdlc_version: 9` + 5 discriminator + 2 opt-in flags + `model_plan`; display included `integration-branch:`; user confirmed; TaskCreate list created | Confirmation row in `## SDLC State` |
-| 1. Ideate | Refined idea + "Not Doing" list | Artifacts in spec; `shape` output if `design-refresh`; triage notes if `incident-response` |
-| 2. Spec | Every req has acceptance criterion | Spec doc |
-| 3. Plan | No placeholders; `integration-branch:` declared; Step 4 expanded into slice tasks | Plan file |
-| 4. Implement | Every slice has a passing test that was RED first; worktree created if `use_worktree: true` | Commit history with RED→GREEN; worktree fields when applicable |
-| 5. Verify (gate) | Tests/build pass (`pass == total`); browser modality proven or `n/a`; bundle freshness proven or `n/a`; drive-check proven or `n/a`; stack-health proven or `n/a` | `cmd:`/`pass:`/`total:`/`output:` + `devtools-trace:` or `n/a:` + `bundle-fresh:` proof or `n/a:` + `drive-check:` delta/suite or `n/a:` + `stack-health:` snapshot or `n/a:` |
-| 6. Review (gate) | Every axis has a verdict; adversarial critic attached (mandatory in `autonomous`, `incident-response`, `design-refresh`) | Pointer to 5-axis body + critic findings |
-| 7. Document decisions | Every significant decision has a record | ADR file(s); or `rca.md` for `incident-response` |
-| 8. Integrate & close | Wave merged into declared `integration-branch`; worktree removed; `.bionic/tmp/` wiped + tasks completed + `cleaned:` stamped (or `cleanup: n/a`) | `merge:`/`worktree-removed:` + cleanup fields |
-| 9. Ship | Checklist complete, rollback documented; fix monitored stuck + gap closed (`incident-response`) | Deployment record; monitoring evidence |
-| — Commit rhythm | Per-step checkpoint commit; `## SDLC State` current step updated before staging | Commit in git (no `commit:` evidence field) |
+| 0. Configure | v10 frontmatter (5 discriminator + 2 opt-in + `model_plan`) + `## Verification Matrix` derived; `integration-branch:` shown; user confirmed; task list created | `Step 0:` confirmation row |
+| 1. Ideate | Refined idea + "Not Doing" list | Artifacts in spec |
+| 2. Spec | Every requirement has an acceptance criterion | Spec doc |
+| 3. Plan | No placeholders; `integration-branch:` + matrix locked; Step 4 expanded into slices | Plan file |
+| 4. Implement | Every slice RED-first green; worktree if `use_worktree` | RED→GREEN commits |
+| 5. Verify (gate) | Tests floor (`pass == total`); every matrix row discharged at its tier or waived; auditor CONFIRMED | `cmd:`/`pass:`/`total:`/`output:` + `auditor:` + discharged `## Verification Matrix` |
+| 6. Review (gate) | Every axis has a verdict; independent critic attached | 5-axis body + critic findings |
+| 7. Document | Every significant decision recorded | ADR(s); `rca.md` for `incident-response` |
+| 8. Integrate & close | Wave merged into `integration-branch`; worktree removed; tmp wiped; tasks completed | `merge:`/`worktree-removed:` + cleanup fields |
+| 9. Ship | Checklist + rollback; monitored, gap closed (`incident-response`) | Deployment + monitoring evidence |
+| — Commit rhythm | Per-step commit; `## SDLC State` updated before staging | Commit in git (no `commit:` field) |
