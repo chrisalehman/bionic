@@ -1690,6 +1690,52 @@ expect_allow "GRANDFATHER: v7 Step 5 without drive-check → allow" \
   "$h14l" 'git commit -m "x"'
 
 # ============================================================
+# Section 15: CRLF line endings — frontmatter parses under \r\n
+# ============================================================
+#
+# Plan files with CRLF (\r\n) line endings previously defeated the
+# hook's exact-match awk frontmatter parser (`$0=="---"` never matches
+# "---\r"), silently downgrading v8 plans to legacy presence-only mode
+# — every shape check (including the drive-check gate from Section 14)
+# skipped. Strip \r at extraction time so CRLF plans get the same
+# enforcement as LF plans.
+
+echo ""
+echo "=== Section 15: CRLF line endings ==="
+
+# Converts LF line endings to CRLF by inserting a literal CR before
+# each newline. Bash-3.2-safe ANSI-C quoting embeds a real CR byte in
+# the sed script itself (BSD sed's replacement text does not interpret
+# the two-character "\r" as an escape).
+to_crlf() {
+  printf '%s' "$1" | sed $'s/$/\r/'
+}
+
+# 15a — CRLF v8 plan, Step 5 complete but NO drive-check → block. Before
+# the fix: FRONTMATTER parses empty (canonical_sdlc_version lost) → hook
+# silently downgrades to legacy presence-only mode → incorrectly allows.
+h15a=$(make_home)
+write_plan "$h15a" "$(to_crlf "$(v8_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v8_step5_base")" > /dev/null
+expect_block "CRLF v8 Step 5 without drive-check → block" \
+  "$h15a" 'git commit -m "x"' "drive-check"
+
+# 15b — CRLF v8 plan with a complete, valid Step-5 block (drive-check
+# present) → allow.
+h15b=$(make_home)
+write_plan "$h15b" "$(to_crlf "$(v8_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v8_step5_base
+  drive-check: click toggled app flag false → true via eval readback")" > /dev/null
+expect_allow "CRLF v8 Step 5 complete (drive-check present) → allow" \
+  "$h15b" 'git commit -m "x"'
+
+# ============================================================
 # Summary
 # ============================================================
 

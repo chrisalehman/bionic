@@ -611,6 +611,39 @@ canonical_sdlc_version: ${version}
   assert_eq "exit 0" 0 "$HOOK_EXIT"
 done
 
+# ============================================================
+# CRLF line endings — frontmatter parses under \r\n (Write path)
+# ============================================================
+#
+# Plan files with CRLF (\r\n) line endings previously defeated the
+# hook's exact-match awk frontmatter parser (`$0=="---"` never matches
+# "---\r"), so a CRLF artifact's frontmatter was read as entirely
+# absent — false-BLOCKed as "missing a YAML frontmatter block" even
+# when every required flag was present. Strip \r at extraction time so
+# CRLF artifacts get the same treatment as LF artifacts.
+
+# Converts LF line endings to CRLF by inserting a literal CR before
+# each newline. Bash-3.2-safe ANSI-C quoting embeds a real CR byte in
+# the sed script itself (BSD sed's replacement text does not interpret
+# the two-character "\r" as an escape).
+to_crlf() {
+  printf '%s' "$1" | sed $'s/$/\r/'
+}
+
+echo "CRLF v8 autonomous plan with full valid frontmatter → allow"
+v8_full_crlf=$(to_crlf "$(build_versioned_plan 8)")
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-21-v8-crlf.plan.md" "$v8_full_crlf"
+assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+echo "CRLF v8 Write missing model_plan → block, error names model_plan"
+v8_no_mp_crlf=$(to_crlf "$(build_versioned_plan 8 model_plan)")
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-22-v8-crlf-no-mp.plan.md" "$v8_no_mp_crlf"
+assert_eq "exit 2" 2 "$HOOK_EXIT"
+case "$HOOK_STDERR" in
+  *model_plan*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  CRLF error mentions model_plan\n' ;;
+  *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  CRLF error missing model_plan: %q\n' "$HOOK_STDERR" ;;
+esac
+
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then

@@ -134,6 +134,14 @@ if [ -z "$CONTENT" ]; then
   exit 2
 fi
 
+# Normalize CRLF (\r\n) line endings before any parsing. Without this, a
+# CRLF artifact's "---\r" delimiter line never matches the exact-match
+# `$0 == "---"` comparison below, so FRONTMATTER parses empty and the
+# hook false-BLOCKs a valid artifact as "missing a YAML frontmatter
+# block". Stripping \r once here means every downstream parse
+# (frontmatter values, yaml_get) sees plain \n text.
+CONTENT=$(printf '%s' "$CONTENT" | tr -d '\r')
+
 # Extract the leading YAML frontmatter block (between the first two `---`
 # lines at column 0). If absent, block.
 FRONTMATTER=$(echo "$CONTENT" | awk '
