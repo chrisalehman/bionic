@@ -921,6 +921,12 @@ PLAYWRIGHT_CACHE="${PLAYWRIGHT_CACHE:-$HOME/Library/Caches/ms-playwright}"
 # a warm re-run skips the real install entirely — immune to lock contention.
 # Any dry-run failure or unparseable output returns 1: fall through to the
 # real install, never skip on absent evidence.
+# Real-world contract (observed playwright 1.6x): `install chromium` stages
+# THREE components — chromium, ffmpeg, chromium_headless_shell — and all
+# three write INSTALLATION_COMPLETE. If a future component omits the marker,
+# this probe degrades fail-open (warm skip lost, install re-runs every time,
+# nothing hangs or breaks) — if warm runs stop reporting "already installed",
+# look here first.
 _pw_satisfied() {
   local out locs loc
   out="$("$@" 2>/dev/null)" || return 1
@@ -936,13 +942,20 @@ _pw_satisfied() {
 # install. Held by a live installer (any process, incl. another session's)
 # → return 1: the caller fails fast instead of waiting silently forever.
 # Present but orphaned → stale: remove and proceed. Absent → proceed.
+# Pattern requires a space-separated "install" arg after a playwright-bearing
+# token (matches `npx playwright install`, `.../cli.js install`, python's
+# driver) without matching doc/log files like playwright-install-notes.md.
+# No self-exclusion needed: this script's cmdline never matches, and the
+# dry-run child has exited before preflight runs (synchronous command
+# substitution) — preserve that ordering if refactoring.
 _pw_lock_preflight() {
   local lock="${PLAYWRIGHT_CACHE}/__dirlock"
   [ -e "$lock" ] || return 0
-  if pgrep -f "playwright.*install" >/dev/null 2>&1; then
+  if pgrep -f "playwright[^ ]* install" >/dev/null 2>&1; then
     return 1
   fi
   rm -rf "$lock"
+  echo ""
   echo "    removed stale browser-cache lock (${lock})"
   return 0
 }
