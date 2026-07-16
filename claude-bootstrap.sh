@@ -964,9 +964,23 @@ export PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT="${PLAYWRIGHT_DOWNLOAD_CONNECTION_
 _playwright_install() {
   npx --yes playwright@latest install chromium 2>&1 | sed '/[╔║╚]/d'
 }
-step_start "chromium (first install downloads ~170 MB)"
-step_stream network "run 'npx --yes playwright@latest install chromium' by hand, then re-run ./claude-bootstrap.sh" \
-  _playwright_install
+# Guard → preflight → install. The dry-run probe costs ~2-3s but never
+# touches the cache lock, so warm re-runs are instant and immune to a lock
+# held by another session's install (which previously hung this step
+# silently and indefinitely).
+do_install_playwright_chromium() {
+  step_start "chromium (first install downloads ~170 MB)"
+  if _pw_satisfied npx --yes playwright@latest install chromium --dry-run; then
+    step_cached network "browsers already installed"
+  elif ! _pw_lock_preflight; then
+    step_fail network "another Playwright install holds the browser-cache lock (often a second Claude session)" \
+      "finish or kill it, then re-run ./claude-bootstrap.sh"
+  else
+    step_stream network "run 'npx --yes playwright@latest install chromium' by hand, then re-run ./claude-bootstrap.sh" \
+      _playwright_install
+  fi
+}
+do_install_playwright_chromium
 
 # ─── Marketplaces ────────────────────────────────────────────────────────────
 

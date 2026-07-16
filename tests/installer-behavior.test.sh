@@ -53,7 +53,7 @@ chmod +x "${BIN}"/*
 
 # ---------- extract the REAL resilience block + installer functions ----------
 awk '/^# ─── Resilience ───/{f=1} f{print} /^# ─── Helpers ───/{if(f)exit}' "$BOOTSTRAP" > "$CODE"
-for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight; do
+for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium; do
   awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$CODE"
 done
 
@@ -165,6 +165,51 @@ if _pw_lock_preflight; then ok "stale lock → preflight clears"; else no "stale
 [ -d "${PLAYWRIGHT_CACHE}/__dirlock" ] && no "stale lock must be removed" || ok "stale lock removed"
 
 if _pw_lock_preflight; then ok "no lock → preflight passes"; else no "no lock should pass"; fi
+
+# 9) chromium step wiring: skip / fail-fast / install branches.
+cat > "${BIN}/npx" <<EOF
+#!/bin/bash
+echo "npx \$*" >> "$LOG"
+case "\$*" in
+  *--dry-run*) cat "${PWSBX}/dryrun.txt" ;;
+esac
+exit 0
+EOF
+chmod +x "${BIN}/npx"
+
+# 9a) warm cache → cached, real install never invoked
+mkdir -p "${PWSBX}/loc-c"; touch "${PWSBX}/loc-c/INSTALLATION_COMPLETE"
+printf '  Install location:    %s\n' "${PWSBX}/loc-c" > "${PWSBX}/dryrun.txt"
+rm -rf "${PLAYWRIGHT_CACHE}/__dirlock"
+: > "$LOG"; INSTALL_FAILURES=()
+do_install_playwright_chromium >/dev/null
+expect_log "npx --yes playwright@latest install chromium --dry-run" "chromium step probes via --dry-run"
+if logged "npx --yes playwright@latest install chromium"; then no "warm cache must not run the real install"; else ok "warm cache skips the real install"; fi
+
+# 9b) cold cache, no lock → real install runs
+rm "${PWSBX}/loc-c/INSTALLATION_COMPLETE"
+: > "$LOG"; INSTALL_FAILURES=()
+do_install_playwright_chromium >/dev/null
+expect_log "npx --yes playwright@latest install chromium" "cold cache runs the real install"
+
+# 9c) cold cache + held lock → fail fast, no real install, failure recorded
+mkdir -p "${PLAYWRIGHT_CACHE}/__dirlock"
+cat > "${BIN}/pgrep" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+chmod +x "${BIN}/pgrep"
+: > "$LOG"; INSTALL_FAILURES=()
+do_install_playwright_chromium >/dev/null
+if logged "npx --yes playwright@latest install chromium"; then no "held lock must not attempt the real install"; else ok "held lock skips the real install attempt"; fi
+[ "${#INSTALL_FAILURES[@]}" -eq 1 ] && ok "held lock records exactly one failure" || no "held lock should record a failure (got ${#INSTALL_FAILURES[@]})"
+case "${INSTALL_FAILURES[0]:-}" in *"second Claude session"*) ok "failure names the second-session cause";; *) no "failure text should name the second-session cause";; esac
+rm -rf "${PLAYWRIGHT_CACHE}/__dirlock"
+cat > "${BIN}/pgrep" <<'EOF'
+#!/bin/bash
+exit 1
+EOF
+chmod +x "${BIN}/pgrep"
 
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
