@@ -2178,6 +2178,19 @@ write_plan "$h17d" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_live_na")" > /de
 expect_block "v10 17d T3 contact: n/a, no waiver → block (Waiver Protocol)" \
   "$h17d" 'git commit -m "x"' "Waiver Protocol"
 
+# 17d-case — the live-tier n/a ban must be case-insensitive: 'N/A' and
+# 'N/a: <reason>' are the same self-written downgrade as lowercase 'n/a'
+# (review-gate finding: a single capital letter must not defeat the ban).
+h17d2=$(make_home)
+write_plan "$h17d2" "$(v10_plan 5 "$v10_step5_base" "${v10_matrix_live_na/contact: n\/a: not reachable quickly/contact: N\/A}")" > /dev/null
+expect_block "v10 17d T3 contact: N/A (uppercase), no waiver → block" \
+  "$h17d2" 'git commit -m "x"' "Waiver Protocol"
+
+h17d3=$(make_home)
+write_plan "$h17d3" "$(v10_plan 5 "$v10_step5_base" "${v10_matrix_live_na/contact: n\/a: not reachable quickly/contact: N\/a: not reachable quickly}")" > /dev/null
+expect_block "v10 17d T3 contact: N/a: <reason> (mixed case), no waiver → block" \
+  "$h17d3" 'git commit -m "x"' "Waiver Protocol"
+
 # 17e — T3 row with only the suite-credit shape (missing fresh/cold-client/
 # contact) → block.
 h17e=$(make_home)

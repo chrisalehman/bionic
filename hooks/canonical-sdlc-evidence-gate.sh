@@ -731,9 +731,12 @@ validate_matrix_v10() {
         fi
         # live-tier (T3/T4) fields cannot be self-written n/a — that is a
         # downgrade, which is a user decision via the Waiver Protocol.
+        # Case-insensitive: 'N/A' is the same downgrade as 'n/a' (matches
+        # matrix_is_placeholder's lowercasing).
+        val_lc=$(echo "$val" | tr '[:upper:]' '[:lower:]')
         case "$tier" in
           T3|T4)
-            case "$val" in
+            case "$val_lc" in
               n/a|n/a:*)
                 block_matrix "matrix row '${ac}' (${tier}) key '${key}' is a self-written 'n/a' on a live tier." \
                   "a live-tier field cannot be n/a — downgrade the row via the Waiver Protocol (record 'waiver: <user> <date> <reason>'), a user decision." ;;
