@@ -53,7 +53,7 @@ chmod +x "${BIN}"/*
 
 # ---------- extract the REAL resilience block + installer functions ----------
 awk '/^# ─── Resilience ───/{f=1} f{print} /^# ─── Helpers ───/{if(f)exit}' "$BOOTSTRAP" > "$CODE"
-for fn in do_install_brew_cask do_install_pnpm_store; do
+for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight; do
   awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$CODE"
 done
 
@@ -129,6 +129,42 @@ if run_retry flaky2; then
 else
   no "flaky2 should succeed on attempt 2"
 fi
+
+# 8) Playwright guard helpers.
+# _pw_satisfied: parses 'Install location:' lines; 0 iff all carry the marker.
+PWSBX="${SBX}/pw"; mkdir -p "${PWSBX}/loc-a" "${PWSBX}/loc-b"
+touch "${PWSBX}/loc-a/INSTALLATION_COMPLETE" "${PWSBX}/loc-b/INSTALLATION_COMPLETE"
+dry_ok(){ printf '  Install location:    %s\n  Install location:    %s\n' "${PWSBX}/loc-a" "${PWSBX}/loc-b"; }
+if _pw_satisfied dry_ok; then ok "satisfied when all locations carry INSTALLATION_COMPLETE"; else no "should be satisfied (all markers present)"; fi
+
+rm "${PWSBX}/loc-b/INSTALLATION_COMPLETE"
+if _pw_satisfied dry_ok; then no "must not skip when a marker is missing"; else ok "unsatisfied when any marker is missing"; fi
+
+dry_fail(){ return 1; }
+if _pw_satisfied dry_fail; then no "must not skip when dry-run fails"; else ok "unsatisfied when dry-run exits non-zero (fail-open to install)"; fi
+
+dry_empty(){ echo "no locations here"; }
+if _pw_satisfied dry_empty; then no "must not skip on zero parsed locations"; else ok "unsatisfied on zero 'Install location:' lines (fail-open to install)"; fi
+
+# _pw_lock_preflight: stale lock removed; held lock refused.
+export PLAYWRIGHT_CACHE="${PWSBX}/cache"; mkdir -p "${PLAYWRIGHT_CACHE}/__dirlock"
+cat > "${BIN}/pgrep" <<'EOF'
+#!/bin/bash
+exit 0   # simulate: a live playwright install exists
+EOF
+chmod +x "${BIN}/pgrep"
+if _pw_lock_preflight; then no "held lock must refuse install"; else ok "lock + live installer → preflight refuses"; fi
+[ -d "${PLAYWRIGHT_CACHE}/__dirlock" ] && ok "held lock is not removed" || no "held lock must be left in place"
+
+cat > "${BIN}/pgrep" <<'EOF'
+#!/bin/bash
+exit 1   # simulate: no playwright install running
+EOF
+chmod +x "${BIN}/pgrep"
+if _pw_lock_preflight; then ok "stale lock → preflight clears"; else no "stale lock should clear"; fi
+[ -d "${PLAYWRIGHT_CACHE}/__dirlock" ] && no "stale lock must be removed" || ok "stale lock removed"
+
+if _pw_lock_preflight; then ok "no lock → preflight passes"; else no "no lock should pass"; fi
 
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
