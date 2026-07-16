@@ -63,7 +63,7 @@ Verification in this lifecycle is structured at three levels. Conflating them is
 
 - **Gate** = the principle being satisfied. Two gates: **Verify** ("does it work?", Step 5) and **Review** ("is it well-made?", Step 6).
 - **Modality** = a kind of evidence (under Verify) or a stance (under Review), each present-or-`n/a` per wave.
-  - *Verify modalities:* automated tests/build (**always**); real-browser behavior (**when UI/user-visible**); performance + accessibility (**when flagged**). The browser modality's evidence begins with two universal proofs: **bundle freshness** (the serve reflects the working tree) and the **drive-check** (one trusted interaction provably changed app state, read back semantically) — live observations without both are not evidence.
+  - *Verify modalities:* automated tests/build (**always**); real-browser behavior (**when UI/user-visible**); performance + accessibility (**when flagged**). The live walk is guarded by three universal proofs, one per failure axis: **bundle freshness** (artifact integrity — the serve reflects the working tree), the **drive-check** (input contact — one trusted interaction provably changed app state, read back semantically), and **stack-health** (runtime integrity — the serving stack did not crash-restart mid-walk) — live observations without them are not evidence.
   - *Review stances:* structured 5-axis self-review (**always**); adversarial critic (**mandatory in `autonomous`, `incident-response`, `design-refresh`**; an **INDEPENDENT** agent — never self-graded).
 - **Tool** = the instrument for a modality, expressed as default → escalation. Browser modality: `playwright-cli` (default, via `browser-verify`) → escalate to the chrome-devtools MCP (`agent-skills:browser-testing-with-devtools`) **ONLY** for deep inspection the CLI can't do (Lighthouse, perf-trace analysis, heap/CPU profiling, network throttling).
 
@@ -547,7 +547,7 @@ Each step has: **goal** · **action** · **completion gate** · **evidence artif
 
 ### Step 0 — Configure (entry-gate confirmation phase)
 
-Mandatory for new plans (`canonical_sdlc_version: 8`, current). `3`/`4`/`5`/`6`/`7` are prior-but-enforced (v3 requires the 5 + 2 flag set; v4 added `model_plan`, carried unchanged by v5, v6, v7, and v8); `1`/`2` are grandfathered (no flag enforcement).
+Mandatory for new plans (`canonical_sdlc_version: 9`, current). `3`/`4`/`5`/`6`/`7`/`8` are prior-but-enforced (v3 requires the 5 + 2 flag set; v4 added `model_plan`, carried unchanged by v5, v6, v7, v8, and v9); `1`/`2` are grandfathered (no flag enforcement).
 
 **Goal:** Set every plan-shaping flag in plan frontmatter deliberately, with explicit user confirmation.
 
@@ -631,7 +631,7 @@ override     := "set" flag "=" value
 
 Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`; `set integration-branch=develop, confirm`. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set exec-standard=opus, confirm` (route standard slices to opus too — equivalent to disabling complexity routing); `set exec-complex=sonnet, confirm` (accepted but discouraged; warn before applying); `set execution=opus-only, confirm` (shorthand for `exec-standard=opus`); `set main_model=sonnet, confirm` (multi_agent=false dial-down).
 
-On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 8` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`). The confirmed `integration-branch` is carried forward: when the plan file is written at Step 3, its `## SDLC State` section opens with the Step-0-confirmed `integration-branch: <name>` line. For v4 and later autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2).
+On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 9` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`). The confirmed `integration-branch` is carried forward: when the plan file is written at Step 3, its `## SDLC State` section opens with the Step-0-confirmed `integration-branch: <name>` line. For v4 and later autonomous plans the governing-skill hook **requires** `model_plan` — a missing value blocks the write (exit 2).
 
 **Two-layer enforcement.**
 
@@ -640,9 +640,9 @@ On accept, write final values into plan frontmatter literally — every flag as 
 
 **Mid-plan reconfiguration.** Edit plan frontmatter directly; the new value takes effect immediately on next hook read.
 
-**Legacy plan handling.** Plans with `canonical_sdlc_version: 1` or `2` are grandfathered — flag enforcement skipped. `canonical_sdlc_version: 3` plans remain enforced under the prior 5 + 2 contract (no `model_plan`); `4` and later require `model_plan`. The hooks treat v3/v4 evidence under the v3 shape table; v5 uses its own; v6 uses its own (v5 minus the external-review step); v7 uses its own (v6 plus the universal Step-5 `bundle-fresh:` key); v8 uses its own (v7 plus the universal Step-5 `drive-check:` key) — see §Verification tier. DO NOT retrofit the `bundle-fresh:` requirement into v6 or earlier plans — in-flight plans would start blocking mid-wave. DO NOT retrofit the `drive-check:` requirement into v7 or earlier plans — in-flight plans would start blocking mid-wave.
+**Legacy plan handling.** Plans with `canonical_sdlc_version: 1` or `2` are grandfathered — flag enforcement skipped. `canonical_sdlc_version: 3` plans remain enforced under the prior 5 + 2 contract (no `model_plan`); `4` and later require `model_plan`. The hooks treat v3/v4 evidence under the v3 shape table; v5 uses its own; v6 uses its own (v5 minus the external-review step); v7 uses its own (v6 plus the universal Step-5 `bundle-fresh:` key); v8 uses its own (v7 plus the universal Step-5 `drive-check:` key); v9 uses its own (v8 plus the universal Step-5 `stack-health:` key) — see §Verification tier. DO NOT retrofit the `bundle-fresh:` requirement into v6 or earlier plans — in-flight plans would start blocking mid-wave. DO NOT retrofit the `drive-check:` requirement into v7 or earlier plans — in-flight plans would start blocking mid-wave. DO NOT retrofit the `stack-health:` requirement into v8 or earlier plans — in-flight plans would start blocking mid-wave.
 
-**Gate:** Plan frontmatter contains `canonical_sdlc_version: 8` plus all 5 discriminator flags, 2 opt-in flags, and `model_plan`. The confirmation display included the `integration-branch:` line. User reply ended with `confirm` or `confirmed`.
+**Gate:** Plan frontmatter contains `canonical_sdlc_version: 9` plus all 5 discriminator flags, 2 opt-in flags, and `model_plan`. The confirmation display included the `integration-branch:` line. User reply ended with `confirm` or `confirmed`.
 
 **Evidence:** A line in `## SDLC State`: `Step 0: configured at <ISO-timestamp> via <reply-summary>; model_plan=<confirmed tiers>; integration-branch=<name>`.
 
@@ -723,11 +723,13 @@ The Verify gate proves the change works, by modality (see §Verification model).
 - **Browser modality (when UI/user-visible):** drive the browser via `playwright-cli` (the `browser-verify` skill), picking the input rung by surface: **ref-based driving** (`snapshot` → `click`/`fill`/`type`) for DOM surfaces the accessibility tree can address; **trusted coordinate primitives** (`mousemove`/`mousedown`/`mouseup`/`mousewheel`, keyboard `press`/`keydown`/`keyup` for chords, or `run-code` + `page.mouse` for compound gestures) for canvas/gesture surfaces — a bare canvas typically exposes nothing to the a11y tree, so a ref-walk over it drives nothing. Some canvas/WebGL engines may reject or ignore even trusted synthetic input — the drive-check arbitrates per-surface; never assume acceptance. Assert each key state semantically (`console` + `network` + a page-scope `eval` of the actual application value — screenshots are illustration, never sole proof). Golden path + at least one edge case (or `n/a: <reason>` for non-UI work). Escalate to `agent-skills:browser-testing-with-devtools` (chrome-devtools MCP) **only** for deep inspection the CLI can't do — Lighthouse, performance-trace analysis, heap/CPU profiling, network throttling.
 - **Bundle freshness (always — proof or `n/a`):** BEFORE any live observation is used as evidence, prove the served artifact reflects the working tree via the project's freshness tool, and record the tool's output line as `bundle-fresh: <proof>`; when the wave observes no long-running served artifact, record `bundle-fresh: n/a: <reason>` instead. Like `devtools-trace:`, the key is universal — "not applicable" is an explicit recorded decision, never a silent omission. This applies to ANY long-running serve observed live, not just UI bundles — a hot-reloading API dev server curled for evidence is exactly as suspect as a stale browser bundle. Long-running dev serves go stale silently — a stalled file watcher, a serve left up for days, or a failed rebuild all keep serving the last-good artifact while every external check (HTTP 200, page loads) looks healthy, producing false regressions and false greens. A typical freshness tool is a canary round-trip: write a unique token into a dev-only source file, poll the served artifact for it, restore the file — proving watcher-alive and whole-tree-current. The tool and its output format are project-specific; the proof is not. **Strong form:** the proof precedes EVERY live observation used as evidence, not just once per wave — the hook enforces the recorded artifact; the per-observation discipline is yours.
 - **Drive-check (always — proof or `n/a`):** BEFORE any browser-modality evidence counts, prove that one trusted interaction actually changed app state and read the delta back semantically — an interaction goes in, a page-scope `eval` reads a real application value that changed. Record it as `drive-check: <observed delta>`; when the automated suite earns axis-qualified credit, `drive-check: suite: <named test — what it asserts>`; when no browser modality applies, `drive-check: n/a: <reason>`. This is the cheap gate that catches every silent no-contact cause at once — unaddressable surfaces, rejected input, stale readiness, wrong gesture binding — regardless of which tool produced it. If no input rung makes contact, the walk cannot produce evidence: report that loudly; "the walk completed" is not "the walk verified."
+- **Stack-health (always — proof or `n/a`):** BEFORE any live observation is used as evidence, snapshot the serving stack's runtime-integrity indicators — process/container restart counts, crash/OOM last-state — then re-snapshot AFTER the walk. Record the no-delta result as `stack-health: <before/after snapshot, no delta>`; when the wave observes no long-running serve, `stack-health: n/a: <reason>`. **Any delta is a blocking finding — run it to ground before the evidence banks:** a crash-restart mid-walk can swallow the exact bug being probed while the app returns looking healthy, so the run that "passed" may have stepped over the fault entirely. The snapshot command is project-specific exactly as the freshness tool is (a process-supervisor status query, a container-orchestrator restart-count read — a tool *pattern*, never a named consumer tool); the hook validates presence + non-empty value/reason + the placeholder ban ONLY. Universal, not gated on `has_ui`. **Claim scope (hard rule):** stack-health catches *restart/crash-shaped* degradation — do not claim it catches all degradation, and never assert what the snapshot did not prove.
+- **The three runtime proof axes.** Bundle-fresh, drive-check, and stack-health form one family guarding the live walk, one proof per failure axis: **artifact integrity** (`bundle-fresh:` — the served artifact reflects the working tree), **input contact** (`drive-check:` — a trusted interaction provably changed app state), and **runtime integrity** (`stack-health:` — the serving stack did not crash-restart across the walk). Each is universal, each is proof-or-`n/a`, and "not applicable" is always an explicit recorded decision, never a silent omission.
 - **Redundancy-killing rule.** A modality is proven ONCE, by whatever produced it. If the automated suite already drove a real browser across all targets, the browser modality is **satisfied by that run** — with axis-qualified credit: cite the *named* test(s), and credit counts only if the cited test itself makes real contact (real input on the actual surface + a semantic assertion of app state, not pixels). Harvest screenshots + a console/network health assertion; do NOT run a second interactive drive. A suite green on mock data does not discharge a real-data-behavior requirement (see closure floor). A separate interactive drive fires only when (a) the suite doesn't exercise a real browser, or (b) the check is perceptual/exploratory and can't be reduced to an assertion (`design-refresh`).
 - **End-to-end closure floor:** for any wave whose stated value involves user-visible behavior change, the browser-modality evidence MUST include a user-input → new-code trace (file:line per hop). `n/a: substrate-only` is a red flag and requires explicit justification in the wave's stated value. A requirement whose stated value is real-data behavior cannot be discharged by mock-fixture coverage, however green — it needs a real-data observation (or real-data-shaped fixtures). (Also re-checked in Step 6's architecture axis.)
 - **Parallelization:** parallel by modality × case — the modalities share no state.
-- **Gate:** tests/build pass (`pass == total`, output pasted) AND browser modality proven (trace) or explicitly `n/a: <reason>` AND bundle freshness proven or explicitly `bundle-fresh: n/a: <reason>` AND drive-check proven (delta or suite-credit) or explicitly `drive-check: n/a: <reason>`.
-- **Evidence:** `cmd:`, `pass:`, `total:`, `output:` for the tests/build modality; `devtools-trace: <path>` (a `playwright-cli` screenshot + `console`/`network` check written to `.bionic/tmp/`) OR `n/a: <reason>` for the browser modality; `bundle-fresh: <proof>` OR `bundle-fresh: n/a: <reason>` for the freshness of whatever serve was observed; `drive-check: <observed delta>` OR `drive-check: suite: <named test — what it asserts>` OR `drive-check: n/a: <reason>` for the contact proof.
+- **Gate:** tests/build pass (`pass == total`, output pasted) AND browser modality proven (trace) or explicitly `n/a: <reason>` AND bundle freshness proven or explicitly `bundle-fresh: n/a: <reason>` AND drive-check proven (delta or suite-credit) or explicitly `drive-check: n/a: <reason>` AND stack-health proven (before/after snapshot, no delta) or explicitly `stack-health: n/a: <reason>`.
+- **Evidence:** `cmd:`, `pass:`, `total:`, `output:` for the tests/build modality; `devtools-trace: <path>` (a `playwright-cli` screenshot + `console`/`network` check written to `.bionic/tmp/`) OR `n/a: <reason>` for the browser modality; `bundle-fresh: <proof>` OR `bundle-fresh: n/a: <reason>` for the freshness of whatever serve was observed; `drive-check: <observed delta>` OR `drive-check: suite: <named test — what it asserts>` OR `drive-check: n/a: <reason>` for the contact proof; `stack-health: <before/after snapshot, no delta>` OR `stack-health: n/a: <reason>` for the serving stack's runtime integrity.
 - **Mode weight:**
   - `design-refresh`: **heavily weighted**. Browser evidence per state + **`audit`** scored technical-quality report. The interactive drive is justified here (perceptual/exploratory).
 - **UI/UX substitution:** use `impeccable` in Step 4 and `agent-skills:frontend-ui-engineering` pre-verify.
@@ -844,7 +846,7 @@ sdlc-step: 3
 epic: epic-02-v2-product-pass
 wave: wave-01-checkout-refactor
 mode: autonomous
-canonical_sdlc_version: 8
+canonical_sdlc_version: 9
 ---
 ```
 
@@ -872,7 +874,7 @@ Evidence falls into two tiers. Each tier has different rules for when it's writt
 
 | Tier | Always present? | Controlled by | Enforced by |
 |---|---|---|---|
-| **Verification** | Yes — mandatory | (no flag) | `canonical-sdlc-evidence-gate.sh` (presence + shape on v3–v8 plans) |
+| **Verification** | Yes — mandatory | (no flag) | `canonical-sdlc-evidence-gate.sh` (presence + shape on v3–v9 plans) |
 | **Handoff** | Only when plan spans sessions | (no flag — session-end trigger) | Skill prose + Stop-hook checkpoint |
 
 For decision-point prose to the user, see the **User Decision Protocol** section above — that replaces the prior narrative tier.
@@ -881,26 +883,28 @@ For decision-point prose to the user, see the **User Decision Protocol** section
 
 Every step has an evidence artifact recorded under `Step N:` in `## SDLC State`. The evidence-gate hook enforces presence on every `git commit`.
 
-The per-step **shape table** the hook enforces depends on the plan's version. `canonical_sdlc_version: 8` uses the **v8 table below** — v7 plus the universal Step-5 `drive-check:` key. `canonical_sdlc_version: 7` uses the prior **v7 table** — identical to v8 minus the `drive-check:` requirement (v6 plus the universal Step-5 `bundle-fresh:` key). `canonical_sdlc_version: 6` uses the **v6 table** — identical to v7 minus the `bundle-fresh:` requirement. `canonical_sdlc_version: 5` uses the **v5 table** — v6 plus an `8 External review` step, shifting Integrate & close to 9 and Ship to 10. `canonical_sdlc_version: 3` and `4` share the older **v3 table** (v4 added `model_plan` but changed no per-step evidence shape). `1`/`2` use their original table.
+The per-step **shape table** the hook enforces depends on the plan's version. `canonical_sdlc_version: 9` uses the **v9 table below** — v8 plus the universal Step-5 `stack-health:` key. `canonical_sdlc_version: 8` uses the prior **v8 table** — identical to v9 minus the `stack-health:` requirement (v7 plus the universal Step-5 `drive-check:` key). `canonical_sdlc_version: 7` uses the **v7 table** — identical to v8 minus the `drive-check:` requirement (v6 plus the universal Step-5 `bundle-fresh:` key). `canonical_sdlc_version: 6` uses the **v6 table** — identical to v7 minus the `bundle-fresh:` requirement. `canonical_sdlc_version: 5` uses the **v5 table** — v6 plus an `8 External review` step, shifting Integrate & close to 9 and Ship to 10. `canonical_sdlc_version: 3` and `4` share the older **v3 table** (v4 added `model_plan` but changed no per-step evidence shape). `1`/`2` use their original table.
 
-**v8 shape table:**
+**v9 shape table:**
 
 | Step | Required fields under `Step N:` | Notes |
 |------|---------------------------------|-------|
 | 0 | `prereqs: ok` | smoke |
 | 1, 2, 3 | pointer | presence-only |
 | 4 | pointer; also `worktree:`/`base-sha:`/`branch:` when `use_worktree: true` | presence-only |
-| 5 Verify | `cmd:`, `pass:`, `total:`, `output:` (pass==total) AND `devtools-trace: <path>` OR `n/a: <reason>` AND `bundle-fresh: <proof>` OR `bundle-fresh: n/a: <reason>` AND `drive-check: <observed delta>` OR `drive-check: suite: <named test — what it asserts>` OR `drive-check: n/a: <reason>` | tests modality always; browser modality is trace or n/a; bundle freshness is proof or n/a-with-reason; drive-check is delta, suite-credit, or n/a-with-reason |
+| 5 Verify | `cmd:`, `pass:`, `total:`, `output:` (pass==total) AND `devtools-trace: <path>` OR `n/a: <reason>` AND `bundle-fresh: <proof>` OR `bundle-fresh: n/a: <reason>` AND `drive-check: <observed delta>` OR `drive-check: suite: <named test — what it asserts>` OR `drive-check: n/a: <reason>` AND `stack-health: <before/after snapshot, no delta>` OR `stack-health: n/a: <reason>` | tests modality always; browser modality is trace or n/a; bundle freshness is proof or n/a-with-reason; drive-check is delta, suite-credit, or n/a-with-reason; stack-health is a no-delta snapshot or n/a-with-reason |
 | 6 Review | pointer to 5-axis body + critic findings | presence-only |
 | 7 Document | `adr:` OR `rca:` OR `n/a:` | — |
 | 8 Integrate & close | `merge:`, `worktree-removed:` AND (`cleanup:`, `tmp-wiped:`, `tasks-completed:` OR `cleanup: n/a`) | — |
 | 9 Ship | `deploy:`, `verified-at:`, `monitor:` OR `n/a:` | n/a only when `deploy_target: none` |
 
-Pointer steps in v8: 1, 2, 3, 4, 6 — presence-only at the hook level.
+Pointer steps in v9: 1, 2, 3, 4, 6 — presence-only at the hook level.
 
 The `bundle-fresh:` value is the pasted output line of the project's freshness tool (e.g. `bundle-fresh: FRESH — canary <token> round-tripped to <served-artifact> in 4.2s`). The hook validates presence and the placeholder ban, not the format — the format is project-specific by design.
 
 The `drive-check:` value is the observed state delta (e.g. `drive-check: drag moved app value 3 → 7 via eval readback`), the named qualifying suite test (`drive-check: suite: <named test — what it asserts>`), or `n/a: <reason>`. The hook validates presence and the placeholder ban, not the format.
+
+The `stack-health:` value is the pasted before/after snapshot of the serving stack's runtime-integrity indicators showing no change (e.g. `stack-health: restarts 0 → 0, no crash/OOM state change`), or `n/a: <reason>` when no long-running serve is observed. Like `bundle-fresh:`, the snapshot command and its output format are project-specific by design; the hook validates presence and the placeholder ban only. It catches restart/crash-shaped degradation — a crash-restart mid-walk that returns the app looking healthy — and nothing broader.
 
 **Block format.** Multi-field steps use YAML-style indented keys under `Step N:`:
 
@@ -913,9 +917,10 @@ Step 5:
   devtools-trace: .bionic/tmp/evidence-checkout.png
   bundle-fresh: FRESH — canary token-9f3a round-tripped to dist/main.js in 4.2s
   drive-check: drag moved app value 3 → 7 via eval readback
+  stack-health: restarts 0 → 0, no crash/OOM state change
 ```
 
-**Backwards compatibility.** Plans with `canonical_sdlc_version: 1` or `2` use their original shape table. `canonical_sdlc_version: 3` and `4` share the same (v3) shape table. `canonical_sdlc_version: 5` uses its own (v5) shape table (with the `8 External review` step). `canonical_sdlc_version: 6` uses its own (v6) shape table (v7 minus the `bundle-fresh:` requirement). `canonical_sdlc_version: 7` uses its own (v7) shape table (v8 minus the `drive-check:` requirement). `canonical_sdlc_version: 8` uses the v8 shape table above.
+**Backwards compatibility.** Plans with `canonical_sdlc_version: 1` or `2` use their original shape table. `canonical_sdlc_version: 3` and `4` share the same (v3) shape table. `canonical_sdlc_version: 5` uses its own (v5) shape table (with the `8 External review` step). `canonical_sdlc_version: 6` uses its own (v6) shape table (v7 minus the `bundle-fresh:` requirement). `canonical_sdlc_version: 7` uses its own (v7) shape table (v8 minus the `drive-check:` requirement). `canonical_sdlc_version: 8` uses its own (v8) shape table (v9 minus the `stack-health:` requirement). `canonical_sdlc_version: 9` uses the v9 shape table above.
 
 ### Handoff tier — multi-session contract
 
@@ -1001,11 +1006,11 @@ Zero user interaction. The next session reads it if present and resumes from the
 
 Bionic installs `canonical-sdlc-evidence-gate.sh` as a `PreToolUse|Bash` hook. On `git commit`, the hook locates the most recent plan, reads `## SDLC State`, and **blocks the commit (exit 2) if the current step's evidence artifact is missing or unreadable**.
 
-For `canonical_sdlc_version: 8` plans, the hook validates the v8 per-step shape table above (including the universal Step-5 `drive-check:` key); for `7`, the v7 shape table (including the universal Step-5 `bundle-fresh:` key); for `6`, the v6 shape table; for `5`, the v5 shape table; for `3` and `4`, the v3 shape table; for v1/v2, the original shape table.
+For `canonical_sdlc_version: 9` plans, the hook validates the v9 per-step shape table above (including the universal Step-5 `stack-health:` key); for `8`, the v8 shape table (including the universal Step-5 `drive-check:` key); for `7`, the v7 shape table (including the universal Step-5 `bundle-fresh:` key); for `6`, the v6 shape table; for `5`, the v5 shape table; for `3` and `4`, the v3 shape table; for v1/v2, the original shape table.
 
 ## Governing-Skill Hook
 
-Bionic installs `canonical-sdlc-governing-skill.sh` as a `PreToolUse|Write,Edit` hook. It blocks writes to any canonical-sdlc artifact lacking `governing-skill:` frontmatter, and on `canonical_sdlc_version: 3`–`8` autonomous plans validates the 5 discriminator + 2 opt-in flag set (v4 and later also require `model_plan`).
+Bionic installs `canonical-sdlc-governing-skill.sh` as a `PreToolUse|Write,Edit` hook. It blocks writes to any canonical-sdlc artifact lacking `governing-skill:` frontmatter, and on `canonical_sdlc_version: 3`–`9` autonomous plans validates the 5 discriminator + 2 opt-in flag set (v4 and later also require `model_plan`).
 
 ## Subagent Dispatch Convention
 
@@ -1081,6 +1086,7 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 | "Parallel dispatch is overhead for a small task" | The default is parallel. Justify sequential. |
 | "The serve is running and the page loads; the bundle must be current" | A stalled watcher and a failed rebuild both serve the last-good bundle silently. FRESH is proven, never assumed. |
 | "The walk completed without errors, so the feature works" | A ref-walk over a canvas completes by driving nothing; a screenshot can look right over a broken render. The drive-check + semantic readback are what make a walk evidence. |
+| "The restart counter ticked up but the app came back healthy — the walk still counts" | A mid-walk crash-restart can swallow the exact bug being probed; the restart-count delta is a blocking finding until run to ground. |
 
 ## Red Flags — STOP and Correct
 
@@ -1107,17 +1113,18 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 - Single-threading a step where 2+ subtasks are clearly independent.
 - Presenting live-browser evidence with no bundle-freshness proof in the same session.
 - Recording browser-modality evidence with no drive-check in the same session.
+- Recording live-walk evidence with no stack-health snapshot, or treating a mid-walk restart-count delta as benign instead of a blocking finding.
 
 ## Quick Reference
 
 | Step | Gate | Evidence |
 |---|---|---|
-| 0. Configure | Frontmatter has `canonical_sdlc_version: 8` + 5 discriminator + 2 opt-in flags + `model_plan`; display included `integration-branch:`; user confirmed; TaskCreate list created | Confirmation row in `## SDLC State` |
+| 0. Configure | Frontmatter has `canonical_sdlc_version: 9` + 5 discriminator + 2 opt-in flags + `model_plan`; display included `integration-branch:`; user confirmed; TaskCreate list created | Confirmation row in `## SDLC State` |
 | 1. Ideate | Refined idea + "Not Doing" list | Artifacts in spec; `shape` output if `design-refresh`; triage notes if `incident-response` |
 | 2. Spec | Every req has acceptance criterion | Spec doc |
 | 3. Plan | No placeholders; `integration-branch:` declared; Step 4 expanded into slice tasks | Plan file |
 | 4. Implement | Every slice has a passing test that was RED first; worktree created if `use_worktree: true` | Commit history with RED→GREEN; worktree fields when applicable |
-| 5. Verify (gate) | Tests/build pass (`pass == total`); browser modality proven or `n/a`; bundle freshness proven or `n/a`; drive-check proven or `n/a` | `cmd:`/`pass:`/`total:`/`output:` + `devtools-trace:` or `n/a:` + `bundle-fresh:` proof or `n/a:` + `drive-check:` delta/suite or `n/a:` |
+| 5. Verify (gate) | Tests/build pass (`pass == total`); browser modality proven or `n/a`; bundle freshness proven or `n/a`; drive-check proven or `n/a`; stack-health proven or `n/a` | `cmd:`/`pass:`/`total:`/`output:` + `devtools-trace:` or `n/a:` + `bundle-fresh:` proof or `n/a:` + `drive-check:` delta/suite or `n/a:` + `stack-health:` snapshot or `n/a:` |
 | 6. Review (gate) | Every axis has a verdict; adversarial critic attached (mandatory in `autonomous`, `incident-response`, `design-refresh`) | Pointer to 5-axis body + critic findings |
 | 7. Document decisions | Every significant decision has a record | ADR file(s); or `rca.md` for `incident-response` |
 | 8. Integrate & close | Wave merged into declared `integration-branch`; worktree removed; `.bionic/tmp/` wiped + tasks completed + `cleaned:` stamped (or `cleanup: n/a`) | `merge:`/`worktree-removed:` + cleanup fields |

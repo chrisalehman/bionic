@@ -61,6 +61,8 @@ X2=$(echo "$BOX" | jq '.x + .width*0.7 | round'); Y2=$(echo "$BOX" | jq '.y + .h
 
 Return the object itself — do NOT `JSON.stringify` it: `--raw` already serializes the return value, and stringifying first double-encodes it into a quoted string that `jq` can't index, leaving the coordinate variables silently empty (`mousemove` with empty args drives (0,0) — a silent no-contact walk).
 
+**Probe the plumbing, don't presence-grep it.** A shared prelude or setup snippet — the bounding-box read above, an auth bootstrap, a fixture loader — needs its own executed probe exactly like a headline claim does. A presence-grep ("the snippet is there") passes vacuously on a broken-but-present snippet: the code exists, so the grep is green, while the snippet silently produces the wrong value. Only running the prelude and reading its output back proves the plumbing. The double-encoding trap above is the archetype — the recipe was present and looked correct, every presence check stayed green, and it drove (0,0) anyway; nothing but an executed readback of the computed coordinates would have caught it.
+
 **Drag** — step the pointer through at least one intermediate move; drag handlers with move-thresholds or per-move deltas miss a single jump (this template is a horizontal drag: `Y1 == Y2`; interpolate Y in the intermediate move for diagonal drags):
 
 ```bash
@@ -153,6 +155,8 @@ S="verify-<wave-slug>"
 playwright-cli -s="$S" open http://localhost:3000
 ```
 
+**Stack-health snapshot — bracket the whole walk.** Before the walk begins, snapshot the serving stack's runtime-integrity indicators (process/container restart counts, crash/OOM last-state) via the project's stack-health tool — a process-supervisor status query or a container-orchestrator restart-count read; the tool is project-specific. Re-snapshot AFTER the walk, before you close the session. Any delta (a restart, a crash/OOM that recovered) blocks the evidence until run to ground: a crash-restart mid-walk can swallow the exact bug being probed while the app returns looking healthy. The no-delta before/after result feeds the plan's `stack-health:` evidence (canonical-sdlc Step 5), running as one pre/post frame with the drive-check (contact) and bundle-freshness (artifact) proofs.
+
 0. **Drive-check — prove contact before anything counts.** Before ANY interaction evidence counts, prove your input actually reaches the app: perform one cheap interaction on the surface under test and read a real application value back via `eval` — not a screenshot.
    ```bash
    # example shape: read state, interact, read again — assert the delta
@@ -236,9 +240,10 @@ Step 5:
   output: <plan>#step-5
   devtools-trace: .bionic/tmp/evidence-<slug>-golden.png
   drive-check: <observed delta>
+  stack-health: <before/after snapshot, no delta>
 ```
 
-The `drive-check:` key (v8) records the contact proof from procedure step 0.
+The `drive-check:` key (v8) records the contact proof from procedure step 0. The `stack-health:` key (v9) records the pre/post-walk runtime-integrity snapshot — `stack-health: <before/after snapshot, no delta>`, or `stack-health: n/a: <reason>` when no long-running serve is observed.
 
 For non-UI waves, the browser modality is `n/a: <reason>` (the tests modality is still required). **End-to-end closure floor:** for any wave whose value is user-visible behavior change, the evidence must trace user input → new code (file:line per hop); `n/a: substrate-only` is a red flag requiring explicit justification.
 
