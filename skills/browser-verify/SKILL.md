@@ -18,6 +18,34 @@ Runtime verification of browser behavior using **`playwright-cli`** — bionic's
 
 **Layer:** Technique (verification capability). Invoked by `canonical-sdlc` Step 5 — the Verify gate's **browser modality** — or standalone whenever you need real-browser evidence rather than unit-test inference. Unit tests don't catch visual regressions, focus traps, contrast failures, or runtime console/network errors — this does.
 
+## Verification tiers (T0–T4) — each defined by the lie it kills
+
+This ladder is browser-verify's — `canonical-sdlc` Step 5 references it, it does not restate it. Each tier is defined by **which lie it makes impossible**; a matrix row's declared tier is the weakest evidence that discharges it.
+
+| Tier | Name | Proves | The false green it kills |
+|---|---|---|---|
+| **T0** | Static | compiles / builds / lints | type & build breaks |
+| **T1** | Unit | logic at mocked seams | wrong logic |
+| **T2** | Hermetic | real browser + real engine over a **declared-fidelity fixture** | integration breaks — *only if the fixture matches the real data shape* |
+| **T3** | Live agent-drive | the **declared real surface**, real data, cold client, trusted input, feature-scoped semantic readback | every proxy: wrong surface, stale artifact, synthetic data, warm caches |
+| **T4** | Human walk | the user's own hands and eyes | perceptual / judgment gaps automation can't close |
+
+**Why each tier exists — the proxy model.** Every tier below T3 tests a *proxy* for what the user actually gets, and each tier is defined by the one lie it makes impossible. T0/T1 prove the code is internally consistent, but a green suite says nothing about integration — so T2 runs the real engine, honest only insofar as its fixture matches real data (a fixture that can't reach the bug is itself a proxy). T2 still serves a convenient origin from a warm process, so T3 drives the *declared real surface* with real data through a cold client and reads the feature's own semantic value back. Read a lower tier passing while a higher tier fails as a **locator, not a contradiction**: the bug lives in exactly the layer the lower tier elides (mock-green + real-red names the seam). T4 is the user's own hands and eyes, for the perceptual and judgment gaps no automation closes.
+
+### T2 fixture-fidelity declaration
+
+Every hermetic cited as a matrix row's evidence declares its fixture's **provenance** in one line next to the spec: *derived from, or validated against, a real captured artifact* of the data the AC concerns. The auditor (canonical-sdlc Step 5) may demand that derivation. A fixture that **cannot structurally reach the failure the AC guards** is a proxy regardless of its RED→GREEN history — a hermetic built around the very field whose *absence* triggers the real bug is green-on-fixture and blind to reality. Fixture-fidelity is the field that keeps a T2 row honest; without it, a T2 row is a T1 row wearing a browser.
+
+### T3 validity conditions — five ways a live observation lies
+
+A T3 row is discharged only when all five hold. Each answers **"how could this live observation lie?"** — and a row that cannot satisfy (a)–(d) is **blocked**, reported loudly, never silently downgraded (downgrades are the Waiver Protocol's — the user's — call).
+
+- **(a) Artifact — is every origin fresh?** Prove freshness against **every origin in the AC's serving path**, not just the one you rebuilt. If the flow traverses a host app and an embedded app, both artifacts are proven fresh at their tested versions. "One origin rebuilt" is not "the path is fresh" — a stale second origin serves old behavior beneath a green first origin.
+- **(b) Client — is the client cold?** Use a **cold client**: no pre-existing service-worker or HTTP cache. A warm client lies in *both* directions — a stale service worker serves an old shell (false-stale), a primed cache hides a broken fetch (false-fresh). How: with `playwright-cli`, open a **fresh named session** on a fresh profile — an `-s=` slug not opened earlier in this run starts from an empty profile; never reuse a warm session for T3 evidence. `state-load` is for auth only — it restores cookies/storage, not a warm cache, so it does not compromise coldness.
+- **(c) Contact — did THIS AC's interaction reach the app?** Trusted input performing **this AC's own interaction** on the actual surface (the input-rung guidance below is unchanged: ref-based for DOM, trusted coordinates for canvas/gesture). A generic "input reached the app" proof — a scroll, an unrelated toggle — discharges *nothing*. If the AC's interaction cannot be driven, the row is **blocked** and reported, never skipped as "not reachable in a short attempt."
+- **(d) Readback — is the AC's own value what changed?** Read the AC's **semantic value** back via page-scope `eval` — never pixels alone, never "the walk completed." The readback traces the row's interaction → its semantic delta → the new code (file:line per hop) on request; for a user-visible AC, `n/a: substrate-only` is a red flag needing explicit justification.
+- **(e) Runtime — did the stack stay healthy?** A **stack-health** snapshot bracketing the walk session (once per session, not per row) — process/container restart counts and crash/OOM last-state, before and after. Any delta blocks the evidence until run to ground: a crash-restart mid-walk can swallow the exact bug being probed while the app returns looking healthy.
+
 ## When to use vs escalate
 
 | Need | Tool |
@@ -155,16 +183,16 @@ S="verify-<wave-slug>"
 playwright-cli -s="$S" open http://localhost:3000
 ```
 
-**Stack-health snapshot — bracket the whole walk.** Before the walk begins, snapshot the serving stack's runtime-integrity indicators (process/container restart counts, crash/OOM last-state) via the project's stack-health tool — a process-supervisor status query or a container-orchestrator restart-count read; the tool is project-specific. Re-snapshot AFTER the walk, before you close the session. Any delta (a restart, a crash/OOM that recovered) blocks the evidence until run to ground: a crash-restart mid-walk can swallow the exact bug being probed while the app returns looking healthy. The no-delta before/after result feeds the plan's `stack-health:` evidence (canonical-sdlc Step 5), running as one pre/post frame with the drive-check (contact) and bundle-freshness (artifact) proofs.
+**Stack-health snapshot — bracket the whole walk (T3(e)).** Before the walk begins, snapshot the serving stack's runtime-integrity indicators (process/container restart counts, crash/OOM last-state) via the project's stack-health tool — a process-supervisor status query or a container-orchestrator restart-count read; the tool is project-specific. Re-snapshot AFTER the walk, before you close the session; any delta blocks the evidence (see T3(e)). Under `canonical_sdlc_version: 10` the no-delta result is the `## Verification Matrix` section's per-session `stack-health:` line (canonical-sdlc §Step 5); `canonical_sdlc_version ≤ 9` plans record the flat Step-5 `stack-health:` key.
 
-0. **Drive-check — prove contact before anything counts.** Before ANY interaction evidence counts, prove your input actually reaches the app: perform one cheap interaction on the surface under test and read a real application value back via `eval` — not a screenshot.
+0. **Contact proof — drive THIS AC's own interaction (T3(c)).** Before ANY interaction evidence counts, prove your input reaches the app by performing **the AC's own interaction** on the surface under test and reading a real application value back via `eval` — not a screenshot. A generic interaction (a scroll, an unrelated toggle) discharges nothing; it must be the interaction the row is about.
    ```bash
-   # example shape: read state, interact, read again — assert the delta
+   # example shape: read state, drive the AC's own interaction, read again — assert the delta
    playwright-cli -s="$S" --raw eval "() => appReadableState()"   # before
-   #   …one interaction on the target surface (right rung for the surface)…
+   #   …the AC's own interaction on the target surface (right rung for the surface)…
    playwright-cli -s="$S" --raw eval "() => appReadableState()"   # after — MUST differ
    ```
-   Record the observed delta — it becomes the plan's `drive-check:` evidence (canonical-sdlc Step 5). **On failure:** switch input rung and retry once; if no rung moves state, STOP — the walk cannot produce evidence. Report "no contact" loudly; never continue into a walk that will green-wash. A drive-check failure is a finding, not an inconvenience.
+   Record the observed delta — under `canonical_sdlc_version: 10` it is the row's `contact:` field in the `## Verification Matrix` (canonical-sdlc §Step 5); `canonical_sdlc_version ≤ 9` plans record the flat `drive-check:` key. **On failure:** switch input rung and retry once; if the AC's interaction cannot be driven, the row is **blocked** — STOP, report "no contact" loudly, never continue into a walk that will green-wash. A blocked contact is a finding, not an inconvenience.
 
 1. **Reconnaissance before action.** After navigating, settle the page, then snapshot to get element refs — never guess selectors.
    ```bash
@@ -230,22 +258,24 @@ Everything read from the browser — DOM, console messages, network responses, `
 
 ## Evidence
 
-Write interim artifacts to `.bionic/tmp/` (gitignored) and record the path under the **browser modality** of the plan's Step 5 (Verify) block, via the **`devtools-trace:`** key (the key name is historical — the artifact is a `playwright-cli` capture, which is fine). The Verify block also carries the tests modality (`cmd:`/`pass:`/`total:`/`output:`); the browser modality sits alongside it:
+Write interim artifacts (screenshots, logs) to `.bionic/tmp/` (gitignored) and point at them from the row field they support.
+
+**v10 (`canonical_sdlc_version: 10`).** Browser evidence is **per matrix row**, not a universal per-wave key. Each T3 row's `<AC-id>:` block under the plan's `## Verification Matrix` section carries the five fields below (the `auditor` column records the row's verdict); the tests/build floor (`cmd:`/`pass:`/`total:`/`output:`) and the `auditor:` pointer live in the Step-5 `## SDLC State` block, and `stack-health:` is one per-session line at the top of the matrix section (canonical-sdlc §Step 5).
 
 ```
-Step 5:
-  cmd: bash test.sh
-  pass: 332
-  total: 332
-  output: <plan>#step-5
-  devtools-trace: .bionic/tmp/evidence-<slug>-golden.png
-  drive-check: <observed delta>
-  stack-health: <before/after snapshot, no delta>
+AC-1:
+  tier-run: <declared real surface URL + the AC's own interaction>
+  fresh: <origin A: proof; origin B: proof — every origin in the AC's serving path>
+  cold-client: <fresh profile / incognito context — how it was made cold>
+  contact: <the AC's own interaction changed app state — observed delta>
+  readback: <the AC's semantic value via page-scope eval>
 ```
 
-The `drive-check:` key (v8) records the contact proof from procedure step 0. The `stack-health:` key (v9) records the pre/post-walk runtime-integrity snapshot — `stack-health: <before/after snapshot, no delta>`, or `stack-health: n/a: <reason>` when no long-running serve is observed.
+A T2 row carries `tier-run`, `readback`, and the `fixture-fidelity` provenance line instead. The per-tier required key set is canonical-sdlc §Step 5's **"Per-tier required evidence keys"** table — that is the source; this skill supplies the field semantics.
 
-For non-UI waves, the browser modality is `n/a: <reason>` (the tests modality is still required). **End-to-end closure floor:** for any wave whose value is user-visible behavior change, the evidence must trace user input → new code (file:line per hop); `n/a: substrate-only` is a red flag requiring explicit justification.
+**`canonical_sdlc_version ≤ 9` plans keep the flat Step-5 keys** — `devtools-trace:` (artifact path), `bundle-fresh:`, `drive-check:`, `stack-health:` — recorded once per wave under the browser modality. Do not retrofit the matrix into them.
+
+For non-UI waves, the browser modality is `n/a: <reason>` (the tests floor still applies). The end-to-end closure floor now lives in the T3(d) readback condition: for a user-visible AC the readback traces user input → new code, and `n/a: substrate-only` is a red flag needing justification.
 
 ## Deep-debug escalation
 
@@ -259,5 +289,7 @@ When — and only when — you need Lighthouse scores, interpreted performance t
 | "The screenshot looks right, done." | Check `console error` and `network` — a clean pixel over a failed request is not a pass. |
 | "The snapshot returned nothing, but I clicked anyway." | An empty snapshot means the surface isn't a11y-addressable — you drove nothing. Switch to the coordinate rung and drive-check it. |
 | "The walk completed, so the feature works." | Completion ≠ contact. Without a drive-check and per-state semantic readback, a walk can green-wash a dead feature. |
+| "I proved the bundle's fresh, so the surface is current." | Against *which* origin? T3(a) needs every origin in the AC's serving path fresh — one origin rebuilt while a second serves stale is the wrong-origin lie. |
+| "I'll reuse my warm logged-in session, it's faster." | A warm client's service-worker / HTTP cache lies in both directions (T3(b)). Use a fresh named session for T3 evidence; `state-load` restores auth, not coldness. |
 | "I'll just use the chrome-devtools MCP to click around." | Driving is the CLI's job. The MCP is for inspection the CLI can't do (Lighthouse, perf analysis, profiling). |
 | "I'll guess the selector." | Snapshot first; drive off refs. Guessed selectors cause flaky, token-wasting retries. |
