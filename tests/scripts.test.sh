@@ -765,6 +765,10 @@ expect_eq "reset ALIAS_END matches bootstrap ALIAS_END" "$_bootstrap_end" "$_res
 
 # 5e: Bootstrap uses bionic:start marker (may also reference old claude-setup:start for migration)
 expect_true "bootstrap references bionic:start" grep -q 'bionic:start' "$BOOTSTRAP"
+expect_true "npm-update advisory uses the inspected npm's absolute path (multi-node prefix safety)" \
+  grep -q '{npmbin} install -g ${pkg}@latest' "$BOOTSTRAP"
+expect_true "npm-update advisory resolves npmbin from command -v" \
+  grep -q 'npmbin="$(command -v npm)"' "$BOOTSTRAP"
 # The active start_marker variable must be bionic:start (not the legacy value)
 _bs_active_marker="$(grep 'start_marker=' "$BOOTSTRAP" | grep -v 'old_start' | grep -v '#' | head -1)"
 expect_contains "bootstrap active start_marker uses bionic:start" "bionic:start" "$_bs_active_marker"
