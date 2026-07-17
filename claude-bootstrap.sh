@@ -719,8 +719,8 @@ verify_playwright_registry() {
   local links="${PLAYWRIGHT_CACHE}/.links" f target ver missing label
   [ -d "$links" ] || return 0
   for f in "$links"/*; do
-    [ -e "$f" ] || continue
-    target="$(cat "$f" 2>/dev/null)"
+    [ -f "$f" ] || continue   # skips unexpanded glob + non-file entries (set -e safety)
+    target="$(cat "$f" 2>/dev/null || true)"
     { [ -n "$target" ] && [ -d "$target" ]; } || continue   # dangling: nothing to verify
     label="${target%/node_modules/playwright-core}"
     ver="$(jq -r '.version // "unknown"' "$target/package.json" 2>/dev/null || echo unknown)"
@@ -992,14 +992,19 @@ _pw_lock_preflight() {
 # accepted-risk class as the dry-run parse above): every consumer fails open —
 # unreadable input skips loudly, never blocks the run.
 
-# _pw_link_demands <pkg-dir> — print "name revision" per chromium-set
+# _pw_link_demands <pkg-dir> — print "name rev [rev...]" per chromium-set
 # component (chromium, chromium-headless-shell, ffmpeg — the three components
-# `install chromium` stages). rc≠0 / empty output when browsers.json is
-# missing or unparseable.
+# `install chromium` stages). Revisions after the first are the entry's
+# revisionOverrides values (per-platform pins, e.g. ffmpeg mac12 → older
+# build): the component is satisfied by ANY candidate revision, because on a
+# given machine Playwright itself resolves and installs exactly one of them —
+# replicating its host-platform detection here would chase an internal
+# contract. rc≠0 / empty output when browsers.json is missing or unparseable.
 _pw_link_demands() {
   jq -r '.browsers[]
          | select(.name == "chromium" or .name == "chromium-headless-shell" or .name == "ffmpeg")
-         | "\(.name) \(.revision)"' "$1/browsers.json" 2>/dev/null
+         | .name + " " + .revision + ((.revisionOverrides // {}) | [.[]] | map(" " + .) | join(""))' \
+    "$1/browsers.json" 2>/dev/null
 }
 
 # _pw_component_dir <name> <revision> — cache dir for one component build.
@@ -1009,15 +1014,23 @@ _pw_component_dir() {
   echo "${PLAYWRIGHT_CACHE}/${1//-/_}-$2"
 }
 
-# _pw_link_missing <pkg-dir> — print demanded component names whose build is
-# absent or incomplete (no INSTALLATION_COMPLETE marker). Empty output + rc 0
-# = fully satisfied. rc 1 = demands unreadable/empty (caller skips loudly).
+# _pw_link_missing <pkg-dir> — print demanded component names with no complete
+# build under ANY candidate revision (no INSTALLATION_COMPLETE marker). Empty
+# output + rc 0 = fully satisfied. rc 1 = demands unreadable/empty (caller
+# skips loudly).
 _pw_link_missing() {
-  local demands name rev
+  local demands name revs rev sat
   demands="$(_pw_link_demands "$1")"
   [ -n "$demands" ] || return 1
-  while IFS=' ' read -r name rev; do
-    [ -f "$(_pw_component_dir "$name" "$rev")/INSTALLATION_COMPLETE" ] || echo "$name"
+  while IFS=' ' read -r name revs; do
+    sat=0
+    for rev in $revs; do
+      if [ -f "$(_pw_component_dir "$name" "$rev")/INSTALLATION_COMPLETE" ]; then
+        sat=1
+        break
+      fi
+    done
+    [ "$sat" -eq 1 ] || echo "$name"
   done <<< "$demands"
 }
 
@@ -1044,8 +1057,11 @@ do_heal_playwright_registry() {
     return 0
   fi
   for f in "$links"/*; do
-    [ -e "$f" ] || continue   # unexpanded glob: empty registry
-    target="$(cat "$f" 2>/dev/null)"
+    # -f (not -e) skips the unexpanded-glob literal AND non-file entries
+    # (a stray subdirectory); `|| true` keeps an unreadable link file from
+    # tripping set -e — both are fail-open contract, never abort.
+    [ -f "$f" ] || continue
+    target="$(cat "$f" 2>/dev/null || true)"
     if [ -z "$target" ] || [ ! -d "$target" ]; then
       echo "  ${target:-$(basename "$f")} — dangling registry link (skipped; re-registers on that project's next install)"
       continue
