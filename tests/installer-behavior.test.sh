@@ -53,7 +53,7 @@ chmod +x "${BIN}"/*
 
 # ---------- extract the REAL resilience block + installer functions ----------
 awk '/^# ─── Resilience ───/{f=1} f{print} /^# ─── Helpers ───/{if(f)exit}' "$BOOTSTRAP" > "$CODE"
-for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing; do
+for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_one do_heal_playwright_registry; do
   awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$CODE"
 done
 
@@ -318,6 +318,76 @@ NOJSON="${REG}/proj-b/node_modules/playwright-core"; mkdir -p "$NOJSON"
 if _pw_link_missing "$NOJSON" >/dev/null; then no "missing browsers.json must rc 1"; else ok "missing browsers.json → rc 1"; fi
 printf 'not json' > "$NOJSON/browsers.json"
 if _pw_link_missing "$NOJSON" >/dev/null; then no "corrupt browsers.json must rc 1"; else ok "corrupt browsers.json → rc 1"; fi
+
+# 12) Registry heal wiring: heal / warm no-op / dangling / unreadable / lock.
+cat > "${BIN}/node" <<EOF
+#!/bin/bash
+echo "node \$*" >> "$LOG"
+exit 0
+EOF
+chmod +x "${BIN}/node"
+
+# 12a) missing build → heals via THAT installation's own CLI
+rm -rf "${PLAYWRIGHT_CACHE}"; mkdir -p "${PLAYWRIGHT_CACHE}/.links"
+mk_pw_install "$PROJ_A" "1.59.1" "1217"
+echo "$PROJ_A" > "${PLAYWRIGHT_CACHE}/.links/aaa"
+satisfy_component chromium 1217; satisfy_component ffmpeg 9999   # shell missing
+: > "$LOG"; INSTALL_FAILURES=()
+do_heal_playwright_registry >/dev/null
+expect_log "node ${PROJ_A}/cli.js install chromium" "heal invokes the installation's own cli.js"
+[ "${#INSTALL_FAILURES[@]}" -eq 0 ] && ok "successful heal records no failure" || no "heal recorded spurious failure"
+
+# 12b) fully satisfied → no node invocation, satisfied line printed
+satisfy_component chromium-headless-shell 1217
+: > "$LOG"; INSTALL_FAILURES=()
+out="$(do_heal_playwright_registry)"
+if logged "node ${PROJ_A}/cli.js install chromium"; then no "warm registry must not invoke cli.js"; else ok "warm registry skips the install"; fi
+echo "$out" | grep -q "pinned builds present" && ok "satisfied link prints presence line" || no "presence line missing: $out"
+
+# 12c) dangling link → loud skip, no node, no failure
+echo "${REG}/gone/node_modules/playwright-core" > "${PLAYWRIGHT_CACHE}/.links/bbb"
+: > "$LOG"; INSTALL_FAILURES=()
+out="$(do_heal_playwright_registry)"
+echo "$out" | grep -q "dangling registry link" && ok "dangling link skips loudly" || no "dangling skip line missing: $out"
+[ "${#INSTALL_FAILURES[@]}" -eq 0 ] && ok "dangling link records no failure" || no "dangling link must not record a failure"
+rm "${PLAYWRIGHT_CACHE}/.links/bbb"
+
+# 12d) unreadable browsers.json → loud skip, no node, no failure
+mkdir -p "$NOJSON"; printf 'not json' > "$NOJSON/browsers.json"
+echo "$NOJSON" > "${PLAYWRIGHT_CACHE}/.links/ccc"
+: > "$LOG"; INSTALL_FAILURES=()
+out="$(do_heal_playwright_registry)"
+echo "$out" | grep -q "unreadable browsers.json" && ok "unreadable demands skip loudly" || no "unreadable skip line missing: $out"
+if logged "node ${NOJSON}/cli.js install chromium"; then no "unreadable demands must not heal"; else ok "unreadable demands do not invoke cli.js"; fi
+rm "${PLAYWRIGHT_CACHE}/.links/ccc"
+
+# 12e) held lock → fail fast, no node, one named failure
+rm "$(_pw_component_dir chromium-headless-shell 1217)/INSTALLATION_COMPLETE"
+mkdir -p "${PLAYWRIGHT_CACHE}/__dirlock"
+cat > "${BIN}/pgrep" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+chmod +x "${BIN}/pgrep"
+: > "$LOG"; INSTALL_FAILURES=()
+do_heal_playwright_registry >/dev/null
+if logged "node ${PROJ_A}/cli.js install chromium"; then no "held lock must not heal"; else ok "held lock skips the heal attempt"; fi
+[ "${#INSTALL_FAILURES[@]}" -eq 1 ] && ok "held-lock heal records one failure" || no "held-lock failure count ${#INSTALL_FAILURES[@]}"
+case "${INSTALL_FAILURES[0]:-}" in *"second Claude session"*) ok "heal failure names the second-session cause";; *) no "heal failure text wrong";; esac
+rm -rf "${PLAYWRIGHT_CACHE}/__dirlock"
+cat > "${BIN}/pgrep" <<'EOF'
+#!/bin/bash
+exit 1
+EOF
+chmod +x "${BIN}/pgrep"
+
+# 12f) empty/absent registry → quiet no-op, rc 0
+rm -f "${PLAYWRIGHT_CACHE}/.links/aaa"
+if do_heal_playwright_registry >/dev/null; then ok "empty registry no-ops (rc 0)"; else no "empty registry must rc 0"; fi
+rm -rf "${PLAYWRIGHT_CACHE}/.links"
+out="$(do_heal_playwright_registry)"; rc=$?
+[ "$rc" -eq 0 ] && echo "$out" | grep -q "no installation registry" && ok "absent .links skips loudly, rc 0" || no "absent .links handling wrong (rc=$rc): $out"
+mkdir -p "${PLAYWRIGHT_CACHE}/.links"
 
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
