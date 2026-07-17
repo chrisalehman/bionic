@@ -53,13 +53,15 @@ chmod +x "${BIN}"/*
 
 # ---------- extract the REAL resilience block + installer functions ----------
 awk '/^# ─── Resilience ───/{f=1} f{print} /^# ─── Helpers ───/{if(f)exit}' "$BOOTSTRAP" > "$CODE"
-for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer; do
+for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry; do
   awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$CODE"
 done
 
 # ---------- run under a restricted PATH (mock bin + core dirs only) ----------
 # Excludes /opt/homebrew & any google-cloud-sdk so `command -v gcloud` fails and
-# the install path is genuinely exercised.
+# the install path is genuinely exercised. jq is symlinked in for real (the
+# registry-heal helpers need the real jq; Homebrew's jq may be excluded below).
+ln -s "$(command -v jq)" "${BIN}/jq"
 export PATH="${BIN}:/usr/bin:/bin"
 export RETRY_MAX=2
 # shellcheck disable=SC1090
@@ -255,6 +257,244 @@ cat > "${BIN}/pgrep" <<'EOF'
 exit 1
 EOF
 chmod +x "${BIN}/pgrep"
+
+# 11) Registry-heal helpers: demand parse, dir mapping, missing detection.
+REG="${SBX}/registry"; export PLAYWRIGHT_CACHE="${REG}/cache"
+mkdir -p "${PLAYWRIGHT_CACHE}/.links"
+
+# mk_pw_install <dir> <version> <chromium-rev> — fabricate a playwright-core
+# package dir with a realistic browsers.json (ffmpeg on its own revision;
+# firefox present to prove the chromium-set filter).
+mk_pw_install() {
+  mkdir -p "$1"
+  printf '{"version":"%s"}\n' "$2" > "$1/package.json"
+  cat > "$1/browsers.json" <<JSON
+{"browsers":[
+  {"name":"chromium","revision":"$3","installByDefault":true},
+  {"name":"chromium-headless-shell","revision":"$3","installByDefault":true},
+  {"name":"ffmpeg","revision":"9999","revisionOverrides":{"mac12":"8888"},"installByDefault":true},
+  {"name":"firefox","revision":"7777","installByDefault":true}
+]}
+JSON
+}
+satisfy_component() {  # <name> <rev>
+  local d; d="$(_pw_component_dir "$1" "$2")"
+  mkdir -p "$d"; touch "$d/INSTALLATION_COMPLETE"
+}
+
+PROJ_A="${REG}/proj-a/node_modules/playwright-core"
+mk_pw_install "$PROJ_A" "1.59.1" "1217"
+
+# 11a) demands: chromium set only, name+revision pairs
+d="$(_pw_link_demands "$PROJ_A")"
+echo "$d" | grep -qx "chromium 1217" && ok "demands include chromium 1217" || no "chromium demand missing: $d"
+echo "$d" | grep -qx "chromium-headless-shell 1217" && ok "demands include headless shell" || no "shell demand missing"
+echo "$d" | grep -qx "ffmpeg 9999 8888" && ok "demands include ffmpeg with override candidates" || no "ffmpeg demand missing/wrong: $d"
+echo "$d" | grep -q "firefox" && no "firefox must be filtered out" || ok "firefox filtered from demands"
+
+# 11b) dir mapping: dashes become underscores
+[ "$(_pw_component_dir chromium-headless-shell 1217)" = "${PLAYWRIGHT_CACHE}/chromium_headless_shell-1217" ] \
+  && ok "component dir maps dashes to underscores" || no "dir mapping wrong: $(_pw_component_dir chromium-headless-shell 1217)"
+[ "$(_pw_component_dir chromium 1217)" = "${PLAYWRIGHT_CACHE}/chromium-1217" ] \
+  && ok "chromium dir mapping" || no "chromium dir mapping wrong"
+
+# 11c) missing detection: all missing → three names; marker required
+m="$(_pw_link_missing "$PROJ_A")"
+[ "$(echo "$m" | wc -l | tr -d ' ')" = "3" ] && ok "all three components reported missing" || no "missing list wrong: $m"
+satisfy_component chromium 1217
+mkdir -p "$(_pw_component_dir chromium-headless-shell 1217)"   # dir but NO marker
+m="$(_pw_link_missing "$PROJ_A")"
+echo "$m" | grep -qx "chromium" && no "satisfied chromium must not be listed" || ok "satisfied component not listed"
+echo "$m" | grep -qx "chromium-headless-shell" && ok "marker-less dir still counts missing" || no "marker-less dir must count missing"
+
+# 11d) fully satisfied → empty output, rc 0
+satisfy_component chromium-headless-shell 1217
+satisfy_component ffmpeg 9999
+m="$(_pw_link_missing "$PROJ_A")"; rc=$?
+[ "$rc" -eq 0 ] && [ -z "$m" ] && ok "fully satisfied → empty, rc 0" || no "satisfied walk wrong (rc=$rc, m='$m')"
+
+# 11e) unreadable browsers.json → rc 1 (fail-open signal)
+NOJSON="${REG}/proj-b/node_modules/playwright-core"; mkdir -p "$NOJSON"
+if _pw_link_missing "$NOJSON" >/dev/null; then no "missing browsers.json must rc 1"; else ok "missing browsers.json → rc 1"; fi
+printf 'not json' > "$NOJSON/browsers.json"
+if _pw_link_missing "$NOJSON" >/dev/null; then no "corrupt browsers.json must rc 1"; else ok "corrupt browsers.json → rc 1"; fi
+
+export PLAYWRIGHT_HEAL_NODE=node   # hermetic: resolver must pick the PATH mock, not a real brew node@22
+# 12) Registry heal wiring: heal / warm no-op / dangling / unreadable / lock.
+cat > "${BIN}/node" <<EOF
+#!/bin/bash
+echo "node \$*" >> "$LOG"
+case "\$1" in -e) echo 22; exit 0 ;; esac
+exit 0
+EOF
+chmod +x "${BIN}/node"
+
+# 12a) missing build → heals via THAT installation's own CLI
+rm -rf "${PLAYWRIGHT_CACHE}"; mkdir -p "${PLAYWRIGHT_CACHE}/.links"
+mk_pw_install "$PROJ_A" "1.59.1" "1217"
+echo "$PROJ_A" > "${PLAYWRIGHT_CACHE}/.links/aaa"
+satisfy_component chromium 1217; satisfy_component ffmpeg 9999   # shell missing
+: > "$LOG"; INSTALL_FAILURES=()
+do_heal_playwright_registry >/dev/null
+expect_log "node ${PROJ_A}/cli.js install chromium" "heal invokes the installation's own cli.js"
+[ "${#INSTALL_FAILURES[@]}" -eq 0 ] && ok "successful heal records no failure" || no "heal recorded spurious failure"
+
+# 12b) fully satisfied → no node invocation, satisfied line printed
+satisfy_component chromium-headless-shell 1217
+: > "$LOG"; INSTALL_FAILURES=()
+out="$(do_heal_playwright_registry)"
+if logged "node ${PROJ_A}/cli.js install chromium"; then no "warm registry must not invoke cli.js"; else ok "warm registry skips the install"; fi
+echo "$out" | grep -q "pinned builds present" && ok "satisfied link prints presence line" || no "presence line missing: $out"
+
+# 12c) dangling link → loud skip, no node, no failure
+echo "${REG}/gone/node_modules/playwright-core" > "${PLAYWRIGHT_CACHE}/.links/bbb"
+: > "$LOG"; INSTALL_FAILURES=()
+out="$(do_heal_playwright_registry)"
+echo "$out" | grep -q "dangling registry link" && ok "dangling link skips loudly" || no "dangling skip line missing: $out"
+[ "${#INSTALL_FAILURES[@]}" -eq 0 ] && ok "dangling link records no failure" || no "dangling link must not record a failure"
+rm "${PLAYWRIGHT_CACHE}/.links/bbb"
+
+# 12d) unreadable browsers.json → loud skip, no node, no failure
+mkdir -p "$NOJSON"; printf 'not json' > "$NOJSON/browsers.json"
+echo "$NOJSON" > "${PLAYWRIGHT_CACHE}/.links/ccc"
+: > "$LOG"; INSTALL_FAILURES=()
+out="$(do_heal_playwright_registry)"
+echo "$out" | grep -q "unreadable browsers.json" && ok "unreadable demands skip loudly" || no "unreadable skip line missing: $out"
+if logged "node ${NOJSON}/cli.js install chromium"; then no "unreadable demands must not heal"; else ok "unreadable demands do not invoke cli.js"; fi
+rm "${PLAYWRIGHT_CACHE}/.links/ccc"
+
+# 12e) held lock → fail fast, no node, one named failure
+rm "$(_pw_component_dir chromium-headless-shell 1217)/INSTALLATION_COMPLETE"
+mkdir -p "${PLAYWRIGHT_CACHE}/__dirlock"
+cat > "${BIN}/pgrep" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+chmod +x "${BIN}/pgrep"
+: > "$LOG"; INSTALL_FAILURES=()
+do_heal_playwright_registry >/dev/null
+if logged "node ${PROJ_A}/cli.js install chromium"; then no "held lock must not heal"; else ok "held lock skips the heal attempt"; fi
+[ "${#INSTALL_FAILURES[@]}" -eq 1 ] && ok "held-lock heal records one failure" || no "held-lock failure count ${#INSTALL_FAILURES[@]}"
+case "${INSTALL_FAILURES[0]:-}" in *"second Claude session"*) ok "heal failure names the second-session cause";; *) no "heal failure text wrong";; esac
+rm -rf "${PLAYWRIGHT_CACHE}/__dirlock"
+cat > "${BIN}/pgrep" <<'EOF'
+#!/bin/bash
+exit 1
+EOF
+chmod +x "${BIN}/pgrep"
+
+# 12f) empty/absent registry → quiet no-op, rc 0
+rm -f "${PLAYWRIGHT_CACHE}/.links/aaa"
+if do_heal_playwright_registry >/dev/null; then ok "empty registry no-ops (rc 0)"; else no "empty registry must rc 0"; fi
+rm -rf "${PLAYWRIGHT_CACHE}/.links"
+out="$(do_heal_playwright_registry)"; rc=$?
+[ "$rc" -eq 0 ] && echo "$out" | grep -q "no installation registry" && ok "absent .links skips loudly, rc 0" || no "absent .links handling wrong (rc=$rc): $out"
+mkdir -p "${PLAYWRIGHT_CACHE}/.links"
+
+# 12g) AC-4: a heal whose underlying node invocation FAILS records exactly one
+# failure and does NOT abort the walk — it continues to heal a subsequent link.
+PROJ_C="${REG}/proj-c/node_modules/playwright-core"
+mk_pw_install "$PROJ_C" "1.59.1" "1217"
+rm -rf "${PLAYWRIGHT_CACHE}"; mkdir -p "${PLAYWRIGHT_CACHE}/.links"
+echo "$PROJ_A" > "${PLAYWRIGHT_CACHE}/.links/aaa"
+echo "$PROJ_C" > "${PLAYWRIGHT_CACHE}/.links/ccc"
+satisfy_component chromium 1217; satisfy_component ffmpeg 9999   # both links missing only the shell build
+cat > "${BIN}/node" <<EOF
+#!/bin/bash
+echo "node \$*" >> "$LOG"
+case "\$1" in -e) echo 22; exit 0 ;; esac
+case "\$*" in
+  *proj-a*) exit 1 ;;
+esac
+exit 0
+EOF
+chmod +x "${BIN}/node"
+: > "$LOG"; INSTALL_FAILURES=()
+do_heal_playwright_registry >/dev/null; rc=$?
+[ "$rc" -eq 0 ] && ok "heal walk returns 0 even when one link's underlying install fails" || no "heal walk aborted (rc=$rc)"
+expect_log "node ${PROJ_A}/cli.js install chromium" "failing heal still invokes proj-a's own cli.js"
+expect_log "node ${PROJ_C}/cli.js install chromium" "walk continues to heal proj-c after proj-a's failure"
+[ "${#INSTALL_FAILURES[@]}" -eq 1 ] && ok "exactly one failure recorded for the failing heal" || no "failure count wrong (got ${#INSTALL_FAILURES[@]})"
+
+# restore the standard exit-0 node mock so later sections are unaffected
+cat > "${BIN}/node" <<EOF
+#!/bin/bash
+echo "node \$*" >> "$LOG"
+case "\$1" in -e) echo 22; exit 0 ;; esac
+exit 0
+EOF
+chmod +x "${BIN}/node"
+
+# 13) Verification walk: per-link status lines + named verify errors.
+# 13a) satisfied link → ✓ line, no errors
+rm -rf "${PLAYWRIGHT_CACHE}"; mkdir -p "${PLAYWRIGHT_CACHE}/.links"
+mk_pw_install "$PROJ_A" "1.59.1" "1217"
+echo "$PROJ_A" > "${PLAYWRIGHT_CACHE}/.links/aaa"
+satisfy_component chromium 1217; satisfy_component chromium-headless-shell 1217; satisfy_component ffmpeg 9999
+verify_errors=()
+out="$(verify_playwright_registry)"
+echo "$out" | grep -q "playwright 1.59.1" && echo "$out" | grep -q "✓" && ok "satisfied link prints ✓ with version" || no "✓ line wrong: $out"
+[ "${#verify_errors[@]}" -eq 0 ] && ok "satisfied link adds no verify error" || no "spurious verify error: ${verify_errors[*]}"
+
+# 13b) missing build → named error naming the component
+rm "$(_pw_component_dir chromium-headless-shell 1217)/INSTALLATION_COMPLETE"
+verify_errors=()
+pw13b_out="$(mktemp)"; verify_playwright_registry > "$pw13b_out"; out="$(cat "$pw13b_out")"; rm -f "$pw13b_out"
+echo "$out" | grep -q "missing" && ok "missing build printed" || no "missing line absent: $out"
+[ "${#verify_errors[@]}" -eq 1 ] && ok "missing build adds one verify error" || no "verify_errors count ${#verify_errors[@]}"
+case "${verify_errors[0]:-}" in *chromium-headless-shell*) ok "verify error names the component";; *) no "component name missing: ${verify_errors[0]:-}";; esac
+
+# 13c) dangling + unreadable links → silently skipped, no errors
+echo "${REG}/gone2/node_modules/playwright-core" > "${PLAYWRIGHT_CACHE}/.links/ddd"
+printf 'not json' > "$NOJSON/browsers.json"; echo "$NOJSON" > "${PLAYWRIGHT_CACHE}/.links/eee"
+satisfy_component chromium-headless-shell 1217
+verify_errors=()
+verify_playwright_registry >/dev/null
+[ "${#verify_errors[@]}" -eq 0 ] && ok "dangling/unreadable links add no verify errors" || no "skips must not error: ${verify_errors[*]}"
+
+# 14) Review-fix regressions: revisionOverrides + set -e fail-open.
+# 14a) component satisfied via an override revision only → not missing
+rm -rf "${PLAYWRIGHT_CACHE}"; mkdir -p "${PLAYWRIGHT_CACHE}/.links"
+mk_pw_install "$PROJ_A" "1.59.1" "1217"
+satisfy_component chromium 1217; satisfy_component chromium-headless-shell 1217
+satisfy_component ffmpeg 8888          # only the override build present
+m="$(_pw_link_missing "$PROJ_A")"; rc=$?
+[ "$rc" -eq 0 ] && [ -z "$m" ] && ok "override revision satisfies the component" || no "override not accepted (rc=$rc, m='$m')"
+
+# 14b) heal walk survives set -e with a subdirectory + unreadable file in .links
+echo "$PROJ_A" > "${PLAYWRIGHT_CACHE}/.links/good"
+mkdir -p "${PLAYWRIGHT_CACHE}/.links/stray-dir"
+echo "$PROJ_A" > "${PLAYWRIGHT_CACHE}/.links/unreadable"; chmod 000 "${PLAYWRIGHT_CACHE}/.links/unreadable"
+: > "$LOG"; INSTALL_FAILURES=()
+if (set -e; do_heal_playwright_registry >/dev/null); then ok "heal survives dir+unreadable under set -e"; else no "heal aborted under set -e"; fi
+
+# 14c) verify walk too, and the good link still gets its ✓ alongside bad entries
+verify_errors=()
+if (set -e; verify_playwright_registry > "${SBX}/v14.out"); then ok "verify survives dir+unreadable under set -e"; else no "verify aborted under set -e"; fi
+grep -q "✓" "${SBX}/v14.out" && ok "good link still verified alongside bad entries" || no "good link not processed: $(cat "${SBX}/v14.out")"
+chmod 700 "${PLAYWRIGHT_CACHE}/.links/unreadable"
+
+# 15) Heal-node resolver: version-pair safety (node >=23 deadlocks playwright <=1.59).
+# 15a) modern CLI → system node fast path
+nb="$(_pw_heal_node 1.61.1)" && [ "$nb" = "node" ] && ok "1.61+ resolves to system node" || no "fast path wrong: ${nb:-rc1}"
+nb="$(_pw_heal_node 1.62.0-alpha-1783623505000)" && [ "$nb" = "node" ] && ok "1.62-alpha resolves to system node" || no "alpha fast path wrong: ${nb:-rc1}"
+# 15b) old CLI + override probing 26 → override rejected, some <=22 runtime wins
+cat > "${BIN}/node26bad" <<'MOCK'
+#!/bin/bash
+case "$1" in -e) echo 26; exit 0 ;; esac
+exit 0
+MOCK
+chmod +x "${BIN}/node26bad"
+nb="$(PLAYWRIGHT_HEAL_NODE="${BIN}/node26bad" _pw_heal_node 1.59.1)"; rc=$?
+[ "$rc" -eq 0 ] && [ "$nb" != "${BIN}/node26bad" ] && ok "old CLI rejects node-26 override, picks a <=22 runtime" || no "resolver accepted unsafe runtime: ${nb:-rc1}"
+# 15c) no safe runtime anywhere → heal skips loudly, never invokes the CLI
+rm -rf "${PLAYWRIGHT_CACHE}"; mkdir -p "${PLAYWRIGHT_CACHE}/.links"
+mk_pw_install "$PROJ_A" "1.59.1" "1217"
+echo "$PROJ_A" > "${PLAYWRIGHT_CACHE}/.links/aaa"
+: > "$LOG"
+out="$(_pw_heal_node(){ return 1; }; do_heal_playwright_registry)"
+echo "$out" | grep -q "needs node" && echo "$out" | grep -q "PLAYWRIGHT_HEAL_NODE" && ok "no-safe-node skips loudly with remediation" || no "skip/remediation line missing: $out"
+if logged "node ${PROJ_A}/cli.js install chromium"; then no "no-safe-node must not invoke the CLI"; else ok "no CLI invocation without a safe runtime"; fi
 
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
