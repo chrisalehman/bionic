@@ -960,6 +960,44 @@ _pw_lock_preflight() {
   return 0
 }
 
+# ─── Registry-heal helpers ───
+# Playwright records every installation that ever ran `playwright install` in
+# ${PLAYWRIGHT_CACHE}/.links (one file per installation, containing the path
+# to its playwright-core package dir), and each installation's browsers.json
+# declares the exact browser builds that version launches. These helpers read
+# that registry. The formats are unversioned Playwright internals (same
+# accepted-risk class as the dry-run parse above): every consumer fails open —
+# unreadable input skips loudly, never blocks the run.
+
+# _pw_link_demands <pkg-dir> — print "name revision" per chromium-set
+# component (chromium, chromium-headless-shell, ffmpeg — the three components
+# `install chromium` stages). rc≠0 / empty output when browsers.json is
+# missing or unparseable.
+_pw_link_demands() {
+  jq -r '.browsers[]
+         | select(.name == "chromium" or .name == "chromium-headless-shell" or .name == "ffmpeg")
+         | "\(.name) \(.revision)"' "$1/browsers.json" 2>/dev/null
+}
+
+# _pw_component_dir <name> <revision> — cache dir for one component build.
+# Playwright's naming: dashes in the component name become underscores
+# (chromium-headless-shell @ 1217 → chromium_headless_shell-1217).
+_pw_component_dir() {
+  echo "${PLAYWRIGHT_CACHE}/${1//-/_}-$2"
+}
+
+# _pw_link_missing <pkg-dir> — print demanded component names whose build is
+# absent or incomplete (no INSTALLATION_COMPLETE marker). Empty output + rc 0
+# = fully satisfied. rc 1 = demands unreadable/empty (caller skips loudly).
+_pw_link_missing() {
+  local demands name rev
+  demands="$(_pw_link_demands "$1")"
+  [ -n "$demands" ] || return 1
+  while IFS=' ' read -r name rev; do
+    [ -f "$(_pw_component_dir "$name" "$rev")/INSTALLATION_COMPLETE" ] || echo "$name"
+  done <<< "$demands"
+}
+
 section "Playwright browsers"
 # The one legitimately slow step (~170 MB on first install), so: stream
 # playwright's own progress instead of capturing it (it prints plain progress

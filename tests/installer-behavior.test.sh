@@ -53,13 +53,15 @@ chmod +x "${BIN}"/*
 
 # ---------- extract the REAL resilience block + installer functions ----------
 awk '/^# ─── Resilience ───/{f=1} f{print} /^# ─── Helpers ───/{if(f)exit}' "$BOOTSTRAP" > "$CODE"
-for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer; do
+for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing; do
   awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$CODE"
 done
 
 # ---------- run under a restricted PATH (mock bin + core dirs only) ----------
 # Excludes /opt/homebrew & any google-cloud-sdk so `command -v gcloud` fails and
-# the install path is genuinely exercised.
+# the install path is genuinely exercised. jq is symlinked in for real (the
+# registry-heal helpers need the real jq; Homebrew's jq may be excluded below).
+ln -s "$(command -v jq)" "${BIN}/jq"
 export PATH="${BIN}:/usr/bin:/bin"
 export RETRY_MAX=2
 # shellcheck disable=SC1090
@@ -255,6 +257,67 @@ cat > "${BIN}/pgrep" <<'EOF'
 exit 1
 EOF
 chmod +x "${BIN}/pgrep"
+
+# 11) Registry-heal helpers: demand parse, dir mapping, missing detection.
+REG="${SBX}/registry"; export PLAYWRIGHT_CACHE="${REG}/cache"
+mkdir -p "${PLAYWRIGHT_CACHE}/.links"
+
+# mk_pw_install <dir> <version> <chromium-rev> — fabricate a playwright-core
+# package dir with a realistic browsers.json (ffmpeg on its own revision;
+# firefox present to prove the chromium-set filter).
+mk_pw_install() {
+  mkdir -p "$1"
+  printf '{"version":"%s"}\n' "$2" > "$1/package.json"
+  cat > "$1/browsers.json" <<JSON
+{"browsers":[
+  {"name":"chromium","revision":"$3","installByDefault":true},
+  {"name":"chromium-headless-shell","revision":"$3","installByDefault":true},
+  {"name":"ffmpeg","revision":"9999","installByDefault":true},
+  {"name":"firefox","revision":"7777","installByDefault":true}
+]}
+JSON
+}
+satisfy_component() {  # <name> <rev>
+  local d; d="$(_pw_component_dir "$1" "$2")"
+  mkdir -p "$d"; touch "$d/INSTALLATION_COMPLETE"
+}
+
+PROJ_A="${REG}/proj-a/node_modules/playwright-core"
+mk_pw_install "$PROJ_A" "1.59.1" "1217"
+
+# 11a) demands: chromium set only, name+revision pairs
+d="$(_pw_link_demands "$PROJ_A")"
+echo "$d" | grep -qx "chromium 1217" && ok "demands include chromium 1217" || no "chromium demand missing: $d"
+echo "$d" | grep -qx "chromium-headless-shell 1217" && ok "demands include headless shell" || no "shell demand missing"
+echo "$d" | grep -qx "ffmpeg 9999" && ok "demands include ffmpeg on its own revision" || no "ffmpeg demand missing"
+echo "$d" | grep -q "firefox" && no "firefox must be filtered out" || ok "firefox filtered from demands"
+
+# 11b) dir mapping: dashes become underscores
+[ "$(_pw_component_dir chromium-headless-shell 1217)" = "${PLAYWRIGHT_CACHE}/chromium_headless_shell-1217" ] \
+  && ok "component dir maps dashes to underscores" || no "dir mapping wrong: $(_pw_component_dir chromium-headless-shell 1217)"
+[ "$(_pw_component_dir chromium 1217)" = "${PLAYWRIGHT_CACHE}/chromium-1217" ] \
+  && ok "chromium dir mapping" || no "chromium dir mapping wrong"
+
+# 11c) missing detection: all missing → three names; marker required
+m="$(_pw_link_missing "$PROJ_A")"
+[ "$(echo "$m" | wc -l | tr -d ' ')" = "3" ] && ok "all three components reported missing" || no "missing list wrong: $m"
+satisfy_component chromium 1217
+mkdir -p "$(_pw_component_dir chromium-headless-shell 1217)"   # dir but NO marker
+m="$(_pw_link_missing "$PROJ_A")"
+echo "$m" | grep -qx "chromium" && no "satisfied chromium must not be listed" || ok "satisfied component not listed"
+echo "$m" | grep -qx "chromium-headless-shell" && ok "marker-less dir still counts missing" || no "marker-less dir must count missing"
+
+# 11d) fully satisfied → empty output, rc 0
+satisfy_component chromium-headless-shell 1217
+satisfy_component ffmpeg 9999
+m="$(_pw_link_missing "$PROJ_A")"; rc=$?
+[ "$rc" -eq 0 ] && [ -z "$m" ] && ok "fully satisfied → empty, rc 0" || no "satisfied walk wrong (rc=$rc, m='$m')"
+
+# 11e) unreadable browsers.json → rc 1 (fail-open signal)
+NOJSON="${REG}/proj-b/node_modules/playwright-core"; mkdir -p "$NOJSON"
+if _pw_link_missing "$NOJSON" >/dev/null; then no "missing browsers.json must rc 1"; else ok "missing browsers.json → rc 1"; fi
+printf 'not json' > "$NOJSON/browsers.json"
+if _pw_link_missing "$NOJSON" >/dev/null; then no "corrupt browsers.json must rc 1"; else ok "corrupt browsers.json → rc 1"; fi
 
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
