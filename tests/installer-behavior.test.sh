@@ -389,6 +389,38 @@ out="$(do_heal_playwright_registry)"; rc=$?
 [ "$rc" -eq 0 ] && echo "$out" | grep -q "no installation registry" && ok "absent .links skips loudly, rc 0" || no "absent .links handling wrong (rc=$rc): $out"
 mkdir -p "${PLAYWRIGHT_CACHE}/.links"
 
+# 12g) AC-4: a heal whose underlying node invocation FAILS records exactly one
+# failure and does NOT abort the walk — it continues to heal a subsequent link.
+PROJ_C="${REG}/proj-c/node_modules/playwright-core"
+mk_pw_install "$PROJ_C" "1.59.1" "1217"
+rm -rf "${PLAYWRIGHT_CACHE}"; mkdir -p "${PLAYWRIGHT_CACHE}/.links"
+echo "$PROJ_A" > "${PLAYWRIGHT_CACHE}/.links/aaa"
+echo "$PROJ_C" > "${PLAYWRIGHT_CACHE}/.links/ccc"
+satisfy_component chromium 1217; satisfy_component ffmpeg 9999   # both links missing only the shell build
+cat > "${BIN}/node" <<EOF
+#!/bin/bash
+echo "node \$*" >> "$LOG"
+case "\$*" in
+  *proj-a*) exit 1 ;;
+esac
+exit 0
+EOF
+chmod +x "${BIN}/node"
+: > "$LOG"; INSTALL_FAILURES=()
+do_heal_playwright_registry >/dev/null; rc=$?
+[ "$rc" -eq 0 ] && ok "heal walk returns 0 even when one link's underlying install fails" || no "heal walk aborted (rc=$rc)"
+expect_log "node ${PROJ_A}/cli.js install chromium" "failing heal still invokes proj-a's own cli.js"
+expect_log "node ${PROJ_C}/cli.js install chromium" "walk continues to heal proj-c after proj-a's failure"
+[ "${#INSTALL_FAILURES[@]}" -eq 1 ] && ok "exactly one failure recorded for the failing heal" || no "failure count wrong (got ${#INSTALL_FAILURES[@]})"
+
+# restore the standard exit-0 node mock so later sections are unaffected
+cat > "${BIN}/node" <<EOF
+#!/bin/bash
+echo "node \$*" >> "$LOG"
+exit 0
+EOF
+chmod +x "${BIN}/node"
+
 # 13) Verification walk: per-link status lines + named verify errors.
 # 13a) satisfied link → ✓ line, no errors
 rm -rf "${PLAYWRIGHT_CACHE}"; mkdir -p "${PLAYWRIGHT_CACHE}/.links"
