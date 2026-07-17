@@ -272,7 +272,7 @@ mk_pw_install() {
 {"browsers":[
   {"name":"chromium","revision":"$3","installByDefault":true},
   {"name":"chromium-headless-shell","revision":"$3","installByDefault":true},
-  {"name":"ffmpeg","revision":"9999","installByDefault":true},
+  {"name":"ffmpeg","revision":"9999","revisionOverrides":{"mac12":"8888"},"installByDefault":true},
   {"name":"firefox","revision":"7777","installByDefault":true}
 ]}
 JSON
@@ -289,7 +289,7 @@ mk_pw_install "$PROJ_A" "1.59.1" "1217"
 d="$(_pw_link_demands "$PROJ_A")"
 echo "$d" | grep -qx "chromium 1217" && ok "demands include chromium 1217" || no "chromium demand missing: $d"
 echo "$d" | grep -qx "chromium-headless-shell 1217" && ok "demands include headless shell" || no "shell demand missing"
-echo "$d" | grep -qx "ffmpeg 9999" && ok "demands include ffmpeg on its own revision" || no "ffmpeg demand missing"
+echo "$d" | grep -qx "ffmpeg 9999 8888" && ok "demands include ffmpeg with override candidates" || no "ffmpeg demand missing/wrong: $d"
 echo "$d" | grep -q "firefox" && no "firefox must be filtered out" || ok "firefox filtered from demands"
 
 # 11b) dir mapping: dashes become underscores
@@ -447,6 +447,28 @@ satisfy_component chromium-headless-shell 1217
 verify_errors=()
 verify_playwright_registry >/dev/null
 [ "${#verify_errors[@]}" -eq 0 ] && ok "dangling/unreadable links add no verify errors" || no "skips must not error: ${verify_errors[*]}"
+
+# 14) Review-fix regressions: revisionOverrides + set -e fail-open.
+# 14a) component satisfied via an override revision only → not missing
+rm -rf "${PLAYWRIGHT_CACHE}"; mkdir -p "${PLAYWRIGHT_CACHE}/.links"
+mk_pw_install "$PROJ_A" "1.59.1" "1217"
+satisfy_component chromium 1217; satisfy_component chromium-headless-shell 1217
+satisfy_component ffmpeg 8888          # only the override build present
+m="$(_pw_link_missing "$PROJ_A")"; rc=$?
+[ "$rc" -eq 0 ] && [ -z "$m" ] && ok "override revision satisfies the component" || no "override not accepted (rc=$rc, m='$m')"
+
+# 14b) heal walk survives set -e with a subdirectory + unreadable file in .links
+echo "$PROJ_A" > "${PLAYWRIGHT_CACHE}/.links/good"
+mkdir -p "${PLAYWRIGHT_CACHE}/.links/stray-dir"
+echo "$PROJ_A" > "${PLAYWRIGHT_CACHE}/.links/unreadable"; chmod 000 "${PLAYWRIGHT_CACHE}/.links/unreadable"
+: > "$LOG"; INSTALL_FAILURES=()
+if (set -e; do_heal_playwright_registry >/dev/null); then ok "heal survives dir+unreadable under set -e"; else no "heal aborted under set -e"; fi
+
+# 14c) verify walk too, and the good link still gets its ✓ alongside bad entries
+verify_errors=()
+if (set -e; verify_playwright_registry > "${SBX}/v14.out"); then ok "verify survives dir+unreadable under set -e"; else no "verify aborted under set -e"; fi
+grep -q "✓" "${SBX}/v14.out" && ok "good link still verified alongside bad entries" || no "good link not processed: $(cat "${SBX}/v14.out")"
+chmod 700 "${PLAYWRIGHT_CACHE}/.links/unreadable"
 
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
