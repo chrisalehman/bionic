@@ -716,7 +716,7 @@ verify_plugin_installed() {
 # verify error (the chromium-* glob above only proves SOME build exists —
 # it is blind to which one each registered project needs).
 verify_playwright_registry() {
-  local links="${PLAYWRIGHT_CACHE}/.links" f target ver missing label
+  local links="${PLAYWRIGHT_CACHE}/.links" f target ver missing label hint
   [ -d "$links" ] || return 0
   for f in "$links"/*; do
     [ -f "$f" ] || continue   # skips unexpanded glob + non-file entries (set -e safety)
@@ -729,7 +729,11 @@ verify_playwright_registry() {
       echo "    playwright ${ver} (${label}) ✓"
     else
       echo "    playwright ${ver} (${label}) — missing: ${missing//$'\n'/ }"
-      verify_errors+=("playwright ${ver} pinned builds missing: ${missing//$'\n'/ } (${label})")
+      # If this machine can't heal the installation (old CLI, no node ≤22),
+      # the generic "re-run bootstrap" advice is a circle — name the real fix.
+      hint=""
+      _pw_heal_node "$ver" >/dev/null || hint=" — heal skipped: needs node ≤22 (brew install node@22) or upgrade this installation past 1.60"
+      verify_errors+=("playwright ${ver} pinned builds missing: ${missing//$'\n'/ } (${label})${hint}")
     fi
   done
 }
@@ -1709,11 +1713,16 @@ collect_updates() {
 
   # npm outdated also exits non-zero when outdated packages exist.
   if command -v jq &>/dev/null; then
-    local pkg cur latest
+    local pkg cur latest npmbin
+    # Absolute path in the remediation: the advisory inspects THIS npm's
+    # global root, and on multi-node machines (nvm + homebrew) a bare `npm`
+    # in the user's shell can resolve elsewhere — the advised command would
+    # install to the wrong prefix and the advisory would never clear.
+    npmbin="$(command -v npm)"
     while IFS=$'\t' read -r pkg cur latest; do
       [ -n "$pkg" ] || continue
       case " ${managed_npm} " in
-        *" ${pkg} "*) UPDATES+=("${pkg} ${cur} → ${latest}|npm install -g ${pkg}@latest") ;;
+        *" ${pkg} "*) UPDATES+=("${pkg} ${cur} → ${latest}|${npmbin} install -g ${pkg}@latest") ;;
       esac
     done < <(npm outdated -g --json 2>/dev/null | jq -r 'to_entries[] | [.key, .value.current // "?", .value.latest // "?"] | @tsv' 2>/dev/null || true)
   fi

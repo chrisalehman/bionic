@@ -496,6 +496,22 @@ out="$(_pw_heal_node(){ return 1; }; do_heal_playwright_registry)"
 echo "$out" | grep -q "needs node" && echo "$out" | grep -q "PLAYWRIGHT_HEAL_NODE" && ok "no-safe-node skips loudly with remediation" || no "skip/remediation line missing: $out"
 if logged "node ${PROJ_A}/cli.js install chromium"; then no "no-safe-node must not invoke the CLI"; else ok "no CLI invocation without a safe runtime"; fi
 
+# 16) Verify-error hint: names the real fix when this machine can't heal.
+# 16a) resolver fails → error carries the node<=22 / upgrade hint
+rm -rf "${PLAYWRIGHT_CACHE}"; mkdir -p "${PLAYWRIGHT_CACHE}/.links"
+mk_pw_install "$PROJ_A" "1.59.1" "1217"
+echo "$PROJ_A" > "${PLAYWRIGHT_CACHE}/.links/aaa"
+_pw_heal_node_saved="$(declare -f _pw_heal_node)"
+_pw_heal_node() { return 1; }
+verify_errors=()
+verify_playwright_registry > /dev/null
+case "${verify_errors[0]:-}" in *"heal skipped"*node*) ok "unhealable install's verify error names node<=22/upgrade fix";; *) no "hint missing: ${verify_errors[0]:-none}";; esac
+eval "$_pw_heal_node_saved"
+# 16b) resolver succeeds → no hint (generic re-run advice is then correct)
+verify_errors=()
+verify_playwright_registry > /dev/null
+case "${verify_errors[0]:-}" in *"heal skipped"*) no "healable install must not carry the hint: ${verify_errors[0]:-}";; "") no "expected a verify error (builds are missing)";; *) ok "healable install's verify error stays generic";; esac
+
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
 echo "========================================"
