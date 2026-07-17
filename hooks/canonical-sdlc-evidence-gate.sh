@@ -640,9 +640,19 @@ keys_for_tier() {
 }
 
 # The `## Verification Matrix` section body (\r stripped, like SECTION at the
-# top of the hook — a separate awk pass over the whole plan).
+# top of the hook — a separate awk pass over the whole plan). Lines inside
+# ``` fenced code blocks are dropped so a jq/shell pipeline written in
+# leading-pipe continuation style is never mistaken for a table row; every
+# downstream matrix parse (rows, stack-health, false-green, AC blocks) reads
+# this body, so scoping the fence-skip here covers all of them. Fence state
+# is tracked across the whole file so section detection stays fence-aware.
 matrix_section() {
-  tr -d '\r' < "$PLAN" | awk '/^## Verification Matrix/{f=1;next} /^## /{f=0} f'
+  tr -d '\r' < "$PLAN" | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## Verification Matrix/ { f=1; next }
+    /^## / { f=0 }
+    f'
 }
 
 # The indented evidence block under "<AC-id>:" within MATRIX (up to the next

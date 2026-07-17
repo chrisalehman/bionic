@@ -2499,6 +2499,112 @@ expect_block "v10.1 17q pending row at current 6 → block (relaxation is 5-only
   "$h17q" 'git commit -m "x"' "AC-2"
 
 # ============================================================
+# Section 18: v10 matrix parser — section scoping + fenced-code skip
+# ============================================================
+#
+# The v10 matrix validator reads every parse (stack-health, false-green,
+# tier-table rows, per-AC blocks) from matrix_section() — the body of the
+# top-level `## Verification Matrix` section. Two properties this section
+# pins:
+#   (1) Row grammar applies ONLY inside that section — a leading-pipe line
+#       in another section is never read as a table row.
+#   (2) Inside that section, lines within ``` fenced code blocks are
+#       skipped — so a jq/shell pipeline written in leading-pipe
+#       continuation style does not masquerade as a malformed table row.
+# Regression origin: epic-06's matrix section embeds fenced bash/jq blocks;
+# a leading-pipe jq continuation line ('| select(.name == "chromium")') was
+# parsed as a matrix row and blocked the commit with a bogus malformed-row
+# error.
+
+echo ""
+echo "=== Section 18: v10 matrix section scoping + fenced-code skip ==="
+
+# A fenced bash block whose jq pipeline uses leading-pipe continuation lines
+# — the exact shape that tripped the validator live. Single-quoted so the
+# triple backticks and inner quotes stay literal (no command substitution).
+v10_fence_block='```bash
+playwright projects --json | jq -r '"'"'.browsers[]
+       | select(.name == "chromium")
+       | "\(.name)"'"'"'
+```'
+
+# (a) Valid, fully discharged matrix with a fenced pipeline appended inside
+# the section (matrix is the last section, so the fence sits at EOF within
+# it). RED before the fix: the '| select(...)' lines parse as malformed rows.
+v10_matrix_fence_after="$v10_matrix_complete
+
+$v10_fence_block"
+
+h18a=$(make_home)
+write_plan "$h18a" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_fence_after")" > /dev/null
+expect_allow "v10 18a fenced jq (leading-pipe) inside matrix section at current 5 → allow" \
+  "$h18a" 'git commit -m "x"'
+
+# (b) A leading-pipe line OUTSIDE the matrix section (a later ## section),
+# not fenced → allow. Pins that row grammar is scoped to the matrix section.
+h18b=$(make_home)
+write_plan "$h18b" "$(v10_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v10_step5_base
+
+$v10_matrix_complete
+
+## Notes
+| this stray pipe line lives outside the matrix section
+| and must never be read as a table row" > /dev/null
+expect_allow "v10 18b leading-pipe line outside the matrix section → allow" \
+  "$h18b" 'git commit -m "x"'
+
+# (c) A fenced pipeline (skipped) AND a genuinely malformed table row (a
+# stray literal | shears a cell) → still block. Pins that fence-skip does
+# not suppress real malformed rows.
+v10_matrix_fence_and_malformed="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+$v10_fence_block
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T3 | discharged | see | AC-1 | CONFIRMED |
+
+AC-1:
+  tier-run: x
+  fresh: x
+  cold-client: x
+  contact: x
+  readback: x"
+
+h18c=$(make_home)
+write_plan "$h18c" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_fence_and_malformed")" > /dev/null
+expect_block "v10 18c fenced pipeline + genuinely malformed row → block (malformed)" \
+  "$h18c" 'git commit -m "x"' "malformed"
+
+# (d) A fenced pipeline placed between stack-health and the table (mid-
+# section), containing leading-pipe lines → allow. Pins that fence-skip works
+# anywhere in the section, not just at the tail.
+v10_matrix_fence_before_table="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+$v10_fence_block
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  tier-run: bash test.sh
+  readback: 40/40 asserted"
+
+h18d=$(make_home)
+write_plan "$h18d" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_fence_before_table")" > /dev/null
+expect_allow "v10 18d fenced pipeline before the table (mid-section) → allow" \
+  "$h18d" 'git commit -m "x"'
+
+# ============================================================
 # Summary
 # ============================================================
 
