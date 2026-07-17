@@ -711,29 +711,6 @@ verify_plugin_installed() {
   fi
 }
 
-# verify_playwright_registry — read-only registry walk: one status line per
-# live registered installation; any missing pinned build becomes a named
-# verify error (the chromium-* glob above only proves SOME build exists —
-# it is blind to which one each registered project needs).
-verify_playwright_registry() {
-  local links="${PLAYWRIGHT_CACHE}/.links" f target ver missing label
-  [ -d "$links" ] || return 0
-  for f in "$links"/*; do
-    [ -f "$f" ] || continue   # skips unexpanded glob + non-file entries (set -e safety)
-    target="$(cat "$f" 2>/dev/null || true)"
-    { [ -n "$target" ] && [ -d "$target" ]; } || continue   # dangling: nothing to verify
-    label="${target%/node_modules/playwright-core}"
-    ver="$(jq -r '.version // "unknown"' "$target/package.json" 2>/dev/null || echo unknown)"
-    missing="$(_pw_link_missing "$target")" || continue      # unreadable demands: skip
-    if [ -z "$missing" ]; then
-      echo "    playwright ${ver} (${label}) ✓"
-    else
-      echo "    playwright ${ver} (${label}) — missing: ${missing//$'\n'/ }"
-      verify_errors+=("playwright ${ver} pinned builds missing: ${missing//$'\n'/ } (${label})")
-    fi
-  done
-}
-
 # ─── Preflight ───────────────────────────────────────────────────────────────
 # Hard prerequisites and environment checks. This is the ONLY place the script
 # may exit early (exit 2). Everything after preflight records failures and
@@ -983,110 +960,6 @@ _pw_lock_preflight() {
   return 0
 }
 
-# ─── Registry-heal helpers ───
-# Playwright records every installation that ever ran `playwright install` in
-# ${PLAYWRIGHT_CACHE}/.links (one file per installation, containing the path
-# to its playwright-core package dir), and each installation's browsers.json
-# declares the exact browser builds that version launches. These helpers read
-# that registry. The formats are unversioned Playwright internals (same
-# accepted-risk class as the dry-run parse above): every consumer fails open —
-# unreadable input skips loudly, never blocks the run.
-
-# _pw_link_demands <pkg-dir> — print "name rev [rev...]" per chromium-set
-# component (chromium, chromium-headless-shell, ffmpeg — the three components
-# `install chromium` stages). Revisions after the first are the entry's
-# revisionOverrides values (per-platform pins, e.g. ffmpeg mac12 → older
-# build): the component is satisfied by ANY candidate revision, because on a
-# given machine Playwright itself resolves and installs exactly one of them —
-# replicating its host-platform detection here would chase an internal
-# contract. rc≠0 / empty output when browsers.json is missing or unparseable.
-_pw_link_demands() {
-  jq -r '.browsers[]
-         | select(.name == "chromium" or .name == "chromium-headless-shell" or .name == "ffmpeg")
-         | .name + " " + .revision + ((.revisionOverrides // {}) | [.[]] | map(" " + .) | join(""))' \
-    "$1/browsers.json" 2>/dev/null
-}
-
-# _pw_component_dir <name> <revision> — cache dir for one component build.
-# Playwright's naming: dashes in the component name become underscores
-# (chromium-headless-shell @ 1217 → chromium_headless_shell-1217).
-_pw_component_dir() {
-  echo "${PLAYWRIGHT_CACHE}/${1//-/_}-$2"
-}
-
-# _pw_link_missing <pkg-dir> — print demanded component names with no complete
-# build under ANY candidate revision (no INSTALLATION_COMPLETE marker). Empty
-# output + rc 0 = fully satisfied. rc 1 = demands unreadable/empty (caller
-# skips loudly).
-_pw_link_missing() {
-  local demands name revs rev sat
-  demands="$(_pw_link_demands "$1")"
-  [ -n "$demands" ] || return 1
-  while IFS=' ' read -r name revs; do
-    sat=0
-    for rev in $revs; do
-      if [ -f "$(_pw_component_dir "$name" "$rev")/INSTALLATION_COMPLETE" ]; then
-        sat=1
-        break
-      fi
-    done
-    [ "$sat" -eq 1 ] || echo "$name"
-  done <<< "$demands"
-}
-
-# _pw_heal_one <pkg-dir> — restore an installation's pinned chromium
-# components via ITS OWN CLI (the only authority on its build numbers).
-# Downloads land in the shared machine-global cache and re-register the
-# link, so later installers' GC passes keep these builds. Same sed filter
-# as _playwright_install (strips the per-project warning box).
-_pw_heal_one() {
-  node "$1/cli.js" install chromium 2>&1 | sed '/[╔║╚]/d'
-}
-
-# do_heal_playwright_registry — walk the installation registry and restore
-# any missing pinned builds. Zero-config: the registry is maintained by
-# Playwright as a side effect of use. Runs AFTER the @latest baseline so
-# every link this pass touches is re-registered and survives subsequent GC
-# passes (including the excalidraw renderer's python install). Fail-open at
-# every rung: dangling/unreadable links skip loudly; heals serialize behind
-# the machine-global cache lock; a failed heal records and continues.
-do_heal_playwright_registry() {
-  local links="${PLAYWRIGHT_CACHE}/.links" f target ver missing label
-  if [ ! -d "$links" ]; then
-    echo "  registry heal — no installation registry yet (skipped)"
-    return 0
-  fi
-  for f in "$links"/*; do
-    # -f (not -e) skips the unexpanded-glob literal AND non-file entries
-    # (a stray subdirectory); `|| true` keeps an unreadable link file from
-    # tripping set -e — both are fail-open contract, never abort.
-    [ -f "$f" ] || continue
-    target="$(cat "$f" 2>/dev/null || true)"
-    if [ -z "$target" ] || [ ! -d "$target" ]; then
-      echo "  ${target:-$(basename "$f")} — dangling registry link (skipped; re-registers on that project's next install)"
-      continue
-    fi
-    label="${target%/node_modules/playwright-core}"
-    ver="$(jq -r '.version // "unknown"' "$target/package.json" 2>/dev/null || echo unknown)"
-    if ! missing="$(_pw_link_missing "$target")"; then
-      echo "  ${label} — unreadable browsers.json (skipped)"
-      continue
-    fi
-    if [ -z "$missing" ]; then
-      echo "  ✓ playwright ${ver} (${label}) — pinned builds present"
-      continue
-    fi
-    step_start "heal playwright ${ver}: ${missing//$'\n'/ }"
-    if ! _pw_lock_preflight; then
-      step_fail network "another Playwright install holds the browser-cache lock (often a second Claude session)" \
-        "finish or kill it, then re-run ./claude-bootstrap.sh"
-      continue
-    fi
-    step_stream network "run 'node ${target}/cli.js install chromium' by hand, then re-run ./claude-bootstrap.sh" \
-      _pw_heal_one "$target"
-  done
-}
-
 section "Playwright browsers"
 # The one legitimately slow step (~170 MB on first install), so: stream
 # playwright's own progress instead of capturing it (it prints plain progress
@@ -1121,7 +994,6 @@ do_install_playwright_chromium() {
   fi
 }
 do_install_playwright_chromium
-do_heal_playwright_registry
 
 # ─── Marketplaces ────────────────────────────────────────────────────────────
 
@@ -1529,10 +1401,6 @@ else
   echo "    chromium — not found"
   verify_errors+=("chromium browser — not found")
 fi
-
-echo ""
-echo "  Playwright registry:"
-verify_playwright_registry
 
 echo ""
 echo "  Skill setup:"
