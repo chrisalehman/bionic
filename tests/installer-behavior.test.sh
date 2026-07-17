@@ -53,7 +53,7 @@ chmod +x "${BIN}"/*
 
 # ---------- extract the REAL resilience block + installer functions ----------
 awk '/^# ─── Resilience ───/{f=1} f{print} /^# ─── Helpers ───/{if(f)exit}' "$BOOTSTRAP" > "$CODE"
-for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_one do_heal_playwright_registry; do
+for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_one do_heal_playwright_registry verify_playwright_registry; do
   awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$CODE"
 done
 
@@ -388,6 +388,33 @@ rm -rf "${PLAYWRIGHT_CACHE}/.links"
 out="$(do_heal_playwright_registry)"; rc=$?
 [ "$rc" -eq 0 ] && echo "$out" | grep -q "no installation registry" && ok "absent .links skips loudly, rc 0" || no "absent .links handling wrong (rc=$rc): $out"
 mkdir -p "${PLAYWRIGHT_CACHE}/.links"
+
+# 13) Verification walk: per-link status lines + named verify errors.
+# 13a) satisfied link → ✓ line, no errors
+rm -rf "${PLAYWRIGHT_CACHE}"; mkdir -p "${PLAYWRIGHT_CACHE}/.links"
+mk_pw_install "$PROJ_A" "1.59.1" "1217"
+echo "$PROJ_A" > "${PLAYWRIGHT_CACHE}/.links/aaa"
+satisfy_component chromium 1217; satisfy_component chromium-headless-shell 1217; satisfy_component ffmpeg 9999
+verify_errors=()
+out="$(verify_playwright_registry)"
+echo "$out" | grep -q "playwright 1.59.1" && echo "$out" | grep -q "✓" && ok "satisfied link prints ✓ with version" || no "✓ line wrong: $out"
+[ "${#verify_errors[@]}" -eq 0 ] && ok "satisfied link adds no verify error" || no "spurious verify error: ${verify_errors[*]}"
+
+# 13b) missing build → named error naming the component
+rm "$(_pw_component_dir chromium-headless-shell 1217)/INSTALLATION_COMPLETE"
+verify_errors=()
+pw13b_out="$(mktemp)"; verify_playwright_registry > "$pw13b_out"; out="$(cat "$pw13b_out")"; rm -f "$pw13b_out"
+echo "$out" | grep -q "missing" && ok "missing build printed" || no "missing line absent: $out"
+[ "${#verify_errors[@]}" -eq 1 ] && ok "missing build adds one verify error" || no "verify_errors count ${#verify_errors[@]}"
+case "${verify_errors[0]:-}" in *chromium-headless-shell*) ok "verify error names the component";; *) no "component name missing: ${verify_errors[0]:-}";; esac
+
+# 13c) dangling + unreadable links → silently skipped, no errors
+echo "${REG}/gone2/node_modules/playwright-core" > "${PLAYWRIGHT_CACHE}/.links/ddd"
+printf 'not json' > "$NOJSON/browsers.json"; echo "$NOJSON" > "${PLAYWRIGHT_CACHE}/.links/eee"
+satisfy_component chromium-headless-shell 1217
+verify_errors=()
+verify_playwright_registry >/dev/null
+[ "${#verify_errors[@]}" -eq 0 ] && ok "dangling/unreadable links add no verify errors" || no "skips must not error: ${verify_errors[*]}"
 
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"

@@ -711,6 +711,29 @@ verify_plugin_installed() {
   fi
 }
 
+# verify_playwright_registry — read-only registry walk: one status line per
+# live registered installation; any missing pinned build becomes a named
+# verify error (the chromium-* glob above only proves SOME build exists —
+# it is blind to which one each registered project needs).
+verify_playwright_registry() {
+  local links="${PLAYWRIGHT_CACHE}/.links" f target ver missing label
+  [ -d "$links" ] || return 0
+  for f in "$links"/*; do
+    [ -e "$f" ] || continue
+    target="$(cat "$f" 2>/dev/null)"
+    { [ -n "$target" ] && [ -d "$target" ]; } || continue   # dangling: nothing to verify
+    label="${target%/node_modules/playwright-core}"
+    ver="$(jq -r '.version // "unknown"' "$target/package.json" 2>/dev/null || echo unknown)"
+    missing="$(_pw_link_missing "$target")" || continue      # unreadable demands: skip
+    if [ -z "$missing" ]; then
+      echo "    playwright ${ver} (${label}) ✓"
+    else
+      echo "    playwright ${ver} (${label}) — missing: ${missing//$'\n'/ }"
+      verify_errors+=("playwright ${ver} pinned builds missing: ${missing//$'\n'/ } (${label})")
+    fi
+  done
+}
+
 # ─── Preflight ───────────────────────────────────────────────────────────────
 # Hard prerequisites and environment checks. This is the ONLY place the script
 # may exit early (exit 2). Everything after preflight records failures and
@@ -1490,6 +1513,10 @@ else
   echo "    chromium — not found"
   verify_errors+=("chromium browser — not found")
 fi
+
+echo ""
+echo "  Playwright registry:"
+verify_playwright_registry
 
 echo ""
 echo "  Skill setup:"
