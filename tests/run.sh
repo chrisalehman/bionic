@@ -35,10 +35,10 @@ for t in hooks/*.test.sh; do
 done
 run "scripts.test.sh" bash tests/scripts.test.sh
 run "installer-behavior.test.sh" bash tests/installer-behavior.test.sh
-if command -v docker >/dev/null 2>&1; then
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   run "bootstrap-e2e-docker.sh (mock)" bash tests/bootstrap-e2e-docker.sh
 else
-  printf '  %-36s ' "bootstrap-e2e-docker.sh (mock)"; echo "⤼ SKIP (docker not found)"; skip=$((skip+1))
+  printf '  %-36s ' "bootstrap-e2e-docker.sh (mock)"; echo "⤼ SKIP (docker unavailable)"; skip=$((skip+1))
 fi
 
 echo "──────────────────────────────────────────────"

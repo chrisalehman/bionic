@@ -47,6 +47,7 @@ while [ $# -gt 0 ]; do
 done
 
 command -v docker >/dev/null || die "docker not found (install Docker Desktop or colima)."
+docker info >/dev/null 2>&1 || die "docker daemon not reachable (start Docker Desktop or colima)."
 [ "$AUTH" = "api" ] && [ -z "$API_KEY" ] && die "--api-key needs a value"
 if [ -z "$IMAGE" ]; then
   [ "$MODE" = "mock" ] && IMAGE="debian:stable-slim" || IMAGE="node:bookworm-slim"
