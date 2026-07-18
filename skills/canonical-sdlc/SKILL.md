@@ -387,7 +387,7 @@ When a run hits either, do not guess — ask the one-question interview at Step 
 **Four floor sources.** Effective rigor = the MAX across all four; a floor can only push rigor UP, never down (override upward-only):
 
 - **Intent floor** — from the intent itself: `incident-response` floors at `audited`; `spike` is CAPPED at `tested` (it ships no code, so higher rigor buys nothing).
-- **Flag floor** — security-touching AND privacy/vulnerable-population triggers floor at `audited`. Evaluate what the work **touches and induces**, not what it renders: handling a credential, a PII field, or a vulnerable-population surface raises the floor even when the visible output looks benign.
+- **Flag floor** — security-touching work or privacy/vulnerable-population triggers: either category alone floors at `audited`. Evaluate what the work **touches and induces**, not what it renders: handling a credential, a PII field, or a vulnerable-population surface raises the floor even when the visible output looks benign.
 - **Project floor** — a `rigor-floor:` key in `.bionic/config.yaml` sets a repo-wide minimum.
 - **Epic floor** — a `rigor-floor:` line in epic frontmatter sets an epic-wide minimum. Use `rigor-floor:`, never `rigor:` — an epic declares a floor, not a fixed rigor.
 
@@ -966,11 +966,12 @@ governing-skill: superpowers:writing-plans
 sdlc-step: 3
 epic: epic-02-v2-product-pass
 wave: wave-01-checkout-refactor
-canonical_sdlc_version: 11
+mode: autonomous
+canonical_sdlc_version: 10
 ---
 ```
 
-v11 plans never declare `mode:`; v≤10 plans carry a `mode:` line and keep it forever (§Legacy modes (v≤10)). For `incident-response` artifacts, use `incident: NNNN-<slug>` instead of `epic`/`wave`. Full field definitions live in the README frontmatter table; the two load-bearing specials are `governing-skill` — the skill declared after the producing step's heading (Step 1 → `agent-skills:idea-refine`; Step 3 → `superpowers:writing-plans`; Step 7 RCA → `canonical-sdlc`; `tune` UX flavor overrides Step 1 → `shape`, Step 4 → `impeccable`) — and `sdlc-step`, that step's number (`0` for `scale: epic` artifacts, `10` for `continuation.md`).
+The example shows the current (v10) shape. v11 plans will drop `mode:` for the `intent:`/`rigor:`/`scale:` triple once hook support lands (wave 2 of the axis transition); v≤10 plans carry a `mode:` line and keep it forever (§Legacy modes (v≤10)). For `incident-response` artifacts, use `incident: NNNN-<slug>` instead of `epic`/`wave`. Full field definitions live in the README frontmatter table; the two load-bearing specials are `governing-skill` — the skill declared after the producing step's heading (Step 1 → `agent-skills:idea-refine`; Step 3 → `superpowers:writing-plans`; Step 7 RCA → `canonical-sdlc`; `tune` UX flavor overrides Step 1 → `shape`, Step 4 → `impeccable`) — and `sdlc-step`, that step's number (`0` for `scale: epic` artifacts, `10` for `continuation.md`).
 
 ### Transition discipline
 
@@ -996,7 +997,7 @@ Before v11, this skill ran on a single `mode:` axis with five values. Those name
 
 - **v≤10 plans keep their `mode:` vocabulary forever.** They are never retrofitted to the axis model; a v≤10 plan's `mode:` line stays valid and the v≤10 hooks and shape-tables keep enforcing it unchanged.
 - **v11 plans never declare `mode:`.** They declare `intent:` / `rigor:` / `scale:` instead (frontmatter fields + hook parsing land in wave 2). The v≤10 flag / `model_plan` / matrix enforcement that gated on the legacy `mode:` value is documented in the v10 shape table (§Evidence) — wave 2 re-keys the hooks to the triple.
-- **Not-Doing (D6): no per-intent dispatch-rules files.** v11 does NOT add per-intent rules files — this kills the five phantom per-mode dispatch files carried since v2. The single universal `.bionic/sdlc-dispatch-rules.json` remains the only dispatch-rules file; intent routing lives in this file's prose tables (§Step → governing-skill mapping, §Per-intent deltas), never in per-intent JSON.
+- **Not-Doing (D6): no per-intent dispatch-rules files.** v11 does NOT add per-intent rules files — this kills the five phantom per-mode dispatch files carried since v2. The single universal `.bionic/sdlc-dispatch-rules.json` remains the only dispatch-rules file; intent routing lives in SKILL.md's prose tables (§Step → governing-skill mapping, §Per-intent deltas), never in per-intent JSON.
 
 ## Evidence (two tiers)
 
