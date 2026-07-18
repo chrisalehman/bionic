@@ -296,19 +296,102 @@ This is non-negotiable. The list is the visible progress surface for the user.
 - A spec or plan already exists.
 - The work requires decisions that future maintainers will need.
 
-## Mode Selector
+## The Three Axes
 
-Declare the mode at entry. The mode determines which steps apply. **`autonomous` is the default** — any other mode is an explicit declaration.
+v11 replaces the single `mode` with three orthogonal axes. Every run declares exactly **one triple** — `<intent> · <rigor> · <scale>` — at Step 0. **Intent** is the kind of work (what the deliverable is); **rigor** is how hard the evidence tries to lie (how well-made); **scale** is the decomposition unit (how much work, one session or many). The axes are independent: any intent can run at any rigor (subject to the floors below) and at any valid scale (§Intent × scale validity). Intent declaration is reviewable — a run mislabelled to dodge steps is drift with a label. The v≤10 mode names survive only as legacy vocabulary (see the grandfathering section).
 
-| Mode | When | Steps applied |
-|---|---|---|
-| `autonomous` (default) | Any wave-level build, fix, refactor, or user-facing work | 0–9; Step 6 Review's adversarial critic **mandatory**; per-step checkpoint commits (commit rhythm); full stop-and-wake list |
-| `epic-scope` | Beginning a new epic; no implementation yet; needs carving into waves | 0–3 only; produces `epic.spec.md` + `epic.plan.md`. Short-circuits before Step 4. |
-| `incident-response` | Live or recent production incident needing detection confirmation, diagnosis, fix, deploy, monitoring gap closure, and postmortem RCA | Triage-compressed 1 → 2–4 → **5 Verify** → **6 Review** → **Step 7 produces RCA** (not ADR) → **8 Integrate & close** → **Step 9 includes monitoring verification + gap closure** |
-| `design-refresh` | Visual/UX refresh on an existing feature; no behavior change | `shape` prepended to Step 1; Step 2 = visual acceptance criteria; Step 4 uses `impeccable` + `polish` family; Step 5 Verify heavily weighted; Step 6 Review = 5 code axes only (design quality is evaluated in the Step 4 critique loop) |
-| `spike` | Timeboxed research or prototype; **no code ships** | Prereqs → woven source-driven → brief writeup at `<docs-root>/spikes/`. No worktree, no ADR, no commits to integration branch. |
+### Intent — the kind of work
 
-Mode declaration is reviewable. A feature disguised as a different mode to skip steps is drift with a label.
+| Intent | Description | Use when | Evidence-shape delta |
+|---|---|---|---|
+| `build` | New capability, or capability restored by ADDING new machinery/interfaces/config (the machinery test, S1). Covers user-facing features AND internal/infrastructure work. The spec describes NEW behavior. | The deliverable is behavior that did not exist in the design before — a new feature, tool, or substrate, or a capability re-established by building new machinery rather than repairing existing code. | Standard RED→GREEN per slice. **Meta-evidence rule for instrument-type work:** when the build IS a verification instrument (a test harness, a gate, a check), its capability evidence must prove the instrument CATCHES planted failures, not merely that it runs green — a check that never fails is not proven to work. |
+| `bugfix` | Restore intended behavior WITHIN the existing design (S1) — a repair, not new machinery. The spec describes RESTORED behavior. | A divergence from intended behavior is fixable inside the current design; no new interface or substrate is introduced. | RED test is the failing repro; GREEN is the repro passing. Default rigor is lighter at `task` scale (see defaults). |
+| `refactor` | Change structure without changing behavior. Explicitly covers upgrades, migrations, AND removals/deprecations of redundant capability. The observable contract is preserved; the code, dependency, or surface underneath it changes. | Restructuring, upgrading a dependency, migrating to a new API, or removing/deprecating capability now redundant. | Behavior-preservation evidence — the existing suite stays green across the change ("all existing tests still pass" is the spec). Full refactor/upgrade evidence keys land in a later wave. |
+| `tune` | Move a NAMED measured quantity toward a target (S2) — performance, size, UX quality, cost. Absorbs `design-refresh` as its UX flavor. Requires a measurement loop; if you cannot name the measurement, it is not tune. | The goal is a better value on a metric you can baseline and re-measure — latency, bundle size, a design/heuristic score — routed to the domain skill (`impeccable` / `security-and-hardening` / `performance-optimization`). | **baseline → target → re-measure** — record the starting value, the target, and the re-measured value. This shape applies at EVERY rigor; rigor sets how hard the measurement is defended, not whether it exists. |
+| `spike` | Timeboxed research or prototype. **Ships no code at any rigor.** The deliverable is a finding, not a shipped change. | A question must be answered by building throwaway code or investigating, and nothing from the spike is meant to reach the integration branch. | Writeup only — no plan file, no ADR, no commits to the integration branch (D3). If the finding is worth shipping, that shipping is a SEPARATE run under a shipping intent (§Classification rules). |
+| `incident-response` | Any LIVE DEPLOYED surface broken for its users — production OR tooling (S3). The clock matters. The outcome is a closed incident with documented prevention. | A released, in-use surface (a production service or a shipped dev tool) is broken for the people who depend on it and the fix is time-pressured. | RCA, not ADR (backward-facing postmortem). Full `audited` rigor is the intent floor (below). Monitoring-gap closure is part of Ship. |
+
+### Rigor — how hard the evidence tries to lie
+
+Cumulative: each tier includes everything below it. TDD is non-negotiable at every tier.
+
+| Rigor | The claim | What you get | What you skip | Use when |
+|---|---|---|---|---|
+| `tested` | "It provably works." | TDD RED→GREEN on every code change; the Verify gate discharges the Verification Matrix at each row's contracted tier; the tests floor (`pass == total`); structured 5-axis self-review. | The MANDATORY independent adversarial critic (Step 6) and the full independent Verification Auditor pass (Step 5) — self-review only. | The cheap floor for well-scoped work — `task`-scale bugfixes, spikes. |
+| `peer-reviewed` | "It works and it's well-made." | Everything in `tested`, plus the MANDATORY independent adversarial critic (Step 6) AND the independent Verification Auditor on the evidence (Step 5). | Third-party adversarial falsification and its durable decision trail. | The default for `build`, `refactor`, `tune`, and `wave`-scale `bugfix` — anything that ships to users or sets structure. |
+| `audited` | "A third party tried to break it, and the decision trail survives me." | Everything in `peer-reviewed`, plus an independent third-party adversarial pass and a durable, reviewable decision trail that outlives the author. | Nothing — this is the top tier. | The intent floor for `incident-response`; any security/privacy-flagged or otherwise floor-raised work (§Rigor floors and lifecycle). |
+
+### Scale — the decomposition unit
+
+| Scale | Steps | Decomposition & artifacts | Branch / merge |
+|---|---|---|---|
+| `epic` | 0–3 only (short-circuits before Step 4). | Carves the work into waves; produces `epic.spec.md` + `epic.plan.md`. Does NOT execute Steps 4–9. | Owns the integration branch `epic/NN-<slug>`; every wave merges there; the epic merges to mainline ONCE, at close. |
+| `wave` (default) | The full applicable step set (0–9). | The default scale; one wave spec + plan; slices inside Step 4. Re-enters Steps 1–3 at greater depth than the epic plan — trust but verify. | Wave branch off the epic integration branch; merges back there at Step 8. |
+| `task` | The full step set, compressed — a sub-session unit. | MULTIPLE per session. ONE session-level plan carries a `## Tasks` ledger with one `## SDLC State` evidence line per task — NO per-task plan or spec files. Ledger hook-addressing is documented here, enforced in a subsequent hook revision. | Shares the session's branch; no per-task branch. |
+
+**Spike artifact shape (any scale).** When intent is `spike`, there is NO plan file at all — the sole artifact is the writeup at `<docs-root>/spikes/` (D3). Universal entry means universal *routing*, not universal paperwork.
+
+## Classification rules
+
+Intent is DECLARED and reviewable; a mislabelled run is drift with a label. These rules make the declaration mechanical.
+
+1. **One intent per run.** Mixed-kind work splits into several runs — never average two kinds into one label. `scale: task` explicitly allows several runs per session, each with its own intent, so splitting is cheap.
+2. **Dominant deliverable, not motivation.** Classify by what the run DELIVERS, not why it was undertaken. The `build`-vs-`bugfix` discriminator is the **machinery test (S1):** capability restored by ADDING new machinery/interfaces/config = `build`; a fix within the existing design = `bugfix`. Field-failure motivation does not make new machinery a bugfix.
+3. **Spike-then-ship = two runs, and this splitting takes precedence over incidental-fix folding (S4).** A finding from a spike re-enters as a SEPARATE run under a shipping intent. When a shippable fix is discovered DURING a spike, the split wins over rule 4 — the fix is its own run, never folded into the spike (which ships no code).
+4. **Incidental corrections otherwise stay in their host run.** Small corrections encountered while doing the run's dominant work (a one-line typo fix in a touched file) ship inline, not as a separate run — except where rule 3 applies.
+5. **Removal/deprecation → `refactor`.** Removing or deprecating redundant capability is a refactor, not a build or a bugfix.
+6. **Docs-only work is outside canonical-sdlc.** Pure documentation/prose changes are not lifecycle-governed — there is no docs/chore intent (ratified Not-Doing). Universal entry covers non-trivial code-bearing work.
+7. **Planning-only runs take the scoped work's intent at `epic` scale.** An epic-scoping run is `scale: epic` of its eventual intent (usually `build`), not an intent of its own.
+
+**Known gray zones — expected intent collisions.** Two boundary cases recur and do NOT resolve mechanically; both route to Step 0's **interview-by-exception** (wired in a later slice) rather than a silent default:
+
+- **mechanism-swap** — capability is preserved but the mechanism observably changes (a transport swap, a trigger swap). Sits between `build` and `refactor`.
+- **reference-content** — skill prose / recipes versus enforced machinery. Enforced artifacts (hooks, keys, schemas) classify cleanly as `build`; reference prose leans toward out-of-scope docs. Sits between `build` and docs-outside-lifecycle.
+
+When a run hits either, do not guess — ask the one-question interview at Step 0.
+
+## Rigor floors and lifecycle
+
+**Default rigor by intent** (provisional at Step 0):
+
+| Intent | Default rigor |
+|---|---|
+| `build` | `peer-reviewed` |
+| `bugfix` | `tested` at `task` scale; `peer-reviewed` at `wave`+ |
+| `refactor` | `peer-reviewed` |
+| `tune` | `peer-reviewed` |
+| `spike` | `tested` (capped — no code ships at any rigor) |
+| `incident-response` | `audited` (intent floor) |
+
+**Four floor sources.** Effective rigor = the MAX across all four; a floor can only push rigor UP, never down (override upward-only):
+
+- **Intent floor** — from the intent itself: `incident-response` floors at `audited`; `spike` is CAPPED at `tested` (it ships no code, so higher rigor buys nothing).
+- **Flag floor** — security-touching AND privacy/vulnerable-population triggers floor at `audited`. Evaluate what the work **touches and induces**, not what it renders: handling a credential, a PII field, or a vulnerable-population surface raises the floor even when the visible output looks benign.
+- **Project floor** — a `rigor-floor:` key in `.bionic/config.yaml` sets a repo-wide minimum.
+- **Epic floor** — a `rigor-floor:` line in epic frontmatter sets an epic-wide minimum. Use `rigor-floor:`, never `rigor:` — an epic declares a floor, not a fixed rigor.
+
+**Anti-flag-laundering guard.** Do not carve a sensitive concern into a tiny unflagged wave to dodge the floor. Carve waves along sensitivity boundaries, and the wave that OWNS the integration point (where the sensitive path is wired) carries the flag floor — you cannot launder a security-touching integration into a benign-looking slice.
+
+**Lifecycle.** Rigor is **provisional** at Step 0 (defaulted from the table above), **locked** at Step 3 approval. The model may propose a different rigor, but only INSIDE the reviewed plan with a one-line rationale — never a silent change. **Mid-wave UPGRADES are free** and are recorded in `## SDLC State`. **DOWNGRADES are user decisions** via the existing **Waiver Protocol** (§Step 5) — there is no parallel downgrade mechanism.
+
+**Flags stay orthogonal to rigor (D5).** `use_worktree` and `multi_agent` are NEVER bound by rigor. Inference defaults may correlate (audited work often wants isolation), but there is no binding rule and no hook check — rigor sets evidence strength, flags set execution mechanics.
+
+## Intent × scale validity
+
+|  | `task` | `wave` | `epic` |
+|---|---|---|---|
+| `build` | valid | valid | valid |
+| `bugfix` | valid | valid | **barred** |
+| `refactor` | valid | valid | valid |
+| `tune` | valid | valid | valid |
+| `spike` | valid | valid | **barred** |
+| `incident-response` | valid | valid | **barred** |
+
+**Barred cells (D4):**
+
+- `bugfix × epic` — a bugfix that needs multi-session decomposition is a misclassified `refactor` or `build`; a genuine bugfix fits within a wave.
+- `spike × epic` — spikes are timeboxed; an epic-scale investigation is not a spike.
+- `incident-response × epic` — incidents are clock-driven; you do not scope an incident across multiple sessions.
 
 ### `autonomous` mode in particular (the default)
 
