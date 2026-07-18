@@ -364,7 +364,7 @@ Intent is DECLARED and reviewable; a mislabelled run is drift with a label. Thes
 6. **Docs-only work is outside canonical-sdlc.** Pure documentation/prose changes are not lifecycle-governed — there is no docs/chore intent (ratified Not-Doing). Universal entry covers non-trivial code-bearing work.
 7. **Planning-only runs take the scoped work's intent at `epic` scale.** An epic-scoping run is `scale: epic` of its eventual intent (usually `build`), not an intent of its own.
 
-**Known gray zones — expected intent collisions.** Two boundary cases recur and do NOT resolve mechanically; both route to Step 0's **interview-by-exception** (wired in a later slice) rather than a silent default:
+**Known gray zones — expected intent collisions.** Two boundary cases recur and do NOT resolve mechanically; both route to Step 0's **interview-by-exception** (§Step 0, classification sub-step) rather than a silent default:
 
 - **mechanism-swap** — capability is preserved but the mechanism observably changes (a transport swap, a trigger swap). Sits between `build` and `refactor`.
 - **reference-content** — skill prose / recipes versus enforced machinery. Enforced artifacts (hooks, keys, schemas) classify cleanly as `build`; reference prose leans toward out-of-scope docs. Sits between `build` and docs-outside-lifecycle.
