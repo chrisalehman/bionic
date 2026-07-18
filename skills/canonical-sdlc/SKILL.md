@@ -81,15 +81,23 @@ Generalize the `<step>/<unit>:` task-naming so any fanned-out step labels its un
 
 ## Load-time Announcement
 
-When this skill is loaded, the **first user-facing action** is to announce the mode in the form:
+When this skill is loaded, the **first user-facing action** is to announce the declared **triple** — `<intent> · <rigor> · <scale>` — in the form (D7):
 
-> **Canonical SDLC engaged — mode: `<mode>`.**
+> **Canonical SDLC engaged — `<intent>` · `<rigor>` · `<scale>` (`<consequence summary>`).**
 
-If the mode is not yet declared, announce:
+The `<consequence summary>` names what the declared rigor buys at that scale — derive it from the rigor ladder's *what-you-get* column (§Rigor — how hard the evidence tries to lie) plus the scale's artifact story (§Scale — the decomposition unit). Examples:
 
-> **Canonical SDLC engaged — mode: pending declaration. Declare one of: `autonomous` (default), `epic-scope`, `incident-response`, `design-refresh`, `spike`.**
+> **Canonical SDLC engaged — build · peer-reviewed · wave (spec + full matrix + 5-axis review + independent critic).**
+> **Canonical SDLC engaged — bugfix · tested · task (RED repro → GREEN, matrix at tier, self-review — no mandatory critic).**
 
-No other work proceeds until mode is declared.
+If the triple is not yet declared, announce that it is pending and enumerate the three axes with their value sets:
+
+> **Canonical SDLC engaged — triple pending declaration. Declare one value per axis:**
+> - **intent** — `build` · `bugfix` · `refactor` · `tune` · `spike` · `incident-response`
+> - **rigor** — `tested` · `peer-reviewed` · `audited` (defaults per intent; floors may push up — §Rigor floors and lifecycle)
+> - **scale** — `task` · `wave` (default) · `epic`
+
+No other work proceeds until the triple is declared. (Step 0 infers the triple silently and presents it for confirmation — declaration is normally a `confirm`, not a from-scratch answer; see Step 0.)
 
 ## Taxonomy
 
@@ -283,18 +291,28 @@ This is non-negotiable. The list is the visible progress surface for the user.
 
 ## When to Use
 
-**Hard triggers** (any one → invoke):
-- User begins a new feature, architectural change, or multi-day effort.
-- User asks "what's next?" on an in-progress large-scale effort.
-- Session start on a branch that has an active plan file.
-- A production incident needs triage, fix, deploy, and postmortem (→ `incident-response`).
-- A visual/UX refresh on an existing feature (→ `design-refresh`).
+**canonical-sdlc is the entry point for ALL non-trivial engineering work — not just large efforts.** Universal entry: the question at the door is no longer *whether* to engage the lifecycle but *which triple* to run it at. A one-line bugfix runs the same lifecycle a multi-session epic does — at `tested · task`, where the ceremony collapses to minutes (RED repro → GREEN → self-review), not at `peer-reviewed · wave`. The `tested` rigor and `task` scale exist precisely so small work pays minutes, not ceremony: no per-task plan file, no spec, no mandatory critic — just the TDD floor and a one-line ledger entry.
 
-**Soft triggers** (two or more → invoke):
-- The effort touches more than one component.
-- The effort will ship to users.
-- A spec or plan already exists.
-- The work requires decisions that future maintainers will need.
+**Out of scope — the one boundary.** Work with **no behavior or verification surface** stays outside the lifecycle: docs-only prose changes and chores are not lifecycle-governed (there is no docs/chore intent — ratified Not-Doing; §Classification rules rule 6). Standalone skills (`humanizer`, a prose linter, a formatter) cover that work directly. Everything with code-bearing behavior to verify enters here and picks a triple.
+
+Triggers are re-keyed from *whether to engage* to *which triple*:
+
+**Hard triggers** (any one → engage; the triple is inferred at Step 0):
+- A new feature, architectural change, or multi-day effort → usually `build`, scale `wave`/`epic`.
+- "What's next?" on an in-progress effort → resume at the active plan's triple.
+- Session start on a branch with an active plan file → adopt that plan's triple.
+- A divergence-from-intended-behavior fix → `bugfix`, scale `task` or `wave`.
+- A behavior-preserving restructure/upgrade/migration/removal → `refactor`.
+- A named-measurement improvement (latency, bundle size, UX quality) → `tune`.
+- A production/tooling incident to triage, fix, deploy, postmortem → `incident-response` (floors at `audited`).
+
+**Soft triggers** (two or more → lean toward a heavier rigor/scale, not toward *whether* to engage):
+- The effort touches more than one component → lean `wave`+, `complex` slices.
+- The effort will ship to users → lean `peer-reviewed`+.
+- A spec or plan already exists → adopt its scale.
+- The work requires decisions future maintainers will need → lean `peer-reviewed`+ (durable decision trail).
+
+Intent, rigor, and scale value sets and their inference live in §The Three Axes and Step 0's classification sub-step; this section only decides that the door is open and hints at where the triple lands.
 
 ## The Three Axes
 
@@ -602,7 +620,7 @@ Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are p
 
 **Goal:** Set every plan-shaping flag in plan frontmatter deliberately, with explicit user confirmation, and derive the Verification Matrix the wave will discharge.
 
-**Action:** Six sub-steps:
+**Action:** Seven sub-steps:
 
 1. **Pre-flight environment check.**
    - **(a) Bionic root.** Check `<project>/.bionic/` exists. If absent, ask to create.
@@ -610,7 +628,24 @@ Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are p
    - **(c) Ephemeral workspace.** `mkdir -p <project>/.bionic/tmp/`.
    - **(d) Hook installation.** Verify `~/.claude/hooks/canonical-sdlc-{evidence-gate,governing-skill}.sh` are present and executable. If any are missing, warn and record an `## Assumptions` entry.
 
-2. **Infer recommended values** from available context.
+2. **Classify the triple — `<intent> · <rigor> · <scale>` — silently, then interview only by exception.** The triple is the run's most fundamental shaping decision (§The Three Axes); infer it before the discriminator flags, because intent seeds several flag and matrix-tier defaults. Inference signals per axis:
+
+   | Axis | Inference signals |
+   |---|---|
+   | **intent** | Read the verbs and named artifacts in the request. New capability / new machinery (the machinery test, §Classification rules) → `build`; a divergence-from-intended-behavior to repair → `bugfix`; a behavior-preserving restructure, dependency upgrade, API migration, or removal/deprecation → `refactor`; a named-measurement improvement (latency, bundle size, a design/heuristic score) → `tune`; understanding-as-deliverable (a throwaway probe, a research question) → `spike`; a live deployed surface broken for its users with the clock running → `incident-response`. |
+   | **rigor** | Start from the **default-rigor-by-intent** table (§Rigor floors and lifecycle), then take the **MAX** with every derivable floor (intent floor, flag floor, project floor, epic floor). A floor only pushes rigor UP. The inferred value is **provisional** — it locks at Step 3. |
+   | **scale** | A sub-session unit, one of several this session → `task`; one full session → `wave` (default); spans multiple sessions and carves into waves → `epic`. Check the **intent × scale validity** matrix (§Intent × scale validity): a barred cell (`bugfix`/`spike`/`incident-response` × `epic`) means the intent or the scale is misjudged — re-derive, do not declare a barred triple. |
+
+   **Silent inference is the default path.** Do NOT interrogate the user for the triple; infer it, then surface it in the confirmation display (sub-step 5) with a per-line rationale, exactly as the discriminator flags are surfaced. The user confirms or overrides via the DSL — the triple is normally a `confirm`, not an answered questionnaire.
+
+   **Interview by exception — ONLY.** Fire **1–3 targeted questions** at Step 0 on **exactly** these three conditions, and no others:
+   - **(a) Intent collision** — two intents are genuinely plausible and §Classification rules does not resolve it. The two **standing gray zones** named there are the canonical cases: **mechanism-swap** (capability preserved but the mechanism observably changes — sits between `build` and `refactor`) and **reference-content** (skill prose/recipes versus enforced machinery — sits between `build` and out-of-scope docs). Name the two candidate intents in the question; never silently pick one.
+   - **(b) Suspected-but-unconfirmed floor trigger** — the request has a *possible* security / privacy / vulnerable-population surface (a flag-floor trigger) that the request itself does not confirm. Ask whether that sensitive surface is in scope, because a yes raises the rigor floor to `audited`.
+   - **(c) Unclear scale** — the work could be one session or several, and the boundary is not derivable from the request.
+
+   There is **no interview mode.** These are surgical, single-purpose questions fired inline at Step 0. Deep requirements elicitation — the 6-lens back-and-forth — stays at **Step 1 (Ideate)**; Step 0's interview-by-exception never expands into it. (D5: the discriminator flags stay orthogonal to the triple — inference for the two may correlate, but no rule binds a flag to an axis value and no hook checks the pairing.)
+
+3. **Infer recommended values** from available context.
 
    | Flag | Inference signals |
    |---|---|
@@ -624,7 +659,7 @@ Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are p
    | `integration_branch` | Wave under an existing epic → copy from the epic plan's `integration-branch:`. Standalone → current git branch if it is a mainline (`main`/`master`/`develop`); otherwise default `main`. `incident-response` → `main` or `hotfix/<id>`. If genuinely undeterminable, print the line with value `unknown` — never drop it. |
    | `model_plan` | Derived from `multi_agent` and the **detected session model** (see §Model & Token Strategy). `true` → `orchestrator=<detected>; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`. `false` → `main=<detected>` (dial-down offered). Surfaced for confirmation; **hook-enforced for v4+** autonomous plans. |
 
-3. **Derive the Verification Matrix.** One row per acceptance criterion (from the Step 2 spec; a wave planned before its spec is final reconciles rows against the spec at Step 2). Each row gets a tier from browser-verify's T0–T4 ladder by these **inference defaults**:
+4. **Derive the Verification Matrix.** One row per acceptance criterion (from the Step 2 spec; a wave planned before its spec is final reconciles rows against the spec at Step 2). Each row gets a tier from browser-verify's T0–T4 ladder by these **inference defaults**:
    - user-visible behavior change → **T3**;
    - engine/rendering-divergent behavior → **T2 (both engines)** for the divergence AND **T3** for the user-visible AC;
    - pure substrate/internal, no runtime surface → **T1/T2** with a one-line justification;
@@ -656,7 +691,7 @@ Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are p
 
    **T4 rows** are explicitly-scheduled human-walk rows, discharged by recorded user confirmation (§Step 5). **Lock semantics:** the matrix locks at Step 3 approval; after lock, tier *upgrades* are free, while *downgrades*, self-`n/a` on a live tier, and closure over a non-CONFIRMED row are only via the **Waiver Protocol** (§Step 5). Mid-wave new ACs go to `## Assumptions` as W+1 candidates — never into the locked matrix.
 
-4. **Present the confirmation display — in full, always.** The display below is a mandatory, untruncatable artifact: every section, every flag, every line, every inference rationale, **and every matrix row**, rendered as one block in the conversation. Never elide, summarize, sample ("key flags: …"), or defer any portion of it — an abbreviated display invalidates the confirmation, because the user is approving exactly what they can see. The matrix block is rendered IN FULL under the same rule — **even past 12 ACs, print every row** (a matrix is exactly what must not be sampled). If a value is unknown, print the line with the value marked `unknown` rather than dropping the line. The `integration-branch:` line is load-bearing — Step 8 merges every wave into it; a display missing this line is an invalid confirmation, exactly like a missing flag.
+5. **Present the confirmation display — in full, always.** The display below is a mandatory, untruncatable artifact: every section, every flag, every line, every inference rationale, **and every matrix row**, rendered as one block in the conversation. Never elide, summarize, sample ("key flags: …"), or defer any portion of it — an abbreviated display invalidates the confirmation, because the user is approving exactly what they can see. The matrix block is rendered IN FULL under the same rule — **even past 12 ACs, print every row** (a matrix is exactly what must not be sampled). If a value is unknown, print the line with the value marked `unknown` rather than dropping the line. The `integration-branch:` line is load-bearing — Step 8 merges every wave into it; a display missing this line is an invalid confirmation, exactly like a missing flag.
 
    ```
    ═══ Plan Configuration — confirm before Step 1 ═══
@@ -667,7 +702,12 @@ Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are p
      hooks:        evidence-gate, governing-skill       [all installed]
 
    slug: <inferred-from-conversation>
-   mode: autonomous
+
+   Triple:                          [the run's shaping decision — see §The Three Axes]
+     intent:  build                 [inferred: request adds new machinery — machinery test]
+     rigor:   peer-reviewed         [inferred: build default; no floor raises it — §Rigor floors]
+     scale:   wave                  [inferred: one-session chunk, not multi-session]
+
    integration-branch: main         [inferred: current branch — Step 8 merges every wave here]
 
    Discriminator flags:
@@ -700,9 +740,9 @@ Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are p
      e.g. "set use_worktree=true, set exec-standard=opus, set verify(AC-2)=T2, then confirm"
    ```
 
-5. **Block until explicit confirmation.** No timeout, no implicit acceptance.
+6. **Block until explicit confirmation.** No timeout, no implicit acceptance.
 
-6. **Task-list creation is the immediate next action after approval.** The instant confirmation arrives — before any Step 1 work — run this fixed sequence:
+7. **Task-list creation is the immediate next action after approval.** The instant confirmation arrives — before any Step 1 work — run this fixed sequence:
    1. **Announce it:** "Step 0 confirmed — creating the task list."
    2. **Create the full TaskCreate list:** tasks `0:`, `1:`, ..., `9:`, one per planned step. Mark `0:` `completed` immediately.
    3. **Then transition to Step 1** (idea-refine).
@@ -714,12 +754,18 @@ Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are p
 ```
 reply        := overrides? "confirm"
 overrides    := override ("," override)* ","?
-override     := "set" flag "=" value
+override     := "set" axis "=" axis-value
+              | "set" flag "=" value
               | "set" "verify" "(" AC-id ")" "=" tier
               | "change" flag "to" value
+axis         := "intent" | "rigor" | "scale"
+axis-value   := intent-value | rigor-value | scale-value
+intent-value := "build" | "bugfix" | "refactor" | "tune" | "spike" | "incident-response"
+rigor-value  := "tested" | "peer-reviewed" | "audited"
+scale-value  := "task" | "wave" | "epic"
 ```
 
-Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`; `set integration-branch=develop, confirm`. **Matrix tier override:** `set verify(AC-B2.1)=T2, confirm` retiers a matrix row before lock. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set exec-standard=opus, confirm` (route standard slices to opus too — equivalent to disabling complexity routing); `set exec-complex=sonnet, confirm` (accepted but discouraged; warn before applying); `set execution=opus-only, confirm` (shorthand for `exec-standard=opus`); `set main_model=sonnet, confirm` (multi_agent=false dial-down).
+Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`; `set integration-branch=develop, confirm`. **Triple override:** `set intent=refactor, set rigor=audited, confirm` reclassifies the run before Step 1; `set scale=epic, confirm` switches to epic-scoping. **Floors are upward-only — a rigor override BELOW a derivable floor is rejected at Step 0** (e.g. `set rigor=tested` on `incident-response`, whose intent floor is `audited`, or on any security/privacy-flagged work): warn, name the binding floor, and keep the floor value. An upward rigor override (`set rigor=audited` on a `build`) is always accepted. An override that names a **barred** intent × scale cell (§Intent × scale validity) is rejected with the reason. **Matrix tier override:** `set verify(AC-B2.1)=T2, confirm` retiers a matrix row before lock. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set exec-standard=opus, confirm` (route standard slices to opus too — equivalent to disabling complexity routing); `set exec-complex=sonnet, confirm` (accepted but discouraged; warn before applying); `set execution=opus-only, confirm` (shorthand for `exec-standard=opus`); `set main_model=sonnet, confirm` (multi_agent=false dial-down).
 
 On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 10` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`). The confirmed `integration-branch` and the derived `## Verification Matrix` are carried forward: when the plan file is written at Step 3, its `## SDLC State` section opens with the Step-0-confirmed `integration-branch: <name>` line, and the plan body carries the locked `## Verification Matrix` section. For v4 and later autonomous plans the governing-skill hook **requires** `model_plan`; for v10 it additionally requires the `## Verification Matrix` section at `sdlc-step ≥ 3` — a missing value blocks the write (exit 2).
 
