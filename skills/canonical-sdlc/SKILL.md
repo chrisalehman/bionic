@@ -64,7 +64,7 @@ Verification in this lifecycle is structured at four levels. Conflating them is 
 - **Tier** = *how hard the evidence tries to lie*, from browser-verify's **T0–T4 ladder** (T0 static → T1 unit → T2 hermetic → T3 live agent-drive → T4 human walk). browser-verify is the canonical home of the ladder and its "the lie each tier kills" framing — reference it, do not restate it. Each matrix row carries a tier; the **Tier-Discharge Rule** (Step 5) governs how the row is discharged.
 - **Tool** = the instrument for a tier, default → escalation. Browser tiers (T2/T3): `playwright-cli` (default, via `browser-verify`) → escalate to the chrome-devtools MCP (`agent-skills:browser-testing-with-devtools`) **ONLY** for deep inspection the CLI can't do (Lighthouse, perf-trace analysis, heap/CPU profiling, network throttling).
 
-Review is unchanged: structured 5-axis self-review (**always**) plus an **INDEPENDENT** adversarial critic (**mandatory in `autonomous`, `incident-response`, `design-refresh`** — never self-graded). The Verify-gate **auditor** and the Review-gate **critic** are distinct: the auditor falsifies the *evidence*, the critic falsifies the *code* (see Steps 5–6).
+Review is unchanged in shape: structured 5-axis self-review (**always**) plus an **INDEPENDENT** adversarial critic (**mandatory at `audited` rigor** — into which `incident-response` floors — never self-graded). The Verify-gate **auditor** (present from `peer-reviewed` up) and the Review-gate **critic** (present at `audited`) are distinct: the auditor falsifies the *evidence*, the critic falsifies the *code* (see Steps 5–6).
 
 **Why lower tiers are proxies (the locator model).** Every tier below the live walk tests a proxy, and each reports PASS at its own blind spot: unit tests pass on mocked seams; hermetic tests pass on fixtures that may not match the real data shape; a ref-walk over a bare canvas drives nothing yet "completes"; a screenshot of a degenerate frame satisfies "something rendered." A higher tier exists precisely to kill the lie the tier below cannot see. Mock-green + real-red is not a contradiction but a **locator** — the bug lives in exactly the layer the proxy elides. The matrix pins each AC to the tier that can actually catch its failure, so no AC is discharged by a proxy that structurally cannot reach its bug.
 
@@ -81,15 +81,24 @@ Generalize the `<step>/<unit>:` task-naming so any fanned-out step labels its un
 
 ## Load-time Announcement
 
-When this skill is loaded, the **first user-facing action** is to announce the mode in the form:
+When this skill is loaded, the **first user-facing action** is to announce the declared **triple** — `<intent> · <rigor> · <scale>` — in the form (D7):
 
-> **Canonical SDLC engaged — mode: `<mode>`.**
+> **Canonical SDLC engaged — `<intent>` · `<rigor>` · `<scale>` (`<consequence summary>`).**
 
-If the mode is not yet declared, announce:
+The `<consequence summary>` names what the declared rigor buys at that scale — derive it from the rigor ladder's *what-you-get* column (§Rigor — how hard the evidence tries to lie) plus the scale's artifact story (§Scale — the decomposition unit). Examples:
 
-> **Canonical SDLC engaged — mode: pending declaration. Declare one of: `autonomous` (default), `epic-scope`, `incident-response`, `design-refresh`, `spike`.**
+> **Canonical SDLC engaged — build · peer-reviewed · wave (spec + full matrix + independent auditor + 5-axis review).**
+> **Canonical SDLC engaged — bugfix · tested · task (RED repro → GREEN, matrix at tier, self-review — no mandatory critic).**
+> **Canonical SDLC engaged — incident-response · audited · wave (adversarial critic + per-step checkpoints + expanded stop-and-wake).**
 
-No other work proceeds until mode is declared.
+If the triple is not yet declared, announce that it is pending and enumerate the three axes with their value sets:
+
+> **Canonical SDLC engaged — triple pending declaration. Declare one value per axis:**
+> - **intent** — `build` · `bugfix` · `refactor` · `tune` · `spike` · `incident-response`
+> - **rigor** — `tested` · `peer-reviewed` · `audited` (defaults per intent; floors may push up — §Rigor floors and lifecycle)
+> - **scale** — `task` · `wave` (default) · `epic`
+
+No other work proceeds until the triple is declared. (Step 0 infers the triple silently and presents it for confirmation — declaration is normally a `confirm`, not a from-scratch answer; see Step 0.)
 
 ## Taxonomy
 
@@ -100,7 +109,9 @@ No other work proceeds until mode is declared.
 | 3 | **step** | One of the canonical-sdlc steps (0–9) inside a wave. |
 | — | *slice* | *Informal.* An atomic implementation commit inside a wave's Step 4. A wave can have 1 or many slices. Slices don't get their own plan files. |
 
-**Naming convention.** Artifacts live in a directory-per-epic layout with zero-padded epic numbers and human-readable slugs. One slug per epic is chosen at epic-scope time and used across `specs/`, `plans/`, and `adrs/`:
+**Scale IS this taxonomy.** The `scale:` axis (§Scale — the decomposition unit) declares which of these units a run occupies: `scale: epic` = tier 1, `scale: wave` = tier 2. The one addition the axis makes is `scale: task` — a sub-session unit *below* a wave (several per session, no per-task plan file), which the tier table above does not name. `step` and `slice` are never `scale:` values — they are the units *inside* a wave, not a declared run size.
+
+**Naming convention.** Artifacts live in a directory-per-epic layout with zero-padded epic numbers and human-readable slugs. One slug per epic is chosen at epic-scoping time (`scale: epic`) and used across `specs/`, `plans/`, and `adrs/`:
 
 ```
 <docs-root>/specs/epic-02-v2-product-pass/
@@ -138,8 +149,8 @@ Reject deviations from these conventions unless there is a named, recorded reaso
 
 The skill runs at two scales:
 
-1. **Epic scoping** — declared via `epic-scope` mode. Runs Steps 1–3 only. Produces `epic.spec.md` + `epic.plan.md`. Carves the work into waves. Does **not** execute Steps 4–9.
-2. **Wave execution** — the default. Declared via `autonomous` (default), `incident-response`, `design-refresh`, or `spike`. Runs the full applicable step set for one wave. Each wave re-enters Steps 1–3 at greater depth than the epic plan supplied; **trust but verify** the epic's assumptions, do not re-derive from scratch.
+1. **Epic scoping** — `scale: epic`. Runs Steps 0–3 only. Produces `epic.spec.md` + `epic.plan.md`. Carves the work into waves. Does **not** execute Steps 4–9.
+2. **Wave execution** — the default (`scale: wave`). Runs the full applicable step set for one wave under whatever intent the run declares (`build`, `bugfix`, `refactor`, `tune`, `spike`, `incident-response`). Each wave re-enters Steps 1–3 at greater depth than the epic plan supplied; **trust but verify** the epic's assumptions, do not re-derive from scratch.
 
 ## The Iron Law
 
@@ -283,54 +294,129 @@ This is non-negotiable. The list is the visible progress surface for the user.
 
 ## When to Use
 
-**Hard triggers** (any one → invoke):
-- User begins a new feature, architectural change, or multi-day effort.
-- User asks "what's next?" on an in-progress large-scale effort.
-- Session start on a branch that has an active plan file.
-- A production incident needs triage, fix, deploy, and postmortem (→ `incident-response`).
-- A visual/UX refresh on an existing feature (→ `design-refresh`).
+**canonical-sdlc is the entry point for ALL non-trivial engineering work — not just large efforts.** Universal entry: the question at the door is no longer *whether* to engage the lifecycle but *which triple* to run it at. A one-line bugfix runs the same lifecycle a multi-session epic does — at `tested · task`, where the ceremony collapses to minutes (RED repro → GREEN → self-review), not at `peer-reviewed · wave`. The `tested` rigor and `task` scale exist precisely so small work pays minutes, not ceremony: no per-task plan file, no spec, no mandatory critic — just the TDD floor and a one-line ledger entry.
 
-**Soft triggers** (two or more → invoke):
-- The effort touches more than one component.
-- The effort will ship to users.
-- A spec or plan already exists.
-- The work requires decisions that future maintainers will need.
+**Out of scope — the one boundary.** Work with **no behavior or verification surface** stays outside the lifecycle: docs-only prose changes and chores are not lifecycle-governed (there is no docs/chore intent — ratified Not-Doing; §Classification rules rule 6). Standalone skills (`humanizer`, a prose linter, a formatter) cover that work directly. Everything with code-bearing behavior to verify enters here and picks a triple.
 
-## Mode Selector
+Triggers are re-keyed from *whether to engage* to *which triple*:
 
-Declare the mode at entry. The mode determines which steps apply. **`autonomous` is the default** — any other mode is an explicit declaration.
+**Hard triggers** (any one → engage; the triple is inferred at Step 0):
+- A new feature, architectural change, or multi-day effort → usually `build`, scale `wave`/`epic`.
+- "What's next?" on an in-progress effort → resume at the active plan's triple.
+- Session start on a branch with an active plan file → adopt that plan's triple.
+- A divergence-from-intended-behavior fix → `bugfix`, scale `task` or `wave`.
+- A behavior-preserving restructure/upgrade/migration/removal → `refactor`.
+- A named-measurement improvement (latency, bundle size, UX quality) → `tune`.
+- A production/tooling incident to triage, fix, deploy, postmortem → `incident-response` (floors at `audited`).
 
-| Mode | When | Steps applied |
-|---|---|---|
-| `autonomous` (default) | Any wave-level build, fix, refactor, or user-facing work | 0–9; Step 6 Review's adversarial critic **mandatory**; per-step checkpoint commits (commit rhythm); full stop-and-wake list |
-| `epic-scope` | Beginning a new epic; no implementation yet; needs carving into waves | 0–3 only; produces `epic.spec.md` + `epic.plan.md`. Short-circuits before Step 4. |
-| `incident-response` | Live or recent production incident needing detection confirmation, diagnosis, fix, deploy, monitoring gap closure, and postmortem RCA | Triage-compressed 1 → 2–4 → **5 Verify** → **6 Review** → **Step 7 produces RCA** (not ADR) → **8 Integrate & close** → **Step 9 includes monitoring verification + gap closure** |
-| `design-refresh` | Visual/UX refresh on an existing feature; no behavior change | `shape` prepended to Step 1; Step 2 = visual acceptance criteria; Step 4 uses `impeccable` + `polish` family; Step 5 Verify heavily weighted; Step 6 Review = 5 code axes only (design quality is evaluated in the Step 4 critique loop) |
-| `spike` | Timeboxed research or prototype; **no code ships** | Prereqs → woven source-driven → brief writeup at `<docs-root>/spikes/`. No worktree, no ADR, no commits to integration branch. |
+**Soft triggers** (two or more → lean toward a heavier rigor/scale, not toward *whether* to engage):
+- The effort touches more than one component → lean `wave`+, `complex` slices.
+- The effort will ship to users → lean `peer-reviewed`+.
+- A spec or plan already exists → adopt its scale.
+- The work requires decisions future maintainers will need → lean `peer-reviewed`+ (durable decision trail).
 
-Mode declaration is reviewable. A feature disguised as a different mode to skip steps is drift with a label.
+Intent, rigor, and scale value sets and their inference live in §The Three Axes and Step 0's classification sub-step; this section only decides that the door is open and hints at where the triple lands.
 
-### `autonomous` mode in particular (the default)
+## The Three Axes
 
-This is the default because Bionic philosophy is "operate autonomously." The mode assumes no human is watching Steps 4–9 in real time, and tightens evidence discipline accordingly: the Step 6 adversarial critic becomes **mandatory**, per-step checkpoint commits fire (the commit rhythm), and the stop-and-wake list expands (see the Mode Selector row).
+v11 replaces the single `mode` with three orthogonal axes. Every run declares exactly **one triple** — `<intent> · <rigor> · <scale>` — at Step 0. **Intent** is the kind of work (what the deliverable is); **rigor** is how hard the evidence tries to lie (how well-made); **scale** is the decomposition unit (how much work, one session or many). The axes are independent: any intent can run at any rigor (subject to the floors below) and at any valid scale (§Intent × scale validity). Intent declaration is reviewable — a run mislabelled to dodge steps is drift with a label. The v≤10 mode names survive only as legacy vocabulary (see the grandfathering section).
 
-**Autonomous does NOT mean "skip Step 1 Q&A."** The autonomous span is **Steps 4–9**. The user-engagement sequence is:
+### Intent — the kind of work
 
-| Step | Engagement |
+| Intent | Description | Use when | Evidence-shape delta |
+|---|---|---|---|
+| `build` | New capability, or capability restored by ADDING new machinery/interfaces/config (the machinery test, S1). Covers user-facing features AND internal/infrastructure work. The spec describes NEW behavior. | The deliverable is behavior that did not exist in the design before — a new feature, tool, or substrate, or a capability re-established by building new machinery rather than repairing existing code. | Standard RED→GREEN per slice. **Meta-evidence rule for instrument-type work:** when the build IS a verification instrument (a test harness, a gate, a check), its capability evidence must prove the instrument CATCHES planted failures, not merely that it runs green — a check that never fails is not proven to work. |
+| `bugfix` | Restore intended behavior WITHIN the existing design (S1) — a repair, not new machinery. The spec describes RESTORED behavior. | A divergence from intended behavior is fixable inside the current design; no new interface or substrate is introduced. | RED test is the failing repro; GREEN is the repro passing. Default rigor is lighter at `task` scale (see defaults). |
+| `refactor` | Change structure without changing behavior. Explicitly covers upgrades, migrations, AND removals/deprecations of redundant capability. The observable contract is preserved; the code, dependency, or surface underneath it changes. | Restructuring, upgrading a dependency, migrating to a new API, or removing/deprecating capability now redundant. | Behavior-preservation evidence — the existing suite stays green across the change ("all existing tests still pass" is the spec). Full refactor/upgrade evidence keys land in a later wave. |
+| `tune` | Move a NAMED measured quantity toward a target (S2) — performance, size, UX quality, cost. Absorbs the former UX-refresh lifecycle as its UX flavor (§Legacy modes). Requires a measurement loop; if you cannot name the measurement, it is not tune. | The goal is a better value on a metric you can baseline and re-measure — latency, bundle size, a design/heuristic score — routed to the domain skill (`impeccable` / `security-and-hardening` / `performance-optimization`). | **baseline → target → re-measure** — record the starting value, the target, and the re-measured value. This shape applies at EVERY rigor; rigor sets how hard the measurement is defended, not whether it exists. |
+| `spike` | Timeboxed research or prototype. **Ships no code at any rigor.** The deliverable is a finding, not a shipped change. | A question must be answered by building throwaway code or investigating, and nothing from the spike is meant to reach the integration branch. | Writeup only — no plan file, no ADR, no commits to the integration branch (D3). If the finding is worth shipping, that shipping is a SEPARATE run under a shipping intent (§Classification rules). |
+| `incident-response` | Any LIVE DEPLOYED surface broken for its users — production OR tooling (S3). The clock matters. The outcome is a closed incident with documented prevention. | A released, in-use surface (a production service or a shipped dev tool) is broken for the people who depend on it and the fix is time-pressured. | RCA, not ADR (backward-facing postmortem). Full `audited` rigor is the intent floor (below). Monitoring-gap closure is part of Ship. |
+
+### Rigor — how hard the evidence tries to lie
+
+Cumulative: each tier includes everything below it. TDD is non-negotiable at every tier.
+
+| Rigor | The claim | What you get | What you skip | Use when |
+|---|---|---|---|---|
+| `tested` | "It provably works." | TDD RED→GREEN on every code change; the Verify gate discharges the Verification Matrix at each row's contracted tier; the tests floor (`pass == total`); structured 5-axis Step-6 self-review. | ALL independent assurance roles — both the independent Step-5 Verification Auditor AND the mandatory Step-6 adversarial critic. Self-review only. | The cheap floor for well-scoped work — `task`-scale bugfixes, spikes. |
+| `peer-reviewed` | "It works and it's well-made." | Everything in `tested`, plus a separate spec, the full Verification Matrix per AC discharged by the INDEPENDENT Step-5 Verification Auditor on the evidence, and the structured 5-axis Step-6 review. **No adversarial critic** — that role is `audited`'s. | The mandatory independent adversarial critic (Step 6) and the durable third-party decision trail. | The default for `build`, `refactor`, `tune`, and `wave`-scale `bugfix` — anything that ships to users or sets structure. |
+| `audited` | "A third party tried to break it, and the decision trail survives me." | Everything in `peer-reviewed`, plus the mandatory INDEPENDENT adversarial critic (Step-6 stance 2), per-step checkpoint commits, and the expanded stop-and-wake list (§Escalation Protocol) — adversarial verification plus unattended discipline. The decision trail is durable and reviewable, outliving the author. | Nothing — this is the top tier. | The intent floor for `incident-response`; any security/privacy-flagged or otherwise floor-raised work (§Rigor floors and lifecycle). |
+
+### Scale — the decomposition unit
+
+| Scale | Steps | Decomposition & artifacts | Branch / merge |
+|---|---|---|---|
+| `epic` | 0–3 only (short-circuits before Step 4). | Carves the work into waves; produces `epic.spec.md` + `epic.plan.md`. Does NOT execute Steps 4–9. | Owns the integration branch `epic/NN-<slug>`; every wave merges there; the epic merges to mainline ONCE, at close. |
+| `wave` (default) | The full applicable step set (0–9). | The default scale; one wave spec + plan; slices inside Step 4. Re-enters Steps 1–3 at greater depth than the epic plan — trust but verify. | Wave branch off the epic integration branch; merges back there at Step 8. |
+| `task` | The full step set, compressed — a sub-session unit. | MULTIPLE per session. ONE session-level plan carries a `## Tasks` ledger with one `## SDLC State` evidence line per task — NO per-task plan or spec files. Ledger hook-addressing is documented here, enforced in a subsequent hook revision. | Shares the session's branch; no per-task branch. |
+
+**Spike artifact shape (any scale).** When intent is `spike`, there is NO plan file at all — the sole artifact is the writeup at `<docs-root>/spikes/` (D3). Universal entry means universal *routing*, not universal paperwork.
+
+## Classification rules
+
+Intent is DECLARED and reviewable; a mislabelled run is drift with a label. These rules make the declaration mechanical.
+
+1. **One intent per run.** Mixed-kind work splits into several runs — never average two kinds into one label. `scale: task` explicitly allows several runs per session, each with its own intent, so splitting is cheap.
+2. **Dominant deliverable, not motivation.** Classify by what the run DELIVERS, not why it was undertaken. The `build`-vs-`bugfix` discriminator is the **machinery test (S1):** capability restored by ADDING new machinery/interfaces/config = `build`; a fix within the existing design = `bugfix`. Field-failure motivation does not make new machinery a bugfix.
+3. **Spike-then-ship = two runs, and this splitting takes precedence over incidental-fix folding (S4).** A finding from a spike re-enters as a SEPARATE run under a shipping intent. When a shippable fix is discovered DURING a spike, the split wins over rule 4 — the fix is its own run, never folded into the spike (which ships no code).
+4. **Incidental corrections otherwise stay in their host run.** Small corrections encountered while doing the run's dominant work (a one-line typo fix in a touched file) ship inline, not as a separate run — except where rule 3 applies.
+5. **Removal/deprecation → `refactor`.** Removing or deprecating redundant capability is a refactor, not a build or a bugfix.
+6. **Docs-only work is outside canonical-sdlc.** Pure documentation/prose changes are not lifecycle-governed — there is no docs/chore intent (ratified Not-Doing). Universal entry covers non-trivial code-bearing work.
+7. **Planning-only runs take the scoped work's intent at `epic` scale.** An epic-scoping run is `scale: epic` of its eventual intent (usually `build`), not an intent of its own.
+
+**Known gray zones — expected intent collisions.** Two boundary cases recur and do NOT resolve mechanically; both route to Step 0's **interview-by-exception** (§Step 0, classification sub-step) rather than a silent default:
+
+- **mechanism-swap** — capability is preserved but the mechanism observably changes (a transport swap, a trigger swap). Sits between `build` and `refactor`.
+- **reference-content** — skill prose / recipes versus enforced machinery. Enforced artifacts (hooks, keys, schemas) classify cleanly as `build`; reference prose leans toward out-of-scope docs. Sits between `build` and docs-outside-lifecycle.
+
+When a run hits either, do not guess — ask the one-question interview at Step 0.
+
+## Rigor floors and lifecycle
+
+**Default rigor by intent** (provisional at Step 0):
+
+| Intent | Default rigor |
 |---|---|
-| 1. Ideate | **Interactive Q&A with the user.** Extensive back-and-forth on scope, non-goals, alternatives. |
-| 2. Spec | **Semi-interactive.** Translate Step 1 into a testable contract. Surface remaining ambiguities as Wake Notes; otherwise proceed. |
-| 3. Plan | **Autonomous write → one approval checkpoint.** Claude writes the plan; user reviews and approves before Step 4 begins. |
-| 4–9 | **Fully autonomous** within the stop-and-wake rules. |
+| `build` | `peer-reviewed` |
+| `bugfix` | `tested` at `task` scale; `peer-reviewed` at `wave`+ |
+| `refactor` | `peer-reviewed` |
+| `tune` | `peer-reviewed` |
+| `spike` | `tested` (capped — no code ships at any rigor) |
+| `incident-response` | `audited` (intent floor) |
 
-Skipping Step 1 Q&A to "save time" is the single highest-risk move.
+**Four floor sources.** Effective rigor = the MAX across all four; a floor can only push rigor UP, never down (override upward-only):
 
-**Step → governing-skill mapping:**
+- **Intent floor** — from the intent itself: `incident-response` floors at `audited`; `spike` is CAPPED at `tested` (it ships no code, so higher rigor buys nothing).
+- **Flag floor** — security-touching work or privacy/vulnerable-population triggers: either category alone floors at `audited`. Evaluate what the work **touches and induces**, not what it renders: handling a credential, a PII field, or a vulnerable-population surface raises the floor even when the visible output looks benign.
+- **Project floor** — a `rigor-floor:` key in `.bionic/config.yaml` sets a repo-wide minimum.
+- **Epic floor** — a `rigor-floor:` line in epic frontmatter sets an epic-wide minimum. Use `rigor-floor:`, never `rigor:` — an epic declares a floor, not a fixed rigor.
 
-**Tier** = default dispatch target (see §Model & Token Strategy): **O** = orchestrator (main
-thread) · **E** = execution (fresh `model: opus` or `model: sonnet`, routed by the slice's
-`complexity:` tag; fork only if context-heavy) · **X** = explore/mechanical/test (fresh
-`model: sonnet`). Default hint only; the Strategy section governs.
+**Anti-flag-laundering guard.** Do not carve a sensitive concern into a tiny unflagged wave to dodge the floor. Carve waves along sensitivity boundaries, and the wave that OWNS the integration point (where the sensitive path is wired) carries the flag floor — you cannot launder a security-touching integration into a benign-looking slice.
+
+**Lifecycle.** Rigor is **provisional** at Step 0 (defaulted from the table above), **locked** at Step 3 approval. The model may propose a different rigor, but only INSIDE the reviewed plan with a one-line rationale — never a silent change. **Mid-wave UPGRADES are free** and are recorded in `## SDLC State`. **DOWNGRADES are user decisions** via the existing **Waiver Protocol** (§Step 5) — there is no parallel downgrade mechanism.
+
+**Flags stay orthogonal to rigor (D5).** `use_worktree` and `multi_agent` are NEVER bound by rigor. Inference defaults may correlate (audited work often wants isolation), but there is no binding rule and no hook check — rigor sets evidence strength, flags set execution mechanics.
+
+## Intent × scale validity
+
+|  | `task` | `wave` | `epic` |
+|---|---|---|---|
+| `build` | valid | valid | valid |
+| `bugfix` | valid | valid | **barred** |
+| `refactor` | valid | valid | valid |
+| `tune` | valid | valid | valid |
+| `spike` | valid | valid | **barred** |
+| `incident-response` | valid | valid | **barred** |
+
+**Barred cells (D4):**
+
+- `bugfix × epic` — a bugfix that needs multi-session decomposition is a misclassified `refactor` or `build`; a genuine bugfix fits within a wave.
+- `spike × epic` — spikes are timeboxed; an epic-scale investigation is not a spike.
+- `incident-response × epic` — incidents are clock-driven; you do not scope an incident across multiple sessions.
+
+## Step → governing-skill mapping
+
+One base step→skill table governs every run; per-intent deltas below name only what changes. The **Tier** column is the default dispatch target (§Model & Token Strategy): **O** = orchestrator (main thread) · **E** = execution (fresh `model: opus`/`model: sonnet`, routed by the slice's `complexity:` tag; fork only if context-heavy) · **X** = explore/mechanical/test (fresh `model: sonnet`). Default hint only; the Strategy section governs.
 
 | Step | Tier | Governing skill | On-demand sub-skills |
 |---|---|---|---|
@@ -340,20 +426,44 @@ thread) · **E** = execution (fresh `model: opus` or `model: sonnet`, routed by 
 | 3 Plan | O | `superpowers:writing-plans` | — |
 | 4 Implement | E + X | `agent-skills:incremental-implementation` | `superpowers:test-driven-development` (every slice); `superpowers:executing-plans`; `agent-skills:source-driven-development`; `superpowers:systematic-debugging`; `agent-skills:documentation-and-adrs`; `superpowers:using-git-worktrees` (if `use_worktree`) |
 | 5 Verify (gate) | X → O | `superpowers:verification-before-completion` | tests/build modality: the suite · browser modality: `browser-verify` (drives `playwright-cli`) → escalate `agent-skills:browser-testing-with-devtools` (deep inspection only); `agent-skills:frontend-ui-engineering` pre-verify |
-| 6 Review (gate) | E | `agent-skills:code-review-and-quality` | adversarial stance: independent subagent dispatch (MANDATORY autonomous/incident/design-refresh); `agent-skills:security-and-hardening` (security flag); `agent-skills:performance-optimization` (perf flag) |
-| 7 Document | O / E | `agent-skills:documentation-and-adrs` | — |
+| 6 Review (gate) | E | `agent-skills:code-review-and-quality` | 5-axis self-review (always); adversarial critic via independent subagent dispatch — **MANDATORY at `audited` rigor** (§Step 6); `agent-skills:security-and-hardening` (security flag); `agent-skills:performance-optimization` (perf flag) |
+| 7 Document | O / E | `agent-skills:documentation-and-adrs` | RCA shape for `incident-response` (§Per-intent deltas) |
 | 8 Integrate & close | O / X | `superpowers:finishing-a-development-branch` | `canonical-sdlc` (cleanup half) |
 | 9 Ship | E / O | `agent-skills:shipping-and-launch` | `agent-skills:ci-cd-and-automation` (new pipelines only) |
 | — Commit rhythm (cross-cutting) | O | `agent-skills:git-workflow-and-versioning` | fires per step, not at a position |
 
-#### Autonomous Friction Protocol
+**Engagement sequence — Step 1 Q&A is never skipped.** Unattended execution is the **Steps 4–9 span**, not the whole lifecycle; skipping Step 1 Q&A to "save time" is the single highest-risk move. The user-engagement shape is fixed for every run:
 
-When autonomous-mode work hits friction, **diagnose before escalating**. Friction is either:
+| Step | Engagement |
+|---|---|
+| 1. Ideate | **Interactive Q&A with the user.** Extensive back-and-forth on scope, non-goals, alternatives. |
+| 2. Spec | **Semi-interactive.** Translate Step 1 into a testable contract. Surface remaining ambiguities as Wake Notes; otherwise proceed. |
+| 3. Plan | **Write → one approval checkpoint.** Claude writes the plan; user reviews and approves before Step 4 begins. |
+| 4–9 | **Unattended** within the stop-and-wake rules (expanded at `audited` rigor — §Escalation Protocol). |
+
+### Per-intent deltas
+
+Each intent runs the base table above; only the rows named below change. `scale: epic` short-circuits any intent after Step 3 (§Scale — the decomposition unit): it produces `epic.spec.md` + `epic.plan.md`, carves waves, owns the `epic/NN-<slug>` integration branch, and does not run Steps 4–9 — each wave is then a separate subsequent run.
+
+- **`build`** — base table as-is. When the build IS a verification instrument (a test harness, a gate, a check), its Step-5 capability evidence must prove the instrument CATCHES planted failures, not merely that it runs green (the meta-evidence rule, §Intent — the kind of work).
+- **`bugfix`** — Step 4's failing test IS the repro: RED = the reproduction of the divergence, GREEN = the repro passing.
+- **`refactor`** — the Step-2 spec is "behavior preserved" (the existing suite stays green across the change); migrations additionally carry a compatibility matrix and a revert plan. Full refactor/upgrade evidence keys ship in a later version. A new acceptance criterion means the work is no longer behavior-preserving ⇒ reclassify as `build`.
+- **`tune`** — Step 1 routes to the **domain skill**: `impeccable` for UX, `agent-skills:security-and-hardening` for hardening, `agent-skills:performance-optimization` for latency/size/cost. Step 5 is **heavily weighted at every rigor** — the **baseline → target → re-measure** shape is the verification (record starting value, target, re-measured value).
+- **`spike`** — **no plan file**; the sole artifact is the writeup at `<docs-root>/spikes/spike-<slug>-<YYYYMMDD>.md` (D3). Research runs on a scratch branch or uncommitted; **no worktree, no ADR, no spec, no commits to the integration branch**. If the finding turns out shippable, that is a SEPARATE run — re-enter under a shipping intent at Step 1 (§Classification rules rule 3).
+- **`incident-response`** — Step 1 compresses to **triage** (confirm the incident is real, scope blast radius, assign severity); Step 4's failing test = the incident repro; Step 6's critic framing is "does the fix mask a deeper issue?"; Step 7 is an **RCA, not an ADR** (backward-facing postmortem — shape below); Step 9 = deploy with rollback → monitor ≥1 cycle → close the monitoring gap (or declare "no gap" with evidence). Rigor floors at `audited`, so the adversarial critic and expanded stop-and-wake are always on.
+
+**`tune` UX flavor (absorbs the former UX-refresh lifecycle).** When `tune` targets UX, Step 1's domain skill is `impeccable` (`shape` for ideation) and Step 4 runs impeccable's native loop: (a) `/impeccable craft` → (b) polish + harden + normalize → (c) critique (scored eval) → (d) iterate. **Loop exit gate:** critique's Nielsen heuristic scores ≥ 3/4 on all 10 heuristics; cognitive-load score ≤ 1; AI-slop verdict passes; polish checklist complete. Step 5 adds an `audit` scored technical-quality report with T3 browser evidence per state (`agent-skills:frontend-ui-engineering` pre-verify); Step 6 reviews the **5 code axes only** (design quality was already evaluated in the Step-4 critique loop); Step 9 invokes `extract` if reusable patterns emerged. Behavior is unchanged from the v≤10 UX-refresh mode — only its home moved (§Legacy modes).
+
+**RCA required shape** (`incidents/NNNN-<slug>/rca.md`): summary, timeline, root cause, contributing factors, the fix, prevention (each measure links a commit/ticket), and monitoring-gap analysis. Full section-by-section shape and rules: the canonical-sdlc README (`## RCA shape`). Incident-specific stop-and-wake triggers live under §Escalation Protocol.
+
+## Autonomous Friction Protocol
+
+When unattended Steps 4–9 hit friction, **diagnose before escalating**. Friction is either:
 
 - **Diagnostic friction** — direction is clear, code misbehaves (test fails, behavior diverges from spec, surprise output). → MAP first.
 - **Decision friction** — the direction itself is in question (which approach, which abstraction, which scope). → Surface via User Decision Protocol.
 
-For diagnostic friction in autonomous mode:
+For diagnostic friction:
 
 1. **Load `map-instrument-narrow` immediately** and dispatch it to a **fresh subagent carrying the verbatim Rigor Mandate** (Subagent Dispatch Convention point 8). Do not write speculative fix code first. Speculative-fix-before-instrumentation regresses pass rates more often than it improves them.
 2. **No fix code** until NARROW phase yields a named root cause with data evidence.
@@ -363,79 +473,7 @@ For diagnostic friction in autonomous mode:
 
 **Anti-pattern:** "I'll try one thing first, then instrument if it doesn't work." That "one thing" mutates state. Subsequent instrumentation captures post-attempt state, not the original bug. **MAP before any state change.**
 
-This protocol is load-bearing for every autonomous wave. It is not optional.
-
-### `epic-scope` mode in particular
-
-`epic-scope` only runs Steps 0–3, producing the epic-level spec and plan. After `epic-scope` completes, each wave is a separate subsequent invocation — typically `autonomous`.
-
-| Step | Governing skill |
-|---|---|
-| 0. Configure | `canonical-sdlc` + `agent-skills:context-engineering` |
-| 1. Ideate | `agent-skills:idea-refine` |
-| 2. Spec | `agent-skills:spec-driven-development` (produces `epic.spec.md`) |
-| 3. Plan | `superpowers:writing-plans` (produces `epic.plan.md`; carves waves; declares `integration-branch:`) |
-| 4–9 | **N/A** — `epic-scope` stops here. |
-
-### `incident-response` mode in particular
-
-`incident-response` is the mode for production incidents. The outcome is a **closed incident with documented prevention**.
-
-| Step | Governing skill | Notes |
-|---|---|---|
-| 0. Configure | `canonical-sdlc` + `agent-skills:context-engineering` | — |
-| 1. Triage (compressed Ideate) | `agent-skills:idea-refine` (compressed to triage) | — |
-| 2. Spec (repro + closure criteria) | `agent-skills:spec-driven-development` (writes `incidents/NNNN-<slug>/spec.md`) | — |
-| 3. Plan (debug + fix) | `superpowers:writing-plans` (writes `plan.md`; integration branch is typically `main` or `hotfix/<id>`) | — |
-| 4. Diagnose + Implement | `superpowers:systematic-debugging` → `agent-skills:incremental-implementation` | failing test = incident repro |
-| 5. Verify (gate) | `superpowers:verification-before-completion` | tests/build modality always; browser modality via `browser-verify`/`playwright-cli` (N/A if non-UI) → deep-debug `agent-skills:browser-testing-with-devtools` |
-| 6. Review (gate) | `agent-skills:code-review-and-quality` + adversarial critic (**MANDATORY**) | critic framing: "does the fix mask a deeper issue?" |
-| 7. **RCA (not ADR)** | `canonical-sdlc` (writes `rca.md`) | — |
-| 8. Integrate & close | `superpowers:finishing-a-development-branch` (merge to declared integration branch) + `canonical-sdlc` (cleanup) | — |
-| 9. Ship + Monitor + Close gap | `agent-skills:shipping-and-launch` (deploy → monitor through ≥1 cycle → close monitoring gap) | — |
-
-**RCA required shape** (`incidents/NNNN-<slug>/rca.md`): summary, timeline, root cause, contributing factors, the fix, prevention (each measure links a commit/ticket), and monitoring-gap analysis. Full section-by-section shape and rules: see the canonical-sdlc README (`## RCA shape`).
-
-**Incident-specific stop-and-wake:** halt if the fix might mask a deeper issue, root cause is not yet established, or blast radius is larger than scoped.
-
-### `design-refresh` mode in particular
-
-`design-refresh` wraps impeccable's native design lifecycle (`shape → craft → polish → critique`) inside the canonical-sdlc shell. **Behavior does not change.**
-
-| Step | Governing skill | Notes |
-|---|---|---|
-| 0. Configure | `canonical-sdlc` + `agent-skills:context-engineering` | `teach-impeccable` if `.impeccable.md` missing |
-| 1. Ideate | **`shape`** | — |
-| 2. Spec | `agent-skills:spec-driven-development` | — |
-| 3. Plan | `superpowers:writing-plans` | — |
-| 4. Implement (**loop**) | **`impeccable`** (`/impeccable craft`) | (a) craft → (b) polish + harden + normalize → (c) critique. Iterate. |
-| 5. Verify (gate, **heavily weighted**) | `superpowers:verification-before-completion`; browser modality `browser-verify`/`playwright-cli` + **`audit`** | browser evidence per state; `audit` scored technical-quality report; deep-debug → `agent-skills:browser-testing-with-devtools` |
-| 6. Review (gate, **5 code axes only**) | `agent-skills:code-review-and-quality` + adversarial critic | design quality evaluated in Step 4 critique loop; critic framing: "find visual regressions and a11y failures" |
-| 7. Document decisions | `agent-skills:documentation-and-adrs` | — |
-| 8. Integrate & close | `superpowers:finishing-a-development-branch` + `canonical-sdlc` (cleanup) | — |
-| 9. Ship | `agent-skills:shipping-and-launch` | **`extract`** (if reusable patterns) |
-
-**Step 4 loop structure:** (a) build → `/impeccable craft` (skips shape; loads references from the brief); (b) polish + harden + normalize; (c) critique (scored eval); (d) iterate — if critique flags issues, classify and loop.
-
-**Step 4 loop exit gate:**
-- Critique's Nielsen heuristic scores ≥ 3/4 on all 10 heuristics.
-- Cognitive load score ≤ 1.
-- AI slop verdict: passes.
-- Polish checklist complete.
-
-### `spike` mode in particular
-
-**Constraints:**
-- **No worktree.** Research happens on a scratch branch or uncommitted.
-- **No ADR, no plan file, no spec.**
-- **No commits to the integration branch.**
-- If a spike reveals the work is worth shipping, **declare a new mode** and re-enter at Step 1.
-
-| Step | Governing skill |
-|---|---|
-| 0. Configure | `canonical-sdlc` + `agent-skills:context-engineering` |
-| — Research | `agent-skills:source-driven-development` (woven, on-demand) |
-| — Writeup | informal — writes `<docs-root>/spikes/spike-<slug>-<YYYYMMDD>.md` |
+This protocol is load-bearing for every unattended wave. It is not optional.
 
 ## User Decision Protocol
 
@@ -498,7 +536,7 @@ These load at session start, not as numbered steps:
 4. Read `INDEX.md` + `context.md` + every linked file.
 5. **Name the active artifact explicitly** before declaring mode/wave. If the inferred active artifact contradicts the user's stated intent, HALT and surface via User Decision Protocol. Do not auto-resolve.
 
-- **Announce the mode** per the Load-time Announcement section.
+- **Announce the triple** per the Load-time Announcement section.
 - `agent-skills:context-engineering` — load the right files before work begins.
 - **Memory sweep — recursive.** Read `.bionic/memory/INDEX.md`, `context.md`, AND every file they link to. INDEX.md is an *index*, not the whole notebook.
 
@@ -519,7 +557,7 @@ Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are p
 
 **Goal:** Set every plan-shaping flag in plan frontmatter deliberately, with explicit user confirmation, and derive the Verification Matrix the wave will discharge.
 
-**Action:** Six sub-steps:
+**Action:** Seven sub-steps:
 
 1. **Pre-flight environment check.**
    - **(a) Bionic root.** Check `<project>/.bionic/` exists. If absent, ask to create.
@@ -527,7 +565,24 @@ Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are p
    - **(c) Ephemeral workspace.** `mkdir -p <project>/.bionic/tmp/`.
    - **(d) Hook installation.** Verify `~/.claude/hooks/canonical-sdlc-{evidence-gate,governing-skill}.sh` are present and executable. If any are missing, warn and record an `## Assumptions` entry.
 
-2. **Infer recommended values** from available context.
+2. **Classify the triple — `<intent> · <rigor> · <scale>` — silently, then interview only by exception.** The triple is the run's most fundamental shaping decision (§The Three Axes); infer it before the discriminator flags, because intent seeds several flag and matrix-tier defaults. Inference signals per axis:
+
+   | Axis | Inference signals |
+   |---|---|
+   | **intent** | Read the verbs and named artifacts in the request. New capability / new machinery (the machinery test, §Classification rules) → `build`; a divergence-from-intended-behavior to repair → `bugfix`; a behavior-preserving restructure, dependency upgrade, API migration, or removal/deprecation → `refactor`; a named-measurement improvement (latency, bundle size, a design/heuristic score) → `tune`; understanding-as-deliverable (a throwaway probe, a research question) → `spike`; a live deployed surface broken for its users with the clock running → `incident-response`. |
+   | **rigor** | Start from the **default-rigor-by-intent** table (§Rigor floors and lifecycle), then take the **MAX** with every derivable floor (intent floor, flag floor, project floor, epic floor). A floor only pushes rigor UP. The inferred value is **provisional** — it locks at Step 3. |
+   | **scale** | A sub-session unit, one of several this session → `task`; one full session → `wave` (default); spans multiple sessions and carves into waves → `epic`. Check the **intent × scale validity** matrix (§Intent × scale validity): a barred cell (`bugfix`/`spike`/`incident-response` × `epic`) means the intent or the scale is misjudged — re-derive, do not declare a barred triple. |
+
+   **Silent inference is the default path.** Do NOT interrogate the user for the triple; infer it, then surface it in the confirmation display (sub-step 5) with a per-line rationale, exactly as the discriminator flags are surfaced. The user confirms or overrides via the DSL — the triple is normally a `confirm`, not an answered questionnaire.
+
+   **Interview by exception — ONLY.** Fire **1–3 targeted questions** at Step 0 on **exactly** these three conditions, and no others:
+   - **(a) Intent collision** — two intents are genuinely plausible and §Classification rules does not resolve it. The two **standing gray zones** named there are the canonical cases: **mechanism-swap** (capability preserved but the mechanism observably changes — sits between `build` and `refactor`) and **reference-content** (skill prose/recipes versus enforced machinery — sits between `build` and out-of-scope docs). Name the two candidate intents in the question; never silently pick one.
+   - **(b) Suspected-but-unconfirmed floor trigger** — the request has a *possible* security / privacy / vulnerable-population surface (a flag-floor trigger) that the request itself does not confirm. Ask whether that sensitive surface is in scope, because a yes raises the rigor floor to `audited`.
+   - **(c) Unclear scale** — the work could be one session or several, and the boundary is not derivable from the request.
+
+   There is **no interview mode.** These are surgical, single-purpose questions fired inline at Step 0. Deep requirements elicitation — the 6-lens back-and-forth — stays at **Step 1 (Ideate)**; Step 0's interview-by-exception never expands into it. (D5: the discriminator flags stay orthogonal to the triple — inference for the two may correlate, but no rule binds a flag to an axis value and no hook checks the pairing.)
+
+3. **Infer recommended values** from available context.
 
    | Flag | Inference signals |
    |---|---|
@@ -539,9 +594,9 @@ Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are p
    | `cleanup_on_finish` | Default `true`. |
    | `use_worktree` | Default `false`. Set true on explicit user override or when user says "isolate". |
    | `integration_branch` | Wave under an existing epic → copy from the epic plan's `integration-branch:`. Standalone → current git branch if it is a mainline (`main`/`master`/`develop`); otherwise default `main`. `incident-response` → `main` or `hotfix/<id>`. If genuinely undeterminable, print the line with value `unknown` — never drop it. |
-   | `model_plan` | Derived from `multi_agent` and the **detected session model** (see §Model & Token Strategy). `true` → `orchestrator=<detected>; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`. `false` → `main=<detected>` (dial-down offered). Surfaced for confirmation; **hook-enforced for v4+** autonomous plans. |
+   | `model_plan` | Derived from `multi_agent` and the **detected session model** (see §Model & Token Strategy). `true` → `orchestrator=<detected>; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`. `false` → `main=<detected>` (dial-down offered). Surfaced for confirmation; **hook-enforced for v4+** plans (§Legacy modes covers the v≤10 mode gating). |
 
-3. **Derive the Verification Matrix.** One row per acceptance criterion (from the Step 2 spec; a wave planned before its spec is final reconciles rows against the spec at Step 2). Each row gets a tier from browser-verify's T0–T4 ladder by these **inference defaults**:
+4. **Derive the Verification Matrix.** One row per acceptance criterion (from the Step 2 spec; a wave planned before its spec is final reconciles rows against the spec at Step 2). Each row gets a tier from browser-verify's T0–T4 ladder by these **inference defaults**:
    - user-visible behavior change → **T3**;
    - engine/rendering-divergent behavior → **T2 (both engines)** for the divergence AND **T3** for the user-visible AC;
    - pure substrate/internal, no runtime surface → **T1/T2** with a one-line justification;
@@ -573,7 +628,7 @@ Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are p
 
    **T4 rows** are explicitly-scheduled human-walk rows, discharged by recorded user confirmation (§Step 5). **Lock semantics:** the matrix locks at Step 3 approval; after lock, tier *upgrades* are free, while *downgrades*, self-`n/a` on a live tier, and closure over a non-CONFIRMED row are only via the **Waiver Protocol** (§Step 5). Mid-wave new ACs go to `## Assumptions` as W+1 candidates — never into the locked matrix.
 
-4. **Present the confirmation display — in full, always.** The display below is a mandatory, untruncatable artifact: every section, every flag, every line, every inference rationale, **and every matrix row**, rendered as one block in the conversation. Never elide, summarize, sample ("key flags: …"), or defer any portion of it — an abbreviated display invalidates the confirmation, because the user is approving exactly what they can see. The matrix block is rendered IN FULL under the same rule — **even past 12 ACs, print every row** (a matrix is exactly what must not be sampled). If a value is unknown, print the line with the value marked `unknown` rather than dropping the line. The `integration-branch:` line is load-bearing — Step 8 merges every wave into it; a display missing this line is an invalid confirmation, exactly like a missing flag.
+5. **Present the confirmation display — in full, always.** The display below is a mandatory, untruncatable artifact: every section, every flag, every line, every inference rationale, **and every matrix row**, rendered as one block in the conversation. Never elide, summarize, sample ("key flags: …"), or defer any portion of it — an abbreviated display invalidates the confirmation, because the user is approving exactly what they can see. The matrix block is rendered IN FULL under the same rule — **even past 12 ACs, print every row** (a matrix is exactly what must not be sampled). If a value is unknown, print the line with the value marked `unknown` rather than dropping the line. The `integration-branch:` line is load-bearing — Step 8 merges every wave into it; a display missing this line is an invalid confirmation, exactly like a missing flag.
 
    ```
    ═══ Plan Configuration — confirm before Step 1 ═══
@@ -584,7 +639,12 @@ Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are p
      hooks:        evidence-gate, governing-skill       [all installed]
 
    slug: <inferred-from-conversation>
-   mode: autonomous
+
+   Triple:                          [the run's shaping decision — see §The Three Axes]
+     intent:  build                 [inferred: request adds new machinery — machinery test]
+     rigor:   peer-reviewed         [inferred: build default; no floor raises it — §Rigor floors]
+     scale:   wave                  [inferred: one-session chunk, not multi-session]
+
    integration-branch: main         [inferred: current branch — Step 8 merges every wave here]
 
    Discriminator flags:
@@ -617,9 +677,9 @@ Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are p
      e.g. "set use_worktree=true, set exec-standard=opus, set verify(AC-2)=T2, then confirm"
    ```
 
-5. **Block until explicit confirmation.** No timeout, no implicit acceptance.
+6. **Block until explicit confirmation.** No timeout, no implicit acceptance.
 
-6. **Task-list creation is the immediate next action after approval.** The instant confirmation arrives — before any Step 1 work — run this fixed sequence:
+7. **Task-list creation is the immediate next action after approval.** The instant confirmation arrives — before any Step 1 work — run this fixed sequence:
    1. **Announce it:** "Step 0 confirmed — creating the task list."
    2. **Create the full TaskCreate list:** tasks `0:`, `1:`, ..., `9:`, one per planned step. Mark `0:` `completed` immediately.
    3. **Then transition to Step 1** (idea-refine).
@@ -631,16 +691,22 @@ Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are p
 ```
 reply        := overrides? "confirm"
 overrides    := override ("," override)* ","?
-override     := "set" flag "=" value
+override     := "set" axis "=" axis-value
+              | "set" flag "=" value
               | "set" "verify" "(" AC-id ")" "=" tier
               | "change" flag "to" value
+axis         := "intent" | "rigor" | "scale"
+axis-value   := intent-value | rigor-value | scale-value
+intent-value := "build" | "bugfix" | "refactor" | "tune" | "spike" | "incident-response"
+rigor-value  := "tested" | "peer-reviewed" | "audited"
+scale-value  := "task" | "wave" | "epic"
 ```
 
-Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`; `set integration-branch=develop, confirm`. **Matrix tier override:** `set verify(AC-B2.1)=T2, confirm` retiers a matrix row before lock. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set exec-standard=opus, confirm` (route standard slices to opus too — equivalent to disabling complexity routing); `set exec-complex=sonnet, confirm` (accepted but discouraged; warn before applying); `set execution=opus-only, confirm` (shorthand for `exec-standard=opus`); `set main_model=sonnet, confirm` (multi_agent=false dial-down).
+Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`; `set integration-branch=develop, confirm`. **Triple override:** `set intent=refactor, set rigor=audited, confirm` reclassifies the run before Step 1; `set scale=epic, confirm` switches to epic-scoping. **Floors are upward-only — a rigor override BELOW a derivable floor is rejected at Step 0** (e.g. `set rigor=tested` on `incident-response`, whose intent floor is `audited`, or on any security/privacy-flagged work): warn, name the binding floor, and keep the floor value. An upward rigor override (`set rigor=audited` on a `build`) is always accepted. An override that names a **barred** intent × scale cell (§Intent × scale validity) is rejected with the reason. **Matrix tier override:** `set verify(AC-B2.1)=T2, confirm` retiers a matrix row before lock. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set exec-standard=opus, confirm` (route standard slices to opus too — equivalent to disabling complexity routing); `set exec-complex=sonnet, confirm` (accepted but discouraged; warn before applying); `set execution=opus-only, confirm` (shorthand for `exec-standard=opus`); `set main_model=sonnet, confirm` (multi_agent=false dial-down).
 
-On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 10` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`). The confirmed `integration-branch` and the derived `## Verification Matrix` are carried forward: when the plan file is written at Step 3, its `## SDLC State` section opens with the Step-0-confirmed `integration-branch: <name>` line, and the plan body carries the locked `## Verification Matrix` section. For v4 and later autonomous plans the governing-skill hook **requires** `model_plan`; for v10 it additionally requires the `## Verification Matrix` section at `sdlc-step ≥ 3` — a missing value blocks the write (exit 2).
+On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 10` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`). The confirmed `integration-branch` and the derived `## Verification Matrix` are carried forward: when the plan file is written at Step 3, its `## SDLC State` section opens with the Step-0-confirmed `integration-branch: <name>` line, and the plan body carries the locked `## Verification Matrix` section. For v4 and later plans the governing-skill hook **requires** `model_plan`; for v10 it additionally requires the `## Verification Matrix` section at `sdlc-step ≥ 3` — a missing value blocks the write (exit 2).
 
-**Two-layer enforcement.** Layer 1 (soft): SKILL.md mandates Step 0 — do not proceed without explicit user confirmation. Layer 2 (hard, `canonical-sdlc-governing-skill.sh`, on `PreToolUse|Write,Edit`): for v4+ autonomous plans, a missing flag / `model_plan` / (v10) matrix section → exit 2.
+**Two-layer enforcement.** Layer 1 (soft): SKILL.md mandates Step 0 — do not proceed without explicit user confirmation. Layer 2 (hard, `canonical-sdlc-governing-skill.sh`, on `PreToolUse|Write,Edit`): for v4+ plans, a missing flag / `model_plan` / (v10) matrix section → exit 2.
 
 **Mid-plan reconfiguration.** Edit plan frontmatter directly; the new value takes effect immediately on next hook read.
 
@@ -653,15 +719,15 @@ On accept, write final values into plan frontmatter literally — every flag as 
 ### Step 1 — Ideate (`agent-skills:idea-refine`)
 - **Goal:** Pin scope and non-goals before they get encoded as requirements.
 - **Action:** Run the 6-lens refinement + "Not Doing" list. Always prefer `idea-refine` over `superpowers:brainstorming`.
-- **Engagement:** Interactive Q&A with the user. **Mandatory in every mode.** Every decision point follows the **User Decision Protocol**. The alternatives lens must check:
+- **Engagement:** Interactive Q&A with the user. **Mandatory for every run, every intent.** Every decision point follows the **User Decision Protocol**. The alternatives lens must check:
   1. Existing design docs (`.bionic/memory/*.md` including every file linked from `INDEX.md`).
   2. Prior plans and specs in `<docs-root>/plans/` and `<docs-root>/specs/` — walk every epic directory.
   3. Prior ADRs under `<docs-root>/adrs/`.
   4. Prior incidents and RCAs under `<docs-root>/incidents/`.
   5. In wave mode: the epic plan and spec for the current epic. Trust but verify.
 - **Parallelization:** dispatch parallel Explore agents for distinct lenses when 2+ are independent.
-- **Mode substitutions:**
-  - `design-refresh`: governing skill becomes **`shape`** (not `idea-refine`).
+- **Intent substitutions:**
+  - `tune` (UX flavor): governing skill becomes **`shape`** (not `idea-refine`).
   - `incident-response`: compress to triage — confirm incident reality, scope blast radius, assign severity.
 - **Gate:** Refined idea statement + explicit "Not Doing" list + alternatives lens cites prior design artifacts.
 - **Evidence:** Artifacts captured in the spec file.
@@ -671,9 +737,9 @@ On accept, write final values into plan frontmatter literally — every flag as 
 - **Action:** Write requirements + acceptance criteria.
 - **Parallelization:** surface_type specialist + user-experience critic in parallel.
 - **Gate:** Every requirement has an acceptance criterion.
-- **Evidence:** Spec doc at `<docs-root>/specs/epic-NN-<slug>/wave-NN-<slug>.spec.md` (wave); `epic.spec.md` (epic-scope); `incidents/NNNN-<slug>/spec.md` (incident).
-- **Mode substitutions:**
-  - `design-refresh`: spec is **visual** (tokens, contrast, focus, interaction, responsive) plus "all existing tests still pass."
+- **Evidence:** Spec doc at `<docs-root>/specs/epic-NN-<slug>/wave-NN-<slug>.spec.md` (wave); `epic.spec.md` (`scale: epic`); `incidents/NNNN-<slug>/spec.md` (incident).
+- **Intent substitutions:**
+  - `tune` (UX flavor): spec is **visual** (tokens, contrast, focus, interaction, responsive) plus "all existing tests still pass."
   - `incident-response`: spec is repro + blast radius + closure criteria.
 
 ### Step 3 — Plan (`superpowers:writing-plans`)
@@ -698,7 +764,7 @@ On accept, write final values into plan frontmatter literally — every flag as 
 - **Expand TaskCreate list.** After the plan is written, expand Step 4 (Implement) into one TaskCreate task per slice (`4/1:`, `4/2:`, …).
 - **Tag every slice's complexity.** Each Step 4 slice in the plan carries a `complexity: standard | complex` tag — this routes the slice's execution dispatch (see §Model & Token Strategy, Slice complexity routing). When uncertain, tag `complex`.
 - **Integration-branch declaration — confirmed once at Step 0, stick to it.** Declared in `## SDLC State` via an `integration-branch: <name>` line, copied from the value confirmed in the Step 0 display. If the plan somehow reaches Step 3 without a confirmed value (legacy plan, resumed session), resolve it now:
-  - `epic-scope`: ask the user. Record in the epic plan. Waves inherit.
+  - `scale: epic`: ask the user. Record in the epic plan. Waves inherit.
   - Wave under an existing epic: copy from epic plan.
   - Standalone wave (no epic): ask. Default offer: `main`.
   - `incident-response`: typically `main` or `hotfix/<id>` — ask explicitly.
@@ -725,8 +791,8 @@ This is the "walk away" boundary. After the plan is complete, present a summary 
 - **Parallelization:** if slices are independent (no shared state), dispatch parallel implementer agents.
 - **Dispatch by complexity tag:** `standard` slices → fresh `model: sonnet`; `complex` slices → fresh `model: opus`. If a `standard` slice fails its gate twice, re-dispatch it fresh `model: opus` with the failure context (see §Model & Token Strategy, Escalation ladder).
 - **Task tracking:** mark `4/<slice>: <description>` `in_progress` at slice start; `completed` immediately on slice merge.
-- **Mode substitutions:**
-  - `design-refresh`: governing skill is **`impeccable`**, invoked as `/impeccable craft`. Step 4 runs as a loop: craft → polish/harden/normalize → critique → iterate.
+- **Intent substitutions:**
+  - `tune` (UX flavor): governing skill is **`impeccable`**, invoked as `/impeccable craft`. Step 4 runs as a loop: craft → polish/harden/normalize → critique → iterate.
   - `incident-response`: the failing test must be the **incident repro**.
 - **Assumption-log update:** whenever a decision resolves ambiguity, append a one-line entry to `## Assumptions` **before the commit**.
 - **Gate:** Every slice has a passing test that was RED before implementation; new assumptions logged.
@@ -789,7 +855,7 @@ Step 5:
 
 plus the discharged `## Verification Matrix` section (stack-health line + per-AC tier blocks + `auditor` column). The full auditor report is ephemeral (`.bionic/tmp/`); the per-row verdicts persist in the matrix.
 
-**Mode weight.** `design-refresh`: **heavily weighted** — T3 browser evidence per state + an `audit` scored technical-quality report; use `impeccable` in Step 4 and `agent-skills:frontend-ui-engineering` pre-verify.
+**Intent weight.** `tune` (UX flavor): **heavily weighted** — T3 browser evidence per state + an `audit` scored technical-quality report; use `impeccable` in Step 4 and `agent-skills:frontend-ui-engineering` pre-verify.
 
 ### Step 6 — Review (gate: "is it well-made?") (`agent-skills:code-review-and-quality`)
 
@@ -801,10 +867,10 @@ The Review gate proves the change is well-made, by stance (see §Verification mo
 - **Architecture-axis closure check:** for each new primitive/substrate added in this wave, trace user input → new code; also confirm the Step-5 T3 readback reached the same code (see Step 5). If the chain breaks (no callsite reaches the new code), the substrate is dead and the architecture axis is FAIL.
 - **Parallelization:** all 5 axes run in parallel.
 - **Escalations:** security axis flags → `agent-skills:security-and-hardening`. Performance axis flags → `agent-skills:performance-optimization`.
-- **Mode substitution:** `design-refresh` — review the **5 code axes only**. Design quality was already evaluated in Step 4's critique loop.
+- **Intent substitution:** `tune` (UX flavor) — review the **5 code axes only**. Design quality was already evaluated in Step 4's critique loop.
 
 **Stance 2 — adversarial critic.**
-- **Mandatory in:** `autonomous`, `incident-response`, `design-refresh`. **Optional in:** `spike`. N/A in `epic-scope`.
+- **Mandatory at:** `audited` rigor — into which `incident-response` floors, and to which any security/privacy-flagged work is raised. **Optional below** `audited` (`tested`/`peer-reviewed`) — a run may still add it voluntarily. Not run at `scale: epic` (there is no Step 6).
 - **INDEPENDENCE is non-negotiable:** the critic must be an **independent agent** — never the agent that wrote the code, never a self-graded review.
 - **Distinct from the Step-5 auditor:** the critic falsifies the *code* (this diff, this design); the Step-5 auditor falsifies the *evidence* (did the matrix rows verify at their tiers). Both run; neither substitutes for the other.
 - **Goal:** Catch what self-review missed. Fresh context, red-team framing.
@@ -820,11 +886,12 @@ The Review gate proves the change is well-made, by stance (see §Verification mo
 
 ### Step 7 — Document decisions (`agent-skills:documentation-and-adrs`) — checkpoint
 - **Goal:** Forcing function. Catch decisions that weren't captured inline during Steps 3 and 4.
-- **Action (`autonomous`, `epic-scope`, `design-refresh`):** Review plan and implementation commits; verify every significant decision has an ADR.
-- **Action (`incident-response`):** **write the RCA** (postmortem, not ADR — see RCA shape above).
+- **ADRs attach to decision SIGNIFICANCE, never to rigor.** Use the User Decision Protocol's significance tiers (§User Decision Protocol): a **momentous** decision (cross-wave, sets a precedent, expensive to reverse) gets an ADR at ANY rigor — even `tested`; a **medium** decision (wave-scoped, reversible with rework) gets one when it will shape later waves; a **trivial** decision gets none at any rigor. The rigor ladder carries **no ADR row** — rigor sets evidence strength, significance sets the decision trail. (`audited`'s "durable decision trail" is the discipline of *recording* momentous decisions, not an extra ADR quota keyed to rigor.)
+- **Action (all intents except `incident-response`):** Review plan and implementation commits; verify every decision at or above **medium** significance has an ADR.
+- **Action (`incident-response`):** **write the RCA** (postmortem, not ADR — see RCA shape in §Per-intent deltas).
 - **Parallelization:** ADR draft + RCA draft (if applicable) in parallel.
-- **Gate:** Every flagged decision has a written record.
-- **Evidence:** ADR file(s) at canonical path, or `rca.md` for incident-response.
+- **Gate:** Every decision at or above medium significance has a written record.
+- **Evidence:** ADR file(s) at canonical path, or `rca.md` for `incident-response`.
 
 ### Step 8 — Integrate & close (`superpowers:finishing-a-development-branch` + `canonical-sdlc`)
 
@@ -863,8 +930,8 @@ Merges the wave onto the integration branch (the **finish** half) then wipes the
 ### Step 9 — Ship (`agent-skills:shipping-and-launch`)
 - **Goal:** Production gate with pre-launch checklist, monitoring, rollback.
 - **Action:** Run checklist; configure CI/CD if new pipelines needed. **Before declaring the wave complete**, emit `<docs-root>/plans/epic-NN-<slug>/continuation.md` summarizing wave, next wave, and open carry-overs.
-- **Mode substitution (`design-refresh`):** invoke **`extract`** if reusable patterns introduced.
-- **Mode substitution (`incident-response`):** Step 9 expands to:
+- **Intent substitution (`tune`, UX flavor):** invoke **`extract`** if reusable patterns introduced.
+- **Intent substitution (`incident-response`):** Step 9 expands to:
   1. Deploy with rollback plan.
   2. Monitor the indicator metric/alert through ≥1 cycle.
   3. Close the monitoring gap (or declare "no gap" with evidence).
@@ -881,7 +948,7 @@ Committing is **not a numbered step** — it is a cross-cutting rhythm that fire
 ## Constraints
 
 - **TDD is non-negotiable** on any code-producing step.
-- **Mode declaration is reviewable.** A wrong mode is drift with a label.
+- **Intent declaration is reviewable.** A wrong intent is drift with a label.
 - **Every step produces an artifact that outlives the conversation.**
 - **Evidence must be pasted or linked**, not claimed.
 - **Escalation deep dives are conditional**, not routine.
@@ -904,7 +971,7 @@ canonical_sdlc_version: 10
 ---
 ```
 
-For incident-response artifacts, use `incident: NNNN-<slug>` instead of `epic`/`wave`. Full field definitions live in the README frontmatter table; the two load-bearing specials are `governing-skill` — the skill declared after the producing step's heading (Step 1 → `agent-skills:idea-refine`; Step 3 → `superpowers:writing-plans`; Step 7 RCA → `canonical-sdlc`; `design-refresh` overrides Step 1 → `shape`, Step 4 → `impeccable`) — and `sdlc-step`, that step's number (`0` for epic-scope artifacts, `10` for `continuation.md`).
+The example shows the current (v10) shape. v11 plans will drop `mode:` for the `intent:`/`rigor:`/`scale:` triple once hook support lands (wave 2 of the axis transition); v≤10 plans carry a `mode:` line and keep it forever (§Legacy modes (v≤10)). For `incident-response` artifacts, use `incident: NNNN-<slug>` instead of `epic`/`wave`. Full field definitions live in the README frontmatter table; the two load-bearing specials are `governing-skill` — the skill declared after the producing step's heading (Step 1 → `agent-skills:idea-refine`; Step 3 → `superpowers:writing-plans`; Step 7 RCA → `canonical-sdlc`; `tune` UX flavor overrides Step 1 → `shape`, Step 4 → `impeccable`) — and `sdlc-step`, that step's number (`0` for `scale: epic` artifacts, `10` for `continuation.md`).
 
 ### Transition discipline
 
@@ -913,6 +980,24 @@ When advancing from one step to the next, announce explicitly:
 > _**Advancing to Step N — &lt;title&gt;** (governing skill: `<skill-id>`). Loading now._
 
 Then invoke `Skill` to load the governing skill.
+
+## Legacy modes (v≤10)
+
+Before v11, this skill ran on a single `mode:` axis with five values. Those names are **v≤10 vocabulary only** — v11 replaces them with the intent × rigor × scale triple. Each legacy mode maps to its nearest axis triple:
+
+| v≤10 `mode:` | v11 triple (nearest equivalent) | Notes |
+|---|---|---|
+| `autonomous` | `build` · `audited` · `wave` | The `audited` mapping reflects what v≤10 `autonomous` behavior corresponded to — mandatory adversarial critic, per-step checkpoint commits, expanded stop-and-wake. **v11 defaults `build` to `peer-reviewed`**; the `audited` mapping is the behavioral equivalent, not the new default. |
+| `epic-scope` | `<intent>` · — · `epic` | Scale-only; rigor is set by the eventual intent. Runs Steps 0–3. |
+| `incident-response` | `incident-response` · `audited` · `wave` | Survives as an intent value; the mode's discipline is now the `audited` intent floor. |
+| `design-refresh` | `tune` · `peer-reviewed` · `wave` (UX flavor) | Folded into `tune`; the impeccable `shape → craft → polish → critique` loop is unchanged (§Per-intent deltas). |
+| `spike` | `spike` · `tested` · `wave`/`task` | Survives as an intent value; capped at `tested` (no code ships at any rigor). |
+
+**Grandfathering rules:**
+
+- **v≤10 plans keep their `mode:` vocabulary forever.** They are never retrofitted to the axis model; a v≤10 plan's `mode:` line stays valid and the v≤10 hooks and shape-tables keep enforcing it unchanged.
+- **v11 plans never declare `mode:`.** They declare `intent:` / `rigor:` / `scale:` instead (frontmatter fields + hook parsing land in wave 2). The v≤10 flag / `model_plan` / matrix enforcement that gated on the legacy `mode:` value is documented in the v10 shape table (§Evidence) — wave 2 re-keys the hooks to the triple.
+- **Not-Doing (D6): no per-intent dispatch-rules files.** v11 does NOT add per-intent rules files — this kills the five phantom per-mode dispatch files carried since v2. The single universal `.bionic/sdlc-dispatch-rules.json` remains the only dispatch-rules file; intent routing lives in SKILL.md's prose tables (§Step → governing-skill mapping, §Per-intent deltas), never in per-intent JSON.
 
 ## Evidence (two tiers)
 
@@ -1027,14 +1112,14 @@ Zero user interaction. The next session reads it if present and resumes from the
 Two `PreToolUse` hooks enforce the contract (full mechanism in the README):
 
 - **`canonical-sdlc-evidence-gate.sh`** (`Bash`) — on `git commit`, blocks (exit 2) if the current step's evidence is missing or unreadable. For `canonical_sdlc_version: 10` it validates the v10 shape table and the `## Verification Matrix` (per-tier keys, waiver/CONFIRMED discipline); v1–v9 plans use their own tables, never retrofitted.
-- **`canonical-sdlc-governing-skill.sh`** (`Write,Edit`) — blocks any artifact lacking `governing-skill:` frontmatter; on v4+ autonomous plans validates the 5 discriminator + 2 opt-in flags + `model_plan`; on **v10** autonomous plans additionally requires a `## Verification Matrix` section at `sdlc-step ≥ 3`.
+- **`canonical-sdlc-governing-skill.sh`** (`Write,Edit`) — blocks any artifact lacking `governing-skill:` frontmatter; on v4+ plans validates the 5 discriminator + 2 opt-in flags + `model_plan`; on **v10** plans additionally requires a `## Verification Matrix` section at `sdlc-step ≥ 3`. (In v≤10 this gating keyed on the legacy `mode:` value — §Legacy modes; wave 2 re-keys the hooks to the triple.)
 
 ## Subagent Dispatch Convention
 
 Every subagent invoked during a canonical-sdlc step must receive a prompt prefix containing:
 
 1. **Current step** — number, name, sub-skill invoked.
-2. **Mode** — the declared canonical-sdlc mode.
+2. **Triple** — the declared `<intent> · <rigor> · <scale>`.
 3. **Scope constraint** — what this agent may touch; what it must not.
 4. **Artifact expected** — the evidence shape required for the step gate.
 5. **Exit condition** — when to stop and report. Includes: "do not pivot approach; surface blockers to the main thread."
@@ -1055,11 +1140,11 @@ This prevents subagent wander.
 
 > Interplay with the model-tier escalation ladder: a `standard` slice that fails twice on `model: sonnet` re-dispatches on `model: opus` (§Model & Token Strategy) — that Opus attempt is the third and final try before this rule fires. Tier escalation happens *within* the three-fail budget, not in addition to it.
 
-1. **If failures are diagnostic** (tests failing, behavior diverging, surprise output) — invoke the **Autonomous Friction Protocol** (see autonomous-mode section). The three-fail counter resets after a completed MAP-INSTRUMENT-NARROW pass yields a root cause; it does NOT reset on additional speculative fixes.
+1. **If failures are diagnostic** (tests failing, behavior diverging, surprise output) — invoke the **Autonomous Friction Protocol** (§Autonomous Friction Protocol). The three-fail counter resets after a completed MAP-INSTRUMENT-NARROW pass yields a root cause; it does NOT reset on additional speculative fixes.
 2. **If failures are decision-related** (ambiguity, blocked-on-judgment, unclear requirement) — Stop. Do not attempt a fourth time. Surface to the user via **User Decision Protocol**: framing, options for unblocking, why-it-matters.
 3. Wait for direction.
 
-**Stop-and-wake list** (active in `autonomous`):
+**Stop-and-wake list** (active for every unattended wave; expanded at `audited` rigor):
 
 - Ambiguous spec requiring a judgment call.
 - New external-API authentication setup.
@@ -1091,8 +1176,10 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 | "This decision is minor, it doesn't need an ADR" | "Minor" is judged from inside the context. Step 7 is the forcing function. |
 | "The code works, that's enough evidence" | "Works on my machine" isn't evidence. |
 | "The user is in a hurry, I should skip steps" | Declare a fast-path explicitly or walk the full path. |
-| "This is just a bugfix; `autonomous` is overkill" | A bugfix is still a code change. |
-| "This is just a refactor; no spec needed" | "All existing tests still pass" is the spec. |
+| "I'll call this a refactor to skip the spec" | Intent is declared and reviewable — a wrong-intent label is drift with a label. `refactor` still owes its "behavior preserved" spec; no intent is spec-free. |
+| "`tested` is fine for this auth change" | The flag floor forbids it — a security/privacy surface floors at `audited`. Floors are max-wins and upward-only; you cannot shop rigor below a derivable floor. |
+| "It's really one big task, not a wave" | Scale-inflation (or deflation) dodges the matrix; the Step-3 checkpoint catches it. Declare the honest scale. |
+| "The Step-0 interview is overkill; I'll just guess the intent" | The gray-zone collisions (mechanism-swap, reference-content) are exactly what the exception interview exists for — guessing is silent misclassification. |
 | "The matrix tier is too strict for this AC" | Downgrading a tier is a user decision via the Waiver Protocol, recorded in the row — never a self-service call at Verify time. |
 | "The auditor is overkill, my evidence is obviously fine" | Self-graded evidence is the exact root cause the auditor exists to kill. "Obviously fine" is the claim it falsifies. |
 | "I'm confident in my self-review; the adversarial critic is overkill" | Self-review is bounded by what you thought to check. |
@@ -1107,8 +1194,8 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 ## Red Flags — STOP and Correct
 
 - Claiming a step is "done" without pasting or linking its evidence artifact.
-- Skipping the load-time mode announcement.
-- Declaring a mode that doesn't match the actual work.
+- Skipping the load-time triple announcement.
+- Declaring an intent that doesn't match the actual work.
 - Skipping TDD on a code-producing step.
 - Implementing before a plan file exists (any wave mode).
 - Writing an ADR or RCA post-commit "as a follow-up."
@@ -1117,9 +1204,9 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 - Shipping spike code.
 - Reaching Step 9 with no artifact from Step 3.
 - Committing without `## SDLC State` updated for the current step.
-- `autonomous` mode without `## Assumptions` seeded at plan time.
+- A wave reaching Step 4 without `## Assumptions` seeded at plan time.
 - Adversarial critic output that is pure agreement.
-- Dispatching a subagent without the current-step + mode + scope-constraint prefix.
+- Dispatching a subagent without the current-step + triple + scope-constraint prefix.
 - Improvising past a stop-and-wake trigger.
 - Step 8 closing without the wave's commits reachable from the integration branch.
 - Declaring a plan without an `integration-branch:` line.
