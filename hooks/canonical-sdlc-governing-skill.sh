@@ -239,7 +239,7 @@ fi
 # v11 re-keys governance off the legacy `mode:` axis onto the triple
 # (intent × rigor × scale). Presence + whole-value enum validation is
 # blocking; CONTENT is already CR-stripped (line 143), so whole-line
-# yaml_get reads compare cleanly under CRLF too (epic-05). Being a v11
+# yaml_get reads compare cleanly under CRLF too. Being a v11
 # artifact — not a `mode: autonomous` gate — is what makes the flag /
 # model_plan / matrix contract below apply (D13); the mode-gate short
 # circuit further down is bypassed for v11 accordingly.
