@@ -128,12 +128,29 @@ if [ -z "$PLAN" ] || [ ! -f "$PLAN" ]; then
   exit 0
 fi
 
+# Normalize a plan file's line endings to plain \n on stdout. Strips a trailing
+# \r from each record (CRLF: \r\n → \n) and converts any remaining lone \r
+# (classic-Mac CR-only: \r without \n) into a real newline. Every parse below is
+# line-anchored, so it must see real newlines.
+#
+# `tr -d '\r'` (the prior normalization) merely DELETED every \r. On a CRLF file
+# that happened to work, but on a CR-only file it removed every line break,
+# collapsing the whole plan to ONE line beginning with the frontmatter `---`.
+# The line-anchored `/^## SDLC State/` presence check then never matched, the
+# hook exited 0 as "not a canonical-sdlc plan", and every commit passed ungated.
+# awk splits on \n by default, so a CR-only file arrives as a single record that
+# gsub re-splits into real lines; LF and CRLF files are unaffected.
+normalize_newlines() {
+  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"
+}
+
 # The newest plan has no ## SDLC State section → not a canonical-sdlc run.
 # Fence-aware (matches the SECTION extraction below): a `## SDLC State` heading
 # that appears ONLY inside a ``` fenced example is documentation, not state, so
 # the file passes through as non-canonical rather than being parsed and then
-# false-blocked on the empty extraction. \r stripped for CRLF plans.
-if [ -z "$(tr -d '\r' < "$PLAN" | awk '
+# false-blocked on the empty extraction. Line endings normalized (CRLF and
+# CR-only) to real newlines first — see normalize_newlines.
+if [ -z "$(normalize_newlines "$PLAN" | awk '
   /^[[:space:]]*```/ { fence = !fence; next }
   fence { next }
   /^## SDLC State/ { print "yes"; exit }
@@ -146,12 +163,12 @@ fi
 # for v2 shape enforcement; absent on legacy plans, in which case the
 # hook reverts to presence-only behavior.
 #
-# CRLF plans (\r\n line endings) would otherwise defeat the exact-match
-# `$0=="---"` comparison ("---\r" != "---"), so \r is stripped from the
-# file before either awk pass — normalizing once here means every
-# downstream parse (frontmatter values, SECTION lines, CURRENT, evidence
-# blocks) sees plain \n text.
-FRONTMATTER=$(tr -d '\r' < "$PLAN" | awk 'NR==1 && $0=="---"{f=1; next} f && $0=="---"{exit} f')
+# CRLF/CR-only plans would otherwise defeat the exact-match `$0=="---"`
+# comparison ("---\r" != "---"), so line endings are normalized to \n before
+# every awk pass (normalize_newlines) — meaning every downstream parse
+# (frontmatter values, SECTION lines, CURRENT, evidence blocks) sees plain
+# \n text regardless of the file's original line-ending style.
+FRONTMATTER=$(normalize_newlines "$PLAN" | awk 'NR==1 && $0=="---"{f=1; next} f && $0=="---"{exit} f')
 
 frontmatter_get() {
   echo "$FRONTMATTER" \
@@ -217,13 +234,13 @@ log_finding() {  # $1=check-id  $2=detail
 # v11 task-scale ledger validation (D12) — LOG-ONLY (D14, check-id
 # `task-ledger`). Reads the `## Tasks` registration table (fence-aware, the
 # matrix_section idiom) and the per-task `- T<n>:` evidence lines in the
-# ## SDLC State section (SECTION, already \r-stripped). Every deviation appends
+# ## SDLC State section (SECTION, already newline-normalized). Every deviation appends
 # one finding; the function ALWAYS returns 0 — a ledger defect never blocks this
 # wave. Checks: missing `## Tasks`; status outside {pending,active,done,dropped};
 # an active/done task with no `- T<n>:` line or a placeholder/empty value.
 validate_task_ledger() {
   local tasks rows line id status ev
-  tasks=$(tr -d '\r' < "$PLAN" | awk '
+  tasks=$(normalize_newlines "$PLAN" | awk '
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^## Tasks/ { f=1; next }
@@ -259,14 +276,14 @@ validate_task_ledger() {
 }
 
 # Extract the ## SDLC State section (from its header up to the next ##
-# header or EOF). \r stripped here too, for the same CRLF reason as
-# FRONTMATTER above. Fence-aware (same idiom as matrix_section): lines inside
+# header or EOF). Line endings normalized here too (normalize_newlines), for
+# the same reason as FRONTMATTER above. Fence-aware (same idiom as matrix_section): lines inside
 # ``` fenced code blocks are skipped, so a plan documenting the D12 task-scale
 # schema in a fenced example — a `## SDLC State` heading with `current: T<n>` —
 # does not shadow the REAL section (which would mis-parse `current:` and false-
 # block). Fence state is tracked across the whole file so section detection
 # stays fence-aware.
-SECTION=$(tr -d '\r' < "$PLAN" | awk '
+SECTION=$(normalize_newlines "$PLAN" | awk '
   /^[[:space:]]*```/ { fence = !fence; next }
   fence { next }
   /^## SDLC State/ { flag=1; next }
@@ -767,15 +784,15 @@ keys_for_tier() {
   esac
 }
 
-# The `## Verification Matrix` section body (\r stripped, like SECTION at the
-# top of the hook — a separate awk pass over the whole plan). Lines inside
+# The `## Verification Matrix` section body (newline-normalized, like SECTION at
+# the top of the hook — a separate awk pass over the whole plan). Lines inside
 # ``` fenced code blocks are dropped so a jq/shell pipeline written in
 # leading-pipe continuation style is never mistaken for a table row; every
 # downstream matrix parse (rows, stack-health, false-green, AC blocks) reads
 # this body, so scoping the fence-skip here covers all of them. Fence state
 # is tracked across the whole file so section detection stays fence-aware.
 matrix_section() {
-  tr -d '\r' < "$PLAN" | awk '
+  normalize_newlines "$PLAN" | awk '
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
     /^## Verification Matrix/ { f=1; next }
@@ -978,7 +995,7 @@ validate_merge_target() {
   [ -r "$epic_plan" ] || return 0
   # Fence-aware (matches the SECTION extraction): an epic plan documenting a
   # `## SDLC State` example in a ``` fence must not shadow its real section.
-  epic_branch=$(tr -d '\r' < "$epic_plan" \
+  epic_branch=$(normalize_newlines "$epic_plan" \
     | awk '
       /^[[:space:]]*```/ { fence = !fence; next }
       fence { next }
