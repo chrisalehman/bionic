@@ -167,6 +167,7 @@ DEPLOY_TARGET=$(frontmatter_get deploy_target)
 SDLC_VERSION=$(frontmatter_get canonical_sdlc_version)
 USE_WORKTREE=$(frontmatter_get use_worktree)
 SCALE=$(frontmatter_get scale)
+INTENT=$(frontmatter_get intent)
 
 # Whole-value placeholder test: trim leading/trailing whitespace, lowercase,
 # then require whole-value EQUALITY against the known token set. A token that
@@ -184,13 +185,29 @@ is_placeholder_value() {
   esac
 }
 
+# Audit dir follows the plan's own project (walk-up from $PLAN's directory
+# to the nearest ancestor containing .bionic/), matching the governing-skill
+# hook's find_project_root_from_path strategy — findings live with the
+# project that owns the artifact, not necessarily the invoking PROJECT_DIR.
+# PROJECT_DIR is the fallback only (empty/unreadable $PLAN, or no .bionic/
+# ancestor found). Fail-open: the `cd ... && pwd` guard never crashes the hook.
+audit_root() {
+  local d
+  d=$(cd "$(dirname "$PLAN")" 2>/dev/null && pwd)
+  while [ -n "$d" ] && [ "$d" != "/" ]; do
+    if [ -d "$d/.bionic" ]; then echo "$d"; return 0; fi
+    d=$(dirname "$d")
+  done
+  echo "$PROJECT_DIR"
+}
+
 # v11 log-only finding channel (D14): append one line to the durable audit file
 # AND echo to stderr, then return 0 — floor/ledger/merge-target findings never
 # block this wave. Twin of the governing-skill hook's helper (hook name differs:
 # `evidence-gate`). mkdir + append are fail-open; the audit file lives in the
 # durable .bionic/memory/ (not .bionic/tmp/, which is wiped at Integrate).
 log_finding() {  # $1=check-id  $2=detail
-  local audit_dir="$PROJECT_DIR/.bionic/memory"
+  local audit_dir="$(audit_root)/.bionic/memory"
   local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) evidence-gate $1: $2 ($PLAN)"
   mkdir -p "$audit_dir" 2>/dev/null && printf '%s\n' "$line" >> "$audit_dir/sdlc-v11-audit.md" 2>/dev/null
   echo "canonical-sdlc v11 [$1]: $2" >&2
@@ -343,12 +360,30 @@ if [ -z "$BLOCK_STRIPPED" ]; then
   exit 2
 fi
 
+# R7 intent-scoped Step-5 keys (v11, D14 log-only — see validate_intent_evidence
+# below). A whole-value match against this exact key name exempts the line
+# from the universal placeholder ban ONLY on v11 plans; the R7 contract is
+# enforced instead by validate_intent_evidence, which logs a finding but never
+# blocks. v≤10 plans are never exempted (grandfathered) — a stray line that
+# happens to share one of these key names still blocks there, byte-identical
+# to pre-R7 behavior.
+is_r7_key() {
+  case "$1" in
+    behavior-preservation|compat-matrix|revert-plan|baseline|target|re-measure) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Placeholder detection. Each line of the block is checked as a whole value:
 # the text after the first ':' on a "key: value" continuation line, or the
 # whole line when it has no colon (the single-line "Step N: <value>" case,
 # which arrives here as RAW_VALUE). ${_bline#*:} yields the after-colon text
 # on colon lines and the unchanged line otherwise.
 while IFS= read -r _bline; do
+  _bkey=$(printf '%s' "$_bline" | sed -E 's/^[[:space:]]*//; s/[[:space:]]*:.*$//')
+  if [ "$SDLC_VERSION" = "11" ] && is_r7_key "$_bkey"; then
+    continue
+  fi
   if is_placeholder_value "${_bline#*:}"; then
     echo "BLOCKED: canonical-sdlc step ${CURRENT} evidence line is a placeholder (\"${BLOCK}\")." >&2
     echo "Plan: $PLAN" >&2
@@ -961,6 +996,41 @@ validate_merge_target() {
   return 0
 }
 
+# v11 intent-scoped Step-5 evidence keys (R7) — LOG-ONLY (D14; check-ids
+# `refactor-evidence`, `tune-evidence`). Fires only on v11 plans whose
+# declared intent carries a conditional key set; never blocks. Reuses the
+# Step-5 BLOCK/block_has/block_get accessors already populated for the
+# current step's evidence (same accessors validate_verify_step_v10 uses),
+# so this validator is only meaningful when called at current: 5.
+validate_intent_evidence() {
+  local key val
+  case "$INTENT" in
+    refactor)
+      if ! block_has behavior-preservation || [ -z "$(block_get behavior-preservation)" ] \
+         || is_placeholder_value "$(block_get behavior-preservation)"; then
+        log_finding refactor-evidence "v11 refactor plan Step 5 missing 'behavior-preservation:' evidence"
+      fi
+      for key in compat-matrix revert-plan; do
+        if block_has "$key"; then
+          val=$(block_get "$key")
+          if [ -z "$val" ] || is_placeholder_value "$val"; then
+            log_finding refactor-evidence "v11 refactor plan Step 5 '${key}:' present but empty"
+          fi
+        fi
+      done
+      ;;
+    tune)
+      for key in baseline target re-measure; do
+        val=$(block_get "$key")
+        if ! block_has "$key" || [ -z "$val" ] || is_placeholder_value "$val"; then
+          log_finding tune-evidence "v11 tune plan Step 5 missing '${key}:' evidence"
+        fi
+      done
+      ;;
+  esac
+  return 0
+}
+
 dispatch_modern() {
   local label="$1" ext_step="" integrate_step ship_step
   case "$label" in
@@ -988,6 +1058,9 @@ dispatch_modern() {
         validate_verify_step_v10
       else
         validate_verify_step "$label"
+      fi
+      if [ "$label" = "v11" ]; then
+        validate_intent_evidence
       fi
       ;;
     7) validate_document_step "$label" 7 ;;
