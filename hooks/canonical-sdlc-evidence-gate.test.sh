@@ -3036,6 +3036,296 @@ expect_allow_both "v11 19r fenced ## SDLC State in epic plan → merge-target re
   "$h19r" "$p19r" 'git commit -m "x"'
 
 # ============================================================
+# Section 20: v11 — intent-scoped Step-5 evidence keys (R7, log-only)
+# ============================================================
+#
+# v11 plans declare an `intent:` in frontmatter. Two intents carry a
+# conditional Step-5 evidence key set, checked LOG-ONLY (D14) at the Verify
+# gate — never blocks:
+#   - refactor: requires `behavior-preservation:` (non-empty); `compat-matrix:`
+#     and `revert-plan:` are optional but must not be present-and-empty.
+#   - tune: requires `baseline:`, `target:`, `re-measure:` (all non-empty).
+# Any other intent (e.g. build) gets no check at all — this is intent-scoped,
+# not a universal Step-5 key like bundle-fresh/drive-check/stack-health. A
+# v10 plan (no `intent:` line) must be byte-identical to its pre-R7 behavior
+# — no audit write, no finding.
+
+echo ""
+echo "=== Section 20: v11 intent-scoped Step-5 evidence keys (R7, log-only) ==="
+
+# Counts occurrences of $substr in stderr — for asserting an exact finding
+# count (e.g. the tune intent's three missing keys).
+expect_finding_count() {
+  local label="$1" home_dir="$2" command="$3" substr="$4" expected="$5"
+  TOTAL=$((TOTAL + 1))
+  run_hook "$home_dir" "$command"
+  local count
+  count=$(echo "$HOOK_STDERR" | grep -c "$substr") || count=0
+  if [ "$HOOK_EXIT" -eq 0 ] && [ "$count" -eq "$expected" ]; then
+    echo "PASS: $label"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL (expected allow exit 0 + ${expected}x '$substr'): $label"
+    echo "  exit=$HOOK_EXIT count=$count stderr='$HOOK_STDERR'"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+# Asserts exit 0, empty stderr, AND that the durable audit file was never
+# created — the named v10 grandfather regression (20f) needs the stronger
+# "no write at all" guarantee, not just "no finding printed this run".
+expect_no_audit_write() {
+  local label="$1" home_dir="$2" command="$3"
+  TOTAL=$((TOTAL + 1))
+  run_hook "$home_dir" "$command"
+  local af="$home_dir/.bionic/memory/sdlc-v11-audit.md"
+  if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ] && [ ! -f "$af" ]; then
+    echo "PASS: $label"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL (expected allow exit 0 + no audit file): $label"
+    echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR' audit_exists=$( [ -f "$af" ] && echo yes || echo no )"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+# v11 frontmatter with a caller-chosen intent (Section 19's v11_frontmatter
+# hardcodes intent: build). $1 intent, $2 scale (default wave).
+v20_frontmatter() {
+  local intent="$1" scale="${2:-wave}"
+  printf -- '---\n'
+  printf -- 'governing-skill: canonical-sdlc\n'
+  printf -- 'canonical_sdlc_version: 11\n'
+  printf -- 'intent: %s\n' "$intent"
+  printf -- 'rigor: audited\n'
+  printf -- 'scale: %s\n' "$scale"
+  printf -- 'deploy_target: none\n'
+  printf -- 'use_worktree: false\n'
+  printf -- 'has_ui: false\n'
+  printf -- '---\n'
+}
+
+# A v11 wave plan with the given intent, at the given current/Step-5 body/
+# matrix. $1 intent, $2 current, $3 Step-block body, $4 matrix.
+v20_wave_plan() {
+  printf '%s\n## SDLC State\ncurrent: %s\nStep %s:\n%s\n\n%s\n' \
+    "$(v20_frontmatter "$1")" "$2" "$2" "$3" "$4"
+}
+
+# Refactor Step-5 body with behavior-preservation already satisfied — the
+# base for the compat-matrix/revert-plan sub-cases (20c), which isolate
+# that one axis by keeping behavior-preservation clean.
+v20_refactor_body_ok="$v10_step5_base
+  behavior-preservation: suites 211/211 pre @abc, 211/211 post @def"
+
+# --- 20a/20b: refactor — behavior-preservation required ------------------
+
+# 20a — refactor plan, valid tests floor + matrix, NO behavior-preservation
+# key → exit 0 + refactor-evidence finding on stderr AND in the audit file.
+h20a=$(make_home)
+write_plan "$h20a" "$(v20_wave_plan refactor 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
+expect_finding "v11 20a refactor plan missing behavior-preservation → finding" \
+  "$h20a" 'git commit -m "x"' "canonical-sdlc v11 \[refactor-evidence\]"
+h20a2=$(make_home)
+write_plan "$h20a2" "$(v20_wave_plan refactor 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
+expect_audit_line "v11 20a2 refactor plan missing behavior-preservation → audit file line" \
+  "$h20a2" 'git commit -m "x"' "evidence-gate refactor-evidence:"
+
+# 20b — same plan + behavior-preservation present → exit 0, NO finding.
+h20b=$(make_home)
+write_plan "$h20b" "$(v20_wave_plan refactor 5 "$v20_refactor_body_ok" "$v10_matrix_complete")" > /dev/null
+expect_allow "v11 20b refactor plan with behavior-preservation → allow, no finding" \
+  "$h20b" 'git commit -m "x"'
+
+# --- 20c: refactor — compat-matrix/revert-plan optional-but-not-empty ----
+
+# 20c1 — compat-matrix present but empty → refactor-evidence finding.
+h20c1=$(make_home)
+write_plan "$h20c1" "$(v20_wave_plan refactor 5 "$v20_refactor_body_ok
+  compat-matrix:" "$v10_matrix_complete")" > /dev/null
+expect_finding "v11 20c1 refactor compat-matrix present but empty → finding" \
+  "$h20c1" 'git commit -m "x"' "compat-matrix"
+
+# 20c2 — compat-matrix: n/a: not a migration (non-empty) → clean.
+h20c2=$(make_home)
+write_plan "$h20c2" "$(v20_wave_plan refactor 5 "$v20_refactor_body_ok
+  compat-matrix: n/a: not a migration" "$v10_matrix_complete")" > /dev/null
+expect_allow "v11 20c2 refactor compat-matrix non-empty n/a → allow, no finding" \
+  "$h20c2" 'git commit -m "x"'
+
+# 20c3 — compat-matrix/revert-plan entirely absent → clean (they are
+# optional; only presence-and-empty is a finding).
+h20c3=$(make_home)
+write_plan "$h20c3" "$(v20_wave_plan refactor 5 "$v20_refactor_body_ok" "$v10_matrix_complete")" > /dev/null
+expect_allow "v11 20c3 refactor compat-matrix/revert-plan absent → allow, no finding" \
+  "$h20c3" 'git commit -m "x"'
+
+# --- 20d: tune — baseline/target/re-measure all required ------------------
+
+# 20d1 — tune plan missing all three keys → exactly THREE tune-evidence
+# findings (assert count, not just "at least one").
+h20d1=$(make_home)
+write_plan "$h20d1" "$(v20_wave_plan tune 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
+expect_finding_count "v11 20d1 tune plan missing baseline/target/re-measure → 3 findings" \
+  "$h20d1" 'git commit -m "x"' "tune-evidence" 3
+
+# 20d2 — tune plan with all three non-empty → clean.
+v20_tune_body_ok="$v10_step5_base
+  baseline: p95 340ms @abc
+  target: p95 <= 200ms
+  re-measure: p95 190ms @def"
+h20d2=$(make_home)
+write_plan "$h20d2" "$(v20_wave_plan tune 5 "$v20_tune_body_ok" "$v10_matrix_complete")" > /dev/null
+expect_allow "v11 20d2 tune plan with baseline/target/re-measure → allow, no finding" \
+  "$h20d2" 'git commit -m "x"'
+
+# --- 20e: build — intent-scoped, not universal ----------------------------
+
+# 20e — build intent with none of the refactor/tune keys → NO finding (these
+# checks are intent-scoped; build never triggers them).
+h20e=$(make_home)
+write_plan "$h20e" "$(v20_wave_plan build 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
+expect_allow "v11 20e build plan with no intent-scoped keys → allow, no finding" \
+  "$h20e" 'git commit -m "x"'
+
+# --- 20f: named v10 grandfather regression --------------------------------
+
+# 20f — a v10 plan (no `intent:` line) at current: 5 with valid v10 evidence
+# → exit 0, no finding, NO audit-file write at all. R7 must be invisible to
+# v10 plans.
+h20f=$(make_home)
+write_plan "$h20f" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
+expect_no_audit_write "v11 20f v10 plan (no intent:) → allow, no audit write (grandfather)" \
+  "$h20f" 'git commit -m "x"'
+
+# --- 20g/20h: R7 keys are truly log-only (critic Issue 1) ------------------
+#
+# The universal placeholder ban (the whole-Step-block scan a few hundred
+# lines up) used to scan these six v11-intent-scoped keys too, so a
+# placeholder R7 value BLOCKED the commit — contradicting the ratified
+# log-only contract. R7 keys are exempted from that ban on v11 plans only
+# (version-gated: v≤10 plans still block on a stray placeholder R7-named
+# line — see 20i); validate_intent_evidence itself now treats a placeholder
+# value the same as missing/empty, so the finding still fires.
+
+# 20g — refactor plan, behavior-preservation: TODO (placeholder value, not
+# missing) → exit 0 + refactor-evidence finding + audit line (was BLOCKED).
+h20g=$(make_home)
+write_plan "$h20g" "$(v20_wave_plan refactor 5 "$v10_step5_base
+  behavior-preservation: TODO" "$v10_matrix_complete")" > /dev/null
+expect_finding "v11 20g refactor behavior-preservation: TODO → allow + refactor-evidence finding" \
+  "$h20g" 'git commit -m "x"' "canonical-sdlc v11 \[refactor-evidence\]"
+h20g2=$(make_home)
+write_plan "$h20g2" "$(v20_wave_plan refactor 5 "$v10_step5_base
+  behavior-preservation: TODO" "$v10_matrix_complete")" > /dev/null
+expect_audit_line "v11 20g2 refactor behavior-preservation: TODO → audit file line" \
+  "$h20g2" 'git commit -m "x"' "evidence-gate refactor-evidence:"
+
+# 20h — tune plan, baseline: tbd (placeholder), target/re-measure valid →
+# exit 0 + exactly ONE tune-evidence finding (not three — the other two
+# keys are present and non-placeholder).
+h20h=$(make_home)
+write_plan "$h20h" "$(v20_wave_plan tune 5 "$v10_step5_base
+  baseline: tbd
+  target: p95 <= 200ms
+  re-measure: p95 190ms @def" "$v10_matrix_complete")" > /dev/null
+expect_finding_count "v11 20h tune baseline: tbd (rest valid) → exactly 1 tune-evidence finding" \
+  "$h20h" 'git commit -m "x"' "tune-evidence" 1
+
+# --- 20i: NAMED grandfather regression (version-gated exemption) -----------
+#
+# A v10 plan (no `intent:`) with a stray `baseline: TODO` line in its Step-5
+# block must STILL block — the R7 exemption from the universal ban is
+# version-gated to v11 only. Byte-identical to pre-R7 behavior.
+h20i=$(make_home)
+write_plan "$h20i" "$(v10_plan 5 "$v10_step5_base
+  baseline: TODO" "$v10_matrix_complete")" > /dev/null
+expect_block "v11 20i v10 plan stray 'baseline: TODO' → still BLOCKED (grandfather, version-gated)" \
+  "$h20i" 'git commit -m "x"' "is a placeholder"
+
+# --- 20j: NAMED regression — n/a is not a placeholder on the new path ------
+#
+# v11 refactor plan with compat-matrix: n/a: not a migration must stay
+# clean — "n/a: <reason>" is explicit non-applicability, not a placeholder
+# token, so neither the ban-loop exemption path nor validate_intent_evidence's
+# placeholder-aware check may flag it.
+h20j=$(make_home)
+write_plan "$h20j" "$(v20_wave_plan refactor 5 "$v20_refactor_body_ok
+  compat-matrix: n/a: not a migration" "$v10_matrix_complete")" > /dev/null
+expect_allow "v11 20j refactor compat-matrix: n/a: not a migration → allow, no finding" \
+  "$h20j" 'git commit -m "x"'
+
+# ============================================================
+# Section 21: audit dir follows the plan's project (strategy alignment)
+# ============================================================
+#
+# log_finding's audit_dir now walks up from $PLAN's own directory to the
+# nearest ancestor containing .bionic/, matching the governing-skill hook's
+# find_project_root_from_path strategy — findings live with the project that
+# owns the artifact. PROJECT_DIR is the fallback only.
+#
+# NOTE (pinning, not RED — see plan ## Assumptions): plan discovery is
+# rooted at PROJECT_DIR (PLAN_DIRS is built from $HOME/.claude/plans and
+# $PROJECT_DIR/...), so in every case constructible through the hook's real
+# discovery paths, walk-up resolves to the SAME directory PROJECT_DIR already
+# names. Both cases below pass identically before and after the refactor;
+# they pin the new code path (and its fallback) rather than catch a bug.
+
+echo ""
+echo "=== Section 21: audit dir follows the plan's project (strategy alignment) ==="
+
+# Like run_hook_with_project, but pins CLAUDE_PROJECT_DIR to $2 (the fixture
+# project that owns the plan) while the JSON cwd field AND the actual
+# invoking shell's cwd are $3 (an unrelated sibling dir) — proving
+# log_finding follows the plan's own project via walk-up, never whatever
+# directory happened to invoke the hook.
+run_hook_project_elsewhere_cwd() {
+  local home_dir="$1" project_dir="$2" elsewhere_dir="$3" command="$4"
+  local input
+  input=$(jq -n --arg c "$command" --arg cwd "$elsewhere_dir" '{tool_input: {command: $c}, cwd: $cwd}')
+  local tmp_err
+  tmp_err=$(mktemp)
+  if (cd "$elsewhere_dir" && HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"); then
+    HOOK_EXIT=0
+  else
+    HOOK_EXIT=$?
+  fi
+  HOOK_STDERR=$(cat "$tmp_err")
+  rm -f "$tmp_err"
+}
+
+# 21a — fixture project owns the plan; the JSON cwd field and the actual
+# process cwd both point at an unrelated sibling temp dir. Asserts the audit
+# line lands in the FIXTURE project's .bionic/memory/sdlc-v11-audit.md, and
+# that NO .bionic/ gets created under the sibling (no cwd leak).
+h21a=$(make_home)
+fixture21a=$(make_project)
+elsewhere21a=$(mktemp -d); cleanup_dirs+=("$elsewhere21a")
+write_project_plan "$fixture21a" "$(v20_wave_plan tune 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
+TOTAL=$((TOTAL + 1))
+run_hook_project_elsewhere_cwd "$h21a" "$fixture21a" "$elsewhere21a" 'git commit -m "x"'
+fixture_audit="$fixture21a/.bionic/memory/sdlc-v11-audit.md"
+if [ "$HOOK_EXIT" -eq 0 ] && [ -f "$fixture_audit" ] && grep -q "tune-evidence" "$fixture_audit" \
+  && [ ! -d "$elsewhere21a/.bionic" ]; then
+  echo "PASS: v11 21a audit line follows the plan's fixture project, not the invoking cwd"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected fixture audit line + no .bionic under elsewhere cwd): v11 21a"
+  echo "  exit=$HOOK_EXIT fixture_audit_exists=$([ -f "$fixture_audit" ] && echo yes || echo no) elsewhere_bionic=$([ -d "$elsewhere21a/.bionic" ] && echo yes || echo no)"
+  FAIL=$((FAIL + 1))
+fi
+
+# 21b — fail-open fallback: plan reached only via the ~/.claude/plans global
+# convention (Section 19/20's usual fixture), whose ancestry has no .bionic/
+# directory anywhere above it. audit_root's walk-up exhausts without a match
+# and falls back to $PROJECT_DIR (== $h21b here, via the cwd field) — hook
+# still exits 0 and still writes the audit line, unblocked.
+h21b=$(make_home)
+write_plan "$h21b" "$(v20_wave_plan tune 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
+expect_audit_line "v11 21b fail-open: no .bionic ancestor above the plan → PROJECT_DIR fallback used" \
+  "$h21b" 'git commit -m "x"' "tune-evidence"
+
+# ============================================================
 # Summary
 # ============================================================
 
