@@ -158,6 +158,80 @@ EVIDENCE_SCHEMA=$(frontmatter_get evidence_schema)
 DEPLOY_TARGET=$(frontmatter_get deploy_target)
 SDLC_VERSION=$(frontmatter_get canonical_sdlc_version)
 USE_WORKTREE=$(frontmatter_get use_worktree)
+SCALE=$(frontmatter_get scale)
+
+# Whole-value placeholder test: trim leading/trailing whitespace, lowercase,
+# then require whole-value EQUALITY against the known token set. A token that
+# merely appears as a substring of a longer value ("resolved TODOs",
+# "*.example placeholders", "status pending → done") is legal evidence.
+# "in progress" and its whitespace-free "inprogress" are both listed so
+# either spelling of the value matches. Defined here (ahead of the Step-line
+# checks) so the v11 task-ledger validator, which runs before them, can reuse it.
+is_placeholder_value() {
+  local v
+  v=$(printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | tr '[:upper:]' '[:lower:]')
+  case "$v" in
+    todo|pending|"in progress"|inprogress|xxx|tbd|placeholder) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# v11 log-only finding channel (D14): append one line to the durable audit file
+# AND echo to stderr, then return 0 — floor/ledger/merge-target findings never
+# block this wave. Twin of the governing-skill hook's helper (hook name differs:
+# `evidence-gate`). mkdir + append are fail-open; the audit file lives in the
+# durable .bionic/memory/ (not .bionic/tmp/, which is wiped at Integrate).
+log_finding() {  # $1=check-id  $2=detail
+  local audit_dir="$PROJECT_DIR/.bionic/memory"
+  local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) evidence-gate $1: $2 ($PLAN)"
+  mkdir -p "$audit_dir" 2>/dev/null && printf '%s\n' "$line" >> "$audit_dir/sdlc-v11-audit.md" 2>/dev/null
+  echo "canonical-sdlc v11 [$1]: $2" >&2
+  return 0
+}
+
+# v11 task-scale ledger validation (D12) — LOG-ONLY (D14, check-id
+# `task-ledger`). Reads the `## Tasks` registration table (fence-aware, the
+# matrix_section idiom) and the per-task `- T<n>:` evidence lines in the
+# ## SDLC State section (SECTION, already \r-stripped). Every deviation appends
+# one finding; the function ALWAYS returns 0 — a ledger defect never blocks this
+# wave. Checks: missing `## Tasks`; status outside {pending,active,done,dropped};
+# an active/done task with no `- T<n>:` line or a placeholder/empty value.
+validate_task_ledger() {
+  local tasks rows line id status ev
+  tasks=$(tr -d '\r' < "$PLAN" | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## Tasks/ { f=1; next }
+    /^## / { f=0 }
+    f')
+  if [ -z "$tasks" ]; then
+    log_finding task-ledger "v11 task-scale plan has no '## Tasks' registration section"
+    return 0
+  fi
+  rows=$(echo "$tasks" | grep -E '^[[:space:]]*\|[[:space:]]*T[0-9]+')
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    id=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
+    status=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')
+    case "$status" in
+      pending|active|done|dropped) : ;;
+      *) log_finding task-ledger "task ${id} has invalid status '${status:-empty}' (want pending|active|done|dropped)" ;;
+    esac
+    # Evidence line for this task in ## SDLC State (anchored so T2 never matches T20).
+    ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
+         | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
+    case "$status" in
+      active|done)
+        if [ -z "$ev" ]; then
+          log_finding task-ledger "task ${id} is ${status} but has no evidence on a '- ${id}:' line in ## SDLC State"
+        elif is_placeholder_value "$ev"; then
+          log_finding task-ledger "task ${id} is ${status} but its evidence is a placeholder ('${ev}')"
+        fi
+        ;;
+    esac
+  done <<< "$rows"
+  return 0
+}
 
 # Extract the ## SDLC State section (from its header up to the next ##
 # header or EOF). \r stripped here too, for the same CRLF reason as
@@ -178,6 +252,18 @@ CURRENT=$(echo "$SECTION" \
           | head -1 \
           | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
           | tr -d '[:space:]')
+
+# v11 task-scale plans address a ledger TASK, not a numbered step:
+# `current: T<n>` with evidence on `- T<n>:` lines (no `Step N:` line). Validate
+# the ledger (log-only, D12/D14) and allow the commit — the task pointer is
+# structurally valid, so a false block here would be a defect (R4.3). A
+# `current: T<n>` on a v≤10 plan or a non-task v11 plan is NOT accepted here; it
+# falls through to the numeric check below and blocks (T-format is v11 + scale:task
+# only, never retrofitted).
+if echo "$CURRENT" | grep -qE '^T[0-9]+$' && [ "$SDLC_VERSION" = "11" ] && [ "$SCALE" = "task" ]; then
+  validate_task_ledger
+  exit 0
+fi
 
 if [ -z "$CURRENT" ] || ! echo "$CURRENT" | grep -qE '^[0-9]+[ab]?$'; then
   echo "BLOCKED: canonical-sdlc plan file's '## SDLC State' section is missing a valid 'current: N' line." >&2
@@ -238,21 +324,6 @@ if [ -z "$BLOCK_STRIPPED" ]; then
   echo "Fix: record the evidence artifact (commit SHA, path, link) for step ${CURRENT} before committing." >&2
   exit 2
 fi
-
-# Whole-value placeholder test: trim leading/trailing whitespace, lowercase,
-# then require whole-value EQUALITY against the known token set. A token that
-# merely appears as a substring of a longer value ("resolved TODOs",
-# "*.example placeholders", "status pending → done") is legal evidence.
-# "in progress" and its whitespace-free "inprogress" are both listed so
-# either spelling of the value matches.
-is_placeholder_value() {
-  local v
-  v=$(printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | tr '[:upper:]' '[:lower:]')
-  case "$v" in
-    todo|pending|"in progress"|inprogress|xxx|tbd|placeholder) return 0 ;;
-    *) return 1 ;;
-  esac
-}
 
 # Placeholder detection. Each line of the block is checked as a whole value:
 # the text after the first ':' on a "key: value" continuation line, or the
@@ -343,7 +414,11 @@ done <<< "$BLOCK"
 # looking healthy. Same contract as its siblings: presence, non-empty
 # value / non-empty n/a reason, existing placeholder ban. v8 and earlier
 # plans are never retrofitted.
-if [ "$SDLC_VERSION" = "10" ]; then
+if [ "$SDLC_VERSION" = "11" ]; then
+  # v11 wave/epic-scale plans carry the v10 shape (task-scale plans exited
+  # above via validate_task_ledger). The v11 arm reuses v10's validators.
+  SHAPE_MODE="v11"
+elif [ "$SDLC_VERSION" = "10" ]; then
   SHAPE_MODE="v10"
 elif [ "$SDLC_VERSION" = "9" ]; then
   SHAPE_MODE="v9"
@@ -371,7 +446,7 @@ fi
 # here, so v2 always shape-checks Step 4 (unchanged from before).
 pointer_steps_for_mode() {
   case "$1" in
-    v10)         echo "1 2 3 4" ;;  # Step 6 must reach dispatch for the matrix prefix check
+    v10|v11)     echo "1 2 3 4" ;;  # Step 6 must reach dispatch for the matrix prefix check
     v5|v6|v7|v8|v9) echo "1 2 3 4 6" ;;
     v3)          echo "1 2 3 4 7 8" ;;
     *)           echo "1 2 3 5 8 8b" ;;  # v2
@@ -836,25 +911,55 @@ validate_verify_step_v10() {
 # Step 7 (Document) are common; Step 4 is the worktree shape check reached
 # only when use_worktree=true. A future version is one case arm here plus a
 # step5_keys_for_version arm.
+# v11 epic merge-target consistency (LOG-ONLY; D14, check-id `merge-target`).
+# On a v11 wave-scale plan naming an `epic:`, when the epic plan exists and
+# declares an `integration-branch:` in its ## SDLC State, a mismatch with this
+# plan's integration-branch logs a finding. Never blocks. First cross-file read
+# in this hook — read-only, fail-open (missing epic plan / missing key → no
+# finding). Fires at the integrate step.
+validate_merge_target() {
+  local epic epic_plan epic_branch this_branch
+  epic=$(frontmatter_get epic)
+  [ -n "$epic" ] || return 0
+  epic_plan="$DOCS_ROOT/plans/$epic/epic.plan.md"
+  [ -r "$epic_plan" ] || return 0
+  epic_branch=$(tr -d '\r' < "$epic_plan" \
+    | awk '/^## SDLC State/{f=1; next} /^## /{f=0} f' \
+    | grep -E '^[[:space:]]*integration-branch[[:space:]]*:' | head -1 \
+    | sed -E 's/^[[:space:]]*integration-branch[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
+  [ -n "$epic_branch" ] || return 0
+  this_branch=$(echo "$SECTION" | grep -E '^[[:space:]]*integration-branch[[:space:]]*:' | head -1 \
+    | sed -E 's/^[[:space:]]*integration-branch[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
+  if [ -n "$this_branch" ] && [ "$this_branch" != "$epic_branch" ]; then
+    log_finding merge-target "plan integration-branch '$this_branch' != epic '$epic' integration-branch '$epic_branch'"
+  fi
+  return 0
+}
+
 dispatch_modern() {
   local label="$1" ext_step="" integrate_step ship_step
   case "$label" in
-    v5)              ext_step=8; integrate_step=9; ship_step=10 ;;
-    v6|v7|v8|v9|v10) integrate_step=8; ship_step=9 ;;
+    v5)                  ext_step=8; integrate_step=9; ship_step=10 ;;
+    v6|v7|v8|v9|v10|v11) integrate_step=8; ship_step=9 ;;
   esac
-  # v10: the Verification Matrix is a prefix contract for every step from the
-  # Verify gate on — current: 5 validates it inside validate_verify_step_v10;
+  # v10/v11: the Verification Matrix is a prefix contract for every step from
+  # the Verify gate on — current: 5 validates it inside validate_verify_step_v10;
   # current: 6..9 validate it here, so a REFUTED auditor blocks post-Verify
-  # commits too (Step 6 is not a v10 pointer step, so it reaches this arm).
-  if [ "$label" = "v10" ]; then
+  # commits too (Step 6 is not a pointer step, so it reaches this arm). v11
+  # wave/epic-scale plans carry the v10 shape unchanged, so they share the arm.
+  if [ "$label" = "v10" ] || [ "$label" = "v11" ]; then
     case "$CURRENT" in
       6|7|8|9) validate_matrix_v10 ;;
     esac
   fi
+  # v11: log-only epic merge-target check at the integrate step.
+  if [ "$label" = "v11" ] && [ "$CURRENT" = "$integrate_step" ]; then
+    validate_merge_target
+  fi
   case "$CURRENT" in
     4) shape_block worktree base-sha branch ;;
     5)
-      if [ "$label" = "v10" ]; then
+      if [ "$label" = "v10" ] || [ "$label" = "v11" ]; then
         validate_verify_step_v10
       else
         validate_verify_step "$label"
@@ -874,7 +979,7 @@ dispatch_modern() {
 }
 
 case "$SHAPE_MODE" in
-  v5|v6|v7|v8|v9|v10)
+  v5|v6|v7|v8|v9|v10|v11)
     dispatch_modern "$SHAPE_MODE"
     ;;
   v3)
