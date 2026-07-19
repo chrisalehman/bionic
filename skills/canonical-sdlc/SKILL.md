@@ -338,9 +338,9 @@ Cumulative: each tier includes everything below it. TDD is non-negotiable at eve
 
 | Rigor | The claim | What you get | What you skip | Use when |
 |---|---|---|---|---|
-| `tested` | "It provably works." | TDD RED→GREEN on every code change; the Verify gate discharges the Verification Matrix at each row's contracted tier; the tests floor (`pass == total`); structured 5-axis Step-6 self-review. | ALL independent assurance roles — both the independent Step-5 Verification Auditor AND the mandatory Step-6 adversarial critic. Self-review only. | The cheap floor for well-scoped work — `task`-scale bugfixes, spikes. |
-| `peer-reviewed` | "It works and it's well-made." | Everything in `tested`, plus a separate spec, the full Verification Matrix per AC discharged by the INDEPENDENT Step-5 Verification Auditor on the evidence, and the structured 5-axis Step-6 review. **No adversarial critic** — that role is `audited`'s. | The mandatory independent adversarial critic (Step 6) and the durable third-party decision trail. | The default for `build`, `refactor`, `tune`, and `wave`-scale `bugfix` — anything that ships to users or sets structure. |
-| `audited` | "A third party tried to break it, and the decision trail survives me." | Everything in `peer-reviewed`, plus the mandatory INDEPENDENT adversarial critic (Step-6 stance 2), per-step checkpoint commits, and the expanded stop-and-wake list (§Escalation Protocol) — adversarial verification plus unattended discipline. The decision trail is durable and reviewable, outliving the author. | Nothing — this is the top tier. | The intent floor for `incident-response`; any security/privacy-flagged or otherwise floor-raised work (§Rigor floors and lifecycle). |
+| `tested` | "It provably works." | TDD RED→GREEN on every code change; the Verify gate discharges the Verification Matrix at each row's contracted tier; the tests floor (`pass == total`); structured 5-axis Step-6 self-review. | ALL independent assurance roles — both the independent Step-5 Verification Auditor AND the mandatory Step-6 adversarial critic. Self-review only. | The task-scale bugfix/spike lane. |
+| `peer-reviewed` | "It works and it's well-made." | Everything in `tested`, plus a separate spec, the full Verification Matrix per AC discharged by the INDEPENDENT Step-5 Verification Auditor on the evidence, and the structured 5-axis Step-6 review. **No adversarial critic** — that role is `audited`'s. | The mandatory independent adversarial critic (Step 6) and the durable third-party decision trail. | The task-scale shipping default. |
+| `audited` | "A third party tried to break it, and the decision trail survives me." | Everything in `peer-reviewed`, plus the mandatory INDEPENDENT adversarial critic (Step-6 stance 2), per-step checkpoint commits, and the expanded stop-and-wake list (§Escalation Protocol) — adversarial verification plus unattended discipline. The decision trail is durable and reviewable, outliving the author. | Nothing — this is the top tier. | The default at wave scale and above; the intent floor for `incident-response`; any security/privacy-flagged or otherwise floor-raised work (§Rigor floors and lifecycle). |
 
 ### Scale — the decomposition unit
 
@@ -348,7 +348,7 @@ Cumulative: each tier includes everything below it. TDD is non-negotiable at eve
 |---|---|---|---|
 | `epic` | 0–3 only (short-circuits before Step 4). | Carves the work into waves; produces `epic.spec.md` + `epic.plan.md`. Does NOT execute Steps 4–9. | Owns the integration branch `epic/NN-<slug>`; every wave merges there; the epic merges to mainline ONCE, at close. |
 | `wave` (default) | The full applicable step set (0–9). | The default scale; one wave spec + plan; slices inside Step 4. Re-enters Steps 1–3 at greater depth than the epic plan — trust but verify. | Wave branch off the epic integration branch; merges back there at Step 8. |
-| `task` | The full step set, compressed — a sub-session unit. | MULTIPLE per session. ONE session-level plan carries a `## Tasks` ledger with one `## SDLC State` evidence line per task — NO per-task plan or spec files. Ledger hook-addressing is documented here, enforced in a subsequent hook revision. | Shares the session's branch; no per-task branch. |
+| `task` | The full step set, compressed — a sub-session unit. | MULTIPLE per session. ONE session-level plan carries a `## Tasks` ledger with one `## SDLC State` evidence line per task — NO per-task plan or spec files. Ledger hook-addressing is documented here, enforced (log-only) since v11.0. | Shares the session's branch; no per-task branch. |
 
 **Spike artifact shape (any scale).** When intent is `spike`, there is NO plan file at all — the sole artifact is the writeup at `<docs-root>/spikes/` (D3). Universal entry means universal *routing*, not universal paperwork.
 
@@ -373,16 +373,12 @@ When a run hits either, do not guess — ask the one-question interview at Step 
 
 ## Rigor floors and lifecycle
 
-**Default rigor by intent** (provisional at Step 0):
+**Default rigor is scale-keyed** (provisional at Step 0; D11 — `audited` is the default at wave scale and above):
 
-| Intent | Default rigor |
-|---|---|
-| `build` | `peer-reviewed` |
-| `bugfix` | `tested` at `task` scale; `peer-reviewed` at `wave`+ |
-| `refactor` | `peer-reviewed` |
-| `tune` | `peer-reviewed` |
-| `spike` | `tested` (capped — no code ships at any rigor) |
-| `incident-response` | `audited` (intent floor) |
+| Scale | bugfix | build / refactor / tune | spike | incident-response |
+|---|---|---|---|---|
+| task | tested | peer-reviewed | tested (capped) | audited (floor) |
+| wave and above | audited | audited | tested (capped) | audited (floor) |
 
 **Four floor sources.** Effective rigor = the MAX across all four; a floor can only push rigor UP, never down (override upward-only):
 
@@ -553,7 +549,7 @@ Each step has: **goal** · **action** · **completion gate** · **evidence artif
 
 ### Step 0 — Configure (entry-gate confirmation phase)
 
-Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are prior-but-enforced (v3 requires the 5 + 2 flag set; v4 added `model_plan`, carried unchanged through v9; v10 adds the Verification Matrix); `1`/`2` are grandfathered (no flag enforcement).
+Mandatory for new plans (`canonical_sdlc_version: 11`, current). `3`–`10` are prior-but-enforced (v3 requires the 5 + 2 flag set; v4 added `model_plan`, carried unchanged through v9; v10 added the Verification Matrix; v11 adds the axis triple + universal structural contract); `1`/`2` are grandfathered (no flag enforcement).
 
 **Goal:** Set every plan-shaping flag in plan frontmatter deliberately, with explicit user confirmation, and derive the Verification Matrix the wave will discharge.
 
@@ -570,7 +566,7 @@ Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are p
    | Axis | Inference signals |
    |---|---|
    | **intent** | Read the verbs and named artifacts in the request. New capability / new machinery (the machinery test, §Classification rules) → `build`; a divergence-from-intended-behavior to repair → `bugfix`; a behavior-preserving restructure, dependency upgrade, API migration, or removal/deprecation → `refactor`; a named-measurement improvement (latency, bundle size, a design/heuristic score) → `tune`; understanding-as-deliverable (a throwaway probe, a research question) → `spike`; a live deployed surface broken for its users with the clock running → `incident-response`. |
-   | **rigor** | Start from the **default-rigor-by-intent** table (§Rigor floors and lifecycle), then take the **MAX** with every derivable floor (intent floor, flag floor, project floor, epic floor). A floor only pushes rigor UP. The inferred value is **provisional** — it locks at Step 3. |
+   | **rigor** | Start from the **scale-keyed default-rigor** table (§Rigor floors and lifecycle), then take the **MAX** with every derivable floor (intent floor, flag floor, project floor, epic floor). A floor only pushes rigor UP. The inferred value is **provisional** — it locks at Step 3. |
    | **scale** | A sub-session unit, one of several this session → `task`; one full session → `wave` (default); spans multiple sessions and carves into waves → `epic`. Check the **intent × scale validity** matrix (§Intent × scale validity): a barred cell (`bugfix`/`spike`/`incident-response` × `epic`) means the intent or the scale is misjudged — re-derive, do not declare a barred triple. |
 
    **Silent inference is the default path.** Do NOT interrogate the user for the triple; infer it, then surface it in the confirmation display (sub-step 5) with a per-line rationale, exactly as the discriminator flags are surfaced. The user confirms or overrides via the DSL — the triple is normally a `confirm`, not an answered questionnaire.
@@ -642,7 +638,7 @@ Mandatory for new plans (`canonical_sdlc_version: 10`, current). `3`–`9` are p
 
    Triple:                          [the run's shaping decision — see §The Three Axes]
      intent:  build                 [inferred: request adds new machinery — machinery test]
-     rigor:   peer-reviewed         [inferred: build default; no floor raises it — §Rigor floors]
+     rigor:   audited               [inferred: wave-scale default (D11); no floor raises it — §Rigor floors]
      scale:   wave                  [inferred: one-session chunk, not multi-session]
 
    integration-branch: main         [inferred: current branch — Step 8 merges every wave here]
@@ -704,15 +700,15 @@ scale-value  := "task" | "wave" | "epic"
 
 Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`; `set integration-branch=develop, confirm`. **Triple override:** `set intent=refactor, set rigor=audited, confirm` reclassifies the run before Step 1; `set scale=epic, confirm` switches to epic-scoping. **Floors are upward-only — a rigor override BELOW a derivable floor is rejected at Step 0** (e.g. `set rigor=tested` on `incident-response`, whose intent floor is `audited`, or on any security/privacy-flagged work): warn, name the binding floor, and keep the floor value. An upward rigor override (`set rigor=audited` on a `build`) is always accepted. An override that names a **barred** intent × scale cell (§Intent × scale validity) is rejected with the reason. **Matrix tier override:** `set verify(AC-B2.1)=T2, confirm` retiers a matrix row before lock. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set exec-standard=opus, confirm` (route standard slices to opus too — equivalent to disabling complexity routing); `set exec-complex=sonnet, confirm` (accepted but discouraged; warn before applying); `set execution=opus-only, confirm` (shorthand for `exec-standard=opus`); `set main_model=sonnet, confirm` (multi_agent=false dial-down).
 
-On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 10` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`). The confirmed `integration-branch` and the derived `## Verification Matrix` are carried forward: when the plan file is written at Step 3, its `## SDLC State` section opens with the Step-0-confirmed `integration-branch: <name>` line, and the plan body carries the locked `## Verification Matrix` section. For v4 and later plans the governing-skill hook **requires** `model_plan`; for v10 it additionally requires the `## Verification Matrix` section at `sdlc-step ≥ 3` — a missing value blocks the write (exit 2).
+On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 11` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`), and — replacing the legacy `mode:` line — the `intent:`/`rigor:`/`scale:` triple. The confirmed `integration-branch` and the derived `## Verification Matrix` are carried forward: when the plan file is written at Step 3, its `## SDLC State` section opens with the Step-0-confirmed `integration-branch: <name>` line, and the plan body carries the locked `## Verification Matrix` section. For v4 and later plans the governing-skill hook **requires** `model_plan`; for v10 and v11 it additionally requires the `## Verification Matrix` section at `sdlc-step ≥ 3` — a missing value blocks the write (exit 2).
 
-**Two-layer enforcement.** Layer 1 (soft): SKILL.md mandates Step 0 — do not proceed without explicit user confirmation. Layer 2 (hard, `canonical-sdlc-governing-skill.sh`, on `PreToolUse|Write,Edit`): for v4+ plans, a missing flag / `model_plan` / (v10) matrix section → exit 2.
+**Two-layer enforcement.** Layer 1 (soft): SKILL.md mandates Step 0 — do not proceed without explicit user confirmation. Layer 2 (hard, `canonical-sdlc-governing-skill.sh`, on `PreToolUse|Write,Edit`): for v4+ plans, a missing flag / `model_plan` / (v10 and v11) matrix section → exit 2; on v11, additionally a missing or non-enum `intent:`/`rigor:`/`scale:`, a `mode:` line, or a barred intent × scale cell → exit 2.
 
 **Mid-plan reconfiguration.** Edit plan frontmatter directly; the new value takes effect immediately on next hook read.
 
-**Legacy plan handling.** `canonical_sdlc_version: 1`/`2` are grandfathered (no flag enforcement); `3`–`9` stay enforced under their own shape tables (§Versioning). **DO NOT retrofit a newer version's requirements into an older plan** — an in-flight plan would start blocking mid-wave. This covers every universal-key addition (v7 `bundle-fresh:`, v8 `drive-check:`, v9 `stack-health:`) **and the v10 Verification Matrix**: never add a matrix to a v9-or-earlier plan.
+**Legacy plan handling.** `canonical_sdlc_version: 1`/`2` are grandfathered (no flag enforcement); `3`–`10` stay enforced under their own shape tables (§Versioning). **DO NOT retrofit a newer version's requirements into an older plan** — an in-flight plan would start blocking mid-wave. This covers every universal-key addition (v7 `bundle-fresh:`, v8 `drive-check:`, v9 `stack-health:`, **the v10 Verification Matrix**, and **the v11 axis triple**): never add a matrix to a v9-or-earlier plan, and never retrofit the triple onto a v≤10 plan.
 
-**Gate:** Plan frontmatter contains `canonical_sdlc_version: 10` plus all 5 discriminator flags, 2 opt-in flags, and `model_plan`; the derived `## Verification Matrix` exists. The confirmation display included the `integration-branch:` line and every matrix row. User reply ended with `confirm` or `confirmed`.
+**Gate:** Plan frontmatter contains `canonical_sdlc_version: 11` plus all 5 discriminator flags, 2 opt-in flags, `model_plan`, and the `intent:`/`rigor:`/`scale:` triple; the derived `## Verification Matrix` exists. The confirmation display included the `integration-branch:` line and every matrix row. User reply ended with `confirm` or `confirmed`.
 
 **Evidence:** A line in `## SDLC State`: `Step 0: configured at <ISO-timestamp> via <reply-summary>; model_plan=<confirmed tiers>; integration-branch=<name>`.
 
@@ -745,13 +741,15 @@ On accept, write final values into plan frontmatter literally — every flag as 
 ### Step 3 — Plan (`superpowers:writing-plans`)
 - **Goal:** Produce the execution contract that survives compaction.
 - **Action:** Write an ordered, verifiable step list with no placeholders. Every plan file must contain two structured sections:
-  - `## SDLC State` — opens with three literal keys: `integration-branch: <name>`, `mode: <mode>`, and `current: <N>` (the current step number — the evidence-gate hook greps `^current:` and blocks every commit if the line is missing or non-numeric; do NOT write `current-step:` or any other variant). Then one `Step N: <evidence>` line per step. **When advancing, bump `current:` and replace `Step N: (pending)` in-place.** Copyable skeleton:
+  - `## SDLC State` — opens with the literal keys `integration-branch: <name>`, the `intent:`/`rigor:`/`scale:` triple, and `current: <N>` (the current step number — the evidence-gate hook greps `^current:` and blocks every commit if the line is missing or non-numeric; do NOT write `current-step:` or any other variant). Then one `Step N: <evidence>` line per step. **When advancing, bump `current:` and replace `Step N: (pending)` in-place.** Copyable skeleton (wave/epic scale):
 
     ```
     ## SDLC State
 
     integration-branch: <name>
-    mode: <mode>
+    intent: <intent>
+    rigor: <rigor>
+    scale: <scale>
     current: <N>
 
     - Step 0: <evidence>
@@ -759,6 +757,31 @@ On accept, write final values into plan frontmatter literally — every flag as 
     - Step 2: (pending)
     ...
     - Step 9: (pending)
+    ```
+
+    **Task-scale variant (`scale: task`, D12).** A task-scale session addresses a ledger TASK, not a numbered step: the plan additionally carries a `## Tasks` registration table, and `## SDLC State` opens with `current: T<n>` and one `- T<n>: <evidence>` line per task. Frontmatter `intent:`/`rigor:` are session defaults; per-task ledger cells override them. (In the sample below the `## SDLC State` heading is indented one space — a copy-paste guard so a fence-blind SDLC-State extractor in any doc that quotes this skeleton cannot match a real section; **real task-scale plans use no indent**.)
+
+    ```
+    ## Tasks
+
+    | id | intent | rigor | description | status |
+    |---|---|---|---|---|
+    | T1 | bugfix | tested | <description> | done |
+    | T2 | refactor | peer-reviewed | <description> | active |
+
+    status ∈ pending|active|done|dropped; id matches ^T[0-9]+$
+    frontmatter intent:/rigor: are session defaults; ledger cells override per task
+
+     ## SDLC State
+
+    integration-branch: <name>
+    intent: <session default>
+    rigor: <session default>
+    scale: task
+    current: T2
+
+    - T1: <evidence — one line per task, full step set compressed>
+    - T2: <evidence>
     ```
   - `## Assumptions` — seeded from Step 1 "Not Doing" plus spec ambiguities. Step 4 appends inline.
 - **Expand TaskCreate list.** After the plan is written, expand Step 4 (Implement) into one TaskCreate task per slice (`4/1:`, `4/2:`, …).
@@ -966,12 +989,14 @@ governing-skill: superpowers:writing-plans
 sdlc-step: 3
 epic: epic-02-v2-product-pass
 wave: wave-01-checkout-refactor
-mode: autonomous
-canonical_sdlc_version: 10
+intent: build
+rigor: audited
+scale: wave
+canonical_sdlc_version: 11
 ---
 ```
 
-The example shows the current (v10) shape. v11 plans will drop `mode:` for the `intent:`/`rigor:`/`scale:` triple once hook support lands (wave 2 of the axis transition); v≤10 plans carry a `mode:` line and keep it forever (§Legacy modes (v≤10)). For `incident-response` artifacts, use `incident: NNNN-<slug>` instead of `epic`/`wave`. Full field definitions live in the README frontmatter table; the two load-bearing specials are `governing-skill` — the skill declared after the producing step's heading (Step 1 → `agent-skills:idea-refine`; Step 3 → `superpowers:writing-plans`; Step 7 RCA → `canonical-sdlc`; `tune` UX flavor overrides Step 1 → `shape`, Step 4 → `impeccable`) — and `sdlc-step`, that step's number (`0` for `scale: epic` artifacts, `10` for `continuation.md`).
+The example shows the current (v11) shape — the `intent:`/`rigor:`/`scale:` triple replaces the single `mode:` axis, and the governing-skill hook parses and blocks on it (§Hooks). v≤10 plans carry a `mode:` line and keep it forever (§Legacy modes (v≤10)). For `incident-response` artifacts, use `incident: NNNN-<slug>` instead of `epic`/`wave`. Full field definitions live in the README frontmatter table; the two load-bearing specials are `governing-skill` — the skill declared after the producing step's heading (Step 1 → `agent-skills:idea-refine`; Step 3 → `superpowers:writing-plans`; Step 7 RCA → `canonical-sdlc`; `tune` UX flavor overrides Step 1 → `shape`, Step 4 → `impeccable`) — and `sdlc-step`, that step's number (`0` for `scale: epic` artifacts, `10` for `continuation.md`).
 
 ### Transition discipline
 
@@ -987,7 +1012,7 @@ Before v11, this skill ran on a single `mode:` axis with five values. Those name
 
 | v≤10 `mode:` | v11 triple (nearest equivalent) | Notes |
 |---|---|---|
-| `autonomous` | `build` · `audited` · `wave` | The `audited` mapping reflects what v≤10 `autonomous` behavior corresponded to — mandatory adversarial critic, per-step checkpoint commits, expanded stop-and-wake. **v11 defaults `build` to `peer-reviewed`**; the `audited` mapping is the behavioral equivalent, not the new default. |
+| `autonomous` | `build` · `audited` · `wave` | The `audited` mapping reflects what v≤10 `autonomous` behavior corresponded to — mandatory adversarial critic, per-step checkpoint commits, expanded stop-and-wake. Under D11 this triple is literally the v11 default at wave scale. |
 | `epic-scope` | `<intent>` · — · `epic` | Scale-only; rigor is set by the eventual intent. Runs Steps 0–3. |
 | `incident-response` | `incident-response` · `audited` · `wave` | Survives as an intent value; the mode's discipline is now the `audited` intent floor. |
 | `design-refresh` | `tune` · `peer-reviewed` · `wave` (UX flavor) | Folded into `tune`; the impeccable `shape → craft → polish → critique` loop is unchanged (§Per-intent deltas). |
@@ -996,7 +1021,7 @@ Before v11, this skill ran on a single `mode:` axis with five values. Those name
 **Grandfathering rules:**
 
 - **v≤10 plans keep their `mode:` vocabulary forever.** They are never retrofitted to the axis model; a v≤10 plan's `mode:` line stays valid and the v≤10 hooks and shape-tables keep enforcing it unchanged.
-- **v11 plans never declare `mode:`.** They declare `intent:` / `rigor:` / `scale:` instead (frontmatter fields + hook parsing land in wave 2). The v≤10 flag / `model_plan` / matrix enforcement that gated on the legacy `mode:` value is documented in the v10 shape table (§Evidence) — wave 2 re-keys the hooks to the triple.
+- **v11 plans never declare `mode:`.** They declare `intent:` / `rigor:` / `scale:` instead — the governing-skill hook parses and blocks on the triple (§Hooks). The v≤10 flag / `model_plan` / matrix enforcement that gated on the legacy `mode:` value stays documented in the v10 shape table (§Evidence); the v11 hooks re-key that enforcement onto the triple's presence (D13).
 - **Not-Doing (D6): no per-intent dispatch-rules files.** v11 does NOT add per-intent rules files — this kills the five phantom per-mode dispatch files carried since v2. The single universal `.bionic/sdlc-dispatch-rules.json` remains the only dispatch-rules file; intent routing lives in SKILL.md's prose tables (§Step → governing-skill mapping, §Per-intent deltas), never in per-intent JSON.
 
 ## Evidence (two tiers)
@@ -1005,7 +1030,7 @@ Two evidence tiers: **Verification** (always mandatory; shape-checked by `canoni
 
 ### Verification tier — mandatory, shape-checked
 
-Every step has an evidence artifact recorded under `Step N:` in `## SDLC State`. The evidence-gate hook enforces presence on every `git commit`, plus a per-version **shape table** on the multi-field steps. `canonical_sdlc_version: 10` uses the **v10 table below**; versions `1`–`9` keep their own tables (the full version ladder — v3 through v9, each adding one universal Step-5 key — is documented in the README). **Never retrofit an older plan to a newer table.**
+Every step has an evidence artifact recorded under `Step N:` in `## SDLC State`. The evidence-gate hook enforces presence on every `git commit`, plus a per-version **shape table** on the multi-field steps. `canonical_sdlc_version: 10` and `11` use the **v10 table below** (v11 layers on the task-scale and log-only additions noted after it); versions `1`–`9` keep their own tables (the full version ladder — v3 through v9, each adding one universal Step-5 key — is documented in the README). **Never retrofit an older plan to a newer table.**
 
 **v10 shape table:**
 
@@ -1023,6 +1048,13 @@ Every step has an evidence artifact recorded under `Step N:` in `## SDLC State`.
 Pointer steps in v10: 1, 2, 3, 4 — presence-only. Step 6 is deliberately **not** a pointer step, so a post-Verify commit re-runs the matrix prefix check.
 
 **`## Verification Matrix` validation** fires at `current: 5` (via the Verify gate) and `current: 6..9` (as a prefix check). The hook checks the `stack-health:` line, the tier table's grammar (T0–T4, five cells, no literal `|`, status enum `pending|blocked|discharged|waived`), each non-waived row's per-tier keys (§Step 5) with the placeholder and live-tier-`n/a` bans, the `false-green:`/`rewritten:` pairing, and — once `current > 5` — a `CONFIRMED` auditor cell on every non-waived row. A `waiver:` entry (evidence cell or AC block) exempts its row. **v10.1:** at `current: 5` only, `pending`/`blocked` rows skip the per-tier key check (their contract bites at the 5→6 advance), and the `auditor:` pointer is demanded only when no such row remains.
+
+**v11 shape table.** v11 wave/epic plans carry the **exact v10 rows above** — same per-step fields, same `## Verification Matrix` validation. v11 re-keys the *gate* off the triple, not the evidence shape. Two additions:
+
+| Addition | Shape | Enforcement |
+|---|---|---|
+| Task-scale addressing (`scale: task`) | `## SDLC State` addresses a ledger TASK: `current: T<n>` + one `- T<n>: <evidence>` line per task, backed by a `## Tasks` registration table (§Step 3 skeleton, D12) | The evidence-gate accepts `current: T<n>` on v11 task-scale plans without blocking (structural correctness — a false block here is a defect). Ledger validation (missing `## Tasks`, bad status enum, active/done task lacking evidence) is **log-only**. |
+| Log-only judgment surfaces (v11.0) | Floor-consistency (governing-skill), task-ledger + epic merge-target (evidence-gate) | Each finding appends one line to `.bionic/memory/sdlc-v11-audit.md` and echoes to stderr, then exits 0 — **never blocks**. Promotion to blocking is a later decision made from that data (D14). |
 
 **Block format** (v10). The Step-5 block in `## SDLC State`:
 
@@ -1111,8 +1143,8 @@ Zero user interaction. The next session reads it if present and resumes from the
 
 Two `PreToolUse` hooks enforce the contract (full mechanism in the README):
 
-- **`canonical-sdlc-evidence-gate.sh`** (`Bash`) — on `git commit`, blocks (exit 2) if the current step's evidence is missing or unreadable. For `canonical_sdlc_version: 10` it validates the v10 shape table and the `## Verification Matrix` (per-tier keys, waiver/CONFIRMED discipline); v1–v9 plans use their own tables, never retrofitted.
-- **`canonical-sdlc-governing-skill.sh`** (`Write,Edit`) — blocks any artifact lacking `governing-skill:` frontmatter; on v4+ plans validates the 5 discriminator + 2 opt-in flags + `model_plan`; on **v10** plans additionally requires a `## Verification Matrix` section at `sdlc-step ≥ 3`. (In v≤10 this gating keyed on the legacy `mode:` value — §Legacy modes; wave 2 re-keys the hooks to the triple.)
+- **`canonical-sdlc-evidence-gate.sh`** (`Bash`) — on `git commit`, blocks (exit 2) if the current step's evidence is missing or unreadable. For `canonical_sdlc_version: 11` it carries the v10 shape table and `## Verification Matrix` validation unchanged on wave/epic plans, accepts `current: T<n>` task-scale addressing, and runs the **log-only** task-ledger and epic merge-target checks (findings append to `.bionic/memory/sdlc-v11-audit.md` + stderr, exit 0 — never block). For `canonical_sdlc_version: 10` it validates the v10 shape table and the `## Verification Matrix` (per-tier keys, waiver/CONFIRMED discipline); v1–v9 plans use their own tables, never retrofitted.
+- **`canonical-sdlc-governing-skill.sh`** (`Write,Edit`) — blocks any artifact lacking `governing-skill:` frontmatter. On **v11** artifacts it **blocks** (exit 2) on: a `mode:` line (split-brain guard), a missing or non-enum `intent:`/`rigor:`/`scale:`, a barred intent × scale cell, a missing discriminator/opt-in flag or `model_plan`, and (on `*.plan.md` at `sdlc-step ≥ 3`) a missing `## Verification Matrix` — the triple's presence is the gate, with no `mode:` short-circuit (D13). It additionally runs the **log-only** floor-consistency checks (intent floor, spike cap, project floor, epic floor → `.bionic/memory/sdlc-v11-audit.md` + stderr, exit 0). On v4+ v≤10 plans it validates the 5 discriminator + 2 opt-in flags + `model_plan`; on **v10** plans additionally requires the matrix at `sdlc-step ≥ 3`, gating on the legacy `mode:` value (§Legacy modes).
 
 ## Subagent Dispatch Convention
 
@@ -1223,7 +1255,7 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 
 | Step | Gate | Evidence |
 |---|---|---|
-| 0. Configure | v10 frontmatter (5 discriminator + 2 opt-in + `model_plan`) + `## Verification Matrix` derived; `integration-branch:` shown; user confirmed; task list created | `Step 0:` confirmation row |
+| 0. Configure | v11 frontmatter (triple + 5 discriminator + 2 opt-in + `model_plan`) + `## Verification Matrix` derived; `integration-branch:` shown; user confirmed; task list created | `Step 0:` confirmation row |
 | 1. Ideate | Refined idea + "Not Doing" list | Artifacts in spec |
 | 2. Spec | Every requirement has an acceptance criterion | Spec doc |
 | 3. Plan | No placeholders; `integration-branch:` + matrix locked; Step 4 expanded into slices | Plan file |

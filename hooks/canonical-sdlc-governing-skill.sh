@@ -227,18 +227,130 @@ fi
 # here). v4/v5/v6/v7/v8/v9/v10 share v4's flag contract unchanged. v3
 # plans keep the prior contract so in-flight plans authored before v4
 # are not retroactively broken.
-if [ "$SDLC_VERSION" != "3" ] && [ "$SDLC_VERSION" != "4" ] && [ "$SDLC_VERSION" != "5" ] && [ "$SDLC_VERSION" != "6" ] && [ "$SDLC_VERSION" != "7" ] && [ "$SDLC_VERSION" != "8" ] && [ "$SDLC_VERSION" != "9" ] && [ "$SDLC_VERSION" != "10" ]; then
+if [ "$SDLC_VERSION" != "3" ] && [ "$SDLC_VERSION" != "4" ] && [ "$SDLC_VERSION" != "5" ] && [ "$SDLC_VERSION" != "6" ] && [ "$SDLC_VERSION" != "7" ] && [ "$SDLC_VERSION" != "8" ] && [ "$SDLC_VERSION" != "9" ] && [ "$SDLC_VERSION" != "10" ] && [ "$SDLC_VERSION" != "11" ]; then
   echo "BLOCKED: canonical-sdlc artifact '$BASENAME' has unsupported canonical_sdlc_version: '$SDLC_VERSION'." >&2
   echo "Path: $FILE_PATH" >&2
-  echo "Fix: set 'canonical_sdlc_version: 10' (current), '9'/'8'/'7'/'6'/'5'/'4'/'3' (prior, still enforced), or '1'/'2' for legacy plans." >&2
+  echo "Fix: set 'canonical_sdlc_version: 11' (current), '10'/'9'/'8'/'7'/'6'/'5'/'4'/'3' (prior, still enforced), or '1'/'2' for legacy plans." >&2
   exit 2
 fi
 
-# v3/v4 schema: require all opt-in flags + discriminators only for autonomous
-# mode. Other modes (epic-scope, incident-response, design-refresh, spike)
-# have different rule sets and are out of scope for enforcement.
+# ---------- v11: intent × rigor × scale triple + universal contract ----------
+#
+# v11 re-keys governance off the legacy `mode:` axis onto the triple
+# (intent × rigor × scale). Presence + whole-value enum validation is
+# blocking; CONTENT is already CR-stripped (line 143), so whole-line
+# yaml_get reads compare cleanly under CRLF too (epic-05). Being a v11
+# artifact — not a `mode: autonomous` gate — is what makes the flag /
+# model_plan / matrix contract below apply (D13); the mode-gate short
+# circuit further down is bypassed for v11 accordingly.
+if [ "$SDLC_VERSION" = "11" ]; then
+  # Local block helper for this arm — same BLOCKED:/Path: stderr shape as
+  # the inline v≤10 blocks above, hoisted to avoid repeating it eight
+  # times. Scoped to the v11 path; v≤10 output is untouched.
+  block() {
+    echo "BLOCKED: canonical-sdlc v11 artifact '$BASENAME': $1" >&2
+    echo "Path: $FILE_PATH" >&2
+    exit 2
+  }
+  # Split-brain guard: a v11 artifact declares the triple, never mode.
+  [ -z "$(yaml_get mode)" ] || block "v11 artifacts declare intent:/rigor:/scale:, never mode:"
+  INTENT=$(yaml_get intent); RIGOR=$(yaml_get rigor); SCALE=$(yaml_get scale)
+  [ -n "$INTENT" ] || block "v11 requires intent: (build|bugfix|refactor|tune|spike|incident-response)"
+  [ -n "$RIGOR" ]  || block "v11 requires rigor: (tested|peer-reviewed|audited)"
+  [ -n "$SCALE" ]  || block "v11 requires scale: (task|wave|epic)"
+  case "$INTENT" in
+    build|bugfix|refactor|tune|spike|incident-response) ;;
+    *) block "invalid intent: '$INTENT' — allowed: build|bugfix|refactor|tune|spike|incident-response" ;;
+  esac
+  case "$RIGOR" in
+    tested|peer-reviewed|audited) ;;
+    *) block "invalid rigor: '$RIGOR' — allowed: tested|peer-reviewed|audited" ;;
+  esac
+  case "$SCALE" in
+    task|wave|epic) ;;
+    *) block "invalid scale: '$SCALE' — allowed: task|wave|epic" ;;
+  esac
+  # Intent × scale validity: barred cells derivable from the two enums.
+  if [ "$SCALE" = "epic" ]; then
+    case "$INTENT" in
+      bugfix|spike|incident-response)
+        block "barred cell: $INTENT × epic (§Intent × scale validity)" ;;
+    esac
+  fi
+
+  # ---------- floor-consistency checks (LOG-ONLY; D14, spec R3) ----------
+  #
+  # Past the blocking gates above INTENT/RIGOR/SCALE are valid enums. These
+  # checks compute derivable rigor floors and record a finding when the
+  # declared rigor violates one. Findings NEVER block: each appends one line
+  # to <project>/.bionic/memory/sdlc-v11-audit.md AND echoes to stderr, then
+  # returns 0. Promotion to blocking is a separate later decision made from
+  # this data. Every new read path (config.yaml, epic plan, audit file) is
+  # fail-open. The evidence-gate hook carries a twin of log_finding (hook
+  # name differs); a shared hooks-lib extraction is deliberately deferred.
+  #
+  # Rigor ordering (normative): tested(0) < peer-reviewed(1) < audited(2).
+  rigor_rank() {
+    case "$1" in
+      tested) echo 0 ;;
+      peer-reviewed) echo 1 ;;
+      audited) echo 2 ;;
+      *) echo -1 ;;
+    esac
+  }
+  log_finding() {  # $1=check-id $2=detail — never blocks, always returns 0
+    local audit_dir="$PROJECT_ROOT_FROM_PATH/.bionic/memory"
+    local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) governing-skill $1: $2 ($FILE_PATH)"
+    mkdir -p "$audit_dir" 2>/dev/null \
+      && printf '%s\n' "$line" >> "$audit_dir/sdlc-v11-audit.md" 2>/dev/null
+    echo "canonical-sdlc v11 [$1]: $2" >&2
+    return 0
+  }
+
+  RR=$(rigor_rank "$RIGOR")
+  # Intent floor / spike cap (derivable from intent + rigor).
+  [ "$INTENT" = "incident-response" ] && [ "$RR" -lt 2 ] \
+    && log_finding intent-floor "incident-response floors at audited, declared $RIGOR"
+  [ "$INTENT" = "spike" ] && [ "$RR" -gt 0 ] \
+    && log_finding spike-cap "spike is capped at tested, declared $RIGOR"
+
+  # Project floor: rigor-floor: in <project>/.bionic/config.yaml (fail-open;
+  # an unparseable/invalid value is its own finding, never a block).
+  PF=$(grep -E '^rigor-floor:' "$PROJECT_ROOT_FROM_PATH/.bionic/config.yaml" 2>/dev/null \
+    | head -1 | sed 's/^rigor-floor:[[:space:]]*//' | sed 's/[[:space:]]*$//' | tr -d '\r')
+  if [ -n "$PF" ]; then
+    PR=$(rigor_rank "$PF")
+    if [ "$PR" -lt 0 ]; then
+      log_finding project-floor "invalid rigor-floor value '$PF' in config.yaml"
+    elif [ "$RR" -lt "$PR" ]; then
+      log_finding project-floor "project floor $PF, declared $RIGOR"
+    fi
+  fi
+
+  # Epic floor: rigor-floor: in the epic plan's frontmatter (first cross-file
+  # read in this hook — read-only, fail-open; missing/unreadable epic plan or
+  # missing key → no finding, floors are opt-in).
+  EPIC=$(yaml_get epic)
+  if [ -n "$EPIC" ] && [ -r "$DOCS_ROOT/plans/$EPIC/epic.plan.md" ]; then
+    EF=$(awk '/^---$/{n++;next} n==1' "$DOCS_ROOT/plans/$EPIC/epic.plan.md" \
+      | grep -E '^rigor-floor:' | head -1 | sed 's/^rigor-floor:[[:space:]]*//' | sed 's/[[:space:]]*$//' | tr -d '\r')
+    if [ -n "$EF" ]; then
+      ER=$(rigor_rank "$EF")
+      [ "$ER" -ge 0 ] && [ "$RR" -lt "$ER" ] \
+        && log_finding epic-floor "epic floor $EF (from $EPIC), declared $RIGOR"
+    fi
+  fi
+fi
+
+# v3–v10 schema: require all opt-in flags + discriminators only for
+# autonomous mode. Other modes (epic-scope, incident-response,
+# design-refresh, spike) have different rule sets and are out of scope for
+# enforcement. v11 has no mode axis — its triple's presence is the gate
+# (D13), so v11 enters the flag/model_plan/matrix contract below WITHOUT
+# consulting this short circuit (the `!= 11` clause keeps v≤10 behavior
+# byte-identical).
 MODE=$(yaml_get mode)
-if [ "$MODE" != "autonomous" ]; then
+if [ "$SDLC_VERSION" != "11" ] && [ "$MODE" != "autonomous" ]; then
   exit 0
 fi
 
@@ -256,7 +368,7 @@ done
 # Step-0 model-tier decision). Checked as a separate conditional grep — NOT
 # an array element — to stay safe under `set -u` with bash 3.2's empty-array
 # expansion behaviour. v3 plans skip this and keep the prior contract.
-if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ] || [ "$SDLC_VERSION" = "6" ] || [ "$SDLC_VERSION" = "7" ] || [ "$SDLC_VERSION" = "8" ] || [ "$SDLC_VERSION" = "9" ] || [ "$SDLC_VERSION" = "10" ]; then
+if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ] || [ "$SDLC_VERSION" = "6" ] || [ "$SDLC_VERSION" = "7" ] || [ "$SDLC_VERSION" = "8" ] || [ "$SDLC_VERSION" = "9" ] || [ "$SDLC_VERSION" = "10" ] || [ "$SDLC_VERSION" = "11" ]; then
   if ! echo "$FRONTMATTER" | grep -qE "^[[:space:]]*model_plan[[:space:]]*:"; then
     MISSING+=("model_plan")
   fi
@@ -268,7 +380,7 @@ if [ "${#MISSING[@]}" -gt 0 ]; then
   echo "Fix: run Step 0 (Configure) to set these explicitly. See SKILL.md §Step 0." >&2
   echo "Required opt-in flags:        ${REQUIRED_V3_OPT_IN[*]}" >&2
   echo "Required discriminator flags: ${REQUIRED_DISCRIMINATORS[*]}" >&2
-  if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ] || [ "$SDLC_VERSION" = "6" ] || [ "$SDLC_VERSION" = "7" ] || [ "$SDLC_VERSION" = "8" ] || [ "$SDLC_VERSION" = "9" ] || [ "$SDLC_VERSION" = "10" ]; then
+  if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ] || [ "$SDLC_VERSION" = "6" ] || [ "$SDLC_VERSION" = "7" ] || [ "$SDLC_VERSION" = "8" ] || [ "$SDLC_VERSION" = "9" ] || [ "$SDLC_VERSION" = "10" ] || [ "$SDLC_VERSION" = "11" ]; then
     echo "Required for v${SDLC_VERSION} (added):      model_plan" >&2
   fi
   exit 2
@@ -284,11 +396,12 @@ fi
 # CONFIRMED/waived auditor discipline (structure vs substance split
 # mirrors the model_plan / flag checks above).
 #
-# Scope: v10, mode: autonomous, basename *.plan.md, sdlc-step >= 3
-# (numeric). Specs, non-autonomous modes, continuation*.md, and earlier
-# schema versions are out of scope — the matrix is a plan-body artifact
-# that exists starting at Step 3 (Plan) approval.
-if [ "$SDLC_VERSION" = "10" ] && [ "$MODE" = "autonomous" ]; then
+# Scope: v10 mode: autonomous OR any v11 (v11 has no mode gate — its
+# triple's presence is the gate, D13), basename *.plan.md, sdlc-step >= 3
+# (numeric). Specs, non-autonomous v10 modes, continuation*.md, and
+# earlier schema versions are out of scope — the matrix is a plan-body
+# artifact that exists starting at Step 3 (Plan) approval.
+if { [ "$SDLC_VERSION" = "10" ] && [ "$MODE" = "autonomous" ]; } || [ "$SDLC_VERSION" = "11" ]; then
   case "$BASENAME" in
     *.plan.md)
       SDLC_STEP=$(yaml_get sdlc-step)
@@ -297,7 +410,11 @@ if [ "$SDLC_VERSION" = "10" ] && [ "$MODE" = "autonomous" ]; then
         *)
           if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null; then
             if ! echo "$CONTENT" | grep -qE '^## Verification Matrix'; then
-              echo "BLOCKED: canonical-sdlc v10 autonomous plan '$BASENAME' (sdlc-step ${SDLC_STEP}) is missing a '## Verification Matrix' section." >&2
+              if [ "$SDLC_VERSION" = "11" ]; then
+                echo "BLOCKED: canonical-sdlc v11 plan '$BASENAME' (sdlc-step ${SDLC_STEP}) is missing a '## Verification Matrix' section." >&2
+              else
+                echo "BLOCKED: canonical-sdlc v10 autonomous plan '$BASENAME' (sdlc-step ${SDLC_STEP}) is missing a '## Verification Matrix' section." >&2
+              fi
               echo "Path: $FILE_PATH" >&2
               echo "Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix') and lock it at Step 3 approval, or if this wave is reopened, use the Step 5–9 upgrade path in §Versioning." >&2
               exit 2

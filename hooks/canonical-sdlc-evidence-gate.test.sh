@@ -2605,6 +2605,437 @@ expect_allow "v10 18d fenced pipeline before the table (mid-section) → allow" 
   "$h18d" 'git commit -m "x"'
 
 # ============================================================
+# Section 19: v11 — triple re-key, task ledger, merge-target
+# ============================================================
+#
+# v11 re-keys plans from `mode:` to the intent × rigor × scale triple. For
+# the evidence gate two shapes matter:
+#   (1) Wave/epic-scale v11 plans carry the v10 shape unchanged — pointer
+#       steps 1..4, the Verification Matrix at the Verify gate, integrate=8,
+#       ship=9. They join `dispatch_modern` via `v10|v11` case arms.
+#   (2) Task-scale v11 plans (scale: task) address a ledger TASK, not a
+#       numbered step: `current: T<n>` with a `## Tasks` registration table
+#       and one `- T<n>:` evidence line per task in `## SDLC State`. The hook
+#       MUST accept `current: T<n>` without blocking (structural correctness),
+#       and validates the ledger LOG-ONLY (D14, check-id `task-ledger`):
+#       missing `## Tasks`, status outside the enum, an active/done task with
+#       no evidence line or a placeholder value — each appends one finding and
+#       exits 0.
+# A v11 wave plan naming an `epic:` also gets a LOG-ONLY merge-target check at
+# the integrate step (check-id `merge-target`): a mismatch between the plan's
+# `integration-branch:` and the epic plan's is logged, never blocks.
+# All new read paths (epic plan, audit file) are fail-open; a `current: T<n>`
+# on a v≤10 plan still blocks (T-format is v11 + scale:task only).
+
+echo ""
+echo "=== Section 19: v11 triple re-key, task ledger, merge-target ==="
+
+# Log-only assertion helpers: exit 0 with a finding on stderr (the standard
+# expect_allow requires EMPTY stderr, which a finding violates).
+expect_finding() {
+  local label="$1" home_dir="$2" command="$3" substr="$4"
+  TOTAL=$((TOTAL + 1))
+  run_hook "$home_dir" "$command"
+  if [ "$HOOK_EXIT" -eq 0 ] && echo "$HOOK_STDERR" | grep -q "$substr"; then
+    echo "PASS: $label"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL (expected allow exit 0 + stderr '$substr'): $label"
+    echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+expect_finding_both() {
+  local label="$1" home_dir="$2" project_dir="$3" command="$4" substr="$5"
+  TOTAL=$((TOTAL + 1))
+  run_hook_with_project "$home_dir" "$project_dir" "$command"
+  if [ "$HOOK_EXIT" -eq 0 ] && echo "$HOOK_STDERR" | grep -q "$substr"; then
+    echo "PASS: $label"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL (expected allow exit 0 + stderr '$substr'): $label"
+    echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+# Asserts the durable audit file exists under the sandbox HOME and carries a
+# line matching $4 — pins the D14 file channel (not just the stderr echo).
+expect_audit_line() {
+  local label="$1" home_dir="$2" command="$3" substr="$4"
+  TOTAL=$((TOTAL + 1))
+  run_hook "$home_dir" "$command"
+  local af="$home_dir/.bionic/memory/sdlc-v11-audit.md"
+  if [ "$HOOK_EXIT" -eq 0 ] && [ -f "$af" ] && grep -q "$substr" "$af"; then
+    echo "PASS: $label"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL (expected exit 0 + audit-file line '$substr'): $label"
+    echo "  exit=$HOOK_EXIT audit='$( [ -f "$af" ] && cat "$af" )'"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+# v11 frontmatter: the triple replaces mode:. $1 scale, $2 deploy, $3
+# use_worktree, $4 epic (omitted when empty).
+v11_frontmatter() {
+  local scale="${1:-wave}" deploy="${2:-none}" use_wt="${3:-false}" epic="${4:-}"
+  printf -- '---\n'
+  printf -- 'governing-skill: canonical-sdlc\n'
+  printf -- 'canonical_sdlc_version: 11\n'
+  printf -- 'intent: build\n'
+  printf -- 'rigor: audited\n'
+  printf -- 'scale: %s\n' "$scale"
+  printf -- 'deploy_target: %s\n' "$deploy"
+  printf -- 'use_worktree: %s\n' "$use_wt"
+  printf -- 'has_ui: false\n'
+  [ -n "$epic" ] && printf -- 'epic: %s\n' "$epic"
+  printf -- '---\n'
+}
+
+# A v11 wave plan (v10-shaped): frontmatter + ## SDLC State (current + Step
+# block) + ## Verification Matrix. Reuses the Section-17 matrix fixtures.
+v11_wave_plan() {
+  printf '%s\n## SDLC State\ncurrent: %s\nStep %s:\n%s\n\n%s\n' \
+    "$(v11_frontmatter wave)" "$1" "$1" "$2" "$3"
+}
+
+# A v11 wave plan naming an epic and carrying an integration-branch line, for
+# the merge-target check. $1 current, $2 step body, $3 matrix, $4 epic,
+# $5 integration-branch.
+v11_wave_epic_plan() {
+  printf '%s\n## SDLC State\nintegration-branch: %s\ncurrent: %s\nStep %s:\n%s\n\n%s\n' \
+    "$(v11_frontmatter wave none false "$4")" "$5" "$1" "$1" "$2" "$3"
+}
+
+# A v11 task-scale plan: frontmatter (scale: task) + the given body (a
+# ## Tasks table followed by ## SDLC State).
+v11_task_plan() {
+  printf '%s\n%s\n' "$(v11_frontmatter task)" "$1"
+}
+
+# A complete integrate (Step 8) block that passes the shape check, so the
+# merge-target log-only check can be exercised in isolation.
+v11_integrate_body="  merge: merged wave into epic/07-x
+  worktree-removed: n/a
+  cleanup: n/a"
+
+# --- (2) wave/epic-scale v11 plans shape as v10 --------------------------
+
+# 19a — v11 wave plan at Step 5 with an incomplete matrix (discharged T3 row
+# with no AC block) → block, exactly like v10.
+h19a=$(make_home)
+write_plan "$h19a" "$(v11_wave_plan 5 "$v10_step5_base" "$v10_matrix_no_block")" > /dev/null
+expect_block "v11 19a wave plan Step 5 incomplete matrix → block (shapes as v10)" \
+  "$h19a" 'git commit -m "x"' "AC-1"
+
+# 19b — v11 wave plan at Step 5 with a complete matrix + auditor pointer →
+# allow (pointer/matrix evidence in place).
+h19b=$(make_home)
+write_plan "$h19b" "$(v11_wave_plan 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
+expect_allow "v11 19b wave plan Step 5 complete matrix → allow" \
+  "$h19b" 'git commit -m "x"'
+
+# 19c — step remap: integrate is Step 8. A v11 plan at current: 8 with a
+# complete matrix but an integrate block missing merge/worktree-removed →
+# block on the shape check (integrate fires at 8 as in v10).
+h19c=$(make_home)
+write_plan "$h19c" "$(v11_wave_plan 8 "  note: integrating now" "$v10_matrix_complete")" > /dev/null
+expect_block "v11 19c integrate Step 8 missing merge fields → block (remap fires as v10)" \
+  "$h19c" 'git commit -m "x"' "merge"
+
+# 19c2 — Step 4 is a pointer step in v11 (as in v10): a pointer body allows.
+h19c2=$(make_home)
+write_plan "$h19c2" "$(v11_frontmatter wave)
+## SDLC State
+current: 4
+Step 4: .bionic/docs/plans/wave.plan.md#step-4" > /dev/null
+expect_allow "v11 19c2 wave plan Step 4 pointer → allow" \
+  "$h19c2" 'git commit -m "x"'
+
+# --- (2) task-scale ledger fixtures --------------------------------------
+
+# Valid ledger: T1 done with evidence, T2 active with evidence; current: T2.
+v11_ledger_valid="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | tested | fix the frontmatter parser | done |
+| T2 | refactor | peer-reviewed | extract the ledger helper | active |
+
+## SDLC State
+
+integration-branch: main
+intent: build
+rigor: peer-reviewed
+scale: task
+current: T2
+
+- T1: fixed in commit abc123, suite 5/5 green
+- T2: extracting helper on branch, commit def456"
+
+# 19d — valid task ledger, current: T2 accepted → allow, no finding (BLOCKING-
+# grade correctness: a false block here would be a defect).
+h19d=$(make_home)
+write_plan "$h19d" "$(v11_task_plan "$v11_ledger_valid")" > /dev/null
+expect_allow "v11 19d task plan current: T2 valid ledger → allow (T-format accepted)" \
+  "$h19d" 'git commit -m "x"'
+
+# 19e — no ## Tasks section → exit 0 + task-ledger finding.
+v11_ledger_no_tasks="## SDLC State
+
+intent: build
+rigor: peer-reviewed
+scale: task
+current: T2
+
+- T2: some evidence"
+h19e=$(make_home)
+write_plan "$h19e" "$(v11_task_plan "$v11_ledger_no_tasks")" > /dev/null
+expect_finding "v11 19e missing ## Tasks section → exit 0 + task-ledger finding" \
+  "$h19e" 'git commit -m "x"' "task-ledger"
+
+# 19e2 — the finding is written to the durable audit file with the D14 format.
+h19e2=$(make_home)
+write_plan "$h19e2" "$(v11_task_plan "$v11_ledger_no_tasks")" > /dev/null
+expect_audit_line "v11 19e2 missing ## Tasks → audit file line (evidence-gate task-ledger)" \
+  "$h19e2" 'git commit -m "x"' "evidence-gate task-ledger:"
+
+# 19f — status outside the enum (doing) → exit 0 + finding.
+v11_ledger_bad_status="${v11_ledger_valid/| T2 | refactor | peer-reviewed | extract the ledger helper | active |/| T2 | refactor | peer-reviewed | extract the ledger helper | doing |}"
+h19f=$(make_home)
+write_plan "$h19f" "$(v11_task_plan "$v11_ledger_bad_status")" > /dev/null
+expect_finding "v11 19f invalid status 'doing' → exit 0 + task-ledger finding" \
+  "$h19f" 'git commit -m "x"' "task-ledger"
+
+# 19g — active task (T2) with no `- T2:` evidence line → exit 0 + finding.
+v11_ledger_active_no_line="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | tested | fix the frontmatter parser | done |
+| T2 | refactor | peer-reviewed | extract the ledger helper | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: fixed in commit abc123, suite 5/5 green"
+h19g=$(make_home)
+write_plan "$h19g" "$(v11_task_plan "$v11_ledger_active_no_line")" > /dev/null
+expect_finding "v11 19g active task without evidence line → exit 0 + task-ledger finding" \
+  "$h19g" 'git commit -m "x"' "task-ledger"
+
+# 19h — active task with a placeholder evidence value (`- T2: TBD`) → finding.
+v11_ledger_active_placeholder="${v11_ledger_valid/- T2: extracting helper on branch, commit def456/- T2: TBD}"
+h19h=$(make_home)
+write_plan "$h19h" "$(v11_task_plan "$v11_ledger_active_placeholder")" > /dev/null
+expect_finding "v11 19h active task placeholder evidence → exit 0 + task-ledger finding" \
+  "$h19h" 'git commit -m "x"' "task-ledger"
+
+# 19i — done task (T1) with an empty evidence line (`- T1:`) → finding.
+v11_ledger_done_empty="${v11_ledger_valid/- T1: fixed in commit abc123, suite 5\/5 green/- T1:}"
+h19i=$(make_home)
+write_plan "$h19i" "$(v11_task_plan "$v11_ledger_done_empty")" > /dev/null
+expect_finding "v11 19i done task missing evidence → exit 0 + task-ledger finding" \
+  "$h19i" 'git commit -m "x"' "task-ledger"
+
+# --- (2) task-scale CRLF -------------------------------------------------
+
+# 19j — a valid task ledger with CRLF line endings → exit 0, no false finding
+# (every parse path — frontmatter scale, current, ## Tasks, evidence lines —
+# strips \r).
+h19j=$(make_home)
+write_plan "$h19j" "$(to_crlf "$(v11_task_plan "$v11_ledger_valid")")" > /dev/null
+expect_allow "v11 19j CRLF task ledger → allow, no false finding" \
+  "$h19j" 'git commit -m "x"'
+
+# --- (4) epic merge-target consistency (log-only) ------------------------
+
+# Build a project with an epic plan declaring integration-branch: epic/07-x.
+make_epic_project() {
+  local branch="$1"
+  local proj
+  proj=$(make_project)
+  mkdir -p "$proj/.bionic/docs/plans/epic-fix"
+  printf -- '---\ncanonical_sdlc_version: 11\nintent: build\nrigor: audited\nscale: epic\n---\n## SDLC State\nintegration-branch: %s\ncurrent: 1\n' \
+    "$branch" > "$proj/.bionic/docs/plans/epic-fix/epic.plan.md"
+  touch -t 202001010000 "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" 2>/dev/null || \
+    touch -d "2020-01-01" "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" 2>/dev/null || true
+  echo "$proj"
+}
+
+# 19k — plan integration-branch (main) mismatches the epic's (epic/07-x) at
+# the integrate step → exit 0 + merge-target finding.
+h19k=$(make_home); p19k=$(make_epic_project "epic/07-x")
+write_project_plan "$p19k" \
+  "$(v11_wave_epic_plan 8 "$v11_integrate_body" "$v10_matrix_complete" epic-fix main)" \
+  "wave-newest.plan.md" > /dev/null
+expect_finding_both "v11 19k merge-target mismatch → exit 0 + merge-target finding" \
+  "$h19k" "$p19k" 'git commit -m "x"' "merge-target"
+
+# 19l — matching integration-branch → no finding (silent allow).
+h19l=$(make_home); p19l=$(make_epic_project "epic/07-x")
+write_project_plan "$p19l" \
+  "$(v11_wave_epic_plan 8 "$v11_integrate_body" "$v10_matrix_complete" epic-fix "epic/07-x")" \
+  "wave-newest.plan.md" > /dev/null
+expect_allow_both "v11 19l merge-target match → allow, no finding" \
+  "$h19l" "$p19l" 'git commit -m "x"'
+
+# --- (5) named v≤10 regressions ------------------------------------------
+
+# 19m — a v10 plan with `current: T2` STILL blocks: the T-format is a v11 +
+# scale:task feature only, never retrofitted onto v≤10.
+h19m=$(make_home)
+write_plan "$h19m" "---
+canonical_sdlc_version: 10
+mode: autonomous
+---
+## SDLC State
+current: T2
+Step 5: whatever" > /dev/null
+expect_block "v11 19m v10 plan with current: T2 still blocks (T-format is v11+task only)" \
+  "$h19m" 'git commit -m "x"' "valid"
+
+# 19n — a v9 plan at a pointer step is untouched (v9 path unchanged).
+h19n=$(make_home)
+write_plan "$h19n" "---
+canonical_sdlc_version: 9
+---
+## SDLC State
+current: 6
+Step 6: .bionic/docs/plans/wave.plan.md#step-6" > /dev/null
+expect_allow "v11 19n v9 pointer step untouched (named v≤10 regression)" \
+  "$h19n" 'git commit -m "x"'
+
+# --- fence-aware SDLC-State extraction (blocking-grade correctness) -------
+
+# A fenced ``` example containing a `## SDLC State` heading + `current: T2`
+# line — the D12 task-scale schema as it appears in a plan's PROSE. Single-
+# quoted so the triple backticks stay literal (no command substitution).
+v11_fenced_sdlcstate_shadow='```
+## SDLC State
+current: T2
+
+- T1: <evidence>
+- T2: <evidence>
+```'
+
+# 19o — the SDLC-State extraction must be fence-aware, like matrix_section.
+# A v10 plan whose body documents the task-scale schema in a fenced block
+# BEFORE the real section must validate against the REAL `## SDLC State`
+# (current: 5 + complete matrix), not the shadowed `current: T2`. Before the
+# fix the fence-blind awk captured the fenced `current: T2` first →
+# CURRENT=T2 → non-numeric → false block. Same defect class the matrix parser
+# fixed (fence-blind row parsing). This fix removes false blocks, adds none.
+h19o=$(make_home)
+write_plan "$h19o" "$(v10_frontmatter true)
+
+Doc note — the task-scale ledger schema (D12) looks like:
+
+$v11_fenced_sdlcstate_shadow
+
+## SDLC State
+current: 5
+Step 5:
+$v10_step5_base
+
+$v10_matrix_complete" > /dev/null
+expect_allow "v11 19o fenced ## SDLC State shadow before real section → validates real section (allow)" \
+  "$h19o" 'git commit -m "x"'
+
+# 19p — the `## Tasks` extraction is fence-aware from the start: a fenced ```
+# example carrying a bogus-status row before the REAL ## Tasks table must not
+# raise a false task-ledger finding (the real ledger is valid). Fence-blind,
+# both tables' rows would be read and the T9 `doing` row would log a finding.
+v11_fenced_tasks_shadow='```
+## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T9 | bugfix | tested | example row | doing |
+```'
+h19p=$(make_home)
+write_plan "$h19p" "$(v11_frontmatter task)
+
+Example ledger:
+
+$v11_fenced_tasks_shadow
+
+$v11_ledger_valid" > /dev/null
+expect_allow "v11 19p fenced ## Tasks example before real table → no false finding (fence-aware)" \
+  "$h19p" 'git commit -m "x"'
+
+# 19q — a doc file whose ONLY `## SDLC State` occurrence is inside a fenced
+# ``` example (no real section) must pass through as NON-CANONICAL (exit 0),
+# not be parsed and false-blocked on the now-empty extraction. The presence
+# check must be fence-aware too, matching the extraction: a fenced heading is
+# documentation, not state. Decision recorded in the plan's ## Assumptions.
+v11_fenced_only_sdlcstate="# Some skill doc
+
+Here is how a canonical-sdlc plan records its state:
+
+$v11_fenced_sdlcstate_shadow
+
+That is the schema — this file itself is not a plan and carries no real
+SDLC-State section of its own."
+h19q=$(make_home)
+write_plan "$h19q" "$v11_fenced_only_sdlcstate" > /dev/null
+expect_allow "v11 19q fenced-only ## SDLC State (no real section) → pass through as non-canonical" \
+  "$h19q" 'git commit -m "x"'
+
+# --- fence-aware epic-plan read in merge-target (review fix) --------------
+
+# An epic project whose epic.plan.md documents a `## SDLC State` example in a
+# fenced ``` block (bogus integration-branch: fenced-decoy) BEFORE its real
+# section (integration-branch: $1). Fence-blind, the cross-file read picks the
+# decoy (head -1) and mis-reports the merge target.
+make_epic_project_fenced() {
+  local branch="$1" proj
+  proj=$(make_project)
+  mkdir -p "$proj/.bionic/docs/plans/epic-fix"
+  cat > "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" <<EOF
+---
+canonical_sdlc_version: 11
+intent: build
+rigor: audited
+scale: epic
+---
+# Epic plan
+
+The epic's state block looks like this:
+
+\`\`\`
+## SDLC State
+integration-branch: fenced-decoy
+current: 1
+\`\`\`
+
+## SDLC State
+integration-branch: ${branch}
+current: 1
+EOF
+  touch -t 202001010000 "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" 2>/dev/null || \
+    touch -d "2020-01-01" "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" 2>/dev/null || true
+  echo "$proj"
+}
+
+# 19r — the merge-target epic-plan read must be fence-aware, like every other
+# SDLC-State extraction this wave. The wave plan's integration-branch matches
+# the epic's REAL value (epic/07-x); the fenced decoy (fenced-decoy) must be
+# ignored → silent (no finding). Before the fix the fence-blind awk read the
+# decoy first (head -1) → mismatch → spurious merge-target finding. Log-only
+# blast radius, but the exact defect class this wave eliminated everywhere else.
+h19r=$(make_home); p19r=$(make_epic_project_fenced "epic/07-x")
+write_project_plan "$p19r" \
+  "$(v11_wave_epic_plan 8 "$v11_integrate_body" "$v10_matrix_complete" epic-fix "epic/07-x")" \
+  "wave-newest.plan.md" > /dev/null
+expect_allow_both "v11 19r fenced ## SDLC State in epic plan → merge-target reads real section (silent)" \
+  "$h19r" "$p19r" 'git commit -m "x"'
+
+# ============================================================
 # Summary
 # ============================================================
 
