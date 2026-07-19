@@ -185,13 +185,29 @@ is_placeholder_value() {
   esac
 }
 
+# Audit dir follows the plan's own project (walk-up from $PLAN's directory
+# to the nearest ancestor containing .bionic/), matching the governing-skill
+# hook's find_project_root_from_path strategy — findings live with the
+# project that owns the artifact, not necessarily the invoking PROJECT_DIR.
+# PROJECT_DIR is the fallback only (empty/unreadable $PLAN, or no .bionic/
+# ancestor found). Fail-open: the `cd ... && pwd` guard never crashes the hook.
+audit_root() {
+  local d
+  d=$(cd "$(dirname "$PLAN")" 2>/dev/null && pwd)
+  while [ -n "$d" ] && [ "$d" != "/" ]; do
+    if [ -d "$d/.bionic" ]; then echo "$d"; return 0; fi
+    d=$(dirname "$d")
+  done
+  echo "$PROJECT_DIR"
+}
+
 # v11 log-only finding channel (D14): append one line to the durable audit file
 # AND echo to stderr, then return 0 — floor/ledger/merge-target findings never
 # block this wave. Twin of the governing-skill hook's helper (hook name differs:
 # `evidence-gate`). mkdir + append are fail-open; the audit file lives in the
 # durable .bionic/memory/ (not .bionic/tmp/, which is wiped at Integrate).
 log_finding() {  # $1=check-id  $2=detail
-  local audit_dir="$PROJECT_DIR/.bionic/memory"
+  local audit_dir="$(audit_root)/.bionic/memory"
   local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) evidence-gate $1: $2 ($PLAN)"
   mkdir -p "$audit_dir" 2>/dev/null && printf '%s\n' "$line" >> "$audit_dir/sdlc-v11-audit.md" 2>/dev/null
   echo "canonical-sdlc v11 [$1]: $2" >&2

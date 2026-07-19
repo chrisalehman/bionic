@@ -3199,6 +3199,76 @@ expect_no_audit_write "v11 20f v10 plan (no intent:) → allow, no audit write (
   "$h20f" 'git commit -m "x"'
 
 # ============================================================
+# Section 21: audit dir follows the plan's project (strategy alignment)
+# ============================================================
+#
+# log_finding's audit_dir now walks up from $PLAN's own directory to the
+# nearest ancestor containing .bionic/, matching the governing-skill hook's
+# find_project_root_from_path strategy — findings live with the project that
+# owns the artifact. PROJECT_DIR is the fallback only.
+#
+# NOTE (pinning, not RED — see plan ## Assumptions): plan discovery is
+# rooted at PROJECT_DIR (PLAN_DIRS is built from $HOME/.claude/plans and
+# $PROJECT_DIR/...), so in every case constructible through the hook's real
+# discovery paths, walk-up resolves to the SAME directory PROJECT_DIR already
+# names. Both cases below pass identically before and after the refactor;
+# they pin the new code path (and its fallback) rather than catch a bug.
+
+echo ""
+echo "=== Section 21: audit dir follows the plan's project (strategy alignment) ==="
+
+# Like run_hook_with_project, but pins CLAUDE_PROJECT_DIR to $2 (the fixture
+# project that owns the plan) while the JSON cwd field AND the actual
+# invoking shell's cwd are $3 (an unrelated sibling dir) — proving
+# log_finding follows the plan's own project via walk-up, never whatever
+# directory happened to invoke the hook.
+run_hook_project_elsewhere_cwd() {
+  local home_dir="$1" project_dir="$2" elsewhere_dir="$3" command="$4"
+  local input
+  input=$(jq -n --arg c "$command" --arg cwd "$elsewhere_dir" '{tool_input: {command: $c}, cwd: $cwd}')
+  local tmp_err
+  tmp_err=$(mktemp)
+  if (cd "$elsewhere_dir" && HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"); then
+    HOOK_EXIT=0
+  else
+    HOOK_EXIT=$?
+  fi
+  HOOK_STDERR=$(cat "$tmp_err")
+  rm -f "$tmp_err"
+}
+
+# 21a — fixture project owns the plan; the JSON cwd field and the actual
+# process cwd both point at an unrelated sibling temp dir. Asserts the audit
+# line lands in the FIXTURE project's .bionic/memory/sdlc-v11-audit.md, and
+# that NO .bionic/ gets created under the sibling (no cwd leak).
+h21a=$(make_home)
+fixture21a=$(make_project)
+elsewhere21a=$(mktemp -d); cleanup_dirs+=("$elsewhere21a")
+write_project_plan "$fixture21a" "$(v20_wave_plan tune 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
+TOTAL=$((TOTAL + 1))
+run_hook_project_elsewhere_cwd "$h21a" "$fixture21a" "$elsewhere21a" 'git commit -m "x"'
+fixture_audit="$fixture21a/.bionic/memory/sdlc-v11-audit.md"
+if [ "$HOOK_EXIT" -eq 0 ] && [ -f "$fixture_audit" ] && grep -q "tune-evidence" "$fixture_audit" \
+  && [ ! -d "$elsewhere21a/.bionic" ]; then
+  echo "PASS: v11 21a audit line follows the plan's fixture project, not the invoking cwd"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected fixture audit line + no .bionic under elsewhere cwd): v11 21a"
+  echo "  exit=$HOOK_EXIT fixture_audit_exists=$([ -f "$fixture_audit" ] && echo yes || echo no) elsewhere_bionic=$([ -d "$elsewhere21a/.bionic" ] && echo yes || echo no)"
+  FAIL=$((FAIL + 1))
+fi
+
+# 21b — fail-open fallback: plan reached only via the ~/.claude/plans global
+# convention (Section 19/20's usual fixture), whose ancestry has no .bionic/
+# directory anywhere above it. audit_root's walk-up exhausts without a match
+# and falls back to $PROJECT_DIR (== $h21b here, via the cwd field) — hook
+# still exits 0 and still writes the audit line, unblocked.
+h21b=$(make_home)
+write_plan "$h21b" "$(v20_wave_plan tune 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
+expect_audit_line "v11 21b fail-open: no .bionic ancestor above the plan → PROJECT_DIR fallback used" \
+  "$h21b" 'git commit -m "x"' "tune-evidence"
+
+# ============================================================
 # Summary
 # ============================================================
 
