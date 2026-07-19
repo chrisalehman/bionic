@@ -1,6 +1,6 @@
 ---
 name: map-instrument-narrow
-description: Use when debugging requires understanding unfamiliar system internals before instrumentation will be interpretable — especially async execution, third-party library code, state mutations with no obvious code path between cause and effect, prior failed fix attempts, OR any diagnostic friction inside canonical-sdlc autonomous mode (loaded automatically by the Autonomous Friction Protocol)
+description: Use when debugging requires understanding unfamiliar system internals before instrumentation will be interpretable — especially async execution, third-party library code, state mutations with no obvious code path between cause and effect, prior failed fix attempts, OR any diagnostic friction in a canonical-sdlc run at audited rigor (loaded automatically by the Autonomous Friction Protocol)
 layer: technique
 needs: []
 loading: deferred
