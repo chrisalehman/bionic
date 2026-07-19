@@ -2968,6 +2968,24 @@ $v11_ledger_valid" > /dev/null
 expect_allow "v11 19p fenced ## Tasks example before real table → no false finding (fence-aware)" \
   "$h19p" 'git commit -m "x"'
 
+# 19q — a doc file whose ONLY `## SDLC State` occurrence is inside a fenced
+# ``` example (no real section) must pass through as NON-CANONICAL (exit 0),
+# not be parsed and false-blocked on the now-empty extraction. The presence
+# check must be fence-aware too, matching the extraction: a fenced heading is
+# documentation, not state. Decision recorded in the plan's ## Assumptions.
+v11_fenced_only_sdlcstate="# Some skill doc
+
+Here is how a canonical-sdlc plan records its state:
+
+$v11_fenced_sdlcstate_shadow
+
+That is the schema — this file itself is not a plan and carries no real
+SDLC-State section of its own."
+h19q=$(make_home)
+write_plan "$h19q" "$v11_fenced_only_sdlcstate" > /dev/null
+expect_allow "v11 19q fenced-only ## SDLC State (no real section) → pass through as non-canonical" \
+  "$h19q" 'git commit -m "x"'
+
 # ============================================================
 # Summary
 # ============================================================

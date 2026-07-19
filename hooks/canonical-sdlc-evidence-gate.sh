@@ -129,7 +129,15 @@ if [ -z "$PLAN" ] || [ ! -f "$PLAN" ]; then
 fi
 
 # The newest plan has no ## SDLC State section → not a canonical-sdlc run.
-if ! grep -q '^## SDLC State' "$PLAN"; then
+# Fence-aware (matches the SECTION extraction below): a `## SDLC State` heading
+# that appears ONLY inside a ``` fenced example is documentation, not state, so
+# the file passes through as non-canonical rather than being parsed and then
+# false-blocked on the empty extraction. \r stripped for CRLF plans.
+if [ -z "$(tr -d '\r' < "$PLAN" | awk '
+  /^[[:space:]]*```/ { fence = !fence; next }
+  fence { next }
+  /^## SDLC State/ { print "yes"; exit }
+')" ]; then
   exit 0
 fi
 
