@@ -941,8 +941,15 @@ validate_merge_target() {
   [ -n "$epic" ] || return 0
   epic_plan="$DOCS_ROOT/plans/$epic/epic.plan.md"
   [ -r "$epic_plan" ] || return 0
+  # Fence-aware (matches the SECTION extraction): an epic plan documenting a
+  # `## SDLC State` example in a ``` fence must not shadow its real section.
   epic_branch=$(tr -d '\r' < "$epic_plan" \
-    | awk '/^## SDLC State/{f=1; next} /^## /{f=0} f' \
+    | awk '
+      /^[[:space:]]*```/ { fence = !fence; next }
+      fence { next }
+      /^## SDLC State/ { f=1; next }
+      /^## / { f=0 }
+      f' \
     | grep -E '^[[:space:]]*integration-branch[[:space:]]*:' | head -1 \
     | sed -E 's/^[[:space:]]*integration-branch[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
   [ -n "$epic_branch" ] || return 0
