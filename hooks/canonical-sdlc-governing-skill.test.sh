@@ -83,6 +83,19 @@ assert_eq() {
   fi
 }
 
+# Asserts $3 (haystack, typically $HOOK_STDERR) contains substring $2.
+# Same PASS/FAIL accounting + output shape as the inline `case` idiom
+# used throughout this file, hoisted to a helper for the v11 section's
+# many stderr-substring checks.
+assert_contains() {
+  local label="$1" needle="$2" hay="$3"
+  TOTAL=$((TOTAL + 1))
+  case "$hay" in
+    *"$needle"*) PASS=$((PASS + 1)); printf '  PASS  %s\n' "$label" ;;
+    *) FAIL=$((FAIL + 1)); printf '  FAIL  %s (missing %q in %q)\n' "$label" "$needle" "$hay" ;;
+  esac
+}
+
 VALID_FRONTMATTER='---
 governing-skill: superpowers:writing-plans
 sdlc-step: 3
@@ -380,16 +393,16 @@ canonical_sdlc_version: 99
 run_write "$project/.bionic/docs/plans/epic-01-demo/wave-09b-bad.plan.md" "$bad_ver"
 assert_eq "exit 2" 2 "$HOOK_EXIT"
 
-echo "unsupported canonical_sdlc_version: 11 → block (boundary: 10 is current, 11 is not yet minted)"
-v11_bad='---
+echo "unsupported canonical_sdlc_version: 12 → block (boundary: 11 is current, 12 is not yet minted)"
+v12_bad='---
 governing-skill: canonical-sdlc
 mode: autonomous
-canonical_sdlc_version: 11
+canonical_sdlc_version: 12
 ---
 
 # Body
 '
-run_write "$project/.bionic/docs/plans/epic-01-demo/wave-09c-v11.plan.md" "$v11_bad"
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-09c-v12.plan.md" "$v12_bad"
 assert_eq "exit 2" 2 "$HOOK_EXIT"
 
 echo "Edit on existing v1-migrated file (simulating live continuation-checkpoint.md) → allow"
@@ -769,6 +782,200 @@ echo "v10 continuation.md (sdlc-step 10, not *.plan.md) without Verification Mat
 v10_continuation="$(build_v10_frontmatter 10)"$'\n'"$NO_MATRIX_BODY"
 run_write "$project/.bionic/docs/plans/epic-01-demo/continuation.md" "$v10_continuation"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
+
+# ============================================================
+# canonical_sdlc_version v11: intent × rigor × scale triple
+# ============================================================
+#
+# v11 re-keys governance off the legacy `mode:` axis onto the triple
+# (intent × rigor × scale). This section exercises R1 (triple presence +
+# whole-value enum validation + mode split-brain guard + barred cells)
+# and R2 (universal structural contract — flags/model_plan/matrix without
+# the mode gate). Baseline fixture: build_v11_plan (all defaults valid);
+# every case below mutates ONE aspect of it.
+#
+# Enums: intent ∈ {build,bugfix,refactor,tune,spike,incident-response};
+#        rigor ∈ {tested,peer-reviewed,audited}; scale ∈ {task,wave,epic}.
+# Barred intent × scale cells: bugfix·epic, spike·epic, incident-response·epic.
+
+# Builds a v11 plan. All config via KEY=VALUE args (bash-3.2 arg parse):
+#   intent/rigor/scale — triple values (default build/audited/wave);
+#     value OMIT drops the line entirely (missing-field cases).
+#   step  — sdlc-step (default 3).
+#   mode  — if set, inject a `mode:` line (split-brain guard case).
+#   omit  — space-separated flag names to drop (missing-flag cases).
+#   matrix — yes|no; drop the "## Verification Matrix" section when no.
+build_v11_plan() {
+  local intent=build rigor=audited scale=wave step=3 mode="OMIT" omit=" " matrix=yes
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      intent=*) intent="${arg#intent=}" ;;
+      rigor=*)  rigor="${arg#rigor=}" ;;
+      scale=*)  scale="${arg#scale=}" ;;
+      step=*)   step="${arg#step=}" ;;
+      mode=*)   mode="${arg#mode=}" ;;
+      omit=*)   omit=" ${arg#omit=} " ;;
+      matrix=*) matrix="${arg#matrix=}" ;;
+    esac
+  done
+
+  local out='---
+governing-skill: superpowers:writing-plans
+sdlc-step: '"$step"'
+epic: epic-01-demo
+wave: wave-01-x
+canonical_sdlc_version: 11
+'
+  [ "$mode" = OMIT ]   || out+="mode: $mode"$'\n'
+  [ "$intent" = OMIT ] || out+="intent: $intent"$'\n'
+  [ "$rigor" = OMIT ]  || out+="rigor: $rigor"$'\n'
+  [ "$scale" = OMIT ]  || out+="scale: $scale"$'\n'
+
+  local flags=("cleanup_on_finish:true" "use_worktree:false" \
+    "surface_type:none" "language:none" "has_ui:false" \
+    "multi_agent:false" "deploy_target:none" \
+    "model_plan:orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh")
+  local kv key val
+  for kv in "${flags[@]}"; do
+    key="${kv%%:*}"; val="${kv#*:}"
+    case "$omit" in *" $key "*) continue ;; esac
+    out+="${key}: ${val}"$'\n'
+  done
+  out+='---
+'
+  if [ "$matrix" = yes ]; then
+    out+='
+## Verification Matrix
+
+stack-health: n/a: no long-running serve observed
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+'
+  else
+    out+='
+# Plan body without a matrix section
+'
+  fi
+  printf '%s' "$out"
+}
+
+project=$(make_project)
+
+echo "v11 valid plan (full triple + flags + model_plan + matrix) → allow"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-valid.plan.md" "$(build_v11_plan)"
+assert_eq "v11_accepts_valid_plan exit 0" 0 "$HOOK_EXIT"
+
+echo "v11 missing intent → block, error names intent"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-no-intent.plan.md" "$(build_v11_plan intent=OMIT)"
+assert_eq "v11_blocks_missing_intent exit 2" 2 "$HOOK_EXIT"
+assert_contains "v11_blocks_missing_intent names intent" "intent" "$HOOK_STDERR"
+
+echo "v11 missing rigor → block, error names rigor"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-no-rigor.plan.md" "$(build_v11_plan rigor=OMIT)"
+assert_eq "v11_blocks_missing_rigor exit 2" 2 "$HOOK_EXIT"
+assert_contains "v11_blocks_missing_rigor names rigor" "rigor" "$HOOK_STDERR"
+
+echo "v11 missing scale → block, error names scale"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-no-scale.plan.md" "$(build_v11_plan scale=OMIT)"
+assert_eq "v11_blocks_missing_scale exit 2" 2 "$HOOK_EXIT"
+assert_contains "v11_blocks_missing_scale names scale" "scale" "$HOOK_STDERR"
+
+echo "v11 bad intent enum (intent: feature) → block, lists allowed set"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-bad-intent.plan.md" "$(build_v11_plan intent=feature)"
+assert_eq "v11_blocks_bad_intent_enum exit 2" 2 "$HOOK_EXIT"
+assert_contains "v11_blocks_bad_intent_enum lists allowed" "allowed" "$HOOK_STDERR"
+
+echo "v11 bad rigor enum (rigor: reviewed) → block, lists allowed set"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-bad-rigor.plan.md" "$(build_v11_plan rigor=reviewed)"
+assert_eq "v11_blocks_bad_rigor_enum exit 2" 2 "$HOOK_EXIT"
+assert_contains "v11_blocks_bad_rigor_enum lists allowed" "allowed" "$HOOK_STDERR"
+
+echo "v11 bad scale enum (scale: session) → block, lists allowed set"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-bad-scale.plan.md" "$(build_v11_plan scale=session)"
+assert_eq "v11_blocks_bad_scale_enum exit 2" 2 "$HOOK_EXIT"
+assert_contains "v11_blocks_bad_scale_enum lists allowed" "allowed" "$HOOK_STDERR"
+
+echo "v11 with mode: present (split-brain) → block, error names mode"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-mode.plan.md" "$(build_v11_plan mode=autonomous)"
+assert_eq "v11_blocks_mode_present exit 2" 2 "$HOOK_EXIT"
+assert_contains "v11_blocks_mode_present names mode" "mode" "$HOOK_STDERR"
+
+echo "v11 barred cell bugfix × epic → block"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-bugfix-epic.plan.md" "$(build_v11_plan intent=bugfix scale=epic)"
+assert_eq "v11_blocks_barred_bugfix_epic exit 2" 2 "$HOOK_EXIT"
+assert_contains "v11_blocks_barred_bugfix_epic says barred" "barred" "$HOOK_STDERR"
+
+echo "v11 barred cell spike × epic → block"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-spike-epic.plan.md" "$(build_v11_plan intent=spike scale=epic)"
+assert_eq "v11_blocks_barred_spike_epic exit 2" 2 "$HOOK_EXIT"
+assert_contains "v11_blocks_barred_spike_epic says barred" "barred" "$HOOK_STDERR"
+
+echo "v11 barred cell incident-response × epic → block"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-incident-epic.plan.md" "$(build_v11_plan intent=incident-response scale=epic)"
+assert_eq "v11_blocks_barred_incident_epic exit 2" 2 "$HOOK_EXIT"
+assert_contains "v11_blocks_barred_incident_epic says barred" "barred" "$HOOK_STDERR"
+
+echo "v11 missing a discriminator flag (surface_type) → block WITHOUT a mode gate"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-no-flag.plan.md" "$(build_v11_plan omit=surface_type)"
+assert_eq "v11_blocks_missing_flag exit 2" 2 "$HOOK_EXIT"
+assert_contains "v11_blocks_missing_flag names surface_type" "surface_type" "$HOOK_STDERR"
+
+echo "v11 missing model_plan → block, error names model_plan"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-no-mp.plan.md" "$(build_v11_plan omit=model_plan)"
+assert_eq "v11_blocks_missing_model_plan exit 2" 2 "$HOOK_EXIT"
+assert_contains "v11_blocks_missing_model_plan names model_plan" "model_plan" "$HOOK_STDERR"
+
+echo "v11 *.plan.md at sdlc-step 3 without matrix → block"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-no-matrix.plan.md" "$(build_v11_plan step=3 matrix=no)"
+assert_eq "v11_blocks_plan_step3_no_matrix exit 2" 2 "$HOOK_EXIT"
+assert_contains "v11_blocks_plan_step3_no_matrix names matrix" "Verification Matrix" "$HOOK_STDERR"
+
+echo "v11 *.spec.md at sdlc-step 2 without matrix → allow (matrix is plan-only, step >= 3)"
+run_write "$project/.bionic/docs/specs/epic-01-demo/v11-spec.spec.md" "$(build_v11_plan step=2 matrix=no)"
+assert_eq "v11_accepts_spec_step2_no_matrix exit 0" 0 "$HOOK_EXIT"
+
+echo "v11 CRLF plan with full valid triple → allow"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-crlf.plan.md" "$(to_crlf "$(build_v11_plan)")"
+assert_eq "v11_accepts_crlf_triple exit 0" 0 "$HOOK_EXIT"
+
+echo "v11 enum substring (intent: rebuild) → block (whole-value equality, not substring)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-substr.plan.md" "$(build_v11_plan intent=rebuild)"
+assert_eq "v11_blocks_enum_substring exit 2" 2 "$HOOK_EXIT"
+assert_contains "v11_blocks_enum_substring lists allowed" "allowed" "$HOOK_STDERR"
+
+echo "v10 grandfather: mode gate intact — autonomous v10 missing a flag still blocks"
+v10_auto_no_flag=$(build_versioned_plan 10 surface_type)
+run_write "$project/.bionic/docs/plans/epic-01-demo/v10-gf-block.plan.md" "$v10_auto_no_flag"
+assert_eq "v10_regression_mode_gate_intact (autonomous blocks) exit 2" 2 "$HOOK_EXIT"
+assert_contains "v10_regression_mode_gate_intact names surface_type" "surface_type" "$HOOK_STDERR"
+
+echo "v10 grandfather: mode gate intact — non-autonomous v10 skips flags (byte-identical path)"
+v10_nonauto_no_flags='---
+governing-skill: canonical-sdlc
+mode: spike
+sdlc-step: 3
+canonical_sdlc_version: 10
+---
+
+# Body (no flags, no matrix — mode gate short-circuits before either check)
+'
+run_write "$project/.bionic/docs/plans/epic-01-demo/v10-gf-skip.plan.md" "$v10_nonauto_no_flags"
+assert_eq "v10_regression_mode_gate_intact (non-autonomous skips) exit 0" 0 "$HOOK_EXIT"
+
+echo "unsupported canonical_sdlc_version: 12 → block (allowlist grew to exactly 11)"
+v12_unsupported='---
+governing-skill: canonical-sdlc
+mode: autonomous
+canonical_sdlc_version: 12
+---
+
+# Body
+'
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-unsupported.plan.md" "$v12_unsupported"
+assert_eq "unsupported_v12_still_blocks exit 2" 2 "$HOOK_EXIT"
 
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
