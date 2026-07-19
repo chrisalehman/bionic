@@ -277,6 +277,69 @@ if [ "$SDLC_VERSION" = "11" ]; then
         block "barred cell: $INTENT × epic (§Intent × scale validity)" ;;
     esac
   fi
+
+  # ---------- floor-consistency checks (LOG-ONLY; D14, spec R3) ----------
+  #
+  # Past the blocking gates above INTENT/RIGOR/SCALE are valid enums. These
+  # checks compute derivable rigor floors and record a finding when the
+  # declared rigor violates one. Findings NEVER block: each appends one line
+  # to <project>/.bionic/memory/sdlc-v11-audit.md AND echoes to stderr, then
+  # returns 0. Promotion to blocking is a separate later decision made from
+  # this data. Every new read path (config.yaml, epic plan, audit file) is
+  # fail-open. The evidence-gate hook carries a twin of log_finding (hook
+  # name differs); a shared hooks-lib extraction is deliberately deferred.
+  #
+  # Rigor ordering (normative): tested(0) < peer-reviewed(1) < audited(2).
+  rigor_rank() {
+    case "$1" in
+      tested) echo 0 ;;
+      peer-reviewed) echo 1 ;;
+      audited) echo 2 ;;
+      *) echo -1 ;;
+    esac
+  }
+  log_finding() {  # $1=check-id $2=detail — never blocks, always returns 0
+    local audit_dir="$PROJECT_ROOT_FROM_PATH/.bionic/memory"
+    local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) governing-skill $1: $2 ($FILE_PATH)"
+    mkdir -p "$audit_dir" 2>/dev/null \
+      && printf '%s\n' "$line" >> "$audit_dir/sdlc-v11-audit.md" 2>/dev/null
+    echo "canonical-sdlc v11 [$1]: $2" >&2
+    return 0
+  }
+
+  RR=$(rigor_rank "$RIGOR")
+  # Intent floor / spike cap (derivable from intent + rigor).
+  [ "$INTENT" = "incident-response" ] && [ "$RR" -lt 2 ] \
+    && log_finding intent-floor "incident-response floors at audited, declared $RIGOR"
+  [ "$INTENT" = "spike" ] && [ "$RR" -gt 0 ] \
+    && log_finding spike-cap "spike is capped at tested, declared $RIGOR"
+
+  # Project floor: rigor-floor: in <project>/.bionic/config.yaml (fail-open;
+  # an unparseable/invalid value is its own finding, never a block).
+  PF=$(grep -E '^rigor-floor:' "$PROJECT_ROOT_FROM_PATH/.bionic/config.yaml" 2>/dev/null \
+    | head -1 | sed 's/^rigor-floor:[[:space:]]*//' | sed 's/[[:space:]]*$//' | tr -d '\r')
+  if [ -n "$PF" ]; then
+    PR=$(rigor_rank "$PF")
+    if [ "$PR" -lt 0 ]; then
+      log_finding project-floor "invalid rigor-floor value '$PF' in config.yaml"
+    elif [ "$RR" -lt "$PR" ]; then
+      log_finding project-floor "project floor $PF, declared $RIGOR"
+    fi
+  fi
+
+  # Epic floor: rigor-floor: in the epic plan's frontmatter (first cross-file
+  # read in this hook — read-only, fail-open; missing/unreadable epic plan or
+  # missing key → no finding, floors are opt-in).
+  EPIC=$(yaml_get epic)
+  if [ -n "$EPIC" ] && [ -r "$DOCS_ROOT/plans/$EPIC/epic.plan.md" ]; then
+    EF=$(awk '/^---$/{n++;next} n==1' "$DOCS_ROOT/plans/$EPIC/epic.plan.md" \
+      | grep -E '^rigor-floor:' | head -1 | sed 's/^rigor-floor:[[:space:]]*//' | sed 's/[[:space:]]*$//' | tr -d '\r')
+    if [ -n "$EF" ]; then
+      ER=$(rigor_rank "$EF")
+      [ "$ER" -ge 0 ] && [ "$RR" -lt "$ER" ] \
+        && log_finding epic-floor "epic floor $EF (from $EPIC), declared $RIGOR"
+    fi
+  fi
 fi
 
 # v3–v10 schema: require all opt-in flags + discriminators only for

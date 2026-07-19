@@ -977,6 +977,114 @@ canonical_sdlc_version: 12
 run_write "$project/.bionic/docs/plans/epic-01-demo/v12-unsupported.plan.md" "$v12_unsupported"
 assert_eq "unsupported_v12_still_blocks exit 2" 2 "$HOOK_EXIT"
 
+# ============================================================
+# canonical_sdlc_version v11: floor-consistency checks (LOG-ONLY, D14)
+# ============================================================
+#
+# On every v11 artifact write the hook computes derivable rigor floors and
+# appends one line per violation to <project>/.bionic/memory/sdlc-v11-audit.md
+# AND echoes it to stderr, then exits 0 — findings NEVER block (R3/D14).
+# Floors: incident-response floors at audited; spike is capped at tested;
+# `rigor-floor:` in .bionic/config.yaml (invalid value = its own finding);
+# `rigor-floor:` in the epic plan's frontmatter (fail-open on missing plan).
+# Fixtures build temp project roots; audit writes land under the temp root
+# (the hook derives PROJECT_ROOT from the file path's .bionic walk-up), so
+# the real repo's .bionic/memory is never touched.
+
+AUDIT_REL=".bionic/memory/sdlc-v11-audit.md"
+read_audit() {
+  if [ -f "$1/$AUDIT_REL" ]; then cat "$1/$AUDIT_REL"; else echo ""; fi
+}
+
+echo "v11 intent-floor: incident-response + rigor tested → log intent-floor, exit 0"
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-incident-floor.plan.md" "$(build_v11_plan intent=incident-response rigor=tested)"
+assert_eq "v11_floor_incident_below_audited_logs exit 0" 0 "$HOOK_EXIT"
+assert_contains "v11_floor_incident stderr names intent-floor" "intent-floor" "$HOOK_STDERR"
+assert_contains "v11_floor_incident audit line names intent-floor" "intent-floor" "$(read_audit "$project")"
+assert_contains "v11_floor_incident audit line carries artifact path" "v11-incident-floor.plan.md" "$(read_audit "$project")"
+
+echo "v11 spike-cap: spike + rigor audited → log spike-cap, exit 0"
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-spike-cap.plan.md" "$(build_v11_plan intent=spike rigor=audited)"
+assert_eq "v11_floor_spike_above_tested_logs exit 0" 0 "$HOOK_EXIT"
+assert_contains "v11_floor_spike stderr names spike-cap" "spike-cap" "$HOOK_STDERR"
+assert_contains "v11_floor_spike audit names spike-cap" "spike-cap" "$(read_audit "$project")"
+
+echo "v11 project-floor: config rigor-floor audited + plan rigor tested → log project-floor"
+project=$(make_project)
+printf 'rigor-floor: audited\n' > "$project/.bionic/config.yaml"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-proj-floor.plan.md" "$(build_v11_plan intent=build rigor=tested)"
+assert_eq "v11_floor_project_violation_logs exit 0" 0 "$HOOK_EXIT"
+assert_contains "v11_floor_project stderr names project-floor" "project-floor" "$HOOK_STDERR"
+assert_contains "v11_floor_project audit names project-floor" "project-floor" "$(read_audit "$project")"
+
+echo "v11 project-floor satisfied: rigor audited meets floor → silent (no audit, no stderr)"
+project=$(make_project)
+printf 'rigor-floor: audited\n' > "$project/.bionic/config.yaml"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-proj-ok.plan.md" "$(build_v11_plan intent=build rigor=audited)"
+assert_eq "v11_floor_project_satisfied_silent exit 0" 0 "$HOOK_EXIT"
+assert_eq "v11_floor_project_satisfied_silent no audit file" "" "$(read_audit "$project")"
+assert_eq "v11_floor_project_satisfied_silent empty stderr" "" "$HOOK_STDERR"
+
+echo "v11 project-floor invalid value: rigor-floor: extreme → invalid-value finding, exit 0"
+project=$(make_project)
+printf 'rigor-floor: extreme\n' > "$project/.bionic/config.yaml"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-proj-invalid.plan.md" "$(build_v11_plan intent=build rigor=audited)"
+assert_eq "v11_floor_project_invalid_value_logs exit 0" 0 "$HOOK_EXIT"
+assert_contains "v11_floor_project_invalid stderr names project-floor" "project-floor" "$HOOK_STDERR"
+assert_contains "v11_floor_project_invalid audit says invalid" "invalid rigor-floor" "$(read_audit "$project")"
+
+echo "v11 epic-floor: epic.plan.md rigor-floor audited + plan rigor tested → log epic-floor"
+project=$(make_project)
+cat > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md" <<'EOF'
+---
+governing-skill: canonical-sdlc
+canonical_sdlc_version: 11
+rigor-floor: audited
+---
+
+# Epic
+EOF
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-epic-floor.plan.md" "$(build_v11_plan intent=build rigor=tested)"
+assert_eq "v11_floor_epic_violation_logs exit 0" 0 "$HOOK_EXIT"
+assert_contains "v11_floor_epic stderr names epic-floor" "epic-floor" "$HOOK_STDERR"
+assert_contains "v11_floor_epic audit names epic-floor" "epic-floor" "$(read_audit "$project")"
+
+echo "v11 epic-floor: epic names a plan that doesn't exist → silent (fail-open)"
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-epic-missing.plan.md" "$(build_v11_plan intent=build rigor=tested)"
+assert_eq "v11_floor_epic_plan_missing_silent exit 0" 0 "$HOOK_EXIT"
+assert_eq "v11_floor_epic_plan_missing_silent no audit file" "" "$(read_audit "$project")"
+
+echo "v11 audit file + parent dir created on first finding"
+project=$(make_project)
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-audit-create.plan.md" "$(build_v11_plan intent=spike rigor=audited)"
+assert_eq "v11_floor_audit_file_created exit 0" 0 "$HOOK_EXIT"
+if [ -f "$project/$AUDIT_REL" ]; then
+  PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  v11_floor_audit_file_created (file + dir created)\n'
+else
+  FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  v11_floor_audit_file_created (file missing)\n'
+fi
+
+echo "v11 all-violations fixture (intent + project + epic floors) → still exit 0, all three logged"
+project=$(make_project)
+printf 'rigor-floor: audited\n' > "$project/.bionic/config.yaml"
+cat > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md" <<'EOF'
+---
+governing-skill: canonical-sdlc
+canonical_sdlc_version: 11
+rigor-floor: audited
+---
+
+# Epic
+EOF
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-all-violations.plan.md" "$(build_v11_plan intent=incident-response rigor=tested)"
+assert_eq "v11_floor_never_blocks exit 0" 0 "$HOOK_EXIT"
+assert_contains "v11_floor_never_blocks logs intent-floor" "intent-floor" "$(read_audit "$project")"
+assert_contains "v11_floor_never_blocks logs project-floor" "project-floor" "$(read_audit "$project")"
+assert_contains "v11_floor_never_blocks logs epic-floor" "epic-floor" "$(read_audit "$project")"
+
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then
