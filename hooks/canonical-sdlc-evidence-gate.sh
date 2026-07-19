@@ -167,6 +167,7 @@ DEPLOY_TARGET=$(frontmatter_get deploy_target)
 SDLC_VERSION=$(frontmatter_get canonical_sdlc_version)
 USE_WORKTREE=$(frontmatter_get use_worktree)
 SCALE=$(frontmatter_get scale)
+INTENT=$(frontmatter_get intent)
 
 # Whole-value placeholder test: trim leading/trailing whitespace, lowercase,
 # then require whole-value EQUALITY against the known token set. A token that
@@ -961,6 +962,36 @@ validate_merge_target() {
   return 0
 }
 
+# v11 intent-scoped Step-5 evidence keys (R7) — LOG-ONLY (D14; check-ids
+# `refactor-evidence`, `tune-evidence`). Fires only on v11 plans whose
+# declared intent carries a conditional key set; never blocks. Reuses the
+# Step-5 BLOCK/block_has/block_get accessors already populated for the
+# current step's evidence (same accessors validate_verify_step_v10 uses),
+# so this validator is only meaningful when called at current: 5.
+validate_intent_evidence() {
+  local key
+  case "$INTENT" in
+    refactor)
+      if ! block_has behavior-preservation || [ -z "$(block_get behavior-preservation)" ]; then
+        log_finding refactor-evidence "v11 refactor plan Step 5 missing 'behavior-preservation:' evidence"
+      fi
+      for key in compat-matrix revert-plan; do
+        if block_has "$key" && [ -z "$(block_get "$key")" ]; then
+          log_finding refactor-evidence "v11 refactor plan Step 5 '${key}:' present but empty"
+        fi
+      done
+      ;;
+    tune)
+      for key in baseline target re-measure; do
+        if ! block_has "$key" || [ -z "$(block_get "$key")" ]; then
+          log_finding tune-evidence "v11 tune plan Step 5 missing '${key}:' evidence"
+        fi
+      done
+      ;;
+  esac
+  return 0
+}
+
 dispatch_modern() {
   local label="$1" ext_step="" integrate_step ship_step
   case "$label" in
@@ -988,6 +1019,9 @@ dispatch_modern() {
         validate_verify_step_v10
       else
         validate_verify_step "$label"
+      fi
+      if [ "$label" = "v11" ]; then
+        validate_intent_evidence
       fi
       ;;
     7) validate_document_step "$label" 7 ;;
