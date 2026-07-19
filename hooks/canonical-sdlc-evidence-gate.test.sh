@@ -3198,6 +3198,63 @@ write_plan "$h20f" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_complete")" > /d
 expect_no_audit_write "v11 20f v10 plan (no intent:) → allow, no audit write (grandfather)" \
   "$h20f" 'git commit -m "x"'
 
+# --- 20g/20h: R7 keys are truly log-only (critic Issue 1) ------------------
+#
+# The universal placeholder ban (the whole-Step-block scan a few hundred
+# lines up) used to scan these six v11-intent-scoped keys too, so a
+# placeholder R7 value BLOCKED the commit — contradicting the ratified
+# log-only contract. R7 keys are exempted from that ban on v11 plans only
+# (version-gated: v≤10 plans still block on a stray placeholder R7-named
+# line — see 20i); validate_intent_evidence itself now treats a placeholder
+# value the same as missing/empty, so the finding still fires.
+
+# 20g — refactor plan, behavior-preservation: TODO (placeholder value, not
+# missing) → exit 0 + refactor-evidence finding + audit line (was BLOCKED).
+h20g=$(make_home)
+write_plan "$h20g" "$(v20_wave_plan refactor 5 "$v10_step5_base
+  behavior-preservation: TODO" "$v10_matrix_complete")" > /dev/null
+expect_finding "v11 20g refactor behavior-preservation: TODO → allow + refactor-evidence finding" \
+  "$h20g" 'git commit -m "x"' "canonical-sdlc v11 \[refactor-evidence\]"
+h20g2=$(make_home)
+write_plan "$h20g2" "$(v20_wave_plan refactor 5 "$v10_step5_base
+  behavior-preservation: TODO" "$v10_matrix_complete")" > /dev/null
+expect_audit_line "v11 20g2 refactor behavior-preservation: TODO → audit file line" \
+  "$h20g2" 'git commit -m "x"' "evidence-gate refactor-evidence:"
+
+# 20h — tune plan, baseline: tbd (placeholder), target/re-measure valid →
+# exit 0 + exactly ONE tune-evidence finding (not three — the other two
+# keys are present and non-placeholder).
+h20h=$(make_home)
+write_plan "$h20h" "$(v20_wave_plan tune 5 "$v10_step5_base
+  baseline: tbd
+  target: p95 <= 200ms
+  re-measure: p95 190ms @def" "$v10_matrix_complete")" > /dev/null
+expect_finding_count "v11 20h tune baseline: tbd (rest valid) → exactly 1 tune-evidence finding" \
+  "$h20h" 'git commit -m "x"' "tune-evidence" 1
+
+# --- 20i: NAMED grandfather regression (version-gated exemption) -----------
+#
+# A v10 plan (no `intent:`) with a stray `baseline: TODO` line in its Step-5
+# block must STILL block — the R7 exemption from the universal ban is
+# version-gated to v11 only. Byte-identical to pre-R7 behavior.
+h20i=$(make_home)
+write_plan "$h20i" "$(v10_plan 5 "$v10_step5_base
+  baseline: TODO" "$v10_matrix_complete")" > /dev/null
+expect_block "v11 20i v10 plan stray 'baseline: TODO' → still BLOCKED (grandfather, version-gated)" \
+  "$h20i" 'git commit -m "x"' "is a placeholder"
+
+# --- 20j: NAMED regression — n/a is not a placeholder on the new path ------
+#
+# v11 refactor plan with compat-matrix: n/a: not a migration must stay
+# clean — "n/a: <reason>" is explicit non-applicability, not a placeholder
+# token, so neither the ban-loop exemption path nor validate_intent_evidence's
+# placeholder-aware check may flag it.
+h20j=$(make_home)
+write_plan "$h20j" "$(v20_wave_plan refactor 5 "$v20_refactor_body_ok
+  compat-matrix: n/a: not a migration" "$v10_matrix_complete")" > /dev/null
+expect_allow "v11 20j refactor compat-matrix: n/a: not a migration → allow, no finding" \
+  "$h20j" 'git commit -m "x"'
+
 # ============================================================
 # Section 21: audit dir follows the plan's project (strategy alignment)
 # ============================================================
