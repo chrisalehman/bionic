@@ -360,12 +360,30 @@ if [ -z "$BLOCK_STRIPPED" ]; then
   exit 2
 fi
 
+# R7 intent-scoped Step-5 keys (v11, D14 log-only — see validate_intent_evidence
+# below). A whole-value match against this exact key name exempts the line
+# from the universal placeholder ban ONLY on v11 plans; the R7 contract is
+# enforced instead by validate_intent_evidence, which logs a finding but never
+# blocks. v≤10 plans are never exempted (grandfathered) — a stray line that
+# happens to share one of these key names still blocks there, byte-identical
+# to pre-R7 behavior.
+is_r7_key() {
+  case "$1" in
+    behavior-preservation|compat-matrix|revert-plan|baseline|target|re-measure) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Placeholder detection. Each line of the block is checked as a whole value:
 # the text after the first ':' on a "key: value" continuation line, or the
 # whole line when it has no colon (the single-line "Step N: <value>" case,
 # which arrives here as RAW_VALUE). ${_bline#*:} yields the after-colon text
 # on colon lines and the unchanged line otherwise.
 while IFS= read -r _bline; do
+  _bkey=$(printf '%s' "$_bline" | sed -E 's/^[[:space:]]*//; s/[[:space:]]*:.*$//')
+  if [ "$SDLC_VERSION" = "11" ] && is_r7_key "$_bkey"; then
+    continue
+  fi
   if is_placeholder_value "${_bline#*:}"; then
     echo "BLOCKED: canonical-sdlc step ${CURRENT} evidence line is a placeholder (\"${BLOCK}\")." >&2
     echo "Plan: $PLAN" >&2
@@ -985,21 +1003,26 @@ validate_merge_target() {
 # current step's evidence (same accessors validate_verify_step_v10 uses),
 # so this validator is only meaningful when called at current: 5.
 validate_intent_evidence() {
-  local key
+  local key val
   case "$INTENT" in
     refactor)
-      if ! block_has behavior-preservation || [ -z "$(block_get behavior-preservation)" ]; then
+      if ! block_has behavior-preservation || [ -z "$(block_get behavior-preservation)" ] \
+         || is_placeholder_value "$(block_get behavior-preservation)"; then
         log_finding refactor-evidence "v11 refactor plan Step 5 missing 'behavior-preservation:' evidence"
       fi
       for key in compat-matrix revert-plan; do
-        if block_has "$key" && [ -z "$(block_get "$key")" ]; then
-          log_finding refactor-evidence "v11 refactor plan Step 5 '${key}:' present but empty"
+        if block_has "$key"; then
+          val=$(block_get "$key")
+          if [ -z "$val" ] || is_placeholder_value "$val"; then
+            log_finding refactor-evidence "v11 refactor plan Step 5 '${key}:' present but empty"
+          fi
         fi
       done
       ;;
     tune)
       for key in baseline target re-measure; do
-        if ! block_has "$key" || [ -z "$(block_get "$key")" ]; then
+        val=$(block_get "$key")
+        if ! block_has "$key" || [ -z "$val" ] || is_placeholder_value "$val"; then
           log_finding tune-evidence "v11 tune plan Step 5 missing '${key}:' evidence"
         fi
       done
