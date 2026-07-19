@@ -2271,13 +2271,45 @@ expect_block "v10 17d T3 contact: n/a, no waiver → block (Waiver Protocol)" \
 # 17d-case — the live-tier n/a ban must be case-insensitive: 'N/A' and
 # 'N/a: <reason>' are the same self-written downgrade as lowercase 'n/a'
 # (review-gate finding: a single capital letter must not defeat the ban).
+# The variants are written as full literal matrices rather than derived from
+# v10_matrix_live_na via ${var/pat/rep}: a slash in the contact value forces
+# an escaped slash in the pattern, and bash 3.2 leaves that backslash in the
+# replacement (producing 'contact: N\/A'), so the variant is never built.
+v10_matrix_live_na_upper="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  tier-run: https://app.example/panel — opened the panel
+  fresh: origin A rebuilt token-9f3a
+  cold-client: fresh incognito profile
+  contact: N/A
+  readback: panel.visible === true via page eval"
 h17d2=$(make_home)
-write_plan "$h17d2" "$(v10_plan 5 "$v10_step5_base" "${v10_matrix_live_na/contact: n\/a: not reachable quickly/contact: N\/A}")" > /dev/null
+write_plan "$h17d2" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_live_na_upper")" > /dev/null
 expect_block "v10 17d T3 contact: N/A (uppercase), no waiver → block" \
   "$h17d2" 'git commit -m "x"' "Waiver Protocol"
 
+v10_matrix_live_na_mixed="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  tier-run: https://app.example/panel — opened the panel
+  fresh: origin A rebuilt token-9f3a
+  cold-client: fresh incognito profile
+  contact: N/a: not reachable quickly
+  readback: panel.visible === true via page eval"
 h17d3=$(make_home)
-write_plan "$h17d3" "$(v10_plan 5 "$v10_step5_base" "${v10_matrix_live_na/contact: n\/a: not reachable quickly/contact: N\/a: not reachable quickly}")" > /dev/null
+write_plan "$h17d3" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_live_na_mixed")" > /dev/null
 expect_block "v10 17d T3 contact: N/a: <reason> (mixed case), no waiver → block" \
   "$h17d3" 'git commit -m "x"' "Waiver Protocol"
 
