@@ -2986,6 +2986,55 @@ write_plan "$h19q" "$v11_fenced_only_sdlcstate" > /dev/null
 expect_allow "v11 19q fenced-only ## SDLC State (no real section) → pass through as non-canonical" \
   "$h19q" 'git commit -m "x"'
 
+# --- fence-aware epic-plan read in merge-target (review fix) --------------
+
+# An epic project whose epic.plan.md documents a `## SDLC State` example in a
+# fenced ``` block (bogus integration-branch: fenced-decoy) BEFORE its real
+# section (integration-branch: $1). Fence-blind, the cross-file read picks the
+# decoy (head -1) and mis-reports the merge target.
+make_epic_project_fenced() {
+  local branch="$1" proj
+  proj=$(make_project)
+  mkdir -p "$proj/.bionic/docs/plans/epic-fix"
+  cat > "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" <<EOF
+---
+canonical_sdlc_version: 11
+intent: build
+rigor: audited
+scale: epic
+---
+# Epic plan
+
+The epic's state block looks like this:
+
+\`\`\`
+## SDLC State
+integration-branch: fenced-decoy
+current: 1
+\`\`\`
+
+## SDLC State
+integration-branch: ${branch}
+current: 1
+EOF
+  touch -t 202001010000 "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" 2>/dev/null || \
+    touch -d "2020-01-01" "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" 2>/dev/null || true
+  echo "$proj"
+}
+
+# 19r — the merge-target epic-plan read must be fence-aware, like every other
+# SDLC-State extraction this wave. The wave plan's integration-branch matches
+# the epic's REAL value (epic/07-x); the fenced decoy (fenced-decoy) must be
+# ignored → silent (no finding). Before the fix the fence-blind awk read the
+# decoy first (head -1) → mismatch → spurious merge-target finding. Log-only
+# blast radius, but the exact defect class this wave eliminated everywhere else.
+h19r=$(make_home); p19r=$(make_epic_project_fenced "epic/07-x")
+write_project_plan "$p19r" \
+  "$(v11_wave_epic_plan 8 "$v11_integrate_body" "$v10_matrix_complete" epic-fix "epic/07-x")" \
+  "wave-newest.plan.md" > /dev/null
+expect_allow_both "v11 19r fenced ## SDLC State in epic plan → merge-target reads real section (silent)" \
+  "$h19r" "$p19r" 'git commit -m "x"'
+
 # ============================================================
 # Summary
 # ============================================================
