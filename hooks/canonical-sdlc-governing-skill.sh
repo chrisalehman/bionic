@@ -227,18 +227,67 @@ fi
 # here). v4/v5/v6/v7/v8/v9/v10 share v4's flag contract unchanged. v3
 # plans keep the prior contract so in-flight plans authored before v4
 # are not retroactively broken.
-if [ "$SDLC_VERSION" != "3" ] && [ "$SDLC_VERSION" != "4" ] && [ "$SDLC_VERSION" != "5" ] && [ "$SDLC_VERSION" != "6" ] && [ "$SDLC_VERSION" != "7" ] && [ "$SDLC_VERSION" != "8" ] && [ "$SDLC_VERSION" != "9" ] && [ "$SDLC_VERSION" != "10" ]; then
+if [ "$SDLC_VERSION" != "3" ] && [ "$SDLC_VERSION" != "4" ] && [ "$SDLC_VERSION" != "5" ] && [ "$SDLC_VERSION" != "6" ] && [ "$SDLC_VERSION" != "7" ] && [ "$SDLC_VERSION" != "8" ] && [ "$SDLC_VERSION" != "9" ] && [ "$SDLC_VERSION" != "10" ] && [ "$SDLC_VERSION" != "11" ]; then
   echo "BLOCKED: canonical-sdlc artifact '$BASENAME' has unsupported canonical_sdlc_version: '$SDLC_VERSION'." >&2
   echo "Path: $FILE_PATH" >&2
-  echo "Fix: set 'canonical_sdlc_version: 10' (current), '9'/'8'/'7'/'6'/'5'/'4'/'3' (prior, still enforced), or '1'/'2' for legacy plans." >&2
+  echo "Fix: set 'canonical_sdlc_version: 11' (current), '10'/'9'/'8'/'7'/'6'/'5'/'4'/'3' (prior, still enforced), or '1'/'2' for legacy plans." >&2
   exit 2
 fi
 
-# v3/v4 schema: require all opt-in flags + discriminators only for autonomous
-# mode. Other modes (epic-scope, incident-response, design-refresh, spike)
-# have different rule sets and are out of scope for enforcement.
+# ---------- v11: intent × rigor × scale triple + universal contract ----------
+#
+# v11 re-keys governance off the legacy `mode:` axis onto the triple
+# (intent × rigor × scale). Presence + whole-value enum validation is
+# blocking; CONTENT is already CR-stripped (line 143), so whole-line
+# yaml_get reads compare cleanly under CRLF too (epic-05). Being a v11
+# artifact — not a `mode: autonomous` gate — is what makes the flag /
+# model_plan / matrix contract below apply (D13); the mode-gate short
+# circuit further down is bypassed for v11 accordingly.
+if [ "$SDLC_VERSION" = "11" ]; then
+  # Local block helper for this arm — same BLOCKED:/Path: stderr shape as
+  # the inline v≤10 blocks above, hoisted to avoid repeating it eight
+  # times. Scoped to the v11 path; v≤10 output is untouched.
+  block() {
+    echo "BLOCKED: canonical-sdlc v11 artifact '$BASENAME': $1" >&2
+    echo "Path: $FILE_PATH" >&2
+    exit 2
+  }
+  # Split-brain guard: a v11 artifact declares the triple, never mode.
+  [ -z "$(yaml_get mode)" ] || block "v11 artifacts declare intent:/rigor:/scale:, never mode:"
+  INTENT=$(yaml_get intent); RIGOR=$(yaml_get rigor); SCALE=$(yaml_get scale)
+  [ -n "$INTENT" ] || block "v11 requires intent: (build|bugfix|refactor|tune|spike|incident-response)"
+  [ -n "$RIGOR" ]  || block "v11 requires rigor: (tested|peer-reviewed|audited)"
+  [ -n "$SCALE" ]  || block "v11 requires scale: (task|wave|epic)"
+  case "$INTENT" in
+    build|bugfix|refactor|tune|spike|incident-response) ;;
+    *) block "invalid intent: '$INTENT' — allowed: build|bugfix|refactor|tune|spike|incident-response" ;;
+  esac
+  case "$RIGOR" in
+    tested|peer-reviewed|audited) ;;
+    *) block "invalid rigor: '$RIGOR' — allowed: tested|peer-reviewed|audited" ;;
+  esac
+  case "$SCALE" in
+    task|wave|epic) ;;
+    *) block "invalid scale: '$SCALE' — allowed: task|wave|epic" ;;
+  esac
+  # Intent × scale validity: barred cells derivable from the two enums.
+  if [ "$SCALE" = "epic" ]; then
+    case "$INTENT" in
+      bugfix|spike|incident-response)
+        block "barred cell: $INTENT × epic (§Intent × scale validity)" ;;
+    esac
+  fi
+fi
+
+# v3–v10 schema: require all opt-in flags + discriminators only for
+# autonomous mode. Other modes (epic-scope, incident-response,
+# design-refresh, spike) have different rule sets and are out of scope for
+# enforcement. v11 has no mode axis — its triple's presence is the gate
+# (D13), so v11 enters the flag/model_plan/matrix contract below WITHOUT
+# consulting this short circuit (the `!= 11` clause keeps v≤10 behavior
+# byte-identical).
 MODE=$(yaml_get mode)
-if [ "$MODE" != "autonomous" ]; then
+if [ "$SDLC_VERSION" != "11" ] && [ "$MODE" != "autonomous" ]; then
   exit 0
 fi
 
@@ -256,7 +305,7 @@ done
 # Step-0 model-tier decision). Checked as a separate conditional grep — NOT
 # an array element — to stay safe under `set -u` with bash 3.2's empty-array
 # expansion behaviour. v3 plans skip this and keep the prior contract.
-if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ] || [ "$SDLC_VERSION" = "6" ] || [ "$SDLC_VERSION" = "7" ] || [ "$SDLC_VERSION" = "8" ] || [ "$SDLC_VERSION" = "9" ] || [ "$SDLC_VERSION" = "10" ]; then
+if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ] || [ "$SDLC_VERSION" = "6" ] || [ "$SDLC_VERSION" = "7" ] || [ "$SDLC_VERSION" = "8" ] || [ "$SDLC_VERSION" = "9" ] || [ "$SDLC_VERSION" = "10" ] || [ "$SDLC_VERSION" = "11" ]; then
   if ! echo "$FRONTMATTER" | grep -qE "^[[:space:]]*model_plan[[:space:]]*:"; then
     MISSING+=("model_plan")
   fi
@@ -268,7 +317,7 @@ if [ "${#MISSING[@]}" -gt 0 ]; then
   echo "Fix: run Step 0 (Configure) to set these explicitly. See SKILL.md §Step 0." >&2
   echo "Required opt-in flags:        ${REQUIRED_V3_OPT_IN[*]}" >&2
   echo "Required discriminator flags: ${REQUIRED_DISCRIMINATORS[*]}" >&2
-  if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ] || [ "$SDLC_VERSION" = "6" ] || [ "$SDLC_VERSION" = "7" ] || [ "$SDLC_VERSION" = "8" ] || [ "$SDLC_VERSION" = "9" ] || [ "$SDLC_VERSION" = "10" ]; then
+  if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ] || [ "$SDLC_VERSION" = "6" ] || [ "$SDLC_VERSION" = "7" ] || [ "$SDLC_VERSION" = "8" ] || [ "$SDLC_VERSION" = "9" ] || [ "$SDLC_VERSION" = "10" ] || [ "$SDLC_VERSION" = "11" ]; then
     echo "Required for v${SDLC_VERSION} (added):      model_plan" >&2
   fi
   exit 2
@@ -284,11 +333,12 @@ fi
 # CONFIRMED/waived auditor discipline (structure vs substance split
 # mirrors the model_plan / flag checks above).
 #
-# Scope: v10, mode: autonomous, basename *.plan.md, sdlc-step >= 3
-# (numeric). Specs, non-autonomous modes, continuation*.md, and earlier
-# schema versions are out of scope — the matrix is a plan-body artifact
-# that exists starting at Step 3 (Plan) approval.
-if [ "$SDLC_VERSION" = "10" ] && [ "$MODE" = "autonomous" ]; then
+# Scope: v10 mode: autonomous OR any v11 (v11 has no mode gate — its
+# triple's presence is the gate, D13), basename *.plan.md, sdlc-step >= 3
+# (numeric). Specs, non-autonomous v10 modes, continuation*.md, and
+# earlier schema versions are out of scope — the matrix is a plan-body
+# artifact that exists starting at Step 3 (Plan) approval.
+if { [ "$SDLC_VERSION" = "10" ] && [ "$MODE" = "autonomous" ]; } || [ "$SDLC_VERSION" = "11" ]; then
   case "$BASENAME" in
     *.plan.md)
       SDLC_STEP=$(yaml_get sdlc-step)
@@ -297,7 +347,11 @@ if [ "$SDLC_VERSION" = "10" ] && [ "$MODE" = "autonomous" ]; then
         *)
           if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null; then
             if ! echo "$CONTENT" | grep -qE '^## Verification Matrix'; then
-              echo "BLOCKED: canonical-sdlc v10 autonomous plan '$BASENAME' (sdlc-step ${SDLC_STEP}) is missing a '## Verification Matrix' section." >&2
+              if [ "$SDLC_VERSION" = "11" ]; then
+                echo "BLOCKED: canonical-sdlc v11 plan '$BASENAME' (sdlc-step ${SDLC_STEP}) is missing a '## Verification Matrix' section." >&2
+              else
+                echo "BLOCKED: canonical-sdlc v10 autonomous plan '$BASENAME' (sdlc-step ${SDLC_STEP}) is missing a '## Verification Matrix' section." >&2
+              fi
               echo "Path: $FILE_PATH" >&2
               echo "Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix') and lock it at Step 3 approval, or if this wave is reopened, use the Step 5–9 upgrade path in §Versioning." >&2
               exit 2
