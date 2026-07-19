@@ -2910,6 +2910,64 @@ Step 6: .bionic/docs/plans/wave.plan.md#step-6" > /dev/null
 expect_allow "v11 19n v9 pointer step untouched (named v≤10 regression)" \
   "$h19n" 'git commit -m "x"'
 
+# --- fence-aware SDLC-State extraction (blocking-grade correctness) -------
+
+# A fenced ``` example containing a `## SDLC State` heading + `current: T2`
+# line — the D12 task-scale schema as it appears in a plan's PROSE. Single-
+# quoted so the triple backticks stay literal (no command substitution).
+v11_fenced_sdlcstate_shadow='```
+## SDLC State
+current: T2
+
+- T1: <evidence>
+- T2: <evidence>
+```'
+
+# 19o — the SDLC-State extraction must be fence-aware, like matrix_section.
+# A v10 plan whose body documents the task-scale schema in a fenced block
+# BEFORE the real section must validate against the REAL `## SDLC State`
+# (current: 5 + complete matrix), not the shadowed `current: T2`. Before the
+# fix the fence-blind awk captured the fenced `current: T2` first →
+# CURRENT=T2 → non-numeric → false block. Same defect class the matrix parser
+# fixed (fence-blind row parsing). This fix removes false blocks, adds none.
+h19o=$(make_home)
+write_plan "$h19o" "$(v10_frontmatter true)
+
+Doc note — the task-scale ledger schema (D12) looks like:
+
+$v11_fenced_sdlcstate_shadow
+
+## SDLC State
+current: 5
+Step 5:
+$v10_step5_base
+
+$v10_matrix_complete" > /dev/null
+expect_allow "v11 19o fenced ## SDLC State shadow before real section → validates real section (allow)" \
+  "$h19o" 'git commit -m "x"'
+
+# 19p — the `## Tasks` extraction is fence-aware from the start: a fenced ```
+# example carrying a bogus-status row before the REAL ## Tasks table must not
+# raise a false task-ledger finding (the real ledger is valid). Fence-blind,
+# both tables' rows would be read and the T9 `doing` row would log a finding.
+v11_fenced_tasks_shadow='```
+## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T9 | bugfix | tested | example row | doing |
+```'
+h19p=$(make_home)
+write_plan "$h19p" "$(v11_frontmatter task)
+
+Example ledger:
+
+$v11_fenced_tasks_shadow
+
+$v11_ledger_valid" > /dev/null
+expect_allow "v11 19p fenced ## Tasks example before real table → no false finding (fence-aware)" \
+  "$h19p" 'git commit -m "x"'
+
 # ============================================================
 # Summary
 # ============================================================

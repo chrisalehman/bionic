@@ -235,8 +235,18 @@ validate_task_ledger() {
 
 # Extract the ## SDLC State section (from its header up to the next ##
 # header or EOF). \r stripped here too, for the same CRLF reason as
-# FRONTMATTER above.
-SECTION=$(tr -d '\r' < "$PLAN" | awk '/^## SDLC State/{flag=1; next} /^## /{flag=0} flag')
+# FRONTMATTER above. Fence-aware (same idiom as matrix_section): lines inside
+# ``` fenced code blocks are skipped, so a plan documenting the D12 task-scale
+# schema in a fenced example — a `## SDLC State` heading with `current: T<n>` —
+# does not shadow the REAL section (which would mis-parse `current:` and false-
+# block). Fence state is tracked across the whole file so section detection
+# stays fence-aware.
+SECTION=$(tr -d '\r' < "$PLAN" | awk '
+  /^[[:space:]]*```/ { fence = !fence; next }
+  fence { next }
+  /^## SDLC State/ { flag=1; next }
+  /^## / { flag=0 }
+  flag')
 
 if [ -z "$SECTION" ]; then
   echo "BLOCKED: canonical-sdlc plan file has an empty '## SDLC State' section." >&2
