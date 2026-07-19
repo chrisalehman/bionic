@@ -100,6 +100,8 @@ If the triple is not yet declared, announce that it is pending and enumerate the
 
 No other work proceeds until the triple is declared. (Step 0 infers the triple silently and presents it for confirmation — declaration is normally a `confirm`, not a from-scratch answer; see Step 0.)
 
+**Bare help invocation.** When the skill is invoked with the single argument `help`, render the quick-reference card (§Step 0) and stop — no run starts, no triple is inferred, nothing is written.
+
 ## Taxonomy
 
 | Tier | Word | Definition |
@@ -671,6 +673,7 @@ Mandatory for new plans (`canonical_sdlc_version: 11`, current). `3`–`10` are 
 
    Reply "confirm" to accept, or specify overrides:
      e.g. "set use_worktree=true, set exec-standard=opus, set verify(AC-2)=T2, then confirm"
+     Reply "explain" (or "explain <axis>") for a plain-language guide to these choices.
    ```
 
 6. **Block until explicit confirmation.** No timeout, no implicit acceptance.
@@ -686,6 +689,7 @@ Mandatory for new plans (`canonical_sdlc_version: 11`, current). `3`–`10` are 
 
 ```
 reply        := overrides? "confirm"
+              | "explain" axis?
 overrides    := override ("," override)* ","?
 override     := "set" axis "=" axis-value
               | "set" flag "=" value
@@ -699,6 +703,46 @@ scale-value  := "task" | "wave" | "epic"
 ```
 
 Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`; `set integration-branch=develop, confirm`. **Triple override:** `set intent=refactor, set rigor=audited, confirm` reclassifies the run before Step 1; `set scale=epic, confirm` switches to epic-scoping. **Floors are upward-only — a rigor override BELOW a derivable floor is rejected at Step 0** (e.g. `set rigor=tested` on `incident-response`, whose intent floor is `audited`, or on any security/privacy-flagged work): warn, name the binding floor, and keep the floor value. An upward rigor override (`set rigor=audited` on a `build`) is always accepted. An override that names a **barred** intent × scale cell (§Intent × scale validity) is rejected with the reason. **Matrix tier override:** `set verify(AC-B2.1)=T2, confirm` retiers a matrix row before lock. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set exec-standard=opus, confirm` (route standard slices to opus too — equivalent to disabling complexity routing); `set exec-complex=sonnet, confirm` (accepted but discouraged; warn before applying); `set execution=opus-only, confirm` (shorthand for `exec-standard=opus`); `set main_model=sonnet, confirm` (multi_agent=false dial-down).
+
+**Explain.** A reply of `explain` (optionally `explain intent` / `explain rigor` / `explain scale`) renders the quick-reference card below — full card, or the named axis's section plus the floors line — then re-presents the reply prompt. It never modifies state and never counts as confirmation. A free-text reply that asks a question about the display ("what does audited mean?") is treated as `explain <topic>`, never as a DSL parse error.
+
+#### The quick-reference card (explain / help)
+
+Canonical card — rendered verbatim by `explain` and by a bare `help` invocation; content mirrors the axis tables and must be updated with them.
+
+```
+── canonical-sdlc quick reference ──
+
+Reply "confirm" to accept the inferred triple, or override any axis first
+(examples at the bottom). One value per axis:
+
+intent — what kind of work is this?
+  build              new capability, or capability restored by adding new machinery
+  bugfix             restore intended behavior within the existing design
+  refactor           change structure, preserve behavior (upgrades, migrations, removals)
+  tune               move a NAMED measurement toward a target (latency, size, a UX score)
+  spike              timeboxed research or prototype — ships no code; the writeup is the deliverable
+  incident-response  a live deployed surface is broken for its users; the clock matters
+
+rigor — how hard should the evidence try to lie? (each tier includes the ones below)
+  tested         TDD on every change + the Verification Matrix + structured self-review
+  peer-reviewed  adds a separate spec + an independent auditor who tries to falsify your evidence
+  audited        adds an independent adversarial critic who tries to break the code itself
+
+scale — how much work?
+  task   sub-session unit, several per session — ledger line, no per-task plan file
+  wave   one session (the default)
+  epic   multi-session — scoping run only (Steps 0–3), carves the work into waves
+
+Floors push rigor UP, never down: incident-response and security/privacy-touching
+work floor at audited; a project or epic can declare its own rigor-floor. spike is
+capped at tested (it ships no code).
+
+Override examples:
+  set intent=refactor, confirm
+  set rigor=audited, set scale=task, confirm
+  set verify(AC-2)=T2, confirm
+```
 
 On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 11` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`), and the `intent:`/`rigor:`/`scale:` triple. The confirmed `integration-branch` and the derived `## Verification Matrix` are carried forward: when the plan file is written at Step 3, its `## SDLC State` section opens with the Step-0-confirmed `integration-branch: <name>` line, and the plan body carries the locked `## Verification Matrix` section. For v4 and later plans the governing-skill hook **requires** `model_plan`; for v10 and v11 it additionally requires the `## Verification Matrix` section at `sdlc-step ≥ 3` — a missing value blocks the write (exit 2).
 
