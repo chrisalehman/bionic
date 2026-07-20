@@ -357,6 +357,12 @@ fi
 # consulting this short circuit (the `!= 11` clause keeps v≤10 behavior
 # byte-identical).
 MODE=$(yaml_get mode)
+# Read SCALE unconditionally here (mirrors MODE) so it is bound on every path
+# under `set -u`. The v11 arm re-reads it for its own triple validation; v10
+# plans have no scale: field, so SCALE is "" and the matrix block treats them
+# as before. Without this, the matrix block's `[ "$SCALE" != "task" ]` guard
+# tripped an unbound-variable error on the v10 autonomous path.
+SCALE=$(yaml_get scale)
 if [ "$SDLC_VERSION" != "11" ] && [ "$MODE" != "autonomous" ]; then
   exit 0
 fi
@@ -405,7 +411,8 @@ fi
 #
 # Scope: v10 mode: autonomous OR any v11 (v11 has no mode gate — its
 # triple's presence is the gate, D13), basename *.plan.md, sdlc-step >= 3
-# (numeric). Specs, non-autonomous v10 modes, continuation*.md, and
+# (numeric). Specs, non-autonomous v10 modes, continuation*.md, v11
+# scale: task plans (they carry a ## Tasks ledger, not a matrix), and
 # earlier schema versions are out of scope — the matrix is a plan-body
 # artifact that exists starting at Step 3 (Plan) approval.
 if { [ "$SDLC_VERSION" = "10" ] && [ "$MODE" = "autonomous" ]; } || [ "$SDLC_VERSION" = "11" ]; then
@@ -415,7 +422,11 @@ if { [ "$SDLC_VERSION" = "10" ] && [ "$MODE" = "autonomous" ]; } || [ "$SDLC_VER
       case "$SDLC_STEP" in
         ''|*[!0-9]*) ;;  # non-numeric or empty sdlc-step → not in scope
         *)
-          if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null; then
+          # scale: task plans carry a ## Tasks ledger, not a ## Verification
+          # Matrix (the matrix is a wave/epic artifact) — exempt them. SCALE is
+          # set only on the v11 arm above (empty for v10 autonomous), so this
+          # guard never changes v10 behavior.
+          if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null && [ "$SCALE" != "task" ]; then
             if ! echo "$CONTENT" | grep -qE '^## Verification Matrix'; then
               if [ "$SDLC_VERSION" = "11" ]; then
                 echo "BLOCKED: canonical-sdlc v11 plan '$BASENAME' (sdlc-step ${SDLC_STEP}) is missing a '## Verification Matrix' section." >&2

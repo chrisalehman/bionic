@@ -937,6 +937,19 @@ echo "v11 *.spec.md at sdlc-step 2 without matrix → allow (matrix is plan-only
 run_write "$project/.bionic/docs/specs/epic-01-demo/v11-spec.spec.md" "$(build_v11_plan step=2 matrix=no)"
 assert_eq "v11_accepts_spec_step2_no_matrix exit 0" 0 "$HOOK_EXIT"
 
+# scale: task plans carry a ## Tasks ledger, not a ## Verification Matrix
+# (the matrix is a wave/epic artifact). They must be exempt from the
+# matrix-required check regardless of sdlc-step. The wave case above
+# (build_v11_plan defaults to scale=wave) is the guard that the exemption
+# is scale-scoped, not a blanket removal.
+echo "v11 scale:task plan at sdlc-step 3 without matrix → allow (task uses ## Tasks ledger, not a matrix)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-task-no-matrix.plan.md" "$(build_v11_plan scale=task intent=bugfix rigor=tested step=3 matrix=no)"
+assert_eq "v11_accepts_task_step3_no_matrix exit 0" 0 "$HOOK_EXIT"
+
+echo "v11 scale:task plan at sdlc-step 4 without matrix → allow"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-task-no-matrix-s4.plan.md" "$(build_v11_plan scale=task intent=bugfix rigor=tested step=4 matrix=no)"
+assert_eq "v11_accepts_task_step4_no_matrix exit 0" 0 "$HOOK_EXIT"
+
 echo "v11 CRLF plan with full valid triple → allow"
 run_write "$project/.bionic/docs/plans/epic-01-demo/v11-crlf.plan.md" "$(to_crlf "$(build_v11_plan)")"
 assert_eq "v11_accepts_crlf_triple exit 0" 0 "$HOOK_EXIT"
