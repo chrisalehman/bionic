@@ -4204,6 +4204,88 @@ write_plan "$h22d6e" "$(v11_task_plan_rigor tested "$v22d6e_body")" > /dev/null
 expect_allow "v11 22d6e control: empty rigor cell on non-addressed done row inherits tested floor, honest evidence → allow (empty ≠ INVALID)" \
   "$h22d6e" 'git commit -m "x"'
 
+# 22d6f/g/h — slice 4/7 closes the residual left by 4/6: an off-enum rigor cell
+# blocked only on the addressed unit (any status, 4/1) and on non-addressed DONE
+# rows (4/6), but a non-addressed ACTIVE or PENDING row with an off-enum cell
+# still passed SILENTLY — its lane was never resolved, so no block and no
+# finding. The spec's semantic model bans unknown cell values as a blocking
+# malformation "at any rigor" with NO status qualifier (whole-value enum
+# equality, the exact idiom used for the status cell, which is validated per-row
+# regardless of status). 4/7 consolidates the INVALID check into ONE per-row
+# guard that runs before the status-based branching, so a malformed rigor cell
+# blocks UNIFORMLY on any row (addressed or not; done, active, pending, dropped)
+# at any frontmatter rigor. 22d6f (active) and 22d6g (pending) are the residuals
+# this slice closes; 22d6h is a negative control proving an EMPTY cell on an
+# active row still inherits and allows (empty ≠ INVALID — active rows without a
+# done claim are not over-blocked).
+
+# 22d6f — non-addressed ACTIVE row with an off-enum rigor cell 'reviewed',
+# frontmatter tested, addressed unit T2 honest → block. Pre-4/7 this passed
+# silently (the active branch never resolves the cell).
+v22d6f_body="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | reviewed | fix the frontmatter parser | active |
+| T2 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: reworking the parser
+- T2: fixed enum check, bash suite 12/12"
+h22d6f=$(make_home)
+write_plan "$h22d6f" "$(v11_task_plan_rigor tested "$v22d6f_body")" > /dev/null
+expect_block "v11 22d6f frontmatter tested, non-addressed ACTIVE off-enum rigor cell → block (INVALID blocks regardless of status)" \
+  "$h22d6f" 'git commit -m "x"' "invalid rigor"
+
+# 22d6g — non-addressed PENDING row with an off-enum rigor cell, frontmatter
+# peer-reviewed, addressed unit T2 honest → block. Pending rows carry no
+# evidence line, so pre-4/7 the whole row was skipped and the bad cell never
+# surfaced.
+v22d6g_body="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | reviewed | fix the frontmatter parser | pending |
+| T2 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T2: fixed enum check, bash suite 12/12"
+h22d6g=$(make_home)
+write_plan "$h22d6g" "$(v11_task_plan_rigor peer-reviewed "$v22d6g_body")" > /dev/null
+expect_block "v11 22d6g frontmatter peer-reviewed, non-addressed PENDING off-enum rigor cell → block (INVALID blocks even on a pending row)" \
+  "$h22d6g" 'git commit -m "x"' "invalid rigor"
+
+# 22d6h — negative control: non-addressed ACTIVE row with an EMPTY rigor cell,
+# honest evidence, frontmatter tested → allow. The empty cell inherits the
+# frontmatter (tested, the floor); empty ≠ INVALID, so the per-row guard does
+# not fire and an active row without a done claim is not over-blocked.
+v22d6h_body="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix |  | fix the frontmatter parser | active |
+| T2 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: reworking the parser
+- T2: fixed enum check, bash suite 12/12"
+h22d6h=$(make_home)
+write_plan "$h22d6h" "$(v11_task_plan_rigor tested "$v22d6h_body")" > /dev/null
+expect_allow "v11 22d6h control: empty rigor cell on non-addressed active row inherits tested floor, honest evidence → allow (empty ≠ INVALID)" \
+  "$h22d6h" 'git commit -m "x"'
+
 # ---- 22e: grandfathering + non-regression (slice 4/4, R5) -----------------
 #
 # Proves the v11 rigor-keyed machinery (4/1–4/3) left the v10 path, and the
