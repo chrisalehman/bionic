@@ -2797,6 +2797,26 @@ v11_task_plan() {
   printf '%s\n%s\n' "$(v11_frontmatter task)" "$1"
 }
 
+# A v11 task-scale plan at a caller-chosen frontmatter rigor (v11_frontmatter
+# hardcodes audited). $1 rigor, $2 body. Used to pin the log-only ledger-shape
+# path that slice 4/3 promotes to BLOCKING only under frontmatter rigor:
+# audited — a non-audited plan keeps logging findings.
+v11_task_frontmatter_rigor() {  # $1 rigor
+  printf -- '---\n'
+  printf -- 'governing-skill: canonical-sdlc\n'
+  printf -- 'canonical_sdlc_version: 11\n'
+  printf -- 'intent: build\n'
+  printf -- 'rigor: %s\n' "$1"
+  printf -- 'scale: task\n'
+  printf -- 'deploy_target: none\n'
+  printf -- 'use_worktree: false\n'
+  printf -- 'has_ui: false\n'
+  printf -- '---\n'
+}
+v11_task_plan_rigor() {  # $1 rigor  $2 body
+  printf '%s\n%s\n' "$(v11_task_frontmatter_rigor "$1")" "$2"
+}
+
 # A complete integrate (Step 8) block that passes the shape check, so the
 # merge-target log-only check can be exercised in isolation.
 v11_integrate_body="  merge: merged wave into epic/07-x
@@ -2864,7 +2884,9 @@ write_plan "$h19d" "$(v11_task_plan "$v11_ledger_valid")" > /dev/null
 expect_allow "v11 19d task plan current: T2 valid ledger → allow (T-format accepted)" \
   "$h19d" 'git commit -m "x"'
 
-# 19e — no ## Tasks section → exit 0 + task-ledger finding.
+# 19e — no ## Tasks section on a NON-audited plan → exit 0 + task-ledger finding
+# (log-only). Slice 4/3 promotes this check to BLOCKING under frontmatter
+# rigor: audited (pinned by 22c5); a peer-reviewed plan keeps logging.
 v11_ledger_no_tasks="## SDLC State
 
 intent: build
@@ -2874,21 +2896,22 @@ current: T2
 
 - T2: some evidence"
 h19e=$(make_home)
-write_plan "$h19e" "$(v11_task_plan "$v11_ledger_no_tasks")" > /dev/null
-expect_finding "v11 19e missing ## Tasks section → exit 0 + task-ledger finding" \
+write_plan "$h19e" "$(v11_task_plan_rigor peer-reviewed "$v11_ledger_no_tasks")" > /dev/null
+expect_finding "v11 19e missing ## Tasks section (non-audited) → exit 0 + task-ledger finding" \
   "$h19e" 'git commit -m "x"' "task-ledger"
 
 # 19e2 — the finding is written to the durable audit file with the D14 format.
 h19e2=$(make_home)
-write_plan "$h19e2" "$(v11_task_plan "$v11_ledger_no_tasks")" > /dev/null
+write_plan "$h19e2" "$(v11_task_plan_rigor peer-reviewed "$v11_ledger_no_tasks")" > /dev/null
 expect_audit_line "v11 19e2 missing ## Tasks → audit file line (evidence-gate task-ledger)" \
   "$h19e2" 'git commit -m "x"' "evidence-gate task-ledger:"
 
-# 19f — status outside the enum (doing) → exit 0 + finding.
+# 19f — status outside the enum (doing) on a NON-audited plan → exit 0 + finding
+# (log-only). Slice 4/3 blocks this under rigor: audited (pinned by 22c1).
 v11_ledger_bad_status="${v11_ledger_valid/| T2 | refactor | peer-reviewed | extract the ledger helper | active |/| T2 | refactor | peer-reviewed | extract the ledger helper | doing |}"
 h19f=$(make_home)
-write_plan "$h19f" "$(v11_task_plan "$v11_ledger_bad_status")" > /dev/null
-expect_finding "v11 19f invalid status 'doing' → exit 0 + task-ledger finding" \
+write_plan "$h19f" "$(v11_task_plan_rigor peer-reviewed "$v11_ledger_bad_status")" > /dev/null
+expect_finding "v11 19f invalid status 'doing' (non-audited) → exit 0 + task-ledger finding" \
   "$h19f" 'git commit -m "x"' "task-ledger"
 
 # 19g — the ADDRESSED active task (T2, current: T2) with no `- T2:` evidence
@@ -2920,11 +2943,13 @@ write_plan "$h19h" "$(v11_task_plan "$v11_ledger_active_placeholder")" > /dev/nu
 expect_block "v11 19h addressed active task placeholder evidence → block" \
   "$h19h" 'git commit -m "x"' "placeholder"
 
-# 19i — done task (T1) with an empty evidence line (`- T1:`) → finding.
+# 19i — done non-addressed task (T1) with an empty evidence line (`- T1:`) on a
+# NON-audited plan → finding (log-only). Slice 4/3 blocks this under rigor:
+# audited (pinned by 22c3).
 v11_ledger_done_empty="${v11_ledger_valid/- T1: fixed in commit abc123, suite 5\/5 green/- T1:}"
 h19i=$(make_home)
-write_plan "$h19i" "$(v11_task_plan "$v11_ledger_done_empty")" > /dev/null
-expect_finding "v11 19i done task missing evidence → exit 0 + task-ledger finding" \
+write_plan "$h19i" "$(v11_task_plan_rigor peer-reviewed "$v11_ledger_done_empty")" > /dev/null
+expect_finding "v11 19i done task missing evidence (non-audited) → exit 0 + task-ledger finding" \
   "$h19i" 'git commit -m "x"' "task-ledger"
 
 # --- (2) task-scale CRLF -------------------------------------------------
@@ -2946,8 +2971,8 @@ expect_allow "v11 19j CRLF task ledger → allow, no false finding" \
 # parsed → no finding at all (RED). After the fix the ledger validates and
 # the bad status is caught.
 h19jcr1=$(make_home)
-write_plan "$h19jcr1" "$(to_cr "$(v11_task_plan "$v11_ledger_bad_status")")" > /dev/null
-expect_finding "v11 19j-cr1 CR-only bad-status ledger → exit 0 + task-ledger finding" \
+write_plan "$h19jcr1" "$(to_cr "$(v11_task_plan_rigor peer-reviewed "$v11_ledger_bad_status")")" > /dev/null
+expect_finding "v11 19j-cr1 CR-only bad-status ledger (non-audited) → exit 0 + task-ledger finding" \
   "$h19jcr1" 'git commit -m "x"' "task-ledger"
 
 # 19j-cr2 — a valid ledger under CR-only → allow, no false finding (guard
@@ -3544,10 +3569,12 @@ expect_block "v11 22a5 addressed unit T2 invalid rigor cell → block" \
   "$h22a5" 'git commit -m "x"' "invalid rigor"
 
 # 22a6 (regression pin) — a broken NON-addressed row (T1 done, no evidence line)
-# while the addressed unit T2 is honest → NO block. The non-addressed row keeps
-# its log-only handling, so this exits 0 with a task-ledger finding on stderr
-# (expect_finding, not expect_allow — the finding IS the log-only channel). This
-# pins the addressed-unit-only scope of the blocking floor.
+# while the addressed unit T2 is honest → NO block on a NON-audited plan. The
+# non-addressed row keeps its log-only handling (this exits 0 with a task-ledger
+# finding, not a block), pinning the addressed-unit-only scope of the 4/1
+# blocking floor. NB: slice 4/3 makes this same NON-addressed check BLOCKING
+# under frontmatter rigor: audited (pinned by 22c3), so this fixture is
+# deliberately peer-reviewed to keep exercising the surviving log-only lane.
 v22_nonaddressed_broken="## Tasks
 
 | id | intent | rigor | description | status |
@@ -3562,8 +3589,8 @@ current: T2
 
 - T2: fixed enum check, bash suite 12/12"
 h22a6=$(make_home)
-write_plan "$h22a6" "$(v11_task_plan "$v22_nonaddressed_broken")" > /dev/null
-expect_finding "v11 22a6 broken non-addressed row (T1) + honest T2 → no block, log-only finding" \
+write_plan "$h22a6" "$(v11_task_plan_rigor peer-reviewed "$v22_nonaddressed_broken")" > /dev/null
+expect_finding "v11 22a6 broken non-addressed row (T1) + honest T2 (non-audited) → no block, log-only finding" \
   "$h22a6" 'git commit -m "x"' "task-ledger"
 
 # --- 22b: proof-shape + auditor/critic lanes (slice 4/2) ------------------
@@ -3761,6 +3788,186 @@ h22b8b=$(make_home)
 write_plan "$h22b8b" "$(v11_task_plan "$v22b_t2_no_command")" > /dev/null
 expect_block "v11 22b8b proof-shape pin: digit, no command token → block" \
   "$h22b8b" 'git commit -m "x"' "not prose"
+
+# --- 22c: audited plan-level strictness + wave D7 dispatch-ledger (slice 4/3) -
+#
+# Part A (task scale): the previously log-only NON-addressed-row ledger-shape
+# checks (missing ## Tasks, bad status enum, active/done row missing/placeholder
+# evidence) BLOCK under frontmatter rigor: audited and stay log-only otherwise
+# (ledger_shape_fail router). Part B (wave scale): validate_dispatch_ledger
+# demands a `## Tasks` dispatched-task ledger section on v11 + scale:wave +
+# rigor:audited + multi_agent:true plans (absent → block; empty/none-dispatched
+# → allow; rows validate at TESTED-FLOOR shape only — enum + evidence-line
+# presence, NO per-row auditor/critic, plan Assumption A2). Every other plan is
+# a guard no-op.
+
+echo ""
+echo "=== Section 22c: audited strictness + D7 dispatch-ledger presence ==="
+
+# ---- Part A: task-scale audited plan-level strictness --------------------
+
+# 22c1 — audited task plan, addressed T1 clean + proof-shaped, a second
+# (non-addressed) row T2 with status 'wip' (bad enum) → BLOCK (audited promotes
+# the enum check). Isolated: the addressed unit T1 is clean so the block is the
+# enum promotion, not the addressed floor.
+v22c_bad_enum="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | build | tested | do the thing | active |
+| T2 | build | tested | second thing | wip |
+
+## SDLC State
+
+scale: task
+current: T1
+
+- T1: bash suite 12/12 green"
+h22c1=$(make_home)
+write_plan "$h22c1" "$(v11_task_plan "$v22c_bad_enum")" > /dev/null
+expect_block "v11 22c1 audited task plan, non-addressed row bad status enum → block" \
+  "$h22c1" 'git commit -m "x"' "invalid status"
+
+# 22c2 — same fixture at frontmatter rigor peer-reviewed → log-only finding, NOT
+# a block (the router stays log-only off audited).
+h22c2=$(make_home)
+write_plan "$h22c2" "$(v11_task_plan_rigor peer-reviewed "$v22c_bad_enum")" > /dev/null
+expect_finding "v11 22c2 same fixture at peer-reviewed → finding (still log-only)" \
+  "$h22c2" 'git commit -m "x"' "task-ledger"
+
+# 22c3 — audited task plan, addressed T1 clean, non-addressed T2 status done with
+# NO `- T2:` evidence line → BLOCK (audited promotes the missing-evidence check).
+v22c_done_no_ev="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | build | tested | do the thing | active |
+| T2 | build | tested | second thing | done |
+
+## SDLC State
+
+scale: task
+current: T1
+
+- T1: bash suite 12/12 green"
+h22c3=$(make_home)
+write_plan "$h22c3" "$(v11_task_plan "$v22c_done_no_ev")" > /dev/null
+expect_block "v11 22c3 audited task plan, non-addressed done row missing evidence line → block" \
+  "$h22c3" 'git commit -m "x"' "no evidence"
+
+# 22c4 — same fixture at frontmatter rigor tested → log-only finding, NOT a block.
+h22c4=$(make_home)
+write_plan "$h22c4" "$(v11_task_plan_rigor tested "$v22c_done_no_ev")" > /dev/null
+expect_finding "v11 22c4 same fixture at tested → finding (still log-only)" \
+  "$h22c4" 'git commit -m "x"' "task-ledger"
+
+# ---- Part B: wave-scale D7 dispatched-task ledger presence ---------------
+
+# A v11 WAVE frontmatter carrying an explicit multi_agent field — the D7
+# dispatch-ledger guard fires ONLY on audited + multi_agent:true + v11 + wave.
+# v11_frontmatter sets NO multi_agent, so every prior wave fixture (19a/b/c,
+# 19r, Section 20) is a guaranteed guard no-op. $1 rigor (default audited),
+# $2 multi_agent (default true).
+v22c_wave_frontmatter() {
+  local rigor="${1:-audited}" multi="${2:-true}"
+  printf -- '---\n'
+  printf -- 'governing-skill: canonical-sdlc\n'
+  printf -- 'canonical_sdlc_version: 11\n'
+  printf -- 'intent: build\n'
+  printf -- 'rigor: %s\n' "$rigor"
+  printf -- 'scale: wave\n'
+  printf -- 'deploy_target: none\n'
+  printf -- 'use_worktree: false\n'
+  printf -- 'has_ui: false\n'
+  printf -- 'multi_agent: %s\n' "$multi"
+  printf -- '---\n'
+}
+
+# A v11 wave plan at current: 5 reaching dispatch_modern with the SAME valid
+# Step-5 body + matrix as 19b (so the ONLY variable under test is the
+# dispatched-task ledger; validate_dispatch_ledger runs at the top of
+# dispatch_modern, before the matrix machinery). $1 = ## Tasks section text
+# (empty omits it); $2 = extra ## SDLC State lines, e.g. a `- T<n>:` evidence
+# line (empty omits); $3 rigor (default audited); $4 multi_agent (default true).
+v22c_wave_plan() {
+  local tasks="$1" extra_state="$2" rigor="${3:-audited}" multi="${4:-true}"
+  printf '%s\n' "$(v22c_wave_frontmatter "$rigor" "$multi")"
+  [ -n "$tasks" ] && printf '%s\n\n' "$tasks"
+  printf '## SDLC State\ncurrent: 5\nStep 5:\n%s\n' "$v10_step5_base"
+  [ -n "$extra_state" ] && printf '%s\n' "$extra_state"
+  printf '\n%s\n' "$v10_matrix_complete"
+}
+
+# 22c5 — audited multi_agent wave with NO ## Tasks section → block (D7 presence).
+h22c5=$(make_home)
+write_plan "$h22c5" "$(v22c_wave_plan "" "")" > /dev/null
+expect_block "v11 22c5 audited multi_agent wave with no ## Tasks → block (D7 presence)" \
+  "$h22c5" 'git commit -m "x"' "dispatched-task ledger"
+
+# 22c6 — WITH a ## Tasks section, header-only + a `none dispatched` line, zero
+# T-rows → allow (section present suffices; the parser needs no row).
+v22c_tasks_none="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+
+none dispatched — the orchestrator appends one row per dispatched task-shaped unit."
+h22c6=$(make_home)
+write_plan "$h22c6" "$(v22c_wave_plan "$v22c_tasks_none" "")" > /dev/null
+expect_allow "v11 22c6 audited multi_agent wave with none-dispatched ## Tasks → allow" \
+  "$h22c6" 'git commit -m "x"'
+
+# 22c7 — ## Tasks with one dispatched row (done) AND a matching `- T1:` evidence
+# line in ## SDLC State → allow. NOTE: the line carries NO auditor/critic token
+# yet it passes — tested-floor shape only at wave scale (pins Assumption A2).
+v22c_tasks_one_done="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | build | audited | dispatched slice | done |"
+h22c7=$(make_home)
+write_plan "$h22c7" "$(v22c_wave_plan "$v22c_tasks_one_done" "- T1: bash suite 9/9 green")" > /dev/null
+expect_allow "v11 22c7 audited multi_agent wave dispatched T1 + evidence line → allow (tested-floor shape, no auditor/critic)" \
+  "$h22c7" 'git commit -m "x"'
+
+# 22c8 — ## Tasks with a dispatched row (done) but NO `- T1:` evidence line
+# anywhere in ## SDLC State → block.
+h22c8=$(make_home)
+write_plan "$h22c8" "$(v22c_wave_plan "$v22c_tasks_one_done" "")" > /dev/null
+expect_block "v11 22c8 audited multi_agent wave dispatched T1 with no evidence line → block" \
+  "$h22c8" 'git commit -m "x"' "evidence line"
+
+# 22c9 — NON-audited wave (rigor peer-reviewed) with NO ## Tasks → allow (the
+# guard excludes non-audited plans).
+h22c9=$(make_home)
+write_plan "$h22c9" "$(v22c_wave_plan "" "" peer-reviewed true)" > /dev/null
+expect_allow "v11 22c9 non-audited (peer-reviewed) wave with no ## Tasks → allow (guard excludes)" \
+  "$h22c9" 'git commit -m "x"'
+
+# 22c10 — audited wave with multi_agent: false and NO ## Tasks → allow (the guard
+# excludes single-agent plans).
+h22c10=$(make_home)
+write_plan "$h22c10" "$(v22c_wave_plan "" "" audited false)" > /dev/null
+expect_allow "v11 22c10 audited wave with multi_agent:false, no ## Tasks → allow (guard excludes)" \
+  "$h22c10" 'git commit -m "x"'
+
+# 22c11 (self-reference pin) — reproduce THIS wave-05 plan's exact ## Tasks shape
+# (header + `|---|` separator + blank + a `none dispatched — ...` prose line,
+# zero T-rows) on an audited multi_agent wave fixture → allow. This is the shape
+# the deployed NEW hook must accept when wave-05 itself advances past the pointer
+# steps into the dispatcher.
+v22c_tasks_selfref="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+
+none dispatched — D7 ledger opens empty; the orchestrator appends one row
+per dispatched task-shaped unit (slices ledger under Step-4 evidence, not
+here, unless dispatched as discrete task-shaped work)."
+h22c11=$(make_home)
+write_plan "$h22c11" "$(v22c_wave_plan "$v22c_tasks_selfref" "")" > /dev/null
+expect_allow "v11 22c11 self-reference pin — THIS plan's exact ## Tasks shape (zero T-rows) → allow" \
+  "$h22c11" 'git commit -m "x"'
 
 # ============================================================
 # Summary

@@ -186,6 +186,7 @@ USE_WORKTREE=$(frontmatter_get use_worktree)
 SCALE=$(frontmatter_get scale)
 INTENT=$(frontmatter_get intent)
 RIGOR=$(frontmatter_get rigor)
+MULTI_AGENT=$(frontmatter_get multi_agent)
 
 # Whole-value placeholder test: trim leading/trailing whitespace, lowercase,
 # then require whole-value EQUALITY against the known token set. A token that
@@ -326,6 +327,23 @@ apply_rigor_lanes() {  # $1=id $2=status $3=effective-rigor $4=evidence-value
   fi
 }
 
+# Router for the previously-log-only NON-addressed-row ledger-shape checks
+# (D-slice 4/3, task scale). On a frontmatter `rigor: audited` plan these
+# promote to BLOCKING (exit 2); at any other rigor they stay log-only findings
+# (D14, unchanged). The detail string is authored once by the caller and used
+# verbatim in whichever channel fires. The addressed-unit floor (4/1) and the
+# rigor lanes (4/2) are NOT routed through here — they already block
+# unconditionally where they should.
+ledger_shape_fail() {  # $1 = detail
+  if [ "$RIGOR" = audited ]; then
+    echo "BLOCKED: canonical-sdlc task-ledger: $1" >&2
+    echo "Plan: $PLAN" >&2
+    echo "Fix: resolve the ledger-shape defect above before committing (audited rigor makes the ledger-shape checks blocking; a non-audited plan would log this as a finding instead)." >&2
+    exit 2
+  fi
+  log_finding task-ledger "$1"
+}
+
 # v11 task-scale ledger validation (D12). Reads the `## Tasks` registration
 # table (fence-aware, the matrix_section idiom) and the per-task `- T<n>:`
 # evidence lines in the ## SDLC State section (SECTION, already newline-normalized).
@@ -355,7 +373,7 @@ validate_task_ledger() {
     /^## / { f=0 }
     f')
   if [ -z "$tasks" ]; then
-    log_finding task-ledger "v11 task-scale plan has no '## Tasks' registration section"
+    ledger_shape_fail "v11 task-scale plan has no '## Tasks' registration section"
     return 0
   fi
   rows=$(echo "$tasks" | grep -E '^[[:space:]]*\|[[:space:]]*T[0-9]+')
@@ -364,10 +382,11 @@ validate_task_ledger() {
     id=$(echo "$line"         | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
     status=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')
     rigor_cell=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$4); print $4}')
-    # status enum — log-only for every row (unchanged from D12).
+    # status enum — routed through ledger_shape_fail (4/3): blocking on audited
+    # plans, log-only otherwise (was unconditionally log-only in D12).
     case "$status" in
       pending|active|done|dropped) : ;;
-      *) log_finding task-ledger "task ${id} has invalid status '${status:-empty}' (want pending|active|done|dropped)" ;;
+      *) ledger_shape_fail "task ${id} has invalid status '${status:-empty}' (want pending|active|done|dropped)" ;;
     esac
     # Evidence line for this task in ## SDLC State (anchored so T2 never matches T20).
     ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
@@ -399,13 +418,14 @@ validate_task_ledger() {
       # the addressed unit is always in scope.
       apply_rigor_lanes "$id" "$status" "$eff" "$ev"
     else
-      # Every OTHER row keeps its log-only handling (D14) at this slice.
+      # Every OTHER row's presence/placeholder checks route through
+      # ledger_shape_fail (4/3): blocking on audited plans, log-only otherwise.
       case "$status" in
         active|done)
           if [ -z "$ev" ]; then
-            log_finding task-ledger "task ${id} is ${status} but has no evidence on a '- ${id}:' line in ## SDLC State"
+            ledger_shape_fail "task ${id} is ${status} but has no evidence on a '- ${id}:' line in ## SDLC State"
           elif is_placeholder_value "$ev"; then
-            log_finding task-ledger "task ${id} is ${status} but its evidence is a placeholder ('${ev}')"
+            ledger_shape_fail "task ${id} is ${status} but its evidence is a placeholder ('${ev}')"
           elif [ "$status" = "done" ]; then
             # 4/2: a done row WITH real evidence is in scope for the
             # rigor-keyed lanes (BLOCKING) — a false-done claim at
@@ -1201,12 +1221,88 @@ validate_intent_evidence() {
   return 0
 }
 
+# v11 wave-scale D7 dispatched-task ledger PRESENCE (D-slice 4/3). Guarded to
+# v11 + scale:wave + frontmatter rigor:audited + multi_agent:true plans; for
+# every other plan it is a no-op (return 0). scale:epic is intentionally OUT —
+# epic plans legitimately dispatch research, not task-shaped units, so demanding
+# a dispatched-task ledger there would false-block scoping runs (plan Assumption
+# A8). Called from dispatch_modern, so it runs at EVERY step that reaches the
+# dispatcher (plan Assumption A5): the ledger is commit-time bookkeeping (D7:
+# ledger before marking complete), demanded from the first gated commit.
+#
+# TESTED-FLOOR SHAPE ONLY (plan Assumption A2): the wave's own Step-5 auditor /
+# Step-6 critic are the assurance roles at wave scale, so per-row auditor/critic
+# tokens (task-scale machinery) are NOT demanded here.
+#   1. `## Tasks` section ABSENT -> exit 2 (empty is fine, absent is not — the
+#      audited multi_agent wave must carry its dispatched-task ledger home).
+#   2. ZERO data rows -> SATISFIED (a human `none dispatched` prose line is
+#      documentation, not required by the parser). return 0.
+#   3. Each data row: status (field 6) in {pending,active,done,dropped} else
+#      exit 2; a non-placeholder `- T<n>:` evidence line must exist in the
+#      ## SDLC State section (SECTION) else exit 2.
+validate_dispatch_ledger() {
+  [ "$SDLC_VERSION" = "11" ] || return 0
+  [ "$SCALE" = "wave" ] || return 0
+  [ "$RIGOR" = "audited" ] || return 0
+  [ "$MULTI_AGENT" = "true" ] || return 0
+
+  local tasks rows line id status ev
+  # Fence-aware `## Tasks` extraction — same awk extractor as validate_task_ledger.
+  tasks=$(normalize_newlines "$PLAN" | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## Tasks/ { f=1; next }
+    /^## / { f=0 }
+    f')
+  if [ -z "$tasks" ]; then
+    echo "BLOCKED: canonical-sdlc audited multi_agent wave plan has no '## Tasks' dispatched-task ledger section." >&2
+    echo "Plan: $PLAN" >&2
+    echo "Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); the orchestrator appends one row per dispatched task-shaped unit (D7)." >&2
+    exit 2
+  fi
+  rows=$(echo "$tasks" | grep -E '^[[:space:]]*\|[[:space:]]*T[0-9]+')
+  [ -n "$rows" ] || return 0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    id=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
+    status=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')
+    case "$status" in
+      pending|active|done|dropped) : ;;
+      *)
+        echo "BLOCKED: canonical-sdlc dispatched task ${id} has invalid status '${status:-empty}' (want pending|active|done|dropped)." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: set the '${id}' row's status cell to one of pending|active|done|dropped before committing." >&2
+        exit 2
+        ;;
+    esac
+    # Evidence line in ## SDLC State (anchored, same lookup as task scale).
+    ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
+         | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
+    if [ -z "$ev" ]; then
+      echo "BLOCKED: canonical-sdlc dispatched task ${id} has no '- ${id}:' evidence line in '## SDLC State'." >&2
+      echo "Plan: $PLAN" >&2
+      echo "Fix: record the dispatched unit's evidence artifact on a '- ${id}:' line before committing." >&2
+      exit 2
+    fi
+    if is_placeholder_value "$ev"; then
+      echo "BLOCKED: canonical-sdlc dispatched task ${id} evidence line is a placeholder ('${ev}')." >&2
+      echo "Plan: $PLAN" >&2
+      echo "Fix: replace the '- ${id}:' placeholder with the actual evidence artifact before committing." >&2
+      exit 2
+    fi
+  done <<< "$rows"
+  return 0
+}
+
 dispatch_modern() {
   local label="$1" ext_step="" integrate_step ship_step
   case "$label" in
     v5)                  ext_step=8; integrate_step=9; ship_step=10 ;;
     v6|v7|v8|v9|v10|v11) integrate_step=8; ship_step=9 ;;
   esac
+  # v11 audited multi_agent wave: D7 dispatched-task ledger PRESENCE, at every
+  # step that reaches this dispatcher (guarded internally; no-op otherwise).
+  validate_dispatch_ledger
   # v10/v11: the Verification Matrix is a prefix contract for every step from
   # the Verify gate on — current: 5 validates it inside validate_verify_step_v10;
   # current: 6..9 validate it here, so a REFUTED auditor blocks post-Verify
