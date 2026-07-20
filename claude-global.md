@@ -30,7 +30,7 @@ When `superpowers:` and `agent-skills:` could both fire, pick per-task.
 
 Outside these pairs: whichever plugin has the more specific skill. On ties, `superpowers:`.
 
-For large-scale efforts (new feature, architectural change, multi-day project), invoke `canonical-sdlc` at session start. It routes to the right skill per phase and enforces evidence per phase. Always prefer `idea-refine` over `brainstorming`.
+Non-trivial engineering work goes through `canonical-sdlc` — invoke it at session start and declare the run's triple: `intent` (build · bugfix · refactor · tune · spike · incident-response) · `rigor` (tested · peer-reviewed · audited) · `scale` (task · wave · epic). Small work stays cheap: a one-line fix runs `bugfix · tested · task` in minutes. Docs-only prose changes and chores stay outside the lifecycle. It routes each step to the right skill and enforces evidence per step. Always prefer `idea-refine` over `brainstorming`.
 
 ## Stack defaults
 
