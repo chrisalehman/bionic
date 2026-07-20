@@ -185,6 +185,7 @@ SDLC_VERSION=$(frontmatter_get canonical_sdlc_version)
 USE_WORKTREE=$(frontmatter_get use_worktree)
 SCALE=$(frontmatter_get scale)
 INTENT=$(frontmatter_get intent)
+RIGOR=$(frontmatter_get rigor)
 
 # Whole-value placeholder test: trim leading/trailing whitespace, lowercase,
 # then require whole-value EQUALITY against the known token set. A token that
@@ -231,15 +232,44 @@ log_finding() {  # $1=check-id  $2=detail
   return 0
 }
 
-# v11 task-scale ledger validation (D12) — LOG-ONLY (D14, check-id
-# `task-ledger`). Reads the `## Tasks` registration table (fence-aware, the
-# matrix_section idiom) and the per-task `- T<n>:` evidence lines in the
-# ## SDLC State section (SECTION, already newline-normalized). Every deviation appends
-# one finding; the function ALWAYS returns 0 — a ledger defect never blocks this
-# wave. Checks: missing `## Tasks`; status outside {pending,active,done,dropped};
-# an active/done task with no `- T<n>:` line or a placeholder/empty value.
+# Normalize a task row's rigor cell to its effective rigor lane. Whole-value
+# `case` equality against the rigor enum (bash-3.2 safe — no associative arrays,
+# same idiom as is_r7_key below): a cell already naming a lane passes through; a
+# non-empty cell outside the enum is INVALID; an empty cell inherits the
+# plan-level RIGOR when that itself names a lane, else defaults to `tested` (the
+# floor — see plan Assumption A3). Defined ahead of validate_task_ledger (which
+# runs at the `current: T<n>` branch, before is_r7_key is defined below) so the
+# validator can call it — same placement rationale as is_placeholder_value.
+effective_row_rigor() {  # $1 = row's rigor cell
+  local cell
+  cell=$(printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+  case "$cell" in
+    tested|peer-reviewed|audited) echo "$cell"; return ;;
+    "") : ;;
+    *) echo "INVALID"; return ;;
+  esac
+  case "$RIGOR" in
+    tested|peer-reviewed|audited) echo "$RIGOR" ;;
+    *) echo "tested" ;;
+  esac
+}
+
+# v11 task-scale ledger validation (D12). Reads the `## Tasks` registration
+# table (fence-aware, the matrix_section idiom) and the per-task `- T<n>:`
+# evidence lines in the ## SDLC State section (SECTION, already newline-normalized).
+#
+# Two lanes (slice 4/1):
+#   - THE ADDRESSED UNIT — the `T<n>` named by `current: T<n>` — is BLOCKING at
+#     the tested floor: its row must exist in `## Tasks`, carry a non-placeholder
+#     `- T<n>:` evidence line, and have a rigor cell that resolves (its cell
+#     names a lane, or is empty; a non-empty cell outside the enum is INVALID).
+#     Any breach emits a 3-line block message and exit 2.
+#   - EVERY OTHER row stays LOG-ONLY (D14, check-id `task-ledger`): status
+#     outside {pending,active,done,dropped}, or an active/done task with no
+#     `- T<n>:` line or a placeholder/empty value, each append one finding and
+#     never block. Missing `## Tasks` entirely is also log-only here.
 validate_task_ledger() {
-  local tasks rows line id status ev
+  local tasks rows line id status rigor_cell ev eff addressed_found=0
   tasks=$(normalize_newlines "$PLAN" | awk '
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
@@ -253,8 +283,10 @@ validate_task_ledger() {
   rows=$(echo "$tasks" | grep -E '^[[:space:]]*\|[[:space:]]*T[0-9]+')
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    id=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
-    status=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')
+    id=$(echo "$line"         | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
+    status=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')
+    rigor_cell=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$4); print $4}')
+    # status enum — log-only for every row (unchanged from D12).
     case "$status" in
       pending|active|done|dropped) : ;;
       *) log_finding task-ledger "task ${id} has invalid status '${status:-empty}' (want pending|active|done|dropped)" ;;
@@ -262,16 +294,48 @@ validate_task_ledger() {
     # Evidence line for this task in ## SDLC State (anchored so T2 never matches T20).
     ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
          | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
-    case "$status" in
-      active|done)
-        if [ -z "$ev" ]; then
-          log_finding task-ledger "task ${id} is ${status} but has no evidence on a '- ${id}:' line in ## SDLC State"
-        elif is_placeholder_value "$ev"; then
-          log_finding task-ledger "task ${id} is ${status} but its evidence is a placeholder ('${ev}')"
-        fi
-        ;;
-    esac
+    if [ "$id" = "$CURRENT" ]; then
+      # THE ADDRESSED UNIT: the tested floor is BLOCKING (slice 4/1).
+      addressed_found=1
+      if [ -z "$ev" ]; then
+        echo "BLOCKED: canonical-sdlc task ${id} has no '- ${id}:' evidence line in '## SDLC State'." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: record the evidence artifact on a '- ${id}:' line before committing." >&2
+        exit 2
+      fi
+      if is_placeholder_value "$ev"; then
+        echo "BLOCKED: canonical-sdlc task ${id} evidence line is a placeholder ('${ev}')." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: replace the '- ${id}:' placeholder with the actual evidence artifact before committing." >&2
+        exit 2
+      fi
+      eff=$(effective_row_rigor "$rigor_cell")
+      if [ "$eff" = "INVALID" ]; then
+        echo "BLOCKED: canonical-sdlc task ${id} has an invalid rigor '${rigor_cell}' (want tested|peer-reviewed|audited)." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: set the '${id}' row's rigor cell to one of tested, peer-reviewed, audited before committing." >&2
+        exit 2
+      fi
+    else
+      # Every OTHER row keeps its log-only handling (D14) at this slice.
+      case "$status" in
+        active|done)
+          if [ -z "$ev" ]; then
+            log_finding task-ledger "task ${id} is ${status} but has no evidence on a '- ${id}:' line in ## SDLC State"
+          elif is_placeholder_value "$ev"; then
+            log_finding task-ledger "task ${id} is ${status} but its evidence is a placeholder ('${ev}')"
+          fi
+          ;;
+      esac
+    fi
   done <<< "$rows"
+  # The addressed unit (current: T<n>) must have a row in ## Tasks (BLOCKING).
+  if [ "$addressed_found" -eq 0 ]; then
+    echo "BLOCKED: canonical-sdlc task ${CURRENT} has no row in the '## Tasks' registration table." >&2
+    echo "Plan: $PLAN" >&2
+    echo "Fix: add a '| ${CURRENT} | <intent> | <rigor> | <description> | <status> |' row to '## Tasks' before committing." >&2
+    exit 2
+  fi
   return 0
 }
 
