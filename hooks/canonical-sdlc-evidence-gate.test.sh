@@ -3969,6 +3969,255 @@ write_plan "$h22c11" "$(v22c_wave_plan "$v22c_tasks_selfref" "")" > /dev/null
 expect_allow "v11 22c11 self-reference pin — THIS plan's exact ## Tasks shape (zero T-rows) → allow" \
   "$h22c11" 'git commit -m "x"'
 
+# ---- 22d: per-row rigor resolution (slice 4/4, R4) ------------------------
+#
+# effective_row_rigor resolves cell-first: a non-empty, enum-valid cell wins
+# outright — it does NOT blend with, or get overridden by, the frontmatter
+# rigor. Frontmatter rigor only supplies the fallback when the cell is empty
+# (and 'tested' is the final fallback under an unset/invalid frontmatter
+# rigor). 22d1/22d2 pin cell-wins-over-frontmatter in both directions
+# (lighter cell overrides heavier frontmatter, and vice versa). 22d3/22d4 pin
+# the empty-cell inheritance path. 22d5 pins that the cell alone drives the
+# audited lane (auditor+critic), independent of frontmatter. 22d6 is a
+# confirmation-vs-actual probe on a NON-addressed row's off-enum rigor cell —
+# see its comment for the finding.
+
+echo ""
+echo "=== Section 22d: per-row rigor resolution (R4) ==="
+
+# 22d1 — frontmatter rigor tested, addressed row cell peer-reviewed (heavier),
+# weak prose evidence → block. The row CELL overrides the lighter frontmatter:
+# proof-shape is demanded because the cell says peer-reviewed, not because of
+# the (lighter) frontmatter.
+v22d1_body="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | peer-reviewed | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T1
+
+- T1: fixed it manually"
+h22d1=$(make_home)
+write_plan "$h22d1" "$(v11_task_plan_rigor tested "$v22d1_body")" > /dev/null
+expect_block "v11 22d1 frontmatter tested, cell peer-reviewed (heavier), prose evidence → block (cell wins)" \
+  "$h22d1" 'git commit -m "x"' "not prose"
+
+# 22d2 — frontmatter rigor audited (v11_task_plan hardcodes it), addressed row
+# cell tested (lighter), plain honest one-line evidence (no digit/command
+# token) → allow. The row CELL overrides the heavier frontmatter: this is the
+# tested floor, so no proof-shape is demanded even though the plan-level
+# rigor is audited. (Plan-level audited strictness still applies to OTHER
+# rows via ledger_shape_fail — see 22c1/22c3 — but the addressed tested-cell
+# row itself stays at the floor.)
+v22d2_body="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T1
+
+- T1: reproduced and fixed the boundary case"
+h22d2=$(make_home)
+write_plan "$h22d2" "$(v11_task_plan "$v22d2_body")" > /dev/null
+expect_allow "v11 22d2 frontmatter audited, cell tested (lighter), plain evidence → allow (cell wins, floor only)" \
+  "$h22d2" 'git commit -m "x"'
+
+# 22d3 — frontmatter rigor peer-reviewed, addressed row cell EMPTY (missing
+# field-4 value), weak prose evidence → block. An empty cell inherits the
+# frontmatter rigor (peer-reviewed), so proof-shape is demanded.
+v22d3_body="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix |  | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T1
+
+- T1: fixed it manually"
+h22d3=$(make_home)
+write_plan "$h22d3" "$(v11_task_plan_rigor peer-reviewed "$v22d3_body")" > /dev/null
+expect_block "v11 22d3 frontmatter peer-reviewed, cell empty, prose evidence → block (inherits frontmatter)" \
+  "$h22d3" 'git commit -m "x"' "not prose"
+
+# 22d4 — frontmatter rigor tested, addressed row cell EMPTY, weak prose
+# evidence → allow. An empty cell inherits tested, the floor.
+v22d4_body="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix |  | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T1
+
+- T1: fixed it manually"
+h22d4=$(make_home)
+write_plan "$h22d4" "$(v11_task_plan_rigor tested "$v22d4_body")" > /dev/null
+expect_allow "v11 22d4 frontmatter tested, cell empty, prose evidence → allow (inherits tested floor)" \
+  "$h22d4" 'git commit -m "x"'
+
+# 22d5 — frontmatter rigor tested (lighter), addressed row cell audited
+# (heavier), status done: proof-shaped evidence + auditor + critic tokens →
+# allow; drop the critic token (same frontmatter, same cell) → block. Pins
+# that the CELL alone drives the audited lane, independent of frontmatter.
+v22d5_body_complete="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | audited | fix enum | done |
+
+## SDLC State
+
+scale: task
+current: T1
+
+- T1: bash test.sh 12/12 auditor CONFIRMED, critic no-blocking"
+h22d5a=$(make_home)
+write_plan "$h22d5a" "$(v11_task_plan_rigor tested "$v22d5_body_complete")" > /dev/null
+expect_allow "v11 22d5a frontmatter tested, cell audited, done, proof+auditor+critic → allow (cell drives lane)" \
+  "$h22d5a" 'git commit -m "x"'
+
+v22d5_body_no_critic="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | audited | fix enum | done |
+
+## SDLC State
+
+scale: task
+current: T1
+
+- T1: bash test.sh 12/12 auditor CONFIRMED"
+h22d5b=$(make_home)
+write_plan "$h22d5b" "$(v11_task_plan_rigor tested "$v22d5_body_no_critic")" > /dev/null
+expect_block "v11 22d5b same, drop critic token → block (cell audited lane still demands it)" \
+  "$h22d5b" 'git commit -m "x"' "critic"
+
+# 22d6 — FINDING (confirmation-vs-actual): a bad rigor cell 'reviewed'
+# (off-enum) on a NON-addressed 'done' row. effective_row_rigor("reviewed")
+# resolves to the INVALID sentinel — but INVALID is only ever explicitly
+# checked on the ADDRESSED unit's own row (validate_task_ledger's
+# `if [ "$eff" = "INVALID" ]` block, addressed-row-only). For a NON-addressed
+# row, the done-row path calls apply_rigor_lanes(id, status, "INVALID", ev)
+# directly with no INVALID guard; apply_rigor_lanes' case arms only match
+# tested|peer-reviewed|audited, so "INVALID" matches none of them and the
+# function falls through as a silent no-op — no block, and (unlike the other
+# non-addressed-row defects, which route through ledger_shape_fail) no
+# log-only finding either. Empirically verified (both variants exit 0 with
+# EMPTY stderr — a full allow, not even a finding):
+#   - frontmatter rigor audited: exit 0, no stderr (NOT the block the task
+#     brief assumed — "INVALID cell surfaces even off the addressed unit
+#     under audited" does not hold; audited plan-level strictness only
+#     reaches the checks that are routed through ledger_shape_fail, and an
+#     off-enum rigor CELL is not one of them).
+#   - frontmatter rigor tested: exit 0, no stderr (same silent pass-through).
+# Net: an off-enum rigor cell on a non-addressed row evades detection
+# entirely, at every frontmatter rigor level — a real gap in 4/1's INVALID
+# handling (scoped to the addressed unit only) that 4/2's apply_rigor_lanes
+# does not close for the non-addressed case. Reported per plan instruction;
+# NOT fixed in this slice (SCOPE: hook changes only for a defect surfacing
+# here, and this needs an intentional design call — should apply_rigor_lanes
+# block on eff=INVALID, or should ledger_shape_fail gain an enum check for
+# non-addressed rows? — not a mechanical one-liner). These two assertions PIN
+# the actual (surprising) behavior rather than the originally-assumed one.
+v22d6_body="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | reviewed | fix the frontmatter parser | done |
+| T2 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: bash test.sh 12/12 auditor CONFIRMED, critic no-blocking
+- T2: fixed enum check, bash suite 12/12"
+h22d6a=$(make_home)
+write_plan "$h22d6a" "$(v11_task_plan "$v22d6_body")" > /dev/null
+expect_allow "v11 22d6a FINDING: frontmatter audited, non-addressed off-enum rigor cell → allow (NOT block — INVALID unchecked off the addressed unit)" \
+  "$h22d6a" 'git commit -m "x"'
+
+h22d6b=$(make_home)
+write_plan "$h22d6b" "$(v11_task_plan_rigor tested "$v22d6_body")" > /dev/null
+expect_allow "v11 22d6b FINDING: frontmatter tested, non-addressed off-enum rigor cell → allow (same silent pass-through)" \
+  "$h22d6b" 'git commit -m "x"'
+
+# ---- 22e: grandfathering + non-regression (slice 4/4, R5) -----------------
+#
+# Proves the v11 rigor-keyed machinery (4/1–4/3) left the v10 path, and the
+# already-pinned D7/audited-guard exclusions, byte-identical.
+
+echo ""
+echo "=== Section 22e: grandfathering + non-regression (R5) ==="
+
+# 22e1 — a v10 wave plan (Section 17's shape: v10_frontmatter + Step 5 +
+# ## Verification Matrix, no rigor-keyed anything) with a complete matrix at
+# current: 5 → allow. The v10 path is untouched by the v11 rigor additions.
+h22e1=$(make_home)
+write_plan "$h22e1" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
+expect_allow "v11 22e1 v10 wave plan, complete matrix, current: 5 → allow (v10 path untouched)" \
+  "$h22e1" 'git commit -m "x"'
+
+# 22e2 — same v10 plan shape, but the matrix has a deliberately broken row
+# (AC-1 discharged with no matching AC-1 evidence block — v10_matrix_no_block,
+# reused from Section 17/19a) → block. v10 matrix enforcement still fires.
+h22e2=$(make_home)
+write_plan "$h22e2" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_no_block")" > /dev/null
+expect_block "v11 22e2 v10 wave plan, broken matrix row → block (v10 enforcement still fires)" \
+  "$h22e2" 'git commit -m "x"' "AC-1"
+
+# 22e3 — regression pin (restated from 22c9): v11 wave plan, frontmatter
+# rigor peer-reviewed (NOT audited), no ## Tasks section → allow. The D7
+# dispatch-ledger guard excludes non-audited plans.
+h22e3=$(make_home)
+write_plan "$h22e3" "$(v22c_wave_plan "" "" peer-reviewed true)" > /dev/null
+expect_allow "v11 22e3 non-audited (peer-reviewed) wave, no ## Tasks → allow (D7 guard excludes non-audited)" \
+  "$h22e3" 'git commit -m "x"'
+
+# 22e4 — regression pin (restated from 22c10): v11 wave plan, audited,
+# multi_agent: false, no ## Tasks section → allow. The D7 guard excludes
+# single-agent plans.
+h22e4=$(make_home)
+write_plan "$h22e4" "$(v22c_wave_plan "" "" audited false)" > /dev/null
+expect_allow "v11 22e4 audited wave, multi_agent:false, no ## Tasks → allow (D7 guard excludes non-multi_agent)" \
+  "$h22e4" 'git commit -m "x"'
+
+# 22e5 — v11 task plan, frontmatter tested, clean addressed row with an
+# honest one-line prose evidence (no digit/command token, no auditor/critic)
+# → allow. The headline guarantee: the cheap (tested) lane stays cheap.
+v22e5_body="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T1
+
+- T1: reproduced and fixed the bug locally"
+h22e5=$(make_home)
+write_plan "$h22e5" "$(v11_task_plan_rigor tested "$v22e5_body")" > /dev/null
+expect_allow "v11 22e5 tested addressed row, honest one-line evidence → allow (cheap lane stays cheap)" \
+  "$h22e5" 'git commit -m "x"'
+
 # ============================================================
 # Summary
 # ============================================================
