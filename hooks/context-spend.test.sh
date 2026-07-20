@@ -99,16 +99,17 @@ make_env() {  # $1=step $2=input $3=cache_c $4=cache_r
   echo "$dir"
 }
 
-stdin_for() {  # $1=project $2=transcript-path — real captured shape, paths swapped
-  printf '{"session_id":"scrubbed","transcript_path":"%s","cwd":"%s","hook_event_name":"Stop","stop_hook_active":false}' "$2" "$1"
+stdin_for() {  # $1=project $2=transcript-path [$3=session_id, default "scrubbed"]
+  local sess="${3:-scrubbed}"
+  printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"Stop","stop_hook_active":false}' "$sess" "$2" "$1"
 }
 
 run_hook() {  # $1=project $2=stdin-json
   HOOK_STDOUT=$(CLAUDE_PROJECT_DIR="$1" bash "$HOOK" <<< "$2" 2>/dev/null); HOOK_EXIT=$?
 }
 
-fire() {  # $1=project — build real-shape stdin and run
-  run_hook "$1" "$(stdin_for "$1" "$1/transcript.jsonl")"
+fire() {  # $1=project [$2=session_id, default "scrubbed"] — build real-shape stdin and run
+  run_hook "$1" "$(stdin_for "$1" "$1/transcript.jsonl" "${2:-scrubbed}")"
 }
 
 audit_of() { cat "$1/.bionic/memory/sdlc-v11-audit.md" 2>/dev/null || true; }
@@ -169,8 +170,8 @@ e1() {
     fail "E1 first-seen: expected silent no-line" "exit=$HOOK_EXIT audit='$(audit_of "$dir")'"
   fi
   TOTAL=$((TOTAL + 1))
-  if [ "$(state_of "$dir")" = "$(printf '%s\t4\t100000' "$plan")" ]; then
-    pass "E1 first-seen: state seeded plan<TAB>4<TAB>100000"
+  if [ "$(state_of "$dir")" = "$(printf '%s\tscrubbed\t4\t100000' "$plan")" ]; then
+    pass "E1 first-seen: state seeded plan<TAB>session<TAB>4<TAB>100000"
   else
     fail "E1 first-seen: state seed" "state='$(state_of "$dir")'"
   fi
@@ -225,8 +226,8 @@ e3() {
     fail "E3 boundary: format mismatch" "audit='$audit'"
   fi
   TOTAL=$((TOTAL + 1))
-  if [ "$(state_of "$dir")" = "$(printf '%s\t5\t142137' "$plan")" ]; then
-    pass "E3 boundary: state advanced to 5<TAB>142137"
+  if [ "$(state_of "$dir")" = "$(printf '%s\tscrubbed\t5\t142137' "$plan")" ]; then
+    pass "E3 boundary: state advanced to session<TAB>5<TAB>142137"
   else
     fail "E3 boundary: state advance" "state='$(state_of "$dir")'"
   fi
@@ -298,6 +299,67 @@ e6() {
   fi
 }
 e6
+
+# ============================================================
+# Concurrency section (critic-fix F1; folds under AC-1/AC-4) — state is session-scoped. Two
+# sessions interleaving Stops on the same project/plan must
+# never synthesize a cross-session delta; a session change
+# re-seeds silently, same as a plan change (E6).
+# ============================================================
+
+echo ""
+echo "=== C1: session A then session B (different transcript) — no cross-session delta, silent re-seed ==="
+c1() {
+  local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
+  local plan="$dir/.bionic/docs/plans/epic-t/wave-t.plan.md"
+  # Session A seeds at step 4, occupancy 100000.
+  run_hook "$dir" "$(stdin_for "$dir" "$dir/transcript.jsonl" "sess-a")"
+  assert_silent "C1 session A seed"
+  # Session B fires at step 5, on its OWN transcript, occupancy 500000.
+  # A same-session boundary here would compute delta=+400000; the hook
+  # must instead detect the session change and re-seed silently.
+  write_plan "$dir" 5
+  cat > "$dir/transcript-b.jsonl" <<'EOF'
+{"type":"user","message":"scrubbed"}
+{"type":"assistant","message":{"model":"claude-fable-5","usage":{"input_tokens":500000,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":50}}}
+EOF
+  run_hook "$dir" "$(stdin_for "$dir" "$dir/transcript-b.jsonl" "sess-b")"
+  assert_silent "C1 session B run"
+  local audit; audit=$(audit_of "$dir")
+  TOTAL=$((TOTAL + 1))
+  if [ -z "$audit" ]; then
+    pass "C1 cross-session: no audit line (no synthesized delta)"
+  else
+    fail "C1 cross-session: unexpected audit line (cross-session delta leaked)" "audit='$audit'"
+  fi
+  TOTAL=$((TOTAL + 1))
+  if [ "$(state_of "$dir")" = "$(printf '%s\tsess-b\t5\t500000' "$plan")" ]; then
+    pass "C1 cross-session: state re-seeded to sess-b/5/500000"
+  else
+    fail "C1 cross-session: state re-seed" "state='$(state_of "$dir")'"
+  fi
+}
+c1
+
+echo ""
+echo "=== C2: same session_id across a boundary — still emits the E3-format line ==="
+c2() {
+  local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
+  run_hook "$dir" "$(stdin_for "$dir" "$dir/transcript.jsonl" "sess-x")"
+  assert_silent "C2 seed run"
+  write_plan "$dir" 5
+  write_transcript "$dir" 142137 0 0
+  run_hook "$dir" "$(stdin_for "$dir" "$dir/transcript.jsonl" "sess-x")"
+  assert_silent "C2 boundary run"
+  local audit; audit=$(audit_of "$dir")
+  TOTAL=$((TOTAL + 1))
+  if printf '%s\n' "$audit" | grep -qE '^- [0-9TZ:-]+ context-spend step-4: occupied=142137 delta=\+42137 model=claude-fable-5 \(.*wave-t\.plan\.md\)$'; then
+    pass "C2 same-session boundary: E3-format line emitted"
+  else
+    fail "C2 same-session boundary" "audit='$audit'"
+  fi
+}
+c2
 
 # ============================================================
 # Degradation section (AC-2) — no-data classes: exit 0, empty
