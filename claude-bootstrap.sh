@@ -1317,9 +1317,27 @@ do_install_agents() {
     repo_agents+=("$(basename "$agent")")
   done
 
+  # ~/.claude/agents/ is Claude Code's standard USER subagent directory, so
+  # the prune must be scoped to manifest-tracked orphans only — a file only
+  # gets removed if bionic installed it in a prior run (its basename is in
+  # the PRE-EXISTING manifest, read before this run overwrites it) and it's
+  # no longer in the repo. A hand-authored file never listed in the manifest
+  # (or a first run with no manifest yet) is never touched.
+  declare -a prior_manifest=()
+  if [ -f ~/.claude/agents/.bionic-manifest ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] && prior_manifest+=("$line")
+    done < ~/.claude/agents/.bionic-manifest
+  fi
+
   for installed in ~/.claude/agents/*.md; do
     [ -f "$installed" ] || continue
     base="$(basename "$installed")"
+    tracked=0
+    for m in ${prior_manifest[@]+"${prior_manifest[@]}"}; do
+      if [ "$base" = "$m" ]; then tracked=1; break; fi
+    done
+    [ "$tracked" -eq 1 ] || continue
     found=0
     for r in ${repo_agents[@]+"${repo_agents[@]}"}; do
       if [ "$base" = "$r" ]; then found=1; break; fi

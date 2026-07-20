@@ -513,51 +513,86 @@ verify_playwright_registry > /dev/null
 case "${verify_errors[0]:-}" in *"heal skipped"*) no "healable install must not carry the hint: ${verify_errors[0]:-}";; "") no "expected a verify error (builds are missing)";; *) ok "healable install's verify error stays generic";; esac
 
 # 17) Global agents install (Pattern B: mirrors the hooks install — glob copy,
-# orphan-prune, manifest). Sandboxed via SCRIPT_DIR (fixture repo with a fake
-# agents/ dir, same convention the hooks block uses for its source glob) and
-# HOME (fake ~/.claude/agents, pre-seeded with an orphan to prune) — no real
-# ~/.claude is touched.
+# manifest-scoped orphan-prune). Sandboxed via SCRIPT_DIR (fixture repo with a
+# fake agents/ dir, same convention the hooks block uses for its source glob)
+# and HOME (fake ~/.claude/agents) — no real ~/.claude is touched.
+#
+# ~/.claude/agents/ is Claude Code's standard USER subagent directory, so the
+# prune must be scoped to MANIFEST-TRACKED orphans only: a hand-authored file
+# that bionic never installed (never listed in .bionic-manifest) must never
+# be deleted, even though it isn't in the repo either.
 AGSBX="${SBX}/agents-sandbox"
 mkdir -p "${AGSBX}/repo/agents" "${AGSBX}/home/.claude/agents"
 printf -- '---\nname: alpha\n---\nalpha body\n' > "${AGSBX}/repo/agents/alpha.md"
 printf -- '---\nname: beta\n---\nbeta body\n' > "${AGSBX}/repo/agents/beta.md"
-echo "stale content" > "${AGSBX}/home/.claude/agents/orphan.md"
+printf -- '---\nname: gamma\n---\ngamma body\n' > "${AGSBX}/repo/agents/gamma.md"
+echo "hand-authored, not from bionic" > "${AGSBX}/home/.claude/agents/user-custom.md"
+echo "pre-existing stray, no manifest yet" > "${AGSBX}/home/.claude/agents/stray.md"
 
+# --- Run 1: no manifest exists yet ---
 : > "$LOG"; INSTALL_FAILURES=()
 ( export SCRIPT_DIR="${AGSBX}/repo" HOME="${AGSBX}/home"; do_install_agents >/dev/null )
 rc=$?
 [ "$rc" -eq 0 ] && ok "do_install_agents returns 0" || no "do_install_agents failed (rc=$rc)"
 
 [ -f "${AGSBX}/home/.claude/agents/alpha.md" ] && [ -f "${AGSBX}/home/.claude/agents/beta.md" ] \
-  && ok "both fixture role files copied to ~/.claude/agents" \
+  && [ -f "${AGSBX}/home/.claude/agents/gamma.md" ] \
+  && ok "all 3 fixture role files copied to ~/.claude/agents" \
   || no "role files not copied"
 diff -q "${AGSBX}/repo/agents/alpha.md" "${AGSBX}/home/.claude/agents/alpha.md" >/dev/null 2>&1 \
   && ok "copied file content matches source" || no "copied content mismatch"
 
-[ ! -f "${AGSBX}/home/.claude/agents/orphan.md" ] && ok "planted orphan removed" || no "orphan not pruned"
+[ -f "${AGSBX}/home/.claude/agents/user-custom.md" ] \
+  && ok "user-authored file (never manifest-tracked) survives run 1" \
+  || no "user-authored file was deleted on run 1"
+[ -f "${AGSBX}/home/.claude/agents/stray.md" ] \
+  && ok "first-run-no-manifest: pre-existing stray file survives (nothing pruned)" \
+  || no "first-run-no-manifest incorrectly pruned a file"
 
 manifest="${AGSBX}/home/.claude/agents/.bionic-manifest"
 if [ -f "$manifest" ]; then
   ok "manifest written"
   sort "$manifest" > "${SBX}/manifest.sorted"
-  printf 'alpha.md\nbeta.md\n' | sort > "${SBX}/manifest.expected"
+  printf 'alpha.md\nbeta.md\ngamma.md\n' | sort > "${SBX}/manifest.expected"
   diff -q "${SBX}/manifest.sorted" "${SBX}/manifest.expected" >/dev/null 2>&1 \
-    && ok "manifest lists exactly the 2 installed basenames" \
+    && ok "manifest lists exactly the 3 installed basenames" \
     || no "manifest content wrong: $(cat "$manifest")"
 else
   no "manifest missing"
   no "manifest content check skipped (no manifest)"
 fi
 
-# subshell exit-0 proof under set -e (matches the do_heal_playwright_registry
-# precedent at 14b above) — re-seed an orphan so prune runs again too.
-echo "stale again" > "${AGSBX}/home/.claude/agents/orphan2.md"
+# --- Run 2: repo drops gamma.md; manifest from run 1 still lists it ---
+# gamma.md is manifest-tracked (run 1 wrote it) and now absent from repo, so
+# it must be pruned. alpha/beta stay (still in repo). user-custom.md and
+# stray.md must still survive — proving survival isn't a first-run
+# coincidence; it holds even once a manifest exists.
+rm -f "${AGSBX}/repo/agents/gamma.md"
+: > "$LOG"; INSTALL_FAILURES=()
 if ( set -e; export SCRIPT_DIR="${AGSBX}/repo" HOME="${AGSBX}/home"; do_install_agents >/dev/null ); then
   ok "do_install_agents survives under set -e (subshell exits 0)"
 else
   no "do_install_agents aborted under set -e"
 fi
-[ ! -f "${AGSBX}/home/.claude/agents/orphan2.md" ] && ok "second-run orphan also pruned" || no "second-run orphan not pruned"
+
+[ ! -f "${AGSBX}/home/.claude/agents/gamma.md" ] \
+  && ok "manifest-tracked orphan (gamma.md, dropped from repo) is pruned" \
+  || no "manifest-tracked orphan not pruned"
+[ -f "${AGSBX}/home/.claude/agents/alpha.md" ] && [ -f "${AGSBX}/home/.claude/agents/beta.md" ] \
+  && ok "still-in-repo role files remain after run 2" \
+  || no "still-in-repo role files missing after run 2"
+[ -f "${AGSBX}/home/.claude/agents/user-custom.md" ] \
+  && ok "user-authored file survives run 2 (still never manifest-tracked)" \
+  || no "user-authored file was deleted on run 2"
+[ -f "${AGSBX}/home/.claude/agents/stray.md" ] \
+  && ok "pre-existing stray file survives run 2 (never manifest-tracked)" \
+  || no "pre-existing stray file was deleted on run 2"
+
+sort "$manifest" > "${SBX}/manifest2.sorted"
+printf 'alpha.md\nbeta.md\n' | sort > "${SBX}/manifest2.expected"
+diff -q "${SBX}/manifest2.sorted" "${SBX}/manifest2.expected" >/dev/null 2>&1 \
+  && ok "manifest after run 2 lists exactly alpha.md and beta.md" \
+  || no "manifest after run 2 wrong: $(cat "$manifest")"
 
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
