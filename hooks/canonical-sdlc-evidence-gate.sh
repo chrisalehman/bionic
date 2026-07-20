@@ -361,9 +361,14 @@ ledger_shape_fail() {  # $1 = detail
 #     or an active/done task with no `- T<n>:` line or a placeholder/empty
 #     value, each append one finding and never block. Missing `## Tasks`
 #     entirely is also log-only here. A `done` row that DOES have a non-empty,
-#     non-placeholder evidence line is additionally passed through
-#     apply_rigor_lanes (4/2) — BLOCKING, since a done claim at peer-reviewed+
-#     rigor without real evidence is a false-done claim, not a bookkeeping gap.
+#     non-placeholder evidence line resolves its effective rigor and is
+#     additionally passed through apply_rigor_lanes (4/2) — BLOCKING, since a
+#     done claim at peer-reviewed+ rigor without real evidence is a false-done
+#     claim, not a bookkeeping gap. If that resolution yields the INVALID
+#     sentinel (an off-enum rigor cell), the row's lane is indeterminate — a
+#     hard structural error that BLOCKS unconditionally at any rigor (4/6),
+#     mirroring the addressed unit's INVALID block rather than routing through
+#     the audited-only ledger_shape_fail.
 validate_task_ledger() {
   local tasks rows line id status rigor_cell ev eff addressed_found=0
   tasks=$(normalize_newlines "$PLAN" | awk '
@@ -432,6 +437,21 @@ validate_task_ledger() {
             # peer-reviewed+ rigor, not a bookkeeping gap. A done row with
             # NO evidence line stays log-only above (4/3 territory).
             eff=$(effective_row_rigor "$rigor_cell")
+            # 4/6: an off-enum rigor cell resolves to the INVALID sentinel,
+            # which makes the row's lane indeterminate — you cannot tell which
+            # evidence contract applies. That is a hard STRUCTURAL error, not an
+            # evidence-quality issue, so it blocks UNCONDITIONALLY at any
+            # frontmatter rigor (mirroring the addressed unit's INVALID block
+            # above), NOT via the audited-only ledger_shape_fail. Guard here,
+            # before apply_rigor_lanes — whose case arms match only the three
+            # enum lanes and would otherwise let INVALID fall through as a
+            # silent no-op (the 4/4 gap).
+            if [ "$eff" = "INVALID" ]; then
+              echo "BLOCKED: canonical-sdlc task ${id} has an invalid rigor '${rigor_cell}' (want tested|peer-reviewed|audited)." >&2
+              echo "Plan: $PLAN" >&2
+              echo "Fix: set the '${id}' row's rigor cell to one of tested, peer-reviewed, audited before committing." >&2
+              exit 2
+            fi
             apply_rigor_lanes "$id" "$status" "$eff" "$ev"
           fi
           ;;
