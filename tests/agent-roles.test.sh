@@ -145,6 +145,13 @@ for r in $NODENY_EXPECT; do
   if [ -z "$v" ]; then pass "$r: no disallowedTools (inherits all)"; else fail "$r: unexpected disallowedTools ('$v')"; fi
 done
 
+# test-runner: tee-to-log duty (results always land in a log the orchestrator/user can tail)
+if grep -q 'tee' "$AGENTS/test-runner.md" && grep -q 'log path' "$AGENTS/test-runner.md"; then
+  pass "test-runner: tee-to-log duty present (names the log path in reports)"
+else
+  fail "test-runner: tee-to-log duty missing"
+fi
+
 # ===== Section 4: mandate byte-diff =====
 echo "== Section 4: mandate byte-identity =="
 if [ -n "$(skill_blockquote "$SKILL" "$AUDITOR_ANCHOR")" ]; then pass "SKILL auditor blockquote extracted"; else fail "SKILL auditor blockquote empty"; fi
