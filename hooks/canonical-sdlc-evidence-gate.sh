@@ -364,11 +364,11 @@ ledger_shape_fail() {  # $1 = detail
 #     non-placeholder evidence line resolves its effective rigor and is
 #     additionally passed through apply_rigor_lanes (4/2) — BLOCKING, since a
 #     done claim at peer-reviewed+ rigor without real evidence is a false-done
-#     claim, not a bookkeeping gap. If that resolution yields the INVALID
-#     sentinel (an off-enum rigor cell), the row's lane is indeterminate — a
-#     hard structural error that BLOCKS unconditionally at any rigor (4/6),
-#     mirroring the addressed unit's INVALID block rather than routing through
-#     the audited-only ledger_shape_fail.
+#     claim, not a bookkeeping gap. A malformed (off-enum) rigor cell on ANY row
+#     — addressed or not, at ANY status (done, active, pending, dropped) — is
+#     caught earlier by the per-row INVALID guard (4/7), which resolves the cell
+#     and BLOCKS unconditionally at any frontmatter rigor before this
+#     status-based branching; see that guard for the rationale.
 validate_task_ledger() {
   local tasks rows line id status rigor_cell ev eff addressed_found=0
   tasks=$(normalize_newlines "$PLAN" | awk '
@@ -393,6 +393,27 @@ validate_task_ledger() {
       pending|active|done|dropped) : ;;
       *) ledger_shape_fail "task ${id} has invalid status '${status:-empty}' (want pending|active|done|dropped)" ;;
     esac
+    # Per-row INVALID rigor-cell guard (4/7): resolve this row's rigor cell and
+    # block if it is off-enum. A malformed rigor cell makes the row's lane
+    # indeterminate — a hard STRUCTURAL error, the exact sibling of the
+    # status-enum check above (both are whole-value enum equality on a single
+    # cell, validated per-row REGARDLESS of the row's status). So it blocks
+    # UNIFORMLY: on ANY row (addressed or not; done, active, pending, dropped)
+    # and at ANY frontmatter rigor — NOT routed through the audited-only
+    # ledger_shape_fail. Placed here, before the evidence extraction and the
+    # addressed-vs-other branching, so this ONE guard covers every row —
+    # consolidating the former per-branch INVALID checks (4/1 addressed unit,
+    # 4/6 non-addressed done) that left non-addressed active/pending rows
+    # unchecked. `eff` is reused by both branches below (never INVALID past
+    # here). Order vs the status-enum check: status first, then rigor — a row
+    # with BOTH defects may block on either; this order is pinned for determinism.
+    eff=$(effective_row_rigor "$rigor_cell")
+    if [ "$eff" = "INVALID" ]; then
+      echo "BLOCKED: canonical-sdlc task ${id} has an invalid rigor '${rigor_cell}' (want tested|peer-reviewed|audited)." >&2
+      echo "Plan: $PLAN" >&2
+      echo "Fix: set the '${id}' row's rigor cell to one of tested, peer-reviewed, audited before committing." >&2
+      exit 2
+    fi
     # Evidence line for this task in ## SDLC State (anchored so T2 never matches T20).
     ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
          | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
@@ -411,16 +432,10 @@ validate_task_ledger() {
         echo "Fix: replace the '- ${id}:' placeholder with the actual evidence artifact before committing." >&2
         exit 2
       fi
-      eff=$(effective_row_rigor "$rigor_cell")
-      if [ "$eff" = "INVALID" ]; then
-        echo "BLOCKED: canonical-sdlc task ${id} has an invalid rigor '${rigor_cell}' (want tested|peer-reviewed|audited)." >&2
-        echo "Plan: $PLAN" >&2
-        echo "Fix: set the '${id}' row's rigor cell to one of tested, peer-reviewed, audited before committing." >&2
-        exit 2
-      fi
-      # 4/2: rigor-keyed proof-shape/auditor/critic lanes on top of the
-      # tested floor above. Applies regardless of this row's own status —
-      # the addressed unit is always in scope.
+      # 4/2: rigor-keyed proof-shape/auditor/critic lanes on top of the tested
+      # floor above. `eff` was resolved and INVALID-guarded at the per-row guard
+      # (4/7); it names a valid lane here. Applies regardless of this row's own
+      # status — the addressed unit is always in scope.
       apply_rigor_lanes "$id" "$status" "$eff" "$ev"
     else
       # Every OTHER row's presence/placeholder checks route through
@@ -435,23 +450,10 @@ validate_task_ledger() {
             # 4/2: a done row WITH real evidence is in scope for the
             # rigor-keyed lanes (BLOCKING) — a false-done claim at
             # peer-reviewed+ rigor, not a bookkeeping gap. A done row with
-            # NO evidence line stays log-only above (4/3 territory).
-            eff=$(effective_row_rigor "$rigor_cell")
-            # 4/6: an off-enum rigor cell resolves to the INVALID sentinel,
-            # which makes the row's lane indeterminate — you cannot tell which
-            # evidence contract applies. That is a hard STRUCTURAL error, not an
-            # evidence-quality issue, so it blocks UNCONDITIONALLY at any
-            # frontmatter rigor (mirroring the addressed unit's INVALID block
-            # above), NOT via the audited-only ledger_shape_fail. Guard here,
-            # before apply_rigor_lanes — whose case arms match only the three
-            # enum lanes and would otherwise let INVALID fall through as a
-            # silent no-op (the 4/4 gap).
-            if [ "$eff" = "INVALID" ]; then
-              echo "BLOCKED: canonical-sdlc task ${id} has an invalid rigor '${rigor_cell}' (want tested|peer-reviewed|audited)." >&2
-              echo "Plan: $PLAN" >&2
-              echo "Fix: set the '${id}' row's rigor cell to one of tested, peer-reviewed, audited before committing." >&2
-              exit 2
-            fi
+            # NO evidence line stays log-only above (4/3 territory). `eff` was
+            # resolved and INVALID-guarded at the per-row guard (4/7 — was a
+            # done-only guard under 4/6; now uniform across statuses), so it
+            # names a valid lane here.
             apply_rigor_lanes "$id" "$status" "$eff" "$ev"
           fi
           ;;
