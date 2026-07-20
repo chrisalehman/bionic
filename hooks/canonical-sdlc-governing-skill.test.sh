@@ -937,9 +937,58 @@ echo "v11 *.spec.md at sdlc-step 2 without matrix → allow (matrix is plan-only
 run_write "$project/.bionic/docs/specs/epic-01-demo/v11-spec.spec.md" "$(build_v11_plan step=2 matrix=no)"
 assert_eq "v11_accepts_spec_step2_no_matrix exit 0" 0 "$HOOK_EXIT"
 
+# scale: task plans carry a ## Tasks ledger, not a ## Verification Matrix
+# (the matrix is a wave/epic artifact). They must be exempt from the
+# matrix-required check regardless of sdlc-step. The wave case above
+# (build_v11_plan defaults to scale=wave) is the guard that the exemption
+# is scale-scoped, not a blanket removal.
+echo "v11 scale:task plan at sdlc-step 3 without matrix → allow (task uses ## Tasks ledger, not a matrix)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-task-no-matrix.plan.md" "$(build_v11_plan scale=task intent=bugfix rigor=tested step=3 matrix=no)"
+assert_eq "v11_accepts_task_step3_no_matrix exit 0" 0 "$HOOK_EXIT"
+
+echo "v11 scale:task plan at sdlc-step 4 without matrix → allow"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-task-no-matrix-s4.plan.md" "$(build_v11_plan scale=task intent=bugfix rigor=tested step=4 matrix=no)"
+assert_eq "v11_accepts_task_step4_no_matrix exit 0" 0 "$HOOK_EXIT"
+
 echo "v11 CRLF plan with full valid triple → allow"
 run_write "$project/.bionic/docs/plans/epic-01-demo/v11-crlf.plan.md" "$(to_crlf "$(build_v11_plan)")"
 assert_eq "v11_accepts_crlf_triple exit 0" 0 "$HOOK_EXIT"
+
+# ============================================================
+# CR-only line endings — classic-Mac \r (no \n) must parse too
+# ============================================================
+#
+# The prior normalization `tr -d '\r'` DELETED every \r. On CRLF that
+# leaves \n (works). On a CR-only artifact (\r as the sole line
+# separator) it removed every line break, collapsing the whole file to
+# ONE line, so the exact-match `$0 == "---"` frontmatter parser never
+# matched and a VALID artifact was false-BLOCKed "missing a YAML
+# frontmatter block". Fix: TRANSLATE \r to \n (not delete), matching the
+# evidence-gate hook's normalize_newlines. Sibling of the CRLF block above.
+
+# Converts LF line endings to classic-Mac CR-only by replacing each \n
+# with a bare \r (no \n remains).
+to_cr_only() {
+  printf '%s' "$1" | tr '\n' '\r'
+}
+
+echo "CR-only v11 plan with full valid triple → allow"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-cr-only.plan.md" "$(to_cr_only "$(build_v11_plan)")"
+assert_eq "v11_accepts_cr_only_triple exit 0" 0 "$HOOK_EXIT"
+
+echo "CR-only v8 autonomous plan with full valid frontmatter → allow"
+v8_full_cr=$(to_cr_only "$(build_versioned_plan 8)")
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-23-v8-cr-only.plan.md" "$v8_full_cr"
+assert_eq "cr_only_v8_full exit 0" 0 "$HOOK_EXIT"
+
+echo "CR-only v8 Write missing model_plan → block for the RIGHT reason (parses, then flags model_plan)"
+v8_no_mp_cr=$(to_cr_only "$(build_versioned_plan 8 model_plan)")
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-24-v8-cr-only-no-mp.plan.md" "$v8_no_mp_cr"
+assert_eq "cr_only_v8_no_mp exit 2" 2 "$HOOK_EXIT"
+case "$HOOK_STDERR" in
+  *model_plan*) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  CR-only error mentions model_plan (not "missing frontmatter")\n' ;;
+  *) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  CR-only error should name model_plan, got: %q\n' "$HOOK_STDERR" ;;
+esac
 
 echo "v11 enum substring (intent: rebuild) → block (whole-value equality, not substring)"
 run_write "$project/.bionic/docs/plans/epic-01-demo/v11-substr.plan.md" "$(build_v11_plan intent=rebuild)"
