@@ -1348,18 +1348,34 @@ do_install_agents() {
     fi
   done
 
+  # Files this run actually installs (or attempted to) — becomes the new
+  # manifest. A colliding user-authored file is skipped entirely and must
+  # NOT enter the manifest: bionic did not install it, so reset must never
+  # attribute it to bionic later.
+  declare -a manifest_agents=()
   for agent in "${SCRIPT_DIR}"/agents/*.md; do
     [ -f "$agent" ] || continue
     name="$(basename "$agent")"
     step_start "$name"
+    if [ -f ~/.claude/agents/"$name" ]; then
+      tracked=0
+      for m in ${prior_manifest[@]+"${prior_manifest[@]}"}; do
+        if [ "$name" = "$m" ]; then tracked=1; break; fi
+      done
+      if [ "$tracked" -eq 0 ]; then
+        step_fail fs "user-authored ~/.claude/agents/${name} exists — rename it to adopt the bionic role"
+        continue
+      fi
+    fi
     if cp "$agent" ~/.claude/agents/"$name"; then
       step_ok fs
     else
       step_fail fs "could not install agent role file to ~/.claude/agents/${name}"
     fi
+    manifest_agents+=("$name")
   done
 
-  { for r in ${repo_agents[@]+"${repo_agents[@]}"}; do echo "$r"; done; } > ~/.claude/agents/.bionic-manifest || true
+  { for r in ${manifest_agents[@]+"${manifest_agents[@]}"}; do echo "$r"; done; } > ~/.claude/agents/.bionic-manifest || true
   return 0
 }
 

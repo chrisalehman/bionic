@@ -613,6 +613,15 @@ expect_true "bootstrap writes agents manifest" grep -qF 'agents/.bionic-manifest
 expect_true "reset reads agents manifest" grep -qF 'agents/.bionic-manifest' "$RESET"
 expect_true "reset has an agents leftover-audit block" grep -qF 'LEFTOVERS+=("agent ' "$RESET"
 
+# 3x2b: agents removal is MANIFEST-ONLY — ~/.claude/agents/ is Claude Code's
+# standard USER subagent directory, so attribution for removal comes from the
+# install-time manifest alone, never a repo glob (deliberate divergence from
+# the hooks precedent above, which does union repo+manifest).
+expect_false "reset agents removal no longer globs repo agents/*.md" \
+  grep -qF 'for agent in "${SCRIPT_DIR}"/agents/*.md' "$RESET"
+expect_true "reset agents removal reads the manifest" \
+  grep -qF 'if [ -f ~/.claude/agents/.bionic-manifest ]; then' "$RESET"
+
 # 3x3: reset reverts account-mirror symlinks (and restores backups)
 expect_true "reset handles account-mirror symlinks" grep -q 'Account-mirror symlinks' "$RESET"
 expect_true "reset restores mirror backups" grep -qF '.bak-' "$RESET"

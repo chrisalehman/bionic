@@ -196,6 +196,13 @@ if ! mandate_matches "$SKILL" "$CRITIC_ANCHOR" "$TMP/critic-drift.md" MANDATE-BE
 else
   fail "meta: role-side critic mandate drift NOT detected"
 fi
+# 6c2. SKILL-side critic mandate drift (canonical copy moved)
+plant_skill_drift "$SKILL" "$TMP/skill-drift-critic.md" "$CRITIC_ANCHOR"
+if ! mandate_matches "$TMP/skill-drift-critic.md" "$CRITIC_ANCHOR" "$AGENTS/critic.md" MANDATE-BEGIN MANDATE-END; then
+  pass "meta: SKILL-side critic mandate drift detected"
+else
+  fail "meta: SKILL-side critic mandate drift NOT detected"
+fi
 # 6d. shared-core drift (one block drifted)
 plant_block_content_drift "$AGENTS/implementor.md" "$TMP/impl-drift.md" SHARED-CORE-BEGIN SHARED-CORE-END
 if ! sharedcore_matches "$TMP/impl-drift.md" "$AGENTS/senior-implementor.md"; then
