@@ -19,6 +19,9 @@ set -u
 command -v jq >/dev/null 2>&1 || exit 0
 INPUT=$(cat)
 
+SESSION_ID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || SESSION_ID=""
+[ -n "$SESSION_ID" ] || SESSION_ID="unknown"
+
 TRANSCRIPT=$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || TRANSCRIPT=""
 [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || exit 0
 
@@ -69,14 +72,16 @@ STATE_DIR="$PROJECT_DIR/.bionic/tmp"
 STATE="$STATE_DIR/context-spend.state"
 mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
 
-s_plan=""; s_step=""; s_occ=""
+s_plan=""; s_sess=""; s_step=""; s_occ=""
 if [ -f "$STATE" ]; then
-  IFS='	' read -r s_plan s_step s_occ < "$STATE" 2>/dev/null || true
+  IFS='	' read -r s_plan s_sess s_step s_occ < "$STATE" 2>/dev/null || true
 fi
 
-# First-seen or plan switch: seed silently.
-if [ "$s_plan" != "$PLAN" ] || [ -z "$s_step" ]; then
-  printf '%s\t%s\t%s\n' "$PLAN" "$STEP" "$OCCUPIED" > "$STATE" 2>/dev/null || true
+# First-seen, plan switch, or session switch: seed silently. Two
+# concurrent sessions on the same plan must never diff against each
+# other's occupancy — a session change re-seeds, same as a plan change.
+if [ "$s_plan" != "$PLAN" ] || [ "$s_sess" != "$SESSION_ID" ] || [ -z "$s_step" ]; then
+  printf '%s\t%s\t%s\t%s\n' "$PLAN" "$SESSION_ID" "$STEP" "$OCCUPIED" > "$STATE" 2>/dev/null || true
   exit 0
 fi
 
@@ -91,5 +96,5 @@ if [ "$DELTA" -ge 0 ]; then DELTA="+$DELTA"; fi
 AUDIT_DIR="$PROJECT_DIR/.bionic/memory"
 LINE="- $(date -u +%Y-%m-%dT%H:%M:%SZ) context-spend step-$s_step: occupied=$OCCUPIED delta=$DELTA model=$MODEL ($PLAN)"
 mkdir -p "$AUDIT_DIR" 2>/dev/null && printf '%s\n' "$LINE" >> "$AUDIT_DIR/sdlc-v11-audit.md" 2>/dev/null
-printf '%s\t%s\t%s\n' "$PLAN" "$STEP" "$OCCUPIED" > "$STATE" 2>/dev/null || true
+printf '%s\t%s\t%s\t%s\n' "$PLAN" "$SESSION_ID" "$STEP" "$OCCUPIED" > "$STATE" 2>/dev/null || true
 exit 0
