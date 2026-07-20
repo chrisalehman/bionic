@@ -134,13 +134,20 @@ if [ -z "$CONTENT" ]; then
   exit 2
 fi
 
-# Normalize CRLF (\r\n) line endings before any parsing. Without this, a
-# CRLF artifact's "---\r" delimiter line never matches the exact-match
-# `$0 == "---"` comparison below, so FRONTMATTER parses empty and the
-# hook false-BLOCKs a valid artifact as "missing a YAML frontmatter
-# block". Stripping \r once here means every downstream parse
-# (frontmatter values, yaml_get) sees plain \n text.
-CONTENT=$(printf '%s' "$CONTENT" | tr -d '\r')
+# Normalize line endings to plain \n before any parsing. Strip a trailing
+# \r from each record (CRLF: \r\n → \n) and translate any remaining lone \r
+# (classic-Mac CR-only: \r without \n) into a real newline. Every parse below
+# is line-anchored (the exact-match `$0 == "---"` frontmatter delimiter,
+# yaml_get, the matrix grep), so it must see real newlines.
+#
+# `tr -d '\r'` (the prior normalization) merely DELETED every \r. On a CRLF
+# artifact that happened to work, but on a CR-only artifact it removed every
+# line break, collapsing the whole file to ONE line — the frontmatter parser
+# then never matched and a VALID artifact was false-BLOCKed as "missing a YAML
+# frontmatter block". awk splits on \n by default, so a CR-only file arrives as
+# a single record that gsub re-splits into real lines; LF and CRLF files are
+# unaffected. Twin of the evidence-gate hook's normalize_newlines.
+CONTENT=$(printf '%s' "$CONTENT" | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }')
 
 # Extract the leading YAML frontmatter block (between the first two `---`
 # lines at column 0). If absent, block.
