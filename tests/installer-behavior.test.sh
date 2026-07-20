@@ -594,6 +594,57 @@ diff -q "${SBX}/manifest2.sorted" "${SBX}/manifest2.expected" >/dev/null 2>&1 \
   && ok "manifest after run 2 lists exactly alpha.md and beta.md" \
   || no "manifest after run 2 wrong: $(cat "$manifest")"
 
+# --- Run 3: collision — repo introduces delta.md; home already has a
+# hand-authored delta.md (never bionic-installed, never manifest-tracked).
+# User-territory guarantee: a collision with an untracked file must SKIP
+# (not overwrite), record a step failure naming the remediation, and never
+# enter the new manifest (bionic did not install it). alpha.md (manifest-
+# tracked from runs 1-2) must still overwrite normally — proving the skip is
+# collision-specific, not a general "existing file" freeze.
+printf -- '---\nname: alpha\n---\nalpha body v2\n' > "${AGSBX}/repo/agents/alpha.md"
+printf -- '---\nname: delta\n---\ndelta body\n' > "${AGSBX}/repo/agents/delta.md"
+echo "hand-authored delta, never installed by bionic" > "${AGSBX}/home/.claude/agents/delta.md"
+
+: > "$LOG"; INSTALL_FAILURES=()
+# INSTALL_FAILURES mutations happen in the subshell's own memory (needed here
+# to sandbox SCRIPT_DIR/HOME per-run) and don't propagate back — write the
+# array out from inside the subshell instead of reading it from the parent.
+_collision_out="${SBX}/collision-failures.txt"
+( export SCRIPT_DIR="${AGSBX}/repo" HOME="${AGSBX}/home"
+  do_install_agents >/dev/null
+  printf '%s\n' ${INSTALL_FAILURES[@]+"${INSTALL_FAILURES[@]}"} > "$_collision_out" )
+rc=$?
+[ "$rc" -eq 0 ] && ok "do_install_agents (collision run) returns 0" || no "do_install_agents (collision run) failed (rc=$rc)"
+
+diff -q "${AGSBX}/repo/agents/alpha.md" "${AGSBX}/home/.claude/agents/alpha.md" >/dev/null 2>&1 \
+  && ok "manifest-tracked target (alpha.md) still overwritten normally" \
+  || no "manifest-tracked target (alpha.md) was not updated"
+
+grep -qxF "hand-authored delta, never installed by bionic" "${AGSBX}/home/.claude/agents/delta.md" \
+  && ok "colliding user-authored file (delta.md, untracked) survives — not overwritten" \
+  || no "colliding user-authored file was overwritten"
+
+declare -a _collision_failures=()
+if [ -f "$_collision_out" ]; then
+  while IFS= read -r line; do
+    [ -n "$line" ] && _collision_failures+=("$line")
+  done < "$_collision_out"
+fi
+[ "${#_collision_failures[@]}" -ge 1 ] && ok "collision records at least one install failure" || no "collision recorded no failure"
+_delta_fail_found=0
+for f in ${_collision_failures[@]+"${_collision_failures[@]}"}; do
+  case "$f" in *"user-authored"*"delta.md"*) _delta_fail_found=1;; esac
+done
+[ "$_delta_fail_found" -eq 1 ] \
+  && ok "collision failure names delta.md and user-authored, with rename remediation" \
+  || no "collision failure message missing delta.md/user-authored wording (failures: ${_collision_failures[*]:-none})"
+
+sort "$manifest" > "${SBX}/manifest3.sorted"
+printf 'alpha.md\nbeta.md\n' | sort > "${SBX}/manifest3.expected"
+diff -q "${SBX}/manifest3.sorted" "${SBX}/manifest3.expected" >/dev/null 2>&1 \
+  && ok "manifest after collision run still lists exactly alpha.md and beta.md (delta.md excluded)" \
+  || no "manifest after collision run wrong: $(cat "$manifest")"
+
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
 echo "========================================"

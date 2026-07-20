@@ -424,17 +424,16 @@ if ! confirm "global agent role files (~/.claude/agents/)"; then
   note_skipped "Agents" "all agent role files"
 else
   agents_removed=0
-  # Remove the union of role files currently in this repo's agents/
-  # directory and files recorded in the install-time manifest
-  # (.bionic-manifest) — the manifest attributes files orphaned by later
-  # repo renames/deletions (mirrors Global Hooks below).
+  # Manifest-only removal: unlike Global Hooks below, this does NOT union in
+  # the repo's agents/*.md glob. ~/.claude/agents/ is Claude Code's standard
+  # USER subagent directory, so attribution here comes from the install-time
+  # manifest (.bionic-manifest) alone — a hand-authored file that happens to
+  # share a basename with a repo role file must never be removed just
+  # because the repo file exists. No manifest means bionic installed nothing
+  # here to remove.
   _agent_names=""
-  for agent in "${SCRIPT_DIR}"/agents/*.md; do
-    [ -f "$agent" ] || continue
-    _agent_names="${_agent_names}$(basename "$agent")"$'\n'
-  done
   if [ -f ~/.claude/agents/.bionic-manifest ]; then
-    _agent_names="${_agent_names}$(cat ~/.claude/agents/.bionic-manifest)"$'\n'
+    _agent_names="$(cat ~/.claude/agents/.bionic-manifest)"$'\n'
   fi
   _agent_names="$(printf '%s' "$_agent_names" | grep -v '^$' | sort -u || true)"
   while IFS= read -r name; do
