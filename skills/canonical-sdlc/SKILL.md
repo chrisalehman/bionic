@@ -280,6 +280,7 @@ Rules:
 - Fan out Steps 5 and 6 into their units when they are dispatched in parallel; Step 8 (Integrate & close) stays a single atomic task.
 - Mark a task `in_progress` when starting it; `completed` immediately when done. Never batch completions.
 - When a sub-agent finishes, the main thread updates the corresponding task.
+- **Dispatched task-shaped work: the orchestrator ledgers it.** When a discrete task-scale unit is executed by a dispatched subagent (inside a wave or any parent run), the subagent only reports; the ORCHESTRATOR writes the governing plan's ledger record from the verified report — at `scale: task`, the `## Tasks` row plus its `- T<n>: <evidence>` line; inside a wave, an equivalent dispatched-task ledger entry in the plan — before marking the unit complete. A missing ledger row is the orchestrator's defect, never the subagent's.
 - Step 8 (Integrate & close) verifies all tasks are `completed` before merge.
 
 **Golden rule of display.** The task list is a signal surface, not a narration log:
@@ -803,7 +804,7 @@ On accept, write final values into plan frontmatter literally — every flag as 
     - Step 9: (pending)
     ```
 
-    **Task-scale variant (`scale: task`, D12).** A task-scale session addresses a ledger TASK, not a numbered step: the plan additionally carries a `## Tasks` registration table, and `## SDLC State` opens with `current: T<n>` and one `- T<n>: <evidence>` line per task. Frontmatter `intent:`/`rigor:` are session defaults; per-task ledger cells override them. (In the sample below the `## SDLC State` heading is indented one space — a copy-paste guard so a fence-blind SDLC-State extractor in any doc that quotes this skeleton cannot match a real section; **real task-scale plans use no indent**.)
+    **Task-scale variant (`scale: task`, D12).** A task-scale session addresses a ledger TASK, not a numbered step: the plan additionally carries a `## Tasks` registration table, and `## SDLC State` opens with `current: T<n>` and one `- T<n>: <evidence>` line per task. Frontmatter `intent:`/`rigor:` are session defaults; per-task ledger cells override them. When a task is executed by a dispatched subagent, ledger-writing stays with the dispatching orchestrator (§Task Tracking). (In the sample below the `## SDLC State` heading is indented one space — a copy-paste guard so a fence-blind SDLC-State extractor in any doc that quotes this skeleton cannot match a real section; **real task-scale plans use no indent**.)
 
     ```
     ## Tasks
@@ -1208,6 +1209,7 @@ Every subagent invoked during a canonical-sdlc step must receive a prompt prefix
 
    This is not paraphrasable and not optional. The canonical copy lives in `map-instrument-narrow`'s **Rigor Mandate** and in `.bionic/sdlc-dispatch-rules.json` (`diagnostic_friction.directive`); inject that exact string. Omitting it is the single most common cause of debugging that spins through ad-hoc theories instead of converging on the root cause.
 9. **Auditor mandate (hardcoded).** Any Step-5 Independent Verification Auditor dispatch MUST include the Auditor Mandate **verbatim** in the subagent prompt (the canonical copy is the blockquote in §Step 5). Like point 8's Rigor Mandate, it is not paraphrasable and not optional — a paraphrased mandate is a weakened auditor.
+10. **Ledger accountability.** The dispatching orchestrator owns the ledger record for the dispatched unit (§Task Tracking). Subagents never write ledger rows; they return the evidence (commands, counts, commits, timing) the orchestrator needs to write one.
 
 This prevents subagent wander.
 
