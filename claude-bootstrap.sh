@@ -1372,6 +1372,7 @@ MANAGED_HOOKS=(
   "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "SessionStart|startup|~/.claude/hooks/memory-cleanup.sh"
   "UserPromptSubmit||~/.claude/hooks/terseness-reminder.sh"
+  "Stop||~/.claude/hooks/context-spend.sh"
 )
 
 # Rebuild hook config in global settings. Resetting .hooks to exactly the
