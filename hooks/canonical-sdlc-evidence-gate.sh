@@ -185,6 +185,8 @@ SDLC_VERSION=$(frontmatter_get canonical_sdlc_version)
 USE_WORKTREE=$(frontmatter_get use_worktree)
 SCALE=$(frontmatter_get scale)
 INTENT=$(frontmatter_get intent)
+RIGOR=$(frontmatter_get rigor)
+MULTI_AGENT=$(frontmatter_get multi_agent)
 
 # Whole-value placeholder test: trim leading/trailing whitespace, lowercase,
 # then require whole-value EQUALITY against the known token set. A token that
@@ -231,15 +233,190 @@ log_finding() {  # $1=check-id  $2=detail
   return 0
 }
 
-# v11 task-scale ledger validation (D12) — LOG-ONLY (D14, check-id
-# `task-ledger`). Reads the `## Tasks` registration table (fence-aware, the
-# matrix_section idiom) and the per-task `- T<n>:` evidence lines in the
-# ## SDLC State section (SECTION, already newline-normalized). Every deviation appends
-# one finding; the function ALWAYS returns 0 — a ledger defect never blocks this
-# wave. Checks: missing `## Tasks`; status outside {pending,active,done,dropped};
-# an active/done task with no `- T<n>:` line or a placeholder/empty value.
+# Normalize a task row's rigor cell to its effective rigor lane. Whole-value
+# `case` equality against the rigor enum (bash-3.2 safe — no associative arrays,
+# same idiom as is_r7_key below): a cell already naming a lane passes through; a
+# non-empty cell outside the enum is INVALID; an empty cell inherits the
+# plan-level RIGOR when that itself names a lane, else defaults to `tested` (the
+# floor — see plan Assumption A3). Defined ahead of validate_task_ledger (which
+# runs at the `current: T<n>` branch, before is_r7_key is defined below) so the
+# validator can call it — same placement rationale as is_placeholder_value.
+effective_row_rigor() {  # $1 = row's rigor cell
+  local cell
+  cell=$(printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+  case "$cell" in
+    tested|peer-reviewed|audited) echo "$cell"; return ;;
+    "") : ;;
+    *) echo "INVALID"; return ;;
+  esac
+  case "$RIGOR" in
+    tested|peer-reviewed|audited) echo "$RIGOR" ;;
+    *) echo "tested" ;;
+  esac
+}
+
+# Total order over the rigor enum, for the per-row FLOOR check (slice 4/8).
+# tested < peer-reviewed < audited. An empty/unknown value maps to 0 (the tested
+# floor) so an unset frontmatter rigor never manufactures a phantom downgrade.
+# Mirrors the governing-skill hook's ord map at its rigor check (kept in sync by
+# hand, not imported — the two hooks share no source). bash-3.2 safe whole-value
+# `case`, same idiom as effective_row_rigor above.
+rigor_ord() {  # $1 = a rigor lane name (or empty)
+  case "$1" in
+    peer-reviewed) echo 1 ;;
+    audited)       echo 2 ;;
+    *)             echo 0 ;;  # tested, empty, or unknown → the floor
+  esac
+}
+
+# Proof-shape test (D-slice 4/2): an evidence value counts as "proof-shaped"
+# — a command invocation + result counts, not prose — iff it contains BOTH
+# at least one digit AND at least one command token. A command token is any
+# of: a backtick; a literal '/' anywhere (a path, e.g. 'hooks/foo.sh'); or a
+# whole-word match against the fixed runner list (bash-3.2 safe — no
+# associative arrays, `grep -Ew` for the bounded whole-word match so `test`
+# matches in "bash test.sh 12/12" but `testing` never triggers on a `test`
+# substring). Returns 0 (proof-shaped) / 1 (not) — never blocks itself; the
+# caller (apply_rigor_lanes) decides what a failure means.
+is_proof_shaped() {  # $1 = evidence value
+  local v="$1"
+  echo "$v" | grep -qE '[0-9]' || return 1
+  if echo "$v" | grep -q '`'; then
+    return 0
+  fi
+  if echo "$v" | grep -qF '/'; then
+    return 0
+  fi
+  if echo "$v" | grep -Ewq 'bash|sh|npm|pnpm|yarn|make|pytest|go|cargo|git|test'; then
+    return 0
+  fi
+  return 1
+}
+
+# v11 rigor-keyed evidence lanes (D-slice 4/2, TASK SCALE ONLY). Applies to
+# the addressed row (any status) and to every OTHER row with status `done`
+# that has a non-empty, non-placeholder evidence line — the caller only
+# invokes this once those upstream 4/1 presence/placeholder checks (and, for
+# the addressed row, the rigor-enum check) have already passed. BLOCKS
+# (exit 2) on any lane breach:
+#   - effective rigor peer-reviewed or audited: evidence must be proof-shaped.
+#   - status done AND effective rigor >= peer-reviewed: evidence must name
+#     an `auditor` verdict.
+#   - status done AND effective rigor audited: evidence must ALSO name a
+#     `critic` verdict.
+# The `tested` floor carries none of these demands — 4/1's presence +
+# placeholder checks are its entire contract (plan Assumption A4: the literal
+# substrings are sufficient tokens, no pointer-format sub-schema).
+apply_rigor_lanes() {  # $1=id $2=status $3=effective-rigor $4=evidence-value
+  local id="$1" status="$2" eff="$3" ev="$4"
+  case "$eff" in
+    peer-reviewed|audited)
+      if ! is_proof_shaped "$ev"; then
+        echo "BLOCKED: canonical-sdlc task ${id} evidence must show a command + counts, not prose, at rigor '${eff}' ('${ev}')." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: replace the '- ${id}:' evidence with the actual command invocation and result counts (e.g. 'bash test.sh 12/12 green')." >&2
+        exit 2
+      fi
+      ;;
+  esac
+  if [ "$status" = "done" ]; then
+    case "$eff" in
+      peer-reviewed|audited)
+        if ! echo "$ev" | grep -Ewq 'auditor'; then
+          echo "BLOCKED: canonical-sdlc task ${id} is done at rigor '${eff}' but its evidence has no 'auditor' verdict ('${ev}')." >&2
+          echo "Plan: $PLAN" >&2
+          echo "Fix: record the independent auditor's verdict in the '- ${id}:' evidence line before marking done." >&2
+          exit 2
+        fi
+        ;;
+    esac
+    if [ "$eff" = "audited" ]; then
+      if ! echo "$ev" | grep -Ewq 'critic'; then
+        echo "BLOCKED: canonical-sdlc task ${id} is done at rigor 'audited' but its evidence has no 'critic' verdict ('${ev}')." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: record the adversarial critic's verdict in the '- ${id}:' evidence line before marking done." >&2
+        exit 2
+      fi
+    fi
+  fi
+}
+
+# Per-row rigor FLOOR check (slice 4/8, A15 — user-ratified, momentous). The
+# per-row `rigor` cell is a FLOOR unified with v11's run-rigor floor model: a
+# cell RAISING a row above the frontmatter rigor is always allowed (the cell
+# drives the heavier lane, 4/4), but a cell LOWERING it below the frontmatter
+# rigor is a DOWNGRADE — a recorded decision, never silent. A downgrade BLOCKS
+# (exit 2) UNLESS the row's `- T<n>:` evidence line carries a whole-word `waiver`
+# marker (Waiver Protocol — same `grep -Ewq` word-boundary idiom as the lane
+# token checks), in which case the row proceeds at its (lower) cell lane.
+#
+# Called on exactly the rows the rigor lanes cover — the addressed unit (any
+# status) and non-addressed `done` rows with real evidence — AFTER their
+# presence/placeholder checks and the per-row INVALID guard, and BEFORE
+# apply_rigor_lanes. Ordering rationale: a missing/placeholder evidence block
+# (addressed unit, or audited non-addressed via ledger_shape_fail) and the
+# INVALID-cell block both fire upstream of this, so they still win — a row with
+# no evidence line never reaches here (there is no line to hold a waiver, and its
+# absence already blocks or logs). `eff` is the RESOLVED effective rigor: an
+# empty cell resolves to the frontmatter rigor, so rigor_ord(eff) ==
+# rigor_ord(RIGOR) and no phantom downgrade fires — only an explicit lower cell
+# trips it. A cell EQUAL to the frontmatter is not a downgrade (strict `<`).
+enforce_rigor_floor() {  # $1=id  $2=effective-rigor  $3=evidence-value
+  local id="$1" eff="$2" ev="$3"
+  [ "$(rigor_ord "$eff")" -lt "$(rigor_ord "$RIGOR")" ] || return 0
+  if echo "$ev" | grep -Ewq 'waiver'; then
+    return 0  # recorded downgrade — proceed at the lower cell lane
+  fi
+  echo "BLOCKED: canonical-sdlc task ${id} lowers rigor from '${RIGOR}' to '${eff}', below the plan's floor." >&2
+  echo "Plan: $PLAN" >&2
+  echo "Fix: raise the cell to at least '${RIGOR}', or record a downgrade: add 'waiver: <user> <date> <reason>' to the '- ${id}:' evidence line (Waiver Protocol)." >&2
+  exit 2
+}
+
+# Router for the previously-log-only NON-addressed-row ledger-shape checks
+# (D-slice 4/3, task scale). On a frontmatter `rigor: audited` plan these
+# promote to BLOCKING (exit 2); at any other rigor they stay log-only findings
+# (D14, unchanged). The detail string is authored once by the caller and used
+# verbatim in whichever channel fires. The addressed-unit floor (4/1) and the
+# rigor lanes (4/2) are NOT routed through here — they already block
+# unconditionally where they should.
+ledger_shape_fail() {  # $1 = detail
+  if [ "$RIGOR" = audited ]; then
+    echo "BLOCKED: canonical-sdlc task-ledger: $1" >&2
+    echo "Plan: $PLAN" >&2
+    echo "Fix: resolve the ledger-shape defect above before committing (audited rigor makes the ledger-shape checks blocking; a non-audited plan would log this as a finding instead)." >&2
+    exit 2
+  fi
+  log_finding task-ledger "$1"
+}
+
+# v11 task-scale ledger validation (D12). Reads the `## Tasks` registration
+# table (fence-aware, the matrix_section idiom) and the per-task `- T<n>:`
+# evidence lines in the ## SDLC State section (SECTION, already newline-normalized).
+#
+# Two lanes (slice 4/1), plus rigor-keyed lanes on top (slice 4/2):
+#   - THE ADDRESSED UNIT — the `T<n>` named by `current: T<n>` — is BLOCKING at
+#     the tested floor: its row must exist in `## Tasks`, carry a non-placeholder
+#     `- T<n>:` evidence line, and have a rigor cell that resolves (its cell
+#     names a lane, or is empty; a non-empty cell outside the enum is INVALID).
+#     Any breach emits a 3-line block message and exit 2. Once past the floor,
+#     apply_rigor_lanes (4/2) applies the proof-shape/auditor/critic lanes keyed
+#     to its effective rigor.
+#   - EVERY OTHER row stays LOG-ONLY (D14, check-id `task-ledger`) for status
+#     and presence/placeholder: status outside {pending,active,done,dropped},
+#     or an active/done task with no `- T<n>:` line or a placeholder/empty
+#     value, each append one finding and never block. Missing `## Tasks`
+#     entirely is also log-only here. A `done` row that DOES have a non-empty,
+#     non-placeholder evidence line resolves its effective rigor and is
+#     additionally passed through apply_rigor_lanes (4/2) — BLOCKING, since a
+#     done claim at peer-reviewed+ rigor without real evidence is a false-done
+#     claim, not a bookkeeping gap. A malformed (off-enum) rigor cell on ANY row
+#     — addressed or not, at ANY status (done, active, pending, dropped) — is
+#     caught earlier by the per-row INVALID guard (4/7), which resolves the cell
+#     and BLOCKS unconditionally at any frontmatter rigor before this
+#     status-based branching; see that guard for the rationale.
 validate_task_ledger() {
-  local tasks rows line id status ev
+  local tasks rows line id status rigor_cell ev eff addressed_found=0
   tasks=$(normalize_newlines "$PLAN" | awk '
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
@@ -247,31 +424,102 @@ validate_task_ledger() {
     /^## / { f=0 }
     f')
   if [ -z "$tasks" ]; then
-    log_finding task-ledger "v11 task-scale plan has no '## Tasks' registration section"
+    ledger_shape_fail "v11 task-scale plan has no '## Tasks' registration section"
     return 0
   fi
   rows=$(echo "$tasks" | grep -E '^[[:space:]]*\|[[:space:]]*T[0-9]+')
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    id=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
-    status=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')
+    id=$(echo "$line"         | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
+    status=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')
+    rigor_cell=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$4); print $4}')
+    # status enum — routed through ledger_shape_fail (4/3): blocking on audited
+    # plans, log-only otherwise (was unconditionally log-only in D12).
     case "$status" in
       pending|active|done|dropped) : ;;
-      *) log_finding task-ledger "task ${id} has invalid status '${status:-empty}' (want pending|active|done|dropped)" ;;
+      *) ledger_shape_fail "task ${id} has invalid status '${status:-empty}' (want pending|active|done|dropped)" ;;
     esac
+    # Per-row INVALID rigor-cell guard (4/7): resolve this row's rigor cell and
+    # block if it is off-enum. A malformed rigor cell makes the row's lane
+    # indeterminate — a hard STRUCTURAL error, the exact sibling of the
+    # status-enum check above (both are whole-value enum equality on a single
+    # cell, validated per-row REGARDLESS of the row's status). So it blocks
+    # UNIFORMLY: on ANY row (addressed or not; done, active, pending, dropped)
+    # and at ANY frontmatter rigor — NOT routed through the audited-only
+    # ledger_shape_fail. Placed here, before the evidence extraction and the
+    # addressed-vs-other branching, so this ONE guard covers every row —
+    # consolidating the former per-branch INVALID checks (4/1 addressed unit,
+    # 4/6 non-addressed done) that left non-addressed active/pending rows
+    # unchecked. `eff` is reused by both branches below (never INVALID past
+    # here). Order vs the status-enum check: status first, then rigor — a row
+    # with BOTH defects may block on either; this order is pinned for determinism.
+    eff=$(effective_row_rigor "$rigor_cell")
+    if [ "$eff" = "INVALID" ]; then
+      echo "BLOCKED: canonical-sdlc task ${id} has an invalid rigor '${rigor_cell}' (want tested|peer-reviewed|audited)." >&2
+      echo "Plan: $PLAN" >&2
+      echo "Fix: set the '${id}' row's rigor cell to one of tested, peer-reviewed, audited before committing." >&2
+      exit 2
+    fi
     # Evidence line for this task in ## SDLC State (anchored so T2 never matches T20).
     ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
          | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
-    case "$status" in
-      active|done)
-        if [ -z "$ev" ]; then
-          log_finding task-ledger "task ${id} is ${status} but has no evidence on a '- ${id}:' line in ## SDLC State"
-        elif is_placeholder_value "$ev"; then
-          log_finding task-ledger "task ${id} is ${status} but its evidence is a placeholder ('${ev}')"
-        fi
-        ;;
-    esac
+    if [ "$id" = "$CURRENT" ]; then
+      # THE ADDRESSED UNIT: the tested floor is BLOCKING (slice 4/1).
+      addressed_found=1
+      if [ -z "$ev" ]; then
+        echo "BLOCKED: canonical-sdlc task ${id} has no '- ${id}:' evidence line in '## SDLC State'." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: record the evidence artifact on a '- ${id}:' line before committing." >&2
+        exit 2
+      fi
+      if is_placeholder_value "$ev"; then
+        echo "BLOCKED: canonical-sdlc task ${id} evidence line is a placeholder ('${ev}')." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: replace the '- ${id}:' placeholder with the actual evidence artifact before committing." >&2
+        exit 2
+      fi
+      # 4/8: FLOOR check — a cell lowering this row below the frontmatter rigor
+      # blocks unless the evidence line records a waiver. Runs after the
+      # presence/placeholder blocks above (so those win) and before the lanes.
+      enforce_rigor_floor "$id" "$eff" "$ev"
+      # 4/2: rigor-keyed proof-shape/auditor/critic lanes on top of the tested
+      # floor above. `eff` was resolved and INVALID-guarded at the per-row guard
+      # (4/7); it names a valid lane here. Applies regardless of this row's own
+      # status — the addressed unit is always in scope.
+      apply_rigor_lanes "$id" "$status" "$eff" "$ev"
+    else
+      # Every OTHER row's presence/placeholder checks route through
+      # ledger_shape_fail (4/3): blocking on audited plans, log-only otherwise.
+      case "$status" in
+        active|done)
+          if [ -z "$ev" ]; then
+            ledger_shape_fail "task ${id} is ${status} but has no evidence on a '- ${id}:' line in ## SDLC State"
+          elif is_placeholder_value "$ev"; then
+            ledger_shape_fail "task ${id} is ${status} but its evidence is a placeholder ('${ev}')"
+          elif [ "$status" = "done" ]; then
+            # 4/2: a done row WITH real evidence is in scope for the
+            # rigor-keyed lanes (BLOCKING) — a false-done claim at
+            # peer-reviewed+ rigor, not a bookkeeping gap. A done row with
+            # NO evidence line stays log-only above (4/3 territory). `eff` was
+            # resolved and INVALID-guarded at the per-row guard (4/7 — was a
+            # done-only guard under 4/6; now uniform across statuses), so it
+            # names a valid lane here.
+            # 4/8: FLOOR check first — a done row whose cell lowers it below the
+            # frontmatter rigor blocks unless its evidence line records a waiver.
+            enforce_rigor_floor "$id" "$eff" "$ev"
+            apply_rigor_lanes "$id" "$status" "$eff" "$ev"
+          fi
+          ;;
+      esac
+    fi
   done <<< "$rows"
+  # The addressed unit (current: T<n>) must have a row in ## Tasks (BLOCKING).
+  if [ "$addressed_found" -eq 0 ]; then
+    echo "BLOCKED: canonical-sdlc task ${CURRENT} has no row in the '## Tasks' registration table." >&2
+    echo "Plan: $PLAN" >&2
+    echo "Fix: add a '| ${CURRENT} | <intent> | <rigor> | <description> | <status> |' row to '## Tasks' before committing." >&2
+    exit 2
+  fi
   return 0
 }
 
@@ -1048,12 +1296,88 @@ validate_intent_evidence() {
   return 0
 }
 
+# v11 wave-scale D7 dispatched-task ledger PRESENCE (D-slice 4/3). Guarded to
+# v11 + scale:wave + frontmatter rigor:audited + multi_agent:true plans; for
+# every other plan it is a no-op (return 0). scale:epic is intentionally OUT —
+# epic plans legitimately dispatch research, not task-shaped units, so demanding
+# a dispatched-task ledger there would false-block scoping runs (plan Assumption
+# A8). Called from dispatch_modern, so it runs at EVERY step that reaches the
+# dispatcher (plan Assumption A5): the ledger is commit-time bookkeeping (D7:
+# ledger before marking complete), demanded from the first gated commit.
+#
+# TESTED-FLOOR SHAPE ONLY (plan Assumption A2): the wave's own Step-5 auditor /
+# Step-6 critic are the assurance roles at wave scale, so per-row auditor/critic
+# tokens (task-scale machinery) are NOT demanded here.
+#   1. `## Tasks` section ABSENT -> exit 2 (empty is fine, absent is not — the
+#      audited multi_agent wave must carry its dispatched-task ledger home).
+#   2. ZERO data rows -> SATISFIED (a human `none dispatched` prose line is
+#      documentation, not required by the parser). return 0.
+#   3. Each data row: status (field 6) in {pending,active,done,dropped} else
+#      exit 2; a non-placeholder `- T<n>:` evidence line must exist in the
+#      ## SDLC State section (SECTION) else exit 2.
+validate_dispatch_ledger() {
+  [ "$SDLC_VERSION" = "11" ] || return 0
+  [ "$SCALE" = "wave" ] || return 0
+  [ "$RIGOR" = "audited" ] || return 0
+  [ "$MULTI_AGENT" = "true" ] || return 0
+
+  local tasks rows line id status ev
+  # Fence-aware `## Tasks` extraction — same awk extractor as validate_task_ledger.
+  tasks=$(normalize_newlines "$PLAN" | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## Tasks/ { f=1; next }
+    /^## / { f=0 }
+    f')
+  if [ -z "$tasks" ]; then
+    echo "BLOCKED: canonical-sdlc audited multi_agent wave plan has no '## Tasks' dispatched-task ledger section." >&2
+    echo "Plan: $PLAN" >&2
+    echo "Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); the orchestrator appends one row per dispatched task-shaped unit (D7)." >&2
+    exit 2
+  fi
+  rows=$(echo "$tasks" | grep -E '^[[:space:]]*\|[[:space:]]*T[0-9]+')
+  [ -n "$rows" ] || return 0
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    id=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
+    status=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')
+    case "$status" in
+      pending|active|done|dropped) : ;;
+      *)
+        echo "BLOCKED: canonical-sdlc dispatched task ${id} has invalid status '${status:-empty}' (want pending|active|done|dropped)." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: set the '${id}' row's status cell to one of pending|active|done|dropped before committing." >&2
+        exit 2
+        ;;
+    esac
+    # Evidence line in ## SDLC State (anchored, same lookup as task scale).
+    ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
+         | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
+    if [ -z "$ev" ]; then
+      echo "BLOCKED: canonical-sdlc dispatched task ${id} has no '- ${id}:' evidence line in '## SDLC State'." >&2
+      echo "Plan: $PLAN" >&2
+      echo "Fix: record the dispatched unit's evidence artifact on a '- ${id}:' line before committing." >&2
+      exit 2
+    fi
+    if is_placeholder_value "$ev"; then
+      echo "BLOCKED: canonical-sdlc dispatched task ${id} evidence line is a placeholder ('${ev}')." >&2
+      echo "Plan: $PLAN" >&2
+      echo "Fix: replace the '- ${id}:' placeholder with the actual evidence artifact before committing." >&2
+      exit 2
+    fi
+  done <<< "$rows"
+  return 0
+}
+
 dispatch_modern() {
   local label="$1" ext_step="" integrate_step ship_step
   case "$label" in
     v5)                  ext_step=8; integrate_step=9; ship_step=10 ;;
     v6|v7|v8|v9|v10|v11) integrate_step=8; ship_step=9 ;;
   esac
+  # v11 audited multi_agent wave: D7 dispatched-task ledger PRESENCE, at every
+  # step that reaches this dispatcher (guarded internally; no-op otherwise).
+  validate_dispatch_ledger
   # v10/v11: the Verification Matrix is a prefix contract for every step from
   # the Verify gate on — current: 5 validates it inside validate_verify_step_v10;
   # current: 6..9 validate it here, so a REFUTED auditor blocks post-Verify
