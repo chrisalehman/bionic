@@ -1762,6 +1762,14 @@ to_crlf() {
   printf '%s' "$1" | sed $'s/$/\r/'
 }
 
+# Converts LF line endings to CR-only (classic-Mac) by replacing every
+# newline with a carriage return, so the content carries NO \n at all.
+# (write_plan then appends one trailing \n; the internal line breaks
+# stay pure \r — the faithful CR-only shape.)
+to_cr() {
+  printf '%s' "$1" | tr '\n' '\r'
+}
+
 # 15a — CRLF v8 plan, Step 5 complete but NO drive-check → block. Before
 # the fix: FRONTMATTER parses empty (canonical_sdlc_version lost) → hook
 # silently downgrades to legacy presence-only mode → incorrectly allows.
@@ -1785,6 +1793,45 @@ $v8_step5_base
   drive-check: click toggled app flag false → true via eval readback")" > /dev/null
 expect_allow "CRLF v8 Step 5 complete (drive-check present) → allow" \
   "$h15b" 'git commit -m "x"'
+
+# ============================================================
+# Section 15b: CR-only line endings — classic-Mac (\r without \n)
+# ============================================================
+#
+# A plan file with CR-only line endings (every break a lone \r, no \n)
+# previously collapsed to a SINGLE line under the hook's `tr -d '\r'`
+# normalization: deleting every \r removed every line break, so the
+# line-anchored `/^## SDLC State/` presence check never matched and the
+# hook exited 0 as "not a canonical-sdlc plan" — every commit passed
+# ungated. The fix normalizes \r to real newlines (both \r\n and lone
+# \r) so CR-only plans parse identically to LF/CRLF plans.
+
+echo ""
+echo "=== Section 15b: CR-only (classic-Mac) line endings ==="
+
+# 15b-cr-a — CR-only v8 plan, Step 5 complete but NO drive-check → block.
+# Before the fix: the whole file collapses to one line, ## SDLC State is
+# never seen, version is lost → hook silently allows. This is the RED case.
+h15bcra=$(make_home)
+write_plan "$h15bcra" "$(to_cr "$(v8_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v8_step5_base")" > /dev/null
+expect_block "CR-only v8 Step 5 without drive-check → block" \
+  "$h15bcra" 'git commit -m "x"' "drive-check"
+
+# 15b-cr-b — CR-only v8 plan with a complete, valid Step-5 block → allow
+# (guards against over-blocking once CR-only parses correctly).
+h15bcrb=$(make_home)
+write_plan "$h15bcrb" "$(to_cr "$(v8_frontmatter true)
+## SDLC State
+current: 5
+Step 5:
+$v8_step5_base
+  drive-check: click toggled app flag false → true via eval readback")" > /dev/null
+expect_allow "CR-only v8 Step 5 complete (drive-check present) → allow" \
+  "$h15bcrb" 'git commit -m "x"'
 
 # ============================================================
 # Section 16: v9 canonical_sdlc_version — universal stack-health gate
@@ -2271,13 +2318,45 @@ expect_block "v10 17d T3 contact: n/a, no waiver → block (Waiver Protocol)" \
 # 17d-case — the live-tier n/a ban must be case-insensitive: 'N/A' and
 # 'N/a: <reason>' are the same self-written downgrade as lowercase 'n/a'
 # (review-gate finding: a single capital letter must not defeat the ban).
+# The variants are written as full literal matrices rather than derived from
+# v10_matrix_live_na via ${var/pat/rep}: a slash in the contact value forces
+# an escaped slash in the pattern, and bash 3.2 leaves that backslash in the
+# replacement (producing 'contact: N\/A'), so the variant is never built.
+v10_matrix_live_na_upper="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  tier-run: https://app.example/panel — opened the panel
+  fresh: origin A rebuilt token-9f3a
+  cold-client: fresh incognito profile
+  contact: N/A
+  readback: panel.visible === true via page eval"
 h17d2=$(make_home)
-write_plan "$h17d2" "$(v10_plan 5 "$v10_step5_base" "${v10_matrix_live_na/contact: n\/a: not reachable quickly/contact: N\/A}")" > /dev/null
+write_plan "$h17d2" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_live_na_upper")" > /dev/null
 expect_block "v10 17d T3 contact: N/A (uppercase), no waiver → block" \
   "$h17d2" 'git commit -m "x"' "Waiver Protocol"
 
+v10_matrix_live_na_mixed="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  tier-run: https://app.example/panel — opened the panel
+  fresh: origin A rebuilt token-9f3a
+  cold-client: fresh incognito profile
+  contact: N/a: not reachable quickly
+  readback: panel.visible === true via page eval"
 h17d3=$(make_home)
-write_plan "$h17d3" "$(v10_plan 5 "$v10_step5_base" "${v10_matrix_live_na/contact: n\/a: not reachable quickly/contact: N\/a: not reachable quickly}")" > /dev/null
+write_plan "$h17d3" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_live_na_mixed")" > /dev/null
 expect_block "v10 17d T3 contact: N/a: <reason> (mixed case), no waiver → block" \
   "$h17d3" 'git commit -m "x"' "Waiver Protocol"
 
@@ -2851,6 +2930,26 @@ h19j=$(make_home)
 write_plan "$h19j" "$(to_crlf "$(v11_task_plan "$v11_ledger_valid")")" > /dev/null
 expect_allow "v11 19j CRLF task ledger → allow, no false finding" \
   "$h19j" 'git commit -m "x"'
+
+# 19j-cr — the same paths under CR-only (classic-Mac) line endings. Two
+# assertions pin both directions of the normalization fix on the task path
+# (frontmatter scale, current: T<n>, ## Tasks table, evidence lines):
+#
+# 19j-cr1 — a bad-status ledger under CR-only → exit 0 + task-ledger finding.
+# Before the fix the file collapsed to one line, scale/## Tasks were never
+# parsed → no finding at all (RED). After the fix the ledger validates and
+# the bad status is caught.
+h19jcr1=$(make_home)
+write_plan "$h19jcr1" "$(to_cr "$(v11_task_plan "$v11_ledger_bad_status")")" > /dev/null
+expect_finding "v11 19j-cr1 CR-only bad-status ledger → exit 0 + task-ledger finding" \
+  "$h19jcr1" 'git commit -m "x"' "task-ledger"
+
+# 19j-cr2 — a valid ledger under CR-only → allow, no false finding (guard
+# against over-flagging once CR-only parses correctly).
+h19jcr2=$(make_home)
+write_plan "$h19jcr2" "$(to_cr "$(v11_task_plan "$v11_ledger_valid")")" > /dev/null
+expect_allow "v11 19j-cr2 CR-only valid task ledger → allow, no false finding" \
+  "$h19jcr2" 'git commit -m "x"'
 
 # --- (4) epic merge-target consistency (log-only) ------------------------
 

@@ -647,6 +647,44 @@ Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql
 
 **Mid-plan reconfiguration:** edit the frontmatter directly; the new value takes effect on the next hook read.
 
+### The quick-reference card (explain / help)
+
+Canonical card — rendered verbatim by `explain` and by a bare `help` invocation; content mirrors the axis tables and must be updated with them.
+
+```
+── canonical-sdlc quick reference ──
+
+Reply "confirm" to accept the inferred triple, or override any axis first
+(examples at the bottom). One value per axis:
+
+intent — what kind of work is this?
+  build              new capability, or capability restored by adding new machinery
+  bugfix             restore intended behavior within the existing design
+  refactor           change structure, preserve behavior (upgrades, migrations, removals)
+  tune               move a NAMED measurement toward a target (latency, size, a UX score)
+  spike              timeboxed research or prototype — ships no code; the writeup is the deliverable
+  incident-response  a live deployed surface is broken for its users; the clock matters
+
+rigor — how hard should the evidence try to lie? (each tier includes the ones below)
+  tested         TDD on every change + the Verification Matrix + structured self-review
+  peer-reviewed  adds a separate spec + an independent auditor who tries to falsify your evidence
+  audited        adds an independent adversarial critic who tries to break the code itself
+
+scale — how much work?
+  task   sub-session unit, several per session — ledger line, no per-task plan file
+  wave   one session (the default)
+  epic   multi-session — scoping run only (Steps 0–3), carves the work into waves
+
+Floors push rigor UP, never down: incident-response and security/privacy-touching
+work floor at audited; a project or epic can declare its own rigor-floor. spike is
+capped at tested (it ships no code).
+
+Override examples:
+  set intent=refactor, confirm
+  set rigor=audited, set scale=task, confirm
+  set verify(AC-2)=T2, confirm
+```
+
 ---
 
 ## Quick reference
