@@ -254,20 +254,98 @@ effective_row_rigor() {  # $1 = row's rigor cell
   esac
 }
 
+# Proof-shape test (D-slice 4/2): an evidence value counts as "proof-shaped"
+# — a command invocation + result counts, not prose — iff it contains BOTH
+# at least one digit AND at least one command token. A command token is any
+# of: a backtick; a literal '/' anywhere (a path, e.g. 'hooks/foo.sh'); or a
+# whole-word match against the fixed runner list (bash-3.2 safe — no
+# associative arrays, `grep -Ew` for the bounded whole-word match so `test`
+# matches in "bash test.sh 12/12" but `testing` never triggers on a `test`
+# substring). Returns 0 (proof-shaped) / 1 (not) — never blocks itself; the
+# caller (apply_rigor_lanes) decides what a failure means.
+is_proof_shaped() {  # $1 = evidence value
+  local v="$1"
+  echo "$v" | grep -qE '[0-9]' || return 1
+  if echo "$v" | grep -q '`'; then
+    return 0
+  fi
+  if echo "$v" | grep -qF '/'; then
+    return 0
+  fi
+  if echo "$v" | grep -Ewq 'bash|sh|npm|pnpm|yarn|make|pytest|go|cargo|git|test'; then
+    return 0
+  fi
+  return 1
+}
+
+# v11 rigor-keyed evidence lanes (D-slice 4/2, TASK SCALE ONLY). Applies to
+# the addressed row (any status) and to every OTHER row with status `done`
+# that has a non-empty, non-placeholder evidence line — the caller only
+# invokes this once those upstream 4/1 presence/placeholder checks (and, for
+# the addressed row, the rigor-enum check) have already passed. BLOCKS
+# (exit 2) on any lane breach:
+#   - effective rigor peer-reviewed or audited: evidence must be proof-shaped.
+#   - status done AND effective rigor >= peer-reviewed: evidence must name
+#     an `auditor` verdict.
+#   - status done AND effective rigor audited: evidence must ALSO name a
+#     `critic` verdict.
+# The `tested` floor carries none of these demands — 4/1's presence +
+# placeholder checks are its entire contract (plan Assumption A4: the literal
+# substrings are sufficient tokens, no pointer-format sub-schema).
+apply_rigor_lanes() {  # $1=id $2=status $3=effective-rigor $4=evidence-value
+  local id="$1" status="$2" eff="$3" ev="$4"
+  case "$eff" in
+    peer-reviewed|audited)
+      if ! is_proof_shaped "$ev"; then
+        echo "BLOCKED: canonical-sdlc task ${id} evidence must show a command + counts, not prose, at rigor '${eff}' ('${ev}')." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: replace the '- ${id}:' evidence with the actual command invocation and result counts (e.g. 'bash test.sh 12/12 green')." >&2
+        exit 2
+      fi
+      ;;
+  esac
+  if [ "$status" = "done" ]; then
+    case "$eff" in
+      peer-reviewed|audited)
+        if ! echo "$ev" | grep -q "auditor"; then
+          echo "BLOCKED: canonical-sdlc task ${id} is done at rigor '${eff}' but its evidence has no 'auditor' verdict ('${ev}')." >&2
+          echo "Plan: $PLAN" >&2
+          echo "Fix: record the independent auditor's verdict in the '- ${id}:' evidence line before marking done." >&2
+          exit 2
+        fi
+        ;;
+    esac
+    if [ "$eff" = "audited" ]; then
+      if ! echo "$ev" | grep -q "critic"; then
+        echo "BLOCKED: canonical-sdlc task ${id} is done at rigor 'audited' but its evidence has no 'critic' verdict ('${ev}')." >&2
+        echo "Plan: $PLAN" >&2
+        echo "Fix: record the adversarial critic's verdict in the '- ${id}:' evidence line before marking done." >&2
+        exit 2
+      fi
+    fi
+  fi
+}
+
 # v11 task-scale ledger validation (D12). Reads the `## Tasks` registration
 # table (fence-aware, the matrix_section idiom) and the per-task `- T<n>:`
 # evidence lines in the ## SDLC State section (SECTION, already newline-normalized).
 #
-# Two lanes (slice 4/1):
+# Two lanes (slice 4/1), plus rigor-keyed lanes on top (slice 4/2):
 #   - THE ADDRESSED UNIT — the `T<n>` named by `current: T<n>` — is BLOCKING at
 #     the tested floor: its row must exist in `## Tasks`, carry a non-placeholder
 #     `- T<n>:` evidence line, and have a rigor cell that resolves (its cell
 #     names a lane, or is empty; a non-empty cell outside the enum is INVALID).
-#     Any breach emits a 3-line block message and exit 2.
-#   - EVERY OTHER row stays LOG-ONLY (D14, check-id `task-ledger`): status
-#     outside {pending,active,done,dropped}, or an active/done task with no
-#     `- T<n>:` line or a placeholder/empty value, each append one finding and
-#     never block. Missing `## Tasks` entirely is also log-only here.
+#     Any breach emits a 3-line block message and exit 2. Once past the floor,
+#     apply_rigor_lanes (4/2) applies the proof-shape/auditor/critic lanes keyed
+#     to its effective rigor.
+#   - EVERY OTHER row stays LOG-ONLY (D14, check-id `task-ledger`) for status
+#     and presence/placeholder: status outside {pending,active,done,dropped},
+#     or an active/done task with no `- T<n>:` line or a placeholder/empty
+#     value, each append one finding and never block. Missing `## Tasks`
+#     entirely is also log-only here. A `done` row that DOES have a non-empty,
+#     non-placeholder evidence line is additionally passed through
+#     apply_rigor_lanes (4/2) — BLOCKING, since a done claim at peer-reviewed+
+#     rigor without real evidence is a false-done claim, not a bookkeeping gap.
 validate_task_ledger() {
   local tasks rows line id status rigor_cell ev eff addressed_found=0
   tasks=$(normalize_newlines "$PLAN" | awk '
@@ -316,6 +394,10 @@ validate_task_ledger() {
         echo "Fix: set the '${id}' row's rigor cell to one of tested, peer-reviewed, audited before committing." >&2
         exit 2
       fi
+      # 4/2: rigor-keyed proof-shape/auditor/critic lanes on top of the
+      # tested floor above. Applies regardless of this row's own status —
+      # the addressed unit is always in scope.
+      apply_rigor_lanes "$id" "$status" "$eff" "$ev"
     else
       # Every OTHER row keeps its log-only handling (D14) at this slice.
       case "$status" in
@@ -324,6 +406,13 @@ validate_task_ledger() {
             log_finding task-ledger "task ${id} is ${status} but has no evidence on a '- ${id}:' line in ## SDLC State"
           elif is_placeholder_value "$ev"; then
             log_finding task-ledger "task ${id} is ${status} but its evidence is a placeholder ('${ev}')"
+          elif [ "$status" = "done" ]; then
+            # 4/2: a done row WITH real evidence is in scope for the
+            # rigor-keyed lanes (BLOCKING) — a false-done claim at
+            # peer-reviewed+ rigor, not a bookkeeping gap. A done row with
+            # NO evidence line stays log-only above (4/3 territory).
+            eff=$(effective_row_rigor "$rigor_cell")
+            apply_rigor_lanes "$id" "$status" "$eff" "$ev"
           fi
           ;;
       esac
