@@ -2855,7 +2855,7 @@ scale: task
 current: T2
 
 - T1: fixed in commit abc123, suite 5/5 green
-- T2: extracting helper on branch, commit def456"
+- T2: bash extract-helper.sh 4 cases green, commit def456"
 
 # 19d — valid task ledger, current: T2 accepted → allow, no finding (BLOCKING-
 # grade correctness: a false block here would be a defect).
@@ -2914,7 +2914,7 @@ expect_block "v11 19g addressed active task without evidence line → block" \
 
 # 19h — the ADDRESSED active task (T2) with a placeholder evidence value
 # (`- T2: TBD`) → BLOCK (slice 4/1 blocking floor; previously a finding).
-v11_ledger_active_placeholder="${v11_ledger_valid/- T2: extracting helper on branch, commit def456/- T2: TBD}"
+v11_ledger_active_placeholder="${v11_ledger_valid/- T2: bash extract-helper.sh 4 cases green, commit def456/- T2: TBD}"
 h19h=$(make_home)
 write_plan "$h19h" "$(v11_task_plan "$v11_ledger_active_placeholder")" > /dev/null
 expect_block "v11 19h addressed active task placeholder evidence → block" \
@@ -3565,6 +3565,202 @@ h22a6=$(make_home)
 write_plan "$h22a6" "$(v11_task_plan "$v22_nonaddressed_broken")" > /dev/null
 expect_finding "v11 22a6 broken non-addressed row (T1) + honest T2 → no block, log-only finding" \
   "$h22a6" 'git commit -m "x"' "task-ledger"
+
+# --- 22b: proof-shape + auditor/critic lanes (slice 4/2) ------------------
+#
+# Lane scope (D-slice 4/2): the addressed row (any status) AND every OTHER
+# row with status `done` are subject to — effective rigor peer-reviewed OR
+# audited: evidence must be proof-shaped (is_proof_shaped); done AND rigor
+# >= peer-reviewed: evidence must contain "auditor"; done AND rigor audited:
+# evidence must ALSO contain "critic". The `tested` floor carries none of
+# this — presence + placeholder (4/1) is its whole contract.
+
+# 22b1 — addressed row (peer-reviewed, active) with prose evidence (no digit,
+# no command token) → block (not proof-shaped).
+v22b_t2_prose="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | tested | fix the frontmatter parser | done |
+| T2 | bugfix | peer-reviewed | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: fixed in commit abc123, suite 5/5 green
+- T2: implemented and verified manually"
+h22b1=$(make_home)
+write_plan "$h22b1" "$(v11_task_plan "$v22b_t2_prose")" > /dev/null
+expect_block "v11 22b1 addressed row peer-reviewed active prose evidence → block (not proof-shaped)" \
+  "$h22b1" 'git commit -m "x"' "not prose"
+
+# 22b2 — same row, evidence is a command + counts → allow (proof-shaped).
+v22b_t2_proof="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | tested | fix the frontmatter parser | done |
+| T2 | bugfix | peer-reviewed | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: fixed in commit abc123, suite 5/5 green
+- T2: bash test.sh 232/232 green"
+h22b2=$(make_home)
+write_plan "$h22b2" "$(v11_task_plan "$v22b_t2_proof")" > /dev/null
+expect_allow "v11 22b2 addressed row peer-reviewed active proof-shaped evidence → allow" \
+  "$h22b2" 'git commit -m "x"'
+
+# 22b3 — a DONE non-addressed row (T1, peer-reviewed) with proof-shaped
+# evidence but no 'auditor' token → block (done needs auditor).
+v22b_t1_no_auditor="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | peer-reviewed | fix the frontmatter parser | done |
+| T2 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: bash suite 12/12
+- T2: fixed enum check, bash suite 12/12"
+h22b3=$(make_home)
+write_plan "$h22b3" "$(v11_task_plan "$v22b_t1_no_auditor")" > /dev/null
+expect_block "v11 22b3 done row peer-reviewed proof-shaped but no auditor token → block" \
+  "$h22b3" 'git commit -m "x"' "auditor"
+
+# 22b4 — same row with an 'auditor' token in the evidence → allow.
+v22b_t1_auditor="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | peer-reviewed | fix the frontmatter parser | done |
+| T2 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: bash test.sh 12/12, auditor CONFIRMED
+- T2: fixed enum check, bash suite 12/12"
+h22b4=$(make_home)
+write_plan "$h22b4" "$(v11_task_plan "$v22b_t1_auditor")" > /dev/null
+expect_allow "v11 22b4 done row peer-reviewed with auditor token → allow" \
+  "$h22b4" 'git commit -m "x"'
+
+# 22b5 — a DONE row at audited rigor with 'auditor' but no 'critic' → block
+# (audited done additionally needs critic).
+v22b_t1_audited_no_critic="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | audited | fix the frontmatter parser | done |
+| T2 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: bash test.sh 12/12 auditor CONFIRMED
+- T2: fixed enum check, bash suite 12/12"
+h22b5=$(make_home)
+write_plan "$h22b5" "$(v11_task_plan "$v22b_t1_audited_no_critic")" > /dev/null
+expect_block "v11 22b5 done row audited with auditor but no critic → block" \
+  "$h22b5" 'git commit -m "x"' "critic"
+
+# 22b6 — same row with both 'auditor' and 'critic' tokens → allow.
+v22b_t1_audited_complete="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | audited | fix the frontmatter parser | done |
+| T2 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: bash test.sh 12/12 auditor CONFIRMED, critic no-blocking
+- T2: fixed enum check, bash suite 12/12"
+h22b6=$(make_home)
+write_plan "$h22b6" "$(v11_task_plan "$v22b_t1_audited_complete")" > /dev/null
+expect_allow "v11 22b6 done row audited with auditor and critic → allow" \
+  "$h22b6" 'git commit -m "x"'
+
+# 22b7 — addressed row at the tested floor (active), plain prose evidence →
+# allow (tested demands no proof-shape/auditor/critic; presence+placeholder
+# from 4/1 is its whole contract).
+v22b_t2_tested_prose="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | tested | fix the frontmatter parser | done |
+| T2 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: fixed in commit abc123, suite 5/5 green
+- T2: reproduced and fixed the off-by-one"
+h22b7=$(make_home)
+write_plan "$h22b7" "$(v11_task_plan "$v22b_t2_tested_prose")" > /dev/null
+expect_allow "v11 22b7 addressed row tested floor prose evidence → allow (no proof-shape demand)" \
+  "$h22b7" 'git commit -m "x"'
+
+# 22b8 — proof-shape unit pin: a command word alone (no digit) is not
+# proof-shaped, and a digit alone (no command token) is not proof-shaped
+# either — both halves of the AND are load-bearing.
+
+v22b_t2_no_digit="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | tested | fix the frontmatter parser | done |
+| T2 | bugfix | peer-reviewed | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: fixed in commit abc123, suite 5/5 green
+- T2: bash test.sh all green"
+h22b8a=$(make_home)
+write_plan "$h22b8a" "$(v11_task_plan "$v22b_t2_no_digit")" > /dev/null
+expect_block "v11 22b8a proof-shape pin: command word, no digit → block" \
+  "$h22b8a" 'git commit -m "x"' "not prose"
+
+v22b_t2_no_command="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | tested | fix the frontmatter parser | done |
+| T2 | bugfix | peer-reviewed | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: fixed in commit abc123, suite 5/5 green
+- T2: fixed 3 cases by hand"
+h22b8b=$(make_home)
+write_plan "$h22b8b" "$(v11_task_plan "$v22b_t2_no_command")" > /dev/null
+expect_block "v11 22b8b proof-shape pin: digit, no command token → block" \
+  "$h22b8b" 'git commit -m "x"' "not prose"
 
 # ============================================================
 # Summary
