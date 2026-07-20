@@ -397,7 +397,7 @@ stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
 | AC | tier | status | evidence | auditor |
 |---|---|---|---|---|
 | AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
-| AC-2 | T3 | waived | waiver: chris 2026-07-16 staging origin down; retest next wave | waived |
+| AC-2 | T3 | waived | waiver: dana 2026-07-16 staging origin down; retest next wave | waived |
 | AC-3 | T2 | discharged | see AC-3 | CONFIRMED |
 | AC-4 | T1 | discharged | see AC-4 | CONFIRMED |
 | AC-5 | T0 | discharged | see AC-5 | CONFIRMED |
@@ -420,7 +420,7 @@ AC-5:
   tier-run: pnpm build && tsc
   readback: 0 type errors
 AC-6:
-  user-confirmed: chris 2026-07-16 walked the panel at 3 breakpoints against the design spec
+  user-confirmed: dana 2026-07-16 walked the panel at 3 breakpoints against the design spec
 ```
 
 Reading the rows: **AC-1** (T3) is a real user-visible flow, so it carries all five live-tier fields — a suite run could never honestly produce `fresh`/`cold-client`/`contact` for it (the Tier-Discharge Rule). **AC-2** (T3) is legitimately blocked this wave by a staging outage; rather than self-write `n/a` on a live-tier field, it goes through the Waiver Protocol and is recorded `waiver: <user> <date> <reason>` — exempt from its per-tier keys and from needing a `CONFIRMED` auditor verdict. **AC-3** (T2) declares its fixture's provenance so the auditor can check the fixture structurally reaches the failure the AC guards. **AC-4** (T1) and **AC-5** (T0) are substrate-only, so `tier-run` + `readback` is the whole contract. **AC-6** (T4) is a scheduled human walk, discharged by a recorded `user-confirmed:` field — never self-confirmed by an agent. Every non-waived row's `auditor` cell reads `CONFIRMED`, meaning the Independent Verification Auditor re-executed at least one evidence command per tier used and could not falsify the row; a single `REFUTED` or `UNVERIFIABLE` cell would block Step-5 closure absent a waiver.
