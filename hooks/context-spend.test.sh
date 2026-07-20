@@ -74,6 +74,39 @@ fire() {  # $1=project — build real-shape stdin and run
 audit_of() { cat "$1/.bionic/memory/sdlc-v11-audit.md" 2>/dev/null || true; }
 state_of() { cat "$1/.bionic/tmp/context-spend.state" 2>/dev/null || true; }
 
+# assert_silent: advisory invariant (A1) — every hook invocation, on every
+# path, exits 0 and emits nothing on stdout (a Stop hook's stdout can carry
+# a block payload; this hook must never emit one). Reads HOOK_EXIT/
+# HOOK_STDOUT set by the most recent run_hook/fire call.
+assert_silent() {  # $1=label
+  local label="$1"
+  TOTAL=$((TOTAL + 1))
+  if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDOUT" ]; then
+    pass "$label: exit 0 + empty stdout"
+  else
+    fail "$label: expected exit 0 + empty stdout" "exit=$HOOK_EXIT stdout='$HOOK_STDOUT'"
+  fi
+}
+
+# assert_degraded: a no-data class (D1-D8/A3) must be silent (A1) AND leave
+# both outputs untouched — no audit line, state exactly as before the run.
+assert_degraded() {  # $1=dir $2=label $3=pre-run state_of() snapshot
+  local dir="$1" label="$2" pre="$3"
+  assert_silent "$label"
+  TOTAL=$((TOTAL + 1))
+  if [ -z "$(audit_of "$dir")" ]; then
+    pass "$label: no audit line"
+  else
+    fail "$label: unexpected audit line" "audit='$(audit_of "$dir")'"
+  fi
+  TOTAL=$((TOTAL + 1))
+  if [ "$(state_of "$dir")" = "$pre" ]; then
+    pass "$label: state untouched"
+  else
+    fail "$label: state changed" "before='$pre' after='$(state_of "$dir")'"
+  fi
+}
+
 cleanup_projects=()
 cleanup() { for d in "${cleanup_projects[@]:-}"; do rm -rf "$d"; done; }
 trap cleanup EXIT
@@ -88,6 +121,7 @@ e1() {
   local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
   local plan="$dir/.bionic/docs/plans/epic-t/wave-t.plan.md"
   fire "$dir"
+  assert_silent "E1 first-seen"
   TOTAL=$((TOTAL + 1))
   if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$(audit_of "$dir")" ]; then
     pass "E1 first-seen: exit 0, no audit line"
@@ -107,8 +141,9 @@ echo ""
 echo "=== E2: unchanged step — still no line, state untouched ==="
 e2() {
   local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
-  fire "$dir"; local st1; st1=$(state_of "$dir")
+  fire "$dir"; assert_silent "E2 unchanged (seed run)"; local st1; st1=$(state_of "$dir")
   fire "$dir"
+  assert_silent "E2 unchanged (repeat run)"
   TOTAL=$((TOTAL + 1))
   if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$(audit_of "$dir")" ]; then
     pass "E2 unchanged step: still no line"
@@ -130,9 +165,11 @@ e3() {
   local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
   local plan="$dir/.bionic/docs/plans/epic-t/wave-t.plan.md"
   fire "$dir"                        # seed at step 4, occ 100000
+  assert_silent "E3 seed run"
   write_plan "$dir" 5
   write_transcript "$dir" 142137 0 0
   fire "$dir"                        # boundary: step 4 ended, occ 142137
+  assert_silent "E3 boundary run"
   local audit; audit=$(audit_of "$dir")
   TOTAL=$((TOTAL + 1))
   local n; n=$(printf '%s\n' "$audit" | grep -c 'context-spend step-')
@@ -161,9 +198,11 @@ echo "=== E4: boundary with compaction — negative delta ==="
 e4() {
   local dir; dir=$(make_env 5 142137 0 0); cleanup_projects+=("$dir")
   fire "$dir"                        # seed at step 5, occ 142137
+  assert_silent "E4 seed run"
   write_plan "$dir" 6
   write_transcript "$dir" 90000 0 0
   fire "$dir"                        # boundary: occ dropped to 90000
+  assert_silent "E4 boundary run"
   local audit; audit=$(audit_of "$dir")
   TOTAL=$((TOTAL + 1))
   if printf '%s\n' "$audit" | grep -qE 'context-spend step-5: occupied=90000 delta=-52137 '; then
@@ -179,9 +218,11 @@ echo "=== E5: task-scale ids — step-T2 attribution ==="
 e5() {
   local dir; dir=$(make_env T2 100000 0 0); cleanup_projects+=("$dir")
   fire "$dir"                        # seed at T2
+  assert_silent "E5 seed run"
   write_plan "$dir" T3
   write_transcript "$dir" 120000 0 0
   fire "$dir"                        # boundary: T2 ended
+  assert_silent "E5 boundary run"
   local audit; audit=$(audit_of "$dir")
   TOTAL=$((TOTAL + 1))
   if printf '%s\n' "$audit" | grep -qE 'context-spend step-T2: occupied=120000 delta=\+20000 '; then
@@ -197,10 +238,12 @@ echo "=== E6: newest plan changes — silent re-seed, no line ==="
 e6() {
   local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
   fire "$dir"                        # seed pointing at wave-t.plan.md
+  assert_silent "E6 seed run"
   sleep 1
   write_plan "$dir" 7 "epic-t/wave-u.plan.md"   # newer plan becomes ls -t head
   touch "$dir/.bionic/docs/plans/epic-t/wave-u.plan.md"
   fire "$dir"
+  assert_silent "E6 plan-change run"
   TOTAL=$((TOTAL + 1))
   if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$(audit_of "$dir")" ]; then
     pass "E6 plan-change: silent re-seed, no line"
@@ -215,6 +258,187 @@ e6() {
   fi
 }
 e6
+
+# ============================================================
+# Degradation section (AC-2) — no-data classes: exit 0, empty
+# stdout, no audit line, state untouched from before the run.
+# ============================================================
+
+echo ""
+echo "=== D1: stdin missing transcript_path key ==="
+d1() {
+  local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
+  local pre; pre=$(state_of "$dir")
+  local stdin; stdin=$(printf '{"session_id":"scrubbed","cwd":"%s","hook_event_name":"Stop","stop_hook_active":false}' "$dir")
+  run_hook "$dir" "$stdin"
+  assert_degraded "$dir" "D1 missing transcript_path" "$pre"
+}
+d1
+
+echo ""
+echo "=== D2: transcript file absent ==="
+d2() {
+  local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
+  local pre; pre=$(state_of "$dir")
+  run_hook "$dir" "$(stdin_for "$dir" "$dir/does-not-exist.jsonl")"
+  assert_degraded "$dir" "D2 transcript absent" "$pre"
+}
+d2
+
+echo ""
+echo "=== D3: transcript has no assistant-usage entries ==="
+d3() {
+  local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
+  cat > "$dir/transcript.jsonl" <<'EOF'
+{"type":"user","message":"scrubbed"}
+{"type":"system","message":"scrubbed"}
+EOF
+  local pre; pre=$(state_of "$dir")
+  fire "$dir"
+  assert_degraded "$dir" "D3 no assistant-usage entries" "$pre"
+}
+d3
+
+echo ""
+echo "=== D4: no plans dir / no *.plan.md under it ==="
+d4a() {
+  local dir; dir=$(mktemp -d); cleanup_projects+=("$dir")
+  mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/memory"
+  write_transcript "$dir" 100000 0 0
+  local pre; pre=$(state_of "$dir")
+  fire "$dir"
+  assert_degraded "$dir" "D4a no plans dir at all" "$pre"
+}
+d4a
+
+d4b() {
+  local dir; dir=$(mktemp -d); cleanup_projects+=("$dir")
+  mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/memory" "$dir/.bionic/docs/plans"
+  write_transcript "$dir" 100000 0 0
+  local pre; pre=$(state_of "$dir")
+  fire "$dir"
+  assert_degraded "$dir" "D4b plans dir empty (no *.plan.md)" "$pre"
+}
+d4b
+
+echo ""
+echo "=== D5: plan lacking current: line (or lacking ## SDLC State) ==="
+d5a() {
+  local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
+  cat > "$dir/.bionic/docs/plans/epic-t/wave-t.plan.md" <<'EOF'
+---
+governing-skill: superpowers:writing-plans
+---
+## SDLC State
+
+integration-branch: main
+
+- Step 0: ok
+EOF
+  local pre; pre=$(state_of "$dir")
+  fire "$dir"
+  assert_degraded "$dir" "D5a plan lacks current: line" "$pre"
+}
+d5a
+
+d5b() {
+  local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
+  cat > "$dir/.bionic/docs/plans/epic-t/wave-t.plan.md" <<'EOF'
+---
+governing-skill: superpowers:writing-plans
+---
+## Some Other Section
+
+current: 4
+EOF
+  local pre; pre=$(state_of "$dir")
+  fire "$dir"
+  assert_degraded "$dir" "D5b plan lacks ## SDLC State section entirely" "$pre"
+}
+d5b
+
+echo ""
+echo "=== D6: jq absent (PATH stripped) ==="
+d6() {
+  local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
+  local pre; pre=$(state_of "$dir")
+  HOOK_STDOUT=$(CLAUDE_PROJECT_DIR="$dir" PATH=/nonexistent /bin/bash "$HOOK" <<< "$(stdin_for "$dir" "$dir/transcript.jsonl")" 2>/dev/null); HOOK_EXIT=$?
+  assert_degraded "$dir" "D6 jq absent" "$pre"
+}
+d6
+
+echo ""
+echo "=== D7: malformed stdin (not JSON) ==="
+d7() {
+  local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
+  local pre; pre=$(state_of "$dir")
+  run_hook "$dir" "this is not json at all"
+  assert_degraded "$dir" "D7 malformed stdin" "$pre"
+}
+d7
+
+echo ""
+echo "=== D8: occupied=0 (all three token fields zero) ==="
+d8() {
+  local dir; dir=$(make_env 4 0 0 0); cleanup_projects+=("$dir")
+  local pre; pre=$(state_of "$dir")
+  fire "$dir"
+  assert_degraded "$dir" "D8 occupied=0" "$pre"
+}
+d8
+
+# ============================================================
+# Advisory-invariant section (AC-4) — meta-evidence planted in
+# BOTH directions: A1 (silence contract, retrofit onto E1-E6
+# above + every D/A case via assert_silent), A2 (positive
+# re-assert: a planted boundary DOES append exactly one line),
+# A3 (fence-blind parser would wrongly emit; this hook must not).
+# ============================================================
+
+echo ""
+echo "=== A2: positive re-assert — planted boundary appends exactly one line ==="
+a2() {
+  local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
+  fire "$dir"
+  assert_silent "A2 seed run"
+  write_plan "$dir" 5
+  write_transcript "$dir" 142137 0 0
+  fire "$dir"
+  assert_silent "A2 boundary run"
+  local audit; audit=$(audit_of "$dir")
+  TOTAL=$((TOTAL + 1))
+  local n; n=$(printf '%s\n' "$audit" | grep -c 'context-spend step-')
+  if [ "$n" -eq 1 ]; then
+    pass "A2 positive re-assert: exactly one line on planted boundary"
+  else
+    fail "A2 positive re-assert: line count" "n=$n audit='$audit'"
+  fi
+}
+a2
+
+echo ""
+echo "=== A3: fenced-skeleton plan — current: only inside fences → silence ==="
+a3() {
+  local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
+  cat > "$dir/.bionic/docs/plans/epic-t/wave-t.plan.md" <<'PLANEOF'
+---
+governing-skill: superpowers:writing-plans
+---
+## SDLC State
+
+integration-branch: main
+
+```
+current: 99
+```
+
+- Step 0: ok
+PLANEOF
+  local pre; pre=$(state_of "$dir")
+  fire "$dir"
+  assert_degraded "$dir" "A3 fenced-skeleton current: line" "$pre"
+}
+a3
 
 # ============================================================
 # Results
