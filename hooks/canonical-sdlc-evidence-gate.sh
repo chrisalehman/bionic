@@ -255,6 +255,20 @@ effective_row_rigor() {  # $1 = row's rigor cell
   esac
 }
 
+# Total order over the rigor enum, for the per-row FLOOR check (slice 4/8).
+# tested < peer-reviewed < audited. An empty/unknown value maps to 0 (the tested
+# floor) so an unset frontmatter rigor never manufactures a phantom downgrade.
+# Mirrors the governing-skill hook's ord map at its rigor check (kept in sync by
+# hand, not imported — the two hooks share no source). bash-3.2 safe whole-value
+# `case`, same idiom as effective_row_rigor above.
+rigor_ord() {  # $1 = a rigor lane name (or empty)
+  case "$1" in
+    peer-reviewed) echo 1 ;;
+    audited)       echo 2 ;;
+    *)             echo 0 ;;  # tested, empty, or unknown → the floor
+  esac
+}
+
 # Proof-shape test (D-slice 4/2): an evidence value counts as "proof-shaped"
 # — a command invocation + result counts, not prose — iff it contains BOTH
 # at least one digit AND at least one command token. A command token is any
@@ -308,7 +322,7 @@ apply_rigor_lanes() {  # $1=id $2=status $3=effective-rigor $4=evidence-value
   if [ "$status" = "done" ]; then
     case "$eff" in
       peer-reviewed|audited)
-        if ! echo "$ev" | grep -q "auditor"; then
+        if ! echo "$ev" | grep -Ewq 'auditor'; then
           echo "BLOCKED: canonical-sdlc task ${id} is done at rigor '${eff}' but its evidence has no 'auditor' verdict ('${ev}')." >&2
           echo "Plan: $PLAN" >&2
           echo "Fix: record the independent auditor's verdict in the '- ${id}:' evidence line before marking done." >&2
@@ -317,7 +331,7 @@ apply_rigor_lanes() {  # $1=id $2=status $3=effective-rigor $4=evidence-value
         ;;
     esac
     if [ "$eff" = "audited" ]; then
-      if ! echo "$ev" | grep -q "critic"; then
+      if ! echo "$ev" | grep -Ewq 'critic'; then
         echo "BLOCKED: canonical-sdlc task ${id} is done at rigor 'audited' but its evidence has no 'critic' verdict ('${ev}')." >&2
         echo "Plan: $PLAN" >&2
         echo "Fix: record the adversarial critic's verdict in the '- ${id}:' evidence line before marking done." >&2
@@ -325,6 +339,38 @@ apply_rigor_lanes() {  # $1=id $2=status $3=effective-rigor $4=evidence-value
       fi
     fi
   fi
+}
+
+# Per-row rigor FLOOR check (slice 4/8, A15 — user-ratified, momentous). The
+# per-row `rigor` cell is a FLOOR unified with v11's run-rigor floor model: a
+# cell RAISING a row above the frontmatter rigor is always allowed (the cell
+# drives the heavier lane, 4/4), but a cell LOWERING it below the frontmatter
+# rigor is a DOWNGRADE — a recorded decision, never silent. A downgrade BLOCKS
+# (exit 2) UNLESS the row's `- T<n>:` evidence line carries a whole-word `waiver`
+# marker (Waiver Protocol — same `grep -Ewq` word-boundary idiom as the lane
+# token checks), in which case the row proceeds at its (lower) cell lane.
+#
+# Called on exactly the rows the rigor lanes cover — the addressed unit (any
+# status) and non-addressed `done` rows with real evidence — AFTER their
+# presence/placeholder checks and the per-row INVALID guard, and BEFORE
+# apply_rigor_lanes. Ordering rationale: a missing/placeholder evidence block
+# (addressed unit, or audited non-addressed via ledger_shape_fail) and the
+# INVALID-cell block both fire upstream of this, so they still win — a row with
+# no evidence line never reaches here (there is no line to hold a waiver, and its
+# absence already blocks or logs). `eff` is the RESOLVED effective rigor: an
+# empty cell resolves to the frontmatter rigor, so rigor_ord(eff) ==
+# rigor_ord(RIGOR) and no phantom downgrade fires — only an explicit lower cell
+# trips it. A cell EQUAL to the frontmatter is not a downgrade (strict `<`).
+enforce_rigor_floor() {  # $1=id  $2=effective-rigor  $3=evidence-value
+  local id="$1" eff="$2" ev="$3"
+  [ "$(rigor_ord "$eff")" -lt "$(rigor_ord "$RIGOR")" ] || return 0
+  if echo "$ev" | grep -Ewq 'waiver'; then
+    return 0  # recorded downgrade — proceed at the lower cell lane
+  fi
+  echo "BLOCKED: canonical-sdlc task ${id} lowers rigor from '${RIGOR}' to '${eff}', below the plan's floor." >&2
+  echo "Plan: $PLAN" >&2
+  echo "Fix: raise the cell to at least '${RIGOR}', or record a downgrade: add 'waiver: <user> <date> <reason>' to the '- ${id}:' evidence line (Waiver Protocol)." >&2
+  exit 2
 }
 
 # Router for the previously-log-only NON-addressed-row ledger-shape checks
@@ -432,6 +478,10 @@ validate_task_ledger() {
         echo "Fix: replace the '- ${id}:' placeholder with the actual evidence artifact before committing." >&2
         exit 2
       fi
+      # 4/8: FLOOR check — a cell lowering this row below the frontmatter rigor
+      # blocks unless the evidence line records a waiver. Runs after the
+      # presence/placeholder blocks above (so those win) and before the lanes.
+      enforce_rigor_floor "$id" "$eff" "$ev"
       # 4/2: rigor-keyed proof-shape/auditor/critic lanes on top of the tested
       # floor above. `eff` was resolved and INVALID-guarded at the per-row guard
       # (4/7); it names a valid lane here. Applies regardless of this row's own
@@ -454,6 +504,9 @@ validate_task_ledger() {
             # resolved and INVALID-guarded at the per-row guard (4/7 — was a
             # done-only guard under 4/6; now uniform across statuses), so it
             # names a valid lane here.
+            # 4/8: FLOOR check first — a done row whose cell lowers it below the
+            # frontmatter rigor blocks unless its evidence line records a waiver.
+            enforce_rigor_floor "$id" "$eff" "$ev"
             apply_rigor_lanes "$id" "$status" "$eff" "$ev"
           fi
           ;;
