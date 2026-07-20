@@ -86,7 +86,7 @@ source "${SCRIPT_DIR}/lib/platform.sh"
 # ─── Sections ────────────────────────────────────────────────────────────────
 # Bump SECTION_TOTAL when adding a section() call.
 
-SECTION_TOTAL=22
+SECTION_TOTAL=23
 SECTION_IDX=0
 CURRENT_SECTION=""
 section() {
@@ -1298,6 +1298,55 @@ if command -v notebooklm &>/dev/null; then
 else
   echo "  notebooklm — skipped (CLI not installed)"
 fi
+
+# ─── Global Agents ───────────────────────────────────────────────────────────
+#
+# Installs bionic's agent role files (repo agents/*.md) to ~/.claude/agents so
+# Claude Code can dispatch subagents via `subagent_type: implementor|
+# senior-implementor|researcher|auditor|critic|test-runner`. Same glob /
+# orphan-prune / manifest shape as Global Hooks below: the repo is canonical,
+# installs orphaned by prior refactors are removed, and a manifest records
+# exactly what bionic installed so reset can undo it even if the repo's
+# agents/ contents change between install and reset.
+do_install_agents() {
+  mkdir -p ~/.claude/agents
+
+  declare -a repo_agents=()
+  for agent in "${SCRIPT_DIR}"/agents/*.md; do
+    [ -f "$agent" ] || continue
+    repo_agents+=("$(basename "$agent")")
+  done
+
+  for installed in ~/.claude/agents/*.md; do
+    [ -f "$installed" ] || continue
+    base="$(basename "$installed")"
+    found=0
+    for r in ${repo_agents[@]+"${repo_agents[@]}"}; do
+      if [ "$base" = "$r" ]; then found=1; break; fi
+    done
+    if [ "$found" -eq 0 ]; then
+      rm -f "$installed"
+      echo "  ${base}... ✗ removed (no longer in repo)"
+    fi
+  done
+
+  for agent in "${SCRIPT_DIR}"/agents/*.md; do
+    [ -f "$agent" ] || continue
+    name="$(basename "$agent")"
+    step_start "$name"
+    if cp "$agent" ~/.claude/agents/"$name"; then
+      step_ok fs
+    else
+      step_fail fs "could not install agent role file to ~/.claude/agents/${name}"
+    fi
+  done
+
+  { for r in ${repo_agents[@]+"${repo_agents[@]}"}; do echo "$r"; done; } > ~/.claude/agents/.bionic-manifest || true
+  return 0
+}
+
+section "Global agents"
+do_install_agents
 
 # ─── Global Hooks ────────────────────────────────────────────────────────────
 

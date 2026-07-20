@@ -53,7 +53,7 @@ chmod +x "${BIN}"/*
 
 # ---------- extract the REAL resilience block + installer functions ----------
 awk '/^# ─── Resilience ───/{f=1} f{print} /^# ─── Helpers ───/{if(f)exit}' "$BOOTSTRAP" > "$CODE"
-for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry; do
+for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry do_install_agents; do
   awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$CODE"
 done
 
@@ -511,6 +511,53 @@ eval "$_pw_heal_node_saved"
 verify_errors=()
 verify_playwright_registry > /dev/null
 case "${verify_errors[0]:-}" in *"heal skipped"*) no "healable install must not carry the hint: ${verify_errors[0]:-}";; "") no "expected a verify error (builds are missing)";; *) ok "healable install's verify error stays generic";; esac
+
+# 17) Global agents install (Pattern B: mirrors the hooks install — glob copy,
+# orphan-prune, manifest). Sandboxed via SCRIPT_DIR (fixture repo with a fake
+# agents/ dir, same convention the hooks block uses for its source glob) and
+# HOME (fake ~/.claude/agents, pre-seeded with an orphan to prune) — no real
+# ~/.claude is touched.
+AGSBX="${SBX}/agents-sandbox"
+mkdir -p "${AGSBX}/repo/agents" "${AGSBX}/home/.claude/agents"
+printf -- '---\nname: alpha\n---\nalpha body\n' > "${AGSBX}/repo/agents/alpha.md"
+printf -- '---\nname: beta\n---\nbeta body\n' > "${AGSBX}/repo/agents/beta.md"
+echo "stale content" > "${AGSBX}/home/.claude/agents/orphan.md"
+
+: > "$LOG"; INSTALL_FAILURES=()
+( export SCRIPT_DIR="${AGSBX}/repo" HOME="${AGSBX}/home"; do_install_agents >/dev/null )
+rc=$?
+[ "$rc" -eq 0 ] && ok "do_install_agents returns 0" || no "do_install_agents failed (rc=$rc)"
+
+[ -f "${AGSBX}/home/.claude/agents/alpha.md" ] && [ -f "${AGSBX}/home/.claude/agents/beta.md" ] \
+  && ok "both fixture role files copied to ~/.claude/agents" \
+  || no "role files not copied"
+diff -q "${AGSBX}/repo/agents/alpha.md" "${AGSBX}/home/.claude/agents/alpha.md" >/dev/null 2>&1 \
+  && ok "copied file content matches source" || no "copied content mismatch"
+
+[ ! -f "${AGSBX}/home/.claude/agents/orphan.md" ] && ok "planted orphan removed" || no "orphan not pruned"
+
+manifest="${AGSBX}/home/.claude/agents/.bionic-manifest"
+if [ -f "$manifest" ]; then
+  ok "manifest written"
+  sort "$manifest" > "${SBX}/manifest.sorted"
+  printf 'alpha.md\nbeta.md\n' | sort > "${SBX}/manifest.expected"
+  diff -q "${SBX}/manifest.sorted" "${SBX}/manifest.expected" >/dev/null 2>&1 \
+    && ok "manifest lists exactly the 2 installed basenames" \
+    || no "manifest content wrong: $(cat "$manifest")"
+else
+  no "manifest missing"
+  no "manifest content check skipped (no manifest)"
+fi
+
+# subshell exit-0 proof under set -e (matches the do_heal_playwright_registry
+# precedent at 14b above) — re-seed an orphan so prune runs again too.
+echo "stale again" > "${AGSBX}/home/.claude/agents/orphan2.md"
+if ( set -e; export SCRIPT_DIR="${AGSBX}/repo" HOME="${AGSBX}/home"; do_install_agents >/dev/null ); then
+  ok "do_install_agents survives under set -e (subshell exits 0)"
+else
+  no "do_install_agents aborted under set -e"
+fi
+[ ! -f "${AGSBX}/home/.claude/agents/orphan2.md" ] && ok "second-run orphan also pruned" || no "second-run orphan not pruned"
 
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
