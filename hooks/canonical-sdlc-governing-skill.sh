@@ -134,13 +134,20 @@ if [ -z "$CONTENT" ]; then
   exit 2
 fi
 
-# Normalize CRLF (\r\n) line endings before any parsing. Without this, a
-# CRLF artifact's "---\r" delimiter line never matches the exact-match
-# `$0 == "---"` comparison below, so FRONTMATTER parses empty and the
-# hook false-BLOCKs a valid artifact as "missing a YAML frontmatter
-# block". Stripping \r once here means every downstream parse
-# (frontmatter values, yaml_get) sees plain \n text.
-CONTENT=$(printf '%s' "$CONTENT" | tr -d '\r')
+# Normalize line endings to plain \n before any parsing. Strip a trailing
+# \r from each record (CRLF: \r\n → \n) and translate any remaining lone \r
+# (classic-Mac CR-only: \r without \n) into a real newline. Every parse below
+# is line-anchored (the exact-match `$0 == "---"` frontmatter delimiter,
+# yaml_get, the matrix grep), so it must see real newlines.
+#
+# `tr -d '\r'` (the prior normalization) merely DELETED every \r. On a CRLF
+# artifact that happened to work, but on a CR-only artifact it removed every
+# line break, collapsing the whole file to ONE line — the frontmatter parser
+# then never matched and a VALID artifact was false-BLOCKed as "missing a YAML
+# frontmatter block". awk splits on \n by default, so a CR-only file arrives as
+# a single record that gsub re-splits into real lines; LF and CRLF files are
+# unaffected. Twin of the evidence-gate hook's normalize_newlines.
+CONTENT=$(printf '%s' "$CONTENT" | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }')
 
 # Extract the leading YAML frontmatter block (between the first two `---`
 # lines at column 0). If absent, block.
@@ -350,6 +357,12 @@ fi
 # consulting this short circuit (the `!= 11` clause keeps v≤10 behavior
 # byte-identical).
 MODE=$(yaml_get mode)
+# Read SCALE unconditionally here (mirrors MODE) so it is bound on every path
+# under `set -u`. The v11 arm re-reads it for its own triple validation; v10
+# plans have no scale: field, so SCALE is "" and the matrix block treats them
+# as before. Without this, the matrix block's `[ "$SCALE" != "task" ]` guard
+# tripped an unbound-variable error on the v10 autonomous path.
+SCALE=$(yaml_get scale)
 if [ "$SDLC_VERSION" != "11" ] && [ "$MODE" != "autonomous" ]; then
   exit 0
 fi
@@ -398,7 +411,8 @@ fi
 #
 # Scope: v10 mode: autonomous OR any v11 (v11 has no mode gate — its
 # triple's presence is the gate, D13), basename *.plan.md, sdlc-step >= 3
-# (numeric). Specs, non-autonomous v10 modes, continuation*.md, and
+# (numeric). Specs, non-autonomous v10 modes, continuation*.md, v11
+# scale: task plans (they carry a ## Tasks ledger, not a matrix), and
 # earlier schema versions are out of scope — the matrix is a plan-body
 # artifact that exists starting at Step 3 (Plan) approval.
 if { [ "$SDLC_VERSION" = "10" ] && [ "$MODE" = "autonomous" ]; } || [ "$SDLC_VERSION" = "11" ]; then
@@ -408,7 +422,11 @@ if { [ "$SDLC_VERSION" = "10" ] && [ "$MODE" = "autonomous" ]; } || [ "$SDLC_VER
       case "$SDLC_STEP" in
         ''|*[!0-9]*) ;;  # non-numeric or empty sdlc-step → not in scope
         *)
-          if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null; then
+          # scale: task plans carry a ## Tasks ledger, not a ## Verification
+          # Matrix (the matrix is a wave/epic artifact) — exempt them. SCALE is
+          # set only on the v11 arm above (empty for v10 autonomous), so this
+          # guard never changes v10 behavior.
+          if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null && [ "$SCALE" != "task" ]; then
             if ! echo "$CONTENT" | grep -qE '^## Verification Matrix'; then
               if [ "$SDLC_VERSION" = "11" ]; then
                 echo "BLOCKED: canonical-sdlc v11 plan '$BASENAME' (sdlc-step ${SDLC_STEP}) is missing a '## Verification Matrix' section." >&2

@@ -2062,7 +2062,7 @@ stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
 |---|---|---|---|---|
 | AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
 | AC-2 | T1 | discharged | see AC-2 | CONFIRMED |
-| AC-3 | T3 | waived | waiver: chris 2026-07-16 env stale | waived |
+| AC-3 | T3 | waived | waiver: dana 2026-07-16 env stale | waived |
 
 AC-1:
   tier-run: https://app.example/panel — opened the panel
@@ -2143,7 +2143,7 @@ stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
 |---|---|---|---|---|
 | AC-1 | T3 | discharged | see AC-1 | REFUTED |
 | AC-2 | T1 | discharged | see AC-2 | CONFIRMED |
-| AC-3 | T3 | waived | waiver: chris 2026-07-16 env stale | waived |
+| AC-3 | T3 | waived | waiver: dana 2026-07-16 env stale | waived |
 
 AC-1:
   tier-run: https://app.example/panel — opened the panel
@@ -2164,7 +2164,7 @@ stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
 |---|---|---|---|---|
 | AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
 | AC-2 | T1 | discharged | see AC-2 | CONFIRMED |
-| AC-3 | T3 | waived | waiver: chris 2026-07-16 env stale |  |
+| AC-3 | T3 | waived | waiver: dana 2026-07-16 env stale |  |
 
 AC-1:
   tier-run: https://app.example/panel — opened the panel
@@ -4061,7 +4061,7 @@ v22d2b_body="## Tasks
 scale: task
 current: T1
 
-- T1: reproduced and fixed the boundary case, waiver: chris 2026-07-19 genuine bugfix"
+- T1: reproduced and fixed the boundary case, waiver: dana 2026-07-19 genuine bugfix"
 h22d2b=$(make_home)
 write_plan "$h22d2b" "$(v11_task_plan "$v22d2b_body")" > /dev/null
 expect_allow "v11 22d2b frontmatter audited, cell tested (downgrade), WITH waiver → allow (recorded, runs at tested lane)" \
@@ -4434,7 +4434,7 @@ v22f2_body="## Tasks
 scale: task
 current: T1
 
-- T1: reproduced and fixed the boundary case, waiver: chris 2026-07-19 genuine bugfix"
+- T1: reproduced and fixed the boundary case, waiver: dana 2026-07-19 genuine bugfix"
 h22f2=$(make_home)
 write_plan "$h22f2" "$(v11_task_plan "$v22f2_body")" > /dev/null
 expect_allow "v11 22f2 audited frontmatter, addressed tested cell + waiver → allow (recorded downgrade)" \
@@ -4490,7 +4490,7 @@ v22f4b_body="## Tasks
 scale: task
 current: T1
 
-- T1: fixed it by hand, waiver: chris 2026-07-19 quick bugfix"
+- T1: fixed it by hand, waiver: dana 2026-07-19 quick bugfix"
 h22f4b=$(make_home)
 write_plan "$h22f4b" "$(v11_task_plan_rigor peer-reviewed "$v22f4b_body")" > /dev/null
 expect_allow "v11 22f4b peer-reviewed frontmatter, addressed tested cell + waiver → allow" \
@@ -4551,7 +4551,7 @@ v22f6b_body="## Tasks
 scale: task
 current: T2
 
-- T1: bash test.sh 9/9 auditor CONFIRMED, waiver: chris 2026-07-19 scoped down to peer-reviewed
+- T1: bash test.sh 9/9 auditor CONFIRMED, waiver: dana 2026-07-19 scoped down to peer-reviewed
 - T2: bash suite 12/12 green"
 h22f6b=$(make_home)
 write_plan "$h22f6b" "$(v11_task_plan "$v22f6b_body")" > /dev/null
