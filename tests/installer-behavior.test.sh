@@ -53,7 +53,7 @@ chmod +x "${BIN}"/*
 
 # ---------- extract the REAL resilience block + installer functions ----------
 awk '/^# ─── Resilience ───/{f=1} f{print} /^# ─── Helpers ───/{if(f)exit}' "$BOOTSTRAP" > "$CODE"
-for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry; do
+for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry do_install_agents; do
   awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$CODE"
 done
 
@@ -511,6 +511,139 @@ eval "$_pw_heal_node_saved"
 verify_errors=()
 verify_playwright_registry > /dev/null
 case "${verify_errors[0]:-}" in *"heal skipped"*) no "healable install must not carry the hint: ${verify_errors[0]:-}";; "") no "expected a verify error (builds are missing)";; *) ok "healable install's verify error stays generic";; esac
+
+# 17) Global agents install (Pattern B: mirrors the hooks install — glob copy,
+# manifest-scoped orphan-prune). Sandboxed via SCRIPT_DIR (fixture repo with a
+# fake agents/ dir, same convention the hooks block uses for its source glob)
+# and HOME (fake ~/.claude/agents) — no real ~/.claude is touched.
+#
+# ~/.claude/agents/ is Claude Code's standard USER subagent directory, so the
+# prune must be scoped to MANIFEST-TRACKED orphans only: a hand-authored file
+# that bionic never installed (never listed in .bionic-manifest) must never
+# be deleted, even though it isn't in the repo either.
+AGSBX="${SBX}/agents-sandbox"
+mkdir -p "${AGSBX}/repo/agents" "${AGSBX}/home/.claude/agents"
+printf -- '---\nname: alpha\n---\nalpha body\n' > "${AGSBX}/repo/agents/alpha.md"
+printf -- '---\nname: beta\n---\nbeta body\n' > "${AGSBX}/repo/agents/beta.md"
+printf -- '---\nname: gamma\n---\ngamma body\n' > "${AGSBX}/repo/agents/gamma.md"
+echo "hand-authored, not from bionic" > "${AGSBX}/home/.claude/agents/user-custom.md"
+echo "pre-existing stray, no manifest yet" > "${AGSBX}/home/.claude/agents/stray.md"
+
+# --- Run 1: no manifest exists yet ---
+: > "$LOG"; INSTALL_FAILURES=()
+( export SCRIPT_DIR="${AGSBX}/repo" HOME="${AGSBX}/home"; do_install_agents >/dev/null )
+rc=$?
+[ "$rc" -eq 0 ] && ok "do_install_agents returns 0" || no "do_install_agents failed (rc=$rc)"
+
+[ -f "${AGSBX}/home/.claude/agents/alpha.md" ] && [ -f "${AGSBX}/home/.claude/agents/beta.md" ] \
+  && [ -f "${AGSBX}/home/.claude/agents/gamma.md" ] \
+  && ok "all 3 fixture role files copied to ~/.claude/agents" \
+  || no "role files not copied"
+diff -q "${AGSBX}/repo/agents/alpha.md" "${AGSBX}/home/.claude/agents/alpha.md" >/dev/null 2>&1 \
+  && ok "copied file content matches source" || no "copied content mismatch"
+
+[ -f "${AGSBX}/home/.claude/agents/user-custom.md" ] \
+  && ok "user-authored file (never manifest-tracked) survives run 1" \
+  || no "user-authored file was deleted on run 1"
+[ -f "${AGSBX}/home/.claude/agents/stray.md" ] \
+  && ok "first-run-no-manifest: pre-existing stray file survives (nothing pruned)" \
+  || no "first-run-no-manifest incorrectly pruned a file"
+
+manifest="${AGSBX}/home/.claude/agents/.bionic-manifest"
+if [ -f "$manifest" ]; then
+  ok "manifest written"
+  sort "$manifest" > "${SBX}/manifest.sorted"
+  printf 'alpha.md\nbeta.md\ngamma.md\n' | sort > "${SBX}/manifest.expected"
+  diff -q "${SBX}/manifest.sorted" "${SBX}/manifest.expected" >/dev/null 2>&1 \
+    && ok "manifest lists exactly the 3 installed basenames" \
+    || no "manifest content wrong: $(cat "$manifest")"
+else
+  no "manifest missing"
+  no "manifest content check skipped (no manifest)"
+fi
+
+# --- Run 2: repo drops gamma.md; manifest from run 1 still lists it ---
+# gamma.md is manifest-tracked (run 1 wrote it) and now absent from repo, so
+# it must be pruned. alpha/beta stay (still in repo). user-custom.md and
+# stray.md must still survive — proving survival isn't a first-run
+# coincidence; it holds even once a manifest exists.
+rm -f "${AGSBX}/repo/agents/gamma.md"
+: > "$LOG"; INSTALL_FAILURES=()
+if ( set -e; export SCRIPT_DIR="${AGSBX}/repo" HOME="${AGSBX}/home"; do_install_agents >/dev/null ); then
+  ok "do_install_agents survives under set -e (subshell exits 0)"
+else
+  no "do_install_agents aborted under set -e"
+fi
+
+[ ! -f "${AGSBX}/home/.claude/agents/gamma.md" ] \
+  && ok "manifest-tracked orphan (gamma.md, dropped from repo) is pruned" \
+  || no "manifest-tracked orphan not pruned"
+[ -f "${AGSBX}/home/.claude/agents/alpha.md" ] && [ -f "${AGSBX}/home/.claude/agents/beta.md" ] \
+  && ok "still-in-repo role files remain after run 2" \
+  || no "still-in-repo role files missing after run 2"
+[ -f "${AGSBX}/home/.claude/agents/user-custom.md" ] \
+  && ok "user-authored file survives run 2 (still never manifest-tracked)" \
+  || no "user-authored file was deleted on run 2"
+[ -f "${AGSBX}/home/.claude/agents/stray.md" ] \
+  && ok "pre-existing stray file survives run 2 (never manifest-tracked)" \
+  || no "pre-existing stray file was deleted on run 2"
+
+sort "$manifest" > "${SBX}/manifest2.sorted"
+printf 'alpha.md\nbeta.md\n' | sort > "${SBX}/manifest2.expected"
+diff -q "${SBX}/manifest2.sorted" "${SBX}/manifest2.expected" >/dev/null 2>&1 \
+  && ok "manifest after run 2 lists exactly alpha.md and beta.md" \
+  || no "manifest after run 2 wrong: $(cat "$manifest")"
+
+# --- Run 3: collision — repo introduces delta.md; home already has a
+# hand-authored delta.md (never bionic-installed, never manifest-tracked).
+# User-territory guarantee: a collision with an untracked file must SKIP
+# (not overwrite), record a step failure naming the remediation, and never
+# enter the new manifest (bionic did not install it). alpha.md (manifest-
+# tracked from runs 1-2) must still overwrite normally — proving the skip is
+# collision-specific, not a general "existing file" freeze.
+printf -- '---\nname: alpha\n---\nalpha body v2\n' > "${AGSBX}/repo/agents/alpha.md"
+printf -- '---\nname: delta\n---\ndelta body\n' > "${AGSBX}/repo/agents/delta.md"
+echo "hand-authored delta, never installed by bionic" > "${AGSBX}/home/.claude/agents/delta.md"
+
+: > "$LOG"; INSTALL_FAILURES=()
+# INSTALL_FAILURES mutations happen in the subshell's own memory (needed here
+# to sandbox SCRIPT_DIR/HOME per-run) and don't propagate back — write the
+# array out from inside the subshell instead of reading it from the parent.
+_collision_out="${SBX}/collision-failures.txt"
+( export SCRIPT_DIR="${AGSBX}/repo" HOME="${AGSBX}/home"
+  do_install_agents >/dev/null
+  printf '%s\n' ${INSTALL_FAILURES[@]+"${INSTALL_FAILURES[@]}"} > "$_collision_out" )
+rc=$?
+[ "$rc" -eq 0 ] && ok "do_install_agents (collision run) returns 0" || no "do_install_agents (collision run) failed (rc=$rc)"
+
+diff -q "${AGSBX}/repo/agents/alpha.md" "${AGSBX}/home/.claude/agents/alpha.md" >/dev/null 2>&1 \
+  && ok "manifest-tracked target (alpha.md) still overwritten normally" \
+  || no "manifest-tracked target (alpha.md) was not updated"
+
+grep -qxF "hand-authored delta, never installed by bionic" "${AGSBX}/home/.claude/agents/delta.md" \
+  && ok "colliding user-authored file (delta.md, untracked) survives — not overwritten" \
+  || no "colliding user-authored file was overwritten"
+
+declare -a _collision_failures=()
+if [ -f "$_collision_out" ]; then
+  while IFS= read -r line; do
+    [ -n "$line" ] && _collision_failures+=("$line")
+  done < "$_collision_out"
+fi
+[ "${#_collision_failures[@]}" -ge 1 ] && ok "collision records at least one install failure" || no "collision recorded no failure"
+_delta_fail_found=0
+for f in ${_collision_failures[@]+"${_collision_failures[@]}"}; do
+  case "$f" in *"user-authored"*"delta.md"*) _delta_fail_found=1;; esac
+done
+[ "$_delta_fail_found" -eq 1 ] \
+  && ok "collision failure names delta.md and user-authored, with rename remediation" \
+  || no "collision failure message missing delta.md/user-authored wording (failures: ${_collision_failures[*]:-none})"
+
+sort "$manifest" > "${SBX}/manifest3.sorted"
+printf 'alpha.md\nbeta.md\n' | sort > "${SBX}/manifest3.expected"
+diff -q "${SBX}/manifest3.sorted" "${SBX}/manifest3.expected" >/dev/null 2>&1 \
+  && ok "manifest after collision run still lists exactly alpha.md and beta.md (delta.md excluded)" \
+  || no "manifest after collision run wrong: $(cat "$manifest")"
 
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"

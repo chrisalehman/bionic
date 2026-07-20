@@ -86,7 +86,7 @@ source "${SCRIPT_DIR}/lib/platform.sh"
 # ─── Sections ────────────────────────────────────────────────────────────────
 # Bump SECTION_TOTAL when adding a section() call.
 
-SECTION_TOTAL=22
+SECTION_TOTAL=23
 SECTION_IDX=0
 CURRENT_SECTION=""
 section() {
@@ -1298,6 +1298,89 @@ if command -v notebooklm &>/dev/null; then
 else
   echo "  notebooklm — skipped (CLI not installed)"
 fi
+
+# ─── Global Agents ───────────────────────────────────────────────────────────
+#
+# Installs bionic's agent role files (repo agents/*.md) to ~/.claude/agents so
+# Claude Code can dispatch subagents via `subagent_type: implementor|
+# senior-implementor|researcher|auditor|critic|test-runner`. Same glob /
+# orphan-prune / manifest shape as Global Hooks below: the repo is canonical,
+# installs orphaned by prior refactors are removed, and a manifest records
+# exactly what bionic installed so reset can undo it even if the repo's
+# agents/ contents change between install and reset.
+do_install_agents() {
+  mkdir -p ~/.claude/agents
+
+  declare -a repo_agents=()
+  for agent in "${SCRIPT_DIR}"/agents/*.md; do
+    [ -f "$agent" ] || continue
+    repo_agents+=("$(basename "$agent")")
+  done
+
+  # ~/.claude/agents/ is Claude Code's standard USER subagent directory, so
+  # the prune must be scoped to manifest-tracked orphans only — a file only
+  # gets removed if bionic installed it in a prior run (its basename is in
+  # the PRE-EXISTING manifest, read before this run overwrites it) and it's
+  # no longer in the repo. A hand-authored file never listed in the manifest
+  # (or a first run with no manifest yet) is never touched.
+  declare -a prior_manifest=()
+  if [ -f ~/.claude/agents/.bionic-manifest ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] && prior_manifest+=("$line")
+    done < ~/.claude/agents/.bionic-manifest
+  fi
+
+  for installed in ~/.claude/agents/*.md; do
+    [ -f "$installed" ] || continue
+    base="$(basename "$installed")"
+    tracked=0
+    for m in ${prior_manifest[@]+"${prior_manifest[@]}"}; do
+      if [ "$base" = "$m" ]; then tracked=1; break; fi
+    done
+    [ "$tracked" -eq 1 ] || continue
+    found=0
+    for r in ${repo_agents[@]+"${repo_agents[@]}"}; do
+      if [ "$base" = "$r" ]; then found=1; break; fi
+    done
+    if [ "$found" -eq 0 ]; then
+      rm -f "$installed"
+      echo "  ${base}... ✗ removed (no longer in repo)"
+    fi
+  done
+
+  # Files this run actually installs (or attempted to) — becomes the new
+  # manifest. A colliding user-authored file is skipped entirely and must
+  # NOT enter the manifest: bionic did not install it, so reset must never
+  # attribute it to bionic later.
+  declare -a manifest_agents=()
+  for agent in "${SCRIPT_DIR}"/agents/*.md; do
+    [ -f "$agent" ] || continue
+    name="$(basename "$agent")"
+    step_start "$name"
+    if [ -f ~/.claude/agents/"$name" ]; then
+      tracked=0
+      for m in ${prior_manifest[@]+"${prior_manifest[@]}"}; do
+        if [ "$name" = "$m" ]; then tracked=1; break; fi
+      done
+      if [ "$tracked" -eq 0 ]; then
+        step_fail fs "user-authored ~/.claude/agents/${name} exists — rename it to adopt the bionic role"
+        continue
+      fi
+    fi
+    if cp "$agent" ~/.claude/agents/"$name"; then
+      step_ok fs
+    else
+      step_fail fs "could not install agent role file to ~/.claude/agents/${name}"
+    fi
+    manifest_agents+=("$name")
+  done
+
+  { for r in ${manifest_agents[@]+"${manifest_agents[@]}"}; do echo "$r"; done; } > ~/.claude/agents/.bionic-manifest || true
+  return 0
+}
+
+section "Global agents"
+do_install_agents
 
 # ─── Global Hooks ────────────────────────────────────────────────────────────
 
