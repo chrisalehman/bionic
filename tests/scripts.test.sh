@@ -603,12 +603,15 @@ expect_true "bootstrap rewrites git SSH to HTTPS for its process" grep -q "GIT_C
 expect_true "bootstrap disables git terminal prompts" grep -q 'GIT_TERMINAL_PROMPT=0' "$BOOTSTRAP"
 
 # 3x2: manifest symmetry — bootstrap writes install-time manifests (skill-pack
-# skills, bionic-owned hooks); reset consumes them so removal works offline and
-# survives repo renames.
+# skills, bionic-owned hooks, agent role files); reset consumes them so
+# removal works offline and survives repo renames.
 expect_true "bootstrap writes skill-pack manifest" grep -qF '.pack-${name}.manifest' "$BOOTSTRAP"
 expect_true "reset reads skill-pack manifest" grep -qF '.pack-${name}.manifest' "$RESET"
 expect_true "bootstrap writes hook manifest" grep -qF '.bionic-manifest' "$BOOTSTRAP"
 expect_true "reset consumes hook manifest" grep -qF '.bionic-manifest' "$RESET"
+expect_true "bootstrap writes agents manifest" grep -qF 'agents/.bionic-manifest' "$BOOTSTRAP"
+expect_true "reset reads agents manifest" grep -qF 'agents/.bionic-manifest' "$RESET"
+expect_true "reset has an agents leftover-audit block" grep -qF 'LEFTOVERS+=("agent ' "$RESET"
 
 # 3x3: reset reverts account-mirror symlinks (and restores backups)
 expect_true "reset handles account-mirror symlinks" grep -q 'Account-mirror symlinks' "$RESET"
