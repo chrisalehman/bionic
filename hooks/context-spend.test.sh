@@ -48,6 +48,46 @@ write_transcript() {  # $1=dir $2=input $3=cache_c $4=cache_r
 EOF
 }
 
+# write_plan_crlf: E3-style plan (current: $2) with \r\n line endings.
+write_plan_crlf() {  # $1=dir $2=step [$3=rel-plan-path]
+  local dir="$1" step="$2" rel="${3:-epic-t/wave-t.plan.md}"
+  write_plan "$dir" "$step" "$rel"
+  local f="$dir/.bionic/docs/plans/$rel"
+  sed 's/$/\r/' "$f" > "$f.crlf" && mv "$f.crlf" "$f"
+}
+
+# write_plan_cronly: same plan, transformed via `tr '\n' '\r'` (classic-Mac,
+# CR-only line endings — no \n anywhere in the file).
+write_plan_cronly() {  # $1=dir $2=step [$3=rel-plan-path]
+  local dir="$1" step="$2" rel="${3:-epic-t/wave-t.plan.md}"
+  write_plan "$dir" "$step" "$rel"
+  local f="$dir/.bionic/docs/plans/$rel"
+  tr '\n' '\r' < "$f" > "$f.cr" && mv "$f.cr" "$f"
+}
+
+# write_transcript_u1: top-level usage sums to 142137; iterations[] holds
+# TWO objects whose own token sums total 284274 (exactly 2x divergent).
+# A summing implementation would log 284274; the hook must log 142137.
+write_transcript_u1() {  # $1=dir
+  local dir="$1"
+  cat > "$dir/transcript.jsonl" <<'EOF'
+{"type":"user","message":"scrubbed"}
+{"type":"assistant","message":{"model":"claude-fable-5","usage":{"input_tokens":100000,"cache_creation_input_tokens":30000,"cache_read_input_tokens":12137,"output_tokens":50,"iterations":[{"input_tokens":142137,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},{"input_tokens":142137,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}]}}}
+EOF
+}
+
+# write_transcript_u4: three assistant entries with different usage sums
+# (50000, 90000, 142137). Only the LAST one's occupied value must be logged.
+write_transcript_u4() {  # $1=dir
+  local dir="$1"
+  cat > "$dir/transcript.jsonl" <<'EOF'
+{"type":"user","message":"scrubbed"}
+{"type":"assistant","message":{"model":"claude-fable-5","usage":{"input_tokens":50000,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":10}}}
+{"type":"assistant","message":{"model":"claude-fable-5","usage":{"input_tokens":90000,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":20}}}
+{"type":"assistant","message":{"model":"claude-fable-5","usage":{"input_tokens":142137,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":30}}}
+EOF
+}
+
 # make_env: scratch project + plan (current: $1) + transcript (occupied sum
 # $2+$3+$4). Returns project dir.
 make_env() {  # $1=step $2=input $3=cache_c $4=cache_r
@@ -439,6 +479,91 @@ PLANEOF
   assert_degraded "$dir" "A3 fenced-skeleton current: line" "$pre"
 }
 a3
+
+# ============================================================
+# Parsing-edges section (AC-3) — top-level-usage rule (never
+# iterations[]) + CR/CRLF plan normalization + last-entry-wins.
+# ============================================================
+
+echo ""
+echo "=== U1: top-level vs iterations[] — logs top-level sum, never the 2x-divergent iterations sum ==="
+u1() {
+  local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
+  fire "$dir"                        # seed at step 4
+  assert_silent "U1 seed run"
+  write_plan "$dir" 5
+  write_transcript_u1 "$dir"
+  fire "$dir"                        # boundary: divergent iterations[] present
+  assert_silent "U1 boundary run"
+  local audit; audit=$(audit_of "$dir")
+  TOTAL=$((TOTAL + 1))
+  if printf '%s\n' "$audit" | grep -q 'occupied=142137' && ! printf '%s\n' "$audit" | grep -q '284274'; then
+    pass "U1 top-level vs iterations[]: occupied=142137, never 284274"
+  else
+    fail "U1 top-level vs iterations[]" "audit='$audit'"
+  fi
+}
+u1
+
+echo ""
+echo "=== U2: CRLF plan — boundary still emits with correct step id ==="
+u2() {
+  local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
+  fire "$dir"                        # seed at step 4
+  assert_silent "U2 seed run"
+  write_plan_crlf "$dir" 5
+  write_transcript "$dir" 142137 0 0
+  fire "$dir"                        # boundary: CRLF-normalized plan
+  assert_silent "U2 boundary run"
+  local audit; audit=$(audit_of "$dir")
+  TOTAL=$((TOTAL + 1))
+  if printf '%s\n' "$audit" | grep -qE 'context-spend step-4: occupied=142137 delta=\+42137 '; then
+    pass "U2 CRLF plan: boundary emits with correct step id"
+  else
+    fail "U2 CRLF plan" "audit='$audit'"
+  fi
+}
+u2
+
+echo ""
+echo "=== U3: CR-only (classic-Mac) plan — boundary still emits with correct step id ==="
+u3() {
+  local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
+  fire "$dir"                        # seed at step 4
+  assert_silent "U3 seed run"
+  write_plan_cronly "$dir" 5
+  write_transcript "$dir" 142137 0 0
+  fire "$dir"                        # boundary: CR-only-normalized plan
+  assert_silent "U3 boundary run"
+  local audit; audit=$(audit_of "$dir")
+  TOTAL=$((TOTAL + 1))
+  if printf '%s\n' "$audit" | grep -qE 'context-spend step-4: occupied=142137 delta=\+42137 '; then
+    pass "U3 CR-only plan: boundary emits with correct step id"
+  else
+    fail "U3 CR-only plan" "audit='$audit'"
+  fi
+}
+u3
+
+echo ""
+echo "=== U4: multiple assistant entries in tail — only the LAST one's occupied value logged ==="
+u4() {
+  local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
+  fire "$dir"                        # seed at step 4
+  assert_silent "U4 seed run"
+  write_plan "$dir" 5
+  write_transcript_u4 "$dir"
+  fire "$dir"                        # boundary: three assistant entries, differing sums
+  assert_silent "U4 boundary run"
+  local audit; audit=$(audit_of "$dir")
+  TOTAL=$((TOTAL + 1))
+  if printf '%s\n' "$audit" | grep -q 'occupied=142137' && ! printf '%s\n' "$audit" | grep -qE 'occupied=(50000|90000)'; then
+    pass "U4 multiple assistant entries: only last entry's occupied logged"
+  else
+    fail "U4 multiple assistant entries" "audit='$audit'"
+  fi
+}
+u4
 
 # ============================================================
 # Results
