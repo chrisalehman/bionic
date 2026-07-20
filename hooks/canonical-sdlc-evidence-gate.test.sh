@@ -4107,33 +4107,25 @@ write_plan "$h22d5b" "$(v11_task_plan_rigor tested "$v22d5_body_no_critic")" > /
 expect_block "v11 22d5b same, drop critic token → block (cell audited lane still demands it)" \
   "$h22d5b" 'git commit -m "x"' "critic"
 
-# 22d6 — FINDING (confirmation-vs-actual): a bad rigor cell 'reviewed'
-# (off-enum) on a NON-addressed 'done' row. effective_row_rigor("reviewed")
-# resolves to the INVALID sentinel — but INVALID is only ever explicitly
-# checked on the ADDRESSED unit's own row (validate_task_ledger's
-# `if [ "$eff" = "INVALID" ]` block, addressed-row-only). For a NON-addressed
-# row, the done-row path calls apply_rigor_lanes(id, status, "INVALID", ev)
-# directly with no INVALID guard; apply_rigor_lanes' case arms only match
-# tested|peer-reviewed|audited, so "INVALID" matches none of them and the
-# function falls through as a silent no-op — no block, and (unlike the other
-# non-addressed-row defects, which route through ledger_shape_fail) no
-# log-only finding either. Empirically verified (both variants exit 0 with
-# EMPTY stderr — a full allow, not even a finding):
-#   - frontmatter rigor audited: exit 0, no stderr (NOT the block the task
-#     brief assumed — "INVALID cell surfaces even off the addressed unit
-#     under audited" does not hold; audited plan-level strictness only
-#     reaches the checks that are routed through ledger_shape_fail, and an
-#     off-enum rigor CELL is not one of them).
-#   - frontmatter rigor tested: exit 0, no stderr (same silent pass-through).
-# Net: an off-enum rigor cell on a non-addressed row evades detection
-# entirely, at every frontmatter rigor level — a real gap in 4/1's INVALID
-# handling (scoped to the addressed unit only) that 4/2's apply_rigor_lanes
-# does not close for the non-addressed case. Reported per plan instruction;
-# NOT fixed in this slice (SCOPE: hook changes only for a defect surfacing
-# here, and this needs an intentional design call — should apply_rigor_lanes
-# block on eff=INVALID, or should ledger_shape_fail gain an enum check for
-# non-addressed rows? — not a mechanical one-liner). These two assertions PIN
-# the actual (surprising) behavior rather than the originally-assumed one.
+# 22d6 — an off-enum rigor cell 'reviewed' on a NON-addressed 'done' row.
+# effective_row_rigor("reviewed") resolves to the INVALID sentinel. Slice 4/4
+# pinned (as expect_allow) that this evaded detection entirely: INVALID was
+# only ever explicitly checked on the ADDRESSED unit's own row (4/1's
+# `if [ "$eff" = "INVALID" ]` block), so the non-addressed done-row path called
+# apply_rigor_lanes(id, status, "INVALID", ev) directly and its case arms —
+# matching only tested|peer-reviewed|audited — fell through as a silent no-op:
+# no block, and (unlike the ledger_shape_fail-routed defects) no log-only
+# finding either.
+#
+# Slice 4/6 closes that gap: the non-addressed done-row path now guards for
+# eff=INVALID BEFORE calling apply_rigor_lanes, mirroring the addressed unit's
+# 4/1 INVALID block. A malformed rigor cell makes the row's lane indeterminate
+# — you cannot resolve which evidence contract applies — so it is a hard
+# STRUCTURAL error that blocks UNCONDITIONALLY at ANY frontmatter rigor, NOT
+# routed through the audited-only ledger_shape_fail. 22d6a/b/c pin the block at
+# audited / tested / peer-reviewed frontmatter respectively (proving "at any
+# rigor"); 22d6d/e are controls proving ONLY the INVALID sentinel blocks — a
+# valid enum cell and an empty (inherits-frontmatter) cell both still allow.
 v22d6_body="## Tasks
 
 | id | intent | rigor | description | status |
@@ -4150,13 +4142,67 @@ current: T2
 - T2: fixed enum check, bash suite 12/12"
 h22d6a=$(make_home)
 write_plan "$h22d6a" "$(v11_task_plan "$v22d6_body")" > /dev/null
-expect_allow "v11 22d6a FINDING: frontmatter audited, non-addressed off-enum rigor cell → allow (NOT block — INVALID unchecked off the addressed unit)" \
-  "$h22d6a" 'git commit -m "x"'
+expect_block "v11 22d6a frontmatter audited, non-addressed off-enum rigor cell → block (INVALID lane is a hard structural error)" \
+  "$h22d6a" 'git commit -m "x"' "invalid rigor"
 
 h22d6b=$(make_home)
 write_plan "$h22d6b" "$(v11_task_plan_rigor tested "$v22d6_body")" > /dev/null
-expect_allow "v11 22d6b FINDING: frontmatter tested, non-addressed off-enum rigor cell → allow (same silent pass-through)" \
-  "$h22d6b" 'git commit -m "x"'
+expect_block "v11 22d6b frontmatter tested, non-addressed off-enum rigor cell → block (blocks at any rigor, not just audited)" \
+  "$h22d6b" 'git commit -m "x"' "invalid rigor"
+
+# 22d6c — same off-enum cell, frontmatter peer-reviewed → block. Third rigor
+# level, proving the INVALID guard fires UNCONDITIONALLY (a, b, c together
+# cover audited / tested / peer-reviewed).
+h22d6c=$(make_home)
+write_plan "$h22d6c" "$(v11_task_plan_rigor peer-reviewed "$v22d6_body")" > /dev/null
+expect_block "v11 22d6c frontmatter peer-reviewed, non-addressed off-enum rigor cell → block (blocks at any rigor)" \
+  "$h22d6c" 'git commit -m "x"' "invalid rigor"
+
+# 22d6d — negative control: a VALID enum cell (peer-reviewed) on a non-addressed
+# done row, with proof-shaped + auditor evidence, frontmatter tested → allow.
+# The fix targets ONLY the INVALID sentinel; a well-formed heavier cell resolves
+# its lane and (evidence being proof-shaped + auditor-named) passes cleanly.
+v22d6d_body="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | peer-reviewed | fix the frontmatter parser | done |
+| T2 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: bash test.sh 12/12 auditor CONFIRMED
+- T2: fixed enum check, bash suite 12/12"
+h22d6d=$(make_home)
+write_plan "$h22d6d" "$(v11_task_plan_rigor tested "$v22d6d_body")" > /dev/null
+expect_allow "v11 22d6d control: valid peer-reviewed cell on non-addressed done row, proof+auditor evidence → allow (only INVALID blocks)" \
+  "$h22d6d" 'git commit -m "x"'
+
+# 22d6e — empty-cell control: an EMPTY rigor cell on a non-addressed done row
+# inherits the frontmatter rigor (tested, the floor), with honest one-line
+# evidence → allow. Empty ≠ INVALID: the empty cell resolves via inheritance,
+# not the malformation sentinel, so no structural block fires.
+v22d6e_body="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix |  | fix the frontmatter parser | done |
+| T2 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: reproduced and fixed the boundary case
+- T2: fixed enum check, bash suite 12/12"
+h22d6e=$(make_home)
+write_plan "$h22d6e" "$(v11_task_plan_rigor tested "$v22d6e_body")" > /dev/null
+expect_allow "v11 22d6e control: empty rigor cell on non-addressed done row inherits tested floor, honest evidence → allow (empty ≠ INVALID)" \
+  "$h22d6e" 'git commit -m "x"'
 
 # ---- 22e: grandfathering + non-regression (slice 4/4, R5) -----------------
 #
