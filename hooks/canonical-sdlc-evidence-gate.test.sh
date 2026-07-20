@@ -2695,10 +2695,13 @@ expect_allow "v10 18d fenced pipeline before the table (mid-section) → allow" 
 #   (2) Task-scale v11 plans (scale: task) address a ledger TASK, not a
 #       numbered step: `current: T<n>` with a `## Tasks` registration table
 #       and one `- T<n>:` evidence line per task in `## SDLC State`. The hook
-#       MUST accept `current: T<n>` without blocking (structural correctness),
-#       and validates the ledger LOG-ONLY (D14, check-id `task-ledger`):
-#       missing `## Tasks`, status outside the enum, an active/done task with
-#       no evidence line or a placeholder value — each appends one finding and
+#       MUST accept `current: T<n>` without blocking when the addressed unit is
+#       honest (structural correctness). Slice 4/1 makes the ADDRESSED unit's
+#       tested floor BLOCKING (see Section 22): its missing row / missing or
+#       placeholder evidence line / INVALID rigor cell each exit 2. Every OTHER
+#       row stays LOG-ONLY (D14, check-id `task-ledger`): missing `## Tasks`,
+#       status outside the enum, or a non-addressed active/done task with no
+#       evidence line or a placeholder value — each appends one finding and
 #       exits 0.
 # A v11 wave plan naming an `epic:` also gets a LOG-ONLY merge-target check at
 # the integrate step (check-id `merge-target`): a mismatch between the plan's
@@ -2888,7 +2891,9 @@ write_plan "$h19f" "$(v11_task_plan "$v11_ledger_bad_status")" > /dev/null
 expect_finding "v11 19f invalid status 'doing' → exit 0 + task-ledger finding" \
   "$h19f" 'git commit -m "x"' "task-ledger"
 
-# 19g — active task (T2) with no `- T2:` evidence line → exit 0 + finding.
+# 19g — the ADDRESSED active task (T2, current: T2) with no `- T2:` evidence
+# line → BLOCK. Slice 4/1 made the addressed-unit tested floor blocking; this
+# case previously logged a finding (see Section 22 for the full lane coverage).
 v11_ledger_active_no_line="## Tasks
 
 | id | intent | rigor | description | status |
@@ -2904,15 +2909,16 @@ current: T2
 - T1: fixed in commit abc123, suite 5/5 green"
 h19g=$(make_home)
 write_plan "$h19g" "$(v11_task_plan "$v11_ledger_active_no_line")" > /dev/null
-expect_finding "v11 19g active task without evidence line → exit 0 + task-ledger finding" \
-  "$h19g" 'git commit -m "x"' "task-ledger"
+expect_block "v11 19g addressed active task without evidence line → block" \
+  "$h19g" 'git commit -m "x"' "evidence line"
 
-# 19h — active task with a placeholder evidence value (`- T2: TBD`) → finding.
+# 19h — the ADDRESSED active task (T2) with a placeholder evidence value
+# (`- T2: TBD`) → BLOCK (slice 4/1 blocking floor; previously a finding).
 v11_ledger_active_placeholder="${v11_ledger_valid/- T2: extracting helper on branch, commit def456/- T2: TBD}"
 h19h=$(make_home)
 write_plan "$h19h" "$(v11_task_plan "$v11_ledger_active_placeholder")" > /dev/null
-expect_finding "v11 19h active task placeholder evidence → exit 0 + task-ledger finding" \
-  "$h19h" 'git commit -m "x"' "task-ledger"
+expect_block "v11 19h addressed active task placeholder evidence → block" \
+  "$h19h" 'git commit -m "x"' "placeholder"
 
 # 19i — done task (T1) with an empty evidence line (`- T1:`) → finding.
 v11_ledger_done_empty="${v11_ledger_valid/- T1: fixed in commit abc123, suite 5\/5 green/- T1:}"
@@ -3423,6 +3429,142 @@ h21b=$(make_home)
 write_plan "$h21b" "$(v20_wave_plan tune 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
 expect_audit_line "v11 21b fail-open: no .bionic ancestor above the plan → PROJECT_DIR fallback used" \
   "$h21b" 'git commit -m "x"' "tune-evidence"
+
+# ============================================================
+# Section 22: v11 rigor-keyed ledger lanes
+# ============================================================
+#
+# Slice 4/1 makes the v11 task-ledger tested floor BLOCKING for THE ADDRESSED
+# UNIT ONLY (the T<n> named by `current: T<n>`). For that one task the gate now
+# exits 2 when: its row is absent from `## Tasks`; its `- T<n>:` evidence line
+# is missing or a placeholder; or its rigor cell fails `effective_row_rigor`
+# (a non-empty cell outside tested|peer-reviewed|audited → INVALID). Every OTHER
+# row keeps its log-only handling (D14) at this slice — 22a6 pins that scope.
+
+echo ""
+echo "=== Section 22: v11 rigor-keyed ledger lanes ==="
+
+# --- 22a: blocking tested floor on the addressed ledger unit --------------
+
+# 22a1 — ## Tasks has no row for the addressed unit (T2) → block.
+v22_no_t2_row="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | tested | fix the frontmatter parser | done |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: fixed in commit abc123, suite 5/5 green"
+h22a1=$(make_home)
+write_plan "$h22a1" "$(v11_task_plan "$v22_no_t2_row")" > /dev/null
+expect_block "v11 22a1 addressed unit T2 has no ## Tasks row → block" \
+  "$h22a1" 'git commit -m "x"' "no row"
+
+# 22a2 — T2 row present (active) but no `- T2:` evidence line → block.
+v22_t2_no_line="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | tested | fix the frontmatter parser | done |
+| T2 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: fixed in commit abc123, suite 5/5 green"
+h22a2=$(make_home)
+write_plan "$h22a2" "$(v11_task_plan "$v22_t2_no_line")" > /dev/null
+expect_block "v11 22a2 addressed unit T2 missing evidence line → block" \
+  "$h22a2" 'git commit -m "x"' "evidence line"
+
+# 22a3 — `- T2: pending` (placeholder value) → block.
+v22_t2_placeholder="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | tested | fix the frontmatter parser | done |
+| T2 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: fixed in commit abc123, suite 5/5 green
+- T2: pending"
+h22a3=$(make_home)
+write_plan "$h22a3" "$(v11_task_plan "$v22_t2_placeholder")" > /dev/null
+expect_block "v11 22a3 addressed unit T2 placeholder evidence → block" \
+  "$h22a3" 'git commit -m "x"' "placeholder"
+
+# 22a4 — honest addressed unit (row + real evidence + valid rigor) → allow.
+v22_t2_valid="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | tested | fix the frontmatter parser | done |
+| T2 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: fixed in commit abc123, suite 5/5 green
+- T2: fixed enum check, bash suite 12/12"
+h22a4=$(make_home)
+write_plan "$h22a4" "$(v11_task_plan "$v22_t2_valid")" > /dev/null
+expect_allow "v11 22a4 honest addressed unit T2 → allow" \
+  "$h22a4" 'git commit -m "x"'
+
+# 22a5 — the addressed unit's rigor cell is INVALID ('rigorous') → block.
+v22_t2_bad_rigor="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | tested | fix the frontmatter parser | done |
+| T2 | bugfix | rigorous | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: fixed in commit abc123, suite 5/5 green
+- T2: fixed enum check, bash suite 12/12"
+h22a5=$(make_home)
+write_plan "$h22a5" "$(v11_task_plan "$v22_t2_bad_rigor")" > /dev/null
+expect_block "v11 22a5 addressed unit T2 invalid rigor cell → block" \
+  "$h22a5" 'git commit -m "x"' "invalid rigor"
+
+# 22a6 (regression pin) — a broken NON-addressed row (T1 done, no evidence line)
+# while the addressed unit T2 is honest → NO block. The non-addressed row keeps
+# its log-only handling, so this exits 0 with a task-ledger finding on stderr
+# (expect_finding, not expect_allow — the finding IS the log-only channel). This
+# pins the addressed-unit-only scope of the blocking floor.
+v22_nonaddressed_broken="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | tested | fix the frontmatter parser | done |
+| T2 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T2: fixed enum check, bash suite 12/12"
+h22a6=$(make_home)
+write_plan "$h22a6" "$(v11_task_plan "$v22_nonaddressed_broken")" > /dev/null
+expect_finding "v11 22a6 broken non-addressed row (T1) + honest T2 → no block, log-only finding" \
+  "$h22a6" 'git commit -m "x"' "task-ledger"
 
 # ============================================================
 # Summary
