@@ -1264,17 +1264,17 @@ esac
 echo "v12 barred cell bugfix × continuous → block, reason names charter default stamp (SR-1)"
 run_write "$project/.bionic/docs/plans/epic-01-demo/v12-bugfix-cont.plan.md" "$(build_v12_plan intent=bugfix scale=continuous)"
 assert_eq "v12_blocks_barred_bugfix_continuous exit 2" 2 "$HOOK_EXIT"
-assert_contains "v12_blocks_barred_bugfix_continuous says barred" "barred" "$HOOK_STDERR"
+assert_contains "v12_blocks_barred_bugfix_continuous names SR-1 charter default stamp" "charter default-conversion stamp" "$HOOK_STDERR"
 
 echo "v12 barred cell spike × continuous → block"
 run_write "$project/.bionic/docs/plans/epic-01-demo/v12-spike-cont.plan.md" "$(build_v12_plan intent=spike scale=continuous)"
 assert_eq "v12_blocks_barred_spike_continuous exit 2" 2 "$HOOK_EXIT"
-assert_contains "v12_blocks_barred_spike_continuous says barred" "barred" "$HOOK_STDERR"
+assert_contains "v12_blocks_barred_spike_continuous names SR-1 charter default stamp" "charter default-conversion stamp" "$HOOK_STDERR"
 
 echo "v12 barred cell incident-response × continuous → block"
 run_write "$project/.bionic/docs/plans/epic-01-demo/v12-incident-cont.plan.md" "$(build_v12_plan intent=incident-response scale=continuous)"
 assert_eq "v12_blocks_barred_incident_continuous exit 2" 2 "$HOOK_EXIT"
-assert_contains "v12_blocks_barred_incident_continuous says barred" "barred" "$HOOK_STDERR"
+assert_contains "v12_blocks_barred_incident_continuous names SR-1 charter default stamp" "charter default-conversion stamp" "$HOOK_STDERR"
 
 echo "v12 refactor × continuous → allow (compliant twin)"
 run_write "$project/.bionic/docs/plans/epic-01-demo/v12-refactor-cont.plan.md" "$(build_v12_plan intent=refactor scale=continuous)"

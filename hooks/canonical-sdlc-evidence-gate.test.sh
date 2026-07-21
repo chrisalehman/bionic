@@ -4968,6 +4968,57 @@ write_plan "$h24s" "$v11_wave_gform" > /dev/null
 expect_block "v24s current: G1 on a v11 plan → block (non-numeric parse, unchanged)" \
   "$h24s" 'git commit -m "x"' "valid 'current: N'"
 
+# 24t — id-format guard (5-axis O1 + O2): a registry row whose id does NOT match
+# ^G[0-9]+$ exactly (here 'G1x', a trailing-char id) is a blocking malformation on
+# ANY row, any status. The row is QUEUED (evidence-exempt) so the ONLY defect is
+# the id format — pre-guard this ALLOWed (grammar gated id only via the row-grep
+# prefix, which is unanchored at the end). This also closes the ERE-metachar risk:
+# a non-conforming id can no longer reach the evidence grep. current: G1 addressed
+# is clean.
+v12_goals_badid_x="## Goals
+
+| id | triple | plan | status |
+|---|---|---|---|
+| G1 | build-audited-wave | plans/g1/wave.plan.md | active |
+| G1x | build-audited-task | plans/g2/task.plan.md | queued |"
+h24t=$(make_home)
+write_plan "$h24t" "$(v12_charter G1 "$v12_goals_badid_x" "- G1: wave 3/3 slices green, commit abc123")" > /dev/null
+expect_block "v24t charter registry row id 'G1x' (non-conforming, queued) → block (id-format ^G[0-9]+\$)" \
+  "$h24t" 'git commit -m "x"' "not a valid goal id"
+
+# 24u — id-format guard, regex-metachar id ('G2.*'): pre-guard this id would be
+# interpolated live into the ERE evidence grep (O2). The queued row ALLOWed
+# pre-guard (queued rows skip evidence, so the metachar never triggered a block);
+# now the id-format guard blocks it before the ERE is ever built — the metachar
+# can no longer reach the grep. Twin of 24t on the metachar leg.
+v12_goals_badid_meta="## Goals
+
+| id | triple | plan | status |
+|---|---|---|---|
+| G1 | build-audited-wave | plans/g1/wave.plan.md | active |
+| G2.* | build-audited-task | plans/g2/task.plan.md | queued |"
+h24u=$(make_home)
+write_plan "$h24u" "$(v12_charter G1 "$v12_goals_badid_meta" "- G1: wave 3/3 slices green, commit abc123")" > /dev/null
+expect_block "v24u charter registry row id 'G2.*' (regex metachar) → block (id-format, kills ERE reach)" \
+  "$h24u" 'git commit -m "x"' "not a valid goal id"
+
+# 24v — duplicate-goal-id detection (critic OBS-3): two rows sharing an id (both
+# 'G1') plus a single '- G1:' evidence line — pre-guard the anchored evidence grep
+# matched the one line for BOTH rows, so contradictory duplicate goals both
+# "satisfied" the gate → ALLOW. Now a second occurrence of any id blocks. current:
+# G1 addressed + evidence is otherwise clean, so the block is the duplicate, not
+# the addressing.
+v12_goals_dup="## Goals
+
+| id | triple | plan | status |
+|---|---|---|---|
+| G1 | build-audited-wave | plans/g1/wave.plan.md | active |
+| G1 | build-audited-task | plans/g1b/wave.plan.md | complete |"
+h24v=$(make_home)
+write_plan "$h24v" "$(v12_charter G1 "$v12_goals_dup" "- G1: wave 3/3 slices green, commit abc123")" > /dev/null
+expect_block "v24v charter registry duplicate goal id 'G1' → block (OBS-3)" \
+  "$h24v" 'git commit -m "x"' "duplicate goal id"
+
 # ============================================================
 # Section 25: v≤11 grandfathering sweep (AC-5)
 # ============================================================
