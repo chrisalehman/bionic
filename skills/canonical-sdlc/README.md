@@ -69,7 +69,7 @@ Ten flat steps, numbered 0–9. No interstitials, no sub-steps, no hidden statio
 **Tier key.** Each step has a default dispatch target (the strategy below governs; the tier is a hint):
 
 - **O — orchestrator.** The main thread. Runs Steps 1–3 directly and coordinates the rest.
-- **E — execution.** A fresh subagent routed by the slice's `complexity:` tag — `complex` → `model: opus`, `standard` → `model: sonnet`; fork only when the unit genuinely needs the inherited conversation.
+- **E — execution.** A fresh subagent routed by the slice's `complexity:` tag to an installed role via `subagent_type` — `complex` → `senior-implementor` (`model: opus`), `standard` → `implementor` (`model: sonnet`); fork only when the unit genuinely needs the inherited conversation.
 - **X — explore / mechanical / test.** A fresh `model: sonnet` subagent — search, fixtures, mechanical edits, test-writing.
 
 ### The approval checkpoint
@@ -511,7 +511,7 @@ Four tiers by role (the default plan when `multi_agent: true`):
 
 **Why the orchestrator gets the best model.** Orchestrator errors are the most expensive tokens in the system — a bad decomposition wastes every subagent it dispatches — while the orchestrator is a minority of wave spend (execution carries the volume; the pinned main thread is mostly cache reads). Fable runs at `high`, not `xhigh`: its per-effort capability clears Opus-at-xhigh on coordination work, and xhigh buys diminishing returns there.
 
-**Slice complexity routing.** At Step 3 every Step 4 slice gets a `complexity: standard | complex` tag in the plan, which routes its dispatch. Complex if any of: touches more than one subsystem, unresolved design decisions inside the slice, ambiguous spec surface, security-sensitive, expected root-cause debugging. When uncertain, tag `complex` — a misrouted slice costs more in rework than Sonnet saves. Opt out at Step 0 with `set exec-standard=opus` (shorthand: `set execution=opus-only`).
+**Slice complexity routing.** At Step 3 every Step 4 slice gets a `complexity: standard | complex` tag in the plan, which routes its dispatch **by `subagent_type` to an installed role** — `standard` → `implementor` (`model: sonnet`), `complex` → `senior-implementor` (`model: opus`); the role file, not a per-dispatch model argument, pins the model. Complex if any of: touches more than one subsystem, unresolved design decisions inside the slice, ambiguous spec surface, security-sensitive, expected root-cause debugging. When uncertain, tag `complex` — a misrouted slice costs more in rework than Sonnet saves. Opt out at Step 0 with `set exec-standard=opus` (shorthand: `set execution=opus-only`).
 
 **Escalation ladder.** A `standard` slice that fails its gate twice re-dispatches as a fresh `model: opus` agent carrying the failure context — never a third retry on the same tier. That Opus attempt is the third and final try before the three-fail rule fires.
 
