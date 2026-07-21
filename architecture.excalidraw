@@ -159,7 +159,7 @@
     {
       "type": "text", "id": "agents_src_note",
       "x": 75, "y": 362, "width": 180, "height": 15,
-      "text": "6 role files (new)", "originalText": "6 role files (new)",
+      "text": "6 role files", "originalText": "6 role files",
       "fontSize": 12, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#64748b", "backgroundColor": "transparent",
       "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid",
@@ -266,8 +266,8 @@
     {
       "type": "text", "id": "group1_content",
       "x": 720, "y": 105, "width": 415, "height": 112,
-      "text": "settings.json — hooks, env, MCP, statusline\nCLAUDE.md — philosophy, boundaries, skill precedence\nhooks/ — protect-* (2), memory-*, sdlc-* (2), context-spend\nskills/ — excalidraw, impeccable (20+), bionic (5)\nagents/ — 6 role files (new), manifest-scoped prune",
-      "originalText": "settings.json — hooks, env, MCP, statusline\nCLAUDE.md — philosophy, boundaries, skill precedence\nhooks/ — protect-* (2), memory-*, sdlc-* (2), context-spend\nskills/ — excalidraw, impeccable (20+), bionic (5)\nagents/ — 6 role files (new), manifest-scoped prune",
+      "text": "settings.json — hooks, env, MCP, statusline\nCLAUDE.md — philosophy, boundaries, skill precedence\nhooks/ — protect-* (2), memory-*, sdlc-* (2), context-spend\nskills/ — excalidraw, impeccable (20+), bionic (5)\nagents/ — 6 role files, manifest-scoped prune",
+      "originalText": "settings.json — hooks, env, MCP, statusline\nCLAUDE.md — philosophy, boundaries, skill precedence\nhooks/ — protect-* (2), memory-*, sdlc-* (2), context-spend\nskills/ — excalidraw, impeccable (20+), bionic (5)\nagents/ — 6 role files, manifest-scoped prune",
       "fontSize": 14, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#374151", "backgroundColor": "transparent",
       "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid",
@@ -578,8 +578,8 @@
     {
       "type": "text", "id": "band_subtitle",
       "x": 380, "y": 590, "width": 560, "height": 16,
-      "text": "wave-04 adds two — advisory / gating, both logging to one shared audit trail",
-      "originalText": "wave-04 adds two — advisory / gating, both logging to one shared audit trail",
+      "text": "advisory / gating — both log to one shared audit trail",
+      "originalText": "advisory / gating — both log to one shared audit trail",
       "fontSize": 13, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#64748b", "backgroundColor": "transparent",
       "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid",
