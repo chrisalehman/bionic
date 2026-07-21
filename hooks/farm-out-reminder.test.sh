@@ -25,11 +25,11 @@ setup() {  # fresh sandbox project per case
 }
 audit_file() { printf '%s' "$SANDBOX/.bionic/memory/sdlc-v11-audit.md"; }
 
-stdin_for() {  # $1=command $2=agent_type ("" = main thread)
-  local at=""
+stdin_for() {  # $1=command $2=agent_type ("" = main thread) $3=session_id (default s-fixture)
+  local at="" sid="${3:-s-fixture}"
   [ -n "${2:-}" ] && at=",\"agent_id\":\"a-fixture-$2\",\"agent_type\":\"$2\""
-  printf '{"session_id":"s-fixture","transcript_path":"/tmp/t.jsonl","cwd":"%s","prompt_id":"p-1","permission_mode":"bypassPermissions"%s,"effort":{"level":"high"},"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":%s,"description":"fixture"},"tool_use_id":"toolu_fixture"}' \
-    "$SANDBOX" "$at" "$(printf '%s' "$1" | jq -Rs .)"
+  printf '{"session_id":"%s","transcript_path":"/tmp/t.jsonl","cwd":"%s","prompt_id":"p-1","permission_mode":"bypassPermissions"%s,"effort":{"level":"high"},"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":%s,"description":"fixture"},"tool_use_id":"toolu_fixture"}' \
+    "$sid" "$SANDBOX" "$at" "$(printf '%s' "$1" | jq -Rs .)"
 }
 
 run_hook() {  # stdin on $1
@@ -42,6 +42,7 @@ assert_silent() { [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDOUT" ] && pass || fai
 assert_deny()   { printf '%s' "$HOOK_STDOUT" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1 && pass || fail "$1"; }
 assert_reason_has() { printf '%s' "$HOOK_STDOUT" | jq -r '.hookSpecificOutput.permissionDecisionReason' 2>/dev/null | grep -qF "$2" && pass || fail "$1"; }
 assert_nudge()  { printf '%s' "$HOOK_STDOUT" | jq -e '.hookSpecificOutput.additionalContext' >/dev/null 2>&1 && pass || fail "$1"; }
+assert_nudge_has() { printf '%s' "$HOOK_STDOUT" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null | grep -qF "$2" && pass || fail "$1"; }
 assert_no_decision() { printf '%s' "$HOOK_STDOUT" | grep -qv '"permissionDecision"' && pass || fail "$1"; }
 assert_audit_has()   { grep -qF "$2" "$(audit_file)" 2>/dev/null && pass || fail "$1"; }
 assert_audit_absent(){ ! grep -qF "$2" "$(audit_file)" 2>/dev/null && pass || fail "$1"; }
@@ -459,6 +460,98 @@ r8prime() {
   assert_deny "R8′ missing-keys classifies MAIN → tier-1 deny"
 }
 r8prime
+
+# ============================================================
+# Tier-2 NUDGE + cooldown (AC-2) — fuzzy production-shaped commands
+# get ONE additionalContext nudge per (session, class); a repeat within
+# the same session is suppressed. State: .bionic/tmp/farm-out.state,
+# lines session_id<TAB>class.
+# ============================================================
+
+echo ""
+echo "=== T1: git clone … (main) → nudge + audit nudge:class=clone ==="
+t1() {
+  setup
+  run_hook "$(stdin_for 'git clone https://github.com/foo/bar.git' '')"
+  assert_nudge "T1 git clone → nudge (additionalContext)"
+  assert_audit_has "T1 audit nudge class=clone" "farm-out nudge: class=clone"
+}
+t1
+
+echo ""
+echo "=== T2: git clone twice same session → 2nd silent + audit suppressed ==="
+t2() {
+  setup
+  run_hook "$(stdin_for 'git clone https://github.com/foo/bar.git' '')"
+  assert_nudge "T2 first git clone → nudge"
+  run_hook "$(stdin_for 'git clone https://github.com/foo/bar.git' '')"
+  assert_silent "T2 second git clone same session → suppressed (silent)"
+  assert_audit_has "T2 audit suppressed class=clone" "farm-out suppressed: class=clone"
+}
+t2
+
+echo ""
+echo "=== T3: different class (npx …) same session after clone → nudge ==="
+t3() {
+  setup
+  run_hook "$(stdin_for 'git clone https://github.com/foo/bar.git' '')"
+  assert_nudge "T3 prime cooldown with clone → nudge"
+  run_hook "$(stdin_for 'npx create-react-app demo' '')"
+  assert_nudge "T3 npx (pkg-exec) uncooled class → nudge"
+  assert_audit_has "T3 audit nudge class=pkg-exec" "farm-out nudge: class=pkg-exec"
+}
+t3
+
+echo ""
+echo "=== T4: same class, different session_id → nudge (state keyed by session) ==="
+t4() {
+  setup
+  run_hook "$(stdin_for 'git clone https://github.com/foo/bar.git' '')"
+  assert_nudge "T4 session s-fixture clone → nudge"
+  run_hook "$(stdin_for 'git clone https://github.com/foo/bar.git' '' 's-other')"
+  assert_nudge "T4 session s-other same class → nudge (not suppressed)"
+}
+t4
+
+echo ""
+echo "=== T5: 3-seg exempt-only chain (git add && git commit && git log) → silent ==="
+t5() {
+  setup
+  run_hook "$(stdin_for 'git add -A && git commit -m wip && git log --oneline -1' '')"
+  assert_silent "T5 exempt-only chain → silent"
+  assert_audit_absent "T5 no audit line" "farm-out"
+}
+t5
+
+echo ""
+echo "=== T6: 3-seg mixed non-tier-1 chain (mkdir && curl && tar) → nudge class=chain ==="
+t6() {
+  setup
+  run_hook "$(stdin_for 'mkdir out && curl -o out/f.tgz https://ex/f && tar xf out/f.tgz' '')"
+  assert_nudge "T6 mixed non-tier-1 chain → nudge"
+  assert_audit_has "T6 audit nudge class=chain" "farm-out nudge: class=chain"
+}
+t6
+
+echo ""
+echo "=== T7: unwritable state dir (chmod 555 .bionic/tmp) → nudge still emitted ==="
+t7() {
+  setup
+  chmod 555 "$SANDBOX/.bionic/tmp"
+  run_hook "$(stdin_for 'git clone https://github.com/foo/bar.git' '')"
+  assert_nudge "T7 unwritable state dir → nudge still emitted (degrade loud)"
+  chmod u+rwx "$SANDBOX/.bionic/tmp" 2>/dev/null || true
+}
+t7
+
+echo ""
+echo "=== T8: nudge JSON names subagent_type: implementor ==="
+t8() {
+  setup
+  run_hook "$(stdin_for 'git clone https://github.com/foo/bar.git' '')"
+  assert_nudge_has "T8 nudge additionalContext names subagent_type: implementor" "subagent_type: implementor"
+}
+t8
 
 # ============================================================
 # Results
