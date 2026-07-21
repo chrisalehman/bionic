@@ -1451,6 +1451,7 @@ MANAGED_HOOKS=(
   "PreToolUse|Bash|~/.claude/hooks/protect-main.sh"
   "PreToolUse|Bash|~/.claude/hooks/protect-database.sh"
   "PreToolUse|Bash|~/.claude/hooks/canonical-sdlc-evidence-gate.sh"
+  "PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh"
   "PreToolUse|Write|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "SessionStart|startup|~/.claude/hooks/memory-cleanup.sh"
