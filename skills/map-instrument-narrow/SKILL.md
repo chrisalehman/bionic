@@ -225,7 +225,7 @@ Record every cause as a node so the investigation is auditable and an orchestrat
 ### Who runs the recursion
 
 - **Standalone use** (`ralph-loop`, direct invocation): when a node spawns children, run a fresh MAP-INSTRUMENT-NARROW pass for each, depth-first, and keep the tree in your working notes.
-- **Under an orchestrator** (`canonical-sdlc` autonomous mode): do NOT recurse in place. Emit the confirmed node plus its open children as structured candidates and hand them back. The orchestrator owns the tree and dispatches a **fresh subagent per candidate** (clean context, same Rigor Mandate). See that skill's Autonomous Friction Protocol.
+- **Under an orchestrator** (an unattended `canonical-sdlc` wave): do NOT recurse in place. Emit the confirmed node plus its open children as structured candidates and hand them back. The orchestrator owns the tree and dispatches a **fresh subagent per candidate** (clean context, same Rigor Mandate). See that skill's Autonomous Friction Protocol.
 
 ### Termination
 

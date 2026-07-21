@@ -1,6 +1,10 @@
 # bionic
 
-One engineer, mass-augmented. A single bootstrap transforms Claude Code into a fully agentic engineering team — 100+ specialists, structured SDLC, safety guardrails.
+**An SDLC harness for agentic engineering — built to magnify one engineer, not replace them.**
+
+bionic bridges two paradigms. The first is the discipline you already trust: discovery, spec, plan, implement, test, review, ship — the well-worn lifecycle that makes software provable. The second is the new one: agentic engineering, where that same lifecycle is executed by a team of AI agents — an orchestrator holding the decision layer in continuous dialogue with you, farming implementation, research, verification, and review out to specialist subagents running in parallel.
+
+Most AI tooling picks one side: "trust the agent" (no discipline) or "AI autocomplete" (no multiplication). bionic welds them: the traditional SDLC, enforced mechanically by hooks that block undisciplined work, executed at agentic scale.
 
 ```bash
 git clone https://github.com/chrisalehman/bionic.git
@@ -17,13 +21,28 @@ Re-run anytime to update. Reset with `./claude-reset.sh` (same profile arguments
 
 **Fresh Mac note:** the first run may ask for your macOS password and open the Xcode Command Line Tools dialog (Homebrew needs them) — expected; everything else is unattended.
 
-## Patterns That Change How You Ship
+## Come for the Discipline. Stay for the Multiplication.
+
+**The discipline.** [`canonical-sdlc`](skills/canonical-sdlc/README.md) — the flagship — runs every non-trivial change through a governed 10-step lifecycle with two gates: Verify ("does it work?") and Review ("is it well-made?"). Claims don't count; evidence does. Commits are blocked — mechanically, by hook — until the current step's evidence exists in the plan. At audited rigor, an independent auditor tries to falsify your verification evidence and an adversarial critic tries to falsify your code before anything merges.
+
+**The multiplication.** The lifecycle isn't executed by one agent in one context window. An orchestrator keeps the decision layer — scoping, planning, synthesis, and the socratic back-and-forth with you — while the production work fans out to six installed agent roles on tiered models. A farm-out hook denies the orchestrator from burning its own context on work that belongs to a subagent; a context-spend hook measures the economics per lifecycle step. One engineer, running an engineering org's worth of concurrent work.
+
+**The receipts** — bionic builds itself under its own lifecycle:
+
+- The evidence-gate hook is 1,464 lines of enforcement held to a 4,613-line test suite — the tests outweigh the enforcement they guard 3:1.
+- ~800 test assertions across 11 suites; every hook ships with a paired suite.
+- Bionic develops itself at audited rigor, and the assurance roles earn their keep: the adversarial critic has caught material defects pre-merge wave after wave (critic-attributed fixes are visible in the commit history), and the independent auditor has issued a real REFUTED verdict — against this project's own evidence. The full audit trail lives in each run's plan artifacts.
+- canonical-sdlc has survived eleven versions of tightening — each one closing another way an agent learned to look done without being done.
+
+## The Operating Patterns
 
 Most AI tooling demos show a single agent completing a single task. That's the "hello world" of agentic development. These patterns are what happens when you treat AI agents the way you'd treat an engineering organization — with specialization, parallelism, feedback loops, and async coordination.
 
 **Agentic Teams** — Dispatch parallel specialist teams at a problem instead of feeding everything through one context window. Audits, refactors, migrations, feature builds, incident investigations — any problem that benefits from multiple perspectives gets decomposed across concurrent agents, each bringing domain expertise, then synthesized into a coordinated result. This is the same reason no serious org assigns one engineer to do a security review, perf analysis, and accessibility audit in one sitting. Parallelism plus specialization compounds.
 
-**Canonical SDLC** — Bionic's flagship pattern. An 11-step autonomous lifecycle (configure → ideate → spec → plan → implement → verify → review → document → external-review → integrate-&-close → ship), organized around **two gates** — Verify ("does it work?", Step 5) and Review ("is it well-made?", Step 6) — plus a cross-cutting commit rhythm that fires per step rather than at a numbered position. Enforced by two coordinating hooks: governing-skill validates plan/spec/ADR frontmatter shape on write, evidence-gate blocks commits that lack verifiable per-step evidence. Plan frontmatter is the single source of truth for state — `mode`, `sdlc-step`, `canonical_sdlc_version`, five discriminator flags, two opt-in flags, and a `model_plan` line. Evidence is two-tiered: verification (mandatory, shape-checked) and handoff (preserved across sessions). Step 0 confirms every flag with the user before plan-shaping; Step 9 (Integrate & close) strips ephemera on close. The loop runs unattended for hours and produces an auditable record at the end. See [`skills/canonical-sdlc/README.md`](skills/canonical-sdlc/README.md).
+**Canonical SDLC** — Bionic's flagship pattern. A governed 10-step lifecycle (0–9: configure → ideate → spec → plan → implement → verify → review → document → integrate-&-close → ship), organized around **two gates** — Verify ("does it work?", Step 5) and Review ("is it well-made?", Step 6) — plus a cross-cutting commit rhythm that fires per step rather than at a numbered position. Every run declares a triple — **intent** (build · bugfix · refactor · tune · spike · incident-response) · **rigor** (tested · peer-reviewed · audited) · **scale** (task · wave · epic) — so a one-line bugfix pays minutes of ceremony while an audited wave gets the full machinery: a pre-registered **Verification Matrix** with T0–T4 evidence tiers per acceptance criterion, an **independent auditor** whose only job is to falsify the verification evidence, and an **adversarial critic** whose only job is to falsify the code. Two coordinating hooks make it mechanical: governing-skill validates plan/spec/ADR frontmatter shape on write, evidence-gate blocks commits that lack verifiable per-step evidence. Plan frontmatter is the single source of truth for state. The loop runs unattended for hours and produces an auditable record at the end. See [`skills/canonical-sdlc/README.md`](skills/canonical-sdlc/README.md).
+
+**The Conductor** — bionic's name for the orchestrator: the one agent that holds the session's decision layer. Its context window is the session's lifespan, and its judgment is the ceiling on everything it dispatches — so bionic treats it as the scarcest resource in the system and protects it mechanically. Six installed agent roles ([`agents/`](agents/)) carry the invariant duties on tiered models: mechanical slices run on Sonnet-class models, judgment work on Opus-class, and the assurance roles are tool-denied from editing code at all. The farm-out hook *denies* long-running commands on the main thread and names the role that should run them instead; the context-spend hook logs per-step context burn so dispatch economics are measured, not vibes. The orchestrator stays free for what only it can do: decisions, synthesis, and the dialogue with you.
 
 **Subagent SDLC Pipeline (superpowers)** — A complementary, lighter-weight lifecycle from the superpowers plugin: brainstorm → design decisions with explicit tradeoff analysis → implementation plan → TDD → parallel execution → code review. Surfaces architectural *decisions* rather than burying them in generated code. Use this for one-off changes; use canonical-sdlc when the work is wave-sized and worth the audit trail.
 
@@ -51,6 +70,7 @@ Other things to try on day one:
 - `Fix this failing test. Run it. Iterate until green. Show me the result.`
 - `Refactor this module — full SDLC: design decision first, then implement.`
 - `Optimize this query. Measure before and after.`
+- `/canonical-sdlc <a real feature brief>` — declare the intent · rigor · scale triple and watch the gates work.
 
 ## What Gets Installed
 
@@ -61,10 +81,11 @@ The **core profile** lives in [`claude-config.txt`](claude-config.txt) — edit 
 | **CLI tools** | git, node, pnpm, gh, jq, ripgrep, uv, docker, yq, aws, gcloud *(cask)*, @playwright/cli, @pencil.dev/cli, notebooklm *(via uv)* |
 | **Plugins** | superpowers, agent-skills, document-skills, example-skills, frontend-design |
 | **Subagents** | voltagent-core-dev, voltagent-lang, voltagent-infra, voltagent-qa-sec, voltagent-data-ai, voltagent-dev-exp, voltagent-meta |
+| **Agent roles** | implementor, senior-implementor, researcher, auditor, critic, test-runner → `~/.claude/agents/` — model-tiered roles with byte-checked mandates |
 | **MCP servers** | context7, chrome-devtools *(Pencil's MCP server self-registers whenever the Pencil app is running — no config entry needed)* |
-| **Skills** | **bionic:canonical-sdlc** (flagship — 11-step autonomous lifecycle), bionic:browser-verify, bionic:rigorous-refactor, bionic:ralph-loop, bionic:map-instrument-narrow, bionic:skill-factory, excalidraw-diagram, humanizer, notebooklm, impeccable (20+ design skills) |
-| **Hooks** | protect-main.sh, protect-database.sh, memory-cleanup.sh, terseness-reminder.sh, **canonical-sdlc-evidence-gate.sh**, **canonical-sdlc-governing-skill.sh** |
-| **Philosophy** | 10 principles for agentic development → [`~/.claude/CLAUDE.md`](claude-global.md) |
+| **Skills** | **bionic:canonical-sdlc** (flagship — governed 10-step SDLC, intent · rigor · scale), bionic:browser-verify, bionic:rigorous-refactor, bionic:ralph-loop, bionic:map-instrument-narrow, bionic:skill-factory, bionic:excalidraw-diagram, bionic:motion, humanizer, notebooklm, impeccable (20+ design skills) |
+| **Hooks** | protect-main.sh, protect-database.sh, memory-cleanup.sh, terseness-reminder.sh, **canonical-sdlc-evidence-gate.sh**, **canonical-sdlc-governing-skill.sh**, **farm-out-reminder.sh**, **context-spend.sh** |
+| **Philosophy** | 8 principles + skill-precedence, stack-default, and terseness rules → [`~/.claude/CLAUDE.md`](claude-global.md) |
 | **Shell alias** | `claude` → `claude --dangerously-skip-permissions` |
 
 The **everything profile** ([`claude-config.everything.txt`](claude-config.everything.txt)) layers on the optional catalog: deployment platforms (stripe, vercel, supabase, fastlane, eas-cli), API tooling (httpie, grpcurl, protoc), observability (@sentry/cli + sentry MCP *(requires env vars)*), productivity (trello MCP *(requires env vars)*), plus commented sections for Kubernetes, databases, and Firebase.
@@ -85,6 +106,13 @@ bionic/
 ├── lib/                     # Shared libraries
 │   ├── platform.sh          # OS detection (macOS/Linux)
 │   └── platform.test.sh     # Platform detection tests
+├── agents/                  # Agent roles → ~/.claude/agents/
+│   ├── implementor.md       # Mechanical slice execution (sonnet) — ambiguity means stop
+│   ├── senior-implementor.md # Discretionary slices + root-cause debugging (opus)
+│   ├── researcher.md        # Read-only exploration with file:line citations (sonnet)
+│   ├── auditor.md           # Falsifies verification evidence (opus, write-denied)
+│   ├── critic.md            # Falsifies the code + the merge claim (opus, write-denied)
+│   └── test-runner.md       # Runs suites, never fixes (sonnet, write-denied)
 ├── hooks/                   # Safety guardrails + canonical-sdlc enforcement
 │   ├── protect-main.sh      # PreToolUse hook: blocks pushes to main/master
 │   ├── protect-database.sh  # PreToolUse hook: blocks destructive SQL
@@ -92,16 +120,24 @@ bionic/
 │   ├── terseness-reminder.sh # UserPromptSubmit hook: re-asserts terseness each turn
 │   ├── canonical-sdlc-evidence-gate.sh   # PreToolUse hook: blocks commits missing plan evidence
 │   ├── canonical-sdlc-governing-skill.sh # PreToolUse hook: blocks plan/spec writes missing frontmatter
+│   ├── farm-out-reminder.sh # PreToolUse hook: tiered dispatch enforcement (deny + nudge)
+│   ├── context-spend.sh     # Stop hook: per-step context telemetry
 │   └── *.test.sh            # Hook test suites
 ├── tests/                   # Script-level test suites
-│   └── scripts.test.sh      # Config parsing, consistency, symmetry
+│   ├── run.sh               # One-command runner for the gating suites
+│   ├── scripts.test.sh      # Config parsing, consistency, symmetry
+│   ├── installer-behavior.test.sh  # Installer functions against a sandboxed mock-tool PATH
+│   ├── agent-roles.test.sh  # Role-file mandates stay byte-identical to SKILL.md canon
+│   └── bootstrap-e2e-docker.sh     # Whole-bootstrap e2e (skipped without Docker)
 ├── skills/                  # Bionic skills → ~/.claude/skills/
-│   ├── canonical-sdlc/      # Flagship 11-step autonomous SDLC
+│   ├── canonical-sdlc/      # Flagship governed SDLC (v11: intent · rigor · scale)
 │   ├── browser-verify/      # Verify-gate browser modality (CLI-first)
 │   ├── rigorous-refactor/   # Disciplined multi-file refactoring
 │   ├── ralph-loop/          # Build-test-diagnose iteration cycle
-│   ├── map-instrument-narrow/ # Evidence-gathering for complex debugging
-│   └── skill-factory/       # Guided skill authoring with composability schema
+│   ├── map-instrument-narrow/ # Evidence-first debugging (MAP → INSTRUMENT → NARROW)
+│   ├── skill-factory/       # Guided skill authoring with composability schema
+│   ├── excalidraw-diagram/  # Diagram JSON generation + Playwright renderer
+│   └── motion/              # Current motion.dev API for animated web UI
 ├── ccstatusline/            # Status line config → ~/.config/ccstatusline/
 │   └── settings.json        # Model, context %, cost, git branch
 └── README.md
@@ -259,10 +295,6 @@ Why VoltAgent over building custom subagents: VoltAgent agents are community-mai
 
 Skills are prompt files installed to `~/.claude/skills/` that Claude can invoke via the `Skill` tool. Unlike plugins (which define agent types), skills are instructions that Claude follows within its own context.
 
-**excalidraw-diagram** — `github-skill | excalidraw-diagram | coleam00/excalidraw-diagram-skill`
-
-Generates Excalidraw diagram JSON files for visualizing workflows, architectures, and concepts. Includes a Python renderer (set up via `uv sync` during bootstrap) that uses Playwright to convert diagrams to images.
-
 **humanizer** — `github-skill | humanizer | blader/humanizer`
 
 Detects and removes 29 AI writing patterns from text, based on Wikipedia's "Signs of AI Writing" guide. Uses a two-pass process: rewrite, then self-audit for remaining AI tells. Supports voice calibration — provide a sample of your writing and it matches your sentence rhythm, word choices, and quirks. Zero dependencies, zero code — purely a structured system prompt.
@@ -283,28 +315,49 @@ All bionic skills follow the composability schema: every skill declares a `layer
 
 | Skill | Layer | What it constrains |
 |-------|-------|--------------------|
-| **canonical-sdlc** *(flagship)* | Governance | Bionic's own 11-step autonomous SDLC (Steps 0–10), organized around **two gates** — Verify (Step 5, "does it work?") and Review (Step 6, "is it well-made?") — plus a cross-cutting commit rhythm. Two coordinating hooks (governing-skill, evidence-gate) enforce plan/spec/ADR frontmatter shape on write and per-step verification evidence on commit. Plan frontmatter is single source of truth for state. Two-tier evidence (verification + handoff). Step 0 wizard confirms every flag with the user; Step 9 (Integrate & close) strips ephemera on close. Five modes (autonomous, epic-scope, incident-response, design-refresh, spike). Full reference: [`skills/canonical-sdlc/README.md`](skills/canonical-sdlc/README.md). |
+| **canonical-sdlc** *(flagship)* | Governance | The full SDLC as an enforced contract: 10 steps (0–9) with two gates — Verify (Step 5, "does it work?") and Review (Step 6, "is it well-made?") — plus a cross-cutting commit rhythm. Every run declares **intent · rigor · scale**; rigor floors are upward-only (security-touching work cannot run below `audited`). Audited runs get an independent evidence auditor and an adversarial code critic — both dispatched as separate agents, never self-graded. A pre-registered Verification Matrix pins each acceptance criterion to a T0–T4 evidence tier so nothing gets verified by a proxy that can't catch its failure. Enforced by four hooks: frontmatter shape on write, per-step evidence on commit, dispatch discipline, and context telemetry. Full reference: [`skills/canonical-sdlc/README.md`](skills/canonical-sdlc/README.md). |
 | **browser-verify** | Operational | The Verify gate's browser modality (Step 5). Runs golden-path and edge-case flows with console/network checks and visual evidence. Drives via the token-efficient `playwright-cli`; escalates to the Chrome DevTools MCP only for deep inspection (Lighthouse, performance traces, heap/CPU profiling, network throttling) that no CLI exposes. |
 | **ralph-loop** | Governance | Disciplined build-test-diagnose iteration cycle. Prevents skipping phases, exiting without evidence, and grinding past iteration limits. Three modes: DEBUG, GREENFIELD, RESEARCH-FIRST. |
 | **rigorous-refactor** | Operational | Strict state machine for complex refactors. Prevents self-grading, skipping decomposition, and implementing without tests. Independent validation via separate agent. |
-| **map-instrument-narrow** | Technique | Evidence-gathering for complex debugging. Prevents guessing without data, fixing without understanding, and instrumenting without architecture. MAP → INSTRUMENT → NARROW phases. |
+| **map-instrument-narrow** | Technique | Evidence-first debugging. Prevents guessing without data, fixing without understanding, and instrumenting without architecture. MAP → INSTRUMENT → NARROW phases, with a recursive root-cause tree so a fix isn't declared done while deeper or sibling causes sit unexamined. Reference: [`skills/map-instrument-narrow/README.md`](skills/map-instrument-narrow/README.md). |
 | **skill-factory** | Governance | Interviews the user to extract a constraint, layer, dependencies, and rationalizations, then hands off to skill-creator for file generation and eval testing. Prevents creating skills without an identified failure mode. |
 
-### Hooks (Safety Guardrails + canonical-sdlc Enforcement)
+Two more local skills ship alongside the constraint skills: **excalidraw-diagram** (`local-skill | excalidraw-diagram`) generates Excalidraw diagram JSON with a Python/Playwright renderer set up via `uv sync` during bootstrap, and **motion** (`local-skill | motion`) teaches the current `motion`/motion.dev API — the successor to Framer Motion — for animated web UI, with the pnpm store pre-warmed so `pnpm add motion` is instant.
 
-Hooks are shell scripts that Claude Code invokes at defined lifecycle events. Bionic ships six, in two behavioral families.
+### Agent Roles (`agents/`)
 
-**Hard blocks** (four `PreToolUse` hooks, exit-code-2 — the call never runs):
+Six agent role files installed to `~/.claude/agents/` — the cast that canonical-sdlc's dispatch convention assumes. The role file carries the invariant duties (mandates, model tier, tool restrictions); the dispatch prompt carries only the run-specific variables (step, scope, expected artifact, exit condition). This kills prompt drift: the auditor's and critic's mandates are **byte-identity-checked** against their canonical copies in `skills/canonical-sdlc/SKILL.md` by [`tests/agent-roles.test.sh`](tests/agent-roles.test.sh), so an installed role cannot silently diverge from the governing skill.
+
+| Role | Model · effort | Write access | Job |
+|------|---------------|--------------|-----|
+| **implementor** | sonnet · high | yes | Mechanical slice execution under TDD. The plan is literal; tests define done; ambiguity means stop and surface — never invent a decision. |
+| **senior-implementor** | opus · high | yes | Discretionary slices and root-cause debugging. Judgment licensed within slice scope; every resolution logged to the plan's Assumptions before commit. |
+| **researcher** | sonnet · medium | no | Read-only codebase/docs exploration returning structured summaries with file:line citations. |
+| **auditor** | opus · high | no | Falsifies verification evidence at its declared tier — never reviews code. Verdicts: CONFIRMED / REFUTED / UNVERIFIABLE. "The evidence is plausible" is not a verdict. |
+| **critic** | opus · high | no | Falsifies the code and the claim it's ready to merge. Mandatory at audited rigor. Pure agreement is not acceptable output. |
+| **test-runner** | sonnet · low | no | Runs suites and reports full results, teeing output to named logs. Never fixes, never edits, never re-runs to green. |
+
+The write-denied roles (`researcher`, `auditor`, `critic`, `test-runner`) carry `disallowedTools: Write, Edit, NotebookEdit` in their frontmatter — the assurance layer physically cannot modify what it judges.
+
+### Hooks (Safety Guardrails + Enforcement)
+
+Hooks are shell scripts that Claude Code invokes at defined lifecycle events. Bionic ships **eight**, in three behavioral families. Every hook has a paired `*.test.sh` suite (run them all with `./test.sh`), and every hook fails safe — a missing dependency or internal error injects nothing rather than breaking the session.
+
+**Hard blocks** (`PreToolUse`, exit-code-2 — the call never runs):
 - `protect-main.sh` (`PreToolUse|Bash`) — blocks pushes to main/master.
 - `protect-database.sh` (`PreToolUse|Bash`) — blocks destructive SQL.
-- `canonical-sdlc-evidence-gate.sh` (`PreToolUse|Bash`) — blocks `git commit` when the active plan's `## SDLC State` section lacks evidence for the current step. v3–v9 plans get per-step shape enforcement (e.g. Step 5 Verify requires `cmd:`, `pass:`, `total:`, `output:` with `pass==total`, plus a `devtools-trace:` or `n/a:`, plus `bundle-fresh:` (v7+), `drive-check:` (v8+), and `stack-health:` (v9) or `n/a:`); v1/v2 plans are presence-only.
-- `canonical-sdlc-governing-skill.sh` (`PreToolUse|Write, Edit`) — blocks writes to `*.plan.md` / `*.spec.md` / `adr-*.md` / `continuation*.md` under the docs root that lack non-empty `governing-skill:` frontmatter. v3 autonomous plans must also declare `canonical_sdlc_version: 3` plus the 5 discriminator + 2 opt-in flags; v4 through v9 add a required `model_plan`; v1/v2 plans are grandfathered.
+- `canonical-sdlc-evidence-gate.sh` (`PreToolUse|Bash`) — blocks `git commit` when the active plan's `## SDLC State` section lacks evidence for the current step. Version-routed shape enforcement from v3 through v11 (details below).
+- `canonical-sdlc-governing-skill.sh` (`PreToolUse|Write, Edit`) — blocks writes to canonical-sdlc artifacts that lack required frontmatter, including the v11 `intent`/`rigor`/`scale` triple (details below).
 
-**Advisory / reinforcement** (two hooks using JSON output to inject context, never block):
+**Tiered dispatch enforcement** (JSON permission decisions, always exit 0):
+- `farm-out-reminder.sh` (`PreToolUse|Bash`) — the Conductor pattern's teeth. Tier-1 long-running commands on the main thread (test suites, builds, installs, make targets, wrapper chains) are **denied** with a redirect naming the agent role that should run them; tier-2 production-shaped commands get one advisory nudge per class per session; `FARM_OUT_ALLOW=1` provides an audited override. Every event is logged to the shared audit channel (`.bionic/memory/sdlc-v11-audit.md`).
+
+**Advisory / telemetry** (inject context or log, never block):
 - `memory-cleanup.sh` (`SessionStart|startup`) — scans `.bionic/memory/` at session start and emits an advisory listing stale or oversized files.
 - `terseness-reminder.sh` (`UserPromptSubmit`) — re-asserts the CLAUDE.md terseness rules every turn to fight drift.
+- `context-spend.sh` (`Stop`) — appends one context-spend line (occupancy, delta, step, model) per SDLC step boundary to the audit channel, attributed via the active plan's `current:` line. This is how dispatch economics get measured instead of guessed. Silent whenever data is missing.
 
-All six hooks are registered in `~/.claude/settings.json` by `claude-bootstrap.sh`, each with a paired `*.test.sh` suite run in CI.
+All eight are installed and registered in `~/.claude/settings.json` by `claude-bootstrap.sh`.
 
 **protect-main.sh** — [`hooks/protect-main.sh`](hooks/protect-main.sh) → `~/.claude/hooks/protect-main.sh`
 
@@ -329,19 +382,27 @@ Prevents Claude from running destructive SQL. First checks if the command involv
 | `.drop()` / `.dropDatabase()` / `.deleteMany({})` | MongoDB destructive methods |
 | `DROP`/`TRUNCATE` piped to a DB client | Catches `echo "DROP TABLE..." \| psql` patterns |
 
-Both hooks have test suites ([`hooks/protect-main.test.sh`](hooks/protect-main.test.sh), [`hooks/protect-database.test.sh`](hooks/protect-database.test.sh)), run in CI via GitHub Actions alongside the canonical-sdlc and memory-cleanup suites.
+Both hooks have test suites ([`hooks/protect-main.test.sh`](hooks/protect-main.test.sh), [`hooks/protect-database.test.sh`](hooks/protect-database.test.sh)), run locally via `./test.sh` alongside the canonical-sdlc and memory-cleanup suites.
 
 **canonical-sdlc-governing-skill.sh** — [`hooks/canonical-sdlc-governing-skill.sh`](hooks/canonical-sdlc-governing-skill.sh) → `~/.claude/hooks/canonical-sdlc-governing-skill.sh`
 
 `PreToolUse|Write, Edit` hook that gates writes to canonical-sdlc artifacts. It walks up from the target path to the nearest `.bionic/` parent to find the project root, resolves the docs root (`<project>/.bionic/config.yaml`'s `docs-root:`, default `.bionic/docs`), and only fires when the file lives under `{specs,plans,adrs,incidents}/` and its basename matches `*.plan.md` / `*.spec.md` / `adr-*.md` / `continuation*.md`. README files, images, and supporting notes under those paths pass through.
 
-When in scope, the hook requires non-empty `governing-skill:` frontmatter, then routes flag enforcement by `canonical_sdlc_version`: v3 autonomous plans must carry the 5 discriminator + 2 opt-in flags; v4 through v9 add a required `model_plan` (a missing value blocks the write); v1/v2 plans are grandfathered (only `governing-skill:` is checked); an unsupported version exits 2. This makes the plan file's frontmatter the single source of truth — a malformed plan can't be written in the first place.
+When in scope, the hook requires non-empty `governing-skill:` frontmatter, then routes flag enforcement by `canonical_sdlc_version`: v3 plans must carry the 5 discriminator + 2 opt-in flags; v4 through v9 add a required `model_plan`; **v10 additionally requires the `## Verification Matrix` section once the plan reaches `sdlc-step: 3`; v11 validates the `intent`/`rigor`/`scale` triple (missing or non-enum values block), blocks any legacy `mode:` line on v11 artifacts, and blocks barred intent × scale combinations** (a `bugfix` can't be an `epic`; a `spike` can't either). v1/v2 plans are grandfathered (only `governing-skill:` is checked); an unsupported version exits 2. This makes the plan file's frontmatter the single source of truth — a malformed plan can't be written in the first place.
 
 **canonical-sdlc-evidence-gate.sh** — [`hooks/canonical-sdlc-evidence-gate.sh`](hooks/canonical-sdlc-evidence-gate.sh) → `~/.claude/hooks/canonical-sdlc-evidence-gate.sh`
 
-`PreToolUse|Bash` hook that gates `git commit`. It locates the newest plan, reads its `## SDLC State` section, finds `current: N`, and blocks the commit (exit 2) if step N's evidence line is missing, empty, or a placeholder token (`todo`, `pending`, `inprogress`, `xxx`, `tbd`, `placeholder`). (`Phase N:` is accepted as a legacy alias for `Step N:`.) Plans without a `## SDLC State` section pass through — the gate only enforces against active canonical-sdlc runs.
+`PreToolUse|Bash` hook that gates `git commit`. It locates the newest plan, reads its `## SDLC State` section, finds the current step, and blocks the commit (exit 2) if that step's evidence line is missing, empty, or a placeholder token (`todo`, `pending`, `inprogress`, `xxx`, `tbd`, `placeholder`). Plans without a `## SDLC State` section pass through — the gate only enforces against active canonical-sdlc runs.
 
-Shape enforcement is version-routed: v3/v4 plans run the v3 per-step shape table; v5 plans run the gate-collapsed 0–10 table (e.g. Step 5 Verify requires `cmd:`/`pass:`/`total:`/`output:` with `pass==total`, plus a `devtools-trace:` or `n/a:`; Step 9 Integrate & close requires `merge:`/`worktree-removed:` plus the cleanup-half fields or `cleanup: n/a`); v6 plans run the v6 table (v5 minus external review); v7 plans run the v7 table (v6 plus the universal Step-5 `bundle-fresh:` key); v8 plans run the v8 table (v7 plus the universal Step-5 `drive-check:` key); v9 plans run the v9 table (v8 plus the universal Step-5 `stack-health:` key). v1/v2 plans are presence-only. The rule is simple: the evidence artifact must be recorded in the plan *before* the commit that closes the step. Test suite: [`hooks/canonical-sdlc-evidence-gate.test.sh`](hooks/canonical-sdlc-evidence-gate.test.sh) (and [`hooks/canonical-sdlc-governing-skill.test.sh`](hooks/canonical-sdlc-governing-skill.test.sh) for the companion hook).
+Shape enforcement is version-routed: v3/v4 plans run the v3 per-step shape table; v5 plans run the gate-collapsed table; v6 drops external review; v7 adds the universal Step-5 `bundle-fresh:` key; v8 adds `drive-check:`; v9 adds `stack-health:`. **v10 adds full `## Verification Matrix` validation — per-tier evidence keys on every acceptance-criterion row, waiver discipline, and an auditor-CONFIRMED requirement before the Verify gate can close. v11 adds the task-scale ledger (a `## Tasks` table whose rows are rigor-keyed: the blocking lanes escalate from a one-honest-line floor at `tested`, to proof-shaped evidence plus an auditor verdict at `peer-reviewed`, to a critic verdict at `audited`) and the dispatched-task ledger presence check for audited multi-agent waves — plus a log-only audit channel (`.bionic/memory/sdlc-v11-audit.md`) that records softer findings for future promotion decisions.** v1/v2 plans are presence-only. The rule is simple: the evidence artifact must be recorded in the plan *before* the commit that closes the step. Test suite: [`hooks/canonical-sdlc-evidence-gate.test.sh`](hooks/canonical-sdlc-evidence-gate.test.sh) (and [`hooks/canonical-sdlc-governing-skill.test.sh`](hooks/canonical-sdlc-governing-skill.test.sh) for the companion hook).
+
+**farm-out-reminder.sh** — [`hooks/farm-out-reminder.sh`](hooks/farm-out-reminder.sh) → `~/.claude/hooks/farm-out-reminder.sh`
+
+`PreToolUse|Bash` hook that enforces the orchestrator/subagent split. Main-thread commands are classified into tiers: tier-1 (long-running, production-shaped — test suites, bootstrap runs, installs, builds, make targets, and chains/wrappers around them) are **denied** via a JSON `permissionDecision` with a redirect-shaped reason naming the agent role that should run the command; tier-2 (fuzzier production-shaped commands) get one advisory nudge per command class per session. Subagent invocations pass through untouched — the hook discriminates main-thread from subagent context and fails toward advisory when it can't tell. `FARM_OUT_ALLOW=1` overrides with an audit trail; a `farm-out-mode` knob tunes enforcement. Always exits 0 — the enforcement lives in the JSON decision, so a hook failure can never block legitimate work. Test suite: [`hooks/farm-out-reminder.test.sh`](hooks/farm-out-reminder.test.sh).
+
+**context-spend.sh** — [`hooks/context-spend.sh`](hooks/context-spend.sh) → `~/.claude/hooks/context-spend.sh`
+
+`Stop` hook providing advisory context telemetry for canonical-sdlc runs: at each SDLC step boundary it appends one line — occupied context, delta, step, model, plan — to the audit channel, computing occupancy from the session transcript's usage data and attributing it via the active plan's current-step line. Session-scoped state lives in `.bionic/tmp/`. Silent on any missing data (no jq, no transcript, no active plan); never blocks, never writes to stdout. This is the instrumentation behind bionic's dispatch economics — where the context actually goes, per step, measured. Test suite: [`hooks/context-spend.test.sh`](hooks/context-spend.test.sh).
 
 **memory-cleanup.sh** — [`hooks/memory-cleanup.sh`](hooks/memory-cleanup.sh) → `~/.claude/hooks/memory-cleanup.sh`
 
@@ -390,11 +451,11 @@ Why this is safe despite the name: The hooks provide the actual safety net. `--d
 
 The file [`claude-global.md`](claude-global.md) is installed to `~/.claude/CLAUDE.md` (wrapped in HTML comment markers so re-runs update without clobbering your additions). This is the instructions file that Claude Code reads at the start of every session, in every project.
 
-**Why global, not project-level:** Claude Code reads both `~/.claude/CLAUDE.md` (global) and `.claude/CLAUDE.md` (project-level) — they compose. The principles here are *agent-level behavior*, not project-specific conventions. "Deploy the team," "prove it works," and "guard your context" apply regardless of what you're building. Making them global means bootstrap sets it once and every project inherits automatically — no per-project setup, no drift between repos. Project-level `CLAUDE.md` files are still the right place for project-specific instructions (coding style, architecture decisions, repo-specific boundaries). The two layers stack: global provides the base operating model, project-level adds local context.
+**Why global, not project-level:** Claude Code reads both `~/.claude/CLAUDE.md` (global) and `.claude/CLAUDE.md` (project-level) — they compose. The principles here are *agent-level behavior*, not project-specific conventions. "Prove it works," "guard your context," and "act, don't ask" apply regardless of what you're building. Making them global means bootstrap sets it once and every project inherits automatically — no per-project setup, no drift between repos. Project-level `CLAUDE.md` files are still the right place for project-specific instructions (coding style, architecture decisions, repo-specific boundaries). The two layers stack: global provides the base operating model, project-level adds local context.
 
-It teaches ten principles and four hard boundaries:
+It teaches eight principles and four hard boundaries:
 
-**Principles** — These shape how Claude approaches work, ordered by frequency of relevance:
+**Principles** — These shape how Claude approaches work:
 
 | Principle | What it teaches | Why it matters |
 |-----------|-----------------|----------------|
@@ -403,11 +464,11 @@ It teaches ten principles and four hard boundaries:
 | **Match the codebase** | Follow existing patterns, conventions, and style. `grep` for precedent. | Claude's instinct is to write "correct" code from first principles rather than consistent code that matches what's already there. |
 | **Prove it works** | Never claim done without evidence. Run tests, show output. | Without this, Claude will say "I've fixed the bug" without running the test suite. Trust but verify. |
 | **Measure before fixing** | When debugging, instrument the system to gather evidence before attempting any fix. Map, capture, narrow, then fix. | Prevents circular debugging — without data, agents guess at causes and loop through uninformed fix attempts. The philosophical complement to the map-instrument-narrow technique skill. |
-| **Act, don't ask** | Operate autonomously. Fix bugs without hand-holding. | Claude's default behavior is overly cautious — asking permission for things a senior engineer would just do. This recalibrates. |
-| **Guard your context** | Main conversation is for decisions. Offload research and implementation to subagents. | Context window pollution is the #1 cause of degraded Claude performance mid-session. This principle keeps the main thread clean. |
-| **Deploy the team** | Use 100+ specialists in parallel. Default to subagents; reserve Agent Teams for mid-flight coordination. | Without this, Claude defaults to doing everything in one context window — slower, worse results, wastes the subagent infrastructure you just installed. |
-| **Keep a project notebook** | Maintain `.bionic/memory/` with an INDEX.md brain, context.md for active state, and topical files for deep context. | Anyone (including future Claude sessions) can open the folder and understand the project state, decisions made, and lessons learned. |
-| **Learn from corrections** | Save corrections to the notebook immediately. Never repeat the same mistake. | Claude has no cross-session memory by default. The notebook is a persistent knowledge base that compounds across sessions. |
+| **Act, don't ask** | Operate autonomously on tasks. On questions, answer first — don't treat a question as permission to act. | Claude's default behavior is overly cautious — asking permission for things a senior engineer would just do. This recalibrates. |
+| **Guard your context** | Main conversation is for decisions and coordination. Offload research, exploration, and implementation to subagents; dispatch parallel teams for independent tasks. | Context window pollution is the #1 cause of degraded Claude performance mid-session. This principle keeps the main thread clean — and is now mechanically backed by the farm-out hook. |
+| **Keep a project notebook** | Maintain `.bionic/memory/` with an INDEX.md brain, context.md for active state, and topical files for deep context. Save corrections as rules the moment they happen. | Claude has no cross-session memory by default. The notebook is a persistent knowledge base that compounds across sessions. |
+
+Beyond the principles, the file carries three more sections the bootstrap keeps synced: **Skill precedence** — per-task routing between the superpowers and agent-skills plugins where their workflows collide, plus the universal-entry rule that sends all non-trivial engineering work through canonical-sdlc with a declared intent · rigor · scale triple; **Stack defaults** — motion.dev as the default library for animated web UI; and **Terseness** — banned filler phrases and length-by-question-shape rules, re-asserted every turn by the terseness-reminder hook.
 
 **Memory architecture** — The project notebook at `.bionic/memory/` is designed around two constraints: context windows are expensive, and most memories are one-liners.
 
@@ -456,7 +517,7 @@ These are disabled by default. Uncomment in `claude-config.everything.txt` and r
 
 ## Safety
 
-Hooks intercept `Bash` commands to catch accidental pushes to main and destructive SQL before they happen. The philosophy in [`claude-global.md`](claude-global.md) teaches Claude judgment — ten principles for when to act, when to pause, and when to escalate. See [Hooks](#hooks-safety-guardrails--canonical-sdlc-enforcement) and [Global Philosophy](#global-philosophy-claudemd) above for details.
+Hooks intercept `Bash` commands to catch accidental pushes to main and destructive SQL before they happen — and, mid-lifecycle, to block commits that lack evidence and dispatches that squander the orchestrator's context. The philosophy in [`claude-global.md`](claude-global.md) teaches Claude judgment — eight principles for when to act, when to pause, and when to escalate. See [Hooks](#hooks-safety-guardrails--enforcement) and [Global Philosophy](#global-philosophy-claudemd) above for details.
 
 ## Requirements
 

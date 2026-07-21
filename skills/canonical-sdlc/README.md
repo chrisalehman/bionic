@@ -4,7 +4,7 @@ Bionic's flagship engineering pattern: a 10-step software development lifecycle 
 
 This is the human-facing reference. The skill prose Claude reads at runtime is in [`SKILL.md`](SKILL.md) — same directory.
 
-> **TL;DR.** A skill enforces 10 flat steps (0–9) organized around **two gates** — Verify (Step 5, "does it work?") and Review (Step 6, "is it well-made?") — plus a cross-cutting **commit rhythm** that fires per step rather than at a numbered position. **v11 (current)** replaces the single `mode:` with an orthogonal **`intent · rigor · scale` triple** declared per run: intent ∈ `build`/`bugfix`/`refactor`/`tune`/`spike`/`incident-response`; rigor ∈ `tested`/`peer-reviewed`/`audited`; scale ∈ `task`/`wave` (default)/`epic`. `mode:` is **v≤10 legacy vocabulary**, grandfathered forever and never retrofitted. Plan frontmatter is the single source of truth: `governing-skill`, the `intent`/`rigor`/`scale` triple, `sdlc-step`, `canonical_sdlc_version`, five discriminator flags, two opt-in flags, and a `model_plan` line. State lives in a `## SDLC State` section, one evidence line per step (or per ledger task at `scale: task`). Two hooks back the skill, **unchanged in role**: `governing-skill` validates plan/spec/ADR frontmatter on write (v11: triple presence + whole-value enums, a `mode:` line blocked, barred intent×scale cells blocked), and `evidence-gate` blocks commits whose current-step evidence line is missing or placeholder. Dispatch and model tiering are governed by prose, not a hook.
+> **TL;DR.** A skill enforces 10 flat steps (0–9) organized around **two gates** — Verify (Step 5, "does it work?") and Review (Step 6, "is it well-made?") — plus a cross-cutting **commit rhythm** that fires per step rather than at a numbered position. **v11 (current)** replaces the single `mode:` with an orthogonal **`intent · rigor · scale` triple** declared per run: intent ∈ `build`/`bugfix`/`refactor`/`tune`/`spike`/`incident-response`; rigor ∈ `tested`/`peer-reviewed`/`audited`; scale ∈ `task`/`wave` (default)/`epic`. `mode:` is **v≤10 legacy vocabulary**, grandfathered forever and never retrofitted. Plan frontmatter is the single source of truth: `governing-skill`, the `intent`/`rigor`/`scale` triple, `sdlc-step`, `canonical_sdlc_version`, five discriminator flags, two opt-in flags, and a `model_plan` line. State lives in a `## SDLC State` section, one evidence line per step (or per ledger task at `scale: task`). Four hooks back the skill: `governing-skill` validates plan/spec/ADR frontmatter on write (v11: triple presence + whole-value enums, a `mode:` line blocked, barred intent×scale cells blocked); `evidence-gate` blocks commits whose current-step evidence line is missing or placeholder; `farm-out-reminder` mechanically enforces the dispatch split (tier-1 long-running main-thread commands are denied with a redirect naming the right agent role, tier-2 gets one nudge per class per session); and `context-spend` logs per-step context occupancy. The latter two share the skill's audit channel (`.bionic/memory/sdlc-v11-audit.md`). Model *tiering* — who runs on what — remains prose-governed.
 
 ---
 
@@ -17,7 +17,7 @@ This is the human-facing reference. The skill prose Claude reads at runtime is i
 - [SDLC State and the evidence model](#sdlc-state-and-the-evidence-model)
 - [Verification Matrix: a worked example](#verification-matrix-a-worked-example)
 - [Handoff tier](#handoff-tier)
-- [The two hooks](#the-two-hooks)
+- [The four hooks](#the-four-hooks)
 - [Model and token strategy](#model-and-token-strategy)
 - [Versioning and backward-compat](#versioning-and-backward-compat)
 - [RCA shape](#rca-shape)
@@ -33,7 +33,7 @@ Most "AI does the SDLC" demos collapse the lifecycle: a brainstorm becomes code 
 
 Canonical SDLC is the constraint that forces the lifecycle to stay intact. Each of the 10 steps contributes a dimension of fidelity — scope, contract, plan, isolation, proof, review, decision record, release discipline — that no other step supplies. Without enforcement, individual steps feel skippable in isolation, but the compounding loss of fidelity is invisible mid-effort and surfaces later as rework.
 
-The skill plus two hooks make the lifecycle non-skippable. The plan file is the single source of truth: configuration lives in YAML frontmatter, evidence lives in the `## SDLC State` section, and decisions live in ADRs (or RCAs for incidents). Every commit must show evidence for the current step. Every plan/spec/ADR must declare the skill that produced it.
+The skill plus its four hooks make the lifecycle non-skippable. The plan file is the single source of truth: configuration lives in YAML frontmatter, evidence lives in the `## SDLC State` section, and decisions live in ADRs (or RCAs for incidents). Every commit must show evidence for the current step. Every plan/spec/ADR must declare the skill that produced it.
 
 The autonomous span is **Steps 4–9** — Claude walks away to build for hours and returns with merged code. Steps 1–3 (Ideate, Spec, Plan) are interactive: that's where wrong assumptions get caught cheaply. Step 3 ends with an explicit user approval before autonomous execution begins.
 
@@ -461,9 +461,9 @@ session-count: 2
 
 ---
 
-## The two hooks
+## The four hooks
 
-Two independent hooks gate two different tool events. Each reads the active plan independently — there is no shared state, no dispatch routing, no rules JSON.
+Two blocking hooks gate the artifact contract (frontmatter on write, evidence on commit); two enforcement/telemetry hooks back the dispatch discipline (farm-out routing, context spend). Each reads the active plan independently — there is no shared state between them and no dispatch-routing JSON; the only shared surface is the append-only audit channel at `.bionic/memory/sdlc-v11-audit.md`.
 
 ### `canonical-sdlc-governing-skill.sh` — `PreToolUse | Write, Edit`
 
@@ -492,6 +492,14 @@ Shape enforcement is version-routed:
 - **v10 plans** — run the v10 per-step shape table (tests floor + `auditor:` pointer, replacing the flat universal-key stack with a discharged `## Verification Matrix` section: per-tier keys, status enum, waiver/`CONFIRMED` discipline, `false-green:`/`rewritten:` pairing). Validated at `current: 5` (the Verify-gate check, with the v10.1 mid-discharge relaxation for `pending`/`blocked` rows) and re-validated as a prefix check for `current: 6..9` — so a `REFUTED` auditor verdict discovered after Step 5 still blocks every later commit.
 - **v1/v2 plans** — presence-only by default.
 
+### `farm-out-reminder.sh` — `PreToolUse | Bash`
+
+The mechanical backstop for the dispatch discipline in [Model and token strategy](#model-and-token-strategy). Classifies main-thread Bash commands into tiers: tier-1 long-running, production-shaped work (test suites, bootstrap runs, installs, builds, make targets, and chains/wrappers around them) is **denied** via a JSON `permissionDecision` whose reason names the agent role that should run it; tier-2 fuzzier production-shaped commands get one advisory nudge per command class per session. Subagent contexts pass through untouched, and ambiguity fails toward advisory. `FARM_OUT_ALLOW=1` overrides with an audit line; every deny/nudge/override event is logged to the audit channel. Always exits 0 — enforcement lives in the JSON decision, so a hook failure can never block legitimate work.
+
+### `context-spend.sh` — `Stop`
+
+Advisory telemetry for the same discipline: at each SDLC step boundary it appends one line — occupied context, delta, step, model, plan — to the audit channel, computing occupancy from the session transcript's usage data and attributing it via the plan's `current:` line. Silent on any missing input; never blocks. This is the measurement side of the strategy below — dispatch economics from data, not vibes.
+
 ---
 
 ## Model and token strategy
@@ -499,6 +507,8 @@ Shape enforcement is version-routed:
 canonical-sdlc pins the orchestrator on one strong model for the whole wave and reaches the cheaper tiers **only through subagent dispatch**. The reasoning is mechanical: switching the main model mid-wave invalidates the prompt cache (and a skill cannot enforce a main-model switch anyway), so the main model is fixed and the tiering lives in *who you dispatch to*.
 
 Dispatch uses model family **aliases** (`model: opus`, `model: sonnet`) that resolve to the top model in each family at dispatch time — the skill never hardcodes a version, so it self-upgrades on every model release. The "currently resolves to" column is informational.
+
+Dispatch goes through **installed agent roles** (`agents/` in the bionic repo → `~/.claude/agents/`): `implementor`, `senior-implementor`, `researcher`, `auditor`, `critic`, `test-runner`. The role file carries the invariant duties, model/effort defaults, and tool restrictions (the assurance roles are write-denied); the dispatch prompt carries only the run-specific variables. The auditor's and critic's mandates are byte-identity-checked against their canonical copies in SKILL.md by `tests/agent-roles.test.sh`, so an installed role cannot silently drift from the governing skill.
 
 Four tiers by role (the default plan when `multi_agent: true`):
 
