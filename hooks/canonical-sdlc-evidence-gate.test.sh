@@ -4969,6 +4969,93 @@ expect_block "v24s current: G1 on a v11 plan → block (non-numeric parse, uncha
   "$h24s" 'git commit -m "x"' "valid 'current: N'"
 
 # ============================================================
+# Section 25: v≤11 grandfathering sweep (AC-5)
+# ============================================================
+#
+# Slice 4/4 (AC-5): a dedicated sweep proving v1-v11 plans behave
+# byte-identically under the CURRENT (post slice-4/1..4/3) hook. Per the
+# wave's meta-evidence rule, cases already covered VERBATIM elsewhere in
+# this file are cited here rather than duplicated; only genuinely missing
+# assertions get new fixtures.
+#
+# 1. v10 wave plan, discharged matrix -> allow: VERBATIM at 22e1. Negative
+#    twin (broken matrix -> block "AC-1"): VERBATIM at 22e2.
+# 2. v11 wave plan (matrix + audited multi_agent + ## Tasks) -> allow:
+#    VERBATIM at 22c7. Negative twin (missing evidence line -> block
+#    "evidence line"): VERBATIM at 22c8.
+# 3. v11 task-ledger plan (current: T<n>, rigor lanes) -> allow: VERBATIM
+#    at 19d. Negative twins (rigor-lane blocks): VERBATIM at 19g and the
+#    Section 22 rigor-lane cases (e.g. 22a5 bad rigor cell, 22f downgrade
+#    without waiver).
+# 4. v<=9 legacy plan (v9 stack-health shape) -> allow: VERBATIM at 16b.
+#    Negative twin (missing stack-health -> block): VERBATIM at 16a. (v7
+#    bundle-fresh shape: 13b/13a is the sibling pin.)
+# 5. Negative twins for 1-4 are the cases cited alongside each, above.
+#
+# Item 6 (no v12 key/message ever leaks onto a v<=11 plan) is NOT pinned
+# elsewhere in this file as its own assertion — added below:
+#   25a/25b/25c - v7/v9/v10 plans run through Section 23's fail-loud
+#     dispatch isolation (v23_plan) stay allowed — the companion to 23d's
+#     v11 pin, for the versions the fail-loud arm must leave untouched.
+#   25d/25e - the v10 (22e2) and v11 (19a) matrix-negative twins, re-run
+#     with an added check that their block message never carries v12-only
+#     vocabulary ("unsupported canonical_sdlc_version", "Goals",
+#     "G-addressing") — the negative-space proof that the charter contract
+#     and the fail-loud unknown-version message are structurally
+#     unreachable for v10/v11, not merely untriggered by these fixtures.
+
+echo ""
+echo "=== Section 25: v≤11 grandfathering sweep (AC-5) ==="
+
+# 25a — v7 plan through the fail-loud dispatch isolation → allow.
+h25a=$(make_home)
+write_plan "$h25a" "$(v23_plan 7)" > /dev/null
+expect_allow "v25a v7 plan through fail-loud dispatch → allow (grandfathered arm, companion to 23d)" \
+  "$h25a" 'git commit -m "x"'
+
+# 25b — v9 plan through the fail-loud dispatch isolation → allow.
+h25b=$(make_home)
+write_plan "$h25b" "$(v23_plan 9)" > /dev/null
+expect_allow "v25b v9 plan through fail-loud dispatch → allow (grandfathered arm, companion to 23d)" \
+  "$h25b" 'git commit -m "x"'
+
+# 25c — v10 plan through the fail-loud dispatch isolation → allow.
+h25c=$(make_home)
+write_plan "$h25c" "$(v23_plan 10)" > /dev/null
+expect_allow "v25c v10 plan through fail-loud dispatch → allow (grandfathered arm, companion to 23d)" \
+  "$h25c" 'git commit -m "x"'
+
+# 25d — the v10 matrix negative twin (22e2, broken matrix) never emits v12
+# vocabulary in its block message.
+h25d=$(make_home)
+write_plan "$h25d" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_no_block")" > /dev/null
+TOTAL=$((TOTAL + 1))
+run_hook "$h25d" 'git commit -m "x"'
+case "$HOOK_STDERR" in
+  *"unsupported canonical_sdlc_version"*|*"Goals"*|*"G-addressing"*)
+    FAIL=$((FAIL + 1))
+    printf 'FAIL: v25d v10 block message leaked v12 vocabulary\n  stderr=%q\n' "$HOOK_STDERR" ;;
+  *)
+    PASS=$((PASS + 1))
+    echo "PASS: v25d v10 block message stays v10-scoped (no v12 vocabulary leak)" ;;
+esac
+
+# 25e — the v11 wave matrix negative twin (19a, incomplete matrix) never
+# emits charter vocabulary either — same negative-space proof for v11.
+h25e=$(make_home)
+write_plan "$h25e" "$(v11_wave_plan 5 "$v10_step5_base" "$v10_matrix_no_block")" > /dev/null
+TOTAL=$((TOTAL + 1))
+run_hook "$h25e" 'git commit -m "x"'
+case "$HOOK_STDERR" in
+  *"unsupported canonical_sdlc_version"*|*"## Goals"*|*"G-addressing"*)
+    FAIL=$((FAIL + 1))
+    printf 'FAIL: v25e v11 block message leaked v12 vocabulary\n  stderr=%q\n' "$HOOK_STDERR" ;;
+  *)
+    PASS=$((PASS + 1))
+    echo "PASS: v25e v11 block message stays v11-scoped (no v12 vocabulary leak)" ;;
+esac
+
+# ============================================================
 # Summary
 # ============================================================
 

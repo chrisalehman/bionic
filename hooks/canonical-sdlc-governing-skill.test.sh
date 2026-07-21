@@ -1346,6 +1346,60 @@ echo "v12 CRLF charter with full valid triple → allow"
 run_write "$project/.bionic/docs/plans/epic-01-demo/v12-crlf.plan.md" "$(to_crlf "$(build_v12_plan)")"
 assert_eq "v12_accepts_crlf_charter exit 0" 0 "$HOOK_EXIT"
 
+# ============================================================
+# canonical_sdlc_version: v≤11 grandfathering sweep (AC-5)
+# ============================================================
+#
+# Slice 4/4 (AC-5): a dedicated sweep proving v1-v11 plans behave
+# byte-identically under the CURRENT (post slice-4/2) hook. Per the
+# wave's meta-evidence rule, cases already covered VERBATIM elsewhere in
+# this file are cited here rather than duplicated; only genuinely missing
+# assertions get new fixtures.
+#
+# 1. v10 full valid plan -> allow / missing model_plan -> block: VERBATIM
+#    in the v6..v10 loop ("v6/v7/v8 enforcement" section) and the
+#    "v10 grandfather: mode gate intact" pair, both above.
+# 2/3. v11 triple + barred-cell + matrix-exemption contract -> unchanged:
+#    VERBATIM in the "v11: intent x rigor x scale triple" section above
+#    (build_v11_plan cases).
+# 4. v<=9 legacy plan (v7/v9 full valid -> allow, missing model_plan ->
+#    block): VERBATIM in the v6..v10 loop above.
+# 5. Negative twins for 1/4 are the "missing model_plan -> block" cases
+#    cited alongside each, above.
+#
+# Item 6 (no v12 key/message ever leaks onto a v<=11 plan) is NOT pinned
+# elsewhere in this file as its own assertion — added below: a v10 and a
+# v11 plan, each BLOCKED for an ordinary reason unrelated to v12, must
+# never carry v12-only vocabulary ("Goals", "continuous", "charter") in
+# the block message — the negative-space proof that the continuous-scale
+# contract is structurally unreachable for v<=11, not merely untriggered
+# by these particular fixtures. (grep confirms the hook only ever emits
+# "continuous"/"charter"/"Goals" inside `[ "$SCALE" = "continuous" ]`
+# arms, so this check is specific, not a coincidental substring miss.)
+
+echo "grandfather: v10 blocked plan (missing model_plan) never leaks v12 vocabulary"
+v10_no_mp_gf=$(build_versioned_plan 10 model_plan)
+run_write "$project/.bionic/docs/plans/epic-01-demo/gf-v10-no-vocab-leak.plan.md" "$v10_no_mp_gf"
+assert_eq "gf_v10_no_mp exit 2" 2 "$HOOK_EXIT"
+case "$HOOK_STDERR" in
+  *"Goals"*|*"continuous"*|*"charter"*)
+    FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1))
+    printf '  FAIL  v10 block message leaked v12 vocabulary: %q\n' "$HOOK_STDERR" ;;
+  *) PASS=$((PASS+1)); TOTAL=$((TOTAL+1))
+     printf '  PASS  v10 block message stays v10-scoped (no v12 vocabulary leak)\n' ;;
+esac
+
+echo "grandfather: v11 blocked plan (bad intent enum) never leaks v12 vocabulary"
+run_write "$project/.bionic/docs/plans/epic-01-demo/gf-v11-no-vocab-leak.plan.md" "$(build_v11_plan intent=feature)"
+assert_eq "gf_v11_bad_intent exit 2" 2 "$HOOK_EXIT"
+case "$HOOK_STDERR" in
+  *"Goals"*|*"continuous"*|*"charter"*)
+    FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1))
+    printf '  FAIL  v11 block message leaked v12 vocabulary: %q\n' "$HOOK_STDERR" ;;
+  *) PASS=$((PASS+1)); TOTAL=$((TOTAL+1))
+     printf '  PASS  v11 block message stays v11-scoped (no v12 vocabulary leak)\n' ;;
+esac
+
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then
