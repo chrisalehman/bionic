@@ -523,6 +523,94 @@ validate_task_ledger() {
   return 0
 }
 
+# 3-line BLOCKED/Plan/Fix emit for the v12 charter arm. $1 = message tail, $2 =
+# fix line. Mirrors block_matrix / ledger_shape_fail.
+charter_fail() {
+  echo "BLOCKED: canonical-sdlc charter: $1" >&2
+  echo "Plan: $PLAN" >&2
+  echo "Fix: $2" >&2
+  exit 2
+}
+
+# v12 continuous charter G-addressing (R7 / AC-7). Called only when
+# SDLC_VERSION=12, SCALE=continuous, and current: G<n>. Validates the `## Goals`
+# registry (row schema `| id | triple | plan | status |` — four content cells, so
+# a well-formed row splits into exactly 6 fields on '|'; id ^G[0-9]+$; status
+# enum queued|active|complete|gated|dropped; a literal '|' inside a cell shears
+# the cell count and blocks, mirroring the matrix grammar checks) and the
+# per-goal `- G<n>:` evidence lines in ## SDLC State (SECTION — the same anchored
+# lookup validate_task_ledger uses, so G1 never matches G10):
+#   - the ADDRESSED goal (current: G<n>) must have a row AND a non-placeholder
+#     evidence line, at ANY status;
+#   - every NON-queued row (active|complete|gated|dropped) must have a
+#     non-placeholder evidence line; queued rows are exempt (nothing has run).
+# The ## Goals registry IS the charter's ledger: the D7 `## Tasks` presence check
+# and the wave `## Verification Matrix` never apply here (this validator exits
+# the hook before the shape dispatch reaches them).
+validate_charter() {
+  local goals rows line ncols id status ev addressed_found=0
+  goals=$(normalize_newlines "$PLAN" | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## Goals/ { f=1; next }
+    /^## / { f=0 }
+    f')
+  if [ -z "$goals" ]; then
+    charter_fail "charter addresses ${CURRENT} but has no '## Goals' registry section" \
+      "add a '## Goals' table (| id | triple | plan | status |) with a row for ${CURRENT} before committing."
+  fi
+  rows=$(echo "$goals" | grep -E '^[[:space:]]*\|[[:space:]]*G[0-9]+')
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    ncols=$(echo "$line"  | awk -F'|' '{print NF}')
+    id=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
+    status=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$5); print $5}')
+    # A well-formed 4-cell row splits into exactly 6 fields on '|'. Any other
+    # count is a sheared row / a literal pipe inside a cell (grammar mirror).
+    if [ "$ncols" -ne 6 ]; then
+      charter_fail "goal row '${line}' is malformed (wrong cell count — no literal '|' inside cells)." \
+        "write the row as '| G<n> | <triple> | <plan> | <status> |' with exactly four cells and no literal pipe inside any cell."
+    fi
+    # status enum — blocks on ANY row.
+    case "$status" in
+      queued|active|complete|gated|dropped) : ;;
+      *) charter_fail "goal ${id} has invalid status '${status:-empty}' (want queued|active|complete|gated|dropped)." \
+           "set the '${id}' row status cell to one of queued|active|complete|gated|dropped." ;;
+    esac
+    # Evidence line for this goal in ## SDLC State (anchored so G1 never matches G10).
+    ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
+         | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
+    if [ "$id" = "$CURRENT" ]; then
+      # THE ADDRESSED GOAL: evidence required at ANY status.
+      addressed_found=1
+      if [ -z "$ev" ]; then
+        charter_fail "addressed goal ${id} has no '- ${id}:' evidence line in '## SDLC State'." \
+          "record the evidence artifact on a '- ${id}:' line before committing."
+      fi
+      if is_placeholder_value "$ev"; then
+        charter_fail "addressed goal ${id} evidence line is a placeholder ('${ev}')." \
+          "replace the '- ${id}:' placeholder with the actual evidence artifact before committing."
+      fi
+    elif [ "$status" != "queued" ]; then
+      # NON-queued, non-addressed rows: evidence required (something has run).
+      if [ -z "$ev" ]; then
+        charter_fail "goal ${id} is ${status} but has no '- ${id}:' evidence line in '## SDLC State'." \
+          "record the evidence artifact on a '- ${id}:' line, or set the row back to queued."
+      fi
+      if is_placeholder_value "$ev"; then
+        charter_fail "goal ${id} is ${status} but its evidence line is a placeholder ('${ev}')." \
+          "replace the '- ${id}:' placeholder with the actual evidence artifact before committing."
+      fi
+    fi
+  done <<< "$rows"
+  # The addressed goal (current: G<n>) must have a row in ## Goals (BLOCKING).
+  if [ "$addressed_found" -eq 0 ]; then
+    charter_fail "charter addresses ${CURRENT} but no '${CURRENT}' row exists in the '## Goals' registry" \
+      "add a '| ${CURRENT} | <triple> | <plan> | <status> |' row to '## Goals' before committing."
+  fi
+  return 0
+}
+
 # Extract the ## SDLC State section (from its header up to the next ##
 # header or EOF). Line endings normalized here too (normalize_newlines), for
 # the same reason as FRONTMATTER above. Fence-aware (same idiom as matrix_section): lines inside
@@ -560,9 +648,32 @@ CURRENT=$(echo "$SECTION" \
 # `current: T<n>` on a v≤10 plan or a non-task v11 plan is NOT accepted here; it
 # falls through to the numeric check below and blocks (T-format is v11 + scale:task
 # only, never retrofitted).
-if echo "$CURRENT" | grep -qE '^T[0-9]+$' && [ "$SDLC_VERSION" = "11" ] && [ "$SCALE" = "task" ]; then
+if echo "$CURRENT" | grep -qE '^T[0-9]+$' \
+   && { [ "$SDLC_VERSION" = "11" ] || [ "$SDLC_VERSION" = "12" ]; } && [ "$SCALE" = "task" ]; then
   validate_task_ledger
   exit 0
+fi
+
+# v12 continuous charter G-addressing (R7 / AC-7). `current: G<n>` is the ARMED
+# form, valid ONLY on a v12 scale: continuous charter — it addresses a `## Goals`
+# registry row, not a numbered step. Validate the registry and allow the commit
+# (the G pointer is structurally valid; the numeric check below would false-block
+# it). G-addressing anywhere else is structural misuse: a v12 NON-continuous plan
+# blocks naming the scale mismatch; a v≤11 plan falls through to the numeric check
+# and blocks there (byte-identical to today — G is not a valid v≤11 current),
+# never retrofitted.
+if echo "$CURRENT" | grep -qE '^G[0-9]+$'; then
+  if [ "$SDLC_VERSION" = "12" ] && [ "$SCALE" = "continuous" ]; then
+    validate_charter
+    exit 0
+  fi
+  if [ "$SDLC_VERSION" = "12" ]; then
+    echo "BLOCKED: canonical-sdlc G-addressing (current: ${CURRENT}) is only valid on a 'scale: continuous' charter; this plan is 'scale: ${SCALE:-unset}'." >&2
+    echo "Plan: $PLAN" >&2
+    echo "Fix: address a numbered step (current: N) on a '${SCALE:-non-continuous}'-scale plan, or set 'scale: continuous' if this is a charter." >&2
+    exit 2
+  fi
+  # v≤11: fall through — G is not a valid current; the numeric check below blocks.
 fi
 
 if [ -z "$CURRENT" ] || ! echo "$CURRENT" | grep -qE '^[0-9]+[ab]?$'; then
@@ -646,7 +757,7 @@ is_r7_key() {
 # on colon lines and the unchanged line otherwise.
 while IFS= read -r _bline; do
   _bkey=$(printf '%s' "$_bline" | sed -E 's/^[[:space:]]*//; s/[[:space:]]*:.*$//')
-  if [ "$SDLC_VERSION" = "11" ] && is_r7_key "$_bkey"; then
+  if { [ "$SDLC_VERSION" = "11" ] || [ "$SDLC_VERSION" = "12" ]; } && is_r7_key "$_bkey"; then
     continue
   fi
   if is_placeholder_value "${_bline#*:}"; then
@@ -656,6 +767,17 @@ while IFS= read -r _bline; do
     exit 2
   fi
 done <<< "$BLOCK"
+
+# v12 continuous charter, NUMERIC current (0-3 scoping, 10 close). The armed
+# G<n> form exited above via validate_charter; a numeric current on a charter is
+# a scoping/close step whose whole contract is epic-style presence — the Step
+# evidence line exists and is non-placeholder, both already checked above. NO
+# wave shape table, NO ## Verification Matrix, and NO D7 ## Tasks ledger applies
+# to a charter (the ## Goals registry is its ledger), so exit before the shape
+# dispatch reaches any of that machinery.
+if [ "$SDLC_VERSION" = "12" ] && [ "$SCALE" = "continuous" ]; then
+  exit 0
+fi
 
 # ---------- shape validation (v2 evidence_schema or v3 plans) ----------
 # Legacy plans (no evidence_schema, no v3 marker) stop here — presence
@@ -743,18 +865,24 @@ done <<< "$BLOCK"
 # `[ -z ]` check grandfathers it. Versions 1/2 pass here and are routed by
 # `evidence_schema` in the dispatch (legacy vs. v2 shape).
 case "$SDLC_VERSION" in
-  ""|1|2|3|4|5|6|7|8|9|10|11) : ;;
+  ""|1|2|3|4|5|6|7|8|9|10|11|12) : ;;
   *)
     echo "BLOCKED: canonical-sdlc evidence-gate: unsupported canonical_sdlc_version: '$SDLC_VERSION'." >&2
     echo "Plan: $PLAN" >&2
-    echo "Fix: set 'canonical_sdlc_version: 11' (current), '10'/'9'/'8'/'7'/'6'/'5'/'4'/'3' (prior, still enforced), or '1'/'2' for legacy plans." >&2
+    echo "Fix: set 'canonical_sdlc_version: 12' (current), '11'/'10'/'9'/'8'/'7'/'6'/'5'/'4'/'3' (prior, still enforced), or '1'/'2' for legacy plans." >&2
     exit 2
     ;;
 esac
 
-if [ "$SDLC_VERSION" = "11" ]; then
-  # v11 wave/epic-scale plans carry the v10 shape (task-scale plans exited
-  # above via validate_task_ledger). The v11 arm reuses v10's validators.
+if [ "$SDLC_VERSION" = "11" ] || [ "$SDLC_VERSION" = "12" ]; then
+  # v11 AND v12 wave/epic-scale plans carry the v10 shape (task-scale plans
+  # exited above via validate_task_ledger; scale: continuous charters exited
+  # above via validate_charter / the numeric-scoping path). The v12 arm inherits
+  # the v11 shape tables + ## Verification Matrix + D7 dispatch-ledger VERBATIM —
+  # a unified arm (gate =11||=12), the same pattern slice 4/2 used on the
+  # governing-skill side (plan Assumption A8). SHAPE_MODE=v11 means v12 wave/epic
+  # plans emit v10/v11-labeled shape messages; that is the inherited-verbatim
+  # contract, not a defect.
   SHAPE_MODE="v11"
 elif [ "$SDLC_VERSION" = "10" ]; then
   SHAPE_MODE="v10"
@@ -1336,7 +1464,7 @@ validate_intent_evidence() {
 #      exit 2; a non-placeholder `- T<n>:` evidence line must exist in the
 #      ## SDLC State section (SECTION) else exit 2.
 validate_dispatch_ledger() {
-  [ "$SDLC_VERSION" = "11" ] || return 0
+  case "$SDLC_VERSION" in 11|12) : ;; *) return 0 ;; esac
   [ "$SCALE" = "wave" ] || return 0
   [ "$RIGOR" = "audited" ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
