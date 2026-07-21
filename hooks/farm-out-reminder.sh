@@ -111,7 +111,25 @@ emit_tier1() {  # $1=class $2=role — deny, or downgrade to a nudge under advis
   log_event "deny" "$1"; emit_deny "$1" "$2"; exit 0
 }
 
-# ── main flow: override → wrapper-unwrap → tier-1 deny → chain (tier-1 arm) ──
+classify_tier2() {  # $1=flat cmd → sets CLASS ROLE, rc 0 on match
+  local c="$1"
+  if printf '%s' "$c" | grep -qE '^git +clone( |$)'; then CLASS="clone"; ROLE="implementor"; return 0; fi
+  if printf '%s' "$c" | grep -qE '^docker +(run|pull)( |$)'; then CLASS="docker-run"; ROLE="implementor"; return 0; fi
+  if printf '%s' "$c" | grep -qE '^(npx|uvx) +'; then CLASS="pkg-exec"; ROLE="implementor"; return 0; fi
+  return 1
+}
+
+nudge_once() {  # $1=class $2=role — ONE nudge per (session, class); repeat = suppressed
+  local state="$PROJECT_DIR/.bionic/tmp/farm-out.state"
+  mkdir -p "$PROJECT_DIR/.bionic/tmp" 2>/dev/null
+  if [ -f "$state" ] && grep -qF "$SESSION_ID	$1" "$state" 2>/dev/null; then
+    log_event "suppressed" "$1"; return 0
+  fi
+  printf '%s\t%s\n' "$SESSION_ID" "$1" >> "$state" 2>/dev/null || true
+  log_event "nudge" "$1"; emit_nudge "$1" "$2"; return 0
+}
+
+# ── main flow: override → unwrap → tier-1 deny → tier-2 nudge (single + chain) ──
 case "$FLAT" in
   "FARM_OUT_ALLOW=1 "*|"env FARM_OUT_ALLOW=1 "*)
     log_event "override" "user-sanctioned"; exit 0 ;;
@@ -120,31 +138,55 @@ esac
 TARGET=$(unwrap "$(strip_prefixes "$FLAT")")
 CLASS=""; ROLE=""
 
+# Tier-1 single command → deny (advisory-downgrades to a nudge inside emit_tier1).
 if classify_tier1 "$TARGET"; then
   emit_tier1 "$CLASS" "$ROLE"
 fi
 
-# Chain rule (tier-1 arm; the tier-2 arm lands in 4/3): ≥3 &&-joined segments
-# where ANY stripped/unwrapped segment matches tier-1 → deny as class=chain,
-# role taken from the matching segment.
+# Chain segmentation (≥3 &&-joined segments) feeds both chain arms below;
+# compute the segment list once. Empty/0 when no `&&` is present.
+CHAIN_SEGS=""; CHAIN_COUNT=0
 case "$FLAT" in
   *"&&"*)
-    _flat_nl=$(printf '%s' "$FLAT" | awk '{ gsub(/&&/, "\n"); print }')
-    _seg_count=$(printf '%s\n' "$_flat_nl" | grep -cE '[^[:space:]]')
-    if [ "${_seg_count:-0}" -ge 3 ]; then
-      CHAIN_ROLE=""
-      while IFS= read -r _seg; do
-        _seg=$(printf '%s' "$_seg" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-        [ -n "$_seg" ] || continue
-        if classify_tier1 "$(unwrap "$(strip_prefixes "$_seg")")"; then
-          CHAIN_ROLE="$ROLE"; break
-        fi
-      done <<EOF
-$_flat_nl
-EOF
-      [ -n "$CHAIN_ROLE" ] && emit_tier1 "chain" "$CHAIN_ROLE"
-    fi
+    CHAIN_SEGS=$(printf '%s' "$FLAT" | awk '{ gsub(/&&/, "\n"); print }')
+    CHAIN_COUNT=$(printf '%s\n' "$CHAIN_SEGS" | grep -cE '[^[:space:]]')
     ;;
 esac
+
+# Chain tier-1 arm: ANY stripped/unwrapped segment matches tier-1 → deny as
+# class=chain, role taken from the matching segment.
+if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
+  CHAIN_ROLE=""
+  while IFS= read -r _seg; do
+    _seg=$(printf '%s' "$_seg" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    [ -n "$_seg" ] || continue
+    if classify_tier1 "$(unwrap "$(strip_prefixes "$_seg")")"; then
+      CHAIN_ROLE="$ROLE"; break
+    fi
+  done <<EOF
+$CHAIN_SEGS
+EOF
+  [ -n "$CHAIN_ROLE" ] && emit_tier1 "chain" "$CHAIN_ROLE"
+fi
+
+# Tier-2 single command → nudge once per (session, class).
+if classify_tier2 "$TARGET"; then
+  nudge_once "$CLASS" "$ROLE"; exit 0
+fi
+
+# Chain tier-2 arm: ≥3 segments, NO tier-1 segment (the tier-1 arm above would
+# have exited otherwise), ≥1 non-exempt segment → nudge as class=chain.
+if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
+  _has_nonexempt=""
+  while IFS= read -r _seg; do
+    _seg=$(printf '%s' "$_seg" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    [ -n "$_seg" ] || continue
+    printf '%s' "$_seg" | grep -qE '^(git|ls|cat|head|tail|wc|grep|rg|find|awk|sed|mkdir|cp|mv|rm|touch|echo|printf|test|cd|pwd|which|command|true|false) ' \
+      || { _has_nonexempt=1; break; }
+  done <<EOF
+$CHAIN_SEGS
+EOF
+  [ -n "$_has_nonexempt" ] && { nudge_once "chain" "implementor"; exit 0; }
+fi
 
 exit 0
