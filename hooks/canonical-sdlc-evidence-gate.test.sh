@@ -4599,6 +4599,514 @@ expect_allow "v11 22f7b same evidence + standalone 'critic no-blocking' token �
   "$h22f7b" 'git commit -m "x"'
 
 # ============================================================
+# Section 23: fail-loud version dispatch (AC-8 / R8, B=2 ruling)
+# ============================================================
+#
+# The `canonical_sdlc_version` dispatch below the presence/placeholder
+# checks used to be a pure if/elif shape-selector whose `else` arm silently
+# exited 0. An unrecognized NON-EMPTY version (`13`, garbage, or the
+# not-yet-armed `12`) therefore fell through to zero evidence gating at
+# commit — the asymmetry B=2 fixes (the governing-skill hook already blocks
+# unknown versions; the evidence-gate now does too). Pre-change exit codes
+# (probed against the working tree before this slice): version 13 → exit 0,
+# garbage → exit 0, version 12 → exit 0 (all silent fall-through); a valid
+# v11 plan → exit 0 and a no-version legacy plan → exit 0 (both correct, and
+# must stay correct). Both directions per the meta-evidence rule.
+#
+# An EMPTY version — no line at all, symmetric with the governing-skill
+# hook's `[ -z ]` grandfather — stays legacy (exit 0). The supported set is
+# 1–11 at this slice; slice 4/3 arms 12 and flips fixture 23e to allow.
+
+echo ""
+echo "=== Section 23: fail-loud version dispatch (AC-8) ==="
+
+# Builds a minimal well-formed plan carrying an arbitrary version line: valid
+# ## SDLC State, numeric current at a pointer step, non-empty non-placeholder
+# Step evidence — enough to clear every presence/placeholder check and reach
+# the version dispatch (so the ONLY thing under test is the version arm).
+v23_plan() {  # $1 = value for canonical_sdlc_version
+  cat <<EOF
+---
+canonical_sdlc_version: $1
+intent: build
+rigor: audited
+scale: wave
+---
+
+## SDLC State
+current: 1
+Step 1: /path/to/ideate.md
+EOF
+}
+
+# 23a — unrecognized non-empty numeric version (13) → block naming the
+# supported set. RED baseline: exit 0 (silent fall-through).
+h23a=$(make_home)
+write_plan "$h23a" "$(v23_plan 13)" > /dev/null
+expect_block "v23a version 13 (unknown, non-empty) → block (was silent exit 0)" \
+  "$h23a" 'git commit -m "x"' "unsupported canonical_sdlc_version"
+
+# 23b — unrecognized non-numeric garbage token → block. RED baseline: exit 0.
+h23b=$(make_home)
+write_plan "$h23b" "$(v23_plan garbage-token)" > /dev/null
+expect_block "v23b version 'garbage-token' (non-numeric) → block (was silent exit 0)" \
+  "$h23b" 'git commit -m "x"' "unsupported canonical_sdlc_version"
+
+# 23c — no-version-line legacy plan (pre-versioning): NOT an unknown version,
+# keeps today's presence-only legacy behavior. Pinned before AND after the
+# change (grandfather anchor). RED baseline: exit 0 — must stay exit 0.
+h23c=$(make_home)
+write_plan "$h23c" "## SDLC State
+current: 4
+Phase 4: worktree at /path, base SHA abc123" > /dev/null
+expect_allow "v23c no canonical_sdlc_version line → legacy behavior preserved (allow)" \
+  "$h23c" 'git commit -m "x"'
+
+# 23d — compliant twin: a real, allowlisted arm (v11) with a valid pointer-step
+# evidence line stays allowed — the guard touches only unrecognized versions.
+h23d=$(make_home)
+write_plan "$h23d" "$(v23_plan 11)" > /dev/null
+expect_allow "v23d valid v11 plan (allowlisted arm) → allow (guard leaves known versions untouched)" \
+  "$h23d" 'git commit -m "x"'
+
+# 23e — version 12 is now ARMED (slice 4/3). A v12 wave plan at a pointer step
+# inherits the v11 arm (SHAPE_MODE=v11), so current: 1 is a pointer step and
+# the commit is allowed. This fixture was `expect_block "unsupported ..."` at
+# slice 4/1 (12 unarmed, blocked as unknown); A7 records the deliberate flip.
+# RED baseline for THIS slice: exit 2 "unsupported" (armed 12 flips it to allow).
+h23e=$(make_home)
+write_plan "$h23e" "$(v23_plan 12)" > /dev/null
+expect_allow "v23e version 12 (now armed, slice 4/3) → allow (inherits v11 arm; current: 1 is a pointer step)" \
+  "$h23e" 'git commit -m "x"'
+
+# ============================================================
+# Section 24: v12 arm + continuous charter contract (AC-7, AC-4, AC-1)
+# ============================================================
+#
+# Slice 4/3 arms canonical_sdlc_version: 12 in the (now fail-loud) dispatch.
+# THREE inheritances + ONE new contract:
+#   - wave/epic scale → the v11 shape tables + ## Verification Matrix (via
+#     SHAPE_MODE=v11) + the D7 dispatched-task ledger, VERBATIM.
+#   - task scale → the v11 task-ledger contract, VERBATIM.
+#   - continuous scale → the NEW charter contract: current: 0-3 (numeric
+#     scoping, epic-style presence), current: G<n> (armed — addressed against
+#     the ## Goals registry), current: 10 (close). The ## Goals registry IS the
+#     charter's ledger, so the wave D7 ## Tasks check and the ## Verification
+#     Matrix never apply to a charter.
+#
+# RED baseline for EVERY fixture below (probed against the working tree after
+# slice 4/1, before this slice): version 12 → exit 2 "unsupported
+# canonical_sdlc_version" (the fail-loud gate blocks 12 as unknown). So every
+# allow expectation currently exit-2-FAILs, and every block expectation
+# currently blocks with the WRONG substring ("unsupported ...", not the
+# charter/arm-specific message) — both directions are RED until the v12 arm
+# lands. Both directions per the meta-evidence rule.
+
+echo ""
+echo "=== Section 24: v12 arm + continuous charter contract (AC-7/4/1) ==="
+
+# v12 frontmatter. $1 scale (default wave), $2 multi_agent (default true),
+# $3 rigor (default audited). Mirrors v22c_wave_frontmatter with version 12.
+v12_frontmatter() {
+  local scale="${1:-wave}" multi="${2:-true}" rigor="${3:-audited}"
+  printf -- '---\n'
+  printf -- 'governing-skill: canonical-sdlc\n'
+  printf -- 'canonical_sdlc_version: 12\n'
+  printf -- 'intent: build\n'
+  printf -- 'rigor: %s\n' "$rigor"
+  printf -- 'scale: %s\n' "$scale"
+  printf -- 'deploy_target: none\n'
+  printf -- 'use_worktree: false\n'
+  printf -- 'has_ui: false\n'
+  printf -- 'multi_agent: %s\n' "$multi"
+  printf -- '---\n'
+}
+
+# ---- 24a/b: wave-scale inherits the v11 matrix contract verbatim ---------
+
+# A v12 wave plan (v11/v10-shaped): frontmatter + ## SDLC State + ## Verification
+# Matrix. Reuses the Section-17 matrix fixtures — the ONLY variable vs a v11
+# wave plan is the version stamp. multi_agent:false so the D7 dispatch-ledger
+# guard is a no-op (isolating the matrix arm, exactly as v11 19a/19b do with a
+# no-multi_agent frontmatter); D7 inheritance is covered separately by 24c/24d.
+v12_wave_plan() {  # $1 current, $2 step body, $3 matrix section
+  printf '%s\n## SDLC State\ncurrent: %s\nStep %s:\n%s\n\n%s\n' \
+    "$(v12_frontmatter wave false)" "$1" "$1" "$2" "$3"
+}
+
+# 24a — v12 wave at current: 5 with a complete matrix + auditor pointer → allow
+# (matrix machinery inherited; the twin of 24b). Mirrors v11 19b.
+h24a=$(make_home)
+write_plan "$h24a" "$(v12_wave_plan 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
+expect_allow "v24a v12 wave Step 5 complete matrix → allow (inherits v11 matrix arm)" \
+  "$h24a" 'git commit -m "x"'
+
+# 24b — v12 wave at current: 5 with an incomplete matrix (discharged T3 row, no
+# AC block) → block, exactly like v11 19a. Proves the matrix arm FIRES for v12.
+h24b=$(make_home)
+write_plan "$h24b" "$(v12_wave_plan 5 "$v10_step5_base" "$v10_matrix_no_block")" > /dev/null
+expect_block "v24b v12 wave Step 5 incomplete matrix → block (matrix arm fires for v12)" \
+  "$h24b" 'git commit -m "x"' "AC-1"
+
+# ---- 24c/d: wave-scale inherits the D7 dispatched-task ledger verbatim ----
+
+# A v12 audited multi_agent wave at current: 5 reaching dispatch_modern, mirroring
+# v22c_wave_plan. $1 = ## Tasks section (empty omits it); $2 = extra ## SDLC State
+# lines (empty omits). validate_dispatch_ledger runs at the top of dispatch_modern.
+v12_wave_d7_plan() {
+  printf '%s\n' "$(v12_frontmatter wave)"
+  [ -n "$1" ] && printf '%s\n\n' "$1"
+  printf '## SDLC State\ncurrent: 5\nStep 5:\n%s\n' "$v10_step5_base"
+  [ -n "$2" ] && printf '%s\n' "$2"
+  printf '\n%s\n' "$v10_matrix_complete"
+}
+
+# 24c — v12 audited multi_agent wave with NO ## Tasks section → block (D7 presence
+# inherited). Mirrors v11 22c5.
+h24c=$(make_home)
+write_plan "$h24c" "$(v12_wave_d7_plan "" "")" > /dev/null
+expect_block "v24c v12 audited multi_agent wave, no ## Tasks → block (D7 inherited)" \
+  "$h24c" 'git commit -m "x"' "dispatched-task ledger"
+
+# 24d — same wave WITH a header-only ## Tasks section (zero rows) → allow (D7
+# satisfied by presence). Twin of 24c. Mirrors v11 22c6.
+h24d=$(make_home)
+write_plan "$h24d" "$(v12_wave_d7_plan "$v22c_tasks_none" "")" > /dev/null
+expect_allow "v24d v12 audited multi_agent wave, header-only ## Tasks → allow (D7 presence met)" \
+  "$h24d" 'git commit -m "x"'
+
+# ---- 24e/f: task-scale inherits the v11 task-ledger contract verbatim -----
+
+# A v12 task-scale plan: frontmatter (scale: task) + the given body. $2 rigor.
+v12_task_plan() {  # $1 body, $2 rigor (default tested)
+  printf '%s\n%s\n' "$(v12_frontmatter task true "${2:-tested}")" "$1"
+}
+
+# 24e — a v12 task plan, addressed T1 with a valid ledger + non-placeholder
+# evidence → allow (task-ledger dispatch inherited; T-format accepted on v12).
+v24e_ledger_valid="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | build | tested | do the thing | active |
+
+## SDLC State
+
+scale: task
+current: T1
+
+- T1: bash suite 12/12 green"
+h24e=$(make_home)
+write_plan "$h24e" "$(v12_task_plan "$v24e_ledger_valid")" > /dev/null
+expect_allow "v24e v12 task plan current: T1 valid ledger → allow (task-ledger inherited)" \
+  "$h24e" 'git commit -m "x"'
+
+# 24f — a v12 audited task plan with NO ## Tasks registration section → block
+# (ledger-shape fail promoted to blocking at audited, inherited). Mirrors the
+# v11 audited ledger-shape path.
+v24f_no_tasks="## SDLC State
+
+scale: task
+current: T1
+
+- T1: bash suite 12/12 green"
+h24f=$(make_home)
+write_plan "$h24f" "$(v12_task_plan "$v24f_no_tasks" audited)" > /dev/null
+expect_block "v24f v12 audited task plan, no ## Tasks → block (ledger-shape inherited)" \
+  "$h24f" 'git commit -m "x"' "task-ledger"
+
+# ---- 24g..24t: the NEW v12 continuous charter contract -------------------
+
+# A v12 charter (scale: continuous): frontmatter + ## Charter + ## Goals ($2,
+# omitted when empty) + ## SDLC State with the triple, integration-branch, and
+# current ($1). $3 = extra ## SDLC State lines (a `- G<n>:` evidence line for the
+# armed form, or a `Step N:` line for the numeric scoping/close form; omitted
+# when empty). Section body order matches the spec: ## Charter, ## Goals,
+# ## SDLC State. multi_agent:true + audited by default — so a charter WITHOUT a
+# ## Tasks section AND WITHOUT a ## Verification Matrix is the standing proof the
+# D7 and matrix arms never fire on scale: continuous.
+v12_charter() {  # $1 current, $2 goals section, $3 extra SDLC State lines
+  printf '%s\n' "$(v12_frontmatter continuous)"
+  printf '## Charter\n\nconversion policy: sub-goals convert at their own scale.\ncompletion condition: all goals complete or dropped.\n\n'
+  [ -n "$2" ] && printf '%s\n\n' "$2"
+  printf '## SDLC State\n\nintegration-branch: charter/main\nintent: build\nrigor: audited\nscale: continuous\ncurrent: %s\n' "$1"
+  [ -n "$3" ] && printf '%s\n' "$3"
+}
+
+# Valid ## Goals registry: G1 active (non-queued → evidence required), G2 queued
+# (→ evidence NOT required). Row schema | id | triple | plan | status |.
+v12_goals_valid="## Goals
+
+| id | triple | plan | status |
+|---|---|---|---|
+| G1 | build-audited-wave | plans/g1/wave.plan.md | active |
+| G2 | build-audited-task | plans/g2/task.plan.md | queued |"
+
+# 24g — VALID CHARTER (the compliant twin for the whole contract). current: G1,
+# G1 addressed + active + a non-placeholder `- G1:` evidence line; G2 queued with
+# NO evidence line (queued rows are exempt). No ## Tasks, no ## Verification
+# Matrix, yet audited + multi_agent:true → allow. This is the standing proof that
+# the D7 ## Tasks branch and the wave matrix are BOTH n/a on scale: continuous.
+h24g=$(make_home)
+write_plan "$h24g" "$(v12_charter G1 "$v12_goals_valid" "- G1: wave 3/3 slices green, commit abc123")" > /dev/null
+expect_allow "v24g valid v12 charter current: G1 (D7 n/a, matrix n/a, queued row exempt) → allow" \
+  "$h24g" 'git commit -m "x"'
+
+# 24h — current: G1 but NO ## Goals registry section → block (the armed form
+# requires the registry).
+h24h=$(make_home)
+write_plan "$h24h" "$(v12_charter G1 "" "- G1: wave 3/3 slices green")" > /dev/null
+expect_block "v24h charter current: G1 with no ## Goals section → block" \
+  "$h24h" 'git commit -m "x"' "Goals"
+
+# 24i — current: G3 but no G3 row in the registry (addressed goal absent) → block.
+# G1's evidence line is present (G1 active demands it) and G2 is queued (exempt),
+# so the ONLY defect is the missing addressed row — the block names G3.
+h24i=$(make_home)
+write_plan "$h24i" "$(v12_charter G3 "$v12_goals_valid" "- G1: wave 3/3 slices green")" > /dev/null
+expect_block "v24i charter addresses G3 with no G3 row in ## Goals → block (addressed absent)" \
+  "$h24i" 'git commit -m "x"' "no 'G3' row"
+
+# 24j — a registry row with a bad status enum ('wip') → block (any row). current:
+# G1 addressed is otherwise clean, so the block is the enum, not the addressing.
+v12_goals_bad_status="## Goals
+
+| id | triple | plan | status |
+|---|---|---|---|
+| G1 | build-audited-wave | plans/g1/wave.plan.md | active |
+| G2 | build-audited-task | plans/g2/task.plan.md | wip |"
+h24j=$(make_home)
+write_plan "$h24j" "$(v12_charter G1 "$v12_goals_bad_status" "- G1: wave 3/3 slices green")" > /dev/null
+expect_block "v24j charter registry row bad status enum ('wip') → block (any row)" \
+  "$h24j" 'git commit -m "x"' "invalid status"
+
+# 24k — a sheared registry row (a literal '|' inside a cell → wrong cell count) →
+# block. Mirrors the matrix grammar's no-literal-pipe check.
+v12_goals_sheared="## Goals
+
+| id | triple | plan | status |
+|---|---|---|---|
+| G1 | build | audited | wave | plans/g1/wave.plan.md | active |"
+h24k=$(make_home)
+write_plan "$h24k" "$(v12_charter G1 "$v12_goals_sheared" "- G1: wave 3/3 slices green")" > /dev/null
+expect_block "v24k charter registry sheared row (extra cells) → block (grammar mirror)" \
+  "$h24k" 'git commit -m "x"' "malformed"
+
+# 24l — addressed goal's evidence line MISSING. current: G1, G1 in the registry,
+# but no `- G1:` line in ## SDLC State → block (addressed evidence required at
+# any status).
+h24l=$(make_home)
+write_plan "$h24l" "$(v12_charter G1 "$v12_goals_valid" "")" > /dev/null
+expect_block "v24l charter addressed G1 with no '- G1:' evidence line → block" \
+  "$h24l" 'git commit -m "x"' "evidence line"
+
+# 24m — addressed goal's evidence line is a PLACEHOLDER token → block.
+h24m=$(make_home)
+write_plan "$h24m" "$(v12_charter G1 "$v12_goals_valid" "- G1: TODO")" > /dev/null
+expect_block "v24m charter addressed G1 evidence is a placeholder → block" \
+  "$h24m" 'git commit -m "x"' "placeholder"
+
+# 24n — a NON-addressed, NON-queued row (G2 active) with no `- G2:` evidence line
+# → block. current: G1 addressed is clean; G2 active demands evidence.
+v12_goals_g2_active="## Goals
+
+| id | triple | plan | status |
+|---|---|---|---|
+| G1 | build-audited-wave | plans/g1/wave.plan.md | active |
+| G2 | build-audited-task | plans/g2/task.plan.md | active |"
+h24n=$(make_home)
+write_plan "$h24n" "$(v12_charter G1 "$v12_goals_g2_active" "- G1: wave 3/3 slices green")" > /dev/null
+expect_block "v24n charter non-queued row G2 (active) missing evidence line → block" \
+  "$h24n" 'git commit -m "x"' "G2"
+
+# 24o — numeric SCOPING current (2): epic-style presence — the Step 2 evidence
+# line exists and is non-placeholder → allow. No ## Goals needed while scoping.
+h24o=$(make_home)
+write_plan "$h24o" "$(v12_charter 2 "" "Step 2: scoping notes at ideas/charter-scope.md")" > /dev/null
+expect_allow "v24o charter numeric scoping current: 2 with a Step 2 line → allow (presence only)" \
+  "$h24o" 'git commit -m "x"'
+
+# 24p — numeric scoping current (2) with NO Step 2 evidence line → block
+# (epic-style presence fails). Twin of 24o.
+h24p=$(make_home)
+write_plan "$h24p" "$(v12_charter 2 "" "")" > /dev/null
+expect_block "v24p charter numeric scoping current: 2 with no Step 2 line → block (presence)" \
+  "$h24p" 'git commit -m "x"' "Step 2"
+
+# 24q — CLOSE current (10): epic-style presence — the Step 10 line exists → allow.
+h24q=$(make_home)
+write_plan "$h24q" "$(v12_charter 10 "$v12_goals_valid" "Step 10: charter closed, all goals complete or dropped")" > /dev/null
+expect_allow "v24q charter close current: 10 with a Step 10 line → allow (presence only)" \
+  "$h24q" 'git commit -m "x"'
+
+# 24r — G-addressing MISUSE: current: G1 on a v12 NON-continuous (wave) plan →
+# block (structural misuse; message names the scale mismatch).
+v12_wave_gform="$(v12_frontmatter wave)
+## SDLC State
+
+integration-branch: main
+current: G1
+
+- G1: this is a wave, not a charter"
+h24r=$(make_home)
+write_plan "$h24r" "$v12_wave_gform" > /dev/null
+expect_block "v24r current: G1 on a v12 wave (non-continuous) → block (G-addressing misuse)" \
+  "$h24r" 'git commit -m "x"' "G-addressing"
+
+# 24s — GRANDFATHER pin: current: G1 on a v11 plan stays a non-numeric parse
+# failure (blocks on the 'valid current: N' check), byte-identical to today —
+# the v12 G-form interception never touches v≤11. Passes before AND after this
+# slice (a no-regression anchor, not a RED fixture).
+v11_wave_gform="$(v11_frontmatter wave)
+## SDLC State
+
+current: G1
+
+- G1: v11 has no G-addressing"
+h24s=$(make_home)
+write_plan "$h24s" "$v11_wave_gform" > /dev/null
+expect_block "v24s current: G1 on a v11 plan → block (non-numeric parse, unchanged)" \
+  "$h24s" 'git commit -m "x"' "valid 'current: N'"
+
+# 24t — id-format guard (5-axis O1 + O2): a registry row whose id does NOT match
+# ^G[0-9]+$ exactly (here 'G1x', a trailing-char id) is a blocking malformation on
+# ANY row, any status. The row is QUEUED (evidence-exempt) so the ONLY defect is
+# the id format — pre-guard this ALLOWed (grammar gated id only via the row-grep
+# prefix, which is unanchored at the end). This also closes the ERE-metachar risk:
+# a non-conforming id can no longer reach the evidence grep. current: G1 addressed
+# is clean.
+v12_goals_badid_x="## Goals
+
+| id | triple | plan | status |
+|---|---|---|---|
+| G1 | build-audited-wave | plans/g1/wave.plan.md | active |
+| G1x | build-audited-task | plans/g2/task.plan.md | queued |"
+h24t=$(make_home)
+write_plan "$h24t" "$(v12_charter G1 "$v12_goals_badid_x" "- G1: wave 3/3 slices green, commit abc123")" > /dev/null
+expect_block "v24t charter registry row id 'G1x' (non-conforming, queued) → block (id-format ^G[0-9]+\$)" \
+  "$h24t" 'git commit -m "x"' "not a valid goal id"
+
+# 24u — id-format guard, regex-metachar id ('G2.*'): pre-guard this id would be
+# interpolated live into the ERE evidence grep (O2). The queued row ALLOWed
+# pre-guard (queued rows skip evidence, so the metachar never triggered a block);
+# now the id-format guard blocks it before the ERE is ever built — the metachar
+# can no longer reach the grep. Twin of 24t on the metachar leg.
+v12_goals_badid_meta="## Goals
+
+| id | triple | plan | status |
+|---|---|---|---|
+| G1 | build-audited-wave | plans/g1/wave.plan.md | active |
+| G2.* | build-audited-task | plans/g2/task.plan.md | queued |"
+h24u=$(make_home)
+write_plan "$h24u" "$(v12_charter G1 "$v12_goals_badid_meta" "- G1: wave 3/3 slices green, commit abc123")" > /dev/null
+expect_block "v24u charter registry row id 'G2.*' (regex metachar) → block (id-format, kills ERE reach)" \
+  "$h24u" 'git commit -m "x"' "not a valid goal id"
+
+# 24v — duplicate-goal-id detection (critic OBS-3): two rows sharing an id (both
+# 'G1') plus a single '- G1:' evidence line — pre-guard the anchored evidence grep
+# matched the one line for BOTH rows, so contradictory duplicate goals both
+# "satisfied" the gate → ALLOW. Now a second occurrence of any id blocks. current:
+# G1 addressed + evidence is otherwise clean, so the block is the duplicate, not
+# the addressing.
+v12_goals_dup="## Goals
+
+| id | triple | plan | status |
+|---|---|---|---|
+| G1 | build-audited-wave | plans/g1/wave.plan.md | active |
+| G1 | build-audited-task | plans/g1b/wave.plan.md | complete |"
+h24v=$(make_home)
+write_plan "$h24v" "$(v12_charter G1 "$v12_goals_dup" "- G1: wave 3/3 slices green, commit abc123")" > /dev/null
+expect_block "v24v charter registry duplicate goal id 'G1' → block (OBS-3)" \
+  "$h24v" 'git commit -m "x"' "duplicate goal id"
+
+# ============================================================
+# Section 25: v≤11 grandfathering sweep (AC-5)
+# ============================================================
+#
+# Slice 4/4 (AC-5): a dedicated sweep proving v1-v11 plans behave
+# byte-identically under the CURRENT (post slice-4/1..4/3) hook. Per the
+# wave's meta-evidence rule, cases already covered VERBATIM elsewhere in
+# this file are cited here rather than duplicated; only genuinely missing
+# assertions get new fixtures.
+#
+# 1. v10 wave plan, discharged matrix -> allow: VERBATIM at 22e1. Negative
+#    twin (broken matrix -> block "AC-1"): VERBATIM at 22e2.
+# 2. v11 wave plan (matrix + audited multi_agent + ## Tasks) -> allow:
+#    VERBATIM at 22c7. Negative twin (missing evidence line -> block
+#    "evidence line"): VERBATIM at 22c8.
+# 3. v11 task-ledger plan (current: T<n>, rigor lanes) -> allow: VERBATIM
+#    at 19d. Negative twins (rigor-lane blocks): VERBATIM at 19g and the
+#    Section 22 rigor-lane cases (e.g. 22a5 bad rigor cell, 22f downgrade
+#    without waiver).
+# 4. v<=9 legacy plan (v9 stack-health shape) -> allow: VERBATIM at 16b.
+#    Negative twin (missing stack-health -> block): VERBATIM at 16a. (v7
+#    bundle-fresh shape: 13b/13a is the sibling pin.)
+# 5. Negative twins for 1-4 are the cases cited alongside each, above.
+#
+# Item 6 (no v12 key/message ever leaks onto a v<=11 plan) is NOT pinned
+# elsewhere in this file as its own assertion — added below:
+#   25a/25b/25c - v7/v9/v10 plans run through Section 23's fail-loud
+#     dispatch isolation (v23_plan) stay allowed — the companion to 23d's
+#     v11 pin, for the versions the fail-loud arm must leave untouched.
+#   25d/25e - the v10 (22e2) and v11 (19a) matrix-negative twins, re-run
+#     with an added check that their block message never carries v12-only
+#     vocabulary ("unsupported canonical_sdlc_version", "Goals",
+#     "G-addressing") — the negative-space proof that the charter contract
+#     and the fail-loud unknown-version message are structurally
+#     unreachable for v10/v11, not merely untriggered by these fixtures.
+
+echo ""
+echo "=== Section 25: v≤11 grandfathering sweep (AC-5) ==="
+
+# 25a — v7 plan through the fail-loud dispatch isolation → allow.
+h25a=$(make_home)
+write_plan "$h25a" "$(v23_plan 7)" > /dev/null
+expect_allow "v25a v7 plan through fail-loud dispatch → allow (grandfathered arm, companion to 23d)" \
+  "$h25a" 'git commit -m "x"'
+
+# 25b — v9 plan through the fail-loud dispatch isolation → allow.
+h25b=$(make_home)
+write_plan "$h25b" "$(v23_plan 9)" > /dev/null
+expect_allow "v25b v9 plan through fail-loud dispatch → allow (grandfathered arm, companion to 23d)" \
+  "$h25b" 'git commit -m "x"'
+
+# 25c — v10 plan through the fail-loud dispatch isolation → allow.
+h25c=$(make_home)
+write_plan "$h25c" "$(v23_plan 10)" > /dev/null
+expect_allow "v25c v10 plan through fail-loud dispatch → allow (grandfathered arm, companion to 23d)" \
+  "$h25c" 'git commit -m "x"'
+
+# 25d — the v10 matrix negative twin (22e2, broken matrix) never emits v12
+# vocabulary in its block message.
+h25d=$(make_home)
+write_plan "$h25d" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_no_block")" > /dev/null
+TOTAL=$((TOTAL + 1))
+run_hook "$h25d" 'git commit -m "x"'
+case "$HOOK_STDERR" in
+  *"unsupported canonical_sdlc_version"*|*"Goals"*|*"G-addressing"*)
+    FAIL=$((FAIL + 1))
+    printf 'FAIL: v25d v10 block message leaked v12 vocabulary\n  stderr=%q\n' "$HOOK_STDERR" ;;
+  *)
+    PASS=$((PASS + 1))
+    echo "PASS: v25d v10 block message stays v10-scoped (no v12 vocabulary leak)" ;;
+esac
+
+# 25e — the v11 wave matrix negative twin (19a, incomplete matrix) never
+# emits charter vocabulary either — same negative-space proof for v11.
+h25e=$(make_home)
+write_plan "$h25e" "$(v11_wave_plan 5 "$v10_step5_base" "$v10_matrix_no_block")" > /dev/null
+TOTAL=$((TOTAL + 1))
+run_hook "$h25e" 'git commit -m "x"'
+case "$HOOK_STDERR" in
+  *"unsupported canonical_sdlc_version"*|*"## Goals"*|*"G-addressing"*)
+    FAIL=$((FAIL + 1))
+    printf 'FAIL: v25e v11 block message leaked v12 vocabulary\n  stderr=%q\n' "$HOOK_STDERR" ;;
+  *)
+    PASS=$((PASS + 1))
+    echo "PASS: v25e v11 block message stays v11-scoped (no v12 vocabulary leak)" ;;
+esac
+
+# ============================================================
 # Summary
 # ============================================================
 
