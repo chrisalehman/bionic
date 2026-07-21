@@ -554,6 +554,98 @@ t8() {
 t8
 
 # ============================================================
+# Make-target build coverage (critic F1) + segment anchoring
+# (critic F2b). `make <target>` is tier-1 build EXCEPT `make clean`
+# (trivial → silent) and `make test` (suite arm wins, not build).
+# install/build regexes anchor on (^|[;&| ]) so a post-separator
+# segment classifies like the suite/bootstrap arms already do —
+# while a substring inside a word (remake) still never matches.
+# ============================================================
+
+echo ""
+echo "=== F1: make build/release/all/dist/install → deny class=build ==="
+f1() {
+  local cmd
+  for cmd in 'make build' 'make release' 'make all' 'make dist' 'make install'; do
+    setup
+    run_hook "$(stdin_for "$cmd" '')"
+    assert_deny "F1 [$cmd] → deny"
+    assert_audit_has "F1 [$cmd] audit class=build" "farm-out deny: class=build"
+  done
+}
+f1
+
+echo ""
+echo "=== F2: make clean → silent (trivial exemption, no audit) ==="
+f2() {
+  setup
+  run_hook "$(stdin_for 'make clean' '')"
+  assert_silent "F2 make clean → silent"
+  assert_audit_absent "F2 no audit line" "farm-out"
+}
+f2
+
+echo ""
+echo "=== F3: make test → still deny class=suite (regression; suite arm wins over build) ==="
+f3() {
+  setup
+  run_hook "$(stdin_for 'make test' '')"
+  assert_deny "F3 make test → deny"
+  assert_audit_has "F3 audit class=suite" "farm-out deny: class=suite"
+}
+f3
+
+echo ""
+echo "=== F4: true ; npm install → deny class=install (segment anchor after ;) ==="
+f4() {
+  setup
+  run_hook "$(stdin_for 'true ; npm install' '')"
+  assert_deny "F4 true ; npm install → deny"
+  assert_audit_has "F4 audit class=install" "farm-out deny: class=install"
+}
+f4
+
+echo ""
+echo "=== F5: true ; cargo build → deny class=build (segment anchor after ;) ==="
+f5() {
+  setup
+  run_hook "$(stdin_for 'true ; cargo build' '')"
+  assert_deny "F5 true ; cargo build → deny"
+  assert_audit_has "F5 audit class=build" "farm-out deny: class=build"
+}
+f5
+
+echo ""
+echo "=== F6: echo remake → silent (word-boundary discipline; 'make' inside a word) ==="
+f6() {
+  setup
+  run_hook "$(stdin_for 'echo remake' '')"
+  assert_silent "F6 echo remake → silent"
+  assert_audit_absent "F6 no audit line" "farm-out"
+}
+f6
+
+echo ""
+echo "=== F7: bash test.sh; echo done → deny class=suite (terminator unify; trailing ;) ==="
+f7() {
+  setup
+  run_hook "$(stdin_for 'bash test.sh; echo done' '')"
+  assert_deny "F7 bash test.sh; echo done → deny"
+  assert_audit_has "F7 audit class=suite" "farm-out deny: class=suite"
+}
+f7
+
+echo ""
+echo "=== F8: npm ci → deny class=install (ci ratified into closed set; regression guard) ==="
+f8() {
+  setup
+  run_hook "$(stdin_for 'npm ci' '')"
+  assert_deny "F8 npm ci → deny"
+  assert_audit_has "F8 audit class=install" "farm-out deny: class=install"
+}
+f8
+
+# ============================================================
 # Results
 # ============================================================
 echo ""

@@ -93,13 +93,23 @@ unwrap() {  # one level of sh -c / bash -c / eval / bash <(...) → inner comman
 
 classify_tier1() {  # $1=flat cmd → sets CLASS ROLE, rc 0 on match
   local c="$1"
-  if printf '%s' "$c" | grep -qE '(^|[;&| ])bash +([^ ]*/)?(test\.sh|tests/run\.sh)( |$)|(^|[;&| ])bash +[^ ]+\.test\.sh( |$)|^(npm|pnpm|yarn) +test( |$)|^pytest( |$)|^go +test( |$)|^cargo +test( |$)|^make +test( |$)'; then
+  # Patterns match mid-command by design: the (^|[;&| ]) anchor and the
+  # ([;&| ]|$) terminator let a tier-1 token be found after a separator
+  # (`true ; npm install`, `bash test.sh; echo done`) while a substring
+  # inside a word (`echo remake`) never matches. A short (<3-segment) chain
+  # that carries a tier-1 token thus denies here on purpose; the ≥3-segment
+  # &&-chain is a separate arm (class=chain) reached only when this one skips.
+  if printf '%s' "$c" | grep -qE '(^|[;&| ])bash +([^ ]*/)?(test\.sh|tests/run\.sh)([;&| ]|$)|(^|[;&| ])bash +[^ ]+\.test\.sh([;&| ]|$)|^(npm|pnpm|yarn) +test([;&| ]|$)|^pytest([;&| ]|$)|^go +test([;&| ]|$)|^cargo +test([;&| ]|$)|^make +test([;&| ]|$)'; then
     CLASS="suite"; ROLE="test-runner"; return 0; fi
-  if printf '%s' "$c" | grep -qE '(^|[;&| ])\.?/?([^ ]*/)?claude-(bootstrap|reset)\.sh( |$)'; then
+  if printf '%s' "$c" | grep -qE '(^|[;&| ])\.?/?([^ ]*/)?claude-(bootstrap|reset)\.sh([;&| ]|$)'; then
     CLASS="bootstrap"; ROLE="implementor"; return 0; fi
-  if printf '%s' "$c" | grep -qE '^(npm|pnpm|yarn) +(install|add|ci)( |$)|^pip3? +install( |$)|^uv +(sync|pip)( |$)|^brew +install( |$)'; then
+  if printf '%s' "$c" | grep -qE '(^|[;&| ])(npm|pnpm|yarn) +(install|add|ci)([;&| ]|$)|(^|[;&| ])pip3? +install([;&| ]|$)|(^|[;&| ])uv +(sync|pip)([;&| ]|$)|(^|[;&| ])brew +install([;&| ]|$)'; then
     CLASS="install"; ROLE="implementor"; return 0; fi
-  if printf '%s' "$c" | grep -qE '^(npm|pnpm|yarn) +run +build( |$)|^cargo +build( |$)|^go +build( |$)|^docker +build( |$)|^make$'; then
+  # `make clean` is trivial → stays silent; `make test` already classified suite
+  # above. Every other `make`/`make <target>` is tier-1 build. ERE has no negative
+  # lookahead, so the clean exemption is a guard rather than baked into the pattern.
+  case "$c" in "make clean"|"make clean "*) return 1 ;; esac
+  if printf '%s' "$c" | grep -qE '(^|[;&| ])(npm|pnpm|yarn) +run +build([;&| ]|$)|(^|[;&| ])cargo +build([;&| ]|$)|(^|[;&| ])go +build([;&| ]|$)|(^|[;&| ])docker +build([;&| ]|$)|(^|[;&| ])make( +[^ ]+)?([;&| ]|$)'; then
     CLASS="build"; ROLE="implementor"; return 0; fi
   return 1
 }
@@ -113,8 +123,8 @@ emit_tier1() {  # $1=class $2=role — deny, or downgrade to a nudge under advis
 
 classify_tier2() {  # $1=flat cmd → sets CLASS ROLE, rc 0 on match
   local c="$1"
-  if printf '%s' "$c" | grep -qE '^git +clone( |$)'; then CLASS="clone"; ROLE="implementor"; return 0; fi
-  if printf '%s' "$c" | grep -qE '^docker +(run|pull)( |$)'; then CLASS="docker-run"; ROLE="implementor"; return 0; fi
+  if printf '%s' "$c" | grep -qE '^git +clone([;&| ]|$)'; then CLASS="clone"; ROLE="implementor"; return 0; fi
+  if printf '%s' "$c" | grep -qE '^docker +(run|pull)([;&| ]|$)'; then CLASS="docker-run"; ROLE="implementor"; return 0; fi
   if printf '%s' "$c" | grep -qE '^(npx|uvx) +'; then CLASS="pkg-exec"; ROLE="implementor"; return 0; fi
   return 1
 }
@@ -138,11 +148,6 @@ esac
 TARGET=$(unwrap "$(strip_prefixes "$FLAT")")
 CLASS=""; ROLE=""
 
-# Tier-1 single command → deny (advisory-downgrades to a nudge inside emit_tier1).
-if classify_tier1 "$TARGET"; then
-  emit_tier1 "$CLASS" "$ROLE"
-fi
-
 # Chain segmentation (≥3 &&-joined segments) feeds both chain arms below;
 # compute the segment list once. Empty/0 when no `&&` is present.
 CHAIN_SEGS=""; CHAIN_COUNT=0
@@ -152,6 +157,14 @@ case "$FLAT" in
     CHAIN_COUNT=$(printf '%s\n' "$CHAIN_SEGS" | grep -cE '[^[:space:]]')
     ;;
 esac
+
+# Tier-1 single command → deny (advisory-downgrades to a nudge inside emit_tier1).
+# A ≥3-segment && chain defers to the chain tier-1 arm below so it keeps its
+# class=chain label: now that install/build share the suite/bootstrap segment
+# anchoring, an unguarded single-command match would relabel those chains.
+if [ "${CHAIN_COUNT:-0}" -lt 3 ] && classify_tier1 "$TARGET"; then
+  emit_tier1 "$CLASS" "$ROLE"
+fi
 
 # Chain tier-1 arm: ANY stripped/unwrapped segment matches tier-1 → deny as
 # class=chain, role taken from the matching segment.
