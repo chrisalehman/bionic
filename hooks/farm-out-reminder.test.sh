@@ -117,11 +117,11 @@ n7() {
 n7
 
 echo ""
-echo "=== N8: missing agent_type key entirely (real main JSON) → main, silent here (deny re-asserted 4/2 R8′) ==="
+echo "=== N8: missing agent_type key entirely (real main JSON) → classified MAIN → deny (4/2 landed; see R8′) ==="
 n8() {
   setup
   run_hook "$(stdin_for 'bash test.sh' '')"   # stdin_for '' omits agent_id/agent_type keys entirely
-  assert_silent "N8 missing-keys classifies main, silent under skeleton"
+  assert_deny "N8 missing-keys classifies main → tier-1 deny (was silent under 4/1 skeleton)"
 }
 n8
 
@@ -189,6 +189,276 @@ i6() {
   assert_silent "I6 tool_name != Bash → silent"
 }
 i6
+
+# ============================================================
+# Tier-1 DENY (AC-1) — every class fires on a planted main-thread
+# fixture; deny reason names role + original command + override token.
+# ============================================================
+
+echo ""
+echo "=== D1: bash test.sh (main) → deny; reason has role + command + override token ==="
+d1() {
+  setup
+  run_hook "$(stdin_for 'bash test.sh' '')"
+  assert_deny "D1 bash test.sh → deny"
+  assert_reason_has "D1 reason names role test-runner" "test-runner"
+  assert_reason_has "D1 reason embeds original command" "bash test.sh"
+  assert_reason_has "D1 reason names override token" "FARM_OUT_ALLOW=1"
+}
+d1
+
+echo ""
+echo "=== D2: bash tests/run.sh (main) → deny, class=suite ==="
+d2() {
+  setup
+  run_hook "$(stdin_for 'bash tests/run.sh' '')"
+  assert_deny "D2 bash tests/run.sh → deny"
+  assert_audit_has "D2 audit class=suite" "farm-out deny: class=suite"
+}
+d2
+
+echo ""
+echo "=== D3: bash hooks/context-spend.test.sh (main) → deny, class=suite ==="
+d3() {
+  setup
+  run_hook "$(stdin_for 'bash hooks/context-spend.test.sh' '')"
+  assert_deny "D3 *.test.sh → deny"
+  assert_audit_has "D3 audit class=suite" "farm-out deny: class=suite"
+}
+d3
+
+echo ""
+echo "=== D4: pnpm test / pytest / cargo test / go test ./... / make test → deny each ==="
+d4() {
+  local cmd
+  for cmd in 'pnpm test' 'pytest' 'cargo test' 'go test ./...' 'make test'; do
+    setup
+    run_hook "$(stdin_for "$cmd" '')"
+    assert_deny "D4 [$cmd] → deny"
+  done
+}
+d4
+
+echo ""
+echo "=== D5: ./claude-bootstrap.sh (main) → deny, class=bootstrap, role=implementor ==="
+d5() {
+  setup
+  run_hook "$(stdin_for './claude-bootstrap.sh' '')"
+  assert_deny "D5 bootstrap → deny"
+  assert_audit_has "D5 audit class=bootstrap" "farm-out deny: class=bootstrap"
+  assert_reason_has "D5 reason names role implementor" "implementor"
+}
+d5
+
+echo ""
+echo "=== D6: npm install / pip install / brew install / uv sync → deny each, class=install ==="
+d6() {
+  local cmd
+  for cmd in 'npm install' 'pip install requests' 'brew install jq' 'uv sync'; do
+    setup
+    run_hook "$(stdin_for "$cmd" '')"
+    assert_deny "D6 [$cmd] → deny"
+    assert_audit_has "D6 [$cmd] audit class=install" "farm-out deny: class=install"
+  done
+}
+d6
+
+echo ""
+echo "=== D7: pnpm run build / docker build . / cargo build / make → deny each, class=build ==="
+d7() {
+  local cmd
+  for cmd in 'pnpm run build' 'docker build .' 'cargo build' 'make'; do
+    setup
+    run_hook "$(stdin_for "$cmd" '')"
+    assert_deny "D7 [$cmd] → deny"
+    assert_audit_has "D7 [$cmd] audit class=build" "farm-out deny: class=build"
+  done
+}
+d7
+
+echo ""
+echo "=== D8: cd /x && npm install && npm run build (3 segs, tier-1 seg) → deny, class=chain ==="
+d8() {
+  setup
+  run_hook "$(stdin_for 'cd /x && npm install && npm run build' '')"
+  assert_deny "D8 3-seg chain with tier-1 segment → deny"
+  assert_audit_has "D8 audit class=chain" "farm-out deny: class=chain"
+}
+d8
+
+# ============================================================
+# Wrapper closure (AC-1) — one-level unwrap; a wrapper whose inner
+# matches tier-1 is tier-1 (workaround closure).
+# ============================================================
+
+echo ""
+echo "=== W1: sh -c 'bash test.sh' → deny (unwrap) ==="
+w1() {
+  setup
+  run_hook "$(stdin_for "sh -c 'bash test.sh'" '')"
+  assert_deny "W1 sh -c 'bash test.sh' → deny"
+}
+w1
+
+echo ""
+echo "=== W2: bash -c \"pnpm test\" → deny ==="
+w2() {
+  setup
+  run_hook "$(stdin_for 'bash -c "pnpm test"' '')"
+  assert_deny "W2 bash -c \"pnpm test\" → deny"
+}
+w2
+
+echo ""
+echo "=== W3: eval bash tests/run.sh → deny ==="
+w3() {
+  setup
+  run_hook "$(stdin_for 'eval bash tests/run.sh' '')"
+  assert_deny "W3 eval bash tests/run.sh → deny"
+}
+w3
+
+echo ""
+echo "=== W4: bash <(cat test.sh) → deny (process-sub closure; inner names test.sh) ==="
+w4() {
+  setup
+  run_hook "$(stdin_for 'bash <(cat test.sh)' '')"
+  assert_deny "W4 bash <(cat test.sh) → deny"
+}
+w4
+
+echo ""
+echo "=== W5: nohup bash test.sh / timeout 600 bash test.sh → deny each ==="
+w5() {
+  local cmd
+  for cmd in 'nohup bash test.sh' 'timeout 600 bash test.sh'; do
+    setup
+    run_hook "$(stdin_for "$cmd" '')"
+    assert_deny "W5 [$cmd] → deny"
+  done
+}
+w5
+
+# ============================================================
+# Override (AC-1/AC-3) — FARM_OUT_ALLOW=1 proceeds (no decision
+# emitted) AND logs a loud, sanctioned override line.
+# ============================================================
+
+echo ""
+echo "=== O1: FARM_OUT_ALLOW=1 bash test.sh → no decision emitted, audit override ==="
+o1() {
+  setup
+  run_hook "$(stdin_for 'FARM_OUT_ALLOW=1 bash test.sh' '')"
+  assert_silent "O1 override → exit 0, no permissionDecision emitted"
+  assert_audit_has "O1 audit override line present" "farm-out override:"
+}
+o1
+
+echo ""
+echo "=== O2: env FARM_OUT_ALLOW=1 bash test.sh → same (protect-main env-prefix form) ==="
+o2() {
+  setup
+  run_hook "$(stdin_for 'env FARM_OUT_ALLOW=1 bash test.sh' '')"
+  assert_silent "O2 env-prefixed override → exit 0, no decision"
+  assert_audit_has "O2 audit override line present" "farm-out override:"
+}
+o2
+
+# ============================================================
+# Audit shape (AC-5) — one line per event in the log_finding shape;
+# exempt commands never log.
+# ============================================================
+
+echo ""
+echo "=== A1: D1 deny → exact audit line 'farm-out deny: class=suite mode=block' ==="
+a1() {
+  setup
+  run_hook "$(stdin_for 'bash test.sh' '')"
+  assert_audit_has "A1 exact deny line shape" "farm-out deny: class=suite mode=block"
+}
+a1
+
+echo ""
+echo "=== A2: git status (exempt) → no audit line ==="
+a2() {
+  setup
+  run_hook "$(stdin_for 'git status' '')"
+  assert_audit_absent "A2 exempt command never logs" "farm-out"
+}
+a2
+
+# ============================================================
+# Modes (AC-2) — advisory downgrades tier-1 deny to a nudge and
+# logs deny-downgraded.
+# ============================================================
+
+echo ""
+echo "=== G1: bash test.sh with farm-out-mode: advisory → nudge not deny; audit deny-downgraded ==="
+g1() {
+  setup
+  printf 'farm-out-mode: advisory\n' > "$SANDBOX/.bionic/config.yaml"
+  run_hook "$(stdin_for 'bash test.sh' '')"
+  assert_nudge "G1 advisory → nudge (additionalContext), not deny"
+  assert_audit_has "G1 audit deny-downgraded" "farm-out deny-downgraded: class=suite"
+}
+g1
+
+# ============================================================
+# Meta-evidence (AC-3) — planted stub hooks prove the suite catches
+# a hook that STOPS denying AND one that STARTS over-blocking.
+# ============================================================
+
+echo ""
+echo "=== M1: silent stub must NOT satisfy the deny check (suite catches a dead deny) ==="
+m1() {
+  setup
+  local stub="$SANDBOX/stub-silent.sh"
+  printf '#!/bin/bash\nexit 0\n' > "$stub"
+  local saved="$HOOK"; HOOK="$stub"
+  run_hook "$(stdin_for 'bash test.sh' '')"
+  HOOK="$saved"
+  if printf '%s' "$HOOK_STDOUT" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1; then
+    fail "M1 meta: silent stub wrongly passed the deny check — suite blind to a dead deny"
+  else
+    pass
+  fi
+}
+m1
+
+echo ""
+echo "=== M2: deny-everything stub must break an exempt-silent case (suite catches over-blocking) ==="
+m2() {
+  setup
+  local stub="$SANDBOX/stub-denyall.sh"
+  cat > "$stub" <<'STUB'
+#!/bin/bash
+jq -n '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:"stub-denies-all"}}'
+exit 0
+STUB
+  local saved="$HOOK"; HOOK="$stub"
+  run_hook "$(stdin_for 'git status' '')"
+  HOOK="$saved"
+  if [ -n "$HOOK_STDOUT" ] && printf '%s' "$HOOK_STDOUT" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1; then
+    pass
+  else
+    fail "M2 meta: deny-all stub produced no deny for an exempt cmd — suite blind to over-blocking"
+  fi
+}
+m2
+
+# ============================================================
+# R8′ — N8 re-assertion: real main JSON (no agent keys) + bash test.sh
+# → deny (missing keys degrade toward MORE enforcement, never silence).
+# ============================================================
+
+echo ""
+echo "=== R8′: real main JSON (no agent_type/agent_id) + bash test.sh → deny ==="
+r8prime() {
+  setup
+  run_hook "$(stdin_for 'bash test.sh' '')"   # stdin_for '' omits agent_id/agent_type keys entirely
+  assert_deny "R8′ missing-keys classifies MAIN → tier-1 deny"
+}
+r8prime
 
 # ============================================================
 # Results

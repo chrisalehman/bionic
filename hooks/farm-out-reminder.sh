@@ -69,9 +69,82 @@ deny_reason() {  # $1=class $2=role
   printf '%s' "farm-out policy: this is a long-running $1-class command; it must not run on the orchestrator thread (a stuck orchestrator is unavailable and cannot process subagent completions — this protects your own context budget). Dispatch it instead: Agent(subagent_type: $2, prompt carrying this exact command): $FLAT — the agent returns the result summary. If this genuinely cannot be dispatched (needs this session's state), re-run prefixed FARM_OUT_ALLOW=1 — the override is sanctioned and audited."
 }
 
-# ── classification (4/2, 4/3) ───────────────────────────────────────────
-# classify_tier1 FLAT → sets CLASS/ROLE, returns 0 on match
-# classify_tier2 FLAT → sets CLASS/ROLE, returns 0 on match
-# override check + wrapper unwrap precede both.
+# ── classification (4/2 tier-1; classify_tier2 lands in 4/3) ─────────────
+# override check + wrapper unwrap precede classify_tier1.
+
+strip_prefixes() {  # env / FARM_OUT_*= / nohup / timeout wrappers → stripped form
+  printf '%s' "$1" | sed -E 's/^(env +)?(FARM_OUT_[A-Z_]+=[^ ]+ +)?(nohup +)?(timeout +[0-9]+[smh]? +)?//'
+}
+
+unwrap() {  # one level of sh -c / bash -c / eval / bash <(...) → inner command
+  local c="$1"
+  case "$c" in
+    "sh -c "*|"bash -c "*)
+      printf '%s' "$c" | sed -E "s/^(sh|bash) -c +//; s/^'(.*)'\$/\1/; s/^\"(.*)\"\$/\1/" ;;
+    "eval "*) printf '%s' "${c#eval }" ;;
+    "bash <("*)
+      # bash <(cat FILE) ≡ bash FILE (process substitution feeding a reader);
+      # collapse to the executed script so the workaround closes onto the
+      # tier-1 matcher — the inner `cat test.sh` alone would not match.
+      printf '%s' "$c" | sed -E 's/^bash <\((cat|tac) +//; s/^bash <\(//; s/\)$//; s/^/bash /' ;;
+    *) printf '%s' "$c" ;;
+  esac
+}
+
+classify_tier1() {  # $1=flat cmd → sets CLASS ROLE, rc 0 on match
+  local c="$1"
+  if printf '%s' "$c" | grep -qE '(^|[;&| ])bash +([^ ]*/)?(test\.sh|tests/run\.sh)( |$)|(^|[;&| ])bash +[^ ]+\.test\.sh( |$)|^(npm|pnpm|yarn) +test( |$)|^pytest( |$)|^go +test( |$)|^cargo +test( |$)|^make +test( |$)'; then
+    CLASS="suite"; ROLE="test-runner"; return 0; fi
+  if printf '%s' "$c" | grep -qE '(^|[;&| ])\.?/?([^ ]*/)?claude-(bootstrap|reset)\.sh( |$)'; then
+    CLASS="bootstrap"; ROLE="implementor"; return 0; fi
+  if printf '%s' "$c" | grep -qE '^(npm|pnpm|yarn) +(install|add|ci)( |$)|^pip3? +install( |$)|^uv +(sync|pip)( |$)|^brew +install( |$)'; then
+    CLASS="install"; ROLE="implementor"; return 0; fi
+  if printf '%s' "$c" | grep -qE '^(npm|pnpm|yarn) +run +build( |$)|^cargo +build( |$)|^go +build( |$)|^docker +build( |$)|^make$'; then
+    CLASS="build"; ROLE="implementor"; return 0; fi
+  return 1
+}
+
+emit_tier1() {  # $1=class $2=role — deny, or downgrade to a nudge under advisory
+  if [ "$MODE" = "advisory" ]; then
+    log_event "deny-downgraded" "$1"; emit_nudge "$1" "$2"; exit 0
+  fi
+  log_event "deny" "$1"; emit_deny "$1" "$2"; exit 0
+}
+
+# ── main flow: override → wrapper-unwrap → tier-1 deny → chain (tier-1 arm) ──
+case "$FLAT" in
+  "FARM_OUT_ALLOW=1 "*|"env FARM_OUT_ALLOW=1 "*)
+    log_event "override" "user-sanctioned"; exit 0 ;;
+esac
+
+TARGET=$(unwrap "$(strip_prefixes "$FLAT")")
+CLASS=""; ROLE=""
+
+if classify_tier1 "$TARGET"; then
+  emit_tier1 "$CLASS" "$ROLE"
+fi
+
+# Chain rule (tier-1 arm; the tier-2 arm lands in 4/3): ≥3 &&-joined segments
+# where ANY stripped/unwrapped segment matches tier-1 → deny as class=chain,
+# role taken from the matching segment.
+case "$FLAT" in
+  *"&&"*)
+    _flat_nl=$(printf '%s' "$FLAT" | awk '{ gsub(/&&/, "\n"); print }')
+    _seg_count=$(printf '%s\n' "$_flat_nl" | grep -cE '[^[:space:]]')
+    if [ "${_seg_count:-0}" -ge 3 ]; then
+      CHAIN_ROLE=""
+      while IFS= read -r _seg; do
+        _seg=$(printf '%s' "$_seg" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+        [ -n "$_seg" ] || continue
+        if classify_tier1 "$(unwrap "$(strip_prefixes "$_seg")")"; then
+          CHAIN_ROLE="$ROLE"; break
+        fi
+      done <<EOF
+$_flat_nl
+EOF
+      [ -n "$CHAIN_ROLE" ] && emit_tier1 "chain" "$CHAIN_ROLE"
+    fi
+    ;;
+esac
 
 exit 0
