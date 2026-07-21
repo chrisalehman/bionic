@@ -548,7 +548,7 @@ charter_fail() {
 # and the wave `## Verification Matrix` never apply here (this validator exits
 # the hook before the shape dispatch reaches them).
 validate_charter() {
-  local goals rows line ncols id status ev addressed_found=0
+  local goals rows line ncols id status ev addressed_found=0 seen_ids=""
   goals=$(normalize_newlines "$PLAN" | awk '
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
@@ -571,6 +571,25 @@ validate_charter() {
       charter_fail "goal row '${line}' is malformed (wrong cell count — no literal '|' inside cells)." \
         "write the row as '| G<n> | <triple> | <plan> | <status> |' with exactly four cells and no literal pipe inside any cell."
     fi
+    # id-format guard — blocks on ANY row, any status. The id must match ^G[0-9]+$
+    # EXACTLY (the row grep prefix is unanchored at the end, so 'G1x'/'G2.*' slip
+    # past it). This kills two holes at once: a cosmetically-malformed id, and the
+    # ERE-metachar risk — a metachar in $id can no longer reach the evidence grep
+    # below. INVARIANT: past this guard, $id is guaranteed metachar-free
+    # (^G[0-9]+$), so its later interpolation into the ERE evidence lookup is safe.
+    if ! echo "$id" | grep -qE '^G[0-9]+$'; then
+      charter_fail "goal row id '${id:-empty}' is not a valid goal id (want ^G[0-9]+\$)." \
+        "write the row id as 'G<n>' (e.g. G1, G7) — no trailing characters, no punctuation."
+    fi
+    # duplicate-id guard — a second row with an id already seen blocks. $id is
+    # metachar/space-free by the guard above, so the case-glob membership test is
+    # exact. seen_ids accumulates a space-delimited list (bash-3.2-safe; no assoc
+    # arrays).
+    case " $seen_ids " in
+      *" $id "*) charter_fail "duplicate goal id '${id}' in the '## Goals' registry (each id must be unique)." \
+                   "remove the duplicate '${id}' row so each goal id appears exactly once." ;;
+    esac
+    seen_ids="$seen_ids $id"
     # status enum — blocks on ANY row.
     case "$status" in
       queued|active|complete|gated|dropped) : ;;
