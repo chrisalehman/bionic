@@ -732,6 +732,26 @@ done <<< "$BLOCK"
 # looking healthy. Same contract as its siblings: presence, non-empty
 # value / non-empty n/a reason, existing placeholder ban. v8 and earlier
 # plans are never retrofitted.
+# Fail-loud version dispatch (AC-8 / R8, B=2). The if/elif shape-selector
+# below used to fall through to `exit 0` for any unrecognized version, so a
+# plan stamped `canonical_sdlc_version: 13` (or garbage, or the not-yet-armed
+# 12) got ZERO evidence gating at commit. Block such versions loud, naming
+# the supported set — symmetric with the governing-skill hook's allowlist
+# guard. An EMPTY version (no line, or a blank value) is a pre-versioning
+# legacy plan, NOT an unknown version: it passes this gate and reaches the
+# legacy `else` arm below (exit 0), exactly as the governing-skill hook's
+# `[ -z ]` check grandfathers it. Versions 1/2 pass here and are routed by
+# `evidence_schema` in the dispatch (legacy vs. v2 shape).
+case "$SDLC_VERSION" in
+  ""|1|2|3|4|5|6|7|8|9|10|11) : ;;
+  *)
+    echo "BLOCKED: canonical-sdlc evidence-gate: unsupported canonical_sdlc_version: '$SDLC_VERSION'." >&2
+    echo "Plan: $PLAN" >&2
+    echo "Fix: set 'canonical_sdlc_version: 11' (current), '10'/'9'/'8'/'7'/'6'/'5'/'4'/'3' (prior, still enforced), or '1'/'2' for legacy plans." >&2
+    exit 2
+    ;;
+esac
+
 if [ "$SDLC_VERSION" = "11" ]; then
   # v11 wave/epic-scale plans carry the v10 shape (task-scale plans exited
   # above via validate_task_ledger). The v11 arm reuses v10's validators.

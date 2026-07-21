@@ -4599,6 +4599,85 @@ expect_allow "v11 22f7b same evidence + standalone 'critic no-blocking' token �
   "$h22f7b" 'git commit -m "x"'
 
 # ============================================================
+# Section 23: fail-loud version dispatch (AC-8 / R8, B=2 ruling)
+# ============================================================
+#
+# The `canonical_sdlc_version` dispatch below the presence/placeholder
+# checks used to be a pure if/elif shape-selector whose `else` arm silently
+# exited 0. An unrecognized NON-EMPTY version (`13`, garbage, or the
+# not-yet-armed `12`) therefore fell through to zero evidence gating at
+# commit — the asymmetry B=2 fixes (the governing-skill hook already blocks
+# unknown versions; the evidence-gate now does too). Pre-change exit codes
+# (probed against the working tree before this slice): version 13 → exit 0,
+# garbage → exit 0, version 12 → exit 0 (all silent fall-through); a valid
+# v11 plan → exit 0 and a no-version legacy plan → exit 0 (both correct, and
+# must stay correct). Both directions per the meta-evidence rule.
+#
+# An EMPTY version — no line at all, symmetric with the governing-skill
+# hook's `[ -z ]` grandfather — stays legacy (exit 0). The supported set is
+# 1–11 at this slice; slice 4/3 arms 12 and flips fixture 23e to allow.
+
+echo ""
+echo "=== Section 23: fail-loud version dispatch (AC-8) ==="
+
+# Builds a minimal well-formed plan carrying an arbitrary version line: valid
+# ## SDLC State, numeric current at a pointer step, non-empty non-placeholder
+# Step evidence — enough to clear every presence/placeholder check and reach
+# the version dispatch (so the ONLY thing under test is the version arm).
+v23_plan() {  # $1 = value for canonical_sdlc_version
+  cat <<EOF
+---
+canonical_sdlc_version: $1
+intent: build
+rigor: audited
+scale: wave
+---
+
+## SDLC State
+current: 1
+Step 1: /path/to/ideate.md
+EOF
+}
+
+# 23a — unrecognized non-empty numeric version (13) → block naming the
+# supported set. RED baseline: exit 0 (silent fall-through).
+h23a=$(make_home)
+write_plan "$h23a" "$(v23_plan 13)" > /dev/null
+expect_block "v23a version 13 (unknown, non-empty) → block (was silent exit 0)" \
+  "$h23a" 'git commit -m "x"' "unsupported canonical_sdlc_version"
+
+# 23b — unrecognized non-numeric garbage token → block. RED baseline: exit 0.
+h23b=$(make_home)
+write_plan "$h23b" "$(v23_plan garbage-token)" > /dev/null
+expect_block "v23b version 'garbage-token' (non-numeric) → block (was silent exit 0)" \
+  "$h23b" 'git commit -m "x"' "unsupported canonical_sdlc_version"
+
+# 23c — no-version-line legacy plan (pre-versioning): NOT an unknown version,
+# keeps today's presence-only legacy behavior. Pinned before AND after the
+# change (grandfather anchor). RED baseline: exit 0 — must stay exit 0.
+h23c=$(make_home)
+write_plan "$h23c" "## SDLC State
+current: 4
+Phase 4: worktree at /path, base SHA abc123" > /dev/null
+expect_allow "v23c no canonical_sdlc_version line → legacy behavior preserved (allow)" \
+  "$h23c" 'git commit -m "x"'
+
+# 23d — compliant twin: a real, allowlisted arm (v11) with a valid pointer-step
+# evidence line stays allowed — the guard touches only unrecognized versions.
+h23d=$(make_home)
+write_plan "$h23d" "$(v23_plan 11)" > /dev/null
+expect_allow "v23d valid v11 plan (allowlisted arm) → allow (guard leaves known versions untouched)" \
+  "$h23d" 'git commit -m "x"'
+
+# 23e — version 12 is not armed at this slice; it must block exactly like any
+# other unknown version (a v12 plan getting zero gating is the bug B=2 fixes).
+# RED baseline: exit 0. Slice 4/3 adds the v12 arm and flips this to allow.
+h23e=$(make_home)
+write_plan "$h23e" "$(v23_plan 12)" > /dev/null
+expect_block "v23e version 12 (not yet armed) → block (slice 4/3 arms it)" \
+  "$h23e" 'git commit -m "x"' "unsupported canonical_sdlc_version"
+
+# ============================================================
 # Summary
 # ============================================================
 
