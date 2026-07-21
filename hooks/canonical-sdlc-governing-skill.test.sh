@@ -393,16 +393,16 @@ canonical_sdlc_version: 99
 run_write "$project/.bionic/docs/plans/epic-01-demo/wave-09b-bad.plan.md" "$bad_ver"
 assert_eq "exit 2" 2 "$HOOK_EXIT"
 
-echo "unsupported canonical_sdlc_version: 12 → block (boundary: 11 is current, 12 is not yet minted)"
-v12_bad='---
+echo "unsupported canonical_sdlc_version: 13 → block (boundary: 12 is current, 13 is not yet minted)"
+v13_bad='---
 governing-skill: canonical-sdlc
 mode: autonomous
-canonical_sdlc_version: 12
+canonical_sdlc_version: 13
 ---
 
 # Body
 '
-run_write "$project/.bionic/docs/plans/epic-01-demo/wave-09c-v12.plan.md" "$v12_bad"
+run_write "$project/.bionic/docs/plans/epic-01-demo/wave-09c-v13.plan.md" "$v13_bad"
 assert_eq "exit 2" 2 "$HOOK_EXIT"
 
 echo "Edit on existing v1-migrated file (simulating live continuation-checkpoint.md) → allow"
@@ -1014,17 +1014,17 @@ canonical_sdlc_version: 10
 run_write "$project/.bionic/docs/plans/epic-01-demo/v10-gf-skip.plan.md" "$v10_nonauto_no_flags"
 assert_eq "v10_regression_mode_gate_intact (non-autonomous skips) exit 0" 0 "$HOOK_EXIT"
 
-echo "unsupported canonical_sdlc_version: 12 → block (allowlist grew to exactly 11)"
-v12_unsupported='---
+echo "unsupported canonical_sdlc_version: 13 → block (allowlist grew to exactly 12)"
+v13_unsupported='---
 governing-skill: canonical-sdlc
 mode: autonomous
-canonical_sdlc_version: 12
+canonical_sdlc_version: 13
 ---
 
 # Body
 '
-run_write "$project/.bionic/docs/plans/epic-01-demo/v12-unsupported.plan.md" "$v12_unsupported"
-assert_eq "unsupported_v12_still_blocks exit 2" 2 "$HOOK_EXIT"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v13-unsupported.plan.md" "$v13_unsupported"
+assert_eq "unsupported_v13_still_blocks exit 2" 2 "$HOOK_EXIT"
 
 # ============================================================
 # canonical_sdlc_version v11: floor-consistency checks (LOG-ONLY, D14)
@@ -1133,6 +1133,218 @@ assert_eq "v11_floor_never_blocks exit 0" 0 "$HOOK_EXIT"
 assert_contains "v11_floor_never_blocks logs intent-floor" "intent-floor" "$(read_audit "$project")"
 assert_contains "v11_floor_never_blocks logs project-floor" "project-floor" "$(read_audit "$project")"
 assert_contains "v11_floor_never_blocks logs epic-floor" "epic-floor" "$(read_audit "$project")"
+
+# ============================================================
+# canonical_sdlc_version v12: the `continuous` scale (charter)
+# ============================================================
+#
+# v12 adds `continuous` — a first-class standing charter scope — as the
+# fourth scale value, on v12 plans ONLY (v11's three-value enum stays
+# frozen; `scale: continuous` on a v11 plan BLOCKS). A v12 plan inherits
+# the entire v11 universal contract (triple presence/enum, mode
+# split-brain guard, flag set, model_plan, matrix-required-at-step-3)
+# with three continuous-specific additions:
+#   - scale enum gains `continuous` (message lists four values);
+#   - barred cells `bugfix|spike|incident-response × continuous` block
+#     (charter default-conversion stamp — SR-1); build|refactor|tune pass;
+#   - scale floor: `continuous` + rigor below `audited` blocks (fifth
+#     floor source, upward-only — audited passes, nothing sits above it).
+# The matrix-required check exempts `scale: continuous` exactly as it
+# exempts `scale: task` (a charter carries a ## Goals registry, not a
+# ## Verification Matrix). Every check proves BOTH directions.
+#
+# Enums: intent ∈ {build,bugfix,refactor,tune,spike,incident-response};
+#        rigor ∈ {tested,peer-reviewed,audited};
+#        scale ∈ {task,wave,epic,continuous} (v12).
+# Barred intent × continuous cells: bugfix, spike, incident-response.
+
+# Builds a v12 plan. Same KEY=VALUE arg convention as build_v11_plan.
+# Defaults model the headline v12 kind — the charter: scale=continuous,
+# matrix=no (charters carry ## Goals, not a matrix). Wave/epic/task
+# fixtures override scale (and matrix where a matrix is required).
+build_v12_plan() {
+  local intent=build rigor=audited scale=continuous step=3 mode="OMIT" omit=" " matrix=no
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      intent=*) intent="${arg#intent=}" ;;
+      rigor=*)  rigor="${arg#rigor=}" ;;
+      scale=*)  scale="${arg#scale=}" ;;
+      step=*)   step="${arg#step=}" ;;
+      mode=*)   mode="${arg#mode=}" ;;
+      omit=*)   omit=" ${arg#omit=} " ;;
+      matrix=*) matrix="${arg#matrix=}" ;;
+    esac
+  done
+
+  local out='---
+governing-skill: superpowers:writing-plans
+sdlc-step: '"$step"'
+epic: epic-01-demo
+wave: wave-01-x
+canonical_sdlc_version: 12
+'
+  [ "$mode" = OMIT ]   || out+="mode: $mode"$'\n'
+  [ "$intent" = OMIT ] || out+="intent: $intent"$'\n'
+  [ "$rigor" = OMIT ]  || out+="rigor: $rigor"$'\n'
+  [ "$scale" = OMIT ]  || out+="scale: $scale"$'\n'
+
+  local flags=("cleanup_on_finish:true" "use_worktree:false" \
+    "surface_type:none" "language:none" "has_ui:false" \
+    "multi_agent:false" "deploy_target:none" \
+    "model_plan:orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh")
+  local kv key val
+  for kv in "${flags[@]}"; do
+    key="${kv%%:*}"; val="${kv#*:}"
+    case "$omit" in *" $key "*) continue ;; esac
+    out+="${key}: ${val}"$'\n'
+  done
+  out+='---
+'
+  if [ "$matrix" = yes ]; then
+    out+='
+## Verification Matrix
+
+stack-health: n/a: no long-running serve observed
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+'
+  else
+    out+='
+## Goals
+
+| id | triple | plan | status |
+|---|---|---|---|
+| G1 | build·audited·wave | wave-01 | queued |
+'
+  fi
+  printf '%s' "$out"
+}
+
+project=$(make_project)
+
+# ---------- AC-1: enum + plan-kind acceptance ----------
+
+echo "v12 valid charter (continuous·audited·build, full flags, no matrix) at continuous.plan.md → allow"
+run_write "$project/.bionic/docs/plans/epic-01-demo/continuous.plan.md" "$(build_v12_plan)"
+assert_eq "v12_accepts_valid_charter exit 0" 0 "$HOOK_EXIT"
+
+echo "v12 valid wave plan (scale:wave + matrix) → allow"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-wave.plan.md" "$(build_v12_plan scale=wave matrix=yes)"
+assert_eq "v12_accepts_valid_wave exit 0" 0 "$HOOK_EXIT"
+
+echo "v12 valid task plan (scale:task, bugfix·tested, no matrix) → allow (task contract unchanged)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-task.plan.md" "$(build_v12_plan scale=task intent=bugfix rigor=tested)"
+assert_eq "v12_accepts_valid_task exit 0" 0 "$HOOK_EXIT"
+
+echo "v12 valid epic plan (scale:epic + matrix, build·audited) → allow (epic contract unchanged)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-epic.plan.md" "$(build_v12_plan scale=epic matrix=yes)"
+assert_eq "v12_accepts_valid_epic exit 0" 0 "$HOOK_EXIT"
+
+echo "v12 invalid scale enum (scale: session) → block, message lists the four values"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-bad-scale.plan.md" "$(build_v12_plan scale=session)"
+assert_eq "v12_blocks_bad_scale_enum exit 2" 2 "$HOOK_EXIT"
+assert_contains "v12_blocks_bad_scale_enum lists allowed" "allowed" "$HOOK_STDERR"
+assert_contains "v12_blocks_bad_scale_enum lists continuous" "continuous" "$HOOK_STDERR"
+
+echo "v11 + scale: continuous → block (frozen three-value enum; message must NOT advertise the four-value set)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v11-continuous-frozen.plan.md" "$(build_v11_plan scale=continuous)"
+assert_eq "v11_blocks_continuous_frozen exit 2" 2 "$HOOK_EXIT"
+# The block message legitimately echoes the rejected value ('continuous'); the
+# frozen-enum proof is that it never advertises the four-value allowed set.
+case "$HOOK_STDERR" in
+  *"task|wave|epic|continuous"*) FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  v11 enum message advertised four-value set: %q\n' "$HOOK_STDERR" ;;
+  *) PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  v11 enum message stays three-value (no four-value allowed set)\n' ;;
+esac
+
+# ---------- AC-2: barred intent × continuous cells ----------
+
+echo "v12 barred cell bugfix × continuous → block, reason names charter default stamp (SR-1)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-bugfix-cont.plan.md" "$(build_v12_plan intent=bugfix scale=continuous)"
+assert_eq "v12_blocks_barred_bugfix_continuous exit 2" 2 "$HOOK_EXIT"
+assert_contains "v12_blocks_barred_bugfix_continuous says barred" "barred" "$HOOK_STDERR"
+
+echo "v12 barred cell spike × continuous → block"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-spike-cont.plan.md" "$(build_v12_plan intent=spike scale=continuous)"
+assert_eq "v12_blocks_barred_spike_continuous exit 2" 2 "$HOOK_EXIT"
+assert_contains "v12_blocks_barred_spike_continuous says barred" "barred" "$HOOK_STDERR"
+
+echo "v12 barred cell incident-response × continuous → block"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-incident-cont.plan.md" "$(build_v12_plan intent=incident-response scale=continuous)"
+assert_eq "v12_blocks_barred_incident_continuous exit 2" 2 "$HOOK_EXIT"
+assert_contains "v12_blocks_barred_incident_continuous says barred" "barred" "$HOOK_STDERR"
+
+echo "v12 refactor × continuous → allow (compliant twin)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-refactor-cont.plan.md" "$(build_v12_plan intent=refactor scale=continuous)"
+assert_eq "v12_accepts_refactor_continuous exit 0" 0 "$HOOK_EXIT"
+
+echo "v12 tune × continuous → allow (compliant twin)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-tune-cont.plan.md" "$(build_v12_plan intent=tune scale=continuous)"
+assert_eq "v12_accepts_tune_continuous exit 0" 0 "$HOOK_EXIT"
+
+echo "v12 existing epic bar re-pinned: bugfix × epic on v12 → block"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-bugfix-epic.plan.md" "$(build_v12_plan intent=bugfix scale=epic matrix=yes)"
+assert_eq "v12_blocks_barred_bugfix_epic exit 2" 2 "$HOOK_EXIT"
+assert_contains "v12_blocks_barred_bugfix_epic says barred" "barred" "$HOOK_STDERR"
+
+# ---------- AC-3: scale floor (continuous floors at audited) ----------
+
+echo "v12 continuous + rigor tested → block, message names the floor source"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-cont-tested.plan.md" "$(build_v12_plan scale=continuous rigor=tested)"
+assert_eq "v12_blocks_continuous_floor_tested exit 2" 2 "$HOOK_EXIT"
+assert_contains "v12_blocks_continuous_floor_tested names floor" "continuous scale floors at audited" "$HOOK_STDERR"
+
+echo "v12 continuous + rigor peer-reviewed → block, message names the floor source"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-cont-peer.plan.md" "$(build_v12_plan scale=continuous rigor=peer-reviewed)"
+assert_eq "v12_blocks_continuous_floor_peer exit 2" 2 "$HOOK_EXIT"
+assert_contains "v12_blocks_continuous_floor_peer names floor" "continuous scale floors at audited" "$HOOK_STDERR"
+
+# (continuous + rigor audited → allow is the valid-charter twin above.)
+
+# ---------- AC-4 (governing-skill half): allowlist +12 + inherited contract ----------
+
+echo "v12 charter missing model_plan → block, names model_plan (inherited universal contract)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-no-mp.plan.md" "$(build_v12_plan omit=model_plan)"
+assert_eq "v12_blocks_missing_model_plan exit 2" 2 "$HOOK_EXIT"
+assert_contains "v12_blocks_missing_model_plan names model_plan" "model_plan" "$HOOK_STDERR"
+
+echo "v12 charter missing a discriminator flag (surface_type) → block, names surface_type"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-no-flag.plan.md" "$(build_v12_plan omit=surface_type)"
+assert_eq "v12_blocks_missing_flag exit 2" 2 "$HOOK_EXIT"
+assert_contains "v12_blocks_missing_flag names surface_type" "surface_type" "$HOOK_STDERR"
+
+echo "v12 with mode: present (split-brain) → block, names mode"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-mode.plan.md" "$(build_v12_plan mode=autonomous)"
+assert_eq "v12_blocks_mode_present exit 2" 2 "$HOOK_EXIT"
+assert_contains "v12_blocks_mode_present names mode" "mode" "$HOOK_STDERR"
+
+echo "v12 missing intent → block, names intent"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-no-intent.plan.md" "$(build_v12_plan intent=OMIT)"
+assert_eq "v12_blocks_missing_intent exit 2" 2 "$HOOK_EXIT"
+assert_contains "v12_blocks_missing_intent names intent" "intent" "$HOOK_STDERR"
+
+# ---------- matrix exemption: continuous exempt exactly as task ----------
+
+echo "v12 charter (continuous) at sdlc-step 3 without a matrix → allow (## Goals, not a matrix)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-cont-nomatrix.plan.md" "$(build_v12_plan scale=continuous step=3 matrix=no)"
+assert_eq "v12_accepts_continuous_step3_no_matrix exit 0" 0 "$HOOK_EXIT"
+
+echo "v12 charter (continuous) at sdlc-step 5 without a matrix → allow"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-cont-nomatrix-s5.plan.md" "$(build_v12_plan scale=continuous step=5 matrix=no)"
+assert_eq "v12_accepts_continuous_step5_no_matrix exit 0" 0 "$HOOK_EXIT"
+
+echo "v12 WAVE plan at sdlc-step 3 without a matrix → block (no accidental widening of the exemption)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-wave-nomatrix.plan.md" "$(build_v12_plan scale=wave step=3 matrix=no)"
+assert_eq "v12_blocks_wave_step3_no_matrix exit 2" 2 "$HOOK_EXIT"
+assert_contains "v12_blocks_wave_step3_no_matrix names matrix" "Verification Matrix" "$HOOK_STDERR"
+
+# ---------- CRLF parity: a v12 charter under \r\n parses and passes ----------
+
+echo "v12 CRLF charter with full valid triple → allow"
+run_write "$project/.bionic/docs/plans/epic-01-demo/v12-crlf.plan.md" "$(to_crlf "$(build_v12_plan)")"
+assert_eq "v12_accepts_crlf_charter exit 0" 0 "$HOOK_EXIT"
 
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
