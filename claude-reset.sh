@@ -416,6 +416,46 @@ verify_local_package_clean() {
   fi
 }
 
+# ─── Global Agents ──────────────────────────────────────────────────────────
+
+echo "Global agents:"
+if ! confirm "global agent role files (~/.claude/agents/)"; then
+  echo "  agents — skipped"
+  note_skipped "Agents" "all agent role files"
+else
+  agents_removed=0
+  # Manifest-only removal: unlike Global Hooks below, this does NOT union in
+  # the repo's agents/*.md glob. ~/.claude/agents/ is Claude Code's standard
+  # USER subagent directory, so attribution here comes from the install-time
+  # manifest (.bionic-manifest) alone — a hand-authored file that happens to
+  # share a basename with a repo role file must never be removed just
+  # because the repo file exists. No manifest means bionic installed nothing
+  # here to remove.
+  _agent_names=""
+  if [ -f ~/.claude/agents/.bionic-manifest ]; then
+    _agent_names="$(cat ~/.claude/agents/.bionic-manifest)"$'\n'
+  fi
+  _agent_names="$(printf '%s' "$_agent_names" | grep -v '^$' | sort -u || true)"
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    echo -n "  ${name}... "
+    if [ -f ~/.claude/agents/"${name}" ]; then
+      rm -f ~/.claude/agents/"${name}"
+      echo "✓"
+      note_removed "Agents" "$name"
+    else
+      echo "✓ (already removed)"
+      note_clean "Agents" "$name"
+    fi
+    agents_removed=$((agents_removed + 1))
+  done <<< "$_agent_names"
+  rm -f ~/.claude/agents/.bionic-manifest
+  if [ "$agents_removed" -eq 0 ]; then
+    echo "  (no agents to remove)"
+  fi
+fi
+echo ""
+
 # ─── Global Hooks ──────────────────────────────────────────────────────────
 
 echo "Global hooks:"
@@ -786,6 +826,17 @@ elif [ -f "$SHELL_RC" ] && grep -qF "dangerously-skip-permissions" "$SHELL_RC"; 
   LEFTOVERS+=("~/${SHELL_RC_NAME} — legacy alias still present")
 else
   echo "    ~/${SHELL_RC_NAME} ✓ (clean)"
+fi
+
+echo ""
+echo "  Global agents:"
+if [ -d ~/.claude/agents ] && [ "$(ls -A ~/.claude/agents 2>/dev/null)" ]; then
+  for agent in ~/.claude/agents/*; do
+    echo "    $(basename "$agent") — still present"
+    LEFTOVERS+=("agent $(basename "$agent") — still present in ~/.claude/agents/")
+  done
+else
+  echo "    (none installed) ✓"
 fi
 
 echo ""
