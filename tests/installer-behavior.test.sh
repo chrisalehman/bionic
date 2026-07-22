@@ -53,7 +53,7 @@ chmod +x "${BIN}"/*
 
 # ---------- extract the REAL resilience block + installer functions ----------
 awk '/^# ─── Resilience ───/{f=1} f{print} /^# ─── Helpers ───/{if(f)exit}' "$BOOTSTRAP" > "$CODE"
-for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry do_install_agents _cron_env_mode _gen_ntfy_topic _cron_shape_issues do_author_cron_env do_verify_cron_env do_register_poker_cron do_preflight_node; do
+for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry do_install_agents _cron_env_mode _gen_ntfy_topic _cron_shape_issues do_author_cron_env do_verify_cron_env do_register_poker_cron do_preflight_node _node_probe do_preflight_registry_tls; do
   awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$CODE"
 done
 
@@ -1101,6 +1101,84 @@ esac
 
 # restore the hidden mock for later sections
 [ -e "${BIN}/node.hidden" ] && mv "${BIN}/node.hidden" "${BIN}/node"
+
+# ---------- F1: registry TLS probe + auto-remediation ----------
+# Probe OK → step ok, no brew call
+cat > "${BIN}/node" <<EOF
+#!/bin/bash
+echo "node \$*" >> "$LOG"
+exit 0
+EOF
+chmod +x "${BIN}/node"
+: > "$LOG"; STEP_RECORDS=()
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"
+step_start "registry TLS (node)" >/dev/null
+do_preflight_registry_tls >/dev/null; _rc=$?
+PATH="$_saved_path"
+[ "$_rc" = "0" ] && ok "tls probe: healthy store passes" || no "tls probe: healthy rc=$_rc"
+grep -q '^brew postinstall' "$LOG" && no "tls probe: healthy must not postinstall" \
+  || ok "tls probe: no postinstall on healthy store"
+
+# Cert failure, repair works: node fails once with cert error, succeeds after
+# brew postinstall ran (stateful mock via marker file)
+cat > "${BIN}/node" <<EOF
+#!/bin/bash
+echo "node \$*" >> "$LOG"
+if [ -f "$SBX/repaired" ]; then exit 0; fi
+echo "UNABLE_TO_GET_ISSUER_CERT_LOCALLY" >&2
+exit 1
+EOF
+cat > "${BIN}/brew" <<EOF
+#!/bin/bash
+echo "brew \$*" >> "$LOG"
+[ "\$1" = "postinstall" ] && touch "$SBX/repaired"
+[ "\$1 \$2" = "list --cask" ] && exit 1
+exit 0
+EOF
+chmod +x "${BIN}/node" "${BIN}/brew"
+rm -f "$SBX/repaired"; : > "$LOG"; STEP_RECORDS=()
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"
+step_start "registry TLS (node)" >/dev/null
+do_preflight_registry_tls >/dev/null; _rc=$?
+PATH="$_saved_path"
+[ "$_rc" = "0" ] && ok "tls probe: auto-repair path continues" || no "tls probe: repair rc=$_rc"
+expect_log "brew postinstall openssl@3" "tls probe: brew postinstall openssl@3 invoked"
+case "${STEP_RECORDS[0]:-}" in
+  warn\|prereq\|*auto-repaired*) ok "tls probe: repair recorded as warn note" ;;
+  *) no "tls probe: expected warn/auto-repaired (got: ${STEP_RECORDS[0]:-none})" ;;
+esac
+
+# Cert failure, repair does NOT work → hard exit 2 (subshell)
+rm -f "$SBX/repaired"
+cat > "${BIN}/node" <<EOF
+#!/bin/bash
+echo "node \$*" >> "$LOG"
+echo "UNABLE_TO_GET_ISSUER_CERT_LOCALLY" >&2
+exit 1
+EOF
+chmod +x "${BIN}/node"
+: > "$LOG"
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"
+( step_start "registry TLS (node)" >/dev/null; do_preflight_registry_tls >/dev/null 2>&1 ); _rc=$?
+PATH="$_saved_path"
+[ "$_rc" = "2" ] && ok "tls probe: unrepaired cert store exits 2" || no "tls probe: want exit 2, got $_rc"
+
+# Non-cert probe failure (DNS) → warn and continue
+cat > "${BIN}/node" <<EOF
+#!/bin/bash
+echo "node \$*" >> "$LOG"
+echo "getaddrinfo ENOTFOUND registry.npmjs.org" >&2
+exit 1
+EOF
+chmod +x "${BIN}/node"
+: > "$LOG"; STEP_RECORDS=()
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"
+step_start "registry TLS (node)" >/dev/null
+do_preflight_registry_tls >/dev/null; _rc=$?
+PATH="$_saved_path"
+[ "$_rc" = "0" ] && ok "tls probe: net-class failure continues" || no "tls probe: net rc=$_rc"
+grep -q '^brew postinstall' "$LOG" && no "tls probe: net class must not postinstall" \
+  || ok "tls probe: no postinstall on net class"
 
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
