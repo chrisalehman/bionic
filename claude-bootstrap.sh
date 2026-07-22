@@ -438,13 +438,18 @@ do_preflight_claude_cli() {
     step_cached prereq "$(claude --version 2>/dev/null | head -1 || echo present)"
     return 0
   fi
-  if command -v npm &>/dev/null && run_retry npm install -g @anthropic-ai/claude-code@latest; then
-    step_ok prereq "$(claude --version 2>/dev/null | head -1 || echo installed)"
-    return 0
+  if command -v npm &>/dev/null; then
+    if run_retry npm install -g @anthropic-ai/claude-code@latest; then
+      step_ok prereq "$(claude --version 2>/dev/null | head -1 || echo installed)"
+      return 0
+    fi
+    npm_err="$RUN_ERR"
+  else
+    npm_err="npm unavailable"
   fi
-  npm_err="${RUN_ERR:-npm unavailable}"
   if run_retry bash -c 'curl -fsSL https://claude.ai/install.sh | bash' \
      && { command -v claude &>/dev/null || [ -x "$HOME/.local/bin/claude" ]; }; then
+    case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac
     step_ok prereq "native installer — npm channel failed"
     return 0
   fi
@@ -456,6 +461,8 @@ do_preflight_claude_cli() {
   echo "    native: curl -fsSL https://claude.ai/install.sh | bash"
   if [ -n "$hint" ]; then
     echo "  npm channel failure looks like: ${hint}"
+  else
+    echo "  npm channel: ${npm_err}"
   fi
   echo "  then re-run ./claude-bootstrap.sh"
   exit 2
