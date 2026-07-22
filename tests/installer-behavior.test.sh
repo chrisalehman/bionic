@@ -53,7 +53,7 @@ chmod +x "${BIN}"/*
 
 # ---------- extract the REAL resilience block + installer functions ----------
 awk '/^# ─── Resilience ───/{f=1} f{print} /^# ─── Helpers ───/{if(f)exit}' "$BOOTSTRAP" > "$CODE"
-for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry do_install_agents do_preflight_node _node_probe do_preflight_registry_tls; do
+for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry do_install_agents do_preflight_node _node_probe do_preflight_registry_tls do_preflight_claude_cli; do
   awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$CODE"
 done
 
@@ -809,6 +809,84 @@ PATH="$_saved_path"
 [ "$_rc" = "0" ] && ok "tls probe: net-class failure continues" || no "tls probe: net rc=$_rc"
 grep -q '^brew postinstall' "$LOG" && no "tls probe: net class must not postinstall" \
   || ok "tls probe: no postinstall on net class"
+
+# ---------- F2: native-installer fallback ----------
+# npm succeeds → curl never called
+cat > "${BIN}/npm" <<EOF
+#!/bin/bash
+echo "npm \$*" >> "$LOG"
+exit 0
+EOF
+cat > "${BIN}/curl" <<EOF
+#!/bin/bash
+echo "curl \$*" >> "$LOG"
+exit 0
+EOF
+cat > "${BIN}/claude" <<EOF
+#!/bin/bash
+echo "2.0.0 (mock)"
+EOF
+chmod +x "${BIN}/npm" "${BIN}/curl" "${BIN}/claude"
+: > "$LOG"; STEP_RECORDS=()
+# claude "absent" first: run with claude mock removed, npm present
+mv "${BIN}/claude" "${BIN}/claude.hidden"
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"; _saved_home="$HOME"; HOME="$SBX"
+step_start "claude CLI" >/dev/null
+RETRY_MAX=1 do_preflight_claude_cli >/dev/null; _rc=$?
+HOME="$_saved_home"; PATH="$_saved_path"
+[ "$_rc" = "0" ] && ok "claude cli: npm channel ok" || no "claude cli: npm rc=$_rc"
+expect_log "npm install -g @anthropic-ai/claude-code@latest" "claude cli: npm channel attempted"
+grep -q '^curl' "$LOG" && no "claude cli: curl must not run when npm succeeds" \
+  || ok "claude cli: native not invoked on npm success"
+
+# npm fails → native invoked; native "succeeds" by dropping ~/.local/bin/claude
+cat > "${BIN}/npm" <<EOF
+#!/bin/bash
+echo "npm \$*" >> "$LOG"
+echo "npm error code UNABLE_TO_GET_ISSUER_CERT_LOCALLY" >&2
+exit 1
+EOF
+cat > "${BIN}/curl" <<EOF
+#!/bin/bash
+echo "curl \$*" >> "$LOG"
+mkdir -p "$SBX/.local/bin"
+printf '#!/bin/bash\necho 2.0.0\n' > "$SBX/.local/bin/claude"
+chmod +x "$SBX/.local/bin/claude"
+echo "echo native-installer-ran"
+EOF
+chmod +x "${BIN}/npm" "${BIN}/curl"
+rm -rf "$SBX/.local"; : > "$LOG"; STEP_RECORDS=()
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"; _saved_home="$HOME"; HOME="$SBX"
+step_start "claude CLI" >/dev/null
+RETRY_MAX=1 do_preflight_claude_cli >/dev/null; _rc=$?
+HOME="$_saved_home"; PATH="$_saved_path"
+[ "$_rc" = "0" ] && ok "claude cli: native fallback succeeds" || no "claude cli: fallback rc=$_rc"
+grep -q '^curl -fsSL https://claude.ai/install.sh' "$LOG" \
+  && ok "claude cli: native installer invoked on npm failure" \
+  || no "claude cli: native installer not invoked"
+case "${STEP_RECORDS[0]:-}" in
+  ok\|prereq\|*native\ installer*) ok "claude cli: channel named in record" ;;
+  *) no "claude cli: expected native-installer note (got: ${STEP_RECORDS[0]:-none})" ;;
+esac
+
+# both fail → exit 2, message names both channels + cert hint
+cat > "${BIN}/curl" <<EOF
+#!/bin/bash
+echo "curl \$*" >> "$LOG"
+exit 1
+EOF
+chmod +x "${BIN}/curl"
+rm -rf "$SBX/.local"; : > "$LOG"
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"; _saved_home="$HOME"; HOME="$SBX"
+_out="$( step_start "claude CLI" >/dev/null; RETRY_MAX=1 do_preflight_claude_cli 2>&1 )"; _rc=$?
+HOME="$_saved_home"; PATH="$_saved_path"
+[ "$_rc" = "2" ] && ok "claude cli: both channels dead exits 2" || no "claude cli: want 2, got $_rc"
+printf '%s' "$_out" | grep -q 'npm install -g @anthropic-ai/claude-code@latest' \
+  && ok "claude cli: exit message names npm path" || no "claude cli: npm path missing from message"
+printf '%s' "$_out" | grep -q 'claude.ai/install.sh' \
+  && ok "claude cli: exit message names native path" || no "claude cli: native path missing"
+printf '%s' "$_out" | grep -q 'brew postinstall openssl@3' \
+  && ok "claude cli: exit message carries classified cert hint" || no "claude cli: cert hint missing"
 
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
