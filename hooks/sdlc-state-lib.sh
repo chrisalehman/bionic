@@ -444,6 +444,111 @@ ledger_applied() {
   return 1
 }
 
+# ---------- D4/D5: effect guard — exactly-once replay (slice 4/3) ----------
+#
+# The exactly-once leg atop the ledger primitives: journal-before-act plus a
+# post-crash replay that runs an effect no more than once, even when a death
+# fell between the intent and the outcome.
+#
+# Effect-key grammar (D4): `<class>:<qualifier>`.
+#   * class — an OPEN lowercase set naming the KIND of side effect
+#     (notify, merge, poke, append, ...). New classes need no registration.
+#   * qualifier — deterministic and REPLAY-STABLE: the SAME logical action
+#     must derive the SAME key on every replay. NEVER embed a timestamp, pid,
+#     or session-id — a key that changes between the original run and its
+#     replay defeats the guard (the replayer sees `unapplied` and re-runs).
+#   Examples:
+#     notify:slack-run-done        (one Slack ping per run)
+#     merge:pr-1487                (merge a specific PR exactly once)
+#     poke:reviewer-jane-wave-02   (nudge a named reviewer once per wave)
+#
+# The two states that gate a replay decision (see sdlc_effect_state):
+#   applied        — an effect line for the key exists; the outcome landed.
+#   indeterminate  — a decision line exists but NO effect line: intent was
+#                    journaled, outcome unknown (the crash window).
+#   unapplied      — neither exists (absent/empty ledger included): "not yet".
+
+# sdlc_effect_state <goal-id> <effect-key>
+# Prints exactly one of `applied` / `indeterminate` / `unapplied` (rc 0).
+# Membership mirrors ledger_applied (effect-type, exact key); an absent or
+# empty ledger is `unapplied` — "not yet" is ordinary, not a defect (AS-27).
+# Loud named defects (rc 1, one stderr line): invalid-goal-id (shared guard),
+# missing-effect-key (matches ledger_append's class).
+sdlc_effect_state() {
+  local goal_id="${1:-}" key="${2:-}" path l_type l_key has_decision=0
+  _sdlc_validate_goal_id "$goal_id" "sdlc_effect_state" || return 1
+  [ -n "$key" ] || { echo "defect: missing-effect-key: sdlc_effect_state requires a non-empty effect-key" >&2; return 1; }
+
+  path="$(ledger_path "$goal_id")"
+  if [ -f "$path" ] && [ -s "$path" ]; then
+    while IFS=$'\t' read -r _ _ _ l_type l_key _; do
+      [ "$l_key" = "$key" ] || continue
+      [ "$l_type" = "effect" ] && { printf 'applied\n'; return 0; }
+      [ "$l_type" = "decision" ] && has_decision=1
+    done < "$path"
+  fi
+  [ "$has_decision" -eq 1 ] && { printf 'indeterminate\n'; return 0; }
+  printf 'unapplied\n'
+  return 0
+}
+
+# sdlc_effect_run <goal-id> <effect-key> <summary> [--replay-safe] -- <cmd> [args...]
+# Runs <cmd> AT MOST ONCE for the key, journal-before-act. The literal `--`
+# separates the guard's own args from the command; `--replay-safe` (the only
+# flag) sits before it. Behavior by state:
+#   applied        → rc 0, command NOT executed (idempotent success, silent).
+#   indeterminate, no --replay-safe → fail-closed (J1): one stderr line
+#                    `effect-indeterminate`, nonzero, command NOT executed —
+#                    the caller parks GATED for a human replay decision.
+#   indeterminate + --replay-safe, OR unapplied → journal the decision intent
+#                    (SKIP when a decision line already exists — the
+#                    indeterminate replay-safe path must not double-journal),
+#                    run the command, and on rc 0 journal the effect line.
+#                    Command nonzero → that rc, NO effect line: the intent
+#                    stands so a live caller may retry, and a future replayer
+#                    correctly sees `indeterminate` and parks (D5/AS-8).
+# Any ledger_append failure propagates loud (its own named defect, nonzero) —
+# never swallowed. Loud guard defects: invalid-goal-id, missing-effect-key,
+# missing-command (no command after `--`), bad-args (unexpected token before
+# `--`).
+sdlc_effect_run() {
+  local goal_id="${1:-}" key="${2:-}" summary="${3:-}" replay_safe=0 state
+
+  _sdlc_validate_goal_id "$goal_id" "sdlc_effect_run" || return 1
+  [ -n "$key" ] || { echo "defect: missing-effect-key: sdlc_effect_run requires a non-empty effect-key" >&2; return 1; }
+
+  if [ "$#" -ge 3 ]; then shift 3; else shift "$#"; fi
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --replay-safe) replay_safe=1; shift ;;
+      --)            shift; break ;;
+      *) echo "defect: bad-args: sdlc_effect_run expected '--replay-safe' or '--' before the command, got '$1'" >&2; return 1 ;;
+    esac
+  done
+  [ "$#" -ge 1 ] || { echo "defect: missing-command: sdlc_effect_run requires a command after '--'" >&2; return 1; }
+
+  state="$(sdlc_effect_state "$goal_id" "$key")" || return 1
+  case "$state" in
+    applied)
+      return 0 ;;
+    indeterminate)
+      if [ "$replay_safe" -eq 0 ]; then
+        echo "defect: effect-indeterminate: $key — journaled intent has no recorded effect; replay requires a decision" >&2
+        return 1
+      fi
+      ;;  # replay-safe: the decision is already journaled — do NOT re-append
+    unapplied)
+      ledger_append "$goal_id" decision "$key" "$summary" || return 1 ;;
+  esac
+
+  "$@"
+  local cmd_rc=$?
+  [ "$cmd_rc" -eq 0 ] || return "$cmd_rc"   # intent stands; no effect line
+
+  ledger_append "$goal_id" effect "$key" "$summary" || return 1
+  return 0
+}
+
 # ---------- R-W1/R-W2: WIP shadow store (slice 4/2) ----------
 #
 # The durable-state substrate's third leg: a git-plumbing SIDE STORE for
