@@ -1000,6 +1000,19 @@ if printf '%s' "$_cron_src" | grep -q 'read -r'; then no "author/8 Cron section 
 # author/9) reset must still NOT reference cron.env — user-owned credential data,
 # never deleted by a reset (unchanged by amendment 3).
 if grep -q 'cron\.env' "${REPO}/claude-reset.sh"; then no "author/9 claude-reset.sh must not reference cron.env (user credential data)"; else ok "author/9 claude-reset.sh leaves cron.env untouched"; fi
+
+# author/10) C6-am3 ADDENDUM — trailing-newline guard. A hand-authored file whose
+# last byte is NOT a newline must never merge with the appended key line. Existing
+# no-trailing-newline token line + MISSING topic → structural repair must emit a
+# newline BEFORE appending, yielding two well-formed lines (both values intact);
+# the pre-guard behavior produced ONE corrupt line destroying both values.
+printf 'CLAUDE_CODE_OAUTH_TOKEN=%s' "$VALID_TOK" > "$AUTH_F"     # NO trailing newline
+chmod 600 "$AUTH_F"
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_author_cron_env >/dev/null
+grep -qxF "CLAUDE_CODE_OAUTH_TOKEN=$VALID_TOK" "$AUTH_F" && ok "author/10 no-trailing-newline token line preserved intact (not merged)" || no "author/10 token line corrupted by merge: $(sed 's/=.*/=<redacted>/' "$AUTH_F")"
+case "$(grep -m1 '^BIONIC_NTFY_TOPIC=' "$AUTH_F")" in BIONIC_NTFY_TOPIC=bionic-?*) ok "author/10 topic added on its OWN line (newline guard held)";; *) no "author/10 topic line missing or merged: $(cat -A "$AUTH_F")";; esac
+[ "$(grep -c '=' "$AUTH_F")" -eq 2 ] && ok "author/10 exactly two KEY=VALUE lines (no corrupt merge)" || no "author/10 wrong line count (merge corruption): $(cat -A "$AUTH_F")"
 export HOME="$_OLD_HOME"
 
 echo "========================================"
