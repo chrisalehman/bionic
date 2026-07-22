@@ -1531,6 +1531,29 @@ _is_interactive() {
   [ -t 0 ]
 }
 
+# _cron_shape_issues <file> — the single source of the cron.env value-shape
+# rules, consumed by BOTH do_verify_cron_env (→ per-property warns) and
+# do_repair_cron_env (→ which line to rewrite). Parses the RAW KEY=VALUE lines
+# (never sources the file) so a whitespace-bearing value is DETECTED, not
+# word-split. Echoes a SPACE-separated list of issue CODES — never any value —
+# drawn from: token-whitespace token-length token-prefix topic-whitespace
+# topic-missing. Empty output ⇒ well-formed. Leak-safe: only codes are printed.
+_cron_shape_issues() {
+  local f="$1" tok topic issues=""
+  tok="$(grep -m1 '^CLAUDE_CODE_OAUTH_TOKEN=' "$f" 2>/dev/null || true)"; tok="${tok#CLAUDE_CODE_OAUTH_TOKEN=}"
+  case "$tok" in *[[:space:]]*) issues="${issues} token-whitespace" ;; esac
+  local n=${#tok}
+  if [ "$n" -lt 40 ] || [ "$n" -gt 512 ]; then issues="${issues} token-length"; fi
+  case "$tok" in sk-ant*) : ;; *) issues="${issues} token-prefix" ;; esac
+  if ! grep -q '^BIONIC_NTFY_TOPIC=' "$f" 2>/dev/null; then
+    issues="${issues} topic-missing"
+  else
+    topic="$(grep -m1 '^BIONIC_NTFY_TOPIC=' "$f" 2>/dev/null || true)"; topic="${topic#BIONIC_NTFY_TOPIC=}"
+    case "$topic" in *[[:space:]]*) issues="${issues} topic-whitespace" ;; esac
+  fi
+  printf '%s' "${issues# }"
+}
+
 # do_provision_cron_env — C6 AMENDMENT. GUIDED, consented, interactive-only
 # provisioning of the standing-service identity file. Fires ONLY when all hold:
 # the env file is absent, stdin is a TTY, and CI is unset — i.e. an attended
@@ -1639,7 +1662,145 @@ do_verify_cron_env() {
       "add ${missing[*]} to ${f} (the token comes from 'claude setup-token')"
     return 0
   fi
+
+  # Value SHAPE checks (walk-2 hardening). WARN-only — a malformed credential is
+  # the user's provisioning gap, not a bootstrap failure — and NO value is ever
+  # printed: _cron_shape_issues returns issue CODES only. Each code maps to a
+  # warn naming only the offending property; a clean shape falls through to the
+  # unchanged step_ok. (A malformed credential on an attended run is offered a
+  # guided repair upstream by do_repair_cron_env before this verify.)
+  local issues issue
+  issues="$(_cron_shape_issues "$f")"
+  if [ -n "$issues" ]; then
+    for issue in $issues; do
+      case "$issue" in
+        token-whitespace)
+          step_warn env "CLAUDE_CODE_OAUTH_TOKEN contains whitespace (must be a single unbroken token)" \
+            "re-run 'claude setup-token' and store the value with no spaces or line breaks" ;;
+        token-length)
+          step_warn env "CLAUDE_CODE_OAUTH_TOKEN length is outside the expected 40–512 band" \
+            "confirm the value is a full 'claude setup-token' token, not a truncated or padded copy" ;;
+        token-prefix)
+          step_warn env "CLAUDE_CODE_OAUTH_TOKEN does not look like a \`claude setup-token\` value (expected sk-ant… prefix)" \
+            "re-run 'claude setup-token' — the minted value starts with sk-ant" ;;
+        topic-whitespace)
+          step_warn env "BIONIC_NTFY_TOPIC contains whitespace (topics must be a single URL-path-safe token)" \
+            "choose a BIONIC_NTFY_TOPIC with no spaces or line breaks" ;;
+        topic-missing)
+          step_warn env "${f} is missing key: BIONIC_NTFY_TOPIC" \
+            "add a BIONIC_NTFY_TOPIC=<random topic> line to ${f}" ;;
+      esac
+    done
+    return 0
+  fi
   step_ok env "mode 600, both keys present"
+  return 0
+}
+
+# do_repair_cron_env — C6 AMENDMENT 2. GUIDED, consented, interactive-only
+# REPAIR of a malformed standing-service identity. Runs BEFORE do_verify. Fires
+# ONLY when all hold: the file EXISTS, stdin is a TTY, CI is unset, and
+# _cron_shape_issues reports at least one problem. On a y/N prompt (default N)
+# answered yes it mints a fresh token via `claude setup-token` in-flow (only if
+# the token line is the problem) and/or regenerates the ntfy topic (only if the
+# topic line is the problem), then rewrites ONLY the offending line(s): every
+# other line — the healthy credential included — survives byte-identical, via an
+# atomic temp+mv under umask 077 (mode 600). Credential values are never echoed.
+# Decline, non-TTY, CI, an absent file, or a clean file → does nothing and falls
+# through to the verify path unchanged (a valid file is NEVER prompted over).
+# setup-token failure or a write failure → step_warn, file left intact, no
+# record_fail. The user is never asked to hand-edit the credential file.
+do_repair_cron_env() {
+  local f="${HOME}/.claude/cron.env"
+
+  # Gate: EXISTS + attended + not-CI + actually malformed. Any miss → silent
+  # fall-through; do_verify then reports (step_ok if clean, warns otherwise).
+  [ -f "$f" ] || return 0
+  [ -n "${CI:-}" ] && return 0
+  _is_interactive || return 0
+  local issues
+  issues="$(_cron_shape_issues "$f")"
+  [ -z "$issues" ] && return 0
+
+  local want_token=0 want_topic=0
+  case " $issues " in *" token-"*) want_token=1 ;; esac
+  case " $issues " in *" topic-"*) want_topic=1 ;; esac
+
+  # Consent, default No. Prompt to stdout; read the answer from the terminal.
+  local reply=""
+  printf '  Repair the malformed sdlc-poker credential now? [y/N] '
+  read -r reply || reply=""
+  case "$reply" in
+    [yY] | [yY][eE][sS]) ;;
+    *) return 0 ;;
+  esac
+
+  step_start "cron.env (guided repair)"
+
+  # Mint a replacement token ONLY when the token line is the problem. Same
+  # capture discipline as do_provision_cron_env: command substitution grabs
+  # stdout (the token), OAuth prompts reach the terminal via stderr, the value
+  # is held in a local and never echoed. $?-capture (not PIPESTATUS — zsh, C8).
+  local new_token=""
+  if [ "$want_token" -eq 1 ]; then
+    local claude_bin
+    claude_bin="$(command -v claude 2>/dev/null || true)"
+    if [ -z "$claude_bin" ]; then
+      step_warn env "claude binary not found — cannot run setup-token to repair the token" \
+        "install the claude CLI, then re-run ./claude-bootstrap.sh to repair ${f}"
+      return 0
+    fi
+    local rc=0
+    new_token="$("$claude_bin" setup-token)" || rc=$?
+    new_token="$(printf '%s' "$new_token" | tr -d '\r\n ')"
+    if [ "$rc" -ne 0 ] || [ -z "$new_token" ]; then
+      step_warn env "claude setup-token did not return a token — ${f} left unchanged" \
+        "re-run ./claude-bootstrap.sh and complete 'claude setup-token', or fix ${f} by hand"
+      return 0
+    fi
+  fi
+
+  # Regenerate the ntfy topic ONLY when the topic line is the problem (openssl
+  # preferred, /dev/urandom fallback — mirrors do_provision_cron_env).
+  local new_topic=""
+  if [ "$want_topic" -eq 1 ]; then
+    if command -v openssl >/dev/null 2>&1; then
+      new_topic="bionic-$(openssl rand -hex 12)"
+    else
+      new_topic="bionic-$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
+    fi
+  fi
+
+  # Rewrite ONLY the offending line(s); every other line is copied byte-for-byte.
+  # Stream the old file, substituting the target key line(s); append a topic line
+  # only if it was entirely absent. Atomic: write a temp under umask 077, then
+  # rename into place. On any write failure remove the temp and warn (not fail).
+  local had_topic=1
+  grep -q '^BIONIC_NTFY_TOPIC=' "$f" || had_topic=0
+  local tmp="${f}.tmp.$$"
+  if ( umask 077
+       {
+         while IFS= read -r line || [ -n "$line" ]; do
+           case "$line" in
+             CLAUDE_CODE_OAUTH_TOKEN=*)
+               if [ "$want_token" -eq 1 ]; then printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$new_token"; else printf '%s\n' "$line"; fi ;;
+             BIONIC_NTFY_TOPIC=*)
+               if [ "$want_topic" -eq 1 ]; then printf 'BIONIC_NTFY_TOPIC=%s\n' "$new_topic"; else printf '%s\n' "$line"; fi ;;
+             *) printf '%s\n' "$line" ;;
+           esac
+         done < "$f"
+         if [ "$want_topic" -eq 1 ] && [ "$had_topic" -eq 0 ]; then printf 'BIONIC_NTFY_TOPIC=%s\n' "$new_topic"; fi
+       } > "$tmp" ) && mv "$tmp" "$f"; then
+    chmod 600 "$f" 2>/dev/null || true
+    local mode
+    mode="$(_cron_env_mode "$f")"
+    step_ok env "repaired ${f} (mode ${mode:-600})"
+  else
+    rm -f "$tmp" 2>/dev/null || true
+    step_warn env "could not write ${f}" \
+      "repair ${f} by hand, then 'chmod 600 ${f}'"
+    return 0
+  fi
   return 0
 }
 
@@ -1703,6 +1864,7 @@ do_register_poker_cron() {
 
 section "Cron (sdlc-poker)"
 do_provision_cron_env
+do_repair_cron_env
 do_verify_cron_env
 do_register_poker_cron
 
