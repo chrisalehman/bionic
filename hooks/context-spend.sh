@@ -68,6 +68,114 @@ OCCUPIED=${_row##*	}
 case "$OCCUPIED" in ''|*[!0-9]*) exit 0 ;; esac
 [ "$OCCUPIED" -gt 0 ] || exit 0
 
+# ============================================================
+# CEILING TRIPWIRE (epic-10-never-die N1, R-C1/R-C2). Independent of the
+# step-boundary emission below: context can cross a threshold WITHIN a single
+# step, so this samples pct = occupied/ceiling(model) on every qualifying Stop
+# and, transitions-only (D6), emits at most one advisory (>=50%) and one red
+# (>=70%) audit line per upward crossing. While red it nags a MANDATE line
+# until a baton fresher than the red transition exists. State is a SEPARATE
+# marker file — the 4-field TSV session state below is untouched (AS-2). All
+# failure is silent: any misstep here leaves the step-boundary logic and the
+# hook's exit-0-always contract intact.
+# ------------------------------------------------------------
+# ceiling(model): BIONIC_CONTEXT_CEILING wins; else a per-model table; else the
+# conservative 200000 default (D5). Known top-tier models carry their real
+# (large) windows so the tripwire fires at a true fraction, not the default
+# tuned for UNKNOWN models. Exact rows are a Step-3 open question — provisional.
+_ceiling=""
+case "${BIONIC_CONTEXT_CEILING:-}" in
+  ''|*[!0-9]*) : ;;                       # unset/non-numeric → fall through to table
+  *) _ceiling="$BIONIC_CONTEXT_CEILING" ;;
+esac
+if [ -z "$_ceiling" ]; then
+  case "$MODEL" in
+    *fable*)   _ceiling=2000000 ;;
+    *opus*)    _ceiling=1000000 ;;
+    *sonnet*)  _ceiling=1000000 ;;
+    *haiku*)   _ceiling=200000 ;;
+    *)         _ceiling=200000 ;;         # conservative default for unknown models
+  esac
+fi
+# Thresholds (percent) — overridable for accelerated tests (AS-4).
+_adv_pct="${BIONIC_CONTEXT_ADVISORY_PCT:-50}"
+_red_pct="${BIONIC_CONTEXT_RED_PCT:-70}"
+case "$_adv_pct" in ''|*[!0-9]*) _adv_pct=50 ;; esac
+case "$_red_pct" in ''|*[!0-9]*) _red_pct=70 ;; esac
+
+if [ "$_ceiling" -gt 0 ] 2>/dev/null; then
+  _pct=$(( OCCUPIED * 100 / _ceiling ))
+
+  # goal-id: sanitized stem of the plan path the hook already tracks. No poker
+  # function derives a goal-id from a plan (it validates ^[a-z0-9-]+$ on the
+  # registration filename); this mirrors the in-repo sanitizer idiom
+  # (canonical-sdlc-evidence-gate.sh: printf | sed | tr '[:upper:]' '[:lower:]')
+  # so the output satisfies the poker's charset by construction.
+  _goal_id=$(printf '%s' "$(basename "$PLAN" .plan.md)" | sed 's/[^A-Za-z0-9-]/-/g' | tr '[:upper:]' '[:lower:]')
+
+  if [ -n "$_goal_id" ]; then
+    _cdir="${SDLC_STATE_DIR:-$HOME/.claude/sdlc-state}/$_goal_id"
+    _marker="$_cdir/ceiling"
+    _baton="$_cdir/baton.md"
+
+    # Marker: "adv_fired red_fired red_ts" (dedupe substrate). Absent → never
+    # fired (context only grows, so a first sample already >= a threshold IS an
+    # upward crossing and must fire).
+    _adv=0; _red=0; _rts=""
+    if [ -f "$_marker" ]; then
+      read -r _adv _red _rts < "$_marker" 2>/dev/null || true
+      case "$_adv" in ''|*[!0-9]*) _adv=0 ;; esac
+      case "$_red" in ''|*[!0-9]*) _red=0 ;; esac
+    fi
+
+    _cts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    _cline() {  # $1=kind $2=extra — one audit line in the hook's line convention
+      printf '%s\n' "- $_cts context-spend ceiling $1: goal=$_goal_id $2 model=$MODEL ($PLAN)" \
+        >> "$AUDIT_DIR_C/sdlc-v11-audit.md" 2>/dev/null
+    }
+    AUDIT_DIR_C="$PROJECT_DIR/.bionic/memory"
+
+    if [ "$_pct" -lt "$_adv_pct" ]; then
+      # Below advisory → re-arm: drop the marker so a later re-crossing fires.
+      [ -f "$_marker" ] && rm -f "$_marker" 2>/dev/null
+    else
+      mkdir -p "$_cdir" 2>/dev/null
+      if [ "$_pct" -ge "$_red_pct" ]; then
+        if [ "$_red" -eq 0 ]; then
+          mkdir -p "$AUDIT_DIR_C" 2>/dev/null
+          _cline red "pct=$_pct occupied=$OCCUPIED ceiling=$_ceiling"
+          _red=1; _adv=1
+          _rts=$(date +%s)                 # red-transition time (epoch, local)
+        fi
+        # Baton freshness: fresh iff it exists AND mtime strictly newer than the
+        # red transition. Stale/absent → nag a MANDATE each red sample until a
+        # fresh baton lands (a pre-red baton counts stale).
+        _fresh=0
+        if [ -f "$_baton" ]; then
+          _bm=$(stat -f %m "$_baton" 2>/dev/null || stat -c %Y "$_baton" 2>/dev/null)
+          case "$_bm" in ''|*[!0-9]*) _bm=0 ;; esac
+          case "$_rts" in ''|*[!0-9]*) _rts=0 ;; esac
+          [ "$_bm" -gt "$_rts" ] && _fresh=1
+        fi
+        if [ "$_fresh" -eq 0 ]; then
+          mkdir -p "$AUDIT_DIR_C" 2>/dev/null
+          _cline mandate "red pct=$_pct — no fresh baton; write a baton for $_goal_id"
+        fi
+      else
+        # Advisory zone (adv <= pct < red).
+        if [ "$_adv" -eq 0 ]; then
+          mkdir -p "$AUDIT_DIR_C" 2>/dev/null
+          _cline advisory "pct=$_pct occupied=$OCCUPIED ceiling=$_ceiling"
+          _adv=1
+        fi
+        # Dropped out of red into advisory → re-arm the red crossing.
+        if [ "$_red" -eq 1 ]; then _red=0; _rts=""; fi
+      fi
+      printf '%s %s %s\n' "$_adv" "$_red" "$_rts" > "$_marker" 2>/dev/null || true
+    fi
+  fi
+fi
+
 STATE_DIR="$PROJECT_DIR/.bionic/tmp"
 STATE="$STATE_DIR/context-spend.state"
 mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
