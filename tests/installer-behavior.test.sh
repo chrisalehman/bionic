@@ -1015,6 +1015,69 @@ case "$(grep -m1 '^BIONIC_NTFY_TOPIC=' "$AUTH_F")" in BIONIC_NTFY_TOPIC=bionic-?
 [ "$(grep -c '=' "$AUTH_F")" -eq 2 ] && ok "author/10 exactly two KEY=VALUE lines (no corrupt merge)" || no "author/10 wrong line count (merge corruption): $(cat -A "$AUTH_F")"
 export HOME="$_OLD_HOME"
 
+# 19) Global hooks install covers hooks/sdlc-state-lib.sh (epic-10-never-die
+# wave-01-substrate slice 4/4). The "Global Hooks" section of claude-bootstrap.sh
+# is inline top-level script, not a function — extract the glob-copy +
+# manifest-write block (the same block that installs every hooks/*.sh file,
+# event hook or sourced library alike) and run it against a fixture HOME with
+# SCRIPT_DIR pointed at the REAL repo, so this proves the REAL hooks/ directory
+# (including the real sdlc-state-lib.sh) installs — no reimplemented glob logic.
+# sdlc-state-lib.sh is a sourced library (not an event hook): it must NOT
+# appear in MANAGED_HOOKS/settings.json, only get copied to ~/.claude/hooks/,
+# so only this file-copy block (not the settings.json wiring further down) is
+# extracted and exercised.
+HOOKS_CODE="${SBX}/hooks_code.sh"
+awk '/^# Build the set of hook files present in the repo/{f=1} f{print} /^# Define all managed hooks/{if(f)exit}' "$BOOTSTRAP" > "$HOOKS_CODE"
+HOOKSBX="${SBX}/hooks-sandbox"; mkdir -p "${HOOKSBX}/home/.claude/hooks"
+LIVE_LIB="${REPO}/hooks/sdlc-state-lib.sh"
+[ -f "$LIVE_LIB" ] && ok "19/0 hooks/sdlc-state-lib.sh exists in the repo (slice 4/1 prerequisite)" || no "19/0 hooks/sdlc-state-lib.sh not found in repo"
+
+# --- Run 1: fresh install into an empty fixture ~/.claude/hooks ---
+( export SCRIPT_DIR="$REPO" HOME="${HOOKSBX}/home" CURRENT_SECTION="TestHooks"
+  STEP_RECORDS=(); INSTALL_FAILURES=()
+  source "$HOOKS_CODE" >/dev/null )
+rc=$?
+[ "$rc" -eq 0 ] && ok "19/1 hooks install block runs cleanly against the real repo hooks/" || no "19/1 hooks install block failed (rc=$rc)"
+
+DEPLOYED_LIB="${HOOKSBX}/home/.claude/hooks/sdlc-state-lib.sh"
+[ -f "$DEPLOYED_LIB" ] && ok "19/1 sdlc-state-lib.sh present in the installed fileset (glob already covers it, no allowlist edit needed)" || no "19/1 sdlc-state-lib.sh missing from install output"
+diff -q "$LIVE_LIB" "$DEPLOYED_LIB" >/dev/null 2>&1 && ok "19/1 deployed sdlc-state-lib.sh content matches the repo source" || no "19/1 deployed content mismatch"
+[ -x "$DEPLOYED_LIB" ] && ok "19/1 deployed sdlc-state-lib.sh is mode +x" || no "19/1 deployed sdlc-state-lib.sh not executable"
+
+MANIFEST="${HOOKSBX}/home/.claude/hooks/.bionic-manifest"
+grep -qxF "sdlc-state-lib.sh" "$MANIFEST" 2>/dev/null && ok "19/1 sdlc-state-lib.sh listed in the hooks .bionic-manifest" || no "19/1 sdlc-state-lib.sh absent from .bionic-manifest"
+
+# sanity: a real event hook (context-spend.sh, MANAGED_HOOKS-registered) is
+# also installed by the SAME glob pass — proves this is the general
+# hooks/*.sh mechanism, not something special-cased for the lib file.
+[ -f "${HOOKSBX}/home/.claude/hooks/context-spend.sh" ] && ok "19/1 an event hook (context-spend.sh) installs via the same pass" || no "19/1 context-spend.sh missing"
+# sanity: .test.sh siblings are excluded (the glob's existing filter, unchanged).
+[ -f "${HOOKSBX}/home/.claude/hooks/sdlc-state-lib.test.sh" ] && no "19/1 a *.test.sh file must never be installed" || ok "19/1 *.test.sh siblings excluded from install"
+
+# --- Run 2: redeploy — byte-identical, idempotent (no drift on re-run) ---
+_lib_before="$(cat "$DEPLOYED_LIB")"
+_lib_mtime_before="$(stat -f%m "$DEPLOYED_LIB" 2>/dev/null || stat -c%Y "$DEPLOYED_LIB")"
+sleep 1
+( export SCRIPT_DIR="$REPO" HOME="${HOOKSBX}/home" CURRENT_SECTION="TestHooks"
+  STEP_RECORDS=(); INSTALL_FAILURES=()
+  source "$HOOKS_CODE" >/dev/null )
+rc=$?
+[ "$rc" -eq 0 ] && ok "19/2 redeploy runs cleanly" || no "19/2 redeploy failed (rc=$rc)"
+[ "$(cat "$DEPLOYED_LIB")" = "$_lib_before" ] && ok "19/2 redeploy is byte-identical to run 1" || no "19/2 redeploy changed sdlc-state-lib.sh content"
+[ -x "$DEPLOYED_LIB" ] && ok "19/2 redeployed sdlc-state-lib.sh still mode +x" || no "19/2 redeployed sdlc-state-lib.sh lost +x"
+grep -qxF "sdlc-state-lib.sh" "$MANIFEST" 2>/dev/null && ok "19/2 manifest still lists sdlc-state-lib.sh after redeploy" || no "19/2 manifest lost sdlc-state-lib.sh after redeploy"
+
+# --- 19/3: errexit divergence guard — bootstrap runs under set -euo pipefail,
+# this suite runs set -uo (no errexit). The extracted block itself claims no
+# new fail-open behavior (it is unmodified bootstrap code), but prove it still
+# survives set -e in this fixture the same way sections 14b/18/8 do for their
+# extracted blocks, since it is now exercised standalone for the first time.
+( set -e
+  export SCRIPT_DIR="$REPO" HOME="${HOOKSBX}/home" CURRENT_SECTION="TestHooks"
+  STEP_RECORDS=(); INSTALL_FAILURES=()
+  source "$HOOKS_CODE" >/dev/null )
+if [ $? -eq 0 ]; then ok "19/3 hooks install block survives set -e"; else no "19/3 hooks install block aborted under set -e"; fi
+
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
 echo "========================================"
