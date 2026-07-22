@@ -86,7 +86,7 @@ source "${SCRIPT_DIR}/lib/platform.sh"
 # ─── Sections ────────────────────────────────────────────────────────────────
 # Bump SECTION_TOTAL when adding a section() call.
 
-SECTION_TOTAL=23
+SECTION_TOTAL=24
 SECTION_IDX=0
 CURRENT_SECTION=""
 section() {
@@ -1506,6 +1506,270 @@ fi
 if [ "$removed_hooks" -gt 0 ]; then
   echo "  cleaned up ${removed_hooks} stale hook file(s) from ~/.claude/hooks/"
 fi
+
+# ─── Cron (sdlc-poker relay driver) ──────────────────────────────────────────
+#
+# The poker is a cron-run script — installed as a plain file by the Global
+# Hooks section above, NOT wired into settings.json (it is not a Claude Code
+# hook). Here we (1) verify the user-provisioned standing-service identity
+# file and (2) register the marker-tagged */3 crontab entry idempotently.
+# Both steps are non-fatal: a missing env file is a provisioning gap the user
+# closes — not an install failure — and a crontab we cannot write records-and-
+# continues like every other step.
+
+# _cron_env_mode <file> — octal permission bits, portable across BSD stat
+# (macOS: -f '%Lp') and GNU stat (Linux/WSL2: -c '%a'). Empty on an
+# unreadable file.
+_cron_env_mode() {
+  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null
+}
+
+# _gen_ntfy_topic — a random ntfy topic (NOT a credential: machinery may write
+# it). openssl preferred, /dev/urandom fallback when openssl is absent. Prints
+# the topic; the caller writes it under umask 077.
+_gen_ntfy_topic() {
+  if command -v openssl >/dev/null 2>&1; then
+    printf 'bionic-%s' "$(openssl rand -hex 12)"
+  else
+    printf 'bionic-%s' "$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
+  fi
+}
+
+# _cron_shape_issues <file> — the single source of the cron.env value-shape
+# rules, consumed by do_verify_cron_env (→ per-property warns). Parses the RAW
+# KEY=VALUE lines (never sources the file) so a whitespace-bearing value is
+# DETECTED, not word-split. Echoes a SPACE-separated list of issue CODES — never
+# any value — drawn from: token-empty token-whitespace token-length token-prefix
+# topic-whitespace topic-missing. An EMPTY token value is its OWN state
+# (token-empty) and suppresses the length/prefix codes — an empty slot is the
+# authored default the user has yet to fill (C6 amendment 3), not a malformed
+# credential. Empty output ⇒ well-formed. Leak-safe: only codes are printed.
+_cron_shape_issues() {
+  local f="$1" tok topic issues=""
+  tok="$(grep -m1 '^CLAUDE_CODE_OAUTH_TOKEN=' "$f" 2>/dev/null || true)"; tok="${tok#CLAUDE_CODE_OAUTH_TOKEN=}"
+  if [ -z "$tok" ]; then
+    issues="${issues} token-empty"
+  else
+    case "$tok" in *[[:space:]]*) issues="${issues} token-whitespace" ;; esac
+    local n=${#tok}
+    if [ "$n" -lt 40 ] || [ "$n" -gt 512 ]; then issues="${issues} token-length"; fi
+    case "$tok" in sk-ant*) : ;; *) issues="${issues} token-prefix" ;; esac
+  fi
+  if ! grep -q '^BIONIC_NTFY_TOPIC=' "$f" 2>/dev/null; then
+    issues="${issues} topic-missing"
+  else
+    topic="$(grep -m1 '^BIONIC_NTFY_TOPIC=' "$f" 2>/dev/null || true)"; topic="${topic#BIONIC_NTFY_TOPIC=}"
+    case "$topic" in *[[:space:]]*) issues="${issues} topic-whitespace" ;; esac
+  fi
+  printf '%s' "${issues# }"
+}
+
+# do_author_cron_env — C6 AMENDMENT 3 (FINAL). NON-INTERACTIVE template
+# authoring of the standing-service identity file — the SAME behavior attended,
+# unattended, or in CI (no TTY checks, no CI checks, no prompts). Machinery
+# never writes a credential VALUE: the token slot is authored EMPTY (the user
+# runs `claude setup-token` and pastes it in), while the ntfy topic is not a
+# credential and is machine-generated.
+#
+#   • File ABSENT  → author it: an empty CLAUDE_CODE_OAUTH_TOKEN= slot plus a
+#     generated BIONIC_NTFY_TOPIC=bionic-… line, mode 600, atomic temp+mv under
+#     umask 077.
+#   • File PRESENT → STRUCTURAL repair only: a MISSING key line is added (empty
+#     token slot / generated topic); a line that already exists is preserved
+#     BYTE-IDENTICAL, even when its value is malformed — user-set values are
+#     never overwritten. Both keys present → a no-op.
+#
+# Value SHAPE is never judged here — that stays do_verify_cron_env's warn-only
+# job. On any write failure the temp is removed and a warn recorded (never
+# record_fail): a credential file we cannot author is a provisioning gap, not an
+# install failure. The empty slot is not a credential, so the strict "machinery
+# never writes credential VALUES" boundary holds.
+do_author_cron_env() {
+  local f="${HOME}/.claude/cron.env"
+  local existed=0; [ -f "$f" ] && existed=1
+
+  # Which key LINES are already present (any value, even empty/malformed, counts
+  # as present — only the STRUCTURE is authored, never the value).
+  local have_token=0 have_topic=0
+  if [ "$existed" -eq 1 ]; then
+    grep -q '^CLAUDE_CODE_OAUTH_TOKEN=' "$f" 2>/dev/null && have_token=1
+    grep -q '^BIONIC_NTFY_TOPIC=' "$f" 2>/dev/null && have_topic=1
+    # Structure already complete → nothing to author; verify reports the rest.
+    if [ "$have_token" -eq 1 ] && [ "$have_topic" -eq 1 ]; then
+      return 0
+    fi
+  fi
+
+  step_start "cron.env (template authoring)"
+
+  # Atomic write under umask 077 (mode 600) via a temp in the same dir, then
+  # rename into place. An existing file is streamed BYTE-IDENTICAL (cat) and only
+  # the MISSING key line(s) appended; an absent file gets both lines authored
+  # fresh (empty token slot + generated topic). The trailing `if…fi` forms keep
+  # the group's exit status 0 whether or not a given line is appended, so a
+  # genuine write failure (temp uncreatable) is what trips the else branch.
+  # Trailing-newline guard (C6-am3 addendum): if we will APPEND a key line to an
+  # existing file whose last byte is NOT a newline, `cat` streams the final line
+  # without a terminator and the append fuses onto it — one corrupt line that
+  # destroys BOTH values. `$(tail -c1)` strips a trailing newline to empty, so a
+  # non-empty result means the last byte is not a newline → emit one first.
+  local need_nl=0
+  if [ "$existed" -eq 1 ] && { [ "$have_token" -eq 0 ] || [ "$have_topic" -eq 0 ]; } \
+     && [ -s "$f" ] && [ -n "$(tail -c1 "$f" 2>/dev/null)" ]; then
+    need_nl=1
+  fi
+  local tmp="${f}.tmp.$$"
+  if ( umask 077
+       {
+         [ "$existed" -eq 1 ] && cat "$f"
+         [ "$need_nl" -eq 1 ] && printf '\n'
+         if [ "$have_token" -eq 0 ]; then printf 'CLAUDE_CODE_OAUTH_TOKEN=\n'; fi
+         if [ "$have_topic" -eq 0 ]; then printf 'BIONIC_NTFY_TOPIC=%s\n' "$(_gen_ntfy_topic)"; fi
+       } > "$tmp" ) && mv "$tmp" "$f"; then
+    chmod 600 "$f" 2>/dev/null || true
+    local mode
+    mode="$(_cron_env_mode "$f")"
+    if [ "$existed" -eq 1 ]; then
+      step_ok env "repaired ${f} structure (mode ${mode:-600}; added missing key slot)"
+    else
+      step_ok env "authored ${f} (mode ${mode:-600}, empty token slot + generated topic)"
+    fi
+  else
+    rm -f "$tmp" 2>/dev/null || true
+    step_warn env "could not author ${f}" \
+      "create ${f} with CLAUDE_CODE_OAUTH_TOKEN= and BIONIC_NTFY_TOPIC= KEY=VALUE lines, then 'chmod 600 ${f}'"
+    return 0
+  fi
+  return 0
+}
+
+# do_verify_cron_env — C6. VERIFY ONLY: the env file exists, is mode 600, and
+# declares both key NAMES. Never creates or writes it (machinery never writes
+# credentials); never prints a value. Absent/misconfigured → warn with
+# provisioning instructions and continue — no record_fail, because a missing
+# credential file is the user's provisioning gate, not a bootstrap failure.
+do_verify_cron_env() {
+  local f="${HOME}/.claude/cron.env"
+  step_start "cron.env (standing service identity)"
+  if [ ! -f "$f" ]; then
+    step_skip env "${f} not provisioned — the cron poker stays idle until you create it" \
+      "run 'claude setup-token' for CLAUDE_CODE_OAUTH_TOKEN, choose a random BIONIC_NTFY_TOPIC, write both KEY=VALUE lines to ${f}, then 'chmod 600 ${f}' (never committed, never auto-created)"
+    return 0
+  fi
+  local mode
+  mode="$(_cron_env_mode "$f")"
+  if [ "$mode" != "600" ]; then
+    step_warn env "${f} is mode ${mode:-unknown}, expected 600" \
+      "run 'chmod 600 ${f}' — it holds the CLAUDE_CODE_OAUTH_TOKEN and BIONIC_NTFY_TOPIC secrets"
+    return 0
+  fi
+  local missing=()
+  grep -q '^CLAUDE_CODE_OAUTH_TOKEN=' "$f" || missing+=("CLAUDE_CODE_OAUTH_TOKEN")
+  grep -q '^BIONIC_NTFY_TOPIC=' "$f" || missing+=("BIONIC_NTFY_TOPIC")
+  if [ "${#missing[@]}" -gt 0 ]; then
+    step_warn env "${f} is missing key(s): ${missing[*]}" \
+      "add ${missing[*]} to ${f} (the token comes from 'claude setup-token')"
+    return 0
+  fi
+
+  # Value SHAPE checks (walk-2 hardening; C6 amendment 3). WARN-only — an empty
+  # or malformed token is the user's provisioning gap, not a bootstrap failure —
+  # and NO value is ever printed: _cron_shape_issues returns issue CODES only.
+  # Each code maps to a warn naming only the offending property; a clean shape
+  # falls through to the unchanged step_ok. These warns are the END-SUMMARY UX:
+  # every token-property warn carries the SAME fill instruction as its → action
+  # line (the token slot is authored empty; the user pastes the setup-token
+  # value). The topic is machine-generated, so its warns keep their own action.
+  local issues issue
+  local fill="run 'claude setup-token' and paste the value after CLAUDE_CODE_OAUTH_TOKEN= in ~/.claude/cron.env"
+  issues="$(_cron_shape_issues "$f")"
+  if [ -n "$issues" ]; then
+    for issue in $issues; do
+      case "$issue" in
+        token-empty)
+          step_warn env "CLAUDE_CODE_OAUTH_TOKEN is empty" "$fill" ;;
+        token-whitespace)
+          step_warn env "CLAUDE_CODE_OAUTH_TOKEN contains whitespace (must be a single unbroken token)" "$fill" ;;
+        token-length)
+          step_warn env "CLAUDE_CODE_OAUTH_TOKEN length is outside the expected 40–512 band" "$fill" ;;
+        token-prefix)
+          step_warn env "CLAUDE_CODE_OAUTH_TOKEN does not look like a \`claude setup-token\` value (expected sk-ant… prefix)" "$fill" ;;
+        topic-whitespace)
+          step_warn env "BIONIC_NTFY_TOPIC contains whitespace (topics must be a single URL-path-safe token)" \
+            "choose a BIONIC_NTFY_TOPIC with no spaces or line breaks" ;;
+        topic-missing)
+          step_warn env "${f} is missing key: BIONIC_NTFY_TOPIC" \
+            "add a BIONIC_NTFY_TOPIC=<random topic> line to ${f}" ;;
+      esac
+    done
+    return 0
+  fi
+  step_ok env "mode 600, both keys present"
+  return 0
+}
+
+# do_register_poker_cron — C7. Install the marker-tagged */3 entry idempotently:
+# every foreign entry is preserved byte-identical, the entry is appended when
+# the marker is absent and replaced in place when a marker line already exists
+# but differs. `crontab -l` exits 1 on an empty/absent crontab — that is
+# normal, not an error, so the read is guarded (|| true) to stay set -e safe.
+do_register_poker_cron() {
+  local marker="# BIONIC-SDLC-POKER"
+  local entry='*/3 * * * * PATH=/opt/homebrew/bin:/usr/bin:/bin /bin/sh -c '\''. "$HOME/.claude/cron.env" && "$HOME/.claude/hooks/sdlc-poker.sh" >> "$HOME/.claude/sdlc-poker.log" 2>&1'\'' # BIONIC-SDLC-POKER'
+  step_start "crontab (sdlc-poker every 3 min)"
+
+  # No cron on this host (minimal container, some CI) → skip, don't fail:
+  # the poker relay is optional and a missing cron daemon must not turn a
+  # clean bootstrap into a failure. macOS and WSL2 always ship crontab.
+  if ! command -v crontab >/dev/null 2>&1; then
+    step_skip tool "crontab not available — the sdlc-poker cron entry was not registered" \
+      "install cron (macOS ships it; Debian/Ubuntu: apt-get install cron), then re-run ./claude-bootstrap.sh"
+    return 0
+  fi
+
+  # Probe + record the claude binary path at registration time (C7): the
+  # entry's PATH is fixed for macOS, so a host whose claude lives elsewhere
+  # (WSL2) surfaces here rather than as a silent run-time no-op.
+  local claude_path
+  claude_path="$(command -v claude 2>/dev/null || true)"
+
+  # Read the current crontab; exit-1 (empty/absent) is normal — guard it.
+  local current
+  current="$(crontab -l 2>/dev/null || true)"
+
+  # Foreign entries = every non-marker line, kept byte-identical.
+  local foreign=""
+  if [ -n "$current" ]; then
+    foreign="$(printf '%s\n' "$current" | grep -vF "$marker" || true)"
+  fi
+  local desired
+  if [ -n "$foreign" ]; then
+    desired="${foreign}"$'\n'"${entry}"
+  else
+    desired="${entry}"
+  fi
+
+  if [ "$current" = "$desired" ]; then
+    step_cached state "already registered${claude_path:+; claude: ${claude_path}}"
+    return 0
+  fi
+
+  local verb="installed"
+  if printf '%s\n' "$current" | grep -qF "$marker"; then
+    verb="replaced"
+  fi
+  if printf '%s\n' "$desired" | crontab -; then
+    step_ok state "entry ${verb}${claude_path:+; claude: ${claude_path}}"
+  else
+    step_fail state "could not write crontab" "run 'crontab -e' and add the sdlc-poker */3 entry by hand, then re-run ./claude-bootstrap.sh"
+  fi
+  return 0
+}
+
+section "Cron (sdlc-poker)"
+do_author_cron_env
+do_verify_cron_env
+do_register_poker_cron
 
 # ─── Account-mirror symlinks ────────────────────────────────────────────────
 #
