@@ -1524,6 +1524,93 @@ _cron_env_mode() {
   stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null
 }
 
+# _is_interactive — true only when stdin is a real terminal. Factored out so the
+# guided-provisioning gate is test-mockable (a here-string driving `read` is not
+# a TTY, so tests override this to simulate the attended path).
+_is_interactive() {
+  [ -t 0 ]
+}
+
+# do_provision_cron_env — C6 AMENDMENT. GUIDED, consented, interactive-only
+# provisioning of the standing-service identity file. Fires ONLY when all hold:
+# the env file is absent, stdin is a TTY, and CI is unset — i.e. an attended
+# run where a human can consent. On a y/N prompt (default N) answered yes it
+# runs `claude setup-token` in-flow, auto-generates a random ntfy topic, and
+# writes ~/.claude/cron.env itself under umask 077 (mode 600). The boundary is
+# "machinery never writes credentials UNATTENDED": on decline, non-TTY, CI, or
+# an already-present file it does nothing and falls through to the verify path
+# unchanged — an existing file is NEVER prompted over or overwritten. Credential
+# values are never echoed to stdout/stderr/logs. setup-token failure or an empty
+# token → step_warn with no partial file left behind (never record_fail).
+do_provision_cron_env() {
+  local f="${HOME}/.claude/cron.env"
+
+  # Gate: attended + absent + not-CI. Any miss → silent fall-through (no prompt,
+  # no write); the existing verify path then reports as it did before.
+  [ -f "$f" ] && return 0
+  [ -n "${CI:-}" ] && return 0
+  _is_interactive || return 0
+
+  # Consent, default No. Prompt to stdout; read the answer from the terminal.
+  local reply=""
+  printf '  Provision the sdlc-poker standing service identity now? [y/N] '
+  read -r reply || reply=""
+  case "$reply" in
+    [yY] | [yY][eE][sS]) ;;
+    *) return 0 ;;
+  esac
+
+  step_start "cron.env (guided provisioning)"
+
+  # Resolve the claude binary the way the cron registration does.
+  local claude_bin
+  claude_bin="$(command -v claude 2>/dev/null || true)"
+  if [ -z "$claude_bin" ]; then
+    step_warn env "claude binary not found — cannot run setup-token" \
+      "install the claude CLI, then re-run ./claude-bootstrap.sh to provision ${f}"
+    return 0
+  fi
+
+  # Run setup-token in-flow. Command substitution captures ONLY stdout (the
+  # token); the interactive OAuth prompts reach the terminal via stderr. The
+  # captured value is held in a local and never echoed. $?-capture (not
+  # PIPESTATUS — zsh gotcha, C8).
+  local token="" rc=0
+  token="$("$claude_bin" setup-token)" || rc=$?
+  token="$(printf '%s' "$token" | tr -d '\r\n ')"
+  if [ "$rc" -ne 0 ] || [ -z "$token" ]; then
+    step_warn env "claude setup-token did not return a token — ${f} not written" \
+      "re-run ./claude-bootstrap.sh and complete 'claude setup-token', or provision ${f} by hand"
+    return 0
+  fi
+
+  # Random ntfy topic (a secret in its own right): openssl preferred, a
+  # /dev/urandom fallback when openssl is absent.
+  local topic
+  if command -v openssl >/dev/null 2>&1; then
+    topic="bionic-$(openssl rand -hex 12)"
+  else
+    topic="bionic-$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
+  fi
+
+  # Write atomically under umask 077 (mode 600) via a temp in the same dir, then
+  # rename into place. Never echo the values. On any write failure remove the
+  # temp so no partial file survives, and warn (not fail).
+  local tmp="${f}.tmp.$$"
+  if ( umask 077; printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\nBIONIC_NTFY_TOPIC=%s\n' "$token" "$topic" > "$tmp" ) && mv "$tmp" "$f"; then
+    chmod 600 "$f" 2>/dev/null || true
+    local mode
+    mode="$(_cron_env_mode "$f")"
+    step_ok env "provisioned ${f} (mode ${mode:-600}, both keys)"
+  else
+    rm -f "$tmp" 2>/dev/null || true
+    step_warn env "could not write ${f}" \
+      "provision ${f} by hand: CLAUDE_CODE_OAUTH_TOKEN and BIONIC_NTFY_TOPIC KEY=VALUE lines, then 'chmod 600 ${f}'"
+    return 0
+  fi
+  return 0
+}
+
 # do_verify_cron_env — C6. VERIFY ONLY: the env file exists, is mode 600, and
 # declares both key NAMES. Never creates or writes it (machinery never writes
 # credentials); never prints a value. Absent/misconfigured → warn with
@@ -1615,6 +1702,7 @@ do_register_poker_cron() {
 }
 
 section "Cron (sdlc-poker)"
+do_provision_cron_env
 do_verify_cron_env
 do_register_poker_cron
 
