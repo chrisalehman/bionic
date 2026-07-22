@@ -35,6 +35,17 @@ QUIET_THRESHOLD="${QUIET_THRESHOLD:-180}"   # idle quiet → IDLE_STALLED (secon
 WEDGE_QUIET="${WEDGE_QUIET:-540}"           # busy quiet → WEDGED (3× threshold)
 POKE_CAP="${POKE_CAP:-3}"                    # max pokes per stall episode (4/2)
 
+# Absolute claude binary for the POKE (C4: alias not inherited). The registry
+# READ uses PATH-resolved bare `claude` (AS-7a); only the poke is pinned. Kept
+# overridable exactly as the thresholds are, so the fixture suite points it at a
+# stub — the default literal is the fixture-asserted contract value.
+POKE_CLAUDE_BIN="${POKE_CLAUDE_BIN:-/opt/homebrew/bin/claude}"
+
+# Fixed poke prompt (C4, fixture-asserted): resume-and-continue with the gate
+# escape hatch, carrying NO approval vocabulary (banned-token list, C4). Single-
+# quoted so the backticked markers stay literal (no command substitution).
+POKE_PROMPT='continue per the plan'"'"'s `## SDLC State`; if blocked on a decision, write a `## Wake Note` and stop'
+
 # Registration globals — bound unconditionally so set -u never trips on a path
 # that reads them before load_registration runs (hooks-rules.md).
 REG_PLAN=""; REG_CWD=""; REG_SESSION_ID=""; REG_PID=""; REG_ARMED_AT=""
@@ -241,6 +252,14 @@ state_word() {  # $1=classification
   esac
 }
 
+# Human recovery command (C3): the ONLY place a signal verb appears as a string
+# in this script — never executed, only surfaced in the WEDGE status/notification
+# so force stays human. Consolidated to one template so the no-signal-invocation
+# fixture can whitelist exactly this line.
+recovery_cmd() {  # uses REG_PID, REG_CWD, REG_SESSION_ID
+  printf 'kill %s && cd %s && claude --resume %s' "$REG_PID" "$REG_CWD" "$REG_SESSION_ID"
+}
+
 # write_status <goal-id> <classification> — derived status file (C8): state,
 # plan current, last transcript activity, attach handle, + recovery command on
 # WEDGE. No occupancy field (wave-04).
@@ -257,7 +276,7 @@ write_status() {  # $1=goal-id $2=classification
     echo "last-activity: $iso"
     echo "attach: cd $REG_CWD && claude --resume $REG_SESSION_ID"
     if [ "$state" = "WEDGED" ]; then
-      echo "recovery: kill $REG_PID && cd $REG_CWD && claude --resume $REG_SESSION_ID"
+      echo "recovery: $(recovery_cmd)"
     fi
   } > "$dir/$gid.md" 2>/dev/null
 }
@@ -285,13 +304,125 @@ acquire_lock() {
 }
 release_lock() { rm -rf "$(lock_dir)" 2>/dev/null; }
 
-# ---------- actions (NO-OP stubs this slice; slice 4/2 wires them) ----------
-do_poke()   { :; }   # $1=goal-id
-do_notify() { :; }   # $1=goal-id $2=event $3=body
+# ---------- C4: the poke ----------
+# Resume the stalled session and hand it the fixed prompt via STDIN (a positional
+# prompt after flags is swallowed, P1). Absolute binary (alias not inherited),
+# cd-first (--resume is cwd/project-scoped, P2), no --model (the resumed turn does
+# the goal's real work). Idempotent and leaf-agnostic. Echoes nothing; returns
+# the resume exit code (a nonzero poke still counts against the cap).
+do_poke() {  # $1=goal-id ; uses REG_CWD, REG_SESSION_ID
+  local gid="$1" rc
+  ( cd "$REG_CWD" 2>/dev/null && printf '%s' "$POKE_PROMPT" \
+      | "$POKE_CLAUDE_BIN" --resume "$REG_SESSION_ID" -p --dangerously-skip-permissions \
+  ) >/dev/null 2>&1
+  rc=$?
+  audit_line "$gid" POKE "resume $REG_SESSION_ID rc=$rc"
+  return "$rc"
+}
+
+# ---------- C5: notification transport (ntfy) ----------
+# One transition notification. The topic is a secret: it reaches curl only, never
+# an audit line or status file (audit records the EVENT, not the topic). curl
+# failure → NOTIFY-FAIL audit + nonzero return (the caller leaves the dedupe cache
+# un-advanced so the next poll retries — notification retry rides the poll cadence,
+# no inner loop). Returns 0 iff the POST succeeded.
+do_notify() {  # $1=goal-id $2=event $3=body
+  local gid="$1" event="$2" body="$3" topic rc
+  topic="${BIONIC_NTFY_TOPIC:-}"
+  if [ -z "$topic" ]; then
+    audit_line "$gid" NOTIFY-FAIL "$event: no ntfy topic configured"
+    return 1
+  fi
+  curl -fsS -m 10 -H "Title: $gid: $event" -d "$body" "https://ntfy.sh/$topic" >/dev/null 2>&1
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    audit_line "$gid" "$event" "notified"
+    return 0
+  fi
+  audit_line "$gid" NOTIFY-FAIL "$event curl rc=$rc"
+  return 1
+}
+
+# ---------- C4 retry-cap: stall episodes ----------
+# Per-goal poke-episode state: "<transcript-mtime> <poke-count> <pokefail-sent>".
+# The episode is keyed by transcript mtime; any movement resets count + the
+# POKE-FAIL flag. A dead session's poke does not move the transcript, so repeated
+# stalls stay one episode and the cap bites.
+poke_state_file() { printf '%s/%s.poke' "$(state_dir)" "$1"; }
+
+transcript_mtime_key() {  # uses REG_CWD, REG_SESSION_ID
+  local t; t=$(resolve_transcript)
+  [ -n "$t" ] || { printf 'none'; return; }
+  file_mtime "$t" 2>/dev/null || printf 'none'
+}
+
+# Poke a stalled goal, honoring the per-episode cap. On cap exhaustion emit a
+# single POKE-FAIL notification and park (until the episode resets on movement).
+poke_capped() {  # $1=goal-id
+  local gid="$1" pf mtime smtime scount sfail
+  pf="$(poke_state_file "$gid")"
+  mtime=$(transcript_mtime_key)
+  smtime=""; scount=0; sfail=0
+  if [ -f "$pf" ]; then
+    read -r smtime scount sfail < "$pf" 2>/dev/null || true
+    [ -n "$scount" ] || scount=0
+    [ -n "$sfail" ] || sfail=0
+  fi
+  [ "$mtime" = "$smtime" ] || { scount=0; sfail=0; }   # movement → new episode
+  if [ "$scount" -ge "$POKE_CAP" ]; then
+    if [ "$sfail" -ne 1 ]; then
+      do_notify "$gid" POKE-FAIL "poke cap ($POKE_CAP) exhausted for $gid; parking until state change" \
+        && sfail=1
+    fi
+    printf '%s %s %s\n' "$mtime" "$scount" "$sfail" > "$pf" 2>/dev/null
+    return 0
+  fi
+  do_poke "$gid"                                        # counts regardless of exit
+  scount=$((scount + 1))
+  printf '%s %s %s\n' "$mtime" "$scount" "$sfail" > "$pf" 2>/dev/null
+}
+
+# ---------- C3: action dispatch (the no-force table) ----------
+# Read the previous classification (transition-dedupe substrate).
+read_cache() { cat "$(state_dir)/$1" 2>/dev/null || true; }
+
+# Notify only on a state transition, and advance the dedupe cache ONLY when the
+# notification is delivered — a failed notify leaves the cache at the prior state
+# so the next poll retries (C5).
+notify_and_cache() {  # $1=gid $2=event $3=body $4=prev $5=state
+  local gid="$1" event="$2" body="$3" prev="$4" state="$5"
+  [ "$prev" = "$state" ] && return 0                    # already notified → dedupe
+  do_notify "$gid" "$event" "$body" && cache_state "$gid" "$state"
+}
+
+# Per the C3 table: COMPLETE/GATED/WEDGED notify-on-transition (never poke; gate
+# and wedge supremacy); DEAD/IDLE_STALLED poke under the cap; BUSY logs SKIP-BUSY;
+# IDLE is left alone. Non-notify states advance the cache directly so a later
+# transition INTO a notify state is detected.
+dispatch_actions() {  # $1=gid $2=state $3=prev
+  local gid="$1" state="$2" prev="$3"
+  case "$state" in
+    COMPLETE)
+      notify_and_cache "$gid" COMPLETE "goal $gid complete (charter close / current:10)" "$prev" "$state" ;;
+    GATED)
+      notify_and_cache "$gid" GATED "goal $gid gated — decision required; see the plan's ## Wake Note" "$prev" "$state" ;;
+    WEDGED)
+      notify_and_cache "$gid" WEDGE \
+        "goal $gid WEDGED: driving but transcript quiet >${WEDGE_QUIET}s. recovery: $(recovery_cmd)" "$prev" "$state" ;;
+    DEAD|IDLE_STALLED)
+      poke_capped "$gid"; cache_state "$gid" "$state" ;;
+    BUSY)
+      audit_line "$gid" SKIP-BUSY "driving; left alone"; cache_state "$gid" "$state" ;;
+    IDLE)
+      cache_state "$gid" "$state" ;;                    # not stalled → leave alone this poll
+    *)
+      cache_state "$gid" "$state" ;;
+  esac
+}
 
 # ---------- main loop ----------
 process_goals() {
-  local gdir f gid state
+  local gdir f gid state prev
   gdir="$(goals_dir)"
   [ -d "$gdir" ] || return 0
   for f in "$gdir"/*; do
@@ -308,10 +439,9 @@ process_goals() {
     is_armed_scale || continue        # scale != continuous → unarmed/disarm, silent skip
     state=$(classify_goal "$gid")
     [ -n "$state" ] || continue       # total-signal-loss degrade → already audited, skip
+    prev=$(read_cache "$gid")         # previous classification (transition dedupe)
     write_status "$gid" "$state"
-    cache_state "$gid" "$state"
-    # Action dispatch (poke/notify per the C3 table) is wired in slice 4/2 via
-    # do_poke / do_notify; classification + record is this slice's contract.
+    dispatch_actions "$gid" "$state" "$prev"   # poke/notify per the C3 no-force table; caches state
   done
 }
 
