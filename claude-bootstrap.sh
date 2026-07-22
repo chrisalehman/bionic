@@ -175,7 +175,7 @@ _init_run_log() {
   BOOTSTRAP_LOG="${dir}/bootstrap-$(date -u +%Y%m%dT%H%M%SZ).log"
   ls -1t "${dir}"/bootstrap-*.log 2>/dev/null | tail -n +5 | while IFS= read -r old; do
     rm -f "$old"
-  done
+  done || true   # empty dir: unexpanded glob fails ls; pipefail would kill the run (field failure 2026-07-22)
   exec > >(tee >(sed -E $'s/\x1b\\[[0-9;]*m//g' >> "$BOOTSTRAP_LOG")) 2>&1
   return 0
 }
