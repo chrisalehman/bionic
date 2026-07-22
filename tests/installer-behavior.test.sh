@@ -53,7 +53,7 @@ chmod +x "${BIN}"/*
 
 # ---------- extract the REAL resilience block + installer functions ----------
 awk '/^# ─── Resilience ───/{f=1} f{print} /^# ─── Helpers ───/{if(f)exit}' "$BOOTSTRAP" > "$CODE"
-for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry do_install_agents; do
+for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry do_install_agents _cron_env_mode _gen_ntfy_topic _cron_shape_issues do_author_cron_env do_verify_cron_env do_register_poker_cron; do
   awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$CODE"
 done
 
@@ -644,6 +644,376 @@ printf 'alpha.md\nbeta.md\n' | sort > "${SBX}/manifest3.expected"
 diff -q "${SBX}/manifest3.sorted" "${SBX}/manifest3.expected" >/dev/null 2>&1 \
   && ok "manifest after collision run still lists exactly alpha.md and beta.md (delta.md excluded)" \
   || no "manifest after collision run wrong: $(cat "$manifest")"
+
+# 18) Cron registration (C7) + cron.env verification (C6) + reset removal.
+# The crontab is exercised against a PATH-shadowed stub that stores stdin to a
+# file and serves `crontab -l` from it (exiting 1 on an absent store, exactly
+# like a real empty crontab). No real crontab is ever touched. cron.env
+# verification runs against a controlled fake $HOME so no real file is read or
+# written.
+CRONFILE="${SBX}/crontab.store"
+CRONLOG="${SBX}/crontab.args.log"
+cat > "${BIN}/crontab" <<EOF
+#!/bin/bash
+echo "crontab \$*" >> "$CRONLOG"
+case "\$1" in
+  -l) if [ -f "$CRONFILE" ]; then cat "$CRONFILE"; else exit 1; fi ;;
+  -r) rm -f "$CRONFILE" ;;
+  -)  cat > "$CRONFILE" ;;
+  *)  exit 2 ;;
+esac
+EOF
+chmod +x "${BIN}/crontab"
+# A resolvable `claude` so the registration probe records a path (C7).
+cat > "${BIN}/claude" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+chmod +x "${BIN}/claude"
+
+# The exact entry C7 mandates — asserted byte-for-byte against what the
+# installer writes. $HOME stays literal (cron expands it at run time).
+EXPECTED_CRON='*/3 * * * * PATH=/opt/homebrew/bin:/usr/bin:/bin /bin/sh -c '\''. "$HOME/.claude/cron.env" && "$HOME/.claude/hooks/sdlc-poker.sh" >> "$HOME/.claude/sdlc-poker.log" 2>&1'\'' # BIONIC-SDLC-POKER'
+CRON_MARKER="# BIONIC-SDLC-POKER"
+
+# 18/9) 127-guard: every new function was actually extracted (a missing callee
+# would `command not found` silently — this catches an omission from the
+# `for fn in` list at the top of this file).
+for fn in _cron_env_mode _gen_ntfy_topic _cron_shape_issues do_author_cron_env do_verify_cron_env do_register_poker_cron; do
+  if declare -F "$fn" >/dev/null; then ok "extracted for test: ${fn}"; else no "127-guard: ${fn} not extracted (add it to the 'for fn in' list)"; fi
+done
+
+# 18/1) empty crontab (crontab -l exits 1) → entry installed, exit 0.
+rm -f "$CRONFILE"; : > "$CRONLOG"; INSTALL_FAILURES=()
+do_register_poker_cron >/dev/null; rc=$?
+[ "$rc" -eq 0 ] && ok "register returns 0 on an empty crontab" || no "register non-zero on empty crontab (rc=$rc)"
+grep -qxF "$EXPECTED_CRON" "$CRONFILE" && ok "18/1 empty crontab: exact C7 entry written" || no "18/1 entry mismatch: $(cat "$CRONFILE" 2>/dev/null)"
+[ "$(grep -cF "$CRON_MARKER" "$CRONFILE")" -eq 1 ] && ok "18/1 exactly one marker line" || no "18/1 marker count wrong"
+grep -qxF "crontab -l" "$CRONLOG" && ok "18/1 read the current crontab via crontab -l" || no "18/1 did not probe crontab -l"
+
+# 18/1b) crontab binary absent on the host → skip (NOT fail): the poker relay
+# degrades gracefully rather than failing a clean bootstrap. Run under a PATH
+# with no crontab (only `date`, which step_start needs); the subshell writes
+# its INSTALL_FAILURES count + last STEP_RECORDS entry out since neither
+# propagates from a subshell.
+CRONLESS="${SBX}/cronless"; mkdir -p "$CRONLESS"
+ln -s "$(command -v date)" "${CRONLESS}/date" 2>/dev/null || true
+_skip_out="${SBX}/cronless-skip.txt"
+( PATH="$CRONLESS"; STEP_RECORDS=(); INSTALL_FAILURES=()
+  do_register_poker_cron >/dev/null 2>&1
+  printf '%s\n' "${#INSTALL_FAILURES[@]}" "${STEP_RECORDS[*]: -1}" > "$_skip_out" )
+{ read -r _nfail; read -r _rec; } < "$_skip_out"
+[ "$_nfail" = "0" ] && ok "18/1b crontab-absent host records no install failure" || no "18/1b crontab-absent recorded a failure (${_nfail})"
+case "$_rec" in skip*) ok "18/1b crontab-absent → skip status (graceful degradation)";; *) no "18/1b crontab-absent status wrong: ${_rec}";; esac
+
+# 18/2) double-bootstrap → still exactly one marker line (idempotent), and the
+# second run detects no change (cached, no crontab write).
+: > "$CRONLOG"; INSTALL_FAILURES=(); STEP_RECORDS=()
+do_register_poker_cron >/dev/null
+[ "$(grep -cF "$CRON_MARKER" "$CRONFILE")" -eq 1 ] && ok "18/2 double-bootstrap keeps exactly one marker line" || no "18/2 duplicate marker lines"
+if grep -qxF "crontab -" "$CRONLOG"; then no "18/2 idempotent re-run must not rewrite the crontab"; else ok "18/2 idempotent re-run does not rewrite the crontab"; fi
+[ "${STEP_RECORDS[*]: -1}" != "" ] && case "${STEP_RECORDS[${#STEP_RECORDS[@]}-1]}" in cached*) ok "18/2 re-run records a cached step";; *) no "18/2 re-run not cached: ${STEP_RECORDS[${#STEP_RECORDS[@]}-1]}";; esac
+
+# 18/3) marker present but entry text differs → replaced in place.
+printf 'OLD BROKEN POKER LINE # BIONIC-SDLC-POKER\n' > "$CRONFILE"
+: > "$CRONLOG"; INSTALL_FAILURES=()
+do_register_poker_cron >/dev/null
+grep -qxF "$EXPECTED_CRON" "$CRONFILE" && ok "18/3 stale marker line replaced with the C7 entry" || no "18/3 entry not replaced: $(cat "$CRONFILE")"
+grep -q "OLD BROKEN POKER LINE" "$CRONFILE" && no "18/3 stale entry must be gone" || ok "18/3 stale entry removed"
+[ "$(grep -cF "$CRON_MARKER" "$CRONFILE")" -eq 1 ] && ok "18/3 replace leaves exactly one marker line" || no "18/3 marker count wrong after replace"
+
+# 18/4) foreign entries survive install byte-identical.
+FOREIGN_A='0 9 * * * /usr/bin/foreign-job --flag "arg with spaces"'
+FOREIGN_B='@reboot /opt/thing/start.sh'
+printf '%s\n%s\n' "$FOREIGN_A" "$FOREIGN_B" > "$CRONFILE"
+: > "$CRONLOG"; INSTALL_FAILURES=()
+do_register_poker_cron >/dev/null
+grep -qxF "$FOREIGN_A" "$CRONFILE" && ok "18/4 foreign entry A survives install byte-identical" || no "18/4 foreign A mangled"
+grep -qxF "$FOREIGN_B" "$CRONFILE" && ok "18/4 foreign entry B survives install byte-identical" || no "18/4 foreign B mangled"
+grep -qxF "$EXPECTED_CRON" "$CRONFILE" && ok "18/4 poker entry appended alongside foreign entries" || no "18/4 poker entry missing"
+
+# 18/8) errexit regression: bare `crontab -l` exits 1 on the no-crontab path;
+# the register must not abort under `set -e` (subshell round-trip).
+rm -f "$CRONFILE"
+if (set -e; do_register_poker_cron >/dev/null); then ok "18/8 register survives set -e on the empty-crontab path" || true; else no "18/8 register aborted under set -e (unguarded crontab -l exit 1)"; fi
+grep -qxF "$EXPECTED_CRON" "$CRONFILE" && ok "18/8 entry still installed on the set -e path" || no "18/8 entry not installed under set -e"
+
+# 18/5) reset removes ONLY the marker line; foreign entries survive byte-
+# identical. Extract do_remove_poker_cron from claude-reset.sh and stub its
+# reset-only helpers (confirm/note_*) so it runs in this sandbox.
+confirm() { return 0; }
+note_removed() { :; }
+note_clean() { :; }
+note_skipped() { :; }
+RESET_CODE="${SBX}/reset_code.sh"
+awk '$0 ~ "^do_remove_poker_cron\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "${REPO}/claude-reset.sh" > "$RESET_CODE"
+if declare -F do_remove_poker_cron >/dev/null; then unset -f do_remove_poker_cron; fi
+# shellcheck disable=SC1090
+source "$RESET_CODE"
+if declare -F do_remove_poker_cron >/dev/null; then ok "18/5 do_remove_poker_cron extracted from claude-reset.sh" || true; else no "18/5 do_remove_poker_cron not extracted from claude-reset.sh"; fi
+
+# Install into a crontab that also carries foreign entries, then reset.
+printf '%s\n%s\n' "$FOREIGN_A" "$FOREIGN_B" > "$CRONFILE"
+do_register_poker_cron >/dev/null
+: > "$CRONLOG"
+do_remove_poker_cron >/dev/null
+grep -qF "$CRON_MARKER" "$CRONFILE" && no "18/5 reset must remove the marker line" || ok "18/5 reset removes the marker line"
+grep -qxF "$FOREIGN_A" "$CRONFILE" && ok "18/5 foreign entry A survives reset byte-identical" || no "18/5 reset mangled foreign A"
+grep -qxF "$FOREIGN_B" "$CRONFILE" && ok "18/5 foreign entry B survives reset byte-identical" || no "18/5 reset mangled foreign B"
+
+# 18/5b) reset on a crontab whose ONLY entry is the marker clears it entirely.
+rm -f "$CRONFILE"
+do_register_poker_cron >/dev/null
+do_remove_poker_cron >/dev/null
+if [ ! -f "$CRONFILE" ] || ! grep -qF "$CRON_MARKER" "${CRONFILE}"; then ok "18/5b reset of a poker-only crontab leaves no marker"; else no "18/5b marker survived reset"; fi
+
+# 18/5c) reset when the marker is already absent → clean no-op (foreign intact).
+printf '%s\n' "$FOREIGN_A" > "$CRONFILE"
+: > "$CRONLOG"
+do_remove_poker_cron >/dev/null
+grep -qxF "$FOREIGN_A" "$CRONFILE" && ok "18/5c reset no-op leaves an unrelated crontab intact" || no "18/5c reset damaged an unrelated crontab"
+
+# ---- cron.env verification (C6) under a controlled fake HOME ----
+CRONHOME="${SBX}/cronhome"; mkdir -p "${CRONHOME}/.claude"
+_OLD_HOME="$HOME"; export HOME="$CRONHOME"
+
+# A well-shaped OAuth token used by the passing-shape fixtures: sk-ant prefix,
+# in the 40–512 length band, no whitespace. The distinctive `VERIFYOK` marker
+# doubles as a leak canary (grep it absent from any captured output).
+VALID_TOK="sk-ant-oat01-VERIFYOK$(printf '0%.0s' {1..80})"
+
+# 18/6) env file absent → skip (NOT fail): warning names `claude setup-token`
+# and BOTH key names; no INSTALL_FAILURES; the file is never created.
+rm -f "${CRONHOME}/.claude/cron.env"
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_verify_cron_env >/dev/null
+rec="${STEP_RECORDS[*]: -1}"
+IFS='|' read -r c_st c_cat c_sec c_name c_rem c_det <<< "$rec"
+[ "$c_st" = "skip" ] && ok "18/6 absent cron.env → skip status (provisioning gap, not a failure)" || no "18/6 absent status wrong: $c_st"
+[ "${#INSTALL_FAILURES[@]}" -eq 0 ] && ok "18/6 absent cron.env records no install failure (resilience)" || no "18/6 absent wrongly recorded a failure"
+case "$c_rem" in *"claude setup-token"*) ok "18/6 warning names 'claude setup-token'";; *) no "18/6 remediation missing setup-token: $c_rem";; esac
+case "$c_rem" in *CLAUDE_CODE_OAUTH_TOKEN*BIONIC_NTFY_TOPIC*) ok "18/6 warning names both key names";; *) no "18/6 remediation missing a key name: $c_rem";; esac
+[ ! -f "${CRONHOME}/.claude/cron.env" ] && ok "18/6 verification never creates the env file" || no "18/6 env file was created (machinery must never write it)"
+
+# 18/7a) mode 644 (both keys) → warn, no failure. Invoke directly (not in a
+# command substitution) so the in-process STEP_RECORDS/INSTALL_FAILURES update.
+printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\nBIONIC_NTFY_TOPIC=topic-secret-value\n' "$VALID_TOK" > "${CRONHOME}/.claude/cron.env"
+chmod 644 "${CRONHOME}/.claude/cron.env"
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_verify_cron_env >/dev/null
+rec="${STEP_RECORDS[*]: -1}"; IFS='|' read -r c_st c_cat c_sec c_name c_rem c_det <<< "$rec"
+[ "$c_st" = "warn" ] && ok "18/7a mode 644 → warn status" || no "18/7a mode 644 status wrong: $c_st"
+[ "${#INSTALL_FAILURES[@]}" -eq 0 ] && ok "18/7a mode 644 records no failure" || no "18/7a mode 644 wrongly failed"
+
+# 18/7b) mode 600 + both keys → silent pass (step_ok), and NO secret value is
+# ever printed to stdout/stderr (C6: values never printed). Status comes from a
+# direct call; the leak check re-runs in a subshell purely to capture output.
+chmod 600 "${CRONHOME}/.claude/cron.env"
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_verify_cron_env >/dev/null
+rec="${STEP_RECORDS[*]: -1}"; IFS='|' read -r c_st c_cat c_sec c_name c_rem c_det <<< "$rec"
+[ "$c_st" = "ok" ] && ok "18/7b mode 600 + both keys → ok status" || no "18/7b mode 600 status wrong: $c_st"
+[ "${#INSTALL_FAILURES[@]}" -eq 0 ] && ok "18/7b mode 600 pass records no failure" || no "18/7b mode 600 wrongly failed"
+verify_out="$(do_verify_cron_env 2>&1)"
+if echo "$verify_out" | grep -q "VERIFYOK\|topic-secret-value"; then no "18/7b a secret VALUE leaked to output"; else ok "18/7b never prints a secret value"; fi
+
+# 18/7c) mode 600 but a key missing → warn naming the missing key, no failure.
+# (C6 amendment 3: in the LIVE flow do_author_cron_env runs BEFORE verify and
+# ADDS a missing key line, so verify would see both keys. This case still
+# exercises verify's own missing-key branch directly — author is not invoked.)
+printf 'CLAUDE_CODE_OAUTH_TOKEN=tok-secret-value\n' > "${CRONHOME}/.claude/cron.env"
+chmod 600 "${CRONHOME}/.claude/cron.env"
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_verify_cron_env >/dev/null
+rec="${STEP_RECORDS[*]: -1}"; IFS='|' read -r c_st c_cat c_sec c_name c_rem c_det <<< "$rec"
+[ "$c_st" = "warn" ] && ok "18/7c missing key → warn status" || no "18/7c missing-key status wrong: $c_st"
+case "$c_det$c_rem" in *BIONIC_NTFY_TOPIC*) ok "18/7c warning names the missing key (BIONIC_NTFY_TOPIC)";; *) no "18/7c missing-key name absent: $c_det | $c_rem";; esac
+
+# ---- token-shape verification (C6, walk-2 hardening) under the fake HOME ----
+# do_verify_cron_env, having confirmed mode 600 + both key NAMES, now also
+# vets the SHAPE of the values — WARN-only (never record_fail), and the value
+# is NEVER printed. The raw KEY=VALUE line is parsed, never sourced, so a
+# space-bearing value is DETECTED rather than word-split. A helper collects
+# every recorded step so multi-warn cases can be asserted.
+_shape_steps() { printf '%s\n' "${STEP_RECORDS[@]}"; }
+
+# 18/7d) the walk-2 failure: a long (~2687-char) token carrying an EMBEDDED
+# SPACE. Sourced, it word-splits and mangles the Bearer header. → a warn that
+# names whitespace, NO step_ok, and the value never reaches stdout/stderr.
+PLANTED_WS="sk-ant-oat01-LEAKCANARY7d $(printf 'z%.0s' {1..2650})"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\nBIONIC_NTFY_TOPIC=topic-ok\n' "$PLANTED_WS" > "${CRONHOME}/.claude/cron.env"
+chmod 600 "${CRONHOME}/.claude/cron.env"
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_verify_cron_env >/dev/null
+_shape_steps | grep -qi 'whitespace' && ok "18/7d space-bearing token → whitespace warn (naming the property)" || no "18/7d no whitespace warn recorded: $(_shape_steps)"
+_shape_steps | grep -q '^ok|' && no "18/7d must not record step_ok on a malformed token" || ok "18/7d malformed token records no step_ok"
+[ "${#INSTALL_FAILURES[@]}" -eq 0 ] && ok "18/7d shape warn records no install failure (warn-and-continue)" || no "18/7d wrongly recorded a failure"
+_leak_out="$(do_verify_cron_env 2>&1)"
+if printf '%s' "$_leak_out" | grep -qF "LEAKCANARY7d"; then no "18/7d token VALUE leaked to output"; else ok "18/7d space-bearing value absent from all captured output"; fi
+
+# 18/7e) short garbage value ("hello"): wrong prefix AND out-of-band length →
+# both properties warn, no step_ok.
+printf 'CLAUDE_CODE_OAUTH_TOKEN=hello\nBIONIC_NTFY_TOPIC=topic-ok\n' > "${CRONHOME}/.claude/cron.env"
+chmod 600 "${CRONHOME}/.claude/cron.env"
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_verify_cron_env >/dev/null
+_shape_steps | grep -qi 'sk-ant' && ok "18/7e garbage token → prefix warn (names sk-ant expectation)" || no "18/7e no prefix warn: $(_shape_steps)"
+_shape_steps | grep -qi 'length' && ok "18/7e garbage token → length warn" || no "18/7e no length warn: $(_shape_steps)"
+_shape_steps | grep -q '^ok|' && no "18/7e must not record step_ok on a garbage token" || ok "18/7e garbage token records no step_ok"
+
+# 18/7f) a valid-shaped token (sk-ant prefix, ~100 chars, no whitespace) →
+# step_ok, exactly one record, NO shape warns. Regression guard so the added
+# checks never bark on a well-formed credential (the prov/-era shape).
+printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\nBIONIC_NTFY_TOPIC=topic-ok\n' "$VALID_TOK" > "${CRONHOME}/.claude/cron.env"
+chmod 600 "${CRONHOME}/.claude/cron.env"
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_verify_cron_env >/dev/null
+rec="${STEP_RECORDS[*]: -1}"; IFS='|' read -r c_st c_cat c_sec c_name c_rem c_det <<< "$rec"
+[ "$c_st" = "ok" ] && ok "18/7f valid-shaped token → step_ok" || no "18/7f valid token status wrong: $c_st"
+[ "${#STEP_RECORDS[@]}" -eq 1 ] && ok "18/7f valid token records no shape warn" || no "18/7f unexpected extra records: $(_shape_steps)"
+
+# 18/7g) BIONIC_NTFY_TOPIC carrying whitespace (topics must be URL-path-safe) →
+# warn naming the topic, no step_ok. The token itself is valid-shaped so the
+# only complaint is the topic.
+printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\nBIONIC_NTFY_TOPIC=has a space\n' "$VALID_TOK" > "${CRONHOME}/.claude/cron.env"
+chmod 600 "${CRONHOME}/.claude/cron.env"
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_verify_cron_env >/dev/null
+_shape_steps | grep -qi 'BIONIC_NTFY_TOPIC.*whitespace' && ok "18/7g whitespace in topic → warn naming BIONIC_NTFY_TOPIC" || no "18/7g no topic-whitespace warn: $(_shape_steps)"
+_shape_steps | grep -q '^ok|' && no "18/7g must not record step_ok when the topic is malformed" || ok "18/7g malformed topic records no step_ok"
+
+# 18/7h) errexit: the shape checks add grep in command-substitution; verify the
+# function does not abort under set -e when the values are present and valid.
+printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\nBIONIC_NTFY_TOPIC=topic-ok\n' "$VALID_TOK" > "${CRONHOME}/.claude/cron.env"
+chmod 600 "${CRONHOME}/.claude/cron.env"
+if (set -e; do_verify_cron_env >/dev/null 2>&1); then ok "18/7h shape verify survives set -e on the valid path" || true; else no "18/7h verify aborted under set -e"; fi
+
+# ---- template authoring (C6 AMENDMENT 3 — FINAL) under the fake HOME ----
+# Amendment 3 SUPERSEDES the interactive provision/repair flows entirely with a
+# single NON-INTERACTIVE authoring pass — identical behavior attended,
+# unattended, or in CI (no TTY checks, no CI checks, no prompts):
+#   • file ABSENT  → author it (an EMPTY CLAUDE_CODE_OAUTH_TOKEN= slot the user
+#     later pastes into, plus a machine-generated BIONIC_NTFY_TOPIC), mode 600,
+#     atomic temp+mv under umask 077.
+#   • file PRESENT → STRUCTURAL repair only: a MISSING key line is added; a line
+#     that already exists is preserved BYTE-IDENTICAL, even if its value is
+#     malformed (user-set values are never overwritten). Both keys present → a
+#     no-op.
+# Value SHAPE is never judged by authoring — that stays do_verify_cron_env's
+# warn-only job, whose warns are the entire END-SUMMARY UX.
+AUTH_F="${CRONHOME}/.claude/cron.env"
+# The EXACT fill instruction the empty/malformed token warns carry as the →
+# action line (spec §C6 amendment 3, verbatim).
+FILL="run 'claude setup-token' and paste the value after CLAUDE_CODE_OAUTH_TOKEN= in ~/.claude/cron.env"
+_auth_steps() { printf '%s\n' "${STEP_RECORDS[@]}"; }
+
+# author/1) absent file → authored: exists, mode 600, the token slot line is
+# EXACTLY `CLAUDE_CODE_OAUTH_TOKEN=` (empty — machinery writes no credential
+# value), a generated bionic- topic, atomic (no temp file left behind).
+rm -f "$AUTH_F" "${CRONHOME}/.claude/"cron.env.tmp.* 2>/dev/null || true
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_author_cron_env >/dev/null
+[ -f "$AUTH_F" ] && ok "author/1 absent file → cron.env authored" || no "author/1 did not author the file"
+[ "$(_cron_env_mode "$AUTH_F")" = "600" ] && ok "author/1 authored file is mode 600" || no "author/1 wrong mode: $(_cron_env_mode "$AUTH_F")"
+grep -qxF 'CLAUDE_CODE_OAUTH_TOKEN=' "$AUTH_F" && ok "author/1 token slot authored EMPTY (no credential value written)" || no "author/1 token line not empty: $(sed 's/=.*/=<redacted>/' "$AUTH_F")"
+_a1_topic="$(grep -m1 '^BIONIC_NTFY_TOPIC=' "$AUTH_F")"
+case "$_a1_topic" in BIONIC_NTFY_TOPIC=bionic-?*) ok "author/1 topic generated (bionic- prefix, non-empty)";; *) no "author/1 topic wrong: $_a1_topic";; esac
+_a1_leftover="$(find "${CRONHOME}/.claude" -maxdepth 1 -name 'cron.env.tmp.*' 2>/dev/null)"
+[ -z "$_a1_leftover" ] && ok "author/1 atomic write leaves no temp file" || no "author/1 temp leftover: $_a1_leftover"
+rec="${STEP_RECORDS[*]: -1}"; IFS='|' read -r a_st _ <<< "$rec"
+[ "$a_st" = "ok" ] && ok "author/1 authoring records step_ok" || no "author/1 status wrong: $a_st ($rec)"
+[ "${#INSTALL_FAILURES[@]}" -eq 0 ] && ok "author/1 authoring records no install failure" || no "author/1 wrongly recorded a failure"
+
+# author/2) the authored file → do_verify_cron_env warns EMPTY-token (its own
+# detected state, NOT length/prefix) with the EXACT fill instruction as the →
+# action line; no step_ok, no install failure.
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_verify_cron_env >/dev/null
+_auth_steps | grep -qi 'CLAUDE_CODE_OAUTH_TOKEN is empty' && ok "author/2 empty token → 'CLAUDE_CODE_OAUTH_TOKEN is empty' warn" || no "author/2 no empty-token warn: $(_auth_steps)"
+_auth_steps | grep -qF "$FILL" && ok "author/2 empty-token warn carries the exact fill instruction" || no "author/2 fill instruction missing: $(_auth_steps)"
+if _auth_steps | grep -qiE 'length|sk-ant'; then no "author/2 empty token must not also warn length/prefix (empty is its own state)"; else ok "author/2 empty token is its own state (no length/prefix warn)"; fi
+if _auth_steps | grep -q '^ok|'; then no "author/2 must not record step_ok on an empty token"; else ok "author/2 empty token records no step_ok"; fi
+[ "${#INSTALL_FAILURES[@]}" -eq 0 ] && ok "author/2 empty-token warn records no install failure" || no "author/2 wrongly recorded a failure"
+
+# author/3) VALID user token + topic → author is a byte-identical no-op
+# (structure complete), and verify → step_ok.
+printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\nBIONIC_NTFY_TOPIC=bionic-keepme-abc123\n' "$VALID_TOK" > "$AUTH_F"
+chmod 600 "$AUTH_F"
+_a3_before="$(cat "$AUTH_F")"
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_author_cron_env >/dev/null
+[ "$(cat "$AUTH_F")" = "$_a3_before" ] && ok "author/3 well-formed file → byte-identical no-op" || no "author/3 modified a well-formed file"
+[ "${#STEP_RECORDS[@]}" -eq 0 ] && ok "author/3 no-op records no step" || no "author/3 recorded a step: ${STEP_RECORDS[*]}"
+STEP_RECORDS=(); do_verify_cron_env >/dev/null
+rec="${STEP_RECORDS[*]: -1}"; IFS='|' read -r v_st _ <<< "$rec"
+[ "$v_st" = "ok" ] && ok "author/3 verify of a valid file → step_ok" || no "author/3 verify wrong: $v_st"
+
+# author/4) token line MISSING but topic present → the empty token slot line is
+# ADDED, the existing topic line survives BYTE-IDENTICAL, mode 600.
+GOOD_TOPIC='BIONIC_NTFY_TOPIC=bionic-keepme-abcdef123456'
+printf '%s\n' "$GOOD_TOPIC" > "$AUTH_F"
+chmod 600 "$AUTH_F"
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_author_cron_env >/dev/null
+grep -qxF 'CLAUDE_CODE_OAUTH_TOKEN=' "$AUTH_F" && ok "author/4 missing token slot added (empty)" || no "author/4 token slot not added: $(sed 's/=.*/=<redacted>/' "$AUTH_F")"
+grep -qxF "$GOOD_TOPIC" "$AUTH_F" && ok "author/4 existing topic line preserved byte-identical" || no "author/4 topic mangled: $(grep '^BIONIC_NTFY_TOPIC=' "$AUTH_F")"
+[ "$(_cron_env_mode "$AUTH_F")" = "600" ] && ok "author/4 repaired file is mode 600" || no "author/4 wrong mode: $(_cron_env_mode "$AUTH_F")"
+[ "${#INSTALL_FAILURES[@]}" -eq 0 ] && ok "author/4 structural repair records no install failure" || no "author/4 wrongly recorded a failure"
+
+# author/5) MALFORMED user token value (embedded spaces) → author does NOT touch
+# it (the line exists, so its value is never overwritten): byte-identical. verify
+# still WARNS on the bad shape (existing shape detection retained).
+printf 'CLAUDE_CODE_OAUTH_TOKEN=bad token with spaces\n%s\n' "$GOOD_TOPIC" > "$AUTH_F"
+chmod 600 "$AUTH_F"
+_a5_before="$(cat "$AUTH_F")"
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_author_cron_env >/dev/null
+[ "$(cat "$AUTH_F")" = "$_a5_before" ] && ok "author/5 malformed user value left byte-identical (never overwritten)" || no "author/5 overwrote a user value"
+STEP_RECORDS=(); do_verify_cron_env >/dev/null
+_auth_steps | grep -qi 'whitespace' && ok "author/5 verify still warns on the malformed token shape" || no "author/5 verify did not warn: $(_auth_steps)"
+
+# author/6) double-run idempotence: authoring an already-authored file is a
+# byte-identical no-op (second run produces identical bytes, records no step).
+rm -f "$AUTH_F"
+STEP_RECORDS=(); do_author_cron_env >/dev/null
+_a6_first="$(cat "$AUTH_F")"
+STEP_RECORDS=(); do_author_cron_env >/dev/null
+[ "$(cat "$AUTH_F")" = "$_a6_first" ] && ok "author/6 second author run is byte-identical (idempotent)" || no "author/6 second run changed the file"
+[ "${#STEP_RECORDS[@]}" -eq 0 ] && ok "author/6 idempotent re-run records no step" || no "author/6 re-run recorded a step: ${STEP_RECORDS[*]}"
+
+# author/7) errexit: the author path (subshell temp+mv, command-substituted
+# topic) must not abort under set -e — on BOTH the absent-file and the
+# structural-repair branch.
+rm -f "$AUTH_F"
+if (set -e; do_author_cron_env >/dev/null 2>&1); then ok "author/7 author survives set -e on the absent-file path" || true; else no "author/7 author aborted under set -e (absent path)"; fi
+printf '%s\n' "$GOOD_TOPIC" > "$AUTH_F"; chmod 600 "$AUTH_F"
+if (set -e; do_author_cron_env >/dev/null 2>&1); then ok "author/7 author survives set -e on the structural-repair path" || true; else no "author/7 author aborted under set -e (repair path)"; fi
+
+# author/8) no-interactivity proof: the interactive symbols are GONE from the
+# live script, and the Cron section carries no `read -r` consent prompt.
+[ "$(grep -c 'do_provision_cron_env' "$BOOTSTRAP")" -eq 0 ] && ok "author/8 do_provision_cron_env fully removed from the script" || no "author/8 do_provision_cron_env still present in the script"
+[ "$(grep -c 'do_repair_cron_env' "$BOOTSTRAP")" -eq 0 ] && ok "author/8 do_repair_cron_env fully removed from the script" || no "author/8 do_repair_cron_env still present in the script"
+[ "$(grep -c '_is_interactive' "$BOOTSTRAP")" -eq 0 ] && ok "author/8 _is_interactive fully removed from the script" || no "author/8 _is_interactive still present in the script"
+_cron_src="$(awk '/^# ─── Cron \(sdlc-poker/{f=1} f{print} /^# ─── Account-mirror/{exit}' "$BOOTSTRAP")"
+if printf '%s' "$_cron_src" | grep -q 'read -r'; then no "author/8 Cron section still contains a read -r consent prompt"; else ok "author/8 Cron section has no read -r consent prompt"; fi
+
+# author/9) reset must still NOT reference cron.env — user-owned credential data,
+# never deleted by a reset (unchanged by amendment 3).
+if grep -q 'cron\.env' "${REPO}/claude-reset.sh"; then no "author/9 claude-reset.sh must not reference cron.env (user credential data)"; else ok "author/9 claude-reset.sh leaves cron.env untouched"; fi
+
+# author/10) C6-am3 ADDENDUM — trailing-newline guard. A hand-authored file whose
+# last byte is NOT a newline must never merge with the appended key line. Existing
+# no-trailing-newline token line + MISSING topic → structural repair must emit a
+# newline BEFORE appending, yielding two well-formed lines (both values intact);
+# the pre-guard behavior produced ONE corrupt line destroying both values.
+printf 'CLAUDE_CODE_OAUTH_TOKEN=%s' "$VALID_TOK" > "$AUTH_F"     # NO trailing newline
+chmod 600 "$AUTH_F"
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_author_cron_env >/dev/null
+grep -qxF "CLAUDE_CODE_OAUTH_TOKEN=$VALID_TOK" "$AUTH_F" && ok "author/10 no-trailing-newline token line preserved intact (not merged)" || no "author/10 token line corrupted by merge: $(sed 's/=.*/=<redacted>/' "$AUTH_F")"
+case "$(grep -m1 '^BIONIC_NTFY_TOPIC=' "$AUTH_F")" in BIONIC_NTFY_TOPIC=bionic-?*) ok "author/10 topic added on its OWN line (newline guard held)";; *) no "author/10 topic line missing or merged: $(cat -A "$AUTH_F")";; esac
+[ "$(grep -c '=' "$AUTH_F")" -eq 2 ] && ok "author/10 exactly two KEY=VALUE lines (no corrupt merge)" || no "author/10 wrong line count (merge corruption): $(cat -A "$AUTH_F")"
+export HOME="$_OLD_HOME"
 
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
