@@ -1261,7 +1261,8 @@ printf '%s' "$_out" | grep -q 'brew postinstall openssl@3' \
 # ---------- F6: run log init + rotation ----------
 _saved_home="$HOME"; HOME="$SBX"
 rm -rf "$SBX/.claude"
-( _init_run_log; echo "hello ${C_RED}red${C_RESET} world"; sleep 0.2 ) >/dev/null 2>&1
+( set -euo pipefail; _init_run_log; echo "hello ${C_RED}red${C_RESET} world"; echo "survived-rotation" >> "$SBX/marker"; sleep 0.2 ) >/dev/null 2>&1
+[ -f "$SBX/marker" ] && ok "runlog: survives empty log dir under set -euo pipefail" || no "runlog: died in rotation pipeline (set -e)"
 _logfile="$(ls "$SBX/.claude/logs"/bootstrap-*.log 2>/dev/null | head -1)"
 [ -n "$_logfile" ] && ok "runlog: log file created under ~/.claude/logs" || no "runlog: no log file"
 grep -q 'hello red world' "$_logfile" 2>/dev/null \
@@ -1272,7 +1273,7 @@ rm -rf "$SBX/.claude/logs"; mkdir -p "$SBX/.claude/logs"
 for i in 1 2 3 4 5 6 7; do
   touch -t "2026010${i}0000" "$SBX/.claude/logs/bootstrap-2026010${i}T000000Z.log"
 done
-( _init_run_log; sleep 0.2 ) >/dev/null 2>&1
+( set -euo pipefail; _init_run_log; sleep 0.2 ) >/dev/null 2>&1
 _count="$(ls "$SBX/.claude/logs"/bootstrap-*.log | wc -l | tr -d ' ')"
 [ "$_count" = "5" ] && ok "runlog: rotation keeps 5" || no "runlog: rotation kept $_count, want 5"
 
