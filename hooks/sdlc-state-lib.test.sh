@@ -630,6 +630,160 @@ ac_w2_drift() {
 ac_w2_drift
 
 # ============================================================
+# Effect guard (slice 4/3) — sdlc_effect_state / sdlc_effect_run: the
+# exactly-once replay leg. Every case drives the REAL guard against a real
+# ledger and proves the SIDE EFFECT via a counter file the command appends
+# to (one line per execution) — never by inspecting the guard's return value
+# alone. `counter` lines == executions; ledger effect/decision line counts
+# come from awk over the real ledger file (never a reimplemented parser).
+# ============================================================
+
+# key_lines <ledger-path> <type> <key> — count of lines of that type with
+# that exact effect-key (field 4 = type, field 5 = effect-key).
+key_lines() { awk -F'\t' -v t="$2" -v k="$3" '$4==t && $5==k' "$1" | wc -l | tr -d ' '; }
+# runs <counter-file> — how many times the guarded command executed.
+runs() { wc -l < "$1" | tr -d ' '; }
+
+echo ""
+echo "=== AC-W3: effect guard idempotency — double-drive executes exactly once ==="
+ac_w3() {
+  new_state_dir
+  local gid="effect-w3" counter key path rc
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  key="notify:slack-done"
+  path="$(ledger_path "$gid")"
+
+  sdlc_effect_run "$gid" "$key" "notify slack the run is done" -- sh -c "echo x >> '$counter'"; rc=$?
+  assert_eq "AC-W3 first drive exits 0" "0" "$rc"
+  assert_eq "AC-W3 first drive executed the command once (counter=1)" "1" "$(runs "$counter")"
+  assert_eq "AC-W3 exactly one effect line for the key after first drive" "1" "$(key_lines "$path" effect "$key")"
+
+  sdlc_effect_run "$gid" "$key" "notify slack the run is done" -- sh -c "echo x >> '$counter'"; rc=$?
+  assert_eq "AC-W3 second drive exits 0 (idempotent success)" "0" "$rc"
+  assert_eq "AC-W3 second drive did NOT re-execute (counter still 1)" "1" "$(runs "$counter")"
+  assert_eq "AC-W3 still exactly one effect line for the key after second drive" "1" "$(key_lines "$path" effect "$key")"
+
+  assert_true "AC-W3 ledger_verify passes after guard appends (chain intact)" ledger_verify "$gid"
+}
+ac_w3
+
+echo ""
+echo "=== AC-W4: crash window — indeterminate fails closed by default, --replay-safe completes ==="
+
+echo "--- planted intent-without-effect, default replay parks (fail-closed J1) ---"
+ac_w4_default_parks() {
+  new_state_dir
+  local gid="effect-w4-default" counter key errf rc
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  key="merge:pr-42"
+  ledger_append "$gid" decision "$key" "intent to merge" >/dev/null   # crash window: intent, no effect
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_effect_run "$gid" "$key" "merge pr 42" -- sh -c "echo x >> '$counter'" 2>"$errf"; rc=$?
+  assert_nonzero "AC-W4 default replay of indeterminate returns nonzero" "$rc"
+  assert_contains "AC-W4 default replay names effect-indeterminate" "effect-indeterminate" "$(cat "$errf")"
+  assert_eq "AC-W4 default replay did NOT execute the command (counter=0)" "0" "$(runs "$counter")"
+}
+ac_w4_default_parks
+
+echo "--- --replay-safe completes the journal, executes exactly once, no duplicate decision ---"
+ac_w4_replay_safe_completes() {
+  new_state_dir
+  local gid="effect-w4-rs" counter key path rc
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  key="merge:pr-42"
+  path="$(ledger_path "$gid")"
+  ledger_append "$gid" decision "$key" "intent to merge" >/dev/null
+  sdlc_effect_run "$gid" "$key" "merge pr 42" --replay-safe -- sh -c "echo x >> '$counter'"; rc=$?
+  assert_eq "AC-W4 replay-safe of indeterminate exits 0" "0" "$rc"
+  assert_eq "AC-W4 replay-safe executed exactly once (counter=1)" "1" "$(runs "$counter")"
+  assert_eq "AC-W4 replay-safe completed the journal (one effect line)" "1" "$(key_lines "$path" effect "$key")"
+  assert_eq "AC-W4 replay-safe did NOT journal a duplicate decision line" "1" "$(key_lines "$path" decision "$key")"
+  assert_eq "AC-W4 state after replay-safe completion is applied" "applied" "$(sdlc_effect_state "$gid" "$key")"
+  assert_true "AC-W4 ledger_verify passes after replay-safe completion" ledger_verify "$gid"
+}
+ac_w4_replay_safe_completes
+
+echo "--- fresh key (nothing journaled) runs normally under --replay-safe ---"
+ac_w4_fresh_key_runs() {
+  new_state_dir
+  local gid="effect-w4-fresh" counter key path rc
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  key="poke:fresh"
+  path="$(ledger_path "$gid")"
+  sdlc_effect_run "$gid" "$key" "poke fresh" --replay-safe -- sh -c "echo x >> '$counter'"; rc=$?
+  assert_eq "AC-W4 fresh key with --replay-safe exits 0" "0" "$rc"
+  assert_eq "AC-W4 fresh key executed once (counter=1)" "1" "$(runs "$counter")"
+  assert_eq "AC-W4 fresh key journaled a decision line" "1" "$(key_lines "$path" decision "$key")"
+  assert_eq "AC-W4 fresh key journaled an effect line" "1" "$(key_lines "$path" effect "$key")"
+}
+ac_w4_fresh_key_runs
+
+echo "--- failed command: attempt stands, no effect line, state stays indeterminate ---"
+ac_w4_failed_command() {
+  new_state_dir
+  local gid="effect-w4-fail" counter key path rc
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  key="merge:pr-99"
+  path="$(ledger_path "$gid")"
+  sdlc_effect_run "$gid" "$key" "merge pr 99" -- sh -c "echo x >> '$counter'; exit 3"; rc=$?
+  assert_nonzero "AC-W4 failed command returns nonzero" "$rc"
+  assert_eq "AC-W4 failed command still shows the attempt (counter=1)" "1" "$(runs "$counter")"
+  assert_eq "AC-W4 failed command appended NO effect line" "0" "$(key_lines "$path" effect "$key")"
+  assert_eq "AC-W4 failed command left the decision (intent) standing" "1" "$(key_lines "$path" decision "$key")"
+  assert_eq "AC-W4 state after failed command is indeterminate" "indeterminate" "$(sdlc_effect_state "$gid" "$key")"
+}
+ac_w4_failed_command
+
+echo ""
+echo "=== sdlc_effect_state direct: three states + decision/effect key non-collision ==="
+ac_effect_state() {
+  new_state_dir
+  local gid="effect-state-direct"
+  assert_eq "effect_state unapplied on an absent ledger" "unapplied" "$(sdlc_effect_state "$gid" "notify:x")"
+
+  ledger_append "$gid" decision "notify:x" "intent" >/dev/null
+  assert_eq "effect_state indeterminate after a decision line only" "indeterminate" "$(sdlc_effect_state "$gid" "notify:x")"
+
+  ledger_append "$gid" effect "notify:x" "done" >/dev/null
+  assert_eq "effect_state applied once an effect line exists" "applied" "$(sdlc_effect_state "$gid" "notify:x")"
+
+  # Non-collision (extends AC-L1's decision/effect split): an effect line for
+  # key A must not make an untouched key B applied.
+  assert_eq "effect_state key B unapplied though key A is applied" "unapplied" "$(sdlc_effect_state "$gid" "notify:y")"
+
+  # A decision line alone for another key is indeterminate, never applied.
+  ledger_append "$gid" decision "merge:z" "intent z" >/dev/null
+  assert_eq "effect_state a decision-only key is indeterminate, not applied" "indeterminate" "$(sdlc_effect_state "$gid" "merge:z")"
+}
+ac_effect_state
+
+echo "--- effect guard loud defects: invalid-goal-id + missing-effect-key (both functions) ---"
+ac_effect_defects() {
+  new_state_dir
+  local err rc
+  err=$(sdlc_effect_state "bad/goal" "notify:x" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "effect_state rejects a goal-id with '/'" "$rc"
+  assert_contains "effect_state '/' goal-id names invalid-goal-id" "invalid-goal-id" "$err"
+
+  err=$(sdlc_effect_state "good-goal" "" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "effect_state rejects an empty effect-key" "$rc"
+  assert_contains "effect_state empty key names missing-effect-key" "missing-effect-key" "$err"
+
+  err=$(sdlc_effect_run "bad/goal" "notify:x" "s" -- true 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "effect_run rejects a goal-id with '/'" "$rc"
+  assert_contains "effect_run '/' goal-id names invalid-goal-id" "invalid-goal-id" "$err"
+
+  err=$(sdlc_effect_run "good-goal" "" "s" -- true 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "effect_run rejects an empty effect-key" "$rc"
+  assert_contains "effect_run empty key names missing-effect-key" "missing-effect-key" "$err"
+
+  # No '--'/command → loud, never a silent no-op.
+  err=$(sdlc_effect_run "good-goal" "notify:x" "s" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "effect_run with no '--'/command returns nonzero" "$rc"
+}
+ac_effect_defects
+
+# ============================================================
 # Goal-id contract + divergence guard (FLAG 2, AS-26) — sdlc_goal_id() is
 # the canonical transform for future writers (N2-N4). context-spend.sh
 # keeps its own inline copy (reviewed-acceptable self-containment); this
