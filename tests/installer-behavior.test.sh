@@ -888,6 +888,31 @@ printf '%s' "$_out" | grep -q 'claude.ai/install.sh' \
 printf '%s' "$_out" | grep -q 'brew postinstall openssl@3' \
   && ok "claude cli: exit message carries classified cert hint" || no "claude cli: cert hint missing"
 
+# ---------- F6: run log init + rotation ----------
+_saved_home="$HOME"; HOME="$SBX"
+rm -rf "$SBX/.claude"
+( _init_run_log; echo "hello ${C_RED}red${C_RESET} world"; sleep 0.2 ) >/dev/null 2>&1
+_logfile="$(ls "$SBX/.claude/logs"/bootstrap-*.log 2>/dev/null | head -1)"
+[ -n "$_logfile" ] && ok "runlog: log file created under ~/.claude/logs" || no "runlog: no log file"
+grep -q 'hello red world' "$_logfile" 2>/dev/null \
+  && ok "runlog: content captured with ANSI stripped" || no "runlog: content/strip failed"
+
+# rotation: 7 pre-existing logs + this run → 5 remain
+rm -rf "$SBX/.claude/logs"; mkdir -p "$SBX/.claude/logs"
+for i in 1 2 3 4 5 6 7; do
+  touch -t "2026010${i}0000" "$SBX/.claude/logs/bootstrap-2026010${i}T000000Z.log"
+done
+( _init_run_log; sleep 0.2 ) >/dev/null 2>&1
+_count="$(ls "$SBX/.claude/logs"/bootstrap-*.log | wc -l | tr -d ' ')"
+[ "$_count" = "5" ] && ok "runlog: rotation keeps 5" || no "runlog: rotation kept $_count, want 5"
+
+# unwritable dir → disabled, no crash
+rm -rf "$SBX/.claude"; mkdir -p "$SBX/.claude"; chmod a-w "$SBX/.claude"
+( _init_run_log ) >/dev/null 2>&1; _rc=$?
+chmod u+w "$SBX/.claude"
+[ "$_rc" = "0" ] && ok "runlog: unwritable dir degrades gracefully" || no "runlog: rc=$_rc"
+HOME="$_saved_home"
+
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
 echo "========================================"
