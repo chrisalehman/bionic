@@ -61,13 +61,14 @@ assert_nonzero() {  # <label> <actual-exit-code>
 }
 
 # ---------- fixture helpers ----------
-# write_healthy <goal-id> → writes a healthy baton via the REAL baton_write,
-# returns its path.
+# write_healthy <goal-id> [wip] → writes a healthy baton via the REAL
+# baton_write, returns its path. wip defaults to "none" (the common case);
+# pass a sha for round-trip fidelity assertions.
 write_healthy() {
-  local gid="$1"
+  local gid="$1" wip="${2:-none}"
   baton_write "$gid" "/plans/$gid.plan.md" "/work/$gid" "wave-01-substrate" \
     "epic/10-never-die" "abc1234" "4" "sid-$gid/4242" "42" \
-    "run the next slice" >/dev/null 2>&1
+    "run the next slice" "$wip" >/dev/null 2>&1
   baton_path "$gid"
 }
 
@@ -112,14 +113,14 @@ empty_value() { sed -E "s/^(${3}):.*/\1:/" "$1" > "$2"; }
 # the "cut off mid-flush" signal distinct from missing/duplicate/empty.
 truncate_file() { printf '%s' "$(cat "$1")" > "$2"; }
 
-REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc-step session ledger-position next-action written-at"
+REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc-step session ledger-position next-action wip written-at"
 
 # ============================================================
 echo "=== AC-B1: round-trip write → cold parse → next-action + ledger-position readback ==="
 ac_b1() {
   new_state_dir
   local gid="wave-01-substrate-4-1"
-  local f; f=$(write_healthy "$gid")
+  local f; f=$(write_healthy "$gid" "deadbeef1234567890abcdef1234567890abcdef")
   assert_true "AC-B1 baton_write produced a file" test -f "$f"
   assert_eq "AC-B1 baton_write went through the goal's dir (AS-6 mkdir -p)" \
     "$SDLC_STATE_DIR/$gid/baton.md" "$f"
@@ -142,6 +143,7 @@ ac_b1() {
   assert_eq "AC-B1 last-commit round-trips" "abc1234" "$BATON_LAST_COMMIT"
   assert_eq "AC-B1 sdlc-step round-trips" "4" "$BATON_SDLC_STEP"
   assert_eq "AC-B1 session round-trips" "sid-$gid/4242" "$BATON_SESSION"
+  assert_eq "AC-B1 wip round-trips" "deadbeef1234567890abcdef1234567890abcdef" "$BATON_WIP"
   assert_true "AC-B1 written-at is non-empty" test -n "$BATON_WRITTEN_AT"
 }
 ac_b1
@@ -229,9 +231,12 @@ ac_b2_no_partial_trust() {
   dst="$(mktemp -d)/baton.md"; CLEAN_DIRS+=("$(dirname "$dst")")
   delete_key "$src" "$dst" "next-action"
   BATON_GOAL_ID="sentinel-untouched"
+  BATON_WIP="sentinel-wip-untouched"
   baton_parse "$dst" >/dev/null 2>&1
   assert_eq "AC-B2 a failed parse leaves prior BATON_* state untouched (no partial trust)" \
     "sentinel-untouched" "$BATON_GOAL_ID"
+  assert_eq "AC-B2 a failed parse leaves prior BATON_WIP untouched (no partial trust)" \
+    "sentinel-wip-untouched" "$BATON_WIP"
 }
 ac_b2_no_partial_trust
 
@@ -487,7 +492,7 @@ echo "--- baton_write: goal-id containing '/' ---"
 ac_goal_guard_write_slash() {
   new_state_dir
   local err rc
-  err=$(baton_write "bad/goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" 2>&1 1>/dev/null); rc=$?
+  err=$(baton_write "bad/goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" "none" 2>&1 1>/dev/null); rc=$?
   assert_nonzero "baton_write rejects goal-id with '/'" "$rc"
   assert_contains "baton_write '/' goal-id names invalid-goal-id" "invalid-goal-id" "$err"
 }
@@ -497,7 +502,7 @@ echo "--- baton_write: goal-id beginning with '.' ---"
 ac_goal_guard_write_dot() {
   new_state_dir
   local err rc
-  err=$(baton_write ".hidden-goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" 2>&1 1>/dev/null); rc=$?
+  err=$(baton_write ".hidden-goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" "none" 2>&1 1>/dev/null); rc=$?
   assert_nonzero "baton_write rejects goal-id beginning with '.'" "$rc"
   assert_contains "baton_write leading-'.' goal-id names invalid-goal-id" "invalid-goal-id" "$err"
 }
@@ -544,7 +549,7 @@ ac_nounset_no_leak() {
   local out rc
   out=$(bash -c '
     . "$1"
-    baton_write "leak-goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" >/dev/null 2>&1
+    baton_write "leak-goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" "none" >/dev/null 2>&1
     wrc=$?
     printf "unbound-ok:%s write-rc:%s\n" "$SOME_UNSET_VAR_NEVER_DEFINED_ANYWHERE" "$wrc"
   ' bash "$LIB" 2>&1)
