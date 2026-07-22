@@ -351,6 +351,52 @@ do_preflight_node() {
   return 0
 }
 
+# _node_probe — hit the npm registry with node itself. npm/pnpm/npx verify
+# TLS through OpenSSL's CA store (Homebrew node is built shared_openssl),
+# NOT the macOS keychain that curl uses — so curl 200 + node cert-fail is
+# exactly the broken-CA-store signature (field incident 2026-07-21: missing
+# /opt/homebrew/etc/openssl@3/cert.pem symlink).
+_node_probe() {
+  node -e 'require("https").get("https://registry.npmjs.org/-/ping",function(r){process.exit(r.statusCode===200?0:1)}).on("error",function(e){console.error(e.code||e.message);process.exit(1)})' 2>&1
+}
+
+# do_preflight_registry_tls — probe; on cert-class failure auto-repair the
+# one known cause (brew postinstall openssl@3 — recreates the cert.pem
+# symlink, idempotent) and re-probe. Unrepaired cert store is a hard
+# preflight failure (exit 2): every npm/pnpm/npx step downstream would fail.
+# Non-cert failures warn and continue (mirrors the curl reachability arm).
+do_preflight_registry_tls() {
+  local out
+  if ! command -v node &>/dev/null; then
+    step_skip prereq "node unavailable — probe skipped (npm installs may fail)"
+    return 0
+  fi
+  if out="$(_node_probe)"; then
+    step_ok prereq
+    return 0
+  fi
+  case "$(classify_err "$out")" in
+    cert\|*)
+      brew postinstall openssl@3 >/dev/null 2>&1 || true
+      if out="$(_node_probe)"; then
+        step_warn prereq "CA store was broken — auto-repaired (brew postinstall openssl@3)"
+        return 0
+      fi
+      echo "${C_RED}✗${C_RESET}"
+      echo ""
+      echo "  node cannot verify registry.npmjs.org's TLS certificate (${out})."
+      echo "  Auto-repair (brew postinstall openssl@3) did not resolve it."
+      echo "  Every npm/pnpm install would fail. Fix the OpenSSL CA store, then"
+      echo "  re-run ./claude-bootstrap.sh"
+      exit 2
+      ;;
+    *)
+      step_warn prereq "registry probe failed (${out}) — npm installs may fail" "check network/VPN/proxy"
+      ;;
+  esac
+  return 0
+}
+
 do_install_npm_global() {
   local pkg="$1"
   step_start "$pkg"
@@ -870,6 +916,11 @@ fi
 # node — hoisted preflight step (see do_preflight_node).
 step_start "node"
 do_preflight_node
+
+# Registry TLS through node's CA store — curl alone probes the WRONG TLS
+# stack (system keychain) and greenlit the 2026-07-21 broken-store run.
+step_start "registry TLS (node)"
+do_preflight_registry_tls
 
 # claude CLI — auto-install via npm (the canonical channel; the Homebrew cask
 # lags many versions behind). node comes from brew first if needed.
