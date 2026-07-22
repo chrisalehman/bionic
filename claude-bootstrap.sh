@@ -332,6 +332,25 @@ do_install_brew_dep() {
   ensure_cmd "$binary" "$pkg"
 }
 
+# do_preflight_node — node is needed by the registry TLS probe (F1) and the
+# npm channel of the claude CLI install. Formerly hidden inside the claude-CLI
+# else-branch behind `command -v claude` with its failure swallowed by
+# `|| true` — a machine with claude but no node reached the npm steps with no
+# npm at all, and a brew failure was misreported as a claude-CLI failure.
+# Never aborts: with the native-installer fallback (F2) the claude CLI no
+# longer requires node, and npm-dependent steps fail individually with
+# classified hints.
+do_preflight_node() {
+  if command -v node &>/dev/null; then
+    step_cached prereq "$(node -v 2>/dev/null || echo present)"
+  elif run_retry brew install node --quiet; then
+    step_ok prereq "$(node -v 2>/dev/null || echo installed)"
+  else
+    step_fail prereq "$RUN_ERR" "run 'brew install node' by hand, then re-run ./claude-bootstrap.sh"
+  fi
+  return 0
+}
+
 do_install_npm_global() {
   local pkg="$1"
   step_start "$pkg"
@@ -848,15 +867,16 @@ else
   fi
 fi
 
+# node — hoisted preflight step (see do_preflight_node).
+step_start "node"
+do_preflight_node
+
 # claude CLI — auto-install via npm (the canonical channel; the Homebrew cask
 # lags many versions behind). node comes from brew first if needed.
 step_start "claude CLI"
 if command -v claude &>/dev/null; then
   step_cached prereq "$(claude --version 2>/dev/null | head -1 || echo present)"
 else
-  if ! command -v node &>/dev/null; then
-    run_retry brew install node --quiet || true
-  fi
   if command -v npm &>/dev/null && run_retry npm install -g @anthropic-ai/claude-code@latest; then
     step_ok prereq "$(claude --version 2>/dev/null | head -1 || echo installed)"
   else
