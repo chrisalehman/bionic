@@ -53,7 +53,7 @@ chmod +x "${BIN}"/*
 
 # ---------- extract the REAL resilience block + installer functions ----------
 awk '/^# ─── Resilience ───/{f=1} f{print} /^# ─── Helpers ───/{if(f)exit}' "$BOOTSTRAP" > "$CODE"
-for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry do_install_agents _cron_env_mode do_verify_cron_env do_register_poker_cron; do
+for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry do_install_agents _cron_env_mode _is_interactive do_provision_cron_env do_verify_cron_env do_register_poker_cron; do
   awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$CODE"
 done
 
@@ -679,7 +679,7 @@ CRON_MARKER="# BIONIC-SDLC-POKER"
 # 18/9) 127-guard: every new function was actually extracted (a missing callee
 # would `command not found` silently — this catches an omission from the
 # `for fn in` list at the top of this file).
-for fn in _cron_env_mode do_verify_cron_env do_register_poker_cron; do
+for fn in _cron_env_mode _is_interactive do_provision_cron_env do_verify_cron_env do_register_poker_cron; do
   if declare -F "$fn" >/dev/null; then ok "extracted for test: ${fn}"; else no "127-guard: ${fn} not extracted (add it to the 'for fn in' list)"; fi
 done
 
@@ -820,6 +820,125 @@ do_verify_cron_env >/dev/null
 rec="${STEP_RECORDS[*]: -1}"; IFS='|' read -r c_st c_cat c_sec c_name c_rem c_det <<< "$rec"
 [ "$c_st" = "warn" ] && ok "18/7c missing key → warn status" || no "18/7c missing-key status wrong: $c_st"
 case "$c_det$c_rem" in *BIONIC_NTFY_TOPIC*) ok "18/7c warning names the missing key (BIONIC_NTFY_TOPIC)";; *) no "18/7c missing-key name absent: $c_det | $c_rem";; esac
+
+# ---- guided provisioning (C6 AMENDMENT) under the fake HOME ----
+# The amendment lets bootstrap WRITE cron.env, but only interactively, with
+# per-run consent, when the file is absent and CI is unset. TTY is simulated by
+# overriding the `_is_interactive` helper (the real one tests `[ -t 0 ]`, false
+# under a here-string); consent is fed via a here-string so the function's
+# `read` sees input while STEP_RECORDS updates stay in-process (a pipeline would
+# subshell them away). The `claude` stub answers `setup-token` with a controlled
+# fake token (env-driven) — the real binary is never run, no real token minted.
+PROV_TOKEN='tok-PROVISION-secret-9f8e7d'
+cat > "${BIN}/claude" <<'EOF'
+#!/bin/bash
+case "$1" in
+  setup-token)
+    [ -n "${FAKE_SETUP_TOKEN:-}" ] && printf '%s\n' "$FAKE_SETUP_TOKEN"
+    exit "${SETUP_TOKEN_RC:-0}" ;;
+  *) exit 0 ;;
+esac
+EOF
+chmod +x "${BIN}/claude"
+PROV_F="${CRONHOME}/.claude/cron.env"
+POUT="${SBX}/prov.out"
+# CI must be UNSET for the guided path to arm; save/clear (this suite may run
+# under a CI env) and set it only for the CI-blocks case.
+_SAVED_CI="${CI:-}"; unset CI
+unset FAKE_SETUP_TOKEN SETUP_TOKEN_RC
+
+# prov/1) absent + non-TTY → no prompt, no file; STEP_RECORDS untouched, so the
+# existing skip+warn verify path (18/6) is byte-unchanged. Boundary regression.
+rm -f "$PROV_F"
+_is_interactive() { return 1; }        # simulate: stdin is not a TTY
+STEP_RECORDS=(); INSTALL_FAILURES=(); export FAKE_SETUP_TOKEN="$PROV_TOKEN"
+do_provision_cron_env <<< "y" > "$POUT" 2>&1
+[ ! -s "$POUT" ] && ok "prov/1 non-TTY prints no prompt" || no "prov/1 non-TTY emitted output: $(cat "$POUT")"
+[ ! -f "$PROV_F" ] && ok "prov/1 non-TTY writes no cron.env" || no "prov/1 non-TTY created a file"
+[ "${#STEP_RECORDS[@]}" -eq 0 ] && ok "prov/1 non-TTY records no step (verify path unchanged)" || no "prov/1 recorded a step: ${STEP_RECORDS[*]}"
+[ "${#INSTALL_FAILURES[@]}" -eq 0 ] && ok "prov/1 non-TTY records no failure" || no "prov/1 non-TTY recorded a failure"
+
+# prov/2) absent + TTY-sim + decline ("n") → prompt shown, no file, no step.
+rm -f "$PROV_F"
+_is_interactive() { return 0; }        # simulate: interactive TTY
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_provision_cron_env <<< "n" > "$POUT" 2>&1
+grep -q 'Provision the sdlc-poker standing service identity now? \[y/N\]' "$POUT" \
+  && ok "prov/2 TTY decline shows the [y/N] consent prompt" || no "prov/2 prompt missing: $(cat "$POUT")"
+[ ! -f "$PROV_F" ] && ok "prov/2 decline writes no cron.env" || no "prov/2 decline created a file"
+[ "${#STEP_RECORDS[@]}" -eq 0 ] && ok "prov/2 decline records no step (falls through to verify)" || no "prov/2 decline recorded a step: ${STEP_RECORDS[*]}"
+
+# prov/3) absent + TTY-sim + consent ("y") → file written mode 600, BOTH keys,
+# token == the stub's output, step_ok recorded, and the token VALUE appears
+# NOWHERE in captured stdout/stderr (C6: credential values never printed).
+rm -f "$PROV_F"
+_is_interactive() { return 0; }
+STEP_RECORDS=(); INSTALL_FAILURES=(); export FAKE_SETUP_TOKEN="$PROV_TOKEN"; export SETUP_TOKEN_RC=0
+do_provision_cron_env <<< "y" > "$POUT" 2>&1
+[ -f "$PROV_F" ] && ok "prov/3 consent writes cron.env" || no "prov/3 consent did not write the file"
+[ "$(_cron_env_mode "$PROV_F")" = "600" ] && ok "prov/3 written cron.env is mode 600" || no "prov/3 wrong mode: $(_cron_env_mode "$PROV_F")"
+grep -q '^CLAUDE_CODE_OAUTH_TOKEN=' "$PROV_F" && grep -q '^BIONIC_NTFY_TOPIC=' "$PROV_F" \
+  && ok "prov/3 both key names present" || no "prov/3 a key name missing: $(sed 's/=.*/=<redacted>/' "$PROV_F")"
+grep -qxF "CLAUDE_CODE_OAUTH_TOKEN=${PROV_TOKEN}" "$PROV_F" \
+  && ok "prov/3 token value == stub setup-token output" || no "prov/3 token value mismatch"
+grep -q '^BIONIC_NTFY_TOPIC=bionic-' "$PROV_F" \
+  && ok "prov/3 topic auto-generated with bionic- prefix" || no "prov/3 topic prefix wrong"
+rec="${STEP_RECORDS[*]: -1}"; IFS='|' read -r p_st p_cat p_sec p_name p_rem p_det <<< "$rec"
+[ "$p_st" = "ok" ] && ok "prov/3 guided write records step_ok" || no "prov/3 status wrong: $p_st ($rec)"
+if grep -qF "$PROV_TOKEN" "$POUT"; then no "prov/3 TOKEN VALUE LEAKED to output"; else ok "prov/3 token value never printed to stdout/stderr"; fi
+# amendment: after a successful guided write, do_verify_cron_env → step_ok.
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_verify_cron_env >/dev/null
+rec="${STEP_RECORDS[*]: -1}"; IFS='|' read -r v_st _ <<< "$rec"
+[ "$v_st" = "ok" ] && ok "prov/3 re-verify after guided write → step_ok" || no "prov/3 re-verify wrong: $v_st"
+
+# prov/4) EXISTING file + TTY-sim → never prompted, file byte-unchanged.
+printf 'CLAUDE_CODE_OAUTH_TOKEN=preexisting\nBIONIC_NTFY_TOPIC=preexisting\n' > "$PROV_F"
+chmod 600 "$PROV_F"
+_prov4_before="$(cat "$PROV_F")"
+_is_interactive() { return 0; }
+STEP_RECORDS=(); INSTALL_FAILURES=(); export FAKE_SETUP_TOKEN="$PROV_TOKEN"
+do_provision_cron_env <<< "y" > "$POUT" 2>&1
+[ ! -s "$POUT" ] && ok "prov/4 existing file → no prompt offered" || no "prov/4 prompted over an existing file: $(cat "$POUT")"
+[ "$(cat "$PROV_F")" = "$_prov4_before" ] && ok "prov/4 existing cron.env left byte-unchanged" || no "prov/4 overwrote an existing file"
+
+# prov/5) absent + TTY-sim + CI=1 → no prompt, no file (unattended = no write).
+rm -f "$PROV_F"
+_is_interactive() { return 0; }
+STEP_RECORDS=(); INSTALL_FAILURES=(); export FAKE_SETUP_TOKEN="$PROV_TOKEN"
+export CI=1
+do_provision_cron_env <<< "y" > "$POUT" 2>&1
+unset CI
+[ ! -s "$POUT" ] && ok "prov/5 CI set → no prompt" || no "prov/5 CI prompted: $(cat "$POUT")"
+[ ! -f "$PROV_F" ] && ok "prov/5 CI set → no cron.env written" || no "prov/5 CI wrote a file"
+
+# prov/6) setup-token exits 1 → step_warn, NO file, no partial/temp left behind.
+rm -f "$PROV_F"; rm -f "${CRONHOME}/.claude/"cron.env.tmp.* 2>/dev/null || true
+_is_interactive() { return 0; }
+STEP_RECORDS=(); INSTALL_FAILURES=(); unset FAKE_SETUP_TOKEN; export SETUP_TOKEN_RC=1
+do_provision_cron_env <<< "y" > "$POUT" 2>&1
+rec="${STEP_RECORDS[*]: -1}"; IFS='|' read -r p_st _ <<< "$rec"
+[ "$p_st" = "warn" ] && ok "prov/6 setup-token failure → step_warn" || no "prov/6 status wrong: $p_st ($rec)"
+[ "${#INSTALL_FAILURES[@]}" -eq 0 ] && ok "prov/6 setup-token failure records no install failure" || no "prov/6 wrongly recorded a failure"
+[ ! -f "$PROV_F" ] && ok "prov/6 setup-token failure leaves no cron.env" || no "prov/6 left a file"
+_leftover="$(find "${CRONHOME}/.claude" -maxdepth 1 -name 'cron.env*' 2>/dev/null)"
+[ -z "$_leftover" ] && ok "prov/6 no partial/temp file left behind" || no "prov/6 leftover: $_leftover"
+unset SETUP_TOKEN_RC
+
+# prov/7) errexit: the decline path must survive `set -e` (subshell round-trip).
+rm -f "$PROV_F"
+_is_interactive() { return 0; }
+if (set -e; do_provision_cron_env <<< "n" >/dev/null 2>&1); then ok "prov/7 decline path survives set -e"; else no "prov/7 decline aborted under set -e"; fi
+
+# prov/8) reset must NOT reference cron.env — it is user-owned credential data,
+# never deleted by a reset (a reset that nuked the token would silently disarm
+# the relay). Static assertion against the reset script source.
+if grep -q 'cron\.env' "${REPO}/claude-reset.sh"; then no "prov/8 claude-reset.sh must not reference cron.env (user credential data)"; else ok "prov/8 claude-reset.sh leaves cron.env untouched"; fi
+
+# restore _is_interactive and CI for any later blocks / a clean environment.
+_is_interactive() { [ -t 0 ]; }
+[ -n "$_SAVED_CI" ] && export CI="$_SAVED_CI" || unset CI
+unset FAKE_SETUP_TOKEN SETUP_TOKEN_RC
 
 export HOME="$_OLD_HOME"
 
