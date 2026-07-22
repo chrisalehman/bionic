@@ -646,6 +646,32 @@ f8() {
 f8
 
 # ============================================================
+# F5 / AC-5: bootstrap arm anchors to COMMAND position.
+# Reading the script is not running it (field annoyance 2026-07-22:
+# ls/wc/grep on claude-bootstrap.sh were denied as bootstrap-class).
+setup
+run_hook "$(stdin_for 'ls claude-bootstrap.sh' '')"
+assert_silent "AC-5a: ls claude-bootstrap.sh is not a bootstrap run"
+run_hook "$(stdin_for 'wc -l claude-bootstrap.sh' '')"
+assert_silent "AC-5a: wc -l claude-bootstrap.sh silent"
+run_hook "$(stdin_for 'grep -n cert claude-bootstrap.sh' '')"
+assert_silent "AC-5a: grep on claude-bootstrap.sh silent"
+run_hook "$(stdin_for 'cat hooks/../claude-bootstrap.sh' '')"
+assert_silent "AC-5a: cat path/claude-bootstrap.sh silent"
+run_hook "$(stdin_for 'shasum -a 256 claude-reset.sh' '')"
+assert_silent "AC-5a: shasum claude-reset.sh silent"
+
+run_hook "$(stdin_for './claude-bootstrap.sh' '')"
+assert_deny "AC-5b: ./claude-bootstrap.sh still denied"
+assert_reason_has "AC-5b: deny names bootstrap class" "bootstrap-class"
+run_hook "$(stdin_for 'bash claude-bootstrap.sh' '')"
+assert_deny "AC-5b: bash claude-bootstrap.sh denied"
+run_hook "$(stdin_for 'bash /some/path/claude-reset.sh' '')"
+assert_deny "AC-5b: bash /path/claude-reset.sh denied"
+run_hook "$(stdin_for 'echo prep; ./claude-bootstrap.sh' '')"
+assert_deny "AC-5b: post-separator execution denied"
+
+# ============================================================
 # Results
 # ============================================================
 echo ""

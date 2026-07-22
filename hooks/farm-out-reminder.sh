@@ -101,7 +101,11 @@ classify_tier1() {  # $1=flat cmd → sets CLASS ROLE, rc 0 on match
   # &&-chain is a separate arm (class=chain) reached only when this one skips.
   if printf '%s' "$c" | grep -qE '(^|[;&| ])bash +([^ ]*/)?(test\.sh|tests/run\.sh)([;&| ]|$)|(^|[;&| ])bash +[^ ]+\.test\.sh([;&| ]|$)|^(npm|pnpm|yarn) +test([;&| ]|$)|^pytest([;&| ]|$)|^go +test([;&| ]|$)|^cargo +test([;&| ]|$)|^make +test([;&| ]|$)'; then
     CLASS="suite"; ROLE="test-runner"; return 0; fi
-  if printf '%s' "$c" | grep -qE '(^|[;&| ])\.?/?([^ ]*/)?claude-(bootstrap|reset)\.sh([;&| ]|$)'; then
+  # Command position only: start-of-command or after a real separator
+  # (;|&), optionally via a bash/sh runner. A bare space is NOT a
+  # separator here — `ls claude-bootstrap.sh` reads the script, it does
+  # not run it (2026-07-22 false-positive fix).
+  if printf '%s' "$c" | grep -qE '(^|[;&|] ?)(bash +|sh +)?([^ ]*/)?claude-(bootstrap|reset)\.sh([;&| ]|$)'; then
     CLASS="bootstrap"; ROLE="implementor"; return 0; fi
   if printf '%s' "$c" | grep -qE '(^|[;&| ])(npm|pnpm|yarn) +(install|add|ci)([;&| ]|$)|(^|[;&| ])pip3? +install([;&| ]|$)|(^|[;&| ])uv +(sync|pip)([;&| ]|$)|(^|[;&| ])brew +install([;&| ]|$)'; then
     CLASS="install"; ROLE="implementor"; return 0; fi
