@@ -27,7 +27,13 @@
 # Required keys (R-B1): goal-id, plan, cwd, branch, integration-branch,
 # last-commit, sdlc-step, session, ledger-position, next-action, written-at.
 
-set -u
+# Deliberately NO top-level `set -u` (FLAG 4): this file is sourced by
+# other scripts (context-spend.sh today; N2-N4 later), and a sourced
+# file's `set` options persist in the CALLING shell — not scoped to a
+# subshell. A top-level `set -u` here would silently flip nounset on for
+# every future sourcer, whether or not it opted in. The pervasive
+# `${x:-}` guards throughout this file are the actual safety net; they
+# do not depend on nounset being active.
 
 BATON_REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc-step session ledger-position next-action written-at"
 
@@ -35,6 +41,35 @@ BATON_REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc
 sdlc_state_dir() { printf '%s' "${SDLC_STATE_DIR:-$HOME/.claude/sdlc-state}"; }
 baton_goal_dir()  { printf '%s/%s' "$(sdlc_state_dir)" "$1"; }
 baton_path()      { printf '%s/baton.md' "$(baton_goal_dir "$1")"; }
+
+# ---------- R-B1/AS-26: sdlc_goal_id (canonical goal-id derivation) ----------
+# sdlc_goal_id <plan-path> — the canonical goal-id transform for future
+# writers (N2-N4): sanitized, lowercased stem of the plan path, byte-
+# equivalent to context-spend.sh's own inline derivation (~line 120).
+# context-spend.sh deliberately keeps its inline copy rather than
+# sourcing this lib (reviewed self-containment) — a divergence-guard
+# test in the suite proves the two stay byte-identical on a probe set;
+# any future edit to either site MUST update the other.
+sdlc_goal_id() {
+  basename "${1:-}" .plan.md | sed 's/[^A-Za-z0-9-]/-/g' | tr '[:upper:]' '[:lower:]'
+}
+
+# ---------- FLAG 3: goal-id path guard ----------
+# _sdlc_validate_goal_id <goal-id> <caller-label> — shared by baton_write,
+# baton_parse, ledger_append, ledger_verify, ledger_applied. Rejects a
+# goal-id that is empty, contains '/', or begins with '.' (covers '..')
+# — every goal-id is used to build a filesystem path (baton_goal_dir),
+# so an unguarded value is a path-traversal opening. Nonzero + one
+# `defect: invalid-goal-id:` line on stderr.
+_sdlc_validate_goal_id() {
+  local gid="${1:-}" who="${2:-goal-id}"
+  case "$gid" in
+    '') echo "defect: invalid-goal-id: $who requires a non-empty goal-id" >&2; return 1 ;;
+    */*) echo "defect: invalid-goal-id: $who goal-id must not contain '/': '$gid'" >&2; return 1 ;;
+    .*) echo "defect: invalid-goal-id: $who goal-id must not begin with '.': '$gid'" >&2; return 1 ;;
+  esac
+  return 0
+}
 
 # ---------- R-B1: baton_write ----------
 # baton_write <goal-id> <plan> <cwd> <branch> <integration-branch>
@@ -52,7 +87,7 @@ baton_write() {
         next_action="${10:-}" prose="${11:-}"
   local dir target tmp written_at
 
-  [ -n "$goal_id" ] || { echo "defect: missing-goal-id: baton_write requires a non-empty goal-id" >&2; return 1; }
+  _sdlc_validate_goal_id "$goal_id" "baton_write" || return 1
 
   dir="$(baton_goal_dir "$goal_id")"
   mkdir -p "$dir" 2>/dev/null || { echo "defect: mkdir-failed: cannot create $dir" >&2; return 1; }
@@ -134,7 +169,9 @@ baton_parse() {
       return 1
     fi
     case "$key" in
-      goal-id)             v_goal_id="$value" ;;
+      goal-id)
+        _sdlc_validate_goal_id "$value" "baton_parse" || return 1
+        v_goal_id="$value" ;;
       plan)                v_plan="$value" ;;
       cwd)                 v_cwd="$value" ;;
       branch)               v_branch="$value" ;;
@@ -226,7 +263,7 @@ ledger_append() {
   local goal_id="${1:-}" type="${2:-}" key="${3:-}" summary="${4:-}"
   local dir path last_line prev_content seq ts digest new_line
 
-  [ -n "$goal_id" ] || { echo "defect: missing-goal-id: ledger_append requires a non-empty goal-id" >&2; return 1; }
+  _sdlc_validate_goal_id "$goal_id" "ledger_append" || return 1
   case "$type" in
     decision|effect) ;;
     *) echo "defect: bad-type: ledger_append type must be 'decision' or 'effect', got '${type:-<empty>}'" >&2; return 1 ;;
@@ -248,6 +285,9 @@ ledger_append() {
   if [ -s "$path" ]; then
     last_line=$(tail -n 1 "$path")
     seq=$(printf '%s' "$last_line" | awk -F'\t' '{print $2}')
+    case "$seq" in
+      ''|*[!0-9]*) echo "defect: corrupt-ledger-tail: last line's seq field is not numeric ('${seq:-<empty>}'): $path" >&2; return 1 ;;
+    esac
     seq=$((seq + 1))
     prev_content="$last_line"
   else
@@ -277,7 +317,7 @@ ledger_append() {
 # recomputing the chain). A pristine ledger is silent and returns 0.
 ledger_verify() {
   local goal_id="${1:-}" path
-  [ -n "$goal_id" ] || { echo "defect: missing-goal-id: ledger_verify requires a non-empty goal-id" >&2; return 1; }
+  _sdlc_validate_goal_id "$goal_id" "ledger_verify" || return 1
   path="$(ledger_path "$goal_id")"
 
   [ -f "$path" ] || { echo "defect: missing-ledger: ledger not found: $path" >&2; return 1; }
@@ -340,7 +380,7 @@ ledger_verify() {
 # R-L1's membership check).
 ledger_applied() {
   local goal_id="${1:-}" key="${2:-}" path line l_type l_key
-  [ -n "$goal_id" ] || return 1
+  _sdlc_validate_goal_id "$goal_id" "ledger_applied" || return 1
   path="$(ledger_path "$goal_id")"
   [ -f "$path" ] && [ -s "$path" ] || return 1
 

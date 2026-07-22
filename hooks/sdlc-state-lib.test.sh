@@ -305,6 +305,20 @@ ac_l1_bad_type() {
 }
 ac_l1_bad_type
 
+echo "--- ledger_append onto a ledger whose LAST line has a non-numeric seq field → nonzero + corrupt-ledger-tail (fail loud, not a shell arithmetic error) ---"
+ac_l1_corrupt_tail() {
+  new_state_dir
+  local gid="corrupt-tail-goal" path errf rc total
+  path=$(build_healthy_ledger "$gid")
+  total=$(wc -l < "$path" | tr -d ' ')
+  awk -F'\t' -v OFS='\t' -v ln="$total" 'NR==ln{$2="NOTANUMBER"} {print}' "$path" > "$path.new" && mv "$path.new" "$path"
+  errf="$(mktemp)"; CLEAN_DIRS+=("$errf")
+  ledger_append "$gid" "decision" "new-after-tamper" "should fail loud, not crash" 2>"$errf"; rc=$?
+  assert_nonzero "AC-L1 append onto tampered-seq ledger returns nonzero" "$rc"
+  assert_contains "AC-L1 append onto tampered-seq ledger names corrupt-ledger-tail" "corrupt-ledger-tail" "$(cat "$errf")"
+}
+ac_l1_corrupt_tail
+
 # ============================================================
 echo "=== AC-L2: ledger tamper evidence — pristine + each planted defect class ==="
 
@@ -394,6 +408,134 @@ ac_l2_truncated() {
   assert_contains "AC-L2 truncated ledger defect names truncation" "truncat" "$(cat "$errf")"
 }
 ac_l2_truncated
+
+# ============================================================
+# Goal-id contract + divergence guard (FLAG 2, AS-26) — sdlc_goal_id() is
+# the canonical transform for future writers (N2-N4). context-spend.sh
+# keeps its own inline copy (reviewed-acceptable self-containment); this
+# guard proves the two agree on a probe set of plan paths, so the two
+# sites are proven byte-identical rather than assumed so. inline_goal_id
+# extracts and evals the REAL line out of context-spend.sh's own source
+# at test time — never a hand-copied reimplementation — so a future edit
+# to either site that breaks agreement fails this test loudly.
+# ============================================================
+
+# inline_goal_id <plan-path> — runs the deployed context-spend.sh
+# goal-id transform, extracted from its own source.
+inline_goal_id() {
+  local plan="$1" line
+  line=$(grep -E '_goal_id=\$\(printf' "$REPO/hooks/context-spend.sh")
+  [ -n "$line" ] || { echo "FIXTURE-ERROR: could not locate the inline goal-id transform in context-spend.sh" >&2; return 1; }
+  PLAN="$plan" bash -c "$line"$'\nprintf %s "$_goal_id"'
+}
+
+echo ""
+echo "=== Goal-id contract (AS-26): sdlc_goal_id() matches context-spend.sh's inline transform on a probe set ==="
+ac_goal_id_divergence() {
+  new_state_dir
+  local probes=(
+    "wave-01-substrate.plan.md"
+    "WAVE-01-SUBSTRATE.plan.md"
+    "wave.01.substrate.plan.md"
+    "wave_01_substrate.plan.md"
+    "wave 01 substrate.plan.md"
+    "/some/nested/dir/wave-01-substrate.plan.md"
+    "wave-01-substrate"
+    "epic-10/wave-01-substrate.plan.md"
+  )
+  local p lib_out inline_out
+  for p in "${probes[@]}"; do
+    lib_out=$(sdlc_goal_id "$p")
+    inline_out=$(inline_goal_id "$p")
+    assert_eq "goal-id divergence guard: lib vs inline agree on '$p'" "$inline_out" "$lib_out"
+  done
+}
+ac_goal_id_divergence
+
+# ============================================================
+# Goal-id path guards (FLAG 3) — baton_write, baton_parse, ledger_append,
+# ledger_verify, ledger_applied all reject a goal-id that is empty,
+# contains '/', or begins with '.' (covers '..'), via one shared helper.
+# Representative coverage across the two distinct invocation surfaces:
+# baton_write (positional arg) and baton_parse (value read from a file,
+# a different surface entirely), plus ledger_append as the representative
+# for ledger_append/ledger_verify/ledger_applied, which all call the
+# identical shared helper on their own positional goal-id arg.
+# ============================================================
+
+echo ""
+echo "=== Goal-id path guards (FLAG 3): reject '/' / leading '.' — nonzero + invalid-goal-id ==="
+
+echo "--- baton_write: goal-id containing '/' ---"
+ac_goal_guard_write_slash() {
+  new_state_dir
+  local err rc
+  err=$(baton_write "bad/goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "baton_write rejects goal-id with '/'" "$rc"
+  assert_contains "baton_write '/' goal-id names invalid-goal-id" "invalid-goal-id" "$err"
+}
+ac_goal_guard_write_slash
+
+echo "--- baton_write: goal-id beginning with '.' ---"
+ac_goal_guard_write_dot() {
+  new_state_dir
+  local err rc
+  err=$(baton_write ".hidden-goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "baton_write rejects goal-id beginning with '.'" "$rc"
+  assert_contains "baton_write leading-'.' goal-id names invalid-goal-id" "invalid-goal-id" "$err"
+}
+ac_goal_guard_write_dot
+
+echo "--- baton_parse: FILE's goal-id value containing '/' (distinct surface — value from file content, not a positional arg) ---"
+ac_goal_guard_parse_slash() {
+  new_state_dir
+  local src dst rc err
+  src=$(write_healthy "guard-parse-src")
+  dst="$(mktemp -d)/baton.md"; CLEAN_DIRS+=("$(dirname "$dst")")
+  sed -E "s#^goal-id:.*#goal-id: bad/goal#" "$src" > "$dst"
+  err=$(baton_parse "$dst" 2>&1 >/dev/null); rc=$?
+  assert_nonzero "baton_parse rejects a file goal-id containing '/'" "$rc"
+  assert_contains "baton_parse '/' goal-id names invalid-goal-id" "invalid-goal-id" "$err"
+}
+ac_goal_guard_parse_slash
+
+echo "--- ledger_append: goal-id containing '/' (representative for ledger_append/ledger_verify/ledger_applied) ---"
+ac_goal_guard_ledger_append_slash() {
+  new_state_dir
+  local err rc
+  err=$(ledger_append "bad/goal" "decision" "k" "s" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "ledger_append rejects goal-id with '/'" "$rc"
+  assert_contains "ledger_append '/' goal-id names invalid-goal-id" "invalid-goal-id" "$err"
+}
+ac_goal_guard_ledger_append_slash
+
+# ============================================================
+# Sourced-lib nounset guard (FLAG 4) — the lib is sourced by future
+# writers (N2-N4) that may not themselves run under `set -u`. A
+# top-level `set -u` in the lib would leak into the sourcing shell (a
+# sourced file's `set` options persist in the caller — this is not a
+# subshell). Proven here by sourcing in a child WITHOUT nounset, calling
+# a function with a missing optional trailing arg, then referencing a
+# bare unset variable in the CALLER's own script after the source
+# returns — if `-u` leaked, that bare reference aborts the script.
+# ============================================================
+
+echo ""
+echo "=== Sourced-lib nounset guard (FLAG 4): sourcing must not enable -u in the caller's shell ==="
+ac_nounset_no_leak() {
+  new_state_dir
+  local out rc
+  out=$(bash -c '
+    . "$1"
+    baton_write "leak-goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" >/dev/null 2>&1
+    wrc=$?
+    printf "unbound-ok:%s write-rc:%s\n" "$SOME_UNSET_VAR_NEVER_DEFINED_ANYWHERE" "$wrc"
+  ' bash "$LIB" 2>&1)
+  rc=$?
+  assert_eq "nounset leak guard: exit 0 (sourcing the lib does not enable -u in the caller shell)" "0" "$rc"
+  assert_contains "nounset leak guard: bare unset-var reference survives after sourcing (no -u leak)" "unbound-ok: write-rc:0" "$out"
+}
+ac_nounset_no_leak
 
 # ============================================================
 echo ""
