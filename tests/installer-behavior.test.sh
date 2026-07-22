@@ -53,7 +53,7 @@ chmod +x "${BIN}"/*
 
 # ---------- extract the REAL resilience block + installer functions ----------
 awk '/^# ─── Resilience ───/{f=1} f{print} /^# ─── Helpers ───/{if(f)exit}' "$BOOTSTRAP" > "$CODE"
-for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry do_install_agents; do
+for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry do_install_agents _cron_env_mode do_verify_cron_env do_register_poker_cron; do
   awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$CODE"
 done
 
@@ -644,6 +644,184 @@ printf 'alpha.md\nbeta.md\n' | sort > "${SBX}/manifest3.expected"
 diff -q "${SBX}/manifest3.sorted" "${SBX}/manifest3.expected" >/dev/null 2>&1 \
   && ok "manifest after collision run still lists exactly alpha.md and beta.md (delta.md excluded)" \
   || no "manifest after collision run wrong: $(cat "$manifest")"
+
+# 18) Cron registration (C7) + cron.env verification (C6) + reset removal.
+# The crontab is exercised against a PATH-shadowed stub that stores stdin to a
+# file and serves `crontab -l` from it (exiting 1 on an absent store, exactly
+# like a real empty crontab). No real crontab is ever touched. cron.env
+# verification runs against a controlled fake $HOME so no real file is read or
+# written.
+CRONFILE="${SBX}/crontab.store"
+CRONLOG="${SBX}/crontab.args.log"
+cat > "${BIN}/crontab" <<EOF
+#!/bin/bash
+echo "crontab \$*" >> "$CRONLOG"
+case "\$1" in
+  -l) if [ -f "$CRONFILE" ]; then cat "$CRONFILE"; else exit 1; fi ;;
+  -r) rm -f "$CRONFILE" ;;
+  -)  cat > "$CRONFILE" ;;
+  *)  exit 2 ;;
+esac
+EOF
+chmod +x "${BIN}/crontab"
+# A resolvable `claude` so the registration probe records a path (C7).
+cat > "${BIN}/claude" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+chmod +x "${BIN}/claude"
+
+# The exact entry C7 mandates — asserted byte-for-byte against what the
+# installer writes. $HOME stays literal (cron expands it at run time).
+EXPECTED_CRON='*/3 * * * * PATH=/opt/homebrew/bin:/usr/bin:/bin /bin/sh -c '\''. "$HOME/.claude/cron.env" && "$HOME/.claude/hooks/sdlc-poker.sh" >> "$HOME/.claude/sdlc-poker.log" 2>&1'\'' # BIONIC-SDLC-POKER'
+CRON_MARKER="# BIONIC-SDLC-POKER"
+
+# 18/9) 127-guard: every new function was actually extracted (a missing callee
+# would `command not found` silently — this catches an omission from the
+# `for fn in` list at the top of this file).
+for fn in _cron_env_mode do_verify_cron_env do_register_poker_cron; do
+  if declare -F "$fn" >/dev/null; then ok "extracted for test: ${fn}"; else no "127-guard: ${fn} not extracted (add it to the 'for fn in' list)"; fi
+done
+
+# 18/1) empty crontab (crontab -l exits 1) → entry installed, exit 0.
+rm -f "$CRONFILE"; : > "$CRONLOG"; INSTALL_FAILURES=()
+do_register_poker_cron >/dev/null; rc=$?
+[ "$rc" -eq 0 ] && ok "register returns 0 on an empty crontab" || no "register non-zero on empty crontab (rc=$rc)"
+grep -qxF "$EXPECTED_CRON" "$CRONFILE" && ok "18/1 empty crontab: exact C7 entry written" || no "18/1 entry mismatch: $(cat "$CRONFILE" 2>/dev/null)"
+[ "$(grep -cF "$CRON_MARKER" "$CRONFILE")" -eq 1 ] && ok "18/1 exactly one marker line" || no "18/1 marker count wrong"
+grep -qxF "crontab -l" "$CRONLOG" && ok "18/1 read the current crontab via crontab -l" || no "18/1 did not probe crontab -l"
+
+# 18/1b) crontab binary absent on the host → skip (NOT fail): the poker relay
+# degrades gracefully rather than failing a clean bootstrap. Run under a PATH
+# with no crontab (only `date`, which step_start needs); the subshell writes
+# its INSTALL_FAILURES count + last STEP_RECORDS entry out since neither
+# propagates from a subshell.
+CRONLESS="${SBX}/cronless"; mkdir -p "$CRONLESS"
+ln -s "$(command -v date)" "${CRONLESS}/date" 2>/dev/null || true
+_skip_out="${SBX}/cronless-skip.txt"
+( PATH="$CRONLESS"; STEP_RECORDS=(); INSTALL_FAILURES=()
+  do_register_poker_cron >/dev/null 2>&1
+  printf '%s\n' "${#INSTALL_FAILURES[@]}" "${STEP_RECORDS[*]: -1}" > "$_skip_out" )
+{ read -r _nfail; read -r _rec; } < "$_skip_out"
+[ "$_nfail" = "0" ] && ok "18/1b crontab-absent host records no install failure" || no "18/1b crontab-absent recorded a failure (${_nfail})"
+case "$_rec" in skip*) ok "18/1b crontab-absent → skip status (graceful degradation)";; *) no "18/1b crontab-absent status wrong: ${_rec}";; esac
+
+# 18/2) double-bootstrap → still exactly one marker line (idempotent), and the
+# second run detects no change (cached, no crontab write).
+: > "$CRONLOG"; INSTALL_FAILURES=(); STEP_RECORDS=()
+do_register_poker_cron >/dev/null
+[ "$(grep -cF "$CRON_MARKER" "$CRONFILE")" -eq 1 ] && ok "18/2 double-bootstrap keeps exactly one marker line" || no "18/2 duplicate marker lines"
+if grep -qxF "crontab -" "$CRONLOG"; then no "18/2 idempotent re-run must not rewrite the crontab"; else ok "18/2 idempotent re-run does not rewrite the crontab"; fi
+[ "${STEP_RECORDS[*]: -1}" != "" ] && case "${STEP_RECORDS[${#STEP_RECORDS[@]}-1]}" in cached*) ok "18/2 re-run records a cached step";; *) no "18/2 re-run not cached: ${STEP_RECORDS[${#STEP_RECORDS[@]}-1]}";; esac
+
+# 18/3) marker present but entry text differs → replaced in place.
+printf 'OLD BROKEN POKER LINE # BIONIC-SDLC-POKER\n' > "$CRONFILE"
+: > "$CRONLOG"; INSTALL_FAILURES=()
+do_register_poker_cron >/dev/null
+grep -qxF "$EXPECTED_CRON" "$CRONFILE" && ok "18/3 stale marker line replaced with the C7 entry" || no "18/3 entry not replaced: $(cat "$CRONFILE")"
+grep -q "OLD BROKEN POKER LINE" "$CRONFILE" && no "18/3 stale entry must be gone" || ok "18/3 stale entry removed"
+[ "$(grep -cF "$CRON_MARKER" "$CRONFILE")" -eq 1 ] && ok "18/3 replace leaves exactly one marker line" || no "18/3 marker count wrong after replace"
+
+# 18/4) foreign entries survive install byte-identical.
+FOREIGN_A='0 9 * * * /usr/bin/foreign-job --flag "arg with spaces"'
+FOREIGN_B='@reboot /opt/thing/start.sh'
+printf '%s\n%s\n' "$FOREIGN_A" "$FOREIGN_B" > "$CRONFILE"
+: > "$CRONLOG"; INSTALL_FAILURES=()
+do_register_poker_cron >/dev/null
+grep -qxF "$FOREIGN_A" "$CRONFILE" && ok "18/4 foreign entry A survives install byte-identical" || no "18/4 foreign A mangled"
+grep -qxF "$FOREIGN_B" "$CRONFILE" && ok "18/4 foreign entry B survives install byte-identical" || no "18/4 foreign B mangled"
+grep -qxF "$EXPECTED_CRON" "$CRONFILE" && ok "18/4 poker entry appended alongside foreign entries" || no "18/4 poker entry missing"
+
+# 18/8) errexit regression: bare `crontab -l` exits 1 on the no-crontab path;
+# the register must not abort under `set -e` (subshell round-trip).
+rm -f "$CRONFILE"
+if (set -e; do_register_poker_cron >/dev/null); then ok "18/8 register survives set -e on the empty-crontab path" || true; else no "18/8 register aborted under set -e (unguarded crontab -l exit 1)"; fi
+grep -qxF "$EXPECTED_CRON" "$CRONFILE" && ok "18/8 entry still installed on the set -e path" || no "18/8 entry not installed under set -e"
+
+# 18/5) reset removes ONLY the marker line; foreign entries survive byte-
+# identical. Extract do_remove_poker_cron from claude-reset.sh and stub its
+# reset-only helpers (confirm/note_*) so it runs in this sandbox.
+confirm() { return 0; }
+note_removed() { :; }
+note_clean() { :; }
+note_skipped() { :; }
+RESET_CODE="${SBX}/reset_code.sh"
+awk '$0 ~ "^do_remove_poker_cron\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "${REPO}/claude-reset.sh" > "$RESET_CODE"
+if declare -F do_remove_poker_cron >/dev/null; then unset -f do_remove_poker_cron; fi
+# shellcheck disable=SC1090
+source "$RESET_CODE"
+if declare -F do_remove_poker_cron >/dev/null; then ok "18/5 do_remove_poker_cron extracted from claude-reset.sh" || true; else no "18/5 do_remove_poker_cron not extracted from claude-reset.sh"; fi
+
+# Install into a crontab that also carries foreign entries, then reset.
+printf '%s\n%s\n' "$FOREIGN_A" "$FOREIGN_B" > "$CRONFILE"
+do_register_poker_cron >/dev/null
+: > "$CRONLOG"
+do_remove_poker_cron >/dev/null
+grep -qF "$CRON_MARKER" "$CRONFILE" && no "18/5 reset must remove the marker line" || ok "18/5 reset removes the marker line"
+grep -qxF "$FOREIGN_A" "$CRONFILE" && ok "18/5 foreign entry A survives reset byte-identical" || no "18/5 reset mangled foreign A"
+grep -qxF "$FOREIGN_B" "$CRONFILE" && ok "18/5 foreign entry B survives reset byte-identical" || no "18/5 reset mangled foreign B"
+
+# 18/5b) reset on a crontab whose ONLY entry is the marker clears it entirely.
+rm -f "$CRONFILE"
+do_register_poker_cron >/dev/null
+do_remove_poker_cron >/dev/null
+if [ ! -f "$CRONFILE" ] || ! grep -qF "$CRON_MARKER" "${CRONFILE}"; then ok "18/5b reset of a poker-only crontab leaves no marker"; else no "18/5b marker survived reset"; fi
+
+# 18/5c) reset when the marker is already absent → clean no-op (foreign intact).
+printf '%s\n' "$FOREIGN_A" > "$CRONFILE"
+: > "$CRONLOG"
+do_remove_poker_cron >/dev/null
+grep -qxF "$FOREIGN_A" "$CRONFILE" && ok "18/5c reset no-op leaves an unrelated crontab intact" || no "18/5c reset damaged an unrelated crontab"
+
+# ---- cron.env verification (C6) under a controlled fake HOME ----
+CRONHOME="${SBX}/cronhome"; mkdir -p "${CRONHOME}/.claude"
+_OLD_HOME="$HOME"; export HOME="$CRONHOME"
+
+# 18/6) env file absent → skip (NOT fail): warning names `claude setup-token`
+# and BOTH key names; no INSTALL_FAILURES; the file is never created.
+rm -f "${CRONHOME}/.claude/cron.env"
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_verify_cron_env >/dev/null
+rec="${STEP_RECORDS[*]: -1}"
+IFS='|' read -r c_st c_cat c_sec c_name c_rem c_det <<< "$rec"
+[ "$c_st" = "skip" ] && ok "18/6 absent cron.env → skip status (provisioning gap, not a failure)" || no "18/6 absent status wrong: $c_st"
+[ "${#INSTALL_FAILURES[@]}" -eq 0 ] && ok "18/6 absent cron.env records no install failure (resilience)" || no "18/6 absent wrongly recorded a failure"
+case "$c_rem" in *"claude setup-token"*) ok "18/6 warning names 'claude setup-token'";; *) no "18/6 remediation missing setup-token: $c_rem";; esac
+case "$c_rem" in *CLAUDE_CODE_OAUTH_TOKEN*BIONIC_NTFY_TOPIC*) ok "18/6 warning names both key names";; *) no "18/6 remediation missing a key name: $c_rem";; esac
+[ ! -f "${CRONHOME}/.claude/cron.env" ] && ok "18/6 verification never creates the env file" || no "18/6 env file was created (machinery must never write it)"
+
+# 18/7a) mode 644 (both keys) → warn, no failure. Invoke directly (not in a
+# command substitution) so the in-process STEP_RECORDS/INSTALL_FAILURES update.
+printf 'CLAUDE_CODE_OAUTH_TOKEN=tok-secret-value\nBIONIC_NTFY_TOPIC=topic-secret-value\n' > "${CRONHOME}/.claude/cron.env"
+chmod 644 "${CRONHOME}/.claude/cron.env"
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_verify_cron_env >/dev/null
+rec="${STEP_RECORDS[*]: -1}"; IFS='|' read -r c_st c_cat c_sec c_name c_rem c_det <<< "$rec"
+[ "$c_st" = "warn" ] && ok "18/7a mode 644 → warn status" || no "18/7a mode 644 status wrong: $c_st"
+[ "${#INSTALL_FAILURES[@]}" -eq 0 ] && ok "18/7a mode 644 records no failure" || no "18/7a mode 644 wrongly failed"
+
+# 18/7b) mode 600 + both keys → silent pass (step_ok), and NO secret value is
+# ever printed to stdout/stderr (C6: values never printed). Status comes from a
+# direct call; the leak check re-runs in a subshell purely to capture output.
+chmod 600 "${CRONHOME}/.claude/cron.env"
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_verify_cron_env >/dev/null
+rec="${STEP_RECORDS[*]: -1}"; IFS='|' read -r c_st c_cat c_sec c_name c_rem c_det <<< "$rec"
+[ "$c_st" = "ok" ] && ok "18/7b mode 600 + both keys → ok status" || no "18/7b mode 600 status wrong: $c_st"
+[ "${#INSTALL_FAILURES[@]}" -eq 0 ] && ok "18/7b mode 600 pass records no failure" || no "18/7b mode 600 wrongly failed"
+verify_out="$(do_verify_cron_env 2>&1)"
+if echo "$verify_out" | grep -q "tok-secret-value\|topic-secret-value"; then no "18/7b a secret VALUE leaked to output"; else ok "18/7b never prints a secret value"; fi
+
+# 18/7c) mode 600 but a key missing → warn naming the missing key, no failure.
+printf 'CLAUDE_CODE_OAUTH_TOKEN=tok-secret-value\n' > "${CRONHOME}/.claude/cron.env"
+chmod 600 "${CRONHOME}/.claude/cron.env"
+STEP_RECORDS=(); INSTALL_FAILURES=()
+do_verify_cron_env >/dev/null
+rec="${STEP_RECORDS[*]: -1}"; IFS='|' read -r c_st c_cat c_sec c_name c_rem c_det <<< "$rec"
+[ "$c_st" = "warn" ] && ok "18/7c missing key → warn status" || no "18/7c missing-key status wrong: $c_st"
+case "$c_det$c_rem" in *BIONIC_NTFY_TOPIC*) ok "18/7c warning names the missing key (BIONIC_NTFY_TOPIC)";; *) no "18/7c missing-key name absent: $c_det | $c_rem";; esac
+
+export HOME="$_OLD_HOME"
 
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"

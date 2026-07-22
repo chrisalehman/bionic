@@ -519,6 +519,41 @@ else
 fi
 echo ""
 
+# ─── Cron jobs ───────────────────────────────────────────────────────────────
+# The sdlc-poker cron entry (installed by claude-bootstrap.sh) is tagged with a
+# marker comment. Remove ONLY the marker line; every foreign crontab entry is
+# preserved byte-identical. `crontab -l` exits 1 on an empty/absent crontab —
+# normal, guarded with || true.
+do_remove_poker_cron() {
+  local marker="# BIONIC-SDLC-POKER"
+  if ! confirm "sdlc-poker crontab entry"; then
+    echo "  sdlc-poker cron — skipped"
+    note_skipped "Cron" "sdlc-poker entry"
+    return 0
+  fi
+  echo -n "  sdlc-poker cron entry... "
+  local current
+  current="$(crontab -l 2>/dev/null || true)"
+  if ! printf '%s\n' "$current" | grep -qF "$marker"; then
+    echo "✓ (already removed)"
+    note_clean "Cron" "sdlc-poker entry"
+    return 0
+  fi
+  local filtered
+  filtered="$(printf '%s\n' "$current" | grep -vF "$marker" || true)"
+  if [ -n "$filtered" ]; then
+    printf '%s\n' "$filtered" | crontab -
+  else
+    crontab -r 2>/dev/null || true
+  fi
+  echo "✓"
+  note_removed "Cron" "sdlc-poker entry"
+}
+
+echo "Cron jobs:"
+do_remove_poker_cron
+echo ""
+
 # ─── Account-mirror symlinks ────────────────────────────────────────────────
 # Bootstrap symlinks ~/.claude-*/settings.json and CLAUDE.md to the canonical
 # ~/.claude/ copies, backing up any originals as <file>.bak-<ts>. Undo that:
@@ -848,6 +883,15 @@ if [ -d ~/.claude/hooks ] && [ "$(ls -A ~/.claude/hooks 2>/dev/null)" ]; then
   done
 else
   echo "    (none installed) ✓"
+fi
+
+echo ""
+echo "  Cron jobs:"
+if crontab -l 2>/dev/null | grep -qF "# BIONIC-SDLC-POKER"; then
+  echo "    sdlc-poker entry — still present"
+  LEFTOVERS+=("sdlc-poker cron entry — still present in crontab")
+else
+  echo "    sdlc-poker entry ✓ (removed)"
 fi
 
 echo ""
