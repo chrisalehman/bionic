@@ -701,6 +701,12 @@ sdlc_wip_restore() {
     # alias the real dir. Lowercase via tr (no bash-4 ${x,,}, preserving the
     # lib's 3.2-compatible idiom), then a slash-bounded component match — precise,
     # so a legit 'foo.git.txt' or '.github/' (no bare '.git' component) is spared.
+    # Platform assumption (Step-6 critic re-verify): this covers APFS (the macOS
+    # default) — restore writes via shell redirection, never `git checkout`, so
+    # git's own is_hfs_dotgit/is_ntfs_dotgit normalization is not the writer, and
+    # APFS does not alias trailing-dot/space ('.git.', '.git ') or HFS+
+    # ignorable-codepoint ('.g<ZWNJ>it') forms to '.git'. A genuine HFS+ volume
+    # is the only place those could alias; extend this match if N3 ports there.
     case "$(printf '%s' "/$path/" | tr '[:upper:]' '[:lower:]')" in
       */.git/*) rm -f "$difftmp"
                 echo "defect: restore-unsafe-path: refusing '.git'-component path '$path' from snapshot '$sha' in: $dir" >&2
