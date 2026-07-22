@@ -623,6 +623,7 @@ p7() {
   run_poker                                      # 4th poll: cap exhausted
   assert_eq "4/2-7 no 4th poke after cap exhausted" "3" "$(count_lines "$(claude_calls)" "resume sid-p7")"
   assert_contains "4/2-7 POKE-FAIL notified on cap exhaustion" "Title: as7: POKE-FAIL" "$(curl_calls)"
+  sleep 1  # mtime distinctness: same-age re-plant within one wall-clock second is byte-identical (c9 idiom); poke_capped resets only on mtime != smtime
   plant_transcript_age "$cwd" sid-p7 200 user   # fresh mtime = transcript movement
   run_poker
   assert_eq "4/2-7 episode reset on movement → poke resumes" "4" "$(count_lines "$(claude_calls)" "resume sid-p7")"
