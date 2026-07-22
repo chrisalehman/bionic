@@ -14,7 +14,7 @@
 # sources the lib and calls baton_parse — no reuse of the writer's own shell
 # state, matching "a cold reader names the next action from the file alone."
 #
-# Usage: bash tests/sdlc-state.test.sh
+# Usage: bash hooks/sdlc-state-lib.test.sh
 
 set -uo pipefail
 
