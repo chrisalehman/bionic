@@ -30,6 +30,12 @@
 
 set -u
 
+# Release gate: `scale: continuous` (the v12 standing charter) is source-complete
+# in the contract but held back from origin/main until the never-die epic (E10)
+# ships. SDLC_CONTINUOUS_RELEASED=1 lifts the gate. Bound default keeps the read
+# `set -u`-safe; the guard fires in the v12 continuous arm below.
+SDLC_CONTINUOUS_RELEASED="${SDLC_CONTINUOUS_RELEASED:-0}"
+
 INPUT=$(cat)
 TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty')
 
@@ -285,6 +291,16 @@ if [ "$SDLC_VERSION" = "11" ] || [ "$SDLC_VERSION" = "12" ]; then
     tested|peer-reviewed|audited) ;;
     *) block "invalid rigor: '$RIGOR' — allowed: tested|peer-reviewed|audited" ;;
   esac
+  # RELEASE GATE (E10): scale: continuous is armed in the v12 contract but held
+  # back from origin/main until the never-die epic (E10) ships. Fires BEFORE the
+  # continuous-specific validations below (enum acceptance, barred cells, audited
+  # scale floor) so an armed charter cannot be authored on a released tree;
+  # SDLC_CONTINUOUS_RELEASED=1 lifts the gate and every one of those validations
+  # stays reachable. v12-only — on v11 `scale: continuous` is an invalid enum
+  # value and blocks as such below, gate or no gate.
+  if [ "$SDLC_VERSION" = "12" ] && [ "$SCALE" = "continuous" ] && [ "$SDLC_CONTINUOUS_RELEASED" != "1" ]; then
+    block "scale: continuous is release-gated until the never-die epic (E10) ships; set SDLC_CONTINUOUS_RELEASED=1 to override"
+  fi
   case "$SCALE" in
     task|wave|epic) ;;
     continuous)
