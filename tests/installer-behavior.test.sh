@@ -53,7 +53,7 @@ chmod +x "${BIN}"/*
 
 # ---------- extract the REAL resilience block + installer functions ----------
 awk '/^# ─── Resilience ───/{f=1} f{print} /^# ─── Helpers ───/{if(f)exit}' "$BOOTSTRAP" > "$CODE"
-for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry do_install_agents; do
+for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry do_install_agents do_preflight_node; do
   awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$CODE"
 done
 
@@ -692,6 +692,45 @@ run_retry brokenbrew install && no "run_retry: brokenbrew should fail" || true
 [ "$(grep -c '^brokenbrew' "$LOG")" = "2" ] \
   && ok "run_retry: unknown class keeps full retries" \
   || no "run_retry: unknown retries (attempts: $(grep -c '^brokenbrew' "$LOG"))"
+
+# ---------- F3: node hoisted, failure surfaces as node failure ----------
+# Earlier sections (playwright heal) leave a mock ${BIN}/node behind; hide it
+# so "node absent" actually holds (same pattern as brew.real below).
+[ -e "${BIN}/node" ] && mv "${BIN}/node" "${BIN}/node.hidden"
+
+# node absent + brew succeeds → brew install node attempted, step ok
+: > "$LOG"; STEP_RECORDS=(); INSTALL_FAILURES=()
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"   # sandbox: no real node
+step_start "node" >/dev/null
+do_preflight_node >/dev/null
+PATH="$_saved_path"
+expect_log "brew install node --quiet" "node hoist: brew install node attempted when absent"
+case "${STEP_RECORDS[0]:-}" in
+  ok\|prereq\|*) ok "node hoist: success recorded as prereq ok" ;;
+  *) no "node hoist: expected ok|prereq record (got: ${STEP_RECORDS[0]:-none})" ;;
+esac
+
+# node absent + brew FAILS → step_fail with brew detail; NO abort, NO claude-CLI wording
+: > "$LOG"; STEP_RECORDS=(); INSTALL_FAILURES=()
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"
+mv "${BIN}/brew" "${BIN}/brew.real"; cp "${BIN}/brokenbrew" "${BIN}/brew"
+step_start "node" >/dev/null
+RETRY_MAX=1 do_preflight_node >/dev/null; _rc=$?
+mv "${BIN}/brew.real" "${BIN}/brew"; PATH="$_saved_path"
+[ "$_rc" = "0" ] && ok "node hoist: brew failure does not abort" || no "node hoist: rc=$_rc, want 0"
+case "${STEP_RECORDS[0]:-}" in
+  fail\|prereq\|*\|node\|*)   # record_step: status|category|section|name|remediation|detail
+    ok "node hoist: failure recorded against node step" ;;
+  *) no "node hoist: expected fail|prereq|…|node record (got: ${STEP_RECORDS[0]:-none})" ;;
+esac
+case "${INSTALL_FAILURES[0]:-}" in
+  *"claude CLI"*) no "node hoist: failure must not mention claude CLI" ;;
+  node:*) ok "node hoist: failure names node, not claude CLI" ;;
+  *) no "node hoist: unexpected failure record (${INSTALL_FAILURES[0]:-none})" ;;
+esac
+
+# restore the hidden mock for later sections
+[ -e "${BIN}/node.hidden" ] && mv "${BIN}/node.hidden" "${BIN}/node"
 
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
