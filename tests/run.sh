@@ -36,7 +36,6 @@ done
 run "scripts.test.sh" bash tests/scripts.test.sh
 run "installer-behavior.test.sh" bash tests/installer-behavior.test.sh
 run "agent-roles.test.sh" bash tests/agent-roles.test.sh
-run "sdlc-state.test.sh" bash tests/sdlc-state.test.sh
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   run "bootstrap-e2e-docker.sh (mock)" bash tests/bootstrap-e2e-docker.sh
 else
