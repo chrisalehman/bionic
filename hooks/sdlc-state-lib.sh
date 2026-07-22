@@ -25,7 +25,8 @@
 # or malformed key.
 #
 # Required keys (R-B1): goal-id, plan, cwd, branch, integration-branch,
-# last-commit, sdlc-step, session, ledger-position, next-action, written-at.
+# last-commit, sdlc-step, session, ledger-position, next-action, wip,
+# written-at.
 
 # Deliberately NO top-level `set -u` (FLAG 4): this file is sourced by
 # other scripts (context-spend.sh today; N2-N4 later), and a sourced
@@ -35,7 +36,7 @@
 # `${x:-}` guards throughout this file are the actual safety net; they
 # do not depend on nounset being active.
 
-BATON_REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc-step session ledger-position next-action written-at"
+BATON_REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc-step session ledger-position next-action wip written-at"
 
 # ---------- path helpers (read SDLC_STATE_DIR/HOME at call time) ----------
 sdlc_state_dir() { printf '%s' "${SDLC_STATE_DIR:-$HOME/.claude/sdlc-state}"; }
@@ -74,7 +75,7 @@ _sdlc_validate_goal_id() {
 # ---------- R-B1: baton_write ----------
 # baton_write <goal-id> <plan> <cwd> <branch> <integration-branch>
 #             <last-commit> <sdlc-step> <session> <ledger-position>
-#             <next-action> [prose]
+#             <next-action> <wip> [prose]
 # Serializes goal state as structured markdown with the fixed required-key
 # lines, `written-at:` stamped here (UTC, now). Atomic: written to a tmp
 # file in the SAME dir, then `mv` into place (single rename, never a
@@ -84,7 +85,7 @@ _sdlc_validate_goal_id() {
 baton_write() {
   local goal_id="${1:-}" plan="${2:-}" cwd="${3:-}" branch="${4:-}" integ="${5:-}" \
         last_commit="${6:-}" step="${7:-}" session="${8:-}" ledger_pos="${9:-}" \
-        next_action="${10:-}" prose="${11:-}"
+        next_action="${10:-}" wip="${11:-}" prose="${12:-}"
   local dir target tmp written_at
 
   _sdlc_validate_goal_id "$goal_id" "baton_write" || return 1
@@ -107,6 +108,7 @@ baton_write() {
     echo "session: $session"
     echo "ledger-position: $ledger_pos"
     echo "next-action: $next_action"
+    echo "wip: $wip"
     echo "written-at: $written_at"
     if [ -n "$prose" ]; then
       echo ""
@@ -142,7 +144,7 @@ baton_write() {
 baton_parse() {
   local f="${1:-}"
   local header key count value
-  local v_goal_id v_plan v_cwd v_branch v_integ v_last_commit v_step v_session v_ledger_pos v_next_action v_written_at
+  local v_goal_id v_plan v_cwd v_branch v_integ v_last_commit v_step v_session v_ledger_pos v_next_action v_wip v_written_at
 
   [ -n "$f" ] && [ -f "$f" ] || { echo "defect: missing-file: baton not found: ${f:-<empty path>}" >&2; return 1; }
   [ -s "$f" ] || { echo "defect: truncated-file: baton is empty: $f" >&2; return 1; }
@@ -181,6 +183,7 @@ baton_parse() {
       session)             v_session="$value" ;;
       ledger-position)     v_ledger_pos="$value" ;;
       next-action)         v_next_action="$value" ;;
+      wip)                 v_wip="$value" ;;
       written-at)          v_written_at="$value" ;;
     esac
   done
@@ -198,6 +201,7 @@ baton_parse() {
   BATON_SESSION="$v_session"
   BATON_LEDGER_POSITION="$v_ledger_pos"
   BATON_NEXT_ACTION="$v_next_action"
+  BATON_WIP="$v_wip"
   BATON_WRITTEN_AT="$v_written_at"
   return 0
 }
