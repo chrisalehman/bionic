@@ -34,6 +34,7 @@ set -u
 QUIET_THRESHOLD="${QUIET_THRESHOLD:-180}"   # idle quiet → IDLE_STALLED (seconds)
 WEDGE_QUIET="${WEDGE_QUIET:-540}"           # busy quiet → WEDGED (3× threshold)
 POKE_CAP="${POKE_CAP:-3}"                    # max pokes per stall episode (4/2)
+POKE_TIMEOUT="${POKE_TIMEOUT:-900}"          # per-poke wall-clock cap, seconds (C4 amendment B)
 
 # Absolute claude binary for the POKE (C4: alias not inherited). The registry
 # READ uses PATH-resolved bare `claude` (AS-7a); only the poke is pinned. Kept
@@ -56,15 +57,6 @@ status_dir()  { printf '%s/.claude/sdlc-status' "$HOME"; }
 state_dir()   { printf '%s/.claude/sdlc-status/.state' "$HOME"; }
 audit_log()   { printf '%s/.claude/sdlc-poker-audit.log' "$HOME"; }
 lock_dir()    { printf '%s/.claude/sdlc-poker.lock' "$HOME"; }
-
-# Transcript project directory for a cwd. Claude Code keys project dirs by cwd,
-# replacing every '/' and '.' with '-' (verified live on 2.1.216:
-# /Users/admin/workspace/personal/bionic/.bionic/tmp/p3 →
-# -Users-admin-workspace-personal-bionic--bionic-tmp-p3). Transcripts are
-# cwd-keyed, NOT repo-keyed (P3), so the poker must know each target's cwd.
-project_dir_for_cwd() {
-  printf '%s/.claude/projects/%s' "$HOME" "$(printf '%s' "$1" | sed 's#[/.]#-#g')"
-}
 
 # Portable mtime (epoch seconds): BSD stat first, GNU stat fallback.
 file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
@@ -139,15 +131,24 @@ is_armed_scale() {  # uses REG_PLAN
 }
 
 # ---------- transcript signals ----------
-# Newest transcript for the registered session: prefer <sid>.jsonl, else the
-# newest *.jsonl in the cwd-keyed project dir. Echoes a path or nothing.
-resolve_transcript() {  # uses REG_CWD, REG_SESSION_ID
-  local pdir t
-  pdir=$(project_dir_for_cwd "$REG_CWD")
-  t="$pdir/$REG_SESSION_ID.jsonl"
-  if [ -f "$t" ]; then printf '%s' "$t"; return; fi
-  t=$(ls -t "$pdir"/*.jsonl 2>/dev/null | head -1)
-  [ -n "$t" ] && [ -f "$t" ] && printf '%s' "$t"
+# Newest transcript for the registered session, located by SESSION-ID GLOB across
+# every Claude Code project dir — $HOME/.claude/projects/*/<sid>.jsonl (C2
+# amendment, Step-6 critic). Session ids are unique, so by-id glob is the A11
+# principle applied to the filesystem and is immune to project-dir sanitizer
+# drift: the shipped cwd→dir transform replicated only [/.] while Claude Code
+# sanitizes [^a-zA-Z0-9] plus a length-cap/hash, so ANY underscore-bearing cwd
+# silently broke resolution → stall/wedge detection defeated. Nullglob-safe via
+# the -f guard (an unmatched glob word is skipped); >1 match is impossible for a
+# uuid but the newest is taken defensively. Echoes a path or nothing.
+resolve_transcript() {  # uses REG_SESSION_ID
+  local t best="" bestm="" m
+  for t in "$HOME"/.claude/projects/*/"$REG_SESSION_ID".jsonl; do
+    [ -f "$t" ] || continue
+    m=$(file_mtime "$t" 2>/dev/null) || m=0
+    [ -n "$m" ] || m=0
+    if [ -z "$best" ] || [ "$m" -gt "$bestm" ]; then best="$t"; bestm="$m"; fi
+  done
+  [ -n "$best" ] && printf '%s' "$best"
 }
 
 # Transcript quiet in seconds (now - mtime). No transcript → 0 (recently-active
@@ -333,18 +334,40 @@ scrub_secrets() {  # stdin → stdout, secrets replaced with [REDACTED]
 # failure — "Not logged in · Please run /login" — rides the `-p` result stream on
 # STDOUT with stderr empty, so capturing stderr alone would still be blind); on
 # rc=0 no tail (nothing to diagnose).
+# Secret-scrubbed, single-line, trailing ~120 chars of a captured poke stream (the
+# failure reason surfaces at the end); substr guards a short line.
+poke_tail() {  # $1=outfile
+  scrub_secrets < "$1" | tr '\n\r' '  ' \
+    | awk '{ n=length($0); print (n>120 ? substr($0, n-119) : $0) }'
+}
+
 do_poke() {  # $1=goal-id ; uses REG_CWD, REG_SESSION_ID
   local gid="$1" rc outf tail
   outf=$(mktemp 2>/dev/null) || outf=""
+  # The poke runs under a wall-clock cap (C4 amendment B): a hung `claude --resume`
+  # would otherwise hold the poker's OWN lock forever — every later poll sees a
+  # live holder and exits — so one hung poke stalls the entire relay. There is no
+  # `timeout` binary on this host, so `perl -e 'alarm shift; exec @ARGV'` sets a
+  # SIGALRM timer that is preserved across the exec into the poke; on expiry the
+  # child dies (rc 128+14 = 142). Killing our OWN timed-out child is process
+  # hygiene, not the no-force verb (which protects TARGET sessions); the DAG makes
+  # a killed poke turn resumable.
   ( cd "$REG_CWD" 2>/dev/null && printf '%s' "$POKE_PROMPT" \
-      | "$POKE_CLAUDE_BIN" --resume "$REG_SESSION_ID" -p --dangerously-skip-permissions \
+      | perl -e 'alarm shift @ARGV; exec @ARGV' "$POKE_TIMEOUT" \
+          "$POKE_CLAUDE_BIN" --resume "$REG_SESSION_ID" -p --dangerously-skip-permissions \
   ) >"${outf:-/dev/null}" 2>&1
   rc=$?
-  if [ "$rc" -ne 0 ] && [ -n "$outf" ] && [ -s "$outf" ]; then
-    # scrub → single-line → keep the trailing ~120 chars (the failure reason
-    # surfaces at the end of the stream); substr guards a short line.
-    tail=$(scrub_secrets < "$outf" | tr '\n\r' '  ' \
-      | awk '{ n=length($0); print (n>120 ? substr($0, n-119) : $0) }')
+  if [ "$rc" -eq 142 ]; then
+    # perl-alarm SIGALRM: the poke exceeded POKE_TIMEOUT. Counts toward the cap;
+    # the audit carries the out: tail if the child produced any before the kill.
+    if [ -n "$outf" ] && [ -s "$outf" ]; then
+      tail=$(poke_tail "$outf")
+      audit_line "$gid" POKE-TIMEOUT "resume $REG_SESSION_ID timed out after ${POKE_TIMEOUT}s out: $tail"
+    else
+      audit_line "$gid" POKE-TIMEOUT "resume $REG_SESSION_ID timed out after ${POKE_TIMEOUT}s"
+    fi
+  elif [ "$rc" -ne 0 ] && [ -n "$outf" ] && [ -s "$outf" ]; then
+    tail=$(poke_tail "$outf")
     audit_line "$gid" POKE "resume $REG_SESSION_ID rc=$rc out: $tail"
   else
     audit_line "$gid" POKE "resume $REG_SESSION_ID rc=$rc"
@@ -470,6 +493,13 @@ process_goals() {
   for f in "$gdir"/*; do
     [ -f "$f" ] || continue           # empty dir → the literal glob, skipped
     gid=$(basename "$f")
+    # C1 addendum: the goal-id (registration filename) reaches paths and
+    # notification titles — validate it before trusting it anywhere.
+    case "$gid" in
+      *[!a-z0-9-]*|'')
+        audit_line "$gid" MALFORMED-RECORD "invalid goal-id: must match ^[a-z0-9-]+"
+        continue ;;
+    esac
     if ! load_registration "$gid"; then
       audit_line "$gid" MALFORMED-RECORD "missing required key in registration"
       continue

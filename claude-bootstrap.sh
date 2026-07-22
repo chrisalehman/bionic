@@ -1608,10 +1608,21 @@ do_author_cron_env() {
   # fresh (empty token slot + generated topic). The trailing `if…fi` forms keep
   # the group's exit status 0 whether or not a given line is appended, so a
   # genuine write failure (temp uncreatable) is what trips the else branch.
+  # Trailing-newline guard (C6-am3 addendum): if we will APPEND a key line to an
+  # existing file whose last byte is NOT a newline, `cat` streams the final line
+  # without a terminator and the append fuses onto it — one corrupt line that
+  # destroys BOTH values. `$(tail -c1)` strips a trailing newline to empty, so a
+  # non-empty result means the last byte is not a newline → emit one first.
+  local need_nl=0
+  if [ "$existed" -eq 1 ] && { [ "$have_token" -eq 0 ] || [ "$have_topic" -eq 0 ]; } \
+     && [ -s "$f" ] && [ -n "$(tail -c1 "$f" 2>/dev/null)" ]; then
+    need_nl=1
+  fi
   local tmp="${f}.tmp.$$"
   if ( umask 077
        {
          [ "$existed" -eq 1 ] && cat "$f"
+         [ "$need_nl" -eq 1 ] && printf '\n'
          if [ "$have_token" -eq 0 ]; then printf 'CLAUDE_CODE_OAUTH_TOKEN=\n'; fi
          if [ "$have_topic" -eq 0 ]; then printf 'BIONIC_NTFY_TOPIC=%s\n' "$(_gen_ntfy_topic)"; fi
        } > "$tmp" ) && mv "$tmp" "$f"; then

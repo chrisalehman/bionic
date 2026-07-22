@@ -32,10 +32,12 @@ fail() { echo "FAIL: $1"; [ -n "${2:-}" ] && echo "  $2"; FAIL=$((FAIL + 1)); }
 cleanup() { for d in "${CLEAN_HOMES[@]:-}"; do [ -n "$d" ] && rm -rf "$d"; done; }
 trap cleanup EXIT
 
-# Source the library (functions only; main suppressed). project_dir_for_cwd
-# and classify_goal become callable; QUIET_THRESHOLD/WEDGE_QUIET/POKE_CAP land
-# in scope. HOME is re-pointed per case AFTER this, and every poker function
-# reads $HOME at call time, so the single source is safe across cases.
+# Source the library (functions only; main suppressed). classify_goal becomes
+# callable; QUIET_THRESHOLD/WEDGE_QUIET/POKE_CAP land in scope. HOME is re-pointed
+# per case AFTER this, and every poker function reads $HOME at call time, so the
+# single source is safe across cases. Transcript planting uses this suite's OWN
+# real_project_dir sanitizer (below) — the poker no longer maps cwd→dir at all
+# (it globs by session id), so the harness must derive the realistic path itself.
 SDLC_POKER_LIB=1 . "$POKER"
 
 # ---------- fresh fake HOME + PATH-shadowed stub claude / curl ----------
@@ -71,6 +73,14 @@ fi
 if [ -f "$STUBDIR/poke-append" ]; then
   tp=$(cat "$STUBDIR/poke-append")
   printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text"}]}}' >> "$tp"
+fi
+# F3: model a HUNG poke — real foreground work (NOT a leading sleep, which the
+# harness blocks), self-bounded (~8s) so a poker WITHOUT the timeout wrapper does
+# not hang the suite (it finishes late, rc=0). With the perl-alarm wrapper and a
+# small POKE_TIMEOUT the child is SIGALRM-killed first → rc=142 → POKE-TIMEOUT.
+if [ -f "$STUBDIR/poke-block" ]; then
+  _end=$(( $(date +%s) + 8 ))
+  while [ "$(date +%s)" -lt "$_end" ]; do : ; done
 fi
 prc=0
 [ -f "$STUBDIR/poke.rc" ] && prc=$(cat "$STUBDIR/poke.rc")
@@ -140,13 +150,22 @@ set_mtime_age() {
   fi
 }
 
+# Claude Code's project-dir sanitizer, implemented INDEPENDENTLY of the poker (the
+# poker no longer maps cwd→dir — it globs by session id): the FULL cwd with every
+# [^a-zA-Z0-9] replaced by '-'. Used only to PLANT transcripts at realistic paths;
+# the sid-glob resolver finds them by session id regardless of the dir name.
+real_project_dir() {
+  printf '%s/.claude/projects/%s' "$HOME" "$(printf '%s' "$1" | sed 's/[^a-zA-Z0-9]/-/g')"
+}
+
 # plant_transcript_age <cwd> <sid> <age-seconds> [last-event: user|busy]
-# Writes the session transcript under the cwd-keyed Claude project dir (the
-# poker's own project_dir_for_cwd, so the mapping is identical by construction)
-# and back-dates its mtime.
+# Writes the session transcript under the REAL (independently sanitized) Claude
+# project dir and back-dates its mtime. The poker resolves it by SESSION-ID GLOB,
+# so the exact dir name is immaterial to resolution — only that the file is named
+# <sid>.jsonl under some $HOME/.claude/projects/* dir.
 plant_transcript_age() {
   local cwd="$1" sid="$2" age="$3" ev="${4:-user}"
-  local pdir; pdir=$(project_dir_for_cwd "$cwd")
+  local pdir; pdir=$(real_project_dir "$cwd")
   mkdir -p "$pdir"
   local t="$pdir/$sid.jsonl"
   case "$ev" in
@@ -180,6 +199,7 @@ stub_registry_state() {
 run_poker() {
   POKER_OUT=$(HOME="$HOME" PATH="$HOME/.claude/.stub:$ORIG_PATH" \
     POKE_CLAUDE_BIN="$HOME/.claude/.stub/claude" \
+    POKE_TIMEOUT="${POKE_TIMEOUT:-900}" \
     BIONIC_NTFY_TOPIC="${BIONIC_NTFY_TOPIC:-}" bash "$POKER" 2>&1); POKER_EXIT=$?
 }
 
@@ -666,7 +686,7 @@ f2() {
   arm_goal af2 4 "$cwd" sid-f2 4242 260 user    # idle + 260s → IDLE_STALLED (pokeable)
   stub_registry_state idle sid-f2
   echo 1 > "$HOME/.claude/.stub/poke.rc"         # every poke fails (models "Not logged in")
-  tpath="$(project_dir_for_cwd "$cwd")/sid-f2.jsonl"
+  tpath="$(real_project_dir "$cwd")/sid-f2.jsonl"
   # Each poll: the failed poke's own turn lands as fresh transcript movement
   # (distinct, still-stale mtimes, all >QUIET_THRESHOLD so the goal stays IDLE_STALLED).
   local age
@@ -728,6 +748,111 @@ f3() {
   else fail "4/3-3b secret scrub" "tail absent or topic value leaked into the audit line"; fi
 }
 f3
+
+# ============================================================
+# ============  slice 4/4 — step-6 review fold-ins  ==========
+# F1 SESSION-ID GLOB transcript resolution (C2 amendment), F3 poke timeout
+# (C4 amendment B), F4 goal-id validation (C1 addendum).
+
+echo "=== 4/4-1 (F1): transcript resolved by SESSION-ID GLOB, not cwd→project-dir transform ==="
+# false-green-2 rewrite. The retired harness planted transcripts via the poker's
+# OWN project_dir_for_cwd, so its buggy [/.]-only mapping always "found" what it
+# planted — grading the poker against its own mapping. Here the transcript is
+# planted at the REAL Claude-Code path — the FULL cwd sanitized [^a-zA-Z0-9]→- —
+# computed INDEPENDENTLY (hardcoded literal below, never via a poker function). An
+# underscore-bearing cwd is exactly where the shipped transform silently diverged:
+# it preserved '_', so it looked in the wrong project dir, the transcript went
+# unfound, quiet collapsed to 0, and a real stall was misclassified IDLE (not
+# IDLE_STALLED) — defeating stall/wedge detection.
+f1_glob() {
+  new_home
+  local cwd="/tmp/bn_fix/my_proj" sid="sid-underscore-glob"
+  # Independent hardcoded expected project dir (apply [^a-zA-Z0-9]→- BY HAND):
+  #   /tmp/bn_fix/my_proj  →  -tmp-bn-fix-my-proj
+  local realdir="$HOME/.claude/projects/-tmp-bn-fix-my-proj"
+  mkdir -p "$realdir"
+  local t="$realdir/$sid.jsonl"
+  printf '%s\n' '{"type":"user","message":{"role":"user","content":"continue"}}' > "$t"
+  set_mtime_age "$t" 300            # >180 → IDLE_STALLED iff the transcript is found
+  local plan="$HOME/plans/uscore.plan.md"; plant_plan "$plan" 4 0 continuous
+  plant_goal uscore "$plan" "$cwd" "$sid" 4242
+  stub_registry_state idle "$sid"
+  assert_classify uscore IDLE_STALLED "F1 underscore cwd: sid-glob finds real transcript → IDLE_STALLED"
+
+  # Regression: an old-style (no-underscore) cwd — the [/.] transform and the real
+  # [^a-zA-Z0-9] sanitizer agree here, so the glob subsumes the mapping and finds
+  # the transcript by sid regardless of the project-dir name.
+  local cwd2="/tmp/plain/proj" sid2="sid-plain-glob"
+  local realdir2="$HOME/.claude/projects/-tmp-plain-proj"
+  mkdir -p "$realdir2"
+  local t2="$realdir2/$sid2.jsonl"
+  printf '%s\n' '{"type":"user","message":{"role":"user","content":"continue"}}' > "$t2"
+  set_mtime_age "$t2" 300
+  local plan2="$HOME/plans/plain.plan.md"; plant_plan "$plan2" 4 0 continuous
+  plant_goal plainx "$plan2" "$cwd2" "$sid2" 4242
+  stub_registry_state idle "$sid2"
+  assert_classify plainx IDLE_STALLED "F1 non-underscore cwd: sid-glob finds old-style path → IDLE_STALLED"
+}
+f1_glob
+
+echo "=== 4/4-2 (F3): poke timeout — a hung poke is alarmed, POKE-TIMEOUT audited, counts to cap, lock released ==="
+# A hung `claude --resume` otherwise holds the poker's own lock forever (every
+# later poll sees a live holder and exits) → one hung poke stalls the whole relay.
+# The perl-alarm wrapper SIGALRM-kills our own timed-out child (process hygiene,
+# not the no-force verb — that protects TARGET sessions).
+f3_timeout() {
+  new_home
+  local cwd; cwd=$(real_cwd f4t)
+  arm_goal at4 4 "$cwd" sid-t4 4242 200 user     # idle + 200s → IDLE_STALLED (pokeable)
+  stub_registry_state idle sid-t4
+  : > "$HOME/.claude/.stub/poke-block"           # stub busy-works past POKE_TIMEOUT
+  POKE_TIMEOUT=2 run_poker                        # poll1: poke hangs → alarmed
+  assert_eq "4/4-2 poker exits 0 after a timed-out poke (run completes, lock released)" 0 "$POKER_EXIT"
+  assert_contains "4/4-2 POKE-TIMEOUT audit line emitted" "at4 POKE-TIMEOUT" "$(audit_of)"
+  assert_contains "4/4-2 the timed-out poke was still attempted (argv recorded)" "--resume sid-t4" "$(claude_calls)"
+  TOTAL=$((TOTAL + 1))
+  if [ ! -d "$HOME/.claude/sdlc-poker.lock" ]; then pass "4/4-2 poker lock released after a timed-out poke"; else fail "4/4-2 lock leaked after timeout"; fi
+  POKE_TIMEOUT=2 run_poker                        # poll2: count 2
+  POKE_TIMEOUT=2 run_poker                        # poll3: count 3 (cap reached)
+  POKE_TIMEOUT=2 run_poker                        # poll4: cap exhausted → POKE-FAIL, no poke
+  assert_eq "4/4-2 timed-out pokes count toward POKE_CAP (exactly 3 attempts)" "3" "$(count_lines "$(claude_calls)" "resume sid-t4")"
+  assert_contains "4/4-2 POKE-FAIL fires once the cap of timed-out pokes is exhausted" "Title: at4: POKE-FAIL" "$(curl_calls)"
+  rm -f "$HOME/.claude/.stub/poke-block"
+
+  # A fast rc=0 poke (no block) is unaffected by the timeout wrapper.
+  new_home
+  cwd=$(real_cwd f4f)
+  arm_goal at4f 4 "$cwd" sid-t4f 4242 200 user
+  stub_registry_state idle sid-t4f
+  POKE_TIMEOUT=2 run_poker
+  assert_contains "4/4-2 a fast poke under the timeout succeeds (normal POKE rc=0 audit)" "resume sid-t4f rc=0" "$(audit_of)"
+  TOTAL=$((TOTAL + 1))
+  if ! printf '%s' "$(audit_of)" | grep -q "at4f POKE-TIMEOUT"; then pass "4/4-2 a fast poke never audits POKE-TIMEOUT"; else fail "4/4-2 fast poke wrongly timed out"; fi
+}
+f3_timeout
+
+echo "=== 4/4-3 (F4): goal-id validation — filename must match ^[a-z0-9-]+\$; invalid → MALFORMED-RECORD + skip ==="
+# ids reach paths and notification titles; harden the consent-registry boundary.
+# The bad goal is otherwise WELL-FORMED (all keys, continuous plan) so ONLY the id
+# check can reject it; a valid-id goal in the same run proves the run continues.
+f4_id() {
+  new_home
+  local badplan="$HOME/plans/badid.plan.md"; plant_plan "$badplan" 4 0 continuous
+  local bf="$HOME/.claude/sdlc-goals/Bad_ID!"
+  {
+    echo "PLAN=$badplan"; echo "CWD=/proj/badid"; echo "SESSION_ID=sid-badid"
+    echo "PID=4242"; echo "ARMED_AT=2026-07-21T00:00:00Z"
+  } > "$bf"
+  arm_goal okid 4 /proj/okid sid-okid 4242 30 user
+  stub_registry_state idle sid-okid
+  run_poker
+  assert_eq "4/4-3 poker exit 0 despite an invalid goal-id" 0 "$POKER_EXIT"
+  assert_contains "4/4-3 MALFORMED-RECORD audit for the invalid goal-id" "Bad_ID! MALFORMED-RECORD" "$(audit_of)"
+  TOTAL=$((TOTAL + 1))
+  if [ ! -f "$HOME/.claude/sdlc-status/Bad_ID!.md" ]; then pass "4/4-3 invalid-id goal skipped (no status, never poked)"; else fail "4/4-3 invalid id was processed"; fi
+  assert_true "4/4-3 run continued to the valid-id goal (status written)" status_exists okid
+}
+f4_id
 
 # ============================================================
 echo ""
