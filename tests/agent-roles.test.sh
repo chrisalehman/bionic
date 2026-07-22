@@ -218,6 +218,19 @@ else
   fail "meta: shared-core drift NOT detected"
 fi
 
+# ===== Section 7: dispatch convention — background always under multi_agent (W+1-1, C9) =====
+echo "== Section 7: dispatch convention background-always =="
+if ! grep -qiE "critical-path" "$SKILL" && ! grep -qiE "synchronously" "$SKILL"; then
+  pass "SKILL.md: old 'critical-path work synchronously' phrasing removed"
+else
+  fail "SKILL.md: old 'critical-path work synchronously' phrasing still present"
+fi
+if grep -q "background subagents" "$SKILL" && grep -q "completion notification" "$SKILL"; then
+  pass "SKILL.md: new background-dispatch/completion-notification rule present"
+else
+  fail "SKILL.md: new background-dispatch/completion-notification rule missing"
+fi
+
 # ---------- summary ----------
 echo "──────────────────────────────────────────────"
 echo "agent-roles: ${PASS} passed, ${FAIL} failed"
