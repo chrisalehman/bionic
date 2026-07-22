@@ -260,6 +260,43 @@ arm_goal() {  # <gid> <cur> <cwd> <sid> <pid> <age> [event] [wake]
   plant_transcript_age "$cwd" "$sid" "$age" "$ev"
 }
 
+# ADR-002 Decision 2a: signal wrappers sanctioned on the poker's own poke
+# path only — the perl alarm-exec idiom may appear inside do_poke's body and
+# nowhere else. Extracts do_poke's own line range (function-boundary awk) and
+# returns any 'alarm' hits found outside it; empty output means confined.
+alarm_confined_to_do_poke() {  # $1=poker script path
+  local script="$1" range start end
+  range=$(awk '
+    /^do_poke\(\) \{/ { start = NR }
+    start && /^}$/ { end = NR; exit }
+    END { print start, end }
+  ' "$script")
+  start=${range%% *}; end=${range##* }
+  if [ -z "$start" ] || [ -z "$end" ]; then
+    echo "do_poke boundaries not found in $script"
+    return
+  fi
+  grep -nE 'alarm' "$script" \
+    | awk -F: -v s="$start" -v e="$end" '$1 < s || $1 > e { print }'
+}
+
+# plant_alarm_drift <in> <out>: writes a copy of the poker with an alarm-idiom
+# mention inserted into dispatch_actions — OUTSIDE do_poke — proving
+# alarm_confined_to_do_poke REDs when the signal-bearing pattern escapes its
+# sanctioned function. Never touches the real script (agent-roles.test.sh
+# drift-planter precedent: mutate a copy, never the source).
+plant_alarm_drift() {
+  awk '
+    /^dispatch_actions\(\) \{/ && !done {
+      print
+      print "  # planted drift (meta-evidence): perl alarm-exec idiom outside do_poke"
+      done = 1
+      next
+    }
+    { print }
+  ' "$1" > "$2"
+}
+
 # ============================================================
 echo "=== Case 1: plan current:10 → COMPLETE regardless of session state ==="
 c1() {
@@ -507,6 +544,22 @@ p3() {
     | grep -vE ':[[:space:]]*#' \
     | grep -vF "printf 'kill %s && cd %s && claude --resume %s'")
   if [ -z "$hits" ]; then pass "4/2-3 no kill/pkill/killall invocation in script"; else fail "4/2-3 no-kill" "offenders: $hits"; fi
+
+  # ADR-002 Decision 2a: signal wrappers sanctioned on the poker's own poke
+  # path only — assert the alarm-exec idiom never escapes do_poke.
+  TOTAL=$((TOTAL + 1))
+  local alarm_hits; alarm_hits=$(alarm_confined_to_do_poke "$POKER")
+  if [ -z "$alarm_hits" ]; then pass "4/2-3 alarm-wrapper confined to do_poke (ADR-002 D2a)"; else fail "4/2-3 alarm-wrapper escaped do_poke" "offenders: $alarm_hits"; fi
+
+  # Meta-evidence: a planted alarm mention OUTSIDE do_poke (in dispatch_actions,
+  # on a tmp copy — the shipped poker is never mutated) must make the guard
+  # above go RED, proving it actually enforces the boundary.
+  TOTAL=$((TOTAL + 1))
+  local drift_copy; drift_copy=$(mktemp)
+  plant_alarm_drift "$POKER" "$drift_copy"
+  local drift_hits; drift_hits=$(alarm_confined_to_do_poke "$drift_copy")
+  rm -f "$drift_copy"
+  if [ -n "$drift_hits" ]; then pass "meta: alarm-wrapper-outside-do_poke drift detected"; else fail "meta: planted alarm drift NOT detected"; fi
 }
 p3
 
