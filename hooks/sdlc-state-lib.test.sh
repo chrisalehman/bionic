@@ -396,6 +396,23 @@ ac_l2_edit() {
 }
 ac_l2_edit
 
+echo "--- planted in-place edit of the TERMINAL line (effect-key + summary rewritten, seq + digest fields kept) → nonzero + named defect (AS-28: self-covering chain — the terminal line is the kill-moment line and must be tamper-evident) ---"
+ac_l2_edit_terminal() {
+  new_state_dir
+  local gid="edit-terminal-goal" path errf rc total
+  path=$(build_healthy_ledger "$gid")
+  total=$(wc -l < "$path" | tr -d ' ')
+  # Edit the LAST line's effect-key (field 5) + summary (field 6), keeping
+  # its seq (field 2) and digest (field 3) fields byte-for-byte — the exact
+  # forgery a prev-line-only chain could not see (nothing chains past the tail).
+  awk -F'\t' -v OFS='\t' -v ln="$total" 'NR==ln { $5="FORGED-KEY"; $6="FORGED SUMMARY" } { print }' "$path" > "$path.new" && mv "$path.new" "$path"
+  errf="$(mktemp)"; CLEAN_DIRS+=("$errf")
+  ledger_verify "$gid" 2>"$errf"; rc=$?
+  assert_nonzero "AC-L2 terminal-line in-place edit returns nonzero" "$rc"
+  assert_contains "AC-L2 terminal-line in-place edit defect names it" "in-place-edit" "$(cat "$errf")"
+}
+ac_l2_edit_terminal
+
 echo "--- planted truncation (no trailing newline, mid-flush cut) → nonzero + named defect ---"
 ac_l2_truncated() {
   new_state_dir
