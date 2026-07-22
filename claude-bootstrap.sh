@@ -86,7 +86,7 @@ source "${SCRIPT_DIR}/lib/platform.sh"
 # ─── Sections ────────────────────────────────────────────────────────────────
 # Bump SECTION_TOTAL when adding a section() call.
 
-SECTION_TOTAL=23
+SECTION_TOTAL=24
 SECTION_IDX=0
 CURRENT_SECTION=""
 section() {
@@ -1506,6 +1506,117 @@ fi
 if [ "$removed_hooks" -gt 0 ]; then
   echo "  cleaned up ${removed_hooks} stale hook file(s) from ~/.claude/hooks/"
 fi
+
+# ─── Cron (sdlc-poker relay driver) ──────────────────────────────────────────
+#
+# The poker is a cron-run script — installed as a plain file by the Global
+# Hooks section above, NOT wired into settings.json (it is not a Claude Code
+# hook). Here we (1) verify the user-provisioned standing-service identity
+# file and (2) register the marker-tagged */3 crontab entry idempotently.
+# Both steps are non-fatal: a missing env file is a provisioning gap the user
+# closes — not an install failure — and a crontab we cannot write records-and-
+# continues like every other step.
+
+# _cron_env_mode <file> — octal permission bits, portable across BSD stat
+# (macOS: -f '%Lp') and GNU stat (Linux/WSL2: -c '%a'). Empty on an
+# unreadable file.
+_cron_env_mode() {
+  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null
+}
+
+# do_verify_cron_env — C6. VERIFY ONLY: the env file exists, is mode 600, and
+# declares both key NAMES. Never creates or writes it (machinery never writes
+# credentials); never prints a value. Absent/misconfigured → warn with
+# provisioning instructions and continue — no record_fail, because a missing
+# credential file is the user's provisioning gate, not a bootstrap failure.
+do_verify_cron_env() {
+  local f="${HOME}/.claude/cron.env"
+  step_start "cron.env (standing service identity)"
+  if [ ! -f "$f" ]; then
+    step_skip env "${f} not provisioned — the cron poker stays idle until you create it" \
+      "run 'claude setup-token' for CLAUDE_CODE_OAUTH_TOKEN, choose a random BIONIC_NTFY_TOPIC, write both KEY=VALUE lines to ${f}, then 'chmod 600 ${f}' (never committed, never auto-created)"
+    return 0
+  fi
+  local mode
+  mode="$(_cron_env_mode "$f")"
+  if [ "$mode" != "600" ]; then
+    step_warn env "${f} is mode ${mode:-unknown}, expected 600" \
+      "run 'chmod 600 ${f}' — it holds the CLAUDE_CODE_OAUTH_TOKEN and BIONIC_NTFY_TOPIC secrets"
+    return 0
+  fi
+  local missing=()
+  grep -q '^CLAUDE_CODE_OAUTH_TOKEN=' "$f" || missing+=("CLAUDE_CODE_OAUTH_TOKEN")
+  grep -q '^BIONIC_NTFY_TOPIC=' "$f" || missing+=("BIONIC_NTFY_TOPIC")
+  if [ "${#missing[@]}" -gt 0 ]; then
+    step_warn env "${f} is missing key(s): ${missing[*]}" \
+      "add ${missing[*]} to ${f} (the token comes from 'claude setup-token')"
+    return 0
+  fi
+  step_ok env "mode 600, both keys present"
+  return 0
+}
+
+# do_register_poker_cron — C7. Install the marker-tagged */3 entry idempotently:
+# every foreign entry is preserved byte-identical, the entry is appended when
+# the marker is absent and replaced in place when a marker line already exists
+# but differs. `crontab -l` exits 1 on an empty/absent crontab — that is
+# normal, not an error, so the read is guarded (|| true) to stay set -e safe.
+do_register_poker_cron() {
+  local marker="# BIONIC-SDLC-POKER"
+  local entry='*/3 * * * * PATH=/opt/homebrew/bin:/usr/bin:/bin /bin/sh -c '\''. "$HOME/.claude/cron.env" && "$HOME/.claude/hooks/sdlc-poker.sh" >> "$HOME/.claude/sdlc-poker.log" 2>&1'\'' # BIONIC-SDLC-POKER'
+  step_start "crontab (sdlc-poker every 3 min)"
+
+  # No cron on this host (minimal container, some CI) → skip, don't fail:
+  # the poker relay is optional and a missing cron daemon must not turn a
+  # clean bootstrap into a failure. macOS and WSL2 always ship crontab.
+  if ! command -v crontab >/dev/null 2>&1; then
+    step_skip tool "crontab not available — the sdlc-poker cron entry was not registered" \
+      "install cron (macOS ships it; Debian/Ubuntu: apt-get install cron), then re-run ./claude-bootstrap.sh"
+    return 0
+  fi
+
+  # Probe + record the claude binary path at registration time (C7): the
+  # entry's PATH is fixed for macOS, so a host whose claude lives elsewhere
+  # (WSL2) surfaces here rather than as a silent run-time no-op.
+  local claude_path
+  claude_path="$(command -v claude 2>/dev/null || true)"
+
+  # Read the current crontab; exit-1 (empty/absent) is normal — guard it.
+  local current
+  current="$(crontab -l 2>/dev/null || true)"
+
+  # Foreign entries = every non-marker line, kept byte-identical.
+  local foreign=""
+  if [ -n "$current" ]; then
+    foreign="$(printf '%s\n' "$current" | grep -vF "$marker" || true)"
+  fi
+  local desired
+  if [ -n "$foreign" ]; then
+    desired="${foreign}"$'\n'"${entry}"
+  else
+    desired="${entry}"
+  fi
+
+  if [ "$current" = "$desired" ]; then
+    step_cached state "already registered${claude_path:+; claude: ${claude_path}}"
+    return 0
+  fi
+
+  local verb="installed"
+  if printf '%s\n' "$current" | grep -qF "$marker"; then
+    verb="replaced"
+  fi
+  if printf '%s\n' "$desired" | crontab -; then
+    step_ok state "entry ${verb}${claude_path:+; claude: ${claude_path}}"
+  else
+    step_fail state "could not write crontab" "run 'crontab -e' and add the sdlc-poker */3 entry by hand, then re-run ./claude-bootstrap.sh"
+  fi
+  return 0
+}
+
+section "Cron (sdlc-poker)"
+do_verify_cron_env
+do_register_poker_cron
 
 # ─── Account-mirror symlinks ────────────────────────────────────────────────
 #
