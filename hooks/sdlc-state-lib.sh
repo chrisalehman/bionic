@@ -1,6 +1,6 @@
 #!/bin/bash
 # sdlc-state-lib — durable per-goal state primitives (epic-10-never-die,
-# wave-01-substrate, slice 4/1: baton primitives).
+# waves 01-02): baton primitives, ledger, WIP shadow store, effect guard.
 #
 # A sourced function library (D3) — no standalone process, nothing runs on
 # source. Ships the baton half of the durable-state substrate: a structured-
@@ -673,6 +673,27 @@ sdlc_wip_restore() {
     IFS= read -r -d '' path || { rm -f "$difftmp"; echo "defect: restore-failed: truncated diff-tree stream for '$sha' in: $dir" >&2; return 1; }
     # meta = ":<src-mode> <dst-mode> <src-sha> <dst-sha> <status>" (leading ':' stripped).
     read -r src_mode dst_mode src_sha dst_sha status <<< "${meta#:}"
+    # Path-containment guard (forged/corrupted-object hardening, ADR-001 D5).
+    # $path is about to be joined as "$dir/$path" and written or removed. A
+    # normal snapshot can't carry an escaping path (git add rejects absolute
+    # paths and '..'), but a FORGED/corrupted snapshot object can — a tree
+    # with a '..'-named subtree yields a '../escape' delta path, and a raw
+    # tree hand-built past fsck can carry a leading '/'. Either would let
+    # restore write/remove outside "$dir". Reject BEFORE building $target, so
+    # neither branch (A/M write, D remove) can act on it. The '..' test is
+    # slash-bounded ("/$path/" vs */../*) — a precise PATH-COMPONENT match, so
+    # a legitimate dotted filename like 'a..b.txt' is NOT rejected, whereas a
+    # bare '..' substring test would false-reject it.
+    case "$path" in
+      /*) rm -f "$difftmp"
+          echo "defect: restore-unsafe-path: refusing absolute path '$path' from snapshot '$sha' in: $dir" >&2
+          return 1 ;;
+    esac
+    case "/$path/" in
+      */../*) rm -f "$difftmp"
+              echo "defect: restore-unsafe-path: refusing '..' traversal in path '$path' from snapshot '$sha' in: $dir" >&2
+              return 1 ;;
+    esac
     target="$dir/$path"
     case "$status" in
       D)

@@ -551,6 +551,81 @@ ac_w1_restore_lost() {
 }
 ac_w1_restore_lost
 
+echo "--- restore path-containment (FLAG-1): forged '..'/absolute delta paths refused, legit dotted/nested paths restore ---"
+# Threat model: a FORGED or corrupted snapshot object whose delta carries a
+# path that escapes "$dir". A normal snapshot can't (git add rejects '..' and
+# absolute paths), so both fixtures below forge tree objects directly. The
+# traversal object is a real git tree (a '..'-named subtree, built with
+# mktree); the absolute-path object is a raw tree hand-built past fsck with
+# `hash-object --literally` (mktree forbids slashes in a name). Both drive the
+# REAL sdlc_wip_restore — the plumbing is forged, the restore is not.
+hex2bin() {  # <hex-sha> → 20 raw bytes on stdout
+  local h="$1" i
+  for ((i = 0; i < ${#h}; i += 2)); do printf "\\x${h:i:2}"; done
+}
+# forge_traversal_commit <repo-dir> <sentinel-basename> <content> → commit sha.
+# Delta path is "../<sentinel-basename>" so restore's "$dir/$path" join escapes
+# to <dir>'s SIBLING. -p HEAD so the restore's "$sha^" parent resolves.
+forge_traversal_commit() {
+  local d="$1" name="$2" content="$3" blob inner outer
+  blob=$(printf '%s' "$content" | git -C "$d" hash-object -w --stdin)
+  inner=$(printf '100644 blob %s\t%s\n' "$blob" "$name" | git -C "$d" mktree)
+  outer=$(printf '040000 tree %s\t..\n' "$inner" | git -C "$d" mktree)
+  git -C "$d" commit-tree "$outer" -p "$(git -C "$d" rev-parse HEAD)" -m forged-traversal
+}
+# forge_absolute_commit <repo-dir> <content> → commit sha; delta path "/abs.txt".
+forge_absolute_commit() {
+  local d="$1" content="$2" blob binf tree
+  blob=$(printf '%s' "$content" | git -C "$d" hash-object -w --stdin)
+  binf=$(mktemp); CLEAN_DIRS+=("$binf")
+  { printf '100644 /abs.txt\0'; hex2bin "$blob"; } > "$binf"
+  tree=$(git -C "$d" hash-object -w -t tree --literally "$binf")
+  git -C "$d" commit-tree "$tree" -p "$(git -C "$d" rev-parse HEAD)" -m forged-absolute
+}
+
+ac_w1_restore_traversal() {
+  local d gid sentinel forged err rc
+  d=$(new_wip_repo); gid="wip-goal-traversal"
+  sentinel="$(dirname "$d")/wip-escape-sentinel-$$.txt"
+  rm -f "$sentinel"                                   # ensure a clean slate
+  forged=$(forge_traversal_commit "$d" "wip-escape-sentinel-$$.txt" "PWNED")
+  err=$(sdlc_wip_restore "$gid" "$forged" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 FLAG-1 restore refuses a '..'-traversal delta path (nonzero)" "$rc"
+  assert_contains "AC-W1 FLAG-1 traversal defect names restore-unsafe-path" "restore-unsafe-path" "$err"
+  assert_true "AC-W1 FLAG-1 traversal wrote NO file outside the fixture dir" test ! -e "$sentinel"
+  rm -f "$sentinel"
+}
+ac_w1_restore_traversal
+
+ac_w1_restore_absolute() {
+  local d gid forged err rc
+  d=$(new_wip_repo); gid="wip-goal-absolute"
+  forged=$(forge_absolute_commit "$d" "PWNED-ABS")
+  err=$(sdlc_wip_restore "$gid" "$forged" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 FLAG-1 restore refuses an absolute delta path (nonzero)" "$rc"
+  assert_contains "AC-W1 FLAG-1 absolute defect names restore-unsafe-path" "restore-unsafe-path" "$err"
+}
+ac_w1_restore_absolute
+
+# Positive control: legit nested and dotted-filename paths must NOT false-reject
+# (proves the '..' check is a precise PATH-COMPONENT match, not a bare substring).
+ac_w1_restore_legit_dotted() {
+  local d gid snap rc
+  d=$(new_wip_repo); gid="wip-goal-dotted"
+  mkdir -p "$d/sub/dir"
+  printf 'nested ok\n'  > "$d/sub/dir/ok.txt"          # legit nested path
+  printf 'dotted ok\n'  > "$d/a..b.txt"                # filename literally containing '..'
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  rm -f "$d/sub/dir/ok.txt" "$d/a..b.txt"              # clobber both
+  sdlc_wip_restore "$gid" "$snap" "$d" 2>/dev/null; rc=$?
+  assert_eq "AC-W1 FLAG-1 legit nested+dotted paths restore exits 0 (no false-reject)" "0" "$rc"
+  assert_eq "AC-W1 FLAG-1 nested path restored byte-faithful" \
+    "nested ok" "$(cat "$d/sub/dir/ok.txt" 2>/dev/null)"
+  assert_eq "AC-W1 FLAG-1 dotted filename 'a..b.txt' restored byte-faithful" \
+    "dotted ok" "$(cat "$d/a..b.txt" 2>/dev/null)"
+}
+ac_w1_restore_legit_dotted
+
 echo ""
 echo "=== AC-W2: WIP loss detection — healthy/none silent, each planted loss class named loud (both directions) ==="
 
