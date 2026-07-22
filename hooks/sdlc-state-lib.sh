@@ -164,3 +164,188 @@ baton_parse() {
   BATON_WRITTEN_AT="$v_written_at"
   return 0
 }
+
+# ---------- R-L1/R-L2: ledger primitives (slice 4/2) ----------
+#
+# Ledger placement mirrors the baton (D1): $SDLC_STATE_DIR/<goal-id>/ledger.log,
+# same override convention, dir created lib-side (mkdir -p) on first append.
+#
+# Line format (D4/R-L1), TAB-separated (matches context-spend's existing TSV
+# state-file convention, AS-2) with the free-text summary as the LAST field:
+#   ts \t seq \t digest \t type \t effect-key \t summary
+# The summary is deliberately the final field: bash `read` folds any excess
+# tokens (including embedded separators) into the last variable, so a summary
+# containing spaces is always safe. Embedded tabs/newlines in effect-key or
+# summary are rejected at append time (see ledger_append) rather than
+# tolerated, so every line is guaranteed to carry exactly 6 fields — the
+# invariant ledger_verify's chain walk depends on.
+#
+# Tamper evidence (D4): `digest` is an 8-hex prefix of sha256(previous line's
+# full raw content) — NOT of the line's own content — so editing a line in
+# place does not corrupt its own digest field, but breaks the NEXT line's
+# chain reference, surfacing the edit on verify. The first line has no
+# previous line, so it chains from a fixed genesis marker,
+# LEDGER_GENESIS_MARKER, named here for auditability.
+#
+# Digest tool portability (AS-1): probed once per process into
+# LEDGER_DIGEST_TOOL — `shasum -a 256` (macOS) else `sha256sum` (linux);
+# loud error if neither is on PATH.
+
+LEDGER_GENESIS_MARKER="SDLC-LEDGER-GENESIS-v1"
+
+ledger_path() { printf '%s/ledger.log' "$(baton_goal_dir "$1")"; }
+
+# ledger_digest_tool_probe — sets LEDGER_DIGEST_TOOL once; idempotent.
+ledger_digest_tool_probe() {
+  [ -n "${LEDGER_DIGEST_TOOL:-}" ] && return 0
+  if command -v shasum >/dev/null 2>&1; then LEDGER_DIGEST_TOOL="shasum"; return 0; fi
+  if command -v sha256sum >/dev/null 2>&1; then LEDGER_DIGEST_TOOL="sha256sum"; return 0; fi
+  echo "defect: no-digest-tool: neither shasum nor sha256sum found on PATH" >&2
+  return 1
+}
+
+# ledger_digest <content> — prints the 8-hex prefix of sha256(content).
+# Requires LEDGER_DIGEST_TOOL already probed.
+ledger_digest() {
+  case "$LEDGER_DIGEST_TOOL" in
+    shasum)    printf '%s' "$1" | shasum -a 256 | cut -c1-8 ;;
+    sha256sum) printf '%s' "$1" | sha256sum    | cut -c1-8 ;;
+  esac
+}
+
+# ---------- R-L1: ledger_append ----------
+# ledger_append <goal-id> <type> <effect-key> <summary>
+# type is `decision` or `effect` (R-L1). Appends one line: journal-before-act
+# is a prose contract on the CALLER (append is the first act of any
+# non-deterministic decision) — this primitive only guarantees the append
+# itself is well-formed and atomic (single O_APPEND-style write; no tmp+mv,
+# per the append-only contract — never rewrites existing lines). seq is
+# strictly monotonic, derived from the last line currently on disk (1 if the
+# ledger is absent or empty).
+ledger_append() {
+  local goal_id="${1:-}" type="${2:-}" key="${3:-}" summary="${4:-}"
+  local dir path last_line prev_content seq ts digest new_line
+
+  [ -n "$goal_id" ] || { echo "defect: missing-goal-id: ledger_append requires a non-empty goal-id" >&2; return 1; }
+  case "$type" in
+    decision|effect) ;;
+    *) echo "defect: bad-type: ledger_append type must be 'decision' or 'effect', got '${type:-<empty>}'" >&2; return 1 ;;
+  esac
+  [ -n "$key" ] || { echo "defect: missing-effect-key: ledger_append requires a non-empty effect-key" >&2; return 1; }
+  case "$key" in
+    *$'\t'*|*$'\n'*) echo "defect: invalid-effect-key: effect-key must not contain a tab or newline" >&2; return 1 ;;
+  esac
+  case "$summary" in
+    *$'\t'*|*$'\n'*) echo "defect: invalid-summary: summary must not contain a tab or newline" >&2; return 1 ;;
+  esac
+
+  ledger_digest_tool_probe || return 1
+
+  dir="$(baton_goal_dir "$goal_id")"
+  mkdir -p "$dir" 2>/dev/null || { echo "defect: mkdir-failed: cannot create $dir" >&2; return 1; }
+  path="$(ledger_path "$goal_id")"
+
+  if [ -s "$path" ]; then
+    last_line=$(tail -n 1 "$path")
+    seq=$(printf '%s' "$last_line" | awk -F'\t' '{print $2}')
+    seq=$((seq + 1))
+    prev_content="$last_line"
+  else
+    seq=1
+    prev_content="$LEDGER_GENESIS_MARKER"
+  fi
+
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  digest=$(ledger_digest "$prev_content")
+  new_line="$(printf '%s\t%s\t%s\t%s\t%s\t%s' "$ts" "$seq" "$digest" "$type" "$key" "$summary")"
+
+  printf '%s\n' "$new_line" >> "$path" 2>/dev/null || { echo "defect: append-failed: cannot append to $path" >&2; return 1; }
+  return 0
+}
+
+# ---------- R-L2: ledger_verify ----------
+# ledger_verify <goal-id>
+# Walks the whole chain. Defect classes (each named on stderr, nonzero
+# exit): missing-ledger (file absent — distinct from an empty file, which is
+# vacuously pristine and verifies silent/0, since there is nothing yet to
+# tamper with), truncated-ledger (missing trailing newline — the same
+# mid-flush-cut signal AS-10 established for the baton), seq-gap (the seq
+# values present do not form a contiguous 1..N run — something is missing),
+# seq-reorder (the seq values ARE the complete 1..N set, but not in
+# ascending physical file order — lines were transposed), in-place-edit
+# (chained-digest mismatch — a line's content was changed without
+# recomputing the chain). A pristine ledger is silent and returns 0.
+ledger_verify() {
+  local goal_id="${1:-}" path
+  [ -n "$goal_id" ] || { echo "defect: missing-goal-id: ledger_verify requires a non-empty goal-id" >&2; return 1; }
+  path="$(ledger_path "$goal_id")"
+
+  [ -f "$path" ] || { echo "defect: missing-ledger: ledger not found: $path" >&2; return 1; }
+  [ -s "$path" ] || return 0
+
+  if [ "$(tail -c1 "$path" 2>/dev/null | wc -l | tr -d '[:space:]')" != "1" ]; then
+    echo "defect: truncated-ledger: ledger does not end with a newline (cut off mid-write): $path" >&2
+    return 1
+  fi
+
+  ledger_digest_tool_probe || return 1
+
+  local n=0 line
+  local seqs=() lines=()
+  while IFS= read -r line; do
+    n=$((n + 1))
+    seqs+=("$(printf '%s' "$line" | awk -F'\t' '{print $2}')")
+    lines+=("$line")
+  done < "$path"
+
+  local unique_sorted unique_count max_seq
+  unique_sorted=$(printf '%s\n' "${seqs[@]}" | sort -n -u)
+  unique_count=$(printf '%s\n' "$unique_sorted" | grep -c .)
+  max_seq=$(printf '%s\n' "$unique_sorted" | tail -1)
+
+  if [ "$unique_count" -ne "$n" ] || [ "$max_seq" != "$n" ]; then
+    echo "defect: seq-gap: ledger has $n lines but sequence numbers do not form a contiguous 1..$n run (distinct values: $unique_count, max: $max_seq): $path" >&2
+    return 1
+  fi
+
+  local i
+  for ((i = 0; i < n; i++)); do
+    if [ "${seqs[$i]}" != "$((i + 1))" ]; then
+      echo "defect: seq-reorder: line $((i + 1)) has seq=${seqs[$i]}, expected seq=$((i + 1)) in file order: $path" >&2
+      return 1
+    fi
+  done
+
+  local prev_content expected_digest actual_digest rest
+  prev_content="$LEDGER_GENESIS_MARKER"
+  for ((i = 0; i < n; i++)); do
+    actual_digest=$(printf '%s' "${lines[$i]}" | awk -F'\t' '{print $3}')
+    expected_digest=$(ledger_digest "$prev_content")
+    if [ "$actual_digest" != "$expected_digest" ]; then
+      echo "defect: in-place-edit: line $((i + 1)) digest mismatch (expected $expected_digest, got $actual_digest) — content changed without a chain-consistent digest: $path" >&2
+      return 1
+    fi
+    prev_content="${lines[$i]}"
+  done
+
+  return 0
+}
+
+# ---------- R-L1: ledger_applied ----------
+# ledger_applied <goal-id> <effect-key>
+# Exit 0 iff an `effect`-type line with that exact effect-key exists;
+# nonzero otherwise (including an absent or empty ledger — silent, since
+# "not yet applied" is the ordinary case, not a defect). A `decision`-type
+# line sharing the same key is deliberately NOT a match (both directions of
+# R-L1's membership check).
+ledger_applied() {
+  local goal_id="${1:-}" key="${2:-}" path line l_type l_key
+  [ -n "$goal_id" ] || return 1
+  path="$(ledger_path "$goal_id")"
+  [ -f "$path" ] && [ -s "$path" ] || return 1
+
+  while IFS=$'\t' read -r _ _ _ l_type l_key _; do
+    [ "$l_type" = "effect" ] && [ "$l_key" = "$key" ] && return 0
+  done < "$path"
+  return 1
+}

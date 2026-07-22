@@ -236,8 +236,168 @@ ac_b2_no_partial_trust() {
 ac_b2_no_partial_trust
 
 # ============================================================
+# ledger fixture helpers (slice 4/2) — build via the REAL ledger_append;
+# planted-corruption cases forge lines by construction (awk splice), never
+# by reimplementing digest/seq logic.
+# ============================================================
+
+# build_healthy_ledger <goal-id> — three real appends (decision, effect,
+# decision); echoes the ledger's path.
+build_healthy_ledger() {
+  local gid="$1"
+  ledger_append "$gid" "decision" "step-a" "first decision" >/dev/null 2>&1
+  ledger_append "$gid" "effect" "step-a-applied" "applied step a" >/dev/null 2>&1
+  ledger_append "$gid" "decision" "step-b" "second decision" >/dev/null 2>&1
+  printf '%s' "$(ledger_path "$gid")"
+}
+
+# ============================================================
+echo "=== AC-L1: ordered ledger journaling + ledger_applied (both directions) ==="
+ac_l1() {
+  new_state_dir
+  local gid="wave-01-substrate-4-2"
+  assert_true "AC-L1 first decision append succeeds" ledger_append "$gid" "decision" "choose-approach" "decided to use tab-separated chained log"
+  assert_true "AC-L1 second append (effect) succeeds" ledger_append "$gid" "effect" "wrote-file-x" "wrote config to /tmp/x"
+  assert_true "AC-L1 third append (decision) succeeds" ledger_append "$gid" "decision" "choose-approach-2" "picked a fixed genesis marker"
+
+  local path="$SDLC_STATE_DIR/$gid/ledger.log"
+  assert_true "AC-L1 ledger file exists" test -f "$path"
+  assert_eq "AC-L1 exactly 3 lines written" "3" "$(wc -l < "$path" | tr -d ' ')"
+
+  local seqs
+  seqs=$(awk -F'\t' '{print $2}' "$path" | tr '\n' ',')
+  assert_eq "AC-L1 seq is strictly monotonic from 1" "1,2,3," "$seqs"
+
+  assert_true "AC-L1 ledger_applied finds a known effect-key" ledger_applied "$gid" "wrote-file-x"
+
+  TOTAL=$((TOTAL + 1))
+  if ledger_applied "$gid" "never-happened"; then
+    fail "AC-L1 ledger_applied rejects an unknown effect-key"
+  else
+    pass "AC-L1 ledger_applied rejects an unknown effect-key"
+  fi
+
+  TOTAL=$((TOTAL + 1))
+  if ledger_applied "$gid" "choose-approach"; then
+    fail "AC-L1 ledger_applied does not false-positive on a decision-type line sharing the key"
+  else
+    pass "AC-L1 ledger_applied does not false-positive on a decision-type line sharing the key"
+  fi
+}
+ac_l1
+
+echo "--- ledger_applied on an absent ledger: nonzero, silent (not-applied) ---"
+ac_l1_absent() {
+  new_state_dir
+  local err rc
+  err=$(ledger_applied "no-such-goal" "whatever" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-L1 ledger_applied on absent ledger returns nonzero" "$rc"
+  assert_eq "AC-L1 ledger_applied on absent ledger is silent (no stderr)" "" "$err"
+}
+ac_l1_absent
+
+echo "--- ledger_append rejects a bad type (fail-closed) ---"
+ac_l1_bad_type() {
+  new_state_dir
+  local rc
+  ledger_append "bad-type-goal" "not-a-type" "k" "s" >/dev/null 2>&1; rc=$?
+  assert_nonzero "AC-L1 ledger_append rejects an invalid type" "$rc"
+}
+ac_l1_bad_type
+
+# ============================================================
+echo "=== AC-L2: ledger tamper evidence — pristine + each planted defect class ==="
+
+echo "--- pristine ledger verifies silent, exit 0 ---"
+ac_l2_pristine() {
+  new_state_dir
+  local gid="pristine-goal" errf rc
+  build_healthy_ledger "$gid" >/dev/null
+  errf="$(mktemp)"; CLEAN_DIRS+=("$errf")
+  ledger_verify "$gid" 2>"$errf"; rc=$?
+  assert_eq "AC-L2 pristine ledger exits 0" "0" "$rc"
+  assert_eq "AC-L2 pristine ledger is silent on stderr" "" "$(cat "$errf")"
+}
+ac_l2_pristine
+
+echo "--- absent ledger: named defect, distinct from empty ---"
+ac_l2_absent() {
+  new_state_dir
+  local err rc
+  err=$(ledger_verify "no-such-goal" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-L2 absent ledger returns nonzero" "$rc"
+  assert_contains "AC-L2 absent ledger defect names it missing" "missing-ledger" "$err"
+}
+ac_l2_absent
+
+echo "--- empty (zero-byte) ledger: silent, exit 0 — distinct from absent ---"
+ac_l2_empty() {
+  new_state_dir
+  local gid="empty-goal" dir path errf rc
+  dir="$SDLC_STATE_DIR/$gid"; mkdir -p "$dir"
+  path="$dir/ledger.log"; : > "$path"
+  errf="$(mktemp)"; CLEAN_DIRS+=("$errf")
+  ledger_verify "$gid" 2>"$errf"; rc=$?
+  assert_eq "AC-L2 empty ledger exits 0 (vacuously pristine)" "0" "$rc"
+  assert_eq "AC-L2 empty ledger is silent on stderr" "" "$(cat "$errf")"
+}
+ac_l2_empty
+
+echo "--- planted seq-gap (middle line deleted) → nonzero + named defect ---"
+ac_l2_gap() {
+  new_state_dir
+  local gid="gap-goal" path errf rc
+  path=$(build_healthy_ledger "$gid")
+  awk 'NR!=2' "$path" > "$path.new" && mv "$path.new" "$path"
+  errf="$(mktemp)"; CLEAN_DIRS+=("$errf")
+  ledger_verify "$gid" 2>"$errf"; rc=$?
+  assert_nonzero "AC-L2 seq-gap returns nonzero" "$rc"
+  assert_contains "AC-L2 seq-gap defect names it" "seq-gap" "$(cat "$errf")"
+}
+ac_l2_gap
+
+echo "--- planted reorder (two lines swapped) → nonzero + named defect ---"
+ac_l2_reorder() {
+  new_state_dir
+  local gid="reorder-goal" path errf rc
+  path=$(build_healthy_ledger "$gid")
+  awk 'NR==1 { print; next } NR==2 { l2=$0; next } NR==3 { print; print l2; next } { print }' "$path" > "$path.new" && mv "$path.new" "$path"
+  errf="$(mktemp)"; CLEAN_DIRS+=("$errf")
+  ledger_verify "$gid" 2>"$errf"; rc=$?
+  assert_nonzero "AC-L2 reorder returns nonzero" "$rc"
+  assert_contains "AC-L2 reorder defect names it" "seq-reorder" "$(cat "$errf")"
+}
+ac_l2_reorder
+
+echo "--- planted in-place edit (line-2 summary rewritten, digest field untouched) → nonzero + named defect ---"
+ac_l2_edit() {
+  new_state_dir
+  local gid="edit-goal" path errf rc
+  path=$(build_healthy_ledger "$gid")
+  awk -F'\t' -v OFS='\t' 'NR==2 { $6="TAMPERED SUMMARY" } { print }' "$path" > "$path.new" && mv "$path.new" "$path"
+  errf="$(mktemp)"; CLEAN_DIRS+=("$errf")
+  ledger_verify "$gid" 2>"$errf"; rc=$?
+  assert_nonzero "AC-L2 in-place edit returns nonzero" "$rc"
+  assert_contains "AC-L2 in-place edit defect names it" "in-place-edit" "$(cat "$errf")"
+}
+ac_l2_edit
+
+echo "--- planted truncation (no trailing newline, mid-flush cut) → nonzero + named defect ---"
+ac_l2_truncated() {
+  new_state_dir
+  local gid="trunc-goal" path errf rc
+  path=$(build_healthy_ledger "$gid")
+  printf '%s' "$(cat "$path")" > "$path.new" && mv "$path.new" "$path"
+  errf="$(mktemp)"; CLEAN_DIRS+=("$errf")
+  ledger_verify "$gid" 2>"$errf"; rc=$?
+  assert_nonzero "AC-L2 truncated ledger returns nonzero" "$rc"
+  assert_contains "AC-L2 truncated ledger defect names truncation" "truncat" "$(cat "$errf")"
+}
+ac_l2_truncated
+
+# ============================================================
 echo ""
 echo "========================================"
-echo "sdlc-state baton primitives: $PASS/$TOTAL passed, $FAIL failed"
+echo "sdlc-state primitives (baton + ledger): $PASS/$TOTAL passed, $FAIL failed"
 echo "========================================"
 [ "$FAIL" -eq 0 ] || exit 1
