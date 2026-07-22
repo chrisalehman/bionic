@@ -305,18 +305,51 @@ acquire_lock() {
 release_lock() { rm -rf "$(lock_dir)" 2>/dev/null; }
 
 # ---------- C4: the poke ----------
+# Literal (regex-free) redaction of the standing-service secrets from a stderr
+# tail before it reaches the audit log (C4 amendment defensive filter). Values
+# are matched by exact substring — no ERE — so a token/topic with metacharacters
+# can never mis-anchor or leak. Reads the env values at call time.
+scrub_secrets() {  # stdin → stdout, secrets replaced with [REDACTED]
+  awk -v tok="${CLAUDE_CODE_OAUTH_TOKEN:-}" -v top="${BIONIC_NTFY_TOPIC:-}" '
+    function strip(line, s,   out, p) {
+      if (s == "") return line
+      out = ""
+      while ((p = index(line, s)) > 0) {
+        out = out substr(line, 1, p - 1) "[REDACTED]"
+        line = substr(line, p + length(s))
+      }
+      return out line
+    }
+    { print strip(strip($0, tok), top) }'
+}
+
 # Resume the stalled session and hand it the fixed prompt via STDIN (a positional
 # prompt after flags is swallowed, P1). Absolute binary (alias not inherited),
 # cd-first (--resume is cwd/project-scoped, P2), no --model (the resumed turn does
 # the goal's real work). Idempotent and leaf-agnostic. Echoes nothing; returns
-# the resume exit code (a nonzero poke still counts against the cap).
+# the resume exit code (a nonzero poke still counts against the cap). On rc≠0 the
+# audit POKE line carries a truncated (~120 chars, single-line), secret-scrubbed
+# trailing tail of the poke's COMBINED stdout+stderr (C4 amendment: the live
+# failure — "Not logged in · Please run /login" — rides the `-p` result stream on
+# STDOUT with stderr empty, so capturing stderr alone would still be blind); on
+# rc=0 no tail (nothing to diagnose).
 do_poke() {  # $1=goal-id ; uses REG_CWD, REG_SESSION_ID
-  local gid="$1" rc
+  local gid="$1" rc outf tail
+  outf=$(mktemp 2>/dev/null) || outf=""
   ( cd "$REG_CWD" 2>/dev/null && printf '%s' "$POKE_PROMPT" \
       | "$POKE_CLAUDE_BIN" --resume "$REG_SESSION_ID" -p --dangerously-skip-permissions \
-  ) >/dev/null 2>&1
+  ) >"${outf:-/dev/null}" 2>&1
   rc=$?
-  audit_line "$gid" POKE "resume $REG_SESSION_ID rc=$rc"
+  if [ "$rc" -ne 0 ] && [ -n "$outf" ] && [ -s "$outf" ]; then
+    # scrub → single-line → keep the trailing ~120 chars (the failure reason
+    # surfaces at the end of the stream); substr guards a short line.
+    tail=$(scrub_secrets < "$outf" | tr '\n\r' '  ' \
+      | awk '{ n=length($0); print (n>120 ? substr($0, n-119) : $0) }')
+    audit_line "$gid" POKE "resume $REG_SESSION_ID rc=$rc out: $tail"
+  else
+    audit_line "$gid" POKE "resume $REG_SESSION_ID rc=$rc"
+  fi
+  [ -n "$outf" ] && rm -f "$outf" 2>/dev/null
   return "$rc"
 }
 
@@ -343,11 +376,17 @@ do_notify() {  # $1=goal-id $2=event $3=body
   return 1
 }
 
-# ---------- C4 retry-cap: stall episodes ----------
-# Per-goal poke-episode state: "<transcript-mtime> <poke-count> <pokefail-sent>".
-# The episode is keyed by transcript mtime; any movement resets count + the
-# POKE-FAIL flag. A dead session's poke does not move the transcript, so repeated
-# stalls stay one episode and the cap bites.
+# ---------- C4 retry-cap: failure-aware stall episodes ----------
+# Per-goal poke-episode state: "<transcript-mtime> <poke-count> <pokefail-sent>
+# <last-rc> <state>". Every poke increments the count. The episode resets (count
+# + POKE-FAIL flag) only when:
+#   - the goal's classification changed since the last poke (goal state change), OR
+#   - the transcript moved AND the last poke SUCCEEDED (rc=0) — legitimate progress.
+# A transcript move that follows a FAILED poke (rc≠0) is the failure's own turn
+# write (e.g. a "Not logged in" reply) and must NEVER reset the episode — else a
+# persistently-failing target is poked unboundedly and POKE-FAIL never fires
+# (C4 amendment; observed live at 7 pokes/7 min, no cap). Cap exhaustion → a
+# single POKE-FAIL notification, then park until the episode legitimately resets.
 poke_state_file() { printf '%s/%s.poke' "$(state_dir)" "$1"; }
 
 transcript_mtime_key() {  # uses REG_CWD, REG_SESSION_ID
@@ -356,30 +395,33 @@ transcript_mtime_key() {  # uses REG_CWD, REG_SESSION_ID
   file_mtime "$t" 2>/dev/null || printf 'none'
 }
 
-# Poke a stalled goal, honoring the per-episode cap. On cap exhaustion emit a
-# single POKE-FAIL notification and park (until the episode resets on movement).
-poke_capped() {  # $1=goal-id
-  local gid="$1" pf mtime smtime scount sfail
+poke_capped() {  # $1=goal-id $2=classification
+  local gid="$1" state="$2" pf mtime smtime scount sfail slastrc sstate
   pf="$(poke_state_file "$gid")"
   mtime=$(transcript_mtime_key)
-  smtime=""; scount=0; sfail=0
+  smtime=""; scount=0; sfail=0; slastrc=0; sstate=""
   if [ -f "$pf" ]; then
-    read -r smtime scount sfail < "$pf" 2>/dev/null || true
-    [ -n "$scount" ] || scount=0
-    [ -n "$sfail" ] || sfail=0
+    read -r smtime scount sfail slastrc sstate < "$pf" 2>/dev/null || true
+    [ -n "$scount" ]  || scount=0
+    [ -n "$sfail" ]   || sfail=0
+    [ -n "$slastrc" ] || slastrc=0
   fi
-  [ "$mtime" = "$smtime" ] || { scount=0; sfail=0; }   # movement → new episode
+  if [ "$sstate" != "$state" ]; then
+    scount=0; sfail=0                                  # goal state change → new episode
+  elif [ "$mtime" != "$smtime" ] && [ "$slastrc" = "0" ]; then
+    scount=0; sfail=0                                  # progress after a good poke → new episode
+  fi                                                    # else: failed-poke move → same episode
   if [ "$scount" -ge "$POKE_CAP" ]; then
     if [ "$sfail" -ne 1 ]; then
       do_notify "$gid" POKE-FAIL "poke cap ($POKE_CAP) exhausted for $gid; parking until state change" \
         && sfail=1
     fi
-    printf '%s %s %s\n' "$mtime" "$scount" "$sfail" > "$pf" 2>/dev/null
+    printf '%s %s %s %s %s\n' "$mtime" "$scount" "$sfail" "$slastrc" "$state" > "$pf" 2>/dev/null
     return 0
   fi
-  do_poke "$gid"                                        # counts regardless of exit
+  do_poke "$gid"; slastrc=$?                            # counts regardless of exit
   scount=$((scount + 1))
-  printf '%s %s %s\n' "$mtime" "$scount" "$sfail" > "$pf" 2>/dev/null
+  printf '%s %s %s %s %s\n' "$mtime" "$scount" "$sfail" "$slastrc" "$state" > "$pf" 2>/dev/null
 }
 
 # ---------- C3: action dispatch (the no-force table) ----------
@@ -410,7 +452,7 @@ dispatch_actions() {  # $1=gid $2=state $3=prev
       notify_and_cache "$gid" WEDGE \
         "goal $gid WEDGED: driving but transcript quiet >${WEDGE_QUIET}s. recovery: $(recovery_cmd)" "$prev" "$state" ;;
     DEAD|IDLE_STALLED)
-      poke_capped "$gid"; cache_state "$gid" "$state" ;;
+      poke_capped "$gid" "$state"; cache_state "$gid" "$state" ;;
     BUSY)
       audit_line "$gid" SKIP-BUSY "driving; left alone"; cache_state "$gid" "$state" ;;
     IDLE)
@@ -445,7 +487,21 @@ process_goals() {
   done
 }
 
+# C8 amendment: the poker SELF-SOURCES the standing-service env file so plain,
+# non-exported KEY=value lines reach the poke child and the notify path regardless
+# of how the cron entry sourced them (the C7 entry's `. cron.env` binds vars in the
+# sh -c shell only; the poker child inherits nothing → "Not logged in" + "no ntfy
+# topic configured", observed live). `set -a` exports every var the file defines;
+# guarded on existence; the env path is overridable for the fixture suite.
+env_self_source() {
+  local envf; envf="${BIONIC_CRON_ENV:-$HOME/.claude/cron.env}"
+  [ -f "$envf" ] || return 0
+  set -a; . "$envf" 2>/dev/null; set +a
+  return 0
+}
+
 main() {
+  env_self_source
   mkdir -p "$(goals_dir)" "$(status_dir)" "$(state_dir)" 2>/dev/null
   acquire_lock || exit 0             # live overlap → silent, normal
   process_goals

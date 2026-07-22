@@ -55,10 +55,23 @@ if [ "$1" = "agents" ]; then
   [ -f "$STUBDIR/registry.json" ] && cat "$STUBDIR/registry.json"
   exit "$rc"
 fi
-# POKE path: capture argv, cwd, and stdin; honor a planted exit code.
+# POKE path: capture argv, cwd, stdin, and whether the OAuth token reached this
+# child (F1); honor planted stderr (F3), a per-call transcript append (F2, models
+# the live "Not logged in" turn write), and an exit code.
 echo "$*" >> "$STUBDIR/claude-calls.log"
 pwd >> "$STUBDIR/claude-cwd.log"
 cat >> "$STUBDIR/claude-stdin.log"
+if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+  echo present >> "$STUBDIR/claude-token.log"
+else
+  echo absent >> "$STUBDIR/claude-token.log"
+fi
+[ -f "$STUBDIR/poke.stdout" ] && cat "$STUBDIR/poke.stdout"
+[ -f "$STUBDIR/poke.stderr" ] && cat "$STUBDIR/poke.stderr" >&2
+if [ -f "$STUBDIR/poke-append" ]; then
+  tp=$(cat "$STUBDIR/poke-append")
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text"}]}}' >> "$tp"
+fi
 prc=0
 [ -f "$STUBDIR/poke.rc" ] && prc=$(cat "$STUBDIR/poke.rc")
 exit "$prc"
@@ -170,12 +183,27 @@ run_poker() {
     BIONIC_NTFY_TOPIC="${BIONIC_NTFY_TOPIC:-}" bash "$POKER" 2>&1); POKER_EXIT=$?
 }
 
+# A cron-faithful poll (F1): model the C7 entry's `. cron.env && poker`, but with
+# NEITHER the token NOR the topic present in the invoking environment (env -u), and
+# the cron.env sourced by the PARENT sh as PLAIN, non-exported KEY=value — so the
+# parent-shell binding does NOT reach the poker child. Only the poker's own
+# self-source (C8 amendment) can carry the identity through. No BIONIC_NTFY_TOPIC
+# is injected here (unlike run_poker); the poker must self-source it.
+run_poker_cron() {
+  local cronenv="$HOME/.claude/cron.env"
+  POKER_OUT=$(env -u BIONIC_NTFY_TOPIC -u CLAUDE_CODE_OAUTH_TOKEN \
+    HOME="$HOME" PATH="$HOME/.claude/.stub:$ORIG_PATH" \
+    POKE_CLAUDE_BIN="$HOME/.claude/.stub/claude" \
+    /bin/sh -c '. "$1" && bash "$2"' sh "$cronenv" "$POKER" 2>&1); POKER_EXIT=$?
+}
+
 audit_of()  { cat "$HOME/.claude/sdlc-poker-audit.log" 2>/dev/null || true; }
 status_of() { cat "$HOME/.claude/sdlc-status/$1.md" 2>/dev/null || true; }
 status_exists() { [ -f "$HOME/.claude/sdlc-status/$1.md" ]; }
 claude_calls() { cat "$HOME/.claude/.stub/claude-calls.log" 2>/dev/null || true; }
 claude_stdin() { cat "$HOME/.claude/.stub/claude-stdin.log" 2>/dev/null || true; }
 claude_cwd()   { cat "$HOME/.claude/.stub/claude-cwd.log" 2>/dev/null || true; }
+claude_token() { cat "$HOME/.claude/.stub/claude-token.log" 2>/dev/null || true; }
 curl_calls()   { cat "$HOME/.claude/.stub/curl-calls.log" 2>/dev/null || true; }
 count_lines()  { printf '%s' "$1" | grep -c -e "$2" 2>/dev/null || true; }
 # A real, existing cwd (the poke `cd`s into it) mapped like production paths.
@@ -594,6 +622,112 @@ p11() {
   else fail "4/2-11 topic secrecy" "topic value leaked into audit/status"; fi
 }
 p11
+
+# ============================================================
+# ============  slice 4/3 — T3 walk findings  ================
+# F1 env self-source (C8 amendment), F2 failure-aware retry-cap (C4 amendment),
+# F3 stderr audit tail (C4 amendment). Root-cause evidence: .bionic/tmp/walk/walk.log
+# (7 unbounded rc=1 pokes, no POKE-FAIL, stderr swallowed, "no ntfy topic").
+
+echo "=== 4/3-1 (F1): poker self-sources cron.env → token reaches poke child, topic reaches notify ==="
+f1() {
+  new_home
+  # cron.env with PLAIN (non-exported) KEY=value lines — the live file shape.
+  {
+    echo "CLAUDE_CODE_OAUTH_TOKEN=fake-oauth-token-value"
+    echo "BIONIC_NTFY_TOPIC=fake-selfsourced-topic"
+  } > "$HOME/.claude/cron.env"
+  chmod 600 "$HOME/.claude/cron.env"
+  local dcwd ccwd
+  dcwd=$(real_cwd f1d); ccwd=$(real_cwd f1c)
+  arm_goal f1dead 4  "$dcwd" sid-f1d 2147483647 30 user   # DEAD → poke (token check)
+  arm_goal f1comp 10 "$ccwd" sid-f1c 4242         30 user   # COMPLETE → notify (topic check)
+  stub_registry_state absent                                # sid-f1d absent → DEAD
+  run_poker_cron
+  assert_eq "4/3-1 poker exit 0 (cron-invoked, self-sourced)" 0 "$POKER_EXIT"
+  assert_contains "4/3-1 OAuth token reached the poke child (self-sourced from cron.env)" \
+    "present" "$(claude_token)"
+  assert_contains "4/3-1 ntfy topic reached do_notify (curl POST carries self-sourced topic)" \
+    "fake-selfsourced-topic" "$(curl_calls)"
+  TOTAL=$((TOTAL + 1))
+  if ! printf '%s' "$(claude_token)" | grep -qx absent; then
+    pass "4/3-1 no poke child ever saw an absent token"
+  else fail "4/3-1 token presence" "a poke child observed CLAUDE_CODE_OAUTH_TOKEN absent"; fi
+}
+f1
+
+echo "=== 4/3-2 (F2): failure-aware cap — rc=1 pokes that MOVE the transcript still hit POKE_CAP ==="
+# The rewritten proof for the recorded false-green: the pre-amendment episode was
+# keyed on transcript mtime alone, so a persistently-failing poke's own turn write
+# reset the episode every poll → unbounded pokes, POKE-FAIL never fired (live: 7/7).
+f2() {
+  new_home
+  local cwd tpath; cwd=$(real_cwd fp2)
+  arm_goal af2 4 "$cwd" sid-f2 4242 260 user    # idle + 260s → IDLE_STALLED (pokeable)
+  stub_registry_state idle sid-f2
+  echo 1 > "$HOME/.claude/.stub/poke.rc"         # every poke fails (models "Not logged in")
+  tpath="$(project_dir_for_cwd "$cwd")/sid-f2.jsonl"
+  # Each poll: the failed poke's own turn lands as fresh transcript movement
+  # (distinct, still-stale mtimes, all >QUIET_THRESHOLD so the goal stays IDLE_STALLED).
+  local age
+  for age in 250 240 230 220; do
+    set_mtime_age "$tpath" "$age"
+    run_poker
+  done
+  assert_eq "4/3-2 exactly POKE_CAP(3) pokes despite per-poll transcript movement" \
+    "3" "$(count_lines "$(claude_calls)" "resume sid-f2")"
+  assert_contains "4/3-2 POKE-FAIL fires (a failed poke's own write never resets the episode)" \
+    "Title: af2: POKE-FAIL" "$(curl_calls)"
+  set_mtime_age "$tpath" 210
+  run_poker                                       # parked: still no poke after cap
+  assert_eq "4/3-2 no further poke after cap (parked despite continued movement)" \
+    "3" "$(count_lines "$(claude_calls)" "resume sid-f2")"
+}
+f2
+
+echo "=== 4/3-3 (F3): rc!=0 POKE audit tail — combined stdout+stderr, trailing, truncated, scrubbed ==="
+f3() {
+  # 3a: the live failure ("Not logged in · Please run /login") rides STDOUT — the
+  # -p result stream — with stderr empty (walk repro). Capturing stderr alone
+  # would still be blind, so the audit tail must span the COMBINED stream.
+  new_home
+  local cwd; cwd=$(real_cwd fp3a)
+  arm_goal af3a 4 "$cwd" sid-f3a 2147483647 30 user   # dead pid + registry absent → DEAD → poke
+  stub_registry_state absent
+  echo 1 > "$HOME/.claude/.stub/poke.rc"
+  printf 'Not logged in - Please run /login (STDOUT-DISTINCTIVE)\n' > "$HOME/.claude/.stub/poke.stdout"
+  run_poker
+  assert_contains "4/3-3a live STDOUT failure line captured in the POKE audit tail" \
+    "STDOUT-DISTINCTIVE" "$(audit_of)"
+
+  # 3b: stderr is also captured; the tail is the TRAILING ~120 chars (the failure
+  # reason surfaces at the end of the stream) and the topic secret is scrubbed.
+  new_home
+  cwd=$(real_cwd fp3b)
+  arm_goal af3b 4 "$cwd" sid-f3b 2147483647 30 user
+  stub_registry_state absent
+  echo 1 > "$HOME/.claude/.stub/poke.rc"
+  {
+    printf 'LEADmarker '                               # far from the tail → truncated away
+    head -c 140 < /dev/zero | tr '\0' x
+    printf ' token=%s TRAILmarker\n' "$BIONIC_NTFY_TOPIC"   # inside the trailing tail
+  } > "$HOME/.claude/.stub/poke.stderr"
+  run_poker
+  local audit havetrail; audit="$(audit_of)"
+  assert_contains "4/3-3b stderr tail captured (trailing marker present)" "TRAILmarker" "$audit"
+  # Truncation + scrub are gated on the trailing marker being present, so neither
+  # passes vacuously if the stream is swallowed or the wrong end is kept.
+  havetrail=no; printf '%s' "$audit" | grep -qF -- "TRAILmarker" && havetrail=yes
+  TOTAL=$((TOTAL + 1))
+  if [ "$havetrail" = yes ] && ! printf '%s' "$audit" | grep -qF -- "LEADmarker"; then
+    pass "4/3-3b tail truncated to the trailing ~120 chars — LEADmarker dropped"
+  else fail "4/3-3b truncation" "tail absent or leading content survived truncation"; fi
+  TOTAL=$((TOTAL + 1))
+  if [ "$havetrail" = yes ] && ! printf '%s' "$audit" | grep -qF -- "$BIONIC_NTFY_TOPIC"; then
+    pass "4/3-3b topic secret scrubbed from the tail"
+  else fail "4/3-3b secret scrub" "tail absent or topic value leaked into the audit line"; fi
+}
+f3
 
 # ============================================================
 echo ""
