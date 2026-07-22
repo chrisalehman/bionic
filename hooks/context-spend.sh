@@ -134,8 +134,11 @@ if [ "$_ceiling" -gt 0 ] 2>/dev/null; then
       case "$_red" in ''|*[!0-9]*) _red=0 ;; esac
     fi
 
-    _cts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-    _cline() {  # $1=kind $2=extra — one audit line in the hook's line convention
+    _cline() {  # $1=kind $2=extra — one audit line in the hook's line convention.
+      # Timestamp computed HERE (not hoisted above) so the common
+      # below-threshold path — the vast majority of samples — forks no
+      # extra `date` process for a line it will never emit.
+      local _cts; _cts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
       printf '%s\n' "- $_cts context-spend ceiling $1: goal=$_goal_id $2 model=$MODEL ($PLAN)" \
         >> "$AUDIT_DIR_C/sdlc-v11-audit.md" 2>/dev/null
     }
