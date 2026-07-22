@@ -1229,6 +1229,7 @@ rm -rf "$SBX/.local"; : > "$LOG"; STEP_RECORDS=()
 _saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"; _saved_home="$HOME"; HOME="$SBX"
 step_start "claude CLI" >/dev/null
 RETRY_MAX=1 do_preflight_claude_cli >/dev/null; _rc=$?
+_path_after_call="$PATH"
 HOME="$_saved_home"; PATH="$_saved_path"
 [ "$_rc" = "0" ] && ok "claude cli: native fallback succeeds" || no "claude cli: fallback rc=$_rc"
 grep -q '^curl -fsSL https://claude.ai/install.sh' "$LOG" \
@@ -1237,6 +1238,12 @@ grep -q '^curl -fsSL https://claude.ai/install.sh' "$LOG" \
 case "${STEP_RECORDS[0]:-}" in
   ok\|prereq\|*native\ installer*) ok "claude cli: channel named in record" ;;
   *) no "claude cli: expected native-installer note (got: ${STEP_RECORDS[0]:-none})" ;;
+esac
+# D1: downstream steps (plugin/MCP registration) invoke `claude` by name, so a
+# native-only success must leave ~/.local/bin on PATH, not just pass -x.
+case ":$_path_after_call:" in
+  *":$SBX/.local/bin:"*) ok "claude cli: PATH gains ~/.local/bin after native-only success (D1)" ;;
+  *) no "claude cli: PATH missing ~/.local/bin after native-only success (D1): $_path_after_call" ;;
 esac
 
 # both fail → exit 2, message names both channels + cert hint
@@ -1257,6 +1264,24 @@ printf '%s' "$_out" | grep -q 'claude.ai/install.sh' \
   && ok "claude cli: exit message names native path" || no "claude cli: native path missing"
 printf '%s' "$_out" | grep -q 'brew postinstall openssl@3' \
   && ok "claude cli: exit message carries classified cert hint" || no "claude cli: cert hint missing"
+
+# D2: npm absent — a stale global RUN_ERR left over from an unrelated prior
+# run_retry (e.g. node's brew install) must not be misattributed as the
+# npm-channel failure reason when npm was never invoked at all.
+mv "${BIN}/npm" "${BIN}/npm.hidden"
+rm -rf "$SBX/.local"; : > "$LOG"
+RUN_ERR="stale brew noise"
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"; _saved_home="$HOME"; HOME="$SBX"
+_out="$( step_start "claude CLI" >/dev/null; RETRY_MAX=1 do_preflight_claude_cli 2>&1 )"; _rc=$?
+HOME="$_saved_home"; PATH="$_saved_path"
+mv "${BIN}/npm.hidden" "${BIN}/npm"
+[ "$_rc" = "2" ] && ok "claude cli: npm-absent both-channels-dead exits 2 (D2)" || no "claude cli: want 2, got $_rc (D2)"
+printf '%s' "$_out" | grep -q 'stale brew noise' \
+  && no "claude cli: exit message misattributed stale RUN_ERR as npm-channel reason (D2)" \
+  || ok "claude cli: exit message does not leak stale RUN_ERR (D2)"
+printf '%s' "$_out" | grep -qi 'npm unavailable' \
+  && ok "claude cli: npm-channel line honestly reflects unavailability (D2)" \
+  || no "claude cli: exit message does not say npm is unavailable (D2): $_out"
 
 # ---------- F6: run log init + rotation ----------
 _saved_home="$HOME"; HOME="$SBX"
