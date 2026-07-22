@@ -38,7 +38,11 @@ trap cleanup EXIT
 # reads $HOME at call time, so the single source is safe across cases.
 SDLC_POKER_LIB=1 . "$POKER"
 
-# ---------- fresh fake HOME + PATH-shadowed stub claude ----------
+# ---------- fresh fake HOME + PATH-shadowed stub claude / curl ----------
+# The claude stub serves canned `agents --json` registry states AND records the
+# POKE (argv → claude-calls.log, stdin → claude-stdin.log, cwd → claude-cwd.log),
+# honoring an optional exit code (poke.rc) so a failing poke can be planted. The
+# curl stub records the ntfy POST (argv → curl-calls.log), honoring curl.rc.
 new_home() {
   HOME=$(mktemp -d); export HOME
   mkdir -p "$HOME/.claude/sdlc-goals" "$HOME/.claude/sdlc-status" "$HOME/.claude/.stub"
@@ -51,11 +55,26 @@ if [ "$1" = "agents" ]; then
   [ -f "$STUBDIR/registry.json" ] && cat "$STUBDIR/registry.json"
   exit "$rc"
 fi
+# POKE path: capture argv, cwd, and stdin; honor a planted exit code.
 echo "$*" >> "$STUBDIR/claude-calls.log"
-exit 0
+pwd >> "$STUBDIR/claude-cwd.log"
+cat >> "$STUBDIR/claude-stdin.log"
+prc=0
+[ -f "$STUBDIR/poke.rc" ] && prc=$(cat "$STUBDIR/poke.rc")
+exit "$prc"
 STUB
   chmod +x "$HOME/.claude/.stub/claude"
+  cat > "$HOME/.claude/.stub/curl" <<'STUB'
+#!/bin/sh
+STUBDIR="$HOME/.claude/.stub"
+echo "$*" >> "$STUBDIR/curl-calls.log"
+crc=0
+[ -f "$STUBDIR/curl.rc" ] && crc=$(cat "$STUBDIR/curl.rc")
+exit "$crc"
+STUB
+  chmod +x "$HOME/.claude/.stub/curl"
   export PATH="$HOME/.claude/.stub:$ORIG_PATH"
+  export BIONIC_NTFY_TOPIC="test-secret-topic-$$"   # secret; must never reach audit/status
   CLEAN_HOMES+=("$HOME")
 }
 
@@ -141,13 +160,26 @@ stub_registry_state() {
 }
 
 # ---------- runners / assertions ----------
+# A poll: run the whole poker as a fresh child. POKE_CLAUDE_BIN points the
+# absolute-binary poke at the stub (C4 uses /opt/homebrew/bin/claude, overridable
+# exactly as the thresholds are — AS resolution logged in the report); the ntfy
+# topic rides through as the standing-service identity would supply it.
 run_poker() {
-  POKER_OUT=$(HOME="$HOME" PATH="$HOME/.claude/.stub:$ORIG_PATH" bash "$POKER" 2>&1); POKER_EXIT=$?
+  POKER_OUT=$(HOME="$HOME" PATH="$HOME/.claude/.stub:$ORIG_PATH" \
+    POKE_CLAUDE_BIN="$HOME/.claude/.stub/claude" \
+    BIONIC_NTFY_TOPIC="${BIONIC_NTFY_TOPIC:-}" bash "$POKER" 2>&1); POKER_EXIT=$?
 }
 
 audit_of()  { cat "$HOME/.claude/sdlc-poker-audit.log" 2>/dev/null || true; }
 status_of() { cat "$HOME/.claude/sdlc-status/$1.md" 2>/dev/null || true; }
 status_exists() { [ -f "$HOME/.claude/sdlc-status/$1.md" ]; }
+claude_calls() { cat "$HOME/.claude/.stub/claude-calls.log" 2>/dev/null || true; }
+claude_stdin() { cat "$HOME/.claude/.stub/claude-stdin.log" 2>/dev/null || true; }
+claude_cwd()   { cat "$HOME/.claude/.stub/claude-cwd.log" 2>/dev/null || true; }
+curl_calls()   { cat "$HOME/.claude/.stub/curl-calls.log" 2>/dev/null || true; }
+count_lines()  { printf '%s' "$1" | grep -c -e "$2" 2>/dev/null || true; }
+# A real, existing cwd (the poke `cd`s into it) mapped like production paths.
+real_cwd() { local d="$HOME/work/$1"; mkdir -p "$d"; printf '%s' "$d"; }
 
 assert_classify() {  # <gid> <expected> <label>
   TOTAL=$((TOTAL + 1))
@@ -167,7 +199,7 @@ assert_true() {  # <label> <cmd...>
 }
 assert_contains() {  # <label> <needle> <haystack>
   TOTAL=$((TOTAL + 1))
-  if printf '%s' "$3" | grep -qF "$2"; then pass "$1"; else fail "$1" "expected to contain '$2'"; fi
+  if printf '%s' "$3" | grep -qF -- "$2"; then pass "$1"; else fail "$1" "expected to contain '$2'"; fi
 }
 
 # A goal that is armed and classifiable: continuous plan + registration +
@@ -357,6 +389,211 @@ c12() {
   assert_true "case12b stale lock reclaimed → goal processed (status written)" status_exists g12b
 }
 c12
+
+# ============================================================
+# ===================  slice 4/2 — actions  ==================
+# poke (C4), retry-cap episodes, ntfy transitions (C5), no-force wedge (C3).
+
+echo "=== 4/2-1: DEAD armed goal → poke via stdin, absolute binary, cd-first, no --model ==="
+p1() {
+  new_home
+  local cwd; cwd=$(real_cwd d1)
+  arm_goal ad1 4 "$cwd" sid-d1 2147483647 30 user   # dead pid; registry absent → DEAD
+  stub_registry_state absent
+  run_poker
+  assert_eq "4/2-1 poker exit 0" 0 "$POKER_EXIT"
+  assert_contains "4/2-1 poke argv: --resume <sid> -p" "--resume sid-d1 -p" "$(claude_calls)"
+  assert_contains "4/2-1 poke argv: --dangerously-skip-permissions" "--dangerously-skip-permissions" "$(claude_calls)"
+  TOTAL=$((TOTAL + 1))
+  if ! printf '%s' "$(claude_calls)" | grep -q -- '--model'; then
+    pass "4/2-1 no --model override in poke argv"
+  else fail "4/2-1 no --model" "argv='$(claude_calls)'"; fi
+  assert_contains "4/2-1 POKE_PROMPT arrived via stdin" "continue per the plan" "$(claude_stdin)"
+  assert_contains "4/2-1 POKE_PROMPT carries the gate escape hatch" "if blocked on a decision" "$(claude_stdin)"
+  local exp; exp=$(cd "$cwd" 2>/dev/null && pwd)
+  assert_eq "4/2-1 poke ran cd-first in CWD" "$exp" "$(claude_cwd)"
+  assert_true "4/2-1 script pins the absolute poke binary" grep -q "/opt/homebrew/bin/claude" "$POKER"
+}
+p1
+
+echo "=== 4/2-2: IDLE_STALLED → poked; IDLE (fresh) → zero invocations ==="
+p2() {
+  new_home
+  local cwd; cwd=$(real_cwd d2)
+  arm_goal as2 4 "$cwd" sid-s2 4242 200 user   # idle + 200s → IDLE_STALLED
+  stub_registry_state idle sid-s2
+  run_poker
+  assert_contains "4/2-2 IDLE_STALLED poked" "--resume sid-s2" "$(claude_calls)"
+  new_home
+  cwd=$(real_cwd d2b)
+  arm_goal ai2 4 "$cwd" sid-i2 4242 60 user    # idle + 60s → IDLE (fresh)
+  stub_registry_state idle sid-i2
+  run_poker
+  assert_eq "4/2-2 IDLE (fresh) → zero poke invocations" "" "$(claude_calls)"
+}
+p2
+
+echo "=== 4/2-3: BUSY → SKIP-BUSY, no poke; WEDGED → no poke, no kill, target alive ==="
+p3() {
+  new_home
+  local cwd; cwd=$(real_cwd d3)
+  arm_goal ab3 4 "$cwd" sid-b3 4242 60 busy    # busy + 60s → BUSY
+  stub_registry_state busy sid-b3
+  run_poker
+  assert_eq "4/2-3 BUSY → zero poke invocations" "" "$(claude_calls)"
+  assert_contains "4/2-3 SKIP-BUSY audit line" "ab3 SKIP-BUSY" "$(audit_of)"
+
+  new_home
+  cwd=$(real_cwd d3w)
+  arm_goal aw3 4 "$cwd" sid-w3 "$$" 600 busy   # busy + 600s → WEDGED; live pid == this process
+  stub_registry_state busy sid-w3
+  run_poker
+  assert_eq "4/2-3 WEDGED → zero claude poke invocations" "" "$(claude_calls)"
+  TOTAL=$((TOTAL + 1))
+  if ps -p "$$" >/dev/null 2>&1; then pass "4/2-3 WEDGE target pid still alive (never signalled)"; else fail "4/2-3 target alive"; fi
+  # No kill/pkill/killall INVOCATION in the script; comments and the recovery-
+  # command STRING (the single printf template) are the only permitted mentions.
+  TOTAL=$((TOTAL + 1))
+  local hits
+  hits=$(grep -nE '(kill|pkill|killall)' "$POKER" \
+    | grep -vE ':[[:space:]]*#' \
+    | grep -vF "printf 'kill %s && cd %s && claude --resume %s'")
+  if [ -z "$hits" ]; then pass "4/2-3 no kill/pkill/killall invocation in script"; else fail "4/2-3 no-kill" "offenders: $hits"; fi
+}
+p3
+
+echo "=== 4/2-4: WEDGE notification — Title + recovery command verbatim ==="
+p4() {
+  new_home
+  local cwd; cwd=$(real_cwd d4)
+  arm_goal aw4 4 "$cwd" sid-w4 31337 600 busy   # WEDGED, known pid for recovery string
+  stub_registry_state busy sid-w4
+  run_poker
+  assert_contains "4/2-4 WEDGE curl Title" "Title: aw4: WEDGE" "$(curl_calls)"
+  assert_contains "4/2-4 WEDGE body carries recovery command verbatim" \
+    "kill 31337 && cd $cwd && claude --resume sid-w4" "$(curl_calls)"
+}
+p4
+
+echo "=== 4/2-5: GATED once; identical poll dedupes; driving→gated flip re-notifies ==="
+p5() {
+  new_home
+  local cwd; cwd=$(real_cwd d5)
+  local plan="$HOME/plans/ag5.plan.md"
+  plant_plan "$plan" 4 1 continuous            # wake note → GATED
+  plant_goal ag5 "$plan" "$cwd" sid-g5 4242
+  plant_transcript_age "$cwd" sid-g5 60 user
+  stub_registry_state busy sid-g5
+  run_poker                                     # poll1: GATED transition → notify
+  run_poker                                     # poll2: GATED again → dedupe
+  assert_eq "4/2-5 GATED notified once across two identical polls" "1" "$(count_lines "$(curl_calls)" "GATED")"
+  plant_plan "$plan" 4 0 continuous            # wake note gone → BUSY (driving)
+  plant_transcript_age "$cwd" sid-g5 60 busy
+  run_poker                                     # poll3: BUSY → no GATED curl
+  plant_plan "$plan" 4 1 continuous            # wake note back → GATED
+  plant_transcript_age "$cwd" sid-g5 60 user
+  run_poker                                     # poll4: GATED transition again → notify #2
+  assert_eq "4/2-5 GATED re-notified after driving→gated flip" "2" "$(count_lines "$(curl_calls)" "GATED")"
+}
+p5
+
+echo "=== 4/2-6: COMPLETE once; registration retained (poker never disarms) ==="
+p6() {
+  new_home
+  local cwd; cwd=$(real_cwd d6)
+  arm_goal ac6 10 "$cwd" sid-c6 4242 60 user    # current:10 → COMPLETE
+  stub_registry_state idle sid-c6
+  run_poker
+  assert_eq "4/2-6 COMPLETE notified once" "1" "$(count_lines "$(curl_calls)" "COMPLETE")"
+  assert_true "4/2-6 registration retained" test -f "$HOME/.claude/sdlc-goals/ac6"
+  run_poker
+  assert_eq "4/2-6 COMPLETE deduped on second poll" "1" "$(count_lines "$(curl_calls)" "COMPLETE")"
+}
+p6
+
+echo "=== 4/2-7: retry-cap — 3 pokes then POKE-FAIL; transcript movement resets episode ==="
+p7() {
+  new_home
+  local cwd; cwd=$(real_cwd d7)
+  arm_goal as7 4 "$cwd" sid-p7 4242 200 user    # IDLE_STALLED, pokeable
+  stub_registry_state idle sid-p7
+  run_poker; run_poker; run_poker               # 3 pokes, same episode (stub never moves transcript)
+  assert_eq "4/2-7 three pokes within the cap" "3" "$(count_lines "$(claude_calls)" "resume sid-p7")"
+  run_poker                                      # 4th poll: cap exhausted
+  assert_eq "4/2-7 no 4th poke after cap exhausted" "3" "$(count_lines "$(claude_calls)" "resume sid-p7")"
+  assert_contains "4/2-7 POKE-FAIL notified on cap exhaustion" "Title: as7: POKE-FAIL" "$(curl_calls)"
+  plant_transcript_age "$cwd" sid-p7 200 user   # fresh mtime = transcript movement
+  run_poker
+  assert_eq "4/2-7 episode reset on movement → poke resumes" "4" "$(count_lines "$(claude_calls)" "resume sid-p7")"
+}
+p7
+
+echo "=== 4/2-8: a failing poke (exit nonzero) counts against the cap ==="
+p8() {
+  new_home
+  local cwd; cwd=$(real_cwd d8)
+  arm_goal as8 4 "$cwd" sid-p8 4242 200 user
+  stub_registry_state idle sid-p8
+  echo 1 > "$HOME/.claude/.stub/poke.rc"         # every poke exits nonzero
+  run_poker; run_poker; run_poker
+  assert_eq "4/2-8 three failing pokes counted" "3" "$(count_lines "$(claude_calls)" "resume sid-p8")"
+  run_poker
+  assert_eq "4/2-8 failing pokes count against cap (no 4th)" "3" "$(count_lines "$(claude_calls)" "resume sid-p8")"
+  assert_contains "4/2-8 POKE-FAIL after failing pokes fill the cap" "Title: as8: POKE-FAIL" "$(curl_calls)"
+}
+p8
+
+echo "=== 4/2-9: POKE_PROMPT contains no banned approval token (case-insensitive) ==="
+p9() {
+  new_home
+  local cwd; cwd=$(real_cwd d9)
+  arm_goal ap9 4 "$cwd" sid-b9 2147483647 30 user   # dead pid; registry absent → DEAD → poke
+  stub_registry_state absent
+  run_poker
+  local stdin; stdin=$(claude_stdin)
+  TOTAL=$((TOTAL + 1))
+  if [ -n "$stdin" ] && ! printf '%s' "$stdin" \
+     | grep -qiE 'approve|approved|approval|permission granted|yes to|go ahead with the gate|waiver'; then
+    pass "4/2-9 POKE_PROMPT carries no banned approval token"
+  else fail "4/2-9 banned-token scan" "stdin='$stdin'"; fi
+}
+p9
+
+echo "=== 4/2-10: curl failure → NOTIFY-FAIL audit, exit 0, retry on next poll ==="
+p10() {
+  new_home
+  local cwd; cwd=$(real_cwd d10)
+  arm_goal ac10 10 "$cwd" sid-n10 4242 60 user   # COMPLETE → notifies
+  stub_registry_state idle sid-n10
+  echo 22 > "$HOME/.claude/.stub/curl.rc"         # curl fails (exit 22)
+  run_poker
+  assert_eq "4/2-10 poker exit 0 despite curl failure" 0 "$POKER_EXIT"
+  assert_contains "4/2-10 NOTIFY-FAIL audit line" "ac10 NOTIFY-FAIL" "$(audit_of)"
+  rm -f "$HOME/.claude/.stub/curl.rc"             # curl recovers
+  run_poker
+  assert_contains "4/2-10 notification retried on the next poll" "Title: ac10: COMPLETE" "$(curl_calls)"
+}
+p10
+
+echo "=== 4/2-11: topic secrecy — \$BIONIC_NTFY_TOPIC never in audit log or status files ==="
+p11() {
+  new_home
+  local cwd; cwd=$(real_cwd d11)
+  # Exercise several notify + poke + wedge paths so every writer runs.
+  arm_goal comp11 10 "$cwd" sid-cm 4242 60 user
+  stub_registry_state idle sid-cm
+  run_poker
+  new_home
+  cwd=$(real_cwd d11w)
+  arm_goal wed11 4 "$cwd" sid-wd 4242 600 busy
+  stub_registry_state busy sid-wd
+  run_poker
+  TOTAL=$((TOTAL + 1))
+  if ! grep -rqF "$BIONIC_NTFY_TOPIC" "$HOME/.claude/sdlc-poker-audit.log" "$HOME/.claude/sdlc-status" 2>/dev/null; then
+    pass "4/2-11 topic secret absent from audit log + status files"
+  else fail "4/2-11 topic secrecy" "topic value leaked into audit/status"; fi
+}
+p11
 
 # ============================================================
 echo ""
