@@ -217,18 +217,51 @@ baton_parse() {
 # tolerated, so every line is guaranteed to carry exactly 6 fields — the
 # invariant ledger_verify's chain walk depends on.
 #
-# Tamper evidence (D4): `digest` is an 8-hex prefix of sha256(previous line's
-# full raw content) — NOT of the line's own content — so editing a line in
-# place does not corrupt its own digest field, but breaks the NEXT line's
-# chain reference, surfacing the edit on verify. The first line has no
-# previous line, so it chains from a fixed genesis marker,
-# LEDGER_GENESIS_MARKER, named here for auditability.
+# Tamper evidence (D4, AS-28 — SELF-COVERING chain): `digest` is an 8-hex
+# prefix of sha256 over BOTH the previous line's digest AND this line's own
+# content, so every line — including the terminal one — is covered by a
+# check. A prev-line-only chain (the original design) left the LAST line
+# protected by nothing: an in-place edit of the terminal line passed verify
+# while ledger_applied returned the forged value. The self-covering rule
+# closes that: editing any line changes its own digest's expected value,
+# surfacing on verify at that very line.
+#
+# Digested material for line i (the CANONICAL serialization both append and
+# verify hash, fixed here so the two sites can never drift):
+#   <prev> <TAB> ts <TAB> seq <TAB> type <TAB> effect-key <TAB> summary
+# where <prev> is digest[i-1] (the previous line's stored 8-hex digest
+# field) for i>1, or the literal LEDGER_GENESIS_MARKER for i=1, and the
+# trailing five TAB-joined fields are exactly the line's own fields with its
+# OWN digest column (field 3) omitted — see _ledger_content. So:
+#   digest[1] = H(GENESIS_MARKER \t content_1)
+#   digest[i] = H(digest[i-1]    \t content_i)   for i > 1
+# This is accident/naive-edit tamper evidence via an 8-hex truncation — NOT
+# a cryptographic tamper-proof guarantee (an adversary who recomputes the
+# whole chain forward from the edit still passes; trailing whole-line
+# DELETION stays chain-undetectable, AS-25, owed to N3's ledger-position
+# cross-check).
+#
+# Format version: the marker is v2 because the chain rule itself changed
+# (self-covering vs prev-line-only). A v1-format ledger cannot silently
+# verify under v2 rules — its digests were computed over different material,
+# so verify reports in-place-edit rather than a false pass. There are ZERO
+# real ledgers in existence (checked: ~/.claude/sdlc-state is empty), so no
+# migration is owed.
 #
 # Digest tool portability (AS-1): probed once per process into
 # LEDGER_DIGEST_TOOL — `shasum -a 256` (macOS) else `sha256sum` (linux);
 # loud error if neither is on PATH.
 
-LEDGER_GENESIS_MARKER="SDLC-LEDGER-GENESIS-v1"
+LEDGER_GENESIS_MARKER="SDLC-LEDGER-GENESIS-v2"
+
+# _ledger_content <raw-line> — the canonical digested material's line-half:
+# the TAB-joined line fields with the digest column (field 3) omitted, i.e.
+# `ts \t seq \t type \t effect-key \t summary`. Both ledger_append (building
+# the material from the fields it is about to write) and ledger_verify
+# (extracting it from a stored line) MUST agree on this shape.
+_ledger_content() {
+  printf '%s' "$1" | awk -F'\t' -v OFS='\t' '{ print $1, $2, $4, $5, $6 }'
+}
 
 ledger_path() { printf '%s/ledger.log' "$(baton_goal_dir "$1")"; }
 
@@ -261,7 +294,7 @@ ledger_digest() {
 # ledger is absent or empty).
 ledger_append() {
   local goal_id="${1:-}" type="${2:-}" key="${3:-}" summary="${4:-}"
-  local dir path last_line prev_content seq ts digest new_line
+  local dir path last_line prev seq ts content digest new_line
 
   _sdlc_validate_goal_id "$goal_id" "ledger_append" || return 1
   case "$type" in
@@ -288,15 +321,26 @@ ledger_append() {
     case "$seq" in
       ''|*[!0-9]*) echo "defect: corrupt-ledger-tail: last line's seq field is not numeric ('${seq:-<empty>}'): $path" >&2; return 1 ;;
     esac
+    # The self-covering chain reads the tail's own digest as this line's
+    # <prev>; a malformed tail digest would silently poison the new digest,
+    # so reject it loud (same class as the numeric-seq guard) before append.
+    prev=$(printf '%s' "$last_line" | awk -F'\t' '{print $3}')
+    case "$prev" in
+      [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+      *) echo "defect: corrupt-ledger-tail: last line's digest field is not 8 hex chars ('${prev:-<empty>}'): $path" >&2; return 1 ;;
+    esac
     seq=$((seq + 1))
-    prev_content="$last_line"
   else
     seq=1
-    prev_content="$LEDGER_GENESIS_MARKER"
+    prev="$LEDGER_GENESIS_MARKER"
   fi
 
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  digest=$(ledger_digest "$prev_content")
+  # Self-covering digest (AS-28): hash <prev> together with this line's own
+  # content (all fields but the digest column) — see the canonical
+  # serialization documented at LEDGER_GENESIS_MARKER.
+  content=$(printf '%s\t%s\t%s\t%s\t%s' "$ts" "$seq" "$type" "$key" "$summary")
+  digest=$(ledger_digest "$prev"$'\t'"$content")
   new_line="$(printf '%s\t%s\t%s\t%s\t%s\t%s' "$ts" "$seq" "$digest" "$type" "$key" "$summary")"
 
   printf '%s\n' "$new_line" >> "$path" 2>/dev/null || { echo "defect: append-failed: cannot append to $path" >&2; return 1; }
@@ -356,16 +400,22 @@ ledger_verify() {
     fi
   done
 
-  local prev_content expected_digest actual_digest rest
-  prev_content="$LEDGER_GENESIS_MARKER"
+  # Self-covering chain (AS-28): recompute every line's digest — INCLUDING
+  # the terminal line — from <prev> plus that line's own content, so a
+  # tampered terminal line surfaces at its own digest rather than at a
+  # (non-existent) next line. <prev> is the previous line's STORED digest
+  # field (genesis marker for line 1), matching ledger_append.
+  local prev expected_digest actual_digest content
+  prev="$LEDGER_GENESIS_MARKER"
   for ((i = 0; i < n; i++)); do
     actual_digest=$(printf '%s' "${lines[$i]}" | awk -F'\t' '{print $3}')
-    expected_digest=$(ledger_digest "$prev_content")
+    content=$(_ledger_content "${lines[$i]}")
+    expected_digest=$(ledger_digest "$prev"$'\t'"$content")
     if [ "$actual_digest" != "$expected_digest" ]; then
       echo "defect: in-place-edit: line $((i + 1)) digest mismatch (expected $expected_digest, got $actual_digest) — content changed without a chain-consistent digest: $path" >&2
       return 1
     fi
-    prev_content="${lines[$i]}"
+    prev="$actual_digest"
   done
 
   return 0
