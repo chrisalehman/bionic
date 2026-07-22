@@ -443,3 +443,178 @@ ledger_applied() {
   done < "$path"
   return 1
 }
+
+# ---------- R-W1/R-W2: WIP shadow store (slice 4/2) ----------
+#
+# The durable-state substrate's third leg: a git-plumbing SIDE STORE for
+# work-in-progress that survives a session death without ever touching the
+# working tree, the real index, the branch, or the evidence gate (D1). A
+# confused successor that would otherwise clobber uncommitted work instead
+# finds it captured under refs/sdlc-wip/<goal-id> and replays it byte-faithful.
+#
+# Evidence-gate neutrality (D1, binding): snapshot uses ONLY plumbing —
+# read-tree/add/write-tree into a TEMPORARY index (GIT_INDEX_FILE, never the
+# repo's real index), commit-tree, update-ref. Porcelain `git commit` is NEVER
+# invoked: the evidence gate's matcher word-bounds `git commit`, and a stray
+# porcelain commit here would trip it. Every git invocation is `-C <dir>` so
+# the caller's $PWD is irrelevant (D3: the repo is the caller-supplied dir).
+#
+# Gitignored lifecycle artifacts (the goal's plan/spec under .bionic/docs) are
+# part of the work product but `git add -A` skips them, so snapshot force-adds
+# each caller-named path (`git add -f`). ONE ref per goal, overwritten each
+# checkpoint; a clean tree deletes the ref and reports `none`, so the snapshot
+# always reflects now (never a stale capture). Superseded snapshots become
+# unreachable and gc-able — accepted, no retention machinery (D1).
+
+# sdlc_wip_snapshot <goal-id> <dir> [force-include-path ...]
+# Captures the repo-at-<dir>'s WIP into a shadow commit under
+# refs/sdlc-wip/<goal-id> without touching the working tree, real index, or
+# branch. Prints the snapshot sha (rc 0), or `none` (rc 0) when there is
+# nothing to capture — deleting any stale ref in that case. Loud named
+# defects (one stderr line, nonzero): invalid-goal-id, not-a-repo,
+# snapshot-failed.
+sdlc_wip_snapshot() {
+  local goal_id="${1:-}" dir="${2:-}"
+  if [ "$#" -ge 2 ]; then shift 2; else set --; fi   # remaining args = force-include paths
+  local tmp_index head_tree tree snap p
+
+  _sdlc_validate_goal_id "$goal_id" "sdlc_wip_snapshot" || return 1
+
+  # not-a-repo: dir absent, not a git repo, or no HEAD commit to parent onto.
+  # HEAD^{tree} both proves a usable repo/HEAD and gives the clean-tree anchor.
+  head_tree=$(git -C "$dir" rev-parse --verify --quiet 'HEAD^{tree}' 2>/dev/null) || true
+  if [ -z "$head_tree" ]; then
+    echo "defect: not-a-repo: sdlc_wip_snapshot needs a git repo with a HEAD at: ${dir:-<empty dir>}" >&2
+    return 1
+  fi
+
+  tmp_index=$(mktemp 2>/dev/null) || { echo "defect: snapshot-failed: cannot mint a temp index" >&2; return 1; }
+  # Build the snapshot tree in the TEMP index only (real index untouched):
+  # seed from HEAD, stage every dirty/untracked-unignored change, then
+  # force-add each caller-named gitignored lifecycle-artifact path.
+  if ! GIT_INDEX_FILE="$tmp_index" git -C "$dir" read-tree HEAD 2>/dev/null \
+     || ! GIT_INDEX_FILE="$tmp_index" git -C "$dir" add -A 2>/dev/null; then
+    rm -f "$tmp_index"
+    echo "defect: snapshot-failed: could not stage WIP into the temp index for: $dir" >&2
+    return 1
+  fi
+  for p in "$@"; do
+    [ -n "$p" ] || continue
+    if ! GIT_INDEX_FILE="$tmp_index" git -C "$dir" add -f -- "$p" 2>/dev/null; then
+      rm -f "$tmp_index"
+      echo "defect: snapshot-failed: could not force-add '$p' for: $dir" >&2
+      return 1
+    fi
+  done
+  tree=$(GIT_INDEX_FILE="$tmp_index" git -C "$dir" write-tree 2>/dev/null) \
+    || { rm -f "$tmp_index"; echo "defect: snapshot-failed: write-tree failed for: $dir" >&2; return 1; }
+  rm -f "$tmp_index"
+
+  # Nothing captured (tree matches HEAD): report none, drop any stale ref.
+  if [ "$tree" = "$head_tree" ]; then
+    git -C "$dir" update-ref -d "refs/sdlc-wip/$goal_id" 2>/dev/null || :
+    printf 'none\n'
+    return 0
+  fi
+
+  snap=$(git -C "$dir" commit-tree "$tree" -p HEAD -m "sdlc-wip snapshot: $goal_id" 2>/dev/null) \
+    || { echo "defect: snapshot-failed: commit-tree failed for: $dir" >&2; return 1; }
+  git -C "$dir" update-ref "refs/sdlc-wip/$goal_id" "$snap" 2>/dev/null \
+    || { echo "defect: snapshot-failed: update-ref refs/sdlc-wip/$goal_id failed for: $dir" >&2; return 1; }
+  printf '%s\n' "$snap"
+  return 0
+}
+
+# sdlc_wip_restore <goal-id> <sha> <dir>
+# Replays the captured delta into the repo-at-<dir>'s working tree,
+# byte-faithful, touching ONLY the captured paths: for each added/modified
+# path write the snapshot blob (creating parent dirs; restoring the exec bit
+# when the dst mode is 100755); for each deleted path remove the working-tree
+# file. Loud named defects (one stderr line, nonzero): invalid-goal-id,
+# wip-lost (object missing/unreadable), restore-failed.
+#
+# The delta is `diff-tree -r -z <sha>^ <sha>` — the snapshot vs its HEAD
+# parent (snapshots always `commit-tree -p HEAD`, so <sha>^ resolves). -z
+# (NUL-delimited) is chosen so paths with spaces or shell metacharacters
+# survive intact: each record is a metadata field
+# `:<src-mode> <dst-mode> <src-sha> <dst-sha> <status>` terminated by NUL,
+# then the path terminated by NUL. Rename/copy detection is off (snapshots
+# never emit R/C), so there is never a second path field to consume; statuses
+# seen are A/M/D and, defensively, T (type change) — all non-D are treated as
+# "write the dst blob". Only the exec bit is mode-faithful (100755 → +x); a
+# 100644 restore leaves the freshly written file at the umask default and does
+# not actively clear a pre-existing +x (out of scope; content is faithful).
+sdlc_wip_restore() {
+  local goal_id="${1:-}" sha="${2:-}" dir="${3:-}"
+  local difftmp meta path src_mode dst_mode src_sha dst_sha status target
+
+  _sdlc_validate_goal_id "$goal_id" "sdlc_wip_restore" || return 1
+
+  if [ -z "$sha" ] || ! git -C "$dir" cat-file -e "$sha" 2>/dev/null; then
+    echo "defect: wip-lost: sdlc_wip_restore cannot read snapshot object '${sha:-<empty>}' in: $dir" >&2
+    return 1
+  fi
+
+  difftmp=$(mktemp 2>/dev/null) || { echo "defect: restore-failed: cannot mint a temp file" >&2; return 1; }
+  # NUL-safe stream to a temp file: command substitution would strip the NUL
+  # delimiters, so the -z output is consumed from a file, not a variable.
+  if ! git -C "$dir" diff-tree -r -z "$sha^" "$sha" > "$difftmp" 2>/dev/null; then
+    rm -f "$difftmp"
+    echo "defect: restore-failed: diff-tree failed for snapshot '$sha' in: $dir" >&2
+    return 1
+  fi
+
+  while IFS= read -r -d '' meta; do
+    IFS= read -r -d '' path || { rm -f "$difftmp"; echo "defect: restore-failed: truncated diff-tree stream for '$sha' in: $dir" >&2; return 1; }
+    # meta = ":<src-mode> <dst-mode> <src-sha> <dst-sha> <status>" (leading ':' stripped).
+    read -r src_mode dst_mode src_sha dst_sha status <<< "${meta#:}"
+    target="$dir/$path"
+    case "$status" in
+      D)
+        rm -f "$target" 2>/dev/null || { rm -f "$difftmp"; echo "defect: restore-failed: cannot remove '$path' in: $dir" >&2; return 1; }
+        ;;
+      *)  # A / M / T — materialize the snapshot blob at the worktree path.
+        mkdir -p "$(dirname "$target")" 2>/dev/null || { rm -f "$difftmp"; echo "defect: restore-failed: cannot mkdir for '$path' in: $dir" >&2; return 1; }
+        if ! git -C "$dir" cat-file blob "$dst_sha" > "$target" 2>/dev/null; then
+          rm -f "$difftmp"
+          echo "defect: restore-failed: cannot write blob for '$path' in: $dir" >&2
+          return 1
+        fi
+        [ "$dst_mode" = "100755" ] && { chmod +x "$target" 2>/dev/null || :; }
+        ;;
+    esac
+  done < "$difftmp"
+  rm -f "$difftmp"
+  return 0
+}
+
+# sdlc_wip_check <goal-id> <baton-wip-value> <dir>
+# Verifies the baton's recorded WIP against the repo-at-<dir>, mutating
+# nothing. `none` → silent rc 0. Otherwise the value is a snapshot sha:
+# object readable AND refs/sdlc-wip/<goal-id> resolves to that SAME sha →
+# silent rc 0; object or ref missing/unreadable → `wip-lost` (naming the
+# sha), nonzero; ref resolves to a DIFFERENT sha → `wip-drift` (naming both),
+# nonzero. The goal-id is validated on the non-none path (it builds the ref
+# path — same shared guard as every sibling); `none` short-circuits before
+# any check, so an honest `none` is always silent regardless.
+sdlc_wip_check() {
+  local goal_id="${1:-}" wip="${2:-}" dir="${3:-}" ref_sha
+  [ "$wip" = "none" ] && return 0
+
+  _sdlc_validate_goal_id "$goal_id" "sdlc_wip_check" || return 1
+
+  if ! git -C "$dir" cat-file -e "$wip" 2>/dev/null; then
+    echo "defect: wip-lost: snapshot object '$wip' is unreadable (pruned/gone) in: $dir" >&2
+    return 1
+  fi
+  ref_sha=$(git -C "$dir" rev-parse --verify --quiet "refs/sdlc-wip/$goal_id" 2>/dev/null) || true
+  if [ -z "$ref_sha" ]; then
+    echo "defect: wip-lost: ref refs/sdlc-wip/$goal_id is missing though object '$wip' survives, in: $dir" >&2
+    return 1
+  fi
+  if [ "$ref_sha" != "$wip" ]; then
+    echo "defect: wip-drift: baton names '$wip' but refs/sdlc-wip/$goal_id resolves to '$ref_sha', in: $dir" >&2
+    return 1
+  fi
+  return 0
+}
