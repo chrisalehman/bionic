@@ -397,6 +397,41 @@ do_preflight_registry_tls() {
   return 0
 }
 
+# do_preflight_claude_cli — npm is the canonical channel (the Homebrew cask
+# lags many versions). The official native installer is the fallback: it
+# verifies TLS through the system keychain via curl, so it survives the
+# broken-OpenSSL-CA-store failure that kills the npm channel (and is exactly
+# what the field fix was on 2026-07-21). Hard-fails (exit 2) only when both
+# channels are dead — the CLI is the bootstrap's one true prerequisite.
+do_preflight_claude_cli() {
+  local npm_err="" hint=""
+  if command -v claude &>/dev/null; then
+    step_cached prereq "$(claude --version 2>/dev/null | head -1 || echo present)"
+    return 0
+  fi
+  if command -v npm &>/dev/null && run_retry npm install -g @anthropic-ai/claude-code@latest; then
+    step_ok prereq "$(claude --version 2>/dev/null | head -1 || echo installed)"
+    return 0
+  fi
+  npm_err="${RUN_ERR:-npm unavailable}"
+  if run_retry bash -c 'curl -fsSL https://claude.ai/install.sh | bash' \
+     && { command -v claude &>/dev/null || [ -x "$HOME/.local/bin/claude" ]; }; then
+    step_ok prereq "native installer — npm channel failed"
+    return 0
+  fi
+  hint="$(classify_err "$npm_err")"; hint="${hint#*|}"
+  echo "${C_RED}✗${C_RESET}"
+  echo ""
+  echo "  Could not install the claude CLI by either channel. Install it manually:"
+  echo "    npm:    npm install -g @anthropic-ai/claude-code@latest"
+  echo "    native: curl -fsSL https://claude.ai/install.sh | bash"
+  if [ -n "$hint" ]; then
+    echo "  npm channel failure looks like: ${hint}"
+  fi
+  echo "  then re-run ./claude-bootstrap.sh"
+  exit 2
+}
+
 do_install_npm_global() {
   local pkg="$1"
   step_start "$pkg"
@@ -922,23 +957,9 @@ do_preflight_node
 step_start "registry TLS (node)"
 do_preflight_registry_tls
 
-# claude CLI — auto-install via npm (the canonical channel; the Homebrew cask
-# lags many versions behind). node comes from brew first if needed.
+# claude CLI — npm canonical, native installer fallback (see function).
 step_start "claude CLI"
-if command -v claude &>/dev/null; then
-  step_cached prereq "$(claude --version 2>/dev/null | head -1 || echo present)"
-else
-  if command -v npm &>/dev/null && run_retry npm install -g @anthropic-ai/claude-code@latest; then
-    step_ok prereq "$(claude --version 2>/dev/null | head -1 || echo installed)"
-  else
-    echo "${C_RED}✗${C_RESET}"
-    echo ""
-    echo "  Could not install the claude CLI. Install it manually:"
-    echo "    npm install -g @anthropic-ai/claude-code@latest"
-    echo "  then re-run ./claude-bootstrap.sh"
-    exit 2
-  fi
-fi
+do_preflight_claude_cli
 
 # claude auth — warn only; the bootstrap itself works logged out, but plugin
 # and MCP registration may not.
