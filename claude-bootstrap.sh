@@ -167,10 +167,34 @@ run_retry() {
   local n=1 delay=2
   while :; do
     if RUN_ERR="$("$@" </dev/null 2>&1)"; then RUN_ATTEMPT="$n"; return 0; fi
+    case "$(classify_err "$RUN_ERR")" in
+      cert\|*|perms\|*) RUN_ATTEMPT="$n"; return 1 ;;  # deterministic — retry can't help
+    esac
     if [ "$n" -ge "$RETRY_MAX" ]; then RUN_ATTEMPT="$n"; return 1; fi
     sleep "$delay"
     n=$((n + 1)); delay=$((delay * 2))
   done
+}
+
+# classify_err <text> — map captured error output to "class|hint" on stdout.
+# class ∈ cert|perms|net|unknown; unknown carries an empty hint so callers
+# keep their own remediation. cert/perms are DETERMINISTIC — retrying cannot
+# change the outcome, so run_retry short-circuits them (field incident
+# 2026-07-21: a broken OpenSSL CA store burned 3 retries × N steps with an
+# EACCES hint that sent the user down the wrong path).
+classify_err() {
+  local t
+  t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$t" in
+    *unable_to_get_issuer_cert_locally*|*self_signed_cert_in_chain*|*'unable to get local issuer certificate'*)
+      printf '%s' "cert|run 'brew postinstall openssl@3', then re-run ./claude-bootstrap.sh" ;;
+    *eacces*)
+      printf '%s' "perms|fix npm's global prefix (e.g. npm config set prefix ~/.npm-global), then re-run ./claude-bootstrap.sh" ;;
+    *enotfound*|*eai_again*|*etimedout*)
+      printf '%s' "net|check network/VPN/proxy, then re-run ./claude-bootstrap.sh" ;;
+    *)
+      printf 'unknown|' ;;
+  esac
 }
 
 # record_fail <message> — note a non-fatal install failure (legacy summary).
@@ -226,9 +250,14 @@ step_warn() {
   record_step warn "$1" "$STEP_NAME" "${3:-}" "$2"
 }
 
-# step_fail <category> <detail> [remediation] — record and CONTINUE.
+# step_fail <category> <detail> [remediation] — record and CONTINUE. A
+# classified detail (cert/perms/net) overrides the caller's canned hint so
+# the report names the real cause, not a guess.
 step_fail() {
   local remediation="${3:-re-run ./claude-bootstrap.sh — completed steps are skipped}"
+  local _c _hint
+  _c="$(classify_err "$2")"; _hint="${_c#*|}"; _c="${_c%%|*}"
+  if [ "$_c" != "unknown" ] && [ -n "$_hint" ]; then remediation="$_hint"; fi
   echo "${C_RED}✗${C_RESET} failed (continuing)$(_step_dur)"
   record_step fail "$1" "$STEP_NAME" "$remediation" "$2"
   record_fail "${STEP_NAME}: ${2}"
