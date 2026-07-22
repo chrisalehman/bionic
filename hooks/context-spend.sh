@@ -80,9 +80,15 @@ case "$OCCUPIED" in ''|*[!0-9]*) exit 0 ;; esac
 # hook's exit-0-always contract intact.
 # ------------------------------------------------------------
 # ceiling(model): BIONIC_CONTEXT_CEILING wins; else a per-model table; else the
-# conservative 200000 default (D5). Known top-tier models carry their real
-# (large) windows so the tripwire fires at a true fraction, not the default
-# tuned for UNKNOWN models. Exact rows are a Step-3 open question — provisional.
+# conservative 200000 default (D5). FAIL-CLOSED denominator (plan §Global
+# constraints, binding): a ceiling must err toward the SMALLEST plausible window
+# so the tripwire fires early, never the largest convenient one — an oversized
+# denominator is the silent-death class this epic exists to kill. Rows are the
+# smallest standard window consistent with observed telemetry
+# (.bionic/memory/sdlc-v11-audit.md): claude-fable-5 seen at occupied=524861 →
+# rules out 500k, 1M is the smallest standard window that fits. Others default
+# to 200000 until telemetry justifies raising them. Recalibrate UPWARD only on
+# observed evidence (a too-small ceiling merely warns early; too-large stays silent).
 _ceiling=""
 case "${BIONIC_CONTEXT_CEILING:-}" in
   ''|*[!0-9]*) : ;;                       # unset/non-numeric → fall through to table
@@ -90,9 +96,9 @@ case "${BIONIC_CONTEXT_CEILING:-}" in
 esac
 if [ -z "$_ceiling" ]; then
   case "$MODEL" in
-    *fable*)   _ceiling=2000000 ;;
-    *opus*)    _ceiling=1000000 ;;
-    *sonnet*)  _ceiling=1000000 ;;
+    *fable*)   _ceiling=1000000 ;;        # observed max 524861 → smallest fit is 1M
+    *opus*)    _ceiling=200000 ;;         # no telemetry yet → conservative default
+    *sonnet*)  _ceiling=200000 ;;         # no telemetry yet → conservative default
     *haiku*)   _ceiling=200000 ;;
     *)         _ceiling=200000 ;;         # conservative default for unknown models
   esac

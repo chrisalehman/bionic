@@ -104,8 +104,16 @@ stdin_for() {  # $1=project $2=transcript-path [$3=session_id, default "scrubbed
   printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"Stop","stop_hook_active":false}' "$sess" "$2" "$1"
 }
 
+# Legacy cases (E/C/D/A/U) predate the ceiling tripwire and assert only on the
+# step-boundary emission + 4-field TSV state. Pin a very large ceiling HERE so
+# the tripwire is inert BY DECLARATION for them (occupancy/100M < 1% << 50%),
+# independent of — and unaffected by — the per-model table's fail-closed values.
+# The ceiling-tripwire cases below use their own runners (fire_ceiling exercises
+# the override path; fire_table exercises the REAL table) and are NOT pinned.
+LEGACY_CEIL_PIN=100000000
 run_hook() {  # $1=project $2=stdin-json
-  HOOK_STDOUT=$(CLAUDE_PROJECT_DIR="$1" bash "$HOOK" <<< "$2" 2>/dev/null); HOOK_EXIT=$?
+  HOOK_STDOUT=$(CLAUDE_PROJECT_DIR="$1" BIONIC_CONTEXT_CEILING="$LEGACY_CEIL_PIN" \
+    bash "$HOOK" <<< "$2" 2>/dev/null); HOOK_EXIT=$?
 }
 
 fire() {  # $1=project [$2=session_id, default "scrubbed"] — build real-shape stdin and run
@@ -899,6 +907,40 @@ ma4() {
   fi
 }
 ma4
+
+# ============================================================
+# Ceiling-table section (AC-C1, fail-closed doctrine) — proves the
+# REAL per-model table row FIRES, not just the BIONIC_CONTEXT_CEILING
+# override path. Runs the hook with NO ceiling override so ceiling(model)
+# comes from the table: claude-fable-5 -> 1000000 (smallest standard
+# window consistent with observed telemetry: max occupied 524861 rules
+# out 500k; fail-closed errs to the smallest plausible window). 550000
+# tokens / 1M = 55% -> advisory. (Pre-fail-closed, fable was 2000000 and
+# 550000 was 27% -> silent; this case is the table-row's regression fence.)
+# ============================================================
+
+# fire_table: exercise the REAL per-model table — NO BIONIC_CONTEXT_CEILING.
+fire_table() {  # $1=project [$2=session]
+  local proj="$1" sess="${2:-scrubbed}"
+  HOOK_STDOUT=$(CLAUDE_PROJECT_DIR="$proj" SDLC_STATE_DIR="$CEIL_STATE" \
+    bash "$HOOK" <<< "$(stdin_for "$proj" "$proj/transcript.jsonl" "$sess")" 2>/dev/null); HOOK_EXIT=$?
+}
+
+echo ""
+echo "=== CT1: real table path — claude-fable-5 550000 tokens = 55% of 1M → advisory ==="
+ct1() {
+  new_ceiling_env 550000; local dir="$CEIL_DIR"
+  fire_table "$dir"                          # no override → ceiling(model) from the table
+  assert_silent "CT1 table-path run"
+  local audit; audit=$(audit_of "$dir")
+  TOTAL=$((TOTAL + 1))
+  if printf '%s\n' "$audit" | grep -qE '^- [0-9TZ:-]+ context-spend ceiling advisory: goal=wave-t pct=55 occupied=550000 ceiling=1000000 model=claude-fable-5 \(.*wave-t\.plan\.md\)$'; then
+    pass "CT1 fable→1M table row fires advisory at 55% (ceiling=1000000)"
+  else
+    fail "CT1 table-path advisory (fable→1M row)" "audit='$audit'"
+  fi
+}
+ct1
 
 # ============================================================
 # Results
