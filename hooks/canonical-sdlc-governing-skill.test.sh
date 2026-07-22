@@ -1223,6 +1223,64 @@ stack-health: n/a: no long-running serve observed
   printf '%s' "$out"
 }
 
+# ============================================================
+# canonical_sdlc_version v12: `continuous` RELEASE GATE (E10)
+# ============================================================
+#
+# `scale: continuous` (the v12 standing charter) is source-complete in the
+# contract but held back from origin/main until the never-die epic (E10)
+# ships. The governing-skill hook BLOCKS a v12 continuous write with a
+# release-gate message UNLESS SDLC_CONTINUOUS_RELEASED=1 is set; the gate
+# fires BEFORE the continuous-specific validations (enum acceptance, barred
+# cells, audited scale floor), which all stay reachable once the flag lifts
+# it. These cases run under DEFAULT env (gate armed). The wave-02 continuous
+# contract section that follows runs under SDLC_CONTINUOUS_RELEASED=1, where
+# every one of those validations is exercised exactly as when released.
+
+project=$(make_project)
+
+echo "GATE v12 valid charter (default env) → block with the release-gate message"
+run_write "$project/.bionic/docs/plans/epic-01-demo/gate-charter.plan.md" "$(build_v12_plan)"
+assert_eq "v12_gate_blocks_charter_default_env exit 2" 2 "$HOOK_EXIT"
+assert_contains "v12_gate_blocks_charter names the E10 gate" "release-gated until the never-die epic (E10)" "$HOOK_STDERR"
+assert_contains "v12_gate_blocks_charter names the override flag" "SDLC_CONTINUOUS_RELEASED=1" "$HOOK_STDERR"
+
+echo "GATE v12 charter with SDLC_CONTINUOUS_RELEASED=1 → allow (passes exactly as when released)"
+export SDLC_CONTINUOUS_RELEASED=1
+run_write "$project/.bionic/docs/plans/epic-01-demo/gate-charter-released.plan.md" "$(build_v12_plan)"
+assert_eq "v12_gate_flag_allows_charter exit 0" 0 "$HOOK_EXIT"
+unset SDLC_CONTINUOUS_RELEASED
+
+# ---- regression: the gate is continuous-only; nothing else is touched ----
+
+echo "GATE regression: v12 wave plan (default env) → allow (gate is continuous-only)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/gate-v12-wave.plan.md" "$(build_v12_plan scale=wave matrix=yes)"
+assert_eq "v12_gate_untouched_wave exit 0" 0 "$HOOK_EXIT"
+
+echo "GATE regression: v12 task plan (default env) → allow"
+run_write "$project/.bionic/docs/plans/epic-01-demo/gate-v12-task.plan.md" "$(build_v12_plan scale=task intent=bugfix rigor=tested)"
+assert_eq "v12_gate_untouched_task exit 0" 0 "$HOOK_EXIT"
+
+echo "GATE regression: v12 epic plan (default env) → allow"
+run_write "$project/.bionic/docs/plans/epic-01-demo/gate-v12-epic.plan.md" "$(build_v12_plan scale=epic matrix=yes)"
+assert_eq "v12_gate_untouched_epic exit 0" 0 "$HOOK_EXIT"
+
+echo "GATE regression: v11 valid plan (default env) → allow (gate is v12-only)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/gate-v11.plan.md" "$(build_v11_plan)"
+assert_eq "v12_gate_untouched_v11 exit 0" 0 "$HOOK_EXIT"
+
+echo "GATE regression: v10 valid plan (default env) → allow"
+run_write "$project/.bionic/docs/plans/epic-01-demo/gate-v10.plan.md" "$(build_versioned_plan 10)"
+assert_eq "v12_gate_untouched_v10 exit 0" 0 "$HOOK_EXIT"
+
+# The wave-02 continuous contract (enum acceptance, barred cells, scale floor,
+# ## Goals G-form, matrix exemption, CRLF parity) is authored on an ARMED
+# charter, so it runs under SDLC_CONTINUOUS_RELEASED=1 — the release gate is
+# lifted and each continuous-specific validation is exercised exactly as when
+# E10 ships. The v11-continuous-frozen case within is version-scoped (the gate
+# is v12-only), so it behaves identically flag or no flag. Unset restores the
+# default (gate-armed) env for the grandfather sweep that follows.
+export SDLC_CONTINUOUS_RELEASED=1
 project=$(make_project)
 
 # ---------- AC-1: enum + plan-kind acceptance ----------
@@ -1345,6 +1403,9 @@ assert_contains "v12_blocks_wave_step3_no_matrix names matrix" "Verification Mat
 echo "v12 CRLF charter with full valid triple → allow"
 run_write "$project/.bionic/docs/plans/epic-01-demo/v12-crlf.plan.md" "$(to_crlf "$(build_v12_plan)")"
 assert_eq "v12_accepts_crlf_charter exit 0" 0 "$HOOK_EXIT"
+
+# Restore the default (gate-armed) env for the grandfather sweep below.
+unset SDLC_CONTINUOUS_RELEASED
 
 # ============================================================
 # canonical_sdlc_version: v≤11 grandfathering sweep (AC-5)
