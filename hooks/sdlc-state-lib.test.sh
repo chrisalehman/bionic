@@ -626,6 +626,124 @@ ac_w1_restore_legit_dotted() {
 }
 ac_w1_restore_legit_dotted
 
+echo "--- restore path-containment (Step-6 critic): '.git'-component write + symlink-parent/leaf write-through refused, legit '.github' still restores ---"
+# Two further forged-snapshot escapes that the '..'/absolute string guards do
+# NOT catch (no '..', not absolute):
+#   ESCAPE 1 — a '.git'-component delta path (e.g. '.git/hooks/pre-commit')
+#     would plant an executable hook the next git op runs (RCE). Also aliased
+#     case-insensitively on APFS/HFS ('.GIT/…' hits the real .git).
+#   ESCAPE 2 — a pre-existing worktree symlink at a parent (or leaf) component
+#     lets 'cat-file blob > $dir/link/…' follow the link and write OUTSIDE $dir.
+#     A string test on $path cannot catch this — an lstat check is required.
+# Both forge trees directly (git add refuses a '.git' entry) and drive the REAL
+# sdlc_wip_restore. forge_*_commit preserve HEAD's entries so the delta carries
+# ONLY the escaping path (no incidental deletions to reason about).
+
+# forge_gitdir_commit <repo-dir> <gitname> <content> → commit sha; delta path
+# "<gitname>/hooks/pre-commit" (mode 100755). <gitname> is '.git' or a case
+# variant ('.GIT') to exercise the case-folded component match.
+forge_gitdir_commit() {
+  local d="$1" gitname="$2" content="$3" blob hooks_tree git_tree root
+  blob=$(printf '%s' "$content" | git -C "$d" hash-object -w --stdin)
+  hooks_tree=$(printf '100755 blob %s\tpre-commit\n' "$blob" | git -C "$d" mktree)
+  git_tree=$(printf '040000 tree %s\thooks\n' "$hooks_tree" | git -C "$d" mktree)
+  root=$( { git -C "$d" ls-tree HEAD; printf '040000 tree %s\t%s\n' "$git_tree" "$gitname"; } \
+            | git -C "$d" mktree )
+  git -C "$d" commit-tree "$root" -p "$(git -C "$d" rev-parse HEAD)" -m forged-gitdir
+}
+# forge_underdir_commit <repo-dir> <dirname> <leaf> <content> → commit sha;
+# delta path "<dirname>/<leaf>" (no '..', not absolute). Used to aim a write at
+# a path under a pre-existing worktree symlink named <dirname>.
+forge_underdir_commit() {
+  local d="$1" dirname="$2" leaf="$3" content="$4" blob sub root
+  blob=$(printf '%s' "$content" | git -C "$d" hash-object -w --stdin)
+  sub=$(printf '100644 blob %s\t%s\n' "$blob" "$leaf" | git -C "$d" mktree)
+  root=$( { git -C "$d" ls-tree HEAD; printf '040000 tree %s\t%s\n' "$sub" "$dirname"; } \
+            | git -C "$d" mktree )
+  git -C "$d" commit-tree "$root" -p "$(git -C "$d" rev-parse HEAD)" -m forged-underdir
+}
+# forge_topfile_commit <repo-dir> <name> <content> → commit sha; delta path
+# "<name>" (a top-level file). Used to aim a write at a pre-existing symlink LEAF.
+forge_topfile_commit() {
+  local d="$1" name="$2" content="$3" blob root
+  blob=$(printf '%s' "$content" | git -C "$d" hash-object -w --stdin)
+  root=$( { git -C "$d" ls-tree HEAD; printf '100644 blob %s\t%s\n' "$blob" "$name"; } \
+            | git -C "$d" mktree )
+  git -C "$d" commit-tree "$root" -p "$(git -C "$d" rev-parse HEAD)" -m forged-topfile
+}
+
+# ESCAPE 1 — '.git'-component write → RCE.
+ac_w1_restore_gitdir() {
+  local d gid forged err rc
+  d=$(new_wip_repo); gid="wip-goal-gitdir"
+  rm -f "$d/.git/hooks/pre-commit"
+  forged=$(forge_gitdir_commit "$d" ".git" "#!/bin/sh"$'\n'"echo PWNED")
+  err=$(sdlc_wip_restore "$gid" "$forged" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 critic restore refuses a '.git'-component delta path (nonzero)" "$rc"
+  assert_contains "AC-W1 critic '.git' defect names restore-unsafe-path" "restore-unsafe-path" "$err"
+  assert_true "AC-W1 critic '.git' write planted NO hook in .git/hooks" test ! -e "$d/.git/hooks/pre-commit"
+}
+ac_w1_restore_gitdir
+
+# ESCAPE 1b — case-folded '.GIT' component (APFS/HFS alias the real .git dir).
+ac_w1_restore_gitdir_casefold() {
+  local d gid forged err rc
+  d=$(new_wip_repo); gid="wip-goal-gitcase"
+  rm -f "$d/.git/hooks/pre-commit"
+  forged=$(forge_gitdir_commit "$d" ".GIT" "#!/bin/sh"$'\n'"echo PWNED")
+  err=$(sdlc_wip_restore "$gid" "$forged" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 critic restore refuses a case-folded '.GIT'-component path (nonzero)" "$rc"
+  assert_contains "AC-W1 critic '.GIT' defect names restore-unsafe-path" "restore-unsafe-path" "$err"
+  assert_true "AC-W1 critic '.GIT' write planted NO hook in the real .git/hooks" test ! -e "$d/.git/hooks/pre-commit"
+}
+ac_w1_restore_gitdir_casefold
+
+# ESCAPE 2 — write-through a pre-existing symlink at a PARENT component.
+ac_w1_restore_symlink_parent() {
+  local d gid outside forged err rc
+  d=$(new_wip_repo); gid="wip-goal-slparent"
+  outside=$(mktemp -d); CLEAN_DIRS+=("$outside")
+  rm -f "$outside/pwn.txt"
+  ln -s "$outside" "$d/linkdir"                      # pre-existing worktree symlink OUTSIDE $dir
+  forged=$(forge_underdir_commit "$d" "linkdir" "pwn.txt" "ESCAPED_OUTSIDE")
+  err=$(sdlc_wip_restore "$gid" "$forged" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 critic restore refuses a write through a symlinked PARENT (nonzero)" "$rc"
+  assert_contains "AC-W1 critic symlink-parent defect names restore-unsafe-target" "restore-unsafe-target" "$err"
+  assert_true "AC-W1 critic symlink-parent wrote NO file outside \$dir" test ! -e "$outside/pwn.txt"
+}
+ac_w1_restore_symlink_parent
+
+# ESCAPE 2b — write-through a pre-existing symlink at the LEAF component.
+ac_w1_restore_symlink_leaf() {
+  local d gid outside forged err rc
+  d=$(new_wip_repo); gid="wip-goal-slleaf"
+  outside=$(mktemp -d); CLEAN_DIRS+=("$outside")
+  rm -f "$outside/target"
+  ln -s "$outside/target" "$d/leaflink"             # pre-existing worktree symlink LEAF
+  forged=$(forge_topfile_commit "$d" "leaflink" "ESCAPED_VIA_LEAF")
+  err=$(sdlc_wip_restore "$gid" "$forged" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 critic restore refuses writing through a symlink LEAF (nonzero)" "$rc"
+  assert_contains "AC-W1 critic symlink-leaf defect names restore-unsafe-target" "restore-unsafe-target" "$err"
+  assert_true "AC-W1 critic symlink-leaf wrote NO file through the link" test ! -e "$outside/target"
+}
+ac_w1_restore_symlink_leaf
+
+# Positive control: '.github' is a legit real dir whose name merely CONTAINS
+# 'git' — the component match must be precise, not a substring, so it restores.
+ac_w1_restore_legit_github() {
+  local d gid snap rc
+  d=$(new_wip_repo); gid="wip-goal-github"
+  mkdir -p "$d/.github/workflows"
+  printf 'name: ci\n' > "$d/.github/workflows/ci.yml"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  rm -f "$d/.github/workflows/ci.yml"
+  sdlc_wip_restore "$gid" "$snap" "$d" 2>/dev/null; rc=$?
+  assert_eq "AC-W1 critic legit '.github' path restores exits 0 (no false-reject)" "0" "$rc"
+  assert_eq "AC-W1 critic '.github/workflows/ci.yml' restored byte-faithful" \
+    "name: ci" "$(cat "$d/.github/workflows/ci.yml" 2>/dev/null)"
+}
+ac_w1_restore_legit_github
+
 echo ""
 echo "=== AC-W2: WIP loss detection — healthy/none silent, each planted loss class named loud (both directions) ==="
 

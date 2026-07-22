@@ -694,6 +694,40 @@ sdlc_wip_restore() {
               echo "defect: restore-unsafe-path: refusing '..' traversal in path '$path' from snapshot '$sha' in: $dir" >&2
               return 1 ;;
     esac
+    # A forged path with a '.git' component (no '..', not absolute → passes the
+    # tests above) would let restore write an executable hook or clobber config
+    # inside "$dir/.git" — the next git op then runs it (RCE). Reject any '.git'
+    # path component, CASE-FOLDED: APFS/HFS are case-insensitive, so '.GIT' etc
+    # alias the real dir. Lowercase via tr (no bash-4 ${x,,}, preserving the
+    # lib's 3.2-compatible idiom), then a slash-bounded component match — precise,
+    # so a legit 'foo.git.txt' or '.github/' (no bare '.git' component) is spared.
+    case "$(printf '%s' "/$path/" | tr '[:upper:]' '[:lower:]')" in
+      */.git/*) rm -f "$difftmp"
+                echo "defect: restore-unsafe-path: refusing '.git'-component path '$path' from snapshot '$sha' in: $dir" >&2
+                return 1 ;;
+    esac
+    # Symlink containment: a string test on $path cannot catch a PRE-EXISTING
+    # worktree symlink at any component — 'mkdir -p $dir/link' is a no-op on a
+    # symlinked dir and 'cat-file blob > $dir/link/leaf' (or a rm of it) then
+    # follows the link OUTSIDE "$dir". Walk each component from the trusted root
+    # "$dir" down to and including the leaf; if any existing prefix is a symlink
+    # (lstat, -L), refuse. Not-yet-existing real dirs are not symlinks, so a
+    # legitimate nested restore still mkdir -p's them and writes. Guards BOTH the
+    # write (A/M) and remove (D) branches, which follow below.
+    local _walk="$path" _comp _accum="$dir"
+    while [ -n "$_walk" ]; do
+      case "$_walk" in
+        */*) _comp="${_walk%%/*}"; _walk="${_walk#*/}" ;;
+        *)   _comp="$_walk";       _walk="" ;;
+      esac
+      [ -z "$_comp" ] && continue
+      _accum="$_accum/$_comp"
+      if [ -L "$_accum" ]; then
+        rm -f "$difftmp"
+        echo "defect: restore-unsafe-target: refusing to restore through symlinked component '$_comp' in path '$path' from snapshot '$sha' in: $dir" >&2
+        return 1
+      fi
+    done
     target="$dir/$path"
     case "$status" in
       D)
