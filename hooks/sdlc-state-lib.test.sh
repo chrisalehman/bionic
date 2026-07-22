@@ -432,6 +432,204 @@ ac_l2_truncated() {
 ac_l2_truncated
 
 # ============================================================
+# WIP shadow store (slice 4/2) — sdlc_wip_snapshot / _restore / _check.
+# Every case builds a HERMETIC fixture git repo in a fresh temp dir (git
+# init + local user config + a base commit) so no test ever touches the
+# real repo's git state; new_state_dir also freshens HOME/SDLC_STATE_DIR so
+# no real home surface is read (the fixture's own local config is the only
+# git config in play). Fixtures drive the REAL lib functions against planted
+# WIP — never reimplement the plumbing here. refs/sdlc-wip/<goal-id> lives
+# inside the fixture repo (WIP functions are repo-scoped via -C <dir>, D3),
+# not under SDLC_STATE_DIR.
+# ============================================================
+
+# new_wip_repo — a hermetic fixture git repo; echoes its dir. Base commit
+# carries tracked.txt, todelete.txt, control.txt and a .gitignore that
+# ignores .bionic/docs/ (the lifecycle-artifact dir a snapshot force-includes).
+new_wip_repo() {
+  new_state_dir
+  local d; d=$(mktemp -d); CLEAN_DIRS+=("$d")
+  git -C "$d" init -q
+  git -C "$d" config user.name  "fixture"
+  git -C "$d" config user.email "fixture@example.com"
+  printf 'base line\n'    > "$d/tracked.txt"
+  printf 'delete me\n'    > "$d/todelete.txt"
+  printf 'do not touch\n' > "$d/control.txt"
+  printf '.bionic/docs/\n' > "$d/.gitignore"
+  git -C "$d" add -A
+  git -C "$d" commit -qm base
+  printf '%s' "$d"
+}
+
+echo ""
+echo "=== AC-W1: WIP snapshot → clobber → restore, byte-faithful across all four WIP classes (+ exec bit, spaces, deletion, controls untouched) ==="
+ac_w1() {
+  local d gid snap rc
+  d=$(new_wip_repo); gid="wip-goal-w1"
+
+  # All captured WIP classes at once:
+  printf 'base line\nmodified\n' > "$d/tracked.txt"                 # 1. tracked modification
+  printf 'brand new\n'           > "$d/untracked.txt"               # 2. untracked new file
+  mkdir -p "$d/.bionic/docs"
+  printf 'artifact v1\n'         > "$d/.bionic/docs/artifact.md"    # 3. gitignored, force-included
+  rm -f "$d/todelete.txt"                                           # 4. tracked deletion
+  printf '#!/bin/sh\necho hi\n'  > "$d/added-exec.sh"; chmod +x "$d/added-exec.sh"  # exec bit
+  printf 'has spaces\n'          > "$d/a spacey file.txt"           # path with a space
+
+  snap=$(sdlc_wip_snapshot "$gid" "$d" ".bionic/docs" 2>/dev/null)
+  TOTAL=$((TOTAL + 1)); if [ -n "$snap" ] && [ "$snap" != "none" ]; then
+    pass "AC-W1 snapshot prints a captured sha (WIP present, not 'none')"
+  else fail "AC-W1 snapshot prints a captured sha (WIP present, not 'none')" "got: '$snap'"; fi
+  assert_eq "AC-W1 refs/sdlc-wip/<gid> points at the snapshot" \
+    "$snap" "$(git -C "$d" rev-parse --verify --quiet "refs/sdlc-wip/$gid" || true)"
+
+  # Clobber every captured path; plant a post-snapshot untracked file that
+  # restore must NOT delete (proves restore touches only captured paths).
+  git -C "$d" checkout -q -- tracked.txt                 # revert tracked mod
+  rm -f "$d/untracked.txt"                                # remove untracked
+  printf 'CLOBBERED\n' > "$d/.bionic/docs/artifact.md"    # overwrite artifact
+  printf 'delete me\n' > "$d/todelete.txt"               # resurrect deleted file
+  rm -f "$d/added-exec.sh"
+  rm -f "$d/a spacey file.txt"
+  printf 'survivor\n'  > "$d/post-snapshot.txt"          # non-captured control
+
+  sdlc_wip_restore "$gid" "$snap" "$d" 2>/dev/null; rc=$?
+  assert_eq "AC-W1 restore exits 0" "0" "$rc"
+
+  assert_eq "AC-W1 tracked modification restored byte-faithful" \
+    "$(printf 'base line\nmodified')" "$(cat "$d/tracked.txt")"
+  assert_eq "AC-W1 untracked file restored byte-faithful" \
+    "brand new" "$(cat "$d/untracked.txt" 2>/dev/null)"
+  assert_eq "AC-W1 gitignored force-included artifact restored byte-faithful" \
+    "artifact v1" "$(cat "$d/.bionic/docs/artifact.md" 2>/dev/null)"
+  assert_true "AC-W1 tracked deletion re-applied (file removed again)" test ! -e "$d/todelete.txt"
+  assert_true "AC-W1 exec bit survived restore" test -x "$d/added-exec.sh"
+  assert_eq "AC-W1 path-with-space file restored byte-faithful" \
+    "has spaces" "$(cat "$d/a spacey file.txt" 2>/dev/null)"
+  assert_eq "AC-W1 committed control file untouched by restore" \
+    "do not touch" "$(cat "$d/control.txt" 2>/dev/null)"
+  assert_eq "AC-W1 non-captured post-snapshot file untouched by restore" \
+    "survivor" "$(cat "$d/post-snapshot.txt" 2>/dev/null)"
+}
+ac_w1
+
+echo "--- clean tree → snapshot prints 'none' and deletes a stale ref ---"
+ac_w1_clean() {
+  local d gid out
+  d=$(new_wip_repo); gid="wip-goal-clean"
+  git -C "$d" update-ref "refs/sdlc-wip/$gid" "$(git -C "$d" rev-parse HEAD)"  # stale ref
+  out=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  assert_eq "AC-W1 clean-tree snapshot prints none" "none" "$out"
+  assert_eq "AC-W1 clean-tree snapshot deleted the stale ref" "" \
+    "$(git -C "$d" rev-parse --verify --quiet "refs/sdlc-wip/$gid" || true)"
+}
+ac_w1_clean
+
+echo "--- snapshot loud defects: not-a-repo, invalid-goal-id ---"
+ac_w1_defects() {
+  local nonrepo d err rc
+  new_state_dir
+  nonrepo=$(mktemp -d); CLEAN_DIRS+=("$nonrepo")
+  err=$(sdlc_wip_snapshot "good-goal" "$nonrepo" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 snapshot on a non-repo dir returns nonzero" "$rc"
+  assert_contains "AC-W1 snapshot on a non-repo dir names not-a-repo" "not-a-repo" "$err"
+
+  d=$(new_wip_repo)
+  err=$(sdlc_wip_snapshot "bad/goal" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 snapshot with a '/'-goal-id returns nonzero" "$rc"
+  assert_contains "AC-W1 snapshot bad goal-id names invalid-goal-id" "invalid-goal-id" "$err"
+}
+ac_w1_defects
+
+echo "--- restore on a missing object → wip-lost ---"
+ac_w1_restore_lost() {
+  local d err rc
+  d=$(new_wip_repo)
+  err=$(sdlc_wip_restore "wip-goal-rlost" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 restore on a missing object returns nonzero" "$rc"
+  assert_contains "AC-W1 restore on a missing object names wip-lost" "wip-lost" "$err"
+}
+ac_w1_restore_lost
+
+echo ""
+echo "=== AC-W2: WIP loss detection — healthy/none silent, each planted loss class named loud (both directions) ==="
+
+echo "--- healthy match → silent, exit 0 ---"
+ac_w2_healthy() {
+  local d gid snap errf rc
+  d=$(new_wip_repo); gid="wip-goal-w2-ok"
+  printf 'wip\n' > "$d/untracked.txt"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_wip_check "$gid" "$snap" "$d" 2>"$errf"; rc=$?
+  assert_eq "AC-W2 healthy check exits 0" "0" "$rc"
+  assert_eq "AC-W2 healthy check is silent on stderr" "" "$(cat "$errf")"
+}
+ac_w2_healthy
+
+echo "--- honest 'none' → silent, exit 0 ---"
+ac_w2_none() {
+  local d errf rc
+  d=$(new_wip_repo)
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_wip_check "wip-goal-none" "none" "$d" 2>"$errf"; rc=$?
+  assert_eq "AC-W2 none check exits 0" "0" "$rc"
+  assert_eq "AC-W2 none check is silent on stderr" "" "$(cat "$errf")"
+}
+ac_w2_none
+
+echo "--- object pruned (ref deleted + gc prune) → wip-lost naming the sha ---"
+ac_w2_pruned() {
+  local d gid snap errf rc out
+  d=$(new_wip_repo); gid="wip-goal-pruned"
+  printf 'wip\n' > "$d/untracked.txt"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  git -C "$d" update-ref -d "refs/sdlc-wip/$gid"
+  git -C "$d" prune --expire=now 2>/dev/null; git -C "$d" gc --prune=now -q 2>/dev/null || true
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_wip_check "$gid" "$snap" "$d" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "AC-W2 pruned-object check returns nonzero" "$rc"
+  assert_contains "AC-W2 pruned-object check names wip-lost" "wip-lost" "$out"
+  assert_contains "AC-W2 pruned-object check names the lost sha" "$snap" "$out"
+}
+ac_w2_pruned
+
+echo "--- ref deleted but object alive → wip-lost (ref half) ---"
+ac_w2_ref_deleted() {
+  local d gid snap errf rc out
+  d=$(new_wip_repo); gid="wip-goal-refgone"
+  printf 'wip\n' > "$d/untracked.txt"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  git -C "$d" update-ref "refs/keepalive/$gid" "$snap"   # anchor the object
+  git -C "$d" update-ref -d "refs/sdlc-wip/$gid"          # drop only the sdlc-wip ref
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_wip_check "$gid" "$snap" "$d" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "AC-W2 ref-deleted (object alive) check returns nonzero" "$rc"
+  assert_contains "AC-W2 ref-deleted check names wip-lost" "wip-lost" "$out"
+}
+ac_w2_ref_deleted
+
+echo "--- ref reseated to a different sha, baton names the old sha → wip-drift naming both ---"
+ac_w2_drift() {
+  local d gid snap snap2 errf rc out
+  d=$(new_wip_repo); gid="wip-goal-drift"
+  printf 'wip\n' > "$d/untracked.txt"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  printf 'more wip\n' > "$d/untracked2.txt"
+  snap2=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)     # reseats the ref to snap2
+  TOTAL=$((TOTAL + 1)); if [ "$snap" != "$snap2" ]; then
+    pass "AC-W2 drift fixture: the two snapshots differ"
+  else fail "AC-W2 drift fixture: the two snapshots differ" "both '$snap'"; fi
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_wip_check "$gid" "$snap" "$d" 2>"$errf"; rc=$?; out=$(cat "$errf")  # baton still names old snap
+  assert_nonzero "AC-W2 drift check returns nonzero" "$rc"
+  assert_contains "AC-W2 drift check names wip-drift" "wip-drift" "$out"
+  assert_contains "AC-W2 drift check names the baton (old) sha" "$snap" "$out"
+  assert_contains "AC-W2 drift check names the ref (new) sha" "$snap2" "$out"
+}
+ac_w2_drift
+
+# ============================================================
 # Goal-id contract + divergence guard (FLAG 2, AS-26) — sdlc_goal_id() is
 # the canonical transform for future writers (N2-N4). context-spend.sh
 # keeps its own inline copy (reviewed-acceptable self-containment); this
