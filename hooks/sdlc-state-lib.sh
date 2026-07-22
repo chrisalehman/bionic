@@ -1,6 +1,6 @@
 #!/bin/bash
 # sdlc-state-lib — durable per-goal state primitives (epic-10-never-die,
-# wave-01-substrate, slice 4/1: baton primitives).
+# waves 01-02): baton primitives, ledger, WIP shadow store, effect guard.
 #
 # A sourced function library (D3) — no standalone process, nothing runs on
 # source. Ships the baton half of the durable-state substrate: a structured-
@@ -25,7 +25,8 @@
 # or malformed key.
 #
 # Required keys (R-B1): goal-id, plan, cwd, branch, integration-branch,
-# last-commit, sdlc-step, session, ledger-position, next-action, written-at.
+# last-commit, sdlc-step, session, ledger-position, next-action, wip,
+# written-at.
 
 # Deliberately NO top-level `set -u` (FLAG 4): this file is sourced by
 # other scripts (context-spend.sh today; N2-N4 later), and a sourced
@@ -35,7 +36,7 @@
 # `${x:-}` guards throughout this file are the actual safety net; they
 # do not depend on nounset being active.
 
-BATON_REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc-step session ledger-position next-action written-at"
+BATON_REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc-step session ledger-position next-action wip written-at"
 
 # ---------- path helpers (read SDLC_STATE_DIR/HOME at call time) ----------
 sdlc_state_dir() { printf '%s' "${SDLC_STATE_DIR:-$HOME/.claude/sdlc-state}"; }
@@ -74,7 +75,7 @@ _sdlc_validate_goal_id() {
 # ---------- R-B1: baton_write ----------
 # baton_write <goal-id> <plan> <cwd> <branch> <integration-branch>
 #             <last-commit> <sdlc-step> <session> <ledger-position>
-#             <next-action> [prose]
+#             <next-action> <wip> [prose]
 # Serializes goal state as structured markdown with the fixed required-key
 # lines, `written-at:` stamped here (UTC, now). Atomic: written to a tmp
 # file in the SAME dir, then `mv` into place (single rename, never a
@@ -84,7 +85,7 @@ _sdlc_validate_goal_id() {
 baton_write() {
   local goal_id="${1:-}" plan="${2:-}" cwd="${3:-}" branch="${4:-}" integ="${5:-}" \
         last_commit="${6:-}" step="${7:-}" session="${8:-}" ledger_pos="${9:-}" \
-        next_action="${10:-}" prose="${11:-}"
+        next_action="${10:-}" wip="${11:-}" prose="${12:-}"
   local dir target tmp written_at
 
   _sdlc_validate_goal_id "$goal_id" "baton_write" || return 1
@@ -107,6 +108,7 @@ baton_write() {
     echo "session: $session"
     echo "ledger-position: $ledger_pos"
     echo "next-action: $next_action"
+    echo "wip: $wip"
     echo "written-at: $written_at"
     if [ -n "$prose" ]; then
       echo ""
@@ -142,7 +144,7 @@ baton_write() {
 baton_parse() {
   local f="${1:-}"
   local header key count value
-  local v_goal_id v_plan v_cwd v_branch v_integ v_last_commit v_step v_session v_ledger_pos v_next_action v_written_at
+  local v_goal_id v_plan v_cwd v_branch v_integ v_last_commit v_step v_session v_ledger_pos v_next_action v_wip v_written_at
 
   [ -n "$f" ] && [ -f "$f" ] || { echo "defect: missing-file: baton not found: ${f:-<empty path>}" >&2; return 1; }
   [ -s "$f" ] || { echo "defect: truncated-file: baton is empty: $f" >&2; return 1; }
@@ -181,6 +183,7 @@ baton_parse() {
       session)             v_session="$value" ;;
       ledger-position)     v_ledger_pos="$value" ;;
       next-action)         v_next_action="$value" ;;
+      wip)                 v_wip="$value" ;;
       written-at)          v_written_at="$value" ;;
     esac
   done
@@ -198,6 +201,7 @@ baton_parse() {
   BATON_SESSION="$v_session"
   BATON_LEDGER_POSITION="$v_ledger_pos"
   BATON_NEXT_ACTION="$v_next_action"
+  BATON_WIP="$v_wip"
   BATON_WRITTEN_AT="$v_written_at"
   return 0
 }
@@ -438,4 +442,345 @@ ledger_applied() {
     [ "$l_type" = "effect" ] && [ "$l_key" = "$key" ] && return 0
   done < "$path"
   return 1
+}
+
+# ---------- D4/D5: effect guard — exactly-once replay (slice 4/3) ----------
+#
+# The exactly-once leg atop the ledger primitives: journal-before-act plus a
+# post-crash replay that runs an effect no more than once, even when a death
+# fell between the intent and the outcome.
+#
+# Effect-key grammar (D4): `<class>:<qualifier>`.
+#   * class — an OPEN lowercase set naming the KIND of side effect
+#     (notify, merge, poke, append, ...). New classes need no registration.
+#   * qualifier — deterministic and REPLAY-STABLE: the SAME logical action
+#     must derive the SAME key on every replay. NEVER embed a timestamp, pid,
+#     or session-id — a key that changes between the original run and its
+#     replay defeats the guard (the replayer sees `unapplied` and re-runs).
+#   Examples:
+#     notify:slack-run-done        (one Slack ping per run)
+#     merge:pr-1487                (merge a specific PR exactly once)
+#     poke:reviewer-jane-wave-02   (nudge a named reviewer once per wave)
+#
+# The two states that gate a replay decision (see sdlc_effect_state):
+#   applied        — an effect line for the key exists; the outcome landed.
+#   indeterminate  — a decision line exists but NO effect line: intent was
+#                    journaled, outcome unknown (the crash window).
+#   unapplied      — neither exists (absent/empty ledger included): "not yet".
+
+# sdlc_effect_state <goal-id> <effect-key>
+# Prints exactly one of `applied` / `indeterminate` / `unapplied` (rc 0).
+# Membership mirrors ledger_applied (effect-type, exact key); an absent or
+# empty ledger is `unapplied` — "not yet" is ordinary, not a defect (AS-27).
+# Loud named defects (rc 1, one stderr line): invalid-goal-id (shared guard),
+# missing-effect-key (matches ledger_append's class).
+sdlc_effect_state() {
+  local goal_id="${1:-}" key="${2:-}" path l_type l_key has_decision=0
+  _sdlc_validate_goal_id "$goal_id" "sdlc_effect_state" || return 1
+  [ -n "$key" ] || { echo "defect: missing-effect-key: sdlc_effect_state requires a non-empty effect-key" >&2; return 1; }
+
+  path="$(ledger_path "$goal_id")"
+  if [ -f "$path" ] && [ -s "$path" ]; then
+    while IFS=$'\t' read -r _ _ _ l_type l_key _; do
+      [ "$l_key" = "$key" ] || continue
+      [ "$l_type" = "effect" ] && { printf 'applied\n'; return 0; }
+      [ "$l_type" = "decision" ] && has_decision=1
+    done < "$path"
+  fi
+  [ "$has_decision" -eq 1 ] && { printf 'indeterminate\n'; return 0; }
+  printf 'unapplied\n'
+  return 0
+}
+
+# sdlc_effect_run <goal-id> <effect-key> <summary> [--replay-safe] -- <cmd> [args...]
+# Runs <cmd> AT MOST ONCE for the key, journal-before-act. The literal `--`
+# separates the guard's own args from the command; `--replay-safe` (the only
+# flag) sits before it. Behavior by state:
+#   applied        → rc 0, command NOT executed (idempotent success, silent).
+#   indeterminate, no --replay-safe → fail-closed (J1): one stderr line
+#                    `effect-indeterminate`, nonzero, command NOT executed —
+#                    the caller parks GATED for a human replay decision.
+#   indeterminate + --replay-safe, OR unapplied → journal the decision intent
+#                    (SKIP when a decision line already exists — the
+#                    indeterminate replay-safe path must not double-journal),
+#                    run the command, and on rc 0 journal the effect line.
+#                    Command nonzero → that rc, NO effect line: the intent
+#                    stands so a live caller may retry, and a future replayer
+#                    correctly sees `indeterminate` and parks (D5/AS-8).
+# Any ledger_append failure propagates loud (its own named defect, nonzero) —
+# never swallowed. Loud guard defects: invalid-goal-id, missing-effect-key,
+# missing-command (no command after `--`), bad-args (unexpected token before
+# `--`).
+sdlc_effect_run() {
+  local goal_id="${1:-}" key="${2:-}" summary="${3:-}" replay_safe=0 state
+
+  _sdlc_validate_goal_id "$goal_id" "sdlc_effect_run" || return 1
+  [ -n "$key" ] || { echo "defect: missing-effect-key: sdlc_effect_run requires a non-empty effect-key" >&2; return 1; }
+
+  if [ "$#" -ge 3 ]; then shift 3; else shift "$#"; fi
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --replay-safe) replay_safe=1; shift ;;
+      --)            shift; break ;;
+      *) echo "defect: bad-args: sdlc_effect_run expected '--replay-safe' or '--' before the command, got '$1'" >&2; return 1 ;;
+    esac
+  done
+  [ "$#" -ge 1 ] || { echo "defect: missing-command: sdlc_effect_run requires a command after '--'" >&2; return 1; }
+
+  state="$(sdlc_effect_state "$goal_id" "$key")" || return 1
+  case "$state" in
+    applied)
+      return 0 ;;
+    indeterminate)
+      if [ "$replay_safe" -eq 0 ]; then
+        echo "defect: effect-indeterminate: $key — journaled intent has no recorded effect; replay requires a decision" >&2
+        return 1
+      fi
+      ;;  # replay-safe: the decision is already journaled — do NOT re-append
+    unapplied)
+      ledger_append "$goal_id" decision "$key" "$summary" || return 1 ;;
+  esac
+
+  "$@"
+  local cmd_rc=$?
+  [ "$cmd_rc" -eq 0 ] || return "$cmd_rc"   # intent stands; no effect line
+
+  ledger_append "$goal_id" effect "$key" "$summary" || return 1
+  return 0
+}
+
+# ---------- R-W1/R-W2: WIP shadow store (slice 4/2) ----------
+#
+# The durable-state substrate's third leg: a git-plumbing SIDE STORE for
+# work-in-progress that survives a session death without ever touching the
+# working tree, the real index, the branch, or the evidence gate (D1). A
+# confused successor that would otherwise clobber uncommitted work instead
+# finds it captured under refs/sdlc-wip/<goal-id> and replays it byte-faithful.
+#
+# Evidence-gate neutrality (D1, binding): snapshot uses ONLY plumbing —
+# read-tree/add/write-tree into a TEMPORARY index (GIT_INDEX_FILE, never the
+# repo's real index), commit-tree, update-ref. Porcelain `git commit` is NEVER
+# invoked: the evidence gate's matcher word-bounds `git commit`, and a stray
+# porcelain commit here would trip it. Every git invocation is `-C <dir>` so
+# the caller's $PWD is irrelevant (D3: the repo is the caller-supplied dir).
+#
+# Gitignored lifecycle artifacts (the goal's plan/spec under .bionic/docs) are
+# part of the work product but `git add -A` skips them, so snapshot force-adds
+# each caller-named path (`git add -f`). ONE ref per goal, overwritten each
+# checkpoint; a clean tree deletes the ref and reports `none`, so the snapshot
+# always reflects now (never a stale capture). Superseded snapshots become
+# unreachable and gc-able — accepted, no retention machinery (D1).
+
+# sdlc_wip_snapshot <goal-id> <dir> [force-include-path ...]
+# Captures the repo-at-<dir>'s WIP into a shadow commit under
+# refs/sdlc-wip/<goal-id> without touching the working tree, real index, or
+# branch. Prints the snapshot sha (rc 0), or `none` (rc 0) when there is
+# nothing to capture — deleting any stale ref in that case. Loud named
+# defects (one stderr line, nonzero): invalid-goal-id, not-a-repo,
+# snapshot-failed.
+sdlc_wip_snapshot() {
+  local goal_id="${1:-}" dir="${2:-}"
+  if [ "$#" -ge 2 ]; then shift 2; else set --; fi   # remaining args = force-include paths
+  local tmp_index head_tree tree snap p
+
+  _sdlc_validate_goal_id "$goal_id" "sdlc_wip_snapshot" || return 1
+
+  # not-a-repo: dir absent, not a git repo, or no HEAD commit to parent onto.
+  # HEAD^{tree} both proves a usable repo/HEAD and gives the clean-tree anchor.
+  head_tree=$(git -C "$dir" rev-parse --verify --quiet 'HEAD^{tree}' 2>/dev/null) || true
+  if [ -z "$head_tree" ]; then
+    echo "defect: not-a-repo: sdlc_wip_snapshot needs a git repo with a HEAD at: ${dir:-<empty dir>}" >&2
+    return 1
+  fi
+
+  tmp_index=$(mktemp 2>/dev/null) || { echo "defect: snapshot-failed: cannot mint a temp index" >&2; return 1; }
+  # Build the snapshot tree in the TEMP index only (real index untouched):
+  # seed from HEAD, stage every dirty/untracked-unignored change, then
+  # force-add each caller-named gitignored lifecycle-artifact path.
+  if ! GIT_INDEX_FILE="$tmp_index" git -C "$dir" read-tree HEAD 2>/dev/null \
+     || ! GIT_INDEX_FILE="$tmp_index" git -C "$dir" add -A 2>/dev/null; then
+    rm -f "$tmp_index"
+    echo "defect: snapshot-failed: could not stage WIP into the temp index for: $dir" >&2
+    return 1
+  fi
+  for p in "$@"; do
+    [ -n "$p" ] || continue
+    if ! GIT_INDEX_FILE="$tmp_index" git -C "$dir" add -f -- "$p" 2>/dev/null; then
+      rm -f "$tmp_index"
+      echo "defect: snapshot-failed: could not force-add '$p' for: $dir" >&2
+      return 1
+    fi
+  done
+  tree=$(GIT_INDEX_FILE="$tmp_index" git -C "$dir" write-tree 2>/dev/null) \
+    || { rm -f "$tmp_index"; echo "defect: snapshot-failed: write-tree failed for: $dir" >&2; return 1; }
+  rm -f "$tmp_index"
+
+  # Nothing captured (tree matches HEAD): report none, drop any stale ref.
+  if [ "$tree" = "$head_tree" ]; then
+    git -C "$dir" update-ref -d "refs/sdlc-wip/$goal_id" 2>/dev/null || :
+    printf 'none\n'
+    return 0
+  fi
+
+  snap=$(git -C "$dir" commit-tree "$tree" -p HEAD -m "sdlc-wip snapshot: $goal_id" 2>/dev/null) \
+    || { echo "defect: snapshot-failed: commit-tree failed for: $dir" >&2; return 1; }
+  git -C "$dir" update-ref "refs/sdlc-wip/$goal_id" "$snap" 2>/dev/null \
+    || { echo "defect: snapshot-failed: update-ref refs/sdlc-wip/$goal_id failed for: $dir" >&2; return 1; }
+  printf '%s\n' "$snap"
+  return 0
+}
+
+# sdlc_wip_restore <goal-id> <sha> <dir>
+# Replays the captured delta into the repo-at-<dir>'s working tree,
+# byte-faithful, touching ONLY the captured paths: for each added/modified
+# path write the snapshot blob (creating parent dirs; restoring the exec bit
+# when the dst mode is 100755); for each deleted path remove the working-tree
+# file. Loud named defects (one stderr line, nonzero): invalid-goal-id,
+# wip-lost (object missing/unreadable), restore-failed.
+#
+# The delta is `diff-tree -r -z <sha>^ <sha>` — the snapshot vs its HEAD
+# parent (snapshots always `commit-tree -p HEAD`, so <sha>^ resolves). -z
+# (NUL-delimited) is chosen so paths with spaces or shell metacharacters
+# survive intact: each record is a metadata field
+# `:<src-mode> <dst-mode> <src-sha> <dst-sha> <status>` terminated by NUL,
+# then the path terminated by NUL. Rename/copy detection is off (snapshots
+# never emit R/C), so there is never a second path field to consume; statuses
+# seen are A/M/D and, defensively, T (type change) — all non-D are treated as
+# "write the dst blob". Only the exec bit is mode-faithful (100755 → +x); a
+# 100644 restore leaves the freshly written file at the umask default and does
+# not actively clear a pre-existing +x (out of scope; content is faithful).
+sdlc_wip_restore() {
+  local goal_id="${1:-}" sha="${2:-}" dir="${3:-}"
+  local difftmp meta path src_mode dst_mode src_sha dst_sha status target
+
+  _sdlc_validate_goal_id "$goal_id" "sdlc_wip_restore" || return 1
+
+  if [ -z "$sha" ] || ! git -C "$dir" cat-file -e "$sha" 2>/dev/null; then
+    echo "defect: wip-lost: sdlc_wip_restore cannot read snapshot object '${sha:-<empty>}' in: $dir" >&2
+    return 1
+  fi
+
+  difftmp=$(mktemp 2>/dev/null) || { echo "defect: restore-failed: cannot mint a temp file" >&2; return 1; }
+  # NUL-safe stream to a temp file: command substitution would strip the NUL
+  # delimiters, so the -z output is consumed from a file, not a variable.
+  if ! git -C "$dir" diff-tree -r -z "$sha^" "$sha" > "$difftmp" 2>/dev/null; then
+    rm -f "$difftmp"
+    echo "defect: restore-failed: diff-tree failed for snapshot '$sha' in: $dir" >&2
+    return 1
+  fi
+
+  while IFS= read -r -d '' meta; do
+    IFS= read -r -d '' path || { rm -f "$difftmp"; echo "defect: restore-failed: truncated diff-tree stream for '$sha' in: $dir" >&2; return 1; }
+    # meta = ":<src-mode> <dst-mode> <src-sha> <dst-sha> <status>" (leading ':' stripped).
+    read -r src_mode dst_mode src_sha dst_sha status <<< "${meta#:}"
+    # Path-containment guard (forged/corrupted-object hardening, ADR-001 D5).
+    # $path is about to be joined as "$dir/$path" and written or removed. A
+    # normal snapshot can't carry an escaping path (git add rejects absolute
+    # paths and '..'), but a FORGED/corrupted snapshot object can — a tree
+    # with a '..'-named subtree yields a '../escape' delta path, and a raw
+    # tree hand-built past fsck can carry a leading '/'. Either would let
+    # restore write/remove outside "$dir". Reject BEFORE building $target, so
+    # neither branch (A/M write, D remove) can act on it. The '..' test is
+    # slash-bounded ("/$path/" vs */../*) — a precise PATH-COMPONENT match, so
+    # a legitimate dotted filename like 'a..b.txt' is NOT rejected, whereas a
+    # bare '..' substring test would false-reject it.
+    case "$path" in
+      /*) rm -f "$difftmp"
+          echo "defect: restore-unsafe-path: refusing absolute path '$path' from snapshot '$sha' in: $dir" >&2
+          return 1 ;;
+    esac
+    case "/$path/" in
+      */../*) rm -f "$difftmp"
+              echo "defect: restore-unsafe-path: refusing '..' traversal in path '$path' from snapshot '$sha' in: $dir" >&2
+              return 1 ;;
+    esac
+    # A forged path with a '.git' component (no '..', not absolute → passes the
+    # tests above) would let restore write an executable hook or clobber config
+    # inside "$dir/.git" — the next git op then runs it (RCE). Reject any '.git'
+    # path component, CASE-FOLDED: APFS/HFS are case-insensitive, so '.GIT' etc
+    # alias the real dir. Lowercase via tr (no bash-4 ${x,,}, preserving the
+    # lib's 3.2-compatible idiom), then a slash-bounded component match — precise,
+    # so a legit 'foo.git.txt' or '.github/' (no bare '.git' component) is spared.
+    # Platform assumption (Step-6 critic re-verify): this covers APFS (the macOS
+    # default) — restore writes via shell redirection, never `git checkout`, so
+    # git's own is_hfs_dotgit/is_ntfs_dotgit normalization is not the writer, and
+    # APFS does not alias trailing-dot/space ('.git.', '.git ') or HFS+
+    # ignorable-codepoint ('.g<ZWNJ>it') forms to '.git'. A genuine HFS+ volume
+    # is the only place those could alias; extend this match if N3 ports there.
+    case "$(printf '%s' "/$path/" | tr '[:upper:]' '[:lower:]')" in
+      */.git/*) rm -f "$difftmp"
+                echo "defect: restore-unsafe-path: refusing '.git'-component path '$path' from snapshot '$sha' in: $dir" >&2
+                return 1 ;;
+    esac
+    # Symlink containment: a string test on $path cannot catch a PRE-EXISTING
+    # worktree symlink at any component — 'mkdir -p $dir/link' is a no-op on a
+    # symlinked dir and 'cat-file blob > $dir/link/leaf' (or a rm of it) then
+    # follows the link OUTSIDE "$dir". Walk each component from the trusted root
+    # "$dir" down to and including the leaf; if any existing prefix is a symlink
+    # (lstat, -L), refuse. Not-yet-existing real dirs are not symlinks, so a
+    # legitimate nested restore still mkdir -p's them and writes. Guards BOTH the
+    # write (A/M) and remove (D) branches, which follow below.
+    local _walk="$path" _comp _accum="$dir"
+    while [ -n "$_walk" ]; do
+      case "$_walk" in
+        */*) _comp="${_walk%%/*}"; _walk="${_walk#*/}" ;;
+        *)   _comp="$_walk";       _walk="" ;;
+      esac
+      [ -z "$_comp" ] && continue
+      _accum="$_accum/$_comp"
+      if [ -L "$_accum" ]; then
+        rm -f "$difftmp"
+        echo "defect: restore-unsafe-target: refusing to restore through symlinked component '$_comp' in path '$path' from snapshot '$sha' in: $dir" >&2
+        return 1
+      fi
+    done
+    target="$dir/$path"
+    case "$status" in
+      D)
+        rm -f "$target" 2>/dev/null || { rm -f "$difftmp"; echo "defect: restore-failed: cannot remove '$path' in: $dir" >&2; return 1; }
+        ;;
+      *)  # A / M / T — materialize the snapshot blob at the worktree path.
+        mkdir -p "$(dirname "$target")" 2>/dev/null || { rm -f "$difftmp"; echo "defect: restore-failed: cannot mkdir for '$path' in: $dir" >&2; return 1; }
+        if ! git -C "$dir" cat-file blob "$dst_sha" > "$target" 2>/dev/null; then
+          rm -f "$difftmp"
+          echo "defect: restore-failed: cannot write blob for '$path' in: $dir" >&2
+          return 1
+        fi
+        [ "$dst_mode" = "100755" ] && { chmod +x "$target" 2>/dev/null || :; }
+        ;;
+    esac
+  done < "$difftmp"
+  rm -f "$difftmp"
+  return 0
+}
+
+# sdlc_wip_check <goal-id> <baton-wip-value> <dir>
+# Verifies the baton's recorded WIP against the repo-at-<dir>, mutating
+# nothing. `none` → silent rc 0. Otherwise the value is a snapshot sha:
+# object readable AND refs/sdlc-wip/<goal-id> resolves to that SAME sha →
+# silent rc 0; object or ref missing/unreadable → `wip-lost` (naming the
+# sha), nonzero; ref resolves to a DIFFERENT sha → `wip-drift` (naming both),
+# nonzero. The goal-id is validated on the non-none path (it builds the ref
+# path — same shared guard as every sibling); `none` short-circuits before
+# any check, so an honest `none` is always silent regardless.
+sdlc_wip_check() {
+  local goal_id="${1:-}" wip="${2:-}" dir="${3:-}" ref_sha
+  [ "$wip" = "none" ] && return 0
+
+  _sdlc_validate_goal_id "$goal_id" "sdlc_wip_check" || return 1
+
+  if ! git -C "$dir" cat-file -e "$wip" 2>/dev/null; then
+    echo "defect: wip-lost: snapshot object '$wip' is unreadable (pruned/gone) in: $dir" >&2
+    return 1
+  fi
+  ref_sha=$(git -C "$dir" rev-parse --verify --quiet "refs/sdlc-wip/$goal_id" 2>/dev/null) || true
+  if [ -z "$ref_sha" ]; then
+    echo "defect: wip-lost: ref refs/sdlc-wip/$goal_id is missing though object '$wip' survives, in: $dir" >&2
+    return 1
+  fi
+  if [ "$ref_sha" != "$wip" ]; then
+    echo "defect: wip-drift: baton names '$wip' but refs/sdlc-wip/$goal_id resolves to '$ref_sha', in: $dir" >&2
+    return 1
+  fi
+  return 0
 }

@@ -61,13 +61,14 @@ assert_nonzero() {  # <label> <actual-exit-code>
 }
 
 # ---------- fixture helpers ----------
-# write_healthy <goal-id> → writes a healthy baton via the REAL baton_write,
-# returns its path.
+# write_healthy <goal-id> [wip] → writes a healthy baton via the REAL
+# baton_write, returns its path. wip defaults to "none" (the common case);
+# pass a sha for round-trip fidelity assertions.
 write_healthy() {
-  local gid="$1"
+  local gid="$1" wip="${2:-none}"
   baton_write "$gid" "/plans/$gid.plan.md" "/work/$gid" "wave-01-substrate" \
     "epic/10-never-die" "abc1234" "4" "sid-$gid/4242" "42" \
-    "run the next slice" >/dev/null 2>&1
+    "run the next slice" "$wip" >/dev/null 2>&1
   baton_path "$gid"
 }
 
@@ -112,14 +113,14 @@ empty_value() { sed -E "s/^(${3}):.*/\1:/" "$1" > "$2"; }
 # the "cut off mid-flush" signal distinct from missing/duplicate/empty.
 truncate_file() { printf '%s' "$(cat "$1")" > "$2"; }
 
-REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc-step session ledger-position next-action written-at"
+REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc-step session ledger-position next-action wip written-at"
 
 # ============================================================
 echo "=== AC-B1: round-trip write → cold parse → next-action + ledger-position readback ==="
 ac_b1() {
   new_state_dir
   local gid="wave-01-substrate-4-1"
-  local f; f=$(write_healthy "$gid")
+  local f; f=$(write_healthy "$gid" "deadbeef1234567890abcdef1234567890abcdef")
   assert_true "AC-B1 baton_write produced a file" test -f "$f"
   assert_eq "AC-B1 baton_write went through the goal's dir (AS-6 mkdir -p)" \
     "$SDLC_STATE_DIR/$gid/baton.md" "$f"
@@ -142,6 +143,7 @@ ac_b1() {
   assert_eq "AC-B1 last-commit round-trips" "abc1234" "$BATON_LAST_COMMIT"
   assert_eq "AC-B1 sdlc-step round-trips" "4" "$BATON_SDLC_STEP"
   assert_eq "AC-B1 session round-trips" "sid-$gid/4242" "$BATON_SESSION"
+  assert_eq "AC-B1 wip round-trips" "deadbeef1234567890abcdef1234567890abcdef" "$BATON_WIP"
   assert_true "AC-B1 written-at is non-empty" test -n "$BATON_WRITTEN_AT"
 }
 ac_b1
@@ -229,9 +231,12 @@ ac_b2_no_partial_trust() {
   dst="$(mktemp -d)/baton.md"; CLEAN_DIRS+=("$(dirname "$dst")")
   delete_key "$src" "$dst" "next-action"
   BATON_GOAL_ID="sentinel-untouched"
+  BATON_WIP="sentinel-wip-untouched"
   baton_parse "$dst" >/dev/null 2>&1
   assert_eq "AC-B2 a failed parse leaves prior BATON_* state untouched (no partial trust)" \
     "sentinel-untouched" "$BATON_GOAL_ID"
+  assert_eq "AC-B2 a failed parse leaves prior BATON_WIP untouched (no partial trust)" \
+    "sentinel-wip-untouched" "$BATON_WIP"
 }
 ac_b2_no_partial_trust
 
@@ -427,6 +432,551 @@ ac_l2_truncated() {
 ac_l2_truncated
 
 # ============================================================
+# WIP shadow store (slice 4/2) — sdlc_wip_snapshot / _restore / _check.
+# Every case builds a HERMETIC fixture git repo in a fresh temp dir (git
+# init + local user config + a base commit) so no test ever touches the
+# real repo's git state; new_state_dir also freshens HOME/SDLC_STATE_DIR so
+# no real home surface is read (the fixture's own local config is the only
+# git config in play). Fixtures drive the REAL lib functions against planted
+# WIP — never reimplement the plumbing here. refs/sdlc-wip/<goal-id> lives
+# inside the fixture repo (WIP functions are repo-scoped via -C <dir>, D3),
+# not under SDLC_STATE_DIR.
+# ============================================================
+
+# new_wip_repo — a hermetic fixture git repo; echoes its dir. Base commit
+# carries tracked.txt, todelete.txt, control.txt and a .gitignore that
+# ignores .bionic/docs/ (the lifecycle-artifact dir a snapshot force-includes).
+new_wip_repo() {
+  new_state_dir
+  local d; d=$(mktemp -d); CLEAN_DIRS+=("$d")
+  git -C "$d" init -q
+  git -C "$d" config user.name  "fixture"
+  git -C "$d" config user.email "fixture@example.com"
+  printf 'base line\n'    > "$d/tracked.txt"
+  printf 'delete me\n'    > "$d/todelete.txt"
+  printf 'do not touch\n' > "$d/control.txt"
+  printf '.bionic/docs/\n' > "$d/.gitignore"
+  git -C "$d" add -A
+  git -C "$d" commit -qm base
+  printf '%s' "$d"
+}
+
+echo ""
+echo "=== AC-W1: WIP snapshot → clobber → restore, byte-faithful across all four WIP classes (+ exec bit, spaces, deletion, controls untouched) ==="
+ac_w1() {
+  local d gid snap rc
+  d=$(new_wip_repo); gid="wip-goal-w1"
+
+  # All captured WIP classes at once:
+  printf 'base line\nmodified\n' > "$d/tracked.txt"                 # 1. tracked modification
+  printf 'brand new\n'           > "$d/untracked.txt"               # 2. untracked new file
+  mkdir -p "$d/.bionic/docs"
+  printf 'artifact v1\n'         > "$d/.bionic/docs/artifact.md"    # 3. gitignored, force-included
+  rm -f "$d/todelete.txt"                                           # 4. tracked deletion
+  printf '#!/bin/sh\necho hi\n'  > "$d/added-exec.sh"; chmod +x "$d/added-exec.sh"  # exec bit
+  printf 'has spaces\n'          > "$d/a spacey file.txt"           # path with a space
+
+  snap=$(sdlc_wip_snapshot "$gid" "$d" ".bionic/docs" 2>/dev/null)
+  TOTAL=$((TOTAL + 1)); if [ -n "$snap" ] && [ "$snap" != "none" ]; then
+    pass "AC-W1 snapshot prints a captured sha (WIP present, not 'none')"
+  else fail "AC-W1 snapshot prints a captured sha (WIP present, not 'none')" "got: '$snap'"; fi
+  assert_eq "AC-W1 refs/sdlc-wip/<gid> points at the snapshot" \
+    "$snap" "$(git -C "$d" rev-parse --verify --quiet "refs/sdlc-wip/$gid" || true)"
+
+  # Clobber every captured path; plant a post-snapshot untracked file that
+  # restore must NOT delete (proves restore touches only captured paths).
+  git -C "$d" checkout -q -- tracked.txt                 # revert tracked mod
+  rm -f "$d/untracked.txt"                                # remove untracked
+  printf 'CLOBBERED\n' > "$d/.bionic/docs/artifact.md"    # overwrite artifact
+  printf 'delete me\n' > "$d/todelete.txt"               # resurrect deleted file
+  rm -f "$d/added-exec.sh"
+  rm -f "$d/a spacey file.txt"
+  printf 'survivor\n'  > "$d/post-snapshot.txt"          # non-captured control
+
+  sdlc_wip_restore "$gid" "$snap" "$d" 2>/dev/null; rc=$?
+  assert_eq "AC-W1 restore exits 0" "0" "$rc"
+
+  assert_eq "AC-W1 tracked modification restored byte-faithful" \
+    "$(printf 'base line\nmodified')" "$(cat "$d/tracked.txt")"
+  assert_eq "AC-W1 untracked file restored byte-faithful" \
+    "brand new" "$(cat "$d/untracked.txt" 2>/dev/null)"
+  assert_eq "AC-W1 gitignored force-included artifact restored byte-faithful" \
+    "artifact v1" "$(cat "$d/.bionic/docs/artifact.md" 2>/dev/null)"
+  assert_true "AC-W1 tracked deletion re-applied (file removed again)" test ! -e "$d/todelete.txt"
+  assert_true "AC-W1 exec bit survived restore" test -x "$d/added-exec.sh"
+  assert_eq "AC-W1 path-with-space file restored byte-faithful" \
+    "has spaces" "$(cat "$d/a spacey file.txt" 2>/dev/null)"
+  assert_eq "AC-W1 committed control file untouched by restore" \
+    "do not touch" "$(cat "$d/control.txt" 2>/dev/null)"
+  assert_eq "AC-W1 non-captured post-snapshot file untouched by restore" \
+    "survivor" "$(cat "$d/post-snapshot.txt" 2>/dev/null)"
+}
+ac_w1
+
+echo "--- clean tree → snapshot prints 'none' and deletes a stale ref ---"
+ac_w1_clean() {
+  local d gid out
+  d=$(new_wip_repo); gid="wip-goal-clean"
+  git -C "$d" update-ref "refs/sdlc-wip/$gid" "$(git -C "$d" rev-parse HEAD)"  # stale ref
+  out=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  assert_eq "AC-W1 clean-tree snapshot prints none" "none" "$out"
+  assert_eq "AC-W1 clean-tree snapshot deleted the stale ref" "" \
+    "$(git -C "$d" rev-parse --verify --quiet "refs/sdlc-wip/$gid" || true)"
+}
+ac_w1_clean
+
+echo "--- snapshot loud defects: not-a-repo, invalid-goal-id ---"
+ac_w1_defects() {
+  local nonrepo d err rc
+  new_state_dir
+  nonrepo=$(mktemp -d); CLEAN_DIRS+=("$nonrepo")
+  err=$(sdlc_wip_snapshot "good-goal" "$nonrepo" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 snapshot on a non-repo dir returns nonzero" "$rc"
+  assert_contains "AC-W1 snapshot on a non-repo dir names not-a-repo" "not-a-repo" "$err"
+
+  d=$(new_wip_repo)
+  err=$(sdlc_wip_snapshot "bad/goal" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 snapshot with a '/'-goal-id returns nonzero" "$rc"
+  assert_contains "AC-W1 snapshot bad goal-id names invalid-goal-id" "invalid-goal-id" "$err"
+}
+ac_w1_defects
+
+echo "--- restore on a missing object → wip-lost ---"
+ac_w1_restore_lost() {
+  local d err rc
+  d=$(new_wip_repo)
+  err=$(sdlc_wip_restore "wip-goal-rlost" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 restore on a missing object returns nonzero" "$rc"
+  assert_contains "AC-W1 restore on a missing object names wip-lost" "wip-lost" "$err"
+}
+ac_w1_restore_lost
+
+echo "--- restore path-containment (FLAG-1): forged '..'/absolute delta paths refused, legit dotted/nested paths restore ---"
+# Threat model: a FORGED or corrupted snapshot object whose delta carries a
+# path that escapes "$dir". A normal snapshot can't (git add rejects '..' and
+# absolute paths), so both fixtures below forge tree objects directly. The
+# traversal object is a real git tree (a '..'-named subtree, built with
+# mktree); the absolute-path object is a raw tree hand-built past fsck with
+# `hash-object --literally` (mktree forbids slashes in a name). Both drive the
+# REAL sdlc_wip_restore — the plumbing is forged, the restore is not.
+hex2bin() {  # <hex-sha> → 20 raw bytes on stdout
+  local h="$1" i
+  for ((i = 0; i < ${#h}; i += 2)); do printf "\\x${h:i:2}"; done
+}
+# forge_traversal_commit <repo-dir> <sentinel-basename> <content> → commit sha.
+# Delta path is "../<sentinel-basename>" so restore's "$dir/$path" join escapes
+# to <dir>'s SIBLING. -p HEAD so the restore's "$sha^" parent resolves.
+forge_traversal_commit() {
+  local d="$1" name="$2" content="$3" blob inner outer
+  blob=$(printf '%s' "$content" | git -C "$d" hash-object -w --stdin)
+  inner=$(printf '100644 blob %s\t%s\n' "$blob" "$name" | git -C "$d" mktree)
+  outer=$(printf '040000 tree %s\t..\n' "$inner" | git -C "$d" mktree)
+  git -C "$d" commit-tree "$outer" -p "$(git -C "$d" rev-parse HEAD)" -m forged-traversal
+}
+# forge_absolute_commit <repo-dir> <content> → commit sha; delta path "/abs.txt".
+forge_absolute_commit() {
+  local d="$1" content="$2" blob binf tree
+  blob=$(printf '%s' "$content" | git -C "$d" hash-object -w --stdin)
+  binf=$(mktemp); CLEAN_DIRS+=("$binf")
+  { printf '100644 /abs.txt\0'; hex2bin "$blob"; } > "$binf"
+  tree=$(git -C "$d" hash-object -w -t tree --literally "$binf")
+  git -C "$d" commit-tree "$tree" -p "$(git -C "$d" rev-parse HEAD)" -m forged-absolute
+}
+
+ac_w1_restore_traversal() {
+  local d gid sentinel forged err rc
+  d=$(new_wip_repo); gid="wip-goal-traversal"
+  sentinel="$(dirname "$d")/wip-escape-sentinel-$$.txt"
+  rm -f "$sentinel"                                   # ensure a clean slate
+  forged=$(forge_traversal_commit "$d" "wip-escape-sentinel-$$.txt" "PWNED")
+  err=$(sdlc_wip_restore "$gid" "$forged" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 FLAG-1 restore refuses a '..'-traversal delta path (nonzero)" "$rc"
+  assert_contains "AC-W1 FLAG-1 traversal defect names restore-unsafe-path" "restore-unsafe-path" "$err"
+  assert_true "AC-W1 FLAG-1 traversal wrote NO file outside the fixture dir" test ! -e "$sentinel"
+  rm -f "$sentinel"
+}
+ac_w1_restore_traversal
+
+ac_w1_restore_absolute() {
+  local d gid forged err rc
+  d=$(new_wip_repo); gid="wip-goal-absolute"
+  forged=$(forge_absolute_commit "$d" "PWNED-ABS")
+  err=$(sdlc_wip_restore "$gid" "$forged" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 FLAG-1 restore refuses an absolute delta path (nonzero)" "$rc"
+  assert_contains "AC-W1 FLAG-1 absolute defect names restore-unsafe-path" "restore-unsafe-path" "$err"
+}
+ac_w1_restore_absolute
+
+# Positive control: legit nested and dotted-filename paths must NOT false-reject
+# (proves the '..' check is a precise PATH-COMPONENT match, not a bare substring).
+ac_w1_restore_legit_dotted() {
+  local d gid snap rc
+  d=$(new_wip_repo); gid="wip-goal-dotted"
+  mkdir -p "$d/sub/dir"
+  printf 'nested ok\n'  > "$d/sub/dir/ok.txt"          # legit nested path
+  printf 'dotted ok\n'  > "$d/a..b.txt"                # filename literally containing '..'
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  rm -f "$d/sub/dir/ok.txt" "$d/a..b.txt"              # clobber both
+  sdlc_wip_restore "$gid" "$snap" "$d" 2>/dev/null; rc=$?
+  assert_eq "AC-W1 FLAG-1 legit nested+dotted paths restore exits 0 (no false-reject)" "0" "$rc"
+  assert_eq "AC-W1 FLAG-1 nested path restored byte-faithful" \
+    "nested ok" "$(cat "$d/sub/dir/ok.txt" 2>/dev/null)"
+  assert_eq "AC-W1 FLAG-1 dotted filename 'a..b.txt' restored byte-faithful" \
+    "dotted ok" "$(cat "$d/a..b.txt" 2>/dev/null)"
+}
+ac_w1_restore_legit_dotted
+
+echo "--- restore path-containment (Step-6 critic): '.git'-component write + symlink-parent/leaf write-through refused, legit '.github' still restores ---"
+# Two further forged-snapshot escapes that the '..'/absolute string guards do
+# NOT catch (no '..', not absolute):
+#   ESCAPE 1 — a '.git'-component delta path (e.g. '.git/hooks/pre-commit')
+#     would plant an executable hook the next git op runs (RCE). Also aliased
+#     case-insensitively on APFS/HFS ('.GIT/…' hits the real .git).
+#   ESCAPE 2 — a pre-existing worktree symlink at a parent (or leaf) component
+#     lets 'cat-file blob > $dir/link/…' follow the link and write OUTSIDE $dir.
+#     A string test on $path cannot catch this — an lstat check is required.
+# Both forge trees directly (git add refuses a '.git' entry) and drive the REAL
+# sdlc_wip_restore. forge_*_commit preserve HEAD's entries so the delta carries
+# ONLY the escaping path (no incidental deletions to reason about).
+
+# forge_gitdir_commit <repo-dir> <gitname> <content> → commit sha; delta path
+# "<gitname>/hooks/pre-commit" (mode 100755). <gitname> is '.git' or a case
+# variant ('.GIT') to exercise the case-folded component match.
+forge_gitdir_commit() {
+  local d="$1" gitname="$2" content="$3" blob hooks_tree git_tree root
+  blob=$(printf '%s' "$content" | git -C "$d" hash-object -w --stdin)
+  hooks_tree=$(printf '100755 blob %s\tpre-commit\n' "$blob" | git -C "$d" mktree)
+  git_tree=$(printf '040000 tree %s\thooks\n' "$hooks_tree" | git -C "$d" mktree)
+  root=$( { git -C "$d" ls-tree HEAD; printf '040000 tree %s\t%s\n' "$git_tree" "$gitname"; } \
+            | git -C "$d" mktree )
+  git -C "$d" commit-tree "$root" -p "$(git -C "$d" rev-parse HEAD)" -m forged-gitdir
+}
+# forge_underdir_commit <repo-dir> <dirname> <leaf> <content> → commit sha;
+# delta path "<dirname>/<leaf>" (no '..', not absolute). Used to aim a write at
+# a path under a pre-existing worktree symlink named <dirname>.
+forge_underdir_commit() {
+  local d="$1" dirname="$2" leaf="$3" content="$4" blob sub root
+  blob=$(printf '%s' "$content" | git -C "$d" hash-object -w --stdin)
+  sub=$(printf '100644 blob %s\t%s\n' "$blob" "$leaf" | git -C "$d" mktree)
+  root=$( { git -C "$d" ls-tree HEAD; printf '040000 tree %s\t%s\n' "$sub" "$dirname"; } \
+            | git -C "$d" mktree )
+  git -C "$d" commit-tree "$root" -p "$(git -C "$d" rev-parse HEAD)" -m forged-underdir
+}
+# forge_topfile_commit <repo-dir> <name> <content> → commit sha; delta path
+# "<name>" (a top-level file). Used to aim a write at a pre-existing symlink LEAF.
+forge_topfile_commit() {
+  local d="$1" name="$2" content="$3" blob root
+  blob=$(printf '%s' "$content" | git -C "$d" hash-object -w --stdin)
+  root=$( { git -C "$d" ls-tree HEAD; printf '100644 blob %s\t%s\n' "$blob" "$name"; } \
+            | git -C "$d" mktree )
+  git -C "$d" commit-tree "$root" -p "$(git -C "$d" rev-parse HEAD)" -m forged-topfile
+}
+
+# ESCAPE 1 — '.git'-component write → RCE.
+ac_w1_restore_gitdir() {
+  local d gid forged err rc
+  d=$(new_wip_repo); gid="wip-goal-gitdir"
+  rm -f "$d/.git/hooks/pre-commit"
+  forged=$(forge_gitdir_commit "$d" ".git" "#!/bin/sh"$'\n'"echo PWNED")
+  err=$(sdlc_wip_restore "$gid" "$forged" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 critic restore refuses a '.git'-component delta path (nonzero)" "$rc"
+  assert_contains "AC-W1 critic '.git' defect names restore-unsafe-path" "restore-unsafe-path" "$err"
+  assert_true "AC-W1 critic '.git' write planted NO hook in .git/hooks" test ! -e "$d/.git/hooks/pre-commit"
+}
+ac_w1_restore_gitdir
+
+# ESCAPE 1b — case-folded '.GIT' component (APFS/HFS alias the real .git dir).
+ac_w1_restore_gitdir_casefold() {
+  local d gid forged err rc
+  d=$(new_wip_repo); gid="wip-goal-gitcase"
+  rm -f "$d/.git/hooks/pre-commit"
+  forged=$(forge_gitdir_commit "$d" ".GIT" "#!/bin/sh"$'\n'"echo PWNED")
+  err=$(sdlc_wip_restore "$gid" "$forged" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 critic restore refuses a case-folded '.GIT'-component path (nonzero)" "$rc"
+  assert_contains "AC-W1 critic '.GIT' defect names restore-unsafe-path" "restore-unsafe-path" "$err"
+  assert_true "AC-W1 critic '.GIT' write planted NO hook in the real .git/hooks" test ! -e "$d/.git/hooks/pre-commit"
+}
+ac_w1_restore_gitdir_casefold
+
+# ESCAPE 2 — write-through a pre-existing symlink at a PARENT component.
+ac_w1_restore_symlink_parent() {
+  local d gid outside forged err rc
+  d=$(new_wip_repo); gid="wip-goal-slparent"
+  outside=$(mktemp -d); CLEAN_DIRS+=("$outside")
+  rm -f "$outside/pwn.txt"
+  ln -s "$outside" "$d/linkdir"                      # pre-existing worktree symlink OUTSIDE $dir
+  forged=$(forge_underdir_commit "$d" "linkdir" "pwn.txt" "ESCAPED_OUTSIDE")
+  err=$(sdlc_wip_restore "$gid" "$forged" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 critic restore refuses a write through a symlinked PARENT (nonzero)" "$rc"
+  assert_contains "AC-W1 critic symlink-parent defect names restore-unsafe-target" "restore-unsafe-target" "$err"
+  assert_true "AC-W1 critic symlink-parent wrote NO file outside \$dir" test ! -e "$outside/pwn.txt"
+}
+ac_w1_restore_symlink_parent
+
+# ESCAPE 2b — write-through a pre-existing symlink at the LEAF component.
+ac_w1_restore_symlink_leaf() {
+  local d gid outside forged err rc
+  d=$(new_wip_repo); gid="wip-goal-slleaf"
+  outside=$(mktemp -d); CLEAN_DIRS+=("$outside")
+  rm -f "$outside/target"
+  ln -s "$outside/target" "$d/leaflink"             # pre-existing worktree symlink LEAF
+  forged=$(forge_topfile_commit "$d" "leaflink" "ESCAPED_VIA_LEAF")
+  err=$(sdlc_wip_restore "$gid" "$forged" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-W1 critic restore refuses writing through a symlink LEAF (nonzero)" "$rc"
+  assert_contains "AC-W1 critic symlink-leaf defect names restore-unsafe-target" "restore-unsafe-target" "$err"
+  assert_true "AC-W1 critic symlink-leaf wrote NO file through the link" test ! -e "$outside/target"
+}
+ac_w1_restore_symlink_leaf
+
+# Positive control: '.github' is a legit real dir whose name merely CONTAINS
+# 'git' — the component match must be precise, not a substring, so it restores.
+ac_w1_restore_legit_github() {
+  local d gid snap rc
+  d=$(new_wip_repo); gid="wip-goal-github"
+  mkdir -p "$d/.github/workflows"
+  printf 'name: ci\n' > "$d/.github/workflows/ci.yml"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  rm -f "$d/.github/workflows/ci.yml"
+  sdlc_wip_restore "$gid" "$snap" "$d" 2>/dev/null; rc=$?
+  assert_eq "AC-W1 critic legit '.github' path restores exits 0 (no false-reject)" "0" "$rc"
+  assert_eq "AC-W1 critic '.github/workflows/ci.yml' restored byte-faithful" \
+    "name: ci" "$(cat "$d/.github/workflows/ci.yml" 2>/dev/null)"
+}
+ac_w1_restore_legit_github
+
+echo ""
+echo "=== AC-W2: WIP loss detection — healthy/none silent, each planted loss class named loud (both directions) ==="
+
+echo "--- healthy match → silent, exit 0 ---"
+ac_w2_healthy() {
+  local d gid snap errf rc
+  d=$(new_wip_repo); gid="wip-goal-w2-ok"
+  printf 'wip\n' > "$d/untracked.txt"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_wip_check "$gid" "$snap" "$d" 2>"$errf"; rc=$?
+  assert_eq "AC-W2 healthy check exits 0" "0" "$rc"
+  assert_eq "AC-W2 healthy check is silent on stderr" "" "$(cat "$errf")"
+}
+ac_w2_healthy
+
+echo "--- honest 'none' → silent, exit 0 ---"
+ac_w2_none() {
+  local d errf rc
+  d=$(new_wip_repo)
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_wip_check "wip-goal-none" "none" "$d" 2>"$errf"; rc=$?
+  assert_eq "AC-W2 none check exits 0" "0" "$rc"
+  assert_eq "AC-W2 none check is silent on stderr" "" "$(cat "$errf")"
+}
+ac_w2_none
+
+echo "--- object pruned (ref deleted + gc prune) → wip-lost naming the sha ---"
+ac_w2_pruned() {
+  local d gid snap errf rc out
+  d=$(new_wip_repo); gid="wip-goal-pruned"
+  printf 'wip\n' > "$d/untracked.txt"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  git -C "$d" update-ref -d "refs/sdlc-wip/$gid"
+  git -C "$d" prune --expire=now 2>/dev/null; git -C "$d" gc --prune=now -q 2>/dev/null || true
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_wip_check "$gid" "$snap" "$d" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "AC-W2 pruned-object check returns nonzero" "$rc"
+  assert_contains "AC-W2 pruned-object check names wip-lost" "wip-lost" "$out"
+  assert_contains "AC-W2 pruned-object check names the lost sha" "$snap" "$out"
+}
+ac_w2_pruned
+
+echo "--- ref deleted but object alive → wip-lost (ref half) ---"
+ac_w2_ref_deleted() {
+  local d gid snap errf rc out
+  d=$(new_wip_repo); gid="wip-goal-refgone"
+  printf 'wip\n' > "$d/untracked.txt"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  git -C "$d" update-ref "refs/keepalive/$gid" "$snap"   # anchor the object
+  git -C "$d" update-ref -d "refs/sdlc-wip/$gid"          # drop only the sdlc-wip ref
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_wip_check "$gid" "$snap" "$d" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "AC-W2 ref-deleted (object alive) check returns nonzero" "$rc"
+  assert_contains "AC-W2 ref-deleted check names wip-lost" "wip-lost" "$out"
+}
+ac_w2_ref_deleted
+
+echo "--- ref reseated to a different sha, baton names the old sha → wip-drift naming both ---"
+ac_w2_drift() {
+  local d gid snap snap2 errf rc out
+  d=$(new_wip_repo); gid="wip-goal-drift"
+  printf 'wip\n' > "$d/untracked.txt"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  printf 'more wip\n' > "$d/untracked2.txt"
+  snap2=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)     # reseats the ref to snap2
+  TOTAL=$((TOTAL + 1)); if [ "$snap" != "$snap2" ]; then
+    pass "AC-W2 drift fixture: the two snapshots differ"
+  else fail "AC-W2 drift fixture: the two snapshots differ" "both '$snap'"; fi
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_wip_check "$gid" "$snap" "$d" 2>"$errf"; rc=$?; out=$(cat "$errf")  # baton still names old snap
+  assert_nonzero "AC-W2 drift check returns nonzero" "$rc"
+  assert_contains "AC-W2 drift check names wip-drift" "wip-drift" "$out"
+  assert_contains "AC-W2 drift check names the baton (old) sha" "$snap" "$out"
+  assert_contains "AC-W2 drift check names the ref (new) sha" "$snap2" "$out"
+}
+ac_w2_drift
+
+# ============================================================
+# Effect guard (slice 4/3) — sdlc_effect_state / sdlc_effect_run: the
+# exactly-once replay leg. Every case drives the REAL guard against a real
+# ledger and proves the SIDE EFFECT via a counter file the command appends
+# to (one line per execution) — never by inspecting the guard's return value
+# alone. `counter` lines == executions; ledger effect/decision line counts
+# come from awk over the real ledger file (never a reimplemented parser).
+# ============================================================
+
+# key_lines <ledger-path> <type> <key> — count of lines of that type with
+# that exact effect-key (field 4 = type, field 5 = effect-key).
+key_lines() { awk -F'\t' -v t="$2" -v k="$3" '$4==t && $5==k' "$1" | wc -l | tr -d ' '; }
+# runs <counter-file> — how many times the guarded command executed.
+runs() { wc -l < "$1" | tr -d ' '; }
+
+echo ""
+echo "=== AC-W3: effect guard idempotency — double-drive executes exactly once ==="
+ac_w3() {
+  new_state_dir
+  local gid="effect-w3" counter key path rc
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  key="notify:slack-done"
+  path="$(ledger_path "$gid")"
+
+  sdlc_effect_run "$gid" "$key" "notify slack the run is done" -- sh -c "echo x >> '$counter'"; rc=$?
+  assert_eq "AC-W3 first drive exits 0" "0" "$rc"
+  assert_eq "AC-W3 first drive executed the command once (counter=1)" "1" "$(runs "$counter")"
+  assert_eq "AC-W3 exactly one effect line for the key after first drive" "1" "$(key_lines "$path" effect "$key")"
+
+  sdlc_effect_run "$gid" "$key" "notify slack the run is done" -- sh -c "echo x >> '$counter'"; rc=$?
+  assert_eq "AC-W3 second drive exits 0 (idempotent success)" "0" "$rc"
+  assert_eq "AC-W3 second drive did NOT re-execute (counter still 1)" "1" "$(runs "$counter")"
+  assert_eq "AC-W3 still exactly one effect line for the key after second drive" "1" "$(key_lines "$path" effect "$key")"
+
+  assert_true "AC-W3 ledger_verify passes after guard appends (chain intact)" ledger_verify "$gid"
+}
+ac_w3
+
+echo ""
+echo "=== AC-W4: crash window — indeterminate fails closed by default, --replay-safe completes ==="
+
+echo "--- planted intent-without-effect, default replay parks (fail-closed J1) ---"
+ac_w4_default_parks() {
+  new_state_dir
+  local gid="effect-w4-default" counter key errf rc
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  key="merge:pr-42"
+  ledger_append "$gid" decision "$key" "intent to merge" >/dev/null   # crash window: intent, no effect
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_effect_run "$gid" "$key" "merge pr 42" -- sh -c "echo x >> '$counter'" 2>"$errf"; rc=$?
+  assert_nonzero "AC-W4 default replay of indeterminate returns nonzero" "$rc"
+  assert_contains "AC-W4 default replay names effect-indeterminate" "effect-indeterminate" "$(cat "$errf")"
+  assert_eq "AC-W4 default replay did NOT execute the command (counter=0)" "0" "$(runs "$counter")"
+}
+ac_w4_default_parks
+
+echo "--- --replay-safe completes the journal, executes exactly once, no duplicate decision ---"
+ac_w4_replay_safe_completes() {
+  new_state_dir
+  local gid="effect-w4-rs" counter key path rc
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  key="merge:pr-42"
+  path="$(ledger_path "$gid")"
+  ledger_append "$gid" decision "$key" "intent to merge" >/dev/null
+  sdlc_effect_run "$gid" "$key" "merge pr 42" --replay-safe -- sh -c "echo x >> '$counter'"; rc=$?
+  assert_eq "AC-W4 replay-safe of indeterminate exits 0" "0" "$rc"
+  assert_eq "AC-W4 replay-safe executed exactly once (counter=1)" "1" "$(runs "$counter")"
+  assert_eq "AC-W4 replay-safe completed the journal (one effect line)" "1" "$(key_lines "$path" effect "$key")"
+  assert_eq "AC-W4 replay-safe did NOT journal a duplicate decision line" "1" "$(key_lines "$path" decision "$key")"
+  assert_eq "AC-W4 state after replay-safe completion is applied" "applied" "$(sdlc_effect_state "$gid" "$key")"
+  assert_true "AC-W4 ledger_verify passes after replay-safe completion" ledger_verify "$gid"
+}
+ac_w4_replay_safe_completes
+
+echo "--- fresh key (nothing journaled) runs normally under --replay-safe ---"
+ac_w4_fresh_key_runs() {
+  new_state_dir
+  local gid="effect-w4-fresh" counter key path rc
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  key="poke:fresh"
+  path="$(ledger_path "$gid")"
+  sdlc_effect_run "$gid" "$key" "poke fresh" --replay-safe -- sh -c "echo x >> '$counter'"; rc=$?
+  assert_eq "AC-W4 fresh key with --replay-safe exits 0" "0" "$rc"
+  assert_eq "AC-W4 fresh key executed once (counter=1)" "1" "$(runs "$counter")"
+  assert_eq "AC-W4 fresh key journaled a decision line" "1" "$(key_lines "$path" decision "$key")"
+  assert_eq "AC-W4 fresh key journaled an effect line" "1" "$(key_lines "$path" effect "$key")"
+}
+ac_w4_fresh_key_runs
+
+echo "--- failed command: attempt stands, no effect line, state stays indeterminate ---"
+ac_w4_failed_command() {
+  new_state_dir
+  local gid="effect-w4-fail" counter key path rc
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  key="merge:pr-99"
+  path="$(ledger_path "$gid")"
+  sdlc_effect_run "$gid" "$key" "merge pr 99" -- sh -c "echo x >> '$counter'; exit 3"; rc=$?
+  assert_nonzero "AC-W4 failed command returns nonzero" "$rc"
+  assert_eq "AC-W4 failed command still shows the attempt (counter=1)" "1" "$(runs "$counter")"
+  assert_eq "AC-W4 failed command appended NO effect line" "0" "$(key_lines "$path" effect "$key")"
+  assert_eq "AC-W4 failed command left the decision (intent) standing" "1" "$(key_lines "$path" decision "$key")"
+  assert_eq "AC-W4 state after failed command is indeterminate" "indeterminate" "$(sdlc_effect_state "$gid" "$key")"
+}
+ac_w4_failed_command
+
+echo ""
+echo "=== sdlc_effect_state direct: three states + decision/effect key non-collision ==="
+ac_effect_state() {
+  new_state_dir
+  local gid="effect-state-direct"
+  assert_eq "effect_state unapplied on an absent ledger" "unapplied" "$(sdlc_effect_state "$gid" "notify:x")"
+
+  ledger_append "$gid" decision "notify:x" "intent" >/dev/null
+  assert_eq "effect_state indeterminate after a decision line only" "indeterminate" "$(sdlc_effect_state "$gid" "notify:x")"
+
+  ledger_append "$gid" effect "notify:x" "done" >/dev/null
+  assert_eq "effect_state applied once an effect line exists" "applied" "$(sdlc_effect_state "$gid" "notify:x")"
+
+  # Non-collision (extends AC-L1's decision/effect split): an effect line for
+  # key A must not make an untouched key B applied.
+  assert_eq "effect_state key B unapplied though key A is applied" "unapplied" "$(sdlc_effect_state "$gid" "notify:y")"
+
+  # A decision line alone for another key is indeterminate, never applied.
+  ledger_append "$gid" decision "merge:z" "intent z" >/dev/null
+  assert_eq "effect_state a decision-only key is indeterminate, not applied" "indeterminate" "$(sdlc_effect_state "$gid" "merge:z")"
+}
+ac_effect_state
+
+echo "--- effect guard loud defects: invalid-goal-id + missing-effect-key (both functions) ---"
+ac_effect_defects() {
+  new_state_dir
+  local err rc
+  err=$(sdlc_effect_state "bad/goal" "notify:x" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "effect_state rejects a goal-id with '/'" "$rc"
+  assert_contains "effect_state '/' goal-id names invalid-goal-id" "invalid-goal-id" "$err"
+
+  err=$(sdlc_effect_state "good-goal" "" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "effect_state rejects an empty effect-key" "$rc"
+  assert_contains "effect_state empty key names missing-effect-key" "missing-effect-key" "$err"
+
+  err=$(sdlc_effect_run "bad/goal" "notify:x" "s" -- true 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "effect_run rejects a goal-id with '/'" "$rc"
+  assert_contains "effect_run '/' goal-id names invalid-goal-id" "invalid-goal-id" "$err"
+
+  err=$(sdlc_effect_run "good-goal" "" "s" -- true 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "effect_run rejects an empty effect-key" "$rc"
+  assert_contains "effect_run empty key names missing-effect-key" "missing-effect-key" "$err"
+
+  # No '--'/command → loud, never a silent no-op.
+  err=$(sdlc_effect_run "good-goal" "notify:x" "s" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "effect_run with no '--'/command returns nonzero" "$rc"
+}
+ac_effect_defects
+
+# ============================================================
 # Goal-id contract + divergence guard (FLAG 2, AS-26) — sdlc_goal_id() is
 # the canonical transform for future writers (N2-N4). context-spend.sh
 # keeps its own inline copy (reviewed-acceptable self-containment); this
@@ -487,7 +1037,7 @@ echo "--- baton_write: goal-id containing '/' ---"
 ac_goal_guard_write_slash() {
   new_state_dir
   local err rc
-  err=$(baton_write "bad/goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" 2>&1 1>/dev/null); rc=$?
+  err=$(baton_write "bad/goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" "none" 2>&1 1>/dev/null); rc=$?
   assert_nonzero "baton_write rejects goal-id with '/'" "$rc"
   assert_contains "baton_write '/' goal-id names invalid-goal-id" "invalid-goal-id" "$err"
 }
@@ -497,7 +1047,7 @@ echo "--- baton_write: goal-id beginning with '.' ---"
 ac_goal_guard_write_dot() {
   new_state_dir
   local err rc
-  err=$(baton_write ".hidden-goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" 2>&1 1>/dev/null); rc=$?
+  err=$(baton_write ".hidden-goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" "none" 2>&1 1>/dev/null); rc=$?
   assert_nonzero "baton_write rejects goal-id beginning with '.'" "$rc"
   assert_contains "baton_write leading-'.' goal-id names invalid-goal-id" "invalid-goal-id" "$err"
 }
@@ -544,7 +1094,7 @@ ac_nounset_no_leak() {
   local out rc
   out=$(bash -c '
     . "$1"
-    baton_write "leak-goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" >/dev/null 2>&1
+    baton_write "leak-goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" "none" >/dev/null 2>&1
     wrc=$?
     printf "unbound-ok:%s write-rc:%s\n" "$SOME_UNSET_VAR_NEVER_DEFINED_ANYWHERE" "$wrc"
   ' bash "$LIB" 2>&1)
