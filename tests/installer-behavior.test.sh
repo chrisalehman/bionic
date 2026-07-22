@@ -645,6 +645,54 @@ diff -q "${SBX}/manifest3.sorted" "${SBX}/manifest3.expected" >/dev/null 2>&1 \
   && ok "manifest after collision run still lists exactly alpha.md and beta.md (delta.md excluded)" \
   || no "manifest after collision run wrong: $(cat "$manifest")"
 
+# ---------- F4: classify_err + deterministic short-circuit ----------
+CERT_HINT="run 'brew postinstall openssl@3', then re-run ./claude-bootstrap.sh"
+[ "$(classify_err 'npm error code UNABLE_TO_GET_ISSUER_CERT_LOCALLY')" = "cert|${CERT_HINT}" ] \
+  && ok "classify: UNABLE_TO_GET_ISSUER_CERT_LOCALLY → cert" || no "classify: cert code"
+[ "$(classify_err 'reason: unable to get local issuer certificate')" = "cert|${CERT_HINT}" ] \
+  && ok "classify: issuer-cert prose → cert" || no "classify: cert prose"
+[ "$(classify_err 'Error: SELF_SIGNED_CERT_IN_CHAIN')" = "cert|${CERT_HINT}" ] \
+  && ok "classify: SELF_SIGNED_CERT_IN_CHAIN → cert" || no "classify: self-signed"
+case "$(classify_err 'npm ERR! Error: EACCES: permission denied')" in
+  perms\|*) ok "classify: EACCES → perms" ;; *) no "classify: EACCES → perms" ;; esac
+case "$(classify_err 'getaddrinfo ENOTFOUND registry.npmjs.org')" in
+  net\|*) ok "classify: ENOTFOUND → net" ;; *) no "classify: ENOTFOUND → net" ;; esac
+[ "$(classify_err 'some totally novel failure')" = "unknown|" ] \
+  && ok "classify: unknown → empty hint" || no "classify: unknown"
+
+# step_fail consults the classifier: cert-class detail overrides canned remediation
+STEP_RECORDS=(); INSTALL_FAILURES=(); STEP_NAME="npm pkg"; STEP_T0="$(date +%s)"
+step_fail network 'npm error UNABLE_TO_GET_ISSUER_CERT_LOCALLY' \
+  "run 'npm install -g x' by hand (EACCES → fix npm's global prefix)" >/dev/null
+case "${STEP_RECORDS[0]}" in
+  *"brew postinstall openssl@3"*) ok "step_fail: cert hint overrides canned EACCES hint" ;;
+  *) no "step_fail: cert hint overrides (got: ${STEP_RECORDS[0]})" ;;
+esac
+STEP_RECORDS=(); step_fail network 'some novel failure' 'my canned hint' >/dev/null
+case "${STEP_RECORDS[0]}" in
+  *"my canned hint"*) ok "step_fail: unknown class keeps caller hint" ;;
+  *) no "step_fail: unknown keeps caller hint" ;;
+esac
+
+# run_retry short-circuits deterministic classes: exactly ONE attempt logged
+cat > "${BIN}/certfail" <<EOF
+#!/bin/bash
+echo "certfail \$*" >> "$LOG"
+echo "npm error code UNABLE_TO_GET_ISSUER_CERT_LOCALLY" >&2
+exit 1
+EOF
+chmod +x "${BIN}/certfail"
+: > "$LOG"; RETRY_MAX=3
+run_retry certfail install && no "run_retry: certfail should fail" || true
+[ "$(grep -c '^certfail' "$LOG")" = "1" ] \
+  && ok "run_retry: cert class short-circuits after attempt 1" \
+  || no "run_retry: cert short-circuit (attempts: $(grep -c '^certfail' "$LOG"))"
+: > "$LOG"; RETRY_MAX=2
+run_retry brokenbrew install && no "run_retry: brokenbrew should fail" || true
+[ "$(grep -c '^brokenbrew' "$LOG")" = "2" ] \
+  && ok "run_retry: unknown class keeps full retries" \
+  || no "run_retry: unknown retries (attempts: $(grep -c '^brokenbrew' "$LOG"))"
+
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
 echo "========================================"
