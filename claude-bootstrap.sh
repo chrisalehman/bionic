@@ -159,6 +159,27 @@ else
   C_GREEN=""; C_YELLOW=""; C_RED=""; C_BOLD=""; C_RESET=""
 fi
 
+# _init_run_log — tee the whole run to ~/.claude/logs/, newest 5 kept.
+# MUST run after color detection ([ -t 1 ] above): the exec turns stdout
+# into a pipe, so testing later would kill terminal colors. The log branch
+# strips ANSI so captured logs stay clean while the terminal keeps color.
+# Logging failure never blocks the run (a bootstrap that can't log must
+# still bootstrap).
+BOOTSTRAP_LOG=""
+_init_run_log() {
+  local dir="$HOME/.claude/logs" old
+  { mkdir -p "$dir" 2>/dev/null && [ -w "$dir" ]; } || {
+    echo "  ${C_YELLOW}⚠${C_RESET} could not create ${dir} — run log disabled"
+    return 0
+  }
+  BOOTSTRAP_LOG="${dir}/bootstrap-$(date -u +%Y%m%dT%H%M%SZ).log"
+  ls -1t "${dir}"/bootstrap-*.log 2>/dev/null | tail -n +5 | while IFS= read -r old; do
+    rm -f "$old"
+  done
+  exec > >(tee >(sed -E $'s/\x1b\\[[0-9;]*m//g' >> "$BOOTSTRAP_LOG")) 2>&1
+  return 0
+}
+
 # run_retry <cmd...> — runs cmd with stdout+stderr captured into RUN_ERR and
 # stdin detached, retrying up to RETRY_MAX times with exponential backoff
 # (2s, 4s, 8s...). Sets RUN_ATTEMPT to the attempt count. Returns 0 on
@@ -284,6 +305,14 @@ step_stream() {
 }
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
+
+# Placed here (not immediately after the function definition above) so the
+# test harness's Resilience→Helpers extraction (tests/installer-behavior.
+# test.sh) doesn't source-and-execute this call: that range is sourced
+# wholesale to expose the function for direct testing, and a bare top-level
+# call inside it would exec-tee the test script's own stdout. Still runs
+# before any real bootstrap output.
+_init_run_log
 
 # Formulae with heavy dependency trees (>30s installs) stream brew's own
 # progress instead of installing silently — see step_stream.
@@ -2372,6 +2401,9 @@ print_report() {
   fi
   echo "    • Restart your shell (or run: source ~/${SHELL_RC_NAME})"
   echo "    • Run \`claude\` in any project to verify"
+  if [ -n "${BOOTSTRAP_LOG:-}" ]; then
+    echo "    • Full run log: ${BOOTSTRAP_LOG}"
+  fi
   echo "    • Pencil: install the app from pencil.dev — its MCP server registers"
   echo "      itself with Claude Code whenever the app is running"
   if [ "$n_bad" -gt 0 ]; then
