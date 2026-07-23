@@ -1205,6 +1205,338 @@ ac_nounset_no_leak() {
 ac_nounset_no_leak
 
 # ============================================================
+# Ledger-position cross-check + reconcile (slice 4/2, AS-25 discharge) —
+# sdlc_ledger_position_check and sdlc_reconcile. Fixtures drive the REAL
+# functions against real batons (baton_write) + real ledgers (ledger_append)
+# + hermetic repos; planted divergence one class at a time, both directions.
+# ============================================================
+
+# ledger_line_digest <ledger-path> <seq> — the stored 8-hex digest at that seq.
+ledger_line_digest() { awk -F'\t' -v s="$2" '$2==s {print $3; exit}' "$1"; }
+
+echo ""
+echo "=== AC-N4: ledger-position cross-check — trailing-deletion hole demo + digest-mismatch + ledger-ahead + exact-match ==="
+
+echo "--- 'none' position + empty/absent ledger → silent, exit 0 ---"
+ac_n4_none_empty() {
+  new_state_dir
+  local gid="pos-none-empty" errf rc
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "none" 2>"$errf"; rc=$?
+  assert_eq "AC-N4 none+empty exits 0" "0" "$rc"
+  assert_eq "AC-N4 none+empty silent on stderr" "" "$(cat "$errf")"
+}
+ac_n4_none_empty
+
+echo "--- 'none' position + non-empty ledger → ledger-ahead (entries the baton never saw) ---"
+ac_n4_none_nonempty() {
+  new_state_dir
+  local gid="pos-none-nonempty" path errf rc out
+  path=$(build_healthy_ledger "$gid")
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "none" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "AC-N4 none+non-empty returns nonzero" "$rc"
+  assert_contains "AC-N4 none+non-empty names ledger-ahead" "ledger-ahead" "$out"
+  assert_contains "AC-N4 none+non-empty says 'baton at none'" "baton at none" "$out"
+}
+ac_n4_none_nonempty
+
+echo "--- HOLE DEMO (AS-25): trailing line deleted — ledger_verify ALONE passes, position cross-check catches it ---"
+ac_n4_hole_demo() {
+  new_state_dir
+  local gid="pos-hole" path tail_seq tail_dig errf rc out
+  path=$(build_healthy_ledger "$gid")            # seq 1..3
+  tail_seq=$(tail -n 1 "$path" | awk -F'\t' '{print $2}')
+  tail_dig=$(ledger_line_digest "$path" "$tail_seq")
+  # Delete the trailing line — a clean whole-line truncation.
+  awk -v ln="$tail_seq" 'NR!=ln' "$path" > "$path.new" && mv "$path.new" "$path"
+  # LOAD-BEARING (AS-25 residual documented): the chain cannot see a trailing
+  # deletion — ledger_verify ALONE still exits 0. This assertion PROVES the hole
+  # the position cross-check closes; it must pass in RED as well as GREEN.
+  assert_true "AC-N4 HOLE DEMO ledger_verify ALONE passes after trailing deletion (the hole)" ledger_verify "$gid"
+  # The cross-check, holding the baton's recorded tail position, catches it.
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "$tail_seq:$tail_dig" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "AC-N4 HOLE DEMO position cross-check catches the trailing deletion (nonzero)" "$rc"
+  assert_contains "AC-N4 HOLE DEMO names ledger-truncated" "ledger-truncated" "$out"
+  assert_contains "AC-N4 HOLE DEMO says trailing entries missing" "trailing entries missing" "$out"
+}
+ac_n4_hole_demo
+
+echo "--- exact match (tail seq + digest) → silent, exit 0 (positive control) ---"
+ac_n4_exact() {
+  new_state_dir
+  local gid="pos-exact" path tail_seq tail_dig errf rc
+  path=$(build_healthy_ledger "$gid")
+  tail_seq=$(tail -n 1 "$path" | awk -F'\t' '{print $2}')
+  tail_dig=$(ledger_line_digest "$path" "$tail_seq")
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "$tail_seq:$tail_dig" 2>"$errf"; rc=$?
+  assert_eq "AC-N4 exact-match exits 0" "0" "$rc"
+  assert_eq "AC-N4 exact-match silent on stderr" "" "$(cat "$errf")"
+}
+ac_n4_exact
+
+echo "--- digest mismatch at the recorded seq (rewrite-at-position) → ledger-truncated naming both digests ---"
+ac_n4_digest_mismatch() {
+  new_state_dir
+  local gid="pos-rewrite" path real_dig errf rc out
+  path=$(build_healthy_ledger "$gid")            # seq 1..3
+  real_dig=$(ledger_line_digest "$path" 2)
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  # Baton claims seq 2 with a WRONG digest; tail (3) >= 2 so it is not a length
+  # truncation — the stored digest at line 2 refutes the baton's recorded one.
+  sdlc_ledger_position_check "$gid" "2:00000000" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "AC-N4 digest-mismatch returns nonzero" "$rc"
+  assert_contains "AC-N4 digest-mismatch names ledger-truncated" "ledger-truncated" "$out"
+  assert_contains "AC-N4 digest-mismatch names the baton digest" "00000000" "$out"
+  assert_contains "AC-N4 digest-mismatch names the ledger's stored digest" "$real_dig" "$out"
+}
+ac_n4_digest_mismatch
+
+echo "--- tail seq > baton seq (matching digest at the recorded seq) → ledger-ahead ---"
+ac_n4_ahead() {
+  new_state_dir
+  local gid="pos-ahead" path dig2 errf rc out
+  path=$(build_healthy_ledger "$gid")            # seq 1..3
+  dig2=$(ledger_line_digest "$path" 2)
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  # Baton is at seq 2 with the CORRECT digest, but the ledger has grown to 3 —
+  # decisions post-date the checkpoint.
+  sdlc_ledger_position_check "$gid" "2:$dig2" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "AC-N4 ledger-ahead returns nonzero" "$rc"
+  assert_contains "AC-N4 ledger-ahead names ledger-ahead" "ledger-ahead" "$out"
+  assert_contains "AC-N4 ledger-ahead says 'baton at 2'" "baton at 2" "$out"
+}
+ac_n4_ahead
+
+echo "--- chain defect passes through under its own name (verify runs first) ---"
+ac_n4_chain_passthrough() {
+  new_state_dir
+  local gid="pos-chain" path tail_seq tail_dig errf rc out
+  path=$(build_healthy_ledger "$gid")
+  tail_seq=$(tail -n 1 "$path" | awk -F'\t' '{print $2}')
+  tail_dig=$(ledger_line_digest "$path" "$tail_seq")
+  # Tamper line 2's summary WITHOUT touching its digest → in-place-edit.
+  awk -F'\t' -v OFS='\t' 'NR==2 { $6="TAMPERED" } { print }' "$path" > "$path.new" && mv "$path.new" "$path"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "$tail_seq:$tail_dig" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "AC-N4 chain defect returns nonzero" "$rc"
+  assert_contains "AC-N4 chain defect passes through as in-place-edit" "in-place-edit" "$out"
+}
+ac_n4_chain_passthrough
+
+echo "--- position-check goal-id guard: '/' → invalid-goal-id ---"
+ac_n4_guard() {
+  new_state_dir
+  local err rc
+  err=$(sdlc_ledger_position_check "bad/goal" "none" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N4 position-check rejects a '/' goal-id" "$rc"
+  assert_contains "AC-N4 position-check '/' names invalid-goal-id" "invalid-goal-id" "$err"
+}
+ac_n4_guard
+
+# ---------- reconcile fixtures ----------
+# setup_reconcile <goal-id> [current] — sets REPO_DIR + PLAN_STUB globals (NOT
+# echoed: it must run in THIS shell, not a command-substitution subshell, so
+# new_state_dir's HOME/SDLC_STATE_DIR exports reach the parent — a subshell
+# would lose them and the baton/plan would land under a stale dir). Freshens
+# HOME/SDLC_STATE_DIR, builds a hermetic repo, and writes a plan stub OUTSIDE
+# the repo worktree (so it never perturbs the worktree-tree comparison in
+# predicate 7). Callers: `setup_reconcile "$gid" 4; d="$REPO_DIR"`.
+setup_reconcile() {
+  local gid="$1" current="${2:-4}"
+  new_state_dir
+  REPO_DIR=$(mktemp -d); CLEAN_DIRS+=("$REPO_DIR")
+  git -C "$REPO_DIR" init -q
+  git -C "$REPO_DIR" config user.name  "fixture"
+  git -C "$REPO_DIR" config user.email "fixture@example.com"
+  printf 'base line\n' > "$REPO_DIR/tracked.txt"
+  git -C "$REPO_DIR" add -A
+  git -C "$REPO_DIR" commit -qm base
+  mkdir -p "$SDLC_STATE_DIR/$gid"
+  PLAN_STUB="$SDLC_STATE_DIR/$gid/plan.stub.md"
+  printf 'current: %s\n' "$current" > "$PLAN_STUB"
+}
+# write_recon_baton <gid> <repo-dir> <current> <ledger-pos> <wip> — an aligned
+# healthy baton whose branch/last-commit track the repo's real HEAD.
+write_recon_baton() {
+  local gid="$1" d="$2" current="$3" lpos="$4" wip="$5"
+  baton_write "$gid" "$PLAN_STUB" "$d" "$(git -C "$d" rev-parse --abbrev-ref HEAD)" \
+    "epic/10-never-die" "$(git -C "$d" rev-parse HEAD)" "$current" "sid-$gid/1" \
+    "$lpos" "resume the slice" "$wip" >/dev/null 2>&1
+}
+
+echo ""
+echo "=== AC-N2/AC-N5: sdlc_reconcile — clean/restore verdicts + each planted divergence parks (both directions) ==="
+
+echo "--- clean fixture (wip none, clean worktree) → 'clean' verdict, exit 0 ---"
+ac_recon_clean_none() {
+  local gid="recon-clean-none" d errf out rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none none
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_reconcile "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N2 clean fixture exits 0" "0" "$rc"
+  assert_eq "AC-N2 clean fixture prints the 'clean' verdict token" "clean" "$out"
+  assert_eq "AC-N2 clean fixture silent on stderr" "" "$(cat "$errf")"
+}
+ac_recon_clean_none
+
+echo "--- clean fixture with a present WIP (worktree == snapshot) → 'clean' verdict ---"
+ac_recon_clean_wip_present() {
+  local gid="recon-clean-wip" d snap errf out rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  printf 'work in progress\n' > "$d/wip.txt"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)   # snap tree = HEAD + wip.txt; worktree still has wip.txt
+  write_recon_baton "$gid" "$d" 4 none "$snap"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_reconcile "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N5 wip-present fixture exits 0" "0" "$rc"
+  assert_eq "AC-N5 wip-present (worktree==snapshot) prints 'clean'" "clean" "$out"
+}
+ac_recon_clean_wip_present
+
+echo "--- clobbered worktree (worktree == HEAD, baton names a wip sha) → 'restore:<sha>' verdict ---"
+ac_recon_restore() {
+  local gid="recon-restore" d snap errf out rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  printf 'work in progress\n' > "$d/wip.txt"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  rm -f "$d/wip.txt"                                   # clobber: worktree back to HEAD
+  write_recon_baton "$gid" "$d" 4 none "$snap"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_reconcile "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N5 clobbered fixture exits 0" "0" "$rc"
+  assert_eq "AC-N5 clobbered (worktree==HEAD + wip sha) prints 'restore:<sha>'" "restore:$snap" "$out"
+}
+ac_recon_restore
+
+echo "--- baton-stale: sdlc-step != plan current → baton-stale naming both ---"
+ac_recon_stale_step() {
+  local gid="recon-stale-step" d err rc
+  setup_reconcile "$gid" 5; d="$REPO_DIR"                        # plan current: 5
+  write_recon_baton "$gid" "$d" 4 none none            # baton sdlc-step: 4
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N2 step-mismatch returns nonzero" "$rc"
+  assert_contains "AC-N2 step-mismatch names baton-stale" "baton-stale" "$err"
+  assert_contains "AC-N2 step-mismatch names the baton step" "baton step 4" "$err"
+  assert_contains "AC-N2 step-mismatch names the plan current" "plan current 5" "$err"
+}
+ac_recon_stale_step
+
+echo "--- baton-stale: last-commit != branch tip (branch advanced after checkpoint) → baton-stale ---"
+ac_recon_stale_tip() {
+  local gid="recon-stale-tip" d err rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none none            # last-commit = current tip
+  printf 'later work\n' > "$d/later.txt"; git -C "$d" add -A; git -C "$d" commit -qm later  # advance tip
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N2 tip-advanced returns nonzero" "$rc"
+  assert_contains "AC-N2 tip-advanced names baton-stale" "baton-stale" "$err"
+  assert_contains "AC-N2 tip-advanced says 'not branch tip'" "not branch tip" "$err"
+}
+ac_recon_stale_tip
+
+echo "--- plan file missing → plan-unreadable ---"
+ac_recon_plan_missing() {
+  local gid="recon-plan-missing" d err rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none none
+  rm -f "$PLAN_STUB"
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N2 plan-missing returns nonzero" "$rc"
+  assert_contains "AC-N2 plan-missing names plan-unreadable" "plan-unreadable" "$err"
+}
+ac_recon_plan_missing
+
+echo "--- plan present but no parseable 'current:' line → plan-unreadable ---"
+ac_recon_plan_no_current() {
+  local gid="recon-plan-nocurrent" d err rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none none
+  printf 'no current key here\n' > "$PLAN_STUB"
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N2 plan-no-current returns nonzero" "$rc"
+  assert_contains "AC-N2 plan-no-current names plan-unreadable" "plan-unreadable" "$err"
+}
+ac_recon_plan_no_current
+
+echo "--- malformed baton passes through (parse defect family) ---"
+ac_recon_baton_malformed() {
+  local gid="recon-malformed" d err rc baton
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none none
+  baton=$(baton_path "$gid")
+  grep -v -E '^next-action:' "$baton" > "$baton.new" && mv "$baton.new" "$baton"   # drop a required key
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N2 malformed-baton returns nonzero" "$rc"
+  assert_contains "AC-N2 malformed-baton passes through the parse defect" "missing-key" "$err"
+}
+ac_recon_baton_malformed
+
+echo "--- ledger-position cross-check passes through (ledger-ahead) ---"
+ac_recon_ledger_passthrough() {
+  local gid="recon-ledger" d err rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  build_healthy_ledger "$gid" >/dev/null              # non-empty ledger
+  write_recon_baton "$gid" "$d" 4 none none           # baton ledger-position: none
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N4 reconcile ledger-position pass-through returns nonzero" "$rc"
+  assert_contains "AC-N4 reconcile passes through ledger-ahead" "ledger-ahead" "$err"
+}
+ac_recon_ledger_passthrough
+
+echo "--- WIP check passes through (wip-lost: baton names a sha with no ref/object) ---"
+ac_recon_wip_passthrough() {
+  local gid="recon-wiplost" d err rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"  # full 40-hex, absent object
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N5 reconcile wip-check pass-through returns nonzero" "$rc"
+  assert_contains "AC-N5 reconcile passes through wip-lost" "wip-lost" "$err"
+}
+ac_recon_wip_passthrough
+
+echo "--- worktree-drift: wip none but a dirty worktree (unexplained work product) → worktree-drift ---"
+ac_recon_drift_none() {
+  local gid="recon-drift-none" d err rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none none
+  printf 'unexplained\n' > "$d/surprise.txt"           # dirty worktree, baton says wip none
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N5 wip-none dirty-worktree returns nonzero" "$rc"
+  assert_contains "AC-N5 wip-none dirty-worktree names worktree-drift" "worktree-drift" "$err"
+  assert_contains "AC-N5 wip-none dirty-worktree says 'unexplained work product'" "unexplained work product" "$err"
+}
+ac_recon_drift_none
+
+echo "--- worktree-drift: worktree matches NEITHER HEAD nor snapshot (third writer) → worktree-drift ---"
+ac_recon_drift_neither() {
+  local gid="recon-drift-neither" d snap err rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  printf 'wip one\n' > "$d/wip.txt"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)   # snap = HEAD + wip.txt (ref seated once)
+  printf 'third writer\n' > "$d/wip2.txt"              # worktree now HEAD + wip.txt + wip2.txt (matches neither)
+  write_recon_baton "$gid" "$d" 4 none "$snap"
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N5 third-writer drift returns nonzero" "$rc"
+  assert_contains "AC-N5 third-writer names worktree-drift" "worktree-drift" "$err"
+  assert_contains "AC-N5 third-writer says 'matches neither'" "matches neither" "$err"
+}
+ac_recon_drift_neither
+
+echo "--- reconcile goal-id guard: '/' → invalid-goal-id ---"
+ac_recon_guard() {
+  new_state_dir
+  local err rc
+  err=$(sdlc_reconcile "bad/goal" "." 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "reconcile rejects a '/' goal-id" "$rc"
+  assert_contains "reconcile '/' names invalid-goal-id" "invalid-goal-id" "$err"
+}
+ac_recon_guard
+
+# ============================================================
 echo ""
 echo "========================================"
 echo "sdlc-state primitives (baton + ledger): $PASS/$TOTAL passed, $FAIL failed"
