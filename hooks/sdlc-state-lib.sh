@@ -1184,10 +1184,28 @@ EOF
 # successor WAS launched", not "its turn completed". The `( cmd & )` idiom
 # detaches the child (reparented, survives this shell) with rc 0 for the launch;
 # a cd failure exits nonzero so the intent stands and no effect line lands.
+#
+# Permission posture (AS-N14, Chris ruling — "strong workers, strong walls"):
+# the successor launches FULLY CAPABLE by default; safety lives in the spine's
+# structural walls (pre-spawn reconciliation, fail-closed parks, exactly-once
+# effects), never in worker weakness. SDLC_SPAWN_PERMISSIONS is the posture
+# seam: UNSET → the default full-capability flag; SET (non-empty) → its
+# contents word-split verbatim replace the permission args; SET EMPTY → no
+# permission args at all (weak posture, the caller's explicit choice). The lib
+# has no `set -u`, so `${VAR+set}` (not `${VAR:-}`) is the only form that
+# tells "unset" apart from "set to empty" — that distinction is the whole
+# point of this seam.
 _sdlc_spawn_launch() {
   local cwd="$1" sid="$2" prompt="$3"
+  local perm_args
+  if [ "${SDLC_SPAWN_PERMISSIONS+set}" = "set" ]; then
+    # shellcheck disable=SC2206  # intentional word-split, AS-N14 seam contract
+    perm_args=( $SDLC_SPAWN_PERMISSIONS )
+  else
+    perm_args=( --dangerously-skip-permissions )
+  fi
   ( cd "$cwd" 2>/dev/null || exit 1
-    claude -p "$prompt" --session-id "$sid" >/dev/null 2>&1 & )
+    claude -p "$prompt" --session-id "$sid" "${perm_args[@]}" >/dev/null 2>&1 & )
 }
 
 # _sdlc_spawn_defect_class <stderr-line> — the defect class token (text between

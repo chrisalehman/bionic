@@ -2130,6 +2130,114 @@ ac_spawn_guard() {
 }
 ac_spawn_guard
 
+echo ""
+echo "=== AS-N14: successor spawn posture — strong workers, strong walls (default full-capability launch) ==="
+
+# make_claude_fake <argv-file> [sleep-secs] — a PATH-fake `claude` binary that
+# records its full argv (one token per line) to argv-file, optionally
+# sleeping first (to prove the real launch backgrounds rather than blocking
+# on the successor's whole turn — spec D8 fire-and-observe). Echoes the
+# fixture DIRECTORY (to prepend onto PATH so the default `_sdlc_spawn_launch`
+# resolves this stub instead of the real binary).
+make_claude_fake() {
+  local argv_file="$1" sleep_secs="${2:-0}" dir stub
+  dir="$(mktemp -d)"; CLEAN_DIRS+=("$dir")
+  stub="$dir/claude"
+  cat > "$stub" <<STUBEOF
+#!/bin/bash
+sleep $sleep_secs
+for a in "\$@"; do printf '%s\n' "\$a" >> "$argv_file"; done
+STUBEOF
+  chmod +x "$stub"
+  printf '%s' "$dir"
+}
+# wait_for_file <path> <max-tenths> — polls up to max-tenths*0.1s for a
+# non-empty file (the default spawn launch backgrounds itself, so the fake
+# claude's argv write races the assertion).
+wait_for_file() {
+  local path="$1" max="${2:-30}" n=0
+  while [ ! -s "$path" ] && [ "$n" -lt "$max" ]; do sleep 0.1; n=$((n + 1)); done
+}
+
+echo "--- DEFAULT posture: SDLC_SPAWN_PERMISSIONS unset → argv carries --dangerously-skip-permissions; launch backgrounds (returns before the fake claude's sleep elapses, effect line still journals) ---"
+ac_spawn_posture_default() {
+  local gid="spawn-posture-default" d argvf fakedir path out rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_SPAWN_PERMISSIONS
+  unset SDLC_SPAWN_PERMISSIONS
+  setup_complete "$gid" 4 no; d="$REPO_DIR"          # current 4 → benign not-complete → proceed
+  write_complete_baton "$gid" "$d" 4 none
+  argvf=$(mktemp); CLEAN_DIRS+=("$argvf"); : > "$argvf"
+  fakedir="$(make_claude_fake "$argvf" 2)"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  local PATH="$fakedir:$PATH"
+  path="$(ledger_path "$gid")"
+
+  SECONDS=0
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AS-N14 default drive exits 0" "0" "$rc"
+  assert_true "AS-N14 default drive returned before the fake claude's 2s sleep elapsed (backgrounded)" test "$SECONDS" -lt 2
+  assert_eq "AS-N14 default drive: spawn effect line journaled (fire-and-observe, not launch-completion)" "1" \
+    "$(awk -F'\t' '$4=="effect" && $5 ~ /^spawn:/' "$path" | wc -l | tr -d ' ')"
+
+  wait_for_file "$argvf" 40
+  assert_contains "AS-N14 default argv carries -p" "-p" "$(cat "$argvf")"
+  assert_contains "AS-N14 default argv carries --session-id" "--session-id" "$(cat "$argvf")"
+  assert_contains "AS-N14 default argv carries --dangerously-skip-permissions" "--dangerously-skip-permissions" "$(cat "$argvf")"
+}
+ac_spawn_posture_default
+
+echo "--- OVERRIDE posture: SDLC_SPAWN_PERMISSIONS set non-empty → its tokens replace the permission args verbatim, no --dangerously-skip-permissions ---"
+ac_spawn_posture_override() {
+  local gid="spawn-posture-override" d argvf fakedir out rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_SPAWN_PERMISSIONS
+  SDLC_SPAWN_PERMISSIONS="--permission-mode acceptEdits"
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  argvf=$(mktemp); CLEAN_DIRS+=("$argvf"); : > "$argvf"
+  fakedir="$(make_claude_fake "$argvf" 0)"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  local PATH="$fakedir:$PATH"
+
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AS-N14 override drive exits 0" "0" "$rc"
+  wait_for_file "$argvf" 40
+  assert_contains "AS-N14 override argv carries --permission-mode" "--permission-mode" "$(cat "$argvf")"
+  assert_contains "AS-N14 override argv carries acceptEdits" "acceptEdits" "$(cat "$argvf")"
+  TOTAL=$((TOTAL + 1))
+  if grep -qF -- "--dangerously-skip-permissions" "$argvf"; then
+    fail "AS-N14 override argv does NOT carry --dangerously-skip-permissions" "found it in: $(cat "$argvf")"
+  else
+    pass "AS-N14 override argv does NOT carry --dangerously-skip-permissions"
+  fi
+}
+ac_spawn_posture_override
+
+echo "--- WEAK posture: SDLC_SPAWN_PERMISSIONS set EMPTY (caller's explicit choice) → no permission args at all ---"
+ac_spawn_posture_empty() {
+  local gid="spawn-posture-empty" d argvf fakedir out rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_SPAWN_PERMISSIONS
+  SDLC_SPAWN_PERMISSIONS=""
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  argvf=$(mktemp); CLEAN_DIRS+=("$argvf"); : > "$argvf"
+  fakedir="$(make_claude_fake "$argvf" 0)"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  local PATH="$fakedir:$PATH"
+
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AS-N14 empty-posture drive exits 0" "0" "$rc"
+  wait_for_file "$argvf" 40
+  assert_contains "AS-N14 empty-posture argv still carries -p" "-p" "$(cat "$argvf")"
+  assert_contains "AS-N14 empty-posture argv still carries --session-id" "--session-id" "$(cat "$argvf")"
+  TOTAL=$((TOTAL + 1))
+  if grep -qF -- "--dangerously-skip-permissions" "$argvf" || grep -qF -- "--permission-mode" "$argvf"; then
+    fail "AS-N14 empty-posture argv carries NO permission tokens" "found permission token in: $(cat "$argvf")"
+  else
+    pass "AS-N14 empty-posture argv carries NO permission tokens"
+  fi
+}
+ac_spawn_posture_empty
+
 # ============================================================
 echo ""
 echo "========================================"
