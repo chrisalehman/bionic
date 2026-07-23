@@ -1372,6 +1372,186 @@ ac_n4_guard() {
 }
 ac_n4_guard
 
+# ============================================================
+echo ""
+echo "=== D-C10: spine-class ledger-ahead amendment — supervision trailing entries benign, passenger/garbled still park ==="
+
+# lp_spine_benign <class> — a trailing entry of a CLOSED spine class past the
+# baton's recorded position is a benign supervision event: no ledger-ahead.
+# (Fails TODAY: any growth past the position fires ledger-ahead.)
+lp_spine_benign() {
+  new_state_dir
+  local cls="$1"
+  local gid="pos-spine-$cls" path dig1 errf rc out
+  ledger_append "$gid" "decision" "seed:baseline" "baseline entry" >/dev/null 2>&1   # seq 1 (baton pos)
+  path=$(ledger_path "$gid")
+  dig1=$(ledger_line_digest "$path" 1)
+  ledger_append "$gid" "effect" "$cls:g:detail:100:1" "trailing supervision event" >/dev/null 2>&1  # seq 2 (trailing)
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "1:$dig1" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_eq "D-C10 trailing '$cls:' past baton pos → silent pass (rc 0)" "0" "$rc"
+  assert_eq "D-C10 trailing '$cls:' silent on stderr" "" "$out"
+}
+for _c in rung park spawn complete poke; do lp_spine_benign "$_c"; done
+
+echo "--- multiple trailing spine-class entries (rung then park) → still benign ---"
+lp_spine_multi() {
+  new_state_dir
+  local gid="pos-spine-multi" path dig1 errf rc out
+  ledger_append "$gid" "decision" "seed:baseline" "baseline" >/dev/null 2>&1        # seq 1 (baton pos)
+  path=$(ledger_path "$gid")
+  dig1=$(ledger_line_digest "$path" 1)
+  ledger_append "$gid" "decision" "rung:g:poke:100:1" "poke attempt journaled" >/dev/null 2>&1  # seq 2
+  ledger_append "$gid" "effect"   "park:g:ladder-exhausted" "escalated to human" >/dev/null 2>&1  # seq 3
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "1:$dig1" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_eq "D-C10 two trailing spine entries → silent pass (rc 0)" "0" "$rc"
+  assert_eq "D-C10 two trailing spine entries silent on stderr" "" "$out"
+}
+lp_spine_multi
+
+echo "--- trailing PASSENGER-class entry (merge:) past baton pos → ledger-ahead still fires ---"
+lp_passenger() {
+  new_state_dir
+  local gid="pos-passenger" path dig1 errf rc out
+  ledger_append "$gid" "decision" "seed:baseline" "baseline" >/dev/null 2>&1        # seq 1 (baton pos)
+  path=$(ledger_path "$gid")
+  dig1=$(ledger_line_digest "$path" 1)
+  ledger_append "$gid" "effect" "merge:pr-42" "a passenger merge, not supervision" >/dev/null 2>&1  # seq 2
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "1:$dig1" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "D-C10 trailing passenger 'merge:' → ledger-ahead (nonzero)" "$rc"
+  assert_contains "D-C10 passenger names ledger-ahead" "ledger-ahead" "$out"
+}
+lp_passenger
+
+echo "--- MIXED trailing: one spine (rung:) + one passenger (merge:) → ledger-ahead (any passenger trips it) ---"
+lp_mixed() {
+  new_state_dir
+  local gid="pos-mixed" path dig1 errf rc out
+  ledger_append "$gid" "decision" "seed:baseline" "baseline" >/dev/null 2>&1        # seq 1 (baton pos)
+  path=$(ledger_path "$gid")
+  dig1=$(ledger_line_digest "$path" 1)
+  ledger_append "$gid" "decision" "rung:g:poke:100:1" "supervision" >/dev/null 2>&1  # seq 2 (spine)
+  ledger_append "$gid" "effect"   "merge:pr-9" "a passenger slipped in" >/dev/null 2>&1  # seq 3 (passenger)
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "1:$dig1" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "D-C10 mixed spine+passenger → ledger-ahead (nonzero)" "$rc"
+  assert_contains "D-C10 mixed names ledger-ahead" "ledger-ahead" "$out"
+}
+lp_mixed
+
+echo "--- garbled trailing class (no ':' delimiter) → ledger-ahead (fail-closed: unknown = passenger) ---"
+lp_garbled() {
+  new_state_dir
+  local gid="pos-garbled" path dig1 errf rc out
+  ledger_append "$gid" "decision" "seed:baseline" "baseline" >/dev/null 2>&1        # seq 1 (baton pos)
+  path=$(ledger_path "$gid")
+  dig1=$(ledger_line_digest "$path" 1)
+  ledger_append "$gid" "effect" "garbled" "a delimiter-less key" >/dev/null 2>&1     # seq 2, class "garbled"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "1:$dig1" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "D-C10 garbled (no ':') trailing → ledger-ahead (nonzero)" "$rc"
+  assert_contains "D-C10 garbled names ledger-ahead" "ledger-ahead" "$out"
+}
+lp_garbled
+
+echo "--- empty trailing class (leading ':') → ledger-ahead (fail-closed) ---"
+lp_empty_class() {
+  new_state_dir
+  local gid="pos-empty-class" path dig1 errf rc out
+  ledger_append "$gid" "decision" "seed:baseline" "baseline" >/dev/null 2>&1        # seq 1 (baton pos)
+  path=$(ledger_path "$gid")
+  dig1=$(ledger_line_digest "$path" 1)
+  ledger_append "$gid" "effect" ":orphan" "empty class prefix" >/dev/null 2>&1       # seq 2, class ""
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "1:$dig1" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "D-C10 empty-class (leading ':') trailing → ledger-ahead (nonzero)" "$rc"
+  assert_contains "D-C10 empty-class names ledger-ahead" "ledger-ahead" "$out"
+}
+lp_empty_class
+
+# ============================================================
+echo ""
+echo "=== D-C11: ledger_append per-goal single-writer lock — race repro, held-lock timeout, stale reclaim ==="
+
+# back_date <path> <seconds-ago> — set mtime into the past (BSD `touch -t`
+# first, GNU `touch -d` fallback); heritage of the poker suite's set_mtime_age.
+back_date() {
+  local f="$1" age="$2" ts
+  if ts=$(date -v "-${age}S" +%Y%m%d%H%M.%S 2>/dev/null); then
+    touch -t "$ts" "$f"
+  else
+    touch -d "@$(( $(date +%s) - age ))" "$f"
+  fi
+}
+
+echo "--- concurrent-append race: two interleaved writers → strictly monotonic seqs, chain verifies (collides pre-lock) ---"
+lock_race_monotonic() {
+  new_state_dir
+  local gid="lock-race" path ready hold apid bpid i seqs
+  ledger_append "$gid" "decision" "seed:baseline" "seed" >/dev/null 2>&1             # seq 1
+  path=$(ledger_path "$gid")
+  ready=$(mktemp -u); hold=$(mktemp)   # $hold EXISTS → writer A parks in the window; $ready ABSENT → A creates it
+  CLEAN_DIRS+=("$ready" "$hold")
+  # Writer A parks in the read-tail→write window (via the test seam) holding
+  # whatever lock ledger_append took, until we remove $hold.
+  bash -c '. "$1"; SDLC_LEDGER_SEAM_READY="$3" SDLC_LEDGER_SEAM_HOLD="$4" ledger_append "$2" decision "writer:a" "A" >/dev/null 2>&1' \
+    _ "$LIB" "$gid" "$ready" "$hold" &
+  apid=$!
+  # Wait until A has entered the window (read the tail).
+  i=0; while [ ! -e "$ready" ] && [ "$i" -lt 300 ]; do sleep 0.02; i=$((i + 1)); done
+  # Writer B, no seam. Pre-lock: reads the SAME tail A saw → seq collision.
+  # Post-lock: blocks on the lock A holds until A releases → next seq.
+  bash -c '. "$1"; ledger_append "$2" decision "writer:b" "B" >/dev/null 2>&1' _ "$LIB" "$gid" &
+  bpid=$!
+  sleep 0.4               # let B reach its write (pre-lock) or park on the lock (post-lock)
+  rm -f "$hold"           # release A → it appends
+  wait "$apid" 2>/dev/null; wait "$bpid" 2>/dev/null
+  seqs=$(awk -F'\t' '{printf "%s ", $2}' "$path"); seqs="${seqs% }"
+  assert_eq "D-C11 race drive yields strictly monotonic seqs (1 2 3)" "1 2 3" "$seqs"
+  assert_true "D-C11 race-driven ledger verifies (chain intact)" ledger_verify "$gid"
+}
+lock_race_monotonic
+
+echo "--- held lock (fresh, live holder) → ledger-locked defect, rc 1, ledger byte-unchanged ---"
+lock_held_timeout() {
+  new_state_dir
+  local gid="lock-held" path lockdir before after errf rc
+  local SDLC_LEDGER_LOCK_TRIES=3     # 3 x 0.1s → fast timeout
+  ledger_append "$gid" "decision" "seed:baseline" "seed" >/dev/null 2>&1             # seq 1
+  path=$(ledger_path "$gid")
+  before=$(cksum < "$path")
+  lockdir="$SDLC_STATE_DIR/$gid/.ledger.lock"
+  mkdir "$lockdir"                    # fresh mtime = now → a LIVE holder, not stale
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  ledger_append "$gid" "decision" "blocked:write" "must not land" 2>"$errf"; rc=$?
+  after=$(cksum < "$path")
+  assert_nonzero "D-C11 held lock → append returns nonzero" "$rc"
+  assert_contains "D-C11 held lock names ledger-locked" "ledger-locked" "$(cat "$errf")"
+  assert_contains "D-C11 ledger-locked names the goal-id" "$gid" "$(cat "$errf")"
+  assert_eq "D-C11 held lock → ledger byte-unchanged" "$before" "$after"
+  rmdir "$lockdir" 2>/dev/null
+}
+lock_held_timeout
+
+echo "--- stale lock (mtime back-dated past SDLC_LEDGER_LOCK_STALE) → reclaimed, append succeeds ---"
+lock_stale_reclaim() {
+  new_state_dir
+  local gid="lock-stale" path lockdir rc
+  local SDLC_LEDGER_LOCK_TRIES=3
+  ledger_append "$gid" "decision" "seed:baseline" "seed" >/dev/null 2>&1             # seq 1
+  path=$(ledger_path "$gid")
+  lockdir="$SDLC_STATE_DIR/$gid/.ledger.lock"
+  mkdir "$lockdir"
+  back_date "$lockdir" 120            # older than default 60s stale ceiling → reclaimable
+  ledger_append "$gid" "decision" "after:reclaim" "lands after stale reclaim" >/dev/null 2>&1; rc=$?
+  assert_eq "D-C11 back-dated stale lock → append succeeds (rc 0)" "0" "$rc"
+  assert_eq "D-C11 stale reclaim → ledger now has 2 lines" "2" "$(wc -l < "$path" | tr -d ' ')"
+  assert_true "D-C11 stale-reclaim ledger verifies" ledger_verify "$gid"
+}
+lock_stale_reclaim
+
 # ---------- reconcile fixtures ----------
 # setup_reconcile <goal-id> [current] — sets REPO_DIR + PLAN_STUB globals (NOT
 # echoed: it must run in THIS shell, not a command-substitution subshell, so

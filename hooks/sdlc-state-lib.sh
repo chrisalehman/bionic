@@ -325,6 +325,50 @@ ledger_digest() {
   esac
 }
 
+# ---------- D-C11: per-goal ledger append lock ----------
+# The passenger session and the supervision ladder both append to a goal's
+# ledger only through ledger_append; on IDLE_STALLED the passenger is ALIVE
+# while the ladder journals, so two writers can race the read-tail→append
+# window and mint a colliding seq. An advisory per-goal mkdir lock serializes
+# that window (poker single-instance-lock heritage: mkdir is the atomic
+# winner, a dead holder's orphan is reclaimed by mtime age).
+
+# _ledger_lock_mtime <lockdir> — epoch mtime of the lock dir, cross-platform
+# (BSD `stat -f` first, GNU `stat -c` fallback); empty if unreadable.
+_ledger_lock_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
+
+# _ledger_lock_acquire <goal-dir> — take <goal-dir>/.ledger.lock. Bounded wait:
+# SDLC_LEDGER_LOCK_TRIES attempts (default 50), 0.1s apart. A lock dir whose
+# mtime is older than SDLC_LEDGER_LOCK_STALE seconds (default 60) is a dead
+# writer's orphan — reclaimed (rmdir) and retried. rc 0 on acquisition; rc 1 on
+# timeout (caller emits `ledger-locked` and writes nothing — the append window
+# is never entered, so the ledger stays byte-unchanged).
+_ledger_lock_acquire() {
+  local lockdir="${1:-}/.ledger.lock"
+  local tries="${SDLC_LEDGER_LOCK_TRIES:-50}" stale="${SDLC_LEDGER_LOCK_STALE:-60}"
+  local i mtime now age
+  for (( i = 0; i < tries; i++ )); do
+    if mkdir "$lockdir" 2>/dev/null; then return 0; fi
+    mtime=$(_ledger_lock_mtime "$lockdir")
+    if [ -n "$mtime" ]; then
+      now=$(date +%s); age=$((now - mtime))
+      if [ "$age" -ge "$stale" ]; then
+        rmdir "$lockdir" 2>/dev/null || rm -rf "$lockdir" 2>/dev/null
+        continue   # reclaimed a stale orphan → retry mkdir immediately (loop still bounds i)
+      fi
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
+# _ledger_lock_release <goal-dir> — drop the append lock (idempotent; a missing
+# lock is not an error). Always rc 0 so it never perturbs a caller's status.
+_ledger_lock_release() {
+  rmdir "${1:-}/.ledger.lock" 2>/dev/null || rm -rf "${1:-}/.ledger.lock" 2>/dev/null
+  return 0
+}
+
 # ---------- R-L1: ledger_append ----------
 # ledger_append <goal-id> <type> <effect-key> <summary>
 # type is `decision` or `effect` (R-L1). Appends one line: journal-before-act
@@ -336,7 +380,7 @@ ledger_digest() {
 # ledger is absent or empty).
 ledger_append() {
   local goal_id="${1:-}" type="${2:-}" key="${3:-}" summary="${4:-}"
-  local dir path last_line prev seq ts content digest new_line
+  local dir path last_line prev seq ts content digest new_line _seam_i
 
   _sdlc_validate_goal_id "$goal_id" "ledger_append" || return 1
   case "$type" in
@@ -357,11 +401,17 @@ ledger_append() {
   mkdir -p "$dir" 2>/dev/null || { echo "defect: mkdir-failed: cannot create $dir" >&2; return 1; }
   path="$(ledger_path "$goal_id")"
 
+  # D-C11: serialize the read-tail→append window against a racing second writer
+  # (see the append-lock helpers above). Acquired here, released on EVERY exit
+  # path below. Nothing is written to the ledger before this point, so a
+  # lock timeout leaves the ledger byte-unchanged.
+  _ledger_lock_acquire "$dir" || { echo "defect: ledger-locked: $goal_id" >&2; return 1; }
+
   if [ -s "$path" ]; then
     last_line=$(tail -n 1 "$path")
     seq=$(printf '%s' "$last_line" | awk -F'\t' '{print $2}')
     case "$seq" in
-      ''|*[!0-9]*) echo "defect: corrupt-ledger-tail: last line's seq field is not numeric ('${seq:-<empty>}'): $path" >&2; return 1 ;;
+      ''|*[!0-9]*) _ledger_lock_release "$dir"; echo "defect: corrupt-ledger-tail: last line's seq field is not numeric ('${seq:-<empty>}'): $path" >&2; return 1 ;;
     esac
     # The self-covering chain reads the tail's own digest as this line's
     # <prev>; a malformed tail digest would silently poison the new digest,
@@ -369,12 +419,26 @@ ledger_append() {
     prev=$(printf '%s' "$last_line" | awk -F'\t' '{print $3}')
     case "$prev" in
       [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
-      *) echo "defect: corrupt-ledger-tail: last line's digest field is not 8 hex chars ('${prev:-<empty>}'): $path" >&2; return 1 ;;
+      *) _ledger_lock_release "$dir"; echo "defect: corrupt-ledger-tail: last line's digest field is not 8 hex chars ('${prev:-<empty>}'): $path" >&2; return 1 ;;
     esac
     seq=$((seq + 1))
   else
     seq=1
     prev="$LEDGER_GENESIS_MARKER"
+  fi
+
+  # Test-only deterministic-interleaving seam (D-C11 concurrency contract):
+  # when SDLC_LEDGER_SEAM_HOLD names a path, block HERE — after the tail-read,
+  # before the append — until that path is removed (bounded, self-releasing),
+  # signalling arrival by touching SDLC_LEDGER_SEAM_READY. A suite pins the
+  # read→write window open with it to drive the append race deterministically;
+  # both vars are unset in production, so this is inert on every real append.
+  if [ -n "${SDLC_LEDGER_SEAM_HOLD:-}" ]; then
+    [ -n "${SDLC_LEDGER_SEAM_READY:-}" ] && : > "$SDLC_LEDGER_SEAM_READY"
+    _seam_i=0
+    while [ -e "$SDLC_LEDGER_SEAM_HOLD" ] && [ "$_seam_i" -lt 500 ]; do
+      sleep 0.02; _seam_i=$((_seam_i + 1))
+    done
   fi
 
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -385,7 +449,12 @@ ledger_append() {
   digest=$(ledger_digest "$prev"$'\t'"$content")
   new_line="$(printf '%s\t%s\t%s\t%s\t%s\t%s' "$ts" "$seq" "$digest" "$type" "$key" "$summary")"
 
-  printf '%s\n' "$new_line" >> "$path" 2>/dev/null || { echo "defect: append-failed: cannot append to $path" >&2; return 1; }
+  if ! printf '%s\n' "$new_line" >> "$path" 2>/dev/null; then
+    _ledger_lock_release "$dir"
+    echo "defect: append-failed: cannot append to $path" >&2
+    return 1
+  fi
+  _ledger_lock_release "$dir"
   return 0
 }
 
@@ -852,13 +921,18 @@ sdlc_wip_check() {
 #       stored digest at line <seq> ≠ <digest> → `ledger-truncated` naming both
 #                               the baton's and the ledger's stored digest
 #                               (a deeper rewrite AT the recorded position).
-#       tail seq > baton seq → `ledger-ahead: baton at <seq>, ledger tail
-#                               <tail-seq>` (decisions post-date the checkpoint).
+#       tail seq > baton seq → classify the trailing entries (D-C10): if EVERY
+#                               entry past <seq> has a spine-class effect-key
+#                               (rung|park|spawn|complete|poke) it is benign
+#                               supervision growth → silent rc 0; otherwise
+#                               `ledger-ahead: baton at <seq>, ledger tail
+#                               <tail-seq>` (a passenger/garbled entry
+#                               post-dates the checkpoint — fail-closed).
 #       exact match (tail seq == seq AND digest matches) → silent rc 0.
 # The digest check precedes the ledger-ahead check by design: a rewrite AT the
 # baton's position is a stronger signal than mere growth past it.
 sdlc_ledger_position_check() {
-  local goal_id="${1:-}" position="${2:-}" path seq digest tail_seq stored_digest
+  local goal_id="${1:-}" position="${2:-}" path seq digest tail_seq stored_digest passenger
   _sdlc_validate_goal_id "$goal_id" "sdlc_ledger_position_check" || return 1
   path="$(ledger_path "$goal_id")"
 
@@ -897,8 +971,26 @@ sdlc_ledger_position_check() {
   fi
 
   if [ "$tail_seq" -gt "$seq" ]; then
-    echo "defect: ledger-ahead: baton at $seq, ledger tail $tail_seq" >&2
-    return 1
+    # D-C10 (amendment to ADR-003 D2/AS-N12): the ladder journals rung attempts
+    # into the goal's ledger, so the tail advances past the baton position on
+    # every supervision event. Trailing entries are BENIGN iff EVERY one's
+    # effect-key class (the token before the first ':' of field 5) is in the
+    # CLOSED spine set (rung|park|spawn|complete|poke). Any other trailing
+    # class — including empty or delimiter-less (garbled) — is a passenger
+    # write and keeps `ledger-ahead` (fail-closed: unknown = passenger = stale
+    # baton = park). ledger-truncated logic above is untouched in every case.
+    passenger=$(awk -F'\t' -v s="$seq" '
+      $2 > s {
+        cls = $5; sub(/:.*/, "", cls)
+        if (cls != "rung" && cls != "park" && cls != "spawn" && cls != "complete" && cls != "poke") {
+          print "passenger"; exit
+        }
+      }
+    ' "$path")
+    if [ -n "$passenger" ]; then
+      echo "defect: ledger-ahead: baton at $seq, ledger tail $tail_seq" >&2
+      return 1
+    fi
   fi
 
   return 0
