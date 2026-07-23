@@ -1910,7 +1910,13 @@ S2_6() {
 }
 S2_6
 
-echo "=== 4/S2-7 (AS-11 guard): empty SESSION_ID registration → MALFORMED-RECORD, no classify, no resume ==="
+echo "=== 4/S2-7 (AS-11 guard, REGRESSION LOCK): empty SESSION_ID → MALFORMED-RECORD, no classify, no resume ==="
+# Already-GREEN pre-change, not a RED->GREEN pair: load_registration's existing
+# `[ -n "$REG_SESSION_ID" ]` check (hooks/sdlc-poker.sh:124-125) already refuses
+# an empty SESSION_ID as "missing required key in registration" before is_armed
+# is ever reached — verified against the unmodified script at 7cbfae8. No code
+# change was made for this case; it is locked here so a future edit to
+# load_registration cannot silently regress the AS-11 guarantee.
 S2_7() {
   new_home
   local plan="$HOME/plans/gs27.plan.md"
