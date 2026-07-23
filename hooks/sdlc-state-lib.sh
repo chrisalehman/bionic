@@ -38,6 +38,15 @@
 
 BATON_REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc-step session ledger-position next-action wip base-commit written-at"
 
+# SDLC_SPINE_CLASSES — the CLOSED set of effect-key classes the supervision
+# spine journals into a goal's ledger (D-C10 / AS-C7): rung/park/spawn/complete/
+# poke. Space-separated so it feeds an awk membership set. SINGLE SOURCE — both
+# sdlc_ledger_position_check (benign-trailing-growth classification) and
+# sdlc_ladder_anchor (passenger-class tail = highest seq whose class is NOT in
+# this set) read it, so the two can never drift. Extending the set is a recorded
+# decision, never a drive-by (AS-C7).
+SDLC_SPINE_CLASSES="rung park spawn complete poke"
+
 # ---------- path helpers (read SDLC_STATE_DIR/HOME at call time) ----------
 sdlc_state_dir() { printf '%s' "${SDLC_STATE_DIR:-$HOME/.claude/sdlc-state}"; }
 baton_goal_dir()  { printf '%s/%s' "$(sdlc_state_dir)" "$1"; }
@@ -325,6 +334,50 @@ ledger_digest() {
   esac
 }
 
+# ---------- D-C11: per-goal ledger append lock ----------
+# The passenger session and the supervision ladder both append to a goal's
+# ledger only through ledger_append; on IDLE_STALLED the passenger is ALIVE
+# while the ladder journals, so two writers can race the read-tail→append
+# window and mint a colliding seq. An advisory per-goal mkdir lock serializes
+# that window (poker single-instance-lock heritage: mkdir is the atomic
+# winner, a dead holder's orphan is reclaimed by mtime age).
+
+# _ledger_lock_mtime <lockdir> — epoch mtime of the lock dir, cross-platform
+# (BSD `stat -f` first, GNU `stat -c` fallback); empty if unreadable.
+_ledger_lock_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
+
+# _ledger_lock_acquire <goal-dir> — take <goal-dir>/.ledger.lock. Bounded wait:
+# SDLC_LEDGER_LOCK_TRIES attempts (default 50), 0.1s apart. A lock dir whose
+# mtime is older than SDLC_LEDGER_LOCK_STALE seconds (default 60) is a dead
+# writer's orphan — reclaimed (rmdir) and retried. rc 0 on acquisition; rc 1 on
+# timeout (caller emits `ledger-locked` and writes nothing — the append window
+# is never entered, so the ledger stays byte-unchanged).
+_ledger_lock_acquire() {
+  local lockdir="${1:-}/.ledger.lock"
+  local tries="${SDLC_LEDGER_LOCK_TRIES:-50}" stale="${SDLC_LEDGER_LOCK_STALE:-60}"
+  local i mtime now age
+  for (( i = 0; i < tries; i++ )); do
+    if mkdir "$lockdir" 2>/dev/null; then return 0; fi
+    mtime=$(_ledger_lock_mtime "$lockdir")
+    if [ -n "$mtime" ]; then
+      now=$(date +%s); age=$((now - mtime))
+      if [ "$age" -ge "$stale" ]; then
+        rmdir "$lockdir" 2>/dev/null || rm -rf "$lockdir" 2>/dev/null
+        continue   # reclaimed a stale orphan → retry mkdir immediately (loop still bounds i)
+      fi
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
+# _ledger_lock_release <goal-dir> — drop the append lock (idempotent; a missing
+# lock is not an error). Always rc 0 so it never perturbs a caller's status.
+_ledger_lock_release() {
+  rmdir "${1:-}/.ledger.lock" 2>/dev/null || rm -rf "${1:-}/.ledger.lock" 2>/dev/null
+  return 0
+}
+
 # ---------- R-L1: ledger_append ----------
 # ledger_append <goal-id> <type> <effect-key> <summary>
 # type is `decision` or `effect` (R-L1). Appends one line: journal-before-act
@@ -336,7 +389,7 @@ ledger_digest() {
 # ledger is absent or empty).
 ledger_append() {
   local goal_id="${1:-}" type="${2:-}" key="${3:-}" summary="${4:-}"
-  local dir path last_line prev seq ts content digest new_line
+  local dir path last_line prev seq ts content digest new_line _seam_i
 
   _sdlc_validate_goal_id "$goal_id" "ledger_append" || return 1
   case "$type" in
@@ -357,11 +410,17 @@ ledger_append() {
   mkdir -p "$dir" 2>/dev/null || { echo "defect: mkdir-failed: cannot create $dir" >&2; return 1; }
   path="$(ledger_path "$goal_id")"
 
+  # D-C11: serialize the read-tail→append window against a racing second writer
+  # (see the append-lock helpers above). Acquired here, released on EVERY exit
+  # path below. Nothing is written to the ledger before this point, so a
+  # lock timeout leaves the ledger byte-unchanged.
+  _ledger_lock_acquire "$dir" || { echo "defect: ledger-locked: $goal_id" >&2; return 1; }
+
   if [ -s "$path" ]; then
     last_line=$(tail -n 1 "$path")
     seq=$(printf '%s' "$last_line" | awk -F'\t' '{print $2}')
     case "$seq" in
-      ''|*[!0-9]*) echo "defect: corrupt-ledger-tail: last line's seq field is not numeric ('${seq:-<empty>}'): $path" >&2; return 1 ;;
+      ''|*[!0-9]*) _ledger_lock_release "$dir"; echo "defect: corrupt-ledger-tail: last line's seq field is not numeric ('${seq:-<empty>}'): $path" >&2; return 1 ;;
     esac
     # The self-covering chain reads the tail's own digest as this line's
     # <prev>; a malformed tail digest would silently poison the new digest,
@@ -369,12 +428,26 @@ ledger_append() {
     prev=$(printf '%s' "$last_line" | awk -F'\t' '{print $3}')
     case "$prev" in
       [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
-      *) echo "defect: corrupt-ledger-tail: last line's digest field is not 8 hex chars ('${prev:-<empty>}'): $path" >&2; return 1 ;;
+      *) _ledger_lock_release "$dir"; echo "defect: corrupt-ledger-tail: last line's digest field is not 8 hex chars ('${prev:-<empty>}'): $path" >&2; return 1 ;;
     esac
     seq=$((seq + 1))
   else
     seq=1
     prev="$LEDGER_GENESIS_MARKER"
+  fi
+
+  # Test-only deterministic-interleaving seam (D-C11 concurrency contract):
+  # when SDLC_LEDGER_SEAM_HOLD names a path, block HERE — after the tail-read,
+  # before the append — until that path is removed (bounded, self-releasing),
+  # signalling arrival by touching SDLC_LEDGER_SEAM_READY. A suite pins the
+  # read→write window open with it to drive the append race deterministically;
+  # both vars are unset in production, so this is inert on every real append.
+  if [ -n "${SDLC_LEDGER_SEAM_HOLD:-}" ]; then
+    [ -n "${SDLC_LEDGER_SEAM_READY:-}" ] && : > "$SDLC_LEDGER_SEAM_READY"
+    _seam_i=0
+    while [ -e "$SDLC_LEDGER_SEAM_HOLD" ] && [ "$_seam_i" -lt 500 ]; do
+      sleep 0.02; _seam_i=$((_seam_i + 1))
+    done
   fi
 
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -385,7 +458,12 @@ ledger_append() {
   digest=$(ledger_digest "$prev"$'\t'"$content")
   new_line="$(printf '%s\t%s\t%s\t%s\t%s\t%s' "$ts" "$seq" "$digest" "$type" "$key" "$summary")"
 
-  printf '%s\n' "$new_line" >> "$path" 2>/dev/null || { echo "defect: append-failed: cannot append to $path" >&2; return 1; }
+  if ! printf '%s\n' "$new_line" >> "$path" 2>/dev/null; then
+    _ledger_lock_release "$dir"
+    echo "defect: append-failed: cannot append to $path" >&2
+    return 1
+  fi
+  _ledger_lock_release "$dir"
   return 0
 }
 
@@ -852,13 +930,18 @@ sdlc_wip_check() {
 #       stored digest at line <seq> ≠ <digest> → `ledger-truncated` naming both
 #                               the baton's and the ledger's stored digest
 #                               (a deeper rewrite AT the recorded position).
-#       tail seq > baton seq → `ledger-ahead: baton at <seq>, ledger tail
-#                               <tail-seq>` (decisions post-date the checkpoint).
+#       tail seq > baton seq → classify the trailing entries (D-C10): if EVERY
+#                               entry past <seq> has a spine-class effect-key
+#                               (rung|park|spawn|complete|poke) it is benign
+#                               supervision growth → silent rc 0; otherwise
+#                               `ledger-ahead: baton at <seq>, ledger tail
+#                               <tail-seq>` (a passenger/garbled entry
+#                               post-dates the checkpoint — fail-closed).
 #       exact match (tail seq == seq AND digest matches) → silent rc 0.
 # The digest check precedes the ledger-ahead check by design: a rewrite AT the
 # baton's position is a stronger signal than mere growth past it.
 sdlc_ledger_position_check() {
-  local goal_id="${1:-}" position="${2:-}" path seq digest tail_seq stored_digest
+  local goal_id="${1:-}" position="${2:-}" path seq digest tail_seq stored_digest passenger
   _sdlc_validate_goal_id "$goal_id" "sdlc_ledger_position_check" || return 1
   path="$(ledger_path "$goal_id")"
 
@@ -897,8 +980,25 @@ sdlc_ledger_position_check() {
   fi
 
   if [ "$tail_seq" -gt "$seq" ]; then
-    echo "defect: ledger-ahead: baton at $seq, ledger tail $tail_seq" >&2
-    return 1
+    # D-C10 (amendment to ADR-003 D2/AS-N12): the ladder journals rung attempts
+    # into the goal's ledger, so the tail advances past the baton position on
+    # every supervision event. Trailing entries are BENIGN iff EVERY one's
+    # effect-key class (the token before the first ':' of field 5) is in the
+    # CLOSED spine set (rung|park|spawn|complete|poke). Any other trailing
+    # class — including empty or delimiter-less (garbled) — is a passenger
+    # write and keeps `ledger-ahead` (fail-closed: unknown = passenger = stale
+    # baton = park). ledger-truncated logic above is untouched in every case.
+    passenger=$(awk -F'\t' -v s="$seq" -v spine="$SDLC_SPINE_CLASSES" '
+      BEGIN { n = split(spine, a, " "); for (i = 1; i <= n; i++) sp[a[i]] = 1 }
+      $2 > s {
+        cls = $5; sub(/:.*/, "", cls)
+        if (!(cls in sp)) { print "passenger"; exit }
+      }
+    ' "$path")
+    if [ -n "$passenger" ]; then
+      echo "defect: ledger-ahead: baton at $seq, ledger tail $tail_seq" >&2
+      return 1
+    fi
   fi
 
   return 0
@@ -1261,7 +1361,14 @@ _sdlc_gate_park_append() {
     echo "park-skipped: wake note already present — first park wins" >&2
     return 0
   fi
-  if ! {
+  # The append is wrapped in a SUBSHELL so a failed-open redirect (an unwritable
+  # plan) propagates as a nonzero exit — the bare `if ! { …; } >> file` form
+  # silently evaluates to 0 when the redirect cannot open the file (bash
+  # compound-redirect quirk), which would report a park that never landed as
+  # success. The subshell also confines the redirect's own error to the outer
+  # `2>/dev/null`, so a failed park is loud through THIS function's named defect
+  # only, never a stray shell message.
+  if ! ( {
     printf '\n## Wake Note\n\n'
     printf 'GATED by rollover spine: %s\n' "$defect"
     printf '%s\n\n' "$detail"
@@ -1269,7 +1376,7 @@ _sdlc_gate_park_append() {
     printf '1. Resolve the named divergence and delete this note to re-arm.\n'
     printf '2. Close the goal manually (plan current: 10 + merge) if it is in fact done.\n\n'
     printf '**Why it matters:** the spine refuses to spawn a successor while this note stands (fail-closed).\n'
-  } >> "$plan_path" 2>/dev/null; then
+  } >> "$plan_path" ) 2>/dev/null; then
     echo "defect: park-failed: $plan_path — park could not land durable state" >&2
     return 1
   fi
@@ -1527,4 +1634,256 @@ sdlc_successor_spawn() {
   # 8. success — the fresh sid is the caller/N4 handle.
   echo "$sid"
   return 0
+}
+
+# ---------- D-C1/D-C2/D-C4: revival ladder derivation (slice 4/3) ----------
+#
+# sdlc_ladder_next <goal-id> <classification> <anchor> [dir] — the PURE ladder
+# oracle the poker dispatcher (4/4) consults each poll. Given a goal's
+# classification and the current DURABLE-PROGRESS anchor (8-hex digest from
+# sdlc_ladder_anchor — D-C2 amendment), it DERIVES the single next rung action
+# by reading the goal's ledger (rung attempts already journaled) and, at the
+# rollover step, the current baton generation. It writes NOTHING, reads no clock
+# and no world state beyond the <anchor> arg, and makes no registry call:
+# the poker owns EXECUTING the returned action (each through sdlc_effect_run);
+# this function only decides WHICH one.
+#
+# Contract (D-C2 rung effect-key grammar; D-C1 rung order; D-C4 rollover):
+#   stdout exactly one token, rc 0:
+#     poke:<n> | re-prompt:<n> | observe:<n> | rollover | human | none
+#   Invalid args (goal-id, non-epoch anchor, garbled cap) or a corrupt ledger →
+#   one `defect: <class>: <detail>` line on stderr, rc 1 (caller fail-closed
+#   skips + audits). A journaled rung DECISION with no matching EFFECT under the
+#   current anchor (the crash window) → `defect: effect-indeterminate` (caller
+#   parks).
+#
+# Derivation:
+#   * An attempt = one COMPLETED (effect-line) rung action under the key
+#     `rung:<goal-id>:<rung-name>:<anchor>:<n>` (n from 1). Attempts are counted
+#     per rung for the CURRENT anchor ONLY; entries under an older anchor are
+#     dead history (durable progress happened — a fresh episode starts at n=1
+#     for the new digest) and are neither reused nor garbage-collected. Because
+#     the anchor keys off durable progress, a poke's own resume turn (which only
+#     moves the transcript) does NOT change it — the ladder cannot reset the
+#     episode it is judged by (Step-6 critic F1 fix).
+#   * Caps: SDLC_RUNG_CAP (default 2 — poke and re-prompt each) and
+#     SDLC_OBSERVE_CAP (default 3). A rung with < cap completed attempts yields
+#     `<rung>:<count+1>`; at cap it is exhausted and the next rung is consulted.
+#   * Rung order by classification (D-C1):
+#       DEAD          → poke → re-prompt → rollover → human
+#       IDLE_STALLED  → poke → re-prompt → human   (alive: the single-writer
+#                       constitution forbids rollover — STRUCTURALLY unreachable)
+#       WEDGED        → observe → human            (alive + busy: no safe
+#                       automated action, only bounded observation, no kill verb)
+#       anything else → none                        (no ladder)
+#   * Rollover (D-C4): read the CURRENT baton generation; the spawn key
+#     `spawn:<goal-id>:<baton-written-at>` state via sdlc_effect_state:
+#       unapplied     → rollover (the spine will spawn a successor)
+#       applied       → human    (spawn-skipped steady state, AS-N13 — the ladder
+#                                 NEVER re-keys a spawn around exactly-once)
+#       indeterminate → defect effect-indeterminate (caller parks)
+#     An unparseable baton passes its own defect through (caller fail-closed).
+#
+# [dir] is accepted for dispatcher-signature parity but the derivation is
+# repo-INDEPENDENT: every input (baton, ledger, effect state) derives from
+# SDLC_STATE_DIR + goal-id, never from a working tree.
+
+# sdlc_ladder_anchor <goal-id> <plan-path> <cwd> [dir] — mint the episode's
+# DURABLE-PROGRESS DIGEST (D-C2 anchor amendment, Step-6 critic F1): an 8-hex
+# token over the tuple of the goal's DURABLE progress, so the anchor moves iff
+# real progress happened and is IMMUNE to a poke's own resume turn (which only
+# advances the transcript). Transcript mtime is OUT of escalation state entirely
+# — it stays a staleness-classification signal only.
+#
+# Tuple (order fixed here so the digest is reproducible cold, D-C7 / AC-C3):
+#   1. plan `current:` value      — read from <plan-path> (the goal's REGISTRATION
+#                                    plan, trusted provenance; same grep+sed shape
+#                                    as reconcile/complete-check).
+#   2. goal branch tip sha        — `git -C <dir> rev-parse <baton branch>`.
+#   3. passenger-class ledger tail — highest ledger seq whose effect-key class is
+#                                    NOT in SDLC_SPINE_CLASSES (0 when none); the
+#                                    ladder's OWN spine-class journaling never
+#                                    moves it, so the anchor cannot reset itself.
+#   4. baton `written-at`         — the current baton generation stamp.
+#
+# Pure (no writes), deterministic, cold-readable. rc 0 + 8-hex on stdout; on any
+# unreadable input a loud named `defect:` on stderr + rc 1 (caller fail-closed
+# skips). Reads: baton (BATON_BRANCH/BATON_WRITTEN_AT), plan file, git repo,
+# goal ledger. [dir] overrides the git repo for tests; defaults to <cwd>.
+sdlc_ladder_anchor() {
+  local goal_id="${1:-}" plan_path="${2:-}" cwd="${3:-}" dir="${4:-${3:-}}"
+  local baton plan_current branch_tip lpath passenger_tail
+
+  _sdlc_validate_goal_id "$goal_id" "sdlc_ladder_anchor" || return 1
+  ledger_digest_tool_probe || return 1
+
+  # 1. baton (branch + written-at) — its own defect passes through, fail-closed.
+  baton="$(baton_path "$goal_id")"
+  baton_parse "$baton" || return 1
+
+  # 2. plan readable + a parseable current: line (mirrors reconcile's shape).
+  if [ ! -f "$plan_path" ]; then
+    echo "defect: plan-unreadable: $plan_path" >&2
+    return 1
+  fi
+  plan_current=$(grep -E '^current:' "$plan_path" 2>/dev/null | head -1 | sed -E 's/^current:[[:space:]]*//; s/[[:space:]]+$//')
+  if [ -z "$plan_current" ]; then
+    echo "defect: plan-unreadable: $plan_path" >&2
+    return 1
+  fi
+
+  # 3. goal branch tip — an unreadable repo/branch is fail-closed (the durable
+  #    tuple cannot be completed without it). `--verify --quiet ... ^{commit}`
+  #    (never plain rev-parse) so an unresolvable ref yields EMPTY output at a
+  #    nonzero rc instead of git's literal-ref-echoed-to-stdout quirk (rc 128,
+  #    ref name on stdout) — the `-z` guard below would otherwise miss that
+  #    literal and digest it (F1b, Step-6 critic-fix-2). The 40-hex check is a
+  #    second, independent gate on the same fail-closed contract.
+  branch_tip=$(git -C "$dir" rev-parse --verify --quiet "${BATON_BRANCH}^{commit}" 2>/dev/null)
+  if ! printf '%s' "$branch_tip" | grep -qE '^[0-9a-f]{40}$'; then
+    echo "defect: cwd-unreadable: cannot resolve branch tip for '$BATON_BRANCH' in: $dir" >&2
+    return 1
+  fi
+
+  # 4. passenger-class ledger tail. A non-empty ledger must chain-verify first
+  #    (corruption is fail-closed, its defect passes through); a missing/empty
+  #    ledger is a fresh episode (tail 0), never a defect — mirrors the effect
+  #    primitives' "not yet". Spine-class entries (SDLC_SPINE_CLASSES) never move
+  #    the tail, so the ladder's own journaling cannot reset the anchor.
+  lpath="$(ledger_path "$goal_id")"
+  if [ -s "$lpath" ]; then
+    ledger_verify "$goal_id" || return 1
+    passenger_tail=$(awk -F'\t' -v spine="$SDLC_SPINE_CLASSES" '
+      BEGIN { n = split(spine, a, " "); for (i = 1; i <= n; i++) sp[a[i]] = 1; max = 0 }
+      { cls = $5; sub(/:.*/, "", cls); if (!(cls in sp) && $2 + 0 > max) max = $2 + 0 }
+      END { print max + 0 }
+    ' "$lpath")
+  else
+    passenger_tail=0
+  fi
+
+  # Digest the tuple (newline-joined; components are single logical fields with
+  # no embedded newline) → 8-hex, the same truncation the ledger chain uses.
+  ledger_digest "$(printf '%s\n%s\n%s\n%s' "$plan_current" "$branch_tip" "$passenger_tail" "$BATON_WRITTEN_AT")"
+}
+
+# _sdlc_rung_key <goal-id> <rung-name> <anchor> <n> — mint the canonical rung
+# effect-key `rung:<goal-id>:<rung-name>:<anchor>:<n>` (D-C2), in ONE place so
+# the derivation and any future consumer can never drift the grammar. rung-name
+# ∈ poke|re-prompt|observe; anchor is the 8-hex DURABLE-PROGRESS DIGEST minted by
+# sdlc_ladder_anchor (D-C2 anchor amendment — NEVER an epoch/mtime); n a positive
+# ordinal — each rejected loud (one named defect, rc 1) so a malformed key is
+# never minted.
+_sdlc_rung_key() {
+  local gid="${1:-}" rung="${2:-}" anchor="${3:-}" n="${4:-}"
+  case "$rung" in
+    poke|re-prompt|observe) ;;
+    *) echo "defect: invalid-rung: rung-name must be poke|re-prompt|observe, got '${rung:-<empty>}'" >&2; return 1 ;;
+  esac
+  if ! printf '%s' "$anchor" | grep -qE '^[0-9a-f]{8}$'; then
+    echo "defect: invalid-anchor: rung anchor must be an 8-hex durable-progress digest, got '${anchor:-<empty>}'" >&2
+    return 1
+  fi
+  if ! printf '%s' "$n" | grep -qE '^[1-9][0-9]*$'; then
+    echo "defect: invalid-ordinal: rung ordinal must be a positive integer, got '${n:-<empty>}'" >&2
+    return 1
+  fi
+  printf 'rung:%s:%s:%s:%s' "$gid" "$rung" "$anchor" "$n"
+}
+
+# _sdlc_ladder_rung_probe <goal-id> <rung-name> <anchor> <cap> — walk ordinals
+# 1..cap for ONE rung under this anchor. Prints the next open ordinal (rc 0)
+# when a slot is free; prints nothing (rc 2) when the rung is exhausted (all
+# <cap> attempts applied); emits a loud effect-indeterminate defect (rc 1) on a
+# decision-without-effect crash-window key. Pure (reads effect state only).
+_sdlc_ladder_rung_probe() {
+  local gid="$1" rung="$2" anchor="$3" cap="$4"
+  local n key state
+  for (( n = 1; n <= cap; n++ )); do
+    key="$(_sdlc_rung_key "$gid" "$rung" "$anchor" "$n")" || return 1
+    state="$(sdlc_effect_state "$gid" "$key")" || return 1
+    case "$state" in
+      applied) ;;                                    # completed attempt — keep counting
+      indeterminate)
+        echo "defect: effect-indeterminate: $key — journaled rung intent has no recorded effect (crash window)" >&2
+        return 1 ;;
+      *) printf '%s' "$n"; return 0 ;;               # unapplied → this is the next open slot
+    esac
+  done
+  return 2                                           # all cap attempts applied → rung exhausted
+}
+
+# _sdlc_ladder_rollover <goal-id> — the DEAD ladder's terminal-automated step
+# (D-C4): derive from the CURRENT baton generation's spawn-key state. Prints
+# `rollover` (unapplied) or `human` (applied, AS-N13); a decision-only spawn key
+# (crash window) → defect effect-indeterminate; an unparseable baton passes its
+# own defect through. rc 0 on a token, 1 on any defect.
+_sdlc_ladder_rollover() {
+  local gid="$1" baton spawn_key
+  baton="$(baton_path "$gid")"
+  baton_parse "$baton" || return 1
+  spawn_key="spawn:$gid:$BATON_WRITTEN_AT"
+  case "$(sdlc_effect_state "$gid" "$spawn_key")" in
+    applied)   printf 'human\n'; return 0 ;;
+    unapplied) printf 'rollover\n'; return 0 ;;
+    *) echo "defect: effect-indeterminate: $spawn_key — journaled spawn intent has no recorded effect (crash window)" >&2
+       return 1 ;;
+  esac
+}
+
+sdlc_ladder_next() {
+  local goal_id="${1:-}" classification="${2:-}" anchor="${3:-}"
+  local rung_cap="${SDLC_RUNG_CAP:-2}" observe_cap="${SDLC_OBSERVE_CAP:-3}"
+  local lpath next
+
+  _sdlc_validate_goal_id "$goal_id" "sdlc_ladder_next" || return 1
+
+  # anchor is the episode's DURABLE-PROGRESS DIGEST (D-C2 amendment): an 8-hex
+  # token the caller derives via sdlc_ladder_anchor over durable progress only
+  # (plan current, goal branch tip, passenger-class ledger tail, baton
+  # written-at) — replay-stable and IMMUNE to a poke's own transcript write. A
+  # non-8-hex value is a caller bug, refused loud.
+  if ! printf '%s' "$anchor" | grep -qE '^[0-9a-f]{8}$'; then
+    echo "defect: invalid-anchor: sdlc_ladder_next anchor must be an 8-hex durable-progress digest, got '${anchor:-<empty>}'" >&2
+    return 1
+  fi
+  # caps are env-overridable; a garbled override must fail LOUD, never silently
+  # coerce to 0 (which would collapse the ladder straight to its terminal rung).
+  if ! printf '%s' "$rung_cap" | grep -qE '^[1-9][0-9]*$'; then
+    echo "defect: invalid-cap: SDLC_RUNG_CAP must be a positive integer, got '$rung_cap'" >&2
+    return 1
+  fi
+  if ! printf '%s' "$observe_cap" | grep -qE '^[1-9][0-9]*$'; then
+    echo "defect: invalid-cap: SDLC_OBSERVE_CAP must be a positive integer, got '$observe_cap'" >&2
+    return 1
+  fi
+
+  # Corrupt-ledger fail-closed: a NON-EMPTY ledger must chain-verify before any
+  # rung is derived from it. A missing/empty ledger is a fresh episode, NOT a
+  # defect — the same "not yet" the effect primitives treat as ordinary.
+  lpath="$(ledger_path "$goal_id")"
+  if [ -s "$lpath" ]; then
+    ledger_verify "$goal_id" || return 1
+  fi
+
+  case "$classification" in
+    DEAD)
+      next="$(_sdlc_ladder_rung_probe "$goal_id" poke "$anchor" "$rung_cap")"
+      case $? in 0) printf 'poke:%s\n' "$next"; return 0 ;; 1) return 1 ;; esac
+      next="$(_sdlc_ladder_rung_probe "$goal_id" re-prompt "$anchor" "$rung_cap")"
+      case $? in 0) printf 're-prompt:%s\n' "$next"; return 0 ;; 1) return 1 ;; esac
+      _sdlc_ladder_rollover "$goal_id"; return $? ;;
+    IDLE_STALLED)
+      next="$(_sdlc_ladder_rung_probe "$goal_id" poke "$anchor" "$rung_cap")"
+      case $? in 0) printf 'poke:%s\n' "$next"; return 0 ;; 1) return 1 ;; esac
+      next="$(_sdlc_ladder_rung_probe "$goal_id" re-prompt "$anchor" "$rung_cap")"
+      case $? in 0) printf 're-prompt:%s\n' "$next"; return 0 ;; 1) return 1 ;; esac
+      printf 'human\n'; return 0 ;;
+    WEDGED)
+      next="$(_sdlc_ladder_rung_probe "$goal_id" observe "$anchor" "$observe_cap")"
+      case $? in 0) printf 'observe:%s\n' "$next"; return 0 ;; 1) return 1 ;; esac
+      printf 'human\n'; return 0 ;;
+    *)
+      printf 'none\n'; return 0 ;;
+  esac
 }
