@@ -3343,6 +3343,80 @@ ac_s1_arm_roundtrip() {
 }
 ac_s1_arm_roundtrip
 
+echo ""
+echo "=== 4/S1-G3: arm refusals (missing/malformed/collision/false) + --force ==="
+ac_s1_arm_refusals() {
+  new_state_dir
+  local plan out rc err
+  export SDLC_ARM_SESSION_ID="sid-fixture-3"; export SDLC_ARM_PID="4242"
+
+  # --- missing plan → refuse, no record ---
+  err=$(sdlc_arm "$HOME/nope/ghost.plan.md" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "arm missing plan → nonzero" "$rc"
+  assert_contains "arm missing plan → defect on stderr" "defect:" "$err"
+  assert_true "arm missing plan → no record" test ! -e "$(goals_reg ghost)"
+
+  # --- malformed frontmatter: off-enum keepalive → refuse, no record ---
+  plan="$HOME/plans/badka.plan.md"; write_plan "$plan" wave "maybe"
+  err=$(sdlc_arm "$plan" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "arm off-enum keepalive → nonzero" "$rc"
+  assert_contains "arm off-enum keepalive → defect on stderr" "defect:" "$err"
+  assert_true "arm off-enum keepalive → no record" test ! -e "$(goals_reg badka)"
+
+  # --- malformed frontmatter: off-enum pilot (no override) → refuse ---
+  plan="$HOME/plans/badpilot.plan.md"; write_plan "$plan" wave true SEMI
+  err=$(sdlc_arm "$plan" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "arm off-enum pilot (no override) → nonzero" "$rc"
+  assert_true "arm off-enum pilot → no record" test ! -e "$(goals_reg badpilot)"
+  # an explicit pilot-override bypasses the unreadable plan pilot (still armable)
+  out=$(sdlc_arm "$plan" AUTO 2>/dev/null); rc=$?
+  assert_eq "arm off-enum pilot WITH override → rc 0" "0" "$rc"
+  assert_contains "override → audit pilot=AUTO" "badpilot ARM $plan pilot=AUTO" "$(cat "$(poker_audit)")"
+
+  # --- collision: existing record, different PLAN → refuse, record intact ---
+  new_state_dir
+  export SDLC_ARM_SESSION_ID="sid-fixture-3"; export SDLC_ARM_PID="4242"
+  mkdir -p "$HOME/.claude/sdlc-goals" "$HOME/a"
+  local rec; rec="$(goals_reg foo)"
+  {
+    echo "PLAN=/somewhere/else/foo.plan.md"; echo "CWD=/x"; echo "SESSION_ID=sid-old"
+    echo "PID=999"; echo "ARMED_AT=2026-07-20T00:00:00Z"
+  } > "$rec"
+  plan="$HOME/a/foo.plan.md"; write_plan "$plan" wave true
+  err=$(sdlc_arm "$plan" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "arm collision (gid taken, different PLAN) → nonzero" "$rc"
+  assert_contains "arm collision → defect on stderr" "defect:" "$err"
+  assert_eq "arm collision → original record PLAN untouched" "/somewhere/else/foo.plan.md" "$(reg_field "$rec" PLAN)"
+
+  # --- same-plan re-arm is idempotent (not a collision) ---
+  new_state_dir
+  export SDLC_ARM_SESSION_ID="sid-fixture-3"; export SDLC_ARM_PID="4242"
+  plan="$HOME/plans/rearm.plan.md"; write_plan "$plan" wave true
+  sdlc_arm "$plan" >/dev/null 2>&1
+  out=$(sdlc_arm "$plan" 2>/dev/null); rc=$?
+  assert_eq "arm same-plan re-arm → rc 0 (idempotent)" "0" "$rc"
+
+  # --- keepalive-effective=false → refuse unless --force ---
+  new_state_dir
+  export SDLC_ARM_SESSION_ID="sid-fixture-3"; export SDLC_ARM_PID="4242"
+  plan="$HOME/plans/kf.plan.md"; write_plan "$plan" wave false   # explicit false
+  err=$(sdlc_arm "$plan" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "arm keepalive:false without --force → nonzero" "$rc"
+  assert_contains "arm keepalive:false → defect names force" "force" "$err"
+  assert_true "arm keepalive:false without --force → no record" test ! -e "$(goals_reg kf)"
+  out=$(sdlc_arm "$plan" --force 2>/dev/null); rc=$?
+  assert_eq "arm keepalive:false WITH --force → rc 0" "0" "$rc"
+  assert_true "arm --force → record written" test -f "$(goals_reg kf)"
+
+  # absent-flag task/wave/epic is also keepalive-false → same refusal
+  plan="$HOME/plans/absk.plan.md"; write_plan "$plan" epic
+  rc=0; sdlc_arm "$plan" >/dev/null 2>&1 || rc=$?
+  assert_nonzero "arm absent-keepalive epic (fallback false) without --force → nonzero" "$rc"
+
+  unset SDLC_ARM_SESSION_ID SDLC_ARM_PID
+}
+ac_s1_arm_refusals
+
 # ============================================================
 echo ""
 echo "========================================"

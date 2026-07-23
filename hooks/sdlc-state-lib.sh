@@ -2014,26 +2014,58 @@ sdlc_arm() {
     esac
   done
 
-  local abs gid dir rec tmp sid pid cwd armed pilot
+  local abs gid dir rec tmp sid pid cwd armed pilot ka krc prc
+
+  # 1. plan must be a readable file — refuse loud, before any resolution.
+  [ -n "$plan" ] && [ -f "$plan" ] && [ -r "$plan" ] || {
+    echo "defect: missing-plan: sdlc_arm requires a readable plan file: ${plan:-<empty>}" >&2; return 1; }
+
   abs="$(_sdlc_abspath "$plan")" || abs="$plan"
   gid="$(sdlc_goal_id "$plan")"
   _sdlc_validate_goal_id "$gid" "sdlc_arm" || return 1
+
+  # 2. malformed frontmatter is fail-loud: an off-enum keepalive (rc 2) refuses
+  #    regardless of --force (garbage is not a false to be forced past).
+  ka="$(sdlc_keepalive_effective "$abs")"; krc=$?
+  if [ "$krc" -ne 0 ]; then
+    echo "defect: malformed-frontmatter: cannot resolve keepalive for $abs" >&2; return 1
+  fi
+
+  # pilot for the audit line: explicit override wins; else the effective value.
+  # An off-enum pilot with NO override is malformed → refuse.
+  if [ -n "$pilot_override" ]; then
+    pilot="$pilot_override"
+  else
+    pilot="$(sdlc_pilot_effective "$abs")"; prc=$?
+    if [ "$prc" -ne 0 ]; then
+      echo "defect: malformed-frontmatter: cannot resolve pilot for $abs (pass MANUAL|AUTO to override)" >&2; return 1
+    fi
+  fi
+
+  # 3. keepalive-effective false arms only under an explicit --force.
+  if [ "$ka" = false ] && [ "$force" -ne 1 ]; then
+    echo "defect: keepalive-false: $abs is not keepalive-armable; pass --force to arm anyway" >&2; return 1
+  fi
+
+  # 4. collision: a record already at this goal-id whose PLAN differs is a
+  #    distinct goal claiming the same id — refuse (a same-PLAN re-arm is an
+  #    idempotent overwrite, allowed).
+  dir="$(_sdlc_goals_dir)"
+  rec="$dir/$gid"
+  if [ -f "$rec" ]; then
+    local existing_plan; existing_plan="$(grep -E '^PLAN=' "$rec" 2>/dev/null | head -1 | sed -E 's/^PLAN=//')"
+    if [ -n "$existing_plan" ] && [ "$existing_plan" != "$abs" ]; then
+      echo "defect: arm-collision: goal-id '$gid' already registered to a different plan ($existing_plan); refusing to overwrite with $abs" >&2
+      return 1
+    fi
+  fi
 
   cwd="$(pwd)"
   sid="${SDLC_ARM_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
   pid="${SDLC_ARM_PID:-$$}"
   armed="$(_sdlc_iso_now)"
 
-  # pilot for the audit line: explicit override wins; else the effective value.
-  if [ -n "$pilot_override" ]; then
-    pilot="$pilot_override"
-  else
-    pilot="$(sdlc_pilot_effective "$abs" 2>/dev/null)" || pilot="?"
-  fi
-
-  dir="$(_sdlc_goals_dir)"
   mkdir -p "$dir" 2>/dev/null || { echo "defect: arm-mkdir-failed: cannot create goals dir: $dir" >&2; return 1; }
-  rec="$dir/$gid"
   tmp="$(mktemp "$dir/.arm.$gid.XXXXXX" 2>/dev/null)" || { echo "defect: arm-mktemp-failed: cannot mint a temp record in $dir" >&2; return 1; }
   {
     printf 'PLAN=%s\n' "$abs"
