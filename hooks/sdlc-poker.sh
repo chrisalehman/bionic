@@ -316,6 +316,120 @@ wedge_cputime() {  # $1=pid → integer seconds on stdout, rc 0; rc 1 if pid gon
   printf '%s' "$total"
 }
 
+# Per-goal wedge observation state (mirrors the .poke state-file style): a single
+# line "<pid> <transcript-size> <cputime> <count>". The counter is the number of
+# consecutive corroborating polls observed; it RESETS on transcript movement,
+# vehicle-pid change, or a vanished pid (the vehicle changed).
+wedge_state_file() { printf '%s/%s.wedge' "$(state_dir)" "$1"; }
+
+# Effective pilot for the registered plan (AUTO|MANUAL), keying the quiet ceiling.
+# Consumes the S1 lib resolver (frontmatter → scale-keyed fallback). When the lib is
+# unavailable or the value is off-enum, fall back to the CONSERVATIVE MANUAL ceiling
+# (the longest) — a detector that cannot read the pilot must not shorten the window.
+wedge_pilot() {  # uses REG_PLAN
+  local p
+  if [ "$SDLC_LIB_OK" = "1" ]; then
+    p="$(sdlc_pilot_effective "$REG_PLAN" 2>/dev/null)" || p=""
+    case "$p" in AUTO|MANUAL) printf '%s' "$p"; return ;; esac
+  fi
+  printf 'MANUAL'
+}
+
+# Current transcript byte size (movement signal), or "none" when unresolved.
+wedge_transcript_size() {
+  local sz
+  _resolve_transcript_memo
+  [ -n "$_XSCRIPT_PATH" ] || { printf 'none'; return; }
+  sz=$(file_size "$_XSCRIPT_PATH" 2>/dev/null) || sz=""
+  [ -n "$sz" ] || { printf 'none'; return; }
+  printf '%s' "$sz"
+}
+
+wedge_write() {  # $1=file $2=pid $3=size $4=cputime $5=count
+  mkdir -p "$(dirname "$1")" 2>/dev/null
+  printf '%s %s %s %s\n' "$2" "$3" "$4" "$5" > "$1" 2>/dev/null
+}
+
+# wedge_corroborated <gid> — the detector (spec R4/AC-5; probe Q7). rc 0 ONLY when
+# ALL hold across SDLC_WEDGE_OBS consecutive polls: quiet beyond the pilot-keyed
+# ceiling, transcript bytes flat poll-over-poll, and process-tree cputime flat
+# (accumulating cputime is AMBIGUOUS — notify-only, never corroborated). Any of
+# transcript movement, pid change, or a vanished pid RESETS the observation. Called
+# ONLY on a registry-busy / status-null-in-flight path (busy_or_wedged), so the
+# "busy" precondition is the caller's; here we verify quiet + flatness. Emits only
+# audit lines (WEDGE-OBSERVE / WEDGE-AMBIGUOUS) — no actions (verbs are S4/S5).
+# Uses REG_PID / REG_PLAN / the transcript memo. rc: 0 corroborated; 1 observing/
+# not-yet; 2 ambiguous (cpu active).
+wedge_corroborated() {  # $1=gid
+  local gid="${1:--}" q pilot ceiling cur_size cur_cpu cpurc pf
+  local s_pid s_size s_cpu s_count delta count
+  pf="$(wedge_state_file "$gid")"
+  q=$(transcript_quiet)
+  pilot="$(wedge_pilot)"
+  if [ "$pilot" = "AUTO" ]; then ceiling="$SDLC_WEDGE_CEILING_AUTO"; else ceiling="$SDLC_WEDGE_CEILING_MANUAL"; fi
+  cur_size="$(wedge_transcript_size)"
+  cur_cpu="$(wedge_cputime "$REG_PID")"; cpurc=$?
+
+  s_pid=""; s_size=""; s_cpu=""; s_count=0
+  if [ -f "$pf" ]; then
+    read -r s_pid s_size s_cpu s_count < "$pf" 2>/dev/null || true
+    [ -n "$s_count" ] || s_count=0
+  fi
+
+  # Vanished pid → the vehicle changed → observation reset, no corroboration.
+  if [ "$cpurc" -ne 0 ]; then
+    wedge_write "$pf" "$REG_PID" "none" "0" 0
+    audit_line "$gid" WEDGE-OBSERVE "n=0 (vehicle pid $REG_PID unreadable; observation reset)"
+    return 1
+  fi
+
+  # Condition (c): quiet must exceed the pilot ceiling to advance corroboration.
+  if [ "$q" -le "$ceiling" ]; then
+    wedge_write "$pf" "$REG_PID" "$cur_size" "$cur_cpu" 0
+    audit_line "$gid" WEDGE-OBSERVE "n=0 (quiet ${q}s <= ${pilot} ceiling ${ceiling}s)"
+    return 1
+  fi
+
+  # Vehicle-pid change → reset baseline.
+  if [ -n "$s_pid" ] && [ "$s_pid" != "$REG_PID" ]; then
+    wedge_write "$pf" "$REG_PID" "$cur_size" "$cur_cpu" 1
+    audit_line "$gid" WEDGE-OBSERVE "n=1 (vehicle pid changed ${s_pid}->${REG_PID}; observation reset)"
+    return 1
+  fi
+
+  # Transcript movement → reset baseline.
+  if [ -n "$s_size" ] && [ "$s_size" != "none" ] && [ "$cur_size" != "$s_size" ]; then
+    wedge_write "$pf" "$REG_PID" "$cur_size" "$cur_cpu" 1
+    audit_line "$gid" WEDGE-OBSERVE "n=1 (transcript moved ${s_size}->${cur_size}B; observation reset)"
+    return 1
+  fi
+
+  # Baseline poll (no usable predecessor): establish, no cputime delta to judge yet.
+  if [ "$s_count" -lt 1 ] || [ -z "$s_size" ] || [ "$s_size" = "none" ]; then
+    wedge_write "$pf" "$REG_PID" "$cur_size" "$cur_cpu" 1
+    if [ 1 -ge "$SDLC_WEDGE_OBS" ]; then return 0; fi
+    audit_line "$gid" WEDGE-OBSERVE "n=1 (baseline; quiet ${q}s > ${pilot} ceiling ${ceiling}s)"
+    return 1
+  fi
+
+  # Predecessor present: judge the cputime delta.
+  delta=$(( cur_cpu - s_cpu )); [ "$delta" -lt 0 ] && delta=0
+  if [ "$delta" -gt "$SDLC_WEDGE_CPU_EPSILON" ]; then
+    # Accumulating cputime → AMBIGUOUS (waiting-vs-hung indistinguishable on CPU,
+    # probe Q7). Restart the observation; never corroborate this episode.
+    wedge_write "$pf" "$REG_PID" "$cur_size" "$cur_cpu" 1
+    audit_line "$gid" WEDGE-AMBIGUOUS "cpu-active (delta ${delta}s cputime over observation; notify-only, no restart)"
+    return 2
+  fi
+
+  # Flat cputime + flat transcript + quiet>ceiling + same pid → this poll qualifies.
+  count=$(( s_count + 1 ))
+  wedge_write "$pf" "$REG_PID" "$cur_size" "$cur_cpu" "$count"
+  if [ "$count" -ge "$SDLC_WEDGE_OBS" ]; then return 0; fi
+  audit_line "$gid" WEDGE-OBSERVE "n=${count} (corroborating; quiet ${q}s, cputime flat delta ${delta}s)"
+  return 1
+}
+
 # ---------- C2: classification (P3 verbatim, registry-primary) ----------
 # Given a live BUSY/IDLE/NOSTATUS reading, fold in transcript quiet.
 busy_or_wedged() { [ "$(transcript_quiet)" -gt "$WEDGE_QUIET" ] && echo WEDGED || echo BUSY; }
