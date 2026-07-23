@@ -174,29 +174,30 @@ plan_has_wake_note() {  # $1=plan
 
 # Armed = registration well-formed (checked by the caller before this call —
 # unreadable plan is MALFORMED, not merely unarmed) AND
-# sdlc_keepalive_effective(REG_PLAN) = true. keepalive:false / fallback-false
+# sdlc_watchdog_effective(REG_PLAN) = on. watchdog:off / fallback-off
 # (Global Constraints fallback table: explicit flag wins; absent-flag
-# continuous → true; absent-flag task/wave/epic → false) is an AUDITED skip
+# continuous → on; absent-flag task/wave/epic → off) is an AUDITED skip
 # (SKIP-UNARMED), replacing the old silent `continue`. The resolver's rc 1
 # (unreadable plan — should not occur post-caller-check, but fail-loud rather
-# than assume) and rc 2 (off-enum keepalive value) both land on the existing
-# MALFORMED-RECORD audit path — never guess past a malformed flag.
+# than assume) and rc 2 (off-enum watchdog value, or a plan still carrying the
+# pre-rename flag key) both land on the existing MALFORMED-RECORD audit path —
+# never guess past a malformed flag.
 is_armed() {  # $1=gid; uses REG_PLAN
-  local gid="$1" ka karc
+  local gid="$1" wd wdrc
   if [ "$SDLC_LIB_OK" != "1" ]; then
     # Lib unavailable (already audited once via LADDER-DEGRADE, gid "-") —
-    # sdlc_keepalive_effective is undefined in this branch, so fall back to
+    # sdlc_watchdog_effective is undefined in this branch, so fall back to
     # the pre-S2 scale-only check, byte-identical to the old is_armed_scale.
     [ "$(plan_frontmatter "$REG_PLAN" scale)" = "continuous" ]
     return $?
   fi
-  ka="$(sdlc_keepalive_effective "$REG_PLAN")"; karc=$?
-  if [ "$karc" -ne 0 ]; then
-    audit_line "$gid" MALFORMED-RECORD "keepalive resolution failed (rc=$karc) for $REG_PLAN"
+  wd="$(sdlc_watchdog_effective "$REG_PLAN")"; wdrc=$?
+  if [ "$wdrc" -ne 0 ]; then
+    audit_line "$gid" MALFORMED-RECORD "watchdog resolution failed (rc=$wdrc) for $REG_PLAN"
     return 1
   fi
-  [ "$ka" = "true" ] && return 0
-  audit_line "$gid" SKIP-UNARMED "keepalive effective=false"
+  [ "$wd" = "on" ] && return 0
+  audit_line "$gid" SKIP-UNARMED "watchdog effective=off"
   return 1
 }
 
@@ -322,17 +323,17 @@ wedge_cputime() {  # $1=pid → integer seconds on stdout, rc 0; rc 1 if pid gon
 # vehicle-pid change, or a vanished pid (the vehicle changed).
 wedge_state_file() { printf '%s/%s.wedge' "$(state_dir)" "$1"; }
 
-# Effective pilot for the registered plan (AUTO|MANUAL), keying the quiet ceiling.
+# Effective pilot for the registered plan (auto|manual), keying the quiet ceiling.
 # Consumes the S1 lib resolver (frontmatter → scale-keyed fallback). When the lib is
-# unavailable or the value is off-enum, fall back to the CONSERVATIVE MANUAL ceiling
+# unavailable or the value is off-enum, fall back to the CONSERVATIVE manual ceiling
 # (the longest) — a detector that cannot read the pilot must not shorten the window.
 wedge_pilot() {  # uses REG_PLAN
   local p
   if [ "$SDLC_LIB_OK" = "1" ]; then
     p="$(sdlc_pilot_effective "$REG_PLAN" 2>/dev/null)" || p=""
-    case "$p" in AUTO|MANUAL) printf '%s' "$p"; return ;; esac
+    case "$p" in auto|manual) printf '%s' "$p"; return ;; esac
   fi
-  printf 'MANUAL'
+  printf 'manual'
 }
 
 # Current transcript byte size (movement signal), or "none" when unresolved.
@@ -366,7 +367,7 @@ wedge_corroborated() {  # $1=gid
   pf="$(wedge_state_file "$gid")"
   q=$(transcript_quiet)
   pilot="$(wedge_pilot)"
-  if [ "$pilot" = "AUTO" ]; then ceiling="$SDLC_WEDGE_CEILING_AUTO"; else ceiling="$SDLC_WEDGE_CEILING_MANUAL"; fi
+  if [ "$pilot" = "auto" ]; then ceiling="$SDLC_WEDGE_CEILING_AUTO"; else ceiling="$SDLC_WEDGE_CEILING_MANUAL"; fi
   cur_size="$(wedge_transcript_size)"
   cur_cpu="$(wedge_cputime "$REG_PID")"; cpurc=$?
 
@@ -1010,7 +1011,7 @@ process_goals() {
       audit_line "$gid" MALFORMED-RECORD "registered plan not readable: $REG_PLAN"
       continue
     fi
-    is_armed "$gid" || continue       # keepalive-effective=false → audited SKIP-UNARMED, or MALFORMED-RECORD
+    is_armed "$gid" || continue       # watchdog-effective=off → audited SKIP-UNARMED, or MALFORMED-RECORD
     state=$(classify_goal "$gid" "$reg_json" "$reg_rc")
     [ -n "$state" ] || continue       # total-signal-loss degrade → already audited, skip
     prev=$(read_cache "$gid")         # previous classification (transition dedupe)

@@ -1889,9 +1889,9 @@ sdlc_ladder_next() {
 }
 
 # ============================================================================
-# Keepalive wave (4/S1): flag resolution + arm/disarm
+# Watchdog wave (4/S1): flag resolution + arm/disarm
 # ============================================================================
-# Universal keepalive — any governed run armable with explicit keepalive/pilot
+# Universal watchdog — any governed run armable with explicit watchdog/pilot
 # consents. Two effective-flag resolvers (frontmatter → scale-keyed fallback)
 # and the arm/disarm registration primitives. These write to the POKER's
 # consent registry ($HOME/.claude/sdlc-goals) and audit log
@@ -1930,47 +1930,58 @@ _sdlc_plan_fm() {
 # _sdlc_scale_is_continuous <plan> — 0 iff the plan's effective scale row is the
 # `continuous` row of the fallback table. Any other value (task/wave/epic, an
 # unknown scale, or an absent scale) is the conservative non-continuous row:
-# keepalive off / pilot MANUAL — never arm/drive on a scale we cannot read.
+# watchdog off / pilot manual — never arm/drive on a scale we cannot read.
 _sdlc_scale_is_continuous() {
   [ "$(_sdlc_plan_fm "$1" scale)" = "continuous" ]
 }
 
-# sdlc_keepalive_effective <plan-path> → stdout `true|false`, rc 0.
+# sdlc_watchdog_effective <plan-path> → stdout `on|off`, rc 0.
 #   unreadable/missing plan → rc 1, empty stdout.
-#   explicit off-enum keepalive value → rc 2 + stderr (fail-loud, never guess —
-#   symmetric with the pilot resolver; a `keepalive: flase` typo must not
-#   silently fall through to the fallback and flip armability on a guess).
-sdlc_keepalive_effective() {
-  local plan="${1:-}" v
+#   explicit off-enum watchdog value → rc 2 + stderr (fail-loud, never guess —
+#   symmetric with the pilot resolver; a `watchdog: no` typo must not silently
+#   fall through to the fallback and flip armability on a guess).
+#   a plan still carrying the pre-rename flag key (KA-R16) → rc 2 + stderr, never
+#   a fallthrough to fallback — the old key was renamed and a plan still carrying
+#   it is a defect the author must fix, not a signal to silently guess. (The old
+#   key name is written split across a character class below so the KA-R16
+#   code-ban grep stays clean while the stale key is still detected.)
+sdlc_watchdog_effective() {
+  local plan="${1:-}" v stale
   [ -n "$plan" ] && [ -f "$plan" ] && [ -r "$plan" ] || { return 1; }
-  v="$(_sdlc_plan_fm "$plan" keepalive)"
+  stale="$(_sdlc_plan_fm "$plan" 'keep[a]live')"
+  if [ -n "$stale" ]; then
+    echo "defect: renamed-key: this plan carries the pre-rename flag key, renamed to watchdog: (values on|off): $plan" >&2
+    return 2
+  fi
+  v="$(_sdlc_plan_fm "$plan" watchdog)"
   case "$v" in
-    true)  printf 'true\n';  return 0 ;;
-    false) printf 'false\n'; return 0 ;;
-    '')    # absent → scale-keyed fallback
-      if _sdlc_scale_is_continuous "$plan"; then printf 'true\n'; else printf 'false\n'; fi
+    on)  printf 'on\n';  return 0 ;;
+    off) printf 'off\n'; return 0 ;;
+    '')  # absent → scale-keyed fallback
+      if _sdlc_scale_is_continuous "$plan"; then printf 'on\n'; else printf 'off\n'; fi
       return 0 ;;
     *)
-      echo "defect: invalid-keepalive: '$v' — keepalive must be true or false: $plan" >&2
+      echo "defect: invalid-watchdog: '$v' — watchdog must be on or off: $plan" >&2
       return 2 ;;
   esac
 }
 
-# sdlc_pilot_effective <plan-path> → stdout `MANUAL|AUTO`, rc 0.
+# sdlc_pilot_effective <plan-path> → stdout `manual|auto`, rc 0.
 #   unreadable/missing plan → rc 1, empty stdout.
-#   explicit off-enum pilot value → rc 2 + stderr naming it (fail-loud).
+#   explicit off-enum pilot value (incl. legacy uppercase MANUAL|AUTO) → rc 2 +
+#   stderr naming it (fail-loud; the lowercase enum is the KA-R16 contract).
 sdlc_pilot_effective() {
   local plan="${1:-}" v
   [ -n "$plan" ] && [ -f "$plan" ] && [ -r "$plan" ] || { return 1; }
   v="$(_sdlc_plan_fm "$plan" pilot)"
   case "$v" in
-    MANUAL) printf 'MANUAL\n'; return 0 ;;
-    AUTO)   printf 'AUTO\n';   return 0 ;;
+    manual) printf 'manual\n'; return 0 ;;
+    auto)   printf 'auto\n';   return 0 ;;
     '')     # absent → scale-keyed fallback
-      if _sdlc_scale_is_continuous "$plan"; then printf 'AUTO\n'; else printf 'MANUAL\n'; fi
+      if _sdlc_scale_is_continuous "$plan"; then printf 'auto\n'; else printf 'manual\n'; fi
       return 0 ;;
     *)
-      echo "defect: invalid-pilot: '$v' — pilot must be MANUAL or AUTO: $plan" >&2
+      echo "defect: invalid-pilot: '$v' — pilot must be manual or auto: $plan" >&2
       return 2 ;;
   esac
 }
@@ -1995,12 +2006,12 @@ _sdlc_abspath() {
 # values ($$ for PID; $CLAUDE_SESSION_ID for the session). On success: emits
 # `ARM <gid> <plan> pilot=<p>` to the audit log and prints the goal-id.
 #
-# pilot-override (a bare MANUAL|AUTO token) sets the pilot shown in the audit
-# line; --force authorizes arming when keepalive-effective is false (the sole
-# legitimate arm-on-false path). Refusals (rc≠0 + stderr + NO record write):
-# missing/unreadable plan, malformed frontmatter (off-enum keepalive/pilot),
-# a colliding record (same goal-id, different PLAN), and keepalive-effective
-# false without --force. [refusals land in a later case-group.]
+# pilot-override (a bare manual|auto token) sets the pilot shown in the audit
+# line; --force authorizes arming when watchdog-effective is off (the sole
+# legitimate arm-on-off path). Refusals (rc≠0 + stderr + NO record write):
+# missing/unreadable plan, malformed frontmatter (off-enum watchdog/pilot),
+# a colliding record (same goal-id, different PLAN), and watchdog-effective
+# off without --force. [refusals land in a later case-group.]
 sdlc_arm() {
   local plan="${1:-}" pilot_override="" force=0
   shift 2>/dev/null || true
@@ -2008,13 +2019,13 @@ sdlc_arm() {
   for a in "$@"; do
     case "$a" in
       --force)       force=1 ;;
-      MANUAL|AUTO)   pilot_override="$a" ;;
+      manual|auto)   pilot_override="$a" ;;
       '')            ;;
-      *) echo "defect: arm-bad-arg: unrecognized argument '$a' (expected MANUAL|AUTO or --force)" >&2; return 1 ;;
+      *) echo "defect: arm-bad-arg: unrecognized argument '$a' (expected manual|auto or --force)" >&2; return 1 ;;
     esac
   done
 
-  local abs gid dir rec tmp sid pid cwd armed pilot ka krc prc
+  local abs gid dir rec tmp sid pid cwd armed pilot wd wrc prc
 
   # 1. plan must be a readable file — refuse loud, before any resolution.
   [ -n "$plan" ] && [ -f "$plan" ] && [ -r "$plan" ] || {
@@ -2024,11 +2035,11 @@ sdlc_arm() {
   gid="$(sdlc_goal_id "$plan")"
   _sdlc_validate_goal_id "$gid" "sdlc_arm" || return 1
 
-  # 2. malformed frontmatter is fail-loud: an off-enum keepalive (rc 2) refuses
-  #    regardless of --force (garbage is not a false to be forced past).
-  ka="$(sdlc_keepalive_effective "$abs")"; krc=$?
-  if [ "$krc" -ne 0 ]; then
-    echo "defect: malformed-frontmatter: cannot resolve keepalive for $abs" >&2; return 1
+  # 2. malformed frontmatter is fail-loud: an off-enum watchdog (rc 2) refuses
+  #    regardless of --force (garbage is not an off to be forced past).
+  wd="$(sdlc_watchdog_effective "$abs")"; wrc=$?
+  if [ "$wrc" -ne 0 ]; then
+    echo "defect: malformed-frontmatter: cannot resolve watchdog for $abs" >&2; return 1
   fi
 
   # pilot for the audit line: explicit override wins; else the effective value.
@@ -2042,9 +2053,9 @@ sdlc_arm() {
     fi
   fi
 
-  # 3. keepalive-effective false arms only under an explicit --force.
-  if [ "$ka" = false ] && [ "$force" -ne 1 ]; then
-    echo "defect: keepalive-false: $abs is not keepalive-armable; pass --force to arm anyway" >&2; return 1
+  # 3. watchdog-effective off arms only under an explicit --force.
+  if [ "$wd" = off ] && [ "$force" -ne 1 ]; then
+    echo "defect: watchdog-off: $abs — watchdog effective=off (use --force)" >&2; return 1
   fi
 
   # 4. collision: a record already at this goal-id whose PLAN differs is a

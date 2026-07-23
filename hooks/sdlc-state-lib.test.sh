@@ -929,7 +929,7 @@ ac_w2_ref_deleted() {
   d=$(new_wip_repo); gid="wip-goal-refgone"
   printf 'wip\n' > "$d/untracked.txt"
   snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
-  git -C "$d" update-ref "refs/keepalive/$gid" "$snap"   # anchor the object
+  git -C "$d" update-ref "refs/anchor/$gid" "$snap"   # anchor the object
   git -C "$d" update-ref -d "refs/sdlc-wip/$gid"          # drop only the sdlc-wip ref
   errf=$(mktemp); CLEAN_DIRS+=("$errf")
   sdlc_wip_check "$gid" "$snap" "$d" 2>"$errf"; rc=$?; out=$(cat "$errf")
@@ -3196,23 +3196,23 @@ ac_anchor_branch_valid_unchanged() {
 ac_anchor_branch_valid_unchanged
 
 # ============================================================
-# ===== 4/S1 keepalive: flag resolution + arm/disarm =========
+# ===== 4/S1 watchdog: flag resolution + arm/disarm =========
 # ============================================================
-# Fixtures drive the REAL lib functions (sdlc_keepalive_effective,
+# Fixtures drive the REAL lib functions (sdlc_watchdog_effective,
 # sdlc_pilot_effective, sdlc_arm, sdlc_disarm) against planted plan
 # files + a fresh fake $HOME (goals dir + audit log live under it).
 
-# write_plan <path> <scale> [keepalive] [pilot] — emit a plan with a
-# frontmatter block. Empty keepalive/pilot arg ⇒ that key is ABSENT
-# (drives the fallback table); a non-true/false or non-MANUAL/AUTO value
+# write_plan <path> <scale> [watchdog] [pilot] — emit a plan with a
+# frontmatter block. Empty watchdog/pilot arg ⇒ that key is ABSENT
+# (drives the fallback table); a non-on/off or non-manual/auto value
 # is an off-enum fixture.
 write_plan() {
-  local path="$1" scale="$2" ka="${3:-}" pilot="${4:-}"
+  local path="$1" scale="$2" wd="${3:-}" pilot="${4:-}"
   mkdir -p "$(dirname "$path")" 2>/dev/null
   {
     echo "---"
     echo "scale: $scale"
-    [ -n "$ka" ] && echo "keepalive: $ka"
+    [ -n "$wd" ] && echo "watchdog: $wd"
     [ -n "$pilot" ] && echo "pilot: $pilot"
     echo "---"
     echo ""
@@ -3226,69 +3226,81 @@ poker_audit() { printf '%s/.claude/sdlc-poker-audit.log' "$HOME"; }
 goals_reg() { printf '%s/.claude/sdlc-goals/%s' "$HOME" "$1"; }
 
 echo ""
-echo "=== 4/S1-G1: effective-flag grid (keepalive/pilot × scale × presence) ==="
+echo "=== 4/S1-G1: effective-flag grid (watchdog/pilot × scale × presence) ==="
 ac_s1_effgrid() {
   new_state_dir
   local scale p out rc
-  # --- keepalive: explicit true/false is scale-independent; absent →
-  #     continuous:true, task/wave/epic:false (fallback table) ---
+  # --- watchdog: explicit on/off is scale-independent; absent →
+  #     continuous:on, task/wave/epic:off (fallback table) ---
   for scale in continuous task wave epic; do
-    write_plan "$HOME/p-$scale-t.plan.md" "$scale" true
-    out=$(sdlc_keepalive_effective "$HOME/p-$scale-t.plan.md"); rc=$?
-    assert_eq "keepalive explicit true ($scale) → true" "true" "$out"
-    assert_eq "keepalive explicit true ($scale) → rc 0" "0" "$rc"
+    write_plan "$HOME/p-$scale-t.plan.md" "$scale" on
+    out=$(sdlc_watchdog_effective "$HOME/p-$scale-t.plan.md"); rc=$?
+    assert_eq "watchdog explicit on ($scale) → on" "on" "$out"
+    assert_eq "watchdog explicit on ($scale) → rc 0" "0" "$rc"
 
-    write_plan "$HOME/p-$scale-f.plan.md" "$scale" false
-    out=$(sdlc_keepalive_effective "$HOME/p-$scale-f.plan.md")
-    assert_eq "keepalive explicit false ($scale) → false" "false" "$out"
+    write_plan "$HOME/p-$scale-f.plan.md" "$scale" off
+    out=$(sdlc_watchdog_effective "$HOME/p-$scale-f.plan.md")
+    assert_eq "watchdog explicit off ($scale) → off" "off" "$out"
 
     write_plan "$HOME/p-$scale-a.plan.md" "$scale"
-    out=$(sdlc_keepalive_effective "$HOME/p-$scale-a.plan.md")
+    out=$(sdlc_watchdog_effective "$HOME/p-$scale-a.plan.md")
     if [ "$scale" = continuous ]; then
-      assert_eq "keepalive absent (continuous) → true (fallback)" "true" "$out"
+      assert_eq "watchdog absent (continuous) → on (fallback)" "on" "$out"
     else
-      assert_eq "keepalive absent ($scale) → false (fallback)" "false" "$out"
+      assert_eq "watchdog absent ($scale) → off (fallback)" "off" "$out"
     fi
   done
 
-  # --- pilot: explicit MANUAL/AUTO scale-independent; absent →
-  #     continuous:AUTO, else MANUAL ---
-  write_plan "$HOME/pp-man.plan.md" wave "" MANUAL
+  # --- pilot: explicit manual/auto scale-independent; absent →
+  #     continuous:auto, else manual ---
+  write_plan "$HOME/pp-man.plan.md" wave "" manual
   out=$(sdlc_pilot_effective "$HOME/pp-man.plan.md"); rc=$?
-  assert_eq "pilot explicit MANUAL → MANUAL" "MANUAL" "$out"
-  assert_eq "pilot explicit MANUAL → rc 0" "0" "$rc"
-  write_plan "$HOME/pp-auto.plan.md" task "" AUTO
+  assert_eq "pilot explicit manual → manual" "manual" "$out"
+  assert_eq "pilot explicit manual → rc 0" "0" "$rc"
+  write_plan "$HOME/pp-auto.plan.md" task "" auto
   out=$(sdlc_pilot_effective "$HOME/pp-auto.plan.md")
-  assert_eq "pilot explicit AUTO → AUTO" "AUTO" "$out"
+  assert_eq "pilot explicit auto → auto" "auto" "$out"
   for scale in continuous task wave epic; do
     write_plan "$HOME/pp-$scale-a.plan.md" "$scale"
     out=$(sdlc_pilot_effective "$HOME/pp-$scale-a.plan.md")
     if [ "$scale" = continuous ]; then
-      assert_eq "pilot absent (continuous) → AUTO (fallback)" "AUTO" "$out"
+      assert_eq "pilot absent (continuous) → auto (fallback)" "auto" "$out"
     else
-      assert_eq "pilot absent ($scale) → MANUAL (fallback)" "MANUAL" "$out"
+      assert_eq "pilot absent ($scale) → manual (fallback)" "manual" "$out"
     fi
   done
 
-  # --- off-enum pilot → rc 2 + stderr names the bad value (never guess) ---
+  # --- off-enum pilot → rc 2 + stderr names the bad value (never guess);
+  #     legacy uppercase MANUAL is now off-enum (KA-R16 lowercase contract) ---
   write_plan "$HOME/pp-bad.plan.md" wave "" SEMI
   out=$(sdlc_pilot_effective "$HOME/pp-bad.plan.md" 2>/dev/null); rc=$?
   assert_eq "pilot off-enum → rc 2" "2" "$rc"
   local err
   err=$(sdlc_pilot_effective "$HOME/pp-bad.plan.md" 2>&1 1>/dev/null)
   assert_contains "pilot off-enum → stderr names the bad value" "SEMI" "$err"
+  write_plan "$HOME/pp-upper.plan.md" wave "" MANUAL
+  out=$(sdlc_pilot_effective "$HOME/pp-upper.plan.md" 2>/dev/null); rc=$?
+  assert_eq "pilot legacy uppercase MANUAL → rc 2 (off-enum)" "2" "$rc"
 
-  # --- off-enum keepalive → rc 2 + stderr (symmetric fail-loud) ---
+  # --- off-enum watchdog → rc 2 + stderr (symmetric fail-loud) ---
   write_plan "$HOME/pk-bad.plan.md" wave "maybe"
-  out=$(sdlc_keepalive_effective "$HOME/pk-bad.plan.md" 2>/dev/null); rc=$?
-  assert_eq "keepalive off-enum → rc 2" "2" "$rc"
-  err=$(sdlc_keepalive_effective "$HOME/pk-bad.plan.md" 2>&1 1>/dev/null)
-  assert_contains "keepalive off-enum → stderr names the bad value" "maybe" "$err"
+  out=$(sdlc_watchdog_effective "$HOME/pk-bad.plan.md" 2>/dev/null); rc=$?
+  assert_eq "watchdog off-enum → rc 2" "2" "$rc"
+  err=$(sdlc_watchdog_effective "$HOME/pk-bad.plan.md" 2>&1 1>/dev/null)
+  assert_contains "watchdog off-enum → stderr names the bad value" "maybe" "$err"
+
+  # --- a plan still carrying the pre-rename flag key → rc 2 + stderr
+  #     "renamed to watchdog:" (never a silent fallthrough to fallback) ---
+  { echo "---"; echo "scale: wave"; echo "keep${_none:-}alive: true"; echo "---"; } > "$HOME/pk-stale.plan.md"
+  out=$(sdlc_watchdog_effective "$HOME/pk-stale.plan.md" 2>/dev/null); rc=$?
+  assert_eq "watchdog stale pre-rename key → rc 2" "2" "$rc"
+  err=$(sdlc_watchdog_effective "$HOME/pk-stale.plan.md" 2>&1 1>/dev/null)
+  assert_contains "watchdog stale key → stderr says renamed to watchdog:" "renamed to watchdog:" "$err"
 
   # --- unreadable/missing plan → rc 1 + empty stdout (both fns) ---
-  out=$(sdlc_keepalive_effective "$HOME/does-not-exist.plan.md" 2>/dev/null); rc=$?
-  assert_eq "keepalive missing plan → rc 1" "1" "$rc"
-  assert_eq "keepalive missing plan → empty stdout" "" "$out"
+  out=$(sdlc_watchdog_effective "$HOME/does-not-exist.plan.md" 2>/dev/null); rc=$?
+  assert_eq "watchdog missing plan → rc 1" "1" "$rc"
+  assert_eq "watchdog missing plan → empty stdout" "" "$out"
   out=$(sdlc_pilot_effective "$HOME/does-not-exist.plan.md" 2>/dev/null); rc=$?
   assert_eq "pilot missing plan → rc 1" "1" "$rc"
   assert_eq "pilot missing plan → empty stdout" "" "$out"
@@ -3301,12 +3313,12 @@ ac_s1_arm_roundtrip() {
   new_state_dir
   local plan out rc rec
   plan="$HOME/plans/mywave.plan.md"
-  write_plan "$plan" wave true       # keepalive:true task/wave/epic → armable
+  write_plan "$plan" wave on         # watchdog:on task/wave/epic → armable
   export SDLC_ARM_SESSION_ID="sid-fixture-1"
   export SDLC_ARM_PID="31337"
 
   out=$(sdlc_arm "$plan"); rc=$?
-  assert_eq "arm keepalive:true wave → rc 0" "0" "$rc"
+  assert_eq "arm watchdog:on wave → rc 0" "0" "$rc"
   assert_eq "arm → stdout is the goal-id" "mywave" "$out"
 
   rec="$(goals_reg mywave)"
@@ -3324,16 +3336,16 @@ ac_s1_arm_roundtrip() {
 
   # audit line follows the poker's audit_line convention (<iso> <gid> <event>
   # <detail>): the ARM <gid> <plan> pilot=<p> content lands as
-  # "<iso> mywave ARM <plan> pilot=MANUAL" (pilot falls back to MANUAL for wave).
+  # "<iso> mywave ARM <plan> pilot=manual" (pilot falls back to manual for wave).
   local audit; audit="$(cat "$(poker_audit)" 2>/dev/null)"
-  assert_contains "arm → audit ARM line present" "mywave ARM $plan pilot=MANUAL" "$audit"
+  assert_contains "arm → audit ARM line present" "mywave ARM $plan pilot=manual" "$audit"
 
   unset SDLC_ARM_SESSION_ID SDLC_ARM_PID
 
   # --- atomicity: injected write failure leaves NO record behind ---
   new_state_dir
   plan="$HOME/plans/atom.plan.md"
-  write_plan "$plan" wave true
+  write_plan "$plan" wave on
   # plant the goals dir as a regular FILE so mkdir/write into it fails
   mkdir -p "$HOME/.claude"
   : > "$HOME/.claude/sdlc-goals"
@@ -3356,22 +3368,22 @@ ac_s1_arm_refusals() {
   assert_contains "arm missing plan → defect on stderr" "defect:" "$err"
   assert_true "arm missing plan → no record" test ! -e "$(goals_reg ghost)"
 
-  # --- malformed frontmatter: off-enum keepalive → refuse, no record ---
+  # --- malformed frontmatter: off-enum watchdog → refuse, no record ---
   plan="$HOME/plans/badka.plan.md"; write_plan "$plan" wave "maybe"
   err=$(sdlc_arm "$plan" 2>&1 1>/dev/null); rc=$?
-  assert_nonzero "arm off-enum keepalive → nonzero" "$rc"
-  assert_contains "arm off-enum keepalive → defect on stderr" "defect:" "$err"
-  assert_true "arm off-enum keepalive → no record" test ! -e "$(goals_reg badka)"
+  assert_nonzero "arm off-enum watchdog → nonzero" "$rc"
+  assert_contains "arm off-enum watchdog → defect on stderr" "defect:" "$err"
+  assert_true "arm off-enum watchdog → no record" test ! -e "$(goals_reg badka)"
 
   # --- malformed frontmatter: off-enum pilot (no override) → refuse ---
-  plan="$HOME/plans/badpilot.plan.md"; write_plan "$plan" wave true SEMI
+  plan="$HOME/plans/badpilot.plan.md"; write_plan "$plan" wave on SEMI
   err=$(sdlc_arm "$plan" 2>&1 1>/dev/null); rc=$?
   assert_nonzero "arm off-enum pilot (no override) → nonzero" "$rc"
   assert_true "arm off-enum pilot → no record" test ! -e "$(goals_reg badpilot)"
   # an explicit pilot-override bypasses the unreadable plan pilot (still armable)
-  out=$(sdlc_arm "$plan" AUTO 2>/dev/null); rc=$?
+  out=$(sdlc_arm "$plan" auto 2>/dev/null); rc=$?
   assert_eq "arm off-enum pilot WITH override → rc 0" "0" "$rc"
-  assert_contains "override → audit pilot=AUTO" "badpilot ARM $plan pilot=AUTO" "$(cat "$(poker_audit)")"
+  assert_contains "override → audit pilot=auto" "badpilot ARM $plan pilot=auto" "$(cat "$(poker_audit)")"
 
   # --- collision: existing record, different PLAN → refuse, record intact ---
   new_state_dir
@@ -3382,7 +3394,7 @@ ac_s1_arm_refusals() {
     echo "PLAN=/somewhere/else/foo.plan.md"; echo "CWD=/x"; echo "SESSION_ID=sid-old"
     echo "PID=999"; echo "ARMED_AT=2026-07-20T00:00:00Z"
   } > "$rec"
-  plan="$HOME/a/foo.plan.md"; write_plan "$plan" wave true
+  plan="$HOME/a/foo.plan.md"; write_plan "$plan" wave on
   err=$(sdlc_arm "$plan" 2>&1 1>/dev/null); rc=$?
   assert_nonzero "arm collision (gid taken, different PLAN) → nonzero" "$rc"
   assert_contains "arm collision → defect on stderr" "defect:" "$err"
@@ -3391,27 +3403,27 @@ ac_s1_arm_refusals() {
   # --- same-plan re-arm is idempotent (not a collision) ---
   new_state_dir
   export SDLC_ARM_SESSION_ID="sid-fixture-3"; export SDLC_ARM_PID="4242"
-  plan="$HOME/plans/rearm.plan.md"; write_plan "$plan" wave true
+  plan="$HOME/plans/rearm.plan.md"; write_plan "$plan" wave on
   sdlc_arm "$plan" >/dev/null 2>&1
   out=$(sdlc_arm "$plan" 2>/dev/null); rc=$?
   assert_eq "arm same-plan re-arm → rc 0 (idempotent)" "0" "$rc"
 
-  # --- keepalive-effective=false → refuse unless --force ---
+  # --- watchdog-effective=off → refuse unless --force ---
   new_state_dir
   export SDLC_ARM_SESSION_ID="sid-fixture-3"; export SDLC_ARM_PID="4242"
-  plan="$HOME/plans/kf.plan.md"; write_plan "$plan" wave false   # explicit false
+  plan="$HOME/plans/kf.plan.md"; write_plan "$plan" wave off   # explicit off
   err=$(sdlc_arm "$plan" 2>&1 1>/dev/null); rc=$?
-  assert_nonzero "arm keepalive:false without --force → nonzero" "$rc"
-  assert_contains "arm keepalive:false → defect names force" "force" "$err"
-  assert_true "arm keepalive:false without --force → no record" test ! -e "$(goals_reg kf)"
+  assert_nonzero "arm watchdog:off without --force → nonzero" "$rc"
+  assert_contains "arm watchdog:off → defect names force" "force" "$err"
+  assert_true "arm watchdog:off without --force → no record" test ! -e "$(goals_reg kf)"
   out=$(sdlc_arm "$plan" --force 2>/dev/null); rc=$?
-  assert_eq "arm keepalive:false WITH --force → rc 0" "0" "$rc"
+  assert_eq "arm watchdog:off WITH --force → rc 0" "0" "$rc"
   assert_true "arm --force → record written" test -f "$(goals_reg kf)"
 
-  # absent-flag task/wave/epic is also keepalive-false → same refusal
+  # absent-flag task/wave/epic is also watchdog-off → same refusal
   plan="$HOME/plans/absk.plan.md"; write_plan "$plan" epic
   rc=0; sdlc_arm "$plan" >/dev/null 2>&1 || rc=$?
-  assert_nonzero "arm absent-keepalive epic (fallback false) without --force → nonzero" "$rc"
+  assert_nonzero "arm absent-watchdog epic (fallback off) without --force → nonzero" "$rc"
 
   unset SDLC_ARM_SESSION_ID SDLC_ARM_PID
 }
@@ -3425,7 +3437,7 @@ ac_s1_disarm() {
   export SDLC_ARM_SESSION_ID="sid-fixture-4"; export SDLC_ARM_PID="4242"
 
   # --- present → removed + audit DISARM <gid> <reason>, default reason manual ---
-  plan="$HOME/plans/dw.plan.md"; write_plan "$plan" wave true
+  plan="$HOME/plans/dw.plan.md"; write_plan "$plan" wave on
   sdlc_arm "$plan" >/dev/null 2>&1
   rec="$(goals_reg dw)"
   assert_true "disarm setup → record present" test -f "$rec"
@@ -3443,7 +3455,7 @@ ac_s1_disarm() {
   # --- custom reason surfaces in the audit line ---
   new_state_dir
   export SDLC_ARM_SESSION_ID="sid-fixture-4"; export SDLC_ARM_PID="4242"
-  plan="$HOME/plans/dc.plan.md"; write_plan "$plan" wave true
+  plan="$HOME/plans/dc.plan.md"; write_plan "$plan" wave on
   sdlc_arm "$plan" >/dev/null 2>&1
   out=$(sdlc_disarm dc complete); rc=$?
   assert_eq "disarm custom reason → rc 0" "0" "$rc"
