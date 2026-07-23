@@ -1612,6 +1612,7 @@ MANAGED_HOOKS=(
   "PreToolUse|Write|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "SessionStart|startup|~/.claude/hooks/memory-cleanup.sh"
+  "SessionStart|resume|~/.claude/hooks/sdlc-attach-announce.sh"
   "UserPromptSubmit||~/.claude/hooks/terseness-reminder.sh"
   "Stop||~/.claude/hooks/context-spend.sh"
 )
@@ -2413,6 +2414,11 @@ print_report() {
   fi
   echo "    • Pencil: install the app from pencil.dev — its MCP server registers"
   echo "      itself with Claude Code whenever the app is running"
+  if grep -q '^BIONIC_NTFY_TOPIC=' "${HOME}/.claude/cron.env" 2>/dev/null; then
+    echo "    • Phone notifications require the ntfy app subscribed to your"
+    echo "      topic (see cron.env) — receipt is not verifiable from this"
+    echo "      machine; ask Claude to send a test."
+  fi
   if [ "$n_bad" -gt 0 ]; then
     echo ""
     echo "  Exit code: 1 (failures present)"
