@@ -40,6 +40,14 @@ trap cleanup EXIT
 # (it globs by session id), so the harness must derive the realistic path itself.
 SDLC_POKER_LIB=1 . "$POKER"
 
+# Also source the durable-state lib directly, so the slice-4/4 fixtures can plant
+# batons/ledgers (baton_write/baton_path/ledger_path/ledger_applied) INDEPENDENTLY
+# of whether the poker sources it — the RED phase must be able to plant these
+# before the integration lands. The poker's own sourcing (the integration under
+# test) is exercised by run_poker children below, never by this line.
+STATE_LIB="$(cd "$(dirname "$0")" && pwd)/sdlc-state-lib.sh"
+. "$STATE_LIB"
+
 # ---------- fresh fake HOME + PATH-shadowed stub claude / curl ----------
 # The claude stub serves canned `agents --json` registry states AND records the
 # POKE (argv → claude-calls.log, stdin → claude-stdin.log, cwd → claude-cwd.log),
@@ -260,6 +268,34 @@ arm_goal() {  # <gid> <cur> <cwd> <sid> <pid> <age> [event] [wake]
   plant_plan "$plan" "$cur" "$wake"
   plant_goal "$gid" "$plan" "$cwd" "$sid" "$pid"
   plant_transcript_age "$cwd" "$sid" "$age" "$ev"
+}
+
+# ---------- slice 4/4: baton / ledger fixture helpers ----------
+# plant_baton <gid> <next-action> — a well-formed baton for the goal under
+# SDLC_STATE_DIR (= $HOME/.claude/sdlc-state, the poker child's view too). Grammar
+# gates only bite ledger-position/wip/base-commit, so `none` for all three is a
+# clean baton; last-commit is ungated free text. next-action rides verbatim.
+plant_baton() {  # <gid> <next-action>
+  baton_write "$1" "/plan.md" "/cwd" "wave-x" "epic-x" \
+    "$(printf '%040d' 1)" 4 "sid-x" none "$2" none none >/dev/null 2>&1
+}
+
+# The transcript-mtime anchor the ladder derives for a planted goal (epoch of the
+# session transcript file). Mirrors the poker's own transcript_mtime_key input.
+anchor_of() {  # <cwd> <sid>
+  file_mtime "$(real_project_dir "$1")/$2.jsonl"
+}
+
+# A ledger line of a given type+key present for a goal? (decision/effect membership)
+ledger_line_has() {  # <gid> <type> <effect-key>
+  awk -F'\t' -v t="$2" -v k="$3" '$4==t && $5==k {f=1} END{exit(f?0:1)}' \
+    "$(ledger_path "$1")" 2>/dev/null
+}
+
+# Count effect-type rung lines for a goal (episode progress, anchor-agnostic).
+rung_effect_count() {  # <gid>
+  awk -F'\t' -v g="$1" '$4=="effect" && $5 ~ ("^rung:" g ":") {n++} END{print n+0}' \
+    "$(ledger_path "$1")" 2>/dev/null || echo 0
 }
 
 # ADR-002 Decision 2a: signal wrappers sanctioned on the poker's own poke
@@ -1062,6 +1098,230 @@ e4() {
   assert_contains "4/1-4 DEGRADE-fallback: DEGRADE audit line emitted" "ge4degrade DEGRADE" "$(audit_of)"
 }
 e4
+
+# ============================================================
+# ==========  slice 4/4 — ladder dispatcher (rungs 1-3)  =====
+# The poker sources sdlc-state-lib.sh and drives the ledger-clocked revival
+# ladder for baton-bearing DEAD/IDLE_STALLED/WEDGED goals: poke → re-prompt →
+# observe, each exactly-once through sdlc_effect_run under the pinned rung key.
+# Rollover/human audit LADDER-DEFER (4/5 scope). Fail-closed on every defect.
+
+echo "=== 4/4-lib-fence: lib sourced under set -u → a full poll completes, exit 0, no unbound-var crash ==="
+L0() {
+  new_home
+  local cwd; cwd=$(real_cwd lf)
+  arm_goal glf 4 "$cwd" sid-glf 2147483647 300 user   # DEAD
+  stub_registry_state absent
+  plant_baton glf "next"
+  run_poker
+  assert_eq "4/4-lib-fence poll exits 0 with the lib sourced" 0 "$POKER_EXIT"
+  TOTAL=$((TOTAL + 1))
+  if ! printf '%s' "$POKER_OUT" | grep -qi "unbound variable"; then
+    pass "4/4-lib-fence no unbound-variable crash with the lib sourced under set -u"
+  else fail "4/4-lib-fence unbound variable" "$POKER_OUT"; fi
+}
+L0
+
+echo "=== 4/4-batonless: DEAD without a baton → legacy poke_capped, byte-identical (no ladder) ==="
+L1() {
+  new_home
+  local cwd; cwd=$(real_cwd bl)
+  arm_goal gbl 4 "$cwd" sid-gbl 2147483647 300 user   # DEAD, NO baton planted
+  stub_registry_state absent
+  run_poker
+  assert_contains "4/4-batonless DEAD → legacy poke fired" "resume sid-gbl" "$(claude_calls)"
+  assert_eq "4/4-batonless DEAD → zero ladder ledger entries" "0" \
+    "$(count_lines "$(cat "$(ledger_path gbl)" 2>/dev/null || true)" "rung:")"
+  assert_true "4/4-batonless DEAD → legacy poke-state file written (proves legacy path ran)" \
+    test -f "$(state_dir)/gbl.poke"
+}
+L1
+
+echo "=== 4/4-poke: DEAD+baton fresh → poke:1; re-poll (same mtime) → poke:2; each decision+effect under the pinned key ==="
+L2() {
+  new_home
+  local cwd; cwd=$(real_cwd pk)
+  arm_goal gpk 4 "$cwd" sid-gpk 2147483647 300 user   # DEAD (dead pid + registry absent)
+  stub_registry_state absent
+  plant_baton gpk "next"
+  local anc; anc=$(anchor_of "$cwd" sid-gpk)
+  run_poker
+  assert_eq "4/4-poke poll1 fired exactly one poke" "1" "$(count_lines "$(claude_calls)" "resume sid-gpk")"
+  assert_true "4/4-poke poll1 decision journaled under rung:gpk:poke:<anchor>:1" \
+    ledger_line_has gpk decision "rung:gpk:poke:$anc:1"
+  assert_true "4/4-poke poll1 effect journaled under rung:gpk:poke:<anchor>:1" \
+    ledger_line_has gpk effect "rung:gpk:poke:$anc:1"
+  run_poker
+  assert_eq "4/4-poke poll2 (same mtime) → poke:2 (two pokes total)" "2" "$(count_lines "$(claude_calls)" "resume sid-gpk")"
+  assert_true "4/4-poke poll2 effect journaled under rung:gpk:poke:<anchor>:2" \
+    ledger_line_has gpk effect "rung:gpk:poke:$anc:2"
+}
+L2
+
+echo "=== 4/4-reprompt: poke rung exhausted (cap 2) → re-prompt:1 carrying the baton next-action verbatim via stdin ==="
+L3() {
+  new_home
+  local cwd; cwd=$(real_cwd rp)
+  arm_goal grp 4 "$cwd" sid-grp 2147483647 300 user   # DEAD
+  stub_registry_state absent
+  plant_baton grp "REBUILD-THE-INDEX-VERBATIM"
+  local anc; anc=$(anchor_of "$cwd" sid-grp)
+  run_poker; run_poker            # poke:1, poke:2 (cap reached)
+  run_poker                       # poke exhausted → re-prompt:1
+  assert_true "4/4-reprompt re-prompt:1 effect journaled under the re-prompt rung key" \
+    ledger_line_has grp effect "rung:grp:re-prompt:$anc:1"
+  assert_contains "4/4-reprompt child prompt carries the baton next-action verbatim (via stdin)" \
+    "REBUILD-THE-INDEX-VERBATIM" "$(claude_stdin)"
+  assert_contains "4/4-reprompt child prompt carries the fixed project-silent preamble" \
+    "carry out the recorded next action" "$(claude_stdin)"
+}
+L3
+
+echo "=== 4/4-wedged: WEDGED+baton → observe journaled (no child spawned) ==="
+L4() {
+  new_home
+  local cwd; cwd=$(real_cwd wg)
+  arm_goal gwg 4 "$cwd" sid-gwg "$$" 600 busy   # busy + 600s + live pid → WEDGED
+  stub_registry_state busy sid-gwg
+  plant_baton gwg "next"
+  local anc; anc=$(anchor_of "$cwd" sid-gwg)
+  run_poker
+  assert_eq "4/4-wedged observe → NO poke child spawned" "" "$(claude_calls)"
+  assert_true "4/4-wedged observe effect journaled under rung:gwg:observe:<anchor>:1" \
+    ledger_line_has gwg effect "rung:gwg:observe:$anc:1"
+}
+L4
+
+echo "=== 4/4-silence: IDLE / BUSY / GATED with a baton → zero ladder entries ==="
+L5() {
+  # BUSY (fresh + registry busy)
+  new_home
+  local cwd; cwd=$(real_cwd sb)
+  arm_goal gsb 4 "$cwd" sid-gsb 4242 60 busy
+  stub_registry_state busy sid-gsb
+  plant_baton gsb "next"
+  run_poker
+  assert_eq "4/4-silence BUSY → zero rung ledger entries" "0" \
+    "$(count_lines "$(cat "$(ledger_path gsb)" 2>/dev/null || true)" "rung:")"
+  # IDLE (fresh + registry idle)
+  new_home
+  cwd=$(real_cwd si)
+  arm_goal gsi 4 "$cwd" sid-gsi 4242 60 user
+  stub_registry_state idle sid-gsi
+  plant_baton gsi "next"
+  run_poker
+  assert_eq "4/4-silence IDLE → zero rung ledger entries" "0" \
+    "$(count_lines "$(cat "$(ledger_path gsi)" 2>/dev/null || true)" "rung:")"
+  # GATED (wake note)
+  new_home
+  cwd=$(real_cwd sg)
+  arm_goal gsg 4 "$cwd" sid-gsg 4242 60 user 1
+  stub_registry_state busy sid-gsg
+  plant_baton gsg "next"
+  run_poker
+  assert_eq "4/4-silence GATED → zero rung ledger entries" "0" \
+    "$(count_lines "$(cat "$(ledger_path gsg)" 2>/dev/null || true)" "rung:")"
+}
+L5
+
+echo "=== 4/4-progress: transcript progress (mtime advances, session revives) → old anchor abandoned, nothing journaled ==="
+L6() {
+  new_home
+  local cwd; cwd=$(real_cwd pg)
+  arm_goal gpg 4 "$cwd" sid-gpg 2147483647 300 user   # DEAD → poke:1
+  stub_registry_state absent
+  plant_baton gpg "next"
+  run_poker
+  assert_eq "4/4-progress poll1: one rung effect (poke:1)" "1" "$(rung_effect_count gpg)"
+  # progress: the session revives — registry idle + a FRESH transcript (<180 → IDLE)
+  stub_registry_state idle sid-gpg
+  plant_transcript_age "$cwd" sid-gpg 30 user
+  run_poker
+  assert_eq "4/4-progress poll2 (revived → IDLE): no new poke fired" "1" \
+    "$(count_lines "$(claude_calls)" "resume sid-gpg")"
+  assert_eq "4/4-progress poll2: old-anchor episode abandoned, still exactly one rung effect" "1" \
+    "$(rung_effect_count gpg)"
+}
+L6
+
+echo "=== 4/4-one-action: a single poll journals exactly ONE rung decision + ONE rung effect for a goal (AS-C5) ==="
+L7() {
+  new_home
+  local cwd; cwd=$(real_cwd oa)
+  arm_goal goa 4 "$cwd" sid-goa 2147483647 300 user   # DEAD
+  stub_registry_state absent
+  plant_baton goa "next"
+  run_poker
+  assert_eq "4/4-one-action exactly one rung decision this poll" "1" \
+    "$(awk -F'\t' '$4=="decision" && $5 ~ /^rung:goa:/' "$(ledger_path goa)" | wc -l | tr -d ' ')"
+  assert_eq "4/4-one-action exactly one rung effect this poll" "1" \
+    "$(awk -F'\t' '$4=="effect" && $5 ~ /^rung:goa:/' "$(ledger_path goa)" | wc -l | tr -d ' ')"
+}
+L7
+
+echo "=== 4/4-failclosed-baton: malformed baton → LADDER-SKIP audit + goal skipped; a SECOND goal still processed ==="
+L8() {
+  new_home
+  local cwd1 cwd2; cwd1=$(real_cwd fb1); cwd2=$(real_cwd fb2)
+  arm_goal gbad 4 "$cwd1" sid-gbad 2147483647 300 user    # DEAD, malformed baton
+  arm_goal ggood 4 "$cwd2" sid-ggood 2147483647 300 user  # DEAD, clean baton
+  stub_registry_state absent
+  mkdir -p "$(baton_goal_dir gbad)"
+  printf 'goal-id: gbad\n' > "$(baton_path gbad)"          # missing required keys → malformed
+  plant_baton ggood "next"
+  local anc; anc=$(anchor_of "$cwd2" sid-ggood)
+  run_poker
+  assert_eq "4/4-failclosed-baton poker exit 0" 0 "$POKER_EXIT"
+  assert_contains "4/4-failclosed-baton LADDER-SKIP audited for the malformed baton" \
+    "gbad LADDER-SKIP" "$(audit_of)"
+  assert_eq "4/4-failclosed-baton the malformed-baton goal was NOT poked (no legacy fall-through)" "0" \
+    "$(count_lines "$(claude_calls)" "resume sid-gbad")"
+  assert_true "4/4-failclosed-baton the SECOND goal was still laddered (poke:1 effect journaled)" \
+    ledger_line_has ggood effect "rung:ggood:poke:$anc:1"
+}
+L8
+
+echo "=== 4/4-failclosed-ledger: corrupt ledger → LADDER-DEFECT audit + goal skipped; a SECOND goal still processed ==="
+L9() {
+  new_home
+  local cwd1 cwd2; cwd1=$(real_cwd fl1); cwd2=$(real_cwd fl2)
+  arm_goal gcl 4 "$cwd1" sid-gcl 2147483647 300 user
+  arm_goal gok 4 "$cwd2" sid-gok 2147483647 300 user
+  stub_registry_state absent
+  plant_baton gcl "next"
+  plant_baton gok "next"
+  mkdir -p "$(baton_goal_dir gcl)"
+  # a chain-inconsistent ledger line (bogus digest) → ledger_verify in-place-edit
+  printf 'ts\t1\tdeadbeef\teffect\trung:gcl:poke:100:1\tx\n' > "$(ledger_path gcl)"
+  local anc; anc=$(anchor_of "$cwd2" sid-gok)
+  run_poker
+  assert_eq "4/4-failclosed-ledger poker exit 0" 0 "$POKER_EXIT"
+  assert_contains "4/4-failclosed-ledger LADDER-DEFECT audited for the corrupt ledger" \
+    "gcl LADDER-DEFECT" "$(audit_of)"
+  assert_eq "4/4-failclosed-ledger the corrupt-ledger goal was NOT poked" "0" \
+    "$(count_lines "$(claude_calls)" "resume sid-gcl")"
+  assert_true "4/4-failclosed-ledger the SECOND goal was still laddered (poke:1 effect journaled)" \
+    ledger_line_has gok effect "rung:gok:poke:$anc:1"
+}
+L9
+
+echo "=== 4/4-degrade: lib unavailable → LADDER-DEGRADE audit + baton goal falls back to legacy poke (no ladder) ==="
+L10() {
+  new_home
+  local cwd; cwd=$(real_cwd dg)
+  arm_goal gdg 4 "$cwd" sid-gdg 2147483647 300 user   # DEAD, baton present
+  stub_registry_state absent
+  plant_baton gdg "next"
+  export SDLC_STATE_LIB="$HOME/nonexistent-state-lib.sh"   # poker child cannot source the lib
+  run_poker
+  unset SDLC_STATE_LIB
+  assert_eq "4/4-degrade poker exit 0 with the lib unavailable" 0 "$POKER_EXIT"
+  assert_contains "4/4-degrade LADDER-DEGRADE audited once" "LADDER-DEGRADE" "$(audit_of)"
+  assert_contains "4/4-degrade the baton goal fell back to a legacy poke" "resume sid-gdg" "$(claude_calls)"
+  assert_eq "4/4-degrade no ladder ledger entries were journaled" "0" \
+    "$(count_lines "$(cat "$(ledger_path gdg)" 2>/dev/null || true)" "rung:")"
+}
+L10
 
 # ============================================================
 echo ""

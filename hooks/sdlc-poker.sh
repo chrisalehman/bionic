@@ -47,6 +47,13 @@ POKE_CLAUDE_BIN="${POKE_CLAUDE_BIN:-/opt/homebrew/bin/claude}"
 # quoted so the backticked markers stay literal (no command substitution).
 POKE_PROMPT='continue per the plan'"'"'s `## SDLC State`; if blocked on a decision, write a `## Wake Note` and stop'
 
+# Fixed re-prompt preamble (D-C3, 4/4): the ladder's rung-2 resume carries an
+# EXPLICIT directive = this project-silent preamble + the baton's `next-action`
+# value verbatim (appended by the dispatcher). Same transport/timeout as the
+# generic poke; carries NO approval vocabulary (banned-token list, C4). Single-
+# quoted so the backticked markers stay literal.
+REPROMPT_PREAMBLE='resume per the plan'"'"'s `## SDLC State` and carry out the recorded next action; if blocked on a decision, write a `## Wake Note` and stop. Next action:'
+
 # Registration globals — bound unconditionally so set -u never trips on a path
 # that reads them before load_registration runs (hooks-rules.md).
 REG_PLAN=""; REG_CWD=""; REG_SESSION_ID=""; REG_PID=""; REG_ARMED_AT=""
@@ -61,6 +68,22 @@ REG_PLAN=""; REG_CWD=""; REG_SESSION_ID=""; REG_PID=""; REG_ARMED_AT=""
 # _XSCRIPT_SCANS counts actual (non-memoized) scans — test-observable only,
 # read nowhere in production logic.
 _XSCRIPT_SID=""; _XSCRIPT_PATH=""; _XSCRIPT_SCANS=0
+
+# ---------- first poker↔lib integration (D-C9, slice 4/4) ----------
+# The poker sources sdlc-state-lib.sh — the durable-state substrate the revival
+# ladder derives from (baton_parse, sdlc_ladder_next, sdlc_effect_run, the rung
+# key grammar). Path resolved relative to THIS file (${BASH_SOURCE[0]}), so it
+# works whether the poker is run as a child or sourced by the fixture suite; the
+# override seam SDLC_STATE_LIB lets a suite point it elsewhere (or at a bad path,
+# to prove the degrade). The poker keeps `set -u`; the lib is written WITHOUT it
+# and its `${x:-}` guards are the net (D-C9). A sourcing failure is fail-closed:
+# SDLC_LIB_OK stays 0, every goal takes the baton-less legacy path, the poll
+# never dies (main audits the degrade once).
+SDLC_STATE_LIB="${SDLC_STATE_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/sdlc-state-lib.sh}"
+SDLC_LIB_OK=0
+if [ -f "$SDLC_STATE_LIB" ] && . "$SDLC_STATE_LIB" 2>/dev/null; then
+  SDLC_LIB_OK=1
+fi
 
 # ---------- path helpers (read $HOME at call time) ----------
 goals_dir()   { printf '%s/.claude/sdlc-goals' "$HOME"; }
@@ -379,8 +402,11 @@ poke_tail() {  # $1=outfile
     | awk '{ n=length($0); print (n>120 ? substr($0, n-119) : $0) }'
 }
 
-do_poke() {  # $1=goal-id ; uses REG_CWD, REG_SESSION_ID
-  local gid="$1" rc outf tail
+do_poke() {  # $1=goal-id [$2=prompt] ; uses REG_CWD, REG_SESSION_ID
+  # $2 is the resume prompt; unset → the generic POKE_PROMPT (byte-identical to
+  # the legacy one-arg call). The ladder's re-prompt rung (D-C3) passes a
+  # baton-derived directive here through this same transport + timeout.
+  local gid="$1" prompt="${2:-$POKE_PROMPT}" rc outf tail
   outf=$(mktemp 2>/dev/null) || outf=""
   # The poke runs under a wall-clock cap (C4 amendment B): a hung `claude --resume`
   # would otherwise hold the poker's OWN lock forever — every later poll sees a
@@ -390,7 +416,7 @@ do_poke() {  # $1=goal-id ; uses REG_CWD, REG_SESSION_ID
   # child dies (rc 128+14 = 142). Killing our OWN timed-out child is process
   # hygiene, not the no-force verb (which protects TARGET sessions); the DAG makes
   # a killed poke turn resumable.
-  ( cd "$REG_CWD" 2>/dev/null && printf '%s' "$POKE_PROMPT" \
+  ( cd "$REG_CWD" 2>/dev/null && printf '%s' "$prompt" \
       | perl -e 'alarm shift @ARGV; exec @ARGV' "$POKE_TIMEOUT" \
           "$POKE_CLAUDE_BIN" --resume "$REG_SESSION_ID" -p --dangerously-skip-permissions \
   ) >"${outf:-/dev/null}" 2>&1
@@ -498,12 +524,109 @@ notify_and_cache() {  # $1=gid $2=event $3=body $4=prev $5=state
   do_notify "$gid" "$event" "$body" && cache_state "$gid" "$state"
 }
 
+# ---------- D-C1/D-C2/D-C3: revival ladder dispatcher (slice 4/4) ----------
+# The poker's ledger-clocked revival ladder. For a DEAD/IDLE_STALLED/WEDGED goal
+# WITH a parseable baton, the pure oracle sdlc_ladder_next (lib) decides the ONE
+# next rung from the goal's ledger + the current transcript-mtime anchor; the
+# poker EXECUTES at most that one action this poll, each through sdlc_effect_run
+# under the pinned key `rung:<goal-id>:<rung-name>:<anchor>:<n>` (D-C2, minted by
+# the lib's single-source _sdlc_rung_key). Rungs 1-3 (poke/re-prompt/observe) are
+# this slice; `rollover`/`human` audit LADDER-DEFER and take no action (4/5's
+# scope). Fail-closed throughout (D-C9/J1): a malformed baton, a bad anchor, an
+# oracle defect, or a corrupt ledger → one audit line + skip of THIS goal; the
+# poll continues to the next goal (one bad goal never starves supervision).
+
+# Classifications the ladder governs (baton-bearing). Others keep legacy behavior.
+ladder_applicable() {  # $1=classification
+  case "$1" in DEAD|IDLE_STALLED|WEDGED) return 0 ;; *) return 1 ;; esac
+}
+
+# The rung action is the DISPATCH, not the child's exit: do_poke always audits
+# its own resume rc, and a nonzero resume is a completed attempt (heritage: a
+# failed poke still counts, C4). Returning 0 lets sdlc_effect_run journal the
+# effect line so the attempt is recorded — the crash window (poker death between
+# decision and effect) is the ONLY thing that must leave the effect unjournaled.
+ladder_poke_child()     { do_poke "$1"; return 0; }        # generic poke prompt
+ladder_reprompt_child() { do_poke "$1" "$2"; return 0; }   # baton-directed prompt
+
+# Execute ONE rung's effect under the pinned key (D-C2). Called at most once per
+# goal per poll (AS-C5). Journal-before-act via sdlc_effect_run.
+ladder_rung_effect() {  # $1=gid $2=anchor $3=token(<rung>:<n>) $4=rung-name
+  local gid="$1" anchor="$2" token="$3" rung="$4" n key prompt
+  n="${token##*:}"
+  key="$(_sdlc_rung_key "$gid" "$rung" "$anchor" "$n" 2>/dev/null)" || {
+    audit_line "$gid" LADDER-DEFECT "cannot mint rung key for '$token' (anchor $anchor)"; return 0; }
+  case "$rung" in
+    poke)
+      sdlc_effect_run "$gid" "$key" "ladder poke attempt $n (anchor $anchor)" -- \
+        ladder_poke_child "$gid" \
+        || audit_line "$gid" LADDER-DEFECT "effect-run failed for $key" ;;
+    re-prompt)
+      # BATON_NEXT_ACTION was set by ladder_dispatch's own baton_parse (the
+      # oracle's parse ran in a subshell and cannot have clobbered it).
+      prompt="$REPROMPT_PREAMBLE $BATON_NEXT_ACTION"
+      sdlc_effect_run "$gid" "$key" "ladder re-prompt attempt $n (anchor $anchor)" -- \
+        ladder_reprompt_child "$gid" "$prompt" \
+        || audit_line "$gid" LADDER-DEFECT "effect-run failed for $key" ;;
+    observe)
+      # Journal-only observation: no child, no side effect. --replay-safe so a
+      # crash-window re-drive re-runs the harmless `true` instead of parking.
+      sdlc_effect_run "$gid" "$key" "ladder observe attempt $n (anchor $anchor)" --replay-safe -- true \
+        || audit_line "$gid" LADDER-DEFECT "effect-run failed for $key" ;;
+  esac
+  return 0
+}
+
+# ladder_dispatch <gid> <classification> — the per-goal ladder step. The caller
+# has already confirmed SDLC_LIB_OK, ladder_applicable, and a baton FILE present.
+ladder_dispatch() {  # $1=gid $2=classification
+  local gid="$1" state="$2" bpath anchor token rc
+  bpath="$(baton_path "$gid")"
+  # Parse-gate (fail-closed): a baton file that does not parse is a defect, not a
+  # baton-less goal — skip the goal, never fall through to a legacy poke.
+  if ! baton_parse "$bpath" 2>/dev/null; then
+    audit_line "$gid" LADDER-SKIP "malformed baton: $bpath"
+    return 0
+  fi
+  # Anchor = transcript-mtime epoch (the memo path, D-C8). No transcript → no
+  # episode clock → fail-closed skip.
+  anchor="$(transcript_mtime_key)"
+  case "$anchor" in
+    ''|*[!0-9]*) audit_line "$gid" LADDER-SKIP "no transcript-mtime anchor for the ladder episode"; return 0 ;;
+  esac
+  token="$(sdlc_ladder_next "$gid" "$state" "$anchor" 2>/dev/null)"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    audit_line "$gid" LADDER-DEFECT "sdlc_ladder_next rc=$rc ($state, anchor $anchor)"
+    return 0
+  fi
+  case "$token" in
+    poke:*)          ladder_rung_effect "$gid" "$anchor" "$token" poke ;;
+    re-prompt:*)     ladder_rung_effect "$gid" "$anchor" "$token" re-prompt ;;
+    observe:*)       ladder_rung_effect "$gid" "$anchor" "$token" observe ;;
+    rollover|human)  audit_line "$gid" LADDER-DEFER "$token" ;;   # 4/5's scope — no action
+    none)            : ;;                                          # no ladder action this poll
+    *)               audit_line "$gid" LADDER-DEFECT "unrecognized ladder token '$token'" ;;
+  esac
+  return 0
+}
+
 # Per the C3 table: COMPLETE/GATED/WEDGED notify-on-transition (never poke; gate
 # and wedge supremacy); DEAD/IDLE_STALLED poke under the cap; BUSY logs SKIP-BUSY;
 # IDLE is left alone. Non-notify states advance the cache directly so a later
 # transition INTO a notify state is detected.
+#
+# 4/4 ladder pre-branch: a baton-bearing DEAD/IDLE_STALLED/WEDGED goal is owned
+# by the revival ladder (ledger-clocked rungs), which supersedes the legacy
+# poke_capped / WEDGE-notify path for that goal. Goals WITHOUT a baton — and
+# every goal when the lib is unavailable — keep the legacy path byte-identical
+# (AS-C4 grandfather). GATED/COMPLETE/BUSY/IDLE never ladder.
 dispatch_actions() {  # $1=gid $2=state $3=prev
   local gid="$1" state="$2" prev="$3"
+  if [ "$SDLC_LIB_OK" = "1" ] && ladder_applicable "$state" && [ -f "$(baton_path "$gid")" ]; then
+    ladder_dispatch "$gid" "$state"
+    cache_state "$gid" "$state"      # advance the dedupe cache (transition detection)
+    return 0
+  fi
   case "$state" in
     COMPLETE)
       notify_and_cache "$gid" COMPLETE "goal $gid complete (charter close / current:10)" "$prev" "$state" ;;
@@ -575,6 +698,9 @@ main() {
   env_self_source
   mkdir -p "$(goals_dir)" "$(status_dir)" "$(state_dir)" 2>/dev/null
   acquire_lock || exit 0             # live overlap → silent, normal
+  # D-C9 fail-closed degrade: no lib → no ladder for any goal (baton-less legacy
+  # everywhere). Audit once per poll so the degrade is observable, never silent.
+  [ "$SDLC_LIB_OK" = "1" ] || audit_line "-" LADDER-DEGRADE "sdlc-state-lib unavailable ($SDLC_STATE_LIB); baton-less legacy for all goals"
   process_goals
   release_lock
   exit 0
