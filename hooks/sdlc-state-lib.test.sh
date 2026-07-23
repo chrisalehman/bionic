@@ -2741,6 +2741,12 @@ journal_rung() { sdlc_effect_run "$1" "rung:$1:$2:$3:$4" "rung $2 attempt $4" --
 journal_rung_decision() { ledger_append "$1" decision "rung:$1:$2:$3:$4" "rung $2 intent $4" >/dev/null 2>&1; }
 # baton_written_at <gid> — the CURRENT baton generation key (BATON_WRITTEN_AT).
 baton_written_at() { baton_parse "$(baton_path "$1")" >/dev/null 2>&1; printf '%s' "$BATON_WRITTEN_AT"; }
+# journal_restart <gid> <anchor> <n> — a COMPLETED (applied) restart attempt
+# (decision+effect through the real effect guard, as sdlc_restart_vehicle does).
+journal_restart() { sdlc_effect_run "$1" "restart:$1:$2:$3" "restart $3" -- true >/dev/null 2>&1; }
+# journal_restart_decision <gid> <anchor> <n> — a decision-only restart line
+# (the crash window / an aborted restart whose intent stands, no effect landed).
+journal_restart_decision() { ledger_append "$1" decision "restart:$1:$2:$3" "restart intent $3" >/dev/null 2>&1; }
 # journal_spawn_applied <gid> <written-at> — the spawn effect for a generation.
 journal_spawn_applied() { sdlc_effect_run "$1" "spawn:$1:$2" "spawned" -- true >/dev/null 2>&1; }
 # journal_spawn_decision <gid> <written-at> — decision-only spawn line (indeterminate).
@@ -2820,23 +2826,28 @@ ac_ladder_crash_window() {
 }
 ac_ladder_crash_window
 
-echo "--- IDLE_STALLED at 2 poke + 2 re-prompt (spawn unapplied) → human; rollover STRUCTURALLY unreachable for this class ---"
-ac_ladder_idle_stalled_human() {
+echo "--- 4/S5 IDLE_STALLED at 2 poke + 2 re-prompt → restart:1 (KA-R6 amendment: was human); rollover STRUCTURALLY unreachable ---"
+ac_ladder_idle_stalled_restart() {
   new_state_dir
   local gid="ladder-idle-stalled" a="$LADDER_ANCHOR" out
   write_healthy "$gid" >/dev/null                    # spawn key would be unapplied → DEAD would rollover
   journal_rung "$gid" poke "$a" 1; journal_rung "$gid" poke "$a" 2
   journal_rung "$gid" re-prompt "$a" 1; journal_rung "$gid" re-prompt "$a" 2
   out="$(sdlc_ladder_next "$gid" IDLE_STALLED "$a" 2>/dev/null)"
-  assert_eq "4/3 IDLE_STALLED after 2+2 → human" "human" "$out"
+  assert_eq "4/S5 IDLE_STALLED after 2+2 → restart:1 (RESTART rung now reachable)" "restart:1" "$out"
   TOTAL=$((TOTAL + 1))
   if [ "$out" = "rollover" ]; then
-    fail "4/3 IDLE_STALLED NEVER emits rollover (session alive)" "got rollover"
+    fail "4/S5 IDLE_STALLED NEVER emits rollover (session alive; restart kills first)" "got rollover"
   else
-    pass "4/3 IDLE_STALLED NEVER emits rollover (session alive)"
+    pass "4/S5 IDLE_STALLED NEVER emits rollover (session alive; restart kills first)"
   fi
+  # restart cap 2 → restart:1 → restart:2 → restart-exhausted (crash-loop breaker).
+  journal_restart "$gid" "$a" 1
+  assert_eq "4/S5 IDLE_STALLED after restart:1 applied → restart:2" "restart:2" "$(sdlc_ladder_next "$gid" IDLE_STALLED "$a" 2>/dev/null)"
+  journal_restart "$gid" "$a" 2
+  assert_eq "4/S5 IDLE_STALLED after 2 restarts (cap) → restart-exhausted" "restart-exhausted" "$(sdlc_ladder_next "$gid" IDLE_STALLED "$a" 2>/dev/null)"
 }
-ac_ladder_idle_stalled_human
+ac_ladder_idle_stalled_restart
 
 echo "--- IDLE_STALLED fresh → poke:1 (shares the automated rungs with DEAD) ---"
 ac_ladder_idle_stalled_fresh() {
@@ -2846,19 +2857,36 @@ ac_ladder_idle_stalled_fresh() {
 }
 ac_ladder_idle_stalled_fresh
 
-echo "--- WEDGED: observe:1 → observe:2 → observe:3 (cap 3) → human ---"
-ac_ladder_wedged() {
+echo "--- 4/S5 WEDGED enters RESTART directly (no nudge rungs): restart:1 → restart:2 → restart-exhausted (cap 2) ---"
+ac_ladder_wedged_restart() {
   new_state_dir
   local gid="ladder-wedged" a="$LADDER_ANCHOR"
-  assert_eq "4/3 WEDGED fresh → observe:1" "observe:1" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
-  journal_rung "$gid" observe "$a" 1
-  assert_eq "4/3 WEDGED after 1 observe → observe:2" "observe:2" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
-  journal_rung "$gid" observe "$a" 2
-  assert_eq "4/3 WEDGED after 2 observe → observe:3" "observe:3" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
-  journal_rung "$gid" observe "$a" 3
-  assert_eq "4/3 WEDGED after 3 observe (cap) → human" "human" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  # Corroborated wedge bypasses poke/re-prompt entirely — a busy target is never
+  # poked (KA-R6). The very first ladder step is the RESTART rung.
+  assert_eq "4/S5 WEDGED fresh → restart:1 (direct, no observe/nudge)" "restart:1" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  # And it does NOT emit a poke/re-prompt (poking a busy vehicle stays banned).
+  TOTAL=$((TOTAL + 1))
+  case "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)" in
+    poke:*|re-prompt:*|observe:*) fail "4/S5 WEDGED never nudges/observes (goes straight to restart)" ;;
+    *) pass "4/S5 WEDGED never nudges/observes (goes straight to restart)" ;;
+  esac
+  journal_restart "$gid" "$a" 1
+  assert_eq "4/S5 WEDGED after restart:1 applied → restart:2" "restart:2" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  journal_restart "$gid" "$a" 2
+  assert_eq "4/S5 WEDGED after 2 restarts (cap) → restart-exhausted" "restart-exhausted" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
 }
-ac_ladder_wedged
+ac_ladder_wedged_restart
+
+echo "--- 4/S5 RESTART crash window: a decision-only restart line under the current anchor → defect effect-indeterminate ---"
+ac_ladder_restart_crash_window() {
+  new_state_dir
+  local gid="ladder-restart-crash" a="$LADDER_ANCHOR" err rc
+  journal_restart_decision "$gid" "$a" 1     # restart intent, no effect (aborted / crash)
+  err="$(sdlc_ladder_next "$gid" WEDGED "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/S5 WEDGED restart decision-only returns nonzero" "$rc"
+  assert_contains "4/S5 WEDGED restart decision-only names effect-indeterminate" "effect-indeterminate" "$err"
+}
+ac_ladder_restart_crash_window
 
 echo "--- ANCHOR RESET: attempts under anchor A stay history; called with anchor B → poke:1 (fresh episode) ---"
 ac_ladder_anchor_reset() {
@@ -2920,15 +2948,15 @@ ac_ladder_cap_rung() {
 }
 ac_ladder_cap_rung
 
-ac_ladder_cap_observe() {
+ac_ladder_cap_restart() {
   new_state_dir
-  local gid="ladder-cap-obs" a="$LADDER_ANCHOR"
-  local SDLC_OBSERVE_CAP=1
-  assert_eq "4/3 observe cap=1 fresh → observe:1" "observe:1" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
-  journal_rung "$gid" observe "$a" 1
-  assert_eq "4/3 observe cap=1 after 1 observe → human" "human" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  local gid="ladder-cap-restart" a="$LADDER_ANCHOR"
+  local SDLC_RESTART_CAP=1
+  assert_eq "4/S5 restart cap=1 fresh WEDGED → restart:1" "restart:1" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  journal_restart "$gid" "$a" 1
+  assert_eq "4/S5 restart cap=1 after 1 restart → restart-exhausted" "restart-exhausted" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
 }
-ac_ladder_cap_observe
+ac_ladder_cap_restart
 
 ac_ladder_cap_garbled() {
   new_state_dir
@@ -3099,17 +3127,16 @@ ac_anchor_critic_repro() {
 }
 ac_anchor_critic_repro
 
-echo "--- WEDGED churn no longer evades the observe cap (tuple stable → cap reached → human) ---"
+echo "--- 4/S5 WEDGED churn no longer evades the restart cap (tuple stable → cap reached → restart-exhausted) ---"
 ac_anchor_wedged_cap() {
   anchor_fixture "anc-wedged" 4
   local gid="anc-wedged" a
   a="$(anchor_of_lib "$gid")"
-  journal_rung "$gid" observe "$a" 1
-  journal_rung "$gid" observe "$a" 2
-  journal_rung "$gid" observe "$a" 3
+  journal_restart "$gid" "$a" 1
+  journal_restart "$gid" "$a" 2
   assert_eq "wedged-cap anchor stable despite transcript churn" "$a" "$(anchor_of_lib "$gid")"
-  assert_eq "wedged-cap observe cap reached despite churn → human" \
-    "human" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  assert_eq "wedged-cap restart cap reached despite churn → restart-exhausted" \
+    "restart-exhausted" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
 }
 ac_anchor_wedged_cap
 
@@ -3470,6 +3497,238 @@ ac_s1_disarm() {
   unset SDLC_ARM_SESSION_ID SDLC_ARM_PID
 }
 ac_s1_disarm
+
+# ============================================================
+# 4/S5: sdlc_restart_vehicle — the kill-and-revive primitive (KA-R6/R13).
+# Ordering is journal-proven (RED case 1); the kill is stubbed (SDLC_KILL_CMD)
+# and the registry is a MUTABLE file the kill stub rewrites to simulate the
+# vehicle dying. Every case reuses the proven happy-spawn fixture (setup_complete
+# current 4 → not-complete → proceed) so the UNCHANGED sdlc_successor_spawn runs.
+# ============================================================
+echo ""
+echo "=== 4/S5: sdlc_restart_vehicle — ordering, abort, exactly-once, DEAD-skip, attended-refuse, cap ==="
+
+RESTART_ANCHOR=a1b2c3d4
+# make_kill_stub <order-log> <regfile> <absent-json-file> <repo> <gid> <dies:yes|no>
+# — a SIGTERM stand-in: records "kill <pid> snap=<present|absent>" (proving the WIP
+# snapshot already ran) and, when <dies>=yes, rewrites <regfile> to the absent
+# registry (the vehicle leaves the registry). When <dies>=no the vehicle stays
+# present (the won't-die abort path).
+make_kill_stub() {
+  local order="$1" regfile="$2" absent="$3" repo="$4" gid="$5" dies="$6" stub
+  stub="$(mktemp)"; CLEAN_DIRS+=("$stub")
+  {
+    printf '#!/bin/bash\n'
+    printf 'snap=absent\n'
+    printf 'git -C %q rev-parse --verify --quiet %q >/dev/null 2>&1 && snap=present\n' "$repo" "refs/sdlc-wip/$gid"
+    printf 'printf "kill %%s snap=%%s\\n" "$1" "$snap" >> %q\n' "$order"
+    [ "$dies" = yes ] && printf 'cat %q > %q\n' "$absent" "$regfile"
+    printf 'exit 0\n'
+  } > "$stub"
+  chmod +x "$stub"
+  printf '%s' "$stub"
+}
+# make_spawn_stub_ordered <counter> <order-log> — like make_spawn_stub but also
+# appends "spawn" to the shared order log (kill-before-spawn ordering proof).
+make_spawn_stub_ordered() {
+  local counter="$1" order="$2" stub
+  stub="$(mktemp)"; CLEAN_DIRS+=("$stub")
+  printf '#!/bin/bash\nprintf x >> %q\nprintf "\\n" >> %q\nprintf "spawn\\n" >> %q\n' \
+    "$counter" "$counter" "$order" > "$stub"
+  chmod +x "$stub"
+  printf '%s' "$stub"
+}
+# plant_restart_reg <gid> <cwd> <sid> <pid> — the 5-field consent record the
+# primitive reads for SID/PID/CWD.
+plant_restart_reg() {
+  local gid="$1" cwd="$2" sid="$3" pid="$4" dir f
+  dir="$HOME/.claude/sdlc-goals"; mkdir -p "$dir"; f="$dir/$gid"
+  {
+    printf 'PLAN=%s\n' "$PLAN_STUB"
+    printf 'CWD=%s\n' "$cwd"
+    printf 'SESSION_ID=%s\n' "$sid"
+    printf 'PID=%s\n' "$pid"
+    printf 'ARMED_AT=2026-07-23T00:00:00Z\n'
+  } > "$f"
+}
+# reg_json helpers (array shape jq reads .status from).
+reg_present_null() { printf '[{"pid":%s,"kind":"interactive","sessionId":"%s"}]\n' "$2" "$1"; }
+reg_present_busy() { printf '[{"pid":%s,"kind":"interactive","sessionId":"%s","status":"busy"}]\n' "$2" "$1"; }
+reg_absent()       { printf '[{"pid":1,"kind":"interactive","sessionId":"decoy","status":"idle"}]\n'; }
+restart_audit()    { cat "$(poker_audit)" 2>/dev/null; }
+
+# --- CASE 1: ORDERING — intent-journal precedes snapshot precedes SIGTERM precedes spawn ---
+ac_restart_ordering() {
+  new_state_dir
+  local gid="restart-order" a="$RESTART_ANCHOR" sid="sid-restart-order" rc snap
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  # Pin the git commit date so the pre-snapshot and the restart's OWN re-snapshot
+  # (same tree) mint an IDENTICAL sha — otherwise a second-boundary between them
+  # moves refs/sdlc-wip and sdlc_wip_check reports wip-drift (a real coupling flagged
+  # for review: the restart snapshot re-seats the ref the baton's wip names).
+  local -x GIT_AUTHOR_DATE="@1700000000 +0000" GIT_COMMITTER_DATE="@1700000000 +0000"
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"       # current 4 → not-complete → spawn proceeds
+  printf 'uncommitted\n' > "$d/wip-scratch.txt"          # untracked WIP → snapshot has real work to capture
+  snap="$(sdlc_wip_snapshot "$gid" "$d")"                # the WIP the restart preserves; baton references it
+  write_complete_baton "$gid" "$d" 4 "$snap"             # so reconcile clean-triages the preserved tree, not drift
+  plant_restart_reg "$gid" "$d" "$sid" 999999
+  local order counter regf absentf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); absentf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$absentf")
+  reg_present_null "$sid" 999999 > "$regf"; reg_absent > "$absentf"
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" yes)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_eq "4/S5 restart happy exits 0" "0" "$rc"
+  local lp; lp="$(ledger_path "$gid")"
+  assert_true "4/S5 restart intent DECISION journaled under restart:<gid>:<anchor>:1" \
+    awk -F'\t' -v k="restart:$gid:$a:1" '$4=="decision" && $5==k{f=1} END{exit(f?0:1)}' "$lp"
+  assert_true "4/S5 restart EFFECT journaled (success) under restart:<gid>:<anchor>:1" \
+    awk -F'\t' -v k="restart:$gid:$a:1" '$4=="effect" && $5==k{f=1} END{exit(f?0:1)}' "$lp"
+  assert_true "4/S5 WIP snapshot ref created BEFORE the kill" \
+    test -n "$(git -C "$d" rev-parse --verify --quiet "refs/sdlc-wip/$gid" || true)"
+  assert_contains "4/S5 kill saw the snapshot already present (snapshot precedes SIGTERM)" "snap=present" "$(cat "$order")"
+  assert_eq "4/S5 order log = kill then spawn (SIGTERM precedes spawn)" "kill spawn" \
+    "$(awk '{print $1}' "$order" | tr '\n' ' ' | sed 's/ *$//')"
+  assert_eq "4/S5 successor spawned exactly once" "1" "$(spawn_counter "$counter")"
+  assert_contains "4/S5 RESTART audited (killed=1)" "RESTART" "$(restart_audit)"
+}
+ac_restart_ordering
+
+# --- CASE 2: kill-refuses-to-die → RESTART-ABORT, NO spawn ---
+ac_restart_abort_wontdie() {
+  new_state_dir
+  local gid="restart-wontdie" a="$RESTART_ANCHOR" sid="sid-restart-wontdie" rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0 SDLC_RESTART_KILL_TRIES=2
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "$sid" 999998
+  local order counter regf absentf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); absentf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$absentf")
+  reg_present_null "$sid" 999998 > "$regf"; reg_absent > "$absentf"
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" no)"   # never dies
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_nonzero "4/S5 won't-die restart returns nonzero" "$rc"
+  assert_eq "4/S5 won't-die → NO successor spawned" "0" "$(spawn_counter "$counter")"
+  assert_contains "4/S5 won't-die → RESTART-ABORT audited" "RESTART-ABORT" "$(restart_audit)"
+  assert_true "4/S5 won't-die → NO spawn in the order log (never spawned beside a live vehicle)" \
+    test -z "$(grep -c spawn "$order" 2>/dev/null | grep -v '^0$')"
+}
+ac_restart_abort_wontdie
+
+# --- CASE 3: exactly-once / fork-safety — a replayed restart never double-spawns ---
+ac_restart_exactly_once() {
+  new_state_dir
+  local gid="restart-once" a="$RESTART_ANCHOR" sid="sid-restart-once"
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "$sid" 999997
+  local order counter regf absentf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); absentf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$absentf")
+  reg_present_null "$sid" 999997 > "$regf"; reg_absent > "$absentf"
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" yes)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1
+  assert_eq "4/S5 first restart spawned once" "1" "$(spawn_counter "$counter")"
+  # Replay: baton generation unchanged → the inner spawn's exactly-once (spawn key)
+  # refuses a second launch even though the restart ordinal advances.
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1
+  assert_eq "4/S5 replayed restart did NOT double-spawn (fork-safe)" "1" "$(spawn_counter "$counter")"
+}
+ac_restart_exactly_once
+
+# --- CASE 10: DEAD vehicle (registry-absent) → skip the kill cleanly, snapshot→spawn ---
+ac_restart_dead_skips_kill() {
+  new_state_dir
+  local gid="restart-dead" a="$RESTART_ANCHOR" sid="sid-restart-dead" rc snap
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  local -x GIT_AUTHOR_DATE="@1700000000 +0000" GIT_COMMITTER_DATE="@1700000000 +0000"  # deterministic snapshot sha
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  printf 'uncommitted\n' > "$d/wip-scratch.txt"
+  snap="$(sdlc_wip_snapshot "$gid" "$d")"
+  write_complete_baton "$gid" "$d" 4 "$snap"
+  plant_restart_reg "$gid" "$d" "$sid" 999996
+  local order counter regf absentf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); absentf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$absentf")
+  reg_absent > "$regf"; reg_absent > "$absentf"                 # sid absent from the start → DEAD
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" no)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_eq "4/S5 DEAD-vehicle restart exits 0" "0" "$rc"
+  assert_true "4/S5 DEAD vehicle → the kill step was SKIPPED (nothing to kill)" \
+    test -z "$(grep -c kill "$order" 2>/dev/null | grep -v '^0$')"
+  assert_true "4/S5 DEAD vehicle → snapshot still ran (ref present)" \
+    test -n "$(git -C "$d" rev-parse --verify --quiet "refs/sdlc-wip/$gid" || true)"
+  assert_eq "4/S5 DEAD vehicle → successor spawned" "1" "$(spawn_counter "$counter")"
+  assert_contains "4/S5 DEAD vehicle RESTART audited killed=0" "killed=0" "$(restart_audit)"
+}
+ac_restart_dead_skips_kill
+
+# --- KILL-SEAM ASSERTION: a status-non-null (attended) vehicle is NEVER killed ---
+ac_restart_attended_refuse() {
+  new_state_dir
+  local gid="restart-attended" a="$RESTART_ANCHOR" sid="sid-restart-attended" rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "$sid" 999995
+  local order counter regf absentf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); absentf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$absentf")
+  reg_present_busy "$sid" 999995 > "$regf"; reg_absent > "$absentf"   # a LIVE TUI (status busy)
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" yes)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_nonzero "4/S5 attended (status non-null) restart returns nonzero" "$rc"
+  assert_true "4/S5 attended → the KILL SEAM refused (kill stub never invoked)" \
+    test -z "$(grep -c kill "$order" 2>/dev/null | grep -v '^0$')"
+  assert_eq "4/S5 attended → NO successor spawned" "0" "$(spawn_counter "$counter")"
+  assert_contains "4/S5 attended → RESTART-ABORT names the forbidden kill" "kill FORBIDDEN" "$(restart_audit)"
+}
+ac_restart_attended_refuse
+
+# --- CAP: SDLC_RESTART_CAP restarts applied → rc 2 restart-cap ---
+ac_restart_cap() {
+  new_state_dir
+  local gid="restart-cap" a="$RESTART_ANCHOR" sid="sid-restart-cap" err rc
+  local SDLC_REGISTRY_CMD SDLC_RESTART_CAP=2
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "$sid" 999994
+  local regf; regf=$(mktemp); CLEAN_DIRS+=("$regf"); reg_absent > "$regf"
+  SDLC_REGISTRY_CMD="cat $regf"
+  journal_restart "$gid" "$a" 1; journal_restart "$gid" "$a" 2     # cap consumed
+  err="$(sdlc_restart_vehicle "$gid" "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_eq "4/S5 restart cap exhausted → rc 2" "2" "$rc"
+  assert_contains "4/S5 restart cap exhausted names restart-cap" "restart-cap" "$err"
+}
+ac_restart_cap
+
+# --- GUARDS: invalid goal-id / malformed anchor / no registration → loud defect ---
+ac_restart_guards() {
+  new_state_dir
+  local a="$RESTART_ANCHOR" err rc
+  err="$(sdlc_restart_vehicle "bad/goal" "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/S5 invalid goal-id → nonzero" "$rc"
+  assert_contains "4/S5 invalid goal-id names invalid-goal-id" "invalid-goal-id" "$err"
+  err="$(sdlc_restart_vehicle "okgoal" "not-hex" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/S5 malformed anchor → nonzero" "$rc"
+  assert_contains "4/S5 malformed anchor names invalid-anchor" "invalid-anchor" "$err"
+  err="$(sdlc_restart_vehicle "noreg" "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/S5 no registration → nonzero" "$rc"
+  assert_contains "4/S5 no registration names no-registration" "no-registration" "$err"
+}
+ac_restart_guards
 
 # ============================================================
 echo ""

@@ -514,6 +514,39 @@ classify_goal() {  # $1=goal-id $2=registry-json (optional) $3=registry-rc (opti
   esac
 }
 
+# ---------- 4/S5: presence signal (KA-R13 / spec AC-12) ----------
+# goal_presence <registry-json> <registry-rc> → attached|tui-less|degraded for the
+# LOADED goal (uses REG_SESSION_ID). DISTINCT from classify_goal: it reduces the
+# same registry read to the drive-eligibility axis the PRESENCE RULE keys on —
+# "is a live terminal attached?" — never the goal state.
+#   attached — registry status non-null (idle|busy): a live TUI holds the conn.
+#              The presence rule then bars ALL drive verbs regardless of pilot
+#              (never disturb a human; probe Q8: non-null status = live TUI).
+#   tui-less — status null/NOSTATUS (a headless -p vehicle in flight) OR the sid is
+#              absent (dead). The ONLY drivable presence — AUTO's revival/restart
+#              ladder applies here alone.
+#   degraded — registry rc≠0 / no jq / unparseable: a live TUI cannot be DISPROVEN,
+#              so drive is fail-closed to notify-only (the 4/S5 tightening of the
+#              legacy degrade drive, AS-16). Callable with the once-per-poll fetch
+#              (process_goals) or, args omitted, self-fetching (direct-call parity).
+goal_presence() {  # $1=registry-json (optional) $2=registry-rc (optional)
+  local json rc present status
+  if [ "$#" -ge 2 ]; then json="$1"; rc="$2"; else json=$(${SDLC_REGISTRY_CMD:-claude agents --json} 2>/dev/null); rc=$?; fi
+  if [ "$rc" -ne 0 ] || ! command -v jq >/dev/null 2>&1; then echo degraded; return; fi
+  present=$(printf '%s' "$json" | jq -r --arg sid "$REG_SESSION_ID" 'any(.[]; .sessionId==$sid)' 2>/dev/null)
+  case "$present" in
+    true)  : ;;
+    false) echo tui-less; return ;;    # absent from the registry → dead → drivable
+    *)     echo degraded; return ;;    # parse failure → unconfirmable → fail-closed
+  esac
+  status=$(printf '%s' "$json" | jq -r --arg sid "$REG_SESSION_ID" \
+    '[.[] | select(.sessionId==$sid)][0] | .status // "NOSTATUS"' 2>/dev/null)
+  case "$status" in
+    busy|idle) echo attached ;;        # non-null → a live TUI holds the conn
+    *)         echo tui-less ;;        # NOSTATUS (null) → headless in flight
+  esac
+}
+
 # ---------- C8: run discipline ----------
 audit_line() {  # $1=goal-id $2=event $3=detail
   local log; log="$(audit_log)"
@@ -858,6 +891,45 @@ ladder_human() {  # $1=gid $2=anchor $3=classification
   fi
 }
 
+# ---------- 4/S5: RESTART rung (KA-R6 kill-and-revive) ----------
+# The AUTO ladder's kill-and-revive rung, consumed from sdlc_restart_vehicle (lib)
+# AS-IS: the SIGTERM / WIP-snapshot / spawn mechanics + exactly-once + the live-TUI
+# kill-seam refusal all live in the lib, so THIS poker script never invokes a kill
+# (the e09 no-kill-in-poker constitution stays green). The RESTART notification
+# rides HERE (do_notify transport is poker-side). Outcome map:
+#   rc 0 → restart landed → do_notify RESTART (rides the action).
+#   rc≠0 → aborted (attended / won't-die / spawn-refused): sdlc_restart_vehicle
+#          already audited RESTART-ABORT and (for an abort mid-effect) left the
+#          intent standing, which the ladder's restart probe fail-closes to a GATED
+#          park next poll — nothing to drive here.
+ladder_restart() {  # $1=gid $2=anchor $3=token(restart:<n>)
+  local gid="$1" anchor="$2" token="$3" n rc
+  n="${token##*:}"
+  sdlc_restart_vehicle "$gid" "$anchor" >/dev/null 2>&1; rc=$?
+  if [ "$rc" -eq 0 ]; then
+    do_notify "$gid" RESTART "goal $gid RESTART rung=$n — vehicle torn down and a successor spawned (autopilot)"
+  else
+    audit_line "$gid" LADDER-RESTART-ABORT "restart rung=$n aborted (rc=$rc); see the RESTART-ABORT audit line"
+  fi
+  return 0
+}
+
+# The crash-loop breaker (KA-R6): the restart cap is spent → park GATED for a human
+# and a GATED notify RIDES the exhaustion. sdlc_gate_park's own exactly-once park
+# key makes repeat polls idempotent (one Wake Note); provenance is the REGISTRATION
+# plan (D-C5). Park-rc checked (mirrors ladder_human): a failed park is LADDER-DEFECT.
+ladder_restart_exhausted() {  # $1=gid $2=anchor $3=classification
+  local gid="$1" anchor="$2" cls="$3" cap="${SDLC_RESTART_CAP:-2}"
+  if sdlc_gate_park "$gid" "$REG_PLAN" restart-exhausted \
+       "restart cap ($cap) exhausted for $gid ($cls, episode anchor $anchor); automated restarts spent — human decision required" \
+       >/dev/null 2>&1; then
+    audit_line "$gid" LADDER-RESTART-EXHAUSTED "restart cap ($cap) park ($cls, anchor $anchor)"
+    do_notify "$gid" GATED "goal $gid GATED — restart cap ($cap) exhausted ($cls); autopilot stood down, decision required"
+  else
+    audit_line "$gid" LADDER-DEFECT "restart-exhausted park failed to land for $gid ($cls)"
+  fi
+}
+
 # ---------- D-C6: completion latch (slice 4/5) ----------
 # On COMPLETE classification the poker becomes the cron consumer of the spine's
 # completion latch. sdlc_complete_check (consumed AS-IS) verifies the terminal
@@ -939,13 +1011,15 @@ ladder_dispatch() {  # $1=gid $2=classification
     return 0
   fi
   case "$token" in
-    poke:*)          ladder_rung_effect "$gid" "$anchor" "$token" poke ;;
-    re-prompt:*)     ladder_rung_effect "$gid" "$anchor" "$token" re-prompt ;;
-    observe:*)       ladder_rung_effect "$gid" "$anchor" "$token" observe ;;
-    rollover)        ladder_rollover "$gid" ;;                     # spine spawn (D-C4)
-    human)           ladder_human "$gid" "$anchor" "$state" ;;     # terminal park (D-C5)
-    none)            : ;;                                          # no ladder action this poll
-    *)               audit_line "$gid" LADDER-DEFECT "unrecognized ladder token '$token'" ;;
+    poke:*)            ladder_rung_effect "$gid" "$anchor" "$token" poke ;;
+    re-prompt:*)       ladder_rung_effect "$gid" "$anchor" "$token" re-prompt ;;
+    observe:*)         ladder_rung_effect "$gid" "$anchor" "$token" observe ;;
+    restart:*)         ladder_restart "$gid" "$anchor" "$token" ;;              # 4/S5 restart rung
+    restart-exhausted) ladder_restart_exhausted "$gid" "$anchor" "$state" ;;    # 4/S5 crash-loop breaker
+    rollover)          ladder_rollover "$gid" ;;                    # spine spawn (D-C4)
+    human)             ladder_human "$gid" "$anchor" "$state" ;;    # terminal park (D-C5)
+    none)              : ;;                                         # no ladder action this poll
+    *)                 audit_line "$gid" LADDER-DEFECT "unrecognized ladder token '$token'" ;;
   esac
   return 0
 }
@@ -1022,27 +1096,69 @@ dispatch_manual() {  # $1=gid $2=state $3=prev ; uses REG_*
   esac
 }
 
+# dispatch_attended <gid> <state> <prev> <pilot> — the PRESENCE-RULE verb set for a
+# status-non-null (live-TUI) vehicle (KA-R13 / AC-12): notify-only, ZERO drive
+# verbs, regardless of pilot. An AUTO goal the machine WOULD have driven at a stall
+# gets the STALL-ATTACHED nag ("close it to hand back, or drive it yourself");
+# every other case falls to the S4 manual verb set. Never touches a drive seam.
+dispatch_attended() {  # $1=gid $2=state $3=prev $4=pilot
+  local gid="$1" state="$2" prev="$3" pilot="$4"
+  if [ "$pilot" = "auto" ]; then
+    case "$state" in
+      IDLE_STALLED|WEDGED|DEAD)
+        notify_and_cache "$gid" STALL-ATTACHED \
+          "goal $gid $state but a terminal is attached — close it to hand back to autopilot, or drive it yourself" \
+          "$prev" "$state"
+        return 0 ;;
+    esac
+  fi
+  dispatch_manual "$gid" "$state" "$prev"
+}
+
 # Per the C3 table: COMPLETE/GATED/WEDGED notify-on-transition (never poke; gate
 # and wedge supremacy); DEAD/IDLE_STALLED poke under the cap; BUSY logs SKIP-BUSY;
 # IDLE is left alone. Non-notify states advance the cache directly so a later
 # transition INTO a notify state is detected.
 #
-# 4/S4 pilot gate: a manual-pilot goal is notify-only (dispatch_manual) — ZERO
-# drive verbs, resolved once per goal per poll AHEAD of every drive path below so
-# no seam is reachable. Gated on SDLC_LIB_OK so the lib-less degrade keeps its
-# byte-identical legacy behavior (AS-12): a poker that cannot read the pilot
-# resolver falls through to the grandfathered drive path, never to notify-only.
-# Under a readable lib, an unreadable plan/pilot resolves to manual (goal_pilot
-# fail-safe) — the never-disturb direction.
+# 4/S5 PRESENCE RULE (KA-R13 / AC-12): resolved FIRST, ahead of every verb path.
+# A status-non-null vehicle (a live terminal) is an implicit conn claim → ZERO
+# drive verbs regardless of pilot (SKIP-LIVE-TUI + the notify-only dispatch_attended
+# verb set). A registry-degraded goal cannot DISPROVE a live TUI → fail-closed to
+# notify-only (SKIP-DEGRADED + dispatch_manual). BOTH gates are under SDLC_LIB_OK
+# so the lib-less degrade keeps its byte-identical legacy drive (AS-12/AS-15). Only
+# a tui-less (status null / dead) vehicle reaches the drive paths below.
 #
-# 4/4 ladder pre-branch: a baton-bearing DEAD/IDLE_STALLED/WEDGED goal is owned
-# by the revival ladder (ledger-clocked rungs), which supersedes the legacy
-# poke_capped / WEDGE-notify path for that goal. Goals WITHOUT a baton — and
-# every goal when the lib is unavailable — keep the legacy path byte-identical
-# (AS-C4 grandfather). GATED/COMPLETE/BUSY/IDLE never ladder.
-dispatch_actions() {  # $1=gid $2=state $3=prev
-  local gid="$1" state="$2" prev="$3"
-  if [ "$SDLC_LIB_OK" = "1" ] && [ "$(goal_pilot)" = "manual" ]; then
+# 4/S4 pilot gate: a manual-pilot tui-less goal is notify-only (dispatch_manual) —
+# ZERO drive verbs. Under a readable lib an unreadable plan/pilot resolves to manual
+# (goal_pilot fail-safe) — the never-disturb direction.
+#
+# 4/4 ladder pre-branch: a baton-bearing DEAD/IDLE_STALLED/WEDGED goal (AUTO,
+# tui-less) is owned by the revival ladder (ledger-clocked rungs incl. the 4/S5
+# RESTART rung), which supersedes the legacy poke_capped / WEDGE-notify path. Goals
+# WITHOUT a baton — and every goal when the lib is unavailable — keep the legacy
+# path byte-identical (AS-C4 grandfather). GATED/COMPLETE/BUSY/IDLE never ladder.
+dispatch_actions() {  # $1=gid $2=state $3=prev [$4=presence]
+  local gid="$1" state="$2" prev="$3" presence="${4:-tui-less}" pilot="manual"
+  [ "$SDLC_LIB_OK" = "1" ] && pilot="$(goal_pilot)"
+  # PRESENCE RULE first, but ONLY for the drive-eligible (ladder-applicable) states
+  # — DRIVE verbs occur nowhere else, so COMPLETE's structural latch and the
+  # GATED/BUSY/IDLE notifications stay presence-independent (attachment never
+  # blocks recognizing completion or reminding on a gate). A status-non-null
+  # vehicle bars every drive verb regardless of pilot (SKIP-LIVE-TUI); a degraded
+  # registry cannot disprove a live TUI → fail-closed notify-only (SKIP-DEGRADED).
+  if [ "$SDLC_LIB_OK" = "1" ] && ladder_applicable "$state"; then
+    if [ "$presence" = "attached" ]; then
+      audit_line "$gid" SKIP-LIVE-TUI "status non-null (live terminal attached); zero drive verbs ($state, pilot=$pilot)"
+      dispatch_attended "$gid" "$state" "$prev" "$pilot"
+      return 0
+    fi
+    if [ "$presence" = "degraded" ]; then
+      audit_line "$gid" SKIP-DEGRADED "registry unconfirmable; presence undisprovable → notify-only ($state, pilot=$pilot)"
+      dispatch_manual "$gid" "$state" "$prev"
+      return 0
+    fi
+  fi
+  if [ "$SDLC_LIB_OK" = "1" ] && [ "$pilot" = "manual" ]; then
     dispatch_manual "$gid" "$state" "$prev"
     return 0
   fi
@@ -1080,7 +1196,7 @@ dispatch_actions() {  # $1=gid $2=state $3=prev
 
 # ---------- main loop ----------
 process_goals() {
-  local gdir f gid state prev reg_json reg_rc
+  local gdir f gid state prev presence reg_json reg_rc
   gdir="$(goals_dir)"
   [ -d "$gdir" ] || return 0
   # D-C8 e09 fold: ONE registry fetch per poll (was: one per goal via
@@ -1107,9 +1223,10 @@ process_goals() {
     is_armed "$gid" || continue       # watchdog-effective=off → audited SKIP-UNARMED, or MALFORMED-RECORD
     state=$(classify_goal "$gid" "$reg_json" "$reg_rc")
     [ -n "$state" ] || continue       # total-signal-loss degrade → already audited, skip
+    presence=$(goal_presence "$reg_json" "$reg_rc")   # 4/S5 PRESENCE RULE axis (KA-R13)
     prev=$(read_cache "$gid")         # previous classification (transition dedupe)
     write_status "$gid" "$state"
-    dispatch_actions "$gid" "$state" "$prev"   # poke/notify per the C3 no-force table; caches state
+    dispatch_actions "$gid" "$state" "$prev" "$presence"   # presence-gated poke/notify; caches state
   done
 }
 

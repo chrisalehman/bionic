@@ -40,12 +40,15 @@ BATON_REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc
 
 # SDLC_SPINE_CLASSES — the CLOSED set of effect-key classes the supervision
 # spine journals into a goal's ledger (D-C10 / AS-C7): rung/park/spawn/complete/
-# poke. Space-separated so it feeds an awk membership set. SINGLE SOURCE — both
-# sdlc_ledger_position_check (benign-trailing-growth classification) and
+# poke/restart. Space-separated so it feeds an awk membership set. SINGLE SOURCE —
+# both sdlc_ledger_position_check (benign-trailing-growth classification) and
 # sdlc_ladder_anchor (passenger-class tail = highest seq whose class is NOT in
 # this set) read it, so the two can never drift. Extending the set is a recorded
-# decision, never a drive-by (AS-C7).
-SDLC_SPINE_CLASSES="rung park spawn complete poke"
+# decision, never a drive-by (AS-C7). `restart` (4/S5, AS-16) joins the spine so a
+# restart's own journal entries NEVER move the durable-progress anchor — otherwise
+# each restart would reset the very episode it is judged by (the critic-F1
+# observer-effect bug), letting a crash-loop evade the restart cap forever.
+SDLC_SPINE_CLASSES="rung park spawn complete poke restart"
 
 # ---------- path helpers (read SDLC_STATE_DIR/HOME at call time) ----------
 sdlc_state_dir() { printf '%s' "${SDLC_STATE_DIR:-$HOME/.claude/sdlc-state}"; }
@@ -947,9 +950,25 @@ sdlc_ledger_position_check() {
 
   if [ "$position" = "none" ]; then
     if [ -s "$path" ]; then
-      tail_seq=$(tail -n 1 "$path" | awk -F'\t' '{print $2}')
-      echo "defect: ledger-ahead: baton at none, ledger tail $tail_seq" >&2
-      return 1
+      # A `none` baton records no durable ledger position. Trailing SPINE-class
+      # supervision entries (rung/park/spawn/complete/poke/restart) are benign
+      # bookkeeping — the SAME D-C10 exemption the <seq>:<digest> branch grants,
+      # generalized to the none baseline (baton seq 0): a fresh WEDGED goal's
+      # FIRST restart (4/S5) — or a rollover after nudge rungs — journals spine
+      # entries the none baton never saw, and those must not read as stale
+      # passenger work. A non-empty ledger must chain-verify first (corruption is
+      # fail-closed); any PASSENGER-class (or garbled) entry is real work the
+      # baton missed → ledger-ahead (fail-closed).
+      ledger_verify "$goal_id" || return 1
+      passenger=$(awk -F'\t' -v spine="$SDLC_SPINE_CLASSES" '
+        BEGIN { n = split(spine, a, " "); for (i = 1; i <= n; i++) sp[a[i]] = 1 }
+        { cls = $5; sub(/:.*/, "", cls); if (!(cls in sp)) { print "passenger"; exit } }
+      ' "$path")
+      if [ -n "$passenger" ]; then
+        tail_seq=$(tail -n 1 "$path" | awk -F'\t' '{print $2}')
+        echo "defect: ledger-ahead: baton at none, ledger tail $tail_seq" >&2
+        return 1
+      fi
     fi
     return 0
   fi
@@ -1831,9 +1850,52 @@ _sdlc_ladder_rollover() {
   esac
 }
 
+# ---------- 4/S5: RESTART rung key + probe (KA-R6 kill-verb amendment) ----------
+# The corroborated kill-and-revive rung is its OWN effect family, keyed
+# `restart:<gid>:<anchor>:<n>` — a distinct grammar from the poke/re-prompt/observe
+# rung keys (`rung:...`) so the constitutional kill rung is auditably separable in
+# the ledger. Same anchor (8-hex durable-progress digest) + positive-ordinal
+# validation as _sdlc_rung_key, each rejected loud so a malformed key is never
+# minted.
+_sdlc_restart_key() {
+  local gid="${1:-}" anchor="${2:-}" n="${3:-}"
+  if ! printf '%s' "$anchor" | grep -qE '^[0-9a-f]{8}$'; then
+    echo "defect: invalid-anchor: restart anchor must be an 8-hex durable-progress digest, got '${anchor:-<empty>}'" >&2
+    return 1
+  fi
+  if ! printf '%s' "$n" | grep -qE '^[1-9][0-9]*$'; then
+    echo "defect: invalid-ordinal: restart ordinal must be a positive integer, got '${n:-<empty>}'" >&2
+    return 1
+  fi
+  printf 'restart:%s:%s:%s' "$gid" "$anchor" "$n"
+}
+
+# _sdlc_restart_probe <goal-id> <anchor> <cap> — the next OPEN restart ordinal
+# (1..cap) under this anchor, rc 0; prints nothing + rc 2 when the cap is exhausted
+# (all <cap> applied — the ladder parks GATED); a decision-only restart key (crash
+# window / an aborted restart whose intent stands) → loud effect-indeterminate,
+# rc 1 (caller parks). Pure (reads effect state only). Mirrors _sdlc_ladder_rung_probe
+# over the restart key family.
+_sdlc_restart_probe() {
+  local gid="$1" anchor="$2" cap="$3" n key state
+  for (( n = 1; n <= cap; n++ )); do
+    key="$(_sdlc_restart_key "$gid" "$anchor" "$n")" || return 1
+    state="$(sdlc_effect_state "$gid" "$key")" || return 1
+    case "$state" in
+      applied) ;;                                    # completed restart — keep counting
+      indeterminate)
+        echo "defect: effect-indeterminate: $key — journaled restart intent has no recorded effect (crash window / aborted restart)" >&2
+        return 1 ;;
+      *) printf '%s' "$n"; return 0 ;;               # unapplied → this is the next open slot
+    esac
+  done
+  return 2                                           # cap restarts applied → exhausted
+}
+
 sdlc_ladder_next() {
   local goal_id="${1:-}" classification="${2:-}" anchor="${3:-}"
   local rung_cap="${SDLC_RUNG_CAP:-2}" observe_cap="${SDLC_OBSERVE_CAP:-3}"
+  local restart_cap="${SDLC_RESTART_CAP:-2}"
   local lpath next
 
   _sdlc_validate_goal_id "$goal_id" "sdlc_ladder_next" || return 1
@@ -1857,6 +1919,10 @@ sdlc_ladder_next() {
     echo "defect: invalid-cap: SDLC_OBSERVE_CAP must be a positive integer, got '$observe_cap'" >&2
     return 1
   fi
+  if ! printf '%s' "$restart_cap" | grep -qE '^[1-9][0-9]*$'; then
+    echo "defect: invalid-cap: SDLC_RESTART_CAP must be a positive integer, got '$restart_cap'" >&2
+    return 1
+  fi
 
   # Corrupt-ledger fail-closed: a NON-EMPTY ledger must chain-verify before any
   # rung is derived from it. A missing/empty ledger is a fresh episode, NOT a
@@ -1874,15 +1940,24 @@ sdlc_ladder_next() {
       case $? in 0) printf 're-prompt:%s\n' "$next"; return 0 ;; 1) return 1 ;; esac
       _sdlc_ladder_rollover "$goal_id"; return $? ;;
     IDLE_STALLED)
+      # A live-but-TUI-less stall: nudge, then the RESTART rung (KA-R6 amendment —
+      # was `human`; restart is reachable now, single-writer honored because the
+      # restart kills the vehicle first). rollover stays STRUCTURALLY unreachable
+      # (an alive vehicle is never rolled over — the DEAD ladder owns that).
       next="$(_sdlc_ladder_rung_probe "$goal_id" poke "$anchor" "$rung_cap")"
       case $? in 0) printf 'poke:%s\n' "$next"; return 0 ;; 1) return 1 ;; esac
       next="$(_sdlc_ladder_rung_probe "$goal_id" re-prompt "$anchor" "$rung_cap")"
       case $? in 0) printf 're-prompt:%s\n' "$next"; return 0 ;; 1) return 1 ;; esac
-      printf 'human\n'; return 0 ;;
+      next="$(_sdlc_restart_probe "$goal_id" "$anchor" "$restart_cap")"
+      case $? in 0) printf 'restart:%s\n' "$next"; return 0 ;; 1) return 1 ;; esac
+      printf 'restart-exhausted\n'; return 0 ;;
     WEDGED)
-      next="$(_sdlc_ladder_rung_probe "$goal_id" observe "$anchor" "$observe_cap")"
-      case $? in 0) printf 'observe:%s\n' "$next"; return 0 ;; 1) return 1 ;; esac
-      printf 'human\n'; return 0 ;;
+      # Corroborated wedge enters the RESTART rung DIRECTLY — no nudge rungs
+      # (poking a busy target stays constitutionally banned, KA-R6). Cap exhausted
+      # → restart-exhausted (the poker parks GATED + phones, the crash-loop breaker).
+      next="$(_sdlc_restart_probe "$goal_id" "$anchor" "$restart_cap")"
+      case $? in 0) printf 'restart:%s\n' "$next"; return 0 ;; 1) return 1 ;; esac
+      printf 'restart-exhausted\n'; return 0 ;;
     *)
       printf 'none\n'; return 0 ;;
   esac
@@ -2113,4 +2188,130 @@ sdlc_disarm() {
   # absent → audited no-op, rc 1
   _sdlc_audit "$gid" DISARM "$reason no-op-absent"
   return 1
+}
+
+# ============================================================================
+# Watchdog wave (4/S5): AUTO RESTART rung — the kill-and-revive primitive
+# ============================================================================
+# The constitutional amendment to the e09 no-kill poker constitution (KA-R6/R13,
+# ratified 2026-07-23): a kill verb that is AUTO-only, corroboration-gated,
+# capped, and FORBIDDEN on any attended (status-non-null) vehicle. The poker's
+# ladder reaches this rung; the mechanics live here so the poker script itself
+# never invokes a kill (the e09 no-kill-in-poker guard stays green).
+
+# _sdlc_reg_val <record-file> <key> — value of a `KEY=value` line in a consent
+# record. Mirrors sdlc-poker.sh:reg_val (the poker owns the registry; this lib
+# reads the same 5-field record to recover the vehicle's SID/PID/CWD).
+_sdlc_reg_val() {
+  grep -E "^$2=" "$1" 2>/dev/null | head -1 | sed -E "s/^$2=//"
+}
+
+# _sdlc_restart_body <goal-id> <anchor> <n> <cwd> <sid> <pid> — the restart
+# sequence, run AS the sdlc_effect_run command (so the intent decision line is
+# journaled BEFORE this body executes, and the effect line ONLY on a rc-0
+# return). Normative order (RED case 1): WIP snapshot BEFORE any kill → kill-if
+# (registry-present AND status NULL) → bounded re-poll to registry-absent →
+# sdlc_successor_spawn. rc 0 restarted; rc 1 aborted (each abort audited
+# RESTART-ABORT; the intent stands, so the ladder parks GATED next poll).
+_sdlc_restart_body() {
+  local goal_id="$1" anchor="$2" n="$3" cwd="$4" sid="$5" pid="$6"
+  local snaprc reg_out status killed=0 tries delay i gone spawn_out spawn_rc
+
+  # (b) WIP snapshot BEFORE any kill — a clean tree is `none` (rc 0); only a hard
+  #     failure (not-a-repo / snapshot-failed) aborts, before any kill, so no work
+  #     is ever lost to a kill we could not first preserve against.
+  sdlc_wip_snapshot "$goal_id" "$cwd" >/dev/null 2>&1; snaprc=$?
+  if [ "$snaprc" -ne 0 ]; then
+    _sdlc_audit "$goal_id" RESTART-ABORT "wip snapshot failed before kill (rc=$snaprc); no kill, no spawn (rung=$n)"
+    return 1
+  fi
+
+  # (c) kill-if-alive. The registration sid looked up in the registry (literal
+  #     grep, no jq dependency for presence — same as the spawn single-writer gate).
+  reg_out="$(${SDLC_REGISTRY_CMD:-claude agents --json} 2>/dev/null)"
+  if printf '%s' "$reg_out" | grep -qF "$sid"; then
+    # Present → determine status. NULL (headless in-flight, tui-less) is killable;
+    # NON-NULL (a live TUI) is FORBIDDEN — the kill seam's constitutional assertion
+    # (KA-R13: never kill an attended vehicle). jq-absent / unparseable status is
+    # fail-closed to FORBIDDEN (never kill when tui-less cannot be confirmed).
+    if command -v jq >/dev/null 2>&1; then
+      status="$(printf '%s' "$reg_out" | jq -r --arg sid "$sid" \
+        '[.[] | select(.sessionId==$sid)][0] | .status // "NOSTATUS"' 2>/dev/null)"
+      [ -n "$status" ] || status="UNCONFIRMED"
+    else
+      status="UNCONFIRMED"
+    fi
+    if [ "$status" != "NOSTATUS" ]; then
+      _sdlc_audit "$goal_id" RESTART-ABORT "kill FORBIDDEN: sid=$sid status=$status (live terminal / unconfirmable); no kill, no spawn (rung=$n)"
+      return 1
+    fi
+    # tui-less → SIGTERM via the seam, then bounded re-poll until registry-absent.
+    ${SDLC_KILL_CMD:-kill} "$pid" >/dev/null 2>&1 || true
+    tries="${SDLC_RESTART_KILL_TRIES:-6}"; delay="${SDLC_RESTART_KILL_DELAY:-2}"; gone=0
+    for (( i = 1; i <= tries; i++ )); do
+      reg_out="$(${SDLC_REGISTRY_CMD:-claude agents --json} 2>/dev/null)"
+      if ! printf '%s' "$reg_out" | grep -qF "$sid"; then gone=1; break; fi
+      [ "$delay" -gt 0 ] && sleep "$delay"
+    done
+    if [ "$gone" -ne 1 ]; then
+      _sdlc_audit "$goal_id" RESTART-ABORT "vehicle sid=$sid pid=$pid did not die within ${tries} polls; no spawn (rung=$n)"
+      return 1
+    fi
+    killed=1
+  fi
+  # absent from the registry → a DEAD vehicle, nothing to kill → proceed (RED case 10).
+
+  # (d) successor via the UNCHANGED refuse-first + exactly-once spawn pipeline.
+  spawn_out="$(sdlc_successor_spawn "$goal_id" "$cwd" 2>/dev/null)"; spawn_rc=$?
+  if [ "$spawn_rc" -ne 0 ]; then
+    _sdlc_audit "$goal_id" RESTART-ABORT "successor spawn refused (rc=$spawn_rc) after kill=$killed; no restart effect (rung=$n)"
+    return 1
+  fi
+  _sdlc_audit "$goal_id" RESTART "sid=$sid rung=$n killed=$killed successor=$spawn_out (anchor $anchor)"
+  return 0
+}
+
+# sdlc_restart_vehicle <goal-id> <anchor> — ONE capped restart attempt for the
+# episode's DURABLE-PROGRESS anchor. Reads the vehicle's SID/PID/CWD from the
+# consent record, derives n = (applied restarts this anchor) + 1 (capped
+# SDLC_RESTART_CAP=2), and runs _sdlc_restart_body exactly-once under the effect
+# key restart:<gid>:<anchor>:<n> (intent journaled first). rc 0 restarted;
+# rc 1 aborted (attended / won't-die / spawn-refused / snapshot-failed — the
+# intent stands, ladder parks next poll); rc 2 cap-exhausted (the ladder gates
+# this; defended here). The RESTART notification rides in the POKER (do_notify
+# transport stays poker-side); this primitive only audits RESTART.
+sdlc_restart_vehicle() {
+  local goal_id="${1:-}" anchor="${2:-}"
+  local cap="${SDLC_RESTART_CAP:-2}"
+  local rec dir sid pid n nrc key
+
+  _sdlc_validate_goal_id "$goal_id" "sdlc_restart_vehicle" || return 1
+  if ! printf '%s' "$anchor" | grep -qE '^[0-9a-f]{8}$'; then
+    echo "defect: invalid-anchor: sdlc_restart_vehicle anchor must be an 8-hex durable-progress digest, got '${anchor:-<empty>}'" >&2
+    return 1
+  fi
+
+  rec="$(_sdlc_goals_dir)/$goal_id"
+  if [ ! -f "$rec" ]; then
+    echo "defect: no-registration: sdlc_restart_vehicle found no consent record for $goal_id" >&2
+    return 1
+  fi
+  dir="$(_sdlc_reg_val "$rec" CWD)"
+  sid="$(_sdlc_reg_val "$rec" SESSION_ID)"
+  pid="$(_sdlc_reg_val "$rec" PID)"
+  if [ -z "$dir" ] || [ -z "$sid" ]; then
+    echo "defect: malformed-registration: sdlc_restart_vehicle needs CWD + SESSION_ID in $rec" >&2
+    return 1
+  fi
+
+  n="$(_sdlc_restart_probe "$goal_id" "$anchor" "$cap")"; nrc=$?
+  case "$nrc" in
+    0) : ;;
+    2) echo "defect: restart-cap: restart cap ($cap) exhausted for $goal_id (anchor $anchor)" >&2; return 2 ;;
+    *) return 1 ;;   # effect-indeterminate already surfaced loud by the probe
+  esac
+
+  key="$(_sdlc_restart_key "$goal_id" "$anchor" "$n")" || return 1
+  sdlc_effect_run "$goal_id" "$key" "restart rung n=$n (anchor $anchor) sid=$sid" -- \
+    _sdlc_restart_body "$goal_id" "$anchor" "$n" "$dir" "$sid" "$pid"
 }
