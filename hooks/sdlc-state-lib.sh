@@ -1887,3 +1887,90 @@ sdlc_ladder_next() {
       printf 'none\n'; return 0 ;;
   esac
 }
+
+# ============================================================================
+# Keepalive wave (4/S1): flag resolution + arm/disarm
+# ============================================================================
+# Universal keepalive — any governed run armable with explicit keepalive/pilot
+# consents. Two effective-flag resolvers (frontmatter → scale-keyed fallback)
+# and the arm/disarm registration primitives. These write to the POKER's
+# consent registry ($HOME/.claude/sdlc-goals) and audit log
+# ($HOME/.claude/sdlc-poker-audit.log): the poker (sdlc-poker.sh) is the sole
+# consumer of both. This lib is sourced STANDALONE by its own fixture suite, so
+# the goals-dir / audit-log / iso-now helpers are mirrored here (byte-equivalent
+# to sdlc-poker.sh:89/92/97) rather than reached from the poker — the same
+# self-containment stance sdlc_goal_id takes toward context-spend.sh. All
+# helpers read $HOME at call time so a fixture's fake HOME is honored.
+
+_sdlc_goals_dir()   { printf '%s/.claude/sdlc-goals' "$HOME"; }
+_sdlc_poker_audit() { printf '%s/.claude/sdlc-poker-audit.log' "$HOME"; }
+_sdlc_iso_now()     { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+# _sdlc_audit <goal-id> <event> [detail] — append an audit line in the poker's
+# format (`<iso> <gid> <event> <detail>`) to the shared poker audit log. Never
+# fails the caller (best-effort append, matching sdlc-poker.sh:audit_line).
+_sdlc_audit() {
+  local log; log="$(_sdlc_poker_audit)"
+  mkdir -p "$(dirname "$log")" 2>/dev/null
+  printf '%s %s %s %s\n' "$(_sdlc_iso_now)" "$1" "$2" "${3:-}" >> "$log" 2>/dev/null
+}
+
+# _sdlc_plan_fm <plan> <key> — value of a top-frontmatter `key:` line, CR-
+# tolerant, quote-stripped. Byte-equivalent to sdlc-poker.sh:plan_frontmatter
+# (normalize_nl + the ---…--- window scan): the poker and lib MUST read a plan's
+# flags identically. Empty output = key absent (or empty value).
+_sdlc_plan_fm() {
+  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1" 2>/dev/null \
+    | awk 'NR==1 && $0=="---"{f=1; next} f && $0=="---"{exit} f' \
+    | grep -E "^[[:space:]]*$2[[:space:]]*:" | head -1 \
+    | sed -E "s/^[[:space:]]*$2[[:space:]]*:[[:space:]]*//" \
+    | sed -E 's/[[:space:]]+$//' | sed -E "s/^['\"]//;s/['\"]\$//"
+}
+
+# _sdlc_scale_is_continuous <plan> — 0 iff the plan's effective scale row is the
+# `continuous` row of the fallback table. Any other value (task/wave/epic, an
+# unknown scale, or an absent scale) is the conservative non-continuous row:
+# keepalive off / pilot MANUAL — never arm/drive on a scale we cannot read.
+_sdlc_scale_is_continuous() {
+  [ "$(_sdlc_plan_fm "$1" scale)" = "continuous" ]
+}
+
+# sdlc_keepalive_effective <plan-path> → stdout `true|false`, rc 0.
+#   unreadable/missing plan → rc 1, empty stdout.
+#   explicit off-enum keepalive value → rc 2 + stderr (fail-loud, never guess —
+#   symmetric with the pilot resolver; a `keepalive: flase` typo must not
+#   silently fall through to the fallback and flip armability on a guess).
+sdlc_keepalive_effective() {
+  local plan="${1:-}" v
+  [ -n "$plan" ] && [ -f "$plan" ] && [ -r "$plan" ] || { return 1; }
+  v="$(_sdlc_plan_fm "$plan" keepalive)"
+  case "$v" in
+    true)  printf 'true\n';  return 0 ;;
+    false) printf 'false\n'; return 0 ;;
+    '')    # absent → scale-keyed fallback
+      if _sdlc_scale_is_continuous "$plan"; then printf 'true\n'; else printf 'false\n'; fi
+      return 0 ;;
+    *)
+      echo "defect: invalid-keepalive: '$v' — keepalive must be true or false: $plan" >&2
+      return 2 ;;
+  esac
+}
+
+# sdlc_pilot_effective <plan-path> → stdout `MANUAL|AUTO`, rc 0.
+#   unreadable/missing plan → rc 1, empty stdout.
+#   explicit off-enum pilot value → rc 2 + stderr naming it (fail-loud).
+sdlc_pilot_effective() {
+  local plan="${1:-}" v
+  [ -n "$plan" ] && [ -f "$plan" ] && [ -r "$plan" ] || { return 1; }
+  v="$(_sdlc_plan_fm "$plan" pilot)"
+  case "$v" in
+    MANUAL) printf 'MANUAL\n'; return 0 ;;
+    AUTO)   printf 'AUTO\n';   return 0 ;;
+    '')     # absent → scale-keyed fallback
+      if _sdlc_scale_is_continuous "$plan"; then printf 'AUTO\n'; else printf 'MANUAL\n'; fi
+      return 0 ;;
+    *)
+      echo "defect: invalid-pilot: '$v' — pilot must be MANUAL or AUTO: $plan" >&2
+      return 2 ;;
+  esac
+}
