@@ -1537,6 +1537,178 @@ ac_recon_guard() {
 ac_recon_guard
 
 # ============================================================
+# Completion latch (slice 4/3, spec D2) — sdlc_complete_check. Fixtures build
+# a hermetic repo with two REAL named branches (goal-branch, integ-branch),
+# merged or left unmerged one class at a time, plus a plan stub (current:)
+# and a real baton (baton_write). rc semantics under test: 0 verified / 1
+# benign not-complete / 2 loud false-complete-or-defect.
+# ============================================================
+
+# setup_complete <goal-id> <current> [merge: yes|no, default yes] — sets
+# REPO_DIR + PLAN_STUB globals (NOT echoed — must run in THIS shell so
+# new_state_dir's HOME/SDLC_STATE_DIR exports reach the parent). Builds a
+# repo with goal-branch branched from integ-branch's base commit, one extra
+# commit on goal-branch; merge=yes fast-forwards integ-branch to goal-branch's
+# tip (branch tip becomes an ancestor), merge=no leaves integ-branch behind
+# (branch tip is NOT an ancestor). Writes the plan stub OUTSIDE the repo.
+setup_complete() {
+  local gid="$1" current="$2" merge="${3:-yes}"
+  new_state_dir
+  REPO_DIR=$(mktemp -d); CLEAN_DIRS+=("$REPO_DIR")
+  git -C "$REPO_DIR" init -q
+  git -C "$REPO_DIR" config user.name  "fixture"
+  git -C "$REPO_DIR" config user.email "fixture@example.com"
+  printf 'base\n' > "$REPO_DIR/base.txt"
+  git -C "$REPO_DIR" add -A
+  git -C "$REPO_DIR" commit -qm base
+  git -C "$REPO_DIR" branch -q integ-branch
+  git -C "$REPO_DIR" checkout -q -b goal-branch
+  printf 'goal work\n' > "$REPO_DIR/goal.txt"
+  git -C "$REPO_DIR" add -A
+  git -C "$REPO_DIR" commit -qm goal-work
+  if [ "$merge" = "yes" ]; then
+    git -C "$REPO_DIR" checkout -q integ-branch
+    git -C "$REPO_DIR" merge -q goal-branch -m merge-goal
+    git -C "$REPO_DIR" checkout -q goal-branch
+  fi
+  mkdir -p "$SDLC_STATE_DIR/$gid"
+  PLAN_STUB="$SDLC_STATE_DIR/$gid/plan.stub.md"
+  printf 'current: %s\n' "$current" > "$PLAN_STUB"
+}
+# write_complete_baton <gid> <dir> <current> <wip> — a baton whose branch/
+# integration-branch name the fixture's two real branches.
+write_complete_baton() {
+  local gid="$1" d="$2" current="$3" wip="$4"
+  baton_write "$gid" "$PLAN_STUB" "$d" "goal-branch" "integ-branch" \
+    "$(git -C "$d" rev-parse HEAD)" "$current" "sid-$gid/1" \
+    "none" "resume the slice" "$wip" >/dev/null 2>&1
+}
+# count_key_lines <ledger-path> <effect-key> — raw TSV line count (any type)
+# whose effect-key column (field 5) matches exactly; 0 if the file is absent.
+count_key_lines() {
+  local path="$1" key="$2"
+  [ -f "$path" ] || { printf '0'; return; }
+  awk -F'\t' -v k="$key" '$5==k {c++} END{print c+0}' "$path"
+}
+
+echo ""
+echo "=== AC-N3: sdlc_complete_check — structural completion latch (both directions) ==="
+
+echo "--- GENUINE: current 10, branch merged into integration-branch, wip none → complete-verified, latch once, idempotent on replay ---"
+ac_complete_genuine() {
+  local gid="complete-genuine" d errf out rc path count1 count2
+  setup_complete "$gid" 10 yes; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  path=$(build_healthy_ledger "$gid")   # a real completed goal has journaled things along the way
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N3 genuine exits 0" "0" "$rc"
+  assert_eq "AC-N3 genuine prints 'complete-verified'" "complete-verified" "$out"
+  assert_eq "AC-N3 genuine silent on stderr" "" "$(cat "$errf")"
+  count1="$(count_key_lines "$path" "complete:$gid")"
+  assert_true "AC-N3 genuine journals the complete: latch" test "$count1" -ge 1
+
+  # second invocation: effect already applied — still complete-verified, no
+  # duplicate ledger lines for the key.
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N3 second call exits 0" "0" "$rc"
+  assert_eq "AC-N3 second call prints 'complete-verified'" "complete-verified" "$out"
+  count2="$(count_key_lines "$path" "complete:$gid")"
+  assert_eq "AC-N3 idempotent: ledger line count for complete: key unchanged" "$count1" "$count2"
+}
+ac_complete_genuine
+
+echo "--- FALSE-COMPLETE unmerged: current 10, branch NOT merged into integration-branch → defect, rc 2, no latch ---"
+ac_complete_false_unmerged() {
+  local gid="complete-false-unmerged" d errf out rc path
+  setup_complete "$gid" 10 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  path="$(ledger_path "$gid")"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N3 false-complete unmerged returns rc 2" "2" "$rc"
+  assert_eq "AC-N3 false-complete unmerged exact defect text" \
+    "defect: false-complete: current 10 but goal-branch not merged into integ-branch" "$(cat "$errf")"
+  assert_eq "AC-N3 false-complete unmerged prints nothing on stdout" "" "$out"
+  assert_eq "AC-N3 false-complete unmerged: no complete: line in the ledger" \
+    "0" "$(count_key_lines "$path" "complete:$gid")"
+}
+ac_complete_false_unmerged
+
+echo "--- FALSE-COMPLETE stranded wip: current 10, merged, wip != none → defect, rc 2, no latch ---"
+ac_complete_false_stranded_wip() {
+  local gid="complete-false-wip" d errf out rc path wip
+  setup_complete "$gid" 10 yes; d="$REPO_DIR"
+  wip="$(git -C "$d" rev-parse HEAD)"
+  write_complete_baton "$gid" "$d" 10 "$wip"
+  path="$(ledger_path "$gid")"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N3 stranded-wip returns rc 2" "2" "$rc"
+  assert_eq "AC-N3 stranded-wip exact defect text" \
+    "defect: false-complete: terminal plan with stranded wip $wip" "$(cat "$errf")"
+  assert_eq "AC-N3 stranded-wip: no complete: line in the ledger" \
+    "0" "$(count_key_lines "$path" "complete:$gid")"
+}
+ac_complete_false_stranded_wip
+
+echo "--- BENIGN: current 4 → not-complete (no 'defect:' prefix), rc 1, no ledger writes ---"
+ac_complete_benign() {
+  local gid="complete-benign" d errf out rc path
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  path="$(ledger_path "$gid")"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N3 benign not-complete returns rc 1" "1" "$rc"
+  assert_eq "AC-N3 benign not-complete exact text" "not-complete: plan current 4" "$(cat "$errf")"
+  assert_eq "AC-N3 benign not-complete has NO 'defect:' prefix" "" "$(printf '%s' "$(cat "$errf")" | grep -o '^defect:')"
+  assert_eq "AC-N3 benign not-complete prints nothing on stdout" "" "$out"
+  assert_eq "AC-N3 benign not-complete: ledger untouched (no file)" "0" "$(count_key_lines "$path" "complete:$gid")"
+}
+ac_complete_benign
+
+echo "--- chain-broken ledger: ledger_verify fails → its defect passes through, rc 2, no latch ---"
+ac_complete_chain_broken() {
+  local gid="complete-chain-broken" d errf out rc path
+  setup_complete "$gid" 10 yes; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  path=$(build_healthy_ledger "$gid")
+  awk -F'\t' -v OFS='\t' 'NR==2 { $6="TAMPERED SUMMARY" } { print }' "$path" > "$path.new" && mv "$path.new" "$path"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N3 chain-broken returns rc 2" "2" "$rc"
+  assert_contains "AC-N3 chain-broken passes through in-place-edit" "in-place-edit" "$(cat "$errf")"
+  assert_eq "AC-N3 chain-broken: no complete: line landed" "0" "$(count_key_lines "$path" "complete:$gid")"
+}
+ac_complete_chain_broken
+
+echo "--- malformed baton passes through (parse defect family), rc 2 ---"
+ac_complete_baton_malformed() {
+  local gid="complete-malformed" d errf rc baton
+  setup_complete "$gid" 10 yes; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  baton=$(baton_path "$gid")
+  grep -v -E '^next-action:' "$baton" > "$baton.new" && mv "$baton.new" "$baton"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_complete_check "$gid" "$d" 2>"$errf" 1>/dev/null; rc=$?
+  assert_eq "AC-N3 malformed-baton returns rc 2" "2" "$rc"
+  assert_contains "AC-N3 malformed-baton passes through the parse defect" "missing-key" "$(cat "$errf")"
+}
+ac_complete_baton_malformed
+
+echo "--- complete-check goal-id guard: '/' → invalid-goal-id, rc 2 ---"
+ac_complete_guard() {
+  new_state_dir
+  local errf rc
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_complete_check "bad/goal" "." 2>"$errf" 1>/dev/null; rc=$?
+  assert_eq "AC-N3 complete-check rejects a '/' goal-id with rc 2" "2" "$rc"
+  assert_contains "AC-N3 complete-check '/' names invalid-goal-id" "invalid-goal-id" "$(cat "$errf")"
+}
+ac_complete_guard
+
+# ============================================================
 echo ""
 echo "========================================"
 echo "sdlc-state primitives (baton + ledger): $PASS/$TOTAL passed, $FAIL failed"
