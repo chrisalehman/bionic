@@ -1084,3 +1084,69 @@ sdlc_complete_check() {
   printf 'complete-verified\n'
   return 0
 }
+
+# ---------- D7/AS-N10: gate park (slice 4/4) ----------
+#
+# sdlc_gate_park <goal-id> <plan-path> <defect> <detail> — appends a
+# `## Wake Note` block (User Decision Protocol shape) to the caller-supplied
+# plan file, wrapped in `sdlc_effect_run` under key `park:<goal-id>:<defect>`
+# so a replay of the same defect cannot double-append (idempotent by key).
+#
+# AS-N10 (deviation from spec D7's original 3-arg draft, ruling recorded in
+# the wave plan): plan-path is a CALLER arg, never derived via baton_parse.
+# A malformed or missing baton is itself a park CAUSE (sdlc_reconcile's first
+# predicate can fail before BATON_PLAN exists) — the park primitive must not
+# depend on baton derivation succeeding. Spine callers (the spawn pipeline,
+# a future poker) know the plan path independently of the baton. The shared
+# goal-id guard still applies (AS-26) — only plan-path provenance is exempt.
+#
+# Presence-probe BELT (AS-N6, first-park-wins): the appender itself refuses
+# a second `## Wake Note` heading regardless of which defect key drove it.
+# A DIFFERENT defect arriving while already parked gets its OWN effect key
+# (`park:<goal-id>:<other-defect>`), so sdlc_effect_run still journals its
+# decision/effect lines for that key (a distinct record that this defect was
+# seen and handled) — but the appender no-ops the actual file write and
+# returns 0: the goal IS parked, which is the caller's desired postcondition,
+# so "rc 0, one stderr note, no second block" beats a refusal that would
+# leave the caller unsure whether it's safe to stop. Documented choice, not
+# the only valid one.
+#
+# Plan-file-missing/unwritable → `defect: park-failed: <plan-path> — park
+# could not land durable state`, nonzero, NO file created. Composes with
+# sdlc_effect_run's own contract without special-casing: the decision line
+# was already journaled (unapplied → decision-then-run), the appender then
+# fails, so no effect line lands — a replay of the SAME defect key correctly
+# reads back `indeterminate` (sdlc_effect_state), never a false `applied`.
+_sdlc_gate_park_append() {
+  local plan_path="$1" defect="$2" detail="$3"
+  if [ ! -f "$plan_path" ]; then
+    echo "defect: park-failed: $plan_path — park could not land durable state" >&2
+    return 1
+  fi
+  if grep -q '^## Wake Note$' "$plan_path" 2>/dev/null; then
+    echo "park-skipped: wake note already present — first park wins" >&2
+    return 0
+  fi
+  if ! {
+    printf '\n## Wake Note\n\n'
+    printf 'GATED by rollover spine: %s\n' "$defect"
+    printf '%s\n\n' "$detail"
+    printf '**Options:**\n'
+    printf '1. Resolve the named divergence and delete this note to re-arm.\n'
+    printf '2. Close the goal manually (plan current: 10 + merge) if it is in fact done.\n\n'
+    printf '**Why it matters:** the spine refuses to spawn a successor while this note stands (fail-closed).\n'
+  } >> "$plan_path" 2>/dev/null; then
+    echo "defect: park-failed: $plan_path — park could not land durable state" >&2
+    return 1
+  fi
+  return 0
+}
+
+sdlc_gate_park() {
+  local goal_id="${1:-}" plan_path="${2:-}" defect="${3:-}" detail="${4:-}"
+  _sdlc_validate_goal_id "$goal_id" "sdlc_gate_park" || return 1
+  [ -n "$defect" ] || { echo "defect: missing-defect: sdlc_gate_park requires a non-empty defect" >&2; return 1; }
+
+  sdlc_effect_run "$goal_id" "park:$goal_id:$defect" "$detail" -- \
+    _sdlc_gate_park_append "$plan_path" "$defect" "$detail"
+}
