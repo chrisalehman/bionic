@@ -16,6 +16,17 @@ set -uo pipefail
 HOOK="$(cd "$(dirname "$0")" && pwd)/context-spend.sh"
 PASS=0; FAIL=0; TOTAL=0
 
+# Incident 0001: the audit file lives under $HOME, never in the project tree.
+# The fake HOME is a SIBLING of every sandbox project, never a child — the
+# "nothing under the project tree" assertions use `find "$dir"`, which a nested
+# home would satisfy falsely. Every invocation of the hook runs with HOME
+# pointed here, or the suite would append to the developer's real ~/.claude/logs.
+FAKE_HOME=$(mktemp -d)
+# Slug must match hooks/context-spend.sh audit_path() byte for byte.
+slug_for() { printf '%s-%s' "$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')" \
+                            "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"; }
+audit_path_for() { printf '%s/.claude/logs/%s/sdlc-v11-audit.md' "$FAKE_HOME" "$(slug_for "$1")"; }
+
 # ---------- helpers ----------
 
 pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
@@ -112,7 +123,7 @@ stdin_for() {  # $1=project $2=transcript-path [$3=session_id, default "scrubbed
 # the override path; fire_table exercises the REAL table) and are NOT pinned.
 LEGACY_CEIL_PIN=100000000
 run_hook() {  # $1=project $2=stdin-json
-  HOOK_STDOUT=$(CLAUDE_PROJECT_DIR="$1" BIONIC_CONTEXT_CEILING="$LEGACY_CEIL_PIN" \
+  HOOK_STDOUT=$(HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$1" BIONIC_CONTEXT_CEILING="$LEGACY_CEIL_PIN" \
     bash "$HOOK" <<< "$2" 2>/dev/null); HOOK_EXIT=$?
 }
 
@@ -120,7 +131,7 @@ fire() {  # $1=project [$2=session_id, default "scrubbed"] — build real-shape 
   run_hook "$1" "$(stdin_for "$1" "$1/transcript.jsonl" "${2:-scrubbed}")"
 }
 
-audit_of() { cat "$1/.bionic/memory/sdlc-v11-audit.md" 2>/dev/null || true; }
+audit_of() { cat "$(audit_path_for "$1")" 2>/dev/null || true; }
 state_of() { cat "$1/.bionic/tmp/context-spend.state" 2>/dev/null || true; }
 
 # assert_silent: advisory invariant (A1) — every hook invocation, on every
@@ -156,7 +167,7 @@ assert_degraded() {  # $1=dir $2=label $3=pre-run state_of() snapshot
   fi
 }
 
-cleanup_projects=()
+cleanup_projects=("$FAKE_HOME")
 cleanup() { for d in "${cleanup_projects[@]:-}"; do rm -rf "$d"; done; }
 trap cleanup EXIT
 
@@ -472,7 +483,7 @@ echo "=== D6: jq absent (PATH stripped) ==="
 d6() {
   local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
   local pre; pre=$(state_of "$dir")
-  HOOK_STDOUT=$(CLAUDE_PROJECT_DIR="$dir" PATH=/nonexistent /bin/bash "$HOOK" <<< "$(stdin_for "$dir" "$dir/transcript.jsonl")" 2>/dev/null); HOOK_EXIT=$?
+  HOOK_STDOUT=$(HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$dir" PATH=/nonexistent /bin/bash "$HOOK" <<< "$(stdin_for "$dir" "$dir/transcript.jsonl")" 2>/dev/null); HOOK_EXIT=$?
   assert_degraded "$dir" "D6 jq absent" "$pre"
 }
 d6
@@ -666,7 +677,7 @@ new_ceiling_env() {  # $1=occupied
 # Rewrite the transcript first with set_occ to move occupancy between samples.
 fire_ceiling() {  # $1=project $2=ceiling [$3=session]
   local proj="$1" ceil="$2" sess="${3:-scrubbed}"
-  HOOK_STDOUT=$(CLAUDE_PROJECT_DIR="$proj" SDLC_STATE_DIR="$CEIL_STATE" \
+  HOOK_STDOUT=$(HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$proj" SDLC_STATE_DIR="$CEIL_STATE" \
     BIONIC_CONTEXT_CEILING="$ceil" bash "$HOOK" \
     <<< "$(stdin_for "$proj" "$proj/transcript.jsonl" "$sess")" 2>/dev/null); HOOK_EXIT=$?
 }
@@ -922,7 +933,7 @@ ma4
 # fire_table: exercise the REAL per-model table — NO BIONIC_CONTEXT_CEILING.
 fire_table() {  # $1=project [$2=session]
   local proj="$1" sess="${2:-scrubbed}"
-  HOOK_STDOUT=$(CLAUDE_PROJECT_DIR="$proj" SDLC_STATE_DIR="$CEIL_STATE" \
+  HOOK_STDOUT=$(HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$proj" SDLC_STATE_DIR="$CEIL_STATE" \
     bash "$HOOK" <<< "$(stdin_for "$proj" "$proj/transcript.jsonl" "$sess")" 2>/dev/null); HOOK_EXIT=$?
 }
 
@@ -941,6 +952,80 @@ ct1() {
   fi
 }
 ct1
+
+# ============================================================
+# SEC — incident 0001: both write sites land outside the project tree.
+# Paired presence + absence: an absence assertion alone passes when nothing
+# was ever written, so each case first proves the line EXISTS at the
+# relocated path, then proves the project tree holds no audit file.
+# ============================================================
+
+echo ""
+echo "=== SEC-CS1: step-boundary line lands under HOME, never in the project tree (AC-3) ==="
+sec_cs1() {
+  local dir; dir=$(make_env 4 100000 0 0); cleanup_projects+=("$dir")
+  local f; f=$(audit_path_for "$dir")
+  TOTAL=$((TOTAL + 1))
+  if [ ! -d "$(dirname "$f")" ]; then
+    pass "SEC-CS1: relocated audit dir absent before the first write"
+  else
+    fail "SEC-CS1: relocated audit dir pre-existed" "dir='$(dirname "$f")'"
+  fi
+  fire "$dir"                        # seed at step 4
+  write_plan "$dir" 5
+  write_transcript "$dir" 142137 0 0
+  fire "$dir"                        # boundary → one step line
+  TOTAL=$((TOTAL + 1))
+  if [ -f "$f" ] && grep -q 'context-spend step-4:' "$f"; then
+    pass "SEC-CS1: step line present at the relocated path"
+  else
+    fail "SEC-CS1: no step line at the relocated path" "f='$f'"
+  fi
+  TOTAL=$((TOTAL + 1))
+  if [ -z "$(find "$dir" -name 'sdlc-v11-audit.md' 2>/dev/null)" ]; then
+    pass "SEC-CS1: no audit file anywhere under the project tree"
+  else
+    fail "SEC-CS1: audit file found under the project tree" "$(find "$dir" -name 'sdlc-v11-audit.md')"
+  fi
+}
+sec_cs1
+
+echo ""
+echo "=== SEC-CS2: ceiling line lands under HOME on a FRESH home (mkdir guard, AC-3) ==="
+# The ceiling write site historically appended with no mkdir of its own,
+# relying on <project>/.bionic/memory/ already existing. Under the relocated
+# path the parent directory does NOT exist on first use, so a missing
+# `mkdir -p` silently drops every ceiling line. This case is the guard: the
+# ceiling line is the FIRST write for this project (the plan's `current:`
+# never moves, so no step-boundary line precedes it) and the relocated
+# directory is asserted absent beforehand.
+sec_cs2() {
+  new_ceiling_env 80000; local dir="$CEIL_DIR"
+  local f; f=$(audit_path_for "$dir")
+  TOTAL=$((TOTAL + 1))
+  if [ ! -d "$(dirname "$f")" ]; then
+    pass "SEC-CS2: relocated audit dir absent before the first ceiling write"
+  else
+    fail "SEC-CS2: relocated audit dir pre-existed" "dir='$(dirname "$f")'"
+  fi
+  fire_ceiling "$dir" 200000         # sub-50 seed, silent
+  set_occ "$dir" 110000
+  fire_ceiling "$dir" 200000         # crossing → advisory, first write of any kind
+  assert_silent "SEC-CS2 crossing run"
+  TOTAL=$((TOTAL + 1))
+  if [ -f "$f" ] && grep -q 'context-spend ceiling advisory:' "$f"; then
+    pass "SEC-CS2: ceiling line present at the relocated path on a fresh home"
+  else
+    fail "SEC-CS2: ceiling line dropped — relocated parent dir was never created" "f='$f'"
+  fi
+  TOTAL=$((TOTAL + 1))
+  if [ -z "$(find "$dir" -name 'sdlc-v11-audit.md' 2>/dev/null)" ]; then
+    pass "SEC-CS2: no audit file anywhere under the project tree"
+  else
+    fail "SEC-CS2: audit file found under the project tree" "$(find "$dir" -name 'sdlc-v11-audit.md')"
+  fi
+}
+sec_cs2
 
 # ============================================================
 # Results
