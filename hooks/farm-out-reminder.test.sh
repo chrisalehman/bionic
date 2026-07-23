@@ -22,8 +22,16 @@ trap cleanup EXIT
 setup() {  # fresh sandbox project per case
   SANDBOX=$(mktemp -d); mkdir -p "$SANDBOX/.bionic/tmp" "$SANDBOX/.bionic/memory"
   SANDBOXES+=("$SANDBOX")
+  # The fake HOME is a SIBLING of the sandbox project, never a child: SEC3/SEC4
+  # assert "nothing under the project tree" with `find "$SANDBOX"`, which a
+  # nested home would satisfy falsely. A real $HOME is not inside a project.
+  FAKE_HOME=$(mktemp -d); SANDBOXES+=("$FAKE_HOME")
 }
-audit_file() { printf '%s' "$SANDBOX/.bionic/memory/sdlc-v11-audit.md"; }
+# Incident 0001: the audit file lives under $HOME, never in the project tree.
+# Slug must match hooks/farm-out-reminder.sh audit_path() byte for byte.
+slug_for() { printf '%s-%s' "$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')" \
+                            "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"; }
+audit_file() { printf '%s/.claude/logs/%s/sdlc-v11-audit.md' "$FAKE_HOME" "$(slug_for "$SANDBOX")"; }
 
 stdin_for() {  # $1=command $2=agent_type ("" = main thread) $3=session_id (default s-fixture)
   local at="" sid="${3:-s-fixture}"
@@ -33,7 +41,9 @@ stdin_for() {  # $1=command $2=agent_type ("" = main thread) $3=session_id (defa
 }
 
 run_hook() {  # stdin on $1
-  HOOK_STDOUT=$(printf '%s' "$1" | CLAUDE_PROJECT_DIR="$SANDBOX" bash "$HOOK" 2>/dev/null)
+  # HOME is sandboxed on EVERY invocation — the hook writes under $HOME now,
+  # and an inherited real HOME would append to the developer's own logs.
+  HOOK_STDOUT=$(printf '%s' "$1" | HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$SANDBOX" bash "$HOOK" 2>/dev/null)
   HOOK_EXIT=$?
 }
 
@@ -727,6 +737,63 @@ sec2() {
     && fail "SEC2b truncation split a hex run and leaked a secret prefix" || pass
 }
 sec2
+
+echo ""
+echo "=== SEC3: audit file lands under HOME, never in the project tree (AC-3) ==="
+sec3() {
+  setup
+  run_hook "$(stdin_for 'bash tests/run.sh' '')"
+  assert_audit_has "SEC3 line at relocated path" "farm-out deny: class=suite"
+  [ -z "$(find "$SANDBOX" -name 'sdlc-v11-audit.md' 2>/dev/null)" ] \
+    && pass || fail "SEC3 no audit file anywhere under the project tree"
+}
+sec3
+
+echo ""
+echo "=== SEC4: unwritable destination drops the line, never falls back (AC-4) ==="
+sec4() {
+  setup
+  chmod a-w "$FAKE_HOME" 2>/dev/null
+  run_hook "$(stdin_for 'bash tests/run.sh' '')"
+  assert_exit0 "SEC4 hook still exits 0"
+  assert_deny  "SEC4 enforcement unaffected"
+  [ -z "$(find "$SANDBOX" -name 'sdlc-v11-audit.md' 2>/dev/null)" ] \
+    && pass || fail "SEC4 no fallback into the project tree"
+  chmod u+w "$FAKE_HOME" 2>/dev/null
+}
+sec4
+
+echo ""
+echo "=== SEC5: slug is deterministic and collision-resistant (AC-5) ==="
+sec5() {
+  local a b
+  a=$(slug_for /tmp/alpha/myproj); b=$(slug_for /tmp/beta/myproj)
+  [ "$a" = "$(slug_for /tmp/alpha/myproj)" ] && pass || fail "SEC5 slug is deterministic"
+  [ "$a" != "$b" ] && pass || fail "SEC5 same basename, different parent → different slug"
+}
+sec5
+
+echo ""
+echo "=== SEC5b: collision-resistance through the REAL hook (AC-5) ==="
+sec5b() {
+  # SEC5 only exercises the harness's slug_for copy. This case drives two
+  # project roots with the SAME basename under different parents through the
+  # hook itself and requires two distinct audit files under one HOME. A
+  # basename-only slug (the plausible wrong audit_path) collapses them to one.
+  local root; root=$(mktemp -d); SANDBOXES+=("$root")
+  FAKE_HOME=$(mktemp -d); SANDBOXES+=("$FAKE_HOME")
+  local p
+  for p in "$root/alpha/myproj" "$root/beta/myproj"; do
+    SANDBOX="$p"; mkdir -p "$SANDBOX/.bionic/tmp"
+    run_hook "$(stdin_for 'bash tests/run.sh' '')"
+    assert_deny "SEC5b deny under $(basename "$(dirname "$p")")/myproj"
+    assert_audit_has "SEC5b audit line under $(basename "$(dirname "$p")")/myproj" \
+      "farm-out deny: class=suite"
+  done
+  [ "$(find "$FAKE_HOME" -name 'sdlc-v11-audit.md' 2>/dev/null | wc -l | tr -d ' ')" -eq 2 ] \
+    && pass || fail "SEC5b same-basename projects must not share one audit file"
+}
+sec5b
 
 # ============================================================
 # Results
