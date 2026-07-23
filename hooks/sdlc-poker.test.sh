@@ -293,6 +293,23 @@ arm_goal() {  # <gid> <cur> <cwd> <sid> <pid> <age> [event] [wake]
   plant_transcript_age "$cwd" "$sid" "$age" "$ev"
 }
 
+# Seed a goal's wedge observation so the NEXT single poll corroborates under the
+# active window (slice 4/S3): records the goal's pid, the CURRENT transcript byte
+# size (the flat baseline the next poll must match), a flat cputime, and count=
+# OBS-1. Mirrors the .poke priming idiom. Used by the downstream WEDGE-behavior
+# fixtures whose intent is the post-detection ACTION (notify / no-poke / ladder
+# observe), not the multi-poll detection itself — that is proven directly in the
+# S3 detector cases. Defined here (beside arm_goal) so it precedes every caller.
+prime_wedged() {  # <gid> [cpu]
+  local gid="$1" cpu="${2:-0}" f pid sid t sz d
+  f="$HOME/.claude/sdlc-goals/$gid"
+  pid=$(sed -n 's/^PID=//p' "$f"); sid=$(sed -n 's/^SESSION_ID=//p' "$f")
+  t=$(ls "$HOME"/.claude/projects/*/"$sid".jsonl 2>/dev/null | head -1)
+  sz=$(wc -c < "$t" 2>/dev/null | tr -d ' '); [ -n "$sz" ] || sz=none
+  d="$HOME/.claude/sdlc-status/.state"; mkdir -p "$d"
+  printf '%s %s %s %s\n' "$pid" "$sz" "$cpu" "$(( ${SDLC_WEDGE_OBS:-3} - 1 ))" > "$d/$gid.wedge"
+}
+
 # ---------- slice 4/4: baton / ledger fixture helpers ----------
 # plant_baton <gid> <next-action> — a well-formed baton ALIGNED to the goal's
 # registered repo+plan (read from the consent registration planted by arm_goal),
@@ -398,15 +415,19 @@ c3() {
 }
 c3
 
-echo "=== Case 4: status:busy → BUSY at <WEDGE_QUIET, WEDGED at >WEDGE_QUIET ==="
+echo "=== Case 4: busy + quiet<WEDGE_QUIET → BUSY; quiet>WEDGE_QUIET ALONE → BUSY+WEDGE-OBSERVE (corroboration now required, 4/S3) ==="
 c4() {
   new_home
   arm_goal g4 4 /proj/four sid-4 4242 200 busy
   stub_registry_state busy sid-4
   assert_classify g4 BUSY "case4 busy + quiet 200s (<540)"
-  # Age the same transcript past WEDGE_QUIET.
+  # Age the same transcript past WEDGE_QUIET. A SINGLE poll no longer WEDGES —
+  # corroboration (SDLC_WEDGE_OBS polls, quiet>pilot ceiling, flat transcript+cpu)
+  # is required (spec R4/AC-5). quiet 600 alone → BUSY, with a WEDGE-OBSERVE audit.
   plant_transcript_age /proj/four sid-4 600 busy
-  assert_classify g4 WEDGED "case4 busy + quiet 600s (>540)"
+  local got; got=$(SDLC_WEDGE_CPU_FAKE=0 classify_goal g4)
+  assert_eq "case4 busy + quiet 600s ALONE → BUSY (not yet corroborated)" "BUSY" "$got"
+  assert_contains "case4 quiet>WEDGE_QUIET → WEDGE-OBSERVE audit" "g4 WEDGE-OBSERVE" "$(audit_of)"
 }
 c4
 
@@ -602,9 +623,14 @@ p3() {
 
   new_home
   cwd=$(real_cwd d3w)
-  arm_goal aw3 4 "$cwd" sid-w3 "$$" 600 busy   # busy + 600s → WEDGED; live pid == this process
+  # busy + quiet>ceiling + a primed corroboration (as if OBS-1 prior flat polls) →
+  # this single poll corroborates WEDGED (4/S3). Flat cputime via the seam.
+  arm_goal aw3 4 "$cwd" sid-w3 "$$" 1000 busy  # live pid == this process
   stub_registry_state busy sid-w3
+  prime_wedged aw3 0
+  export SDLC_WEDGE_CPU_FAKE=0
   run_poker
+  unset SDLC_WEDGE_CPU_FAKE
   assert_eq "4/2-3 WEDGED → zero claude poke invocations" "" "$(claude_calls)"
   TOTAL=$((TOTAL + 1))
   if ps -p "$$" >/dev/null 2>&1; then pass "4/2-3 WEDGE target pid still alive (never signalled)"; else fail "4/2-3 target alive"; fi
@@ -639,9 +665,12 @@ echo "=== 4/2-4: WEDGE notification — Title + recovery command verbatim ==="
 p4() {
   new_home
   local cwd; cwd=$(real_cwd d4)
-  arm_goal aw4 4 "$cwd" sid-w4 31337 600 busy   # WEDGED, known pid for recovery string
+  arm_goal aw4 4 "$cwd" sid-w4 31337 1000 busy  # WEDGED (primed+corroborated), known pid for recovery string
   stub_registry_state busy sid-w4
+  prime_wedged aw4 0
+  export SDLC_WEDGE_CPU_FAKE=0
   run_poker
+  unset SDLC_WEDGE_CPU_FAKE
   assert_contains "4/2-4 WEDGE curl Title" "Title: aw4: WEDGE" "$(curl_calls)"
   assert_contains "4/2-4 WEDGE body carries recovery command verbatim" \
     "kill 31337 && cd $cwd && claude --resume sid-w4" "$(curl_calls)"
@@ -1094,14 +1123,15 @@ e4() {
   got=$(classify_goal ge4busy "$json" "$rc")
   assert_eq "4/1-4 BUSY: honors the snapshot, ignores the drifted live absent" "BUSY" "$got"
 
-  # WEDGED: snapshot busy + stale (>WEDGE_QUIET); live drifts to absent.
+  # WEDGED: snapshot busy + stale (>ceiling) + primed corroboration; live drifts to absent.
   new_home
   cwd=$(real_cwd e4wedge)
-  arm_goal ge4wedge 4 "$cwd" sid-e4wedge 4242 600 busy
+  arm_goal ge4wedge 4 "$cwd" sid-e4wedge 4242 1000 busy
   stub_registry_state busy sid-e4wedge
   json=$(claude agents --json 2>/dev/null); rc=$?
   stub_registry_state absent
-  got=$(classify_goal ge4wedge "$json" "$rc")
+  prime_wedged ge4wedge 0
+  got=$(SDLC_WEDGE_CPU_FAKE=0 classify_goal ge4wedge "$json" "$rc")
   assert_eq "4/1-4 WEDGED: honors the snapshot, ignores the drifted live absent" "WEDGED" "$got"
 
   # COMPLETE: plan current:10 short-circuits BEFORE the registry args are ever
@@ -1215,11 +1245,14 @@ echo "=== 4/4-wedged: WEDGED+baton → observe journaled (no child spawned) ==="
 L4() {
   new_home
   local cwd; cwd=$(ladder_cwd wg)
-  arm_goal gwg 4 "$cwd" sid-gwg "$$" 600 busy   # busy + 600s + live pid → WEDGED
+  arm_goal gwg 4 "$cwd" sid-gwg "$$" 1000 busy  # busy + quiet>ceiling + primed corroboration → WEDGED
   stub_registry_state busy sid-gwg
   plant_baton gwg "next"
+  prime_wedged gwg 0
   local anc; anc=$(anchor_of gwg)
+  export SDLC_WEDGE_CPU_FAKE=0
   run_poker
+  unset SDLC_WEDGE_CPU_FAKE
   assert_eq "4/4-wedged observe → NO poke child spawned" "" "$(claude_calls)"
   assert_true "4/4-wedged observe effect journaled under rung:gwg:observe:<anchor>:1" \
     ledger_line_has gwg effect "rung:gwg:observe:$anc:1"
@@ -1951,22 +1984,6 @@ S2_7
 # Read the observation state file / its poll counter (4th field).
 wedge_state_of() { cat "$HOME/.claude/sdlc-status/.state/$1.wedge" 2>/dev/null || true; }
 wedge_count_of() { awk '{print $4+0; exit}' "$HOME/.claude/sdlc-status/.state/$1.wedge" 2>/dev/null || echo 0; }
-
-# Seed a goal's wedge observation so the NEXT single poll corroborates under the
-# active window: records the goal's pid, the CURRENT transcript byte size (the flat
-# baseline the next poll must match), a flat cputime, and count=OBS-1. Mirrors the
-# .poke priming idiom. Used by the downstream WEDGE-behavior fixtures whose intent
-# is the post-detection ACTION (notify / no-poke / ladder observe), not the multi-
-# poll detection itself — that is proven directly in the S3 detector cases below.
-prime_wedged() {  # <gid> [cpu]
-  local gid="$1" cpu="${2:-0}" f pid sid t sz d
-  f="$HOME/.claude/sdlc-goals/$gid"
-  pid=$(sed -n 's/^PID=//p' "$f"); sid=$(sed -n 's/^SESSION_ID=//p' "$f")
-  t=$(ls "$HOME"/.claude/projects/*/"$sid".jsonl 2>/dev/null | head -1)
-  sz=$(wc -c < "$t" 2>/dev/null | tr -d ' '); [ -n "$sz" ] || sz=none
-  d="$HOME/.claude/sdlc-status/.state"; mkdir -p "$d"
-  printf '%s %s %s %s\n' "$pid" "$sz" "$cpu" "$(( ${SDLC_WEDGE_OBS:-3} - 1 ))" > "$d/$gid.wedge"
-}
 
 # One in-process wedge poll with a controlled process-tree cputime: routes through
 # classify_goal (loads the registration, then busy_or_wedged → wedge_corroborated).

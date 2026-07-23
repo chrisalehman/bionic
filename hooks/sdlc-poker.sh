@@ -431,8 +431,18 @@ wedge_corroborated() {  # $1=gid
 }
 
 # ---------- C2: classification (P3 verbatim, registry-primary) ----------
-# Given a live BUSY/IDLE/NOSTATUS reading, fold in transcript quiet.
-busy_or_wedged() { [ "$(transcript_quiet)" -gt "$WEDGE_QUIET" ] && echo WEDGED || echo BUSY; }
+# Given a live BUSY/IDLE/NOSTATUS reading, fold in transcript quiet. WEDGED now
+# flows through corroboration (4/S3): quiet <= WEDGE_QUIET is plainly BUSY; quiet >
+# WEDGE_QUIET enters the wedge observation zone and only classifies WEDGED once
+# wedge_corroborated agrees (SDLC_WEDGE_OBS flat polls beyond the pilot ceiling).
+# Un-corroborated quiet (below ceiling, still building, or cpu-active) stays BUSY —
+# the audit trail (WEDGE-OBSERVE / WEDGE-AMBIGUOUS) is written by the detector. No
+# new actions here: downstream WEDGED behavior (notify / ladder observe) is unchanged.
+busy_or_wedged() {  # $1=gid
+  local gid="${1:--}"
+  if [ "$(transcript_quiet)" -le "$WEDGE_QUIET" ]; then echo BUSY; return; fi
+  if wedge_corroborated "$gid"; then echo WEDGED; else echo BUSY; fi
+}
 idle_or_stalled() { [ "$(transcript_quiet)" -gt "$QUIET_THRESHOLD" ] && echo IDLE_STALLED || echo IDLE; }
 
 # Degrade path (registry unavailable/unparseable): ps -p $PID (alive/dead only)
@@ -441,7 +451,7 @@ idle_or_stalled() { [ "$(transcript_quiet)" -gt "$QUIET_THRESHOLD" ] && echo IDL
 degrade_classify() {  # $1=goal-id (for future audit context)
   if ! ps -p "$REG_PID" >/dev/null 2>&1; then echo DEAD; return; fi
   case "$(transcript_grammar)" in
-    busy) busy_or_wedged ;;
+    busy) busy_or_wedged "$1" ;;
     idle) idle_or_stalled ;;
     *)    echo "" ;;
   esac
@@ -488,9 +498,9 @@ classify_goal() {  # $1=goal-id $2=registry-json (optional) $3=registry-rc (opti
   status=$(printf '%s' "$json" | jq -r --arg sid "$REG_SESSION_ID" \
     '[.[] | select(.sessionId==$sid)][0] | .status // "NOSTATUS"' 2>/dev/null)
   case "$status" in
-    busy) busy_or_wedged ;;                       # 3. BUSY + quiet>WEDGE → WEDGED
+    busy) busy_or_wedged "$gid" ;;                # 3. BUSY + corroborated quiet → WEDGED
     idle) idle_or_stalled ;;                      # IDLE vs IDLE_STALLED
-    *)    busy_or_wedged ;;                       # NOSTATUS print-child → alive-working (treat as BUSY)
+    *)    busy_or_wedged "$gid" ;;                # NOSTATUS print-child → alive-working (treat as BUSY)
   esac
 }
 
