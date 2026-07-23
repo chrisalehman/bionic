@@ -539,6 +539,8 @@ These load at session start, not as numbered steps:
 
 **Session-resume protocol — runs FIRST.** If a plan file with `governing-skill: canonical-sdlc` and `sdlc-step: < 10` exists, treat it as the active plan. Read in this order: frontmatter → `## Handoff` (if present) → `## SDLC State`. Use the handoff's `Resume point` as the literal next action. The handoff is authoritative.
 
+**Rollover pointer entry.** If the session opens via a rollover pointer prompt (a goal-id and baton path supplied directly in the prompt), the baton's `next-action` is the literal resume point — use it in place of deriving one from the plan. Whatever spawned this session already discharged reconciliation before handing off, so do not re-derive it. Re-checking git state on entry is fine, but overriding a Wake Note or a GATED park left in place by the handoff is never permitted — resolve the named divergence through the normal park-recovery path instead.
+
 **Session-entry grounding gate — enumerate before declaring active artifact.** Operating against the wrong plan/wave/branch is a top-cost session failure. Before declaring the active artifact:
 
 1. `git log -10 --oneline` — what's the recent commit shape?

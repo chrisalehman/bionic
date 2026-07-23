@@ -1224,26 +1224,34 @@ stack-health: n/a: no long-running serve observed
 }
 
 # ============================================================
-# canonical_sdlc_version v12: `continuous` RELEASE GATE (E10)
+# canonical_sdlc_version v12: `continuous` RELEASE GATE (E10 shipped — AC-12)
 # ============================================================
 #
-# `scale: continuous` (the v12 standing charter) is source-complete in the
-# contract but held back from origin/main until the never-die epic (E10)
-# ships. The governing-skill hook BLOCKS a v12 continuous write with a
-# release-gate message UNLESS SDLC_CONTINUOUS_RELEASED=1 is set; the gate
-# fires BEFORE the continuous-specific validations (enum acceptance, barred
-# cells, audited scale floor), which all stay reachable once the flag lifts
-# it. These cases run under DEFAULT env (gate armed). The wave-02 continuous
-# contract section that follows runs under SDLC_CONTINUOUS_RELEASED=1, where
-# every one of those validations is exercised exactly as when released.
+# `scale: continuous` (the v12 standing charter) was held back from
+# origin/main behind SDLC_CONTINUOUS_RELEASED until the never-die epic
+# (E10) shipped its revival/self-supervision machinery. E10 has shipped:
+# the DEFAULT now flips from blocked to released, so a v12 continuous
+# charter authored under DEFAULT env passes straight through. The
+# explicit-off posture survives unchanged — SDLC_CONTINUOUS_RELEASED=0
+# still blocks with a release-gate message, now describing that explicit
+# opt-out (there is no more "until E10 ships" to name). These cases run
+# under DEFAULT env (released) except where noted. The wave-02 continuous
+# contract section that follows runs under explicit
+# SDLC_CONTINUOUS_RELEASED=1 (harmless — same released behavior as
+# default), exercising every continuous-specific validation.
 
 project=$(make_project)
 
-echo "GATE v12 valid charter (default env) → block with the release-gate message"
+echo "GATE v12 valid charter (default env) → allow (E10 shipped; released by default — AC-12)"
 run_write "$project/.bionic/docs/plans/epic-01-demo/gate-charter.plan.md" "$(build_v12_plan)"
-assert_eq "v12_gate_blocks_charter_default_env exit 2" 2 "$HOOK_EXIT"
-assert_contains "v12_gate_blocks_charter names the E10 gate" "release-gated until the never-die epic (E10)" "$HOOK_STDERR"
-assert_contains "v12_gate_blocks_charter names the override flag" "SDLC_CONTINUOUS_RELEASED=1" "$HOOK_STDERR"
+assert_eq "v12_gate_default_env_allows_charter exit 0" 0 "$HOOK_EXIT"
+
+echo "GATE v12 charter with SDLC_CONTINUOUS_RELEASED=0 → block with the explicit-off gate message"
+export SDLC_CONTINUOUS_RELEASED=0
+run_write "$project/.bionic/docs/plans/epic-01-demo/gate-charter-off.plan.md" "$(build_v12_plan)"
+assert_eq "v12_gate_explicit_off_blocks_charter exit 2" 2 "$HOOK_EXIT"
+assert_contains "v12_gate_explicit_off names the explicit-off posture" "release-gated OFF by SDLC_CONTINUOUS_RELEASED=0" "$HOOK_STDERR"
+unset SDLC_CONTINUOUS_RELEASED
 
 echo "GATE v12 charter with SDLC_CONTINUOUS_RELEASED=1 → allow (passes exactly as when released)"
 export SDLC_CONTINUOUS_RELEASED=1
@@ -1274,12 +1282,14 @@ run_write "$project/.bionic/docs/plans/epic-01-demo/gate-v10.plan.md" "$(build_v
 assert_eq "v12_gate_untouched_v10 exit 0" 0 "$HOOK_EXIT"
 
 # The wave-02 continuous contract (enum acceptance, barred cells, scale floor,
-# ## Goals G-form, matrix exemption, CRLF parity) is authored on an ARMED
-# charter, so it runs under SDLC_CONTINUOUS_RELEASED=1 — the release gate is
-# lifted and each continuous-specific validation is exercised exactly as when
-# E10 ships. The v11-continuous-frozen case within is version-scoped (the gate
-# is v12-only), so it behaves identically flag or no flag. Unset restores the
-# default (gate-armed) env for the grandfather sweep that follows.
+# ## Goals G-form, matrix exemption, CRLF parity) runs under explicit
+# SDLC_CONTINUOUS_RELEASED=1 — harmless now that it matches the default, kept
+# so this section's fixtures stay independent of the default-env value.
+# Every continuous-specific validation below is exercised exactly as when
+# released. The v11-continuous-frozen case within is version-scoped (the
+# gate is v12-only), so it behaves identically flag or no flag. Unset
+# restores the default (now released) env for the grandfather sweep that
+# follows — harmless, since that sweep never touches scale: continuous.
 export SDLC_CONTINUOUS_RELEASED=1
 project=$(make_project)
 
@@ -1404,7 +1414,7 @@ echo "v12 CRLF charter with full valid triple → allow"
 run_write "$project/.bionic/docs/plans/epic-01-demo/v12-crlf.plan.md" "$(to_crlf "$(build_v12_plan)")"
 assert_eq "v12_accepts_crlf_charter exit 0" 0 "$HOOK_EXIT"
 
-# Restore the default (gate-armed) env for the grandfather sweep below.
+# Restore the default (now released) env for the grandfather sweep below.
 unset SDLC_CONTINUOUS_RELEASED
 
 # ============================================================
