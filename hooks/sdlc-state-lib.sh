@@ -82,6 +82,19 @@ _sdlc_validate_goal_id() {
 # partial file visible to a concurrent cold reader). Creates the goal's
 # dir if absent (AS-6). Returns nonzero + a `defect:`-prefixed line on
 # stderr if the goal-id is empty or the write/rename fails.
+#
+# Value-grammar gates (D4/D9, AS-15/AS-25 discharge) run BEFORE the
+# atomic write (and before the goal dir is even created) — a rejected
+# call leaves no file behind:
+#   - <ledger-position> (arg 9) must be `none` or `<seq>:<digest>` with
+#     seq >= 1 and digest exactly 8 lowercase hex chars
+#     (`^[1-9][0-9]*:[0-9a-f]{8}$`) → else `invalid-ledger-position`.
+#     Cross-file value verification (does the digest match the ledger's
+#     own stored digest at that seq) is sdlc_reconcile's domain (4/2) —
+#     this is a shape/grammar gate only.
+#   - <wip> (arg 11) must be `none` or a full 40-hex sha
+#     (`^[0-9a-f]{40}$`) → else `invalid-wip-sha`. Abbreviation becomes
+#     structurally impossible for every future writer, not a convention.
 baton_write() {
   local goal_id="${1:-}" plan="${2:-}" cwd="${3:-}" branch="${4:-}" integ="${5:-}" \
         last_commit="${6:-}" step="${7:-}" session="${8:-}" ledger_pos="${9:-}" \
@@ -89,6 +102,16 @@ baton_write() {
   local dir target tmp written_at
 
   _sdlc_validate_goal_id "$goal_id" "baton_write" || return 1
+
+  if [ "$ledger_pos" != "none" ] && ! printf '%s' "$ledger_pos" | grep -qE '^[1-9][0-9]*:[0-9a-f]{8}$'; then
+    echo "defect: invalid-ledger-position: $ledger_pos — expected <seq>:<8-hex-digest> or none" >&2
+    return 1
+  fi
+
+  if [ "$wip" != "none" ] && ! printf '%s' "$wip" | grep -qE '^[0-9a-f]{40}$'; then
+    echo "defect: invalid-wip-sha: $wip — wip must be none or a full 40-hex sha" >&2
+    return 1
+  fi
 
   dir="$(baton_goal_dir "$goal_id")"
   mkdir -p "$dir" 2>/dev/null || { echo "defect: mkdir-failed: cannot create $dir" >&2; return 1; }

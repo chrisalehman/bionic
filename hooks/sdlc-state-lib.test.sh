@@ -67,7 +67,7 @@ assert_nonzero() {  # <label> <actual-exit-code>
 write_healthy() {
   local gid="$1" wip="${2:-none}"
   baton_write "$gid" "/plans/$gid.plan.md" "/work/$gid" "wave-01-substrate" \
-    "epic/10-never-die" "abc1234" "4" "sid-$gid/4242" "42" \
+    "epic/10-never-die" "abc1234" "4" "sid-$gid/4242" "42:deadbeef" \
     "run the next slice" "$wip" >/dev/null 2>&1
   baton_path "$gid"
 }
@@ -130,7 +130,7 @@ ac_b1() {
   IFS=$'\t' read -r rc na lp <<< "$COLD_OUT"
   assert_eq "AC-B1 cold parse exit 0 on a healthy baton" "0" "$rc"
   assert_eq "AC-B1 cold next-action readback" "run the next slice" "$na"
-  assert_eq "AC-B1 cold ledger-position readback" "42" "$lp"
+  assert_eq "AC-B1 cold ledger-position readback" "42:deadbeef" "$lp"
 
   # Same-process parse of the remaining required fields (round-trip fidelity
   # beyond the two R-B2-named fields).
@@ -239,6 +239,106 @@ ac_b2_no_partial_trust() {
     "sentinel-wip-untouched" "$BATON_WIP"
 }
 ac_b2_no_partial_trust
+
+# ============================================================
+echo "=== D4/D9: baton_write value-grammar gates — wip (full 40-hex or none) + ledger-position (<seq>:<8-hex-digest> or none) ==="
+
+# assert_no_file_written <label> <goal-id> — asserts baton_write's target
+# path for <goal-id> was never created (the reject contract: loud defect,
+# nonzero rc, no file — not even a partial one).
+assert_no_file_written() {
+  local label="$1" gid="$2"
+  TOTAL=$((TOTAL + 1))
+  if [ -e "$(baton_path "$gid")" ]; then
+    fail "$label" "baton file exists at $(baton_path "$gid")"
+  else
+    pass "$label"
+  fi
+}
+
+echo "--- wip: abbreviated 7-hex sha → invalid-wip-sha, no file written ---"
+ac_grammar_wip_abbrev() {
+  new_state_dir
+  local gid="grammar-wip-abbrev" err rc
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "1:abcd1234" "na" "deadbee" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "abbreviated 7-hex wip rejected (nonzero rc)" "$rc"
+  assert_contains "abbreviated 7-hex wip names invalid-wip-sha" "invalid-wip-sha" "$err"
+  assert_no_file_written "abbreviated 7-hex wip: no baton file written" "$gid"
+}
+ac_grammar_wip_abbrev
+
+echo "--- wip: full-length but non-hex sha → invalid-wip-sha, no file written ---"
+ac_grammar_wip_nonhex() {
+  new_state_dir
+  local gid="grammar-wip-nonhex" err rc
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "1:abcd1234" "na" "deadbeef1234567890abcdef1234567890abcdeg" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "full-length non-hex wip rejected (nonzero rc)" "$rc"
+  assert_contains "full-length non-hex wip names invalid-wip-sha" "invalid-wip-sha" "$err"
+  assert_no_file_written "full-length non-hex wip: no baton file written" "$gid"
+}
+ac_grammar_wip_nonhex
+
+echo "--- ledger-position: bare-seq (no digest) → invalid-ledger-position, no file written ---"
+ac_grammar_ledger_bare_seq() {
+  new_state_dir
+  local gid="grammar-ledger-bare-seq" err rc
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "42" "na" "none" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "bare-seq ledger-position rejected (nonzero rc)" "$rc"
+  assert_contains "bare-seq ledger-position names invalid-ledger-position" "invalid-ledger-position" "$err"
+  assert_no_file_written "bare-seq ledger-position: no baton file written" "$gid"
+}
+ac_grammar_ledger_bare_seq
+
+echo "--- ledger-position: zero-seq → invalid-ledger-position, no file written ---"
+ac_grammar_ledger_zero_seq() {
+  new_state_dir
+  local gid="grammar-ledger-zero-seq" err rc
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "0:abcd1234" "na" "none" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "zero-seq ledger-position rejected (nonzero rc)" "$rc"
+  assert_contains "zero-seq ledger-position names invalid-ledger-position" "invalid-ledger-position" "$err"
+  assert_no_file_written "zero-seq ledger-position: no baton file written" "$gid"
+}
+ac_grammar_ledger_zero_seq
+
+echo "--- ledger-position: missing digest (seq: with nothing after) → invalid-ledger-position, no file written ---"
+ac_grammar_ledger_missing_digest() {
+  new_state_dir
+  local gid="grammar-ledger-missing-digest" err rc
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "42:" "na" "none" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "missing-digest ledger-position rejected (nonzero rc)" "$rc"
+  assert_contains "missing-digest ledger-position names invalid-ledger-position" "invalid-ledger-position" "$err"
+  assert_no_file_written "missing-digest ledger-position: no baton file written" "$gid"
+}
+ac_grammar_ledger_missing_digest
+
+echo "--- accept: 'none' for both wip and ledger-position ---"
+ac_grammar_accept_none() {
+  new_state_dir
+  local gid="grammar-accept-none" rc f
+  baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "none" "na" "none" >/dev/null 2>&1; rc=$?
+  assert_eq "accept: 'none'/'none' returns rc 0" "0" "$rc"
+  f="$(baton_path "$gid")"
+  assert_true "accept: 'none'/'none' wrote a file" test -f "$f"
+  baton_parse "$f"
+  assert_eq "accept: 'none'/'none' ledger-position round-trips" "none" "$BATON_LEDGER_POSITION"
+  assert_eq "accept: 'none'/'none' wip round-trips" "none" "$BATON_WIP"
+}
+ac_grammar_accept_none
+
+echo "--- accept: full 40-hex wip + minimal '1:00000000'-style ledger-position, round-trip unchanged ---"
+ac_grammar_accept_full() {
+  new_state_dir
+  local gid="grammar-accept-full" rc f
+  baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "1:00000000" "na" \
+    "cafebabe1234567890abcdef1234567890abcdef" >/dev/null 2>&1; rc=$?
+  assert_eq "accept: full-form wip + minimal ledger-position returns rc 0" "0" "$rc"
+  f="$(baton_path "$gid")"
+  assert_true "accept: full-form wip + minimal ledger-position wrote a file" test -f "$f"
+  baton_parse "$f"
+  assert_eq "accept: minimal ledger-position round-trips" "1:00000000" "$BATON_LEDGER_POSITION"
+  assert_eq "accept: full 40-hex wip round-trips" "cafebabe1234567890abcdef1234567890abcdef" "$BATON_WIP"
+}
+ac_grammar_accept_full
 
 # ============================================================
 # ledger fixture helpers (slice 4/2) — build via the REAL ledger_append;
@@ -1037,7 +1137,7 @@ echo "--- baton_write: goal-id containing '/' ---"
 ac_goal_guard_write_slash() {
   new_state_dir
   local err rc
-  err=$(baton_write "bad/goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" "none" 2>&1 1>/dev/null); rc=$?
+  err=$(baton_write "bad/goal" "p" "c" "b" "i" "lc" "4" "s" "1:00000000" "na" "none" 2>&1 1>/dev/null); rc=$?
   assert_nonzero "baton_write rejects goal-id with '/'" "$rc"
   assert_contains "baton_write '/' goal-id names invalid-goal-id" "invalid-goal-id" "$err"
 }
@@ -1047,7 +1147,7 @@ echo "--- baton_write: goal-id beginning with '.' ---"
 ac_goal_guard_write_dot() {
   new_state_dir
   local err rc
-  err=$(baton_write ".hidden-goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" "none" 2>&1 1>/dev/null); rc=$?
+  err=$(baton_write ".hidden-goal" "p" "c" "b" "i" "lc" "4" "s" "1:00000000" "na" "none" 2>&1 1>/dev/null); rc=$?
   assert_nonzero "baton_write rejects goal-id beginning with '.'" "$rc"
   assert_contains "baton_write leading-'.' goal-id names invalid-goal-id" "invalid-goal-id" "$err"
 }
@@ -1094,7 +1194,7 @@ ac_nounset_no_leak() {
   local out rc
   out=$(bash -c '
     . "$1"
-    baton_write "leak-goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" "none" >/dev/null 2>&1
+    baton_write "leak-goal" "p" "c" "b" "i" "lc" "4" "s" "1:00000000" "na" "none" >/dev/null 2>&1
     wrc=$?
     printf "unbound-ok:%s write-rc:%s\n" "$SOME_UNSET_VAR_NEVER_DEFINED_ANYWHERE" "$wrc"
   ' bash "$LIB" 2>&1)
