@@ -220,15 +220,37 @@ audit_root() {
   echo "$PROJECT_DIR"
 }
 
+# Incident 0001: the audit stream must live where a consuming project cannot
+# commit it, regardless of that project's .gitignore. $HOME-rooted, per-project,
+# durable — mirroring hooks/sdlc-poker.sh:111's $HOME/.claude/ audit log.
+# Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
+# collision-resistant across same-named projects under different parents.
+# cksum and basename are POSIX — no new dependency.
+# Byte-identical to the copies in farm-out-reminder.sh,
+# canonical-sdlc-governing-skill.sh and context-spend.sh — divergence would give
+# one project two audit files. Deliberate per-hook duplication (no shared lib).
+audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
+  [ -n "${HOME:-}" ] || return 1
+  local base sum
+  base=$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')
+  sum=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
+  printf '%s/.claude/logs/%s-%s/sdlc-v11-audit.md' "$HOME" "$base" "$sum"
+}
+
 # v11 log-only finding channel (D14): append one line to the durable audit file
 # AND echo to stderr, then return 0 — floor/ledger/merge-target findings never
 # block this wave. Twin of the governing-skill hook's helper (hook name differs:
-# `evidence-gate`). mkdir + append are fail-open; the audit file lives in the
-# durable .bionic/memory/ (not .bionic/tmp/, which is wiped at Integrate).
+# `evidence-gate`). mkdir + append are fail-open. audit_root() still selects
+# WHICH project the finding belongs to; incident 0001 moved WHERE the file for
+# that project lives — $HOME/.claude/logs/<project-slug>/, outside every
+# consuming project tree, never .bionic/memory/ again. An unwritable
+# destination drops the line; there is deliberately no fallback branch.
 log_finding() {  # $1=check-id  $2=detail
-  local audit_dir="$(audit_root)/.bionic/memory"
-  local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) evidence-gate $1: $2 ($PLAN)"
-  mkdir -p "$audit_dir" 2>/dev/null && printf '%s\n' "$line" >> "$audit_dir/sdlc-v11-audit.md" 2>/dev/null
+  local f
+  if f=$(audit_path "$(audit_root)"); then
+    local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) evidence-gate $1: $2 ($PLAN)"
+    mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$line" >> "$f" 2>/dev/null
+  fi
   echo "canonical-sdlc v11 [$1]: $2" >&2
   return 0
 }
