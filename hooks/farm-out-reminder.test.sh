@@ -672,6 +672,27 @@ run_hook "$(stdin_for 'echo prep; ./claude-bootstrap.sh' '')"
 assert_deny "AC-5b: post-separator execution denied"
 
 # ============================================================
+# SEC — incident 0001: no command-derived text in any sink.
+# FAKE_SECRET is a planted constant, never a real credential.
+# ============================================================
+FAKE_SECRET="deadbeefcafebabe0123456789abcdef0123456789abcdefdeadbeefcafeb00f"
+
+echo ""
+echo "=== SEC1: audit line carries no command text (AC-1) ==="
+sec1() {
+  setup
+  run_hook "$(stdin_for "sed -i 's/$FAKE_SECRET/x/' notes.md && npm install" '')"
+  assert_deny "SEC1 denies"
+  # Two segments only, so the chain arm (>=3) does not fire — the `npm install`
+  # segment classifies this as class=install. Which class is incidental to AC-1;
+  # the assertion only needs an audit line to exist at all.
+  assert_audit_has    "SEC1 audit still records the class" "farm-out deny: class=install"
+  assert_audit_absent "SEC1 audit omits the planted secret" "$FAKE_SECRET"
+  assert_audit_absent "SEC1 audit omits command text"       "notes.md"
+}
+sec1
+
+# ============================================================
 # Results
 # ============================================================
 echo ""
