@@ -65,10 +65,10 @@ assert_nonzero() {  # <label> <actual-exit-code>
 # baton_write, returns its path. wip defaults to "none" (the common case);
 # pass a sha for round-trip fidelity assertions.
 write_healthy() {
-  local gid="$1" wip="${2:-none}"
+  local gid="$1" wip="${2:-none}" base="${3:-none}"
   baton_write "$gid" "/plans/$gid.plan.md" "/work/$gid" "wave-01-substrate" \
-    "epic/10-never-die" "abc1234" "4" "sid-$gid/4242" "42" \
-    "run the next slice" "$wip" >/dev/null 2>&1
+    "epic/10-never-die" "abc1234" "4" "sid-$gid/4242" "42:deadbeef" \
+    "run the next slice" "$wip" "$base" >/dev/null 2>&1
   baton_path "$gid"
 }
 
@@ -113,14 +113,14 @@ empty_value() { sed -E "s/^(${3}):.*/\1:/" "$1" > "$2"; }
 # the "cut off mid-flush" signal distinct from missing/duplicate/empty.
 truncate_file() { printf '%s' "$(cat "$1")" > "$2"; }
 
-REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc-step session ledger-position next-action wip written-at"
+REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc-step session ledger-position next-action wip base-commit written-at"
 
 # ============================================================
 echo "=== AC-B1: round-trip write → cold parse → next-action + ledger-position readback ==="
 ac_b1() {
   new_state_dir
   local gid="wave-01-substrate-4-1"
-  local f; f=$(write_healthy "$gid" "deadbeef1234567890abcdef1234567890abcdef")
+  local f; f=$(write_healthy "$gid" "deadbeef1234567890abcdef1234567890abcdef" "beefcafe1234567890abcdef1234567890abcdef")
   assert_true "AC-B1 baton_write produced a file" test -f "$f"
   assert_eq "AC-B1 baton_write went through the goal's dir (AS-6 mkdir -p)" \
     "$SDLC_STATE_DIR/$gid/baton.md" "$f"
@@ -130,7 +130,7 @@ ac_b1() {
   IFS=$'\t' read -r rc na lp <<< "$COLD_OUT"
   assert_eq "AC-B1 cold parse exit 0 on a healthy baton" "0" "$rc"
   assert_eq "AC-B1 cold next-action readback" "run the next slice" "$na"
-  assert_eq "AC-B1 cold ledger-position readback" "42" "$lp"
+  assert_eq "AC-B1 cold ledger-position readback" "42:deadbeef" "$lp"
 
   # Same-process parse of the remaining required fields (round-trip fidelity
   # beyond the two R-B2-named fields).
@@ -144,6 +144,7 @@ ac_b1() {
   assert_eq "AC-B1 sdlc-step round-trips" "4" "$BATON_SDLC_STEP"
   assert_eq "AC-B1 session round-trips" "sid-$gid/4242" "$BATON_SESSION"
   assert_eq "AC-B1 wip round-trips" "deadbeef1234567890abcdef1234567890abcdef" "$BATON_WIP"
+  assert_eq "AC-B1 base-commit round-trips" "beefcafe1234567890abcdef1234567890abcdef" "$BATON_BASE_COMMIT"
   assert_true "AC-B1 written-at is non-empty" test -n "$BATON_WRITTEN_AT"
 }
 ac_b1
@@ -239,6 +240,141 @@ ac_b2_no_partial_trust() {
     "sentinel-wip-untouched" "$BATON_WIP"
 }
 ac_b2_no_partial_trust
+
+# ============================================================
+echo "=== D4/D9: baton_write value-grammar gates — wip (full 40-hex or none) + ledger-position (<seq>:<8-hex-digest> or none) ==="
+
+# assert_no_file_written <label> <goal-id> — asserts baton_write's target
+# path for <goal-id> was never created (the reject contract: loud defect,
+# nonzero rc, no file — not even a partial one).
+assert_no_file_written() {
+  local label="$1" gid="$2"
+  TOTAL=$((TOTAL + 1))
+  if [ -e "$(baton_path "$gid")" ]; then
+    fail "$label" "baton file exists at $(baton_path "$gid")"
+  else
+    pass "$label"
+  fi
+}
+
+echo "--- wip: abbreviated 7-hex sha → invalid-wip-sha, no file written ---"
+ac_grammar_wip_abbrev() {
+  new_state_dir
+  local gid="grammar-wip-abbrev" err rc
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "1:abcd1234" "na" "deadbee" "none" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "abbreviated 7-hex wip rejected (nonzero rc)" "$rc"
+  assert_contains "abbreviated 7-hex wip names invalid-wip-sha" "invalid-wip-sha" "$err"
+  assert_no_file_written "abbreviated 7-hex wip: no baton file written" "$gid"
+}
+ac_grammar_wip_abbrev
+
+echo "--- wip: full-length but non-hex sha → invalid-wip-sha, no file written ---"
+ac_grammar_wip_nonhex() {
+  new_state_dir
+  local gid="grammar-wip-nonhex" err rc
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "1:abcd1234" "na" "deadbeef1234567890abcdef1234567890abcdeg" "none" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "full-length non-hex wip rejected (nonzero rc)" "$rc"
+  assert_contains "full-length non-hex wip names invalid-wip-sha" "invalid-wip-sha" "$err"
+  assert_no_file_written "full-length non-hex wip: no baton file written" "$gid"
+}
+ac_grammar_wip_nonhex
+
+echo "--- ledger-position: bare-seq (no digest) → invalid-ledger-position, no file written ---"
+ac_grammar_ledger_bare_seq() {
+  new_state_dir
+  local gid="grammar-ledger-bare-seq" err rc
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "42" "na" "none" "none" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "bare-seq ledger-position rejected (nonzero rc)" "$rc"
+  assert_contains "bare-seq ledger-position names invalid-ledger-position" "invalid-ledger-position" "$err"
+  assert_no_file_written "bare-seq ledger-position: no baton file written" "$gid"
+}
+ac_grammar_ledger_bare_seq
+
+echo "--- ledger-position: zero-seq → invalid-ledger-position, no file written ---"
+ac_grammar_ledger_zero_seq() {
+  new_state_dir
+  local gid="grammar-ledger-zero-seq" err rc
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "0:abcd1234" "na" "none" "none" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "zero-seq ledger-position rejected (nonzero rc)" "$rc"
+  assert_contains "zero-seq ledger-position names invalid-ledger-position" "invalid-ledger-position" "$err"
+  assert_no_file_written "zero-seq ledger-position: no baton file written" "$gid"
+}
+ac_grammar_ledger_zero_seq
+
+echo "--- ledger-position: missing digest (seq: with nothing after) → invalid-ledger-position, no file written ---"
+ac_grammar_ledger_missing_digest() {
+  new_state_dir
+  local gid="grammar-ledger-missing-digest" err rc
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "42:" "na" "none" "none" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "missing-digest ledger-position rejected (nonzero rc)" "$rc"
+  assert_contains "missing-digest ledger-position names invalid-ledger-position" "invalid-ledger-position" "$err"
+  assert_no_file_written "missing-digest ledger-position: no baton file written" "$gid"
+}
+ac_grammar_ledger_missing_digest
+
+echo "--- accept: 'none' for both wip and ledger-position ---"
+ac_grammar_accept_none() {
+  new_state_dir
+  local gid="grammar-accept-none" rc f
+  baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "none" "na" "none" "none" >/dev/null 2>&1; rc=$?
+  assert_eq "accept: 'none'/'none' returns rc 0" "0" "$rc"
+  f="$(baton_path "$gid")"
+  assert_true "accept: 'none'/'none' wrote a file" test -f "$f"
+  baton_parse "$f"
+  assert_eq "accept: 'none'/'none' ledger-position round-trips" "none" "$BATON_LEDGER_POSITION"
+  assert_eq "accept: 'none'/'none' wip round-trips" "none" "$BATON_WIP"
+}
+ac_grammar_accept_none
+
+echo "--- accept: full 40-hex wip + minimal '1:00000000'-style ledger-position, round-trip unchanged ---"
+ac_grammar_accept_full() {
+  new_state_dir
+  local gid="grammar-accept-full" rc f
+  baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "1:00000000" "na" \
+    "cafebabe1234567890abcdef1234567890abcdef" "none" >/dev/null 2>&1; rc=$?
+  assert_eq "accept: full-form wip + minimal ledger-position returns rc 0" "0" "$rc"
+  f="$(baton_path "$gid")"
+  assert_true "accept: full-form wip + minimal ledger-position wrote a file" test -f "$f"
+  baton_parse "$f"
+  assert_eq "accept: minimal ledger-position round-trips" "1:00000000" "$BATON_LEDGER_POSITION"
+  assert_eq "accept: full 40-hex wip round-trips" "cafebabe1234567890abcdef1234567890abcdef" "$BATON_WIP"
+}
+ac_grammar_accept_full
+
+echo "--- base-commit: abbreviated 7-hex sha → invalid-base-commit, no file written ---"
+ac_grammar_base_abbrev() {
+  new_state_dir
+  local gid="grammar-base-abbrev" err rc
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "1:abcd1234" "na" "none" "deadbee" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "abbreviated 7-hex base-commit rejected (nonzero rc)" "$rc"
+  assert_contains "abbreviated 7-hex base-commit names invalid-base-commit" "invalid-base-commit" "$err"
+  assert_no_file_written "abbreviated 7-hex base-commit: no baton file written" "$gid"
+}
+ac_grammar_base_abbrev
+
+echo "--- base-commit: full-length but non-hex sha → invalid-base-commit, no file written ---"
+ac_grammar_base_nonhex() {
+  new_state_dir
+  local gid="grammar-base-nonhex" err rc
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "1:abcd1234" "na" "none" "deadbeef1234567890abcdef1234567890abcdeg" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "full-length non-hex base-commit rejected (nonzero rc)" "$rc"
+  assert_contains "full-length non-hex base-commit names invalid-base-commit" "invalid-base-commit" "$err"
+  assert_no_file_written "full-length non-hex base-commit: no baton file written" "$gid"
+}
+ac_grammar_base_nonhex
+
+echo "--- accept: full 40-hex base-commit round-trips unchanged ---"
+ac_grammar_base_accept_full() {
+  new_state_dir
+  local gid="grammar-base-accept-full" rc f
+  baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "1:00000000" "na" "none" \
+    "abadfeed1234567890abcdef1234567890abcdef" >/dev/null 2>&1; rc=$?
+  assert_eq "accept: full-form base-commit returns rc 0" "0" "$rc"
+  f="$(baton_path "$gid")"
+  baton_parse "$f"
+  assert_eq "accept: full 40-hex base-commit round-trips" "abadfeed1234567890abcdef1234567890abcdef" "$BATON_BASE_COMMIT"
+}
+ac_grammar_base_accept_full
 
 # ============================================================
 # ledger fixture helpers (slice 4/2) — build via the REAL ledger_append;
@@ -1037,7 +1173,7 @@ echo "--- baton_write: goal-id containing '/' ---"
 ac_goal_guard_write_slash() {
   new_state_dir
   local err rc
-  err=$(baton_write "bad/goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" "none" 2>&1 1>/dev/null); rc=$?
+  err=$(baton_write "bad/goal" "p" "c" "b" "i" "lc" "4" "s" "1:00000000" "na" "none" 2>&1 1>/dev/null); rc=$?
   assert_nonzero "baton_write rejects goal-id with '/'" "$rc"
   assert_contains "baton_write '/' goal-id names invalid-goal-id" "invalid-goal-id" "$err"
 }
@@ -1047,7 +1183,7 @@ echo "--- baton_write: goal-id beginning with '.' ---"
 ac_goal_guard_write_dot() {
   new_state_dir
   local err rc
-  err=$(baton_write ".hidden-goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" "none" 2>&1 1>/dev/null); rc=$?
+  err=$(baton_write ".hidden-goal" "p" "c" "b" "i" "lc" "4" "s" "1:00000000" "na" "none" 2>&1 1>/dev/null); rc=$?
   assert_nonzero "baton_write rejects goal-id beginning with '.'" "$rc"
   assert_contains "baton_write leading-'.' goal-id names invalid-goal-id" "invalid-goal-id" "$err"
 }
@@ -1094,7 +1230,7 @@ ac_nounset_no_leak() {
   local out rc
   out=$(bash -c '
     . "$1"
-    baton_write "leak-goal" "p" "c" "b" "i" "lc" "4" "s" "1" "na" "none" >/dev/null 2>&1
+    baton_write "leak-goal" "p" "c" "b" "i" "lc" "4" "s" "1:00000000" "na" "none" "none" >/dev/null 2>&1
     wrc=$?
     printf "unbound-ok:%s write-rc:%s\n" "$SOME_UNSET_VAR_NEVER_DEFINED_ANYWHERE" "$wrc"
   ' bash "$LIB" 2>&1)
@@ -1103,6 +1239,1300 @@ ac_nounset_no_leak() {
   assert_contains "nounset leak guard: bare unset-var reference survives after sourcing (no -u leak)" "unbound-ok: write-rc:0" "$out"
 }
 ac_nounset_no_leak
+
+# ============================================================
+# Ledger-position cross-check + reconcile (slice 4/2, AS-25 discharge) —
+# sdlc_ledger_position_check and sdlc_reconcile. Fixtures drive the REAL
+# functions against real batons (baton_write) + real ledgers (ledger_append)
+# + hermetic repos; planted divergence one class at a time, both directions.
+# ============================================================
+
+# ledger_line_digest <ledger-path> <seq> — the stored 8-hex digest at that seq.
+ledger_line_digest() { awk -F'\t' -v s="$2" '$2==s {print $3; exit}' "$1"; }
+
+echo ""
+echo "=== AC-N4: ledger-position cross-check — trailing-deletion hole demo + digest-mismatch + ledger-ahead + exact-match ==="
+
+echo "--- 'none' position + empty/absent ledger → silent, exit 0 ---"
+ac_n4_none_empty() {
+  new_state_dir
+  local gid="pos-none-empty" errf rc
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "none" 2>"$errf"; rc=$?
+  assert_eq "AC-N4 none+empty exits 0" "0" "$rc"
+  assert_eq "AC-N4 none+empty silent on stderr" "" "$(cat "$errf")"
+}
+ac_n4_none_empty
+
+echo "--- 'none' position + non-empty ledger → ledger-ahead (entries the baton never saw) ---"
+ac_n4_none_nonempty() {
+  new_state_dir
+  local gid="pos-none-nonempty" path errf rc out
+  path=$(build_healthy_ledger "$gid")
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "none" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "AC-N4 none+non-empty returns nonzero" "$rc"
+  assert_contains "AC-N4 none+non-empty names ledger-ahead" "ledger-ahead" "$out"
+  assert_contains "AC-N4 none+non-empty says 'baton at none'" "baton at none" "$out"
+}
+ac_n4_none_nonempty
+
+echo "--- HOLE DEMO (AS-25): trailing line deleted — ledger_verify ALONE passes, position cross-check catches it ---"
+ac_n4_hole_demo() {
+  new_state_dir
+  local gid="pos-hole" path tail_seq tail_dig errf rc out
+  path=$(build_healthy_ledger "$gid")            # seq 1..3
+  tail_seq=$(tail -n 1 "$path" | awk -F'\t' '{print $2}')
+  tail_dig=$(ledger_line_digest "$path" "$tail_seq")
+  # Delete the trailing line — a clean whole-line truncation.
+  awk -v ln="$tail_seq" 'NR!=ln' "$path" > "$path.new" && mv "$path.new" "$path"
+  # LOAD-BEARING (AS-25 residual documented): the chain cannot see a trailing
+  # deletion — ledger_verify ALONE still exits 0. This assertion PROVES the hole
+  # the position cross-check closes; it must pass in RED as well as GREEN.
+  assert_true "AC-N4 HOLE DEMO ledger_verify ALONE passes after trailing deletion (the hole)" ledger_verify "$gid"
+  # The cross-check, holding the baton's recorded tail position, catches it.
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "$tail_seq:$tail_dig" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "AC-N4 HOLE DEMO position cross-check catches the trailing deletion (nonzero)" "$rc"
+  assert_contains "AC-N4 HOLE DEMO names ledger-truncated" "ledger-truncated" "$out"
+  assert_contains "AC-N4 HOLE DEMO says trailing entries missing" "trailing entries missing" "$out"
+}
+ac_n4_hole_demo
+
+echo "--- exact match (tail seq + digest) → silent, exit 0 (positive control) ---"
+ac_n4_exact() {
+  new_state_dir
+  local gid="pos-exact" path tail_seq tail_dig errf rc
+  path=$(build_healthy_ledger "$gid")
+  tail_seq=$(tail -n 1 "$path" | awk -F'\t' '{print $2}')
+  tail_dig=$(ledger_line_digest "$path" "$tail_seq")
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "$tail_seq:$tail_dig" 2>"$errf"; rc=$?
+  assert_eq "AC-N4 exact-match exits 0" "0" "$rc"
+  assert_eq "AC-N4 exact-match silent on stderr" "" "$(cat "$errf")"
+}
+ac_n4_exact
+
+echo "--- digest mismatch at the recorded seq (rewrite-at-position) → ledger-truncated naming both digests ---"
+ac_n4_digest_mismatch() {
+  new_state_dir
+  local gid="pos-rewrite" path real_dig errf rc out
+  path=$(build_healthy_ledger "$gid")            # seq 1..3
+  real_dig=$(ledger_line_digest "$path" 2)
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  # Baton claims seq 2 with a WRONG digest; tail (3) >= 2 so it is not a length
+  # truncation — the stored digest at line 2 refutes the baton's recorded one.
+  sdlc_ledger_position_check "$gid" "2:00000000" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "AC-N4 digest-mismatch returns nonzero" "$rc"
+  assert_contains "AC-N4 digest-mismatch names ledger-truncated" "ledger-truncated" "$out"
+  assert_contains "AC-N4 digest-mismatch names the baton digest" "00000000" "$out"
+  assert_contains "AC-N4 digest-mismatch names the ledger's stored digest" "$real_dig" "$out"
+}
+ac_n4_digest_mismatch
+
+echo "--- tail seq > baton seq (matching digest at the recorded seq) → ledger-ahead ---"
+ac_n4_ahead() {
+  new_state_dir
+  local gid="pos-ahead" path dig2 errf rc out
+  path=$(build_healthy_ledger "$gid")            # seq 1..3
+  dig2=$(ledger_line_digest "$path" 2)
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  # Baton is at seq 2 with the CORRECT digest, but the ledger has grown to 3 —
+  # decisions post-date the checkpoint.
+  sdlc_ledger_position_check "$gid" "2:$dig2" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "AC-N4 ledger-ahead returns nonzero" "$rc"
+  assert_contains "AC-N4 ledger-ahead names ledger-ahead" "ledger-ahead" "$out"
+  assert_contains "AC-N4 ledger-ahead says 'baton at 2'" "baton at 2" "$out"
+}
+ac_n4_ahead
+
+echo "--- chain defect passes through under its own name (verify runs first) ---"
+ac_n4_chain_passthrough() {
+  new_state_dir
+  local gid="pos-chain" path tail_seq tail_dig errf rc out
+  path=$(build_healthy_ledger "$gid")
+  tail_seq=$(tail -n 1 "$path" | awk -F'\t' '{print $2}')
+  tail_dig=$(ledger_line_digest "$path" "$tail_seq")
+  # Tamper line 2's summary WITHOUT touching its digest → in-place-edit.
+  awk -F'\t' -v OFS='\t' 'NR==2 { $6="TAMPERED" } { print }' "$path" > "$path.new" && mv "$path.new" "$path"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "$tail_seq:$tail_dig" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "AC-N4 chain defect returns nonzero" "$rc"
+  assert_contains "AC-N4 chain defect passes through as in-place-edit" "in-place-edit" "$out"
+}
+ac_n4_chain_passthrough
+
+echo "--- position-check goal-id guard: '/' → invalid-goal-id ---"
+ac_n4_guard() {
+  new_state_dir
+  local err rc
+  err=$(sdlc_ledger_position_check "bad/goal" "none" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N4 position-check rejects a '/' goal-id" "$rc"
+  assert_contains "AC-N4 position-check '/' names invalid-goal-id" "invalid-goal-id" "$err"
+}
+ac_n4_guard
+
+# ---------- reconcile fixtures ----------
+# setup_reconcile <goal-id> [current] — sets REPO_DIR + PLAN_STUB globals (NOT
+# echoed: it must run in THIS shell, not a command-substitution subshell, so
+# new_state_dir's HOME/SDLC_STATE_DIR exports reach the parent — a subshell
+# would lose them and the baton/plan would land under a stale dir). Freshens
+# HOME/SDLC_STATE_DIR, builds a hermetic repo, and writes a plan stub OUTSIDE
+# the repo worktree (so it never perturbs the worktree-tree comparison in
+# predicate 7). Callers: `setup_reconcile "$gid" 4; d="$REPO_DIR"`.
+setup_reconcile() {
+  local gid="$1" current="${2:-4}"
+  new_state_dir
+  REPO_DIR=$(mktemp -d); CLEAN_DIRS+=("$REPO_DIR")
+  git -C "$REPO_DIR" init -q
+  git -C "$REPO_DIR" config user.name  "fixture"
+  git -C "$REPO_DIR" config user.email "fixture@example.com"
+  printf 'base line\n' > "$REPO_DIR/tracked.txt"
+  git -C "$REPO_DIR" add -A
+  git -C "$REPO_DIR" commit -qm base
+  mkdir -p "$SDLC_STATE_DIR/$gid"
+  PLAN_STUB="$SDLC_STATE_DIR/$gid/plan.stub.md"
+  printf 'current: %s\n' "$current" > "$PLAN_STUB"
+}
+# write_recon_baton <gid> <repo-dir> <current> <ledger-pos> <wip> — an aligned
+# healthy baton whose branch/last-commit track the repo's real HEAD.
+write_recon_baton() {
+  local gid="$1" d="$2" current="$3" lpos="$4" wip="$5"
+  baton_write "$gid" "$PLAN_STUB" "$d" "$(git -C "$d" rev-parse --abbrev-ref HEAD)" \
+    "epic/10-never-die" "$(git -C "$d" rev-parse HEAD)" "$current" "sid-$gid/1" \
+    "$lpos" "resume the slice" "$wip" "none" >/dev/null 2>&1
+}
+
+echo ""
+echo "=== AC-N2/AC-N5: sdlc_reconcile — clean/restore verdicts + each planted divergence parks (both directions) ==="
+
+echo "--- clean fixture (wip none, clean worktree) → 'clean' verdict, exit 0 ---"
+ac_recon_clean_none() {
+  local gid="recon-clean-none" d errf out rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none none
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_reconcile "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N2 clean fixture exits 0" "0" "$rc"
+  assert_eq "AC-N2 clean fixture prints the 'clean' verdict token" "clean" "$out"
+  assert_eq "AC-N2 clean fixture silent on stderr" "" "$(cat "$errf")"
+}
+ac_recon_clean_none
+
+echo "--- current: with a trailing CR (CRLF plan) → parses as clean, not false baton-stale ---"
+ac_recon_current_crlf() {
+  local gid="recon-current-crlf" d errf out rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  printf 'current: 4\r\n' > "$PLAN_STUB"          # CRLF line ending leaves "4\r" without a trailing trim
+  write_recon_baton "$gid" "$d" 4 none none        # baton sdlc-step: 4
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_reconcile "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "reconcile CRLF current: exits 0" "0" "$rc"
+  assert_eq "reconcile CRLF current: prints 'clean'" "clean" "$out"
+  assert_eq "reconcile CRLF current: silent on stderr" "" "$(cat "$errf")"
+}
+ac_recon_current_crlf
+
+echo "--- clean fixture with a present WIP (worktree == snapshot) → 'clean' verdict ---"
+ac_recon_clean_wip_present() {
+  local gid="recon-clean-wip" d snap errf out rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  printf 'work in progress\n' > "$d/wip.txt"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)   # snap tree = HEAD + wip.txt; worktree still has wip.txt
+  write_recon_baton "$gid" "$d" 4 none "$snap"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_reconcile "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N5 wip-present fixture exits 0" "0" "$rc"
+  assert_eq "AC-N5 wip-present (worktree==snapshot) prints 'clean'" "clean" "$out"
+}
+ac_recon_clean_wip_present
+
+echo "--- clobbered worktree (worktree == HEAD, baton names a wip sha) → 'restore:<sha>' verdict ---"
+ac_recon_restore() {
+  local gid="recon-restore" d snap errf out rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  printf 'work in progress\n' > "$d/wip.txt"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  rm -f "$d/wip.txt"                                   # clobber: worktree back to HEAD
+  write_recon_baton "$gid" "$d" 4 none "$snap"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_reconcile "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N5 clobbered fixture exits 0" "0" "$rc"
+  assert_eq "AC-N5 clobbered (worktree==HEAD + wip sha) prints 'restore:<sha>'" "restore:$snap" "$out"
+}
+ac_recon_restore
+
+# ---------- F1 (critic): mixed-WIP triage over a force-included snapshot ----------
+# The existing AC-N5 clean/restore fixtures snapshot with NO force-include, so a
+# snapshot tree that carries a gitignored lifecycle artifact was never exercised.
+# These three fixtures snapshot WITH a force-include path (.bionic/docs) atop a
+# tracked edit — a faithful mixed WIP — and assert the triage classifies it as
+# clean/restore/drift by CONTENT, not by whole-tree equality (which the plain
+# `add -A` worktree tree can never satisfy once the snapshot force-included a
+# gitignored path).
+echo "--- F1 mixed WIP (tracked edit + force-included gitignored artifact) faithfully present → 'clean' ---"
+ac_recon_mixed_wip_clean() {
+  local gid="recon-mixed-clean" d snap errf out rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  printf '.bionic/\n' > "$d/.gitignore"
+  git -C "$d" add -A; git -C "$d" commit -qm gitignore     # .bionic/ ignored, committed into base
+  printf 'v2 work in progress\n' > "$d/tracked.txt"        # tracked edit
+  mkdir -p "$d/.bionic/docs"; printf 'plan wip\n' > "$d/.bionic/docs/plan.md"  # gitignored artifact
+  snap=$(sdlc_wip_snapshot "$gid" "$d" ".bionic/docs" 2>/dev/null)   # force-include the gitignored path
+  write_recon_baton "$gid" "$d" 4 none "$snap"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_reconcile "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N5 mixed-WIP faithfully present exits 0" "0" "$rc"
+  assert_eq "AC-N5 mixed-WIP (tracked edit + force-included artifact) prints 'clean'" "clean" "$out"
+  assert_eq "AC-N5 mixed-WIP clean silent on stderr" "" "$(cat "$errf")"
+}
+ac_recon_mixed_wip_clean
+
+echo "--- F1 mixed WIP clobbered (both paths back to HEAD) → 'restore:<sha>' ---"
+ac_recon_mixed_wip_clobbered() {
+  local gid="recon-mixed-clobber" d snap errf out rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  printf '.bionic/\n' > "$d/.gitignore"
+  git -C "$d" add -A; git -C "$d" commit -qm gitignore
+  printf 'v2 work in progress\n' > "$d/tracked.txt"
+  mkdir -p "$d/.bionic/docs"; printf 'plan wip\n' > "$d/.bionic/docs/plan.md"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" ".bionic/docs" 2>/dev/null)
+  git -C "$d" checkout -q -- tracked.txt                   # revert tracked edit to HEAD
+  rm -rf "$d/.bionic"                                      # drop the force-included artifact
+  write_recon_baton "$gid" "$d" 4 none "$snap"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_reconcile "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N5 mixed-WIP clobbered exits 0" "0" "$rc"
+  assert_eq "AC-N5 mixed-WIP clobbered (both paths back to HEAD) prints 'restore:<sha>'" "restore:$snap" "$out"
+}
+ac_recon_mixed_wip_clobbered
+
+echo "--- F1 mixed WIP, genuine third-writer divergence on a snapshot path → 'worktree-drift' ---"
+ac_recon_mixed_wip_drift() {
+  local gid="recon-mixed-drift" d snap err rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  printf '.bionic/\n' > "$d/.gitignore"
+  git -C "$d" add -A; git -C "$d" commit -qm gitignore
+  printf 'v2 work in progress\n' > "$d/tracked.txt"
+  mkdir -p "$d/.bionic/docs"; printf 'plan wip\n' > "$d/.bionic/docs/plan.md"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" ".bionic/docs" 2>/dev/null)
+  printf 'v3 a third writer clobbered this\n' > "$d/tracked.txt"   # neither HEAD nor snapshot
+  write_recon_baton "$gid" "$d" 4 none "$snap"
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N5 mixed-WIP third-writer returns nonzero" "$rc"
+  assert_contains "AC-N5 mixed-WIP third-writer names worktree-drift" "worktree-drift" "$err"
+  assert_contains "AC-N5 mixed-WIP third-writer says 'matches neither'" "matches neither" "$err"
+}
+ac_recon_mixed_wip_drift
+
+echo "--- baton-stale: sdlc-step != plan current → baton-stale naming both ---"
+ac_recon_stale_step() {
+  local gid="recon-stale-step" d err rc
+  setup_reconcile "$gid" 5; d="$REPO_DIR"                        # plan current: 5
+  write_recon_baton "$gid" "$d" 4 none none            # baton sdlc-step: 4
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N2 step-mismatch returns nonzero" "$rc"
+  assert_contains "AC-N2 step-mismatch names baton-stale" "baton-stale" "$err"
+  assert_contains "AC-N2 step-mismatch names the baton step" "baton step 4" "$err"
+  assert_contains "AC-N2 step-mismatch names the plan current" "plan current 5" "$err"
+}
+ac_recon_stale_step
+
+echo "--- baton-stale: last-commit != branch tip (branch advanced after checkpoint) → baton-stale ---"
+ac_recon_stale_tip() {
+  local gid="recon-stale-tip" d err rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none none            # last-commit = current tip
+  printf 'later work\n' > "$d/later.txt"; git -C "$d" add -A; git -C "$d" commit -qm later  # advance tip
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N2 tip-advanced returns nonzero" "$rc"
+  assert_contains "AC-N2 tip-advanced names baton-stale" "baton-stale" "$err"
+  assert_contains "AC-N2 tip-advanced says 'not branch tip'" "not branch tip" "$err"
+}
+ac_recon_stale_tip
+
+echo "--- plan file missing → plan-unreadable ---"
+ac_recon_plan_missing() {
+  local gid="recon-plan-missing" d err rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none none
+  rm -f "$PLAN_STUB"
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N2 plan-missing returns nonzero" "$rc"
+  assert_contains "AC-N2 plan-missing names plan-unreadable" "plan-unreadable" "$err"
+}
+ac_recon_plan_missing
+
+echo "--- plan present but no parseable 'current:' line → plan-unreadable ---"
+ac_recon_plan_no_current() {
+  local gid="recon-plan-nocurrent" d err rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none none
+  printf 'no current key here\n' > "$PLAN_STUB"
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N2 plan-no-current returns nonzero" "$rc"
+  assert_contains "AC-N2 plan-no-current names plan-unreadable" "plan-unreadable" "$err"
+}
+ac_recon_plan_no_current
+
+echo "--- malformed baton passes through (parse defect family) ---"
+ac_recon_baton_malformed() {
+  local gid="recon-malformed" d err rc baton
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none none
+  baton=$(baton_path "$gid")
+  grep -v -E '^next-action:' "$baton" > "$baton.new" && mv "$baton.new" "$baton"   # drop a required key
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N2 malformed-baton returns nonzero" "$rc"
+  assert_contains "AC-N2 malformed-baton passes through the parse defect" "missing-key" "$err"
+}
+ac_recon_baton_malformed
+
+echo "--- ledger-position cross-check passes through (ledger-ahead) ---"
+ac_recon_ledger_passthrough() {
+  local gid="recon-ledger" d err rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  build_healthy_ledger "$gid" >/dev/null              # non-empty ledger
+  write_recon_baton "$gid" "$d" 4 none none           # baton ledger-position: none
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N4 reconcile ledger-position pass-through returns nonzero" "$rc"
+  assert_contains "AC-N4 reconcile passes through ledger-ahead" "ledger-ahead" "$err"
+}
+ac_recon_ledger_passthrough
+
+echo "--- WIP check passes through (wip-lost: baton names a sha with no ref/object) ---"
+ac_recon_wip_passthrough() {
+  local gid="recon-wiplost" d err rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"  # full 40-hex, absent object
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N5 reconcile wip-check pass-through returns nonzero" "$rc"
+  assert_contains "AC-N5 reconcile passes through wip-lost" "wip-lost" "$err"
+}
+ac_recon_wip_passthrough
+
+echo "--- worktree-drift: wip none but a dirty worktree (unexplained work product) → worktree-drift ---"
+ac_recon_drift_none() {
+  local gid="recon-drift-none" d err rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none none
+  printf 'unexplained\n' > "$d/surprise.txt"           # dirty worktree, baton says wip none
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N5 wip-none dirty-worktree returns nonzero" "$rc"
+  assert_contains "AC-N5 wip-none dirty-worktree names worktree-drift" "worktree-drift" "$err"
+  assert_contains "AC-N5 wip-none dirty-worktree says 'unexplained work product'" "unexplained work product" "$err"
+}
+ac_recon_drift_none
+
+echo "--- worktree-drift: worktree matches NEITHER HEAD nor snapshot (third writer) → worktree-drift ---"
+ac_recon_drift_neither() {
+  local gid="recon-drift-neither" d snap err rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  printf 'wip one\n' > "$d/wip.txt"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)   # snap = HEAD + wip.txt (ref seated once)
+  printf 'third writer\n' > "$d/wip2.txt"              # worktree now HEAD + wip.txt + wip2.txt (matches neither)
+  write_recon_baton "$gid" "$d" 4 none "$snap"
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N5 third-writer drift returns nonzero" "$rc"
+  assert_contains "AC-N5 third-writer names worktree-drift" "worktree-drift" "$err"
+  assert_contains "AC-N5 third-writer says 'matches neither'" "matches neither" "$err"
+}
+ac_recon_drift_neither
+
+echo "--- reconcile goal-id guard: '/' → invalid-goal-id ---"
+ac_recon_guard() {
+  new_state_dir
+  local err rc
+  err=$(sdlc_reconcile "bad/goal" "." 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "reconcile rejects a '/' goal-id" "$rc"
+  assert_contains "reconcile '/' names invalid-goal-id" "invalid-goal-id" "$err"
+}
+ac_recon_guard
+
+# ============================================================
+# Completion latch (slice 4/3, spec D2) — sdlc_complete_check. Fixtures build
+# a hermetic repo with two REAL named branches (goal-branch, integ-branch),
+# merged or left unmerged one class at a time, plus a plan stub (current:)
+# and a real baton (baton_write). rc semantics under test: 0 verified / 1
+# benign not-complete / 2 loud false-complete-or-defect.
+# ============================================================
+
+# setup_complete <goal-id> <current> [merge: yes|no, default yes] — sets
+# REPO_DIR + PLAN_STUB globals (NOT echoed — must run in THIS shell so
+# new_state_dir's HOME/SDLC_STATE_DIR exports reach the parent). Builds a
+# repo with goal-branch branched from integ-branch's base commit, one extra
+# commit on goal-branch; merge=yes fast-forwards integ-branch to goal-branch's
+# tip (branch tip becomes an ancestor), merge=no leaves integ-branch behind
+# (branch tip is NOT an ancestor). Writes the plan stub OUTSIDE the repo.
+setup_complete() {
+  local gid="$1" current="$2" merge="${3:-yes}"
+  new_state_dir
+  REPO_DIR=$(mktemp -d); CLEAN_DIRS+=("$REPO_DIR")
+  git -C "$REPO_DIR" init -q
+  git -C "$REPO_DIR" config user.name  "fixture"
+  git -C "$REPO_DIR" config user.email "fixture@example.com"
+  printf 'base\n' > "$REPO_DIR/base.txt"
+  git -C "$REPO_DIR" add -A
+  git -C "$REPO_DIR" commit -qm base
+  # The fork baseline: integ-branch's tip at the moment goal-branch forks
+  # from it. A genuinely completed goal has branch_tip != BASE_COMMIT (work
+  # was committed since) AND is-ancestor(branch_tip, integ_tip).
+  BASE_COMMIT=$(git -C "$REPO_DIR" rev-parse HEAD)
+  git -C "$REPO_DIR" branch -q integ-branch
+  git -C "$REPO_DIR" checkout -q -b goal-branch
+  printf 'goal work\n' > "$REPO_DIR/goal.txt"
+  git -C "$REPO_DIR" add -A
+  git -C "$REPO_DIR" commit -qm goal-work
+  if [ "$merge" = "yes" ]; then
+    git -C "$REPO_DIR" checkout -q integ-branch
+    # --no-ff so integ-branch carries a REAL merge commit: its tip then DIFFERS
+    # from goal-branch's tip (a completed goal's realistic post-merge topology).
+    # A fast-forward would leave the tips EQUAL — indistinguishable from the
+    # vacuous zero-goal-work case the F2 tip-distinctness guard rejects.
+    git -C "$REPO_DIR" merge -q --no-ff goal-branch -m merge-goal
+    git -C "$REPO_DIR" checkout -q goal-branch
+  fi
+  mkdir -p "$SDLC_STATE_DIR/$gid"
+  PLAN_STUB="$SDLC_STATE_DIR/$gid/plan.stub.md"
+  printf 'current: %s\n' "$current" > "$PLAN_STUB"
+}
+# setup_complete_vacuous <goal-id> <current> — F2 (critic): builds a repo where
+# goal-branch AND integ-branch BOTH point at the base commit (NO goal work ever
+# committed). The tips are EQUAL, so `merge-base --is-ancestor` passes VACUOUSLY
+# (a commit is its own ancestor) — the exact topology a forged current:10 latch
+# exploits. Same globals/discipline as setup_complete.
+setup_complete_vacuous() {
+  local gid="$1" current="$2"
+  new_state_dir
+  REPO_DIR=$(mktemp -d); CLEAN_DIRS+=("$REPO_DIR")
+  git -C "$REPO_DIR" init -q
+  git -C "$REPO_DIR" config user.name  "fixture"
+  git -C "$REPO_DIR" config user.email "fixture@example.com"
+  printf 'base\n' > "$REPO_DIR/base.txt"
+  git -C "$REPO_DIR" add -A
+  git -C "$REPO_DIR" commit -qm base
+  # Both branches AND the fork baseline sit at base — zero goal work: a stale
+  # zero-work branch (branch_tip == BASE_COMMIT) that the merged-ness predicate
+  # must reject regardless of what integration did.
+  BASE_COMMIT=$(git -C "$REPO_DIR" rev-parse HEAD)
+  git -C "$REPO_DIR" branch -q integ-branch    # both at base — zero goal work
+  git -C "$REPO_DIR" branch -q goal-branch
+  mkdir -p "$SDLC_STATE_DIR/$gid"
+  PLAN_STUB="$SDLC_STATE_DIR/$gid/plan.stub.md"
+  printf 'current: %s\n' "$current" > "$PLAN_STUB"
+}
+# write_complete_baton <gid> <dir> <current> <wip> — a baton whose branch/
+# integration-branch name the fixture's two real branches.
+write_complete_baton() {
+  local gid="$1" d="$2" current="$3" wip="$4" base="${5:-$BASE_COMMIT}"
+  baton_write "$gid" "$PLAN_STUB" "$d" "goal-branch" "integ-branch" \
+    "$(git -C "$d" rev-parse HEAD)" "$current" "sid-$gid/1" \
+    "none" "resume the slice" "$wip" "$base" >/dev/null 2>&1
+}
+# count_key_lines <ledger-path> <effect-key> — raw TSV line count (any type)
+# whose effect-key column (field 5) matches exactly; 0 if the file is absent.
+count_key_lines() {
+  local path="$1" key="$2"
+  [ -f "$path" ] || { printf '0'; return; }
+  awk -F'\t' -v k="$key" '$5==k {c++} END{print c+0}' "$path"
+}
+
+echo ""
+echo "=== AC-N3: sdlc_complete_check — structural completion latch (both directions) ==="
+
+echo "--- GENUINE: current 10, branch merged into integration-branch, wip none → complete-verified, latch once, idempotent on replay ---"
+ac_complete_genuine() {
+  local gid="complete-genuine" d errf out rc path count1 count2
+  setup_complete "$gid" 10 yes; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  path=$(build_healthy_ledger "$gid")   # a real completed goal has journaled things along the way
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N3 genuine exits 0" "0" "$rc"
+  assert_eq "AC-N3 genuine prints 'complete-verified'" "complete-verified" "$out"
+  assert_eq "AC-N3 genuine silent on stderr" "" "$(cat "$errf")"
+  count1="$(count_key_lines "$path" "complete:$gid")"
+  assert_true "AC-N3 genuine journals the complete: latch" test "$count1" -ge 1
+
+  # second invocation: effect already applied — still complete-verified, no
+  # duplicate ledger lines for the key.
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N3 second call exits 0" "0" "$rc"
+  assert_eq "AC-N3 second call prints 'complete-verified'" "complete-verified" "$out"
+  count2="$(count_key_lines "$path" "complete:$gid")"
+  assert_eq "AC-N3 idempotent: ledger line count for complete: key unchanged" "$count1" "$count2"
+}
+ac_complete_genuine
+
+echo "--- current: 10 with a trailing space → parses as terminal, not false not-complete ---"
+ac_complete_current_trailing_space() {
+  local gid="complete-current-trailws" d errf out rc path
+  setup_complete "$gid" 10 yes; d="$REPO_DIR"
+  printf 'current: 10 \n' > "$PLAN_STUB"          # trailing space leaves "10 " without a trailing trim
+  write_complete_baton "$gid" "$d" 10 none
+  path=$(build_healthy_ledger "$gid")
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "complete_check trailing-space current:10 exits 0" "0" "$rc"
+  assert_eq "complete_check trailing-space current:10 prints 'complete-verified'" "complete-verified" "$out"
+  assert_eq "complete_check trailing-space current:10 silent on stderr" "" "$(cat "$errf")"
+}
+ac_complete_current_trailing_space
+
+echo "--- FALSE-COMPLETE unmerged: current 10, branch NOT merged into integration-branch → defect, rc 2, no latch ---"
+ac_complete_false_unmerged() {
+  local gid="complete-false-unmerged" d errf out rc path
+  setup_complete "$gid" 10 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  path="$(ledger_path "$gid")"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N3 false-complete unmerged returns rc 2" "2" "$rc"
+  assert_eq "AC-N3 false-complete unmerged exact defect text" \
+    "defect: false-complete: current 10 but goal-branch not merged into integ-branch" "$(cat "$errf")"
+  assert_eq "AC-N3 false-complete unmerged prints nothing on stdout" "" "$out"
+  assert_eq "AC-N3 false-complete unmerged: no complete: line in the ledger" \
+    "0" "$(count_key_lines "$path" "complete:$gid")"
+}
+ac_complete_false_unmerged
+
+echo "--- FALSE-COMPLETE stranded wip: current 10, merged, wip != none → defect, rc 2, no latch ---"
+ac_complete_false_stranded_wip() {
+  local gid="complete-false-wip" d errf out rc path wip
+  setup_complete "$gid" 10 yes; d="$REPO_DIR"
+  wip="$(git -C "$d" rev-parse HEAD)"
+  write_complete_baton "$gid" "$d" 10 "$wip"
+  path="$(ledger_path "$gid")"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N3 stranded-wip returns rc 2" "2" "$rc"
+  assert_eq "AC-N3 stranded-wip exact defect text" \
+    "defect: false-complete: terminal plan with stranded wip $wip" "$(cat "$errf")"
+  assert_eq "AC-N3 stranded-wip: no complete: line in the ledger" \
+    "0" "$(count_key_lines "$path" "complete:$gid")"
+}
+ac_complete_false_stranded_wip
+
+echo "--- F2 FALSE-COMPLETE vacuous: current 10, goal-branch tip == base-commit (zero goal work) → defect, rc 2, no latch ---"
+ac_complete_false_vacuous() {
+  local gid="complete-false-vacuous" d errf out rc path
+  setup_complete_vacuous "$gid" 10; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  path=$(build_healthy_ledger "$gid")   # a valid ledger so the vacuous latch is what must refuse, not a missing chain
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N3 vacuous-complete returns rc 2" "2" "$rc"
+  assert_contains "AC-N3 vacuous-complete names the false-complete class" "defect: false-complete:" "$(cat "$errf")"
+  assert_contains "AC-N3 vacuous-complete names the stale zero-work branch" \
+    "goal-branch did no work since base-commit" "$(cat "$errf")"
+  assert_contains "AC-N3 vacuous-complete tags stale-zero-work" "stale zero-work branch" "$(cat "$errf")"
+  assert_eq "AC-N3 vacuous-complete prints nothing on stdout" "" "$out"
+  assert_eq "AC-N3 vacuous-complete: no complete: line in the ledger" \
+    "0" "$(count_key_lines "$path" "complete:$gid")"
+}
+ac_complete_false_vacuous
+
+# setup_complete_stale_escape <gid> <current> — F2a (critic re-attack, THE
+# merge-blocker): goal-branch forks at BASE_COMMIT and NEVER advances (zero
+# goal work), while integ-branch advances via an UNRELATED commit (another wave
+# merging into the shared epic branch). goal-branch's tip is thus a PROPER
+# ANCESTOR of integ-branch's tip — is-ancestor TRUE, tips DIFFER — the exact
+# epic topology a forged current:10 on a stale pointer exploits. The old
+# is-ancestor + tip-distinctness guards BOTH pass here (fail-open); the
+# base-commit work-happened predicate must reject.
+setup_complete_stale_escape() {
+  local gid="$1" current="$2"
+  new_state_dir
+  REPO_DIR=$(mktemp -d); CLEAN_DIRS+=("$REPO_DIR")
+  git -C "$REPO_DIR" init -q
+  git -C "$REPO_DIR" config user.name  "fixture"
+  git -C "$REPO_DIR" config user.email "fixture@example.com"
+  printf 'base\n' > "$REPO_DIR/base.txt"
+  git -C "$REPO_DIR" add -A
+  git -C "$REPO_DIR" commit -qm base
+  BASE_COMMIT=$(git -C "$REPO_DIR" rev-parse HEAD)
+  git -C "$REPO_DIR" branch -q goal-branch "$BASE_COMMIT"   # forks at base, never advances
+  git -C "$REPO_DIR" checkout -q -b integ-branch "$BASE_COMMIT"
+  printf 'unrelated other-wave work\n' > "$REPO_DIR/other.txt"
+  git -C "$REPO_DIR" add -A
+  git -C "$REPO_DIR" commit -qm "other wave merged"        # integ advances for unrelated reasons
+  git -C "$REPO_DIR" checkout -q goal-branch
+  mkdir -p "$SDLC_STATE_DIR/$gid"
+  PLAN_STUB="$SDLC_STATE_DIR/$gid/plan.stub.md"
+  printf 'current: %s\n' "$current" > "$PLAN_STUB"
+}
+# setup_complete_ff <gid> <current> — F2b (critic re-attack, over-correction):
+# goal-branch forks at BASE_COMMIT, commits real work, and integ-branch
+# FAST-FORWARDS to goal-branch's tip → tips EQUAL. Work happened
+# (branch_tip != BASE_COMMIT) and is-ancestor holds vacuously; a genuine
+# completion the old tip-equality guard WRONGLY refused. Must verify.
+setup_complete_ff() {
+  local gid="$1" current="$2"
+  new_state_dir
+  REPO_DIR=$(mktemp -d); CLEAN_DIRS+=("$REPO_DIR")
+  git -C "$REPO_DIR" init -q
+  git -C "$REPO_DIR" config user.name  "fixture"
+  git -C "$REPO_DIR" config user.email "fixture@example.com"
+  printf 'base\n' > "$REPO_DIR/base.txt"
+  git -C "$REPO_DIR" add -A
+  git -C "$REPO_DIR" commit -qm base
+  BASE_COMMIT=$(git -C "$REPO_DIR" rev-parse HEAD)
+  git -C "$REPO_DIR" branch -q integ-branch
+  git -C "$REPO_DIR" checkout -q -b goal-branch
+  printf 'real goal work\n' > "$REPO_DIR/goal.txt"
+  git -C "$REPO_DIR" add -A
+  git -C "$REPO_DIR" commit -qm goal-work
+  git -C "$REPO_DIR" checkout -q integ-branch
+  git -C "$REPO_DIR" merge -q --ff-only goal-branch       # fast-forward: tips become EQUAL
+  git -C "$REPO_DIR" checkout -q goal-branch
+  mkdir -p "$SDLC_STATE_DIR/$gid"
+  PLAN_STUB="$SDLC_STATE_DIR/$gid/plan.stub.md"
+  printf 'current: %s\n' "$current" > "$PLAN_STUB"
+}
+
+echo "--- F2a MERGE-BLOCKER: stale zero-work goal branch, integ advanced UNRELATED (proper-ancestor, is-ancestor TRUE, tips differ) → false-complete rc 2, no latch ---"
+ac_complete_stale_escape() {
+  local gid="complete-stale-escape" d errf out rc path btip itip
+  setup_complete_stale_escape "$gid" 10; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  path=$(build_healthy_ledger "$gid")
+  # Prove the fixture IS the escape topology, not a plain unmerged case:
+  btip=$(git -C "$d" rev-parse goal-branch); itip=$(git -C "$d" rev-parse integ-branch)
+  assert_true "F2a fixture: is-ancestor(goal,integ) is TRUE (proper ancestor)" \
+    git -C "$d" merge-base --is-ancestor "$btip" "$itip"
+  TOTAL=$((TOTAL + 1))
+  if [ "$btip" != "$itip" ]; then pass "F2a fixture: tips DIFFER (old distinctness guard would pass)"; else fail "F2a fixture: tips DIFFER" "tips equal"; fi
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "F2a stale-escape returns rc 2 (was fail-open complete-verified)" "2" "$rc"
+  assert_contains "F2a stale-escape names the false-complete class" "defect: false-complete:" "$(cat "$errf")"
+  assert_contains "F2a stale-escape names the stale zero-work branch" "goal-branch did no work since base-commit" "$(cat "$errf")"
+  assert_eq "F2a stale-escape prints nothing on stdout" "" "$out"
+  assert_eq "F2a stale-escape: no complete: line latched" "0" "$(count_key_lines "$path" "complete:$gid")"
+}
+ac_complete_stale_escape
+
+echo "--- F2b OVER-CORRECTION: genuine FF merge (work since base, integ FF'd, tips EQUAL, is-ancestor TRUE) → complete-verified rc 0, latch (was wrongly refused) ---"
+ac_complete_genuine_ff() {
+  local gid="complete-genuine-ff" d errf out rc path btip itip
+  setup_complete_ff "$gid" 10; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  path=$(build_healthy_ledger "$gid")
+  btip=$(git -C "$d" rev-parse goal-branch); itip=$(git -C "$d" rev-parse integ-branch)
+  TOTAL=$((TOTAL + 1))
+  if [ "$btip" = "$itip" ]; then pass "F2b fixture: tips EQUAL (FF merge — old guard's false trigger)"; else fail "F2b fixture: tips EQUAL" "tips differ"; fi
+  TOTAL=$((TOTAL + 1))
+  if [ "$btip" != "$BASE_COMMIT" ]; then pass "F2b fixture: branch_tip != base-commit (work happened)"; else fail "F2b fixture: work happened" "branch_tip == base"; fi
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "F2b genuine-ff exits 0 (was wrongly rc 2)" "0" "$rc"
+  assert_eq "F2b genuine-ff prints complete-verified" "complete-verified" "$out"
+  assert_eq "F2b genuine-ff silent on stderr" "" "$(cat "$errf")"
+  assert_true "F2b genuine-ff journals the complete: latch" test "$(count_key_lines "$path" "complete:$gid")" -ge 1
+}
+ac_complete_genuine_ff
+
+echo "--- FAIL-CLOSED: current 10, genuinely merged, but base-commit none → false-complete rc 2 (cannot prove merged work), no latch ---"
+ac_complete_base_none() {
+  local gid="complete-base-none" d errf out rc path
+  setup_complete "$gid" 10 yes; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none none   # base override = none: no baseline recorded
+  path=$(build_healthy_ledger "$gid")
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "base-none fail-closed returns rc 2" "2" "$rc"
+  assert_eq "base-none fail-closed exact defect text" \
+    "defect: false-complete: current 10 but no base-commit recorded to prove merged work" "$(cat "$errf")"
+  assert_eq "base-none fail-closed prints nothing on stdout" "" "$out"
+  assert_eq "base-none fail-closed: no complete: line latched" "0" "$(count_key_lines "$path" "complete:$gid")"
+}
+ac_complete_base_none
+
+echo "--- BENIGN: current 4 → not-complete (no 'defect:' prefix), rc 1, no ledger writes ---"
+ac_complete_benign() {
+  local gid="complete-benign" d errf out rc path
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  path="$(ledger_path "$gid")"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N3 benign not-complete returns rc 1" "1" "$rc"
+  assert_eq "AC-N3 benign not-complete exact text" "not-complete: plan current 4" "$(cat "$errf")"
+  assert_eq "AC-N3 benign not-complete has NO 'defect:' prefix" "" "$(printf '%s' "$(cat "$errf")" | grep -o '^defect:')"
+  assert_eq "AC-N3 benign not-complete prints nothing on stdout" "" "$out"
+  assert_eq "AC-N3 benign not-complete: ledger untouched (no file)" "0" "$(count_key_lines "$path" "complete:$gid")"
+}
+ac_complete_benign
+
+echo "--- chain-broken ledger: ledger_verify fails → its defect passes through, rc 2, no latch ---"
+ac_complete_chain_broken() {
+  local gid="complete-chain-broken" d errf out rc path
+  setup_complete "$gid" 10 yes; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  path=$(build_healthy_ledger "$gid")
+  awk -F'\t' -v OFS='\t' 'NR==2 { $6="TAMPERED SUMMARY" } { print }' "$path" > "$path.new" && mv "$path.new" "$path"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N3 chain-broken returns rc 2" "2" "$rc"
+  assert_contains "AC-N3 chain-broken passes through in-place-edit" "in-place-edit" "$(cat "$errf")"
+  assert_eq "AC-N3 chain-broken: no complete: line landed" "0" "$(count_key_lines "$path" "complete:$gid")"
+}
+ac_complete_chain_broken
+
+echo "--- malformed baton passes through (parse defect family), rc 2 ---"
+ac_complete_baton_malformed() {
+  local gid="complete-malformed" d errf rc baton
+  setup_complete "$gid" 10 yes; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  baton=$(baton_path "$gid")
+  grep -v -E '^next-action:' "$baton" > "$baton.new" && mv "$baton.new" "$baton"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_complete_check "$gid" "$d" 2>"$errf" 1>/dev/null; rc=$?
+  assert_eq "AC-N3 malformed-baton returns rc 2" "2" "$rc"
+  assert_contains "AC-N3 malformed-baton passes through the parse defect" "missing-key" "$(cat "$errf")"
+}
+ac_complete_baton_malformed
+
+echo "--- complete-check goal-id guard: '/' → invalid-goal-id, rc 2 ---"
+ac_complete_guard() {
+  new_state_dir
+  local errf rc
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_complete_check "bad/goal" "." 2>"$errf" 1>/dev/null; rc=$?
+  assert_eq "AC-N3 complete-check rejects a '/' goal-id with rc 2" "2" "$rc"
+  assert_contains "AC-N3 complete-check '/' names invalid-goal-id" "invalid-goal-id" "$(cat "$errf")"
+}
+ac_complete_guard
+
+# ============================================================
+# Gate park (slice 4/4, spec D7 + AS-N10) — sdlc_gate_park <goal-id>
+# <plan-path> <defect> <detail>. Wraps a Wake-Note append to a caller-
+# supplied plan file in sdlc_effect_run, keyed park:<goal-id>:<defect>.
+# AS-N10: plan-path is a caller-supplied arg (NOT derived via baton_parse) —
+# a malformed/missing baton is itself a park cause, so park must not depend
+# on baton derivation succeeding. Fixtures use a bare temp plan file (no
+# baton, no git repo) plus SDLC_STATE_DIR isolation for the ledger.
+# ============================================================
+
+# wake_note_count <plan-path> — number of '## Wake Note' headings present.
+wake_note_count() { grep -c '^## Wake Note$' "$1" 2>/dev/null || true; }
+
+echo ""
+echo "=== AC-N2/AC-N6: sdlc_gate_park — Wake Note through the effect guard (both directions) ==="
+
+echo "--- first park: Wake Note block appended exactly once, fields substituted, effect journaled once ---"
+ac_park_first() {
+  local gid="park-first" plan errf rc path
+  new_state_dir
+  plan=$(mktemp); CLEAN_DIRS+=("$plan")
+  printf 'current: 4\n' > "$plan"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_gate_park "$gid" "$plan" "baton-stale" "baton step 4, plan current 5" 2>"$errf"; rc=$?
+  assert_eq "AC-N2 first park exits 0" "0" "$rc"
+  assert_eq "AC-N2 first park silent on stderr" "" "$(cat "$errf")"
+  assert_eq "AC-N2 first park: exactly one Wake Note block" "1" "$(wake_note_count "$plan")"
+  assert_contains "AC-N2 first park: defect substituted" "GATED by rollover spine: baton-stale" "$(cat "$plan")"
+  assert_contains "AC-N2 first park: detail substituted" "baton step 4, plan current 5" "$(cat "$plan")"
+  assert_contains "AC-N2 first park: options skeleton present" "**Options:**" "$(cat "$plan")"
+  assert_contains "AC-N2 first park: re-arm option present" "delete this note to re-arm" "$(cat "$plan")"
+  assert_contains "AC-N2 first park: why-it-matters present" "**Why it matters:**" "$(cat "$plan")"
+  assert_contains "AC-N2 first park: original plan content preserved" "current: 4" "$(cat "$plan")"
+  path="$(ledger_path "$gid")"
+  assert_eq "AC-N2 first park: effect line journaled exactly once" "1" "$(key_lines "$path" effect "park:$gid:baton-stale")"
+}
+ac_park_first
+
+echo "--- double-drive SAME defect: idempotent by effect key — still one block, one effect line, rc 0 ---"
+ac_park_double_same() {
+  local gid="park-double-same" plan errf rc path
+  new_state_dir
+  plan=$(mktemp); CLEAN_DIRS+=("$plan")
+  printf 'current: 4\n' > "$plan"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_gate_park "$gid" "$plan" "baton-stale" "first drive detail" >/dev/null 2>&1
+  sdlc_gate_park "$gid" "$plan" "baton-stale" "second drive detail" 2>"$errf"; rc=$?
+  path="$(ledger_path "$gid")"
+  assert_eq "AC-N6 double-drive same defect exits 0" "0" "$rc"
+  assert_eq "AC-N6 double-drive same defect: still exactly one Wake Note block" "1" "$(wake_note_count "$plan")"
+  assert_eq "AC-N6 double-drive same defect: effect line count unchanged (still 1)" "1" "$(key_lines "$path" effect "park:$gid:baton-stale")"
+  assert_contains "AC-N6 double-drive same defect: first drive's detail wins (no re-append)" "first drive detail" "$(cat "$plan")"
+}
+ac_park_double_same
+
+echo "--- second park, DIFFERENT defect while parked: presence-probe belt — no double-append, decision for new key journaled ---"
+ac_park_different_defect() {
+  local gid="park-different" plan errf rc path
+  new_state_dir
+  plan=$(mktemp); CLEAN_DIRS+=("$plan")
+  printf 'current: 4\n' > "$plan"
+  sdlc_gate_park "$gid" "$plan" "baton-stale" "first defect detail" >/dev/null 2>&1
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_gate_park "$gid" "$plan" "worktree-drift" "second, different defect detail" 2>"$errf"; rc=$?
+  path="$(ledger_path "$gid")"
+  assert_eq "AC-N6 different-defect-while-parked exits 0 (postcondition: goal IS parked)" "0" "$rc"
+  assert_eq "AC-N6 different-defect-while-parked: still exactly one Wake Note block" "1" "$(wake_note_count "$plan")"
+  assert_contains "AC-N6 different-defect-while-parked: park-skipped note on stderr" "park-skipped: wake note already present — first park wins" "$(cat "$errf")"
+  assert_eq "AC-N6 different-defect-while-parked: decision journaled for the NEW key" "1" "$(key_lines "$path" decision "park:$gid:worktree-drift")"
+  assert_contains "AC-N6 different-defect-while-parked: first block's defect text untouched" "GATED by rollover spine: baton-stale" "$(cat "$plan")"
+}
+ac_park_different_defect
+
+echo "--- plan file missing → park-failed, nonzero, effect state left indeterminate (no false 'applied') ---"
+ac_park_plan_missing() {
+  local gid="park-plan-missing" plan errf rc state
+  new_state_dir
+  plan="$(mktemp -u)"   # a path that does not exist and is never created
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_gate_park "$gid" "$plan" "baton-stale" "detail text" 2>"$errf"; rc=$?
+  assert_nonzero "AC-N2 plan-missing returns nonzero" "$rc"
+  assert_eq "AC-N2 plan-missing exact defect text" \
+    "defect: park-failed: $plan — park could not land durable state" "$(cat "$errf")"
+  state="$(sdlc_effect_state "$gid" "park:$gid:baton-stale")"
+  assert_eq "AC-N2 plan-missing: effect state is indeterminate, NOT applied" "indeterminate" "$state"
+}
+ac_park_plan_missing
+
+echo "--- human-cleared consent: Wake Note manually deleted, replay SAME defect → effect applied, skip, file stays clean (no re-append) ---"
+ac_park_human_cleared() {
+  local gid="park-cleared" plan errf rc
+  new_state_dir
+  plan=$(mktemp); CLEAN_DIRS+=("$plan")
+  printf 'current: 4\n' > "$plan"
+  sdlc_gate_park "$gid" "$plan" "baton-stale" "original detail" >/dev/null 2>&1
+  assert_eq "AC-N2 human-cleared setup: Wake Note landed once" "1" "$(wake_note_count "$plan")"
+  printf 'current: 4\n' > "$plan"   # human deletes the note — plan back to pristine
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_gate_park "$gid" "$plan" "baton-stale" "original detail" 2>"$errf"; rc=$?
+  assert_eq "AC-N2 human-cleared replay exits 0 (effect already applied)" "0" "$rc"
+  assert_eq "AC-N2 human-cleared replay: no re-append — plan stays pristine" "0" "$(wake_note_count "$plan")"
+  assert_eq "AC-N2 human-cleared replay: plan content untouched" "current: 4" "$(cat "$plan")"
+}
+ac_park_human_cleared
+
+echo "--- defect arg empty → loud reject, no ledger writes, no effect key journaled ---"
+ac_park_missing_defect() {
+  local gid="park-missing-defect" plan errf rc path
+  new_state_dir
+  plan=$(mktemp); CLEAN_DIRS+=("$plan")
+  printf 'current: 4\n' > "$plan"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_gate_park "$gid" "$plan" "" "some detail" 2>"$errf"; rc=$?
+  path="$(ledger_path "$gid")"
+  assert_nonzero "AC-N2 empty-defect returns nonzero" "$rc"
+  assert_contains "AC-N2 empty-defect names missing-defect" "missing-defect" "$(cat "$errf")"
+  assert_eq "AC-N2 empty-defect: no Wake Note appended" "0" "$(wake_note_count "$plan")"
+  assert_eq "AC-N2 empty-defect: ledger untouched (no file)" "0" "$([ -f "$path" ] && wc -l < "$path" | tr -d ' ' || echo 0)"
+}
+ac_park_missing_defect
+
+echo "--- gate-park goal-id guard: '/' → invalid-goal-id ---"
+ac_park_guard() {
+  new_state_dir
+  local plan errf rc
+  plan=$(mktemp); CLEAN_DIRS+=("$plan")
+  printf 'current: 4\n' > "$plan"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_gate_park "bad/goal" "$plan" "baton-stale" "detail" 2>"$errf" 1>/dev/null; rc=$?
+  assert_nonzero "AC-N2 gate-park rejects a '/' goal-id" "$rc"
+  assert_contains "AC-N2 gate-park '/' names invalid-goal-id" "invalid-goal-id" "$(cat "$errf")"
+}
+ac_park_guard
+
+# ============================================================
+# Successor-spawn pipeline (slice 4/5, spec D3/D6/D8) —
+# sdlc_successor_pointer_prompt + sdlc_successor_spawn. Every case stubs the
+# two env seams (AS-N2): SDLC_SPAWN_CMD is a synchronous counter script (one
+# line appended per launch — deterministic, race-free), SDLC_REGISTRY_CMD is
+# a canned command emitting JSON (or `false` for the failure path). The real
+# `claude` binary is NEVER invoked here — the T3 live row (Step 5) exercises
+# the defaults. Both seams are set as `local` in each test fn so dynamic
+# scope reaches sdlc_successor_spawn and they auto-clear on return.
+# ============================================================
+
+# make_spawn_stub <counter-path> — a synchronous stub that records one launch
+# per invocation (echoes the stub's own path for SDLC_SPAWN_CMD).
+make_spawn_stub() {
+  local counter="$1" stub
+  stub="$(mktemp)"; CLEAN_DIRS+=("$stub")
+  printf '#!/bin/bash\nprintf x >> %q\nprintf "\\n" >> %q\n' "$counter" "$counter" > "$stub"
+  chmod +x "$stub"
+  printf '%s' "$stub"
+}
+# make_registry_stub <json> — a `cat <file>` command emitting the given JSON
+# (echoes the command string for SDLC_REGISTRY_CMD).
+make_registry_stub() {
+  local json="$1" f
+  f="$(mktemp)"; CLEAN_DIRS+=("$f")
+  printf '%s\n' "$json" > "$f"
+  printf 'cat %s' "$f"
+}
+# spawn_counter <counter-path> — launches recorded (0 if absent/empty).
+spawn_counter() { if [ -f "$1" ]; then grep -c . "$1" | tr -d ' '; else printf '0'; fi; }
+# ledger_tail_pos <goal-id> — the ledger tail's `<seq>:<digest>` (baton
+# ledger-position grammar), so a planted-ledger fixture's baton stays
+# consistent for sdlc_reconcile's position cross-check.
+ledger_tail_pos() { awk -F'\t' 'END{print $2":"$3}' "$(ledger_path "$1")"; }
+# write_complete_baton_pos <gid> <dir> <current> <wip> <ledger-position> — the
+# two-branch complete baton with an explicit ledger-position.
+write_complete_baton_pos() {
+  baton_write "$1" "$PLAN_STUB" "$2" "goal-branch" "integ-branch" \
+    "$(git -C "$2" rev-parse HEAD)" "$3" "sid-$1/1" "$5" "resume the slice" "$4" "${6:-$BASE_COMMIT}" >/dev/null 2>&1
+}
+# spawn_line_sid <ledger-path> <goal-id> — sid= from the newest spawn effect line.
+spawn_line_sid() {
+  awk -F'\t' '$4=="effect" && $5 ~ /^spawn:/ {l=$6} END{print l}' "$1" \
+    | sed -n 's/.*sid=\([0-9a-f-]*\).*/\1/p'
+}
+
+echo ""
+echo "=== AC-N1 substrate: sdlc_successor_pointer_prompt — one source, exact block ==="
+ac_pointer_prompt() {
+  local out expected
+  out="$(sdlc_successor_pointer_prompt "my-goal" "/p/my-goal.plan.md" "/s/my-goal/baton.md" "resume slice 3")"
+  expected="$(cat <<'EOF'
+Rollover pickup for goal my-goal. The rollover spine verified
+state clean; do not re-derive reconciliation, do not override
+any Wake Note. Read the plan at /p/my-goal.plan.md and the baton at
+/s/my-goal/baton.md; resume per the canonical-sdlc session-resume
+protocol. Baton next-action is the literal resume point:
+resume slice 3
+EOF
+)"
+  assert_eq "AC-N1 pointer prompt matches the plan block verbatim (with substitutions)" "$expected" "$out"
+}
+ac_pointer_prompt
+
+echo ""
+echo "=== AC-N2/AC-N5/AC-N6: sdlc_successor_spawn — refuse-first rollover, exactly-once spawn ==="
+
+echo "--- HAPPY + double-drive: healthy goal spawns once (sid printed, counter 1, spawn effect line carries sid=); replay same baton → spawn-skipped, counter unchanged ---"
+ac_spawn_happy_double() {
+  local gid="spawn-happy" d counter path sid sid2 rc out
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 4 no; d="$REPO_DIR"          # current 4 → benign not-complete → proceed
+  write_complete_baton "$gid" "$d" 4 none
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"   # re-drive: no live owner
+  path="$(ledger_path "$gid")"
+
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AC-N5 happy drive exits 0" "0" "$rc"
+  assert_eq "AC-N5 happy drive launched the successor once (counter=1)" "1" "$(spawn_counter "$counter")"
+  sid="$out"
+  TOTAL=$((TOTAL + 1))
+  if printf '%s' "$sid" | grep -qE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
+    pass "AC-N5 happy drive prints a lowercased uuid sid on stdout"
+  else fail "AC-N5 happy drive prints a lowercased uuid sid on stdout" "got: $sid"; fi
+  assert_eq "AC-N5 happy drive: spawn effect line journaled with the printed sid" "$sid" "$(spawn_line_sid "$path" "$gid")"
+  assert_eq "AC-N5 happy drive: exactly one spawn effect line" "1" \
+    "$(awk -F'\t' '$4=="effect" && $5 ~ /^spawn:/' "$path" | wc -l | tr -d ' ')"
+
+  # replay SAME baton (written-at unchanged) → key applied → skip, no new launch.
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AC-N6 replay same baton exits 0" "0" "$rc"
+  assert_contains "AC-N6 replay same baton prints spawn-skipped" "spawn-skipped: already spawned for baton" "$out"
+  assert_eq "AC-N6 replay same baton did NOT re-launch (counter still 1)" "1" "$(spawn_counter "$counter")"
+  sid2="$(spawn_line_sid "$path" "$gid")"
+  assert_eq "AC-N6 replay same baton: spawn sid unchanged" "$sid" "$sid2"
+}
+ac_spawn_happy_double
+
+echo "--- WAKE NOTE STANDING: plan already parked → goal-gated, no spawn, no second Wake Note ---"
+ac_spawn_wake_note() {
+  local gid="spawn-gated" d counter err rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none none
+  printf '\n## Wake Note\n\nGATED by something earlier\n' >> "$PLAN_STUB"   # already parked
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  err="$(sdlc_successor_spawn "$gid" "$d" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "AC-N6 wake-note-standing returns nonzero" "$rc"
+  assert_contains "AC-N6 wake-note-standing names goal-gated" "goal-gated: wake note standing" "$err"
+  assert_eq "AC-N6 wake-note-standing did not spawn (counter 0)" "0" "$(spawn_counter "$counter")"
+  assert_eq "AC-N6 wake-note-standing left exactly one Wake Note (no second append)" "1" "$(wake_note_count "$PLAN_STUB")"
+}
+ac_spawn_wake_note
+
+echo "--- COMPLETE goal (current 10, merged, wip none): goal-complete rc 0, no spawn; second drive hits the applied-latch branch ---"
+ac_spawn_complete() {
+  local gid="spawn-complete" d counter out rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 10 yes; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  build_healthy_ledger "$gid" >/dev/null      # a genuinely-completed goal journaled along the way
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AC-N3 complete goal exits 0" "0" "$rc"
+  assert_eq "AC-N3 complete goal prints goal-complete" "goal-complete" "$out"
+  assert_eq "AC-N3 complete goal did not spawn (counter 0)" "0" "$(spawn_counter "$counter")"
+  # second drive: complete latch is now applied → the effect_state short-circuit.
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AC-N3 complete goal second drive (applied latch) exits 0" "0" "$rc"
+  assert_eq "AC-N3 complete goal second drive prints goal-complete" "goal-complete" "$out"
+  assert_eq "AC-N3 complete goal second drive still did not spawn" "0" "$(spawn_counter "$counter")"
+}
+ac_spawn_complete
+
+echo "--- FALSE-COMPLETE (current 10, NOT merged): park lands, no spawn, rc nonzero ---"
+ac_spawn_false_complete() {
+  local gid="spawn-false" d counter rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 10 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  sdlc_successor_spawn "$gid" "$d" >/dev/null 2>&1; rc=$?
+  assert_nonzero "AC-N3 false-complete returns nonzero" "$rc"
+  assert_eq "AC-N3 false-complete did not spawn (counter 0)" "0" "$(spawn_counter "$counter")"
+  assert_eq "AC-N3 false-complete parked exactly one Wake Note" "1" "$(wake_note_count "$PLAN_STUB")"
+  assert_contains "AC-N3 false-complete parks the false-complete class" "GATED by rollover spine: false-complete" "$(cat "$PLAN_STUB")"
+}
+ac_spawn_false_complete
+
+echo "--- LIVE OWNER: prior spawn line's sid found in the registry → goal-owned, no park, no spawn ---"
+ac_spawn_live_owner() {
+  local gid="spawn-owned" d counter fakesid err rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  fakesid="11111111-2222-3333-4444-555555555555"
+  ledger_append "$gid" effect "spawn:$gid:2026-01-01T00:00:00Z" "sid=$fakesid pid=na cwd=$d" >/dev/null 2>&1
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub "{\"sessions\":[{\"id\":\"$fakesid\"}]}")"
+  err="$(sdlc_successor_spawn "$gid" "$d" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "AC-N6 live-owner returns nonzero" "$rc"
+  assert_contains "AC-N6 live-owner names goal-owned + the sid" "goal-owned: session $fakesid live" "$err"
+  assert_eq "AC-N6 live-owner did not spawn (counter 0)" "0" "$(spawn_counter "$counter")"
+  assert_eq "AC-N6 live-owner did not park (no Wake Note)" "0" "$(wake_note_count "$PLAN_STUB")"
+}
+ac_spawn_live_owner
+
+echo "--- REGISTRY UNAVAILABLE: registry command fails → conservative goal-owned refusal, no park, no spawn ---"
+ac_spawn_registry_down() {
+  local gid="spawn-regdown" d counter fakesid err rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  fakesid="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+  ledger_append "$gid" effect "spawn:$gid:2026-01-01T00:00:00Z" "sid=$fakesid pid=na cwd=$d" >/dev/null 2>&1
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="false"
+  err="$(sdlc_successor_spawn "$gid" "$d" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "AC-N6 registry-down returns nonzero" "$rc"
+  assert_contains "AC-N6 registry-down: conservative refusal suffix" "registry unavailable, refusing conservatively" "$err"
+  assert_eq "AC-N6 registry-down did not spawn (counter 0)" "0" "$(spawn_counter "$counter")"
+  assert_eq "AC-N6 registry-down did not park" "0" "$(wake_note_count "$PLAN_STUB")"
+}
+ac_spawn_registry_down
+
+echo "--- DEAD OWNER: prior spawn sid absent from the registry → proceeds to spawn ---"
+ac_spawn_dead_owner() {
+  local gid="spawn-dead" d counter fakesid out rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  fakesid="99999999-8888-7777-6666-555555555555"
+  ledger_append "$gid" effect "spawn:$gid:2026-01-01T00:00:00Z" "sid=$fakesid pid=na cwd=$d" >/dev/null 2>&1
+  write_complete_baton_pos "$gid" "$d" 4 none "$(ledger_tail_pos "$gid")"   # baton position tracks the planted line → reconcile clean
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[{"id":"00000000-0000-0000-0000-000000000000"}]}')"
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AC-N6 dead-owner proceeds and exits 0" "0" "$rc"
+  assert_eq "AC-N6 dead-owner launched a fresh successor (counter 1)" "1" "$(spawn_counter "$counter")"
+  TOTAL=$((TOTAL + 1))
+  if printf '%s' "$out" | grep -qE '^[0-9a-f-]{36}$'; then pass "AC-N6 dead-owner printed a fresh sid"; else fail "AC-N6 dead-owner printed a fresh sid" "got: $out"; fi
+}
+ac_spawn_dead_owner
+
+echo "--- DIVERGENCE (baton-stale tip): reconcile defect → park that class, no spawn; double-drive → still one Wake Note ---"
+ac_spawn_divergence() {
+  local gid="spawn-diverge" d counter rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none none
+  printf 'later work\n' > "$d/later.txt"; git -C "$d" add -A; git -C "$d" commit -qm later  # tip advances past baton
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  sdlc_successor_spawn "$gid" "$d" >/dev/null 2>&1; rc=$?
+  assert_nonzero "AC-N2 divergence returns nonzero" "$rc"
+  assert_eq "AC-N2 divergence did not spawn (counter 0)" "0" "$(spawn_counter "$counter")"
+  assert_eq "AC-N2 divergence parked one Wake Note" "1" "$(wake_note_count "$PLAN_STUB")"
+  assert_contains "AC-N2 divergence parks the baton-stale class" "GATED by rollover spine: baton-stale" "$(cat "$PLAN_STUB")"
+  # double-drive: still exactly one Wake Note (park idempotent by key).
+  sdlc_successor_spawn "$gid" "$d" >/dev/null 2>&1
+  assert_eq "AC-N6 divergence double-drive: still one Wake Note" "1" "$(wake_note_count "$PLAN_STUB")"
+  assert_eq "AC-N6 divergence double-drive: still no spawn (counter 0)" "0" "$(spawn_counter "$counter")"
+}
+ac_spawn_divergence
+
+echo "--- RESTORE: reconcile verdict restore:<sha> → wip_restore replays the clobbered file, then spawns ---"
+ac_spawn_restore() {
+  local gid="spawn-restore" d counter snap out rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  printf 'work in progress\n' > "$d/wip.txt"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  rm -f "$d/wip.txt"                                  # clobber → worktree == HEAD
+  write_recon_baton "$gid" "$d" 4 none "$snap"
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AC-N5 restore drive exits 0" "0" "$rc"
+  assert_true "AC-N5 restore replayed the clobbered wip.txt" test -f "$d/wip.txt"
+  assert_eq "AC-N5 restore replayed byte-faithful content" "work in progress" "$(cat "$d/wip.txt")"
+  assert_eq "AC-N5 restore then launched the successor (counter 1)" "1" "$(spawn_counter "$counter")"
+}
+ac_spawn_restore
+
+echo "--- INDETERMINATE spawn key (decision, no effect): effect-indeterminate → park, no launch ---"
+ac_spawn_indeterminate() {
+  local gid="spawn-indet" d counter baton wat rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  baton="$(baton_path "$gid")"
+  baton_parse "$baton"; wat="$BATON_WRITTEN_AT"
+  # plant a DECISION line for the exact spawn key stage 6 will compute — a crash
+  # window: intent journaled, no effect. (decision-type → stage 4 does not match it.)
+  ledger_append "$gid" decision "spawn:$gid:$wat" "sid=deadbeef-0000-0000-0000-000000000000 pid=na cwd=$d" >/dev/null 2>&1
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  sdlc_successor_spawn "$gid" "$d" >/dev/null 2>&1; rc=$?
+  assert_nonzero "AC-N6 indeterminate spawn key returns nonzero" "$rc"
+  assert_eq "AC-N6 indeterminate did not launch (counter 0)" "0" "$(spawn_counter "$counter")"
+  assert_eq "AC-N6 indeterminate parked one Wake Note" "1" "$(wake_note_count "$PLAN_STUB")"
+  assert_contains "AC-N6 indeterminate parks the effect-indeterminate class" "GATED by rollover spine: effect-indeterminate" "$(cat "$PLAN_STUB")"
+}
+ac_spawn_indeterminate
+
+echo "--- goal-id guard: '/' → invalid-goal-id, nonzero ---"
+ac_spawn_guard() {
+  new_state_dir
+  local err rc
+  err="$(sdlc_successor_spawn "bad/goal" "." 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "AC-N2 successor-spawn rejects a '/' goal-id" "$rc"
+  assert_contains "AC-N2 successor-spawn '/' names invalid-goal-id" "invalid-goal-id" "$err"
+}
+ac_spawn_guard
+
+echo ""
+echo "=== AS-N14: successor spawn posture — strong workers, strong walls (default full-capability launch) ==="
+
+# make_claude_fake <argv-file> [sleep-secs] — a PATH-fake `claude` binary that
+# records its full argv (one token per line) to argv-file, optionally
+# sleeping first (to prove the real launch backgrounds rather than blocking
+# on the successor's whole turn — spec D8 fire-and-observe). Echoes the
+# fixture DIRECTORY (to prepend onto PATH so the default `_sdlc_spawn_launch`
+# resolves this stub instead of the real binary).
+make_claude_fake() {
+  local argv_file="$1" sleep_secs="${2:-0}" dir stub
+  dir="$(mktemp -d)"; CLEAN_DIRS+=("$dir")
+  stub="$dir/claude"
+  cat > "$stub" <<STUBEOF
+#!/bin/bash
+sleep $sleep_secs
+for a in "\$@"; do printf '%s\n' "\$a" >> "$argv_file"; done
+STUBEOF
+  chmod +x "$stub"
+  printf '%s' "$dir"
+}
+# wait_for_file <path> <max-tenths> — polls up to max-tenths*0.1s for a
+# non-empty file (the default spawn launch backgrounds itself, so the fake
+# claude's argv write races the assertion).
+wait_for_file() {
+  local path="$1" max="${2:-30}" n=0
+  while [ ! -s "$path" ] && [ "$n" -lt "$max" ]; do sleep 0.1; n=$((n + 1)); done
+}
+
+echo "--- DEFAULT posture: SDLC_SPAWN_PERMISSIONS unset → argv carries --dangerously-skip-permissions; launch backgrounds (returns before the fake claude's sleep elapses, effect line still journals) ---"
+ac_spawn_posture_default() {
+  local gid="spawn-posture-default" d argvf fakedir path out rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_SPAWN_PERMISSIONS
+  unset SDLC_SPAWN_PERMISSIONS
+  setup_complete "$gid" 4 no; d="$REPO_DIR"          # current 4 → benign not-complete → proceed
+  write_complete_baton "$gid" "$d" 4 none
+  argvf=$(mktemp); CLEAN_DIRS+=("$argvf"); : > "$argvf"
+  fakedir="$(make_claude_fake "$argvf" 2)"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  local PATH="$fakedir:$PATH"
+  path="$(ledger_path "$gid")"
+
+  SECONDS=0
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AS-N14 default drive exits 0" "0" "$rc"
+  assert_true "AS-N14 default drive returned before the fake claude's 2s sleep elapsed (backgrounded)" test "$SECONDS" -lt 2
+  assert_eq "AS-N14 default drive: spawn effect line journaled (fire-and-observe, not launch-completion)" "1" \
+    "$(awk -F'\t' '$4=="effect" && $5 ~ /^spawn:/' "$path" | wc -l | tr -d ' ')"
+
+  wait_for_file "$argvf" 40
+  assert_contains "AS-N14 default argv carries -p" "-p" "$(cat "$argvf")"
+  assert_contains "AS-N14 default argv carries --session-id" "--session-id" "$(cat "$argvf")"
+  assert_contains "AS-N14 default argv carries --dangerously-skip-permissions" "--dangerously-skip-permissions" "$(cat "$argvf")"
+}
+ac_spawn_posture_default
+
+echo "--- OVERRIDE posture: SDLC_SPAWN_PERMISSIONS set non-empty → its tokens replace the permission args verbatim, no --dangerously-skip-permissions ---"
+ac_spawn_posture_override() {
+  local gid="spawn-posture-override" d argvf fakedir out rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_SPAWN_PERMISSIONS
+  SDLC_SPAWN_PERMISSIONS="--permission-mode acceptEdits"
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  argvf=$(mktemp); CLEAN_DIRS+=("$argvf"); : > "$argvf"
+  fakedir="$(make_claude_fake "$argvf" 0)"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  local PATH="$fakedir:$PATH"
+
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AS-N14 override drive exits 0" "0" "$rc"
+  wait_for_file "$argvf" 40
+  assert_contains "AS-N14 override argv carries --permission-mode" "--permission-mode" "$(cat "$argvf")"
+  assert_contains "AS-N14 override argv carries acceptEdits" "acceptEdits" "$(cat "$argvf")"
+  TOTAL=$((TOTAL + 1))
+  if grep -qF -- "--dangerously-skip-permissions" "$argvf"; then
+    fail "AS-N14 override argv does NOT carry --dangerously-skip-permissions" "found it in: $(cat "$argvf")"
+  else
+    pass "AS-N14 override argv does NOT carry --dangerously-skip-permissions"
+  fi
+}
+ac_spawn_posture_override
+
+echo "--- WEAK posture: SDLC_SPAWN_PERMISSIONS set EMPTY (caller's explicit choice) → no permission args at all ---"
+ac_spawn_posture_empty() {
+  local gid="spawn-posture-empty" d argvf fakedir out rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_SPAWN_PERMISSIONS
+  SDLC_SPAWN_PERMISSIONS=""
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  argvf=$(mktemp); CLEAN_DIRS+=("$argvf"); : > "$argvf"
+  fakedir="$(make_claude_fake "$argvf" 0)"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  local PATH="$fakedir:$PATH"
+
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AS-N14 empty-posture drive exits 0" "0" "$rc"
+  wait_for_file "$argvf" 40
+  assert_contains "AS-N14 empty-posture argv still carries -p" "-p" "$(cat "$argvf")"
+  assert_contains "AS-N14 empty-posture argv still carries --session-id" "--session-id" "$(cat "$argvf")"
+  TOTAL=$((TOTAL + 1))
+  if grep -qF -- "--dangerously-skip-permissions" "$argvf" || grep -qF -- "--permission-mode" "$argvf"; then
+    fail "AS-N14 empty-posture argv carries NO permission tokens" "found permission token in: $(cat "$argvf")"
+  else
+    pass "AS-N14 empty-posture argv carries NO permission tokens"
+  fi
+}
+ac_spawn_posture_empty
 
 # ============================================================
 echo ""
