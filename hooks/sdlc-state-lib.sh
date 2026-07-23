@@ -26,7 +26,7 @@
 #
 # Required keys (R-B1): goal-id, plan, cwd, branch, integration-branch,
 # last-commit, sdlc-step, session, ledger-position, next-action, wip,
-# written-at.
+# base-commit, written-at.
 
 # Deliberately NO top-level `set -u` (FLAG 4): this file is sourced by
 # other scripts (context-spend.sh today; N2-N4 later), and a sourced
@@ -36,7 +36,7 @@
 # `${x:-}` guards throughout this file are the actual safety net; they
 # do not depend on nounset being active.
 
-BATON_REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc-step session ledger-position next-action wip written-at"
+BATON_REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc-step session ledger-position next-action wip base-commit written-at"
 
 # ---------- path helpers (read SDLC_STATE_DIR/HOME at call time) ----------
 sdlc_state_dir() { printf '%s' "${SDLC_STATE_DIR:-$HOME/.claude/sdlc-state}"; }
@@ -75,7 +75,7 @@ _sdlc_validate_goal_id() {
 # ---------- R-B1: baton_write ----------
 # baton_write <goal-id> <plan> <cwd> <branch> <integration-branch>
 #             <last-commit> <sdlc-step> <session> <ledger-position>
-#             <next-action> <wip> [prose]
+#             <next-action> <wip> <base-commit> [prose]
 # Serializes goal state as structured markdown with the fixed required-key
 # lines, `written-at:` stamped here (UTC, now). Atomic: written to a tmp
 # file in the SAME dir, then `mv` into place (single rename, never a
@@ -95,10 +95,17 @@ _sdlc_validate_goal_id() {
 #   - <wip> (arg 11) must be `none` or a full 40-hex sha
 #     (`^[0-9a-f]{40}$`) → else `invalid-wip-sha`. Abbreviation becomes
 #     structurally impossible for every future writer, not a convention.
+#   - <base-commit> (arg 12, N3/F2) must be `none` or a full 40-hex sha
+#     (`^[0-9a-f]{40}$`) → else `invalid-base-commit`. This is the goal
+#     branch's FORK BASELINE — the integration tip the branch forked from —
+#     the recorded anchor that lets sdlc_complete_check prove a terminal
+#     goal's WORK actually landed in integration (git topology alone cannot,
+#     since a stale zero-work branch is a proper ancestor of an advancing
+#     shared epic tip). Same abbreviation-impossible discipline as wip.
 baton_write() {
   local goal_id="${1:-}" plan="${2:-}" cwd="${3:-}" branch="${4:-}" integ="${5:-}" \
         last_commit="${6:-}" step="${7:-}" session="${8:-}" ledger_pos="${9:-}" \
-        next_action="${10:-}" wip="${11:-}" prose="${12:-}"
+        next_action="${10:-}" wip="${11:-}" base_commit="${12:-}" prose="${13:-}"
   local dir target tmp written_at
 
   _sdlc_validate_goal_id "$goal_id" "baton_write" || return 1
@@ -110,6 +117,11 @@ baton_write() {
 
   if [ "$wip" != "none" ] && ! printf '%s' "$wip" | grep -qE '^[0-9a-f]{40}$'; then
     echo "defect: invalid-wip-sha: $wip — wip must be none or a full 40-hex sha" >&2
+    return 1
+  fi
+
+  if [ "$base_commit" != "none" ] && ! printf '%s' "$base_commit" | grep -qE '^[0-9a-f]{40}$'; then
+    echo "defect: invalid-base-commit: $base_commit — base-commit must be none or a full 40-hex sha" >&2
     return 1
   fi
 
@@ -132,6 +144,7 @@ baton_write() {
     echo "ledger-position: $ledger_pos"
     echo "next-action: $next_action"
     echo "wip: $wip"
+    echo "base-commit: $base_commit"
     echo "written-at: $written_at"
     if [ -n "$prose" ]; then
       echo ""
@@ -167,7 +180,7 @@ baton_write() {
 baton_parse() {
   local f="${1:-}"
   local header key count value
-  local v_goal_id v_plan v_cwd v_branch v_integ v_last_commit v_step v_session v_ledger_pos v_next_action v_wip v_written_at
+  local v_goal_id v_plan v_cwd v_branch v_integ v_last_commit v_step v_session v_ledger_pos v_next_action v_wip v_base_commit v_written_at
 
   [ -n "$f" ] && [ -f "$f" ] || { echo "defect: missing-file: baton not found: ${f:-<empty path>}" >&2; return 1; }
   [ -s "$f" ] || { echo "defect: truncated-file: baton is empty: $f" >&2; return 1; }
@@ -207,6 +220,7 @@ baton_parse() {
       ledger-position)     v_ledger_pos="$value" ;;
       next-action)         v_next_action="$value" ;;
       wip)                 v_wip="$value" ;;
+      base-commit)         v_base_commit="$value" ;;
       written-at)          v_written_at="$value" ;;
     esac
   done
@@ -225,6 +239,7 @@ baton_parse() {
   BATON_LEDGER_POSITION="$v_ledger_pos"
   BATON_NEXT_ACTION="$v_next_action"
   BATON_WIP="$v_wip"
+  BATON_BASE_COMMIT="$v_base_commit"
   BATON_WRITTEN_AT="$v_written_at"
   return 0
 }
@@ -1118,17 +1133,26 @@ sdlc_reconcile() {
 #   2. Plan `current:` (read from BATON_PLAN, same grep+sed shape as
 #      sdlc_reconcile) != "10" → benign not-complete, rc 1. This is the ONLY
 #      rc-1 exit; every later exit in this function is rc 2.
-#   3. current == "10": branch-merged check — resolve BATON_BRANCH and
-#      BATON_INTEGRATION_BRANCH to their tips via `git rev-parse`, then
-#      `git merge-base --is-ancestor <branch-tip> <integration-tip>`; refusal
-#      → `defect: false-complete: current 10 but <branch> not merged into
-#      <integration-branch>`. THEN tip-distinctness (F2): `--is-ancestor` passes
-#      VACUOUSLY when the two tips are the SAME commit, so a forged current:10 on
-#      a goal branch that never diverged (zero goal work) would latch; refuse when
-#      `<branch-tip>` string-equals `<integration-tip>` → `defect: false-complete:
-#      current 10 but <branch> has no commits distinct from <integration-branch>`.
-#      A genuinely completed goal lands via a real (non-fast-forward) merge, so
-#      the tips differ.
+#   3. current == "10": sound merged-ness (F2, critic re-attack). Resolve
+#      BATON_BRANCH and BATON_INTEGRATION_BRANCH to their tips via `git
+#      rev-parse`. A terminal goal is complete iff BOTH hold, checked in order:
+#        (a) WORK HAPPENED — base-commit is the recorded fork baseline. If it is
+#            `none`, merged work is structurally unprovable → fail CLOSED
+#            (`defect: false-complete: current 10 but no base-commit recorded to
+#            prove merged work`). If `<branch-tip>` string-equals the base-commit,
+#            the branch committed nothing since forking (a stale zero-work branch,
+#            even one that is a proper ancestor of an advancing shared integration
+#            tip — the epic topology) → `defect: false-complete: current 10 but
+#            <branch> did no work since base-commit <sha> (stale zero-work
+#            branch)`.
+#        (b) WORK IS IN INTEGRATION — `git merge-base --is-ancestor <branch-tip>
+#            <integration-tip>`; refusal → `defect: false-complete: current 10
+#            but <branch> not merged into <integration-branch>`.
+#      Why not tip-equality / is-ancestor alone: git topology cannot distinguish
+#      landed work from a stale pointer the integration tip passed for UNRELATED
+#      reasons. Tip-equality also over-corrects — it wrongly refuses a genuine
+#      fast-forward merge (tips equal but real work merged). The fork baseline is
+#      the only anchor that answers both directions.
 #   4. BATON_WIP != "none" → `defect: false-complete: terminal plan with
 #      stranded wip <sha>` (a terminal plan must have no work product left
 #      shadowed — that work was either landed or abandoned, never stranded).
@@ -1157,19 +1181,29 @@ sdlc_complete_check() {
 
   branch_tip=$(git -C "$dir" rev-parse "$BATON_BRANCH" 2>/dev/null)
   integ_tip=$(git -C "$dir" rev-parse "$BATON_INTEGRATION_BRANCH" 2>/dev/null)
-  if ! git -C "$dir" merge-base --is-ancestor "$branch_tip" "$integ_tip" 2>/dev/null; then
-    echo "defect: false-complete: current 10 but $BATON_BRANCH not merged into $BATON_INTEGRATION_BRANCH" >&2
+
+  # Sound merged-ness (F2, critic re-attack). Git topology ALONE cannot tell
+  # "the goal branch's WORK is in integration" from "the goal branch is a stale
+  # pointer at an old commit that integration happens to have passed" — both the
+  # is-ancestor check and tip-equality fail on the epic topology, where multiple
+  # waves merge into a shared integration branch and a zero-work goal branch is a
+  # proper ancestor of the advancing tip. The recorded FORK BASELINE
+  # (base-commit) is what closes the gap. A terminal goal is complete iff BOTH:
+  #   (1) WORK HAPPENED — the branch committed at least once since its baseline
+  #       (branch_tip != base-commit). A base-commit of `none` cannot prove work
+  #       structurally, so a terminal claim without one fails CLOSED.
+  #   (2) WORK IS IN INTEGRATION — the branch tip (hence every commit it added
+  #       since the baseline) is reachable from the integration tip.
+  if [ "$BATON_BASE_COMMIT" = "none" ]; then
+    echo "defect: false-complete: current 10 but no base-commit recorded to prove merged work" >&2
     return 2
   fi
-  # Tip-distinctness (F2): `--is-ancestor` passes VACUOUSLY when the two tips are
-  # the SAME commit (every commit is its own ancestor). A forged current:10 on a
-  # goal branch that never diverged from integration — zero goal work committed —
-  # would satisfy the ancestor check with no work ever done, latching a false
-  # completion irreversibly. A genuinely completed goal lands via a real merge, so
-  # integration's tip is DISTINCT from the goal branch's tip; equal tips mean no
-  # goal work was ever merged.
-  if [ "$branch_tip" = "$integ_tip" ]; then
-    echo "defect: false-complete: current 10 but $BATON_BRANCH has no commits distinct from $BATON_INTEGRATION_BRANCH" >&2
+  if [ "$branch_tip" = "$BATON_BASE_COMMIT" ]; then
+    echo "defect: false-complete: current 10 but $BATON_BRANCH did no work since base-commit $BATON_BASE_COMMIT (stale zero-work branch)" >&2
+    return 2
+  fi
+  if ! git -C "$dir" merge-base --is-ancestor "$branch_tip" "$integ_tip" 2>/dev/null; then
+    echo "defect: false-complete: current 10 but $BATON_BRANCH not merged into $BATON_INTEGRATION_BRANCH" >&2
     return 2
   fi
 
