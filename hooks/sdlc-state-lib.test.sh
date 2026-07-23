@@ -1709,6 +1709,140 @@ ac_complete_guard() {
 ac_complete_guard
 
 # ============================================================
+# Gate park (slice 4/4, spec D7 + AS-N10) — sdlc_gate_park <goal-id>
+# <plan-path> <defect> <detail>. Wraps a Wake-Note append to a caller-
+# supplied plan file in sdlc_effect_run, keyed park:<goal-id>:<defect>.
+# AS-N10: plan-path is a caller-supplied arg (NOT derived via baton_parse) —
+# a malformed/missing baton is itself a park cause, so park must not depend
+# on baton derivation succeeding. Fixtures use a bare temp plan file (no
+# baton, no git repo) plus SDLC_STATE_DIR isolation for the ledger.
+# ============================================================
+
+# wake_note_count <plan-path> — number of '## Wake Note' headings present.
+wake_note_count() { grep -c '^## Wake Note$' "$1" 2>/dev/null || true; }
+
+echo ""
+echo "=== AC-N2/AC-N6: sdlc_gate_park — Wake Note through the effect guard (both directions) ==="
+
+echo "--- first park: Wake Note block appended exactly once, fields substituted, effect journaled once ---"
+ac_park_first() {
+  local gid="park-first" plan errf rc path
+  new_state_dir
+  plan=$(mktemp); CLEAN_DIRS+=("$plan")
+  printf 'current: 4\n' > "$plan"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_gate_park "$gid" "$plan" "baton-stale" "baton step 4, plan current 5" 2>"$errf"; rc=$?
+  assert_eq "AC-N2 first park exits 0" "0" "$rc"
+  assert_eq "AC-N2 first park silent on stderr" "" "$(cat "$errf")"
+  assert_eq "AC-N2 first park: exactly one Wake Note block" "1" "$(wake_note_count "$plan")"
+  assert_contains "AC-N2 first park: defect substituted" "GATED by rollover spine: baton-stale" "$(cat "$plan")"
+  assert_contains "AC-N2 first park: detail substituted" "baton step 4, plan current 5" "$(cat "$plan")"
+  assert_contains "AC-N2 first park: options skeleton present" "**Options:**" "$(cat "$plan")"
+  assert_contains "AC-N2 first park: re-arm option present" "delete this note to re-arm" "$(cat "$plan")"
+  assert_contains "AC-N2 first park: why-it-matters present" "**Why it matters:**" "$(cat "$plan")"
+  assert_contains "AC-N2 first park: original plan content preserved" "current: 4" "$(cat "$plan")"
+  path="$(ledger_path "$gid")"
+  assert_eq "AC-N2 first park: effect line journaled exactly once" "1" "$(key_lines "$path" effect "park:$gid:baton-stale")"
+}
+ac_park_first
+
+echo "--- double-drive SAME defect: idempotent by effect key — still one block, one effect line, rc 0 ---"
+ac_park_double_same() {
+  local gid="park-double-same" plan errf rc path
+  new_state_dir
+  plan=$(mktemp); CLEAN_DIRS+=("$plan")
+  printf 'current: 4\n' > "$plan"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_gate_park "$gid" "$plan" "baton-stale" "first drive detail" >/dev/null 2>&1
+  sdlc_gate_park "$gid" "$plan" "baton-stale" "second drive detail" 2>"$errf"; rc=$?
+  path="$(ledger_path "$gid")"
+  assert_eq "AC-N6 double-drive same defect exits 0" "0" "$rc"
+  assert_eq "AC-N6 double-drive same defect: still exactly one Wake Note block" "1" "$(wake_note_count "$plan")"
+  assert_eq "AC-N6 double-drive same defect: effect line count unchanged (still 1)" "1" "$(key_lines "$path" effect "park:$gid:baton-stale")"
+  assert_contains "AC-N6 double-drive same defect: first drive's detail wins (no re-append)" "first drive detail" "$(cat "$plan")"
+}
+ac_park_double_same
+
+echo "--- second park, DIFFERENT defect while parked: presence-probe belt — no double-append, decision for new key journaled ---"
+ac_park_different_defect() {
+  local gid="park-different" plan errf rc path
+  new_state_dir
+  plan=$(mktemp); CLEAN_DIRS+=("$plan")
+  printf 'current: 4\n' > "$plan"
+  sdlc_gate_park "$gid" "$plan" "baton-stale" "first defect detail" >/dev/null 2>&1
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_gate_park "$gid" "$plan" "worktree-drift" "second, different defect detail" 2>"$errf"; rc=$?
+  path="$(ledger_path "$gid")"
+  assert_eq "AC-N6 different-defect-while-parked exits 0 (postcondition: goal IS parked)" "0" "$rc"
+  assert_eq "AC-N6 different-defect-while-parked: still exactly one Wake Note block" "1" "$(wake_note_count "$plan")"
+  assert_contains "AC-N6 different-defect-while-parked: park-skipped note on stderr" "park-skipped: wake note already present — first park wins" "$(cat "$errf")"
+  assert_eq "AC-N6 different-defect-while-parked: decision journaled for the NEW key" "1" "$(key_lines "$path" decision "park:$gid:worktree-drift")"
+  assert_contains "AC-N6 different-defect-while-parked: first block's defect text untouched" "GATED by rollover spine: baton-stale" "$(cat "$plan")"
+}
+ac_park_different_defect
+
+echo "--- plan file missing → park-failed, nonzero, effect state left indeterminate (no false 'applied') ---"
+ac_park_plan_missing() {
+  local gid="park-plan-missing" plan errf rc state
+  new_state_dir
+  plan="$(mktemp -u)"   # a path that does not exist and is never created
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_gate_park "$gid" "$plan" "baton-stale" "detail text" 2>"$errf"; rc=$?
+  assert_nonzero "AC-N2 plan-missing returns nonzero" "$rc"
+  assert_eq "AC-N2 plan-missing exact defect text" \
+    "defect: park-failed: $plan — park could not land durable state" "$(cat "$errf")"
+  state="$(sdlc_effect_state "$gid" "park:$gid:baton-stale")"
+  assert_eq "AC-N2 plan-missing: effect state is indeterminate, NOT applied" "indeterminate" "$state"
+}
+ac_park_plan_missing
+
+echo "--- human-cleared consent: Wake Note manually deleted, replay SAME defect → effect applied, skip, file stays clean (no re-append) ---"
+ac_park_human_cleared() {
+  local gid="park-cleared" plan errf rc
+  new_state_dir
+  plan=$(mktemp); CLEAN_DIRS+=("$plan")
+  printf 'current: 4\n' > "$plan"
+  sdlc_gate_park "$gid" "$plan" "baton-stale" "original detail" >/dev/null 2>&1
+  assert_eq "AC-N2 human-cleared setup: Wake Note landed once" "1" "$(wake_note_count "$plan")"
+  printf 'current: 4\n' > "$plan"   # human deletes the note — plan back to pristine
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_gate_park "$gid" "$plan" "baton-stale" "original detail" 2>"$errf"; rc=$?
+  assert_eq "AC-N2 human-cleared replay exits 0 (effect already applied)" "0" "$rc"
+  assert_eq "AC-N2 human-cleared replay: no re-append — plan stays pristine" "0" "$(wake_note_count "$plan")"
+  assert_eq "AC-N2 human-cleared replay: plan content untouched" "current: 4" "$(cat "$plan")"
+}
+ac_park_human_cleared
+
+echo "--- defect arg empty → loud reject, no ledger writes, no effect key journaled ---"
+ac_park_missing_defect() {
+  local gid="park-missing-defect" plan errf rc path
+  new_state_dir
+  plan=$(mktemp); CLEAN_DIRS+=("$plan")
+  printf 'current: 4\n' > "$plan"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_gate_park "$gid" "$plan" "" "some detail" 2>"$errf"; rc=$?
+  path="$(ledger_path "$gid")"
+  assert_nonzero "AC-N2 empty-defect returns nonzero" "$rc"
+  assert_contains "AC-N2 empty-defect names missing-defect" "missing-defect" "$(cat "$errf")"
+  assert_eq "AC-N2 empty-defect: no Wake Note appended" "0" "$(wake_note_count "$plan")"
+  assert_eq "AC-N2 empty-defect: ledger untouched (no file)" "0" "$([ -f "$path" ] && wc -l < "$path" | tr -d ' ' || echo 0)"
+}
+ac_park_missing_defect
+
+echo "--- gate-park goal-id guard: '/' → invalid-goal-id ---"
+ac_park_guard() {
+  new_state_dir
+  local plan errf rc
+  plan=$(mktemp); CLEAN_DIRS+=("$plan")
+  printf 'current: 4\n' > "$plan"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_gate_park "bad/goal" "$plan" "baton-stale" "detail" 2>"$errf" 1>/dev/null; rc=$?
+  assert_nonzero "AC-N2 gate-park rejects a '/' goal-id" "$rc"
+  assert_contains "AC-N2 gate-park '/' names invalid-goal-id" "invalid-goal-id" "$(cat "$errf")"
+}
+ac_park_guard
+
+# ============================================================
 echo ""
 echo "========================================"
 echo "sdlc-state primitives (baton + ledger): $PASS/$TOTAL passed, $FAIL failed"
