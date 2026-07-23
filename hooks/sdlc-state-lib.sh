@@ -1620,3 +1620,167 @@ sdlc_successor_spawn() {
   echo "$sid"
   return 0
 }
+
+# ---------- D-C1/D-C2/D-C4: revival ladder derivation (slice 4/3) ----------
+#
+# sdlc_ladder_next <goal-id> <classification> <anchor> [dir] — the PURE ladder
+# oracle the poker dispatcher (4/4) consults each poll. Given a goal's
+# classification and the current transcript-mtime anchor, it DERIVES the single
+# next rung action by reading the goal's ledger (rung attempts already
+# journaled) and, at the rollover step, the current baton generation. It writes
+# NOTHING, reads no clock beyond the <anchor> arg, and makes no registry call:
+# the poker owns EXECUTING the returned action (each through sdlc_effect_run);
+# this function only decides WHICH one.
+#
+# Contract (D-C2 rung effect-key grammar; D-C1 rung order; D-C4 rollover):
+#   stdout exactly one token, rc 0:
+#     poke:<n> | re-prompt:<n> | observe:<n> | rollover | human | none
+#   Invalid args (goal-id, non-epoch anchor, garbled cap) or a corrupt ledger →
+#   one `defect: <class>: <detail>` line on stderr, rc 1 (caller fail-closed
+#   skips + audits). A journaled rung DECISION with no matching EFFECT under the
+#   current anchor (the crash window) → `defect: effect-indeterminate` (caller
+#   parks).
+#
+# Derivation:
+#   * An attempt = one COMPLETED (effect-line) rung action under the key
+#     `rung:<goal-id>:<rung-name>:<anchor>:<n>` (n from 1). Attempts are counted
+#     per rung for the CURRENT anchor ONLY; entries under an older anchor are
+#     dead history (the transcript progressed — a fresh episode starts at n=1
+#     for the new anchor) and are neither reused nor garbage-collected.
+#   * Caps: SDLC_RUNG_CAP (default 2 — poke and re-prompt each) and
+#     SDLC_OBSERVE_CAP (default 3). A rung with < cap completed attempts yields
+#     `<rung>:<count+1>`; at cap it is exhausted and the next rung is consulted.
+#   * Rung order by classification (D-C1):
+#       DEAD          → poke → re-prompt → rollover → human
+#       IDLE_STALLED  → poke → re-prompt → human   (alive: the single-writer
+#                       constitution forbids rollover — STRUCTURALLY unreachable)
+#       WEDGED        → observe → human            (alive + busy: no safe
+#                       automated action, only bounded observation, no kill verb)
+#       anything else → none                        (no ladder)
+#   * Rollover (D-C4): read the CURRENT baton generation; the spawn key
+#     `spawn:<goal-id>:<baton-written-at>` state via sdlc_effect_state:
+#       unapplied     → rollover (the spine will spawn a successor)
+#       applied       → human    (spawn-skipped steady state, AS-N13 — the ladder
+#                                 NEVER re-keys a spawn around exactly-once)
+#       indeterminate → defect effect-indeterminate (caller parks)
+#     An unparseable baton passes its own defect through (caller fail-closed).
+#
+# [dir] is accepted for dispatcher-signature parity but the derivation is
+# repo-INDEPENDENT: every input (baton, ledger, effect state) derives from
+# SDLC_STATE_DIR + goal-id, never from a working tree.
+
+# _sdlc_rung_key <goal-id> <rung-name> <anchor> <n> — mint the canonical rung
+# effect-key `rung:<goal-id>:<rung-name>:<anchor>:<n>` (D-C2), in ONE place so
+# the derivation and any future consumer can never drift the grammar. rung-name
+# ∈ poke|re-prompt|observe; anchor must be epoch seconds; n a positive ordinal —
+# each rejected loud (one named defect, rc 1) so a malformed key is never minted.
+_sdlc_rung_key() {
+  local gid="${1:-}" rung="${2:-}" anchor="${3:-}" n="${4:-}"
+  case "$rung" in
+    poke|re-prompt|observe) ;;
+    *) echo "defect: invalid-rung: rung-name must be poke|re-prompt|observe, got '${rung:-<empty>}'" >&2; return 1 ;;
+  esac
+  if ! printf '%s' "$anchor" | grep -qE '^[1-9][0-9]*$'; then
+    echo "defect: invalid-anchor: rung anchor must be epoch seconds, got '${anchor:-<empty>}'" >&2
+    return 1
+  fi
+  if ! printf '%s' "$n" | grep -qE '^[1-9][0-9]*$'; then
+    echo "defect: invalid-ordinal: rung ordinal must be a positive integer, got '${n:-<empty>}'" >&2
+    return 1
+  fi
+  printf 'rung:%s:%s:%s:%s' "$gid" "$rung" "$anchor" "$n"
+}
+
+# _sdlc_ladder_rung_probe <goal-id> <rung-name> <anchor> <cap> — walk ordinals
+# 1..cap for ONE rung under this anchor. Prints the next open ordinal (rc 0)
+# when a slot is free; prints nothing (rc 2) when the rung is exhausted (all
+# <cap> attempts applied); emits a loud effect-indeterminate defect (rc 1) on a
+# decision-without-effect crash-window key. Pure (reads effect state only).
+_sdlc_ladder_rung_probe() {
+  local gid="$1" rung="$2" anchor="$3" cap="$4"
+  local n key state
+  for (( n = 1; n <= cap; n++ )); do
+    key="$(_sdlc_rung_key "$gid" "$rung" "$anchor" "$n")" || return 1
+    state="$(sdlc_effect_state "$gid" "$key")" || return 1
+    case "$state" in
+      applied) ;;                                    # completed attempt — keep counting
+      indeterminate)
+        echo "defect: effect-indeterminate: $key — journaled rung intent has no recorded effect (crash window)" >&2
+        return 1 ;;
+      *) printf '%s' "$n"; return 0 ;;               # unapplied → this is the next open slot
+    esac
+  done
+  return 2                                           # all cap attempts applied → rung exhausted
+}
+
+# _sdlc_ladder_rollover <goal-id> — the DEAD ladder's terminal-automated step
+# (D-C4): derive from the CURRENT baton generation's spawn-key state. Prints
+# `rollover` (unapplied) or `human` (applied, AS-N13); a decision-only spawn key
+# (crash window) → defect effect-indeterminate; an unparseable baton passes its
+# own defect through. rc 0 on a token, 1 on any defect.
+_sdlc_ladder_rollover() {
+  local gid="$1" baton spawn_key
+  baton="$(baton_path "$gid")"
+  baton_parse "$baton" || return 1
+  spawn_key="spawn:$gid:$BATON_WRITTEN_AT"
+  case "$(sdlc_effect_state "$gid" "$spawn_key")" in
+    applied)   printf 'human\n'; return 0 ;;
+    unapplied) printf 'rollover\n'; return 0 ;;
+    *) echo "defect: effect-indeterminate: $spawn_key — journaled spawn intent has no recorded effect (crash window)" >&2
+       return 1 ;;
+  esac
+}
+
+sdlc_ladder_next() {
+  local goal_id="${1:-}" classification="${2:-}" anchor="${3:-}"
+  local rung_cap="${SDLC_RUNG_CAP:-2}" observe_cap="${SDLC_OBSERVE_CAP:-3}"
+  local lpath next
+
+  _sdlc_validate_goal_id "$goal_id" "sdlc_ladder_next" || return 1
+
+  # anchor is a world fact (transcript mtime epoch) — replay-stable, always
+  # positive integer seconds; a non-epoch value is a caller bug, refused loud.
+  if ! printf '%s' "$anchor" | grep -qE '^[1-9][0-9]*$'; then
+    echo "defect: invalid-anchor: sdlc_ladder_next anchor must be epoch seconds, got '${anchor:-<empty>}'" >&2
+    return 1
+  fi
+  # caps are env-overridable; a garbled override must fail LOUD, never silently
+  # coerce to 0 (which would collapse the ladder straight to its terminal rung).
+  if ! printf '%s' "$rung_cap" | grep -qE '^[1-9][0-9]*$'; then
+    echo "defect: invalid-cap: SDLC_RUNG_CAP must be a positive integer, got '$rung_cap'" >&2
+    return 1
+  fi
+  if ! printf '%s' "$observe_cap" | grep -qE '^[1-9][0-9]*$'; then
+    echo "defect: invalid-cap: SDLC_OBSERVE_CAP must be a positive integer, got '$observe_cap'" >&2
+    return 1
+  fi
+
+  # Corrupt-ledger fail-closed: a NON-EMPTY ledger must chain-verify before any
+  # rung is derived from it. A missing/empty ledger is a fresh episode, NOT a
+  # defect — the same "not yet" the effect primitives treat as ordinary.
+  lpath="$(ledger_path "$goal_id")"
+  if [ -s "$lpath" ]; then
+    ledger_verify "$goal_id" || return 1
+  fi
+
+  case "$classification" in
+    DEAD)
+      next="$(_sdlc_ladder_rung_probe "$goal_id" poke "$anchor" "$rung_cap")"
+      case $? in 0) printf 'poke:%s\n' "$next"; return 0 ;; 1) return 1 ;; esac
+      next="$(_sdlc_ladder_rung_probe "$goal_id" re-prompt "$anchor" "$rung_cap")"
+      case $? in 0) printf 're-prompt:%s\n' "$next"; return 0 ;; 1) return 1 ;; esac
+      _sdlc_ladder_rollover "$goal_id"; return $? ;;
+    IDLE_STALLED)
+      next="$(_sdlc_ladder_rung_probe "$goal_id" poke "$anchor" "$rung_cap")"
+      case $? in 0) printf 'poke:%s\n' "$next"; return 0 ;; 1) return 1 ;; esac
+      next="$(_sdlc_ladder_rung_probe "$goal_id" re-prompt "$anchor" "$rung_cap")"
+      case $? in 0) printf 're-prompt:%s\n' "$next"; return 0 ;; 1) return 1 ;; esac
+      printf 'human\n'; return 0 ;;
+    WEDGED)
+      next="$(_sdlc_ladder_rung_probe "$goal_id" observe "$anchor" "$observe_cap")"
+      case $? in 0) printf 'observe:%s\n' "$next"; return 0 ;; 1) return 1 ;; esac
+      printf 'human\n'; return 0 ;;
+    *)
+      printf 'none\n'; return 0 ;;
+  esac
+}
