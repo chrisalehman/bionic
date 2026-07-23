@@ -577,6 +577,90 @@ ladder_rung_effect() {  # $1=gid $2=anchor $3=token(<rung>:<n>) $4=rung-name
   return 0
 }
 
+# ---------- D-C4: rollover rung (slice 4/5) ----------
+# The rollover rung hands the goal to the spine's refuse-first successor pipeline,
+# consumed AS-IS (never reimplemented): sdlc_successor_spawn owns the gated/
+# complete/owned/diverged refusals AND the exactly-once `spawn:<gid>:<written-at>`
+# key (D-C4). The dir is the goal's REPO from the REGISTRATION (REG_CWD, trusted
+# provenance — the git predicates in the spine's reconcile/complete stages run
+# there). This poker NEVER re-keys a spawn or parks around the spine.
+#
+# Outcome map (the spine's contract is stdout+rc, its refuse lines on stderr):
+#   rc 0, stdout a fresh sid                 → LADDER-ROLLOVER (a successor launched)
+#   rc 0, stdout goal-complete/spawn-skipped → LADDER-ROLLOVER-REFUSED (benign, re-derive)
+#   rc≠0, stderr goal-owned/goal-gated       → LADDER-ROLLOVER-REFUSED (a healthy owner /
+#                                              an already-standing Wake Note; NO new park)
+#   rc≠0, stderr EMPTY                        → LADDER-ROLLOVER-PARK: the spine PARKED GATED
+#                                              (reconcile divergence / false-complete /
+#                                              crash-window indeterminate) — it already
+#                                              appended the Wake Note internally and its
+#                                              defect stderr was captured there, so a clean
+#                                              refusal surfaces nothing here. Audit + continue.
+#   rc≠0, stderr other (park-failed, ...)     → LADDER-DEFECT: the park could not land
+#                                              durable state — fail-closed, surfaced loud.
+ladder_rollover() {  # $1=gid ; uses REG_CWD
+  local gid="$1" errf out rc err
+  errf=$(mktemp 2>/dev/null) || errf=""
+  out="$(sdlc_successor_spawn "$gid" "$REG_CWD" 2>"${errf:-/dev/null}")"; rc=$?
+  err=""; [ -n "$errf" ] && { err="$(cat "$errf" 2>/dev/null)"; rm -f "$errf"; }
+  if [ "$rc" -eq 0 ]; then
+    case "$out" in
+      goal-complete|spawn-skipped*) audit_line "$gid" LADDER-ROLLOVER-REFUSED "spine refused: $out" ;;
+      *)                            audit_line "$gid" LADDER-ROLLOVER "successor spawned sid=$out" ;;
+    esac
+    return 0
+  fi
+  case "$err" in
+    goal-owned*|goal-gated*) audit_line "$gid" LADDER-ROLLOVER-REFUSED "spine refused (no park): $err" ;;
+    '')                      audit_line "$gid" LADDER-ROLLOVER-PARK "spine parked GATED (see the plan's ## Wake Note)" ;;
+    *)                       audit_line "$gid" LADDER-DEFECT "rollover spawn failed to park durable state (rc=$rc): $err" ;;
+  esac
+  return 0
+}
+
+# ---------- D-C5: terminal human rung (slice 4/5) ----------
+# The ladder's terminal rung parks the goal GATED for a human. The plan path comes
+# from the REGISTRATION only (REG_PLAN — trusted provenance, D-C5/AS-C11), NEVER
+# the baton. sdlc_gate_park's own `park:<gid>:ladder-exhausted` effect key + first-
+# park-wins belt make repeated polls idempotent (ONE Wake Note). Notification is
+# NOT sent here — it rides the existing GATED-transition ntfy dedupe on the NEXT
+# classification pass (the plan now carries a Wake Note → classify GATED), so park
+# durability never depends on notify success.
+ladder_human() {  # $1=gid $2=anchor $3=classification
+  local gid="$1" anchor="$2" cls="$3"
+  if sdlc_gate_park "$gid" "$REG_PLAN" ladder-exhausted \
+       "revival ladder exhausted for $gid ($cls, episode anchor $anchor); automated rungs spent — human decision required" \
+       >/dev/null 2>&1; then
+    audit_line "$gid" LADDER-HUMAN "ladder-exhausted park ($cls, anchor $anchor)"
+  else
+    audit_line "$gid" LADDER-DEFECT "ladder-exhausted park failed to land for $gid ($cls)"
+  fi
+}
+
+# ---------- D-C6: completion latch (slice 4/5) ----------
+# On COMPLETE classification the poker becomes the cron consumer of the spine's
+# completion latch. sdlc_complete_check (consumed AS-IS) verifies the terminal
+# claim structurally against git reality: rc 0 latches `complete:<gid>` exactly-once
+# ITSELF, then the poker fires the existing COMPLETE transition notify; rc 1 is a
+# benign in-flight race (audit SKIP-RACE, nothing else — never a park); rc 2 is a
+# refuted terminal claim (false-complete / structural defect) → park GATED on the
+# REGISTRATION plan (trusted provenance, D-C5), no latch, no ladder. The check runs
+# against the goal's REPO from the registration (REG_CWD).
+complete_latch() {  # $1=gid $2=prev
+  local gid="$1" prev="$2" ccf cc_err rc cls
+  ccf=$(mktemp 2>/dev/null) || ccf=""
+  sdlc_complete_check "$gid" "$REG_CWD" >/dev/null 2>"${ccf:-/dev/null}"; rc=$?
+  cc_err=""; [ -n "$ccf" ] && { cc_err="$(cat "$ccf" 2>/dev/null)"; rm -f "$ccf"; }
+  case "$rc" in
+    0) notify_and_cache "$gid" COMPLETE "goal $gid complete (charter close / current:10)" "$prev" COMPLETE ;;
+    1) audit_line "$gid" SKIP-RACE "completion check benign not-complete: $cc_err" ;;   # nothing else
+    2) cls="$(_sdlc_spawn_defect_class "$cc_err")"; [ -n "$cls" ] || cls="false-complete"
+       sdlc_gate_park "$gid" "$REG_PLAN" "$cls" "$cc_err" >/dev/null 2>&1
+       audit_line "$gid" COMPLETE-FALSE "false-complete parked GATED: $cc_err"
+       cache_state "$gid" COMPLETE ;;
+  esac
+}
+
 # ladder_dispatch <gid> <classification> — the per-goal ladder step. The caller
 # has already confirmed SDLC_LIB_OK, ladder_applicable, and a baton FILE present.
 ladder_dispatch() {  # $1=gid $2=classification
@@ -594,16 +678,31 @@ ladder_dispatch() {  # $1=gid $2=classification
   case "$anchor" in
     ''|*[!0-9]*) audit_line "$gid" LADDER-SKIP "no transcript-mtime anchor for the ladder episode"; return 0 ;;
   esac
-  token="$(sdlc_ladder_next "$gid" "$state" "$anchor" 2>/dev/null)"; rc=$?
+  local nef nerr
+  nef=$(mktemp 2>/dev/null) || nef=""
+  token="$(sdlc_ladder_next "$gid" "$state" "$anchor" 2>"${nef:-/dev/null}")"; rc=$?
+  nerr=""; [ -n "$nef" ] && { nerr="$(cat "$nef" 2>/dev/null)"; rm -f "$nef"; }
   if [ "$rc" -ne 0 ]; then
-    audit_line "$gid" LADDER-DEFECT "sdlc_ladder_next rc=$rc ($state, anchor $anchor)"
+    # Crash-window fail-closed (AC-C5): a journaled rung DECISION with no matching
+    # effect is the spine's own `effect-indeterminate` posture — park GATED for a
+    # human replay decision (REG_PLAN provenance, D-C5), never re-run the action.
+    # Every OTHER oracle defect (corrupt ledger, bad anchor/cap) stays a
+    # fail-closed skip + LADDER-DEFECT audit (one bad goal never starves the poll).
+    case "$nerr" in
+      *effect-indeterminate*)
+        sdlc_gate_park "$gid" "$REG_PLAN" effect-indeterminate "$nerr" >/dev/null 2>&1
+        audit_line "$gid" LADDER-INDETERMINATE "$nerr" ;;
+      *)
+        audit_line "$gid" LADDER-DEFECT "sdlc_ladder_next rc=$rc ($state, anchor $anchor): $nerr" ;;
+    esac
     return 0
   fi
   case "$token" in
     poke:*)          ladder_rung_effect "$gid" "$anchor" "$token" poke ;;
     re-prompt:*)     ladder_rung_effect "$gid" "$anchor" "$token" re-prompt ;;
     observe:*)       ladder_rung_effect "$gid" "$anchor" "$token" observe ;;
-    rollover|human)  audit_line "$gid" LADDER-DEFER "$token" ;;   # 4/5's scope — no action
+    rollover)        ladder_rollover "$gid" ;;                     # spine spawn (D-C4)
+    human)           ladder_human "$gid" "$anchor" "$state" ;;     # terminal park (D-C5)
     none)            : ;;                                          # no ladder action this poll
     *)               audit_line "$gid" LADDER-DEFECT "unrecognized ladder token '$token'" ;;
   esac
@@ -625,6 +724,14 @@ dispatch_actions() {  # $1=gid $2=state $3=prev
   if [ "$SDLC_LIB_OK" = "1" ] && ladder_applicable "$state" && [ -f "$(baton_path "$gid")" ]; then
     ladder_dispatch "$gid" "$state"
     cache_state "$gid" "$state"      # advance the dedupe cache (transition detection)
+    return 0
+  fi
+  # D-C6 completion latch: a baton-bearing COMPLETE goal routes through the spine's
+  # structural completion check (latch / benign race / false-complete park) instead
+  # of the legacy notify-on-transition. Baton-less COMPLETE goals (and every goal
+  # when the lib is unavailable) keep the legacy path below byte-identical.
+  if [ "$state" = "COMPLETE" ] && [ "$SDLC_LIB_OK" = "1" ] && [ -f "$(baton_path "$gid")" ]; then
+    complete_latch "$gid" "$prev"
     return 0
   fi
   case "$state" in
