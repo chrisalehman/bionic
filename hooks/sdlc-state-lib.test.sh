@@ -1372,6 +1372,186 @@ ac_n4_guard() {
 }
 ac_n4_guard
 
+# ============================================================
+echo ""
+echo "=== D-C10: spine-class ledger-ahead amendment — supervision trailing entries benign, passenger/garbled still park ==="
+
+# lp_spine_benign <class> — a trailing entry of a CLOSED spine class past the
+# baton's recorded position is a benign supervision event: no ledger-ahead.
+# (Fails TODAY: any growth past the position fires ledger-ahead.)
+lp_spine_benign() {
+  new_state_dir
+  local cls="$1"
+  local gid="pos-spine-$cls" path dig1 errf rc out
+  ledger_append "$gid" "decision" "seed:baseline" "baseline entry" >/dev/null 2>&1   # seq 1 (baton pos)
+  path=$(ledger_path "$gid")
+  dig1=$(ledger_line_digest "$path" 1)
+  ledger_append "$gid" "effect" "$cls:g:detail:100:1" "trailing supervision event" >/dev/null 2>&1  # seq 2 (trailing)
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "1:$dig1" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_eq "D-C10 trailing '$cls:' past baton pos → silent pass (rc 0)" "0" "$rc"
+  assert_eq "D-C10 trailing '$cls:' silent on stderr" "" "$out"
+}
+for _c in rung park spawn complete poke; do lp_spine_benign "$_c"; done
+
+echo "--- multiple trailing spine-class entries (rung then park) → still benign ---"
+lp_spine_multi() {
+  new_state_dir
+  local gid="pos-spine-multi" path dig1 errf rc out
+  ledger_append "$gid" "decision" "seed:baseline" "baseline" >/dev/null 2>&1        # seq 1 (baton pos)
+  path=$(ledger_path "$gid")
+  dig1=$(ledger_line_digest "$path" 1)
+  ledger_append "$gid" "decision" "rung:g:poke:100:1" "poke attempt journaled" >/dev/null 2>&1  # seq 2
+  ledger_append "$gid" "effect"   "park:g:ladder-exhausted" "escalated to human" >/dev/null 2>&1  # seq 3
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "1:$dig1" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_eq "D-C10 two trailing spine entries → silent pass (rc 0)" "0" "$rc"
+  assert_eq "D-C10 two trailing spine entries silent on stderr" "" "$out"
+}
+lp_spine_multi
+
+echo "--- trailing PASSENGER-class entry (merge:) past baton pos → ledger-ahead still fires ---"
+lp_passenger() {
+  new_state_dir
+  local gid="pos-passenger" path dig1 errf rc out
+  ledger_append "$gid" "decision" "seed:baseline" "baseline" >/dev/null 2>&1        # seq 1 (baton pos)
+  path=$(ledger_path "$gid")
+  dig1=$(ledger_line_digest "$path" 1)
+  ledger_append "$gid" "effect" "merge:pr-42" "a passenger merge, not supervision" >/dev/null 2>&1  # seq 2
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "1:$dig1" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "D-C10 trailing passenger 'merge:' → ledger-ahead (nonzero)" "$rc"
+  assert_contains "D-C10 passenger names ledger-ahead" "ledger-ahead" "$out"
+}
+lp_passenger
+
+echo "--- MIXED trailing: one spine (rung:) + one passenger (merge:) → ledger-ahead (any passenger trips it) ---"
+lp_mixed() {
+  new_state_dir
+  local gid="pos-mixed" path dig1 errf rc out
+  ledger_append "$gid" "decision" "seed:baseline" "baseline" >/dev/null 2>&1        # seq 1 (baton pos)
+  path=$(ledger_path "$gid")
+  dig1=$(ledger_line_digest "$path" 1)
+  ledger_append "$gid" "decision" "rung:g:poke:100:1" "supervision" >/dev/null 2>&1  # seq 2 (spine)
+  ledger_append "$gid" "effect"   "merge:pr-9" "a passenger slipped in" >/dev/null 2>&1  # seq 3 (passenger)
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "1:$dig1" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "D-C10 mixed spine+passenger → ledger-ahead (nonzero)" "$rc"
+  assert_contains "D-C10 mixed names ledger-ahead" "ledger-ahead" "$out"
+}
+lp_mixed
+
+echo "--- garbled trailing class (no ':' delimiter) → ledger-ahead (fail-closed: unknown = passenger) ---"
+lp_garbled() {
+  new_state_dir
+  local gid="pos-garbled" path dig1 errf rc out
+  ledger_append "$gid" "decision" "seed:baseline" "baseline" >/dev/null 2>&1        # seq 1 (baton pos)
+  path=$(ledger_path "$gid")
+  dig1=$(ledger_line_digest "$path" 1)
+  ledger_append "$gid" "effect" "garbled" "a delimiter-less key" >/dev/null 2>&1     # seq 2, class "garbled"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "1:$dig1" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "D-C10 garbled (no ':') trailing → ledger-ahead (nonzero)" "$rc"
+  assert_contains "D-C10 garbled names ledger-ahead" "ledger-ahead" "$out"
+}
+lp_garbled
+
+echo "--- empty trailing class (leading ':') → ledger-ahead (fail-closed) ---"
+lp_empty_class() {
+  new_state_dir
+  local gid="pos-empty-class" path dig1 errf rc out
+  ledger_append "$gid" "decision" "seed:baseline" "baseline" >/dev/null 2>&1        # seq 1 (baton pos)
+  path=$(ledger_path "$gid")
+  dig1=$(ledger_line_digest "$path" 1)
+  ledger_append "$gid" "effect" ":orphan" "empty class prefix" >/dev/null 2>&1       # seq 2, class ""
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  sdlc_ledger_position_check "$gid" "1:$dig1" 2>"$errf"; rc=$?; out=$(cat "$errf")
+  assert_nonzero "D-C10 empty-class (leading ':') trailing → ledger-ahead (nonzero)" "$rc"
+  assert_contains "D-C10 empty-class names ledger-ahead" "ledger-ahead" "$out"
+}
+lp_empty_class
+
+# ============================================================
+echo ""
+echo "=== D-C11: ledger_append per-goal single-writer lock — race repro, held-lock timeout, stale reclaim ==="
+
+# back_date <path> <seconds-ago> — set mtime into the past (BSD `touch -t`
+# first, GNU `touch -d` fallback); heritage of the poker suite's set_mtime_age.
+back_date() {
+  local f="$1" age="$2" ts
+  if ts=$(date -v "-${age}S" +%Y%m%d%H%M.%S 2>/dev/null); then
+    touch -t "$ts" "$f"
+  else
+    touch -d "@$(( $(date +%s) - age ))" "$f"
+  fi
+}
+
+echo "--- concurrent-append race: two interleaved writers → strictly monotonic seqs, chain verifies (collides pre-lock) ---"
+lock_race_monotonic() {
+  new_state_dir
+  local gid="lock-race" path ready hold apid bpid i seqs
+  ledger_append "$gid" "decision" "seed:baseline" "seed" >/dev/null 2>&1             # seq 1
+  path=$(ledger_path "$gid")
+  ready=$(mktemp -u); hold=$(mktemp)   # $hold EXISTS → writer A parks in the window; $ready ABSENT → A creates it
+  CLEAN_DIRS+=("$ready" "$hold")
+  # Writer A parks in the read-tail→write window (via the test seam) holding
+  # whatever lock ledger_append took, until we remove $hold.
+  bash -c '. "$1"; SDLC_LEDGER_SEAM_READY="$3" SDLC_LEDGER_SEAM_HOLD="$4" ledger_append "$2" decision "writer:a" "A" >/dev/null 2>&1' \
+    _ "$LIB" "$gid" "$ready" "$hold" &
+  apid=$!
+  # Wait until A has entered the window (read the tail).
+  i=0; while [ ! -e "$ready" ] && [ "$i" -lt 300 ]; do sleep 0.02; i=$((i + 1)); done
+  # Writer B, no seam. Pre-lock: reads the SAME tail A saw → seq collision.
+  # Post-lock: blocks on the lock A holds until A releases → next seq.
+  bash -c '. "$1"; ledger_append "$2" decision "writer:b" "B" >/dev/null 2>&1' _ "$LIB" "$gid" &
+  bpid=$!
+  sleep 0.4               # let B reach its write (pre-lock) or park on the lock (post-lock)
+  rm -f "$hold"           # release A → it appends
+  wait "$apid" 2>/dev/null; wait "$bpid" 2>/dev/null
+  seqs=$(awk -F'\t' '{printf "%s ", $2}' "$path"); seqs="${seqs% }"
+  assert_eq "D-C11 race drive yields strictly monotonic seqs (1 2 3)" "1 2 3" "$seqs"
+  assert_true "D-C11 race-driven ledger verifies (chain intact)" ledger_verify "$gid"
+}
+lock_race_monotonic
+
+echo "--- held lock (fresh, live holder) → ledger-locked defect, rc 1, ledger byte-unchanged ---"
+lock_held_timeout() {
+  new_state_dir
+  local gid="lock-held" path lockdir before after errf rc
+  local SDLC_LEDGER_LOCK_TRIES=3     # 3 x 0.1s → fast timeout
+  ledger_append "$gid" "decision" "seed:baseline" "seed" >/dev/null 2>&1             # seq 1
+  path=$(ledger_path "$gid")
+  before=$(cksum < "$path")
+  lockdir="$SDLC_STATE_DIR/$gid/.ledger.lock"
+  mkdir "$lockdir"                    # fresh mtime = now → a LIVE holder, not stale
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  ledger_append "$gid" "decision" "blocked:write" "must not land" 2>"$errf"; rc=$?
+  after=$(cksum < "$path")
+  assert_nonzero "D-C11 held lock → append returns nonzero" "$rc"
+  assert_contains "D-C11 held lock names ledger-locked" "ledger-locked" "$(cat "$errf")"
+  assert_contains "D-C11 ledger-locked names the goal-id" "$gid" "$(cat "$errf")"
+  assert_eq "D-C11 held lock → ledger byte-unchanged" "$before" "$after"
+  rmdir "$lockdir" 2>/dev/null
+}
+lock_held_timeout
+
+echo "--- stale lock (mtime back-dated past SDLC_LEDGER_LOCK_STALE) → reclaimed, append succeeds ---"
+lock_stale_reclaim() {
+  new_state_dir
+  local gid="lock-stale" path lockdir rc
+  local SDLC_LEDGER_LOCK_TRIES=3
+  ledger_append "$gid" "decision" "seed:baseline" "seed" >/dev/null 2>&1             # seq 1
+  path=$(ledger_path "$gid")
+  lockdir="$SDLC_STATE_DIR/$gid/.ledger.lock"
+  mkdir "$lockdir"
+  back_date "$lockdir" 120            # older than default 60s stale ceiling → reclaimable
+  ledger_append "$gid" "decision" "after:reclaim" "lands after stale reclaim" >/dev/null 2>&1; rc=$?
+  assert_eq "D-C11 back-dated stale lock → append succeeds (rc 0)" "0" "$rc"
+  assert_eq "D-C11 stale reclaim → ledger now has 2 lines" "2" "$(wc -l < "$path" | tr -d ' ')"
+  assert_true "D-C11 stale-reclaim ledger verifies" ledger_verify "$gid"
+}
+lock_stale_reclaim
+
 # ---------- reconcile fixtures ----------
 # setup_reconcile <goal-id> [current] — sets REPO_DIR + PLAN_STUB globals (NOT
 # echoed: it must run in THIS shell, not a command-substitution subshell, so
@@ -2533,6 +2713,487 @@ ac_spawn_posture_empty() {
   fi
 }
 ac_spawn_posture_empty
+
+# ============================================================
+# slice 4/3: sdlc_ladder_next — ledger-derived rung position, capped rungs.
+# The ladder derivation is PURE: it reads the goal's baton + ledger (via the
+# existing parse helpers) and derives exactly one token from (classification,
+# anchor, ledger, current-baton-generation) — no writes, no clock reads beyond
+# the anchor ARG, no registry. Rung attempts are journaled here EXACTLY as the
+# poker dispatcher (4/4) will: a completed attempt is one decision+effect pair
+# through sdlc_effect_run under `rung:<gid>:<rung>:<anchor>:<n>`.
+# ============================================================
+echo ""
+echo "=== AC-C3/AC-C4/AC-C5: sdlc_ladder_next — ledger-derived rung position, capped rungs (4/3) ==="
+
+# The episode anchor is now an 8-hex DURABLE-PROGRESS DIGEST (D-C2 amendment,
+# Step-6 critic F1) — no longer a transcript-mtime epoch. sdlc_ladder_next treats
+# it as an opaque token, so these ledger-derivation tests pass a fixed valid
+# 8-hex; the digest's derivation from durable state is covered by the dedicated
+# sdlc_ladder_anchor block below.
+LADDER_ANCHOR=a1b2c3d4
+
+# journal_rung <gid> <rung> <anchor> <n> — a COMPLETED (applied) rung attempt
+# (decision+effect through the real effect guard, as the poker will).
+journal_rung() { sdlc_effect_run "$1" "rung:$1:$2:$3:$4" "rung $2 attempt $4" -- true >/dev/null 2>&1; }
+# journal_rung_decision <gid> <rung> <anchor> <n> — a decision-only rung line
+# (the crash window: intent journaled, effect never landed).
+journal_rung_decision() { ledger_append "$1" decision "rung:$1:$2:$3:$4" "rung $2 intent $4" >/dev/null 2>&1; }
+# baton_written_at <gid> — the CURRENT baton generation key (BATON_WRITTEN_AT).
+baton_written_at() { baton_parse "$(baton_path "$1")" >/dev/null 2>&1; printf '%s' "$BATON_WRITTEN_AT"; }
+# journal_spawn_applied <gid> <written-at> — the spawn effect for a generation.
+journal_spawn_applied() { sdlc_effect_run "$1" "spawn:$1:$2" "spawned" -- true >/dev/null 2>&1; }
+# journal_spawn_decision <gid> <written-at> — decision-only spawn line (indeterminate).
+journal_spawn_decision() { ledger_append "$1" decision "spawn:$1:$2" "spawn intent" >/dev/null 2>&1; }
+# state_manifest — content+structure fingerprint of SDLC_STATE_DIR (purity probe).
+state_manifest() { { find "$SDLC_STATE_DIR" | sort; echo "--"; find "$SDLC_STATE_DIR" -type f -exec cksum {} + 2>/dev/null | sort; }; }
+
+echo "--- DEAD progression: fresh → poke:1 → poke:2 → re-prompt:1 → re-prompt:2 → rollover (spawn unapplied) ---"
+ac_ladder_dead_progression() {
+  new_state_dir
+  local gid="ladder-dead-prog" a="$LADDER_ANCHOR" out rc
+  write_healthy "$gid" >/dev/null                    # baton present for the rollover derivation
+  out="$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"; rc=$?
+  assert_eq "4/3 DEAD fresh episode exits 0" "0" "$rc"
+  assert_eq "4/3 DEAD fresh episode (empty rung-space) → poke:1" "poke:1" "$out"
+  journal_rung "$gid" poke "$a" 1
+  assert_eq "4/3 DEAD after 1 failed poke → poke:2" "poke:2" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+  journal_rung "$gid" poke "$a" 2
+  assert_eq "4/3 DEAD after 2 failed pokes (cap) → re-prompt:1" "re-prompt:1" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+  journal_rung "$gid" re-prompt "$a" 1
+  assert_eq "4/3 DEAD after 2 poke + 1 re-prompt → re-prompt:2" "re-prompt:2" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+  journal_rung "$gid" re-prompt "$a" 2
+  assert_eq "4/3 DEAD after 2 poke + 2 re-prompt, spawn unapplied → rollover" "rollover" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+}
+ac_ladder_dead_progression
+
+echo "--- DEAD at rollover position, spawn key APPLIED → human (spawn-skipped, AS-N13; ladder never re-keys a spawn) ---"
+ac_ladder_dead_spawn_applied() {
+  new_state_dir
+  local gid="ladder-dead-applied" a="$LADDER_ANCHOR" wa
+  write_healthy "$gid" >/dev/null
+  wa="$(baton_written_at "$gid")"
+  journal_rung "$gid" poke "$a" 1; journal_rung "$gid" poke "$a" 2
+  journal_rung "$gid" re-prompt "$a" 1; journal_rung "$gid" re-prompt "$a" 2
+  journal_spawn_applied "$gid" "$wa"
+  assert_eq "4/3 DEAD rollover pos + spawn APPLIED → human" "human" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+}
+ac_ladder_dead_spawn_applied
+
+echo "--- DEAD at rollover position, spawn key INDETERMINATE (decision, no effect) → defect effect-indeterminate ---"
+ac_ladder_dead_spawn_indeterminate() {
+  new_state_dir
+  local gid="ladder-dead-indet" a="$LADDER_ANCHOR" wa err rc
+  write_healthy "$gid" >/dev/null
+  wa="$(baton_written_at "$gid")"
+  journal_rung "$gid" poke "$a" 1; journal_rung "$gid" poke "$a" 2
+  journal_rung "$gid" re-prompt "$a" 1; journal_rung "$gid" re-prompt "$a" 2
+  journal_spawn_decision "$gid" "$wa"
+  err="$(sdlc_ladder_next "$gid" DEAD "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/3 DEAD spawn-indeterminate returns nonzero" "$rc"
+  assert_contains "4/3 DEAD spawn-indeterminate names effect-indeterminate" "effect-indeterminate" "$err"
+}
+ac_ladder_dead_spawn_indeterminate
+
+echo "--- DEAD unparseable baton at the rollover step → defect passthrough (caller fail-closed skips) ---"
+ac_ladder_dead_baton_malformed() {
+  new_state_dir
+  local gid="ladder-dead-badbaton" a="$LADDER_ANCHOR" err rc
+  write_healthy "$gid" >/dev/null
+  journal_rung "$gid" poke "$a" 1; journal_rung "$gid" poke "$a" 2
+  journal_rung "$gid" re-prompt "$a" 1; journal_rung "$gid" re-prompt "$a" 2
+  printf 'garbage without keys\n' > "$(baton_path "$gid")"   # corrupt the baton
+  err="$(sdlc_ladder_next "$gid" DEAD "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/3 DEAD malformed baton at rollover returns nonzero" "$rc"
+  assert_contains "4/3 DEAD malformed baton passes a baton defect through" "defect:" "$err"
+}
+ac_ladder_dead_baton_malformed
+
+echo "--- CRASH WINDOW: a decision-only rung line under the CURRENT anchor → defect effect-indeterminate (before rollover) ---"
+ac_ladder_crash_window() {
+  new_state_dir
+  local gid="ladder-crash" a="$LADDER_ANCHOR" err rc
+  journal_rung_decision "$gid" poke "$a" 1     # poke intent, no effect
+  err="$(sdlc_ladder_next "$gid" DEAD "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/3 crash-window rung decision-only returns nonzero" "$rc"
+  assert_contains "4/3 crash-window names effect-indeterminate" "effect-indeterminate" "$err"
+}
+ac_ladder_crash_window
+
+echo "--- IDLE_STALLED at 2 poke + 2 re-prompt (spawn unapplied) → human; rollover STRUCTURALLY unreachable for this class ---"
+ac_ladder_idle_stalled_human() {
+  new_state_dir
+  local gid="ladder-idle-stalled" a="$LADDER_ANCHOR" out
+  write_healthy "$gid" >/dev/null                    # spawn key would be unapplied → DEAD would rollover
+  journal_rung "$gid" poke "$a" 1; journal_rung "$gid" poke "$a" 2
+  journal_rung "$gid" re-prompt "$a" 1; journal_rung "$gid" re-prompt "$a" 2
+  out="$(sdlc_ladder_next "$gid" IDLE_STALLED "$a" 2>/dev/null)"
+  assert_eq "4/3 IDLE_STALLED after 2+2 → human" "human" "$out"
+  TOTAL=$((TOTAL + 1))
+  if [ "$out" = "rollover" ]; then
+    fail "4/3 IDLE_STALLED NEVER emits rollover (session alive)" "got rollover"
+  else
+    pass "4/3 IDLE_STALLED NEVER emits rollover (session alive)"
+  fi
+}
+ac_ladder_idle_stalled_human
+
+echo "--- IDLE_STALLED fresh → poke:1 (shares the automated rungs with DEAD) ---"
+ac_ladder_idle_stalled_fresh() {
+  new_state_dir
+  local gid="ladder-idle-fresh" a="$LADDER_ANCHOR"
+  assert_eq "4/3 IDLE_STALLED fresh → poke:1" "poke:1" "$(sdlc_ladder_next "$gid" IDLE_STALLED "$a" 2>/dev/null)"
+}
+ac_ladder_idle_stalled_fresh
+
+echo "--- WEDGED: observe:1 → observe:2 → observe:3 (cap 3) → human ---"
+ac_ladder_wedged() {
+  new_state_dir
+  local gid="ladder-wedged" a="$LADDER_ANCHOR"
+  assert_eq "4/3 WEDGED fresh → observe:1" "observe:1" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  journal_rung "$gid" observe "$a" 1
+  assert_eq "4/3 WEDGED after 1 observe → observe:2" "observe:2" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  journal_rung "$gid" observe "$a" 2
+  assert_eq "4/3 WEDGED after 2 observe → observe:3" "observe:3" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  journal_rung "$gid" observe "$a" 3
+  assert_eq "4/3 WEDGED after 3 observe (cap) → human" "human" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+}
+ac_ladder_wedged
+
+echo "--- ANCHOR RESET: attempts under anchor A stay history; called with anchor B → poke:1 (fresh episode) ---"
+ac_ladder_anchor_reset() {
+  new_state_dir
+  local gid="ladder-anchor" a="$LADDER_ANCHOR" b="beefcafe"   # a distinct 8-hex digest
+  journal_rung "$gid" poke "$a" 1; journal_rung "$gid" poke "$a" 2
+  assert_eq "4/3 under anchor A (2 poke) → re-prompt:1 (A history intact)" "re-prompt:1" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+  assert_eq "4/3 under anchor B (no B attempts) → poke:1 (episode reset)" "poke:1" "$(sdlc_ladder_next "$gid" DEAD "$b" 2>/dev/null)"
+}
+ac_ladder_anchor_reset
+
+echo "--- classification not in {DEAD,IDLE_STALLED,WEDGED} → none ---"
+ac_ladder_classification_none() {
+  new_state_dir
+  local gid="ladder-none" a="$LADDER_ANCHOR"
+  assert_eq "4/3 BUSY → none" "none" "$(sdlc_ladder_next "$gid" BUSY "$a" 2>/dev/null)"
+  assert_eq "4/3 IDLE → none" "none" "$(sdlc_ladder_next "$gid" IDLE "$a" 2>/dev/null)"
+  assert_eq "4/3 GATED → none" "none" "$(sdlc_ladder_next "$gid" GATED "$a" 2>/dev/null)"
+  assert_eq "4/3 empty classification → none" "none" "$(sdlc_ladder_next "$gid" "" "$a" 2>/dev/null)"
+}
+ac_ladder_classification_none
+
+echo "--- guards: invalid goal-id / malformed anchor / empty anchor / corrupt ledger → loud defect, rc 1 ---"
+ac_ladder_guards() {
+  new_state_dir
+  local a="$LADDER_ANCHOR" err rc gid="ladder-guard"
+  err="$(sdlc_ladder_next "bad/goal" DEAD "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/3 invalid goal-id returns nonzero" "$rc"
+  assert_contains "4/3 invalid goal-id names invalid-goal-id" "invalid-goal-id" "$err"
+
+  err="$(sdlc_ladder_next "$gid" DEAD "not-an-epoch" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/3 malformed anchor returns nonzero" "$rc"
+  assert_contains "4/3 malformed anchor names invalid-anchor" "invalid-anchor" "$err"
+
+  err="$(sdlc_ladder_next "$gid" DEAD "" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/3 empty anchor returns nonzero" "$rc"
+  assert_contains "4/3 empty anchor names invalid-anchor" "invalid-anchor" "$err"
+
+  local cgid="ladder-corrupt" path
+  path=$(build_healthy_ledger "$cgid")
+  awk -F'\t' -v OFS='\t' 'NR==2 { $6="TAMPERED" } { print }' "$path" > "$path.new" && mv "$path.new" "$path"
+  err="$(sdlc_ladder_next "$cgid" DEAD "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/3 corrupt ledger returns nonzero" "$rc"
+  assert_contains "4/3 corrupt ledger surfaces a chain defect" "defect:" "$err"
+}
+ac_ladder_guards
+
+echo "--- cap overrides: SDLC_RUNG_CAP=1 shrinks poke/re-prompt; SDLC_OBSERVE_CAP=1 shrinks observe ---"
+ac_ladder_cap_rung() {
+  new_state_dir
+  local gid="ladder-cap-rung" a="$LADDER_ANCHOR"
+  local SDLC_RUNG_CAP=1
+  write_healthy "$gid" >/dev/null
+  assert_eq "4/3 cap=1 fresh → poke:1" "poke:1" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+  journal_rung "$gid" poke "$a" 1
+  assert_eq "4/3 cap=1 after 1 poke → re-prompt:1" "re-prompt:1" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+  journal_rung "$gid" re-prompt "$a" 1
+  assert_eq "4/3 cap=1 after 1 poke + 1 re-prompt → rollover" "rollover" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+}
+ac_ladder_cap_rung
+
+ac_ladder_cap_observe() {
+  new_state_dir
+  local gid="ladder-cap-obs" a="$LADDER_ANCHOR"
+  local SDLC_OBSERVE_CAP=1
+  assert_eq "4/3 observe cap=1 fresh → observe:1" "observe:1" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  journal_rung "$gid" observe "$a" 1
+  assert_eq "4/3 observe cap=1 after 1 observe → human" "human" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+}
+ac_ladder_cap_observe
+
+ac_ladder_cap_garbled() {
+  new_state_dir
+  local gid="ladder-cap-bad" a="$LADDER_ANCHOR" err rc
+  local SDLC_RUNG_CAP="abc"
+  err="$(sdlc_ladder_next "$gid" DEAD "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/3 garbled SDLC_RUNG_CAP returns nonzero" "$rc"
+  assert_contains "4/3 garbled cap names invalid-cap" "invalid-cap" "$err"
+}
+ac_ladder_cap_garbled
+
+echo "--- key grammar: _sdlc_rung_key mints exactly rung:<gid>:<rung>:<anchor>:<n>; rejects malformed anchor/ordinal/rung loud ---"
+ac_ladder_key_grammar() {
+  new_state_dir
+  local out rc
+  out="$(_sdlc_rung_key "wave-01" poke a1b2c3d4 1 2>/dev/null)"; rc=$?
+  assert_eq "4/3 rung-key mint exits 0" "0" "$rc"
+  assert_eq "4/3 rung-key mint is exact" "rung:wave-01:poke:a1b2c3d4:1" "$out"
+  assert_eq "4/3 rung-key mints re-prompt name" "rung:g:re-prompt:a1b2c3d4:2" "$(_sdlc_rung_key g re-prompt a1b2c3d4 2 2>/dev/null)"
+
+  # anchor grammar is now the 8-hex durable-progress digest (D-C2 amendment): an
+  # epoch/mtime integer is no longer a valid anchor.
+  _sdlc_rung_key g poke "notepoch"   1 2>/dev/null; assert_nonzero "4/3 rung-key rejects a non-8-hex anchor (letters)" "$?"
+  _sdlc_rung_key g poke "1721600000" 1 2>/dev/null; assert_nonzero "4/3 rung-key rejects a non-8-hex anchor (epoch integer)" "$?"
+  _sdlc_rung_key g poke a1b2c3d4 0 2>/dev/null;     assert_nonzero "4/3 rung-key rejects ordinal 0" "$?"
+  _sdlc_rung_key g poke a1b2c3d4 "x" 2>/dev/null;   assert_nonzero "4/3 rung-key rejects a non-numeric ordinal" "$?"
+  _sdlc_rung_key g bogus a1b2c3d4 1 2>/dev/null;    assert_nonzero "4/3 rung-key rejects an unknown rung name" "$?"
+}
+ac_ladder_key_grammar
+
+echo "--- purity: a derivation call writes NOTHING under SDLC_STATE_DIR ---"
+ac_ladder_purity_fresh() {
+  new_state_dir
+  local gid="ladder-pure-fresh" a="$LADDER_ANCHOR" out
+  out="$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+  assert_eq "4/3 purity: fresh DEAD still derives poke:1" "poke:1" "$out"
+  TOTAL=$((TOTAL + 1))
+  if [ -e "$SDLC_STATE_DIR/$gid" ]; then
+    fail "4/3 purity: fresh derivation created NO goal dir" "found: $SDLC_STATE_DIR/$gid"
+  else
+    pass "4/3 purity: fresh derivation created NO goal dir"
+  fi
+}
+ac_ladder_purity_fresh
+
+ac_ladder_purity_populated() {
+  new_state_dir
+  local gid="ladder-pure-pop" a="$LADDER_ANCHOR" before after out
+  write_healthy "$gid" >/dev/null
+  journal_rung "$gid" poke "$a" 1; journal_rung "$gid" poke "$a" 2
+  journal_rung "$gid" re-prompt "$a" 1; journal_rung "$gid" re-prompt "$a" 2
+  before="$(state_manifest)"
+  out="$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+  after="$(state_manifest)"
+  assert_eq "4/3 purity: populated fixture derives rollover" "rollover" "$out"
+  assert_eq "4/3 purity: SDLC_STATE_DIR manifest byte-unchanged across the derivation" "$before" "$after"
+}
+ac_ladder_purity_populated
+
+# ============================================================
+# slice 6/critic-fix: sdlc_ladder_anchor — the DURABLE-PROGRESS DIGEST that
+# replaces the transcript-mtime anchor (D-C2 amendment, Step-6 critic F1). The
+# anchor keys off durable progress ONLY (plan current, goal branch tip,
+# passenger-class ledger tail, baton written-at), so a poke's own resume turn
+# (which only moves the transcript) can never reset the episode it is judged by.
+# ============================================================
+echo ""
+echo "=== critic-F1 fix: sdlc_ladder_anchor — durable-progress episode digest ==="
+
+# anchor_fixture <gid> <current> — a real git repo + plan + aligned baton so the
+# durable tuple is fully readable. Sets AF_DIR / AF_PLAN / AF_BRANCH.
+anchor_fixture() {
+  local gid="$1" current="$2"
+  new_state_dir
+  AF_DIR=$(mktemp -d); CLEAN_DIRS+=("$AF_DIR")
+  git -C "$AF_DIR" init -q
+  git -C "$AF_DIR" config user.name fixture; git -C "$AF_DIR" config user.email f@e.com
+  printf 'base\n' > "$AF_DIR/f.txt"; git -C "$AF_DIR" add -A; git -C "$AF_DIR" commit -qm base >/dev/null 2>&1
+  AF_BRANCH=$(git -C "$AF_DIR" symbolic-ref --short HEAD)
+  AF_PLAN="$AF_DIR/plan.md"; printf 'current: %s\n' "$current" > "$AF_PLAN"
+  baton_write "$gid" "$AF_PLAN" "$AF_DIR" "$AF_BRANCH" "epic/x" \
+    "$(git -C "$AF_DIR" rev-parse HEAD)" "$current" "sid-$gid/1" none "go" none none >/dev/null 2>&1
+}
+anchor_of_lib() { sdlc_ladder_anchor "$1" "$AF_PLAN" "$AF_DIR" 2>/dev/null; }
+
+echo "--- shape + determinism: 8-hex, reproducible in-process AND cold (AC-C3 heritage) ---"
+ac_anchor_shape() {
+  anchor_fixture "anc-shape" 4
+  local gid="anc-shape" a rc cold
+  a="$(sdlc_ladder_anchor "$gid" "$AF_PLAN" "$AF_DIR")"; rc=$?
+  assert_eq "anchor derivation exits 0 on a healthy fixture" "0" "$rc"
+  TOTAL=$((TOTAL + 1))
+  if printf '%s' "$a" | grep -qE '^[0-9a-f]{8}$'; then pass "anchor is an 8-hex digest"
+  else fail "anchor is an 8-hex digest" "got '$a'"; fi
+  assert_eq "anchor deterministic in-process" "$a" "$(anchor_of_lib "$gid")"
+  cold="$(bash -c '. "$1"; SDLC_STATE_DIR="$2" sdlc_ladder_anchor "$3" "$4" "$5"' \
+            bash "$LIB" "$SDLC_STATE_DIR" "$gid" "$AF_PLAN" "$AF_DIR" 2>/dev/null)"
+  assert_eq "anchor deterministic across a COLD process (cold-readable, D-C7)" "$a" "$cold"
+}
+ac_anchor_shape
+
+echo "--- purity: derivation writes NOTHING under SDLC_STATE_DIR ---"
+ac_anchor_purity() {
+  anchor_fixture "anc-pure" 4
+  local gid="anc-pure" before after
+  before="$(state_manifest)"
+  sdlc_ladder_anchor "$gid" "$AF_PLAN" "$AF_DIR" >/dev/null 2>&1
+  after="$(state_manifest)"
+  assert_eq "anchor derivation is pure (manifest byte-unchanged)" "$before" "$after"
+}
+ac_anchor_purity
+
+echo "--- reset grid: EACH durable-tuple component changing individually → fresh digest; spine-class growth → UNCHANGED ---"
+ac_anchor_reset_grid() {
+  anchor_fixture "anc-grid" 4
+  local gid="anc-grid" prev cur
+  prev="$(anchor_of_lib "$gid")"
+  # (a) plan current: bump
+  printf 'current: 5\n' > "$AF_PLAN"
+  cur="$(anchor_of_lib "$gid")"
+  assert_true "reset-grid (a) plan current: bump → fresh episode digest" test "$prev" != "$cur"
+  prev="$cur"
+  # (b) new commit on the goal branch (tip sha advances)
+  printf 'x\n' >> "$AF_DIR/f.txt"; git -C "$AF_DIR" add -A; git -C "$AF_DIR" commit -qm w >/dev/null 2>&1
+  cur="$(anchor_of_lib "$gid")"
+  assert_true "reset-grid (b) new commit on goal branch → fresh episode digest" test "$prev" != "$cur"
+  prev="$cur"
+  # (c) passenger-class ledger append
+  ledger_append "$gid" effect "passwork:$gid:1" "passenger progress" >/dev/null 2>&1
+  cur="$(anchor_of_lib "$gid")"
+  assert_true "reset-grid (c) passenger-class ledger append → fresh episode digest" test "$prev" != "$cur"
+  prev="$cur"
+  # (d) new baton written-at (new generation) — patch just the written-at line so
+  # only that tuple component changes (deterministic, no wall-clock sleep).
+  awk '/^written-at:/{print "written-at: 2099-01-01T00:00:00Z"; next}{print}' \
+    "$(baton_path "$gid")" > "$(baton_path "$gid").tmp" && mv "$(baton_path "$gid").tmp" "$(baton_path "$gid")"
+  cur="$(anchor_of_lib "$gid")"
+  assert_true "reset-grid (d) new baton written-at → fresh episode digest" test "$prev" != "$cur"
+  prev="$cur"
+  # (e) spine-class ledger growth (the ladder's OWN rung/park/spawn entries) does
+  # NOT move the anchor — the ladder can never reset the episode it is judged by.
+  journal_rung "$gid" poke "$prev" 1
+  ledger_append "$gid" effect "park:$gid:x"  "park entry"  >/dev/null 2>&1
+  ledger_append "$gid" effect "spawn:$gid:y" "spawn entry" >/dev/null 2>&1
+  assert_eq "reset-grid (e) spine-class ledger growth → anchor UNCHANGED" \
+    "$prev" "$(anchor_of_lib "$gid")"
+}
+ac_anchor_reset_grid
+
+echo "--- CRITIC REPRO (F1): a non-progress poke does NOT reset the episode (mtime observer-effect gone) ---"
+ac_anchor_critic_repro() {
+  anchor_fixture "anc-critic" 4
+  local gid="anc-critic" a a2
+  a="$(anchor_of_lib "$gid")"
+  assert_eq "critic-repro fresh DEAD under the durable anchor → poke:1" \
+    "poke:1" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+  # a poke's own resume turn ONLY moves the transcript; the durable tuple is
+  # unchanged, so re-deriving the anchor yields the SAME digest (pre-fix, an
+  # mtime anchor bumped here and reset the episode to poke:1 forever).
+  journal_rung "$gid" poke "$a" 1
+  a2="$(anchor_of_lib "$gid")"
+  assert_eq "critic-repro anchor STABLE across a non-progress poke (no observer effect)" "$a" "$a2"
+  assert_eq "critic-repro re-poll, tuple unchanged → poke:2 (escalates), NOT reset to poke:1" \
+    "poke:2" "$(sdlc_ladder_next "$gid" DEAD "$a2" 2>/dev/null)"
+  journal_rung "$gid" poke "$a" 2
+  assert_eq "critic-repro poke cap reached under a stable anchor → re-prompt:1 (escalation reachable)" \
+    "re-prompt:1" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+}
+ac_anchor_critic_repro
+
+echo "--- WEDGED churn no longer evades the observe cap (tuple stable → cap reached → human) ---"
+ac_anchor_wedged_cap() {
+  anchor_fixture "anc-wedged" 4
+  local gid="anc-wedged" a
+  a="$(anchor_of_lib "$gid")"
+  journal_rung "$gid" observe "$a" 1
+  journal_rung "$gid" observe "$a" 2
+  journal_rung "$gid" observe "$a" 3
+  assert_eq "wedged-cap anchor stable despite transcript churn" "$a" "$(anchor_of_lib "$gid")"
+  assert_eq "wedged-cap observe cap reached despite churn → human" \
+    "human" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+}
+ac_anchor_wedged_cap
+
+echo "--- defects: unreadable plan / unreadable cwd / corrupt ledger / unparseable baton → loud defect, rc 1 ---"
+ac_anchor_defects() {
+  anchor_fixture "anc-def" 4
+  local gid="anc-def" err rc lp
+  err="$(sdlc_ladder_anchor "bad/goal" "$AF_PLAN" "$AF_DIR" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "anchor invalid goal-id → nonzero" "$rc"
+  assert_contains "anchor invalid goal-id names invalid-goal-id" "invalid-goal-id" "$err"
+
+  err="$(sdlc_ladder_anchor "$gid" "/nonexistent/plan.md" "$AF_DIR" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "anchor unreadable plan → nonzero" "$rc"
+  assert_contains "anchor unreadable plan names plan-unreadable" "plan-unreadable" "$err"
+
+  err="$(sdlc_ladder_anchor "$gid" "$AF_PLAN" "/no/such/repo" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "anchor unreadable cwd → nonzero" "$rc"
+  assert_contains "anchor unreadable cwd names cwd-unreadable" "cwd-unreadable" "$err"
+
+  ledger_append "$gid" effect "passwork:$gid" "p" >/dev/null 2>&1
+  lp="$(ledger_path "$gid")"
+  awk -F'\t' -v OFS='\t' 'NR==1{$6="TAMPERED"}{print}' "$lp" > "$lp.new" && mv "$lp.new" "$lp"
+  err="$(sdlc_ladder_anchor "$gid" "$AF_PLAN" "$AF_DIR" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "anchor corrupt ledger → nonzero" "$rc"
+  assert_contains "anchor corrupt ledger surfaces a chain defect" "defect:" "$err"
+
+  printf 'garbage without keys\n' > "$(baton_path "$gid")"
+  err="$(sdlc_ladder_anchor "$gid" "$AF_PLAN" "$AF_DIR" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "anchor unparseable baton → nonzero" "$rc"
+  assert_contains "anchor unparseable baton passes a baton defect through" "defect:" "$err"
+}
+ac_anchor_defects
+
+echo "--- F1b (critic-fix-2): unresolvable baton branch → fail-closed defect, NOT a fail-open literal-ref digest ---"
+ac_anchor_branch_neverexisted() {
+  anchor_fixture "anc-brF1b" 4
+  local gid="anc-brF1b" err rc out
+  # baton's recorded branch is a typo/never-existed name in a perfectly valid repo
+  # (critic-poc/failopen.sh repro). Unpatched: git rev-parse echoes the LITERAL
+  # ref name to stdout at rc 128; the `-z` guard misses it → fail-open digest.
+  awk '/^branch:/{print "branch: feat/does-not-exist"; next}{print}' \
+    "$(baton_path "$gid")" > "$(baton_path "$gid").tmp" && mv "$(baton_path "$gid").tmp" "$(baton_path "$gid")"
+
+  err="$(sdlc_ladder_anchor "$gid" "$AF_PLAN" "$AF_DIR" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "F1b never-existed branch → nonzero (fail-closed, not fail-open)" "$rc"
+  assert_contains "F1b never-existed branch surfaces a named defect" "defect:" "$err"
+
+  out="$(sdlc_ladder_anchor "$gid" "$AF_PLAN" "$AF_DIR" 2>/dev/null)"
+  assert_eq "F1b never-existed branch → NOTHING digested on stdout" "" "$out"
+}
+ac_anchor_branch_neverexisted
+
+echo "--- F1b: branch renamed/deleted after merge (baton still names the old ref) → same fail-closed defect ---"
+ac_anchor_branch_deleted() {
+  anchor_fixture "anc-brdel" 4
+  local gid="anc-brdel" err rc out
+  # the goal branch existed and had a real tip, but was renamed away (deleted
+  # post-merge is the same shape) — the baton's recorded name no longer resolves.
+  git -C "$AF_DIR" branch -m "$AF_BRANCH" "${AF_BRANCH}-renamed" -q
+
+  err="$(sdlc_ladder_anchor "$gid" "$AF_PLAN" "$AF_DIR" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "F1b renamed/deleted branch → nonzero (fail-closed)" "$rc"
+  assert_contains "F1b renamed/deleted branch surfaces a named defect" "defect:" "$err"
+
+  out="$(sdlc_ladder_anchor "$gid" "$AF_PLAN" "$AF_DIR" 2>/dev/null)"
+  assert_eq "F1b renamed/deleted branch → NOTHING digested on stdout" "" "$out"
+}
+ac_anchor_branch_deleted
+
+echo "--- F1b regression: a VALID branch still digests IDENTICALLY (resolvable-branch behavior is unchanged by the fix) ---"
+ac_anchor_branch_valid_unchanged() {
+  anchor_fixture "anc-brok" 4
+  local gid="anc-brok" want got tip
+  # independently reproduce the durable tuple via the OLD raw rev-parse
+  # resolution (which agrees byte-for-byte with the new --verify resolution on
+  # any REAL, resolvable ref) and assert the library's actual output matches —
+  # proving the fix changes nothing for the healthy path.
+  tip=$(git -C "$AF_DIR" rev-parse "$AF_BRANCH" 2>/dev/null)
+  baton_parse "$(baton_path "$gid")" >/dev/null 2>&1
+  want="$(ledger_digest "$(printf '%s\n%s\n%s\n%s' 4 "$tip" 0 "$BATON_WRITTEN_AT")")"
+  got="$(anchor_of_lib "$gid")"
+  assert_eq "F1b regression: resolvable-branch anchor byte-identical to the raw-rev-parse formula" "$want" "$got"
+}
+ac_anchor_branch_valid_unchanged
 
 # ============================================================
 echo ""
