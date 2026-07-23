@@ -3196,6 +3196,106 @@ ac_anchor_branch_valid_unchanged() {
 ac_anchor_branch_valid_unchanged
 
 # ============================================================
+# ===== 4/S1 keepalive: flag resolution + arm/disarm =========
+# ============================================================
+# Fixtures drive the REAL lib functions (sdlc_keepalive_effective,
+# sdlc_pilot_effective, sdlc_arm, sdlc_disarm) against planted plan
+# files + a fresh fake $HOME (goals dir + audit log live under it).
+
+# write_plan <path> <scale> [keepalive] [pilot] — emit a plan with a
+# frontmatter block. Empty keepalive/pilot arg ⇒ that key is ABSENT
+# (drives the fallback table); a non-true/false or non-MANUAL/AUTO value
+# is an off-enum fixture.
+write_plan() {
+  local path="$1" scale="$2" ka="${3:-}" pilot="${4:-}"
+  mkdir -p "$(dirname "$path")" 2>/dev/null
+  {
+    echo "---"
+    echo "scale: $scale"
+    [ -n "$ka" ] && echo "keepalive: $ka"
+    [ -n "$pilot" ] && echo "pilot: $pilot"
+    echo "---"
+    echo ""
+    echo "# plan body"
+  } > "$path"
+}
+
+# read a KEY=VALUE from a planted registration record.
+reg_field() { grep -E "^$2=" "$1" 2>/dev/null | head -1 | sed -E "s/^$2=//"; }
+poker_audit() { printf '%s/.claude/sdlc-poker-audit.log' "$HOME"; }
+goals_reg() { printf '%s/.claude/sdlc-goals/%s' "$HOME" "$1"; }
+
+echo ""
+echo "=== 4/S1-G1: effective-flag grid (keepalive/pilot × scale × presence) ==="
+ac_s1_effgrid() {
+  new_state_dir
+  local scale p out rc
+  # --- keepalive: explicit true/false is scale-independent; absent →
+  #     continuous:true, task/wave/epic:false (fallback table) ---
+  for scale in continuous task wave epic; do
+    write_plan "$HOME/p-$scale-t.plan.md" "$scale" true
+    out=$(sdlc_keepalive_effective "$HOME/p-$scale-t.plan.md"); rc=$?
+    assert_eq "keepalive explicit true ($scale) → true" "true" "$out"
+    assert_eq "keepalive explicit true ($scale) → rc 0" "0" "$rc"
+
+    write_plan "$HOME/p-$scale-f.plan.md" "$scale" false
+    out=$(sdlc_keepalive_effective "$HOME/p-$scale-f.plan.md")
+    assert_eq "keepalive explicit false ($scale) → false" "false" "$out"
+
+    write_plan "$HOME/p-$scale-a.plan.md" "$scale"
+    out=$(sdlc_keepalive_effective "$HOME/p-$scale-a.plan.md")
+    if [ "$scale" = continuous ]; then
+      assert_eq "keepalive absent (continuous) → true (fallback)" "true" "$out"
+    else
+      assert_eq "keepalive absent ($scale) → false (fallback)" "false" "$out"
+    fi
+  done
+
+  # --- pilot: explicit MANUAL/AUTO scale-independent; absent →
+  #     continuous:AUTO, else MANUAL ---
+  write_plan "$HOME/pp-man.plan.md" wave "" MANUAL
+  out=$(sdlc_pilot_effective "$HOME/pp-man.plan.md"); rc=$?
+  assert_eq "pilot explicit MANUAL → MANUAL" "MANUAL" "$out"
+  assert_eq "pilot explicit MANUAL → rc 0" "0" "$rc"
+  write_plan "$HOME/pp-auto.plan.md" task "" AUTO
+  out=$(sdlc_pilot_effective "$HOME/pp-auto.plan.md")
+  assert_eq "pilot explicit AUTO → AUTO" "AUTO" "$out"
+  for scale in continuous task wave epic; do
+    write_plan "$HOME/pp-$scale-a.plan.md" "$scale"
+    out=$(sdlc_pilot_effective "$HOME/pp-$scale-a.plan.md")
+    if [ "$scale" = continuous ]; then
+      assert_eq "pilot absent (continuous) → AUTO (fallback)" "AUTO" "$out"
+    else
+      assert_eq "pilot absent ($scale) → MANUAL (fallback)" "MANUAL" "$out"
+    fi
+  done
+
+  # --- off-enum pilot → rc 2 + stderr names the bad value (never guess) ---
+  write_plan "$HOME/pp-bad.plan.md" wave "" SEMI
+  out=$(sdlc_pilot_effective "$HOME/pp-bad.plan.md" 2>/dev/null); rc=$?
+  assert_eq "pilot off-enum → rc 2" "2" "$rc"
+  local err
+  err=$(sdlc_pilot_effective "$HOME/pp-bad.plan.md" 2>&1 1>/dev/null)
+  assert_contains "pilot off-enum → stderr names the bad value" "SEMI" "$err"
+
+  # --- off-enum keepalive → rc 2 + stderr (symmetric fail-loud) ---
+  write_plan "$HOME/pk-bad.plan.md" wave "maybe"
+  out=$(sdlc_keepalive_effective "$HOME/pk-bad.plan.md" 2>/dev/null); rc=$?
+  assert_eq "keepalive off-enum → rc 2" "2" "$rc"
+  err=$(sdlc_keepalive_effective "$HOME/pk-bad.plan.md" 2>&1 1>/dev/null)
+  assert_contains "keepalive off-enum → stderr names the bad value" "maybe" "$err"
+
+  # --- unreadable/missing plan → rc 1 + empty stdout (both fns) ---
+  out=$(sdlc_keepalive_effective "$HOME/does-not-exist.plan.md" 2>/dev/null); rc=$?
+  assert_eq "keepalive missing plan → rc 1" "1" "$rc"
+  assert_eq "keepalive missing plan → empty stdout" "" "$out"
+  out=$(sdlc_pilot_effective "$HOME/does-not-exist.plan.md" 2>/dev/null); rc=$?
+  assert_eq "pilot missing plan → rc 1" "1" "$rc"
+  assert_eq "pilot missing plan → empty stdout" "" "$out"
+}
+ac_s1_effgrid
+
+# ============================================================
 echo ""
 echo "========================================"
 echo "sdlc-state primitives (baton + ledger): $PASS/$TOTAL passed, $FAIL failed"
