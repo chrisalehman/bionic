@@ -3295,6 +3295,54 @@ ac_s1_effgrid() {
 }
 ac_s1_effgrid
 
+echo ""
+echo "=== 4/S1-G2: arm round-trip (5-field record, atomic, audit) ==="
+ac_s1_arm_roundtrip() {
+  new_state_dir
+  local plan out rc rec
+  plan="$HOME/plans/mywave.plan.md"
+  write_plan "$plan" wave true       # keepalive:true task/wave/epic → armable
+  export SDLC_ARM_SESSION_ID="sid-fixture-1"
+  export SDLC_ARM_PID="31337"
+
+  out=$(sdlc_arm "$plan"); rc=$?
+  assert_eq "arm keepalive:true wave → rc 0" "0" "$rc"
+  assert_eq "arm → stdout is the goal-id" "mywave" "$out"
+
+  rec="$(goals_reg mywave)"
+  assert_true "arm → registration record exists" test -f "$rec"
+  # 5 fields exact
+  assert_eq "record PLAN = resolved absolute plan path" "$plan" "$(reg_field "$rec" PLAN)"
+  assert_eq "record CWD = arm-time pwd" "$(pwd)" "$(reg_field "$rec" CWD)"
+  assert_eq "record SESSION_ID = SDLC_ARM_SESSION_ID seam" "sid-fixture-1" "$(reg_field "$rec" SESSION_ID)"
+  assert_eq "record PID = SDLC_ARM_PID seam" "31337" "$(reg_field "$rec" PID)"
+  # ARMED_AT is an ISO-8601 Z stamp
+  assert_true "record ARMED_AT is ISO-8601 Zulu" bash -c \
+    'printf "%s" "$1" | grep -qE "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"' _ "$(reg_field "$rec" ARMED_AT)"
+  # exactly the 5 keys, no partial / extra
+  assert_eq "record has exactly 5 KEY= lines" "5" "$(grep -cE '^[A-Z_]+=' "$rec")"
+
+  # audit line follows the poker's audit_line convention (<iso> <gid> <event>
+  # <detail>): the ARM <gid> <plan> pilot=<p> content lands as
+  # "<iso> mywave ARM <plan> pilot=MANUAL" (pilot falls back to MANUAL for wave).
+  local audit; audit="$(cat "$(poker_audit)" 2>/dev/null)"
+  assert_contains "arm → audit ARM line present" "mywave ARM $plan pilot=MANUAL" "$audit"
+
+  unset SDLC_ARM_SESSION_ID SDLC_ARM_PID
+
+  # --- atomicity: injected write failure leaves NO record behind ---
+  new_state_dir
+  plan="$HOME/plans/atom.plan.md"
+  write_plan "$plan" wave true
+  # plant the goals dir as a regular FILE so mkdir/write into it fails
+  mkdir -p "$HOME/.claude"
+  : > "$HOME/.claude/sdlc-goals"
+  out=$(sdlc_arm "$plan" 2>/dev/null); rc=$?
+  assert_nonzero "arm with unwritable goals dir → nonzero" "$rc"
+  assert_true "arm failure → no partial record file" test ! -e "$(goals_reg atom)"
+}
+ac_s1_arm_roundtrip
+
 # ============================================================
 echo ""
 echo "========================================"
