@@ -1008,3 +1008,79 @@ sdlc_reconcile() {
   echo "defect: worktree-drift: tree matches neither HEAD nor snapshot $BATON_WIP" >&2
   return 1
 }
+
+# ---------- D2: completion latch (slice 4/3) ----------
+#
+# sdlc_complete_check <goal-id> [dir] — verifies a COMPLETE claim against git
+# reality, structurally only (no project code, no test-suite execution: the
+# lifecycle's own Step-5 gate already evidenced suite-green in the plan these
+# predicates read). `dir` (default $PWD) is the goal's repo; both branches are
+# resolved via `git rev-parse` in that dir.
+#
+# rc semantics (the three named outcomes, D2):
+#   0 — complete-verified: every predicate passed; the completion latch
+#       (`complete:<goal-id>`, exactly-once via sdlc_effect_run) is journaled.
+#   1 — not-complete (BENIGN): the plan is not yet terminal. One stderr line,
+#       deliberately NOT `defect:`-prefixed — this is the ordinary in-flight
+#       case, not a fault, and must never be mistaken for one downstream.
+#   2 — false-complete-or-defect (LOUD): either the plan claims terminal but a
+#       predicate refutes it (`defect: false-complete: ...`), or an earlier
+#       structural guard/parse/chain failed and its own named defect passes
+#       through under this same rc class (goal-id guard, baton_parse,
+#       ledger_verify).
+#
+# Predicate order (first refusal wins):
+#   1. goal-id via the shared guard, then baton_parse — both classes fold into
+#      rc 2, the defect line is whichever primitive printed it.
+#   2. Plan `current:` (read from BATON_PLAN, same grep+sed shape as
+#      sdlc_reconcile) != "10" → benign not-complete, rc 1. This is the ONLY
+#      rc-1 exit; every later exit in this function is rc 2.
+#   3. current == "10": branch-merged check — resolve BATON_BRANCH and
+#      BATON_INTEGRATION_BRANCH to their tips via `git rev-parse`, then
+#      `git merge-base --is-ancestor <branch-tip> <integration-tip>`; refusal
+#      → `defect: false-complete: current 10 but <branch> not merged into
+#      <integration-branch>`.
+#   4. BATON_WIP != "none" → `defect: false-complete: terminal plan with
+#      stranded wip <sha>` (a terminal plan must have no work product left
+#      shadowed — that work was either landed or abandoned, never stranded).
+#   5. `ledger_verify` — chain defects pass through under their own names.
+#   6. All predicates passed → journal the latch via `sdlc_effect_run
+#      <goal-id> "complete:<goal-id>" "completion verified structurally" --
+#      true`; print `complete-verified` on stdout, rc 0. sdlc_effect_run's own
+#      exactly-once guard makes a second invocation idempotent for free: the
+#      effect is already `applied`, so no command runs and no duplicate
+#      ledger line lands — this function does not need its own memo.
+sdlc_complete_check() {
+  local goal_id="${1:-}" dir="${2:-$PWD}"
+  local baton plan_path plan_current branch_tip integ_tip
+
+  _sdlc_validate_goal_id "$goal_id" "sdlc_complete_check" || return 2
+  baton="$(baton_path "$goal_id")"
+  baton_parse "$baton" || return 2
+
+  plan_path="$BATON_PLAN"
+  plan_current=$(grep -E '^current:' "$plan_path" 2>/dev/null | head -1 | sed -E 's/^current:[[:space:]]*//')
+
+  if [ "$plan_current" != "10" ]; then
+    echo "not-complete: plan current $plan_current" >&2
+    return 1
+  fi
+
+  branch_tip=$(git -C "$dir" rev-parse "$BATON_BRANCH" 2>/dev/null)
+  integ_tip=$(git -C "$dir" rev-parse "$BATON_INTEGRATION_BRANCH" 2>/dev/null)
+  if ! git -C "$dir" merge-base --is-ancestor "$branch_tip" "$integ_tip" 2>/dev/null; then
+    echo "defect: false-complete: current 10 but $BATON_BRANCH not merged into $BATON_INTEGRATION_BRANCH" >&2
+    return 2
+  fi
+
+  if [ "$BATON_WIP" != "none" ]; then
+    echo "defect: false-complete: terminal plan with stranded wip $BATON_WIP" >&2
+    return 2
+  fi
+
+  ledger_verify "$goal_id" || return 2
+
+  sdlc_effect_run "$goal_id" "complete:$goal_id" "completion verified structurally" -- true || return 2
+  printf 'complete-verified\n'
+  return 0
+}
