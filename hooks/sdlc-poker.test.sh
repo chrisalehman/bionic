@@ -52,6 +52,7 @@ new_home() {
 #!/bin/sh
 STUBDIR="$HOME/.claude/.stub"
 if [ "$1" = "agents" ]; then
+  echo call >> "$STUBDIR/registry-calls.log"   # e09 fold: count invocations (AC-C7)
   rc=0
   [ -f "$STUBDIR/registry.rc" ] && rc=$(cat "$STUBDIR/registry.rc")
   [ -f "$STUBDIR/registry.json" ] && cat "$STUBDIR/registry.json"
@@ -221,6 +222,7 @@ audit_of()  { cat "$HOME/.claude/sdlc-poker-audit.log" 2>/dev/null || true; }
 status_of() { cat "$HOME/.claude/sdlc-status/$1.md" 2>/dev/null || true; }
 status_exists() { [ -f "$HOME/.claude/sdlc-status/$1.md" ]; }
 claude_calls() { cat "$HOME/.claude/.stub/claude-calls.log" 2>/dev/null || true; }
+registry_calls() { cat "$HOME/.claude/.stub/registry-calls.log" 2>/dev/null || true; }
 claude_stdin() { cat "$HOME/.claude/.stub/claude-stdin.log" 2>/dev/null || true; }
 claude_cwd()   { cat "$HOME/.claude/.stub/claude-cwd.log" 2>/dev/null || true; }
 claude_token() { cat "$HOME/.claude/.stub/claude-token.log" 2>/dev/null || true; }
@@ -907,6 +909,159 @@ f4_id() {
   assert_true "4/4-3 run continued to the valid-id goal (status written)" status_exists okid
 }
 f4_id
+
+# ============================================================
+# ================  slice 4/1 — e09 perf folds  ==============
+# Registry once-per-poll (was: once per goal), transcript memo (was: up to 4
+# independent glob scans per goal), and the SDLC_REGISTRY_CMD seam (was:
+# hardcoded `claude agents --json`). D-C8/AC-C7.
+
+echo "=== 4/1-1 (e09): registry fetched ONCE per poll for a 3-goal poll, not once per goal ==="
+e1() {
+  new_home
+  local c1 c2 c3
+  c1=$(real_cwd e1a); c2=$(real_cwd e1b); c3=$(real_cwd e1c)
+  arm_goal ge1a 4 "$c1" sid-e1a 4242 30 user
+  arm_goal ge1b 4 "$c2" sid-e1b 4242 30 user
+  arm_goal ge1c 4 "$c3" sid-e1c 4242 30 user
+  stub_registry_state idle sid-e1a          # one stub registry.json serves all three lookups
+  run_poker
+  assert_eq "4/1-1 exactly one registry invocation for a 3-goal poll" \
+    "1" "$(registry_calls | wc -l | tr -d ' ')"
+}
+e1
+
+echo "=== 4/1-2 (e09): transcript resolved once per goal per poll (memoized across classify/status/poke-key) ==="
+e2() {
+  new_home
+  mkdir -p "$(state_dir)"   # direct-call convention (bypassing main()); poke_capped needs it to exist
+  local cwd; cwd=$(real_cwd e2)
+  arm_goal ge2 4 "$cwd" sid-e2 2147483647 260 user   # registry absent → DEAD (pokeable, reaches poke-key)
+  stub_registry_state absent
+  _XSCRIPT_SID=""; _XSCRIPT_PATH=""; _XSCRIPT_SCANS=0   # clean baseline (global counter persists across cases)
+  # load_registration runs DIRECTLY (not via `$(classify_goal ...)`, which would
+  # fork a subshell and lose REG_* back-propagation) — mirrors process_goals's
+  # own call order, so write_status below sees REG_PLAN/REG_SESSION_ID correctly.
+  load_registration ge2
+  local state; state=$(classify_goal ge2)
+  write_status ge2 "$state"
+  dispatch_actions ge2 "$state" ""                       # DEAD → poke_capped → transcript_mtime_key
+  assert_eq "4/1-2 exactly one transcript resolution across classify_goal + write_status + poke-key derivation" \
+    "1" "${_XSCRIPT_SCANS:-0}"
+}
+e2
+
+echo "=== 4/1-3 (e09): SDLC_REGISTRY_CMD seam honored — the registry command is not hardcoded ==="
+e3() {
+  new_home
+  local cwd; cwd=$(real_cwd e3)
+  arm_goal ge3 4 "$cwd" sid-e3 4242 30 user   # fresh transcript (30s < QUIET_THRESHOLD 180)
+  stub_registry_state absent                   # default stub: sid absent → would classify DEAD (poke)
+  cat > "$HOME/.claude/.stub/altreg" <<'STUBEOF'
+#!/bin/sh
+echo call >> "$HOME/.claude/.stub/altreg-calls.log"
+printf '[{"sessionId":"sid-e3","status":"idle"}]\n'
+STUBEOF
+  chmod +x "$HOME/.claude/.stub/altreg"
+  export SDLC_REGISTRY_CMD="$HOME/.claude/.stub/altreg"
+  run_poker
+  unset SDLC_REGISTRY_CMD
+  assert_eq "4/1-3 the SDLC_REGISTRY_CMD command was invoked once" \
+    "1" "$(cat "$HOME/.claude/.stub/altreg-calls.log" 2>/dev/null | wc -l | tr -d ' ')"
+  assert_eq "4/1-3 the default claude stub's agents branch was never consulted" \
+    "0" "$(registry_calls | wc -l | tr -d ' ')"
+  assert_contains "4/1-3 classification reflects the seam's IDLE, not the default stub's DEAD" \
+    "state: idle" "$(status_of ge3)"
+  assert_eq "4/1-3 no poke fired (IDLE via the seam, not DEAD via the default)" "" "$(claude_calls)"
+}
+e3
+
+echo "=== 4/1-4 (e09): classification parity — the threaded (cached) call honors the passed snapshot, not a live re-fetch, across the full classification grid ==="
+# Each sub-case snapshots the registry via the seam (json+rc), THEN drifts the
+# LIVE registry to a state that would classify differently if classify_goal's
+# threaded-args path secretly re-fetched instead of using what was passed —
+# proving both parity (matches the literal expected token) and that the
+# caching is real (not a coincidental match against unchanged live state).
+e4() {
+  # DEAD: snapshot has the sid absent; live drifts to present+idle.
+  new_home
+  local cwd json rc got
+  cwd=$(real_cwd e4dead)
+  arm_goal ge4dead 4 "$cwd" sid-e4dead 4242 30 user
+  stub_registry_state absent
+  json=$(claude agents --json 2>/dev/null); rc=$?
+  stub_registry_state idle sid-e4dead
+  got=$(classify_goal ge4dead "$json" "$rc")
+  assert_eq "4/1-4 DEAD: honors the snapshot (absent), ignores the drifted live idle" "DEAD" "$got"
+
+  # IDLE: snapshot idle + fresh transcript; live drifts to absent (would be DEAD).
+  new_home
+  cwd=$(real_cwd e4idle)
+  arm_goal ge4idle 4 "$cwd" sid-e4idle 4242 30 user
+  stub_registry_state idle sid-e4idle
+  json=$(claude agents --json 2>/dev/null); rc=$?
+  stub_registry_state absent
+  got=$(classify_goal ge4idle "$json" "$rc")
+  assert_eq "4/1-4 IDLE: honors the snapshot (idle+fresh), ignores the drifted live absent" "IDLE" "$got"
+
+  # IDLE_STALLED: snapshot idle + stale transcript; live drifts to absent.
+  new_home
+  cwd=$(real_cwd e4stalled)
+  arm_goal ge4stalled 4 "$cwd" sid-e4stalled 4242 200 user
+  stub_registry_state idle sid-e4stalled
+  json=$(claude agents --json 2>/dev/null); rc=$?
+  stub_registry_state absent
+  got=$(classify_goal ge4stalled "$json" "$rc")
+  assert_eq "4/1-4 IDLE_STALLED: honors the snapshot, ignores the drifted live absent" "IDLE_STALLED" "$got"
+
+  # BUSY: snapshot busy + fresh; live drifts to absent.
+  new_home
+  cwd=$(real_cwd e4busy)
+  arm_goal ge4busy 4 "$cwd" sid-e4busy 4242 60 busy
+  stub_registry_state busy sid-e4busy
+  json=$(claude agents --json 2>/dev/null); rc=$?
+  stub_registry_state absent
+  got=$(classify_goal ge4busy "$json" "$rc")
+  assert_eq "4/1-4 BUSY: honors the snapshot, ignores the drifted live absent" "BUSY" "$got"
+
+  # WEDGED: snapshot busy + stale (>WEDGE_QUIET); live drifts to absent.
+  new_home
+  cwd=$(real_cwd e4wedge)
+  arm_goal ge4wedge 4 "$cwd" sid-e4wedge 4242 600 busy
+  stub_registry_state busy sid-e4wedge
+  json=$(claude agents --json 2>/dev/null); rc=$?
+  stub_registry_state absent
+  got=$(classify_goal ge4wedge "$json" "$rc")
+  assert_eq "4/1-4 WEDGED: honors the snapshot, ignores the drifted live absent" "WEDGED" "$got"
+
+  # COMPLETE: plan current:10 short-circuits BEFORE the registry args are ever
+  # read — garbage snapshot args must never surface as a defect/degrade.
+  new_home
+  cwd=$(real_cwd e4complete)
+  arm_goal ge4complete 10 "$cwd" sid-e4complete 4242 30 user
+  got=$(classify_goal ge4complete "garbage-not-json" 1)
+  assert_eq "4/1-4 COMPLETE: plan state short-circuits, garbage registry args never read" "COMPLETE" "$got"
+
+  # GATED: plan Wake Note — same short-circuit guarantee.
+  new_home
+  cwd=$(real_cwd e4gated)
+  arm_goal ge4gated 4 "$cwd" sid-e4gated 4242 30 user 1
+  got=$(classify_goal ge4gated "garbage-not-json" 1)
+  assert_eq "4/1-4 GATED: plan state short-circuits, garbage registry args never read" "GATED" "$got"
+
+  # DEGRADE-fallback: snapshot is a FAILED fetch (rc=1); live recovers to a
+  # clean registry — the cached call must still degrade on the snapshot's
+  # failure (ps/grammar path), never resurrected by the live recovery.
+  new_home
+  cwd=$(real_cwd e4degrade)
+  arm_goal ge4degrade 4 "$cwd" sid-e4degrade "$$" 30 user   # live pid ($$) → ps corroborates alive
+  stub_registry_state idle sid-e4degrade                     # live recovers to a clean registry
+  got=$(classify_goal ge4degrade "" 1)
+  assert_eq "4/1-4 DEGRADE-fallback: cached call degrades on the snapshot's failure (ps+grammar → IDLE)" \
+    "IDLE" "$got"
+  assert_contains "4/1-4 DEGRADE-fallback: DEGRADE audit line emitted" "ge4degrade DEGRADE" "$(audit_of)"
+}
+e4
 
 # ============================================================
 echo ""

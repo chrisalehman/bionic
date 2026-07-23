@@ -51,6 +51,17 @@ POKE_PROMPT='continue per the plan'"'"'s `## SDLC State`; if blocked on a decisi
 # that reads them before load_registration runs (hooks-rules.md).
 REG_PLAN=""; REG_CWD=""; REG_SESSION_ID=""; REG_PID=""; REG_ARMED_AT=""
 
+# Transcript memo (D-C8 e09 fold): resolve_transcript's glob scan is resolved
+# ONCE per goal per poll and reused by every consumer (transcript_quiet,
+# transcript_grammar, write_status, transcript_mtime_key). Keyed on
+# REG_SESSION_ID — load_registration always sets it non-empty before any
+# consumer runs, so a differing (or still-empty) key is always a genuine
+# cache miss; a goal-to-goal transition inside process_goals's loop changes
+# REG_SESSION_ID and so naturally invalidates the prior goal's entry.
+# _XSCRIPT_SCANS counts actual (non-memoized) scans — test-observable only,
+# read nowhere in production logic.
+_XSCRIPT_SID=""; _XSCRIPT_PATH=""; _XSCRIPT_SCANS=0
+
 # ---------- path helpers (read $HOME at call time) ----------
 goals_dir()   { printf '%s/.claude/sdlc-goals' "$HOME"; }
 status_dir()  { printf '%s/.claude/sdlc-status' "$HOME"; }
@@ -140,7 +151,13 @@ is_armed_scale() {  # uses REG_PLAN
 # silently broke resolution → stall/wedge detection defeated. Nullglob-safe via
 # the -f guard (an unmatched glob word is skipped); >1 match is impossible for a
 # uuid but the newest is taken defensively. Echoes a path or nothing.
-resolve_transcript() {  # uses REG_SESSION_ID
+# Populates the _XSCRIPT_PATH memo (global) for the current REG_SESSION_ID.
+# Called DIRECTLY (never via `$(...)`) by every internal consumer below — a
+# command-substitution call forks a subshell, and a subshell's variable writes
+# never reach the parent, so the memo would silently never stick. Callers read
+# $_XSCRIPT_PATH themselves right after calling this.
+_resolve_transcript_memo() {
+  if [ "$_XSCRIPT_SID" = "$REG_SESSION_ID" ]; then return; fi
   local t best="" bestm="" m
   for t in "$HOME"/.claude/projects/*/"$REG_SESSION_ID".jsonl; do
     [ -f "$t" ] || continue
@@ -148,16 +165,25 @@ resolve_transcript() {  # uses REG_SESSION_ID
     [ -n "$m" ] || m=0
     if [ -z "$best" ] || [ "$m" -gt "$bestm" ]; then best="$t"; bestm="$m"; fi
   done
-  [ -n "$best" ] && printf '%s' "$best"
+  _XSCRIPT_SID="$REG_SESSION_ID"; _XSCRIPT_PATH="$best"
+  _XSCRIPT_SCANS=$((_XSCRIPT_SCANS + 1))
+}
+
+# Public wrapper — unchanged external contract (echoes a path or nothing).
+# Safe to call via `$(resolve_transcript)`; internal consumers call
+# _resolve_transcript_memo directly instead, so the memo survives across sites.
+resolve_transcript() {  # uses REG_SESSION_ID; memoized (D-C8 e09 fold)
+  _resolve_transcript_memo
+  [ -n "$_XSCRIPT_PATH" ] && printf '%s' "$_XSCRIPT_PATH"
 }
 
 # Transcript quiet in seconds (now - mtime). No transcript → 0 (recently-active
 # assumption: mtime is a suspect flag only and must never manufacture a stall).
 transcript_quiet() {
-  local t mt now
-  t=$(resolve_transcript)
-  [ -n "$t" ] || { echo 0; return; }
-  mt=$(file_mtime "$t" 2>/dev/null) || mt=""
+  local mt now
+  _resolve_transcript_memo
+  [ -n "$_XSCRIPT_PATH" ] || { echo 0; return; }
+  mt=$(file_mtime "$_XSCRIPT_PATH" 2>/dev/null) || mt=""
   [ -n "$mt" ] || { echo 0; return; }
   now=$(date +%s)
   echo $(( now - mt ))
@@ -166,10 +192,10 @@ transcript_quiet() {
 # Last-event grammar (degrade fallback): dangling tool_use → busy;
 # last-prompt (user) marker → idle; otherwise unknown.
 transcript_grammar() {
-  local t last
-  t=$(resolve_transcript)
-  [ -n "$t" ] || { echo unknown; return; }
-  last=$(tail -n 1 "$t" 2>/dev/null)
+  local last
+  _resolve_transcript_memo
+  [ -n "$_XSCRIPT_PATH" ] || { echo unknown; return; }
+  last=$(tail -n 1 "$_XSCRIPT_PATH" 2>/dev/null)
   if printf '%s' "$last" | grep -q '"tool_use"' \
      && ! printf '%s' "$last" | grep -q '"tool_result"'; then
     echo busy
@@ -197,10 +223,18 @@ degrade_classify() {  # $1=goal-id (for future audit context)
   esac
 }
 
-# classify_goal <goal-id> → one of COMPLETE|GATED|DEAD|IDLE_STALLED|IDLE|BUSY|WEDGED
-# (or "" on total-signal-loss degrade). Loads the registration itself so it is
-# callable directly on a planted goal. Plan state first, session liveness second.
-classify_goal() {  # $1=goal-id
+# classify_goal <goal-id> [registry-json registry-rc] → one of
+# COMPLETE|GATED|DEAD|IDLE_STALLED|IDLE|BUSY|WEDGED (or "" on total-signal-loss
+# degrade). Loads the registration itself so it is callable directly on a
+# planted goal. Plan state first, session liveness second.
+#
+# registry-json/registry-rc (D-C8 e09 fold, SDLC_REGISTRY_CMD seam): when the
+# caller passes both (process_goals's once-per-poll fetch), classify_goal uses
+# them as-is and never shells out itself. Called with just the goal-id (the
+# direct-call convention every existing fixture case uses), it self-fetches via
+# `${SDLC_REGISTRY_CMD:-claude agents --json}` exactly as before — no observable
+# behavior change on that path, just the same seam process_goals now uses.
+classify_goal() {  # $1=goal-id $2=registry-json (optional) $3=registry-rc (optional, paired with $2)
   local gid="$1"
   load_registration "$gid" || { echo ""; return; }
 
@@ -208,10 +242,14 @@ classify_goal() {  # $1=goal-id
   [ "$(plan_current "$REG_PLAN")" = "10" ] && { echo COMPLETE; return; }
   plan_has_wake_note "$REG_PLAN" && { echo GATED; return; }
 
-  # 2. SESSION liveness — `claude agents --json`, by SESSION_ID only (never
-  #    enumeration). Registry unavailable/unparseable → degrade.
+  # 2. SESSION liveness — registry JSON by SESSION_ID only (never enumeration).
+  # Registry unavailable/unparseable → degrade.
   local json rc present status
-  json=$(claude agents --json 2>/dev/null); rc=$?
+  if [ "$#" -ge 3 ]; then
+    json="$2"; rc="$3"
+  else
+    json=$(${SDLC_REGISTRY_CMD:-claude agents --json} 2>/dev/null); rc=$?
+  fi
   if [ "$rc" -ne 0 ] || ! command -v jq >/dev/null 2>&1; then
     audit_line "$gid" DEGRADE "registry unavailable (rc=$rc); ps/grammar fallback"
     degrade_classify "$gid"; return
@@ -265,11 +303,11 @@ recovery_cmd() {  # uses REG_PID, REG_CWD, REG_SESSION_ID
 # plan current, last transcript activity, attach handle, + recovery command on
 # WEDGE. No occupancy field (wave-04).
 write_status() {  # $1=goal-id $2=classification
-  local gid="$1" state="$2" dir t iso cur
+  local gid="$1" state="$2" dir iso cur
   dir="$(status_dir)"; mkdir -p "$dir" 2>/dev/null
   cur=$(plan_current "$REG_PLAN"); [ -n "$cur" ] || cur="unknown"
-  t=$(resolve_transcript)
-  if [ -n "$t" ]; then iso=$(iso_of_mtime "$t"); else iso="unknown"; fi
+  _resolve_transcript_memo
+  if [ -n "$_XSCRIPT_PATH" ]; then iso=$(iso_of_mtime "$_XSCRIPT_PATH"); else iso="unknown"; fi
   {
     echo "# sdlc-poker status: $gid"
     echo "state: $(state_word "$state")"
@@ -413,9 +451,9 @@ do_notify() {  # $1=goal-id $2=event $3=body
 poke_state_file() { printf '%s/%s.poke' "$(state_dir)" "$1"; }
 
 transcript_mtime_key() {  # uses REG_CWD, REG_SESSION_ID
-  local t; t=$(resolve_transcript)
-  [ -n "$t" ] || { printf 'none'; return; }
-  file_mtime "$t" 2>/dev/null || printf 'none'
+  _resolve_transcript_memo
+  [ -n "$_XSCRIPT_PATH" ] || { printf 'none'; return; }
+  file_mtime "$_XSCRIPT_PATH" 2>/dev/null || printf 'none'
 }
 
 poke_capped() {  # $1=goal-id $2=classification
@@ -487,9 +525,12 @@ dispatch_actions() {  # $1=gid $2=state $3=prev
 
 # ---------- main loop ----------
 process_goals() {
-  local gdir f gid state prev
+  local gdir f gid state prev reg_json reg_rc
   gdir="$(goals_dir)"
   [ -d "$gdir" ] || return 0
+  # D-C8 e09 fold: ONE registry fetch per poll (was: one per goal via
+  # classify_goal), threaded to every classify_goal call below as data.
+  reg_json=$(${SDLC_REGISTRY_CMD:-claude agents --json} 2>/dev/null); reg_rc=$?
   for f in "$gdir"/*; do
     [ -f "$f" ] || continue           # empty dir → the literal glob, skipped
     gid=$(basename "$f")
@@ -509,7 +550,7 @@ process_goals() {
       continue
     fi
     is_armed_scale || continue        # scale != continuous → unarmed/disarm, silent skip
-    state=$(classify_goal "$gid")
+    state=$(classify_goal "$gid" "$reg_json" "$reg_rc")
     [ -n "$state" ] || continue       # total-signal-loss degrade → already audited, skip
     prev=$(read_cache "$gid")         # previous classification (transition dedupe)
     write_status "$gid" "$state"
