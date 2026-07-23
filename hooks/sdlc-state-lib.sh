@@ -1974,3 +1974,76 @@ sdlc_pilot_effective() {
       return 2 ;;
   esac
 }
+
+# _sdlc_abspath <path> — path with its directory resolved to an absolute
+# physical path (basename left intact, so a not-yet-existing file resolves as
+# long as its parent dir exists). BSD-safe (no realpath dependency). The
+# registration stores the plan absolute so the poker — polling from the cron
+# cwd — can always re-read the plan's frontmatter (REG_PLAN).
+_sdlc_abspath() {
+  local p="${1:-}" d b
+  d="$(cd "$(dirname "$p")" 2>/dev/null && pwd)" || return 1
+  b="$(basename "$p")"
+  printf '%s/%s' "$d" "$b"
+}
+
+# sdlc_arm <plan-path> [pilot-override] [--force] → arm a governed run:
+# derive the goal-id (sdlc_goal_id), capture PLAN/CWD/SESSION_ID/PID/ARMED_AT
+# and write the 5-field consent record atomically (tmp+mv) into the poker's
+# goals dir. SESSION_ID/PID come from the SDLC_ARM_SESSION_ID / SDLC_ARM_PID
+# env seams when set (testability + headless callers), else best-effort real
+# values ($$ for PID; $CLAUDE_SESSION_ID for the session). On success: emits
+# `ARM <gid> <plan> pilot=<p>` to the audit log and prints the goal-id.
+#
+# pilot-override (a bare MANUAL|AUTO token) sets the pilot shown in the audit
+# line; --force authorizes arming when keepalive-effective is false (the sole
+# legitimate arm-on-false path). Refusals (rc≠0 + stderr + NO record write):
+# missing/unreadable plan, malformed frontmatter (off-enum keepalive/pilot),
+# a colliding record (same goal-id, different PLAN), and keepalive-effective
+# false without --force. [refusals land in a later case-group.]
+sdlc_arm() {
+  local plan="${1:-}" pilot_override="" force=0
+  shift 2>/dev/null || true
+  local a
+  for a in "$@"; do
+    case "$a" in
+      --force)       force=1 ;;
+      MANUAL|AUTO)   pilot_override="$a" ;;
+      '')            ;;
+      *) echo "defect: arm-bad-arg: unrecognized argument '$a' (expected MANUAL|AUTO or --force)" >&2; return 1 ;;
+    esac
+  done
+
+  local abs gid dir rec tmp sid pid cwd armed pilot
+  abs="$(_sdlc_abspath "$plan")" || abs="$plan"
+  gid="$(sdlc_goal_id "$plan")"
+  _sdlc_validate_goal_id "$gid" "sdlc_arm" || return 1
+
+  cwd="$(pwd)"
+  sid="${SDLC_ARM_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
+  pid="${SDLC_ARM_PID:-$$}"
+  armed="$(_sdlc_iso_now)"
+
+  # pilot for the audit line: explicit override wins; else the effective value.
+  if [ -n "$pilot_override" ]; then
+    pilot="$pilot_override"
+  else
+    pilot="$(sdlc_pilot_effective "$abs" 2>/dev/null)" || pilot="?"
+  fi
+
+  dir="$(_sdlc_goals_dir)"
+  mkdir -p "$dir" 2>/dev/null || { echo "defect: arm-mkdir-failed: cannot create goals dir: $dir" >&2; return 1; }
+  rec="$dir/$gid"
+  tmp="$(mktemp "$dir/.arm.$gid.XXXXXX" 2>/dev/null)" || { echo "defect: arm-mktemp-failed: cannot mint a temp record in $dir" >&2; return 1; }
+  {
+    printf 'PLAN=%s\n' "$abs"
+    printf 'CWD=%s\n' "$cwd"
+    printf 'SESSION_ID=%s\n' "$sid"
+    printf 'PID=%s\n' "$pid"
+    printf 'ARMED_AT=%s\n' "$armed"
+  } > "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; echo "defect: arm-write-failed: cannot write $tmp" >&2; return 1; }
+  mv -f "$tmp" "$rec" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; echo "defect: arm-rename-failed: cannot install $rec" >&2; return 1; }
+
+  _sdlc_audit "$gid" ARM "$abs pilot=$pilot"
+  printf '%s\n' "$gid"
+}
