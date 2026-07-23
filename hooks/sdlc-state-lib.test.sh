@@ -2715,6 +2715,273 @@ ac_spawn_posture_empty() {
 ac_spawn_posture_empty
 
 # ============================================================
+# slice 4/3: sdlc_ladder_next — ledger-derived rung position, capped rungs.
+# The ladder derivation is PURE: it reads the goal's baton + ledger (via the
+# existing parse helpers) and derives exactly one token from (classification,
+# anchor, ledger, current-baton-generation) — no writes, no clock reads beyond
+# the anchor ARG, no registry. Rung attempts are journaled here EXACTLY as the
+# poker dispatcher (4/4) will: a completed attempt is one decision+effect pair
+# through sdlc_effect_run under `rung:<gid>:<rung>:<anchor>:<n>`.
+# ============================================================
+echo ""
+echo "=== AC-C3/AC-C4/AC-C5: sdlc_ladder_next — ledger-derived rung position, capped rungs (4/3) ==="
+
+LADDER_ANCHOR=1721600000
+
+# journal_rung <gid> <rung> <anchor> <n> — a COMPLETED (applied) rung attempt
+# (decision+effect through the real effect guard, as the poker will).
+journal_rung() { sdlc_effect_run "$1" "rung:$1:$2:$3:$4" "rung $2 attempt $4" -- true >/dev/null 2>&1; }
+# journal_rung_decision <gid> <rung> <anchor> <n> — a decision-only rung line
+# (the crash window: intent journaled, effect never landed).
+journal_rung_decision() { ledger_append "$1" decision "rung:$1:$2:$3:$4" "rung $2 intent $4" >/dev/null 2>&1; }
+# baton_written_at <gid> — the CURRENT baton generation key (BATON_WRITTEN_AT).
+baton_written_at() { baton_parse "$(baton_path "$1")" >/dev/null 2>&1; printf '%s' "$BATON_WRITTEN_AT"; }
+# journal_spawn_applied <gid> <written-at> — the spawn effect for a generation.
+journal_spawn_applied() { sdlc_effect_run "$1" "spawn:$1:$2" "spawned" -- true >/dev/null 2>&1; }
+# journal_spawn_decision <gid> <written-at> — decision-only spawn line (indeterminate).
+journal_spawn_decision() { ledger_append "$1" decision "spawn:$1:$2" "spawn intent" >/dev/null 2>&1; }
+# state_manifest — content+structure fingerprint of SDLC_STATE_DIR (purity probe).
+state_manifest() { { find "$SDLC_STATE_DIR" | sort; echo "--"; find "$SDLC_STATE_DIR" -type f -exec cksum {} + 2>/dev/null | sort; }; }
+
+echo "--- DEAD progression: fresh → poke:1 → poke:2 → re-prompt:1 → re-prompt:2 → rollover (spawn unapplied) ---"
+ac_ladder_dead_progression() {
+  new_state_dir
+  local gid="ladder-dead-prog" a="$LADDER_ANCHOR" out rc
+  write_healthy "$gid" >/dev/null                    # baton present for the rollover derivation
+  out="$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"; rc=$?
+  assert_eq "4/3 DEAD fresh episode exits 0" "0" "$rc"
+  assert_eq "4/3 DEAD fresh episode (empty rung-space) → poke:1" "poke:1" "$out"
+  journal_rung "$gid" poke "$a" 1
+  assert_eq "4/3 DEAD after 1 failed poke → poke:2" "poke:2" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+  journal_rung "$gid" poke "$a" 2
+  assert_eq "4/3 DEAD after 2 failed pokes (cap) → re-prompt:1" "re-prompt:1" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+  journal_rung "$gid" re-prompt "$a" 1
+  assert_eq "4/3 DEAD after 2 poke + 1 re-prompt → re-prompt:2" "re-prompt:2" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+  journal_rung "$gid" re-prompt "$a" 2
+  assert_eq "4/3 DEAD after 2 poke + 2 re-prompt, spawn unapplied → rollover" "rollover" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+}
+ac_ladder_dead_progression
+
+echo "--- DEAD at rollover position, spawn key APPLIED → human (spawn-skipped, AS-N13; ladder never re-keys a spawn) ---"
+ac_ladder_dead_spawn_applied() {
+  new_state_dir
+  local gid="ladder-dead-applied" a="$LADDER_ANCHOR" wa
+  write_healthy "$gid" >/dev/null
+  wa="$(baton_written_at "$gid")"
+  journal_rung "$gid" poke "$a" 1; journal_rung "$gid" poke "$a" 2
+  journal_rung "$gid" re-prompt "$a" 1; journal_rung "$gid" re-prompt "$a" 2
+  journal_spawn_applied "$gid" "$wa"
+  assert_eq "4/3 DEAD rollover pos + spawn APPLIED → human" "human" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+}
+ac_ladder_dead_spawn_applied
+
+echo "--- DEAD at rollover position, spawn key INDETERMINATE (decision, no effect) → defect effect-indeterminate ---"
+ac_ladder_dead_spawn_indeterminate() {
+  new_state_dir
+  local gid="ladder-dead-indet" a="$LADDER_ANCHOR" wa err rc
+  write_healthy "$gid" >/dev/null
+  wa="$(baton_written_at "$gid")"
+  journal_rung "$gid" poke "$a" 1; journal_rung "$gid" poke "$a" 2
+  journal_rung "$gid" re-prompt "$a" 1; journal_rung "$gid" re-prompt "$a" 2
+  journal_spawn_decision "$gid" "$wa"
+  err="$(sdlc_ladder_next "$gid" DEAD "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/3 DEAD spawn-indeterminate returns nonzero" "$rc"
+  assert_contains "4/3 DEAD spawn-indeterminate names effect-indeterminate" "effect-indeterminate" "$err"
+}
+ac_ladder_dead_spawn_indeterminate
+
+echo "--- DEAD unparseable baton at the rollover step → defect passthrough (caller fail-closed skips) ---"
+ac_ladder_dead_baton_malformed() {
+  new_state_dir
+  local gid="ladder-dead-badbaton" a="$LADDER_ANCHOR" err rc
+  write_healthy "$gid" >/dev/null
+  journal_rung "$gid" poke "$a" 1; journal_rung "$gid" poke "$a" 2
+  journal_rung "$gid" re-prompt "$a" 1; journal_rung "$gid" re-prompt "$a" 2
+  printf 'garbage without keys\n' > "$(baton_path "$gid")"   # corrupt the baton
+  err="$(sdlc_ladder_next "$gid" DEAD "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/3 DEAD malformed baton at rollover returns nonzero" "$rc"
+  assert_contains "4/3 DEAD malformed baton passes a baton defect through" "defect:" "$err"
+}
+ac_ladder_dead_baton_malformed
+
+echo "--- CRASH WINDOW: a decision-only rung line under the CURRENT anchor → defect effect-indeterminate (before rollover) ---"
+ac_ladder_crash_window() {
+  new_state_dir
+  local gid="ladder-crash" a="$LADDER_ANCHOR" err rc
+  journal_rung_decision "$gid" poke "$a" 1     # poke intent, no effect
+  err="$(sdlc_ladder_next "$gid" DEAD "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/3 crash-window rung decision-only returns nonzero" "$rc"
+  assert_contains "4/3 crash-window names effect-indeterminate" "effect-indeterminate" "$err"
+}
+ac_ladder_crash_window
+
+echo "--- IDLE_STALLED at 2 poke + 2 re-prompt (spawn unapplied) → human; rollover STRUCTURALLY unreachable for this class ---"
+ac_ladder_idle_stalled_human() {
+  new_state_dir
+  local gid="ladder-idle-stalled" a="$LADDER_ANCHOR" out
+  write_healthy "$gid" >/dev/null                    # spawn key would be unapplied → DEAD would rollover
+  journal_rung "$gid" poke "$a" 1; journal_rung "$gid" poke "$a" 2
+  journal_rung "$gid" re-prompt "$a" 1; journal_rung "$gid" re-prompt "$a" 2
+  out="$(sdlc_ladder_next "$gid" IDLE_STALLED "$a" 2>/dev/null)"
+  assert_eq "4/3 IDLE_STALLED after 2+2 → human" "human" "$out"
+  TOTAL=$((TOTAL + 1))
+  if [ "$out" = "rollover" ]; then
+    fail "4/3 IDLE_STALLED NEVER emits rollover (session alive)" "got rollover"
+  else
+    pass "4/3 IDLE_STALLED NEVER emits rollover (session alive)"
+  fi
+}
+ac_ladder_idle_stalled_human
+
+echo "--- IDLE_STALLED fresh → poke:1 (shares the automated rungs with DEAD) ---"
+ac_ladder_idle_stalled_fresh() {
+  new_state_dir
+  local gid="ladder-idle-fresh" a="$LADDER_ANCHOR"
+  assert_eq "4/3 IDLE_STALLED fresh → poke:1" "poke:1" "$(sdlc_ladder_next "$gid" IDLE_STALLED "$a" 2>/dev/null)"
+}
+ac_ladder_idle_stalled_fresh
+
+echo "--- WEDGED: observe:1 → observe:2 → observe:3 (cap 3) → human ---"
+ac_ladder_wedged() {
+  new_state_dir
+  local gid="ladder-wedged" a="$LADDER_ANCHOR"
+  assert_eq "4/3 WEDGED fresh → observe:1" "observe:1" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  journal_rung "$gid" observe "$a" 1
+  assert_eq "4/3 WEDGED after 1 observe → observe:2" "observe:2" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  journal_rung "$gid" observe "$a" 2
+  assert_eq "4/3 WEDGED after 2 observe → observe:3" "observe:3" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  journal_rung "$gid" observe "$a" 3
+  assert_eq "4/3 WEDGED after 3 observe (cap) → human" "human" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+}
+ac_ladder_wedged
+
+echo "--- ANCHOR RESET: attempts under anchor A stay history; called with anchor B → poke:1 (fresh episode) ---"
+ac_ladder_anchor_reset() {
+  new_state_dir
+  local gid="ladder-anchor" a="$LADDER_ANCHOR" b
+  b=$((LADDER_ANCHOR + 300))
+  journal_rung "$gid" poke "$a" 1; journal_rung "$gid" poke "$a" 2
+  assert_eq "4/3 under anchor A (2 poke) → re-prompt:1 (A history intact)" "re-prompt:1" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+  assert_eq "4/3 under anchor B (no B attempts) → poke:1 (episode reset)" "poke:1" "$(sdlc_ladder_next "$gid" DEAD "$b" 2>/dev/null)"
+}
+ac_ladder_anchor_reset
+
+echo "--- classification not in {DEAD,IDLE_STALLED,WEDGED} → none ---"
+ac_ladder_classification_none() {
+  new_state_dir
+  local gid="ladder-none" a="$LADDER_ANCHOR"
+  assert_eq "4/3 BUSY → none" "none" "$(sdlc_ladder_next "$gid" BUSY "$a" 2>/dev/null)"
+  assert_eq "4/3 IDLE → none" "none" "$(sdlc_ladder_next "$gid" IDLE "$a" 2>/dev/null)"
+  assert_eq "4/3 GATED → none" "none" "$(sdlc_ladder_next "$gid" GATED "$a" 2>/dev/null)"
+  assert_eq "4/3 empty classification → none" "none" "$(sdlc_ladder_next "$gid" "" "$a" 2>/dev/null)"
+}
+ac_ladder_classification_none
+
+echo "--- guards: invalid goal-id / malformed anchor / empty anchor / corrupt ledger → loud defect, rc 1 ---"
+ac_ladder_guards() {
+  new_state_dir
+  local a="$LADDER_ANCHOR" err rc gid="ladder-guard"
+  err="$(sdlc_ladder_next "bad/goal" DEAD "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/3 invalid goal-id returns nonzero" "$rc"
+  assert_contains "4/3 invalid goal-id names invalid-goal-id" "invalid-goal-id" "$err"
+
+  err="$(sdlc_ladder_next "$gid" DEAD "not-an-epoch" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/3 malformed anchor returns nonzero" "$rc"
+  assert_contains "4/3 malformed anchor names invalid-anchor" "invalid-anchor" "$err"
+
+  err="$(sdlc_ladder_next "$gid" DEAD "" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/3 empty anchor returns nonzero" "$rc"
+  assert_contains "4/3 empty anchor names invalid-anchor" "invalid-anchor" "$err"
+
+  local cgid="ladder-corrupt" path
+  path=$(build_healthy_ledger "$cgid")
+  awk -F'\t' -v OFS='\t' 'NR==2 { $6="TAMPERED" } { print }' "$path" > "$path.new" && mv "$path.new" "$path"
+  err="$(sdlc_ladder_next "$cgid" DEAD "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/3 corrupt ledger returns nonzero" "$rc"
+  assert_contains "4/3 corrupt ledger surfaces a chain defect" "defect:" "$err"
+}
+ac_ladder_guards
+
+echo "--- cap overrides: SDLC_RUNG_CAP=1 shrinks poke/re-prompt; SDLC_OBSERVE_CAP=1 shrinks observe ---"
+ac_ladder_cap_rung() {
+  new_state_dir
+  local gid="ladder-cap-rung" a="$LADDER_ANCHOR"
+  local SDLC_RUNG_CAP=1
+  write_healthy "$gid" >/dev/null
+  assert_eq "4/3 cap=1 fresh → poke:1" "poke:1" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+  journal_rung "$gid" poke "$a" 1
+  assert_eq "4/3 cap=1 after 1 poke → re-prompt:1" "re-prompt:1" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+  journal_rung "$gid" re-prompt "$a" 1
+  assert_eq "4/3 cap=1 after 1 poke + 1 re-prompt → rollover" "rollover" "$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+}
+ac_ladder_cap_rung
+
+ac_ladder_cap_observe() {
+  new_state_dir
+  local gid="ladder-cap-obs" a="$LADDER_ANCHOR"
+  local SDLC_OBSERVE_CAP=1
+  assert_eq "4/3 observe cap=1 fresh → observe:1" "observe:1" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  journal_rung "$gid" observe "$a" 1
+  assert_eq "4/3 observe cap=1 after 1 observe → human" "human" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+}
+ac_ladder_cap_observe
+
+ac_ladder_cap_garbled() {
+  new_state_dir
+  local gid="ladder-cap-bad" a="$LADDER_ANCHOR" err rc
+  local SDLC_RUNG_CAP="abc"
+  err="$(sdlc_ladder_next "$gid" DEAD "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/3 garbled SDLC_RUNG_CAP returns nonzero" "$rc"
+  assert_contains "4/3 garbled cap names invalid-cap" "invalid-cap" "$err"
+}
+ac_ladder_cap_garbled
+
+echo "--- key grammar: _sdlc_rung_key mints exactly rung:<gid>:<rung>:<anchor>:<n>; rejects malformed anchor/ordinal/rung loud ---"
+ac_ladder_key_grammar() {
+  new_state_dir
+  local out rc
+  out="$(_sdlc_rung_key "wave-01" poke 1721600000 1 2>/dev/null)"; rc=$?
+  assert_eq "4/3 rung-key mint exits 0" "0" "$rc"
+  assert_eq "4/3 rung-key mint is exact" "rung:wave-01:poke:1721600000:1" "$out"
+  assert_eq "4/3 rung-key mints re-prompt name" "rung:g:re-prompt:100:2" "$(_sdlc_rung_key g re-prompt 100 2 2>/dev/null)"
+
+  _sdlc_rung_key g poke "notepoch" 1 2>/dev/null; assert_nonzero "4/3 rung-key rejects a non-epoch anchor" "$?"
+  _sdlc_rung_key g poke 100 0 2>/dev/null;         assert_nonzero "4/3 rung-key rejects ordinal 0" "$?"
+  _sdlc_rung_key g poke 100 "x" 2>/dev/null;       assert_nonzero "4/3 rung-key rejects a non-numeric ordinal" "$?"
+  _sdlc_rung_key g bogus 100 1 2>/dev/null;        assert_nonzero "4/3 rung-key rejects an unknown rung name" "$?"
+}
+ac_ladder_key_grammar
+
+echo "--- purity: a derivation call writes NOTHING under SDLC_STATE_DIR ---"
+ac_ladder_purity_fresh() {
+  new_state_dir
+  local gid="ladder-pure-fresh" a="$LADDER_ANCHOR" out
+  out="$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+  assert_eq "4/3 purity: fresh DEAD still derives poke:1" "poke:1" "$out"
+  TOTAL=$((TOTAL + 1))
+  if [ -e "$SDLC_STATE_DIR/$gid" ]; then
+    fail "4/3 purity: fresh derivation created NO goal dir" "found: $SDLC_STATE_DIR/$gid"
+  else
+    pass "4/3 purity: fresh derivation created NO goal dir"
+  fi
+}
+ac_ladder_purity_fresh
+
+ac_ladder_purity_populated() {
+  new_state_dir
+  local gid="ladder-pure-pop" a="$LADDER_ANCHOR" before after out
+  write_healthy "$gid" >/dev/null
+  journal_rung "$gid" poke "$a" 1; journal_rung "$gid" poke "$a" 2
+  journal_rung "$gid" re-prompt "$a" 1; journal_rung "$gid" re-prompt "$a" 2
+  before="$(state_manifest)"
+  out="$(sdlc_ladder_next "$gid" DEAD "$a" 2>/dev/null)"
+  after="$(state_manifest)"
+  assert_eq "4/3 purity: populated fixture derives rollover" "rollover" "$out"
+  assert_eq "4/3 purity: SDLC_STATE_DIR manifest byte-unchanged across the derivation" "$before" "$after"
+}
+ac_ladder_purity_populated
+
+# ============================================================
 echo ""
 echo "========================================"
 echo "sdlc-state primitives (baton + ledger): $PASS/$TOTAL passed, $FAIL failed"
