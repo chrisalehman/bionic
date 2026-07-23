@@ -40,7 +40,7 @@ if [ -f "$PROJECT_DIR/.bionic/config.yaml" ]; then
 fi
 [ "$MODE" = "off" ] && exit 0
 
-# Normalized single-line form for matching + audit excerpts (CR translate).
+# Normalized single-line form for matching + the scrubbed deny reason (CR translate).
 FLAT=$(printf '%s' "$CMD" | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' | tr '\n' ' ' \
   | sed 's/[[:space:]]\{1,\}/ /g; s/^ //; s/ $//')
 
@@ -67,8 +67,20 @@ emit_nudge() {  # $1=class $2=role
   return 0
 }
 
+# Pattern scrub for command-derived text (incident 0001). Two shapes:
+# a hex run of 32+ (API keys, tokens, hashes) and an explicit
+# KEY=/TOKEN=/SECRET= assignment. This is deliberately farm-out-local —
+# no other hook in this repo interpolates raw command text.
+scrub_secrets() {  # stdin → stdout
+  sed -E -e 's/[A-Fa-f0-9]{32,}/[REDACTED]/g' \
+         -e 's/([A-Za-z0-9_]*(KEY|TOKEN|SECRET)=)[^[:space:]]+/\1[REDACTED]/g'
+}
+
 deny_reason() {  # $1=class $2=role
-  printf '%s' "farm-out policy: this is a long-running $1-class command; it must not run on the orchestrator thread (a stuck orchestrator is unavailable and cannot process subagent completions — this protects your own context budget). Dispatch it instead: Agent(subagent_type: $2, prompt carrying this exact command): $FLAT — the agent returns the result summary. If this genuinely cannot be dispatched (needs this session's state), re-run prefixed FARM_OUT_ALLOW=1 — the override is sanctioned and audited."
+  # Scrub BEFORE truncating: truncating first can split a hex run below the
+  # 32-char threshold and leak a prefix.
+  local safe; safe=$(printf '%s' "$FLAT" | scrub_secrets | cut -c1-120)
+  printf '%s' "farm-out policy: this is a long-running $1-class command; it must not run on the orchestrator thread (a stuck orchestrator is unavailable and cannot process subagent completions — this protects your own context budget). Dispatch it instead: Agent(subagent_type: $2, prompt carrying the command from this tool call): $safe — scrubbed and truncated for the log; the agent returns the result summary. If this genuinely cannot be dispatched (needs this session's state), re-run prefixed FARM_OUT_ALLOW=1 — the override is sanctioned and audited."
 }
 
 # ── classification (4/2 tier-1; classify_tier2 lands in 4/3) ─────────────
