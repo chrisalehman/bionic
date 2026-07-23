@@ -807,3 +807,204 @@ sdlc_wip_check() {
   fi
   return 0
 }
+
+# ---------- D1/D4: reconciliation predicates (slice 4/2) ----------
+#
+# The pre-session, fail-closed reconciliation leg: deterministic predicates over
+# durable state ONLY (no project code, no test suites, no builds — cron-safe and
+# bounded, D1). The spine calls these BEFORE any session exists; a divergence
+# never spawns, it parks. Verdict tokens print on stdout (consumers branch on
+# them); every defect is one named single-class line on stderr, nonzero rc
+# (ADR-001 D5). AS-N3.
+
+# sdlc_ledger_position_check <goal-id> <position> — the AS-25 discharge: the
+# baton records the ledger's own stored digest at its tail seq (`<seq>:<digest>`,
+# or `none` for an empty ledger), an INDEPENDENT record the chain cannot forge.
+# The self-covering chain (ADR-001 D2) is blind to a clean trailing whole-line
+# deletion — ledger_verify passes a truncated ledger silently. This cross-check
+# holds the baton's recorded position against the ledger's actual tail and
+# catches what the chain cannot.
+#
+# Outcomes (goal-id validated via the shared guard first):
+#   `none` + no/empty ledger        → silent rc 0 (nothing yet, consistent).
+#   `none` + non-empty ledger        → `ledger-ahead: baton at none, ledger tail
+#                                       <tail-seq>` (entries the baton never saw).
+#   `<seq>:<digest>`: runs ledger_verify FIRST — chain defects (missing-ledger,
+#     seq-gap, in-place-edit, ...) pass through under their own names. Then:
+#       tail seq < baton seq → `ledger-truncated: baton at <seq>:<digest>, ledger
+#                               tail <tail-seq> — trailing entries missing` (the
+#                               trailing-deletion catch, AS-25).
+#       stored digest at line <seq> ≠ <digest> → `ledger-truncated` naming both
+#                               the baton's and the ledger's stored digest
+#                               (a deeper rewrite AT the recorded position).
+#       tail seq > baton seq → `ledger-ahead: baton at <seq>, ledger tail
+#                               <tail-seq>` (decisions post-date the checkpoint).
+#       exact match (tail seq == seq AND digest matches) → silent rc 0.
+# The digest check precedes the ledger-ahead check by design: a rewrite AT the
+# baton's position is a stronger signal than mere growth past it.
+sdlc_ledger_position_check() {
+  local goal_id="${1:-}" position="${2:-}" path seq digest tail_seq stored_digest
+  _sdlc_validate_goal_id "$goal_id" "sdlc_ledger_position_check" || return 1
+  path="$(ledger_path "$goal_id")"
+
+  if [ "$position" = "none" ]; then
+    if [ -s "$path" ]; then
+      tail_seq=$(tail -n 1 "$path" | awk -F'\t' '{print $2}')
+      echo "defect: ledger-ahead: baton at none, ledger tail $tail_seq" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  # position is <seq>:<digest> (grammar already enforced by baton_write, D4).
+  # Chain verify first — its defects pass through under their own names.
+  ledger_verify "$goal_id" || return 1
+
+  seq="${position%%:*}"
+  digest="${position#*:}"
+  # tail seq is 0 for an empty ledger (verify passed it as vacuously pristine);
+  # verify guarantees a contiguous 1..N run, so tail seq == line count == N.
+  if [ -s "$path" ]; then
+    tail_seq=$(tail -n 1 "$path" | awk -F'\t' '{print $2}')
+  else
+    tail_seq=0
+  fi
+
+  if [ "$tail_seq" -lt "$seq" ]; then
+    echo "defect: ledger-truncated: baton at $position, ledger tail $tail_seq — trailing entries missing" >&2
+    return 1
+  fi
+
+  stored_digest=$(awk -F'\t' -v s="$seq" '$2==s {print $3; exit}' "$path")
+  if [ "$stored_digest" != "$digest" ]; then
+    echo "defect: ledger-truncated: baton at $position, ledger stored digest at seq $seq is $stored_digest — position rewritten" >&2
+    return 1
+  fi
+
+  if [ "$tail_seq" -gt "$seq" ]; then
+    echo "defect: ledger-ahead: baton at $seq, ledger tail $tail_seq" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+# sdlc_reconcile <goal-id> [dir] — the D1 predicate chain. Evaluates durable
+# state (baton + plan + git + ledger + WIP) in a fixed order; the FIRST failing
+# predicate short-circuits to one named stderr defect + nonzero rc (the caller
+# parks GATED). All predicates passing prints ONE stdout verdict token — `clean`
+# (WIP already present or none) or `restore:<sha>` (a clobbered worktree the
+# caller must repopulate from the snapshot) — and returns 0. `dir` (default
+# $PWD) is the goal's repo; every git op is `-C "$dir"`. No project code runs.
+#
+# Predicate order (each loud, first refusal wins):
+#   1. baton parse — malformed-baton family passes through (goal-id guarded first
+#      because baton_path is built from it; baton_parse only guards the FILE's
+#      own goal-id value, never this arg).
+#   2. plan file readable + a parseable `current:` line → else `plan-unreadable`.
+#   3. baton sdlc-step == plan current (EXACT string match) → else `baton-stale:
+#      baton step <a>, plan current <b>` (AS-N4: a checkpoint boundary, so any
+#      divergence means the checkpoint is untrustworthy).
+#   4. baton last-commit == `git rev-parse <branch>` tip → else `baton-stale:
+#      last-commit <sha> not branch tip <tip>`.
+#   5. sdlc_ledger_position_check with the baton's ledger-position — pass-through.
+#   6. sdlc_wip_check — wip-lost/wip-drift pass-through.
+#   7. Worktree triage (D5): compute the worktree's tree via a TEMPORARY index
+#      (GIT_INDEX_FILE, read-tree HEAD + add -A + write-tree — read-only on the
+#      real index/tree, the same plumbing discipline as sdlc_wip_snapshot) and
+#      compare tree objects:
+#        wip is a sha: worktree == snapshot tree → `clean`; worktree == HEAD tree
+#          → `restore:<sha>`; neither → `worktree-drift: tree matches neither
+#          HEAD nor snapshot <sha>`.
+#        wip == none: worktree == HEAD tree → `clean`; else → `worktree-drift:
+#          unexplained work product with wip none`.
+#      SIMPLIFICATION (slice-scoped, AS-N7): the worktree tree is built with a
+#      PLAIN `add -A`, which — unlike sdlc_wip_snapshot — does NOT force-include
+#      gitignored lifecycle artifacts (.bionic/docs). So a snapshot whose ONLY
+#      delta was such an artifact compares as worktree==HEAD → the `restore` path
+#      rather than `clean`. That is SAFE: sdlc_wip_restore is delta-faithful and
+#      idempotent-by-content, so restoring an already-present artifact is a
+#      no-op-by-content. Replicating the snapshot's force-include args here is
+#      deferred (N4 owns any artifact-exact triage); a worktree genuinely
+#      matching a force-included snapshot is never misclassified as drift.
+sdlc_reconcile() {
+  local goal_id="${1:-}" dir="${2:-$PWD}"
+  local baton plan_path plan_current tip
+  local tmp_index head_tree worktree_tree snap_tree
+
+  # 1. baton parse (goal-id guarded first — it builds the baton path).
+  _sdlc_validate_goal_id "$goal_id" "sdlc_reconcile" || return 1
+  baton="$(baton_path "$goal_id")"
+  baton_parse "$baton" || return 1
+
+  # 2. plan readable + a parseable current: line.
+  plan_path="$BATON_PLAN"
+  if [ ! -f "$plan_path" ]; then
+    echo "defect: plan-unreadable: $plan_path" >&2
+    return 1
+  fi
+  plan_current=$(grep -E '^current:' "$plan_path" 2>/dev/null | head -1 | sed -E 's/^current:[[:space:]]*//')
+  if [ -z "$plan_current" ]; then
+    echo "defect: plan-unreadable: $plan_path" >&2
+    return 1
+  fi
+
+  # 3. baton step vs plan current (exact match — AS-N4).
+  if [ "$BATON_SDLC_STEP" != "$plan_current" ]; then
+    echo "defect: baton-stale: baton step $BATON_SDLC_STEP, plan current $plan_current" >&2
+    return 1
+  fi
+
+  # 4. baton last-commit vs recorded-branch tip.
+  tip=$(git -C "$dir" rev-parse "$BATON_BRANCH" 2>/dev/null)
+  if [ "$tip" != "$BATON_LAST_COMMIT" ]; then
+    echo "defect: baton-stale: last-commit $BATON_LAST_COMMIT not branch tip $tip" >&2
+    return 1
+  fi
+
+  # 5. ledger-position cross-check (AS-25) — pass-through.
+  sdlc_ledger_position_check "$goal_id" "$BATON_LEDGER_POSITION" || return 1
+
+  # 6. WIP reconciliation — wip-lost/wip-drift pass-through.
+  sdlc_wip_check "$goal_id" "$BATON_WIP" "$dir" || return 1
+
+  # 7. Worktree triage (D5). Build the worktree's tree in a TEMP index only.
+  head_tree=$(git -C "$dir" rev-parse --verify --quiet 'HEAD^{tree}' 2>/dev/null) || true
+  if [ -z "$head_tree" ]; then
+    echo "defect: worktree-unreadable: no HEAD tree to compare against in: $dir" >&2
+    return 1
+  fi
+  tmp_index=$(mktemp 2>/dev/null) || { echo "defect: worktree-unreadable: cannot mint a temp index for: $dir" >&2; return 1; }
+  if ! GIT_INDEX_FILE="$tmp_index" git -C "$dir" read-tree HEAD 2>/dev/null \
+     || ! GIT_INDEX_FILE="$tmp_index" git -C "$dir" add -A 2>/dev/null; then
+    rm -f "$tmp_index"
+    echo "defect: worktree-unreadable: could not stage the worktree for tree comparison in: $dir" >&2
+    return 1
+  fi
+  worktree_tree=$(GIT_INDEX_FILE="$tmp_index" git -C "$dir" write-tree 2>/dev/null) \
+    || { rm -f "$tmp_index"; echo "defect: worktree-unreadable: write-tree failed for: $dir" >&2; return 1; }
+  rm -f "$tmp_index"
+
+  if [ "$BATON_WIP" = "none" ]; then
+    if [ "$worktree_tree" = "$head_tree" ]; then
+      printf 'clean\n'
+      return 0
+    fi
+    echo "defect: worktree-drift: unexplained work product with wip none" >&2
+    return 1
+  fi
+
+  # wip is a snapshot sha; sdlc_wip_check (predicate 6) already proved the object
+  # readable, so <sha>^{tree} resolves.
+  snap_tree=$(git -C "$dir" rev-parse --verify --quiet "$BATON_WIP^{tree}" 2>/dev/null) || true
+  if [ "$worktree_tree" = "$snap_tree" ]; then
+    printf 'clean\n'
+    return 0
+  fi
+  if [ "$worktree_tree" = "$head_tree" ]; then
+    printf 'restore:%s\n' "$BATON_WIP"
+    return 0
+  fi
+  echo "defect: worktree-drift: tree matches neither HEAD nor snapshot $BATON_WIP" >&2
+  return 1
+}
