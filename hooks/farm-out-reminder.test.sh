@@ -692,6 +692,42 @@ sec1() {
 }
 sec1
 
+echo ""
+echo "=== SEC2: deny reason scrubbed + bounded (AC-2) ==="
+sec2() {
+  setup
+  # The secret sits past char 120 so a truncate-first implementation would
+  # still pass a naive check — this case pins scrub-BEFORE-truncate.
+  local pad="cd /some/fairly/long/path/that/pushes/the/secret/past/the/bound &&"
+  run_hook "$(stdin_for "$pad TOKEN=$FAKE_SECRET npm install" '')"
+  assert_deny "SEC2 denies"
+  local reason; reason=$(printf '%s' "$HOOK_STDOUT" \
+    | jq -r '.hookSpecificOutput.permissionDecisionReason' 2>/dev/null)
+  printf '%s' "$reason" | grep -qF "$FAKE_SECRET" \
+    && fail "SEC2 deny reason leaks the planted secret" || pass
+  printf '%s' "$reason" | grep -qE '[A-Fa-f0-9]{32,}' \
+    && fail "SEC2 deny reason leaks a hex run" || pass
+  assert_reason_has "SEC2 deny reason still redirects" "subagent_type"
+
+  # Ordering probe. The fixture above does NOT actually discriminate: the
+  # `TOKEN=` arm redacts the fragment even when truncation runs first, so a
+  # truncate-first build passes every assertion above (verified by mutation).
+  # This fixture removes that rescue — a BARE hex run starting at char 99, so
+  # `cut -c1-120` leaves a 22-char fragment that is below the {32,} threshold
+  # and matches neither scrub rule. Truncate-first leaks `deadbeefcafebabe0123`;
+  # scrub-first redacts the whole run. Do not "fix" a failure here by
+  # reordering — the ordering IS the property under test.
+  setup
+  local deep="/opt/vendor/build/artifacts/staging/release/candidate/deep/nested/tree/leaf/dir"
+  run_hook "$(stdin_for "cd $deep && npm install $FAKE_SECRET" '')"
+  assert_deny "SEC2b denies"
+  local r2; r2=$(printf '%s' "$HOOK_STDOUT" \
+    | jq -r '.hookSpecificOutput.permissionDecisionReason' 2>/dev/null)
+  printf '%s' "$r2" | grep -qF "${FAKE_SECRET:0:20}" \
+    && fail "SEC2b truncation split a hex run and leaked a secret prefix" || pass
+}
+sec2
+
 # ============================================================
 # Results
 # ============================================================
