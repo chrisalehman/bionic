@@ -2,8 +2,10 @@
 # FARM-OUT: tiered PreToolUse(Bash) enforcement — long-running main-thread
 # commands DENY with a redirect to the right role; fuzzy production-shaped
 # commands get ONE additionalContext nudge per class per session; every
-# tier-1/tier-2 event logs one line to .bionic/memory/sdlc-v11-audit.md
-# (log_finding() shape, own copy — deliberate per-hook duplication).
+# tier-1/tier-2 event logs one line to
+# $HOME/.claude/logs/<project-slug>/sdlc-v11-audit.md — outside every consuming
+# project tree (incident 0001) — via audit_path() (log_finding() shape, own
+# copy — deliberate per-hook duplication).
 #
 # Exit 0 on EVERY path. Enforcement lives in stdout JSON only:
 #   deny  → hookSpecificOutput.permissionDecision "deny" + redirect reason
@@ -44,13 +46,29 @@ fi
 FLAT=$(printf '%s' "$CMD" | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' | tr '\n' ' ' \
   | sed 's/[[:space:]]\{1,\}/ /g; s/^ //; s/ $//')
 
+# Incident 0001: the audit stream must live where a consuming project cannot
+# commit it, regardless of that project's .gitignore. $HOME-rooted, per-project,
+# durable — mirroring hooks/sdlc-poker.sh:111's $HOME/.claude/ audit log.
+# Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
+# collision-resistant across same-named projects under different parents.
+# cksum and basename are POSIX — no new dependency.
+audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
+  [ -n "${HOME:-}" ] || return 1
+  local base sum
+  base=$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')
+  sum=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
+  printf '%s/.claude/logs/%s-%s/sdlc-v11-audit.md' "$HOME" "$base" "$sum"
+}
+
 log_event() {  # $1=event $2=class
   # No command-derived text: `class=<c> mode=<m>` is the complete payload.
   # A length bound is not a sanitizer — incident 0001 leaked a live credential
   # through the former `cut -c1-120` excerpt of the raw command.
-  local audit_dir="$PROJECT_DIR/.bionic/memory"
-  local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) farm-out $1: class=$2 mode=$MODE"
-  mkdir -p "$audit_dir" 2>/dev/null && printf '%s\n' "$line" >> "$audit_dir/sdlc-v11-audit.md" 2>/dev/null
+  local f
+  if f=$(audit_path "$PROJECT_DIR"); then
+    local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) farm-out $1: class=$2 mode=$MODE"
+    mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$line" >> "$f" 2>/dev/null
+  fi
   echo "farm-out [$1] class=$2" >&2
   return 0
 }
