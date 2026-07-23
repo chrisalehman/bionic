@@ -232,6 +232,13 @@ run_poker_cron() {
 audit_of()  { cat "$HOME/.claude/sdlc-poker-audit.log" 2>/dev/null || true; }
 status_of() { cat "$HOME/.claude/sdlc-status/$1.md" 2>/dev/null || true; }
 status_exists() { [ -f "$HOME/.claude/sdlc-status/$1.md" ]; }
+# Negated form for assert_true call sites (`assert_true "label" not_status_exists
+# gid`). NOT `bash -c '! status_exists ...'` — that forks a separate bash process
+# that never saw status_exists defined (no `export -f` in this suite), so the
+# lookup 127s and `!` silently turns the "not found" failure into a vacuous
+# pass. This wrapper runs status_exists in-process (a function call, not a
+# fork+exec), so no propagation boundary is crossed at all.
+not_status_exists() { ! status_exists "$1"; }
 claude_calls() { cat "$HOME/.claude/.stub/claude-calls.log" 2>/dev/null || true; }
 registry_calls() { cat "$HOME/.claude/.stub/registry-calls.log" 2>/dev/null || true; }
 claude_stdin() { cat "$HOME/.claude/.stub/claude-stdin.log" 2>/dev/null || true; }
@@ -1844,7 +1851,7 @@ S2_2() {
   stub_registry_state idle sid-s22
   run_poker
   assert_eq "4/S2-2 poker exit 0" 0 "$POKER_EXIT"
-  assert_true "4/S2-2 keepalive:false continuous → NOT classified" bash -c '! status_exists gs22'
+  assert_true "4/S2-2 keepalive:false continuous → NOT classified" not_status_exists gs22
   assert_contains "4/S2-2 skip is audited SKIP-UNARMED (not silent)" "gs22 SKIP-UNARMED" "$(audit_of)"
 }
 S2_2
@@ -1873,7 +1880,7 @@ S2_4() {
     run_poker
     assert_eq "4/S2-4 ($scale) poker exit 0" 0 "$POKER_EXIT"
     assert_true "4/S2-4 ($scale) absent-flag → NOT classified (fallback false)" \
-      bash -c "! status_exists gs24-$scale"
+      not_status_exists "gs24-$scale"
     assert_contains "4/S2-4 ($scale) skip is audited SKIP-UNARMED" "gs24-$scale SKIP-UNARMED" "$(audit_of)"
   done
 }
@@ -1903,7 +1910,7 @@ S2_6() {
   stub_registry_state idle sid-s26
   run_poker
   assert_eq "4/S2-6 poker exit 0" 0 "$POKER_EXIT"
-  assert_true "4/S2-6 off-enum keepalive → NOT classified" bash -c '! status_exists gs26'
+  assert_true "4/S2-6 off-enum keepalive → NOT classified" not_status_exists gs26
   assert_contains "4/S2-6 off-enum keepalive → MALFORMED-RECORD audited" "gs26 MALFORMED-RECORD" "$(audit_of)"
   assert_true "4/S2-6 off-enum keepalive → NOT the SKIP-UNARMED line (fail-loud, not a guessed skip)" \
     bash -c '! printf "%s" "$1" | grep -qF "gs26 SKIP-UNARMED"' _ "$(audit_of)"
@@ -1926,7 +1933,7 @@ S2_7() {
   stub_registry_state idle sid-s27
   run_poker
   assert_eq "4/S2-7 poker exit 0" 0 "$POKER_EXIT"
-  assert_true "4/S2-7 empty SESSION_ID → NOT classified" bash -c '! status_exists gs27'
+  assert_true "4/S2-7 empty SESSION_ID → NOT classified" not_status_exists gs27
   assert_contains "4/S2-7 empty SESSION_ID → MALFORMED-RECORD audited" "gs27 MALFORMED-RECORD" "$(audit_of)"
   assert_eq "4/S2-7 empty SESSION_ID → no resume attempted" "0" \
     "$(count_lines "$(claude_calls)" "resume ")"
