@@ -49,6 +49,12 @@ SDLC_WEDGE_CEILING_AUTO="${SDLC_WEDGE_CEILING_AUTO:-900}"      # AUTO quiet ceil
 SDLC_WEDGE_CEILING_MANUAL="${SDLC_WEDGE_CEILING_MANUAL:-1800}" # MANUAL quiet ceiling (longer than AUTO)
 SDLC_WEDGE_CPU_EPSILON="${SDLC_WEDGE_CPU_EPSILON:-2}"         # cputime delta (s) at/below which flat
 
+# Manual pilot verb set (slice 4/S4, spec R2/AC-4). Under pilot=manual the poker
+# is notify-only; these decay windows key the reminder cadence (never a drive verb).
+# Overridable exactly as the thresholds above are (fixture suite + future tuning).
+SDLC_READY_REMIND_MANUAL="${SDLC_READY_REMIND_MANUAL:-1800}"   # idle-with-work-ready reminder window (s)
+SDLC_GATED_REMIND="${SDLC_GATED_REMIND:-7200}"                 # held-GATED reminder cadence (s)
+
 # Absolute claude binary for the POKE (C4: alias not inherited). The registry
 # READ uses PATH-resolved bare `claude` (AS-7a); only the poke is pinned. Kept
 # overridable exactly as the thresholds are, so the fixture suite points it at a
@@ -323,11 +329,14 @@ wedge_cputime() {  # $1=pid → integer seconds on stdout, rc 0; rc 1 if pid gon
 # vehicle-pid change, or a vanished pid (the vehicle changed).
 wedge_state_file() { printf '%s/%s.wedge' "$(state_dir)" "$1"; }
 
-# Effective pilot for the registered plan (auto|manual), keying the quiet ceiling.
-# Consumes the S1 lib resolver (frontmatter → scale-keyed fallback). When the lib is
-# unavailable or the value is off-enum, fall back to the CONSERVATIVE manual ceiling
-# (the longest) — a detector that cannot read the pilot must not shorten the window.
-wedge_pilot() {  # uses REG_PLAN
+# Effective pilot for the registered goal (auto|manual). Consumes the S1 lib
+# resolver (frontmatter → scale-keyed fallback). When the lib is unavailable or the
+# value is off-enum/unreadable, fall back to the CONSERVATIVE manual — the
+# never-disturb direction: a poker that cannot confirm the pilot must not drive, and
+# the wedge detector that cannot read it must not shorten its (longer, manual) quiet
+# window. Read once per goal per poll by both the wedge detector (ceiling key, S3)
+# and the dispatch gate (drive-vs-notify, S4).
+goal_pilot() {  # uses REG_PLAN
   local p
   if [ "$SDLC_LIB_OK" = "1" ]; then
     p="$(sdlc_pilot_effective "$REG_PLAN" 2>/dev/null)" || p=""
@@ -366,7 +375,7 @@ wedge_corroborated() {  # $1=gid
   local s_pid s_size s_cpu s_count delta count
   pf="$(wedge_state_file "$gid")"
   q=$(transcript_quiet)
-  pilot="$(wedge_pilot)"
+  pilot="$(goal_pilot)"
   if [ "$pilot" = "auto" ]; then ceiling="$SDLC_WEDGE_CEILING_AUTO"; else ceiling="$SDLC_WEDGE_CEILING_MANUAL"; fi
   cur_size="$(wedge_transcript_size)"
   cur_cpu="$(wedge_cputime "$REG_PID")"; cpurc=$?
@@ -941,10 +950,90 @@ ladder_dispatch() {  # $1=gid $2=classification
   return 0
 }
 
+# ---------- 4/S4: manual pilot verb set (spec R2/AC-4; KA-R4/R5) ----------
+# Manual decay reminder (window-based dedupe): rc 0 (and stamps `now`) iff no prior
+# <class> reminder for <gid> landed within <window> seconds; else rc 1 (suppress).
+# Backs the held-GATED reminder cadence — a gate that stays up re-reminds at most
+# once per window, distinct from the transition-dedupe notify_and_cache uses for
+# state ENTRIES. Per-goal per-class stamp file beside the other .state siblings.
+manual_reminder_due() {  # $1=gid $2=class $3=window-seconds
+  local gid="$1" cls="$2" win="$3" f now last
+  f="$(state_dir)/$gid.remind-$cls"
+  now=$(date +%s)
+  if [ -f "$f" ]; then
+    last=$(cat "$f" 2>/dev/null); [ -n "$last" ] || last=0
+    [ "$(( now - last ))" -lt "$win" ] && return 1
+  fi
+  mkdir -p "$(dirname "$f")" 2>/dev/null
+  printf '%s\n' "$now" > "$f" 2>/dev/null
+  return 0
+}
+
+# dispatch_manual <gid> <state> <prev> — the pilot=manual verb set. The ONLY verb
+# is a deduped ntfy notification: ZERO drive verbs (no poke, no re-prompt, no
+# spawn, no restart, no kill) in ANY goal state or on vehicle death (KA-R4/R5).
+# Detection stays fully active and read-only; this function never touches a drive
+# seam. Reached ahead of the ladder / complete-latch / legacy-poke paths (the
+# dispatch_actions gate) so no drive verb is structurally reachable under manual.
+# Notify classes, each transition-deduped via notify_and_cache (prev==state) except
+# the held-GATED reminder (window-deduped via manual_reminder_due):
+#   READY-IDLE  idle (IDLE/IDLE_STALLED) with quiet > SDLC_READY_REMIND_MANUAL —
+#               "idle with work ready / possibly waiting on you"; below the window,
+#               leave alone (cache the raw class so crossing it later is a transition)
+#   WEDGE-ASK   corroborated WEDGED — evidence summary + approve-restart ASK, NO action
+#               (restart stays human-executed under manual, AS-8)
+#   DEAD-MANUAL sid absent — "session died mid-<state>; WIP preserved", NO poke/spawn
+#   GATED       entry transition-notify (kept) + reminder past SDLC_GATED_REMIND
+#   COMPLETE    stand-down transition-notify (auto-clean is S6's scope)
+dispatch_manual() {  # $1=gid $2=state $3=prev ; uses REG_*
+  local gid="$1" state="$2" prev="$3" cur q mins
+  cur=$(plan_current "$REG_PLAN"); [ -n "$cur" ] || cur="unknown"
+  case "$state" in
+    COMPLETE)
+      notify_and_cache "$gid" COMPLETE "goal $gid complete (charter close / current:10)" "$prev" COMPLETE ;;
+    GATED)
+      if [ "$prev" = "GATED" ]; then
+        # held gate → reminder cadence (window-deduped), never re-notify every poll
+        manual_reminder_due "$gid" gated "$SDLC_GATED_REMIND" \
+          && do_notify "$gid" GATED-REMIND "goal $gid still GATED — decision required; see the plan's ## Wake Note"
+      else
+        notify_and_cache "$gid" GATED "goal $gid gated — decision required; see the plan's ## Wake Note" "$prev" GATED
+        manual_reminder_due "$gid" gated "$SDLC_GATED_REMIND" >/dev/null   # seed the window from entry
+      fi ;;
+    WEDGED)
+      q=$(transcript_quiet); mins=$(( q / 60 ))
+      notify_and_cache "$gid" WEDGE-ASK \
+        "goal $gid WEDGED ${mins}min — approve restart? evidence: quiet=${q}s cpu=flat. recovery: $(recovery_cmd)" \
+        "$prev" WEDGED ;;
+    DEAD)
+      notify_and_cache "$gid" DEAD-MANUAL \
+        "session $gid died mid-step-${cur}; WIP preserved (manual pilot — no poke, no spawn)" "$prev" DEAD ;;
+    IDLE_STALLED|IDLE)
+      if [ "$(transcript_quiet)" -gt "$SDLC_READY_REMIND_MANUAL" ]; then
+        notify_and_cache "$gid" READY-IDLE \
+          "goal $gid idle with work ready (current:${cur}) — possibly waiting on you" "$prev" READY-IDLE
+      else
+        cache_state "$gid" "$state"   # below the window → leave alone; cache the raw class
+      fi ;;
+    BUSY)
+      audit_line "$gid" SKIP-MANUAL "working; manual pilot — notify-only"; cache_state "$gid" "$state" ;;
+    *)
+      cache_state "$gid" "$state" ;;
+  esac
+}
+
 # Per the C3 table: COMPLETE/GATED/WEDGED notify-on-transition (never poke; gate
 # and wedge supremacy); DEAD/IDLE_STALLED poke under the cap; BUSY logs SKIP-BUSY;
 # IDLE is left alone. Non-notify states advance the cache directly so a later
 # transition INTO a notify state is detected.
+#
+# 4/S4 pilot gate: a manual-pilot goal is notify-only (dispatch_manual) — ZERO
+# drive verbs, resolved once per goal per poll AHEAD of every drive path below so
+# no seam is reachable. Gated on SDLC_LIB_OK so the lib-less degrade keeps its
+# byte-identical legacy behavior (AS-12): a poker that cannot read the pilot
+# resolver falls through to the grandfathered drive path, never to notify-only.
+# Under a readable lib, an unreadable plan/pilot resolves to manual (goal_pilot
+# fail-safe) — the never-disturb direction.
 #
 # 4/4 ladder pre-branch: a baton-bearing DEAD/IDLE_STALLED/WEDGED goal is owned
 # by the revival ladder (ledger-clocked rungs), which supersedes the legacy
@@ -953,6 +1042,10 @@ ladder_dispatch() {  # $1=gid $2=classification
 # (AS-C4 grandfather). GATED/COMPLETE/BUSY/IDLE never ladder.
 dispatch_actions() {  # $1=gid $2=state $3=prev
   local gid="$1" state="$2" prev="$3"
+  if [ "$SDLC_LIB_OK" = "1" ] && [ "$(goal_pilot)" = "manual" ]; then
+    dispatch_manual "$gid" "$state" "$prev"
+    return 0
+  fi
   if [ "$SDLC_LIB_OK" = "1" ] && ladder_applicable "$state" && [ -f "$(baton_path "$gid")" ]; then
     ladder_dispatch "$gid" "$state"
     cache_state "$gid" "$state"      # advance the dedupe cache (transition detection)
