@@ -45,9 +45,11 @@ FLAT=$(printf '%s' "$CMD" | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' | 
   | sed 's/[[:space:]]\{1,\}/ /g; s/^ //; s/ $//')
 
 log_event() {  # $1=event $2=class
+  # No command-derived text: `class=<c> mode=<m>` is the complete payload.
+  # A length bound is not a sanitizer — incident 0001 leaked a live credential
+  # through the former `cut -c1-120` excerpt of the raw command.
   local audit_dir="$PROJECT_DIR/.bionic/memory"
-  local excerpt; excerpt=$(printf '%s' "$FLAT" | cut -c1-120)
-  local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) farm-out $1: class=$2 mode=$MODE ($excerpt)"
+  local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) farm-out $1: class=$2 mode=$MODE"
   mkdir -p "$audit_dir" 2>/dev/null && printf '%s\n' "$line" >> "$audit_dir/sdlc-v11-audit.md" 2>/dev/null
   echo "farm-out [$1] class=$2" >&2
   return 0
