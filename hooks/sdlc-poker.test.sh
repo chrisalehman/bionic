@@ -2149,6 +2149,153 @@ S3_pid_vanish() {
 }
 S3_pid_vanish
 
+# ==========  slice 4/S4 — manual pilot verb set (R2/AC-4; KA-R4/R5)  =====
+# Under pilot=manual the poker is notify-only: ZERO drive verbs (no poke/spawn/
+# restart/kill) in every goal state and on death, while emitting exactly the
+# contracted notification. Both directions (AC-4): manual specimens → zero seam +
+# correct notify, and no notify below the decay window; the SAME drive-contracted
+# states under auto reach the drive plumbing (differential proof the gate is
+# pilot-keyed, not broken plumbing). The manual path never touches do_poke, so
+# these cases call dispatch_actions / dispatch_manual IN-PROCESS (S3 direct-call
+# style); the auto-differential cases point do_poke at the stub first.
+
+# A manual-armed plan: scale wave, watchdog on (armed), pilot manual (notify-only).
+plant_manual_plan() { plant_plan "$1" "$2" "${3:-0}" wave on manual; }
+# An auto-armed plan: continuous ⇒ watchdog on + pilot auto by fallback ⇒ drives.
+plant_auto_plan()   { plant_plan "$1" "$2" "${3:-0}" continuous; }
+# Load a planted goal's registration into REG_* (as process_goals would) so a
+# direct dispatch call runs against it.
+load_reg() { load_registration "$1" >/dev/null 2>&1; }
+# Count drive-seam (resume poke) invocations recorded by the stub.
+resume_calls() { count_lines "$(claude_calls)" "resume "; }
+# Count ntfy POSTs recorded by the curl stub (each notification = one line).
+notify_calls() { count_lines "$(curl_calls)" "."; }
+
+echo "=== 4/S4-manual-busy: BUSY (working) → zero seam, zero notification ==="
+S4_manual_busy() {
+  new_home
+  local cwd plan; cwd=$(real_cwd s4b); plan="$HOME/plans/g4b.plan.md"
+  plant_manual_plan "$plan" 4
+  plant_goal g4b "$plan" "$cwd" sid-4b 4242
+  plant_transcript_age "$cwd" sid-4b 30 busy
+  load_reg g4b
+  dispatch_actions g4b BUSY ""
+  assert_eq "4/S4-busy manual → zero resume seam" "0" "$(resume_calls)"
+  assert_eq "4/S4-busy manual → zero notification" "0" "$(notify_calls)"
+  assert_contains "4/S4-busy manual → SKIP-MANUAL audited" "g4b SKIP-MANUAL" "$(audit_of)"
+}
+S4_manual_busy
+
+echo "=== 4/S4-manual-idle-below: idle-thinking below the ready window → zero notify (negative) ==="
+S4_manual_idle_below() {
+  new_home
+  local cwd plan; cwd=$(real_cwd s4ib); plan="$HOME/plans/g4ib.plan.md"
+  plant_manual_plan "$plan" 4
+  plant_goal g4ib "$plan" "$cwd" sid-4ib 4242
+  plant_transcript_age "$cwd" sid-4ib 300 user   # quiet 300: >180 stall, <1800 ready window
+  load_reg g4ib
+  dispatch_actions g4ib IDLE_STALLED ""
+  assert_eq "4/S4-idle-below manual → zero resume seam" "0" "$(resume_calls)"
+  assert_eq "4/S4-idle-below manual → zero notification (below ready window)" "0" "$(notify_calls)"
+}
+S4_manual_idle_below
+
+echo "=== 4/S4-manual-ready: idle past the ready window → READY-IDLE once across 3 polls (dedupe) ==="
+S4_manual_ready() {
+  new_home
+  local cwd plan; cwd=$(real_cwd s4r); plan="$HOME/plans/g4r.plan.md"
+  plant_manual_plan "$plan" 4
+  plant_goal g4r "$plan" "$cwd" sid-4r 4242
+  plant_transcript_age "$cwd" sid-4r 2000 user   # quiet 2000 > 1800 ready window
+  stub_registry_state idle sid-4r
+  run_poker; run_poker; run_poker                  # 3 real polls, cache persists across them
+  assert_eq "4/S4-ready manual → zero resume seam across 3 polls" "0" "$(resume_calls)"
+  assert_eq "4/S4-ready manual → READY-IDLE notified exactly once (deduped)" "1" \
+    "$(count_lines "$(audit_of)" "g4r READY-IDLE notified")"
+  assert_eq "4/S4-ready manual → exactly one ntfy POST" "1" "$(notify_calls)"
+}
+S4_manual_ready
+
+echo "=== 4/S4-manual-wedge: corroborated WEDGED → WEDGE-ASK, zero restart/kill seam ==="
+S4_manual_wedge() {
+  new_home
+  local cwd plan; cwd=$(real_cwd s4w); plan="$HOME/plans/g4w.plan.md"
+  plant_manual_plan "$plan" 4
+  plant_goal g4w "$plan" "$cwd" sid-4w 4242
+  plant_transcript_age "$cwd" sid-4w 2000 busy
+  load_reg g4w
+  dispatch_actions g4w WEDGED ""
+  assert_eq "4/S4-wedge manual → zero resume/restart/kill seam" "0" "$(resume_calls)"
+  assert_contains "4/S4-wedge manual → WEDGE-ASK notified" "g4w WEDGE-ASK notified" "$(audit_of)"
+  assert_contains "4/S4-wedge manual → notification carries approve-restart ask" "approve restart?" \
+    "$(curl_calls)"
+}
+S4_manual_wedge
+
+echo "=== 4/S4-manual-dead: sid absent (DEAD) → DEAD-MANUAL notify, zero poke/spawn seam ==="
+S4_manual_dead() {
+  new_home
+  local cwd plan; cwd=$(real_cwd s4d); plan="$HOME/plans/g4d.plan.md"
+  plant_manual_plan "$plan" 5
+  plant_goal g4d "$plan" "$cwd" sid-4d 2147483647
+  plant_transcript_age "$cwd" sid-4d 300 user
+  load_reg g4d
+  dispatch_actions g4d DEAD ""
+  assert_eq "4/S4-dead manual → zero poke/spawn seam" "0" "$(resume_calls)"
+  assert_contains "4/S4-dead manual → DEAD-MANUAL notified" "g4d DEAD-MANUAL notified" "$(audit_of)"
+  assert_contains "4/S4-dead manual → notification says WIP preserved" "WIP preserved" "$(curl_calls)"
+}
+S4_manual_dead
+
+echo "=== 4/S4-manual-gated: entry notify + reminder past the window (window-deduped) ==="
+S4_manual_gated() {
+  new_home
+  local cwd plan; cwd=$(real_cwd s4g); plan="$HOME/plans/g4g.plan.md"
+  plant_manual_plan "$plan" 4 1                    # wake note ⇒ GATED
+  plant_goal g4g "$plan" "$cwd" sid-4g 4242
+  plant_transcript_age "$cwd" sid-4g 300 user
+  load_reg g4g
+  dispatch_manual g4g GATED ""                     # entry → notify once + seed window
+  assert_eq "4/S4-gated entry → one notification" "1" "$(notify_calls)"
+  dispatch_manual g4g GATED GATED                  # within window → suppressed
+  assert_eq "4/S4-gated within window → still one notification" "1" "$(notify_calls)"
+  # window elapsed: backdate the reminder stamp beyond SDLC_GATED_REMIND
+  printf '%s\n' "$(( $(date +%s) - SDLC_GATED_REMIND - 10 ))" > "$HOME/.claude/sdlc-status/.state/g4g.remind-gated"
+  dispatch_manual g4g GATED GATED                  # window elapsed → reminder fires
+  assert_eq "4/S4-gated past window → reminder notification (two total)" "2" "$(notify_calls)"
+  assert_eq "4/S4-gated → zero drive seam throughout" "0" "$(resume_calls)"
+}
+S4_manual_gated
+
+echo "=== 4/S4-auto-differential: the SAME drive-contracted states under AUTO reach the poke seam ==="
+S4_auto_differential() {
+  # IDLE_STALLED under auto (continuous ⇒ pilot auto) → legacy poke fires.
+  new_home
+  mkdir -p "$HOME/.claude/sdlc-status/.state"      # main() mints this; in-process dispatch needs it for poke_capped
+  POKE_CLAUDE_BIN="$HOME/.claude/.stub/claude"     # point in-process do_poke at the stub
+  local cwd plan; cwd=$(real_cwd s4ai); plan="$HOME/plans/g4ai.plan.md"
+  plant_auto_plan "$plan" 4
+  plant_goal g4ai "$plan" "$cwd" sid-4ai 4242
+  plant_transcript_age "$cwd" sid-4ai 300 user
+  load_reg g4ai
+  dispatch_actions g4ai IDLE_STALLED ""
+  assert_true "4/S4-diff auto IDLE_STALLED → poke seam FIRES (gate is pilot-keyed)" \
+    test "$(resume_calls)" -ge 1
+
+  # DEAD under auto (baton-less) → legacy poke fires.
+  new_home
+  mkdir -p "$HOME/.claude/sdlc-status/.state"
+  POKE_CLAUDE_BIN="$HOME/.claude/.stub/claude"
+  cwd=$(real_cwd s4ad); plan="$HOME/plans/g4ad.plan.md"
+  plant_auto_plan "$plan" 4
+  plant_goal g4ad "$plan" "$cwd" sid-4ad 2147483647
+  plant_transcript_age "$cwd" sid-4ad 300 user
+  load_reg g4ad
+  dispatch_actions g4ad DEAD ""
+  assert_true "4/S4-diff auto DEAD → poke seam FIRES" test "$(resume_calls)" -ge 1
+}
+S4_auto_differential
+
 # ============================================================
 echo ""
 echo "========================================"
