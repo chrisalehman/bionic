@@ -1150,3 +1150,229 @@ sdlc_gate_park() {
   sdlc_effect_run "$goal_id" "park:$goal_id:$defect" "$detail" -- \
     _sdlc_gate_park_append "$plan_path" "$defect" "$detail"
 }
+
+# ---------- D3/D6/D8: successor-spawn pipeline (slice 4/5) ----------
+#
+# The rollover vehicle: a refuse-first pipeline that a dumb cron drives against
+# a goal's durable state and, only when every gate clears, launches ONE headless
+# successor to pick the goal back up. Every stage is loud and the FIRST refusal
+# wins; nothing here kills or signals any session (ADR-002 no-force). The ledger
+# IS the spawn record (AS-N5) — no separate file.
+
+# sdlc_successor_pointer_prompt <goal-id> <plan-path> <baton-path> <next-action>
+# Prints the pointer prompt handed to the successor, project-silent and in ONE
+# place so the T3 live walk and any future poker (N4) reuse a single source.
+# The text is the wave plan's block verbatim (hard line breaks preserved — the
+# block is the contract; a reflow would diverge the two consumers from the plan).
+sdlc_successor_pointer_prompt() {
+  local goal_id="${1:-}" plan="${2:-}" baton="${3:-}" next_action="${4:-}"
+  cat <<EOF
+Rollover pickup for goal $goal_id. The rollover spine verified
+state clean; do not re-derive reconciliation, do not override
+any Wake Note. Read the plan at $plan and the baton at
+$baton; resume per the canonical-sdlc session-resume
+protocol. Baton next-action is the literal resume point:
+$next_action
+EOF
+}
+
+# _sdlc_spawn_launch <cwd> <sid> <prompt> — the DEFAULT spawn executor (used
+# only when SDLC_SPAWN_CMD is unset — i.e. the real T3 path, never fixtures).
+# Fires the headless successor in the BACKGROUND from the goal's cwd and returns
+# on successful LAUNCH: spawn is fire-and-observe (plan D8) — the spine does not
+# block on the successor's whole turn, so sdlc_effect_run reads a 0 here as "a
+# successor WAS launched", not "its turn completed". The `( cmd & )` idiom
+# detaches the child (reparented, survives this shell) with rc 0 for the launch;
+# a cd failure exits nonzero so the intent stands and no effect line lands.
+_sdlc_spawn_launch() {
+  local cwd="$1" sid="$2" prompt="$3"
+  ( cd "$cwd" 2>/dev/null || exit 1
+    claude -p "$prompt" --session-id "$sid" >/dev/null 2>&1 & )
+}
+
+# _sdlc_spawn_defect_class <stderr-line> — the defect class token (text between
+# `defect: ` and the next `:`) from a primitive's one-line stderr, for keying a
+# park. Empty when the line is not `defect:`-shaped.
+_sdlc_spawn_defect_class() {
+  printf '%s' "$1" | sed -n 's/^defect: \([^:]*\):.*/\1/p' | head -1
+}
+
+# sdlc_successor_spawn <goal-id> [dir]  (dir default $PWD, the goal's repo)
+# Env seams (AS-N2, fixtures only; T3 runs both defaults real):
+#   SDLC_SPAWN_CMD    — the complete spawn command, word-split on IFS (default:
+#                       _sdlc_spawn_launch, the real backgrounded `claude -p`).
+#                       When set, the spine injects nothing: a fixture bakes its
+#                       own counter into the stub. A stub runs SYNCHRONOUSLY, so
+#                       double-drive launch-counting is race-free; the real
+#                       default backgrounds itself (fire-and-observe).
+#   SDLC_REGISTRY_CMD — command emitting the live-session registry as JSON,
+#                       word-split on IFS (default: `claude agents --json`).
+#
+# Pipeline (each stage loud, first refusal wins):
+#   1. goal-id guard + baton_parse — parse defects pass through, nonzero.
+#   2. plan carries `## Wake Note` → `goal-gated` (stderr), nonzero, NO park
+#      (already parked), no spawn.
+#   3. complete latch: sdlc_effect_state `complete:<gid>` applied → `goal-complete`
+#      (stdout), rc 0. Else sdlc_complete_check — rc 0 (latch just landed) →
+#      `goal-complete`, rc 0; rc 2 → park the check's defect class, nonzero, no
+#      spawn; rc 1 (benign not-complete) → proceed.
+#   4. single-writer: the newest `spawn:` EFFECT line's recorded sid (summary
+#      `sid=<uuid>`) looked up BY ID in SDLC_REGISTRY_CMD's output (a literal
+#      grep — no jq dependency). Found → `goal-owned` (stderr), nonzero, no park
+#      (a healthy live owner). Registry fails/empty → conservative `goal-owned`
+#      refusal (transient; cron re-drives — fail-closed, no park spam). Sid
+#      absent, or no prior spawn effect line → proceed. Decision-only spawn keys
+#      are deliberately NOT matched here — an intent that never became an effect
+#      is the crash window, resolved at stage 6, not a live owner.
+#   5. spawn-key state for `spawn:<gid>:<written-at>` (evaluated BEFORE reconcile,
+#      AS-N12): applied (same baton replayed) → `spawn-skipped` (stdout), rc 0,
+#      no launch; indeterminate (a journaled spawn intent with no effect — the
+#      crash window) → sdlc_effect_run refuses `effect-indeterminate` (no
+#      --replay-safe, command not run) → park that class, nonzero; unapplied →
+#      proceed. This precedes reconcile because the spine's OWN spawn journal
+#      entries advance the ledger past the baton's ledger-position — a re-drive's
+#      reconcile would otherwise trip `ledger-ahead` on the spine's bookkeeping.
+#   6. sdlc_reconcile → nonzero: park its defect class, nonzero, no spawn.
+#      Verdict `restore:<sha>` → sdlc_wip_restore (failure → park `restore-failed`);
+#      `clean` → proceed.
+#   7. spawn: mint a fresh lowercased-uuid sid; sdlc_effect_run under the spawn
+#      key launches at most once. The effect summary carries `sid=<sid> pid=na
+#      cwd=<cwd>` (pid=na by design — the durable record does not track a live
+#      pid; liveness is the registry's answer at stage 4, and a pid is not
+#      replay-stable across a cron re-drive).
+#   8. success → print the fresh sid on stdout (callers/N4 need it), rc 0.
+sdlc_successor_spawn() {
+  local goal_id="${1:-}" dir="${2:-$PWD}"
+  local baton plan_path lpath
+  local cc_errf cc_rc cc_err cclass
+  local spawn_line prior_sid reg_out reg_rc
+  local rec_errf rec_out rec_rc rec_err rclass verdict rsha rst_errf rst_err
+  local sid prompt spawn_key spawn_errf spawn_rc spawn_err sclass
+
+  # 1. goal-id guard (builds the baton path) then baton parse.
+  _sdlc_validate_goal_id "$goal_id" "sdlc_successor_spawn" || return 1
+  baton="$(baton_path "$goal_id")"
+  baton_parse "$baton" || return 1
+  plan_path="$BATON_PLAN"
+  lpath="$(ledger_path "$goal_id")"
+
+  # 2. Wake Note standing → already parked; refuse without re-parking.
+  if [ -f "$plan_path" ] && grep -q '^## Wake Note$' "$plan_path" 2>/dev/null; then
+    echo "goal-gated: wake note standing in $plan_path" >&2
+    return 1
+  fi
+
+  # 3. completion. An applied latch short-circuits the git predicates.
+  if [ "$(sdlc_effect_state "$goal_id" "complete:$goal_id")" = "applied" ]; then
+    echo "goal-complete"
+    return 0
+  fi
+  cc_errf="$(mktemp)"
+  sdlc_complete_check "$goal_id" "$dir" >/dev/null 2>"$cc_errf"; cc_rc=$?
+  cc_err="$(cat "$cc_errf")"; rm -f "$cc_errf"
+  case "$cc_rc" in
+    0) echo "goal-complete"; return 0 ;;
+    2) cclass="$(_sdlc_spawn_defect_class "$cc_err")"
+       [ -n "$cclass" ] || cclass="false-complete"
+       sdlc_gate_park "$goal_id" "$plan_path" "$cclass" "$cc_err"
+       return 1 ;;
+    *) : ;;  # rc 1 benign not-complete → proceed
+  esac
+
+  # 4. single-writer — is a prior spawned session still live?
+  spawn_line=""
+  [ -f "$lpath" ] && spawn_line="$(awk -F'\t' '$4=="effect" && $5 ~ /^spawn:/ {l=$0} END{print l}' "$lpath")"
+  if [ -n "$spawn_line" ]; then
+    prior_sid="$(printf '%s' "$spawn_line" | awk -F'\t' '{print $6}' | sed -n 's/.*sid=\([0-9a-f-]*\).*/\1/p')"
+    if [ -n "$prior_sid" ]; then
+      reg_out="$(${SDLC_REGISTRY_CMD:-claude agents --json} 2>/dev/null)"; reg_rc=$?
+      if [ "$reg_rc" -ne 0 ] || [ -z "$reg_out" ]; then
+        echo "goal-owned: session $prior_sid live — registry unavailable, refusing conservatively" >&2
+        return 1
+      fi
+      if printf '%s' "$reg_out" | grep -qF "$prior_sid"; then
+        echo "goal-owned: session $prior_sid live" >&2
+        return 1
+      fi
+      # sid absent from the registry → the owner is dead → proceed.
+    fi
+  fi
+
+  # 5. spawn-key state — have we already acted on THIS baton? Evaluated HERE,
+  #    with the single-writer gate and BEFORE reconcile (AS-N12): the spine's
+  #    own spawn journal entries (decision+effect) advance the ledger past the
+  #    baton's recorded ledger-position, so a re-drive's sdlc_reconcile would
+  #    report `ledger-ahead` on the spine's own bookkeeping. The exactly-once
+  #    states must short-circuit before reconcile reads the ledger.
+  #    applied  → this baton was already serviced → `spawn-skipped`, rc 0.
+  #    indet.   → a journaled spawn intent never became an effect (crash window):
+  #               sdlc_effect_run refuses `effect-indeterminate` (no
+  #               --replay-safe, command not run) → park that class.
+  #    unapplied → fresh baton → proceed to reconcile + launch.
+  spawn_key="spawn:$goal_id:$BATON_WRITTEN_AT"
+  case "$(sdlc_effect_state "$goal_id" "$spawn_key")" in
+    applied)
+      echo "spawn-skipped: already spawned for baton $BATON_WRITTEN_AT"
+      return 0 ;;
+    indeterminate)
+      spawn_errf="$(mktemp)"
+      sdlc_effect_run "$goal_id" "$spawn_key" "sid=pending pid=na cwd=$BATON_CWD" -- true 2>"$spawn_errf"
+      spawn_err="$(cat "$spawn_errf")"; rm -f "$spawn_errf"
+      sclass="$(_sdlc_spawn_defect_class "$spawn_err")"
+      [ -n "$sclass" ] || sclass="effect-indeterminate"
+      sdlc_gate_park "$goal_id" "$plan_path" "$sclass" "$spawn_err"
+      return 1 ;;
+    *) : ;;  # unapplied → proceed
+  esac
+
+  # 6. reconcile (fresh baton only — the ledger is consistent with it here).
+  rec_errf="$(mktemp)"
+  rec_out="$(sdlc_reconcile "$goal_id" "$dir" 2>"$rec_errf")"; rec_rc=$?
+  rec_err="$(cat "$rec_errf")"; rm -f "$rec_errf"
+  if [ "$rec_rc" -ne 0 ]; then
+    rclass="$(_sdlc_spawn_defect_class "$rec_err")"
+    [ -n "$rclass" ] || rclass="reconcile-defect"
+    sdlc_gate_park "$goal_id" "$plan_path" "$rclass" "$rec_err"
+    return 1
+  fi
+  verdict="$rec_out"
+  case "$verdict" in
+    clean) : ;;
+    restore:*)
+      rsha="${verdict#restore:}"
+      rst_errf="$(mktemp)"
+      if ! sdlc_wip_restore "$goal_id" "$rsha" "$dir" 2>"$rst_errf"; then
+        rst_err="$(cat "$rst_errf")"; rm -f "$rst_errf"
+        sdlc_gate_park "$goal_id" "$plan_path" "restore-failed" "wip restore of $rsha failed: $rst_err"
+        return 1
+      fi
+      rm -f "$rst_errf" ;;
+    *) echo "goal-gated: unexpected reconcile verdict '$verdict'" >&2
+       return 1 ;;
+  esac
+
+  # 7. spawn (unapplied key, state clean) — launch at most once.
+  sid="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+  prompt="$(sdlc_successor_pointer_prompt "$goal_id" "$plan_path" "$baton" "$BATON_NEXT_ACTION")"
+  spawn_errf="$(mktemp)"
+  if [ -n "${SDLC_SPAWN_CMD:-}" ]; then
+    sdlc_effect_run "$goal_id" "$spawn_key" "sid=$sid pid=na cwd=$BATON_CWD" -- $SDLC_SPAWN_CMD 2>"$spawn_errf"
+    spawn_rc=$?
+  else
+    sdlc_effect_run "$goal_id" "$spawn_key" "sid=$sid pid=na cwd=$BATON_CWD" -- \
+      _sdlc_spawn_launch "$BATON_CWD" "$sid" "$prompt" 2>"$spawn_errf"
+    spawn_rc=$?
+  fi
+  spawn_err="$(cat "$spawn_errf")"; rm -f "$spawn_errf"
+  if [ "$spawn_rc" -ne 0 ]; then
+    # a launch/journal failure — park the named class so a human decides.
+    sclass="$(_sdlc_spawn_defect_class "$spawn_err")"
+    [ -n "$sclass" ] || sclass="spawn-failed"
+    sdlc_gate_park "$goal_id" "$plan_path" "$sclass" "$spawn_err"
+    return 1
+  fi
+
+  # 8. success — the fresh sid is the caller/N4 handle.
+  echo "$sid"
+  return 0
+}
