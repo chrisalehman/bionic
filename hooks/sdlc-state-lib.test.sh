@@ -1843,6 +1843,294 @@ ac_park_guard() {
 ac_park_guard
 
 # ============================================================
+# Successor-spawn pipeline (slice 4/5, spec D3/D6/D8) —
+# sdlc_successor_pointer_prompt + sdlc_successor_spawn. Every case stubs the
+# two env seams (AS-N2): SDLC_SPAWN_CMD is a synchronous counter script (one
+# line appended per launch — deterministic, race-free), SDLC_REGISTRY_CMD is
+# a canned command emitting JSON (or `false` for the failure path). The real
+# `claude` binary is NEVER invoked here — the T3 live row (Step 5) exercises
+# the defaults. Both seams are set as `local` in each test fn so dynamic
+# scope reaches sdlc_successor_spawn and they auto-clear on return.
+# ============================================================
+
+# make_spawn_stub <counter-path> — a synchronous stub that records one launch
+# per invocation (echoes the stub's own path for SDLC_SPAWN_CMD).
+make_spawn_stub() {
+  local counter="$1" stub
+  stub="$(mktemp)"; CLEAN_DIRS+=("$stub")
+  printf '#!/bin/bash\nprintf x >> %q\nprintf "\\n" >> %q\n' "$counter" "$counter" > "$stub"
+  chmod +x "$stub"
+  printf '%s' "$stub"
+}
+# make_registry_stub <json> — a `cat <file>` command emitting the given JSON
+# (echoes the command string for SDLC_REGISTRY_CMD).
+make_registry_stub() {
+  local json="$1" f
+  f="$(mktemp)"; CLEAN_DIRS+=("$f")
+  printf '%s\n' "$json" > "$f"
+  printf 'cat %s' "$f"
+}
+# spawn_counter <counter-path> — launches recorded (0 if absent/empty).
+spawn_counter() { if [ -f "$1" ]; then grep -c . "$1" | tr -d ' '; else printf '0'; fi; }
+# ledger_tail_pos <goal-id> — the ledger tail's `<seq>:<digest>` (baton
+# ledger-position grammar), so a planted-ledger fixture's baton stays
+# consistent for sdlc_reconcile's position cross-check.
+ledger_tail_pos() { awk -F'\t' 'END{print $2":"$3}' "$(ledger_path "$1")"; }
+# write_complete_baton_pos <gid> <dir> <current> <wip> <ledger-position> — the
+# two-branch complete baton with an explicit ledger-position.
+write_complete_baton_pos() {
+  baton_write "$1" "$PLAN_STUB" "$2" "goal-branch" "integ-branch" \
+    "$(git -C "$2" rev-parse HEAD)" "$3" "sid-$1/1" "$5" "resume the slice" "$4" >/dev/null 2>&1
+}
+# spawn_line_sid <ledger-path> <goal-id> — sid= from the newest spawn effect line.
+spawn_line_sid() {
+  awk -F'\t' '$4=="effect" && $5 ~ /^spawn:/ {l=$6} END{print l}' "$1" \
+    | sed -n 's/.*sid=\([0-9a-f-]*\).*/\1/p'
+}
+
+echo ""
+echo "=== AC-N1 substrate: sdlc_successor_pointer_prompt — one source, exact block ==="
+ac_pointer_prompt() {
+  local out expected
+  out="$(sdlc_successor_pointer_prompt "my-goal" "/p/my-goal.plan.md" "/s/my-goal/baton.md" "resume slice 3")"
+  expected="$(cat <<'EOF'
+Rollover pickup for goal my-goal. The rollover spine verified
+state clean; do not re-derive reconciliation, do not override
+any Wake Note. Read the plan at /p/my-goal.plan.md and the baton at
+/s/my-goal/baton.md; resume per the canonical-sdlc session-resume
+protocol. Baton next-action is the literal resume point:
+resume slice 3
+EOF
+)"
+  assert_eq "AC-N1 pointer prompt matches the plan block verbatim (with substitutions)" "$expected" "$out"
+}
+ac_pointer_prompt
+
+echo ""
+echo "=== AC-N2/AC-N5/AC-N6: sdlc_successor_spawn — refuse-first rollover, exactly-once spawn ==="
+
+echo "--- HAPPY + double-drive: healthy goal spawns once (sid printed, counter 1, spawn effect line carries sid=); replay same baton → spawn-skipped, counter unchanged ---"
+ac_spawn_happy_double() {
+  local gid="spawn-happy" d counter path sid sid2 rc out
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 4 no; d="$REPO_DIR"          # current 4 → benign not-complete → proceed
+  write_complete_baton "$gid" "$d" 4 none
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"   # re-drive: no live owner
+  path="$(ledger_path "$gid")"
+
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AC-N5 happy drive exits 0" "0" "$rc"
+  assert_eq "AC-N5 happy drive launched the successor once (counter=1)" "1" "$(spawn_counter "$counter")"
+  sid="$out"
+  TOTAL=$((TOTAL + 1))
+  if printf '%s' "$sid" | grep -qE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
+    pass "AC-N5 happy drive prints a lowercased uuid sid on stdout"
+  else fail "AC-N5 happy drive prints a lowercased uuid sid on stdout" "got: $sid"; fi
+  assert_eq "AC-N5 happy drive: spawn effect line journaled with the printed sid" "$sid" "$(spawn_line_sid "$path" "$gid")"
+  assert_eq "AC-N5 happy drive: exactly one spawn effect line" "1" \
+    "$(awk -F'\t' '$4=="effect" && $5 ~ /^spawn:/' "$path" | wc -l | tr -d ' ')"
+
+  # replay SAME baton (written-at unchanged) → key applied → skip, no new launch.
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AC-N6 replay same baton exits 0" "0" "$rc"
+  assert_contains "AC-N6 replay same baton prints spawn-skipped" "spawn-skipped: already spawned for baton" "$out"
+  assert_eq "AC-N6 replay same baton did NOT re-launch (counter still 1)" "1" "$(spawn_counter "$counter")"
+  sid2="$(spawn_line_sid "$path" "$gid")"
+  assert_eq "AC-N6 replay same baton: spawn sid unchanged" "$sid" "$sid2"
+}
+ac_spawn_happy_double
+
+echo "--- WAKE NOTE STANDING: plan already parked → goal-gated, no spawn, no second Wake Note ---"
+ac_spawn_wake_note() {
+  local gid="spawn-gated" d counter err rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none none
+  printf '\n## Wake Note\n\nGATED by something earlier\n' >> "$PLAN_STUB"   # already parked
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  err="$(sdlc_successor_spawn "$gid" "$d" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "AC-N6 wake-note-standing returns nonzero" "$rc"
+  assert_contains "AC-N6 wake-note-standing names goal-gated" "goal-gated: wake note standing" "$err"
+  assert_eq "AC-N6 wake-note-standing did not spawn (counter 0)" "0" "$(spawn_counter "$counter")"
+  assert_eq "AC-N6 wake-note-standing left exactly one Wake Note (no second append)" "1" "$(wake_note_count "$PLAN_STUB")"
+}
+ac_spawn_wake_note
+
+echo "--- COMPLETE goal (current 10, merged, wip none): goal-complete rc 0, no spawn; second drive hits the applied-latch branch ---"
+ac_spawn_complete() {
+  local gid="spawn-complete" d counter out rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 10 yes; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  build_healthy_ledger "$gid" >/dev/null      # a genuinely-completed goal journaled along the way
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AC-N3 complete goal exits 0" "0" "$rc"
+  assert_eq "AC-N3 complete goal prints goal-complete" "goal-complete" "$out"
+  assert_eq "AC-N3 complete goal did not spawn (counter 0)" "0" "$(spawn_counter "$counter")"
+  # second drive: complete latch is now applied → the effect_state short-circuit.
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AC-N3 complete goal second drive (applied latch) exits 0" "0" "$rc"
+  assert_eq "AC-N3 complete goal second drive prints goal-complete" "goal-complete" "$out"
+  assert_eq "AC-N3 complete goal second drive still did not spawn" "0" "$(spawn_counter "$counter")"
+}
+ac_spawn_complete
+
+echo "--- FALSE-COMPLETE (current 10, NOT merged): park lands, no spawn, rc nonzero ---"
+ac_spawn_false_complete() {
+  local gid="spawn-false" d counter rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 10 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  sdlc_successor_spawn "$gid" "$d" >/dev/null 2>&1; rc=$?
+  assert_nonzero "AC-N3 false-complete returns nonzero" "$rc"
+  assert_eq "AC-N3 false-complete did not spawn (counter 0)" "0" "$(spawn_counter "$counter")"
+  assert_eq "AC-N3 false-complete parked exactly one Wake Note" "1" "$(wake_note_count "$PLAN_STUB")"
+  assert_contains "AC-N3 false-complete parks the false-complete class" "GATED by rollover spine: false-complete" "$(cat "$PLAN_STUB")"
+}
+ac_spawn_false_complete
+
+echo "--- LIVE OWNER: prior spawn line's sid found in the registry → goal-owned, no park, no spawn ---"
+ac_spawn_live_owner() {
+  local gid="spawn-owned" d counter fakesid err rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  fakesid="11111111-2222-3333-4444-555555555555"
+  ledger_append "$gid" effect "spawn:$gid:2026-01-01T00:00:00Z" "sid=$fakesid pid=na cwd=$d" >/dev/null 2>&1
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub "{\"sessions\":[{\"id\":\"$fakesid\"}]}")"
+  err="$(sdlc_successor_spawn "$gid" "$d" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "AC-N6 live-owner returns nonzero" "$rc"
+  assert_contains "AC-N6 live-owner names goal-owned + the sid" "goal-owned: session $fakesid live" "$err"
+  assert_eq "AC-N6 live-owner did not spawn (counter 0)" "0" "$(spawn_counter "$counter")"
+  assert_eq "AC-N6 live-owner did not park (no Wake Note)" "0" "$(wake_note_count "$PLAN_STUB")"
+}
+ac_spawn_live_owner
+
+echo "--- REGISTRY UNAVAILABLE: registry command fails → conservative goal-owned refusal, no park, no spawn ---"
+ac_spawn_registry_down() {
+  local gid="spawn-regdown" d counter fakesid err rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  fakesid="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+  ledger_append "$gid" effect "spawn:$gid:2026-01-01T00:00:00Z" "sid=$fakesid pid=na cwd=$d" >/dev/null 2>&1
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="false"
+  err="$(sdlc_successor_spawn "$gid" "$d" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "AC-N6 registry-down returns nonzero" "$rc"
+  assert_contains "AC-N6 registry-down: conservative refusal suffix" "registry unavailable, refusing conservatively" "$err"
+  assert_eq "AC-N6 registry-down did not spawn (counter 0)" "0" "$(spawn_counter "$counter")"
+  assert_eq "AC-N6 registry-down did not park" "0" "$(wake_note_count "$PLAN_STUB")"
+}
+ac_spawn_registry_down
+
+echo "--- DEAD OWNER: prior spawn sid absent from the registry → proceeds to spawn ---"
+ac_spawn_dead_owner() {
+  local gid="spawn-dead" d counter fakesid out rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  fakesid="99999999-8888-7777-6666-555555555555"
+  ledger_append "$gid" effect "spawn:$gid:2026-01-01T00:00:00Z" "sid=$fakesid pid=na cwd=$d" >/dev/null 2>&1
+  write_complete_baton_pos "$gid" "$d" 4 none "$(ledger_tail_pos "$gid")"   # baton position tracks the planted line → reconcile clean
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[{"id":"00000000-0000-0000-0000-000000000000"}]}')"
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AC-N6 dead-owner proceeds and exits 0" "0" "$rc"
+  assert_eq "AC-N6 dead-owner launched a fresh successor (counter 1)" "1" "$(spawn_counter "$counter")"
+  TOTAL=$((TOTAL + 1))
+  if printf '%s' "$out" | grep -qE '^[0-9a-f-]{36}$'; then pass "AC-N6 dead-owner printed a fresh sid"; else fail "AC-N6 dead-owner printed a fresh sid" "got: $out"; fi
+}
+ac_spawn_dead_owner
+
+echo "--- DIVERGENCE (baton-stale tip): reconcile defect → park that class, no spawn; double-drive → still one Wake Note ---"
+ac_spawn_divergence() {
+  local gid="spawn-diverge" d counter rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  write_recon_baton "$gid" "$d" 4 none none
+  printf 'later work\n' > "$d/later.txt"; git -C "$d" add -A; git -C "$d" commit -qm later  # tip advances past baton
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  sdlc_successor_spawn "$gid" "$d" >/dev/null 2>&1; rc=$?
+  assert_nonzero "AC-N2 divergence returns nonzero" "$rc"
+  assert_eq "AC-N2 divergence did not spawn (counter 0)" "0" "$(spawn_counter "$counter")"
+  assert_eq "AC-N2 divergence parked one Wake Note" "1" "$(wake_note_count "$PLAN_STUB")"
+  assert_contains "AC-N2 divergence parks the baton-stale class" "GATED by rollover spine: baton-stale" "$(cat "$PLAN_STUB")"
+  # double-drive: still exactly one Wake Note (park idempotent by key).
+  sdlc_successor_spawn "$gid" "$d" >/dev/null 2>&1
+  assert_eq "AC-N6 divergence double-drive: still one Wake Note" "1" "$(wake_note_count "$PLAN_STUB")"
+  assert_eq "AC-N6 divergence double-drive: still no spawn (counter 0)" "0" "$(spawn_counter "$counter")"
+}
+ac_spawn_divergence
+
+echo "--- RESTORE: reconcile verdict restore:<sha> → wip_restore replays the clobbered file, then spawns ---"
+ac_spawn_restore() {
+  local gid="spawn-restore" d counter snap out rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  printf 'work in progress\n' > "$d/wip.txt"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
+  rm -f "$d/wip.txt"                                  # clobber → worktree == HEAD
+  write_recon_baton "$gid" "$d" 4 none "$snap"
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "AC-N5 restore drive exits 0" "0" "$rc"
+  assert_true "AC-N5 restore replayed the clobbered wip.txt" test -f "$d/wip.txt"
+  assert_eq "AC-N5 restore replayed byte-faithful content" "work in progress" "$(cat "$d/wip.txt")"
+  assert_eq "AC-N5 restore then launched the successor (counter 1)" "1" "$(spawn_counter "$counter")"
+}
+ac_spawn_restore
+
+echo "--- INDETERMINATE spawn key (decision, no effect): effect-indeterminate → park, no launch ---"
+ac_spawn_indeterminate() {
+  local gid="spawn-indet" d counter baton wat rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  baton="$(baton_path "$gid")"
+  baton_parse "$baton"; wat="$BATON_WRITTEN_AT"
+  # plant a DECISION line for the exact spawn key stage 6 will compute — a crash
+  # window: intent journaled, no effect. (decision-type → stage 4 does not match it.)
+  ledger_append "$gid" decision "spawn:$gid:$wat" "sid=deadbeef-0000-0000-0000-000000000000 pid=na cwd=$d" >/dev/null 2>&1
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  sdlc_successor_spawn "$gid" "$d" >/dev/null 2>&1; rc=$?
+  assert_nonzero "AC-N6 indeterminate spawn key returns nonzero" "$rc"
+  assert_eq "AC-N6 indeterminate did not launch (counter 0)" "0" "$(spawn_counter "$counter")"
+  assert_eq "AC-N6 indeterminate parked one Wake Note" "1" "$(wake_note_count "$PLAN_STUB")"
+  assert_contains "AC-N6 indeterminate parks the effect-indeterminate class" "GATED by rollover spine: effect-indeterminate" "$(cat "$PLAN_STUB")"
+}
+ac_spawn_indeterminate
+
+echo "--- goal-id guard: '/' → invalid-goal-id, nonzero ---"
+ac_spawn_guard() {
+  new_state_dir
+  local err rc
+  err="$(sdlc_successor_spawn "bad/goal" "." 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "AC-N2 successor-spawn rejects a '/' goal-id" "$rc"
+  assert_contains "AC-N2 successor-spawn '/' names invalid-goal-id" "invalid-goal-id" "$err"
+}
+ac_spawn_guard
+
+# ============================================================
 echo ""
 echo "========================================"
 echo "sdlc-state primitives (baton + ledger): $PASS/$TOTAL passed, $FAIL failed"
