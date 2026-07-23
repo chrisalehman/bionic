@@ -24,6 +24,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Incident 0001: the audit file lives under $HOME, never in the project tree.
+# Every runner in this suite already pins HOME to a make_home sandbox, so the
+# relocated writes stay off the developer's real ~/.claude/logs. The sandbox
+# HOME is always a SIBLING of the make_project fixtures (both are bare
+# mktemp -d), never a parent — Section 21a's "nothing under the project tree"
+# assertion depends on that.
+# Slug must match hooks/canonical-sdlc-evidence-gate.sh audit_path() byte for byte.
+slug_for() { printf '%s-%s' "$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')" \
+                            "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"; }
+# $1 = sandbox HOME, $2 = the audit_root the hook resolved (the plan's project).
+audit_file_for() { printf '%s/.claude/logs/%s/sdlc-v11-audit.md' "$1" "$(slug_for "$2")"; }
+
 # Creates an isolated $HOME-equivalent with an empty ~/.claude/plans/ dir.
 make_home() {
   local dir
@@ -2748,7 +2760,11 @@ expect_audit_line() {
   local label="$1" home_dir="$2" command="$3" substr="$4"
   TOTAL=$((TOTAL + 1))
   run_hook "$home_dir" "$command"
-  local af="$home_dir/.bionic/memory/sdlc-v11-audit.md"
+  # run_hook posts cwd=$home_dir with CLAUDE_PROJECT_DIR="", and the plan lives
+  # at $home_dir/.claude/plans/ whose ancestry has no .bionic/ — so audit_root()
+  # falls back to PROJECT_DIR == $home_dir. Incident 0001 keys the file on that
+  # root but roots the file itself under HOME.
+  local af; af=$(audit_file_for "$home_dir" "$home_dir")
   if [ "$HOOK_EXIT" -eq 0 ] && [ -f "$af" ] && grep -q "$substr" "$af"; then
     echo "PASS: $label"
     PASS=$((PASS + 1))
@@ -3208,7 +3224,7 @@ expect_no_audit_write() {
   local label="$1" home_dir="$2" command="$3"
   TOTAL=$((TOTAL + 1))
   run_hook "$home_dir" "$command"
-  local af="$home_dir/.bionic/memory/sdlc-v11-audit.md"
+  local af; af=$(audit_file_for "$home_dir" "$home_dir")
   if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ] && [ ! -f "$af" ]; then
     echo "PASS: $label"
     PASS=$((PASS + 1))
@@ -3426,22 +3442,26 @@ run_hook_project_elsewhere_cwd() {
 
 # 21a — fixture project owns the plan; the JSON cwd field and the actual
 # process cwd both point at an unrelated sibling temp dir. Asserts the audit
-# line lands in the FIXTURE project's .bionic/memory/sdlc-v11-audit.md, and
-# that NO .bionic/ gets created under the sibling (no cwd leak).
+# line lands in the audit file KEYED ON the fixture project (incident 0001:
+# under the sandbox HOME, slugged by the fixture root — never inside the
+# project tree), and that NO .bionic/ gets created under the sibling (no cwd
+# leak). The "nothing under the fixture tree" arm is paired with the presence
+# arm on purpose: alone it would pass if the hook wrote nothing at all.
 h21a=$(make_home)
 fixture21a=$(make_project)
 elsewhere21a=$(mktemp -d); cleanup_dirs+=("$elsewhere21a")
 write_project_plan "$fixture21a" "$(v20_wave_plan tune 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
 TOTAL=$((TOTAL + 1))
 run_hook_project_elsewhere_cwd "$h21a" "$fixture21a" "$elsewhere21a" 'git commit -m "x"'
-fixture_audit="$fixture21a/.bionic/memory/sdlc-v11-audit.md"
+fixture_audit=$(audit_file_for "$h21a" "$fixture21a")
+in_tree21a=$(find "$fixture21a" "$elsewhere21a" -name 'sdlc-v11-audit.md' 2>/dev/null)
 if [ "$HOOK_EXIT" -eq 0 ] && [ -f "$fixture_audit" ] && grep -q "tune-evidence" "$fixture_audit" \
-  && [ ! -d "$elsewhere21a/.bionic" ]; then
+  && [ ! -d "$elsewhere21a/.bionic" ] && [ -z "$in_tree21a" ]; then
   echo "PASS: v11 21a audit line follows the plan's fixture project, not the invoking cwd"
   PASS=$((PASS + 1))
 else
-  echo "FAIL (expected fixture audit line + no .bionic under elsewhere cwd): v11 21a"
-  echo "  exit=$HOOK_EXIT fixture_audit_exists=$([ -f "$fixture_audit" ] && echo yes || echo no) elsewhere_bionic=$([ -d "$elsewhere21a/.bionic" ] && echo yes || echo no)"
+  echo "FAIL (expected fixture-keyed audit line under HOME + no audit file in any project tree): v11 21a"
+  echo "  exit=$HOOK_EXIT fixture_audit_exists=$([ -f "$fixture_audit" ] && echo yes || echo no) elsewhere_bionic=$([ -d "$elsewhere21a/.bionic" ] && echo yes || echo no) in_tree='$in_tree21a'"
   FAIL=$((FAIL + 1))
 fi
 

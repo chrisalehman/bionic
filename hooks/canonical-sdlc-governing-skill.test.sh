@@ -23,6 +23,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Incident 0001: the audit file lives under $HOME, never in the project tree.
+# The fake HOME is a SIBLING of every sandbox project, never a child — the
+# "nothing under the project tree" assertion uses `find "$project"`, which a
+# nested home would satisfy falsely. Every invocation of the hook runs with
+# HOME pointed here, or the suite would append to the developer's real
+# ~/.claude/logs. Projects are distinct mktemp paths, so each gets its own slug
+# directory under the one fake home — no cross-case contamination.
+FAKE_HOME=$(mktemp -d)
+cleanup_dirs+=("$FAKE_HOME")
+# Slug must match hooks/canonical-sdlc-governing-skill.sh audit_path() byte for byte.
+slug_for() { printf '%s-%s' "$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')" \
+                            "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"; }
+
 make_project() {
   local dir
   dir=$(mktemp -d)
@@ -43,7 +56,7 @@ run_write() {
     '{tool_name: "Write", tool_input: {file_path: $p, content: $c}}')
   local tmp_err
   tmp_err=$(mktemp)
-  if bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
+  if HOME="$FAKE_HOME" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
     HOOK_EXIT=0
   else
     HOOK_EXIT=$?
@@ -62,7 +75,7 @@ run_edit() {
     '{tool_name: "Edit", tool_input: {file_path: $p, old_string: $o, new_string: $n}}')
   local tmp_err
   tmp_err=$(mktemp)
-  if bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
+  if HOME="$FAKE_HOME" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
     HOOK_EXIT=0
   else
     HOOK_EXIT=$?
@@ -182,7 +195,7 @@ assert_eq "exit 2" 2 "$HOOK_EXIT"
 echo "Bash tool (non-Write/Edit) → allow"
 input=$(jq -n '{tool_name: "Bash", tool_input: {command: "ls"}}')
 HOOK_EXIT=0
-if ! bash "$HOOK" <<< "$input" >/dev/null 2>&1; then
+if ! HOME="$FAKE_HOME" bash "$HOOK" <<< "$input" >/dev/null 2>&1; then
   HOOK_EXIT=$?
 fi
 assert_eq "exit 0" 0 "$HOOK_EXIT"
@@ -1031,18 +1044,26 @@ assert_eq "unsupported_v12_still_blocks exit 2" 2 "$HOOK_EXIT"
 # ============================================================
 #
 # On every v11 artifact write the hook computes derivable rigor floors and
-# appends one line per violation to <project>/.bionic/memory/sdlc-v11-audit.md
-# AND echoes it to stderr, then exits 0 — findings NEVER block (R3/D14).
+# appends one line per violation to
+# $HOME/.claude/logs/<project-slug>/sdlc-v11-audit.md — outside every consuming
+# project tree (incident 0001) — AND echoes it to stderr, then exits 0 —
+# findings NEVER block (R3/D14).
 # Floors: incident-response floors at audited; spike is capped at tested;
 # `rigor-floor:` in .bionic/config.yaml (invalid value = its own finding);
 # `rigor-floor:` in the epic plan's frontmatter (fail-open on missing plan).
-# Fixtures build temp project roots; audit writes land under the temp root
-# (the hook derives PROJECT_ROOT from the file path's .bionic walk-up), so
-# the real repo's .bionic/memory is never touched.
-
-AUDIT_REL=".bionic/memory/sdlc-v11-audit.md"
+# Fixtures build temp project roots; the hook derives PROJECT_ROOT from the
+# file path's .bionic walk-up and keys the audit file on it, so each fixture
+# gets its own slug directory under the sandboxed HOME and the real repo —
+# and the developer's real ~/.claude/logs — is never touched.
+#
+# The path is no longer relative to the project root, so AUDIT_REL is now a
+# function OF the root rather than a constant appended to it.
+audit_file_for() {  # $1=project root → absolute audit-file path under the fake HOME
+  printf '%s/.claude/logs/%s/sdlc-v11-audit.md' "$FAKE_HOME" "$(slug_for "$1")"
+}
 read_audit() {
-  if [ -f "$1/$AUDIT_REL" ]; then cat "$1/$AUDIT_REL"; else echo ""; fi
+  local f; f=$(audit_file_for "$1")
+  if [ -f "$f" ]; then cat "$f"; else echo ""; fi
 }
 
 echo "v11 intent-floor: incident-response + rigor tested → log intent-floor, exit 0"
@@ -1110,10 +1131,19 @@ echo "v11 audit file + parent dir created on first finding"
 project=$(make_project)
 run_write "$project/.bionic/docs/plans/epic-01-demo/v11-audit-create.plan.md" "$(build_v11_plan intent=spike rigor=audited)"
 assert_eq "v11_floor_audit_file_created exit 0" 0 "$HOOK_EXIT"
-if [ -f "$project/$AUDIT_REL" ]; then
+if [ -f "$(audit_file_for "$project")" ]; then
   PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  v11_floor_audit_file_created (file + dir created)\n'
 else
   FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  v11_floor_audit_file_created (file missing)\n'
+fi
+# Incident 0001 (AC-3): the SAME write that just landed above must leave no
+# audit file anywhere under the project tree. Paired with the presence check
+# directly above — an absence assertion alone passes when nothing was written
+# at all, which is exactly the failure mode it exists to catch.
+if [ -z "$(find "$project" -name 'sdlc-v11-audit.md' 2>/dev/null)" ]; then
+  PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  v11_floor_audit_not_in_project_tree\n'
+else
+  FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  v11_floor_audit_not_in_project_tree (%s)\n' "$(find "$project" -name 'sdlc-v11-audit.md')"
 fi
 
 echo "v11 all-violations fixture (intent + project + epic floors) → still exit 0, all three logged"

@@ -1,7 +1,8 @@
 #!/bin/bash
 # CONTEXT-SPEND: advisory Stop hook — appends ONE context-spend line per
-# SDLC step boundary to .bionic/memory/sdlc-v11-audit.md, reusing the
-# log_v11_finding() line format (source: context-spend).
+# SDLC step boundary to $HOME/.claude/logs/<project-slug>/sdlc-v11-audit.md —
+# outside every consuming project tree (incident 0001), via audit_path() —
+# reusing the log_v11_finding() line format (source: context-spend).
 #
 # Mechanism (epic-08 A7 / Q2 spike): Stop = trigger + transcript_path;
 # last assistant message.usage (TOP-LEVEL, never iterations[]) = occupancy
@@ -30,6 +31,24 @@ if [ -z "$PROJECT_DIR" ]; then
   PROJECT_DIR=$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null) || PROJECT_DIR=""
 fi
 [ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR" ] || exit 0
+
+# Incident 0001: the audit stream must live where a consuming project cannot
+# commit it, regardless of that project's .gitignore. $HOME-rooted, per-project,
+# durable — mirroring hooks/sdlc-poker.sh:111's $HOME/.claude/ audit log.
+# Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
+# collision-resistant across same-named projects under different parents.
+# cksum and basename are POSIX — no new dependency.
+# Byte-identical to the copies in farm-out-reminder.sh,
+# canonical-sdlc-governing-skill.sh and canonical-sdlc-evidence-gate.sh —
+# divergence would give one project two audit files. Deliberate per-hook
+# duplication (no shared lib).
+audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
+  [ -n "${HOME:-}" ] || return 1
+  local base sum
+  base=$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')
+  sum=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
+  printf '%s/.claude/logs/%s-%s/sdlc-v11-audit.md' "$HOME" "$base" "$sum"
+}
 
 # docs-root: .bionic/config.yaml override, default .bionic/docs
 DOCS_ROOT=".bionic/docs"
@@ -93,8 +112,9 @@ fi
 case "$s_occ" in ''|*[!0-9]*) s_occ="$OCCUPIED" ;; esac
 DELTA=$((OCCUPIED - s_occ))
 if [ "$DELTA" -ge 0 ]; then DELTA="+$DELTA"; fi
-AUDIT_DIR="$PROJECT_DIR/.bionic/memory"
 LINE="- $(date -u +%Y-%m-%dT%H:%M:%SZ) context-spend step-$s_step: occupied=$OCCUPIED delta=$DELTA model=$MODEL ($PLAN)"
-mkdir -p "$AUDIT_DIR" 2>/dev/null && printf '%s\n' "$LINE" >> "$AUDIT_DIR/sdlc-v11-audit.md" 2>/dev/null
+if AUDIT_FILE=$(audit_path "$PROJECT_DIR"); then
+  mkdir -p "$(dirname "$AUDIT_FILE")" 2>/dev/null && printf '%s\n' "$LINE" >> "$AUDIT_FILE" 2>/dev/null
+fi
 printf '%s\t%s\t%s\t%s\n' "$PLAN" "$SESSION_ID" "$STEP" "$OCCUPIED" > "$STATE" 2>/dev/null || true
 exit 0
