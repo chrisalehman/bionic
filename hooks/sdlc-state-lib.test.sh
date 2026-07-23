@@ -65,10 +65,10 @@ assert_nonzero() {  # <label> <actual-exit-code>
 # baton_write, returns its path. wip defaults to "none" (the common case);
 # pass a sha for round-trip fidelity assertions.
 write_healthy() {
-  local gid="$1" wip="${2:-none}"
+  local gid="$1" wip="${2:-none}" base="${3:-none}"
   baton_write "$gid" "/plans/$gid.plan.md" "/work/$gid" "wave-01-substrate" \
     "epic/10-never-die" "abc1234" "4" "sid-$gid/4242" "42:deadbeef" \
-    "run the next slice" "$wip" >/dev/null 2>&1
+    "run the next slice" "$wip" "$base" >/dev/null 2>&1
   baton_path "$gid"
 }
 
@@ -113,14 +113,14 @@ empty_value() { sed -E "s/^(${3}):.*/\1:/" "$1" > "$2"; }
 # the "cut off mid-flush" signal distinct from missing/duplicate/empty.
 truncate_file() { printf '%s' "$(cat "$1")" > "$2"; }
 
-REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc-step session ledger-position next-action wip written-at"
+REQUIRED_KEYS="goal-id plan cwd branch integration-branch last-commit sdlc-step session ledger-position next-action wip base-commit written-at"
 
 # ============================================================
 echo "=== AC-B1: round-trip write → cold parse → next-action + ledger-position readback ==="
 ac_b1() {
   new_state_dir
   local gid="wave-01-substrate-4-1"
-  local f; f=$(write_healthy "$gid" "deadbeef1234567890abcdef1234567890abcdef")
+  local f; f=$(write_healthy "$gid" "deadbeef1234567890abcdef1234567890abcdef" "beefcafe1234567890abcdef1234567890abcdef")
   assert_true "AC-B1 baton_write produced a file" test -f "$f"
   assert_eq "AC-B1 baton_write went through the goal's dir (AS-6 mkdir -p)" \
     "$SDLC_STATE_DIR/$gid/baton.md" "$f"
@@ -144,6 +144,7 @@ ac_b1() {
   assert_eq "AC-B1 sdlc-step round-trips" "4" "$BATON_SDLC_STEP"
   assert_eq "AC-B1 session round-trips" "sid-$gid/4242" "$BATON_SESSION"
   assert_eq "AC-B1 wip round-trips" "deadbeef1234567890abcdef1234567890abcdef" "$BATON_WIP"
+  assert_eq "AC-B1 base-commit round-trips" "beefcafe1234567890abcdef1234567890abcdef" "$BATON_BASE_COMMIT"
   assert_true "AC-B1 written-at is non-empty" test -n "$BATON_WRITTEN_AT"
 }
 ac_b1
@@ -260,7 +261,7 @@ echo "--- wip: abbreviated 7-hex sha → invalid-wip-sha, no file written ---"
 ac_grammar_wip_abbrev() {
   new_state_dir
   local gid="grammar-wip-abbrev" err rc
-  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "1:abcd1234" "na" "deadbee" 2>&1 1>/dev/null); rc=$?
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "1:abcd1234" "na" "deadbee" "none" 2>&1 1>/dev/null); rc=$?
   assert_nonzero "abbreviated 7-hex wip rejected (nonzero rc)" "$rc"
   assert_contains "abbreviated 7-hex wip names invalid-wip-sha" "invalid-wip-sha" "$err"
   assert_no_file_written "abbreviated 7-hex wip: no baton file written" "$gid"
@@ -271,7 +272,7 @@ echo "--- wip: full-length but non-hex sha → invalid-wip-sha, no file written 
 ac_grammar_wip_nonhex() {
   new_state_dir
   local gid="grammar-wip-nonhex" err rc
-  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "1:abcd1234" "na" "deadbeef1234567890abcdef1234567890abcdeg" 2>&1 1>/dev/null); rc=$?
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "1:abcd1234" "na" "deadbeef1234567890abcdef1234567890abcdeg" "none" 2>&1 1>/dev/null); rc=$?
   assert_nonzero "full-length non-hex wip rejected (nonzero rc)" "$rc"
   assert_contains "full-length non-hex wip names invalid-wip-sha" "invalid-wip-sha" "$err"
   assert_no_file_written "full-length non-hex wip: no baton file written" "$gid"
@@ -282,7 +283,7 @@ echo "--- ledger-position: bare-seq (no digest) → invalid-ledger-position, no 
 ac_grammar_ledger_bare_seq() {
   new_state_dir
   local gid="grammar-ledger-bare-seq" err rc
-  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "42" "na" "none" 2>&1 1>/dev/null); rc=$?
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "42" "na" "none" "none" 2>&1 1>/dev/null); rc=$?
   assert_nonzero "bare-seq ledger-position rejected (nonzero rc)" "$rc"
   assert_contains "bare-seq ledger-position names invalid-ledger-position" "invalid-ledger-position" "$err"
   assert_no_file_written "bare-seq ledger-position: no baton file written" "$gid"
@@ -293,7 +294,7 @@ echo "--- ledger-position: zero-seq → invalid-ledger-position, no file written
 ac_grammar_ledger_zero_seq() {
   new_state_dir
   local gid="grammar-ledger-zero-seq" err rc
-  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "0:abcd1234" "na" "none" 2>&1 1>/dev/null); rc=$?
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "0:abcd1234" "na" "none" "none" 2>&1 1>/dev/null); rc=$?
   assert_nonzero "zero-seq ledger-position rejected (nonzero rc)" "$rc"
   assert_contains "zero-seq ledger-position names invalid-ledger-position" "invalid-ledger-position" "$err"
   assert_no_file_written "zero-seq ledger-position: no baton file written" "$gid"
@@ -304,7 +305,7 @@ echo "--- ledger-position: missing digest (seq: with nothing after) → invalid-
 ac_grammar_ledger_missing_digest() {
   new_state_dir
   local gid="grammar-ledger-missing-digest" err rc
-  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "42:" "na" "none" 2>&1 1>/dev/null); rc=$?
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "42:" "na" "none" "none" 2>&1 1>/dev/null); rc=$?
   assert_nonzero "missing-digest ledger-position rejected (nonzero rc)" "$rc"
   assert_contains "missing-digest ledger-position names invalid-ledger-position" "invalid-ledger-position" "$err"
   assert_no_file_written "missing-digest ledger-position: no baton file written" "$gid"
@@ -315,7 +316,7 @@ echo "--- accept: 'none' for both wip and ledger-position ---"
 ac_grammar_accept_none() {
   new_state_dir
   local gid="grammar-accept-none" rc f
-  baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "none" "na" "none" >/dev/null 2>&1; rc=$?
+  baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "none" "na" "none" "none" >/dev/null 2>&1; rc=$?
   assert_eq "accept: 'none'/'none' returns rc 0" "0" "$rc"
   f="$(baton_path "$gid")"
   assert_true "accept: 'none'/'none' wrote a file" test -f "$f"
@@ -330,7 +331,7 @@ ac_grammar_accept_full() {
   new_state_dir
   local gid="grammar-accept-full" rc f
   baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "1:00000000" "na" \
-    "cafebabe1234567890abcdef1234567890abcdef" >/dev/null 2>&1; rc=$?
+    "cafebabe1234567890abcdef1234567890abcdef" "none" >/dev/null 2>&1; rc=$?
   assert_eq "accept: full-form wip + minimal ledger-position returns rc 0" "0" "$rc"
   f="$(baton_path "$gid")"
   assert_true "accept: full-form wip + minimal ledger-position wrote a file" test -f "$f"
@@ -339,6 +340,41 @@ ac_grammar_accept_full() {
   assert_eq "accept: full 40-hex wip round-trips" "cafebabe1234567890abcdef1234567890abcdef" "$BATON_WIP"
 }
 ac_grammar_accept_full
+
+echo "--- base-commit: abbreviated 7-hex sha → invalid-base-commit, no file written ---"
+ac_grammar_base_abbrev() {
+  new_state_dir
+  local gid="grammar-base-abbrev" err rc
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "1:abcd1234" "na" "none" "deadbee" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "abbreviated 7-hex base-commit rejected (nonzero rc)" "$rc"
+  assert_contains "abbreviated 7-hex base-commit names invalid-base-commit" "invalid-base-commit" "$err"
+  assert_no_file_written "abbreviated 7-hex base-commit: no baton file written" "$gid"
+}
+ac_grammar_base_abbrev
+
+echo "--- base-commit: full-length but non-hex sha → invalid-base-commit, no file written ---"
+ac_grammar_base_nonhex() {
+  new_state_dir
+  local gid="grammar-base-nonhex" err rc
+  err=$(baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "1:abcd1234" "na" "none" "deadbeef1234567890abcdef1234567890abcdeg" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "full-length non-hex base-commit rejected (nonzero rc)" "$rc"
+  assert_contains "full-length non-hex base-commit names invalid-base-commit" "invalid-base-commit" "$err"
+  assert_no_file_written "full-length non-hex base-commit: no baton file written" "$gid"
+}
+ac_grammar_base_nonhex
+
+echo "--- accept: full 40-hex base-commit round-trips unchanged ---"
+ac_grammar_base_accept_full() {
+  new_state_dir
+  local gid="grammar-base-accept-full" rc f
+  baton_write "$gid" "p" "c" "b" "i" "lc" "4" "s" "1:00000000" "na" "none" \
+    "abadfeed1234567890abcdef1234567890abcdef" >/dev/null 2>&1; rc=$?
+  assert_eq "accept: full-form base-commit returns rc 0" "0" "$rc"
+  f="$(baton_path "$gid")"
+  baton_parse "$f"
+  assert_eq "accept: full 40-hex base-commit round-trips" "abadfeed1234567890abcdef1234567890abcdef" "$BATON_BASE_COMMIT"
+}
+ac_grammar_base_accept_full
 
 # ============================================================
 # ledger fixture helpers (slice 4/2) — build via the REAL ledger_append;
@@ -1194,7 +1230,7 @@ ac_nounset_no_leak() {
   local out rc
   out=$(bash -c '
     . "$1"
-    baton_write "leak-goal" "p" "c" "b" "i" "lc" "4" "s" "1:00000000" "na" "none" >/dev/null 2>&1
+    baton_write "leak-goal" "p" "c" "b" "i" "lc" "4" "s" "1:00000000" "na" "none" "none" >/dev/null 2>&1
     wrc=$?
     printf "unbound-ok:%s write-rc:%s\n" "$SOME_UNSET_VAR_NEVER_DEFINED_ANYWHERE" "$wrc"
   ' bash "$LIB" 2>&1)
@@ -1364,7 +1400,7 @@ write_recon_baton() {
   local gid="$1" d="$2" current="$3" lpos="$4" wip="$5"
   baton_write "$gid" "$PLAN_STUB" "$d" "$(git -C "$d" rev-parse --abbrev-ref HEAD)" \
     "epic/10-never-die" "$(git -C "$d" rev-parse HEAD)" "$current" "sid-$gid/1" \
-    "$lpos" "resume the slice" "$wip" >/dev/null 2>&1
+    "$lpos" "resume the slice" "$wip" "none" >/dev/null 2>&1
 }
 
 echo ""
@@ -1638,6 +1674,10 @@ setup_complete() {
   printf 'base\n' > "$REPO_DIR/base.txt"
   git -C "$REPO_DIR" add -A
   git -C "$REPO_DIR" commit -qm base
+  # The fork baseline: integ-branch's tip at the moment goal-branch forks
+  # from it. A genuinely completed goal has branch_tip != BASE_COMMIT (work
+  # was committed since) AND is-ancestor(branch_tip, integ_tip).
+  BASE_COMMIT=$(git -C "$REPO_DIR" rev-parse HEAD)
   git -C "$REPO_DIR" branch -q integ-branch
   git -C "$REPO_DIR" checkout -q -b goal-branch
   printf 'goal work\n' > "$REPO_DIR/goal.txt"
@@ -1671,6 +1711,10 @@ setup_complete_vacuous() {
   printf 'base\n' > "$REPO_DIR/base.txt"
   git -C "$REPO_DIR" add -A
   git -C "$REPO_DIR" commit -qm base
+  # Both branches AND the fork baseline sit at base — zero goal work: a stale
+  # zero-work branch (branch_tip == BASE_COMMIT) that the merged-ness predicate
+  # must reject regardless of what integration did.
+  BASE_COMMIT=$(git -C "$REPO_DIR" rev-parse HEAD)
   git -C "$REPO_DIR" branch -q integ-branch    # both at base — zero goal work
   git -C "$REPO_DIR" branch -q goal-branch
   mkdir -p "$SDLC_STATE_DIR/$gid"
@@ -1680,10 +1724,10 @@ setup_complete_vacuous() {
 # write_complete_baton <gid> <dir> <current> <wip> — a baton whose branch/
 # integration-branch name the fixture's two real branches.
 write_complete_baton() {
-  local gid="$1" d="$2" current="$3" wip="$4"
+  local gid="$1" d="$2" current="$3" wip="$4" base="${5:-$BASE_COMMIT}"
   baton_write "$gid" "$PLAN_STUB" "$d" "goal-branch" "integ-branch" \
     "$(git -C "$d" rev-parse HEAD)" "$current" "sid-$gid/1" \
-    "none" "resume the slice" "$wip" >/dev/null 2>&1
+    "none" "resume the slice" "$wip" "$base" >/dev/null 2>&1
 }
 # count_key_lines <ledger-path> <effect-key> — raw TSV line count (any type)
 # whose effect-key column (field 5) matches exactly; 0 if the file is absent.
@@ -1769,7 +1813,7 @@ ac_complete_false_stranded_wip() {
 }
 ac_complete_false_stranded_wip
 
-echo "--- F2 FALSE-COMPLETE vacuous: current 10, goal-branch tip == integ-branch tip (zero goal work) → defect, rc 2, no latch ---"
+echo "--- F2 FALSE-COMPLETE vacuous: current 10, goal-branch tip == base-commit (zero goal work) → defect, rc 2, no latch ---"
 ac_complete_false_vacuous() {
   local gid="complete-false-vacuous" d errf out rc path
   setup_complete_vacuous "$gid" 10; d="$REPO_DIR"
@@ -1778,13 +1822,131 @@ ac_complete_false_vacuous() {
   errf=$(mktemp); CLEAN_DIRS+=("$errf")
   out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
   assert_eq "AC-N3 vacuous-complete returns rc 2" "2" "$rc"
-  assert_eq "AC-N3 vacuous-complete exact defect text" \
-    "defect: false-complete: current 10 but goal-branch has no commits distinct from integ-branch" "$(cat "$errf")"
+  assert_contains "AC-N3 vacuous-complete names the false-complete class" "defect: false-complete:" "$(cat "$errf")"
+  assert_contains "AC-N3 vacuous-complete names the stale zero-work branch" \
+    "goal-branch did no work since base-commit" "$(cat "$errf")"
+  assert_contains "AC-N3 vacuous-complete tags stale-zero-work" "stale zero-work branch" "$(cat "$errf")"
   assert_eq "AC-N3 vacuous-complete prints nothing on stdout" "" "$out"
   assert_eq "AC-N3 vacuous-complete: no complete: line in the ledger" \
     "0" "$(count_key_lines "$path" "complete:$gid")"
 }
 ac_complete_false_vacuous
+
+# setup_complete_stale_escape <gid> <current> — F2a (critic re-attack, THE
+# merge-blocker): goal-branch forks at BASE_COMMIT and NEVER advances (zero
+# goal work), while integ-branch advances via an UNRELATED commit (another wave
+# merging into the shared epic branch). goal-branch's tip is thus a PROPER
+# ANCESTOR of integ-branch's tip — is-ancestor TRUE, tips DIFFER — the exact
+# epic topology a forged current:10 on a stale pointer exploits. The old
+# is-ancestor + tip-distinctness guards BOTH pass here (fail-open); the
+# base-commit work-happened predicate must reject.
+setup_complete_stale_escape() {
+  local gid="$1" current="$2"
+  new_state_dir
+  REPO_DIR=$(mktemp -d); CLEAN_DIRS+=("$REPO_DIR")
+  git -C "$REPO_DIR" init -q
+  git -C "$REPO_DIR" config user.name  "fixture"
+  git -C "$REPO_DIR" config user.email "fixture@example.com"
+  printf 'base\n' > "$REPO_DIR/base.txt"
+  git -C "$REPO_DIR" add -A
+  git -C "$REPO_DIR" commit -qm base
+  BASE_COMMIT=$(git -C "$REPO_DIR" rev-parse HEAD)
+  git -C "$REPO_DIR" branch -q goal-branch "$BASE_COMMIT"   # forks at base, never advances
+  git -C "$REPO_DIR" checkout -q -b integ-branch "$BASE_COMMIT"
+  printf 'unrelated other-wave work\n' > "$REPO_DIR/other.txt"
+  git -C "$REPO_DIR" add -A
+  git -C "$REPO_DIR" commit -qm "other wave merged"        # integ advances for unrelated reasons
+  git -C "$REPO_DIR" checkout -q goal-branch
+  mkdir -p "$SDLC_STATE_DIR/$gid"
+  PLAN_STUB="$SDLC_STATE_DIR/$gid/plan.stub.md"
+  printf 'current: %s\n' "$current" > "$PLAN_STUB"
+}
+# setup_complete_ff <gid> <current> — F2b (critic re-attack, over-correction):
+# goal-branch forks at BASE_COMMIT, commits real work, and integ-branch
+# FAST-FORWARDS to goal-branch's tip → tips EQUAL. Work happened
+# (branch_tip != BASE_COMMIT) and is-ancestor holds vacuously; a genuine
+# completion the old tip-equality guard WRONGLY refused. Must verify.
+setup_complete_ff() {
+  local gid="$1" current="$2"
+  new_state_dir
+  REPO_DIR=$(mktemp -d); CLEAN_DIRS+=("$REPO_DIR")
+  git -C "$REPO_DIR" init -q
+  git -C "$REPO_DIR" config user.name  "fixture"
+  git -C "$REPO_DIR" config user.email "fixture@example.com"
+  printf 'base\n' > "$REPO_DIR/base.txt"
+  git -C "$REPO_DIR" add -A
+  git -C "$REPO_DIR" commit -qm base
+  BASE_COMMIT=$(git -C "$REPO_DIR" rev-parse HEAD)
+  git -C "$REPO_DIR" branch -q integ-branch
+  git -C "$REPO_DIR" checkout -q -b goal-branch
+  printf 'real goal work\n' > "$REPO_DIR/goal.txt"
+  git -C "$REPO_DIR" add -A
+  git -C "$REPO_DIR" commit -qm goal-work
+  git -C "$REPO_DIR" checkout -q integ-branch
+  git -C "$REPO_DIR" merge -q --ff-only goal-branch       # fast-forward: tips become EQUAL
+  git -C "$REPO_DIR" checkout -q goal-branch
+  mkdir -p "$SDLC_STATE_DIR/$gid"
+  PLAN_STUB="$SDLC_STATE_DIR/$gid/plan.stub.md"
+  printf 'current: %s\n' "$current" > "$PLAN_STUB"
+}
+
+echo "--- F2a MERGE-BLOCKER: stale zero-work goal branch, integ advanced UNRELATED (proper-ancestor, is-ancestor TRUE, tips differ) → false-complete rc 2, no latch ---"
+ac_complete_stale_escape() {
+  local gid="complete-stale-escape" d errf out rc path btip itip
+  setup_complete_stale_escape "$gid" 10; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  path=$(build_healthy_ledger "$gid")
+  # Prove the fixture IS the escape topology, not a plain unmerged case:
+  btip=$(git -C "$d" rev-parse goal-branch); itip=$(git -C "$d" rev-parse integ-branch)
+  assert_true "F2a fixture: is-ancestor(goal,integ) is TRUE (proper ancestor)" \
+    git -C "$d" merge-base --is-ancestor "$btip" "$itip"
+  TOTAL=$((TOTAL + 1))
+  if [ "$btip" != "$itip" ]; then pass "F2a fixture: tips DIFFER (old distinctness guard would pass)"; else fail "F2a fixture: tips DIFFER" "tips equal"; fi
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "F2a stale-escape returns rc 2 (was fail-open complete-verified)" "2" "$rc"
+  assert_contains "F2a stale-escape names the false-complete class" "defect: false-complete:" "$(cat "$errf")"
+  assert_contains "F2a stale-escape names the stale zero-work branch" "goal-branch did no work since base-commit" "$(cat "$errf")"
+  assert_eq "F2a stale-escape prints nothing on stdout" "" "$out"
+  assert_eq "F2a stale-escape: no complete: line latched" "0" "$(count_key_lines "$path" "complete:$gid")"
+}
+ac_complete_stale_escape
+
+echo "--- F2b OVER-CORRECTION: genuine FF merge (work since base, integ FF'd, tips EQUAL, is-ancestor TRUE) → complete-verified rc 0, latch (was wrongly refused) ---"
+ac_complete_genuine_ff() {
+  local gid="complete-genuine-ff" d errf out rc path btip itip
+  setup_complete_ff "$gid" 10; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  path=$(build_healthy_ledger "$gid")
+  btip=$(git -C "$d" rev-parse goal-branch); itip=$(git -C "$d" rev-parse integ-branch)
+  TOTAL=$((TOTAL + 1))
+  if [ "$btip" = "$itip" ]; then pass "F2b fixture: tips EQUAL (FF merge — old guard's false trigger)"; else fail "F2b fixture: tips EQUAL" "tips differ"; fi
+  TOTAL=$((TOTAL + 1))
+  if [ "$btip" != "$BASE_COMMIT" ]; then pass "F2b fixture: branch_tip != base-commit (work happened)"; else fail "F2b fixture: work happened" "branch_tip == base"; fi
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "F2b genuine-ff exits 0 (was wrongly rc 2)" "0" "$rc"
+  assert_eq "F2b genuine-ff prints complete-verified" "complete-verified" "$out"
+  assert_eq "F2b genuine-ff silent on stderr" "" "$(cat "$errf")"
+  assert_true "F2b genuine-ff journals the complete: latch" test "$(count_key_lines "$path" "complete:$gid")" -ge 1
+}
+ac_complete_genuine_ff
+
+echo "--- FAIL-CLOSED: current 10, genuinely merged, but base-commit none → false-complete rc 2 (cannot prove merged work), no latch ---"
+ac_complete_base_none() {
+  local gid="complete-base-none" d errf out rc path
+  setup_complete "$gid" 10 yes; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none none   # base override = none: no baseline recorded
+  path=$(build_healthy_ledger "$gid")
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "base-none fail-closed returns rc 2" "2" "$rc"
+  assert_eq "base-none fail-closed exact defect text" \
+    "defect: false-complete: current 10 but no base-commit recorded to prove merged work" "$(cat "$errf")"
+  assert_eq "base-none fail-closed prints nothing on stdout" "" "$out"
+  assert_eq "base-none fail-closed: no complete: line latched" "0" "$(count_key_lines "$path" "complete:$gid")"
+}
+ac_complete_base_none
 
 echo "--- BENIGN: current 4 → not-complete (no 'defect:' prefix), rc 1, no ledger writes ---"
 ac_complete_benign() {
@@ -2014,7 +2176,7 @@ ledger_tail_pos() { awk -F'\t' 'END{print $2":"$3}' "$(ledger_path "$1")"; }
 # two-branch complete baton with an explicit ledger-position.
 write_complete_baton_pos() {
   baton_write "$1" "$PLAN_STUB" "$2" "goal-branch" "integ-branch" \
-    "$(git -C "$2" rev-parse HEAD)" "$3" "sid-$1/1" "$5" "resume the slice" "$4" >/dev/null 2>&1
+    "$(git -C "$2" rev-parse HEAD)" "$3" "sid-$1/1" "$5" "resume the slice" "$4" "${6:-$BASE_COMMIT}" >/dev/null 2>&1
 }
 # spawn_line_sid <ledger-path> <goal-id> — sid= from the newest spawn effect line.
 spawn_line_sid() {
