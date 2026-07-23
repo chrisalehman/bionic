@@ -1,7 +1,8 @@
 #!/bin/bash
 # CONTEXT-SPEND: advisory Stop hook — appends ONE context-spend line per
-# SDLC step boundary to .bionic/memory/sdlc-v11-audit.md, reusing the
-# log_v11_finding() line format (source: context-spend).
+# SDLC step boundary to $HOME/.claude/logs/<project-slug>/sdlc-v11-audit.md —
+# outside every consuming project tree (incident 0001), via audit_path() —
+# reusing the log_v11_finding() line format (source: context-spend).
 #
 # Mechanism (epic-08 A7 / Q2 spike): Stop = trigger + transcript_path;
 # last assistant message.usage (TOP-LEVEL, never iterations[]) = occupancy
@@ -30,6 +31,24 @@ if [ -z "$PROJECT_DIR" ]; then
   PROJECT_DIR=$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null) || PROJECT_DIR=""
 fi
 [ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR" ] || exit 0
+
+# Incident 0001: the audit stream must live where a consuming project cannot
+# commit it, regardless of that project's .gitignore. $HOME-rooted, per-project,
+# durable — mirroring hooks/sdlc-poker.sh:111's $HOME/.claude/ audit log.
+# Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
+# collision-resistant across same-named projects under different parents.
+# cksum and basename are POSIX — no new dependency.
+# Byte-identical to the copies in farm-out-reminder.sh,
+# canonical-sdlc-governing-skill.sh and canonical-sdlc-evidence-gate.sh —
+# divergence would give one project two audit files. Deliberate per-hook
+# duplication (no shared lib).
+audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
+  [ -n "${HOME:-}" ] || return 1
+  local base sum
+  base=$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')
+  sum=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
+  printf '%s/.claude/logs/%s-%s/sdlc-v11-audit.md' "$HOME" "$base" "$sum"
+}
 
 # docs-root: .bionic/config.yaml override, default .bionic/docs
 DOCS_ROOT=".bionic/docs"
@@ -85,7 +104,7 @@ case "$OCCUPIED" in ''|*[!0-9]*) exit 0 ;; esac
 # so the tripwire fires early, never the largest convenient one — an oversized
 # denominator is the silent-death class this epic exists to kill. Rows are the
 # smallest standard window consistent with observed telemetry
-# (.bionic/memory/sdlc-v11-audit.md): claude-fable-5 seen at occupied=524861 →
+# ($HOME/.claude/logs/<project-slug>/sdlc-v11-audit.md): claude-fable-5 seen at occupied=524861 →
 # rules out 500k, 1M is the smallest standard window that fits. Others default
 # to 200000 until telemetry justifies raising them. Recalibrate UPWARD only on
 # observed evidence (a too-small ceiling merely warns early; too-large stays silent).
@@ -138,11 +157,20 @@ if [ "$_ceiling" -gt 0 ] 2>/dev/null; then
       # Timestamp computed HERE (not hoisted above) so the common
       # below-threshold path — the vast majority of samples — forks no
       # extra `date` process for a line it will never emit.
+      #
+      # The mkdir lives HERE, not at the call sites. Pre-incident-0001 the
+      # three call sites each did `mkdir -p "$AUDIT_DIR_C"` against the
+      # project's .bionic/memory/, a directory that usually already existed.
+      # The relocated $HOME/.claude/logs/<slug>/ never exists on first use, so
+      # the create has to sit with the append or every ceiling line is dropped
+      # silently. Unwritable destination → the line is dropped, no fallback.
       local _cts; _cts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-      printf '%s\n' "- $_cts context-spend ceiling $1: goal=$_goal_id $2 model=$MODEL ($PLAN)" \
-        >> "$AUDIT_DIR_C/sdlc-v11-audit.md" 2>/dev/null
+      local _f; _f=$(audit_path "$PROJECT_DIR") || return 0
+      mkdir -p "$(dirname "$_f")" 2>/dev/null && \
+        printf '%s\n' "- $_cts context-spend ceiling $1: goal=$_goal_id $2 model=$MODEL ($PLAN)" \
+          >> "$_f" 2>/dev/null
+      return 0
     }
-    AUDIT_DIR_C="$PROJECT_DIR/.bionic/memory"
 
     if [ "$_pct" -lt "$_adv_pct" ]; then
       # Below advisory → re-arm: drop the marker so a later re-crossing fires.
@@ -151,7 +179,6 @@ if [ "$_ceiling" -gt 0 ] 2>/dev/null; then
       mkdir -p "$_cdir" 2>/dev/null
       if [ "$_pct" -ge "$_red_pct" ]; then
         if [ "$_red" -eq 0 ]; then
-          mkdir -p "$AUDIT_DIR_C" 2>/dev/null
           _cline red "pct=$_pct occupied=$OCCUPIED ceiling=$_ceiling"
           _red=1; _adv=1
           _rts=$(date +%s)                 # red-transition time (epoch, local)
@@ -167,13 +194,11 @@ if [ "$_ceiling" -gt 0 ] 2>/dev/null; then
           [ "$_bm" -gt "$_rts" ] && _fresh=1
         fi
         if [ "$_fresh" -eq 0 ]; then
-          mkdir -p "$AUDIT_DIR_C" 2>/dev/null
           _cline mandate "red pct=$_pct — no fresh baton; write a baton for $_goal_id"
         fi
       else
         # Advisory zone (adv <= pct < red).
         if [ "$_adv" -eq 0 ]; then
-          mkdir -p "$AUDIT_DIR_C" 2>/dev/null
           _cline advisory "pct=$_pct occupied=$OCCUPIED ceiling=$_ceiling"
           _adv=1
         fi
@@ -210,8 +235,9 @@ fi
 case "$s_occ" in ''|*[!0-9]*) s_occ="$OCCUPIED" ;; esac
 DELTA=$((OCCUPIED - s_occ))
 if [ "$DELTA" -ge 0 ]; then DELTA="+$DELTA"; fi
-AUDIT_DIR="$PROJECT_DIR/.bionic/memory"
 LINE="- $(date -u +%Y-%m-%dT%H:%M:%SZ) context-spend step-$s_step: occupied=$OCCUPIED delta=$DELTA model=$MODEL ($PLAN)"
-mkdir -p "$AUDIT_DIR" 2>/dev/null && printf '%s\n' "$LINE" >> "$AUDIT_DIR/sdlc-v11-audit.md" 2>/dev/null
+if AUDIT_FILE=$(audit_path "$PROJECT_DIR"); then
+  mkdir -p "$(dirname "$AUDIT_FILE")" 2>/dev/null && printf '%s\n' "$LINE" >> "$AUDIT_FILE" 2>/dev/null
+fi
 printf '%s\t%s\t%s\t%s\n' "$PLAN" "$SESSION_ID" "$STEP" "$OCCUPIED" > "$STATE" 2>/dev/null || true
 exit 0
