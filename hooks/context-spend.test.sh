@@ -104,8 +104,16 @@ stdin_for() {  # $1=project $2=transcript-path [$3=session_id, default "scrubbed
   printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"Stop","stop_hook_active":false}' "$sess" "$2" "$1"
 }
 
+# Legacy cases (E/C/D/A/U) predate the ceiling tripwire and assert only on the
+# step-boundary emission + 4-field TSV state. Pin a very large ceiling HERE so
+# the tripwire is inert BY DECLARATION for them (occupancy/100M < 1% << 50%),
+# independent of — and unaffected by — the per-model table's fail-closed values.
+# The ceiling-tripwire cases below use their own runners (fire_ceiling exercises
+# the override path; fire_table exercises the REAL table) and are NOT pinned.
+LEGACY_CEIL_PIN=100000000
 run_hook() {  # $1=project $2=stdin-json
-  HOOK_STDOUT=$(CLAUDE_PROJECT_DIR="$1" bash "$HOOK" <<< "$2" 2>/dev/null); HOOK_EXIT=$?
+  HOOK_STDOUT=$(CLAUDE_PROJECT_DIR="$1" BIONIC_CONTEXT_CEILING="$LEGACY_CEIL_PIN" \
+    bash "$HOOK" <<< "$2" 2>/dev/null); HOOK_EXIT=$?
 }
 
 fire() {  # $1=project [$2=session_id, default "scrubbed"] — build real-shape stdin and run
@@ -626,6 +634,313 @@ u4() {
   fi
 }
 u4
+
+# ============================================================
+# Ceiling-tripwire section (AC-C1, R-C1) — pct = occupied/ceiling,
+# transitions-only: advisory (>=50) fires once per upward crossing,
+# red (>=70) fires once per upward crossing, sub-threshold and
+# steady-state emit NOTHING new, dropping below re-arms. Marker
+# state lives in $SDLC_STATE_DIR/<goal-id>/ceiling (a SEPARATE file;
+# the 4-field TSV session state is untouched, AS-2). Fixtures drive
+# the REAL hook with a planted per-case SDLC_STATE_DIR (never the
+# real home) and a BIONIC_CONTEXT_CEILING override (AS-4 accelerated
+# thresholds) so crossings land at controlled pct values. Goal-id
+# for the epic-t/wave-t.plan.md fixture plan is `wave-t`.
+# Ceiling 200000: 80000=40% (sub), 110000=55% (advisory), 150000=75% (red).
+# ============================================================
+
+CEIL_STATE=""   # per-case planted SDLC_STATE_DIR (global — set by new_ceiling_env)
+CEIL_DIR=""     # per-case scratch project dir (global)
+
+# new_ceiling_env: scratch project (plan current: 4) + occupancy $1, plus a
+# fresh temp SDLC_STATE_DIR. Sets CEIL_DIR + CEIL_STATE as GLOBALS in the
+# caller's shell (NOT via command substitution — a subshelled assignment would
+# be lost, the hook would fall back to the real $HOME, and every case's shared
+# `wave-t` goal-id would cross-contaminate). Callers read $CEIL_DIR.
+new_ceiling_env() {  # $1=occupied
+  CEIL_DIR=$(make_env 4 "$1" 0 0); cleanup_projects+=("$CEIL_DIR")
+  CEIL_STATE=$(mktemp -d); cleanup_projects+=("$CEIL_STATE")
+}
+
+# fire_ceiling: run the REAL hook with the ceiling override + planted state dir.
+# Rewrite the transcript first with set_occ to move occupancy between samples.
+fire_ceiling() {  # $1=project $2=ceiling [$3=session]
+  local proj="$1" ceil="$2" sess="${3:-scrubbed}"
+  HOOK_STDOUT=$(CLAUDE_PROJECT_DIR="$proj" SDLC_STATE_DIR="$CEIL_STATE" \
+    BIONIC_CONTEXT_CEILING="$ceil" bash "$HOOK" \
+    <<< "$(stdin_for "$proj" "$proj/transcript.jsonl" "$sess")" 2>/dev/null); HOOK_EXIT=$?
+}
+set_occ() { write_transcript "$1" "$2" 0 0; }   # $1=dir $2=occupied
+
+# count of audit lines matching an ERE (0 on empty audit).
+count_audit() {  # $1=dir $2=ere
+  printf '%s\n' "$(audit_of "$1")" | grep -cE "$2" 2>/dev/null || true
+}
+marker_of() { cat "$CEIL_STATE/wave-t/ceiling" 2>/dev/null || true; }
+
+echo ""
+echo "=== CE1: sub-50 sample — silent, no ceiling line, no marker written ==="
+ce1() {
+  new_ceiling_env 80000; local dir="$CEIL_DIR"
+  fire_ceiling "$dir" 200000
+  assert_silent "CE1 sub-50"
+  TOTAL=$((TOTAL + 1))
+  if [ -z "$(audit_of "$dir")" ]; then
+    pass "CE1 sub-50: no ceiling audit line"
+  else
+    fail "CE1 sub-50: unexpected audit line" "audit='$(audit_of "$dir")'"
+  fi
+  TOTAL=$((TOTAL + 1))
+  if [ ! -e "$CEIL_STATE/wave-t/ceiling" ]; then
+    pass "CE1 sub-50: no marker created below threshold"
+  else
+    fail "CE1 sub-50: marker written below threshold" "marker='$(marker_of)'"
+  fi
+}
+ce1
+
+echo ""
+echo "=== CE2: crossing 50 — advisory fires exactly once, then dedupes ==="
+ce2() {
+  new_ceiling_env 80000; local dir="$CEIL_DIR"
+  fire_ceiling "$dir" 200000                 # seed sub-50 (silent)
+  assert_silent "CE2 sub-50 seed"
+  set_occ "$dir" 110000
+  fire_ceiling "$dir" 200000                 # crossing → advisory
+  assert_silent "CE2 crossing run (exit/stdout)"
+  local audit; audit=$(audit_of "$dir")
+  TOTAL=$((TOTAL + 1))
+  if printf '%s\n' "$audit" | grep -qE '^- [0-9TZ:-]+ context-spend ceiling advisory: goal=wave-t pct=55 occupied=110000 ceiling=200000 model=claude-fable-5 \(.*wave-t\.plan\.md\)$'; then
+    pass "CE2 advisory: full line format on crossing"
+  else
+    fail "CE2 advisory: format mismatch" "audit='$audit'"
+  fi
+  TOTAL=$((TOTAL + 1))
+  if [ "$(count_audit "$dir" 'ceiling advisory')" -eq 1 ]; then
+    pass "CE2 advisory: exactly one advisory line after crossing"
+  else
+    fail "CE2 advisory: count after crossing" "n=$(count_audit "$dir" 'ceiling advisory')"
+  fi
+  fire_ceiling "$dir" 200000                 # steady advisory → dedupe
+  assert_silent "CE2 steady advisory run"
+  TOTAL=$((TOTAL + 1))
+  if [ "$(count_audit "$dir" 'ceiling advisory')" -eq 1 ]; then
+    pass "CE2 advisory: steady-state emits nothing new (still one line)"
+  else
+    fail "CE2 advisory: steady-state re-emitted" "n=$(count_audit "$dir" 'ceiling advisory')"
+  fi
+}
+ce2
+
+echo ""
+echo "=== CE3: crossing 70 — red fires exactly once, steady-red silent ==="
+ce3() {
+  new_ceiling_env 80000; local dir="$CEIL_DIR"
+  fire_ceiling "$dir" 200000                 # sub-50 seed
+  set_occ "$dir" 110000; fire_ceiling "$dir" 200000   # advisory
+  set_occ "$dir" 150000; fire_ceiling "$dir" 200000   # crossing → red
+  assert_silent "CE3 red crossing run"
+  local audit; audit=$(audit_of "$dir")
+  TOTAL=$((TOTAL + 1))
+  if printf '%s\n' "$audit" | grep -qE '^- [0-9TZ:-]+ context-spend ceiling red: goal=wave-t pct=75 occupied=150000 ceiling=200000 model=claude-fable-5 \(.*wave-t\.plan\.md\)$'; then
+    pass "CE3 red: full line format on crossing"
+  else
+    fail "CE3 red: format mismatch" "audit='$audit'"
+  fi
+  TOTAL=$((TOTAL + 1))
+  if [ "$(count_audit "$dir" 'ceiling red')" -eq 1 ]; then
+    pass "CE3 red: exactly one red line after crossing"
+  else
+    fail "CE3 red: count after crossing" "n=$(count_audit "$dir" 'ceiling red')"
+  fi
+  set_occ "$dir" 150000; fire_ceiling "$dir" 200000   # steady red
+  TOTAL=$((TOTAL + 1))
+  if [ "$(count_audit "$dir" 'ceiling red')" -eq 1 ]; then
+    pass "CE3 red: steady-red emits no new red line"
+  else
+    fail "CE3 red: steady-red re-emitted" "n=$(count_audit "$dir" 'ceiling red')"
+  fi
+}
+ce3
+
+echo ""
+echo "=== CE4: drop below 50 re-arms — advisory fires again on re-crossing ==="
+ce4() {
+  new_ceiling_env 110000; local dir="$CEIL_DIR"
+  fire_ceiling "$dir" 200000                 # first-seen advisory (fires)
+  TOTAL=$((TOTAL + 1))
+  if [ "$(count_audit "$dir" 'ceiling advisory')" -eq 1 ]; then
+    pass "CE4 first advisory fired"
+  else
+    fail "CE4 first advisory" "n=$(count_audit "$dir" 'ceiling advisory')"
+  fi
+  set_occ "$dir" 80000; fire_ceiling "$dir" 200000    # drop below → re-arm (silent)
+  assert_silent "CE4 drop-below run"
+  TOTAL=$((TOTAL + 1))
+  if [ ! -e "$CEIL_STATE/wave-t/ceiling" ]; then
+    pass "CE4 drop-below: marker removed (re-armed)"
+  else
+    fail "CE4 drop-below: marker survived" "marker='$(marker_of)'"
+  fi
+  set_occ "$dir" 110000; fire_ceiling "$dir" 200000   # re-cross → advisory again
+  TOTAL=$((TOTAL + 1))
+  if [ "$(count_audit "$dir" 'ceiling advisory')" -eq 2 ]; then
+    pass "CE4 re-crossing: advisory fires again (2 total)"
+  else
+    fail "CE4 re-crossing: advisory did not re-fire" "n=$(count_audit "$dir" 'ceiling advisory')"
+  fi
+}
+ce4
+
+echo ""
+echo "=== CE5: first-seen already >=50 — advisory fires (crossing implied) ==="
+ce5() {
+  new_ceiling_env 110000; local dir="$CEIL_DIR"
+  fire_ceiling "$dir" 200000                 # no prior sub-50 sample
+  assert_silent "CE5 first-seen advisory run"
+  TOTAL=$((TOTAL + 1))
+  if [ "$(count_audit "$dir" 'ceiling advisory')" -eq 1 ]; then
+    pass "CE5 first-seen high: advisory fires without a prior sub-50 seed"
+  else
+    fail "CE5 first-seen high" "n=$(count_audit "$dir" 'ceiling advisory')"
+  fi
+}
+ce5
+
+# ============================================================
+# Red-baton-mandate section (AC-C2, R-C2) — while red, every sample
+# checks baton freshness: baton exists AND mtime > red-transition
+# time. Stale/absent → a MANDATE line naming the goal; a fresh baton
+# silences subsequent samples; a baton written BEFORE the red
+# transition counts stale. Baton lives at $SDLC_STATE_DIR/wave-t/
+# baton.md; mtime distinctness across the red transition is forced
+# with sleeps (poker p7 mtime-distinctness idiom).
+# ============================================================
+
+plant_baton() {  # touch a baton for goal wave-t at "now"
+  mkdir -p "$CEIL_STATE/wave-t" 2>/dev/null
+  : > "$CEIL_STATE/wave-t/baton.md"
+}
+
+echo ""
+echo "=== MA1: red with no baton — red line AND mandate line ==="
+ma1() {
+  new_ceiling_env 80000; local dir="$CEIL_DIR"
+  fire_ceiling "$dir" 200000                 # sub-50 seed
+  set_occ "$dir" 150000; fire_ceiling "$dir" 200000   # crossing → red, no baton
+  local audit; audit=$(audit_of "$dir")
+  TOTAL=$((TOTAL + 1))
+  if [ "$(count_audit "$dir" 'ceiling red')" -eq 1 ]; then
+    pass "MA1: red line present on crossing"
+  else
+    fail "MA1: red line" "audit='$audit'"
+  fi
+  TOTAL=$((TOTAL + 1))
+  if printf '%s\n' "$audit" | grep -qE '^- [0-9TZ:-]+ context-spend ceiling mandate: goal=wave-t .*wave-t\.plan\.md\)$' \
+     && printf '%s\n' "$audit" | grep -q 'ceiling mandate: goal=wave-t'; then
+    pass "MA1: mandate line names the goal (red + no baton)"
+  else
+    fail "MA1: mandate line missing/malformed" "audit='$audit'"
+  fi
+}
+ma1
+
+echo ""
+echo "=== MA2: fresh baton silences the next red sample ==="
+ma2() {
+  new_ceiling_env 80000; local dir="$CEIL_DIR"
+  fire_ceiling "$dir" 200000                 # sub-50 seed
+  set_occ "$dir" 150000; fire_ceiling "$dir" 200000   # crossing → red + mandate (no baton)
+  TOTAL=$((TOTAL + 1))
+  if [ "$(count_audit "$dir" 'ceiling mandate')" -eq 1 ]; then
+    pass "MA2: mandate fired on the red crossing (baton absent)"
+  else
+    fail "MA2: pre-baton mandate count" "n=$(count_audit "$dir" 'ceiling mandate')"
+  fi
+  sleep 1; plant_baton                         # baton mtime now > red-transition time
+  fire_ceiling "$dir" 200000                   # steady red, fresh baton
+  assert_silent "MA2 fresh-baton run"
+  TOTAL=$((TOTAL + 1))
+  if [ "$(count_audit "$dir" 'ceiling mandate')" -eq 1 ]; then
+    pass "MA2: fresh baton silences the next sample (no new mandate)"
+  else
+    fail "MA2: fresh baton did not silence" "n=$(count_audit "$dir" 'ceiling mandate')"
+  fi
+}
+ma2
+
+echo ""
+echo "=== MA3: pre-red baton counts stale — mandate fires on crossing ==="
+ma3() {
+  new_ceiling_env 80000; local dir="$CEIL_DIR"
+  fire_ceiling "$dir" 200000                 # sub-50 seed
+  plant_baton; sleep 1                          # baton mtime BEFORE the red transition
+  set_occ "$dir" 150000; fire_ceiling "$dir" 200000   # crossing: red-transition time > baton mtime
+  TOTAL=$((TOTAL + 1))
+  if [ "$(count_audit "$dir" 'ceiling mandate')" -eq 1 ]; then
+    pass "MA3: pre-red baton is stale → mandate fires"
+  else
+    fail "MA3: pre-red baton mandate" "n=$(count_audit "$dir" 'ceiling mandate')"
+  fi
+}
+ma3
+
+echo ""
+echo "=== MA4: steady red with a fresh baton — no red, no mandate ==="
+ma4() {
+  new_ceiling_env 80000; local dir="$CEIL_DIR"
+  fire_ceiling "$dir" 200000                 # sub-50 seed
+  set_occ "$dir" 150000; fire_ceiling "$dir" 200000   # crossing → red + mandate
+  sleep 1; plant_baton
+  fire_ceiling "$dir" 200000                   # fresh baton: mandate satisfied
+  local before_red before_mand
+  before_red=$(count_audit "$dir" 'ceiling red')
+  before_mand=$(count_audit "$dir" 'ceiling mandate')
+  fire_ceiling "$dir" 200000                   # steady red, fresh baton
+  assert_silent "MA4 steady-red run"
+  TOTAL=$((TOTAL + 1))
+  if [ "$(count_audit "$dir" 'ceiling red')" = "$before_red" ] \
+     && [ "$(count_audit "$dir" 'ceiling mandate')" = "$before_mand" ]; then
+    pass "MA4 steady-red + fresh baton: fires nothing new"
+  else
+    fail "MA4 steady-red emitted" "red $before_red->$(count_audit "$dir" 'ceiling red') mand $before_mand->$(count_audit "$dir" 'ceiling mandate')"
+  fi
+}
+ma4
+
+# ============================================================
+# Ceiling-table section (AC-C1, fail-closed doctrine) — proves the
+# REAL per-model table row FIRES, not just the BIONIC_CONTEXT_CEILING
+# override path. Runs the hook with NO ceiling override so ceiling(model)
+# comes from the table: claude-fable-5 -> 1000000 (smallest standard
+# window consistent with observed telemetry: max occupied 524861 rules
+# out 500k; fail-closed errs to the smallest plausible window). 550000
+# tokens / 1M = 55% -> advisory. (Pre-fail-closed, fable was 2000000 and
+# 550000 was 27% -> silent; this case is the table-row's regression fence.)
+# ============================================================
+
+# fire_table: exercise the REAL per-model table — NO BIONIC_CONTEXT_CEILING.
+fire_table() {  # $1=project [$2=session]
+  local proj="$1" sess="${2:-scrubbed}"
+  HOOK_STDOUT=$(CLAUDE_PROJECT_DIR="$proj" SDLC_STATE_DIR="$CEIL_STATE" \
+    bash "$HOOK" <<< "$(stdin_for "$proj" "$proj/transcript.jsonl" "$sess")" 2>/dev/null); HOOK_EXIT=$?
+}
+
+echo ""
+echo "=== CT1: real table path — claude-fable-5 550000 tokens = 55% of 1M → advisory ==="
+ct1() {
+  new_ceiling_env 550000; local dir="$CEIL_DIR"
+  fire_table "$dir"                          # no override → ceiling(model) from the table
+  assert_silent "CT1 table-path run"
+  local audit; audit=$(audit_of "$dir")
+  TOTAL=$((TOTAL + 1))
+  if printf '%s\n' "$audit" | grep -qE '^- [0-9TZ:-]+ context-spend ceiling advisory: goal=wave-t pct=55 occupied=550000 ceiling=1000000 model=claude-fable-5 \(.*wave-t\.plan\.md\)$'; then
+    pass "CT1 fable→1M table row fires advisory at 55% (ceiling=1000000)"
+  else
+    fail "CT1 table-path advisory (fable→1M row)" "audit='$audit'"
+  fi
+}
+ct1
 
 # ============================================================
 # Results
