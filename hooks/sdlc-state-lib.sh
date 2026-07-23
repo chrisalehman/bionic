@@ -889,6 +889,96 @@ sdlc_ledger_position_check() {
   return 0
 }
 
+# _sdlc_reconcile_snapshot_triage <snap-sha> <dir> — F1 worktree triage for a
+# baton naming a WIP snapshot. sdlc_wip_snapshot FORCE-INCLUDES gitignored
+# lifecycle artifacts (.bionic/docs) into the snapshot tree, but a plain `add -A`
+# worktree tree never carries them — so the old whole-tree compare false-parked a
+# faithfully-present MIXED WIP (tracked edit + force-included artifact) as drift,
+# and `clean` was unreachable once anything was force-included.
+#
+# Fix: rebuild the worktree tree UNDER THE SNAPSHOT'S OWN BUILD RULE. Start from a
+# plain `add -A` (tracked + untracked-unignored, in a TEMP index only), then
+# force-add each of the snapshot's OWN delta paths (`diff-tree <snap>^ <snap>`)
+# that still exists in the worktree — reproducing the snapshot's force-include
+# GENERICALLY (the delta names the paths; no docs-root knowledge, project-silent).
+# A whole-tree compare of that tree then both (a) sees force-included artifacts
+# and (b) still catches drift on paths OUTSIDE the delta (a genuine third writer):
+#   worktree tree == snapshot tree → `clean`          (WIP faithfully present)
+#   worktree tree == HEAD tree      → `restore:<snap>` (clobbered back to HEAD)
+#   neither                         → `worktree-drift` (genuine divergence)
+#
+# DEVIATION from the slice brief's prescribed per-path filesystem-read mechanism
+# (logged, ASSUMPTIONS): that mechanism iterates ONLY the snapshot-delta paths, so
+# it is blind to a third writer that changes a path OUTSIDE the delta (e.g. adds a
+# new untracked file) — which must still verdict `worktree-drift`. Reproducing the
+# snapshot build rule and comparing whole trees satisfies that requirement, reuses
+# sdlc_wip_snapshot's own proven temp-index/add -f discipline, and stays generic.
+#
+# NUL-safe path handling (diff-tree -z, temp-file streamed per AS-10); a forged
+# absolute-or-'..' delta path is refused before any force-add (containment parity
+# with sdlc_wip_restore, ADR-001 D5). Temp-file/diff-tree/add/write-tree failures
+# fold into the worktree-unreadable defensive class (AS-N9).
+_sdlc_reconcile_snapshot_triage() {
+  local snap="$1" dir="$2"
+  local difftmp tmp_index path head_tree snap_tree worktree_tree
+
+  head_tree=$(git -C "$dir" rev-parse --verify --quiet 'HEAD^{tree}' 2>/dev/null) || true
+  snap_tree=$(git -C "$dir" rev-parse --verify --quiet "$snap^{tree}" 2>/dev/null) || true
+  if [ -z "$head_tree" ] || [ -z "$snap_tree" ]; then
+    echo "defect: worktree-unreadable: cannot resolve HEAD/snapshot tree for '$snap' in: $dir" >&2
+    return 1
+  fi
+
+  difftmp=$(mktemp 2>/dev/null) || { echo "defect: worktree-unreadable: cannot mint a temp file for: $dir" >&2; return 1; }
+  # NUL-safe stream to a temp file: command substitution would strip the NUL
+  # delimiters, so the -z output is consumed from a file, not a variable.
+  if ! git -C "$dir" diff-tree -r -z --name-only "$snap^" "$snap" > "$difftmp" 2>/dev/null; then
+    rm -f "$difftmp"
+    echo "defect: worktree-unreadable: diff-tree failed for snapshot '$snap' in: $dir" >&2
+    return 1
+  fi
+
+  tmp_index=$(mktemp 2>/dev/null) || { rm -f "$difftmp"; echo "defect: worktree-unreadable: cannot mint a temp index for: $dir" >&2; return 1; }
+  if ! GIT_INDEX_FILE="$tmp_index" git -C "$dir" read-tree HEAD 2>/dev/null \
+     || ! GIT_INDEX_FILE="$tmp_index" git -C "$dir" add -A 2>/dev/null; then
+    rm -f "$difftmp" "$tmp_index"
+    echo "defect: worktree-unreadable: could not stage the worktree for tree comparison in: $dir" >&2
+    return 1
+  fi
+  while IFS= read -r -d '' path; do
+    # Path-containment guard (forged/corrupted-object hardening; parity with
+    # sdlc_wip_restore). $path is about to be force-added from "$dir".
+    case "$path" in
+      /*) rm -f "$difftmp" "$tmp_index"
+          echo "defect: worktree-drift: refusing absolute path '$path' from snapshot '$snap' in: $dir" >&2
+          return 1 ;;
+    esac
+    case "/$path/" in
+      */../*) rm -f "$difftmp" "$tmp_index"
+              echo "defect: worktree-drift: refusing '..' traversal in path '$path' from snapshot '$snap' in: $dir" >&2
+              return 1 ;;
+    esac
+    # Force-add only a path that STILL EXISTS in the worktree; an absent delta
+    # path (a snapshot-added artifact clobbered away, or a snapshot-deleted path)
+    # is left to the plain add -A staging, which already reflects its absence.
+    if [ -e "$dir/$path" ]; then
+      GIT_INDEX_FILE="$tmp_index" git -C "$dir" add -f -- "$path" 2>/dev/null || {
+        rm -f "$difftmp" "$tmp_index"
+        echo "defect: worktree-unreadable: could not force-add '$path' for tree comparison in: $dir" >&2
+        return 1; }
+    fi
+  done < "$difftmp"
+  rm -f "$difftmp"
+  worktree_tree=$(GIT_INDEX_FILE="$tmp_index" git -C "$dir" write-tree 2>/dev/null) \
+    || { rm -f "$tmp_index"; echo "defect: worktree-unreadable: write-tree failed for: $dir" >&2; return 1; }
+  rm -f "$tmp_index"
+
+  if [ "$worktree_tree" = "$snap_tree" ]; then printf 'clean\n'; return 0; fi
+  if [ "$worktree_tree" = "$head_tree" ]; then printf 'restore:%s\n' "$snap"; return 0; fi
+  echo "defect: worktree-drift: snapshot $snap — worktree matches neither HEAD nor snapshot" >&2
+  return 1
+}
+
 # sdlc_reconcile <goal-id> [dir] — the D1 predicate chain. Evaluates durable
 # state (baton + plan + git + ledger + WIP) in a fixed order; the FIRST failing
 # predicate short-circuits to one named stderr defect + nonzero rc (the caller
@@ -909,28 +999,25 @@ sdlc_ledger_position_check() {
 #      last-commit <sha> not branch tip <tip>`.
 #   5. sdlc_ledger_position_check with the baton's ledger-position — pass-through.
 #   6. sdlc_wip_check — wip-lost/wip-drift pass-through.
-#   7. Worktree triage (D5): compute the worktree's tree via a TEMPORARY index
-#      (GIT_INDEX_FILE, read-tree HEAD + add -A + write-tree — read-only on the
-#      real index/tree, the same plumbing discipline as sdlc_wip_snapshot) and
-#      compare tree objects:
-#        wip is a sha: worktree == snapshot tree → `clean`; worktree == HEAD tree
-#          → `restore:<sha>`; neither → `worktree-drift: tree matches neither
-#          HEAD nor snapshot <sha>`.
-#        wip == none: worktree == HEAD tree → `clean`; else → `worktree-drift:
+#   7. Worktree triage (D5), split by the baton's wip:
+#        wip == none: no snapshot exists, so build the worktree tree via a
+#          TEMPORARY index (GIT_INDEX_FILE, read-tree HEAD + add -A + write-tree
+#          — the same plain build rule under which a wip-none baton was written)
+#          and compare to HEAD: equal → `clean`; else → `worktree-drift:
 #          unexplained work product with wip none`.
-#      SIMPLIFICATION (slice-scoped, AS-N7): the worktree tree is built with a
-#      PLAIN `add -A`, which — unlike sdlc_wip_snapshot — does NOT force-include
-#      gitignored lifecycle artifacts (.bionic/docs). So a snapshot whose ONLY
-#      delta was such an artifact compares as worktree==HEAD → the `restore` path
-#      rather than `clean`. That is SAFE: sdlc_wip_restore is delta-faithful and
-#      idempotent-by-content, so restoring an already-present artifact is a
-#      no-op-by-content. Replicating the snapshot's force-include args here is
-#      deferred (N4 owns any artifact-exact triage); a worktree genuinely
-#      matching a force-included snapshot is never misclassified as drift.
+#        wip is a sha: delegate to _sdlc_reconcile_snapshot_triage (F1). A plain
+#          `add -A` worktree tree could never see the gitignored lifecycle
+#          artifacts that sdlc_wip_snapshot FORCE-INCLUDES, so a faithfully-present
+#          mixed WIP (tracked edit + force-included artifact) false-parked as drift
+#          and `clean` was unreachable once anything was force-included. The triage
+#          rebuilds the worktree tree under the snapshot's OWN build rule (plain
+#          add -A + a generic force-add of the snapshot's delta paths) then
+#          whole-tree compares: == snapshot → `clean`; == HEAD → `restore:<sha>`;
+#          neither → `worktree-drift` (genuine divergence, in- OR out-of-delta).
 sdlc_reconcile() {
   local goal_id="${1:-}" dir="${2:-$PWD}"
   local baton plan_path plan_current tip
-  local tmp_index head_tree worktree_tree snap_tree
+  local tmp_index head_tree worktree_tree
 
   # 1. baton parse (goal-id guarded first — it builds the baton path).
   _sdlc_validate_goal_id "$goal_id" "sdlc_reconcile" || return 1
@@ -943,7 +1030,7 @@ sdlc_reconcile() {
     echo "defect: plan-unreadable: $plan_path" >&2
     return 1
   fi
-  plan_current=$(grep -E '^current:' "$plan_path" 2>/dev/null | head -1 | sed -E 's/^current:[[:space:]]*//')
+  plan_current=$(grep -E '^current:' "$plan_path" 2>/dev/null | head -1 | sed -E 's/^current:[[:space:]]*//; s/[[:space:]]+$//')
   if [ -z "$plan_current" ]; then
     echo "defect: plan-unreadable: $plan_path" >&2
     return 1
@@ -968,24 +1055,28 @@ sdlc_reconcile() {
   # 6. WIP reconciliation — wip-lost/wip-drift pass-through.
   sdlc_wip_check "$goal_id" "$BATON_WIP" "$dir" || return 1
 
-  # 7. Worktree triage (D5). Build the worktree's tree in a TEMP index only.
+  # 7. Worktree triage (D5).
   head_tree=$(git -C "$dir" rev-parse --verify --quiet 'HEAD^{tree}' 2>/dev/null) || true
   if [ -z "$head_tree" ]; then
     echo "defect: worktree-unreadable: no HEAD tree to compare against in: $dir" >&2
     return 1
   fi
-  tmp_index=$(mktemp 2>/dev/null) || { echo "defect: worktree-unreadable: cannot mint a temp index for: $dir" >&2; return 1; }
-  if ! GIT_INDEX_FILE="$tmp_index" git -C "$dir" read-tree HEAD 2>/dev/null \
-     || ! GIT_INDEX_FILE="$tmp_index" git -C "$dir" add -A 2>/dev/null; then
-    rm -f "$tmp_index"
-    echo "defect: worktree-unreadable: could not stage the worktree for tree comparison in: $dir" >&2
-    return 1
-  fi
-  worktree_tree=$(GIT_INDEX_FILE="$tmp_index" git -C "$dir" write-tree 2>/dev/null) \
-    || { rm -f "$tmp_index"; echo "defect: worktree-unreadable: write-tree failed for: $dir" >&2; return 1; }
-  rm -f "$tmp_index"
 
   if [ "$BATON_WIP" = "none" ]; then
+    # No snapshot exists: any tracked/untracked-unignored change is unexplained.
+    # Build the worktree tree with a plain `add -A` — the SAME build rule under
+    # which a wip-none baton was written (gitignored artifacts excluded) — in a
+    # TEMP index only, and compare to HEAD.
+    tmp_index=$(mktemp 2>/dev/null) || { echo "defect: worktree-unreadable: cannot mint a temp index for: $dir" >&2; return 1; }
+    if ! GIT_INDEX_FILE="$tmp_index" git -C "$dir" read-tree HEAD 2>/dev/null \
+       || ! GIT_INDEX_FILE="$tmp_index" git -C "$dir" add -A 2>/dev/null; then
+      rm -f "$tmp_index"
+      echo "defect: worktree-unreadable: could not stage the worktree for tree comparison in: $dir" >&2
+      return 1
+    fi
+    worktree_tree=$(GIT_INDEX_FILE="$tmp_index" git -C "$dir" write-tree 2>/dev/null) \
+      || { rm -f "$tmp_index"; echo "defect: worktree-unreadable: write-tree failed for: $dir" >&2; return 1; }
+    rm -f "$tmp_index"
     if [ "$worktree_tree" = "$head_tree" ]; then
       printf 'clean\n'
       return 0
@@ -995,18 +1086,10 @@ sdlc_reconcile() {
   fi
 
   # wip is a snapshot sha; sdlc_wip_check (predicate 6) already proved the object
-  # readable, so <sha>^{tree} resolves.
-  snap_tree=$(git -C "$dir" rev-parse --verify --quiet "$BATON_WIP^{tree}" 2>/dev/null) || true
-  if [ "$worktree_tree" = "$snap_tree" ]; then
-    printf 'clean\n'
-    return 0
-  fi
-  if [ "$worktree_tree" = "$head_tree" ]; then
-    printf 'restore:%s\n' "$BATON_WIP"
-    return 0
-  fi
-  echo "defect: worktree-drift: tree matches neither HEAD nor snapshot $BATON_WIP" >&2
-  return 1
+  # readable, so <sha>^ resolves. A whole-tree compare cannot see force-included
+  # gitignored artifacts (F1) — delegate to the per-path triage, which prints the
+  # verdict token (`clean` / `restore:<sha>`) or its own worktree-drift defect.
+  _sdlc_reconcile_snapshot_triage "$BATON_WIP" "$dir"
 }
 
 # ---------- D2: completion latch (slice 4/3) ----------
@@ -1039,7 +1122,13 @@ sdlc_reconcile() {
 #      BATON_INTEGRATION_BRANCH to their tips via `git rev-parse`, then
 #      `git merge-base --is-ancestor <branch-tip> <integration-tip>`; refusal
 #      → `defect: false-complete: current 10 but <branch> not merged into
-#      <integration-branch>`.
+#      <integration-branch>`. THEN tip-distinctness (F2): `--is-ancestor` passes
+#      VACUOUSLY when the two tips are the SAME commit, so a forged current:10 on
+#      a goal branch that never diverged (zero goal work) would latch; refuse when
+#      `<branch-tip>` string-equals `<integration-tip>` → `defect: false-complete:
+#      current 10 but <branch> has no commits distinct from <integration-branch>`.
+#      A genuinely completed goal lands via a real (non-fast-forward) merge, so
+#      the tips differ.
 #   4. BATON_WIP != "none" → `defect: false-complete: terminal plan with
 #      stranded wip <sha>` (a terminal plan must have no work product left
 #      shadowed — that work was either landed or abandoned, never stranded).
@@ -1059,7 +1148,7 @@ sdlc_complete_check() {
   baton_parse "$baton" || return 2
 
   plan_path="$BATON_PLAN"
-  plan_current=$(grep -E '^current:' "$plan_path" 2>/dev/null | head -1 | sed -E 's/^current:[[:space:]]*//')
+  plan_current=$(grep -E '^current:' "$plan_path" 2>/dev/null | head -1 | sed -E 's/^current:[[:space:]]*//; s/[[:space:]]+$//')
 
   if [ "$plan_current" != "10" ]; then
     echo "not-complete: plan current $plan_current" >&2
@@ -1070,6 +1159,17 @@ sdlc_complete_check() {
   integ_tip=$(git -C "$dir" rev-parse "$BATON_INTEGRATION_BRANCH" 2>/dev/null)
   if ! git -C "$dir" merge-base --is-ancestor "$branch_tip" "$integ_tip" 2>/dev/null; then
     echo "defect: false-complete: current 10 but $BATON_BRANCH not merged into $BATON_INTEGRATION_BRANCH" >&2
+    return 2
+  fi
+  # Tip-distinctness (F2): `--is-ancestor` passes VACUOUSLY when the two tips are
+  # the SAME commit (every commit is its own ancestor). A forged current:10 on a
+  # goal branch that never diverged from integration — zero goal work committed —
+  # would satisfy the ancestor check with no work ever done, latching a false
+  # completion irreversibly. A genuinely completed goal lands via a real merge, so
+  # integration's tip is DISTINCT from the goal branch's tip; equal tips mean no
+  # goal work was ever merged.
+  if [ "$branch_tip" = "$integ_tip" ]; then
+    echo "defect: false-complete: current 10 but $BATON_BRANCH has no commits distinct from $BATON_INTEGRATION_BRANCH" >&2
     return 2
   fi
 

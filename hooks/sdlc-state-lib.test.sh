@@ -1383,6 +1383,20 @@ ac_recon_clean_none() {
 }
 ac_recon_clean_none
 
+echo "--- current: with a trailing CR (CRLF plan) → parses as clean, not false baton-stale ---"
+ac_recon_current_crlf() {
+  local gid="recon-current-crlf" d errf out rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  printf 'current: 4\r\n' > "$PLAN_STUB"          # CRLF line ending leaves "4\r" without a trailing trim
+  write_recon_baton "$gid" "$d" 4 none none        # baton sdlc-step: 4
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_reconcile "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "reconcile CRLF current: exits 0" "0" "$rc"
+  assert_eq "reconcile CRLF current: prints 'clean'" "clean" "$out"
+  assert_eq "reconcile CRLF current: silent on stderr" "" "$(cat "$errf")"
+}
+ac_recon_current_crlf
+
 echo "--- clean fixture with a present WIP (worktree == snapshot) → 'clean' verdict ---"
 ac_recon_clean_wip_present() {
   local gid="recon-clean-wip" d snap errf out rc
@@ -1411,6 +1425,69 @@ ac_recon_restore() {
   assert_eq "AC-N5 clobbered (worktree==HEAD + wip sha) prints 'restore:<sha>'" "restore:$snap" "$out"
 }
 ac_recon_restore
+
+# ---------- F1 (critic): mixed-WIP triage over a force-included snapshot ----------
+# The existing AC-N5 clean/restore fixtures snapshot with NO force-include, so a
+# snapshot tree that carries a gitignored lifecycle artifact was never exercised.
+# These three fixtures snapshot WITH a force-include path (.bionic/docs) atop a
+# tracked edit — a faithful mixed WIP — and assert the triage classifies it as
+# clean/restore/drift by CONTENT, not by whole-tree equality (which the plain
+# `add -A` worktree tree can never satisfy once the snapshot force-included a
+# gitignored path).
+echo "--- F1 mixed WIP (tracked edit + force-included gitignored artifact) faithfully present → 'clean' ---"
+ac_recon_mixed_wip_clean() {
+  local gid="recon-mixed-clean" d snap errf out rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  printf '.bionic/\n' > "$d/.gitignore"
+  git -C "$d" add -A; git -C "$d" commit -qm gitignore     # .bionic/ ignored, committed into base
+  printf 'v2 work in progress\n' > "$d/tracked.txt"        # tracked edit
+  mkdir -p "$d/.bionic/docs"; printf 'plan wip\n' > "$d/.bionic/docs/plan.md"  # gitignored artifact
+  snap=$(sdlc_wip_snapshot "$gid" "$d" ".bionic/docs" 2>/dev/null)   # force-include the gitignored path
+  write_recon_baton "$gid" "$d" 4 none "$snap"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_reconcile "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N5 mixed-WIP faithfully present exits 0" "0" "$rc"
+  assert_eq "AC-N5 mixed-WIP (tracked edit + force-included artifact) prints 'clean'" "clean" "$out"
+  assert_eq "AC-N5 mixed-WIP clean silent on stderr" "" "$(cat "$errf")"
+}
+ac_recon_mixed_wip_clean
+
+echo "--- F1 mixed WIP clobbered (both paths back to HEAD) → 'restore:<sha>' ---"
+ac_recon_mixed_wip_clobbered() {
+  local gid="recon-mixed-clobber" d snap errf out rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  printf '.bionic/\n' > "$d/.gitignore"
+  git -C "$d" add -A; git -C "$d" commit -qm gitignore
+  printf 'v2 work in progress\n' > "$d/tracked.txt"
+  mkdir -p "$d/.bionic/docs"; printf 'plan wip\n' > "$d/.bionic/docs/plan.md"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" ".bionic/docs" 2>/dev/null)
+  git -C "$d" checkout -q -- tracked.txt                   # revert tracked edit to HEAD
+  rm -rf "$d/.bionic"                                      # drop the force-included artifact
+  write_recon_baton "$gid" "$d" 4 none "$snap"
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_reconcile "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N5 mixed-WIP clobbered exits 0" "0" "$rc"
+  assert_eq "AC-N5 mixed-WIP clobbered (both paths back to HEAD) prints 'restore:<sha>'" "restore:$snap" "$out"
+}
+ac_recon_mixed_wip_clobbered
+
+echo "--- F1 mixed WIP, genuine third-writer divergence on a snapshot path → 'worktree-drift' ---"
+ac_recon_mixed_wip_drift() {
+  local gid="recon-mixed-drift" d snap err rc
+  setup_reconcile "$gid" 4; d="$REPO_DIR"
+  printf '.bionic/\n' > "$d/.gitignore"
+  git -C "$d" add -A; git -C "$d" commit -qm gitignore
+  printf 'v2 work in progress\n' > "$d/tracked.txt"
+  mkdir -p "$d/.bionic/docs"; printf 'plan wip\n' > "$d/.bionic/docs/plan.md"
+  snap=$(sdlc_wip_snapshot "$gid" "$d" ".bionic/docs" 2>/dev/null)
+  printf 'v3 a third writer clobbered this\n' > "$d/tracked.txt"   # neither HEAD nor snapshot
+  write_recon_baton "$gid" "$d" 4 none "$snap"
+  err=$(sdlc_reconcile "$gid" "$d" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "AC-N5 mixed-WIP third-writer returns nonzero" "$rc"
+  assert_contains "AC-N5 mixed-WIP third-writer names worktree-drift" "worktree-drift" "$err"
+  assert_contains "AC-N5 mixed-WIP third-writer says 'matches neither'" "matches neither" "$err"
+}
+ac_recon_mixed_wip_drift
 
 echo "--- baton-stale: sdlc-step != plan current → baton-stale naming both ---"
 ac_recon_stale_step() {
@@ -1568,9 +1645,34 @@ setup_complete() {
   git -C "$REPO_DIR" commit -qm goal-work
   if [ "$merge" = "yes" ]; then
     git -C "$REPO_DIR" checkout -q integ-branch
-    git -C "$REPO_DIR" merge -q goal-branch -m merge-goal
+    # --no-ff so integ-branch carries a REAL merge commit: its tip then DIFFERS
+    # from goal-branch's tip (a completed goal's realistic post-merge topology).
+    # A fast-forward would leave the tips EQUAL — indistinguishable from the
+    # vacuous zero-goal-work case the F2 tip-distinctness guard rejects.
+    git -C "$REPO_DIR" merge -q --no-ff goal-branch -m merge-goal
     git -C "$REPO_DIR" checkout -q goal-branch
   fi
+  mkdir -p "$SDLC_STATE_DIR/$gid"
+  PLAN_STUB="$SDLC_STATE_DIR/$gid/plan.stub.md"
+  printf 'current: %s\n' "$current" > "$PLAN_STUB"
+}
+# setup_complete_vacuous <goal-id> <current> — F2 (critic): builds a repo where
+# goal-branch AND integ-branch BOTH point at the base commit (NO goal work ever
+# committed). The tips are EQUAL, so `merge-base --is-ancestor` passes VACUOUSLY
+# (a commit is its own ancestor) — the exact topology a forged current:10 latch
+# exploits. Same globals/discipline as setup_complete.
+setup_complete_vacuous() {
+  local gid="$1" current="$2"
+  new_state_dir
+  REPO_DIR=$(mktemp -d); CLEAN_DIRS+=("$REPO_DIR")
+  git -C "$REPO_DIR" init -q
+  git -C "$REPO_DIR" config user.name  "fixture"
+  git -C "$REPO_DIR" config user.email "fixture@example.com"
+  printf 'base\n' > "$REPO_DIR/base.txt"
+  git -C "$REPO_DIR" add -A
+  git -C "$REPO_DIR" commit -qm base
+  git -C "$REPO_DIR" branch -q integ-branch    # both at base — zero goal work
+  git -C "$REPO_DIR" branch -q goal-branch
   mkdir -p "$SDLC_STATE_DIR/$gid"
   PLAN_STUB="$SDLC_STATE_DIR/$gid/plan.stub.md"
   printf 'current: %s\n' "$current" > "$PLAN_STUB"
@@ -1618,6 +1720,21 @@ ac_complete_genuine() {
 }
 ac_complete_genuine
 
+echo "--- current: 10 with a trailing space → parses as terminal, not false not-complete ---"
+ac_complete_current_trailing_space() {
+  local gid="complete-current-trailws" d errf out rc path
+  setup_complete "$gid" 10 yes; d="$REPO_DIR"
+  printf 'current: 10 \n' > "$PLAN_STUB"          # trailing space leaves "10 " without a trailing trim
+  write_complete_baton "$gid" "$d" 10 none
+  path=$(build_healthy_ledger "$gid")
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "complete_check trailing-space current:10 exits 0" "0" "$rc"
+  assert_eq "complete_check trailing-space current:10 prints 'complete-verified'" "complete-verified" "$out"
+  assert_eq "complete_check trailing-space current:10 silent on stderr" "" "$(cat "$errf")"
+}
+ac_complete_current_trailing_space
+
 echo "--- FALSE-COMPLETE unmerged: current 10, branch NOT merged into integration-branch → defect, rc 2, no latch ---"
 ac_complete_false_unmerged() {
   local gid="complete-false-unmerged" d errf out rc path
@@ -1651,6 +1768,23 @@ ac_complete_false_stranded_wip() {
     "0" "$(count_key_lines "$path" "complete:$gid")"
 }
 ac_complete_false_stranded_wip
+
+echo "--- F2 FALSE-COMPLETE vacuous: current 10, goal-branch tip == integ-branch tip (zero goal work) → defect, rc 2, no latch ---"
+ac_complete_false_vacuous() {
+  local gid="complete-false-vacuous" d errf out rc path
+  setup_complete_vacuous "$gid" 10; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 10 none
+  path=$(build_healthy_ledger "$gid")   # a valid ledger so the vacuous latch is what must refuse, not a missing chain
+  errf=$(mktemp); CLEAN_DIRS+=("$errf")
+  out=$(sdlc_complete_check "$gid" "$d" 2>"$errf"); rc=$?
+  assert_eq "AC-N3 vacuous-complete returns rc 2" "2" "$rc"
+  assert_eq "AC-N3 vacuous-complete exact defect text" \
+    "defect: false-complete: current 10 but goal-branch has no commits distinct from integ-branch" "$(cat "$errf")"
+  assert_eq "AC-N3 vacuous-complete prints nothing on stdout" "" "$out"
+  assert_eq "AC-N3 vacuous-complete: no complete: line in the ledger" \
+    "0" "$(count_key_lines "$path" "complete:$gid")"
+}
+ac_complete_false_vacuous
 
 echo "--- BENIGN: current 4 → not-complete (no 'defect:' prefix), rc 1, no ledger writes ---"
 ac_complete_benign() {
