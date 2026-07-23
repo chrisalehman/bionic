@@ -128,7 +128,7 @@ plant_goal() {
 # Empty/omitted keepalive ⇒ the key is ABSENT from frontmatter (fallback-table
 # resolution applies) — mirrors write_plan's convention in sdlc-state-lib.test.sh.
 plant_plan() {
-  local p="$1" cur="$2" wake="${3:-0}" scale="${4:-continuous}" ka="${5:-}"
+  local p="$1" cur="$2" wake="${3:-0}" scale="${4:-continuous}" ka="${5:-}" pilot="${6:-}"
   mkdir -p "$(dirname "$p")"
   {
     echo "---"
@@ -136,6 +136,7 @@ plant_plan() {
     echo "canonical_sdlc_version: 12"
     echo "scale: $scale"
     [ -n "$ka" ] && echo "keepalive: $ka"
+    [ -n "$pilot" ] && echo "pilot: $pilot"
     echo "---"
     echo ""
     echo "## SDLC State"
@@ -1997,6 +1998,139 @@ S3_cpu() {
   if wedge_cputime 2147483647 >/dev/null 2>&1; then fail "4/S3 cputime dead pid → rc1"; else pass "4/S3 cputime dead pid → rc1"; fi
 }
 S3_cpu
+
+# One DIRECT wedge-detector poll: load the goal's registration into REG_* (as
+# classify_goal would), then run wedge_corroborated with a controlled process-tree
+# cputime. CORROB_RC captures its rc (0 = corroborated). The CPU-FAKE seam is scoped
+# to the single call (VAR=val func) — no leak across polls.
+CORROB_RC=0
+corrob_poll() {  # <gid> <cpu-fake>
+  load_registration "$1" >/dev/null 2>&1
+  SDLC_WEDGE_CPU_FAKE="$2" wedge_corroborated "$1"; CORROB_RC=$?
+}
+
+# Append a busy line to a goal's transcript (byte size grows) and re-age it — models
+# transcript MOVEMENT mid-observation without changing the resolved path.
+move_transcript() {  # <cwd> <sid> <age>
+  local cwd="$1" sid="$2" age="$3" pdir t
+  pdir=$(real_project_dir "$cwd"); t="$pdir/$sid.jsonl"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}' >> "$t"
+  set_mtime_age "$t" "$age"
+}
+
+echo "=== 4/S3-corroborate: true hang (AUTO, flat cpu, >ceiling) → WEDGED at OBS ==="
+S3_corroborate() {
+  new_home
+  local cwd; cwd=$(real_cwd s3c)
+  arm_goal g3c 4 "$cwd" sid-3c 4242 1000 busy    # continuous → pilot AUTO, ceiling 900; quiet 1000>900
+  corrob_poll g3c 100; assert_eq "4/S3 poll1 not yet corroborated (baseline)" "1" "$CORROB_RC"
+  assert_eq "4/S3 poll1 count=1" "1" "$(wedge_count_of g3c)"
+  corrob_poll g3c 100; assert_eq "4/S3 poll2 not yet corroborated" "1" "$CORROB_RC"
+  assert_eq "4/S3 poll2 count=2" "2" "$(wedge_count_of g3c)"
+  corrob_poll g3c 100; assert_eq "4/S3 poll3 CORROBORATED (rc0)" "0" "$CORROB_RC"
+  assert_eq "4/S3 poll3 count=3" "3" "$(wedge_count_of g3c)"
+}
+S3_corroborate
+
+echo "=== 4/S3-ambiguous: long compute (cpu climbing) → AMBIGUOUS, never corroborated ==="
+S3_ambiguous() {
+  new_home
+  local cwd; cwd=$(real_cwd s3a)
+  arm_goal g3a 4 "$cwd" sid-3a 4242 1000 busy
+  corrob_poll g3a 100; assert_eq "4/S3-amb poll1 baseline" "1" "$CORROB_RC"
+  corrob_poll g3a 200; assert_eq "4/S3-amb poll2 NOT corroborated (cpu climbing)" "2" "$CORROB_RC"
+  corrob_poll g3a 300; assert_eq "4/S3-amb poll3 NOT corroborated (cpu climbing)" "2" "$CORROB_RC"
+  assert_eq "4/S3-amb never reaches OBS (count stays 1)" "1" "$(wedge_count_of g3a)"
+  assert_contains "4/S3-amb WEDGE-AMBIGUOUS audit present" "g3a WEDGE-AMBIGUOUS cpu-active" "$(audit_of)"
+}
+S3_ambiguous
+
+echo "=== 4/S3-ceilings: quiet ceiling is pilot-keyed (AUTO 900 / MANUAL 1800) ==="
+S3_ceilings() {
+  # 700s < both ceilings → never corroborated, under AUTO and under MANUAL.
+  new_home
+  local cwd; cwd=$(real_cwd s3ka)
+  arm_goal g3ka 4 "$cwd" sid-3ka 4242 700 busy               # AUTO, quiet 700 < 900
+  corrob_poll g3ka 50; corrob_poll g3ka 50; corrob_poll g3ka 50
+  assert_eq "4/S3-ceil 700s AUTO → not corroborated" "1" "$CORROB_RC"
+  assert_eq "4/S3-ceil 700s AUTO → count held at 0 (below ceiling)" "0" "$(wedge_count_of g3ka)"
+
+  new_home
+  cwd=$(real_cwd s3km)
+  local plan="$HOME/plans/g3km.plan.md"
+  plant_plan "$plan" 4 0 continuous "" MANUAL                 # explicit pilot MANUAL, ceiling 1800
+  plant_goal g3km "$plan" "$cwd" sid-3km 4242
+  plant_transcript_age "$cwd" sid-3km 700 busy               # quiet 700 < 1800
+  corrob_poll g3km 50; corrob_poll g3km 50; corrob_poll g3km 50
+  assert_eq "4/S3-ceil 700s MANUAL → not corroborated" "1" "$CORROB_RC"
+
+  # 1000s: crosses AUTO (900) but not MANUAL (1800) — proves the key selects.
+  new_home
+  cwd=$(real_cwd s3aa)
+  arm_goal g3aa 4 "$cwd" sid-3aa 4242 1000 busy               # AUTO, 1000 > 900
+  corrob_poll g3aa 10; corrob_poll g3aa 10; corrob_poll g3aa 10
+  assert_eq "4/S3-ceil 1000s AUTO → CORROBORATED" "0" "$CORROB_RC"
+
+  new_home
+  cwd=$(real_cwd s3mm)
+  plan="$HOME/plans/g3mm.plan.md"
+  plant_plan "$plan" 4 0 continuous "" MANUAL                 # MANUAL, ceiling 1800
+  plant_goal g3mm "$plan" "$cwd" sid-3mm 4242
+  plant_transcript_age "$cwd" sid-3mm 1000 busy              # quiet 1000 < 1800
+  corrob_poll g3mm 10; corrob_poll g3mm 10; corrob_poll g3mm 10
+  assert_eq "4/S3-ceil 1000s MANUAL → not corroborated (below MANUAL ceiling)" "1" "$CORROB_RC"
+
+  # MANUAL corroborates once quiet exceeds its (longer) ceiling — the path works.
+  new_home
+  cwd=$(real_cwd s3mc)
+  plan="$HOME/plans/g3mc.plan.md"
+  plant_plan "$plan" 4 0 continuous "" MANUAL
+  plant_goal g3mc "$plan" "$cwd" sid-3mc 4242
+  plant_transcript_age "$cwd" sid-3mc 2000 busy              # quiet 2000 > 1800
+  corrob_poll g3mc 10; corrob_poll g3mc 10; corrob_poll g3mc 10
+  assert_eq "4/S3-ceil 2000s MANUAL → CORROBORATED" "0" "$CORROB_RC"
+}
+S3_ceilings
+
+echo "=== 4/S3-reset-transcript: movement mid-observation resets the counter ==="
+S3_reset_transcript() {
+  new_home
+  local cwd; cwd=$(real_cwd s3rt)
+  arm_goal g3rt 4 "$cwd" sid-3rt 4242 1000 busy
+  corrob_poll g3rt 5; corrob_poll g3rt 5
+  assert_eq "4/S3-rst count=2 before move" "2" "$(wedge_count_of g3rt)"
+  move_transcript "$cwd" sid-3rt 1000                        # transcript bytes change → reset
+  corrob_poll g3rt 5
+  assert_eq "4/S3-rst poll after move → not corroborated" "1" "$CORROB_RC"
+  assert_eq "4/S3-rst counter reset to 1 (state file proves it)" "1" "$(wedge_count_of g3rt)"
+}
+S3_reset_transcript
+
+echo "=== 4/S3-partial: 2 of 3 polls → not corroborated, WEDGE-OBSERVE present ==="
+S3_partial() {
+  new_home
+  local cwd; cwd=$(real_cwd s3p)
+  arm_goal g3p 4 "$cwd" sid-3p 4242 1000 busy
+  corrob_poll g3p 5; corrob_poll g3p 5
+  assert_eq "4/S3-partial 2/3 → not corroborated" "1" "$CORROB_RC"
+  assert_eq "4/S3-partial count=2" "2" "$(wedge_count_of g3p)"
+  assert_contains "4/S3-partial WEDGE-OBSERVE audit present" "g3p WEDGE-OBSERVE n=2" "$(audit_of)"
+}
+S3_partial
+
+echo "=== 4/S3-pid-vanish: pid gone mid-observation → reset, no crash, no corroboration ==="
+S3_pid_vanish() {
+  new_home
+  local cwd; cwd=$(real_cwd s3pv)
+  arm_goal g3pv 4 "$cwd" sid-3pv 4242 1000 busy
+  corrob_poll g3pv 100; assert_eq "4/S3-pv poll1 baseline" "1" "$CORROB_RC"
+  corrob_poll g3pv GONE                                       # pid vanished mid-read
+  assert_eq "4/S3-pv vanished poll → not corroborated" "1" "$CORROB_RC"
+  assert_eq "4/S3-pv counter reset (0)" "0" "$(wedge_count_of g3pv)"
+  # A subsequent flat poll must not resurrect a stale count — starts fresh.
+  corrob_poll g3pv 100; assert_eq "4/S3-pv post-vanish restarts baseline (count=1)" "1" "$(wedge_count_of g3pv)"
+}
+S3_pid_vanish
 
 # ============================================================
 echo ""
