@@ -159,6 +159,27 @@ else
   C_GREEN=""; C_YELLOW=""; C_RED=""; C_BOLD=""; C_RESET=""
 fi
 
+# _init_run_log — tee the whole run to ~/.claude/logs/, newest 5 kept.
+# MUST run after color detection ([ -t 1 ] above): the exec turns stdout
+# into a pipe, so testing later would kill terminal colors. The log branch
+# strips ANSI so captured logs stay clean while the terminal keeps color.
+# Logging failure never blocks the run (a bootstrap that can't log must
+# still bootstrap).
+BOOTSTRAP_LOG=""
+_init_run_log() {
+  local dir="$HOME/.claude/logs" old
+  { mkdir -p "$dir" 2>/dev/null && [ -w "$dir" ]; } || {
+    echo "  ${C_YELLOW}⚠${C_RESET} could not create ${dir} — run log disabled"
+    return 0
+  }
+  BOOTSTRAP_LOG="${dir}/bootstrap-$(date -u +%Y%m%dT%H%M%SZ).log"
+  ls -1t "${dir}"/bootstrap-*.log 2>/dev/null | tail -n +5 | while IFS= read -r old; do
+    rm -f "$old"
+  done || true   # empty dir: unexpanded glob fails ls; pipefail would kill the run (field failure 2026-07-22)
+  exec > >(tee >(sed -E $'s/\x1b\\[[0-9;]*m//g' >> "$BOOTSTRAP_LOG")) 2>&1
+  return 0
+}
+
 # run_retry <cmd...> — runs cmd with stdout+stderr captured into RUN_ERR and
 # stdin detached, retrying up to RETRY_MAX times with exponential backoff
 # (2s, 4s, 8s...). Sets RUN_ATTEMPT to the attempt count. Returns 0 on
@@ -167,10 +188,34 @@ run_retry() {
   local n=1 delay=2
   while :; do
     if RUN_ERR="$("$@" </dev/null 2>&1)"; then RUN_ATTEMPT="$n"; return 0; fi
+    case "$(classify_err "$RUN_ERR")" in
+      cert\|*|perms\|*) RUN_ATTEMPT="$n"; return 1 ;;  # deterministic — retry can't help
+    esac
     if [ "$n" -ge "$RETRY_MAX" ]; then RUN_ATTEMPT="$n"; return 1; fi
     sleep "$delay"
     n=$((n + 1)); delay=$((delay * 2))
   done
+}
+
+# classify_err <text> — map captured error output to "class|hint" on stdout.
+# class ∈ cert|perms|net|unknown; unknown carries an empty hint so callers
+# keep their own remediation. cert/perms are DETERMINISTIC — retrying cannot
+# change the outcome, so run_retry short-circuits them (field incident
+# 2026-07-21: a broken OpenSSL CA store burned 3 retries × N steps with an
+# EACCES hint that sent the user down the wrong path).
+classify_err() {
+  local t
+  t="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$t" in
+    *unable_to_get_issuer_cert_locally*|*self_signed_cert_in_chain*|*'unable to get local issuer certificate'*)
+      printf '%s' "cert|run 'brew postinstall openssl@3', then re-run ./claude-bootstrap.sh" ;;
+    *eacces*)
+      printf '%s' "perms|fix npm's global prefix (e.g. npm config set prefix ~/.npm-global), then re-run ./claude-bootstrap.sh" ;;
+    *enotfound*|*eai_again*|*etimedout*)
+      printf '%s' "net|check network/VPN/proxy, then re-run ./claude-bootstrap.sh" ;;
+    *)
+      printf 'unknown|' ;;
+  esac
 }
 
 # record_fail <message> — note a non-fatal install failure (legacy summary).
@@ -226,9 +271,14 @@ step_warn() {
   record_step warn "$1" "$STEP_NAME" "${3:-}" "$2"
 }
 
-# step_fail <category> <detail> [remediation] — record and CONTINUE.
+# step_fail <category> <detail> [remediation] — record and CONTINUE. A
+# classified detail (cert/perms/net) overrides the caller's canned hint so
+# the report names the real cause, not a guess.
 step_fail() {
   local remediation="${3:-re-run ./claude-bootstrap.sh — completed steps are skipped}"
+  local _c _hint
+  _c="$(classify_err "$2")"; _hint="${_c#*|}"; _c="${_c%%|*}"
+  if [ "$_c" != "unknown" ] && [ -n "$_hint" ]; then remediation="$_hint"; fi
   echo "${C_RED}✗${C_RESET} failed (continuing)$(_step_dur)"
   record_step fail "$1" "$STEP_NAME" "$remediation" "$2"
   record_fail "${STEP_NAME}: ${2}"
@@ -255,6 +305,14 @@ step_stream() {
 }
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
+
+# Placed here (not immediately after the function definition above) so the
+# test harness's Resilience→Helpers extraction (tests/installer-behavior.
+# test.sh) doesn't source-and-execute this call: that range is sourced
+# wholesale to expose the function for direct testing, and a bare top-level
+# call inside it would exec-tee the test script's own stdout. Still runs
+# before any real bootstrap output.
+_init_run_log
 
 # Formulae with heavy dependency trees (>30s installs) stream brew's own
 # progress instead of installing silently — see step_stream.
@@ -301,6 +359,113 @@ do_install_brew_cask() {
 do_install_brew_dep() {
   local binary="$1" pkg="${2:-$1}"
   ensure_cmd "$binary" "$pkg"
+}
+
+# do_preflight_node — node is needed by the registry TLS probe (F1) and the
+# npm channel of the claude CLI install. Formerly hidden inside the claude-CLI
+# else-branch behind `command -v claude` with its failure swallowed by
+# `|| true` — a machine with claude but no node reached the npm steps with no
+# npm at all, and a brew failure was misreported as a claude-CLI failure.
+# Never aborts: with the native-installer fallback (F2) the claude CLI no
+# longer requires node, and npm-dependent steps fail individually with
+# classified hints.
+do_preflight_node() {
+  if command -v node &>/dev/null; then
+    step_cached prereq "$(node -v 2>/dev/null || echo present)"
+  elif run_retry brew install node --quiet; then
+    step_ok prereq "$(node -v 2>/dev/null || echo installed)"
+  else
+    step_fail prereq "$RUN_ERR" "run 'brew install node' by hand, then re-run ./claude-bootstrap.sh"
+  fi
+  return 0
+}
+
+# _node_probe — hit the npm registry with node itself. npm/pnpm/npx verify
+# TLS through OpenSSL's CA store (Homebrew node is built shared_openssl),
+# NOT the macOS keychain that curl uses — so curl 200 + node cert-fail is
+# exactly the broken-CA-store signature (field incident 2026-07-21: missing
+# /opt/homebrew/etc/openssl@3/cert.pem symlink).
+_node_probe() {
+  node -e 'require("https").get("https://registry.npmjs.org/-/ping",function(r){process.exit(r.statusCode===200?0:1)}).on("error",function(e){console.error(e.code||e.message);process.exit(1)})' 2>&1
+}
+
+# do_preflight_registry_tls — probe; on cert-class failure auto-repair the
+# one known cause (brew postinstall openssl@3 — recreates the cert.pem
+# symlink, idempotent) and re-probe. Unrepaired cert store is a hard
+# preflight failure (exit 2): every npm/pnpm/npx step downstream would fail.
+# Non-cert failures warn and continue (mirrors the curl reachability arm).
+do_preflight_registry_tls() {
+  local out
+  if ! command -v node &>/dev/null; then
+    step_skip prereq "node unavailable — probe skipped (npm installs may fail)"
+    return 0
+  fi
+  if out="$(_node_probe)"; then
+    step_ok prereq
+    return 0
+  fi
+  case "$(classify_err "$out")" in
+    cert\|*)
+      brew postinstall openssl@3 >/dev/null 2>&1 || true
+      if out="$(_node_probe)"; then
+        step_warn prereq "CA store was broken — auto-repaired (brew postinstall openssl@3)"
+        return 0
+      fi
+      echo "${C_RED}✗${C_RESET}"
+      echo ""
+      echo "  node cannot verify registry.npmjs.org's TLS certificate (${out})."
+      echo "  Auto-repair (brew postinstall openssl@3) did not resolve it."
+      echo "  Every npm/pnpm install would fail. Fix the OpenSSL CA store, then"
+      echo "  re-run ./claude-bootstrap.sh"
+      exit 2
+      ;;
+    *)
+      step_warn prereq "registry probe failed (${out}) — npm installs may fail" "check network/VPN/proxy"
+      ;;
+  esac
+  return 0
+}
+
+# do_preflight_claude_cli — npm is the canonical channel (the Homebrew cask
+# lags many versions). The official native installer is the fallback: it
+# verifies TLS through the system keychain via curl, so it survives the
+# broken-OpenSSL-CA-store failure that kills the npm channel (and is exactly
+# what the field fix was on 2026-07-21). Hard-fails (exit 2) only when both
+# channels are dead — the CLI is the bootstrap's one true prerequisite.
+do_preflight_claude_cli() {
+  local npm_err="" hint=""
+  if command -v claude &>/dev/null; then
+    step_cached prereq "$(claude --version 2>/dev/null | head -1 || echo present)"
+    return 0
+  fi
+  if command -v npm &>/dev/null; then
+    if run_retry npm install -g @anthropic-ai/claude-code@latest; then
+      step_ok prereq "$(claude --version 2>/dev/null | head -1 || echo installed)"
+      return 0
+    fi
+    npm_err="$RUN_ERR"
+  else
+    npm_err="npm unavailable"
+  fi
+  if run_retry bash -c 'curl -fsSL https://claude.ai/install.sh | bash' \
+     && { command -v claude &>/dev/null || [ -x "$HOME/.local/bin/claude" ]; }; then
+    case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac
+    step_ok prereq "native installer — npm channel failed"
+    return 0
+  fi
+  hint="$(classify_err "$npm_err")"; hint="${hint#*|}"
+  echo "${C_RED}✗${C_RESET}"
+  echo ""
+  echo "  Could not install the claude CLI by either channel. Install it manually:"
+  echo "    npm:    npm install -g @anthropic-ai/claude-code@latest"
+  echo "    native: curl -fsSL https://claude.ai/install.sh | bash"
+  if [ -n "$hint" ]; then
+    echo "  npm channel failure looks like: ${hint}"
+  else
+    echo "  npm channel: ${npm_err}"
+  fi
+  echo "  then re-run ./claude-bootstrap.sh"
+  exit 2
 }
 
 do_install_npm_global() {
@@ -819,26 +984,18 @@ else
   fi
 fi
 
-# claude CLI — auto-install via npm (the canonical channel; the Homebrew cask
-# lags many versions behind). node comes from brew first if needed.
+# node — hoisted preflight step (see do_preflight_node).
+step_start "node"
+do_preflight_node
+
+# Registry TLS through node's CA store — curl alone probes the WRONG TLS
+# stack (system keychain) and greenlit the 2026-07-21 broken-store run.
+step_start "registry TLS (node)"
+do_preflight_registry_tls
+
+# claude CLI — npm canonical, native installer fallback (see function).
 step_start "claude CLI"
-if command -v claude &>/dev/null; then
-  step_cached prereq "$(claude --version 2>/dev/null | head -1 || echo present)"
-else
-  if ! command -v node &>/dev/null; then
-    run_retry brew install node --quiet || true
-  fi
-  if command -v npm &>/dev/null && run_retry npm install -g @anthropic-ai/claude-code@latest; then
-    step_ok prereq "$(claude --version 2>/dev/null | head -1 || echo installed)"
-  else
-    echo "${C_RED}✗${C_RESET}"
-    echo ""
-    echo "  Could not install the claude CLI. Install it manually:"
-    echo "    npm install -g @anthropic-ai/claude-code@latest"
-    echo "  then re-run ./claude-bootstrap.sh"
-    exit 2
-  fi
-fi
+do_preflight_claude_cli
 
 # claude auth — warn only; the bootstrap itself works logged out, but plugin
 # and MCP registration may not.
@@ -2251,6 +2408,9 @@ print_report() {
   fi
   echo "    • Restart your shell (or run: source ~/${SHELL_RC_NAME})"
   echo "    • Run \`claude\` in any project to verify"
+  if [ -n "${BOOTSTRAP_LOG:-}" ]; then
+    echo "    • Full run log: ${BOOTSTRAP_LOG}"
+  fi
   echo "    • Pencil: install the app from pencil.dev — its MCP server registers"
   echo "      itself with Claude Code whenever the app is running"
   if [ "$n_bad" -gt 0 ]; then

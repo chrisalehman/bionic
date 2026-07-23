@@ -53,7 +53,7 @@ chmod +x "${BIN}"/*
 
 # ---------- extract the REAL resilience block + installer functions ----------
 awk '/^# ─── Resilience ───/{f=1} f{print} /^# ─── Helpers ───/{if(f)exit}' "$BOOTSTRAP" > "$CODE"
-for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry do_install_agents _cron_env_mode _gen_ntfy_topic _cron_shape_issues do_author_cron_env do_verify_cron_env do_register_poker_cron; do
+for fn in do_install_brew_cask do_install_pnpm_store _pw_satisfied _pw_lock_preflight _playwright_install do_install_playwright_chromium _excalidraw_dry_run _excalidraw_setup do_setup_excalidraw_renderer _pw_link_demands _pw_component_dir _pw_link_missing _pw_heal_node _pw_heal_one do_heal_playwright_registry verify_playwright_registry do_install_agents _cron_env_mode _gen_ntfy_topic _cron_shape_issues do_author_cron_env do_verify_cron_env do_register_poker_cron do_preflight_node _node_probe do_preflight_registry_tls do_preflight_claude_cli; do
   awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$CODE"
 done
 
@@ -1077,6 +1077,300 @@ grep -qxF "sdlc-state-lib.sh" "$MANIFEST" 2>/dev/null && ok "19/2 manifest still
   STEP_RECORDS=(); INSTALL_FAILURES=()
   source "$HOOKS_CODE" >/dev/null )
 if [ $? -eq 0 ]; then ok "19/3 hooks install block survives set -e"; else no "19/3 hooks install block aborted under set -e"; fi
+
+# ---------- F4: classify_err + deterministic short-circuit ----------
+CERT_HINT="run 'brew postinstall openssl@3', then re-run ./claude-bootstrap.sh"
+[ "$(classify_err 'npm error code UNABLE_TO_GET_ISSUER_CERT_LOCALLY')" = "cert|${CERT_HINT}" ] \
+  && ok "classify: UNABLE_TO_GET_ISSUER_CERT_LOCALLY → cert" || no "classify: cert code"
+[ "$(classify_err 'reason: unable to get local issuer certificate')" = "cert|${CERT_HINT}" ] \
+  && ok "classify: issuer-cert prose → cert" || no "classify: cert prose"
+[ "$(classify_err 'Error: SELF_SIGNED_CERT_IN_CHAIN')" = "cert|${CERT_HINT}" ] \
+  && ok "classify: SELF_SIGNED_CERT_IN_CHAIN → cert" || no "classify: self-signed"
+case "$(classify_err 'npm ERR! Error: EACCES: permission denied')" in
+  perms\|*) ok "classify: EACCES → perms" ;; *) no "classify: EACCES → perms" ;; esac
+case "$(classify_err 'getaddrinfo ENOTFOUND registry.npmjs.org')" in
+  net\|*) ok "classify: ENOTFOUND → net" ;; *) no "classify: ENOTFOUND → net" ;; esac
+[ "$(classify_err 'some totally novel failure')" = "unknown|" ] \
+  && ok "classify: unknown → empty hint" || no "classify: unknown"
+
+# step_fail consults the classifier: cert-class detail overrides canned remediation
+STEP_RECORDS=(); INSTALL_FAILURES=(); STEP_NAME="npm pkg"; STEP_T0="$(date +%s)"
+step_fail network 'npm error UNABLE_TO_GET_ISSUER_CERT_LOCALLY' \
+  "run 'npm install -g x' by hand (EACCES → fix npm's global prefix)" >/dev/null
+case "${STEP_RECORDS[0]}" in
+  *"brew postinstall openssl@3"*) ok "step_fail: cert hint overrides canned EACCES hint" ;;
+  *) no "step_fail: cert hint overrides (got: ${STEP_RECORDS[0]})" ;;
+esac
+STEP_RECORDS=(); step_fail network 'some novel failure' 'my canned hint' >/dev/null
+case "${STEP_RECORDS[0]}" in
+  *"my canned hint"*) ok "step_fail: unknown class keeps caller hint" ;;
+  *) no "step_fail: unknown keeps caller hint" ;;
+esac
+
+# run_retry short-circuits deterministic classes: exactly ONE attempt logged
+cat > "${BIN}/certfail" <<EOF
+#!/bin/bash
+echo "certfail \$*" >> "$LOG"
+echo "npm error code UNABLE_TO_GET_ISSUER_CERT_LOCALLY" >&2
+exit 1
+EOF
+chmod +x "${BIN}/certfail"
+: > "$LOG"; RETRY_MAX=3
+run_retry certfail install && no "run_retry: certfail should fail" || true
+[ "$(grep -c '^certfail' "$LOG")" = "1" ] \
+  && ok "run_retry: cert class short-circuits after attempt 1" \
+  || no "run_retry: cert short-circuit (attempts: $(grep -c '^certfail' "$LOG"))"
+: > "$LOG"; RETRY_MAX=2
+run_retry brokenbrew install && no "run_retry: brokenbrew should fail" || true
+[ "$(grep -c '^brokenbrew' "$LOG")" = "2" ] \
+  && ok "run_retry: unknown class keeps full retries" \
+  || no "run_retry: unknown retries (attempts: $(grep -c '^brokenbrew' "$LOG"))"
+
+# ---------- F3: node hoisted, failure surfaces as node failure ----------
+# Earlier sections (playwright heal) leave a mock ${BIN}/node behind; hide it
+# so "node absent" actually holds (same pattern as brew.real below).
+[ -e "${BIN}/node" ] && mv "${BIN}/node" "${BIN}/node.hidden"
+
+# node absent + brew succeeds → brew install node attempted, step ok
+: > "$LOG"; STEP_RECORDS=(); INSTALL_FAILURES=()
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"   # sandbox: no real node
+step_start "node" >/dev/null
+do_preflight_node >/dev/null
+PATH="$_saved_path"
+expect_log "brew install node --quiet" "node hoist: brew install node attempted when absent"
+case "${STEP_RECORDS[0]:-}" in
+  ok\|prereq\|*) ok "node hoist: success recorded as prereq ok" ;;
+  *) no "node hoist: expected ok|prereq record (got: ${STEP_RECORDS[0]:-none})" ;;
+esac
+
+# node absent + brew FAILS → step_fail with brew detail; NO abort, NO claude-CLI wording
+: > "$LOG"; STEP_RECORDS=(); INSTALL_FAILURES=()
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"
+mv "${BIN}/brew" "${BIN}/brew.real"; cp "${BIN}/brokenbrew" "${BIN}/brew"
+step_start "node" >/dev/null
+RETRY_MAX=1 do_preflight_node >/dev/null; _rc=$?
+mv "${BIN}/brew.real" "${BIN}/brew"; PATH="$_saved_path"
+[ "$_rc" = "0" ] && ok "node hoist: brew failure does not abort" || no "node hoist: rc=$_rc, want 0"
+case "${STEP_RECORDS[0]:-}" in
+  fail\|prereq\|*\|node\|*)   # record_step: status|category|section|name|remediation|detail
+    ok "node hoist: failure recorded against node step" ;;
+  *) no "node hoist: expected fail|prereq|…|node record (got: ${STEP_RECORDS[0]:-none})" ;;
+esac
+case "${INSTALL_FAILURES[0]:-}" in
+  *"claude CLI"*) no "node hoist: failure must not mention claude CLI" ;;
+  node:*) ok "node hoist: failure names node, not claude CLI" ;;
+  *) no "node hoist: unexpected failure record (${INSTALL_FAILURES[0]:-none})" ;;
+esac
+
+# restore the hidden mock for later sections
+[ -e "${BIN}/node.hidden" ] && mv "${BIN}/node.hidden" "${BIN}/node"
+
+# ---------- F1: registry TLS probe + auto-remediation ----------
+# Probe OK → step ok, no brew call
+cat > "${BIN}/node" <<EOF
+#!/bin/bash
+echo "node \$*" >> "$LOG"
+exit 0
+EOF
+chmod +x "${BIN}/node"
+: > "$LOG"; STEP_RECORDS=()
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"
+step_start "registry TLS (node)" >/dev/null
+do_preflight_registry_tls >/dev/null; _rc=$?
+PATH="$_saved_path"
+[ "$_rc" = "0" ] && ok "tls probe: healthy store passes" || no "tls probe: healthy rc=$_rc"
+grep -q '^brew postinstall' "$LOG" && no "tls probe: healthy must not postinstall" \
+  || ok "tls probe: no postinstall on healthy store"
+
+# Cert failure, repair works: node fails once with cert error, succeeds after
+# brew postinstall ran (stateful mock via marker file)
+cat > "${BIN}/node" <<EOF
+#!/bin/bash
+echo "node \$*" >> "$LOG"
+if [ -f "$SBX/repaired" ]; then exit 0; fi
+echo "UNABLE_TO_GET_ISSUER_CERT_LOCALLY" >&2
+exit 1
+EOF
+cat > "${BIN}/brew" <<EOF
+#!/bin/bash
+echo "brew \$*" >> "$LOG"
+[ "\$1" = "postinstall" ] && touch "$SBX/repaired"
+[ "\$1 \$2" = "list --cask" ] && exit 1
+exit 0
+EOF
+chmod +x "${BIN}/node" "${BIN}/brew"
+rm -f "$SBX/repaired"; : > "$LOG"; STEP_RECORDS=()
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"
+step_start "registry TLS (node)" >/dev/null
+do_preflight_registry_tls >/dev/null; _rc=$?
+PATH="$_saved_path"
+[ "$_rc" = "0" ] && ok "tls probe: auto-repair path continues" || no "tls probe: repair rc=$_rc"
+expect_log "brew postinstall openssl@3" "tls probe: brew postinstall openssl@3 invoked"
+case "${STEP_RECORDS[0]:-}" in
+  warn\|prereq\|*auto-repaired*) ok "tls probe: repair recorded as warn note" ;;
+  *) no "tls probe: expected warn/auto-repaired (got: ${STEP_RECORDS[0]:-none})" ;;
+esac
+
+# Cert failure, repair does NOT work → hard exit 2 (subshell)
+rm -f "$SBX/repaired"
+cat > "${BIN}/node" <<EOF
+#!/bin/bash
+echo "node \$*" >> "$LOG"
+echo "UNABLE_TO_GET_ISSUER_CERT_LOCALLY" >&2
+exit 1
+EOF
+chmod +x "${BIN}/node"
+: > "$LOG"
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"
+( step_start "registry TLS (node)" >/dev/null; do_preflight_registry_tls >/dev/null 2>&1 ); _rc=$?
+PATH="$_saved_path"
+[ "$_rc" = "2" ] && ok "tls probe: unrepaired cert store exits 2" || no "tls probe: want exit 2, got $_rc"
+
+# Non-cert probe failure (DNS) → warn and continue
+cat > "${BIN}/node" <<EOF
+#!/bin/bash
+echo "node \$*" >> "$LOG"
+echo "getaddrinfo ENOTFOUND registry.npmjs.org" >&2
+exit 1
+EOF
+chmod +x "${BIN}/node"
+: > "$LOG"; STEP_RECORDS=()
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"
+step_start "registry TLS (node)" >/dev/null
+do_preflight_registry_tls >/dev/null; _rc=$?
+PATH="$_saved_path"
+[ "$_rc" = "0" ] && ok "tls probe: net-class failure continues" || no "tls probe: net rc=$_rc"
+grep -q '^brew postinstall' "$LOG" && no "tls probe: net class must not postinstall" \
+  || ok "tls probe: no postinstall on net class"
+
+# ---------- F2: native-installer fallback ----------
+# npm succeeds → curl never called
+cat > "${BIN}/npm" <<EOF
+#!/bin/bash
+echo "npm \$*" >> "$LOG"
+exit 0
+EOF
+cat > "${BIN}/curl" <<EOF
+#!/bin/bash
+echo "curl \$*" >> "$LOG"
+exit 0
+EOF
+cat > "${BIN}/claude" <<EOF
+#!/bin/bash
+echo "2.0.0 (mock)"
+EOF
+chmod +x "${BIN}/npm" "${BIN}/curl" "${BIN}/claude"
+: > "$LOG"; STEP_RECORDS=()
+# claude "absent" first: run with claude mock removed, npm present
+mv "${BIN}/claude" "${BIN}/claude.hidden"
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"; _saved_home="$HOME"; HOME="$SBX"
+step_start "claude CLI" >/dev/null
+RETRY_MAX=1 do_preflight_claude_cli >/dev/null; _rc=$?
+HOME="$_saved_home"; PATH="$_saved_path"
+[ "$_rc" = "0" ] && ok "claude cli: npm channel ok" || no "claude cli: npm rc=$_rc"
+expect_log "npm install -g @anthropic-ai/claude-code@latest" "claude cli: npm channel attempted"
+grep -q '^curl' "$LOG" && no "claude cli: curl must not run when npm succeeds" \
+  || ok "claude cli: native not invoked on npm success"
+
+# npm fails → native invoked; native "succeeds" by dropping ~/.local/bin/claude
+cat > "${BIN}/npm" <<EOF
+#!/bin/bash
+echo "npm \$*" >> "$LOG"
+echo "npm error code UNABLE_TO_GET_ISSUER_CERT_LOCALLY" >&2
+exit 1
+EOF
+cat > "${BIN}/curl" <<EOF
+#!/bin/bash
+echo "curl \$*" >> "$LOG"
+mkdir -p "$SBX/.local/bin"
+printf '#!/bin/bash\necho 2.0.0\n' > "$SBX/.local/bin/claude"
+chmod +x "$SBX/.local/bin/claude"
+echo "echo native-installer-ran"
+EOF
+chmod +x "${BIN}/npm" "${BIN}/curl"
+rm -rf "$SBX/.local"; : > "$LOG"; STEP_RECORDS=()
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"; _saved_home="$HOME"; HOME="$SBX"
+step_start "claude CLI" >/dev/null
+RETRY_MAX=1 do_preflight_claude_cli >/dev/null; _rc=$?
+_path_after_call="$PATH"
+HOME="$_saved_home"; PATH="$_saved_path"
+[ "$_rc" = "0" ] && ok "claude cli: native fallback succeeds" || no "claude cli: fallback rc=$_rc"
+grep -q '^curl -fsSL https://claude.ai/install.sh' "$LOG" \
+  && ok "claude cli: native installer invoked on npm failure" \
+  || no "claude cli: native installer not invoked"
+case "${STEP_RECORDS[0]:-}" in
+  ok\|prereq\|*native\ installer*) ok "claude cli: channel named in record" ;;
+  *) no "claude cli: expected native-installer note (got: ${STEP_RECORDS[0]:-none})" ;;
+esac
+# D1: downstream steps (plugin/MCP registration) invoke `claude` by name, so a
+# native-only success must leave ~/.local/bin on PATH, not just pass -x.
+case ":$_path_after_call:" in
+  *":$SBX/.local/bin:"*) ok "claude cli: PATH gains ~/.local/bin after native-only success (D1)" ;;
+  *) no "claude cli: PATH missing ~/.local/bin after native-only success (D1): $_path_after_call" ;;
+esac
+
+# both fail → exit 2, message names both channels + cert hint
+cat > "${BIN}/curl" <<EOF
+#!/bin/bash
+echo "curl \$*" >> "$LOG"
+exit 1
+EOF
+chmod +x "${BIN}/curl"
+rm -rf "$SBX/.local"; : > "$LOG"
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"; _saved_home="$HOME"; HOME="$SBX"
+_out="$( step_start "claude CLI" >/dev/null; RETRY_MAX=1 do_preflight_claude_cli 2>&1 )"; _rc=$?
+HOME="$_saved_home"; PATH="$_saved_path"
+[ "$_rc" = "2" ] && ok "claude cli: both channels dead exits 2" || no "claude cli: want 2, got $_rc"
+printf '%s' "$_out" | grep -q 'npm install -g @anthropic-ai/claude-code@latest' \
+  && ok "claude cli: exit message names npm path" || no "claude cli: npm path missing from message"
+printf '%s' "$_out" | grep -q 'claude.ai/install.sh' \
+  && ok "claude cli: exit message names native path" || no "claude cli: native path missing"
+printf '%s' "$_out" | grep -q 'brew postinstall openssl@3' \
+  && ok "claude cli: exit message carries classified cert hint" || no "claude cli: cert hint missing"
+
+# D2: npm absent — a stale global RUN_ERR left over from an unrelated prior
+# run_retry (e.g. node's brew install) must not be misattributed as the
+# npm-channel failure reason when npm was never invoked at all.
+mv "${BIN}/npm" "${BIN}/npm.hidden"
+rm -rf "$SBX/.local"; : > "$LOG"
+RUN_ERR="stale brew noise"
+_saved_path="$PATH"; PATH="$BIN:/usr/bin:/bin"; _saved_home="$HOME"; HOME="$SBX"
+_out="$( step_start "claude CLI" >/dev/null; RETRY_MAX=1 do_preflight_claude_cli 2>&1 )"; _rc=$?
+HOME="$_saved_home"; PATH="$_saved_path"
+mv "${BIN}/npm.hidden" "${BIN}/npm"
+[ "$_rc" = "2" ] && ok "claude cli: npm-absent both-channels-dead exits 2 (D2)" || no "claude cli: want 2, got $_rc (D2)"
+printf '%s' "$_out" | grep -q 'stale brew noise' \
+  && no "claude cli: exit message misattributed stale RUN_ERR as npm-channel reason (D2)" \
+  || ok "claude cli: exit message does not leak stale RUN_ERR (D2)"
+printf '%s' "$_out" | grep -qi 'npm unavailable' \
+  && ok "claude cli: npm-channel line honestly reflects unavailability (D2)" \
+  || no "claude cli: exit message does not say npm is unavailable (D2): $_out"
+
+# ---------- F6: run log init + rotation ----------
+_saved_home="$HOME"; HOME="$SBX"
+rm -rf "$SBX/.claude"
+( set -euo pipefail; _init_run_log; echo "hello ${C_RED}red${C_RESET} world"; echo "survived-rotation" >> "$SBX/marker"; sleep 0.2 ) >/dev/null 2>&1
+[ -f "$SBX/marker" ] && ok "runlog: survives empty log dir under set -euo pipefail" || no "runlog: died in rotation pipeline (set -e)"
+_logfile="$(ls "$SBX/.claude/logs"/bootstrap-*.log 2>/dev/null | head -1)"
+[ -n "$_logfile" ] && ok "runlog: log file created under ~/.claude/logs" || no "runlog: no log file"
+grep -q 'hello red world' "$_logfile" 2>/dev/null \
+  && ok "runlog: content captured with ANSI stripped" || no "runlog: content/strip failed"
+
+# rotation: 7 pre-existing logs + this run → 5 remain
+rm -rf "$SBX/.claude/logs"; mkdir -p "$SBX/.claude/logs"
+for i in 1 2 3 4 5 6 7; do
+  touch -t "2026010${i}0000" "$SBX/.claude/logs/bootstrap-2026010${i}T000000Z.log"
+done
+( set -euo pipefail; _init_run_log; sleep 0.2 ) >/dev/null 2>&1
+_count="$(ls "$SBX/.claude/logs"/bootstrap-*.log | wc -l | tr -d ' ')"
+[ "$_count" = "5" ] && ok "runlog: rotation keeps 5" || no "runlog: rotation kept $_count, want 5"
+
+# unwritable dir → disabled, no crash
+rm -rf "$SBX/.claude"; mkdir -p "$SBX/.claude"; chmod a-w "$SBX/.claude"
+( _init_run_log ) >/dev/null 2>&1; _rc=$?
+chmod u+w "$SBX/.claude"
+[ "$_rc" = "0" ] && ok "runlog: unwritable dir degrades gracefully" || no "runlog: rc=$_rc"
+HOME="$_saved_home"
 
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
