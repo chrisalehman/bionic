@@ -3417,6 +3417,48 @@ ac_s1_arm_refusals() {
 }
 ac_s1_arm_refusals
 
+echo ""
+echo "=== 4/S1-G4: disarm (present removes + audits; absent rc1 + no-op audit) ==="
+ac_s1_disarm() {
+  new_state_dir
+  local plan out rc rec audit
+  export SDLC_ARM_SESSION_ID="sid-fixture-4"; export SDLC_ARM_PID="4242"
+
+  # --- present → removed + audit DISARM <gid> <reason>, default reason manual ---
+  plan="$HOME/plans/dw.plan.md"; write_plan "$plan" wave true
+  sdlc_arm "$plan" >/dev/null 2>&1
+  rec="$(goals_reg dw)"
+  assert_true "disarm setup → record present" test -f "$rec"
+  out=$(sdlc_disarm dw); rc=$?
+  assert_eq "disarm present → rc 0" "0" "$rc"
+  assert_true "disarm present → record removed" test ! -e "$rec"
+  audit="$(cat "$(poker_audit)")"
+  assert_contains "disarm → audit DISARM line, default reason manual" "dw DISARM manual" "$audit"
+
+  # second disarm of the same gid → rc 1 (absent), still audited as a no-op
+  out=$(sdlc_disarm dw 2>/dev/null); rc=$?
+  assert_eq "disarm absent → rc 1" "1" "$rc"
+  assert_contains "disarm absent → audit line still emitted (no-op)" "dw DISARM" "$(cat "$(poker_audit)")"
+
+  # --- custom reason surfaces in the audit line ---
+  new_state_dir
+  export SDLC_ARM_SESSION_ID="sid-fixture-4"; export SDLC_ARM_PID="4242"
+  plan="$HOME/plans/dc.plan.md"; write_plan "$plan" wave true
+  sdlc_arm "$plan" >/dev/null 2>&1
+  out=$(sdlc_disarm dc complete); rc=$?
+  assert_eq "disarm custom reason → rc 0" "0" "$rc"
+  assert_contains "disarm → audit carries the custom reason" "dc DISARM complete" "$(cat "$(poker_audit)")"
+
+  # --- guard: an invalid goal-id is refused loud (path-traversal guard) ---
+  out=$(sdlc_disarm "" 2>/dev/null); rc=$?
+  assert_nonzero "disarm empty goal-id → nonzero" "$rc"
+  out=$(sdlc_disarm "a/b" 2>/dev/null); rc=$?
+  assert_nonzero "disarm goal-id with slash → nonzero" "$rc"
+
+  unset SDLC_ARM_SESSION_ID SDLC_ARM_PID
+}
+ac_s1_disarm
+
 # ============================================================
 echo ""
 echo "========================================"
