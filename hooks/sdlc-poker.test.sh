@@ -349,6 +349,33 @@ rung_effect_count() {  # <gid>
     "$(ledger_path "$1")" 2>/dev/null || echo 0
 }
 
+# ---------- 4/S5: restart-seam stubs (the SIGTERM + spawn live in the lib) ----------
+# arm_restart_seams — arms the lib's restart seams for a full poker poll so a real
+# `claude` is never launched and no real process is signalled: a kill stub records
+# the SIGTERM and DROPS the target from the registry.json the `claude agents` stub
+# reads (the vehicle "dies" for the bounded re-poll), plus a synchronous spawn
+# counter. Exports SDLC_KILL_CMD / SDLC_SPAWN_CMD / SDLC_RESTART_KILL_DELAY for the
+# poker child (run_poker's inline env augments, not replaces, the inherited env).
+RESTART_SPAWN_COUNTER=""; RESTART_KILL_LOG=""
+arm_restart_seams() {
+  local regjson="$HOME/.claude/.stub/registry.json"
+  RESTART_KILL_LOG="$HOME/.claude/.stub/kill.log"; : > "$RESTART_KILL_LOG"
+  RESTART_SPAWN_COUNTER="$HOME/.claude/.stub/spawn.count"; : > "$RESTART_SPAWN_COUNTER"
+  local kstub="$HOME/.claude/.stub/killcmd"
+  {
+    printf '#!/bin/sh\n'
+    printf 'echo "term $1" >> %q\n' "$RESTART_KILL_LOG"
+    printf 'printf "[{\\"pid\\":11,\\"sessionId\\":\\"decoy-sid\\",\\"status\\":\\"idle\\"}]\\n" > %q\n' "$regjson"
+    printf 'exit 0\n'
+  } > "$kstub"; chmod +x "$kstub"
+  local sstub="$HOME/.claude/.stub/spawncmd"
+  printf '#!/bin/sh\nprintf x >> %q\nexit 0\n' "$RESTART_SPAWN_COUNTER" > "$sstub"; chmod +x "$sstub"
+  export SDLC_KILL_CMD="$kstub" SDLC_SPAWN_CMD="$sstub" SDLC_RESTART_KILL_DELAY=0
+}
+disarm_restart_seams() { unset SDLC_KILL_CMD SDLC_SPAWN_CMD SDLC_RESTART_KILL_DELAY; }
+restart_spawn_count() { [ -s "$RESTART_SPAWN_COUNTER" ] && wc -c < "$RESTART_SPAWN_COUNTER" | tr -d ' ' || echo 0; }
+restart_term_count()  { [ -s "$RESTART_KILL_LOG" ] && grep -c . "$RESTART_KILL_LOG" | tr -d ' ' || echo 0; }
+
 # ADR-002 Decision 2a: signal wrappers sanctioned on the poker's own poke
 # path only — the perl alarm-exec idiom may appear inside do_poke's body and
 # nowhere else. Extracts do_poke's own line range (function-boundary awk) and
@@ -594,14 +621,15 @@ p1() {
 }
 p1
 
-echo "=== 4/2-2: IDLE_STALLED → poked; IDLE (fresh) → zero invocations ==="
+echo "=== 4/2-2: IDLE_STALLED with a live TUI (status idle) → SKIP-LIVE-TUI, zero poke (KA-R13); IDLE (fresh) → zero invocations ==="
 p2() {
   new_home
   local cwd; cwd=$(real_cwd d2)
-  arm_goal as2 4 "$cwd" sid-s2 4242 200 user   # idle + 200s → IDLE_STALLED
+  arm_goal as2 4 "$cwd" sid-s2 4242 200 user   # idle + 200s → IDLE_STALLED; status idle = live TUI = attended
   stub_registry_state idle sid-s2
   run_poker
-  assert_contains "4/2-2 IDLE_STALLED poked" "--resume sid-s2" "$(claude_calls)"
+  assert_eq "4/2-2 IDLE_STALLED + live TUI → ZERO poke (presence rule bars drive)" "" "$(claude_calls)"
+  assert_contains "4/2-2 IDLE_STALLED + live TUI → SKIP-LIVE-TUI audited" "as2 SKIP-LIVE-TUI" "$(audit_of)"
   new_home
   cwd=$(real_cwd d2b)
   arm_goal ai2 4 "$cwd" sid-i2 4242 60 user    # idle + 60s → IDLE (fresh)
@@ -661,12 +689,15 @@ p3() {
 }
 p3
 
-echo "=== 4/2-4: WEDGE notification — Title + recovery command verbatim ==="
+echo "=== 4/2-4: WEDGE notification (tui-less, no baton → legacy WEDGE notify) — Title + recovery command verbatim ==="
 p4() {
   new_home
   local cwd; cwd=$(real_cwd d4)
+  # status null (NOSTATUS) = a headless in-flight vehicle (tui-less), the ONLY
+  # WEDGED shape the machine may act on. No baton planted → the legacy WEDGE
+  # notification path (a real restart needs the ladder + baton).
   arm_goal aw4 4 "$cwd" sid-w4 31337 1000 busy  # WEDGED (primed+corroborated), known pid for recovery string
-  stub_registry_state busy sid-w4
+  stub_registry_state nostatus sid-w4
   prime_wedged aw4 0
   export SDLC_WEDGE_CPU_FAKE=0
   run_poker
@@ -717,8 +748,8 @@ echo "=== 4/2-7: retry-cap — 3 pokes then POKE-FAIL; transcript movement reset
 p7() {
   new_home
   local cwd; cwd=$(real_cwd d7)
-  arm_goal as7 4 "$cwd" sid-p7 4242 200 user    # IDLE_STALLED, pokeable
-  stub_registry_state idle sid-p7
+  arm_goal as7 4 "$cwd" sid-p7 2147483647 200 user    # DEAD (registry absent → tui-less, pokeable)
+  stub_registry_state absent
   run_poker; run_poker; run_poker               # 3 pokes, same episode (stub never moves transcript)
   assert_eq "4/2-7 three pokes within the cap" "3" "$(count_lines "$(claude_calls)" "resume sid-p7")"
   run_poker                                      # 4th poll: cap exhausted
@@ -735,8 +766,8 @@ echo "=== 4/2-8: a failing poke (exit nonzero) counts against the cap ==="
 p8() {
   new_home
   local cwd; cwd=$(real_cwd d8)
-  arm_goal as8 4 "$cwd" sid-p8 4242 200 user
-  stub_registry_state idle sid-p8
+  arm_goal as8 4 "$cwd" sid-p8 2147483647 200 user    # DEAD (registry absent → tui-less)
+  stub_registry_state absent
   echo 1 > "$HOME/.claude/.stub/poke.rc"         # every poke exits nonzero
   run_poker; run_poker; run_poker
   assert_eq "4/2-8 three failing pokes counted" "3" "$(count_lines "$(claude_calls)" "resume sid-p8")"
@@ -838,8 +869,8 @@ echo "=== 4/3-2 (F2): failure-aware cap — rc=1 pokes that MOVE the transcript 
 f2() {
   new_home
   local cwd tpath; cwd=$(real_cwd fp2)
-  arm_goal af2 4 "$cwd" sid-f2 4242 260 user    # idle + 260s → IDLE_STALLED (pokeable)
-  stub_registry_state idle sid-f2
+  arm_goal af2 4 "$cwd" sid-f2 2147483647 260 user    # DEAD (registry absent → tui-less, pokeable)
+  stub_registry_state absent
   echo 1 > "$HOME/.claude/.stub/poke.rc"         # every poke fails (models "Not logged in")
   tpath="$(real_project_dir "$cwd")/sid-f2.jsonl"
   # Each poll: the failed poke's own turn lands as fresh transcript movement
@@ -958,8 +989,8 @@ echo "=== 4/4-2 (F3): poke timeout — a hung poke is alarmed, POKE-TIMEOUT audi
 f3_timeout() {
   new_home
   local cwd; cwd=$(real_cwd f4t)
-  arm_goal at4 4 "$cwd" sid-t4 4242 200 user     # idle + 200s → IDLE_STALLED (pokeable)
-  stub_registry_state idle sid-t4
+  arm_goal at4 4 "$cwd" sid-t4 2147483647 200 user     # DEAD (registry absent → tui-less, pokeable)
+  stub_registry_state absent
   : > "$HOME/.claude/.stub/poke-block"           # stub busy-works past POKE_TIMEOUT
   POKE_TIMEOUT=2 run_poker                        # poll1: poke hangs → alarmed
   assert_eq "4/4-2 poker exits 0 after a timed-out poke (run completes, lock released)" 0 "$POKER_EXIT"
@@ -977,8 +1008,8 @@ f3_timeout() {
   # A fast rc=0 poke (no block) is unaffected by the timeout wrapper.
   new_home
   cwd=$(real_cwd f4f)
-  arm_goal at4f 4 "$cwd" sid-t4f 4242 200 user
-  stub_registry_state idle sid-t4f
+  arm_goal at4f 4 "$cwd" sid-t4f 2147483647 200 user   # DEAD (registry absent → tui-less)
+  stub_registry_state absent
   POKE_TIMEOUT=2 run_poker
   assert_contains "4/4-2 a fast poke under the timeout succeeds (normal POKE rc=0 audit)" "resume sid-t4f rc=0" "$(audit_of)"
   TOTAL=$((TOTAL + 1))
@@ -1241,21 +1272,30 @@ L3() {
 }
 L3
 
-echo "=== 4/4-wedged: WEDGED+baton → observe journaled (no child spawned) ==="
+echo "=== 4/S5 tui-less WEDGED+baton → RESTART directly (no poke): restart effect journaled, successor spawned, RESTART notify rides ==="
 L4() {
   new_home
   local cwd; cwd=$(ladder_cwd wg)
-  arm_goal gwg 4 "$cwd" sid-gwg "$$" 1000 busy  # busy + quiet>ceiling + primed corroboration → WEDGED
-  stub_registry_state busy sid-gwg
+  # status null (NOSTATUS) = a headless in-flight vehicle (tui-less) — the ONLY
+  # WEDGED shape the machine may restart. A SAFE fake pid (never real-signalled;
+  # the SIGTERM seam is stubbed). Corroborated wedge enters RESTART directly.
+  arm_goal gwg 4 "$cwd" sid-gwg 2147483647 1000 busy
+  stub_registry_state nostatus sid-gwg
   plant_baton gwg "next"
   prime_wedged gwg 0
   local anc; anc=$(anchor_of gwg)
+  arm_restart_seams
   export SDLC_WEDGE_CPU_FAKE=0
   run_poker
-  unset SDLC_WEDGE_CPU_FAKE
-  assert_eq "4/4-wedged observe → NO poke child spawned" "" "$(claude_calls)"
-  assert_true "4/4-wedged observe effect journaled under rung:gwg:observe:<anchor>:1" \
-    ledger_line_has gwg effect "rung:gwg:observe:$anc:1"
+  unset SDLC_WEDGE_CPU_FAKE; disarm_restart_seams
+  assert_eq "4/S5 WEDGED → NO poke child (a busy target is never poked)" "" "$(claude_calls)"
+  assert_true "4/S5 WEDGED → restart EFFECT journaled under restart:gwg:<anchor>:1 (no observe rung)" \
+    ledger_line_has gwg effect "restart:gwg:$anc:1"
+  assert_eq "4/S5 WEDGED → the vehicle was torn down via the lib SIGTERM seam (exactly once)" "1" "$(restart_term_count)"
+  assert_eq "4/S5 WEDGED → a successor was spawned" "1" "$(restart_spawn_count)"
+  assert_contains "4/S5 WEDGED → RESTART notification rides the action" "Title: gwg: RESTART" "$(curl_calls)"
+  assert_eq "4/S5 WEDGED → NO observe effect journaled (observe rung retired for WEDGED)" "0" \
+    "$(count_lines "$(cat "$(ledger_path gwg)" 2>/dev/null || true)" "observe:")"
 }
 L4
 
@@ -2295,6 +2335,113 @@ S4_auto_differential() {
   assert_true "4/S4-diff auto DEAD → poke seam FIRES" test "$(resume_calls)" -ge 1
 }
 S4_auto_differential
+
+# ==========  slice 4/S5 — presence rule + restart execution (R3/AC-6/AC-12)  =====
+# The PRESENCE RULE (KA-R13): a status-non-null vehicle (live TUI) bars ALL drive
+# verbs regardless of pilot; a registry-degraded goal (lib present) fails closed to
+# notify-only. AMBIGUOUS wedges never restart. The restart cap parks GATED. Every
+# drive-seam is stubbed (arm_restart_seams) so no real process is signalled.
+
+echo "=== 4/S5-attached-idle: IDLE_STALLED with a live TUI (status idle) → SKIP-LIVE-TUI, STALL-ATTACHED nag, zero drive seam ==="
+S5_attached_idle() {
+  new_home
+  local cwd; cwd=$(ladder_cwd sai)
+  arm_goal gsai 4 "$cwd" sid-sai 2147483647 400 user   # idle + stale → IDLE_STALLED
+  stub_registry_state idle sid-sai                       # status idle = live TUI = attended
+  plant_baton gsai "next"                                # baton present — must STILL not drive
+  arm_restart_seams
+  run_poker
+  disarm_restart_seams
+  assert_contains "4/S5-attached-idle → SKIP-LIVE-TUI audited" "gsai SKIP-LIVE-TUI" "$(audit_of)"
+  assert_eq "4/S5-attached-idle → ZERO poke seam" "" "$(claude_calls)"
+  assert_eq "4/S5-attached-idle → ZERO SIGTERM seam" "0" "$(restart_term_count)"
+  assert_eq "4/S5-attached-idle → ZERO spawn seam" "0" "$(restart_spawn_count)"
+  assert_contains "4/S5-attached-idle → STALL-ATTACHED nag notify (AUTO would have driven)" "Title: gsai: STALL-ATTACHED" "$(curl_calls)"
+}
+S5_attached_idle
+
+echo "=== 4/S5-attached-wedged: WEDGED with a live TUI (status busy) → SKIP-LIVE-TUI, zero SIGTERM/spawn (never kill an attended vehicle) ==="
+S5_attached_wedged() {
+  new_home
+  local cwd; cwd=$(ladder_cwd saw)
+  arm_goal gsaw 4 "$cwd" sid-saw 2147483647 1000 busy   # busy + quiet>ceiling + primed → WEDGED
+  stub_registry_state busy sid-saw                        # status busy = live TUI = attended
+  plant_baton gsaw "next"
+  prime_wedged gsaw 0
+  arm_restart_seams
+  export SDLC_WEDGE_CPU_FAKE=0
+  run_poker
+  unset SDLC_WEDGE_CPU_FAKE; disarm_restart_seams
+  assert_contains "4/S5-attached-wedged → SKIP-LIVE-TUI audited" "gsaw SKIP-LIVE-TUI" "$(audit_of)"
+  assert_eq "4/S5-attached-wedged → ZERO SIGTERM seam (kill of an attended vehicle forbidden)" "0" "$(restart_term_count)"
+  assert_eq "4/S5-attached-wedged → ZERO spawn seam" "0" "$(restart_spawn_count)"
+  assert_eq "4/S5-attached-wedged → ZERO restart effect journaled" "0" \
+    "$(count_lines "$(cat "$(ledger_path gsaw)" 2>/dev/null || true)" "restart:")"
+}
+S5_attached_wedged
+
+echo "=== 4/S5-degraded: registry unavailable + lib present → SKIP-DEGRADED, notify-only, zero drive ==="
+S5_degraded() {
+  new_home
+  local cwd; cwd=$(ladder_cwd sdg)
+  arm_goal gsdg 4 "$cwd" sid-sdg 2147483647 400 user   # dead pid → degrade_classify → DEAD
+  stub_registry_state fail                               # registry rc≠0 → degrade; lib IS present
+  plant_baton gsdg "next"
+  arm_restart_seams
+  run_poker
+  disarm_restart_seams
+  assert_contains "4/S5-degraded → SKIP-DEGRADED audited (fail-closed, presence unconfirmable)" "gsdg SKIP-DEGRADED" "$(audit_of)"
+  assert_eq "4/S5-degraded → ZERO poke seam" "" "$(claude_calls)"
+  assert_eq "4/S5-degraded → ZERO SIGTERM seam" "0" "$(restart_term_count)"
+  assert_eq "4/S5-degraded → ZERO spawn seam" "0" "$(restart_spawn_count)"
+  assert_eq "4/S5-degraded → ZERO restart effect journaled" "0" \
+    "$(count_lines "$(cat "$(ledger_path gsdg)" 2>/dev/null || true)" "restart:")"
+}
+S5_degraded
+
+echo "=== 4/S5-ambiguous: high-CPU quiet (AMBIGUOUS wedge) → BUSY, never restart ==="
+S5_ambiguous_never_restart() {
+  new_home
+  local cwd; cwd=$(ladder_cwd sam)
+  arm_goal gsam 4 "$cwd" sid-sam 2147483647 1000 busy
+  stub_registry_state nostatus sid-sam                    # tui-less, WEDGED-shaped
+  plant_baton gsam "next"
+  prime_wedged gsam 0                                      # cputime baseline 0
+  arm_restart_seams
+  export SDLC_WEDGE_CPU_FAKE=500                           # cputime CLIMBING → AMBIGUOUS (probe Q7) → BUSY
+  run_poker
+  unset SDLC_WEDGE_CPU_FAKE; disarm_restart_seams
+  assert_eq "4/S5-ambiguous → ZERO SIGTERM seam (ambiguous never restarts)" "0" "$(restart_term_count)"
+  assert_eq "4/S5-ambiguous → ZERO spawn seam" "0" "$(restart_spawn_count)"
+  assert_eq "4/S5-ambiguous → ZERO restart effect journaled" "0" \
+    "$(count_lines "$(cat "$(ledger_path gsam)" 2>/dev/null || true)" "restart:")"
+  assert_contains "4/S5-ambiguous → WEDGE-AMBIGUOUS audited (notify-only)" "gsam WEDGE-AMBIGUOUS" "$(audit_of)"
+}
+S5_ambiguous_never_restart
+
+echo "=== 4/S5-restart-cap: 2 restarts spent → restart-exhausted parks GATED + GATED notify, ladder stops ==="
+S5_restart_cap() {
+  new_home
+  local cwd; cwd=$(ladder_cwd src)
+  arm_goal gsrc 4 "$cwd" sid-src 2147483647 1000 busy
+  stub_registry_state nostatus sid-src
+  plant_baton gsrc "next"
+  prime_wedged gsrc 0
+  local anc; anc=$(anchor_of gsrc)
+  # Seed the cap as spent: two applied restart effects under the current anchor.
+  sdlc_effect_run gsrc "restart:gsrc:$anc:1" "restart 1" -- true >/dev/null 2>&1
+  sdlc_effect_run gsrc "restart:gsrc:$anc:2" "restart 2" -- true >/dev/null 2>&1
+  arm_restart_seams
+  export SDLC_WEDGE_CPU_FAKE=0
+  run_poker
+  unset SDLC_WEDGE_CPU_FAKE; disarm_restart_seams
+  assert_contains "4/S5-cap → restart cap park audited (LADDER-RESTART-EXHAUSTED)" "gsrc LADDER-RESTART-EXHAUSTED" "$(audit_of)"
+  assert_contains "4/S5-cap → plan parked GATED (Wake Note appended)" "## Wake Note" "$(cat "$HOME/plans/gsrc.plan.md")"
+  assert_contains "4/S5-cap → GATED notification rides the exhaustion" "Title: gsrc: GATED" "$(curl_calls)"
+  assert_eq "4/S5-cap → NO third restart (ladder stopped at the cap)" "0" "$(restart_term_count)"
+  assert_eq "4/S5-cap → NO new successor spawned" "0" "$(restart_spawn_count)"
+}
+S5_restart_cap
 
 # ============================================================
 echo ""
