@@ -157,11 +157,32 @@ plan_has_wake_note() {  # $1=plan
     END { exit(found ? 0 : 1) }'
 }
 
-# Armed = registration present (loaded) AND the plan declares scale: continuous.
-# The plan-readability half is checked by the caller (unreadable plan is
-# MALFORMED, not merely unarmed); here we test only the scale declaration.
-is_armed_scale() {  # uses REG_PLAN
-  [ "$(plan_frontmatter "$REG_PLAN" scale)" = "continuous" ]
+# Armed = registration well-formed (checked by the caller before this call —
+# unreadable plan is MALFORMED, not merely unarmed) AND
+# sdlc_keepalive_effective(REG_PLAN) = true. keepalive:false / fallback-false
+# (Global Constraints fallback table: explicit flag wins; absent-flag
+# continuous → true; absent-flag task/wave/epic → false) is an AUDITED skip
+# (SKIP-UNARMED), replacing the old silent `continue`. The resolver's rc 1
+# (unreadable plan — should not occur post-caller-check, but fail-loud rather
+# than assume) and rc 2 (off-enum keepalive value) both land on the existing
+# MALFORMED-RECORD audit path — never guess past a malformed flag.
+is_armed() {  # $1=gid; uses REG_PLAN
+  local gid="$1" ka karc
+  if [ "$SDLC_LIB_OK" != "1" ]; then
+    # Lib unavailable (already audited once via LADDER-DEGRADE, gid "-") —
+    # sdlc_keepalive_effective is undefined in this branch, so fall back to
+    # the pre-S2 scale-only check, byte-identical to the old is_armed_scale.
+    [ "$(plan_frontmatter "$REG_PLAN" scale)" = "continuous" ]
+    return $?
+  fi
+  ka="$(sdlc_keepalive_effective "$REG_PLAN")"; karc=$?
+  if [ "$karc" -ne 0 ]; then
+    audit_line "$gid" MALFORMED-RECORD "keepalive resolution failed (rc=$karc) for $REG_PLAN"
+    return 1
+  fi
+  [ "$ka" = "true" ] && return 0
+  audit_line "$gid" SKIP-UNARMED "keepalive effective=false"
+  return 1
 }
 
 # ---------- transcript signals ----------
@@ -799,7 +820,7 @@ process_goals() {
       audit_line "$gid" MALFORMED-RECORD "registered plan not readable: $REG_PLAN"
       continue
     fi
-    is_armed_scale || continue        # scale != continuous → unarmed/disarm, silent skip
+    is_armed "$gid" || continue       # keepalive-effective=false → audited SKIP-UNARMED, or MALFORMED-RECORD
     state=$(classify_goal "$gid" "$reg_json" "$reg_rc")
     [ -n "$state" ] || continue       # total-signal-loss degrade → already audited, skip
     prev=$(read_cache "$gid")         # previous classification (transition dedupe)

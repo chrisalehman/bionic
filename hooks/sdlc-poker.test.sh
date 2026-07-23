@@ -124,15 +124,18 @@ plant_goal() {
   } > "$f"
 }
 
-# plant_plan <path> <current> [wake:0/1] [scale=continuous]
+# plant_plan <path> <current> [wake:0/1] [scale=continuous] [keepalive]
+# Empty/omitted keepalive ⇒ the key is ABSENT from frontmatter (fallback-table
+# resolution applies) — mirrors write_plan's convention in sdlc-state-lib.test.sh.
 plant_plan() {
-  local p="$1" cur="$2" wake="${3:-0}" scale="${4:-continuous}"
+  local p="$1" cur="$2" wake="${3:-0}" scale="${4:-continuous}" ka="${5:-}"
   mkdir -p "$(dirname "$p")"
   {
     echo "---"
     echo "governing-skill: superpowers:writing-plans"
     echo "canonical_sdlc_version: 12"
     echo "scale: $scale"
+    [ -n "$ka" ] && echo "keepalive: $ka"
     echo "---"
     echo ""
     echo "## SDLC State"
@@ -1810,6 +1813,119 @@ PF2() {
   assert_eq "6/critic park-false-complete no complete: latch journaled" "0" "$(complete_effect_count cmf2)"
 }
 PF2
+
+# ---------- 4/S2: poker arming eligibility — keepalive swap ----------
+# is_armed replaces is_armed_scale: registration well-formed AND
+# sdlc_keepalive_effective(REG_PLAN)=true. The fallback table (wave-keepalive
+# plan §Global Constraints, NORMATIVE): explicit keepalive wins; absent-flag
+# continuous → true; absent-flag task/wave/epic → false.
+
+echo "=== 4/S2-1: armed wave-scale plan (keepalive: true) → classified (was: silently skipped) ==="
+S2_1() {
+  new_home
+  local plan="$HOME/plans/gs21.plan.md"
+  plant_plan "$plan" 4 0 wave true          # scale: wave, keepalive: true
+  plant_goal gs21 "$plan" /proj/s21 sid-s21 4242
+  plant_transcript_age /proj/s21 sid-s21 30 user
+  stub_registry_state idle sid-s21
+  run_poker
+  assert_eq "4/S2-1 poker exit 0" 0 "$POKER_EXIT"
+  assert_true "4/S2-1 keepalive:true wave-scale → classified (status written)" status_exists gs21
+}
+S2_1
+
+echo "=== 4/S2-2: keepalive:false continuous → skipped WITH audited SKIP-UNARMED (was: silent) ==="
+S2_2() {
+  new_home
+  local plan="$HOME/plans/gs22.plan.md"
+  plant_plan "$plan" 4 0 continuous false   # scale: continuous, keepalive: false
+  plant_goal gs22 "$plan" /proj/s22 sid-s22 4242
+  plant_transcript_age /proj/s22 sid-s22 30 user
+  stub_registry_state idle sid-s22
+  run_poker
+  assert_eq "4/S2-2 poker exit 0" 0 "$POKER_EXIT"
+  assert_true "4/S2-2 keepalive:false continuous → NOT classified" bash -c '! status_exists gs22'
+  assert_contains "4/S2-2 skip is audited SKIP-UNARMED (not silent)" "gs22 SKIP-UNARMED" "$(audit_of)"
+}
+S2_2
+
+echo "=== 4/S2-3: absent-flag continuous → still armed (KA-R14 compat, zero migration) ==="
+S2_3() {
+  new_home
+  arm_goal gs23 4 /proj/s23 sid-s23 4242 30 user   # arm_goal's plant_plan omits keepalive
+  stub_registry_state idle sid-s23
+  run_poker
+  assert_eq "4/S2-3 poker exit 0" 0 "$POKER_EXIT"
+  assert_true "4/S2-3 absent-flag continuous → classified (fallback true)" status_exists gs23
+}
+S2_3
+
+echo "=== 4/S2-4: absent-flag task/wave/epic → skipped, audited SKIP-UNARMED (fallback false, all 3 scales) ==="
+S2_4() {
+  local scale
+  for scale in task wave epic; do
+    new_home
+    local plan="$HOME/plans/gs24-$scale.plan.md"
+    plant_plan "$plan" 4 0 "$scale"          # keepalive absent
+    plant_goal "gs24-$scale" "$plan" "/proj/s24-$scale" "sid-s24-$scale" 4242
+    plant_transcript_age "/proj/s24-$scale" "sid-s24-$scale" 30 user
+    stub_registry_state idle "sid-s24-$scale"
+    run_poker
+    assert_eq "4/S2-4 ($scale) poker exit 0" 0 "$POKER_EXIT"
+    assert_true "4/S2-4 ($scale) absent-flag → NOT classified (fallback false)" \
+      bash -c "! status_exists gs24-$scale"
+    assert_contains "4/S2-4 ($scale) skip is audited SKIP-UNARMED" "gs24-$scale SKIP-UNARMED" "$(audit_of)"
+  done
+}
+S2_4
+
+echo "=== 4/S2-5: explicit keepalive:true task-scale → armed ==="
+S2_5() {
+  new_home
+  local plan="$HOME/plans/gs25.plan.md"
+  plant_plan "$plan" 4 0 task true          # scale: task, keepalive: true
+  plant_goal gs25 "$plan" /proj/s25 sid-s25 4242
+  plant_transcript_age /proj/s25 sid-s25 30 user
+  stub_registry_state idle sid-s25
+  run_poker
+  assert_eq "4/S2-5 poker exit 0" 0 "$POKER_EXIT"
+  assert_true "4/S2-5 keepalive:true task-scale → classified" status_exists gs25
+}
+S2_5
+
+echo "=== 4/S2-6: off-enum keepalive value → MALFORMED-RECORD (fail-loud, never guess; distinct from SKIP-UNARMED) ==="
+S2_6() {
+  new_home
+  local plan="$HOME/plans/gs26.plan.md"
+  plant_plan "$plan" 4 0 continuous maybe   # keepalive: maybe (off-enum)
+  plant_goal gs26 "$plan" /proj/s26 sid-s26 4242
+  plant_transcript_age /proj/s26 sid-s26 30 user
+  stub_registry_state idle sid-s26
+  run_poker
+  assert_eq "4/S2-6 poker exit 0" 0 "$POKER_EXIT"
+  assert_true "4/S2-6 off-enum keepalive → NOT classified" bash -c '! status_exists gs26'
+  assert_contains "4/S2-6 off-enum keepalive → MALFORMED-RECORD audited" "gs26 MALFORMED-RECORD" "$(audit_of)"
+  assert_true "4/S2-6 off-enum keepalive → NOT the SKIP-UNARMED line (fail-loud, not a guessed skip)" \
+    bash -c '! printf "%s" "$1" | grep -qF "gs26 SKIP-UNARMED"' _ "$(audit_of)"
+}
+S2_6
+
+echo "=== 4/S2-7 (AS-11 guard): empty SESSION_ID registration → MALFORMED-RECORD, no classify, no resume ==="
+S2_7() {
+  new_home
+  local plan="$HOME/plans/gs27.plan.md"
+  plant_plan "$plan" 4 0 continuous
+  plant_goal gs27 "$plan" /proj/s27 "" 4242   # SESSION_ID field present but empty
+  plant_transcript_age /proj/s27 sid-s27 30 user
+  stub_registry_state idle sid-s27
+  run_poker
+  assert_eq "4/S2-7 poker exit 0" 0 "$POKER_EXIT"
+  assert_true "4/S2-7 empty SESSION_ID → NOT classified" bash -c '! status_exists gs27'
+  assert_contains "4/S2-7 empty SESSION_ID → MALFORMED-RECORD audited" "gs27 MALFORMED-RECORD" "$(audit_of)"
+  assert_eq "4/S2-7 empty SESSION_ID → no resume attempted" "0" \
+    "$(count_lines "$(claude_calls)" "resume ")"
+}
+S2_7
 
 # ============================================================
 echo ""
