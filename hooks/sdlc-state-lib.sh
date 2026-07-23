@@ -1733,9 +1733,14 @@ sdlc_ladder_anchor() {
   fi
 
   # 3. goal branch tip — an unreadable repo/branch is fail-closed (the durable
-  #    tuple cannot be completed without it).
-  branch_tip=$(git -C "$dir" rev-parse "$BATON_BRANCH" 2>/dev/null)
-  if [ -z "$branch_tip" ]; then
+  #    tuple cannot be completed without it). `--verify --quiet ... ^{commit}`
+  #    (never plain rev-parse) so an unresolvable ref yields EMPTY output at a
+  #    nonzero rc instead of git's literal-ref-echoed-to-stdout quirk (rc 128,
+  #    ref name on stdout) — the `-z` guard below would otherwise miss that
+  #    literal and digest it (F1b, Step-6 critic-fix-2). The 40-hex check is a
+  #    second, independent gate on the same fail-closed contract.
+  branch_tip=$(git -C "$dir" rev-parse --verify --quiet "${BATON_BRANCH}^{commit}" 2>/dev/null)
+  if ! printf '%s' "$branch_tip" | grep -qE '^[0-9a-f]{40}$'; then
     echo "defect: cwd-unreadable: cannot resolve branch tip for '$BATON_BRANCH' in: $dir" >&2
     return 1
   fi

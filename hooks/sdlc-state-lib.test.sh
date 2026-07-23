@@ -3143,6 +3143,58 @@ ac_anchor_defects() {
 }
 ac_anchor_defects
 
+echo "--- F1b (critic-fix-2): unresolvable baton branch → fail-closed defect, NOT a fail-open literal-ref digest ---"
+ac_anchor_branch_neverexisted() {
+  anchor_fixture "anc-brF1b" 4
+  local gid="anc-brF1b" err rc out
+  # baton's recorded branch is a typo/never-existed name in a perfectly valid repo
+  # (critic-poc/failopen.sh repro). Unpatched: git rev-parse echoes the LITERAL
+  # ref name to stdout at rc 128; the `-z` guard misses it → fail-open digest.
+  awk '/^branch:/{print "branch: feat/does-not-exist"; next}{print}' \
+    "$(baton_path "$gid")" > "$(baton_path "$gid").tmp" && mv "$(baton_path "$gid").tmp" "$(baton_path "$gid")"
+
+  err="$(sdlc_ladder_anchor "$gid" "$AF_PLAN" "$AF_DIR" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "F1b never-existed branch → nonzero (fail-closed, not fail-open)" "$rc"
+  assert_contains "F1b never-existed branch surfaces a named defect" "defect:" "$err"
+
+  out="$(sdlc_ladder_anchor "$gid" "$AF_PLAN" "$AF_DIR" 2>/dev/null)"
+  assert_eq "F1b never-existed branch → NOTHING digested on stdout" "" "$out"
+}
+ac_anchor_branch_neverexisted
+
+echo "--- F1b: branch renamed/deleted after merge (baton still names the old ref) → same fail-closed defect ---"
+ac_anchor_branch_deleted() {
+  anchor_fixture "anc-brdel" 4
+  local gid="anc-brdel" err rc out
+  # the goal branch existed and had a real tip, but was renamed away (deleted
+  # post-merge is the same shape) — the baton's recorded name no longer resolves.
+  git -C "$AF_DIR" branch -m "$AF_BRANCH" "${AF_BRANCH}-renamed" -q
+
+  err="$(sdlc_ladder_anchor "$gid" "$AF_PLAN" "$AF_DIR" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "F1b renamed/deleted branch → nonzero (fail-closed)" "$rc"
+  assert_contains "F1b renamed/deleted branch surfaces a named defect" "defect:" "$err"
+
+  out="$(sdlc_ladder_anchor "$gid" "$AF_PLAN" "$AF_DIR" 2>/dev/null)"
+  assert_eq "F1b renamed/deleted branch → NOTHING digested on stdout" "" "$out"
+}
+ac_anchor_branch_deleted
+
+echo "--- F1b regression: a VALID branch still digests IDENTICALLY (resolvable-branch behavior is unchanged by the fix) ---"
+ac_anchor_branch_valid_unchanged() {
+  anchor_fixture "anc-brok" 4
+  local gid="anc-brok" want got tip
+  # independently reproduce the durable tuple via the OLD raw rev-parse
+  # resolution (which agrees byte-for-byte with the new --verify resolution on
+  # any REAL, resolvable ref) and assert the library's actual output matches —
+  # proving the fix changes nothing for the healthy path.
+  tip=$(git -C "$AF_DIR" rev-parse "$AF_BRANCH" 2>/dev/null)
+  baton_parse "$(baton_path "$gid")" >/dev/null 2>&1
+  want="$(ledger_digest "$(printf '%s\n%s\n%s\n%s' 4 "$tip" 0 "$BATON_WRITTEN_AT")")"
+  got="$(anchor_of_lib "$gid")"
+  assert_eq "F1b regression: resolvable-branch anchor byte-identical to the raw-rev-parse formula" "$want" "$got"
+}
+ac_anchor_branch_valid_unchanged
+
 # ============================================================
 echo ""
 echo "========================================"

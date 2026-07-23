@@ -1334,6 +1334,33 @@ L9() {
 }
 L9
 
+echo "=== 6/critic-fix-2 (F1b): unresolvable baton branch → LADDER-SKIP audit + fail-closed skip; poll continues to next goal ==="
+L9b() {
+  new_home
+  local cwd1 cwd2; cwd1=$(ladder_cwd fb1); cwd2=$(ladder_cwd fb2)
+  arm_goal gbr 4 "$cwd1" sid-gbr 2147483647 300 user    # DEAD, baton names a branch that does not resolve
+  arm_goal gok3 4 "$cwd2" sid-gok3 2147483647 300 user  # DEAD, clean baton
+  stub_registry_state absent
+  # baton for gbr records a branch that never existed in cwd1 (typo / deleted
+  # after merge / wrong repo) — sdlc_ladder_anchor must fail-closed (F1b), never
+  # digest the literal ref name and mint a fake anchor.
+  local plan1 tip1
+  plan1=$(sed -n 's/^PLAN=//p' "$HOME/.claude/sdlc-goals/gbr")
+  tip1=$(git -C "$cwd1" rev-parse HEAD)
+  baton_write "gbr" "$plan1" "$cwd1" "feat/does-not-exist" "epic-x" "$tip1" 4 "sid-gbr" none "next" none none >/dev/null 2>&1
+  plant_baton gok3 "next"
+  local anc; anc=$(anchor_of gok3)
+  run_poker
+  assert_eq "6/critic-fix-2 poker exit 0" 0 "$POKER_EXIT"
+  assert_contains "6/critic-fix-2 LADDER-SKIP audited for the unresolvable branch" \
+    "gbr LADDER-SKIP" "$(audit_of)"
+  assert_eq "6/critic-fix-2 the unresolvable-branch goal was NOT poked (fail-closed, no anchor minted)" "0" \
+    "$(count_lines "$(claude_calls)" "resume sid-gbr")"
+  assert_true "6/critic-fix-2 the SECOND goal was still laddered (poll continues past the bad goal)" \
+    ledger_line_has gok3 effect "rung:gok3:poke:$anc:1"
+}
+L9b
+
 echo "=== 4/4-degrade: lib unavailable → LADDER-DEGRADE audit + baton goal falls back to legacy poke (no ladder) ==="
 L10() {
   new_home
