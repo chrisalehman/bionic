@@ -36,6 +36,19 @@ WEDGE_QUIET="${WEDGE_QUIET:-540}"           # busy quiet → WEDGED (3× thresho
 POKE_CAP="${POKE_CAP:-3}"                    # max pokes per stall episode (4/2)
 POKE_TIMEOUT="${POKE_TIMEOUT:-900}"          # per-poke wall-clock cap, seconds (C4 amendment B)
 
+# Wedge corroboration (slice 4/S3, spec R4/AC-5; probe Q7). A WEDGED classification
+# requires ALL of: registry-busy (or status-null in-flight), transcript bytes flat,
+# and quiet beyond the pilot-keyed ceiling — corroborated across SDLC_WEDGE_OBS
+# consecutive polls. Process-tree cputime flatness SUPPORTS the verdict; accumulating
+# cputime forces AMBIGUOUS (notify-only, never restart), since waiting-vs-hung is
+# indistinguishable on CPU (probe Q7) and the ceiling term carries detection.
+# Ceilings are pilot-keyed (MANUAL longer than AUTO). Overridable exactly as the
+# other thresholds are, so the fixture suite and future tuning rebind without edits.
+SDLC_WEDGE_OBS="${SDLC_WEDGE_OBS:-3}"                          # consecutive corroborating polls
+SDLC_WEDGE_CEILING_AUTO="${SDLC_WEDGE_CEILING_AUTO:-900}"      # AUTO quiet ceiling (> 600s max tool timeout)
+SDLC_WEDGE_CEILING_MANUAL="${SDLC_WEDGE_CEILING_MANUAL:-1800}" # MANUAL quiet ceiling (longer than AUTO)
+SDLC_WEDGE_CPU_EPSILON="${SDLC_WEDGE_CPU_EPSILON:-2}"         # cputime delta (s) at/below which flat
+
 # Absolute claude binary for the POKE (C4: alias not inherited). The registry
 # READ uses PATH-resolved bare `claude` (AS-7a); only the poke is pinned. Kept
 # overridable exactly as the thresholds are, so the fixture suite points it at a
@@ -94,6 +107,8 @@ lock_dir()    { printf '%s/.claude/sdlc-poker.lock' "$HOME"; }
 
 # Portable mtime (epoch seconds): BSD stat first, GNU stat fallback.
 file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
+# Portable byte size: BSD stat first, GNU stat fallback.
+file_size() { stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null; }
 iso_now()    { date -u +%Y-%m-%dT%H:%M:%SZ; }
 iso_of_mtime() {
   local m; m=$(file_mtime "$1" 2>/dev/null) || m=""
@@ -248,6 +263,57 @@ transcript_grammar() {
   else
     echo unknown
   fi
+}
+
+# ---------- slice 4/S3: corroborated wedge detector (R4/AC-5; probe Q7) ----------
+# Convert a `ps -o time=` value to whole seconds. Accepts SS(.ss), MM:SS(.ss),
+# HH:MM:SS and DD-HH:MM:SS (BSD and GNU shapes); empty → 0. Single `awk -v` with no
+# embedded newline (BSD-awk safe). The single parser both wedge_cputime and any
+# future consumer share, so the ps-format handling never drifts across copies.
+_cputime_to_secs() {  # $1=ps-time-string → integer seconds
+  awk -v t="$1" 'BEGIN {
+    if (t == "") { print 0; exit }
+    d = 0
+    if (split(t, dd, "-") == 2) { d = dd[1] + 0; t = dd[2] }
+    sub(/\.[0-9]+$/, "", t)
+    n = split(t, p, ":"); s = 0
+    for (i = 1; i <= n; i++) s = s * 60 + (p[i] + 0)
+    print d * 86400 + s
+  }'
+}
+
+# Process-tree cputime in whole seconds for a pid: the pid PLUS every descendant,
+# each read with `ps -o time= -p <pid>` and summed (probe Q7 term). Descendants come
+# from a single `ps` ppid map walked to a fixed point — no `pgrep -P` dependency, no
+# `timeout` binary, BSD/GNU-portable. Returns rc 1 (no output) when the ROOT pid is
+# gone: the caller treats a vanished pid as an observation reset (the vehicle
+# changed). SDLC_WEDGE_CPU_FAKE is a test-only seam — a numeric value is echoed as
+# the tree total; the literal GONE models a vanished pid (rc 1).
+wedge_cputime() {  # $1=pid → integer seconds on stdout, rc 0; rc 1 if pid gone
+  local pid="${1:-}" pids p total=0 t
+  if [ -n "${SDLC_WEDGE_CPU_FAKE+x}" ]; then
+    [ "$SDLC_WEDGE_CPU_FAKE" = "GONE" ] && return 1
+    printf '%s' "$SDLC_WEDGE_CPU_FAKE"; return 0
+  fi
+  [ -n "$pid" ] && ps -p "$pid" >/dev/null 2>&1 || return 1
+  # pid + descendants: one ppid map, membership grown to a fixed point (proc list
+  # order is arbitrary, so iterate until no new descendant is admitted).
+  pids=$(ps -ax -o pid=,ppid= 2>/dev/null | awk -v root="$pid" '
+    { par[$1] = $2; id[NR] = $1 }
+    END {
+      member[root] = 1; changed = 1
+      while (changed) {
+        changed = 0
+        for (i = 1; i <= NR; i++) { p = id[i]
+          if (!(p in member) && (par[p] in member)) { member[p] = 1; changed = 1 } }
+      }
+      for (p in member) print p
+    }')
+  for p in $pids; do
+    t=$(ps -o time= -p "$p" 2>/dev/null | awk '{print $1; exit}')
+    total=$(( total + $(_cputime_to_secs "$t") ))
+  done
+  printf '%s' "$total"
 }
 
 # ---------- C2: classification (P3 verbatim, registry-primary) ----------

@@ -1940,6 +1940,64 @@ S2_7() {
 }
 S2_7
 
+# ==========  slice 4/S3 — corroborated wedge detector (R4/AC-5; probe Q7)  =====
+# A WEDGED classification now requires ALL of: registry-busy (or status-null
+# in-flight), transcript bytes flat, and quiet beyond the pilot-keyed ceiling —
+# corroborated across SDLC_WEDGE_OBS consecutive polls. Process-tree cputime
+# flatness SUPPORTS the verdict; accumulating cputime forces AMBIGUOUS (notify-
+# only, never restart). Detection + audit lines only — no new actions this slice.
+
+# Read the observation state file / its poll counter (4th field).
+wedge_state_of() { cat "$HOME/.claude/sdlc-status/.state/$1.wedge" 2>/dev/null || true; }
+wedge_count_of() { awk '{print $4+0; exit}' "$HOME/.claude/sdlc-status/.state/$1.wedge" 2>/dev/null || echo 0; }
+
+# Seed a goal's wedge observation so the NEXT single poll corroborates under the
+# active window: records the goal's pid, the CURRENT transcript byte size (the flat
+# baseline the next poll must match), a flat cputime, and count=OBS-1. Mirrors the
+# .poke priming idiom. Used by the downstream WEDGE-behavior fixtures whose intent
+# is the post-detection ACTION (notify / no-poke / ladder observe), not the multi-
+# poll detection itself — that is proven directly in the S3 detector cases below.
+prime_wedged() {  # <gid> [cpu]
+  local gid="$1" cpu="${2:-0}" f pid sid t sz d
+  f="$HOME/.claude/sdlc-goals/$gid"
+  pid=$(sed -n 's/^PID=//p' "$f"); sid=$(sed -n 's/^SESSION_ID=//p' "$f")
+  t=$(ls "$HOME"/.claude/projects/*/"$sid".jsonl 2>/dev/null | head -1)
+  sz=$(wc -c < "$t" 2>/dev/null | tr -d ' '); [ -n "$sz" ] || sz=none
+  d="$HOME/.claude/sdlc-status/.state"; mkdir -p "$d"
+  printf '%s %s %s %s\n' "$pid" "$sz" "$cpu" "$(( ${SDLC_WEDGE_OBS:-3} - 1 ))" > "$d/$gid.wedge"
+}
+
+# One in-process wedge poll with a controlled process-tree cputime: routes through
+# classify_goal (loads the registration, then busy_or_wedged → wedge_corroborated).
+# The CPU-FAKE seam is scoped to this single call and auto-cleared (VAR=val func).
+wedge_poll() {  # <gid> <cpu-fake>  → echoes classification
+  SDLC_WEDGE_CPU_FAKE="$2" classify_goal "$1"
+}
+
+echo "=== 4/S3-cpu: process-tree cputime — parser formats, fake seam, real read ==="
+S3_cpu() {
+  new_home
+  # _cputime_to_secs: SS(.ss) | MM:SS(.ss) | HH:MM:SS | DD-HH:MM:SS | empty.
+  assert_eq "4/S3 cputime parse empty→0"        "0"     "$(_cputime_to_secs '')"
+  assert_eq "4/S3 cputime parse 45→45"          "45"    "$(_cputime_to_secs '45')"
+  assert_eq "4/S3 cputime parse 0:05.50→5"      "5"     "$(_cputime_to_secs '0:05.50')"
+  assert_eq "4/S3 cputime parse 1:30→90"        "90"    "$(_cputime_to_secs '1:30')"
+  assert_eq "4/S3 cputime parse 2:03:04→7384"   "7384"  "$(_cputime_to_secs '2:03:04')"
+  assert_eq "4/S3 cputime parse 1-02:03:04"     "93784" "$(_cputime_to_secs '1-02:03:04')"
+  # Fake seam: numeric echoed as tree total (rc0); literal GONE models vanish (rc1).
+  assert_eq "4/S3 cputime fake numeric" "42" "$(SDLC_WEDGE_CPU_FAKE=42 wedge_cputime 999999)"
+  TOTAL=$((TOTAL + 1))
+  if SDLC_WEDGE_CPU_FAKE=GONE wedge_cputime 999999 >/dev/null 2>&1; then fail "4/S3 cputime fake GONE → rc1"; else pass "4/S3 cputime fake GONE → rc1"; fi
+  # Real read: a live pid (this process) yields a non-negative integer, rc0.
+  TOTAL=$((TOTAL + 1))
+  local v; v=$(wedge_cputime "$$"); local rc=$?
+  if [ "$rc" -eq 0 ] && printf '%s' "$v" | grep -qE '^[0-9]+$'; then pass "4/S3 cputime real live pid → integer ($v)"; else fail "4/S3 cputime real live pid" "rc=$rc v='$v'"; fi
+  # Real read: a definitely-dead pid → rc1 (vanished-vehicle signal).
+  TOTAL=$((TOTAL + 1))
+  if wedge_cputime 2147483647 >/dev/null 2>&1; then fail "4/S3 cputime dead pid → rc1"; else pass "4/S3 cputime dead pid → rc1"; fi
+}
+S3_cpu
+
 # ============================================================
 echo ""
 echo "========================================"
