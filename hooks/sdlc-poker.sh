@@ -655,9 +655,15 @@ complete_latch() {  # $1=gid $2=prev
     0) notify_and_cache "$gid" COMPLETE "goal $gid complete (charter close / current:10)" "$prev" COMPLETE ;;
     1) audit_line "$gid" SKIP-RACE "completion check benign not-complete: $cc_err" ;;   # nothing else
     2) cls="$(_sdlc_spawn_defect_class "$cc_err")"; [ -n "$cls" ] || cls="false-complete"
-       sdlc_gate_park "$gid" "$REG_PLAN" "$cls" "$cc_err" >/dev/null 2>&1
-       audit_line "$gid" COMPLETE-FALSE "false-complete parked GATED: $cc_err"
-       cache_state "$gid" COMPLETE ;;
+       # Park-rc checked (5-axis F1): on a failed park, surface LADDER-DEFECT and
+       # do NOT advance the dedupe cache — the next poll retries the park (loud,
+       # self-healing) instead of silently re-parking with no defect audit.
+       if sdlc_gate_park "$gid" "$REG_PLAN" "$cls" "$cc_err" >/dev/null 2>&1; then
+         audit_line "$gid" COMPLETE-FALSE "false-complete parked GATED: $cc_err"
+         cache_state "$gid" COMPLETE
+       else
+         audit_line "$gid" LADDER-DEFECT "false-complete park failed to land for $gid: $cc_err"
+       fi ;;
   esac
 }
 
@@ -672,12 +678,21 @@ ladder_dispatch() {  # $1=gid $2=classification
     audit_line "$gid" LADDER-SKIP "malformed baton: $bpath"
     return 0
   fi
-  # Anchor = transcript-mtime epoch (the memo path, D-C8). No transcript → no
-  # episode clock → fail-closed skip.
-  anchor="$(transcript_mtime_key)"
-  case "$anchor" in
-    ''|*[!0-9]*) audit_line "$gid" LADDER-SKIP "no transcript-mtime anchor for the ladder episode"; return 0 ;;
-  esac
+  # Anchor = DURABLE-PROGRESS digest (D-C2 amendment, Step-6 critic F1): derived
+  # from the goal's durable progress (plan current, branch tip, passenger-class
+  # ledger tail, baton written-at) via sdlc_ladder_anchor — NEVER transcript
+  # mtime, so a poke's own resume turn cannot reset the episode it is judged by.
+  # Provenance is the REGISTRATION plan+cwd (trusted, D-C5). An anchor-derivation
+  # defect (unreadable plan/cwd/ledger/baton) → LADDER-SKIP + fail-closed skip of
+  # THIS goal; the poll continues to the next.
+  local aef aerr arc
+  aef=$(mktemp 2>/dev/null) || aef=""
+  anchor="$(sdlc_ladder_anchor "$gid" "$REG_PLAN" "$REG_CWD" 2>"${aef:-/dev/null}")"; arc=$?
+  aerr=""; [ -n "$aef" ] && { aerr="$(cat "$aef" 2>/dev/null)"; rm -f "$aef"; }
+  if [ "$arc" -ne 0 ] || [ -z "$anchor" ]; then
+    audit_line "$gid" LADDER-SKIP "durable-progress anchor derivation failed: ${aerr:-<no anchor>}"
+    return 0
+  fi
   local nef nerr
   nef=$(mktemp 2>/dev/null) || nef=""
   token="$(sdlc_ladder_next "$gid" "$state" "$anchor" 2>"${nef:-/dev/null}")"; rc=$?
@@ -690,8 +705,13 @@ ladder_dispatch() {  # $1=gid $2=classification
     # fail-closed skip + LADDER-DEFECT audit (one bad goal never starves the poll).
     case "$nerr" in
       *effect-indeterminate*)
-        sdlc_gate_park "$gid" "$REG_PLAN" effect-indeterminate "$nerr" >/dev/null 2>&1
-        audit_line "$gid" LADDER-INDETERMINATE "$nerr" ;;
+        # Park-rc checked (5-axis F1): a failed park is surfaced as LADDER-DEFECT,
+        # mirroring ladder_human — never a silent re-park with no defect audit.
+        if sdlc_gate_park "$gid" "$REG_PLAN" effect-indeterminate "$nerr" >/dev/null 2>&1; then
+          audit_line "$gid" LADDER-INDETERMINATE "$nerr"
+        else
+          audit_line "$gid" LADDER-DEFECT "effect-indeterminate park failed to land for $gid: $nerr"
+        fi ;;
       *)
         audit_line "$gid" LADDER-DEFECT "sdlc_ladder_next rc=$rc ($state, anchor $anchor): $nerr" ;;
     esac
