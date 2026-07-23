@@ -2079,3 +2079,27 @@ sdlc_arm() {
   _sdlc_audit "$gid" ARM "$abs pilot=$pilot"
   printf '%s\n' "$gid"
 }
+
+# sdlc_disarm <goal-id> [reason] → remove the consent record and emit
+# `DISARM <gid> <reason>` (reason defaults to `manual`). Idempotent-safe: an
+# absent record is a rc-1 no-op that is STILL audited (today's silent delete is
+# replaced by a durable trail). An invalid goal-id is refused loud (path guard,
+# shared with the baton primitives) — no audit, no filesystem touch.
+sdlc_disarm() {
+  local gid="${1:-}" reason="${2:-manual}" rec rc
+  _sdlc_validate_goal_id "$gid" "sdlc_disarm" || return 1
+  rec="$(_sdlc_goals_dir)/$gid"
+  if [ -f "$rec" ]; then
+    rm -f "$rec" 2>/dev/null
+    if [ -e "$rec" ]; then
+      echo "defect: disarm-remove-failed: cannot remove $rec" >&2
+      _sdlc_audit "$gid" DISARM "$reason remove-failed"
+      return 1
+    fi
+    _sdlc_audit "$gid" DISARM "$reason"
+    return 0
+  fi
+  # absent → audited no-op, rc 1
+  _sdlc_audit "$gid" DISARM "$reason no-op-absent"
+  return 1
+}
