@@ -401,6 +401,8 @@ BARRED COMBO: `watchdog: off` + `pilot: auto` — rejected at the Step-0 ceremon
 
 **Presence rule (summary).** An attached terminal is a notify-only floor — the machine has zero drive verbs on a session with a live terminal (registry `status` non-null), regardless of the declared `pilot`; a degraded registry read fails CLOSED.
 
+**Take-over protocol (declare-first).** The presence rule does not make a bare `claude --resume` automatically safe on a `pilot: auto` goal. A freshly-resumed terminal reports registry status `null` until its first turn completes — during that window the presence rule cannot yet see the attached TUI, so autopilot may still drive the session out from under you. Therefore declare `pilot: manual` (or disarm) BEFORE you reopen a `pilot: auto` goal; declaring first closes the reopen-mid-poke race, reopening first does not.
+
 **Onboarding card.**
 
 > **Status: this card describes the keepalive upgrade shipping in this wave, not pre-existing behavior.**

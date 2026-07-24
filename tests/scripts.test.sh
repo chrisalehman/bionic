@@ -867,6 +867,24 @@ _NOYIELD='Under `pilot: auto`, a governed session does not end its turn with wor
 expect_true "SKILL.md carries the no-yield rule verbatim" \
   grep -qF "$_NOYIELD" "$_CANON_SKILL"
 
+# 6g: take-over prose states the fresh-resume-null window HONESTLY and requires
+#   declare-first, both docs in sync (F4, Step-6 critic fix — the KA-R5 doc
+#   contradiction). A bare `claude --resume` is NOT automatically safe on a
+#   `pilot: auto` goal: a freshly-resumed terminal reports registry status null
+#   until its first turn, so the presence rule cannot yet see it → declare
+#   pilot:manual (or disarm) BEFORE reopening. The two docs must carry the same
+#   window statement and the same declare-first instruction verbatim.
+_RESUME_WINDOW='status `null` until its first turn'
+expect_true "SKILL.md states the fresh-resume-null window honestly" \
+  grep -qF "$_RESUME_WINDOW" "$_CANON_SKILL"
+expect_true "README.md states the fresh-resume-null window honestly (sync)" \
+  grep -qF "$_RESUME_WINDOW" "$_CANON_README"
+_DECLARE_FIRST='declare `pilot: manual` (or disarm) BEFORE'
+expect_true "SKILL.md take-over prose requires declare-first before reopen" \
+  grep -qF "$_DECLARE_FIRST" "$_CANON_SKILL"
+expect_true "README.md take-over prose requires declare-first before reopen (sync)" \
+  grep -qF "$_DECLARE_FIRST" "$_CANON_README"
+
 # ============================================================
 # Results
 # ============================================================
