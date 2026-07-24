@@ -593,6 +593,32 @@ c11() {
 }
 c11
 
+echo "=== F8: degrade path rests on transcript grammar, NEVER the record PID — a dead REG_PID under registry outage must not force DEAD ==="
+# The record PID is arm-time telemetry (transient shell \$\$ / carried-forward stale
+# pid, F1/F5 premise) → always-dead. Keying degrade DEAD off it made every armed goal
+# classify DEAD on any registry outage (false DEAD-MANUAL spam / false DEAD ladder
+# class). Degrade now folds only transcript grammar; a genuinely dead vehicle shows a
+# quiet transcript → at worst IDLE_STALLED, and SKIP-DEGRADED (AS-16b) prevents any drive.
+c11_f8() {
+  # F8a: dead REG_PID + registry down + BUSY grammar → busy-path (BUSY), not DEAD.
+  new_home
+  arm_goal gf8b 4 /proj/f8b sid-f8b 2147483647 60 busy   # dead pid; busy transcript, quiet 60 (< WEDGE_QUIET)
+  stub_registry_state fail
+  local got; got=$(classify_goal gf8b)
+  assert_eq "F8a dead-pid degrade + busy grammar → BUSY (not DEAD off the record pid)" "BUSY" "$got"
+  assert_contains "F8a DEGRADE audit line emitted" "gf8b DEGRADE" "$(audit_of)"
+
+  # F8b: dead REG_PID + registry down + quiet (idle) transcript → idle-path, not DEAD.
+  new_home
+  arm_goal gf8i 4 /proj/f8i sid-f8i 2147483647 300 user  # dead pid; idle transcript, quiet 300 (> QUIET_THRESHOLD)
+  stub_registry_state fail
+  got=$(classify_goal gf8i)
+  assert_eq "F8b dead-pid degrade + quiet transcript → IDLE_STALLED (not DEAD)" "IDLE_STALLED" "$got"
+  TOTAL=$((TOTAL + 1))
+  if [ "$got" != "DEAD" ]; then pass "F8b dead-pid degrade never classifies DEAD off the record pid"; else fail "F8b dead-pid degrade never classifies DEAD" "got DEAD"; fi
+}
+c11_f8
+
 echo "=== Case 12: lock — concurrent run exits silently; stale lock reclaimed ==="
 c12() {
   # 12a: a LIVE lock holder ($$) → second run exits 0 and does nothing.
