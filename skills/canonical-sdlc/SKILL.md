@@ -157,7 +157,7 @@ The skill runs at three scales:
 
 1. **Epic scoping** — `scale: epic`. Runs Steps 0–3 only. Produces `epic.spec.md` + `epic.plan.md`. Carves the work into waves. Does **not** execute Steps 4–9.
 2. **Wave execution** — the default (`scale: wave`). Runs the full applicable step set for one wave under whatever intent the run declares (`build`, `bugfix`, `refactor`, `tune`, `spike`, `incident-response`). Each wave re-enters Steps 1–3 at greater depth than the epic plan supplied; **trust but verify** the epic's assumptions, do not re-derive from scratch.
-3. **Charter scoping** — `scale: continuous`. Runs Steps 0–3 only, exactly like epic scoping — produces `continuous.plan.md` (the charter) with a `## Goals` registry in place of an epic's wave carve-up. Never executes Steps 4–9 itself; those belong to each admitted goal's own task/wave/epic run. Unlike an epic, a charter has no terminal close under normal operation — it is a STANDING scope, addressed on an ongoing basis (§Exclusive arming and idle semantics).
+3. **Charter scoping** — `scale: continuous` [EXPERIMENTAL]. Runs Steps 0–3 only, exactly like epic scoping — produces `continuous.plan.md` (the charter) with a `## Goals` registry in place of an epic's wave carve-up. Never executes Steps 4–9 itself; those belong to each admitted goal's own task/wave/epic run. Unlike an epic, a charter has no terminal close under normal operation — it is a STANDING scope, addressed on an ongoing basis (§Exclusive arming and idle semantics).
 
 ## The Iron Law
 
@@ -357,11 +357,31 @@ Cumulative: each tier includes everything below it. TDD is non-negotiable at eve
 | `epic` | 0–3 only (short-circuits before Step 4). | Carves the work into waves; produces `epic.spec.md` + `epic.plan.md`. Does NOT execute Steps 4–9. | Owns the integration branch `epic/NN-<slug>`; every wave merges there; the epic merges to mainline ONCE, at close. |
 | `wave` (default) | The full applicable step set (0–9). | The default scale; one wave spec + plan; slices inside Step 4. Re-enters Steps 1–3 at greater depth than the epic plan — trust but verify. | Wave branch off the epic integration branch; merges back there at Step 8. |
 | `task` | The full step set, compressed — a sub-session unit. | MULTIPLE per session. ONE session-level plan carries a `## Tasks` ledger with one `## SDLC State` evidence line per task — NO per-task plan or spec files. Ledger hook-addressing is documented here; the ledger row's evidence is **BLOCKING**, rigor-keyed to the row's own effective rigor (§Evidence — v11 shape table). | Shares the session's branch; no per-task branch. |
-| `continuous` | 0–3 only (charter-scoping), no terminal step — a STANDING scope, not a bigger epic. | Supervises a heterogeneous stream of task/wave/epic sub-goal runs via a `## Goals` registry (§Step 3 charter shape); backlog intake lives outside the plan (A5). Produces `continuous.plan.md` (the charter). Distinguished from `epic` by heterogeneity: an epic decomposes homogeneously into waves of one intent, a charter supervises goals of any triple. | No integration branch of its own — each goal runs its own branch/merge; the charter document itself is edited in place, never merged. |
+| `continuous` [EXPERIMENTAL] | 0–3 only (charter-scoping), no terminal step — a STANDING scope, not a bigger epic. | Supervises a heterogeneous stream of task/wave/epic sub-goal runs via a `## Goals` registry (§Step 3 charter shape); backlog intake lives outside the plan (A5). Produces `continuous.plan.md` (the charter). Distinguished from `epic` by heterogeneity: an epic decomposes homogeneously into waves of one intent, a charter supervises goals of any triple. | No integration branch of its own — each goal runs its own branch/merge; the charter document itself is edited in place, never merged. |
 
 **Spike artifact shape (any scale).** When intent is `spike`, there is NO plan file at all — the sole artifact is the writeup at `<docs-root>/spikes/` (D3). Universal entry means universal *routing*, not universal paperwork.
 
-**Exclusive arming and idle semantics (SR-1).** `continuous` is the ONLY armed scale — a scope has at most one live charter at a time. Consent to stand one up is explicit and two-layered: the Step-0 `scale: continuous` declaration, then the Step-3 charter approval. Disarming is equally explicit — either a frontmatter edit away from `scale: continuous`, or an explicit user close (`current: 10`). A charter never goes silently idle: its status is always visibly one of **driving** (a `## Goals` row is active), **GATED** (a Wake Note parked it — §Escalation Protocol), or explicitly **declared idle** by the user — never simply unaddressed.
+**Exclusive charter instancing and idle semantics (SR-1, superseded 2026-07-23 by universal watchdog/pilot — KA-R16).** Arming is no longer exclusive to `continuous` — every scope (task/wave/epic/continuous) is independently armable via `watchdog: on` [EXPERIMENTAL] (§Watchdog and pilot — universal keepalive, below). What SR-1 retains: **one live charter per scope** — a scope has at most one live `scale: continuous` plan at a time; this single-instance rule is unaffected by the arming-exclusivity supersession. Consent to stand a charter up is explicit and two-layered: the Step-0 `scale: continuous` declaration, then the Step-3 charter approval. Disarming is equally explicit — either a frontmatter edit away from `scale: continuous`, or an explicit user close (`current: 10`). A charter never goes silently idle: its status is always visibly one of **driving** (a `## Goals` row is active), **GATED** (a Wake Note parked it — §Escalation Protocol), or explicitly **declared idle** by the user — never simply unaddressed.
+
+### Watchdog and pilot — universal keepalive (KA-R16) [EXPERIMENTAL]
+
+Two orthogonal, explicitly-consented flags extend the never-die guarantee (the "keepalive" capability — its historical name) from `scale: continuous` charters to every governed run: `watchdog: on|off` (breakdown detection — dead/wedged/stalled/complete; always read-only) and `pilot: manual|auto` (who fixes a detected blockage — a human via notification, or the machine via a capped, corroboration-gated ladder). Both are **accepted-optional** on v12 (no governing-skill hook requirement — the v11 log-only precedent; promotion to a hook requirement is a later user decision). BARRED COMBO: `watchdog: off` + `pilot: auto` — rejected at the Step-0 ceremony with the reason: driving requires detection.
+
+**Three postures:**
+
+| `watchdog` | `pilot` | Posture |
+|---|---|---|
+| `off` | `manual` | Plain session — the experimental-era default for `task`/`wave`/`epic` |
+| `on` | `manual` | Watched, notify-only — first-class middle state |
+| `on` | `auto` | Watched + self-driving — the `continuous` default |
+
+**Presence rule.** An attached terminal is a notify-only floor: the machine has NO drive verbs (poke, re-prompt, restart, kill) on a session with a live terminal, regardless of the declared `pilot`. The detector is the goals registry's `status` field — non-null means a terminal is attached. On a registry read that cannot resolve (degraded/unreadable), the rule fails CLOSED: treat presence as attached, never drive.
+
+**The no-yield rule (verbatim).** Under `pilot: auto`, a governed session does not end its turn with work READY outside a gate — it continues.
+
+**Exit semantics.** Exiting a session ends the VEHICLE, never the GOAL — the goal parks (watched under `watchdog: on`, silently under `watchdog: off`), and a `pilot: auto` goal resumes driving within one poll once the terminal closes.
+
+**In-session pilot switching** is a natural-language verb — "switch to autopilot" / "switch to manual" edits the plan's `pilot:` flag directly; the poker reads the new value on its next poll (≤3 min). No slash command exists for this — natural language over the `sdlc_arm`/`sdlc_disarm` lib functions and direct frontmatter edits are the only front doors ([EXPERIMENTAL] era; see the onboarding card, README).
 
 ## Classification rules
 
@@ -606,6 +626,8 @@ Mandatory for new plans (`canonical_sdlc_version: 12`, current). `3`–`11` are 
    | `deploy_target` | "k8s" → `k8s`; "Vercel" → `vercel`; "deploy" → `custom`; "migration" → `migration`; none → `none`. |
    | `cleanup_on_finish` | Default `true`. |
    | `use_worktree` | Default `false`. Set true on explicit user override or when user says "isolate". |
+   | `watchdog` [EXPERIMENTAL] | Scale-keyed default (Effective-flag fallback table, accepted-optional on v12 — no hook requirement): `scale: continuous` → `on`; `task`/`wave`/`epic` → `off`. Explicit frontmatter flag always wins. |
+   | `pilot` [EXPERIMENTAL] | Scale-keyed default: `scale: continuous` → `auto`; `task`/`wave`/`epic` → `manual`. Explicit frontmatter flag always wins. BARRED COMBO: `watchdog: off` + `pilot: auto` — rejected at confirmation (driving requires detection). |
    | `integration_branch` | Wave under an existing epic → copy from the epic plan's `integration-branch:`. Standalone → current git branch if it is a mainline (`main`/`master`/`develop`); otherwise default `main`. `incident-response` → `main` or `hotfix/<id>`. If genuinely undeterminable, print the line with value `unknown` — never drop it. |
    | `model_plan` | Derived from `multi_agent` and the **detected session model** (see §Model & Token Strategy). `true` → `orchestrator=<detected>; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`. `false` → `main=<detected>` (dial-down offered). Surfaced for confirmation; **hook-enforced for v4+** plans (§Legacy modes covers the v≤10 mode gating). |
 
@@ -670,6 +692,8 @@ Mandatory for new plans (`canonical_sdlc_version: 12`, current). `3`–`11` are 
    Opt-in flags:
      cleanup_on_finish: true       [Step 8 wipes .bionic/tmp/ on close]
      use_worktree:      false      [no isolated worktree — work on current branch]
+     watchdog: off                 [EXPERIMENTAL — task/wave/epic default off; continuous default on]
+     pilot:    manual              [EXPERIMENTAL — task/wave/epic default manual; continuous default auto]
 
    Model plan:                      [multi_agent=true → tiered dispatch]
      orchestrator:  fable-5 high    [detected session model; main thread, fixed all wave]
@@ -719,7 +743,7 @@ scale-value  := "task" | "wave" | "epic" | "continuous"
 
 `current: G<n>` is the charter's own addressing form (§Step 3 charter shape) — mirrors `current: T<n>` for task-scale ledgers, but is valid only on a `scale: continuous` plan; it is not part of the Step-0 override grammar above.
 
-Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`; `set integration-branch=develop, confirm`. **Triple override:** `set intent=refactor, set rigor=audited, confirm` reclassifies the run before Step 1; `set scale=epic, confirm` switches to epic-scoping. **Floors are upward-only — a rigor override BELOW a derivable floor is rejected at Step 0** (e.g. `set rigor=tested` on `incident-response`, whose intent floor is `audited`, or on any security/privacy-flagged work): warn, name the binding floor, and keep the floor value. An upward rigor override (`set rigor=audited` on a `build`) is always accepted. An override that names a **barred** intent × scale cell (§Intent × scale validity) is rejected with the reason. **Matrix tier override:** `set verify(AC-B2.1)=T2, confirm` retiers a matrix row before lock. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set exec-standard=opus, confirm` (route standard slices to opus too — equivalent to disabling complexity routing); `set exec-complex=sonnet, confirm` (accepted but discouraged; warn before applying); `set execution=opus-only, confirm` (shorthand for `exec-standard=opus`); `set main_model=sonnet, confirm` (multi_agent=false dial-down).
+Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql, set language=python, confirm`; `set integration-branch=develop, confirm`. **Triple override:** `set intent=refactor, set rigor=audited, confirm` reclassifies the run before Step 1; `set scale=epic, confirm` switches to epic-scoping. **Floors are upward-only — a rigor override BELOW a derivable floor is rejected at Step 0** (e.g. `set rigor=tested` on `incident-response`, whose intent floor is `audited`, or on any security/privacy-flagged work): warn, name the binding floor, and keep the floor value. An upward rigor override (`set rigor=audited` on a `build`) is always accepted. An override that names a **barred** intent × scale cell (§Intent × scale validity) is rejected with the reason. **Matrix tier override:** `set verify(AC-B2.1)=T2, confirm` retiers a matrix row before lock. Model-plan keys are valid override targets: `set orchestrator=fable-high, confirm` (multi_agent=true); `set exec-standard=opus, confirm` (route standard slices to opus too — equivalent to disabling complexity routing); `set exec-complex=sonnet, confirm` (accepted but discouraged; warn before applying); `set execution=opus-only, confirm` (shorthand for `exec-standard=opus`); `set main_model=sonnet, confirm` (multi_agent=false dial-down). **Watchdog/pilot overrides [EXPERIMENTAL]:** `set watchdog=on, confirm`; `set pilot=auto, confirm`; `set watchdog=on, set pilot=auto, confirm`. **BARRED COMBO:** `set watchdog=off, set pilot=auto, confirm` is rejected at Step 0 with the reason — driving requires detection (`pilot: auto` needs `watchdog: on`).
 
 **Explain.** A reply of `explain` (optionally `explain intent` / `explain rigor` / `explain scale`) renders the quick-reference card below — full card, or the named axis's section plus the floors line — then re-presents the reply prompt. It never modifies state and never counts as confirmation. A free-text reply that asks a question about the display ("what does audited mean?") is treated as `explain <topic>`, never as a DSL parse error.
 
@@ -750,20 +774,26 @@ scale — how much work?
   task        sub-session unit, several per session — ledger line, no per-task plan file
   wave        one session (the default)
   epic        multi-session — scoping run only (Steps 0–3), carves the work into waves
-  continuous  standing charter, no fixed upper bound — Goals registry, not a bigger epic
+  continuous  [EXPERIMENTAL] standing charter, no fixed upper bound — Goals registry, not a bigger epic
 
 Floors push rigor UP, never down: incident-response and security/privacy-touching
 work floor at audited; a project or epic can declare its own rigor-floor. spike is
 capped at tested (it ships no code); continuous floors at audited too, as a hard
 block (not log-only like the other floors).
 
+watchdog / pilot — universal keepalive, every scale [EXPERIMENTAL]
+  watchdog: off                 [EXPERIMENTAL — task/wave/epic default off; continuous default on]
+  pilot:    manual              [EXPERIMENTAL — task/wave/epic default manual; continuous default auto]
+  BARRED: watchdog=off + pilot=auto (driving requires detection)
+
 Override examples:
   set intent=refactor, confirm
   set rigor=audited, set scale=task, confirm
   set verify(AC-2)=T2, confirm
+  set watchdog=on, set pilot=auto, confirm
 ```
 
-On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 12` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`), and the `intent:`/`rigor:`/`scale:` triple. The confirmed `integration-branch` and the derived `## Verification Matrix` are carried forward (`scale: continuous` charters carry a `## Goals` registry instead — §Step 3 charter shape — the matrix requirement is exempt there): when the plan file is written at Step 3, its `## SDLC State` section opens with the Step-0-confirmed `integration-branch: <name>` line, and the plan body carries the locked `## Verification Matrix` section. For v4 and later plans the governing-skill hook **requires** `model_plan`; for v10, v11, and v12 it additionally requires the `## Verification Matrix` section at `sdlc-step ≥ 3` (exempting `scale: task` and, on v12, `scale: continuous`) — a missing value blocks the write (exit 2).
+On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 12` plus all 5 discriminator flags, 2 opt-in flags, the two [EXPERIMENTAL] `watchdog:`/`pilot:` flags (accepted-optional — always written when confirmed, but not hook-required; framing widens from 2 opt-in to 4 flag mentions total), and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`), and the `intent:`/`rigor:`/`scale:` triple. The confirmed `integration-branch` and the derived `## Verification Matrix` are carried forward (`scale: continuous` charters carry a `## Goals` registry instead — §Step 3 charter shape — the matrix requirement is exempt there): when the plan file is written at Step 3, its `## SDLC State` section opens with the Step-0-confirmed `integration-branch: <name>` line, and the plan body carries the locked `## Verification Matrix` section. For v4 and later plans the governing-skill hook **requires** `model_plan`; for v10, v11, and v12 it additionally requires the `## Verification Matrix` section at `sdlc-step ≥ 3` (exempting `scale: task` and, on v12, `scale: continuous`) — a missing value blocks the write (exit 2).
 
 **Two-layer enforcement.** Layer 1 (soft): SKILL.md mandates Step 0 — do not proceed without explicit user confirmation. Layer 2 (hard, `canonical-sdlc-governing-skill.sh`, on `PreToolUse|Write,Edit`): for v4+ plans, a missing flag / `model_plan` / (v10, v11, v12) matrix section → exit 2; on v11/v12, additionally a missing or non-enum `intent:`/`rigor:`/`scale:`, a `mode:` line, or a barred intent × scale cell → exit 2; on v12 additionally the `continuous` scale floor (§Rigor floors and lifecycle) → exit 2.
 
@@ -898,6 +928,8 @@ This is the "walk away" boundary. After the plan is complete, present a summary 
 - **Exception 1:** if the discovery makes the current wave structurally impossible, surface as a Wake Note and halt. The response is "this wave cannot ship," not "ship a different wave."
 - **Exception 2:** trivial corrections (one-line typo fix in a touched file) ship inline.
 - **Step 6 Review's adversarial critic checks** for mid-wave scope drift not justified by an `## Assumptions` row.
+
+**Auto-arm ceremony [EXPERIMENTAL].** On plan approval, if the confirmed `watchdog` is effective `on`, the orchestrator arms the goal immediately — calling `sdlc_arm` (lib) with the session's plan path, cwd, session id, and pid. Arm failure never blocks the wave: warn, and record a `## Assumptions` entry naming the failure. **Take-over protocol:** a bare `claude --resume` is NOT automatically safe on a machine-driven (`pilot: auto`) goal. A freshly-resumed terminal reports registry status `null` until its first turn completes — during that window the presence rule cannot yet see the attached TUI, so autopilot may still drive the session (poke, re-prompt, or restart it out from under you). Therefore declare `pilot: manual` (or disarm) BEFORE you reopen a `pilot: auto` goal — declaring first closes the reopen-mid-poke race (§Watchdog and pilot — universal keepalive); reopening first and declaring after does not.
 
 ### Step 4 — Implement (`agent-skills:incremental-implementation`)
 - **Worktree (only if `use_worktree: true`).** At the start of Step 4, before the first slice, create a git worktree at `.worktrees/<slug>` off the current branch. Record `worktree:`, `base-sha:`, `branch:` in the Step 4 evidence line. When `use_worktree: false` (default), work proceeds on the current branch.

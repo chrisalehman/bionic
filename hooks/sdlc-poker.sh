@@ -36,6 +36,25 @@ WEDGE_QUIET="${WEDGE_QUIET:-540}"           # busy quiet → WEDGED (3× thresho
 POKE_CAP="${POKE_CAP:-3}"                    # max pokes per stall episode (4/2)
 POKE_TIMEOUT="${POKE_TIMEOUT:-900}"          # per-poke wall-clock cap, seconds (C4 amendment B)
 
+# Wedge corroboration (slice 4/S3, spec R4/AC-5; probe Q7). A WEDGED classification
+# requires ALL of: registry-busy (or status-null in-flight), transcript bytes flat,
+# and quiet beyond the pilot-keyed ceiling — corroborated across SDLC_WEDGE_OBS
+# consecutive polls. Process-tree cputime flatness SUPPORTS the verdict; accumulating
+# cputime forces AMBIGUOUS (notify-only, never restart), since waiting-vs-hung is
+# indistinguishable on CPU (probe Q7) and the ceiling term carries detection.
+# Ceilings are pilot-keyed (MANUAL longer than AUTO). Overridable exactly as the
+# other thresholds are, so the fixture suite and future tuning rebind without edits.
+SDLC_WEDGE_OBS="${SDLC_WEDGE_OBS:-3}"                          # consecutive corroborating polls
+SDLC_WEDGE_CEILING_AUTO="${SDLC_WEDGE_CEILING_AUTO:-900}"      # AUTO quiet ceiling (> 600s max tool timeout)
+SDLC_WEDGE_CEILING_MANUAL="${SDLC_WEDGE_CEILING_MANUAL:-1800}" # MANUAL quiet ceiling (longer than AUTO)
+SDLC_WEDGE_CPU_EPSILON="${SDLC_WEDGE_CPU_EPSILON:-2}"         # cputime delta (s) at/below which flat
+
+# Manual pilot verb set (slice 4/S4, spec R2/AC-4). Under pilot=manual the poker
+# is notify-only; these decay windows key the reminder cadence (never a drive verb).
+# Overridable exactly as the thresholds above are (fixture suite + future tuning).
+SDLC_READY_REMIND_MANUAL="${SDLC_READY_REMIND_MANUAL:-1800}"   # idle-with-work-ready reminder window (s)
+SDLC_GATED_REMIND="${SDLC_GATED_REMIND:-7200}"                 # held-GATED reminder cadence (s)
+
 # Absolute claude binary for the POKE (C4: alias not inherited). The registry
 # READ uses PATH-resolved bare `claude` (AS-7a); only the poke is pinned. Kept
 # overridable exactly as the thresholds are, so the fixture suite points it at a
@@ -57,6 +76,16 @@ REPROMPT_PREAMBLE='resume per the plan'"'"'s `## SDLC State` and carry out the r
 # Registration globals — bound unconditionally so set -u never trips on a path
 # that reads them before load_registration runs (hooks-rules.md).
 REG_PLAN=""; REG_CWD=""; REG_SESSION_ID=""; REG_PID=""; REG_ARMED_AT=""
+# The LIVE vehicle pid the registry reports for this goal's sid (F5, Step-6 critic
+# fix), resolved once per goal per poll in process_goals. The record's PID is
+# arm-time telemetry only — on shipped arming paths it is the transient Bash-tool
+# shell that armed the goal (dead or recycled), never the vehicle — so the wedge
+# detector's cputime read and the human recovery command must key off the live
+# registry pid, not REG_PID. Empty when unresolvable (registry down / sid absent /
+# no pid field): consumers fail SAFE (wedge falls back to the record pid, which is
+# almost always dead → observation reset, never a false corroboration; recovery
+# omits the kill clause rather than print a wrong pid).
+REG_LIVE_PID=""
 
 # Transcript memo (D-C8 e09 fold): resolve_transcript's glob scan is resolved
 # ONCE per goal per poll and reused by every consumer (transcript_quiet,
@@ -94,6 +123,8 @@ lock_dir()    { printf '%s/.claude/sdlc-poker.lock' "$HOME"; }
 
 # Portable mtime (epoch seconds): BSD stat first, GNU stat fallback.
 file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
+# Portable byte size: BSD stat first, GNU stat fallback.
+file_size() { stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null; }
 iso_now()    { date -u +%Y-%m-%dT%H:%M:%SZ; }
 iso_of_mtime() {
   local m; m=$(file_mtime "$1" 2>/dev/null) || m=""
@@ -123,6 +154,21 @@ load_registration() {  # $1=goal-id
   REG_ARMED_AT=$(reg_val "$f" ARMED_AT)
   [ -n "$REG_PLAN" ] && [ -n "$REG_CWD" ] && [ -n "$REG_SESSION_ID" ] \
     && [ -n "$REG_PID" ] && [ -n "$REG_ARMED_AT" ]
+}
+
+# reg_live_pid <registry-json> <sid> [registry-rc] — the LIVE pid the registry
+# reports for <sid>, resolved by `.sessionId == $sid` EQUALITY (never a substring
+# match — a sid surfacing only as a forked child's parentSessionId must not
+# resolve). Empty (rc 0) when the registry is unavailable (rc≠0), jq is absent, the
+# sid is not present, or the entry carries no pid — callers treat empty as
+# unresolvable and fail safe. This is the same sid-keyed resolution the lib's F1
+# kill-target fix uses and the same select() the classify/presence readers use —
+# one canonical "resolve this sid's live entry" path.
+reg_live_pid() {  # $1=registry-json $2=sid [$3=registry-rc]
+  [ "${3:-0}" -eq 0 ] 2>/dev/null || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  printf '%s' "$1" | jq -r --arg sid "$2" \
+    '[.[] | select(.sessionId==$sid)][0] | .pid // empty' 2>/dev/null
 }
 
 # CR-normalized frontmatter value (translate \r, never delete — hooks-rules.md).
@@ -157,11 +203,33 @@ plan_has_wake_note() {  # $1=plan
     END { exit(found ? 0 : 1) }'
 }
 
-# Armed = registration present (loaded) AND the plan declares scale: continuous.
-# The plan-readability half is checked by the caller (unreadable plan is
-# MALFORMED, not merely unarmed); here we test only the scale declaration.
-is_armed_scale() {  # uses REG_PLAN
-  [ "$(plan_frontmatter "$REG_PLAN" scale)" = "continuous" ]
+# Armed = registration well-formed (checked by the caller before this call —
+# unreadable plan is MALFORMED, not merely unarmed) AND
+# sdlc_watchdog_effective(REG_PLAN) = on. watchdog:off / fallback-off
+# (Global Constraints fallback table: explicit flag wins; absent-flag
+# continuous → on; absent-flag task/wave/epic → off) is an AUDITED skip
+# (SKIP-UNARMED), replacing the old silent `continue`. The resolver's rc 1
+# (unreadable plan — should not occur post-caller-check, but fail-loud rather
+# than assume) and rc 2 (off-enum watchdog value, or a plan still carrying the
+# pre-rename flag key) both land on the existing MALFORMED-RECORD audit path —
+# never guess past a malformed flag.
+is_armed() {  # $1=gid; uses REG_PLAN
+  local gid="$1" wd wdrc
+  if [ "$SDLC_LIB_OK" != "1" ]; then
+    # Lib unavailable (already audited once via LADDER-DEGRADE, gid "-") —
+    # sdlc_watchdog_effective is undefined in this branch, so fall back to
+    # the pre-S2 scale-only check, byte-identical to the old is_armed_scale.
+    [ "$(plan_frontmatter "$REG_PLAN" scale)" = "continuous" ]
+    return $?
+  fi
+  wd="$(sdlc_watchdog_effective "$REG_PLAN")"; wdrc=$?
+  if [ "$wdrc" -ne 0 ]; then
+    audit_line "$gid" MALFORMED-RECORD "watchdog resolution failed (rc=$wdrc) for $REG_PLAN"
+    return 1
+  fi
+  [ "$wd" = "on" ] && return 0
+  audit_line "$gid" SKIP-UNARMED "watchdog effective=off"
+  return 1
 }
 
 # ---------- transcript signals ----------
@@ -229,18 +297,210 @@ transcript_grammar() {
   fi
 }
 
+# ---------- slice 4/S3: corroborated wedge detector (R4/AC-5; probe Q7) ----------
+# Convert a `ps -o time=` value to whole seconds. Accepts SS(.ss), MM:SS(.ss),
+# HH:MM:SS and DD-HH:MM:SS (BSD and GNU shapes); empty → 0. Single `awk -v` with no
+# embedded newline (BSD-awk safe). The single parser both wedge_cputime and any
+# future consumer share, so the ps-format handling never drifts across copies.
+_cputime_to_secs() {  # $1=ps-time-string → integer seconds
+  awk -v t="$1" 'BEGIN {
+    if (t == "") { print 0; exit }
+    d = 0
+    if (split(t, dd, "-") == 2) { d = dd[1] + 0; t = dd[2] }
+    sub(/\.[0-9]+$/, "", t)
+    n = split(t, p, ":"); s = 0
+    for (i = 1; i <= n; i++) s = s * 60 + (p[i] + 0)
+    print d * 86400 + s
+  }'
+}
+
+# Process-tree cputime in whole seconds for a pid: the pid PLUS every descendant,
+# each read with `ps -o time= -p <pid>` and summed (probe Q7 term). Descendants come
+# from a single `ps` ppid map walked to a fixed point — no `pgrep -P` dependency, no
+# `timeout` binary, BSD/GNU-portable. Returns rc 1 (no output) when the ROOT pid is
+# gone: the caller treats a vanished pid as an observation reset (the vehicle
+# changed). SDLC_WEDGE_CPU_FAKE is a test-only seam — a numeric value is echoed as
+# the tree total; the literal GONE models a vanished pid (rc 1).
+wedge_cputime() {  # $1=pid → integer seconds on stdout, rc 0; rc 1 if pid gone
+  local pid="${1:-}" pids p total=0 t
+  if [ -n "${SDLC_WEDGE_CPU_FAKE+x}" ]; then
+    [ "$SDLC_WEDGE_CPU_FAKE" = "GONE" ] && return 1
+    printf '%s' "$SDLC_WEDGE_CPU_FAKE"; return 0
+  fi
+  [ -n "$pid" ] && ps -p "$pid" >/dev/null 2>&1 || return 1
+  # pid + descendants: one ppid map, membership grown to a fixed point (proc list
+  # order is arbitrary, so iterate until no new descendant is admitted).
+  pids=$(ps -ax -o pid=,ppid= 2>/dev/null | awk -v root="$pid" '
+    { par[$1] = $2; id[NR] = $1 }
+    END {
+      member[root] = 1; changed = 1
+      while (changed) {
+        changed = 0
+        for (i = 1; i <= NR; i++) { p = id[i]
+          if (!(p in member) && (par[p] in member)) { member[p] = 1; changed = 1 } }
+      }
+      for (p in member) print p
+    }')
+  for p in $pids; do
+    t=$(ps -o time= -p "$p" 2>/dev/null | awk '{print $1; exit}')
+    total=$(( total + $(_cputime_to_secs "$t") ))
+  done
+  printf '%s' "$total"
+}
+
+# Per-goal wedge observation state (mirrors the .poke state-file style): a single
+# line "<pid> <transcript-size> <cputime> <count>". The counter is the number of
+# consecutive corroborating polls observed; it RESETS on transcript movement,
+# vehicle-pid change, or a vanished pid (the vehicle changed).
+wedge_state_file() { printf '%s/%s.wedge' "$(state_dir)" "$1"; }
+
+# Effective pilot for the registered goal (auto|manual). Consumes the S1 lib
+# resolver (frontmatter → scale-keyed fallback). When the lib is unavailable or the
+# value is off-enum/unreadable, fall back to the CONSERVATIVE manual — the
+# never-disturb direction: a poker that cannot confirm the pilot must not drive, and
+# the wedge detector that cannot read it must not shorten its (longer, manual) quiet
+# window. Read once per goal per poll by both the wedge detector (ceiling key, S3)
+# and the dispatch gate (drive-vs-notify, S4).
+goal_pilot() {  # uses REG_PLAN
+  local p
+  if [ "$SDLC_LIB_OK" = "1" ]; then
+    p="$(sdlc_pilot_effective "$REG_PLAN" 2>/dev/null)" || p=""
+    case "$p" in auto|manual) printf '%s' "$p"; return ;; esac
+  fi
+  printf 'manual'
+}
+
+# Current transcript byte size (movement signal), or "none" when unresolved.
+wedge_transcript_size() {
+  local sz
+  _resolve_transcript_memo
+  [ -n "$_XSCRIPT_PATH" ] || { printf 'none'; return; }
+  sz=$(file_size "$_XSCRIPT_PATH" 2>/dev/null) || sz=""
+  [ -n "$sz" ] || { printf 'none'; return; }
+  printf '%s' "$sz"
+}
+
+wedge_write() {  # $1=file $2=pid $3=size $4=cputime $5=count
+  mkdir -p "$(dirname "$1")" 2>/dev/null
+  printf '%s %s %s %s\n' "$2" "$3" "$4" "$5" > "$1" 2>/dev/null
+}
+
+# wedge_corroborated <gid> — the detector (spec R4/AC-5; probe Q7). rc 0 ONLY when
+# ALL hold across SDLC_WEDGE_OBS consecutive polls: quiet beyond the pilot-keyed
+# ceiling, transcript bytes flat poll-over-poll, and process-tree cputime flat
+# (accumulating cputime is AMBIGUOUS — notify-only, never corroborated). Any of
+# transcript movement, pid change, or a vanished pid RESETS the observation. Called
+# ONLY on a registry-busy / status-null-in-flight path (busy_or_wedged), so the
+# "busy" precondition is the caller's; here we verify quiet + flatness. Emits only
+# audit lines (WEDGE-OBSERVE / WEDGE-AMBIGUOUS) — no actions (verbs are S4/S5).
+# Uses REG_PID / REG_PLAN / the transcript memo. rc: 0 corroborated; 1 observing/
+# not-yet; 2 ambiguous (cpu active).
+wedge_corroborated() {  # $1=gid
+  local gid="${1:--}" q pilot ceiling cur_size cur_cpu cpurc pf
+  local s_pid s_size s_cpu s_count delta count
+  pf="$(wedge_state_file "$gid")"
+  q=$(transcript_quiet)
+  pilot="$(goal_pilot)"
+  if [ "$pilot" = "auto" ]; then ceiling="$SDLC_WEDGE_CEILING_AUTO"; else ceiling="$SDLC_WEDGE_CEILING_MANUAL"; fi
+  cur_size="$(wedge_transcript_size)"
+  # F5: read cputime off the LIVE vehicle pid (registry, by sid), not the frozen
+  # record REG_PID. The record pid is the recycled arm-time bash-tool shell — a
+  # dead/wrong pid made wedge_cputime return rc1 EVERY poll, resetting the
+  # observation to n=0 and making WEDGED structurally unreachable. When the live pid
+  # is unresolvable REG_LIVE_PID is empty → fall back to REG_PID, which is almost
+  # always dead → cpurc≠0 → observation reset (the fail-safe no-corroborate
+  # direction, AS-13), never a false corroboration on a wrong-but-live pid.
+  cur_cpu="$(wedge_cputime "${REG_LIVE_PID:-$REG_PID}")"; cpurc=$?
+
+  s_pid=""; s_size=""; s_cpu=""; s_count=0
+  if [ -f "$pf" ]; then
+    read -r s_pid s_size s_cpu s_count < "$pf" 2>/dev/null || true
+    [ -n "$s_count" ] || s_count=0
+  fi
+
+  # Vanished pid → the vehicle changed → observation reset, no corroboration.
+  if [ "$cpurc" -ne 0 ]; then
+    wedge_write "$pf" "$REG_PID" "none" "0" 0
+    audit_line "$gid" WEDGE-OBSERVE "n=0 (vehicle pid $REG_PID unreadable; observation reset)"
+    return 1
+  fi
+
+  # Condition (c): quiet must exceed the pilot ceiling to advance corroboration.
+  if [ "$q" -le "$ceiling" ]; then
+    wedge_write "$pf" "$REG_PID" "$cur_size" "$cur_cpu" 0
+    audit_line "$gid" WEDGE-OBSERVE "n=0 (quiet ${q}s <= ${pilot} ceiling ${ceiling}s)"
+    return 1
+  fi
+
+  # Vehicle-pid change → reset baseline.
+  if [ -n "$s_pid" ] && [ "$s_pid" != "$REG_PID" ]; then
+    wedge_write "$pf" "$REG_PID" "$cur_size" "$cur_cpu" 1
+    audit_line "$gid" WEDGE-OBSERVE "n=1 (vehicle pid changed ${s_pid}->${REG_PID}; observation reset)"
+    return 1
+  fi
+
+  # Transcript movement → reset baseline.
+  if [ -n "$s_size" ] && [ "$s_size" != "none" ] && [ "$cur_size" != "$s_size" ]; then
+    wedge_write "$pf" "$REG_PID" "$cur_size" "$cur_cpu" 1
+    audit_line "$gid" WEDGE-OBSERVE "n=1 (transcript moved ${s_size}->${cur_size}B; observation reset)"
+    return 1
+  fi
+
+  # Baseline poll (no usable predecessor): establish, no cputime delta to judge yet.
+  if [ "$s_count" -lt 1 ] || [ -z "$s_size" ] || [ "$s_size" = "none" ]; then
+    wedge_write "$pf" "$REG_PID" "$cur_size" "$cur_cpu" 1
+    if [ 1 -ge "$SDLC_WEDGE_OBS" ]; then return 0; fi
+    audit_line "$gid" WEDGE-OBSERVE "n=1 (baseline; quiet ${q}s > ${pilot} ceiling ${ceiling}s)"
+    return 1
+  fi
+
+  # Predecessor present: judge the cputime delta.
+  delta=$(( cur_cpu - s_cpu )); [ "$delta" -lt 0 ] && delta=0
+  if [ "$delta" -gt "$SDLC_WEDGE_CPU_EPSILON" ]; then
+    # Accumulating cputime → AMBIGUOUS (waiting-vs-hung indistinguishable on CPU,
+    # probe Q7). Restart the observation; never corroborate this episode.
+    wedge_write "$pf" "$REG_PID" "$cur_size" "$cur_cpu" 1
+    audit_line "$gid" WEDGE-AMBIGUOUS "cpu-active (delta ${delta}s cputime over observation; notify-only, no restart)"
+    return 2
+  fi
+
+  # Flat cputime + flat transcript + quiet>ceiling + same pid → this poll qualifies.
+  count=$(( s_count + 1 ))
+  wedge_write "$pf" "$REG_PID" "$cur_size" "$cur_cpu" "$count"
+  if [ "$count" -ge "$SDLC_WEDGE_OBS" ]; then return 0; fi
+  audit_line "$gid" WEDGE-OBSERVE "n=${count} (corroborating; quiet ${q}s, cputime flat delta ${delta}s)"
+  return 1
+}
+
 # ---------- C2: classification (P3 verbatim, registry-primary) ----------
-# Given a live BUSY/IDLE/NOSTATUS reading, fold in transcript quiet.
-busy_or_wedged() { [ "$(transcript_quiet)" -gt "$WEDGE_QUIET" ] && echo WEDGED || echo BUSY; }
+# Given a live BUSY/IDLE/NOSTATUS reading, fold in transcript quiet. WEDGED now
+# flows through corroboration (4/S3): quiet <= WEDGE_QUIET is plainly BUSY; quiet >
+# WEDGE_QUIET enters the wedge observation zone and only classifies WEDGED once
+# wedge_corroborated agrees (SDLC_WEDGE_OBS flat polls beyond the pilot ceiling).
+# Un-corroborated quiet (below ceiling, still building, or cpu-active) stays BUSY —
+# the audit trail (WEDGE-OBSERVE / WEDGE-AMBIGUOUS) is written by the detector. No
+# new actions here: downstream WEDGED behavior (notify / ladder observe) is unchanged.
+busy_or_wedged() {  # $1=gid
+  local gid="${1:--}"
+  if [ "$(transcript_quiet)" -le "$WEDGE_QUIET" ]; then echo BUSY; return; fi
+  if wedge_corroborated "$gid"; then echo WEDGED; else echo BUSY; fi
+}
 idle_or_stalled() { [ "$(transcript_quiet)" -gt "$QUIET_THRESHOLD" ] && echo IDLE_STALLED || echo IDLE; }
 
-# Degrade path (registry unavailable/unparseable): ps -p $PID (alive/dead only)
-# → transcript last-event grammar → mtime as suspect flag. Total signal loss
-# echoes "" (caller audits + silently skips; the poker itself never wedges).
+# Degrade path (registry unavailable/unparseable): transcript last-event grammar
+# ONLY (busy → busy_or_wedged, idle → idle_or_stalled, unknown → "" silent-skip).
+# The record PID is DELIBERATELY not consulted (F5/F8): it is arm-time telemetry —
+# a transient shell $$ or a carried-forward stale pid after a re-seat — so it is
+# effectively always-dead, and keying DEAD off it made EVERY armed goal classify
+# DEAD on any registry outage (false DEAD-MANUAL notifications / false DEAD ladder
+# class). Degrade now fails toward the quieter verdict: a genuinely dead vehicle shows a
+# quiet transcript → at worst IDLE_STALLED, and the degraded presence rule
+# (AS-16b: SKIP-DEGRADED → notify-only) already bars any drive; real DEAD detection
+# returns with the registry. Total signal loss echoes "" (caller audits + silently
+# skips; the poker itself never wedges).
 degrade_classify() {  # $1=goal-id (for future audit context)
-  if ! ps -p "$REG_PID" >/dev/null 2>&1; then echo DEAD; return; fi
   case "$(transcript_grammar)" in
-    busy) busy_or_wedged ;;
+    busy) busy_or_wedged "$1" ;;
     idle) idle_or_stalled ;;
     *)    echo "" ;;
   esac
@@ -287,9 +547,42 @@ classify_goal() {  # $1=goal-id $2=registry-json (optional) $3=registry-rc (opti
   status=$(printf '%s' "$json" | jq -r --arg sid "$REG_SESSION_ID" \
     '[.[] | select(.sessionId==$sid)][0] | .status // "NOSTATUS"' 2>/dev/null)
   case "$status" in
-    busy) busy_or_wedged ;;                       # 3. BUSY + quiet>WEDGE → WEDGED
+    busy) busy_or_wedged "$gid" ;;                # 3. BUSY + corroborated quiet → WEDGED
     idle) idle_or_stalled ;;                      # IDLE vs IDLE_STALLED
-    *)    busy_or_wedged ;;                       # NOSTATUS print-child → alive-working (treat as BUSY)
+    *)    busy_or_wedged "$gid" ;;                # NOSTATUS print-child → alive-working (treat as BUSY)
+  esac
+}
+
+# ---------- 4/S5: presence signal (KA-R13 / spec AC-12) ----------
+# goal_presence <registry-json> <registry-rc> → attached|tui-less|degraded for the
+# LOADED goal (uses REG_SESSION_ID). DISTINCT from classify_goal: it reduces the
+# same registry read to the drive-eligibility axis the PRESENCE RULE keys on —
+# "is a live terminal attached?" — never the goal state.
+#   attached — registry status non-null (idle|busy): a live TUI holds the conn.
+#              The presence rule then bars ALL drive verbs regardless of pilot
+#              (never disturb a human; probe Q8: non-null status = live TUI).
+#   tui-less — status null/NOSTATUS (a headless -p vehicle in flight) OR the sid is
+#              absent (dead). The ONLY drivable presence — AUTO's revival/restart
+#              ladder applies here alone.
+#   degraded — registry rc≠0 / no jq / unparseable: a live TUI cannot be DISPROVEN,
+#              so drive is fail-closed to notify-only (the 4/S5 tightening of the
+#              legacy degrade drive, AS-16). Callable with the once-per-poll fetch
+#              (process_goals) or, args omitted, self-fetching (direct-call parity).
+goal_presence() {  # $1=registry-json (optional) $2=registry-rc (optional)
+  local json rc present status
+  if [ "$#" -ge 2 ]; then json="$1"; rc="$2"; else json=$(${SDLC_REGISTRY_CMD:-claude agents --json} 2>/dev/null); rc=$?; fi
+  if [ "$rc" -ne 0 ] || ! command -v jq >/dev/null 2>&1; then echo degraded; return; fi
+  present=$(printf '%s' "$json" | jq -r --arg sid "$REG_SESSION_ID" 'any(.[]; .sessionId==$sid)' 2>/dev/null)
+  case "$present" in
+    true)  : ;;
+    false) echo tui-less; return ;;    # absent from the registry → dead → drivable
+    *)     echo degraded; return ;;    # parse failure → unconfirmable → fail-closed
+  esac
+  status=$(printf '%s' "$json" | jq -r --arg sid "$REG_SESSION_ID" \
+    '[.[] | select(.sessionId==$sid)][0] | .status // "NOSTATUS"' 2>/dev/null)
+  case "$status" in
+    busy|idle) echo attached ;;        # non-null → a live TUI holds the conn
+    *)         echo tui-less ;;        # NOSTATUS (null) → headless in flight
   esac
 }
 
@@ -318,8 +611,16 @@ state_word() {  # $1=classification
 # in this script — never executed, only surfaced in the WEDGE status/notification
 # so force stays human. Consolidated to one template so the no-signal-invocation
 # fixture can whitelist exactly this line.
-recovery_cmd() {  # uses REG_PID, REG_CWD, REG_SESSION_ID
-  printf 'kill %s && cd %s && claude --resume %s' "$REG_PID" "$REG_CWD" "$REG_SESSION_ID"
+recovery_cmd() {  # uses REG_LIVE_PID (F5), REG_CWD, REG_SESSION_ID
+  # F5: the kill target is the LIVE registry pid, never the frozen record REG_PID
+  # (which is the recycled arm-time bash-tool shell — killing it does nothing, or
+  # worse, kills a recycled stranger). When the live pid is unresolvable, OMIT the
+  # kill clause entirely rather than hand a human a wrong pid to SIGTERM.
+  if printf '%s' "${REG_LIVE_PID:-}" | grep -qE '^[0-9]+$'; then
+    printf 'kill %s && cd %s && claude --resume %s' "$REG_LIVE_PID" "$REG_CWD" "$REG_SESSION_ID"
+  else
+    printf 'cd %s && claude --resume %s' "$REG_CWD" "$REG_SESSION_ID"
+  fi
 }
 
 # write_status <goal-id> <classification> — derived status file (C8): state,
@@ -416,8 +717,13 @@ do_poke() {  # $1=goal-id [$2=prompt] ; uses REG_CWD, REG_SESSION_ID
   # child dies (rc 128+14 = 142). Killing our OWN timed-out child is process
   # hygiene, not the no-force verb (which protects TARGET sessions); the DAG makes
   # a killed poke turn resumable.
+  # 4/S7 probe-env hazard scrub: an inherited CLAUDE_CODE_CHILD_SESSION marker
+  # suppresses BOTH transcript persistence and registry registration in the
+  # resumed child — `env -u` strips it right before the exec (perl's alarm
+  # timer survives the exec chain: perl → env → the real binary, same pid).
   ( cd "$REG_CWD" 2>/dev/null && printf '%s' "$prompt" \
       | perl -e 'alarm shift @ARGV; exec @ARGV' "$POKE_TIMEOUT" \
+          env -u CLAUDE_CODE_CHILD_SESSION \
           "$POKE_CLAUDE_BIN" --resume "$REG_SESSION_ID" -p --dangerously-skip-permissions \
   ) >"${outf:-/dev/null}" 2>&1
   rc=$?
@@ -637,6 +943,45 @@ ladder_human() {  # $1=gid $2=anchor $3=classification
   fi
 }
 
+# ---------- 4/S5: RESTART rung (KA-R6 kill-and-revive) ----------
+# The AUTO ladder's kill-and-revive rung, consumed from sdlc_restart_vehicle (lib)
+# AS-IS: the SIGTERM / WIP-snapshot / spawn mechanics + exactly-once + the live-TUI
+# kill-seam refusal all live in the lib, so THIS poker script never invokes a kill
+# (the e09 no-kill-in-poker constitution stays green). The RESTART notification
+# rides HERE (do_notify transport is poker-side). Outcome map:
+#   rc 0 → restart landed → do_notify RESTART (rides the action).
+#   rc≠0 → aborted (attended / won't-die / spawn-refused): sdlc_restart_vehicle
+#          already audited RESTART-ABORT and (for an abort mid-effect) left the
+#          intent standing, which the ladder's restart probe fail-closes to a GATED
+#          park next poll — nothing to drive here.
+ladder_restart() {  # $1=gid $2=anchor $3=token(restart:<n>)
+  local gid="$1" anchor="$2" token="$3" n rc
+  n="${token##*:}"
+  sdlc_restart_vehicle "$gid" "$anchor" >/dev/null 2>&1; rc=$?
+  if [ "$rc" -eq 0 ]; then
+    do_notify "$gid" RESTART "goal $gid RESTART rung=$n — vehicle torn down and a successor spawned (autopilot)"
+  else
+    audit_line "$gid" LADDER-RESTART-ABORT "restart rung=$n aborted (rc=$rc); see the RESTART-ABORT audit line"
+  fi
+  return 0
+}
+
+# The crash-loop breaker (KA-R6): the restart cap is spent → park GATED for a human
+# and a GATED notify RIDES the exhaustion. sdlc_gate_park's own exactly-once park
+# key makes repeat polls idempotent (one Wake Note); provenance is the REGISTRATION
+# plan (D-C5). Park-rc checked (mirrors ladder_human): a failed park is LADDER-DEFECT.
+ladder_restart_exhausted() {  # $1=gid $2=anchor $3=classification
+  local gid="$1" anchor="$2" cls="$3" cap="${SDLC_RESTART_CAP:-2}"
+  if sdlc_gate_park "$gid" "$REG_PLAN" restart-exhausted \
+       "restart cap ($cap) exhausted for $gid ($cls, episode anchor $anchor); automated restarts spent — human decision required" \
+       >/dev/null 2>&1; then
+    audit_line "$gid" LADDER-RESTART-EXHAUSTED "restart cap ($cap) park ($cls, anchor $anchor)"
+    do_notify "$gid" GATED "goal $gid GATED — restart cap ($cap) exhausted ($cls); autopilot stood down, decision required"
+  else
+    audit_line "$gid" LADDER-DEFECT "restart-exhausted park failed to land for $gid ($cls)"
+  fi
+}
+
 # ---------- D-C6: completion latch (slice 4/5) ----------
 # On COMPLETE classification the poker becomes the cron consumer of the spine's
 # completion latch. sdlc_complete_check (consumed AS-IS) verifies the terminal
@@ -652,7 +997,12 @@ complete_latch() {  # $1=gid $2=prev
   sdlc_complete_check "$gid" "$REG_CWD" >/dev/null 2>"${ccf:-/dev/null}"; rc=$?
   cc_err=""; [ -n "$ccf" ] && { cc_err="$(cat "$ccf" 2>/dev/null)"; rm -f "$ccf"; }
   case "$rc" in
-    0) notify_and_cache "$gid" COMPLETE "goal $gid complete (charter close / current:10)" "$prev" COMPLETE ;;
+    0) notify_and_cache "$gid" COMPLETE "goal $gid complete (charter close / current:10)" "$prev" COMPLETE
+       # 4/S6 lifecycle hygiene: a genuinely-latched COMPLETE stands down for good —
+       # auto-clean the registration (audited, exactly-once: the record is gone
+       # after this, so no later poll ever reaches this goal again). A false-complete
+       # (rc=2 below) parks GATED instead and MUST retain its registration.
+       sdlc_disarm "$gid" complete >/dev/null 2>&1 ;;
     1) audit_line "$gid" SKIP-RACE "completion check benign not-complete: $cc_err" ;;   # nothing else
     2) cls="$(_sdlc_spawn_defect_class "$cc_err")"; [ -n "$cls" ] || cls="false-complete"
        # Park-rc checked (5-axis F1): on a failed park, surface LADDER-DEFECT and
@@ -666,6 +1016,18 @@ complete_latch() {  # $1=gid $2=prev
        fi ;;
   esac
 }
+
+# ---------- 4/S6: per-poll per-sid drive dedupe ----------
+# _SDLC_DRIVEN_SIDS — space-separated SESSION_IDs that already received a DRIVE
+# action THIS POLL (poke/re-prompt/restart/rollover — the ladder's action tokens,
+# plus the legacy poke_capped path). Reset once per poll (process_goals, below);
+# in-process only, never persisted — a fresh cron invocation starts empty.
+# Notify-only verbs (GATED/WEDGE/COMPLETE notifications, the S4 manual verb set,
+# dispatch_attended) never mark a sid, so a goal that only notifies never blocks
+# a same-sid sibling from driving.
+_SDLC_DRIVEN_SIDS=""
+sid_driven() { case " $_SDLC_DRIVEN_SIDS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+mark_sid_driven() { [ -n "$1" ] && _SDLC_DRIVEN_SIDS="$_SDLC_DRIVEN_SIDS $1"; }
 
 # ladder_dispatch <gid> <classification> — the per-goal ladder step. The caller
 # has already confirmed SDLC_LIB_OK, ladder_applicable, and a baton FILE present.
@@ -717,16 +1079,120 @@ ladder_dispatch() {  # $1=gid $2=classification
     esac
     return 0
   fi
+  # 4/S6 per-poll per-sid dedupe: gate ONLY the drive tokens (poke/re-prompt/
+  # restart/rollover — the ones that reach a spawn/resume seam). observe/human/
+  # none/restart-exhausted are not drive verbs and are never deduped.
   case "$token" in
-    poke:*)          ladder_rung_effect "$gid" "$anchor" "$token" poke ;;
-    re-prompt:*)     ladder_rung_effect "$gid" "$anchor" "$token" re-prompt ;;
-    observe:*)       ladder_rung_effect "$gid" "$anchor" "$token" observe ;;
-    rollover)        ladder_rollover "$gid" ;;                     # spine spawn (D-C4)
-    human)           ladder_human "$gid" "$anchor" "$state" ;;     # terminal park (D-C5)
-    none)            : ;;                                          # no ladder action this poll
-    *)               audit_line "$gid" LADDER-DEFECT "unrecognized ladder token '$token'" ;;
+    poke:*|re-prompt:*|restart:*|rollover)
+      if sid_driven "$REG_SESSION_ID"; then
+        audit_line "$gid" SKIP-SID-DEDUPE "sid $REG_SESSION_ID already driven this poll"
+        return 0
+      fi
+      mark_sid_driven "$REG_SESSION_ID" ;;
+  esac
+  case "$token" in
+    poke:*)            ladder_rung_effect "$gid" "$anchor" "$token" poke ;;
+    re-prompt:*)       ladder_rung_effect "$gid" "$anchor" "$token" re-prompt ;;
+    observe:*)         ladder_rung_effect "$gid" "$anchor" "$token" observe ;;
+    restart:*)         ladder_restart "$gid" "$anchor" "$token" ;;              # 4/S5 restart rung
+    restart-exhausted) ladder_restart_exhausted "$gid" "$anchor" "$state" ;;    # 4/S5 crash-loop breaker
+    rollover)          ladder_rollover "$gid" ;;                    # spine spawn (D-C4)
+    human)             ladder_human "$gid" "$anchor" "$state" ;;    # terminal park (D-C5)
+    none)              : ;;                                         # no ladder action this poll
+    *)                 audit_line "$gid" LADDER-DEFECT "unrecognized ladder token '$token'" ;;
   esac
   return 0
+}
+
+# ---------- 4/S4: manual pilot verb set (spec R2/AC-4; KA-R4/R5) ----------
+# Manual decay reminder (window-based dedupe): rc 0 (and stamps `now`) iff no prior
+# <class> reminder for <gid> landed within <window> seconds; else rc 1 (suppress).
+# Backs the held-GATED reminder cadence — a gate that stays up re-reminds at most
+# once per window, distinct from the transition-dedupe notify_and_cache uses for
+# state ENTRIES. Per-goal per-class stamp file beside the other .state siblings.
+manual_reminder_due() {  # $1=gid $2=class $3=window-seconds
+  local gid="$1" cls="$2" win="$3" f now last
+  f="$(state_dir)/$gid.remind-$cls"
+  now=$(date +%s)
+  if [ -f "$f" ]; then
+    last=$(cat "$f" 2>/dev/null); [ -n "$last" ] || last=0
+    [ "$(( now - last ))" -lt "$win" ] && return 1
+  fi
+  mkdir -p "$(dirname "$f")" 2>/dev/null
+  printf '%s\n' "$now" > "$f" 2>/dev/null
+  return 0
+}
+
+# dispatch_manual <gid> <state> <prev> — the pilot=manual verb set. The ONLY verb
+# is a deduped ntfy notification: ZERO drive verbs (no poke, no re-prompt, no
+# spawn, no restart, no kill) in ANY goal state or on vehicle death (KA-R4/R5).
+# Detection stays fully active and read-only; this function never touches a drive
+# seam. Reached ahead of the ladder / complete-latch / legacy-poke paths (the
+# dispatch_actions gate) so no drive verb is structurally reachable under manual.
+# Notify classes, each transition-deduped via notify_and_cache (prev==state) except
+# the held-GATED reminder (window-deduped via manual_reminder_due):
+#   READY-IDLE  idle (IDLE/IDLE_STALLED) with quiet > SDLC_READY_REMIND_MANUAL —
+#               "idle with work ready / possibly waiting on you"; below the window,
+#               leave alone (cache the raw class so crossing it later is a transition)
+#   WEDGE-ASK   corroborated WEDGED — evidence summary + approve-restart ASK, NO action
+#               (restart stays human-executed under manual, AS-8)
+#   DEAD-MANUAL sid absent — "session died mid-<state>; WIP preserved", NO poke/spawn
+#   GATED       entry transition-notify (kept) + reminder past SDLC_GATED_REMIND
+#   COMPLETE    stand-down transition-notify (auto-clean is S6's scope)
+dispatch_manual() {  # $1=gid $2=state $3=prev ; uses REG_*
+  local gid="$1" state="$2" prev="$3" cur q mins
+  cur=$(plan_current "$REG_PLAN"); [ -n "$cur" ] || cur="unknown"
+  case "$state" in
+    COMPLETE)
+      notify_and_cache "$gid" COMPLETE "goal $gid complete (charter close / current:10)" "$prev" COMPLETE ;;
+    GATED)
+      if [ "$prev" = "GATED" ]; then
+        # held gate → reminder cadence (window-deduped), never re-notify every poll
+        manual_reminder_due "$gid" gated "$SDLC_GATED_REMIND" \
+          && do_notify "$gid" GATED-REMIND "goal $gid still GATED — decision required; see the plan's ## Wake Note"
+      else
+        notify_and_cache "$gid" GATED "goal $gid gated — decision required; see the plan's ## Wake Note" "$prev" GATED
+        manual_reminder_due "$gid" gated "$SDLC_GATED_REMIND" >/dev/null   # seed the window from entry
+      fi ;;
+    WEDGED)
+      q=$(transcript_quiet); mins=$(( q / 60 ))
+      notify_and_cache "$gid" WEDGE-ASK \
+        "goal $gid WEDGED ${mins}min — approve restart? evidence: quiet=${q}s cpu=flat. recovery: $(recovery_cmd)" \
+        "$prev" WEDGED ;;
+    DEAD)
+      notify_and_cache "$gid" DEAD-MANUAL \
+        "session $gid died mid-step-${cur}; WIP preserved (manual pilot — no poke, no spawn)" "$prev" DEAD ;;
+    IDLE_STALLED|IDLE)
+      if [ "$(transcript_quiet)" -gt "$SDLC_READY_REMIND_MANUAL" ]; then
+        notify_and_cache "$gid" READY-IDLE \
+          "goal $gid idle with work ready (current:${cur}) — possibly waiting on you" "$prev" READY-IDLE
+      else
+        cache_state "$gid" "$state"   # below the window → leave alone; cache the raw class
+      fi ;;
+    BUSY)
+      audit_line "$gid" SKIP-MANUAL "working; manual pilot — notify-only"; cache_state "$gid" "$state" ;;
+    *)
+      cache_state "$gid" "$state" ;;
+  esac
+}
+
+# dispatch_attended <gid> <state> <prev> <pilot> — the PRESENCE-RULE verb set for a
+# status-non-null (live-TUI) vehicle (KA-R13 / AC-12): notify-only, ZERO drive
+# verbs, regardless of pilot. An AUTO goal the machine WOULD have driven at a stall
+# gets the STALL-ATTACHED nag ("close it to hand back, or drive it yourself");
+# every other case falls to the S4 manual verb set. Never touches a drive seam.
+dispatch_attended() {  # $1=gid $2=state $3=prev $4=pilot
+  local gid="$1" state="$2" prev="$3" pilot="$4"
+  if [ "$pilot" = "auto" ]; then
+    case "$state" in
+      IDLE_STALLED|WEDGED|DEAD)
+        notify_and_cache "$gid" STALL-ATTACHED \
+          "goal $gid $state but a terminal is attached — close it to hand back to autopilot, or drive it yourself" \
+          "$prev" "$state"
+        return 0 ;;
+    esac
+  fi
+  dispatch_manual "$gid" "$state" "$prev"
 }
 
 # Per the C3 table: COMPLETE/GATED/WEDGED notify-on-transition (never poke; gate
@@ -734,13 +1200,48 @@ ladder_dispatch() {  # $1=gid $2=classification
 # IDLE is left alone. Non-notify states advance the cache directly so a later
 # transition INTO a notify state is detected.
 #
-# 4/4 ladder pre-branch: a baton-bearing DEAD/IDLE_STALLED/WEDGED goal is owned
-# by the revival ladder (ledger-clocked rungs), which supersedes the legacy
-# poke_capped / WEDGE-notify path for that goal. Goals WITHOUT a baton — and
-# every goal when the lib is unavailable — keep the legacy path byte-identical
-# (AS-C4 grandfather). GATED/COMPLETE/BUSY/IDLE never ladder.
-dispatch_actions() {  # $1=gid $2=state $3=prev
-  local gid="$1" state="$2" prev="$3"
+# 4/S5 PRESENCE RULE (KA-R13 / AC-12): resolved FIRST, ahead of every verb path.
+# A status-non-null vehicle (a live terminal) is an implicit conn claim → ZERO
+# drive verbs regardless of pilot (SKIP-LIVE-TUI + the notify-only dispatch_attended
+# verb set). A registry-degraded goal cannot DISPROVE a live TUI → fail-closed to
+# notify-only (SKIP-DEGRADED + dispatch_manual). BOTH gates are under SDLC_LIB_OK
+# so the lib-less degrade keeps its byte-identical legacy drive (AS-12/AS-15). Only
+# a tui-less (status null / dead) vehicle reaches the drive paths below.
+#
+# 4/S4 pilot gate: a manual-pilot tui-less goal is notify-only (dispatch_manual) —
+# ZERO drive verbs. Under a readable lib an unreadable plan/pilot resolves to manual
+# (goal_pilot fail-safe) — the never-disturb direction.
+#
+# 4/4 ladder pre-branch: a baton-bearing DEAD/IDLE_STALLED/WEDGED goal (AUTO,
+# tui-less) is owned by the revival ladder (ledger-clocked rungs incl. the 4/S5
+# RESTART rung), which supersedes the legacy poke_capped / WEDGE-notify path. Goals
+# WITHOUT a baton — and every goal when the lib is unavailable — keep the legacy
+# path byte-identical (AS-C4 grandfather). GATED/COMPLETE/BUSY/IDLE never ladder.
+dispatch_actions() {  # $1=gid $2=state $3=prev [$4=presence]
+  local gid="$1" state="$2" prev="$3" presence="${4:-tui-less}" pilot="manual"
+  [ "$SDLC_LIB_OK" = "1" ] && pilot="$(goal_pilot)"
+  # PRESENCE RULE first, but ONLY for the drive-eligible (ladder-applicable) states
+  # — DRIVE verbs occur nowhere else, so COMPLETE's structural latch and the
+  # GATED/BUSY/IDLE notifications stay presence-independent (attachment never
+  # blocks recognizing completion or reminding on a gate). A status-non-null
+  # vehicle bars every drive verb regardless of pilot (SKIP-LIVE-TUI); a degraded
+  # registry cannot disprove a live TUI → fail-closed notify-only (SKIP-DEGRADED).
+  if [ "$SDLC_LIB_OK" = "1" ] && ladder_applicable "$state"; then
+    if [ "$presence" = "attached" ]; then
+      audit_line "$gid" SKIP-LIVE-TUI "status non-null (live terminal attached); zero drive verbs ($state, pilot=$pilot)"
+      dispatch_attended "$gid" "$state" "$prev" "$pilot"
+      return 0
+    fi
+    if [ "$presence" = "degraded" ]; then
+      audit_line "$gid" SKIP-DEGRADED "registry unconfirmable; presence undisprovable → notify-only ($state, pilot=$pilot)"
+      dispatch_manual "$gid" "$state" "$prev"
+      return 0
+    fi
+  fi
+  if [ "$SDLC_LIB_OK" = "1" ] && [ "$pilot" = "manual" ]; then
+    dispatch_manual "$gid" "$state" "$prev"
+    return 0
+  fi
   if [ "$SDLC_LIB_OK" = "1" ] && ladder_applicable "$state" && [ -f "$(baton_path "$gid")" ]; then
     ladder_dispatch "$gid" "$state"
     cache_state "$gid" "$state"      # advance the dedupe cache (transition detection)
@@ -763,7 +1264,15 @@ dispatch_actions() {  # $1=gid $2=state $3=prev
       notify_and_cache "$gid" WEDGE \
         "goal $gid WEDGED: driving but transcript quiet >${WEDGE_QUIET}s. recovery: $(recovery_cmd)" "$prev" "$state" ;;
     DEAD|IDLE_STALLED)
-      poke_capped "$gid" "$state"; cache_state "$gid" "$state" ;;
+      # 4/S6 per-poll per-sid dedupe: same gate as the ladder's drive tokens —
+      # the legacy (baton-less) poke is a drive verb too.
+      if sid_driven "$REG_SESSION_ID"; then
+        audit_line "$gid" SKIP-SID-DEDUPE "sid $REG_SESSION_ID already driven this poll"
+      else
+        mark_sid_driven "$REG_SESSION_ID"
+        poke_capped "$gid" "$state"
+      fi
+      cache_state "$gid" "$state" ;;
     BUSY)
       audit_line "$gid" SKIP-BUSY "driving; left alone"; cache_state "$gid" "$state" ;;
     IDLE)
@@ -775,9 +1284,10 @@ dispatch_actions() {  # $1=gid $2=state $3=prev
 
 # ---------- main loop ----------
 process_goals() {
-  local gdir f gid state prev reg_json reg_rc
+  local gdir f gid state prev presence reg_json reg_rc
   gdir="$(goals_dir)"
   [ -d "$gdir" ] || return 0
+  _SDLC_DRIVEN_SIDS=""    # 4/S6: fresh per-poll dedupe state (in-process only)
   # D-C8 e09 fold: ONE registry fetch per poll (was: one per goal via
   # classify_goal), threaded to every classify_goal call below as data.
   reg_json=$(${SDLC_REGISTRY_CMD:-claude agents --json} 2>/dev/null); reg_rc=$?
@@ -799,12 +1309,16 @@ process_goals() {
       audit_line "$gid" MALFORMED-RECORD "registered plan not readable: $REG_PLAN"
       continue
     fi
-    is_armed_scale || continue        # scale != continuous → unarmed/disarm, silent skip
+    is_armed "$gid" || continue       # watchdog-effective=off → audited SKIP-UNARMED, or MALFORMED-RECORD
+    # F5: resolve THIS goal's live vehicle pid from the once-per-poll registry by
+    # sid, before classify (wedge) / write_status / dispatch (recovery) consume it.
+    REG_LIVE_PID="$(reg_live_pid "$reg_json" "$REG_SESSION_ID" "$reg_rc")"
     state=$(classify_goal "$gid" "$reg_json" "$reg_rc")
     [ -n "$state" ] || continue       # total-signal-loss degrade → already audited, skip
+    presence=$(goal_presence "$reg_json" "$reg_rc")   # 4/S5 PRESENCE RULE axis (KA-R13)
     prev=$(read_cache "$gid")         # previous classification (transition dedupe)
     write_status "$gid" "$state"
-    dispatch_actions "$gid" "$state" "$prev"   # poke/notify per the C3 no-force table; caches state
+    dispatch_actions "$gid" "$state" "$prev" "$presence"   # presence-gated poke/notify; caches state
   done
 }
 

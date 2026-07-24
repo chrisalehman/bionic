@@ -810,6 +810,82 @@ _reset_verify_shell="$(grep -A 3 'Shell alias:' "$RESET" | head -8)"
 expect_contains "reset verification checks bionic:start in shell rc" "bionic:start" "$_reset_verify_shell"
 
 # ============================================================
+# SECTION 6: Keepalive wave ceremony docs (S9 — watchdog/pilot)
+# ============================================================
+
+echo ""
+echo "=== Section 6: Keepalive wave ceremony docs (S9) ==="
+
+_CANON_SKILL="${REPO}/skills/canonical-sdlc/SKILL.md"
+_CANON_README="${REPO}/skills/canonical-sdlc/README.md"
+
+# 6a: [EXPERIMENTAL] label on the continuous scale-table row, both docs
+_skill_continuous_row="$(grep -E '^\| `continuous`' "$_CANON_SKILL" | head -1 || true)"
+expect_contains "SKILL.md continuous scale-table row carries [EXPERIMENTAL]" "[EXPERIMENTAL]" "$_skill_continuous_row"
+_readme_continuous_row="$(grep -E '`continuous`.*\(v12\)' "$_CANON_README" | head -1 || true)"
+expect_contains "README.md continuous scale bullet carries [EXPERIMENTAL]" "[EXPERIMENTAL]" "$_readme_continuous_row"
+
+# 6b: [EXPERIMENTAL] label on the watchdog/pilot rows, both docs
+expect_true "SKILL.md watchdog row carries [EXPERIMENTAL]" \
+  bash -c "grep -E '\`watchdog\`' '$_CANON_SKILL' | grep -q '\[EXPERIMENTAL\]'"
+expect_true "SKILL.md pilot row carries [EXPERIMENTAL]" \
+  bash -c "grep -E '\`pilot\`' '$_CANON_SKILL' | grep -q '\[EXPERIMENTAL\]'"
+expect_true "README.md watchdog row carries [EXPERIMENTAL]" \
+  bash -c "grep -E '\`watchdog\`' '$_CANON_README' | grep -q '\[EXPERIMENTAL\]'"
+expect_true "README.md pilot row carries [EXPERIMENTAL]" \
+  bash -c "grep -E '\`pilot\`' '$_CANON_README' | grep -q '\[EXPERIMENTAL\]'"
+
+# 6c: display-skeleton watchdog line stays byte-equal (leading indent
+#   trimmed — SKILL.md nests it inside a numbered sub-step, README does
+#   not) across all 3 copies: SKILL.md confirmation display, README.md
+#   confirmation display, and the (byte-shared) quick-reference card.
+_skill_display_watchdog="$(grep -E '^\s*watchdog:' "$_CANON_SKILL" 2>/dev/null | sed -n '1p' | sed 's/^[[:space:]]*//' || true)"
+_readme_display_watchdog="$(grep -E '^\s*watchdog:' "$_CANON_README" 2>/dev/null | sed -n '1p' | sed 's/^[[:space:]]*//' || true)"
+_skill_card_watchdog="$(grep -E '^\s*watchdog:' "$_CANON_SKILL" 2>/dev/null | sed -n '2p' | sed 's/^[[:space:]]*//' || true)"
+expect_true "3 watchdog-line copies found (SKILL display + README display + card)" \
+  bash -c "[ -n '$_skill_display_watchdog' ] && [ -n '$_readme_display_watchdog' ] && [ -n '$_skill_card_watchdog' ]"
+expect_eq "SKILL.md display watchdog line == README.md display watchdog line" \
+  "$_skill_display_watchdog" "$_readme_display_watchdog"
+expect_eq "SKILL.md display watchdog line == quick-ref card watchdog line" \
+  "$_skill_display_watchdog" "$_skill_card_watchdog"
+
+# 6d: zero "ONLY armed scale" residue anywhere in either doc
+expect_false "SKILL.md has zero 'ONLY armed scale' residue" \
+  grep -q 'ONLY armed scale' "$_CANON_SKILL"
+expect_false "README.md has zero 'ONLY armed scale' residue" \
+  grep -q 'ONLY armed scale' "$_CANON_README"
+
+# 6e: zero keepalive: field-form in either doc (KA-R16 — "keepalive" survives
+# only as the historical capability/wave name, never a field)
+expect_false "SKILL.md has zero 'keepalive:' field-form" \
+  grep -qE '^\s*keepalive:' "$_CANON_SKILL"
+expect_false "README.md has zero 'keepalive:' field-form" \
+  grep -qE '^\s*keepalive:' "$_CANON_README"
+
+# 6f: the auto no-yield rule is present verbatim (KA-R16 pilot semantics)
+_NOYIELD='Under `pilot: auto`, a governed session does not end its turn with work READY outside a gate — it continues.'
+expect_true "SKILL.md carries the no-yield rule verbatim" \
+  grep -qF "$_NOYIELD" "$_CANON_SKILL"
+
+# 6g: take-over prose states the fresh-resume-null window HONESTLY and requires
+#   declare-first, both docs in sync (F4, Step-6 critic fix — the KA-R5 doc
+#   contradiction). A bare `claude --resume` is NOT automatically safe on a
+#   `pilot: auto` goal: a freshly-resumed terminal reports registry status null
+#   until its first turn, so the presence rule cannot yet see it → declare
+#   pilot:manual (or disarm) BEFORE reopening. The two docs must carry the same
+#   window statement and the same declare-first instruction verbatim.
+_RESUME_WINDOW='status `null` until its first turn'
+expect_true "SKILL.md states the fresh-resume-null window honestly" \
+  grep -qF "$_RESUME_WINDOW" "$_CANON_SKILL"
+expect_true "README.md states the fresh-resume-null window honestly (sync)" \
+  grep -qF "$_RESUME_WINDOW" "$_CANON_README"
+_DECLARE_FIRST='declare `pilot: manual` (or disarm) BEFORE'
+expect_true "SKILL.md take-over prose requires declare-first before reopen" \
+  grep -qF "$_DECLARE_FIRST" "$_CANON_SKILL"
+expect_true "README.md take-over prose requires declare-first before reopen (sync)" \
+  grep -qF "$_DECLARE_FIRST" "$_CANON_README"
+
+# ============================================================
 # Results
 # ============================================================
 
