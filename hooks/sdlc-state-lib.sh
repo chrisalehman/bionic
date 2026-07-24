@@ -1494,12 +1494,13 @@ _sdlc_spawn_defect_class() {
 # non-empty); the pid is best-effort telemetry only — F1 resolves the real kill
 # target from the live registry, so a stale pid here is never acted on.
 _sdlc_record_follow() {
-  local gid="$1" newsid="$2" newpid="${3:-}" dir rec tmp plan cwd pid armed
+  local gid="$1" newsid="$2" newpid="${3:-}" dir rec tmp plan cwd pid oldsid armed
   dir="$(_sdlc_goals_dir)"; rec="$dir/$gid"
   [ -f "$rec" ] || return 0
   plan="$(grep -E '^PLAN=' "$rec" 2>/dev/null | head -1 | sed -E 's/^PLAN=//')"
   cwd="$(grep -E '^CWD=' "$rec" 2>/dev/null | head -1 | sed -E 's/^CWD=//')"
   pid="$(grep -E '^PID=' "$rec" 2>/dev/null | head -1 | sed -E 's/^PID=//')"
+  oldsid="$(grep -E '^SESSION_ID=' "$rec" 2>/dev/null | head -1 | sed -E 's/^SESSION_ID=//')"
   armed="$(grep -E '^ARMED_AT=' "$rec" 2>/dev/null | head -1 | sed -E 's/^ARMED_AT=//')"
   [ -n "$newpid" ] && pid="$newpid"
   tmp="$(mktemp "$dir/.follow.$gid.XXXXXX" 2>/dev/null)" || return 0
@@ -1511,6 +1512,9 @@ _sdlc_record_follow() {
     printf 'ARMED_AT=%s\n' "$armed"
   } > "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 0; }
   mv -f "$tmp" "$rec" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 0; }
+  # F2 (brief): audit the re-seat so the vehicle-chain turnover leaves a durable
+  # trail (the poker/operator can see which successor the record now points at).
+  _sdlc_audit "$gid" REG-FOLLOW "sid=$newsid (was ${oldsid:-none}) pid=${pid:-none} successor re-seated"
   return 0
 }
 
