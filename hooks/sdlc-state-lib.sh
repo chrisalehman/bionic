@@ -2122,30 +2122,40 @@ _sdlc_abspath() {
   printf '%s/%s' "$d" "$b"
 }
 
-# sdlc_arm <plan-path> [pilot-override] [--force] → arm a governed run:
+# sdlc_arm <plan-path> [--force] → arm a governed run:
 # derive the goal-id (sdlc_goal_id), capture PLAN/CWD/SESSION_ID/PID/ARMED_AT
 # and write the 5-field consent record atomically (tmp+mv) into the poker's
 # goals dir. SESSION_ID/PID come from the SDLC_ARM_SESSION_ID / SDLC_ARM_PID
 # env seams when set (testability + headless callers), else best-effort real
 # values ($$ for PID; $CLAUDE_SESSION_ID for the session). On success: emits
-# `ARM <gid> <plan> pilot=<p>` to the audit log and prints the goal-id.
+# `ARM <gid> <plan> pilot=<p>` to the audit log (p = the EFFECTIVE frontmatter
+# pilot) and prints the goal-id.
 #
-# pilot-override (a bare manual|auto token) sets the pilot shown in the audit
-# line; --force authorizes arming when watchdog-effective is off (the sole
-# legitimate arm-on-off path). Refusals (rc≠0 + stderr + NO record write):
-# missing/unreadable plan, malformed frontmatter (off-enum watchdog/pilot),
-# a colliding record (same goal-id, different PLAN), and watchdog-effective
-# off without --force. [refusals land in a later case-group.]
+# There is NO pilot override (F3): pilot is frontmatter-authoritative, so a
+# positional `manual|auto` argument is REJECTED fail-loud (rc 2 + stderr naming the
+# frontmatter as the single source of truth) — edit the plan's `pilot:` field
+# instead. --force is the sole flag arg; it authorizes arming when watchdog-effective
+# is off (the sole legitimate arm-on-off path). Refusals (rc≠0 + stderr + NO record
+# write): missing/unreadable plan, malformed frontmatter (off-enum watchdog/pilot),
+# a positional pilot override (rc 2), a colliding record (same goal-id, different
+# PLAN), and watchdog-effective off without --force.
 sdlc_arm() {
-  local plan="${1:-}" pilot_override="" force=0
+  local plan="${1:-}" force=0
   shift 2>/dev/null || true
   local a
   for a in "$@"; do
     case "$a" in
       --force)       force=1 ;;
-      manual|auto)   pilot_override="$a" ;;
+      manual|auto)
+        # F3 (Step-6 critic fix): pilot is FRONTMATTER-AUTHORITATIVE. A positional
+        # pilot override was audit-only — the audit line could claim pilot=auto while
+        # the runtime (the poker reads sdlc_pilot_effective off the frontmatter) ran
+        # manual. Reject it fail-loud so the plan frontmatter is the single source of
+        # truth; edit the plan's `pilot:` field instead. --force stays the sole flag.
+        echo "defect: arm-pilot-override: pilot comes from plan frontmatter (single source of truth); edit the plan's pilot: field — refusing the '$a' override argument" >&2
+        return 2 ;;
       '')            ;;
-      *) echo "defect: arm-bad-arg: unrecognized argument '$a' (expected manual|auto or --force)" >&2; return 1 ;;
+      *) echo "defect: arm-bad-arg: unrecognized argument '$a' (expected --force)" >&2; return 1 ;;
     esac
   done
 
@@ -2166,15 +2176,11 @@ sdlc_arm() {
     echo "defect: malformed-frontmatter: cannot resolve watchdog for $abs" >&2; return 1
   fi
 
-  # pilot for the audit line: explicit override wins; else the effective value.
-  # An off-enum pilot with NO override is malformed → refuse.
-  if [ -n "$pilot_override" ]; then
-    pilot="$pilot_override"
-  else
-    pilot="$(sdlc_pilot_effective "$abs")"; prc=$?
-    if [ "$prc" -ne 0 ]; then
-      echo "defect: malformed-frontmatter: cannot resolve pilot for $abs (pass MANUAL|AUTO to override)" >&2; return 1
-    fi
+  # pilot for the audit line: ALWAYS the effective (frontmatter) value — there is no
+  # override (F3, single source of truth). An off-enum pilot is malformed → refuse.
+  pilot="$(sdlc_pilot_effective "$abs")"; prc=$?
+  if [ "$prc" -ne 0 ]; then
+    echo "defect: malformed-frontmatter: cannot resolve pilot for $abs" >&2; return 1
   fi
 
   # 3. watchdog-effective off arms only under an explicit --force.
