@@ -76,6 +76,16 @@ REPROMPT_PREAMBLE='resume per the plan'"'"'s `## SDLC State` and carry out the r
 # Registration globals — bound unconditionally so set -u never trips on a path
 # that reads them before load_registration runs (hooks-rules.md).
 REG_PLAN=""; REG_CWD=""; REG_SESSION_ID=""; REG_PID=""; REG_ARMED_AT=""
+# The LIVE vehicle pid the registry reports for this goal's sid (F5, Step-6 critic
+# fix), resolved once per goal per poll in process_goals. The record's PID is
+# arm-time telemetry only — on shipped arming paths it is the transient Bash-tool
+# shell that armed the goal (dead or recycled), never the vehicle — so the wedge
+# detector's cputime read and the human recovery command must key off the live
+# registry pid, not REG_PID. Empty when unresolvable (registry down / sid absent /
+# no pid field): consumers fail SAFE (wedge falls back to the record pid, which is
+# almost always dead → observation reset, never a false corroboration; recovery
+# omits the kill clause rather than print a wrong pid).
+REG_LIVE_PID=""
 
 # Transcript memo (D-C8 e09 fold): resolve_transcript's glob scan is resolved
 # ONCE per goal per poll and reused by every consumer (transcript_quiet,
@@ -144,6 +154,21 @@ load_registration() {  # $1=goal-id
   REG_ARMED_AT=$(reg_val "$f" ARMED_AT)
   [ -n "$REG_PLAN" ] && [ -n "$REG_CWD" ] && [ -n "$REG_SESSION_ID" ] \
     && [ -n "$REG_PID" ] && [ -n "$REG_ARMED_AT" ]
+}
+
+# reg_live_pid <registry-json> <sid> [registry-rc] — the LIVE pid the registry
+# reports for <sid>, resolved by `.sessionId == $sid` EQUALITY (never a substring
+# match — a sid surfacing only as a forked child's parentSessionId must not
+# resolve). Empty (rc 0) when the registry is unavailable (rc≠0), jq is absent, the
+# sid is not present, or the entry carries no pid — callers treat empty as
+# unresolvable and fail safe. This is the same sid-keyed resolution the lib's F1
+# kill-target fix uses and the same select() the classify/presence readers use —
+# one canonical "resolve this sid's live entry" path.
+reg_live_pid() {  # $1=registry-json $2=sid [$3=registry-rc]
+  [ "${3:-0}" -eq 0 ] 2>/dev/null || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  printf '%s' "$1" | jq -r --arg sid "$2" \
+    '[.[] | select(.sessionId==$sid)][0] | .pid // empty' 2>/dev/null
 }
 
 # CR-normalized frontmatter value (translate \r, never delete — hooks-rules.md).
@@ -378,7 +403,14 @@ wedge_corroborated() {  # $1=gid
   pilot="$(goal_pilot)"
   if [ "$pilot" = "auto" ]; then ceiling="$SDLC_WEDGE_CEILING_AUTO"; else ceiling="$SDLC_WEDGE_CEILING_MANUAL"; fi
   cur_size="$(wedge_transcript_size)"
-  cur_cpu="$(wedge_cputime "$REG_PID")"; cpurc=$?
+  # F5: read cputime off the LIVE vehicle pid (registry, by sid), not the frozen
+  # record REG_PID. The record pid is the recycled arm-time bash-tool shell — a
+  # dead/wrong pid made wedge_cputime return rc1 EVERY poll, resetting the
+  # observation to n=0 and making WEDGED structurally unreachable. When the live pid
+  # is unresolvable REG_LIVE_PID is empty → fall back to REG_PID, which is almost
+  # always dead → cpurc≠0 → observation reset (the fail-safe no-corroborate
+  # direction, AS-13), never a false corroboration on a wrong-but-live pid.
+  cur_cpu="$(wedge_cputime "${REG_LIVE_PID:-$REG_PID}")"; cpurc=$?
 
   s_pid=""; s_size=""; s_cpu=""; s_count=0
   if [ -f "$pf" ]; then
@@ -572,8 +604,16 @@ state_word() {  # $1=classification
 # in this script — never executed, only surfaced in the WEDGE status/notification
 # so force stays human. Consolidated to one template so the no-signal-invocation
 # fixture can whitelist exactly this line.
-recovery_cmd() {  # uses REG_PID, REG_CWD, REG_SESSION_ID
-  printf 'kill %s && cd %s && claude --resume %s' "$REG_PID" "$REG_CWD" "$REG_SESSION_ID"
+recovery_cmd() {  # uses REG_LIVE_PID (F5), REG_CWD, REG_SESSION_ID
+  # F5: the kill target is the LIVE registry pid, never the frozen record REG_PID
+  # (which is the recycled arm-time bash-tool shell — killing it does nothing, or
+  # worse, kills a recycled stranger). When the live pid is unresolvable, OMIT the
+  # kill clause entirely rather than hand a human a wrong pid to SIGTERM.
+  if printf '%s' "${REG_LIVE_PID:-}" | grep -qE '^[0-9]+$'; then
+    printf 'kill %s && cd %s && claude --resume %s' "$REG_LIVE_PID" "$REG_CWD" "$REG_SESSION_ID"
+  else
+    printf 'cd %s && claude --resume %s' "$REG_CWD" "$REG_SESSION_ID"
+  fi
 }
 
 # write_status <goal-id> <classification> — derived status file (C8): state,
@@ -1263,6 +1303,9 @@ process_goals() {
       continue
     fi
     is_armed "$gid" || continue       # watchdog-effective=off → audited SKIP-UNARMED, or MALFORMED-RECORD
+    # F5: resolve THIS goal's live vehicle pid from the once-per-poll registry by
+    # sid, before classify (wedge) / write_status / dispatch (recovery) consume it.
+    REG_LIVE_PID="$(reg_live_pid "$reg_json" "$REG_SESSION_ID" "$reg_rc")"
     state=$(classify_goal "$gid" "$reg_json" "$reg_rc")
     [ -n "$state" ] || continue       # total-signal-loss degrade → already audited, skip
     presence=$(goal_presence "$reg_json" "$reg_rc")   # 4/S5 PRESENCE RULE axis (KA-R13)
