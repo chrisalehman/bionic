@@ -2485,7 +2485,10 @@ ac_spawn_live_owner() {
   ledger_append "$gid" effect "spawn:$gid:2026-01-01T00:00:00Z" "sid=$fakesid pid=na cwd=$d" >/dev/null 2>&1
   counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
   SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
-  SDLC_REGISTRY_CMD="$(make_registry_stub "{\"sessions\":[{\"id\":\"$fakesid\"}]}")"
+  # Real registry schema: a top-level array of records each with a `.sessionId`
+  # (F7 migration — the gate reads presence by sessionId EQUALITY via _sdlc_reg_present,
+  # not a raw-JSON substring grep). The prior sid IS a genuine live session here.
+  SDLC_REGISTRY_CMD="$(make_registry_stub "[{\"pid\":9,\"kind\":\"interactive\",\"sessionId\":\"$fakesid\",\"status\":\"idle\"}]")"
   err="$(sdlc_successor_spawn "$gid" "$d" 2>&1 1>/dev/null)"; rc=$?
   assert_nonzero "AC-N6 live-owner returns nonzero" "$rc"
   assert_contains "AC-N6 live-owner names goal-owned + the sid" "goal-owned: session $fakesid live" "$err"
@@ -2493,6 +2496,29 @@ ac_spawn_live_owner() {
   assert_eq "AC-N6 live-owner did not park (no Wake Note)" "0" "$(wake_note_count "$PLAN_STUB")"
 }
 ac_spawn_live_owner
+
+echo "--- PARENT-ONLY DECOY (F7): prior sid appears ONLY as a live child's parentSessionId → NOT the owner → proceeds to spawn ---"
+ac_spawn_parent_only_decoy() {
+  local gid="spawn-parentdecoy" d counter priorsid out rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 4 no; d="$REPO_DIR"          # current 4 → benign not-complete → gate then proceed
+  priorsid="dddddddd-eeee-ffff-0000-111111111111"
+  ledger_append "$gid" effect "spawn:$gid:2026-01-01T00:00:00Z" "sid=$priorsid pid=na cwd=$d" >/dev/null 2>&1
+  write_complete_baton_pos "$gid" "$d" 4 none "$(ledger_tail_pos "$gid")"   # baton tracks the planted line → reconcile clean
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  # The dead predecessor's surviving child carries priorsid as parentSessionId; its OWN
+  # sessionId is a different live child. A raw-JSON substring grep counts priorsid present
+  # (the F6/F7 fork hazard) → permanent self-refuse (revival never fires). sessionId
+  # EQUALITY sees priorsid absent as an owner → the dead owner is gone → proceed.
+  SDLC_REGISTRY_CMD="$(make_registry_stub "[{\"pid\":7,\"kind\":\"interactive\",\"sessionId\":\"child-decoy\",\"parentSessionId\":\"$priorsid\",\"status\":\"idle\"}]")"
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "F7 parent-only decoy proceeds and exits 0" "0" "$rc"
+  assert_eq "F7 parent-only decoy launched a fresh successor (counter 1)" "1" "$(spawn_counter "$counter")"
+  TOTAL=$((TOTAL + 1))
+  if printf '%s' "$out" | grep -qE '^[0-9a-f-]{36}$'; then pass "F7 parent-only decoy printed a fresh sid"; else fail "F7 parent-only decoy printed a fresh sid" "got: $out"; fi
+}
+ac_spawn_parent_only_decoy
 
 echo "--- REGISTRY UNAVAILABLE: registry command fails → conservative goal-owned refusal, no park, no spawn ---"
 ac_spawn_registry_down() {
@@ -2523,7 +2549,9 @@ ac_spawn_dead_owner() {
   write_complete_baton_pos "$gid" "$d" 4 none "$(ledger_tail_pos "$gid")"   # baton position tracks the planted line → reconcile clean
   counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
   SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
-  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[{"id":"00000000-0000-0000-0000-000000000000"}]}')"
+  # Real registry schema (F7 migration): a DIFFERENT live session is present by its
+  # `.sessionId`; the prior sid is absent → owner dead → proceed. Equality, not substring.
+  SDLC_REGISTRY_CMD="$(make_registry_stub '[{"pid":9,"kind":"interactive","sessionId":"00000000-0000-0000-0000-000000000000","status":"idle"}]')"
   out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
   assert_eq "AC-N6 dead-owner proceeds and exits 0" "0" "$rc"
   assert_eq "AC-N6 dead-owner launched a fresh successor (counter 1)" "1" "$(spawn_counter "$counter")"
