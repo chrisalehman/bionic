@@ -945,7 +945,12 @@ complete_latch() {  # $1=gid $2=prev
   sdlc_complete_check "$gid" "$REG_CWD" >/dev/null 2>"${ccf:-/dev/null}"; rc=$?
   cc_err=""; [ -n "$ccf" ] && { cc_err="$(cat "$ccf" 2>/dev/null)"; rm -f "$ccf"; }
   case "$rc" in
-    0) notify_and_cache "$gid" COMPLETE "goal $gid complete (charter close / current:10)" "$prev" COMPLETE ;;
+    0) notify_and_cache "$gid" COMPLETE "goal $gid complete (charter close / current:10)" "$prev" COMPLETE
+       # 4/S6 lifecycle hygiene: a genuinely-latched COMPLETE stands down for good —
+       # auto-clean the registration (audited, exactly-once: the record is gone
+       # after this, so no later poll ever reaches this goal again). A false-complete
+       # (rc=2 below) parks GATED instead and MUST retain its registration.
+       sdlc_disarm "$gid" complete >/dev/null 2>&1 ;;
     1) audit_line "$gid" SKIP-RACE "completion check benign not-complete: $cc_err" ;;   # nothing else
     2) cls="$(_sdlc_spawn_defect_class "$cc_err")"; [ -n "$cls" ] || cls="false-complete"
        # Park-rc checked (5-axis F1): on a failed park, surface LADDER-DEFECT and
@@ -959,6 +964,18 @@ complete_latch() {  # $1=gid $2=prev
        fi ;;
   esac
 }
+
+# ---------- 4/S6: per-poll per-sid drive dedupe ----------
+# _SDLC_DRIVEN_SIDS — space-separated SESSION_IDs that already received a DRIVE
+# action THIS POLL (poke/re-prompt/restart/rollover — the ladder's action tokens,
+# plus the legacy poke_capped path). Reset once per poll (process_goals, below);
+# in-process only, never persisted — a fresh cron invocation starts empty.
+# Notify-only verbs (GATED/WEDGE/COMPLETE notifications, the S4 manual verb set,
+# dispatch_attended) never mark a sid, so a goal that only notifies never blocks
+# a same-sid sibling from driving.
+_SDLC_DRIVEN_SIDS=""
+sid_driven() { case " $_SDLC_DRIVEN_SIDS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+mark_sid_driven() { [ -n "$1" ] && _SDLC_DRIVEN_SIDS="$_SDLC_DRIVEN_SIDS $1"; }
 
 # ladder_dispatch <gid> <classification> — the per-goal ladder step. The caller
 # has already confirmed SDLC_LIB_OK, ladder_applicable, and a baton FILE present.
@@ -1010,6 +1027,17 @@ ladder_dispatch() {  # $1=gid $2=classification
     esac
     return 0
   fi
+  # 4/S6 per-poll per-sid dedupe: gate ONLY the drive tokens (poke/re-prompt/
+  # restart/rollover — the ones that reach a spawn/resume seam). observe/human/
+  # none/restart-exhausted are not drive verbs and are never deduped.
+  case "$token" in
+    poke:*|re-prompt:*|restart:*|rollover)
+      if sid_driven "$REG_SESSION_ID"; then
+        audit_line "$gid" SKIP-SID-DEDUPE "sid $REG_SESSION_ID already driven this poll"
+        return 0
+      fi
+      mark_sid_driven "$REG_SESSION_ID" ;;
+  esac
   case "$token" in
     poke:*)            ladder_rung_effect "$gid" "$anchor" "$token" poke ;;
     re-prompt:*)       ladder_rung_effect "$gid" "$anchor" "$token" re-prompt ;;
@@ -1184,7 +1212,15 @@ dispatch_actions() {  # $1=gid $2=state $3=prev [$4=presence]
       notify_and_cache "$gid" WEDGE \
         "goal $gid WEDGED: driving but transcript quiet >${WEDGE_QUIET}s. recovery: $(recovery_cmd)" "$prev" "$state" ;;
     DEAD|IDLE_STALLED)
-      poke_capped "$gid" "$state"; cache_state "$gid" "$state" ;;
+      # 4/S6 per-poll per-sid dedupe: same gate as the ladder's drive tokens —
+      # the legacy (baton-less) poke is a drive verb too.
+      if sid_driven "$REG_SESSION_ID"; then
+        audit_line "$gid" SKIP-SID-DEDUPE "sid $REG_SESSION_ID already driven this poll"
+      else
+        mark_sid_driven "$REG_SESSION_ID"
+        poke_capped "$gid" "$state"
+      fi
+      cache_state "$gid" "$state" ;;
     BUSY)
       audit_line "$gid" SKIP-BUSY "driving; left alone"; cache_state "$gid" "$state" ;;
     IDLE)
@@ -1199,6 +1235,7 @@ process_goals() {
   local gdir f gid state prev presence reg_json reg_rc
   gdir="$(goals_dir)"
   [ -d "$gdir" ] || return 0
+  _SDLC_DRIVEN_SIDS=""    # 4/S6: fresh per-poll dedupe state (in-process only)
   # D-C8 e09 fold: ONE registry fetch per poll (was: one per goal via
   # classify_goal), threaded to every classify_goal call below as data.
   reg_json=$(${SDLC_REGISTRY_CMD:-claude agents --json} 2>/dev/null); reg_rc=$?
