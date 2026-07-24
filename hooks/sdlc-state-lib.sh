@@ -2265,6 +2265,22 @@ _sdlc_reg_val() {
   grep -E "^$2=" "$1" 2>/dev/null | head -1 | sed -E "s/^$2=//"
 }
 
+# _sdlc_reg_present <registry-json> <sid> — rc 0 iff a registry entry whose
+# `.sessionId == sid` exists (F6, Step-6 critic fix). EQUALITY, never a substring
+# match: a raw-JSON `grep -qF "$sid"` counts the sid as present when it appears in
+# ANY field — e.g. a forked child's `parentSessionId` (the exact fork hazard this
+# wave defends against) — which then (a) makes an already-dead vehicle look present
+# so the kill path runs, and (b) can never observe absence in the death-confirm
+# re-poll, livelocking the restart into a permanent abort. rc 1 = absent; rc 2 = jq
+# unavailable (presence UNCONFIRMABLE → callers fail closed: never kill, never spawn).
+# This is the one canonical "does this sid have a live registry entry?" test that the
+# kill-path presence check, the death-confirm re-poll, and (via select) the status +
+# pid reads all key off — no more three-slightly-different queries in one function.
+_sdlc_reg_present() {
+  command -v jq >/dev/null 2>&1 || return 2
+  [ "$(printf '%s' "$1" | jq -r --arg sid "$2" 'any(.[]; .sessionId==$sid)' 2>/dev/null)" = "true" ]
+}
+
 # _sdlc_restart_body <goal-id> <anchor> <n> <cwd> <sid> <pid> — the restart
 # sequence, run AS the sdlc_effect_run command (so the intent decision line is
 # journaled BEFORE this body executes, and the effect line ONLY on a rc-0
@@ -2285,21 +2301,26 @@ _sdlc_restart_body() {
     return 1
   fi
 
-  # (c) kill-if-alive. The registration sid looked up in the registry (literal
-  #     grep, no jq dependency for presence — same as the spawn single-writer gate).
+  # (c) kill-if-alive. The registration sid is looked up in the registry by
+  #     `.sessionId` EQUALITY (F6): a substring grep would count the sid as present
+  #     when it appears only as a forked child's parentSessionId — killing an
+  #     already-dead vehicle and livelocking the death-confirm re-poll below.
   reg_out="$(${SDLC_REGISTRY_CMD:-claude agents --json} 2>/dev/null)"
-  if printf '%s' "$reg_out" | grep -qF "$sid"; then
-    # Present → determine status. NULL (headless in-flight, tui-less) is killable;
-    # NON-NULL (a live TUI) is FORBIDDEN — the kill seam's constitutional assertion
-    # (KA-R13: never kill an attended vehicle). jq-absent / unparseable status is
-    # fail-closed to FORBIDDEN (never kill when tui-less cannot be confirmed).
-    if command -v jq >/dev/null 2>&1; then
-      status="$(printf '%s' "$reg_out" | jq -r --arg sid "$sid" \
-        '[.[] | select(.sessionId==$sid)][0] | .status // "NOSTATUS"' 2>/dev/null)"
-      [ -n "$status" ] || status="UNCONFIRMED"
-    else
-      status="UNCONFIRMED"
-    fi
+  _sdlc_reg_present "$reg_out" "$sid"; local prc=$?
+  if [ "$prc" -eq 2 ]; then
+    # jq unavailable → presence unconfirmable → fail closed (never kill, never spawn
+    # beside a vehicle we cannot reason about).
+    _sdlc_audit "$goal_id" RESTART-ABORT "jq unavailable; registry presence unconfirmable for sid=$sid; no kill, no spawn (rung=$n)"
+    return 1
+  fi
+  if [ "$prc" -eq 0 ]; then
+    # Present (by sessionId equality) → determine status. NULL (headless in-flight,
+    # tui-less) is killable; NON-NULL (a live TUI) is FORBIDDEN — the kill seam's
+    # constitutional assertion (KA-R13: never kill an attended vehicle). jq is
+    # guaranteed present here (_sdlc_reg_present returned 0 only when jq resolved).
+    status="$(printf '%s' "$reg_out" | jq -r --arg sid "$sid" \
+      '[.[] | select(.sessionId==$sid)][0] | .status // "NOSTATUS"' 2>/dev/null)"
+    [ -n "$status" ] || status="UNCONFIRMED"
     if [ "$status" != "NOSTATUS" ]; then
       _sdlc_audit "$goal_id" RESTART-ABORT "kill FORBIDDEN: sid=$sid status=$status (live terminal / unconfirmable); no kill, no spawn (rung=$n)"
       return 1
@@ -2322,7 +2343,12 @@ _sdlc_restart_body() {
     tries="${SDLC_RESTART_KILL_TRIES:-6}"; delay="${SDLC_RESTART_KILL_DELAY:-2}"; gone=0
     for (( i = 1; i <= tries; i++ )); do
       reg_out="$(${SDLC_REGISTRY_CMD:-claude agents --json} 2>/dev/null)"
-      if ! printf '%s' "$reg_out" | grep -qF "$sid"; then gone=1; break; fi
+      # death-confirm by sessionId EQUALITY (F6): gone ONLY on definitive absence.
+      # A sid lingering as a child's parentSessionId after the vehicle died would
+      # keep a substring grep "present" forever (permanent won't-die abort); jq
+      # unavailable mid-loop stays not-gone (fail-safe: never spawn beside a vehicle
+      # we can no longer confirm dead).
+      _sdlc_reg_present "$reg_out" "$sid"; [ $? -eq 1 ] && { gone=1; break; }
       [ "$delay" -gt 0 ] && sleep "$delay"
     done
     if [ "$gone" -ne 1 ]; then
