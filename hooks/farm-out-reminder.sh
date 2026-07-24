@@ -2,8 +2,10 @@
 # FARM-OUT: tiered PreToolUse(Bash) enforcement — long-running main-thread
 # commands DENY with a redirect to the right role; fuzzy production-shaped
 # commands get ONE additionalContext nudge per class per session; every
-# tier-1/tier-2 event logs one line to .bionic/memory/sdlc-v11-audit.md
-# (log_finding() shape, own copy — deliberate per-hook duplication).
+# tier-1/tier-2 event logs one line to
+# $HOME/.claude/logs/<project-slug>/sdlc-v11-audit.md — outside every consuming
+# project tree (incident 0001) — via audit_path() (log_finding() shape, own
+# copy — deliberate per-hook duplication).
 #
 # Exit 0 on EVERY path. Enforcement lives in stdout JSON only:
 #   deny  → hookSpecificOutput.permissionDecision "deny" + redirect reason
@@ -40,15 +42,33 @@ if [ -f "$PROJECT_DIR/.bionic/config.yaml" ]; then
 fi
 [ "$MODE" = "off" ] && exit 0
 
-# Normalized single-line form for matching + audit excerpts (CR translate).
+# Normalized single-line form for matching + the scrubbed deny reason (CR translate).
 FLAT=$(printf '%s' "$CMD" | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' | tr '\n' ' ' \
   | sed 's/[[:space:]]\{1,\}/ /g; s/^ //; s/ $//')
 
+# Incident 0001: the audit stream must live where a consuming project cannot
+# commit it, regardless of that project's .gitignore. $HOME-rooted, per-project,
+# durable — mirroring hooks/sdlc-poker.sh:111's $HOME/.claude/ audit log.
+# Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
+# collision-resistant across same-named projects under different parents.
+# cksum and basename are POSIX — no new dependency.
+audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
+  [ -n "${HOME:-}" ] || return 1
+  local base sum
+  base=$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')
+  sum=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
+  printf '%s/.claude/logs/%s-%s/sdlc-v11-audit.md' "$HOME" "$base" "$sum"
+}
+
 log_event() {  # $1=event $2=class
-  local audit_dir="$PROJECT_DIR/.bionic/memory"
-  local excerpt; excerpt=$(printf '%s' "$FLAT" | cut -c1-120)
-  local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) farm-out $1: class=$2 mode=$MODE ($excerpt)"
-  mkdir -p "$audit_dir" 2>/dev/null && printf '%s\n' "$line" >> "$audit_dir/sdlc-v11-audit.md" 2>/dev/null
+  # No command-derived text: `class=<c> mode=<m>` is the complete payload.
+  # A length bound is not a sanitizer — incident 0001 leaked a live credential
+  # through the former `cut -c1-120` excerpt of the raw command.
+  local f
+  if f=$(audit_path "$PROJECT_DIR"); then
+    local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) farm-out $1: class=$2 mode=$MODE"
+    mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$line" >> "$f" 2>/dev/null
+  fi
   echo "farm-out [$1] class=$2" >&2
   return 0
 }
@@ -65,8 +85,20 @@ emit_nudge() {  # $1=class $2=role
   return 0
 }
 
+# Pattern scrub for command-derived text (incident 0001). Two shapes:
+# a hex run of 32+ (API keys, tokens, hashes) and an explicit
+# KEY=/TOKEN=/SECRET= assignment. This is deliberately farm-out-local —
+# no other hook in this repo interpolates raw command text.
+scrub_secrets() {  # stdin → stdout
+  sed -E -e 's/[A-Fa-f0-9]{32,}/[REDACTED]/g' \
+         -e 's/([A-Za-z0-9_]*(KEY|TOKEN|SECRET)=)[^[:space:]]+/\1[REDACTED]/g'
+}
+
 deny_reason() {  # $1=class $2=role
-  printf '%s' "farm-out policy: this is a long-running $1-class command; it must not run on the orchestrator thread (a stuck orchestrator is unavailable and cannot process subagent completions — this protects your own context budget). Dispatch it instead: Agent(subagent_type: $2, prompt carrying this exact command): $FLAT — the agent returns the result summary. If this genuinely cannot be dispatched (needs this session's state), re-run prefixed FARM_OUT_ALLOW=1 — the override is sanctioned and audited."
+  # Scrub BEFORE truncating: truncating first can split a hex run below the
+  # 32-char threshold and leak a prefix.
+  local safe; safe=$(printf '%s' "$FLAT" | scrub_secrets | cut -c1-120)
+  printf '%s' "farm-out policy: this is a long-running $1-class command; it must not run on the orchestrator thread (a stuck orchestrator is unavailable and cannot process subagent completions — this protects your own context budget). Dispatch it instead: Agent(subagent_type: $2, prompt carrying the command from this tool call): $safe — scrubbed and truncated for the log; the agent returns the result summary. If this genuinely cannot be dispatched (needs this session's state), re-run prefixed FARM_OUT_ALLOW=1 — the override is sanctioned and audited."
 }
 
 # ── classification (4/2 tier-1; classify_tier2 lands in 4/3) ─────────────

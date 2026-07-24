@@ -101,6 +101,23 @@ if [ -z "$PROJECT_ROOT_FROM_PATH" ]; then
 fi
 DOCS_ROOT=$(resolve_docs_root "$PROJECT_ROOT_FROM_PATH")
 
+# Incident 0001: the audit stream must live where a consuming project cannot
+# commit it, regardless of that project's .gitignore. $HOME-rooted, per-project,
+# durable — mirroring hooks/sdlc-poker.sh:111's $HOME/.claude/ audit log.
+# Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
+# collision-resistant across same-named projects under different parents.
+# cksum and basename are POSIX — no new dependency.
+# Byte-identical to the copies in farm-out-reminder.sh,
+# canonical-sdlc-evidence-gate.sh and context-spend.sh — divergence would give
+# one project two audit files. Deliberate per-hook duplication (no shared lib).
+audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
+  [ -n "${HOME:-}" ] || return 1
+  local base sum
+  base=$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')
+  sum=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
+  printf '%s/.claude/logs/%s-%s/sdlc-v11-audit.md' "$HOME" "$base" "$sum"
+}
+
 case "$FILE_PATH" in
   "$DOCS_ROOT"/specs/*|"$DOCS_ROOT"/plans/*|"$DOCS_ROOT"/adrs/*|"$DOCS_ROOT"/incidents/*) ;;
   *) exit 0 ;;
@@ -341,7 +358,8 @@ if [ "$SDLC_VERSION" = "11" ] || [ "$SDLC_VERSION" = "12" ]; then
   # Past the blocking gates above INTENT/RIGOR/SCALE are valid enums. These
   # checks compute derivable rigor floors and record a finding when the
   # declared rigor violates one. Findings NEVER block: each appends one line
-  # to <project>/.bionic/memory/sdlc-v11-audit.md AND echoes to stderr, then
+  # to $HOME/.claude/logs/<project-slug>/sdlc-v11-audit.md — outside every
+  # consuming project tree (incident 0001) — AND echoes to stderr, then
   # returns 0. Promotion to blocking is a separate later decision made from
   # this data. Every new read path (config.yaml, epic plan, audit file) is
   # fail-open. The evidence-gate hook carries a twin of log_finding (hook
@@ -357,10 +375,12 @@ if [ "$SDLC_VERSION" = "11" ] || [ "$SDLC_VERSION" = "12" ]; then
     esac
   }
   log_finding() {  # $1=check-id $2=detail — never blocks, always returns 0
-    local audit_dir="$PROJECT_ROOT_FROM_PATH/.bionic/memory"
-    local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) governing-skill $1: $2 ($FILE_PATH)"
-    mkdir -p "$audit_dir" 2>/dev/null \
-      && printf '%s\n' "$line" >> "$audit_dir/sdlc-v11-audit.md" 2>/dev/null
+    local f
+    if f=$(audit_path "$PROJECT_ROOT_FROM_PATH"); then
+      local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) governing-skill $1: $2 ($FILE_PATH)"
+      mkdir -p "$(dirname "$f")" 2>/dev/null \
+        && printf '%s\n' "$line" >> "$f" 2>/dev/null
+    fi
     echo "canonical-sdlc v11 [$1]: $2" >&2
     return 0
   }
