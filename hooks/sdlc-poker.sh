@@ -487,11 +487,18 @@ busy_or_wedged() {  # $1=gid
 }
 idle_or_stalled() { [ "$(transcript_quiet)" -gt "$QUIET_THRESHOLD" ] && echo IDLE_STALLED || echo IDLE; }
 
-# Degrade path (registry unavailable/unparseable): ps -p $PID (alive/dead only)
-# → transcript last-event grammar → mtime as suspect flag. Total signal loss
-# echoes "" (caller audits + silently skips; the poker itself never wedges).
+# Degrade path (registry unavailable/unparseable): transcript last-event grammar
+# ONLY (busy → busy_or_wedged, idle → idle_or_stalled, unknown → "" silent-skip).
+# The record PID is DELIBERATELY not consulted (F5/F8): it is arm-time telemetry —
+# a transient shell $$ or a carried-forward stale pid after a re-seat — so it is
+# effectively always-dead, and keying DEAD off it made EVERY armed goal classify
+# DEAD on any registry outage (false DEAD-MANUAL notifications / false DEAD ladder
+# class). Degrade now fails toward the quieter verdict: a genuinely dead vehicle shows a
+# quiet transcript → at worst IDLE_STALLED, and the degraded presence rule
+# (AS-16b: SKIP-DEGRADED → notify-only) already bars any drive; real DEAD detection
+# returns with the registry. Total signal loss echoes "" (caller audits + silently
+# skips; the poker itself never wedges).
 degrade_classify() {  # $1=goal-id (for future audit context)
-  if ! ps -p "$REG_PID" >/dev/null 2>&1; then echo DEAD; return; fi
   case "$(transcript_grammar)" in
     busy) busy_or_wedged "$1" ;;
     idle) idle_or_stalled ;;
