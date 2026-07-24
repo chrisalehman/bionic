@@ -3862,6 +3862,11 @@ ac_spawn_record_follows_vehicle() {
   # so the prior pid is carried forward as best-effort telemetry (F1 owns the kill).
   assert_true "F2 record PID stays non-empty (5-field contract preserved)" \
     test -n "$(_sdlc_reg_val "$rec" PID)"
+  # brief: the re-seat is AUDITED (durable turnover trail).
+  assert_contains "F2 the re-seat is audited (REG-FOLLOW carries the successor sid)" \
+    "REG-FOLLOW sid=$newsid" "$(restart_audit)"
+  assert_contains "F2 the REG-FOLLOW audit names the dead predecessor it replaced" \
+    "was old-sid-predecessor" "$(restart_audit)"
 }
 ac_spawn_record_follows_vehicle
 
@@ -3897,6 +3902,36 @@ ac_restart_record_follows_vehicle() {
   else fail "F2 restart-leg record SESSION_ID is the successor's minted uuid" "got: $newsid"; fi
 }
 ac_restart_record_follows_vehicle
+
+# --- F2 (6/critic-fix) CASE C: an ABORTED restart leaves the record UNTOUCHED. The
+#     follow only fires on a SUCCESSFUL successor spawn — an attended (status non-null)
+#     vehicle forbids the kill → RESTART-ABORT → no spawn → no follow, so the record's
+#     SESSION_ID stays the predecessor sid and NO REG-FOLLOW is audited (brief: "a
+#     failed/aborted restart leaves the record untouched").
+ac_restart_abort_leaves_record_untouched() {
+  new_state_dir
+  local gid="restart-abort-follow" a="$RESTART_ANCHOR" sid="sid-abort-follow" rc rec
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "$sid" 999996
+  rec="$HOME/.claude/sdlc-goals/$gid"
+  local order counter regf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf")
+  reg_present_busy "$sid" 313131 > "$regf"        # status busy = attended → kill FORBIDDEN → abort
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$regf" "$d" "$gid" no)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_nonzero "F2 attended restart aborts (nonzero)" "$rc"
+  assert_eq "F2 aborted restart NEVER re-seats — SESSION_ID stays the predecessor sid" \
+    "$sid" "$(_sdlc_reg_val "$rec" SESSION_ID)"
+  assert_eq "F2 aborted restart spawned no successor" "0" "$(spawn_counter "$counter")"
+  assert_true "F2 aborted restart wrote NO REG-FOLLOW audit" \
+    test -z "$(restart_audit | grep -F 'REG-FOLLOW')"
+}
+ac_restart_abort_leaves_record_untouched
 
 # --- 4/S7: sdlc_restart_vehicle's spawn leg reaches the env scrub (it calls the
 #     UNCHANGED sdlc_successor_spawn — this proves the scrub reaches it THROUGH
