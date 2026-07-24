@@ -1464,8 +1464,11 @@ _sdlc_spawn_launch() {
   else
     perm_args=( --dangerously-skip-permissions )
   fi
+  # 4/S7 probe-env hazard scrub: an inherited CLAUDE_CODE_CHILD_SESSION marker
+  # suppresses BOTH transcript persistence AND registry registration in the
+  # successor — `env -u` strips it right before the exec.
   ( cd "$cwd" 2>/dev/null || exit 1
-    claude -p "$prompt" --session-id "$sid" "${perm_args[@]}" >/dev/null 2>&1 & )
+    env -u CLAUDE_CODE_CHILD_SESSION claude -p "$prompt" --session-id "$sid" "${perm_args[@]}" >/dev/null 2>&1 & )
 }
 
 # _sdlc_spawn_defect_class <stderr-line> — the defect class token (text between
@@ -1634,7 +1637,11 @@ sdlc_successor_spawn() {
   prompt="$(sdlc_successor_pointer_prompt "$goal_id" "$plan_path" "$baton" "$BATON_NEXT_ACTION")"
   spawn_errf="$(mktemp)"
   if [ -n "${SDLC_SPAWN_CMD:-}" ]; then
-    sdlc_effect_run "$goal_id" "$spawn_key" "sid=$sid pid=na cwd=$BATON_CWD" -- $SDLC_SPAWN_CMD 2>"$spawn_errf"
+    # 4/S7 probe-env hazard scrub (the test/fixture seam — SDLC_SPAWN_CMD is a
+    # real executable, so `env -u` wraps it directly; the default path's own
+    # scrub lives inside _sdlc_spawn_launch, below).
+    sdlc_effect_run "$goal_id" "$spawn_key" "sid=$sid pid=na cwd=$BATON_CWD" -- \
+      env -u CLAUDE_CODE_CHILD_SESSION $SDLC_SPAWN_CMD 2>"$spawn_errf"
     spawn_rc=$?
   else
     sdlc_effect_run "$goal_id" "$spawn_key" "sid=$sid pid=na cwd=$BATON_CWD" -- \

@@ -670,8 +670,13 @@ do_poke() {  # $1=goal-id [$2=prompt] ; uses REG_CWD, REG_SESSION_ID
   # child dies (rc 128+14 = 142). Killing our OWN timed-out child is process
   # hygiene, not the no-force verb (which protects TARGET sessions); the DAG makes
   # a killed poke turn resumable.
+  # 4/S7 probe-env hazard scrub: an inherited CLAUDE_CODE_CHILD_SESSION marker
+  # suppresses BOTH transcript persistence and registry registration in the
+  # resumed child — `env -u` strips it right before the exec (perl's alarm
+  # timer survives the exec chain: perl → env → the real binary, same pid).
   ( cd "$REG_CWD" 2>/dev/null && printf '%s' "$prompt" \
       | perl -e 'alarm shift @ARGV; exec @ARGV' "$POKE_TIMEOUT" \
+          env -u CLAUDE_CODE_CHILD_SESSION \
           "$POKE_CLAUDE_BIN" --resume "$REG_SESSION_ID" -p --dangerously-skip-permissions \
   ) >"${outf:-/dev/null}" 2>&1
   rc=$?
