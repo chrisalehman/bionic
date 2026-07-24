@@ -2715,6 +2715,95 @@ ac_spawn_posture_empty() {
 ac_spawn_posture_empty
 
 # ============================================================
+# 4/S7: spawn-path env scrub (probe env hazard). An inherited
+# CLAUDE_CODE_CHILD_SESSION marker suppresses BOTH transcript persistence AND
+# registry registration in the spawned successor — every vehicle-spawn seam
+# must run the child under `env -u CLAUDE_CODE_CHILD_SESSION`. Two independent
+# seams inside sdlc_successor_spawn: the SDLC_SPAWN_CMD test/fixture seam
+# (stage 7's explicit branch) and the real default `_sdlc_spawn_launch` path
+# (the live `claude -p` launch). A negative-control var proves the scrub is
+# surgical (one var removed), never a blanket env wipe.
+# ============================================================
+
+# make_env_check_stub <envlog> — a synchronous stub (SDLC_SPAWN_CMD shape) that
+# logs whether CLAUDE_CODE_CHILD_SESSION and SDLC_TEST_NEGATIVE_CONTROL reached
+# it: "present"/"absent" appended to <envlog> and <envlog>.control respectively.
+make_env_check_stub() {
+  local envlog="$1" stub
+  stub="$(mktemp)"; CLEAN_DIRS+=("$stub")
+  cat > "$stub" <<STUBEOF
+#!/bin/bash
+if [ -n "\${CLAUDE_CODE_CHILD_SESSION:-}" ]; then echo present >> "$envlog"; else echo absent >> "$envlog"; fi
+if [ -n "\${SDLC_TEST_NEGATIVE_CONTROL:-}" ]; then echo present >> "$envlog.control"; else echo absent >> "$envlog.control"; fi
+exit 0
+STUBEOF
+  chmod +x "$stub"
+  printf '%s' "$stub"
+}
+
+# make_claude_fake_env <envlog> — a PATH-fake `claude` binary (like
+# make_claude_fake) that logs env presence instead of argv, for exercising the
+# REAL default `_sdlc_spawn_launch` path (SDLC_SPAWN_CMD unset). Echoes the
+# fixture directory for a PATH prepend.
+make_claude_fake_env() {
+  local envlog="$1" dir stub
+  dir="$(mktemp -d)"; CLEAN_DIRS+=("$dir")
+  stub="$dir/claude"
+  cat > "$stub" <<STUBEOF
+#!/bin/bash
+if [ -n "\${CLAUDE_CODE_CHILD_SESSION:-}" ]; then echo present >> "$envlog"; else echo absent >> "$envlog"; fi
+if [ -n "\${SDLC_TEST_NEGATIVE_CONTROL:-}" ]; then echo present >> "$envlog.control"; else echo absent >> "$envlog.control"; fi
+STUBEOF
+  chmod +x "$stub"
+  printf '%s' "$dir"
+}
+
+echo "--- SDLC_SPAWN_CMD seam: planted CLAUDE_CODE_CHILD_SESSION in the caller env → the spawned child LACKS it ---"
+ac_spawn_env_scrub_cmd_seam() {
+  local gid="spawn-env-cmd" d envlog rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  local -x CLAUDE_CODE_CHILD_SESSION=1 SDLC_TEST_NEGATIVE_CONTROL=keep-me
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  envlog=$(mktemp); CLEAN_DIRS+=("$envlog" "$envlog.control"); : > "$envlog"
+  SDLC_SPAWN_CMD="$(make_env_check_stub "$envlog")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  sdlc_successor_spawn "$gid" "$d" >/dev/null 2>&1; rc=$?
+  assert_eq "4/S7 SDLC_SPAWN_CMD-seam spawn exits 0" "0" "$rc"
+  assert_contains "4/S7 SDLC_SPAWN_CMD-seam child env LACKS CLAUDE_CODE_CHILD_SESSION" "absent" "$(cat "$envlog")"
+  TOTAL=$((TOTAL + 1))
+  if ! grep -qx present "$envlog"; then
+    pass "4/S7 SDLC_SPAWN_CMD-seam no observation ever saw the marker present"
+  else fail "4/S7 SDLC_SPAWN_CMD-seam marker leaked" "$(cat "$envlog")"; fi
+  assert_contains "4/S7 SDLC_SPAWN_CMD-seam negative-control var still reaches the child" "present" "$(cat "$envlog.control")"
+}
+ac_spawn_env_scrub_cmd_seam
+
+echo "--- default _sdlc_spawn_launch seam (SDLC_SPAWN_CMD unset, the REAL launch path): planted marker → child LACKS it ---"
+ac_spawn_env_scrub_default_seam() {
+  local gid="spawn-env-default" d envlog fakedir rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  unset SDLC_SPAWN_CMD
+  local -x CLAUDE_CODE_CHILD_SESSION=1 SDLC_TEST_NEGATIVE_CONTROL=keep-me
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  envlog=$(mktemp); CLEAN_DIRS+=("$envlog" "$envlog.control"); : > "$envlog"
+  fakedir="$(make_claude_fake_env "$envlog")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  local PATH="$fakedir:$PATH"
+  sdlc_successor_spawn "$gid" "$d" >/dev/null 2>&1; rc=$?
+  assert_eq "4/S7 default-seam spawn exits 0" "0" "$rc"
+  wait_for_file "$envlog" 40
+  assert_contains "4/S7 default-seam (_sdlc_spawn_launch) child env LACKS CLAUDE_CODE_CHILD_SESSION" "absent" "$(cat "$envlog")"
+  TOTAL=$((TOTAL + 1))
+  if ! grep -qx present "$envlog"; then
+    pass "4/S7 default-seam no observation ever saw the marker present"
+  else fail "4/S7 default-seam marker leaked" "$(cat "$envlog")"; fi
+  assert_contains "4/S7 default-seam negative-control var still reaches the child" "present" "$(cat "$envlog.control")"
+}
+ac_spawn_env_scrub_default_seam
+
+# ============================================================
 # slice 4/3: sdlc_ladder_next — ledger-derived rung position, capped rungs.
 # The ladder derivation is PURE: it reads the goal's baton + ledger (via the
 # existing parse helpers) and derives exactly one token from (classification,
@@ -3672,6 +3761,38 @@ ac_restart_dead_skips_kill() {
   assert_contains "4/S5 DEAD vehicle RESTART audited killed=0" "killed=0" "$(restart_audit)"
 }
 ac_restart_dead_skips_kill
+
+# --- 4/S7: sdlc_restart_vehicle's spawn leg reaches the env scrub (it calls the
+#     UNCHANGED sdlc_successor_spawn — this proves the scrub reaches it THROUGH
+#     that call, not merely that sdlc_successor_spawn scrubs in isolation) ---
+ac_restart_env_scrub() {
+  new_state_dir
+  local gid="restart-env-scrub" a="$RESTART_ANCHOR" sid="sid-restart-env-scrub" rc snap envlog
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  local -x GIT_AUTHOR_DATE="@1700000000 +0000" GIT_COMMITTER_DATE="@1700000000 +0000"
+  local -x CLAUDE_CODE_CHILD_SESSION=1 SDLC_TEST_NEGATIVE_CONTROL=keep-me
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  printf 'uncommitted\n' > "$d/wip-scratch.txt"
+  snap="$(sdlc_wip_snapshot "$gid" "$d")"
+  write_complete_baton "$gid" "$d" 4 "$snap"
+  plant_restart_reg "$gid" "$d" "$sid" 999995
+  local regf absentf order
+  regf=$(mktemp); absentf=$(mktemp); order=$(mktemp); CLEAN_DIRS+=("$regf" "$absentf" "$order")
+  reg_absent > "$regf"; reg_absent > "$absentf"    # sid absent from the start → DEAD, kill skipped
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" no)"
+  envlog=$(mktemp); CLEAN_DIRS+=("$envlog" "$envlog.control"); : > "$envlog"
+  SDLC_SPAWN_CMD="$(make_env_check_stub "$envlog")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_eq "4/S7 restart-leg spawn exits 0" "0" "$rc"
+  assert_contains "4/S7 restart-leg → successor's env LACKS CLAUDE_CODE_CHILD_SESSION" "absent" "$(cat "$envlog")"
+  TOTAL=$((TOTAL + 1))
+  if ! grep -qx present "$envlog"; then
+    pass "4/S7 restart-leg no observation ever saw the marker present"
+  else fail "4/S7 restart-leg marker leaked" "$(cat "$envlog")"; fi
+  assert_contains "4/S7 restart-leg negative-control var still reaches the successor" "present" "$(cat "$envlog.control")"
+}
+ac_restart_env_scrub
 
 # --- KILL-SEAM ASSERTION: a status-non-null (attended) vehicle is NEVER killed ---
 ac_restart_attended_refuse() {

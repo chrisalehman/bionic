@@ -77,6 +77,18 @@ if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
 else
   echo absent >> "$STUBDIR/claude-token.log"
 fi
+# 4/S7: probe-env hazard marker + an unrelated negative-control var — proves
+# the scrub is surgical (one var removed), not a blanket env wipe.
+if [ -n "${CLAUDE_CODE_CHILD_SESSION:-}" ]; then
+  echo present >> "$STUBDIR/claude-childsession.log"
+else
+  echo absent >> "$STUBDIR/claude-childsession.log"
+fi
+if [ -n "${SDLC_TEST_NEGATIVE_CONTROL:-}" ]; then
+  echo present >> "$STUBDIR/claude-control.log"
+else
+  echo absent >> "$STUBDIR/claude-control.log"
+fi
 [ -f "$STUBDIR/poke.stdout" ] && cat "$STUBDIR/poke.stdout"
 [ -f "$STUBDIR/poke.stderr" ] && cat "$STUBDIR/poke.stderr" >&2
 if [ -f "$STUBDIR/poke-append" ]; then
@@ -249,6 +261,11 @@ registry_calls() { cat "$HOME/.claude/.stub/registry-calls.log" 2>/dev/null || t
 claude_stdin() { cat "$HOME/.claude/.stub/claude-stdin.log" 2>/dev/null || true; }
 claude_cwd()   { cat "$HOME/.claude/.stub/claude-cwd.log" 2>/dev/null || true; }
 claude_token() { cat "$HOME/.claude/.stub/claude-token.log" 2>/dev/null || true; }
+# 4/S7: whether CLAUDE_CODE_CHILD_SESSION (the probe-env hazard marker) and an
+# unrelated negative-control var reached a poke/re-prompt child — present/absent
+# per invocation, one line each in claude-childsession.log / claude-control.log.
+claude_childsession() { cat "$HOME/.claude/.stub/claude-childsession.log" 2>/dev/null || true; }
+claude_control()      { cat "$HOME/.claude/.stub/claude-control.log" 2>/dev/null || true; }
 curl_calls()   { cat "$HOME/.claude/.stub/curl-calls.log" 2>/dev/null || true; }
 count_lines()  { printf '%s' "$1" | grep -c -e "$2" 2>/dev/null || true; }
 # A real, existing cwd (the poke `cd`s into it) mapped like production paths.
@@ -2520,6 +2537,55 @@ S6_dedupe_notify_exempt() {
   else fail "4/S6-dedupe-notify-exempt unexpected dedupe line" "$(audit_of)"; fi
 }
 S6_dedupe_notify_exempt
+
+# ============================================================
+# ============  slice 4/S7 — spawn-path env scrub  ============
+# Every vehicle-spawn seam runs the child under `env -u CLAUDE_CODE_CHILD_SESSION`
+# (probe env hazard: an inherited child-session marker suppresses BOTH transcript
+# persistence and registry registration). Poker-side seams: do_poke (legacy/
+# ladder poke rung) and the ladder's re-prompt rung — both ride do_poke, so one
+# fix covers both, proven by two independent RED cases per the dispatch brief.
+# ============================================================
+
+echo "=== 4/S7-poke: planted CLAUDE_CODE_CHILD_SESSION in the caller env → do_poke's child LACKS it (negative control preserved) ==="
+S7_poke_scrub() {
+  new_home
+  local cwd; cwd=$(real_cwd s7p6)
+  arm_goal gs7p 4 "$cwd" sid-s7p 2147483647 300 user   # DEAD (registry absent → tui-less, legacy poke)
+  stub_registry_state absent
+  export CLAUDE_CODE_CHILD_SESSION=1
+  export SDLC_TEST_NEGATIVE_CONTROL=keep-me
+  run_poker
+  unset CLAUDE_CODE_CHILD_SESSION SDLC_TEST_NEGATIVE_CONTROL
+  assert_contains "4/S7-poke do_poke child env LACKS CLAUDE_CODE_CHILD_SESSION" "absent" "$(claude_childsession)"
+  assert_contains "4/S7-poke do_poke child env KEEPS the unrelated negative-control var" "present" "$(claude_control)"
+}
+S7_poke_scrub
+
+echo "=== 4/S7-reprompt: planted CLAUDE_CODE_CHILD_SESSION → the ladder's re-prompt child LACKS it (negative control preserved) ==="
+S7_reprompt_scrub() {
+  new_home
+  local cwd; cwd=$(ladder_cwd s7r6)
+  arm_goal gs7r 4 "$cwd" sid-s7r 2147483647 300 user   # DEAD
+  stub_registry_state absent
+  plant_baton gs7r "next"
+  local anc; anc=$(anchor_of gs7r)
+  export CLAUDE_CODE_CHILD_SESSION=1
+  export SDLC_TEST_NEGATIVE_CONTROL=keep-me
+  run_poker; run_poker      # poke:1, poke:2 (cap reached)
+  run_poker                 # poke exhausted → re-prompt:1
+  unset CLAUDE_CODE_CHILD_SESSION SDLC_TEST_NEGATIVE_CONTROL
+  assert_true "4/S7-reprompt re-prompt rung actually fired (sanity)" \
+    ledger_line_has gs7r effect "rung:gs7r:re-prompt:$anc:1"
+  assert_eq "4/S7-reprompt every child this poll (poke ×2 + re-prompt ×1) LACKED the marker" "3" \
+    "$(count_lines "$(claude_childsession)" "^absent$")"
+  TOTAL=$((TOTAL + 1))
+  if ! printf '%s' "$(claude_childsession)" | grep -qx present; then
+    pass "4/S7-reprompt no child ever observed CLAUDE_CODE_CHILD_SESSION present"
+  else fail "4/S7-reprompt marker leaked to a child" "$(claude_childsession)"; fi
+  assert_contains "4/S7-reprompt negative-control var still reached the children" "present" "$(claude_control)"
+}
+S7_reprompt_scrub
 
 # ============================================================
 echo ""
