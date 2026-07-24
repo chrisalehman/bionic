@@ -929,7 +929,7 @@ ac_w2_ref_deleted() {
   d=$(new_wip_repo); gid="wip-goal-refgone"
   printf 'wip\n' > "$d/untracked.txt"
   snap=$(sdlc_wip_snapshot "$gid" "$d" 2>/dev/null)
-  git -C "$d" update-ref "refs/keepalive/$gid" "$snap"   # anchor the object
+  git -C "$d" update-ref "refs/anchor/$gid" "$snap"   # anchor the object
   git -C "$d" update-ref -d "refs/sdlc-wip/$gid"          # drop only the sdlc-wip ref
   errf=$(mktemp); CLEAN_DIRS+=("$errf")
   sdlc_wip_check "$gid" "$snap" "$d" 2>"$errf"; rc=$?; out=$(cat "$errf")
@@ -2393,7 +2393,7 @@ ac_spawn_happy_double() {
   write_complete_baton "$gid" "$d" 4 none
   counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
   SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
-  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"   # re-drive: no live owner
+  SDLC_REGISTRY_CMD="$(make_registry_stub '[]')"   # re-drive: no live owner (real schema: bare array)
   path="$(ledger_path "$gid")"
 
   out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
@@ -2485,7 +2485,10 @@ ac_spawn_live_owner() {
   ledger_append "$gid" effect "spawn:$gid:2026-01-01T00:00:00Z" "sid=$fakesid pid=na cwd=$d" >/dev/null 2>&1
   counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
   SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
-  SDLC_REGISTRY_CMD="$(make_registry_stub "{\"sessions\":[{\"id\":\"$fakesid\"}]}")"
+  # Real registry schema: a top-level array of records each with a `.sessionId`
+  # (F7 migration — the gate reads presence by sessionId EQUALITY via _sdlc_reg_present,
+  # not a raw-JSON substring grep). The prior sid IS a genuine live session here.
+  SDLC_REGISTRY_CMD="$(make_registry_stub "[{\"pid\":9,\"kind\":\"interactive\",\"sessionId\":\"$fakesid\",\"status\":\"idle\"}]")"
   err="$(sdlc_successor_spawn "$gid" "$d" 2>&1 1>/dev/null)"; rc=$?
   assert_nonzero "AC-N6 live-owner returns nonzero" "$rc"
   assert_contains "AC-N6 live-owner names goal-owned + the sid" "goal-owned: session $fakesid live" "$err"
@@ -2493,6 +2496,29 @@ ac_spawn_live_owner() {
   assert_eq "AC-N6 live-owner did not park (no Wake Note)" "0" "$(wake_note_count "$PLAN_STUB")"
 }
 ac_spawn_live_owner
+
+echo "--- PARENT-ONLY DECOY (F7): prior sid appears ONLY as a live child's parentSessionId → NOT the owner → proceeds to spawn ---"
+ac_spawn_parent_only_decoy() {
+  local gid="spawn-parentdecoy" d counter priorsid out rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 4 no; d="$REPO_DIR"          # current 4 → benign not-complete → gate then proceed
+  priorsid="dddddddd-eeee-ffff-0000-111111111111"
+  ledger_append "$gid" effect "spawn:$gid:2026-01-01T00:00:00Z" "sid=$priorsid pid=na cwd=$d" >/dev/null 2>&1
+  write_complete_baton_pos "$gid" "$d" 4 none "$(ledger_tail_pos "$gid")"   # baton tracks the planted line → reconcile clean
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  # The dead predecessor's surviving child carries priorsid as parentSessionId; its OWN
+  # sessionId is a different live child. A raw-JSON substring grep counts priorsid present
+  # (the F6/F7 fork hazard) → permanent self-refuse (revival never fires). sessionId
+  # EQUALITY sees priorsid absent as an owner → the dead owner is gone → proceed.
+  SDLC_REGISTRY_CMD="$(make_registry_stub "[{\"pid\":7,\"kind\":\"interactive\",\"sessionId\":\"child-decoy\",\"parentSessionId\":\"$priorsid\",\"status\":\"idle\"}]")"
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  assert_eq "F7 parent-only decoy proceeds and exits 0" "0" "$rc"
+  assert_eq "F7 parent-only decoy launched a fresh successor (counter 1)" "1" "$(spawn_counter "$counter")"
+  TOTAL=$((TOTAL + 1))
+  if printf '%s' "$out" | grep -qE '^[0-9a-f-]{36}$'; then pass "F7 parent-only decoy printed a fresh sid"; else fail "F7 parent-only decoy printed a fresh sid" "got: $out"; fi
+}
+ac_spawn_parent_only_decoy
 
 echo "--- REGISTRY UNAVAILABLE: registry command fails → conservative goal-owned refusal, no park, no spawn ---"
 ac_spawn_registry_down() {
@@ -2523,7 +2549,9 @@ ac_spawn_dead_owner() {
   write_complete_baton_pos "$gid" "$d" 4 none "$(ledger_tail_pos "$gid")"   # baton position tracks the planted line → reconcile clean
   counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
   SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
-  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[{"id":"00000000-0000-0000-0000-000000000000"}]}')"
+  # Real registry schema (F7 migration): a DIFFERENT live session is present by its
+  # `.sessionId`; the prior sid is absent → owner dead → proceed. Equality, not substring.
+  SDLC_REGISTRY_CMD="$(make_registry_stub '[{"pid":9,"kind":"interactive","sessionId":"00000000-0000-0000-0000-000000000000","status":"idle"}]')"
   out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
   assert_eq "AC-N6 dead-owner proceeds and exits 0" "0" "$rc"
   assert_eq "AC-N6 dead-owner launched a fresh successor (counter 1)" "1" "$(spawn_counter "$counter")"
@@ -2531,6 +2559,66 @@ ac_spawn_dead_owner() {
   if printf '%s' "$out" | grep -qE '^[0-9a-f-]{36}$'; then pass "AC-N6 dead-owner printed a fresh sid"; else fail "AC-N6 dead-owner printed a fresh sid" "got: $out"; fi
 }
 ac_spawn_dead_owner
+
+echo "--- F9 (critic round 3): _sdlc_reg_present JQ PARSE FAILURE must read UNCONFIRMABLE (rc 2), never bare absence (rc 1) ---"
+ac_reg_present_parse_failure() {
+  local sid rc out
+
+  # direct happy-path baseline: genuine present → rc 0.
+  sid="probe-sid-f9-present"
+  out="$(printf '[{"pid":1,"kind":"interactive","sessionId":"%s"}]' "$sid")"
+  _sdlc_reg_present "$out" "$sid"; rc=$?
+  assert_eq "F9 baseline: genuine present → rc 0" "0" "$rc"
+
+  # direct happy-path baseline: clean valid-JSON absence → rc 1.
+  out='[{"pid":1,"kind":"interactive","sessionId":"other-sid"}]'
+  _sdlc_reg_present "$out" "$sid"; rc=$?
+  assert_eq "F9 baseline: clean valid-JSON absence → rc 1" "1" "$rc"
+
+  # RED 1: truncated/malformed JSON that CONTAINS the probe sid as a raw substring
+  # (e.g. an interrupted write mid-flush) → parse failure → UNCONFIRMABLE, not absence.
+  out="$(printf '[{"pid":1,"kind":"interactive","sessionId":"%s"' "$sid")"   # unterminated — no closing braces
+  _sdlc_reg_present "$out" "$sid"; rc=$?
+  assert_eq "F9 case1: truncated JSON containing sid substring → rc 2 (UNCONFIRMABLE), not rc 1 (absent)" "2" "$rc"
+
+  # RED 2: a warning line prepended to otherwise-valid JSON (e.g. a wrapper script's
+  # stderr-to-stdout leak) breaks the overall parse even though the sid is a genuine
+  # .sessionId inside the trailing valid object.
+  out="$(printf 'WARN: registry wrapper noise\n[{"pid":1,"kind":"interactive","sessionId":"%s"}]\n' "$sid")"
+  _sdlc_reg_present "$out" "$sid"; rc=$?
+  assert_eq "F9 case2: warning-line-prefixed valid JSON (genuine sid) → rc 2 (UNCONFIRMABLE), not rc 1 (absent)" "2" "$rc"
+
+  # RED 3: an {"error": ...} object payload (registry backend reporting its own
+  # failure as JSON) — valid JSON, but not the expected array shape; jq's `.[]`
+  # over an object with `any(...)` errors on non-indexable access.
+  out='{"error":"registry backend unavailable"}'
+  _sdlc_reg_present "$out" "$sid"; rc=$?
+  assert_eq "F9 case3: {\"error\":...} payload → rc 2 (UNCONFIRMABLE), not rc 1 (absent)" "2" "$rc"
+}
+ac_reg_present_parse_failure
+
+echo "--- F9 (critic round 3): single-writer gate treats an UNPARSEABLE registry as UNCONFIRMABLE, refuses conservatively (no spawn) ---"
+ac_spawn_registry_unparseable() {
+  local gid="spawn-regbad" d counter fakesid err rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  fakesid="bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+  ledger_append "$gid" effect "spawn:$gid:2026-01-01T00:00:00Z" "sid=$fakesid pid=na cwd=$d" >/dev/null 2>&1
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  # Registry command SUCCEEDS (rc 0) but its stdout is unparseable JSON containing
+  # fakesid as a raw substring (F9): jq's own exit status must gate presence, not
+  # bare stdout-equals-"true" — else this reads as definitive absence and the gate
+  # fail-OPENS beside a possibly-live owner.
+  SDLC_REGISTRY_CMD="$(make_registry_stub "[{\"pid\":9,\"sessionId\":\"$fakesid\"")"   # truncated — no closing
+  err="$(sdlc_successor_spawn "$gid" "$d" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "F9 unparseable-registry returns nonzero" "$rc"
+  assert_contains "F9 unparseable-registry: conservative refusal suffix" "registry unavailable, refusing conservatively" "$err"
+  assert_eq "F9 unparseable-registry did not spawn (counter 0)" "0" "$(spawn_counter "$counter")"
+  assert_eq "F9 unparseable-registry did not park" "0" "$(wake_note_count "$PLAN_STUB")"
+}
+ac_spawn_registry_unparseable
 
 echo "--- DIVERGENCE (baton-stale tip): reconcile defect → park that class, no spawn; double-drive → still one Wake Note ---"
 ac_spawn_divergence() {
@@ -2715,6 +2803,95 @@ ac_spawn_posture_empty() {
 ac_spawn_posture_empty
 
 # ============================================================
+# 4/S7: spawn-path env scrub (probe env hazard). An inherited
+# CLAUDE_CODE_CHILD_SESSION marker suppresses BOTH transcript persistence AND
+# registry registration in the spawned successor — every vehicle-spawn seam
+# must run the child under `env -u CLAUDE_CODE_CHILD_SESSION`. Two independent
+# seams inside sdlc_successor_spawn: the SDLC_SPAWN_CMD test/fixture seam
+# (stage 7's explicit branch) and the real default `_sdlc_spawn_launch` path
+# (the live `claude -p` launch). A negative-control var proves the scrub is
+# surgical (one var removed), never a blanket env wipe.
+# ============================================================
+
+# make_env_check_stub <envlog> — a synchronous stub (SDLC_SPAWN_CMD shape) that
+# logs whether CLAUDE_CODE_CHILD_SESSION and SDLC_TEST_NEGATIVE_CONTROL reached
+# it: "present"/"absent" appended to <envlog> and <envlog>.control respectively.
+make_env_check_stub() {
+  local envlog="$1" stub
+  stub="$(mktemp)"; CLEAN_DIRS+=("$stub")
+  cat > "$stub" <<STUBEOF
+#!/bin/bash
+if [ -n "\${CLAUDE_CODE_CHILD_SESSION:-}" ]; then echo present >> "$envlog"; else echo absent >> "$envlog"; fi
+if [ -n "\${SDLC_TEST_NEGATIVE_CONTROL:-}" ]; then echo present >> "$envlog.control"; else echo absent >> "$envlog.control"; fi
+exit 0
+STUBEOF
+  chmod +x "$stub"
+  printf '%s' "$stub"
+}
+
+# make_claude_fake_env <envlog> — a PATH-fake `claude` binary (like
+# make_claude_fake) that logs env presence instead of argv, for exercising the
+# REAL default `_sdlc_spawn_launch` path (SDLC_SPAWN_CMD unset). Echoes the
+# fixture directory for a PATH prepend.
+make_claude_fake_env() {
+  local envlog="$1" dir stub
+  dir="$(mktemp -d)"; CLEAN_DIRS+=("$dir")
+  stub="$dir/claude"
+  cat > "$stub" <<STUBEOF
+#!/bin/bash
+if [ -n "\${CLAUDE_CODE_CHILD_SESSION:-}" ]; then echo present >> "$envlog"; else echo absent >> "$envlog"; fi
+if [ -n "\${SDLC_TEST_NEGATIVE_CONTROL:-}" ]; then echo present >> "$envlog.control"; else echo absent >> "$envlog.control"; fi
+STUBEOF
+  chmod +x "$stub"
+  printf '%s' "$dir"
+}
+
+echo "--- SDLC_SPAWN_CMD seam: planted CLAUDE_CODE_CHILD_SESSION in the caller env → the spawned child LACKS it ---"
+ac_spawn_env_scrub_cmd_seam() {
+  local gid="spawn-env-cmd" d envlog rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  local -x CLAUDE_CODE_CHILD_SESSION=1 SDLC_TEST_NEGATIVE_CONTROL=keep-me
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  envlog=$(mktemp); CLEAN_DIRS+=("$envlog" "$envlog.control"); : > "$envlog"
+  SDLC_SPAWN_CMD="$(make_env_check_stub "$envlog")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  sdlc_successor_spawn "$gid" "$d" >/dev/null 2>&1; rc=$?
+  assert_eq "4/S7 SDLC_SPAWN_CMD-seam spawn exits 0" "0" "$rc"
+  assert_contains "4/S7 SDLC_SPAWN_CMD-seam child env LACKS CLAUDE_CODE_CHILD_SESSION" "absent" "$(cat "$envlog")"
+  TOTAL=$((TOTAL + 1))
+  if ! grep -qx present "$envlog"; then
+    pass "4/S7 SDLC_SPAWN_CMD-seam no observation ever saw the marker present"
+  else fail "4/S7 SDLC_SPAWN_CMD-seam marker leaked" "$(cat "$envlog")"; fi
+  assert_contains "4/S7 SDLC_SPAWN_CMD-seam negative-control var still reaches the child" "present" "$(cat "$envlog.control")"
+}
+ac_spawn_env_scrub_cmd_seam
+
+echo "--- default _sdlc_spawn_launch seam (SDLC_SPAWN_CMD unset, the REAL launch path): planted marker → child LACKS it ---"
+ac_spawn_env_scrub_default_seam() {
+  local gid="spawn-env-default" d envlog fakedir rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  unset SDLC_SPAWN_CMD
+  local -x CLAUDE_CODE_CHILD_SESSION=1 SDLC_TEST_NEGATIVE_CONTROL=keep-me
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  envlog=$(mktemp); CLEAN_DIRS+=("$envlog" "$envlog.control"); : > "$envlog"
+  fakedir="$(make_claude_fake_env "$envlog")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  local PATH="$fakedir:$PATH"
+  sdlc_successor_spawn "$gid" "$d" >/dev/null 2>&1; rc=$?
+  assert_eq "4/S7 default-seam spawn exits 0" "0" "$rc"
+  wait_for_file "$envlog" 40
+  assert_contains "4/S7 default-seam (_sdlc_spawn_launch) child env LACKS CLAUDE_CODE_CHILD_SESSION" "absent" "$(cat "$envlog")"
+  TOTAL=$((TOTAL + 1))
+  if ! grep -qx present "$envlog"; then
+    pass "4/S7 default-seam no observation ever saw the marker present"
+  else fail "4/S7 default-seam marker leaked" "$(cat "$envlog")"; fi
+  assert_contains "4/S7 default-seam negative-control var still reaches the child" "present" "$(cat "$envlog.control")"
+}
+ac_spawn_env_scrub_default_seam
+
+# ============================================================
 # slice 4/3: sdlc_ladder_next — ledger-derived rung position, capped rungs.
 # The ladder derivation is PURE: it reads the goal's baton + ledger (via the
 # existing parse helpers) and derives exactly one token from (classification,
@@ -2741,6 +2918,12 @@ journal_rung() { sdlc_effect_run "$1" "rung:$1:$2:$3:$4" "rung $2 attempt $4" --
 journal_rung_decision() { ledger_append "$1" decision "rung:$1:$2:$3:$4" "rung $2 intent $4" >/dev/null 2>&1; }
 # baton_written_at <gid> — the CURRENT baton generation key (BATON_WRITTEN_AT).
 baton_written_at() { baton_parse "$(baton_path "$1")" >/dev/null 2>&1; printf '%s' "$BATON_WRITTEN_AT"; }
+# journal_restart <gid> <anchor> <n> — a COMPLETED (applied) restart attempt
+# (decision+effect through the real effect guard, as sdlc_restart_vehicle does).
+journal_restart() { sdlc_effect_run "$1" "restart:$1:$2:$3" "restart $3" -- true >/dev/null 2>&1; }
+# journal_restart_decision <gid> <anchor> <n> — a decision-only restart line
+# (the crash window / an aborted restart whose intent stands, no effect landed).
+journal_restart_decision() { ledger_append "$1" decision "restart:$1:$2:$3" "restart intent $3" >/dev/null 2>&1; }
 # journal_spawn_applied <gid> <written-at> — the spawn effect for a generation.
 journal_spawn_applied() { sdlc_effect_run "$1" "spawn:$1:$2" "spawned" -- true >/dev/null 2>&1; }
 # journal_spawn_decision <gid> <written-at> — decision-only spawn line (indeterminate).
@@ -2820,23 +3003,28 @@ ac_ladder_crash_window() {
 }
 ac_ladder_crash_window
 
-echo "--- IDLE_STALLED at 2 poke + 2 re-prompt (spawn unapplied) → human; rollover STRUCTURALLY unreachable for this class ---"
-ac_ladder_idle_stalled_human() {
+echo "--- 4/S5 IDLE_STALLED at 2 poke + 2 re-prompt → restart:1 (KA-R6 amendment: was human); rollover STRUCTURALLY unreachable ---"
+ac_ladder_idle_stalled_restart() {
   new_state_dir
   local gid="ladder-idle-stalled" a="$LADDER_ANCHOR" out
   write_healthy "$gid" >/dev/null                    # spawn key would be unapplied → DEAD would rollover
   journal_rung "$gid" poke "$a" 1; journal_rung "$gid" poke "$a" 2
   journal_rung "$gid" re-prompt "$a" 1; journal_rung "$gid" re-prompt "$a" 2
   out="$(sdlc_ladder_next "$gid" IDLE_STALLED "$a" 2>/dev/null)"
-  assert_eq "4/3 IDLE_STALLED after 2+2 → human" "human" "$out"
+  assert_eq "4/S5 IDLE_STALLED after 2+2 → restart:1 (RESTART rung now reachable)" "restart:1" "$out"
   TOTAL=$((TOTAL + 1))
   if [ "$out" = "rollover" ]; then
-    fail "4/3 IDLE_STALLED NEVER emits rollover (session alive)" "got rollover"
+    fail "4/S5 IDLE_STALLED NEVER emits rollover (session alive; restart kills first)" "got rollover"
   else
-    pass "4/3 IDLE_STALLED NEVER emits rollover (session alive)"
+    pass "4/S5 IDLE_STALLED NEVER emits rollover (session alive; restart kills first)"
   fi
+  # restart cap 2 → restart:1 → restart:2 → restart-exhausted (crash-loop breaker).
+  journal_restart "$gid" "$a" 1
+  assert_eq "4/S5 IDLE_STALLED after restart:1 applied → restart:2" "restart:2" "$(sdlc_ladder_next "$gid" IDLE_STALLED "$a" 2>/dev/null)"
+  journal_restart "$gid" "$a" 2
+  assert_eq "4/S5 IDLE_STALLED after 2 restarts (cap) → restart-exhausted" "restart-exhausted" "$(sdlc_ladder_next "$gid" IDLE_STALLED "$a" 2>/dev/null)"
 }
-ac_ladder_idle_stalled_human
+ac_ladder_idle_stalled_restart
 
 echo "--- IDLE_STALLED fresh → poke:1 (shares the automated rungs with DEAD) ---"
 ac_ladder_idle_stalled_fresh() {
@@ -2846,19 +3034,36 @@ ac_ladder_idle_stalled_fresh() {
 }
 ac_ladder_idle_stalled_fresh
 
-echo "--- WEDGED: observe:1 → observe:2 → observe:3 (cap 3) → human ---"
-ac_ladder_wedged() {
+echo "--- 4/S5 WEDGED enters RESTART directly (no nudge rungs): restart:1 → restart:2 → restart-exhausted (cap 2) ---"
+ac_ladder_wedged_restart() {
   new_state_dir
   local gid="ladder-wedged" a="$LADDER_ANCHOR"
-  assert_eq "4/3 WEDGED fresh → observe:1" "observe:1" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
-  journal_rung "$gid" observe "$a" 1
-  assert_eq "4/3 WEDGED after 1 observe → observe:2" "observe:2" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
-  journal_rung "$gid" observe "$a" 2
-  assert_eq "4/3 WEDGED after 2 observe → observe:3" "observe:3" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
-  journal_rung "$gid" observe "$a" 3
-  assert_eq "4/3 WEDGED after 3 observe (cap) → human" "human" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  # Corroborated wedge bypasses poke/re-prompt entirely — a busy target is never
+  # poked (KA-R6). The very first ladder step is the RESTART rung.
+  assert_eq "4/S5 WEDGED fresh → restart:1 (direct, no observe/nudge)" "restart:1" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  # And it does NOT emit a poke/re-prompt (poking a busy vehicle stays banned).
+  TOTAL=$((TOTAL + 1))
+  case "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)" in
+    poke:*|re-prompt:*|observe:*) fail "4/S5 WEDGED never nudges/observes (goes straight to restart)" ;;
+    *) pass "4/S5 WEDGED never nudges/observes (goes straight to restart)" ;;
+  esac
+  journal_restart "$gid" "$a" 1
+  assert_eq "4/S5 WEDGED after restart:1 applied → restart:2" "restart:2" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  journal_restart "$gid" "$a" 2
+  assert_eq "4/S5 WEDGED after 2 restarts (cap) → restart-exhausted" "restart-exhausted" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
 }
-ac_ladder_wedged
+ac_ladder_wedged_restart
+
+echo "--- 4/S5 RESTART crash window: a decision-only restart line under the current anchor → defect effect-indeterminate ---"
+ac_ladder_restart_crash_window() {
+  new_state_dir
+  local gid="ladder-restart-crash" a="$LADDER_ANCHOR" err rc
+  journal_restart_decision "$gid" "$a" 1     # restart intent, no effect (aborted / crash)
+  err="$(sdlc_ladder_next "$gid" WEDGED "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/S5 WEDGED restart decision-only returns nonzero" "$rc"
+  assert_contains "4/S5 WEDGED restart decision-only names effect-indeterminate" "effect-indeterminate" "$err"
+}
+ac_ladder_restart_crash_window
 
 echo "--- ANCHOR RESET: attempts under anchor A stay history; called with anchor B → poke:1 (fresh episode) ---"
 ac_ladder_anchor_reset() {
@@ -2920,15 +3125,15 @@ ac_ladder_cap_rung() {
 }
 ac_ladder_cap_rung
 
-ac_ladder_cap_observe() {
+ac_ladder_cap_restart() {
   new_state_dir
-  local gid="ladder-cap-obs" a="$LADDER_ANCHOR"
-  local SDLC_OBSERVE_CAP=1
-  assert_eq "4/3 observe cap=1 fresh → observe:1" "observe:1" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
-  journal_rung "$gid" observe "$a" 1
-  assert_eq "4/3 observe cap=1 after 1 observe → human" "human" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  local gid="ladder-cap-restart" a="$LADDER_ANCHOR"
+  local SDLC_RESTART_CAP=1
+  assert_eq "4/S5 restart cap=1 fresh WEDGED → restart:1" "restart:1" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  journal_restart "$gid" "$a" 1
+  assert_eq "4/S5 restart cap=1 after 1 restart → restart-exhausted" "restart-exhausted" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
 }
-ac_ladder_cap_observe
+ac_ladder_cap_restart
 
 ac_ladder_cap_garbled() {
   new_state_dir
@@ -3099,17 +3304,16 @@ ac_anchor_critic_repro() {
 }
 ac_anchor_critic_repro
 
-echo "--- WEDGED churn no longer evades the observe cap (tuple stable → cap reached → human) ---"
+echo "--- 4/S5 WEDGED churn no longer evades the restart cap (tuple stable → cap reached → restart-exhausted) ---"
 ac_anchor_wedged_cap() {
   anchor_fixture "anc-wedged" 4
   local gid="anc-wedged" a
   a="$(anchor_of_lib "$gid")"
-  journal_rung "$gid" observe "$a" 1
-  journal_rung "$gid" observe "$a" 2
-  journal_rung "$gid" observe "$a" 3
+  journal_restart "$gid" "$a" 1
+  journal_restart "$gid" "$a" 2
   assert_eq "wedged-cap anchor stable despite transcript churn" "$a" "$(anchor_of_lib "$gid")"
-  assert_eq "wedged-cap observe cap reached despite churn → human" \
-    "human" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
+  assert_eq "wedged-cap restart cap reached despite churn → restart-exhausted" \
+    "restart-exhausted" "$(sdlc_ladder_next "$gid" WEDGED "$a" 2>/dev/null)"
 }
 ac_anchor_wedged_cap
 
@@ -3194,6 +3398,774 @@ ac_anchor_branch_valid_unchanged() {
   assert_eq "F1b regression: resolvable-branch anchor byte-identical to the raw-rev-parse formula" "$want" "$got"
 }
 ac_anchor_branch_valid_unchanged
+
+# ============================================================
+# ===== 4/S1 watchdog: flag resolution + arm/disarm =========
+# ============================================================
+# Fixtures drive the REAL lib functions (sdlc_watchdog_effective,
+# sdlc_pilot_effective, sdlc_arm, sdlc_disarm) against planted plan
+# files + a fresh fake $HOME (goals dir + audit log live under it).
+
+# write_plan <path> <scale> [watchdog] [pilot] — emit a plan with a
+# frontmatter block. Empty watchdog/pilot arg ⇒ that key is ABSENT
+# (drives the fallback table); a non-on/off or non-manual/auto value
+# is an off-enum fixture.
+write_plan() {
+  local path="$1" scale="$2" wd="${3:-}" pilot="${4:-}"
+  mkdir -p "$(dirname "$path")" 2>/dev/null
+  {
+    echo "---"
+    echo "scale: $scale"
+    [ -n "$wd" ] && echo "watchdog: $wd"
+    [ -n "$pilot" ] && echo "pilot: $pilot"
+    echo "---"
+    echo ""
+    echo "# plan body"
+  } > "$path"
+}
+
+# read a KEY=VALUE from a planted registration record.
+reg_field() { grep -E "^$2=" "$1" 2>/dev/null | head -1 | sed -E "s/^$2=//"; }
+poker_audit() { printf '%s/.claude/sdlc-poker-audit.log' "$HOME"; }
+goals_reg() { printf '%s/.claude/sdlc-goals/%s' "$HOME" "$1"; }
+
+echo ""
+echo "=== 4/S1-G1: effective-flag grid (watchdog/pilot × scale × presence) ==="
+ac_s1_effgrid() {
+  new_state_dir
+  local scale p out rc
+  # --- watchdog: explicit on/off is scale-independent; absent →
+  #     continuous:on, task/wave/epic:off (fallback table) ---
+  for scale in continuous task wave epic; do
+    write_plan "$HOME/p-$scale-t.plan.md" "$scale" on
+    out=$(sdlc_watchdog_effective "$HOME/p-$scale-t.plan.md"); rc=$?
+    assert_eq "watchdog explicit on ($scale) → on" "on" "$out"
+    assert_eq "watchdog explicit on ($scale) → rc 0" "0" "$rc"
+
+    write_plan "$HOME/p-$scale-f.plan.md" "$scale" off
+    out=$(sdlc_watchdog_effective "$HOME/p-$scale-f.plan.md")
+    assert_eq "watchdog explicit off ($scale) → off" "off" "$out"
+
+    write_plan "$HOME/p-$scale-a.plan.md" "$scale"
+    out=$(sdlc_watchdog_effective "$HOME/p-$scale-a.plan.md")
+    if [ "$scale" = continuous ]; then
+      assert_eq "watchdog absent (continuous) → on (fallback)" "on" "$out"
+    else
+      assert_eq "watchdog absent ($scale) → off (fallback)" "off" "$out"
+    fi
+  done
+
+  # --- pilot: explicit manual/auto scale-independent; absent →
+  #     continuous:auto, else manual ---
+  write_plan "$HOME/pp-man.plan.md" wave "" manual
+  out=$(sdlc_pilot_effective "$HOME/pp-man.plan.md"); rc=$?
+  assert_eq "pilot explicit manual → manual" "manual" "$out"
+  assert_eq "pilot explicit manual → rc 0" "0" "$rc"
+  write_plan "$HOME/pp-auto.plan.md" task "" auto
+  out=$(sdlc_pilot_effective "$HOME/pp-auto.plan.md")
+  assert_eq "pilot explicit auto → auto" "auto" "$out"
+  for scale in continuous task wave epic; do
+    write_plan "$HOME/pp-$scale-a.plan.md" "$scale"
+    out=$(sdlc_pilot_effective "$HOME/pp-$scale-a.plan.md")
+    if [ "$scale" = continuous ]; then
+      assert_eq "pilot absent (continuous) → auto (fallback)" "auto" "$out"
+    else
+      assert_eq "pilot absent ($scale) → manual (fallback)" "manual" "$out"
+    fi
+  done
+
+  # --- off-enum pilot → rc 2 + stderr names the bad value (never guess);
+  #     legacy uppercase MANUAL is now off-enum (KA-R16 lowercase contract) ---
+  write_plan "$HOME/pp-bad.plan.md" wave "" SEMI
+  out=$(sdlc_pilot_effective "$HOME/pp-bad.plan.md" 2>/dev/null); rc=$?
+  assert_eq "pilot off-enum → rc 2" "2" "$rc"
+  local err
+  err=$(sdlc_pilot_effective "$HOME/pp-bad.plan.md" 2>&1 1>/dev/null)
+  assert_contains "pilot off-enum → stderr names the bad value" "SEMI" "$err"
+  write_plan "$HOME/pp-upper.plan.md" wave "" MANUAL
+  out=$(sdlc_pilot_effective "$HOME/pp-upper.plan.md" 2>/dev/null); rc=$?
+  assert_eq "pilot legacy uppercase MANUAL → rc 2 (off-enum)" "2" "$rc"
+
+  # --- off-enum watchdog → rc 2 + stderr (symmetric fail-loud) ---
+  write_plan "$HOME/pk-bad.plan.md" wave "maybe"
+  out=$(sdlc_watchdog_effective "$HOME/pk-bad.plan.md" 2>/dev/null); rc=$?
+  assert_eq "watchdog off-enum → rc 2" "2" "$rc"
+  err=$(sdlc_watchdog_effective "$HOME/pk-bad.plan.md" 2>&1 1>/dev/null)
+  assert_contains "watchdog off-enum → stderr names the bad value" "maybe" "$err"
+
+  # --- a plan still carrying the pre-rename flag key → rc 2 + stderr
+  #     "renamed to watchdog:" (never a silent fallthrough to fallback) ---
+  { echo "---"; echo "scale: wave"; echo "keep${_none:-}alive: true"; echo "---"; } > "$HOME/pk-stale.plan.md"
+  out=$(sdlc_watchdog_effective "$HOME/pk-stale.plan.md" 2>/dev/null); rc=$?
+  assert_eq "watchdog stale pre-rename key → rc 2" "2" "$rc"
+  err=$(sdlc_watchdog_effective "$HOME/pk-stale.plan.md" 2>&1 1>/dev/null)
+  assert_contains "watchdog stale key → stderr says renamed to watchdog:" "renamed to watchdog:" "$err"
+
+  # --- unreadable/missing plan → rc 1 + empty stdout (both fns) ---
+  out=$(sdlc_watchdog_effective "$HOME/does-not-exist.plan.md" 2>/dev/null); rc=$?
+  assert_eq "watchdog missing plan → rc 1" "1" "$rc"
+  assert_eq "watchdog missing plan → empty stdout" "" "$out"
+  out=$(sdlc_pilot_effective "$HOME/does-not-exist.plan.md" 2>/dev/null); rc=$?
+  assert_eq "pilot missing plan → rc 1" "1" "$rc"
+  assert_eq "pilot missing plan → empty stdout" "" "$out"
+}
+ac_s1_effgrid
+
+echo ""
+echo "=== 4/S1-G2: arm round-trip (5-field record, atomic, audit) ==="
+ac_s1_arm_roundtrip() {
+  new_state_dir
+  local plan out rc rec
+  plan="$HOME/plans/mywave.plan.md"
+  write_plan "$plan" wave on         # watchdog:on task/wave/epic → armable
+  export SDLC_ARM_SESSION_ID="sid-fixture-1"
+  export SDLC_ARM_PID="31337"
+
+  out=$(sdlc_arm "$plan"); rc=$?
+  assert_eq "arm watchdog:on wave → rc 0" "0" "$rc"
+  assert_eq "arm → stdout is the goal-id" "mywave" "$out"
+
+  rec="$(goals_reg mywave)"
+  assert_true "arm → registration record exists" test -f "$rec"
+  # 5 fields exact
+  assert_eq "record PLAN = resolved absolute plan path" "$plan" "$(reg_field "$rec" PLAN)"
+  assert_eq "record CWD = arm-time pwd" "$(pwd)" "$(reg_field "$rec" CWD)"
+  assert_eq "record SESSION_ID = SDLC_ARM_SESSION_ID seam" "sid-fixture-1" "$(reg_field "$rec" SESSION_ID)"
+  assert_eq "record PID = SDLC_ARM_PID seam" "31337" "$(reg_field "$rec" PID)"
+  # ARMED_AT is an ISO-8601 Z stamp
+  assert_true "record ARMED_AT is ISO-8601 Zulu" bash -c \
+    'printf "%s" "$1" | grep -qE "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"' _ "$(reg_field "$rec" ARMED_AT)"
+  # exactly the 5 keys, no partial / extra
+  assert_eq "record has exactly 5 KEY= lines" "5" "$(grep -cE '^[A-Z_]+=' "$rec")"
+
+  # audit line follows the poker's audit_line convention (<iso> <gid> <event>
+  # <detail>): the ARM <gid> <plan> pilot=<p> content lands as
+  # "<iso> mywave ARM <plan> pilot=manual" (pilot falls back to manual for wave).
+  local audit; audit="$(cat "$(poker_audit)" 2>/dev/null)"
+  assert_contains "arm → audit ARM line present" "mywave ARM $plan pilot=manual" "$audit"
+
+  unset SDLC_ARM_SESSION_ID SDLC_ARM_PID
+
+  # --- atomicity: injected write failure leaves NO record behind ---
+  new_state_dir
+  plan="$HOME/plans/atom.plan.md"
+  write_plan "$plan" wave on
+  # plant the goals dir as a regular FILE so mkdir/write into it fails
+  mkdir -p "$HOME/.claude"
+  : > "$HOME/.claude/sdlc-goals"
+  out=$(sdlc_arm "$plan" 2>/dev/null); rc=$?
+  assert_nonzero "arm with unwritable goals dir → nonzero" "$rc"
+  assert_true "arm failure → no partial record file" test ! -e "$(goals_reg atom)"
+}
+ac_s1_arm_roundtrip
+
+echo ""
+echo "=== 4/S1-G3: arm refusals (missing/malformed/collision/false) + --force ==="
+ac_s1_arm_refusals() {
+  new_state_dir
+  local plan out rc err
+  export SDLC_ARM_SESSION_ID="sid-fixture-3"; export SDLC_ARM_PID="4242"
+
+  # --- missing plan → refuse, no record ---
+  err=$(sdlc_arm "$HOME/nope/ghost.plan.md" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "arm missing plan → nonzero" "$rc"
+  assert_contains "arm missing plan → defect on stderr" "defect:" "$err"
+  assert_true "arm missing plan → no record" test ! -e "$(goals_reg ghost)"
+
+  # --- malformed frontmatter: off-enum watchdog → refuse, no record ---
+  plan="$HOME/plans/badka.plan.md"; write_plan "$plan" wave "maybe"
+  err=$(sdlc_arm "$plan" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "arm off-enum watchdog → nonzero" "$rc"
+  assert_contains "arm off-enum watchdog → defect on stderr" "defect:" "$err"
+  assert_true "arm off-enum watchdog → no record" test ! -e "$(goals_reg badka)"
+
+  # --- malformed frontmatter: off-enum pilot → refuse (no positional override exists) ---
+  plan="$HOME/plans/badpilot.plan.md"; write_plan "$plan" wave on SEMI
+  err=$(sdlc_arm "$plan" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "arm off-enum pilot → nonzero" "$rc"
+  assert_true "arm off-enum pilot → no record" test ! -e "$(goals_reg badpilot)"
+
+  # --- F3 (6/critic-fix): pilot is FRONTMATTER-AUTHORITATIVE — a positional pilot
+  #     override is REJECTED (rc 2, no record), never a bypass; the plan is edited
+  #     instead. --force stays the sole flag arg. The audit always logs the
+  #     EFFECTIVE (frontmatter) pilot on a clean arm. ---
+  plan="$HOME/plans/okpilot.plan.md"; write_plan "$plan" wave on manual
+  err=$(sdlc_arm "$plan" auto 2>&1 1>/dev/null); rc=$?
+  assert_eq "F3 positional pilot override → rc 2" "2" "$rc"
+  assert_contains "F3 rejection names the frontmatter source" "pilot comes from plan frontmatter" "$err"
+  assert_true "F3 override rejection writes NO record" test ! -e "$(goals_reg okpilot)"
+  err=$(sdlc_arm "$plan" manual 2>&1 1>/dev/null); rc=$?
+  assert_eq "F3 override rejected even when it AGREES with the frontmatter (single source of truth)" "2" "$rc"
+  out=$(sdlc_arm "$plan" 2>/dev/null); rc=$?
+  assert_eq "F3 clean arm (no override) → rc 0" "0" "$rc"
+  assert_contains "F3 audit logs the EFFECTIVE (frontmatter) pilot" "okpilot ARM $plan pilot=manual" "$(cat "$(poker_audit)")"
+
+  # --- collision: existing record, different PLAN → refuse, record intact ---
+  new_state_dir
+  export SDLC_ARM_SESSION_ID="sid-fixture-3"; export SDLC_ARM_PID="4242"
+  mkdir -p "$HOME/.claude/sdlc-goals" "$HOME/a"
+  local rec; rec="$(goals_reg foo)"
+  {
+    echo "PLAN=/somewhere/else/foo.plan.md"; echo "CWD=/x"; echo "SESSION_ID=sid-old"
+    echo "PID=999"; echo "ARMED_AT=2026-07-20T00:00:00Z"
+  } > "$rec"
+  plan="$HOME/a/foo.plan.md"; write_plan "$plan" wave on
+  err=$(sdlc_arm "$plan" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "arm collision (gid taken, different PLAN) → nonzero" "$rc"
+  assert_contains "arm collision → defect on stderr" "defect:" "$err"
+  assert_eq "arm collision → original record PLAN untouched" "/somewhere/else/foo.plan.md" "$(reg_field "$rec" PLAN)"
+
+  # --- same-plan re-arm is idempotent (not a collision) ---
+  new_state_dir
+  export SDLC_ARM_SESSION_ID="sid-fixture-3"; export SDLC_ARM_PID="4242"
+  plan="$HOME/plans/rearm.plan.md"; write_plan "$plan" wave on
+  sdlc_arm "$plan" >/dev/null 2>&1
+  out=$(sdlc_arm "$plan" 2>/dev/null); rc=$?
+  assert_eq "arm same-plan re-arm → rc 0 (idempotent)" "0" "$rc"
+
+  # --- watchdog-effective=off → refuse unless --force ---
+  new_state_dir
+  export SDLC_ARM_SESSION_ID="sid-fixture-3"; export SDLC_ARM_PID="4242"
+  plan="$HOME/plans/kf.plan.md"; write_plan "$plan" wave off   # explicit off
+  err=$(sdlc_arm "$plan" 2>&1 1>/dev/null); rc=$?
+  assert_nonzero "arm watchdog:off without --force → nonzero" "$rc"
+  assert_contains "arm watchdog:off → defect names force" "force" "$err"
+  assert_true "arm watchdog:off without --force → no record" test ! -e "$(goals_reg kf)"
+  out=$(sdlc_arm "$plan" --force 2>/dev/null); rc=$?
+  assert_eq "arm watchdog:off WITH --force → rc 0" "0" "$rc"
+  assert_true "arm --force → record written" test -f "$(goals_reg kf)"
+
+  # absent-flag task/wave/epic is also watchdog-off → same refusal
+  plan="$HOME/plans/absk.plan.md"; write_plan "$plan" epic
+  rc=0; sdlc_arm "$plan" >/dev/null 2>&1 || rc=$?
+  assert_nonzero "arm absent-watchdog epic (fallback off) without --force → nonzero" "$rc"
+
+  unset SDLC_ARM_SESSION_ID SDLC_ARM_PID
+}
+ac_s1_arm_refusals
+
+echo ""
+echo "=== 4/S1-G4: disarm (present removes + audits; absent rc1 + no-op audit) ==="
+ac_s1_disarm() {
+  new_state_dir
+  local plan out rc rec audit
+  export SDLC_ARM_SESSION_ID="sid-fixture-4"; export SDLC_ARM_PID="4242"
+
+  # --- present → removed + audit DISARM <gid> <reason>, default reason manual ---
+  plan="$HOME/plans/dw.plan.md"; write_plan "$plan" wave on
+  sdlc_arm "$plan" >/dev/null 2>&1
+  rec="$(goals_reg dw)"
+  assert_true "disarm setup → record present" test -f "$rec"
+  out=$(sdlc_disarm dw); rc=$?
+  assert_eq "disarm present → rc 0" "0" "$rc"
+  assert_true "disarm present → record removed" test ! -e "$rec"
+  audit="$(cat "$(poker_audit)")"
+  assert_contains "disarm → audit DISARM line, default reason manual" "dw DISARM manual" "$audit"
+
+  # second disarm of the same gid → rc 1 (absent), still audited as a no-op
+  out=$(sdlc_disarm dw 2>/dev/null); rc=$?
+  assert_eq "disarm absent → rc 1" "1" "$rc"
+  assert_contains "disarm absent → audit line still emitted (no-op)" "dw DISARM" "$(cat "$(poker_audit)")"
+
+  # --- custom reason surfaces in the audit line ---
+  new_state_dir
+  export SDLC_ARM_SESSION_ID="sid-fixture-4"; export SDLC_ARM_PID="4242"
+  plan="$HOME/plans/dc.plan.md"; write_plan "$plan" wave on
+  sdlc_arm "$plan" >/dev/null 2>&1
+  out=$(sdlc_disarm dc complete); rc=$?
+  assert_eq "disarm custom reason → rc 0" "0" "$rc"
+  assert_contains "disarm → audit carries the custom reason" "dc DISARM complete" "$(cat "$(poker_audit)")"
+
+  # --- guard: an invalid goal-id is refused loud (path-traversal guard) ---
+  out=$(sdlc_disarm "" 2>/dev/null); rc=$?
+  assert_nonzero "disarm empty goal-id → nonzero" "$rc"
+  out=$(sdlc_disarm "a/b" 2>/dev/null); rc=$?
+  assert_nonzero "disarm goal-id with slash → nonzero" "$rc"
+
+  unset SDLC_ARM_SESSION_ID SDLC_ARM_PID
+}
+ac_s1_disarm
+
+# ============================================================
+# 4/S5: sdlc_restart_vehicle — the kill-and-revive primitive (KA-R6/R13).
+# Ordering is journal-proven (RED case 1); the kill is stubbed (SDLC_KILL_CMD)
+# and the registry is a MUTABLE file the kill stub rewrites to simulate the
+# vehicle dying. Every case reuses the proven happy-spawn fixture (setup_complete
+# current 4 → not-complete → proceed) so the UNCHANGED sdlc_successor_spawn runs.
+# ============================================================
+echo ""
+echo "=== 4/S5: sdlc_restart_vehicle — ordering, abort, exactly-once, DEAD-skip, attended-refuse, cap ==="
+
+RESTART_ANCHOR=a1b2c3d4
+# make_kill_stub <order-log> <regfile> <absent-json-file> <repo> <gid> <dies:yes|no>
+# — a SIGTERM stand-in: records "kill <pid> snap=<present|absent>" (proving the WIP
+# snapshot already ran) and, when <dies>=yes, rewrites <regfile> to the absent
+# registry (the vehicle leaves the registry). When <dies>=no the vehicle stays
+# present (the won't-die abort path).
+make_kill_stub() {
+  local order="$1" regfile="$2" absent="$3" repo="$4" gid="$5" dies="$6" stub
+  stub="$(mktemp)"; CLEAN_DIRS+=("$stub")
+  {
+    printf '#!/bin/bash\n'
+    printf 'snap=absent\n'
+    printf 'git -C %q rev-parse --verify --quiet %q >/dev/null 2>&1 && snap=present\n' "$repo" "refs/sdlc-wip/$gid"
+    printf 'printf "kill %%s snap=%%s\\n" "$1" "$snap" >> %q\n' "$order"
+    [ "$dies" = yes ] && printf 'cat %q > %q\n' "$absent" "$regfile"
+    printf 'exit 0\n'
+  } > "$stub"
+  chmod +x "$stub"
+  printf '%s' "$stub"
+}
+# make_spawn_stub_ordered <counter> <order-log> — like make_spawn_stub but also
+# appends "spawn" to the shared order log (kill-before-spawn ordering proof).
+make_spawn_stub_ordered() {
+  local counter="$1" order="$2" stub
+  stub="$(mktemp)"; CLEAN_DIRS+=("$stub")
+  printf '#!/bin/bash\nprintf x >> %q\nprintf "\\n" >> %q\nprintf "spawn\\n" >> %q\n' \
+    "$counter" "$counter" "$order" > "$stub"
+  chmod +x "$stub"
+  printf '%s' "$stub"
+}
+# plant_restart_reg <gid> <cwd> <sid> <pid> — the 5-field consent record the
+# primitive reads for SID/PID/CWD.
+plant_restart_reg() {
+  local gid="$1" cwd="$2" sid="$3" pid="$4" dir f
+  dir="$HOME/.claude/sdlc-goals"; mkdir -p "$dir"; f="$dir/$gid"
+  {
+    printf 'PLAN=%s\n' "$PLAN_STUB"
+    printf 'CWD=%s\n' "$cwd"
+    printf 'SESSION_ID=%s\n' "$sid"
+    printf 'PID=%s\n' "$pid"
+    printf 'ARMED_AT=2026-07-23T00:00:00Z\n'
+  } > "$f"
+}
+# reg_json helpers (array shape jq reads .status from).
+reg_present_null() { printf '[{"pid":%s,"kind":"interactive","sessionId":"%s"}]\n' "$2" "$1"; }
+reg_present_busy() { printf '[{"pid":%s,"kind":"interactive","sessionId":"%s","status":"busy"}]\n' "$2" "$1"; }
+reg_absent()       { printf '[{"pid":1,"kind":"interactive","sessionId":"decoy","status":"idle"}]\n'; }
+# F1 (6/critic-fix): a present + status-NULL entry that carries NO pid field — the
+# kill target is unresolvable from the registry (fail-closed, never fall back to record).
+reg_present_null_nopid() { printf '[{"kind":"interactive","sessionId":"%s"}]\n' "$1"; }
+# F6 (6/critic-fix): the sid appears ONLY as a forked child's parentSessionId — the
+# vehicle's own sessionId entry is NOT present. A substring grep counts it present;
+# `.sessionId==$sid` equality correctly does not.
+reg_parent_only() { printf '[{"pid":7,"kind":"interactive","sessionId":"child-decoy","parentSessionId":"%s","status":"idle"}]\n' "$1"; }
+restart_audit()    { cat "$(poker_audit)" 2>/dev/null; }
+
+# --- CASE 1: ORDERING — intent-journal precedes snapshot precedes SIGTERM precedes spawn ---
+ac_restart_ordering() {
+  new_state_dir
+  local gid="restart-order" a="$RESTART_ANCHOR" sid="sid-restart-order" rc snap
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  # Pin the git commit date so the pre-snapshot and the restart's OWN re-snapshot
+  # (same tree) mint an IDENTICAL sha — otherwise a second-boundary between them
+  # moves refs/sdlc-wip and sdlc_wip_check reports wip-drift (a real coupling flagged
+  # for review: the restart snapshot re-seats the ref the baton's wip names).
+  local -x GIT_AUTHOR_DATE="@1700000000 +0000" GIT_COMMITTER_DATE="@1700000000 +0000"
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"       # current 4 → not-complete → spawn proceeds
+  printf 'uncommitted\n' > "$d/wip-scratch.txt"          # untracked WIP → snapshot has real work to capture
+  snap="$(sdlc_wip_snapshot "$gid" "$d")"                # the WIP the restart preserves; baton references it
+  write_complete_baton "$gid" "$d" 4 "$snap"             # so reconcile clean-triages the preserved tree, not drift
+  plant_restart_reg "$gid" "$d" "$sid" 999999
+  local order counter regf absentf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); absentf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$absentf")
+  reg_present_null "$sid" 999999 > "$regf"; reg_absent > "$absentf"
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" yes)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_eq "4/S5 restart happy exits 0" "0" "$rc"
+  local lp; lp="$(ledger_path "$gid")"
+  assert_true "4/S5 restart intent DECISION journaled under restart:<gid>:<anchor>:1" \
+    awk -F'\t' -v k="restart:$gid:$a:1" '$4=="decision" && $5==k{f=1} END{exit(f?0:1)}' "$lp"
+  assert_true "4/S5 restart EFFECT journaled (success) under restart:<gid>:<anchor>:1" \
+    awk -F'\t' -v k="restart:$gid:$a:1" '$4=="effect" && $5==k{f=1} END{exit(f?0:1)}' "$lp"
+  assert_true "4/S5 WIP snapshot ref created BEFORE the kill" \
+    test -n "$(git -C "$d" rev-parse --verify --quiet "refs/sdlc-wip/$gid" || true)"
+  assert_contains "4/S5 kill saw the snapshot already present (snapshot precedes SIGTERM)" "snap=present" "$(cat "$order")"
+  assert_eq "4/S5 order log = kill then spawn (SIGTERM precedes spawn)" "kill spawn" \
+    "$(awk '{print $1}' "$order" | tr '\n' ' ' | sed 's/ *$//')"
+  assert_eq "4/S5 successor spawned exactly once" "1" "$(spawn_counter "$counter")"
+  assert_contains "4/S5 RESTART audited (killed=1)" "RESTART" "$(restart_audit)"
+}
+ac_restart_ordering
+
+# --- CASE 2: kill-refuses-to-die → RESTART-ABORT, NO spawn ---
+ac_restart_abort_wontdie() {
+  new_state_dir
+  local gid="restart-wontdie" a="$RESTART_ANCHOR" sid="sid-restart-wontdie" rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0 SDLC_RESTART_KILL_TRIES=2
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "$sid" 999998
+  local order counter regf absentf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); absentf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$absentf")
+  reg_present_null "$sid" 999998 > "$regf"; reg_absent > "$absentf"
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" no)"   # never dies
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_nonzero "4/S5 won't-die restart returns nonzero" "$rc"
+  assert_eq "4/S5 won't-die → NO successor spawned" "0" "$(spawn_counter "$counter")"
+  assert_contains "4/S5 won't-die → RESTART-ABORT audited" "RESTART-ABORT" "$(restart_audit)"
+  assert_true "4/S5 won't-die → NO spawn in the order log (never spawned beside a live vehicle)" \
+    test -z "$(grep -c spawn "$order" 2>/dev/null | grep -v '^0$')"
+}
+ac_restart_abort_wontdie
+
+# --- CASE 3: exactly-once / fork-safety — a replayed restart never double-spawns ---
+ac_restart_exactly_once() {
+  new_state_dir
+  local gid="restart-once" a="$RESTART_ANCHOR" sid="sid-restart-once"
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "$sid" 999997
+  local order counter regf absentf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); absentf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$absentf")
+  reg_present_null "$sid" 999997 > "$regf"; reg_absent > "$absentf"
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" yes)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1
+  assert_eq "4/S5 first restart spawned once" "1" "$(spawn_counter "$counter")"
+  # Replay: baton generation unchanged → the inner spawn's exactly-once (spawn key)
+  # refuses a second launch even though the restart ordinal advances.
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1
+  assert_eq "4/S5 replayed restart did NOT double-spawn (fork-safe)" "1" "$(spawn_counter "$counter")"
+}
+ac_restart_exactly_once
+
+# --- CASE 10: DEAD vehicle (registry-absent) → skip the kill cleanly, snapshot→spawn ---
+ac_restart_dead_skips_kill() {
+  new_state_dir
+  local gid="restart-dead" a="$RESTART_ANCHOR" sid="sid-restart-dead" rc snap
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  local -x GIT_AUTHOR_DATE="@1700000000 +0000" GIT_COMMITTER_DATE="@1700000000 +0000"  # deterministic snapshot sha
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  printf 'uncommitted\n' > "$d/wip-scratch.txt"
+  snap="$(sdlc_wip_snapshot "$gid" "$d")"
+  write_complete_baton "$gid" "$d" 4 "$snap"
+  plant_restart_reg "$gid" "$d" "$sid" 999996
+  local order counter regf absentf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); absentf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$absentf")
+  reg_absent > "$regf"; reg_absent > "$absentf"                 # sid absent from the start → DEAD
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" no)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_eq "4/S5 DEAD-vehicle restart exits 0" "0" "$rc"
+  assert_true "4/S5 DEAD vehicle → the kill step was SKIPPED (nothing to kill)" \
+    test -z "$(grep -c kill "$order" 2>/dev/null | grep -v '^0$')"
+  assert_true "4/S5 DEAD vehicle → snapshot still ran (ref present)" \
+    test -n "$(git -C "$d" rev-parse --verify --quiet "refs/sdlc-wip/$gid" || true)"
+  assert_eq "4/S5 DEAD vehicle → successor spawned" "1" "$(spawn_counter "$counter")"
+  assert_contains "4/S5 DEAD vehicle RESTART audited killed=0" "killed=0" "$(restart_audit)"
+}
+ac_restart_dead_skips_kill
+
+# --- F1 (6/critic-fix) CASE A: the SIGTERM targets the REGISTRY's pid for this sid,
+#     NOT the frozen arm-time record PID. The record carries a bogus 999999 (on
+#     shipped arming paths the record PID is the transient Bash-tool shell, never
+#     the vehicle); the live registry carries the real specimen pid. The kill seam
+#     MUST receive the registry pid. (Fails on pre-fix code: it kills $pid=999999.)
+ac_restart_kill_by_registry_pid() {
+  new_state_dir
+  local gid="restart-regpid" a="$RESTART_ANCHOR" sid="sid-restart-regpid" rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  local -x GIT_AUTHOR_DATE="@1700000000 +0000" GIT_COMMITTER_DATE="@1700000000 +0000"
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  printf 'uncommitted\n' > "$d/wip-scratch.txt"
+  local snap; snap="$(sdlc_wip_snapshot "$gid" "$d")"
+  write_complete_baton "$gid" "$d" 4 "$snap"
+  plant_restart_reg "$gid" "$d" "$sid" 999999            # record PID bogus (arm-time telemetry)
+  local order counter regf absentf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); absentf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$absentf")
+  reg_present_null "$sid" 313131 > "$regf"; reg_absent > "$absentf"   # REGISTRY pid = the real vehicle
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" yes)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_eq "F1 kill-by-registry-pid restart exits 0" "0" "$rc"
+  assert_contains "F1 SIGTERM went to the REGISTRY pid (313131), not the record PID" "kill 313131" "$(cat "$order")"
+  assert_true "F1 the bogus record PID (999999) was NEVER the kill target" \
+    test -z "$(grep -F 'kill 999999' "$order" 2>/dev/null)"
+  assert_eq "F1 successor spawned after the registry-pid kill" "1" "$(spawn_counter "$counter")"
+}
+ac_restart_kill_by_registry_pid
+
+# --- F1 (6/critic-fix) CASE B: sid registry-present + status NULL but the entry
+#     carries NO pid → the kill target is UNRESOLVABLE → RESTART-ABORT, no kill,
+#     no spawn (fail-closed; never fall back to the record PID).
+ac_restart_pid_unresolvable_aborts() {
+  new_state_dir
+  local gid="restart-nopid" a="$RESTART_ANCHOR" sid="sid-restart-nopid" rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "$sid" 999999
+  local order counter regf absentf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); absentf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$absentf")
+  reg_present_null_nopid "$sid" > "$regf"; reg_absent > "$absentf"   # present, status NULL, NO pid
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" yes)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_nonzero "F1 pid-unresolvable restart returns nonzero" "$rc"
+  assert_true "F1 pid-unresolvable → the kill seam was NEVER invoked" \
+    test -z "$(grep -c kill "$order" 2>/dev/null | grep -v '^0$')"
+  assert_eq "F1 pid-unresolvable → NO successor spawned" "0" "$(spawn_counter "$counter")"
+  assert_contains "F1 pid-unresolvable → RESTART-ABORT audited" "RESTART-ABORT" "$(restart_audit)"
+}
+ac_restart_pid_unresolvable_aborts
+
+# --- F2 (6/critic-fix) CASE A: sdlc_successor_spawn rewrites the consent record's
+#     SESSION_ID to the freshly-minted successor sid (the record FOLLOWS the vehicle
+#     chain), preserving PLAN/CWD/ARMED_AT. On pre-fix code the record keeps the DEAD
+#     predecessor sid → the poker classifies the turned-over goal permanently DEAD.
+ac_spawn_record_follows_vehicle() {
+  new_state_dir
+  local gid="spawn-follow" d counter out rc newsid rec
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 4 no; d="$REPO_DIR"           # current 4 → benign not-complete → spawn proceeds
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "old-sid-predecessor" 999999   # consent record with the OLD sid
+  rec="$HOME/.claude/sdlc-goals/$gid"
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  newsid="$out"
+  assert_eq "F2 successor spawn exits 0" "0" "$rc"
+  assert_eq "F2 consent record SESSION_ID now equals the successor sid" "$newsid" "$(_sdlc_reg_val "$rec" SESSION_ID)"
+  assert_true "F2 record no longer carries the dead predecessor sid" \
+    test "$(_sdlc_reg_val "$rec" SESSION_ID)" != "old-sid-predecessor"
+  assert_eq "F2 record PLAN preserved across the follow" "$PLAN_STUB" "$(_sdlc_reg_val "$rec" PLAN)"
+  assert_eq "F2 record CWD preserved across the follow" "$d" "$(_sdlc_reg_val "$rec" CWD)"
+  assert_eq "F2 record ARMED_AT preserved across the follow" "2026-07-23T00:00:00Z" "$(_sdlc_reg_val "$rec" ARMED_AT)"
+  # The record stays a complete 5-field record — PID is NEVER blanked (the poker's
+  # load_registration requires every field non-empty); the child pid was unknowable
+  # so the prior pid is carried forward as best-effort telemetry (F1 owns the kill).
+  assert_true "F2 record PID stays non-empty (5-field contract preserved)" \
+    test -n "$(_sdlc_reg_val "$rec" PID)"
+  # brief: the re-seat is AUDITED (durable turnover trail).
+  assert_contains "F2 the re-seat is audited (REG-FOLLOW carries the successor sid)" \
+    "REG-FOLLOW sid=$newsid" "$(restart_audit)"
+  assert_contains "F2 the REG-FOLLOW audit names the dead predecessor it replaced" \
+    "was old-sid-predecessor" "$(restart_audit)"
+}
+ac_spawn_record_follows_vehicle
+
+# --- F2 (6/critic-fix) CASE B: the follow applies TRANSITIVELY through the restart
+#     leg — sdlc_restart_vehicle's spawn calls sdlc_successor_spawn, so a DEAD-vehicle
+#     restart also re-seats the record's SESSION_ID onto the fresh successor.
+ac_restart_record_follows_vehicle() {
+  new_state_dir
+  local gid="restart-follow" a="$RESTART_ANCHOR" sid="sid-restart-follow" rc snap rec newsid
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  local -x GIT_AUTHOR_DATE="@1700000000 +0000" GIT_COMMITTER_DATE="@1700000000 +0000"
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  printf 'uncommitted\n' > "$d/wip-scratch.txt"
+  snap="$(sdlc_wip_snapshot "$gid" "$d")"
+  write_complete_baton "$gid" "$d" 4 "$snap"
+  plant_restart_reg "$gid" "$d" "$sid" 999996
+  rec="$HOME/.claude/sdlc-goals/$gid"
+  local order counter regf absentf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); absentf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$absentf")
+  reg_absent > "$regf"; reg_absent > "$absentf"        # sid absent → DEAD, kill skipped, spawn proceeds
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" no)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_eq "F2 restart-leg exits 0" "0" "$rc"
+  newsid="$(_sdlc_reg_val "$rec" SESSION_ID)"
+  assert_true "F2 restart-leg re-seated the record onto a fresh uuid successor sid" \
+    test "$newsid" != "$sid"
+  TOTAL=$((TOTAL + 1))
+  if printf '%s' "$newsid" | grep -qE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
+    pass "F2 restart-leg record SESSION_ID is the successor's minted uuid"
+  else fail "F2 restart-leg record SESSION_ID is the successor's minted uuid" "got: $newsid"; fi
+}
+ac_restart_record_follows_vehicle
+
+# --- F2 (6/critic-fix) CASE C: an ABORTED restart leaves the record UNTOUCHED. The
+#     follow only fires on a SUCCESSFUL successor spawn — an attended (status non-null)
+#     vehicle forbids the kill → RESTART-ABORT → no spawn → no follow, so the record's
+#     SESSION_ID stays the predecessor sid and NO REG-FOLLOW is audited (brief: "a
+#     failed/aborted restart leaves the record untouched").
+ac_restart_abort_leaves_record_untouched() {
+  new_state_dir
+  local gid="restart-abort-follow" a="$RESTART_ANCHOR" sid="sid-abort-follow" rc rec
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "$sid" 999996
+  rec="$HOME/.claude/sdlc-goals/$gid"
+  local order counter regf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf")
+  reg_present_busy "$sid" 313131 > "$regf"        # status busy = attended → kill FORBIDDEN → abort
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$regf" "$d" "$gid" no)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_nonzero "F2 attended restart aborts (nonzero)" "$rc"
+  assert_eq "F2 aborted restart NEVER re-seats — SESSION_ID stays the predecessor sid" \
+    "$sid" "$(_sdlc_reg_val "$rec" SESSION_ID)"
+  assert_eq "F2 aborted restart spawned no successor" "0" "$(spawn_counter "$counter")"
+  assert_true "F2 aborted restart wrote NO REG-FOLLOW audit" \
+    test -z "$(restart_audit | grep -F 'REG-FOLLOW')"
+}
+ac_restart_abort_leaves_record_untouched
+
+# --- F6 (6/critic-fix) CASE A: presence is by `.sessionId` EQUALITY, not substring.
+#     The sid present ONLY as a forked child's parentSessionId is NOT the vehicle →
+#     treated as ABSENT (DEAD) → skip kill → spawn a successor (revival). Pre-fix
+#     (substring grep) counted it present → status NOSTATUS → kpid empty → F1
+#     pid-unresolvable ABORT (no spawn): the fork hazard silently blocked revival.
+ac_restart_presence_by_equality_not_substring() {
+  new_state_dir
+  local gid="restart-parentonly" a="$RESTART_ANCHOR" sid="sid-parentonly" rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "$sid" 999996
+  local order counter regf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf")
+  reg_parent_only "$sid" > "$regf"                # sid ONLY as a child's parentSessionId
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$regf" "$d" "$gid" no)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_eq "F6 parentSessionId-only sid → restart exits 0 (equality: absent → DEAD → revived)" "0" "$rc"
+  assert_eq "F6 parentSessionId-only sid → successor spawned (revival NOT blocked)" "1" "$(spawn_counter "$counter")"
+  assert_true "F6 parentSessionId-only sid → the kill seam was NEVER invoked" \
+    test -z "$(grep -c kill "$order" 2>/dev/null | grep -v '^0$')"
+}
+ac_restart_presence_by_equality_not_substring
+
+# --- F6 (6/critic-fix) CASE B: the death-confirm re-poll is by EQUALITY too. After
+#     the kill the vehicle's sessionId entry is GONE but the sid lingers as a child's
+#     parentSessionId → equality observes absence → spawn proceeds. Pre-fix (substring
+#     grep) saw the lingering sid forever → won't-die abort (no spawn), a livelock.
+ac_restart_gone_check_by_equality() {
+  new_state_dir
+  local gid="restart-goneparent" a="$RESTART_ANCHOR" sid="sid-goneparent" rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "$sid" 999996
+  local order counter regf lingerf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); lingerf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$lingerf")
+  reg_present_null "$sid" 424242 > "$regf"        # initially present + status NULL → killable
+  reg_parent_only "$sid" > "$lingerf"              # after kill: sessionId gone, sid lingers as parent
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$lingerf" "$d" "$gid" yes)"   # dies → flips regf to lingerf
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_eq "F6 gone-check by equality: death observed despite lingering parentSessionId → exits 0" "0" "$rc"
+  assert_eq "F6 gone-check by equality: successor spawned after the kill" "1" "$(spawn_counter "$counter")"
+  assert_contains "F6 gone-check by equality: the kill actually fired (killed=1)" "killed=1" "$(restart_audit)"
+}
+ac_restart_gone_check_by_equality
+
+# --- 4/S7: sdlc_restart_vehicle's spawn leg reaches the env scrub (it calls the
+#     UNCHANGED sdlc_successor_spawn — this proves the scrub reaches it THROUGH
+#     that call, not merely that sdlc_successor_spawn scrubs in isolation) ---
+ac_restart_env_scrub() {
+  new_state_dir
+  local gid="restart-env-scrub" a="$RESTART_ANCHOR" sid="sid-restart-env-scrub" rc snap envlog
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  local -x GIT_AUTHOR_DATE="@1700000000 +0000" GIT_COMMITTER_DATE="@1700000000 +0000"
+  local -x CLAUDE_CODE_CHILD_SESSION=1 SDLC_TEST_NEGATIVE_CONTROL=keep-me
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  printf 'uncommitted\n' > "$d/wip-scratch.txt"
+  snap="$(sdlc_wip_snapshot "$gid" "$d")"
+  write_complete_baton "$gid" "$d" 4 "$snap"
+  plant_restart_reg "$gid" "$d" "$sid" 999995
+  local regf absentf order
+  regf=$(mktemp); absentf=$(mktemp); order=$(mktemp); CLEAN_DIRS+=("$regf" "$absentf" "$order")
+  reg_absent > "$regf"; reg_absent > "$absentf"    # sid absent from the start → DEAD, kill skipped
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" no)"
+  envlog=$(mktemp); CLEAN_DIRS+=("$envlog" "$envlog.control"); : > "$envlog"
+  SDLC_SPAWN_CMD="$(make_env_check_stub "$envlog")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_eq "4/S7 restart-leg spawn exits 0" "0" "$rc"
+  assert_contains "4/S7 restart-leg → successor's env LACKS CLAUDE_CODE_CHILD_SESSION" "absent" "$(cat "$envlog")"
+  TOTAL=$((TOTAL + 1))
+  if ! grep -qx present "$envlog"; then
+    pass "4/S7 restart-leg no observation ever saw the marker present"
+  else fail "4/S7 restart-leg marker leaked" "$(cat "$envlog")"; fi
+  assert_contains "4/S7 restart-leg negative-control var still reaches the successor" "present" "$(cat "$envlog.control")"
+}
+ac_restart_env_scrub
+
+# --- KILL-SEAM ASSERTION: a status-non-null (attended) vehicle is NEVER killed ---
+ac_restart_attended_refuse() {
+  new_state_dir
+  local gid="restart-attended" a="$RESTART_ANCHOR" sid="sid-restart-attended" rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "$sid" 999995
+  local order counter regf absentf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); absentf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$absentf")
+  reg_present_busy "$sid" 999995 > "$regf"; reg_absent > "$absentf"   # a LIVE TUI (status busy)
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" yes)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_nonzero "4/S5 attended (status non-null) restart returns nonzero" "$rc"
+  assert_true "4/S5 attended → the KILL SEAM refused (kill stub never invoked)" \
+    test -z "$(grep -c kill "$order" 2>/dev/null | grep -v '^0$')"
+  assert_eq "4/S5 attended → NO successor spawned" "0" "$(spawn_counter "$counter")"
+  assert_contains "4/S5 attended → RESTART-ABORT names the forbidden kill" "kill FORBIDDEN" "$(restart_audit)"
+}
+ac_restart_attended_refuse
+
+# --- CAP: SDLC_RESTART_CAP restarts applied → rc 2 restart-cap ---
+ac_restart_cap() {
+  new_state_dir
+  local gid="restart-cap" a="$RESTART_ANCHOR" sid="sid-restart-cap" err rc
+  local SDLC_REGISTRY_CMD SDLC_RESTART_CAP=2
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "$sid" 999994
+  local regf; regf=$(mktemp); CLEAN_DIRS+=("$regf"); reg_absent > "$regf"
+  SDLC_REGISTRY_CMD="cat $regf"
+  journal_restart "$gid" "$a" 1; journal_restart "$gid" "$a" 2     # cap consumed
+  err="$(sdlc_restart_vehicle "$gid" "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_eq "4/S5 restart cap exhausted → rc 2" "2" "$rc"
+  assert_contains "4/S5 restart cap exhausted names restart-cap" "restart-cap" "$err"
+}
+ac_restart_cap
+
+# --- GUARDS: invalid goal-id / malformed anchor / no registration → loud defect ---
+ac_restart_guards() {
+  new_state_dir
+  local a="$RESTART_ANCHOR" err rc
+  err="$(sdlc_restart_vehicle "bad/goal" "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/S5 invalid goal-id → nonzero" "$rc"
+  assert_contains "4/S5 invalid goal-id names invalid-goal-id" "invalid-goal-id" "$err"
+  err="$(sdlc_restart_vehicle "okgoal" "not-hex" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/S5 malformed anchor → nonzero" "$rc"
+  assert_contains "4/S5 malformed anchor names invalid-anchor" "invalid-anchor" "$err"
+  err="$(sdlc_restart_vehicle "noreg" "$a" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "4/S5 no registration → nonzero" "$rc"
+  assert_contains "4/S5 no registration names no-registration" "no-registration" "$err"
+}
+ac_restart_guards
 
 # ============================================================
 echo ""

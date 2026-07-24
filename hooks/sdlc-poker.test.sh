@@ -77,6 +77,18 @@ if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
 else
   echo absent >> "$STUBDIR/claude-token.log"
 fi
+# 4/S7: probe-env hazard marker + an unrelated negative-control var — proves
+# the scrub is surgical (one var removed), not a blanket env wipe.
+if [ -n "${CLAUDE_CODE_CHILD_SESSION:-}" ]; then
+  echo present >> "$STUBDIR/claude-childsession.log"
+else
+  echo absent >> "$STUBDIR/claude-childsession.log"
+fi
+if [ -n "${SDLC_TEST_NEGATIVE_CONTROL:-}" ]; then
+  echo present >> "$STUBDIR/claude-control.log"
+else
+  echo absent >> "$STUBDIR/claude-control.log"
+fi
 [ -f "$STUBDIR/poke.stdout" ] && cat "$STUBDIR/poke.stdout"
 [ -f "$STUBDIR/poke.stderr" ] && cat "$STUBDIR/poke.stderr" >&2
 if [ -f "$STUBDIR/poke-append" ]; then
@@ -124,15 +136,19 @@ plant_goal() {
   } > "$f"
 }
 
-# plant_plan <path> <current> [wake:0/1] [scale=continuous]
+# plant_plan <path> <current> [wake:0/1] [scale=continuous] [watchdog] [pilot]
+# Empty/omitted watchdog ⇒ the key is ABSENT from frontmatter (fallback-table
+# resolution applies) — mirrors write_plan's convention in sdlc-state-lib.test.sh.
 plant_plan() {
-  local p="$1" cur="$2" wake="${3:-0}" scale="${4:-continuous}"
+  local p="$1" cur="$2" wake="${3:-0}" scale="${4:-continuous}" wd="${5:-}" pilot="${6:-}"
   mkdir -p "$(dirname "$p")"
   {
     echo "---"
     echo "governing-skill: superpowers:writing-plans"
     echo "canonical_sdlc_version: 12"
     echo "scale: $scale"
+    [ -n "$wd" ] && echo "watchdog: $wd"
+    [ -n "$pilot" ] && echo "pilot: $pilot"
     echo "---"
     echo ""
     echo "## SDLC State"
@@ -229,11 +245,27 @@ run_poker_cron() {
 audit_of()  { cat "$HOME/.claude/sdlc-poker-audit.log" 2>/dev/null || true; }
 status_of() { cat "$HOME/.claude/sdlc-status/$1.md" 2>/dev/null || true; }
 status_exists() { [ -f "$HOME/.claude/sdlc-status/$1.md" ]; }
+# Negated form for assert_true call sites (`assert_true "label" not_status_exists
+# gid`). NOT `bash -c '! status_exists ...'` — that forks a separate bash process
+# that never saw status_exists defined (no `export -f` in this suite), so the
+# lookup 127s and `!` silently turns the "not found" failure into a vacuous
+# pass. This wrapper runs status_exists in-process (a function call, not a
+# fork+exec), so no propagation boundary is crossed at all.
+not_status_exists() { ! status_exists "$1"; }
+# 4/S6: registration-record presence (auto-clean assertions). Same in-process
+# discipline as not_status_exists — no bash -c fork on an unexported function.
+reg_exists() { [ -f "$HOME/.claude/sdlc-goals/$1" ]; }
+not_reg_exists() { ! reg_exists "$1"; }
 claude_calls() { cat "$HOME/.claude/.stub/claude-calls.log" 2>/dev/null || true; }
 registry_calls() { cat "$HOME/.claude/.stub/registry-calls.log" 2>/dev/null || true; }
 claude_stdin() { cat "$HOME/.claude/.stub/claude-stdin.log" 2>/dev/null || true; }
 claude_cwd()   { cat "$HOME/.claude/.stub/claude-cwd.log" 2>/dev/null || true; }
 claude_token() { cat "$HOME/.claude/.stub/claude-token.log" 2>/dev/null || true; }
+# 4/S7: whether CLAUDE_CODE_CHILD_SESSION (the probe-env hazard marker) and an
+# unrelated negative-control var reached a poke/re-prompt child — present/absent
+# per invocation, one line each in claude-childsession.log / claude-control.log.
+claude_childsession() { cat "$HOME/.claude/.stub/claude-childsession.log" 2>/dev/null || true; }
+claude_control()      { cat "$HOME/.claude/.stub/claude-control.log" 2>/dev/null || true; }
 curl_calls()   { cat "$HOME/.claude/.stub/curl-calls.log" 2>/dev/null || true; }
 count_lines()  { printf '%s' "$1" | grep -c -e "$2" 2>/dev/null || true; }
 # A real, existing cwd (the poke `cd`s into it) mapped like production paths.
@@ -282,6 +314,23 @@ arm_goal() {  # <gid> <cur> <cwd> <sid> <pid> <age> [event] [wake]
   plant_transcript_age "$cwd" "$sid" "$age" "$ev"
 }
 
+# Seed a goal's wedge observation so the NEXT single poll corroborates under the
+# active window (slice 4/S3): records the goal's pid, the CURRENT transcript byte
+# size (the flat baseline the next poll must match), a flat cputime, and count=
+# OBS-1. Mirrors the .poke priming idiom. Used by the downstream WEDGE-behavior
+# fixtures whose intent is the post-detection ACTION (notify / no-poke / ladder
+# observe), not the multi-poll detection itself — that is proven directly in the
+# S3 detector cases. Defined here (beside arm_goal) so it precedes every caller.
+prime_wedged() {  # <gid> [cpu]
+  local gid="$1" cpu="${2:-0}" f pid sid t sz d
+  f="$HOME/.claude/sdlc-goals/$gid"
+  pid=$(sed -n 's/^PID=//p' "$f"); sid=$(sed -n 's/^SESSION_ID=//p' "$f")
+  t=$(ls "$HOME"/.claude/projects/*/"$sid".jsonl 2>/dev/null | head -1)
+  sz=$(wc -c < "$t" 2>/dev/null | tr -d ' '); [ -n "$sz" ] || sz=none
+  d="$HOME/.claude/sdlc-status/.state"; mkdir -p "$d"
+  printf '%s %s %s %s\n' "$pid" "$sz" "$cpu" "$(( ${SDLC_WEDGE_OBS:-3} - 1 ))" > "$d/$gid.wedge"
+}
+
 # ---------- slice 4/4: baton / ledger fixture helpers ----------
 # plant_baton <gid> <next-action> — a well-formed baton ALIGNED to the goal's
 # registered repo+plan (read from the consent registration planted by arm_goal),
@@ -320,6 +369,33 @@ rung_effect_count() {  # <gid>
   awk -F'\t' -v g="$1" '$4=="effect" && $5 ~ ("^rung:" g ":") {n++} END{print n+0}' \
     "$(ledger_path "$1")" 2>/dev/null || echo 0
 }
+
+# ---------- 4/S5: restart-seam stubs (the SIGTERM + spawn live in the lib) ----------
+# arm_restart_seams — arms the lib's restart seams for a full poker poll so a real
+# `claude` is never launched and no real process is signalled: a kill stub records
+# the SIGTERM and DROPS the target from the registry.json the `claude agents` stub
+# reads (the vehicle "dies" for the bounded re-poll), plus a synchronous spawn
+# counter. Exports SDLC_KILL_CMD / SDLC_SPAWN_CMD / SDLC_RESTART_KILL_DELAY for the
+# poker child (run_poker's inline env augments, not replaces, the inherited env).
+RESTART_SPAWN_COUNTER=""; RESTART_KILL_LOG=""
+arm_restart_seams() {
+  local regjson="$HOME/.claude/.stub/registry.json"
+  RESTART_KILL_LOG="$HOME/.claude/.stub/kill.log"; : > "$RESTART_KILL_LOG"
+  RESTART_SPAWN_COUNTER="$HOME/.claude/.stub/spawn.count"; : > "$RESTART_SPAWN_COUNTER"
+  local kstub="$HOME/.claude/.stub/killcmd"
+  {
+    printf '#!/bin/sh\n'
+    printf 'echo "term $1" >> %q\n' "$RESTART_KILL_LOG"
+    printf 'printf "[{\\"pid\\":11,\\"sessionId\\":\\"decoy-sid\\",\\"status\\":\\"idle\\"}]\\n" > %q\n' "$regjson"
+    printf 'exit 0\n'
+  } > "$kstub"; chmod +x "$kstub"
+  local sstub="$HOME/.claude/.stub/spawncmd"
+  printf '#!/bin/sh\nprintf x >> %q\nexit 0\n' "$RESTART_SPAWN_COUNTER" > "$sstub"; chmod +x "$sstub"
+  export SDLC_KILL_CMD="$kstub" SDLC_SPAWN_CMD="$sstub" SDLC_RESTART_KILL_DELAY=0
+}
+disarm_restart_seams() { unset SDLC_KILL_CMD SDLC_SPAWN_CMD SDLC_RESTART_KILL_DELAY; }
+restart_spawn_count() { [ -s "$RESTART_SPAWN_COUNTER" ] && wc -c < "$RESTART_SPAWN_COUNTER" | tr -d ' ' || echo 0; }
+restart_term_count()  { [ -s "$RESTART_KILL_LOG" ] && grep -c . "$RESTART_KILL_LOG" | tr -d ' ' || echo 0; }
 
 # ADR-002 Decision 2a: signal wrappers sanctioned on the poker's own poke
 # path only — the perl alarm-exec idiom may appear inside do_poke's body and
@@ -387,15 +463,19 @@ c3() {
 }
 c3
 
-echo "=== Case 4: status:busy → BUSY at <WEDGE_QUIET, WEDGED at >WEDGE_QUIET ==="
+echo "=== Case 4: busy + quiet<WEDGE_QUIET → BUSY; quiet>WEDGE_QUIET ALONE → BUSY+WEDGE-OBSERVE (corroboration now required, 4/S3) ==="
 c4() {
   new_home
   arm_goal g4 4 /proj/four sid-4 4242 200 busy
   stub_registry_state busy sid-4
   assert_classify g4 BUSY "case4 busy + quiet 200s (<540)"
-  # Age the same transcript past WEDGE_QUIET.
+  # Age the same transcript past WEDGE_QUIET. A SINGLE poll no longer WEDGES —
+  # corroboration (SDLC_WEDGE_OBS polls, quiet>pilot ceiling, flat transcript+cpu)
+  # is required (spec R4/AC-5). quiet 600 alone → BUSY, with a WEDGE-OBSERVE audit.
   plant_transcript_age /proj/four sid-4 600 busy
-  assert_classify g4 WEDGED "case4 busy + quiet 600s (>540)"
+  local got; got=$(SDLC_WEDGE_CPU_FAKE=0 classify_goal g4)
+  assert_eq "case4 busy + quiet 600s ALONE → BUSY (not yet corroborated)" "BUSY" "$got"
+  assert_contains "case4 quiet>WEDGE_QUIET → WEDGE-OBSERVE audit" "g4 WEDGE-OBSERVE" "$(audit_of)"
 }
 c4
 
@@ -513,6 +593,32 @@ c11() {
 }
 c11
 
+echo "=== F8: degrade path rests on transcript grammar, NEVER the record PID — a dead REG_PID under registry outage must not force DEAD ==="
+# The record PID is arm-time telemetry (transient shell \$\$ / carried-forward stale
+# pid, F1/F5 premise) → always-dead. Keying degrade DEAD off it made every armed goal
+# classify DEAD on any registry outage (false DEAD-MANUAL spam / false DEAD ladder
+# class). Degrade now folds only transcript grammar; a genuinely dead vehicle shows a
+# quiet transcript → at worst IDLE_STALLED, and SKIP-DEGRADED (AS-16b) prevents any drive.
+c11_f8() {
+  # F8a: dead REG_PID + registry down + BUSY grammar → busy-path (BUSY), not DEAD.
+  new_home
+  arm_goal gf8b 4 /proj/f8b sid-f8b 2147483647 60 busy   # dead pid; busy transcript, quiet 60 (< WEDGE_QUIET)
+  stub_registry_state fail
+  local got; got=$(classify_goal gf8b)
+  assert_eq "F8a dead-pid degrade + busy grammar → BUSY (not DEAD off the record pid)" "BUSY" "$got"
+  assert_contains "F8a DEGRADE audit line emitted" "gf8b DEGRADE" "$(audit_of)"
+
+  # F8b: dead REG_PID + registry down + quiet (idle) transcript → idle-path, not DEAD.
+  new_home
+  arm_goal gf8i 4 /proj/f8i sid-f8i 2147483647 300 user  # dead pid; idle transcript, quiet 300 (> QUIET_THRESHOLD)
+  stub_registry_state fail
+  got=$(classify_goal gf8i)
+  assert_eq "F8b dead-pid degrade + quiet transcript → IDLE_STALLED (not DEAD)" "IDLE_STALLED" "$got"
+  TOTAL=$((TOTAL + 1))
+  if [ "$got" != "DEAD" ]; then pass "F8b dead-pid degrade never classifies DEAD off the record pid"; else fail "F8b dead-pid degrade never classifies DEAD" "got DEAD"; fi
+}
+c11_f8
+
 echo "=== Case 12: lock — concurrent run exits silently; stale lock reclaimed ==="
 c12() {
   # 12a: a LIVE lock holder ($$) → second run exits 0 and does nothing.
@@ -562,14 +668,15 @@ p1() {
 }
 p1
 
-echo "=== 4/2-2: IDLE_STALLED → poked; IDLE (fresh) → zero invocations ==="
+echo "=== 4/2-2: IDLE_STALLED with a live TUI (status idle) → SKIP-LIVE-TUI, zero poke (KA-R13); IDLE (fresh) → zero invocations ==="
 p2() {
   new_home
   local cwd; cwd=$(real_cwd d2)
-  arm_goal as2 4 "$cwd" sid-s2 4242 200 user   # idle + 200s → IDLE_STALLED
+  arm_goal as2 4 "$cwd" sid-s2 4242 200 user   # idle + 200s → IDLE_STALLED; status idle = live TUI = attended
   stub_registry_state idle sid-s2
   run_poker
-  assert_contains "4/2-2 IDLE_STALLED poked" "--resume sid-s2" "$(claude_calls)"
+  assert_eq "4/2-2 IDLE_STALLED + live TUI → ZERO poke (presence rule bars drive)" "" "$(claude_calls)"
+  assert_contains "4/2-2 IDLE_STALLED + live TUI → SKIP-LIVE-TUI audited" "as2 SKIP-LIVE-TUI" "$(audit_of)"
   new_home
   cwd=$(real_cwd d2b)
   arm_goal ai2 4 "$cwd" sid-i2 4242 60 user    # idle + 60s → IDLE (fresh)
@@ -591,9 +698,14 @@ p3() {
 
   new_home
   cwd=$(real_cwd d3w)
-  arm_goal aw3 4 "$cwd" sid-w3 "$$" 600 busy   # busy + 600s → WEDGED; live pid == this process
+  # busy + quiet>ceiling + a primed corroboration (as if OBS-1 prior flat polls) →
+  # this single poll corroborates WEDGED (4/S3). Flat cputime via the seam.
+  arm_goal aw3 4 "$cwd" sid-w3 "$$" 1000 busy  # live pid == this process
   stub_registry_state busy sid-w3
+  prime_wedged aw3 0
+  export SDLC_WEDGE_CPU_FAKE=0
   run_poker
+  unset SDLC_WEDGE_CPU_FAKE
   assert_eq "4/2-3 WEDGED → zero claude poke invocations" "" "$(claude_calls)"
   TOTAL=$((TOTAL + 1))
   if ps -p "$$" >/dev/null 2>&1; then pass "4/2-3 WEDGE target pid still alive (never signalled)"; else fail "4/2-3 target alive"; fi
@@ -624,16 +736,26 @@ p3() {
 }
 p3
 
-echo "=== 4/2-4: WEDGE notification — Title + recovery command verbatim ==="
+echo "=== 4/2-4: WEDGE notification (tui-less, no baton → legacy WEDGE notify) — Title + recovery command verbatim ==="
 p4() {
   new_home
   local cwd; cwd=$(real_cwd d4)
-  arm_goal aw4 4 "$cwd" sid-w4 31337 600 busy   # WEDGED, known pid for recovery string
-  stub_registry_state busy sid-w4
+  # status null (NOSTATUS) = a headless in-flight vehicle (tui-less), the ONLY
+  # WEDGED shape the machine may act on. No baton planted → the legacy WEDGE
+  # notification path (a real restart needs the ladder + baton).
+  # record PID 31337 is the frozen arm-time pid; the LIVE registry entry carries
+  # pid 4242 (the nostatus stub). F5 (6/critic-fix): recovery targets the LIVE pid.
+  arm_goal aw4 4 "$cwd" sid-w4 31337 1000 busy  # WEDGED (primed+corroborated)
+  stub_registry_state nostatus sid-w4           # live registry pid = 4242
+  prime_wedged aw4 0
+  export SDLC_WEDGE_CPU_FAKE=0
   run_poker
+  unset SDLC_WEDGE_CPU_FAKE
   assert_contains "4/2-4 WEDGE curl Title" "Title: aw4: WEDGE" "$(curl_calls)"
-  assert_contains "4/2-4 WEDGE body carries recovery command verbatim" \
-    "kill 31337 && cd $cwd && claude --resume sid-w4" "$(curl_calls)"
+  # F5 migration (premise updated, intent preserved): recovery carries the LIVE
+  # registry pid (4242), never the frozen record PID (31337).
+  assert_contains "4/2-4 WEDGE body carries recovery command with the LIVE pid verbatim" \
+    "kill 4242 && cd $cwd && claude --resume sid-w4" "$(curl_calls)"
 }
 p4
 
@@ -677,8 +799,8 @@ echo "=== 4/2-7: retry-cap — 3 pokes then POKE-FAIL; transcript movement reset
 p7() {
   new_home
   local cwd; cwd=$(real_cwd d7)
-  arm_goal as7 4 "$cwd" sid-p7 4242 200 user    # IDLE_STALLED, pokeable
-  stub_registry_state idle sid-p7
+  arm_goal as7 4 "$cwd" sid-p7 2147483647 200 user    # DEAD (registry absent → tui-less, pokeable)
+  stub_registry_state absent
   run_poker; run_poker; run_poker               # 3 pokes, same episode (stub never moves transcript)
   assert_eq "4/2-7 three pokes within the cap" "3" "$(count_lines "$(claude_calls)" "resume sid-p7")"
   run_poker                                      # 4th poll: cap exhausted
@@ -695,8 +817,8 @@ echo "=== 4/2-8: a failing poke (exit nonzero) counts against the cap ==="
 p8() {
   new_home
   local cwd; cwd=$(real_cwd d8)
-  arm_goal as8 4 "$cwd" sid-p8 4242 200 user
-  stub_registry_state idle sid-p8
+  arm_goal as8 4 "$cwd" sid-p8 2147483647 200 user    # DEAD (registry absent → tui-less)
+  stub_registry_state absent
   echo 1 > "$HOME/.claude/.stub/poke.rc"         # every poke exits nonzero
   run_poker; run_poker; run_poker
   assert_eq "4/2-8 three failing pokes counted" "3" "$(count_lines "$(claude_calls)" "resume sid-p8")"
@@ -798,8 +920,8 @@ echo "=== 4/3-2 (F2): failure-aware cap — rc=1 pokes that MOVE the transcript 
 f2() {
   new_home
   local cwd tpath; cwd=$(real_cwd fp2)
-  arm_goal af2 4 "$cwd" sid-f2 4242 260 user    # idle + 260s → IDLE_STALLED (pokeable)
-  stub_registry_state idle sid-f2
+  arm_goal af2 4 "$cwd" sid-f2 2147483647 260 user    # DEAD (registry absent → tui-less, pokeable)
+  stub_registry_state absent
   echo 1 > "$HOME/.claude/.stub/poke.rc"         # every poke fails (models "Not logged in")
   tpath="$(real_project_dir "$cwd")/sid-f2.jsonl"
   # Each poll: the failed poke's own turn lands as fresh transcript movement
@@ -918,8 +1040,8 @@ echo "=== 4/4-2 (F3): poke timeout — a hung poke is alarmed, POKE-TIMEOUT audi
 f3_timeout() {
   new_home
   local cwd; cwd=$(real_cwd f4t)
-  arm_goal at4 4 "$cwd" sid-t4 4242 200 user     # idle + 200s → IDLE_STALLED (pokeable)
-  stub_registry_state idle sid-t4
+  arm_goal at4 4 "$cwd" sid-t4 2147483647 200 user     # DEAD (registry absent → tui-less, pokeable)
+  stub_registry_state absent
   : > "$HOME/.claude/.stub/poke-block"           # stub busy-works past POKE_TIMEOUT
   POKE_TIMEOUT=2 run_poker                        # poll1: poke hangs → alarmed
   assert_eq "4/4-2 poker exits 0 after a timed-out poke (run completes, lock released)" 0 "$POKER_EXIT"
@@ -937,8 +1059,8 @@ f3_timeout() {
   # A fast rc=0 poke (no block) is unaffected by the timeout wrapper.
   new_home
   cwd=$(real_cwd f4f)
-  arm_goal at4f 4 "$cwd" sid-t4f 4242 200 user
-  stub_registry_state idle sid-t4f
+  arm_goal at4f 4 "$cwd" sid-t4f 2147483647 200 user   # DEAD (registry absent → tui-less)
+  stub_registry_state absent
   POKE_TIMEOUT=2 run_poker
   assert_contains "4/4-2 a fast poke under the timeout succeeds (normal POKE rc=0 audit)" "resume sid-t4f rc=0" "$(audit_of)"
   TOTAL=$((TOTAL + 1))
@@ -1083,14 +1205,15 @@ e4() {
   got=$(classify_goal ge4busy "$json" "$rc")
   assert_eq "4/1-4 BUSY: honors the snapshot, ignores the drifted live absent" "BUSY" "$got"
 
-  # WEDGED: snapshot busy + stale (>WEDGE_QUIET); live drifts to absent.
+  # WEDGED: snapshot busy + stale (>ceiling) + primed corroboration; live drifts to absent.
   new_home
   cwd=$(real_cwd e4wedge)
-  arm_goal ge4wedge 4 "$cwd" sid-e4wedge 4242 600 busy
+  arm_goal ge4wedge 4 "$cwd" sid-e4wedge 4242 1000 busy
   stub_registry_state busy sid-e4wedge
   json=$(claude agents --json 2>/dev/null); rc=$?
   stub_registry_state absent
-  got=$(classify_goal ge4wedge "$json" "$rc")
+  prime_wedged ge4wedge 0
+  got=$(SDLC_WEDGE_CPU_FAKE=0 classify_goal ge4wedge "$json" "$rc")
   assert_eq "4/1-4 WEDGED: honors the snapshot, ignores the drifted live absent" "WEDGED" "$got"
 
   # COMPLETE: plan current:10 short-circuits BEFORE the registry args are ever
@@ -1200,18 +1323,30 @@ L3() {
 }
 L3
 
-echo "=== 4/4-wedged: WEDGED+baton → observe journaled (no child spawned) ==="
+echo "=== 4/S5 tui-less WEDGED+baton → RESTART directly (no poke): restart effect journaled, successor spawned, RESTART notify rides ==="
 L4() {
   new_home
   local cwd; cwd=$(ladder_cwd wg)
-  arm_goal gwg 4 "$cwd" sid-gwg "$$" 600 busy   # busy + 600s + live pid → WEDGED
-  stub_registry_state busy sid-gwg
+  # status null (NOSTATUS) = a headless in-flight vehicle (tui-less) — the ONLY
+  # WEDGED shape the machine may restart. A SAFE fake pid (never real-signalled;
+  # the SIGTERM seam is stubbed). Corroborated wedge enters RESTART directly.
+  arm_goal gwg 4 "$cwd" sid-gwg 2147483647 1000 busy
+  stub_registry_state nostatus sid-gwg
   plant_baton gwg "next"
+  prime_wedged gwg 0
   local anc; anc=$(anchor_of gwg)
+  arm_restart_seams
+  export SDLC_WEDGE_CPU_FAKE=0
   run_poker
-  assert_eq "4/4-wedged observe → NO poke child spawned" "" "$(claude_calls)"
-  assert_true "4/4-wedged observe effect journaled under rung:gwg:observe:<anchor>:1" \
-    ledger_line_has gwg effect "rung:gwg:observe:$anc:1"
+  unset SDLC_WEDGE_CPU_FAKE; disarm_restart_seams
+  assert_eq "4/S5 WEDGED → NO poke child (a busy target is never poked)" "" "$(claude_calls)"
+  assert_true "4/S5 WEDGED → restart EFFECT journaled under restart:gwg:<anchor>:1 (no observe rung)" \
+    ledger_line_has gwg effect "restart:gwg:$anc:1"
+  assert_eq "4/S5 WEDGED → the vehicle was torn down via the lib SIGTERM seam (exactly once)" "1" "$(restart_term_count)"
+  assert_eq "4/S5 WEDGED → a successor was spawned" "1" "$(restart_spawn_count)"
+  assert_contains "4/S5 WEDGED → RESTART notification rides the action" "Title: gwg: RESTART" "$(curl_calls)"
+  assert_eq "4/S5 WEDGED → NO observe effect journaled (observe rung retired for WEDGED)" "0" \
+    "$(count_lines "$(cat "$(ledger_path gwg)" 2>/dev/null || true)" "observe:")"
 }
 L4
 
@@ -1613,6 +1748,32 @@ H2() {
 }
 H2
 
+# ---------- F2 (6/critic-fix): the consent record follows the vehicle chain ----------
+echo "=== 4/5-F2-turnover-busy: after a turnover the record SESSION_ID follows the successor; new-sid present-busy classifies BUSY, not the dead-predecessor DEAD ==="
+F2TB() {
+  new_home
+  arm_rollover gf2
+  stub_registry_state absent                     # single-writer: no live owner → the rollover spawn proceeds
+  setup_spawn_stub
+  run_poker                                       # poll1: rollover spawns; sdlc_successor_spawn re-seats the record onto the successor
+  unset_spawn_stub
+  assert_eq "4/5-F2 poll1 spawned once" "1" "$(spawn_count)"
+  # The successor's real sid is journaled in the spawn effect line (present pre- AND
+  # post-fix); the RECORD only carries it AFTER F2's follow.
+  local sucsid; sucsid=$(awk -F'\t' '$4=="effect" && $5 ~ /^spawn:gf2:/{print $6}' "$(ledger_path gf2)" \
+    | sed -n 's/.*sid=\([0-9a-f-]*\).*/\1/p' | tail -1)
+  assert_true "4/5-F2 a successor sid was journaled" test -n "$sucsid"
+  assert_eq "4/5-F2 consent record SESSION_ID now equals the successor sid (record follows the vehicle)" \
+    "$sucsid" "$(reg_val "$HOME/.claude/sdlc-goals/gf2" SESSION_ID)"
+  # Registry: the OLD predecessor sid is absent, the successor is present + busy.
+  # A fresh recent transcript for the successor keeps the BUSY read clean (no wedge).
+  plant_transcript_age "$ROLL_CWD" "$sucsid" 10 busy
+  stub_registry_state busy "$sucsid"
+  assert_eq "4/5-F2 classify sees the LIVE successor as BUSY (pre-fix: predecessor absent → DEAD forever)" \
+    "BUSY" "$(classify_goal gf2)"
+}
+F2TB
+
 # ---------- completion latch (deliverable c, D-C6) ----------
 echo "=== 4/5-complete-genuine: genuinely-merged COMPLETE → complete: latched EXACTLY once across two polls + notify once ==="
 C1() {
@@ -1810,6 +1971,724 @@ PF2() {
   assert_eq "6/critic park-false-complete no complete: latch journaled" "0" "$(complete_effect_count cmf2)"
 }
 PF2
+
+# ---------- 4/S2: poker arming eligibility — watchdog swap ----------
+# is_armed replaces is_armed_scale: registration well-formed AND
+# sdlc_watchdog_effective(REG_PLAN)=on. The fallback table (the wave
+# plan §Global Constraints, NORMATIVE): explicit watchdog wins; absent-flag
+# continuous → on; absent-flag task/wave/epic → off.
+
+echo "=== 4/S2-1: armed wave-scale plan (watchdog: on) → classified (was: silently skipped) ==="
+S2_1() {
+  new_home
+  local plan="$HOME/plans/gs21.plan.md"
+  plant_plan "$plan" 4 0 wave on            # scale: wave, watchdog: on
+  plant_goal gs21 "$plan" /proj/s21 sid-s21 4242
+  plant_transcript_age /proj/s21 sid-s21 30 user
+  stub_registry_state idle sid-s21
+  run_poker
+  assert_eq "4/S2-1 poker exit 0" 0 "$POKER_EXIT"
+  assert_true "4/S2-1 watchdog:on wave-scale → classified (status written)" status_exists gs21
+}
+S2_1
+
+echo "=== 4/S2-2: watchdog:off continuous → skipped WITH audited SKIP-UNARMED (was: silent) ==="
+S2_2() {
+  new_home
+  local plan="$HOME/plans/gs22.plan.md"
+  plant_plan "$plan" 4 0 continuous off     # scale: continuous, watchdog: off
+  plant_goal gs22 "$plan" /proj/s22 sid-s22 4242
+  plant_transcript_age /proj/s22 sid-s22 30 user
+  stub_registry_state idle sid-s22
+  run_poker
+  assert_eq "4/S2-2 poker exit 0" 0 "$POKER_EXIT"
+  assert_true "4/S2-2 watchdog:off continuous → NOT classified" not_status_exists gs22
+  assert_contains "4/S2-2 skip is audited SKIP-UNARMED (not silent)" "gs22 SKIP-UNARMED" "$(audit_of)"
+}
+S2_2
+
+echo "=== 4/S2-3: absent-flag continuous → still armed (KA-R14 compat, zero migration) ==="
+S2_3() {
+  new_home
+  arm_goal gs23 4 /proj/s23 sid-s23 4242 30 user   # arm_goal's plant_plan omits watchdog
+  stub_registry_state idle sid-s23
+  run_poker
+  assert_eq "4/S2-3 poker exit 0" 0 "$POKER_EXIT"
+  assert_true "4/S2-3 absent-flag continuous → classified (fallback on)" status_exists gs23
+}
+S2_3
+
+echo "=== 4/S2-4: absent-flag task/wave/epic → skipped, audited SKIP-UNARMED (fallback off, all 3 scales) ==="
+S2_4() {
+  local scale
+  for scale in task wave epic; do
+    new_home
+    local plan="$HOME/plans/gs24-$scale.plan.md"
+    plant_plan "$plan" 4 0 "$scale"          # watchdog absent
+    plant_goal "gs24-$scale" "$plan" "/proj/s24-$scale" "sid-s24-$scale" 4242
+    plant_transcript_age "/proj/s24-$scale" "sid-s24-$scale" 30 user
+    stub_registry_state idle "sid-s24-$scale"
+    run_poker
+    assert_eq "4/S2-4 ($scale) poker exit 0" 0 "$POKER_EXIT"
+    assert_true "4/S2-4 ($scale) absent-flag → NOT classified (fallback off)" \
+      not_status_exists "gs24-$scale"
+    assert_contains "4/S2-4 ($scale) skip is audited SKIP-UNARMED" "gs24-$scale SKIP-UNARMED" "$(audit_of)"
+  done
+}
+S2_4
+
+echo "=== 4/S2-5: explicit watchdog:on task-scale → armed ==="
+S2_5() {
+  new_home
+  local plan="$HOME/plans/gs25.plan.md"
+  plant_plan "$plan" 4 0 task on            # scale: task, watchdog: on
+  plant_goal gs25 "$plan" /proj/s25 sid-s25 4242
+  plant_transcript_age /proj/s25 sid-s25 30 user
+  stub_registry_state idle sid-s25
+  run_poker
+  assert_eq "4/S2-5 poker exit 0" 0 "$POKER_EXIT"
+  assert_true "4/S2-5 watchdog:on task-scale → classified" status_exists gs25
+}
+S2_5
+
+echo "=== 4/S2-6: off-enum watchdog value → MALFORMED-RECORD (fail-loud, never guess; distinct from SKIP-UNARMED) ==="
+S2_6() {
+  new_home
+  local plan="$HOME/plans/gs26.plan.md"
+  plant_plan "$plan" 4 0 continuous maybe   # watchdog: maybe (off-enum)
+  plant_goal gs26 "$plan" /proj/s26 sid-s26 4242
+  plant_transcript_age /proj/s26 sid-s26 30 user
+  stub_registry_state idle sid-s26
+  run_poker
+  assert_eq "4/S2-6 poker exit 0" 0 "$POKER_EXIT"
+  assert_true "4/S2-6 off-enum watchdog → NOT classified" not_status_exists gs26
+  assert_contains "4/S2-6 off-enum watchdog → MALFORMED-RECORD audited" "gs26 MALFORMED-RECORD" "$(audit_of)"
+  assert_true "4/S2-6 off-enum watchdog → NOT the SKIP-UNARMED line (fail-loud, not a guessed skip)" \
+    bash -c '! printf "%s" "$1" | grep -qF "gs26 SKIP-UNARMED"' _ "$(audit_of)"
+}
+S2_6
+
+echo "=== 4/S2-7 (AS-11 guard, REGRESSION LOCK): empty SESSION_ID → MALFORMED-RECORD, no classify, no resume ==="
+# Already-GREEN pre-change, not a RED->GREEN pair: load_registration's existing
+# `[ -n "$REG_SESSION_ID" ]` check (hooks/sdlc-poker.sh:124-125) already refuses
+# an empty SESSION_ID as "missing required key in registration" before is_armed
+# is ever reached — verified against the unmodified script at 7cbfae8. No code
+# change was made for this case; it is locked here so a future edit to
+# load_registration cannot silently regress the AS-11 guarantee.
+S2_7() {
+  new_home
+  local plan="$HOME/plans/gs27.plan.md"
+  plant_plan "$plan" 4 0 continuous
+  plant_goal gs27 "$plan" /proj/s27 "" 4242   # SESSION_ID field present but empty
+  plant_transcript_age /proj/s27 sid-s27 30 user
+  stub_registry_state idle sid-s27
+  run_poker
+  assert_eq "4/S2-7 poker exit 0" 0 "$POKER_EXIT"
+  assert_true "4/S2-7 empty SESSION_ID → NOT classified" not_status_exists gs27
+  assert_contains "4/S2-7 empty SESSION_ID → MALFORMED-RECORD audited" "gs27 MALFORMED-RECORD" "$(audit_of)"
+  assert_eq "4/S2-7 empty SESSION_ID → no resume attempted" "0" \
+    "$(count_lines "$(claude_calls)" "resume ")"
+}
+S2_7
+
+# ==========  slice 4/S3 — corroborated wedge detector (R4/AC-5; probe Q7)  =====
+# A WEDGED classification now requires ALL of: registry-busy (or status-null
+# in-flight), transcript bytes flat, and quiet beyond the pilot-keyed ceiling —
+# corroborated across SDLC_WEDGE_OBS consecutive polls. Process-tree cputime
+# flatness SUPPORTS the verdict; accumulating cputime forces AMBIGUOUS (notify-
+# only, never restart). Detection + audit lines only — no new actions this slice.
+
+# Read the observation state file / its poll counter (4th field).
+wedge_state_of() { cat "$HOME/.claude/sdlc-status/.state/$1.wedge" 2>/dev/null || true; }
+wedge_count_of() { awk '{print $4+0; exit}' "$HOME/.claude/sdlc-status/.state/$1.wedge" 2>/dev/null || echo 0; }
+
+# One in-process wedge poll with a controlled process-tree cputime: routes through
+# classify_goal (loads the registration, then busy_or_wedged → wedge_corroborated).
+# The CPU-FAKE seam is scoped to this single call and auto-cleared (VAR=val func).
+wedge_poll() {  # <gid> <cpu-fake>  → echoes classification
+  SDLC_WEDGE_CPU_FAKE="$2" classify_goal "$1"
+}
+
+echo "=== 4/S3-cpu: process-tree cputime — parser formats, fake seam, real read ==="
+S3_cpu() {
+  new_home
+  # _cputime_to_secs: SS(.ss) | MM:SS(.ss) | HH:MM:SS | DD-HH:MM:SS | empty.
+  assert_eq "4/S3 cputime parse empty→0"        "0"     "$(_cputime_to_secs '')"
+  assert_eq "4/S3 cputime parse 45→45"          "45"    "$(_cputime_to_secs '45')"
+  assert_eq "4/S3 cputime parse 0:05.50→5"      "5"     "$(_cputime_to_secs '0:05.50')"
+  assert_eq "4/S3 cputime parse 1:30→90"        "90"    "$(_cputime_to_secs '1:30')"
+  assert_eq "4/S3 cputime parse 2:03:04→7384"   "7384"  "$(_cputime_to_secs '2:03:04')"
+  assert_eq "4/S3 cputime parse 1-02:03:04"     "93784" "$(_cputime_to_secs '1-02:03:04')"
+  # Fake seam: numeric echoed as tree total (rc0); literal GONE models vanish (rc1).
+  assert_eq "4/S3 cputime fake numeric" "42" "$(SDLC_WEDGE_CPU_FAKE=42 wedge_cputime 999999)"
+  TOTAL=$((TOTAL + 1))
+  if SDLC_WEDGE_CPU_FAKE=GONE wedge_cputime 999999 >/dev/null 2>&1; then fail "4/S3 cputime fake GONE → rc1"; else pass "4/S3 cputime fake GONE → rc1"; fi
+  # Real read: a live pid (this process) yields a non-negative integer, rc0.
+  TOTAL=$((TOTAL + 1))
+  local v; v=$(wedge_cputime "$$"); local rc=$?
+  if [ "$rc" -eq 0 ] && printf '%s' "$v" | grep -qE '^[0-9]+$'; then pass "4/S3 cputime real live pid → integer ($v)"; else fail "4/S3 cputime real live pid" "rc=$rc v='$v'"; fi
+  # Real read: a definitely-dead pid → rc1 (vanished-vehicle signal).
+  TOTAL=$((TOTAL + 1))
+  if wedge_cputime 2147483647 >/dev/null 2>&1; then fail "4/S3 cputime dead pid → rc1"; else pass "4/S3 cputime dead pid → rc1"; fi
+}
+S3_cpu
+
+# One DIRECT wedge-detector poll: load the goal's registration into REG_* (as
+# classify_goal would), then run wedge_corroborated with a controlled process-tree
+# cputime. CORROB_RC captures its rc (0 = corroborated). The CPU-FAKE seam is scoped
+# to the single call (VAR=val func) — no leak across polls.
+CORROB_RC=0
+corrob_poll() {  # <gid> <cpu-fake>
+  load_registration "$1" >/dev/null 2>&1
+  SDLC_WEDGE_CPU_FAKE="$2" wedge_corroborated "$1"; CORROB_RC=$?
+}
+
+# Append a busy line to a goal's transcript (byte size grows) and re-age it — models
+# transcript MOVEMENT mid-observation without changing the resolved path.
+move_transcript() {  # <cwd> <sid> <age>
+  local cwd="$1" sid="$2" age="$3" pdir t
+  pdir=$(real_project_dir "$cwd"); t="$pdir/$sid.jsonl"
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}' >> "$t"
+  set_mtime_age "$t" "$age"
+}
+
+echo "=== 4/S3-corroborate: true hang (AUTO, flat cpu, >ceiling) → WEDGED at OBS ==="
+S3_corroborate() {
+  new_home
+  local cwd; cwd=$(real_cwd s3c)
+  arm_goal g3c 4 "$cwd" sid-3c 4242 1000 busy    # continuous → pilot AUTO, ceiling 900; quiet 1000>900
+  corrob_poll g3c 100; assert_eq "4/S3 poll1 not yet corroborated (baseline)" "1" "$CORROB_RC"
+  assert_eq "4/S3 poll1 count=1" "1" "$(wedge_count_of g3c)"
+  corrob_poll g3c 100; assert_eq "4/S3 poll2 not yet corroborated" "1" "$CORROB_RC"
+  assert_eq "4/S3 poll2 count=2" "2" "$(wedge_count_of g3c)"
+  corrob_poll g3c 100; assert_eq "4/S3 poll3 CORROBORATED (rc0)" "0" "$CORROB_RC"
+  assert_eq "4/S3 poll3 count=3" "3" "$(wedge_count_of g3c)"
+}
+S3_corroborate
+
+echo "=== 4/S3-ambiguous: long compute (cpu climbing) → AMBIGUOUS, never corroborated ==="
+S3_ambiguous() {
+  new_home
+  local cwd; cwd=$(real_cwd s3a)
+  arm_goal g3a 4 "$cwd" sid-3a 4242 1000 busy
+  corrob_poll g3a 100; assert_eq "4/S3-amb poll1 baseline" "1" "$CORROB_RC"
+  corrob_poll g3a 200; assert_eq "4/S3-amb poll2 NOT corroborated (cpu climbing)" "2" "$CORROB_RC"
+  corrob_poll g3a 300; assert_eq "4/S3-amb poll3 NOT corroborated (cpu climbing)" "2" "$CORROB_RC"
+  assert_eq "4/S3-amb never reaches OBS (count stays 1)" "1" "$(wedge_count_of g3a)"
+  assert_contains "4/S3-amb WEDGE-AMBIGUOUS audit present" "g3a WEDGE-AMBIGUOUS cpu-active" "$(audit_of)"
+}
+S3_ambiguous
+
+echo "=== 4/S3-ceilings: quiet ceiling is pilot-keyed (AUTO 900 / MANUAL 1800) ==="
+S3_ceilings() {
+  # 700s < both ceilings → never corroborated, under AUTO and under MANUAL.
+  new_home
+  local cwd; cwd=$(real_cwd s3ka)
+  arm_goal g3ka 4 "$cwd" sid-3ka 4242 700 busy               # AUTO, quiet 700 < 900
+  corrob_poll g3ka 50; corrob_poll g3ka 50; corrob_poll g3ka 50
+  assert_eq "4/S3-ceil 700s AUTO → not corroborated" "1" "$CORROB_RC"
+  assert_eq "4/S3-ceil 700s AUTO → count held at 0 (below ceiling)" "0" "$(wedge_count_of g3ka)"
+
+  new_home
+  cwd=$(real_cwd s3km)
+  local plan="$HOME/plans/g3km.plan.md"
+  plant_plan "$plan" 4 0 continuous "" manual                 # explicit pilot manual, ceiling 1800
+  plant_goal g3km "$plan" "$cwd" sid-3km 4242
+  plant_transcript_age "$cwd" sid-3km 700 busy               # quiet 700 < 1800
+  corrob_poll g3km 50; corrob_poll g3km 50; corrob_poll g3km 50
+  assert_eq "4/S3-ceil 700s MANUAL → not corroborated" "1" "$CORROB_RC"
+
+  # 1000s: crosses AUTO (900) but not MANUAL (1800) — proves the key selects.
+  new_home
+  cwd=$(real_cwd s3aa)
+  arm_goal g3aa 4 "$cwd" sid-3aa 4242 1000 busy               # AUTO, 1000 > 900
+  corrob_poll g3aa 10; corrob_poll g3aa 10; corrob_poll g3aa 10
+  assert_eq "4/S3-ceil 1000s AUTO → CORROBORATED" "0" "$CORROB_RC"
+
+  new_home
+  cwd=$(real_cwd s3mm)
+  plan="$HOME/plans/g3mm.plan.md"
+  plant_plan "$plan" 4 0 continuous "" manual                 # manual, ceiling 1800
+  plant_goal g3mm "$plan" "$cwd" sid-3mm 4242
+  plant_transcript_age "$cwd" sid-3mm 1000 busy              # quiet 1000 < 1800
+  corrob_poll g3mm 10; corrob_poll g3mm 10; corrob_poll g3mm 10
+  assert_eq "4/S3-ceil 1000s MANUAL → not corroborated (below MANUAL ceiling)" "1" "$CORROB_RC"
+
+  # manual corroborates once quiet exceeds its (longer) ceiling — the path works.
+  new_home
+  cwd=$(real_cwd s3mc)
+  plan="$HOME/plans/g3mc.plan.md"
+  plant_plan "$plan" 4 0 continuous "" manual
+  plant_goal g3mc "$plan" "$cwd" sid-3mc 4242
+  plant_transcript_age "$cwd" sid-3mc 2000 busy              # quiet 2000 > 1800
+  corrob_poll g3mc 10; corrob_poll g3mc 10; corrob_poll g3mc 10
+  assert_eq "4/S3-ceil 2000s MANUAL → CORROBORATED" "0" "$CORROB_RC"
+}
+S3_ceilings
+
+echo "=== 4/S3-reset-transcript: movement mid-observation resets the counter ==="
+S3_reset_transcript() {
+  new_home
+  local cwd; cwd=$(real_cwd s3rt)
+  arm_goal g3rt 4 "$cwd" sid-3rt 4242 1000 busy
+  corrob_poll g3rt 5; corrob_poll g3rt 5
+  assert_eq "4/S3-rst count=2 before move" "2" "$(wedge_count_of g3rt)"
+  move_transcript "$cwd" sid-3rt 1000                        # transcript bytes change → reset
+  corrob_poll g3rt 5
+  assert_eq "4/S3-rst poll after move → not corroborated" "1" "$CORROB_RC"
+  assert_eq "4/S3-rst counter reset to 1 (state file proves it)" "1" "$(wedge_count_of g3rt)"
+}
+S3_reset_transcript
+
+echo "=== 4/S3-partial: 2 of 3 polls → not corroborated, WEDGE-OBSERVE present ==="
+S3_partial() {
+  new_home
+  local cwd; cwd=$(real_cwd s3p)
+  arm_goal g3p 4 "$cwd" sid-3p 4242 1000 busy
+  corrob_poll g3p 5; corrob_poll g3p 5
+  assert_eq "4/S3-partial 2/3 → not corroborated" "1" "$CORROB_RC"
+  assert_eq "4/S3-partial count=2" "2" "$(wedge_count_of g3p)"
+  assert_contains "4/S3-partial WEDGE-OBSERVE audit present" "g3p WEDGE-OBSERVE n=2" "$(audit_of)"
+}
+S3_partial
+
+echo "=== 4/S3-pid-vanish: pid gone mid-observation → reset, no crash, no corroboration ==="
+S3_pid_vanish() {
+  new_home
+  local cwd; cwd=$(real_cwd s3pv)
+  arm_goal g3pv 4 "$cwd" sid-3pv 4242 1000 busy
+  corrob_poll g3pv 100; assert_eq "4/S3-pv poll1 baseline" "1" "$CORROB_RC"
+  corrob_poll g3pv GONE                                       # pid vanished mid-read
+  assert_eq "4/S3-pv vanished poll → not corroborated" "1" "$CORROB_RC"
+  assert_eq "4/S3-pv counter reset (0)" "0" "$(wedge_count_of g3pv)"
+  # A subsequent flat poll must not resurrect a stale count — starts fresh.
+  corrob_poll g3pv 100; assert_eq "4/S3-pv post-vanish restarts baseline (count=1)" "1" "$(wedge_count_of g3pv)"
+}
+S3_pid_vanish
+
+# ==========  slice 4/S4 — manual pilot verb set (R2/AC-4; KA-R4/R5)  =====
+# Under pilot=manual the poker is notify-only: ZERO drive verbs (no poke/spawn/
+# restart/kill) in every goal state and on death, while emitting exactly the
+# contracted notification. Both directions (AC-4): manual specimens → zero seam +
+# correct notify, and no notify below the decay window; the SAME drive-contracted
+# states under auto reach the drive plumbing (differential proof the gate is
+# pilot-keyed, not broken plumbing). The manual path never touches do_poke, so
+# these cases call dispatch_actions / dispatch_manual IN-PROCESS (S3 direct-call
+# style); the auto-differential cases point do_poke at the stub first.
+
+# A manual-armed plan: scale wave, watchdog on (armed), pilot manual (notify-only).
+plant_manual_plan() { plant_plan "$1" "$2" "${3:-0}" wave on manual; }
+# An auto-armed plan: continuous ⇒ watchdog on + pilot auto by fallback ⇒ drives.
+plant_auto_plan()   { plant_plan "$1" "$2" "${3:-0}" continuous; }
+# Load a planted goal's registration into REG_* (as process_goals would) so a
+# direct dispatch call runs against it.
+load_reg() { load_registration "$1" >/dev/null 2>&1; }
+# Count drive-seam (resume poke) invocations recorded by the stub.
+resume_calls() { count_lines "$(claude_calls)" "resume "; }
+# Count ntfy POSTs recorded by the curl stub (each notification = one line).
+notify_calls() { count_lines "$(curl_calls)" "."; }
+
+echo "=== 4/S4-manual-busy: BUSY (working) → zero seam, zero notification ==="
+S4_manual_busy() {
+  new_home
+  local cwd plan; cwd=$(real_cwd s4b); plan="$HOME/plans/g4b.plan.md"
+  plant_manual_plan "$plan" 4
+  plant_goal g4b "$plan" "$cwd" sid-4b 4242
+  plant_transcript_age "$cwd" sid-4b 30 busy
+  load_reg g4b
+  dispatch_actions g4b BUSY ""
+  assert_eq "4/S4-busy manual → zero resume seam" "0" "$(resume_calls)"
+  assert_eq "4/S4-busy manual → zero notification" "0" "$(notify_calls)"
+  assert_contains "4/S4-busy manual → SKIP-MANUAL audited" "g4b SKIP-MANUAL" "$(audit_of)"
+}
+S4_manual_busy
+
+echo "=== 4/S4-manual-idle-below: idle-thinking below the ready window → zero notify (negative) ==="
+S4_manual_idle_below() {
+  new_home
+  local cwd plan; cwd=$(real_cwd s4ib); plan="$HOME/plans/g4ib.plan.md"
+  plant_manual_plan "$plan" 4
+  plant_goal g4ib "$plan" "$cwd" sid-4ib 4242
+  plant_transcript_age "$cwd" sid-4ib 300 user   # quiet 300: >180 stall, <1800 ready window
+  load_reg g4ib
+  dispatch_actions g4ib IDLE_STALLED ""
+  assert_eq "4/S4-idle-below manual → zero resume seam" "0" "$(resume_calls)"
+  assert_eq "4/S4-idle-below manual → zero notification (below ready window)" "0" "$(notify_calls)"
+}
+S4_manual_idle_below
+
+echo "=== 4/S4-manual-ready: idle past the ready window → READY-IDLE once across 3 polls (dedupe) ==="
+S4_manual_ready() {
+  new_home
+  local cwd plan; cwd=$(real_cwd s4r); plan="$HOME/plans/g4r.plan.md"
+  plant_manual_plan "$plan" 4
+  plant_goal g4r "$plan" "$cwd" sid-4r 4242
+  plant_transcript_age "$cwd" sid-4r 2000 user   # quiet 2000 > 1800 ready window
+  stub_registry_state idle sid-4r
+  run_poker; run_poker; run_poker                  # 3 real polls, cache persists across them
+  assert_eq "4/S4-ready manual → zero resume seam across 3 polls" "0" "$(resume_calls)"
+  assert_eq "4/S4-ready manual → READY-IDLE notified exactly once (deduped)" "1" \
+    "$(count_lines "$(audit_of)" "g4r READY-IDLE notified")"
+  assert_eq "4/S4-ready manual → exactly one ntfy POST" "1" "$(notify_calls)"
+}
+S4_manual_ready
+
+echo "=== 4/S4-manual-wedge: corroborated WEDGED → WEDGE-ASK, zero restart/kill seam ==="
+S4_manual_wedge() {
+  new_home
+  local cwd plan; cwd=$(real_cwd s4w); plan="$HOME/plans/g4w.plan.md"
+  plant_manual_plan "$plan" 4
+  plant_goal g4w "$plan" "$cwd" sid-4w 4242
+  plant_transcript_age "$cwd" sid-4w 2000 busy
+  load_reg g4w
+  dispatch_actions g4w WEDGED ""
+  assert_eq "4/S4-wedge manual → zero resume/restart/kill seam" "0" "$(resume_calls)"
+  assert_contains "4/S4-wedge manual → WEDGE-ASK notified" "g4w WEDGE-ASK notified" "$(audit_of)"
+  assert_contains "4/S4-wedge manual → notification carries approve-restart ask" "approve restart?" \
+    "$(curl_calls)"
+}
+S4_manual_wedge
+
+echo "=== 4/S4-manual-dead: sid absent (DEAD) → DEAD-MANUAL notify, zero poke/spawn seam ==="
+S4_manual_dead() {
+  new_home
+  local cwd plan; cwd=$(real_cwd s4d); plan="$HOME/plans/g4d.plan.md"
+  plant_manual_plan "$plan" 5
+  plant_goal g4d "$plan" "$cwd" sid-4d 2147483647
+  plant_transcript_age "$cwd" sid-4d 300 user
+  load_reg g4d
+  dispatch_actions g4d DEAD ""
+  assert_eq "4/S4-dead manual → zero poke/spawn seam" "0" "$(resume_calls)"
+  assert_contains "4/S4-dead manual → DEAD-MANUAL notified" "g4d DEAD-MANUAL notified" "$(audit_of)"
+  assert_contains "4/S4-dead manual → notification says WIP preserved" "WIP preserved" "$(curl_calls)"
+}
+S4_manual_dead
+
+echo "=== 4/S4-manual-gated: entry notify + reminder past the window (window-deduped) ==="
+S4_manual_gated() {
+  new_home
+  local cwd plan; cwd=$(real_cwd s4g); plan="$HOME/plans/g4g.plan.md"
+  plant_manual_plan "$plan" 4 1                    # wake note ⇒ GATED
+  plant_goal g4g "$plan" "$cwd" sid-4g 4242
+  plant_transcript_age "$cwd" sid-4g 300 user
+  load_reg g4g
+  dispatch_manual g4g GATED ""                     # entry → notify once + seed window
+  assert_eq "4/S4-gated entry → one notification" "1" "$(notify_calls)"
+  dispatch_manual g4g GATED GATED                  # within window → suppressed
+  assert_eq "4/S4-gated within window → still one notification" "1" "$(notify_calls)"
+  # window elapsed: backdate the reminder stamp beyond SDLC_GATED_REMIND
+  printf '%s\n' "$(( $(date +%s) - SDLC_GATED_REMIND - 10 ))" > "$HOME/.claude/sdlc-status/.state/g4g.remind-gated"
+  dispatch_manual g4g GATED GATED                  # window elapsed → reminder fires
+  assert_eq "4/S4-gated past window → reminder notification (two total)" "2" "$(notify_calls)"
+  assert_eq "4/S4-gated → zero drive seam throughout" "0" "$(resume_calls)"
+}
+S4_manual_gated
+
+echo "=== 4/S4-auto-differential: the SAME drive-contracted states under AUTO reach the poke seam ==="
+S4_auto_differential() {
+  # IDLE_STALLED under auto (continuous ⇒ pilot auto) → legacy poke fires.
+  new_home
+  mkdir -p "$HOME/.claude/sdlc-status/.state"      # main() mints this; in-process dispatch needs it for poke_capped
+  POKE_CLAUDE_BIN="$HOME/.claude/.stub/claude"     # point in-process do_poke at the stub
+  local cwd plan; cwd=$(real_cwd s4ai); plan="$HOME/plans/g4ai.plan.md"
+  plant_auto_plan "$plan" 4
+  plant_goal g4ai "$plan" "$cwd" sid-4ai 4242
+  plant_transcript_age "$cwd" sid-4ai 300 user
+  load_reg g4ai
+  dispatch_actions g4ai IDLE_STALLED ""
+  assert_true "4/S4-diff auto IDLE_STALLED → poke seam FIRES (gate is pilot-keyed)" \
+    test "$(resume_calls)" -ge 1
+
+  # DEAD under auto (baton-less) → legacy poke fires.
+  new_home
+  mkdir -p "$HOME/.claude/sdlc-status/.state"
+  POKE_CLAUDE_BIN="$HOME/.claude/.stub/claude"
+  cwd=$(real_cwd s4ad); plan="$HOME/plans/g4ad.plan.md"
+  plant_auto_plan "$plan" 4
+  plant_goal g4ad "$plan" "$cwd" sid-4ad 2147483647
+  plant_transcript_age "$cwd" sid-4ad 300 user
+  load_reg g4ad
+  dispatch_actions g4ad DEAD ""
+  assert_true "4/S4-diff auto DEAD → poke seam FIRES" test "$(resume_calls)" -ge 1
+}
+S4_auto_differential
+
+# ==========  slice 4/S5 — presence rule + restart execution (R3/AC-6/AC-12)  =====
+# The PRESENCE RULE (KA-R13): a status-non-null vehicle (live TUI) bars ALL drive
+# verbs regardless of pilot; a registry-degraded goal (lib present) fails closed to
+# notify-only. AMBIGUOUS wedges never restart. The restart cap parks GATED. Every
+# drive-seam is stubbed (arm_restart_seams) so no real process is signalled.
+
+echo "=== 4/S5-attached-idle: IDLE_STALLED with a live TUI (status idle) → SKIP-LIVE-TUI, STALL-ATTACHED nag, zero drive seam ==="
+S5_attached_idle() {
+  new_home
+  local cwd; cwd=$(ladder_cwd sai)
+  arm_goal gsai 4 "$cwd" sid-sai 2147483647 400 user   # idle + stale → IDLE_STALLED
+  stub_registry_state idle sid-sai                       # status idle = live TUI = attended
+  plant_baton gsai "next"                                # baton present — must STILL not drive
+  arm_restart_seams
+  run_poker
+  disarm_restart_seams
+  assert_contains "4/S5-attached-idle → SKIP-LIVE-TUI audited" "gsai SKIP-LIVE-TUI" "$(audit_of)"
+  assert_eq "4/S5-attached-idle → ZERO poke seam" "" "$(claude_calls)"
+  assert_eq "4/S5-attached-idle → ZERO SIGTERM seam" "0" "$(restart_term_count)"
+  assert_eq "4/S5-attached-idle → ZERO spawn seam" "0" "$(restart_spawn_count)"
+  assert_contains "4/S5-attached-idle → STALL-ATTACHED nag notify (AUTO would have driven)" "Title: gsai: STALL-ATTACHED" "$(curl_calls)"
+}
+S5_attached_idle
+
+echo "=== 4/S5-attached-wedged: WEDGED with a live TUI (status busy) → SKIP-LIVE-TUI, zero SIGTERM/spawn (never kill an attended vehicle) ==="
+S5_attached_wedged() {
+  new_home
+  local cwd; cwd=$(ladder_cwd saw)
+  arm_goal gsaw 4 "$cwd" sid-saw 2147483647 1000 busy   # busy + quiet>ceiling + primed → WEDGED
+  stub_registry_state busy sid-saw                        # status busy = live TUI = attended
+  plant_baton gsaw "next"
+  prime_wedged gsaw 0
+  arm_restart_seams
+  export SDLC_WEDGE_CPU_FAKE=0
+  run_poker
+  unset SDLC_WEDGE_CPU_FAKE; disarm_restart_seams
+  assert_contains "4/S5-attached-wedged → SKIP-LIVE-TUI audited" "gsaw SKIP-LIVE-TUI" "$(audit_of)"
+  assert_eq "4/S5-attached-wedged → ZERO SIGTERM seam (kill of an attended vehicle forbidden)" "0" "$(restart_term_count)"
+  assert_eq "4/S5-attached-wedged → ZERO spawn seam" "0" "$(restart_spawn_count)"
+  assert_eq "4/S5-attached-wedged → ZERO restart effect journaled" "0" \
+    "$(count_lines "$(cat "$(ledger_path gsaw)" 2>/dev/null || true)" "restart:")"
+}
+S5_attached_wedged
+
+echo "=== 4/S5-degraded: registry unavailable + lib present → SKIP-DEGRADED, notify-only, zero drive ==="
+S5_degraded() {
+  new_home
+  local cwd; cwd=$(ladder_cwd sdg)
+  arm_goal gsdg 4 "$cwd" sid-sdg 2147483647 400 user   # dead pid → degrade_classify → DEAD
+  stub_registry_state fail                               # registry rc≠0 → degrade; lib IS present
+  plant_baton gsdg "next"
+  arm_restart_seams
+  run_poker
+  disarm_restart_seams
+  assert_contains "4/S5-degraded → SKIP-DEGRADED audited (fail-closed, presence unconfirmable)" "gsdg SKIP-DEGRADED" "$(audit_of)"
+  assert_eq "4/S5-degraded → ZERO poke seam" "" "$(claude_calls)"
+  assert_eq "4/S5-degraded → ZERO SIGTERM seam" "0" "$(restart_term_count)"
+  assert_eq "4/S5-degraded → ZERO spawn seam" "0" "$(restart_spawn_count)"
+  assert_eq "4/S5-degraded → ZERO restart effect journaled" "0" \
+    "$(count_lines "$(cat "$(ledger_path gsdg)" 2>/dev/null || true)" "restart:")"
+}
+S5_degraded
+
+echo "=== 4/S5-ambiguous: high-CPU quiet (AMBIGUOUS wedge) → BUSY, never restart ==="
+S5_ambiguous_never_restart() {
+  new_home
+  local cwd; cwd=$(ladder_cwd sam)
+  arm_goal gsam 4 "$cwd" sid-sam 2147483647 1000 busy
+  stub_registry_state nostatus sid-sam                    # tui-less, WEDGED-shaped
+  plant_baton gsam "next"
+  prime_wedged gsam 0                                      # cputime baseline 0
+  arm_restart_seams
+  export SDLC_WEDGE_CPU_FAKE=500                           # cputime CLIMBING → AMBIGUOUS (probe Q7) → BUSY
+  run_poker
+  unset SDLC_WEDGE_CPU_FAKE; disarm_restart_seams
+  assert_eq "4/S5-ambiguous → ZERO SIGTERM seam (ambiguous never restarts)" "0" "$(restart_term_count)"
+  assert_eq "4/S5-ambiguous → ZERO spawn seam" "0" "$(restart_spawn_count)"
+  assert_eq "4/S5-ambiguous → ZERO restart effect journaled" "0" \
+    "$(count_lines "$(cat "$(ledger_path gsam)" 2>/dev/null || true)" "restart:")"
+  assert_contains "4/S5-ambiguous → WEDGE-AMBIGUOUS audited (notify-only)" "gsam WEDGE-AMBIGUOUS" "$(audit_of)"
+}
+S5_ambiguous_never_restart
+
+echo "=== 4/S5-restart-cap: 2 restarts spent → restart-exhausted parks GATED + GATED notify, ladder stops ==="
+S5_restart_cap() {
+  new_home
+  local cwd; cwd=$(ladder_cwd src)
+  arm_goal gsrc 4 "$cwd" sid-src 2147483647 1000 busy
+  stub_registry_state nostatus sid-src
+  plant_baton gsrc "next"
+  prime_wedged gsrc 0
+  local anc; anc=$(anchor_of gsrc)
+  # Seed the cap as spent: two applied restart effects under the current anchor.
+  sdlc_effect_run gsrc "restart:gsrc:$anc:1" "restart 1" -- true >/dev/null 2>&1
+  sdlc_effect_run gsrc "restart:gsrc:$anc:2" "restart 2" -- true >/dev/null 2>&1
+  arm_restart_seams
+  export SDLC_WEDGE_CPU_FAKE=0
+  run_poker
+  unset SDLC_WEDGE_CPU_FAKE; disarm_restart_seams
+  assert_contains "4/S5-cap → restart cap park audited (LADDER-RESTART-EXHAUSTED)" "gsrc LADDER-RESTART-EXHAUSTED" "$(audit_of)"
+  assert_contains "4/S5-cap → plan parked GATED (Wake Note appended)" "## Wake Note" "$(cat "$HOME/plans/gsrc.plan.md")"
+  assert_contains "4/S5-cap → GATED notification rides the exhaustion" "Title: gsrc: GATED" "$(curl_calls)"
+  assert_eq "4/S5-cap → NO third restart (ladder stopped at the cap)" "0" "$(restart_term_count)"
+  assert_eq "4/S5-cap → NO new successor spawned" "0" "$(restart_spawn_count)"
+}
+S5_restart_cap
+
+# ============================================================
+# ============  slice 4/S6 — lifecycle hygiene  ===============
+# (a) COMPLETE auto-clean: post-latch (complete_latch rc=0) removes the
+#     registration via sdlc_disarm; a false-complete park (rc=2) retains it.
+# (b) Per-poll per-sid drive dedupe: a second armed goal resolving to an
+#     already-driven SESSION_ID this poll is skipped + audited
+#     SKIP-SID-DEDUPE; notify-only actions never consume the dedupe slot.
+# ============================================================
+
+echo "=== 4/S6-autoclean-genuine: genuinely-merged COMPLETE → registration removed exactly once, DISARM audited ==="
+S6_autoclean_genuine() {
+  new_home
+  arm_complete cac6 yes
+  run_poker            # poll1: latches + auto-cleans
+  run_poker            # poll2: record already gone — no-op, no second audit line
+  assert_true "4/S6-autoclean-genuine registration removed after the latch" not_reg_exists cac6
+  assert_eq "4/S6-autoclean-genuine exactly one DISARM audit line" "1" "$(count_lines "$(audit_of)" "cac6 DISARM")"
+  assert_contains "4/S6-autoclean-genuine DISARM reason=complete" "cac6 DISARM complete" "$(audit_of)"
+  assert_eq "4/S6-autoclean-genuine COMPLETE still notified exactly once" "1" \
+    "$(count_lines "$(curl_calls)" "cac6: COMPLETE")"
+}
+S6_autoclean_genuine
+
+echo "=== 4/S6-autoclean-false: false-complete (branch unmerged) → latch parks GATED, registration RETAINED (never bypass the park) ==="
+S6_autoclean_false() {
+  new_home
+  arm_complete caf6 no
+  run_poker
+  assert_true "4/S6-autoclean-false registration RETAINED (parked goals stay registered)" reg_exists caf6
+  assert_contains "4/S6-autoclean-false COMPLETE-FALSE park audited" "caf6 COMPLETE-FALSE" "$(audit_of)"
+  TOTAL=$((TOTAL + 1))
+  if ! printf '%s' "$(audit_of)" | grep -q "caf6 DISARM"; then
+    pass "4/S6-autoclean-false no DISARM fired on a false-complete park"
+  else fail "4/S6-autoclean-false unexpected DISARM" "$(audit_of)"; fi
+}
+S6_autoclean_false
+
+echo "=== 4/S6-dedupe-drive: two AUTO tui-less goals sharing one SESSION_ID → exactly one drive + one SKIP-SID-DEDUPE ==="
+S6_dedupe_drive() {
+  new_home
+  local cwd; cwd=$(ladder_cwd dd6)
+  arm_goal gdd61 4 "$cwd" sid-dd6-shared 2147483647 300 user   # DEAD (registry absent → tui-less)
+  arm_goal gdd62 4 "$cwd" sid-dd6-shared 2147483647 300 user   # same sid — a shared-session double-registration
+  stub_registry_state absent
+  plant_baton gdd61 "next"
+  plant_baton gdd62 "next"
+  run_poker
+  assert_eq "4/S6-dedupe-drive exactly one poke reached the shared sid this poll" "1" \
+    "$(count_lines "$(claude_calls)" "resume sid-dd6-shared")"
+  assert_eq "4/S6-dedupe-drive exactly one SKIP-SID-DEDUPE audit line" "1" \
+    "$(count_lines "$(audit_of)" "SKIP-SID-DEDUPE")"
+  assert_contains "4/S6-dedupe-drive the SECOND goal (gdd62, lexically later) is the one deduped" \
+    "gdd62 SKIP-SID-DEDUPE" "$(audit_of)"
+}
+S6_dedupe_drive
+
+echo "=== 4/S6-dedupe-notify-exempt: first goal only NOTIFIES (GATED) → never consumes the dedupe slot; second still drives ==="
+S6_dedupe_notify_exempt() {
+  new_home
+  local cwd; cwd=$(ladder_cwd de6)
+  arm_goal gde61 4 "$cwd" sid-de6-shared 2147483647 300 user 1   # wake=1 → GATED (notify-only, never ladders)
+  arm_goal gde62 4 "$cwd" sid-de6-shared 2147483647 300 user     # same sid — DEAD, tui-less, drive-eligible
+  stub_registry_state absent
+  plant_baton gde62 "next"
+  run_poker
+  assert_eq "4/S6-dedupe-notify-exempt the drive-eligible goal still pokes (GATED notify never consumed the slot)" "1" \
+    "$(count_lines "$(claude_calls)" "resume sid-de6-shared")"
+  TOTAL=$((TOTAL + 1))
+  if ! printf '%s' "$(audit_of)" | grep -q "SKIP-SID-DEDUPE"; then
+    pass "4/S6-dedupe-notify-exempt no SKIP-SID-DEDUPE fired (only one drive-eligible goal reached this poll)"
+  else fail "4/S6-dedupe-notify-exempt unexpected dedupe line" "$(audit_of)"; fi
+}
+S6_dedupe_notify_exempt
+
+# ============================================================
+# ============  slice 4/S7 — spawn-path env scrub  ============
+# Every vehicle-spawn seam runs the child under `env -u CLAUDE_CODE_CHILD_SESSION`
+# (probe env hazard: an inherited child-session marker suppresses BOTH transcript
+# persistence and registry registration). Poker-side seams: do_poke (legacy/
+# ladder poke rung) and the ladder's re-prompt rung — both ride do_poke, so one
+# fix covers both, proven by two independent RED cases per the dispatch brief.
+# ============================================================
+
+echo "=== 4/S7-poke: planted CLAUDE_CODE_CHILD_SESSION in the caller env → do_poke's child LACKS it (negative control preserved) ==="
+S7_poke_scrub() {
+  new_home
+  local cwd; cwd=$(real_cwd s7p6)
+  arm_goal gs7p 4 "$cwd" sid-s7p 2147483647 300 user   # DEAD (registry absent → tui-less, legacy poke)
+  stub_registry_state absent
+  export CLAUDE_CODE_CHILD_SESSION=1
+  export SDLC_TEST_NEGATIVE_CONTROL=keep-me
+  run_poker
+  unset CLAUDE_CODE_CHILD_SESSION SDLC_TEST_NEGATIVE_CONTROL
+  assert_contains "4/S7-poke do_poke child env LACKS CLAUDE_CODE_CHILD_SESSION" "absent" "$(claude_childsession)"
+  assert_contains "4/S7-poke do_poke child env KEEPS the unrelated negative-control var" "present" "$(claude_control)"
+}
+S7_poke_scrub
+
+echo "=== 4/S7-reprompt: planted CLAUDE_CODE_CHILD_SESSION → the ladder's re-prompt child LACKS it (negative control preserved) ==="
+S7_reprompt_scrub() {
+  new_home
+  local cwd; cwd=$(ladder_cwd s7r6)
+  arm_goal gs7r 4 "$cwd" sid-s7r 2147483647 300 user   # DEAD
+  stub_registry_state absent
+  plant_baton gs7r "next"
+  local anc; anc=$(anchor_of gs7r)
+  export CLAUDE_CODE_CHILD_SESSION=1
+  export SDLC_TEST_NEGATIVE_CONTROL=keep-me
+  run_poker; run_poker      # poke:1, poke:2 (cap reached)
+  run_poker                 # poke exhausted → re-prompt:1
+  unset CLAUDE_CODE_CHILD_SESSION SDLC_TEST_NEGATIVE_CONTROL
+  assert_true "4/S7-reprompt re-prompt rung actually fired (sanity)" \
+    ledger_line_has gs7r effect "rung:gs7r:re-prompt:$anc:1"
+  assert_eq "4/S7-reprompt every child this poll (poke ×2 + re-prompt ×1) LACKED the marker" "3" \
+    "$(count_lines "$(claude_childsession)" "^absent$")"
+  TOTAL=$((TOTAL + 1))
+  if ! printf '%s' "$(claude_childsession)" | grep -qx present; then
+    pass "4/S7-reprompt no child ever observed CLAUDE_CODE_CHILD_SESSION present"
+  else fail "4/S7-reprompt marker leaked to a child" "$(claude_childsession)"; fi
+  assert_contains "4/S7-reprompt negative-control var still reached the children" "present" "$(claude_control)"
+}
+S7_reprompt_scrub
+
+echo "=== 6/critic-fix F5: wedge + recovery target the LIVE registry pid, not the frozen record PID ==="
+F5_live_pid() {
+  # --- reg_live_pid: sid-keyed EQUALITY resolution (the shared canonical path;
+  #     the same select(.sessionId==$sid) the classify/presence readers use) ---
+  local J='[{"pid":5150,"sessionId":"sid-live","status":"busy"},{"pid":99,"sessionId":"other"}]'
+  assert_eq "F5 reg_live_pid resolves the sid's pid by equality" "5150" "$(reg_live_pid "$J" sid-live 0)"
+  assert_eq "F5 reg_live_pid empty when the sid is absent" "" "$(reg_live_pid "$J" nope 0)"
+  assert_eq "F5 reg_live_pid empty when the registry rc is nonzero" "" "$(reg_live_pid "$J" sid-live 1)"
+  # a sid surfacing ONLY as parentSessionId must NOT resolve (equality, not substring)
+  local JP='[{"pid":7,"sessionId":"child","parentSessionId":"sid-live","status":"busy"}]'
+  assert_eq "F5 reg_live_pid ignores a sid that is only a parentSessionId" "" "$(reg_live_pid "$JP" sid-live 0)"
+
+  # --- wedge_corroborated reads the LIVE pid: a DEAD record PID + a LIVE registry
+  #     pid must STILL corroborate. Pre-fix it read the frozen REG_PID (the recycled
+  #     arm-time bash-tool shell) → wedge_cputime rc1 → observation reset EVERY poll →
+  #     WEDGED structurally unreachable for lib-armed goals. ---
+  new_home
+  local cwd; cwd=$(real_cwd f5w)
+  arm_goal g5w 4 "$cwd" sid-5w 2147483647 1000 busy      # REG_PID = a guaranteed-DEAD pid
+  sleep 300 & local livepid=$!                            # a real, flat-low-cputime LIVE process
+  f5_poll() { load_registration g5w >/dev/null 2>&1; REG_LIVE_PID="$livepid" wedge_corroborated g5w; }
+  f5_poll >/dev/null 2>&1
+  assert_eq "F5 poll1 baseline established (LIVE pid readable → count=1, NOT a reset)" "1" "$(wedge_count_of g5w)"
+  f5_poll >/dev/null 2>&1
+  local rc; f5_poll >/dev/null 2>&1; rc=$?
+  assert_eq "F5 poll3 CORROBORATED (rc0) — proves the LIVE registry pid was read, not the dead record PID" "0" "$rc"
+  kill "$livepid" 2>/dev/null
+
+  # --- recovery_cmd emits the LIVE registry pid, never the frozen record PID, and
+  #     OMITS the kill clause entirely when the live pid is unresolvable (never
+  #     hand a human a wrong pid to kill). ---
+  new_home
+  local cwd2; cwd2=$(real_cwd f5r)
+  arm_goal g5r 4 "$cwd2" sid-5r 31337 1000 busy           # record PID 31337 (frozen/wrong)
+  load_registration g5r >/dev/null 2>&1
+  REG_LIVE_PID=4242                                        # live registry pid ≠ the record's 31337
+  assert_contains "F5 recovery_cmd uses the LIVE registry pid" \
+    "kill 4242 && cd $cwd2 && claude --resume sid-5r" "$(recovery_cmd)"
+  assert_true "F5 recovery_cmd never emits the frozen record PID" \
+    test -z "$(recovery_cmd | grep -F 'kill 31337')"
+  REG_LIVE_PID=""                                          # unresolvable → omit the kill clause
+  assert_eq "F5 recovery_cmd omits the kill clause when the live pid is unresolvable" \
+    "cd $cwd2 && claude --resume sid-5r" "$(recovery_cmd)"
+  REG_LIVE_PID=""
+}
+F5_live_pid
 
 # ============================================================
 echo ""
