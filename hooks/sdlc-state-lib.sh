@@ -2284,13 +2284,19 @@ _sdlc_reg_val() {
 # wave defends against) — which then (a) makes an already-dead vehicle look present
 # so the kill path runs, and (b) can never observe absence in the death-confirm
 # re-poll, livelocking the restart into a permanent abort. rc 1 = absent; rc 2 = jq
-# unavailable (presence UNCONFIRMABLE → callers fail closed: never kill, never spawn).
+# unavailable OR the registry JSON failed to parse/evaluate (F9, Step-6 critic round
+# 3: jq's own exit status gates presence, never a bare stdout-equals-"true" compare —
+# a malformed/truncated payload makes jq exit nonzero with empty stdout, which would
+# otherwise compare falsy and misread as definitive absence). Either way presence is
+# UNCONFIRMABLE → callers fail closed: never kill, never spawn.
 # This is the one canonical "does this sid have a live registry entry?" test that the
 # kill-path presence check, the death-confirm re-poll, and (via select) the status +
 # pid reads all key off — no more three-slightly-different queries in one function.
 _sdlc_reg_present() {
   command -v jq >/dev/null 2>&1 || return 2
-  [ "$(printf '%s' "$1" | jq -r --arg sid "$2" 'any(.[]; .sessionId==$sid)' 2>/dev/null)" = "true" ]
+  local out
+  out="$(printf '%s' "$1" | jq -r --arg sid "$2" 'any(.[]; .sessionId==$sid)' 2>/dev/null)" || return 2
+  [ "$out" = "true" ]
 }
 
 # _sdlc_restart_body <goal-id> <anchor> <n> <cwd> <sid> <pid> — the restart

@@ -2393,7 +2393,7 @@ ac_spawn_happy_double() {
   write_complete_baton "$gid" "$d" 4 none
   counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
   SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
-  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"   # re-drive: no live owner
+  SDLC_REGISTRY_CMD="$(make_registry_stub '[]')"   # re-drive: no live owner (real schema: bare array)
   path="$(ledger_path "$gid")"
 
   out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
@@ -2559,6 +2559,66 @@ ac_spawn_dead_owner() {
   if printf '%s' "$out" | grep -qE '^[0-9a-f-]{36}$'; then pass "AC-N6 dead-owner printed a fresh sid"; else fail "AC-N6 dead-owner printed a fresh sid" "got: $out"; fi
 }
 ac_spawn_dead_owner
+
+echo "--- F9 (critic round 3): _sdlc_reg_present JQ PARSE FAILURE must read UNCONFIRMABLE (rc 2), never bare absence (rc 1) ---"
+ac_reg_present_parse_failure() {
+  local sid rc out
+
+  # direct happy-path baseline: genuine present → rc 0.
+  sid="probe-sid-f9-present"
+  out="$(printf '[{"pid":1,"kind":"interactive","sessionId":"%s"}]' "$sid")"
+  _sdlc_reg_present "$out" "$sid"; rc=$?
+  assert_eq "F9 baseline: genuine present → rc 0" "0" "$rc"
+
+  # direct happy-path baseline: clean valid-JSON absence → rc 1.
+  out='[{"pid":1,"kind":"interactive","sessionId":"other-sid"}]'
+  _sdlc_reg_present "$out" "$sid"; rc=$?
+  assert_eq "F9 baseline: clean valid-JSON absence → rc 1" "1" "$rc"
+
+  # RED 1: truncated/malformed JSON that CONTAINS the probe sid as a raw substring
+  # (e.g. an interrupted write mid-flush) → parse failure → UNCONFIRMABLE, not absence.
+  out="$(printf '[{"pid":1,"kind":"interactive","sessionId":"%s"' "$sid")"   # unterminated — no closing braces
+  _sdlc_reg_present "$out" "$sid"; rc=$?
+  assert_eq "F9 case1: truncated JSON containing sid substring → rc 2 (UNCONFIRMABLE), not rc 1 (absent)" "2" "$rc"
+
+  # RED 2: a warning line prepended to otherwise-valid JSON (e.g. a wrapper script's
+  # stderr-to-stdout leak) breaks the overall parse even though the sid is a genuine
+  # .sessionId inside the trailing valid object.
+  out="$(printf 'WARN: registry wrapper noise\n[{"pid":1,"kind":"interactive","sessionId":"%s"}]\n' "$sid")"
+  _sdlc_reg_present "$out" "$sid"; rc=$?
+  assert_eq "F9 case2: warning-line-prefixed valid JSON (genuine sid) → rc 2 (UNCONFIRMABLE), not rc 1 (absent)" "2" "$rc"
+
+  # RED 3: an {"error": ...} object payload (registry backend reporting its own
+  # failure as JSON) — valid JSON, but not the expected array shape; jq's `.[]`
+  # over an object with `any(...)` errors on non-indexable access.
+  out='{"error":"registry backend unavailable"}'
+  _sdlc_reg_present "$out" "$sid"; rc=$?
+  assert_eq "F9 case3: {\"error\":...} payload → rc 2 (UNCONFIRMABLE), not rc 1 (absent)" "2" "$rc"
+}
+ac_reg_present_parse_failure
+
+echo "--- F9 (critic round 3): single-writer gate treats an UNPARSEABLE registry as UNCONFIRMABLE, refuses conservatively (no spawn) ---"
+ac_spawn_registry_unparseable() {
+  local gid="spawn-regbad" d counter fakesid err rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  fakesid="bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+  ledger_append "$gid" effect "spawn:$gid:2026-01-01T00:00:00Z" "sid=$fakesid pid=na cwd=$d" >/dev/null 2>&1
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  # Registry command SUCCEEDS (rc 0) but its stdout is unparseable JSON containing
+  # fakesid as a raw substring (F9): jq's own exit status must gate presence, not
+  # bare stdout-equals-"true" — else this reads as definitive absence and the gate
+  # fail-OPENS beside a possibly-live owner.
+  SDLC_REGISTRY_CMD="$(make_registry_stub "[{\"pid\":9,\"sessionId\":\"$fakesid\"")"   # truncated — no closing
+  err="$(sdlc_successor_spawn "$gid" "$d" 2>&1 1>/dev/null)"; rc=$?
+  assert_nonzero "F9 unparseable-registry returns nonzero" "$rc"
+  assert_contains "F9 unparseable-registry: conservative refusal suffix" "registry unavailable, refusing conservatively" "$err"
+  assert_eq "F9 unparseable-registry did not spawn (counter 0)" "0" "$(spawn_counter "$counter")"
+  assert_eq "F9 unparseable-registry did not park" "0" "$(wake_note_count "$PLAN_STUB")"
+}
+ac_spawn_registry_unparseable
 
 echo "--- DIVERGENCE (baton-stale tip): reconcile defect → park that class, no spawn; double-drive → still one Wake Note ---"
 ac_spawn_divergence() {
