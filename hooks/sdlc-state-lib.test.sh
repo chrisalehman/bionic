@@ -3658,6 +3658,10 @@ reg_absent()       { printf '[{"pid":1,"kind":"interactive","sessionId":"decoy",
 # F1 (6/critic-fix): a present + status-NULL entry that carries NO pid field — the
 # kill target is unresolvable from the registry (fail-closed, never fall back to record).
 reg_present_null_nopid() { printf '[{"kind":"interactive","sessionId":"%s"}]\n' "$1"; }
+# F6 (6/critic-fix): the sid appears ONLY as a forked child's parentSessionId — the
+# vehicle's own sessionId entry is NOT present. A substring grep counts it present;
+# `.sessionId==$sid` equality correctly does not.
+reg_parent_only() { printf '[{"pid":7,"kind":"interactive","sessionId":"child-decoy","parentSessionId":"%s","status":"idle"}]\n' "$1"; }
 restart_audit()    { cat "$(poker_audit)" 2>/dev/null; }
 
 # --- CASE 1: ORDERING — intent-journal precedes snapshot precedes SIGTERM precedes spawn ---
@@ -3932,6 +3936,59 @@ ac_restart_abort_leaves_record_untouched() {
     test -z "$(restart_audit | grep -F 'REG-FOLLOW')"
 }
 ac_restart_abort_leaves_record_untouched
+
+# --- F6 (6/critic-fix) CASE A: presence is by `.sessionId` EQUALITY, not substring.
+#     The sid present ONLY as a forked child's parentSessionId is NOT the vehicle →
+#     treated as ABSENT (DEAD) → skip kill → spawn a successor (revival). Pre-fix
+#     (substring grep) counted it present → status NOSTATUS → kpid empty → F1
+#     pid-unresolvable ABORT (no spawn): the fork hazard silently blocked revival.
+ac_restart_presence_by_equality_not_substring() {
+  new_state_dir
+  local gid="restart-parentonly" a="$RESTART_ANCHOR" sid="sid-parentonly" rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "$sid" 999996
+  local order counter regf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf")
+  reg_parent_only "$sid" > "$regf"                # sid ONLY as a child's parentSessionId
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$regf" "$d" "$gid" no)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_eq "F6 parentSessionId-only sid → restart exits 0 (equality: absent → DEAD → revived)" "0" "$rc"
+  assert_eq "F6 parentSessionId-only sid → successor spawned (revival NOT blocked)" "1" "$(spawn_counter "$counter")"
+  assert_true "F6 parentSessionId-only sid → the kill seam was NEVER invoked" \
+    test -z "$(grep -c kill "$order" 2>/dev/null | grep -v '^0$')"
+}
+ac_restart_presence_by_equality_not_substring
+
+# --- F6 (6/critic-fix) CASE B: the death-confirm re-poll is by EQUALITY too. After
+#     the kill the vehicle's sessionId entry is GONE but the sid lingers as a child's
+#     parentSessionId → equality observes absence → spawn proceeds. Pre-fix (substring
+#     grep) saw the lingering sid forever → won't-die abort (no spawn), a livelock.
+ac_restart_gone_check_by_equality() {
+  new_state_dir
+  local gid="restart-goneparent" a="$RESTART_ANCHOR" sid="sid-goneparent" rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "$sid" 999996
+  local order counter regf lingerf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); lingerf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$lingerf")
+  reg_present_null "$sid" 424242 > "$regf"        # initially present + status NULL → killable
+  reg_parent_only "$sid" > "$lingerf"              # after kill: sessionId gone, sid lingers as parent
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$lingerf" "$d" "$gid" yes)"   # dies → flips regf to lingerf
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_eq "F6 gone-check by equality: death observed despite lingering parentSessionId → exits 0" "0" "$rc"
+  assert_eq "F6 gone-check by equality: successor spawned after the kill" "1" "$(spawn_counter "$counter")"
+  assert_contains "F6 gone-check by equality: the kill actually fired (killed=1)" "killed=1" "$(restart_audit)"
+}
+ac_restart_gone_check_by_equality
 
 # --- 4/S7: sdlc_restart_vehicle's spawn leg reaches the env scrub (it calls the
 #     UNCHANGED sdlc_successor_spawn — this proves the scrub reaches it THROUGH
