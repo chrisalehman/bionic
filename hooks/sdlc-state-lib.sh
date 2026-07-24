@@ -1566,7 +1566,7 @@ sdlc_successor_spawn() {
   local goal_id="${1:-}" dir="${2:-$PWD}"
   local baton plan_path lpath
   local cc_errf cc_rc cc_err cclass
-  local spawn_line prior_sid reg_out reg_rc
+  local spawn_line prior_sid reg_out reg_rc prc
   local rec_errf rec_out rec_rc rec_err rclass verdict rsha rst_errf rst_err
   local sid prompt spawn_key spawn_errf spawn_rc spawn_err sclass
 
@@ -1611,11 +1611,23 @@ sdlc_successor_spawn() {
         echo "goal-owned: session $prior_sid live — registry unavailable, refusing conservatively" >&2
         return 1
       fi
-      if printf '%s' "$reg_out" | grep -qF "$prior_sid"; then
+      # Presence by `.sessionId` EQUALITY (F7), never a raw-JSON substring grep: a
+      # surviving child of the DEAD predecessor carries prior_sid as its
+      # parentSessionId, so `grep -qF "$prior_sid"` would count the owner "live" and
+      # refuse revival permanently (the F6 class through the single-writer gate — the
+      # F2 self-refuse symptom). _sdlc_reg_present matches only a live entry whose
+      # OWN sessionId equals prior_sid, and returns 2 when jq is absent → presence
+      # UNCONFIRMABLE → refuse conservatively, exactly as a registry outage does.
+      _sdlc_reg_present "$reg_out" "$prior_sid"; prc=$?
+      if [ "$prc" -eq 2 ]; then
+        echo "goal-owned: session $prior_sid live — registry unavailable, refusing conservatively" >&2
+        return 1
+      fi
+      if [ "$prc" -eq 0 ]; then
         echo "goal-owned: session $prior_sid live" >&2
         return 1
       fi
-      # sid absent from the registry → the owner is dead → proceed.
+      # prc 1: prior_sid absent from the registry as an owner → the owner is dead → proceed.
     fi
   fi
 
