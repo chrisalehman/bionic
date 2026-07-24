@@ -240,6 +240,10 @@ status_exists() { [ -f "$HOME/.claude/sdlc-status/$1.md" ]; }
 # pass. This wrapper runs status_exists in-process (a function call, not a
 # fork+exec), so no propagation boundary is crossed at all.
 not_status_exists() { ! status_exists "$1"; }
+# 4/S6: registration-record presence (auto-clean assertions). Same in-process
+# discipline as not_status_exists — no bash -c fork on an unexported function.
+reg_exists() { [ -f "$HOME/.claude/sdlc-goals/$1" ]; }
+not_reg_exists() { ! reg_exists "$1"; }
 claude_calls() { cat "$HOME/.claude/.stub/claude-calls.log" 2>/dev/null || true; }
 registry_calls() { cat "$HOME/.claude/.stub/registry-calls.log" 2>/dev/null || true; }
 claude_stdin() { cat "$HOME/.claude/.stub/claude-stdin.log" 2>/dev/null || true; }
@@ -2442,6 +2446,80 @@ S5_restart_cap() {
   assert_eq "4/S5-cap → NO new successor spawned" "0" "$(restart_spawn_count)"
 }
 S5_restart_cap
+
+# ============================================================
+# ============  slice 4/S6 — lifecycle hygiene  ===============
+# (a) COMPLETE auto-clean: post-latch (complete_latch rc=0) removes the
+#     registration via sdlc_disarm; a false-complete park (rc=2) retains it.
+# (b) Per-poll per-sid drive dedupe: a second armed goal resolving to an
+#     already-driven SESSION_ID this poll is skipped + audited
+#     SKIP-SID-DEDUPE; notify-only actions never consume the dedupe slot.
+# ============================================================
+
+echo "=== 4/S6-autoclean-genuine: genuinely-merged COMPLETE → registration removed exactly once, DISARM audited ==="
+S6_autoclean_genuine() {
+  new_home
+  arm_complete cac6 yes
+  run_poker            # poll1: latches + auto-cleans
+  run_poker            # poll2: record already gone — no-op, no second audit line
+  assert_true "4/S6-autoclean-genuine registration removed after the latch" not_reg_exists cac6
+  assert_eq "4/S6-autoclean-genuine exactly one DISARM audit line" "1" "$(count_lines "$(audit_of)" "cac6 DISARM")"
+  assert_contains "4/S6-autoclean-genuine DISARM reason=complete" "cac6 DISARM complete" "$(audit_of)"
+  assert_eq "4/S6-autoclean-genuine COMPLETE still notified exactly once" "1" \
+    "$(count_lines "$(curl_calls)" "cac6: COMPLETE")"
+}
+S6_autoclean_genuine
+
+echo "=== 4/S6-autoclean-false: false-complete (branch unmerged) → latch parks GATED, registration RETAINED (never bypass the park) ==="
+S6_autoclean_false() {
+  new_home
+  arm_complete caf6 no
+  run_poker
+  assert_true "4/S6-autoclean-false registration RETAINED (parked goals stay registered)" reg_exists caf6
+  assert_contains "4/S6-autoclean-false COMPLETE-FALSE park audited" "caf6 COMPLETE-FALSE" "$(audit_of)"
+  TOTAL=$((TOTAL + 1))
+  if ! printf '%s' "$(audit_of)" | grep -q "caf6 DISARM"; then
+    pass "4/S6-autoclean-false no DISARM fired on a false-complete park"
+  else fail "4/S6-autoclean-false unexpected DISARM" "$(audit_of)"; fi
+}
+S6_autoclean_false
+
+echo "=== 4/S6-dedupe-drive: two AUTO tui-less goals sharing one SESSION_ID → exactly one drive + one SKIP-SID-DEDUPE ==="
+S6_dedupe_drive() {
+  new_home
+  local cwd; cwd=$(ladder_cwd dd6)
+  arm_goal gdd61 4 "$cwd" sid-dd6-shared 2147483647 300 user   # DEAD (registry absent → tui-less)
+  arm_goal gdd62 4 "$cwd" sid-dd6-shared 2147483647 300 user   # same sid — a shared-session double-registration
+  stub_registry_state absent
+  plant_baton gdd61 "next"
+  plant_baton gdd62 "next"
+  run_poker
+  assert_eq "4/S6-dedupe-drive exactly one poke reached the shared sid this poll" "1" \
+    "$(count_lines "$(claude_calls)" "resume sid-dd6-shared")"
+  assert_eq "4/S6-dedupe-drive exactly one SKIP-SID-DEDUPE audit line" "1" \
+    "$(count_lines "$(audit_of)" "SKIP-SID-DEDUPE")"
+  assert_contains "4/S6-dedupe-drive the SECOND goal (gdd62, lexically later) is the one deduped" \
+    "gdd62 SKIP-SID-DEDUPE" "$(audit_of)"
+}
+S6_dedupe_drive
+
+echo "=== 4/S6-dedupe-notify-exempt: first goal only NOTIFIES (GATED) → never consumes the dedupe slot; second still drives ==="
+S6_dedupe_notify_exempt() {
+  new_home
+  local cwd; cwd=$(ladder_cwd de6)
+  arm_goal gde61 4 "$cwd" sid-de6-shared 2147483647 300 user 1   # wake=1 → GATED (notify-only, never ladders)
+  arm_goal gde62 4 "$cwd" sid-de6-shared 2147483647 300 user     # same sid — DEAD, tui-less, drive-eligible
+  stub_registry_state absent
+  plant_baton gde62 "next"
+  run_poker
+  assert_eq "4/S6-dedupe-notify-exempt the drive-eligible goal still pokes (GATED notify never consumed the slot)" "1" \
+    "$(count_lines "$(claude_calls)" "resume sid-de6-shared")"
+  TOTAL=$((TOTAL + 1))
+  if ! printf '%s' "$(audit_of)" | grep -q "SKIP-SID-DEDUPE"; then
+    pass "4/S6-dedupe-notify-exempt no SKIP-SID-DEDUPE fired (only one drive-eligible goal reached this poll)"
+  else fail "4/S6-dedupe-notify-exempt unexpected dedupe line" "$(audit_of)"; fi
+}
+S6_dedupe_notify_exempt
 
 # ============================================================
 echo ""
