@@ -3491,15 +3491,26 @@ ac_s1_arm_refusals() {
   assert_contains "arm off-enum watchdog → defect on stderr" "defect:" "$err"
   assert_true "arm off-enum watchdog → no record" test ! -e "$(goals_reg badka)"
 
-  # --- malformed frontmatter: off-enum pilot (no override) → refuse ---
+  # --- malformed frontmatter: off-enum pilot → refuse (no positional override exists) ---
   plan="$HOME/plans/badpilot.plan.md"; write_plan "$plan" wave on SEMI
   err=$(sdlc_arm "$plan" 2>&1 1>/dev/null); rc=$?
-  assert_nonzero "arm off-enum pilot (no override) → nonzero" "$rc"
+  assert_nonzero "arm off-enum pilot → nonzero" "$rc"
   assert_true "arm off-enum pilot → no record" test ! -e "$(goals_reg badpilot)"
-  # an explicit pilot-override bypasses the unreadable plan pilot (still armable)
-  out=$(sdlc_arm "$plan" auto 2>/dev/null); rc=$?
-  assert_eq "arm off-enum pilot WITH override → rc 0" "0" "$rc"
-  assert_contains "override → audit pilot=auto" "badpilot ARM $plan pilot=auto" "$(cat "$(poker_audit)")"
+
+  # --- F3 (6/critic-fix): pilot is FRONTMATTER-AUTHORITATIVE — a positional pilot
+  #     override is REJECTED (rc 2, no record), never a bypass; the plan is edited
+  #     instead. --force stays the sole flag arg. The audit always logs the
+  #     EFFECTIVE (frontmatter) pilot on a clean arm. ---
+  plan="$HOME/plans/okpilot.plan.md"; write_plan "$plan" wave on manual
+  err=$(sdlc_arm "$plan" auto 2>&1 1>/dev/null); rc=$?
+  assert_eq "F3 positional pilot override → rc 2" "2" "$rc"
+  assert_contains "F3 rejection names the frontmatter source" "pilot comes from plan frontmatter" "$err"
+  assert_true "F3 override rejection writes NO record" test ! -e "$(goals_reg okpilot)"
+  err=$(sdlc_arm "$plan" manual 2>&1 1>/dev/null); rc=$?
+  assert_eq "F3 override rejected even when it AGREES with the frontmatter (single source of truth)" "2" "$rc"
+  out=$(sdlc_arm "$plan" 2>/dev/null); rc=$?
+  assert_eq "F3 clean arm (no override) → rc 0" "0" "$rc"
+  assert_contains "F3 audit logs the EFFECTIVE (frontmatter) pilot" "okpilot ARM $plan pilot=manual" "$(cat "$(poker_audit)")"
 
   # --- collision: existing record, different PLAN → refuse, record intact ---
   new_state_dir
