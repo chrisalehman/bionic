@@ -717,15 +717,19 @@ p4() {
   # status null (NOSTATUS) = a headless in-flight vehicle (tui-less), the ONLY
   # WEDGED shape the machine may act on. No baton planted → the legacy WEDGE
   # notification path (a real restart needs the ladder + baton).
-  arm_goal aw4 4 "$cwd" sid-w4 31337 1000 busy  # WEDGED (primed+corroborated), known pid for recovery string
-  stub_registry_state nostatus sid-w4
+  # record PID 31337 is the frozen arm-time pid; the LIVE registry entry carries
+  # pid 4242 (the nostatus stub). F5 (6/critic-fix): recovery targets the LIVE pid.
+  arm_goal aw4 4 "$cwd" sid-w4 31337 1000 busy  # WEDGED (primed+corroborated)
+  stub_registry_state nostatus sid-w4           # live registry pid = 4242
   prime_wedged aw4 0
   export SDLC_WEDGE_CPU_FAKE=0
   run_poker
   unset SDLC_WEDGE_CPU_FAKE
   assert_contains "4/2-4 WEDGE curl Title" "Title: aw4: WEDGE" "$(curl_calls)"
-  assert_contains "4/2-4 WEDGE body carries recovery command verbatim" \
-    "kill 31337 && cd $cwd && claude --resume sid-w4" "$(curl_calls)"
+  # F5 migration (premise updated, intent preserved): recovery carries the LIVE
+  # registry pid (4242), never the frozen record PID (31337).
+  assert_contains "4/2-4 WEDGE body carries recovery command with the LIVE pid verbatim" \
+    "kill 4242 && cd $cwd && claude --resume sid-w4" "$(curl_calls)"
 }
 p4
 
@@ -2612,6 +2616,53 @@ S7_reprompt_scrub() {
   assert_contains "4/S7-reprompt negative-control var still reached the children" "present" "$(claude_control)"
 }
 S7_reprompt_scrub
+
+echo "=== 6/critic-fix F5: wedge + recovery target the LIVE registry pid, not the frozen record PID ==="
+F5_live_pid() {
+  # --- reg_live_pid: sid-keyed EQUALITY resolution (the shared canonical path;
+  #     the same select(.sessionId==$sid) the classify/presence readers use) ---
+  local J='[{"pid":5150,"sessionId":"sid-live","status":"busy"},{"pid":99,"sessionId":"other"}]'
+  assert_eq "F5 reg_live_pid resolves the sid's pid by equality" "5150" "$(reg_live_pid "$J" sid-live 0)"
+  assert_eq "F5 reg_live_pid empty when the sid is absent" "" "$(reg_live_pid "$J" nope 0)"
+  assert_eq "F5 reg_live_pid empty when the registry rc is nonzero" "" "$(reg_live_pid "$J" sid-live 1)"
+  # a sid surfacing ONLY as parentSessionId must NOT resolve (equality, not substring)
+  local JP='[{"pid":7,"sessionId":"child","parentSessionId":"sid-live","status":"busy"}]'
+  assert_eq "F5 reg_live_pid ignores a sid that is only a parentSessionId" "" "$(reg_live_pid "$JP" sid-live 0)"
+
+  # --- wedge_corroborated reads the LIVE pid: a DEAD record PID + a LIVE registry
+  #     pid must STILL corroborate. Pre-fix it read the frozen REG_PID (the recycled
+  #     arm-time bash-tool shell) → wedge_cputime rc1 → observation reset EVERY poll →
+  #     WEDGED structurally unreachable for lib-armed goals. ---
+  new_home
+  local cwd; cwd=$(real_cwd f5w)
+  arm_goal g5w 4 "$cwd" sid-5w 2147483647 1000 busy      # REG_PID = a guaranteed-DEAD pid
+  sleep 300 & local livepid=$!                            # a real, flat-low-cputime LIVE process
+  f5_poll() { load_registration g5w >/dev/null 2>&1; REG_LIVE_PID="$livepid" wedge_corroborated g5w; }
+  f5_poll >/dev/null 2>&1
+  assert_eq "F5 poll1 baseline established (LIVE pid readable → count=1, NOT a reset)" "1" "$(wedge_count_of g5w)"
+  f5_poll >/dev/null 2>&1
+  local rc; f5_poll >/dev/null 2>&1; rc=$?
+  assert_eq "F5 poll3 CORROBORATED (rc0) — proves the LIVE registry pid was read, not the dead record PID" "0" "$rc"
+  kill "$livepid" 2>/dev/null
+
+  # --- recovery_cmd emits the LIVE registry pid, never the frozen record PID, and
+  #     OMITS the kill clause entirely when the live pid is unresolvable (never
+  #     hand a human a wrong pid to kill). ---
+  new_home
+  local cwd2; cwd2=$(real_cwd f5r)
+  arm_goal g5r 4 "$cwd2" sid-5r 31337 1000 busy           # record PID 31337 (frozen/wrong)
+  load_registration g5r >/dev/null 2>&1
+  REG_LIVE_PID=4242                                        # live registry pid ≠ the record's 31337
+  assert_contains "F5 recovery_cmd uses the LIVE registry pid" \
+    "kill 4242 && cd $cwd2 && claude --resume sid-5r" "$(recovery_cmd)"
+  assert_true "F5 recovery_cmd never emits the frozen record PID" \
+    test -z "$(recovery_cmd | grep -F 'kill 31337')"
+  REG_LIVE_PID=""                                          # unresolvable → omit the kill clause
+  assert_eq "F5 recovery_cmd omits the kill clause when the live pid is unresolvable" \
+    "cd $cwd2 && claude --resume sid-5r" "$(recovery_cmd)"
+  REG_LIVE_PID=""
+}
+F5_live_pid
 
 # ============================================================
 echo ""
