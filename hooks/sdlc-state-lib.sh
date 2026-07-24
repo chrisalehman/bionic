@@ -2222,7 +2222,7 @@ _sdlc_reg_val() {
 # RESTART-ABORT; the intent stands, so the ladder parks GATED next poll).
 _sdlc_restart_body() {
   local goal_id="$1" anchor="$2" n="$3" cwd="$4" sid="$5" pid="$6"
-  local snaprc reg_out status killed=0 tries delay i gone spawn_out spawn_rc
+  local snaprc reg_out status kpid killed=0 tries delay i gone spawn_out spawn_rc
 
   # (b) WIP snapshot BEFORE any kill — a clean tree is `none` (rc 0); only a hard
   #     failure (not-a-repo / snapshot-failed) aborts, before any kill, so no work
@@ -2252,8 +2252,21 @@ _sdlc_restart_body() {
       _sdlc_audit "$goal_id" RESTART-ABORT "kill FORBIDDEN: sid=$sid status=$status (live terminal / unconfirmable); no kill, no spawn (rung=$n)"
       return 1
     fi
-    # tui-less → SIGTERM via the seam, then bounded re-poll until registry-absent.
-    ${SDLC_KILL_CMD:-kill} "$pid" >/dev/null 2>&1 || true
+    # tui-less → SIGTERM the pid the REGISTRY reports for THIS sid (F1, Step-6
+    # critic fix): the record's PID is arm-time telemetry only — on the shipped
+    # arming paths it is the transient Bash-tool shell that armed the goal, never
+    # the vehicle process, so trusting it kills the wrong pid (or nothing). The
+    # live registry payload is the sole kill target. jq is guaranteed present here
+    # (the status branch above already required it). Sid registry-present but pid
+    # unresolvable → fail-closed RESTART-ABORT: never fall back to the record PID,
+    # never SIGTERM a pid we cannot tie to this live vehicle.
+    kpid="$(printf '%s' "$reg_out" | jq -r --arg sid "$sid" \
+      '[.[] | select(.sessionId==$sid)][0] | .pid // empty' 2>/dev/null)"
+    if ! printf '%s' "$kpid" | grep -qE '^[0-9]+$'; then
+      _sdlc_audit "$goal_id" RESTART-ABORT "registry pid unresolvable for sid=$sid (present, status NULL); no kill, no spawn (rung=$n)"
+      return 1
+    fi
+    ${SDLC_KILL_CMD:-kill} "$kpid" >/dev/null 2>&1 || true
     tries="${SDLC_RESTART_KILL_TRIES:-6}"; delay="${SDLC_RESTART_KILL_DELAY:-2}"; gone=0
     for (( i = 1; i <= tries; i++ )); do
       reg_out="$(${SDLC_REGISTRY_CMD:-claude agents --json} 2>/dev/null)"
@@ -2261,7 +2274,7 @@ _sdlc_restart_body() {
       [ "$delay" -gt 0 ] && sleep "$delay"
     done
     if [ "$gone" -ne 1 ]; then
-      _sdlc_audit "$goal_id" RESTART-ABORT "vehicle sid=$sid pid=$pid did not die within ${tries} polls; no spawn (rung=$n)"
+      _sdlc_audit "$goal_id" RESTART-ABORT "vehicle sid=$sid kill_pid=$kpid did not die within ${tries} polls; no spawn (rung=$n)"
       return 1
     fi
     killed=1
@@ -2274,7 +2287,7 @@ _sdlc_restart_body() {
     _sdlc_audit "$goal_id" RESTART-ABORT "successor spawn refused (rc=$spawn_rc) after kill=$killed; no restart effect (rung=$n)"
     return 1
   fi
-  _sdlc_audit "$goal_id" RESTART "sid=$sid rung=$n killed=$killed successor=$spawn_out (anchor $anchor)"
+  _sdlc_audit "$goal_id" RESTART "sid=$sid rung=$n killed=$killed rec_pid=$pid kill_pid=${kpid:-none} successor=$spawn_out (anchor $anchor)"
   return 0
 }
 

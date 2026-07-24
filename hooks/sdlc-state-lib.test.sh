@@ -3644,6 +3644,9 @@ plant_restart_reg() {
 reg_present_null() { printf '[{"pid":%s,"kind":"interactive","sessionId":"%s"}]\n' "$2" "$1"; }
 reg_present_busy() { printf '[{"pid":%s,"kind":"interactive","sessionId":"%s","status":"busy"}]\n' "$2" "$1"; }
 reg_absent()       { printf '[{"pid":1,"kind":"interactive","sessionId":"decoy","status":"idle"}]\n'; }
+# F1 (6/critic-fix): a present + status-NULL entry that carries NO pid field — the
+# kill target is unresolvable from the registry (fail-closed, never fall back to record).
+reg_present_null_nopid() { printf '[{"kind":"interactive","sessionId":"%s"}]\n' "$1"; }
 restart_audit()    { cat "$(poker_audit)" 2>/dev/null; }
 
 # --- CASE 1: ORDERING — intent-journal precedes snapshot precedes SIGTERM precedes spawn ---
@@ -3761,6 +3764,63 @@ ac_restart_dead_skips_kill() {
   assert_contains "4/S5 DEAD vehicle RESTART audited killed=0" "killed=0" "$(restart_audit)"
 }
 ac_restart_dead_skips_kill
+
+# --- F1 (6/critic-fix) CASE A: the SIGTERM targets the REGISTRY's pid for this sid,
+#     NOT the frozen arm-time record PID. The record carries a bogus 999999 (on
+#     shipped arming paths the record PID is the transient Bash-tool shell, never
+#     the vehicle); the live registry carries the real specimen pid. The kill seam
+#     MUST receive the registry pid. (Fails on pre-fix code: it kills $pid=999999.)
+ac_restart_kill_by_registry_pid() {
+  new_state_dir
+  local gid="restart-regpid" a="$RESTART_ANCHOR" sid="sid-restart-regpid" rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  local -x GIT_AUTHOR_DATE="@1700000000 +0000" GIT_COMMITTER_DATE="@1700000000 +0000"
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  printf 'uncommitted\n' > "$d/wip-scratch.txt"
+  local snap; snap="$(sdlc_wip_snapshot "$gid" "$d")"
+  write_complete_baton "$gid" "$d" 4 "$snap"
+  plant_restart_reg "$gid" "$d" "$sid" 999999            # record PID bogus (arm-time telemetry)
+  local order counter regf absentf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); absentf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$absentf")
+  reg_present_null "$sid" 313131 > "$regf"; reg_absent > "$absentf"   # REGISTRY pid = the real vehicle
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" yes)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_eq "F1 kill-by-registry-pid restart exits 0" "0" "$rc"
+  assert_contains "F1 SIGTERM went to the REGISTRY pid (313131), not the record PID" "kill 313131" "$(cat "$order")"
+  assert_true "F1 the bogus record PID (999999) was NEVER the kill target" \
+    test -z "$(grep -F 'kill 999999' "$order" 2>/dev/null)"
+  assert_eq "F1 successor spawned after the registry-pid kill" "1" "$(spawn_counter "$counter")"
+}
+ac_restart_kill_by_registry_pid
+
+# --- F1 (6/critic-fix) CASE B: sid registry-present + status NULL but the entry
+#     carries NO pid → the kill target is UNRESOLVABLE → RESTART-ABORT, no kill,
+#     no spawn (fail-closed; never fall back to the record PID).
+ac_restart_pid_unresolvable_aborts() {
+  new_state_dir
+  local gid="restart-nopid" a="$RESTART_ANCHOR" sid="sid-restart-nopid" rc
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  setup_complete "$gid" 4 no; local d="$REPO_DIR"
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "$sid" 999999
+  local order counter regf absentf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); absentf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$absentf")
+  reg_present_null_nopid "$sid" > "$regf"; reg_absent > "$absentf"   # present, status NULL, NO pid
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" yes)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_nonzero "F1 pid-unresolvable restart returns nonzero" "$rc"
+  assert_true "F1 pid-unresolvable → the kill seam was NEVER invoked" \
+    test -z "$(grep -c kill "$order" 2>/dev/null | grep -v '^0$')"
+  assert_eq "F1 pid-unresolvable → NO successor spawned" "0" "$(spawn_counter "$counter")"
+  assert_contains "F1 pid-unresolvable → RESTART-ABORT audited" "RESTART-ABORT" "$(restart_audit)"
+}
+ac_restart_pid_unresolvable_aborts
 
 # --- 4/S7: sdlc_restart_vehicle's spawn leg reaches the env scrub (it calls the
 #     UNCHANGED sdlc_successor_spawn — this proves the scrub reaches it THROUGH
