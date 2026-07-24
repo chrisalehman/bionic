@@ -3822,6 +3822,71 @@ ac_restart_pid_unresolvable_aborts() {
 }
 ac_restart_pid_unresolvable_aborts
 
+# --- F2 (6/critic-fix) CASE A: sdlc_successor_spawn rewrites the consent record's
+#     SESSION_ID to the freshly-minted successor sid (the record FOLLOWS the vehicle
+#     chain), preserving PLAN/CWD/ARMED_AT. On pre-fix code the record keeps the DEAD
+#     predecessor sid → the poker classifies the turned-over goal permanently DEAD.
+ac_spawn_record_follows_vehicle() {
+  new_state_dir
+  local gid="spawn-follow" d counter out rc newsid rec
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD
+  setup_complete "$gid" 4 no; d="$REPO_DIR"           # current 4 → benign not-complete → spawn proceeds
+  write_complete_baton "$gid" "$d" 4 none
+  plant_restart_reg "$gid" "$d" "old-sid-predecessor" 999999   # consent record with the OLD sid
+  rec="$HOME/.claude/sdlc-goals/$gid"
+  counter=$(mktemp); CLEAN_DIRS+=("$counter"); : > "$counter"
+  SDLC_SPAWN_CMD="$(make_spawn_stub "$counter")"
+  SDLC_REGISTRY_CMD="$(make_registry_stub '{"sessions":[]}')"
+  out="$(sdlc_successor_spawn "$gid" "$d" 2>/dev/null)"; rc=$?
+  newsid="$out"
+  assert_eq "F2 successor spawn exits 0" "0" "$rc"
+  assert_eq "F2 consent record SESSION_ID now equals the successor sid" "$newsid" "$(_sdlc_reg_val "$rec" SESSION_ID)"
+  assert_true "F2 record no longer carries the dead predecessor sid" \
+    test "$(_sdlc_reg_val "$rec" SESSION_ID)" != "old-sid-predecessor"
+  assert_eq "F2 record PLAN preserved across the follow" "$PLAN_STUB" "$(_sdlc_reg_val "$rec" PLAN)"
+  assert_eq "F2 record CWD preserved across the follow" "$d" "$(_sdlc_reg_val "$rec" CWD)"
+  assert_eq "F2 record ARMED_AT preserved across the follow" "2026-07-23T00:00:00Z" "$(_sdlc_reg_val "$rec" ARMED_AT)"
+  # The record stays a complete 5-field record — PID is NEVER blanked (the poker's
+  # load_registration requires every field non-empty); the child pid was unknowable
+  # so the prior pid is carried forward as best-effort telemetry (F1 owns the kill).
+  assert_true "F2 record PID stays non-empty (5-field contract preserved)" \
+    test -n "$(_sdlc_reg_val "$rec" PID)"
+}
+ac_spawn_record_follows_vehicle
+
+# --- F2 (6/critic-fix) CASE B: the follow applies TRANSITIVELY through the restart
+#     leg — sdlc_restart_vehicle's spawn calls sdlc_successor_spawn, so a DEAD-vehicle
+#     restart also re-seats the record's SESSION_ID onto the fresh successor.
+ac_restart_record_follows_vehicle() {
+  new_state_dir
+  local gid="restart-follow" a="$RESTART_ANCHOR" sid="sid-restart-follow" rc snap rec newsid
+  local SDLC_SPAWN_CMD SDLC_REGISTRY_CMD SDLC_KILL_CMD SDLC_RESTART_KILL_DELAY=0
+  local -x GIT_AUTHOR_DATE="@1700000000 +0000" GIT_COMMITTER_DATE="@1700000000 +0000"
+  setup_complete "$gid" 4 no; d="$REPO_DIR"
+  printf 'uncommitted\n' > "$d/wip-scratch.txt"
+  snap="$(sdlc_wip_snapshot "$gid" "$d")"
+  write_complete_baton "$gid" "$d" 4 "$snap"
+  plant_restart_reg "$gid" "$d" "$sid" 999996
+  rec="$HOME/.claude/sdlc-goals/$gid"
+  local order counter regf absentf
+  order=$(mktemp); counter=$(mktemp); regf=$(mktemp); absentf=$(mktemp)
+  CLEAN_DIRS+=("$order" "$counter" "$regf" "$absentf")
+  reg_absent > "$regf"; reg_absent > "$absentf"        # sid absent → DEAD, kill skipped, spawn proceeds
+  SDLC_REGISTRY_CMD="cat $regf"
+  SDLC_KILL_CMD="$(make_kill_stub "$order" "$regf" "$absentf" "$d" "$gid" no)"
+  SDLC_SPAWN_CMD="$(make_spawn_stub_ordered "$counter" "$order")"
+  sdlc_restart_vehicle "$gid" "$a" >/dev/null 2>&1; rc=$?
+  assert_eq "F2 restart-leg exits 0" "0" "$rc"
+  newsid="$(_sdlc_reg_val "$rec" SESSION_ID)"
+  assert_true "F2 restart-leg re-seated the record onto a fresh uuid successor sid" \
+    test "$newsid" != "$sid"
+  TOTAL=$((TOTAL + 1))
+  if printf '%s' "$newsid" | grep -qE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
+    pass "F2 restart-leg record SESSION_ID is the successor's minted uuid"
+  else fail "F2 restart-leg record SESSION_ID is the successor's minted uuid" "got: $newsid"; fi
+}
+ac_restart_record_follows_vehicle
+
 # --- 4/S7: sdlc_restart_vehicle's spawn leg reaches the env scrub (it calls the
 #     UNCHANGED sdlc_successor_spawn — this proves the scrub reaches it THROUGH
 #     that call, not merely that sdlc_successor_spawn scrubs in isolation) ---

@@ -1478,6 +1478,42 @@ _sdlc_spawn_defect_class() {
   printf '%s' "$1" | sed -n 's/^defect: \([^:]*\):.*/\1/p' | head -1
 }
 
+# _sdlc_record_follow <goal-id> <new-sid> [<new-pid>] — re-seat the consent record's
+# SESSION_ID onto a freshly-spawned successor so the record FOLLOWS the vehicle chain
+# (F2, Step-6 critic fix). Without this the record keeps the dead predecessor's sid
+# forever: the poker then classifies the turned-over goal DEAD on every poll (the
+# live successor's sid is registry-present but never consulted), the WEDGED rung is
+# unreachable, and a goal-owned rollover self-refuses. PLAN/CWD/ARMED_AT are preserved
+# verbatim; the write is atomic (tmp+mv, the sdlc_arm idiom). No consent record (a
+# headless caller with no registration) → a clean no-op.
+#
+# PID: the detached launch (`( cmd & )`) and the synchronous fixture stub both hide
+# the child pid, so it is rarely knowable — passed non-empty it is written, else the
+# record's EXISTING pid is carried forward (never blanked). The record stays a
+# complete 5-field record (the poker's load_registration requires every field
+# non-empty); the pid is best-effort telemetry only — F1 resolves the real kill
+# target from the live registry, so a stale pid here is never acted on.
+_sdlc_record_follow() {
+  local gid="$1" newsid="$2" newpid="${3:-}" dir rec tmp plan cwd pid armed
+  dir="$(_sdlc_goals_dir)"; rec="$dir/$gid"
+  [ -f "$rec" ] || return 0
+  plan="$(grep -E '^PLAN=' "$rec" 2>/dev/null | head -1 | sed -E 's/^PLAN=//')"
+  cwd="$(grep -E '^CWD=' "$rec" 2>/dev/null | head -1 | sed -E 's/^CWD=//')"
+  pid="$(grep -E '^PID=' "$rec" 2>/dev/null | head -1 | sed -E 's/^PID=//')"
+  armed="$(grep -E '^ARMED_AT=' "$rec" 2>/dev/null | head -1 | sed -E 's/^ARMED_AT=//')"
+  [ -n "$newpid" ] && pid="$newpid"
+  tmp="$(mktemp "$dir/.follow.$gid.XXXXXX" 2>/dev/null)" || return 0
+  {
+    printf 'PLAN=%s\n' "$plan"
+    printf 'CWD=%s\n' "$cwd"
+    printf 'SESSION_ID=%s\n' "$newsid"
+    printf 'PID=%s\n' "$pid"
+    printf 'ARMED_AT=%s\n' "$armed"
+  } > "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 0; }
+  mv -f "$tmp" "$rec" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 0; }
+  return 0
+}
+
 # sdlc_successor_spawn <goal-id> [dir]  (dir default $PWD, the goal's repo)
 # Env seams (AS-N2, fixtures only; T3 runs both defaults real):
 #   SDLC_SPAWN_CMD    — the complete spawn command, word-split on IFS (default:
@@ -1656,6 +1692,12 @@ sdlc_successor_spawn() {
     sdlc_gate_park "$goal_id" "$plan_path" "$sclass" "$spawn_err"
     return 1
   fi
+
+  # F2 (Step-6 critic fix): the consent record follows the vehicle chain — re-seat
+  # its SESSION_ID onto this fresh successor so the poker classifies the LIVE
+  # successor rather than the dead predecessor sid. PID left empty (the detached
+  # launch does not expose $!; F1 resolves the kill target from the live registry).
+  _sdlc_record_follow "$goal_id" "$sid" ""
 
   # 8. success — the fresh sid is the caller/N4 handle.
   echo "$sid"

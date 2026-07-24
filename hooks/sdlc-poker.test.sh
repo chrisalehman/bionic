@@ -1718,6 +1718,32 @@ H2() {
 }
 H2
 
+# ---------- F2 (6/critic-fix): the consent record follows the vehicle chain ----------
+echo "=== 4/5-F2-turnover-busy: after a turnover the record SESSION_ID follows the successor; new-sid present-busy classifies BUSY, not the dead-predecessor DEAD ==="
+F2TB() {
+  new_home
+  arm_rollover gf2
+  stub_registry_state absent                     # single-writer: no live owner → the rollover spawn proceeds
+  setup_spawn_stub
+  run_poker                                       # poll1: rollover spawns; sdlc_successor_spawn re-seats the record onto the successor
+  unset_spawn_stub
+  assert_eq "4/5-F2 poll1 spawned once" "1" "$(spawn_count)"
+  # The successor's real sid is journaled in the spawn effect line (present pre- AND
+  # post-fix); the RECORD only carries it AFTER F2's follow.
+  local sucsid; sucsid=$(awk -F'\t' '$4=="effect" && $5 ~ /^spawn:gf2:/{print $6}' "$(ledger_path gf2)" \
+    | sed -n 's/.*sid=\([0-9a-f-]*\).*/\1/p' | tail -1)
+  assert_true "4/5-F2 a successor sid was journaled" test -n "$sucsid"
+  assert_eq "4/5-F2 consent record SESSION_ID now equals the successor sid (record follows the vehicle)" \
+    "$sucsid" "$(reg_val "$HOME/.claude/sdlc-goals/gf2" SESSION_ID)"
+  # Registry: the OLD predecessor sid is absent, the successor is present + busy.
+  # A fresh recent transcript for the successor keeps the BUSY read clean (no wedge).
+  plant_transcript_age "$ROLL_CWD" "$sucsid" 10 busy
+  stub_registry_state busy "$sucsid"
+  assert_eq "4/5-F2 classify sees the LIVE successor as BUSY (pre-fix: predecessor absent → DEAD forever)" \
+    "BUSY" "$(classify_goal gf2)"
+}
+F2TB
+
 # ---------- completion latch (deliverable c, D-C6) ----------
 echo "=== 4/5-complete-genuine: genuinely-merged COMPLETE → complete: latched EXACTLY once across two polls + notify once ==="
 C1() {
