@@ -27,7 +27,7 @@ Most AI tooling demos show a single agent completing a single task. That's the "
 
 **Subagent SDLC Pipeline (superpowers)** — A complementary, lighter-weight lifecycle from the superpowers plugin: brainstorm → design decisions with explicit tradeoff analysis → implementation plan → TDD → parallel execution → code review. Surfaces architectural *decisions* rather than burying them in generated code. Use this for one-off changes; use canonical-sdlc when the work is wave-sized and worth the audit trail.
 
-**Domain Specialists on Demand** — 100+ voltagent specialists: Kubernetes debugger, PostgreSQL optimizer, security auditor, Terraform engineer, Rust systems programmer. The problems this unlocks: harden your auth layer, optimize a critical query path, untangle a Helm chart, and audit your IAM policies — simultaneously, in a single session. You don't need to be an expert in every domain. You dispatch one.
+**Domain Specialists on Demand** *(opt-in profile)* — 100+ voltagent specialists: Kubernetes debugger, PostgreSQL optimizer, security auditor, Terraform engineer, Rust systems programmer. The problems this unlocks: harden your auth layer, optimize a critical query path, untangle a Helm chart, and audit your IAM policies — simultaneously, in a single session. You don't need to be an expert in every domain. You dispatch one. These packs moved out of core in favour of an explicit opt-in — see [Domain Specialists](#domain-specialists-voltagent--opt-in) for the cost that drove it and the one command that installs them.
 
 **Autonomous Debug Cycles** — A closed feedback loop: test → analyze → hypothesize → fix → build → redeploy → validate with Playwright against a running application. This is a control system, not a suggestion engine. The agent doesn't propose a fix and wait — it executes, observes, and iterates until the test passes or escalates. You come back to a resolved issue, not a diagnostic report.
 
@@ -60,7 +60,7 @@ The **core profile** lives in [`claude-config.txt`](claude-config.txt) — edit 
 |----------|------|
 | **CLI tools** | git, node, pnpm, gh, jq, ripgrep, uv, docker, yq, aws, gcloud *(cask)*, @playwright/cli, @pencil.dev/cli, notebooklm *(via uv)* |
 | **Plugins** | superpowers, agent-skills, document-skills, example-skills, frontend-design |
-| **Subagents** | voltagent-core-dev, voltagent-lang, voltagent-infra, voltagent-qa-sec, voltagent-data-ai, voltagent-dev-exp, voltagent-meta |
+| **Subagent roles** | implementor, senior-implementor, researcher, auditor, critic, test-runner — bionic's own hand-written roles, carrying the invariant duties canonical-sdlc dispatches against *(the seven voltagent packs are opt-in: see below)* |
 | **MCP servers** | context7, chrome-devtools *(Pencil's MCP server self-registers whenever the Pencil app is running — no config entry needed)* |
 | **Skills** | **bionic:canonical-sdlc** (flagship — 11-step autonomous lifecycle), bionic:browser-verify, bionic:rigorous-refactor, bionic:ralph-loop, bionic:map-instrument-narrow, bionic:skill-factory, excalidraw-diagram, humanizer, notebooklm, impeccable (20+ design skills) |
 | **Hooks** | protect-main.sh, protect-database.sh, memory-cleanup.sh, terseness-reminder.sh, **canonical-sdlc-evidence-gate.sh**, **canonical-sdlc-governing-skill.sh** |
@@ -200,12 +200,14 @@ Why @sentry/mcp-server: Official Sentry MCP server maintained by the Sentry core
 
 ### Plugins & Subagents
 
-Plugins extend Claude Code with additional skills and agent types. Installed via `claude plugin install` from four marketplaces.
+Plugins extend Claude Code with additional skills and agent types. Installed via `claude plugin install`.
 
-**Marketplaces** — Where plugins are sourced from:
+**Marketplaces (core)** — Where plugins are sourced from:
 - `anthropics/skills` — Anthropic's official skill marketplace
-- `VoltAgent/awesome-claude-code-subagents` — Community subagent collection
 - `addyosmani/agent-skills` — Addy Osmani's production-grade SDLC skills marketplace
+
+**Marketplaces (opt-in, `claude-config.everything.txt`)**:
+- `VoltAgent/awesome-claude-code-subagents` — Community subagent collection
 
 #### SDLC Pipeline
 
@@ -239,9 +241,21 @@ Design-quality frontend generation is provided by the **impeccable** skill pack 
 
 **example-skills** (`anthropic-agent-skills`) — Reference implementations of the document-skills. Included as working examples you can study or modify.
 
-#### Domain Specialists (VoltAgent)
+#### Domain Specialists (VoltAgent) — opt-in
 
 Seven subagent packs providing 100+ specialist agents. These are dispatched via the `Agent` tool with a `subagent_type` parameter — Claude selects the right specialist based on the task. Each agent gets its own context window and tool access.
+
+**Not in core — install deliberately:**
+
+```bash
+./claude-bootstrap.sh claude-config.everything.txt
+```
+
+Why they were demoted: the packs ship 108 agent definition files whose `description:` lines total roughly 21.8k characters — about **5.4k tokens loaded into every session's system prompt**, whether or not a single one is dispatched. That is a standing tax paid by every session to keep a catalog browsable. They failed the core membership test (*"removing this would change what Bionic is"*), so they moved to the opt-in profile where the cost is chosen rather than inherited. Take them when you actually dispatch specialists; leave them when you don't.
+
+Core instead ships six hand-written roles — `implementor`, `senior-implementor`, `researcher`, `auditor`, `critic`, `test-runner` — which carry the invariant duties canonical-sdlc's dispatch convention depends on (TDD rhythm, evidence-not-payloads, the verbatim Auditor Mandate). Those cover the lifecycle; the voltagent catalog covers domain breadth.
+
+> **Uninstall caveat.** `claude-bootstrap.sh` installs plugins but never prunes them, and `claude-reset.sh` discovers what to uninstall *by reading the config*. So removing an entry from a profile does **not** uninstall an already-installed plugin — it strands it. If you previously installed these packs and want the context back, uninstall them explicitly before relying on the config change.
 
 | Pack | Config | What it covers |
 |------|--------|----------------|
