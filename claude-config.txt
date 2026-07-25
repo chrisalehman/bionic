@@ -70,7 +70,7 @@ pnpm-store   | motion
 
 # ─── Marketplaces & Plugins ─────────────────────────────────────────────────
 marketplace  | anthropics/skills
-marketplace  | VoltAgent/awesome-claude-code-subagents
+# marketplace  | VoltAgent/awesome-claude-code-subagents  # demoted to the everything profile (epic-11 W1)
 # marketplace  | nextlevelbuilder/ui-ux-pro-max-skill   # disabled: superseded by impeccable (see ADR / README)
 marketplace  | addyosmani/agent-skills
 
@@ -80,13 +80,13 @@ plugin       | frontend-design     | claude-plugins-official
 plugin       | document-skills     | anthropic-agent-skills
 plugin       | example-skills      | anthropic-agent-skills
 # plugin       | ui-ux-pro-max       | ui-ux-pro-max-skill       # disabled: trust issues on paid tier + superseded by impeccable
-plugin       | voltagent-core-dev  | voltagent-subagents
-plugin       | voltagent-lang      | voltagent-subagents
-plugin       | voltagent-infra     | voltagent-subagents
-plugin       | voltagent-qa-sec    | voltagent-subagents
-plugin       | voltagent-data-ai   | voltagent-subagents
-plugin       | voltagent-dev-exp   | voltagent-subagents
-plugin       | voltagent-meta      | voltagent-subagents
+# The seven VoltAgent subagent packs were demoted to the everything profile in
+# epic-11 W1. Measured cost: 108 agent definition files whose `description:`
+# lines total ~21.8k characters (~5.4k tokens) loaded into EVERY session's
+# system prompt, whether or not any of them is dispatched. They failed the core
+# membership test — removing them does not change what Bionic *is*. Install
+# them deliberately with:
+#   ./claude-bootstrap.sh claude-config.everything.txt
 plugin       | agent-skills        | addy-agent-skills
 
 # ─── Skills, Commands, Memory ───────────────────────────────────────────────
