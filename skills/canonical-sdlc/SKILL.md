@@ -588,7 +588,7 @@ Mandatory for new plans (`canonical_sdlc_version: 11`, current). `3`–`10` are 
    | `language` | Repo files: `package.json` / `tsconfig.json` → `typescript`/`javascript`; `Cargo.toml` → `rust`; `go.mod` → `go`; `pyproject.toml` → `python`; etc. Default `none`. |
    | `surface_type` | Keywords: "REST endpoint" / "HTTP API" → `api`; "GraphQL" → `graphql`; "dashboard" / "page" / "component" → `ui`; "Terraform" → `iac`; "ML" / "training" → `ml`; "WebSocket" / "realtime" → `realtime`; "iOS" / "Android" → `mobile`; otherwise `system` or `none`. |
    | `has_ui` | true if "UI" / "dashboard" / "page" / "component" appears. |
-   | `multi_agent` | Heuristic: more than 3 voltagent specialties match across phases. |
+   | `multi_agent` | Default **true** — hybrid by work class is the standing operating model: research, exploration, verification and mechanical work dispatch to subagents; decisions, synthesis, and evidence the orchestrator must personally witness stay on the main thread. Infer `false` ONLY when the work is genuinely single-threaded (one trivial unit, nothing to offload). **Never key this off an installed plugin catalog** — the previous heuristic ("more than 3 voltagent specialties match") silently inferred `false` on any install without those packs, which disables the D7 dispatched-task ledger guard at `canonical-sdlc-evidence-gate.sh`'s `validate_dispatch_ledger()`. A discriminator that gates an enforcement branch must not depend on optional content. |
    | `deploy_target` | "k8s" → `k8s`; "Vercel" → `vercel`; "deploy" → `custom`; "migration" → `migration`; none → `none`. |
    | `cleanup_on_finish` | Default `true`. |
    | `use_worktree` | Default `false`. Set true on explicit user override or when user says "isolate". |
