@@ -96,7 +96,8 @@ DOCS_ROOT=$(resolve_docs_root "$PROJECT_ROOT_FROM_PATH")
 
 # Incident 0001: the audit stream must live where a consuming project cannot
 # commit it, regardless of that project's .gitignore. $HOME-rooted, per-project,
-# durable — mirroring hooks/sdlc-poker.sh:111's $HOME/.claude/ audit log.
+# durable — the same $HOME/.claude/ audit path the archived epic-10 poker used
+# (that work is recoverable at tag archive/epic-10-never-die).
 # Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
 # collision-resistant across same-named projects under different parents.
 # cksum and basename are POSIX — no new dependency.
