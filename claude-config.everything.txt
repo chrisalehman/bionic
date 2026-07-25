@@ -3,8 +3,14 @@
 #
 # This is the union of ALL optional entries Bionic knows how to install —
 # the browsable catalog, the maintainer's environment, and the config the
-# e2e tests exercise. Rule (enforced by tests/scripts.test.sh): every active
-# entry in any other profile file must also appear here.
+# e2e tests exercise. Rule: every active entry in any other profile file must
+# also appear here.
+#
+# Enforcement caveat (epic-11 W1 critic finding): tests/scripts.test.sh's
+# superset check iterates `claude-config.*.txt`, a glob that does NOT match
+# `claude-config.txt` — so CORE is never scanned and the rule is vacuous for
+# it. The disjointness check (3z) does discriminate and was mutation-proven,
+# so the direction that matters for core-vs-catalog moves is guarded.
 #
 # Same format as claude-config.txt. Reset with the same argument:
 #   ./claude-reset.sh claude-config.everything.txt
