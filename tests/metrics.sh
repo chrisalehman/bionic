@@ -49,23 +49,33 @@ measure_file() { # $1=key-prefix $2=path
 # ── AC-2: always-on session context ────────────────────────────────────────
 # VoltAgent subagent descriptions load into every session's system prompt.
 VOLT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/voltagent-subagents"
+# ENABLEMENT is the metric that matters, not disk presence. A plugin's cache
+# directory can persist long after the plugin is uninstalled — orphaned bytes
+# cost zero context. Measuring the cache is a PROXY that cannot see the thing
+# this wave claims: whether the descriptions still load into the system prompt.
+# (Found the hard way, epic-11 W1: after a real uninstall the cache-based
+# metrics still reported 108/101/20464 for packs that were already gone.)
+SETTINGS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+if [ -f "$SETTINGS" ]; then
+  emit voltagent.enabled_plugins \
+    "$(grep -o '"voltagent-[a-z-]*@[^"]*": *true' "$SETTINGS" 2>/dev/null | wc -l | tr -d ' ')" plugins
+else
+  emit voltagent.enabled_plugins n/a plugins
+fi
+
+# Cache-on-disk, retained ONLY as a housekeeping signal. These are NOT the
+# context cost — an enabled_plugins of 0 means zero tokens regardless of what
+# these report. Never cite them as evidence of a context reduction.
 if [ -d "$VOLT" ]; then
-  # Two DIFFERENT numbers, kept separate on a critic finding: not every markdown
-  # file in the cache is an agent. 108 files include 7 READMEs; only the 101
-  # carrying a `description:` line contribute to the system prompt. Conflating
-  # them overstates the demotion's benefit, which is the number this whole wave
-  # rests on.
-  emit voltagent.md_files "$(find "$VOLT" -name '*.md' | wc -l | tr -d ' ')" files
-  emit voltagent.agent_definitions \
+  emit voltagent.cached_md_files "$(find "$VOLT" -name '*.md' | wc -l | tr -d ' ')" files
+  emit voltagent.cached_agent_definitions \
     "$(find "$VOLT" -name '*.md' -exec grep -l '^description:' {} \; | wc -l | tr -d ' ')" agents
-  # Description TEXT only — strip the `description:` key, which is not prompt
-  # payload attributable to the catalog's content.
-  emit voltagent.description_chars \
+  emit voltagent.cached_description_chars \
     "$(find "$VOLT" -name '*.md' -exec awk '/^description:/{sub(/^description:[[:space:]]*/,""); print; exit}' {} \; | wc -c | tr -d ' ')" chars
 else
-  emit voltagent.md_files          n/a files
-  emit voltagent.agent_definitions n/a agents
-  emit voltagent.description_chars n/a chars
+  emit voltagent.cached_md_files           n/a files
+  emit voltagent.cached_agent_definitions  n/a agents
+  emit voltagent.cached_description_chars  n/a chars
 fi
 
 # Config-declared install surface (what bootstrap would install).
