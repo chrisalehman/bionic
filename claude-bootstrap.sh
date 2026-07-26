@@ -1083,7 +1083,7 @@ fi
 #
 # Pre-warm the pnpm content-addressable store with importable JS libraries
 # (e.g. motion). Projects pull them in with `pnpm add <pkg>`, which hard-links
-# from the warm store — instant and offline. See the `motion` skill for usage.
+# from the warm store — instant and offline.
 
 section "Frontend libraries (pnpm store)" "$(config_count pnpm-store)"
 if ! command -v pnpm &>/dev/null; then
@@ -1612,7 +1612,6 @@ MANAGED_HOOKS=(
   "PreToolUse|Write|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "SessionStart|startup|~/.claude/hooks/memory-cleanup.sh"
-  "UserPromptSubmit||~/.claude/hooks/terseness-reminder.sh"
   "Stop||~/.claude/hooks/context-spend.sh"
 )
 

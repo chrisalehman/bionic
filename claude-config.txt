@@ -96,14 +96,10 @@ github-skill | humanizer          | blader/humanizer
 
 github-skill-pack | impeccable   | pbakaus/impeccable
 
-local-skill  | rigorous-refactor
-local-skill  | ralph-loop
 local-skill  | map-instrument-narrow
-local-skill  | skill-factory
 local-skill  | canonical-sdlc
 local-skill  | excalidraw-diagram
 local-skill  | browser-verify
-local-skill  | motion
 
 local-command | memory-compact
 local-command | memory-save

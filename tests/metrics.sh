@@ -89,15 +89,6 @@ else
   emit config.mcp_servers  n/a entries
 fi
 
-# Terseness duplication: the same rules in standing context AND per-turn hook.
-if [ -f claude-global.md ]; then
-  emit terseness.in_global_memory "$(count_lines '^## Terseness' claude-global.md)" sections
-else
-  emit terseness.in_global_memory n/a sections
-fi
-emit terseness.hook_present \
-  "$([ -f hooks/terseness-reminder.sh ] && echo 1 || echo 0)" bool
-
 # Dangling references to machinery that no longer exists.
 emit dangling.sdlc_poker_refs \
   "$(grep -rl 'sdlc-poker\.sh' hooks/ 2>/dev/null | wc -l | tr -d ' ')" files
