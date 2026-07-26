@@ -300,11 +300,11 @@ Rules:
 - **Naming convention always.** Every entry follows `<step>: <description>` / `<step>/<unit>: <description>` — no freeform titles. [UNENFORCED]
 - **The current step's slices take primary billing.** While a fanned-out step has pending units (in-progress or to-do), its `<step>/<unit>` tasks are the foreground of the list; subsequent steps remain collapsed as single `N:` entries. A step expands into units only when it becomes current (Step 4's slices are the one exception — they expand at Step 3, because the plan defines them).
 
-This is non-negotiable. The list is the visible progress surface for the user.
+This is non-negotiable. The list is the visible progress surface for the user. [UNENFORCED]
 
 ## Non-Negotiable: TDD
 
-`superpowers:test-driven-development` fires on every step that produces or modifies code. No fast-path skips it. No "it's a small change" justification. Tests that pass are the canonical evidence of fidelity to outcome.
+`superpowers:test-driven-development` fires on every step that produces or modifies code. No fast-path skips it. No "it's a small change" justification. Tests that pass are the canonical evidence of fidelity to outcome. Nothing enforces the TDD *process* — no hook can see whether the test was written first; the evidence gate checks the shape of the Step-5 evidence line (`cmd`/`pass`/`total`) and nothing else. [UNENFORCED]
 
 ## When to Use
 
@@ -348,7 +348,7 @@ v11 replaces the single `mode` with three orthogonal axes. Every run declares ex
 
 ### Rigor — how hard the evidence tries to lie
 
-Cumulative: each tier includes everything below it. TDD is non-negotiable at every tier.
+Cumulative: each tier includes everything below it. TDD is non-negotiable at every tier. [UNENFORCED]
 
 | Rigor | The claim | What you get | What you skip | Use when |
 |---|---|---|---|---|
@@ -1030,7 +1030,7 @@ Committing is **not a numbered step** — it is a cross-cutting rhythm that fire
 
 ## Constraints
 
-- **TDD is non-negotiable** on any code-producing step.
+- **TDD is non-negotiable** on any code-producing step. [UNENFORCED]
 - **Intent declaration is reviewable.** A wrong intent is drift with a label.
 - **Every step produces an artifact that outlives the conversation.**
 - **Evidence must be pasted or linked**, not claimed. [UNENFORCED]
@@ -1270,7 +1270,7 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 | "This task is simple, I can skip the spec" | Simplicity is a claim, not a fact. If it's truly simple, the spec is 3 lines and costs nothing. |
 | "The plan is obvious, I'll hold it in my head" | Plan files survive context compaction; mental plans don't. | [UNENFORCED]
 | "I can decide the approach as I implement" | Implementation-time decisions are un-reviewable and un-recorded. |
-| "TDD is overkill for this change" | TDD is non-negotiable. |
+| "TDD is overkill for this change" | TDD is non-negotiable. [UNENFORCED] |
 | "I already know this API, source-driven-development is unnecessary" | Training data is stale. |
 | "This decision is minor, it doesn't need an ADR" | "Minor" is judged from inside the context. Step 7 is the forcing function. |
 | "The code works, that's enough evidence" | "Works on my machine" isn't evidence. |
