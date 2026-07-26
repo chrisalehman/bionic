@@ -16,9 +16,10 @@
 #   ./claude-reset.sh claude-config.everything.txt
 
 # ─── Subagent Packs ─────────────────────────────────────────────────────────
-# Demoted from core in epic-11 W1. These seven packs supply 108 specialist
-# subagent definitions; their `description:` lines alone total ~21.8k chars
-# (~5.4k tokens) loaded into every session's system prompt regardless of
+# Demoted from core in epic-11 W1. These seven packs supply 101 specialist
+# subagent definitions (108 markdown files, 7 of them READMEs); their
+# `description:` lines alone total ~20.4k chars (~5.1k tokens) loaded into
+# every session's system prompt regardless of
 # whether any is dispatched. Valuable when you actually dispatch them, pure
 # standing cost when you don't — which is exactly what the everything profile
 # is for. Bionic's own hand-written roles (implementor, senior-implementor,

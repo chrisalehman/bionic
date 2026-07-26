@@ -133,7 +133,6 @@ else
   emit skill.norm.mandatory n/a occurrences
   emit skill.norm.total     n/a occurrences
 fi
-measure_file skill.canonical_sdlc_readme skills/canonical-sdlc/README.md
 
 # ── Hook implementation weight (the enforcement surface W4 extends) ────────
 hook_total=0
