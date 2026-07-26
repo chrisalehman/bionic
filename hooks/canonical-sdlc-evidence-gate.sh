@@ -1146,7 +1146,7 @@ validate_matrix_v10() {
 
   # v10.1: set while any row is still pending/blocked at current: 5. The
   # Step-5 validator reads it to keep the `auditor:` pointer optional
-  # mid-walk (the auditor is the exit gate — it cannot have run yet).
+  # mid-walk (the auditor is the exit gate — it has not run yet).
   UNDISCHARGED=0
   MATRIX=$(matrix_section)
   if [ -z "$MATRIX" ]; then
@@ -1245,7 +1245,9 @@ validate_matrix_v10() {
         # live-tier (T3/T4) fields cannot be self-written n/a — that is a
         # downgrade, which is a user decision via the Waiver Protocol.
         # Case-insensitive: 'N/A' is the same downgrade as 'n/a' (matches
-        # matrix_is_placeholder's lowercasing).
+        # matrix_is_placeholder's lowercasing). The tier CELL is not checked
+        # here: retyping T3 to T2 is a downgrade this hook does not see.
+        # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
         val_lc=$(echo "$val" | tr '[:upper:]' '[:lower:]')
         case "$tier" in
           T3|T4)
