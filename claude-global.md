@@ -78,7 +78,7 @@ Filter first: if a standing principle resolves it or you can go find it out, dec
 
 Operate without approval EXCEPT:
 - Pushes to main [WALL: hooks/protect-main.test.sh] or production branches [UNENFORCED]
-- Destructive database migrations (DROP [WALL: hooks/protect-database.test.sh] / ALTER on tables with data [UNENFORCED])
+- Destructive database migrations — the destructive SQL shapes (`DROP`, `TRUNCATE`, unqualified `DELETE`, `ALTER TABLE … DROP`) *reaching a recognised DB CLI* [WALL: hooks/protect-database.test.sh]; every other `ALTER` on tables with data, and anything run outside such a CLI — an ORM, a migration runner, a raw driver [UNENFORCED]
 - Changes to secrets, API keys, or credentials [UNENFORCED]
 - Configuration changes that affect billing [UNENFORCED]
 

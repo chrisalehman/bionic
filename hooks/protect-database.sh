@@ -1,5 +1,6 @@
 #!/bin/bash
 # HARD BLOCK: Prevents AI from running destructive database operations.
+# [WALL: hooks/protect-database.test.sh]
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
 # Catches DROP, TRUNCATE, DELETE without WHERE, and ALTER TABLE...DROP
 # via psql, mysql, sqlite3, and other common DB CLIs.
