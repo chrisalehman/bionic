@@ -1241,14 +1241,14 @@ This prevents subagent wander.
 2. **If failures are decision-related** (ambiguity, blocked-on-judgment, unclear requirement) — Stop. Do not attempt a fourth time. Surface to the user via **User Decision Protocol**: framing, options for unblocking, why-it-matters. [UNENFORCED]
 3. Wait for direction.
 
-**Stop-and-wake list** (active for every unattended wave; expanded at `audited` rigor): [UNENFORCED]
+**Stop-and-wake list** (active for every unattended wave; expanded at `audited` rigor). One bullet is partly walled; the class is on each bullet, not on this header:
 
-- Ambiguous spec requiring a judgment call.
-- New external-API authentication setup.
-- Configuration change that affects billing.
-- Destructive database migration.
-- Changes to secrets, API keys, or production infrastructure.
-- Any action the user's `CLAUDE.md` marks as requiring approval.
+- Ambiguous spec requiring a judgment call. [UNENFORCED]
+- New external-API authentication setup. [UNENFORCED]
+- Configuration change that affects billing. [UNENFORCED]
+- Destructive database migration — `DROP` / `TRUNCATE` / unqualified `DELETE` / `ALTER TABLE ... DROP` through a DB CLI [WALL: hooks/protect-database.test.sh]; every other destructive migration, and any migration run outside a recognised CLI [UNENFORCED].
+- Changes to secrets, API keys, or production infrastructure. [UNENFORCED]
+- Any action the user's `CLAUDE.md` marks as requiring approval. [UNENFORCED]
 
 **Incident-response additions:**
 - The fix might mask a deeper issue.
@@ -1277,7 +1277,7 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 | "`tested` is fine for this auth change" | A security/privacy surface floors at `audited`; floors are max-wins and upward-only. This skill declines a sub-floor override and keeps the floor value — but no code stops you. The only floor check, `canonical-sdlc-governing-skill.sh`'s floor-consistency check, records the inconsistency to the audit stream and allows the write (D14). [INSTRUMENT] |
 | "It's really one big task, not a wave" | Scale-inflation (or deflation) dodges the matrix; the Step-3 checkpoint catches it. Declare the honest scale. |
 | "The Step-0 interview is overkill; I'll just guess the intent" | The gray-zone collisions (mechanism-swap, reference-content) are exactly what the exception interview exists for — guessing is silent misclassification. |
-| "The matrix tier is too strict for this AC" | Downgrading a tier is a user decision via the Waiver Protocol, recorded in the row — never a self-service call at Verify time. | [UNENFORCED]
+| "The matrix tier is too strict for this AC" | Downgrading a tier is a user decision via the Waiver Protocol, recorded in the row. A self-written `n/a` on a T3/T4 evidence key is blocked at commit [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]; retyping the tier CELL itself is not checked, so that form of downgrade is caught by review [UNENFORCED]. |
 | "The auditor is overkill, my evidence is obviously fine" | Self-graded evidence is the exact root cause the auditor exists to kill. "Obviously fine" is the claim it falsifies. |
 | "I'm confident in my self-review; the adversarial critic is overkill" | Self-review is bounded by what you thought to check. |
 | "The assumption was obvious; no need to log it" | "Obvious" is judged from inside the moment. Log it. |
