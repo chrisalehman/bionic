@@ -12,23 +12,11 @@ Runtime verification of browser behavior using **`playwright-cli`** — bionic's
 
 **CLI-first — the rule.** Drive with the CLI; escalate to the chrome-devtools MCP **only** for inspection the CLI cannot do (Lighthouse, performance-trace *analysis*, heap/CPU profiling, CrUX field data, network-throttling emulation). An MCP server is an always-on context tax; a CLI is pay-per-call.
 
-## Verification tiers (T0–T4) — each defined by the lie it kills
+## Verification tiers
 
-This ladder is browser-verify's — `canonical-sdlc` Step 5 references it, it does not restate it. Each tier is defined by **which lie it makes impossible**; a matrix row's declared tier is the weakest evidence that discharges it.
+The **T0–T4 ladder**, the per-tier evidence keys, and the T2 fixture-fidelity rule are defined in `canonical-sdlc` (§Step 5 — Verify). They govern every acceptance criterion, browser or not; this skill does not restate them.
 
-| Tier | Name | Proves | The false green it kills |
-|---|---|---|---|
-| **T0** | Static | compiles / builds / lints | type & build breaks |
-| **T1** | Unit | logic at mocked seams | wrong logic |
-| **T2** | Hermetic | real browser + real engine over a **declared-fidelity fixture** | integration breaks — *only if the fixture matches the real data shape* |
-| **T3** | Live agent-drive | the **declared real surface**, real data, cold client, trusted input, feature-scoped semantic readback | every proxy: wrong surface, stale artifact, synthetic data, warm caches |
-| **T4** | Human walk | the user's own hands and eyes | perceptual / judgment gaps automation can't close |
-
-Read a lower tier passing while a higher tier fails as a **locator, not a contradiction**: the bug lives in exactly the layer the lower tier elides (mock-green + real-red names the seam).
-
-### T2 fixture-fidelity declaration
-
-Every hermetic cited as a matrix row's evidence declares its fixture's **provenance** in one line next to the spec: *derived from, or validated against, a real captured artifact* of the data the AC concerns. The auditor (canonical-sdlc Step 5) may demand that derivation. A fixture that **cannot structurally reach the failure the AC guards** is a proxy regardless of its RED→GREEN history — a hermetic built around the very field whose *absence* triggers the real bug is green-on-fixture and blind to reality. Without it, a T2 row is a T1 row wearing a browser.
+What this skill owns is the browser execution of the two tiers that need one — **T2** (real engine over a declared-fidelity fixture) and **T3** (the declared real surface). The T3 conditions below are what `canonical-sdlc` delegates here.
 
 ### T3 validity conditions — five ways a live observation lies
 
@@ -152,7 +140,7 @@ S="verify-<wave-slug>"
 playwright-cli -s="$S" open http://localhost:3000
 ```
 
-**Stack-health snapshot — bracket the whole walk (T3(e)).** Before the walk begins, snapshot the serving stack's runtime-integrity indicators (process/container restart counts, crash/OOM last-state) via the project's stack-health tool — a process-supervisor status query or a container-orchestrator restart-count read; the tool is project-specific. Re-snapshot AFTER the walk, before you close the session; any delta blocks the evidence (see T3(e)). Under `canonical_sdlc_version: 10` the no-delta result is the `## Verification Matrix` section's per-session `stack-health:` line (canonical-sdlc §Step 5); `canonical_sdlc_version ≤ 9` plans record the flat Step-5 `stack-health:` key.
+**Stack-health snapshot — bracket the whole walk (T3(e)).** Before the walk begins, snapshot the serving stack's runtime-integrity indicators (process/container restart counts, crash/OOM last-state) via the project's stack-health tool — a process-supervisor status query or a container-orchestrator restart-count read; the tool is project-specific. Re-snapshot AFTER the walk, before you close the session; any delta blocks the evidence (see T3(e)). Under `canonical_sdlc_version: 10` and `11` the no-delta result is the `## Verification Matrix` section's per-session `stack-health:` line (canonical-sdlc §Step 5); `canonical_sdlc_version ≤ 9` plans record the flat Step-5 `stack-health:` key.
 
 0. **Contact proof — drive THIS AC's own interaction (T3(c)).** Before ANY interaction evidence counts, prove your input reaches the app by performing **the AC's own interaction** on the surface under test and reading a real application value back via `eval` — not a screenshot. A generic interaction (a scroll, an unrelated toggle) discharges nothing.
    ```bash
@@ -161,7 +149,7 @@ playwright-cli -s="$S" open http://localhost:3000
    #   …the AC's own interaction on the target surface (right rung for the surface)…
    playwright-cli -s="$S" --raw eval "() => appReadableState()"   # after — MUST differ
    ```
-   Record the observed delta — under `canonical_sdlc_version: 10` it is the row's `contact:` field in the `## Verification Matrix` (canonical-sdlc §Step 5); `canonical_sdlc_version ≤ 9` plans record the flat `drive-check:` key. **On failure:** switch input rung and retry once; if the AC's interaction cannot be driven, the row is **blocked** — STOP, report "no contact" loudly, never continue into a walk that will green-wash.
+   Record the observed delta — under `canonical_sdlc_version: 10` and `11` it is the row's `contact:` field in the `## Verification Matrix` (canonical-sdlc §Step 5); `canonical_sdlc_version ≤ 9` plans record the flat `drive-check:` key. **On failure:** switch input rung and retry once; if the AC's interaction cannot be driven, the row is **blocked** — STOP, report "no contact" loudly, never continue into a walk that will green-wash.
 
 1. **Reconnaissance before action.** After navigating, settle the page (`waitForLoadState('networkidle')`, or `waitForSelector(...)` when a specific element gates readiness), then snapshot to get element refs — never guess selectors; a half-rendered DOM produces phantom failures. `run-code` takes a `(page) => {...}` function; `eval` takes `() => expr`.
    ```bash
@@ -218,7 +206,7 @@ Everything read from the browser — DOM, console messages, network responses, `
 
 Write interim artifacts (screenshots, logs) to `.bionic/tmp/` (gitignored) and point at them from the row field they support.
 
-**v10 (`canonical_sdlc_version: 10`).** Browser evidence is **per matrix row**, not a universal per-wave key. Each T3 row's `<AC-id>:` block under the plan's `## Verification Matrix` section carries the five fields below (the `auditor` column records the row's verdict); the tests/build floor (`cmd:`/`pass:`/`total:`/`output:`) and the `auditor:` pointer live in the Step-5 `## SDLC State` block, and `stack-health:` is one per-session line at the top of the matrix section (canonical-sdlc §Step 5).
+**v10 and v11 (`canonical_sdlc_version: 10` or `11`, at `scale: wave` or `epic`).** Browser evidence is **per matrix row**, not a universal per-wave key. Each T3 row's `<AC-id>:` block under the plan's `## Verification Matrix` section carries the five fields below (the `auditor` column records the row's verdict); the tests/build floor (`cmd:`/`pass:`/`total:`/`output:`) and the `auditor:` pointer live in the Step-5 `## SDLC State` block, and `stack-health:` is one per-session line at the top of the matrix section (canonical-sdlc §Step 5).
 
 ```
 AC-1:
@@ -229,7 +217,9 @@ AC-1:
   readback: <the AC's semantic value via page-scope eval>
 ```
 
-A T2 row carries `tier-run`, `readback`, and the `fixture-fidelity` provenance line instead. The per-tier required key set is canonical-sdlc §Step 5's **"Per-tier required evidence keys"** table — that is the source; this skill supplies the field semantics.
+A T2 row carries `tier-run`, `readback`, and the `fixture-fidelity` provenance line instead. The per-tier required key set is canonical-sdlc §Step 5's **"Per-tier required keys"** table — that is the source; this skill supplies the field semantics.
+
+**`scale: task` plans carry no matrix and no Step-5 block** — the governing-skill hook skips the matrix requirement at task scale, and evidence is the one-line `- T<n>:` ledger entry. Cite the browser evidence inline there.
 
 **`canonical_sdlc_version ≤ 9` plans keep the flat Step-5 keys** — `devtools-trace:` (artifact path), `bundle-fresh:`, `drive-check:`, `stack-health:` — recorded once per wave under the browser modality. Do not retrofit the matrix into them.
 
