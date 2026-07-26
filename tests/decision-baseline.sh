@@ -27,14 +27,13 @@
 #                      prompt. A floor, never a total — a badly-framed decision
 #                      answered anyway leaves no trace (spec §Assumptions).
 #   ac3_agreement_pct  of the turns the user actually corrected, the share the
-#                      detector fires on. THE FALSIFIER. The threshold is
-#                      pre-registered in the plan's `## Assumptions` and this
-#                      script reads it from there rather than hardcoding it.
-#                      The plan is UNTRACKED (.bionic/ is gitignored), so a
-#                      threshold moved there produces no diff, in either
-#                      direction — the guard against silent tuning is the pin
-#                      asserted in tests/decision-baseline.test.sh
-#                      (`ac3_threshold_pct=70`), not git history on the plan.
+#                      detector fires on. THE FALSIFIER. The threshold was
+#                      pre-registered in the plan's `## Assumptions` and is
+#                      TRACKED here as `AC3_THRESHOLD`, so the verdict is
+#                      computable on a bare clone. The plan copy is still the
+#                      provenance record and is checked against this constant
+#                      by tests/decision-baseline.test.sh, which skips that
+#                      one check loudly when `.bionic/` is absent.
 #   uncorrected_fire_pct  fire rate on turns the user did NOT correct. An UPPER
 #                      BOUND on false positives, not the false-positive rate: a
 #                      well-framed ask the user simply answered fires
@@ -52,7 +51,6 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
 DETECTOR="$REPO/hooks/request-to-human-detector.sh"
-PLAN="$REPO/.bionic/docs/plans/epic-11-harness-fitness/wave-02-decision-quality.plan.md"
 
 emit() { printf '%s\t%s\t%s\n' "$1" "$2" "$3"; }
 
@@ -168,14 +166,22 @@ $(awk -v corrf="$TMP/corrected" -v fpf="$TMP/fingerprints" '
 ' "$TMP/corrected" "$TMP/fingerprints" "$TMP/verdicts")
 EOF
 
-# The pre-registered threshold, read from the plan at runtime. The plan is
-# untracked (.bionic/ is gitignored), so moving it produces no diff there to
-# review — the guard against silent tuning is the pin asserted in
-# tests/decision-baseline.test.sh (`ac3_threshold_pct=70`), not git history.
-THRESHOLD=$(awk '
-  /agreement threshold/ && match($0, /[0-9]+%/) { print substr($0, RSTART, RLENGTH - 1); exit }
-' "$PLAN" 2>/dev/null)
-case "$THRESHOLD" in ''|*[!0-9]*) THRESHOLD="" ;; esac
+# The pre-registered threshold, TRACKED here rather than read out of the plan.
+#
+# It used to be read from the plan at runtime, and the plan lives in `.bionic/`,
+# which is gitignored. On any clone of this repo the read returned nothing, the
+# threshold went empty, and `ac3_verdict` degraded to `n/a` — the instrument
+# reported no verdict at all for every consumer, while looking healthy on the
+# author's machine.
+#
+# The plan remains the PROVENANCE record and is still the place the threshold
+# was pre-registered. It is now compared against this constant by the paired
+# test (a drift check that skips loudly when the plan is absent), rather than
+# being the value the verdict depends on. That also removes an odd property of
+# the old arrangement: the gate could be moved by editing an untracked file
+# that leaves no reviewable diff.
+AC3_THRESHOLD=70
+THRESHOLD="$AC3_THRESHOLD"
 
 AGREE=$(pct "$CTD" "$CT")
 AGREE_DEDUP=$(pct "$DCTD" "$DCT")

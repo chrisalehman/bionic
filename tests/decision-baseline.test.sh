@@ -22,7 +22,7 @@ set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SCORER="$REPO/tests/decision-baseline.sh"
-PASS=0; FAIL=0; TOTAL=0
+PASS=0; FAIL=0; TOTAL=0; SKIP=0
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -188,5 +188,46 @@ else
 fi
 
 echo
-printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
+echo "Threshold provenance: the tracked constant still matches the plan"
+# The threshold is pre-registered in the plan and TRACKED in the scorer, so the
+# pin above (`ac3_threshold_pct = 70`) executes on a bare clone. It used to be
+# read out of the plan at runtime, and the plan lives in gitignored `.bionic/`
+# — which made the threshold empty and the verdict `n/a` for every consumer of
+# this repo.
+#
+# This check is the other half: it catches the two copies diverging. It is the
+# ONLY threshold assertion that needs the plan, so it is the only one that may
+# skip — and it says so out loud rather than disappearing.
+PLAN="$REPO/.bionic/docs/plans/epic-11-harness-fitness/wave-02-decision-quality.plan.md"
+TRACKED=$(awk -F= '/^AC3_THRESHOLD=/ { gsub(/[^0-9]/, "", $2); print $2; exit }' "$SCORER")
+TOTAL=$((TOTAL + 1))
+if [ "$TRACKED" = "70" ]; then
+  PASS=$((PASS + 1)); printf '  PASS  scorer carries the threshold as a tracked constant (%s)\n' "$TRACKED"
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  scorer tracked threshold — expected 70, got "%s"\n' "$TRACKED"
+fi
+
+if [ -f "$PLAN" ]; then
+  PLANNED=$(awk '
+    /agreement threshold/ && match($0, /[0-9]+%/) { print substr($0, RSTART, RLENGTH - 1); exit }
+  ' "$PLAN" 2>/dev/null)
+  TOTAL=$((TOTAL + 1))
+  if [ "$PLANNED" = "$TRACKED" ]; then
+    PASS=$((PASS + 1)); printf '  PASS  plan and scorer agree on the threshold (%s)\n' "$PLANNED"
+  else
+    FAIL=$((FAIL + 1))
+    printf '  FAIL  threshold DRIFT — plan says "%s", scorer says "%s"\n' "$PLANNED" "$TRACKED"
+  fi
+else
+  SKIP=$((SKIP + 1))
+  printf '  SKIP  plan-vs-scorer threshold drift check — plan not present\n'
+  printf '        %s\n' "$PLAN"
+  printf '        `.bionic/` is gitignored, so this is expected on a clone. The\n'
+  printf '        threshold pin itself DID run against the tracked constant.\n'
+fi
+
+echo
+# Skips are reported on the SAME line as the tally. A suite that silently drops
+# assertions when an input is missing reads exactly like one that ran them.
+printf 'Results: %d/%d passed, %d failed, %d skipped\n' "$PASS" "$TOTAL" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
