@@ -34,7 +34,7 @@ HOOKDIR="$(cd "$(dirname "$0")" && pwd)"
 HOOK="$HOOKDIR/refuse-and-classify.sh"
 REPO="$(cd "$HOOKDIR/.." && pwd)"
 SPEC="$REPO/.bionic/docs/specs/epic-11-harness-fitness/wave-02-decision-quality.spec.md"
-PASS=0; FAIL=0; TOTAL=0
+PASS=0; FAIL=0; TOTAL=0; SKIP=0
 
 TMP=$(mktemp -d)
 # Incident 0001: the accrued record must live where a consuming project cannot
@@ -127,17 +127,65 @@ assert_contains "4. Consequence line"          "Consequence"       "$REASON"
 assert_contains "4. reframe marker"            "DECISION REFRAME"  "$REASON"
 
 echo
-echo "AC-5: the shipped reason IS the spec's ratified prompt, whole"
-# The spec now carries the reframe body LITERALLY — an earlier revision
-# described it with a placeholder, which made "ship it verbatim" unexecutable
-# and forced this test to check only the prose either side of the gap. With the
-# gap closed the assertion is equality over the WHOLE prompt, which is strictly
-# stronger: no substring of the prompt can drift, including the reframe body
-# that is the user's own text and the least paraphrasable part of it.
-if [ -f "$SPEC" ]; then
+echo "AC-5: the shipped reason IS the ratified prompt, byte for byte"
+# This is the strongest assertion in the wave, and it MUST execute for anyone
+# who clones the repo. It used to read the prompt out of `.bionic/`, which is
+# gitignored — so on a fresh clone this equality, the placeholder guard and the
+# four reframe-body checks ALL silently vanished, six assertions at once, and
+# the suite still reported green. An assertion that only runs on the author's
+# machine is not evidence.
+#
+# The prompt is therefore vendored into a TRACKED fixture beside the hook. The
+# fixture is derived FROM the spec, never dumped from the hook: the spec
+# hard-wraps its blockquote for readability and the hook ships each paragraph
+# on one line, so the fixture is the spec text REFLOWED. Generating it out of
+# the implementation would have made this assertion tautological — it would
+# compare the hook to itself and pass no matter what the prompt said.
+FIXTURE="$HOOKDIR/refuse-and-classify.prompt.txt"
+
+TOTAL=$((TOTAL + 1))
+if [ -f "$FIXTURE" ]; then
+  PASS=$((PASS + 1)); printf '  PASS  tracked prompt fixture present (needs no .bionic/)\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  tracked prompt fixture MISSING: %s\n' "$FIXTURE"
+fi
+
+# Byte-exact, not whitespace-normalised. The paragraph structure is part of the
+# prompt the model receives.
+printf '%s\n' "$REASON" > "$TMP/reason.actual"
+TOTAL=$((TOTAL + 1))
+if [ -f "$FIXTURE" ] && diff -u "$FIXTURE" "$TMP/reason.actual" > "$TMP/reason.diff" 2>&1; then
+  PASS=$((PASS + 1))
+  printf '  PASS  shipped reason EQUALS the tracked fixture, byte for byte (%d bytes)\n' \
+    "$(wc -c < "$FIXTURE" | tr -d ' ')"
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  shipped reason EQUALS the tracked fixture\n'
+  sed 's/^/        /' "$TMP/reason.diff" 2>/dev/null | head -30
+fi
+
+# The reframe body specifically — the user's own words, and the part an
+# implementer is most likely to "improve". These never needed the spec, so they
+# run unconditionally rather than riding along inside a conditional.
+assert_contains "reframe body: opening sentence"  \
+  "Reframe the decision(s) at a higher conceptual level in plain language" "$REASON"
+assert_contains "reframe body: options and rationale" \
+  "What are the numbered options, your recommendation(s), and the accompanying rationale?" "$REASON"
+assert_contains "reframe body: significance and compounding impacts" \
+  "Include significance of the decision(s), downstream and compounding impacts" "$REASON"
+assert_contains "reframe body: brevity instruction" "Be as concise as possible" "$REASON"
+
+echo
+echo "AC-5 provenance: the fixture still matches the spec (drift guard)"
+# THIS one is legitimately skippable, and it is the only part that is. Its sole
+# job is catching divergence between the vendored copy and the spec it came
+# from, and that genuinely requires the spec. The equality proof above does not
+# depend on it and runs everywhere — which is the whole point of the split.
+# Vendoring without this check would merely move the drift somewhere quieter.
+if [ -f "$SPEC" ] && [ -f "$FIXTURE" ]; then
   # Blockquote under `### The injected prompt`, unwrapped. Stops at the first
   # line that is neither blockquote nor blank, so a later blockquote elsewhere
-  # in the section cannot be swept in.
+  # in the section cannot be swept in. Compared whitespace-normalised, because
+  # the spec wraps for readability and the fixture is reflowed.
   spec_prompt=$(awk '
     /^### The injected prompt/ { f = 1; next }
     f && /^> / { seen = 1; sub(/^> /, ""); print; next }
@@ -145,17 +193,17 @@ if [ -f "$SPEC" ]; then
     f && seen && /^[[:space:]]*$/ { next }
     f && seen { exit }
   ' "$SPEC" | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//')
-  norm_reason=$(printf '%s' "$REASON" | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//')
+  fixture_norm=$(tr '\n' ' ' < "$FIXTURE" | sed 's/  */ /g; s/^ //; s/ $//')
 
   TOTAL=$((TOTAL + 1))
   if [ ${#spec_prompt} -gt 600 ]; then
-    PASS=$((PASS + 1)); printf '  PASS  spec prompt extracted whole (%d chars, no placeholder)\n' "${#spec_prompt}"
+    PASS=$((PASS + 1)); printf '  PASS  spec prompt extracted whole (%d chars)\n' "${#spec_prompt}"
   else
     FAIL=$((FAIL + 1)); printf '  FAIL  spec prompt extracted whole (got %d chars)\n' "${#spec_prompt}"
   fi
 
   # A placeholder must never come back: it is what made the prompt
-  # unimplementable, and it would silently weaken every assertion below.
+  # unimplementable, and it would silently weaken everything downstream.
   TOTAL=$((TOTAL + 1))
   case "$spec_prompt" in
     *"<"*">"*) FAIL=$((FAIL + 1)); printf '  FAIL  spec prompt is literal, not a description (placeholder present)\n' ;;
@@ -163,25 +211,20 @@ if [ -f "$SPEC" ]; then
   esac
 
   TOTAL=$((TOTAL + 1))
-  if [ "$norm_reason" = "$spec_prompt" ]; then
-    PASS=$((PASS + 1)); printf '  PASS  shipped reason EQUALS the spec prompt, byte for byte\n'
+  if [ "$fixture_norm" = "$spec_prompt" ]; then
+    PASS=$((PASS + 1)); printf '  PASS  tracked fixture still matches the spec (no vendored drift)\n'
   else
-    FAIL=$((FAIL + 1)); printf '  FAIL  shipped reason EQUALS the spec prompt\n'
-    printf '        spec  (%d): %s\n' "${#spec_prompt}" "$spec_prompt"
-    printf '        hook  (%d): %s\n' "${#norm_reason}" "$norm_reason"
+    FAIL=$((FAIL + 1)); printf '  FAIL  tracked fixture still matches the spec\n'
+    printf '        spec    (%d): %s\n' "${#spec_prompt}" "$spec_prompt"
+    printf '        fixture (%d): %s\n' "${#fixture_norm}" "$fixture_norm"
   fi
-
-  # The reframe body specifically — the user's own words, the part an
-  # implementer is most likely to "improve".
-  assert_contains "reframe body: opening sentence"  \
-    "Reframe the decision(s) at a higher conceptual level in plain language" "$REASON"
-  assert_contains "reframe body: options and rationale" \
-    "What are the numbered options, your recommendation(s), and the accompanying rationale?" "$REASON"
-  assert_contains "reframe body: significance and compounding impacts" \
-    "Include significance of the decision(s), downstream and compounding impacts" "$REASON"
-  assert_contains "reframe body: brevity instruction" "Be as concise as possible" "$REASON"
 else
-  fail "spec present for the drift check" "not found: $SPEC"
+  SKIP=$((SKIP + 3))
+  printf '  SKIP  fixture-vs-spec drift guard (3 assertions) — spec not present\n'
+  printf '        %s\n' "$SPEC"
+  printf '        `.bionic/` is gitignored, so this is expected on a clone. The\n'
+  printf '        byte-exact equality above DID run; only the provenance check\n'
+  printf '        between the vendored copy and the spec is unavailable here.\n'
 fi
 
 echo
@@ -409,5 +452,8 @@ assert_contains "valid JSON but not an object: already-active path" \
   || fail "valid JSON but not an object: no block" "got: $HOOK_STDOUT"
 
 echo
-printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
+# Skips are reported on the SAME line as the tally, never swallowed. A suite
+# that quietly drops assertions when an input is missing reads exactly like a
+# suite that ran them — that failure mode is what C1 was.
+printf 'Results: %d/%d passed, %d failed, %d skipped\n' "$PASS" "$TOTAL" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]

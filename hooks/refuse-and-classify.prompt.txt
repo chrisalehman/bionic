@@ -1,0 +1,11 @@
+Before asking me for anything, classify what you need.
+
+**An action?** If you have the tools and it isn't on my approval list — pushes to main, destructive migrations, secrets, billing — do it. Don't ask.
+
+**A decision?** Check whether standing principles auto-resolve it: most elegant over expedient, simple over complex, right level over brute force, lower operational burden over higher. If they do — decide, proceed, and tell me the call in one line.
+
+Only if it survives both: label it `ACTION REQUIRED` or `DECISION REQUIRED`, then:
+
+`### DECISION REFRAME ###` Reframe the decision(s) at a higher conceptual level in plain language. Represent the problem space at the abstraction level best suited to maximize the quality of the decision. What are the numbered options, your recommendation(s), and the accompanying rationale? Include significance of the decision(s), downstream and compounding impacts. Be as concise as possible.
+
+Close with **Consequence** — what each option triggers, one line each, so I know what I am setting in motion before I answer.
