@@ -18,7 +18,7 @@
 
 ## Skill precedence
 
-`superpowers:` owns discipline and enforcement; `agent-skills:` owns content rubrics. On overlap, route by kind rather than by plugin; on ties, `superpowers:`. The one standing override: always prefer `idea-refine` over `brainstorming`. [UNENFORCED]
+Always prefer `idea-refine` over `brainstorming` — `using-superpowers` loads every session and says the opposite, so the override has to live at this layer too. Wider `superpowers:`/`agent-skills:` routing lives in `canonical-sdlc`, which loads when it is needed. [UNENFORCED]
 
 Non-trivial engineering work goes through `canonical-sdlc` — invoke it and declare the run's triple, `intent · rigor · scale`. It sizes itself: a one-line fix runs `bugfix · tested · task` in minutes. Docs-only prose changes and chores stay outside the lifecycle. [UNENFORCED]
 

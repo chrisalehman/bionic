@@ -76,7 +76,7 @@ Ten flat steps, numbered 0–9. No interstitials, no sub-steps, no hidden statio
 
 ### The approval checkpoint
 
-The end of Step 3 is the "walk away" boundary. After the plan is complete, Claude presents a summary (framing, options to approve / request revisions / halt, why-it-matters) and **only begins Step 4 on explicit approval**.
+The end of Step 3 is the "walk away" boundary. After the plan is complete, Claude presents a summary via the User Decision Protocol, with the option set *approve / request revisions / halt*, and **only begins Step 4 on explicit approval**.
 
 Wave scope locks at approval. Mid-wave discoveries — architectural gaps, related bugs, audit findings — get logged to `## Assumptions` as candidates for the next wave; they do not reshape the current wave. Two exceptions: a discovery that makes the current wave structurally impossible is surfaced as a Wake Note and halts; a trivial one-line correction in a touched file ships inline. Step 6 (Review)'s adversarial-critic stance checks for unjustified mid-wave scope drift.
 
@@ -262,7 +262,7 @@ Evidence falls into exactly two tiers:
 | **Verification** | Yes — mandatory | `canonical-sdlc-evidence-gate.sh` (presence + per-step shape on v3–v11; v11 wave/epic shares the v10 shape) |
 | **Handoff** | Only when a plan spans sessions | Skill prose only — no hook writes it and no hook checks it |
 
-There is no third "narrative" tier. Decision-point prose to the user is governed instead by the **User Decision Protocol**: frame the decision at the highest useful level of abstraction, offer numbered options each with a one-line rationale, state significance in one sentence, and keep the whole thing under ~200 words. If stating the question needs a filename or line number, the abstraction level is wrong — climb a rung and rewrite.
+There is no third "narrative" tier. Decision-point prose to the user is governed instead by the **User Decision Protocol** — every user-facing decision point in the lifecycle uses one format, and its canonical shape, pre-send gate and significance tiers live in [SKILL.md §User Decision Protocol](SKILL.md). The gist: climb to the highest useful level of abstraction, and keep it short.
 
 ### Per-step evidence shape — the v10 table (current, shared by v11 wave/epic)
 
@@ -523,11 +523,11 @@ Four tiers by role (the default plan when `multi_agent: true`):
 
 **Serial when slices share state.** Parallel dispatch applies to independent, stateless work. When slices share state — the one local DB, a `supabase db reset`, count-based assertions — dispatch serially: one at a time, verify, then the next, regardless of fresh-vs-fork.
 
-**Effort is a main-thread-only dial.** There is no reasoning-effort parameter on the Agent tool — you set effort on the main session, and you cannot request "Opus high" for a subagent. The dispatch layer tiers the *model* and the *mechanism* (fresh vs fork), not effort. Forks inherit the orchestrator's effort; fresh subagents run at their model's harness default.
+**Effort is a main-thread-only dial.** There is no reasoning-effort parameter on the Agent tool — you set effort on the main session, and you cannot request "Opus high" for a subagent. The dispatch layer tiers the *model* and the *mechanism* (fresh vs fork), not effort; what each mechanism pays for effort is the fresh-vs-fork rule above.
 
 **`multi_agent: false`** collapses this to a single thread (no dispatch). The main model is the detected session model (`main=<detected>` in `model_plan`) and can be dialed down at Step 0, since there is nothing to offload to.
 
-**Verification carries over.** Verify each dispatched unit's commit *fileset* (`git show --stat` plus `git status --short` for orphans), not just that tests are green; and the Step 6 (Review) adversarial critic must be **independent of whoever wrote the code** — never accept a subagent's self-graded review.
+**Verification carries over.** Verify each dispatched unit's commit *fileset* (`git show --stat` plus `git status --short` for orphans), not just that tests are green. Critic independence is Step 6's rule — see [SKILL.md §Step 6](SKILL.md).
 
 ---
 
@@ -663,41 +663,15 @@ Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql
 
 ### The quick-reference card (explain / help)
 
-Canonical card — rendered verbatim by `explain` and by a bare `help` invocation; content mirrors the axis tables and must be updated with them.
+`explain` and a bare `help` invocation both render a quick-reference card. **The card has no stored copy** — it is rendered at display time from the axis tables ([Intent](#intent--the-kind-of-work-one-line-each), [Rigor](#rigor--how-hard-the-evidence-tries-to-lie-cumulative-one-line-each), [Scale](#scale--the-decomposition-unit-one-line-each)), one line per value, under a `── canonical-sdlc quick reference ──` header and a line inviting the user to reply `confirm` or override an axis first. It closes with the floors line (floors push rigor UP, never down — see [Scale-keyed rigor defaults and floors](#scale-keyed-rigor-defaults-d11-and-floors)) and these override examples, rendered verbatim:
 
 ```
-── canonical-sdlc quick reference ──
-
-Reply "confirm" to accept the inferred triple, or override any axis first
-(examples at the bottom). One value per axis:
-
-intent — what kind of work is this?
-  build              new capability, or capability restored by adding new machinery
-  bugfix             restore intended behavior within the existing design
-  refactor           change structure, preserve behavior (upgrades, migrations, removals)
-  tune               move a NAMED measurement toward a target (latency, size, a UX score)
-  spike              timeboxed research or prototype — ships no code; the writeup is the deliverable
-  incident-response  a live deployed surface is broken for its users; the clock matters
-
-rigor — how hard should the evidence try to lie? (each tier includes the ones below)
-  tested         TDD on every change + the Verification Matrix + structured self-review
-  peer-reviewed  adds a separate spec + an independent auditor who tries to falsify your evidence
-  audited        adds an independent adversarial critic who tries to break the code itself
-
-scale — how much work?
-  task   sub-session unit, several per session — ledger line, no per-task plan file
-  wave   one session (the default)
-  epic   multi-session — scoping run only (Steps 0–3), carves the work into waves
-
-Floors push rigor UP, never down: incident-response and security/privacy-touching
-work floor at audited; a project or epic can declare its own rigor-floor. spike is
-capped at tested (it ships no code).
-
-Override examples:
-  set intent=refactor, confirm
-  set rigor=audited, set scale=task, confirm
-  set verify(AC-2)=T2, confirm
+set intent=refactor, confirm
+set rigor=audited, set scale=task, confirm
+set verify(AC-2)=T2, confirm
 ```
+
+Full render instruction: [SKILL.md §The quick-reference card](SKILL.md).
 
 ---
 

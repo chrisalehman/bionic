@@ -42,7 +42,7 @@ loading: deferred
 
 This skill constrains how large-scale development efforts are executed. The SDLC steps exist because they lead to better outcomes — each step contributes a dimension of fidelity (scope, contract, plan, proof, review, decision record, release discipline) that no other step supplies. Without this skill, Claude truncates the lifecycle on any given effort: individual steps feel skippable in isolation, but the compounding loss of fidelity is invisible mid-effort and surfaces as rework, lost decisions, and features that look complete but aren't production-grade.
 
-**Core principle: NO STEP SKIPPED WITHOUT A DECLARED FAST-PATH. NO COMMIT WITHOUT EVIDENCE FROM THE CURRENT STEP.** (formalized below as The Iron Law, with what enforces it and what does not — the first sentence [UNENFORCED], the second [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]).
+**Core principle: NO STEP SKIPPED WITHOUT A DECLARED FAST-PATH. NO COMMIT WITHOUT EVIDENCE FROM THE CURRENT STEP.** (formalized below as The Iron Law, with what enforces it and what does not — the first sentence [UNENFORCED], the second [FORM: hooks/canonical-sdlc-evidence-gate.test.sh] — the gate reads the plan artifact, never the commit).
 
 **Layer:** Governance (process constraint). Loads when a large-scale effort begins or when picking the skill for the current step.
 
@@ -76,8 +76,6 @@ The *slice* (atomic RED→GREEN commit) stays **exclusive to Step 4 Implement**.
 - **Step 8 Integrate & close** is **atomic** — a single task.
 
 Generalize the `<step>/<unit>:` task-naming so any fanned-out step labels its units: `4/<slice>`, `5/<AC-id>`, `6/<axis-or-stance>`. Step 8 stays one task. See §Task Tracking.
-
-**REQUIRED SUB-SKILLS.** The `needs`-declared skills load only when the step that invokes them is active. [UNENFORCED]
 
 ## Load-time Announcement
 
@@ -164,7 +162,7 @@ NO COMMIT WITHOUT EVIDENCE FROM THE CURRENT STEP.
 
 **What enforces this, precisely.** The evidence gate is incremental, not
 holistic. At each commit it reads the plan's `current: N` and validates the
-evidence line for **that step only** [WALL: hooks/canonical-sdlc-evidence-gate.test.sh].
+evidence line for **that step only** [FORM: hooks/canonical-sdlc-evidence-gate.test.sh].
 It never re-validates steps 0..N-1, and nothing re-checks the full set at
 completion; the sole cumulative contract is the `## Verification Matrix`, a
 prefix re-validated at every step from 6 on. Walking every applicable step is
@@ -239,8 +237,8 @@ failures still count toward the three-fail rule (§Escalation Protocol). [UNENFO
 
 **Verification is never cheaper than authorship.** Step 6's 5-axis review and adversarial critic
 dispatch at Tier 2 (fresh `model: opus`) regardless of which tier wrote the code — Sonnet-written
-slices get Opus review. The savings live in writing, not judging. The critic additionally remains
-independent of whoever wrote the code (see Step 6). [UNENFORCED]
+slices get Opus review. The savings live in writing, not judging. Critic independence is Step 6's
+rule (§Step 6). [UNENFORCED]
 
 **Fresh by default, fork by exception — the cost rule.** A subagent spends tokens on two axes:
 *context* (the input it carries) and *effort* (the thinking it does). A **fork** is expensive on
@@ -259,15 +257,15 @@ summary returns to the main context. So for the goal of keeping the orchestrator
   accumulated conversation. **Never fork a vanilla or mechanical task** — that is the most
   expensive way to do the cheapest work. **Never fork to get a cheaper model** — forks ignore
   `model` and inherit the orchestrator's (a Fable-orchestrator's forks are Fable, not Opus). [UNENFORCED]
-- **Under a Fable orchestrator the fork bar rises.** Fable forks pay roughly 2× Opus per token
-  AND re-pay the entire main-thread context on every dispatch. Prefer hand-feeding context to a
-  fresh `model: opus` agent even in borderline cases.
+- **Under a Fable orchestrator the fork bar rises.** Fable forks pay roughly 2× Opus per token on
+  top of that inheritance. Prefer hand-feeding context to a fresh `model: opus` agent even in
+  borderline cases.
 - **Serial when slices share state** (see Parallel by Default above).
 
 **Effort is a main-thread-only dial.** There is no reasoning-effort parameter on the Agent tool.
 Set effort on the main session (`/model`); you cannot request "Opus high" for a subagent. Tier the
-*model* and the *mechanism*, never assume a selectable execution effort below the main thread.
-Forks inherit the orchestrator's effort; fresh subagents run at their model's harness default. [UNENFORCED]
+*model* and the *mechanism*, never assume a selectable execution effort below the main thread —
+what each dispatch mechanism actually pays for effort is the cost rule above. [UNENFORCED]
 
 **`multi_agent: false`** — everything runs on the main orchestrator, no dispatch (Tiers 2–4 N/A).
 The main model is the detected session model (`main=<detected>` in `model_plan`); **dial-down is
@@ -275,8 +273,7 @@ offered at Step 0** since there is nothing to offload to.
 
 **Verification carries over from the multi-agent memory** (`feedback_multi_agent_fork_orchestration`):
 verify each dispatched unit's commit *fileset* (`git show --stat` + `git status --short` for
-orphans), not just that tests are green; and the Step 6 adversarial critic must be **independent
-of whoever wrote the code** — never accept a subagent's self-graded review. [UNENFORCED]
+orphans), not just that tests are green. Critic independence is Step 6's rule (§Step 6). [UNENFORCED]
 
 ## Task Tracking (mandatory)
 [UNENFORCED]
@@ -721,40 +718,16 @@ Accepted: `confirm`; `set use_worktree=true, confirm`; `set surface_type=graphql
 
 #### The quick-reference card (explain / help)
 
-Canonical card — rendered verbatim by `explain` and by a bare `help` invocation; content mirrors the axis tables and must be updated with them. [UNENFORCED]
+`explain` and a bare `help` invocation both render this card. **Render it from the axis tables at display time — no copy is kept here**, because a hand-synced copy drifts from the tables it mirrors. Under a `── canonical-sdlc quick reference ──` header and a line inviting the user to reply `confirm` or override an axis first, render three blocks, one line per value, straight from the tables: `intent — what kind of work is this?` (§Intent — the kind of work), `rigor — how hard should the evidence try to lie?`, noting it is cumulative (§Rigor — how hard the evidence tries to lie), and `scale — how much work?` (§Scale — the decomposition unit). Close with the floors line and the override examples below. [UNENFORCED]
+
+**Floors line:** floors push rigor UP, never down — `incident-response` and security/privacy-touching work floor at `audited`; a project or epic can declare its own rigor-floor; `spike` is capped at `tested` (it ships no code). [UNENFORCED]
+
+**Override examples** (rendered verbatim):
 
 ```
-── canonical-sdlc quick reference ──
-
-Reply "confirm" to accept the inferred triple, or override any axis first
-(examples at the bottom). One value per axis:
-
-intent — what kind of work is this?
-  build              new capability, or capability restored by adding new machinery
-  bugfix             restore intended behavior within the existing design
-  refactor           change structure, preserve behavior (upgrades, migrations, removals)
-  tune               move a NAMED measurement toward a target (latency, size, a UX score)
-  spike              timeboxed research or prototype — ships no code; the writeup is the deliverable
-  incident-response  a live deployed surface is broken for its users; the clock matters
-
-rigor — how hard should the evidence try to lie? (each tier includes the ones below)
-  tested         TDD on every change + the Verification Matrix + structured self-review
-  peer-reviewed  adds a separate spec + an independent auditor who tries to falsify your evidence
-  audited        adds an independent adversarial critic who tries to break the code itself
-
-scale — how much work?
-  task   sub-session unit, several per session — ledger line, no per-task plan file
-  wave   one session (the default)
-  epic   multi-session — scoping run only (Steps 0–3), carves the work into waves
-
-Floors push rigor UP, never down: incident-response and security/privacy-touching
-work floor at audited; a project or epic can declare its own rigor-floor. spike is
-capped at tested (it ships no code).
-
-Override examples:
-  set intent=refactor, confirm
-  set rigor=audited, set scale=task, confirm
-  set verify(AC-2)=T2, confirm
+set intent=refactor, confirm
+set rigor=audited, set scale=task, confirm
+set verify(AC-2)=T2, confirm
 ```
 
 On accept, write final values into plan frontmatter literally — every flag as an explicit `<key>: <value>` line. The plan carries `canonical_sdlc_version: 11` plus all 5 discriminator flags, 2 opt-in flags, and a single-line `model_plan:` recording the confirmed tiers (e.g. `model_plan: orchestrator=fable-5-high; exec-complex=opus-fresh; exec-standard=sonnet-fresh; explore=sonnet-fresh`), and the `intent:`/`rigor:`/`scale:` triple. The confirmed `integration-branch` and the derived `## Verification Matrix` are carried forward: when the plan file is written at Step 3, its `## SDLC State` section opens with the Step-0-confirmed `integration-branch: <name>` line, and the plan body carries the locked `## Verification Matrix` section. For v4 and later plans the governing-skill hook **requires** `model_plan`; for v10 and v11 it additionally requires the `## Verification Matrix` section at `sdlc-step ≥ 3` — a missing value blocks the write (exit 2). [FORM: hooks/canonical-sdlc-governing-skill.test.sh]
@@ -854,7 +827,7 @@ On accept, write final values into plan frontmatter literally — every flag as 
 
 #### Approval Checkpoint (end of Step 3)
 
-This is the "walk away" boundary. After the plan is complete, present a summary using the **User Decision Protocol**: framing, options (approve / request revisions / halt), why-it-matters. Only on explicit approval does Step 4 begin.
+This is the "walk away" boundary. After the plan is complete, present a summary via the **User Decision Protocol** (§User Decision Protocol) with the option set *approve / request revisions / halt*. Only on explicit approval does Step 4 begin.
 
 **Wave shape locks at approval.** Once the user approves the Step 3 plan, wave scope is locked. Mid-wave discoveries (architectural gaps, related bugs, audit findings) get logged to `## Assumptions` as W+1 candidates — they do NOT reshape the current wave. [UNENFORCED]
 
@@ -1028,20 +1001,11 @@ Committing is **not a numbered step** — it is a cross-cutting rhythm that fire
 
 - **Guardrail — no per-step `commit:` evidence field.** Do NOT add a `commit:` SHA to `## SDLC State`. The hook gates the current step's *existing* evidence on commit; a redundant `commit:` field would be self-referential and adds nothing. The commit SHA lives in git, not the evidence block. [UNENFORCED]
 
-## Constraints
-
-- **TDD is non-negotiable** on any code-producing step. [UNENFORCED]
-- **Intent declaration is reviewable.** A wrong intent is drift with a label.
-- **Every step produces an artifact that outlives the conversation.**
-- **Evidence must be pasted or linked**, not claimed. [UNENFORCED]
-- **Escalation deep dives are conditional**, not routine.
-- **Spike code never ships.** [UNENFORCED]
-
 ## Governing-Skill Declaration
 
 Every canonical-sdlc artifact carries frontmatter declaring the skill that governs its production.
 
-**Required frontmatter** on every `*.plan.md`, `*.spec.md`, `adr-*.md`, `continuation*.md`, `epic.plan.md`, `epic.spec.md`, `rca.md`, and incident-response `spec.md`/`plan.md`: [FORM: hooks/canonical-sdlc-governing-skill.test.sh]
+**Required frontmatter** on every `*.plan.md`, `*.spec.md`, `adr-*.md`, `continuation*.md`, `epic.plan.md` and `epic.spec.md` [FORM: hooks/canonical-sdlc-governing-skill.test.sh]. Also required on `rca.md` and the incident-response bare `spec.md`/`plan.md`, but **nothing enforces those three** — the hook's basename gate (`canonical-sdlc-governing-skill.sh`, the `case "$BASENAME"` block) matches `*.plan.md`/`*.spec.md`/`continuation*.md`/`adr-*.md`, and a bare `rca.md`, `spec.md` or `plan.md` matches none of them, so it exits 0 before the frontmatter check runs. `incident-response` floors at `audited`, which makes this the least-guarded artifact set under the strictest rigor [UNENFORCED]:
 
 ```yaml
 ---
@@ -1207,8 +1171,8 @@ Step 0's artifact inventory lists it if present and resumes from the recorded st
 
 Two `PreToolUse` hooks enforce the contract (full mechanism in the README) [WALL: hooks/canonical-sdlc-evidence-gate.test.sh] [WALL: hooks/canonical-sdlc-governing-skill.test.sh]:
 
-- **`canonical-sdlc-evidence-gate.sh`** (`Bash`) — on `git commit`, blocks (exit 2) if the current step's evidence is missing or unreadable. For `canonical_sdlc_version: 11` it carries the v10 shape table and `## Verification Matrix` validation unchanged on wave/epic plans, and accepts `current: T<n>` task-scale addressing. `scale: task` plans then **block** on the ledger's rigor-keyed lanes — the addressed row's tested-floor presence always, plus proof-shape and auditor/critic tokens once the row's effective rigor reaches `peer-reviewed`/`audited` — and the remaining non-addressed-row ledger-shape checks block too once frontmatter is `rigor: audited`. Separately, an `audited`, `multi_agent: true` wave plan must carry a `## Tasks` section at all (D7 presence — absence blocks, empty is fine, present rows validate tested-floor shape only; `scale: epic` excluded). What stays **log-only**: the epic merge-target check and the intent-scoped Step-5 keys (`refactor`/`tune`) (findings append to `.bionic/memory/sdlc-v11-audit.md` + stderr, exit 0 — never block). For `canonical_sdlc_version: 10` it validates the v10 shape table and the `## Verification Matrix` (per-tier keys, waiver/CONFIRMED discipline); v1–v9 plans use their own tables, never retrofitted. [FORM: hooks/canonical-sdlc-evidence-gate.test.sh]
-- **`canonical-sdlc-governing-skill.sh`** (`Write,Edit`) — blocks any artifact lacking `governing-skill:` frontmatter. On **v11** artifacts it **blocks** (exit 2) on: a `mode:` line (split-brain guard), a missing or non-enum `intent:`/`rigor:`/`scale:`, a barred intent × scale cell, a missing discriminator/opt-in flag or `model_plan`, and (on `*.plan.md` at `sdlc-step ≥ 3`) a missing `## Verification Matrix` — the triple's presence is the gate, with no `mode:` short-circuit (D13). It additionally runs the **log-only** floor-consistency checks (intent floor, spike cap, project floor, epic floor → `.bionic/memory/sdlc-v11-audit.md` + stderr, exit 0). On v4+ v≤10 plans it validates the 5 discriminator + 2 opt-in flags + `model_plan`; on **v10** plans additionally requires the matrix at `sdlc-step ≥ 3`, gating on the legacy `mode:` value (§Legacy modes). [FORM: hooks/canonical-sdlc-governing-skill.test.sh]
+- **`canonical-sdlc-evidence-gate.sh`** (`Bash`) — on `git commit`, blocks (exit 2) when the current step's evidence is missing, unreadable, or the wrong shape for the plan's version and scale, and re-validates the `## Verification Matrix` as a prefix check from step 5 on. Which fields each step owes is §Evidence's per-version shape tables; a handful of v11 checks are deliberately **log-only** (append to `.bionic/memory/sdlc-v11-audit.md`, exit 0) and those tables mark them. [FORM: hooks/canonical-sdlc-evidence-gate.test.sh]
+- **`canonical-sdlc-governing-skill.sh`** (`Write,Edit`) — blocks any artifact lacking `governing-skill:` frontmatter, and on v11 additionally on a `mode:` line (split-brain guard), a missing or non-enum `intent:`/`rigor:`/`scale:`, a barred intent × scale cell, a missing discriminator/opt-in flag or `model_plan`, or — on `*.plan.md` at `sdlc-step ≥ 3` — a missing `## Verification Matrix`. Its floor-consistency checks are **log-only**. [FORM: hooks/canonical-sdlc-governing-skill.test.sh]
 
 ## Subagent Dispatch Convention
 
@@ -1240,24 +1204,21 @@ This prevents subagent wander. [UNENFORCED]
 > Interplay with the model-tier escalation ladder: a `standard` slice that fails twice on `model: sonnet` re-dispatches on `model: opus` (§Model & Token Strategy) — that Opus attempt is the third and final try before this rule fires. Tier escalation happens *within* the three-fail budget, not in addition to it.
 
 1. **If failures are diagnostic** (tests failing, behavior diverging, surprise output) — invoke the **Autonomous Friction Protocol** (§Autonomous Friction Protocol). The three-fail counter resets after a completed MAP-INSTRUMENT-NARROW pass yields a root cause; it does NOT reset on additional speculative fixes.
-2. **If failures are decision-related** (ambiguity, blocked-on-judgment, unclear requirement) — Stop. Do not attempt a fourth time. Surface to the user via **User Decision Protocol**: framing, options for unblocking, why-it-matters. [UNENFORCED]
+2. **If failures are decision-related** (ambiguity, blocked-on-judgment, unclear requirement) — Stop. Do not attempt a fourth time. Surface to the user via the **User Decision Protocol** (§User Decision Protocol); the options are the ways out of the block. [UNENFORCED]
 3. Wait for direction.
 
-**Stop-and-wake list** (active for every unattended wave; expanded at `audited` rigor). One bullet is partly walled; the class is on each bullet, not on this header:
+**Stop-and-wake list** (active for every unattended wave; expanded at `audited` rigor). The lifecycle-specific triggers, plus one catch-all that carries the user's own boundary list; the class marker is on each bullet, not on this header:
 
 - Ambiguous spec requiring a judgment call. [UNENFORCED]
 - New external-API authentication setup. [UNENFORCED]
-- Configuration change that affects billing. [UNENFORCED]
-- Destructive database migration — `DROP` / `TRUNCATE` / unqualified `DELETE` / `ALTER TABLE ... DROP` through a DB CLI [WALL: hooks/protect-database.test.sh]; every other destructive migration, and any migration run outside a recognised CLI [UNENFORCED].
-- Changes to secrets, API keys, or production infrastructure. [UNENFORCED]
-- Any action the user's `CLAUDE.md` marks as requiring approval. [UNENFORCED]
+- Any action the user's `CLAUDE.md` marks as requiring approval. Its `## Boundaries` section is the list — billing-affecting configuration, destructive database migrations, secrets/API-key/credential changes, pushes to protected branches — and their enforcement classes live there, not restated here. [UNENFORCED]
 
 **Incident-response additions:**
 - The fix might mask a deeper issue.
 - Root cause is not yet established.
 - Blast radius is larger than initially scoped.
 
-**On halt:** append a `## Wake Note` section to the plan file. The Wake Note follows the **User Decision Protocol** format — framing, numbered options, why-it-matters. Do not proceed past the block. [UNENFORCED]
+**On halt:** append a `## Wake Note` section to the plan file, in the **User Decision Protocol** format (§User Decision Protocol). Do not proceed past the block. [UNENFORCED]
 
 ## Sub-Skill Loading
 
@@ -1283,11 +1244,11 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 | "The auditor is overkill, my evidence is obviously fine" | Self-graded evidence is the exact root cause the auditor exists to kill. "Obviously fine" is the claim it falsifies. |
 | "I'm confident in my self-review; the adversarial critic is overkill" | Self-review is bounded by what you thought to check. |
 | "The assumption was obvious; no need to log it" | "Obvious" is judged from inside the moment. Log it. |
-| "I can update `## SDLC State` after the commit" | The commit rhythm requires the current step's evidence line in place *before* staging — the evidence gate hook blocks the commit otherwise [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]. |
+| "I can update `## SDLC State` after the commit" | The commit rhythm requires the current step's evidence line in place *before* staging — the evidence gate hook blocks the commit otherwise [FORM: hooks/canonical-sdlc-evidence-gate.test.sh]. |
 | "An RCA is the same as an ADR" | ADRs are forward-facing; RCAs are backward-facing. |
 | "Monitoring already exists; I don't need to check it" | Default assumption is a gap exists; prove "no gap" with evidence. | [UNENFORCED]
 | "Spike code is good, let's just ship it" | Re-enter a ship-capable mode at Step 1. |
-| "Just send the user a paragraph asking what to do" | Use the User Decision Protocol. Numbered options + rationale + why-it-matters. No walls of text. |
+| "Just send the user a paragraph asking what to do" | Use the User Decision Protocol (§User Decision Protocol). No walls of text. |
 | "Parallel dispatch is overhead for a small task" | The default is parallel. Justify sequential. |
 
 ## Red Flags — STOP and Correct
@@ -1295,15 +1256,8 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 
 - Claiming a step is "done" without pasting or linking its evidence artifact.
 - Skipping the load-time triple announcement.
-- Declaring an intent that doesn't match the actual work.
-- Skipping TDD on a code-producing step.
-- Implementing before a plan file exists (any wave mode).
 - Writing an ADR or RCA post-commit "as a follow-up."
-- Producing an incident-response artifact labeled "ADR" when it should be an RCA.
-- Closing an incident without a monitoring gap analysis.
-- Shipping spike code.
 - Reaching Step 9 with no artifact from Step 3.
-- Committing without `## SDLC State` updated for the current step.
 - A wave reaching Step 4 without `## Assumptions` seeded at plan time.
 - Adversarial critic output that is pure agreement.
 - Dispatching a subagent without the current-step + triple + scope-constraint prefix.
@@ -1311,10 +1265,7 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 - Step 8 closing without the wave's commits reachable from the integration branch.
 - Declaring a plan without an `integration-branch:` line.
 - Presenting a Step 0 confirmation display without the `integration-branch:` line.
-- Asking the user a wall-of-text question instead of following the **User Decision Protocol**.
 - Skipping the TaskCreate list or batching task completions at the end.
-- Single-threading a step where 2+ subtasks are clearly independent.
-- Closing Step 5 without an independent auditor report.
 - A self-written `n/a` on a live-tier (T3/T4) matrix row (that is a Waiver Protocol decision, the user's call). [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 - A RED fixture that cannot structurally reach the failure it guards (a proxy regardless of RED→GREEN history). [UNENFORCED]
 - Claiming "delivered/fixed/verified" below the row's contracted tier.
@@ -1324,7 +1275,7 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 | Step | Gate | Evidence |
 |---|---|---|
 | 0. Configure | v11 frontmatter (triple + 5 discriminator + 2 opt-in + `model_plan`) + `## Verification Matrix` derived; `integration-branch:` shown; user confirmed; task list created | `Step 0:` confirmation row |
-| 1. Ideate | Refined idea + "Not Doing" list | Artifacts in spec |
+| 1. Ideate | Refined idea + "Not Doing" list; alternatives lens cites prior design artifacts | Artifacts in spec |
 | 2. Spec | Every requirement has an acceptance criterion | Spec doc |
 | 3. Plan | No placeholders; `integration-branch:` + matrix locked; Step 4 expanded into slices | Plan file |
 | 4. Implement | Every slice RED-first green; worktree if `use_worktree` | RED→GREEN commits |
@@ -1332,5 +1283,5 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 | 6. Review (gate) | Every axis has a verdict; independent critic attached | 5-axis body + critic findings |
 | 7. Document | Every significant decision recorded | ADR(s); `rca.md` for `incident-response` |
 | 8. Integrate & close | Wave merged into `integration-branch`; worktree removed; tmp wiped; tasks completed | `merge:`/`worktree-removed:` + cleanup fields |
-| 9. Ship | Checklist + rollback; monitored, gap closed (`incident-response`) | Deployment + monitoring evidence |
+| 9. Ship | Checklist + rollback; `continuation.md` written; monitored, gap closed (`incident-response`) | Deployment + monitoring evidence + `continuation.md` path |
 | — Commit rhythm | Per-step commit; `## SDLC State` updated before staging | Commit in git (no `commit:` field) |
