@@ -16,8 +16,15 @@
 # directly, on a payload that would otherwise certainly block.
 #
 # AC-5 is discharged by extracting the ratified prompt from the SPEC at test
-# time and asserting the shipped reason still contains it verbatim. That makes
-# spec drift a test failure rather than a silent divergence.
+# time and asserting the shipped reason EQUALS it, whole. That makes spec drift
+# a test failure rather than a silent divergence, in both directions.
+#
+# The equality is only possible because the spec carries the reframe body
+# literally. An earlier revision described it with a placeholder, which made
+# "ship it verbatim" unexecutable and limited this test to the prose either
+# side of the gap. A guard asserts the placeholder never returns: a spec that
+# DESCRIBES a load-bearing string instead of CONTAINING it silently weakens
+# every assertion here.
 #
 # Usage: bash hooks/refuse-and-classify.test.sh
 
@@ -108,31 +115,59 @@ assert_contains "4. Consequence line"          "Consequence"       "$REASON"
 assert_contains "4. reframe marker"            "DECISION REFRAME"  "$REASON"
 
 echo
-echo "AC-5: the reason still matches the SPEC's ratified prompt verbatim"
-# The spec's blockquote carries one angle-bracket placeholder for the reframe
-# body. Everything the spec states LITERALLY — the prose before and after that
-# placeholder — must appear in the shipped reason unchanged. Editing the spec's
-# prompt without editing the hook fails here, which is the point.
+echo "AC-5: the shipped reason IS the spec's ratified prompt, whole"
+# The spec now carries the reframe body LITERALLY — an earlier revision
+# described it with a placeholder, which made "ship it verbatim" unexecutable
+# and forced this test to check only the prose either side of the gap. With the
+# gap closed the assertion is equality over the WHOLE prompt, which is strictly
+# stronger: no substring of the prompt can drift, including the reframe body
+# that is the user's own text and the least paraphrasable part of it.
 if [ -f "$SPEC" ]; then
+  # Blockquote under `### The injected prompt`, unwrapped. Stops at the first
+  # line that is neither blockquote nor blank, so a later blockquote elsewhere
+  # in the section cannot be swept in.
   spec_prompt=$(awk '
     /^### The injected prompt/ { f = 1; next }
-    f && /^[A-Za-z]+ properties are load-bearing/ { exit }
-    f && /^> / { sub(/^> /, ""); print }
-    f && /^>$/ { print "" }
-  ' "$SPEC" | tr '\n' ' ' | tr -s ' ')
-  norm_reason=$(printf '%s' "$REASON" | tr '\n' ' ' | tr -s ' ')
-  before=${spec_prompt%%<*}
-  after=${spec_prompt#*>}
-  before=$(printf '%s' "$before" | sed 's/ *$//')
-  after=$(printf '%s' "$after" | sed 's/^ *//; s/ *$//')
+    f && /^> / { seen = 1; sub(/^> /, ""); print; next }
+    f && /^>$/ { print ""; next }
+    f && seen && /^[[:space:]]*$/ { next }
+    f && seen { exit }
+  ' "$SPEC" | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//')
+  norm_reason=$(printf '%s' "$REASON" | tr '\n' ' ' | sed 's/  */ /g; s/^ //; s/ $//')
+
   TOTAL=$((TOTAL + 1))
-  if [ ${#before} -gt 80 ] && [ ${#after} -gt 40 ]; then
-    PASS=$((PASS + 1)); printf '  PASS  spec blockquote extracted (%d + %d chars around the placeholder)\n' "${#before}" "${#after}"
+  if [ ${#spec_prompt} -gt 600 ]; then
+    PASS=$((PASS + 1)); printf '  PASS  spec prompt extracted whole (%d chars, no placeholder)\n' "${#spec_prompt}"
   else
-    FAIL=$((FAIL + 1)); printf '  FAIL  spec blockquote extracted (got %d + %d)\n' "${#before}" "${#after}"
+    FAIL=$((FAIL + 1)); printf '  FAIL  spec prompt extracted whole (got %d chars)\n' "${#spec_prompt}"
   fi
-  assert_contains "spec prose BEFORE the placeholder is shipped verbatim" "$before" "$norm_reason"
-  assert_contains "spec prose AFTER the placeholder is shipped verbatim"  "$after"  "$norm_reason"
+
+  # A placeholder must never come back: it is what made the prompt
+  # unimplementable, and it would silently weaken every assertion below.
+  TOTAL=$((TOTAL + 1))
+  case "$spec_prompt" in
+    *"<"*">"*) FAIL=$((FAIL + 1)); printf '  FAIL  spec prompt is literal, not a description (placeholder present)\n' ;;
+    *)         PASS=$((PASS + 1)); printf '  PASS  spec prompt is literal, not a description\n' ;;
+  esac
+
+  TOTAL=$((TOTAL + 1))
+  if [ "$norm_reason" = "$spec_prompt" ]; then
+    PASS=$((PASS + 1)); printf '  PASS  shipped reason EQUALS the spec prompt, byte for byte\n'
+  else
+    FAIL=$((FAIL + 1)); printf '  FAIL  shipped reason EQUALS the spec prompt\n'
+    printf '        spec  (%d): %s\n' "${#spec_prompt}" "$spec_prompt"
+    printf '        hook  (%d): %s\n' "${#norm_reason}" "$norm_reason"
+  fi
+
+  # The reframe body specifically — the user's own words, the part an
+  # implementer is most likely to "improve".
+  assert_contains "reframe body: opening sentence"  \
+    "Reframe the decision(s) at a higher conceptual level in plain language" "$REASON"
+  assert_contains "reframe body: options and rationale" \
+    "What are the numbered options, your recommendation(s), and the accompanying rationale?" "$REASON"
+  assert_contains "reframe body: significance and compounding impacts" \
+    "Include significance of the decision(s), downstream and compounding impacts" "$REASON"
+  assert_contains "reframe body: brevity instruction" "Be as concise as possible" "$REASON"
 else
   fail "spec present for the drift check" "not found: $SPEC"
 fi
