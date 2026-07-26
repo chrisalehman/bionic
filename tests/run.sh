@@ -36,6 +36,11 @@ done
 run "scripts.test.sh" bash tests/scripts.test.sh
 run "installer-behavior.test.sh" bash tests/installer-behavior.test.sh
 run "agent-roles.test.sh" bash tests/agent-roles.test.sh
+# Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
+# 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
+# false green — but it was the ONLY runner carrying lib/platform.test.sh, so
+# retiring it without this line would have traded one blind spot for another.
+run "platform.test.sh" bash lib/platform.test.sh
 # The verifier's own behaviour gate, then its DEFAULT run over the real governed
 # surfaces. The default run was deliberately unwired while slices 4/3–4/5 were
 # still marking (a gate failing until then would have taken this suite red
