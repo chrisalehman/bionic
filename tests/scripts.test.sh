@@ -737,10 +737,21 @@ expect_true "evidence-gate hook pins SUPPORTED_SDLC_VERSION" \
   grep -q 'SUPPORTED_SDLC_VERSION=12' "$_egate"
 expect_true "governing-skill hook pins SUPPORTED_SDLC_VERSION" \
   grep -q 'SUPPORTED_SDLC_VERSION=12' "$_gskill"
+# The contract: comparing SDLC_VERSION to the $SUPPORTED_SDLC_VERSION *variable*
+# is the one legitimate check; comparing it to a version *literal* is the
+# regression. Three shapes a reintroduced version arm actually takes in bash:
+#   1. a dereference compared to a digit — [ "$SDLC_VERSION" != "11" ],
+#      [[ ${SDLC_VERSION} == 9 ]], [ "$SDLC_VERSION" -ne 10 ]
+#   2. a bare name compared to a digit in arithmetic context — (( SDLC_VERSION == 11 ))
+#      (two-char operators only, so the SUPPORTED_SDLC_VERSION=12 pin is not flagged)
+#   3. a case dispatch — case "$SDLC_VERSION" in 11) ...
+_vdispatch_re='\$\{?(SUPPORTED_)?SDLC_VERSION\}?"?[[:space:]]*(=|==|!=|-eq|-ne|-lt|-le|-gt|-ge)[[:space:]]*"?[0-9]'
+_vdispatch_re="${_vdispatch_re}|(^|[^A-Z_])SDLC_VERSION[[:space:]]*(==|!=|-eq|-ne)[[:space:]]*\"?[0-9]"
+_vdispatch_re="${_vdispatch_re}|case[[:space:]]+\"?\\\$\\{?SDLC_VERSION"
 expect_false "evidence-gate hook has no version-dispatch chain" \
-  grep -qE 'SDLC_VERSION"?[[:space:]]*=[[:space:]]*"(1|2|3|4|5|6|7|8|9|10|11)"' "$_egate"
+  grep -qE "$_vdispatch_re" "$_egate"
 expect_false "governing-skill hook has no version-dispatch chain" \
-  grep -qE 'SDLC_VERSION"?[[:space:]]*=[[:space:]]*"(1|2|3|4|5|6|7|8|9|10|11)"' "$_gskill"
+  grep -qE "$_vdispatch_re" "$_gskill"
 
 # 4r: README promotes canonical-sdlc as flagship (Wave 6 closure; Wave 7 repointed link)
 expect_true "README has a Canonical SDLC pattern subsection" \
