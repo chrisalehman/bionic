@@ -260,7 +260,7 @@ Evidence falls into exactly two tiers:
 | Tier | Always present? | Enforced by |
 |---|---|---|
 | **Verification** | Yes — mandatory | `canonical-sdlc-evidence-gate.sh` (presence + per-step shape on v3–v11; v11 wave/epic shares the v10 shape) |
-| **Handoff** | Only when a plan spans sessions | Skill prose + the Stop-hook checkpoint |
+| **Handoff** | Only when a plan spans sessions | Skill prose only — no hook writes it and no hook checks it |
 
 There is no third "narrative" tier. Decision-point prose to the user is governed instead by the **User Decision Protocol**: frame the decision at the highest useful level of abstraction, offer numbered options each with a one-line rationale, state significance in one sentence, and keep the whole thing under ~200 words. If stating the question needs a filename or line number, the abstraction level is wrong — climb a rung and rewrite.
 
@@ -381,7 +381,7 @@ The `bundle-fresh:` value is the pasted output line of the project's freshness t
 
 The `drive-check:` value is the observed state delta from one trusted interaction, read back semantically (`drive-check: <observed delta>`), a named suite test that makes the same real contact (`drive-check: suite: <named test — what it asserts>`), or `n/a: <reason>` when no browser modality applies. Like `bundle-fresh:`, the hook validates presence and the placeholder ban only — the semantics live in skill prose.
 
-The `stack-health:` value is the before/after snapshot of the serving stack's runtime-integrity indicators — process/container restart counts, crash/OOM last-state — showing no change across the walk (`stack-health: <before/after snapshot, no delta>`), or `n/a: <reason>` when no long-running serve is observed. The snapshot command is project-specific like the freshness tool; the hook validates presence and the placeholder ban only. It catches restart/crash-shaped degradation — a crash-restart mid-walk that can swallow the exact bug being probed while the app returns looking healthy — not degradation in general.
+The `stack-health:` value is the before/after snapshot of the serving stack's runtime-integrity indicators — process/container restart counts, crash/OOM last-state — showing no change across the walk (`stack-health: <before/after snapshot, no delta>`), or `n/a: <reason>` when no long-running serve is observed. The snapshot command is project-specific like the freshness tool; the hook validates presence and the placeholder ban only — nothing in the harness compares the before against the after. Reading the snapshot is a human judgment, and only the walker and the Step-5 auditor can catch a delta. The class of failure the snapshot exists to catch is restart/crash-shaped degradation — a crash-restart mid-walk that can swallow the exact bug being probed while the app returns looking healthy — not degradation in general.
 
 The gate blocks (exit 2) when the current step's evidence line is missing, empty, or a placeholder token (`todo`, `pending`, `inprogress`, `xxx`, `tbd`, `placeholder`).
 
@@ -457,7 +457,7 @@ session-count: 2
 
 `Decisions ratified this session` resets each session; everything else persists, capped per field. The handoff is **rewritten in place** on every trigger, never appended — a 3-session plan carries the same handoff size as a 1-session plan.
 
-**Triggers:** session end mid-plan (`Stop` event with `sdlc-step: < 10`), context-compaction risk (~90% utilization), or an explicit user checkpoint.
+**Triggers** — all three are agent conventions; no hook fires any of them: ending a session mid-plan (`sdlc-step: < 10`), context-compaction risk (~90% utilization), or an explicit user checkpoint.
 
 **Strip:** a plan that opens and closes within one session never gets a handoff; Step 8's cleanup half strips a leftover handoff on merge.
 

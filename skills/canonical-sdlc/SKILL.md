@@ -1086,7 +1086,7 @@ Before v11, this skill ran on a single `mode:` axis with five values. Those name
 
 ## Evidence (two tiers)
 
-Two evidence tiers: **Verification** (always mandatory; shape-checked by `canonical-sdlc-evidence-gate.sh` on v3–v10 plans) and **Handoff** (only when a plan spans sessions; skill prose + Stop-hook checkpoint). Decision-point prose to the user is the **User Decision Protocol** above, not a tier. [FORM: hooks/canonical-sdlc-evidence-gate.test.sh]
+Two evidence tiers: **Verification** (always mandatory; shape-checked by `canonical-sdlc-evidence-gate.sh` on v3–v10 plans) [FORM: hooks/canonical-sdlc-evidence-gate.test.sh] and **Handoff** (only when a plan spans sessions; skill prose only — no hook writes it and no hook checks it) [UNENFORCED]. Decision-point prose to the user is the **User Decision Protocol** above, not a tier.
 
 ### Verification tier — mandatory, shape-checked
 [FORM: hooks/canonical-sdlc-evidence-gate.test.sh]
@@ -1178,7 +1178,7 @@ session-count: 2
 
 #### Triggers — when handoff is written
 
-Three triggers: session end mid-plan (`Stop` with `sdlc-step: < 10`); context-compaction risk (~90% utilization); or explicit user trigger (`/checkpoint`). The skill **rewrites the section in place** each time — never appends; handoff is bounded. Persistence is marked inline in the template (`RESET each session` vs `PERSISTS`). [UNENFORCED]
+Three triggers, all agent conventions — no hook fires any of them: ending a session mid-plan (`sdlc-step: < 10`); context-compaction risk (~90% utilization); or explicit user trigger (`/checkpoint`). The skill **rewrites the section in place** each time — never appends; handoff is bounded. Persistence is marked inline in the template (`RESET each session` vs `PERSISTS`). [UNENFORCED]
 
 #### When handoff is NOT written
 
@@ -1186,7 +1186,7 @@ Single-session plans never get a handoff section. Step 8 (cleanup half) strips t
 
 ## Continuation Artifacts
 
-Long-running epics span sessions. Continuation artifacts make session handoff automatic.
+Long-running epics span sessions. Continuation artifacts carry the handoff across that boundary: an agent writes `continuation.md` at Step 9 and an agent reads it at the next session's Step 0. Nothing autosaves or auto-reads them — no hook is involved at either end. [UNENFORCED]
 
 **End-of-wave (`continuation.md`).** Step 9 emits `<docs-root>/plans/epic-NN-<slug>/continuation.md` summarizing:
 - Wave just completed (id, scope, outcome).
