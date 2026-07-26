@@ -286,6 +286,66 @@ run_hook "$(payload true "$T8" "$ASK")"
 assert_contains "record: re-entry marked" "suppressed=re-entry" "$(tail -1 "$REC")"
 [ -z "$HOOK_STDOUT" ] && pass "record: logging did not resurrect the block" || fail "re-entry still silent"
 
+echo "  (S1: a crafted session id cannot forge a second record)"
+# decision-quality.md is declared machine-parsed by W6 and is written one record
+# per line. session_id is the only field on that line that comes from outside
+# the hook, so it is the only place a newline could inject a whole extra record.
+# Not a live vector today — the id is a harness-generated UUID — but the file is
+# an input to something else, and an injectable line format stays injectable.
+before=$(wc -l < "$REC" | tr -d ' ')
+FORGED_ID='real-id
+- 2099-01-01T00:00:00Z refuse-and-classify: fired=1 signals=question session=forged'
+T10="$TMP/t10.jsonl"; write_transcript "$T10" "$WORK"
+run_hook "$(jq -nc --arg t "$T10" --arg c "$PROJ" --arg m "$WORK" --arg s "$FORGED_ID" \
+  '{session_id:$s, transcript_path:$t, cwd:$c, hook_event_name:"Stop",
+    stop_hook_active:false, last_assistant_message:$m}')"
+after=$(wc -l < "$REC" | tr -d ' ')
+TOTAL=$((TOTAL + 1))
+if [ "$after" -eq $((before + 1)) ]; then
+  PASS=$((PASS + 1)); printf '  PASS  record: newline-bearing session id appends exactly one line\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  record: newline-bearing session id appended %d lines\n' "$((after - before))"
+fi
+TOTAL=$((TOTAL + 1))
+if grep -q 'session=forged' "$REC" 2>/dev/null; then
+  FAIL=$((FAIL + 1)); printf '  FAIL  record: a forged record reached the stream\n'
+else
+  PASS=$((PASS + 1)); printf '  PASS  record: no forged record in the stream\n'
+fi
+# A tab is the other delimiter a parser is likely to reach for.
+TOTAL=$((TOTAL + 1))
+run_hook "$(jq -nc --arg t "$T10" --arg c "$PROJ" --arg m "$WORK" --arg s "$(printf 'id\twith\ttabs')" \
+  '{session_id:$s, transcript_path:$t, cwd:$c, hook_event_name:"Stop",
+    stop_hook_active:false, last_assistant_message:$m}')"
+if printf '%s' "$(tail -1 "$REC")" | grep -q "$(printf '\t')"; then
+  FAIL=$((FAIL + 1)); printf '  FAIL  record: a tab from session_id reached the record line\n'
+else
+  PASS=$((PASS + 1)); printf '  PASS  record: tabs are stripped from session_id\n'
+fi
+
+echo "  (a field separator smuggled into session_id cannot suppress the refusal)"
+# The hook reads the whole payload in one jq spawn and frames the header fields
+# on a unit separator. That framing is itself an injection surface: a separator
+# inside an EARLIER field would slide every later field left, and one of those
+# fields is stop_hook_active — the flag that decides whether the hook may block
+# at all. session_id is therefore read LAST, where surplus fields fold into it
+# harmlessly, and is charset-restricted on top.
+T11="$TMP/t11.jsonl"; write_transcript "$T11" "$ASK"
+SEP=$(printf '\037')
+run_hook "$(jq -nc --arg t "$T11" --arg c "$PROJ" --arg m "$ASK" \
+  --arg s "id${SEP}true${SEP}${PROJ}${SEP}${T11}" \
+  '{session_id:$s, transcript_path:$t, cwd:$c, hook_event_name:"Stop",
+    stop_hook_active:false, last_assistant_message:$m}')"
+DEC=$(printf '%s' "$HOOK_STDOUT" | jq -r '.decision // empty' 2>/dev/null)
+[ "$DEC" = "block" ] && pass "separator injection does not flip stop_hook_active" \
+  || fail "separator injection does not flip stop_hook_active" "got: '$DEC'"
+TOTAL=$((TOTAL + 1))
+if printf '%s' "$(tail -1 "$REC")" | grep -q "$SEP"; then
+  FAIL=$((FAIL + 1)); printf '  FAIL  record: a separator from session_id reached the record line\n'
+else
+  PASS=$((PASS + 1)); printf '  PASS  record: separators are stripped from session_id\n'
+fi
+
 echo "  (incident 0001: nothing is written inside the project tree)"
 TOTAL=$((TOTAL + 1))
 stray=$(find "$PROJ" -type f 2>/dev/null | wc -l | tr -d ' ')
@@ -311,6 +371,42 @@ chmod 700 "$UNWRIT"; rm -rf "$UNWRIT"
 [ "$HOOK_EXIT" -eq 0 ] && pass "unwritable HOME: exit 0" || fail "unwritable HOME: exit 0" "got $HOOK_EXIT"
 DEC=$(printf '%s' "$HOOK_STDOUT" | jq -r '.decision // empty' 2>/dev/null)
 [ "$DEC" = "block" ] && pass "unwritable HOME: the refusal still ships" || fail "unwritable HOME: refusal still ships" "got '$DEC'"
+
+echo
+echo "The fail-open asymmetry: two defaults pointing OPPOSITE ways, both deliberate"
+# Collapsing the payload reads into one jq spawn is exactly the kind of change
+# that quietly flattens this, so it is asserted directly rather than left to be
+# inferred from an exit code.
+#
+# A well-formed object with stop_hook_active ABSENT is the FIRST Stop of a turn.
+# `// false` makes it block, which is the entire purpose of the hook.
+T12="$TMP/t12.jsonl"; write_transcript "$T12" "$ASK"
+run_hook "$(jq -nc --arg t "$T12" --arg c "$PROJ" --arg m "$ASK" \
+  '{session_id:"scrubbed", transcript_path:$t, cwd:$c,
+    hook_event_name:"Stop", last_assistant_message:$m}')"
+DEC=$(printf '%s' "$HOOK_STDOUT" | jq -r '.decision // empty' 2>/dev/null)
+[ "$DEC" = "block" ] && pass "key ABSENT on a well-formed object: // false → blocks" \
+  || fail "key ABSENT on a well-formed object: // false → blocks" "got: '$DEC'"
+
+# An UNPARSEABLE payload resolves the other way: treat it as already-active, so
+# a hook that cannot read the flag can never block a second time. Silence alone
+# would not prove this — the hook has a dozen other ways to exit 0 — so the
+# accrued marker is what pins which branch ran. CLAUDE_PROJECT_DIR supplies the
+# project root that the unreadable payload cannot.
+HOOK_STDOUT=$(printf '%s' '{"session_id":"x", not valid json' \
+  | HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$HOOK" 2>/dev/null); HOOK_EXIT=$?
+assert_contains "unparseable payload: took the already-active path" \
+  "suppressed=re-entry" "$(tail -1 "$REC")"
+[ -z "$HOOK_STDOUT" ] && pass "unparseable payload: still no block" \
+  || fail "unparseable payload: still no block" "got: $HOOK_STDOUT"
+
+# Valid JSON that is not an object is the same fail-open direction.
+HOOK_STDOUT=$(printf '%s' '"a bare string"' \
+  | HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$HOOK" 2>/dev/null); HOOK_EXIT=$?
+assert_contains "valid JSON but not an object: already-active path" \
+  "suppressed=re-entry" "$(tail -1 "$REC")"
+[ -z "$HOOK_STDOUT" ] && pass "valid JSON but not an object: no block" \
+  || fail "valid JSON but not an object: no block" "got: $HOOK_STDOUT"
 
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
