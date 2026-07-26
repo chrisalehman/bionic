@@ -64,7 +64,7 @@ The **core profile** lives in [`claude-config.txt`](claude-config.txt) — edit 
 | **MCP servers** | context7, chrome-devtools *(Pencil's MCP server self-registers whenever the Pencil app is running — no config entry needed)* |
 | **Skills** | **bionic:canonical-sdlc** (flagship — 10-step autonomous lifecycle), bionic:browser-verify, bionic:rigorous-refactor, bionic:ralph-loop, bionic:map-instrument-narrow, bionic:skill-factory, excalidraw-diagram, humanizer, notebooklm, impeccable (20+ design skills) |
 | **Hooks** | protect-main.sh, protect-database.sh, memory-cleanup.sh, terseness-reminder.sh, **canonical-sdlc-evidence-gate.sh**, **canonical-sdlc-governing-skill.sh** |
-| **Philosophy** | 10 principles for agentic development → [`~/.claude/CLAUDE.md`](claude-global.md) |
+| **Philosophy** | 8 principles for agentic development → [`~/.claude/CLAUDE.md`](claude-global.md) |
 | **Shell alias** | `claude` → `claude --dangerously-skip-permissions` |
 
 The **everything profile** ([`claude-config.everything.txt`](claude-config.everything.txt)) layers on the optional catalog: deployment platforms (stripe, vercel, supabase, fastlane, eas-cli), API tooling (httpie, grpcurl, protoc), observability (@sentry/cli + sentry MCP *(requires env vars)*), productivity (trello MCP *(requires env vars)*), plus commented sections for Kubernetes, databases, and Firebase.
@@ -81,7 +81,7 @@ bionic/
 ├── claude-bootstrap.sh      # Install (idempotent)
 ├── claude-reset.sh          # Remove everything
 ├── wsl-setup.sh             # One-time WSL2 setup (Windows)
-├── test.sh                  # Run all test suites locally
+├── test.sh                  # Convenience entry point — delegates to tests/run.sh
 ├── lib/                     # Shared libraries
 │   ├── platform.sh          # OS detection (macOS/Linux)
 │   └── platform.test.sh     # Platform detection tests
@@ -410,9 +410,9 @@ Why this is safe despite the name: The hooks provide the actual safety net. `--d
 
 The file [`claude-global.md`](claude-global.md) is installed to `~/.claude/CLAUDE.md` (wrapped in HTML comment markers so re-runs update without clobbering your additions). This is the instructions file that Claude Code reads at the start of every session, in every project.
 
-**Why global, not project-level:** Claude Code reads both `~/.claude/CLAUDE.md` (global) and `.claude/CLAUDE.md` (project-level) — they compose. The principles here are *agent-level behavior*, not project-specific conventions. "Deploy the team," "prove it works," and "guard your context" apply regardless of what you're building. Making them global means bootstrap sets it once and every project inherits automatically — no per-project setup, no drift between repos. Project-level `CLAUDE.md` files are still the right place for project-specific instructions (coding style, architecture decisions, repo-specific boundaries). The two layers stack: global provides the base operating model, project-level adds local context.
+**Why global, not project-level:** Claude Code reads both `~/.claude/CLAUDE.md` (global) and `.claude/CLAUDE.md` (project-level) — they compose. The principles here are *agent-level behavior*, not project-specific conventions. "Act, don't ask," "prove it works," and "guard your context" apply regardless of what you're building. Making them global means bootstrap sets it once and every project inherits automatically — no per-project setup, no drift between repos. Project-level `CLAUDE.md` files are still the right place for project-specific instructions (coding style, architecture decisions, repo-specific boundaries). The two layers stack: global provides the base operating model, project-level adds local context.
 
-It teaches ten principles and four hard boundaries:
+It teaches eight principles and four hard boundaries:
 
 **Principles** — These shape how Claude approaches work, ordered by frequency of relevance:
 
@@ -424,10 +424,8 @@ It teaches ten principles and four hard boundaries:
 | **Prove it works** | Never claim done without evidence. Run tests, show output. | Without this, Claude will say "I've fixed the bug" without running the test suite. Trust but verify. |
 | **Measure before fixing** | When debugging, instrument the system to gather evidence before attempting any fix. Map, capture, narrow, then fix. | Prevents circular debugging — without data, agents guess at causes and loop through uninformed fix attempts. The philosophical complement to the map-instrument-narrow technique skill. |
 | **Act, don't ask** | Operate autonomously. Fix bugs without hand-holding. | Claude's default behavior is overly cautious — asking permission for things a senior engineer would just do. This recalibrates. |
-| **Guard your context** | Main conversation is for decisions. Offload research and implementation to subagents. | Context window pollution is the #1 cause of degraded Claude performance mid-session. This principle keeps the main thread clean. |
-| **Deploy the team** | Use 100+ specialists in parallel. Default to subagents; reserve Agent Teams for mid-flight coordination. | Without this, Claude defaults to doing everything in one context window — slower, worse results, wastes the subagent infrastructure you just installed. |
-| **Keep a project notebook** | Maintain `.bionic/memory/` with an INDEX.md brain, context.md for active state, and topical files for deep context. | Anyone (including future Claude sessions) can open the folder and understand the project state, decisions made, and lessons learned. |
-| **Learn from corrections** | Save corrections to the notebook immediately. Never repeat the same mistake. | Claude has no cross-session memory by default. The notebook is a persistent knowledge base that compounds across sessions. |
+| **Guard your context** | Main conversation is for decisions. Offload research and implementation to subagents, and dispatch parallel teams for independent tasks. | Context window pollution is the #1 cause of degraded Claude performance mid-session. This principle keeps the main thread clean and puts the subagent infrastructure you just installed to work. |
+| **Keep a project notebook** | Maintain `.bionic/memory/`: `INDEX.md` and `context.md` read at session start, topical files for deep context, and every correction written down as a rule the moment it happens. | Claude has no cross-session memory by default. Anyone — including future Claude sessions — can open the folder and understand project state, decisions, and lessons that would otherwise be relearned. |
 
 **Memory architecture** — The project notebook at `.bionic/memory/` is designed around two constraints: context windows are expensive, and most memories are one-liners.
 
@@ -476,7 +474,7 @@ These are disabled by default. Uncomment in `claude-config.everything.txt` and r
 
 ## Safety
 
-Hooks intercept `Bash` commands to catch accidental pushes to main and destructive SQL before they happen. The philosophy in [`claude-global.md`](claude-global.md) teaches Claude judgment — ten principles for when to act, when to pause, and when to escalate. See [Hooks](#hooks-safety-guardrails--canonical-sdlc-enforcement) and [Global Philosophy](#global-philosophy-claudemd) above for details.
+Hooks intercept `Bash` commands to catch accidental pushes to main and destructive SQL before they happen. The philosophy in [`claude-global.md`](claude-global.md) teaches Claude judgment — eight principles for when to act, when to pause, and when to escalate. See [Hooks](#hooks-safety-guardrails--canonical-sdlc-enforcement) and [Global Philosophy](#global-philosophy-claudemd) above for details.
 
 ## Requirements
 
