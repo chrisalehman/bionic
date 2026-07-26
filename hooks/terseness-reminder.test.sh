@@ -51,6 +51,18 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local label="$1" needle="$2" haystack="$3"
+  TOTAL=$((TOTAL + 1))
+  if [[ "$haystack" != *"$needle"* ]]; then
+    PASS=$((PASS + 1))
+    printf '  PASS  %s\n' "$label"
+  else
+    FAIL=$((FAIL + 1))
+    printf '  FAIL  %s (found %q)\n' "$label" "$needle"
+  fi
+}
+
 run_hook() {
   local prompt="$1"
   local input
@@ -86,6 +98,36 @@ assert_contains "exempt: code" "code" "$ctx"
 assert_contains "exempt: evidence blocks" "evidence blocks" "$ctx"
 assert_contains "exempt: commit messages" "commit messages" "$ctx"
 assert_contains "exempt: security warnings" "security warnings" "$ctx"
+
+echo "Every exemption CLAUDE.md grants is carried in the payload"
+# Source of truth is claude-global.md's `Write normally (not terse) for:`
+# line — the file claude-bootstrap.sh deploys to ~/.claude/CLAUDE.md. The
+# payload fires every turn, so an exemption the section grants but the payload
+# omits is a per-turn narrowing of the live rule. Direction matters: the four
+# assertions above pin named exemptions into the payload; this one pins the
+# payload to the section, so adding an exemption there takes this suite red
+# until the hook carries it too.
+GLOBAL="$(cd "$(dirname "$0")/.." && pwd)/claude-global.md"
+exempt_line=$(grep -m1 '^Write normally (not terse) for:' "$GLOBAL" || true)
+assert_contains "claude-global.md carries the exemption line" "Write normally" "$exempt_line"
+exempt_items=${exempt_line#*for: }
+exempt_items=${exempt_items%.}
+IFS=',' read -r -a exempt_arr <<< "$exempt_items"
+for item in "${exempt_arr[@]}"; do
+  item="${item#"${item%%[![:space:]]*}"}"
+  item="${item%"${item##*[![:space:]]}"}"
+  [ -n "$item" ] || continue
+  assert_contains "exemption from claude-global.md: $item" "$item" "$ctx"
+done
+
+echo "Payload stays in scope: the terseness section, and nothing else"
+# Regression for epic-11 W2. A deployed-but-uncommitted payload had compressed
+# `## Before asking me for anything` into this hook; 89a26f9 replaced that
+# section with `## When you need something from me` and the injected copy was
+# left restating a rule that no longer existed. Every rule other than
+# `## Terseness` lives in CLAUDE.md once.
+assert_not_contains "no request-to-user protocol (label)" "DECISION REQUIRED" "$ctx"
+assert_not_contains "no request-to-user protocol (preamble)" "BEFORE ASKING" "$ctx"
 
 echo "Payload includes BLUF directive (lead with the answer)"
 assert_contains "BLUF directive" "Lead with the answer" "$ctx"
