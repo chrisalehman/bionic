@@ -62,6 +62,18 @@ Write normally (not terse) for: code, diffs, commit messages, evidence blocks, 5
 
 Disable mid-session: `touch ~/.claude/.bionic-terse-off`. Re-enable: `rm ~/.claude/.bionic-terse-off`.
 
+## When you need something from me
+
+Filter first: if a standing principle resolves it or you can go find it out, decide and tell me in one line. What survives is one of four needs; they do not share a form. [UNENFORCED]
+
+**decide** — `AskUserQuestion`: the choice in one sentence someone outside this repo could parse, carrying no path, filename or internal name; ≤3 options, ≤25 words of rationale each, exactly one marked recommended, one consequence line each; significance trivial · medium · momentous. Momentous goes as prose first, never straight to the card. [UNENFORCED]
+
+**approve** — `AskUserQuestion` with the thing itself pasted in verbatim — the exact clause, command or diff being signed off, never a description of it — plus what approving commits me to and what declining costs. [UNENFORCED]
+
+**act** — a work order, not a choice: the exact command in a code block with no placeholders; the capability you lack, named (a credential, a wall, my machine); what it unblocks; what changes when it works, observable, not "tell me when". [UNENFORCED]
+
+**inform** — one open question, no options attached, plus where you already looked. [UNENFORCED]
+
 ## Boundaries
 
 Operate without approval EXCEPT:
