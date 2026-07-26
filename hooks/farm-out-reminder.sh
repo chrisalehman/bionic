@@ -3,7 +3,7 @@
 # commands DENY with a redirect to the right role; fuzzy production-shaped
 # commands get ONE additionalContext nudge per class per session; every
 # tier-1/tier-2 event logs one line to
-# $HOME/.claude/logs/<project-slug>/sdlc-v11-audit.md — outside every consuming
+# $HOME/.claude/logs/<project-slug>/sdlc-audit.md — outside every consuming
 # project tree (incident 0001) — via audit_path() (log_finding() shape, own
 # copy — deliberate per-hook duplication).
 #
@@ -60,7 +60,7 @@ audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
   local base sum
   base=$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')
   sum=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
-  printf '%s/.claude/logs/%s-%s/sdlc-v11-audit.md' "$HOME" "$base" "$sum"
+  printf '%s/.claude/logs/%s-%s/sdlc-audit.md' "$HOME" "$base" "$sum"
 }
 
 log_event() {  # $1=event $2=class

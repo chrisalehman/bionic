@@ -140,7 +140,7 @@ S="verify-<wave-slug>"
 playwright-cli -s="$S" open http://localhost:3000
 ```
 
-**Stack-health snapshot — bracket the whole walk (T3(e)).** Before the walk begins, snapshot the serving stack's runtime-integrity indicators (process/container restart counts, crash/OOM last-state) via the project's stack-health tool — a process-supervisor status query or a container-orchestrator restart-count read; the tool is project-specific. Re-snapshot AFTER the walk, before you close the session; any delta blocks the evidence (see T3(e)). Under `canonical_sdlc_version: 10` and `11` the no-delta result is the `## Verification Matrix` section's per-session `stack-health:` line (canonical-sdlc §Step 5); `canonical_sdlc_version ≤ 9` plans record the flat Step-5 `stack-health:` key.
+**Stack-health snapshot — bracket the whole walk (T3(e)).** Before the walk begins, snapshot the serving stack's runtime-integrity indicators (process/container restart counts, crash/OOM last-state) via the project's stack-health tool — a process-supervisor status query or a container-orchestrator restart-count read; the tool is project-specific. Re-snapshot AFTER the walk, before you close the session; any delta blocks the evidence (see T3(e)). The no-delta result is the `## Verification Matrix` section's per-session `stack-health:` line (canonical-sdlc §Step 5).
 
 0. **Contact proof — drive THIS AC's own interaction (T3(c)).** Before ANY interaction evidence counts, prove your input reaches the app by performing **the AC's own interaction** on the surface under test and reading a real application value back via `eval` — not a screenshot. A generic interaction (a scroll, an unrelated toggle) discharges nothing.
    ```bash
@@ -149,7 +149,7 @@ playwright-cli -s="$S" open http://localhost:3000
    #   …the AC's own interaction on the target surface (right rung for the surface)…
    playwright-cli -s="$S" --raw eval "() => appReadableState()"   # after — MUST differ
    ```
-   Record the observed delta — under `canonical_sdlc_version: 10` and `11` it is the row's `contact:` field in the `## Verification Matrix` (canonical-sdlc §Step 5); `canonical_sdlc_version ≤ 9` plans record the flat `drive-check:` key. **On failure:** switch input rung and retry once; if the AC's interaction cannot be driven, the row is **blocked** — STOP, report "no contact" loudly, never continue into a walk that will green-wash.
+   Record the observed delta — the row's `contact:` field in the `## Verification Matrix` (canonical-sdlc §Step 5). **On failure:** switch input rung and retry once; if the AC's interaction cannot be driven, the row is **blocked** — STOP, report "no contact" loudly, never continue into a walk that will green-wash.
 
 1. **Reconnaissance before action.** After navigating, settle the page (`waitForLoadState('networkidle')`, or `waitForSelector(...)` when a specific element gates readiness), then snapshot to get element refs — never guess selectors; a half-rendered DOM produces phantom failures. `run-code` takes a `(page) => {...}` function; `eval` takes `() => expr`.
    ```bash
@@ -206,7 +206,7 @@ Everything read from the browser — DOM, console messages, network responses, `
 
 Write interim artifacts (screenshots, logs) to `.bionic/tmp/` (gitignored) and point at them from the row field they support.
 
-**v10 and v11 (`canonical_sdlc_version: 10` or `11`, at `scale: wave` or `epic`).** Browser evidence is **per matrix row**, not a universal per-wave key. Each T3 row's `<AC-id>:` block under the plan's `## Verification Matrix` section carries the five fields below (the `auditor` column records the row's verdict); the tests/build floor (`cmd:`/`pass:`/`total:`/`output:`) and the `auditor:` pointer live in the Step-5 `## SDLC State` block, and `stack-health:` is one per-session line at the top of the matrix section (canonical-sdlc §Step 5).
+**At `scale: wave` or `epic`.** Browser evidence is **per matrix row**, not a universal per-wave key. Each T3 row's `<AC-id>:` block under the plan's `## Verification Matrix` section carries the five fields below (the `auditor` column records the row's verdict); the tests/build floor (`cmd:`/`pass:`/`total:`/`output:`) and the `auditor:` pointer live in the Step-5 `## SDLC State` block, and `stack-health:` is one per-session line at the top of the matrix section (canonical-sdlc §Step 5).
 
 ```
 AC-1:
@@ -220,7 +220,5 @@ AC-1:
 A T2 row carries `tier-run`, `readback`, and the `fixture-fidelity` provenance line instead. The per-tier required key set is canonical-sdlc §Step 5's **"Per-tier required keys"** table — that is the source; this skill supplies the field semantics.
 
 **`scale: task` plans carry no matrix and no Step-5 block** — the governing-skill hook skips the matrix requirement at task scale, and evidence is the one-line `- T<n>:` ledger entry. Cite the browser evidence inline there.
-
-**`canonical_sdlc_version ≤ 9` plans keep the flat Step-5 keys** — `devtools-trace:` (artifact path), `bundle-fresh:`, `drive-check:`, `stack-health:` — recorded once per wave under the browser modality. Do not retrofit the matrix into them.
 
 For non-UI waves, the browser modality is `n/a: <reason>` (the tests floor still applies). The end-to-end closure floor lives in the T3(d) readback condition: for a user-visible AC the readback traces user input → new code, and `n/a: substrate-only` is a red flag needing justification.

@@ -1,6 +1,6 @@
 #!/bin/bash
 # CONTEXT-SPEND: advisory Stop hook — appends ONE context-spend line per
-# SDLC step boundary to $HOME/.claude/logs/<project-slug>/sdlc-v11-audit.md —
+# SDLC step boundary to $HOME/.claude/logs/<project-slug>/sdlc-audit.md —
 # outside every consuming project tree (incident 0001), via audit_path() —
 # reusing the log_v11_finding() line format (source: context-spend).
 #
@@ -51,7 +51,7 @@ audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
   local base sum
   base=$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')
   sum=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
-  printf '%s/.claude/logs/%s-%s/sdlc-v11-audit.md' "$HOME" "$base" "$sum"
+  printf '%s/.claude/logs/%s-%s/sdlc-audit.md' "$HOME" "$base" "$sum"
 }
 
 # docs-root: .bionic/config.yaml override, default .bionic/docs

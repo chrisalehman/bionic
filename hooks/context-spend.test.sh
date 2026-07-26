@@ -25,7 +25,7 @@ FAKE_HOME=$(mktemp -d)
 # Slug must match hooks/context-spend.sh audit_path() byte for byte.
 slug_for() { printf '%s-%s' "$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')" \
                             "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"; }
-audit_path_for() { printf '%s/.claude/logs/%s/sdlc-v11-audit.md' "$FAKE_HOME" "$(slug_for "$1")"; }
+audit_path_for() { printf '%s/.claude/logs/%s/sdlc-audit.md' "$FAKE_HOME" "$(slug_for "$1")"; }
 
 # ---------- helpers ----------
 
@@ -667,10 +667,10 @@ sec_cs1() {
     fail "SEC-CS1: no step line at the relocated path" "f='$f'"
   fi
   TOTAL=$((TOTAL + 1))
-  if [ -z "$(find "$dir" -name 'sdlc-v11-audit.md' 2>/dev/null)" ]; then
+  if [ -z "$(find "$dir" -name 'sdlc-audit.md' 2>/dev/null)" ]; then
     pass "SEC-CS1: no audit file anywhere under the project tree"
   else
-    fail "SEC-CS1: audit file found under the project tree" "$(find "$dir" -name 'sdlc-v11-audit.md')"
+    fail "SEC-CS1: audit file found under the project tree" "$(find "$dir" -name 'sdlc-audit.md')"
   fi
 }
 sec_cs1

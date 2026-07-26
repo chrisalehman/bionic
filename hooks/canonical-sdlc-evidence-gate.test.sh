@@ -34,7 +34,7 @@ trap cleanup EXIT
 slug_for() { printf '%s-%s' "$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')" \
                             "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"; }
 # $1 = sandbox HOME, $2 = the audit_root the hook resolved (the plan's project).
-audit_file_for() { printf '%s/.claude/logs/%s/sdlc-v11-audit.md' "$1" "$(slug_for "$2")"; }
+audit_file_for() { printf '%s/.claude/logs/%s/sdlc-audit.md' "$1" "$(slug_for "$2")"; }
 
 # Creates an isolated $HOME-equivalent with an empty ~/.claude/plans/ dir.
 make_home() {
@@ -147,6 +147,20 @@ expect_block() {
   fi
 }
 
+# Minimal valid frontmatter for fixtures whose subject is NOT the frontmatter.
+# scale: wave + rigor: tested keeps the wave-lane machinery (dispatch ledger,
+# rigor lanes) out of the way so each fixture isolates the behavior under test.
+FM='---
+governing-skill: canonical-sdlc
+canonical_sdlc_version: 12
+intent: build
+rigor: tested
+scale: wave
+deploy_target: none
+use_worktree: false
+has_ui: false
+---'
+
 # ============================================================
 # Section 1: non-commit commands always allowed
 # ============================================================
@@ -156,9 +170,10 @@ echo "=== Section 1: Non-commit commands pass through ==="
 
 h1=$(make_home)
 # Seed a plan that WOULD block if the command were a commit.
-write_plan "$h1" "## SDLC State
+write_plan "$h1" "$FM
+## SDLC State
 current: 5
-Phase 5: TODO" > /dev/null
+Step 5: TODO" > /dev/null
 
 expect_allow "ls command — not a commit" "$h1" "ls /tmp"
 expect_allow "git status — not a commit" "$h1" "git status"
@@ -194,57 +209,31 @@ echo ""
 echo "=== Section 3: Valid evidence in ## SDLC State — allowed ==="
 
 h3=$(make_home)
-write_plan "$h3" "# plan
+write_plan "$h3" "$FM
+# plan
 
 ## SDLC State
-mode: overnight
-current: 5
-Phase 1: /path/to/ideate.md
-Phase 2: /path/to/spec.md
-Phase 3: ~/.claude/plans/this.md
-Phase 4: git worktree at /tmp/wt
-Phase 5: tests passing, commit abc123
-
-## Other section" > /dev/null
-
-# Step-vocabulary variant (new plans) — must be accepted equally.
-h3b=$(make_home)
-write_plan "$h3b" "# plan (new vocabulary)
-
-## SDLC State
-mode: full
-current: 5
+current: 3
 Step 1: /path/to/ideate.md
 Step 2: /path/to/spec.md
 Step 3: ~/.claude/plans/this.md
-Step 4: git worktree at /tmp/wt
-Step 5: tests passing, commit def456
 
 ## Other section" > /dev/null
-expect_allow "Step N: vocabulary — allowed" "$h3b" 'git commit -m "x"'
-
-# Mixed Phase/Step — legacy plan that partially migrated. The current
-# step's line must exist under either prefix; hook accepts either.
-h3c=$(make_home)
-write_plan "$h3c" "## SDLC State
-current: 5
-Phase 1: done
-Phase 2: done
-Step 5: mixed-vocab evidence" > /dev/null
-expect_allow "mixed Phase/Step with Step for current — allowed" "$h3c" 'git commit -m "x"'
-expect_allow "valid phase 5 evidence — allow" "$h3" 'git commit -m "phase 5 done"'
+expect_allow "valid pointer-step evidence — allow" "$h3" 'git commit -m "step 3 done"'
 
 h3b=$(make_home)
-write_plan "$h3b" "## SDLC State
+write_plan "$h3b" "$FM
+## SDLC State
 current: 8b
-Phase 8b: critic report attached in docs/review.md" > /dev/null
-expect_allow "valid phase 8b evidence — allow" "$h3b" 'git commit -m "critic done"'
+Step 8b: critic report attached in docs/review.md" > /dev/null
+expect_allow "valid step 8b evidence — allow" "$h3b" 'git commit -m "critic done"'
 
 h3c=$(make_home)
-write_plan "$h3c" "## SDLC State
+write_plan "$h3c" "$FM
+## SDLC State
 current: 10
-- Phase 10: commit SHA abc123 body written" > /dev/null
-expect_allow "bulleted Phase line — allow" "$h3c" 'git commit -m "x"'
+- Step 10: commit SHA abc123 body written" > /dev/null
+expect_allow "bulleted Step line — allow" "$h3c" 'git commit -m "x"'
 
 # ============================================================
 # Section 4: malformed / missing SDLC State pieces
@@ -254,24 +243,27 @@ echo ""
 echo "=== Section 4: Malformed SDLC State — blocked ==="
 
 h4=$(make_home)
-write_plan "$h4" "## SDLC State
+write_plan "$h4" "$FM
+## SDLC State
 # no current line, no phase lines
 
 ## Next section" > /dev/null
 expect_block "missing 'current: N' line" "$h4" 'git commit -m "x"' "missing a valid 'current: N'"
 
 h4b=$(make_home)
-write_plan "$h4b" "## SDLC State
+write_plan "$h4b" "$FM
+## SDLC State
 current: 5
-Phase 1: done
-Phase 2: done
-# no Phase 5 line" > /dev/null
-expect_block "no matching Step N line (legacy Phase lines don't match)" "$h4b" 'git commit -m "x"' "no 'Step 5:' line"
+Step 1: done
+Step 2: done
+# no Step 5 line" > /dev/null
+expect_block "no matching Step N line" "$h4b" 'git commit -m "x"' "no 'Step 5:' line"
 
 h4c=$(make_home)
-write_plan "$h4c" "## SDLC State
+write_plan "$h4c" "$FM
+## SDLC State
 current: five
-Phase 5: something" > /dev/null
+Step 5: something" > /dev/null
 expect_block "non-numeric current" "$h4c" 'git commit -m "x"' "missing a valid 'current: N'"
 
 # ============================================================
@@ -282,16 +274,18 @@ echo ""
 echo "=== Section 5: Placeholder evidence — blocked ==="
 
 h5=$(make_home)
-write_plan "$h5" "## SDLC State
+write_plan "$h5" "$FM
+## SDLC State
 current: 5
-Phase 5:   " > /dev/null
+Step 5:   " > /dev/null
 expect_block "empty evidence line" "$h5" 'git commit -m "x"' "is empty"
 
 for token in TODO pending "in progress" XXX TBD placeholder; do
   h=$(make_home)
-  write_plan "$h" "## SDLC State
+  write_plan "$h" "$FM
+## SDLC State
 current: 5
-Phase 5: $token" > /dev/null
+Step 5: $token" > /dev/null
   expect_block "placeholder '$token'" "$h" 'git commit -m "x"' "placeholder"
 done
 
@@ -300,9 +294,10 @@ done
 # (was "Todo — still writing", which is prose that merely starts with the
 # token — legal under the new contract; see 5e).
 h5b=$(make_home)
-write_plan "$h5b" "## SDLC State
+write_plan "$h5b" "$FM
+## SDLC State
 current: 5
-Phase 5: Todo" > /dev/null
+Step 5: Todo" > /dev/null
 expect_block "placeholder 'Todo' (mixed case, bare token)" "$h5b" 'git commit -m "x"' "placeholder"
 
 # --- whole-value equality: the placeholder ban matches only when the whole
@@ -312,7 +307,8 @@ expect_block "placeholder 'Todo' (mixed case, bare token)" "$h5b" 'git commit -m
 
 # 5c — whole-line 'Step 5: pending' (single-line value) → block.
 h5c=$(make_home)
-write_plan "$h5c" "## SDLC State
+write_plan "$h5c" "$FM
+## SDLC State
 current: 5
 Step 5: pending" > /dev/null
 expect_block "whole-line 'Step 5: pending' → block" "$h5c" 'git commit -m "x"' "placeholder"
@@ -320,7 +316,8 @@ expect_block "whole-line 'Step 5: pending' → block" "$h5c" 'git commit -m "x"'
 # 5d — trim + lowercase before comparison: '  Pending  ' (padded, mixed case)
 # as a continuation value still equals the token → block.
 h5d=$(make_home)
-write_plan "$h5d" "## SDLC State
+write_plan "$h5d" "$FM
+## SDLC State
 current: 5
 Step 5:
   readback:   Pending  " > /dev/null
@@ -330,16 +327,18 @@ expect_block "padded mixed-case 'readback:   Pending  ' → block" "$h5d" 'git c
 # 'resolved all TODOs from the last review' (contains 'todo') → allow. Under
 # the OLD substring ban this was a false block.
 h5e=$(make_home)
-write_plan "$h5e" "## SDLC State
-current: 5
-Step 5: resolved all TODOs from the last review" > /dev/null
+write_plan "$h5e" "$FM
+## SDLC State
+current: 3
+Step 3: resolved all TODOs from the last review" > /dev/null
 expect_allow "substring-only 'resolved all TODOs' → allow (whole-value equality)" \
   "$h5e" 'git commit -m "x"'
 
 # 5f — a continuation key whose whole value equals a token still blocks:
 # 'stack-health: pending' (value 'pending') → block.
 h5f=$(make_home)
-write_plan "$h5f" "## SDLC State
+write_plan "$h5f" "$FM
+## SDLC State
 current: 5
 Step 5:
   stack-health: pending" > /dev/null
@@ -354,18 +353,20 @@ echo ""
 echo "=== Section 6: Compound commands — commit detection ==="
 
 h6=$(make_home)
-write_plan "$h6" "## SDLC State
+write_plan "$h6" "$FM
+## SDLC State
 current: 5
-Phase 5: TODO" > /dev/null
+Step 5: TODO" > /dev/null
 expect_block "cd && git commit" "$h6" 'cd /tmp && git commit -m "x"' "placeholder"
 expect_block "git add && git commit" "$h6" 'git add . && git commit -m "x"' "placeholder"
 
 # False-positive check: quoted "git commit" as prose shouldn't trigger
 # gate on its own, but a real `git commit` in the same command does.
 h6b=$(make_home)
-write_plan "$h6b" "## SDLC State
+write_plan "$h6b" "$FM
+## SDLC State
 current: 5
-Phase 5: TODO" > /dev/null
+Step 5: TODO" > /dev/null
 expect_allow "echo only, no real commit" "$h6b" 'echo "we will git commit later"'
 
 # ============================================================
@@ -377,25 +378,28 @@ echo "=== Section 7: Newest plan file is the one enforced ==="
 
 h7=$(make_home)
 # Older plan with valid state
-write_plan "$h7" "## SDLC State
+write_plan "$h7" "$FM
+## SDLC State
 current: 5
-Phase 5: tests green" "old.md" > /dev/null
+Step 5: tests green" "old.md" > /dev/null
 # Make old.md older than now.
 touch -t 202001010000 "$h7/.claude/plans/old.md" 2>/dev/null || \
   touch -d "2020-01-01" "$h7/.claude/plans/old.md" 2>/dev/null || true
 # Newer plan with bad state
-write_plan "$h7" "## SDLC State
+write_plan "$h7" "$FM
+## SDLC State
 current: 5
-Phase 5: TODO" "new.md" > /dev/null
+Step 5: TODO" "new.md" > /dev/null
 expect_block "newest plan rules — bad state blocks even with valid older plan" \
   "$h7" 'git commit -m "x"' "placeholder"
 
 # Inverse: newer plan without ## SDLC State lets commit pass even if
 # an older plan has bad state.
 h7b=$(make_home)
-write_plan "$h7b" "## SDLC State
+write_plan "$h7b" "$FM
+## SDLC State
 current: 5
-Phase 5: TODO" "old-bad.md" > /dev/null
+Step 5: TODO" "old-bad.md" > /dev/null
 touch -t 202001010000 "$h7b/.claude/plans/old-bad.md" 2>/dev/null || \
   touch -d "2020-01-01" "$h7b/.claude/plans/old-bad.md" 2>/dev/null || true
 write_plan "$h7b" "# unrelated plan, no SDLC State" "new-neutral.md" > /dev/null
@@ -440,1582 +444,84 @@ expect_block_both() {
 
 # 8a — project-local plan alone, global empty: hook honors project plan.
 h8a=$(make_home); p8a=$(make_project)
-write_project_plan "$p8a" "## SDLC State
+write_project_plan "$p8a" "$FM
+## SDLC State
 current: 5
-Phase 5: TODO" > /dev/null
+Step 5: TODO" > /dev/null
 expect_block_both "project-local plan (bad) blocks with no global plan" \
   "$h8a" "$p8a" 'git commit -m "x"' "placeholder"
 
 # 8b — project-local plan alone, global empty: good evidence allows.
 h8b=$(make_home); p8b=$(make_project)
-write_project_plan "$p8b" "## SDLC State
-current: 5
-Phase 5: commit abc123 tests green" > /dev/null
+write_project_plan "$p8b" "$FM
+## SDLC State
+current: 3
+Step 3: commit abc123 tests green" > /dev/null
 expect_allow_both "project-local plan (good) allows with no global plan" \
   "$h8b" "$p8b" 'git commit -m "x"'
 
 # 8c — both plans exist, project is newer → project wins.
 h8c=$(make_home); p8c=$(make_project)
-write_plan "$h8c" "## SDLC State
-current: 5
-Phase 5: commit xyz green" "old-global.md" > /dev/null
+write_plan "$h8c" "$FM
+## SDLC State
+current: 3
+Step 3: commit xyz green" "old-global.md" > /dev/null
 touch -t 202001010000 "$h8c/.claude/plans/old-global.md" 2>/dev/null || \
   touch -d "2020-01-01" "$h8c/.claude/plans/old-global.md" 2>/dev/null || true
-write_project_plan "$p8c" "## SDLC State
+write_project_plan "$p8c" "$FM
+## SDLC State
 current: 5
-Phase 5: TODO" > /dev/null
+Step 5: TODO" > /dev/null
 expect_block_both "newer project plan (bad) wins over older global (good)" \
   "$h8c" "$p8c" 'git commit -m "x"' "placeholder"
 
 # 8d — both plans exist, global is newer → global wins.
 h8d=$(make_home); p8d=$(make_project)
-write_project_plan "$p8d" "## SDLC State
+write_project_plan "$p8d" "$FM
+## SDLC State
 current: 5
-Phase 5: TODO" "old-proj.md" > /dev/null
+Step 5: TODO" "old-proj.md" > /dev/null
 touch -t 202001010000 "$p8d/.bionic/docs/plans/old-proj.md" 2>/dev/null || \
   touch -d "2020-01-01" "$p8d/.bionic/docs/plans/old-proj.md" 2>/dev/null || true
-write_plan "$h8d" "## SDLC State
-current: 5
-Phase 5: commit xyz green" > /dev/null
+write_plan "$h8d" "$FM
+## SDLC State
+current: 3
+Step 3: commit xyz green" > /dev/null
 expect_allow_both "newer global plan (good) wins over older project (bad)" \
   "$h8d" "$p8d" 'git commit -m "x"'
 
 # 8e — project dir lacks .bionic/docs/plans/: hook falls back to global.
 h8e=$(make_home)
 p8e=$(mktemp -d); cleanup_dirs+=("$p8e") # no .bionic/docs/plans/ inside
-write_plan "$h8e" "## SDLC State
+write_plan "$h8e" "$FM
+## SDLC State
 current: 5
-Phase 5: TODO" > /dev/null
+Step 5: TODO" > /dev/null
 expect_block_both "project without .bionic/docs/plans/ falls back to global plan" \
   "$h8e" "$p8e" 'git commit -m "x"' "placeholder"
 
 # 8f — CLAUDE_PROJECT_DIR unset: original behavior (global only).
 h8f=$(make_home)
-write_plan "$h8f" "## SDLC State
+write_plan "$h8f" "$FM
+## SDLC State
 current: 5
-Phase 5: TODO" > /dev/null
+Step 5: TODO" > /dev/null
 expect_block "CLAUDE_PROJECT_DIR unset: still gates on global plan" \
   "$h8f" 'git commit -m "x"' "placeholder"
 
 # 8g — also covers superpowers convention.
 h8g=$(make_home); p8g=$(mktemp -d); cleanup_dirs+=("$p8g")
 mkdir -p "$p8g/docs/superpowers/plans"
-printf '## SDLC State\ncurrent: 5\nPhase 5: TODO\n' > "$p8g/docs/superpowers/plans/active.md"
+printf '%s\n## SDLC State\ncurrent: 5\nStep 5: TODO\n' "$FM" > "$p8g/docs/superpowers/plans/active.md"
 touch "$p8g/docs/superpowers/plans/active.md"
 expect_block_both "docs/superpowers/plans/ plan is honored alongside bionic" \
   "$h8g" "$p8g" 'git commit -m "x"' "placeholder"
 
 # ============================================================
-# Section 9: v2 evidence schema — shape validation
+# Section 17: Verification Matrix gate
 # ============================================================
 #
-# When frontmatter declares `evidence_schema: v2`, the hook performs
-# per-step shape checks on top of the existing presence/placeholder
-# rules. Plans with `evidence_schema: legacy` (or absent — the default
-# for pre-v2 plans) keep the original presence-only behavior. See
-# canonical-sdlc-autonomous-redesign.md §2.1.
-
-echo ""
-echo "=== Section 9: v2 evidence_schema shape validation ==="
-
-# Shared helper: build a v2-frontmatter prefix block that the hook
-# parses for `evidence_schema` (and `deploy_target` for Step 13).
-v2_frontmatter() {
-  local schema="$1" deploy="${2:-none}"
-  cat <<EOF
----
-governing-skill: canonical-sdlc
-mode: autonomous
-canonical_sdlc_version: 2
-evidence_schema: ${schema}
-deploy_target: ${deploy}
----
-EOF
-}
-
-# 9a — legacy (evidence_schema: legacy) → existing presence-only path.
-# A free-form Step 4 line is fine; no shape complaint.
-h9a=$(make_home)
-write_plan "$h9a" "$(v2_frontmatter legacy)
-## SDLC State
-current: 4
-Phase 4: worktree at /path, base SHA abc123" > /dev/null
-expect_allow "v2-frontmatter with evidence_schema: legacy → no shape check" \
-  "$h9a" 'git commit -m "x"'
-
-# 9b — evidence_schema absent → defaults to legacy behavior.
-h9b=$(make_home)
-write_plan "$h9b" "---
-governing-skill: canonical-sdlc
-mode: autonomous
----
-
-## SDLC State
-current: 4
-Phase 4: worktree at /path, base SHA abc123" > /dev/null
-expect_allow "frontmatter without evidence_schema → legacy behavior" \
-  "$h9b" 'git commit -m "x"'
-
-# 9c — evidence_schema: v2, Step 4 in v2 fields form, all required
-# fields present → allow.
-h9c=$(make_home)
-write_plan "$h9c" "$(v2_frontmatter v2)
-## SDLC State
-current: 4
-Step 4:
-  worktree: /Users/x/.worktrees/feature-x
-  base-sha: abc1234abc1234abc1234abc1234abc1234abc1
-  branch: feature-x" > /dev/null
-expect_allow "v2 Step 4 with all required fields → allow" \
-  "$h9c" 'git commit -m "x"'
-
-# 9d — v2, Step 4 missing 'base-sha:' → block, error names base-sha.
-h9d=$(make_home)
-write_plan "$h9d" "$(v2_frontmatter v2)
-## SDLC State
-current: 4
-Step 4:
-  worktree: /Users/x/.worktrees/feature-x
-  branch: feature-x" > /dev/null
-expect_block "v2 Step 4 missing base-sha → block" \
-  "$h9d" 'git commit -m "x"' "base-sha"
-
-# 9e — v2, Step 7 with all four fields, pass==total → allow.
-h9e=$(make_home)
-write_plan "$h9e" "$(v2_frontmatter v2)
-## SDLC State
-current: 7
-Step 7:
-  cmd: bash test.sh
-  pass: 332
-  total: 332
-  output: .bionic/docs/plans/wave-04.plan.md#step-7" > /dev/null
-expect_allow "v2 Step 7 with full shape → allow" \
-  "$h9e" 'git commit -m "x"'
-
-# 9f — v2, Step 7 missing 'pass:' → block, error names pass.
-h9f=$(make_home)
-write_plan "$h9f" "$(v2_frontmatter v2)
-## SDLC State
-current: 7
-Step 7:
-  cmd: bash test.sh
-  total: 332
-  output: .bionic/docs/plans/wave-04.plan.md#step-7" > /dev/null
-expect_block "v2 Step 7 missing pass field → block" \
-  "$h9f" 'git commit -m "x"' "pass"
-
-# 9g — v2, Step 7 with pass != total → block, error mentions pass and total.
-h9g=$(make_home)
-write_plan "$h9g" "$(v2_frontmatter v2)
-## SDLC State
-current: 7
-Step 7:
-  cmd: bash test.sh
-  pass: 330
-  total: 332
-  output: .bionic/docs/plans/wave-04.plan.md#step-7" > /dev/null
-expect_block "v2 Step 7 pass != total → block" \
-  "$h9g" 'git commit -m "x"' "pass"
-
-# 9h — v2, Step 6 with 'n/a: <reason>' → allow (Step 6 accepts n/a).
-h9h=$(make_home)
-write_plan "$h9h" "$(v2_frontmatter v2)
-## SDLC State
-current: 6
-Step 6:
-  n/a: no UI; agent-skills:browser-testing-with-devtools sufficient" > /dev/null
-expect_allow "v2 Step 6 with n/a → allow" \
-  "$h9h" 'git commit -m "x"'
-
-# 9i — v2, Step 6 with neither devtools-trace nor n/a → block.
-h9i=$(make_home)
-write_plan "$h9i" "$(v2_frontmatter v2)
-## SDLC State
-current: 6
-Step 6:
-  notes: skipped" > /dev/null
-expect_block "v2 Step 6 missing devtools-trace and n/a → block" \
-  "$h9i" 'git commit -m "x"' "devtools-trace"
-
-# 9j — v2, Step 11 with 'n/a: PR-less workflow' → allow.
-h9j=$(make_home)
-write_plan "$h9j" "$(v2_frontmatter v2)
-## SDLC State
-current: 11
-Step 11:
-  n/a: PR-less workflow" > /dev/null
-expect_allow "v2 Step 11 with n/a: PR-less workflow → allow" \
-  "$h9j" 'git commit -m "x"'
-
-# 9k — v2, Step 11 with 'pr: <url>' → allow.
-h9k=$(make_home)
-write_plan "$h9k" "$(v2_frontmatter v2)
-## SDLC State
-current: 11
-Step 11:
-  pr: https://github.com/example/repo/pull/42" > /dev/null
-expect_allow "v2 Step 11 with pr → allow" \
-  "$h9k" 'git commit -m "x"'
-
-# 9l — v2, Step 13 with 'n/a: <reason>' AND deploy_target: none → allow.
-h9l=$(make_home)
-write_plan "$h9l" "$(v2_frontmatter v2 none)
-## SDLC State
-current: 13
-Step 13:
-  n/a: no deploy target" > /dev/null
-expect_allow "v2 Step 13 with n/a + deploy_target=none → allow" \
-  "$h9l" 'git commit -m "x"'
-
-# 9m — v2, Step 13 with 'n/a' but deploy_target: k8s → block (n/a only
-# valid when deploy_target is none).
-h9m=$(make_home)
-write_plan "$h9m" "$(v2_frontmatter v2 k8s)
-## SDLC State
-current: 13
-Step 13:
-  n/a: skipped" > /dev/null
-expect_block "v2 Step 13 n/a with deploy_target=k8s → block" \
-  "$h9m" 'git commit -m "x"' "deploy_target"
-
-# 9n — v2, Step 13 with deploy/verified-at/monitor + deploy_target: k8s
-# → allow.
-h9n=$(make_home)
-write_plan "$h9n" "$(v2_frontmatter v2 k8s)
-## SDLC State
-current: 13
-Step 13:
-  deploy: prod
-  verified-at: 2026-05-02T18:00:00Z
-  monitor: https://grafana.example.com/d/foo" > /dev/null
-expect_allow "v2 Step 13 full deploy fields + deploy_target=k8s → allow" \
-  "$h9n" 'git commit -m "x"'
-
-# 9o — v2, pointer step (Step 5) — single-line free-form is acceptable.
-# Pointer steps (1, 2, 3, 5, 8, 8b) skip shape check in v1; presence-only.
-h9o=$(make_home)
-write_plan "$h9o" "$(v2_frontmatter v2)
-## SDLC State
-current: 5
-Step 5: /.bionic/docs/plans/wave-04.plan.md#phase-5" > /dev/null
-expect_allow "v2 Step 5 (pointer step) free-form → allow (no shape check)" \
-  "$h9o" 'git commit -m "x"'
-
-# 9p — v2, Step 8b (adversarial) is a pointer step — single-line allowed.
-h9p=$(make_home)
-write_plan "$h9p" "$(v2_frontmatter v2)
-## SDLC State
-current: 8b
-Step 8b: /.bionic/docs/plans/wave-04.plan.md#step-8b-findings" > /dev/null
-expect_allow "v2 Step 8b (pointer step) → allow" \
-  "$h9p" 'git commit -m "x"'
-
-# 9q — v2, Step 10 with all required fields → allow.
-h9q=$(make_home)
-write_plan "$h9q" "$(v2_frontmatter v2)
-## SDLC State
-current: 10
-Step 10:
-  commit: abc1234abc1234abc1234abc1234abc1234abc1
-  subject: feat(thing): do the thing
-  files: 5" > /dev/null
-expect_allow "v2 Step 10 with required fields → allow" \
-  "$h9q" 'git commit -m "x"'
-
-# 9r — v2, Step 10 missing 'commit:' → block.
-h9r=$(make_home)
-write_plan "$h9r" "$(v2_frontmatter v2)
-## SDLC State
-current: 10
-Step 10:
-  subject: feat(thing): do the thing
-  files: 5" > /dev/null
-expect_block "v2 Step 10 missing commit field → block" \
-  "$h9r" 'git commit -m "x"' "commit"
-
-# 9s — v2, Step 12 with all required fields → allow.
-h9s=$(make_home)
-write_plan "$h9s" "$(v2_frontmatter v2)
-## SDLC State
-current: 12
-Step 12:
-  merge: abc1234abc1234abc1234abc1234abc1234abc1
-  worktree-removed: yes" > /dev/null
-expect_allow "v2 Step 12 with required fields → allow" \
-  "$h9s" 'git commit -m "x"'
-
-# 9t — placeholder check still applies under v2 (existing behavior).
-h9t=$(make_home)
-write_plan "$h9t" "$(v2_frontmatter v2)
-## SDLC State
-current: 4
-Step 4: TODO" > /dev/null
-expect_block "v2 Step 4 with placeholder TODO → block (presence layer still active)" \
-  "$h9t" 'git commit -m "x"' "placeholder"
-
-# ============================================================
-# Section 10: v3 canonical_sdlc_version shape validation
-# ============================================================
-#
-# When frontmatter declares canonical_sdlc_version: 3, the hook applies
-# the renumbered v3 shape switch. v2 (evidence_schema: v2) plans
-# continue to use the original switch.
-
-echo ""
-echo "=== Section 10: v3 canonical_sdlc_version shape validation ==="
-
-v3_frontmatter() {
-  local deploy="${1:-none}" use_wt="${2:-false}"
-  cat <<EOF
----
-governing-skill: canonical-sdlc
-mode: autonomous
-canonical_sdlc_version: 3
-deploy_target: ${deploy}
-use_worktree: ${use_wt}
----
-EOF
-}
-
-# 10a — v3 Step 4 (Implement) pointer step when use_worktree=false → allow.
-h10a=$(make_home)
-write_plan "$h10a" "$(v3_frontmatter none false)
-## SDLC State
-current: 4
-Step 4: <docs-root>/plans/wave-04.plan.md#step-4" > /dev/null
-expect_allow "v3 Step 4 pointer (use_worktree=false) → allow" \
-  "$h10a" 'git commit -m "x"'
-
-# 10b — v3 Step 4 with use_worktree=true and all fields → allow.
-h10b=$(make_home)
-write_plan "$h10b" "$(v3_frontmatter none true)
-## SDLC State
-current: 4
-Step 4:
-  worktree: /Users/x/.worktrees/feature-x
-  base-sha: abc1234abc1234abc1234abc1234abc1234abc1
-  branch: feature-x" > /dev/null
-expect_allow "v3 Step 4 use_worktree=true with all fields → allow" \
-  "$h10b" 'git commit -m "x"'
-
-# 10c — v3 Step 4 with use_worktree=true missing base-sha → block.
-h10c=$(make_home)
-write_plan "$h10c" "$(v3_frontmatter none true)
-## SDLC State
-current: 4
-Step 4:
-  worktree: /Users/x/.worktrees/feature-x
-  branch: feature-x" > /dev/null
-expect_block "v3 Step 4 use_worktree=true missing base-sha → block" \
-  "$h10c" 'git commit -m "x"' "base-sha"
-
-# 10d — v3 Step 5 (Browser verify) with devtools-trace → allow.
-h10d=$(make_home)
-write_plan "$h10d" "$(v3_frontmatter)
-## SDLC State
-current: 5
-Step 5:
-  devtools-trace: .bionic/tmp/devtools-trace-001.json" > /dev/null
-expect_allow "v3 Step 5 with devtools-trace → allow" \
-  "$h10d" 'git commit -m "x"'
-
-# 10e — v3 Step 5 with n/a → allow.
-h10e=$(make_home)
-write_plan "$h10e" "$(v3_frontmatter)
-## SDLC State
-current: 5
-Step 5:
-  n/a: no UI in this wave" > /dev/null
-expect_allow "v3 Step 5 with n/a → allow" \
-  "$h10e" 'git commit -m "x"'
-
-# 10f — v3 Step 5 with neither → block.
-h10f=$(make_home)
-write_plan "$h10f" "$(v3_frontmatter)
-## SDLC State
-current: 5
-Step 5:
-  notes: skipped" > /dev/null
-expect_block "v3 Step 5 missing devtools-trace and n/a → block" \
-  "$h10f" 'git commit -m "x"' "devtools-trace"
-
-# 10g — v3 Step 6 (Verify done) — moved from old Step 7.
-h10g=$(make_home)
-write_plan "$h10g" "$(v3_frontmatter)
-## SDLC State
-current: 6
-Step 6:
-  cmd: bash test.sh
-  pass: 332
-  total: 332
-  output: .bionic/docs/plans/wave-04.plan.md#step-6" > /dev/null
-expect_allow "v3 Step 6 full shape (cmd/pass/total/output) → allow" \
-  "$h10g" 'git commit -m "x"'
-
-# 10h — v3 Step 6 missing pass → block.
-h10h=$(make_home)
-write_plan "$h10h" "$(v3_frontmatter)
-## SDLC State
-current: 6
-Step 6:
-  cmd: bash test.sh
-  total: 332
-  output: .bionic/docs/plans/wave-04.plan.md#step-6" > /dev/null
-expect_block "v3 Step 6 missing pass → block" \
-  "$h10h" 'git commit -m "x"' "pass"
-
-# 10i — v3 Step 7 (Self-review) pointer step → allow.
-h10i=$(make_home)
-write_plan "$h10i" "$(v3_frontmatter)
-## SDLC State
-current: 7
-Step 7: .bionic/docs/plans/wave-04.plan.md#step-7-review" > /dev/null
-expect_allow "v3 Step 7 (pointer step) → allow" \
-  "$h10i" 'git commit -m "x"'
-
-# 10j — v3 Step 8 (Adversarial critic) pointer step → allow.
-h10j=$(make_home)
-write_plan "$h10j" "$(v3_frontmatter)
-## SDLC State
-current: 8
-Step 8: .bionic/docs/plans/wave-04.plan.md#step-8-critic-findings" > /dev/null
-expect_allow "v3 Step 8 (Adversarial critic pointer step) → allow" \
-  "$h10j" 'git commit -m "x"'
-
-# 10k — v3 Step 9 with adr → allow.
-h10k=$(make_home)
-write_plan "$h10k" "$(v3_frontmatter)
-## SDLC State
-current: 9
-Step 9:
-  adr: .bionic/docs/adrs/epic-01-x/adr-001-decision.md" > /dev/null
-expect_allow "v3 Step 9 with adr → allow" \
-  "$h10k" 'git commit -m "x"'
-
-# 10l — v3 Step 10 with required fields → allow.
-h10l=$(make_home)
-write_plan "$h10l" "$(v3_frontmatter)
-## SDLC State
-current: 10
-Step 10:
-  commit: abc1234abc1234abc1234abc1234abc1234abc1
-  subject: feat(thing): do the thing
-  files: 5" > /dev/null
-expect_allow "v3 Step 10 with required fields → allow" \
-  "$h10l" 'git commit -m "x"'
-
-# 10m — v3 Step 11 with pr → allow.
-h10m=$(make_home)
-write_plan "$h10m" "$(v3_frontmatter)
-## SDLC State
-current: 11
-Step 11:
-  pr: https://github.com/example/repo/pull/42" > /dev/null
-expect_allow "v3 Step 11 with pr → allow" \
-  "$h10m" 'git commit -m "x"'
-
-# 10n — v3 Step 12 with required fields → allow.
-h10n=$(make_home)
-write_plan "$h10n" "$(v3_frontmatter)
-## SDLC State
-current: 12
-Step 12:
-  merge: abc1234abc1234abc1234abc1234abc1234abc1
-  worktree-removed: n/a" > /dev/null
-expect_allow "v3 Step 12 with required fields → allow" \
-  "$h10n" 'git commit -m "x"'
-
-# 10o — v3 Step 13 (Post-merge cleanup) with required fields → allow.
-h10o=$(make_home)
-write_plan "$h10o" "$(v3_frontmatter)
-## SDLC State
-current: 13
-Step 13:
-  cleanup: ok
-  tmp-wiped: yes
-  tasks-completed: 14/14" > /dev/null
-expect_allow "v3 Step 13 (Post-merge cleanup) with required fields → allow" \
-  "$h10o" 'git commit -m "x"'
-
-# 10p — v3 Step 13 missing tmp-wiped → block.
-h10p=$(make_home)
-write_plan "$h10p" "$(v3_frontmatter)
-## SDLC State
-current: 13
-Step 13:
-  cleanup: ok
-  tasks-completed: 14/14" > /dev/null
-expect_block "v3 Step 13 missing tmp-wiped → block" \
-  "$h10p" 'git commit -m "x"' "tmp-wiped"
-
-# 10q — v3 Step 13 with n/a (cleanup_on_finish=false case) → allow.
-h10q=$(make_home)
-write_plan "$h10q" "$(v3_frontmatter)
-## SDLC State
-current: 13
-Step 13:
-  n/a: cleanup_on_finish=false" > /dev/null
-expect_allow "v3 Step 13 with n/a → allow" \
-  "$h10q" 'git commit -m "x"'
-
-# 10r — v3 Step 14 (Ship) with deploy fields → allow.
-h10r=$(make_home)
-write_plan "$h10r" "$(v3_frontmatter k8s)
-## SDLC State
-current: 14
-Step 14:
-  deploy: prod
-  verified-at: 2026-05-10T18:00:00Z
-  monitor: https://grafana.example.com/d/foo" > /dev/null
-expect_allow "v3 Step 14 with deploy fields → allow" \
-  "$h10r" 'git commit -m "x"'
-
-# 10s — v3 Step 14 with n/a + deploy_target=none → allow.
-h10s=$(make_home)
-write_plan "$h10s" "$(v3_frontmatter none)
-## SDLC State
-current: 14
-Step 14:
-  n/a: no deploy target" > /dev/null
-expect_allow "v3 Step 14 n/a + deploy_target=none → allow" \
-  "$h10s" 'git commit -m "x"'
-
-# 10t — v3 Step 14 with n/a but deploy_target=k8s → block.
-h10t=$(make_home)
-write_plan "$h10t" "$(v3_frontmatter k8s)
-## SDLC State
-current: 14
-Step 14:
-  n/a: skipped" > /dev/null
-expect_block "v3 Step 14 n/a with deploy_target=k8s → block" \
-  "$h10t" 'git commit -m "x"' "deploy_target"
-
-# 10u — v3 pointer step 1/2/3 → allow.
-for step in 1 2 3; do
-  h=$(make_home)
-  write_plan "$h" "$(v3_frontmatter)
-## SDLC State
-current: $step
-Step $step: pointer evidence here" > /dev/null
-  expect_allow "v3 Step $step (pointer step) → allow" \
-    "$h" 'git commit -m "x"'
-done
-
-# 10v — v3 placeholder check still active.
-h10v=$(make_home)
-write_plan "$h10v" "$(v3_frontmatter)
-## SDLC State
-current: 6
-Step 6: TODO" > /dev/null
-expect_block "v3 Step 6 with placeholder TODO → block" \
-  "$h10v" 'git commit -m "x"' "placeholder"
-
-# ============================================================
-# Section 11: v5 canonical_sdlc_version shape validation
-# ============================================================
-#
-# v5 collapses the step set: Step 5 = Verify gate (tests modality always +
-# browser modality devtools-trace/n-a), Step 6 = Review (pointer), Step 7 =
-# Document (was 9), Step 8 = External review (was 11), Step 9 = Integrate &
-# close (merge + cleanup, was 12+13), Step 10 = Ship (was 14). Commit is a
-# cross-cutting rhythm, no longer a numbered step.
-
-echo ""
-echo "=== Section 11: v5 canonical_sdlc_version shape validation ==="
-
-v5_frontmatter() {
-  local deploy="${1:-none}" use_wt="${2:-false}"
-  cat <<EOF
----
-governing-skill: canonical-sdlc
-mode: autonomous
-canonical_sdlc_version: 5
-deploy_target: ${deploy}
-use_worktree: ${use_wt}
----
-EOF
-}
-
-# 11a — v5 Step 4 (Implement) pointer step when use_worktree=false → allow.
-h11a=$(make_home)
-write_plan "$h11a" "$(v5_frontmatter none false)
-## SDLC State
-current: 4
-Step 4: <docs-root>/plans/wave-04.plan.md#step-4" > /dev/null
-expect_allow "v5 Step 4 pointer (use_worktree=false) → allow" \
-  "$h11a" 'git commit -m "x"'
-
-# 11b — v5 Step 4 with use_worktree=true and all fields → allow.
-h11b=$(make_home)
-write_plan "$h11b" "$(v5_frontmatter none true)
-## SDLC State
-current: 4
-Step 4:
-  worktree: /Users/x/.worktrees/feature-x
-  base-sha: abc1234abc1234abc1234abc1234abc1234abc1
-  branch: feature-x" > /dev/null
-expect_allow "v5 Step 4 use_worktree=true with all fields → allow" \
-  "$h11b" 'git commit -m "x"'
-
-# 11c — v5 Step 4 with use_worktree=true missing base-sha → block.
-h11c=$(make_home)
-write_plan "$h11c" "$(v5_frontmatter none true)
-## SDLC State
-current: 4
-Step 4:
-  worktree: /Users/x/.worktrees/feature-x
-  branch: feature-x" > /dev/null
-expect_block "v5 Step 4 use_worktree=true missing base-sha → block" \
-  "$h11c" 'git commit -m "x"' "base-sha"
-
-# 11d — v5 Step 5 (Verify) full shape: tests + browser devtools-trace → allow.
-h11d=$(make_home)
-write_plan "$h11d" "$(v5_frontmatter)
-## SDLC State
-current: 5
-Step 5:
-  cmd: bash test.sh
-  pass: 332
-  total: 332
-  output: .bionic/docs/plans/wave-04.plan.md#step-5
-  devtools-trace: .bionic/tmp/evidence-golden.png" > /dev/null
-expect_allow "v5 Step 5 Verify full (tests + browser trace) → allow" \
-  "$h11d" 'git commit -m "x"'
-
-# 11e — v5 Step 5 tests + browser n/a (non-UI wave) → allow.
-h11e=$(make_home)
-write_plan "$h11e" "$(v5_frontmatter)
-## SDLC State
-current: 5
-Step 5:
-  cmd: bash test.sh
-  pass: 100
-  total: 100
-  output: .bionic/docs/plans/wave-04.plan.md#step-5
-  n/a: no UI in this wave" > /dev/null
-expect_allow "v5 Step 5 Verify tests + browser n/a → allow" \
-  "$h11e" 'git commit -m "x"'
-
-# 11f — v5 Step 5 tests present but browser modality missing (no trace, no n/a) → block.
-h11f=$(make_home)
-write_plan "$h11f" "$(v5_frontmatter)
-## SDLC State
-current: 5
-Step 5:
-  cmd: bash test.sh
-  pass: 10
-  total: 10
-  output: x" > /dev/null
-expect_block "v5 Step 5 missing browser modality (devtools-trace/n-a) → block" \
-  "$h11f" 'git commit -m "x"' "devtools-trace"
-
-# 11g — v5 Step 5 missing pass → block.
-h11g=$(make_home)
-write_plan "$h11g" "$(v5_frontmatter)
-## SDLC State
-current: 5
-Step 5:
-  cmd: bash test.sh
-  total: 332
-  output: x
-  devtools-trace: .bionic/tmp/e.png" > /dev/null
-expect_block "v5 Step 5 missing pass → block" \
-  "$h11g" 'git commit -m "x"' "pass"
-
-# 11h — v5 Step 5 pass != total → block.
-h11h=$(make_home)
-write_plan "$h11h" "$(v5_frontmatter)
-## SDLC State
-current: 5
-Step 5:
-  cmd: bash test.sh
-  pass: 331
-  total: 332
-  output: x
-  devtools-trace: .bionic/tmp/e.png" > /dev/null
-expect_block "v5 Step 5 pass != total → block" \
-  "$h11h" 'git commit -m "x"' "not fully green"
-
-# 11i — v5 Step 6 (Review) pointer step → allow.
-h11i=$(make_home)
-write_plan "$h11i" "$(v5_frontmatter)
-## SDLC State
-current: 6
-Step 6: .bionic/docs/plans/wave-04.plan.md#step-6-review" > /dev/null
-expect_allow "v5 Step 6 (Review pointer step) → allow" \
-  "$h11i" 'git commit -m "x"'
-
-# 11j — v5 Step 7 (Document) with adr → allow.
-h11j=$(make_home)
-write_plan "$h11j" "$(v5_frontmatter)
-## SDLC State
-current: 7
-Step 7:
-  adr: .bionic/docs/adrs/epic-01-x/adr-001-decision.md" > /dev/null
-expect_allow "v5 Step 7 Document with adr → allow" \
-  "$h11j" 'git commit -m "x"'
-
-# 11k — v5 Step 7 with rca → allow.
-h11k=$(make_home)
-write_plan "$h11k" "$(v5_frontmatter)
-## SDLC State
-current: 7
-Step 7:
-  rca: .bionic/docs/incidents/0001-x/rca.md" > /dev/null
-expect_allow "v5 Step 7 Document with rca → allow" \
-  "$h11k" 'git commit -m "x"'
-
-# 11l — v5 Step 7 missing adr/rca/n-a → block.
-h11l=$(make_home)
-write_plan "$h11l" "$(v5_frontmatter)
-## SDLC State
-current: 7
-Step 7:
-  notes: forgot the decision record" > /dev/null
-expect_block "v5 Step 7 missing adr/rca/n-a → block" \
-  "$h11l" 'git commit -m "x"' "adr"
-
-# 11m — v5 Step 8 (External review) with pr → allow.
-h11m=$(make_home)
-write_plan "$h11m" "$(v5_frontmatter)
-## SDLC State
-current: 8
-Step 8:
-  pr: https://github.com/example/repo/pull/42" > /dev/null
-expect_allow "v5 Step 8 External review with pr → allow" \
-  "$h11m" 'git commit -m "x"'
-
-# 11n — v5 Step 8 with n/a → allow.
-h11n=$(make_home)
-write_plan "$h11n" "$(v5_frontmatter)
-## SDLC State
-current: 8
-Step 8:
-  n/a: PR-less workflow" > /dev/null
-expect_allow "v5 Step 8 External review with n/a → allow" \
-  "$h11n" 'git commit -m "x"'
-
-# 11o — v5 Step 9 (Integrate & close) full: merge + cleanup triple → allow.
-h11o=$(make_home)
-write_plan "$h11o" "$(v5_frontmatter)
-## SDLC State
-current: 9
-Step 9:
-  merge: abc1234abc1234abc1234abc1234abc1234abc1
-  worktree-removed: n/a
-  cleanup: ok
-  tmp-wiped: yes
-  tasks-completed: 11/11" > /dev/null
-expect_allow "v5 Step 9 Integrate & close full (merge + cleanup) → allow" \
-  "$h11o" 'git commit -m "x"'
-
-# 11p — v5 Step 9 with cleanup: n/a (cleanup_on_finish=false) → allow.
-h11p=$(make_home)
-write_plan "$h11p" "$(v5_frontmatter)
-## SDLC State
-current: 9
-Step 9:
-  merge: abc1234abc1234abc1234abc1234abc1234abc1
-  worktree-removed: n/a
-  cleanup: n/a" > /dev/null
-expect_allow "v5 Step 9 with cleanup: n/a → allow" \
-  "$h11p" 'git commit -m "x"'
-
-# 11p2 — v5 Step 9 with cleanup: n/a + reason (cleanup_on_finish=false / already cleaned) → allow.
-h11p2=$(make_home)
-write_plan "$h11p2" "$(v5_frontmatter)
-## SDLC State
-current: 9
-Step 9:
-  merge: abc1234abc1234abc1234abc1234abc1234abc1
-  worktree-removed: n/a
-  cleanup: n/a: cleanup_on_finish=false" > /dev/null
-expect_allow "v5 Step 9 with cleanup: n/a + reason → allow" \
-  "$h11p2" 'git commit -m "x"'
-
-# 11q — v5 Step 9 missing merge → block.
-h11q=$(make_home)
-write_plan "$h11q" "$(v5_frontmatter)
-## SDLC State
-current: 9
-Step 9:
-  worktree-removed: n/a
-  cleanup: ok
-  tmp-wiped: yes
-  tasks-completed: 11/11" > /dev/null
-expect_block "v5 Step 9 missing merge → block" \
-  "$h11q" 'git commit -m "x"' "merge"
-
-# 11r — v5 Step 9 cleanup present but missing tmp-wiped → block.
-h11r=$(make_home)
-write_plan "$h11r" "$(v5_frontmatter)
-## SDLC State
-current: 9
-Step 9:
-  merge: abc1234abc1234abc1234abc1234abc1234abc1
-  worktree-removed: n/a
-  cleanup: ok
-  tasks-completed: 11/11" > /dev/null
-expect_block "v5 Step 9 cleanup present, missing tmp-wiped → block" \
-  "$h11r" 'git commit -m "x"' "tmp-wiped"
-
-# 11s — v5 Step 10 (Ship) with deploy fields → allow.
-h11s=$(make_home)
-write_plan "$h11s" "$(v5_frontmatter k8s)
-## SDLC State
-current: 10
-Step 10:
-  deploy: prod
-  verified-at: 2026-06-19T18:00:00Z
-  monitor: https://grafana.example.com/d/foo" > /dev/null
-expect_allow "v5 Step 10 Ship with deploy fields → allow" \
-  "$h11s" 'git commit -m "x"'
-
-# 11t — v5 Step 10 with n/a + deploy_target=none → allow.
-h11t=$(make_home)
-write_plan "$h11t" "$(v5_frontmatter none)
-## SDLC State
-current: 10
-Step 10:
-  n/a: no deploy target" > /dev/null
-expect_allow "v5 Step 10 n/a + deploy_target=none → allow" \
-  "$h11t" 'git commit -m "x"'
-
-# 11u — v5 Step 10 with n/a but deploy_target=k8s → block.
-h11u=$(make_home)
-write_plan "$h11u" "$(v5_frontmatter k8s)
-## SDLC State
-current: 10
-Step 10:
-  n/a: skipped" > /dev/null
-expect_block "v5 Step 10 n/a with deploy_target=k8s → block" \
-  "$h11u" 'git commit -m "x"' "deploy_target"
-
-# 11v — v5 pointer step 1/2/3 → allow.
-for step in 1 2 3; do
-  h=$(make_home)
-  write_plan "$h" "$(v5_frontmatter)
-## SDLC State
-current: $step
-Step $step: pointer evidence here" > /dev/null
-  expect_allow "v5 Step $step (pointer step) → allow" \
-    "$h" 'git commit -m "x"'
-done
-
-# 11w — v5 placeholder check still active.
-h11w=$(make_home)
-write_plan "$h11w" "$(v5_frontmatter)
-## SDLC State
-current: 5
-Step 5: TODO" > /dev/null
-expect_block "v5 Step 5 with placeholder TODO → block" \
-  "$h11w" 'git commit -m "x"' "placeholder"
-
-# ============================================================
-# Section 12: v6 canonical_sdlc_version shape validation
-# ============================================================
-#
-# v6 drops the external-review step from v5 (0–9 shape): Step 8 =
-# Integrate & close (was v5 Step 9), Step 9 = Ship (was v5 Step 10).
-# Step 5 shape is identical to v5. Regression-critical: v6 plans must
-# NOT require the v7 `bundle-fresh:` key, even when has_ui is true.
-
-echo ""
-echo "=== Section 12: v6 canonical_sdlc_version shape validation ==="
-
-v6_frontmatter() {
-  local deploy="${1:-none}" use_wt="${2:-false}" has_ui="${3:-false}"
-  cat <<EOF
----
-governing-skill: canonical-sdlc
-mode: autonomous
-canonical_sdlc_version: 6
-deploy_target: ${deploy}
-use_worktree: ${use_wt}
-has_ui: ${has_ui}
----
-EOF
-}
-
-# 12a — v6 Step 5 full shape, has_ui=true, NO bundle-fresh → allow
-# (grandfathered: the bundle-fresh requirement is v7-only).
-h12a=$(make_home)
-write_plan "$h12a" "$(v6_frontmatter none false true)
-## SDLC State
-current: 5
-Step 5:
-  cmd: bash test.sh
-  pass: 332
-  total: 332
-  output: .bionic/docs/plans/wave-04.plan.md#step-5
-  devtools-trace: .bionic/tmp/evidence-golden.png" > /dev/null
-expect_allow "v6 Step 5 has_ui=true without bundle-fresh → allow (grandfathered)" \
-  "$h12a" 'git commit -m "x"'
-
-# 12b — v6 Step 5 missing browser modality → block (v6 base rules intact).
-h12b=$(make_home)
-write_plan "$h12b" "$(v6_frontmatter)
-## SDLC State
-current: 5
-Step 5:
-  cmd: bash test.sh
-  pass: 10
-  total: 10
-  output: x" > /dev/null
-expect_block "v6 Step 5 missing browser modality (devtools-trace/n-a) → block" \
-  "$h12b" 'git commit -m "x"' "devtools-trace"
-
-# 12c — v6 Step 8 (Integrate & close, renumbered from v5 Step 9) → allow.
-h12c=$(make_home)
-write_plan "$h12c" "$(v6_frontmatter)
-## SDLC State
-current: 8
-Step 8:
-  merge: abc1234abc1234abc1234abc1234abc1234abc1
-  worktree-removed: n/a
-  cleanup: ok
-  tmp-wiped: yes
-  tasks-completed: 10/10" > /dev/null
-expect_allow "v6 Step 8 Integrate & close full → allow" \
-  "$h12c" 'git commit -m "x"'
-
-# 12d — v6 Step 9 (Ship, renumbered from v5 Step 10) n/a + deploy_target=none → allow.
-h12d=$(make_home)
-write_plan "$h12d" "$(v6_frontmatter none)
-## SDLC State
-current: 9
-Step 9:
-  n/a: no deploy target" > /dev/null
-expect_allow "v6 Step 9 Ship n/a + deploy_target=none → allow" \
-  "$h12d" 'git commit -m "x"'
-
-# 12e — v6 Step 6 (Review) pointer step → allow.
-h12e=$(make_home)
-write_plan "$h12e" "$(v6_frontmatter)
-## SDLC State
-current: 6
-Step 6: .bionic/docs/plans/wave-04.plan.md#step-6-review" > /dev/null
-expect_allow "v6 Step 6 (Review pointer step) → allow" \
-  "$h12e" 'git commit -m "x"'
-
-# ============================================================
-# Section 13: v7 canonical_sdlc_version — bundle-freshness gate
-# ============================================================
-#
-# v7 = v6 plus ONE addition: the Step 5 block must carry
-# `bundle-fresh: <proof>` or `bundle-fresh: n/a: <reason>` — universal
-# with an n/a escape, exactly like `devtools-trace:`. Frontmatter flags
-# (has_ui included) do NOT gate the requirement. The proof format is
-# project-specific by design — the hook validates presence + non-empty
-# value/reason + the existing placeholder ban only.
-
-echo ""
-echo "=== Section 13: v7 bundle-freshness gate ==="
-
-v7_frontmatter() {
-  local has_ui="${1:-true}" deploy="${2:-none}" use_wt="${3:-false}"
-  cat <<EOF
----
-governing-skill: canonical-sdlc
-mode: autonomous
-canonical_sdlc_version: 7
-deploy_target: ${deploy}
-use_worktree: ${use_wt}
-has_ui: ${has_ui}
----
-EOF
-}
-
-# Shared Step-5 body (tests + browser modalities satisfied) so each case
-# isolates the bundle-fresh variable.
-v7_step5_base="  cmd: bash test.sh
-  pass: 332
-  total: 332
-  output: .bionic/docs/plans/wave-04.plan.md#step-5
-  devtools-trace: .bionic/tmp/evidence-golden.png"
-
-# 13a — v7 has_ui=true, Step 5 complete but NO bundle-fresh → block,
-# message names the key.
-h13a=$(make_home)
-write_plan "$h13a" "$(v7_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v7_step5_base" > /dev/null
-expect_block "v7 has_ui=true Step 5 without bundle-fresh → block" \
-  "$h13a" 'git commit -m "x"' "bundle-fresh"
-
-# 13b — v7 has_ui=true + bundle-fresh proof line → allow.
-h13b=$(make_home)
-write_plan "$h13b" "$(v7_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v7_step5_base
-  bundle-fresh: FRESH — canary token-9f3a round-tripped to dist/main.js in 4.2s" > /dev/null
-expect_allow "v7 has_ui=true + bundle-fresh proof → allow" \
-  "$h13b" 'git commit -m "x"'
-
-# 13c — v7 has_ui=true + bundle-fresh: n/a with reason → allow.
-h13c=$(make_home)
-write_plan "$h13c" "$(v7_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v7_step5_base
-  bundle-fresh: n/a: CLI tool, no served bundle" > /dev/null
-expect_allow "v7 has_ui=true + bundle-fresh: n/a with reason → allow" \
-  "$h13c" 'git commit -m "x"'
-
-# 13d — v7 has_ui=true + bundle-fresh placeholder → block (placeholder ban).
-h13d=$(make_home)
-write_plan "$h13d" "$(v7_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v7_step5_base
-  bundle-fresh: TBD" > /dev/null
-expect_block "v7 bundle-fresh: TBD → block (placeholder ban)" \
-  "$h13d" 'git commit -m "x"' "placeholder"
-
-# 13e — v7 has_ui=true + bundle-fresh: n/a with NO reason → block.
-h13e=$(make_home)
-write_plan "$h13e" "$(v7_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v7_step5_base
-  bundle-fresh: n/a" > /dev/null
-expect_block "v7 bundle-fresh: n/a without reason → block" \
-  "$h13e" 'git commit -m "x"' "bundle-fresh"
-
-# 13f — v7 has_ui=true + bundle-fresh empty value → block.
-h13f=$(make_home)
-write_plan "$h13f" "$(v7_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v7_step5_base
-  bundle-fresh:" > /dev/null
-expect_block "v7 bundle-fresh with empty value → block" \
-  "$h13f" 'git commit -m "x"' "bundle-fresh"
-
-# 13g — v7 has_ui=false, no bundle-fresh key → block (the requirement is
-# universal; frontmatter flags don't gate it).
-h13g=$(make_home)
-write_plan "$h13g" "$(v7_frontmatter false)
-## SDLC State
-current: 5
-Step 5:
-$v7_step5_base" > /dev/null
-expect_block "v7 has_ui=false without bundle-fresh → block (universal key)" \
-  "$h13g" 'git commit -m "x"' "bundle-fresh"
-
-# 13h — v7 has_ui=false + bundle-fresh: n/a with reason → allow (the n/a
-# escape is how non-served waves satisfy the universal key).
-h13h=$(make_home)
-write_plan "$h13h" "$(v7_frontmatter false)
-## SDLC State
-current: 5
-Step 5:
-$v7_step5_base
-  bundle-fresh: n/a: no served artifact in this wave" > /dev/null
-expect_allow "v7 has_ui=false + bundle-fresh: n/a with reason → allow" \
-  "$h13h" 'git commit -m "x"'
-
-# 13i — v7 has_ui=true with bundle-fresh but missing browser modality →
-# block (v6 base rules still apply under v7).
-h13i=$(make_home)
-write_plan "$h13i" "$(v7_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-  cmd: bash test.sh
-  pass: 10
-  total: 10
-  output: x
-  bundle-fresh: FRESH — canary token-9f3a round-tripped in 4.2s" > /dev/null
-expect_block "v7 Step 5 missing devtools-trace (base v6 rules intact) → block" \
-  "$h13i" 'git commit -m "x"' "devtools-trace"
-
-# 13j — v7 non-Step-5 shapes unchanged from v6: Step 8 Integrate & close → allow.
-h13j=$(make_home)
-write_plan "$h13j" "$(v7_frontmatter true)
-## SDLC State
-current: 8
-Step 8:
-  merge: abc1234abc1234abc1234abc1234abc1234abc1
-  worktree-removed: n/a
-  cleanup: ok
-  tmp-wiped: yes
-  tasks-completed: 10/10" > /dev/null
-expect_allow "v7 Step 8 Integrate & close full → allow" \
-  "$h13j" 'git commit -m "x"'
-
-# 13k — v7 pointer steps 1/2/3/6 → allow.
-for step in 1 2 3 6; do
-  h=$(make_home)
-  write_plan "$h" "$(v7_frontmatter true)
-## SDLC State
-current: $step
-Step $step: pointer evidence here" > /dev/null
-  expect_allow "v7 Step $step (pointer step) → allow" \
-    "$h" 'git commit -m "x"'
-done
-
-# ============================================================
-# Section 14: v8 canonical_sdlc_version — drive-check gate
-# ============================================================
-#
-# v8 = v7 plus ONE addition: the Step 5 block must carry
-# `drive-check: <observed delta>` (or `suite: <named test — what it asserts>` /
-# `n/a: <reason>`) — proof that one trusted interaction changed app
-# state, read back semantically, before browser-modality evidence
-# counts. Universal with an n/a escape, exactly like `bundle-fresh:`.
-# The hook validates presence + non-empty value/reason + the existing
-# placeholder ban only; the suite-credit semantics live in skill prose.
-
-echo ""
-echo "=== Section 14: v8 drive-check gate ==="
-
-v8_frontmatter() {
-  local has_ui="${1:-true}" deploy="${2:-none}" use_wt="${3:-false}"
-  cat <<EOF
----
-governing-skill: canonical-sdlc
-mode: autonomous
-canonical_sdlc_version: 8
-deploy_target: ${deploy}
-use_worktree: ${use_wt}
-has_ui: ${has_ui}
----
-EOF
-}
-
-# Shared Step-5 body (tests + browser + bundle-fresh satisfied) so each
-# case isolates the drive-check variable.
-v8_step5_base="  cmd: bash test.sh
-  pass: 332
-  total: 332
-  output: .bionic/docs/plans/wave-04.plan.md#step-5
-  devtools-trace: .bionic/tmp/evidence-golden.png
-  bundle-fresh: FRESH — canary token-9f3a round-tripped to dist/main.js in 4.2s"
-
-# 14a — v8 Step 5 complete but NO drive-check → block, message names the key.
-h14a=$(make_home)
-write_plan "$h14a" "$(v8_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v8_step5_base" > /dev/null
-expect_block "v8 Step 5 without drive-check → block" \
-  "$h14a" 'git commit -m "x"' "drive-check"
-
-# 14b — v8 + drive-check observed-delta proof → allow.
-h14b=$(make_home)
-write_plan "$h14b" "$(v8_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v8_step5_base
-  drive-check: drag on target surface moved app value 3 → 7 via eval readback" > /dev/null
-expect_allow "v8 + drive-check observed delta → allow" \
-  "$h14b" 'git commit -m "x"'
-
-# 14c — v8 + drive-check suite-credit form → allow.
-h14c=$(make_home)
-write_plan "$h14c" "$(v8_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v8_step5_base
-  drive-check: suite: e2e drag-updates-value.spec — real pointer input on the target surface, asserts app state delta" > /dev/null
-expect_allow "v8 + drive-check: suite-credit form → allow" \
-  "$h14c" 'git commit -m "x"'
-
-# 14d — v8 + drive-check: n/a with reason → allow.
-h14d=$(make_home)
-write_plan "$h14d" "$(v8_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v8_step5_base
-  drive-check: n/a: no browser modality in this wave" > /dev/null
-expect_allow "v8 + drive-check: n/a with reason → allow" \
-  "$h14d" 'git commit -m "x"'
-
-# 14e — v8 + drive-check placeholder → block (placeholder ban).
-h14e=$(make_home)
-write_plan "$h14e" "$(v8_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v8_step5_base
-  drive-check: TBD" > /dev/null
-expect_block "v8 drive-check: TBD → block (placeholder ban)" \
-  "$h14e" 'git commit -m "x"' "placeholder"
-
-# 14f — v8 + drive-check: n/a with NO reason → block.
-h14f=$(make_home)
-write_plan "$h14f" "$(v8_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v8_step5_base
-  drive-check: n/a" > /dev/null
-expect_block "v8 drive-check: n/a without reason → block" \
-  "$h14f" 'git commit -m "x"' "drive-check"
-
-# 14g — v8 + drive-check empty value → block.
-h14g=$(make_home)
-write_plan "$h14g" "$(v8_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v8_step5_base
-  drive-check:" > /dev/null
-expect_block "v8 drive-check with empty value → block" \
-  "$h14g" 'git commit -m "x"' "drive-check"
-
-# 14h — v8 has_ui=false: key is universal (block without; n/a satisfies).
-h14h1=$(make_home)
-write_plan "$h14h1" "$(v8_frontmatter false)
-## SDLC State
-current: 5
-Step 5:
-$v8_step5_base" > /dev/null
-expect_block "v8 has_ui=false without drive-check → block (universal key)" \
-  "$h14h1" 'git commit -m "x"' "drive-check"
-
-h14h2=$(make_home)
-write_plan "$h14h2" "$(v8_frontmatter false)
-## SDLC State
-current: 5
-Step 5:
-$v8_step5_base
-  drive-check: n/a: no interactive surface in this wave" > /dev/null
-expect_allow "v8 has_ui=false + drive-check: n/a with reason → allow" \
-  "$h14h2" 'git commit -m "x"'
-
-# 14i — v8 with drive-check but missing bundle-fresh → block (v7 base
-# rules still apply under v8).
-h14i=$(make_home)
-write_plan "$h14i" "$(v8_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-  cmd: bash test.sh
-  pass: 10
-  total: 10
-  output: x
-  devtools-trace: .bionic/tmp/evidence-golden.png
-  drive-check: click toggled app flag false → true via eval readback" > /dev/null
-expect_block "v8 Step 5 missing bundle-fresh (base v7 rules intact) → block" \
-  "$h14i" 'git commit -m "x"' "bundle-fresh"
-
-# 14j — v8 non-Step-5 shapes unchanged from v7: Step 8 → allow.
-h14j=$(make_home)
-write_plan "$h14j" "$(v8_frontmatter true)
-## SDLC State
-current: 8
-Step 8:
-  merge: abc1234abc1234abc1234abc1234abc1234abc1
-  worktree-removed: n/a
-  cleanup: ok
-  tmp-wiped: yes
-  tasks-completed: 10/10" > /dev/null
-expect_allow "v8 Step 8 Integrate & close full → allow" \
-  "$h14j" 'git commit -m "x"'
-
-# 14k — v8 pointer steps 1/2/3/6 → allow.
-for step in 1 2 3 6; do
-  h=$(make_home)
-  write_plan "$h" "$(v8_frontmatter true)
-## SDLC State
-current: $step
-Step $step: pointer evidence here" > /dev/null
-  expect_allow "v8 Step $step (pointer step) → allow" \
-    "$h" 'git commit -m "x"'
-done
-
-# 14l — GRANDFATHERING: a v7 plan at Step 5 with bundle-fresh but NO
-# drive-check must still pass after the v8 switch lands. (13b proves the
-# same shape; this case exists as the explicit named regression.)
-h14l=$(make_home)
-write_plan "$h14l" "$(v7_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v7_step5_base
-  bundle-fresh: FRESH — canary token-9f3a round-tripped to dist/main.js in 4.2s" > /dev/null
-expect_allow "GRANDFATHER: v7 Step 5 without drive-check → allow" \
-  "$h14l" 'git commit -m "x"'
-
-# ============================================================
-# Section 15: CRLF line endings — frontmatter parses under \r\n
-# ============================================================
-#
-# Plan files with CRLF (\r\n) line endings previously defeated the
-# hook's exact-match awk frontmatter parser (`$0=="---"` never matches
-# "---\r"), silently downgrading v8 plans to legacy presence-only mode
-# — every shape check (including the drive-check gate from Section 14)
-# skipped. Strip \r at extraction time so CRLF plans get the same
-# enforcement as LF plans.
-
-echo ""
-echo "=== Section 15: CRLF line endings ==="
-
-# Converts LF line endings to CRLF by inserting a literal CR before
-# each newline. Bash-3.2-safe ANSI-C quoting embeds a real CR byte in
-# the sed script itself (BSD sed's replacement text does not interpret
-# the two-character "\r" as an escape).
-to_crlf() {
-  printf '%s' "$1" | sed $'s/$/\r/'
-}
-
-# Converts LF line endings to CR-only (classic-Mac) by replacing every
-# newline with a carriage return, so the content carries NO \n at all.
-# (write_plan then appends one trailing \n; the internal line breaks
-# stay pure \r — the faithful CR-only shape.)
-to_cr() {
-  printf '%s' "$1" | tr '\n' '\r'
-}
-
-# 15a — CRLF v8 plan, Step 5 complete but NO drive-check → block. Before
-# the fix: FRONTMATTER parses empty (canonical_sdlc_version lost) → hook
-# silently downgrades to legacy presence-only mode → incorrectly allows.
-h15a=$(make_home)
-write_plan "$h15a" "$(to_crlf "$(v8_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v8_step5_base")" > /dev/null
-expect_block "CRLF v8 Step 5 without drive-check → block" \
-  "$h15a" 'git commit -m "x"' "drive-check"
-
-# 15b — CRLF v8 plan with a complete, valid Step-5 block (drive-check
-# present) → allow.
-h15b=$(make_home)
-write_plan "$h15b" "$(to_crlf "$(v8_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v8_step5_base
-  drive-check: click toggled app flag false → true via eval readback")" > /dev/null
-expect_allow "CRLF v8 Step 5 complete (drive-check present) → allow" \
-  "$h15b" 'git commit -m "x"'
-
-# ============================================================
-# Section 15b: CR-only line endings — classic-Mac (\r without \n)
-# ============================================================
-#
-# A plan file with CR-only line endings (every break a lone \r, no \n)
-# previously collapsed to a SINGLE line under the hook's `tr -d '\r'`
-# normalization: deleting every \r removed every line break, so the
-# line-anchored `/^## SDLC State/` presence check never matched and the
-# hook exited 0 as "not a canonical-sdlc plan" — every commit passed
-# ungated. The fix normalizes \r to real newlines (both \r\n and lone
-# \r) so CR-only plans parse identically to LF/CRLF plans.
-
-echo ""
-echo "=== Section 15b: CR-only (classic-Mac) line endings ==="
-
-# 15b-cr-a — CR-only v8 plan, Step 5 complete but NO drive-check → block.
-# Before the fix: the whole file collapses to one line, ## SDLC State is
-# never seen, version is lost → hook silently allows. This is the RED case.
-h15bcra=$(make_home)
-write_plan "$h15bcra" "$(to_cr "$(v8_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v8_step5_base")" > /dev/null
-expect_block "CR-only v8 Step 5 without drive-check → block" \
-  "$h15bcra" 'git commit -m "x"' "drive-check"
-
-# 15b-cr-b — CR-only v8 plan with a complete, valid Step-5 block → allow
-# (guards against over-blocking once CR-only parses correctly).
-h15bcrb=$(make_home)
-write_plan "$h15bcrb" "$(to_cr "$(v8_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v8_step5_base
-  drive-check: click toggled app flag false → true via eval readback")" > /dev/null
-expect_allow "CR-only v8 Step 5 complete (drive-check present) → allow" \
-  "$h15bcrb" 'git commit -m "x"'
-
-# ============================================================
-# Section 16: v9 canonical_sdlc_version — universal stack-health gate
-# ============================================================
-#
-# v9 = v8 plus ONE addition: the Step 5 block must carry
-# `stack-health: <before/after snapshot, no delta>` or
-# `stack-health: n/a: <reason>` — proof that the serving stack's
-# runtime-integrity indicators (process restarts, crash/OOM state) did
-# not change across the walk, so a crash-restart mid-walk cannot swallow
-# the bug being probed while the app returns looking healthy. Universal
-# with an n/a escape, exactly like `bundle-fresh:` and `drive-check:`.
-# The hook validates presence + non-empty value/reason + the existing
-# placeholder ban only; the snapshot command is project-specific by
-# design.
-
-echo ""
-echo "=== Section 16: v9 stack-health gate ==="
-
-v9_frontmatter() {
-  local has_ui="${1:-true}" deploy="${2:-none}" use_wt="${3:-false}"
-  cat <<EOF
----
-governing-skill: canonical-sdlc
-mode: autonomous
-canonical_sdlc_version: 9
-deploy_target: ${deploy}
-use_worktree: ${use_wt}
-has_ui: ${has_ui}
----
-EOF
-}
-
-# Shared Step-5 body (tests + browser + bundle-fresh + drive-check
-# satisfied) so each case isolates the stack-health variable.
-v9_step5_base="  cmd: bash test.sh
-  pass: 332
-  total: 332
-  output: .bionic/docs/plans/wave-04.plan.md#step-5
-  devtools-trace: .bionic/tmp/evidence-golden.png
-  bundle-fresh: FRESH — canary token-9f3a round-tripped to dist/main.js in 4.2s
-  drive-check: click toggled app flag false → true via eval readback"
-
-# 16a — v9 Step 5 complete (all v8 keys present) but NO stack-health →
-# block, message names the key.
-h16a=$(make_home)
-write_plan "$h16a" "$(v9_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v9_step5_base" > /dev/null
-expect_block "v9 Step 5 without stack-health → block" \
-  "$h16a" 'git commit -m "x"' "stack-health"
-
-# 16b — v9 + stack-health before/after snapshot with no delta → allow.
-h16b=$(make_home)
-write_plan "$h16b" "$(v9_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v9_step5_base
-  stack-health: process restarts 0 → 0 across walk; no crash/OOM state change" > /dev/null
-expect_allow "v9 + stack-health no-delta snapshot → allow" \
-  "$h16b" 'git commit -m "x"'
-
-# 16c — v9 + stack-health: n/a with reason → allow.
-h16c=$(make_home)
-write_plan "$h16c" "$(v9_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v9_step5_base
-  stack-health: n/a: no long-running serve observed" > /dev/null
-expect_allow "v9 + stack-health: n/a with reason → allow" \
-  "$h16c" 'git commit -m "x"'
-
-# 16d — v9 + stack-health empty value → block.
-h16d=$(make_home)
-write_plan "$h16d" "$(v9_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v9_step5_base
-  stack-health:" > /dev/null
-expect_block "v9 stack-health with empty value → block" \
-  "$h16d" 'git commit -m "x"' "stack-health"
-
-# 16e — v9 + stack-health: n/a with NO reason → block.
-h16e=$(make_home)
-write_plan "$h16e" "$(v9_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v9_step5_base
-  stack-health: n/a" > /dev/null
-expect_block "v9 stack-health: n/a without reason → block" \
-  "$h16e" 'git commit -m "x"' "stack-health"
-
-# 16f — v9 + stack-health placeholder → block (placeholder ban).
-h16f=$(make_home)
-write_plan "$h16f" "$(v9_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v9_step5_base
-  stack-health: TBD" > /dev/null
-expect_block "v9 stack-health: TBD → block (placeholder ban)" \
-  "$h16f" 'git commit -m "x"' "placeholder"
-
-# 16g — v9 non-Step-5 spot-checks: document (Step 7) and integrate
-# (Step 8) shapes unchanged from v8.
-h16g1=$(make_home)
-write_plan "$h16g1" "$(v9_frontmatter true)
-## SDLC State
-current: 7
-Step 7:
-  adr: .bionic/docs/adrs/adr-001-example.md" > /dev/null
-expect_allow "v9 Step 7 Document with adr → allow" \
-  "$h16g1" 'git commit -m "x"'
-
-h16g2=$(make_home)
-write_plan "$h16g2" "$(v9_frontmatter true)
-## SDLC State
-current: 8
-Step 8:
-  merge: abc1234abc1234abc1234abc1234abc1234abc1
-  worktree-removed: n/a
-  cleanup: ok
-  tmp-wiped: yes
-  tasks-completed: 10/10" > /dev/null
-expect_allow "v9 Step 8 Integrate & close full → allow" \
-  "$h16g2" 'git commit -m "x"'
-
-# 16h — GRANDFATHER (named regression): a v8 plan at Step 5 with all v8
-# keys (including drive-check — v8's own requirement) but NO stack-health
-# must still pass after the v9 switch lands.
-h16h=$(make_home)
-write_plan "$h16h" "$(v8_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v8_step5_base
-  drive-check: click toggled app flag false → true via eval readback" > /dev/null
-expect_allow "GRANDFATHER: v8 Step 5 without stack-health → allow" \
-  "$h16h" 'git commit -m "x"'
-
-# 16i — whole-value equality on the flat Step-5 block: a field VALUE that
-# merely CONTAINS a placeholder token as a substring (here output: "...
-# *.example placeholders ...") is legal — only a whole-value match blocks.
-# This was the live false block under the OLD substring ban.
-h16i=$(make_home)
-write_plan "$h16i" "$(v9_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-  cmd: bash test.sh
-  pass: 332
-  total: 332
-  output: rendered 3 *.example placeholders in the fixture snapshot
-  devtools-trace: .bionic/tmp/evidence-golden.png
-  bundle-fresh: FRESH — canary token-9f3a round-tripped to dist/main.js in 4.2s
-  drive-check: click toggled app flag false → true via eval readback
-  stack-health: process restarts 0 → 0 across walk; no crash/OOM state change" > /dev/null
-expect_allow "v9 Step 5 output containing '*.example placeholders' substring → allow (whole-value equality)" \
-  "$h16i" 'git commit -m "x"'
-
-# ============================================================
-# Section 17: v10 canonical_sdlc_version — Verification Matrix gate
-# ============================================================
-#
-# v10 replaces the flat Step-5 universal-key stack (bundle-fresh /
-# drive-check / stack-health) with a pre-registered Verification Matrix
+# The Verify gate uses a pre-registered Verification Matrix
 # stored in a top-level `## Verification Matrix` section of the plan. The
 # Step-5 block keeps the tests floor (cmd/pass/total/output) and gains a
 # required `auditor:` pointer; the matrix carries a per-session
@@ -2028,15 +534,17 @@ expect_allow "v9 Step 5 output containing '*.example placeholders' substring →
 # (Step-5 validator) and as a prefix check for current: 6..9.
 
 echo ""
-echo "=== Section 17: v10 Verification Matrix gate ==="
+echo "=== Section 17: Verification Matrix gate ==="
 
-v10_frontmatter() {
+matrix_frontmatter() {
   local has_ui="${1:-true}" deploy="${2:-none}" use_wt="${3:-false}"
   cat <<EOF
 ---
 governing-skill: canonical-sdlc
-mode: autonomous
-canonical_sdlc_version: 10
+canonical_sdlc_version: 12
+intent: build
+rigor: audited
+scale: wave
 deploy_target: ${deploy}
 use_worktree: ${use_wt}
 has_ui: ${has_ui}
@@ -2045,28 +553,28 @@ EOF
 }
 
 # Shared Step-5 block: tests floor + the required auditor pointer.
-v10_step5_base="  cmd: bash test.sh
+step5_base="  cmd: bash test.sh
   pass: 332
   total: 332
   output: .bionic/docs/plans/wave-01.plan.md#step-5
   auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
 
-# Assemble a full v10 plan: frontmatter + ## SDLC State (current + Step
+# Assemble a full plan: frontmatter + ## SDLC State (current + Step
 # block) + a ## Verification Matrix section. $1 current, $2 Step-block
 # body (indented lines), $3 full matrix section text.
-v10_plan() {
+plan() {
   printf '%s\n## SDLC State\ncurrent: %s\nStep %s:\n%s\n\n%s\n' \
-    "$(v10_frontmatter true)" "$1" "$1" "$2" "$3"
+    "$(matrix_frontmatter true)" "$1" "$1" "$2" "$3"
 }
 
 # A pointer body for post-Verify steps (6..9): non-empty, non-placeholder.
-v10_step6_body="  review: .bionic/docs/plans/wave-01.plan.md#step-6-review"
+step6_body="  review: .bionic/docs/plans/wave-01.plan.md#step-6-review"
 
 # --- matrix fixtures -------------------------------------------------------
 
 # Complete, valid matrix: T3 (all five fields), T1 (tier-run+readback),
 # waived T3 row. stack-health present. All auditor cells CONFIRMED/waived.
-v10_matrix_complete="## Verification Matrix
+matrix_complete="## Verification Matrix
 
 stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
 
@@ -2087,7 +595,7 @@ AC-2:
   readback: 332/332 asserted"
 
 # discharged T3 row with NO matching AC evidence block (AC-1 block absent).
-v10_matrix_no_block="## Verification Matrix
+matrix_no_block="## Verification Matrix
 
 stack-health: n/a: no long-running serve
 
@@ -2101,7 +609,7 @@ AC-2:
   readback: 332/332 asserted"
 
 # AC-1 readback is a placeholder token.
-v10_matrix_placeholder="## Verification Matrix
+matrix_placeholder="## Verification Matrix
 
 stack-health: n/a: no long-running serve
 
@@ -2117,7 +625,7 @@ AC-1:
   readback: TBD"
 
 # AC-1 (T3) contact is a self-written n/a with no waiver.
-v10_matrix_live_na="## Verification Matrix
+matrix_live_na="## Verification Matrix
 
 stack-health: n/a: no long-running serve
 
@@ -2134,7 +642,7 @@ AC-1:
 
 # AC-1 declared T3 but carries only the suite-credit shape (tier-run +
 # readback), missing fresh/cold-client/contact.
-v10_matrix_suite_credit="## Verification Matrix
+matrix_suite_credit="## Verification Matrix
 
 stack-health: n/a: no long-running serve
 
@@ -2147,7 +655,7 @@ AC-1:
   readback: 12/12 asserted"
 
 # Complete matrix but AC-1 auditor verdict is REFUTED.
-v10_matrix_refuted="## Verification Matrix
+matrix_refuted="## Verification Matrix
 
 stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
 
@@ -2168,7 +676,7 @@ AC-2:
   readback: 332/332 asserted"
 
 # Complete matrix; the waived row's auditor cell is empty (legal).
-v10_matrix_waived_empty="## Verification Matrix
+matrix_waived_empty="## Verification Matrix
 
 stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
 
@@ -2189,7 +697,7 @@ AC-2:
   readback: 332/332 asserted"
 
 # stack-health line absent.
-v10_matrix_no_stackhealth="## Verification Matrix
+matrix_no_stackhealth="## Verification Matrix
 
 | AC | tier | status | evidence | auditor |
 |---|---|---|---|---|
@@ -2200,7 +708,7 @@ AC-1:
   readback: 40/40 asserted"
 
 # stack-health via the n/a escape.
-v10_matrix_stackhealth_na="## Verification Matrix
+matrix_stackhealth_na="## Verification Matrix
 
 stack-health: n/a: no long-running serve
 
@@ -2213,7 +721,7 @@ AC-1:
   readback: 40/40 asserted"
 
 # T0/T1/T2-only matrix — no T3 fields, no browser artifacts anywhere.
-v10_matrix_lower_tiers="## Verification Matrix
+matrix_lower_tiers="## Verification Matrix
 
 stack-health: n/a: no long-running serve
 
@@ -2235,7 +743,7 @@ AC-3:
   readback: 0 type errors"
 
 # false-green entry with no paired rewritten entry.
-v10_matrix_false_green_unpaired="## Verification Matrix
+matrix_false_green_unpaired="## Verification Matrix
 
 stack-health: n/a: no long-running serve
 
@@ -2250,7 +758,7 @@ AC-1:
 false-green: hermetic-x — green over broken branch"
 
 # false-green entry WITH a paired rewritten entry.
-v10_matrix_false_green_paired="## Verification Matrix
+matrix_false_green_paired="## Verification Matrix
 
 stack-health: n/a: no long-running serve
 
@@ -2266,7 +774,7 @@ false-green: hermetic-x — green over broken branch
 rewritten: fixed in commit abc123, test now RED-first"
 
 # A malformed row: a stray literal | shears an extra cell.
-v10_matrix_malformed="## Verification Matrix
+matrix_malformed="## Verification Matrix
 
 stack-health: n/a: no long-running serve
 
@@ -2285,26 +793,26 @@ AC-1:
 
 # 17a — complete matrix at current: 5 → allow.
 h17a=$(make_home)
-write_plan "$h17a" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
-expect_allow "v10 17a complete matrix (T3 + T1 + waived T3) at current 5 → allow" \
+write_plan "$h17a" "$(plan 5 "$step5_base" "$matrix_complete")" > /dev/null
+expect_allow "17a complete matrix (T3 + T1 + waived T3) at current 5 → allow" \
   "$h17a" 'git commit -m "x"'
 
 # 17b — discharged row with NO AC evidence block → block, names the AC.
 h17b=$(make_home)
-write_plan "$h17b" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_no_block")" > /dev/null
-expect_block "v10 17b discharged T3 row with no AC block → block (names AC-1)" \
+write_plan "$h17b" "$(plan 5 "$step5_base" "$matrix_no_block")" > /dev/null
+expect_block "17b discharged T3 row with no AC block → block (names AC-1)" \
   "$h17b" 'git commit -m "x"' "AC-1"
 
 # 17c — placeholder token in an AC evidence field → block.
 h17c=$(make_home)
-write_plan "$h17c" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_placeholder")" > /dev/null
-expect_block "v10 17c readback: TBD in AC block → block (placeholder ban)" \
+write_plan "$h17c" "$(plan 5 "$step5_base" "$matrix_placeholder")" > /dev/null
+expect_block "17c readback: TBD in AC block → block (placeholder ban)" \
   "$h17c" 'git commit -m "x"' "placeholder"
 
 # 17c-substr — a matrix AC field VALUE that merely CONTAINS a placeholder
 # token as a substring is legal; only a whole-value match blocks. readback:
 # 'status pending → done ...' (contains 'pending') → allow.
-v10_matrix_substr_ok="## Verification Matrix
+matrix_substr_ok="## Verification Matrix
 
 stack-health: n/a: no long-running serve
 
@@ -2316,25 +824,25 @@ AC-1:
   tier-run: bash test.sh
   readback: status pending → done, 40/40 asserted"
 h17c2=$(make_home)
-write_plan "$h17c2" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_substr_ok")" > /dev/null
-expect_allow "v10 17c matrix readback containing 'pending' substring → allow (whole-value equality)" \
+write_plan "$h17c2" "$(plan 5 "$step5_base" "$matrix_substr_ok")" > /dev/null
+expect_allow "17c matrix readback containing 'pending' substring → allow (whole-value equality)" \
   "$h17c2" 'git commit -m "x"'
 
 # 17d — T3 row with self-written n/a on a field, no waiver → block, points
 # at the Waiver Protocol.
 h17d=$(make_home)
-write_plan "$h17d" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_live_na")" > /dev/null
-expect_block "v10 17d T3 contact: n/a, no waiver → block (Waiver Protocol)" \
+write_plan "$h17d" "$(plan 5 "$step5_base" "$matrix_live_na")" > /dev/null
+expect_block "17d T3 contact: n/a, no waiver → block (Waiver Protocol)" \
   "$h17d" 'git commit -m "x"' "Waiver Protocol"
 
 # 17d-case — the live-tier n/a ban must be case-insensitive: 'N/A' and
 # 'N/a: <reason>' are the same self-written downgrade as lowercase 'n/a'
 # (review-gate finding: a single capital letter must not defeat the ban).
 # The variants are written as full literal matrices rather than derived from
-# v10_matrix_live_na via ${var/pat/rep}: a slash in the contact value forces
+# matrix_live_na via ${var/pat/rep}: a slash in the contact value forces
 # an escaped slash in the pattern, and bash 3.2 leaves that backslash in the
 # replacement (producing 'contact: N\/A'), so the variant is never built.
-v10_matrix_live_na_upper="## Verification Matrix
+matrix_live_na_upper="## Verification Matrix
 
 stack-health: n/a: no long-running serve
 
@@ -2349,11 +857,11 @@ AC-1:
   contact: N/A
   readback: panel.visible === true via page eval"
 h17d2=$(make_home)
-write_plan "$h17d2" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_live_na_upper")" > /dev/null
-expect_block "v10 17d T3 contact: N/A (uppercase), no waiver → block" \
+write_plan "$h17d2" "$(plan 5 "$step5_base" "$matrix_live_na_upper")" > /dev/null
+expect_block "17d T3 contact: N/A (uppercase), no waiver → block" \
   "$h17d2" 'git commit -m "x"' "Waiver Protocol"
 
-v10_matrix_live_na_mixed="## Verification Matrix
+matrix_live_na_mixed="## Verification Matrix
 
 stack-health: n/a: no long-running serve
 
@@ -2368,127 +876,106 @@ AC-1:
   contact: N/a: not reachable quickly
   readback: panel.visible === true via page eval"
 h17d3=$(make_home)
-write_plan "$h17d3" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_live_na_mixed")" > /dev/null
-expect_block "v10 17d T3 contact: N/a: <reason> (mixed case), no waiver → block" \
+write_plan "$h17d3" "$(plan 5 "$step5_base" "$matrix_live_na_mixed")" > /dev/null
+expect_block "17d T3 contact: N/a: <reason> (mixed case), no waiver → block" \
   "$h17d3" 'git commit -m "x"' "Waiver Protocol"
 
 # 17e — T3 row with only the suite-credit shape (missing fresh/cold-client/
 # contact) → block.
 h17e=$(make_home)
-write_plan "$h17e" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_suite_credit")" > /dev/null
-expect_block "v10 17e T3 suite-credit shape missing live-tier fields → block (fresh)" \
+write_plan "$h17e" "$(plan 5 "$step5_base" "$matrix_suite_credit")" > /dev/null
+expect_block "17e T3 suite-credit shape missing live-tier fields → block (fresh)" \
   "$h17e" 'git commit -m "x"' "fresh"
 
 # 17f — current: 6, one row auditor REFUTED → block.
 h17f1=$(make_home)
-write_plan "$h17f1" "$(v10_plan 6 "$v10_step6_body" "$v10_matrix_refuted")" > /dev/null
-expect_block "v10 17f current 6 with a REFUTED row → block (CONFIRMED required)" \
+write_plan "$h17f1" "$(plan 6 "$step6_body" "$matrix_refuted")" > /dev/null
+expect_block "17f current 6 with a REFUTED row → block (CONFIRMED required)" \
   "$h17f1" 'git commit -m "x"' "CONFIRMED"
 
 # 17f — current: 6, all non-waived rows CONFIRMED → allow.
 h17f2=$(make_home)
-write_plan "$h17f2" "$(v10_plan 6 "$v10_step6_body" "$v10_matrix_complete")" > /dev/null
-expect_allow "v10 17f current 6 all CONFIRMED (waived row exempt) → allow" \
+write_plan "$h17f2" "$(plan 6 "$step6_body" "$matrix_complete")" > /dev/null
+expect_allow "17f current 6 all CONFIRMED (waived row exempt) → allow" \
   "$h17f2" 'git commit -m "x"'
 
 # 17f — current: 6, waived row with an empty auditor cell → allow.
 h17f3=$(make_home)
-write_plan "$h17f3" "$(v10_plan 6 "$v10_step6_body" "$v10_matrix_waived_empty")" > /dev/null
-expect_allow "v10 17f current 6 waived row with empty auditor cell → allow" \
+write_plan "$h17f3" "$(plan 6 "$step6_body" "$matrix_waived_empty")" > /dev/null
+expect_allow "17f current 6 waived row with empty auditor cell → allow" \
   "$h17f3" 'git commit -m "x"'
 
-# 17g — v10 at current: 5 with NO ## Verification Matrix section → block.
+# 17g — current: 5 with NO ## Verification Matrix section → block.
 h17g=$(make_home)
-write_plan "$h17g" "$(v10_frontmatter true)
+write_plan "$h17g" "$(matrix_frontmatter true)
 ## SDLC State
 current: 5
 Step 5:
-$v10_step5_base" > /dev/null
-expect_block "v10 17g current 5 with no Verification Matrix section → block" \
+$step5_base" > /dev/null
+expect_block "17g current 5 with no Verification Matrix section → block" \
   "$h17g" 'git commit -m "x"' "Verification Matrix"
 
 # 17h — matrix missing the stack-health line → block.
 h17h1=$(make_home)
-write_plan "$h17h1" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_no_stackhealth")" > /dev/null
-expect_block "v10 17h matrix missing stack-health → block" \
+write_plan "$h17h1" "$(plan 5 "$step5_base" "$matrix_no_stackhealth")" > /dev/null
+expect_block "17h matrix missing stack-health → block" \
   "$h17h1" 'git commit -m "x"' "stack-health"
 
 # 17h — stack-health via the n/a escape → allow.
 h17h2=$(make_home)
-write_plan "$h17h2" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_stackhealth_na")" > /dev/null
-expect_allow "v10 17h stack-health: n/a with reason → allow" \
+write_plan "$h17h2" "$(plan 5 "$step5_base" "$matrix_stackhealth_na")" > /dev/null
+expect_allow "17h stack-health: n/a with reason → allow" \
   "$h17h2" 'git commit -m "x"'
 
 # 17i — T0/T1/T2-only matrix, no T3 fields, no browser artifacts → allow.
 h17i=$(make_home)
-write_plan "$h17i" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_lower_tiers")" > /dev/null
-expect_allow "v10 17i lower-tier-only matrix (T0/T1/T2) → allow" \
+write_plan "$h17i" "$(plan 5 "$step5_base" "$matrix_lower_tiers")" > /dev/null
+expect_allow "17i lower-tier-only matrix (T0/T1/T2) → allow" \
   "$h17i" 'git commit -m "x"'
 
 # 17j — Step-5 block missing the auditor pointer → block.
 h17j1=$(make_home)
-write_plan "$h17j1" "$(v10_plan 5 "  cmd: bash test.sh
+write_plan "$h17j1" "$(plan 5 "  cmd: bash test.sh
   pass: 332
   total: 332
-  output: .bionic/docs/plans/wave-01.plan.md#step-5" "$v10_matrix_complete")" > /dev/null
-expect_block "v10 17j Step-5 missing auditor → block" \
+  output: .bionic/docs/plans/wave-01.plan.md#step-5" "$matrix_complete")" > /dev/null
+expect_block "17j Step-5 missing auditor → block" \
   "$h17j1" 'git commit -m "x"' "auditor"
 
 # 17j — Step-5 block missing the tests floor (cmd) → block (validator reuse).
 h17j2=$(make_home)
-write_plan "$h17j2" "$(v10_plan 5 "  pass: 332
+write_plan "$h17j2" "$(plan 5 "  pass: 332
   total: 332
   output: .bionic/docs/plans/wave-01.plan.md#step-5
-  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md" "$v10_matrix_complete")" > /dev/null
-expect_block "v10 17j Step-5 missing tests floor cmd → block" \
+  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md" "$matrix_complete")" > /dev/null
+expect_block "17j Step-5 missing tests floor cmd → block" \
   "$h17j2" 'git commit -m "x"' "cmd"
-
-# 17k — GRANDFATHER: a v9 plan at current: 5 with v9 keys and NO matrix must
-# still pass after the v10 switch lands (reuses the v9 fixtures).
-h17k1=$(make_home)
-write_plan "$h17k1" "$(v9_frontmatter true)
-## SDLC State
-current: 5
-Step 5:
-$v9_step5_base
-  stack-health: process restarts 0 → 0 across walk; no crash/OOM state change" > /dev/null
-expect_allow "GRANDFATHER: v9 Step 5 (no matrix) after v10 lands → allow" \
-  "$h17k1" 'git commit -m "x"'
-
-# 17k — same v9 plan at current: 6 (pointer step) → allow.
-h17k2=$(make_home)
-write_plan "$h17k2" "$(v9_frontmatter true)
-## SDLC State
-current: 6
-Step 6: .bionic/docs/plans/wave-04.plan.md#step-6-review" > /dev/null
-expect_allow "GRANDFATHER: v9 Step 6 pointer (no matrix) → allow" \
-  "$h17k2" 'git commit -m "x"'
 
 # 17l — false-green entry with NO paired rewritten entry → block.
 h17l1=$(make_home)
-write_plan "$h17l1" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_false_green_unpaired")" > /dev/null
-expect_block "v10 17l false-green without rewritten → block" \
+write_plan "$h17l1" "$(plan 5 "$step5_base" "$matrix_false_green_unpaired")" > /dev/null
+expect_block "17l false-green without rewritten → block" \
   "$h17l1" 'git commit -m "x"' "rewritten"
 
 # 17l — false-green entry WITH a paired rewritten entry → allow.
 h17l2=$(make_home)
-write_plan "$h17l2" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_false_green_paired")" > /dev/null
-expect_allow "v10 17l false-green with paired rewritten → allow" \
+write_plan "$h17l2" "$(plan 5 "$step5_base" "$matrix_false_green_paired")" > /dev/null
+expect_allow "17l false-green with paired rewritten → allow" \
   "$h17l2" 'git commit -m "x"'
 
 # 17l — no false-green entry at all (key is optional) → allow.
 h17l3=$(make_home)
-write_plan "$h17l3" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_lower_tiers")" > /dev/null
-expect_allow "v10 17l no false-green entry (optional key) → allow" \
+write_plan "$h17l3" "$(plan 5 "$step5_base" "$matrix_lower_tiers")" > /dev/null
+expect_allow "17l no false-green entry (optional key) → allow" \
   "$h17l3" 'git commit -m "x"'
 
 # 17m — a malformed table row (stray literal | shears a cell) → block.
 h17m=$(make_home)
-write_plan "$h17m" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_malformed")" > /dev/null
-expect_block "v10 17m malformed row (extra literal |) → block" \
+write_plan "$h17m" "$(plan 5 "$step5_base" "$matrix_malformed")" > /dev/null
+expect_block "17m malformed row (extra literal |) → block" \
   "$h17m" 'git commit -m "x"' "malformed"
 
-# --- v10.1: mid-discharge commits at the Verify gate ------------------------
+# --- mid-discharge commits at the Verify gate ------------------------
 #
 # At current: 5 a row still being discharged (status pending/blocked) is
 # exempt from its per-tier evidence keys, and the Step-5 `auditor:` pointer
@@ -2540,60 +1027,60 @@ AC-2:
 
 # 17n — pending row, no AC block, current: 5 → allow (mid-walk commit home).
 h17n1=$(make_home)
-write_plan "$h17n1" "$(v10_plan 5 "$v10_step5_base" "$v101_matrix_pending")" > /dev/null
-expect_allow "v10.1 17n pending row without AC block at current 5 → allow" \
+write_plan "$h17n1" "$(plan 5 "$step5_base" "$v101_matrix_pending")" > /dev/null
+expect_allow "17n pending row without AC block at current 5 → allow" \
   "$h17n1" 'git commit -m "x"'
 
 # 17n — pending row AND no auditor pointer → allow (the auditor is the
 # Step-5 exit gate; it cannot have run while rows are pending).
 h17n2=$(make_home)
-write_plan "$h17n2" "$(v10_plan 5 "$v101_step5_noauditor" "$v101_matrix_pending")" > /dev/null
-expect_allow "v10.1 17n pending row + no auditor pointer at current 5 → allow" \
+write_plan "$h17n2" "$(plan 5 "$v101_step5_noauditor" "$v101_matrix_pending")" > /dev/null
+expect_allow "17n pending row + no auditor pointer at current 5 → allow" \
   "$h17n2" 'git commit -m "x"'
 
 # 17n — blocked row, no auditor pointer → allow (same relaxation).
 h17n3=$(make_home)
-write_plan "$h17n3" "$(v10_plan 5 "$v101_step5_noauditor" "$v101_matrix_blocked")" > /dev/null
-expect_allow "v10.1 17n blocked row + no auditor pointer at current 5 → allow" \
+write_plan "$h17n3" "$(plan 5 "$v101_step5_noauditor" "$v101_matrix_blocked")" > /dev/null
+expect_allow "17n blocked row + no auditor pointer at current 5 → allow" \
   "$h17n3" 'git commit -m "x"'
 
 # 17n — pending row with a partial block carrying a live-tier n/a → allow
 # at current 5 (deferred, not licensed: it blocks at discharge/advance).
 h17n4=$(make_home)
-write_plan "$h17n4" "$(v10_plan 5 "$v10_step5_base" "$v101_matrix_pending_partial")" > /dev/null
-expect_allow "v10.1 17n pending row with partial block (contact: n/a) at current 5 → allow" \
+write_plan "$h17n4" "$(plan 5 "$step5_base" "$v101_matrix_pending_partial")" > /dev/null
+expect_allow "17n pending row with partial block (contact: n/a) at current 5 → allow" \
   "$h17n4" 'git commit -m "x"'
 
 # 17o — fully discharged matrix + missing auditor pointer → still block
-# (17j1 pins the same shape; this pins it against the v10.1 relaxation).
+# (17j1 pins the same shape; this pins it against the mid-discharge relaxation).
 h17o1=$(make_home)
-write_plan "$h17o1" "$(v10_plan 5 "$v101_step5_noauditor" "$v10_matrix_complete")" > /dev/null
-expect_block "v10.1 17o fully discharged matrix + no auditor pointer → block" \
+write_plan "$h17o1" "$(plan 5 "$v101_step5_noauditor" "$matrix_complete")" > /dev/null
+expect_block "17o fully discharged matrix + no auditor pointer → block" \
   "$h17o1" 'git commit -m "x"' "auditor"
 
 # 17p — invalid status token → block, names the row and the enum.
 h17p1=$(make_home)
-write_plan "$h17p1" "$(v10_plan 5 "$v10_step5_base" "$v101_matrix_bad_status")" > /dev/null
-expect_block "v10.1 17p invalid status 'done' at current 5 → block (enum)" \
+write_plan "$h17p1" "$(plan 5 "$step5_base" "$v101_matrix_bad_status")" > /dev/null
+expect_block "17p invalid status 'done' at current 5 → block (enum)" \
   "$h17p1" 'git commit -m "x"' "invalid status"
 
 h17p2=$(make_home)
-write_plan "$h17p2" "$(v10_plan 6 "$v10_step6_body" "$v101_matrix_bad_status")" > /dev/null
-expect_block "v10.1 17p invalid status 'done' at current 6 → block (enum)" \
+write_plan "$h17p2" "$(plan 6 "$step6_body" "$v101_matrix_bad_status")" > /dev/null
+expect_block "17p invalid status 'done' at current 6 → block (enum)" \
   "$h17p2" 'git commit -m "x"' "invalid status"
 
 # 17q — the relaxation is 5-only: a pending row at current: 6 blocks (its
 # per-tier keys are demanded by the prefix check).
 h17q=$(make_home)
-write_plan "$h17q" "$(v10_plan 6 "$v10_step6_body" "$v101_matrix_pending")" > /dev/null
-expect_block "v10.1 17q pending row at current 6 → block (relaxation is 5-only)" \
+write_plan "$h17q" "$(plan 6 "$step6_body" "$v101_matrix_pending")" > /dev/null
+expect_block "17q pending row at current 6 → block (relaxation is 5-only)" \
   "$h17q" 'git commit -m "x"' "AC-2"
 
 # ============================================================
-# Section 18: v10 matrix parser — section scoping + fenced-code skip
+# Section 18: matrix parser — section scoping + fenced-code skip
 # ============================================================
 #
-# The v10 matrix validator reads every parse (stack-health, false-green,
+# The matrix validator reads every parse (stack-health, false-green,
 # tier-table rows, per-AC blocks) from matrix_section() — the body of the
 # top-level `## Verification Matrix` section. Two properties this section
 # pins:
@@ -2608,7 +1095,7 @@ expect_block "v10.1 17q pending row at current 6 → block (relaxation is 5-only
 # error.
 
 echo ""
-echo "=== Section 18: v10 matrix section scoping + fenced-code skip ==="
+echo "=== Section 18: matrix section scoping + fenced-code skip ==="
 
 # A fenced bash block whose jq pipeline uses leading-pipe continuation lines
 # — the exact shape that tripped the validator live. Single-quoted so the
@@ -2622,36 +1109,36 @@ playwright projects --json | jq -r '"'"'.browsers[]
 # (a) Valid, fully discharged matrix with a fenced pipeline appended inside
 # the section (matrix is the last section, so the fence sits at EOF within
 # it). RED before the fix: the '| select(...)' lines parse as malformed rows.
-v10_matrix_fence_after="$v10_matrix_complete
+matrix_fence_after="$matrix_complete
 
 $v10_fence_block"
 
 h18a=$(make_home)
-write_plan "$h18a" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_fence_after")" > /dev/null
-expect_allow "v10 18a fenced jq (leading-pipe) inside matrix section at current 5 → allow" \
+write_plan "$h18a" "$(plan 5 "$step5_base" "$matrix_fence_after")" > /dev/null
+expect_allow "18a fenced jq (leading-pipe) inside matrix section at current 5 → allow" \
   "$h18a" 'git commit -m "x"'
 
 # (b) A leading-pipe line OUTSIDE the matrix section (a later ## section),
 # not fenced → allow. Pins that row grammar is scoped to the matrix section.
 h18b=$(make_home)
-write_plan "$h18b" "$(v10_frontmatter true)
+write_plan "$h18b" "$(matrix_frontmatter true)
 ## SDLC State
 current: 5
 Step 5:
-$v10_step5_base
+$step5_base
 
-$v10_matrix_complete
+$matrix_complete
 
 ## Notes
 | this stray pipe line lives outside the matrix section
 | and must never be read as a table row" > /dev/null
-expect_allow "v10 18b leading-pipe line outside the matrix section → allow" \
+expect_allow "18b leading-pipe line outside the matrix section → allow" \
   "$h18b" 'git commit -m "x"'
 
 # (c) A fenced pipeline (skipped) AND a genuinely malformed table row (a
 # stray literal | shears a cell) → still block. Pins that fence-skip does
 # not suppress real malformed rows.
-v10_matrix_fence_and_malformed="## Verification Matrix
+matrix_fence_and_malformed="## Verification Matrix
 
 stack-health: n/a: no long-running serve
 
@@ -2669,14 +1156,14 @@ AC-1:
   readback: x"
 
 h18c=$(make_home)
-write_plan "$h18c" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_fence_and_malformed")" > /dev/null
-expect_block "v10 18c fenced pipeline + genuinely malformed row → block (malformed)" \
+write_plan "$h18c" "$(plan 5 "$step5_base" "$matrix_fence_and_malformed")" > /dev/null
+expect_block "18c fenced pipeline + genuinely malformed row → block (malformed)" \
   "$h18c" 'git commit -m "x"' "malformed"
 
 # (d) A fenced pipeline placed between stack-health and the table (mid-
 # section), containing leading-pipe lines → allow. Pins that fence-skip works
 # anywhere in the section, not just at the tail.
-v10_matrix_fence_before_table="## Verification Matrix
+matrix_fence_before_table="## Verification Matrix
 
 stack-health: n/a: no long-running serve
 
@@ -2691,38 +1178,87 @@ AC-1:
   readback: 40/40 asserted"
 
 h18d=$(make_home)
-write_plan "$h18d" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_fence_before_table")" > /dev/null
-expect_allow "v10 18d fenced pipeline before the table (mid-section) → allow" \
+write_plan "$h18d" "$(plan 5 "$step5_base" "$matrix_fence_before_table")" > /dev/null
+expect_allow "18d fenced pipeline before the table (mid-section) → allow" \
   "$h18d" 'git commit -m "x"'
 
 # ============================================================
-# Section 19: v11 — triple re-key, task ledger, merge-target
+# Section 15: CRLF and CR-only line endings
 # ============================================================
 #
-# v11 re-keys plans from `mode:` to the intent × rigor × scale triple. For
-# the evidence gate two shapes matter:
-#   (1) Wave/epic-scale v11 plans carry the v10 shape unchanged — pointer
-#       steps 1..4, the Verification Matrix at the Verify gate, integrate=8,
-#       ship=9. They join `dispatch_modern` via `v10|v11` case arms.
-#   (2) Task-scale v11 plans (scale: task) address a ledger TASK, not a
-#       numbered step: `current: T<n>` with a `## Tasks` registration table
-#       and one `- T<n>:` evidence line per task in `## SDLC State`. The hook
-#       MUST accept `current: T<n>` without blocking when the addressed unit is
-#       honest (structural correctness). Slice 4/1 makes the ADDRESSED unit's
-#       tested floor BLOCKING (see Section 22): its missing row / missing or
-#       placeholder evidence line / INVALID rigor cell each exit 2. Every OTHER
-#       row stays LOG-ONLY (D14, check-id `task-ledger`): missing `## Tasks`,
-#       status outside the enum, or a non-addressed active/done task with no
-#       evidence line or a placeholder value — each appends one finding and
-#       exits 0.
-# A v11 wave plan naming an `epic:` also gets a LOG-ONLY merge-target check at
-# the integrate step (check-id `merge-target`): a mismatch between the plan's
-# `integration-branch:` and the epic plan's is logged, never blocks.
-# All new read paths (epic plan, audit file) are fail-open; a `current: T<n>`
-# on a v≤10 plan still blocks (T-format is v11 + scale:task only).
+# CRLF (\r\n) previously defeated the hook's exact-match awk frontmatter
+# parser (`$0=="---"` never matches "---\r"), so the version marker and every
+# frontmatter-keyed check were lost. The earlier fix `tr -d '\r'` then broke
+# CR-only (classic-Mac) plans by deleting every line break, collapsing the file
+# to ONE line so `/^## SDLC State/` never matched and the hook exited 0 as "not
+# a canonical-sdlc plan" — every commit passed ungated. The parser now
+# TRANSLATES \r to real newlines, so all three line-ending styles parse alike.
+#
+# Each style is proved BOTH ways: a valid plan must be allowed (no false block
+# from a mangled parse) and a plan with a broken matrix row must be blocked on
+# THAT row (proving the frontmatter and body actually parsed, rather than the
+# file being waved through or rejected wholesale).
 
 echo ""
-echo "=== Section 19: v11 triple re-key, task ledger, merge-target ==="
+echo "=== Section 15: CRLF and CR-only line endings ==="
+
+# Inserts a literal CR before each newline. Bash-3.2-safe ANSI-C quoting embeds
+# a real CR byte in the sed script itself (BSD sed's replacement text does not
+# interpret the two-character "\r" as an escape).
+to_crlf() {
+  printf '%s' "$1" | sed $'s/$/\r/'
+}
+
+# Replaces every newline with a carriage return, so the content carries NO \n
+# at all. (write_plan then appends one trailing \n; the internal line breaks
+# stay pure \r — the faithful CR-only shape.)
+to_cr() {
+  printf '%s' "$1" | tr '\n' '\r'
+}
+
+# 15a — CRLF plan, complete Step 5 + complete matrix → allow.
+h15a=$(make_home)
+write_plan "$h15a" "$(to_crlf "$(plan 5 "$step5_base" "$matrix_complete")")" > /dev/null
+expect_allow "CRLF plan, complete Step 5 + matrix → allow" \
+  "$h15a" 'git commit -m "x"'
+
+# 15b — CRLF plan whose matrix has a discharged row with no AC block → block on
+# that row. A mangled parse would either allow, or block on the version.
+h15b=$(make_home)
+write_plan "$h15b" "$(to_crlf "$(plan 5 "$step5_base" "$matrix_no_block")")" > /dev/null
+expect_block "CRLF plan, broken matrix row → block on AC-1 (frontmatter parsed)" \
+  "$h15b" 'git commit -m "x"' "AC-1"
+
+# 15c — CR-only plan, complete Step 5 + complete matrix → allow.
+h15c=$(make_home)
+write_plan "$h15c" "$(to_cr "$(plan 5 "$step5_base" "$matrix_complete")")" > /dev/null
+expect_allow "CR-only plan, complete Step 5 + matrix → allow" \
+  "$h15c" 'git commit -m "x"'
+
+# 15d — CR-only plan with a broken matrix row → block on that row. Before the
+# fix the whole file collapsed to one line and the commit passed ungated.
+h15d=$(make_home)
+write_plan "$h15d" "$(to_cr "$(plan 5 "$step5_base" "$matrix_no_block")")" > /dev/null
+expect_block "CR-only plan, broken matrix row → block on AC-1 (body parsed)" \
+  "$h15d" 'git commit -m "x"' "AC-1"
+
+# ============================================================
+# Section 19: triple, task ledger, merge-target
+# ============================================================
+#
+# Governance keys off the intent × rigor × scale triple. Two shapes follow
+# from `scale:`:
+#   (1) Wave/epic-scale plans carry the numbered-step shape — pointer steps
+#       1/2/3/4, the Verify gate at 5, document at 7, integrate=8, ship=9.
+#   (2) Task-scale plans (scale: task) address a ledger TASK, not a numbered
+#       step: `current: T<n>` with evidence on `- T<n>:` lines.
+#
+# A wave plan naming an `epic:` also gets a LOG-ONLY merge-target check at the
+# integrate step. `current: T<n>` on a non-task plan still blocks — the
+# T-format is scale: task only.
+
+echo ""
+echo "=== Section 19: triple, task ledger, merge-target ==="
 
 # Log-only assertion helpers: exit 0 with a finding on stderr (the standard
 # expect_allow requires EMPTY stderr, which a finding violates).
@@ -2775,13 +1311,13 @@ expect_audit_line() {
   fi
 }
 
-# v11 frontmatter: the triple replaces mode:. $1 scale, $2 deploy, $3
-# use_worktree, $4 epic (omitted when empty).
-v11_frontmatter() {
+# Frontmatter carrying the triple. $1 scale, $2 deploy, $3 use_worktree,
+# $4 epic (omitted when empty).
+frontmatter() {
   local scale="${1:-wave}" deploy="${2:-none}" use_wt="${3:-false}" epic="${4:-}"
   printf -- '---\n'
   printf -- 'governing-skill: canonical-sdlc\n'
-  printf -- 'canonical_sdlc_version: 11\n'
+  printf -- 'canonical_sdlc_version: 12\n'
   printf -- 'intent: build\n'
   printf -- 'rigor: audited\n'
   printf -- 'scale: %s\n' "$scale"
@@ -2792,35 +1328,35 @@ v11_frontmatter() {
   printf -- '---\n'
 }
 
-# A v11 wave plan (v10-shaped): frontmatter + ## SDLC State (current + Step
+# A wave plan: frontmatter + ## SDLC State (current + Step
 # block) + ## Verification Matrix. Reuses the Section-17 matrix fixtures.
-v11_wave_plan() {
+wave_plan() {
   printf '%s\n## SDLC State\ncurrent: %s\nStep %s:\n%s\n\n%s\n' \
-    "$(v11_frontmatter wave)" "$1" "$1" "$2" "$3"
+    "$(frontmatter wave)" "$1" "$1" "$2" "$3"
 }
 
-# A v11 wave plan naming an epic and carrying an integration-branch line, for
+# A wave plan naming an epic and carrying an integration-branch line, for
 # the merge-target check. $1 current, $2 step body, $3 matrix, $4 epic,
 # $5 integration-branch.
-v11_wave_epic_plan() {
+wave_epic_plan() {
   printf '%s\n## SDLC State\nintegration-branch: %s\ncurrent: %s\nStep %s:\n%s\n\n%s\n' \
-    "$(v11_frontmatter wave none false "$4")" "$5" "$1" "$1" "$2" "$3"
+    "$(frontmatter wave none false "$4")" "$5" "$1" "$1" "$2" "$3"
 }
 
-# A v11 task-scale plan: frontmatter (scale: task) + the given body (a
+# A task-scale plan: frontmatter (scale: task) + the given body (a
 # ## Tasks table followed by ## SDLC State).
-v11_task_plan() {
-  printf '%s\n%s\n' "$(v11_frontmatter task)" "$1"
+task_plan() {
+  printf '%s\n%s\n' "$(frontmatter task)" "$1"
 }
 
-# A v11 task-scale plan at a caller-chosen frontmatter rigor (v11_frontmatter
+# A task-scale plan at a caller-chosen frontmatter rigor (frontmatter
 # hardcodes audited). $1 rigor, $2 body. Used to pin the log-only ledger-shape
 # path that slice 4/3 promotes to BLOCKING only under frontmatter rigor:
 # audited — a non-audited plan keeps logging findings.
-v11_task_frontmatter_rigor() {  # $1 rigor
+task_frontmatter_rigor() {  # $1 rigor
   printf -- '---\n'
   printf -- 'governing-skill: canonical-sdlc\n'
-  printf -- 'canonical_sdlc_version: 11\n'
+  printf -- 'canonical_sdlc_version: 12\n'
   printf -- 'intent: build\n'
   printf -- 'rigor: %s\n' "$1"
   printf -- 'scale: task\n'
@@ -2829,53 +1365,53 @@ v11_task_frontmatter_rigor() {  # $1 rigor
   printf -- 'has_ui: false\n'
   printf -- '---\n'
 }
-v11_task_plan_rigor() {  # $1 rigor  $2 body
-  printf '%s\n%s\n' "$(v11_task_frontmatter_rigor "$1")" "$2"
+task_plan_rigor() {  # $1 rigor  $2 body
+  printf '%s\n%s\n' "$(task_frontmatter_rigor "$1")" "$2"
 }
 
 # A complete integrate (Step 8) block that passes the shape check, so the
 # merge-target log-only check can be exercised in isolation.
-v11_integrate_body="  merge: merged wave into epic/07-x
+integrate_body="  merge: merged wave into epic/07-x
   worktree-removed: n/a
   cleanup: n/a"
 
-# --- (2) wave/epic-scale v11 plans shape as v10 --------------------------
+# --- (2) wave/epic-scale plans: the numbered-step shape ------------------
 
-# 19a — v11 wave plan at Step 5 with an incomplete matrix (discharged T3 row
-# with no AC block) → block, exactly like v10.
+# 19a — wave plan at Step 5 with an incomplete matrix (discharged T3 row
+# with no AC block) → block.
 h19a=$(make_home)
-write_plan "$h19a" "$(v11_wave_plan 5 "$v10_step5_base" "$v10_matrix_no_block")" > /dev/null
-expect_block "v11 19a wave plan Step 5 incomplete matrix → block (shapes as v10)" \
+write_plan "$h19a" "$(wave_plan 5 "$step5_base" "$matrix_no_block")" > /dev/null
+expect_block "19a wave plan Step 5 incomplete matrix → block" \
   "$h19a" 'git commit -m "x"' "AC-1"
 
-# 19b — v11 wave plan at Step 5 with a complete matrix + auditor pointer →
+# 19b — wave plan at Step 5 with a complete matrix + auditor pointer →
 # allow (pointer/matrix evidence in place).
 h19b=$(make_home)
-write_plan "$h19b" "$(v11_wave_plan 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
-expect_allow "v11 19b wave plan Step 5 complete matrix → allow" \
+write_plan "$h19b" "$(wave_plan 5 "$step5_base" "$matrix_complete")" > /dev/null
+expect_allow "19b wave plan Step 5 complete matrix → allow" \
   "$h19b" 'git commit -m "x"'
 
-# 19c — step remap: integrate is Step 8. A v11 plan at current: 8 with a
+# 19c — integrate is Step 8. A plan at current: 8 with a
 # complete matrix but an integrate block missing merge/worktree-removed →
-# block on the shape check (integrate fires at 8 as in v10).
+# block on the shape check (integrate fires at 8).
 h19c=$(make_home)
-write_plan "$h19c" "$(v11_wave_plan 8 "  note: integrating now" "$v10_matrix_complete")" > /dev/null
-expect_block "v11 19c integrate Step 8 missing merge fields → block (remap fires as v10)" \
+write_plan "$h19c" "$(wave_plan 8 "  note: integrating now" "$matrix_complete")" > /dev/null
+expect_block "19c integrate Step 8 missing merge fields → block" \
   "$h19c" 'git commit -m "x"' "merge"
 
-# 19c2 — Step 4 is a pointer step in v11 (as in v10): a pointer body allows.
+# 19c2 — Step 4 is a pointer step: a pointer body allows.
 h19c2=$(make_home)
-write_plan "$h19c2" "$(v11_frontmatter wave)
+write_plan "$h19c2" "$(frontmatter wave)
 ## SDLC State
 current: 4
 Step 4: .bionic/docs/plans/wave.plan.md#step-4" > /dev/null
-expect_allow "v11 19c2 wave plan Step 4 pointer → allow" \
+expect_allow "19c2 wave plan Step 4 pointer → allow" \
   "$h19c2" 'git commit -m "x"'
 
 # --- (2) task-scale ledger fixtures --------------------------------------
 
 # Valid ledger: T1 done with evidence, T2 active with evidence; current: T2.
-v11_ledger_valid="## Tasks
+ledger_valid="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
@@ -2896,14 +1432,14 @@ current: T2
 # 19d — valid task ledger, current: T2 accepted → allow, no finding (BLOCKING-
 # grade correctness: a false block here would be a defect).
 h19d=$(make_home)
-write_plan "$h19d" "$(v11_task_plan_rigor tested "$v11_ledger_valid")" > /dev/null
-expect_allow "v11 19d task plan current: T2 valid ledger → allow (T-format accepted)" \
+write_plan "$h19d" "$(task_plan_rigor tested "$ledger_valid")" > /dev/null
+expect_allow "19d task plan current: T2 valid ledger → allow (T-format accepted)" \
   "$h19d" 'git commit -m "x"'
 
 # 19e — no ## Tasks section on a NON-audited plan → exit 0 + task-ledger finding
 # (log-only). Slice 4/3 promotes this check to BLOCKING under frontmatter
 # rigor: audited (pinned by 22c5); a peer-reviewed plan keeps logging.
-v11_ledger_no_tasks="## SDLC State
+ledger_no_tasks="## SDLC State
 
 intent: build
 rigor: peer-reviewed
@@ -2912,28 +1448,28 @@ current: T2
 
 - T2: some evidence"
 h19e=$(make_home)
-write_plan "$h19e" "$(v11_task_plan_rigor peer-reviewed "$v11_ledger_no_tasks")" > /dev/null
-expect_finding "v11 19e missing ## Tasks section (non-audited) → exit 0 + task-ledger finding" \
+write_plan "$h19e" "$(task_plan_rigor peer-reviewed "$ledger_no_tasks")" > /dev/null
+expect_finding "19e missing ## Tasks section (non-audited) → exit 0 + task-ledger finding" \
   "$h19e" 'git commit -m "x"' "task-ledger"
 
 # 19e2 — the finding is written to the durable audit file with the D14 format.
 h19e2=$(make_home)
-write_plan "$h19e2" "$(v11_task_plan_rigor peer-reviewed "$v11_ledger_no_tasks")" > /dev/null
-expect_audit_line "v11 19e2 missing ## Tasks → audit file line (evidence-gate task-ledger)" \
+write_plan "$h19e2" "$(task_plan_rigor peer-reviewed "$ledger_no_tasks")" > /dev/null
+expect_audit_line "19e2 missing ## Tasks → audit file line (evidence-gate task-ledger)" \
   "$h19e2" 'git commit -m "x"' "evidence-gate task-ledger:"
 
 # 19f — status outside the enum (doing) on a NON-audited plan → exit 0 + finding
 # (log-only). Slice 4/3 blocks this under rigor: audited (pinned by 22c1).
-v11_ledger_bad_status="${v11_ledger_valid/| T2 | refactor | peer-reviewed | extract the ledger helper | active |/| T2 | refactor | peer-reviewed | extract the ledger helper | doing |}"
+ledger_bad_status="${ledger_valid/| T2 | refactor | peer-reviewed | extract the ledger helper | active |/| T2 | refactor | peer-reviewed | extract the ledger helper | doing |}"
 h19f=$(make_home)
-write_plan "$h19f" "$(v11_task_plan_rigor tested "$v11_ledger_bad_status")" > /dev/null
-expect_finding "v11 19f invalid status 'doing' (non-audited) → exit 0 + task-ledger finding" \
+write_plan "$h19f" "$(task_plan_rigor tested "$ledger_bad_status")" > /dev/null
+expect_finding "19f invalid status 'doing' (non-audited) → exit 0 + task-ledger finding" \
   "$h19f" 'git commit -m "x"' "task-ledger"
 
 # 19g — the ADDRESSED active task (T2, current: T2) with no `- T2:` evidence
 # line → BLOCK. Slice 4/1 made the addressed-unit tested floor blocking; this
 # case previously logged a finding (see Section 22 for the full lane coverage).
-v11_ledger_active_no_line="## Tasks
+ledger_active_no_line="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
@@ -2947,25 +1483,25 @@ current: T2
 
 - T1: fixed in commit abc123, suite 5/5 green"
 h19g=$(make_home)
-write_plan "$h19g" "$(v11_task_plan_rigor tested "$v11_ledger_active_no_line")" > /dev/null
-expect_block "v11 19g addressed active task without evidence line → block" \
+write_plan "$h19g" "$(task_plan_rigor tested "$ledger_active_no_line")" > /dev/null
+expect_block "19g addressed active task without evidence line → block" \
   "$h19g" 'git commit -m "x"' "evidence line"
 
 # 19h — the ADDRESSED active task (T2) with a placeholder evidence value
 # (`- T2: TBD`) → BLOCK (slice 4/1 blocking floor; previously a finding).
-v11_ledger_active_placeholder="${v11_ledger_valid/- T2: bash extract-helper.sh 4 cases green, commit def456/- T2: TBD}"
+ledger_active_placeholder="${ledger_valid/- T2: bash extract-helper.sh 4 cases green, commit def456/- T2: TBD}"
 h19h=$(make_home)
-write_plan "$h19h" "$(v11_task_plan_rigor tested "$v11_ledger_active_placeholder")" > /dev/null
-expect_block "v11 19h addressed active task placeholder evidence → block" \
+write_plan "$h19h" "$(task_plan_rigor tested "$ledger_active_placeholder")" > /dev/null
+expect_block "19h addressed active task placeholder evidence → block" \
   "$h19h" 'git commit -m "x"' "placeholder"
 
 # 19i — done non-addressed task (T1) with an empty evidence line (`- T1:`) on a
 # NON-audited plan → finding (log-only). Slice 4/3 blocks this under rigor:
 # audited (pinned by 22c3).
-v11_ledger_done_empty="${v11_ledger_valid/- T1: fixed in commit abc123, suite 5\/5 green/- T1:}"
+ledger_done_empty="${ledger_valid/- T1: fixed in commit abc123, suite 5\/5 green/- T1:}"
 h19i=$(make_home)
-write_plan "$h19i" "$(v11_task_plan_rigor peer-reviewed "$v11_ledger_done_empty")" > /dev/null
-expect_finding "v11 19i done task missing evidence (non-audited) → exit 0 + task-ledger finding" \
+write_plan "$h19i" "$(task_plan_rigor peer-reviewed "$ledger_done_empty")" > /dev/null
+expect_finding "19i done task missing evidence (non-audited) → exit 0 + task-ledger finding" \
   "$h19i" 'git commit -m "x"' "task-ledger"
 
 # --- (2) task-scale CRLF -------------------------------------------------
@@ -2974,8 +1510,8 @@ expect_finding "v11 19i done task missing evidence (non-audited) → exit 0 + ta
 # (every parse path — frontmatter scale, current, ## Tasks, evidence lines —
 # strips \r).
 h19j=$(make_home)
-write_plan "$h19j" "$(to_crlf "$(v11_task_plan_rigor tested "$v11_ledger_valid")")" > /dev/null
-expect_allow "v11 19j CRLF task ledger → allow, no false finding" \
+write_plan "$h19j" "$(to_crlf "$(task_plan_rigor tested "$ledger_valid")")" > /dev/null
+expect_allow "19j CRLF task ledger → allow, no false finding" \
   "$h19j" 'git commit -m "x"'
 
 # 19j-cr — the same paths under CR-only (classic-Mac) line endings. Two
@@ -2987,15 +1523,15 @@ expect_allow "v11 19j CRLF task ledger → allow, no false finding" \
 # parsed → no finding at all (RED). After the fix the ledger validates and
 # the bad status is caught.
 h19jcr1=$(make_home)
-write_plan "$h19jcr1" "$(to_cr "$(v11_task_plan_rigor tested "$v11_ledger_bad_status")")" > /dev/null
-expect_finding "v11 19j-cr1 CR-only bad-status ledger (non-audited) → exit 0 + task-ledger finding" \
+write_plan "$h19jcr1" "$(to_cr "$(task_plan_rigor tested "$ledger_bad_status")")" > /dev/null
+expect_finding "19j-cr1 CR-only bad-status ledger (non-audited) → exit 0 + task-ledger finding" \
   "$h19jcr1" 'git commit -m "x"' "task-ledger"
 
 # 19j-cr2 — a valid ledger under CR-only → allow, no false finding (guard
 # against over-flagging once CR-only parses correctly).
 h19jcr2=$(make_home)
-write_plan "$h19jcr2" "$(to_cr "$(v11_task_plan_rigor tested "$v11_ledger_valid")")" > /dev/null
-expect_allow "v11 19j-cr2 CR-only valid task ledger → allow, no false finding" \
+write_plan "$h19jcr2" "$(to_cr "$(task_plan_rigor tested "$ledger_valid")")" > /dev/null
+expect_allow "19j-cr2 CR-only valid task ledger → allow, no false finding" \
   "$h19jcr2" 'git commit -m "x"'
 
 # --- (4) epic merge-target consistency (log-only) ------------------------
@@ -3006,7 +1542,7 @@ make_epic_project() {
   local proj
   proj=$(make_project)
   mkdir -p "$proj/.bionic/docs/plans/epic-fix"
-  printf -- '---\ncanonical_sdlc_version: 11\nintent: build\nrigor: audited\nscale: epic\n---\n## SDLC State\nintegration-branch: %s\ncurrent: 1\n' \
+  printf -- '---\ncanonical_sdlc_version: 12\nintent: build\nrigor: audited\nscale: epic\n---\n## SDLC State\nintegration-branch: %s\ncurrent: 1\n' \
     "$branch" > "$proj/.bionic/docs/plans/epic-fix/epic.plan.md"
   touch -t 202001010000 "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" 2>/dev/null || \
     touch -d "2020-01-01" "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" 2>/dev/null || true
@@ -3017,44 +1553,31 @@ make_epic_project() {
 # the integrate step → exit 0 + merge-target finding.
 h19k=$(make_home); p19k=$(make_epic_project "epic/07-x")
 write_project_plan "$p19k" \
-  "$(v11_wave_epic_plan 8 "$v11_integrate_body" "$v10_matrix_complete" epic-fix main)" \
+  "$(wave_epic_plan 8 "$integrate_body" "$matrix_complete" epic-fix main)" \
   "wave-newest.plan.md" > /dev/null
-expect_finding_both "v11 19k merge-target mismatch → exit 0 + merge-target finding" \
+expect_finding_both "19k merge-target mismatch → exit 0 + merge-target finding" \
   "$h19k" "$p19k" 'git commit -m "x"' "merge-target"
 
 # 19l — matching integration-branch → no finding (silent allow).
 h19l=$(make_home); p19l=$(make_epic_project "epic/07-x")
 write_project_plan "$p19l" \
-  "$(v11_wave_epic_plan 8 "$v11_integrate_body" "$v10_matrix_complete" epic-fix "epic/07-x")" \
+  "$(wave_epic_plan 8 "$integrate_body" "$matrix_complete" epic-fix "epic/07-x")" \
   "wave-newest.plan.md" > /dev/null
-expect_allow_both "v11 19l merge-target match → allow, no finding" \
+expect_allow_both "19l merge-target match → allow, no finding" \
   "$h19l" "$p19l" 'git commit -m "x"'
 
-# --- (5) named v≤10 regressions ------------------------------------------
+# --- (5) T-format is scale: task only ------------------------------------
 
-# 19m — a v10 plan with `current: T2` STILL blocks: the T-format is a v11 +
-# scale:task feature only, never retrofitted onto v≤10.
+# `current: T2` on a WAVE-scale plan is not a valid step pointer: the T-format
+# belongs to the task-scale ledger. It falls through to the numeric check and
+# blocks.
 h19m=$(make_home)
-write_plan "$h19m" "---
-canonical_sdlc_version: 10
-mode: autonomous
----
+write_plan "$h19m" "$(frontmatter wave)
 ## SDLC State
 current: T2
 Step 5: whatever" > /dev/null
-expect_block "v11 19m v10 plan with current: T2 still blocks (T-format is v11+task only)" \
+expect_block "19m wave-scale plan with current: T2 → block (T-format is scale: task only)" \
   "$h19m" 'git commit -m "x"' "valid"
-
-# 19n — a v9 plan at a pointer step is untouched (v9 path unchanged).
-h19n=$(make_home)
-write_plan "$h19n" "---
-canonical_sdlc_version: 9
----
-## SDLC State
-current: 6
-Step 6: .bionic/docs/plans/wave.plan.md#step-6" > /dev/null
-expect_allow "v11 19n v9 pointer step untouched (named v≤10 regression)" \
-  "$h19n" 'git commit -m "x"'
 
 # --- fence-aware SDLC-State extraction (blocking-grade correctness) -------
 
@@ -3070,14 +1593,14 @@ current: T2
 ```'
 
 # 19o — the SDLC-State extraction must be fence-aware, like matrix_section.
-# A v10 plan whose body documents the task-scale schema in a fenced block
+# A plan whose body documents the task-scale schema in a fenced block
 # BEFORE the real section must validate against the REAL `## SDLC State`
 # (current: 5 + complete matrix), not the shadowed `current: T2`. Before the
 # fix the fence-blind awk captured the fenced `current: T2` first →
 # CURRENT=T2 → non-numeric → false block. Same defect class the matrix parser
 # fixed (fence-blind row parsing). This fix removes false blocks, adds none.
 h19o=$(make_home)
-write_plan "$h19o" "$(v10_frontmatter true)
+write_plan "$h19o" "$(matrix_frontmatter true)
 
 Doc note — the task-scale ledger schema (D12) looks like:
 
@@ -3086,10 +1609,10 @@ $v11_fenced_sdlcstate_shadow
 ## SDLC State
 current: 5
 Step 5:
-$v10_step5_base
+$step5_base
 
-$v10_matrix_complete" > /dev/null
-expect_allow "v11 19o fenced ## SDLC State shadow before real section → validates real section (allow)" \
+$matrix_complete" > /dev/null
+expect_allow "19o fenced ## SDLC State shadow before real section → validates real section (allow)" \
   "$h19o" 'git commit -m "x"'
 
 # 19p — the `## Tasks` extraction is fence-aware from the start: a fenced ```
@@ -3104,14 +1627,14 @@ v11_fenced_tasks_shadow='```
 | T9 | bugfix | tested | example row | doing |
 ```'
 h19p=$(make_home)
-write_plan "$h19p" "$(v11_task_frontmatter_rigor tested)
+write_plan "$h19p" "$(task_frontmatter_rigor tested)
 
 Example ledger:
 
 $v11_fenced_tasks_shadow
 
-$v11_ledger_valid" > /dev/null
-expect_allow "v11 19p fenced ## Tasks example before real table → no false finding (fence-aware)" \
+$ledger_valid" > /dev/null
+expect_allow "19p fenced ## Tasks example before real table → no false finding (fence-aware)" \
   "$h19p" 'git commit -m "x"'
 
 # 19q — a doc file whose ONLY `## SDLC State` occurrence is inside a fenced
@@ -3129,7 +1652,7 @@ That is the schema — this file itself is not a plan and carries no real
 SDLC-State section of its own."
 h19q=$(make_home)
 write_plan "$h19q" "$v11_fenced_only_sdlcstate" > /dev/null
-expect_allow "v11 19q fenced-only ## SDLC State (no real section) → pass through as non-canonical" \
+expect_allow "19q fenced-only ## SDLC State (no real section) → pass through as non-canonical" \
   "$h19q" 'git commit -m "x"'
 
 # --- fence-aware epic-plan read in merge-target (review fix) --------------
@@ -3144,7 +1667,7 @@ make_epic_project_fenced() {
   mkdir -p "$proj/.bionic/docs/plans/epic-fix"
   cat > "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" <<EOF
 ---
-canonical_sdlc_version: 11
+canonical_sdlc_version: 12
 intent: build
 rigor: audited
 scale: epic
@@ -3176,16 +1699,16 @@ EOF
 # blast radius, but the exact defect class this wave eliminated everywhere else.
 h19r=$(make_home); p19r=$(make_epic_project_fenced "epic/07-x")
 write_project_plan "$p19r" \
-  "$(v11_wave_epic_plan 8 "$v11_integrate_body" "$v10_matrix_complete" epic-fix "epic/07-x")" \
+  "$(wave_epic_plan 8 "$integrate_body" "$matrix_complete" epic-fix "epic/07-x")" \
   "wave-newest.plan.md" > /dev/null
-expect_allow_both "v11 19r fenced ## SDLC State in epic plan → merge-target reads real section (silent)" \
+expect_allow_both "19r fenced ## SDLC State in epic plan → merge-target reads real section (silent)" \
   "$h19r" "$p19r" 'git commit -m "x"'
 
 # ============================================================
-# Section 20: v11 — intent-scoped Step-5 evidence keys (R7, log-only)
+# Section 20: intent-scoped Step-5 evidence keys (R7, log-only)
 # ============================================================
 #
-# v11 plans declare an `intent:` in frontmatter. Two intents carry a
+# Plans declare an `intent:` in frontmatter. Two intents carry a
 # conditional Step-5 evidence key set, checked LOG-ONLY (D14) at the Verify
 # gate — never blocks:
 #   - refactor: requires `behavior-preservation:` (non-empty); `compat-matrix:`
@@ -3193,11 +1716,10 @@ expect_allow_both "v11 19r fenced ## SDLC State in epic plan → merge-target re
 #   - tune: requires `baseline:`, `target:`, `re-measure:` (all non-empty).
 # Any other intent (e.g. build) gets no check at all — this is intent-scoped,
 # not a universal Step-5 key like bundle-fresh/drive-check/stack-health. A
-# v10 plan (no `intent:` line) must be byte-identical to its pre-R7 behavior
 # — no audit write, no finding.
 
 echo ""
-echo "=== Section 20: v11 intent-scoped Step-5 evidence keys (R7, log-only) ==="
+echo "=== Section 20: intent-scoped Step-5 evidence keys (R7, log-only) ==="
 
 # Counts occurrences of $substr in stderr — for asserting an exact finding
 # count (e.g. the tune intent's three missing keys).
@@ -3217,31 +1739,14 @@ expect_finding_count() {
   fi
 }
 
-# Asserts exit 0, empty stderr, AND that the durable audit file was never
-# created — the named v10 grandfather regression (20f) needs the stronger
-# "no write at all" guarantee, not just "no finding printed this run".
-expect_no_audit_write() {
-  local label="$1" home_dir="$2" command="$3"
-  TOTAL=$((TOTAL + 1))
-  run_hook "$home_dir" "$command"
-  local af; af=$(audit_file_for "$home_dir" "$home_dir")
-  if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ] && [ ! -f "$af" ]; then
-    echo "PASS: $label"
-    PASS=$((PASS + 1))
-  else
-    echo "FAIL (expected allow exit 0 + no audit file): $label"
-    echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR' audit_exists=$( [ -f "$af" ] && echo yes || echo no )"
-    FAIL=$((FAIL + 1))
-  fi
-}
 
-# v11 frontmatter with a caller-chosen intent (Section 19's v11_frontmatter
+# Frontmatter with a caller-chosen intent (Section 19's frontmatter
 # hardcodes intent: build). $1 intent, $2 scale (default wave).
-v20_frontmatter() {
+r7_frontmatter() {
   local intent="$1" scale="${2:-wave}"
   printf -- '---\n'
   printf -- 'governing-skill: canonical-sdlc\n'
-  printf -- 'canonical_sdlc_version: 11\n'
+  printf -- 'canonical_sdlc_version: 12\n'
   printf -- 'intent: %s\n' "$intent"
   printf -- 'rigor: audited\n'
   printf -- 'scale: %s\n' "$scale"
@@ -3251,17 +1756,17 @@ v20_frontmatter() {
   printf -- '---\n'
 }
 
-# A v11 wave plan with the given intent, at the given current/Step-5 body/
+# A wave plan with the given intent, at the given current/Step-5 body/
 # matrix. $1 intent, $2 current, $3 Step-block body, $4 matrix.
-v20_wave_plan() {
+r7_wave_plan() {
   printf '%s\n## SDLC State\ncurrent: %s\nStep %s:\n%s\n\n%s\n' \
-    "$(v20_frontmatter "$1")" "$2" "$2" "$3" "$4"
+    "$(r7_frontmatter "$1")" "$2" "$2" "$3" "$4"
 }
 
 # Refactor Step-5 body with behavior-preservation already satisfied — the
 # base for the compat-matrix/revert-plan sub-cases (20c), which isolate
 # that one axis by keeping behavior-preservation clean.
-v20_refactor_body_ok="$v10_step5_base
+r7_refactor_body_ok="$step5_base
   behavior-preservation: suites 211/211 pre @abc, 211/211 post @def"
 
 # --- 20a/20b: refactor — behavior-preservation required ------------------
@@ -3269,41 +1774,41 @@ v20_refactor_body_ok="$v10_step5_base
 # 20a — refactor plan, valid tests floor + matrix, NO behavior-preservation
 # key → exit 0 + refactor-evidence finding on stderr AND in the audit file.
 h20a=$(make_home)
-write_plan "$h20a" "$(v20_wave_plan refactor 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
-expect_finding "v11 20a refactor plan missing behavior-preservation → finding" \
-  "$h20a" 'git commit -m "x"' "canonical-sdlc v11 \[refactor-evidence\]"
+write_plan "$h20a" "$(r7_wave_plan refactor 5 "$step5_base" "$matrix_complete")" > /dev/null
+expect_finding "20a refactor plan missing behavior-preservation → finding" \
+  "$h20a" 'git commit -m "x"' "canonical-sdlc \[refactor-evidence\]"
 h20a2=$(make_home)
-write_plan "$h20a2" "$(v20_wave_plan refactor 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
-expect_audit_line "v11 20a2 refactor plan missing behavior-preservation → audit file line" \
+write_plan "$h20a2" "$(r7_wave_plan refactor 5 "$step5_base" "$matrix_complete")" > /dev/null
+expect_audit_line "20a2 refactor plan missing behavior-preservation → audit file line" \
   "$h20a2" 'git commit -m "x"' "evidence-gate refactor-evidence:"
 
 # 20b — same plan + behavior-preservation present → exit 0, NO finding.
 h20b=$(make_home)
-write_plan "$h20b" "$(v20_wave_plan refactor 5 "$v20_refactor_body_ok" "$v10_matrix_complete")" > /dev/null
-expect_allow "v11 20b refactor plan with behavior-preservation → allow, no finding" \
+write_plan "$h20b" "$(r7_wave_plan refactor 5 "$r7_refactor_body_ok" "$matrix_complete")" > /dev/null
+expect_allow "20b refactor plan with behavior-preservation → allow, no finding" \
   "$h20b" 'git commit -m "x"'
 
 # --- 20c: refactor — compat-matrix/revert-plan optional-but-not-empty ----
 
 # 20c1 — compat-matrix present but empty → refactor-evidence finding.
 h20c1=$(make_home)
-write_plan "$h20c1" "$(v20_wave_plan refactor 5 "$v20_refactor_body_ok
-  compat-matrix:" "$v10_matrix_complete")" > /dev/null
-expect_finding "v11 20c1 refactor compat-matrix present but empty → finding" \
+write_plan "$h20c1" "$(r7_wave_plan refactor 5 "$r7_refactor_body_ok
+  compat-matrix:" "$matrix_complete")" > /dev/null
+expect_finding "20c1 refactor compat-matrix present but empty → finding" \
   "$h20c1" 'git commit -m "x"' "compat-matrix"
 
 # 20c2 — compat-matrix: n/a: not a migration (non-empty) → clean.
 h20c2=$(make_home)
-write_plan "$h20c2" "$(v20_wave_plan refactor 5 "$v20_refactor_body_ok
-  compat-matrix: n/a: not a migration" "$v10_matrix_complete")" > /dev/null
-expect_allow "v11 20c2 refactor compat-matrix non-empty n/a → allow, no finding" \
+write_plan "$h20c2" "$(r7_wave_plan refactor 5 "$r7_refactor_body_ok
+  compat-matrix: n/a: not a migration" "$matrix_complete")" > /dev/null
+expect_allow "20c2 refactor compat-matrix non-empty n/a → allow, no finding" \
   "$h20c2" 'git commit -m "x"'
 
 # 20c3 — compat-matrix/revert-plan entirely absent → clean (they are
 # optional; only presence-and-empty is a finding).
 h20c3=$(make_home)
-write_plan "$h20c3" "$(v20_wave_plan refactor 5 "$v20_refactor_body_ok" "$v10_matrix_complete")" > /dev/null
-expect_allow "v11 20c3 refactor compat-matrix/revert-plan absent → allow, no finding" \
+write_plan "$h20c3" "$(r7_wave_plan refactor 5 "$r7_refactor_body_ok" "$matrix_complete")" > /dev/null
+expect_allow "20c3 refactor compat-matrix/revert-plan absent → allow, no finding" \
   "$h20c3" 'git commit -m "x"'
 
 # --- 20d: tune — baseline/target/re-measure all required ------------------
@@ -3311,18 +1816,18 @@ expect_allow "v11 20c3 refactor compat-matrix/revert-plan absent → allow, no f
 # 20d1 — tune plan missing all three keys → exactly THREE tune-evidence
 # findings (assert count, not just "at least one").
 h20d1=$(make_home)
-write_plan "$h20d1" "$(v20_wave_plan tune 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
-expect_finding_count "v11 20d1 tune plan missing baseline/target/re-measure → 3 findings" \
+write_plan "$h20d1" "$(r7_wave_plan tune 5 "$step5_base" "$matrix_complete")" > /dev/null
+expect_finding_count "20d1 tune plan missing baseline/target/re-measure → 3 findings" \
   "$h20d1" 'git commit -m "x"' "tune-evidence" 3
 
 # 20d2 — tune plan with all three non-empty → clean.
-v20_tune_body_ok="$v10_step5_base
+r7_tune_body_ok="$step5_base
   baseline: p95 340ms @abc
   target: p95 <= 200ms
   re-measure: p95 190ms @def"
 h20d2=$(make_home)
-write_plan "$h20d2" "$(v20_wave_plan tune 5 "$v20_tune_body_ok" "$v10_matrix_complete")" > /dev/null
-expect_allow "v11 20d2 tune plan with baseline/target/re-measure → allow, no finding" \
+write_plan "$h20d2" "$(r7_wave_plan tune 5 "$r7_tune_body_ok" "$matrix_complete")" > /dev/null
+expect_allow "20d2 tune plan with baseline/target/re-measure → allow, no finding" \
   "$h20d2" 'git commit -m "x"'
 
 # --- 20e: build — intent-scoped, not universal ----------------------------
@@ -3330,26 +1835,16 @@ expect_allow "v11 20d2 tune plan with baseline/target/re-measure → allow, no f
 # 20e — build intent with none of the refactor/tune keys → NO finding (these
 # checks are intent-scoped; build never triggers them).
 h20e=$(make_home)
-write_plan "$h20e" "$(v20_wave_plan build 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
-expect_allow "v11 20e build plan with no intent-scoped keys → allow, no finding" \
+write_plan "$h20e" "$(r7_wave_plan build 5 "$step5_base" "$matrix_complete")" > /dev/null
+expect_allow "20e build plan with no intent-scoped keys → allow, no finding" \
   "$h20e" 'git commit -m "x"'
-
-# --- 20f: named v10 grandfather regression --------------------------------
-
-# 20f — a v10 plan (no `intent:` line) at current: 5 with valid v10 evidence
-# → exit 0, no finding, NO audit-file write at all. R7 must be invisible to
-# v10 plans.
-h20f=$(make_home)
-write_plan "$h20f" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
-expect_no_audit_write "v11 20f v10 plan (no intent:) → allow, no audit write (grandfather)" \
-  "$h20f" 'git commit -m "x"'
 
 # --- 20g/20h: R7 keys are truly log-only (critic Issue 1) ------------------
 #
 # The universal placeholder ban (the whole-Step-block scan a few hundred
-# lines up) used to scan these six v11-intent-scoped keys too, so a
+# lines up) used to scan these six intent-scoped keys too, so a
 # placeholder R7 value BLOCKED the commit — contradicting the ratified
-# log-only contract. R7 keys are exempted from that ban on v11 plans only
+# log-only contract. R7 keys are exempted from that ban
 # (version-gated: v≤10 plans still block on a stray placeholder R7-named
 # line — see 20i); validate_intent_evidence itself now treats a placeholder
 # value the same as missing/empty, so the finding still fires.
@@ -3357,49 +1852,26 @@ expect_no_audit_write "v11 20f v10 plan (no intent:) → allow, no audit write (
 # 20g — refactor plan, behavior-preservation: TODO (placeholder value, not
 # missing) → exit 0 + refactor-evidence finding + audit line (was BLOCKED).
 h20g=$(make_home)
-write_plan "$h20g" "$(v20_wave_plan refactor 5 "$v10_step5_base
-  behavior-preservation: TODO" "$v10_matrix_complete")" > /dev/null
-expect_finding "v11 20g refactor behavior-preservation: TODO → allow + refactor-evidence finding" \
-  "$h20g" 'git commit -m "x"' "canonical-sdlc v11 \[refactor-evidence\]"
+write_plan "$h20g" "$(r7_wave_plan refactor 5 "$step5_base
+  behavior-preservation: TODO" "$matrix_complete")" > /dev/null
+expect_finding "20g refactor behavior-preservation: TODO → allow + refactor-evidence finding" \
+  "$h20g" 'git commit -m "x"' "canonical-sdlc \[refactor-evidence\]"
 h20g2=$(make_home)
-write_plan "$h20g2" "$(v20_wave_plan refactor 5 "$v10_step5_base
-  behavior-preservation: TODO" "$v10_matrix_complete")" > /dev/null
-expect_audit_line "v11 20g2 refactor behavior-preservation: TODO → audit file line" \
+write_plan "$h20g2" "$(r7_wave_plan refactor 5 "$step5_base
+  behavior-preservation: TODO" "$matrix_complete")" > /dev/null
+expect_audit_line "20g2 refactor behavior-preservation: TODO → audit file line" \
   "$h20g2" 'git commit -m "x"' "evidence-gate refactor-evidence:"
 
 # 20h — tune plan, baseline: tbd (placeholder), target/re-measure valid →
 # exit 0 + exactly ONE tune-evidence finding (not three — the other two
 # keys are present and non-placeholder).
 h20h=$(make_home)
-write_plan "$h20h" "$(v20_wave_plan tune 5 "$v10_step5_base
+write_plan "$h20h" "$(r7_wave_plan tune 5 "$step5_base
   baseline: tbd
   target: p95 <= 200ms
-  re-measure: p95 190ms @def" "$v10_matrix_complete")" > /dev/null
-expect_finding_count "v11 20h tune baseline: tbd (rest valid) → exactly 1 tune-evidence finding" \
+  re-measure: p95 190ms @def" "$matrix_complete")" > /dev/null
+expect_finding_count "20h tune baseline: tbd (rest valid) → exactly 1 tune-evidence finding" \
   "$h20h" 'git commit -m "x"' "tune-evidence" 1
-
-# --- 20i: NAMED grandfather regression (version-gated exemption) -----------
-#
-# A v10 plan (no `intent:`) with a stray `baseline: TODO` line in its Step-5
-# block must STILL block — the R7 exemption from the universal ban is
-# version-gated to v11 only. Byte-identical to pre-R7 behavior.
-h20i=$(make_home)
-write_plan "$h20i" "$(v10_plan 5 "$v10_step5_base
-  baseline: TODO" "$v10_matrix_complete")" > /dev/null
-expect_block "v11 20i v10 plan stray 'baseline: TODO' → still BLOCKED (grandfather, version-gated)" \
-  "$h20i" 'git commit -m "x"' "is a placeholder"
-
-# --- 20j: NAMED regression — n/a is not a placeholder on the new path ------
-#
-# v11 refactor plan with compat-matrix: n/a: not a migration must stay
-# clean — "n/a: <reason>" is explicit non-applicability, not a placeholder
-# token, so neither the ban-loop exemption path nor validate_intent_evidence's
-# placeholder-aware check may flag it.
-h20j=$(make_home)
-write_plan "$h20j" "$(v20_wave_plan refactor 5 "$v20_refactor_body_ok
-  compat-matrix: n/a: not a migration" "$v10_matrix_complete")" > /dev/null
-expect_allow "v11 20j refactor compat-matrix: n/a: not a migration → allow, no finding" \
-  "$h20j" 'git commit -m "x"'
 
 # ============================================================
 # Section 21: audit dir follows the plan's project (strategy alignment)
@@ -3450,17 +1922,17 @@ run_hook_project_elsewhere_cwd() {
 h21a=$(make_home)
 fixture21a=$(make_project)
 elsewhere21a=$(mktemp -d); cleanup_dirs+=("$elsewhere21a")
-write_project_plan "$fixture21a" "$(v20_wave_plan tune 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
+write_project_plan "$fixture21a" "$(r7_wave_plan tune 5 "$step5_base" "$matrix_complete")" > /dev/null
 TOTAL=$((TOTAL + 1))
 run_hook_project_elsewhere_cwd "$h21a" "$fixture21a" "$elsewhere21a" 'git commit -m "x"'
 fixture_audit=$(audit_file_for "$h21a" "$fixture21a")
-in_tree21a=$(find "$fixture21a" "$elsewhere21a" -name 'sdlc-v11-audit.md' 2>/dev/null)
+in_tree21a=$(find "$fixture21a" "$elsewhere21a" -name 'sdlc-audit.md' 2>/dev/null)
 if [ "$HOOK_EXIT" -eq 0 ] && [ -f "$fixture_audit" ] && grep -q "tune-evidence" "$fixture_audit" \
   && [ ! -d "$elsewhere21a/.bionic" ] && [ -z "$in_tree21a" ]; then
-  echo "PASS: v11 21a audit line follows the plan's fixture project, not the invoking cwd"
+  echo "PASS: 21a audit line follows the plan's fixture project, not the invoking cwd"
   PASS=$((PASS + 1))
 else
-  echo "FAIL (expected fixture-keyed audit line under HOME + no audit file in any project tree): v11 21a"
+  echo "FAIL (expected fixture-keyed audit line under HOME + no audit file in any project tree): 21a"
   echo "  exit=$HOOK_EXIT fixture_audit_exists=$([ -f "$fixture_audit" ] && echo yes || echo no) elsewhere_bionic=$([ -d "$elsewhere21a/.bionic" ] && echo yes || echo no) in_tree='$in_tree21a'"
   FAIL=$((FAIL + 1))
 fi
@@ -3471,15 +1943,15 @@ fi
 # and falls back to $PROJECT_DIR (== $h21b here, via the cwd field) — hook
 # still exits 0 and still writes the audit line, unblocked.
 h21b=$(make_home)
-write_plan "$h21b" "$(v20_wave_plan tune 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
-expect_audit_line "v11 21b fail-open: no .bionic ancestor above the plan → PROJECT_DIR fallback used" \
+write_plan "$h21b" "$(r7_wave_plan tune 5 "$step5_base" "$matrix_complete")" > /dev/null
+expect_audit_line "21b fail-open: no .bionic ancestor above the plan → PROJECT_DIR fallback used" \
   "$h21b" 'git commit -m "x"' "tune-evidence"
 
 # ============================================================
-# Section 22: v11 rigor-keyed ledger lanes
+# Section 22: rigor-keyed ledger lanes
 # ============================================================
 #
-# Slice 4/1 makes the v11 task-ledger tested floor BLOCKING for THE ADDRESSED
+# Slice 4/1 makes the task-ledger tested floor BLOCKING for THE ADDRESSED
 # UNIT ONLY (the T<n> named by `current: T<n>`). For that one task the gate now
 # exits 2 when: its row is absent from `## Tasks`; its `- T<n>:` evidence line
 # is missing or a placeholder; or its rigor cell fails `effective_row_rigor`
@@ -3487,7 +1959,7 @@ expect_audit_line "v11 21b fail-open: no .bionic ancestor above the plan → PRO
 # row keeps its log-only handling (D14) at this slice — 22a6 pins that scope.
 
 echo ""
-echo "=== Section 22: v11 rigor-keyed ledger lanes ==="
+echo "=== Section 22: rigor-keyed ledger lanes ==="
 
 # --- 22a: blocking tested floor on the addressed ledger unit --------------
 
@@ -3505,8 +1977,8 @@ current: T2
 
 - T1: fixed in commit abc123, suite 5/5 green"
 h22a1=$(make_home)
-write_plan "$h22a1" "$(v11_task_plan_rigor tested "$v22_no_t2_row")" > /dev/null
-expect_block "v11 22a1 addressed unit T2 has no ## Tasks row → block" \
+write_plan "$h22a1" "$(task_plan_rigor tested "$v22_no_t2_row")" > /dev/null
+expect_block "22a1 addressed unit T2 has no ## Tasks row → block" \
   "$h22a1" 'git commit -m "x"' "no row"
 
 # 22a2 — T2 row present (active) but no `- T2:` evidence line → block.
@@ -3524,8 +1996,8 @@ current: T2
 
 - T1: fixed in commit abc123, suite 5/5 green"
 h22a2=$(make_home)
-write_plan "$h22a2" "$(v11_task_plan_rigor tested "$v22_t2_no_line")" > /dev/null
-expect_block "v11 22a2 addressed unit T2 missing evidence line → block" \
+write_plan "$h22a2" "$(task_plan_rigor tested "$v22_t2_no_line")" > /dev/null
+expect_block "22a2 addressed unit T2 missing evidence line → block" \
   "$h22a2" 'git commit -m "x"' "evidence line"
 
 # 22a3 — `- T2: pending` (placeholder value) → block.
@@ -3544,8 +2016,8 @@ current: T2
 - T1: fixed in commit abc123, suite 5/5 green
 - T2: pending"
 h22a3=$(make_home)
-write_plan "$h22a3" "$(v11_task_plan_rigor tested "$v22_t2_placeholder")" > /dev/null
-expect_block "v11 22a3 addressed unit T2 placeholder evidence → block" \
+write_plan "$h22a3" "$(task_plan_rigor tested "$v22_t2_placeholder")" > /dev/null
+expect_block "22a3 addressed unit T2 placeholder evidence → block" \
   "$h22a3" 'git commit -m "x"' "placeholder"
 
 # 22a4 — honest addressed unit (row + real evidence + valid rigor) → allow.
@@ -3564,8 +2036,8 @@ current: T2
 - T1: fixed in commit abc123, suite 5/5 green
 - T2: fixed enum check, bash suite 12/12"
 h22a4=$(make_home)
-write_plan "$h22a4" "$(v11_task_plan_rigor tested "$v22_t2_valid")" > /dev/null
-expect_allow "v11 22a4 honest addressed unit T2 → allow" \
+write_plan "$h22a4" "$(task_plan_rigor tested "$v22_t2_valid")" > /dev/null
+expect_allow "22a4 honest addressed unit T2 → allow" \
   "$h22a4" 'git commit -m "x"'
 
 # 22a5 — the addressed unit's rigor cell is INVALID ('rigorous') → block.
@@ -3584,8 +2056,8 @@ current: T2
 - T1: fixed in commit abc123, suite 5/5 green
 - T2: fixed enum check, bash suite 12/12"
 h22a5=$(make_home)
-write_plan "$h22a5" "$(v11_task_plan_rigor tested "$v22_t2_bad_rigor")" > /dev/null
-expect_block "v11 22a5 addressed unit T2 invalid rigor cell → block" \
+write_plan "$h22a5" "$(task_plan_rigor tested "$v22_t2_bad_rigor")" > /dev/null
+expect_block "22a5 addressed unit T2 invalid rigor cell → block" \
   "$h22a5" 'git commit -m "x"' "invalid rigor"
 
 # 22a6 (regression pin) — a broken NON-addressed row (T1 done, no evidence line)
@@ -3612,8 +2084,8 @@ current: T2
 
 - T2: fixed enum check, bash suite 12/12"
 h22a6=$(make_home)
-write_plan "$h22a6" "$(v11_task_plan_rigor tested "$v22_nonaddressed_broken")" > /dev/null
-expect_finding "v11 22a6 broken non-addressed row (T1) + honest T2 (non-audited) → no block, log-only finding" \
+write_plan "$h22a6" "$(task_plan_rigor tested "$v22_nonaddressed_broken")" > /dev/null
+expect_finding "22a6 broken non-addressed row (T1) + honest T2 (non-audited) → no block, log-only finding" \
   "$h22a6" 'git commit -m "x"' "task-ledger"
 
 # --- 22b: proof-shape + auditor/critic lanes (slice 4/2) ------------------
@@ -3625,11 +2097,11 @@ expect_finding "v11 22a6 broken non-addressed row (T1) + honest T2 (non-audited)
 # evidence must ALSO contain "critic". The `tested` floor carries none of
 # this — presence + placeholder (4/1) is its whole contract.
 #
-# These fixtures run at frontmatter rigor: tested (v11_task_plan_rigor tested),
+# These fixtures run at frontmatter rigor: tested (task_plan_rigor tested),
 # so each heavier cell (peer-reviewed/audited) is a RAISE above the floor — the
 # CELL drives the lane, and the 4/8 downgrade gate never fires (raises are always
 # free). This isolates the lane behavior from the floor check. (Was
-# v11_task_plan / audited before slice 4/8, where a tested/peer-reviewed cell
+# task_plan / audited before slice 4/8, where a tested/peer-reviewed cell
 # would now be a blocking downgrade and mask the lane under test.)
 
 # 22b1 — addressed row (peer-reviewed, active) with prose evidence (no digit,
@@ -3649,8 +2121,8 @@ current: T2
 - T1: fixed in commit abc123, suite 5/5 green
 - T2: implemented and verified manually"
 h22b1=$(make_home)
-write_plan "$h22b1" "$(v11_task_plan_rigor tested "$v22b_t2_prose")" > /dev/null
-expect_block "v11 22b1 addressed row peer-reviewed active prose evidence → block (not proof-shaped)" \
+write_plan "$h22b1" "$(task_plan_rigor tested "$v22b_t2_prose")" > /dev/null
+expect_block "22b1 addressed row peer-reviewed active prose evidence → block (not proof-shaped)" \
   "$h22b1" 'git commit -m "x"' "not prose"
 
 # 22b2 — same row, evidence is a command + counts → allow (proof-shaped).
@@ -3669,8 +2141,8 @@ current: T2
 - T1: fixed in commit abc123, suite 5/5 green
 - T2: bash test.sh 232/232 green"
 h22b2=$(make_home)
-write_plan "$h22b2" "$(v11_task_plan_rigor tested "$v22b_t2_proof")" > /dev/null
-expect_allow "v11 22b2 addressed row peer-reviewed active proof-shaped evidence → allow" \
+write_plan "$h22b2" "$(task_plan_rigor tested "$v22b_t2_proof")" > /dev/null
+expect_allow "22b2 addressed row peer-reviewed active proof-shaped evidence → allow" \
   "$h22b2" 'git commit -m "x"'
 
 # 22b3 — a DONE non-addressed row (T1, peer-reviewed) with proof-shaped
@@ -3690,8 +2162,8 @@ current: T2
 - T1: bash suite 12/12
 - T2: fixed enum check, bash suite 12/12"
 h22b3=$(make_home)
-write_plan "$h22b3" "$(v11_task_plan_rigor tested "$v22b_t1_no_auditor")" > /dev/null
-expect_block "v11 22b3 done row peer-reviewed proof-shaped but no auditor token → block" \
+write_plan "$h22b3" "$(task_plan_rigor tested "$v22b_t1_no_auditor")" > /dev/null
+expect_block "22b3 done row peer-reviewed proof-shaped but no auditor token → block" \
   "$h22b3" 'git commit -m "x"' "auditor"
 
 # 22b4 — same row with an 'auditor' token in the evidence → allow.
@@ -3710,8 +2182,8 @@ current: T2
 - T1: bash test.sh 12/12, auditor CONFIRMED
 - T2: fixed enum check, bash suite 12/12"
 h22b4=$(make_home)
-write_plan "$h22b4" "$(v11_task_plan_rigor tested "$v22b_t1_auditor")" > /dev/null
-expect_allow "v11 22b4 done row peer-reviewed with auditor token → allow" \
+write_plan "$h22b4" "$(task_plan_rigor tested "$v22b_t1_auditor")" > /dev/null
+expect_allow "22b4 done row peer-reviewed with auditor token → allow" \
   "$h22b4" 'git commit -m "x"'
 
 # 22b5 — a DONE row at audited rigor with 'auditor' but no 'critic' → block
@@ -3731,8 +2203,8 @@ current: T2
 - T1: bash test.sh 12/12 auditor CONFIRMED
 - T2: fixed enum check, bash suite 12/12"
 h22b5=$(make_home)
-write_plan "$h22b5" "$(v11_task_plan_rigor tested "$v22b_t1_audited_no_critic")" > /dev/null
-expect_block "v11 22b5 done row audited with auditor but no critic → block" \
+write_plan "$h22b5" "$(task_plan_rigor tested "$v22b_t1_audited_no_critic")" > /dev/null
+expect_block "22b5 done row audited with auditor but no critic → block" \
   "$h22b5" 'git commit -m "x"' "critic"
 
 # 22b6 — same row with both 'auditor' and 'critic' tokens → allow.
@@ -3751,8 +2223,8 @@ current: T2
 - T1: bash test.sh 12/12 auditor CONFIRMED, critic no-blocking
 - T2: fixed enum check, bash suite 12/12"
 h22b6=$(make_home)
-write_plan "$h22b6" "$(v11_task_plan_rigor tested "$v22b_t1_audited_complete")" > /dev/null
-expect_allow "v11 22b6 done row audited with auditor and critic → allow" \
+write_plan "$h22b6" "$(task_plan_rigor tested "$v22b_t1_audited_complete")" > /dev/null
+expect_allow "22b6 done row audited with auditor and critic → allow" \
   "$h22b6" 'git commit -m "x"'
 
 # 22b7 — addressed row at the tested floor (active), plain prose evidence →
@@ -3773,8 +2245,8 @@ current: T2
 - T1: fixed in commit abc123, suite 5/5 green
 - T2: reproduced and fixed the off-by-one"
 h22b7=$(make_home)
-write_plan "$h22b7" "$(v11_task_plan_rigor tested "$v22b_t2_tested_prose")" > /dev/null
-expect_allow "v11 22b7 addressed row tested floor prose evidence → allow (no proof-shape demand)" \
+write_plan "$h22b7" "$(task_plan_rigor tested "$v22b_t2_tested_prose")" > /dev/null
+expect_allow "22b7 addressed row tested floor prose evidence → allow (no proof-shape demand)" \
   "$h22b7" 'git commit -m "x"'
 
 # 22b8 — proof-shape unit pin: a command word alone (no digit) is not
@@ -3796,8 +2268,8 @@ current: T2
 - T1: fixed in commit abc123, suite 5/5 green
 - T2: bash test.sh all green"
 h22b8a=$(make_home)
-write_plan "$h22b8a" "$(v11_task_plan_rigor tested "$v22b_t2_no_digit")" > /dev/null
-expect_block "v11 22b8a proof-shape pin: command word, no digit → block" \
+write_plan "$h22b8a" "$(task_plan_rigor tested "$v22b_t2_no_digit")" > /dev/null
+expect_block "22b8a proof-shape pin: command word, no digit → block" \
   "$h22b8a" 'git commit -m "x"' "not prose"
 
 v22b_t2_no_command="## Tasks
@@ -3815,8 +2287,8 @@ current: T2
 - T1: fixed in commit abc123, suite 5/5 green
 - T2: fixed 3 cases by hand"
 h22b8b=$(make_home)
-write_plan "$h22b8b" "$(v11_task_plan_rigor tested "$v22b_t2_no_command")" > /dev/null
-expect_block "v11 22b8b proof-shape pin: digit, no command token → block" \
+write_plan "$h22b8b" "$(task_plan_rigor tested "$v22b_t2_no_command")" > /dev/null
+expect_block "22b8b proof-shape pin: digit, no command token → block" \
   "$h22b8b" 'git commit -m "x"' "not prose"
 
 # --- 22c: audited plan-level strictness + wave D7 dispatch-ledger (slice 4/3) -
@@ -3825,7 +2297,7 @@ expect_block "v11 22b8b proof-shape pin: digit, no command token → block" \
 # checks (missing ## Tasks, bad status enum, active/done row missing/placeholder
 # evidence) BLOCK under frontmatter rigor: audited and stay log-only otherwise
 # (ledger_shape_fail router). Part B (wave scale): validate_dispatch_ledger
-# demands a `## Tasks` dispatched-task ledger section on v11 + scale:wave +
+# demands a `## Tasks` dispatched-task ledger section on scale:wave +
 # rigor:audited + multi_agent:true plans (absent → block; empty/none-dispatched
 # → allow; rows validate at TESTED-FLOOR shape only — enum + evidence-line
 # presence, NO per-row auditor/critic, plan Assumption A2). Every other plan is
@@ -3856,15 +2328,15 @@ current: T1
 
 - T1: bash suite 12/12 green"
 h22c1=$(make_home)
-write_plan "$h22c1" "$(v11_task_plan "$v22c_bad_enum")" > /dev/null
-expect_block "v11 22c1 audited task plan, non-addressed row bad status enum → block" \
+write_plan "$h22c1" "$(task_plan "$v22c_bad_enum")" > /dev/null
+expect_block "22c1 audited task plan, non-addressed row bad status enum → block" \
   "$h22c1" 'git commit -m "x"' "invalid status"
 
 # 22c2 — same fixture at frontmatter rigor peer-reviewed → log-only finding, NOT
 # a block (the router stays log-only off audited).
 h22c2=$(make_home)
-write_plan "$h22c2" "$(v11_task_plan_rigor peer-reviewed "$v22c_bad_enum")" > /dev/null
-expect_finding "v11 22c2 same fixture at peer-reviewed → finding (still log-only)" \
+write_plan "$h22c2" "$(task_plan_rigor peer-reviewed "$v22c_bad_enum")" > /dev/null
+expect_finding "22c2 same fixture at peer-reviewed → finding (still log-only)" \
   "$h22c2" 'git commit -m "x"' "task-ledger"
 
 # 22c3 — audited task plan, addressed T1 clean, non-addressed T2 status done with
@@ -3886,28 +2358,28 @@ current: T1
 
 - T1: bash suite 12/12 green"
 h22c3=$(make_home)
-write_plan "$h22c3" "$(v11_task_plan "$v22c_done_no_ev")" > /dev/null
-expect_block "v11 22c3 audited task plan, non-addressed done row missing evidence line → block" \
+write_plan "$h22c3" "$(task_plan "$v22c_done_no_ev")" > /dev/null
+expect_block "22c3 audited task plan, non-addressed done row missing evidence line → block" \
   "$h22c3" 'git commit -m "x"' "no evidence"
 
 # 22c4 — same fixture at frontmatter rigor tested → log-only finding, NOT a block.
 h22c4=$(make_home)
-write_plan "$h22c4" "$(v11_task_plan_rigor tested "$v22c_done_no_ev")" > /dev/null
-expect_finding "v11 22c4 same fixture at tested → finding (still log-only)" \
+write_plan "$h22c4" "$(task_plan_rigor tested "$v22c_done_no_ev")" > /dev/null
+expect_finding "22c4 same fixture at tested → finding (still log-only)" \
   "$h22c4" 'git commit -m "x"' "task-ledger"
 
 # ---- Part B: wave-scale D7 dispatched-task ledger presence ---------------
 
-# A v11 WAVE frontmatter carrying an explicit multi_agent field — the D7
-# dispatch-ledger guard fires ONLY on audited + multi_agent:true + v11 + wave.
-# v11_frontmatter sets NO multi_agent, so every prior wave fixture (19a/b/c,
+# A WAVE frontmatter carrying an explicit multi_agent field — the D7
+# dispatch-ledger guard fires ONLY on audited + multi_agent:true + wave.
+# frontmatter sets NO multi_agent, so every prior wave fixture (19a/b/c,
 # 19r, Section 20) is a guaranteed guard no-op. $1 rigor (default audited),
 # $2 multi_agent (default true).
-v22c_wave_frontmatter() {
+d7_wave_frontmatter() {
   local rigor="${1:-audited}" multi="${2:-true}"
   printf -- '---\n'
   printf -- 'governing-skill: canonical-sdlc\n'
-  printf -- 'canonical_sdlc_version: 11\n'
+  printf -- 'canonical_sdlc_version: 12\n'
   printf -- 'intent: build\n'
   printf -- 'rigor: %s\n' "$rigor"
   printf -- 'scale: wave\n'
@@ -3918,72 +2390,72 @@ v22c_wave_frontmatter() {
   printf -- '---\n'
 }
 
-# A v11 wave plan at current: 5 reaching dispatch_modern with the SAME valid
+# A wave plan at current: 5 reaching the dispatcher with the SAME valid
 # Step-5 body + matrix as 19b (so the ONLY variable under test is the
 # dispatched-task ledger; validate_dispatch_ledger runs at the top of
 # dispatch_modern, before the matrix machinery). $1 = ## Tasks section text
 # (empty omits it); $2 = extra ## SDLC State lines, e.g. a `- T<n>:` evidence
 # line (empty omits); $3 rigor (default audited); $4 multi_agent (default true).
-v22c_wave_plan() {
+d7_wave_plan() {
   local tasks="$1" extra_state="$2" rigor="${3:-audited}" multi="${4:-true}"
-  printf '%s\n' "$(v22c_wave_frontmatter "$rigor" "$multi")"
+  printf '%s\n' "$(d7_wave_frontmatter "$rigor" "$multi")"
   [ -n "$tasks" ] && printf '%s\n\n' "$tasks"
-  printf '## SDLC State\ncurrent: 5\nStep 5:\n%s\n' "$v10_step5_base"
+  printf '## SDLC State\ncurrent: 5\nStep 5:\n%s\n' "$step5_base"
   [ -n "$extra_state" ] && printf '%s\n' "$extra_state"
-  printf '\n%s\n' "$v10_matrix_complete"
+  printf '\n%s\n' "$matrix_complete"
 }
 
 # 22c5 — audited multi_agent wave with NO ## Tasks section → block (D7 presence).
 h22c5=$(make_home)
-write_plan "$h22c5" "$(v22c_wave_plan "" "")" > /dev/null
-expect_block "v11 22c5 audited multi_agent wave with no ## Tasks → block (D7 presence)" \
+write_plan "$h22c5" "$(d7_wave_plan "" "")" > /dev/null
+expect_block "22c5 audited multi_agent wave with no ## Tasks → block (D7 presence)" \
   "$h22c5" 'git commit -m "x"' "dispatched-task ledger"
 
 # 22c6 — WITH a ## Tasks section, header-only + a `none dispatched` line, zero
 # T-rows → allow (section present suffices; the parser needs no row).
-v22c_tasks_none="## Tasks
+tasks_none="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
 
 none dispatched — the orchestrator appends one row per dispatched task-shaped unit."
 h22c6=$(make_home)
-write_plan "$h22c6" "$(v22c_wave_plan "$v22c_tasks_none" "")" > /dev/null
-expect_allow "v11 22c6 audited multi_agent wave with none-dispatched ## Tasks → allow" \
+write_plan "$h22c6" "$(d7_wave_plan "$tasks_none" "")" > /dev/null
+expect_allow "22c6 audited multi_agent wave with none-dispatched ## Tasks → allow" \
   "$h22c6" 'git commit -m "x"'
 
 # 22c7 — ## Tasks with one dispatched row (done) AND a matching `- T1:` evidence
 # line in ## SDLC State → allow. NOTE: the line carries NO auditor/critic token
 # yet it passes — tested-floor shape only at wave scale (pins Assumption A2).
-v22c_tasks_one_done="## Tasks
+tasks_one_done="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
 | T1 | build | audited | dispatched slice | done |"
 h22c7=$(make_home)
-write_plan "$h22c7" "$(v22c_wave_plan "$v22c_tasks_one_done" "- T1: bash suite 9/9 green")" > /dev/null
-expect_allow "v11 22c7 audited multi_agent wave dispatched T1 + evidence line → allow (tested-floor shape, no auditor/critic)" \
+write_plan "$h22c7" "$(d7_wave_plan "$tasks_one_done" "- T1: bash suite 9/9 green")" > /dev/null
+expect_allow "22c7 audited multi_agent wave dispatched T1 + evidence line → allow (tested-floor shape, no auditor/critic)" \
   "$h22c7" 'git commit -m "x"'
 
 # 22c8 — ## Tasks with a dispatched row (done) but NO `- T1:` evidence line
 # anywhere in ## SDLC State → block.
 h22c8=$(make_home)
-write_plan "$h22c8" "$(v22c_wave_plan "$v22c_tasks_one_done" "")" > /dev/null
-expect_block "v11 22c8 audited multi_agent wave dispatched T1 with no evidence line → block" \
+write_plan "$h22c8" "$(d7_wave_plan "$tasks_one_done" "")" > /dev/null
+expect_block "22c8 audited multi_agent wave dispatched T1 with no evidence line → block" \
   "$h22c8" 'git commit -m "x"' "evidence line"
 
 # 22c9 — NON-audited wave (rigor peer-reviewed) with NO ## Tasks → allow (the
 # guard excludes non-audited plans).
 h22c9=$(make_home)
-write_plan "$h22c9" "$(v22c_wave_plan "" "" peer-reviewed true)" > /dev/null
-expect_allow "v11 22c9 non-audited (peer-reviewed) wave with no ## Tasks → allow (guard excludes)" \
+write_plan "$h22c9" "$(d7_wave_plan "" "" peer-reviewed true)" > /dev/null
+expect_allow "22c9 non-audited (peer-reviewed) wave with no ## Tasks → allow (guard excludes)" \
   "$h22c9" 'git commit -m "x"'
 
 # 22c10 — audited wave with multi_agent: false and NO ## Tasks → allow (the guard
 # excludes single-agent plans).
 h22c10=$(make_home)
-write_plan "$h22c10" "$(v22c_wave_plan "" "" audited false)" > /dev/null
-expect_allow "v11 22c10 audited wave with multi_agent:false, no ## Tasks → allow (guard excludes)" \
+write_plan "$h22c10" "$(d7_wave_plan "" "" audited false)" > /dev/null
+expect_allow "22c10 audited wave with multi_agent:false, no ## Tasks → allow (guard excludes)" \
   "$h22c10" 'git commit -m "x"'
 
 # 22c11 (self-reference pin) — reproduce THIS wave-05 plan's exact ## Tasks shape
@@ -3991,7 +2463,7 @@ expect_allow "v11 22c10 audited wave with multi_agent:false, no ## Tasks → all
 # zero T-rows) on an audited multi_agent wave fixture → allow. This is the shape
 # the deployed NEW hook must accept when wave-05 itself advances past the pointer
 # steps into the dispatcher.
-v22c_tasks_selfref="## Tasks
+tasks_selfref="## Tasks
 
 | id | intent | rigor | description | status |
 |---|---|---|---|---|
@@ -4000,8 +2472,8 @@ none dispatched — D7 ledger opens empty; the orchestrator appends one row
 per dispatched task-shaped unit (slices ledger under Step-4 evidence, not
 here, unless dispatched as discrete task-shaped work)."
 h22c11=$(make_home)
-write_plan "$h22c11" "$(v22c_wave_plan "$v22c_tasks_selfref" "")" > /dev/null
-expect_allow "v11 22c11 self-reference pin — THIS plan's exact ## Tasks shape (zero T-rows) → allow" \
+write_plan "$h22c11" "$(d7_wave_plan "$tasks_selfref" "")" > /dev/null
+expect_allow "22c11 self-reference pin — THIS plan's exact ## Tasks shape (zero T-rows) → allow" \
   "$h22c11" 'git commit -m "x"'
 
 # ---- 22d: per-row rigor resolution (slice 4/4, R4) ------------------------
@@ -4037,11 +2509,11 @@ current: T1
 
 - T1: fixed it manually"
 h22d1=$(make_home)
-write_plan "$h22d1" "$(v11_task_plan_rigor tested "$v22d1_body")" > /dev/null
-expect_block "v11 22d1 frontmatter tested, cell peer-reviewed (heavier), prose evidence → block (cell wins)" \
+write_plan "$h22d1" "$(task_plan_rigor tested "$v22d1_body")" > /dev/null
+expect_block "22d1 frontmatter tested, cell peer-reviewed (heavier), prose evidence → block (cell wins)" \
   "$h22d1" 'git commit -m "x"' "not prose"
 
-# 22d2 — frontmatter rigor audited (v11_task_plan hardcodes it), addressed row
+# 22d2 — frontmatter rigor audited (task_plan hardcodes it), addressed row
 # cell tested (lighter than the frontmatter floor), plain honest one-line
 # evidence → this is a DOWNGRADE (A15: the per-row cell is a FLOOR; a cell
 # below the frontmatter rigor must be waived). WITHOUT a waiver marker on the
@@ -4063,8 +2535,8 @@ current: T1
 
 - T1: reproduced and fixed the boundary case"
 h22d2=$(make_home)
-write_plan "$h22d2" "$(v11_task_plan "$v22d2_body")" > /dev/null
-expect_block "v11 22d2 frontmatter audited, cell tested (downgrade), no waiver → block (floor)" \
+write_plan "$h22d2" "$(task_plan "$v22d2_body")" > /dev/null
+expect_block "22d2 frontmatter audited, cell tested (downgrade), no waiver → block (floor)" \
   "$h22d2" 'git commit -m "x"' "lowers rigor"
 
 # 22d2b — same fixture with a Waiver-Protocol marker on the `- T1:` line → allow.
@@ -4083,8 +2555,8 @@ current: T1
 
 - T1: reproduced and fixed the boundary case, waiver: dana 2026-07-19 genuine bugfix"
 h22d2b=$(make_home)
-write_plan "$h22d2b" "$(v11_task_plan "$v22d2b_body")" > /dev/null
-expect_allow "v11 22d2b frontmatter audited, cell tested (downgrade), WITH waiver → allow (recorded, runs at tested lane)" \
+write_plan "$h22d2b" "$(task_plan "$v22d2b_body")" > /dev/null
+expect_allow "22d2b frontmatter audited, cell tested (downgrade), WITH waiver → allow (recorded, runs at tested lane)" \
   "$h22d2b" 'git commit -m "x"'
 
 # 22d3 — frontmatter rigor peer-reviewed, addressed row cell EMPTY (missing
@@ -4103,8 +2575,8 @@ current: T1
 
 - T1: fixed it manually"
 h22d3=$(make_home)
-write_plan "$h22d3" "$(v11_task_plan_rigor peer-reviewed "$v22d3_body")" > /dev/null
-expect_block "v11 22d3 frontmatter peer-reviewed, cell empty, prose evidence → block (inherits frontmatter)" \
+write_plan "$h22d3" "$(task_plan_rigor peer-reviewed "$v22d3_body")" > /dev/null
+expect_block "22d3 frontmatter peer-reviewed, cell empty, prose evidence → block (inherits frontmatter)" \
   "$h22d3" 'git commit -m "x"' "not prose"
 
 # 22d4 — frontmatter rigor tested, addressed row cell EMPTY, weak prose
@@ -4122,8 +2594,8 @@ current: T1
 
 - T1: fixed it manually"
 h22d4=$(make_home)
-write_plan "$h22d4" "$(v11_task_plan_rigor tested "$v22d4_body")" > /dev/null
-expect_allow "v11 22d4 frontmatter tested, cell empty, prose evidence → allow (inherits tested floor)" \
+write_plan "$h22d4" "$(task_plan_rigor tested "$v22d4_body")" > /dev/null
+expect_allow "22d4 frontmatter tested, cell empty, prose evidence → allow (inherits tested floor)" \
   "$h22d4" 'git commit -m "x"'
 
 # 22d5 — frontmatter rigor tested (lighter), addressed row cell audited
@@ -4143,8 +2615,8 @@ current: T1
 
 - T1: bash test.sh 12/12 auditor CONFIRMED, critic no-blocking"
 h22d5a=$(make_home)
-write_plan "$h22d5a" "$(v11_task_plan_rigor tested "$v22d5_body_complete")" > /dev/null
-expect_allow "v11 22d5a frontmatter tested, cell audited, done, proof+auditor+critic → allow (cell drives lane)" \
+write_plan "$h22d5a" "$(task_plan_rigor tested "$v22d5_body_complete")" > /dev/null
+expect_allow "22d5a frontmatter tested, cell audited, done, proof+auditor+critic → allow (cell drives lane)" \
   "$h22d5a" 'git commit -m "x"'
 
 v22d5_body_no_critic="## Tasks
@@ -4160,8 +2632,8 @@ current: T1
 
 - T1: bash test.sh 12/12 auditor CONFIRMED"
 h22d5b=$(make_home)
-write_plan "$h22d5b" "$(v11_task_plan_rigor tested "$v22d5_body_no_critic")" > /dev/null
-expect_block "v11 22d5b same, drop critic token → block (cell audited lane still demands it)" \
+write_plan "$h22d5b" "$(task_plan_rigor tested "$v22d5_body_no_critic")" > /dev/null
+expect_block "22d5b same, drop critic token → block (cell audited lane still demands it)" \
   "$h22d5b" 'git commit -m "x"' "critic"
 
 # 22d6 — an off-enum rigor cell 'reviewed' on a NON-addressed 'done' row.
@@ -4198,21 +2670,21 @@ current: T2
 - T1: bash test.sh 12/12 auditor CONFIRMED, critic no-blocking
 - T2: fixed enum check, bash suite 12/12"
 h22d6a=$(make_home)
-write_plan "$h22d6a" "$(v11_task_plan "$v22d6_body")" > /dev/null
-expect_block "v11 22d6a frontmatter audited, non-addressed off-enum rigor cell → block (INVALID lane is a hard structural error)" \
+write_plan "$h22d6a" "$(task_plan "$v22d6_body")" > /dev/null
+expect_block "22d6a frontmatter audited, non-addressed off-enum rigor cell → block (INVALID lane is a hard structural error)" \
   "$h22d6a" 'git commit -m "x"' "invalid rigor"
 
 h22d6b=$(make_home)
-write_plan "$h22d6b" "$(v11_task_plan_rigor tested "$v22d6_body")" > /dev/null
-expect_block "v11 22d6b frontmatter tested, non-addressed off-enum rigor cell → block (blocks at any rigor, not just audited)" \
+write_plan "$h22d6b" "$(task_plan_rigor tested "$v22d6_body")" > /dev/null
+expect_block "22d6b frontmatter tested, non-addressed off-enum rigor cell → block (blocks at any rigor, not just audited)" \
   "$h22d6b" 'git commit -m "x"' "invalid rigor"
 
 # 22d6c — same off-enum cell, frontmatter peer-reviewed → block. Third rigor
 # level, proving the INVALID guard fires UNCONDITIONALLY (a, b, c together
 # cover audited / tested / peer-reviewed).
 h22d6c=$(make_home)
-write_plan "$h22d6c" "$(v11_task_plan_rigor peer-reviewed "$v22d6_body")" > /dev/null
-expect_block "v11 22d6c frontmatter peer-reviewed, non-addressed off-enum rigor cell → block (blocks at any rigor)" \
+write_plan "$h22d6c" "$(task_plan_rigor peer-reviewed "$v22d6_body")" > /dev/null
+expect_block "22d6c frontmatter peer-reviewed, non-addressed off-enum rigor cell → block (blocks at any rigor)" \
   "$h22d6c" 'git commit -m "x"' "invalid rigor"
 
 # 22d6d — negative control: a VALID enum cell (peer-reviewed) on a non-addressed
@@ -4234,8 +2706,8 @@ current: T2
 - T1: bash test.sh 12/12 auditor CONFIRMED
 - T2: fixed enum check, bash suite 12/12"
 h22d6d=$(make_home)
-write_plan "$h22d6d" "$(v11_task_plan_rigor tested "$v22d6d_body")" > /dev/null
-expect_allow "v11 22d6d control: valid peer-reviewed cell on non-addressed done row, proof+auditor evidence → allow (only INVALID blocks)" \
+write_plan "$h22d6d" "$(task_plan_rigor tested "$v22d6d_body")" > /dev/null
+expect_allow "22d6d control: valid peer-reviewed cell on non-addressed done row, proof+auditor evidence → allow (only INVALID blocks)" \
   "$h22d6d" 'git commit -m "x"'
 
 # 22d6e — empty-cell control: an EMPTY rigor cell on a non-addressed done row
@@ -4257,8 +2729,8 @@ current: T2
 - T1: reproduced and fixed the boundary case
 - T2: fixed enum check, bash suite 12/12"
 h22d6e=$(make_home)
-write_plan "$h22d6e" "$(v11_task_plan_rigor tested "$v22d6e_body")" > /dev/null
-expect_allow "v11 22d6e control: empty rigor cell on non-addressed done row inherits tested floor, honest evidence → allow (empty ≠ INVALID)" \
+write_plan "$h22d6e" "$(task_plan_rigor tested "$v22d6e_body")" > /dev/null
+expect_allow "22d6e control: empty rigor cell on non-addressed done row inherits tested floor, honest evidence → allow (empty ≠ INVALID)" \
   "$h22d6e" 'git commit -m "x"'
 
 # 22d6f/g/h — slice 4/7 closes the residual left by 4/6: an off-enum rigor cell
@@ -4294,8 +2766,8 @@ current: T2
 - T1: reworking the parser
 - T2: fixed enum check, bash suite 12/12"
 h22d6f=$(make_home)
-write_plan "$h22d6f" "$(v11_task_plan_rigor tested "$v22d6f_body")" > /dev/null
-expect_block "v11 22d6f frontmatter tested, non-addressed ACTIVE off-enum rigor cell → block (INVALID blocks regardless of status)" \
+write_plan "$h22d6f" "$(task_plan_rigor tested "$v22d6f_body")" > /dev/null
+expect_block "22d6f frontmatter tested, non-addressed ACTIVE off-enum rigor cell → block (INVALID blocks regardless of status)" \
   "$h22d6f" 'git commit -m "x"' "invalid rigor"
 
 # 22d6g — non-addressed PENDING row with an off-enum rigor cell, frontmatter
@@ -4316,8 +2788,8 @@ current: T2
 
 - T2: fixed enum check, bash suite 12/12"
 h22d6g=$(make_home)
-write_plan "$h22d6g" "$(v11_task_plan_rigor peer-reviewed "$v22d6g_body")" > /dev/null
-expect_block "v11 22d6g frontmatter peer-reviewed, non-addressed PENDING off-enum rigor cell → block (INVALID blocks even on a pending row)" \
+write_plan "$h22d6g" "$(task_plan_rigor peer-reviewed "$v22d6g_body")" > /dev/null
+expect_block "22d6g frontmatter peer-reviewed, non-addressed PENDING off-enum rigor cell → block (INVALID blocks even on a pending row)" \
   "$h22d6g" 'git commit -m "x"' "invalid rigor"
 
 # 22d6h — negative control: non-addressed ACTIVE row with an EMPTY rigor cell,
@@ -4339,74 +2811,14 @@ current: T2
 - T1: reworking the parser
 - T2: fixed enum check, bash suite 12/12"
 h22d6h=$(make_home)
-write_plan "$h22d6h" "$(v11_task_plan_rigor tested "$v22d6h_body")" > /dev/null
-expect_allow "v11 22d6h control: empty rigor cell on non-addressed active row inherits tested floor, honest evidence → allow (empty ≠ INVALID)" \
+write_plan "$h22d6h" "$(task_plan_rigor tested "$v22d6h_body")" > /dev/null
+expect_allow "22d6h control: empty rigor cell on non-addressed active row inherits tested floor, honest evidence → allow (empty ≠ INVALID)" \
   "$h22d6h" 'git commit -m "x"'
-
-# ---- 22e: grandfathering + non-regression (slice 4/4, R5) -----------------
-#
-# Proves the v11 rigor-keyed machinery (4/1–4/3) left the v10 path, and the
-# already-pinned D7/audited-guard exclusions, byte-identical.
-
-echo ""
-echo "=== Section 22e: grandfathering + non-regression (R5) ==="
-
-# 22e1 — a v10 wave plan (Section 17's shape: v10_frontmatter + Step 5 +
-# ## Verification Matrix, no rigor-keyed anything) with a complete matrix at
-# current: 5 → allow. The v10 path is untouched by the v11 rigor additions.
-h22e1=$(make_home)
-write_plan "$h22e1" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_complete")" > /dev/null
-expect_allow "v11 22e1 v10 wave plan, complete matrix, current: 5 → allow (v10 path untouched)" \
-  "$h22e1" 'git commit -m "x"'
-
-# 22e2 — same v10 plan shape, but the matrix has a deliberately broken row
-# (AC-1 discharged with no matching AC-1 evidence block — v10_matrix_no_block,
-# reused from Section 17/19a) → block. v10 matrix enforcement still fires.
-h22e2=$(make_home)
-write_plan "$h22e2" "$(v10_plan 5 "$v10_step5_base" "$v10_matrix_no_block")" > /dev/null
-expect_block "v11 22e2 v10 wave plan, broken matrix row → block (v10 enforcement still fires)" \
-  "$h22e2" 'git commit -m "x"' "AC-1"
-
-# 22e3 — regression pin (restated from 22c9): v11 wave plan, frontmatter
-# rigor peer-reviewed (NOT audited), no ## Tasks section → allow. The D7
-# dispatch-ledger guard excludes non-audited plans.
-h22e3=$(make_home)
-write_plan "$h22e3" "$(v22c_wave_plan "" "" peer-reviewed true)" > /dev/null
-expect_allow "v11 22e3 non-audited (peer-reviewed) wave, no ## Tasks → allow (D7 guard excludes non-audited)" \
-  "$h22e3" 'git commit -m "x"'
-
-# 22e4 — regression pin (restated from 22c10): v11 wave plan, audited,
-# multi_agent: false, no ## Tasks section → allow. The D7 guard excludes
-# single-agent plans.
-h22e4=$(make_home)
-write_plan "$h22e4" "$(v22c_wave_plan "" "" audited false)" > /dev/null
-expect_allow "v11 22e4 audited wave, multi_agent:false, no ## Tasks → allow (D7 guard excludes non-multi_agent)" \
-  "$h22e4" 'git commit -m "x"'
-
-# 22e5 — v11 task plan, frontmatter tested, clean addressed row with an
-# honest one-line prose evidence (no digit/command token, no auditor/critic)
-# → allow. The headline guarantee: the cheap (tested) lane stays cheap.
-v22e5_body="## Tasks
-
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
-| T1 | bugfix | tested | fix enum | active |
-
-## SDLC State
-
-scale: task
-current: T1
-
-- T1: reproduced and fixed the bug locally"
-h22e5=$(make_home)
-write_plan "$h22e5" "$(v11_task_plan_rigor tested "$v22e5_body")" > /dev/null
-expect_allow "v11 22e5 tested addressed row, honest one-line evidence → allow (cheap lane stays cheap)" \
-  "$h22e5" 'git commit -m "x"'
 
 # ---- 22f: row rigor is a FLOOR — downgrade blocks unless waived (slice 4/8) --
 #
 # A15 (user-ratified, momentous): the per-row `rigor` cell is a FLOOR unified
-# with v11's run-rigor floor model. A cell that RAISES a row above the
+# with the run-rigor floor model. A cell that RAISES a row above the
 # frontmatter rigor is always allowed (the cell drives the heavier lane —
 # 22d1/22d5 already pin this). A cell that LOWERS a row below the frontmatter
 # rigor is a DOWNGRADE: it BLOCKS (exit 2) UNLESS the row's `- T<n>:` evidence
@@ -4437,8 +2849,8 @@ current: T1
 
 - T1: reproduced and fixed the boundary case"
 h22f1=$(make_home)
-write_plan "$h22f1" "$(v11_task_plan "$v22f1_body")" > /dev/null
-expect_block "v11 22f1 audited frontmatter, addressed tested cell (downgrade), no waiver → block" \
+write_plan "$h22f1" "$(task_plan "$v22f1_body")" > /dev/null
+expect_block "22f1 audited frontmatter, addressed tested cell (downgrade), no waiver → block" \
   "$h22f1" 'git commit -m "x"' "lowers rigor"
 
 # 22f2 — same, but the `- T1:` line carries a Waiver-Protocol marker → allow
@@ -4456,8 +2868,8 @@ current: T1
 
 - T1: reproduced and fixed the boundary case, waiver: dana 2026-07-19 genuine bugfix"
 h22f2=$(make_home)
-write_plan "$h22f2" "$(v11_task_plan "$v22f2_body")" > /dev/null
-expect_allow "v11 22f2 audited frontmatter, addressed tested cell + waiver → allow (recorded downgrade)" \
+write_plan "$h22f2" "$(task_plan "$v22f2_body")" > /dev/null
+expect_allow "22f2 audited frontmatter, addressed tested cell + waiver → allow (recorded downgrade)" \
   "$h22f2" 'git commit -m "x"'
 
 # 22f3 — frontmatter tested, addressed row cell audited (RAISE), done, evidence
@@ -4476,8 +2888,8 @@ current: T1
 
 - T1: bash test.sh 12/12 auditor CONFIRMED, critic no-blocking"
 h22f3=$(make_home)
-write_plan "$h22f3" "$(v11_task_plan_rigor tested "$v22f3_body")" > /dev/null
-expect_allow "v11 22f3 tested frontmatter, addressed audited cell (raise), proof+auditor+critic → allow" \
+write_plan "$h22f3" "$(task_plan_rigor tested "$v22f3_body")" > /dev/null
+expect_allow "22f3 tested frontmatter, addressed audited cell (raise), proof+auditor+critic → allow" \
   "$h22f3" 'git commit -m "x"'
 
 # 22f4 — frontmatter peer-reviewed, addressed row cell tested (downgrade). No
@@ -4495,8 +2907,8 @@ current: T1
 
 - T1: fixed it by hand"
 h22f4a=$(make_home)
-write_plan "$h22f4a" "$(v11_task_plan_rigor peer-reviewed "$v22f4_body")" > /dev/null
-expect_block "v11 22f4a peer-reviewed frontmatter, addressed tested cell (downgrade), no waiver → block" \
+write_plan "$h22f4a" "$(task_plan_rigor peer-reviewed "$v22f4_body")" > /dev/null
+expect_block "22f4a peer-reviewed frontmatter, addressed tested cell (downgrade), no waiver → block" \
   "$h22f4a" 'git commit -m "x"' "lowers rigor"
 
 v22f4b_body="## Tasks
@@ -4512,8 +2924,8 @@ current: T1
 
 - T1: fixed it by hand, waiver: dana 2026-07-19 quick bugfix"
 h22f4b=$(make_home)
-write_plan "$h22f4b" "$(v11_task_plan_rigor peer-reviewed "$v22f4b_body")" > /dev/null
-expect_allow "v11 22f4b peer-reviewed frontmatter, addressed tested cell + waiver → allow" \
+write_plan "$h22f4b" "$(task_plan_rigor peer-reviewed "$v22f4b_body")" > /dev/null
+expect_allow "22f4b peer-reviewed frontmatter, addressed tested cell + waiver → allow" \
   "$h22f4b" 'git commit -m "x"'
 
 # 22f5 — frontmatter audited, addressed row cell audited (EQUAL, no downgrade),
@@ -4532,8 +2944,8 @@ current: T1
 
 - T1: bash test.sh 12/12 auditor CONFIRMED, critic no-blocking"
 h22f5=$(make_home)
-write_plan "$h22f5" "$(v11_task_plan "$v22f5_body")" > /dev/null
-expect_allow "v11 22f5 audited frontmatter, addressed audited cell (equal) → allow (no downgrade)" \
+write_plan "$h22f5" "$(task_plan "$v22f5_body")" > /dev/null
+expect_allow "22f5 audited frontmatter, addressed audited cell (equal) → allow (no downgrade)" \
   "$h22f5" 'git commit -m "x"'
 
 # 22f6 — NON-addressed done row (T1) at frontmatter audited with cell
@@ -4555,8 +2967,8 @@ current: T2
 - T1: bash test.sh 9/9 auditor CONFIRMED
 - T2: bash suite 12/12 green"
 h22f6a=$(make_home)
-write_plan "$h22f6a" "$(v11_task_plan "$v22f6_body")" > /dev/null
-expect_block "v11 22f6a audited frontmatter, non-addressed done peer-reviewed cell (downgrade), no waiver → block" \
+write_plan "$h22f6a" "$(task_plan "$v22f6_body")" > /dev/null
+expect_block "22f6a audited frontmatter, non-addressed done peer-reviewed cell (downgrade), no waiver → block" \
   "$h22f6a" 'git commit -m "x"' "lowers rigor"
 
 v22f6b_body="## Tasks
@@ -4574,8 +2986,8 @@ current: T2
 - T1: bash test.sh 9/9 auditor CONFIRMED, waiver: dana 2026-07-19 scoped down to peer-reviewed
 - T2: bash suite 12/12 green"
 h22f6b=$(make_home)
-write_plan "$h22f6b" "$(v11_task_plan "$v22f6b_body")" > /dev/null
-expect_allow "v11 22f6b same, waiver on the non-addressed done row → allow (runs at peer-reviewed lane)" \
+write_plan "$h22f6b" "$(task_plan "$v22f6b_body")" > /dev/null
+expect_allow "22f6b same, waiver on the non-addressed done row → allow (runs at peer-reviewed lane)" \
   "$h22f6b" 'git commit -m "x"'
 
 # 22f7 (F3 word-boundary) — audited addressed done row whose evidence contains
@@ -4597,8 +3009,8 @@ current: T1
 
 - T1: bash test.sh 9/9, auditor CONFIRMED, fixed a critical path bug"
 h22f7a=$(make_home)
-write_plan "$h22f7a" "$(v11_task_plan "$v22f7a_body")" > /dev/null
-expect_block "v11 22f7a audited done row, 'critical' (no standalone critic) → block (word-boundary critic token)" \
+write_plan "$h22f7a" "$(task_plan "$v22f7a_body")" > /dev/null
+expect_block "22f7a audited done row, 'critical' (no standalone critic) → block (word-boundary critic token)" \
   "$h22f7a" 'git commit -m "x"' "critic"
 
 v22f7b_body="## Tasks
@@ -4614,9 +3026,62 @@ current: T1
 
 - T1: bash test.sh 9/9, auditor CONFIRMED, fixed a critical path bug, critic no-blocking"
 h22f7b=$(make_home)
-write_plan "$h22f7b" "$(v11_task_plan "$v22f7b_body")" > /dev/null
-expect_allow "v11 22f7b same evidence + standalone 'critic no-blocking' token → allow" \
+write_plan "$h22f7b" "$(task_plan "$v22f7b_body")" > /dev/null
+expect_allow "22f7b same evidence + standalone 'critic no-blocking' token → allow" \
   "$h22f7b" 'git commit -m "x"'
+
+# ============================================================
+# Section 23: canonical_sdlc_version — exactly one supported value
+# ============================================================
+#
+# The hook supports canonical_sdlc_version: 12 and nothing else. Every other
+# value blocks with exit 2 and a message naming the value found. One
+# table-driven case over representative bad values — an older number, a much
+# older number, a legacy single digit, a far-future number, an empty value, and
+# non-numeric garbage — because there is one behavior here, not one per value.
+#
+# The version check sits ahead of every shape check, so these fixtures carry a
+# valid ## SDLC State: what is under test is the version, not the evidence.
+
+echo ""
+echo "=== Section 23: canonical_sdlc_version — exactly one supported value ==="
+
+versioned_plan() {  # $1 = the canonical_sdlc_version value to declare
+  printf -- '---\n'
+  printf -- 'governing-skill: canonical-sdlc\n'
+  printf -- 'canonical_sdlc_version: %s\n' "$1"
+  printf -- 'intent: build\nrigor: tested\nscale: wave\n'
+  printf -- '---\n'
+  printf -- '## SDLC State\ncurrent: 3\nStep 3: .bionic/docs/plans/wave-01.plan.md\n'
+}
+
+for bad_version in 11 9 2 99 "" banana 12.0 v12; do
+  h=$(make_home)
+  write_plan "$h" "$(versioned_plan "$bad_version")" > /dev/null
+  expect_block "unsupported canonical_sdlc_version '${bad_version:-<empty>}' → block, naming the value found" \
+    "$h" 'git commit -m "x"' "canonical_sdlc_version: '${bad_version}'"
+done
+
+# A plan with NO canonical_sdlc_version line at all is not a special case: it
+# reads as the empty value and blocks the same way.
+h23none=$(make_home)
+write_plan "$h23none" "---
+governing-skill: canonical-sdlc
+intent: build
+rigor: tested
+scale: wave
+---
+## SDLC State
+current: 3
+Step 3: .bionic/docs/plans/wave-01.plan.md" > /dev/null
+expect_block "absent canonical_sdlc_version → block" \
+  "$h23none" 'git commit -m "x"' "the only supported version"
+
+# The supported value passes the version gate (proved by reaching — and
+# satisfying — the evidence checks beyond it).
+h23ok=$(make_home)
+write_plan "$h23ok" "$(versioned_plan 12)" > /dev/null
+expect_allow "canonical_sdlc_version: 12 → allow" "$h23ok" 'git commit -m "x"'
 
 # ============================================================
 # Summary
