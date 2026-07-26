@@ -145,6 +145,69 @@ Three ways to shape the retry policy.
 EOF
 add_pos decision-options-only 's/^\*\*Option \([ABC]\)\*\*/Shape \1/' "$T"
 
+# --- positives: a labelled menu whose items are an ordinary numbered list ---
+# The `Option N` heading is one way to write a menu; a standalone `Options:`
+# label governing a numbered list is the same FORM. The label line is what
+# distinguishes a menu from the numbered lists that fill ordinary work turns.
+
+read -r -d '' T <<'EOF' || true
+Three ways to land this.
+
+**Options:**
+1. **Inline the helper** (Recommended) — less indirection, one duplicated block.
+2. **Extract a module** — one definition, one more file to install.
+3. **Leave it** — the duplication is two lines and the sites never change together.
+
+I would take 1.
+EOF
+add_pos decision-options-label '/^\*\*Options:\*\*$/d' "$T"
+
+read -r -d '' T <<'EOF' || true
+The retry policy needs a call before the client ships.
+
+Choices:
+1. Fixed backoff — predictable, slow under load.
+2. Exponential with jitter — fast recovery, harder to reason about.
+EOF
+add_pos decision-choices-label '/^Choices:$/d' "$T"
+
+# --- positives: blocked-on-you, an ask phrased as a statement of pendency ---
+# Never a question, never an imperative — it names the human as the thing the
+# work is waiting on. The preposition is load-bearing: "blocked ON your call"
+# is an ask, "blocked your push" is a report. See the negative below.
+
+read -r -d '' T <<'EOF' || true
+Reviewer idle — its report is already banked. The suite is green and nothing
+else is outstanding.
+
+The branch remains paused on your read of the migration window.
+EOF
+add_pos action-paused-on-your 's/paused on your read of the migration window/paused until the migration window closes/' "$T"
+
+read -r -d '' T <<'EOF' || true
+Nothing pending on my side except your ruling on the retry policy.
+EOF
+add_pos action-pending-your-ruling 's/except your ruling on the retry policy/except the nightly run of the retry suite/' "$T"
+
+# --- positives: a bare imperative aimed at the human ---
+# No "please", no "can you" — just the verb. The direction markers the other
+# request forms rely on are absent, and the sentence position carries it.
+
+read -r -d '' T <<'EOF' || true
+The one-pager is drafted and the three closeout items are listed above.
+
+Confirm the closeout items and I will write it up.
+EOF
+add_pos action-bare-confirm 's/Confirm the closeout items and I will write it up./I confirmed the closeout items and wrote it up./' "$T"
+
+read -r -d '' T <<'EOF' || true
+Both scopes are viable and the tradeoff is stated above. The narrow one costs a
+day, the wide one costs a week and covers two more call sites.
+
+Reply with the scope you want and I will start on it.
+EOF
+add_pos action-bare-reply 's/Reply with the scope you want and I will start on it./I started on the narrow scope./' "$T"
+
 # --- negatives: ordinary work turns ---
 
 read -r -d '' T <<'EOF' || true
@@ -257,6 +320,31 @@ Logs are clean for 6 hours.
 EOF
 add_neg let-you-know '$a\
 Should I disarm the alarm?' "$T"
+
+# The preposition is what separates an ask from a report. "blocked ON your
+# call" hands the work to the human; "blocked your push" is something that
+# happened TO them. A pendency signal that grabbed any (blocked, your) pair
+# would fire here, so this fixture is the guard on that generalisation.
+read -r -d '' T <<'EOF' || true
+The pre-commit hook blocked your push because the branch is protected. Re-run
+after rebasing and it will go through.
+
+Nothing else in the tree changed.
+EOF
+add_neg blocked-your-push 's/blocked your push because/blocked on your push decision because/' "$T"
+
+# Past-tense reports of decisions already made. The bare-imperative signal keys
+# on the verb in sentence-initial position; "Confirmed", "Approved", "Decided"
+# are receipts, and the hook must never refuse the behaviour it exists to
+# produce.
+read -r -d '' T <<'EOF' || true
+Confirmed: 41/41 pass. Approved the migration in staging earlier today, and the
+rollback path is tested.
+
+Decided against the wider refactor — it is outside what was asked.
+EOF
+add_neg past-tense-reports '$a\
+Confirm the rollback path.' "$T"
 
 # ---------- 1. baseline: every positive fires, every negative is silent ----------
 
