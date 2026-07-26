@@ -36,6 +36,11 @@ done
 run "scripts.test.sh" bash tests/scripts.test.sh
 run "installer-behavior.test.sh" bash tests/installer-behavior.test.sh
 run "agent-roles.test.sh" bash tests/agent-roles.test.sh
+# The verifier's own behaviour gate. The verifier's DEFAULT run (over the real
+# governed surfaces) is deliberately not wired here yet: the surfaces are marked
+# in slices 4/3–4/5, and a gate that fails until then would take this suite red
+# mid-wave. adr-005's prose → data → hook-with-log-only-first pattern.
+run "marker-verify.test.sh" bash tests/marker-verify.test.sh
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   run "bootstrap-e2e-docker.sh (mock)" bash tests/bootstrap-e2e-docker.sh
 else
