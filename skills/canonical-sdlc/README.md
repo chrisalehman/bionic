@@ -33,7 +33,7 @@ Most "AI does the SDLC" demos collapse the lifecycle: a brainstorm becomes code 
 
 Canonical SDLC is the constraint that forces the lifecycle to stay intact. Each of the 10 steps contributes a dimension of fidelity — scope, contract, plan, isolation, proof, review, decision record, release discipline — that no other step supplies. Without enforcement, individual steps feel skippable in isolation, but the compounding loss of fidelity is invisible mid-effort and surfaces later as rework.
 
-The skill plus two hooks make the lifecycle non-skippable. The plan file is the single source of truth: configuration lives in YAML frontmatter, evidence lives in the `## SDLC State` section, and decisions live in ADRs (or RCAs for incidents). Every commit must show evidence for the current step. Every plan/spec/ADR must declare the skill that produced it.
+The skill mandates the full step set; the two hooks make the *evidence* non-skippable at the granularity they check — a write without declared frontmatter, a commit without the current step's evidence. The plan file is the single source of truth: configuration lives in YAML frontmatter, evidence lives in the `## SDLC State` section, and decisions live in ADRs (or RCAs for incidents). Every commit must show evidence for the current step. Every plan/spec/ADR must declare the skill that produced it.
 
 The autonomous span is **Steps 4–9** — Claude walks away to build for hours and returns with merged code. Steps 1–3 (Ideate, Spec, Plan) are interactive: that's where wrong assumptions get caught cheaply. Step 3 ends with an explicit user approval before autonomous execution begins.
 
@@ -41,10 +41,12 @@ The autonomous span is **Steps 4–9** — Claude walks away to build for hours 
 
 ```
 NO STEP SKIPPED WITHOUT A DECLARED FAST-PATH.
-NO COMPLETION WITHOUT EVIDENCE FROM EVERY APPLICABLE STEP.
+NO COMMIT WITHOUT EVIDENCE FROM THE CURRENT STEP.
 ```
 
 Violating the letter of this process is violating the spirit of this process.
+
+**What enforces this, precisely.** The evidence gate is incremental, not holistic. At each commit it reads the plan's `current: N` and validates the evidence line for **that step only** — it never re-validates steps 0..N-1, and nothing re-checks the full set at completion. The sole cumulative contract is the `## Verification Matrix`, a prefix re-validated at every step from 6 on. Walking every applicable step is the discipline the per-commit check serves, not a property any code proves: an abandoned step is caught by review, not by the harness.
 
 ---
 

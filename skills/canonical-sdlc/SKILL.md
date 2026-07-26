@@ -42,7 +42,7 @@ loading: deferred
 
 This skill constrains how large-scale development efforts are executed. The SDLC steps exist because they lead to better outcomes — each step contributes a dimension of fidelity (scope, contract, plan, proof, review, decision record, release discipline) that no other step supplies. Without this skill, Claude truncates the lifecycle on any given effort: individual steps feel skippable in isolation, but the compounding loss of fidelity is invisible mid-effort and surfaces as rework, lost decisions, and features that look complete but aren't production-grade.
 
-**Core principle: NO STEP SKIPPED WITHOUT A DECLARED FAST-PATH. NO COMMIT WITHOUT EVIDENCE FROM THE CURRENT STEP.** (formalized below as The Iron Law, with what enforces it and what does not).
+**Core principle: NO STEP SKIPPED WITHOUT A DECLARED FAST-PATH. NO COMMIT WITHOUT EVIDENCE FROM THE CURRENT STEP.** (formalized below as The Iron Law, with what enforces it and what does not — the first sentence [UNENFORCED], the second [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]).
 
 **Layer:** Governance (process constraint). Loads when a large-scale effort begins or when picking the skill for the current step.
 
@@ -917,7 +917,7 @@ Step 5 does not close until an **Independent Verification Auditor** has ruled on
 [UNENFORCED]
 > Your job is to falsify this wave's verification evidence, not to review its code. You have the Verification Matrix, the per-row evidence, and repo access. For every row: (1) confirm the evidence was produced at the declared tier — a T3 row must cite the declared real surface, its per-origin freshness proofs, a cold client, and a feature-scoped semantic readback; (2) for T2 rows, demand the fixture-fidelity declaration and check the fixture can structurally reach the failure the AC guards; (3) re-execute at least one evidence command per tier used (cap 3 total) and compare outputs. Verdict per row: CONFIRMED / REFUTED / UNVERIFIABLE. "The evidence is plausible" is not a verdict. Agreement without re-execution is not acceptable output.
 
-**Bounds:** the auditor audits the *evidence*, not the wave — it does not re-verify the feature, re-run the whole suite, or review code. Re-execution is one command per tier used, capped at 3 total. One auditor, one pass. Verdicts are recorded in the matrix `auditor` column. Any **REFUTED** or **UNVERIFIABLE** row blocks Step-5 closure absent a waiver; the hook enforces CONFIRMED-or-waived on every non-waived row once `current > 5`. The auditor is **distinct from the Step 6 critic** — the auditor falsifies the *evidence*, the critic falsifies the *code*. Both are kept.
+**Bounds:** the auditor audits the *evidence*, not the wave — it does not re-verify the feature, re-run the whole suite, or review code. Re-execution is one command per tier used, capped at 3 total. One auditor, one pass. Verdicts are recorded in the matrix `auditor` column. Any **REFUTED** or **UNVERIFIABLE** row blocks Step-5 closure absent a waiver; the hook enforces CONFIRMED-or-waived on every non-waived row once `current > 5` [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]. The auditor is **distinct from the Step 6 critic** — the auditor falsifies the *evidence*, the critic falsifies the *code*. Both are kept.
 
 #### Waiver Protocol
 
@@ -1054,7 +1054,7 @@ canonical_sdlc_version: 11
 ---
 ```
 
-The example shows the current (v11) shape, and the governing-skill hook parses and blocks on the `intent:`/`rigor:`/`scale:` triple (§Hooks). For `incident-response` artifacts, use `incident: NNNN-<slug>` instead of `epic`/`wave`. Full field definitions live in the README frontmatter table; the two load-bearing specials are `governing-skill` — the skill declared after the producing step's heading (Step 1 → `agent-skills:idea-refine`; Step 3 → `superpowers:writing-plans`; Step 7 RCA → `canonical-sdlc`; `tune` UX flavor overrides Step 1 → `shape`, Step 4 → `impeccable`) — and `sdlc-step`, that step's number (`0` for `scale: epic` artifacts, `10` for `continuation.md`).
+The example shows the current (v11) shape, and the governing-skill hook parses and blocks on the `intent:`/`rigor:`/`scale:` triple (§Hooks) [FORM: hooks/canonical-sdlc-governing-skill.test.sh]. For `incident-response` artifacts, use `incident: NNNN-<slug>` instead of `epic`/`wave`. Full field definitions live in the README frontmatter table; the two load-bearing specials are `governing-skill` — the skill declared after the producing step's heading (Step 1 → `agent-skills:idea-refine`; Step 3 → `superpowers:writing-plans`; Step 7 RCA → `canonical-sdlc`; `tune` UX flavor overrides Step 1 → `shape`, Step 4 → `impeccable`) — and `sdlc-step`, that step's number (`0` for `scale: epic` artifacts, `10` for `continuation.md`).
 
 ### Transition discipline
 
@@ -1099,14 +1099,14 @@ Every step has an evidence artifact recorded under `Step N:` in `## SDLC State`.
 | 1, 2, 3 | pointer | presence-only |
 | 4 | pointer; also `worktree:`/`base-sha:`/`branch:` when `use_worktree: true` | presence-only |
 | 5 Verify | `cmd:`/`pass:`/`total:`/`output:` (pass==total) AND a valid `## Verification Matrix` section (below) AND — once no row is `pending`/`blocked` — a non-empty `auditor:` pointer | tests floor lives in `## SDLC State`; per-row tier evidence lives in the matrix section; mid-discharge relaxation per v10.1 (§Step 5) |
-| 6 Review | pointer to 5-axis body + critic findings | matrix re-validated here as a prefix check — a REFUTED row blocks the commit |
+| 6 Review | pointer to 5-axis body + critic findings | matrix re-validated here as a prefix check — a REFUTED row blocks the commit [WALL: hooks/canonical-sdlc-evidence-gate.test.sh] |
 | 7 Document | `adr:` OR `rca:` OR `n/a:` | — |
 | 8 Integrate & close | `merge:`, `worktree-removed:` AND (`cleanup:`, `tmp-wiped:`, `tasks-completed:` OR `cleanup: n/a`) | — |
 | 9 Ship | `deploy:`, `verified-at:`, `monitor:` OR `n/a:` | n/a only when `deploy_target: none` |
 
 Pointer steps in v10: 1, 2, 3, 4 — presence-only. Step 6 is deliberately **not** a pointer step, so a post-Verify commit re-runs the matrix prefix check.
 
-**`## Verification Matrix` validation** fires at `current: 5` (via the Verify gate) and `current: 6..9` (as a prefix check). The hook checks the `stack-health:` line, the tier table's grammar (T0–T4, five cells, no literal `|`, status enum `pending|blocked|discharged|waived`), each non-waived row's per-tier keys (§Step 5) with the placeholder and live-tier-`n/a` bans, the `false-green:`/`rewritten:` pairing, and — once `current > 5` — a `CONFIRMED` auditor cell on every non-waived row. A `waiver:` entry (evidence cell or AC block) exempts its row. **v10.1:** at `current: 5` only, `pending`/`blocked` rows skip the per-tier key check (their contract bites at the 5→6 advance), and the `auditor:` pointer is demanded only when no such row remains.
+**`## Verification Matrix` validation** fires at `current: 5` (via the Verify gate) and `current: 6..9` (as a prefix check). The hook checks the `stack-health:` line, the tier table's grammar (T0–T4, five cells, no literal `|`, status enum `pending|blocked|discharged|waived`), each non-waived row's per-tier keys (§Step 5) with the placeholder and live-tier-`n/a` bans, the `false-green:`/`rewritten:` pairing, and — once `current > 5` — a `CONFIRMED` auditor cell on every non-waived row. A `waiver:` entry (evidence cell or AC block) exempts its row. **v10.1:** at `current: 5` only, `pending`/`blocked` rows skip the per-tier key check (their contract bites at the 5→6 advance), and the `auditor:` pointer is demanded only when no such row remains. [FORM: hooks/canonical-sdlc-evidence-gate.test.sh]
 
 **v11 shape table.** v11 wave/epic plans carry the **exact v10 rows above** — same per-step fields, same `## Verification Matrix` validation. v11 re-keys the *gate* off the triple, not the evidence shape for wave/epic plans. `scale: task` plans instead run the ledger contract below — tightened in place under the same `canonical_sdlc_version: 11` (no `v12`). Five additions:
 
@@ -1203,7 +1203,7 @@ Zero user interaction. The next session reads it if present and resumes from the
 
 ## Hooks
 
-Two `PreToolUse` hooks enforce the contract (full mechanism in the README):
+Two `PreToolUse` hooks enforce the contract (full mechanism in the README) [WALL: hooks/canonical-sdlc-evidence-gate.test.sh, hooks/canonical-sdlc-governing-skill.test.sh]:
 
 - **`canonical-sdlc-evidence-gate.sh`** (`Bash`) — on `git commit`, blocks (exit 2) if the current step's evidence is missing or unreadable. For `canonical_sdlc_version: 11` it carries the v10 shape table and `## Verification Matrix` validation unchanged on wave/epic plans, and accepts `current: T<n>` task-scale addressing. `scale: task` plans then **block** on the ledger's rigor-keyed lanes — the addressed row's tested-floor presence always, plus proof-shape and auditor/critic tokens once the row's effective rigor reaches `peer-reviewed`/`audited` — and the remaining non-addressed-row ledger-shape checks block too once frontmatter is `rigor: audited`. Separately, an `audited`, `multi_agent: true` wave plan must carry a `## Tasks` section at all (D7 presence — absence blocks, empty is fine, present rows validate tested-floor shape only; `scale: epic` excluded). What stays **log-only**: the epic merge-target check and the intent-scoped Step-5 keys (`refactor`/`tune`) (findings append to `.bionic/memory/sdlc-v11-audit.md` + stderr, exit 0 — never block). For `canonical_sdlc_version: 10` it validates the v10 shape table and the `## Verification Matrix` (per-tier keys, waiver/CONFIRMED discipline); v1–v9 plans use their own tables, never retrofitted. [FORM: hooks/canonical-sdlc-evidence-gate.test.sh]
 - **`canonical-sdlc-governing-skill.sh`** (`Write,Edit`) — blocks any artifact lacking `governing-skill:` frontmatter. On **v11** artifacts it **blocks** (exit 2) on: a `mode:` line (split-brain guard), a missing or non-enum `intent:`/`rigor:`/`scale:`, a barred intent × scale cell, a missing discriminator/opt-in flag or `model_plan`, and (on `*.plan.md` at `sdlc-step ≥ 3`) a missing `## Verification Matrix` — the triple's presence is the gate, with no `mode:` short-circuit (D13). It additionally runs the **log-only** floor-consistency checks (intent floor, spike cap, project floor, epic floor → `.bionic/memory/sdlc-v11-audit.md` + stderr, exit 0). On v4+ v≤10 plans it validates the 5 discriminator + 2 opt-in flags + `model_plan`; on **v10** plans additionally requires the matrix at `sdlc-step ≥ 3`, gating on the legacy `mode:` value (§Legacy modes). [FORM: hooks/canonical-sdlc-governing-skill.test.sh]
@@ -1281,7 +1281,7 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 | "The auditor is overkill, my evidence is obviously fine" | Self-graded evidence is the exact root cause the auditor exists to kill. "Obviously fine" is the claim it falsifies. |
 | "I'm confident in my self-review; the adversarial critic is overkill" | Self-review is bounded by what you thought to check. |
 | "The assumption was obvious; no need to log it" | "Obvious" is judged from inside the moment. Log it. |
-| "I can update `## SDLC State` after the commit" | The commit rhythm requires the current step's evidence line in place *before* staging — the evidence gate hook blocks the commit otherwise. |
+| "I can update `## SDLC State` after the commit" | The commit rhythm requires the current step's evidence line in place *before* staging — the evidence gate hook blocks the commit otherwise [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]. |
 | "An RCA is the same as an ADR" | ADRs are forward-facing; RCAs are backward-facing. |
 | "Monitoring already exists; I don't need to check it" | Default assumption is a gap exists; prove "no gap" with evidence. | [UNENFORCED]
 | "Spike code is good, let's just ship it" | Re-enter a ship-capable mode at Step 1. |
