@@ -79,26 +79,41 @@ ctx=$(echo "$HOOK_STDOUT" | jq -r '.hookSpecificOutput.additionalContext')
 assert_contains "ctx mentions CLAUDE.md" "CLAUDE.md" "$ctx"
 
 echo "Payload carries load-bearing exemption tokens"
-# These four assertions exist to make 'cleanup' that drops the EXEMPT
+# These five assertions exist to make 'cleanup' that drops the EXEMPT
 # clause an explicit test failure. Without these exemptions, terseness
-# corrupts structured output that other skills depend on.
+# corrupts structured output that other skills depend on. The catch-all
+# clause was a strict truncation of claude-global.md:61 — restored here.
 assert_contains "exempt: code" "code" "$ctx"
 assert_contains "exempt: evidence blocks" "evidence blocks" "$ctx"
 assert_contains "exempt: commit messages" "commit messages" "$ctx"
 assert_contains "exempt: security warnings" "security warnings" "$ctx"
+assert_contains "exempt: catch-all clause" "anything a skill mandates structured output for" "$ctx"
 
 echo "Payload includes BLUF directive (lead with the answer)"
 assert_contains "BLUF directive" "Lead with the answer" "$ctx"
 
-echo "Payload size is bounded (<500 chars per-turn overhead)"
+echo "Payload carries content-selection directives (WHAT gets said/escalated, not just HOW)"
+# The hook used to govern phrasing only. These assertions make sure the
+# content-selection layer — the classify-before-asking heuristic and the
+# anti-narration clause — can't be silently dropped in a future edit.
+assert_contains "content-selection: classify before asking" "BEFORE ASKING FOR ANYTHING" "$ctx"
+assert_contains "content-selection: auto-resolve principle" "auto-resolve" "$ctx"
+assert_contains "content-selection: one-line call report" "report the call in one line" "$ctx"
+assert_contains "content-selection: approval list reference" "approval list" "$ctx"
+assert_contains "anti-narration clause" "Don't narrate reasoning" "$ctx"
+
+echo "Payload size is bounded (<1000 chars per-turn overhead)"
+# Bound raised from the original <500 chars: the payload now carries
+# content-selection (the expensive failure phrasing rules never
+# addressed), not just phrasing, so it costs more per-turn overhead.
 TOTAL=$((TOTAL + 1))
 ctx_len=${#ctx}
-if [ "$ctx_len" -lt 500 ]; then
+if [ "$ctx_len" -lt 1000 ]; then
   PASS=$((PASS + 1))
-  printf '  PASS  context length %d < 500\n' "$ctx_len"
+  printf '  PASS  context length %d < 1000\n' "$ctx_len"
 else
   FAIL=$((FAIL + 1))
-  printf '  FAIL  context length %d ≥ 500 (per-turn bloat risk)\n' "$ctx_len"
+  printf '  FAIL  context length %d ≥ 1000 (per-turn bloat risk)\n' "$ctx_len"
 fi
 
 echo "Disable flag: HOME-scoped flag file silences the hook"
