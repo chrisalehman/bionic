@@ -133,6 +133,19 @@ That is a scope question — your call.
 EOF
 add_pos decision-your-call 's/your call/my call, and I kept the scope narrow/' "$T"
 
+# Blockquoted PROSE, not blockquoted code. The blockquote marker is stripped
+# when deciding whether a line opens or closes a code block, and this fixture is
+# the guard on that: stripping it must not turn quoted prose into skipped
+# content. Quoting an ask is still asking.
+read -r -d '' T <<'EOF' || true
+Pulling the open thread out of the review so it does not get lost:
+
+> Should we cache the parsed result, or re-read it every time?
+
+Everything else in the review is closed.
+EOF
+add_pos decision-blockquoted-ask 's/Should we cache the parsed result, or re-read it every time?/I cached the parsed result./' "$T"
+
 # Options WITHOUT a question — the enumerated-options signal must stand alone.
 read -r -d '' T <<'EOF' || true
 Three ways to shape the retry policy.
@@ -247,6 +260,88 @@ It exits non-zero on a malformed key instead of defaulting to zero.
 EOF
 add_neg code-only '$a\
 Should we ship it?' "$T"
+
+# The other three code-block forms CommonMark recognises, plus nesting. A
+# stripper that knows only ``` scans the contents of all of them, and the
+# request-shaped comment inside each is what a real turn pastes. One shared
+# payload line (`# can you run this ...`) so the fixtures differ only in the
+# block FORM, which is the thing under test.
+
+read -r -d '' T <<'EOF' || true
+Here is the guard as it now stands, pasted straight from the terminal.
+
+    # can you run this before the first read, or the mtime is unset
+    key=$(printf '%s' "$path" | cksum | cut -d' ' -f1)
+
+It exits non-zero on a malformed key instead of defaulting to zero.
+EOF
+add_neg indented-code '$a\
+Can you confirm this is enough?' "$T"
+
+read -r -d '' T <<'EOF' || true
+Here is the guard as it now stands.
+
+~~~bash
+# can you run this before the first read, or the mtime is unset
+grep -qE 'colou?r' "$path" && echo matched
+~~~
+
+It exits non-zero on a malformed key instead of defaulting to zero.
+EOF
+add_neg tilde-fence '$a\
+Can you confirm this is enough?' "$T"
+
+read -r -d '' T <<'EOF' || true
+The reviewer quoted the guard back at me.
+
+> ```bash
+> # can you run this before the first read, or the mtime is unset
+> grep -qE 'colou?r' "$path" && echo matched
+> ```
+
+Their point was that anchoring to the line start is the whole fix.
+EOF
+add_neg blockquoted-fence '$a\
+Can you confirm this is enough?' "$T"
+
+# Nesting is the case a naive toggle gets exactly backwards: the inner fence
+# flips the flag OFF, so the inner code is SCANNED and the prose around it is
+# SKIPPED. Closing only on a marker of the same char and at least the opening
+# length — the CommonMark rule — is what kills the inversion.
+read -r -d '' T <<'EOF' || true
+Here is the README block, wrapped so the inner fence survives verbatim.
+
+````markdown
+Install the guard, then run it:
+
+```bash
+# can you run this before the first read?
+grep -qE 'colou?r' "$path"
+```
+````
+
+The outer fence is four backticks, so the inner three do not close it.
+EOF
+add_neg nested-fence '$a\
+Can you confirm this is enough?' "$T"
+
+# The other half of the same inversion. The wrapped fragment shows an OPENING
+# fence only, so a toggle is left inverted and every line after the block is
+# skipped — including a real ask. Baseline silence here is not evidence; the
+# MUTATION is, because it fires only if the outer fence actually closed.
+read -r -d '' T <<'EOF' || true
+Here is the README fragment that documents how to open a block.
+
+````markdown
+Start the block like this:
+
+```bash
+````
+
+The fragment is deliberately unbalanced — that is what it documents.
+EOF
+add_neg nested-fence-unbalanced '$a\
+Should we ship it as written, or trim the fragment first?' "$T"
 
 read -r -d '' T <<'EOF' || true
 Why does the cache miss on every second call? Because the key includes a

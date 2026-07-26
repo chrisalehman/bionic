@@ -25,8 +25,13 @@
 #              and the human is named as what it is stopped ON ("paused on your
 #              call", "nothing pending except your ruling")
 #
-# Never "this paragraph feels decision-ish". Fenced code is stripped before
-# matching: a regex holding `?` and a comment holding "you" are not an ask.
+# Never "this paragraph feels decision-ish". Code is stripped before matching —
+# a regex holding `?` and a comment holding "you" are not an ask — in all four
+# forms CommonMark recognises: ``` fences, ~~~ fences, four-space indented
+# blocks, and any of those inside a blockquote. Fence state is a CHARACTER and
+# a LENGTH, not a boolean, so an inner ``` cannot close an outer ````; a plain
+# toggle inverts on nesting and ends up scanning the code while skipping the
+# prose, which is the worst of both directions.
 #
 # Direction is load-bearing and falls out of the phrase forms: "you can run it"
 # is documentation, "can you run it" is a request. Only the second fires. The
@@ -64,7 +69,8 @@ function norm(s,   t) {
   sub(/^ /, "", t); sub(/ $/, "", t)
   return " " t " "
 }
-function reset() { fence = 0; opts = 0; label = 0; num = 0; q = 0; r = 0; b = 0; started = 0 }
+function reset() { fence = ""; flen = 0; fbq = 0; ind = 0; blank = 1
+                   opts = 0; label = 0; num = 0; q = 0; r = 0; b = 0; started = 0 }
 function flush(   sig) {
   if (!started) return
   sig = ""
@@ -129,8 +135,70 @@ BEGIN {
 batch && substr($0, 1, 1) == SOH { flush(); id = substr($0, 2); started = 1; next }
 {
   if (!batch) started = 1
-  if ($0 ~ /^[ \t]*```/) { fence = !fence; next }
-  if (fence) next
+
+  # ── code blocks, all four forms CommonMark recognises ────────────────────
+  # A toggle that knows only ``` scans the contents of the other three, and
+  # gets NESTING exactly backwards: an inner fence flips the flag off, so inner
+  # code is scanned and the prose around it is skipped. Fence state is
+  # therefore a CHARACTER and a LENGTH, not a boolean.
+
+  # A `>` prefix is a blockquote CONTAINER, not content. Strip it before asking
+  # whether the line opens or closes a block, so a quoted block is recognised
+  # as a block. Matching below still runs on the RAW line — quoting an ask is
+  # still asking, and norm() collapses the marker to a space anyway.
+  line = $0
+  inbq = 0
+  while (line ~ /^ ? ? ?>/) { sub(/^ ? ? ?>[ \t]?/, "", line); inbq = 1 }
+
+  # A fence opened inside a blockquote ends where the blockquote does —
+  # CommonMark closes open containers at the end of their parent. Without this,
+  # one unclosed quoted block would swallow every line after it.
+  if (fence != "" && fbq && !inbq) { fence = ""; flen = 0; fbq = 0 }
+
+  if (fence != "") {
+    # Close only on the SAME character, a run at least as long as the opener,
+    # and nothing else on the line. That is the CommonMark rule, and it is
+    # precisely what stops an inner ``` from closing an outer ````.
+    if (match(line, /^ ? ? ?(`+|~+)[ \t]*$/)) {
+      mark = substr(line, RSTART, RLENGTH); sub(/^ +/, "", mark); sub(/[ \t]+$/, "", mark)
+      if (substr(mark, 1, 1) == fence && length(mark) >= flen) {
+        fence = ""; flen = 0; fbq = 0; blank = 1; next
+      }
+    }
+    blank = 0
+    next
+  }
+
+  # An indented code block runs until the first non-blank line indented under
+  # four. Interior blank lines do not end it.
+  if (ind) {
+    if (line ~ /^[ \t]*$/) { blank = 1; next }
+    if (line ~ /^(    |\t)/) { blank = 0; next }
+    ind = 0
+  }
+
+  if (line ~ /^[ \t]*$/) { blank = 1; next }
+
+  # An opening fence: three or more backticks or tildes, indented at most
+  # three. The info string on a backtick fence may not itself contain a
+  # backtick, which is what keeps an inline span from opening a block.
+  if (match(line, /^ ? ? ?(`+|~+)/)) {
+    mark = substr(line, RSTART, RLENGTH); sub(/^ +/, "", mark)
+    if (length(mark) >= 3 && (substr(mark, 1, 1) == "~" || substr(line, RSTART + RLENGTH) !~ /`/)) {
+      fence = substr(mark, 1, 1); flen = length(mark); fbq = inbq; blank = 0; next
+    }
+  }
+
+  # An indented code block OPENS only on a line that follows a blank one —
+  # the CommonMark rule that an indented chunk cannot interrupt a paragraph,
+  # and what keeps wrapped prose and hanging indents out. The residual is
+  # a deliberate trade: a deeply indented list continuation sitting after a
+  # blank line is treated as code and goes unscanned. That is the CHEAP
+  # direction for this detector — a miss costs what today already costs, a
+  # false positive burns a turn.
+  if (blank && line ~ /^(    |\t)/) { ind = 1; blank = 0; next }
+  blank = 0
+
   # Numbered-list items are counted on the RAW line: normalisation spaces out
   # the terminator, so `1.` and a sentence-ending period become the same token.
   if ($0 ~ /^[ \t]*[0-9]+[.)][ \t]/) num++
