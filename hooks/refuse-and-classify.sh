@@ -34,11 +34,58 @@ command -v jq >/dev/null 2>&1 || exit 0
 INPUT=$(cat) || exit 0
 [ -n "$INPUT" ] || exit 0
 
+# Incident 0001: the accrued stream must live where a consuming project cannot
+# commit it, regardless of that project's .gitignore. $HOME-rooted, per-project,
+# durable. Byte-identical to the copies in context-spend.sh,
+# farm-out-reminder.sh, canonical-sdlc-governing-skill.sh and
+# canonical-sdlc-evidence-gate.sh — divergence would give one project two audit
+# directories. Deliberate per-hook duplication (no shared lib).
+audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
+  [ -n "${HOME:-}" ] || return 1
+  local base sum
+  base=$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')
+  sum=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
+  printf '%s/.claude/logs/%s-%s/sdlc-v11-audit.md' "$HOME" "$base" "$sum"
+}
+
+# Decision-quality records go to a SIBLING file in the same per-project
+# directory, not into sdlc-v11-audit.md. The slug logic is shared verbatim so
+# incident 0001 is honoured identically, but the streams stay separate: this one
+# is per-TURN and machine-parsed by W6, while the audit stream is per-STEP and
+# read by humans. Interleaving them would make both harder to use.
+#
+# Failure is silent and total — a hook that refuses to accrue is a lost data
+# point; a hook that errors while accruing is a broken session.
+accrue() {  # $1=fired(0|1) $2=signals $3=extra
+  local dir f
+  PROJECT_DIR="${CLAUDE_PROJECT_DIR:-}"
+  if [ -z "$PROJECT_DIR" ]; then
+    PROJECT_DIR=$(printf '%s' "$INPUT" | jq -r 'if type == "object" then (.cwd // empty) else empty end' 2>/dev/null) || return 0
+  fi
+  [ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR" ] || return 0
+  f=$(audit_path "$PROJECT_DIR") 2>/dev/null || return 0
+  dir=$(dirname "$f")
+  mkdir -p "$dir" 2>/dev/null || return 0
+  # Signals and counts only. Turn text never reaches this file.
+  printf -- '- %s refuse-and-classify: fired=%s signals=%s session=%s%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "${2:--}" "$SESSION_ID" "${3:+ $3}" \
+    >> "$dir/decision-quality.md" 2>/dev/null || return 0
+}
+
+SESSION_ID=$(printf '%s' "$INPUT" | jq -r 'if type == "object" then (.session_id // empty) else empty end' 2>/dev/null) || SESSION_ID=""
+[ -n "$SESSION_ID" ] || SESSION_ID="unknown"
+
 # ── loop safety, before anything else ──────────────────────────────────────
 # On a parse failure the fallback is "active", i.e. do not block. Every
 # ambiguity in this hook resolves toward letting the turn through.
 ACTIVE=$(printf '%s' "$INPUT" | jq -r 'if type == "object" then (.stop_hook_active // false) else true end' 2>/dev/null) || ACTIVE=true
-[ "$ACTIVE" = "false" ] || exit 0
+if [ "$ACTIVE" != "false" ]; then
+  # Recorded as a distinct outcome: a suppressed re-entry is not the same fact
+  # as a turn that had nothing to refuse, and conflating them would make the
+  # accrued rate unreadable.
+  accrue 0 - "suppressed=re-entry"
+  exit 0
+fi
 
 # ── the completed turn's text ──────────────────────────────────────────────
 TURN=$(printf '%s' "$INPUT" | jq -r 'if type == "object" then (.last_assistant_message // empty) else empty end' 2>/dev/null) || TURN=""
@@ -69,7 +116,16 @@ DETECTOR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/request-to-h
 . "$DETECTOR" 2>/dev/null || exit 0
 command -v detect_request_to_human >/dev/null 2>&1 || exit 0
 
-printf '%s' "$TURN" | detect_request_to_human >/dev/null 2>&1 || exit 0
+# Signal names are captured, not discarded: they are what makes the accrued
+# record diagnostic rather than a bare counter.
+if SIGNALS=$(printf '%s' "$TURN" | detect_request_to_human 2>/dev/null); then
+  FIRED=1
+else
+  FIRED=0; SIGNALS=""
+fi
+SIGNALS=$(printf '%s' "$SIGNALS" | tr ' ' ',')
+accrue "$FIRED" "$SIGNALS" ""
+[ "$FIRED" = "1" ] || exit 0
 
 # ── the refusal ────────────────────────────────────────────────────────────
 # Ships near-verbatim from the spec's `### The injected prompt`. Four
