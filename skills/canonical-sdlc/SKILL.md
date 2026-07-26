@@ -62,11 +62,11 @@ Verification in this lifecycle is structured at four levels. Conflating them is 
 - **Gate** = the principle being satisfied. Two gates: **Verify** ("does it work?", Step 5) and **Review** ("is it well-made?", Step 6).
 - **Contract** = the **Verification Matrix** — one row per acceptance criterion, derived at Step 0, locked at Step 3 approval (§Step 0). The Verify gate discharges the matrix row-by-row; nothing is verified "in general," only against a pre-registered row.
 - **Tier** = *how hard the evidence tries to lie*, from browser-verify's **T0–T4 ladder** (T0 static → T1 unit → T2 hermetic → T3 live agent-drive → T4 human walk). browser-verify is the canonical home of the ladder and its "the lie each tier kills" framing — reference it, do not restate it. Each matrix row carries a tier; the **Tier-Discharge Rule** (Step 5) governs how the row is discharged. [UNENFORCED]
-- **Tool** = the instrument for a tier, default → escalation. Browser tiers (T2/T3): `playwright-cli` (default, via `browser-verify`) → escalate to the chrome-devtools MCP (`agent-skills:browser-testing-with-devtools`) **ONLY** for deep inspection the CLI can't do (Lighthouse, perf-trace analysis, heap/CPU profiling, network throttling).
+- **Tool** = the instrument for a tier, default → escalation. Browser tiers (T2/T3): `playwright-cli` (default, via `browser-verify`) → escalate to the chrome-devtools MCP (`agent-skills:browser-testing-with-devtools`) **ONLY** for deep inspection the CLI can't do (Lighthouse, perf-trace analysis, heap/CPU profiling, network throttling). [UNENFORCED]
 
 Review is unchanged in shape: structured 5-axis self-review (**always**) plus an **INDEPENDENT** adversarial critic (**mandatory at `audited` rigor** — into which `incident-response` floors — never self-graded). The Verify-gate **auditor** (present from `peer-reviewed` up) and the Review-gate **critic** (present at `audited`) are distinct: the auditor falsifies the *evidence*, the critic falsifies the *code* (see Steps 5–6). [UNENFORCED]
 
-**Why lower tiers are proxies (the locator model).** Every tier below the live walk tests a proxy, and each reports PASS at its own blind spot: unit tests pass on mocked seams; hermetic tests pass on fixtures that may not match the real data shape; a ref-walk over a bare canvas drives nothing yet "completes"; a screenshot of a degenerate frame satisfies "something rendered." A higher tier exists precisely to kill the lie the tier below cannot see. Mock-green + real-red is not a contradiction but a **locator** — the bug lives in exactly the layer the proxy elides. The matrix pins each AC to the tier that can actually catch its failure, so no AC is discharged by a proxy that structurally cannot reach its bug.
+**Why lower tiers are proxies (the locator model).** Every tier below the live walk tests a proxy, and each reports PASS at its own blind spot: unit tests pass on mocked seams; hermetic tests pass on fixtures that may not match the real data shape; a ref-walk over a bare canvas drives nothing yet "completes"; a screenshot of a degenerate frame satisfies "something rendered." A higher tier exists precisely to kill the lie the tier below cannot see. Mock-green + real-red is not a contradiction but a **locator** — the bug lives in exactly the layer the proxy elides. The matrix pins each AC to the tier that can actually catch its failure, so no AC is discharged by a proxy that structurally cannot reach its bug. [UNENFORCED]
 
 ### Decomposition unit per step
 
@@ -110,7 +110,7 @@ No other work proceeds until the triple is declared. (Step 0 infers the triple s
 | 1 | **epic** | Large body of work spanning multiple sessions. |
 | 2 | **wave** | One-session chunk of an epic. If it doesn't fit, split into more waves. |
 | 3 | **step** | One of the canonical-sdlc steps (0–9) inside a wave. |
-| — | *slice* | *Informal.* An atomic implementation commit inside a wave's Step 4. A wave can have 1 or many slices. Slices don't get their own plan files. |
+| — | *slice* | *Informal.* An atomic implementation commit inside a wave's Step 4. A wave can have 1 or many slices. Slices don't get their own plan files. [UNENFORCED] |
 
 **Scale IS this taxonomy.** The `scale:` axis (§Scale — the decomposition unit) declares which of these units a run occupies: `scale: epic` = tier 1, `scale: wave` = tier 2. The one addition the axis makes is `scale: task` — a sub-session unit *below* a wave (several per session, no per-task plan file), which the tier table above does not name. `step` and `slice` are never `scale:` values — they are the units *inside* a wave, not a declared run size. [FORM: hooks/canonical-sdlc-governing-skill.test.sh]
 
@@ -207,8 +207,8 @@ releases without breaking anything. [UNENFORCED]
 |---|---|---|---|---|
 | **1 · Orchestrator** | main thread — runs Steps 1–3 directly, coordinates 4–9 | **best available** (detected at Step 0): Fable @ **high** → else top Opus @ **xhigh** | Fable 5 high / Opus 4.8 xhigh | the main session (human-set at start; **fixed all wave**) |
 | **2 · Execution-complex** | slices tagged `complex`, root-cause debugging, Step 6 review (5-axis + adversarial critic) | fresh **`model: opus`** | Opus 4.8 | fresh by default; `fork` only when the unit genuinely needs the inherited conversation/context |
-| **3 · Execution-standard** | slices tagged `standard` — well-specified, single-subsystem, tests define done | fresh **`model: sonnet`** | Sonnet 5 | **fresh** (never a fork) |
-| **4 · Explore / mechanical / test** | codebase search, fixtures, mechanical edits, test-writing | fresh **`model: sonnet`** | Sonnet 5 | **fresh** (never a fork) |
+| **3 · Execution-standard** | slices tagged `standard` — well-specified, single-subsystem, tests define done | fresh **`model: sonnet`** | Sonnet 5 | **fresh** (never a fork) [UNENFORCED] |
+| **4 · Explore / mechanical / test** | codebase search, fixtures, mechanical edits, test-writing | fresh **`model: sonnet`** | Sonnet 5 | **fresh** (never a fork) [UNENFORCED] |
 
 **Orchestrator = best available, detected at Step 0.** Orchestrator errors are the most expensive
 tokens in the system — a bad decomposition or wrong plan wastes every subagent it dispatches —
@@ -816,7 +816,7 @@ On accept, write final values into plan frontmatter literally — every flag as 
     - Step 9: (pending)
     ```
 
-    **Task-scale variant (`scale: task`, D12).** A task-scale session addresses a ledger TASK, not a numbered step: the plan additionally carries a `## Tasks` registration table, and `## SDLC State` opens with `current: T<n>` and one `- T<n>: <evidence>` line per task. Frontmatter `intent:`/`rigor:` are session defaults; ledger cells may raise a task's rigor above the default — lowering it below the default is a downgrade requiring a `waiver:` marker on the task's evidence line. When a task is executed by a dispatched subagent, ledger-writing stays with the dispatching orchestrator (§Task Tracking). The evidence-gate hook enforces this ledger as **BLOCKING**, rigor-keyed to each row's own effective rigor (§Evidence — v11 shape table). (In the sample below the `## SDLC State` heading is indented one space — a copy-paste guard so a fence-blind SDLC-State extractor in any doc that quotes this skeleton cannot match a real section; **real task-scale plans use no indent**.)
+    **Task-scale variant (`scale: task`, D12).** A task-scale session addresses a ledger TASK, not a numbered step: the plan additionally carries a `## Tasks` registration table, and `## SDLC State` opens with `current: T<n>` and one `- T<n>: <evidence>` line per task. Frontmatter `intent:`/`rigor:` are session defaults; ledger cells may raise a task's rigor above the default — lowering it below the default is a downgrade requiring a `waiver:` marker on the task's evidence line. When a task is executed by a dispatched subagent, ledger-writing stays with the dispatching orchestrator (§Task Tracking). The evidence-gate hook enforces this ledger as **BLOCKING**, rigor-keyed to each row's own effective rigor (§Evidence — v11 shape table). [WALL: hooks/canonical-sdlc-evidence-gate.test.sh] (In the sample below the `## SDLC State` heading is indented one space — a copy-paste guard so a fence-blind SDLC-State extractor in any doc that quotes this skeleton cannot match a real section; **real task-scale plans use no indent**.)
 
     ```
     ## Tasks
@@ -858,7 +858,7 @@ This is the "walk away" boundary. After the plan is complete, present a summary 
 
 **Wave shape locks at approval.** Once the user approves the Step 3 plan, wave scope is locked. Mid-wave discoveries (architectural gaps, related bugs, audit findings) get logged to `## Assumptions` as W+1 candidates — they do NOT reshape the current wave. [UNENFORCED]
 
-- **Exception 1:** if the discovery makes the current wave structurally impossible, surface as a Wake Note and halt. The response is "this wave cannot ship," not "ship a different wave."
+- **Exception 1:** if the discovery makes the current wave structurally impossible, surface as a Wake Note and halt. The response is "this wave cannot ship," not "ship a different wave." [UNENFORCED]
 - **Exception 2:** trivial corrections (one-line typo fix in a touched file) ship inline.
 - **Step 6 Review's adversarial critic checks** for mid-wave scope drift not justified by an `## Assumptions` row.
 
@@ -904,7 +904,7 @@ This replaces the old suite-credit escape: a green suite (T1) can never stand in
 
 **T4 discharge.** A T4 row is discharged by recorded user confirmation — `user-confirmed: <user> <date> <what was walked>` [FORM: hooks/canonical-sdlc-evidence-gate.test.sh]. Agents never self-confirm a T4 row. [UNENFORCED]
 
-**False-green rule (structured).** On discovering any test that passed over broken code, the gate cannot close until (1) the finding is logged as a `false-green: <test — what it lied about>` entry in the matrix section AND (2) it carries a paired `rewritten: <commit/test ref>` proving the test now goes RED on the broken code. A logged-but-unfixed false-green is a blocking defect (hook-enforced).
+**False-green rule (structured).** On discovering any test that passed over broken code, the gate cannot close until (1) the finding is logged as a `false-green: <test — what it lied about>` entry in the matrix section AND (2) it carries a paired `rewritten: <commit/test ref>` proving the test now goes RED on the broken code. A logged-but-unfixed false-green is a blocking defect (hook-enforced). [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 
 **Vocabulary rule.** Say "delivered/fixed/verified" only at the row's contracted tier. Below tier, the only honest phrasing is "implemented, verification pending."
 
@@ -1210,7 +1210,7 @@ Two `PreToolUse` hooks enforce the contract (full mechanism in the README):
 
 ## Subagent Dispatch Convention
 
-Every subagent is dispatched through an **installed role** — `subagent_type: implementor | senior-implementor | researcher | auditor | critic | test-runner` — and its prompt carries only the **five run-specific variables the role file cannot know** (items 1–5). The invariant 90% — duties, mandates, and model/effort defaults — lives in the role file, installed from the bionic repo's `agents/` dir to `~/.claude/agents/` by bootstrap; the dispatch prompt no longer re-types it. Items 6–10 are the dispatch-time obligations layered on the variables:
+Every subagent is dispatched through an **installed role** — `subagent_type: implementor | senior-implementor | researcher | auditor | critic | test-runner` — and its prompt carries only the **five run-specific variables the role file cannot know** (items 1–5). The invariant 90% — duties, mandates, and model/effort defaults — lives in the role file, installed from the bionic repo's `agents/` dir to `~/.claude/agents/` by bootstrap; the dispatch prompt no longer re-types it. [UNENFORCED] Items 6–10 are the dispatch-time obligations layered on the variables:
 
 1. **Current step** — number, name, sub-skill invoked.
 2. **Triple** — the declared `<intent> · <rigor> · <scale>`.
@@ -1229,7 +1229,7 @@ Every subagent is dispatched through an **installed role** — `subagent_type: i
 
 Dispatch **critical-path** work **synchronously** (`run_in_background: false`): an orchestrator with nothing else to do should block on the dispatched agent rather than poll it. Reserve **background** dispatch for genuinely off-critical-path work the orchestrator can overlap with other progress. Either way, point 4's named output artifact is what makes a finished-but-silent agent cheap to check.
 
-This prevents subagent wander.
+This prevents subagent wander. [UNENFORCED]
 
 ## Escalation Protocol
 
@@ -1313,8 +1313,8 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 - Skipping the TaskCreate list or batching task completions at the end.
 - Single-threading a step where 2+ subtasks are clearly independent.
 - Closing Step 5 without an independent auditor report.
-- A self-written `n/a` on a live-tier (T3/T4) matrix row (that is a Waiver Protocol decision, the user's call).
-- A RED fixture that cannot structurally reach the failure it guards (a proxy regardless of RED→GREEN history).
+- A self-written `n/a` on a live-tier (T3/T4) matrix row (that is a Waiver Protocol decision, the user's call). [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
+- A RED fixture that cannot structurally reach the failure it guards (a proxy regardless of RED→GREEN history). [UNENFORCED]
 - Claiming "delivered/fixed/verified" below the row's contracted tier.
 
 ## Quick Reference
