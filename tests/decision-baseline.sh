@@ -29,9 +29,12 @@
 #   ac3_agreement_pct  of the turns the user actually corrected, the share the
 #                      detector fires on. THE FALSIFIER. The threshold is
 #                      pre-registered in the plan's `## Assumptions` and this
-#                      script reads it from there rather than hardcoding it —
-#                      a threshold moved to fit a result must show up as a diff
-#                      in the plan, where it is reviewable.
+#                      script reads it from there rather than hardcoding it.
+#                      The plan is UNTRACKED (.bionic/ is gitignored), so a
+#                      threshold moved there produces no diff, in either
+#                      direction — the guard against silent tuning is the pin
+#                      asserted in tests/decision-baseline.test.sh
+#                      (`ac3_threshold_pct=70`), not git history on the plan.
 #   uncorrected_fire_pct  fire rate on turns the user did NOT correct. An UPPER
 #                      BOUND on false positives, not the false-positive rate: a
 #                      well-framed ask the user simply answered fires
@@ -165,14 +168,17 @@ $(awk -v corrf="$TMP/corrected" -v fpf="$TMP/fingerprints" '
 ' "$TMP/corrected" "$TMP/fingerprints" "$TMP/verdicts")
 EOF
 
-# The pre-registered threshold, read from the plan so that moving it is a
-# reviewable diff and not a silent edit to this script.
+# The pre-registered threshold, read from the plan at runtime. The plan is
+# untracked (.bionic/ is gitignored), so moving it produces no diff there to
+# review — the guard against silent tuning is the pin asserted in
+# tests/decision-baseline.test.sh (`ac3_threshold_pct=70`), not git history.
 THRESHOLD=$(awk '
   /agreement threshold/ && match($0, /[0-9]+%/) { print substr($0, RSTART, RLENGTH - 1); exit }
 ' "$PLAN" 2>/dev/null)
 case "$THRESHOLD" in ''|*[!0-9]*) THRESHOLD="" ;; esac
 
 AGREE=$(pct "$CTD" "$CT")
+AGREE_DEDUP=$(pct "$DCTD" "$DCT")
 
 emit decision.transcripts            "$FILES"       count
 emit decision.turns                  "$TURNS"       count
@@ -190,7 +196,7 @@ emit decision.ac3_threshold_pct        "${THRESHOLD:-n/a}" pct
 # ALONGSIDE the pre-registered number, never instead of it — the pre-registered
 # metric is the one the threshold was written against.
 emit decision.corrected_turns_distinct "$DCT"       count
-emit decision.ac3_agreement_dedup_pct  "$(pct "$DCTD" "$DCT")" pct
+emit decision.ac3_agreement_dedup_pct  "$AGREE_DEDUP" pct
 emit decision.uncorrected_turns        "$UNC"       count
 emit decision.uncorrected_fire_pct     "$(pct "$UNCF" "$UNC")" pct
 
@@ -198,10 +204,14 @@ emit decision.uncorrected_fire_pct     "$(pct "$UNCF" "$UNC")" pct
 # valid, valuable result that triggers a re-plan. A non-zero exit here would
 # invite someone to tune the detector until the script goes green, which is the
 # exact defect this wave exists to prevent.
-if [ -z "$THRESHOLD" ] || [ "$AGREE" = "n/a" ]; then
+#
+# Computed from the DE-DUPLICATED rate, not the raw one: the user ruled the
+# de-duplicated reading governs the gate, since a stock sentence emitted a
+# dozen times must not carry the verdict on its own repetition.
+if [ -z "$THRESHOLD" ] || [ "$AGREE_DEDUP" = "n/a" ]; then
   emit decision.ac3_verdict n/a verdict
 else
   emit decision.ac3_verdict \
-    "$(awk -v a="$AGREE" -v t="$THRESHOLD" 'BEGIN { print (a + 0 >= t + 0) ? "pass" : "BELOW-THRESHOLD" }')" \
+    "$(awk -v a="$AGREE_DEDUP" -v t="$THRESHOLD" 'BEGIN { print (a + 0 >= t + 0) ? "pass" : "BELOW-THRESHOLD" }')" \
     verdict
 fi
