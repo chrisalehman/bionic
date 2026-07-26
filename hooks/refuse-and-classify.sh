@@ -78,12 +78,10 @@ printf '%s' "$TURN" | detect_request_to_human >/dev/null 2>&1 || exit 0
 # and the ACTION/DECISION REQUIRED label plus the Consequence line. The paired
 # test extracts this prompt from the spec at run time and fails on drift.
 #
-# The spec states the reframe body as a placeholder — "the user's reframe
-# prompt, verbatim". It is expanded here from the repo's own
-# `## User Decision Protocol` (skills/canonical-sdlc/SKILL.md): highest useful
-# level of abstraction, 2-3 numbered options with a one-line rationale each, a
-# marked recommendation, and one sentence of significance. Wording is a USER
-# decision — change it there, not here.
+# The reframe body is the USER's own text, carried literally by the spec. It is
+# not paraphrasable and not an implementer's to tune: an earlier spec revision
+# described it with a placeholder, which made "ship it verbatim" unexecutable.
+# Change it in the spec, never here — the paired test asserts the two are equal.
 read -r -d '' REASON <<'PROMPT'
 Before asking me for anything, classify what you need.
 
@@ -91,7 +89,11 @@ Before asking me for anything, classify what you need.
 
 **A decision?** Check whether standing principles auto-resolve it: most elegant over expedient, simple over complex, right level over brute force, lower operational burden over higher. If they do — decide, proceed, and tell me the call in one line.
 
-Only if it survives both: label it `ACTION REQUIRED` or `DECISION REQUIRED`, then `### DECISION REFRAME ###` — frame the decision at the highest useful level of abstraction in plain language, represent the problem space at the abstraction level best suited to maximize the quality of the decision, offer up to three numbered options with a one-line rationale each and mark your recommendation, and state the significance in one sentence: what downstream decisions, costs, or constraints compound from it. Close with **Consequence** — what each option triggers, one line each, so I know what I am setting in motion before I answer.
+Only if it survives both: label it `ACTION REQUIRED` or `DECISION REQUIRED`, then:
+
+`### DECISION REFRAME ###` Reframe the decision(s) at a higher conceptual level in plain language. Represent the problem space at the abstraction level best suited to maximize the quality of the decision. What are the numbered options, your recommendation(s), and the accompanying rationale? Include significance of the decision(s), downstream and compounding impacts. Be as concise as possible.
+
+Close with **Consequence** — what each option triggers, one line each, so I know what I am setting in motion before I answer.
 PROMPT
 
 jq -nc --arg r "$REASON" '{decision: "block", reason: $r}' 2>/dev/null || exit 0
