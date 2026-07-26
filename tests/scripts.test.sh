@@ -729,12 +729,18 @@ for hook in "${REPO}/hooks/"*.sh; do
 done
 expect_true "hooks/ contains at least one non-test hook" [ "$_hook_count" -gt 0 ]
 
-# 4p: evidence-gate hook reads evidence_schema and supports v2 path
+# 4p: both canonical-sdlc hooks pin exactly one supported version and neither
+# carries a version-dispatch chain.
 _egate="${REPO}/hooks/canonical-sdlc-evidence-gate.sh"
-expect_true "evidence-gate hook reads evidence_schema from frontmatter" \
-  grep -q 'evidence_schema' "$_egate"
-expect_true "evidence-gate hook references the v2 schema literal" \
-  grep -qE '"v2"|EVIDENCE_SCHEMA[[:space:]]*=' "$_egate"
+_gskill="${REPO}/hooks/canonical-sdlc-governing-skill.sh"
+expect_true "evidence-gate hook pins SUPPORTED_SDLC_VERSION" \
+  grep -q 'SUPPORTED_SDLC_VERSION=12' "$_egate"
+expect_true "governing-skill hook pins SUPPORTED_SDLC_VERSION" \
+  grep -q 'SUPPORTED_SDLC_VERSION=12' "$_gskill"
+expect_false "evidence-gate hook has no version-dispatch chain" \
+  grep -qE 'SDLC_VERSION"?[[:space:]]*=[[:space:]]*"(1|2|3|4|5|6|7|8|9|10|11)"' "$_egate"
+expect_false "governing-skill hook has no version-dispatch chain" \
+  grep -qE 'SDLC_VERSION"?[[:space:]]*=[[:space:]]*"(1|2|3|4|5|6|7|8|9|10|11)"' "$_gskill"
 
 # 4r: README promotes canonical-sdlc as flagship (Wave 6 closure; Wave 7 repointed link)
 expect_true "README has a Canonical SDLC pattern subsection" \

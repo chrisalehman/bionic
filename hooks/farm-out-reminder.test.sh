@@ -31,7 +31,7 @@ setup() {  # fresh sandbox project per case
 # Slug must match hooks/farm-out-reminder.sh audit_path() byte for byte.
 slug_for() { printf '%s-%s' "$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')" \
                             "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"; }
-audit_file() { printf '%s/.claude/logs/%s/sdlc-v11-audit.md' "$FAKE_HOME" "$(slug_for "$SANDBOX")"; }
+audit_file() { printf '%s/.claude/logs/%s/sdlc-audit.md' "$FAKE_HOME" "$(slug_for "$SANDBOX")"; }
 
 stdin_for() {  # $1=command $2=agent_type ("" = main thread) $3=session_id (default s-fixture)
   local at="" sid="${3:-s-fixture}"
@@ -744,7 +744,7 @@ sec3() {
   setup
   run_hook "$(stdin_for 'bash tests/run.sh' '')"
   assert_audit_has "SEC3 line at relocated path" "farm-out deny: class=suite"
-  [ -z "$(find "$SANDBOX" -name 'sdlc-v11-audit.md' 2>/dev/null)" ] \
+  [ -z "$(find "$SANDBOX" -name 'sdlc-audit.md' 2>/dev/null)" ] \
     && pass || fail "SEC3 no audit file anywhere under the project tree"
 }
 sec3
@@ -757,7 +757,7 @@ sec4() {
   run_hook "$(stdin_for 'bash tests/run.sh' '')"
   assert_exit0 "SEC4 hook still exits 0"
   assert_deny  "SEC4 enforcement unaffected"
-  [ -z "$(find "$SANDBOX" -name 'sdlc-v11-audit.md' 2>/dev/null)" ] \
+  [ -z "$(find "$SANDBOX" -name 'sdlc-audit.md' 2>/dev/null)" ] \
     && pass || fail "SEC4 no fallback into the project tree"
   chmod u+w "$FAKE_HOME" 2>/dev/null
 }
@@ -790,7 +790,7 @@ sec5b() {
     assert_audit_has "SEC5b audit line under $(basename "$(dirname "$p")")/myproj" \
       "farm-out deny: class=suite"
   done
-  [ "$(find "$FAKE_HOME" -name 'sdlc-v11-audit.md' 2>/dev/null | wc -l | tr -d ' ')" -eq 2 ] \
+  [ "$(find "$FAKE_HOME" -name 'sdlc-audit.md' 2>/dev/null | wc -l | tr -d ' ')" -eq 2 ] \
     && pass || fail "SEC5b same-basename projects must not share one audit file"
 }
 sec5b

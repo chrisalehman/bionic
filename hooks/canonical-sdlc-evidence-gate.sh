@@ -5,18 +5,13 @@
 # Convention: the plan file contains a section like:
 #
 #   ## SDLC State
-#   mode: overnight
 #   integration-branch: main
 #   current: 5
 #   Step 1: /path/or/link
 #   Step 2: /path/to/spec.md
-#   Step 3: docs/bionic/plans/epic-NN-<slug>/wave-NN-<slug>.plan.md
+#   Step 3: .bionic/docs/plans/epic-NN-<slug>/wave-NN-<slug>.plan.md
 #   Step 4: git worktree at /path, base SHA abc123
 #   Step 5: tests passing, commit abc123
-#
-# The hook also accepts `Phase N:` lines for backward compatibility with
-# in-flight plans written under the prior "phase" vocabulary. Both forms
-# are parsed; new plans should use `Step N:`.
 #
 # If the current step's line is empty or a placeholder (TODO, pending,
 # in progress, XXX, TBD, placeholder), block the commit. The rule is:
@@ -162,9 +157,8 @@ if [ -z "$(normalize_newlines "$PLAN" | awk '
 fi
 
 # Extract YAML frontmatter (between first two `---` lines at column 0)
-# if the plan has any. Used to read `evidence_schema` and `deploy_target`
-# for v2 shape enforcement; absent on legacy plans, in which case the
-# hook reverts to presence-only behavior.
+# if the plan has any. Used to read the version marker, the triple, and the
+# discriminator flags the checks below key off.
 #
 # CRLF/CR-only plans would otherwise defeat the exact-match `$0=="---"`
 # comparison ("---\r" != "---"), so line endings are normalized to \n before
@@ -182,7 +176,6 @@ frontmatter_get() {
     | sed -E "s/^['\"]//;s/['\"]\$//"
 }
 
-EVIDENCE_SCHEMA=$(frontmatter_get evidence_schema)
 DEPLOY_TARGET=$(frontmatter_get deploy_target)
 SDLC_VERSION=$(frontmatter_get canonical_sdlc_version)
 USE_WORKTREE=$(frontmatter_get use_worktree)
@@ -191,13 +184,27 @@ INTENT=$(frontmatter_get intent)
 RIGOR=$(frontmatter_get rigor)
 MULTI_AGENT=$(frontmatter_get multi_agent)
 
+# ONE supported version. Anything else — an older number, a typo, an empty
+# value, garbage — blocks. Symmetric with the governing-skill hook. There is
+# no version dispatch anywhere below this line, so there is also no path that
+# reaches `exit 0` by matching no arm.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
+SUPPORTED_SDLC_VERSION=12
+
+if [ "$SDLC_VERSION" != "$SUPPORTED_SDLC_VERSION" ]; then
+  echo "BLOCKED: canonical-sdlc evidence-gate: plan declares canonical_sdlc_version: '$SDLC_VERSION'." >&2
+  echo "Plan: $PLAN" >&2
+  echo "Fix: set 'canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION}' — the only supported version." >&2
+  exit 2
+fi
+
 # Whole-value placeholder test: trim leading/trailing whitespace, lowercase,
 # then require whole-value EQUALITY against the known token set. A token that
 # merely appears as a substring of a longer value ("resolved TODOs",
 # "*.example placeholders", "status pending → done") is legal evidence.
 # "in progress" and its whitespace-free "inprogress" are both listed so
 # either spelling of the value matches. Defined here (ahead of the Step-line
-# checks) so the v11 task-ledger validator, which runs before them, can reuse it.
+# checks) so the task-ledger validator, which runs before them, can reuse it.
 is_placeholder_value() {
   local v
   v=$(printf '%s' "$1" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' | tr '[:upper:]' '[:lower:]')
@@ -240,10 +247,10 @@ audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
   local base sum
   base=$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')
   sum=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
-  printf '%s/.claude/logs/%s-%s/sdlc-v11-audit.md' "$HOME" "$base" "$sum"
+  printf '%s/.claude/logs/%s-%s/sdlc-audit.md' "$HOME" "$base" "$sum"
 }
 
-# v11 log-only finding channel (D14): append one line to the durable audit file
+# Log-only finding channel (D14): append one line to the durable audit file
 # AND echo to stderr, then return 0 — floor/ledger/merge-target findings never
 # block this wave. Twin of the governing-skill hook's helper (hook name differs:
 # `evidence-gate`). mkdir + append are fail-open. audit_root() still selects
@@ -258,7 +265,7 @@ log_finding() {  # $1=check-id  $2=detail
     local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) evidence-gate $1: $2 ($PLAN)"
     mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$line" >> "$f" 2>/dev/null
   fi
-  echo "canonical-sdlc v11 [$1]: $2" >&2
+  echo "canonical-sdlc [$1]: $2" >&2
   return 0
 }
 
@@ -324,7 +331,7 @@ is_proof_shaped() {  # $1 = evidence value
   return 1
 }
 
-# v11 rigor-keyed evidence lanes (D-slice 4/2, TASK SCALE ONLY). Applies to
+# Rigor-keyed evidence lanes (D-slice 4/2, TASK SCALE ONLY). Applies to
 # the addressed row (any status) and to every OTHER row with status `done`
 # that has a non-empty, non-placeholder evidence line — the caller only
 # invokes this once those upstream 4/1 presence/placeholder checks (and, for
@@ -374,7 +381,7 @@ apply_rigor_lanes() {  # $1=id $2=status $3=effective-rigor $4=evidence-value
 }
 
 # Per-row rigor FLOOR check (slice 4/8, A15 — user-ratified, momentous). The
-# per-row `rigor` cell is a FLOOR unified with v11's run-rigor floor model: a
+# per-row `rigor` cell is a FLOOR unified with the run-rigor floor model: a
 # cell RAISING a row above the frontmatter rigor is always allowed (the cell
 # drives the heavier lane, 4/4), but a cell LOWERING it below the frontmatter
 # rigor is a DOWNGRADE — a recorded decision, never silent. A downgrade BLOCKS
@@ -425,7 +432,7 @@ ledger_shape_fail() {  # $1 = detail
   log_finding task-ledger "$1"
 }
 
-# v11 task-scale ledger validation (D12). Reads the `## Tasks` registration
+# Task-scale ledger validation (D12). Reads the `## Tasks` registration
 # table (fence-aware, the matrix_section idiom) and the per-task `- T<n>:`
 # evidence lines in the ## SDLC State section (SECTION, already newline-normalized).
 #
@@ -462,7 +469,7 @@ validate_task_ledger() {
     /^## / { f=0 }
     f')
   if [ -z "$tasks" ]; then
-    ledger_shape_fail "v11 task-scale plan has no '## Tasks' registration section"
+    ledger_shape_fail "task-scale plan has no '## Tasks' registration section"
     return 0
   fi
   rows=$(echo "$tasks" | grep -E '^[[:space:]]*\|[[:space:]]*T[0-9]+')
@@ -596,15 +603,14 @@ CURRENT=$(echo "$SECTION" \
           | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
           | tr -d '[:space:]')
 
-# v11 task-scale plans address a ledger TASK, not a numbered step:
+# Task-scale plans address a ledger TASK, not a numbered step:
 # `current: T<n>` with evidence on `- T<n>:` lines (no `Step N:` line). Validate
 # the ledger (log-only, D12/D14) and allow the commit — the task pointer is
 # structurally valid, so a false block here would be a defect (R4.3). A
-# `current: T<n>` on a v≤10 plan or a non-task v11 plan is NOT accepted here; it
-# falls through to the numeric check below and blocks (T-format is v11 + scale:task
-# only, never retrofitted).
+# `current: T<n>` on a non-task plan is NOT accepted here; it falls through to
+# the numeric check below and blocks (T-format is scale: task only).
 # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
-if echo "$CURRENT" | grep -qE '^T[0-9]+$' && [ "$SDLC_VERSION" = "11" ] && [ "$SCALE" = "task" ]; then
+if echo "$CURRENT" | grep -qE '^T[0-9]+$' && [ "$SCALE" = "task" ]; then
   validate_task_ledger
   exit 0
 fi
@@ -616,13 +622,11 @@ if [ -z "$CURRENT" ] || ! echo "$CURRENT" | grep -qE '^[0-9]+[ab]?$'; then
   exit 2
 fi
 
-# Find the evidence line for the current step. Accepts both "Step N:"
-# (current vocabulary) and "Phase N:" (legacy plans), with or without a
-# leading list marker. New plans should use "Step"; "Phase" is retained
-# for backward compatibility.
+# Find the evidence line for the current step: a "Step N:" line, with or
+# without a leading list marker.
 # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 LINE=$(echo "$SECTION" \
-       | grep -E "^[[:space:]]*-?[[:space:]]*(Step|Phase)[[:space:]]+${CURRENT}[[:space:]]*:" \
+       | grep -E "^[[:space:]]*-?[[:space:]]*Step[[:space:]]+${CURRENT}[[:space:]]*:" \
        | head -1)
 
 if [ -z "$LINE" ]; then
@@ -632,20 +636,19 @@ if [ -z "$LINE" ]; then
   exit 2
 fi
 
-RAW_VALUE=$(echo "$LINE" | sed -E "s/^[[:space:]]*-?[[:space:]]*(Step|Phase)[[:space:]]+${CURRENT}[[:space:]]*:[[:space:]]*//")
+RAW_VALUE=$(echo "$LINE" | sed -E "s/^[[:space:]]*-?[[:space:]]*Step[[:space:]]+${CURRENT}[[:space:]]*:[[:space:]]*//")
 
-# v2 multi-line form: when the Step line has no inline content, evidence
-# may live on indented continuation lines below. Collect them so the
-# rest of the hook treats `Step N:\n  field: value\n  ...` as non-empty
-# evidence.
+# Multi-line form: when the Step line has no inline content, evidence lives on
+# indented continuation lines below. Collect them so the rest of the hook treats
+# `Step N:\n  field: value\n  ...` as non-empty evidence.
 extract_continuation() {
   local section="$1" step="$2"
   local sline
-  sline=$(echo "$section" | grep -nE "^[[:space:]]*-?[[:space:]]*(Step|Phase)[[:space:]]+${step}[[:space:]]*:" | head -1 | cut -d: -f1)
+  sline=$(echo "$section" | grep -nE "^[[:space:]]*-?[[:space:]]*Step[[:space:]]+${step}[[:space:]]*:" | head -1 | cut -d: -f1)
   [ -z "$sline" ] && return
   echo "$section" | awk -v start="$sline" '
     NR > start {
-      if ($0 ~ /^[[:space:]]*-?[[:space:]]*(Step|Phase)[[:space:]]+[0-9]+[ab]?[[:space:]]*:/) exit
+      if ($0 ~ /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+[0-9]+[ab]?[[:space:]]*:/) exit
       if ($0 ~ /^[^[:space:]]/) exit
       if ($0 ~ /^[[:space:]]*$/) next
       print $0
@@ -671,13 +674,10 @@ if [ -z "$BLOCK_STRIPPED" ]; then
   exit 2
 fi
 
-# R7 intent-scoped Step-5 keys (v11, D14 log-only — see validate_intent_evidence
-# below). A whole-value match against this exact key name exempts the line
-# from the universal placeholder ban ONLY on v11 plans; the R7 contract is
-# enforced instead by validate_intent_evidence, which logs a finding but never
-# blocks. v≤10 plans are never exempted (grandfathered) — a stray line that
-# happens to share one of these key names still blocks there, byte-identical
-# to pre-R7 behavior.
+# R7 intent-scoped Step-5 keys (D14 log-only — see validate_intent_evidence
+# below). A whole-value match against this exact key name exempts the line from
+# the universal placeholder ban; the R7 contract is enforced instead by
+# validate_intent_evidence, which logs a finding but never blocks.
 # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 is_r7_key() {
   case "$1" in
@@ -693,7 +693,7 @@ is_r7_key() {
 # on colon lines and the unchanged line otherwise.
 while IFS= read -r _bline; do
   _bkey=$(printf '%s' "$_bline" | sed -E 's/^[[:space:]]*//; s/[[:space:]]*:.*$//')
-  if [ "$SDLC_VERSION" = "11" ] && is_r7_key "$_bkey"; then
+  if is_r7_key "$_bkey"; then
     continue
   fi
   if is_placeholder_value "${_bline#*:}"; then
@@ -704,126 +704,15 @@ while IFS= read -r _bline; do
   fi
 done <<< "$BLOCK"
 
-# ---------- shape validation (v2 evidence_schema or v3 plans) ----------
-# Legacy plans (no evidence_schema, no v3 marker) stop here — presence
-# + placeholder check is the full contract.
-#
-# v3 plans (canonical_sdlc_version: 3) use a renumbered shape switch:
-#   - Step 4 (Implement) — pointer step, optionally worktree fields when use_worktree=true
-#   - Step 5 (Browser verify) — devtools-trace OR n/a
-#   - Step 6 (Verify done) — cmd/pass/total/output
-#   - Step 7 (Self-review) — pointer step
-#   - Step 8 (Adversarial critic) — pointer step
-#   - Step 9 (Document) — adr OR rca OR n/a
-#   - Step 10 (Commit) — commit/subject/files
-#   - Step 11 (External review) — pr OR n/a
-#   - Step 12 (Finish branch) — merge/worktree-removed
-#   - Step 13 (Post-merge cleanup) — cleanup/tmp-wiped/tasks-completed OR n/a
-#   - Step 14 (Ship) — deploy/verified-at/monitor OR n/a
-#
-# v2 plans (canonical_sdlc_version: 2 or evidence_schema: v2) use the
-# original shape switch with old step numbers including Step 4
-# (worktree) and Step 8b (adversarial critic).
 
-# v4 uses the same per-step evidence shape table as v3 — the v4 bump added
-# a required `model_plan` frontmatter field (enforced by the governing-skill
-# hook), which changes no per-step evidence shape.
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
-#
-# v5 (gate-collapse) renumbers and merges steps, so it has its own shape
-# switch:
-#   - Step 5 (Verify gate) — cmd/pass/total/output (tests modality, pass==total)
-#     AND devtools-trace OR n/a (browser modality)
-#   - Step 6 (Review gate) — pointer step
-#   - Step 7 (Document) — adr OR rca OR n/a   (was v3 Step 9)
-#   - Step 8 (External review) — pr OR n/a    (was v3 Step 11)
-#   - Step 9 (Integrate & close) — merge/worktree-removed AND cleanup triple
-#     OR cleanup: n/a   (merge of v3 Steps 12 + 13)
-#   - Step 10 (Ship) — deploy/verified-at/monitor OR n/a   (was v3 Step 14)
-#   Commit is a cross-cutting rhythm, not a numbered step (no Step 10 commit shape).
-#
-# v6 removes the external-review step entirely, so it has its own shape
-# switch — identical to v5 except Step 8 (External review) is gone and
-# the tail renumbers:
-#   - Steps 5, 6, 7 — same shapes as v5
-#   - Step 8 (Integrate & close) — merge/worktree-removed AND cleanup triple
-#     OR cleanup: n/a   (was v5 Step 9)
-#   - Step 9 (Ship) — deploy/verified-at/monitor OR n/a   (was v5 Step 10)
-#   Commit remains a cross-cutting rhythm, not a numbered step.
-#
-# v7 is the v6 shape table plus ONE addition: Step 5 (Verify)
-# additionally requires a `bundle-fresh:` key — the pasted output of the
-# project's bundle-freshness proof (proves the served artifact reflects
-# the working tree before any live observation is used as evidence), or
-# `bundle-fresh: n/a: <reason>`. Universal with an n/a escape, exactly
-# like `devtools-trace:` — "not applicable" is an explicit recorded
-# decision, never a silent omission. The proof format is
-# project-specific by design; the hook validates presence, non-empty
-# value / non-empty n/a reason, and the existing placeholder ban only.
+# A pointer step records a link/path (not shaped fields); having passed the
+# presence + placeholder checks above, it needs no shape check, so allow the
+# commit. Step 4 is the exception: when use_worktree=true it carries worktree
+# fields and must fall through to the shape check below.
 # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
-#
-# v8 is the v7 shape table plus ONE addition: Step 5 (Verify)
-# additionally requires a `drive-check:` key — proof that one trusted
-# interaction changed app state, read back semantically (not via pixels),
-# before browser-modality evidence counts. Forms: an observed state delta,
-# `drive-check: suite: <named test — what it asserts>` (suite-credit only via a named test
-# making the same real contact), or `drive-check: n/a: <reason>`. Universal
-# with an n/a escape, grandfathered like every prior key — the hook
-# validates presence, non-empty value / non-empty n/a reason, and the
-# existing placeholder ban only; the suite-credit semantics live in
-# SKILL.md prose. v7 and earlier plans are never retrofitted.
-# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
-#
-# v9 (current) = v8 + Step-5 stack-health: ONE more universal key,
-# `stack-health: <before/after snapshot, no delta>` or
-# `stack-health: n/a: <reason>` — a runtime-integrity sibling of
-# bundle-fresh (artifact) and drive-check (contact): a crash-restart
-# mid-walk can swallow the bug being probed while the app returns
-# looking healthy. Same contract as its siblings: presence, non-empty
-# value / non-empty n/a reason, existing placeholder ban. v8 and earlier
-# plans are never retrofitted.
-# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
-if [ "$SDLC_VERSION" = "11" ]; then
-  # v11 wave/epic-scale plans carry the v10 shape (task-scale plans exited
-  # above via validate_task_ledger). The v11 arm reuses v10's validators.
-  SHAPE_MODE="v11"
-elif [ "$SDLC_VERSION" = "10" ]; then
-  SHAPE_MODE="v10"
-elif [ "$SDLC_VERSION" = "9" ]; then
-  SHAPE_MODE="v9"
-elif [ "$SDLC_VERSION" = "8" ]; then
-  SHAPE_MODE="v8"
-elif [ "$SDLC_VERSION" = "7" ]; then
-  SHAPE_MODE="v7"
-elif [ "$SDLC_VERSION" = "6" ]; then
-  SHAPE_MODE="v6"
-elif [ "$SDLC_VERSION" = "5" ]; then
-  SHAPE_MODE="v5"
-elif [ "$SDLC_VERSION" = "3" ] || [ "$SDLC_VERSION" = "4" ]; then
-  SHAPE_MODE="v3"
-elif [ "$EVIDENCE_SCHEMA" = "v2" ]; then
-  SHAPE_MODE="v2"
-else
-  exit 0
-fi
+POINTER_STEPS="1 2 3 4"  # Step 6 must reach dispatch for the matrix prefix check
 
-# Pointer steps differ between schema versions due to renumbering. A pointer
-# step records a link/path (not shaped fields); having passed the presence +
-# placeholder checks above, it needs no shape check, so allow the commit.
-# Step 4 is the exception: when use_worktree=true it carries worktree fields
-# and must fall through to the shape check below. v2 lists Step 4 nowhere
-# here, so v2 always shape-checks Step 4 (unchanged from before).
-# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
-pointer_steps_for_mode() {
-  case "$1" in
-    v10|v11)     echo "1 2 3 4" ;;  # Step 6 must reach dispatch for the matrix prefix check
-    v5|v6|v7|v8|v9) echo "1 2 3 4 6" ;;
-    v3)          echo "1 2 3 4 7 8" ;;
-    *)           echo "1 2 3 5 8 8b" ;;  # v2
-  esac
-}
-
-for _ps in $(pointer_steps_for_mode "$SHAPE_MODE"); do
+for _ps in $POINTER_STEPS; do
   [ "$CURRENT" = "$_ps" ] || continue
   if [ "$_ps" = "4" ] && [ "$USE_WORKTREE" = "true" ]; then
     break  # fall through to the Step-4 worktree shape check below
@@ -862,107 +751,28 @@ shape_block() {
   if [ "${#missing[@]}" -gt 0 ]; then
     echo "BLOCKED: canonical-sdlc step ${CURRENT} evidence missing required field(s): ${missing[*]}" >&2
     echo "Plan: $PLAN" >&2
-    echo "Required for step ${CURRENT} (evidence_schema: v2): $*" >&2
+    echo "Required for step ${CURRENT}: $*" >&2
     echo "Fix: rewrite the Step ${CURRENT} block as multi-line YAML-style fields. See canonical-sdlc/SKILL.md \"Evidence (two tiers)\" → verification shape table." >&2
     exit 2
   fi
 }
 
 # ---------- shared per-step validators ----------
-# The v5–v8 branches below collapse into one dispatcher (dispatch_modern)
-# driven by a role→step map; v3/v2 keep thin `case` arms that call the same
-# validators where byte-identical and keep their own arms where they differ.
-# Every stderr line is byte-identical to the pre-refactor per-version code
-# (the 140-assertion harness is the contract) — the version label and step
-# number are the only interpolated parts.
 
-# Compose the "canonical-sdlc <label> step <N>" message prefix. An empty
-# label (v2) yields "canonical-sdlc step <N>" with no stray double space.
+# Compose the "canonical-sdlc step <N>" message prefix.
 step_prefix() {
-  if [ -n "$1" ]; then
-    echo "canonical-sdlc $1 step $2"
-  else
-    echo "canonical-sdlc step $2"
-  fi
-}
-
-# Universal Step-5 keys a version layers on the shared verify body, in
-# enforcement order. v7 added bundle-fresh; v8 added drive-check; v9 added
-# stack-health. A future version appends ONE case arm here (and one
-# require_na_key arm).
-step5_keys_for_version() {
-  case "$1" in
-    v9) echo "bundle-fresh drive-check stack-health" ;;
-    v8) echo "bundle-fresh drive-check" ;;
-    v7) echo "bundle-fresh" ;;
-    *)  echo "" ;;  # v5, v6: no universal Step-5 keys
-  esac
-}
-
-# Presence + non-empty-value / `n/a: <reason>`-with-reason check for one
-# universal Step-5 key. Per-key wording lives in the case arms (tests assert
-# it byte-for-byte); the whole-block placeholder ban already ran upstream.
-# These keys are Step-5 only, so the prefix is fixed at step 5.
-# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
-require_na_key() {
-  local label="$1" key="$2" prefix val
-  prefix=$(step_prefix "$label" 5)
-  if ! block_has "$key"; then
-    case "$key" in
-      bundle-fresh)
-        echo "BLOCKED: ${prefix} requires 'bundle-fresh: <proof>' or 'bundle-fresh: n/a: <reason>'." >&2
-        echo "Plan: $PLAN" >&2
-        echo "Fix: run the project's bundle-freshness proof and paste its output line as 'bundle-fresh: <proof>', or record 'bundle-fresh: n/a: <reason>' for non-served targets." >&2
-        ;;
-      drive-check)
-        echo "BLOCKED: ${prefix} requires 'drive-check: <observed delta>' or 'drive-check: n/a: <reason>'." >&2
-        echo "Plan: $PLAN" >&2
-        echo "Fix: prove one trusted interaction changed app state (read the delta back semantically, not via pixels) and record the observed delta — or 'drive-check: suite: <named test — what it asserts>' when a suite test makes the same real contact, or 'drive-check: n/a: <reason>' when no browser modality applies." >&2
-        ;;
-      stack-health)
-        echo "BLOCKED: ${prefix} requires 'stack-health: <before/after snapshot>' or 'stack-health: n/a: <reason>'." >&2
-        echo "Plan: $PLAN" >&2
-        echo "Fix: snapshot the serving stack's runtime-integrity indicators before and after the walk and paste the no-delta result as 'stack-health: <snapshot>', or record 'stack-health: n/a: <reason>' when no long-running serve is observed." >&2
-        ;;
-    esac
-    exit 2
-  fi
-  # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
-  val=$(block_get "$key")
-  case "$val" in
-    ""|n/a|n/a:)
-      case "$key" in
-        bundle-fresh)
-          echo "BLOCKED: ${prefix} 'bundle-fresh:' needs a non-empty proof, or 'n/a: <reason>' with a non-empty reason." >&2
-          echo "Plan: $PLAN" >&2
-          echo "Fix: paste the freshness tool's output line, or give the reason freshness does not apply." >&2
-          ;;
-        drive-check)
-          echo "BLOCKED: ${prefix} 'drive-check:' needs a non-empty observation, or 'n/a: <reason>' with a non-empty reason." >&2
-          echo "Plan: $PLAN" >&2
-          echo "Fix: record the observed state delta, the qualifying suite test, or the reason a drive-check does not apply." >&2
-          ;;
-        stack-health)
-          echo "BLOCKED: ${prefix} 'stack-health:' needs a non-empty snapshot, or 'n/a: <reason>' with a non-empty reason." >&2
-          echo "Plan: $PLAN" >&2
-          echo "Fix: paste the before/after snapshot showing no delta, or give the reason stack-health does not apply." >&2
-          ;;
-      esac
-      exit 2
-      ;;
-  esac
+  echo "canonical-sdlc step $1"
 }
 
 # Tests modality: cmd/pass/total/output present, pass and total integers,
-# pass==total. Shared by the verify gate (v5–v8 Step 5) and the standalone
-# "Verify done" step (v3 Step 6, v2 Step 7).
+# pass==total. Used by the Step-5 verify gate.
 # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 validate_tests_block() {
-  local label="$1" step="$2" pass total prefix
+  local step="$1" pass total prefix
   shape_block cmd pass total output
   pass=$(block_get pass)
   total=$(block_get total)
-  prefix=$(step_prefix "$label" "$step")
+  prefix=$(step_prefix "$step")
   if ! echo "$pass" | grep -qE '^[0-9]+$' || ! echo "$total" | grep -qE '^[0-9]+$'; then
     echo "BLOCKED: ${prefix} 'pass:' and 'total:' must be integers (got pass='${pass}', total='${total}')." >&2
     echo "Plan: $PLAN" >&2
@@ -976,63 +786,20 @@ validate_tests_block() {
   fi
 }
 
-# Verify gate (v5–v8 Step 5): tests modality, then browser modality
-# (devtools-trace OR n/a), then each universal key the version requires.
-# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
-validate_verify_step() {
-  local label="$1" k
-  validate_tests_block "$label" 5
-  if ! block_has devtools-trace && ! block_has_na; then
-    echo "BLOCKED: canonical-sdlc ${label} step 5 (Verify) browser modality requires 'devtools-trace: <path>' or 'n/a: <reason>'." >&2
-    echo "Plan: $PLAN" >&2
-    echo "Fix: add the browser-evidence path, or 'n/a:' with a reason. See SKILL.md verification shape table." >&2
-    exit 2
-  fi
-  for k in $(step5_keys_for_version "$label"); do
-    require_na_key "$label" "$k"
-  done
-}
-
-# Standalone browser-verify step (v3 Step 5, v2 Step 6): devtools-trace OR
-# n/a. Distinct wording from the verify gate's browser modality above.
-# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
-validate_browser_verify_step() {
-  local label="$1" step="$2" prefix
-  if ! block_has devtools-trace && ! block_has_na; then
-    prefix=$(step_prefix "$label" "$step")
-    echo "BLOCKED: ${prefix} evidence requires either 'devtools-trace: <path>' or 'n/a: <reason>'." >&2
-    echo "Plan: $PLAN" >&2
-    echo "Fix: pick one. See SKILL.md verification shape table." >&2
-    exit 2
-  fi
-}
-
 # Document step: adr OR rca OR n/a.
 # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 validate_document_step() {
-  local label="$1" step="$2" prefix
+  local step="$1" prefix
   if ! block_has adr && ! block_has rca && ! block_has_na; then
-    prefix=$(step_prefix "$label" "$step")
+    prefix=$(step_prefix "$step")
     echo "BLOCKED: ${prefix} evidence requires 'adr: <path>', 'rca: <path>' (incident-response mode), or 'n/a: <reason>'." >&2
     echo "Plan: $PLAN" >&2
     exit 2
   fi
 }
 
-# External review step: pr OR n/a.
-# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
-validate_external_review_step() {
-  local label="$1" step="$2" prefix
-  if ! block_has pr && ! block_has_na; then
-    prefix=$(step_prefix "$label" "$step")
-    echo "BLOCKED: ${prefix} evidence requires either 'pr: <url>' or 'n/a: <reason>' (e.g. 'n/a: PR-less workflow')." >&2
-    echo "Plan: $PLAN" >&2
-    exit 2
-  fi
-}
-
-# Integrate & close (v5–v8): merge/worktree-removed always; then the cleanup
-# triple, OR an explicit `cleanup: n/a` marker (cleanup_on_finish=false).
+# Integrate & close: merge/worktree-removed always; then the cleanup triple,
+# OR an explicit `cleanup: n/a` marker (cleanup_on_finish=false).
 # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 validate_integrate_step() {
   local cleanup_val
@@ -1052,10 +819,10 @@ validate_integrate_step() {
 # deploy_target=none.
 # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 validate_ship_step() {
-  local label="$1" step="$2" prefix
+  local step="$1" prefix
   if block_has_na; then
     if [ -n "$DEPLOY_TARGET" ] && [ "$DEPLOY_TARGET" != "none" ]; then
-      prefix=$(step_prefix "$label" "$step")
+      prefix=$(step_prefix "$step")
       echo "BLOCKED: ${prefix} 'n/a:' is only valid when deploy_target=none in frontmatter (got deploy_target=${DEPLOY_TARGET})." >&2
       echo "Plan: $PLAN" >&2
       echo "Fix: provide 'deploy:', 'verified-at:', and 'monitor:' fields, or change deploy_target to none." >&2
@@ -1066,15 +833,15 @@ validate_ship_step() {
   fi
 }
 
-# ---------- v10: pre-registered Verification Matrix ----------
-# The v10 Verify gate discharges a Verification Matrix stored in a top-level
+# ---------- pre-registered Verification Matrix ----------
+# The Verify gate discharges a Verification Matrix stored in a top-level
 # `## Verification Matrix` section of the plan (separate from ## SDLC State).
-# validate_matrix_v10 parses that section — a per-session stack-health line, a
+# validate_matrix parses that section — a per-session stack-health line, a
 # tier table (one row per AC), and one indented per-AC evidence block per
 # non-waived row — and fires at current: 5 (via the Step-5 validator) and as a
-# prefix check for current: 6..9 (via dispatch_modern's v10 arm).
+# prefix check for current: 6..9 (via the dispatcher).
 #
-# v10.1 (mid-discharge commits): at current: 5, rows with status
+# Mid-discharge commits: at current: 5, rows with status
 # pending/blocked skip the per-tier key check, and the Step-5 `auditor:`
 # pointer is required only when no such row remains. The full contract —
 # per-tier keys + CONFIRMED on every non-waived row — bites on the 5→6
@@ -1124,11 +891,11 @@ matrix_block() {
     f'
 }
 
-# 3-line BLOCKED/Plan/Fix emit for the v10 matrix arm (mirrors the pattern
+# 3-line BLOCKED/Plan/Fix emit for the matrix arm (mirrors the pattern
 # every other validator uses). $1 = message tail, $2 = fix line.
 # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 block_matrix() {
-  echo "BLOCKED: canonical-sdlc v10 step ${CURRENT} — $1" >&2
+  echo "BLOCKED: canonical-sdlc step ${CURRENT} — $1" >&2
   echo "Plan: $PLAN" >&2
   echo "Fix: $2" >&2
   exit 2
@@ -1141,16 +908,16 @@ matrix_is_placeholder() {
   is_placeholder_value "$1"
 }
 
-validate_matrix_v10() {
+validate_matrix() {
   local sh rows line ncols ac tier status ev aud block_txt key val
 
-  # v10.1: set while any row is still pending/blocked at current: 5. The
+  # Set while any row is still pending/blocked at current: 5. The
   # Step-5 validator reads it to keep the `auditor:` pointer optional
   # mid-walk (the auditor is the exit gate — it has not run yet).
   UNDISCHARGED=0
   MATRIX=$(matrix_section)
   if [ -z "$MATRIX" ]; then
-    block_matrix "the Verify gate requires a '## Verification Matrix' section (v10 contract)." \
+    block_matrix "the Verify gate requires a '## Verification Matrix' section." \
       "add the '## Verification Matrix' section: a stack-health line, the AC tier table, and one per-AC evidence block. See canonical-sdlc/SKILL.md Step 5."
   fi
 
@@ -1205,7 +972,7 @@ validate_matrix_v10() {
       block_matrix "matrix row for '${ac}' has an invalid tier '${tier}' (want T0..T4)." \
         "set the tier cell to one of T0, T1, T2, T3, T4."
     fi
-    # status enum (v10.1) — the status cell is load-bearing (pending/blocked
+    # status enum — the status cell is load-bearing (pending/blocked
     # relax the Verify gate; waived relaxes everything), so a typo must
     # block, not silently read as discharged-like.
     # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
@@ -1221,7 +988,7 @@ validate_matrix_v10() {
     if echo "$ev" | grep -qE 'waiver:' || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
       :
     elif [ "$CURRENT" = "5" ] && { [ "$status" = "pending" ] || [ "$status" = "blocked" ]; }; then
-      # v10.1: a row still being discharged carries no evidence contract at
+      # A row still being discharged carries no evidence contract at
       # the Verify gate itself — its per-tier keys bite on the 5→6 advance
       # (the 6..9 prefix check), mirroring the CONFIRMED rule. This is what
       # gives a mid-walk corrective commit an honest home at current: 5.
@@ -1273,14 +1040,14 @@ validate_matrix_v10() {
   done <<< "$rows"
 }
 
-# v10 Verify gate: tests floor (reused), a required non-empty auditor pointer,
+# Verify gate: tests floor, a required non-empty auditor pointer,
 # then the Verification Matrix.
 # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
-validate_verify_step_v10() {
+validate_verify_step() {
   local aud
-  validate_tests_block v10 5
-  validate_matrix_v10
-  # v10.1: the auditor is the Step-5 exit gate — it cannot have run while
+  validate_tests_block 5
+  validate_matrix
+  # The auditor is the Step-5 exit gate — it cannot have run while
   # rows are still pending/blocked, so the pointer is required only once
   # every row is discharged or waived.
   # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
@@ -1297,14 +1064,8 @@ validate_verify_step_v10() {
   fi
 }
 
-# Per-version dispatch for the modern (gate-collapsed) shape table. v5 keeps
-# an external-review step and numbers integrate/ship at 9/10; v6+ dropped
-# external review and renumber integrate/ship to 8/9. Step 5 (Verify) and
-# Step 7 (Document) are common; Step 4 is the worktree shape check reached
-# only when use_worktree=true. A future version is one case arm here plus a
-# step5_keys_for_version arm.
-# v11 epic merge-target consistency (LOG-ONLY; D14, check-id `merge-target`).
-# On a v11 wave-scale plan naming an `epic:`, when the epic plan exists and
+# Epic merge-target consistency (LOG-ONLY; D14, check-id `merge-target`).
+# On a wave-scale plan naming an `epic:`, when the epic plan exists and
 # declares an `integration-branch:` in its ## SDLC State, a mismatch with this
 # plan's integration-branch logs a finding. Never blocks. First cross-file read
 # in this hook — read-only, fail-open (missing epic plan / missing key → no
@@ -1337,11 +1098,11 @@ validate_merge_target() {
   return 0
 }
 
-# v11 intent-scoped Step-5 evidence keys (R7) — LOG-ONLY (D14; check-ids
-# `refactor-evidence`, `tune-evidence`). Fires only on v11 plans whose
+# Intent-scoped Step-5 evidence keys (R7) — LOG-ONLY (D14; check-ids
+# `refactor-evidence`, `tune-evidence`). Fires on plans whose
 # declared intent carries a conditional key set; never blocks. Reuses the
 # Step-5 BLOCK/block_has/block_get accessors already populated for the
-# current step's evidence (same accessors validate_verify_step_v10 uses),
+# current step's evidence (same accessors validate_verify_step uses),
 # so this validator is only meaningful when called at current: 5.
 # [INSTRUMENT]
 validate_intent_evidence() {
@@ -1350,13 +1111,13 @@ validate_intent_evidence() {
     refactor)
       if ! block_has behavior-preservation || [ -z "$(block_get behavior-preservation)" ] \
          || is_placeholder_value "$(block_get behavior-preservation)"; then
-        log_finding refactor-evidence "v11 refactor plan Step 5 missing 'behavior-preservation:' evidence"
+        log_finding refactor-evidence "refactor plan Step 5 missing 'behavior-preservation:' evidence"
       fi
       for key in compat-matrix revert-plan; do
         if block_has "$key"; then
           val=$(block_get "$key")
           if [ -z "$val" ] || is_placeholder_value "$val"; then
-            log_finding refactor-evidence "v11 refactor plan Step 5 '${key}:' present but empty"
+            log_finding refactor-evidence "refactor plan Step 5 '${key}:' present but empty"
           fi
         fi
       done
@@ -1365,7 +1126,7 @@ validate_intent_evidence() {
       for key in baseline target re-measure; do
         val=$(block_get "$key")
         if ! block_has "$key" || [ -z "$val" ] || is_placeholder_value "$val"; then
-          log_finding tune-evidence "v11 tune plan Step 5 missing '${key}:' evidence"
+          log_finding tune-evidence "tune plan Step 5 missing '${key}:' evidence"
         fi
       done
       ;;
@@ -1373,8 +1134,8 @@ validate_intent_evidence() {
   return 0
 }
 
-# v11 wave-scale D7 dispatched-task ledger PRESENCE (D-slice 4/3). Guarded to
-# v11 + scale:wave + frontmatter rigor:audited + multi_agent:true plans; for
+# Wave-scale D7 dispatched-task ledger PRESENCE (D-slice 4/3). Guarded to
+# scale:wave + frontmatter rigor:audited + multi_agent:true plans; for
 # every other plan it is a no-op (return 0). scale:epic is intentionally OUT —
 # epic plans legitimately dispatch research, not task-shaped units, so demanding
 # a dispatched-task ledger there would false-block scoping runs (plan Assumption
@@ -1394,7 +1155,6 @@ validate_intent_evidence() {
 #      ## SDLC State section (SECTION) else exit 2.
 # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 validate_dispatch_ledger() {
-  [ "$SDLC_VERSION" = "11" ] || return 0
   [ "$SCALE" = "wave" ] || return 0
   [ "$RIGOR" = "audited" ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
@@ -1449,96 +1209,40 @@ validate_dispatch_ledger() {
   return 0
 }
 
-dispatch_modern() {
-  local label="$1" ext_step="" integrate_step ship_step
-  case "$label" in
-    v5)                  ext_step=8; integrate_step=9; ship_step=10 ;;
-    v6|v7|v8|v9|v10|v11) integrate_step=8; ship_step=9 ;;
-  esac
-  # v11 audited multi_agent wave: D7 dispatched-task ledger PRESENCE, at every
-  # step that reaches this dispatcher (guarded internally; no-op otherwise).
+# Step numbering: 4 worktree · 5 Verify gate · 7 Document · 8 Integrate &
+# close · 9 Ship. Steps 1/2/3/6 are pointer steps handled upstream, except
+# that Step 6 reaches here so the matrix prefix check can fire.
+INTEGRATE_STEP=8
+SHIP_STEP=9
+
+dispatch() {
+  # Audited multi_agent wave: D7 dispatched-task ledger PRESENCE, at every step
+  # that reaches this dispatcher (guarded internally; no-op otherwise).
   validate_dispatch_ledger
-  # v10/v11: the Verification Matrix is a prefix contract for every step from
-  # the Verify gate on — current: 5 validates it inside validate_verify_step_v10;
-  # current: 6..9 validate it here, so a REFUTED auditor blocks post-Verify
-  # commits too (Step 6 is not a pointer step, so it reaches this arm). v11
-  # wave/epic-scale plans carry the v10 shape unchanged, so they share the arm.
-  if [ "$label" = "v10" ] || [ "$label" = "v11" ]; then
-    case "$CURRENT" in
-      6|7|8|9) validate_matrix_v10 ;;
-    esac
-  fi
-  # v11: log-only epic merge-target check at the integrate step.
-  if [ "$label" = "v11" ] && [ "$CURRENT" = "$integrate_step" ]; then
-    validate_merge_target
-  fi
+  # The Verification Matrix is a prefix contract for every step from the Verify
+  # gate on — current: 5 validates it inside validate_verify_step; current: 6..9
+  # validate it here, so a REFUTED auditor blocks post-Verify commits too.
+  case "$CURRENT" in
+    6|7|8|9) validate_matrix ;;
+  esac
+  # Log-only epic merge-target check at the integrate step.
+  [ "$CURRENT" = "$INTEGRATE_STEP" ] && validate_merge_target
   case "$CURRENT" in
     4) shape_block worktree base-sha branch ;;
     5)
-      if [ "$label" = "v10" ] || [ "$label" = "v11" ]; then
-        validate_verify_step_v10
-      else
-        validate_verify_step "$label"
-      fi
-      if [ "$label" = "v11" ]; then
-        validate_intent_evidence
-      fi
+      validate_verify_step
+      validate_intent_evidence
       ;;
-    7) validate_document_step "$label" 7 ;;
+    7) validate_document_step 7 ;;
     *)
-      if [ -n "$ext_step" ] && [ "$CURRENT" = "$ext_step" ]; then
-        validate_external_review_step "$label" "$ext_step"
-      elif [ "$CURRENT" = "$integrate_step" ]; then
+      if [ "$CURRENT" = "$INTEGRATE_STEP" ]; then
         validate_integrate_step
-      elif [ "$CURRENT" = "$ship_step" ]; then
-        validate_ship_step "$label" "$ship_step"
+      elif [ "$CURRENT" = "$SHIP_STEP" ]; then
+        validate_ship_step "$SHIP_STEP"
       fi
       ;;
   esac
 }
 
-case "$SHAPE_MODE" in
-  v5|v6|v7|v8|v9|v10|v11)
-    dispatch_modern "$SHAPE_MODE"
-    ;;
-  v3)
-    # v3 shape switch — renumbered steps (0–14). Reuses the shared validators
-    # where an arm is byte-identical (browser-verify, tests, document,
-    # external-review, ship); keeps its own arms where it differs (Step 10
-    # commit, Step 12 merge-only, Step 13 bare-n/a cleanup).
-    case "$CURRENT" in
-      4)  shape_block worktree base-sha branch ;;
-      5)  validate_browser_verify_step v3 5 ;;
-      6)  validate_tests_block v3 6 ;;
-      9)  validate_document_step v3 9 ;;
-      10) shape_block commit subject files ;;
-      11) validate_external_review_step v3 11 ;;
-      12) shape_block merge worktree-removed ;;
-      13)
-        if block_has_na; then
-          : # n/a is acceptable for Step 13 (cleanup_on_finish=false case)
-        else
-          shape_block cleanup tmp-wiped tasks-completed
-        fi
-        ;;
-      14) validate_ship_step v3 14 ;;
-    esac
-    ;;
-  *)
-    # v2 shape switch — original step numbers (preserved for backwards
-    # compat). Reuses the shared validators with an empty version label, so
-    # messages read "canonical-sdlc step N ..." (no version token).
-    case "$CURRENT" in
-      4)  shape_block worktree base-sha branch ;;
-      6)  validate_browser_verify_step "" 6 ;;
-      7)  validate_tests_block "" 7 ;;
-      9)  validate_document_step "" 9 ;;
-      10) shape_block commit subject files ;;
-      11) validate_external_review_step "" 11 ;;
-      12) shape_block merge worktree-removed ;;
-      13) validate_ship_step "" 13 ;;
-    esac
-    ;;
-esac
-
+dispatch
 exit 0

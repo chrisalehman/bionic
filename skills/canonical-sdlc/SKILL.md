@@ -98,9 +98,9 @@ Do not carve a sensitive concern into a tiny unflagged wave to dodge a floor. Th
 .bionic/tmp/                      # ephemera only, gitignored, wiped at Step 8
 ```
 
-Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 11`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. v11 plans never declare `mode:`.
+Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 12`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`.
 
-**Never retrofit a newer version's requirements onto an older plan** — an in-flight plan would start blocking mid-wave. v1/v2 are grandfathered; v3–v10 keep their own shape tables.
+**12 is the only supported version.** Any other value — an older number, an empty value, a typo — blocks at both hooks. There is one contract; an artifact either meets it or does not write. A run that predates it is brought forward to 12, not exempted.
 
 ## Steps
 
@@ -264,9 +264,9 @@ One evidence artifact per step under `Step N:` in `## SDLC State`. The gate vali
 
 **`canonical-sdlc-evidence-gate.sh`** (`PreToolUse|Bash`) fires only on a real `git commit` segment. It finds the newest `*.md` under the plan dirs, and if it has a `## SDLC State` section, validates the current step's evidence, the matrix, and the task ledger. Log-only (never blocks): the epic merge-target check, and the `refactor`/`tune` intent-scoped Step-5 keys.
 
-**`canonical-sdlc-governing-skill.sh`** (`PreToolUse|Write,Edit`) blocks any artifact under `<docs-root>/{specs,plans,adrs,incidents}/` lacking `governing-skill:` frontmatter, and on v11 blocks a `mode:` line, a missing or non-enum triple, a barred cell, a missing flag or `model_plan`, or a missing `## Verification Matrix` at `sdlc-step ≥ 3`. Floor-consistency checks are log-only.
+**`canonical-sdlc-governing-skill.sh`** (`PreToolUse|Write,Edit`) blocks any artifact under `<docs-root>/{specs,plans,adrs,incidents}/` lacking `governing-skill:` frontmatter, and blocks a `mode:` line, a missing or non-enum triple, a barred cell, a missing flag or `model_plan`, or a missing `## Verification Matrix` at `sdlc-step ≥ 3`. Floor-consistency checks are log-only.
 
-**Known holes — do not mistake these for enforcement.** The governing-skill hook validates `Write` content but not `Edit` content, so one valid write grandfathers every later edit. Flag *values* are never checked, only presence. The evidence gate reads the plan file's text, so an `Edit` that writes evidence for tests never run passes unseen. Proof-shape is a heuristic: a digit plus a `/` satisfies it.
+**Known holes — do not mistake these for enforcement.** The governing-skill hook validates `Write` content but not `Edit` content, so one valid write covers every later edit. Flag *values* are never checked, only presence. The evidence gate reads the plan file's text, so an `Edit` that writes evidence for tests never run passes unseen. Proof-shape is a heuristic: a digit plus a `/` satisfies it.
 
 ## Dispatch
 
@@ -293,3 +293,7 @@ Before ending a turn, reconcile: every `active` row either has a verified result
 **Three-fail rule.** Three failures to produce valid evidence for one step: if diagnostic, run a full MAP-INSTRUMENT-NARROW pass (the counter resets on a completed pass, not on more speculative fixes); if decision-related, stop and surface. A `standard` slice that fails twice re-dispatches once as `senior-implementor` — that is the third try, not a fourth.
 
 **Stop and wake** for: an ambiguous spec needing a judgment call, new external-API auth, anything affecting billing, destructive migrations, secrets or production infrastructure, and anything the user's own config marks as requiring approval. Append a `## Wake Note` and do not proceed past it.
+
+## Diagrams
+
+`diagrams/lifecycle.png` — the 10 steps, the two gates, and the commit rhythm. `diagrams/hook-chain.png` — which hook fires on which tool event, and which arms block versus log. Sources are the paired `.excalidraw` files.
