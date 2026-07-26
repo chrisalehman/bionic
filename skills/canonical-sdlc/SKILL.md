@@ -1,6 +1,6 @@
 ---
 name: canonical-sdlc
-description: Use when starting a large-scale development effort (new feature, architectural change, multi-day project) or when picking the skill for the current SDLC step. Routes to the canonical skill per step and enforces that every applicable step is walked before completion.
+description: Use when starting a large-scale development effort (new feature, architectural change, multi-day project) or when picking the skill for the current SDLC step. Routes to the canonical skill per step and gates every commit on the current step's evidence.
 layer: governance
 needs:
   - agent-skills:context-engineering
@@ -42,7 +42,7 @@ loading: deferred
 
 This skill constrains how large-scale development efforts are executed. The SDLC steps exist because they lead to better outcomes — each step contributes a dimension of fidelity (scope, contract, plan, proof, review, decision record, release discipline) that no other step supplies. Without this skill, Claude truncates the lifecycle on any given effort: individual steps feel skippable in isolation, but the compounding loss of fidelity is invisible mid-effort and surfaces as rework, lost decisions, and features that look complete but aren't production-grade.
 
-**Core principle: NO STEP SKIPPED WITHOUT A DECLARED FAST-PATH. NO COMPLETION WITHOUT EVIDENCE FROM EVERY APPLICABLE STEP.** (formalized below as The Iron Law).
+**Core principle: NO STEP SKIPPED WITHOUT A DECLARED FAST-PATH. NO COMMIT WITHOUT EVIDENCE FROM THE CURRENT STEP.** (formalized below as The Iron Law, with what enforces it and what does not).
 
 **Layer:** Governance (process constraint). Loads when a large-scale effort begins or when picking the skill for the current step.
 
@@ -159,8 +159,17 @@ The skill runs at two scales:
 
 ```
 NO STEP SKIPPED WITHOUT A DECLARED FAST-PATH.
-NO COMPLETION WITHOUT EVIDENCE FROM EVERY APPLICABLE STEP.
+NO COMMIT WITHOUT EVIDENCE FROM THE CURRENT STEP.
 ```
+
+**What enforces this, precisely.** The evidence gate is incremental, not
+holistic. At each commit it reads the plan's `current: N` and validates the
+evidence line for **that step only** [WALL: hooks/canonical-sdlc-evidence-gate.test.sh].
+It never re-validates steps 0..N-1, and nothing re-checks the full set at
+completion; the sole cumulative contract is the `## Verification Matrix`, a
+prefix re-validated at every step from 6 on. Walking every applicable step is
+the discipline the per-commit check serves — not a property any code proves,
+so an abandoned step is caught by review, not by the harness [UNENFORCED].
 
 ## Parallel by Default
 
@@ -1265,7 +1274,7 @@ Do not preload sub-skills. Load each when you reach the step that invokes it. Re
 | "The code works, that's enough evidence" | "Works on my machine" isn't evidence. |
 | "The user is in a hurry, I should skip steps" | Declare a fast-path explicitly or walk the full path. |
 | "I'll call this a refactor to skip the spec" | Intent is declared and reviewable — a wrong-intent label is drift with a label. `refactor` still owes its "behavior preserved" spec; no intent is spec-free. |
-| "`tested` is fine for this auth change" | The flag floor forbids it — a security/privacy surface floors at `audited`. Floors are max-wins and upward-only; you cannot shop rigor below a derivable floor. |
+| "`tested` is fine for this auth change" | A security/privacy surface floors at `audited`; floors are max-wins and upward-only. This skill declines a sub-floor override and keeps the floor value — but no code stops you. The only floor check, `canonical-sdlc-governing-skill.sh`'s floor-consistency check, records the inconsistency to the audit stream and allows the write (D14). [INSTRUMENT] |
 | "It's really one big task, not a wave" | Scale-inflation (or deflation) dodges the matrix; the Step-3 checkpoint catches it. Declare the honest scale. |
 | "The Step-0 interview is overkill; I'll just guess the intent" | The gray-zone collisions (mechanism-swap, reference-content) are exactly what the exception interview exists for — guessing is silent misclassification. |
 | "The matrix tier is too strict for this AC" | Downgrading a tier is a user decision via the Waiver Protocol, recorded in the row — never a self-service call at Verify time. | [UNENFORCED]
