@@ -8,6 +8,16 @@
 #   [WALL: <test>]   the action does not happen — `exit 2`, or a
 #                    hookSpecificOutput.permissionDecision "deny" payload
 #   [FORM: <test>]   a required artifact shape; a malformed field is caught
+#
+#   WALL vs FORM, when both seem to fit — judge WHAT THE CHECK READS, not what
+#   stops. A check that reads the ACT (which branch is being pushed, which SQL
+#   verb is reaching a DB CLI) and refuses it is a WALL. A check that reads an
+#   ARTIFACT and stops the act as a consequence of a missing or malformed field
+#   is a FORM. So protect-main and protect-database are WALLs; the evidence gate
+#   is a FORM throughout — it never inspects the commit, only the plan. Both
+#   exit 2, so no instrument can tell them apart (epic-11 W2's auditor found
+#   exactly this); the discriminator is the reader's, and this is it. Written
+#   down because the surface had marked one obligation both ways at five sites.
 #   [INSTRUMENT]     observes and records; never blocks, never instructs
 #   [UNENFORCED]     prose only; nothing downstream depends on it
 #

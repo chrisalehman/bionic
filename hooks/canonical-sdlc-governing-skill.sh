@@ -472,7 +472,7 @@ if { [ "$SDLC_VERSION" = "10" ] && [ "$MODE" = "autonomous" ]; } || [ "$SDLC_VER
                 echo "BLOCKED: canonical-sdlc v10 autonomous plan '$BASENAME' (sdlc-step ${SDLC_STEP}) is missing a '## Verification Matrix' section." >&2
               fi
               echo "Path: $FILE_PATH" >&2
-              echo "Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix') and lock it at Step 3 approval, or if this wave is reopened, use the Step 5–9 upgrade path in §Versioning." >&2
+              echo "Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix') and lock it at Step 3 approval, or if this wave is reopened, use the Step 5–9 upgrade path in canonical-sdlc/README.md §Versioning and backward-compat." >&2
               exit 2
             fi
           fi

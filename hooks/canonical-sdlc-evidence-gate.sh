@@ -863,7 +863,7 @@ shape_block() {
     echo "BLOCKED: canonical-sdlc step ${CURRENT} evidence missing required field(s): ${missing[*]}" >&2
     echo "Plan: $PLAN" >&2
     echo "Required for step ${CURRENT} (evidence_schema: v2): $*" >&2
-    echo "Fix: rewrite the Step ${CURRENT} block as multi-line YAML-style fields. See canonical-sdlc/SKILL.md \"Evidence (three-tier)\" → verification shape table." >&2
+    echo "Fix: rewrite the Step ${CURRENT} block as multi-line YAML-style fields. See canonical-sdlc/SKILL.md \"Evidence (two tiers)\" → verification shape table." >&2
     exit 2
   fi
 }
