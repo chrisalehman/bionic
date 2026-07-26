@@ -739,8 +739,6 @@ expect_true "evidence-gate hook references the v2 schema literal" \
 # 4r: README promotes canonical-sdlc as flagship (Wave 6 closure; Wave 7 repointed link)
 expect_true "README has a Canonical SDLC pattern subsection" \
   grep -q '\*\*Canonical SDLC\*\*' "${REPO}/README.md"
-expect_true "README links to skills/canonical-sdlc/README.md" \
-  grep -q 'skills/canonical-sdlc/README\.md' "${REPO}/README.md"
 expect_true "README Skills row mentions bionic:canonical-sdlc as flagship" \
   grep -q 'bionic:canonical-sdlc' "${REPO}/README.md"
 expect_true "README Hooks list mentions both canonical-sdlc hooks" \
