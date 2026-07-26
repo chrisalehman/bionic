@@ -12,6 +12,7 @@
 #   nudge → hookSpecificOutput.additionalContext
 # Never "allow", never updatedInput, never exit 2 (epic-08 wave-04 ADR-002;
 # amends D14 per user ratification 2026-07-20).
+# [UNENFORCED]
 #
 # Thread discrimination (epic-08 Q1 spike + hooks docs): agent_type
 # non-empty → subagent → silent. Missing keys classify as MAIN THREAD.
@@ -53,6 +54,7 @@ FLAT=$(printf '%s' "$CMD" | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' | 
 # Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
 # collision-resistant across same-named projects under different parents.
 # cksum and basename are POSIX — no new dependency.
+# [INSTRUMENT]
 audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
   [ -n "${HOME:-}" ] || return 1
   local base sum
@@ -74,6 +76,7 @@ log_event() {  # $1=event $2=class
   return 0
 }
 
+# [WALL: hooks/farm-out-reminder.test.sh]
 emit_deny() {  # $1=class $2=role
   jq -n --arg r "$(deny_reason "$1" "$2")" \
     '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}' 2>/dev/null
@@ -132,6 +135,7 @@ classify_tier1() {  # $1=flat cmd → sets CLASS ROLE, rc 0 on match
   # inside a word (`echo remake`) never matches. A short (<3-segment) chain
   # that carries a tier-1 token thus denies here on purpose; the ≥3-segment
   # &&-chain is a separate arm (class=chain) reached only when this one skips.
+  # [WALL: hooks/farm-out-reminder.test.sh]
   if printf '%s' "$c" | grep -qE '(^|[;&| ])bash +([^ ]*/)?(test\.sh|tests/run\.sh)([;&| ]|$)|(^|[;&| ])bash +[^ ]+\.test\.sh([;&| ]|$)|^(npm|pnpm|yarn) +test([;&| ]|$)|^pytest([;&| ]|$)|^go +test([;&| ]|$)|^cargo +test([;&| ]|$)|^make +test([;&| ]|$)'; then
     CLASS="suite"; ROLE="test-runner"; return 0; fi
   # Command position only: start-of-command or after a real separator

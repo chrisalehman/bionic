@@ -1,6 +1,7 @@
 #!/bin/bash
 # GOVERNING-SKILL GATE: Blocks Write and Edit to canonical-sdlc artifact
 # files that lack the required governing-skill frontmatter.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
 #
 # Scope: files under <project>/docs/bionic/{specs,plans,adrs}/ matching
 #   *.plan.md | *.spec.md | adr-*.md | continuation*.md
@@ -11,6 +12,7 @@
 # own naming gates catch artifacts that aren't named correctly.
 #
 # Required frontmatter block at the top of the file:
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
 #
 #   ---
 #   governing-skill: superpowers:writing-plans
@@ -46,6 +48,7 @@ fi
 
 # Is the path under a canonical-sdlc artifact directory AND does the
 # basename match an enforced extension? Both must be true.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
 # Match files under the project's docs root (default <project>/.bionic/
 # docs/, configurable via <project>/.bionic/config.yaml `docs-root:`).
 #
@@ -104,6 +107,7 @@ DOCS_ROOT=$(resolve_docs_root "$PROJECT_ROOT_FROM_PATH")
 # Byte-identical to the copies in farm-out-reminder.sh,
 # canonical-sdlc-evidence-gate.sh and context-spend.sh — divergence would give
 # one project two audit files. Deliberate per-hook duplication (no shared lib).
+# [INSTRUMENT]
 audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
   [ -n "${HOME:-}" ] || return 1
   local base sum
@@ -136,6 +140,7 @@ fi
 #   subsequent Edit inherits it. If an Edit targets a file that never
 #   had the frontmatter, the hook blocks and directs the user to Write
 #   the artifact from scratch with the required frontmatter block.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
 CONTENT=""
 if [ "$TOOL" = "Write" ]; then
   CONTENT=$(echo "$INPUT" | jq -r '.tool_input.content // empty')
@@ -157,6 +162,7 @@ fi
 # (classic-Mac CR-only: \r without \n) into a real newline. Every parse below
 # is line-anchored (the exact-match `$0 == "---"` frontmatter delimiter,
 # yaml_get, the matrix grep), so it must see real newlines.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
 #
 # `tr -d '\r'` (the prior normalization) merely DELETED every \r. On a CRLF
 # artifact that happened to work, but on a CR-only artifact it removed every
@@ -165,10 +171,12 @@ fi
 # frontmatter block". awk splits on \n by default, so a CR-only file arrives as
 # a single record that gsub re-splits into real lines; LF and CRLF files are
 # unaffected. Twin of the evidence-gate hook's normalize_newlines.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
 CONTENT=$(printf '%s' "$CONTENT" | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }')
 
 # Extract the leading YAML frontmatter block (between the first two `---`
 # lines at column 0). If absent, block.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
 FRONTMATTER=$(echo "$CONTENT" | awk '
   NR == 1 && $0 == "---" { inside = 1; next }
   inside && $0 == "---" { exit }
@@ -190,6 +198,7 @@ if [ -z "$FRONTMATTER" ]; then
 fi
 
 # Enforce presence of the governing-skill field with a non-empty value.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
 GOVERNING=$(echo "$FRONTMATTER" \
             | grep -E '^[[:space:]]*governing-skill[[:space:]]*:' \
             | head -1 \
@@ -252,6 +261,7 @@ fi
 # here). v4/v5/v6/v7/v8/v9/v10 share v4's flag contract unchanged. v3
 # plans keep the prior contract so in-flight plans authored before v4
 # are not retroactively broken.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
 if [ "$SDLC_VERSION" != "3" ] && [ "$SDLC_VERSION" != "4" ] && [ "$SDLC_VERSION" != "5" ] && [ "$SDLC_VERSION" != "6" ] && [ "$SDLC_VERSION" != "7" ] && [ "$SDLC_VERSION" != "8" ] && [ "$SDLC_VERSION" != "9" ] && [ "$SDLC_VERSION" != "10" ] && [ "$SDLC_VERSION" != "11" ]; then
   echo "BLOCKED: canonical-sdlc artifact '$BASENAME' has unsupported canonical_sdlc_version: '$SDLC_VERSION'." >&2
   echo "Path: $FILE_PATH" >&2
@@ -272,12 +282,14 @@ if [ "$SDLC_VERSION" = "11" ]; then
   # Local block helper for this arm — same BLOCKED:/Path: stderr shape as
   # the inline v≤10 blocks above, hoisted to avoid repeating it eight
   # times. Scoped to the v11 path; v≤10 output is untouched.
+  # [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
   block() {
     echo "BLOCKED: canonical-sdlc v11 artifact '$BASENAME': $1" >&2
     echo "Path: $FILE_PATH" >&2
     exit 2
   }
   # Split-brain guard: a v11 artifact declares the triple, never mode.
+  # [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
   [ -z "$(yaml_get mode)" ] || block "v11 artifacts declare intent:/rigor:/scale:, never mode:"
   INTENT=$(yaml_get intent); RIGOR=$(yaml_get rigor); SCALE=$(yaml_get scale)
   [ -n "$INTENT" ] || block "v11 requires intent: (build|bugfix|refactor|tune|spike|incident-response)"
@@ -314,6 +326,7 @@ if [ "$SDLC_VERSION" = "11" ]; then
   # this data. Every new read path (config.yaml, epic plan, audit file) is
   # fail-open. The evidence-gate hook carries a twin of log_finding (hook
   # name differs); a shared hooks-lib extraction is deliberately deferred.
+  # [INSTRUMENT]
   #
   # Rigor ordering (normative): tested(0) < peer-reviewed(1) < audited(2).
   rigor_rank() {
@@ -344,6 +357,7 @@ if [ "$SDLC_VERSION" = "11" ]; then
 
   # Project floor: rigor-floor: in <project>/.bionic/config.yaml (fail-open;
   # an unparseable/invalid value is its own finding, never a block).
+  # [INSTRUMENT]
   PF=$(grep -E '^rigor-floor:' "$PROJECT_ROOT_FROM_PATH/.bionic/config.yaml" 2>/dev/null \
     | head -1 | sed 's/^rigor-floor:[[:space:]]*//' | sed 's/[[:space:]]*$//' | tr -d '\r')
   if [ -n "$PF" ]; then
@@ -402,6 +416,7 @@ done
 # Step-0 model-tier decision). Checked as a separate conditional grep — NOT
 # an array element — to stay safe under `set -u` with bash 3.2's empty-array
 # expansion behaviour. v3 plans skip this and keep the prior contract.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
 if [ "$SDLC_VERSION" = "4" ] || [ "$SDLC_VERSION" = "5" ] || [ "$SDLC_VERSION" = "6" ] || [ "$SDLC_VERSION" = "7" ] || [ "$SDLC_VERSION" = "8" ] || [ "$SDLC_VERSION" = "9" ] || [ "$SDLC_VERSION" = "10" ] || [ "$SDLC_VERSION" = "11" ]; then
   if ! echo "$FRONTMATTER" | grep -qE "^[[:space:]]*model_plan[[:space:]]*:"; then
     MISSING+=("model_plan")
@@ -421,6 +436,7 @@ if [ "${#MISSING[@]}" -gt 0 ]; then
 fi
 
 # ---------- v10: pre-registered Verification Matrix required at Step 3+ ----------
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
 #
 # v10's Step 0 derives a "## Verification Matrix" section (per-AC tier +
 # status + evidence, locked at Step 3 approval — see canonical-sdlc
@@ -447,6 +463,7 @@ if { [ "$SDLC_VERSION" = "10" ] && [ "$MODE" = "autonomous" ]; } || [ "$SDLC_VER
           # Matrix (the matrix is a wave/epic artifact) — exempt them. SCALE is
           # set only on the v11 arm above (empty for v10 autonomous), so this
           # guard never changes v10 behavior.
+          # [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
           if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null && [ "$SCALE" != "task" ]; then
             if ! echo "$CONTENT" | grep -qE '^## Verification Matrix'; then
               if [ "$SDLC_VERSION" = "11" ]; then

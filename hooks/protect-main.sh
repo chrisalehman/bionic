@@ -2,6 +2,7 @@
 # HARD BLOCK: Prevents AI from pushing to main/master branches.
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
 # The user must push to main manually from their own terminal.
+# [WALL: hooks/protect-main.test.sh]
 # Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
 
 INPUT=$(cat)
@@ -35,13 +36,14 @@ if [ -z "$PUSH_CMD" ]; then
 fi
 
 # Block 1: Explicit main/master in the push command
+# [WALL: hooks/protect-main.test.sh]
 if echo "$PUSH_CMD" | grep -qE 'git push.*([[:space:]]|:)(main|master)([[:space:]]|$)'; then
   echo "BLOCKED: Pushing to main/master is not allowed from Claude Code." >&2
   echo "Push to main must be done manually by the user." >&2
   exit 2
 fi
 
-# Block 2: Force pushes (always dangerous)
+# Block 2: Force pushes (always dangerous) [WALL: hooks/protect-main.test.sh]
 if echo "$PUSH_CMD" | grep -qE '(^|\s)(-f|--force|--force-with-lease)(\s|$)'; then
   echo "BLOCKED: Force pushing is not allowed from Claude Code." >&2
   exit 2
@@ -49,6 +51,7 @@ fi
 
 # Block 3: Any push while on main/master branch (catches implicit pushes
 # like "git push origin", "git push origin HEAD", bare "git push")
+# [WALL: hooks/protect-main.test.sh]
 CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
 if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
   echo "BLOCKED: Cannot push while on '$CURRENT_BRANCH' branch from Claude Code." >&2
