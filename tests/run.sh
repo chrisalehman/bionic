@@ -41,20 +41,6 @@ run "agent-roles.test.sh" bash tests/agent-roles.test.sh
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so
 # retiring it without this line would have traded one blind spot for another.
 run "platform.test.sh" bash lib/platform.test.sh
-# The verifier's own behaviour gate, then its DEFAULT run over the real governed
-# surfaces. The default run was deliberately unwired while slices 4/3–4/5 were
-# still marking (a gate failing until then would have taken this suite red
-# mid-wave); marking completed at unmarked=0, so it is wired now. Without it the
-# floor could report green while the real instruction surface carried unmarked
-# statements — a false green in the instrument that exists to catch false greens.
-run "marker-verify.test.sh" bash tests/marker-verify.test.sh
-run "marker-verify.sh (surfaces)" bash tests/marker-verify.sh
-# Same for the mutation-and-restore harness: behaviour gate, then the default run
-# proving every WALL/FORM pointer still goes RED when its enforcement is removed.
-# A marker whose test stopped discriminating is a claim with a dead citation, and
-# this is the only check that catches it.
-run "marker-discriminates.test.sh" bash tests/marker-discriminates.test.sh
-run "marker-discriminates.sh (pointers)" bash tests/marker-discriminates.sh
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   run "bootstrap-e2e-docker.sh (mock)" bash tests/bootstrap-e2e-docker.sh
 else

@@ -62,8 +62,8 @@ The **core profile** lives in [`claude-config.txt`](claude-config.txt) — edit 
 | **Plugins** | superpowers, agent-skills, document-skills, example-skills, frontend-design |
 | **Subagent roles** | implementor, senior-implementor, researcher, auditor, critic, test-runner — bionic's own hand-written roles, carrying the invariant duties canonical-sdlc dispatches against *(the seven voltagent packs are opt-in: see below)* |
 | **MCP servers** | context7, chrome-devtools *(Pencil's MCP server self-registers whenever the Pencil app is running — no config entry needed)* |
-| **Skills** | **bionic:canonical-sdlc** (flagship — 10-step autonomous lifecycle), bionic:browser-verify, bionic:rigorous-refactor, bionic:ralph-loop, bionic:map-instrument-narrow, bionic:skill-factory, excalidraw-diagram, humanizer, notebooklm, impeccable (20+ design skills) |
-| **Hooks** | protect-main.sh, protect-database.sh, memory-cleanup.sh, terseness-reminder.sh, **canonical-sdlc-evidence-gate.sh**, **canonical-sdlc-governing-skill.sh** |
+| **Skills** | **bionic:canonical-sdlc** (flagship — 10-step autonomous lifecycle), bionic:browser-verify, bionic:map-instrument-narrow, excalidraw-diagram, humanizer, notebooklm, impeccable (20+ design skills) |
+| **Hooks** | protect-main.sh, protect-database.sh, memory-cleanup.sh, **canonical-sdlc-evidence-gate.sh**, **canonical-sdlc-governing-skill.sh** |
 | **Philosophy** | 8 principles for agentic development → [`~/.claude/CLAUDE.md`](claude-global.md) |
 | **Shell alias** | `claude` → `claude --dangerously-skip-permissions` |
 
@@ -89,7 +89,6 @@ bionic/
 │   ├── protect-main.sh      # PreToolUse hook: blocks pushes to main/master
 │   ├── protect-database.sh  # PreToolUse hook: blocks destructive SQL
 │   ├── memory-cleanup.sh    # SessionStart hook: advisory staleness/size cleanup
-│   ├── terseness-reminder.sh # UserPromptSubmit hook: re-asserts terseness each turn
 │   ├── canonical-sdlc-evidence-gate.sh   # PreToolUse hook: blocks commits missing plan evidence
 │   ├── canonical-sdlc-governing-skill.sh # PreToolUse hook: blocks plan/spec writes missing frontmatter
 │   └── *.test.sh            # Hook test suites
@@ -98,10 +97,8 @@ bionic/
 ├── skills/                  # Bionic skills → ~/.claude/skills/
 │   ├── canonical-sdlc/      # Flagship 10-step autonomous SDLC
 │   ├── browser-verify/      # Verify-gate browser modality (CLI-first)
-│   ├── rigorous-refactor/   # Disciplined multi-file refactoring
-│   ├── ralph-loop/          # Build-test-diagnose iteration cycle
 │   ├── map-instrument-narrow/ # Evidence-gathering for complex debugging
-│   └── skill-factory/       # Guided skill authoring with composability schema
+│   └── excalidraw-diagram/  # Diagram JSON generator + renderer
 ├── ccstatusline/            # Status line config → ~/.config/ccstatusline/
 │   └── settings.json        # Model, context %, cost, git branch
 └── README.md
@@ -305,10 +302,7 @@ All bionic skills follow the composability schema: every skill declares a `layer
 |-------|-------|--------------------|
 | **canonical-sdlc** *(flagship)* | Governance | Bionic's own 10-step autonomous SDLC (Steps 0–9), organized around **two gates** — Verify (Step 5, "does it work?") and Review (Step 6, "is it well-made?") — plus a cross-cutting commit rhythm. Two coordinating hooks (governing-skill, evidence-gate) enforce plan/spec/ADR frontmatter shape on write and per-step verification evidence on commit. Plan frontmatter is single source of truth for state. Two-tier evidence (verification + handoff). Step 0 wizard confirms every flag with the user; Step 8 (Integrate & close) strips ephemera on close. Governed by an `intent`/`rigor`/`scale` triple (the retired v≤10 `mode:` vocabulary — autonomous, epic-scope, incident-response, design-refresh, spike — maps onto it; see the skill's Legacy modes section). Full reference: [`skills/canonical-sdlc/README.md`](skills/canonical-sdlc/README.md). |
 | **browser-verify** | Operational | The Verify gate's browser modality (Step 5). Runs golden-path and edge-case flows with console/network checks and visual evidence. Drives via the token-efficient `playwright-cli`; escalates to the Chrome DevTools MCP only for deep inspection (Lighthouse, performance traces, heap/CPU profiling, network throttling) that no CLI exposes. |
-| **ralph-loop** | Governance | Disciplined build-test-diagnose iteration cycle. Prevents skipping phases, exiting without evidence, and grinding past iteration limits. Three modes: DEBUG, GREENFIELD, RESEARCH-FIRST. |
-| **rigorous-refactor** | Operational | Strict state machine for complex refactors. Prevents self-grading, skipping decomposition, and implementing without tests. Independent validation via separate agent. |
 | **map-instrument-narrow** | Technique | Evidence-gathering for complex debugging. Prevents guessing without data, fixing without understanding, and instrumenting without architecture. MAP → INSTRUMENT → NARROW phases. |
-| **skill-factory** | Governance | Interviews the user to extract a constraint, layer, dependencies, and rationalizations, then hands off to skill-creator for file generation and eval testing. Prevents creating skills without an identified failure mode. |
 
 ### Hooks (Safety Guardrails + canonical-sdlc Enforcement)
 
@@ -322,7 +316,6 @@ Hooks are shell scripts that Claude Code invokes at defined lifecycle events. Bi
 
 **Advisory / reinforcement** (two hooks using JSON output to inject context, never block):
 - `memory-cleanup.sh` (`SessionStart|startup`) — scans `.bionic/memory/` at session start and emits an advisory listing stale or oversized files.
-- `terseness-reminder.sh` (`UserPromptSubmit`) — re-asserts the CLAUDE.md terseness rules every turn to fight drift.
 
 All six hooks are registered in `~/.claude/settings.json` by `claude-bootstrap.sh`, each with a paired `*.test.sh` suite run in CI.
 
@@ -367,9 +360,6 @@ Shape enforcement is version-routed: v3/v4 plans run the v3 per-step shape table
 
 `SessionStart` hook (with the `startup` matcher, so it doesn't re-fire on compact/clear/resume) that scans `.bionic/memory/` for two kinds of problem: **stale topical files** (`<topic>.md` whose `updated:` frontmatter is older than 30 days) and **oversized files** (`INDEX.md` over 30 Always-Apply rules or 5 KB; `context.md` over 500 lines or 50 KB). When anything trips, it emits `hookSpecificOutput.additionalContext` listing the offenders and recommending the fix — verify/bump/prune stale files, run `/memory-compact` on oversized ones. `INDEX.md` and `context.md` never date-expire (only topical files do), though both are subject to the size check. **Advisory only — it never blocks**, and when nothing trips it exits silently. No-op for projects without `.bionic/memory/`. Test suite: [`hooks/memory-cleanup.test.sh`](hooks/memory-cleanup.test.sh).
 
-**terseness-reminder.sh** — [`hooks/terseness-reminder.sh`](hooks/terseness-reminder.sh) → `~/.claude/hooks/terseness-reminder.sh`
-
-`UserPromptSubmit` hook that re-asserts the CLAUDE.md terseness rules on every turn. CLAUDE.md is loaded once at session start; as context grows and other skills inject competing instructions, the terseness baseline gets diluted. This hook keeps a compact (<500-char) reminder in the model's attention each turn — lead with the answer, no preamble, drop hedging — with an explicit EXEMPT clause (code, diffs, commit messages, evidence blocks, the 5-axis review rubric, ADRs, plan/spec frontmatter, security warnings) so terseness can't corrupt the structured output that canonical-sdlc and other skills depend on. Disable mid-session with `touch ~/.claude/.bionic-terse-off`; re-enable by removing the flag. Fails silent — a missing `jq` or any error injects nothing rather than breaking the session. Test suite: [`hooks/terseness-reminder.test.sh`](hooks/terseness-reminder.test.sh).
 
 #### Memory: a manual-save notebook
 

@@ -118,7 +118,7 @@ mcp-server   | sentry        | @sentry/mcp-server@latest   | SENTRY_ACCESS_TOKEN
 
    # Indented comment — must be skipped
 
-local-skill  | rigorous-refactor
+local-skill  | browser-verify
 env-var      | CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS | 1
 statusline   | npx ccstatusline@latest
 plugin       | superpowers         | claude-plugins-official
@@ -195,7 +195,7 @@ expect_eq "blank lines skipped: exactly 2 brew-dep entries" "2" "$_brew_count"
 _local_skill_name=""
 _check_local_skill() { _local_skill_name="$1"; }
 read_config "local-skill" _check_local_skill
-expect_eq "local-skill: name whitespace-trimmed" "rigorous-refactor" "$_local_skill_name"
+expect_eq "local-skill: name whitespace-trimmed" "browser-verify" "$_local_skill_name"
 
 # 1i: env-var two-field entry (key and value both trimmed)
 _env_key="" _env_val=""
@@ -447,12 +447,6 @@ _motion_store=0
 _check_motion_store() { if [ "$1" = "motion" ]; then _motion_store=1; fi; }
 read_config "pnpm-store" _check_motion_store
 expect_eq "motion is registered as a pnpm-store library" "1" "$_motion_store"
-
-# 2m: motion is also installed as a local-skill (teaches the current motion.dev API)
-_motion_skill=0
-_check_motion_skill() { if [ "$1" = "motion" ]; then _motion_skill=1; fi; }
-read_config "local-skill" _check_motion_skill
-expect_eq "motion is registered as a local-skill" "1" "$_motion_skill"
 
 # ============================================================
 # SECTION 3: Bootstrap/reset script symmetry
