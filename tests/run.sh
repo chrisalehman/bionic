@@ -36,11 +36,37 @@ done
 run "scripts.test.sh" bash tests/scripts.test.sh
 run "installer-behavior.test.sh" bash tests/installer-behavior.test.sh
 run "agent-roles.test.sh" bash tests/agent-roles.test.sh
+run "decision-baseline.test.sh" bash tests/decision-baseline.test.sh
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   run "bootstrap-e2e-docker.sh (mock)" bash tests/bootstrap-e2e-docker.sh
 else
   printf '  %-36s ' "bootstrap-e2e-docker.sh (mock)"; echo "⤼ SKIP (docker unavailable)"; skip=$((skip+1))
 fi
+
+# ── Instruments: MEASURED, never gating ────────────────────────────────────
+# These are measurement instruments, not gates. They must never set the exit
+# code — a metric that can fail the suite becomes a number people tune instead
+# of a number they read. They run here so the instruments cannot become orphan
+# scripts that rot unnoticed: before this, tests/metrics.sh was reachable only
+# by hand, which is how an "add a metric" task ends up measuring nothing.
+echo ""
+echo "Instruments (measured, never gating):"
+instrument() {  # instrument <label> <cmd...>
+  local label="$1"; shift
+  printf '  %-36s ' "$label"
+  if "$@" >"$TMP/inst" 2>&1; then
+    echo "✓ $(grep -c . "$TMP/inst" | tr -d ' ') rows"
+  else
+    echo "⤼ unavailable (not a failure)"
+  fi
+}
+instrument "metrics.sh" bash tests/metrics.sh
+instrument "decision-baseline.sh" bash tests/decision-baseline.sh
+# The headline decision-quality rows, surfaced so the instrument is read rather
+# than merely executed. The corpus is live, so these drift slightly run to run;
+# BIONIC_CORPUS_DIR pins a frozen corpus when a number must be reproduced.
+grep -E '^decision\.(turns|request_turn_pct|ac3_agreement_dedup_pct|ac3_verdict|uncorrected_fire_pct)\b' \
+  "$TMP/inst" 2>/dev/null | sed 's/^/      /' || true
 
 echo "──────────────────────────────────────────────"
 echo "Gating: ${pass} passed, ${fail} failed, ${skip} skipped"

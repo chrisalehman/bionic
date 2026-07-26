@@ -37,7 +37,19 @@ SPEC="$REPO/.bionic/docs/specs/epic-11-harness-fitness/wave-02-decision-quality.
 PASS=0; FAIL=0; TOTAL=0
 
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+# Incident 0001: the accrued record must live where a consuming project cannot
+# commit it. The fake HOME is a SIBLING of the sandbox project, never a child —
+# the "nothing under the project tree" assertion uses `find "$PROJ"`, which a
+# nested home would satisfy falsely. Every invocation runs with HOME pointed
+# here, or the suite would append to the developer's real ~/.claude/logs.
+FAKE_HOME=$(mktemp -d)
+PROJ="$TMP/proj"; mkdir -p "$PROJ"
+trap 'rm -rf "$TMP" "$FAKE_HOME"' EXIT
+
+# Must match hooks/refuse-and-classify.sh audit_path() byte for byte.
+slug_for() { printf '%s-%s' "$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')" \
+                            "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"; }
+record_for() { printf '%s/.claude/logs/%s/decision-quality.md' "$FAKE_HOME" "$(slug_for "$1")"; }
 
 pass() { PASS=$((PASS + 1)); TOTAL=$((TOTAL + 1)); printf '  PASS  %s\n' "$1"; }
 fail() { FAIL=$((FAIL + 1)); TOTAL=$((TOTAL + 1)); printf '  FAIL  %s%s\n' "$1" "${2:+ — $2}"; }
@@ -48,19 +60,19 @@ assert_contains() {  # $1=label $2=needle $3=haystack
 
 # run_hook <stdin-json> → HOOK_EXIT, HOOK_STDOUT
 run_hook() {
-  HOOK_STDOUT=$(printf '%s' "$1" | bash "$HOOK" 2>/dev/null); HOOK_EXIT=$?
+  HOOK_STDOUT=$(printf '%s' "$1" | HOME="$FAKE_HOME" bash "$HOOK" 2>/dev/null); HOOK_EXIT=$?
 }
 
 # Real captured Stop stdin shape. last_assistant_message is added only where a
 # case needs it, because the capture proves it is not always there.
 payload() {  # $1=stop_hook_active $2=transcript_path [$3=last_assistant_message]
   if [ $# -ge 3 ]; then
-    jq -nc --argjson a "$1" --arg t "$2" --arg m "$3" \
-      '{session_id:"scrubbed", transcript_path:$t, cwd:"/scrubbed",
+    jq -nc --argjson a "$1" --arg t "$2" --arg c "$PROJ" --arg m "$3" \
+      '{session_id:"scrubbed", transcript_path:$t, cwd:$c,
         hook_event_name:"Stop", stop_hook_active:$a, last_assistant_message:$m}'
   else
-    jq -nc --argjson a "$1" --arg t "$2" \
-      '{session_id:"scrubbed", transcript_path:$t, cwd:"/scrubbed",
+    jq -nc --argjson a "$1" --arg t "$2" --arg c "$PROJ" \
+      '{session_id:"scrubbed", transcript_path:$t, cwd:$c,
         hook_event_name:"Stop", stop_hook_active:$a}'
   fi
 }
@@ -235,6 +247,70 @@ T7="$TMP/t7.jsonl"; write_transcript "$T7" "$ASK"
 run_hook "$(payload false "$T7" "")"
 DEC=$(printf '%s' "$HOOK_STDOUT" | jq -r '.decision // empty' 2>/dev/null)
 [ "$DEC" = "block" ] && pass "empty message key: falls back and blocks" || fail "empty message key: falls back" "got: '$DEC'"
+
+echo
+echo "AC-8: the hook accrues its own fire/no-fire record"
+# Decision quality must stay measurable after the wave closes. The record is the
+# only thing W6 will have — this wave's baseline comes from history, and history
+# cannot be re-measured after behaviour changes.
+REC=$(record_for "$PROJ")
+rm -f "$REC"
+
+T8="$TMP/t8.jsonl"; write_transcript "$T8" "$ASK"
+run_hook "$(payload false "$T8" "$ASK")"
+if [ -f "$REC" ]; then pass "record file created under \$HOME/.claude/logs/<slug>/"
+else fail "record file created" "not found: $REC"; fi
+line=$(tail -1 "$REC" 2>/dev/null || true)
+assert_contains "record: source tag"   "refuse-and-classify:" "$line"
+assert_contains "record: fired=1"      "fired=1"              "$line"
+# The signal names are what make the accrued data diagnostic rather than a bare
+# counter — W6 needs to know WHICH ask shape drove the rate.
+assert_contains "record: carries signal names" "signals=question" "$line"
+TOTAL=$((TOTAL + 1))
+if printf '%s' "$line" | grep -qE '^- [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z '; then
+  PASS=$((PASS + 1)); printf '  PASS  record: house line format (- <ISO8601> <source>: ...)\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  record: house line format — got: %s\n' "$line"
+fi
+
+echo "  (a non-firing turn is recorded too — no-fire is data, not absence of data)"
+before=$(wc -l < "$REC" | tr -d ' ')
+T9="$TMP/t9.jsonl"; write_transcript "$T9" "$WORK"
+run_hook "$(payload false "$T9" "$WORK")"
+after=$(wc -l < "$REC" | tr -d ' ')
+[ "$after" -eq $((before + 1)) ] && pass "record: appended, never truncated" || fail "record appended" "$before → $after"
+assert_contains "record: fired=0 on an ordinary turn" "fired=0" "$(tail -1 "$REC")"
+
+echo "  (a suppressed re-entry is distinguishable from a genuine no-fire)"
+run_hook "$(payload true "$T8" "$ASK")"
+assert_contains "record: re-entry marked" "suppressed=re-entry" "$(tail -1 "$REC")"
+[ -z "$HOOK_STDOUT" ] && pass "record: logging did not resurrect the block" || fail "re-entry still silent"
+
+echo "  (incident 0001: nothing is written inside the project tree)"
+TOTAL=$((TOTAL + 1))
+stray=$(find "$PROJ" -type f 2>/dev/null | wc -l | tr -d ' ')
+if [ "$stray" -eq 0 ]; then
+  PASS=$((PASS + 1)); printf '  PASS  record: zero files under the project tree\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  record: %s file(s) under the project tree\n' "$stray"
+  find "$PROJ" -type f | sed 's/^/        /'
+fi
+
+echo "  (no transcript content reaches the record)"
+TOTAL=$((TOTAL + 1))
+if grep -qiF "cache the parsed config" "$REC" 2>/dev/null; then
+  FAIL=$((FAIL + 1)); printf '  FAIL  record: turn text leaked into the accrued record\n'
+else
+  PASS=$((PASS + 1)); printf '  PASS  record: signals and counts only, no turn text\n'
+fi
+
+echo "  (logging can never break a session)"
+UNWRIT=$(mktemp -d); chmod 500 "$UNWRIT"
+HOOK_STDOUT=$(printf '%s' "$(payload false "$T8" "$ASK")" | HOME="$UNWRIT" bash "$HOOK" 2>/dev/null); HOOK_EXIT=$?
+chmod 700 "$UNWRIT"; rm -rf "$UNWRIT"
+[ "$HOOK_EXIT" -eq 0 ] && pass "unwritable HOME: exit 0" || fail "unwritable HOME: exit 0" "got $HOOK_EXIT"
+DEC=$(printf '%s' "$HOOK_STDOUT" | jq -r '.decision // empty' 2>/dev/null)
+[ "$DEC" = "block" ] && pass "unwritable HOME: the refusal still ships" || fail "unwritable HOME: refusal still ships" "got '$DEC'"
 
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"

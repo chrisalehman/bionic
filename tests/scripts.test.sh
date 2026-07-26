@@ -735,6 +735,26 @@ for hook in "${REPO}/hooks/"*.sh; do
 done
 expect_true "hooks/ contains at least one non-test hook" [ "$_hook_count" -gt 0 ]
 
+# 4n: measurement instruments are reachable from the repo's own test surface.
+# An instrument nobody runs measures nothing. Both of these were hand-invoked
+# only, so "add a metric" would have left the number unread — the WIRING is the
+# deliverable, not the metric. These assertions are the anti-orphan guard: if a
+# future cleanup drops the call from run.sh, this fails instead of the
+# instrument quietly rotting.
+_runner="${REPO}/tests/run.sh"
+expect_true "run.sh invokes tests/metrics.sh" \
+  grep -q 'tests/metrics\.sh' "$_runner"
+expect_true "run.sh invokes tests/decision-baseline.sh" \
+  grep -q 'tests/decision-baseline\.sh' "$_runner"
+expect_true "run.sh runs the scorer's own suite as gating" \
+  grep -q 'tests/decision-baseline\.test\.sh' "$_runner"
+# Instruments must not be able to fail the build. `run` is the gating helper;
+# instruments go through `instrument`, which swallows the exit status.
+expect_true "run.sh has a non-gating instrument helper" \
+  grep -q '^instrument()' "$_runner"
+expect_false "instruments are not registered as gating suites" \
+  grep -qE '^run "(metrics|decision-baseline)\.sh"' "$_runner"
+
 # 4p: evidence-gate hook reads evidence_schema and supports v2 path
 _egate="${REPO}/hooks/canonical-sdlc-evidence-gate.sh"
 expect_true "evidence-gate hook reads evidence_schema from frontmatter" \
