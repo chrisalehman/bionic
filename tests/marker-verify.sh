@@ -40,15 +40,19 @@
 # Definitions this verifier commits to (all are judgment calls; see the plan's
 # ## Assumptions):
 #
-#   normative statement — a LINE containing never / must / always / mandatory /
-#     required / shall / do not / don't, case-insensitive, whole word. Line, not
-#     sentence: sentence splitting is a parser. Keyword-based detection is a
-#     floor, not a ceiling — a rule phrased without a keyword is invisible here,
-#     which is why markers are ALLOWED on any line and why the two-way check
-#     exists.
+#   normative statement — a LINE containing an obligation keyword (never / must
+#     / always / mandatory / required / shall / do not / don't) or a BINDING VERB
+#     (cannot / can't / forbid(s) / forbidden / refuse(s) / prevents / no way to
+#     / will not / is barred), case-insensitive, whole word. Line, not sentence:
+#     sentence splitting is a parser. Keyword-based detection is a floor, not a
+#     ceiling — a rule phrased without a keyword is invisible here, which is why
+#     markers are ALLOWED on any line and why the two-way check exists. The
+#     binding verbs were added in slice 4/9 after a sweep found overclaims that
+#     said the system *refuses* something rather than that you *must not* do it.
 #   unit — the span a marker covers. In prose: a run of non-blank lines, split
-#     at every list item and heading, so sibling bullets need their own markers
-#     (the `## Boundaries` case: two of four entries bind, two do not). In
+#     at every list item, heading and TABLE ROW, so siblings need their own
+#     markers (the `## Boundaries` case: two of four entries bind, two do not;
+#     the rationalization table: one marked row was covering twenty-eight). In
 #     shell: a run of comment lines, split at empty comment lines.
 #   blocking path — `exit 2` or a permissionDecision "deny" payload, on a
 #     NON-COMMENT line. Comment lines are excluded deliberately: a grep that
@@ -116,6 +120,12 @@ scan() {  # scan <mode:prose|shell> <file>
       if (t ~ / (never|must|always|mandatory|required|shall) /) return 1
       if (t ~ / do not /) return 1
       if (t ~ / (dont|don t) /) return 1
+      # Binding verbs: a rule that says the system REFUSES something is as
+      # binding as one that says you must not do it, and the first keyword set
+      # could not see any of them. "The flag floor forbids it — you cannot shop
+      # rigor below a derivable floor" is the case that found this gap.
+      if (t ~ / (cannot|cant|forbid|forbids|forbidden|refuse|refuses|prevents) /) return 1
+      if (t ~ / (can t|no way to|will not|is barred) /) return 1
       return 0
     }
     function scan_markers(s, ln,   rest, tok, inner, cls, args, p) {
@@ -149,7 +159,7 @@ scan() {  # scan <mode:prose|shell> <file>
     MODE == "prose" && fence { next }
     MODE == "prose" && /^[[:space:]]*$/ { flush_unit(); next }
     MODE == "prose" {
-      if ($0 ~ /^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]/ || $0 ~ /^#{1,6}[[:space:]]/) flush_unit()
+      if ($0 ~ /^[[:space:]]*([-*+]|[0-9]+[.)])[[:space:]]/ || $0 ~ /^#{1,6}[[:space:]]/ || $0 ~ /^[[:space:]]*\|/) flush_unit()
       collect($0, FNR)
       next
     }

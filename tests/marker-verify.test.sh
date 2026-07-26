@@ -146,6 +146,41 @@ expect_out "INSTRUMENT counted" "INSTRUMENT=1"
 expect_out "UNENFORCED counted" "UNENFORCED=1"
 expect_out "four normative statements counted" "normative=4"
 
+# ---------- 8: binding verbs beyond never/must/always (slice 4/9) ----------
+#
+# The first keyword floor read only never/must/always/mandatory/required/shall/
+# do not/don't. A rule phrased "the flag floor forbids it — you cannot shop
+# rigor below a derivable floor" is just as binding and was invisible, so it sat
+# unmarked while the verifier reported clean. Same defect shape at the unit
+# level: a markdown TABLE was one unit, so a single marker anywhere in it
+# covered every row.
+echo "== 8: binding verbs and table-row units =="
+
+run_verify "$FIX/binding-verbs.md"
+expect_rc "binding-verbs.md exits non-zero" 1
+expect_out "violation code E-UNMARKED" "E-UNMARKED"
+expect_out "forbids is binding" "forbids shopping rigor"
+expect_out "cannot is binding" "cannot be dispatched"
+expect_out "can't is binding" "merge a wave while a matrix row"
+expect_out "refuses is binding" "refuses a plan whose current step"
+expect_out "forbidden is binding" "Sub-floor rigor is forbidden"
+expect_out "prevents is binding" "prevents a push to a protected branch"
+expect_out "no way to is binding" "no way to skip the independent auditor"
+expect_out "will not is binding" "will not be applied silently"
+expect_out "is barred is binding" "epic-scale bugfix is barred"
+expect_out "every binding verb counted, and only those" "unmarked=9"
+expect_no_out "the non-normative line is not reported" "binds nothing"
+
+run_verify "$FIX/binding-verbs-marked.md"
+expect_rc "binding-verbs-marked.md exits 0" 0
+expect_out "marked twin counts the same statements" "normative=9"
+expect_out "marked twin reports zero unmarked" "unmarked=0"
+
+run_verify "$FIX/table-units.md"
+expect_rc "a marker on one table row does not cover its sibling" 1
+expect_out "the unmarked sibling row is named" "$FIX/table-units.md:5"
+expect_out "exactly one table row is unmarked" "unmarked=1"
+
 # ---------- 7: meta-evidence — mutation and restore ----------
 echo "== 7: meta-evidence (mutation and restore) =="
 
@@ -170,6 +205,20 @@ expect_out "7b: the blocking path is reported unclaimed" "E-UNCLAIMED-BLOCK"
 # 7c: restore is asserted, not assumed — the real fixtures still pass
 run_verify "$FIX/marked.md" "$FIX/claimed-block.sh"
 expect_rc "7c: unmutated fixtures still pass after mutation" 0
+
+# 7d: move the marker from one table row to its sibling — the verifier must
+# follow it. Durable proof that a table row is its own unit: if a marker
+# anywhere in the table covered the whole table (the pre-4/9 behaviour), this
+# mutation would change nothing and both variants would pass.
+sed -e '5s/forbids it\./forbids it. [UNENFORCED]/' -e '6s/ \[UNENFORCED\]//' \
+    "$REPO/$FIX/table-units.md" > "$mut_dir/$FIX/table-units.md"
+OUT="$(cd "$REPO" && bash "$VERIFY" "$mut_dir/$FIX/table-units.md" 2>&1)"; RC=$?
+expect_rc "7d: moving the marker to the other row stays RED" 1
+expect_out "7d: the now-unmarked sibling is the OTHER row" "table-units.md:6"
+expect_out "7d: still exactly one unmarked row" "unmarked=1"
+
+run_verify "$FIX/table-units.md"
+expect_out "7d: the unmutated fixture still names row 5" "$FIX/table-units.md:5"
 
 echo
 echo "Results: $PASS/$((PASS + FAIL)) passed, $FAIL failed"
