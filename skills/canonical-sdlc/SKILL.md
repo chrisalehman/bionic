@@ -900,7 +900,9 @@ This replaces the old suite-credit escape: a green suite (T1) can never stand in
 
 **T3 validity — the five ways a live observation lies.** A T3 row's `fresh`/`cold-client`/`contact`/`readback` fields carry browser-verify's five T3 validity conditions: artifact per-origin freshness across the AC's serving path; a cold client; feature-scoped contact with the AC's own interaction (undrivable → the row is **blocked**, loud, never silently skipped); semantic readback via page-scope eval, never pixels; and the once-per-session runtime stack-health below. browser-verify is the canonical home — see it for the full conditions; do not restate them here. [FORM: hooks/canonical-sdlc-evidence-gate.test.sh]
 
-**stack-health — once per walk session.** The `## Verification Matrix` section opens with a `stack-health: <before/after snapshot, no delta>` line (or `n/a: <reason>` when no long-running serve is observed), bracketing the whole walk — same value contract as v9. Any restart/crash delta is a blocking finding until run to ground.
+**stack-health — once per walk session.** The `## Verification Matrix` section carries a `stack-health: <before/after snapshot, no delta>` line (or `n/a: <reason>` when no long-running serve is observed), conventionally first, bracketing the whole walk — same value contract as v9. What the hook checks is presence plus a non-empty value, anywhere in the section: a missing line, a bare `stack-health:`, `n/a`, or `n/a:` blocks the commit; any other text passes unread. [FORM: hooks/canonical-sdlc-evidence-gate.test.sh]
+
+Reading that snapshot is a human judgment — nothing in the harness compares before against after. A restart or crash delta is a blocking finding until run to ground, and only the walker and the Step-5 auditor can catch one. [UNENFORCED]
 
 **T4 discharge.** A T4 row is discharged by recorded user confirmation — `user-confirmed: <user> <date> <what was walked>` [FORM: hooks/canonical-sdlc-evidence-gate.test.sh]. Agents never self-confirm a T4 row. [UNENFORCED]
 
@@ -1194,12 +1196,12 @@ Long-running epics span sessions. Continuation artifacts make session handoff au
 
 Frontmatter: `governing-skill: canonical-sdlc`, `sdlc-step: 10`, no `wave` field.
 
-**Mid-wave checkpoint (`.bionic/tmp/continuation-checkpoint.md`).** The Stop hook detects an active canonical-sdlc run and autosaves a checkpoint to `.bionic/tmp/` capturing:
+**Mid-wave checkpoint (`.bionic/tmp/continuation-checkpoint.md`).** Nothing autosaves this file. No hook writes it; the only wired `Stop` hook is `context-spend.sh`, which appends one context-spend audit line and updates its own state file. An agent that wants a mid-wave checkpoint writes one itself, capturing: [UNENFORCED]
 - Current SDLC State snapshot.
 - In-flight work.
 - Next recommended action on resume.
 
-Zero user interaction. The next session reads it if present and resumes from the recorded state. Step 8's `.bionic/tmp/` wipe (cleanup half) clears this on merge.
+Step 0's artifact inventory lists it if present and resumes from the recorded state; absent, there is nothing to resume from and the session reconstructs state from the plan. Step 8's `.bionic/tmp/` wipe (cleanup half) clears it on merge. [UNENFORCED]
 
 ## Hooks
 
