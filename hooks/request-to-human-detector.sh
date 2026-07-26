@@ -14,16 +14,26 @@
 #
 #   question — a `?`-terminated sentence carrying a marker that aims it at the
 #              human ("should we", "do you want", "which approach", "your")
-#   options  — two or more enumerated `Option N` / `Choice N` headings, the
-#              shape of a menu handed over for selection
-#   request  — an explicit imperative aimed at the human ("can you run",
-#              "please push", "let me know", "your call", "I need you")
+#   options  — a menu handed over for selection: two or more `Option N` /
+#              `Choice N` headings, OR a standalone `Options:` label line
+#              governing a numbered list of two or more items
+#   request  — an imperative aimed at the human ("can you run", "please push",
+#              "let me know", "your call", "I need you"), including a BARE
+#              imperative in sentence-initial position ("Confirm the items and
+#              I'll write it up", "Reply with the scope you want")
+#   blocked  — an ask phrased as a statement of pendency: the work is stopped
+#              and the human is named as what it is stopped ON ("paused on your
+#              call", "nothing pending except your ruling")
 #
 # Never "this paragraph feels decision-ish". Fenced code is stripped before
 # matching: a regex holding `?` and a comment holding "you" are not an ask.
 #
 # Direction is load-bearing and falls out of the phrase forms: "you can run it"
-# is documentation, "can you run it" is a request. Only the second fires.
+# is documentation, "can you run it" is a request. Only the second fires. The
+# same discipline governs the pendency signal — "blocked ON your call" hands the
+# work over, "blocked your push" reports something that happened to them — and
+# the imperative signal, where sentence-initial position is what separates
+# "Confirm the rollback path" from "Confirmed: 41/41 pass".
 #
 # Two modes, ONE matching core, so the corpus baseline cannot drift from the
 # hook that ships:
@@ -54,13 +64,18 @@ function norm(s,   t) {
   sub(/^ /, "", t); sub(/ $/, "", t)
   return " " t " "
 }
-function reset() { fence = 0; opts = 0; q = 0; r = 0; started = 0 }
+function reset() { fence = 0; opts = 0; label = 0; num = 0; q = 0; r = 0; b = 0; started = 0 }
 function flush(   sig) {
   if (!started) return
   sig = ""
   if (q) sig = sig " question"
-  if (opts >= 2) sig = sig " options"
+  # A menu is either N labelled `Option` headings, or one standalone label line
+  # governing a numbered list. The label line is the discriminator: numbered
+  # lists are the most common shape in ordinary work turns, and only a menu
+  # announces itself before enumerating.
+  if (opts >= 2 || (label >= 1 && num >= 2)) sig = sig " options"
   if (r) sig = sig " request"
+  if (b) sig = sig " blocked"
   sub(/^ /, "", sig)
   if (batch) printf "%s\t%d\t%s\n", id, (sig != "" ? 1 : 0), (sig != "" ? sig : "-")
   else if (sig != "") { print sig; hit = 1 }
@@ -89,18 +104,42 @@ BEGIN {
     "| i need (you|your) | (tell|let) me (which|what|whether|if|how) " \
     "| (should|shall) (i|we) | (do|did) you want | would you like | want me to )"
 
+  # A bare imperative aimed at the human — no "please", no "can you", nothing
+  # but the verb in sentence-initial position. The verb set is deliberately
+  # narrow: verbs that only make sense addressed to someone who owes a call.
+  # Generic imperatives (take, use, run, see, check) are excluded — they are
+  # how documentation talks, and they would cost false positives.
+  S_IMPERATIVE = "(^ |[.?!] )(confirm|reply|pick|choose|decide|approve|specify" \
+    "|clarify|advise|acknowledge|ratify|weigh in|sign off) "
+
+  # An ask phrased as a statement of pendency: the work is stopped and the
+  # human is named as what it is stopped ON. Never a question, never an
+  # imperative. The preposition is load-bearing and is why this is not simply
+  # (pendency-word AND "your") — "blocked ON your call" hands the work over,
+  # "blocked your push" is a report of something that happened to them.
+  S_BLOCKED = " (blocked|paused|parked|stalled|waiting|pending|gated|stuck" \
+    "|held|holding)[^.?!]* (on|for|upon) ([^.?!]* )?your "
+
   # An enumerated menu. Two or more, at line start, explicitly labelled.
   S_OPTIONS = "^ (option|choice) [0-9a-c] "
+  # A standalone menu label: a line that is nothing but the word, so prose like
+  # "both options work" cannot match.
+  S_OPTLABEL = "^ (the |your |two |three |four |five |six )?(options|choices) $"
 }
 batch && substr($0, 1, 1) == SOH { flush(); id = substr($0, 2); started = 1; next }
 {
   if (!batch) started = 1
   if ($0 ~ /^[ \t]*```/) { fence = !fence; next }
   if (fence) next
+  # Numbered-list items are counted on the RAW line: normalisation spaces out
+  # the terminator, so `1.` and a sentence-ending period become the same token.
+  if ($0 ~ /^[ \t]*[0-9]+[.)][ \t]/) num++
   n = norm($0)
   if (n ~ S_OPTIONS) opts++
+  if (n ~ S_OPTLABEL) label++
   if (n ~ S_QUESTION) q = 1
-  if (n ~ S_REQUEST) r = 1
+  if (n ~ S_REQUEST || n ~ S_IMPERATIVE) r = 1
+  if (n ~ S_BLOCKED) b = 1
 }
 END { flush(); if (!batch) exit (hit ? 0 : 1) }
 '
