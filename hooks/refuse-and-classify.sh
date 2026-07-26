@@ -58,10 +58,7 @@ audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
 # point; a hook that errors while accruing is a broken session.
 accrue() {  # $1=fired(0|1) $2=signals $3=extra
   local dir f
-  PROJECT_DIR="${CLAUDE_PROJECT_DIR:-}"
-  if [ -z "$PROJECT_DIR" ]; then
-    PROJECT_DIR=$(printf '%s' "$INPUT" | jq -r 'if type == "object" then (.cwd // empty) else empty end' 2>/dev/null) || return 0
-  fi
+  PROJECT_DIR="${CLAUDE_PROJECT_DIR:-${CWD:-}}"
   [ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR" ] || return 0
   f=$(audit_path "$PROJECT_DIR") 2>/dev/null || return 0
   dir=$(dirname "$f")
@@ -72,13 +69,68 @@ accrue() {  # $1=fired(0|1) $2=signals $3=extra
     >> "$dir/decision-quality.md" 2>/dev/null || return 0
 }
 
-SESSION_ID=$(printf '%s' "$INPUT" | jq -r 'if type == "object" then (.session_id // empty) else empty end' 2>/dev/null) || SESSION_ID=""
+# ── ONE read of the payload ────────────────────────────────────────────────
+# Every field this hook needs, in a single `jq` spawn. It took four on the
+# common path — session_id, stop_hook_active, cwd, last_assistant_message —
+# plus a fifth for transcript_path on the fallback, and a Stop hook runs on
+# EVERY turn, so the spawns are the cost that matters here.
+#
+# Framing: the header fields on line 1, joined on \037. That separator is a
+# unit separator and, critically, NOT whitespace — `read` collapses runs of
+# whitespace delimiters and would silently swallow an empty field, sliding
+# every later field one position left. The turn text is the only field that can
+# legitimately contain newlines, so it goes LAST and is carried raw as the
+# whole remainder. `@tsv` would have been shorter and is wrong here: it escapes
+# \t and \n into two-character sequences, and the detector matches per LINE, so
+# an escaped turn is a differently-shaped turn.
+#
+# Every header field is flattened inside jq, and session_id is held to a
+# stricter charset than the rest. Both are load-bearing, for different reasons:
+# the framing above needs line 1 to stay one line, and session_id is the one
+# header field that also reaches decision-quality.md — written one record per
+# line and declared machine-parsed by W6.
+#
+# The fail-open asymmetry is preserved exactly. Both defaults are deliberate:
+#   unparseable payload       → jq exits non-zero → ACTIVE "" → not "false"
+#                               → treat as already-active, never block twice
+#   valid JSON, not an object → the else branch → ACTIVE "true" → no block
+#   well-formed object with
+#     stop_hook_active ABSENT → `// false` → ACTIVE "false" → blocks, which is
+#                               the first Stop of a turn and the whole point
+_READ=$(printf '%s' "$INPUT" | jq -r '
+  # Newlines and tabs out of every header field, or line 1 stops being one line
+  # and part of the header is handed to the turn text.
+  def flat: tostring | gsub("[\n\r\t]"; "");
+  # session_id takes the house charset from audit_path() instead. A
+  # control-character scrub is NOT enough for this field: the record line is
+  # space-delimited, so it is the SPACE that lets a crafted id forge a second
+  # field on a line it legitimately occupies. The allowlist leaves nothing that
+  # can pass for a delimiter — no newline, no tab, no space, no `=`, and not
+  # the unit separator either.
+  def id: tostring | gsub("[^A-Za-z0-9._-]"; "-");
+  if type == "object" then
+    ([(.stop_hook_active // false | flat), (.cwd // "" | flat),
+      (.transcript_path // "" | flat), (.session_id // "" | id)] | join("\u001f")),
+    (.last_assistant_message // "")
+  else
+    (["true", "", "", ""] | join("\u001f")), ""
+  end' 2>/dev/null) || _READ=""
+
+# Everything after the first newline is the turn. When the turn is empty jq
+# emits a trailing blank line, which the substitution strips — leaving no
+# newline at all, which is the "no turn text" case rather than a short header.
+_HDR=${_READ%%$'\n'*}
+if [ "$_HDR" = "$_READ" ]; then TURN=""; else TURN=${_READ#*$'\n'}; fi
+# Field ORDER is defensive, not cosmetic. `read` folds every surplus field into
+# the LAST variable, so session_id going last means a separator smuggled into
+# any field can only ever extend session_id — it can never shift the value of
+# stop_hook_active, the one field that decides whether this hook may block.
+IFS=$'\037' read -r ACTIVE CWD TRANSCRIPT SESSION_ID <<< "$_HDR"
 [ -n "$SESSION_ID" ] || SESSION_ID="unknown"
 
 # ── loop safety, before anything else ──────────────────────────────────────
 # On a parse failure the fallback is "active", i.e. do not block. Every
 # ambiguity in this hook resolves toward letting the turn through.
-ACTIVE=$(printf '%s' "$INPUT" | jq -r 'if type == "object" then (.stop_hook_active // false) else true end' 2>/dev/null) || ACTIVE=true
 if [ "$ACTIVE" != "false" ]; then
   # Recorded as a distinct outcome: a suppressed re-entry is not the same fact
   # as a turn that had nothing to refuse, and conflating them would make the
@@ -88,10 +140,11 @@ if [ "$ACTIVE" != "false" ]; then
 fi
 
 # ── the completed turn's text ──────────────────────────────────────────────
-TURN=$(printf '%s' "$INPUT" | jq -r 'if type == "object" then (.last_assistant_message // empty) else empty end' 2>/dev/null) || TURN=""
-
+# TURN and TRANSCRIPT both came out of the single read above. The key being
+# ABSENT and the key being EMPTY are the same case here and always were: both
+# fall back to the transcript walk, which is what makes a CONDITIONAL key safe
+# to prefer.
 if [ -z "${TURN//[[:space:]]/}" ]; then
-  TRANSCRIPT=$(printf '%s' "$INPUT" | jq -r 'if type == "object" then (.transcript_path // empty) else empty end' 2>/dev/null) || TRANSCRIPT=""
   [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || exit 0
   # House pattern (context-spend.sh): bounded tail, `fromjson?` swallows
   # malformed lines. Each candidate is emitted as ONE JSON-encoded line so the
