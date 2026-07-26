@@ -96,6 +96,31 @@ expect decision.uncorrected_fire_pct             50.0
 expect decision.ac3_verdict                      BELOW-THRESHOLD
 
 echo
+echo "Straddle case: raw and dedup rates disagree across the 70% threshold"
+# The known-answer corpus above cannot discriminate which rate drives the
+# verdict — raw (66.7) and dedup (50.0) are both under 70, so a verdict wired
+# to either one reads BELOW-THRESHOLD. This corpus is built so the two rates
+# land on OPPOSITE sides of the threshold: 8 duplicate corrected turns on the
+# firing ASK1 text plus 2 duplicate corrected turns on the non-firing WORK1
+# text give a raw rate of 8/10 = 80.0 (clears 70), but collapsed to distinct
+# fingerprints that is 1 firing of 2 distinct = 50.0 (misses it). Only this
+# shape proves the verdict is reading the de-duplicated column.
+CORPUS2="$TMP/corpus2"; mkdir -p "$CORPUS2"
+F="$CORPUS2/frozen.jsonl"; : > "$F"
+for i in 1 2 3 4 5 6 7 8; do a_turn "$ASK1";  u_fix; done
+for i in 1 2;             do a_turn "$WORK1"; u_fix; done
+
+OUTS=$(BIONIC_CORPUS_DIR="$CORPUS2" bash "$SCORER" 2>/dev/null)
+expect_straddle() {  # $1=key $2=expected value
+  local got
+  got=$(printf '%s\n' "$OUTS" | awk -v k="$1" -F'\t' '$1 == k { print $2; exit }')
+  if [ "$got" = "$2" ]; then pass "straddle: $1 = $2"; else fail "straddle: $1 = $2" "got '$got'"; fi
+}
+expect_straddle decision.ac3_agreement_pct       80.0
+expect_straddle decision.ac3_agreement_dedup_pct 50.0
+expect_straddle decision.ac3_verdict             BELOW-THRESHOLD
+
+echo
 echo "The verdict never sets the exit code"
 # A red script invites tuning the detector until it goes green, which is the
 # defect this wave exists to prevent.
