@@ -8,10 +8,12 @@
 # last assistant message.usage (TOP-LEVEL, never iterations[]) = occupancy
 # (input + cache_creation + cache_read); the active plan's `current:` line
 # = step attribution; .bionic/tmp/context-spend.state = boundary detector.
+# [INSTRUMENT]
 #
 # Failure mode: silence. Missing jq/transcript/usage/plan/current →
 # exit 0, nothing appended, state untouched. NEVER blocks, NEVER writes
 # stdout (a Stop hook's stdout could carry a block payload).
+# [INSTRUMENT]
 #
 # Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
 
@@ -43,6 +45,7 @@ fi
 # canonical-sdlc-governing-skill.sh and canonical-sdlc-evidence-gate.sh —
 # divergence would give one project two audit files. Deliberate per-hook
 # duplication (no shared lib).
+# [INSTRUMENT]
 audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
   [ -n "${HOME:-}" ] || return 1
   local base sum
@@ -66,6 +69,7 @@ PLAN=$(ls -t "$PLANS_DIR"/*.plan.md "$PLANS_DIR"/*/*.plan.md "$PLANS_DIR"/*/*/*.
 
 # current: from ## SDLC State — CR-normalized, fence-aware (the evidence-gate
 # defect class: fenced skeletons quoting `current:` must stay invisible).
+# [INSTRUMENT]
 STEP=$(awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$PLAN" | awk '
   /^```/ { fence = !fence; next }
   fence { next }
@@ -100,6 +104,7 @@ fi
 # First-seen, plan switch, or session switch: seed silently. Two
 # concurrent sessions on the same plan must never diff against each
 # other's occupancy — a session change re-seeds, same as a plan change.
+# [INSTRUMENT]
 if [ "$s_plan" != "$PLAN" ] || [ "$s_sess" != "$SESSION_ID" ] || [ -z "$s_step" ]; then
   printf '%s\t%s\t%s\t%s\n' "$PLAN" "$SESSION_ID" "$STEP" "$OCCUPIED" > "$STATE" 2>/dev/null || true
   exit 0

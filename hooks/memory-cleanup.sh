@@ -6,14 +6,17 @@
 #      older than 30 days.
 #   2. Oversized index / journal — INDEX.md > 30 Always Apply rules
 #      or > 5 KB; context.md > 500 lines or > 50 KB.
+# [INSTRUMENT]
 #
 # INDEX.md and context.md are never considered "stale" by the date
 # check — only topical files are date-aged. They are subject to the
 # size check.
+# [INSTRUMENT]
 #
 # When anything is flagged, emits hookSpecificOutput.additionalContext
 # so Claude picks up the recommendation silently at session start.
 # Advisory only — NEVER blocks. When nothing trips, exits silently.
+# [INSTRUMENT]
 #
 # Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
 
@@ -55,7 +58,7 @@ for file in "$MEMORY_DIR"/*.md; do
   [ -f "$file" ] || continue
   base=$(basename "$file")
 
-  # INDEX.md and context.md never expire per the protocol.
+  # INDEX.md and context.md never expire per the protocol. [INSTRUMENT]
   [ "$base" = "INDEX.md" ] && continue
   [ "$base" = "context.md" ] && continue
 
@@ -96,6 +99,7 @@ done
 # Thresholds (in sync with commands/memory-compact.md):
 #   INDEX.md     — > 30 Always Apply rules OR > 5 KB
 #   context.md   — > 500 lines OR > 50 KB
+# [INSTRUMENT]
 INDEX_FILE="$MEMORY_DIR/INDEX.md"
 CONTEXT_FILE="$MEMORY_DIR/context.md"
 
@@ -120,6 +124,7 @@ if [ -f "$INDEX_FILE" ]; then
   # by counting any line that begins with "- " in the file — the typical
   # INDEX.md is dominated by Always Apply bullets, and Deep Context
   # pointers count toward the rule budget too (both are bullets).
+  # [INSTRUMENT]
   index_bullets=$(grep -c '^- ' "$INDEX_FILE" 2>/dev/null || echo 0)
   index_bullets=${index_bullets//[!0-9]/}
   : "${index_bullets:=0}"

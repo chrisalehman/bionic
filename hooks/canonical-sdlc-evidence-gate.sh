@@ -22,6 +22,7 @@
 # in progress, XXX, TBD, placeholder), block the commit. The rule is:
 # the evidence artifact must be recorded in the plan file *before* the
 # commit that closes the step.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 #
 # Plans without ## SDLC State pass through unblocked — this hook only
 # enforces against canonical-sdlc runs.
@@ -132,6 +133,7 @@ fi
 # \r from each record (CRLF: \r\n → \n) and converts any remaining lone \r
 # (classic-Mac CR-only: \r without \n) into a real newline. Every parse below is
 # line-anchored, so it must see real newlines.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 #
 # `tr -d '\r'` (the prior normalization) merely DELETED every \r. On a CRLF file
 # that happened to work, but on a CR-only file it removed every line break,
@@ -140,6 +142,7 @@ fi
 # hook exited 0 as "not a canonical-sdlc plan", and every commit passed ungated.
 # awk splits on \n by default, so a CR-only file arrives as a single record that
 # gsub re-splits into real lines; LF and CRLF files are unaffected.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 normalize_newlines() {
   awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"
 }
@@ -210,6 +213,7 @@ is_placeholder_value() {
 # project that owns the artifact, not necessarily the invoking PROJECT_DIR.
 # PROJECT_DIR is the fallback only (empty/unreadable $PLAN, or no .bionic/
 # ancestor found). Fail-open: the `cd ... && pwd` guard never crashes the hook.
+# [INSTRUMENT]
 audit_root() {
   local d
   d=$(cd "$(dirname "$PLAN")" 2>/dev/null && pwd)
@@ -230,6 +234,7 @@ audit_root() {
 # Byte-identical to the copies in farm-out-reminder.sh,
 # canonical-sdlc-governing-skill.sh and context-spend.sh — divergence would give
 # one project two audit files. Deliberate per-hook duplication (no shared lib).
+# [INSTRUMENT]
 audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
   [ -n "${HOME:-}" ] || return 1
   local base sum
@@ -246,6 +251,7 @@ audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
 # that project lives — $HOME/.claude/logs/<project-slug>/, outside every
 # consuming project tree, never .bionic/memory/ again. An unwritable
 # destination drops the line; there is deliberately no fallback branch.
+# [INSTRUMENT]
 log_finding() {  # $1=check-id  $2=detail
   local f
   if f=$(audit_path "$(audit_root)"); then
@@ -281,6 +287,7 @@ effective_row_rigor() {  # $1 = row's rigor cell
 # Total order over the rigor enum, for the per-row FLOOR check (slice 4/8).
 # tested < peer-reviewed < audited. An empty/unknown value maps to 0 (the tested
 # floor) so an unset frontmatter rigor never manufactures a phantom downgrade.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 # Mirrors the governing-skill hook's ord map at its rigor check (kept in sync by
 # hand, not imported — the two hooks share no source). bash-3.2 safe whole-value
 # `case`, same idiom as effective_row_rigor above.
@@ -301,6 +308,7 @@ rigor_ord() {  # $1 = a rigor lane name (or empty)
 # matches in "bash test.sh 12/12" but `testing` never triggers on a `test`
 # substring). Returns 0 (proof-shaped) / 1 (not) — never blocks itself; the
 # caller (apply_rigor_lanes) decides what a failure means.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 is_proof_shaped() {  # $1 = evidence value
   local v="$1"
   echo "$v" | grep -qE '[0-9]' || return 1
@@ -330,6 +338,7 @@ is_proof_shaped() {  # $1 = evidence value
 # The `tested` floor carries none of these demands — 4/1's presence +
 # placeholder checks are its entire contract (plan Assumption A4: the literal
 # substrings are sufficient tokens, no pointer-format sub-schema).
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 apply_rigor_lanes() {  # $1=id $2=status $3=effective-rigor $4=evidence-value
   local id="$1" status="$2" eff="$3" ev="$4"
   case "$eff" in
@@ -372,6 +381,7 @@ apply_rigor_lanes() {  # $1=id $2=status $3=effective-rigor $4=evidence-value
 # (exit 2) UNLESS the row's `- T<n>:` evidence line carries a whole-word `waiver`
 # marker (Waiver Protocol — same `grep -Ewq` word-boundary idiom as the lane
 # token checks), in which case the row proceeds at its (lower) cell lane.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 #
 # Called on exactly the rows the rigor lanes cover — the addressed unit (any
 # status) and non-addressed `done` rows with real evidence — AFTER their
@@ -384,6 +394,7 @@ apply_rigor_lanes() {  # $1=id $2=status $3=effective-rigor $4=evidence-value
 # empty cell resolves to the frontmatter rigor, so rigor_ord(eff) ==
 # rigor_ord(RIGOR) and no phantom downgrade fires — only an explicit lower cell
 # trips it. A cell EQUAL to the frontmatter is not a downgrade (strict `<`).
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 enforce_rigor_floor() {  # $1=id  $2=effective-rigor  $3=evidence-value
   local id="$1" eff="$2" ev="$3"
   [ "$(rigor_ord "$eff")" -lt "$(rigor_ord "$RIGOR")" ] || return 0
@@ -403,6 +414,7 @@ enforce_rigor_floor() {  # $1=id  $2=effective-rigor  $3=evidence-value
 # verbatim in whichever channel fires. The addressed-unit floor (4/1) and the
 # rigor lanes (4/2) are NOT routed through here — they already block
 # unconditionally where they should.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 ledger_shape_fail() {  # $1 = detail
   if [ "$RIGOR" = audited ]; then
     echo "BLOCKED: canonical-sdlc task-ledger: $1" >&2
@@ -425,6 +437,8 @@ ledger_shape_fail() {  # $1 = detail
 #     Any breach emits a 3-line block message and exit 2. Once past the floor,
 #     apply_rigor_lanes (4/2) applies the proof-shape/auditor/critic lanes keyed
 #     to its effective rigor.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
+#
 #   - EVERY OTHER row stays LOG-ONLY (D14, check-id `task-ledger`) for status
 #     and presence/placeholder: status outside {pending,active,done,dropped},
 #     or an active/done task with no `- T<n>:` line or a placeholder/empty
@@ -438,6 +452,7 @@ ledger_shape_fail() {  # $1 = detail
 #     caught earlier by the per-row INVALID guard (4/7), which resolves the cell
 #     and BLOCKS unconditionally at any frontmatter rigor before this
 #     status-based branching; see that guard for the rationale.
+# [INSTRUMENT]
 validate_task_ledger() {
   local tasks rows line id status rigor_cell ev eff addressed_found=0
   tasks=$(normalize_newlines "$PLAN" | awk '
@@ -476,6 +491,7 @@ validate_task_ledger() {
     # unchecked. `eff` is reused by both branches below (never INVALID past
     # here). Order vs the status-enum check: status first, then rigor — a row
     # with BOTH defects may block on either; this order is pinned for determinism.
+    # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
     eff=$(effective_row_rigor "$rigor_cell")
     if [ "$eff" = "INVALID" ]; then
       echo "BLOCKED: canonical-sdlc task ${id} has an invalid rigor '${rigor_cell}' (want tested|peer-reviewed|audited)." >&2
@@ -484,6 +500,7 @@ validate_task_ledger() {
       exit 2
     fi
     # Evidence line for this task in ## SDLC State (anchored so T2 never matches T20).
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
     ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
          | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
     if [ "$id" = "$CURRENT" ]; then
@@ -509,6 +526,7 @@ validate_task_ledger() {
       # floor above. `eff` was resolved and INVALID-guarded at the per-row guard
       # (4/7); it names a valid lane here. Applies regardless of this row's own
       # status — the addressed unit is always in scope.
+      # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
       apply_rigor_lanes "$id" "$status" "$eff" "$ev"
     else
       # Every OTHER row's presence/placeholder checks route through
@@ -537,6 +555,7 @@ validate_task_ledger() {
     fi
   done <<< "$rows"
   # The addressed unit (current: T<n>) must have a row in ## Tasks (BLOCKING).
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
   if [ "$addressed_found" -eq 0 ]; then
     echo "BLOCKED: canonical-sdlc task ${CURRENT} has no row in the '## Tasks' registration table." >&2
     echo "Plan: $PLAN" >&2
@@ -554,6 +573,7 @@ validate_task_ledger() {
 # does not shadow the REAL section (which would mis-parse `current:` and false-
 # block). Fence state is tracked across the whole file so section detection
 # stays fence-aware.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 SECTION=$(normalize_newlines "$PLAN" | awk '
   /^[[:space:]]*```/ { fence = !fence; next }
   fence { next }
@@ -583,6 +603,7 @@ CURRENT=$(echo "$SECTION" \
 # `current: T<n>` on a v≤10 plan or a non-task v11 plan is NOT accepted here; it
 # falls through to the numeric check below and blocks (T-format is v11 + scale:task
 # only, never retrofitted).
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 if echo "$CURRENT" | grep -qE '^T[0-9]+$' && [ "$SDLC_VERSION" = "11" ] && [ "$SCALE" = "task" ]; then
   validate_task_ledger
   exit 0
@@ -599,6 +620,7 @@ fi
 # (current vocabulary) and "Phase N:" (legacy plans), with or without a
 # leading list marker. New plans should use "Step"; "Phase" is retained
 # for backward compatibility.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 LINE=$(echo "$SECTION" \
        | grep -E "^[[:space:]]*-?[[:space:]]*(Step|Phase)[[:space:]]+${CURRENT}[[:space:]]*:" \
        | head -1)
@@ -634,6 +656,7 @@ extract_continuation() {
 CONTINUATION=$(extract_continuation "$SECTION" "$CURRENT")
 
 # Combined block used for empty/placeholder/shape checks.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 BLOCK=$RAW_VALUE
 if [ -n "$CONTINUATION" ]; then
   BLOCK="${BLOCK}
@@ -655,6 +678,7 @@ fi
 # blocks. v≤10 plans are never exempted (grandfathered) — a stray line that
 # happens to share one of these key names still blocks there, byte-identical
 # to pre-R7 behavior.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 is_r7_key() {
   case "$1" in
     behavior-preservation|compat-matrix|revert-plan|baseline|target|re-measure) return 0 ;;
@@ -704,6 +728,7 @@ done <<< "$BLOCK"
 # v4 uses the same per-step evidence shape table as v3 — the v4 bump added
 # a required `model_plan` frontmatter field (enforced by the governing-skill
 # hook), which changes no per-step evidence shape.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
 #
 # v5 (gate-collapse) renumbers and merges steps, so it has its own shape
 # switch:
@@ -735,6 +760,7 @@ done <<< "$BLOCK"
 # decision, never a silent omission. The proof format is
 # project-specific by design; the hook validates presence, non-empty
 # value / non-empty n/a reason, and the existing placeholder ban only.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 #
 # v8 is the v7 shape table plus ONE addition: Step 5 (Verify)
 # additionally requires a `drive-check:` key — proof that one trusted
@@ -746,6 +772,7 @@ done <<< "$BLOCK"
 # validates presence, non-empty value / non-empty n/a reason, and the
 # existing placeholder ban only; the suite-credit semantics live in
 # SKILL.md prose. v7 and earlier plans are never retrofitted.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 #
 # v9 (current) = v8 + Step-5 stack-health: ONE more universal key,
 # `stack-health: <before/after snapshot, no delta>` or
@@ -755,6 +782,7 @@ done <<< "$BLOCK"
 # looking healthy. Same contract as its siblings: presence, non-empty
 # value / non-empty n/a reason, existing placeholder ban. v8 and earlier
 # plans are never retrofitted.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 if [ "$SDLC_VERSION" = "11" ]; then
   # v11 wave/epic-scale plans carry the v10 shape (task-scale plans exited
   # above via validate_task_ledger). The v11 arm reuses v10's validators.
@@ -785,6 +813,7 @@ fi
 # Step 4 is the exception: when use_worktree=true it carries worktree fields
 # and must fall through to the shape check below. v2 lists Step 4 nowhere
 # here, so v2 always shape-checks Step 4 (unchanged from before).
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 pointer_steps_for_mode() {
   case "$1" in
     v10|v11)     echo "1 2 3 4" ;;  # Step 6 must reach dispatch for the matrix prefix check
@@ -822,6 +851,7 @@ block_has_na() {
   block_has "n/a"
 }
 
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 shape_block() {
   local missing=()
   for f in "$@"; do
@@ -873,6 +903,7 @@ step5_keys_for_version() {
 # universal Step-5 key. Per-key wording lives in the case arms (tests assert
 # it byte-for-byte); the whole-block placeholder ban already ran upstream.
 # These keys are Step-5 only, so the prefix is fixed at step 5.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 require_na_key() {
   local label="$1" key="$2" prefix val
   prefix=$(step_prefix "$label" 5)
@@ -896,6 +927,7 @@ require_na_key() {
     esac
     exit 2
   fi
+  # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
   val=$(block_get "$key")
   case "$val" in
     ""|n/a|n/a:)
@@ -924,6 +956,7 @@ require_na_key() {
 # Tests modality: cmd/pass/total/output present, pass and total integers,
 # pass==total. Shared by the verify gate (v5–v8 Step 5) and the standalone
 # "Verify done" step (v3 Step 6, v2 Step 7).
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 validate_tests_block() {
   local label="$1" step="$2" pass total prefix
   shape_block cmd pass total output
@@ -945,6 +978,7 @@ validate_tests_block() {
 
 # Verify gate (v5–v8 Step 5): tests modality, then browser modality
 # (devtools-trace OR n/a), then each universal key the version requires.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 validate_verify_step() {
   local label="$1" k
   validate_tests_block "$label" 5
@@ -961,6 +995,7 @@ validate_verify_step() {
 
 # Standalone browser-verify step (v3 Step 5, v2 Step 6): devtools-trace OR
 # n/a. Distinct wording from the verify gate's browser modality above.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 validate_browser_verify_step() {
   local label="$1" step="$2" prefix
   if ! block_has devtools-trace && ! block_has_na; then
@@ -973,6 +1008,7 @@ validate_browser_verify_step() {
 }
 
 # Document step: adr OR rca OR n/a.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 validate_document_step() {
   local label="$1" step="$2" prefix
   if ! block_has adr && ! block_has rca && ! block_has_na; then
@@ -984,6 +1020,7 @@ validate_document_step() {
 }
 
 # External review step: pr OR n/a.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 validate_external_review_step() {
   local label="$1" step="$2" prefix
   if ! block_has pr && ! block_has_na; then
@@ -996,6 +1033,7 @@ validate_external_review_step() {
 
 # Integrate & close (v5–v8): merge/worktree-removed always; then the cleanup
 # triple, OR an explicit `cleanup: n/a` marker (cleanup_on_finish=false).
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 validate_integrate_step() {
   local cleanup_val
   shape_block merge worktree-removed
@@ -1012,6 +1050,7 @@ validate_integrate_step() {
 
 # Ship step: deploy/verified-at/monitor, OR `n/a` only when
 # deploy_target=none.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 validate_ship_step() {
   local label="$1" step="$2" prefix
   if block_has_na; then
@@ -1042,10 +1081,12 @@ validate_ship_step() {
 # advance via the 6..9 prefix check. The status cell is enum-checked
 # (pending|blocked|discharged|waived) since the relaxation makes it
 # load-bearing.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 
 # Per-tier required evidence keys — MIRROR of the canonical table in
 # skills/canonical-sdlc/SKILL.md Step 5 ("Per-tier required evidence keys").
 # Change THAT table first; this function follows it. (R27)
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 keys_for_tier() {
   case "$1" in
     T0|T1) echo "tier-run readback" ;;
@@ -1062,6 +1103,7 @@ keys_for_tier() {
 # downstream matrix parse (rows, stack-health, false-green, AC blocks) reads
 # this body, so scoping the fence-skip here covers all of them. Fence state
 # is tracked across the whole file so section detection stays fence-aware.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 matrix_section() {
   normalize_newlines "$PLAN" | awk '
     /^[[:space:]]*```/ { fence = !fence; next }
@@ -1074,6 +1116,7 @@ matrix_section() {
 # The indented evidence block under "<AC-id>:" within MATRIX (up to the next
 # non-indented line). index()==1 anchors at line start without regex-escaping
 # the AC id, so AC-1 never matches the AC-11 block.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 matrix_block() {
   echo "$MATRIX" | awk -v ac="$1:" '
     index($0, ac)==1 {f=1; next}
@@ -1083,6 +1126,7 @@ matrix_block() {
 
 # 3-line BLOCKED/Plan/Fix emit for the v10 matrix arm (mirrors the pattern
 # every other validator uses). $1 = message tail, $2 = fix line.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 block_matrix() {
   echo "BLOCKED: canonical-sdlc v10 step ${CURRENT} — $1" >&2
   echo "Plan: $PLAN" >&2
@@ -1125,6 +1169,7 @@ validate_matrix_v10() {
 
   # false-green two-part rule: any `false-green:` entry must have a paired
   # `rewritten:` entry, or the gate blocks (Assumption 12a).
+  # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
   if echo "$MATRIX" | grep -qE '^[[:space:]]*false-green[[:space:]]*:'; then
     if ! echo "$MATRIX" | grep -qE '^[[:space:]]*rewritten[[:space:]]*:'; then
       block_matrix "a 'false-green:' entry in the matrix has no paired 'rewritten:' entry." \
@@ -1163,6 +1208,7 @@ validate_matrix_v10() {
     # status enum (v10.1) — the status cell is load-bearing (pending/blocked
     # relax the Verify gate; waived relaxes everything), so a typo must
     # block, not silently read as discharged-like.
+    # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
     case "$status" in
       pending|blocked|discharged|waived) : ;;
       *)
@@ -1212,6 +1258,7 @@ validate_matrix_v10() {
       done
     fi
     # Once past the Verify gate, every non-waived row must be CONFIRMED.
+    # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
     if [ "$CURRENT" -gt 5 ] 2>/dev/null; then
       if [ "$status" = "waived" ] || echo "$ev" | grep -qE 'waiver:' \
          || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
@@ -1226,6 +1273,7 @@ validate_matrix_v10() {
 
 # v10 Verify gate: tests floor (reused), a required non-empty auditor pointer,
 # then the Verification Matrix.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 validate_verify_step_v10() {
   local aud
   validate_tests_block v10 5
@@ -1233,6 +1281,7 @@ validate_verify_step_v10() {
   # v10.1: the auditor is the Step-5 exit gate — it cannot have run while
   # rows are still pending/blocked, so the pointer is required only once
   # every row is discharged or waived.
+  # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
   if [ "$UNDISCHARGED" -eq 0 ]; then
     if ! block_has auditor; then
       block_matrix "the Verify gate requires 'auditor: <verdict summary + report pointer>' in the Step 5 block." \
@@ -1258,6 +1307,7 @@ validate_verify_step_v10() {
 # plan's integration-branch logs a finding. Never blocks. First cross-file read
 # in this hook — read-only, fail-open (missing epic plan / missing key → no
 # finding). Fires at the integrate step.
+# [INSTRUMENT]
 validate_merge_target() {
   local epic epic_plan epic_branch this_branch
   epic=$(frontmatter_get epic)
@@ -1266,6 +1316,7 @@ validate_merge_target() {
   [ -r "$epic_plan" ] || return 0
   # Fence-aware (matches the SECTION extraction): an epic plan documenting a
   # `## SDLC State` example in a ``` fence must not shadow its real section.
+  # [INSTRUMENT]
   epic_branch=$(normalize_newlines "$epic_plan" \
     | awk '
       /^[[:space:]]*```/ { fence = !fence; next }
@@ -1290,6 +1341,7 @@ validate_merge_target() {
 # Step-5 BLOCK/block_has/block_get accessors already populated for the
 # current step's evidence (same accessors validate_verify_step_v10 uses),
 # so this validator is only meaningful when called at current: 5.
+# [INSTRUMENT]
 validate_intent_evidence() {
   local key val
   case "$INTENT" in
@@ -1338,6 +1390,7 @@ validate_intent_evidence() {
 #   3. Each data row: status (field 6) in {pending,active,done,dropped} else
 #      exit 2; a non-placeholder `- T<n>:` evidence line must exist in the
 #      ## SDLC State section (SECTION) else exit 2.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 validate_dispatch_ledger() {
   [ "$SDLC_VERSION" = "11" ] || return 0
   [ "$SCALE" = "wave" ] || return 0
@@ -1364,6 +1417,7 @@ validate_dispatch_ledger() {
     [ -n "$line" ] || continue
     id=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
     status=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')
+    # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
     case "$status" in
       pending|active|done|dropped) : ;;
       *)
@@ -1374,6 +1428,7 @@ validate_dispatch_ledger() {
         ;;
     esac
     # Evidence line in ## SDLC State (anchored, same lookup as task scale).
+    # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
     ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
          | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
     if [ -z "$ev" ]; then
