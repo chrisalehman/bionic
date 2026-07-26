@@ -721,8 +721,8 @@
     },
     {
       "type": "text", "id": "audit_path",
-      "x": 1028, "y": 668, "width": 336, "height": 18,
-      "text": "~/.claude/logs/<project>/sdlc-*-audit.md", "originalText": "~/.claude/logs/<project>/sdlc-*-audit.md",
+      "x": 1028, "y": 668, "width": 319, "height": 18,
+      "text": "~/.claude/logs/<project>/sdlc-audit.md", "originalText": "~/.claude/logs/<project>/sdlc-audit.md",
       "fontSize": 14, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#e2e8f0", "backgroundColor": "transparent",
       "fillStyle": "solid", "strokeWidth": 1, "strokeStyle": "solid",
