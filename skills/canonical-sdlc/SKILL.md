@@ -131,7 +131,65 @@ Committing is a cross-cutting rhythm (~once per step), not a numbered step. Upda
 2. **Classify the triple silently.** Infer from the request's verbs and named artifacts. Do NOT interrogate. Interview by exception only, 1–3 questions, on exactly three conditions: a genuine intent collision the classification rules do not resolve (the standing gray zones are **mechanism-swap** and **reference-content**); a suspected but unconfirmed security/privacy surface; or a scale that could be one session or several.
 3. **Infer the flags.** `language` from repo files; `surface_type`/`has_ui` from the request; `multi_agent` defaults **true** (infer `false` only when there is genuinely nothing to offload — never key it off an installed plugin catalog, which silently disables the dispatched-task ledger guard); `deploy_target` from deploy signals; `cleanup_on_finish` true; `use_worktree` false; `integration_branch` from the epic plan, else the current mainline, else `main` — print it as `unknown` rather than dropping it; `model_plan` from `multi_agent` and the detected session model.
 4. **Derive the Verification Matrix.** One row per acceptance criterion. Tier defaults: user-visible behavior → **T3**; engine-divergent → **T2 both engines** plus **T3** for the user-visible AC; pure substrate with no runtime surface → **T1/T2** with a one-line justification; perceptual fidelity → **T3**, T4 available; docs → **T0/none**.
-5. **Present the confirmation display in full** — every flag, every inference rationale, every matrix row, the `integration-branch:` line. Never elide, sample, or summarize it: the user is approving exactly what they can see.
+5. **Present the confirmation display in full, in the layout below.** Every section, every flag, every inference rationale, every matrix row, the `integration-branch:` line. Never elide, sample, summarize, defer, or restate it as prose — the user is approving exactly what they can see, and an abbreviated display invalidates the confirmation. Print every matrix row even past 12 ACs; a matrix is precisely what must not be sampled. An unknown value prints as `unknown` rather than dropping its line.
+
+```
+═══ Plan Configuration — confirm before Step 1 ═══
+environment:
+  bionic-root:  <abs path>/.bionic                   [verified | MISSING]
+  docs-root:    .bionic/docs                         [default | from config.yaml]
+  bionic-tmp:   <abs path>/.bionic/tmp               [ready]
+  hooks:        evidence-gate, governing-skill       [installed+executable | <what is wrong>]
+
+slug: <wave-NN-slug | epic-NN-slug | incident-NNNN-slug>
+
+Triple:                          [the run's shaping decision]
+  intent:  <value>               [inferred: <rationale — cite the machinery test for build/bugfix>]
+  rigor:   <value>               [inferred: <rationale — name the binding floor>]
+  scale:   <value>               [inferred: <rationale — why not the neighbouring scales>]
+
+  barred-cell check: <cell> is barred; <this cell> PERMITTED
+  floor derivation:  scale default <v> · intent floor <v> · flag floor <v> · project floor <v>
+                     · epic floor <v> → effective <v> = MAX
+
+integration-branch: <name>       [<source: epic plan | current mainline | main> — Step 8 merges here]
+
+Discriminator flags:
+  surface_type:    <value>      [inferred: <evidence>]
+  language:        <value>      [inferred: <evidence>]
+  has_ui:          <value>      [inferred: <evidence>]
+  multi_agent:     <value>      [inferred: <evidence>]
+  deploy_target:   <value>      [inferred: <evidence>]
+
+Opt-in flags:
+  cleanup_on_finish: <value>    [<consequence at Step 8>]
+  use_worktree:      <value>    [<why isolation is or is not needed>]
+
+Model plan:                      [multi_agent=<value> → <tiered dispatch | single-thread>]
+  orchestrator:       <detected session model>   [main thread, fixed all wave]
+  implementor:        <model>    [standard slices]
+  senior-implementor: <model>    [complex slices, root-cause debugging]
+  researcher:         <model>    [exploration]
+  test-runner:        <model>    [mechanical + test execution]
+  auditor:            <model>    [Step 5 — fresh, independent, never the implementer]
+  critic:             <model>    [Step 6 — fresh, independent, never the author]
+
+Verification Matrix:            [locked at Step 3 approval — every row shown, never sampled]
+  stack-health: <PENDING — taken at Step 5 | snapshot | n/a: reason>
+  | AC   | tier | status  | evidence | auditor |
+  | AC-1 | <T>  | pending | see AC-1 |         |  [<tier rationale> — <criterion in one line>]
+  | AC-2 | <T>  | pending | see AC-2 |         |  [<tier rationale> — <criterion in one line>]
+
+  live-tier count: <n> of <total> rows require T3
+  at-risk rows:    <AC-id (why it may end up blocked)> | none
+  slices carrying NO ROW: <slice + why it produces a determination, not behaviour> | none
+
+Reply "confirm" to accept, or specify overrides:
+  e.g. "set use_worktree=true, set verify(AC-2)=T2, then confirm"
+  Reply "explain" (or "explain <axis>") for a plain-language guide to these choices.
+```
+
+   **This layout is literal, and it is deliberately not marked unenforced.** No hook can check it — the display is conversational, never a file — so the template *is* the whole enforcement. A previous version expressed it as descriptive prose, which read as decoration and was deleted in an instruction-surface cut; the run then drifted into free-form summaries that satisfied nobody. Keep it as a block.
 6. **Block until explicit confirmation.** No timeout, no implicit acceptance.
 7. **Create the task list immediately on approval** — one task per planned step, `0:` marked completed. Nothing runs in between.
 
