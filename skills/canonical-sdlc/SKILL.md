@@ -193,6 +193,19 @@ Reply "confirm" to accept, or specify overrides:
 6. **Block until explicit confirmation.** No timeout, no implicit acceptance.
 7. **Create the task list immediately on approval** — one task per planned step, `0:` marked completed. Nothing runs in between.
 
+**Task-list format — blessed, and it binds across every step, not just Step 0.**
+
+- **Chronological order of execution.** The list reads top to bottom as the work will actually happen.
+- **Format A — `<task>: <short desc>`** (e.g. `3: Plan — lock slices and matrix`).
+- **Format B — `<task>/<slice>: <short desc>`**, only where slices are involved (e.g. `4/2: fix the window conversion`).
+- **A takes precedence over B when slices are present**: the step's own entry is DROPPED and its slices stand in its place. Never print `4: Implement` above `4/1: …` — display space is precious and the parent line is duplicative. It is also a line that can never complete until all its slices do, so it carries no signal.
+- **Short descriptions.** The subject is a signal, not a summary — detail belongs in the task body or the plan.
+- **No filler.** Every entry is a real unit of work with a real status; nothing decorative, nothing that carries no state.
+- **No freeform titles.** An entry without a `<task>:` or `<task>/<slice>:` prefix is malformed.
+- Mark `in_progress` on starting and `completed` the moment it is done — never batch completions. When a subagent finishes, the orchestrator updates the entry; dispatched work is ledgered in the plan, never as a bare task.
+
+The list is the user's visible progress surface. Nothing enforces this — no hook can read a task list — so the format is the whole discipline.
+
 **Override DSL.** `set <axis|flag>=<value>` and `set verify(<AC>)=<tier>`, comma-separated, ending in `confirm`. `explain [axis]` renders the axis tables and never counts as confirmation; a free-text question about the display is treated as `explain`, never as a parse error. A rigor override BELOW a derivable floor is refused by this skill (name the binding floor and keep the floor value) — no code refuses it. A barred intent × scale cell is rejected.
 
 **Evidence:** `Step 0: configured at <ISO> via <reply>; model_plan=<tiers>; integration-branch=<name>`
