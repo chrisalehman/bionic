@@ -5,6 +5,9 @@
 **Prove it works.** Run tests, show output. If no test infrastructure exists, create it. Changes without proof are unfinished work.
 **Guard your context.** The main thread is for decisions, judgment and coordination. Offload research, exploration, and implementation to subagents; dispatch parallel teams for independent tasks. Dispatch in the background — never block my session — and when you hand back, name anything still running.
 **Keep a project notebook.** `.bionic/memory/` — read `INDEX.md` and `context.md` at session start; write corrections as rules the moment they happen.
+**Does anything read this without being asked?**
+**No** → operational. Path-addressed, cited when needed. Growth is free.
+**Yes** → knowledge. Reachable from the always-loaded catalogue. Growth costs every session.
 
 ## Cognitive load
 
