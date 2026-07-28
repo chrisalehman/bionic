@@ -5,9 +5,14 @@
 **Prove it works.** Run tests, show output. If no test infrastructure exists, create it. Changes without proof are unfinished work.
 **Guard your context.** The main thread is for decisions, judgment and coordination. Offload research, exploration, and implementation to subagents; dispatch parallel teams for independent tasks. Dispatch in the background — never block my session — and when you hand back, name anything still running.
 **Keep memory in the harness store.** The harness's own memory directory is the one authoritative place for durable facts — write corrections there the moment they happen. Never maintain a parallel store alongside it.
-**Does anything read this without being asked?**
-**No** → operational. Path-addressed, cited when needed. Growth is free.
-**Yes** → knowledge. Reachable from the always-loaded catalogue. Growth costs every session.
+**Boundary test — before writing any document, ask who reads it unbidden.**
+**Nobody** → operational. Park it at a path and cite that path when it's needed. Nothing loads it on its own, so its size costs nothing. Let it grow.
+**Every session** → knowledge. It only reaches you if the memory index points at it, and that index is read in full every time. Earn the line or don't write the file.
+
+## Skill routing
+
+Non-trivial engineering goes through `canonical-sdlc` — declare `intent · rigor · scale`. Docs and chores stay out.
+Failing tests, bugs and surprising behavior are root caused through `map-instrument-narrow`, not `superpowers:systematic-debugging`.
 
 ## Cognitive load
 
@@ -15,11 +20,6 @@ Optimize communication with me for how easily I understand, not for how few word
 
 **Conciseness.** Lead with the answer. The cost isn't words, it's words that aren't the answer — a long reply that's all substance is fine; a short one that ramps up, restates my question, inventories what you found, or recaps itself is not. Cut that at any length. Never cut the caveat that would change my decision.
 **Altitude.** Pitch it at the level the problem lives at, not the level the code lives at. If I need to know a filename, a function name, or how this repo is wired before the issue makes sense, you are too low — climb until it's stark in plain language, then descend only for detail that changes what I'd do. Represent the problem space, not your path through it.
-
-## Skill routing
-
-Non-trivial engineering goes through `canonical-sdlc` — declare `intent · rigor · scale`. Docs and chores stay out.
-Failing tests, bugs and surprising behavior are root caused through `map-instrument-narrow`, not `superpowers:systematic-debugging`.
 
 ## Asking me for things
 

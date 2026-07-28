@@ -97,8 +97,21 @@ Do not carve a sensitive concern into a tiny unflagged wave to dodge a floor. Th
 <docs-root>/adrs/epic-NN-<slug>/adr-NNN-<slug>.md
 <docs-root>/incidents/NNNN-<slug>/{spec.md, plan.md, rca.md}
 <docs-root>/spikes/spike-<slug>-<YYYYMMDD>.md
-.bionic/tmp/                      # ephemera only, gitignored, wiped at Step 8
+<docs-root>/record/               # operational record: session logs, rotated archives,
+                                  # closed-wave handoffs, inert audits. Survives Step 8.
+<docs-root>/ideas/                # deferred-work briefs awaiting a wave to adopt them
+.bionic/tests/                    # validation protocols re-run by hand, not by tests/run.sh
+.bionic/tmp/                      # ephemera only, wiped at Step 8
+.bionic/.gitignore                # literally `*` — written on tree creation; this is what
+                                  # keeps the whole tree out of git, not the project .gitignore
+.bionic/config.yaml               # optional; `docs-root:` moves <docs-root> off the default
 ```
+
+The first five are lifecycle artifacts and are gated: the governing-skill hook enforces
+frontmatter on them and blocks a canonical artifact written anywhere else. `record/` and
+`ideas/` are **operational** — nothing loads them, nothing validates them, and they are reached
+only by citing a path. That is the whole distinction, and it is the boundary test applied to
+this tree: growth in the gated dirs is governed, growth in the operational ones is free.
 
 Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 12`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`.
 
