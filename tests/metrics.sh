@@ -93,22 +93,6 @@ fi
 emit dangling.sdlc_poker_refs \
   "$(grep -rl 'sdlc-poker\.sh' hooks/ 2>/dev/null | wc -l | tr -d ' ')" files
 
-# ── AC-4: memory footprint ─────────────────────────────────────────────────
-measure_file memory.index   .bionic/memory/INDEX.md
-measure_file memory.context .bionic/memory/context.md
-if [ -f .bionic/memory/INDEX.md ]; then
-  emit memory.index_bullets "$(count_lines '^- ' .bionic/memory/INDEX.md)" bullets
-else
-  emit memory.index_bullets n/a bullets
-fi
-if [ -d .bionic/memory ]; then
-  emit memory.topical_files "$(find .bionic/memory -name '*.md' | wc -l | tr -d ' ')" files
-  emit memory.total_bytes "$(find .bionic/memory -name '*.md' -exec cat {} + | wc -c | tr -d ' ')" bytes
-else
-  emit memory.topical_files n/a files
-  emit memory.total_bytes   n/a bytes
-fi
-
 # ── AC-5: canonical-sdlc prose weight and normative density ────────────────
 SKILL=skills/canonical-sdlc/SKILL.md
 measure_file skill.canonical_sdlc "$SKILL"

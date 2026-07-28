@@ -20,7 +20,7 @@ cleanup() { for d in "${SANDBOXES[@]:-}"; do [ -n "$d" ] && chmod -R u+rwx "$d" 
 trap cleanup EXIT
 
 setup() {  # fresh sandbox project per case
-  SANDBOX=$(mktemp -d); mkdir -p "$SANDBOX/.bionic/tmp" "$SANDBOX/.bionic/memory"
+  SANDBOX=$(mktemp -d); mkdir -p "$SANDBOX/.bionic/tmp"
   SANDBOXES+=("$SANDBOX")
   # The fake HOME is a SIBLING of the sandbox project, never a child: SEC3/SEC4
   # assert "nothing under the project tree" with `find "$SANDBOX"`, which a
@@ -181,13 +181,28 @@ i4() {
 i4
 
 echo ""
-echo "=== I5: unwritable .bionic/memory (chmod 555) at a logging path → exit 0 still ==="
+echo "=== I5: unwritable .bionic/tmp (chmod 555) → nudge still emitted, exit 0 ==="
+# The hook's ONLY project-tree write is nudge_once()'s
+# $PROJECT_DIR/.bionic/tmp/farm-out.state (farm-out-reminder.sh:174-175), so
+# .bionic/tmp is the sole directory whose permissions this hook can trip over.
+# Two things make this case discriminating, and both are load-bearing:
+#   - a TIER-2 command. Tier-1 (`bash test.sh`) denies and exits at emit_tier1
+#     without ever reaching nudge_once, so the chmod would be unreachable.
+#   - asserting the state file is ABSENT. Without it the case passes whether or
+#     not the chmod took effect, which is how the pre-2026-07-27 version — which
+#     chmod'd .bionic/memory, a directory the hook never touched — passed
+#     vacuously for its entire life.
 i5() {
   setup
-  chmod 555 "$SANDBOX/.bionic/memory"
-  run_hook "$(stdin_for 'bash test.sh' '')"
-  assert_exit0 "I5 unwritable memory dir → exit 0"
-  chmod u+rwx "$SANDBOX/.bionic/memory" 2>/dev/null || true
+  chmod 555 "$SANDBOX/.bionic/tmp"
+  run_hook "$(stdin_for 'npx cowsay hi' '')"
+  assert_exit0 "I5 unwritable .bionic/tmp → exit 0"
+  assert_nudge "I5 nudge still emitted despite unwritable state dir"
+  # Proves the unwritable path was actually exercised: the append is `|| true`,
+  # so a writable dir would leave the file behind here.
+  [ ! -f "$SANDBOX/.bionic/tmp/farm-out.state" ] \
+    && pass || fail "I5 state file should not exist (chmod did not take effect)"
+  chmod u+rwx "$SANDBOX/.bionic/tmp" 2>/dev/null || true
 }
 i5
 
