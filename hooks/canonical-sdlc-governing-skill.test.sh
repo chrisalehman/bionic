@@ -826,6 +826,61 @@ else
   PASS=$((PASS + 1)); printf '  PASS  ac11_c4c no .bionic/ created for a versionless artifact\n'
 fi
 
+# AC-11 criterion 4, the general form (Step-6 findings C5 / F3 / S4). c4c above
+# only covers the ONE block that fires before the version marker is read, so it
+# passed while creation still ran ahead of every OTHER gate. A write carrying a
+# version marker but failing any later part of the contract was blocked AND left
+# a full tree plus .gitignore behind — a PreToolUse gate mutating the filesystem
+# for a call it then refuses.
+#
+# Ruling (orchestrator, Step 6): the tree is created only for an artifact that
+# passes the ENTIRE contract, not merely one carrying a version marker. So the
+# three later gates each get an arm here.
+# [WALL: hooks/canonical-sdlc-governing-skill.sh]
+echo "AC-11 c4d: blocked on the VERSION gate (wrong number) -> no tree"
+ac11_p6=$(make_bare_project)
+run_write "$ac11_p6/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan version=3)"
+assert_eq "ac11_c4d write blocked" 2 "$HOOK_EXIT"
+TOTAL=$((TOTAL + 1))
+if [ -d "$ac11_p6/.bionic" ]; then
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c4d no .bionic/ created for a wrong-version artifact (found %s/.bionic)\n' "$ac11_p6"
+else
+  PASS=$((PASS + 1)); printf '  PASS  ac11_c4d no .bionic/ created for a wrong-version artifact\n'
+fi
+
+echo "AC-11 c4e: blocked on the TRIPLE gate (invalid intent) -> no tree"
+ac11_p7=$(make_bare_project)
+run_write "$ac11_p7/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan intent=definitely-not-an-intent)"
+assert_eq "ac11_c4e write blocked" 2 "$HOOK_EXIT"
+TOTAL=$((TOTAL + 1))
+if [ -d "$ac11_p7/.bionic" ]; then
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c4e no .bionic/ created for an invalid-triple artifact (found %s/.bionic)\n' "$ac11_p7"
+else
+  PASS=$((PASS + 1)); printf '  PASS  ac11_c4e no .bionic/ created for an invalid-triple artifact\n'
+fi
+
+echo "AC-11 c4f: blocked on the required-FLAGS gate -> no tree"
+ac11_p8=$(make_bare_project)
+run_write "$ac11_p8/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan omit=has_ui)"
+assert_eq "ac11_c4f write blocked" 2 "$HOOK_EXIT"
+TOTAL=$((TOTAL + 1))
+if [ -d "$ac11_p8/.bionic" ]; then
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c4f no .bionic/ created for a flag-missing artifact (found %s/.bionic)\n' "$ac11_p8"
+else
+  PASS=$((PASS + 1)); printf '  PASS  ac11_c4f no .bionic/ created for a flag-missing artifact\n'
+fi
+
+echo "AC-11 c4g: blocked on the MATRIX gate -> no tree"
+ac11_p9=$(make_bare_project)
+run_write "$ac11_p9/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan matrix=no)"
+assert_eq "ac11_c4g write blocked" 2 "$HOOK_EXIT"
+TOTAL=$((TOTAL + 1))
+if [ -d "$ac11_p9/.bionic" ]; then
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c4g no .bionic/ created for a matrix-less step-3 plan (found %s/.bionic)\n' "$ac11_p9"
+else
+  PASS=$((PASS + 1)); printf '  PASS  ac11_c4g no .bionic/ created for a matrix-less step-3 plan\n'
+fi
+
 echo "AC-12 c1: .bionic/.gitignore exists and contains '*'"
 TOTAL=$((TOTAL + 1))
 if [ -f "$ac11_p1/.bionic/.gitignore" ] && grep -qx '\*' "$ac11_p1/.bionic/.gitignore"; then
@@ -851,6 +906,24 @@ run_write "$ac12_p4/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_
 assert_eq "ac12_c3 write allowed" 0 "$HOOK_EXIT"
 ac12_after_hash=$(shasum -a 256 "$ac12_p4/.gitignore" | awk '{print $1}')
 assert_eq "ac12_c3 project .gitignore hash unchanged" "$ac12_before_hash" "$ac12_after_hash"
+
+# AC-12 c4 (Step-6 finding C4): the .gitignore write must be SILENT when it
+# cannot succeed. `printf '*\n' > "$f" 2>/dev/null` does not silence anything —
+# the shell performs the redirection before printf runs, so the redirect's own
+# failure is reported by the shell, not by printf. The paired `mkdir -p ...
+# 2>/dev/null` above it IS correctly silenced, which is why the asymmetry reads
+# as unintended rather than as a choice.
+#
+# Fixture: `.bionic` present as a REGULAR FILE at the project root, so the
+# redirect fails with ENOTDIR. A hook is a tool-call gate — stderr on an ALLOWED
+# call is noise the agent has to interpret.
+# [WALL: hooks/canonical-sdlc-governing-skill.sh]
+echo "AC-12 c4 (C4): an unwritable .gitignore path leaks nothing on stderr"
+ac12_p5=$(make_bare_project)
+: > "$ac12_p5/.bionic"
+run_write "$ac12_p5/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan)"
+assert_eq "ac12_c4 write still allowed" 0 "$HOOK_EXIT"
+assert_eq "ac12_c4 stderr is empty (no shell redirection error)" "" "$HOOK_STDERR"
 
 # ============================================================
 # AC-13: misplacement blocks; absence never does
