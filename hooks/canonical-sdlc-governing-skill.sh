@@ -123,10 +123,12 @@ resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default p
 # not exist yet. `git` answers with the PHYSICAL root, while FILE_PATH arrives
 # from the tool as whatever path the session used — if the project is reached
 # through a symlink the two disagree on prefix and every path comparison below
-# misfires. Slice 1 found this and left it: under the old pass-through it was a
-# silent bypass (artifacts quietly stopped being gated), and under AC-13's
-# fail-closed rule it becomes the worse failure — a correctly placed artifact
-# false-BLOCKED as misplaced.
+# misfires. This function is the fix, and the severity is why it could not be
+# deferred: under the old pass-through the mismatch was a silent bypass
+# (artifacts quietly stopped being gated), but once misplacement BLOCKS, the
+# same mismatch inverts into the worse failure — a correctly placed artifact
+# false-BLOCKED. Fail-closed turns a hole into a wall in front of legitimate
+# work, so closing the hole and resolving symlinks had to land together.
 #
 # Not exotic on macOS, where /tmp and /var are themselves symlinks.
 #
@@ -173,8 +175,9 @@ resolve_docs_root() {
 PROJECT_ROOT_FROM_PATH=$(resolve_project_root "$FILE_PATH" || true)
 if [ -z "$PROJECT_ROOT_FROM_PATH" ]; then
   # No root at all — resolve_project_root falls back to pwd, so this is
-  # reachable only if pwd itself is empty. Kept as a guard; the fail-open
-  # semantics of this branch are slice 3's subject, not slice 1's.
+  # reachable only if pwd itself is empty. Kept as a defensive guard against a
+  # future resolver change; it is not the misplacement fail-open, which is
+  # closed below by the UNDER_DOCS_ROOT verdict.
   exit 0
 fi
 DOCS_ROOT=$(resolve_docs_root "$PROJECT_ROOT_FROM_PATH")
