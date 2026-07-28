@@ -101,7 +101,7 @@ Do not carve a sensitive concern into a tiny unflagged wave to dodge a floor. Th
                                   # closed-wave handoffs, inert audits. Survives Step 8.
 <docs-root>/ideas/                # deferred-work briefs awaiting a wave to adopt them
 .bionic/tests/                    # validation protocols re-run by hand, not by tests/run.sh
-.bionic/tmp/                      # ephemera only, wiped at Step 8
+.bionic/tmp/                      # ephemera only, wiped at Step 8 — NOT a home for evidence
 .bionic/.gitignore                # literally `*` — written on tree creation; this is what
                                   # keeps the whole tree out of git, not the project .gitignore
 .bionic/config.yaml               # optional; `docs-root:` moves <docs-root> off the default
@@ -112,6 +112,15 @@ frontmatter on them and blocks a canonical artifact written anywhere else. `reco
 `ideas/` are **operational** — nothing loads them, nothing validates them, and they are reached
 only by citing a path. That is the whole distinction, and it is the boundary test applied to
 this tree: growth in the gated dirs is governed, growth in the operational ones is free.
+
+**Anything the matrix cites as evidence goes in `record/`, never `tmp/`.** Auditor reports,
+critic findings, review-axis artifacts, test-run captures — the matrix names them by path, so
+they must outlive the run that produced them. `tmp/` is wiped at Step 8 and takes its contents
+with it. Learned the expensive way: a wave dispatched every agent to write its report into
+`tmp/`, then discharged 14 matrix rows citing those paths, and Step 8's cleanup destroyed 28
+artifacts that the plan pointed at. The reasoning survived in the plan's own prose; the primary
+evidence did not, which turns an audited record into testimony. Give an agent a `record/` path
+in its brief, or you will pay this once too.
 
 Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 12`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`.
 
