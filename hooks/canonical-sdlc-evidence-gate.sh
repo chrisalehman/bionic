@@ -85,23 +85,49 @@ fi
 #
 # `--path-format=absolute` is load-bearing, not cosmetic: the bare form returns
 # a RELATIVE path (`.git` at the root, `../.git` one level down), whose dirname
-# is `.` or `..` — a cwd-dependent string, not a root. Requires git >= 2.31.
+# is `.` or `..` — a cwd-dependent string, not a root. It landed in git 2.31.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
+#
+# OLD-GIT FALLBACK (Step-6 finding K2). On git < 2.31 `--path-format` is an
+# unknown option and rev-parse exits 129 — which the single-branch predecessor
+# could not tell apart from "not a repository", so the root silently became the
+# caller's cwd. Plan assumption 6 claimed a `cd`-and-`pwd` fallback already
+# covered this; it did not exist. A documented mitigation that was never built
+# is worse than an unlogged one — it reads as retired, and a reviewer who checks
+# the local git version moves on.
+#
+# So: retry the BARE form, which every git has, and absolutize its answer here.
+# It answers RELATIVE inside the main repo and ABSOLUTE from a linked worktree,
+# hence the `case`. Only when BOTH forms fail is this genuinely not a
+# repository, and the supplied fallback wins as before. The governing-skill
+# hook feels this hardest (its call passes no fallback, so it lands on `pwd`);
+# the twin is kept byte-identical regardless.
 # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 #
 # `git -C` needs a directory that EXISTS; climbing to the nearest existing
 # ancestor supplies git a valid cwd. That climb is not a search for `.bionic/`
 # — the loop's condition never mentions it, and the answer still comes from git.
 resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default pwd)
-  local d common
+  local d common root
   d=$(dirname "$1")
   while [ ! -d "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
     d=$(dirname "$d")
   done
   if common=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
     dirname "$common"
-  else
-    printf '%s\n' "${2:-$(pwd)}"
+    return
   fi
+  if common=$(git -C "$d" rev-parse --git-common-dir 2>/dev/null); then
+    case "$common" in
+      /*) root=$(dirname "$common") ;;
+      *)  root=$(cd "$d" 2>/dev/null && cd "$(dirname "$common")" 2>/dev/null && pwd -P) ;;
+    esac
+    if [ -n "$root" ]; then
+      printf '%s\n' "$root"
+      return
+    fi
+  fi
+  printf '%s\n' "${2:-$(pwd)}"
 }
 
 # ONE root per repo, across BOTH hooks (Step-6 finding C2/S1).

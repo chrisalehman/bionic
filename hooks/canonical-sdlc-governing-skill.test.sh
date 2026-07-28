@@ -662,10 +662,61 @@ else
   FAIL=$((FAIL + 1)); printf '  FAIL  ac10_c5 outside any repo → rc 0, no error (rc=%d)\n' "$?"
 fi
 
+# --- git < 2.31 (critic K2 / FIX 5) ----------------------------------------
+#
+# `--path-format` landed in git 2.31. On anything older rev-parse rejects it as
+# an unknown option and exits 129 — indistinguishable, to the single-branch
+# resolver this wave shipped, from "not a repository". The root then became the
+# session's cwd, so EVERY canonical-sdlc artifact write on such a machine
+# blocked as misplaced and the remediation line pointed the author at whatever
+# directory the session started in. Plan assumption 6 claimed a
+# `cd`-and-`pwd` fallback covered this; no such fallback existed.
+#
+# The shim rejects ONLY `--path-format=absolute` and `exec`s the real git for
+# everything else, so these cases exercise real git's actual bare-form
+# behaviour: `--git-common-dir` answers RELATIVE inside the main repo (`.git`,
+# `../../.git`) and ABSOLUTE from a linked worktree. A stub git would encode
+# the test author's belief about git, which is the belief under test.
+# [WALL: hooks/canonical-sdlc-governing-skill.sh]
+ac10_oldgit=$(mktemp -d); cleanup_dirs+=("$ac10_oldgit")
+ac10_real_git=$(command -v git)
+{
+  printf '#!/bin/bash\n'
+  printf 'for a in "$@"; do\n'
+  printf '  [ "$a" = "--path-format=absolute" ] && exit 129\n'
+  printf 'done\n'
+  printf 'exec %s "$@"\n' "$ac10_real_git"
+} > "$ac10_oldgit/git"
+chmod +x "$ac10_oldgit/git"
+
+# Runs the extracted resolver with the old-git shim first on PATH. PATH is
+# saved and restored around the call so nothing else in the suite is affected.
+ac10_oldgit_resolve() {
+  local saved="$PATH" out
+  PATH="$ac10_oldgit:$PATH"
+  out=$(resolve_project_root "$@")
+  PATH="$saved"
+  printf '%s\n' "$out"
+}
+
+ac10_r6=$(ac10_oldgit_resolve "$ac10_main/.bionic/docs/plans/epic-01-demo/x.plan.md")
+assert_eq "ac10_c6 old git: repo root → repo root" "$ac10_main" "$ac10_r6"
+ac10_r7=$(ac10_oldgit_resolve "$ac10_main/deep/sub/dir/x.plan.md")
+assert_eq "ac10_c7 old git: subdirectory → repo root (relative bare form)" "$ac10_main" "$ac10_r7"
+ac10_r8=$(ac10_oldgit_resolve "$ac10_wt/.bionic/docs/plans/epic-01-demo/x.plan.md")
+assert_eq "ac10_c8 old git: worktree → parent repo root (absolute bare form)" "$ac10_main" "$ac10_r8"
+ac10_r9=$(ac10_oldgit_resolve "$ac10_nb/.bionic/docs/plans/epic-01-demo/x.plan.md")
+assert_eq "ac10_c9 old git: .bionic/ never existed → repo root" "$ac10_nb" "$ac10_r9"
+# Outside any repository BOTH forms fail, so the supplied fallback still wins —
+# the fallback branch must not swallow the genuine no-repo case.
+ac10_r10=$(ac10_oldgit_resolve "$ac10_out/notes/x.plan.md" "$ac10_out")
+assert_eq "ac10_c10 old git: outside any repo → the supplied fallback" "$ac10_out" "$ac10_r10"
+
 # Every answer is an ABSOLUTE path. The naive `dirname $(git rev-parse
 # --git-common-dir)` yields `.` and `..`; a criterion that accepted a relative
-# answer would pass the defect it exists to catch.
-for ac10_i in 1 2 3 4 5; do
+# answer would pass the defect it exists to catch. The old-git arms are in
+# scope here precisely because the bare form is what returns `.` and `..`.
+for ac10_i in 1 2 3 4 5 6 7 8 9 10; do
   eval "ac10_v=\$ac10_r${ac10_i}"
   TOTAL=$((TOTAL + 1))
   case "$ac10_v" in
@@ -712,6 +763,38 @@ fi
 run_write "$ac10_main/.bionic/docs/plans/epic-01-demo/main-floor.plan.md" "$(build_plan intent=spike rigor=audited)"
 assert_eq "ac10_e2e_worktree_pair exit 0" 0 "$HOOK_EXIT"
 assert_contains "ac10_e2e_worktree_pair finding keyed on the main repo" "spike-cap" "$(read_audit "$ac10_main")"
+
+# git < 2.31 at the CALL SITE (critic K2 / FIX 5). The unit arms above can only
+# see what the function returns; this drives the hook through its real stdin
+# contract with the shim on PATH and the process cwd deliberately somewhere
+# else, which is the shape of the reproduction: a correctly-placed artifact was
+# blocked as misplaced against the SESSION's cwd.
+echo "e2e: git < 2.31 → a correctly-placed artifact is still correctly placed"
+run_write_oldgit() {  # like run_write, with the old-git shim first on PATH and cwd elsewhere
+  local file_path="$1" content="$2" input tmp_err
+  input=$(jq -n --arg p "$file_path" --arg c "$content" \
+    '{tool_name: "Write", tool_input: {file_path: $p, content: $c}}')
+  tmp_err=$(mktemp)
+  if (cd "$ac10_out" && HOME="$FAKE_HOME" PATH="$ac10_oldgit:$PATH" bash "$HOOK" <<< "$input") \
+       >/dev/null 2>"$tmp_err"; then
+    HOOK_EXIT=0
+  else
+    HOOK_EXIT=$?
+  fi
+  HOOK_STDERR=$(cat "$tmp_err")
+  rm -f "$tmp_err"
+}
+ac10_og="$ac10_tmp/oldgit"; mkdir -p "$ac10_og"; git -C "$ac10_og" init -q .
+run_write_oldgit "$ac10_og/.bionic/docs/plans/epic-01-demo/oldgit.plan.md" "$(build_plan)"
+assert_eq "ac10_e2e_oldgit valid artifact allowed" 0 "$HOOK_EXIT"
+assert_eq "ac10_e2e_oldgit no stderr" "" "$HOOK_STDERR"
+# ...and misplacement still BLOCKS under old git, naming the artifact's OWN
+# repo. A fallback that resolved everything to the cwd would pass the arm above
+# by turning the hook off; this arm is what makes that impossible.
+run_write_oldgit "$ac10_og/notes/rogue.plan.md" "$(build_plan)"
+assert_eq "ac10_e2e_oldgit misplaced artifact blocked" 2 "$HOOK_EXIT"
+assert_contains "ac10_e2e_oldgit names the artifact's own repo, not the session cwd" \
+  "$ac10_og/.bionic/docs/plans/" "$HOOK_STDERR"
 
 # ============================================================
 # AC-11 / AC-12: tree creation on first lifecycle use
