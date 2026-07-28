@@ -321,7 +321,9 @@ Incident framing: does the fix mask a deeper issue, and is the monitoring-gap an
 
 ### Step 7 — Document
 
-ADRs attach to decision **significance**, not to rigor: momentous (cross-wave, sets a precedent, expensive to reverse) gets one at any rigor; medium gets one when it will shape later waves; trivial gets none. `incident-response` writes the RCA instead. Where any doc produced here should live — always-loaded vs path-addressed — apply the boundary test in `~/.claude/CLAUDE.md`.
+ADRs attach to decision **significance**, not to rigor: momentous (cross-wave, sets a precedent, expensive to reverse) gets one at any rigor; medium gets one when it will shape later waves; trivial gets none. `incident-response` writes the RCA instead. Where any doc produced here should live is settled by one question — **who reads it unbidden?** Nobody → operational: park it at a path and cite that path when it is needed; nothing loads it on its own, so its size costs nothing and it may grow freely. Every session → knowledge: it reaches a reader only if the always-loaded index points at it, and that index is read in full every time, so it must earn its line or not be written.
+
+This test used to live in the always-loaded global config, which is where a preceding wave deliberately put it. It moved here because it failed itself: it is consulted only when a document is being written, which by its own definition makes it operational, and operational content is path-addressed. A rule that loads every session to answer a question asked occasionally is the exact cost it exists to prevent.
 
 ### Step 8 — Integrate & close
 
