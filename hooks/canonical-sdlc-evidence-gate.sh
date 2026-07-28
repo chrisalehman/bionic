@@ -177,9 +177,9 @@ resolve_docs_root() {
 
 # Read unconditionally, next to the other globals: this hook runs `set -u`, and
 # a variable bound on only some code paths crashes the others. See
-# `.claude/rules/hook-authoring.md` (machine-local, gitignored — populated by
-# ./claude-bootstrap.sh; absent from a fresh clone) § "`set -u` and conditionally-bound
-# variables" — the recorded recurrence of exactly this.
+# `.claude/rules/hook-authoring.md` (machine-local, gitignored, authored in
+# place — no script recreates it, so it is absent from a fresh clone) § "`set -u` and
+# conditionally-bound variables" — the recorded recurrence of exactly this.
 DOCS_ROOT=$(resolve_docs_root "$PROJECT_DIR")
 
 # ~/.claude/plans is the harness's own, project-AGNOSTIC plan directory; the
@@ -259,8 +259,8 @@ done
 #     directory is already searched.
 #   - The LEADING frontmatter must declare `canonical_sdlc_version`, the
 #     run-state marker (never `governing-skill`, the artifact-author field —
-#     see `.claude/rules/hook-authoring.md` — machine-local, gitignored, written
-#     by ./claude-bootstrap.sh). Reading only the leading block is
+#     see `.claude/rules/hook-authoring.md` — machine-local, gitignored,
+#     authored in place; no script recreates it). Reading only the leading block is
 #     what keeps a fenced example in a documentation page from counting.
 #   - The whole docs root is "placed", not just plans/ and incidents/:
 #     <docs-root>/spikes/ and <docs-root>/record/ hold real artifacts carrying
