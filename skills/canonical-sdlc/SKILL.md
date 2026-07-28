@@ -306,7 +306,7 @@ Incident framing: does the fix mask a deeper issue, and is the monitoring-gap an
 
 ### Step 7 — Document
 
-ADRs attach to decision **significance**, not to rigor: momentous (cross-wave, sets a precedent, expensive to reverse) gets one at any rigor; medium gets one when it will shape later waves; trivial gets none. `incident-response` writes the RCA instead.
+ADRs attach to decision **significance**, not to rigor: momentous (cross-wave, sets a precedent, expensive to reverse) gets one at any rigor; medium gets one when it will shape later waves; trivial gets none. `incident-response` writes the RCA instead. Where any doc produced here should live — always-loaded vs path-addressed — apply the boundary test in `~/.claude/CLAUDE.md`.
 
 ### Step 8 — Integrate & close
 
