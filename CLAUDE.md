@@ -15,5 +15,6 @@ Non-trivial engineering goes through the `canonical-sdlc` skill
 
 ## Path-scoped rules
 
-See `.claude/rules/` for guidance scoped to `hooks/*.sh`, `claude-bootstrap.sh`, and
-`tests/*.sh`.
+See `.claude/rules/` for guidance scoped by path — hook authoring, bootstrap/install traps,
+test-harness traps, doc-path and worktree discipline, and agent/dispatch discipline. Each file
+declares its own `paths:` globs and loads only when a matching file is read.
