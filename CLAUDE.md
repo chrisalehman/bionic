@@ -12,9 +12,14 @@ Standing instructions for every agent working in this repo.
 
 Non-trivial engineering goes through the `canonical-sdlc` skill
 (`skills/canonical-sdlc/SKILL.md`) — declare `intent · rigor · scale` before starting.
+Docs and chores stay out.
 
 ## Path-scoped rules
 
 See `.claude/rules/` for guidance scoped by path — hook authoring, bootstrap/install traps,
 test-harness traps, doc-path and worktree discipline, and agent/dispatch discipline. Each file
 declares its own `paths:` globs and loads only when a matching file is read.
+
+`.claude/` is **gitignored by decision** — it is machine-local, written by `./claude-bootstrap.sh`.
+A fresh clone will not contain these files, and that is expected, not a deletion. Run the
+bootstrap to populate them.
