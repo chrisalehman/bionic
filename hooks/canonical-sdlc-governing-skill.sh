@@ -589,8 +589,9 @@ esac
 # The discriminator is `canonical_sdlc_version` — the SAME field the schema
 # enforcement above reads, and for the same reason. Slice 2 keyed creation on
 # `governing-skill: canonical-sdlc` instead, which is the artifact-AUTHOR
-# field; `.claude/rules/hook-authoring.md` § "Discriminators in enforcement
-# hooks" names that as a known failure mode, because Step 3 plans legitimately
+# field; `.claude/rules/hook-authoring.md` (machine-local, gitignored — written
+# by ./claude-bootstrap.sh, so absent from a fresh clone) § "Discriminators in
+# enforcement hooks" names that as a known failure mode, because Step 3 plans legitimately
 # declare `governing-skill: superpowers:writing-plans` and would have found no
 # tree. Slice 2's stated rationale was avoiding a re-fire on later artifacts,
 # and re-firing costs nothing: `mkdir -p` is idempotent and the `.gitignore`

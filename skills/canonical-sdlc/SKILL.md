@@ -44,6 +44,8 @@ Governs non-trivial engineering work. Every run declares a triple — `<intent> 
 
 **Iron law.** No commit without evidence from the current step. The evidence gate reads the plan's `current:` and validates that step's evidence only — it never re-checks earlier steps, so a skipped step is caught by review, not by code.
 
+**Bulk reference.** Artifact shape, evidence-gating detail, intent-specific behaviors and the full version history live in `skills/canonical-sdlc/operational-rules.md`, beside this file. Read it when you need the detail this file compresses — it is copied with the skill, but nothing loads it for you.
+
 ## Load-time announcement
 
 First user-facing action:
