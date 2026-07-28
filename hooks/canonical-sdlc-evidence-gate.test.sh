@@ -1948,6 +1948,143 @@ expect_audit_line "21b fail-open: no .bionic ancestor above the plan → PROJECT
   "$h21b" 'git commit -m "x"' "tune-evidence"
 
 # ============================================================
+# Section 21c: AC-10 — the audit root is COMPUTED, never discovered
+# ============================================================
+#
+# audit_root now delegates to resolve_project_root, which computes the root
+# from `git rev-parse --path-format=absolute --git-common-dir` instead of
+# walking the plan's ancestors for an existing `.bionic/`. Consequences:
+# a project whose `.bionic/` has never existed still resolves, and every
+# linked worktree of one repo answers with the parent repo — one repo, one
+# audit file, instead of one per worktree.
+#
+# Fixture fidelity: real `git init` repos and a real `git worktree add` on
+# disk. The behaviour under test is git's own path-format handling, which a
+# stubbed `git` cannot reproduce.
+
+echo ""
+echo "=== Section 21c: AC-10 computed audit root ==="
+
+# The five criteria run against the SHIPPED text of the function, extracted
+# from the hook and eval'd here — not a reimplementation. That seam cannot
+# observe that the hook CALLS it, so 21c-e2e below drives the hook through its
+# real stdin contract and pins the call site.
+ac10_src=$(awk '/^resolve_project_root\(\)/,/^\}/' "$HOOK")
+TOTAL=$((TOTAL + 1))
+if [ -n "$ac10_src" ]; then
+  echo "PASS: 21c0 resolve_project_root extracted from the hook"
+  PASS=$((PASS + 1))
+  eval "$ac10_src"
+else
+  echo "FAIL: 21c0 no resolve_project_root() in $HOOK"
+  FAIL=$((FAIL + 1))
+  # Keep the criteria below individually reportable rather than aborting.
+  resolve_project_root() { :; }
+fi
+
+# The hook's own comment claims this helper is a byte-identical twin of the
+# governing-skill hook's copy. Assert it, so a one-sided edit shows up here
+# rather than as two hooks disagreeing about which project owns an artifact.
+TOTAL=$((TOTAL + 1))
+ac10_twin=$(awk '/^resolve_project_root\(\)/,/^\}/' "$(dirname "$HOOK")/canonical-sdlc-governing-skill.sh")
+if [ -n "$ac10_twin" ] && [ "$ac10_src" = "$ac10_twin" ]; then
+  echo "PASS: 21c0b resolve_project_root is byte-identical to the governing-skill copy"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: 21c0b resolve_project_root diverges from the governing-skill copy"
+  FAIL=$((FAIL + 1))
+fi
+
+ac10_assert() {  # $1 label, $2 expected, $3 actual
+  TOTAL=$((TOTAL + 1))
+  if [ "$2" = "$3" ]; then
+    echo "PASS: $1"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: $1"
+    echo "  expected='$2' actual='$3'"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+# main: a repo WITH .bionic/ (untracked, so the worktree checkout has none).
+# wt:   a linked worktree of main, given its own .bionic/ on purpose — the
+#       predecessor's ancestor walk would stop there.
+# nb:   a repo where .bionic/ has NEVER existed.
+# out:  a plain directory with no repo above it.
+# Physical paths (pwd -P): mktemp -d yields /var/... on macOS, a symlink to
+# /private/var/..., and git answers with the physical path.
+ac10_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$ac10_tmp")
+ac10_main="$ac10_tmp/main"
+mkdir -p "$ac10_main/.bionic/docs/plans" "$ac10_main/deep/sub/dir"
+git -C "$ac10_main" init -q .
+git -C "$ac10_main" commit -q --allow-empty -m init
+git -C "$ac10_main" worktree add -q "$ac10_tmp/wt" -b ac10-wt
+ac10_wt="$ac10_tmp/wt"
+mkdir -p "$ac10_wt/.bionic/docs/plans"
+ac10_nb="$ac10_tmp/nobionic"; mkdir -p "$ac10_nb"; git -C "$ac10_nb" init -q .
+ac10_out="$ac10_tmp/outside"; mkdir -p "$ac10_out"
+
+ac10_assert "21c1 repo root → repo root" "$ac10_main" \
+  "$(resolve_project_root "$ac10_main/.bionic/docs/plans/active.md")"
+ac10_assert "21c2 target in a subdirectory → repo root" "$ac10_main" \
+  "$(resolve_project_root "$ac10_main/deep/sub/dir/active.md")"
+ac10_assert "21c2b cwd in a subdirectory → repo root (not cwd-relative)" "$ac10_main" \
+  "$(cd "$ac10_main/deep/sub/dir" && resolve_project_root "$ac10_main/.bionic/docs/plans/active.md")"
+ac10_assert "21c3 inside a worktree → parent repo root" "$ac10_main" \
+  "$(resolve_project_root "$ac10_wt/.bionic/docs/plans/active.md")"
+ac10_assert "21c4 .bionic/ never existed → repo root" "$ac10_nb" \
+  "$(resolve_project_root "$ac10_nb/.bionic/docs/plans/active.md")"
+ac10_assert "21c5 outside any repo → the supplied fallback" "$ac10_out" \
+  "$(resolve_project_root "$ac10_out/notes/active.md" "$ac10_out")"
+ac10_assert "21c5b outside any repo, no fallback → cwd" "$ac10_out" \
+  "$(cd "$ac10_out" && resolve_project_root "$ac10_out/notes/active.md")"
+
+# Every answer is an ABSOLUTE path. The naive `dirname $(git rev-parse
+# --git-common-dir)` yields `.` and `..`; a criterion accepting a relative
+# answer would pass the defect it exists to catch.
+TOTAL=$((TOTAL + 1))
+ac10_rel=""
+for ac10_p in "$ac10_main/.bionic/docs/plans/active.md" \
+              "$ac10_main/deep/sub/dir/active.md" \
+              "$ac10_wt/.bionic/docs/plans/active.md" \
+              "$ac10_nb/.bionic/docs/plans/active.md" \
+              "$ac10_out/notes/active.md"; do
+  ac10_v=$(cd "$ac10_out" && resolve_project_root "$ac10_p")
+  case "$ac10_v" in /*) ;; *) ac10_rel="${ac10_rel} ${ac10_p}=>${ac10_v}" ;; esac
+done
+if [ -z "$ac10_rel" ]; then
+  echo "PASS: 21c6 every resolution is an absolute path"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: 21c6 relative resolution(s):$ac10_rel"
+  FAIL=$((FAIL + 1))
+fi
+
+# 21c-e2e — the CALL SITE, driven through the hook's real stdin contract. The
+# plan lives in a linked worktree that has its own .bionic/; the finding must
+# land in the audit file keyed on the PARENT repo, and must NOT create one
+# keyed on the worktree. Both arms are asserted together: the absence arm
+# alone would pass if the hook had written nothing at all.
+h21c=$(make_home)
+printf '%s\n' "$(r7_wave_plan tune 5 "$step5_base" "$matrix_complete")" \
+  > "$ac10_wt/.bionic/docs/plans/active.md"
+touch "$ac10_wt/.bionic/docs/plans/active.md"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$h21c" "$ac10_wt" 'git commit -m "x"'
+ac10_main_audit=$(audit_file_for "$h21c" "$ac10_main")
+ac10_wt_audit=$(audit_file_for "$h21c" "$ac10_wt")
+if [ "$HOOK_EXIT" -eq 0 ] && [ -f "$ac10_main_audit" ] && grep -q "tune-evidence" "$ac10_main_audit" \
+   && [ ! -f "$ac10_wt_audit" ]; then
+  echo "PASS: 21c-e2e worktree plan → one audit file, keyed on the parent repo"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: 21c-e2e worktree plan → audit file keyed on the parent repo"
+  echo "  exit=$HOOK_EXIT main_audit=$([ -f "$ac10_main_audit" ] && echo yes || echo no) wt_audit=$([ -f "$ac10_wt_audit" ] && echo yes || echo no)"
+  FAIL=$((FAIL + 1))
+fi
+
+# ============================================================
 # Section 22: rigor-keyed ledger lanes
 # ============================================================
 #

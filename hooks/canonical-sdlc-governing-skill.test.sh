@@ -36,12 +36,23 @@ cleanup_dirs+=("$FAKE_HOME")
 slug_for() { printf '%s-%s' "$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')" \
                             "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"; }
 
+# A fixture project is a REAL git repository at a PHYSICAL path (AC-10).
+#
+# git init: the hook computes the project root from `git rev-parse
+# --git-common-dir`, so a bare temp directory would resolve to whatever repo
+# the runner's cwd sits in, not to the fixture. Real projects using this
+# lifecycle are git repos; the fixture now matches.
+#
+# pwd -P: mktemp -d hands back /var/... on macOS, a symlink to /private/var/...,
+# and git answers with the PHYSICAL path. Comparing the hook's resolved
+# DOCS_ROOT against a logical fixture path would mismatch on the symlink alone.
 make_project() {
   local dir
-  dir=$(mktemp -d)
+  dir=$(cd "$(mktemp -d)" && pwd -P)
   mkdir -p "$dir/.bionic/docs/plans/epic-01-demo"
   mkdir -p "$dir/.bionic/docs/specs/epic-01-demo"
   mkdir -p "$dir/.bionic/docs/adrs/epic-01-demo"
+  git -C "$dir" init -q .
   cleanup_dirs+=("$dir")
   echo "$dir"
 }
@@ -568,6 +579,127 @@ assert_eq "floor_never_blocks exit 0" 0 "$HOOK_EXIT"
 assert_contains "floor_never_blocks logs intent-floor" "intent-floor" "$(read_audit "$project")"
 assert_contains "floor_never_blocks logs project-floor" "project-floor" "$(read_audit "$project")"
 assert_contains "floor_never_blocks logs epic-floor" "epic-floor" "$(read_audit "$project")"
+
+# ============================================================
+# AC-10: the project root is COMPUTED, never discovered
+# ============================================================
+#
+# resolve_project_root computes the root from `git rev-parse
+# --path-format=absolute --git-common-dir`. It never walks the ancestor chain
+# looking for an existing `.bionic/`, which is why it answers in a project
+# where `.bionic/` has never existed and why every linked worktree of one repo
+# answers with the parent repo — one repo, one `.bionic/` tree.
+#
+# Fixture fidelity: real `git init` repos and a real `git worktree add` on
+# disk. The behaviour under test is git's own path-format handling; a stubbed
+# `git` would reproduce whatever the test author believed it does, which is
+# the belief the AC exists to check.
+echo
+echo "=== AC-10: computed root resolution ==="
+
+# The five criteria below run against the SHIPPED text of the function,
+# extracted from the hook and eval'd here — not against a reimplementation.
+# That seam can only observe what the function returns, never that the hook
+# calls it, so the two end-to-end cases at the end of this section drive the
+# hook through its real stdin contract and pin the call site.
+ac10_src=$(awk '/^resolve_project_root\(\)/,/^\}/' "$HOOK")
+TOTAL=$((TOTAL + 1))
+if [ -n "$ac10_src" ]; then
+  PASS=$((PASS + 1)); printf '  PASS  ac10_resolver_extracted\n'
+  eval "$ac10_src"
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac10_resolver_extracted (no resolve_project_root() in %s)\n' "$HOOK"
+  # Keep the five criteria individually reportable rather than aborting the run.
+  resolve_project_root() { :; }
+fi
+
+# main: a repo WITH .bionic/ (untracked, so the worktree checkout has none).
+# wt:   a linked worktree of main, given its own .bionic/ on purpose — the
+#       predecessor's ancestor walk would stop there.
+# nb:   a repo where .bionic/ has NEVER existed.
+# out:  a plain directory, no repo anywhere above it.
+ac10_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$ac10_tmp")
+ac10_main="$ac10_tmp/main"
+mkdir -p "$ac10_main/.bionic/docs/plans/epic-01-demo" "$ac10_main/deep/sub/dir"
+git -C "$ac10_main" init -q .
+git -C "$ac10_main" commit -q --allow-empty -m init
+git -C "$ac10_main" worktree add -q "$ac10_tmp/wt" -b ac10-wt
+ac10_wt="$ac10_tmp/wt"
+mkdir -p "$ac10_wt/.bionic/docs/plans/epic-01-demo"
+ac10_nb="$ac10_tmp/nobionic"; mkdir -p "$ac10_nb"; git -C "$ac10_nb" init -q .
+ac10_out="$ac10_tmp/outside"; mkdir -p "$ac10_out"
+
+# 1 — from the repo root, the repo root.
+ac10_r1=$(resolve_project_root "$ac10_main/.bionic/docs/plans/epic-01-demo/x.plan.md")
+assert_eq "ac10_c1 repo root → repo root" "$ac10_main" "$ac10_r1"
+
+# 2 — from an arbitrary subdirectory, the same repo root: both when the target
+# path lives in the subdirectory, and when the process cwd is the subdirectory.
+ac10_r2=$(resolve_project_root "$ac10_main/deep/sub/dir/x.plan.md")
+assert_eq "ac10_c2 target in a subdirectory → repo root" "$ac10_main" "$ac10_r2"
+ac10_r2b=$(cd "$ac10_main/deep/sub/dir" && resolve_project_root "$ac10_main/.bionic/docs/plans/epic-01-demo/x.plan.md")
+assert_eq "ac10_c2 cwd in a subdirectory → repo root (not cwd-relative)" "$ac10_main" "$ac10_r2b"
+
+# 3 — from inside a linked worktree, the PARENT repo root. `--git-common-dir`
+# is what makes this true; `--git-dir` would name the worktree's private dir.
+ac10_r3=$(resolve_project_root "$ac10_wt/.bionic/docs/plans/epic-01-demo/x.plan.md")
+assert_eq "ac10_c3 inside a worktree → parent repo root" "$ac10_main" "$ac10_r3"
+
+# 4 — a repo where .bionic/ has never existed. None of the target's parent
+# directories exist either, which is the ordinary case for a PreToolUse gate.
+ac10_r4=$(resolve_project_root "$ac10_nb/.bionic/docs/plans/epic-01-demo/x.plan.md")
+assert_eq "ac10_c4 .bionic/ never existed → repo root" "$ac10_nb" "$ac10_r4"
+
+# 5 — outside any repository: cwd, and no error.
+ac10_r5=$(cd "$ac10_out" && resolve_project_root "$ac10_out/notes/x.plan.md")
+assert_eq "ac10_c5 outside any repo → cwd" "$ac10_out" "$ac10_r5"
+TOTAL=$((TOTAL + 1))
+if (cd "$ac10_out" && resolve_project_root "$ac10_out/notes/x.plan.md" >/dev/null 2>&1); then
+  PASS=$((PASS + 1)); printf '  PASS  ac10_c5 outside any repo → rc 0, no error\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac10_c5 outside any repo → rc 0, no error (rc=%d)\n' "$?"
+fi
+
+# Every answer is an ABSOLUTE path. The naive `dirname $(git rev-parse
+# --git-common-dir)` yields `.` and `..`; a criterion that accepted a relative
+# answer would pass the defect it exists to catch.
+for ac10_i in 1 2 3 4 5; do
+  eval "ac10_v=\$ac10_r${ac10_i}"
+  TOTAL=$((TOTAL + 1))
+  case "$ac10_v" in
+    /*) PASS=$((PASS + 1)); printf '  PASS  ac10_absolute c%s\n' "$ac10_i" ;;
+    *)  FAIL=$((FAIL + 1)); printf '  FAIL  ac10_absolute c%s (relative or empty: %q)\n' "$ac10_i" "$ac10_v" ;;
+  esac
+done
+
+# --- end-to-end through the hook (no extraction seam) ---
+
+# Criterion 4 at the CALL SITE: a repo where .bionic/ has never existed. The
+# predecessor's ancestor walk found no root here and the hook exited 0, so an
+# unframed artifact went ungated. Computing the root gates it.
+echo "e2e: unframed artifact in a repo where .bionic/ never existed → block"
+run_write "$ac10_nb/.bionic/docs/plans/epic-01-demo/never-existed.plan.md" "$MISSING_FM"
+assert_eq "ac10_e2e_no_bionic exit 2" 2 "$HOOK_EXIT"
+
+# Criterion 3 at the CALL SITE, observed through the audit file's project key.
+# A worktree-local .bionic/ is NOT the project's tree: resolution answers with
+# main, so main's docs root does not contain this path and the write falls out
+# of scope — no finding is keyed on the worktree. Paired with the presence arm
+# below, which writes the identical floor-violating plan under main and DOES
+# produce main's audit file; alone, the absence arm would pass if the hook had
+# written nothing at all.
+echo "e2e: floor-violating plan under a worktree-local .bionic/ → no finding keyed on the worktree"
+run_write "$ac10_wt/.bionic/docs/plans/epic-01-demo/wt-floor.plan.md" "$(build_plan intent=spike rigor=audited)"
+assert_eq "ac10_e2e_worktree exit 0" 0 "$HOOK_EXIT"
+TOTAL=$((TOTAL + 1))
+if [ ! -f "$(audit_file_for "$ac10_wt")" ]; then
+  PASS=$((PASS + 1)); printf '  PASS  ac10_e2e_worktree no audit file keyed on the worktree\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac10_e2e_worktree audit file keyed on the worktree (%s)\n' "$(audit_file_for "$ac10_wt")"
+fi
+run_write "$ac10_main/.bionic/docs/plans/epic-01-demo/main-floor.plan.md" "$(build_plan intent=spike rigor=audited)"
+assert_eq "ac10_e2e_worktree_pair exit 0" 0 "$HOOK_EXIT"
+assert_contains "ac10_e2e_worktree_pair finding keyed on the main repo" "spike-cap" "$(read_audit "$ac10_main")"
 
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"

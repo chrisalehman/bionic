@@ -55,21 +55,41 @@ fi
 # Match files under the project's docs root (default <project>/.bionic/
 # docs/, configurable via <project>/.bionic/config.yaml `docs-root:`).
 #
-# Strategy: walk up from FILE_PATH to find the nearest `.bionic/`
-# parent — that directory's parent is the project root. From there,
-# resolve docs-root and check whether FILE_PATH lives under
-# <docs-root>/{specs,plans,adrs,incidents}/.
-find_project_root_from_path() {
-  local d
+# Strategy: the project root is COMPUTED from git, never DISCOVERED by
+# walking for an existing `.bionic/`. From that root, resolve docs-root and
+# check whether FILE_PATH lives under <docs-root>/{specs,plans,adrs,incidents}/.
+#
+# `git rev-parse --git-common-dir` names the MAIN repository's .git even from
+# inside a linked worktree (`--git-dir` would name the worktree's private
+# dir), so every worktree of one repo resolves to ONE root and therefore one
+# `.bionic/` tree.
+#
+# `--path-format=absolute` is load-bearing, not cosmetic: the bare form
+# returns a RELATIVE path (`.git` at the root, `../.git` one level down),
+# whose dirname is `.` or `..` — a cwd-dependent string, not a root. Requires
+# git >= 2.31.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+#
+# `git -C` needs a directory that EXISTS, and this is a PreToolUse gate: on
+# the first artifact write into a project the target's parent directories have
+# not been created yet. Climbing to the nearest existing ancestor supplies git
+# a valid cwd — it is not a search for `.bionic/`; the loop's condition never
+# mentions it, and the answer still comes from git.
+#
+# The walk-up-for-`.bionic/` predecessor could not resolve a root in a project
+# where `.bionic/` did not already exist, and resolved a linked worktree to
+# the worktree instead of its parent repo.
+resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default pwd)
+  local d common
   d=$(dirname "$1")
-  while [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
-    if [ -d "$d/.bionic" ]; then
-      echo "$d"
-      return 0
-    fi
+  while [ ! -d "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
     d=$(dirname "$d")
   done
-  return 1
+  if common=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+    dirname "$common"
+  else
+    printf '%s\n' "${2:-$(pwd)}"
+  fi
 }
 
 resolve_docs_root() {
@@ -93,9 +113,11 @@ resolve_docs_root() {
   echo "$proj/.bionic/docs"
 }
 
-PROJECT_ROOT_FROM_PATH=$(find_project_root_from_path "$FILE_PATH" || true)
+PROJECT_ROOT_FROM_PATH=$(resolve_project_root "$FILE_PATH" || true)
 if [ -z "$PROJECT_ROOT_FROM_PATH" ]; then
-  # File is not under any .bionic/ project tree → not a canonical artifact.
+  # No root at all — resolve_project_root falls back to pwd, so this is
+  # reachable only if pwd itself is empty. Kept as a guard; the fail-open
+  # semantics of this branch are slice 3's subject, not slice 1's.
   exit 0
 fi
 DOCS_ROOT=$(resolve_docs_root "$PROJECT_ROOT_FROM_PATH")
