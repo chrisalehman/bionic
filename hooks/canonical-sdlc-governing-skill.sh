@@ -55,21 +55,100 @@ fi
 # Match files under the project's docs root (default <project>/.bionic/
 # docs/, configurable via <project>/.bionic/config.yaml `docs-root:`).
 #
-# Strategy: walk up from FILE_PATH to find the nearest `.bionic/`
-# parent — that directory's parent is the project root. From there,
-# resolve docs-root and check whether FILE_PATH lives under
-# <docs-root>/{specs,plans,adrs,incidents}/.
-find_project_root_from_path() {
-  local d
+# Strategy: the project root is COMPUTED from git, never DISCOVERED by
+# walking for an existing `.bionic/`. From that root, resolve docs-root and
+# check whether FILE_PATH lives under <docs-root>/{specs,plans,adrs,incidents}/.
+#
+# `git rev-parse --git-common-dir` names the MAIN repository's .git even from
+# inside a linked worktree (`--git-dir` would name the worktree's private
+# dir), so every worktree of one repo resolves to ONE root and therefore one
+# `.bionic/` tree.
+#
+# `--path-format=absolute` is load-bearing, not cosmetic: the bare form
+# returns a RELATIVE path (`.git` at the root, `../.git` one level down),
+# whose dirname is `.` or `..` — a cwd-dependent string, not a root. It landed
+# in git 2.31.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+#
+# OLD-GIT FALLBACK (Step-6 finding K2). On git < 2.31 `--path-format` is an
+# unknown option and rev-parse exits 129 — which the single-branch predecessor
+# could not tell apart from "not a repository", so the root silently became the
+# session's cwd and EVERY canonical-sdlc artifact write on such a machine
+# blocked as misplaced, pointing the author at whatever directory the session
+# started in. Fail-closed in the wrong direction, and wave-introduced: the
+# walk-up predecessor worked on every git version. Plan assumption 6 claimed a
+# `cd`-and-`pwd` fallback already covered this; it did not exist. A documented
+# mitigation that was never built is worse than an unlogged one — it reads as
+# retired, and a reviewer who checks the local git version moves on.
+#
+# So: retry the BARE form, which every git has, and absolutize its answer here.
+# It answers RELATIVE inside the main repo and ABSOLUTE from a linked worktree,
+# hence the `case`. Only when BOTH forms fail is this genuinely not a
+# repository, and the supplied fallback wins as before.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+#
+# `git -C` needs a directory that EXISTS, and this is a PreToolUse gate: on
+# the first artifact write into a project the target's parent directories have
+# not been created yet. Climbing to the nearest existing ancestor supplies git
+# a valid cwd — it is not a search for `.bionic/`; the loop's condition never
+# mentions it, and the answer still comes from git.
+#
+# The walk-up-for-`.bionic/` predecessor could not resolve a root in a project
+# where `.bionic/` did not already exist, and resolved a linked worktree to
+# the worktree instead of its parent repo.
+resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default pwd)
+  local d common root
   d=$(dirname "$1")
-  while [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
-    if [ -d "$d/.bionic" ]; then
-      echo "$d"
-      return 0
-    fi
+  while [ ! -d "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
     d=$(dirname "$d")
   done
-  return 1
+  if common=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+    dirname "$common"
+    return
+  fi
+  if common=$(git -C "$d" rev-parse --git-common-dir 2>/dev/null); then
+    case "$common" in
+      /*) root=$(dirname "$common") ;;
+      *)  root=$(cd "$d" 2>/dev/null && cd "$(dirname "$common")" 2>/dev/null && pwd -P) ;;
+    esac
+    if [ -n "$root" ]; then
+      printf '%s\n' "$root"
+      return
+    fi
+  fi
+  printf '%s\n' "${2:-$(pwd)}"
+}
+
+# Resolve a path's ancestors to their physical form, keeping any tail that does
+# not exist yet. `git` answers with the PHYSICAL root, while FILE_PATH arrives
+# from the tool as whatever path the session used — if the project is reached
+# through a symlink the two disagree on prefix and every path comparison below
+# misfires. This function is the fix, and the severity is why it could not be
+# deferred: under the old pass-through the mismatch was a silent bypass
+# (artifacts quietly stopped being gated), but once misplacement BLOCKS, the
+# same mismatch inverts into the worse failure — a correctly placed artifact
+# false-BLOCKED. Fail-closed turns a hole into a wall in front of legitimate
+# work, so closing the hole and resolving symlinks had to land together.
+#
+# Not exotic on macOS, where /tmp and /var are themselves symlinks.
+#
+# `pwd -P` needs a directory that EXISTS, and this is a PreToolUse gate, so the
+# climb mirrors resolve_project_root's: walk up to the nearest existing
+# ancestor, physicalize that, re-attach the tail. Fail-open — an unresolvable
+# path is returned unchanged.
+physicalize() {  # $1=absolute path (need not exist) → ancestors resolved
+  local d rest p
+  d=$(dirname "$1")
+  rest=$(basename "$1")
+  while [ ! -d "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
+    rest="$(basename "$d")/$rest"
+    d=$(dirname "$d")
+  done
+  if p=$(cd "$d" 2>/dev/null && pwd -P); then
+    printf '%s/%s\n' "${p%/}" "$rest"
+  else
+    printf '%s\n' "$1"
+  fi
 }
 
 resolve_docs_root() {
@@ -93,9 +172,12 @@ resolve_docs_root() {
   echo "$proj/.bionic/docs"
 }
 
-PROJECT_ROOT_FROM_PATH=$(find_project_root_from_path "$FILE_PATH" || true)
+PROJECT_ROOT_FROM_PATH=$(resolve_project_root "$FILE_PATH" || true)
 if [ -z "$PROJECT_ROOT_FROM_PATH" ]; then
-  # File is not under any .bionic/ project tree → not a canonical artifact.
+  # No root at all — resolve_project_root falls back to pwd, so this is
+  # reachable only if pwd itself is empty. Kept as a defensive guard against a
+  # future resolver change; it is not the misplacement fail-open, which is
+  # closed below by the UNDER_DOCS_ROOT verdict.
   exit 0
 fi
 DOCS_ROOT=$(resolve_docs_root "$PROJECT_ROOT_FROM_PATH")
@@ -119,11 +201,6 @@ audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
   printf '%s/.claude/logs/%s-%s/sdlc-audit.md' "$HOME" "$base" "$sum"
 }
 
-case "$FILE_PATH" in
-  "$DOCS_ROOT"/specs/*|"$DOCS_ROOT"/plans/*|"$DOCS_ROOT"/adrs/*|"$DOCS_ROOT"/incidents/*) ;;
-  *) exit 0 ;;
-esac
-
 BASENAME=$(basename "$FILE_PATH")
 ENFORCE=0
 case "$BASENAME" in
@@ -131,7 +208,48 @@ case "$BASENAME" in
   adr-*.md) ENFORCE=1 ;;
 esac
 
-if [ "$ENFORCE" -eq 0 ]; then
+# ---------- AC-13: misplacement blocks; absence never does ----------
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+#
+# Two facts about the target path, kept separate because they answer different
+# questions:
+#   IN_SCOPE        — inside one of the four enforced subdirectories, so the
+#                     full frontmatter contract applies.
+#   UNDER_DOCS_ROOT — inside the docs root at all, so the file is PLACED.
+#
+# The fail-open this closes: an artifact declaring canonical-sdlc frontmatter
+# but living outside the docs root used to fall straight out of the scope check
+# and exit 0 — written, ungated, in the wrong place. Slice 1's
+# resolve_project_root() always answers, so the historical no-root `exit 0` is
+# unreachable; the scope check is the fail-open that survived.
+#
+# ABSENCE is not misplacement. DOCS_ROOT is COMPUTED, so a brand-new project
+# with no `.bionic/` still has one, and its first artifact write targets it and
+# passes. Nothing here blocks on `.bionic/` being missing — only on a file that
+# names itself a canonical-sdlc artifact while sitting somewhere else.
+#
+# "Placed" means the whole docs root, not just the four subdirectories:
+# `<docs-root>/spikes/` and `<docs-root>/record/` hold real files carrying this
+# frontmatter. They pass through unenforced, exactly as they did before.
+# Both sides physicalized before comparing, or a symlinked project path makes
+# every verdict below wrong. FILE_PATH itself is left alone — it is what the
+# messages quote back, and quoting a path the user never typed is its own
+# confusion.
+FILE_PATH_MATCH=$(physicalize "$FILE_PATH")
+DOCS_ROOT_MATCH=$(physicalize "$DOCS_ROOT")
+
+IN_SCOPE=0
+case "$FILE_PATH_MATCH" in
+  "$DOCS_ROOT_MATCH"/specs/*|"$DOCS_ROOT_MATCH"/plans/*|"$DOCS_ROOT_MATCH"/adrs/*|"$DOCS_ROOT_MATCH"/incidents/*) IN_SCOPE=1 ;;
+esac
+UNDER_DOCS_ROOT=0
+case "$FILE_PATH_MATCH" in
+  "$DOCS_ROOT_MATCH"/*) UNDER_DOCS_ROOT=1 ;;
+esac
+
+# Placed, and either not in an enforced subdirectory or not an enforced name:
+# nothing to check and no content to read.
+if [ "$UNDER_DOCS_ROOT" -eq 1 ] && { [ "$IN_SCOPE" -eq 0 ] || [ "$ENFORCE" -eq 0 ]; }; then
   exit 0
 fi
 
@@ -149,15 +267,17 @@ if [ "$TOOL" = "Write" ]; then
   CONTENT=$(echo "$INPUT" | jq -r '.tool_input.content // empty')
 else
   if [ -f "$FILE_PATH" ]; then
-    CONTENT=$(cat "$FILE_PATH")
+    if [ "$IN_SCOPE" -eq 1 ]; then
+      CONTENT=$(cat "$FILE_PATH")
+    else
+      # Misplacement probe only. This path is reached on EVERY Edit anywhere
+      # in the project, and all it inspects is the leading frontmatter block —
+      # so read a head, not the whole file. 8 KB is two orders of magnitude
+      # more than any frontmatter block; a truncated read can only fail to
+      # find the closing `---`, which makes the probe print more, never less.
+      CONTENT=$(head -c 8192 "$FILE_PATH")
+    fi
   fi
-fi
-
-if [ -z "$CONTENT" ]; then
-  echo "BLOCKED: canonical-sdlc artifact '$BASENAME' has no content to validate." >&2
-  echo "Path: $FILE_PATH" >&2
-  echo "Fix: use Write to create the artifact with governing-skill frontmatter." >&2
-  exit 2
 fi
 
 # Normalize line endings to plain \n before any parsing. Strip a trailing
@@ -185,6 +305,45 @@ FRONTMATTER=$(echo "$CONTENT" | awk '
   inside && $0 == "---" { exit }
   inside { print }
 ')
+
+# The misplacement verdict, now that the frontmatter is in hand.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+#
+# Reading the LEADING block (and only the leading block) is what keeps a
+# documentation page that shows the frontmatter inside a fence from being
+# mistaken for an artifact — the fenced example is never at line 1. That trap
+# is a recorded recurrence in this repo, not a hypothetical.
+#
+# Either self-declaration identifies the artifact: `canonical_sdlc_version` is
+# the run-state marker the lifecycle stamps, and `governing-skill:
+# canonical-sdlc` is what the skill's own Step-0 artifact carries. A file
+# carrying neither is not a canonical-sdlc artifact and is none of this hook's
+# business, wherever it lives — which is why an ordinary file in an ordinary
+# project, in a project with no `.bionic/` at all, passes untouched.
+if [ "$UNDER_DOCS_ROOT" -eq 0 ]; then
+  if echo "$FRONTMATTER" | grep -qE '^[[:space:]]*(canonical_sdlc_version[[:space:]]*:|governing-skill[[:space:]]*:[[:space:]]*canonical-sdlc[[:space:]]*$)'; then
+    case "$BASENAME" in
+      *.spec.md) MISPLACED_SUBDIR=specs ;;
+      adr-*.md)  MISPLACED_SUBDIR=adrs ;;
+      *)         MISPLACED_SUBDIR=plans ;;
+    esac
+    echo "BLOCKED: canonical-sdlc artifact '$BASENAME' is misplaced." >&2
+    echo "Path: $FILE_PATH" >&2
+    echo "It declares canonical-sdlc frontmatter but does not live under this project's docs root." >&2
+    echo "Docs root: $DOCS_ROOT" >&2
+    echo "Fix: write it under $DOCS_ROOT/$MISPLACED_SUBDIR/ instead." >&2
+    echo "     (the docs root is <project>/.bionic/docs by default; override with 'docs-root:' in $PROJECT_ROOT_FROM_PATH/.bionic/config.yaml)" >&2
+    exit 2
+  fi
+  exit 0
+fi
+
+if [ -z "$CONTENT" ]; then
+  echo "BLOCKED: canonical-sdlc artifact '$BASENAME' has no content to validate." >&2
+  echo "Path: $FILE_PATH" >&2
+  echo "Fix: use Write to create the artifact with governing-skill frontmatter." >&2
+  exit 2
+fi
 
 if [ -z "$FRONTMATTER" ]; then
   echo "BLOCKED: canonical-sdlc artifact '$BASENAME' is missing a YAML frontmatter block." >&2
@@ -419,5 +578,62 @@ case "$BASENAME" in
     esac
     ;;
 esac
+
+# ---------- AC-11 / AC-12: tree creation on first lifecycle use ----------
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+#
+# Slice 2 (F4): neither hook has an entry point that fires on true first
+# lifecycle use without requiring `.bionic/` to pre-exist — except this one.
+# The governing-skill hook already knows the target artifact's path and, as
+# of slice 1, computes PROJECT_ROOT_FROM_PATH from git rather than by
+# walking for an existing `.bionic/`. Creation hangs off that same
+# computation.
+#
+# The discriminator is `canonical_sdlc_version` — the SAME field the schema
+# enforcement above reads, and for the same reason. Slice 2 keyed creation on
+# `governing-skill: canonical-sdlc` instead, which is the artifact-AUTHOR
+# field; `.claude/rules/hook-authoring.md` (machine-local, gitignored, authored
+# in place — no script recreates it, so absent from a fresh clone) § "Discriminators in
+# enforcement hooks" names that as a known failure mode, because Step 3 plans legitimately
+# declare `governing-skill: superpowers:writing-plans` and would have found no
+# tree. Slice 2's stated rationale was avoiding a re-fire on later artifacts,
+# and re-firing costs nothing: `mkdir -p` is idempotent and the `.gitignore`
+# write is `[ -f ]`-guarded.
+#
+# Deliberately NOT a SessionStart hook: that would create `.bionic/` in
+# every repo the user opens a session in. "First lifecycle use" is the
+# first canonical-sdlc artifact write, not the first session — see the
+# wave-level Not Doing.
+#
+# PLACEMENT (Step-6 findings C5 / F3 / S4): this block used to sit immediately
+# after SDLC_VERSION was read, i.e. AHEAD of the version, triple, flag and
+# matrix gates — so a write this hook then REFUSED still left a full tree and a
+# `.gitignore` behind, in a repo named by the tool call's own `file_path`. A
+# PreToolUse gate must not mutate the filesystem for a call it denies. It now
+# runs at the single `exit 0`, past every gate, so the tree is created only for
+# an artifact that satisfies the ENTIRE contract — not merely one carrying a
+# version marker. Nothing between the old and new positions reads the tree:
+# `log_finding` writes under `$HOME/.claude/logs/`, the config.yaml and epic
+# plan reads are `[ -r ]`/`2>/dev/null` fail-open and target files this block
+# never creates.
+#
+# Neither call can block — no new exit path is added here; failure to create is
+# left to whatever already handles an unwritable project tree elsewhere. The
+# `.gitignore` redirect is braced so that the SHELL's failure message (the
+# redirection is performed before `printf` runs, so `printf 2>/dev/null` would
+# silence nothing) is suppressed too — matching the `mkdir -p ... 2>/dev/null`
+# beside it. An allowed tool call must leave stderr clean.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+if [ -n "$SDLC_VERSION" ]; then
+  mkdir -p \
+    "$PROJECT_ROOT_FROM_PATH/.bionic/tmp" \
+    "$PROJECT_ROOT_FROM_PATH/.bionic/docs/specs" \
+    "$PROJECT_ROOT_FROM_PATH/.bionic/docs/plans" \
+    "$PROJECT_ROOT_FROM_PATH/.bionic/docs/adrs" \
+    "$PROJECT_ROOT_FROM_PATH/.bionic/docs/incidents" \
+    2>/dev/null
+  BIONIC_GITIGNORE="$PROJECT_ROOT_FROM_PATH/.bionic/.gitignore"
+  [ -f "$BIONIC_GITIGNORE" ] || { printf '*\n' > "$BIONIC_GITIGNORE"; } 2>/dev/null
+fi
 
 exit 0

@@ -64,6 +64,7 @@ fi
 #
 # Project resolution mirrors memory-update.sh: CLAUDE_PROJECT_DIR first,
 # then the hook input's cwd field, then pwd. Consistent with existing hooks.
+# That value NAMES the invoking directory; the ROOT is computed from it below.
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-}"
 if [ -z "$PROJECT_DIR" ]; then
   PROJECT_DIR=$(echo "$INPUT" | jq -r '.cwd // empty')
@@ -71,6 +72,84 @@ fi
 if [ -z "$PROJECT_DIR" ]; then
   PROJECT_DIR=$(pwd)
 fi
+
+# Compute the project root that owns $1 — never discover it by walking for an
+# existing `.bionic/`. Byte-identical twin of the copy in
+# canonical-sdlc-governing-skill.sh (deliberate per-hook duplication, no shared
+# lib — same convention as audit_path below).
+#
+# `git rev-parse --git-common-dir` names the MAIN repository's .git even from
+# inside a linked worktree (`--git-dir` would name the worktree's private dir),
+# so every worktree of one repo resolves to ONE root and therefore one audit
+# file.
+#
+# `--path-format=absolute` is load-bearing, not cosmetic: the bare form returns
+# a RELATIVE path (`.git` at the root, `../.git` one level down), whose dirname
+# is `.` or `..` — a cwd-dependent string, not a root. It landed in git 2.31.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
+#
+# OLD-GIT FALLBACK (Step-6 finding K2). On git < 2.31 `--path-format` is an
+# unknown option and rev-parse exits 129 — which the single-branch predecessor
+# could not tell apart from "not a repository", so the root silently became the
+# caller's cwd. Plan assumption 6 claimed a `cd`-and-`pwd` fallback already
+# covered this; it did not exist. A documented mitigation that was never built
+# is worse than an unlogged one — it reads as retired, and a reviewer who checks
+# the local git version moves on.
+#
+# So: retry the BARE form, which every git has, and absolutize its answer here.
+# It answers RELATIVE inside the main repo and ABSOLUTE from a linked worktree,
+# hence the `case`. Only when BOTH forms fail is this genuinely not a
+# repository, and the supplied fallback wins as before. The governing-skill
+# hook feels this hardest (its call passes no fallback, so it lands on `pwd`);
+# the twin is kept byte-identical regardless.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
+#
+# `git -C` needs a directory that EXISTS; climbing to the nearest existing
+# ancestor supplies git a valid cwd. That climb is not a search for `.bionic/`
+# — the loop's condition never mentions it, and the answer still comes from git.
+resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default pwd)
+  local d common root
+  d=$(dirname "$1")
+  while [ ! -d "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
+    d=$(dirname "$d")
+  done
+  if common=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+    dirname "$common"
+    return
+  fi
+  if common=$(git -C "$d" rev-parse --git-common-dir 2>/dev/null); then
+    case "$common" in
+      /*) root=$(dirname "$common") ;;
+      *)  root=$(cd "$d" 2>/dev/null && cd "$(dirname "$common")" 2>/dev/null && pwd -P) ;;
+    esac
+    if [ -n "$root" ]; then
+      printf '%s\n' "$root"
+      return
+    fi
+  fi
+  printf '%s\n' "${2:-$(pwd)}"
+}
+
+# ONE root per repo, across BOTH hooks (Step-6 finding C2/S1).
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
+#
+# The governing-skill hook resolves an artifact's project with the twin above,
+# so a Write from inside a linked worktree is placed against the MAIN repo's
+# docs root. This gate used to keep PROJECT_DIR — and therefore DOCS_ROOT,
+# PLAN_DIRS, and the AC-13 misplacement sweep's root — at the raw invoking
+# directory, i.e. the worktree. Slice 1 migrated only audit_root().
+#
+# The consequence was that in a linked worktree NO artifact placement satisfied
+# both hooks: obey the governing hook and put the plan in the main repo, and
+# every commit made from the worktree ran ungated; put it in the worktree so
+# this gate finds it, and every artifact write was blocked. canonical-sdlc ships
+# a `use_worktree` flag, so that is the lifecycle's own normal mode.
+#
+# `$PROJECT_DIR/.` hands the helper a path whose dirname is PROJECT_DIR itself
+# (it is written for a FILE path). Fail-open: when git cannot answer — an
+# invoking directory outside any repository — the fallback is the unresolved
+# value, so a non-repo caller keeps exactly its previous meaning.
+PROJECT_DIR=$(resolve_project_root "$PROJECT_DIR/." "$PROJECT_DIR")
 
 # Resolve the per-project docs root: <project>/.bionic/config.yaml's
 # `docs-root:` if set, else default <project>/.bionic/docs. See
@@ -96,9 +175,19 @@ resolve_docs_root() {
   echo "$proj/.bionic/docs"
 }
 
-PLAN_DIRS=( "${HOME}/.claude/plans" )
+# Read unconditionally, next to the other globals: this hook runs `set -u`, and
+# a variable bound on only some code paths crashes the others. See
+# `.claude/rules/hook-authoring.md` (machine-local, gitignored, authored in
+# place — no script recreates it, so it is absent from a fresh clone) § "`set -u` and
+# conditionally-bound variables" — the recorded recurrence of exactly this.
+DOCS_ROOT=$(resolve_docs_root "$PROJECT_DIR")
+
+# ~/.claude/plans is the harness's own, project-AGNOSTIC plan directory; the
+# rest are this project's. The distinction is load-bearing below — see
+# PROJECT_PLAN.
+GLOBAL_PLAN_DIR="${HOME}/.claude/plans"
+PLAN_DIRS=( "$GLOBAL_PLAN_DIR" )
 if [ -n "$PROJECT_DIR" ]; then
-  DOCS_ROOT=$(resolve_docs_root "$PROJECT_DIR")
   PLAN_DIRS+=(
     "${DOCS_ROOT}/plans"
     "${DOCS_ROOT}/incidents"
@@ -106,9 +195,18 @@ if [ -n "$PROJECT_DIR" ]; then
   )
 fi
 
+# PLAN         — the newest .md across every searched directory; the plan this
+#                gate actually validates.
+# PROJECT_PLAN — the newest across the PROJECT directories only. The
+#                misplacement sweep keys off this one, never off PLAN: a file
+#                in the global directory says nothing about whether THIS
+#                project's plan is somewhere the gate cannot see.
 PLAN=""
+PROJECT_PLAN=""
 for d in "${PLAN_DIRS[@]}"; do
   [ -d "$d" ] || continue
+  d_is_project=1
+  [ "$d" = "$GLOBAL_PLAN_DIR" ] && d_is_project=0
   # Descend up to 2 levels deep to support the bionic directory-per-epic
   # layout: docs/bionic/plans/epic-NN-<slug>/wave-NN-<slug>.plan.md.
   # Flat conventions (~/.claude/plans/<name>.md) are still covered at
@@ -117,9 +215,93 @@ for d in "${PLAN_DIRS[@]}"; do
     if [ -z "$PLAN" ] || [ "$f" -nt "$PLAN" ]; then
       PLAN="$f"
     fi
+    if [ "$d_is_project" -eq 1 ] && { [ -z "$PROJECT_PLAN" ] || [ "$f" -nt "$PROJECT_PLAN" ]; }; then
+      PROJECT_PLAN="$f"
+    fi
   done < <(find "$d" -maxdepth 2 -type f -name '*.md' -print0 2>/dev/null)
 done
 
+# ---------- AC-13: misplacement blocks; absence never does ----------
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
+#
+# No plan file was found in this PROJECT's plan directories. That used to be an
+# unconditional `exit 0`, and it is this hook's fail-open — a structurally
+# different one from the governing-skill hook's, which is why the two are fixed
+# and tested independently. This one never tests `.bionic/` at all: every
+# candidate directory is skipped by `[ -d "$d" ] || continue`, PLAN comes back
+# empty, and the commit passes ungated.
+#
+# The guard is PROJECT_PLAN, not PLAN (Step-6 finding C1/S2). Keying it on PLAN
+# meant "no plan in ANY searched directory", and the first directory searched is
+# the global, project-agnostic `~/.claude/plans/` — where the harness's own plan
+# mode writes. A single unrelated `.md` there made PLAN non-empty and this whole
+# block dead. Two such files were present on the machine this shipped from, so
+# the branch had never executed outside the test suite. A file in the global
+# directory says nothing about whether THIS project's plan is misplaced.
+#
+# Reaching the end of this block is not a decision: the sweep only ever BLOCKS
+# or falls through. The `absent → allow` exit belongs to PLAN and lives just
+# below, so a project with no plan of its own but a global one still gets that
+# global plan validated exactly as before.
+#
+# ABSENT is not an error and must never block. No plan anywhere is every commit
+# in every project that does not use this lifecycle, plus the normal first-run
+# state of one that does.
+#
+# MISPLACED is: a plan carrying the run-state marker exists inside the project
+# but outside every directory this gate searches. The gate is then silently
+# disabled — precisely the failure the AC exists to convert into a block.
+#
+# Scoping, deliberately narrow, because a false positive here walls off every
+# commit in the project:
+#   - `*.plan.md` only. The gate consumes plans. A misplaced file under the
+#     flat `~/.claude/plans/<name>.md` convention is not covered — that whole
+#     directory is already searched.
+#   - The LEADING frontmatter must declare `canonical_sdlc_version`, the
+#     run-state marker (never `governing-skill`, the artifact-author field —
+#     see `.claude/rules/hook-authoring.md` — machine-local, gitignored,
+#     authored in place; no script recreates it). Reading only the leading block is
+#     what keeps a fenced example in a documentation page from counting.
+#   - The whole docs root is "placed", not just plans/ and incidents/:
+#     <docs-root>/spikes/ and <docs-root>/record/ hold real artifacts carrying
+#     this frontmatter, and the governing-skill hook treats them as placed too.
+#   - Bounded walk: `.git` and `node_modules` pruned, depth 5, filename match
+#     first. It runs only when no PROJECT plan was found, so a project in an
+#     active canonical-sdlc run never pays for it.
+if [ -z "$PROJECT_PLAN" ] || [ ! -f "$PROJECT_PLAN" ]; then
+  MISPLACED_PLAN=""
+  if [ -d "$PROJECT_DIR" ]; then
+    while IFS= read -r -d '' f; do
+      case "$f" in "$DOCS_ROOT"/*) continue ;; esac
+      if head -c 8192 "$f" \
+         | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' \
+         | awk 'NR == 1 && $0 == "---" { inside = 1; next }
+                inside && $0 == "---" { exit }
+                inside { print }' \
+         | grep -qE '^[[:space:]]*canonical_sdlc_version[[:space:]]*:'; then
+        MISPLACED_PLAN="$f"
+        break
+      fi
+    done < <(find "$PROJECT_DIR" -maxdepth 5 \
+               \( -name .git -o -name node_modules \) -prune -o \
+               -type f -name '*.plan.md' -print0 2>/dev/null)
+  fi
+
+  if [ -n "$MISPLACED_PLAN" ]; then
+    echo "BLOCKED: a canonical-sdlc plan is misplaced — this commit would pass ungated." >&2
+    echo "Misplaced plan: $MISPLACED_PLAN" >&2
+    echo "Docs root:      $DOCS_ROOT" >&2
+    echo "The evidence gate searches only the plan directories for this project, so a plan" >&2
+    echo "outside them silently disables it — no step evidence is checked at all." >&2
+    echo "Fix: move it under $DOCS_ROOT/plans/ (or $DOCS_ROOT/incidents/ for an incident run)." >&2
+    exit 2
+  fi
+fi
+
+# ABSENCE: nothing to validate anywhere. Never blocks — this is every commit in
+# every project that does not use the lifecycle. Separate from the sweep above,
+# which now runs on the narrower "no PROJECT plan" condition and must therefore
+# fall through when a global plan is present.
 if [ -z "$PLAN" ] || [ ! -f "$PLAN" ]; then
   exit 0
 fi
@@ -214,21 +396,16 @@ is_placeholder_value() {
   esac
 }
 
-# Audit dir follows the plan's own project (walk-up from $PLAN's directory
-# to the nearest ancestor containing .bionic/), matching the governing-skill
-# hook's find_project_root_from_path strategy — findings live with the
-# project that owns the artifact, not necessarily the invoking PROJECT_DIR.
-# PROJECT_DIR is the fallback only (empty/unreadable $PLAN, or no .bionic/
-# ancestor found). Fail-open: the `cd ... && pwd` guard never crashes the hook.
+# Audit dir follows the plan's own project, COMPUTED from $PLAN's own repo
+# rather than discovered by walking for a `.bionic/` ancestor — matching the
+# governing-skill hook's resolve_project_root strategy. Findings live with the
+# project that owns the artifact, not necessarily the invoking PROJECT_DIR, and
+# every worktree of one repo shares one audit file. PROJECT_DIR remains the
+# fallback when $PLAN resolves outside any repository — the same value the
+# exhausted walk-up used to return. Fail-open: git failure never crashes the hook.
 # [INSTRUMENT]
 audit_root() {
-  local d
-  d=$(cd "$(dirname "$PLAN")" 2>/dev/null && pwd)
-  while [ -n "$d" ] && [ "$d" != "/" ]; do
-    if [ -d "$d/.bionic" ]; then echo "$d"; return 0; fi
-    d=$(dirname "$d")
-  done
-  echo "$PROJECT_DIR"
+  resolve_project_root "$PLAN" "$PROJECT_DIR"
 }
 
 # Incident 0001: the audit stream must live where a consuming project cannot

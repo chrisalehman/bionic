@@ -61,7 +61,7 @@ The core profile is [`claude-config.txt`](claude-config.txt) — the authoritati
 | **Subagent roles** | implementor, senior-implementor, researcher, auditor, critic, test-runner — hand-written, carrying the invariant duties canonical-sdlc dispatches against |
 | **MCP servers** | context7, chrome-devtools *(Pencil's server self-registers whenever the Pencil app is running)* |
 | **Skills** | **bionic:canonical-sdlc** *(flagship)*, bionic:browser-verify, bionic:map-instrument-narrow, bionic:excalidraw-diagram, humanizer, notebooklm, impeccable |
-| **Hooks** | protect-main, protect-database, farm-out-reminder, canonical-sdlc-evidence-gate, canonical-sdlc-governing-skill, memory-cleanup, context-spend |
+| **Hooks** | protect-main, protect-database, farm-out-reminder, canonical-sdlc-evidence-gate, canonical-sdlc-governing-skill, context-spend |
 | **Philosophy** | Operating principles and approval boundaries → [`claude-global.md`](claude-global.md), installed to `~/.claude/CLAUDE.md` |
 | **Shell alias** | `claude` → `claude --dangerously-skip-permissions` |
 
@@ -71,7 +71,7 @@ The core profile is [`claude-config.txt`](claude-config.txt) — the authoritati
 
 ## What Blocks You
 
-Bionic installs seven hooks. Five can stop a tool call before it runs; two only emit advice.
+Bionic installs six hooks. Five can stop a tool call before it runs; one only emits advice.
 
 | Hook | Event | Blocks? | What it does |
 |---|---|---|---|
@@ -80,7 +80,6 @@ Bionic installs seven hooks. Five can stop a tool call before it runs; two only 
 | `farm-out-reminder.sh` | Bash | **yes** | Pushes heavy commands off the main thread into subagents |
 | `canonical-sdlc-governing-skill.sh` | Write, Edit | **yes** | Rejects plan/spec/ADR files with malformed frontmatter |
 | `canonical-sdlc-evidence-gate.sh` | Bash | **yes** | Rejects commits lacking evidence for the plan's current step |
-| `memory-cleanup.sh` | SessionStart | no | Flags stale or oversized project-memory files |
 | `context-spend.sh` | Stop | no | Records per-session context spend |
 
 **If a command gets denied and you meant it:** `farm-out-reminder.sh` blocks test suites, builds, installs, and long `&&` chains on the main thread to protect your context budget. Prefix with `FARM_OUT_ALLOW=1` to override — it must be in command position, so `FARM_OUT_ALLOW=1 npm test`, not `cd foo && FARM_OUT_ALLOW=1 npm test`.

@@ -1395,8 +1395,8 @@ read_config "local-skill" do_install_local_skill
 section "Custom commands" "$(config_count local-command)"
 
 # Prune orphan commands: anything in ~/.claude/commands/ not listed in
-# the config as a local-command entry. Renames (memory-sweep →
-# memory-compact) leave stale files behind without this step.
+# the config as a local-command entry. Renames and removals leave stale
+# files behind without this step.
 if [ -d ~/.claude/commands ]; then
   # `|| true`: a config with zero local-command entries makes grep exit 1,
   # which pipefail + set -e would turn into a mid-run abort.
@@ -1599,11 +1599,8 @@ done
 # even if the repo's hooks/ contents change between install and reset.
 { for r in ${repo_hooks[@]+"${repo_hooks[@]}"}; do echo "$r"; done; } > ~/.claude/hooks/.bionic-manifest || true
 
-# Define all managed hooks (event|matcher_or_empty|command pairs)
-# PreToolUse uses Bash/Write/Edit/Agent matchers; SessionStart uses a
-# source matcher (startup — don't fire on compact/clear/resume since
-# cleanup was already done for this notebook); UserPromptSubmit takes
-# no matcher.
+# Define all managed hooks (event|matcher_or_empty|command triples).
+# PreToolUse keys off Bash/Write/Edit matchers; Stop takes no matcher.
 MANAGED_HOOKS=(
   "PreToolUse|Bash|~/.claude/hooks/protect-main.sh"
   "PreToolUse|Bash|~/.claude/hooks/protect-database.sh"
@@ -1611,7 +1608,6 @@ MANAGED_HOOKS=(
   "PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh"
   "PreToolUse|Write|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
-  "SessionStart|startup|~/.claude/hooks/memory-cleanup.sh"
   "Stop||~/.claude/hooks/context-spend.sh"
 )
 

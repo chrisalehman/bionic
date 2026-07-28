@@ -3,7 +3,7 @@
 # Emission section (AC-1): one context-spend line per SDLC step boundary,
 # correct format/attribution/delta arithmetic, silence on non-boundaries.
 #
-# Harness idiom mirrors memory-cleanup.test.sh: PASS/FAIL counters, mktemp
+# Harness idiom mirrors farm-out-reminder.test.sh: PASS/FAIL counters, mktemp
 # projects, run_hook via CLAUDE_PROJECT_DIR. Fixtures replay the REAL Stop
 # stdin JSON + assistant transcript entry captured in slice 4/1 (scrubbed):
 #   stdin  keys: session_id, transcript_path, cwd, hook_event_name, stop_hook_active
@@ -104,7 +104,7 @@ EOF
 make_env() {  # $1=step $2=input $3=cache_c $4=cache_r
   local step="$1" input="$2" cache_c="$3" cache_r="$4"
   local dir; dir=$(mktemp -d)
-  mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/memory"
+  mkdir -p "$dir/.bionic/tmp"
   write_plan "$dir" "$step"
   write_transcript "$dir" "$input" "$cache_c" "$cache_r"
   echo "$dir"
@@ -416,7 +416,7 @@ echo ""
 echo "=== D4: no plans dir / no *.plan.md under it ==="
 d4a() {
   local dir; dir=$(mktemp -d); cleanup_projects+=("$dir")
-  mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/memory"
+  mkdir -p "$dir/.bionic/tmp"
   write_transcript "$dir" 100000 0 0
   local pre; pre=$(state_of "$dir")
   fire "$dir"
@@ -426,7 +426,7 @@ d4a
 
 d4b() {
   local dir; dir=$(mktemp -d); cleanup_projects+=("$dir")
-  mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/memory" "$dir/.bionic/docs/plans"
+  mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/docs/plans"
   write_transcript "$dir" 100000 0 0
   local pre; pre=$(state_of "$dir")
   fire "$dir"
