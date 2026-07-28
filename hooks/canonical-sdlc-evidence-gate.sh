@@ -96,9 +96,14 @@ resolve_docs_root() {
   echo "$proj/.bionic/docs"
 }
 
+# Read unconditionally, next to the other globals: this hook runs `set -u`, and
+# a variable bound on only some code paths crashes the others. See
+# `.claude/rules/hook-authoring.md` § "`set -u` and conditionally-bound
+# variables" — the recorded recurrence of exactly this.
+DOCS_ROOT=$(resolve_docs_root "$PROJECT_DIR")
+
 PLAN_DIRS=( "${HOME}/.claude/plans" )
 if [ -n "$PROJECT_DIR" ]; then
-  DOCS_ROOT=$(resolve_docs_root "$PROJECT_DIR")
   PLAN_DIRS+=(
     "${DOCS_ROOT}/plans"
     "${DOCS_ROOT}/incidents"
@@ -120,7 +125,68 @@ for d in "${PLAN_DIRS[@]}"; do
   done < <(find "$d" -maxdepth 2 -type f -name '*.md' -print0 2>/dev/null)
 done
 
+# ---------- AC-13: misplacement blocks; absence never does ----------
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
+#
+# Reaching here means no plan file was found in ANY searched directory. That
+# used to be an unconditional `exit 0`, and it is this hook's fail-open — a
+# structurally different one from the governing-skill hook's, which is why the
+# two are fixed and tested independently. This one never tests `.bionic/` at
+# all: every candidate directory is skipped by `[ -d "$d" ] || continue`, PLAN
+# comes back empty, and the commit passes ungated.
+#
+# ABSENT is not an error and must never block. No plan anywhere is every commit
+# in every project that does not use this lifecycle, plus the normal first-run
+# state of one that does.
+#
+# MISPLACED is: a plan carrying the run-state marker exists inside the project
+# but outside every directory this gate searches. The gate is then silently
+# disabled — precisely the failure the AC exists to convert into a block.
+#
+# Scoping, deliberately narrow, because a false positive here walls off every
+# commit in the project:
+#   - `*.plan.md` only. The gate consumes plans. A misplaced file under the
+#     flat `~/.claude/plans/<name>.md` convention is not covered — that whole
+#     directory is already searched.
+#   - The LEADING frontmatter must declare `canonical_sdlc_version`, the
+#     run-state marker (never `governing-skill`, the artifact-author field —
+#     see `.claude/rules/hook-authoring.md`). Reading only the leading block is
+#     what keeps a fenced example in a documentation page from counting.
+#   - The whole docs root is "placed", not just plans/ and incidents/:
+#     <docs-root>/spikes/ and <docs-root>/record/ hold real artifacts carrying
+#     this frontmatter, and the governing-skill hook treats them as placed too.
+#   - Bounded walk: `.git` and `node_modules` pruned, depth 5, filename match
+#     first. It runs only when no plan was found, so a project in an active
+#     canonical-sdlc run never pays for it.
 if [ -z "$PLAN" ] || [ ! -f "$PLAN" ]; then
+  MISPLACED_PLAN=""
+  if [ -d "$PROJECT_DIR" ]; then
+    while IFS= read -r -d '' f; do
+      case "$f" in "$DOCS_ROOT"/*) continue ;; esac
+      if head -c 8192 "$f" \
+         | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' \
+         | awk 'NR == 1 && $0 == "---" { inside = 1; next }
+                inside && $0 == "---" { exit }
+                inside { print }' \
+         | grep -qE '^[[:space:]]*canonical_sdlc_version[[:space:]]*:'; then
+        MISPLACED_PLAN="$f"
+        break
+      fi
+    done < <(find "$PROJECT_DIR" -maxdepth 5 \
+               \( -name .git -o -name node_modules \) -prune -o \
+               -type f -name '*.plan.md' -print0 2>/dev/null)
+  fi
+
+  if [ -n "$MISPLACED_PLAN" ]; then
+    echo "BLOCKED: a canonical-sdlc plan is misplaced — this commit would pass ungated." >&2
+    echo "Misplaced plan: $MISPLACED_PLAN" >&2
+    echo "Docs root:      $DOCS_ROOT" >&2
+    echo "The evidence gate searches only the plan directories for this project, so a plan" >&2
+    echo "outside them silently disables it — no step evidence is checked at all." >&2
+    echo "Fix: move it under $DOCS_ROOT/plans/ (or $DOCS_ROOT/incidents/ for an incident run)." >&2
+    exit 2
+  fi
+
   exit 0
 fi
 

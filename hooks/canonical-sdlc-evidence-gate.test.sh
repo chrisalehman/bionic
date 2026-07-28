@@ -3221,6 +3221,173 @@ write_plan "$h23ok" "$(versioned_plan 12)" > /dev/null
 expect_allow "canonical_sdlc_version: 12 → allow" "$h23ok" 'git commit -m "x"'
 
 # ============================================================
+# Section 24: AC-13 — the plan-search fail-open
+# ============================================================
+#
+# This hook fails open DIFFERENTLY from the governing-skill hook. It never
+# tests `.bionic/` at all: every candidate plan directory is skipped by
+# `[ -d "$d" ] || continue`, PLAN comes back empty, and the commit passes
+# ungated. Closing the governing-skill hook's fail-open does nothing for this
+# one, which is why the two are driven independently here.
+#
+# The distinction the AC draws, applied to a commit gate:
+#   ABSENT     — no plan anywhere. Not a canonical-sdlc run. Never blocks;
+#                this is every commit in every project that does not use the
+#                lifecycle, and a wall there would be intolerable.
+#   MISPLACED  — a plan carrying the run marker exists in the project, but
+#                outside every directory the gate searches. The gate is
+#                silently disabled and the commit would sail through. Blocks,
+#                naming where the plan belongs.
+echo ""
+echo "=== Section 24: AC-13 — misplaced plan blocks, absent plan never does ==="
+
+s24_marked_plan() {  # a plan carrying the run-state marker + a satisfied state
+  printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+  printf -- 'canonical_sdlc_version: 12\nintent: build\nrigor: tested\nscale: wave\n---\n'
+  printf -- '## SDLC State\ncurrent: 3\nStep 3: .bionic/docs/plans/wave-01.plan.md\n'
+}
+
+echo "-- c1: ABSENCE never blocks --"
+# A project with no .bionic/ at all and no plan file anywhere. The single most
+# common commit in the world; it must pass, silently.
+s24_h1=$(make_home)
+s24_p1=$(mktemp -d); cleanup_dirs+=("$s24_p1")
+mkdir -p "$s24_p1/src"
+printf 'echo hi\n' > "$s24_p1/src/main.sh"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s24_h1" "$s24_p1" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  echo "PASS: no .bionic/, no plan anywhere → allow, silently"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected allow): no .bionic/, no plan anywhere"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+# .bionic/docs/plans/ exists but is empty — a project that has run Step 0 and
+# not yet written a plan. Still absence, still no block.
+s24_h1b=$(make_home)
+s24_p1b=$(make_project)
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s24_h1b" "$s24_p1b" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  echo "PASS: empty .bionic/docs/plans/ → allow, silently"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected allow): empty .bionic/docs/plans/"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+echo "-- c2: MISPLACEMENT blocks, naming the correct path --"
+# The legacy layout, and the shape a moved-or-renamed tree leaves behind: a
+# real canonical-sdlc plan the gate cannot see.
+s24_h2=$(make_home)
+s24_p2=$(mktemp -d); cleanup_dirs+=("$s24_p2")
+mkdir -p "$s24_p2/docs/bionic/plans/epic-01-demo"
+s24_marked_plan > "$s24_p2/docs/bionic/plans/epic-01-demo/wave-01-x.plan.md"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s24_h2" "$s24_p2" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] \
+   && echo "$HOOK_STDERR" | grep -q "misplaced" \
+   && echo "$HOOK_STDERR" | grep -qF "$s24_p2/.bionic/docs/plans/"; then
+  echo "PASS: misplaced plan → block, naming the correct path"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected block naming $s24_p2/.bionic/docs/plans/): misplaced plan"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+# The identical plan in the right place is found and gated normally — proof the
+# block above is about WHERE the file is, not about the file.
+s24_h3=$(make_home)
+s24_p3=$(make_project)
+s24_marked_plan > "$s24_p3/.bionic/docs/plans/wave-01-x.plan.md"
+expect_allow "the same plan under .bionic/docs/plans/ → found and gated, allow" \
+  "$s24_h3" 'git commit -m "x"'
+
+echo "-- c3: unmarked files are unaffected --"
+# A *.plan.md with no canonical_sdlc_version is not a canonical-sdlc run
+# artifact. Plenty of projects have plan-shaped markdown; none of it is this
+# hook's business.
+s24_h4=$(make_home)
+s24_p4=$(mktemp -d); cleanup_dirs+=("$s24_p4")
+mkdir -p "$s24_p4/notes"
+printf '# Some plan\n\nnot a canonical-sdlc artifact\n' > "$s24_p4/notes/roadmap.plan.md"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s24_h4" "$s24_p4" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  echo "PASS: unmarked *.plan.md → allow, silently"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected allow): unmarked *.plan.md"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+# A FENCED example of the frontmatter is documentation. Only the leading block
+# counts — the recurring trap in this repo is a parser that reads fenced
+# examples as real declarations.
+s24_h5=$(make_home)
+s24_p5=$(mktemp -d); cleanup_dirs+=("$s24_p5")
+mkdir -p "$s24_p5/docs"
+{ printf '# How to write a plan\n\n```\n---\ncanonical_sdlc_version: 12\n---\n```\n'; } \
+  > "$s24_p5/docs/example.plan.md"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s24_h5" "$s24_p5" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  echo "PASS: fenced frontmatter example → allow, silently"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected allow): fenced frontmatter example"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+echo "-- c4: elsewhere under the docs root is PLACED, not misplaced --"
+# <docs-root>/spikes/ and <docs-root>/record/ hold real artifacts carrying this
+# frontmatter. The governing-skill hook treats the whole docs root as placed;
+# this hook must agree, or the two would disagree about the same file.
+s24_h6=$(make_home)
+s24_p6=$(make_project)
+mkdir -p "$s24_p6/.bionic/docs/spikes"
+s24_marked_plan > "$s24_p6/.bionic/docs/spikes/spike-x.plan.md"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s24_h6" "$s24_p6" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  echo "PASS: marked plan under <docs-root>/spikes/ → placed, allow"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected allow): marked plan under <docs-root>/spikes/"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+echo "-- c5: the named path follows docs-root: in config.yaml --"
+s24_h7=$(make_home)
+s24_p7=$(mktemp -d); cleanup_dirs+=("$s24_p7")
+mkdir -p "$s24_p7/.bionic" "$s24_p7/.bionic/docs/plans/epic-01-demo"
+printf 'docs-root: custom/docs\n' > "$s24_p7/.bionic/config.yaml"
+s24_marked_plan > "$s24_p7/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s24_h7" "$s24_p7" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && echo "$HOOK_STDERR" | grep -qF "$s24_p7/custom/docs/plans/"; then
+  echo "PASS: block names the CONFIGURED docs root, not a hardcoded .bionic/"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected block naming $s24_p7/custom/docs/plans/): configured docs-root"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+echo "-- c6: a non-commit command is never touched by any of this --"
+s24_h8=$(make_home)
+expect_allow "non-commit command in the c2 misplaced project → allow" \
+  "$s24_h8" 'git status'
+
+# ============================================================
 # Summary
 # ============================================================
 

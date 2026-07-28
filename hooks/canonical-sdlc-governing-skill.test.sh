@@ -685,14 +685,24 @@ assert_eq "ac10_e2e_no_bionic exit 2" 2 "$HOOK_EXIT"
 
 # Criterion 3 at the CALL SITE, observed through the audit file's project key.
 # A worktree-local .bionic/ is NOT the project's tree: resolution answers with
-# main, so main's docs root does not contain this path and the write falls out
-# of scope — no finding is keyed on the worktree. Paired with the presence arm
-# below, which writes the identical floor-violating plan under main and DOES
-# produce main's audit file; alone, the absence arm would pass if the hook had
-# written nothing at all.
-echo "e2e: floor-violating plan under a worktree-local .bionic/ → no finding keyed on the worktree"
+# main, so main's docs root does not contain this path.
+#
+# Slice 1 left this as an exit-0 pass-through and flagged it as the exact
+# misplacement class slice 3 was to close. It is now a BLOCK naming main's
+# docs root — every worktree of one repo shares one tree (AC-10), so an
+# artifact written into a worktree-local .bionic/docs/ belongs in the parent
+# repo's tree and the hook says where.
+#
+# The audit-file arm still stands and is now stronger: the write never
+# happens, so nothing can be keyed on the worktree. Paired with the presence
+# arm below, which writes the identical floor-violating plan under main and
+# DOES produce main's audit file; alone, the absence arm would pass if the
+# hook had written nothing at all.
+echo "e2e: floor-violating plan under a worktree-local .bionic/ → blocks as misplaced, naming main's tree"
 run_write "$ac10_wt/.bionic/docs/plans/epic-01-demo/wt-floor.plan.md" "$(build_plan intent=spike rigor=audited)"
-assert_eq "ac10_e2e_worktree exit 0" 0 "$HOOK_EXIT"
+assert_eq "ac10_e2e_worktree exit 2 (misplaced)" 2 "$HOOK_EXIT"
+assert_contains "ac10_e2e_worktree names the parent repo's docs root" \
+  "$ac10_main/.bionic/docs/plans/" "$HOOK_STDERR"
 TOTAL=$((TOTAL + 1))
 if [ ! -f "$(audit_file_for "$ac10_wt")" ]; then
   PASS=$((PASS + 1)); printf '  PASS  ac10_e2e_worktree no audit file keyed on the worktree\n'
@@ -775,15 +785,45 @@ else
   PASS=$((PASS + 1)); printf '  PASS  ac11_c4a no .bionic/ created\n'
 fi
 
-echo "AC-11 c4b: enforced artifact under the docs-root but governing-skill != canonical-sdlc -> still no over-creation"
+# A7 REGRESSION. Slice 2 gated creation on `governing-skill: canonical-sdlc` —
+# the artifact-AUTHOR field — and this case asserted the inverse of what is
+# below: that a plan authored by another skill created NO tree.
+#
+# `.claude/rules/hook-authoring.md` § "Discriminators in enforcement hooks"
+# names that exact pattern as a known failure: Step 3 plans legitimately
+# declare `governing-skill: superpowers:writing-plans`, so gating on the
+# self-skill makes the hook invisible to the artifacts the lifecycle itself
+# produces. Recorded consequence: a hook that was a no-op for a whole epic.
+#
+# The concrete failure this pins: a fresh project whose FIRST artifact is a
+# Step-3 plan gets no tree, and AC-11 requires creation on first lifecycle
+# use. The discriminator is now `canonical_sdlc_version`, matching the schema
+# enforcement below it in the same hook. Re-firing is free — `mkdir -p` is
+# idempotent and the .gitignore write is `[ -f ]`-guarded (ac11_c2 pins that).
+echo "AC-11 c4b (A7): Step-3 plan authored by superpowers:writing-plans WITH a valid version -> tree created"
 ac11_p3=$(make_bare_project)
 run_write "$ac11_p3/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan skill=superpowers:writing-plans)"
 assert_eq "ac11_c4b write allowed" 0 "$HOOK_EXIT"
 TOTAL=$((TOTAL + 1))
-if [ -d "$ac11_p3/.bionic" ]; then
-  FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c4b no .bionic/ created for a non-canonical-sdlc governing-skill (found %s/.bionic)\n' "$ac11_p3"
+if tree_exists "$ac11_p3"; then
+  PASS=$((PASS + 1)); printf '  PASS  ac11_c4b tree created for a lifecycle artifact authored by another skill\n'
 else
-  PASS=$((PASS + 1)); printf '  PASS  ac11_c4b no .bionic/ created for a non-canonical-sdlc governing-skill\n'
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c4b tree created for a lifecycle artifact authored by another skill (missing under %s/.bionic)\n' "$ac11_p3"
+fi
+
+# The no-over-creation arm the inverted case above used to carry. An artifact
+# with NO `canonical_sdlc_version` is not a canonical-sdlc run artifact: it
+# blocks on the version gate AND creates nothing. This is what keeps the fix
+# from degenerating into "create on any frontmatter at all".
+echo "AC-11 c4c: enforced artifact with NO canonical_sdlc_version -> blocks, and creates no tree"
+ac11_p5=$(make_bare_project)
+run_write "$ac11_p5/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan skill=canonical-sdlc version=OMIT)"
+assert_eq "ac11_c4c write blocked" 2 "$HOOK_EXIT"
+TOTAL=$((TOTAL + 1))
+if [ -d "$ac11_p5/.bionic" ]; then
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c4c no .bionic/ created for a versionless artifact (found %s/.bionic)\n' "$ac11_p5"
+else
+  PASS=$((PASS + 1)); printf '  PASS  ac11_c4c no .bionic/ created for a versionless artifact\n'
 fi
 
 echo "AC-12 c1: .bionic/.gitignore exists and contains '*'"
@@ -811,6 +851,219 @@ run_write "$ac12_p4/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_
 assert_eq "ac12_c3 write allowed" 0 "$HOOK_EXIT"
 ac12_after_hash=$(shasum -a 256 "$ac12_p4/.gitignore" | awk '{print $1}')
 assert_eq "ac12_c3 project .gitignore hash unchanged" "$ac12_before_hash" "$ac12_after_hash"
+
+# ============================================================
+# AC-13: misplacement blocks; absence never does
+# ============================================================
+#
+# The fail-open this closes: an artifact that DECLARES itself a canonical-sdlc
+# artifact but lives outside the project's computed docs root used to fall out
+# of the `case "$FILE_PATH"` scope check and exit 0 — written, ungated, in the
+# wrong place. Slice 1 replaced the ancestor walk with resolve_project_root(),
+# which always answers, so the historical `exit 0`-on-no-root is unreachable;
+# the surviving fail-open is the scope check itself.
+#
+# The distinction the AC draws: MISPLACED is an error, ABSENT is not. A repo
+# with no `.bionic/` at all is the normal first-run state and must never block
+# — the absence arms below are what keep the fix from becoming a wall in front
+# of every new project.
+#
+# "Outside the docs root" is the whole docs root, not just the four enforced
+# subdirectories. `.bionic/docs/spikes/` and `.bionic/docs/record/` hold real
+# files carrying canonical-sdlc frontmatter (slice 6 put them there); they are
+# placed, and c8 pins that they stay unblocked.
+echo
+echo "=== AC-13: misplacement blocks; absence never does ==="
+
+ac13_p=$(make_project)
+ac13_docs="$ac13_p/.bionic/docs"
+
+echo "AC-13 c1: valid artifact written OUTSIDE the computed docs-root -> block, naming the correct path"
+run_write "$ac13_p/docs/bionic/plans/epic-01-demo/wave-01-x.plan.md" "$VALID_FRONTMATTER"
+assert_eq "ac13_c1 exit 2" 2 "$HOOK_EXIT"
+assert_contains "ac13_c1 says misplaced" "misplaced" "$HOOK_STDERR"
+assert_contains "ac13_c1 names the correct path" "$ac13_docs/plans/" "$HOOK_STDERR"
+
+echo "AC-13 c1b: 'governing-skill: canonical-sdlc' alone is enough to identify the artifact"
+run_write "$ac13_p/notes/stray.md" '---
+governing-skill: canonical-sdlc
+---
+body
+'
+assert_eq "ac13_c1b exit 2" 2 "$HOOK_EXIT"
+assert_contains "ac13_c1b says misplaced" "misplaced" "$HOOK_STDERR"
+
+echo "AC-13 c2: the SAME artifact written INSIDE the computed docs-root -> passes"
+run_write "$ac13_docs/plans/epic-01-demo/wave-01-x.plan.md" "$VALID_FRONTMATTER"
+assert_eq "ac13_c2 exit 0" 0 "$HOOK_EXIT"
+
+echo "AC-13 c3: the named path follows the artifact kind (spec -> specs/, adr -> adrs/)"
+run_write "$ac13_p/docs/wave-01-x.spec.md" "$VALID_FRONTMATTER"
+assert_eq "ac13_c3 spec exit 2" 2 "$HOOK_EXIT"
+assert_contains "ac13_c3 spec names specs/" "$ac13_docs/specs/" "$HOOK_STDERR"
+run_write "$ac13_p/docs/adr-001-thing.md" "$VALID_FRONTMATTER"
+assert_eq "ac13_c3 adr exit 2" 2 "$HOOK_EXIT"
+assert_contains "ac13_c3 adr names adrs/" "$ac13_docs/adrs/" "$HOOK_STDERR"
+
+echo "AC-13 c4: Edit of an already-misplaced artifact blocks too (not just Write)"
+mkdir -p "$ac13_p/legacy"
+printf '%s' "$VALID_FRONTMATTER" > "$ac13_p/legacy/wave-02-y.plan.md"
+run_edit "$ac13_p/legacy/wave-02-y.plan.md" "old" "new"
+assert_eq "ac13_c4 exit 2" 2 "$HOOK_EXIT"
+assert_contains "ac13_c4 says misplaced" "misplaced" "$HOOK_STDERR"
+
+echo "AC-13 c5: a file WITHOUT the frontmatter is unaffected, wherever it lives"
+run_write "$ac13_p/notes.md" "just some notes, no frontmatter at all"
+assert_eq "ac13_c5 plain file exit 0" 0 "$HOOK_EXIT"
+run_write "$ac13_p/docs/bionic/plans/unrelated.plan.md" "$MISSING_FM"
+assert_eq "ac13_c5 plan-named file with no frontmatter exit 0" 0 "$HOOK_EXIT"
+run_write "$ac13_p/docs/other.md" '---
+title: something else entirely
+governing-skill-ish: canonical-sdlc
+---
+body
+'
+assert_eq "ac13_c5 unrelated frontmatter exit 0" 0 "$HOOK_EXIT"
+
+echo "AC-13 c6: a fenced EXAMPLE of the frontmatter is documentation, not an artifact"
+run_write "$ac13_p/docs/how-to-write-plans.md" '# How to write a plan
+
+Prepend this block:
+
+```
+---
+governing-skill: canonical-sdlc
+canonical_sdlc_version: 12
+---
+```
+'
+assert_eq "ac13_c6 fenced example exit 0" 0 "$HOOK_EXIT"
+
+echo "AC-13 c7: ABSENCE never blocks -- a repo where .bionic/ has never existed"
+ac13_bare=$(make_bare_project)
+run_write "$ac13_bare/README.md" "a brand new project"
+assert_eq "ac13_c7 plain write in a .bionic-less repo exit 0" 0 "$HOOK_EXIT"
+run_write "$ac13_bare/src/main.sh" "#!/bin/bash"
+assert_eq "ac13_c7 nested write in a .bionic-less repo exit 0" 0 "$HOOK_EXIT"
+# The first artifact of a brand-new project targets the COMPUTED docs root,
+# which does not exist yet. That is first-run, not misplacement.
+run_write "$ac13_bare/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$VALID_FRONTMATTER"
+assert_eq "ac13_c7 first artifact into the computed docs-root exit 0" 0 "$HOOK_EXIT"
+assert_eq "ac13_c7 first artifact write is silent" "" "$HOOK_STDERR"
+
+echo "AC-13 c7b: what blocks is the misplacement, not the absence -- same bare repo"
+ac13_bare2=$(make_bare_project)
+run_write "$ac13_bare2/docs/plans/wave-01-x.plan.md" "$VALID_FRONTMATTER"
+assert_eq "ac13_c7b exit 2" 2 "$HOOK_EXIT"
+assert_contains "ac13_c7b names the computed docs-root" "$ac13_bare2/.bionic/docs/plans/" "$HOOK_STDERR"
+
+echo "AC-13 c8: under the docs-root but outside the four enforced subdirs -> placed, unblocked"
+mkdir -p "$ac13_docs/spikes" "$ac13_docs/record"
+run_write "$ac13_docs/spikes/spike-thing-20260101.md" "$VALID_FRONTMATTER"
+assert_eq "ac13_c8 spikes/ exit 0" 0 "$HOOK_EXIT"
+run_write "$ac13_docs/record/wave-7-handoff.md" "$VALID_FRONTMATTER"
+assert_eq "ac13_c8 record/ exit 0" 0 "$HOOK_EXIT"
+
+echo "AC-13 c9: 'the correct path' follows docs-root: in config.yaml, not a hardcoded .bionic/"
+ac13_cfg=$(make_project)
+printf 'docs-root: custom/docs\n' > "$ac13_cfg/.bionic/config.yaml"
+mkdir -p "$ac13_cfg/custom/docs/plans/epic-01-demo"
+run_write "$ac13_cfg/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$VALID_FRONTMATTER"
+assert_eq "ac13_c9 default location is now the misplaced one" 2 "$HOOK_EXIT"
+assert_contains "ac13_c9 names the configured docs-root" "$ac13_cfg/custom/docs/plans/" "$HOOK_STDERR"
+run_write "$ac13_cfg/custom/docs/plans/epic-01-demo/wave-01-x.plan.md" "$VALID_FRONTMATTER"
+assert_eq "ac13_c9 configured location passes" 0 "$HOOK_EXIT"
+
+echo "AC-13 c10: a project reached through a SYMLINK is the same project"
+# Slice 1 flagged this and handed it here: `git` answers with the PHYSICAL
+# root while FILE_PATH arrives as whatever path the session used. Under the
+# old pass-through that mismatch was a silent bypass — artifacts quietly
+# stopped being gated. Under AC-13's fail-closed rule the same mismatch would
+# be worse: a CORRECTLY placed artifact false-blocked as misplaced, which is
+# the fix turning into a wall in front of legitimate work.
+#
+# macOS makes this the common case, not an exotic one: /tmp and /var are
+# themselves symlinks, so any project under them is reached through one.
+ac13_sym=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$ac13_sym")
+mkdir -p "$ac13_sym/real/.bionic/docs/plans/epic-01-demo"
+git -C "$ac13_sym/real" init -q .
+ln -s "$ac13_sym/real" "$ac13_sym/link"
+run_write "$ac13_sym/link/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$VALID_FRONTMATTER"
+assert_eq "ac13_c10 correctly-placed artifact via a symlinked path exit 0" 0 "$HOOK_EXIT"
+# The paired arm: resolving the symlink must not resolve away the enforcement.
+run_write "$ac13_sym/link/docs/plans/wave-01-x.plan.md" "$VALID_FRONTMATTER"
+assert_eq "ac13_c10 misplaced artifact via a symlinked path still exit 2" 2 "$HOOK_EXIT"
+assert_contains "ac13_c10 misplaced-via-symlink names the real docs root" \
+  "$ac13_sym/real/.bionic/docs/plans/" "$HOOK_STDERR"
+
+# ============================================================
+# AC-14: no session-state file
+# ============================================================
+#
+# Live state is carried by the active plan's `## Handoff` and by
+# `continuation.md`, and nothing else. Two halves:
+#   (a) no `context.md`-shaped session-state file exists under the new layout;
+#   (b) no shipped surface instructs anything to write one.
+#
+# `.bionic/docs/record/context.md` is EXEMPT: slice 6 relocated the old file
+# there as an operational record of what happened, not as live state. The
+# whole point of the AC is that nothing reads or writes it as session state.
+#
+# This lives in the governing-skill suite because AC-13 and AC-14 are one
+# slice and this suite is the slice's surface; the assertion is about the
+# repo's shipped text, not about this hook. Homed here rather than in a new
+# suite so `tests/run.sh`'s suite count is unchanged.
+echo
+echo "=== AC-14: no session-state file under the new layout ==="
+
+AC14_REPO="$(cd "$(dirname "$HOOK")/.." && pwd)"
+
+echo "AC-14 a: the only context.md under the new docs layout is the exempt operational record"
+TOTAL=$((TOTAL + 1))
+ac14_stray=""
+if [ -d "$AC14_REPO/.bionic/docs" ]; then
+  ac14_stray=$(find "$AC14_REPO/.bionic/docs" -type f -name 'context.md' \
+               ! -path "$AC14_REPO/.bionic/docs/record/context.md" 2>/dev/null)
+fi
+if [ -z "$ac14_stray" ]; then
+  PASS=$((PASS + 1)); printf '  PASS  ac14_a no session-state context.md under .bionic/docs/\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac14_a session-state context.md found: %s\n' "$ac14_stray"
+fi
+
+echo "AC-14 b: no shipped surface instructs anything to write a session-state context.md"
+# Shipped surfaces = what claude-bootstrap.sh installs into ~/.claude/ (hooks,
+# commands, agents, skills) plus the always-loaded global instruction file.
+# Matching is on the write VERBS, not on every mention: a comment naming
+# context.md as retired is a record, not an instruction.
+AC14_WRITE_VERB='(write|update|append|checkpoint|rotate|save)[^.]{0,40}context\.md'
+AC14_SURFACES=()
+for ac14_g in "$AC14_REPO"/hooks/*.sh "$AC14_REPO"/commands/*.md "$AC14_REPO"/agents/*.md \
+              "$AC14_REPO"/claude-global.md; do
+  [ -f "$ac14_g" ] || continue
+  case "$ac14_g" in *.test.sh) continue ;; esac
+  AC14_SURFACES+=("$ac14_g")
+done
+while IFS= read -r ac14_g; do
+  AC14_SURFACES+=("$ac14_g")
+done < <(find "$AC14_REPO/skills" -type f -name '*.md' 2>/dev/null)
+
+# A vacuous glob would make this assertion pass by matching nothing. Pin the
+# surface set as non-empty first, so "no hits" means "searched and found none".
+TOTAL=$((TOTAL + 1))
+if [ "${#AC14_SURFACES[@]}" -ge 10 ]; then
+  PASS=$((PASS + 1)); printf '  PASS  ac14_b surface set is non-vacuous (%d files)\n' "${#AC14_SURFACES[@]}"
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac14_b surface set is vacuous (%d files) — the grep below proves nothing\n' "${#AC14_SURFACES[@]}"
+fi
+
+TOTAL=$((TOTAL + 1))
+ac14_hits=$(grep -nEi "$AC14_WRITE_VERB" "${AC14_SURFACES[@]}" 2>/dev/null || true)
+if [ -z "$ac14_hits" ]; then
+  PASS=$((PASS + 1)); printf '  PASS  ac14_b no shipped surface instructs a context.md write\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac14_b shipped surfaces still instruct a context.md write:\n%s\n' "$ac14_hits"
+fi
 
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
