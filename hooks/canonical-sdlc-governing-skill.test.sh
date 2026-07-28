@@ -872,7 +872,8 @@ fi
 # the artifact-AUTHOR field — and this case asserted the inverse of what is
 # below: that a plan authored by another skill created NO tree.
 #
-# `.claude/rules/hook-authoring.md` § "Discriminators in enforcement hooks"
+# `.claude/rules/hook-authoring.md` (machine-local, gitignored, authored in place —
+# no script recreates it, so absent from a fresh clone) § "Discriminators in enforcement hooks"
 # names that exact pattern as a known failure: Step 3 plans legitimately
 # declare `governing-skill: superpowers:writing-plans`, so gating on the
 # self-skill makes the hook invisible to the artifacts the lifecycle itself
