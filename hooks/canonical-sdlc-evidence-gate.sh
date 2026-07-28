@@ -214,21 +214,47 @@ is_placeholder_value() {
   esac
 }
 
-# Audit dir follows the plan's own project (walk-up from $PLAN's directory
-# to the nearest ancestor containing .bionic/), matching the governing-skill
-# hook's find_project_root_from_path strategy — findings live with the
-# project that owns the artifact, not necessarily the invoking PROJECT_DIR.
-# PROJECT_DIR is the fallback only (empty/unreadable $PLAN, or no .bionic/
-# ancestor found). Fail-open: the `cd ... && pwd` guard never crashes the hook.
-# [INSTRUMENT]
-audit_root() {
-  local d
-  d=$(cd "$(dirname "$PLAN")" 2>/dev/null && pwd)
-  while [ -n "$d" ] && [ "$d" != "/" ]; do
-    if [ -d "$d/.bionic" ]; then echo "$d"; return 0; fi
+# Compute the project root that owns $1 — never discover it by walking for an
+# existing `.bionic/`. Byte-identical twin of the copy in
+# canonical-sdlc-governing-skill.sh (deliberate per-hook duplication, no shared
+# lib — same convention as audit_path below).
+#
+# `git rev-parse --git-common-dir` names the MAIN repository's .git even from
+# inside a linked worktree (`--git-dir` would name the worktree's private dir),
+# so every worktree of one repo resolves to ONE root and therefore one audit
+# file.
+#
+# `--path-format=absolute` is load-bearing, not cosmetic: the bare form returns
+# a RELATIVE path (`.git` at the root, `../.git` one level down), whose dirname
+# is `.` or `..` — a cwd-dependent string, not a root. Requires git >= 2.31.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
+#
+# `git -C` needs a directory that EXISTS; climbing to the nearest existing
+# ancestor supplies git a valid cwd. That climb is not a search for `.bionic/`
+# — the loop's condition never mentions it, and the answer still comes from git.
+resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default pwd)
+  local d common
+  d=$(dirname "$1")
+  while [ ! -d "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
     d=$(dirname "$d")
   done
-  echo "$PROJECT_DIR"
+  if common=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+    dirname "$common"
+  else
+    printf '%s\n' "${2:-$(pwd)}"
+  fi
+}
+
+# Audit dir follows the plan's own project, COMPUTED from $PLAN's own repo
+# rather than discovered by walking for a `.bionic/` ancestor — matching the
+# governing-skill hook's resolve_project_root strategy. Findings live with the
+# project that owns the artifact, not necessarily the invoking PROJECT_DIR, and
+# every worktree of one repo shares one audit file. PROJECT_DIR remains the
+# fallback when $PLAN resolves outside any repository — the same value the
+# exhausted walk-up used to return. Fail-open: git failure never crashes the hook.
+# [INSTRUMENT]
+audit_root() {
+  resolve_project_root "$PLAN" "$PROJECT_DIR"
 }
 
 # Incident 0001: the audit stream must live where a consuming project cannot
