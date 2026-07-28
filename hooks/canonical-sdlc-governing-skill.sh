@@ -366,45 +366,6 @@ yaml_get() {
 
 SDLC_VERSION=$(yaml_get canonical_sdlc_version)
 
-# ---------- AC-11 / AC-12: tree creation on first lifecycle use ----------
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
-#
-# Slice 2 (F4): neither hook has an entry point that fires on true first
-# lifecycle use without requiring `.bionic/` to pre-exist — except this one.
-# The governing-skill hook already knows the target artifact's path and, as
-# of slice 1, computes PROJECT_ROOT_FROM_PATH from git rather than by
-# walking for an existing `.bionic/`. Creation hangs off that same
-# computation.
-#
-# The discriminator is `canonical_sdlc_version` — the SAME field the schema
-# enforcement below reads, and for the same reason. Slice 2 keyed creation on
-# `governing-skill: canonical-sdlc` instead, which is the artifact-AUTHOR
-# field; `.claude/rules/hook-authoring.md` § "Discriminators in enforcement
-# hooks" names that as a known failure mode, because Step 3 plans legitimately
-# declare `governing-skill: superpowers:writing-plans` and would have found no
-# tree. Slice 2's stated rationale was avoiding a re-fire on later artifacts,
-# and re-firing costs nothing: `mkdir -p` is idempotent and the `.gitignore`
-# write is `[ -f ]`-guarded.
-#
-# Deliberately NOT a SessionStart hook: that would create `.bionic/` in
-# every repo the user opens a session in. "First lifecycle use" is the
-# first canonical-sdlc artifact write, not the first session — see the
-# wave-level Not Doing.
-#
-# Neither call can block — no new exit path is added here; failure to create is
-# left to whatever already handles an unwritable project tree elsewhere.
-if [ -n "$SDLC_VERSION" ]; then
-  mkdir -p \
-    "$PROJECT_ROOT_FROM_PATH/.bionic/tmp" \
-    "$PROJECT_ROOT_FROM_PATH/.bionic/docs/specs" \
-    "$PROJECT_ROOT_FROM_PATH/.bionic/docs/plans" \
-    "$PROJECT_ROOT_FROM_PATH/.bionic/docs/adrs" \
-    "$PROJECT_ROOT_FROM_PATH/.bionic/docs/incidents" \
-    2>/dev/null
-  BIONIC_GITIGNORE="$PROJECT_ROOT_FROM_PATH/.bionic/.gitignore"
-  [ -f "$BIONIC_GITIGNORE" ] || printf '*\n' > "$BIONIC_GITIGNORE" 2>/dev/null
-fi
-
 # ONE supported version. Anything else — an older number, a typo, an empty
 # value, garbage — blocks. There is no version dispatch below this line and
 # no path that reaches `exit 0` without passing the whole contract.
@@ -587,5 +548,61 @@ case "$BASENAME" in
     esac
     ;;
 esac
+
+# ---------- AC-11 / AC-12: tree creation on first lifecycle use ----------
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+#
+# Slice 2 (F4): neither hook has an entry point that fires on true first
+# lifecycle use without requiring `.bionic/` to pre-exist — except this one.
+# The governing-skill hook already knows the target artifact's path and, as
+# of slice 1, computes PROJECT_ROOT_FROM_PATH from git rather than by
+# walking for an existing `.bionic/`. Creation hangs off that same
+# computation.
+#
+# The discriminator is `canonical_sdlc_version` — the SAME field the schema
+# enforcement above reads, and for the same reason. Slice 2 keyed creation on
+# `governing-skill: canonical-sdlc` instead, which is the artifact-AUTHOR
+# field; `.claude/rules/hook-authoring.md` § "Discriminators in enforcement
+# hooks" names that as a known failure mode, because Step 3 plans legitimately
+# declare `governing-skill: superpowers:writing-plans` and would have found no
+# tree. Slice 2's stated rationale was avoiding a re-fire on later artifacts,
+# and re-firing costs nothing: `mkdir -p` is idempotent and the `.gitignore`
+# write is `[ -f ]`-guarded.
+#
+# Deliberately NOT a SessionStart hook: that would create `.bionic/` in
+# every repo the user opens a session in. "First lifecycle use" is the
+# first canonical-sdlc artifact write, not the first session — see the
+# wave-level Not Doing.
+#
+# PLACEMENT (Step-6 findings C5 / F3 / S4): this block used to sit immediately
+# after SDLC_VERSION was read, i.e. AHEAD of the version, triple, flag and
+# matrix gates — so a write this hook then REFUSED still left a full tree and a
+# `.gitignore` behind, in a repo named by the tool call's own `file_path`. A
+# PreToolUse gate must not mutate the filesystem for a call it denies. It now
+# runs at the single `exit 0`, past every gate, so the tree is created only for
+# an artifact that satisfies the ENTIRE contract — not merely one carrying a
+# version marker. Nothing between the old and new positions reads the tree:
+# `log_finding` writes under `$HOME/.claude/logs/`, the config.yaml and epic
+# plan reads are `[ -r ]`/`2>/dev/null` fail-open and target files this block
+# never creates.
+#
+# Neither call can block — no new exit path is added here; failure to create is
+# left to whatever already handles an unwritable project tree elsewhere. The
+# `.gitignore` redirect is braced so that the SHELL's failure message (the
+# redirection is performed before `printf` runs, so `printf 2>/dev/null` would
+# silence nothing) is suppressed too — matching the `mkdir -p ... 2>/dev/null`
+# beside it. An allowed tool call must leave stderr clean.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+if [ -n "$SDLC_VERSION" ]; then
+  mkdir -p \
+    "$PROJECT_ROOT_FROM_PATH/.bionic/tmp" \
+    "$PROJECT_ROOT_FROM_PATH/.bionic/docs/specs" \
+    "$PROJECT_ROOT_FROM_PATH/.bionic/docs/plans" \
+    "$PROJECT_ROOT_FROM_PATH/.bionic/docs/adrs" \
+    "$PROJECT_ROOT_FROM_PATH/.bionic/docs/incidents" \
+    2>/dev/null
+  BIONIC_GITIGNORE="$PROJECT_ROOT_FROM_PATH/.bionic/.gitignore"
+  [ -f "$BIONIC_GITIGNORE" ] || { printf '*\n' > "$BIONIC_GITIGNORE"; } 2>/dev/null
+fi
 
 exit 0
