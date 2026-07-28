@@ -131,6 +131,7 @@ assert_contains() {
 #   matrix  — yes|no; drop the "## Verification Matrix" section when no.
 build_plan() {
   local intent=build rigor=audited scale=wave step=3 version=12 mode="OMIT" omit=" " matrix=yes
+  local skill="superpowers:writing-plans"
   local arg
   for arg in "$@"; do
     case "$arg" in
@@ -142,11 +143,12 @@ build_plan() {
       mode=*)    mode="${arg#mode=}" ;;
       omit=*)    omit=" ${arg#omit=} " ;;
       matrix=*)  matrix="${arg#matrix=}" ;;
+      skill=*)   skill="${arg#skill=}" ;;
     esac
   done
 
   local out='---
-governing-skill: superpowers:writing-plans
+governing-skill: '"$skill"'
 sdlc-step: '"$step"'
 epic: epic-01-demo
 wave: wave-01-x
@@ -700,6 +702,115 @@ fi
 run_write "$ac10_main/.bionic/docs/plans/epic-01-demo/main-floor.plan.md" "$(build_plan intent=spike rigor=audited)"
 assert_eq "ac10_e2e_worktree_pair exit 0" 0 "$HOOK_EXIT"
 assert_contains "ac10_e2e_worktree_pair finding keyed on the main repo" "spike-cap" "$(read_audit "$ac10_main")"
+
+# ============================================================
+# AC-11 / AC-12: tree creation on first lifecycle use
+# ============================================================
+#
+# Slice 2 (F4): creation hangs off the SAME frontmatter this hook already
+# parses — a write carrying `governing-skill: canonical-sdlc` — not a
+# SessionStart hook, which would create .bionic/ in every repo the user
+# opens a session in. "First lifecycle use" is the first canonical-sdlc
+# artifact write, not the first session.
+#
+# Fixture: a BARE repo (git init only, no .bionic/ anywhere), the same class
+# AC-10's c4 fixture uses — a pre-created .bionic/docs/ (as make_project()
+# gives every other section in this file) would hide the exact defect this
+# AC guards.
+echo
+echo "=== AC-11/AC-12: tree creation on first lifecycle use ==="
+
+make_bare_project() {
+  local dir
+  dir=$(cd "$(mktemp -d)" && pwd -P)
+  git -C "$dir" init -q .
+  cleanup_dirs+=("$dir")
+  echo "$dir"
+}
+
+tree_exists() {  # $1=project root -> 0 if the full AC-11 tree exists
+  [ -d "$1/.bionic/tmp" ] \
+    && [ -d "$1/.bionic/docs/specs" ] \
+    && [ -d "$1/.bionic/docs/plans" ] \
+    && [ -d "$1/.bionic/docs/adrs" ] \
+    && [ -d "$1/.bionic/docs/incidents" ]
+}
+
+echo "AC-11 c1: first write of governing-skill: canonical-sdlc into a repo with no .bionic/ -> full tree created"
+ac11_p1=$(make_bare_project)
+TOTAL=$((TOTAL + 1))
+if tree_exists "$ac11_p1"; then
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c1_precondition (.bionic/ tree already exists before the write)\n'
+else
+  PASS=$((PASS + 1)); printf '  PASS  ac11_c1_precondition (.bionic/ absent before the write)\n'
+fi
+run_write "$ac11_p1/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan skill=canonical-sdlc)"
+assert_eq "ac11_c1 write allowed" 0 "$HOOK_EXIT"
+ac11_c1_stderr="$HOOK_STDERR"
+TOTAL=$((TOTAL + 1))
+if tree_exists "$ac11_p1"; then
+  PASS=$((PASS + 1)); printf '  PASS  ac11_c1 full tree created\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c1 full tree created (missing under %s/.bionic)\n' "$ac11_p1"
+fi
+
+echo "AC-11 c3: no manual step, no prompt -- one hook invocation, no interactive/setup text on stderr"
+assert_eq "ac11_c3 clean stderr on the creating write" "" "$ac11_c1_stderr"
+
+echo "AC-11 c2: running the identical write again -> idempotent, no error, tree unchanged"
+ac11_before_listing=$(cd "$ac11_p1/.bionic" && find . | sort)
+run_write "$ac11_p1/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan skill=canonical-sdlc)"
+assert_eq "ac11_c2 second write still exits 0" 0 "$HOOK_EXIT"
+ac11_after_listing=$(cd "$ac11_p1/.bionic" && find . | sort)
+assert_eq "ac11_c2 tree listing unchanged (idempotent)" "$ac11_before_listing" "$ac11_after_listing"
+
+echo "AC-11 c4a: unrelated file written outside the docs-root -> no over-creation, no .bionic/ at all"
+ac11_p2=$(make_bare_project)
+run_write "$ac11_p2/README.md" "just some notes"
+assert_eq "ac11_c4a write allowed (not an enforced artifact)" 0 "$HOOK_EXIT"
+TOTAL=$((TOTAL + 1))
+if [ -d "$ac11_p2/.bionic" ]; then
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c4a no .bionic/ created (found %s/.bionic)\n' "$ac11_p2"
+else
+  PASS=$((PASS + 1)); printf '  PASS  ac11_c4a no .bionic/ created\n'
+fi
+
+echo "AC-11 c4b: enforced artifact under the docs-root but governing-skill != canonical-sdlc -> still no over-creation"
+ac11_p3=$(make_bare_project)
+run_write "$ac11_p3/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan skill=superpowers:writing-plans)"
+assert_eq "ac11_c4b write allowed" 0 "$HOOK_EXIT"
+TOTAL=$((TOTAL + 1))
+if [ -d "$ac11_p3/.bionic" ]; then
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c4b no .bionic/ created for a non-canonical-sdlc governing-skill (found %s/.bionic)\n' "$ac11_p3"
+else
+  PASS=$((PASS + 1)); printf '  PASS  ac11_c4b no .bionic/ created for a non-canonical-sdlc governing-skill\n'
+fi
+
+echo "AC-12 c1: .bionic/.gitignore exists and contains '*'"
+TOTAL=$((TOTAL + 1))
+if [ -f "$ac11_p1/.bionic/.gitignore" ] && grep -qx '\*' "$ac11_p1/.bionic/.gitignore"; then
+  PASS=$((PASS + 1)); printf '  PASS  ac12_c1 .bionic/.gitignore exists and contains *\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac12_c1 .bionic/.gitignore missing or wrong content\n'
+fi
+
+echo "AC-12 c2: git check-ignore reports a file inside .bionic/ as ignored (the ignore BINDS)"
+: > "$ac11_p1/.bionic/tmp/probe.txt"
+TOTAL=$((TOTAL + 1))
+if git -C "$ac11_p1" check-ignore -q .bionic/tmp/probe.txt; then
+  PASS=$((PASS + 1)); printf '  PASS  ac12_c2 git check-ignore reports the probe file as ignored\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac12_c2 git check-ignore does NOT report the probe file as ignored\n'
+fi
+
+echo "AC-12 c3: the project's OWN .gitignore is byte-identical before and after (hash, not eye)"
+ac12_p4=$(make_bare_project)
+printf 'node_modules/\n*.log\n' > "$ac12_p4/.gitignore"
+ac12_before_hash=$(shasum -a 256 "$ac12_p4/.gitignore" | awk '{print $1}')
+run_write "$ac12_p4/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan skill=canonical-sdlc)"
+assert_eq "ac12_c3 write allowed" 0 "$HOOK_EXIT"
+ac12_after_hash=$(shasum -a 256 "$ac12_p4/.gitignore" | awk '{print $1}')
+assert_eq "ac12_c3 project .gitignore hash unchanged" "$ac12_before_hash" "$ac12_after_hash"
 
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"

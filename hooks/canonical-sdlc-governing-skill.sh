@@ -240,6 +240,40 @@ if [ -z "$GOVERNING" ]; then
   exit 2
 fi
 
+# ---------- AC-11 / AC-12: tree creation on first lifecycle use ----------
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+#
+# Slice 2 (F4): neither hook has an entry point that fires on true first
+# lifecycle use without requiring `.bionic/` to pre-exist — except this one.
+# The governing-skill hook already knows the target artifact's path and, as
+# of slice 1, computes PROJECT_ROOT_FROM_PATH from git rather than by
+# walking for an existing `.bionic/`. Creation hangs off that same
+# computation, keyed on `governing-skill: canonical-sdlc` specifically —
+# the value Step 0 stamps on the plan file it writes first — not on any
+# non-empty governing-skill value, so artifacts produced by other skills
+# later in the lifecycle (e.g. `superpowers:writing-plans`) never re-fire it.
+#
+# Deliberately NOT a SessionStart hook: that would create `.bionic/` in
+# every repo the user opens a session in. "First lifecycle use" is the
+# first canonical-sdlc artifact write, not the first session — see the
+# wave-level Not Doing.
+#
+# `mkdir -p` is naturally idempotent. The `.gitignore` write is guarded by
+# `[ -f ]` so a second run changes nothing. Neither can block — no new exit
+# path is added here; failure to create is left to whatever already handles
+# an unwritable project tree elsewhere.
+if [ "$GOVERNING" = "canonical-sdlc" ]; then
+  mkdir -p \
+    "$PROJECT_ROOT_FROM_PATH/.bionic/tmp" \
+    "$PROJECT_ROOT_FROM_PATH/.bionic/docs/specs" \
+    "$PROJECT_ROOT_FROM_PATH/.bionic/docs/plans" \
+    "$PROJECT_ROOT_FROM_PATH/.bionic/docs/adrs" \
+    "$PROJECT_ROOT_FROM_PATH/.bionic/docs/incidents" \
+    2>/dev/null
+  BIONIC_GITIGNORE="$PROJECT_ROOT_FROM_PATH/.bionic/.gitignore"
+  [ -f "$BIONIC_GITIGNORE" ] || printf '*\n' > "$BIONIC_GITIGNORE" 2>/dev/null
+fi
+
 # ---------- canonical-sdlc schema enforcement ----------
 #
 # Discriminator: `canonical_sdlc_version`, NOT `governing-skill`.
