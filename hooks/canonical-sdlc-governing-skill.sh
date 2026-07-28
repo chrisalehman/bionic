@@ -66,8 +66,25 @@ fi
 #
 # `--path-format=absolute` is load-bearing, not cosmetic: the bare form
 # returns a RELATIVE path (`.git` at the root, `../.git` one level down),
-# whose dirname is `.` or `..` — a cwd-dependent string, not a root. Requires
-# git >= 2.31.
+# whose dirname is `.` or `..` — a cwd-dependent string, not a root. It landed
+# in git 2.31.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+#
+# OLD-GIT FALLBACK (Step-6 finding K2). On git < 2.31 `--path-format` is an
+# unknown option and rev-parse exits 129 — which the single-branch predecessor
+# could not tell apart from "not a repository", so the root silently became the
+# session's cwd and EVERY canonical-sdlc artifact write on such a machine
+# blocked as misplaced, pointing the author at whatever directory the session
+# started in. Fail-closed in the wrong direction, and wave-introduced: the
+# walk-up predecessor worked on every git version. Plan assumption 6 claimed a
+# `cd`-and-`pwd` fallback already covered this; it did not exist. A documented
+# mitigation that was never built is worse than an unlogged one — it reads as
+# retired, and a reviewer who checks the local git version moves on.
+#
+# So: retry the BARE form, which every git has, and absolutize its answer here.
+# It answers RELATIVE inside the main repo and ABSOLUTE from a linked worktree,
+# hence the `case`. Only when BOTH forms fail is this genuinely not a
+# repository, and the supplied fallback wins as before.
 # [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
 #
 # `git -C` needs a directory that EXISTS, and this is a PreToolUse gate: on
@@ -80,16 +97,26 @@ fi
 # where `.bionic/` did not already exist, and resolved a linked worktree to
 # the worktree instead of its parent repo.
 resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default pwd)
-  local d common
+  local d common root
   d=$(dirname "$1")
   while [ ! -d "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
     d=$(dirname "$d")
   done
   if common=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
     dirname "$common"
-  else
-    printf '%s\n' "${2:-$(pwd)}"
+    return
   fi
+  if common=$(git -C "$d" rev-parse --git-common-dir 2>/dev/null); then
+    case "$common" in
+      /*) root=$(dirname "$common") ;;
+      *)  root=$(cd "$d" 2>/dev/null && cd "$(dirname "$common")" 2>/dev/null && pwd -P) ;;
+    esac
+    if [ -n "$root" ]; then
+      printf '%s\n' "$root"
+      return
+    fi
+  fi
+  printf '%s\n' "${2:-$(pwd)}"
 }
 
 # Resolve a path's ancestors to their physical form, keeping any tail that does

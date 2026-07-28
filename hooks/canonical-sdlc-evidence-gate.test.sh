@@ -2040,6 +2040,47 @@ ac10_assert "21c5 outside any repo → the supplied fallback" "$ac10_out" \
 ac10_assert "21c5b outside any repo, no fallback → cwd" "$ac10_out" \
   "$(cd "$ac10_out" && resolve_project_root "$ac10_out/notes/active.md")"
 
+# --- git < 2.31 (critic K2 / FIX 5) ----------------------------------------
+#
+# `--path-format` landed in git 2.31; older git rejects it as an unknown option
+# and rev-parse exits 129, which the single-branch predecessor could not tell
+# apart from "not a repository". The resolver is a deliberately duplicated
+# byte-identical twin, and 21c0b asserts that identity — but a sameness check on
+# the copy cannot see whether the copy WORKS, so the fallback is driven here
+# too rather than assumed from the governing-skill suite.
+#
+# The shim rejects ONLY `--path-format=absolute` and `exec`s the real git for
+# everything else, so these arms exercise git's actual bare-form behaviour:
+# RELATIVE inside the main repo, ABSOLUTE from a linked worktree.
+# [WALL: hooks/canonical-sdlc-evidence-gate.sh]
+ac10_oldgit=$(mktemp -d); cleanup_dirs+=("$ac10_oldgit")
+ac10_real_git=$(command -v git)
+{
+  printf '#!/bin/bash\n'
+  printf 'for a in "$@"; do\n'
+  printf '  [ "$a" = "--path-format=absolute" ] && exit 129\n'
+  printf 'done\n'
+  printf 'exec %s "$@"\n' "$ac10_real_git"
+} > "$ac10_oldgit/git"
+chmod +x "$ac10_oldgit/git"
+
+ac10_oldgit_resolve() {  # PATH saved/restored so nothing else in the suite sees the shim
+  local saved="$PATH" out
+  PATH="$ac10_oldgit:$PATH"
+  out=$(resolve_project_root "$@")
+  PATH="$saved"
+  printf '%s\n' "$out"
+}
+
+ac10_assert "21c7 old git: repo root → repo root" "$ac10_main" \
+  "$(ac10_oldgit_resolve "$ac10_main/.bionic/docs/plans/active.md")"
+ac10_assert "21c8 old git: subdirectory → repo root (relative bare form)" "$ac10_main" \
+  "$(ac10_oldgit_resolve "$ac10_main/deep/sub/dir/active.md")"
+ac10_assert "21c9 old git: worktree → parent repo root (absolute bare form)" "$ac10_main" \
+  "$(ac10_oldgit_resolve "$ac10_wt/.bionic/docs/plans/active.md")"
+ac10_assert "21c10 old git: outside any repo → the supplied fallback" "$ac10_out" \
+  "$(ac10_oldgit_resolve "$ac10_out/notes/active.md" "$ac10_out")"
+
 # Every answer is an ABSOLUTE path. The naive `dirname $(git rev-parse
 # --git-common-dir)` yields `.` and `..`; a criterion accepting a relative
 # answer would pass the defect it exists to catch.
@@ -3660,6 +3701,30 @@ if [ "$HOOK_EXIT" -eq 2 ] \
   PASS=$((PASS + 1))
 else
   echo "FAIL: 25e3 the gate does not see the file the governing hook accepted"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+echo "-- 25f: git < 2.31 — the two hooks still agree on one root --"
+# FIX 1 and FIX 5 meet here. Under old git the resolver's primary branch fails,
+# so if the fallback did not exist the gate would keep PROJECT_DIR at the
+# worktree and C2/S1 would be reopened on every pre-2.31 machine — a green
+# 25a would be proving nothing about them. Same fixture, same assertion, one
+# variable changed.
+# [WALL: hooks/canonical-sdlc-evidence-gate.sh]
+s25_h6=$(make_home)
+TOTAL=$((TOTAL + 1))
+s25_saved_path="$PATH"
+PATH="$ac10_oldgit:$PATH"
+run_hook_with_project "$s25_h6" "$s25_wt" 'git commit -m "x"'
+PATH="$s25_saved_path"
+if [ "$HOOK_EXIT" -eq 2 ] \
+   && echo "$HOOK_STDERR" | grep -q "placeholder" \
+   && echo "$HOOK_STDERR" | grep -qF "$s25_main/.bionic/docs/plans/"; then
+  echo "PASS: 25f old git — worktree commit still gated by the main repo's plan"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected block naming the main repo): 25f old-git worktree commit"
   echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
   FAIL=$((FAIL + 1))
 fi
