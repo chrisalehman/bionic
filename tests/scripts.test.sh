@@ -711,10 +711,6 @@ expect_true "MANAGED_HOOKS includes protect-main.sh" grep -q 'protect-main\.sh' 
 # 4e: MANAGED_HOOKS includes protect-database.sh
 expect_true "MANAGED_HOOKS includes protect-database.sh" grep -q 'protect-database\.sh' "$BOOTSTRAP"
 
-# 4g: MANAGED_HOOKS includes memory-cleanup.sh as a SessionStart hook with startup matcher
-expect_true "MANAGED_HOOKS includes memory-cleanup.sh as SessionStart|startup" \
-  grep -qE '^\s*"SessionStart\|startup\|.*memory-cleanup\.sh"' "$BOOTSTRAP"
-
 # 4h: MANAGED_HOOKS includes canonical-sdlc-evidence-gate.sh as a PreToolUse|Bash hook
 expect_true "MANAGED_HOOKS includes canonical-sdlc-evidence-gate.sh as PreToolUse|Bash" \
   grep -qE '^\s*"PreToolUse\|Bash\|.*canonical-sdlc-evidence-gate\.sh"' "$BOOTSTRAP"

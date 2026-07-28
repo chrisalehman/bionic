@@ -1948,6 +1948,198 @@ expect_audit_line "21b fail-open: no .bionic ancestor above the plan → PROJECT
   "$h21b" 'git commit -m "x"' "tune-evidence"
 
 # ============================================================
+# Section 21c: AC-10 — the audit root is COMPUTED, never discovered
+# ============================================================
+#
+# audit_root now delegates to resolve_project_root, which computes the root
+# from `git rev-parse --path-format=absolute --git-common-dir` instead of
+# walking the plan's ancestors for an existing `.bionic/`. Consequences:
+# a project whose `.bionic/` has never existed still resolves, and every
+# linked worktree of one repo answers with the parent repo — one repo, one
+# audit file, instead of one per worktree.
+#
+# Fixture fidelity: real `git init` repos and a real `git worktree add` on
+# disk. The behaviour under test is git's own path-format handling, which a
+# stubbed `git` cannot reproduce.
+
+echo ""
+echo "=== Section 21c: AC-10 computed audit root ==="
+
+# The five criteria run against the SHIPPED text of the function, extracted
+# from the hook and eval'd here — not a reimplementation. That seam cannot
+# observe that the hook CALLS it, so 21c-e2e below drives the hook through its
+# real stdin contract and pins the call site.
+ac10_src=$(awk '/^resolve_project_root\(\)/,/^\}/' "$HOOK")
+TOTAL=$((TOTAL + 1))
+if [ -n "$ac10_src" ]; then
+  echo "PASS: 21c0 resolve_project_root extracted from the hook"
+  PASS=$((PASS + 1))
+  eval "$ac10_src"
+else
+  echo "FAIL: 21c0 no resolve_project_root() in $HOOK"
+  FAIL=$((FAIL + 1))
+  # Keep the criteria below individually reportable rather than aborting.
+  resolve_project_root() { :; }
+fi
+
+# The hook's own comment claims this helper is a byte-identical twin of the
+# governing-skill hook's copy. Assert it, so a one-sided edit shows up here
+# rather than as two hooks disagreeing about which project owns an artifact.
+TOTAL=$((TOTAL + 1))
+ac10_twin=$(awk '/^resolve_project_root\(\)/,/^\}/' "$(dirname "$HOOK")/canonical-sdlc-governing-skill.sh")
+if [ -n "$ac10_twin" ] && [ "$ac10_src" = "$ac10_twin" ]; then
+  echo "PASS: 21c0b resolve_project_root is byte-identical to the governing-skill copy"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: 21c0b resolve_project_root diverges from the governing-skill copy"
+  FAIL=$((FAIL + 1))
+fi
+
+ac10_assert() {  # $1 label, $2 expected, $3 actual
+  TOTAL=$((TOTAL + 1))
+  if [ "$2" = "$3" ]; then
+    echo "PASS: $1"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: $1"
+    echo "  expected='$2' actual='$3'"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+# main: a repo WITH .bionic/ (untracked, so the worktree checkout has none).
+# wt:   a linked worktree of main, given its own .bionic/ on purpose — the
+#       predecessor's ancestor walk would stop there.
+# nb:   a repo where .bionic/ has NEVER existed.
+# out:  a plain directory with no repo above it.
+# Physical paths (pwd -P): mktemp -d yields /var/... on macOS, a symlink to
+# /private/var/..., and git answers with the physical path.
+ac10_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$ac10_tmp")
+ac10_main="$ac10_tmp/main"
+mkdir -p "$ac10_main/.bionic/docs/plans" "$ac10_main/deep/sub/dir"
+git -C "$ac10_main" init -q .
+git -C "$ac10_main" commit -q --allow-empty -m init
+git -C "$ac10_main" worktree add -q "$ac10_tmp/wt" -b ac10-wt
+ac10_wt="$ac10_tmp/wt"
+mkdir -p "$ac10_wt/.bionic/docs/plans"
+ac10_nb="$ac10_tmp/nobionic"; mkdir -p "$ac10_nb"; git -C "$ac10_nb" init -q .
+ac10_out="$ac10_tmp/outside"; mkdir -p "$ac10_out"
+
+ac10_assert "21c1 repo root → repo root" "$ac10_main" \
+  "$(resolve_project_root "$ac10_main/.bionic/docs/plans/active.md")"
+ac10_assert "21c2 target in a subdirectory → repo root" "$ac10_main" \
+  "$(resolve_project_root "$ac10_main/deep/sub/dir/active.md")"
+ac10_assert "21c2b cwd in a subdirectory → repo root (not cwd-relative)" "$ac10_main" \
+  "$(cd "$ac10_main/deep/sub/dir" && resolve_project_root "$ac10_main/.bionic/docs/plans/active.md")"
+ac10_assert "21c3 inside a worktree → parent repo root" "$ac10_main" \
+  "$(resolve_project_root "$ac10_wt/.bionic/docs/plans/active.md")"
+ac10_assert "21c4 .bionic/ never existed → repo root" "$ac10_nb" \
+  "$(resolve_project_root "$ac10_nb/.bionic/docs/plans/active.md")"
+ac10_assert "21c5 outside any repo → the supplied fallback" "$ac10_out" \
+  "$(resolve_project_root "$ac10_out/notes/active.md" "$ac10_out")"
+ac10_assert "21c5b outside any repo, no fallback → cwd" "$ac10_out" \
+  "$(cd "$ac10_out" && resolve_project_root "$ac10_out/notes/active.md")"
+
+# --- git < 2.31 (critic K2 / FIX 5) ----------------------------------------
+#
+# `--path-format` landed in git 2.31; older git rejects it as an unknown option
+# and rev-parse exits 129, which the single-branch predecessor could not tell
+# apart from "not a repository". The resolver is a deliberately duplicated
+# byte-identical twin, and 21c0b asserts that identity — but a sameness check on
+# the copy cannot see whether the copy WORKS, so the fallback is driven here
+# too rather than assumed from the governing-skill suite.
+#
+# The shim rejects ONLY `--path-format=absolute` and `exec`s the real git for
+# everything else, so these arms exercise git's actual bare-form behaviour:
+# RELATIVE inside the main repo, ABSOLUTE from a linked worktree.
+# [WALL: hooks/canonical-sdlc-evidence-gate.sh]
+ac10_oldgit=$(mktemp -d); cleanup_dirs+=("$ac10_oldgit")
+ac10_real_git=$(command -v git)
+{
+  printf '#!/bin/bash\n'
+  printf 'for a in "$@"; do\n'
+  printf '  [ "$a" = "--path-format=absolute" ] && exit 129\n'
+  printf 'done\n'
+  printf 'exec %s "$@"\n' "$ac10_real_git"
+} > "$ac10_oldgit/git"
+chmod +x "$ac10_oldgit/git"
+
+ac10_oldgit_resolve() {  # PATH saved/restored so nothing else in the suite sees the shim
+  local saved="$PATH" out
+  PATH="$ac10_oldgit:$PATH"
+  out=$(resolve_project_root "$@")
+  PATH="$saved"
+  printf '%s\n' "$out"
+}
+
+ac10_assert "21c7 old git: repo root → repo root" "$ac10_main" \
+  "$(ac10_oldgit_resolve "$ac10_main/.bionic/docs/plans/active.md")"
+ac10_assert "21c8 old git: subdirectory → repo root (relative bare form)" "$ac10_main" \
+  "$(ac10_oldgit_resolve "$ac10_main/deep/sub/dir/active.md")"
+ac10_assert "21c9 old git: worktree → parent repo root (absolute bare form)" "$ac10_main" \
+  "$(ac10_oldgit_resolve "$ac10_wt/.bionic/docs/plans/active.md")"
+ac10_assert "21c10 old git: outside any repo → the supplied fallback" "$ac10_out" \
+  "$(ac10_oldgit_resolve "$ac10_out/notes/active.md" "$ac10_out")"
+
+# Every answer is an ABSOLUTE path. The naive `dirname $(git rev-parse
+# --git-common-dir)` yields `.` and `..`; a criterion accepting a relative
+# answer would pass the defect it exists to catch.
+TOTAL=$((TOTAL + 1))
+ac10_rel=""
+for ac10_p in "$ac10_main/.bionic/docs/plans/active.md" \
+              "$ac10_main/deep/sub/dir/active.md" \
+              "$ac10_wt/.bionic/docs/plans/active.md" \
+              "$ac10_nb/.bionic/docs/plans/active.md" \
+              "$ac10_out/notes/active.md"; do
+  ac10_v=$(cd "$ac10_out" && resolve_project_root "$ac10_p")
+  case "$ac10_v" in /*) ;; *) ac10_rel="${ac10_rel} ${ac10_p}=>${ac10_v}" ;; esac
+done
+if [ -z "$ac10_rel" ]; then
+  echo "PASS: 21c6 every resolution is an absolute path"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: 21c6 relative resolution(s):$ac10_rel"
+  FAIL=$((FAIL + 1))
+fi
+
+# 21c-e2e — the CALL SITE, driven through the hook's real stdin contract, from
+# INSIDE a linked worktree. The plan lives where the governing-skill hook
+# demands it live — the MAIN repo's docs root — and the worktree carries a
+# newer decoy plan in its own .bionic/docs/plans/. Three arms, asserted
+# together:
+#   - the decoy is NOT selected (it would block on a placeholder), so
+#     PROJECT_DIR/DOCS_ROOT resolved to the main repo, not the worktree;
+#   - the finding lands in the audit file keyed on the main repo;
+#   - no audit file keyed on the worktree exists.
+# The absence arm alone would pass if the hook had written nothing at all.
+#
+# Step-6 finding C2/S1 rewrote this case's fixture. It used to put the real
+# plan INSIDE the worktree's own .bionic/ — a placement the governing-skill
+# hook blocks, so the two hooks disagreed about the same repo and no artifact
+# location satisfied both. This shape is the reachable one.
+h21c=$(make_home)
+printf '%s\n' "$(r7_wave_plan tune 5 "$step5_base" "$matrix_complete")" \
+  > "$ac10_main/.bionic/docs/plans/active.md"
+touch "$ac10_main/.bionic/docs/plans/active.md"
+printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 12\nintent: build\nrigor: tested\nscale: wave\n---\n## SDLC State\ncurrent: 5\nStep 5: TODO\n' \
+  > "$ac10_wt/.bionic/docs/plans/decoy.md"
+touch "$ac10_wt/.bionic/docs/plans/decoy.md"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$h21c" "$ac10_wt" 'git commit -m "x"'
+ac10_main_audit=$(audit_file_for "$h21c" "$ac10_main")
+ac10_wt_audit=$(audit_file_for "$h21c" "$ac10_wt")
+if [ "$HOOK_EXIT" -eq 0 ] && [ -f "$ac10_main_audit" ] && grep -q "tune-evidence" "$ac10_main_audit" \
+   && [ ! -f "$ac10_wt_audit" ]; then
+  echo "PASS: 21c-e2e commit from a worktree → main repo's plan, one audit file keyed on the main repo"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: 21c-e2e commit from a worktree → main repo's plan and audit file"
+  echo "  exit=$HOOK_EXIT main_audit=$([ -f "$ac10_main_audit" ] && echo yes || echo no) wt_audit=$([ -f "$ac10_wt_audit" ] && echo yes || echo no)"
+  echo "  stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+# ============================================================
 # Section 22: rigor-keyed ledger lanes
 # ============================================================
 #
@@ -3082,6 +3274,477 @@ expect_block "absent canonical_sdlc_version → block" \
 h23ok=$(make_home)
 write_plan "$h23ok" "$(versioned_plan 12)" > /dev/null
 expect_allow "canonical_sdlc_version: 12 → allow" "$h23ok" 'git commit -m "x"'
+
+# ============================================================
+# Section 24: AC-13 — the plan-search fail-open
+# ============================================================
+#
+# This hook fails open DIFFERENTLY from the governing-skill hook. It never
+# tests `.bionic/` at all: every candidate plan directory is skipped by
+# `[ -d "$d" ] || continue`, PLAN comes back empty, and the commit passes
+# ungated. Closing the governing-skill hook's fail-open does nothing for this
+# one, which is why the two are driven independently here.
+#
+# The distinction the AC draws, applied to a commit gate:
+#   ABSENT     — no plan anywhere. Not a canonical-sdlc run. Never blocks;
+#                this is every commit in every project that does not use the
+#                lifecycle, and a wall there would be intolerable.
+#   MISPLACED  — a plan carrying the run marker exists in the project, but
+#                outside every directory the gate searches. The gate is
+#                silently disabled and the commit would sail through. Blocks,
+#                naming where the plan belongs.
+echo ""
+echo "=== Section 24: AC-13 — misplaced plan blocks, absent plan never does ==="
+
+s24_marked_plan() {  # a plan carrying the run-state marker + a satisfied state
+  printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+  printf -- 'canonical_sdlc_version: 12\nintent: build\nrigor: tested\nscale: wave\n---\n'
+  printf -- '## SDLC State\ncurrent: 3\nStep 3: .bionic/docs/plans/wave-01.plan.md\n'
+}
+
+echo "-- c1: ABSENCE never blocks --"
+# A project with no .bionic/ at all and no plan file anywhere. The single most
+# common commit in the world; it must pass, silently.
+s24_h1=$(make_home)
+s24_p1=$(mktemp -d); cleanup_dirs+=("$s24_p1")
+mkdir -p "$s24_p1/src"
+printf 'echo hi\n' > "$s24_p1/src/main.sh"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s24_h1" "$s24_p1" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  echo "PASS: no .bionic/, no plan anywhere → allow, silently"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected allow): no .bionic/, no plan anywhere"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+# .bionic/docs/plans/ exists but is empty — a project that has run Step 0 and
+# not yet written a plan. Still absence, still no block.
+s24_h1b=$(make_home)
+s24_p1b=$(make_project)
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s24_h1b" "$s24_p1b" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  echo "PASS: empty .bionic/docs/plans/ → allow, silently"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected allow): empty .bionic/docs/plans/"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+echo "-- c2: MISPLACEMENT blocks, naming the correct path --"
+# The legacy layout, and the shape a moved-or-renamed tree leaves behind: a
+# real canonical-sdlc plan the gate cannot see.
+s24_h2=$(make_home)
+s24_p2=$(mktemp -d); cleanup_dirs+=("$s24_p2")
+mkdir -p "$s24_p2/docs/bionic/plans/epic-01-demo"
+s24_marked_plan > "$s24_p2/docs/bionic/plans/epic-01-demo/wave-01-x.plan.md"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s24_h2" "$s24_p2" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] \
+   && echo "$HOOK_STDERR" | grep -q "misplaced" \
+   && echo "$HOOK_STDERR" | grep -qF "$s24_p2/.bionic/docs/plans/"; then
+  echo "PASS: misplaced plan → block, naming the correct path"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected block naming $s24_p2/.bionic/docs/plans/): misplaced plan"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+# The identical plan in the right place is found and gated normally — proof the
+# block above is about WHERE the file is, not about the file.
+s24_h3=$(make_home)
+s24_p3=$(make_project)
+s24_marked_plan > "$s24_p3/.bionic/docs/plans/wave-01-x.plan.md"
+expect_allow "the same plan under .bionic/docs/plans/ → found and gated, allow" \
+  "$s24_h3" 'git commit -m "x"'
+
+echo "-- c3: unmarked files are unaffected --"
+# A *.plan.md with no canonical_sdlc_version is not a canonical-sdlc run
+# artifact. Plenty of projects have plan-shaped markdown; none of it is this
+# hook's business.
+s24_h4=$(make_home)
+s24_p4=$(mktemp -d); cleanup_dirs+=("$s24_p4")
+mkdir -p "$s24_p4/notes"
+printf '# Some plan\n\nnot a canonical-sdlc artifact\n' > "$s24_p4/notes/roadmap.plan.md"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s24_h4" "$s24_p4" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  echo "PASS: unmarked *.plan.md → allow, silently"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected allow): unmarked *.plan.md"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+# A FENCED example of the frontmatter is documentation. Only the leading block
+# counts — the recurring trap in this repo is a parser that reads fenced
+# examples as real declarations.
+s24_h5=$(make_home)
+s24_p5=$(mktemp -d); cleanup_dirs+=("$s24_p5")
+mkdir -p "$s24_p5/docs"
+{ printf '# How to write a plan\n\n```\n---\ncanonical_sdlc_version: 12\n---\n```\n'; } \
+  > "$s24_p5/docs/example.plan.md"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s24_h5" "$s24_p5" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  echo "PASS: fenced frontmatter example → allow, silently"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected allow): fenced frontmatter example"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+echo "-- c4: elsewhere under the docs root is PLACED, not misplaced --"
+# <docs-root>/spikes/ and <docs-root>/record/ hold real artifacts carrying this
+# frontmatter. The governing-skill hook treats the whole docs root as placed;
+# this hook must agree, or the two would disagree about the same file.
+s24_h6=$(make_home)
+s24_p6=$(make_project)
+mkdir -p "$s24_p6/.bionic/docs/spikes"
+s24_marked_plan > "$s24_p6/.bionic/docs/spikes/spike-x.plan.md"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s24_h6" "$s24_p6" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  echo "PASS: marked plan under <docs-root>/spikes/ → placed, allow"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected allow): marked plan under <docs-root>/spikes/"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+echo "-- c5: the named path follows docs-root: in config.yaml --"
+s24_h7=$(make_home)
+s24_p7=$(mktemp -d); cleanup_dirs+=("$s24_p7")
+mkdir -p "$s24_p7/.bionic" "$s24_p7/.bionic/docs/plans/epic-01-demo"
+printf 'docs-root: custom/docs\n' > "$s24_p7/.bionic/config.yaml"
+s24_marked_plan > "$s24_p7/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s24_h7" "$s24_p7" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && echo "$HOOK_STDERR" | grep -qF "$s24_p7/custom/docs/plans/"; then
+  echo "PASS: block names the CONFIGURED docs root, not a hardcoded .bionic/"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected block naming $s24_p7/custom/docs/plans/): configured docs-root"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+echo "-- c6: a non-commit command is never touched by any of this --"
+s24_h8=$(make_home)
+expect_allow "non-commit command in the c2 misplaced project → allow" \
+  "$s24_h8" 'git status'
+
+echo "-- c7: a NON-EMPTY ~/.claude/plans must not make the sweep unreachable --"
+# Step-6 finding C1/S2. The guard on this whole block used to be "no plan was
+# found in ANY searched directory", and the FIRST directory searched is the
+# global, project-agnostic ~/.claude/plans/. One unrelated .md there — the
+# harness's own plan mode writes into exactly that directory — made $PLAN
+# non-empty and the block dead. Two such files were sitting on the developing
+# machine, so the branch AC-13 added had never executed in production.
+#
+# Every other runner in this suite pins HOME to make_home(), which creates an
+# EMPTY ~/.claude/plans/. That fixture substitutes away the precondition under
+# test — the recorded seam-blindness class. These cases put a file there on
+# purpose. The guard is now scoped to the PROJECT plan directories.
+# [WALL: hooks/canonical-sdlc-evidence-gate.sh]
+s24_h9=$(make_home)
+printf '# just a note\n' > "$s24_h9/.claude/plans/stray.md"
+s24_p9=$(mktemp -d); cleanup_dirs+=("$s24_p9")
+mkdir -p "$s24_p9/docs/bionic/plans/epic-01-demo"
+s24_marked_plan > "$s24_p9/docs/bionic/plans/epic-01-demo/wave-01-x.plan.md"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s24_h9" "$s24_p9" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] \
+   && echo "$HOOK_STDERR" | grep -q "misplaced" \
+   && echo "$HOOK_STDERR" | grep -qF "$s24_p9/.bionic/docs/plans/"; then
+  echo "PASS: misplaced plan blocks even with a non-empty ~/.claude/plans"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected block): misplaced plan with a non-empty ~/.claude/plans"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+# The widened guard must not widen the BLOCK. A project whose plan is correctly
+# placed has a project plan, so the sweep never runs — regardless of what the
+# global directory holds.
+s24_h10=$(make_home)
+printf '# just a note\n' > "$s24_h10/.claude/plans/stray.md"
+s24_p10=$(make_project)
+s24_marked_plan > "$s24_p10/.bionic/docs/plans/wave-01-x.plan.md"
+touch "$s24_p10/.bionic/docs/plans/wave-01-x.plan.md"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s24_h10" "$s24_p10" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  echo "PASS: correctly-placed project plan + non-empty ~/.claude/plans → no false block"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected allow): correctly-placed project plan + non-empty ~/.claude/plans"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+# ABSENCE still never blocks, even though the sweep now runs in this state.
+s24_h11=$(make_home)
+printf '# just a note\n' > "$s24_h11/.claude/plans/stray.md"
+s24_p11=$(mktemp -d); cleanup_dirs+=("$s24_p11")
+mkdir -p "$s24_p11/src"
+printf 'echo hi\n' > "$s24_p11/src/main.sh"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s24_h11" "$s24_p11" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  echo "PASS: no project plan, nothing misplaced, non-empty ~/.claude/plans → allow"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected allow): absence with a non-empty ~/.claude/plans"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+# ============================================================
+# Section 25: C2/S1 — the two hooks name ONE root per repo
+# ============================================================
+#
+# The governing-skill hook resolves the project root with resolve_project_root
+# (`--git-common-dir`, i.e. the MAIN repo even from inside a linked worktree).
+# This gate derived PROJECT_DIR — and therefore DOCS_ROOT, PLAN_DIRS and the
+# AC-13 misplacement sweep's root — from CLAUDE_PROJECT_DIR/.cwd/pwd, i.e. the
+# WORKTREE. Slice 1 migrated only audit_root().
+#
+# The consequence was that in a linked worktree NO artifact placement satisfied
+# both hooks: put the plan where the governing hook demands (the main repo) and
+# every commit from the worktree ran ungated; put it in the worktree so the gate
+# finds it and every artifact write was blocked. canonical-sdlc ships a
+# `use_worktree` flag, so this is the lifecycle's own normal mode.
+#
+# Fixture fidelity: a real `git init` + `git worktree add`, like Section 21c —
+# the behaviour under test is git's own --git-common-dir handling.
+# [WALL: hooks/canonical-sdlc-evidence-gate.sh]
+
+echo ""
+echo "=== Section 25: one root per repo across both hooks (worktrees) ==="
+
+s25_plan() {  # a canonical plan whose current step evidence is a placeholder
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 12\n'
+  printf -- 'intent: build\nrigor: tested\nscale: wave\n'
+  printf -- 'deploy_target: none\nuse_worktree: true\nhas_ui: false\n---\n'
+  printf -- '## SDLC State\ncurrent: 5\nStep 5: TODO\n'
+}
+
+s25_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$s25_tmp")
+s25_main="$s25_tmp/main"
+mkdir -p "$s25_main/.bionic/docs/plans"
+git -C "$s25_main" init -q .
+git -C "$s25_main" commit -q --allow-empty -m init
+git -C "$s25_main" worktree add -q "$s25_tmp/wt" -b s25-wt
+s25_wt="$s25_tmp/wt"
+s25_plan > "$s25_main/.bionic/docs/plans/wave-01-x.plan.md"
+
+echo "-- 25a: a commit FROM the worktree is gated against the main repo's plan --"
+s25_h1=$(make_home)
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s25_h1" "$s25_wt" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] \
+   && echo "$HOOK_STDERR" | grep -q "placeholder" \
+   && echo "$HOOK_STDERR" | grep -qF "$s25_main/.bionic/docs/plans/wave-01-x.plan.md"; then
+  echo "PASS: 25a commit from a linked worktree is gated by the main repo's plan"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected block naming the main repo's plan): 25a worktree commit"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+echo "-- 25b: control — the identical commit from the MAIN repo --"
+s25_h2=$(make_home)
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s25_h2" "$s25_main" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && echo "$HOOK_STDERR" | grep -q "placeholder"; then
+  echo "PASS: 25b commit from the main repo blocks identically"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected block): 25b main-repo commit"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+echo "-- 25c: the misplacement sweep also walks the MAIN repo, not the worktree --"
+# Same shape, no plan anywhere the gate searches, and a marked plan sitting
+# outside the docs root in the MAIN repo. Both the sweep's root and the docs
+# root it names must be the main repo's.
+s25_tmp2=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$s25_tmp2")
+s25_main2="$s25_tmp2/main"
+mkdir -p "$s25_main2/notes"
+git -C "$s25_main2" init -q .
+git -C "$s25_main2" commit -q --allow-empty -m init
+git -C "$s25_main2" worktree add -q "$s25_tmp2/wt" -b s25-wt2
+s25_wt2="$s25_tmp2/wt"
+s25_marked_plan_body() {
+  printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+  printf -- 'canonical_sdlc_version: 12\nintent: build\nrigor: tested\nscale: wave\n---\n'
+  printf -- '## SDLC State\ncurrent: 3\nStep 3: .bionic/docs/plans/wave-01.plan.md\n'
+}
+s25_marked_plan_body > "$s25_main2/notes/rogue.plan.md"
+s25_h3=$(make_home)
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s25_h3" "$s25_wt2" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] \
+   && echo "$HOOK_STDERR" | grep -q "misplaced" \
+   && echo "$HOOK_STDERR" | grep -qF "$s25_main2/notes/rogue.plan.md" \
+   && echo "$HOOK_STDERR" | grep -qF "$s25_main2/.bionic/docs/plans/"; then
+  echo "PASS: 25c sweep from a worktree finds the main repo's misplaced plan"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected block naming the main repo's paths): 25c worktree sweep"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+echo "-- 25e: ONE file, BOTH hooks, one worktree — the two must agree --"
+# A19: every worktree fixture in this tree had asked ONE hook about the
+# placement convenient to that hook, and the two suites' answers contradicted
+# each other while both stayed green. This case puts a single artifact path in
+# front of both binaries in the order the lifecycle actually uses them:
+#   1. the governing-skill hook REFUSES the worktree-local placement and names
+#      the main repo's docs root;
+#   2. it ACCEPTS the placement it named;
+#   3. this gate, invoked from the worktree, gates the commit against that same
+#      file.
+# Before the C2/S1 repair, (3) was exit 0 — obey (1) and every commit from a
+# worktree ran ungated.
+s25_gov_hook="$(dirname "$HOOK")/canonical-sdlc-governing-skill.sh"
+s25_gov_home=$(make_home)   # keeps the governing hook's audit writes off the real ~/.claude
+s25_run_write() {  # $1=file path, $2=content → S25_GOV_EXIT / S25_GOV_STDERR
+  local input tmp_err
+  input=$(jq -n --arg p "$1" --arg c "$2" \
+    '{tool_name: "Write", tool_input: {file_path: $p, content: $c}}')
+  tmp_err=$(mktemp)
+  if HOME="$s25_gov_home" bash "$s25_gov_hook" <<< "$input" >/dev/null 2>"$tmp_err"; then
+    S25_GOV_EXIT=0
+  else
+    S25_GOV_EXIT=$?
+  fi
+  S25_GOV_STDERR=$(cat "$tmp_err")
+  rm -f "$tmp_err"
+}
+s25_artifact='---
+governing-skill: superpowers:writing-plans
+sdlc-step: 3
+epic: epic-01-demo
+wave: wave-01-x
+canonical_sdlc_version: 12
+intent: build
+rigor: tested
+scale: wave
+cleanup_on_finish: true
+use_worktree: true
+surface_type: none
+language: none
+has_ui: false
+multi_agent: false
+deploy_target: none
+model_plan: orchestrator=fable-5-high
+---
+
+## Verification Matrix
+
+stack-health: n/a: no long-running serve observed
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+
+## SDLC State
+current: 5
+Step 5: TODO
+'
+s25_run_write "$s25_wt/.bionic/docs/plans/epic-01-demo/both.plan.md" "$s25_artifact"
+TOTAL=$((TOTAL + 1))
+if [ "$S25_GOV_EXIT" -eq 2 ] && echo "$S25_GOV_STDERR" | grep -qF "$s25_main/.bionic/docs"; then
+  echo "PASS: 25e1 governing hook refuses the worktree-local placement, names the main repo"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: 25e1 governing hook on a worktree-local artifact"
+  echo "  exit=$S25_GOV_EXIT stderr='$S25_GOV_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+mkdir -p "$s25_main/.bionic/docs/plans/epic-01-demo"
+s25_run_write "$s25_main/.bionic/docs/plans/epic-01-demo/both.plan.md" "$s25_artifact"
+TOTAL=$((TOTAL + 1))
+if [ "$S25_GOV_EXIT" -eq 0 ]; then
+  echo "PASS: 25e2 governing hook accepts the placement it named"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: 25e2 governing hook rejects the placement it named"
+  echo "  exit=$S25_GOV_EXIT stderr='$S25_GOV_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+printf '%s' "$s25_artifact" > "$s25_main/.bionic/docs/plans/epic-01-demo/both.plan.md"
+touch "$s25_main/.bionic/docs/plans/epic-01-demo/both.plan.md"
+s25_h5=$(make_home)
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s25_h5" "$s25_wt" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] \
+   && echo "$HOOK_STDERR" | grep -q "placeholder" \
+   && echo "$HOOK_STDERR" | grep -qF "$s25_main/.bionic/docs/plans/epic-01-demo/both.plan.md"; then
+  echo "PASS: 25e3 the gate, from the worktree, gates the SAME file the governing hook accepted"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: 25e3 the gate does not see the file the governing hook accepted"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+echo "-- 25f: git < 2.31 — the two hooks still agree on one root --"
+# FIX 1 and FIX 5 meet here. Under old git the resolver's primary branch fails,
+# so if the fallback did not exist the gate would keep PROJECT_DIR at the
+# worktree and C2/S1 would be reopened on every pre-2.31 machine — a green
+# 25a would be proving nothing about them. Same fixture, same assertion, one
+# variable changed.
+# [WALL: hooks/canonical-sdlc-evidence-gate.sh]
+s25_h6=$(make_home)
+TOTAL=$((TOTAL + 1))
+s25_saved_path="$PATH"
+PATH="$ac10_oldgit:$PATH"
+run_hook_with_project "$s25_h6" "$s25_wt" 'git commit -m "x"'
+PATH="$s25_saved_path"
+if [ "$HOOK_EXIT" -eq 2 ] \
+   && echo "$HOOK_STDERR" | grep -q "placeholder" \
+   && echo "$HOOK_STDERR" | grep -qF "$s25_main/.bionic/docs/plans/"; then
+  echo "PASS: 25f old git — worktree commit still gated by the main repo's plan"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected block naming the main repo): 25f old-git worktree commit"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+echo "-- 25d: a non-repo project dir still resolves to itself (fallback intact) --"
+# resolve_project_root falls back to the supplied value when git cannot answer,
+# so every non-repo fixture in this suite keeps its previous meaning.
+s25_h4=$(make_home)
+s25_p4=$(make_project)
+s24_marked_plan > "$s25_p4/.bionic/docs/plans/wave-01-x.plan.md"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$s25_h4" "$s25_p4" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  echo "PASS: 25d non-repo project dir resolves to itself, plan still found"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected allow): 25d non-repo project dir"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
 
 # ============================================================
 # Summary
