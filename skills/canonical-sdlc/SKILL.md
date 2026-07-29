@@ -44,6 +44,8 @@ Governs non-trivial engineering work. Every run declares a triple — `<intent> 
 
 **Iron law.** No commit without evidence from the current step. The evidence gate reads the plan's `current:` and validates that step's evidence only — it never re-checks earlier steps, so a skipped step is caught by review, not by code.
 
+**Bulk reference.** Artifact shape, evidence-gating detail, intent-specific behaviors and the full version history live in `skills/canonical-sdlc/operational-rules.md`, beside this file. Read it when you need the detail this file compresses — it is copied with the skill, but nothing loads it for you.
+
 ## Load-time announcement
 
 First user-facing action:
@@ -95,8 +97,30 @@ Do not carve a sensitive concern into a tiny unflagged wave to dodge a floor. Th
 <docs-root>/adrs/epic-NN-<slug>/adr-NNN-<slug>.md
 <docs-root>/incidents/NNNN-<slug>/{spec.md, plan.md, rca.md}
 <docs-root>/spikes/spike-<slug>-<YYYYMMDD>.md
-.bionic/tmp/                      # ephemera only, gitignored, wiped at Step 8
+<docs-root>/record/               # operational record: session logs, rotated archives,
+                                  # closed-wave handoffs, inert audits. Survives Step 8.
+<docs-root>/ideas/                # deferred-work briefs awaiting a wave to adopt them
+.bionic/tests/                    # validation protocols re-run by hand, not by tests/run.sh
+.bionic/tmp/                      # ephemera only, wiped at Step 8 — NOT a home for evidence
+.bionic/.gitignore                # literally `*` — written on tree creation; this is what
+                                  # keeps the whole tree out of git, not the project .gitignore
+.bionic/config.yaml               # optional; `docs-root:` moves <docs-root> off the default
 ```
+
+The first five are lifecycle artifacts and are gated: the governing-skill hook enforces
+frontmatter on them and blocks a canonical artifact written anywhere else. `record/` and
+`ideas/` are **operational** — nothing loads them, nothing validates them, and they are reached
+only by citing a path. That is the whole distinction, and it is the boundary test applied to
+this tree: growth in the gated dirs is governed, growth in the operational ones is free.
+
+**Anything the matrix cites as evidence goes in `record/`, never `tmp/`.** Auditor reports,
+critic findings, review-axis artifacts, test-run captures — the matrix names them by path, so
+they must outlive the run that produced them. `tmp/` is wiped at Step 8 and takes its contents
+with it. Learned the expensive way: a wave dispatched every agent to write its report into
+`tmp/`, then discharged 14 matrix rows citing those paths, and Step 8's cleanup destroyed 28
+artifacts that the plan pointed at. The reasoning survived in the plan's own prose; the primary
+evidence did not, which turns an audited record into testimony. Give an agent a `record/` path
+in its brief, or you will pay this once too.
 
 Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 12`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`.
 
@@ -306,7 +330,9 @@ Incident framing: does the fix mask a deeper issue, and is the monitoring-gap an
 
 ### Step 7 — Document
 
-ADRs attach to decision **significance**, not to rigor: momentous (cross-wave, sets a precedent, expensive to reverse) gets one at any rigor; medium gets one when it will shape later waves; trivial gets none. `incident-response` writes the RCA instead.
+ADRs attach to decision **significance**, not to rigor: momentous (cross-wave, sets a precedent, expensive to reverse) gets one at any rigor; medium gets one when it will shape later waves; trivial gets none. `incident-response` writes the RCA instead. Where any doc produced here should live is settled by one question — **who reads it unbidden?** Nobody → operational: park it at a path and cite that path when it is needed; nothing loads it on its own, so its size costs nothing and it may grow freely. Every session → knowledge: it reaches a reader only if the always-loaded index points at it, and that index is read in full every time, so it must earn its line or not be written.
+
+This test used to live in the always-loaded global config, which is where a preceding wave deliberately put it. It moved here because it failed itself: it is consulted only when a document is being written, which by its own definition makes it operational, and operational content is path-addressed. A rule that loads every session to answer a question asked occasionally is the exact cost it exists to prevent.
 
 ### Step 8 — Integrate & close
 
