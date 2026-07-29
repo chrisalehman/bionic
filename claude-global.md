@@ -5,11 +5,6 @@
 **Stay free.** The main thread is for judgment and coordination — offload research, execution and review to subagents, always in the background, and name anything still running when you hand back.
 **One memory store.** The harness's own memory directory, never a parallel one beside it. Write corrections the moment they happen.
 
-## Skill routing
-
-Non-trivial engineering goes through `canonical-sdlc` — declare `intent · rigor · scale`. Docs and chores stay out.
-Bugs and surprising behavior are root-caused through `map-instrument-narrow`, not `superpowers:systematic-debugging`.
-
 ## How I read you
 
 I act on your first paragraph and may not read past it. Everything after earns its place by changing what I'd decide — the caveat that flips my call is never cut, the recap always is. If I need a filename or how the repo is wired before the problem makes sense, you're describing your path instead of the problem.
