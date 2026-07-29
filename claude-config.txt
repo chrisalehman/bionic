@@ -102,9 +102,6 @@ local-skill  | canonical-sdlc
 local-skill  | excalidraw-diagram
 local-skill  | browser-verify
 
-local-command | memory-compact
-local-command | memory-save
-
 # ─── Settings ───────────────────────────────────────────────────────────────
 env-var      | CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS | 1
 
