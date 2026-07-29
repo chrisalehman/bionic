@@ -53,14 +53,25 @@ if [ "$IS_COMMIT" -eq 0 ]; then
   exit 0
 fi
 
-# Locate the newest plan file across the supported plan-directory
-# conventions:
-#   - ~/.claude/plans/            (Claude Code global convention)
-#   - <project>/docs/bionic/plans/ (bionic canonical-sdlc convention)
-#   - <project>/docs/superpowers/plans/ (superpowers convention)
+# Locate the newest plan file across THIS PROJECT's plan directories:
+#   - <docs-root>/plans/      (bionic canonical-sdlc convention)
+#   - <docs-root>/incidents/  (incident-response runs)
 #
-# Picks the newest .md across all that exist. If none exist, this isn't a
-# canonical-sdlc session — let the commit through.
+# Picks the newest .md across those that exist. If none exist, this isn't a
+# canonical-sdlc session — let the commit through (see ABSENT vs MISPLACED
+# below).
+#
+# NOT searched, deliberately: `~/.claude/plans/` and
+# `<project>/docs/superpowers/plans/`. Both were in the search set until
+# 2026-07-28; bionic gates bionic's plans, full stop (user ruling). The global
+# directory is the harness's own, project-AGNOSTIC one — Claude Code's plan mode
+# drops unrelated notes there routinely, and selection takes the newest .md
+# across the whole set. One such note therefore won selection, carried no
+# `## SDLC State`, and this hook exited 0: every commit in that project ran
+# ungated. The superpowers directory was the same pre-`.bionic/docs` vestige
+# (the root `docs/` tree was deleted 2026-07-16); nothing writes canonical plans
+# to either.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 #
 # Project resolution mirrors memory-update.sh: CLAUDE_PROJECT_DIR first,
 # then the hook input's cwd field, then pwd. Consistent with existing hooks.
@@ -182,41 +193,30 @@ resolve_docs_root() {
 # conditionally-bound variables" — the recorded recurrence of exactly this.
 DOCS_ROOT=$(resolve_docs_root "$PROJECT_DIR")
 
-# ~/.claude/plans is the harness's own, project-AGNOSTIC plan directory; the
-# rest are this project's. The distinction is load-bearing below — see
-# PROJECT_PLAN.
-GLOBAL_PLAN_DIR="${HOME}/.claude/plans"
-PLAN_DIRS=( "$GLOBAL_PLAN_DIR" )
-if [ -n "$PROJECT_DIR" ]; then
-  PLAN_DIRS+=(
-    "${DOCS_ROOT}/plans"
-    "${DOCS_ROOT}/incidents"
-    "${PROJECT_DIR}/docs/superpowers/plans"
-  )
-fi
+# Both directories belong to THIS project. No `if [ -n "$PROJECT_DIR" ]` guard:
+# PROJECT_DIR is unconditionally non-empty (it falls back to pwd above), and an
+# empty array would be worse than useless here — `"${arr[@]}"` on an empty array
+# is an unbound-variable error under `set -u` on bash 3.2.
+PLAN_DIRS=( "${DOCS_ROOT}/plans" "${DOCS_ROOT}/incidents" )
 
-# PLAN         — the newest .md across every searched directory; the plan this
-#                gate actually validates.
-# PROJECT_PLAN — the newest across the PROJECT directories only. The
-#                misplacement sweep keys off this one, never off PLAN: a file
-#                in the global directory says nothing about whether THIS
-#                project's plan is somewhere the gate cannot see.
+# PLAN — the newest .md across them; the plan this gate validates, and the same
+# value the misplacement sweep below keys off.
+#
+# This was two variables until 2026-07-28 (PLAN + PROJECT_PLAN). The split
+# existed for exactly one reason: the search set then included the
+# project-AGNOSTIC `~/.claude/plans/`, so the newest file overall might belong to
+# no project at all, and the sweep needed a project-only selection to key on.
+# With every searched directory now this project's, the two selections are the
+# same file by construction.
 PLAN=""
-PROJECT_PLAN=""
 for d in "${PLAN_DIRS[@]}"; do
   [ -d "$d" ] || continue
-  d_is_project=1
-  [ "$d" = "$GLOBAL_PLAN_DIR" ] && d_is_project=0
   # Descend up to 2 levels deep to support the bionic directory-per-epic
-  # layout: docs/bionic/plans/epic-NN-<slug>/wave-NN-<slug>.plan.md.
-  # Flat conventions (~/.claude/plans/<name>.md) are still covered at
-  # depth 1.
+  # layout: <docs-root>/plans/epic-NN-<slug>/wave-NN-<slug>.plan.md. Flat
+  # conventions (<docs-root>/plans/<name>.md) are covered at depth 1.
   while IFS= read -r -d '' f; do
     if [ -z "$PLAN" ] || [ "$f" -nt "$PLAN" ]; then
       PLAN="$f"
-    fi
-    if [ "$d_is_project" -eq 1 ] && { [ -z "$PROJECT_PLAN" ] || [ "$f" -nt "$PROJECT_PLAN" ]; }; then
-      PROJECT_PLAN="$f"
     fi
   done < <(find "$d" -maxdepth 2 -type f -name '*.md' -print0 2>/dev/null)
 done
@@ -224,25 +224,19 @@ done
 # ---------- AC-13: misplacement blocks; absence never does ----------
 # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 #
-# No plan file was found in this PROJECT's plan directories. That used to be an
+# No plan file was found in this project's plan directories. That used to be an
 # unconditional `exit 0`, and it is this hook's fail-open — a structurally
 # different one from the governing-skill hook's, which is why the two are fixed
 # and tested independently. This one never tests `.bionic/` at all: every
 # candidate directory is skipped by `[ -d "$d" ] || continue`, PLAN comes back
 # empty, and the commit passes ungated.
 #
-# The guard is PROJECT_PLAN, not PLAN (Step-6 finding C1/S2). Keying it on PLAN
-# meant "no plan in ANY searched directory", and the first directory searched is
-# the global, project-agnostic `~/.claude/plans/` — where the harness's own plan
-# mode writes. A single unrelated `.md` there made PLAN non-empty and this whole
-# block dead. Two such files were present on the machine this shipped from, so
-# the branch had never executed outside the test suite. A file in the global
-# directory says nothing about whether THIS project's plan is misplaced.
-#
-# Reaching the end of this block is not a decision: the sweep only ever BLOCKS
-# or falls through. The `absent → allow` exit belongs to PLAN and lives just
-# below, so a project with no plan of its own but a global one still gets that
-# global plan validated exactly as before.
+# The guard was PROJECT_PLAN from the Step-6 C1/S2 repair until 2026-07-28,
+# because PLAN then meant "no plan in ANY searched directory" and the first
+# directory searched was the project-agnostic `~/.claude/plans/`: one unrelated
+# `.md` there made PLAN non-empty and this whole block dead. Deleting that
+# directory from the search set fixes the same hole at its root, so the guard is
+# back on PLAN — which now means what C1/S2 needed it to mean.
 #
 # ABSENT is not an error and must never block. No plan anywhere is every commit
 # in every project that does not use this lifecycle, plus the normal first-run
@@ -266,9 +260,9 @@ done
 #     <docs-root>/spikes/ and <docs-root>/record/ hold real artifacts carrying
 #     this frontmatter, and the governing-skill hook treats them as placed too.
 #   - Bounded walk: `.git` and `node_modules` pruned, depth 5, filename match
-#     first. It runs only when no PROJECT plan was found, so a project in an
-#     active canonical-sdlc run never pays for it.
-if [ -z "$PROJECT_PLAN" ] || [ ! -f "$PROJECT_PLAN" ]; then
+#     first. It runs only when no plan was found, so a project in an active
+#     canonical-sdlc run never pays for it.
+if [ -z "$PLAN" ] || [ ! -f "$PLAN" ]; then
   MISPLACED_PLAN=""
   if [ -d "$PROJECT_DIR" ]; then
     while IFS= read -r -d '' f; do
@@ -296,13 +290,13 @@ if [ -z "$PROJECT_PLAN" ] || [ ! -f "$PROJECT_PLAN" ]; then
     echo "Fix: move it under $DOCS_ROOT/plans/ (or $DOCS_ROOT/incidents/ for an incident run)." >&2
     exit 2
   fi
-fi
 
-# ABSENCE: nothing to validate anywhere. Never blocks — this is every commit in
-# every project that does not use the lifecycle. Separate from the sweep above,
-# which now runs on the narrower "no PROJECT plan" condition and must therefore
-# fall through when a global plan is present.
-if [ -z "$PLAN" ] || [ ! -f "$PLAN" ]; then
+  # ABSENCE: nothing misplaced and nothing to validate. Never blocks — this is
+  # every commit in every project that does not use the lifecycle, plus the
+  # normal first-run state of one that does. This exit lived in a second `if`
+  # on its own until 2026-07-28, when the sweep's guard was the narrower
+  # PROJECT_PLAN and the two conditions could differ; on one guard they cannot,
+  # so the sweep and its fall-through are one block.
   exit 0
 fi
 
