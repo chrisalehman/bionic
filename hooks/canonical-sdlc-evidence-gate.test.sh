@@ -1,9 +1,16 @@
 #!/bin/bash
 # Tests for canonical-sdlc-evidence-gate.sh
 #
-# Strategy: override HOME to a temp dir so the hook reads plan files from
-# a test-controlled ~/.claude/plans/ and never touches the real user's
-# plans directory.
+# Strategy: every runner pins HOME to a temp sandbox and pins the hook's
+# project to a temp fixture, so no case can reach the developer's real
+# ~/.claude/ or any real plan file.
+#
+# make_home() doubles as the simplest project fixture: the single-argument
+# runner (run_hook) posts cwd=$home_dir, so the hook resolves PROJECT_DIR to the
+# sandbox HOME and its docs root to $home_dir/.bionic/docs — which is where
+# write_plan() puts plans. The sandbox also carries an EMPTY ~/.claude/plans/,
+# the directory this gate deliberately does NOT search (2026-07-28); the cases
+# that plant something there use write_global_note().
 #
 # Usage: bash hooks/canonical-sdlc-evidence-gate.test.sh
 
@@ -36,11 +43,13 @@ slug_for() { printf '%s-%s' "$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')" \
 # $1 = sandbox HOME, $2 = the audit_root the hook resolved (the plan's project).
 audit_file_for() { printf '%s/.claude/logs/%s/sdlc-audit.md' "$1" "$(slug_for "$2")"; }
 
-# Creates an isolated $HOME-equivalent with an empty ~/.claude/plans/ dir.
+# Creates an isolated $HOME-equivalent that is ALSO usable as the project the
+# single-argument runners gate against: an empty ~/.claude/plans/ (never
+# searched — see write_global_note) plus an empty .bionic/docs/plans/ (searched).
 make_home() {
   local dir
   dir=$(mktemp -d)
-  mkdir -p "$dir/.claude/plans"
+  mkdir -p "$dir/.claude/plans" "$dir/.bionic/docs/plans"
   cleanup_dirs+=("$dir")
   echo "$dir"
 }
@@ -64,13 +73,28 @@ write_project_plan() {
   echo "$path"
 }
 
-# Writes $2 as the content of a plan file inside $1/.claude/plans/.
+# Writes $2 as the content of a plan file in the sandbox HOME's OWN docs root
+# ($1/.bionic/docs/plans/) — the plan directory the single-argument runners
+# (run_hook, which posts cwd=$home_dir) make the hook search.
 # Touches mtime to "now" so it becomes the newest.
 write_plan() {
   local home_dir="$1" content="$2" name="${3:-active.md}"
-  local path="$home_dir/.claude/plans/$name"
+  local path="$home_dir/.bionic/docs/plans/$name"
   printf '%s\n' "$content" > "$path"
   # Ensure mtime > any prior plan in this test by nudging forward.
+  touch "$path"
+  echo "$path"
+}
+
+# Writes $2 into the sandbox's ~/.claude/plans/ — the harness's own,
+# project-AGNOSTIC plan directory, which this gate has NOT searched since
+# 2026-07-28. Whatever lands here must be invisible to the hook; the fixtures
+# using it assert exactly that. Newest mtime by construction, so a case that
+# calls it last is planting the newest .md on the machine.
+write_global_note() {
+  local home_dir="$1" content="$2" name="${3:-note.md}"
+  local path="$home_dir/.claude/plans/$name"
+  printf '%s\n' "$content" > "$path"
   touch "$path"
   echo "$path"
 }
@@ -192,7 +216,7 @@ h2=$(make_home)
 expect_allow "empty plans dir — allow commit" "$h2" 'git commit -m "x"'
 
 h2b=$(mktemp -d); cleanup_dirs+=("$h2b")
-# No ~/.claude/plans/ at all
+# A bare temp dir: no plan directory of any kind.
 expect_allow "no plans dir at all — allow commit" "$h2b" 'git commit -m "x"'
 
 h2c=$(make_home)
@@ -216,7 +240,7 @@ write_plan "$h3" "$FM
 current: 3
 Step 1: /path/to/ideate.md
 Step 2: /path/to/spec.md
-Step 3: ~/.claude/plans/this.md
+Step 3: .bionic/docs/plans/this.md
 
 ## Other section" > /dev/null
 expect_allow "valid pointer-step evidence — allow" "$h3" 'git commit -m "step 3 done"'
@@ -383,8 +407,8 @@ write_plan "$h7" "$FM
 current: 5
 Step 5: tests green" "old.md" > /dev/null
 # Make old.md older than now.
-touch -t 202001010000 "$h7/.claude/plans/old.md" 2>/dev/null || \
-  touch -d "2020-01-01" "$h7/.claude/plans/old.md" 2>/dev/null || true
+touch -t 202001010000 "$h7/.bionic/docs/plans/old.md" 2>/dev/null || \
+  touch -d "2020-01-01" "$h7/.bionic/docs/plans/old.md" 2>/dev/null || true
 # Newer plan with bad state
 write_plan "$h7" "$FM
 ## SDLC State
@@ -400,8 +424,8 @@ write_plan "$h7b" "$FM
 ## SDLC State
 current: 5
 Step 5: TODO" "old-bad.md" > /dev/null
-touch -t 202001010000 "$h7b/.claude/plans/old-bad.md" 2>/dev/null || \
-  touch -d "2020-01-01" "$h7b/.claude/plans/old-bad.md" 2>/dev/null || true
+touch -t 202001010000 "$h7b/.bionic/docs/plans/old-bad.md" 2>/dev/null || \
+  touch -d "2020-01-01" "$h7b/.bionic/docs/plans/old-bad.md" 2>/dev/null || true
 write_plan "$h7b" "# unrelated plan, no SDLC State" "new-neutral.md" > /dev/null
 expect_allow "newest plan without SDLC State — allow despite bad older plan" \
   "$h7b" 'git commit -m "x"'
@@ -460,62 +484,107 @@ Step 3: commit abc123 tests green" > /dev/null
 expect_allow_both "project-local plan (good) allows with no global plan" \
   "$h8b" "$p8b" 'git commit -m "x"'
 
-# 8c — both plans exist, project is newer → project wins.
+# ---- 8c..8i: the directories this gate deliberately does NOT search ----
+#
+# BEHAVIOR CHANGE 2026-07-28 (user ruling): `~/.claude/plans/` and
+# `<project>/docs/superpowers/plans/` are out of the search set entirely —
+# bionic gates bionic's plans. 8c/8d/8e/8f/8h assert the NEW contract and each
+# FAILS against the pre-change hook; that is what makes them worth having.
+# [WALL: hooks/canonical-sdlc-evidence-gate.sh]
+
+# 8c — a canonical plan in the global directory with no project plan anywhere:
+# NOT gated. This blocked until 2026-07-28. The harness's own plan mode owns
+# that directory; what it holds is not this project's run state.
 h8c=$(make_home); p8c=$(make_project)
-write_plan "$h8c" "$FM
-## SDLC State
-current: 3
-Step 3: commit xyz green" "old-global.md" > /dev/null
-touch -t 202001010000 "$h8c/.claude/plans/old-global.md" 2>/dev/null || \
-  touch -d "2020-01-01" "$h8c/.claude/plans/old-global.md" 2>/dev/null || true
-write_project_plan "$p8c" "$FM
+write_global_note "$h8c" "$FM
 ## SDLC State
 current: 5
-Step 5: TODO" > /dev/null
-expect_block_both "newer project plan (bad) wins over older global (good)" \
-  "$h8c" "$p8c" 'git commit -m "x"' "placeholder"
+Step 5: TODO" "global-canonical.md" > /dev/null
+expect_allow_both "canonical plan in ~/.claude/plans/ does NOT gate the commit" \
+  "$h8c" "$p8c" 'git commit -m "x"'
 
-# 8d — both plans exist, global is newer → global wins.
+# 8d — THE LIVE DEFECT. A project whose plan is correctly placed and whose
+# current-step evidence is a placeholder, plus a NEWER non-canonical note in the
+# global directory (plan mode drops these routinely). Selection took the newest
+# .md across the whole set, so the note won, carried no `## SDLC State`, and the
+# hook exited 0 — every commit in that project ran ungated. Two such files were
+# sitting in the real ~/.claude/plans when this was found.
 h8d=$(make_home); p8d=$(make_project)
 write_project_plan "$p8d" "$FM
 ## SDLC State
 current: 5
+Step 5: TODO" > /dev/null
+touch -t 202001010000 "$p8d/.bionic/docs/plans/active.md" 2>/dev/null || \
+  touch -d "2020-01-01" "$p8d/.bionic/docs/plans/active.md" 2>/dev/null || true
+write_global_note "$h8d" "# scratch note from plan mode
+
+Not a canonical-sdlc plan — no SDLC State section." "newer-note.md" > /dev/null
+expect_block_both "newer non-canonical global note cannot hijack plan selection" \
+  "$h8d" "$p8d" 'git commit -m "x"' "placeholder"
+
+# 8e — the same defect with a genuinely canonical, genuinely newer global plan
+# whose own evidence is fine: the project's older, bad plan is still the one
+# gated. Until 2026-07-28 the global plan won and the commit was allowed.
+h8e=$(make_home); p8e=$(make_project)
+write_project_plan "$p8e" "$FM
+## SDLC State
+current: 5
 Step 5: TODO" "old-proj.md" > /dev/null
-touch -t 202001010000 "$p8d/.bionic/docs/plans/old-proj.md" 2>/dev/null || \
-  touch -d "2020-01-01" "$p8d/.bionic/docs/plans/old-proj.md" 2>/dev/null || true
-write_plan "$h8d" "$FM
+touch -t 202001010000 "$p8e/.bionic/docs/plans/old-proj.md" 2>/dev/null || \
+  touch -d "2020-01-01" "$p8e/.bionic/docs/plans/old-proj.md" 2>/dev/null || true
+write_global_note "$h8e" "$FM
 ## SDLC State
 current: 3
-Step 3: commit xyz green" > /dev/null
-expect_allow_both "newer global plan (good) wins over older project (bad)" \
-  "$h8d" "$p8d" 'git commit -m "x"'
-
-# 8e — project dir lacks .bionic/docs/plans/: hook falls back to global.
-h8e=$(make_home)
-p8e=$(mktemp -d); cleanup_dirs+=("$p8e") # no .bionic/docs/plans/ inside
-write_plan "$h8e" "$FM
-## SDLC State
-current: 5
-Step 5: TODO" > /dev/null
-expect_block_both "project without .bionic/docs/plans/ falls back to global plan" \
+Step 3: commit xyz green" "newer-global.md" > /dev/null
+expect_block_both "newer canonical global plan cannot override the project's own" \
   "$h8e" "$p8e" 'git commit -m "x"' "placeholder"
 
-# 8f — CLAUDE_PROJECT_DIR unset: original behavior (global only).
+# 8f — a project with no plan directory of its own, and a plan in the global
+# directory: nothing to gate, silently. Until 2026-07-28 this "fell back" to the
+# global plan and blocked.
 h8f=$(make_home)
-write_plan "$h8f" "$FM
+p8f=$(mktemp -d); cleanup_dirs+=("$p8f") # no .bionic/docs/plans/ inside
+write_global_note "$h8f" "$FM
 ## SDLC State
 current: 5
 Step 5: TODO" > /dev/null
-expect_block "CLAUDE_PROJECT_DIR unset: still gates on global plan" \
-  "$h8f" 'git commit -m "x"' "placeholder"
+expect_allow_both "no project plan dir + global plan → no fallback, allow" \
+  "$h8f" "$p8f" 'git commit -m "x"'
 
-# 8g — also covers superpowers convention.
-h8g=$(make_home); p8g=$(mktemp -d); cleanup_dirs+=("$p8g")
-mkdir -p "$p8g/docs/superpowers/plans"
-printf '%s\n## SDLC State\ncurrent: 5\nStep 5: TODO\n' "$FM" > "$p8g/docs/superpowers/plans/active.md"
-touch "$p8g/docs/superpowers/plans/active.md"
-expect_block_both "docs/superpowers/plans/ plan is honored alongside bionic" \
-  "$h8g" "$p8g" 'git commit -m "x"' "placeholder"
+# 8g — CLAUDE_PROJECT_DIR unset: the project resolves from the hook input's cwd
+# (the sandbox HOME here), and that project's OWN docs root is what is searched.
+h8g=$(make_home)
+write_plan "$h8g" "$FM
+## SDLC State
+current: 5
+Step 5: TODO" > /dev/null
+expect_block "CLAUDE_PROJECT_DIR unset: gates on the cwd project's own plan" \
+  "$h8g" 'git commit -m "x"' "placeholder"
+
+# 8h — docs/superpowers/plans/ is out too. Same vestige: the root docs/ tree was
+# deleted 2026-07-16 and nothing writes canonical plans there. Until 2026-07-28
+# a plan in it gated every commit in the project.
+h8h=$(make_home); p8h=$(mktemp -d); cleanup_dirs+=("$p8h")
+mkdir -p "$p8h/docs/superpowers/plans"
+printf '%s\n## SDLC State\ncurrent: 5\nStep 5: TODO\n' "$FM" > "$p8h/docs/superpowers/plans/active.md"
+touch "$p8h/docs/superpowers/plans/active.md"
+expect_allow_both "docs/superpowers/plans/ plan does NOT gate the commit" \
+  "$h8h" "$p8h" 'git commit -m "x"'
+
+# 8i — the complement of 8d, so "ignore the global directory" cannot be
+# satisfied by a hook that blocks everything: a correctly-placed project plan
+# with good evidence still allows, whatever the global directory holds.
+h8i=$(make_home); p8i=$(make_project)
+write_project_plan "$p8i" "$FM
+## SDLC State
+current: 3
+Step 3: commit abc123 tests green" > /dev/null
+write_global_note "$h8i" "$FM
+## SDLC State
+current: 5
+Step 5: TODO" "newer-global.md" > /dev/null
+expect_allow_both "good project plan allows regardless of the global directory" \
+  "$h8i" "$p8i" 'git commit -m "x"'
 
 # ============================================================
 # Section 17: Verification Matrix gate
@@ -1297,9 +1366,9 @@ expect_audit_line() {
   TOTAL=$((TOTAL + 1))
   run_hook "$home_dir" "$command"
   # run_hook posts cwd=$home_dir with CLAUDE_PROJECT_DIR="", and the plan lives
-  # at $home_dir/.claude/plans/ whose ancestry has no .bionic/ — so audit_root()
-  # falls back to PROJECT_DIR == $home_dir. Incident 0001 keys the file on that
-  # root but roots the file itself under HOME.
+  # in that sandbox's own docs root, which is no git repository — so
+  # audit_root() falls back to PROJECT_DIR == $home_dir. Incident 0001 keys the
+  # file on that root but roots the file itself under HOME.
   local af; af=$(audit_file_for "$home_dir" "$home_dir")
   if [ "$HOOK_EXIT" -eq 0 ] && [ -f "$af" ] && grep -q "$substr" "$af"; then
     echo "PASS: $label"
@@ -1883,8 +1952,8 @@ expect_finding_count "20h tune baseline: tbd (rest valid) → exactly 1 tune-evi
 # owns the artifact. PROJECT_DIR is the fallback only.
 #
 # NOTE (pinning, not RED — see plan ## Assumptions): plan discovery is
-# rooted at PROJECT_DIR (PLAN_DIRS is built from $HOME/.claude/plans and
-# $PROJECT_DIR/...), so in every case constructible through the hook's real
+# rooted at PROJECT_DIR (PLAN_DIRS is built from $PROJECT_DIR's docs root
+# alone), so in every case constructible through the hook's real
 # discovery paths, walk-up resolves to the SAME directory PROJECT_DIR already
 # names. Both cases below pass identically before and after the refactor;
 # they pin the new code path (and its fallback) rather than catch a bug.
@@ -1937,11 +2006,10 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-# 21b — fail-open fallback: plan reached only via the ~/.claude/plans global
-# convention (Section 19/20's usual fixture), whose ancestry has no .bionic/
-# directory anywhere above it. audit_root's walk-up exhausts without a match
-# and falls back to $PROJECT_DIR (== $h21b here, via the cwd field) — hook
-# still exits 0 and still writes the audit line, unblocked.
+# 21b — fail-open fallback: the sandbox-HOME fixture (Section 19/20's usual
+# one) is not a git repository, so resolve_project_root cannot compute a root
+# from the plan and falls back to $PROJECT_DIR (== $h21b here, via the cwd
+# field) — hook still exits 0 and still writes the audit line, unblocked.
 h21b=$(make_home)
 write_plan "$h21b" "$(r7_wave_plan tune 5 "$step5_base" "$matrix_complete")" > /dev/null
 expect_audit_line "21b fail-open: no .bionic ancestor above the plan → PROJECT_DIR fallback used" \
@@ -3443,17 +3511,22 @@ expect_allow "non-commit command in the c2 misplaced project → allow" \
   "$s24_h8" 'git status'
 
 echo "-- c7: a NON-EMPTY ~/.claude/plans must not make the sweep unreachable --"
-# Step-6 finding C1/S2. The guard on this whole block used to be "no plan was
-# found in ANY searched directory", and the FIRST directory searched is the
-# global, project-agnostic ~/.claude/plans/. One unrelated .md there — the
-# harness's own plan mode writes into exactly that directory — made $PLAN
-# non-empty and the block dead. Two such files were sitting on the developing
-# machine, so the branch AC-13 added had never executed in production.
+# Step-6 finding C1/S2, still pinned after its root cause was removed. The guard
+# on this whole block used to be "no plan was found in ANY searched directory",
+# and the FIRST directory searched was the global, project-agnostic
+# ~/.claude/plans/. One unrelated .md there — the harness's own plan mode writes
+# into exactly that directory — made $PLAN non-empty and the block dead. Two
+# such files were sitting on the developing machine, so the branch AC-13 added
+# had never executed in production.
 #
-# Every other runner in this suite pins HOME to make_home(), which creates an
-# EMPTY ~/.claude/plans/. That fixture substitutes away the precondition under
-# test — the recorded seam-blindness class. These cases put a file there on
-# purpose. The guard is now scoped to the PROJECT plan directories.
+# C1/S2 fixed that by scoping the guard to a project-only selection. The
+# 2026-07-28 ruling fixed it at the root instead: the global directory is no
+# longer searched at all, so nothing in it can make $PLAN non-empty and the
+# project-only selection collapsed back into $PLAN. These three cases now pin
+# that the whole class is structurally gone — a file in ~/.claude/plans/ changes
+# none of the three verdicts below. They also stop make_home()'s EMPTY
+# ~/.claude/plans/ from substituting away the precondition, which is the
+# recorded seam-blindness class and the reason they are written this way.
 # [WALL: hooks/canonical-sdlc-evidence-gate.sh]
 s24_h9=$(make_home)
 printf '# just a note\n' > "$s24_h9/.claude/plans/stray.md"
@@ -3473,9 +3546,9 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-# The widened guard must not widen the BLOCK. A project whose plan is correctly
-# placed has a project plan, so the sweep never runs — regardless of what the
-# global directory holds.
+# The guard must not widen the BLOCK. A project whose plan is correctly placed
+# has a plan, so the sweep never runs — regardless of what the global directory
+# holds.
 s24_h10=$(make_home)
 printf '# just a note\n' > "$s24_h10/.claude/plans/stray.md"
 s24_p10=$(make_project)
