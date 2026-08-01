@@ -85,7 +85,7 @@ Triple not yet declared → say so and list the axes. Invoked as `help` → rend
 
 **Barred cells:** `bugfix × epic`, `spike × epic`, `incident-response × epic`. A barred triple means the intent or the scale is misjudged.
 
-**Rigor floors.** Default is scale-keyed: at `task`, `bugfix`→tested and `build`/`refactor`/`tune`→peer-reviewed; at `wave` and above, `audited`. Effective rigor is the MAX of the default and four floors — intent (`incident-response` floors at `audited`, `spike` is CAPPED at `tested`), flag (security-touching or privacy/vulnerable-population work floors at `audited`), project (`rigor-floor:` in `.bionic/config.yaml`), epic (`rigor-floor:` in epic frontmatter). Floors only push UP. Provisional at Step 0, locked at Step 3. Upgrades are free; downgrades go through the Waiver Protocol. Nothing enforces the floors — the only check that reads them is log-only.
+**Rigor floors.** Default is scale-keyed: at `task`, `bugfix`→tested and `build`/`refactor`/`tune`→peer-reviewed; at `wave` and above, `audited`. Effective rigor is the MAX of the default and four floors — intent (`incident-response` floors at `audited`, `spike` is CAPPED at `tested`), flag (security-touching or privacy/vulnerable-population work floors at `audited`), project (`rigor-floor:` in `.bionic/config.yaml`), epic (`rigor-floor:` in epic frontmatter). Floors only push UP — the *derivation* is a MAX, never a subtraction. Provisional at Step 0, locked at Step 3. **Floors advise; they never force.** Upgrades are free, and a rigor below the derived floor is the user's to choose: advised against at Step 0, then accepted and recorded as `rigor-override:` (see the Override DSL). Nothing enforces the floors — the only check that reads them is log-only, and it logs `user-overridden` wherever that marker is present.
 
 Do not carve a sensitive concern into a tiny unflagged wave to dodge a floor. The wave that owns the integration point carries the flag floor.
 
@@ -122,7 +122,7 @@ artifacts that the plan pointed at. The reasoning survived in the plan's own pro
 evidence did not, which turns an audited record into testimony. Give an agent a `record/` path
 in its brief, or you will pay this once too.
 
-Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 12`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`.
+Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 12`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`. Plan files additionally carry `walk: required | exempt` — Step 0's derivation, and the key the Verify gate reads — and, where the run's rigor sits below its derived floor, `rigor-override:` beside it. Neither is required to write, but a `walk:` value outside the enum blocks.
 
 **12 is the only supported version.** Any other value — an older number, an empty value, a typo — blocks at both hooks. There is one contract; an artifact either meets it or does not write. A run that predates it is brought forward to 12, not exempted.
 
@@ -132,10 +132,10 @@ Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `inten
 |---|---|---|
 | 0 Configure | `canonical-sdlc` | Frontmatter complete, matrix derived, user confirmed, task list created |
 | 1 Ideate | `agent-skills:idea-refine` | Refined idea + explicit "Not Doing" + alternatives lens cites prior art |
-| 2 Spec | `agent-skills:spec-driven-development` | Every requirement has an acceptance criterion |
+| 2 Spec | `agent-skills:spec-driven-development` | Every requirement has an acceptance criterion; every criterion cites its `provenance:` |
 | 3 Plan | `superpowers:writing-plans` | No placeholders; `integration-branch:` present; matrix locked; slices tagged; user approved |
 | 4 Implement | `agent-skills:incremental-implementation` | Every slice RED before GREEN; assumptions logged |
-| 5 Verify | `superpowers:verification-before-completion` | Tests floor green; every matrix row discharged at tier or waived; auditor CONFIRMED |
+| 5 Verify | `superpowers:verification-before-completion` | Walk artifact in `record/`; tests floor green; every matrix row discharged at tier or waived; auditor CONFIRMED |
 | 6 Review | `agent-skills:code-review-and-quality` | Every axis has a verdict; independent critic attached |
 | 7 Document | `agent-skills:documentation-and-adrs` | Every decision at medium significance or above is recorded |
 | 8 Integrate | `superpowers:finishing-a-development-branch` | Wave reachable from the integration branch; worktree removed; tmp wiped |
@@ -154,8 +154,9 @@ Committing is a cross-cutting rhythm (~once per step), not a numbered step. Upda
 1. **Pre-flight.** `.bionic/` exists; `docs-root:` read from `.bionic/config.yaml` (default `.bionic/docs`) with `{specs,plans,adrs,incidents}/` present; `mkdir -p .bionic/tmp/`; both hooks installed and executable (if not, warn and record in `## Assumptions`).
 2. **Classify the triple silently.** Infer from the request's verbs and named artifacts. Do NOT interrogate. Interview by exception only, 1–3 questions, on exactly three conditions: a genuine intent collision the classification rules do not resolve (the standing gray zones are **mechanism-swap** and **reference-content**); a suspected but unconfirmed security/privacy surface; or a scale that could be one session or several.
 3. **Infer the flags.** `language` from repo files; `surface_type`/`has_ui` from the request; `multi_agent` defaults **true** (infer `false` only when there is genuinely nothing to offload — never key it off an installed plugin catalog, which silently disables the dispatched-task ledger guard); `deploy_target` from deploy signals; `cleanup_on_finish` true; `use_worktree` false; `integration_branch` from the epic plan, else the current mainline, else `main` — print it as `unknown` rather than dropping it; `model_plan` from `multi_agent` and the detected session model.
-4. **Derive the Verification Matrix.** One row per acceptance criterion. Tier defaults: user-visible behavior → **T3**; engine-divergent → **T2 both engines** plus **T3** for the user-visible AC; pure substrate with no runtime surface → **T1/T2** with a one-line justification; perceptual fidelity → **T3**, T4 available; docs → **T0/none**.
-5. **Present the confirmation display in full, in the layout below.** Every section, every flag, every inference rationale, every matrix row, the `integration-branch:` line. Never elide, sample, summarize, defer, or restate it as prose — the user is approving exactly what they can see, and an abbreviated display invalidates the confirmation. Print every matrix row even past 12 ACs; a matrix is precisely what must not be sampled. An unknown value prints as `unknown` rather than dropping its line.
+4. **Derive the walk requirement.** From the declared surface flags: a surface an agent can open and drive → `walk: required`; nothing drivable → `walk: exempt`. It prints in the confirmation display and is recorded as plan-frontmatter `walk:`. **Exemptions derive from declared configuration and are ratified at Step 0, never invented mid-run** — there is no mid-run `n/a`, and the Verify gate reads an absent or unrecognized key as `required`, so an omission never becomes an exemption.
+5. **Derive the Verification Matrix.** One row per acceptance criterion. Tier defaults: user-visible behavior → **T3**; engine-divergent → **T2 both engines** plus **T3** for the user-visible AC; pure substrate with no runtime surface → **T1/T2** with a one-line justification; perceptual fidelity → **T3**, T4 available; docs → **T0/none**.
+6. **Present the confirmation display in full, in the layout below.** Every section, every flag, every inference rationale, every matrix row, the `integration-branch:` line. Never elide, sample, summarize, defer, or restate it as prose — the user is approving exactly what they can see, and an abbreviated display invalidates the confirmation. Print every matrix row even past 12 ACs; a matrix is precisely what must not be sampled. An unknown value prints as `unknown` rather than dropping its line.
 
 ```
 ═══ Plan Configuration — confirm before Step 1 ═══
@@ -189,6 +190,9 @@ Opt-in flags:
   cleanup_on_finish: <value>    [<consequence at Step 8>]
   use_worktree:      <value>    [<why isolation is or is not needed>]
 
+Walk requirement:                [Step 5 opens with it — decided here, no mid-run exemption]
+  walk: <required | exempt>     [derived: <which surface flags — what an agent would open>]
+
 Model plan:                      [multi_agent=<value> → <tiered dispatch | single-thread>]
   orchestrator:       <detected session model>   [main thread, fixed all wave]
   implementor:        <model>    [standard slices]
@@ -214,8 +218,8 @@ Reply "confirm" to accept, or specify overrides:
 ```
 
    **This layout is literal, and it is deliberately not marked unenforced.** No hook can check it — the display is conversational, never a file — so the template *is* the whole enforcement. A previous version expressed it as descriptive prose, which read as decoration and was deleted in an instruction-surface cut; the run then drifted into free-form summaries that satisfied nobody. Keep it as a block.
-6. **Block until explicit confirmation.** No timeout, no implicit acceptance.
-7. **Create the task list immediately on approval** — one task per planned step, `0:` marked completed. Nothing runs in between.
+7. **Block until explicit confirmation.** No timeout, no implicit acceptance.
+8. **Create the task list immediately on approval** — one task per planned step, `0:` marked completed. Nothing runs in between.
 
 **Task-list format — blessed, and it binds across every step, not just Step 0.**
 
@@ -230,9 +234,15 @@ Reply "confirm" to accept, or specify overrides:
 
 The list is the user's visible progress surface. Nothing enforces this — no hook can read a task list — so the format is the whole discipline.
 
-**Override DSL.** `set <axis|flag>=<value>` and `set verify(<AC>)=<tier>`, comma-separated, ending in `confirm`. `explain [axis]` renders the axis tables and never counts as confirmation; a free-text question about the display is treated as `explain`, never as a parse error. A rigor override BELOW a derivable floor is refused by this skill (name the binding floor and keep the floor value) — no code refuses it. A barred intent × scale cell is rejected.
+**Override DSL.** `set <axis|flag>=<value>` and `set verify(<AC>)=<tier>`, comma-separated, ending in `confirm`. `explain [axis]` renders the axis tables and never counts as confirmation; a free-text question about the display is treated as `explain`, never as a parse error. A rigor override BELOW a derivable floor is **accepted, never refused** — no code refuses it, and neither does this skill. Before locking, name the binding floor, the evidence class it was buying ("audited adds the independent critic; without it, silent wrong assumptions are caught only by self-review"), and what specifically is given up; then proceed with the user's value and record `rigor-override: <user> <date> derived=<v> chosen=<v>` in frontmatter, so every later reader sees a decision rather than a derivation error. The floor checks read that marker and log `user-overridden` instead of a violation. Advisory strength scales with the floor's reason — the security/privacy flag floor gets the strongest language here — but there are **no carve-outs**: every floor accepts the override. A barred intent × scale cell is rejected.
 
 **Evidence:** `Step 0: configured at <ISO> via <reply>; model_plan=<tiers>; integration-branch=<name>`
+
+### Step 2 — Spec shape
+
+Every acceptance criterion carries a `provenance:` line naming where its requirement came from, authored *with* the criterion. Four forms: `provenance: user <date> "<quote>"` · `spec §N` · `ticket-N` · `report §N`. It is written here because circularity is undetectable downstream by definition — "correctly implements a real requirement" and "requirement transcribed from the code" are observably identical at verification time, so the distinction exists only at authoring. A citation beats a category label: a false citation means fabricating a reference anyone can check by opening the source.
+
+The citation travels with the criterion into the plan's matrix AC block, where the evidence gate reads it. The literal value `provenance: implementation` **blocks** — a change cannot be the source of its own requirement. Only that whole value blocks; a real citation that merely contains the word passes, and a missing `provenance:` line does not block today.
 
 ### Step 3 — Plan shape
 
@@ -265,11 +275,15 @@ Tag every Step-4 slice `complexity: standard | complex`. When uncertain, tag `co
 
 The gate discharges the matrix row by row; the unit is the matrix row (`5/<AC-id>`).
 
+**The walk opens verification.** Before any row discharges, an agent that has NOT read the acceptance criteria opens the real running surface and narrates what it sees at the code and behavior this wave intentionally changed — what was seen, never whether an expectation was met. It runs first because it is the cheapest catcher and sits structurally outside the criteria frame, so it finds what nobody knew to look for, before effort is spent row by row.
+
+The narration goes to `<docs-root>/record/`, named by a `walk-artifact:` line in the Step-5 evidence: `record/<file>.md` resolves against the docs root, a bare path against the project root, an absolute path stands as written — any spelling must land under `record/`, and a `..` component is refused outright. **The artifact carries zero AC identifiers** — a walk that says "AC-4: confirmed" is a checklist wearing prose, and `grep -E 'AC-[0-9]'` is the whole content rule. Existence is the wall the gate can check; running it first is discipline no hook can see. Frontmatter `walk: exempt` makes the demand inert and is a Step-0 ratification — absent or off-enum, the key reads as `required`. The demand re-checks at every step after Verify, so the artifact cannot be deleted once Step 5 is behind you.
+
 **Tests floor, always:** run every applicable suite and the build, record `cmd:`/`pass:`/`total:`/`output:`, `pass == total`. No `n/a`.
 
 "Every applicable suite" is a **discovered** set, not whatever the default command runs. Check `package.json`, `Makefile`, CI config, test-runner configs, and test directories for suites the default runner omits — a hand-listed runner that silently drops a suite reports green over untested code. When a change touches code with existing tests, triage each affected test as UPDATE / ADD / REMOVE / OK before implementing, not after.
 
-**Matrix section** carries a `stack-health:` line (a before/after snapshot bracketing the walk, or `n/a: <reason>` — bare `n/a` blocks), the tier table `| AC | tier | status | evidence | auditor |` with exactly five cells per row, no literal `|` inside a cell, tier in `T0`–`T4`, status in `pending|blocked|discharged|waived`, and one evidence block per AC. Reading the stack-health snapshot is human judgment; nothing compares before against after.
+**Matrix section** carries a `stack-health:` line (a before/after snapshot bracketing the discharge pass, or `n/a: <reason>` — bare `n/a` blocks), the tier table `| AC | tier | status | evidence | auditor |` with exactly five cells per row, no literal `|` inside a cell, tier in `T0`–`T4`, status in `pending|blocked|discharged|waived`, and one evidence block per AC. Reading the stack-health snapshot is human judgment; nothing compares before against after.
 
 **The T0–T4 ladder.** Each tier is defined by which lie it makes impossible.
 
@@ -283,7 +297,7 @@ The gate discharges the matrix row by row; the unit is the matrix row (`5/<AC-id
 
 A lower tier passing while a higher one fails is a **locator, not a contradiction** — the bug lives in exactly the layer the lower tier elides.
 
-**T2 fixture-fidelity.** A T2 row declares its fixture's provenance in one line: derived from, or validated against, a real captured artifact of the data the AC concerns. A fixture that cannot structurally reach the failure the AC guards is a proxy regardless of its RED→GREEN history — undeclared, a T2 row is a T1 row wearing a browser.
+**T2 fixture-fidelity.** A T2 row declares in one line where its fixture came from (the `fixture-fidelity` key — not the AC's `provenance:` citation, which names the requirement's source): derived from, or validated against, a real captured artifact of the data the AC concerns. A fixture that cannot structurally reach the failure the AC guards is a proxy regardless of its RED→GREEN history — undeclared, a T2 row is a T1 row wearing a browser.
 
 **Per-tier required keys** — the canonical table; the hooks mirror it, so change this first.
 
@@ -295,6 +309,8 @@ A lower tier passing while a higher one fails is a **locator, not a contradictio
 | T4 | `user-confirmed` |
 
 **Tier-Discharge Rule.** Lower-tier evidence never discharges a higher-tier row; higher-tier evidence discharges lower-tier rows for the same AC. A green suite can never stand in for a T3 row — a suite run cannot honestly produce `fresh`/`cold-client`/`contact`. T3's validity conditions live in `browser-verify`; do not restate them. An undrivable T3 row is **blocked**, loudly, never silently skipped. T4 rows are discharged by `user-confirmed: <user> <date> <what was walked>` — agents never self-confirm one.
+
+**Absence-readback rule.** A readback that is zero, empty, or not-present proves nothing on its own — an all-zero observation reads identically whether the code works or was deleted. Such a row needs a paired positive case: the same readback returning a non-empty result where the behavior says it should. Without one the row is presumed powerless and cannot discharge, at any tier. No hook reads this; the auditor mandate carries it as judgment.
 
 **False-green rule.** On finding any test that passed over broken code, the gate cannot close until the matrix carries `false-green: <test — what it lied about>` AND a paired `rewritten: <ref>` proving the test now goes RED.
 
@@ -347,7 +363,7 @@ One evidence artifact per step under `Step N:` in `## SDLC State`. The gate vali
 | 0 | `prereqs: ok` |
 | 1, 2, 3 | pointer (presence only) |
 | 4 | pointer; plus `worktree:`/`base-sha:`/`branch:` when `use_worktree: true` |
-| 5 | `cmd:`/`pass:`/`total:`/`output:` with `pass == total`, a valid `## Verification Matrix`, and — once no row is `pending`/`blocked` — a non-empty `auditor:` |
+| 5 | `cmd:`/`pass:`/`total:`/`output:` with `pass == total`, a valid `## Verification Matrix`, `walk-artifact:` naming a real file under `<docs-root>/record/` once any row is `discharged` (unless `walk: exempt`), and — once no row is `pending`/`blocked` — a non-empty `auditor:` |
 | 6 | pointer to the 5-axis body + critic findings; matrix re-validated here |
 | 7 | `adr:` OR `rca:` OR `n/a:` |
 | 8 | `merge:`, `worktree-removed:`, and (`cleanup:`, `tmp-wiped:`, `tasks-completed:` OR `cleanup: n/a`) |
@@ -359,9 +375,9 @@ One evidence artifact per step under `Step N:` in `## SDLC State`. The gate vali
 
 ## Hooks
 
-**`canonical-sdlc-evidence-gate.sh`** (`PreToolUse|Bash`) fires only on a real `git commit` segment. It finds the newest `*.md` under the plan dirs, and if it has a `## SDLC State` section, validates the current step's evidence, the matrix, and the task ledger. Log-only (never blocks): the epic merge-target check, and the `refactor`/`tune` intent-scoped Step-5 keys.
+**`canonical-sdlc-evidence-gate.sh`** (`PreToolUse|Bash`) fires only on a real `git commit` segment. It finds the newest `*.md` under the plan dirs, and if it has a `## SDLC State` section, validates the current step's evidence, the matrix, and the task ledger. It also blocks on `provenance: implementation` in any AC block, and — from `current: 5` onward, once any row is `discharged` and the plan does not declare `walk: exempt` — on a missing `walk-artifact:` line, a path that does not resolve to a real file under `<docs-root>/record/`, or an AC identifier inside that file. Log-only (never blocks): the epic merge-target check, and the `refactor`/`tune` intent-scoped Step-5 keys.
 
-**`canonical-sdlc-governing-skill.sh`** (`PreToolUse|Write,Edit`) blocks any artifact under `<docs-root>/{specs,plans,adrs,incidents}/` lacking `governing-skill:` frontmatter, and blocks a `mode:` line, a missing or non-enum triple, a barred cell, a missing flag or `model_plan`, or a missing `## Verification Matrix` at `sdlc-step ≥ 3`. Floor-consistency checks are log-only.
+**`canonical-sdlc-governing-skill.sh`** (`PreToolUse|Write,Edit`) blocks any artifact under `<docs-root>/{specs,plans,adrs,incidents}/` lacking `governing-skill:` frontmatter, and blocks a `mode:` line, a missing or non-enum triple, a barred cell, a missing flag or `model_plan`, a `walk:` value outside `required|exempt`, or a missing `## Verification Matrix` at `sdlc-step ≥ 3`. Floor-consistency checks are log-only, and log `user-overridden` in place of a floor violation when frontmatter carries `rigor-override:` — presence only; the marker's fields are never validated, and it does not quiet a malformed `rigor-floor:` value in `config.yaml`.
 
 **Known holes — do not mistake these for enforcement.** The governing-skill hook validates `Write` content but not `Edit` content, so one valid write covers every later edit. Flag *values* are never checked, only presence. The evidence gate reads the plan file's text, so an `Edit` that writes evidence for tests never run passes unseen. Proof-shape is a heuristic: a digit plus a `/` satisfies it.
 
