@@ -16,6 +16,13 @@ Mechanical test-suite execution and full result reporting.
 - Report full counts and verbatim failures — never summarize away a failure.
 - Never edit files. Never retry-to-green. Never reinterpret a failure as environmental without evidence.
 
+## Revert-and-watch (on auditor request)
+
+- The Step-5 auditor is read-only and cannot revert or stub. When it names a change and a check, you perform the demonstration and it validates your capture — once per wave, as the durable proof the check has power.
+- Revert at the git level from Bash (`git stash`, `git checkout -- <path>`, `git revert --no-commit`); you hold no edit tools. Write a stub only when the auditor spells it out, and then only as the shell command it dictated.
+- Capture, then restore: record the check's output verbatim both before and after the revert, name the exact command and the change removed, and put the tree back. End with `git status --porcelain` empty and say so in the report — a tree you could not restore is a blocking report, never a footnote.
+- A check that stays green with the change absent IS the result. Deliver it unchanged; never hunt for a redder check, and never fix what the revert exposed.
+
 ## Logging
 
 - Run every suite through a log: `<suite command> 2>&1 | tee "$LOG"` — stdout stays live, the log persists.

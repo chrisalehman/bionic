@@ -1054,10 +1054,25 @@ matrix_section() {
 # The indented evidence block under "<AC-id>:" within MATRIX (up to the next
 # non-indented line). index()==1 anchors at line start without regex-escaping
 # the AC id, so AC-1 never matches the AC-11 block.
+#
+# A markdown list leader before the header is tolerated: `- AC-1:` reads exactly
+# like `AC-1:`. Without this, a list-shaped block extracted as EMPTY and every
+# consumer below went silent at once — the provenance arm saw no citation, the
+# per-tier key loop saw no keys and blocked a conformant plan, and both
+# `waiver:` exemptions (per-tier and post-Verify CONFIRMED) lost their token.
+# One extractor, four behaviors, so the leader was a whole-contract bypass.
+# The strip runs on a COPY (`hdr`), which keeps two invariants: the terminator
+# below still tests the RAW line, so a following list item still ends the
+# previous block; and the index test still runs against a line that begins with
+# the AC id, so AC-1 still does not match `- AC-11:`. Accepted: the three
+# CommonMark bullet markers plus at least one space, flush left — `-AC-1:` is
+# not a list item, and an INDENTED header is refused on purpose because the
+# terminator could never end a block it introduced.
 # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 matrix_block() {
   echo "$MATRIX" | awk -v ac="$1:" '
-    index($0, ac)==1 {f=1; next}
+    { hdr = $0; sub(/^[-*+][[:space:]]+/, "", hdr) }
+    index(hdr, ac)==1 {f=1; next}
     /^[^[:space:]]/ {f=0}
     f'
 }
@@ -1080,7 +1095,7 @@ matrix_is_placeholder() {
 }
 
 validate_matrix() {
-  local sh rows line ncols ac tier status ev aud block_txt key val
+  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc
 
   # Set while any row is still pending/blocked at current: 5. The
   # Step-5 validator reads it to keep the `auditor:` pointer optional
@@ -1154,6 +1169,25 @@ validate_matrix() {
           "set the status cell to one of: pending, blocked, discharged, waived." ;;
     esac
     block_txt=$(matrix_block "$ac")
+    # provenance arm (epic-14 W1, AC-5): the literal value `provenance:
+    # implementation` in an AC block is circular — it names the change as the
+    # source of its own requirement, which is unfalsifiable by construction.
+    # Whole-value match after whitespace-trimming; a citation that merely
+    # CONTAINS the word ("implementation-first rewrite of spec §3") is a real
+    # citation and passes. A missing `provenance:` line does not block (plan
+    # assumption A4 — presence is a W+1 candidate, not this wave's). Fires for
+    # every row regardless of tier/status, since the spec (AC-5) says "any AC
+    # block" — unlike the tier-key checks below, it does not sit behind the
+    # waived/undischarged branches. Compared case-insensitively, matching the
+    # placeholder and live-tier n/a checks a few lines below in this same loop.
+    # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
+    prov_val=$(echo "$block_txt" | grep -E '^[[:space:]]*provenance[[:space:]]*:' | head -1 \
+      | sed -E 's/^[[:space:]]*provenance[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
+    prov_val_lc=$(echo "$prov_val" | tr '[:upper:]' '[:lower:]')
+    if [ "$prov_val_lc" = "implementation" ]; then
+      block_matrix "matrix row '${ac}' cites 'provenance: implementation' — the implementation cannot be the source of its own requirement." \
+        "cite the real requirement source (user quote, spec section, ticket, report) for '${ac}', not the implementation itself."
+    fi
     # waived rows (evidence cell or the AC block carries a `waiver:` entry) are
     # exempt from the per-tier evidence requirement.
     if echo "$ev" | grep -qE 'waiver:' || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
@@ -1211,6 +1245,121 @@ validate_matrix() {
   done <<< "$rows"
 }
 
+# ---------- walk-first artifact arm (epic-14 W1) ----------
+# Verification opens with a walk: an agent narrates the real running surface
+# without having read the acceptance criteria, and its narration lands in
+# <docs-root>/record/ BEFORE any matrix row discharges. Existence is the wall;
+# temporal order stays discipline, since no hook can see when the walk happened.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
+#
+# FAIL-CLOSED (plan assumption A1, user-ratified): frontmatter `walk: exempt`
+# makes the arm inert; `walk: required` OR AN ABSENT KEY arms it. An exemption
+# is a Step-0 ratification, never something inferred from an omission — so a
+# plan that simply never mentions the key meets this arm at its next Step-5
+# commit. A value outside the enum also arms it; validating that enum belongs to
+# the governing-skill hook (it gates artifact writes), and treating an
+# unrecognized value as "exempt" here would hand every typo a bypass.
+walk_mode() {
+  case "$(frontmatter_get walk)" in
+    exempt) echo exempt ;;
+    *)      echo required ;;
+  esac
+}
+
+# The Step-5 evidence block, read at ANY current step. The module-level BLOCK
+# holds the CURRENT step's evidence, so at current: 6..9 it is the Step-6..9
+# block and cannot answer for the walk; this extractor re-reads Step 5 out of
+# SECTION with the same line + continuation grammar the top of the hook uses.
+# Empty when the plan carries no Step-5 line at all — which, post-Verify, is
+# itself a missing walk artifact.
+step5_evidence_block() {
+  local line raw cont
+  line=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*Step[[:space:]]+5[[:space:]]*:" | head -1)
+  [ -n "$line" ] || return 0
+  raw=$(echo "$line" | sed -E "s/^[[:space:]]*-?[[:space:]]*Step[[:space:]]+5[[:space:]]*:[[:space:]]*//")
+  cont=$(extract_continuation "$SECTION" "5")
+  printf '%s\n%s\n' "$raw" "$cont"
+}
+
+# Resolve a `walk-artifact:` value to an absolute path. Absolute passes through;
+# a `record/...` value is docs-root-relative (the form the Step-5 contract
+# names); anything else is project-relative, so the fully-spelled
+# `.bionic/docs/record/<file>.md` a plan author is likely to paste also lands in
+# the right place. Containment is checked by the caller — this only resolves.
+resolve_walk_path() {  # $1 = raw walk-artifact value
+  case "$1" in
+    /*)       printf '%s\n' "$1" ;;
+    record/*) printf '%s/%s\n' "$DOCS_ROOT" "$1" ;;
+    *)        printf '%s/%s\n' "$PROJECT_DIR" "$1" ;;
+  esac
+}
+
+# The arm itself. Fires at current: 5..9 (the Verify gate and, as a durable
+# prefix condition — plan assumption A5 — every step after it, so the artifact
+# cannot be deleted once Verify is behind you). Trigger: at least one matrix row
+# with status `discharged`. Rows that are only pending/blocked leave it silent,
+# which is what keeps a mid-discharge corrective commit legal. `waived` is NOT a
+# trigger: the spec arms this on discharge, and a wave whose every row is waived
+# has verified nothing to narrate.
+# [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
+validate_walk_artifact() {
+  local discharged b5 raw abs
+  case "$CURRENT" in 5|6|7|8|9) : ;; *) return 0 ;; esac
+  [ "$(walk_mode)" = required ] || return 0
+  # Reuses the $MATRIX cache validate_matrix() fills. It runs immediately before
+  # this arm at both call sites (validate_verify_step, dispatch's 6..9 case) and
+  # hard-blocks on an empty matrix, so the cache is populated by the time we get
+  # here. The `:-` fallback keeps that an optimization rather than a trap: a
+  # third call site that forgot the ordering would re-read the section instead
+  # of crashing under `set -u` or, worse, reading an empty matrix as "nothing
+  # discharged" and letting the walk gate fall open.
+  discharged=$(echo "${MATRIX:-$(matrix_section)}" | grep -E '^[[:space:]]*\|' \
+    | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$4); print $4}' \
+    | grep -cx 'discharged')
+  [ "$discharged" -gt 0 ] || return 0
+
+  b5=$(step5_evidence_block)
+  raw=$(echo "$b5" | grep -E '^[[:space:]]*walk-artifact[[:space:]]*:' | head -1 \
+        | sed -E 's/^[[:space:]]*walk-artifact[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
+  if [ -z "$raw" ]; then
+    block_matrix "the walk gate: matrix rows are discharged but the Step 5 evidence has no 'walk-artifact:' line." \
+      "run the walk first and record 'walk-artifact: record/<file>.md' in the Step 5 block. Frontmatter 'walk: exempt' is the only way past this arm, and it is a Step-0 decision."
+  fi
+
+  # Containment. A `..` component is refused outright rather than normalized:
+  # the artifact belongs in record/, and a path that climbs out of it is a
+  # placement error whatever it lands on.
+  if echo "$raw" | grep -qE '(^|/)\.\.(/|$)'; then
+    block_matrix "the walk gate: walk-artifact '${raw}' climbs out of the record directory and so does not resolve under ${DOCS_ROOT}/record/." \
+      "name the walk narration relative to the docs root, e.g. 'walk-artifact: record/<file>.md'."
+  fi
+  abs=$(resolve_walk_path "$raw")
+  case "$abs" in
+    "$DOCS_ROOT"/record/*) : ;;
+    *)
+      block_matrix "the walk gate: walk-artifact '${raw}' does not resolve under ${DOCS_ROOT}/record/ (resolved to ${abs})." \
+        "move the walk narration into <docs-root>/record/ and name it there, e.g. 'walk-artifact: record/<file>.md'." ;;
+  esac
+  if [ ! -f "$abs" ]; then
+    block_matrix "the walk gate: walk-artifact '${raw}' is named in the Step 5 evidence but no file exists at ${abs}." \
+      "write the walk narration to that path before discharging any matrix row (and do not delete it afterwards — the arm re-checks at every later step)."
+  elif [ ! -s "$abs" ]; then
+    block_matrix "the walk gate: walk-artifact '${raw}' is named in the Step 5 evidence but the file is empty at ${abs}." \
+      "write real narration into the walk artifact before discharging any matrix row — an empty file is not a walk."
+  fi
+
+  # The walk narrates a running surface; it never checklists acceptance
+  # criteria. An AC identifier in the artifact is the tell that it was written
+  # with the criteria in hand, which is exactly the power the walk is meant to
+  # have. This grep is the whole enforcement.
+  # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
+  if grep -qE 'AC-[0-9]' "$abs" 2>/dev/null; then
+    block_matrix "the walk gate: walk artifact ${abs} names acceptance criteria (matched 'AC-<n>')." \
+      "rewrite the walk as narration of what was driven and what came back, with no AC identifiers — the walk is written without reading the criteria."
+  fi
+  return 0
+}
+
 # Verify gate: tests floor, a required non-empty auditor pointer,
 # then the Verification Matrix.
 # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
@@ -1218,6 +1367,8 @@ validate_verify_step() {
   local aud
   validate_tests_block 5
   validate_matrix
+  # Walk-first: the narration must already exist once anything has discharged.
+  validate_walk_artifact
   # The auditor is the Step-5 exit gate — it cannot have run while
   # rows are still pending/blocked, so the pointer is required only once
   # every row is discharged or waived.
@@ -1393,8 +1544,10 @@ dispatch() {
   # The Verification Matrix is a prefix contract for every step from the Verify
   # gate on — current: 5 validates it inside validate_verify_step; current: 6..9
   # validate it here, so a REFUTED auditor blocks post-Verify commits too.
+  # The walk artifact is a durable prefix condition alongside it (A5): deleting
+  # the narration after the Verify gate blocks every later commit.
   case "$CURRENT" in
-    6|7|8|9) validate_matrix ;;
+    6|7|8|9) validate_matrix; validate_walk_artifact ;;
   esac
   # Log-only epic merge-target check at the integrate step.
   [ "$CURRENT" = "$INTEGRATE_STEP" ] && validate_merge_target

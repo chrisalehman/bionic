@@ -605,6 +605,12 @@ expect_allow_both "good project plan allows regardless of the global directory" 
 echo ""
 echo "=== Section 17: Verification Matrix gate ==="
 
+# `walk: exempt` here and in the other fixture builders below is deliberate and
+# load-bearing: the walk arm (Section 26) is fail-closed, so an ABSENT key on a
+# plan with a discharged row blocks. These fixtures are about matrix mechanics,
+# not the walk, so they declare the exemption and keep isolating their own
+# subject. The fail-closed default itself is pinned by 26e, which is the only
+# fixture in the suite that leaves the key off on purpose.
 matrix_frontmatter() {
   local has_ui="${1:-true}" deploy="${2:-none}" use_wt="${3:-false}"
   cat <<EOF
@@ -617,6 +623,7 @@ scale: wave
 deploy_target: ${deploy}
 use_worktree: ${use_wt}
 has_ui: ${has_ui}
+walk: exempt
 ---
 EOF
 }
@@ -1393,6 +1400,7 @@ frontmatter() {
   printf -- 'deploy_target: %s\n' "$deploy"
   printf -- 'use_worktree: %s\n' "$use_wt"
   printf -- 'has_ui: false\n'
+  printf -- 'walk: exempt\n'  # see matrix_frontmatter — the walk arm is fail-closed
   [ -n "$epic" ] && printf -- 'epic: %s\n' "$epic"
   printf -- '---\n'
 }
@@ -1822,6 +1830,7 @@ r7_frontmatter() {
   printf -- 'deploy_target: none\n'
   printf -- 'use_worktree: false\n'
   printf -- 'has_ui: false\n'
+  printf -- 'walk: exempt\n'  # see matrix_frontmatter — the walk arm is fail-closed
   printf -- '---\n'
 }
 
@@ -2646,6 +2655,7 @@ d7_wave_frontmatter() {
   printf -- 'deploy_target: none\n'
   printf -- 'use_worktree: false\n'
   printf -- 'has_ui: false\n'
+  printf -- 'walk: exempt\n'  # see matrix_frontmatter — the walk arm is fail-closed
   printf -- 'multi_agent: %s\n' "$multi"
   printf -- '---\n'
 }
@@ -3818,6 +3828,457 @@ else
   echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
   FAIL=$((FAIL + 1))
 fi
+
+# ============================================================
+# Section 26: the walk-artifact arm (AC-1, AC-2)
+# ============================================================
+#
+# Walk-first verification: before any matrix row discharges, an agent must have
+# narrated the real running surface into <docs-root>/record/. The arm reads
+# plan frontmatter `walk:` — `exempt` makes it inert, `required` OR AN ABSENT
+# KEY arms it (fail-closed, plan assumption A1: an exemption is ratified at
+# Step 0, never inferred from an omission). Armed, at current: 5..9 with any
+# matrix row `discharged`, three conditions must all hold:
+#   (a) the Step-5 evidence carries a `walk-artifact: <path>` line;
+#   (b) that path resolves to a real file under <docs-root>/record/;
+#   (c) `grep -E 'AC-[0-9]'` over that file finds nothing — the walk narrates,
+#       it never checklists (the artifact is written without having read the
+#       acceptance criteria, and an AC identifier is the tell that it was).
+# It is a durable PREFIX condition (A5): the 6..9 arm re-checks it, so the
+# artifact cannot be deleted once the Verify gate is behind you.
+#
+# The Step-5 block is read by its own extractor at every step, not from the
+# current step's BLOCK — at current: 6 the BLOCK holds Step-6 evidence.
+
+echo ""
+echo "=== Section 26: walk-artifact arm ==="
+
+# $1 = a full `walk:` frontmatter line, or empty for THE KEY IS ABSENT (the
+# fail-closed case). Otherwise the Section-17 shape: audited wave, no
+# multi_agent key, so the dispatch-ledger machinery stays out of the way.
+walk_frontmatter() {
+  local walk_line="${1:-}"
+  printf -- '---\n'
+  printf -- 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 12\n'
+  printf -- 'intent: build\nrigor: audited\nscale: wave\n'
+  printf -- 'deploy_target: none\nuse_worktree: false\nhas_ui: true\n'
+  if [ -n "$walk_line" ]; then
+    printf -- '%s\n' "$walk_line"
+  fi
+  printf -- '---\n'
+}
+
+# $1 walk line · $2 Step-5 body (indented) · $3 matrix section.
+walk_plan5() {
+  printf '%s\n## SDLC State\ncurrent: 5\nStep 5:\n%s\n\n%s\n' \
+    "$(walk_frontmatter "$1")" "$2" "$3"
+}
+
+# Same, at current: 6 — the Step-5 block stays in the section so the durable
+# prefix arm has something to read.
+walk_plan6() {
+  printf '%s\n## SDLC State\ncurrent: 6\nStep 5:\n%s\nStep 6:\n%s\n\n%s\n' \
+    "$(walk_frontmatter "$1")" "$2" "$step6_body" "$3"
+}
+
+# Writes a walk narration into the sandbox's <docs-root>/record/.
+# $1 home · $2 content · $3 filename (default walk-20260801.md).
+write_walk_artifact() {
+  local dir="$1/.bionic/docs/record" name="${3:-walk-20260801.md}"
+  mkdir -p "$dir"
+  printf '%s\n' "$2" > "$dir/$name"
+  echo "$dir/$name"
+}
+
+# A real walk narration: what was driven, what came back. No AC identifiers.
+walk_clean_text="Started a scratch repo with the hook wired and tried an ordinary commit.
+It refused, naming a missing narration file. Wrote one under record/, ran the
+same commit again, and it went through. Nothing else in the tree changed."
+
+# The same narration with a criterion identifier in it — a checklist leaking
+# into the walk.
+walk_dirty_text="Started a scratch repo and tried an ordinary commit.
+It refused as AC-3 predicted, then passed once the file existed."
+
+walk_step5_with_artifact="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
+  walk-artifact: record/walk-20260801.md"
+
+walk_step5_no_artifact="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md"
+
+# Every row still pending: nothing has discharged, so the arm must not fire —
+# a mid-discharge commit before the walk is written stays legal. No auditor
+# pointer either (the Step-5 relaxation), which is the honest shape here.
+walk_matrix_all_pending="## Verification Matrix
+
+stack-health: before: process restarts 0; walk not yet run
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | pending | see AC-1 |  |
+| AC-2 | T1 | pending | see AC-2 |  |"
+
+walk_step5_pending="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5"
+
+# 26a — walk: required, rows discharged, no walk-artifact line → block.
+h26a=$(make_home)
+write_plan "$h26a" "$(walk_plan5 'walk: required' "$walk_step5_no_artifact" "$matrix_complete")" > /dev/null
+expect_block "26a walk: required + discharged rows + no walk-artifact line → block" \
+  "$h26a" 'git commit -m "x"' "no 'walk-artifact:' line"
+
+# 26b — the line, a real file under record/, no AC identifiers → allow.
+h26b=$(make_home)
+write_walk_artifact "$h26b" "$walk_clean_text" > /dev/null
+write_plan "$h26b" "$(walk_plan5 'walk: required' "$walk_step5_with_artifact" "$matrix_complete")" > /dev/null
+expect_allow "26b walk: required + clean artifact under record/ → allow" \
+  "$h26b" 'git commit -m "x"'
+
+# 26c — the artifact names an acceptance criterion → block.
+h26c=$(make_home)
+write_walk_artifact "$h26c" "$walk_dirty_text" > /dev/null
+write_plan "$h26c" "$(walk_plan5 'walk: required' "$walk_step5_with_artifact" "$matrix_complete")" > /dev/null
+expect_block "26c walk artifact containing 'AC-3' → block" \
+  "$h26c" 'git commit -m "x"' "names acceptance criteria"
+
+# 26d — walk: exempt, discharged rows, no artifact anywhere → allow (inert).
+h26d=$(make_home)
+write_plan "$h26d" "$(walk_plan5 'walk: exempt' "$walk_step5_no_artifact" "$matrix_complete")" > /dev/null
+expect_allow "26d walk: exempt + discharged rows + no artifact → allow" \
+  "$h26d" 'git commit -m "x"'
+
+# 26e — the key is ABSENT: fail-closed, so it behaves exactly like required.
+h26e=$(make_home)
+write_plan "$h26e" "$(walk_plan5 '' "$walk_step5_no_artifact" "$matrix_complete")" > /dev/null
+expect_block "26e walk key absent + discharged rows + no artifact → block (fail-closed)" \
+  "$h26e" 'git commit -m "x"' "no 'walk-artifact:' line"
+
+# 26f — nothing discharged yet: the arm does not fire even fail-closed.
+h26f=$(make_home)
+write_plan "$h26f" "$(walk_plan5 '' "$walk_step5_pending" "$walk_matrix_all_pending")" > /dev/null
+expect_allow "26f current 5, all rows pending, no artifact → allow (arm does not fire)" \
+  "$h26f" 'git commit -m "x"'
+
+# 26g — durable prefix condition (A5): at current: 6 the named artifact is
+# gone, so the commit blocks even though Step 5 is behind us.
+h26g=$(make_home)
+h26g_art=$(write_walk_artifact "$h26g" "$walk_clean_text")
+write_plan "$h26g" "$(walk_plan6 'walk: required' "$walk_step5_with_artifact" "$matrix_complete")" > /dev/null
+rm -f "$h26g_art"
+expect_block "26g current 6 with the walk artifact deleted → block (durable prefix)" \
+  "$h26g" 'git commit -m "x"' "no file exists at"
+
+# 26g-ok — the same plan with the artifact still in place → allow, so the
+# block above is the deletion and not the step.
+h26g2=$(make_home)
+write_walk_artifact "$h26g2" "$walk_clean_text" > /dev/null
+write_plan "$h26g2" "$(walk_plan6 'walk: required' "$walk_step5_with_artifact" "$matrix_complete")" > /dev/null
+expect_allow "26g current 6 with the walk artifact present → allow" \
+  "$h26g2" 'git commit -m "x"'
+
+# 26h — a project-relative spelling of the same file resolves too.
+h26h=$(make_home)
+write_walk_artifact "$h26h" "$walk_clean_text" > /dev/null
+write_plan "$h26h" "$(walk_plan5 'walk: required' "  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
+  walk-artifact: .bionic/docs/record/walk-20260801.md" "$matrix_complete")" > /dev/null
+expect_allow "26h project-relative walk-artifact path under record/ → allow" \
+  "$h26h" 'git commit -m "x"'
+
+# 26i — a path that climbs out of record/ is refused before any file test.
+h26i=$(make_home)
+printf 'walk narration living outside the record\n' > "$h26i/.bionic/docs/escaped.md"
+write_plan "$h26i" "$(walk_plan5 'walk: required' "  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
+  walk-artifact: record/../escaped.md" "$matrix_complete")" > /dev/null
+expect_block "26i walk-artifact climbing out of record/ → block" \
+  "$h26i" 'git commit -m "x"' "does not resolve under"
+
+# 26j — a real file that simply lives somewhere else is refused the same way.
+h26j=$(make_home)
+printf 'walk narration in the wrong place\n' > "$h26j/.bionic/docs/plans/walk.md"
+write_plan "$h26j" "$(walk_plan5 'walk: required' "  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
+  walk-artifact: .bionic/docs/plans/walk.md" "$matrix_complete")" > /dev/null
+expect_block "26j walk-artifact outside record/ → block" \
+  "$h26j" 'git commit -m "x"' "does not resolve under"
+
+# 26k — a zero-byte file at the named path is not a walk: existence alone is
+# not enough, the artifact must carry content. The message must distinguish
+# this case ("file is empty at") from the missing-file case above ("no file
+# exists at").
+h26k=$(make_home)
+mkdir -p "$h26k/.bionic/docs/record"
+touch "$h26k/.bionic/docs/record/walk-20260801.md"
+write_plan "$h26k" "$(walk_plan5 'walk: required' "$walk_step5_with_artifact" "$matrix_complete")" > /dev/null
+expect_block "26k zero-byte walk artifact → block (existence alone is not enough)" \
+  "$h26k" 'git commit -m "x"' "file is empty at"
+
+# 26l — an OFF-ENUM walk value arms the arm exactly like `required`. walk_mode()
+# treats everything that is not the literal `exempt` as armed (A1/A7: a typo
+# must never buy a bypass), and the enum itself is the governing-skill hook's
+# job at write time. That split is only sound if the gate really does arm here,
+# which is what this pins — independently of the other hook's coverage.
+h26l=$(make_home)
+write_plan "$h26l" "$(walk_plan5 'walk: bogus' "$walk_step5_no_artifact" "$matrix_complete")" > /dev/null
+expect_block "26l off-enum 'walk: bogus' + discharged rows + no artifact → block (arms like required)" \
+  "$h26l" 'git commit -m "x"' "no 'walk-artifact:' line"
+
+# ============================================================
+# Section 27: the provenance arm (AC-5)
+# ============================================================
+#
+# A citation of the literal form `provenance: implementation` is circular —
+# it names the change itself as the source of its own requirement. The arm
+# blocks on that exact value (whitespace-trimmed) inside any AC block, at
+# whatever tier/status the row carries. A missing `provenance:` line does NOT
+# block (plan assumption A4 — presence is a W+1 candidate, not this wave's).
+# A value that merely CONTAINS the word ("implementation-first rewrite of
+# spec §3") is a real citation and must not trip the whole-value test.
+# validate_matrix() is the single call site for both the current: 5 Verify
+# gate and the current: 6..9 prefix re-validation (dispatch() line ~1506), so
+# one case at current: 6 confirms the arm fires there without a duplicate
+# implementation.
+
+echo ""
+echo "=== Section 27: provenance arm ==="
+
+# Builds a one-row T1 matrix (discharged, auditor CONFIRMED) whose AC-1 block
+# carries tier-run + readback (satisfying T1's own evidence requirement) plus
+# an optional `provenance:` line. $1 = the provenance value to write after
+# the colon, or empty/omitted for no `provenance:` line at all.
+prov_matrix() {
+  local prov_line=""
+  if [ -n "${1:-}" ]; then
+    prov_line="
+  provenance: $1"
+  fi
+  printf '## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\nAC-1:\n  tier-run: bash test.sh — unit suite\n  readback: 332/332 asserted%s\n' "$prov_line"
+}
+
+# 27a — the literal value blocks.
+h27a=$(make_home)
+write_plan "$h27a" "$(plan 5 "$step5_base" "$(prov_matrix "implementation")")" > /dev/null
+expect_block "27a provenance: implementation → block" \
+  "$h27a" 'git commit -m "x"' "provenance: implementation"
+
+# 27b — a real citation allows.
+h27b=$(make_home)
+write_plan "$h27b" "$(plan 5 "$step5_base" "$(prov_matrix "spec §3")")" > /dev/null
+expect_allow "27b provenance: spec §3 → allow" \
+  "$h27b" 'git commit -m "x"'
+
+# 27c — no provenance line at all does not block (A4: presence isn't required).
+h27c=$(make_home)
+write_plan "$h27c" "$(plan 5 "$step5_base" "$(prov_matrix "")")" > /dev/null
+expect_allow "27c no provenance line at all → allow" \
+  "$h27c" 'git commit -m "x"'
+
+# 27d — a value containing the word, not equal to it, must not trip the
+# whole-value test.
+h27d=$(make_home)
+write_plan "$h27d" "$(plan 5 "$step5_base" "$(prov_matrix "implementation-first rewrite of spec §3")")" > /dev/null
+expect_allow "27d provenance substring 'implementation-first ...' → allow (no false trigger)" \
+  "$h27d" 'git commit -m "x"'
+
+# 27e — surrounding whitespace around the value is trimmed before the
+# equality test, so it still blocks.
+h27e=$(make_home)
+write_plan "$h27e" "$(plan 5 "$step5_base" "$(prov_matrix "  implementation  ")")" > /dev/null
+expect_block "27e provenance:   implementation   (padded) → block" \
+  "$h27e" 'git commit -m "x"' "provenance: implementation"
+
+# 27f — the same arm fires at current: 6, the dispatch() prefix
+# re-validation, confirming validate_matrix()'s single call site covers both
+# without a second implementation.
+h27f=$(make_home)
+write_plan "$h27f" "$(plan 6 "$step6_body" "$(prov_matrix "implementation")")" > /dev/null
+expect_block "27f provenance: implementation at current: 6 (prefix re-validation) → block" \
+  "$h27f" 'git commit -m "x"' "provenance: implementation"
+
+# 27g — the compare is case-insensitive, matching the placeholder and
+# live-tier convention in the same loop (trim already applies): a capitalized
+# value is the same circular citation as the lowercase one.
+h27g=$(make_home)
+write_plan "$h27g" "$(plan 5 "$step5_base" "$(prov_matrix "Implementation")")" > /dev/null
+expect_block "27g provenance: Implementation (capitalized) → block (case-insensitive)" \
+  "$h27g" 'git commit -m "x"' "provenance: implementation"
+
+# 27h — pinned control: the case-fold must not widen the match past the
+# whole-value test — a real citation prefixed by "the" still allows.
+h27h=$(make_home)
+write_plan "$h27h" "$(plan 5 "$step5_base" "$(prov_matrix "the implementation")")" > /dev/null
+expect_allow "27h provenance: the implementation → allow (pinned control)" \
+  "$h27h" 'git commit -m "x"'
+
+# 27i — pinned control: a substring citation still allows after the
+# case-fold.
+h27i=$(make_home)
+write_plan "$h27i" "$(plan 5 "$step5_base" "$(prov_matrix "implementation-first rewrite of spec section 3")")" > /dev/null
+expect_allow "27i provenance: implementation-first rewrite of spec section 3 → allow (pinned control)" \
+  "$h27i" 'git commit -m "x"'
+
+# --- step scope of the arm (PINNED, not merely observed) -------------------
+#
+# validate_matrix() runs at the Verify gate (current: 5) and as the prefix
+# re-check for current: 6..9, and nowhere else — so the provenance arm is
+# SILENT at the authoring steps 2/3/4, where the citation is written and the
+# matrix is locked. 27j/27k pin that as the INTENDED shipped scope: the
+# provenance rule is a commit-gate property from Verify onward, and a plan
+# carrying the barred literal commits freely while it is still being authored.
+# This is deliberate rather than accidental — enforcing it at authoring time
+# means the governing-skill hook's Write gate, which is a deferred candidate
+# and not this wave's. If that ever lands, these two cases are the ones that
+# must be rewritten first, and the rewrite is the signal that the scope moved.
+# Pointer body: steps 1-4 exit before any matrix validation, so the block only
+# has to be non-empty and non-placeholder.
+prov_pointer_body="  plan-doc: .bionic/docs/plans/wave-01.plan.md"
+
+# 27j — the barred literal at current: 3 commits clean.
+h27j=$(make_home)
+write_plan "$h27j" "$(plan 3 "$prov_pointer_body" "$(prov_matrix "implementation")")" > /dev/null
+expect_allow "27j provenance: implementation at current: 3 → allow (pinned scope: silent before Verify)" \
+  "$h27j" 'git commit -m "x"'
+
+# 27k — and at current: 4, the last step before the gate.
+h27k=$(make_home)
+write_plan "$h27k" "$(plan 4 "$prov_pointer_body" "$(prov_matrix "implementation")")" > /dev/null
+expect_allow "27k provenance: implementation at current: 4 → allow (pinned scope: silent before Verify)" \
+  "$h27k" 'git commit -m "x"'
+
+# ============================================================
+# Section 28: matrix_block tolerates a markdown list leader
+# ============================================================
+#
+# matrix_block() anchors each AC evidence block with index($0, "AC-n:")==1, so a
+# header written as a markdown list item (`- AC-1:`) yielded an EMPTY block, and
+# every behavior that reads that block went silent at once: the provenance arm
+# saw no citation, the per-tier key loop saw no keys (blocking an otherwise
+# conformant plan), the `waiver:` exemption never found its token, and the
+# post-Verify CONFIRMED check lost that same exemption. Four behaviors, one
+# extractor — so the list leader was a whole-contract bypass, not one arm's bug.
+#
+# The leader is stripped from a COPY of the line before the index test, which
+# leaves two invariants intact: the block TERMINATOR (`/^[^[:space:]]/`) still
+# reads the raw line, so a following list item still ends the previous block;
+# and AC-1 still does not match the AC-11 block (28f). The strip accepts the
+# three CommonMark bullet markers (`-`, `*`, `+`) plus at least one space, flush
+# left — 28g/28h pin the two boundaries that stay invisible.
+
+echo ""
+echo "=== Section 28: matrix_block list-leader tolerance ==="
+
+# T1's own evidence keys, satisfying the per-tier requirement.
+leader_t1_keys="  tier-run: bash test.sh — unit suite
+  readback: 332/332 asserted"
+
+# $1 = block-header leader ("" flush-left, "- ", "* ", …)
+# $2 = the AC-1 block body (indented lines)
+# $3 = the auditor cell value (default CONFIRMED; empty exercises the
+#      post-Verify CONFIRMED check).
+leader_matrix() {
+  local leader="${1:-}" body="$2" aud="${3-CONFIRMED}"
+  printf '## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | %s |\n\n%sAC-1:\n%s\n' \
+    "$aud" "$leader" "$body"
+}
+
+# 28a — provenance arm: a list-leader block carrying the barred literal blocks
+# exactly as a flush-left one does (27a is the flush-left twin).
+h28a=$(make_home)
+write_plan "$h28a" "$(plan 5 "$step5_base" "$(leader_matrix '- ' "$leader_t1_keys
+  provenance: implementation")")" > /dev/null
+expect_block "28a '- AC-1:' block with provenance: implementation → block" \
+  "$h28a" 'git commit -m "x"' "provenance: implementation"
+
+# 28b — per-tier keys: a list-leader block whose T1 evidence is complete must
+# PASS. Before the strip this blocked on a missing key that was sitting in the
+# plan the whole time — the shape that made every per-tier check vacuous.
+h28b=$(make_home)
+write_plan "$h28b" "$(plan 6 "$step6_body" "$(leader_matrix '- ' "$leader_t1_keys")")" > /dev/null
+expect_allow "28b '- AC-1:' block with complete T1 keys at current: 6 → allow" \
+  "$h28b" 'git commit -m "x"'
+
+# 28c — waiver-token exemption: the `waiver:` entry lives in the AC block (not
+# the evidence cell), so reading the block is the only way to find it. With the
+# block visible the row is exempt from the per-tier keys and commits clean.
+h28c=$(make_home)
+write_plan "$h28c" "$(plan 5 "$step5_base" "$(leader_matrix '- ' "  waiver: dana 2026-08-01 env stale")")" > /dev/null
+expect_allow "28c '- AC-1:' block carrying only 'waiver:' → allow (block-side exemption found)" \
+  "$h28c" 'git commit -m "x"'
+
+# 28d — post-Verify CONFIRMED check: complete keys, NO waiver anywhere, auditor
+# cell empty, at current: 6. The block must be visible for the gate to reach
+# this check at all; the expected message is what discriminates, since the same
+# plan blocked before the strip for the wrong reason (a missing evidence key).
+h28d=$(make_home)
+write_plan "$h28d" "$(plan 6 "$step6_body" "$(leader_matrix '- ' "$leader_t1_keys" '')")" > /dev/null
+expect_block "28d '- AC-1:' block, keys complete, auditor cell empty at current: 6 → block on the verdict" \
+  "$h28d" 'git commit -m "x"' "auditor verdict is 'empty'"
+
+# 28e — the other bullet markers are the same list. An author reaching for `*`
+# must not get a silently different parse from one reaching for `-`.
+h28e=$(make_home)
+write_plan "$h28e" "$(plan 5 "$step5_base" "$(leader_matrix '* ' "$leader_t1_keys
+  provenance: implementation")")" > /dev/null
+expect_block "28e '* AC-1:' block with provenance: implementation → block" \
+  "$h28e" 'git commit -m "x"' "provenance: implementation"
+
+# 28f — the AC-1/AC-11 disambiguation index() bought must survive the strip.
+# AC-11's block comes FIRST and is the only one carrying the barred literal; if
+# stripping had let AC-1 match the `- AC-11:` header, AC-1 would inherit that
+# citation and the block would name row 'AC-1' instead.
+h28f=$(make_home)
+write_plan "$h28f" "$(plan 5 "$step5_base" "## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+| AC-11 | T1 | discharged | see AC-11 | CONFIRMED |
+
+- AC-11:
+$leader_t1_keys
+  provenance: implementation
+- AC-1:
+$leader_t1_keys
+  provenance: spec §3")" > /dev/null
+expect_block "28f '- AC-11:' before '- AC-1:' → AC-1 keeps its own block (AC-11 is the row that blocks)" \
+  "$h28f" 'git commit -m "x"' "row 'AC-11' cites"
+
+# 28g — pinned boundary: `-AC-1:` with no space after the dash is not a list
+# item and stays invisible, so its keys are not found. The strip requires a
+# separator; it is not a general "ignore leading punctuation".
+h28g=$(make_home)
+write_plan "$h28g" "$(plan 5 "$step5_base" "$(leader_matrix '-' "$leader_t1_keys")")" > /dev/null
+expect_block "28g '-AC-1:' (no space) → block (pinned boundary: not a list item)" \
+  "$h28g" 'git commit -m "x"' "missing evidence key"
+
+# 28h — pinned boundary: an INDENTED list header stays invisible too. The block
+# terminator is `/^[^[:space:]]/`, so an indented header would never end the
+# preceding block; keeping the strip flush-left preserves that invariant.
+h28h=$(make_home)
+write_plan "$h28h" "$(plan 5 "$step5_base" "$(leader_matrix '  - ' "$leader_t1_keys")")" > /dev/null
+expect_block "28h '  - AC-1:' (indented) → block (pinned boundary: strip is flush-left only)" \
+  "$h28h" 'git commit -m "x"' "missing evidence key"
 
 # ============================================================
 # Summary
