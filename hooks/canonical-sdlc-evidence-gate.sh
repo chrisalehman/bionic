@@ -1080,7 +1080,7 @@ matrix_is_placeholder() {
 }
 
 validate_matrix() {
-  local sh rows line ncols ac tier status ev aud block_txt key val
+  local sh rows line ncols ac tier status ev aud block_txt key val prov_val
 
   # Set while any row is still pending/blocked at current: 5. The
   # Step-5 validator reads it to keep the `auditor:` pointer optional
@@ -1154,6 +1154,23 @@ validate_matrix() {
           "set the status cell to one of: pending, blocked, discharged, waived." ;;
     esac
     block_txt=$(matrix_block "$ac")
+    # provenance arm (epic-14 W1, AC-5): the literal value `provenance:
+    # implementation` in an AC block is circular — it names the change as the
+    # source of its own requirement, which is unfalsifiable by construction.
+    # Whole-value match after whitespace-trimming; a citation that merely
+    # CONTAINS the word ("implementation-first rewrite of spec §3") is a real
+    # citation and passes. A missing `provenance:` line does not block (plan
+    # assumption A4 — presence is a W+1 candidate, not this wave's). Fires for
+    # every row regardless of tier/status, since the spec (AC-5) says "any AC
+    # block" — unlike the tier-key checks below, it does not sit behind the
+    # waived/undischarged branches.
+    # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
+    prov_val=$(echo "$block_txt" | grep -E '^[[:space:]]*provenance[[:space:]]*:' | head -1 \
+      | sed -E 's/^[[:space:]]*provenance[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
+    if [ "$prov_val" = "implementation" ]; then
+      block_matrix "matrix row '${ac}' cites 'provenance: implementation' — the implementation cannot be the source of its own requirement." \
+        "cite the real requirement source (user quote, spec section, ticket, report) for '${ac}', not the implementation itself."
+    fi
     # waived rows (evidence cell or the AC block carries a `waiver:` entry) are
     # exempt from the per-tier evidence requirement.
     if echo "$ev" | grep -qE 'waiver:' || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then

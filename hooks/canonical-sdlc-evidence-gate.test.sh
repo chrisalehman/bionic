@@ -4022,6 +4022,78 @@ expect_block "26j walk-artifact outside record/ → block" \
   "$h26j" 'git commit -m "x"' "does not resolve under"
 
 # ============================================================
+# Section 27: the provenance arm (AC-5)
+# ============================================================
+#
+# A citation of the literal form `provenance: implementation` is circular —
+# it names the change itself as the source of its own requirement. The arm
+# blocks on that exact value (whitespace-trimmed) inside any AC block, at
+# whatever tier/status the row carries. A missing `provenance:` line does NOT
+# block (plan assumption A4 — presence is a W+1 candidate, not this wave's).
+# A value that merely CONTAINS the word ("implementation-first rewrite of
+# spec §3") is a real citation and must not trip the whole-value test.
+# validate_matrix() is the single call site for both the current: 5 Verify
+# gate and the current: 6..9 prefix re-validation (dispatch() line ~1506), so
+# one case at current: 6 confirms the arm fires there without a duplicate
+# implementation.
+
+echo ""
+echo "=== Section 27: provenance arm ==="
+
+# Builds a one-row T1 matrix (discharged, auditor CONFIRMED) whose AC-1 block
+# carries tier-run + readback (satisfying T1's own evidence requirement) plus
+# an optional `provenance:` line. $1 = the provenance value to write after
+# the colon, or empty/omitted for no `provenance:` line at all.
+prov_matrix() {
+  local prov_line=""
+  if [ -n "${1:-}" ]; then
+    prov_line="
+  provenance: $1"
+  fi
+  printf '## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\nAC-1:\n  tier-run: bash test.sh — unit suite\n  readback: 332/332 asserted%s\n' "$prov_line"
+}
+
+# 27a — the literal value blocks.
+h27a=$(make_home)
+write_plan "$h27a" "$(plan 5 "$step5_base" "$(prov_matrix "implementation")")" > /dev/null
+expect_block "27a provenance: implementation → block" \
+  "$h27a" 'git commit -m "x"' "provenance: implementation"
+
+# 27b — a real citation allows.
+h27b=$(make_home)
+write_plan "$h27b" "$(plan 5 "$step5_base" "$(prov_matrix "spec §3")")" > /dev/null
+expect_allow "27b provenance: spec §3 → allow" \
+  "$h27b" 'git commit -m "x"'
+
+# 27c — no provenance line at all does not block (A4: presence isn't required).
+h27c=$(make_home)
+write_plan "$h27c" "$(plan 5 "$step5_base" "$(prov_matrix "")")" > /dev/null
+expect_allow "27c no provenance line at all → allow" \
+  "$h27c" 'git commit -m "x"'
+
+# 27d — a value containing the word, not equal to it, must not trip the
+# whole-value test.
+h27d=$(make_home)
+write_plan "$h27d" "$(plan 5 "$step5_base" "$(prov_matrix "implementation-first rewrite of spec §3")")" > /dev/null
+expect_allow "27d provenance substring 'implementation-first ...' → allow (no false trigger)" \
+  "$h27d" 'git commit -m "x"'
+
+# 27e — surrounding whitespace around the value is trimmed before the
+# equality test, so it still blocks.
+h27e=$(make_home)
+write_plan "$h27e" "$(plan 5 "$step5_base" "$(prov_matrix "  implementation  ")")" > /dev/null
+expect_block "27e provenance:   implementation   (padded) → block" \
+  "$h27e" 'git commit -m "x"' "provenance: implementation"
+
+# 27f — the same arm fires at current: 6, the dispatch() prefix
+# re-validation, confirming validate_matrix()'s single call site covers both
+# without a second implementation.
+h27f=$(make_home)
+write_plan "$h27f" "$(plan 6 "$step6_body" "$(prov_matrix "implementation")")" > /dev/null
+expect_block "27f provenance: implementation at current: 6 (prefix re-validation) → block" \
+  "$h27f" 'git commit -m "x"' "provenance: implementation"
+
+# ============================================================
 # Summary
 # ============================================================
 
