@@ -449,6 +449,22 @@ if [ "$SCALE" = "epic" ]; then
   esac
 fi
 
+# ---------- walk: enum (epic-14 AC-3) ----------
+#
+# `walk:` is optional at THIS hook — an absent key is not this hook's
+# concern; the evidence-gate hook fail-closes on absence at Step 5 (A1/A7,
+# epic-14-verification-power wave-01 plan). When present, only the literal
+# values `required` and `exempt` are legal — anything else (typo, other
+# value) blocks, naming both legal values.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+WALK=$(yaml_get walk)
+if [ -n "$WALK" ]; then
+  case "$WALK" in
+    required|exempt) ;;
+    *) block "invalid walk: '$WALK' — allowed: required|exempt" ;;
+  esac
+fi
+
 # ---------- floor-consistency checks (LOG-ONLY; D14, spec R3) ----------
 #
 # Past the blocking gates above INTENT/RIGOR/SCALE are valid enums. These
@@ -482,12 +498,30 @@ log_finding() {  # $1=check-id $2=detail — never blocks, always returns 0
   return 0
 }
 
+# rigor-override: <user> <date> derived=<v> chosen=<v> (epic-14 AC-10/AC-11).
+# Only PRESENCE of the key is detected — the fields are never validated,
+# matching the existing waiver-token precedent. When present, a
+# floor-violation finding logs "user-overridden" instead of the violation
+# detail; the write still succeeds either way (log-only never blocks). This
+# does NOT cover the "invalid rigor-floor value in config.yaml" finding below
+# — that is a data-quality problem in the floor itself, not a user choosing a
+# rigor below a valid floor, so the marker does not suppress it.
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+RIGOR_OVERRIDE=$(yaml_get rigor-override)
+log_floor_finding() {  # $1=check-id $2=violation-detail
+  if [ -n "$RIGOR_OVERRIDE" ]; then
+    log_finding "$1" "user-overridden"
+  else
+    log_finding "$1" "$2"
+  fi
+}
+
 RR=$(rigor_rank "$RIGOR")
 # Intent floor / spike cap (derivable from intent + rigor).
 [ "$INTENT" = "incident-response" ] && [ "$RR" -lt 2 ] \
-  && log_finding intent-floor "incident-response floors at audited, declared $RIGOR"
+  && log_floor_finding intent-floor "incident-response floors at audited, declared $RIGOR"
 [ "$INTENT" = "spike" ] && [ "$RR" -gt 0 ] \
-  && log_finding spike-cap "spike is capped at tested, declared $RIGOR"
+  && log_floor_finding spike-cap "spike is capped at tested, declared $RIGOR"
 
 # Project floor: rigor-floor: in <project>/.bionic/config.yaml (fail-open;
 # an unparseable/invalid value is its own finding, never a block).
@@ -499,7 +533,7 @@ if [ -n "$PF" ]; then
   if [ "$PR" -lt 0 ]; then
     log_finding project-floor "invalid rigor-floor value '$PF' in config.yaml"
   elif [ "$RR" -lt "$PR" ]; then
-    log_finding project-floor "project floor $PF, declared $RIGOR"
+    log_floor_finding project-floor "project floor $PF, declared $RIGOR"
   fi
 fi
 
@@ -513,7 +547,7 @@ if [ -n "$EPIC" ] && [ -r "$DOCS_ROOT/plans/$EPIC/epic.plan.md" ]; then
   if [ -n "$EF" ]; then
     ER=$(rigor_rank "$EF")
     [ "$ER" -ge 0 ] && [ "$RR" -lt "$ER" ] \
-      && log_finding epic-floor "epic floor $EF (from $EPIC), declared $RIGOR"
+      && log_floor_finding epic-floor "epic floor $EF (from $EPIC), declared $RIGOR"
   fi
 fi
 
