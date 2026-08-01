@@ -1163,11 +1163,13 @@ validate_matrix() {
     # assumption A4 — presence is a W+1 candidate, not this wave's). Fires for
     # every row regardless of tier/status, since the spec (AC-5) says "any AC
     # block" — unlike the tier-key checks below, it does not sit behind the
-    # waived/undischarged branches.
+    # waived/undischarged branches. Compared case-insensitively, matching the
+    # placeholder and live-tier n/a checks a few lines below in this same loop.
     # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
     prov_val=$(echo "$block_txt" | grep -E '^[[:space:]]*provenance[[:space:]]*:' | head -1 \
       | sed -E 's/^[[:space:]]*provenance[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
-    if [ "$prov_val" = "implementation" ]; then
+    prov_val_lc=$(echo "$prov_val" | tr '[:upper:]' '[:lower:]')
+    if [ "$prov_val_lc" = "implementation" ]; then
       block_matrix "matrix row '${ac}' cites 'provenance: implementation' — the implementation cannot be the source of its own requirement." \
         "cite the real requirement source (user quote, spec section, ticket, report) for '${ac}', not the implementation itself."
     fi
@@ -1319,6 +1321,9 @@ validate_walk_artifact() {
   if [ ! -f "$abs" ]; then
     block_matrix "the walk gate: walk-artifact '${raw}' is named in the Step 5 evidence but no file exists at ${abs}." \
       "write the walk narration to that path before discharging any matrix row (and do not delete it afterwards — the arm re-checks at every later step)."
+  elif [ ! -s "$abs" ]; then
+    block_matrix "the walk gate: walk-artifact '${raw}' is named in the Step 5 evidence but the file is empty at ${abs}." \
+      "write real narration into the walk artifact before discharging any matrix row — an empty file is not a walk."
   fi
 
   # The walk narrates a running surface; it never checklists acceptance

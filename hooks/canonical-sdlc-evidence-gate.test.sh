@@ -4021,6 +4021,17 @@ write_plan "$h26j" "$(walk_plan5 'walk: required' "  cmd: bash test.sh
 expect_block "26j walk-artifact outside record/ → block" \
   "$h26j" 'git commit -m "x"' "does not resolve under"
 
+# 26k — a zero-byte file at the named path is not a walk: existence alone is
+# not enough, the artifact must carry content. The message must distinguish
+# this case ("file is empty at") from the missing-file case above ("no file
+# exists at").
+h26k=$(make_home)
+mkdir -p "$h26k/.bionic/docs/record"
+touch "$h26k/.bionic/docs/record/walk-20260801.md"
+write_plan "$h26k" "$(walk_plan5 'walk: required' "$walk_step5_with_artifact" "$matrix_complete")" > /dev/null
+expect_block "26k zero-byte walk artifact → block (existence alone is not enough)" \
+  "$h26k" 'git commit -m "x"' "file is empty at"
+
 # ============================================================
 # Section 27: the provenance arm (AC-5)
 # ============================================================
@@ -4092,6 +4103,28 @@ h27f=$(make_home)
 write_plan "$h27f" "$(plan 6 "$step6_body" "$(prov_matrix "implementation")")" > /dev/null
 expect_block "27f provenance: implementation at current: 6 (prefix re-validation) → block" \
   "$h27f" 'git commit -m "x"' "provenance: implementation"
+
+# 27g — the compare is case-insensitive, matching the placeholder and
+# live-tier convention in the same loop (trim already applies): a capitalized
+# value is the same circular citation as the lowercase one.
+h27g=$(make_home)
+write_plan "$h27g" "$(plan 5 "$step5_base" "$(prov_matrix "Implementation")")" > /dev/null
+expect_block "27g provenance: Implementation (capitalized) → block (case-insensitive)" \
+  "$h27g" 'git commit -m "x"' "provenance: implementation"
+
+# 27h — pinned control: the case-fold must not widen the match past the
+# whole-value test — a real citation prefixed by "the" still allows.
+h27h=$(make_home)
+write_plan "$h27h" "$(plan 5 "$step5_base" "$(prov_matrix "the implementation")")" > /dev/null
+expect_allow "27h provenance: the implementation → allow (pinned control)" \
+  "$h27h" 'git commit -m "x"'
+
+# 27i — pinned control: a substring citation still allows after the
+# case-fold.
+h27i=$(make_home)
+write_plan "$h27i" "$(plan 5 "$step5_base" "$(prov_matrix "implementation-first rewrite of spec section 3")")" > /dev/null
+expect_allow "27i provenance: implementation-first rewrite of spec section 3 → allow (pinned control)" \
+  "$h27i" 'git commit -m "x"'
 
 # ============================================================
 # Summary
