@@ -129,9 +129,13 @@ assert_contains() {
 #   mode    — if set, inject a `mode:` line (split-brain guard case).
 #   omit    — space-separated flag names to drop (missing-flag cases).
 #   matrix  — yes|no; drop the "## Verification Matrix" section when no.
+#   walk    — if set, inject a `walk: <value>` line (default OMIT, no line).
+#   override — if set, inject the given full `rigor-override: ...` line
+#              verbatim (default OMIT, no line).
 build_plan() {
   local intent=build rigor=audited scale=wave step=3 version=12 mode="OMIT" omit=" " matrix=yes
   local skill="superpowers:writing-plans"
+  local walk="OMIT" override="OMIT"
   local arg
   for arg in "$@"; do
     case "$arg" in
@@ -144,6 +148,8 @@ build_plan() {
       omit=*)    omit=" ${arg#omit=} " ;;
       matrix=*)  matrix="${arg#matrix=}" ;;
       skill=*)   skill="${arg#skill=}" ;;
+      walk=*)    walk="${arg#walk=}" ;;
+      override=*) override="${arg#override=}" ;;
     esac
   done
 
@@ -158,6 +164,8 @@ wave: wave-01-x
   [ "$intent" = OMIT ]  || out+="intent: $intent"$'\n'
   [ "$rigor" = OMIT ]   || out+="rigor: $rigor"$'\n'
   [ "$scale" = OMIT ]   || out+="scale: $scale"$'\n'
+  [ "$walk" = OMIT ]    || out+="walk: $walk"$'\n'
+  [ "$override" = OMIT ] || out+="$override"$'\n'
 
   local flags=("cleanup_on_finish:true" "use_worktree:false" \
     "surface_type:none" "language:none" "has_ui:false" \
@@ -414,6 +422,42 @@ run_write "$project/.bionic/docs/plans/epic-01-demo/continuation.md" "$(build_pl
 assert_eq "continuation_exempt_from_matrix exit 0" 0 "$HOOK_EXIT"
 
 # ============================================================
+# walk: enum (epic-14 AC-3)
+# ============================================================
+#
+# `walk:` is optional at THIS hook — absence is never blocked here; the
+# evidence-gate hook fail-closes on absence at Step 5 (A1/A7,
+# .bionic/docs/plans/epic-14-verification-power/wave-01-cheapest-first.plan.md
+# — division of labor between the two hooks). When the key IS present, only
+# the literal values `required` and `exempt` are legal; anything else blocks,
+# naming both legal values.
+
+echo
+echo "=== walk: enum (epic-14 AC-3) ==="
+
+echo "walk: required → allow"
+run_write "$project/.bionic/docs/plans/epic-01-demo/walk-required.plan.md" \
+  "$(build_plan walk=required)"
+assert_eq "walk_required exit 0" 0 "$HOOK_EXIT"
+
+echo "walk: exempt → allow"
+run_write "$project/.bionic/docs/plans/epic-01-demo/walk-exempt.plan.md" \
+  "$(build_plan walk=exempt)"
+assert_eq "walk_exempt exit 0" 0 "$HOOK_EXIT"
+
+echo "walk: rquired (typo) → block, names both legal values"
+run_write "$project/.bionic/docs/plans/epic-01-demo/walk-typo.plan.md" \
+  "$(build_plan walk=rquired)"
+assert_eq "walk_typo exit 2" 2 "$HOOK_EXIT"
+assert_contains "walk_typo names required" "required" "$HOOK_STDERR"
+assert_contains "walk_typo names exempt" "exempt" "$HOOK_STDERR"
+
+echo "no walk: key → allow (this hook does not demand presence)"
+run_write "$project/.bionic/docs/plans/epic-01-demo/walk-absent.plan.md" \
+  "$(build_plan)"
+assert_eq "walk_absent exit 0" 0 "$HOOK_EXIT"
+
+# ============================================================
 # CRLF and CR-only line endings must parse
 # ============================================================
 #
@@ -581,6 +625,62 @@ assert_eq "floor_never_blocks exit 0" 0 "$HOOK_EXIT"
 assert_contains "floor_never_blocks logs intent-floor" "intent-floor" "$(read_audit "$project")"
 assert_contains "floor_never_blocks logs project-floor" "project-floor" "$(read_audit "$project")"
 assert_contains "floor_never_blocks logs epic-floor" "epic-floor" "$(read_audit "$project")"
+
+# ============================================================
+# rigor-override: marker (epic-14 AC-10, AC-11)
+# ============================================================
+#
+# Shape: `rigor-override: <user> <date> derived=<v> chosen=<v>`. Only
+# PRESENCE of the key is detected — fields are never validated (matches the
+# existing waiver-token precedent). With the marker, a floor-violation
+# finding logs "user-overridden" instead of the violation text, and the
+# write still succeeds cleanly either way (log-only never blocks). Without
+# the marker, the existing violation log line is unchanged.
+
+echo
+echo "=== rigor-override: marker (epic-14 AC-10, AC-11) ==="
+
+RIGOR_OVERRIDE_LINE='rigor-override: chris 2026-08-01 derived=audited chosen=tested'
+
+echo "project-floor violated + rigor-override marker → writes cleanly, logs user-overridden, not the violation"
+project=$(make_project)
+printf 'rigor-floor: audited\n' > "$project/.bionic/config.yaml"
+run_write "$project/.bionic/docs/plans/epic-01-demo/override-present.plan.md" \
+  "$(build_plan intent=build rigor=tested override="$RIGOR_OVERRIDE_LINE")"
+assert_eq "rigor_override_present exit 0" 0 "$HOOK_EXIT"
+assert_contains "rigor_override_present stderr says user-overridden" "user-overridden" "$HOOK_STDERR"
+assert_contains "rigor_override_present audit says user-overridden" "user-overridden" "$(read_audit "$project")"
+TOTAL=$((TOTAL + 1))
+case "$HOOK_STDERR" in
+  *"project floor"*) FAIL=$((FAIL + 1)); printf '  FAIL  rigor_override_present stderr still names the violation text\n' ;;
+  *) PASS=$((PASS + 1)); printf '  PASS  rigor_override_present stderr does not name the violation text\n' ;;
+esac
+TOTAL=$((TOTAL + 1))
+case "$(read_audit "$project")" in
+  *"project floor"*) FAIL=$((FAIL + 1)); printf '  FAIL  rigor_override_present audit still names the violation text\n' ;;
+  *) PASS=$((PASS + 1)); printf '  PASS  rigor_override_present audit does not name the violation text\n' ;;
+esac
+
+echo "project-floor violated, NO marker → existing violation log unchanged"
+project2=$(make_project)
+printf 'rigor-floor: audited\n' > "$project2/.bionic/config.yaml"
+run_write "$project2/.bionic/docs/plans/epic-01-demo/override-absent.plan.md" \
+  "$(build_plan intent=build rigor=tested)"
+assert_eq "rigor_override_absent exit 0" 0 "$HOOK_EXIT"
+assert_contains "rigor_override_absent stderr names project-floor violation text" \
+  "project floor audited, declared tested" "$HOOK_STDERR"
+assert_contains "rigor_override_absent audit line matches pre-slice wording" \
+  "project-floor: project floor audited, declared tested" "$(read_audit "$project2")"
+TOTAL=$((TOTAL + 1))
+case "$HOOK_STDERR" in
+  *"user-overridden"*) FAIL=$((FAIL + 1)); printf '  FAIL  rigor_override_absent stderr wrongly says user-overridden\n' ;;
+  *) PASS=$((PASS + 1)); printf '  PASS  rigor_override_absent stderr does not say user-overridden\n' ;;
+esac
+TOTAL=$((TOTAL + 1))
+case "$(read_audit "$project2")" in
+  *"user-overridden"*) FAIL=$((FAIL + 1)); printf '  FAIL  rigor_override_absent audit wrongly says user-overridden\n' ;;
+  *) PASS=$((PASS + 1)); printf '  PASS  rigor_override_absent audit does not say user-overridden\n' ;;
+esac
 
 # ============================================================
 # AC-10: the project root is COMPUTED, never discovered
