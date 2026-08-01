@@ -605,6 +605,12 @@ expect_allow_both "good project plan allows regardless of the global directory" 
 echo ""
 echo "=== Section 17: Verification Matrix gate ==="
 
+# `walk: exempt` here and in the other fixture builders below is deliberate and
+# load-bearing: the walk arm (Section 26) is fail-closed, so an ABSENT key on a
+# plan with a discharged row blocks. These fixtures are about matrix mechanics,
+# not the walk, so they declare the exemption and keep isolating their own
+# subject. The fail-closed default itself is pinned by 26e, which is the only
+# fixture in the suite that leaves the key off on purpose.
 matrix_frontmatter() {
   local has_ui="${1:-true}" deploy="${2:-none}" use_wt="${3:-false}"
   cat <<EOF
@@ -617,6 +623,7 @@ scale: wave
 deploy_target: ${deploy}
 use_worktree: ${use_wt}
 has_ui: ${has_ui}
+walk: exempt
 ---
 EOF
 }
@@ -1393,6 +1400,7 @@ frontmatter() {
   printf -- 'deploy_target: %s\n' "$deploy"
   printf -- 'use_worktree: %s\n' "$use_wt"
   printf -- 'has_ui: false\n'
+  printf -- 'walk: exempt\n'  # see matrix_frontmatter — the walk arm is fail-closed
   [ -n "$epic" ] && printf -- 'epic: %s\n' "$epic"
   printf -- '---\n'
 }
@@ -1822,6 +1830,7 @@ r7_frontmatter() {
   printf -- 'deploy_target: none\n'
   printf -- 'use_worktree: false\n'
   printf -- 'has_ui: false\n'
+  printf -- 'walk: exempt\n'  # see matrix_frontmatter — the walk arm is fail-closed
   printf -- '---\n'
 }
 
@@ -2646,6 +2655,7 @@ d7_wave_frontmatter() {
   printf -- 'deploy_target: none\n'
   printf -- 'use_worktree: false\n'
   printf -- 'has_ui: false\n'
+  printf -- 'walk: exempt\n'  # see matrix_frontmatter — the walk arm is fail-closed
   printf -- 'multi_agent: %s\n' "$multi"
   printf -- '---\n'
 }
@@ -3818,6 +3828,198 @@ else
   echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
   FAIL=$((FAIL + 1))
 fi
+
+# ============================================================
+# Section 26: the walk-artifact arm (AC-1, AC-2)
+# ============================================================
+#
+# Walk-first verification: before any matrix row discharges, an agent must have
+# narrated the real running surface into <docs-root>/record/. The arm reads
+# plan frontmatter `walk:` — `exempt` makes it inert, `required` OR AN ABSENT
+# KEY arms it (fail-closed, plan assumption A1: an exemption is ratified at
+# Step 0, never inferred from an omission). Armed, at current: 5..9 with any
+# matrix row `discharged`, three conditions must all hold:
+#   (a) the Step-5 evidence carries a `walk-artifact: <path>` line;
+#   (b) that path resolves to a real file under <docs-root>/record/;
+#   (c) `grep -E 'AC-[0-9]'` over that file finds nothing — the walk narrates,
+#       it never checklists (the artifact is written without having read the
+#       acceptance criteria, and an AC identifier is the tell that it was).
+# It is a durable PREFIX condition (A5): the 6..9 arm re-checks it, so the
+# artifact cannot be deleted once the Verify gate is behind you.
+#
+# The Step-5 block is read by its own extractor at every step, not from the
+# current step's BLOCK — at current: 6 the BLOCK holds Step-6 evidence.
+
+echo ""
+echo "=== Section 26: walk-artifact arm ==="
+
+# $1 = a full `walk:` frontmatter line, or empty for THE KEY IS ABSENT (the
+# fail-closed case). Otherwise the Section-17 shape: audited wave, no
+# multi_agent key, so the dispatch-ledger machinery stays out of the way.
+walk_frontmatter() {
+  local walk_line="${1:-}"
+  printf -- '---\n'
+  printf -- 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 12\n'
+  printf -- 'intent: build\nrigor: audited\nscale: wave\n'
+  printf -- 'deploy_target: none\nuse_worktree: false\nhas_ui: true\n'
+  if [ -n "$walk_line" ]; then
+    printf -- '%s\n' "$walk_line"
+  fi
+  printf -- '---\n'
+}
+
+# $1 walk line · $2 Step-5 body (indented) · $3 matrix section.
+walk_plan5() {
+  printf '%s\n## SDLC State\ncurrent: 5\nStep 5:\n%s\n\n%s\n' \
+    "$(walk_frontmatter "$1")" "$2" "$3"
+}
+
+# Same, at current: 6 — the Step-5 block stays in the section so the durable
+# prefix arm has something to read.
+walk_plan6() {
+  printf '%s\n## SDLC State\ncurrent: 6\nStep 5:\n%s\nStep 6:\n%s\n\n%s\n' \
+    "$(walk_frontmatter "$1")" "$2" "$step6_body" "$3"
+}
+
+# Writes a walk narration into the sandbox's <docs-root>/record/.
+# $1 home · $2 content · $3 filename (default walk-20260801.md).
+write_walk_artifact() {
+  local dir="$1/.bionic/docs/record" name="${3:-walk-20260801.md}"
+  mkdir -p "$dir"
+  printf '%s\n' "$2" > "$dir/$name"
+  echo "$dir/$name"
+}
+
+# A real walk narration: what was driven, what came back. No AC identifiers.
+walk_clean_text="Started a scratch repo with the hook wired and tried an ordinary commit.
+It refused, naming a missing narration file. Wrote one under record/, ran the
+same commit again, and it went through. Nothing else in the tree changed."
+
+# The same narration with a criterion identifier in it — a checklist leaking
+# into the walk.
+walk_dirty_text="Started a scratch repo and tried an ordinary commit.
+It refused as AC-3 predicted, then passed once the file existed."
+
+walk_step5_with_artifact="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
+  walk-artifact: record/walk-20260801.md"
+
+walk_step5_no_artifact="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md"
+
+# Every row still pending: nothing has discharged, so the arm must not fire —
+# a mid-discharge commit before the walk is written stays legal. No auditor
+# pointer either (the Step-5 relaxation), which is the honest shape here.
+walk_matrix_all_pending="## Verification Matrix
+
+stack-health: before: process restarts 0; walk not yet run
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | pending | see AC-1 |  |
+| AC-2 | T1 | pending | see AC-2 |  |"
+
+walk_step5_pending="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5"
+
+# 26a — walk: required, rows discharged, no walk-artifact line → block.
+h26a=$(make_home)
+write_plan "$h26a" "$(walk_plan5 'walk: required' "$walk_step5_no_artifact" "$matrix_complete")" > /dev/null
+expect_block "26a walk: required + discharged rows + no walk-artifact line → block" \
+  "$h26a" 'git commit -m "x"' "no 'walk-artifact:' line"
+
+# 26b — the line, a real file under record/, no AC identifiers → allow.
+h26b=$(make_home)
+write_walk_artifact "$h26b" "$walk_clean_text" > /dev/null
+write_plan "$h26b" "$(walk_plan5 'walk: required' "$walk_step5_with_artifact" "$matrix_complete")" > /dev/null
+expect_allow "26b walk: required + clean artifact under record/ → allow" \
+  "$h26b" 'git commit -m "x"'
+
+# 26c — the artifact names an acceptance criterion → block.
+h26c=$(make_home)
+write_walk_artifact "$h26c" "$walk_dirty_text" > /dev/null
+write_plan "$h26c" "$(walk_plan5 'walk: required' "$walk_step5_with_artifact" "$matrix_complete")" > /dev/null
+expect_block "26c walk artifact containing 'AC-3' → block" \
+  "$h26c" 'git commit -m "x"' "names acceptance criteria"
+
+# 26d — walk: exempt, discharged rows, no artifact anywhere → allow (inert).
+h26d=$(make_home)
+write_plan "$h26d" "$(walk_plan5 'walk: exempt' "$walk_step5_no_artifact" "$matrix_complete")" > /dev/null
+expect_allow "26d walk: exempt + discharged rows + no artifact → allow" \
+  "$h26d" 'git commit -m "x"'
+
+# 26e — the key is ABSENT: fail-closed, so it behaves exactly like required.
+h26e=$(make_home)
+write_plan "$h26e" "$(walk_plan5 '' "$walk_step5_no_artifact" "$matrix_complete")" > /dev/null
+expect_block "26e walk key absent + discharged rows + no artifact → block (fail-closed)" \
+  "$h26e" 'git commit -m "x"' "no 'walk-artifact:' line"
+
+# 26f — nothing discharged yet: the arm does not fire even fail-closed.
+h26f=$(make_home)
+write_plan "$h26f" "$(walk_plan5 '' "$walk_step5_pending" "$walk_matrix_all_pending")" > /dev/null
+expect_allow "26f current 5, all rows pending, no artifact → allow (arm does not fire)" \
+  "$h26f" 'git commit -m "x"'
+
+# 26g — durable prefix condition (A5): at current: 6 the named artifact is
+# gone, so the commit blocks even though Step 5 is behind us.
+h26g=$(make_home)
+h26g_art=$(write_walk_artifact "$h26g" "$walk_clean_text")
+write_plan "$h26g" "$(walk_plan6 'walk: required' "$walk_step5_with_artifact" "$matrix_complete")" > /dev/null
+rm -f "$h26g_art"
+expect_block "26g current 6 with the walk artifact deleted → block (durable prefix)" \
+  "$h26g" 'git commit -m "x"' "no file exists at"
+
+# 26g-ok — the same plan with the artifact still in place → allow, so the
+# block above is the deletion and not the step.
+h26g2=$(make_home)
+write_walk_artifact "$h26g2" "$walk_clean_text" > /dev/null
+write_plan "$h26g2" "$(walk_plan6 'walk: required' "$walk_step5_with_artifact" "$matrix_complete")" > /dev/null
+expect_allow "26g current 6 with the walk artifact present → allow" \
+  "$h26g2" 'git commit -m "x"'
+
+# 26h — a project-relative spelling of the same file resolves too.
+h26h=$(make_home)
+write_walk_artifact "$h26h" "$walk_clean_text" > /dev/null
+write_plan "$h26h" "$(walk_plan5 'walk: required' "  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
+  walk-artifact: .bionic/docs/record/walk-20260801.md" "$matrix_complete")" > /dev/null
+expect_allow "26h project-relative walk-artifact path under record/ → allow" \
+  "$h26h" 'git commit -m "x"'
+
+# 26i — a path that climbs out of record/ is refused before any file test.
+h26i=$(make_home)
+printf 'walk narration living outside the record\n' > "$h26i/.bionic/docs/escaped.md"
+write_plan "$h26i" "$(walk_plan5 'walk: required' "  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
+  walk-artifact: record/../escaped.md" "$matrix_complete")" > /dev/null
+expect_block "26i walk-artifact climbing out of record/ → block" \
+  "$h26i" 'git commit -m "x"' "does not resolve under"
+
+# 26j — a real file that simply lives somewhere else is refused the same way.
+h26j=$(make_home)
+printf 'walk narration in the wrong place\n' > "$h26j/.bionic/docs/plans/walk.md"
+write_plan "$h26j" "$(walk_plan5 'walk: required' "  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
+  walk-artifact: .bionic/docs/plans/walk.md" "$matrix_complete")" > /dev/null
+expect_block "26j walk-artifact outside record/ → block" \
+  "$h26j" 'git commit -m "x"' "does not resolve under"
 
 # ============================================================
 # Summary
