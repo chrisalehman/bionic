@@ -4032,6 +4032,16 @@ write_plan "$h26k" "$(walk_plan5 'walk: required' "$walk_step5_with_artifact" "$
 expect_block "26k zero-byte walk artifact → block (existence alone is not enough)" \
   "$h26k" 'git commit -m "x"' "file is empty at"
 
+# 26l — an OFF-ENUM walk value arms the arm exactly like `required`. walk_mode()
+# treats everything that is not the literal `exempt` as armed (A1/A7: a typo
+# must never buy a bypass), and the enum itself is the governing-skill hook's
+# job at write time. That split is only sound if the gate really does arm here,
+# which is what this pins — independently of the other hook's coverage.
+h26l=$(make_home)
+write_plan "$h26l" "$(walk_plan5 'walk: bogus' "$walk_step5_no_artifact" "$matrix_complete")" > /dev/null
+expect_block "26l off-enum 'walk: bogus' + discharged rows + no artifact → block (arms like required)" \
+  "$h26l" 'git commit -m "x"' "no 'walk-artifact:' line"
+
 # ============================================================
 # Section 27: the provenance arm (AC-5)
 # ============================================================
@@ -4125,6 +4135,150 @@ h27i=$(make_home)
 write_plan "$h27i" "$(plan 5 "$step5_base" "$(prov_matrix "implementation-first rewrite of spec section 3")")" > /dev/null
 expect_allow "27i provenance: implementation-first rewrite of spec section 3 → allow (pinned control)" \
   "$h27i" 'git commit -m "x"'
+
+# --- step scope of the arm (PINNED, not merely observed) -------------------
+#
+# validate_matrix() runs at the Verify gate (current: 5) and as the prefix
+# re-check for current: 6..9, and nowhere else — so the provenance arm is
+# SILENT at the authoring steps 2/3/4, where the citation is written and the
+# matrix is locked. 27j/27k pin that as the INTENDED shipped scope: the
+# provenance rule is a commit-gate property from Verify onward, and a plan
+# carrying the barred literal commits freely while it is still being authored.
+# This is deliberate rather than accidental — enforcing it at authoring time
+# means the governing-skill hook's Write gate, which is a deferred candidate
+# and not this wave's. If that ever lands, these two cases are the ones that
+# must be rewritten first, and the rewrite is the signal that the scope moved.
+# Pointer body: steps 1-4 exit before any matrix validation, so the block only
+# has to be non-empty and non-placeholder.
+prov_pointer_body="  plan-doc: .bionic/docs/plans/wave-01.plan.md"
+
+# 27j — the barred literal at current: 3 commits clean.
+h27j=$(make_home)
+write_plan "$h27j" "$(plan 3 "$prov_pointer_body" "$(prov_matrix "implementation")")" > /dev/null
+expect_allow "27j provenance: implementation at current: 3 → allow (pinned scope: silent before Verify)" \
+  "$h27j" 'git commit -m "x"'
+
+# 27k — and at current: 4, the last step before the gate.
+h27k=$(make_home)
+write_plan "$h27k" "$(plan 4 "$prov_pointer_body" "$(prov_matrix "implementation")")" > /dev/null
+expect_allow "27k provenance: implementation at current: 4 → allow (pinned scope: silent before Verify)" \
+  "$h27k" 'git commit -m "x"'
+
+# ============================================================
+# Section 28: matrix_block tolerates a markdown list leader
+# ============================================================
+#
+# matrix_block() anchors each AC evidence block with index($0, "AC-n:")==1, so a
+# header written as a markdown list item (`- AC-1:`) yielded an EMPTY block, and
+# every behavior that reads that block went silent at once: the provenance arm
+# saw no citation, the per-tier key loop saw no keys (blocking an otherwise
+# conformant plan), the `waiver:` exemption never found its token, and the
+# post-Verify CONFIRMED check lost that same exemption. Four behaviors, one
+# extractor — so the list leader was a whole-contract bypass, not one arm's bug.
+#
+# The leader is stripped from a COPY of the line before the index test, which
+# leaves two invariants intact: the block TERMINATOR (`/^[^[:space:]]/`) still
+# reads the raw line, so a following list item still ends the previous block;
+# and AC-1 still does not match the AC-11 block (28f). The strip accepts the
+# three CommonMark bullet markers (`-`, `*`, `+`) plus at least one space, flush
+# left — 28g/28h pin the two boundaries that stay invisible.
+
+echo ""
+echo "=== Section 28: matrix_block list-leader tolerance ==="
+
+# T1's own evidence keys, satisfying the per-tier requirement.
+leader_t1_keys="  tier-run: bash test.sh — unit suite
+  readback: 332/332 asserted"
+
+# $1 = block-header leader ("" flush-left, "- ", "* ", …)
+# $2 = the AC-1 block body (indented lines)
+# $3 = the auditor cell value (default CONFIRMED; empty exercises the
+#      post-Verify CONFIRMED check).
+leader_matrix() {
+  local leader="${1:-}" body="$2" aud="${3-CONFIRMED}"
+  printf '## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | %s |\n\n%sAC-1:\n%s\n' \
+    "$aud" "$leader" "$body"
+}
+
+# 28a — provenance arm: a list-leader block carrying the barred literal blocks
+# exactly as a flush-left one does (27a is the flush-left twin).
+h28a=$(make_home)
+write_plan "$h28a" "$(plan 5 "$step5_base" "$(leader_matrix '- ' "$leader_t1_keys
+  provenance: implementation")")" > /dev/null
+expect_block "28a '- AC-1:' block with provenance: implementation → block" \
+  "$h28a" 'git commit -m "x"' "provenance: implementation"
+
+# 28b — per-tier keys: a list-leader block whose T1 evidence is complete must
+# PASS. Before the strip this blocked on a missing key that was sitting in the
+# plan the whole time — the shape that made every per-tier check vacuous.
+h28b=$(make_home)
+write_plan "$h28b" "$(plan 6 "$step6_body" "$(leader_matrix '- ' "$leader_t1_keys")")" > /dev/null
+expect_allow "28b '- AC-1:' block with complete T1 keys at current: 6 → allow" \
+  "$h28b" 'git commit -m "x"'
+
+# 28c — waiver-token exemption: the `waiver:` entry lives in the AC block (not
+# the evidence cell), so reading the block is the only way to find it. With the
+# block visible the row is exempt from the per-tier keys and commits clean.
+h28c=$(make_home)
+write_plan "$h28c" "$(plan 5 "$step5_base" "$(leader_matrix '- ' "  waiver: dana 2026-08-01 env stale")")" > /dev/null
+expect_allow "28c '- AC-1:' block carrying only 'waiver:' → allow (block-side exemption found)" \
+  "$h28c" 'git commit -m "x"'
+
+# 28d — post-Verify CONFIRMED check: complete keys, NO waiver anywhere, auditor
+# cell empty, at current: 6. The block must be visible for the gate to reach
+# this check at all; the expected message is what discriminates, since the same
+# plan blocked before the strip for the wrong reason (a missing evidence key).
+h28d=$(make_home)
+write_plan "$h28d" "$(plan 6 "$step6_body" "$(leader_matrix '- ' "$leader_t1_keys" '')")" > /dev/null
+expect_block "28d '- AC-1:' block, keys complete, auditor cell empty at current: 6 → block on the verdict" \
+  "$h28d" 'git commit -m "x"' "auditor verdict is 'empty'"
+
+# 28e — the other bullet markers are the same list. An author reaching for `*`
+# must not get a silently different parse from one reaching for `-`.
+h28e=$(make_home)
+write_plan "$h28e" "$(plan 5 "$step5_base" "$(leader_matrix '* ' "$leader_t1_keys
+  provenance: implementation")")" > /dev/null
+expect_block "28e '* AC-1:' block with provenance: implementation → block" \
+  "$h28e" 'git commit -m "x"' "provenance: implementation"
+
+# 28f — the AC-1/AC-11 disambiguation index() bought must survive the strip.
+# AC-11's block comes FIRST and is the only one carrying the barred literal; if
+# stripping had let AC-1 match the `- AC-11:` header, AC-1 would inherit that
+# citation and the block would name row 'AC-1' instead.
+h28f=$(make_home)
+write_plan "$h28f" "$(plan 5 "$step5_base" "## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+| AC-11 | T1 | discharged | see AC-11 | CONFIRMED |
+
+- AC-11:
+$leader_t1_keys
+  provenance: implementation
+- AC-1:
+$leader_t1_keys
+  provenance: spec §3")" > /dev/null
+expect_block "28f '- AC-11:' before '- AC-1:' → AC-1 keeps its own block (AC-11 is the row that blocks)" \
+  "$h28f" 'git commit -m "x"' "row 'AC-11' cites"
+
+# 28g — pinned boundary: `-AC-1:` with no space after the dash is not a list
+# item and stays invisible, so its keys are not found. The strip requires a
+# separator; it is not a general "ignore leading punctuation".
+h28g=$(make_home)
+write_plan "$h28g" "$(plan 5 "$step5_base" "$(leader_matrix '-' "$leader_t1_keys")")" > /dev/null
+expect_block "28g '-AC-1:' (no space) → block (pinned boundary: not a list item)" \
+  "$h28g" 'git commit -m "x"' "missing evidence key"
+
+# 28h — pinned boundary: an INDENTED list header stays invisible too. The block
+# terminator is `/^[^[:space:]]/`, so an indented header would never end the
+# preceding block; keeping the strip flush-left preserves that invariant.
+h28h=$(make_home)
+write_plan "$h28h" "$(plan 5 "$step5_base" "$(leader_matrix '  - ' "$leader_t1_keys")")" > /dev/null
+expect_block "28h '  - AC-1:' (indented) → block (pinned boundary: strip is flush-left only)" \
+  "$h28h" 'git commit -m "x"' "missing evidence key"
 
 # ============================================================
 # Summary

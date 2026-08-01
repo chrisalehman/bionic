@@ -1054,10 +1054,25 @@ matrix_section() {
 # The indented evidence block under "<AC-id>:" within MATRIX (up to the next
 # non-indented line). index()==1 anchors at line start without regex-escaping
 # the AC id, so AC-1 never matches the AC-11 block.
+#
+# A markdown list leader before the header is tolerated: `- AC-1:` reads exactly
+# like `AC-1:`. Without this, a list-shaped block extracted as EMPTY and every
+# consumer below went silent at once — the provenance arm saw no citation, the
+# per-tier key loop saw no keys and blocked a conformant plan, and both
+# `waiver:` exemptions (per-tier and post-Verify CONFIRMED) lost their token.
+# One extractor, four behaviors, so the leader was a whole-contract bypass.
+# The strip runs on a COPY (`hdr`), which keeps two invariants: the terminator
+# below still tests the RAW line, so a following list item still ends the
+# previous block; and the index test still runs against a line that begins with
+# the AC id, so AC-1 still does not match `- AC-11:`. Accepted: the three
+# CommonMark bullet markers plus at least one space, flush left — `-AC-1:` is
+# not a list item, and an INDENTED header is refused on purpose because the
+# terminator could never end a block it introduced.
 # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
 matrix_block() {
   echo "$MATRIX" | awk -v ac="$1:" '
-    index($0, ac)==1 {f=1; next}
+    { hdr = $0; sub(/^[-*+][[:space:]]+/, "", hdr) }
+    index(hdr, ac)==1 {f=1; next}
     /^[^[:space:]]/ {f=0}
     f'
 }
@@ -1080,7 +1095,7 @@ matrix_is_placeholder() {
 }
 
 validate_matrix() {
-  local sh rows line ncols ac tier status ev aud block_txt key val prov_val
+  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc
 
   # Set while any row is still pending/blocked at current: 5. The
   # Step-5 validator reads it to keep the `auditor:` pointer optional
@@ -1291,7 +1306,14 @@ validate_walk_artifact() {
   local discharged b5 raw abs
   case "$CURRENT" in 5|6|7|8|9) : ;; *) return 0 ;; esac
   [ "$(walk_mode)" = required ] || return 0
-  discharged=$(matrix_section | grep -E '^[[:space:]]*\|' \
+  # Reuses the $MATRIX cache validate_matrix() fills. It runs immediately before
+  # this arm at both call sites (validate_verify_step, dispatch's 6..9 case) and
+  # hard-blocks on an empty matrix, so the cache is populated by the time we get
+  # here. The `:-` fallback keeps that an optimization rather than a trap: a
+  # third call site that forgot the ordering would re-read the section instead
+  # of crashing under `set -u` or, worse, reading an empty matrix as "nothing
+  # discharged" and letting the walk gate fall open.
+  discharged=$(echo "${MATRIX:-$(matrix_section)}" | grep -E '^[[:space:]]*\|' \
     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$4); print $4}' \
     | grep -cx 'discharged')
   [ "$discharged" -gt 0 ] || return 0
