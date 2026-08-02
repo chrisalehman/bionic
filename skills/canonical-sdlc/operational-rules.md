@@ -96,8 +96,52 @@ nothing loads it unprompted, and being copied beside the skill is not the same a
 
 ## Design section authoring (the Step-2 back-half)
 
-SKILL.md carries the contract — the five parts, the three-way rule, the scale line, and the
-provenance chain each design decision sits in. This is how to author one that earns its keep.
+SKILL.md carries the contract — the five parts, the three-way rule, the scale line, the
+mandatory Design Interview, and the provenance chain each design decision sits in. This is how
+to author one that earns its keep.
+
+### The view menu
+
+A design is several *views* of one change, and the way a design goes wrong is rarely a wrong
+answer — it is a view nobody looked at. The menu:
+
+- **logical domain model** — the entities and relationships the change reasons about;
+- **entity / data design** — the concrete shape of those entities: fields, types, identity;
+- **persistence** — schema, mutability, transactions, migration;
+- **application / component design** — modules, boundaries, control flow, who calls whom;
+- **integration surfaces** — the contracts crossed: APIs, hooks, CLIs, file formats, events;
+- **deployment / runtime architecture** — where it runs, in what process, under what lifecycle.
+
+**The design names which views the change touches, and includes those.** A view considered and
+excluded costs one clause — "no persistence: nothing is stored" — and that clause is worth its
+line, because it is the entire difference between a decision and an oversight. **Silent
+omission is the failure the menu exists to prevent**: a view that appears in neither list is
+itself the finding, and the reader cannot tell an inapplicable view from a forgotten one.
+
+Not every change touches every view, and padding the section with empty headings is its own
+failure. Most work in this repo touches application/component design and integration surfaces
+and excludes entity/data design and persistence in a clause apiece; that is a healthy shape,
+not a thin one.
+
+### The Design Interview
+
+SKILL.md makes it mandatory and names what it is for. This is what to carry into it.
+
+**Bring four things.** The view declarations, touched and excluded, in that one-clause form.
+The design itself, at the altitude of decisions rather than of code. The rejected alternatives,
+each with the reason it lost. And the load-bearing assumptions **posed as questions** — "this
+assumes the installed hook stays at the old version all wave; is that right?" beats "assumes
+hooks stay pinned", because the first is answerable and the second is skimmable.
+
+**Interview on what the repo cannot settle.** The assumptions worth a user's attention are the
+ones no amount of reading resolves: intent, operational constraint, which way a future change
+is expected to go. Anything you could have checked by opening a file is not an interview
+question — go open the file.
+
+**The waiver is the user's, and it is recorded verbatim.** If the user declines the interview,
+write their words into the design's assumptions — `Design interview waived by <user> <date>:
+"<quote>"` — so a later reader meets a decision rather than an absence. "The user did not
+respond" is not a waiver; it is an unfinished Step 2. An agent never waives its own interview.
 
 ### The ownership table
 
