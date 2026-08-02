@@ -36,6 +36,7 @@ done
 run "scripts.test.sh" bash tests/scripts.test.sh
 run "installer-behavior.test.sh" bash tests/installer-behavior.test.sh
 run "agent-roles.test.sh" bash tests/agent-roles.test.sh
+run "interview-protocol.test.sh" bash tests/interview-protocol.test.sh
 # Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
 # 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so

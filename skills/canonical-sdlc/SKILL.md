@@ -122,7 +122,7 @@ artifacts that the plan pointed at. The reasoning survived in the plan's own pro
 evidence did not, which turns an audited record into testimony. Give an agent a `record/` path
 in its brief, or you will pay this once too.
 
-Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 13`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`. Plan files additionally carry `walk: required | exempt` — Step 0's derivation, and the key the Verify gate reads — and, where the run's rigor sits below its derived floor, `rigor-override:` beside it. Neither is required to write, but a `walk:` value outside the enum blocks. Spec files at `scale: wave` or `scale: epic` carry `design: <path>` or `design-waived: <user> <date> <reason>` unless the `## Design` section is in place — the three-way rule, Step 2.
+Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 13`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`. Plan files additionally carry `walk: required | exempt` — Step 0's derivation, and the key the Verify gate reads — Step 0's `design-interview:` value beside it, and, where the run's rigor sits below its derived floor, `rigor-override:` beside those. None of the three is required to write, but a `walk:` value outside the enum blocks. Spec files at `scale: wave` or `scale: epic` carry `design: <path>` or `design-waived: <user> <date> <reason>` unless the `## Design` section is in place — the three-way rule, Step 2.
 
 **13 is the only supported version.** Any other value — an older number, an empty value, a typo — blocks at both hooks. There is one contract; an artifact either meets it or does not write. A run that predates it is brought forward to 13, not exempted.
 
@@ -131,8 +131,8 @@ Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `inten
 | Step | Governing skill | Gate |
 |---|---|---|
 | 0 Configure | `canonical-sdlc` | Frontmatter complete, matrix derived, user confirmed, task list created |
-| 1 Ideate | `agent-skills:idea-refine` | Refined idea + explicit "Not Doing" + alternatives lens cites prior art |
-| 2 Spec | `agent-skills:spec-driven-development` | Every requirement has an acceptance criterion; every criterion cites its `provenance:`; wave+ carries a governing design |
+| 1 Scope | `agent-skills:idea-refine` | Refined idea + explicit "Not Doing" + alternatives lens cites prior art |
+| 2 Design | `agent-skills:spec-driven-development` | Every requirement has an acceptance criterion; every criterion cites its `provenance:`; wave+ carries a governing design |
 | 3 Plan | `superpowers:writing-plans` | No placeholders; `integration-branch:` present; matrix locked; slices tagged; user approved |
 | 4 Implement | `agent-skills:incremental-implementation` | Every slice RED before GREEN; assumptions logged |
 | 5 Verify | `superpowers:verification-before-completion` | Walk artifact in `record/`; tests floor green; every matrix row discharged at tier or waived; auditor CONFIRMED |
@@ -193,6 +193,9 @@ Opt-in flags:
 Walk requirement:                [Step 5 opens with it — decided here, no mid-run exemption]
   walk: <required | exempt>     [derived: <which surface flags — what an agent would open>]
 
+Design interview:                [Step 2's mandate — the user's to waive, never derived]
+  design-interview: <true | false>   [default true; false = the user has waived the interview]
+
 Model plan:                      [multi_agent=<value> → <tiered dispatch | single-thread>]
   orchestrator:       <detected session model>   [main thread, fixed all wave]
   implementor:        <model>    [standard slices]
@@ -221,6 +224,8 @@ Reply "confirm" to accept, or specify overrides:
 7. **Block until explicit confirmation.** No timeout, no implicit acceptance.
 8. **Create the task list immediately on approval** — one task per planned step, `0:` marked completed. Nothing runs in between.
 
+**The `design-interview:` flag.** `design-interview: true | false` is standing Step-0 configuration, default `true`, printed in the confirmation display above and recorded in plan frontmatter beside `walk:`. It is not derived from anything: `false` is the standing form of Step 2's user-only interview waiver, carrying that waiver's whole force and none of it weakened — the run proceeds without the Design Interview because the user said so. Recorded, not validated, matching the `walk:` and `rigor-override:` precedent; **an agent never sets it**, in either direction, and a later reader meets a decision rather than an absent interview.
+
 **Task-list format — blessed, and it binds across every step, not just Step 0.**
 
 - **Chronological order of execution.** The list reads top to bottom as the work will actually happen.
@@ -238,7 +243,7 @@ The list is the user's visible progress surface. Nothing enforces this — no ho
 
 **Evidence:** `Step 0: configured at <ISO> via <reply>; model_plan=<tiers>; integration-branch=<name>`
 
-### Step 2 — Spec shape
+### Step 2 — Design
 
 Every acceptance criterion carries a `provenance:` line naming where its requirement came from, authored *with* the criterion. Four forms: `provenance: user <date> "<quote>"` · `spec §N` · `ticket-N` · `report §N`. It is written here because circularity is undetectable downstream by definition — "correctly implements a real requirement" and "requirement transcribed from the code" are observably identical at verification time, so the distinction exists only at authoring. A citation beats a category label: a false citation means fabricating a reference anyone can check by opening the source.
 
@@ -254,9 +259,17 @@ The citation travels with the criterion into the plan's matrix AC block, where t
 
 Every design decision cites the requirements it serves. That is the middle link of the provenance chain — **requirement → design decision → criterion → evidence** — and the Step-5 auditor walks it whole. Authoring guidance, and what a table row is worth, live in `operational-rules.md`.
 
-**The Design Interview — mandatory.** Step 2 is semi-interactive, and this is what that interactivity is for. Before the spec's first Write, present the candidate design *and your own assessment of it*: which views of the system the change touches and which you considered and excluded, at one clause each (the view menu lives in `operational-rules.md`); the alternatives you rejected and why each lost; and every load-bearing assumption posed as a **question to the user**, not as a statement they must think to challenge. Proceed only on the user's engagement, or on the user's explicit waiver of the interview, recorded verbatim in the design's assumptions. Silence is not engagement, and **an agent never waives it** — there is no agent-side waiver.
+**The Design Interview — mandatory.** Step 2 is semi-interactive, and this is what that interactivity is for. It runs as an interview: a frame, then a walk, one turn at a time. Two shapes are refuted by dogfood — **batch presentation**, the design delivered whole as a wall of text with an ambiguous call to action, and **question-without-frame**, a fork posed before its terms exist.
+
+**Open with the frame**, before any question: the problem and the goal; your own **Design intuition**, the shape you expect to be right, stated so the user can push on it; **Requirements served**, citing the requirements this design answers — the provenance chain's first link, upstream of every decision's own citation; a decision map naming each choice ahead **strategic** or **tactical**; the capture plan, naming where the design ledger accretes; and the artifact form derived from the menu below. Which views the change touches and which you considered and excluded belong here too, one clause each (the view menu lives in `operational-rules.md`). **Question 1 ratifies the frame**; nothing is walked until it holds.
+
+**Then walk the map, one decision per turn.** A strategic choice gets a question stating the tension and your own lean; a tactical choice you may default, but every default is **surfaced at ratification**, never silent. The design ledger accretes visibly — each answer folds in as a named delta the turn it lands, so the user reads a design being built rather than a transcript. Load-bearing assumptions are posed as **questions to the user**, not as statements they must think to challenge.
+
+**Close by composing.** The design goes back whole — decisions, rejected alternatives with the reason each lost, assumptions — for ratification **before the spec's first Write**. Proceed only on the user's engagement, or on the user's explicit waiver of the interview, recorded verbatim in the design's assumptions; `design-interview: false` at Step 0 is that waiver's standing form. Silence is not engagement, and **an agent never waives it** — there is no agent-side waiver.
 
 No new *approval* stop: the binding approval remains the Step-3 checkpoint, which ratifies design, plan, and matrix together, and the wall below is a write-time structural gate that grants approval to nothing. **No hook can see a conversation** — exactly as with Step 1's Q&A, the mandate is the whole enforcement. It does fix the authoring order: the interview is where the design gets composed, so the spec lands after it in one complete Write — a requirements-only first draft of a wave-or-epic spec blocks on the write that would create the file.
+
+**The form menu — derived, then ratified, never mandated.** What the design is *written as* is itself a decision the frame carries. Five forms: a **design paragraph** in the session plan (the task-scale form); a flush-left **`## Design` section** in the spec (the wave default); a **standalone design doc** for a design that outlives the wave or serves as a `design:` pointer target; **structured models** — a logical domain model, C4 views, sequence diagrams — where the change's shape is the hard part; and a **full Technical Design Document** where the surface is large enough that its decisions no longer fit beside the requirements. Derivation heuristics live in `operational-rules.md`; what they produce is a *suggested default*, printed in the frame and ratified, moved up, or moved down by the user there.
 
 **One wall, three ways to satisfy it.** A spec at `scale: wave` or `scale: epic` must carry at least one of:
 
