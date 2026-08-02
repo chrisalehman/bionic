@@ -27,6 +27,8 @@ fail() { echo "FAIL: $1"; [ -n "${2:-}" ] && echo "  $2"; FAIL=$((FAIL + 1)); }
 
 AUDITOR_ANCHOR='^#### Auditor — the Step-5 exit gate'
 CRITIC_ANCHOR='Prompt template:'
+DUP_ANCHOR='**Duplication axis'
+AGREE_ANCHOR='**Agreement tests.'
 
 # ---------- extraction (symmetric on both sides: strip leading ws, keep '> ') ----------
 
@@ -44,6 +46,24 @@ marker_block() {
   ' "$1"
 }
 
+# blockquote_block <file> <begin-substr> <end-substr>: '> '-prefixed lines between the
+# markers, ws-stripped and the '> ' itself stripped — for comparing role-file blockquotes
+# against plain-prose paragraphs on the SKILL.md side (no '> ' there).
+blockquote_block() {
+  awk -v b="$2" -v e="$3" '
+    index($0,b) {f=1; next}
+    index($0,e) {f=0}
+    f {sub(/^[[:space:]]*/,""); if ($0 ~ /^> /) {sub(/^> /,""); print}}
+  ' "$1"
+}
+
+# skill_paragraph <file> <anchor-substr>: the flush-left paragraph line containing the
+# anchor substring — SKILL.md §Step 6's duplication-axis/agreement-test text is plain
+# prose, not a blockquote, so this is a sibling of skill_blockquote() below for that shape.
+skill_paragraph() {
+  awk -v s="$2" 'index($0,s) {print; exit}' "$1"
+}
+
 # fm_value <file> <key>: value of a frontmatter key (between the first two --- fences).
 fm_value() {
   awk -v k="$2" '/^---$/{d++; next} d==1 && $0 ~ "^"k":" {sub("^"k":[[:space:]]*",""); print; exit}' "$1"
@@ -54,6 +74,13 @@ fm_value() {
 # mandate_matches <skillfile> <anchor> <rolefile> <begin> <end>: skill blockquote == role marker block.
 mandate_matches() {
   diff <(skill_blockquote "$1" "$2") <(marker_block "$3" "$4" "$5") >/dev/null 2>&1
+}
+
+# axis_matches <skillfile> <rolefile> <begin> <end>: SKILL.md's duplication-axis +
+# agreement-test paragraphs (in that order) == role file's dequoted marker block.
+axis_matches() {
+  diff <(skill_paragraph "$1" "$DUP_ANCHOR"; skill_paragraph "$1" "$AGREE_ANCHOR") \
+       <(blockquote_block "$2" "$3" "$4") >/dev/null 2>&1
 }
 
 # sharedcore_matches <file1> <file2>: SHARED-CORE blocks byte-identical.
@@ -79,6 +106,15 @@ plant_skill_drift() {
   awk -v a="$3" '
     f && !done && /^[[:space:]]*> / {print $0 "X"; done=1; next}
     $0 ~ a {f=1}
+    {print}
+  ' "$1" > "$2"
+}
+
+# plant_skill_para_drift <in> <out> <anchor-substr>: append a byte to the (plain-prose,
+# non-blockquote) paragraph line itself — sibling of plant_skill_drift for that shape.
+plant_skill_para_drift() {
+  awk -v s="$3" '
+    !done && index($0,s) {print $0 "X"; done=1; next}
     {print}
   ' "$1" > "$2"
 }
@@ -167,6 +203,16 @@ else
   fail "critic.md mandate drifted from SKILL.md" "$(diff <(skill_blockquote "$SKILL" "$CRITIC_ANCHOR") <(marker_block "$AGENTS/critic.md" MANDATE-BEGIN MANDATE-END))"
 fi
 
+# critic.md's duplication-axis + agreement-test blockquotes (outside the MANDATE markers,
+# their own AXIS markers) pinned against SKILL.md §Step 6's plain-prose paragraphs.
+if [ -n "$(skill_paragraph "$SKILL" "$DUP_ANCHOR")" ]; then pass "SKILL duplication-axis paragraph extracted"; else fail "SKILL duplication-axis paragraph empty"; fi
+if [ -n "$(skill_paragraph "$SKILL" "$AGREE_ANCHOR")" ]; then pass "SKILL agreement-test paragraph extracted"; else fail "SKILL agreement-test paragraph empty"; fi
+if axis_matches "$SKILL" "$AGENTS/critic.md" AXIS-BEGIN AXIS-END; then
+  pass "critic.md duplication-axis/agreement-test block == SKILL.md §Step 6 paragraphs"
+else
+  fail "critic.md duplication-axis/agreement-test block drifted from SKILL.md" "$(diff <(skill_paragraph "$SKILL" "$DUP_ANCHOR"; skill_paragraph "$SKILL" "$AGREE_ANCHOR") <(blockquote_block "$AGENTS/critic.md" AXIS-BEGIN AXIS-END))"
+fi
+
 # ===== Section 5: shared-core drift =====
 echo "== Section 5: shared implementor core =="
 if [ -n "$(marker_block "$AGENTS/implementor.md" SHARED-CORE-BEGIN SHARED-CORE-END)" ]; then
@@ -216,6 +262,20 @@ if ! sharedcore_matches "$TMP/impl-drift.md" "$AGENTS/senior-implementor.md"; th
   pass "meta: shared-core drift detected"
 else
   fail "meta: shared-core drift NOT detected"
+fi
+# 6e. role-side axis-block drift (critic.md duplication-axis/agreement-test copy drifted)
+plant_blockquote_drift "$AGENTS/critic.md" "$TMP/critic-axis-drift.md" AXIS-BEGIN AXIS-END
+if ! axis_matches "$SKILL" "$TMP/critic-axis-drift.md" AXIS-BEGIN AXIS-END; then
+  pass "meta: role-side critic axis-block drift detected"
+else
+  fail "meta: role-side critic axis-block drift NOT detected"
+fi
+# 6f. SKILL-side axis-block drift (canonical duplication-axis paragraph moved)
+plant_skill_para_drift "$SKILL" "$TMP/skill-axis-drift.md" "$DUP_ANCHOR"
+if ! axis_matches "$TMP/skill-axis-drift.md" "$AGENTS/critic.md" AXIS-BEGIN AXIS-END; then
+  pass "meta: SKILL-side axis-block drift detected"
+else
+  fail "meta: SKILL-side axis-block drift NOT detected"
 fi
 
 # ---------- summary ----------
