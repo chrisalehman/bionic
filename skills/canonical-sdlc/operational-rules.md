@@ -1,7 +1,7 @@
 ---
 name: canonical-sdlc-operational-rules
 description: Canonical-sdlc operational rules — artifact shape, evidence gating, intent-specific behaviors, version history. Bulk procedural reference; copied beside SKILL.md, read on demand — nothing loads it.
-updated: 2026-08-01
+updated: 2026-08-02
 ---
 
 # canonical-sdlc operational rules
@@ -91,6 +91,73 @@ nothing loads it unprompted, and being copied beside the skill is not the same a
   ```
 
   at the top. The `canonical-sdlc-governing-skill.sh` PreToolUse|Write,Edit hook blocks writes missing the `governing-skill:` field. Non-artifact files (README.md, images) under those paths pass through.
+
+## Design section authoring (the Step-2 back-half)
+
+SKILL.md carries the contract — the five parts, the three-way rule, the scale line, and the
+provenance chain each design decision sits in. This is how to author one that earns its keep.
+
+### The ownership table
+
+The table is the load-bearing row of the whole section, and the only part later steps consume
+mechanically: Step 6's duplication axis anchors on the owner column, and the agreement-test
+column is the obligation the reviewer reads back. Shape:
+
+```
+| concept | owning module (SSoT) | rendering surfaces | agreement test |
+|---|---|---|---|
+| version pin value | one logical constant | both hooks · scripts.test.sh assertions | pin-sync rows in tests/scripts.test.sh |
+```
+
+- **One row per concept rendered at more than one surface.** A concept that exists in exactly
+  one place has nothing to disagree with itself about, and listing it is padding. The table is a
+  duplication ledger, not an inventory of the change.
+- **The owner is a place, not a layer or a role.** "the governing-skill hook" is an owner; "the
+  backend" is not. If you cannot name a file, a function, or a single named constant, the concept
+  does not have an owner yet — and that is the finding. Write it down instead of inventing one.
+- **Rendering surfaces include prose.** A constant read by two scripts and quoted in a doc has
+  three surfaces, and the doc is the one that drifts, because nothing runs it.
+- **The agreement test is a real hermetic test that fails when the surfaces disagree** — named,
+  not a suite and not "covered by the unit tests". The standing exemplar is the
+  `SUPPORTED_SDLC_VERSION` pin-sync rows in `tests/scripts.test.sh`: one logical constant, three
+  rendering sites, one test that goes red the moment any single site moves alone. `none — <why>`
+  is a legitimate cell — some pairs are prose against prose, and a mandate dispatched verbatim
+  has no seam to test — but it is a cell the reviewer will stop on, so give it the reason.
+
+### Scaling
+
+- **Task** — a paragraph per non-trivial task, in the session plan: what it touches, what owns
+  the concept, what breaks if the assumption is wrong. No table, and no wall.
+- **Wave** — a page or two in the spec, all five parts. The ownership table usually runs three to
+  six rows; at twenty, the wave is carrying more than one wave's worth of concepts and the
+  finding is the slice decomposition, not the table.
+- **Epic** — the domain model and boundaries that outlive any single wave, so waves can point at
+  them rather than restate them.
+- **Never forty pages.** The section exists to make the ownership and duplication decisions
+  visible before code is written, not to specify the code. A design longer than the slice list it
+  governs has stopped being a design and started being an implementation nobody ran.
+
+Rejected alternatives are one line each — the alternative, and why it lost — and they are the
+part a later reader needs most, because the question they answer ("why not just…") is the one
+that recurs. Assumptions are what the design would break if false; they seed the plan's
+`## Assumptions`, where Step 4 resolves them inline.
+
+### The by-reference form
+
+`design: <path>` in frontmatter is for a design that legitimately lives above the artifact —
+typically an epic-level design that several waves implement. The target must be a real file
+carrying its own flush-left `## Design`, and path resolution follows the walk-artifact template
+(against the docs root, a bare path against the project root, an absolute path as written, a
+`..` component refused).
+
+A wave may carry both the pointer and a local `## Design` section, and that is the intended
+shape when an inherited design is right about the domain but silent on this wave's specifics:
+the pointer names what governs, the local section carries only the delta. Whether the inherited
+design suffices is judgment, ratified at the Step-3 approval alongside everything else.
+
+`design-waived:` is not a lighter version of the pointer. Waived means no design governs this
+artifact; a pointer means one does and here is where. Waiving because the design lives elsewhere
+destroys the one thing the approval display is built to carry — the path the user would open.
 
 ## Evidence gate
 

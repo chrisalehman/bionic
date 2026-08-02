@@ -71,7 +71,7 @@ Triple not yet declared → say so and list the axes. Invoked as `help` → rend
 
 | Rigor | What you get | What you skip |
 |---|---|---|
-| `tested` | TDD RED→GREEN; matrix discharged at each row's tier; tests floor `pass == total`; 5-axis self-review. | Both independent assurance roles. Self-review only. |
+| `tested` | TDD RED→GREEN; matrix discharged at each row's tier; tests floor `pass == total`; 6-axis self-review. | Both independent assurance roles. Self-review only. |
 | `peer-reviewed` | + a separate spec, + the INDEPENDENT Step-5 verification auditor on the evidence. At `scale: task` a ledger row must be proof-shaped and, once `done`, name an `auditor` verdict. | The mandatory adversarial critic. |
 | `audited` | + the INDEPENDENT Step-6 adversarial critic, per-step checkpoint commits, expanded stop-and-wake. At `scale: task` a `done` row also names a `critic` verdict; at `scale: wave` an audited multi-agent plan must carry a `## Tasks` section at all. | Nothing. |
 
@@ -122,7 +122,7 @@ artifacts that the plan pointed at. The reasoning survived in the plan's own pro
 evidence did not, which turns an audited record into testimony. Give an agent a `record/` path
 in its brief, or you will pay this once too.
 
-Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 12`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`. Plan files additionally carry `walk: required | exempt` — Step 0's derivation, and the key the Verify gate reads — and, where the run's rigor sits below its derived floor, `rigor-override:` beside it. Neither is required to write, but a `walk:` value outside the enum blocks.
+Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 12`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`. Plan files additionally carry `walk: required | exempt` — Step 0's derivation, and the key the Verify gate reads — and, where the run's rigor sits below its derived floor, `rigor-override:` beside it. Neither is required to write, but a `walk:` value outside the enum blocks. Spec files at `scale: wave` or `scale: epic` carry `design: <path>` or `design-waived: <user> <date> <reason>` unless the `## Design` section is in place — the three-way rule, Step 2.
 
 **12 is the only supported version.** Any other value — an older number, an empty value, a typo — blocks at both hooks. There is one contract; an artifact either meets it or does not write. A run that predates it is brought forward to 12, not exempted.
 
@@ -132,7 +132,7 @@ Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `inten
 |---|---|---|
 | 0 Configure | `canonical-sdlc` | Frontmatter complete, matrix derived, user confirmed, task list created |
 | 1 Ideate | `agent-skills:idea-refine` | Refined idea + explicit "Not Doing" + alternatives lens cites prior art |
-| 2 Spec | `agent-skills:spec-driven-development` | Every requirement has an acceptance criterion; every criterion cites its `provenance:` |
+| 2 Spec | `agent-skills:spec-driven-development` | Every requirement has an acceptance criterion; every criterion cites its `provenance:`; wave+ carries a governing design |
 | 3 Plan | `superpowers:writing-plans` | No placeholders; `integration-branch:` present; matrix locked; slices tagged; user approved |
 | 4 Implement | `agent-skills:incremental-implementation` | Every slice RED before GREEN; assumptions logged |
 | 5 Verify | `superpowers:verification-before-completion` | Walk artifact in `record/`; tests floor green; every matrix row discharged at tier or waived; auditor CONFIRMED |
@@ -244,6 +244,28 @@ Every acceptance criterion carries a `provenance:` line naming where its require
 
 The citation travels with the criterion into the plan's matrix AC block, where the evidence gate reads it. The literal value `provenance: implementation` **blocks** — a change cannot be the source of its own requirement. Only that whole value blocks; a real citation that merely contains the word passes, and a missing `provenance:` line does not block today. The block lands at the evidence gate from the Verify gate onward (`current: 5`–`9`), not while the spec and plan are still being authored: a circular citation commits freely at Steps 2–4 and meets the wall at the first Verify-gate commit. Write the real citation here anyway — this is the step where you still know it.
 
+**The design back-half.** Requirements and criteria come first; the design answers them. A wave-or-epic spec then closes with a flush-left `## Design` section carrying five parts:
+
+1. **Domain model** — the entities this change introduces or moves, each with its invariants.
+2. **Component boundaries and interfaces** — which module owns what, and what crosses between them.
+3. **Ownership table** — `concept → owning module (SSoT) → rendering surfaces → agreement test`, one row per concept rendered at more than one surface.
+4. **Rejected alternatives** — what was considered, and why each lost.
+5. **Assumptions** — what the design takes as true and would break if false.
+
+Every design decision cites the requirements it serves. That is the middle link of the provenance chain — **requirement → design decision → criterion → evidence** — and the Step-5 auditor walks it whole. Authoring guidance, and what a table row is worth, live in `operational-rules.md`.
+
+**The design conversation.** Step 2 is already semi-interactive, and this is what that interactivity is for: present the design *and your own assessment of it* — weak points, load-bearing assumptions, open questions — while changing it is still cheap. No new hard stop. The binding approval remains the Step-3 checkpoint, which ratifies design, plan, and matrix together.
+
+**One wall, three ways to satisfy it.** A spec at `scale: wave` or `scale: epic` must carry at least one of:
+
+- **(a) in place** — a flush-left `## Design` section in the spec itself;
+- **(b) by reference** — frontmatter `design: <path>` resolving to a real file that itself contains a flush-left `## Design`; typically an epic-level design a wave implements. Path resolution follows the walk-artifact template: `<dir>/<file>.md` resolves against the docs root, a bare path against the project root, an absolute path stands as written, and a `..` component is refused outright. A wave may carry both the pointer and a supplementary local section;
+- **(c) waived** — frontmatter `design-waived:`, the user's move, documented with the Waiver Protocol.
+
+Presence and resolution are the whole check; the five parts are never inspected and their quality never graded. An empty `## Design` clears the wall and fails the Step-3 approval — which is the ratification that was always going to be the one that could tell.
+
+**Scale.** `task` gets a design paragraph per non-trivial task, written in the session plan — a prose obligation the reviewer reads, with **no wall at task scale at all**. `wave` gets a page or two. Nothing gets forty.
+
 ### Step 3 — Plan shape
 
 Two sections are required in every plan file.
@@ -268,6 +290,8 @@ current: <N>
 `## Assumptions` is seeded from Step 1's "Not Doing" plus spec ambiguities; Step 4 appends inline, before the commit that resolves each one.
 
 Tag every Step-4 slice `complexity: standard | complex`. When uncertain, tag `complex`.
+
+**The approval presentation names the governing design.** One line, listing the absolute path(s) of whatever governs — the spec carrying the `## Design` section, the file its `design:` pointer resolves to, or the word `waived` — with an instruction to review them before answering. Do not render the design's content in the display: paths are what the user opens, and a transcribed domain model is ceremony that makes the display longer without making the decision better. The sole gate is approved / not approved.
 
 **Wave shape locks at approval.** Mid-wave discoveries go to `## Assumptions` as W+1 candidates — they do not reshape the current wave. Two exceptions: a discovery that makes the wave structurally impossible (surface a Wake Note and halt — the answer is "this wave cannot ship," not "ship a different wave"), and one-line trivial corrections.
 
@@ -322,7 +346,7 @@ A lower tier passing while a higher one fails is a **locator, not a contradictio
 
 A **fresh, independent** exec-complex agent (`subagent_type: auditor`) — never the implementer, never a fork of the orchestrator, whose context is the thing under audit. Dispatch carries this mandate **verbatim**; a paraphrase is a weakened auditor:
 
-> Your job is to falsify the claim that this wave's requirements were faithfully implemented **and proven** — not to review its code. You hold the spec, the Verification Matrix, the per-row evidence, and repo access. Walk three levels, top-down. **(1) Coverage** — for every requirement in the spec, name the criteria that prove it. Seed this mechanically: invert the `provenance:` citation map, and requirements with zero inbound citations are the uncovered list before any judgment is spent; spend the judgment on the harder half — requirements cited but weakly expressed, covered in letter and missed in substance. A hole is a **wave-level** finding, because the per-row verdict scheme cannot express a missing row: emit one wave-level verdict alongside the row verdicts. **(2) Power** — for every row, state what the observation would have shown had the change been absent; if the answer is "the same thing," the row proves nothing, whatever its tier. A zero, empty, or not-present readback with no paired positive case is presumed powerless and cannot discharge — you are that rule's enforcement. Once per wave, go one step past judgment with a revert-and-watch demonstration: you are read-only and must not revert or stub anything yourself, so have the test-runner revert or stub the named change and capture a named check going red, then validate the capture — the change really absent, the check one the matrix leans on, the red the failure you predicted. Its value over per-slice RED evidence is that it is durable, auditable after integration, and covers the whole change. **(3) Authenticity** — confirm each row's evidence was produced at its declared tier: a T3 row must cite the declared real surface, its per-origin freshness proofs, a cold client, and a feature-scoped semantic readback; a T2 row must carry its fixture-fidelity declaration, and the fixture must be structurally able to reach the failure the AC guards. Re-execute at least one evidence command per tier used (cap 3 total) and compare outputs. Verdict per row **and one for the wave**: CONFIRMED / REFUTED / UNVERIFIABLE. "The evidence is plausible" is not a verdict. Agreement without re-execution is not acceptable output.
+> Your job is to falsify the claim that this wave's requirements were faithfully implemented **and proven** — not to review its code. You hold the spec, its governing design, the Verification Matrix, the per-row evidence, and repo access. Walk three levels, top-down. **(1) Coverage** — walk the chain whole: requirement → design decision → criterion → evidence. For every requirement in the spec, name both the design decisions and the criteria that serve it; a requirement answered by criteria but by no design decision is a hole in the chain, not a covered requirement (where the design is waived, say so and walk requirement → criterion). Seed this mechanically: invert the `provenance:` citation map and the design section's requirement references, and requirements with zero inbound citations from either are the uncovered list before any judgment is spent; spend the judgment on the harder half — requirements cited but weakly expressed, covered in letter and missed in substance. A hole is a **wave-level** finding, because the per-row verdict scheme cannot express a missing row: emit one wave-level verdict alongside the row verdicts. **(2) Power** — for every row, state what the observation would have shown had the change been absent; if the answer is "the same thing," the row proves nothing, whatever its tier. A zero, empty, or not-present readback with no paired positive case is presumed powerless and cannot discharge — you are that rule's enforcement. Once per wave, go one step past judgment with a revert-and-watch demonstration: you are read-only and must not revert or stub anything yourself, so have the test-runner revert or stub the named change and capture a named check going red, then validate the capture — the change really absent, the check one the matrix leans on, the red the failure you predicted. Its value over per-slice RED evidence is that it is durable, auditable after integration, and covers the whole change. **(3) Authenticity** — confirm each row's evidence was produced at its declared tier: a T3 row must cite the declared real surface, its per-origin freshness proofs, a cold client, and a feature-scoped semantic readback; a T2 row must carry its fixture-fidelity declaration, and the fixture must be structurally able to reach the failure the AC guards. Re-execute at least one evidence command per tier used (cap 3 total) and compare outputs. Verdict per row **and one for the wave**: CONFIRMED / REFUTED / UNVERIFIABLE. "The evidence is plausible" is not a verdict. Agreement without re-execution is not acceptable output.
 
 Bounds: audits the verification, not the wave — never re-verifies the feature, re-runs the whole suite, or reviews the code. The boundary with Step 6's critic sharpens rather than moves: the auditor proves the *verification* faithful to the *requirements*; the critic attacks the *code*. Read-only is literal — the revert-and-watch demonstration is performed by the `test-runner` on request and the auditor validates the capture it returns. One auditor, one pass, ≤3 re-executions.
 
@@ -334,15 +358,23 @@ Three moves are the user's, never an agent's: a tier **downgrade**, an **`n/a` o
 
 Note the hole: the hook checks only that the token `waiver` is present — not who, when, or why. And retyping a tier cell from T3 to T2 is a downgrade no hook sees.
 
+**Design waiver.** A fourth user-only move, sitting on the artifact rather than on a matrix row: `design-waived: <user> <date> <reason>` in a wave-or-epic spec's frontmatter, quieting the design wall for that artifact. Recorded, not validated — presence is the whole check, matching the `waiver:` and `rigor-override:` precedent, and the fields are written for the next reader. An agent never writes one. It means *no design governs this artifact*, which is not the same claim as "the design lives elsewhere" — that one is the `design:` pointer, and reaching for the waiver instead throws away the path the approval display exists to show.
+
 ### Step 6 — Review
 
-**Stance 1 — 5-axis self-review, always.** Correctness, readability, architecture, security, performance; every axis gets an explicit PASS / FLAG / FAIL. Run the axes in parallel. All review agents dispatch at exec-complex regardless of who wrote the code — verification is never cheaper than authorship. Security flags escalate to `agent-skills:security-and-hardening`; performance flags to `agent-skills:performance-optimization`.
+**Stance 1 — 6-axis self-review, always.** Correctness, readability, architecture, security, performance, duplication; every axis gets an explicit PASS / FLAG / FAIL. Run the axes in parallel. All review agents dispatch at exec-complex regardless of who wrote the code — verification is never cheaper than authorship. Security flags escalate to `agent-skills:security-and-hardening`; performance flags to `agent-skills:performance-optimization`.
 
 **Architecture-axis closure check:** for each new primitive added this wave, trace user input → new code, and confirm the Step-5 T3 readback reached the same code. No callsite reaching it means the substrate is dead and the axis is FAIL.
 
+**Duplication axis — one implementation site per concept.** The design's ownership table is the anchor: its owner column already says where each concept lives, so the axis is a comparison, not a hunt. A second site computing or deciding the same thing is a FLAG; a concept the table gives two owners is a FAIL; a concept the wave introduced and the table never named is a FLAG against the design, not against the code.
+
+**Agreement tests.** Each shared-truth pair in the ownership table — one concept, more than one rendering surface — names one hermetic test that fails when the surfaces disagree. The standing exemplar is the `SUPPORTED_SDLC_VERSION` pin-sync rows in `tests/scripts.test.sh`: one logical constant, three rendering sites, one test that goes red the moment any single site moves alone. A listed pair with no named test is a FLAG, and "the suite covers it" is not a named test.
+
+Neither of these is a wall. **No hook sees the duplication axis or the agreement-test obligation** — they are carried by the reviewer and critic mandates and enforced by judgment, which is the whole reason the ownership table is authored at Step 2 where a human ratifies it.
+
 **Stance 2 — adversarial critic.** Mandatory at `audited`. Must be an **independent** agent (`subagent_type: critic`) — never the author, never self-graded. Distinct from the Step-5 auditor: the critic falsifies the *code*, the auditor falsifies the *evidence*. Prompt template:
 
-> _Your job is to find what went wrong in this change. You have the spec, the plan, the diff, and the 5-axis self-review notes. Read them and try to falsify the claim that this is ready to merge. Look specifically for: silent wrong assumptions not logged in the `## Assumptions` section, scope creep beyond the spec, missing edge cases, fabricated evidence, and cross-cutting concerns a single-axis review would miss. Output either: at least one specific, reproducible issue, or an explicit "no issues found" followed by the three strongest falsification attempts you made and why each failed. Confirmation-seeking agreement is not acceptable output._
+> _Your job is to find what went wrong in this change. You have the spec, the plan, the diff, and the 6-axis self-review notes. Read them and try to falsify the claim that this is ready to merge. Look specifically for: silent wrong assumptions not logged in the `## Assumptions` section, scope creep beyond the spec, missing edge cases, fabricated evidence, and cross-cutting concerns a single-axis review would miss. Output either: at least one specific, reproducible issue, or an explicit "no issues found" followed by the three strongest falsification attempts you made and why each failed. Confirmation-seeking agreement is not acceptable output._
 
 Incident framing: does the fix mask a deeper issue, and is the monitoring-gap analysis honest. Sycophantic output is not evidence.
 
@@ -366,7 +398,7 @@ One evidence artifact per step under `Step N:` in `## SDLC State`. The gate vali
 | 1, 2, 3 | pointer (presence only) |
 | 4 | pointer; plus `worktree:`/`base-sha:`/`branch:` when `use_worktree: true` |
 | 5 | `cmd:`/`pass:`/`total:`/`output:` with `pass == total`, a valid `## Verification Matrix`, `walk-artifact:` naming a real file under `<docs-root>/record/` once any row is `discharged` (unless `walk: exempt`), and — once no row is `pending`/`blocked` — a non-empty `auditor:` |
-| 6 | pointer to the 5-axis body + critic findings; matrix re-validated here |
+| 6 | pointer to the 6-axis body + critic findings; matrix re-validated here |
 | 7 | `adr:` OR `rca:` OR `n/a:` |
 | 8 | `merge:`, `worktree-removed:`, and (`cleanup:`, `tmp-wiped:`, `tasks-completed:` OR `cleanup: n/a`) |
 | 9 | `deploy:`, `verified-at:`, `monitor:` OR `n/a:` (only when `deploy_target: none`) |
@@ -379,7 +411,7 @@ One evidence artifact per step under `Step N:` in `## SDLC State`. The gate vali
 
 **`canonical-sdlc-evidence-gate.sh`** (`PreToolUse|Bash`) fires only on a real `git commit` segment. It finds the newest `*.md` under the plan dirs, and if it has a `## SDLC State` section, validates the current step's evidence, the matrix, and the task ledger. **From `current: 5` onward** it also blocks on `provenance: implementation` in any AC block — read flush left or as a flush-left list item (`AC-1:`, `- AC-1:`, `* AC-1:`, `+ AC-1:`; an indented header is not read) — and, once any row is `discharged` and the plan does not declare `walk: exempt`, on a missing `walk-artifact:` line, a path that does not resolve to a real file under `<docs-root>/record/`, or an AC identifier inside that file. Log-only (never blocks): the epic merge-target check, and the `refactor`/`tune` intent-scoped Step-5 keys.
 
-**`canonical-sdlc-governing-skill.sh`** (`PreToolUse|Write,Edit`) blocks any artifact under `<docs-root>/{specs,plans,adrs,incidents}/` lacking `governing-skill:` frontmatter, and blocks a `mode:` line, a missing or non-enum triple, a barred cell, a missing flag or `model_plan`, a `walk:` value outside `required|exempt`, or a missing `## Verification Matrix` at `sdlc-step ≥ 3`. Floor-consistency checks are log-only, and log `user-overridden` in place of a floor violation when frontmatter carries `rigor-override:` — presence only; the marker's fields are never validated, and it does not quiet a malformed `rigor-floor:` value in `config.yaml`.
+**`canonical-sdlc-governing-skill.sh`** (`PreToolUse|Write,Edit`) blocks any artifact under `<docs-root>/{specs,plans,adrs,incidents}/` lacking `governing-skill:` frontmatter, and blocks a `mode:` line, a missing or non-enum triple, a barred cell, a missing flag or `model_plan`, a `walk:` value outside `required|exempt`, or a missing `## Verification Matrix` at `sdlc-step ≥ 3`. On a **spec** artifact at `scale: wave` or `scale: epic` it also blocks a write satisfying no arm of the three-way design rule: no flush-left `## Design` in place, no `design:` pointer resolving to a real file that itself carries a flush-left `## Design` (a dangling path, a target without the section, and a `..` component each fail the arm), and no `design-waived:` token. Plans and every task-scale artifact are untouched by it. Floor-consistency checks are log-only, and log `user-overridden` in place of a floor violation when frontmatter carries `rigor-override:` — presence only; the marker's fields are never validated, and it does not quiet a malformed `rigor-floor:` value in `config.yaml`.
 
 **Known holes — do not mistake these for enforcement.** The governing-skill hook validates `Write` content but not `Edit` content, so one valid write covers every later edit. Flag *values* are never checked, only presence. The evidence gate reads the plan file's text, so an `Edit` that writes evidence for tests never run passes unseen. Proof-shape is a heuristic: a digit plus a `/` satisfies it.
 
