@@ -1587,6 +1587,37 @@ run_write "$DESIGN_SPECS/w14c.spec.md" \
 assert_eq "design_pointer_cr_only_no_section exit 2" 2 "$HOOK_EXIT"
 assert_contains "design_pointer_cr_only_no_section says the target carries no section" "carries no flush-left" "$HOOK_STDERR"
 
+# PRECEDENCE (critic C-3). Pointer and in-place section are documented as a
+# legitimate COMBINED shape — "the pointer names what governs, the local section
+# carries only the delta" — and the Step-3 approval display prints the pointer's
+# resolved path for the user to open. A pointer that is present is therefore
+# never decorative: it validates whatever else the spec carries, so the four
+# cases below hold in the combined shape exactly as c4/c5/c6 hold when the
+# pointer is the sole arm. The waived path is untouched (c7 still short-circuits
+# everything).
+echo "c15: in-place '## Design' + a dangling pointer → block"
+run_write "$DESIGN_SPECS/w15.spec.md" \
+  "$(build_spec design=specs/epic-01-demo/nowhere.spec.md)"
+assert_eq "design_combined_dangling exit 2" 2 "$HOOK_EXIT"
+assert_contains "design_combined_dangling names the raw value" "specs/epic-01-demo/nowhere.spec.md" "$HOOK_STDERR"
+
+echo "c15b: in-place '## Design' + a '..' pointer → block"
+run_write "$DESIGN_SPECS/w15b.spec.md" \
+  "$(build_spec design=specs/epic-01-demo/../sibling.spec.md)"
+assert_eq "design_combined_dotdot exit 2" 2 "$HOOK_EXIT"
+assert_contains "design_combined_dotdot says the path climbs out" "climbs" "$HOOK_STDERR"
+
+echo "c15c: in-place '## Design' + a pointer to a target that lacks the section → block"
+run_write "$DESIGN_SPECS/w15c.spec.md" \
+  "$(build_spec design=specs/epic-01-demo/no-design.spec.md)"
+assert_eq "design_combined_no_section exit 2" 2 "$HOOK_EXIT"
+assert_contains "design_combined_no_section says the target carries no section" "carries no flush-left" "$HOOK_STDERR"
+
+echo "c15d: in-place '## Design' + a VALID pointer → allow (the documented combined shape)"
+run_write "$DESIGN_SPECS/w15d.spec.md" \
+  "$(build_spec design=specs/epic-01-demo/with-design.spec.md)"
+assert_eq "design_combined_valid exit 0" 0 "$HOOK_EXIT"
+
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then

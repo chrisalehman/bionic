@@ -198,8 +198,11 @@ carrying its own flush-left `## Design`, and path resolution follows the walk-ar
 
 A wave may carry both the pointer and a local `## Design` section, and that is the intended
 shape when an inherited design is right about the domain but silent on this wave's specifics:
-the pointer names what governs, the local section carries only the delta. Whether the inherited
-design suffices is judgment, ratified at the Step-3 approval alongside everything else.
+the pointer names what governs, the local section carries only the delta. The local section does
+not excuse the pointer: a `design:` that is present is resolved, existence-checked and
+`..`-refused whatever else the spec carries, because the path it names is the one the approval
+display prints for the user to open. Whether the inherited design suffices is judgment, ratified
+at the Step-3 approval alongside everything else.
 
 `design-waived:` is not a lighter version of the pointer. Waived means no design governs this
 artifact; a pointer means one does and here is where. Waiving because the design lives elsewhere
