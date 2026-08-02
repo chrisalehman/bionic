@@ -1533,6 +1533,36 @@ run_write "$DESIGN_SPECS/w11b.spec.md" \
   "$(build_spec section=no)$(printf '\n## Design — v2\n\nthe real thing.\n')"
 assert_eq "design_suffixed_heading exit 0" 0 "$HOOK_EXIT"
 
+# A spec that EXPLAINS this contract will show `## Design` as an example, and an
+# example is documentation, not a section. Both read paths are fence-aware, so
+# both get a case; each is paired with a control that moves the same heading out
+# of the fence, so the block is fence-awareness and not some other refusal.
+echo "c12: an in-place '## Design' that exists only inside a fenced code block → block"
+run_write "$DESIGN_SPECS/w12.spec.md" \
+  "$(build_spec section=no)$(printf '\n%s\n## Design\n\nan example of the contract, not this spec.\n%s\n' '```markdown' '```')"
+assert_eq "design_fenced_in_place exit 2" 2 "$HOOK_EXIT"
+assert_contains "design_fenced_in_place names the three-way rule" "design-waived:" "$HOOK_STDERR"
+run_write "$DESIGN_SPECS/w12b.spec.md" \
+  "$(build_spec section=no)$(printf '\n%s\n## Design\n%s\n\n## Design\n\nthe real one, outside the fence.\n' '```markdown' '```')"
+assert_eq "design_fenced_in_place_control exit 0" 0 "$HOOK_EXIT"
+
+echo "c13: a pointer target whose only '## Design' is inside a fenced code block → block"
+printf '%s' \
+  "$(build_spec section=no)$(printf '\n%s\n## Design\n%s\n' '```markdown' '```')" \
+  > "$DESIGN_SPECS/fenced-design.spec.md"
+run_write "$DESIGN_SPECS/w13.spec.md" \
+  "$(build_spec section=no design=specs/epic-01-demo/fenced-design.spec.md)"
+assert_eq "design_fenced_pointer_target exit 2" 2 "$HOOK_EXIT"
+assert_contains "design_fenced_pointer_target names the target" "fenced-design.spec.md" "$HOOK_STDERR"
+assert_contains "design_fenced_pointer_target says the target carries no section" "carries no flush-left" "$HOOK_STDERR"
+# Control: the same target with the heading moved out of the fence resolves.
+printf '%s' \
+  "$(build_spec section=no)$(printf '\n%s\n## Design\n%s\n\n## Design\n\nthe real one.\n' '```markdown' '```')" \
+  > "$DESIGN_SPECS/unfenced-design.spec.md"
+run_write "$DESIGN_SPECS/w13b.spec.md" \
+  "$(build_spec section=no design=specs/epic-01-demo/unfenced-design.spec.md)"
+assert_eq "design_fenced_pointer_target_control exit 0" 0 "$HOOK_EXIT"
+
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then
