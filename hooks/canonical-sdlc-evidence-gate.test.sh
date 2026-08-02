@@ -4042,6 +4042,53 @@ write_plan "$h26l" "$(walk_plan5 'walk: bogus' "$walk_step5_no_artifact" "$matri
 expect_block "26l off-enum 'walk: bogus' + discharged rows + no artifact → block (arms like required)" \
   "$h26l" 'git commit -m "x"' "no 'walk-artifact:' line"
 
+# 26m/26n/26o — packed-line extraction (bugfix A17). Sibling extractors
+# elsewhere in this hook already truncate at ';' to tolerate a Step-5 line
+# with more fields packed after the value; the raw walk-artifact extraction
+# was the outlier, greedy to end-of-line. A Step-5 line of the shape
+# `walk-artifact: record/x.md; cmd: ...` swallowed the semicolon-joined
+# remainder as part of the "path", which never resolved even though the real
+# file exists.
+
+walk_step5_packed_ok="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
+  walk-artifact: record/walk-20260801.md; cmd: bash test.sh; pass: 332; total: 332"
+
+walk_step5_packed_bad="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
+  walk-artifact: record/../escaped.md; cmd: bash test.sh; pass: 332; total: 332"
+
+# 26m — a packed Step-5 line (fields after the path, semicolon-joined) naming
+# a real, clean file under record/ → allow.
+h26m=$(make_home)
+write_walk_artifact "$h26m" "$walk_clean_text" > /dev/null
+write_plan "$h26m" "$(walk_plan5 'walk: required' "$walk_step5_packed_ok" "$matrix_complete")" > /dev/null
+expect_allow "26m packed walk-artifact line (fields after the path) → allow" \
+  "$h26m" 'git commit -m "x"'
+
+# 26n — regression pin: the dedicated continuation-line shape (no packed
+# fields) still passes after the truncate-at-';' fix.
+h26n=$(make_home)
+write_walk_artifact "$h26n" "$walk_clean_text" > /dev/null
+write_plan "$h26n" "$(walk_plan5 'walk: required' "$walk_step5_with_artifact" "$matrix_complete")" > /dev/null
+expect_allow "26n dedicated continuation-line walk-artifact (unpacked) → allow" \
+  "$h26n" 'git commit -m "x"'
+
+# 26o — a packed line whose truncated value is STILL a bad path (climbs out
+# of record/ via '..') must still block. The ';' cut must not accidentally
+# salvage a genuinely bad path.
+h26o=$(make_home)
+printf 'walk narration living outside the record\n' > "$h26o/.bionic/docs/escaped.md"
+write_plan "$h26o" "$(walk_plan5 'walk: required' "$walk_step5_packed_bad" "$matrix_complete")" > /dev/null
+expect_block "26o packed walk-artifact line with a bad truncated path → block" \
+  "$h26o" 'git commit -m "x"' "does not resolve under"
+
 # ============================================================
 # Section 27: the provenance arm (AC-5)
 # ============================================================

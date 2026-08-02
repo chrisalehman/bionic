@@ -1318,9 +1318,16 @@ validate_walk_artifact() {
     | grep -cx 'discharged')
   [ "$discharged" -gt 0 ] || return 0
 
+  # Truncated at the first ';' below: sibling extractors in this hook already
+  # tolerate a Step-5 line with more fields packed after the value
+  # (`walk-artifact: record/x.md; cmd: ...`); this one was the outlier,
+  # greedy to end-of-line, and swallowed the packed remainder as part of the
+  # "path" (plan assumption A17). The dedicated continuation-line shape has
+  # no ';' in it, so the truncation is a no-op there.
   b5=$(step5_evidence_block)
   raw=$(echo "$b5" | grep -E '^[[:space:]]*walk-artifact[[:space:]]*:' | head -1 \
-        | sed -E 's/^[[:space:]]*walk-artifact[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
+        | sed -E 's/^[[:space:]]*walk-artifact[[:space:]]*:[[:space:]]*//' \
+        | sed -E 's/;.*$//' | sed -E 's/[[:space:]]+$//')
   if [ -z "$raw" ]; then
     block_matrix "the walk gate: matrix rows are discharged but the Step 5 evidence has no 'walk-artifact:' line." \
       "run the walk first and record 'walk-artifact: record/<file>.md' in the Step 5 block. Frontmatter 'walk: exempt' is the only way past this arm, and it is a Step-0 decision."
