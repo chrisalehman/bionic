@@ -123,6 +123,49 @@ failure. Most work in this repo touches application/component design and integra
 and excludes entity/data design and persistence in a clause apiece; that is a healthy shape,
 not a thin one.
 
+### The form menu
+
+The view menu says what the design must look at. This one says what it gets *written as*. That
+is a decision too, and it is made in the frame in front of the user rather than by whatever
+template the author reached for first. Five rungs, cheapest first:
+
+- **design paragraph in the session plan** — the suggested default at `scale: task`. One
+  non-trivial task, one paragraph: what it touches, what owns the concept, what breaks if the
+  assumption is wrong.
+- **flush-left `## Design` section in the spec** — the suggested default at `scale: wave`, and
+  the rung to beat. The design sits beside the requirements it answers, so the whole provenance
+  chain reads in one file.
+- **standalone design doc** — the suggested default when the design outlives the wave that
+  authored it, or when several waves will implement it: an epic-level domain model, a mechanism a
+  later wave builds. This is what a `design:` pointer resolves to, so choosing this rung is
+  choosing to be pointed at, and the pointer is what the Step-3 approval display prints.
+- **structured models** — a logical domain model, C4 context/container/component views, sequence
+  diagrams — the suggested default when component or integration *topology* is the hard part and
+  would hide in prose. Prose describes two components well and five badly; the moment "who calls
+  whom, in what order, across which process boundary" takes a paragraph to state, it wants a
+  picture instead.
+- **full Technical Design Document** — the suggested default at momentous or cross-system scope,
+  where the surface is large enough that its decisions no longer fit beside the requirements and
+  the design has readers who will never open the spec.
+
+The rungs compose rather than exclude. Structured models most often live *inside* a `## Design`
+section or a standalone doc rather than instead of one, and reading the menu as five mutually
+exclusive boxes is its common misuse.
+
+**Derivation produces a suggested default, never a selection.** Scale gives the starting rung —
+task to paragraph, wave to `## Design` section — and three signals move it up: a design several
+waves will implement (standalone doc), topology prose would flatten (add structured models), a
+cross-system surface with its own readership (full Technical Design Document). One signal moves
+it down: a wave whose design is one decision wide gets a short section, not a doc. Print the
+result in the frame with the one-line reason it was derived; the user moves it up, moves it down,
+or lets it stand. The menu suggests, and that is all it does.
+
+**Nothing enforces the rung, deliberately.** The three-way wall already accepts every one of
+them — in place as a `## Design` section, or by pointer to whatever the standalone form produced
+— so form selection cannot fail a gate and was never going to. It is guidance ratified in
+conversation, and the whole cost of getting it wrong is a design in a shape that does not fit
+its readers.
+
 ### The Design Interview
 
 SKILL.md makes it mandatory and names what it is for. This is what to carry into it.
@@ -137,6 +180,72 @@ hooks stay pinned", because the first is answerable and the second is skimmable.
 ones no amount of reading resolves: intent, operational constraint, which way a future change
 is expected to go. Anything you could have checked by opening a file is not an interview
 question — go open the file.
+
+#### The opening frame
+
+Those four things reach the user through a frame, and the frame comes before any question. Seven
+lines, one or two sentences each — the whole thing is a screen, not a document.
+
+- **Problem** — what is wrong or missing now, in the user's terms rather than the code's.
+- **Goal** — what "designed" looks like when this interview ends.
+- **Design intuition** — the shape you already expect to be right, stated plainly enough to be
+  wrong. Withholding it to seem neutral wastes the user's turn: nobody can push on a lean you
+  never named.
+- **Requirements served** — one line per requirement this design answers, cited by id. It is the
+  provenance chain's first link, upstream of every criterion's own `provenance:`, and each entry
+  in the decision map below names the requirement it serves.
+- **Decision map** — the choices ahead, every entry marked **strategic** or **tactical**.
+  Strategic means the wave comes out shaped differently depending on the answer; tactical means
+  you could pick it yourself and be right most of the time.
+- **Capture plan** — where the design ledger accretes, named before the first answer lands.
+- **Artifact form** — the rung derived from the menu above, printed as a suggested default with
+  its one-line reason.
+
+Then question 1, which ratifies the frame and nothing else. Worked, at wave scale:
+
+> **Problem.** Two hooks each hard-code the supported version; nothing makes them move together.
+> **Goal.** One owner for that value, and a test that goes red when any rendering site drifts.
+> **Design intuition.** A single constant in a sourced lib, with the pin test widened to every
+> rendering site — I expect the prose sites to be the hard part, not the shell ones.
+> **Requirements served.** R2 (an agreement test names a real failing test) · R4 (no silent
+> drift).
+> **Decision map.** (1) Where the constant lives — **strategic**, serves R2. (2) Whether the
+> prose sites get pinned or recorded as unpinned — **strategic**, serves R4. (3) Which file the
+> test lands in — **tactical**, serves R2; I will default it to the existing pin suite.
+> **Capture plan.** The ledger accretes in this spec's `## Design`, one delta per turn.
+> **Artifact form.** Suggested default: `## Design` in place — wave scale, one file's worth of
+> decisions, nothing downstream inherits it.
+>
+> **Q1.** Does that frame hold, or is there a decision I have not listed?
+
+Three things that example does on purpose: the intuition is specific enough to argue with, every
+decision-map entry names the requirement it serves, and the tactical entry announces its default
+instead of quietly taking it.
+
+#### Walking the map
+
+**One decision per turn.** The shape this refuses is **batch presentation** — the design
+delivered whole as a wall of text ending in "thoughts?" — and it is refuted by dogfood rather
+than by taste: nobody answers six coupled questions in one reply, so they answer the easiest one
+and the rest ship unexamined. The second refuted shape is **question-without-frame**, a fork
+posed before its terms exist; the frame is that one's fix, which is why question 1 spends itself
+on the frame and never advances the map.
+
+**A strategic choice gets a question stating the tension and your lean.** "A or B?" is not that
+question. The shape is: what A buys and costs, what B buys and costs, which way you lean and why
+— which hands the user something to disagree with inside one turn.
+
+**A tactical choice you may default**, which is what the mark is for, but a default is never
+silent. State it the turn you take it, or at the latest in the closing ratification, in the form
+"I defaulted X to Y because Z; say the word and it changes." A tactical default nobody ever saw
+is the same defect as an unlogged assumption, one step earlier.
+
+**The ledger accretes visibly.** Each answer folds in as a named delta the turn it lands — "D3:
+the constant lives in `lib/`; the pin suite widens to four sites" — so the user reads a design
+being built rather than a transcript being taken. Skip the deltas and the close becomes the
+first time the user sees the design whole, which is too late for it to be the first time.
+
+#### The waiver
 
 **The waiver is the user's, and it is recorded verbatim.** If the user declines the interview,
 write their words into the design's assumptions — `Design interview waived by <user> <date>:
