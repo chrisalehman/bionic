@@ -613,6 +613,110 @@ case "$BASENAME" in
     ;;
 esac
 
+# ---------- design wall: the three-way rule (wave-02 AC-2/AC-3/AC-4) ----------
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+#
+# A wave-or-epic-scale SPEC blocks unless it carries one of three things: a
+# flush-left `## Design` section in place; a frontmatter `design:` pointer that
+# resolves to a real file carrying one; or a `design-waived:` token. Design is
+# the back half of Step 2, and this is the wall that makes it load-bearing.
+#
+# PRESENCE AND RESOLUTION ONLY. The hook never inspects the section's five
+# parts — an empty `## Design` passes here and fails at the Step-3 approval,
+# which is where a human ratifies design + plan + matrix together. Quality is
+# not a hook's job (spec §Design, assumption 4).
+#
+# Scope is `*.spec.md` at scale wave|epic. Task scale is deliberately untouched
+# (R5: a task gets a design paragraph in its session plan, prose-obliged and
+# reviewer-checked, never a wall), and plans are untouched because the design
+# lives in the spec. Keying on BASENAME rather than on the `specs/` directory
+# follows the matrix gate immediately above: a spec artifact is a spec artifact
+# wherever under the docs root it was filed, and the alternative leaves a
+# rename-free dodge.
+#
+# WRITE ONLY. On Edit, CONTENT is the file's PRE-edit body, so an Edit arm
+# would answer a question nobody asked — it would pass an edit that strips the
+# section and block every edit to the pre-W2 specs that predate the rule. The
+# post-edit hole is the hook's existing, documented Edit weakness (see the
+# CONTENT block above); this arm does not widen it and does not pretend to
+# close it.
+case "$BASENAME" in
+  *.spec.md)
+    if [ "$TOOL" = "Write" ] && { [ "$SCALE" = "wave" ] || [ "$SCALE" = "epic" ]; }; then
+
+      # Resolution follows the evidence-gate hook's walk-artifact template
+      # (resolve_walk_path): absolute stands, a docs-root subdirectory leader is
+      # docs-root-relative, anything else is project-relative — so the
+      # fully-spelled `.bionic/docs/specs/...` an author is likely to paste
+      # lands in the same place as the short form. The leader set is widened
+      # from the walk arm's single `record/` because a governing design can live
+      # in any artifact directory; unlike the walk artifact it is NOT contained
+      # to one, since an epic-level design a wave implements may legitimately
+      # sit outside this project's docs root entirely.
+      resolve_design_path() {  # $1 = raw design: value
+        case "$1" in
+          /*) printf '%s\n' "$1" ;;
+          specs/*|plans/*|adrs/*|incidents/*|record/*) printf '%s/%s\n' "$DOCS_ROOT" "$1" ;;
+          *)  printf '%s/%s\n' "$PROJECT_ROOT_FROM_PATH" "$1" ;;
+        esac
+      }
+
+      # Every block from this arm names all three ways out, whichever arm the
+      # author was reaching for — the author who mistyped a pointer may well be
+      # the author who should have written the section.
+      block_design() {  # $1 = what went wrong
+        echo "BLOCKED: canonical-sdlc spec '$BASENAME' (scale: $SCALE): $1" >&2
+        echo "Path: $FILE_PATH" >&2
+        echo "A wave- or epic-scale spec must satisfy one of three:" >&2
+        echo "  (a) a flush-left '## Design' section in this spec;" >&2
+        echo "  (b) frontmatter 'design: <path>' naming a file that carries a flush-left '## Design';" >&2
+        echo "  (c) frontmatter 'design-waived: <user> <date> <reason>' — a user-only move." >&2
+        exit 2
+      }
+
+      # `## Design` must be flush left and must be the whole heading word:
+      # `## Design — v2` is the section, `## Designer notes` is not. The matrix
+      # gate's bare prefix match would accept both; the trailing-boundary
+      # requirement costs nothing and is the difference between a wall and a
+      # word search. `[[:space:]]` covers a CRLF target's trailing \r.
+      DESIGN_HEADING='^## Design([[:space:]]|$)'
+
+      DESIGN_POINTER=$(yaml_get design)
+      # Presence-only, matching the `rigor-override:` waiver precedent: the
+      # fields are recorded for the reader, never validated here. Read by grep
+      # rather than yaml_get so that a bare `design-waived:` — a malformed
+      # waiver, but unmistakably a user's waiver — still counts as present.
+      DESIGN_WAIVED=0
+      if echo "$FRONTMATTER" | grep -qE '^[[:space:]]*design-waived[[:space:]]*:'; then
+        DESIGN_WAIVED=1
+      fi
+
+      if [ "$DESIGN_WAIVED" -eq 1 ]; then
+        :
+      elif echo "$CONTENT" | grep -qE "$DESIGN_HEADING"; then
+        :
+      elif [ -n "$DESIGN_POINTER" ]; then
+        # A `..` component is refused outright rather than normalized, mirroring
+        # the walk arm: a design named by climbing out of the directory it was
+        # named relative to is a spelling nobody should have to audit, and the
+        # refusal holds even when the climb would land on a real design.
+        if echo "$DESIGN_POINTER" | grep -qE '(^|/)\.\.(/|$)'; then
+          block_design "design: '$DESIGN_POINTER' climbs out with a '..' component and is refused."
+        fi
+        DESIGN_ABS=$(resolve_design_path "$DESIGN_POINTER")
+        if [ ! -f "$DESIGN_ABS" ]; then
+          block_design "design: '$DESIGN_POINTER' names no file (resolved to $DESIGN_ABS)."
+        fi
+        if ! grep -qE "$DESIGN_HEADING" "$DESIGN_ABS" 2>/dev/null; then
+          block_design "design: '$DESIGN_POINTER' resolves to $DESIGN_ABS, which carries no flush-left '## Design' section."
+        fi
+      else
+        block_design "no design. It carries no '## Design' section, no 'design:' pointer and no waiver."
+      fi
+    fi
+    ;;
+esac
+
 # ---------- AC-11 / AC-12: tree creation on first lifecycle use ----------
 # [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
 #
