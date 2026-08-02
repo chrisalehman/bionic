@@ -3325,7 +3325,7 @@ versioned_plan() {  # $1 = the canonical_sdlc_version value to declare
   printf -- '## SDLC State\ncurrent: 3\nStep 3: .bionic/docs/plans/wave-01.plan.md\n'
 }
 
-for bad_version in 11 9 2 99 "" banana 12.0 v12; do
+for bad_version in 11 12 9 2 99 "" banana 12.0 v12; do
   h=$(make_home)
   write_plan "$h" "$(versioned_plan "$bad_version")" > /dev/null
   expect_block "unsupported canonical_sdlc_version '${bad_version:-<empty>}' → block, naming the value found" \

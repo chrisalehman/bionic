@@ -306,7 +306,7 @@ assert_eq "exit 0" 0 "$HOOK_EXIT"
 
 project=$(make_project)
 
-for bad_version in 11 9 2 99 "" "banana" "12.0" "v12"; do
+for bad_version in 11 12 9 2 99 "" "banana" "12.0" "v12"; do
   label="${bad_version:-<empty>}"
   run_write "$project/.bionic/docs/plans/epic-01-demo/unsupported.plan.md" \
     "$(build_plan version="$bad_version")"

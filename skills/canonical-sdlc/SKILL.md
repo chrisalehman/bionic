@@ -254,7 +254,7 @@ The citation travels with the criterion into the plan's matrix AC block, where t
 
 Every design decision cites the requirements it serves. That is the middle link of the provenance chain — **requirement → design decision → criterion → evidence** — and the Step-5 auditor walks it whole. Authoring guidance, and what a table row is worth, live in `operational-rules.md`.
 
-**The design conversation.** Step 2 is already semi-interactive, and this is what that interactivity is for: present the design *and your own assessment of it* — weak points, load-bearing assumptions, open questions — while changing it is still cheap. No new *approval* stop: the binding approval remains the Step-3 checkpoint, which ratifies design, plan, and matrix together. The wall below is a write-time structural gate — it grants approval to nothing.
+**The design conversation.** Step 2 is already semi-interactive, and this is what that interactivity is for: present the design *and your own assessment of it* — weak points, load-bearing assumptions, open questions — while changing it is still cheap. No new *approval* stop: the binding approval remains the Step-3 checkpoint, which ratifies design, plan, and matrix together. The wall below is a write-time structural gate — it grants approval to nothing. It does imply an authoring order, though: the wall checks every Write, so the design is composed here, in conversation, and the spec lands in one complete Write — a requirements-only first draft of a wave-or-epic spec blocks on the write that would create the file.
 
 **One wall, three ways to satisfy it.** A spec at `scale: wave` or `scale: epic` must carry at least one of:
 
