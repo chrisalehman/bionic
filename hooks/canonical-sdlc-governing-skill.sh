@@ -620,6 +620,8 @@ esac
 # flush-left `## Design` section in place; a frontmatter `design:` pointer that
 # resolves to a real file carrying one; or a `design-waived:` token. Design is
 # the back half of Step 2, and this is the wall that makes it load-bearing.
+# The arms are not interchangeable in the order they are tried — see the
+# PRECEDENCE note at the branch chain below.
 #
 # PRESENCE AND RESOLUTION ONLY. The hook never inspects the section's five
 # parts — an empty `## Design` passes here and fails at the Step-3 approval,
@@ -718,9 +720,25 @@ case "$BASENAME" in
         DESIGN_WAIVED=1
       fi
 
+      # PRECEDENCE: waiver short-circuits everything; below it, a PRESENT
+      # `design:` pointer validates unconditionally — resolved, existence-checked
+      # and `..`-refused whether or not the spec also carries its own section —
+      # and only the absence of a pointer falls through to the in-place read.
+      # [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+      #
+      # The order matters because the pointer is not one of three interchangeable
+      # ways to be quiet: it is the path the Step-3 approval display prints for
+      # the user to open (R2/AC-1). The combined shape — pointer plus a local
+      # delta section — is the one the docs recommend, so an `elif` that let the
+      # section satisfy the wall first made the recommended shape the one where a
+      # typo, a moved epic design or a rename produced an approval display citing
+      # nothing, with the wall silent. A pointer is never decorative (critic C-3).
+      #
+      # The waived path is deliberately NOT symmetric: `design-waived:` still
+      # silences a broken pointer beside it. That contradiction is a separate,
+      # known finding, and closing it here would smuggle a second rule into a
+      # repair scoped to the unwaived path.
       if [ "$DESIGN_WAIVED" -eq 1 ]; then
-        :
-      elif echo "$CONTENT" | strip_fences | grep -qE "$DESIGN_HEADING"; then
         :
       elif [ -n "$DESIGN_POINTER" ]; then
         # A `..` component is refused outright rather than normalized, mirroring
@@ -737,7 +755,7 @@ case "$BASENAME" in
         if ! normalize_newlines < "$DESIGN_ABS" 2>/dev/null | strip_fences | grep -qE "$DESIGN_HEADING"; then
           block_design "design: '$DESIGN_POINTER' resolves to $DESIGN_ABS, which carries no flush-left '## Design' section."
         fi
-      else
+      elif ! echo "$CONTENT" | strip_fences | grep -qE "$DESIGN_HEADING"; then
         block_design "no design. It carries no '## Design' section, no 'design:' pointer and no waiver."
       fi
     fi
