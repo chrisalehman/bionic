@@ -99,6 +99,56 @@ expect_pin_in_file "operational-rules.md pin: 'C4'" "C4" "$RULES"
 expect_pin_in_file "operational-rules.md pin: 'suggested default'" "suggested default" "$RULES"
 
 # ============================================================
+# SECTION 4: step renames — "Ideate" retired, "1 Scope" / "2 Design" pinned
+# ============================================================
+
+echo ""
+echo "=== Section 4: step renames ==="
+
+expect_pin_in_file "SKILL.md pin: steps table row '| 1 Scope |'" "| 1 Scope |" "$SKILL"
+expect_pin_in_file "SKILL.md pin: steps table row '2 Design'" "2 Design" "$SKILL"
+
+# expect_zero_occurrences_in_file <label> <needle> <file>
+# Fixed-string absence check. On failure, names every offending file:line so
+# a RED run points straight at the leftover text.
+expect_zero_occurrences_in_file() {
+  local label="$1" needle="$2" file="$3"
+  local hits
+  TOTAL=$((TOTAL + 1))
+  if [ ! -f "$file" ]; then
+    echo "PASS: $label (file absent)"
+    PASS=$((PASS + 1))
+    return
+  fi
+  hits="$(grep -nF -- "$needle" "$file" 2>/dev/null || true)"
+  if [ -z "$hits" ]; then
+    echo "PASS: $label"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: $label"
+    while IFS= read -r hitline; do
+      echo "  ${file}:${hitline}"
+    done <<< "$hits"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+expect_zero_occurrences_in_file "'Ideate' retired from SKILL.md" "Ideate" "$SKILL"
+expect_zero_occurrences_in_file "'Ideate' retired from operational-rules.md" "Ideate" "$RULES"
+
+AGENTS_DIR="${REPO}/agents"
+if [ -d "$AGENTS_DIR" ]; then
+  for f in "$AGENTS_DIR"/*; do
+    [ -f "$f" ] || continue
+    expect_zero_occurrences_in_file "'Ideate' retired from ${f#$REPO/}" "Ideate" "$f"
+  done
+else
+  TOTAL=$((TOTAL + 1))
+  echo "FAIL: agents/ directory not found at $AGENTS_DIR"
+  FAIL=$((FAIL + 1))
+fi
+
+# ============================================================
 # Results
 # ============================================================
 
