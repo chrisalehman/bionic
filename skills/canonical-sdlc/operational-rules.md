@@ -152,7 +152,8 @@ column is the obligation the reviewer reads back. Shape:
 ```
 | concept | owning module (SSoT) | rendering surfaces | agreement test |
 |---|---|---|---|
-| version pin value | one logical constant | both hooks · scripts.test.sh assertions | pin-sync rows in tests/scripts.test.sh |
+| version pin value | no single place — typed at each site; that IS the finding | both hooks · scripts.test.sh assertions · SKILL.md prose · this file's version history · hook-chain diagram | pin-sync rows in tests/scripts.test.sh pin the two hook sites; the prose and diagram sites drift silently |
+| agreement-test exemplar + authoring rules | SKILL.md §Step 6 | SKILL.md §Step 6 · agents/critic.md AXIS block · this section | AXIS-marker rows in tests/agent-roles.test.sh — the pin covers two of the three surfaces; this section is the unpinned one |
 ```
 
 - **One row per concept rendered at more than one surface.** A concept that exists in exactly
@@ -165,8 +166,13 @@ column is the obligation the reviewer reads back. Shape:
   three surfaces, and the doc is the one that drifts, because nothing runs it.
 - **The agreement test is a real hermetic test that fails when the surfaces disagree** — named,
   not a suite and not "covered by the unit tests". The standing exemplar is the
-  `SUPPORTED_SDLC_VERSION` pin-sync rows in `tests/scripts.test.sh`: one logical constant, three
-  rendering sites, one test that goes red the moment any single site moves alone. `none — <why>`
+  `SUPPORTED_SDLC_VERSION` pin-sync rows in `tests/scripts.test.sh`: one logical constant, two
+  rendering sites pinned — the two hooks — and one test that goes red the moment either moves
+  alone. It is also the honest limit, and the limit is the half worth knowing while you write the
+  cell: the version paragraph in `SKILL.md`, the version-history bullet at the top of this file
+  and the version renderings in `diagrams/hook-chain.excalidraw` are rendering sites *outside*
+  that tuple, and they drift silently — which is exactly the row the table above writes down
+  rather than rounding up to "pinned". `none — <why>`
   is a legitimate cell — some pairs are prose against prose, and a mandate dispatched verbatim
   has no seam to test — but it is a cell the reviewer will stop on, so give it the reason.
 
