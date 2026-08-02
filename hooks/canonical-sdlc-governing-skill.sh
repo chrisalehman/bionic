@@ -695,6 +695,19 @@ case "$BASENAME" in
         '
       }
 
+      # The pointer target is read off disk, so it needs the same normalization
+      # `$CONTENT` got at the top of this hook — the stdin twin of the evidence
+      # gate's normalize_newlines(). The template this arm follows was copied for
+      # its path half and not its read half: CRLF survives a line-anchored grep
+      # (`[[:space:]]` eats the trailing \r), but a CR-only document arrives as
+      # ONE record, so no `## Design` is ever at a line start and a legitimate
+      # target false-BLOCKs. CRLF coverage does not catch this class — see
+      # `.claude/rules/hook-authoring.md`, and c14 for the case that does.
+      # [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+      normalize_newlines() {  # a document on stdin → the same document, LF-split
+        awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }'
+      }
+
       DESIGN_POINTER=$(yaml_get design)
       # Presence-only, matching the `rigor-override:` waiver precedent: the
       # fields are recorded for the reader, never validated here. Read by grep
@@ -721,7 +734,7 @@ case "$BASENAME" in
         if [ ! -f "$DESIGN_ABS" ]; then
           block_design "design: '$DESIGN_POINTER' names no file (resolved to $DESIGN_ABS)."
         fi
-        if ! strip_fences < "$DESIGN_ABS" 2>/dev/null | grep -qE "$DESIGN_HEADING"; then
+        if ! normalize_newlines < "$DESIGN_ABS" 2>/dev/null | strip_fences | grep -qE "$DESIGN_HEADING"; then
           block_design "design: '$DESIGN_POINTER' resolves to $DESIGN_ABS, which carries no flush-left '## Design' section."
         fi
       else

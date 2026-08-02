@@ -1563,6 +1563,30 @@ run_write "$DESIGN_SPECS/w13b.spec.md" \
   "$(build_spec section=no design=specs/epic-01-demo/unfenced-design.spec.md)"
 assert_eq "design_fenced_pointer_target_control exit 0" 0 "$HOOK_EXIT"
 
+# The pointer target is read off disk, so it gets the same newline normalization
+# `$CONTENT` gets — CR-only collapses a document to one record, and no heading is
+# ever at a line start after that. CRLF passes either way (`[[:space:]]` eats the
+# trailing \r), so CRLF coverage alone would not have caught this: the CR-only
+# case is the one that discriminates, per `.claude/rules/hook-authoring.md`.
+echo "c14: a CR-only pointer target carrying a real '## Design' → allow"
+to_cr_only "$(build_spec)" > "$DESIGN_SPECS/cr-design.spec.md"
+run_write "$DESIGN_SPECS/w14.spec.md" \
+  "$(build_spec section=no design=specs/epic-01-demo/cr-design.spec.md)"
+assert_eq "design_pointer_cr_only exit 0" 0 "$HOOK_EXIT"
+
+echo "c14b: a CRLF pointer target carrying a real '## Design' → allow (control)"
+to_crlf "$(build_spec)" > "$DESIGN_SPECS/crlf-design.spec.md"
+run_write "$DESIGN_SPECS/w14b.spec.md" \
+  "$(build_spec section=no design=specs/epic-01-demo/crlf-design.spec.md)"
+assert_eq "design_pointer_crlf exit 0" 0 "$HOOK_EXIT"
+
+echo "c14c: a CR-only pointer target WITHOUT '## Design' → still blocks (the fix is not a bypass)"
+to_cr_only "$(build_spec section=no)" > "$DESIGN_SPECS/cr-no-design.spec.md"
+run_write "$DESIGN_SPECS/w14c.spec.md" \
+  "$(build_spec section=no design=specs/epic-01-demo/cr-no-design.spec.md)"
+assert_eq "design_pointer_cr_only_no_section exit 2" 2 "$HOOK_EXIT"
+assert_contains "design_pointer_cr_only_no_section says the target carries no section" "carries no flush-left" "$HOOK_STDERR"
+
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then
