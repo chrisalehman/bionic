@@ -1,7 +1,7 @@
 ---
 name: canonical-sdlc-operational-rules
 description: Canonical-sdlc operational rules — artifact shape, evidence gating, intent-specific behaviors, version history. Bulk procedural reference; copied beside SKILL.md, read on demand — nothing loads it.
-updated: 2026-08-01
+updated: 2026-08-02
 ---
 
 # canonical-sdlc operational rules
@@ -14,7 +14,9 @@ nothing loads it unprompted, and being copied beside the skill is not the same a
 
 ## Engagement and the axis triple
 
-- **v12 is the ONLY supported version (2026-07-26, epic-11).** All backward compatibility was deleted: no grandfathering, no version ladder, no per-version shape tables. Both hooks check `SUPPORTED_SDLC_VERSION=12` and block loudly on anything else (previously the evidence gate fell through to a bare `exit 0` on an unrecognized version, so such a plan committed entirely ungated). v12's contract is IDENTICAL to v11's below — same triple, flags, `model_plan`, Verification Matrix, evidence shapes, `scale: task|wave|epic`; no new fields. It is v11 renumbered to mark the pruned-harness generation. The `continuous` scale from the different v12 on the deleted `wave-keepalive` branch is abandoned. **Every version bullet below v12 in this file is historical record only — none of it is live behavior, and the `mode:` vocabulary of v≤10 is dead.**
+- **v13 is the ONLY supported version (2026-08-02, epic-14 wave-02 — design-before-build).** All backward compatibility was deleted again: v12 plans now block, no grandfathering, no version ladder. Both hooks check `SUPPORTED_SDLC_VERSION=13`. Four contract changes over v12, all landed this wave: (a) **Design back-half of Step 2** — SKILL.md now carries the full `## Design` contract (the ownership table, scaling by task/wave/epic, rejected alternatives, assumptions feeding the plan's `## Assumptions`) and the operational-rules companion below (`## Design section authoring`). (b) **Three-way design wall** — a `*.spec.md` write at `scale: wave` or `scale: epic` now blocks unless it satisfies one of three arms: a flush-left `## Design` section in place, a `design: <path>` pointer resolving to a real file that itself carries one, or a `design-waived: <user> <date> <reason>` token; the governing-skill hook enforces this at write time (SKILL.md §Artifact layout, §Step 5 → Waiver Protocol, §Hooks). (c) **6-axis Step-6 review** — the adversarial self-review grew a sixth axis, duplication (one implementation site per concept, anchored on the design's ownership table), alongside correctness/readability/architecture/security/performance; the critic mandate (`agents/critic.md`) carries the duplication axis and the agreement-test obligation verbatim. (d) **Auditor coverage-chain extension** — the Step-5 Verification Auditor mandate (`agents/auditor.md`) now walks the full chain top-down (requirement → design decision → criterion → evidence) as its first pass, before power and authenticity, seeded mechanically from the `provenance:` citation map and the design section's requirement references; an uncovered requirement is a wave-level finding the per-row verdict scheme can't otherwise express. v13's remaining contract is IDENTICAL to v12's — same triple, flags, `model_plan`, Verification Matrix, evidence shapes, `scale: task|wave|epic`; no new frontmatter fields. **Every version bullet below v13 in this file is historical record only — none of it is live behavior, and the `mode:` vocabulary of v≤10 is dead.**
+
+- **v12 is the ONLY supported version (2026-07-26, epic-11; superseded by v13 on 2026-08-02 — see above).** All backward compatibility was deleted: no grandfathering, no version ladder, no per-version shape tables. Both hooks checked `SUPPORTED_SDLC_VERSION=12` and blocked loudly on anything else (previously the evidence gate fell through to a bare `exit 0` on an unrecognized version, so such a plan committed entirely ungated). v12's contract was IDENTICAL to v11's below — same triple, flags, `model_plan`, Verification Matrix, evidence shapes, `scale: task|wave|epic`; no new fields. It is v11 renumbered to mark the pruned-harness generation. The `continuous` scale from the different v12 on the deleted `wave-keepalive` branch is abandoned.
 
   - **W1 verification power (2026-08-01, epic-14 wave-01) — tightened v12 IN PLACE, NO version bump; the bump belongs to W2.** Four contract changes, all inside `canonical_sdlc_version: 12`. (a) **Walk-first Step 5:** plan frontmatter gains `walk: required | exempt`, derived at Step 0 from the declared surface flags and printed in the confirmation display; at `current: 5..9`, once any matrix row is `discharged`, the evidence gate demands a `walk-artifact:` line in the Step-5 evidence naming a real file under `<docs-root>/record/` that contains no `AC-<n>` identifier. **Fail-closed:** only the literal `exempt` disarms it — an absent key or an off-enum value ARMS it, because an exemption is a Step-0 ratification and never an inference from an omission. The governing-skill hook blocks an off-enum `walk:` value at artifact-write time. Existence is enforceable; "first" is discipline no commit-time hook can see. (b) **Provenance per criterion:** every AC carries `provenance: user <date> "<quote>" | spec §N | ticket-N | report §N`, authored with the criterion; the literal whole value `provenance: implementation` blocks at the evidence gate, a citation merely containing the word passes, and a MISSING `provenance:` line does not block (presence is a W+1 candidate). (c) **Absence-readback rule:** a zero/empty/not-present readback needs a paired positive case or the row is presumed powerless and cannot discharge — judgment-enforced through the auditor mandate, deliberately NOT a hook arm. (d) **Rigor floors advise, never force** — see the supersession note below. Files: SKILL.md (Step 0, new Step-2 section, Step 5, evidence shapes, `## Hooks`), both hooks, `agents/auditor.md`, `agents/test-runner.md`, both hook test suites.
 
@@ -83,7 +85,7 @@ nothing loads it unprompted, and being copied beside the skill is not the same a
   sdlc-step: N
   epic: epic-NN-<slug>
   wave: wave-NN-<slug>
-  canonical_sdlc_version: 12
+  canonical_sdlc_version: 13
   intent: <intent>
   rigor: <rigor>
   scale: <scale>
@@ -91,6 +93,126 @@ nothing loads it unprompted, and being copied beside the skill is not the same a
   ```
 
   at the top. The `canonical-sdlc-governing-skill.sh` PreToolUse|Write,Edit hook blocks writes missing the `governing-skill:` field. Non-artifact files (README.md, images) under those paths pass through.
+
+## Design section authoring (the Step-2 back-half)
+
+SKILL.md carries the contract — the five parts, the three-way rule, the scale line, the
+mandatory Design Interview, and the provenance chain each design decision sits in. This is how
+to author one that earns its keep.
+
+### The view menu
+
+A design is several *views* of one change, and the way a design goes wrong is rarely a wrong
+answer — it is a view nobody looked at. The menu:
+
+- **logical domain model** — the entities and relationships the change reasons about;
+- **entity / data design** — the concrete shape of those entities: fields, types, identity;
+- **persistence** — schema, mutability, transactions, migration;
+- **application / component design** — modules, boundaries, control flow, who calls whom;
+- **integration surfaces** — the contracts crossed: APIs, hooks, CLIs, file formats, events;
+- **deployment / runtime architecture** — where it runs, in what process, under what lifecycle.
+
+**The design names which views the change touches, and includes those.** A view considered and
+excluded costs one clause — "no persistence: nothing is stored" — and that clause is worth its
+line, because it is the entire difference between a decision and an oversight. **Silent
+omission is the failure the menu exists to prevent**: a view that appears in neither list is
+itself the finding, and the reader cannot tell an inapplicable view from a forgotten one.
+
+Not every change touches every view, and padding the section with empty headings is its own
+failure. Most work in this repo touches application/component design and integration surfaces
+and excludes entity/data design and persistence in a clause apiece; that is a healthy shape,
+not a thin one.
+
+### The Design Interview
+
+SKILL.md makes it mandatory and names what it is for. This is what to carry into it.
+
+**Bring four things.** The view declarations, touched and excluded, in that one-clause form.
+The design itself, at the altitude of decisions rather than of code. The rejected alternatives,
+each with the reason it lost. And the load-bearing assumptions **posed as questions** — "this
+assumes the installed hook stays at the old version all wave; is that right?" beats "assumes
+hooks stay pinned", because the first is answerable and the second is skimmable.
+
+**Interview on what the repo cannot settle.** The assumptions worth a user's attention are the
+ones no amount of reading resolves: intent, operational constraint, which way a future change
+is expected to go. Anything you could have checked by opening a file is not an interview
+question — go open the file.
+
+**The waiver is the user's, and it is recorded verbatim.** If the user declines the interview,
+write their words into the design's assumptions — `Design interview waived by <user> <date>:
+"<quote>"` — so a later reader meets a decision rather than an absence. "The user did not
+respond" is not a waiver; it is an unfinished Step 2. An agent never waives its own interview.
+
+### The ownership table
+
+The table is the load-bearing row of the whole section, and the only part later steps consume
+mechanically: Step 6's duplication axis anchors on the owner column, and the agreement-test
+column is the obligation the reviewer reads back. Shape:
+
+```
+| concept | owning module (SSoT) | rendering surfaces | agreement test |
+|---|---|---|---|
+| version pin value | no single place — typed at each site; that IS the finding | both hooks · scripts.test.sh assertions · SKILL.md prose · this file's version history · hook-chain diagram | pin-sync rows in tests/scripts.test.sh pin the two hook sites; the prose and diagram sites drift silently |
+| agreement-test exemplar + authoring rules | SKILL.md §Step 6 | SKILL.md §Step 6 · agents/critic.md AXIS block · this section | AXIS-marker rows in tests/agent-roles.test.sh — the pin covers two of the three surfaces; this section is the unpinned one |
+```
+
+- **One row per concept rendered at more than one surface.** A concept that exists in exactly
+  one place has nothing to disagree with itself about, and listing it is padding. The table is a
+  duplication ledger, not an inventory of the change.
+- **The owner is a place, not a layer or a role.** "the governing-skill hook" is an owner; "the
+  backend" is not. If you cannot name a file, a function, or a single named constant, the concept
+  does not have an owner yet — and that is the finding. Write it down instead of inventing one.
+- **Rendering surfaces include prose.** A constant read by two scripts and quoted in a doc has
+  three surfaces, and the doc is the one that drifts, because nothing runs it.
+- **The agreement test is a real hermetic test that fails when the surfaces disagree** — named,
+  not a suite and not "covered by the unit tests". The standing exemplar is the
+  `SUPPORTED_SDLC_VERSION` pin-sync rows in `tests/scripts.test.sh`: one logical constant, two
+  rendering sites pinned — the two hooks — and one test that goes red the moment either moves
+  alone. It is also the honest limit, and the limit is the half worth knowing while you write the
+  cell: the version paragraph in `SKILL.md`, the version-history bullet at the top of this file
+  and the version renderings in `diagrams/hook-chain.excalidraw` are rendering sites *outside*
+  that tuple, and they drift silently — which is exactly the row the table above writes down
+  rather than rounding up to "pinned". `none — <why>`
+  is a legitimate cell — some pairs are prose against prose, and a mandate dispatched verbatim
+  has no seam to test — but it is a cell the reviewer will stop on, so give it the reason.
+
+### Scaling
+
+- **Task** — a paragraph per non-trivial task, in the session plan: what it touches, what owns
+  the concept, what breaks if the assumption is wrong. No table, and no wall.
+- **Wave** — a page or two in the spec, all five parts. The ownership table usually runs three to
+  six rows; at twenty, the wave is carrying more than one wave's worth of concepts and the
+  finding is the slice decomposition, not the table.
+- **Epic** — the domain model and boundaries that outlive any single wave, so waves can point at
+  them rather than restate them.
+- **Never forty pages.** The section exists to make the ownership and duplication decisions
+  visible before code is written, not to specify the code. A design longer than the slice list it
+  governs has stopped being a design and started being an implementation nobody ran.
+
+Rejected alternatives are one line each — the alternative, and why it lost — and they are the
+part a later reader needs most, because the question they answer ("why not just…") is the one
+that recurs. Assumptions are what the design would break if false; they seed the plan's
+`## Assumptions`, where Step 4 resolves them inline.
+
+### The by-reference form
+
+`design: <path>` in frontmatter is for a design that legitimately lives above the artifact —
+typically an epic-level design that several waves implement. The target must be a real file
+carrying its own flush-left `## Design`, and path resolution follows the walk-artifact template
+(against the docs root, a bare path against the project root, an absolute path as written, a
+`..` component refused).
+
+A wave may carry both the pointer and a local `## Design` section, and that is the intended
+shape when an inherited design is right about the domain but silent on this wave's specifics:
+the pointer names what governs, the local section carries only the delta. The local section does
+not excuse the pointer: a `design:` that is present is resolved, existence-checked and
+`..`-refused whatever else the spec carries, because the path it names is the one the approval
+display prints for the user to open. Whether the inherited design suffices is judgment, ratified
+at the Step-3 approval alongside everything else.
+
+`design-waived:` is not a lighter version of the pointer. Waived means no design governs this
+artifact; a pointer means one does and here is where. Waiving because the design lives elsewhere
+destroys the one thing the approval display is built to carry — the path the user would open.
 
 ## Evidence gate
 

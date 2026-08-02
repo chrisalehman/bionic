@@ -365,7 +365,7 @@ MULTI_AGENT=$(frontmatter_get multi_agent)
 # no version dispatch anywhere below this line, so there is also no path that
 # reaches `exit 0` by matching no arm.
 # [WALL: hooks/canonical-sdlc-evidence-gate.test.sh]
-SUPPORTED_SDLC_VERSION=12
+SUPPORTED_SDLC_VERSION=13
 
 if [ "$SDLC_VERSION" != "$SUPPORTED_SDLC_VERSION" ]; then
   echo "BLOCKED: canonical-sdlc evidence-gate: plan declares canonical_sdlc_version: '$SDLC_VERSION'." >&2
@@ -1318,9 +1318,16 @@ validate_walk_artifact() {
     | grep -cx 'discharged')
   [ "$discharged" -gt 0 ] || return 0
 
+  # Truncated at the first ';' below: sibling extractors in this hook already
+  # tolerate a Step-5 line with more fields packed after the value
+  # (`walk-artifact: record/x.md; cmd: ...`); this one was the outlier,
+  # greedy to end-of-line, and swallowed the packed remainder as part of the
+  # "path" (plan assumption A17). The dedicated continuation-line shape has
+  # no ';' in it, so the truncation is a no-op there.
   b5=$(step5_evidence_block)
   raw=$(echo "$b5" | grep -E '^[[:space:]]*walk-artifact[[:space:]]*:' | head -1 \
-        | sed -E 's/^[[:space:]]*walk-artifact[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
+        | sed -E 's/^[[:space:]]*walk-artifact[[:space:]]*:[[:space:]]*//' \
+        | sed -E 's/;.*$//' | sed -E 's/[[:space:]]+$//')
   if [ -z "$raw" ]; then
     block_matrix "the walk gate: matrix rows are discharged but the Step 5 evidence has no 'walk-artifact:' line." \
       "run the walk first and record 'walk-artifact: record/<file>.md' in the Step 5 block. Frontmatter 'walk: exempt' is the only way past this arm, and it is a Step-0 decision."

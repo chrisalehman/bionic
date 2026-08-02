@@ -125,17 +125,23 @@ assert_contains() {
 #   intent/rigor/scale — triple values (default build/audited/wave);
 #     value OMIT drops the line entirely (missing-field cases).
 #   step    — sdlc-step (default 3).
-#   version — canonical_sdlc_version (default 12); OMIT drops the line.
+#   version — canonical_sdlc_version (default 13); OMIT drops the line.
 #   mode    — if set, inject a `mode:` line (split-brain guard case).
 #   omit    — space-separated flag names to drop (missing-flag cases).
 #   matrix  — yes|no; drop the "## Verification Matrix" section when no.
 #   walk    — if set, inject a `walk: <value>` line (default OMIT, no line).
 #   override — if set, inject the given full `rigor-override: ...` line
 #              verbatim (default OMIT, no line).
+#   waived  — if set, inject the given full `design-waived: ...` line verbatim
+#             (default OMIT). Only the cases that write this fixture to a
+#             *.spec.md path need it: the design wall (wave-02) applies to
+#             wave/epic-scale SPEC artifacts, so a spec fixture that is not
+#             about design must satisfy that arm to keep testing its own
+#             subject. Plan-targeting cases never set it.
 build_plan() {
-  local intent=build rigor=audited scale=wave step=3 version=12 mode="OMIT" omit=" " matrix=yes
+  local intent=build rigor=audited scale=wave step=3 version=13 mode="OMIT" omit=" " matrix=yes
   local skill="superpowers:writing-plans"
-  local walk="OMIT" override="OMIT"
+  local walk="OMIT" override="OMIT" waived="OMIT"
   local arg
   for arg in "$@"; do
     case "$arg" in
@@ -150,6 +156,7 @@ build_plan() {
       skill=*)   skill="${arg#skill=}" ;;
       walk=*)    walk="${arg#walk=}" ;;
       override=*) override="${arg#override=}" ;;
+      waived=*)  waived="${arg#waived=}" ;;
     esac
   done
 
@@ -166,6 +173,7 @@ wave: wave-01-x
   [ "$scale" = OMIT ]   || out+="scale: $scale"$'\n'
   [ "$walk" = OMIT ]    || out+="walk: $walk"$'\n'
   [ "$override" = OMIT ] || out+="$override"$'\n'
+  [ "$waived" = OMIT ]   || out+="$waived"$'\n'
 
   local flags=("cleanup_on_finish:true" "use_worktree:false" \
     "surface_type:none" "language:none" "has_ui:false" \
@@ -199,6 +207,12 @@ stack-health: n/a: no long-running serve observed
 
 VALID_FRONTMATTER="$(build_plan)"
 
+# A wave-scale spec must satisfy the design wall (wave-02 AC-2). Cases below
+# that write a plan fixture to a *.spec.md path are not about design, so they
+# carry the waiver token and keep testing their own subject.
+SPEC_DESIGN_WAIVER='design-waived: test-fixture 2026-08-02 covered by the design-wall cases'
+VALID_SPEC_FRONTMATTER="$(build_plan waived="$SPEC_DESIGN_WAIVER")"
+
 MISSING_FM='# Plan body, no frontmatter
 '
 
@@ -226,7 +240,7 @@ run_write "$project/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$EMPTY_G
 assert_eq "exit 2" 2 "$HOOK_EXIT"
 
 echo "Write: spec file with valid frontmatter → allow"
-run_write "$project/.bionic/docs/specs/epic-01-demo/wave-01-x.spec.md" "$VALID_FRONTMATTER"
+run_write "$project/.bionic/docs/specs/epic-01-demo/wave-01-x.spec.md" "$VALID_SPEC_FRONTMATTER"
 assert_eq "exit 0" 0 "$HOOK_EXIT"
 
 echo "Write: adr file with valid frontmatter → allow"
@@ -283,7 +297,7 @@ assert_eq "exit 0" 0 "$HOOK_EXIT"
 # canonical_sdlc_version: exactly one supported value
 # ============================================================
 #
-# The hook supports canonical_sdlc_version: 12 and nothing else. Every other
+# The hook supports canonical_sdlc_version: 13 and nothing else. Every other
 # value blocks with exit 2 and a message naming the value found. One
 # table-driven case over representative bad values — an older number, a much
 # older number, a legacy single digit, a far-future number, an empty value,
@@ -292,7 +306,7 @@ assert_eq "exit 0" 0 "$HOOK_EXIT"
 
 project=$(make_project)
 
-for bad_version in 11 9 2 99 "" "banana" "12.0" "v12"; do
+for bad_version in 11 12 9 2 99 "" "banana" "12.0" "v12"; do
   label="${bad_version:-<empty>}"
   run_write "$project/.bionic/docs/plans/epic-01-demo/unsupported.plan.md" \
     "$(build_plan version="$bad_version")"
@@ -304,7 +318,7 @@ done
 echo "canonical_sdlc_version line absent entirely → block"
 run_write "$project/.bionic/docs/plans/epic-01-demo/no-version.plan.md" "$(build_plan version=OMIT)"
 assert_eq "absent version blocks" 2 "$HOOK_EXIT"
-assert_contains "absent version names 12 as the supported value" \
+assert_contains "absent version names 13 as the supported value" \
   "the only supported version" "$HOOK_STDERR"
 
 # ============================================================
@@ -414,7 +428,8 @@ run_write "$project/.bionic/docs/plans/epic-01-demo/task.plan.md" "$(build_plan 
 assert_eq "task_scale_exempt_from_matrix exit 0" 0 "$HOOK_EXIT"
 
 echo "spec at sdlc-step 3 without matrix → allow (matrix is a plan-body artifact)"
-run_write "$project/.bionic/docs/specs/epic-01-demo/no-matrix.spec.md" "$(build_plan step=3 matrix=no)"
+run_write "$project/.bionic/docs/specs/epic-01-demo/no-matrix.spec.md" \
+  "$(build_plan step=3 matrix=no waived="$SPEC_DESIGN_WAIVER")"
 assert_eq "spec_exempt_from_matrix exit 0" 0 "$HOOK_EXIT"
 
 echo "continuation.md at sdlc-step 3 without matrix → allow"
@@ -572,7 +587,7 @@ project=$(make_project)
 cat > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md" <<'EOF'
 ---
 governing-skill: canonical-sdlc
-canonical_sdlc_version: 12
+canonical_sdlc_version: 13
 rigor-floor: audited
 ---
 
@@ -614,7 +629,7 @@ printf 'rigor-floor: audited\n' > "$project/.bionic/config.yaml"
 cat > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md" <<'EOF'
 ---
 governing-skill: canonical-sdlc
-canonical_sdlc_version: 12
+canonical_sdlc_version: 13
 rigor-floor: audited
 ---
 
@@ -1190,7 +1205,7 @@ Prepend this block:
 ```
 ---
 governing-skill: canonical-sdlc
-canonical_sdlc_version: 12
+canonical_sdlc_version: 13
 ---
 ```
 '
@@ -1321,6 +1336,287 @@ if [ -z "$ac14_hits" ]; then
 else
   FAIL=$((FAIL + 1)); printf '  FAIL  ac14_b shipped surfaces still instruct a context.md write:\n%s\n' "$ac14_hits"
 fi
+
+# ============================================================
+# design wall: the three-way rule (wave-02 AC-2, AC-3, AC-4)
+# ============================================================
+#
+# A wave-or-epic-scale spec artifact must carry one of: a flush-left
+# `## Design` section in place; a frontmatter `design:` pointer resolving to a
+# real file that itself carries one; or a `design-waived:` token. Task-scale
+# specs and non-spec artifacts never see the arm.
+#
+# FIXTURE FIDELITY (wave-02 design assumption 1). build_spec() is a
+# copy-and-mutate of this wave's own real spec artifact,
+# `.bionic/docs/specs/epic-14-verification-power/wave-02-design-before-build.spec.md`:
+# same frontmatter key set and order (no `wave:` key — specs don't carry one;
+# `created:` last), same body skeleton (`# <name> — spec`, `## Requirements`,
+# `## Acceptance criteria`, `## Design` with its five sub-headings). It is
+# EMBEDDED rather than read from disk at run time because the whole `.bionic/`
+# tree is gitignored — a suite that read the real file would pass on this
+# machine and vanish on a fresh clone. Re-derive it by hand if the artifact
+# shape moves.
+#
+# Knobs: scale (default wave) · section=yes|no (the in-place `## Design`,
+# default yes, as in the real artifact) · design=<value> injects a
+# `design:` line · waived=<full line> injects it verbatim.
+build_spec() {
+  local scale=wave section=yes design="OMIT" waived="OMIT" step=2
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      scale=*)   scale="${arg#scale=}" ;;
+      section=*) section="${arg#section=}" ;;
+      design=*)  design="${arg#design=}" ;;
+      waived=*)  waived="${arg#waived=}" ;;
+      step=*)    step="${arg#step=}" ;;
+    esac
+  done
+
+  local out='---
+governing-skill: canonical-sdlc
+sdlc-step: '"$step"'
+epic: epic-01-demo
+canonical_sdlc_version: 13
+intent: build
+rigor: audited
+scale: '"$scale"'
+'
+  [ "$design" = OMIT ] || out+="design: $design"$'\n'
+  [ "$waived" = OMIT ] || out+="$waived"$'\n'
+  out+='surface_type: system
+language: bash
+has_ui: false
+multi_agent: true
+deploy_target: none
+cleanup_on_finish: true
+use_worktree: false
+model_plan: orchestrator=fable-5; implementor=sonnet-fresh; auditor=opus-fresh
+created: 2026-08-02
+---
+
+# wave-01-demo — spec
+
+Source of requirements: the demo report.
+
+## Requirements
+
+- **R1 — A requirement.** Body text.
+
+## Acceptance criteria
+
+AC-1: something observable.
+  provenance: report §"a section"
+'
+  if [ "$section" = yes ]; then
+    out+='
+## Design
+
+Design decisions below cite the requirements they serve (R-refs).
+
+### Domain model
+
+- **A thing** — what it is (serves R1).
+
+### Boundaries and interfaces
+
+- `some/file.sh` — what it owns (R1).
+
+### Ownership table
+
+| concept | owning module (SSoT) | rendering surfaces | agreement test |
+|---|---|---|---|
+| a thing | some/file.sh | one surface | a hermetic test |
+
+### Rejected alternatives
+
+- Something heavier — weight without value (vs R1).
+
+### Assumptions
+
+1. An assumption.
+'
+  fi
+  printf '%s' "$out"
+}
+
+echo
+echo "=== design wall: three-way rule (wave-02 AC-2, AC-3, AC-4) ==="
+
+design_project=$(make_project)
+DESIGN_SPECS="$design_project/.bionic/docs/specs/epic-01-demo"
+
+# Pointer targets. `with-design` carries the section; `no-design` is a real
+# file that does not. `sibling` sits one level up so a `..` pointer that the
+# hook NAIVELY resolved would find a satisfying file — the `..` case blocks on
+# containment, not on the target being absent.
+printf '%s' "$(build_spec)" > "$DESIGN_SPECS/with-design.spec.md"
+printf '%s' "$(build_spec section=no)" > "$DESIGN_SPECS/no-design.spec.md"
+printf '%s' "$(build_spec)" > "$design_project/.bionic/docs/specs/sibling.spec.md"
+
+echo "c1: wave spec with none of the three arms → block, naming all three ways"
+run_write "$DESIGN_SPECS/w1.spec.md" "$(build_spec section=no)"
+assert_eq "design_none exit 2" 2 "$HOOK_EXIT"
+assert_contains "design_none names the in-place section" "## Design" "$HOOK_STDERR"
+assert_contains "design_none names the pointer" "design:" "$HOOK_STDERR"
+assert_contains "design_none names the waiver" "design-waived:" "$HOOK_STDERR"
+
+echo "c2: wave spec with a flush-left ## Design in place → allow"
+run_write "$DESIGN_SPECS/w2.spec.md" "$(build_spec)"
+assert_eq "design_in_place exit 0" 0 "$HOOK_EXIT"
+
+echo "c3: design: pointer (docs-root-relative) to a file carrying ## Design → allow"
+run_write "$DESIGN_SPECS/w3.spec.md" \
+  "$(build_spec section=no design=specs/epic-01-demo/with-design.spec.md)"
+assert_eq "design_pointer_docsroot exit 0" 0 "$HOOK_EXIT"
+
+echo "c3b: the same pointer spelled project-relative → allow"
+run_write "$DESIGN_SPECS/w3b.spec.md" \
+  "$(build_spec section=no design=.bionic/docs/specs/epic-01-demo/with-design.spec.md)"
+assert_eq "design_pointer_projectrel exit 0" 0 "$HOOK_EXIT"
+
+echo "c3c: the same pointer spelled absolute → allow"
+run_write "$DESIGN_SPECS/w3c.spec.md" \
+  "$(build_spec section=no design="$DESIGN_SPECS/with-design.spec.md")"
+assert_eq "design_pointer_absolute exit 0" 0 "$HOOK_EXIT"
+
+echo "c4: design: pointer to a file that does not exist → block, naming the resolved path"
+run_write "$DESIGN_SPECS/w4.spec.md" \
+  "$(build_spec section=no design=specs/epic-01-demo/nowhere.spec.md)"
+assert_eq "design_pointer_dangling exit 2" 2 "$HOOK_EXIT"
+assert_contains "design_pointer_dangling names the raw value" "specs/epic-01-demo/nowhere.spec.md" "$HOOK_STDERR"
+assert_contains "design_pointer_dangling still names the three-way rule" "design-waived:" "$HOOK_STDERR"
+
+echo "c5: design: pointer to a real file WITHOUT ## Design → block"
+run_write "$DESIGN_SPECS/w5.spec.md" \
+  "$(build_spec section=no design=specs/epic-01-demo/no-design.spec.md)"
+assert_eq "design_pointer_no_section exit 2" 2 "$HOOK_EXIT"
+assert_contains "design_pointer_no_section names the target" "no-design.spec.md" "$HOOK_STDERR"
+
+echo "c6: design: path with a .. component → block even though it would resolve to a real design"
+run_write "$DESIGN_SPECS/w6.spec.md" \
+  "$(build_spec section=no design=specs/epic-01-demo/../sibling.spec.md)"
+assert_eq "design_pointer_dotdot exit 2" 2 "$HOOK_EXIT"
+assert_contains "design_pointer_dotdot says the path climbs out" "climbs" "$HOOK_STDERR"
+# Discrimination guard: the same target NAMED WITHOUT `..` passes, so c6's block
+# is the containment refusal and not a dangling-target block in disguise.
+run_write "$DESIGN_SPECS/w6b.spec.md" "$(build_spec section=no design=specs/sibling.spec.md)"
+assert_eq "design_pointer_dotdot_control exit 0" 0 "$HOOK_EXIT"
+
+echo "c7: design-waived: present → allow"
+run_write "$DESIGN_SPECS/w7.spec.md" \
+  "$(build_spec section=no waived='design-waived: chris 2026-08-02 prose-only wave, no design surface')"
+assert_eq "design_waived exit 0" 0 "$HOOK_EXIT"
+
+echo "c7b: design-waived: is presence-only — a bare key with no fields still quiets the wall"
+run_write "$DESIGN_SPECS/w7b.spec.md" "$(build_spec section=no waived='design-waived:')"
+assert_eq "design_waived_bare exit 0" 0 "$HOOK_EXIT"
+
+echo "c8 (AC-4): task-scale spec with no design anything → allow (arm silent at task scale)"
+run_write "$DESIGN_SPECS/t1.spec.md" "$(build_spec scale=task section=no)"
+assert_eq "design_task_scale exit 0" 0 "$HOOK_EXIT"
+
+echo "c9: epic-scale spec behaves as wave → block with none of the three"
+run_write "$DESIGN_SPECS/e1.spec.md" "$(build_spec scale=epic section=no)"
+assert_eq "design_epic_scale exit 2" 2 "$HOOK_EXIT"
+assert_contains "design_epic_scale names the three-way rule" "design-waived:" "$HOOK_STDERR"
+
+echo "c10: a wave-scale PLAN with no design → allow (the arm is spec-only)"
+run_write "$design_project/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan)"
+assert_eq "design_plan_untouched exit 0" 0 "$HOOK_EXIT"
+
+echo "c11: '## Designer notes' is not a design section → block; '## Design — v2' is → allow"
+run_write "$DESIGN_SPECS/w11.spec.md" \
+  "$(build_spec section=no)$(printf '\n## Designer notes\n\nnot the section.\n')"
+assert_eq "design_near_miss_heading exit 2" 2 "$HOOK_EXIT"
+run_write "$DESIGN_SPECS/w11b.spec.md" \
+  "$(build_spec section=no)$(printf '\n## Design — v2\n\nthe real thing.\n')"
+assert_eq "design_suffixed_heading exit 0" 0 "$HOOK_EXIT"
+
+# A spec that EXPLAINS this contract will show `## Design` as an example, and an
+# example is documentation, not a section. Both read paths are fence-aware, so
+# both get a case; each is paired with a control that moves the same heading out
+# of the fence, so the block is fence-awareness and not some other refusal.
+echo "c12: an in-place '## Design' that exists only inside a fenced code block → block"
+run_write "$DESIGN_SPECS/w12.spec.md" \
+  "$(build_spec section=no)$(printf '\n%s\n## Design\n\nan example of the contract, not this spec.\n%s\n' '```markdown' '```')"
+assert_eq "design_fenced_in_place exit 2" 2 "$HOOK_EXIT"
+assert_contains "design_fenced_in_place names the three-way rule" "design-waived:" "$HOOK_STDERR"
+run_write "$DESIGN_SPECS/w12b.spec.md" \
+  "$(build_spec section=no)$(printf '\n%s\n## Design\n%s\n\n## Design\n\nthe real one, outside the fence.\n' '```markdown' '```')"
+assert_eq "design_fenced_in_place_control exit 0" 0 "$HOOK_EXIT"
+
+echo "c13: a pointer target whose only '## Design' is inside a fenced code block → block"
+printf '%s' \
+  "$(build_spec section=no)$(printf '\n%s\n## Design\n%s\n' '```markdown' '```')" \
+  > "$DESIGN_SPECS/fenced-design.spec.md"
+run_write "$DESIGN_SPECS/w13.spec.md" \
+  "$(build_spec section=no design=specs/epic-01-demo/fenced-design.spec.md)"
+assert_eq "design_fenced_pointer_target exit 2" 2 "$HOOK_EXIT"
+assert_contains "design_fenced_pointer_target names the target" "fenced-design.spec.md" "$HOOK_STDERR"
+assert_contains "design_fenced_pointer_target says the target carries no section" "carries no flush-left" "$HOOK_STDERR"
+# Control: the same target with the heading moved out of the fence resolves.
+printf '%s' \
+  "$(build_spec section=no)$(printf '\n%s\n## Design\n%s\n\n## Design\n\nthe real one.\n' '```markdown' '```')" \
+  > "$DESIGN_SPECS/unfenced-design.spec.md"
+run_write "$DESIGN_SPECS/w13b.spec.md" \
+  "$(build_spec section=no design=specs/epic-01-demo/unfenced-design.spec.md)"
+assert_eq "design_fenced_pointer_target_control exit 0" 0 "$HOOK_EXIT"
+
+# The pointer target is read off disk, so it gets the same newline normalization
+# `$CONTENT` gets — CR-only collapses a document to one record, and no heading is
+# ever at a line start after that. CRLF passes either way (`[[:space:]]` eats the
+# trailing \r), so CRLF coverage alone would not have caught this: the CR-only
+# case is the one that discriminates, per `.claude/rules/hook-authoring.md`.
+echo "c14: a CR-only pointer target carrying a real '## Design' → allow"
+to_cr_only "$(build_spec)" > "$DESIGN_SPECS/cr-design.spec.md"
+run_write "$DESIGN_SPECS/w14.spec.md" \
+  "$(build_spec section=no design=specs/epic-01-demo/cr-design.spec.md)"
+assert_eq "design_pointer_cr_only exit 0" 0 "$HOOK_EXIT"
+
+echo "c14b: a CRLF pointer target carrying a real '## Design' → allow (control)"
+to_crlf "$(build_spec)" > "$DESIGN_SPECS/crlf-design.spec.md"
+run_write "$DESIGN_SPECS/w14b.spec.md" \
+  "$(build_spec section=no design=specs/epic-01-demo/crlf-design.spec.md)"
+assert_eq "design_pointer_crlf exit 0" 0 "$HOOK_EXIT"
+
+echo "c14c: a CR-only pointer target WITHOUT '## Design' → still blocks (the fix is not a bypass)"
+to_cr_only "$(build_spec section=no)" > "$DESIGN_SPECS/cr-no-design.spec.md"
+run_write "$DESIGN_SPECS/w14c.spec.md" \
+  "$(build_spec section=no design=specs/epic-01-demo/cr-no-design.spec.md)"
+assert_eq "design_pointer_cr_only_no_section exit 2" 2 "$HOOK_EXIT"
+assert_contains "design_pointer_cr_only_no_section says the target carries no section" "carries no flush-left" "$HOOK_STDERR"
+
+# PRECEDENCE (critic C-3). Pointer and in-place section are documented as a
+# legitimate COMBINED shape — "the pointer names what governs, the local section
+# carries only the delta" — and the Step-3 approval display prints the pointer's
+# resolved path for the user to open. A pointer that is present is therefore
+# never decorative: it validates whatever else the spec carries, so the four
+# cases below hold in the combined shape exactly as c4/c5/c6 hold when the
+# pointer is the sole arm. The waived path is untouched (c7 still short-circuits
+# everything).
+echo "c15: in-place '## Design' + a dangling pointer → block"
+run_write "$DESIGN_SPECS/w15.spec.md" \
+  "$(build_spec design=specs/epic-01-demo/nowhere.spec.md)"
+assert_eq "design_combined_dangling exit 2" 2 "$HOOK_EXIT"
+assert_contains "design_combined_dangling names the raw value" "specs/epic-01-demo/nowhere.spec.md" "$HOOK_STDERR"
+
+echo "c15b: in-place '## Design' + a '..' pointer → block"
+run_write "$DESIGN_SPECS/w15b.spec.md" \
+  "$(build_spec design=specs/epic-01-demo/../sibling.spec.md)"
+assert_eq "design_combined_dotdot exit 2" 2 "$HOOK_EXIT"
+assert_contains "design_combined_dotdot says the path climbs out" "climbs" "$HOOK_STDERR"
+
+echo "c15c: in-place '## Design' + a pointer to a target that lacks the section → block"
+run_write "$DESIGN_SPECS/w15c.spec.md" \
+  "$(build_spec design=specs/epic-01-demo/no-design.spec.md)"
+assert_eq "design_combined_no_section exit 2" 2 "$HOOK_EXIT"
+assert_contains "design_combined_no_section says the target carries no section" "carries no flush-left" "$HOOK_STDERR"
+
+echo "c15d: in-place '## Design' + a VALID pointer → allow (the documented combined shape)"
+run_write "$DESIGN_SPECS/w15d.spec.md" \
+  "$(build_spec design=specs/epic-01-demo/with-design.spec.md)"
+assert_eq "design_combined_valid exit 0" 0 "$HOOK_EXIT"
 
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"

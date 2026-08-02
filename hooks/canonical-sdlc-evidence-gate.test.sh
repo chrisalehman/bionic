@@ -176,7 +176,7 @@ expect_block() {
 # rigor lanes) out of the way so each fixture isolates the behavior under test.
 FM='---
 governing-skill: canonical-sdlc
-canonical_sdlc_version: 12
+canonical_sdlc_version: 13
 intent: build
 rigor: tested
 scale: wave
@@ -616,7 +616,7 @@ matrix_frontmatter() {
   cat <<EOF
 ---
 governing-skill: canonical-sdlc
-canonical_sdlc_version: 12
+canonical_sdlc_version: 13
 intent: build
 rigor: audited
 scale: wave
@@ -1393,7 +1393,7 @@ frontmatter() {
   local scale="${1:-wave}" deploy="${2:-none}" use_wt="${3:-false}" epic="${4:-}"
   printf -- '---\n'
   printf -- 'governing-skill: canonical-sdlc\n'
-  printf -- 'canonical_sdlc_version: 12\n'
+  printf -- 'canonical_sdlc_version: 13\n'
   printf -- 'intent: build\n'
   printf -- 'rigor: audited\n'
   printf -- 'scale: %s\n' "$scale"
@@ -1433,7 +1433,7 @@ task_plan() {
 task_frontmatter_rigor() {  # $1 rigor
   printf -- '---\n'
   printf -- 'governing-skill: canonical-sdlc\n'
-  printf -- 'canonical_sdlc_version: 12\n'
+  printf -- 'canonical_sdlc_version: 13\n'
   printf -- 'intent: build\n'
   printf -- 'rigor: %s\n' "$1"
   printf -- 'scale: task\n'
@@ -1619,7 +1619,7 @@ make_epic_project() {
   local proj
   proj=$(make_project)
   mkdir -p "$proj/.bionic/docs/plans/epic-fix"
-  printf -- '---\ncanonical_sdlc_version: 12\nintent: build\nrigor: audited\nscale: epic\n---\n## SDLC State\nintegration-branch: %s\ncurrent: 1\n' \
+  printf -- '---\ncanonical_sdlc_version: 13\nintent: build\nrigor: audited\nscale: epic\n---\n## SDLC State\nintegration-branch: %s\ncurrent: 1\n' \
     "$branch" > "$proj/.bionic/docs/plans/epic-fix/epic.plan.md"
   touch -t 202001010000 "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" 2>/dev/null || \
     touch -d "2020-01-01" "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" 2>/dev/null || true
@@ -1744,7 +1744,7 @@ make_epic_project_fenced() {
   mkdir -p "$proj/.bionic/docs/plans/epic-fix"
   cat > "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" <<EOF
 ---
-canonical_sdlc_version: 12
+canonical_sdlc_version: 13
 intent: build
 rigor: audited
 scale: epic
@@ -1823,7 +1823,7 @@ r7_frontmatter() {
   local intent="$1" scale="${2:-wave}"
   printf -- '---\n'
   printf -- 'governing-skill: canonical-sdlc\n'
-  printf -- 'canonical_sdlc_version: 12\n'
+  printf -- 'canonical_sdlc_version: 13\n'
   printf -- 'intent: %s\n' "$intent"
   printf -- 'rigor: audited\n'
   printf -- 'scale: %s\n' "$scale"
@@ -2198,7 +2198,7 @@ h21c=$(make_home)
 printf '%s\n' "$(r7_wave_plan tune 5 "$step5_base" "$matrix_complete")" \
   > "$ac10_main/.bionic/docs/plans/active.md"
 touch "$ac10_main/.bionic/docs/plans/active.md"
-printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 12\nintent: build\nrigor: tested\nscale: wave\n---\n## SDLC State\ncurrent: 5\nStep 5: TODO\n' \
+printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 13\nintent: build\nrigor: tested\nscale: wave\n---\n## SDLC State\ncurrent: 5\nStep 5: TODO\n' \
   > "$ac10_wt/.bionic/docs/plans/decoy.md"
 touch "$ac10_wt/.bionic/docs/plans/decoy.md"
 TOTAL=$((TOTAL + 1))
@@ -2648,7 +2648,7 @@ d7_wave_frontmatter() {
   local rigor="${1:-audited}" multi="${2:-true}"
   printf -- '---\n'
   printf -- 'governing-skill: canonical-sdlc\n'
-  printf -- 'canonical_sdlc_version: 12\n'
+  printf -- 'canonical_sdlc_version: 13\n'
   printf -- 'intent: build\n'
   printf -- 'rigor: %s\n' "$rigor"
   printf -- 'scale: wave\n'
@@ -3304,7 +3304,7 @@ expect_allow "22f7b same evidence + standalone 'critic no-blocking' token → al
 # Section 23: canonical_sdlc_version — exactly one supported value
 # ============================================================
 #
-# The hook supports canonical_sdlc_version: 12 and nothing else. Every other
+# The hook supports canonical_sdlc_version: 13 and nothing else. Every other
 # value blocks with exit 2 and a message naming the value found. One
 # table-driven case over representative bad values — an older number, a much
 # older number, a legacy single digit, a far-future number, an empty value, and
@@ -3325,7 +3325,7 @@ versioned_plan() {  # $1 = the canonical_sdlc_version value to declare
   printf -- '## SDLC State\ncurrent: 3\nStep 3: .bionic/docs/plans/wave-01.plan.md\n'
 }
 
-for bad_version in 11 9 2 99 "" banana 12.0 v12; do
+for bad_version in 11 12 9 2 99 "" banana 12.0 v12; do
   h=$(make_home)
   write_plan "$h" "$(versioned_plan "$bad_version")" > /dev/null
   expect_block "unsupported canonical_sdlc_version '${bad_version:-<empty>}' → block, naming the value found" \
@@ -3350,8 +3350,8 @@ expect_block "absent canonical_sdlc_version → block" \
 # The supported value passes the version gate (proved by reaching — and
 # satisfying — the evidence checks beyond it).
 h23ok=$(make_home)
-write_plan "$h23ok" "$(versioned_plan 12)" > /dev/null
-expect_allow "canonical_sdlc_version: 12 → allow" "$h23ok" 'git commit -m "x"'
+write_plan "$h23ok" "$(versioned_plan 13)" > /dev/null
+expect_allow "canonical_sdlc_version: 13 → allow" "$h23ok" 'git commit -m "x"'
 
 # ============================================================
 # Section 24: AC-13 — the plan-search fail-open
@@ -3376,7 +3376,7 @@ echo "=== Section 24: AC-13 — misplaced plan blocks, absent plan never does ==
 
 s24_marked_plan() {  # a plan carrying the run-state marker + a satisfied state
   printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-  printf -- 'canonical_sdlc_version: 12\nintent: build\nrigor: tested\nscale: wave\n---\n'
+  printf -- 'canonical_sdlc_version: 13\nintent: build\nrigor: tested\nscale: wave\n---\n'
   printf -- '## SDLC State\ncurrent: 3\nStep 3: .bionic/docs/plans/wave-01.plan.md\n'
 }
 
@@ -3466,7 +3466,7 @@ fi
 s24_h5=$(make_home)
 s24_p5=$(mktemp -d); cleanup_dirs+=("$s24_p5")
 mkdir -p "$s24_p5/docs"
-{ printf '# How to write a plan\n\n```\n---\ncanonical_sdlc_version: 12\n---\n```\n'; } \
+{ printf '# How to write a plan\n\n```\n---\ncanonical_sdlc_version: 13\n---\n```\n'; } \
   > "$s24_p5/docs/example.plan.md"
 TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s24_h5" "$s24_p5" 'git commit -m "x"'
@@ -3616,7 +3616,7 @@ echo ""
 echo "=== Section 25: one root per repo across both hooks (worktrees) ==="
 
 s25_plan() {  # a canonical plan whose current step evidence is a placeholder
-  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 12\n'
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 13\n'
   printf -- 'intent: build\nrigor: tested\nscale: wave\n'
   printf -- 'deploy_target: none\nuse_worktree: true\nhas_ui: false\n---\n'
   printf -- '## SDLC State\ncurrent: 5\nStep 5: TODO\n'
@@ -3672,7 +3672,7 @@ git -C "$s25_main2" worktree add -q "$s25_tmp2/wt" -b s25-wt2
 s25_wt2="$s25_tmp2/wt"
 s25_marked_plan_body() {
   printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-  printf -- 'canonical_sdlc_version: 12\nintent: build\nrigor: tested\nscale: wave\n---\n'
+  printf -- 'canonical_sdlc_version: 13\nintent: build\nrigor: tested\nscale: wave\n---\n'
   printf -- '## SDLC State\ncurrent: 3\nStep 3: .bionic/docs/plans/wave-01.plan.md\n'
 }
 s25_marked_plan_body > "$s25_main2/notes/rogue.plan.md"
@@ -3723,7 +3723,7 @@ governing-skill: superpowers:writing-plans
 sdlc-step: 3
 epic: epic-01-demo
 wave: wave-01-x
-canonical_sdlc_version: 12
+canonical_sdlc_version: 13
 intent: build
 rigor: tested
 scale: wave
@@ -3859,7 +3859,7 @@ echo "=== Section 26: walk-artifact arm ==="
 walk_frontmatter() {
   local walk_line="${1:-}"
   printf -- '---\n'
-  printf -- 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 12\n'
+  printf -- 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 13\n'
   printf -- 'intent: build\nrigor: audited\nscale: wave\n'
   printf -- 'deploy_target: none\nuse_worktree: false\nhas_ui: true\n'
   if [ -n "$walk_line" ]; then
@@ -4041,6 +4041,53 @@ h26l=$(make_home)
 write_plan "$h26l" "$(walk_plan5 'walk: bogus' "$walk_step5_no_artifact" "$matrix_complete")" > /dev/null
 expect_block "26l off-enum 'walk: bogus' + discharged rows + no artifact → block (arms like required)" \
   "$h26l" 'git commit -m "x"' "no 'walk-artifact:' line"
+
+# 26m/26n/26o — packed-line extraction (bugfix A17). Sibling extractors
+# elsewhere in this hook already truncate at ';' to tolerate a Step-5 line
+# with more fields packed after the value; the raw walk-artifact extraction
+# was the outlier, greedy to end-of-line. A Step-5 line of the shape
+# `walk-artifact: record/x.md; cmd: ...` swallowed the semicolon-joined
+# remainder as part of the "path", which never resolved even though the real
+# file exists.
+
+walk_step5_packed_ok="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
+  walk-artifact: record/walk-20260801.md; cmd: bash test.sh; pass: 332; total: 332"
+
+walk_step5_packed_bad="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
+  walk-artifact: record/../escaped.md; cmd: bash test.sh; pass: 332; total: 332"
+
+# 26m — a packed Step-5 line (fields after the path, semicolon-joined) naming
+# a real, clean file under record/ → allow.
+h26m=$(make_home)
+write_walk_artifact "$h26m" "$walk_clean_text" > /dev/null
+write_plan "$h26m" "$(walk_plan5 'walk: required' "$walk_step5_packed_ok" "$matrix_complete")" > /dev/null
+expect_allow "26m packed walk-artifact line (fields after the path) → allow" \
+  "$h26m" 'git commit -m "x"'
+
+# 26n — regression pin: the dedicated continuation-line shape (no packed
+# fields) still passes after the truncate-at-';' fix.
+h26n=$(make_home)
+write_walk_artifact "$h26n" "$walk_clean_text" > /dev/null
+write_plan "$h26n" "$(walk_plan5 'walk: required' "$walk_step5_with_artifact" "$matrix_complete")" > /dev/null
+expect_allow "26n dedicated continuation-line walk-artifact (unpacked) → allow" \
+  "$h26n" 'git commit -m "x"'
+
+# 26o — a packed line whose truncated value is STILL a bad path (climbs out
+# of record/ via '..') must still block. The ';' cut must not accidentally
+# salvage a genuinely bad path.
+h26o=$(make_home)
+printf 'walk narration living outside the record\n' > "$h26o/.bionic/docs/escaped.md"
+write_plan "$h26o" "$(walk_plan5 'walk: required' "$walk_step5_packed_bad" "$matrix_complete")" > /dev/null
+expect_block "26o packed walk-artifact line with a bad truncated path → block" \
+  "$h26o" 'git commit -m "x"' "does not resolve under"
 
 # ============================================================
 # Section 27: the provenance arm (AC-5)

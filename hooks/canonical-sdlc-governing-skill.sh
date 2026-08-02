@@ -19,7 +19,7 @@
 #   sdlc-step: 3
 #   epic: epic-02-checkout
 #   wave: wave-01-checkout-refactor
-#   canonical_sdlc_version: 12
+#   canonical_sdlc_version: 13
 #   intent: build
 #   rigor: audited
 #   scale: wave
@@ -354,7 +354,7 @@ if [ -z "$FRONTMATTER" ]; then
   echo "  sdlc-step: <step number>" >&2
   echo "  epic: epic-NN-<slug>" >&2
   echo "  wave: wave-NN-<slug>   # omit for epic-level and continuation" >&2
-  echo "  canonical_sdlc_version: 12" >&2
+  echo "  canonical_sdlc_version: 13" >&2
   echo "  intent: <build|bugfix|refactor|tune|spike|incident-response>" >&2
   echo "  rigor: <tested|peer-reviewed|audited>" >&2
   echo "  scale: <task|wave|epic>" >&2
@@ -400,7 +400,7 @@ SDLC_VERSION=$(yaml_get canonical_sdlc_version)
 # value, garbage — blocks. There is no version dispatch below this line and
 # no path that reaches `exit 0` without passing the whole contract.
 # [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
-SUPPORTED_SDLC_VERSION=12
+SUPPORTED_SDLC_VERSION=13
 
 if [ "$SDLC_VERSION" != "$SUPPORTED_SDLC_VERSION" ]; then
   echo "BLOCKED: canonical-sdlc artifact '$BASENAME' declares canonical_sdlc_version: '$SDLC_VERSION'." >&2
@@ -610,6 +610,155 @@ case "$BASENAME" in
         fi
         ;;
     esac
+    ;;
+esac
+
+# ---------- design wall: the three-way rule (wave-02 AC-2/AC-3/AC-4) ----------
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+#
+# A wave-or-epic-scale SPEC blocks unless it carries one of three things: a
+# flush-left `## Design` section in place; a frontmatter `design:` pointer that
+# resolves to a real file carrying one; or a `design-waived:` token. Design is
+# the back half of Step 2, and this is the wall that makes it load-bearing.
+# The arms are not interchangeable in the order they are tried — see the
+# PRECEDENCE note at the branch chain below.
+#
+# PRESENCE AND RESOLUTION ONLY. The hook never inspects the section's five
+# parts — an empty `## Design` passes here and fails at the Step-3 approval,
+# which is where a human ratifies design + plan + matrix together. Quality is
+# not a hook's job (spec §Design, assumption 4).
+#
+# Scope is `*.spec.md` at scale wave|epic. Task scale is deliberately untouched
+# (R5: a task gets a design paragraph in its session plan, prose-obliged and
+# reviewer-checked, never a wall), and plans are untouched because the design
+# lives in the spec. Keying on BASENAME rather than on the `specs/` directory
+# follows the matrix gate immediately above: a spec artifact is a spec artifact
+# wherever under the docs root it was filed, and the alternative leaves a
+# rename-free dodge.
+#
+# WRITE ONLY. On Edit, CONTENT is the file's PRE-edit body, so an Edit arm
+# would answer a question nobody asked — it would pass an edit that strips the
+# section and block every edit to the pre-W2 specs that predate the rule. The
+# post-edit hole is the hook's existing, documented Edit weakness (see the
+# CONTENT block above); this arm does not widen it and does not pretend to
+# close it.
+case "$BASENAME" in
+  *.spec.md)
+    if [ "$TOOL" = "Write" ] && { [ "$SCALE" = "wave" ] || [ "$SCALE" = "epic" ]; }; then
+
+      # Resolution follows the evidence-gate hook's walk-artifact template
+      # (resolve_walk_path): absolute stands, a docs-root subdirectory leader is
+      # docs-root-relative, anything else is project-relative — so the
+      # fully-spelled `.bionic/docs/specs/...` an author is likely to paste
+      # lands in the same place as the short form. The leader set is widened
+      # from the walk arm's single `record/` because a governing design can live
+      # in any artifact directory; unlike the walk artifact it is NOT contained
+      # to one, since an epic-level design a wave implements may legitimately
+      # sit outside this project's docs root entirely.
+      resolve_design_path() {  # $1 = raw design: value
+        case "$1" in
+          /*) printf '%s\n' "$1" ;;
+          specs/*|plans/*|adrs/*|incidents/*|record/*) printf '%s/%s\n' "$DOCS_ROOT" "$1" ;;
+          *)  printf '%s/%s\n' "$PROJECT_ROOT_FROM_PATH" "$1" ;;
+        esac
+      }
+
+      # Every block from this arm names all three ways out, whichever arm the
+      # author was reaching for — the author who mistyped a pointer may well be
+      # the author who should have written the section.
+      block_design() {  # $1 = what went wrong
+        echo "BLOCKED: canonical-sdlc spec '$BASENAME' (scale: $SCALE): $1" >&2
+        echo "Path: $FILE_PATH" >&2
+        echo "A wave- or epic-scale spec must satisfy one of three:" >&2
+        echo "  (a) a flush-left '## Design' section in this spec;" >&2
+        echo "  (b) frontmatter 'design: <path>' naming a file that carries a flush-left '## Design';" >&2
+        echo "  (c) frontmatter 'design-waived: <user> <date> <reason>' — a user-only move." >&2
+        exit 2
+      }
+
+      # `## Design` must be flush left and must be the whole heading word:
+      # `## Design — v2` is the section, `## Designer notes` is not. The matrix
+      # gate's bare prefix match would accept both; the trailing-boundary
+      # requirement costs nothing and is the difference between a wall and a
+      # word search. `[[:space:]]` covers a CRLF target's trailing \r.
+      DESIGN_HEADING='^## Design([[:space:]]|$)'
+
+      # Fence-aware on BOTH read paths, matching the evidence-gate hook, whose
+      # `## SDLC State` reads all skip ``` fenced blocks for the same reason: a
+      # spec that EXPLAINS this contract will show `## Design` as an example,
+      # and an example is documentation, not a section. Stripping fences before
+      # the grep keeps one heading regex for both paths rather than a second
+      # rendering of it inside awk.
+      strip_fences() {  # a document on stdin → the same document, fences dropped
+        awk '
+          /^[[:space:]]*```/ { fence = !fence; next }
+          fence { next }
+          { print }
+        '
+      }
+
+      # The pointer target is read off disk, so it needs the same normalization
+      # `$CONTENT` got at the top of this hook — the stdin twin of the evidence
+      # gate's normalize_newlines(). The template this arm follows was copied for
+      # its path half and not its read half: CRLF survives a line-anchored grep
+      # (`[[:space:]]` eats the trailing \r), but a CR-only document arrives as
+      # ONE record, so no `## Design` is ever at a line start and a legitimate
+      # target false-BLOCKs. CRLF coverage does not catch this class — see
+      # `.claude/rules/hook-authoring.md`, and c14 for the case that does.
+      # [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+      normalize_newlines() {  # a document on stdin → the same document, LF-split
+        awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }'
+      }
+
+      DESIGN_POINTER=$(yaml_get design)
+      # Presence-only, matching the `rigor-override:` waiver precedent: the
+      # fields are recorded for the reader, never validated here. Read by grep
+      # rather than yaml_get so that a bare `design-waived:` — a malformed
+      # waiver, but unmistakably a user's waiver — still counts as present.
+      DESIGN_WAIVED=0
+      if echo "$FRONTMATTER" | grep -qE '^[[:space:]]*design-waived[[:space:]]*:'; then
+        DESIGN_WAIVED=1
+      fi
+
+      # PRECEDENCE: waiver short-circuits everything; below it, a PRESENT
+      # `design:` pointer validates unconditionally — resolved, existence-checked
+      # and `..`-refused whether or not the spec also carries its own section —
+      # and only the absence of a pointer falls through to the in-place read.
+      # [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+      #
+      # The order matters because the pointer is not one of three interchangeable
+      # ways to be quiet: it is the path the Step-3 approval display prints for
+      # the user to open (R2/AC-1). The combined shape — pointer plus a local
+      # delta section — is the one the docs recommend, so an `elif` that let the
+      # section satisfy the wall first made the recommended shape the one where a
+      # typo, a moved epic design or a rename produced an approval display citing
+      # nothing, with the wall silent. A pointer is never decorative (critic C-3).
+      #
+      # The waived path is deliberately NOT symmetric: `design-waived:` still
+      # silences a broken pointer beside it. That contradiction is a separate,
+      # known finding, and closing it here would smuggle a second rule into a
+      # repair scoped to the unwaived path.
+      if [ "$DESIGN_WAIVED" -eq 1 ]; then
+        :
+      elif [ -n "$DESIGN_POINTER" ]; then
+        # A `..` component is refused outright rather than normalized, mirroring
+        # the walk arm: a design named by climbing out of the directory it was
+        # named relative to is a spelling nobody should have to audit, and the
+        # refusal holds even when the climb would land on a real design.
+        if echo "$DESIGN_POINTER" | grep -qE '(^|/)\.\.(/|$)'; then
+          block_design "design: '$DESIGN_POINTER' climbs out with a '..' component and is refused."
+        fi
+        DESIGN_ABS=$(resolve_design_path "$DESIGN_POINTER")
+        if [ ! -f "$DESIGN_ABS" ]; then
+          block_design "design: '$DESIGN_POINTER' names no file (resolved to $DESIGN_ABS)."
+        fi
+        if ! normalize_newlines < "$DESIGN_ABS" 2>/dev/null | strip_fences | grep -qE "$DESIGN_HEADING"; then
+          block_design "design: '$DESIGN_POINTER' resolves to $DESIGN_ABS, which carries no flush-left '## Design' section."
+        fi
+      elif ! echo "$CONTENT" | strip_fences | grep -qE "$DESIGN_HEADING"; then
+        block_design "no design. It carries no '## Design' section, no 'design:' pointer and no waiver."
+      fi
+    fi
     ;;
 esac
 
