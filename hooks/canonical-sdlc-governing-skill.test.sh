@@ -125,7 +125,7 @@ assert_contains() {
 #   intent/rigor/scale — triple values (default build/audited/wave);
 #     value OMIT drops the line entirely (missing-field cases).
 #   step    — sdlc-step (default 3).
-#   version — canonical_sdlc_version (default 12); OMIT drops the line.
+#   version — canonical_sdlc_version (default 13); OMIT drops the line.
 #   mode    — if set, inject a `mode:` line (split-brain guard case).
 #   omit    — space-separated flag names to drop (missing-flag cases).
 #   matrix  — yes|no; drop the "## Verification Matrix" section when no.
@@ -139,7 +139,7 @@ assert_contains() {
 #             about design must satisfy that arm to keep testing its own
 #             subject. Plan-targeting cases never set it.
 build_plan() {
-  local intent=build rigor=audited scale=wave step=3 version=12 mode="OMIT" omit=" " matrix=yes
+  local intent=build rigor=audited scale=wave step=3 version=13 mode="OMIT" omit=" " matrix=yes
   local skill="superpowers:writing-plans"
   local walk="OMIT" override="OMIT" waived="OMIT"
   local arg
@@ -297,7 +297,7 @@ assert_eq "exit 0" 0 "$HOOK_EXIT"
 # canonical_sdlc_version: exactly one supported value
 # ============================================================
 #
-# The hook supports canonical_sdlc_version: 12 and nothing else. Every other
+# The hook supports canonical_sdlc_version: 13 and nothing else. Every other
 # value blocks with exit 2 and a message naming the value found. One
 # table-driven case over representative bad values — an older number, a much
 # older number, a legacy single digit, a far-future number, an empty value,
@@ -318,7 +318,7 @@ done
 echo "canonical_sdlc_version line absent entirely → block"
 run_write "$project/.bionic/docs/plans/epic-01-demo/no-version.plan.md" "$(build_plan version=OMIT)"
 assert_eq "absent version blocks" 2 "$HOOK_EXIT"
-assert_contains "absent version names 12 as the supported value" \
+assert_contains "absent version names 13 as the supported value" \
   "the only supported version" "$HOOK_STDERR"
 
 # ============================================================
@@ -587,7 +587,7 @@ project=$(make_project)
 cat > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md" <<'EOF'
 ---
 governing-skill: canonical-sdlc
-canonical_sdlc_version: 12
+canonical_sdlc_version: 13
 rigor-floor: audited
 ---
 
@@ -629,7 +629,7 @@ printf 'rigor-floor: audited\n' > "$project/.bionic/config.yaml"
 cat > "$project/.bionic/docs/plans/epic-01-demo/epic.plan.md" <<'EOF'
 ---
 governing-skill: canonical-sdlc
-canonical_sdlc_version: 12
+canonical_sdlc_version: 13
 rigor-floor: audited
 ---
 
@@ -1205,7 +1205,7 @@ Prepend this block:
 ```
 ---
 governing-skill: canonical-sdlc
-canonical_sdlc_version: 12
+canonical_sdlc_version: 13
 ---
 ```
 '
@@ -1377,7 +1377,7 @@ build_spec() {
 governing-skill: canonical-sdlc
 sdlc-step: '"$step"'
 epic: epic-01-demo
-canonical_sdlc_version: 12
+canonical_sdlc_version: 13
 intent: build
 rigor: audited
 scale: '"$scale"'
