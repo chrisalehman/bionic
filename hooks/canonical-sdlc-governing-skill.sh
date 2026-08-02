@@ -681,6 +681,20 @@ case "$BASENAME" in
       # word search. `[[:space:]]` covers a CRLF target's trailing \r.
       DESIGN_HEADING='^## Design([[:space:]]|$)'
 
+      # Fence-aware on BOTH read paths, matching the evidence-gate hook, whose
+      # `## SDLC State` reads all skip ``` fenced blocks for the same reason: a
+      # spec that EXPLAINS this contract will show `## Design` as an example,
+      # and an example is documentation, not a section. Stripping fences before
+      # the grep keeps one heading regex for both paths rather than a second
+      # rendering of it inside awk.
+      strip_fences() {  # a document on stdin → the same document, fences dropped
+        awk '
+          /^[[:space:]]*```/ { fence = !fence; next }
+          fence { next }
+          { print }
+        '
+      }
+
       DESIGN_POINTER=$(yaml_get design)
       # Presence-only, matching the `rigor-override:` waiver precedent: the
       # fields are recorded for the reader, never validated here. Read by grep
@@ -693,7 +707,7 @@ case "$BASENAME" in
 
       if [ "$DESIGN_WAIVED" -eq 1 ]; then
         :
-      elif echo "$CONTENT" | grep -qE "$DESIGN_HEADING"; then
+      elif echo "$CONTENT" | strip_fences | grep -qE "$DESIGN_HEADING"; then
         :
       elif [ -n "$DESIGN_POINTER" ]; then
         # A `..` component is refused outright rather than normalized, mirroring
@@ -707,7 +721,7 @@ case "$BASENAME" in
         if [ ! -f "$DESIGN_ABS" ]; then
           block_design "design: '$DESIGN_POINTER' names no file (resolved to $DESIGN_ABS)."
         fi
-        if ! grep -qE "$DESIGN_HEADING" "$DESIGN_ABS" 2>/dev/null; then
+        if ! strip_fences < "$DESIGN_ABS" 2>/dev/null | grep -qE "$DESIGN_HEADING"; then
           block_design "design: '$DESIGN_POINTER' resolves to $DESIGN_ABS, which carries no flush-left '## Design' section."
         fi
       else
