@@ -67,6 +67,7 @@ The coordinated launch is the simplest approach that satisfies the approved worl
 - Update paywall display values and savings calculations so displayed prices exactly match checkout.
 - Preserve the current plan order and positioning: annual first, quarterly preselected and labeled “Most Popular,” monthly, then weekly.
 - Record the selected term, Price ID, checkout currency, country when available, and pricing cohort in analytics.
+- Preserve the active WINBACK99 and COMEBACK99 offer contract at $99.99 for the first year and $149.99 at renewal. Eligible promo Checkout Sessions continue using the legacy annual Price; standard annual Checkout Sessions use the new $199.99 Price. Label the promo path as a distinct pricing cohort.
 
 ### Apple App Store
 
@@ -111,7 +112,7 @@ This order may create a short mobile-before-web propagation window. That is pref
 
 The launch is complete only when all of the following are true:
 
-- A new U.S. customer sees and is charged $199.99 annual, $99.99 quarterly, $49.99 monthly, or $19.99 weekly on each applicable platform.
+- A standard new U.S. customer sees and is charged $199.99 annual, $99.99 quarterly, $49.99 monthly, or $19.99 weekly on each applicable platform. Eligible win-back customers continue to see $99.99 for the first year and $149.99 annual renewal.
 - Sample new customers in the priority non-U.S. storefronts see the approved localized equivalents and are charged the displayed currency and amount.
 - Existing test subscriptions or renewal simulations remain at their legacy prices.
 - Quarterly remains preselected and labeled “Most Popular,” and all savings copy is mathematically correct.
