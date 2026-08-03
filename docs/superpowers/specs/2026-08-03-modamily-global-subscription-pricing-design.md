@@ -2,6 +2,7 @@
 
 Date: 2026-08-03
 Status: Approved design; implementation not started
+Target launch date: 2026-08-16
 
 ## Decision
 
@@ -96,6 +97,15 @@ The coordinated launch is the simplest approach that satisfies the approved worl
 8. Run legacy-renewal checks or platform-supported renewal simulations to verify grandfathering.
 
 This order may create a short mobile-before-web propagation window. That is preferable to showing a web price that mobile clients cannot yet retrieve. The launch log must record the window rather than claiming a perfectly simultaneous release.
+
+## Launch schedule
+
+- **By August 13, 2026:** finish code, automated tests, Stripe Price creation, store price matrices, preservation settings, and test-purchase verification.
+- **August 14, 2026:** confirm the production clients fetch the prepared store prices and complete the prelaunch exports and rollback package.
+- **August 15, 2026:** hold the final go/no-go review. A checkout mismatch, unverified grandfathering, or entitlement regression is a no-go.
+- **August 16, 2026:** activate the worldwide new-subscriber prices, record each platform's visible-production timestamp, and complete the postlaunch checks.
+- **August 23, 2026:** perform the seven-day commercial and reliability review.
+- **September 15, 2026:** perform the thirty-day commercial review using complete data through September 14.
 
 ## Validation and acceptance criteria
 
