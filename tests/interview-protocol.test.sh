@@ -14,6 +14,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SKILL="${REPO}/skills/canonical-sdlc/SKILL.md"
 RULES="${REPO}/skills/canonical-sdlc/operational-rules.md"
+README="${REPO}/README.md"
 
 PASS=0
 FAIL=0
@@ -63,6 +64,11 @@ echo "=== Section 1: Agreement pins (SKILL.md AND operational-rules.md) ==="
 AGREEMENT_PINS=(
   "ratifies the frame"
   "as a named delta the turn it lands"
+  # The Step-0 flag and the op-rules waiver are ONE waiver with two renderings,
+  # not two discharge paths. Both files must carry the phrase that says so, or
+  # a cold agent can read `design-interview: false` as discharging the
+  # quote-in-assumptions obligation on its own (Step-6 review FLAG 1).
+  "standing Step-0 form"
 )
 
 for pin in "${AGREEMENT_PINS[@]}"; do
@@ -116,6 +122,14 @@ expect_pin_in_file "SKILL.md pin: display-template line '  design-interview: <tr
 expect_pin_in_file "SKILL.md pin: flag paragraph opener '**The \`design-interview:\` flag.**'" \
   '**The `design-interview:` flag.**' "$SKILL"
 
+# Third rendering of the flag's semantics: the §Artifact layout frontmatter
+# contract, which is where the key is declared optional. It was edited by this
+# wave and the two site pins above do not reach it — deleting this clause left
+# the suite green while the contract silently lost "not required to write"
+# (Step-6 review FLAG 3b).
+expect_pin_in_file "SKILL.md pin: frontmatter-contract clause naming the flag" \
+  "Step 0's \`design-interview:\` value beside it" "$SKILL"
+
 # ============================================================
 # SECTION 3: operational-rules.md-only pins
 # ============================================================
@@ -136,6 +150,13 @@ echo "=== Section 4: step renames ==="
 
 expect_pin_in_file "SKILL.md pin: steps table row '| 1 Scope |'" "| 1 Scope |" "$SKILL"
 expect_pin_in_file "SKILL.md pin: steps table row '2 Design'" "2 Design" "$SKILL"
+
+# README.md renders the full step-name sequence and is the one live agreement
+# pair for this concept — the absence checks below guard files that render no
+# step names at all. Without this pin a README revert to "ideate → spec" leaves
+# the suite green while the two surfaces disagree (Step-6 review FLAG 3).
+expect_pin_in_file "README.md pin: lifecycle line carries 'scope → design'" \
+  "scope → design" "$README"
 
 # expect_zero_occurrences_in_file <label> <needle> <file>
 # Fixed-string absence check. On failure, names every offending file:line so
