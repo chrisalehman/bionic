@@ -61,14 +61,34 @@ echo ""
 echo "=== Section 1: Agreement pins (SKILL.md AND operational-rules.md) ==="
 
 AGREEMENT_PINS=(
-  "Design intuition"
-  "Requirements served"
-  "full Technical Design Document"
+  "ratifies the frame"
+  "as a named delta the turn it lands"
 )
 
 for pin in "${AGREEMENT_PINS[@]}"; do
   expect_pin_in_file "agreement pin in SKILL.md: '${pin}'" "$pin" "$SKILL"
   expect_pin_in_file "agreement pin in operational-rules.md: '${pin}'" "$pin" "$RULES"
+done
+
+# Count-scoped agreement pins: operational-rules.md repeats each of these
+# phrases a second time in a worked example, after the normative bullet that
+# introduces it. A presence-only pin on that side cannot tell "normative
+# bullet deleted, worked-example copy survives" from "both survive" — either
+# way the phrase is still present at least once. Requiring >= 2 here forces
+# deletion of the normative occurrence to go red even while the worked example
+# keeps the phrase alive (Step-5 audit Hole finding, wave-03-interview-protocol
+# remediation). The SKILL.md side stays a plain presence pin — it only has the
+# phrase once.
+AGREEMENT_PINS_COUNT_SCOPED=(
+  "Design intuition"
+  "Requirements served"
+  "full Technical Design Document"
+)
+
+for pin in "${AGREEMENT_PINS_COUNT_SCOPED[@]}"; do
+  expect_pin_in_file "agreement pin in SKILL.md: '${pin}'" "$pin" "$SKILL"
+  expect_pin_count_in_file "agreement pin in operational-rules.md: '${pin}' appears >= 2x (normative bullet + worked example)" \
+    "$pin" "$RULES" 2
 done
 
 # ============================================================
@@ -81,11 +101,20 @@ echo "=== Section 2: SKILL.md-only pins ==="
 expect_pin_in_file "SKILL.md pin: 'one decision per turn'" "one decision per turn" "$SKILL"
 expect_pin_in_file "SKILL.md pin: 'surfaced at ratification'" "surfaced at ratification" "$SKILL"
 expect_pin_in_file "SKILL.md pin: \"before the spec's first Write\"" "before the spec's first Write" "$SKILL"
+expect_pin_in_file "SKILL.md pin: 'Derivation heuristics live in'" "Derivation heuristics live in" "$SKILL"
 
-# 'design-interview:' must appear at least twice — once in the Step-0 prose,
-# once in the confirmation-display template block.
-expect_pin_count_in_file "SKILL.md pin: 'design-interview:' appears >= 2x (Step-0 prose + confirmation template)" \
-  "design-interview:" "$SKILL" 2
+# Two line-anchored pins replace the old count>=2 check on the bare substring
+# 'design-interview:' (Step-5 remediation wave-03-interview-protocol). A bare
+# count passes as long as SOME mentions of the substring survive anywhere in
+# the file — it cannot tell that the two load-bearing sites specifically, the
+# confirmation-display template line and the flag-definition paragraph
+# opener, are the ones still present. Pinning each site by its own unique
+# literal closes that hole.
+expect_pin_in_file "SKILL.md pin: display-template line '  design-interview: <true | false>'" \
+  "  design-interview: <true | false>" "$SKILL"
+
+expect_pin_in_file "SKILL.md pin: flag paragraph opener '**The \`design-interview:\` flag.**'" \
+  '**The `design-interview:` flag.**' "$SKILL"
 
 # ============================================================
 # SECTION 3: operational-rules.md-only pins
