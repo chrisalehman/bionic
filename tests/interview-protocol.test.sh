@@ -130,12 +130,32 @@ expect_pin_in_file "SKILL.md pin: flag paragraph opener '**The \`design-intervie
 expect_pin_in_file "SKILL.md pin: frontmatter-contract clause naming the flag" \
   "Step 0's \`design-interview:\` value beside it" "$SKILL"
 
+# Critic Issue 1 (Step-6 remediation): pin the obligation itself, not just the
+# label, so deleting the "not a second way to discharge" sentence — the exact
+# span the critic reproduced — goes RED even while the flag paragraph's
+# opener and display-template line survive untouched.
+expect_pin_in_file "SKILL.md pin: 'not a second way to discharge'" \
+  "not a second way to discharge" "$SKILL"
+
+# The attributed literal is the only trace a human made the waiver call — pin
+# it directly so a rewrite that drops attribution while keeping the flag
+# paragraph's other clauses intact still goes RED.
+expect_pin_in_file "SKILL.md pin: attributed literal 'design-interview: false <user> <date>'" \
+  "design-interview: false <user> <date>" "$SKILL"
+
 # ============================================================
 # SECTION 3: operational-rules.md-only pins
 # ============================================================
 
 echo ""
 echo "=== Section 3: operational-rules.md-only pins ==="
+
+# Critic Issue 1 (Step-6 remediation): op-rules' own statement that the
+# standing Step-0 form does not discharge the waiver obligation on its own —
+# the Step-0 flag and the op-rules waiver paragraph are one waiver with two
+# renderings, not two discharge paths.
+expect_pin_in_file "operational-rules.md pin: 'does not replace it'" \
+  "does not replace it" "$RULES"
 
 expect_pin_in_file "operational-rules.md pin: 'standalone design doc'" "standalone design doc" "$RULES"
 expect_pin_in_file "operational-rules.md pin: 'C4'" "C4" "$RULES"
@@ -197,6 +217,29 @@ else
   echo "FAIL: agents/ directory not found at $AGENTS_DIR"
   FAIL=$((FAIL + 1))
 fi
+
+# ============================================================
+# SECTION 5: lifecycle diagram pins
+# ============================================================
+
+echo ""
+echo "=== Section 5: lifecycle diagram pins ==="
+
+# Critic Issue 3 (Step-6 remediation): the spec's ownership table declared the
+# diagram "recorded unpinned" — retire that by pinning the renamed step labels
+# and the version-stamped title directly against the raw JSON. The file is
+# plain JSON text; each label's newline is the literal two-character sequence
+# backslash-n, not an actual line break, so grep -F matches it as written here.
+DIAGRAM="${REPO}/skills/canonical-sdlc/diagrams/lifecycle.excalidraw"
+
+expect_pin_in_file "lifecycle.excalidraw pin: '1\\nScope' label" \
+  '1\nScope' "$DIAGRAM"
+
+expect_pin_in_file "lifecycle.excalidraw pin: '2\\nDesign' label" \
+  '2\nDesign' "$DIAGRAM"
+
+expect_pin_in_file "lifecycle.excalidraw pin: 'Lifecycle (v13)' title" \
+  'Lifecycle (v13)' "$DIAGRAM"
 
 # ============================================================
 # Results
