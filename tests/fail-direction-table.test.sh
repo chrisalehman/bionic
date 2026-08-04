@@ -1,0 +1,358 @@
+#!/bin/bash
+# THE §7 FAIL-DIRECTION TABLE, PINNED AS BEHAVIOUR — epic-15 wave-01R, slice 4/6.
+#
+# Serves AC-10. Governing design: design/orchestrator-subagent-coordination.md §7.
+# Known-failure checklist A10: "fail-open/fail-closed direction differs between
+# gates on a missing identity field, with nothing pinning that asymmetry itself."
+#
+# The per-gate suites already drive most of these conditions — each inside the
+# suite of the gate it belongs to, where the direction reads as that gate's local
+# habit. THE ASYMMETRY IS THE DESIGN CLAIM, and a claim split across two files is
+# a claim nobody reads. So this suite is one table: every row of §7, both
+# surfaces, driven side by side, with the identical-condition pair
+# (`payload missing its session key`) adjacent so that start=open and stop=closed
+# are one artefact.
+#
+# It is also a doc/behaviour pin: the design's own table text is asserted
+# verbatim, so a direction cannot be quietly reversed in the document and left
+# green here, nor changed here while the document still promises the old one.
+#
+# HERMETIC: throwaway git repos under a mktemp'd sandbox, redirected HOME.
+#
+# Usage: bash tests/fail-direction-table.test.sh
+# Registered by name in tests/run.sh (tests/*.test.sh is NOT auto-globbed).
+
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+# Overridable so the table can be driven against a MUTATED COPY without the
+# shipped file ever being modified — §9's mutation-and-restore proof, repeatable
+# by hand: W1R_PARTY_SG=/tmp/mutant.sh bash tests/fail-direction-table.test.sh
+START_GATE="${W1R_PARTY_DP:-$REPO_ROOT/hooks/dispatch-preflight.sh}"
+STOP_GATE="${W1R_PARTY_SG:-$REPO_ROOT/hooks/stop-guard.sh}"
+PROBE="${W1R_PARTY_PROBE:-$REPO_ROOT/hooks/preflight-probe.sh}"
+DESIGN="$REPO_ROOT/design/orchestrator-subagent-coordination.md"
+
+SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/w1r-faildir.XXXXXX")" && pwd -P)"
+trap 'rm -rf "$SANDBOX"' EXIT
+export HOME="$SANDBOX/home"
+export CLAUDE_CONFIG_DIR="$SANDBOX/home/.claude"
+mkdir -p "$CLAUDE_CONFIG_DIR" "$SANDBOX/plain" "$SANDBOX/stub" "$SANDBOX/nocred/.claude"
+
+# The macOS login keychain is machine-global: a real `security` on this machine
+# would satisfy the producer's credential probe and the row-5 case below could
+# never fail its blocking probe. Substituting the COMMAND (an environment
+# substitution via PATH, not a seam inside the script) is the same technique
+# hooks/preflight-probe.test.sh uses.
+printf '#!/bin/bash\nexit 1\n' > "$SANDBOX/stub/security"
+chmod +x "$SANDBOX/stub/security"
+
+PASS=0; FAIL=0; TOTAL=0
+ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
+no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
+expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
+expect_contains() { if printf '%s' "$3" | grep -qF -- "$2"; then ok "$1"; else no "$1" "missing: $2"; fi; }
+
+SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
+SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
+
+# ---------------------------------------------------------------- fixtures
+#
+# FIXTURE FIDELITY: the PreToolUse envelope is FAITHFUL to
+# .bionic/docs/record/epic-15-kill-interception-experiment.md §2.2 (CLI 2.1.220
+# verbatim capture); the `subagents/agent-<id>.{meta.json,jsonl}` layout is
+# FAITHFUL to §2.5. Session ids, agent ids, plan text: SYNTHESIZED, declared.
+
+write_plan() {  # <path> <current-line>
+  mkdir -p "$(dirname "$1")"
+  {
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 13\n'
+    printf 'intent: build\nrigor: audited\nscale: wave\n---\n\n# Fixture plan\n\n'
+    printf '## SDLC State\n\nintegration-branch: main\n%s\n\n- Step 4: evidence\n' "$2"
+  } > "$1"
+}
+
+# make_world <name> <wave:yes|no|nocurrent> -> "repo|transcript|subagents-dir"
+make_world() {
+  local name="$1" wave="$2"
+  local base="$SANDBOX/w/$name" repo="$SANDBOX/w/$name/repo"
+  mkdir -p "$repo/.bionic" "$base/session/subagents"
+  git -C "$repo" init -q 2>/dev/null
+  printf '{}\n' > "$base/session.jsonl"
+  case "$wave" in
+    yes)       write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: 4" ;;
+    nocurrent) write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: pending" ;;
+    no)        mkdir -p "$repo/.bionic/docs" ;;
+  esac
+  printf '%s|%s|%s' "$repo" "$base/session.jsonl" "$base/session/subagents"
+}
+
+plant_agent() {  # <subagents-dir> <agent-id> <name>
+  printf '{"name":"%s","agentType":"implementor","model":"claude-sonnet-5"}' "$3" \
+    > "$1/agent-$2.meta.json"
+  printf '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}\n' \
+    > "$1/agent-$2.jsonl"
+}
+
+payload() {  # <tool_name> <sid|-> <transcript|-> <cwd> <task_id-or-command|->
+  local tool="$1" sid="$2" tr="$3" cwd="$4" arg="$5"
+  local input='{}'
+  case "$tool" in
+    Agent)    input=$(jq -n --arg d "a dispatch" '{description:$d, subagent_type:"implementor"}') ;;
+    TaskStop) input=$(jq -n --arg k "$arg" '{task_id:$k}') ;;
+    Bash)     input=$(jq -n --arg c "$arg" '{command:$c}') ;;
+    *)        input=$(jq -n '{file_path:"/tmp/x"}') ;;
+  esac
+  jq -n --arg t "$tool" --arg s "$sid" --arg tr "$tr" --arg c "$cwd" --argjson i "$input" \
+    '{prompt_id:"f3cd7d62-305d-47ed-9eaf-46fb12d4f4ed",
+      permission_mode:"bypassPermissions", effort:{level:"high"},
+      hook_event_name:"PreToolUse", tool_name:$t, tool_input:$i,
+      tool_use_id:"toolu_018jyjgop7KMxP6yKtoAWWtB", cwd:$c}
+     + (if $s == "-" then {} else {session_id:$s} end)
+     + (if $tr == "-" then {} else {transcript_path:$tr} end)'
+}
+
+# ---------------------------------------------------------------- the worlds
+
+IFS='|' read -r A_REPO A_TR A_SUB <<< "$(make_world active yes)"
+plant_agent "$A_SUB" "aworker-1111111111111111" "worker"
+plant_agent "$A_SUB" "atwin-2222222222222222" "twin"
+plant_agent "$A_SUB" "atwin-3333333333333333" "twin"
+
+IFS='|' read -r I_REPO I_TR I_SUB <<< "$(make_world inert no)"
+plant_agent "$I_SUB" "aworker-1111111111111111" "worker"
+
+IFS='|' read -r N_REPO N_TR N_SUB <<< "$(make_world nocurrent nocurrent)"
+plant_agent "$N_SUB" "aworker-1111111111111111" "worker"
+
+# An attested active world — the start gate's positive pair.
+IFS='|' read -r T_REPO T_TR T_SUB <<< "$(make_world attested yes)"
+mkdir -p "$T_REPO/.bionic/tmp"
+printf '# attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\n' "$SID_A" \
+  > "$T_REPO/.bionic/tmp/preflight.state"
+
+# An observed active world — the stop gate's positive pair. The observation is
+# RECORDED BY THE RECORDER ARM, never hand-written: the row must be discharged by
+# the real producer→consumer path.
+IFS='|' read -r O_REPO O_TR O_SUB <<< "$(make_world observed yes)"
+plant_agent "$O_SUB" "aworker-1111111111111111" "worker"
+observe() {  # <sid> <transcript> <repo> <target>
+  payload Bash "$1" "$2" "$3" "bash ~/.claude/hooks/stop-check.sh $4" \
+    | bash "$STOP_GATE" >/dev/null 2>&1
+}
+observe "$SID_A" "$O_TR" "$O_REPO" "worker"
+
+# Stale: observed, then the target writes again (D-1's activity boundary).
+IFS='|' read -r S_REPO S_TR S_SUB <<< "$(make_world stale yes)"
+plant_agent "$S_SUB" "aworker-1111111111111111" "worker"
+observe "$SID_A" "$S_TR" "$S_REPO" "worker"
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"more work"}]}}\n' \
+  >> "$S_SUB/agent-aworker-1111111111111111.jsonl"
+
+# Foreign: the only observation belongs to another session.
+IFS='|' read -r F_REPO F_TR F_SUB <<< "$(make_world foreign yes)"
+plant_agent "$F_SUB" "aworker-1111111111111111" "worker"
+observe "$SID_B" "$F_TR" "$F_REPO" "worker"
+
+# Unknown schema version: a record this gate will not guess at (checklist A6).
+IFS='|' read -r V_REPO V_TR V_SUB <<< "$(make_world badversion yes)"
+plant_agent "$V_SUB" "aworker-1111111111111111" "worker"
+mkdir -p "$V_REPO/.bionic/tmp"
+printf 'v9|session=%s|target=%s|typed=worker|log=%s|mtime=1|size=1\n' \
+  "$SID_A" "aworker-1111111111111111" "$V_SUB/agent-aworker-1111111111111111.jsonl" \
+  > "$V_REPO/.bionic/tmp/stop-check.state"
+
+# A symlinked state path — a hostile repo may CLOSE the wall, never open it (§8).
+IFS='|' read -r L_REPO L_TR L_SUB <<< "$(make_world symlinked yes)"
+plant_agent "$L_SUB" "aworker-1111111111111111" "worker"
+mkdir -p "$L_REPO/.bionic/tmp"
+ln -s "$SANDBOX/elsewhere.state" "$L_REPO/.bionic/tmp/stop-check.state"
+
+# ---------------------------------------------------------------- the driver
+
+DRV_ST=0; DRV_OUT=""; DRV_ERR=""
+drive() {  # <condition>
+  local p
+  case "$1" in
+    # --- start gate ---------------------------------------------------------
+    start:irrelevant-tool)  p=$(payload Bash "$SID_A" "$A_TR" "$A_REPO" "echo hi") ;;
+    start:empty-cwd)        p=$(payload Agent "$SID_A" "$A_TR" "" -) ;;
+    start:non-git-cwd)      p=$(payload Agent "$SID_A" "$A_TR" "$SANDBOX/plain" -) ;;
+    start:no-plan)          p=$(payload Agent "$SID_A" "$I_TR" "$I_REPO" -) ;;
+    start:plan-names-no-step) p=$(payload Agent "$SID_A" "$N_TR" "$N_REPO" -) ;;
+    start:no-session-key)   p=$(payload Agent - "$A_TR" "$A_REPO" -) ;;
+    start:unattested)       p=$(payload Agent "$SID_A" "$A_TR" "$A_REPO" -) ;;
+    start:foreign-attestation) p=$(payload Agent "$SID_B" "$T_TR" "$T_REPO" -) ;;
+    start:attested)         p=$(payload Agent "$SID_A" "$T_TR" "$T_REPO" -) ;;
+    # --- stop gate ----------------------------------------------------------
+    stop:irrelevant-tool)   p=$(payload Read "$SID_A" "$A_TR" "$A_REPO" -) ;;
+    stop:empty-cwd)         p=$(payload TaskStop "$SID_A" "$A_TR" "" worker) ;;
+    stop:non-git-cwd)       p=$(payload TaskStop "$SID_A" "$A_TR" "$SANDBOX/plain" worker) ;;
+    stop:no-plan)           p=$(payload TaskStop "$SID_A" "$I_TR" "$I_REPO" worker) ;;
+    stop:plan-names-no-step) p=$(payload TaskStop "$SID_A" "$N_TR" "$N_REPO" worker) ;;
+    stop:no-session-key-inert) p=$(payload TaskStop - "$I_TR" "$I_REPO" worker) ;;
+    stop:no-session-key)    p=$(payload TaskStop - "$A_TR" "$A_REPO" worker) ;;
+    stop:empty-target)      p=$(payload TaskStop "$SID_A" "$A_TR" "$A_REPO" "") ;;
+    stop:no-transcript)     p=$(payload TaskStop "$SID_A" - "$A_REPO" worker) ;;
+    stop:unresolvable)      p=$(payload TaskStop "$SID_A" "$A_TR" "$A_REPO" ghost) ;;
+    stop:ambiguous)         p=$(payload TaskStop "$SID_A" "$A_TR" "$A_REPO" twin) ;;
+    stop:no-observation)    p=$(payload TaskStop "$SID_A" "$A_TR" "$A_REPO" worker) ;;
+    stop:foreign-observation) p=$(payload TaskStop "$SID_A" "$F_TR" "$F_REPO" worker) ;;
+    stop:unknown-schema)    p=$(payload TaskStop "$SID_A" "$V_TR" "$V_REPO" worker) ;;
+    stop:stale-observation) p=$(payload TaskStop "$SID_A" "$S_TR" "$S_REPO" worker) ;;
+    stop:symlinked-state)   p=$(payload TaskStop "$SID_A" "$L_TR" "$L_REPO" worker) ;;
+    stop:observed)          p=$(payload TaskStop "$SID_A" "$O_TR" "$O_REPO" worker) ;;
+    *) echo "unknown condition $1" >&2; return 9 ;;
+  esac
+  case "$1" in
+    start:*) DRV_OUT=$(printf '%s' "$p" | bash "$START_GATE" 2>"$SANDBOX/.err") ;;
+    stop:*)  DRV_OUT=$(printf '%s' "$p" | bash "$STOP_GATE"  2>"$SANDBOX/.err") ;;
+  esac
+  DRV_ST=$?
+  DRV_ERR=$(cat "$SANDBOX/.err")
+  return 0
+}
+
+# ============================================================
+# THE TABLE. One row per driven condition; the `direction` column is the §7 cell
+# it discharges. OPEN = exit 0; CLOSED = exit 2 (the code that blocks the tool
+# call). SILENT = nothing on either stream; LOUD = a refusal on stderr.
+# ============================================================
+TABLE='
+start|irrelevant-tool|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
+start|empty-cwd|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
+start|non-git-cwd|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
+start|no-plan|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
+start|plan-names-no-step|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
+start|no-session-key|0|silent|Payload missing its session key — start: OPEN
+start|unattested|2|loud|Start gate — the decision it exists to make: REFUSE
+start|foreign-attestation|2|loud|Start gate — the decision it exists to make: REFUSE
+start|attested|0|silent|Start gate — the positive pair: pass in silence
+stop|irrelevant-tool|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
+stop|empty-cwd|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
+stop|non-git-cwd|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
+stop|no-plan|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
+stop|plan-names-no-step|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
+stop|no-session-key-inert|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
+stop|no-session-key|2|loud|Payload missing its session key — stop: CLOSED
+stop|empty-target|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|no-transcript|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|unresolvable|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|ambiguous|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|no-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|foreign-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|unknown-schema|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|stale-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|symlinked-state|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|observed|0|silent|Stop gate — the positive pair: a fresh observation permits
+'
+
+echo "=== §7 rows driven as behaviour (AC-10) ==="
+while IFS='|' read -r surface cond want_exit want_loud row; do
+  [ -n "$surface" ] || continue
+  drive "$surface:$cond"
+  if [ "$DRV_ST" = "$want_exit" ]; then
+    ok "$surface/$cond exits $want_exit — $row"
+  else
+    no "$surface/$cond exits $want_exit — $row" "got exit $DRV_ST; stderr: $(printf '%s' "$DRV_ERR" | head -1)"
+  fi
+  if [ "$want_loud" = "silent" ]; then
+    if [ -z "$DRV_OUT" ] && [ -z "$DRV_ERR" ]; then
+      ok "$surface/$cond is SILENT on both streams"
+    else
+      no "$surface/$cond is SILENT on both streams" "stdout='$DRV_OUT' stderr='$DRV_ERR'"
+    fi
+  else
+    if [ -n "$DRV_ERR" ]; then
+      ok "$surface/$cond is LOUD — it says why on stderr"
+    else
+      no "$surface/$cond is LOUD — it says why on stderr" "stderr was empty"
+    fi
+  fi
+done <<EOF
+$(printf '%s' "$TABLE")
+EOF
+
+# ============================================================
+echo ""
+echo "=== the asymmetry itself: ONE missing field, TWO directions ==="
+# ============================================================
+#
+# Checklist A10's defect was not a wrong direction — it was that no test asserted
+# the two directions were different ON PURPOSE. The same absent `session_id`, the
+# same active wave, adjacent:
+
+drive start:no-session-key
+S_START=$DRV_ST; S_START_ERR=$DRV_ERR
+drive stop:no-session-key
+S_STOP=$DRV_ST; S_STOP_ERR=$DRV_ERR
+
+expect_eq "a keyless payload at the START gate passes (open)"   "0" "$S_START"
+expect_eq "a keyless payload at the STOP gate is refused (closed)" "2" "$S_STOP"
+if [ "$S_START" != "$S_STOP" ]; then
+  ok "the directions differ — recorded inconsistency, accepted by §7, not an accident"
+else
+  no "the directions differ" "both gates answered $S_START"
+fi
+expect_eq "the open side stays silent about it" "" "$S_START_ERR"
+expect_contains "the closed side names the missing key" "session key" "$S_STOP_ERR"
+
+# The cost asymmetry §7 derives the whole table from, asserted where a reader
+# meets it: the stop refusal must always name the way forward.
+drive stop:no-observation
+expect_contains "every stop refusal names the observation command" \
+  "~/.claude/hooks/stop-check.sh" "$DRV_ERR"
+drive start:unattested
+expect_contains "every start refusal names the environment check" \
+  "~/.claude/hooks/preflight-probe.sh" "$DRV_ERR"
+
+# ============================================================
+echo ""
+echo "=== the producer's two rows (§7 rows 4 and 5) ==="
+# ============================================================
+
+P_REPO="$SANDBOX/w/producer/repo"; mkdir -p "$P_REPO/.bionic/tmp"
+git -C "$P_REPO" init -q 2>/dev/null
+PRIOR="$P_REPO/.bionic/tmp/preflight.state"
+printf '# attestation\nversion=1\nsession_id=%s\n' "$SID_B" > "$PRIOR"
+PRIOR_SUM=$(shasum "$PRIOR")
+
+# Row 4 — no session key: REFUSE, and state is LEFT UNTOUCHED. An unkeyed run
+# cannot tell whose attestation is on disk, so deleting it would destroy another
+# session's valid stamp (slice 4/1 resolution).
+OUT=$( cd "$P_REPO" && env -u CLAUDE_CODE_SESSION_ID ANTHROPIC_API_KEY=x \
+       HOME="$HOME" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" bash "$PROBE" 2>&1 ); ST=$?
+expect_eq "environment check with no session key REFUSES (exit 3)" "3" "$ST"
+expect_contains "…and says so" "REFUSED" "$OUT"
+expect_eq "…and leaves existing state byte-identical" "$PRIOR_SUM" "$(shasum "$PRIOR")"
+
+# Row 5 — a blocking probe fails: NO ATTESTATION, and the prior one is deleted.
+# A stale pass must not outlive the environment it described.
+printf '# attestation\nversion=1\nsession_id=%s\n' "$SID_A" > "$PRIOR"
+OUT=$( cd "$P_REPO" && env -u ANTHROPIC_API_KEY CLAUDE_CODE_SESSION_ID="$SID_A" \
+       HOME="$SANDBOX/nocred" CLAUDE_CONFIG_DIR="$SANDBOX/nocred/.claude" \
+       PATH="$SANDBOX/stub:$PATH" bash "$PROBE" 2>&1 ); ST=$?
+expect_eq "environment check with a failing blocking probe exits 1" "1" "$ST"
+expect_eq "…and no attestation is on disk" "no" "$([ -e "$PRIOR" ] && echo yes || echo no)"
+expect_contains "…and the prior attestation was deleted, loudly" "deleted" "$OUT"
+
+# ============================================================
+echo ""
+echo "=== doc/behaviour pin: §7's own table text ==="
+# ============================================================
+#
+# Pinning the normative CELLS, not the section name: a direction reversed in the
+# document must break this suite (checklist A12 / the pins-guard-spans rule).
+
+pin() { expect_contains "design §7 still says: $1" "$1" "$(cat "$DESIGN")"; }
+pin '| Start gate — any ambiguity, anywhere | OPEN, silent |'
+pin '| Stop gate — before the active-wave verdict | OPEN, silent |'
+pin '| Stop gate — after the verdict | CLOSED, loud |'
+pin '| Environment check — no session key | REFUSE |'
+pin '| Environment check — blocking probe fails | NO ATTESTATION + delete prior |'
+pin '| Payload missing its session key | start: open / stop: closed |'
+
+echo ""
+echo "──────────────────────────────────────────────"
+echo "fail-direction-table: ${PASS} passed, ${FAIL} failed, ${TOTAL} total"
+[ "$FAIL" -eq 0 ]
