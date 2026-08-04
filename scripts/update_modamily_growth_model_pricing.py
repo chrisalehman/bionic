@@ -12,7 +12,6 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 from openpyxl.comments import Comment
-from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
 
@@ -77,13 +76,13 @@ def set_font_color(cell, color: str) -> None:
 def update_pricing_ladder(workbook) -> None:
     ws = workbook["Pricing Ladder"]
 
-    # Preserve the existing sheet layout and the E13 address consumed elsewhere.
-    original_mix_label_style = copy(ws["A9"]._style)
-    original_mix_formula_style = copy(ws["G9"]._style)
+    # Donors remain invariant after transformation so T(T(x)) has stable styles.
+    mix_label_style = copy(ws["A2"]._style)
     plan_label_style = copy(ws["A8"]._style)
-    currency_style = copy(ws["D8"]._style)
+    currency_formula_style = copy(ws["D8"]._style)
+    currency_input_style = copy(ws["C8"]._style)
     percent_input_style = copy(ws["G8"]._style)
-    formula_percent_style = copy(ws["G9"]._style)
+    formula_percent_style = copy(ws["F8"]._style)
 
     ws["H4"] = "Normalized new-plan mix"
     copy_style(ws["G4"], ws["H4"])
@@ -105,12 +104,19 @@ def update_pricing_ladder(workbook) -> None:
     ws["A9"] = "Legacy"
     ws["A9"]._style = plan_label_style
     ws["B9"] = 32.0
-    ws["B9"]._style = currency_style
+    ws["B9"]._style = currency_input_style
     set_font_color(ws["B9"], BLUE)
+    ws["B9"].comment = Comment(
+        "Assumption from the user: legacy $29.99/$32.99 plans are modeled at "
+        "approximately $32 per payer per month. Edit this yellow/blue input; "
+        "the monthly-equivalent cell in D9 is derived from it.",
+        "Codex",
+    )
     ws["C9"] = None
-    ws["D9"] = 32.0
-    ws["D9"]._style = currency_style
-    set_font_color(ws["D9"], BLUE)
+    ws["D9"] = "=B9"
+    ws["D9"]._style = currency_formula_style
+    set_font_color(ws["D9"], BLACK)
+    ws["D9"].comment = None
     ws["E9"] = None
     ws["F9"] = None
     ws["G9"] = 0.04
@@ -120,13 +126,17 @@ def update_pricing_ladder(workbook) -> None:
     ws["H9"] = None
 
     ws["A10"] = "Payer mix check (must = 100%)"
-    ws["A10"]._style = original_mix_label_style
+    ws["A10"]._style = mix_label_style
     ws["G10"] = "=SUM(G5:G9)"
-    ws["G10"]._style = original_mix_formula_style
+    ws["G10"]._style = copy(formula_percent_style)
     set_font_color(ws["G10"], BLACK)
     ws["H10"] = "=SUM(H5:H8)"
-    ws["H10"]._style = original_mix_formula_style
+    ws["H10"]._style = copy(formula_percent_style)
     set_font_color(ws["H10"], BLACK)
+    for ref in ("G10", "H10"):
+        font = copy(ws[ref].font)
+        font.bold = True
+        ws[ref].font = font
 
     ws["D12"] = "=SUMPRODUCT(D5:D9,G5:G9)"
     set_font_color(ws["D12"], BLACK)
@@ -185,10 +195,11 @@ def update_path_to_30k(workbook) -> None:
 def update_weekly_scorecard(workbook) -> None:
     ws = workbook["Weekly Scorecard"]
 
+    # These donors keep the same semantic role after each transformation.
     header_style = copy(ws["A4"]._style)
-    manual_text_style = copy(ws["A5"]._style)
-    manual_currency_style = copy(ws["C5"]._style)
-    formula_currency_style = copy(ws["D5"]._style)
+    # B5 remains a general-format manual text input; A5 becomes a date input.
+    manual_text_style = copy(ws["B5"]._style)
+    formula_currency_style = copy(workbook["Pricing Ladder"]["D5"]._style)
     note_style = copy(ws["A6"]._style)
 
     for row in range(4, 7):
@@ -230,9 +241,9 @@ def update_weekly_scorecard(workbook) -> None:
     for ref, value in manual_values.items():
         cell = ws[ref]
         cell.value = value
-        cell._style = copy(
-            manual_currency_style if cell.column in currency_columns else manual_text_style
-        )
+        cell._style = copy(manual_text_style)
+        if cell.column in currency_columns:
+            cell.number_format = '\\$#,##0.00;("$"#,##0.00);-'
         set_font_color(cell, BLUE)
     ws["A5"].number_format = "yyyy-mm-dd"
 
