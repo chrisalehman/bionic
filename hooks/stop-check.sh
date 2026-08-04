@@ -68,7 +68,17 @@ fmt_age() {  # <seconds> -> "3m 12s"
 
 slugify() { printf '%s' "$1" | sed 's/[^a-zA-Z0-9]/-/g'; }
 
-PROJECTS="${HOME}/.claude/projects"
+# WHERE CLAUDE CODE STORES SESSION AND PROJECT METADATA. One concept, three
+# renderings in this wave, and they must name one directory: hooks/stop-guard.sh
+# derives it from the payload's transcript path (it has one), hooks/preflight-probe.sh
+# reads `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`, and this producer has no payload
+# so it must read the same variable. Rooting this at $HOME alone made the two
+# sides name different directories the moment CLAUDE_CONFIG_DIR was set — the
+# observation printed "unresolved" while the recorder wrote a record the stop
+# gate then spent, which is the wall OPENING on a look that showed nothing
+# (Step-6 critic, issue 1). Pinned by tests/cross-gate-agreement.test.sh §C,
+# which runs with the two roots deliberately different.
+PROJECTS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
 TARGET_BASE="${TARGET%@*}"
 [ -n "$TARGET_BASE" ] || TARGET_BASE="$TARGET"
 
