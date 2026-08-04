@@ -550,6 +550,117 @@ expect_contains "the start gate reads the payload's session_id field" ".session_
 
 # ============================================================
 echo ""
+echo "=== C — target resolution: the observation and BOTH stop-guard arms agree ==="
+# ============================================================
+#
+# `scan_subagent_dirs` and the portable file facts are duplicated between
+# hooks/stop-check.sh and hooks/stop-guard.sh, and both copies carried a comment
+# claiming this battery held them together while no such battery existed
+# (Step-6 duplication review D1). Byte-identity of the FUNCTION was never the
+# claim worth testing anyway: the two callers fed it different directory sets,
+# and that divergence is what let an observation print "ambiguous — decide
+# nothing" while the recorder wrote a dischargeable record (correctness C1).
+#
+# So the question this battery asks is the CALLERS' question, over one fixture
+# world, with the two halves reaching the directories by their own means: the
+# observation by slugifying its cwd (it has no payload), the recorder and the
+# gate from the payload's transcript path. Agreement means all three answer the
+# same way about the same typed name — or, where they deliberately differ, that
+# the difference is pinned and fail-closed.
+
+RSLUG=$(printf '%s' "$SANDBOX/fx/resolver/repo" | sed 's/[^a-zA-Z0-9]/-/g')
+RPROJ="$HOME/.claude/projects/$RSLUG"
+RREPO=$(new_repo "resolver")
+write_plan "$RREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+mkdir -p "$RPROJ/$SID_A/subagents" "$RPROJ/$SID_B/subagents"
+printf '{}\n' > "$RPROJ/$SID_A.jsonl"
+printf '{}\n' > "$RPROJ/$SID_B.jsonl"
+RTR="$RPROJ/$SID_A.jsonl"
+
+plant() {  # <subagents-dir> <agent-id> <name>
+  printf '{"name":"%s","agentType":"implementor","description":"fixture","model":"opus"}' "$3" \
+    > "$1/agent-$2.meta.json"
+  printf '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}\n' \
+    > "$1/agent-$2.jsonl"
+}
+
+# The three questions, each asked of the REAL party.
+q_observation() {  # <typed> -> resolved|ambiguous|unresolved
+  local out
+  out=$( cd "$RREPO" && bash "$OBSERVE" "$1" 2>&1 )
+  case "$out" in
+    *"Resolved:      ambiguous"*)  echo ambiguous ;;
+    *"Resolved:      unresolved"*) echo unresolved ;;
+    *"Resolved:      a"*)          echo resolved ;;
+    *) echo "other" ;;
+  esac
+}
+q_recorder() {  # <typed> -> recorded|nothing
+  rm -f "$RREPO/.bionic/tmp/stop-check.state"
+  mk_bash_payload "$SID_A" "$RTR" "$RREPO" "bash ~/.claude/hooks/stop-check.sh $1" \
+    | bash "$PARTY_SG" >/dev/null 2>&1
+  if grep -q '^v1|' "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null; then
+    echo recorded
+  else
+    echo nothing
+  fi
+}
+q_gate() {  # <typed> -> permitted|refused   (asked AFTER q_recorder, on its state)
+  mk_stop_payload "$SID_A" "$RTR" "$RREPO" "$1" | bash "$PARTY_SG" >/dev/null 2>&1
+  [ "$?" -eq 0 ] && echo permitted || echo refused
+}
+
+# --- case 1: unique in this session. All three say yes. ---
+plant "$RPROJ/$SID_A/subagents" "asolo-1111111111111111" "solo"
+expect_eq "C1 observation resolves a uniquely-named agent" "resolved" "$(q_observation solo)"
+expect_eq "C1 recorder records the same agent" "recorded" "$(q_recorder solo)"
+expect_eq "C1 gate discharges the stop on that record" "permitted" "$(q_gate solo)"
+
+# --- case 2: the same name in two sessions of this project. The operator is
+# shown a candidate list and NO evidence tier, so nothing may be dischargeable. ---
+plant "$RPROJ/$SID_A/subagents" "adup-2222222222222222" "dup"
+plant "$RPROJ/$SID_B/subagents" "adup-3333333333333333" "dup"
+expect_eq "C2 observation reports the cross-session name as AMBIGUOUS" \
+  "ambiguous" "$(q_observation dup)"
+expect_eq "C2 recorder writes nothing for a name the operator could not resolve" \
+  "nothing" "$(q_recorder dup)"
+expect_eq "C2 gate refuses it" "refused" "$(q_gate dup)"
+
+# --- case 3: resolves only in ANOTHER session of this project. A KNOWN,
+# PINNED divergence, not a defect: the observation is project-wide because it has
+# no payload to scope it, while a stop is session-scoped because a session can
+# only stop its own tasks. The divergence runs fail-closed in every direction —
+# the operator can look, nothing records, the stop refuses — and the refusal
+# names the scope so the loop has a stated exit (readability R4). ---
+plant "$RPROJ/$SID_B/subagents" "aforeign-4444444444444444" "foreign"
+expect_eq "C3 observation can still SHOW another session's agent" \
+  "resolved" "$(q_observation foreign)"
+expect_eq "C3 recorder records nothing for it (only this session's agents)" \
+  "nothing" "$(q_recorder foreign)"
+expect_eq "C3 gate refuses it" "refused" "$(q_gate foreign)"
+OUT=$(mk_stop_payload "$SID_A" "$RTR" "$RREPO" "foreign" | bash "$PARTY_SG" 2>&1)
+expect_contains "C3 the refusal NAMES the scope, so the named fix is not an endless loop" \
+  "scoped to agents this session launched" "$OUT"
+
+# --- case 4: unknown to both. ---
+expect_eq "C4 observation reports an unknown name unresolved" "unresolved" "$(q_observation nobody)"
+expect_eq "C4 recorder writes nothing" "nothing" "$(q_recorder nobody)"
+expect_eq "C4 gate refuses" "refused" "$(q_gate nobody)"
+
+# The derived FILE FACTS agree too: what the observation shows the reader as the
+# working log's size is what the recorder writes down as the activity level. Two
+# computations of one truth, previously untested together (D2).
+plant "$RPROJ/$SID_A/subagents" "afacts-5555555555555555" "facts"
+OBS_OUT=$( cd "$RREPO" && bash "$OBSERVE" facts 2>&1 )
+OBS_SIZE=$(printf '%s' "$OBS_OUT" | grep -E '^  size:' | grep -oE '[0-9]+' | head -1)
+q_recorder facts >/dev/null
+REC_SIZE=$(grep -F 'target=afacts-5555555555555555' "$RREPO/.bionic/tmp/stop-check.state" \
+  | tr '|' '\n' | grep '^size=' | cut -d= -f2)
+expect_eq "the size the observation PRINTS is the size the recorder STORES" \
+  "$OBS_SIZE" "$REC_SIZE"
+
+# ============================================================
+echo ""
 echo "=== D — cross-script security regressions (AC-8, TDD §8) ==="
 # ============================================================
 #

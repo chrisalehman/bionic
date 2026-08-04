@@ -127,10 +127,19 @@ deny() {  # <reason line>...
 
 STATE_FILE="$REPO/$STATE_REL"
 
-# A symlink at the attestation path is never followed — a hostile repo can
-# AIM or CLOSE this wall but must not be able to OPEN it by planting content
-# at a path it controls (design §8). Treated the same as "missing": refuse.
-if [ -L "$STATE_FILE" ] || [ ! -f "$STATE_FILE" ]; then
+# A symlink ANYWHERE on the attestation path is never followed — a hostile repo
+# can AIM or CLOSE this wall but must not be able to OPEN it by planting content
+# at a path it controls (design §8). The DIRECTORY levels matter as much as the
+# file: `.bionic/tmp` pointed at a tree holding a valid same-session attestation
+# (one session working across a repo and its `.worktrees/` siblings produces
+# exactly that) would otherwise admit a dispatch on an environment proof taken
+# for a different tree — and this gate deliberately parses no check detail (§4),
+# so the record's own `repo=` field never exposes the mismatch. Checklist A3
+# names this class; it was discharged for the WRITE path only. The sibling stop
+# gate refuses at all three levels (hooks/stop-guard.sh's state_paths()); these
+# are the same three. Treated the same as "missing": refuse.
+if [ -L "$REPO/.bionic" ] || [ -L "$REPO/.bionic/tmp" ] \
+   || [ -L "$STATE_FILE" ] || [ ! -f "$STATE_FILE" ]; then
   deny "No environment attestation was found for this repo."
 fi
 
@@ -138,6 +147,15 @@ fi
 # readback. This gate parses no check detail beyond the session key: the
 # attestation's existence, keyed to THIS session, is the whole verdict
 # (§4 "The start gate").
+#
+# So the record's `version=` line is written and never read here, while the
+# observation schema's version IS enforced by its reader, which refuses loudly on
+# an unknown one. The asymmetry is deliberate, not drift (Step-6 review D5): each
+# side follows the direction §7 assigns it. A start gate that refused an
+# unrecognised attestation version would be a false block on every session after
+# a schema bump — the expensive direction here — while an unreadable observation
+# record must refuse a stop, because that side's ambiguity is what the wall is
+# for. Recorded in the spec's ownership table beside both schema rows.
 ATTESTED_SID=$(grep -m1 '^session_id=' "$STATE_FILE" 2>/dev/null | cut -d= -f2-)
 if [ -z "$ATTESTED_SID" ] || [ "$ATTESTED_SID" != "$PAYLOAD_SID" ]; then
   deny "The attestation on disk is not this session's (foreign, or not a valid attestation record)." \

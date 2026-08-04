@@ -295,6 +295,36 @@ ln -s "$DECOY" "$REPO/.bionic/tmp/preflight.state"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "attestation path is a symlink -> refuse, not followed" "2" "$GATE_ST"
 
+# S1 (Step-6 security review, slice 4/7): the DIRECTORY levels are guarded too.
+# Checking only the file leaves the same class open one level up — a repo
+# controls its own `.bionic/` contents, so pointing `.bionic/tmp` (or `.bionic`)
+# at a directory holding a valid same-session attestation opens the wall with
+# content the repo arranges. §8's load-bearing property is that a hostile repo
+# can CLOSE or AIM these walls but never OPEN them, and the sibling gate already
+# refuses at both levels (hooks/stop-guard.sh's state_paths(); checklist A3
+# names this variant, discharged for the WRITE path only).
+for _lvl in .bionic/tmp .bionic; do
+  _tag=$(printf '%s' "$_lvl" | tr -d './')
+  REPO=$(make_repo "r8d-$_tag" yes)
+  ELSEWHERE="$SANDBOX/elsewhere-$_tag/.bionic/tmp"
+  mkdir -p "$ELSEWHERE"
+  printf 'session_id=%s\nversion=1\nkind=preflight-attestation\n' "$SID_A" \
+    > "$ELSEWHERE/preflight.state"
+  if [ "$_lvl" = ".bionic/tmp" ]; then
+    mkdir -p "$REPO/.bionic"
+    ln -s "$ELSEWHERE" "$REPO/.bionic/tmp"
+  else
+    # The whole `.bionic` redirected: the active plan has to travel with it, or
+    # the case is vacuous (no wave, nothing to decide).
+    cp -R "$REPO/.bionic/docs" "$SANDBOX/elsewhere-$_tag/.bionic/docs"
+    rm -rf "$REPO/.bionic"
+    ln -s "$SANDBOX/elsewhere-$_tag/.bionic" "$REPO/.bionic"
+  fi
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+  expect_status "a planted DIRECTORY symlink at ${_lvl} -> refuse, not read through (S1)" \
+    "2" "$GATE_ST"
+done
+
 # attestation file exists but is empty / has no session_id= line at all
 REPO=$(make_repo r8c yes)
 mkdir -p "$REPO/.bionic/tmp"

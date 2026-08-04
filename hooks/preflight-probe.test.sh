@@ -198,6 +198,29 @@ chmod 700 "$SBX/repo"
 expect_eq "unwritable repo exits 1" "1" "$rc"
 expect_false "unwritable repo leaves no attestation" [ -e "$SBX/repo/$STATE_REL" ]
 
+# C2 (Step-6 correctness review, slice 4/7). THE STATE DIRECTORY ITSELF is the
+# failing blocking probe. The delete-on-fail obligation holds here too: a
+# directory can be readable-but-not-writable while holding a perfectly readable
+# prior attestation, and the start gate reads that file and passes — a stale pass
+# outliving the environment it described (§7 row 5, AC-1, checklist A5). The
+# fixture above deliberately keeps the state dir writable "so the delete path
+# still runs", which is exactly the branch that had no coverage.
+SBX="$(mk_sandbox)"
+rc="$(run_probe "$SBX")"
+expect_eq "attestation established before making the STATE DIR read-only" "0" "$rc"
+chmod 500 "$SBX/repo/.bionic/tmp"
+rc="$(run_probe "$SBX")"
+chmod 700 "$SBX/repo/.bionic/tmp"
+expect_eq "unwritable state dir exits 1" "1" "$rc"
+if grep -q '^session_id=' "$SBX/repo/$STATE_REL" 2>/dev/null; then
+  bad "an unwritable state dir leaves NO usable prior attestation (C2)" \
+      "the prior attestation survived a blocking failure and still keys this session"
+else
+  ok "an unwritable state dir leaves NO usable prior attestation (C2)"
+fi
+expect_match "the state-dir failure says what happened to the prior attestation" \
+  'deleted or emptied|could' "$ERR"
+
 # ============================================================
 section "S3 — no session key REFUSES (AC-10 / design §7)"
 # ============================================================

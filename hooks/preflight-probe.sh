@@ -50,7 +50,9 @@
 # doc/behavior split on exactly this point (checklist A5) is what let a stale pass survive
 # a failed write in the discarded run:
 #   exit 0 — the attestation for THIS session is present on disk
-#   exit 1 — a blocking probe failed; no attestation on disk (any prior one was deleted)
+#   exit 1 — a blocking probe failed; no usable attestation on disk (any prior one was
+#            deleted, or emptied where the directory forbade deleting it; if even that
+#            failed the message says so and names the file to remove by hand)
 #   exit 2 — refused or could not complete; no attestation on disk (prior one deleted)
 #   exit 3 — no session key; REFUSED, state left untouched
 #   exit 4 — the state lock is held by another writer; state left untouched
@@ -218,10 +220,31 @@ fi
 
 # ---------------------------------------------------------------- state mutation
 
-# An unusable state directory means no attestation can exist there at all: nothing to
-# lock, nothing to delete. This is only ever reached with a blocking failure recorded.
+# An unusable state directory does NOT mean the directory is empty: it can be readable
+# and non-writable (or full) while holding a perfectly readable prior attestation, and the
+# start gate would read that file and pass — a stale pass outliving the environment it
+# described (§7 row 5, checklist A5). So the delete-on-fail obligation holds on THIS path
+# too, even though the lock below is unreachable from here.
+#
+# `rm` needs write permission on the DIRECTORY and can fail here; truncation needs it only
+# on the FILE, and an emptied attestation carries no `session_id=` line, which the start
+# gate refuses as "not a valid attestation record". A symlink is never truncated — that
+# would write through the redirect a hostile repo planted (§8) — only unlinked.
 if [ "$STATE_DIR_OK" -eq 0 ]; then
-  die "BLOCKED — a blocking probe failed. No attestation was written."
+  if [ -L "$STATE_FILE" ]; then
+    rm -f "$STATE_FILE" 2>/dev/null
+  elif [ -f "$STATE_FILE" ]; then
+    rm -f "$STATE_FILE" 2>/dev/null
+    [ -f "$STATE_FILE" ] && : > "$STATE_FILE" 2>/dev/null
+  fi
+  if [ -e "$STATE_FILE" ] && [ -s "$STATE_FILE" ]; then
+    die "BLOCKED — a blocking probe failed, and the prior attestation at $STATE_FILE could"
+    die "NEITHER be deleted nor emptied. It may still admit dispatches. Remove it by hand:"
+    die "  rm -f $STATE_FILE"
+  else
+    die "BLOCKED — a blocking probe failed. No attestation was written, and any earlier"
+    die "attestation has been deleted or emptied."
+  fi
   die "Fix the failure above and re-run: bash ~/.claude/hooks/preflight-probe.sh"
   exit 1
 fi
