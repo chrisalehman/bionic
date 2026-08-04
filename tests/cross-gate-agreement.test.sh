@@ -27,6 +27,17 @@
 # $HOME/.claude/logs — nothing here may touch the real one). No live wave, no
 # installed hooks, no network.
 #
+# THE TWO ROOTS ARE DELIBERATELY DIFFERENT. `$CLAUDE_CONFIG_DIR` is NOT
+# `$HOME/.claude` here, because "where Claude Code stores session and project
+# metadata" is computed at three sites in this wave and holding the two roots
+# equal makes every disagreement between them invisible. That is not
+# hypothetical: this file previously pinned the equal case, and behind it the
+# observation resolved NOTHING while the recorder wrote a record and the stop
+# gate spent it (Step-6 critic, issue 1). Every metadata fixture below is
+# planted under $CLAUDE_CONFIG_DIR, which is what the platform does when the
+# variable is set; §C case 5 plants under $HOME/.claude and proves it is NOT
+# seen.
+#
 # Usage: bash tests/cross-gate-agreement.test.sh
 # Registered by name in tests/run.sh (tests/*.test.sh is NOT auto-globbed).
 
@@ -49,8 +60,8 @@ OBSERVE="$REPO_ROOT/hooks/stop-check.sh"
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/w1r-agreement.XXXXXX")" && pwd -P)"
 trap 'rm -rf "$SANDBOX"' EXIT
 export HOME="$SANDBOX/home"
-export CLAUDE_CONFIG_DIR="$SANDBOX/home/.claude"
-mkdir -p "$CLAUDE_CONFIG_DIR"
+export CLAUDE_CONFIG_DIR="$SANDBOX/cfg"     # NOT $HOME/.claude — see the header
+mkdir -p "$CLAUDE_CONFIG_DIR" "$HOME/.claude"
 
 PASS=0; FAIL=0; TOTAL=0
 ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
@@ -489,11 +500,18 @@ echo "=== B — the session-identity key: producer and BOTH consumers agree ==="
 # producer flows through both consumers.
 
 IREPO=$(new_repo "identity")
-mkdir -p "$SANDBOX/fx/identity/sub"
-ITR="$SANDBOX/fx/identity/session.jsonl"
-printf '{}\n' > "$ITR"
-ISUB="$SANDBOX/fx/identity/session/subagents"
+# The metadata lives where the PLATFORM puts it — under the configured metadata
+# root, in this project's slug directory, in this session's own directory. The
+# earlier version of this fixture invented a transcript path outside any
+# projects root, which let the record and the gate-pass below stand behind an
+# observation that resolved nothing (Step-6 critic, issue 1). A fixture that
+# cannot be reached by BOTH parties proves nothing about their agreement.
+ISLUG=$(printf '%s' "$IREPO" | sed 's/[^a-zA-Z0-9]/-/g')
+IPROJ="$CLAUDE_CONFIG_DIR/projects/$ISLUG"
+ISUB="$IPROJ/$SID_A/subagents"
 mkdir -p "$ISUB"
+ITR="$IPROJ/$SID_A.jsonl"
+printf '{}\n' > "$ITR"
 printf '{"name":"worker","agentType":"implementor"}' > "$ISUB/agent-aworker-1111111111111111.meta.json"
 printf '{}\n' > "$ISUB/agent-aworker-1111111111111111.jsonl"
 write_plan "$IREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
@@ -524,6 +542,13 @@ expect_eq "start gate: a foreign session is refused" "2" "$ST"
 
 # Consumer 2 — the stop gate: the recorder writes the key, the gate compares it.
 # Same literal value, produced by the same session, carried by the payload.
+#
+# The record attests to an EXAMINATION, so what the examination itself showed is
+# asserted first. Without this line the three assertions beneath it are green on
+# a fixture where the operator's own command printed "unresolved" and exited 1 —
+# which is exactly what they were green on before (Step-6 critic, issue 1).
+expect_contains "the observation the record attests to actually resolved the target" \
+  "Resolved:      aworker-1111111111111111" "$( cd "$IREPO" && bash "$OBSERVE" worker 2>&1 )"
 mk_bash_payload "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh worker" \
   | bash "$PARTY_SG" >/dev/null 2>&1
 SGSTATE="$IREPO/.bionic/tmp/stop-check.state"
@@ -568,8 +593,17 @@ echo "=== C — target resolution: the observation and BOTH stop-guard arms agre
 # same way about the same typed name — or, where they deliberately differ, that
 # the difference is pinned and fail-closed.
 
+# The metadata root is the CONFIGURED one. `$CLAUDE_CONFIG_DIR` and
+# `$HOME/.claude` are different directories in this suite (header), so every
+# case below asks its question with the only variable that separates the two
+# callers actually varying. Stated as an assertion rather than a comment,
+# because a future edit that collapses the roots would silently make this whole
+# battery blind again.
+expect_eq "the two metadata roots are genuinely different directories here" "different" \
+  "$([ "$CLAUDE_CONFIG_DIR" != "$HOME/.claude" ] && echo different || echo same)"
+
 RSLUG=$(printf '%s' "$SANDBOX/fx/resolver/repo" | sed 's/[^a-zA-Z0-9]/-/g')
-RPROJ="$HOME/.claude/projects/$RSLUG"
+RPROJ="$CLAUDE_CONFIG_DIR/projects/$RSLUG"
 RREPO=$(new_repo "resolver")
 write_plan "$RREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 mkdir -p "$RPROJ/$SID_A/subagents" "$RPROJ/$SID_B/subagents"
@@ -646,6 +680,26 @@ expect_contains "C3 the refusal NAMES the scope, so the named fix is not an endl
 expect_eq "C4 observation reports an unknown name unresolved" "unresolved" "$(q_observation nobody)"
 expect_eq "C4 recorder writes nothing" "nothing" "$(q_recorder nobody)"
 expect_eq "C4 gate refuses" "refused" "$(q_gate nobody)"
+
+# --- case 5: the metadata root itself. The recorder and the gate reach the
+# directories through the PAYLOAD's transcript path; the observation has no
+# payload and must reach the same root by configuration. Where
+# `$CLAUDE_CONFIG_DIR` names a root other than `$HOME/.claude` — which is the
+# whole reason the variable exists — an observation rooted at `$HOME` looks in a
+# directory the platform is not using: it shows the operator nothing, while the
+# recorder records and the gate spends the record. That is the wall opening on a
+# look that never happened, and it is the direction this case pins.
+#
+# Cases 1-4 above already run under the divergent roots and prove the AGREEING
+# direction. This one plants a decoy under the default root and proves the
+# observation does not answer from it. ---
+HOMEPROJ="$HOME/.claude/projects/$RSLUG"
+mkdir -p "$HOMEPROJ/$SID_A/subagents"
+plant "$HOMEPROJ/$SID_A/subagents" "adecoy-6666666666666666" "decoy"
+expect_eq "C5 observation ignores metadata under \$HOME/.claude when CLAUDE_CONFIG_DIR names another root" \
+  "unresolved" "$(q_observation decoy)"
+expect_eq "C5 recorder writes nothing for it" "nothing" "$(q_recorder decoy)"
+expect_eq "C5 gate refuses it" "refused" "$(q_gate decoy)"
 
 # The derived FILE FACTS agree too: what the observation shows the reader as the
 # working log's size is what the recorder writes down as the activity level. Two

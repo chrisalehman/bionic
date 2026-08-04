@@ -118,9 +118,16 @@ make_agent() {
 }
 
 # run_check <home> <repo> [args...]
+#
+# CLAUDE_CONFIG_DIR is redirected beside HOME, and for the same hermeticity
+# reason: the observation reads `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects`,
+# so on a machine where that variable is exported — this one exports it — a
+# suite that redirected only HOME would read the REAL metadata root. It is
+# pointed at "$home/.claude", the same directory make_agent plants under, so the
+# derivation under test is unchanged; nothing here injects a projects path.
 run_check() {
   local home="$1" repo="$2"; shift 2
-  ( cd "$repo" && HOME="$home" bash "$CHECK" "$@" 2>&1 )
+  ( cd "$repo" && HOME="$home" CLAUDE_CONFIG_DIR="$home/.claude" bash "$CHECK" "$@" 2>&1 )
 }
 
 # ============================================================
@@ -211,9 +218,14 @@ echo ""
 echo "=== Section 4: no seam — the default projects root is derived, not injected ==="
 # ============================================================
 # Seam-blindness (a substituted value leaves the production path unverified):
-# every test above runs with only HOME redirected, so the projects-root
-# derivation ($HOME/.claude/projects/<slugified-project-root>) is itself under
-# test — there is no injected path anywhere in this suite. This section pins the
+# every test above runs with only the two environment variables the production
+# path itself reads redirected — HOME and CLAUDE_CONFIG_DIR, pointed at the same
+# sandbox directory — so the projects-root derivation
+# (${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/<slugified-project-root>) is
+# itself under test; there is no injected path anywhere in this suite. The
+# CLAUDE_CONFIG_DIR half of that derivation is driven with the two roots
+# DIFFERENT in tests/cross-gate-agreement.test.sh §C, which is where it can be
+# compared against the other two renderings. This section pins the
 # derivation by its discriminating consequence: an agent under THIS project's
 # slug resolves quietly, while one found only under another project's slug
 # resolves with an explicit out-of-project note.
@@ -246,9 +258,10 @@ OUT=$(run_check "$H2" "$R2" '*'); ST=$?
 expect_status "a glob target does not resolve" 1 "$ST"
 
 # Run from OUTSIDE any git repo (checklist A1: the fix command must be runnable
-# from any cwd). Resolution is HOME-derived, so it still works; repo activity is
-# simply reported as unavailable.
-OUT=$( cd "$SANDBOX" && HOME="$H2" bash "$CHECK" "quiet-reviewer" 2>&1 ); ST=$?
+# from any cwd). Resolution is rooted at the configured metadata directory, not
+# at the cwd, so it still works; repo activity is simply reported as
+# unavailable.
+OUT=$( cd "$SANDBOX" && HOME="$H2" CLAUDE_CONFIG_DIR="$H2/.claude" bash "$CHECK" "quiet-reviewer" 2>&1 ); ST=$?
 expect_status "runs from a non-repo cwd without crashing" 0 "$ST"
 expect_contains "non-repo cwd still prints the working log evidence" "agent-aquiet-reviewer-deadbeefdeadbeef.jsonl" "$OUT"
 
