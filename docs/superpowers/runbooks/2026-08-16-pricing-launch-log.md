@@ -10,6 +10,10 @@ below without including customer data or credentials in this repository.
 
 | Platform | Term | Identifier | Price |
 |---|---|---|---:|
+| Stripe test — launch | weekly | prod_ItObh6ZCXtLU6g / price_1U0XpoALfCP0Km8wMYt14LcA | $19.99 / week |
+| Stripe test — launch | monthly | prod_FOpVgsPA2MKMwi / price_1U0Xp3ALfCP0Km8wyJi3WT8h | $49.99 / month |
+| Stripe test — launch | quarterly | prod_FOpWGIbC0VAykP / price_1U0XoNALfCP0Km8wzqeTPSq6 | $99.99 / 3 months |
+| Stripe test — launch | annual | prod_FOpXrTwmi48Akh / price_1U0XnPALfCP0Km8wcWJJxXfI | $199.99 / year |
 | Stripe live — launch | weekly | prod_IuxpOWAtc5jSQW / price_1U0ScJALfCP0Km8wqkBmml4l | $19.99 / week |
 | Stripe live — launch | monthly | prod_Fm9cdQghZ4e5uU / price_1U0SbmALfCP0Km8wU1C1KqbQ | $49.99 / month |
 | Stripe live — launch | quarterly | prod_Fm9cJuEYDNzMTK / price_1U0SbLALfCP0Km8wNYXazwDm | $99.99 / 3 months |
@@ -31,8 +35,9 @@ below without including customer data or credentials in this repository.
 
 | Gate | Status | UTC timestamp | PT timestamp | Evidence |
 |---|---|---|---|---|
-| Stripe test Price creation | NOT EXECUTED | — | — | — |
-| Stripe live Price creation | PARTIAL — exact Prices verified; required metadata missing | — | — | Four active USD Prices verified. Dashboard creation times displayed as Aug 3, 2026, 1:35:51–1:37:47 PM without a timezone label. Required `pricing_launch` and `plan_type` metadata is absent; see `.superpowers/sdd/2026-08-03-modamily-global-subscription-pricing/task-1-stripe-correction-report.md` |
+| Stripe test Price creation | COMPLETE — four exact recurring USD Prices created on existing test Products with required metadata | 2026-08-04T02:12:27Z | 2026-08-03 19:12:27 PDT | Dashboard detail pages verified exact amount/interval, zero active subscriptions, `pricing_launch=2026-08-16`, and term-specific `plan_type`; IDs recorded above |
+| Stripe live Price creation | COMPLETE — four pre-existing exact Prices retained and required metadata added | 2026-08-04T02:12:27Z | 2026-08-03 19:12:27 PDT | Dashboard detail pages verified exact amount/interval, zero active subscriptions, `pricing_launch=2026-08-16`, and term-specific `plan_type`; no duplicate live Prices created |
+| Stripe test Checkout verification | BLOCKED — catalog/config and mocked route/webhook checks pass; hosted application flow unavailable | 2026-08-04T02:15:53Z | 2026-08-03 19:15:53 PDT | No local/staging app server, test Stripe credential, or safe authenticated test user was available. No production checkout or real payment was attempted. See Task 6 report for exact unrun subchecks |
 | Apple schedule confirmed | NOT EXECUTED | — | — | — |
 | Google production prices saved | NOT EXECUTED | — | — | — |
 | Apple catalog visibly live | NOT EXECUTED | — | — | — |
