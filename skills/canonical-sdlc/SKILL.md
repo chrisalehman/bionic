@@ -440,9 +440,15 @@ Roles, by `subagent_type`: `researcher` and `test-runner` for exploration and me
 
 **Parallel by default, justify sequential** — but dispatch serially when units share state (one local DB, a shared reset, count-based assertions).
 
-**Ledger the dispatch, not the return.** Write the unit's row the moment you dispatch it, status `active`. An outstanding agent has to exist as a row you can be blocked on, not as something you intend to remember — a dispatch held only in working memory is lost the moment the conversation turns, which is the normal case, not the exception. The row is also what lets you answer "what's still running" without guessing.
+**The starting standard.** A subagent may be dispatched only when: the environment attestation from this session is present; a work contract exists at launch, naming the task and a durable deliverable path; and the launch is ledgered the moment it happens.
 
-On the completion notification: verify the named artifact exists before believing the report, then update the row. **An idle notification is not a report** — nudge for the artifact, never read silence as success. Nudges are capped; a genuinely wedged agent is killed and re-dispatched, and every kill is reported to the user, never absorbed silently. Recorded evidence: of three agents that went idle without delivering, two were nudged and **both had already completed their work correctly** — kill-on-silence would have destroyed finished work.
+**Ledger the dispatch, not the return.** Write the unit's row the moment you dispatch it, status `active`. An outstanding agent has to exist as a row you can be blocked on, not as something you intend to remember — a dispatch held only in working memory is lost the moment the conversation turns, which is the normal case, not the exception. The row is also what lets you answer "what's still running" without guessing. On the completion notification, verify that the named artifact exists before believing the report, then update the row.
+
+**The stopping standard.** A subagent may be stopped only when a fresh observation of that target has been recorded first. Freshness is the activity boundary, not a clock (D-1): a stop is permitted only if the target's last working-log activity is no later than what the observation recorded — anything written since is stale by definition, dormancy since the observation is valid however old. One observation discharges exactly one stop (D-2); a second stop needs a fresh observation. Never on an idle notification, never on elapsed silence alone.
+
+**The non-response procedure.** For a quiet agent, examine its evidence first — for BOTH agent classes, before any other action; an undelivered review is as losable as an uncommitted commit. Then one class-appropriate round: read-only agents may be messaged once and relaunched fresh; writing agents are never resumed — examine their output directly, take over the work, and stand the agent down. Bounded to two rounds, ending in exactly one of: work delivered, work taken over, or agent stopped-and-reported. Every stop is reported to the user, never absorbed silently.
+
+Rationale, failure model, and use cases for the starting standard, the stopping standard, and the non-response procedure: `design/orchestrator-subagent-coordination.md`.
 
 Before ending a turn, reconcile: every `active` row either has a verified result or is named to the user as still running.
 
