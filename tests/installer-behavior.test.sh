@@ -939,6 +939,90 @@ chmod u+w "$SBX/.claude"
 [ "$_rc" = "0" ] && ok "runlog: unwritable dir degrades gracefully" || no "runlog: rc=$_rc"
 HOME="$_saved_home"
 
+# ---------- AC-7: Global hooks — MANAGED_HOOKS registration + old-name cleanup ----------
+# do_install_hooks (file management: install / orphan-removal / manifest) and
+# wire_managed_hooks (settings.json registration) are extracted fresh from the
+# real script — same convention as the Resilience block above — so this stays
+# in lockstep with the real code. The orphan-removal is generic (driven by
+# "what's in the repo's hooks/ dir", not by name): epic-15's rename from
+# kill-guard.sh/kill-check.sh to stop-guard.sh/stop-check.sh needs no
+# special-case code, only proof that the generic mechanism actually removes
+# the old names once planted (restart-handoff's named open question).
+HOOKS_CODE="${SBX}/hooks_code.sh"
+: > "$HOOKS_CODE"
+for fn in do_install_hooks wire_managed_hooks; do
+  awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$HOOKS_CODE"
+done
+awk '/^MANAGED_HOOKS=\(/{f=1} f{print} f&&/^\)$/{exit}' "$BOOTSTRAP" >> "$HOOKS_CODE"
+# shellcheck disable=SC1090
+source "$HOOKS_CODE"
+
+HOOKSBX="${SBX}/hooks-sandbox"
+mkdir -p "${HOOKSBX}/home/.claude/hooks"
+# Plant old-name files simulating a real prior install.
+printf '#!/bin/bash\necho old-kill-guard\n' > "${HOOKSBX}/home/.claude/hooks/kill-guard.sh"
+printf '#!/bin/bash\necho old-kill-check\n' > "${HOOKSBX}/home/.claude/hooks/kill-check.sh"
+chmod +x "${HOOKSBX}/home/.claude/hooks/kill-guard.sh" "${HOOKSBX}/home/.claude/hooks/kill-check.sh"
+
+HOOKS_SETTINGS="${HOOKSBX}/home/.claude/settings.json"
+echo '{}' > "$HOOKS_SETTINGS"
+
+( export SCRIPT_DIR="$REPO" HOME="${HOOKSBX}/home"
+  settings="$HOOKS_SETTINGS"
+  do_install_hooks
+  wire_managed_hooks ) >/dev/null
+_hooks_rc=$?
+[ "$_hooks_rc" -eq 0 ] && ok "AC-7: do_install_hooks + wire_managed_hooks run cleanly against a sandboxed HOME" \
+  || no "AC-7: hook install run failed (rc=$_hooks_rc)"
+
+# Old-name orphans removed.
+[ ! -f "${HOOKSBX}/home/.claude/hooks/kill-guard.sh" ] && ok "AC-7: old-name kill-guard.sh removed" || no "AC-7: kill-guard.sh still present"
+[ ! -f "${HOOKSBX}/home/.claude/hooks/kill-check.sh" ] && ok "AC-7: old-name kill-check.sh removed" || no "AC-7: kill-check.sh still present"
+
+# New-name files present, executable, byte-identical to the repo copies.
+for h in dispatch-preflight.sh preflight-probe.sh stop-check.sh stop-guard.sh; do
+  installed="${HOOKSBX}/home/.claude/hooks/${h}"
+  [ -f "$installed" ] && ok "AC-7: ${h} installed" || no "AC-7: ${h} not installed"
+  [ -x "$installed" ] && ok "AC-7: ${h} is executable" || no "AC-7: ${h} not executable"
+  diff -q "${REPO}/hooks/${h}" "$installed" >/dev/null 2>&1 \
+    && ok "AC-7: ${h} byte-identical to repo copy" || no "AC-7: ${h} differs from repo copy"
+done
+
+# dispatch-preflight.sh (Agent) and stop-guard.sh (Bash + TaskStop) registered.
+_matcher_has_cmd() {  # <event> <matcher> <cmd>
+  jq -e --arg ev "$1" --arg m "$2" --arg c "$3" \
+    '(.hooks[$ev] // []) | any(.matcher == $m and (.hooks | any(.command == $c)))' \
+    "$HOOKS_SETTINGS" >/dev/null
+}
+_matcher_has_cmd PreToolUse Bash "~/.claude/hooks/stop-guard.sh" \
+  && ok "AC-7: stop-guard.sh registered on PreToolUse|Bash" || no "AC-7: stop-guard.sh missing PreToolUse|Bash registration"
+_matcher_has_cmd PreToolUse TaskStop "~/.claude/hooks/stop-guard.sh" \
+  && ok "AC-7: stop-guard.sh registered on PreToolUse|TaskStop" || no "AC-7: stop-guard.sh missing PreToolUse|TaskStop registration"
+_matcher_has_cmd PreToolUse Agent "~/.claude/hooks/dispatch-preflight.sh" \
+  && ok "AC-7: dispatch-preflight.sh registered on PreToolUse|Agent" || no "AC-7: dispatch-preflight.sh missing PreToolUse|Agent registration"
+
+# preflight-probe.sh and stop-check.sh are installed but stay UNREGISTERED
+# (companion scripts, run by hand — never appear as a hooks[].command anywhere).
+for companion in preflight-probe.sh stop-check.sh; do
+  cnt="$(jq --arg c "~/.claude/hooks/${companion}" '[.hooks[]? | .[] | .hooks[]? | select(.command == $c)] | length' "$HOOKS_SETTINGS")"
+  [ "$cnt" = "0" ] && ok "AC-7: ${companion} installed unregistered (companion script)" || no "AC-7: ${companion} unexpectedly registered (${cnt} entries)"
+done
+
+# Registration count matches MANAGED_HOOKS exactly — nothing dropped, nothing
+# duplicated.
+_total_registered="$(jq '[.hooks[]? | .[] | .hooks[]?] | length' "$HOOKS_SETTINGS")"
+[ "$_total_registered" = "${#MANAGED_HOOKS[@]}" ] \
+  && ok "AC-7: settings.json registration count matches MANAGED_HOOKS (${#MANAGED_HOOKS[@]})" \
+  || no "AC-7: registration count ${_total_registered}, want ${#MANAGED_HOOKS[@]}"
+
+# Manifest lists the new names and excludes the removed old names.
+manifest="${HOOKSBX}/home/.claude/hooks/.bionic-manifest"
+for h in dispatch-preflight.sh preflight-probe.sh stop-check.sh stop-guard.sh; do
+  grep -qxF "$h" "$manifest" 2>/dev/null && ok "AC-7: manifest lists ${h}" || no "AC-7: manifest missing ${h}"
+done
+grep -qxF "kill-guard.sh" "$manifest" 2>/dev/null && no "AC-7: manifest must not list removed old name kill-guard.sh" || ok "AC-7: manifest excludes kill-guard.sh"
+grep -qxF "kill-check.sh" "$manifest" 2>/dev/null && no "AC-7: manifest must not list removed old name kill-check.sh" || ok "AC-7: manifest excludes kill-check.sh"
+
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
 echo "========================================"
