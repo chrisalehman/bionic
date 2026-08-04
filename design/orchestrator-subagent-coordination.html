@@ -225,14 +225,14 @@
 <div class="wrap">
 
 <header class="mast">
-  <p class="kicker">Epic-15 · Technical Design Document · v3 · bionic</p>
+  <p class="kicker">Epic-15 · Technical Design Document · v4 · bionic</p>
   <h1>Orchestrator–Subagent Coordination</h1>
   <p class="standfirst">How one Claude session starts, listens to, believes, stops, and accounts for a fleet of others — derived from what can actually be known, down to what must therefore be built.</p>
   <div class="statusbar">
-    <span class="tag draft">Draft v3 — awaiting ratification</span>
-    <span class="tag">Restructured 2026-08-04 per second review</span>
+    <span class="tag accent">RATIFIED 2026-08-04 — governing design</span>
     <span class="tag">build · audited · epic</span>
-    <span class="tag accent">6 open decisions · §5</span>
+    <span class="tag">6 decisions ratified · §5</span>
+    <span class="tag">canonical: design/orchestrator-subagent-coordination.md</span>
   </div>
 </header>
 
@@ -243,7 +243,7 @@
     <li><span class="n">2</span><a href="#s2">Constraints — platform facts and what can be known</a></li>
     <li><span class="n">3</span><a href="#s3">Architecture — derived</a></li>
     <li><span class="n">4</span><a href="#s4">Components</a></li>
-    <li><span class="n">5</span><a href="#s5">Open decisions</a></li>
+    <li><span class="n">5</span><a href="#s5">Decisions (ratified)</a></li>
     <li><span class="n">6</span><a href="#s6">Use cases, end to end</a></li>
     <li><span class="n">7</span><a href="#s7">Failure model</a></li>
     <li><span class="n">8</span><a href="#s8">Security</a></li>
@@ -450,8 +450,8 @@ flowchart LR
 </section>
 
 <section id="s5">
-  <div class="shead"><span class="num">5</span><h2 class="s">Open decisions</h2></div>
-  <p class="lede">Five decisions, each argued from the constraints and channels — the recommendation should feel forced by the time you reach it. Everything else in this document is either verified fact or already ratified.</p>
+  <div class="shead"><span class="num">5</span><h2 class="s">Decisions — ratified 2026-08-04</h2></div>
+  <p class="lede">All six decisions were ratified together on 2026-08-04 and are now binding design. Each block preserves the first-principles argument that carried it.</p>
 
   <div class="decision">
     <div class="dhead"><span class="did">D-1</span><span class="dtitle">When is an observation still fresh?</span></div>
@@ -618,14 +618,15 @@ flowchart LR
         <tr><td class="mono">08-04</td><td>Terminology: "stop," matching the tool's own name.</td><td class="mono">active</td></tr>
         <tr><td class="mono">08-04</td><td>Examine-before-acting applies to <em>both</em> agent classes — an undelivered review is as losable as an uncommitted commit.</td><td class="mono">active</td></tr>
         <tr><td class="mono">08-04</td><td>Significant work requires a TDD; v1 was rejected for thin derivation and script-centricity, v2 for undefined terminology and out-of-sequence structure, producing v3.</td><td class="mono">active · process</td></tr>
+        <tr><td class="mono">08-04</td><td>All six design decisions ratified together — activity-boundary freshness, consume-on-stop, observer identity to wave 3, wave carve stands, per-session state to wave 3, contracted duration with progress artifacts.</td><td class="mono">active</td></tr>
       </tbody>
     </table>
   </div>
 </section>
 
 <footer class="doc">
-  <span>Epic-15 · bionic · v3 draft — governing design once ratified</span>
-  <span>Canonical source syncs on ratification: .bionic/docs/specs/epic-15-orchestrator-subagent-coordination/design-tdd.md</span>
+  <span>Epic-15 · bionic · v4 — RATIFIED, the governing design</span>
+  <span>Canonical source: design/orchestrator-subagent-coordination.md (source-controlled)</span>
 </footer>
 
 </div>
