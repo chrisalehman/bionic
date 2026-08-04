@@ -31,6 +31,11 @@
 set -uo pipefail
 
 STATE_VERSION="v1"
+# The most records the observation state may retain (Step-6 review P2). Both arms
+# walk this file line by line, so its length is a cost every observation and every
+# stop pays; the bound is fail-closed, since a dropped record refuses a stop that
+# one re-observation re-arms.
+MAX_RECORDS=200
 OBSERVE_CMD="bash ~/.claude/hooks/stop-check.sh"
 
 INPUT=$(cat)
@@ -41,8 +46,9 @@ TOOL_NAME=$(_jq '.tool_name')
 # ---------- portable file facts ----------
 # DELIBERATELY DUPLICATED from hooks/stop-check.sh, byte for byte. A shared
 # library is rejected by design (TDD §9): a sourced file the installer misses is
-# a silently inert wall. The copies are held together by the N-way agreement
-# suite, which drives every copy including the origin.
+# a silently inert wall. The copies are held together by the resolver agreement
+# battery in tests/cross-gate-agreement.test.sh §C, which drives both copies —
+# the observation's and this one — over one fixture world.
 file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
 file_size()  { stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || echo 0; }
 
@@ -50,6 +56,9 @@ file_size()  { stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || ech
 # TaskStop inputs, none of them resolved for us, P5) against on-disk metadata.
 # Second copy of hooks/stop-check.sh's resolver, same deliberate duplication.
 # Comparison is LITERAL: a target string is never treated as a pattern.
+# The two copies are driven against one fixture world by
+# tests/cross-gate-agreement.test.sh §C, which asks the observation and this
+# recorder the same resolution question about the same typed name.
 scan_subagent_dirs() {  # <typed> <dir>... -> "<agent-id>|<meta>|<subagents-dir>" per match
   local typed="$1"; shift
   local sub meta base id name
@@ -125,6 +134,35 @@ if [ "$TOOL_NAME" = "Bash" ]; then
   PATHS=$(state_paths "$REPO") || exit 0
   STATE_DIR="${PATHS%|*}"; STATE_FILE="${PATHS#*|}"
 
+  # THE DIRECTORY SET THE OPERATOR SAW (Step-6 review C1). This arm is
+  # PreToolUse: it fires BEFORE the observation runs and can never read the
+  # producer's outcome. So the only way "an examination happened" can be a fact
+  # is for this arm to ask the resolution question over the SAME candidate set
+  # hooks/stop-check.sh asks it over — every session of this project, then
+  # that producer's all-projects fallback. Where that set does not name
+  # exactly one agent, the operator was shown a candidate list or an "unresolved"
+  # message and NO evidence tier at all; a record written anyway would attest to
+  # an examination that produced nothing.
+  #
+  # The set is derived from the PAYLOAD, not from $HOME: §2.5's layout is
+  # <projects-root>/<project-slug>/<session-id>/subagents, so the caller's own
+  # session directory names the project directory outright — the operator's
+  # candidate set is its siblings, and the producer's last-resort all-projects
+  # sweep is one level up again. hooks/stop-check.sh has no payload and must
+  # reach the same two tiers by slugifying its cwd; this arm does not have to
+  # guess, and inherits nothing from $HOME or $CLAUDE_CONFIG_DIR.
+  PROJ_DIR="${SUB%/*/subagents}"        # <projects-root>/<project-slug>
+  PROJECTS_ROOT="${PROJ_DIR%/*}"        # <projects-root>
+
+  observation_dirs() {  # -> every session of THIS project, one dir per line
+    local d out=""
+    for d in "$PROJ_DIR"/*/subagents; do
+      [ -d "$d" ] && out="${out}${d}
+"
+    done
+    printf '%s' "$out"
+  }
+
   is_interpreter() {
     case "${1##*/}" in
       bash|sh|zsh|dash|ksh|env|exec|command|nohup|time) return 0 ;;
@@ -141,15 +179,26 @@ if [ "$TOOL_NAME" = "Bash" ]; then
     case "$sid$tid$typed$log" in *'|'*) return 0 ;; esac
     mkdir -p "$STATE_DIR" 2>/dev/null || return 0
 
-    local lock="$STATE_DIR/.stop-check.lock" tries=0
+    local lock="$STATE_DIR/.stop-check.lock" tries=0 reclaimed=0
     while ! mkdir "$lock" 2>/dev/null; do
       tries=$((tries + 1))
-      # A lock left behind by a killed writer must not wall recording forever.
+      # A lock left behind by a killed writer must not wall recording forever —
+      # but the reclaim gets exactly ONE go, and only against a lock that is
+      # actually there. `mkdir` also fails for reasons no reclaim can fix (an
+      # unwritable state directory, both repo-controlled), and `rm -rf` of an
+      # ABSENT path SUCCEEDS — so an unbounded reclaim-and-retry loop spins
+      # forever, blocking every Bash call in that repo (Step-6 review S2/A3).
       if [ "$tries" -gt 20 ]; then
         local age now
-        now=$(date -u +%s); age=$((now - $(file_mtime "$lock")))
-        [ "$age" -gt 30 ] && rm -rf "$lock" 2>/dev/null && continue
-        return 0
+        if [ "$reclaimed" -eq 0 ] && [ -d "$lock" ]; then
+          now=$(date -u +%s); age=$((now - $(file_mtime "$lock")))
+          if [ "$age" -gt 30 ]; then
+            reclaimed=1; tries=0
+            rm -rf "$lock" 2>/dev/null
+            continue
+          fi
+        fi
+        return 0   # this arm never blocks, ever — it simply records nothing
       fi
       sleep 0.1 2>/dev/null || sleep 1
     done
@@ -160,13 +209,27 @@ if [ "$TOOL_NAME" = "Bash" ]; then
       printf '# bionic observation records — schema stop-check-state/%s\n' "$STATE_VERSION"
       # One live record per (session, target): re-observing REPLACES, so a
       # second stop can never find a second copy of the same look.
+      #
+      # Nothing else pruned this file: a record written by ANOTHER session
+      # survived every write, and both arms read it line by line at a few ms
+      # each, so a multi-session wave taxed every observation and every stop
+      # (Step-6 performance review P2). Two bounds, both fail-closed — a dropped
+      # record refuses a stop that a re-observation immediately re-arms:
+      #   * records whose session's subagents directory is gone are inert (the
+      #     gate resolves targets only through that directory) and are dropped;
+      #   * the survivors are capped, oldest first.
       if [ -f "$STATE_FILE" ]; then
-        while IFS= read -r line; do
-          case "$line" in '#'*|'') continue ;; esac
-          [ "$(record_field "$line" session)" = "$sid" ] \
-            && [ "$(record_field "$line" target)" = "$tid" ] && continue
-          printf '%s\n' "$line"
-        done < "$STATE_FILE"
+        {
+          while IFS= read -r line; do
+            case "$line" in '#'*|'') continue ;; esac
+            [ "$(record_field "$line" session)" = "$sid" ] \
+              && [ "$(record_field "$line" target)" = "$tid" ] && continue
+            local rlog rdir
+            rlog=$(record_field "$line" log); rdir="${rlog%/agent-*}"
+            [ -n "$rdir" ] && [ ! -d "$rdir" ] && continue
+            printf '%s\n' "$line"
+          done < "$STATE_FILE"
+        } | tail -n "$((MAX_RECORDS - 1))"
       fi
       printf '%s|session=%s|target=%s|typed=%s|log=%s|mtime=%s|size=%s\n' \
         "$STATE_VERSION" "$sid" "$tid" "$typed" "$log" "$mt" "$sz"
@@ -177,12 +240,32 @@ if [ "$TOOL_NAME" = "Bash" ]; then
   }
 
   record_observation() {  # <typed>
-    local typed="$1" matches count id meta sub log mt=0 sz=0
-    matches=$(scan_subagent_dirs "${typed%@*}" "$SUB")
+    local typed="$1" base matches count id meta sub log mt=0 sz=0 dirs d all=""
+    # `name@team` strips to the name; a bare `@team` keeps the whole string
+    # rather than scanning for the empty one (hooks/stop-check.sh:72-73 does the
+    # same — the copies are asked one question by the §C agreement battery).
+    base="${typed%@*}"; [ -n "$base" ] || base="$typed"
+
+    dirs=$(observation_dirs)
+    # shellcheck disable=SC2086
+    [ -n "$dirs" ] && matches=$(scan_subagent_dirs "$base" $dirs) || matches=""
+    if [ -z "$matches" ]; then
+      for d in "$PROJECTS_ROOT"/*/*/subagents; do
+        [ -d "$d" ] && all="${all}${d}
+"
+      done
+      # shellcheck disable=SC2086
+      [ -n "$all" ] && matches=$(scan_subagent_dirs "$base" $all)
+    fi
     [ -n "$matches" ] || return 0
     count=$(printf '%s\n' "$matches" | grep -c .)
     [ "$count" -eq 1 ] || return 0
     IFS='|' read -r id meta sub <<< "$matches"
+    # Resolved for the operator — but a session can only stop its own tasks, so a
+    # record the gate arm could never match is not worth writing, and one written
+    # for another session's agent would claim evidence about work this session
+    # cannot act on.
+    [ "$sub" = "$SUB" ] || return 0
     log="$sub/agent-${id}.jsonl"
     if [ -f "$log" ]; then mt=$(file_mtime "$log"); sz=$(file_size "$log"); fi
     write_record "$SID" "$id" "$typed" "$log" "$mt" "$sz"
@@ -192,8 +275,17 @@ if [ "$TOOL_NAME" = "Bash" ]; then
   # token of a segment, or immediately after an interpreter. `cat hooks/stop-check.sh`,
   # `grep -n stop-check.sh …` and a commented-out line all MENTION it without
   # running it, and recording those would manufacture an examination that never
-  # happened — the "recorded a look but nothing ran" class the redesign exists
-  # to close (checklist §C).
+  # happened.
+  #
+  # THE RESIDUAL, stated rather than claimed away (Step-6 review R3): this closes
+  # the MENTION half of checklist §C's "recorded a look but nothing ran" class,
+  # not the RUN half. This arm is PreToolUse — it fires before the command runs
+  # and never learns whether it ran or succeeded, so `false && bash …stop-check.sh
+  # x`, or a later PreToolUse hook blocking the whole call, still leaves a record
+  # behind. What C1's resolution adds is that such a record can only exist for a
+  # target the operator's own command WOULD have resolved uniquely; moving the
+  # write to the producer (or to PostToolUse) is what would close the rest, and
+  # that is a registration change, not a patch.
   while IFS= read -r segment; do
     [ -n "$segment" ] || continue
     set -f; set -- $segment; set +f
@@ -292,7 +384,12 @@ deny() {  # <reason line>...
   local line
   for line in "$@"; do echo "$line" >&2; done
   echo "" >&2
-  echo "Fix: ${OBSERVE_CMD} ${RAW:-<agent-name-or-id>} [each contracted deliverable]" >&2
+  # Runnable AS PRINTED: a blocked orchestrator pastes this line verbatim, and
+  # bracketed placeholders on it became three positional arguments the
+  # observation reported as absent deliverables (Step-6 review R2). The optional
+  # arguments are described beneath the command, never inside it.
+  echo "Fix: ${OBSERVE_CMD} ${RAW:-<agent-name-or-id>}" >&2
+  echo "     (pass each contracted deliverable path as a further argument)" >&2
   echo "Then read what it prints, and stop again if the evidence supports it." >&2
   echo "One observation discharges exactly one stop (D-2), and it goes stale the" >&2
   echo "moment the target writes again (D-1). Human-initiated stops bypass this gate." >&2
@@ -313,8 +410,17 @@ MATCH_COUNT=0
 [ -n "$MATCHES" ] && MATCH_COUNT=$(printf '%s\n' "$MATCHES" | grep -c .)
 
 if [ "$MATCH_COUNT" -eq 0 ]; then
-  deny "Target '${RAW}' is unresolved: no agent in this session's metadata answers to it." \
-       "The platform hands this gate the name AS TYPED and resolves nothing for it (P5)."
+  # Naming the SCOPE is what makes this refusal clearable (Step-6 review R4).
+  # Resolution is this session's own agents; a target another session launched
+  # resolves for the observation — which scans the whole project — and never
+  # here, so without this clause the named fix succeeds and the stop refuses
+  # identically forever, with nothing in the message naming the way out.
+  deny "Target '${RAW}' is unresolved: no agent in THIS session's metadata answers to it." \
+       "The platform hands this gate the name AS TYPED and resolves nothing for it (P5)." \
+       "Resolution is scoped to agents this session launched — one session cannot stop" \
+       "another's tasks, so no observation can discharge this. If the agent belongs to a" \
+       "different session, stop it from there, or stop it yourself (a human-initiated stop" \
+       "bypasses this gate). Otherwise check the name against what you launched it under."
 fi
 if [ "$MATCH_COUNT" -gt 1 ]; then
   deny "Target '${RAW}' is ambiguous: ${MATCH_COUNT} agents in this session answer to it." \
@@ -379,6 +485,7 @@ fi
 
 if [ "$NOW_MTIME" != "$REC_MTIME" ] || [ "$NOW_SIZE" != "$REC_SIZE" ]; then
   deny "'${RAW}' has written to its working log SINCE your observation, so that observation is stale." \
+       "(Any CHANGE counts, not only a later write: a truncated or rewritten log is a changed log.)" \
        "Its evidence tier now includes work you have not seen — which may be the very work a stop would destroy." \
        "This is an activity boundary, not a timer: an agent dormant since your look stays stoppable however long ago it was."
 fi
@@ -392,12 +499,26 @@ fi
 
 LOCK="$STATE_DIR/.stop-check.lock"
 tries=0
+reclaimed=0
+# The wait is BOUNDED: one stale-lock reclaim, then a refusal. `mkdir` fails for
+# reasons no reclaim can fix — an unwritable $STATE_DIR is repo-controlled — and
+# `rm -rf` of an absent path succeeds, so an unbounded reclaim-and-retry loop
+# never terminates and this gate would render no verdict at all (Step-6 review
+# S2/A3). §7 gives this side its direction: after the active-wave verdict the
+# stop gate is CLOSED and loud, so a wait that runs out refuses.
 while ! mkdir "$LOCK" 2>/dev/null; do
   tries=$((tries + 1))
   if [ "$tries" -gt 20 ]; then
-    now=$(date -u +%s)
-    if [ $((now - $(file_mtime "$LOCK"))) -gt 30 ]; then rm -rf "$LOCK" 2>/dev/null; continue; fi
-    deny "The observation record could not be consumed (state is locked), and an unconsumed record would discharge a second stop."
+    if [ "$reclaimed" -eq 0 ] && [ -d "$LOCK" ]; then
+      now=$(date -u +%s)
+      if [ $((now - $(file_mtime "$LOCK"))) -gt 30 ]; then
+        reclaimed=1; tries=0
+        rm -rf "$LOCK" 2>/dev/null
+        continue
+      fi
+    fi
+    deny "The observation record could not be consumed (the state lock at $STATE_DIR could not be taken), and an unconsumed record would discharge a second stop." \
+         "Either another writer holds it, or this repo's .bionic/tmp is not writable by you."
   fi
   sleep 0.1 2>/dev/null || sleep 1
 done
@@ -414,7 +535,15 @@ TMP=$(mktemp "$STATE_DIR/.stop-check.XXXXXX" 2>/dev/null) || {
     printf '%s\n' "$line"
   done < "$STATE_FILE"
 } > "$TMP" 2>/dev/null
-mv -f "$TMP" "$STATE_FILE" 2>/dev/null || rm -f "$TMP"
+# The rename is the third way the consume can fail, and it fails the same way as
+# its two siblings above: CLOSED. Permitting the stop here would leave the record
+# intact, and that one observation would then discharge every later stop of this
+# target — D-2 broken at the only line that can break it (Step-6 review C3/A2).
+mv -f "$TMP" "$STATE_FILE" 2>/dev/null || {
+  rm -f "$TMP"
+  rm -rf "$LOCK"
+  deny "The observation record could not be consumed (the state file could not be replaced), and an unconsumed record would discharge a second stop."
+}
 rm -rf "$LOCK"
 
 exit 0

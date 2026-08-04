@@ -224,6 +224,95 @@ run_guard "$(mk_bash_payload "$SID_A" "$W2_TR" "$W2_REPO" "bash ~/.claude/hooks/
 expect_status "an unresolvable observation target never blocks" 0 "$GUARD_ST"
 expect_absent "an unresolvable observation target records nothing" "ghost" "$(cat "$W2_REPO/$STATE_REL")"
 
+# C1 (Step-6 correctness review, slice 4/7): AN OBSERVATION THAT PRINTED NO
+# EVIDENCE MUST RECORD NOTHING. The recorder fires PreToolUse — before the
+# observation runs — so it cannot read the producer's outcome. It must therefore
+# resolve against THE SAME DIRECTORY SET THE OPERATOR SAW: every session of this
+# project, then the all-projects fallback (hooks/stop-check.sh:103-133). Where
+# that set is ambiguous the operator was shown a candidate list and no evidence
+# tier at all, and a record written anyway attests to an examination that never
+# produced anything — the "recorded a look but nothing ran" class (checklist §C)
+# in a new shape.
+IFS='|' read -r C1_REPO C1_TR C1_SUB <<< "$(make_world c1 yes)"
+C1_OTHER="${C1_TR%/*}/$SID_B/subagents"
+plant_agent "$C1_SUB"  "aworker-1111111111111111" "worker"
+plant_agent "$C1_OTHER" "aworker-2222222222222222" "worker"
+observe "$SID_A" "$C1_TR" "$C1_REPO" "worker"
+expect_status "an ambiguous observation target never blocks" 0 "$GUARD_ST"
+if [ -f "$C1_REPO/$STATE_REL" ]; then
+  expect_absent "a name ambiguous ACROSS SESSIONS records nothing (C1)" \
+    "target=aworker-" "$(cat "$C1_REPO/$STATE_REL")"
+else
+  ok "a name ambiguous ACROSS SESSIONS records nothing (C1)"
+fi
+# …and the stop of that target is therefore refused, rather than discharged by a
+# record the operator's own output contradicts.
+run_guard "$(mk_stop_payload "$SID_A" "$C1_TR" "$C1_REPO" "worker")"
+expect_status "the stop after an evidence-less observation is REFUSED (C1)" 2 "$GUARD_ST"
+
+# The mirror image, fail-closed: a target that resolves ONLY in another session
+# is visible to the operator's observation but unstoppable from here, so no
+# dischargeable record may be written for it either.
+IFS='|' read -r C1B_REPO C1B_TR C1B_SUB <<< "$(make_world c1b yes)"
+plant_agent "${C1B_TR%/*}/$SID_B/subagents" "aforeign-3333333333333333" "foreign"
+observe "$SID_A" "$C1B_TR" "$C1B_REPO" "foreign"
+if [ -f "$C1B_REPO/$STATE_REL" ]; then
+  expect_absent "a target resolving only in ANOTHER session records nothing (C1)" \
+    "target=aforeign-3333333333333333" "$(cat "$C1B_REPO/$STATE_REL")"
+else
+  ok "a target resolving only in ANOTHER session records nothing (C1)"
+fi
+
+# Positive pair (a wall that refuses everything is equally broken, TDD §9):
+# unique in the operator's set AND in this session still records.
+IFS='|' read -r C1C_REPO C1C_TR C1C_SUB <<< "$(make_world c1c yes)"
+plant_agent "$C1C_SUB" "asolo-4444444444444444" "solo"
+observe "$SID_A" "$C1C_TR" "$C1C_REPO" "solo"
+expect_contains "an unambiguous target still records (C1 positive pair)" \
+  "target=asolo-4444444444444444" "$(cat "$C1C_REPO/$STATE_REL" 2>/dev/null)"
+
+# P2 (Step-6 performance review, slice 4/7): the observation state must not grow
+# without bound. Records written by OTHER sessions were pruned by nothing, and
+# both arms walk the file line by line at ~3ms per record, so a multi-session
+# wave paid a growing tax on every observation and every stop.
+IFS='|' read -r P2_REPO P2_TR P2_SUB <<< "$(make_world p2 yes)"
+plant_agent "$P2_SUB" "akeeper-7777777777777777" "keeper"
+mkdir -p "$P2_REPO/.bionic/tmp"
+{
+  printf '# bionic observation records — schema stop-check-state/v1\n'
+  _i=0
+  while [ "$_i" -lt 300 ]; do
+    # live-looking foreign records: their session directory still exists, so only
+    # the hard cap can drop them
+    printf 'v1|session=dead-%s|target=aghost-%s|typed=ghost|log=%s/agent-aghost-%s.jsonl|mtime=1|size=1\n' \
+      "$_i" "$_i" "$P2_SUB" "$_i"
+    _i=$((_i + 1))
+  done
+} > "$P2_REPO/$STATE_REL"
+observe "$SID_A" "$P2_TR" "$P2_REPO" "keeper"
+P2_COUNT=$(grep -c '^v1|' "$P2_REPO/$STATE_REL" 2>/dev/null || echo 0)
+if [ "$P2_COUNT" -le 200 ]; then
+  ok "the observation state is bounded, not unbounded (P2): $P2_COUNT records"
+else
+  no "the observation state is bounded, not unbounded (P2)" "$P2_COUNT records retained"
+fi
+expect_contains "the record just written survives the bound" \
+  "akeeper-7777777777777777" "$(cat "$P2_REPO/$STATE_REL" 2>/dev/null)"
+
+# A record whose session's subagents directory is gone can never discharge
+# anything — the gate resolves targets only through that directory — so it is
+# inert weight and gets dropped on the next write.
+IFS='|' read -r P2B_REPO P2B_TR P2B_SUB <<< "$(make_world p2b yes)"
+plant_agent "$P2B_SUB" "alive-8888888888888888" "alive"
+mkdir -p "$P2B_REPO/.bionic/tmp"
+printf '# bionic observation records — schema stop-check-state/v1\nv1|session=gone|target=avanished-9999999999999999|typed=vanished|log=/no/such/session/subagents/agent-avanished-9999999999999999.jsonl|mtime=1|size=1\n' \
+  > "$P2B_REPO/$STATE_REL"
+observe "$SID_A" "$P2B_TR" "$P2B_REPO" "alive"
+expect_absent "a record whose session directory is gone is pruned (P2)" \
+  "avanished-9999999999999999" "$(cat "$P2B_REPO/$STATE_REL" 2>/dev/null)"
+expect_contains "pruning does not disturb the record being written" \
+  "alive-8888888888888888" "$(cat "$P2B_REPO/$STATE_REL" 2>/dev/null)"
+
 # Credential-leak class (§8, AC-8): no command text reaches the state file.
 run_guard "$(mk_bash_payload "$SID_A" "$W2_TR" "$W2_REPO" \
   "AWS_SECRET=hunter2 bash ~/.claude/hooks/stop-check.sh one")"
@@ -425,6 +514,131 @@ run_guard "$(mk_stop_payload "$SID_A" "$D2B_TR" "$D2B_REPO" "busy")"
 expect_status "the stale stop is refused" 2 "$GUARD_ST"
 expect_contains "a REFUSED stop consumes nothing" \
   "abusy-eeeeeeeeeeeeeeee" "$(cat "$D2B_REPO/$STATE_REL" 2>/dev/null)"
+
+# ============================================================
+echo ""
+echo "=== Section 6a: the refusal's Fix line is runnable AS PRINTED (R2) ==="
+# ============================================================
+#
+# The ownership table names one test for fix-command text across TWO rendering
+# gates, and it drove only the start gate's (Step-6 duplication review, row 5).
+# This is the stop side's counterpart: capture the literal line a blocked
+# orchestrator sees and EXECUTE it, from a non-repo cwd, against a staged copy
+# of the real observation. The defect it pins: bracketed placeholders on the
+# command line became positional arguments the observation reported as three
+# absent deliverables (R2) — a refusal that teaches the reader something false.
+IFS='|' read -r R2_REPO R2_TR R2_SUB <<< "$(make_world r2 yes)"
+plant_agent "$R2_SUB" "ablocked-aaaaaaaaaaaaaaaa" "blocked"
+run_guard "$(mk_stop_payload "$SID_A" "$R2_TR" "$R2_REPO" "blocked")"
+expect_status "the stop with no observation is refused (setup for R2)" 2 "$GUARD_ST"
+FIXLINE=$(printf '%s\n' "$GUARD_ERR" | grep '^Fix: ' | sed 's/^Fix: //')
+expect_contains "a fix line was captured to execute" "stop-check.sh" "$FIXLINE"
+expect_absent "the fix line carries no bracketed placeholder (R2)" "[" "$FIXLINE"
+
+# The world's OWN home, so the observation genuinely resolves the target and
+# reaches its Deliverables section — otherwise it exits at "unresolved" and the
+# fabricated-deliverable assertion below is vacuous.
+R2_HOME="${R2_TR%%/.claude/projects/*}"
+mkdir -p "$R2_HOME/.claude/hooks" "$SANDBOX/r2run/nowhere"
+cp "$(dirname "$GUARD")/stop-check.sh" "$R2_HOME/.claude/hooks/stop-check.sh"
+R2_OUT=$( cd "$SANDBOX/r2run/nowhere" && HOME="$R2_HOME" bash -c "$FIXLINE" 2>&1 )
+R2_ST=$?
+if [ "$R2_ST" -eq 127 ] || [ "$R2_ST" -eq 126 ]; then
+  no "the captured fix line executes from a non-repo cwd" "exit $R2_ST: $R2_OUT"
+else
+  ok "the captured fix line executes from a non-repo cwd (exit $R2_ST)"
+fi
+expect_absent "running the fix line as printed reports no fabricated deliverable" \
+  "— ABSENT" "$R2_OUT"
+expect_absent "running the fix line as printed produces no usage error" "Usage:" "$R2_OUT"
+
+# ============================================================
+echo ""
+echo "=== Section 6b: the lock and the consume — the failure paths (C3, S2) ==="
+# ============================================================
+#
+# This region shipped with no callsite at all (Step-6 architecture review A4),
+# and both a fail-OPEN consume (C3) and an unbounded spin (S2) lived in it.
+
+# --- C3: a consume that cannot complete must REFUSE the stop ---
+#
+# The rename is the one consume failure a fixture cannot provoke directly (the
+# other two — lock held, no writable temp — deny already and are driven below).
+# Proven the way §9 names as durable: mutate a COPY so the rename targets an
+# unwritable path, drive it, then re-checksum the shipped file.
+GUARD_SUM_BEFORE=$(shasum "$GUARD" | awk '{print $1}')
+MUTANT="$SANDBOX/stop-guard.consume-fails.sh"
+sed 's|mv -f "$TMP" "$STATE_FILE" 2>/dev/null|mv -f "$TMP" "/nonexistent-dir-0xdead/x" 2>/dev/null|' \
+  "$GUARD" > "$MUTANT"
+if grep -qF '/nonexistent-dir-0xdead/x' "$MUTANT"; then
+  ok "the consume-failure mutation applied (a mutation matching nothing must FAIL, not skip)"
+else
+  no "the consume-failure mutation applied (a mutation matching nothing must FAIL, not skip)"
+fi
+
+IFS='|' read -r C3_REPO C3_TR C3_SUB <<< "$(make_world c3 yes)"
+plant_agent "$C3_SUB" "aunconsumable-5555555555555555" "unconsumable"
+observe "$SID_A" "$C3_TR" "$C3_REPO" "unconsumable"
+C3_PAYLOAD=$(mk_stop_payload "$SID_A" "$C3_TR" "$C3_REPO" "unconsumable")
+C3_ERR=$(printf '%s' "$C3_PAYLOAD" | bash "$MUTANT" 2>&1 >/dev/null)
+C3_ST=$?
+expect_status "a consume that cannot complete REFUSES the stop (C3)" 2 "$C3_ST"
+expect_contains "the refusal says the record could not be consumed (C3)" \
+  "could not be consumed" "$C3_ERR"
+expect_contains "the record survives an unconsumed stop, so D-2 still holds it" \
+  "aunconsumable-5555555555555555" "$(cat "$C3_REPO/$STATE_REL" 2>/dev/null)"
+if [ -d "$C3_REPO/.bionic/tmp/.stop-check.lock" ]; then
+  no "a refused consume RELEASES the lock" "the lock survived, wedging every later stop"
+else
+  ok "a refused consume RELEASES the lock"
+fi
+expect_status "the shipped script was never modified by the mutation proof" 0 \
+  "$([ "$GUARD_SUM_BEFORE" = "$(shasum "$GUARD" | awk '{print $1}')" ]; echo $?)"
+
+# --- S2: neither arm may spin forever when the lock cannot be taken ---
+#
+# `mkdir` fails for reasons a stale-lock reclaim cannot fix — an unwritable state
+# directory is repo-controlled — and `rm -rf` of an ABSENT path SUCCEEDS, so a
+# reclaim-and-retry loop with no hard bound never terminates. A PreToolUse hook
+# that never returns renders no verdict at all, which §7's table has no row for.
+run_bounded() {  # <label> <secs> <payload> -> sets BOUNDED_ST (137 = killed)
+  local secs="$2" payload="$3" waited=0 pid
+  printf '%s' "$payload" | bash "$GUARD" >"$SANDBOX/.bout" 2>"$SANDBOX/.berr" &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "$secs" ]; do
+    sleep 1; waited=$((waited + 1))
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -9 "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; BOUNDED_ST=137
+  else
+    wait "$pid"; BOUNDED_ST=$?
+  fi
+  return 0
+}
+
+IFS='|' read -r S2_REPO S2_TR S2_SUB <<< "$(make_world s2 yes)"
+plant_agent "$S2_SUB" "awedged-6666666666666666" "wedged"
+observe "$SID_A" "$S2_TR" "$S2_REPO" "wedged"        # a valid record, so the gate reaches the consume
+mkdir -p "$S2_REPO/.bionic/tmp"
+chmod 500 "$S2_REPO/.bionic/tmp"
+
+run_bounded "recorder" 12 "$(mk_bash_payload "$SID_A" "$S2_TR" "$S2_REPO" \
+  "bash ~/.claude/hooks/stop-check.sh wedged")"
+if [ "$BOUNDED_ST" = "137" ]; then
+  no "the RECORDER arm terminates when the lock cannot be taken (S2)" "still running after 12s"
+else
+  expect_status "the RECORDER arm never blocks, even unable to lock (S2)" 0 "$BOUNDED_ST"
+fi
+
+run_bounded "gate" 12 "$(mk_stop_payload "$SID_A" "$S2_TR" "$S2_REPO" "wedged")"
+if [ "$BOUNDED_ST" = "137" ]; then
+  no "the GATE arm terminates when the lock cannot be taken (S2)" "still running after 12s"
+else
+  expect_status "the GATE arm REFUSES rather than spinning (S2, §7 stop=closed)" 2 "$BOUNDED_ST"
+  expect_contains "the lock refusal says why and names the state directory" \
+    "could not be consumed" "$(cat "$SANDBOX/.berr")"
+fi
+chmod 700 "$S2_REPO/.bionic/tmp"
 
 # ============================================================
 echo ""

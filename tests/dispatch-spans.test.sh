@@ -86,6 +86,18 @@ expect_pin_in_file "non-response: outcome — stopped-and-reported" "agent stopp
 expect_pin_in_file "non-response: every stop reported" "Every stop is reported to the user, never absorbed silently" "$SKILL"
 
 echo ""
+echo "=== Section 4b: verification means the artifact, not the report (R1) ==="
+# The pre-wave paragraph this diff replaced carried a standing rule the three
+# ratified spans do not recover: "verify the named artifact exists before
+# believing the report" (Step-6 readability review R1). The reporting contract
+# is wave-2 scope, so nothing restores it until then — it was live guidance
+# before this diff and would be absent for a whole wave. Recovered as one clause
+# in the ledger paragraph, which is the smallest form that does not reopen the
+# ratified spans-only decision.
+expect_pin_in_file "ledger paragraph: verify the artifact, not the report" \
+  "verify that the named artifact exists before believing the report" "$SKILL"
+
+echo ""
 echo "=== Section 5: One pointer line to the governing design, no restatement ==="
 expect_pin_in_file "pointer line names the design doc path" "design/orchestrator-subagent-coordination.md" "$SKILL"
 
