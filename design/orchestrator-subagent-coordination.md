@@ -5,8 +5,9 @@ others — derived from what can actually be known, down to what must therefore 
 
 STATUS: v4 — RATIFIED 2026-08-04. All six decisions (D-1…D-6) ratified by the user ("All
 decisions are ratified"). This is the governing design for epic-15; wave specs reference this
-file. The design outlives the epic; this is its canonical, source-controlled form, with a
-rendered HTML version beside it. History: v1 rejected (thin derivation, script-centricity);
+file. The design outlives the epic; this is its canonical, source-controlled form — .md only,
+rendered copies are generated on demand, never maintained (register, 08-04).
+History: v1 rejected (thin derivation, script-centricity);
 v2 rejected (undefined terminology, out-of-sequence structure); v3 restructured per review;
 v3.1 added D-6/UC-7; v4 ratified.
 
@@ -429,3 +430,7 @@ One honest sentence each; superseded entries stay listed — the register is a h
 | 08-04 | Examine-before-acting applies to BOTH agent classes — an undelivered review is as losable as an uncommitted commit. | active |
 | 08-04 | Significant work requires a TDD; v1 rejected (thin derivation, script-centricity), v2 rejected (undefined terminology, out-of-sequence structure), v3 restructured, v3.1 adds D-6/UC-7. | active · process |
 | 08-04 | All six design decisions (D-1 activity-boundary freshness · D-2 consume-on-stop · D-3 observer identity to wave 3 · D-4 wave carve stands · D-5 per-session state to wave 3 · D-6 contracted duration + progress artifacts) ratified together. | active |
+| 08-04 | Wave-1 carve amendment (wave-01R Step 2): the observation's D-6 progress-artifact check moves to wave 2, beside the contract fields that name its path; the practice — a named progress path in every long-running brief — is adopted immediately. | active |
+| 08-04 | Wave-1 verification scope (wave-01R Step 2): the discriminating test set only — §9's obligations, the discarded run's two blind-spot checks, one named check per applicable known-failure trap; no assertion kept for coverage's sake. | active |
+| 08-04 | Procedure text carries only the three normative spans, pinned, plus a pointer here for rationale — no restatement of this document. | active |
+| 08-04 | This .md is the design's single source of truth; the checked-in rendered HTML is deleted, rendered copies are generated on demand and never maintained. | active |
