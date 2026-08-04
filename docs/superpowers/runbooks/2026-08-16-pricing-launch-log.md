@@ -32,7 +32,7 @@ below without including customer data or credentials in this repository.
 | Gate | Status | UTC timestamp | PT timestamp | Evidence |
 |---|---|---|---|---|
 | Stripe test Price creation | NOT EXECUTED | — | — | — |
-| Stripe live Price creation | COMPLETE — READ-ONLY VERIFIED | — | 2026-08-03 13:35:51–13:37:47 (dashboard display; timezone not labeled) | Four active USD Prices verified against their detail pages; see `.superpowers/sdd/2026-08-03-modamily-global-subscription-pricing/task-1-stripe-correction-report.md` |
+| Stripe live Price creation | PARTIAL — exact Prices verified; required metadata missing | — | — | Four active USD Prices verified. Dashboard creation times displayed as Aug 3, 2026, 1:35:51–1:37:47 PM without a timezone label. Required `pricing_launch` and `plan_type` metadata is absent; see `.superpowers/sdd/2026-08-03-modamily-global-subscription-pricing/task-1-stripe-correction-report.md` |
 | Apple schedule confirmed | NOT EXECUTED | — | — | — |
 | Google production prices saved | NOT EXECUTED | — | — | — |
 | Apple catalog visibly live | NOT EXECUTED | — | — | — |
