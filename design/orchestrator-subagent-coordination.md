@@ -3,11 +3,12 @@
 How one Claude session starts, listens to, believes, stops, and accounts for a fleet of
 others — derived from what can actually be known, down to what must therefore be built.
 
-STATUS: v3.1 DRAFT — awaiting ratification of the six open decisions (§5). Produced during
-epic-15; the design outlives the epic and this file is its canonical, source-controlled form.
-A rendered HTML version lives beside this file. History: v1 rejected (thin derivation,
-script-centricity); v2 rejected (undefined terminology, out-of-sequence structure); v3
-restructured per review; v3.1 adds D-6/UC-7.
+STATUS: v4 — RATIFIED 2026-08-04. All six decisions (D-1…D-6) ratified by the user ("All
+decisions are ratified"). This is the governing design for epic-15; wave specs reference this
+file. The design outlives the epic; this is its canonical, source-controlled form, with a
+rendered HTML version beside it. History: v1 rejected (thin derivation, script-centricity);
+v2 rejected (undefined terminology, out-of-sequence structure); v3 restructured per review;
+v3.1 added D-6/UC-7; v4 ratified.
 
 ## Design
 
@@ -241,7 +242,10 @@ state → `.bionic/tmp/{preflight,stop-check}.state`. Note: the two producers li
 `hooks/` for test-harness pairing but are not hooks — the component boundary is the
 registration list, not the folder.
 
-### 5. Open decisions
+### 5. Decisions — ratified 2026-08-04
+
+All six decisions below were ratified together on 2026-08-04. The RECOMMENDED lines are
+preserved as the argument record; each is now binding design.
 
 **D-1 — When is an observation still fresh?** An observation is a snapshot of the evidence
 tier; it stops being true the moment the evidence changes — and the working log says
@@ -424,3 +428,4 @@ One honest sentence each; superseded entries stay listed — the register is a h
 | 08-04 | Terminology: "stop," matching the tool's own name. | active |
 | 08-04 | Examine-before-acting applies to BOTH agent classes — an undelivered review is as losable as an uncommitted commit. | active |
 | 08-04 | Significant work requires a TDD; v1 rejected (thin derivation, script-centricity), v2 rejected (undefined terminology, out-of-sequence structure), v3 restructured, v3.1 adds D-6/UC-7. | active · process |
+| 08-04 | All six design decisions (D-1 activity-boundary freshness · D-2 consume-on-stop · D-3 observer identity to wave 3 · D-4 wave carve stands · D-5 per-session state to wave 3 · D-6 contracted duration + progress artifacts) ratified together. | active |
