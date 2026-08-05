@@ -289,6 +289,18 @@ for r in $RC_FILES; do
   fi
 done
 
+# Presence + mutual identity alone cannot see WHAT the block says: six copies
+# emptied of meaning in unison are byte-identical and non-empty, and the suite
+# stays green (Step-6 critic reproduced this by inverting the core sentence in
+# all six files). One literal on the reference copy is enough — byte-identity
+# propagates the bind to the other five.
+if marker_block "$AGENTS/auditor.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END \
+   | grep -qF "carries the command that proves it and that command's output, or the explicit"; then
+  pass "auditor.md: REPORT-CONTRACT states the proof-or-label rule (literal pinned)"
+else
+  fail "auditor.md: REPORT-CONTRACT core sentence missing or reworded"
+fi
+
 for r in $RC_FILES; do
   [ "$r" = "auditor" ] && continue
   if diff <(marker_block "$AGENTS/auditor.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END) \

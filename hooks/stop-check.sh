@@ -57,7 +57,10 @@ usage() {  # [reason]
 # survives the loop is the contracted deliverables in the order they were typed.
 # ONE progress path, or nothing: a second flag makes "which artifact did the
 # contract name?" a guess, and guessing about evidence is the failure this
-# whole command exists to prevent. Written without arrays — bash 3.2 is what
+# whole command exists to prevent. An EMPTY value is a missing one — a token
+# following the flag is not a path that was named, and `--progress "$PROG"`
+# with PROG unset would otherwise print an authoritative ABSENT for an artifact
+# nobody contracted, which is the false negative D-6 exists to prevent. Written without arrays — bash 3.2 is what
 # macOS ships, and an empty array under `set -u` is a crash there.
 case "${1:-}" in
   "") usage ;;
@@ -74,6 +77,7 @@ while [ "$ARGN" -gt 0 ]; do
     --progress)
       [ "$PROGRESS_NAMED" -eq 0 ] || usage "Only one --progress path may be named; got a second."
       [ "$ARGN" -gt 0 ] || usage "--progress needs a path."
+      [ -n "$1" ] || usage "--progress needs a path."
       PROGRESS_PATH="$1"; shift; ARGN=$((ARGN - 1)); PROGRESS_NAMED=1 ;;
     -*)
       usage "Unknown option: $arg" ;;

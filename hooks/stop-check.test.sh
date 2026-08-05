@@ -372,6 +372,17 @@ OUT6_BARE=$(run_check "$H6" "$R6" "long-runner" --progress); ST=$?
 expect_status "--progress with no path exits 1" 1 "$ST"
 expect_contains "--progress with no path prints usage" "Usage" "$OUT6_BARE"
 
+# An EMPTY value is the same failure as a missing one, and worse in its output:
+# `--progress "$PROG"` with PROG unset is the ordinary trigger, and a token that
+# follows is not a path that was named. Printing `progress: ABSENT` for it states
+# an authoritative fact about an artifact nobody contracted, which is the exact
+# false negative D-6 exists to prevent — the reader concludes wedged and routes a
+# healthy agent into the non-response procedure (Step-6 critic, issue B).
+OUT6_EMPTY=$(run_check "$H6" "$R6" "long-runner" --progress ""); ST=$?
+expect_status "--progress with an empty path exits 1" 1 "$ST"
+expect_contains "--progress with an empty path prints usage" "Usage" "$OUT6_EMPTY"
+expect_absent "--progress with an empty path never prints a progress fact" "progress:" "$OUT6_EMPTY"
+
 # The flag and its value are never mistaken for contracted deliverables.
 echo "the deliverable body" > "$R6/report.md"
 OUT6_BOTH=$(run_check "$H6" "$R6" "long-runner" "report.md" --progress "$PROG")
