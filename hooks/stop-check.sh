@@ -37,13 +37,34 @@ usage() {  # [reason]
 
 # ---------- arguments ----------
 #
-# `--progress <path>` may appear anywhere among the positional arguments; each
-# non-flag argument is rotated to the back, so what survives the loop is the
-# target followed by the contracted deliverables, in the order they were typed.
+# TARGET FIRST, and no flag before it. This grammar is not a style choice: the
+# Bash arm of hooks/stop-guard.sh re-parses this same command line to record
+# WHICH agent was examined, and it reads only what is written here — it skips
+# `-*` tokens one at a time and takes the first non-flag token, with no
+# knowledge that `--progress` consumes the token after it. Accepting the flag
+# ahead of the target therefore makes the two halves name DIFFERENT agents: the
+# operator looks at one, the record attests to the other, and a record naming an
+# unexamined agent is the stop wall opening on a look that never happened. The
+# producer stays inside what its paired reader can parse; the agreement is
+# pinned by tests/cross-gate-agreement.test.sh §C case 6.
+#
+# For the same reason an unrecognized `-`-leading token is a usage error rather
+# than a deliverable path. `--progres` and `--progress=<path>` are the likely
+# typos, and silently filing them under Deliverables prints an evidence tier
+# missing a channel the reader believes they asked for.
+#
+# After the target, each non-flag argument is rotated to the back, so what
+# survives the loop is the contracted deliverables in the order they were typed.
 # ONE progress path, or nothing: a second flag makes "which artifact did the
 # contract name?" a guess, and guessing about evidence is the failure this
 # whole command exists to prevent. Written without arrays — bash 3.2 is what
 # macOS ships, and an empty array under `set -u` is a crash there.
+case "${1:-}" in
+  "") usage ;;
+  -*) usage "The target comes first: '$1' is an option, not an agent." ;;
+esac
+TARGET="$1"; shift
+
 PROGRESS_PATH=""
 PROGRESS_NAMED=0
 ARGN=$#
@@ -54,16 +75,12 @@ while [ "$ARGN" -gt 0 ]; do
       [ "$PROGRESS_NAMED" -eq 0 ] || usage "Only one --progress path may be named; got a second."
       [ "$ARGN" -gt 0 ] || usage "--progress needs a path."
       PROGRESS_PATH="$1"; shift; ARGN=$((ARGN - 1)); PROGRESS_NAMED=1 ;;
+    -*)
+      usage "Unknown option: $arg" ;;
     *)
       set -- "$@" "$arg" ;;
   esac
 done
-
-if [ "$#" -lt 1 ] || [ -z "${1:-}" ]; then
-  usage
-fi
-
-TARGET="$1"; shift
 
 # ---------- portable file facts ----------
 # DELIBERATELY DUPLICATED in hooks/stop-guard.sh, byte for byte. A shared
