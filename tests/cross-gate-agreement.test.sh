@@ -763,6 +763,29 @@ expect_eq "C6 residual — a refused command whose flag VALUE names a live agent
 expect_eq "C6 residual — but the observation gives that operator nothing to act on" \
   "refused" "$(g_observation --progress solo worker)"
 
+# THE SAME RESIDUAL IN THE TARGET-FIRST DIRECTION, which the row above does not
+# reach: it pins only the flag-VALUE variant. Narrowing the producer did not just
+# remove divergent cases, it CONVERTED two ordinary typos — a mistyped flag and
+# the `=`-joined spelling — from honest agreement into refused-observation-still-
+# recorded. Both leave the target as the first non-flag token, which is exactly
+# what the recorder takes, so the operator now sees a usage error and zero
+# evidence while the record still names the target and carries the working log's
+# mtime and size that the gate's D-1 comparison spends. Closing it is a recorder
+# change (teach the `-*` skip that `--progress` consumes its successor, or move
+# the write to PostToolUse), which is a gate change outside this wave's ratified
+# Not Doing wall — routed to wave 3 (Step-6 critic, issue A). Asserted here so
+# the residual cannot shrink or grow unnoticed.
+expect_eq "C6 residual — a mistyped flag AFTER the target: the observation refuses it" \
+  "refused" "$(g_observation worker --progres "$GPROG")"
+expect_eq "C6 residual — and the recorder records the target anyway" \
+  "aworker-7777777777777777" \
+  "$(g_recorder "bash ~/.claude/hooks/stop-check.sh worker --progres $GPROG")"
+expect_eq "C6 residual — the =-joined spelling: the observation refuses it" \
+  "refused" "$(g_observation worker "--progress=$GPROG")"
+expect_eq "C6 residual — and the recorder records the target for that one too" \
+  "aworker-7777777777777777" \
+  "$(g_recorder "bash ~/.claude/hooks/stop-check.sh worker --progress=$GPROG")"
+
 # The derived FILE FACTS agree too: what the observation shows the reader as the
 # working log's size is what the recorder writes down as the activity level. Two
 # computations of one truth, previously untested together (D2).
