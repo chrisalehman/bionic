@@ -171,6 +171,34 @@ expect_block "GIT_SSH_COMMAND prefix on push"         "GIT_SSH_COMMAND=ssh git p
 expect_block "GIT_ASKPASS prefix on push"             "GIT_ASKPASS=cat git push origin main"
 
 # ============================================================
+# Block 3 cwd resolution: a "cd <worktree> && git push" is judged by the
+# WORKTREE branch, not the hook cwd. Two throwaway git dirs.
+# ============================================================
+
+# The fake-git shim's fall-through is broken for -C invocations (its which -a
+# chain was never exercised before these tests); these tests use REAL git dirs
+# and need no branch faking, so run them on the system PATH and restore after.
+SHIM_PATH="$PATH"
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+T3DIR=$(mktemp -d)
+git -C "$T3DIR" init -q -b master
+git -C "$T3DIR" commit -q --allow-empty -m init
+T3FEAT=$(mktemp -d)
+git -C "$T3FEAT" init -q -b feature/x
+git -C "$T3FEAT" commit -q --allow-empty -m init
+
+expect_allow "cd into feature-branch dir then push"   "cd $T3FEAT && git push origin feature/x"
+expect_allow "cd feature dir, bare push"              "cd $T3FEAT && git push"
+expect_block "cd into master dir then bare push"      "cd $T3DIR && git push"
+expect_block "cd into master dir then push origin"    "cd $T3DIR && git push origin"
+expect_allow "git -C feature dir push"                "git -C $T3FEAT push origin feature/x"
+expect_block "git -C master dir bare push"            "git -C $T3DIR push"
+expect_block "cd feature dir, explicit master push"   "cd $T3FEAT && git push origin feature/x:master"
+
+rm -rf "$T3DIR" "$T3FEAT"
+export PATH="$SHIM_PATH"
+
+# ============================================================
 # Results
 # ============================================================
 
