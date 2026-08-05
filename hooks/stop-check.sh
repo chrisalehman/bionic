@@ -3,12 +3,13 @@
 #
 # Run this before stopping a subagent:
 #
-#   bash ~/.claude/hooks/stop-check.sh <agent-name-or-id> [deliverable-path ...]
+#   bash ~/.claude/hooks/stop-check.sh <agent-name-or-id> [deliverable-path ...] [--progress <path>]
 #
 # It resolves the target against the metadata the platform writes to disk (P5/P6)
 # and prints that agent's EVIDENCE TIER — working-log recency as absolute time
-# and age, the agent's last message, repo activity, and each contracted
-# deliverable's existence and substance.
+# and age, the agent's last message, repo activity, each contracted
+# deliverable's existence and substance, and — when the work contract named a
+# progress artifact — that artifact's own recency (D-6).
 #
 # IT DECIDES NOTHING. No verdict, no recommendation, no stop. The judgment stays
 # with the reader; this command only makes the evidence visible. Its run is
@@ -26,11 +27,40 @@ set -uo pipefail
 
 MAX_MESSAGE_CHARS=600
 
-if [ "$#" -lt 1 ] || [ -z "${1:-}" ]; then
-  echo "Usage: bash ~/.claude/hooks/stop-check.sh <agent-name-or-id> [deliverable-path ...]" >&2
+usage() {  # [reason]
+  [ -n "${1:-}" ] && echo "$1" >&2
+  echo "Usage: bash ~/.claude/hooks/stop-check.sh <agent-name-or-id> [deliverable-path ...] [--progress <path>]" >&2
   echo "" >&2
   echo "Prints one subagent's evidence tier. Decides nothing." >&2
   exit 1
+}
+
+# ---------- arguments ----------
+#
+# `--progress <path>` may appear anywhere among the positional arguments; each
+# non-flag argument is rotated to the back, so what survives the loop is the
+# target followed by the contracted deliverables, in the order they were typed.
+# ONE progress path, or nothing: a second flag makes "which artifact did the
+# contract name?" a guess, and guessing about evidence is the failure this
+# whole command exists to prevent. Written without arrays — bash 3.2 is what
+# macOS ships, and an empty array under `set -u` is a crash there.
+PROGRESS_PATH=""
+PROGRESS_NAMED=0
+ARGN=$#
+while [ "$ARGN" -gt 0 ]; do
+  arg="$1"; shift; ARGN=$((ARGN - 1))
+  case "$arg" in
+    --progress)
+      [ "$PROGRESS_NAMED" -eq 0 ] || usage "Only one --progress path may be named; got a second."
+      [ "$ARGN" -gt 0 ] || usage "--progress needs a path."
+      PROGRESS_PATH="$1"; shift; ARGN=$((ARGN - 1)); PROGRESS_NAMED=1 ;;
+    *)
+      set -- "$@" "$arg" ;;
+  esac
+done
+
+if [ "$#" -lt 1 ] || [ -z "${1:-}" ]; then
+  usage
 fi
 
 TARGET="$1"; shift
@@ -241,6 +271,31 @@ else
       echo "  ${d} — ABSENT"
     fi
   done
+fi
+
+# ---------- evidence 4: the progress artifact (D-6 — the task's own byproducts) ----------
+#
+# An hour-long command silences the working log for its whole hour: one tool
+# call, one result at the end. "No activity for 47 minutes" therefore describes
+# a healthy suite and a wedged one identically, and no amount of reading the
+# agent will separate them. The separation lives one level DOWN, in the work's
+# own byproducts: a contract that requires the long command to accrue output at
+# a named path turns "log quiet 47 minutes, progress file grew 12 seconds ago"
+# into proof of life (design/orchestrator-subagent-coordination.md §5 D-6).
+#
+# Printed only when the contract named a path — the section is additive, and
+# without the flag this command's output is what it always was.
+if [ "$PROGRESS_NAMED" -eq 1 ]; then
+  echo ""
+  echo "-- progress artifact (D-6) --"
+  if [ -e "$PROGRESS_PATH" ]; then
+    PMTIME=$(file_mtime "$PROGRESS_PATH")
+    PSIZE=$(file_size "$PROGRESS_PATH")
+    NOW=$(date -u +%s)
+    echo "progress: ${PROGRESS_PATH}  last-write $(fmt_epoch "$PMTIME") ($(fmt_age $((NOW - PMTIME))) ago)  size ${PSIZE}B"
+  else
+    echo "progress: ${PROGRESS_PATH}  ABSENT"
+  fi
 fi
 
 echo ""
