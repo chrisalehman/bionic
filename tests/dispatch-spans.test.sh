@@ -117,6 +117,21 @@ expect_pin_in_file "auditor mandate: reporting-contract duty addition" \
   "Hold every report to the reporting contract: a factual claim carrying neither its proving command with output nor the label \"unverified\" is itself a finding." "$SKILL"
 
 echo ""
+echo "=== Section 5d: Contract fields + overdue-as-trigger span (epic-15 w2 slice 4/3) ==="
+expect_pin_in_file "five-things sentence: expected duration on every brief" \
+  "expected duration on every brief" "$SKILL"
+expect_pin_in_file "five-things sentence: progress-artifact path for D-6" \
+  "a progress-artifact path the task appends to as it" "$SKILL"
+expect_pin_in_file "overdue span: heading" \
+  "Overdue is a trigger, never evidence:" "$SKILL"
+expect_pin_in_file "overdue span: routes mechanically" \
+  "routes into this procedure mechanically" "$SKILL"
+expect_pin_in_file "overdue span: never justifies a stop by itself" \
+  "never justifies a stop by itself" "$SKILL"
+expect_pin_in_file "overdue span: eventual stop still needs fresh observation" \
+  "the eventual stop still requires its own fresh observation" "$SKILL"
+
+echo ""
 echo "=== Section 6: superseded generic non-response text is gone ==="
 # Pre-wave text handled a "wedged agent" uniformly (kill-and-redispatch) with
 # no reader/writer distinction — exactly what the ratified non-response
