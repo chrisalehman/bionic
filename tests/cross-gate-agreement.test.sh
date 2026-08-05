@@ -524,8 +524,14 @@ write_plan "$IREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
     bash "$PROBE" >"$SANDBOX/probe.out" 2>"$SANDBOX/probe.err" )
 PROBE_ST=$?
 expect_eq "the producer wrote an attestation (exit 0)" "0" "$PROBE_ST"
-ATT="$IREPO/.bionic/tmp/preflight.state"
+# slice 4/2 (D-5): the session identity is now carried in TWO places that must agree —
+# the FILENAME and the session_id= line inside it. A producer and a consumer that
+# disagreed on the filename scheme would refuse every dispatch, so the path is asserted
+# here as part of the same agreement the key is.
+ATT="$IREPO/.bionic/tmp/preflight-$SID_A.state"
 expect_eq "the attestation exists where both consumers look" "yes" "$([ -f "$ATT" ] && echo yes || echo no)"
+expect_eq "and nothing was left in the legacy single-slot both parties abandoned" "no" \
+  "$([ -e "$IREPO/.bionic/tmp/preflight.state" ] && echo yes || echo no)"
 
 # The producer's spelling and the consumer's spelling are the same key.
 expect_contains "the producer spells the identity key 'session_id='" "session_id=$SID_A" "$(cat "$ATT")"

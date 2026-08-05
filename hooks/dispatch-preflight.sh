@@ -19,6 +19,12 @@
 # (§4 "The start gate"); this gate never re-derives or second-guesses what
 # the producer already decided.
 #
+# Attestation filename is per-session (design D-5, slice 4/2):
+#     .bionic/tmp/preflight-<this session's session_id>.state
+# A foreign session's attestation — however fresh — simply is not this file, so it is
+# never read at all; only THIS session's own filename is ever consulted, and the legacy
+# shared .bionic/tmp/preflight.state slot is not consulted either.
+#
 # FAIL DIRECTIONS (TDD §7, pinned by hooks/dispatch-preflight.test.sh):
 #   - not an Agent-tool call                            -> pass, silent  (A7 relevance hoist)
 #   - cwd/repo unresolvable                              -> pass, silent (ambiguity)
@@ -36,7 +42,6 @@
 set -uo pipefail
 
 PREFLIGHT_CMD="bash ~/.claude/hooks/preflight-probe.sh"
-STATE_REL=".bionic/tmp/preflight.state"
 
 INPUT=$(cat)
 _jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
@@ -125,7 +130,7 @@ deny() {  # <reason line>...
   exit 2
 }
 
-STATE_FILE="$REPO/$STATE_REL"
+STATE_FILE="$REPO/.bionic/tmp/preflight-${PAYLOAD_SID}.state"
 
 # A symlink ANYWHERE on the attestation path is never followed — a hostile repo
 # can AIM or CLOSE this wall but must not be able to OPEN it by planting content

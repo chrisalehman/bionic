@@ -132,6 +132,9 @@ PLAN
 }
 
 # write_attestation <repo> <session_id> [extra kv lines...]
+#
+# slice 4/2 (D-5): writes to the PER-SESSION filename, preflight-<sid>.state — the
+# filename is now the primary key, matching hooks/preflight-probe.sh's own scheme.
 write_attestation() {
   local repo="$1" sid="$2"; shift 2
   mkdir -p "$repo/.bionic/tmp"
@@ -144,6 +147,22 @@ write_attestation() {
     printf 'repo=%s\n' "$repo"
     local line
     for line in "$@"; do printf '%s\n' "$line"; done
+  } > "$repo/.bionic/tmp/preflight-$sid.state"
+  chmod 600 "$repo/.bionic/tmp/preflight-$sid.state"
+}
+
+# write_legacy_attestation <repo> <session_id> — the OLD, pre-wave-03 single-slot
+# filename. Used to prove the gate never consults it (slice 4/2).
+write_legacy_attestation() {
+  local repo="$1" sid="$2"
+  mkdir -p "$repo/.bionic/tmp"
+  {
+    printf '# bionic environment attestation — machine-local, safe to delete\n'
+    printf 'version=1\n'
+    printf 'kind=preflight-attestation\n'
+    printf 'session_id=%s\n' "$sid"
+    printf 'written_at=1785790000\n'
+    printf 'repo=%s\n' "$repo"
   } > "$repo/.bionic/tmp/preflight.state"
   chmod 600 "$repo/.bionic/tmp/preflight.state"
 }
@@ -243,14 +262,50 @@ case "$GATE_ERR" in
 esac
 
 # ============================================================
-echo "=== S6 — active wave + attestation is a FOREIGN session -> REFUSE (AC-2) ==="
+echo "=== S6 — active wave + only a FOREIGN session's attestation exists -> REFUSE (AC-2) ==="
 # ============================================================
+#
+# slice 4/2 (D-5): the foreign attestation is written at ITS OWN per-session filename
+# (preflight-<SID_B>.state) — there is no file at all for SID_A, which is exactly what
+# "foreign, however fresh, is not an attestation for this session" means once filenames
+# are the primary key.
 
 REPO=$(make_repo r6 yes)
 write_attestation "$REPO" "$SID_B"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "foreign attestation exits 2" "2" "$GATE_ST"
-expect_contains "foreign-attestation refusal names the fix command" "bash ~/.claude/hooks/preflight-probe.sh" "$GATE_ERR"
+expect_status "foreign-only attestation exits 2 (no file exists for this session)" "2" "$GATE_ST"
+expect_contains "foreign-only refusal names the fix command" "bash ~/.claude/hooks/preflight-probe.sh" "$GATE_ERR"
+
+# ============================================================
+echo "=== S6b — active wave + BOTH sessions hold valid attestations concurrently (AC-2) ==="
+# ============================================================
+#
+# The D-5 core case: two sessions on one repo, each with its own per-session file. Both
+# dispatches pass — session B's attestation existing is neither necessary nor sufficient
+# for session A's gate, and vice versa.
+
+REPO=$(make_repo r6b yes)
+write_attestation "$REPO" "$SID_A"
+write_attestation "$REPO" "$SID_B"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "session A's dispatch passes with both attestations present" "0" "$GATE_ST"
+expect_empty "session A's pass produces no stdout" "$GATE_OUT"
+run_gate "$(mk_agent_payload "$SID_B" "$REPO")"
+expect_status "session B's dispatch ALSO passes with both attestations present" "0" "$GATE_ST"
+expect_empty "session B's pass produces no stdout" "$GATE_OUT"
+
+# ============================================================
+echo "=== S6c — the legacy single-slot file is NEVER consulted (slice 4/2) ==="
+# ============================================================
+#
+# A legacy preflight.state carrying this session's own, perfectly valid-looking
+# session_id= must still refuse: only the per-session filename is ever read.
+
+REPO=$(make_repo r6c yes)
+write_legacy_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "a legacy single-slot attestation (even keyed to this session) still exits 2" "2" "$GATE_ST"
+expect_contains "legacy-file refusal names the fix command" "bash ~/.claude/hooks/preflight-probe.sh" "$GATE_ERR"
 
 # ============================================================
 echo "=== S7 — active wave + attestation IS this session -> pass, silent (AC-2) ==="
@@ -265,11 +320,11 @@ expect_empty "matching attestation produces no stderr" "$GATE_ERR"
 
 # forward-compatibility (A6): unknown extra fields, reordered, must still
 # read the session_id BY KEY, not by position — mirrors
-# preflight-probe.test.sh's own reorder case.
+# preflight-probe.test.sh's own reorder case. Written at the PER-SESSION path.
 REPO=$(make_repo r7b yes)
 mkdir -p "$REPO/.bionic/tmp"
 printf 'unknown_future_field=x\nsession_id=%s\nversion=1\nrepo=%s\n' "$SID_A" "$REPO" \
-  > "$REPO/.bionic/tmp/preflight.state"
+  > "$REPO/.bionic/tmp/preflight-$SID_A.state"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "reordered/extended attestation with a matching key still passes" "0" "$GATE_ST"
 expect_empty "reordered/extended pass produces no stdout" "$GATE_OUT"
@@ -280,7 +335,7 @@ echo "=== S8 — hostile/malformed attestation shapes -> REFUSE, never followed 
 
 # attestation path occupied by a directory
 REPO=$(make_repo r8a yes)
-mkdir -p "$REPO/.bionic/tmp/preflight.state"
+mkdir -p "$REPO/.bionic/tmp/preflight-$SID_A.state"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "attestation path is a directory -> refuse" "2" "$GATE_ST"
 
@@ -291,7 +346,7 @@ REPO=$(make_repo r8b yes)
 mkdir -p "$REPO/.bionic/tmp"
 DECOY="$SANDBOX/decoy-attestation"
 printf 'session_id=%s\nversion=1\n' "$SID_A" > "$DECOY"
-ln -s "$DECOY" "$REPO/.bionic/tmp/preflight.state"
+ln -s "$DECOY" "$REPO/.bionic/tmp/preflight-$SID_A.state"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "attestation path is a symlink -> refuse, not followed" "2" "$GATE_ST"
 
@@ -309,7 +364,7 @@ for _lvl in .bionic/tmp .bionic; do
   ELSEWHERE="$SANDBOX/elsewhere-$_tag/.bionic/tmp"
   mkdir -p "$ELSEWHERE"
   printf 'session_id=%s\nversion=1\nkind=preflight-attestation\n' "$SID_A" \
-    > "$ELSEWHERE/preflight.state"
+    > "$ELSEWHERE/preflight-$SID_A.state"
   if [ "$_lvl" = ".bionic/tmp" ]; then
     mkdir -p "$REPO/.bionic"
     ln -s "$ELSEWHERE" "$REPO/.bionic/tmp"
@@ -328,7 +383,7 @@ done
 # attestation file exists but is empty / has no session_id= line at all
 REPO=$(make_repo r8c yes)
 mkdir -p "$REPO/.bionic/tmp"
-printf 'version=1\nkind=preflight-attestation\n' > "$REPO/.bionic/tmp/preflight.state"
+printf 'version=1\nkind=preflight-attestation\n' > "$REPO/.bionic/tmp/preflight-$SID_A.state"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "attestation with no session_id= line -> refuse" "2" "$GATE_ST"
 

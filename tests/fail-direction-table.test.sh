@@ -125,11 +125,13 @@ plant_agent "$I_SUB" "aworker-1111111111111111" "worker"
 IFS='|' read -r N_REPO N_TR N_SUB <<< "$(make_world nocurrent nocurrent)"
 plant_agent "$N_SUB" "aworker-1111111111111111" "worker"
 
-# An attested active world — the start gate's positive pair.
+# An attested active world — the start gate's positive pair. slice 4/2 (D-5): the
+# attestation lives at the PER-SESSION filename the gate actually reads; the old shared
+# single-slot path is not consulted, so a fixture written there attests to nothing.
 IFS='|' read -r T_REPO T_TR T_SUB <<< "$(make_world attested yes)"
 mkdir -p "$T_REPO/.bionic/tmp"
 printf '# attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\n' "$SID_A" \
-  > "$T_REPO/.bionic/tmp/preflight.state"
+  > "$T_REPO/.bionic/tmp/preflight-$SID_A.state"
 
 # An observed active world — the stop gate's positive pair. The observation is
 # RECORDED BY THE RECORDER ARM, never hand-written: the row must be discharged by
@@ -313,9 +315,15 @@ echo "=== the producer's two rows (§7 rows 4 and 5) ==="
 
 P_REPO="$SANDBOX/w/producer/repo"; mkdir -p "$P_REPO/.bionic/tmp"
 git -C "$P_REPO" init -q 2>/dev/null
-PRIOR="$P_REPO/.bionic/tmp/preflight.state"
-printf '# attestation\nversion=1\nsession_id=%s\n' "$SID_B" > "$PRIOR"
-PRIOR_SUM=$(shasum "$PRIOR")
+
+# slice 4/2 (D-5): both rows are about what a run does to an attestation ALREADY on
+# disk, so each fixture must sit at the per-session filename that run actually governs.
+# Left at the old shared slot these rows stayed green for the wrong reason — the probe
+# now prunes that legacy file unconditionally, so "no attestation is on disk" below was
+# satisfied by the prune rather than by the blocking-failure delete it exists to pin.
+PRIOR_B="$P_REPO/.bionic/tmp/preflight-$SID_B.state"
+printf '# attestation\nversion=1\nsession_id=%s\n' "$SID_B" > "$PRIOR_B"
+PRIOR_SUM=$(shasum "$PRIOR_B")
 
 # Row 4 — no session key: REFUSE, and state is LEFT UNTOUCHED. An unkeyed run
 # cannot tell whose attestation is on disk, so deleting it would destroy another
@@ -324,16 +332,18 @@ OUT=$( cd "$P_REPO" && env -u CLAUDE_CODE_SESSION_ID ANTHROPIC_API_KEY=x \
        HOME="$HOME" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" bash "$PROBE" 2>&1 ); ST=$?
 expect_eq "environment check with no session key REFUSES (exit 3)" "3" "$ST"
 expect_contains "…and says so" "REFUSED" "$OUT"
-expect_eq "…and leaves existing state byte-identical" "$PRIOR_SUM" "$(shasum "$PRIOR")"
+expect_eq "…and leaves existing state byte-identical" "$PRIOR_SUM" "$(shasum "$PRIOR_B")"
 
 # Row 5 — a blocking probe fails: NO ATTESTATION, and the prior one is deleted.
-# A stale pass must not outlive the environment it described.
-printf '# attestation\nversion=1\nsession_id=%s\n' "$SID_A" > "$PRIOR"
+# A stale pass must not outlive the environment it described. The prior stamp is THIS
+# session's own, so pruning never touches it — only the blocking-failure path can.
+PRIOR_A="$P_REPO/.bionic/tmp/preflight-$SID_A.state"
+printf '# attestation\nversion=1\nsession_id=%s\n' "$SID_A" > "$PRIOR_A"
 OUT=$( cd "$P_REPO" && env -u ANTHROPIC_API_KEY CLAUDE_CODE_SESSION_ID="$SID_A" \
        HOME="$SANDBOX/nocred" CLAUDE_CONFIG_DIR="$SANDBOX/nocred/.claude" \
        PATH="$SANDBOX/stub:$PATH" bash "$PROBE" 2>&1 ); ST=$?
 expect_eq "environment check with a failing blocking probe exits 1" "1" "$ST"
-expect_eq "…and no attestation is on disk" "no" "$([ -e "$PRIOR" ] && echo yes || echo no)"
+expect_eq "…and no attestation is on disk" "no" "$([ -e "$PRIOR_A" ] && echo yes || echo no)"
 expect_contains "…and the prior attestation was deleted, loudly" "deleted" "$OUT"
 
 # ============================================================

@@ -46,6 +46,16 @@
 # the user's bootstrap replaces that install, a run of this script must not silently
 # disarm the live gate by renaming the one field it reads.
 #
+# State filename — per-session (design D-5, slice 4/2): the attestation is written to
+#     .bionic/tmp/preflight-<session_id>.state
+# never to the old shared .bionic/tmp/preflight.state slot, so two sessions working the
+# same repo hold valid attestations concurrently instead of racing to overwrite a single
+# shared file. Every run also prunes: the legacy single-slot file if one is still on
+# disk (this script neither writes nor reads it any more), and any per-session
+# attestation whose owning session no longer has a live working log (no transcript file
+# left anywhere under CLAUDE_CONFIG_DIR/projects). A LIVE foreign session's attestation
+# is never touched by another session's run — that is the whole point of D-5.
+#
 # Exit codes — this list is pinned against the code by preflight-probe.test.sh, because a
 # doc/behavior split on exactly this point (checklist A5) is what let a stale pass survive
 # a failed write in the discarded run:
@@ -65,7 +75,9 @@
 set -u
 
 ATTESTATION_VERSION=1
-STATE_BASENAME="preflight.state"
+STATE_BASENAME_PREFIX="preflight-"
+STATE_BASENAME_SUFFIX=".state"
+LEGACY_STATE_BASENAME="preflight.state"
 LOCK_BASENAME=".preflight.lock"
 OTHER_SESSION_WINDOW_MIN=15   # warn-only liveness heuristic; mtime-based, known to
                               # false-positive on recently-dead sessions (spec Not Doing)
@@ -84,6 +96,10 @@ if [ -z "$SESSION_ID" ]; then
   exit 3
 fi
 
+# Hoisted here (rather than beside its sole prior use in the other-sessions scan) so the
+# D-5 pruning step below can also resolve other sessions' transcript directories.
+CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+
 # ---------------------------------------------------------------- where state lives
 
 REPO="$(git rev-parse --show-toplevel 2>/dev/null)"
@@ -96,7 +112,8 @@ fi
 
 BIONIC_DIR="$REPO_REAL/.bionic"
 STATE_DIR="$BIONIC_DIR/tmp"
-STATE_FILE="$STATE_DIR/$STATE_BASENAME"
+STATE_FILE="$STATE_DIR/${STATE_BASENAME_PREFIX}${SESSION_ID}${STATE_BASENAME_SUFFIX}"
+LEGACY_STATE_FILE="$STATE_DIR/$LEGACY_STATE_BASENAME"
 LOCK_DIR="$STATE_DIR/$LOCK_BASENAME"
 
 # Path safety BEFORE anything is created or written: a planted symlink anywhere on the
@@ -179,6 +196,41 @@ if [ "$STATE_DIR_OK" -eq 1 ]; then
   esac
 fi
 
+# ---------------------------------------------------------------- D-5 pruning (slice 4/2)
+#
+# On every run where the state directory is usable — independent of whether THIS
+# session's own blocking probes above passed — remove: (a) the legacy single-slot file,
+# which this script no longer writes or reads, so a repo mid-transition to per-session
+# filenames must not go on trusting a stale shared record; (b) any per-session
+# attestation whose owning session no longer has a live working log (its own transcript
+# file is gone from every project directory this config dir knows about). A LIVE foreign
+# session's attestation — its transcript still exists — is never touched here or by any
+# other session's run; that concurrency is the entire point of D-5.
+session_transcript_exists() {  # <session id>
+  local sid="$1" d
+  [ -n "$sid" ] || return 1
+  [ -d "$CONFIG_DIR/projects" ] || return 1
+  for d in "$CONFIG_DIR"/projects/*/; do
+    [ -f "${d}${sid}.jsonl" ] && return 0
+  done
+  return 1
+}
+
+prune_stale_attestations() {
+  [ -e "$LEGACY_STATE_FILE" ] && rm -f "$LEGACY_STATE_FILE" 2>/dev/null
+  local f base sid
+  for f in "$STATE_DIR"/"$STATE_BASENAME_PREFIX"*"$STATE_BASENAME_SUFFIX"; do
+    [ -e "$f" ] || continue
+    base="$(basename "$f")"
+    sid="${base#"$STATE_BASENAME_PREFIX"}"
+    sid="${sid%"$STATE_BASENAME_SUFFIX"}"
+    [ "$sid" = "$SESSION_ID" ] && continue
+    session_transcript_exists "$sid" || rm -f "$f" 2>/dev/null
+  done
+}
+
+[ "$STATE_DIR_OK" -eq 1 ] && prune_stale_attestations
+
 # ---------------------------------------------------------------- context probes
 
 GIT_BRANCH="-"; GIT_HEAD="-"; GIT_DIRTY="-"
@@ -194,7 +246,7 @@ fi
 # Other live sessions in this project. Warn-only by design (§4, UC-6): detection, never
 # prevention. The project directory is located by finding the one that holds THIS
 # session's own transcript, so no filename-encoding scheme has to be guessed.
-CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+# (CONFIG_DIR is set earlier, beside the session-key check, so D-5 pruning above can use it.)
 OTHER_SESSIONS=0
 PROJ_DIR=""
 if [ -d "$CONFIG_DIR/projects" ]; then
@@ -305,7 +357,7 @@ abort_write() {  # <message> — leaves no attestation of any kind behind
 # this line leaves NO attestation rather than a surviving stale one (checklist A5).
 rm -f "$STATE_FILE" 2>/dev/null
 
-tmp="$(mktemp "$STATE_DIR/$STATE_BASENAME.XXXXXX" 2>/dev/null)"
+tmp="$(mktemp "$STATE_FILE.XXXXXX" 2>/dev/null)"
 [ -n "$tmp" ] && [ -f "$tmp" ] || abort_write "could not create a temporary file in $STATE_DIR"
 chmod 600 "$tmp" 2>/dev/null || abort_write "could not restrict permissions on the temporary file"
 
