@@ -48,6 +48,17 @@ expect_status() {    # <label> <expected> <actual>
   if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected exit $2, got $3"; fi
 }
 
+expect_equal() {     # <label> <expected> <actual>
+  if [ "$2" = "$3" ]; then ok "$1"; else
+    no "$1" "outputs differ:"
+    diff <(printf '%s\n' "$2") <(printf '%s\n' "$3") | sed 's/^/      /'
+  fi
+}
+
+expect_differ() {    # <label> <a> <b>
+  if [ "$2" != "$3" ]; then ok "$1"; else no "$1" "both renderings are identical: $2"; fi
+}
+
 # ---------- fixtures ----------
 #
 # FIXTURE FIDELITY (declared per checklist §A / spec §Design).
@@ -209,10 +220,6 @@ for verdict in "safe to stop" "do not stop" "recommend" "verdict" "you should" "
 done
 expect_contains "observation states that it decides nothing" "decides nothing" "$OUT"
 
-# D-6 carve amendment (register 08-04): the progress-artifact check is WAVE 2.
-# This pin fails if a future edit smuggles it into wave 1.
-expect_absent "no D-6 progress-artifact check in wave 1" "progress artifact" "$OUT"
-
 # ============================================================
 echo ""
 echo "=== Section 4: no seam — the default projects root is derived, not injected ==="
@@ -264,6 +271,174 @@ expect_status "a glob target does not resolve" 1 "$ST"
 OUT=$( cd "$SANDBOX" && HOME="$H2" CLAUDE_CONFIG_DIR="$H2/.claude" bash "$CHECK" "quiet-reviewer" 2>&1 ); ST=$?
 expect_status "runs from a non-repo cwd without crashing" 0 "$ST"
 expect_contains "non-repo cwd still prints the working log evidence" "agent-aquiet-reviewer-deadbeefdeadbeef.jsonl" "$OUT"
+
+# ============================================================
+echo ""
+echo "=== Section 6: the progress artifact — D-6's evidence level below the agent ==="
+# ============================================================
+#
+# An hour-long command silences the working log for the whole hour — one tool
+# call, one result at the end — so "quiet for 47 minutes" describes a healthy
+# suite and a wedged one identically (design §5 D-6). The task's own byproducts
+# are the level of evidence below the agent: the work contract names a progress
+# path, and the observation prints that artifact's facts. Facts only — the
+# section carries no verdict, exactly like every other channel here.
+
+IFS='|' read -r H6 R6 S6 <<< "$(make_world w6)"
+make_agent "$H6" "$S6" "66666666-6666-6666-6666-666666666666" \
+  "along-runner-66666666666666aa" "long-runner" "running the suite" >/dev/null
+
+PROG_DIR="$R6/.bionic/tmp"
+mkdir -p "$PROG_DIR"
+PROG="$PROG_DIR/w6.progress"
+# Written before the baseline run, not between the two: the flagged and
+# unflagged runs are compared below, and an untracked file appearing between
+# them would move the repo-activity line for reasons that have nothing to do
+# with this flag.
+printf 'step 1 done\n' > "$PROG"   # 12 bytes, written just now
+
+# (a) No flag, no section — and nothing else moves either. This is the wave-1
+# carve pin arriving at its destination: while the D-6 check was deferred, the
+# pin asserted the section was absent from the whole command; now that the
+# check has landed, the same negative assertion is the no-flag case.
+OUT6_NONE=$(run_check "$H6" "$R6" "long-runner")
+expect_absent "no --progress flag prints no progress-artifact section" "progress artifact" "$OUT6_NONE"
+
+# (b) A fresh artifact: absolute last-write, seconds-scale age, size.
+OUT6_FRESH=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG")
+expect_contains "the progress section prints its header" "-- progress artifact (D-6) --" "$OUT6_FRESH"
+expect_contains "the progress section prints the contracted path" "$PROG" "$OUT6_FRESH"
+expect_matches "a fresh artifact prints an absolute UTC last-write" \
+  '^progress: .*last-write [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' "$OUT6_FRESH"
+expect_matches "a fresh artifact prints a seconds-scale age" \
+  '^progress: .*\([0-9]{1,2}s ago\)' "$OUT6_FRESH"
+expect_matches "a fresh artifact prints its size in bytes" '^progress: .*size 12B' "$OUT6_FRESH"
+
+# Without the flag the output is byte-unchanged: the section is purely
+# additive. Compared with the volatile fields (ages, absolute timestamps)
+# normalized, and the three added lines — the blank separator, the header, the
+# fact line — removed from the flagged run.
+norm_volatile() {
+  printf '%s\n' "$1" | sed -E \
+    -e 's/\(age [^)]*\)/(age NORMALIZED)/' \
+    -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z/TIMESTAMP/g'
+}
+strip_progress() {   # drop the header, the fact line, and the blank line before them
+  printf '%s\n' "$1" | awk '
+    /^-- progress artifact \(D-6\) --$/ { hold = 0; skip = 1; next }
+    skip == 1 { skip = 0; next }
+    { if (hold) print held; held = $0; hold = 1 }
+    END { if (hold) print held }'
+}
+expect_equal "everything outside the section is unchanged by --progress" \
+  "$(norm_volatile "$OUT6_NONE")" "$(norm_volatile "$(strip_progress "$OUT6_FRESH")")"
+
+# (c) The SAME artifact, ten minutes stale: the rendering must change on time
+# alone. Same path, same bytes — the only difference between these two runs is
+# when the file was last written, which is the whole point of the channel.
+TEN_AGO=$(date -v-10M +%Y%m%d%H%M.%S 2>/dev/null || date -d '10 minutes ago' +%Y%m%d%H%M.%S 2>/dev/null)
+if [ -z "$TEN_AGO" ]; then
+  no "this platform's date can express a 10-minute-old timestamp" "neither date -v nor date -d worked"
+else
+  touch -t "$TEN_AGO" "$PROG"
+  OUT6_STALE=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG")
+  expect_matches "a stale artifact prints a minutes-scale age" \
+    '^progress: .*\(10m [0-9]+s ago\)' "$OUT6_STALE"
+  FRESH_LINE=$(printf '%s\n' "$OUT6_FRESH" | grep '^progress: ')
+  STALE_LINE=$(printf '%s\n' "$OUT6_STALE" | grep '^progress: ')
+  expect_differ "fresh and stale renderings of the same artifact are distinguishable" \
+    "$FRESH_LINE" "$STALE_LINE"
+fi
+
+# (d) Contracted but never written.
+OUT6_MISS=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG_DIR/never-written.progress"); ST=$?
+expect_status "a missing progress artifact is not an error" 0 "$ST"
+expect_matches "a missing progress artifact prints ABSENT" \
+  '^progress: .*never-written\.progress  ABSENT' "$OUT6_MISS"
+
+# Facts only: the section names no state of the agent.
+for verdict in "safe to stop" "recommend" "verdict" "you should" "hung" "stalled" "alive"; do
+  expect_absent "the progress section carries no verdict: '$verdict'" "$verdict" "$OUT6_FRESH"
+done
+
+# (e) One path, or it is a usage error — a second flag is ambiguous about which
+# artifact the contract named, and guessing is the failure this whole design
+# exists to prevent.
+OUT6_TWO=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG" --progress "$PROG"); ST=$?
+expect_status "a second --progress flag exits 1" 1 "$ST"
+expect_contains "a second --progress flag prints usage" "Usage" "$OUT6_TWO"
+
+OUT6_BARE=$(run_check "$H6" "$R6" "long-runner" --progress); ST=$?
+expect_status "--progress with no path exits 1" 1 "$ST"
+expect_contains "--progress with no path prints usage" "Usage" "$OUT6_BARE"
+
+# An EMPTY value is the same failure as a missing one, and worse in its output:
+# `--progress "$PROG"` with PROG unset is the ordinary trigger, and a token that
+# follows is not a path that was named. Printing `progress: ABSENT` for it states
+# an authoritative fact about an artifact nobody contracted, which is the exact
+# false negative D-6 exists to prevent — the reader concludes wedged and routes a
+# healthy agent into the non-response procedure (Step-6 critic, issue B).
+OUT6_EMPTY=$(run_check "$H6" "$R6" "long-runner" --progress ""); ST=$?
+expect_status "--progress with an empty path exits 1" 1 "$ST"
+expect_contains "--progress with an empty path prints usage" "Usage" "$OUT6_EMPTY"
+expect_absent "--progress with an empty path never prints a progress fact" "progress:" "$OUT6_EMPTY"
+
+# The flag and its value are never mistaken for contracted deliverables.
+echo "the deliverable body" > "$R6/report.md"
+OUT6_BOTH=$(run_check "$H6" "$R6" "long-runner" "report.md" --progress "$PROG")
+expect_matches "a deliverable named alongside --progress is still reported" \
+  'report\.md — PRESENT' "$OUT6_BOTH"
+expect_absent "the flag itself is never reported as a deliverable" "  --progress —" "$OUT6_BOTH"
+expect_absent "the flag's value is never reported as a deliverable" "w6.progress — " "$OUT6_BOTH"
+
+# (f) TARGET FIRST — the grammar is the one the RECORDER can parse.
+#
+# This command's run is observed by hooks/stop-guard.sh's Bash arm, which
+# re-parses the same command line to decide WHICH agent was examined. That
+# recorder skips leading `-*` tokens one at a time and takes the first non-flag
+# token; it does not know that `--progress` consumes the token after it. So a
+# leading `--progress <path> <agent>` makes the two halves disagree about the
+# target — the operator looks at <agent> while the record says <path> — and a
+# record naming an agent nobody examined is the wall opening on a look that was
+# never taken (Step-6 review F-1, proven with a two-agent fixture).
+#
+# The producer is therefore narrowed to exactly what the recorder already reads:
+# the target is the FIRST argument, `--progress <path>` may follow it, and any
+# other `-`-leading token anywhere is a usage error rather than a silent
+# deliverable. That last part is also F-2: `--progres` (one `s`) used to be
+# reported as an ABSENT deliverable while the reader believed they had asked for
+# a progress channel.
+
+OUT6_LEAD=$(run_check "$H6" "$R6" --progress "$PROG" "long-runner"); ST=$?
+expect_status "--progress BEFORE the target exits 1" 1 "$ST"
+expect_contains "--progress before the target prints usage" "Usage" "$OUT6_LEAD"
+expect_absent "--progress before the target prints no evidence tier" "OBSERVATION" "$OUT6_LEAD"
+
+# The usage error is an error: nothing on stdout, everything on stderr, so a
+# caller reading the observation's output gets no half-formed tier.
+OUT6_LEAD_STDOUT=$( cd "$R6" && HOME="$H6" CLAUDE_CONFIG_DIR="$H6/.claude" \
+  bash "$CHECK" --progress "$PROG" "long-runner" 2>/dev/null )
+expect_equal "a usage error writes nothing to stdout" "" "$OUT6_LEAD_STDOUT"
+
+OUT6_TYPO=$(run_check "$H6" "$R6" "long-runner" --progres "$PROG"); ST=$?
+expect_status "a mistyped flag exits 1 instead of becoming a deliverable" 1 "$ST"
+expect_contains "a mistyped flag prints usage" "Usage" "$OUT6_TYPO"
+expect_absent "a mistyped flag is never reported as a deliverable" "--progres —" "$OUT6_TYPO"
+
+OUT6_EQ=$(run_check "$H6" "$R6" "long-runner" "--progress=$PROG"); ST=$?
+expect_status "--progress=<path> exits 1 (one spelling, the one the recorder reads)" 1 "$ST"
+expect_contains "--progress=<path> prints usage" "Usage" "$OUT6_EQ"
+
+OUT6_HELP=$(run_check "$H6" "$R6" --help); ST=$?
+expect_status "--help exits 1" 1 "$ST"
+expect_contains "--help reaches usage rather than target resolution" "Usage" "$OUT6_HELP"
+expect_absent "--help is never treated as an agent name" "unresolved" "$OUT6_HELP"
+
+# Position is not the point — an unknown flag is a usage error wherever it sits,
+# including after a well-formed --progress pair.
+OUT6_TRAIL=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG" -x); ST=$?
+expect_status "an unknown flag after a valid --progress pair exits 1" 1 "$ST"
+expect_contains "an unknown flag after a valid --progress pair prints usage" "Usage" "$OUT6_TRAIL"
 
 # ============================================================
 echo ""

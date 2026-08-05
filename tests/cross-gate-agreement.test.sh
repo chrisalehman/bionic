@@ -701,6 +701,91 @@ expect_eq "C5 observation ignores metadata under \$HOME/.claude when CLAUDE_CONF
 expect_eq "C5 recorder writes nothing for it" "nothing" "$(q_recorder decoy)"
 expect_eq "C5 gate refuses it" "refused" "$(q_gate decoy)"
 
+# --- case 6: the ARGUMENT GRAMMAR itself. Cases 1-5 ask both halves about one
+# typed name; this one asks them about one COMMAND LINE, which is the thing they
+# actually share. The observation parses its own `$@`; the recorder re-parses the
+# same string out of the Bash payload with a grammar of its own (skip `-*`
+# tokens, take the first non-flag). Nothing held those two grammars together, and
+# a slice that widened one of them shipped: `--progress <path> <agent>` had the
+# operator looking at <agent> while the record named <path> — an attestation
+# about an agent nobody examined (Step-6 review F-1).
+#
+# So the comparable observable here is the TARGET IDENTITY each half derives from
+# the same string, and the agreement includes refusing together. ---
+plant "$RPROJ/$SID_A/subagents" "aworker-7777777777777777" "worker"
+GPROG="$RREPO/.bionic/tmp/w-grammar.progress"
+mkdir -p "$RREPO/.bionic/tmp"; printf 'step 1\n' > "$GPROG"
+
+g_observation() {  # <args…> -> the agent id the OBSERVATION resolved, or "refused"
+  local out st
+  out=$( cd "$RREPO" && bash "$OBSERVE" "$@" 2>&1 ); st=$?
+  if [ "$st" -ne 0 ] && printf '%s' "$out" | grep -qF 'Usage:'; then echo refused; return; fi
+  printf '%s' "$out" | grep -E '^Resolved:' | grep -oE 'a[a-z0-9-]*-[0-9a-f]{16}' | head -1
+}
+g_recorder() {  # <command-string> -> the agent id the RECORDER wrote, or "nothing"
+  rm -f "$RREPO/.bionic/tmp/stop-check.state"
+  mk_bash_payload "$SID_A" "$RTR" "$RREPO" "$1" | bash "$PARTY_SG" >/dev/null 2>&1
+  local rec
+  rec=$(grep '^v1|' "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null \
+    | tr '|' '\n' | grep '^target=' | cut -d= -f2 | head -1)
+  [ -n "$rec" ] && echo "$rec" || echo nothing
+}
+
+# The documented interface line: target first, flag trailing. Both halves must
+# name the SAME agent — this is the row that would have caught F-1's sibling had
+# it been written for the trailing form only.
+expect_eq "C6 trailing form — the observation resolves the typed target" \
+  "aworker-7777777777777777" "$(g_observation worker report.md --progress "$GPROG")"
+expect_eq "C6 trailing form — the recorder records the SAME agent from the same line" \
+  "aworker-7777777777777777" \
+  "$(g_recorder "bash ~/.claude/hooks/stop-check.sh worker report.md --progress $GPROG")"
+
+# The leading form, which is what diverged. The producer now refuses it, and the
+# recorder — whose `-*` skip walks past the flag and its value alike — finds no
+# resolvable token and writes nothing. Both halves refuse together, which is the
+# only agreement available when the command line is not one either can honour.
+expect_eq "C6 leading form — the observation refuses it" \
+  "refused" "$(g_observation --progress "$GPROG" worker)"
+expect_eq "C6 leading form — the recorder writes no record for it" \
+  "nothing" "$(g_recorder "bash ~/.claude/hooks/stop-check.sh --progress $GPROG worker")"
+
+# THE RESIDUAL, pinned rather than claimed away. The recorder is PreToolUse: it
+# reads the command TEXT before anything runs, so a command that fails in front
+# of the operator can still leave a record if some token in it happens to name a
+# live agent of this session (hooks/stop-guard.sh:280-288 states this class —
+# `false && bash …stop-check.sh x` is the same shape). Narrowing the producer
+# does not close it and was never able to; what it removes is the case where the
+# operator saw a full, successful evidence tier and had no reason to doubt the
+# record. This row exists so that residual cannot shrink or grow unnoticed.
+expect_eq "C6 residual — a refused command whose flag VALUE names a live agent still records it" \
+  "asolo-1111111111111111" \
+  "$(g_recorder "bash ~/.claude/hooks/stop-check.sh --progress solo worker")"
+expect_eq "C6 residual — but the observation gives that operator nothing to act on" \
+  "refused" "$(g_observation --progress solo worker)"
+
+# THE SAME RESIDUAL IN THE TARGET-FIRST DIRECTION, which the row above does not
+# reach: it pins only the flag-VALUE variant. Narrowing the producer did not just
+# remove divergent cases, it CONVERTED two ordinary typos — a mistyped flag and
+# the `=`-joined spelling — from honest agreement into refused-observation-still-
+# recorded. Both leave the target as the first non-flag token, which is exactly
+# what the recorder takes, so the operator now sees a usage error and zero
+# evidence while the record still names the target and carries the working log's
+# mtime and size that the gate's D-1 comparison spends. Closing it is a recorder
+# change (teach the `-*` skip that `--progress` consumes its successor, or move
+# the write to PostToolUse), which is a gate change outside this wave's ratified
+# Not Doing wall — routed to wave 3 (Step-6 critic, issue A). Asserted here so
+# the residual cannot shrink or grow unnoticed.
+expect_eq "C6 residual — a mistyped flag AFTER the target: the observation refuses it" \
+  "refused" "$(g_observation worker --progres "$GPROG")"
+expect_eq "C6 residual — and the recorder records the target anyway" \
+  "aworker-7777777777777777" \
+  "$(g_recorder "bash ~/.claude/hooks/stop-check.sh worker --progres $GPROG")"
+expect_eq "C6 residual — the =-joined spelling: the observation refuses it" \
+  "refused" "$(g_observation worker "--progress=$GPROG")"
+expect_eq "C6 residual — and the recorder records the target for that one too" \
+  "aworker-7777777777777777" \
+  "$(g_recorder "bash ~/.claude/hooks/stop-check.sh worker --progress=$GPROG")"
+
 # The derived FILE FACTS agree too: what the observation shows the reader as the
 # working log's size is what the recorder writes down as the activity level. Two
 # computations of one truth, previously untested together (D2).
