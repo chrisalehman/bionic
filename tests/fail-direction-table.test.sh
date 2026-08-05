@@ -98,7 +98,16 @@ payload() {  # <tool_name> <sid|-> <transcript|-> <cwd> <task_id-or-command|->
   local tool="$1" sid="$2" tr="$3" cwd="$4" arg="$5"
   local input='{}'
   case "$tool" in
-    Agent)    input=$(jq -n --arg d "a dispatch" '{description:$d, subagent_type:"implementor"}') ;;
+    # The brief carries its labeled contract fields (slice 4/3): the start gate
+    # now journals every launch to the session roster and warns on stderr when a
+    # brief names none of them. The `start|attested` row below is THE POSITIVE
+    # PAIR — an ordinary, well-formed dispatch — and its §7 direction is
+    # "pass in silence"; a fieldless brief is a malformed dispatch, whose warning
+    # is a different claim, driven in hooks/dispatch-preflight.test.sh S10c.
+    Agent)    input=$(jq -n --arg d "a dispatch" --arg p 'Expected artifact: .bionic/docs/record/w99.txt
+Expected duration: ~25 minutes.
+Progress artifact: .bionic/tmp/w99.progress' \
+                '{description:$d, subagent_type:"implementor", name:"w99-impl", prompt:$p}') ;;
     TaskStop) input=$(jq -n --arg k "$arg" '{task_id:$k}') ;;
     Bash)     input=$(jq -n --arg c "$arg" '{command:$c}') ;;
     *)        input=$(jq -n '{file_path:"/tmp/x"}') ;;
