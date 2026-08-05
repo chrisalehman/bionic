@@ -102,6 +102,21 @@ echo "=== Section 5: One pointer line to the governing design, no restatement ==
 expect_pin_in_file "pointer line names the design doc path" "design/orchestrator-subagent-coordination.md" "$SKILL"
 
 echo ""
+echo "=== Section 5b: The reporting contract (§Dispatch rendering, epic-15 w2 slice 4/2) ==="
+expect_pin_in_file "reporting contract: heading" "**The reporting contract.**" "$SKILL"
+expect_pin_in_file "reporting contract: core sentence" \
+  "carries the command that proves it and that command's output, or the explicit label" "$SKILL"
+expect_pin_in_file "reporting contract: unverified obligation" \
+  "An \`unverified\` claim obligates the orchestrator to re-check before acting" "$SKILL"
+expect_pin_in_file "reporting contract: no-proof-no-label is a violation" \
+  "a claim with neither proof nor label is a contract violation" "$SKILL"
+
+echo ""
+echo "=== Section 5c: Auditor mandate — reporting-contract duty (epic-15 w2 slice 4/2) ==="
+expect_pin_in_file "auditor mandate: reporting-contract duty addition" \
+  "Hold every report to the reporting contract: a factual claim carrying neither its proving command with output nor the label \"unverified\" is itself a finding." "$SKILL"
+
+echo ""
 echo "=== Section 6: superseded generic non-response text is gone ==="
 # Pre-wave text handled a "wedged agent" uniformly (kill-and-redispatch) with
 # no reader/writer distinction — exactly what the ratified non-response
