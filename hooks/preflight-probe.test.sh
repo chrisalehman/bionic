@@ -39,6 +39,9 @@ SESSION_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 # verbatim session_id exists. Only "a different, well-formed session id" is load-bearing
 # here; the digits are arbitrary.
 SESSION_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
+# fixture-fidelity: SHAPE-ONLY, slice 4/2. A third well-formed session id, used only as a
+# "dead" session for pruning fixtures — no transcript is ever created for it.
+SESSION_C="9a2e5d18-4471-4c9e-9b3a-7412fa0e5c33"
 
 # ---------- assertion helpers ----------
 
@@ -88,7 +91,13 @@ mk_sandbox() {  # echoes the sandbox root
   printf '%s' "$d"
 }
 
-STATE_REL=".bionic/tmp/preflight.state"
+# slice 4/2 (D-5): the attestation filename is per-session, not a shared single slot.
+# STATE_REL is kept as the SESSION_A-keyed path — the session run_probe() defaults to —
+# since nearly every existing case in this file operates as session A; STATE_REL_B and
+# LEGACY_STATE_REL exist for the cases that need a second or a pre-wave-03 filename.
+STATE_REL=".bionic/tmp/preflight-${SESSION_A}.state"
+STATE_REL_B=".bionic/tmp/preflight-${SESSION_B}.state"
+LEGACY_STATE_REL=".bionic/tmp/preflight.state"
 
 run_probe() {  # <sandbox> [KEY=VAL ...] -> echoes exit code; stdout/stderr in $OUT/$ERR
   local sbx="$1"; shift
@@ -117,7 +126,7 @@ expect_true "the probe script exists" [ -f "$PROBE" ]
 SBX="$(mk_sandbox)"
 rc="$(run_probe "$SBX")"
 expect_eq "clean environment exits 0" "0" "$rc"
-expect_true "attestation written at .bionic/tmp/preflight.state" [ -f "$SBX/repo/$STATE_REL" ]
+expect_true "attestation written at the per-session path" [ -f "$SBX/repo/$STATE_REL" ]
 expect_true "attestation is a regular file, not a symlink" [ ! -L "$SBX/repo/$STATE_REL" ]
 expect_match "attestation carries a version line (A6)" '^version=[0-9]+$' "$SBX/repo/$STATE_REL"
 expect_match "attestation is keyed to this session" "^session_id=$SESSION_A\$" "$SBX/repo/$STATE_REL"
@@ -132,7 +141,7 @@ _badlines="$(grep -vE '^(#|[a-z][a-z0-9_]*=)' "$SBX/repo/$STATE_REL" | grep -v '
 expect_eq "every attestation line is a comment or key=value (A6)" "" "$_badlines"
 
 # no temp debris left behind
-_debris="$(find "$SBX/repo/.bionic/tmp" -name 'preflight.state.*' 2>/dev/null | head -3)"
+_debris="$(find "$SBX/repo/.bionic/tmp" -name 'preflight-*.state.*' 2>/dev/null | head -3)"
 expect_eq "no temp files left in the state dir" "" "$_debris"
 _lock="$(find "$SBX/repo/.bionic/tmp" -name '.preflight.lock' 2>/dev/null | head -1)"
 expect_eq "state lock released on the success path" "" "$_lock"
@@ -148,15 +157,18 @@ rc="$(run_probe "$SBX3" PATH="$(stub_dir "$SBX3" 0)")"
 expect_eq "credential satisfied by the keychain source alone" "0" "$rc"
 
 # re-run over an attestation carrying unknown extra fields in a different order (A6
-# forward-compatibility: the record must not be parsed positionally)
+# forward-compatibility: the record must not be parsed positionally). slice 4/2: the
+# stale record sits at THIS session's own per-session path — a foreign session's record
+# at MY filename is not a reachable case under D-5 (it would live at ITS OWN filename;
+# see "D-5 per-session attestation" section below for that scenario).
 SBX4="$(mk_sandbox)"
 mkdir -p "$SBX4/repo/.bionic/tmp"
-printf 'unknown_future_field=x\nsession_id=%s\nversion=1\nrepo=/somewhere\n' "$SESSION_B" \
+printf 'unknown_future_field=x\nsession_id=%s\nversion=1\nrepo=/somewhere\n' "$SESSION_A" \
   > "$SBX4/repo/$STATE_REL"
 rc="$(run_probe "$SBX4")"
 expect_eq "re-run over a reordered/extended prior record exits 0" "0" "$rc"
-expect_match "re-run replaces the foreign record with this session's" "^session_id=$SESSION_A\$" "$SBX4/repo/$STATE_REL"
-expect_nomatch "re-run does not leave the foreign session key behind" "^session_id=$SESSION_B\$" "$SBX4/repo/$STATE_REL"
+expect_match "re-run refreshes this session's record" "^session_id=$SESSION_A\$" "$SBX4/repo/$STATE_REL"
+expect_nomatch "re-run discards the stale placeholder repo field" "^repo=/somewhere\$" "$SBX4/repo/$STATE_REL"
 
 # ============================================================
 section "S2 — blocking failure writes nothing and destroys the prior stamp (AC-1)"
@@ -315,7 +327,12 @@ expect_eq "a held lock yields exit 4, not a racing write" "4" "$rc"
 expect_false "a held lock leaves no attestation behind" [ -e "$SBX/repo/$STATE_REL" ]
 rmdir "$SBX/repo/.bionic/tmp/.preflight.lock"
 
-# two writers in parallel: the survivor's record must be whole, never interleaved
+# two DIFFERENT sessions writing in parallel (slice 4/2, D-5): each writes its OWN
+# per-session file, so both survive concurrently — this is the collision the shared
+# single-slot file used to produce (one writer's record clobbering the other's) and
+# per-session filenames structurally remove. A same-session race (a session probing
+# twice at once) still serializes through the shared lock and is covered by the
+# single-writer interleaving pin below.
 SBX="$(mk_sandbox)"
 ( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY HOME="$SBX/home" CLAUDE_CONFIG_DIR="$SBX/config" \
     CLAUDE_CODE_SESSION_ID="$SESSION_A" bash "$PROBE" ) >/dev/null 2>&1 &
@@ -324,10 +341,17 @@ p1=$!
     CLAUDE_CODE_SESSION_ID="$SESSION_B" bash "$PROBE" ) >/dev/null 2>&1 &
 p2=$!
 wait $p1; wait $p2
-expect_true "a record exists after two parallel writers" [ -f "$SBX/repo/$STATE_REL" ]
-expect_eq "exactly one session line survives (no interleaving)" "1" "$(grep -c '^session_id=' "$SBX/repo/$STATE_REL")"
-expect_eq "exactly one version line survives (no interleaving)" "1" "$(grep -c '^version=' "$SBX/repo/$STATE_REL")"
-_debris="$(find "$SBX/repo/.bionic/tmp" -name 'preflight.state.*' 2>/dev/null | head -3)"
+expect_true "session A's per-session record exists after two parallel writers (AC-2)" [ -f "$SBX/repo/$STATE_REL" ]
+expect_true "session B's per-session record ALSO exists concurrently (AC-2)" [ -f "$SBX/repo/$STATE_REL_B" ]
+expect_eq "session A's record is keyed to session A, not clobbered by B" "$SESSION_A" \
+  "$(grep -m1 '^session_id=' "$SBX/repo/$STATE_REL" | cut -d= -f2-)"
+expect_eq "session B's record is keyed to session B, not clobbered by A" "$SESSION_B" \
+  "$(grep -m1 '^session_id=' "$SBX/repo/$STATE_REL_B" | cut -d= -f2-)"
+expect_eq "session A's record has no interleaving (exactly one session_id line)" "1" \
+  "$(grep -c '^session_id=' "$SBX/repo/$STATE_REL")"
+expect_eq "session B's record has no interleaving (exactly one session_id line)" "1" \
+  "$(grep -c '^session_id=' "$SBX/repo/$STATE_REL_B")"
+_debris="$(find "$SBX/repo/.bionic/tmp" -name 'preflight-*.state.*' 2>/dev/null | head -3)"
 expect_eq "parallel writers leave no temp debris" "" "$_debris"
 
 # ============================================================
@@ -369,6 +393,48 @@ rc="$(run_probe "$SBX")"
 expect_nomatch "own session never warned about" "WARN.*$SESSION_A" "$OUT"
 
 # ============================================================
+section "S6b — D-5: legacy single-slot pruning, dead-session pruning (slice 4/2)"
+# ============================================================
+
+# (iii) the legacy single-slot file is pruned on every run and never honored — this
+# script no longer reads OR writes it, so its mere presence must not survive a run,
+# whatever session it claims to belong to.
+SBX="$(mk_sandbox)"
+mkdir -p "$SBX/repo/.bionic/tmp"
+printf '# bionic environment attestation — machine-local, safe to delete\nversion=1\nkind=preflight-attestation\nsession_id=%s\nrepo=/somewhere\n' "$SESSION_A" \
+  > "$SBX/repo/$LEGACY_STATE_REL"
+rc="$(run_probe "$SBX")"
+expect_eq "a run over a legacy single-slot file still exits 0" "0" "$rc"
+expect_false "the legacy single-slot file is pruned, not honored" [ -e "$SBX/repo/$LEGACY_STATE_REL" ]
+expect_true "this session's own per-session record was written instead" [ -f "$SBX/repo/$STATE_REL" ]
+
+# (iv) a per-session attestation whose session has no live working log anywhere under
+# CLAUDE_CONFIG_DIR/projects (no transcript file for it at all) is DEAD and pruned.
+SBX="$(mk_sandbox)"
+mkdir -p "$SBX/repo/.bionic/tmp"
+printf 'version=1\nkind=preflight-attestation\nsession_id=%s\nrepo=/dead\n' "$SESSION_C" \
+  > "$SBX/repo/.bionic/tmp/preflight-$SESSION_C.state"
+rc="$(run_probe "$SBX")"
+expect_eq "a run over a dead-session leftover still exits 0" "0" "$rc"
+expect_false "the dead session's attestation (no transcript anywhere) is pruned" \
+  [ -e "$SBX/repo/.bionic/tmp/preflight-$SESSION_C.state" ]
+
+# (iv, other half) a LIVE foreign session's attestation — its transcript exists — is
+# NEVER pruned by another session's run. This is the whole point of D-5: two sessions
+# hold valid attestations concurrently.
+SBX="$(mk_sandbox)"
+: > "$SBX/config/projects/$PROJSLUG/$SESSION_B.jsonl"
+mkdir -p "$SBX/repo/.bionic/tmp"
+printf 'version=1\nkind=preflight-attestation\nsession_id=%s\nrepo=/somewhere\n' "$SESSION_B" \
+  > "$SBX/repo/$STATE_REL_B"
+rc="$(run_probe "$SBX")"
+expect_eq "a run alongside a live foreign session's attestation exits 0" "0" "$rc"
+expect_true "the live foreign session's attestation SURVIVES untouched (AC-2)" [ -f "$SBX/repo/$STATE_REL_B" ]
+expect_eq "the live foreign session's record is unchanged, still keyed to session B" "$SESSION_B" \
+  "$(grep -m1 '^session_id=' "$SBX/repo/$STATE_REL_B" | cut -d= -f2-)"
+expect_true "this session's own record was ALSO written (both valid concurrently)" [ -f "$SBX/repo/$STATE_REL" ]
+
+# ============================================================
 section "S7 — mutation-and-restore proofs (design §9, checklist A5/A2)"
 # ============================================================
 
@@ -397,7 +463,7 @@ else
             bash "$MUT" ) >"$OUT" 2>"$ERR"; echo $?)"
   expect_eq "write failure exits 2, never 1 (A5 doc/behavior split)" "2" "$rc"
   expect_false "write failure leaves NO stale stamp (A5)" [ -e "$SBX/repo/$STATE_REL" ]
-  _debris="$(find "$SBX/repo/.bionic/tmp" -name 'preflight.state.*' 2>/dev/null | head -3)"
+  _debris="$(find "$SBX/repo/.bionic/tmp" -name 'preflight-*.state.*' 2>/dev/null | head -3)"
   expect_eq "write failure leaves no temp debris" "" "$_debris"
   _lock="$(find "$SBX/repo/.bionic/tmp" -name '.preflight.lock' 2>/dev/null | head -1)"
   expect_eq "write failure releases the state lock" "" "$_lock"
@@ -419,7 +485,7 @@ else
   expect_true "temp name captured on run 1" [ -n "$n1" ]
   expect_true "temp name captured on run 2" [ -n "$n2" ]
   expect_false "two runs produce different temp names (AC-8)" [ "$n1" = "$n2" ]
-  if printf '%s' "$n1" | grep -qE 'preflight\.state\.[A-Za-z0-9]{6}$'; then
+  if printf '%s' "$n1" | grep -qE "preflight-${SESSION_A}\\.state\\.[A-Za-z0-9]{6}\$"; then
     ok "temp name carries a 6-character random suffix"
   else bad "temp name carries a 6-character random suffix" "got [$n1]"; fi
 fi
