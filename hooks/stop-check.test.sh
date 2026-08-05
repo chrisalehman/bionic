@@ -380,6 +380,55 @@ expect_matches "a deliverable named alongside --progress is still reported" \
 expect_absent "the flag itself is never reported as a deliverable" "  --progress —" "$OUT6_BOTH"
 expect_absent "the flag's value is never reported as a deliverable" "w6.progress — " "$OUT6_BOTH"
 
+# (f) TARGET FIRST — the grammar is the one the RECORDER can parse.
+#
+# This command's run is observed by hooks/stop-guard.sh's Bash arm, which
+# re-parses the same command line to decide WHICH agent was examined. That
+# recorder skips leading `-*` tokens one at a time and takes the first non-flag
+# token; it does not know that `--progress` consumes the token after it. So a
+# leading `--progress <path> <agent>` makes the two halves disagree about the
+# target — the operator looks at <agent> while the record says <path> — and a
+# record naming an agent nobody examined is the wall opening on a look that was
+# never taken (Step-6 review F-1, proven with a two-agent fixture).
+#
+# The producer is therefore narrowed to exactly what the recorder already reads:
+# the target is the FIRST argument, `--progress <path>` may follow it, and any
+# other `-`-leading token anywhere is a usage error rather than a silent
+# deliverable. That last part is also F-2: `--progres` (one `s`) used to be
+# reported as an ABSENT deliverable while the reader believed they had asked for
+# a progress channel.
+
+OUT6_LEAD=$(run_check "$H6" "$R6" --progress "$PROG" "long-runner"); ST=$?
+expect_status "--progress BEFORE the target exits 1" 1 "$ST"
+expect_contains "--progress before the target prints usage" "Usage" "$OUT6_LEAD"
+expect_absent "--progress before the target prints no evidence tier" "OBSERVATION" "$OUT6_LEAD"
+
+# The usage error is an error: nothing on stdout, everything on stderr, so a
+# caller reading the observation's output gets no half-formed tier.
+OUT6_LEAD_STDOUT=$( cd "$R6" && HOME="$H6" CLAUDE_CONFIG_DIR="$H6/.claude" \
+  bash "$CHECK" --progress "$PROG" "long-runner" 2>/dev/null )
+expect_equal "a usage error writes nothing to stdout" "" "$OUT6_LEAD_STDOUT"
+
+OUT6_TYPO=$(run_check "$H6" "$R6" "long-runner" --progres "$PROG"); ST=$?
+expect_status "a mistyped flag exits 1 instead of becoming a deliverable" 1 "$ST"
+expect_contains "a mistyped flag prints usage" "Usage" "$OUT6_TYPO"
+expect_absent "a mistyped flag is never reported as a deliverable" "--progres —" "$OUT6_TYPO"
+
+OUT6_EQ=$(run_check "$H6" "$R6" "long-runner" "--progress=$PROG"); ST=$?
+expect_status "--progress=<path> exits 1 (one spelling, the one the recorder reads)" 1 "$ST"
+expect_contains "--progress=<path> prints usage" "Usage" "$OUT6_EQ"
+
+OUT6_HELP=$(run_check "$H6" "$R6" --help); ST=$?
+expect_status "--help exits 1" 1 "$ST"
+expect_contains "--help reaches usage rather than target resolution" "Usage" "$OUT6_HELP"
+expect_absent "--help is never treated as an agent name" "unresolved" "$OUT6_HELP"
+
+# Position is not the point — an unknown flag is a usage error wherever it sits,
+# including after a well-formed --progress pair.
+OUT6_TRAIL=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG" -x); ST=$?
+expect_status "an unknown flag after a valid --progress pair exits 1" 1 "$ST"
+expect_contains "an unknown flag after a valid --progress pair prints usage" "Usage" "$OUT6_TRAIL"
+
 # ============================================================
 echo ""
 echo "──────────────────────────────────────────────"
