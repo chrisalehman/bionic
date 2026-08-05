@@ -70,6 +70,16 @@ expect_pin_in_file "stopping standard: D-1 freshness rule cited" "Freshness is t
 expect_pin_in_file "stopping standard: D-1 stale-by-definition path" "anything written since is stale by definition" "$SKILL"
 expect_pin_in_file "stopping standard: D-1 dormant-however-old path" "dormancy since the observation is valid however old" "$SKILL"
 expect_pin_in_file "stopping standard: D-2 one-observation-one-stop" "One observation discharges exactly one stop (D-2)" "$SKILL"
+# The ownership table's third row (spec.md:120) names this rendering surface as
+# the SKILL.md half of the progress-observation pair, and it did not exist: the
+# field was declared at dispatch, hooks/stop-check.sh supported the flag, and no
+# normative text connected the two — so an orchestrator following the stopping
+# standard literally took exactly the observation that was insufficient before
+# this wave (Step-6 critic, issue C).
+expect_pin_in_file "stopping standard: a contracted progress path is named in the observation" \
+  "the observation of that target names that path" "$SKILL"
+expect_pin_in_file "stopping standard: the D-6 channel is what it names" \
+  "the D-6 channel" "$SKILL"
 expect_pin_in_file "stopping standard: never on idle notification" "Never on an idle notification" "$SKILL"
 expect_pin_in_file "stopping standard: never on elapsed silence" "never on elapsed silence alone" "$SKILL"
 
@@ -89,17 +99,55 @@ echo ""
 echo "=== Section 4b: verification means the artifact, not the report (R1) ==="
 # The pre-wave paragraph this diff replaced carried a standing rule the three
 # ratified spans do not recover: "verify the named artifact exists before
-# believing the report" (Step-6 readability review R1). The reporting contract
-# is wave-2 scope, so nothing restores it until then — it was live guidance
-# before this diff and would be absent for a whole wave. Recovered as one clause
+# believing the report" (Step-6 readability review R1). Recovered as one clause
 # in the ledger paragraph, which is the smallest form that does not reopen the
-# ratified spans-only decision.
+# ratified spans-only decision. (Wave 2 has since landed the full reporting
+# contract — §5b below pins it — so this clause is no longer the only rendering;
+# it stays because the ledger paragraph is where the verify-before-believing
+# duty attaches to the dispatch row.)
 expect_pin_in_file "ledger paragraph: verify the artifact, not the report" \
   "verify that the named artifact exists before believing the report" "$SKILL"
 
 echo ""
 echo "=== Section 5: One pointer line to the governing design, no restatement ==="
 expect_pin_in_file "pointer line names the design doc path" "design/orchestrator-subagent-coordination.md" "$SKILL"
+
+echo ""
+echo "=== Section 5b: The reporting contract (§Dispatch rendering, epic-15 w2 slice 4/2) ==="
+expect_pin_in_file "reporting contract: heading" "**The reporting contract.**" "$SKILL"
+expect_pin_in_file "reporting contract: core sentence" \
+  "carries the command that proves it and that command's output, or the explicit label" "$SKILL"
+expect_pin_in_file "reporting contract: unverified obligation" \
+  "An \`unverified\` claim obligates the orchestrator to re-check before acting" "$SKILL"
+expect_pin_in_file "reporting contract: no-proof-no-label is a violation" \
+  "a claim with neither proof nor label is a contract violation" "$SKILL"
+
+echo ""
+echo "=== Section 5c: Auditor mandate — reporting-contract duty (epic-15 w2 slice 4/2) ==="
+expect_pin_in_file "auditor mandate: reporting-contract duty addition" \
+  "Hold every report to the reporting contract: a factual claim carrying neither its proving command with output nor the label \"unverified\" is itself a finding." "$SKILL"
+
+echo ""
+echo "=== Section 5d: Contract fields + overdue-as-trigger span (epic-15 w2 slice 4/3) ==="
+expect_pin_in_file "contract-fields sentence: the count matches the enumeration" \
+  "carries the seven things the role file cannot know" "$SKILL"
+expect_pin_in_file "contract-fields sentence: expected duration is one of them" \
+  "exit condition, an expected duration, and" "$SKILL"
+expect_pin_in_file "contract-fields sentence: progress-artifact path for D-6" \
+  "a progress-artifact path the task appends to as it" "$SKILL"
+# The sentence is the SSoT for the brief contract, and it counted five while
+# enumerating seven — "only" made the two added fields read as elaboration on the
+# five rather than as fields of their own (Step-6 critic, issue D).
+expect_absent_in_file "the falsified 'only the five things' count is gone" \
+  "only the five things" "$SKILL"
+expect_pin_in_file "overdue span: heading" \
+  "Overdue is a trigger, never evidence:" "$SKILL"
+expect_pin_in_file "overdue span: routes mechanically" \
+  "routes into this procedure mechanically" "$SKILL"
+expect_pin_in_file "overdue span: never justifies a stop by itself" \
+  "never justifies a stop by itself" "$SKILL"
+expect_pin_in_file "overdue span: eventual stop still needs fresh observation" \
+  "the eventual stop still requires its own fresh observation" "$SKILL"
 
 echo ""
 echo "=== Section 6: superseded generic non-response text is gone ==="

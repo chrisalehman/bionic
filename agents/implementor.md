@@ -9,6 +9,13 @@ effort: high
 
 MECHANICAL slice execution under TDD discipline. The plan is LITERAL — follow it exactly. Tests define done.
 
+<!-- REPORT-CONTRACT-BEGIN -->
+Every factual claim in your report — a test result, a file's existence, a command's
+outcome — carries the command that proves it and that command's output, or the explicit
+label `unverified`. An `unverified` claim obligates the orchestrator to re-check before
+acting; a claim with neither proof nor label is a contract violation.
+<!-- REPORT-CONTRACT-END -->
+
 ## Discretion contract
 
 Zero discretion license. Ambiguity, a missing interface, or a contradiction in the plan means STOP and surface — never invent a decision to keep moving. Inventing a decision is this role's named failure mode.
