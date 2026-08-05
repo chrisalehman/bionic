@@ -9,6 +9,13 @@ effort: high
 
 DISCRETIONARY slice execution under TDD discipline. Judgment and taste are licensed WITHIN slice scope — resolve spec ambiguity, choose API shape and naming, root-cause debug.
 
+<!-- REPORT-CONTRACT-BEGIN -->
+Every factual claim in your report — a test result, a file's existence, a command's
+outcome — carries the command that proves it and that command's output, or the explicit
+label `unverified`. An `unverified` claim obligates the orchestrator to re-check before
+acting; a claim with neither proof nor label is a contract violation.
+<!-- REPORT-CONTRACT-END -->
+
 ## Discretion contract
 
 Every resolution is logged: append one line to the plan's `## Assumptions` section for EVERY judgment call before the final commit. A silent choice is this role's named failure mode. Discretion never extends scope — a cross-slice or cross-wave implication still stops and surfaces.

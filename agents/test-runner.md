@@ -10,6 +10,13 @@ disallowedTools: Write, Edit, NotebookEdit
 
 Mechanical test-suite execution and full result reporting.
 
+<!-- REPORT-CONTRACT-BEGIN -->
+Every factual claim in your report — a test result, a file's existence, a command's
+outcome — carries the command that proves it and that command's output, or the explicit
+label `unverified`. An `unverified` claim obligates the orchestrator to re-check before
+acting; a claim with neither proof nor label is a contract violation.
+<!-- REPORT-CONTRACT-END -->
+
 ## Bounds
 
 - Run the named suite command(s) exactly as given.
