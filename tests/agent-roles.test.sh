@@ -278,6 +278,27 @@ else
   fail "meta: SKILL-side axis-block drift NOT detected"
 fi
 
+# ===== Section 7: REPORT-CONTRACT duty block ×6, byte-identical =====
+echo "== Section 7: REPORT-CONTRACT duty block =="
+RC_FILES="auditor critic implementor researcher senior-implementor test-runner"
+for r in $RC_FILES; do
+  if [ -n "$(marker_block "$AGENTS/$r.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END)" ]; then
+    pass "$r.md: REPORT-CONTRACT block present"
+  else
+    fail "$r.md: REPORT-CONTRACT block missing/empty"
+  fi
+done
+
+for r in $RC_FILES; do
+  [ "$r" = "auditor" ] && continue
+  if diff <(marker_block "$AGENTS/auditor.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END) \
+          <(marker_block "$AGENTS/$r.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END) >/dev/null 2>&1; then
+    pass "$r.md: REPORT-CONTRACT byte-identical to auditor.md"
+  else
+    fail "$r.md: REPORT-CONTRACT drifted from auditor.md" "$(diff <(marker_block "$AGENTS/auditor.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END) <(marker_block "$AGENTS/$r.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END))"
+  fi
+done
+
 # ---------- summary ----------
 echo "──────────────────────────────────────────────"
 echo "agent-roles: ${PASS} passed, ${FAIL} failed"
