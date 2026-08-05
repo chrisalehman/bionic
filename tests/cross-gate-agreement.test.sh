@@ -80,6 +80,14 @@ SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
 # verbatim capture), field for field; tool_name/tool_input vary per tool as §2.1
 # and §2.12 establish. Session ids, agent ids and plan text are SYNTHESIZED and
 # declared as such — none is a platform surface.
+#
+# The Agent tool_input carries a name and a contract-bearing brief (slice 4/3):
+# tool_input became load-bearing when the start gate began journalling the launch
+# to the session roster, and a brief with no labeled contract fields is warned
+# about on stderr. This suite's claim is producer/consumer AGREEMENT ON THE
+# ATTESTATION — "passes in silence" below means the attestation raised nothing —
+# so the fixture is the ordinary dispatch, not a malformed one. The warning
+# itself is driven where it belongs, in hooks/dispatch-preflight.test.sh S10c.
 
 mk_agent_payload() {  # <sid> <cwd>
   jq -n --arg s "$1" --arg c "$2" \
@@ -87,7 +95,8 @@ mk_agent_payload() {  # <sid> <cwd>
       prompt_id:"f3cd7d62-305d-47ed-9eaf-46fb12d4f4ed",
       permission_mode:"bypassPermissions", effort:{level:"high"},
       hook_event_name:"PreToolUse", tool_name:"Agent",
-      tool_input:{description:"a dispatch", subagent_type:"implementor"},
+      tool_input:{description:"a dispatch", subagent_type:"implementor", name:"w99-impl",
+                  prompt:"Expected artifact: .bionic/docs/record/w99.txt\nExpected duration: ~25 minutes.\nProgress artifact: .bionic/tmp/w99.progress"},
       tool_use_id:"toolu_018jyjgop7KMxP6yKtoAWWtB"}'
 }
 
