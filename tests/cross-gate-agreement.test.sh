@@ -656,11 +656,9 @@ expect_eq "start gate: a foreign session is refused" "2" "$ST"
 # which is exactly what they were green on before (Step-6 critic, issue 1).
 expect_contains "the observation the record attests to actually resolved the target" \
   "Resolved:      aworker-1111111111111111" "$( cd "$IREPO" && bash "$OBSERVE" worker 2>&1 )"
-# Since slice 4/6 the stop gate refuses a by-name stop of a target THIS session's
-# roster does not record, so an unrostered fixture would refuse for a reason that
-# has nothing to do with the session key this section is about. Both sessions get
-# a row: then the ONLY thing that differs between the two stops below is the
-# session value carried by the record and the payload.
+# Both sessions get a row so that the roster is not what differs between the two
+# stops below: the ONLY thing that differs is the session value carried by the
+# record and the payload, which is what this section is about.
 roster_row "$IREPO" "$SID_A" "worker" "aworker-1111111111111111"
 roster_row "$IREPO" "${SID_A%?}0" "worker" "aworker-1111111111111111"
 run_pair "$IREPO" "$ITR" "$SID_A" worker
@@ -757,9 +755,9 @@ q_gate() {  # <typed> -> permitted|refused   (asked AFTER q_recorder, on its sta
 
 # --- case 1: unique in this session. All three say yes. ---
 plant "$RPROJ/$SID_A/subagents" "asolo-1111111111111111" "solo"
-# …and this session's roster records it, so the gate's answer to the RESOLUTION
-# question is not pre-empted by the foreign-stop rule (slice 4/6). The unrostered
-# case is section E's claim, driven there on an agent of its own.
+# …and this session's roster records it. Since slice 4/9 the row is not what makes
+# it ours — it is filed under this session's own directory — but keeping the row
+# holds this case fixed on the RESOLUTION question the three parties are answering.
 roster_row "$RREPO" "$SID_A" "solo" "asolo-1111111111111111"
 expect_eq "C1 observation resolves a uniquely-named agent" "resolved" "$(q_observation solo)"
 expect_eq "C1 recorder records the same agent" "recorded" "$(q_recorder solo)"
@@ -1066,22 +1064,41 @@ expect_contains "the recorded observation carries deliverable_source=none (no CL
   "deliverable_source=none" "$E_STATE"
 expect_contains "the recorded observation carries progress_source=none" "progress_source=none" "$E_STATE"
 
-# --- an UNROSTERED target under this session's OWN directory: still not OURS
-# (spec ownership table: "unrostered target classifies foreign"), agreement holds.
-# Its own agent, planted here: every other agent in this world is rostered, because
-# since slice 4/6 being unrostered is not a neutral fixture state — it is the case
-# the stop gate refuses by name. ---
+# --- an UNROSTERED target under this session's OWN directory: OURS, because the
+# metadata's own filing is what ownership reads (slice 4/9). Before that fix this
+# classified foreign, of an agent this session had launched — the live defect, and
+# the standing state for everything dispatched before the roster hook shipped. ---
 plant "$RPROJ/$SID_A/subagents" "aloner-9999999999999999" "loner"
 E3_OUT=$( cd "$RREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" loner 2>&1 )
 E3_MLINE=$(printf '%s\n' "$E3_OUT" | grep '^stop-check-observation/')
-expect_contains "an unrostered target under this session's own directory still classifies not-ours" \
-  "classification=foreign-live" "$E3_MLINE"
+expect_contains "an unrostered target under this session's own directory classifies OURS" \
+  "|classification=ours|" "$E3_MLINE"
 
 mk_bash_post "$SID_A" "$RTR" "$RREPO" "bash ~/.claude/hooks/stop-check.sh loner" "$E3_OUT" \
   | bash "$PARTY_ER" >/dev/null 2>&1
 E3_STATE=$(cat "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null)
+expect_contains "the recorder forwards that classification into the record" \
+  "|classification=ours|" "$E3_STATE"
+
+# --- and the not-ours direction, on the shape that really produced it: a target
+# filed under ANOTHER session's directory, carrying a name this session's roster
+# also carries on an UNCONFIRMED row. The row must grant nothing, and whatever the
+# producer decides must reach the record verbatim — this suite's whole subject.
+# Recording it needs a payload whose transcript names that other session, which is
+# the only way the recorder resolves outside this session's own directory. ---
+plant "$RPROJ/$SID_B/subagents" "acorpse-aaaaaaaaaaaaaaaa" "corpse"
+roster_row "$RREPO" "$SID_A" "corpse" "" "" intended
+E5_OUT=$( cd "$RREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" corpse 2>&1 )
+E5_MLINE=$(printf '%s\n' "$E5_OUT" | grep '^stop-check-observation/')
+expect_contains "an unconfirmed row's NAME does not make another session's agent ours" \
+  "|classification=foreign|" "$E5_MLINE"
+expect_absent "…and the retired liveness label is gone from the vocabulary" \
+  "foreign-live" "$E5_MLINE"
+mk_bash_post "$SID_A" "$RPROJ/$SID_B.jsonl" "$RREPO" \
+  "bash ~/.claude/hooks/stop-check.sh corpse" "$E5_OUT" | bash "$PARTY_ER" >/dev/null 2>&1
+E5_STATE=$(cat "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null)
 expect_contains "the recorder forwards a non-ours classification into the record too" \
-  "classification=foreign-live" "$E3_STATE"
+  "|classification=foreign|" "$E5_STATE"
 
 # --- with no own session id at all, the producer says UNKNOWN and the recorder
 # copies that verbatim rather than defaulting to any other label ---

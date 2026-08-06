@@ -272,12 +272,12 @@ STATE_DIR="${PATHS%|*}"; STATE_FILE="${PATHS#*|}"
 # A NAME IS NOT AN IDENTITY. It is chosen by the operator, reused across waves,
 # and written to disk by every session that ever ran here — which is how a dead
 # epic-14 fleet came to answer to the names a live session was still using
-# (the bb20f616 exhibit, continuation.md §carry-overs). The session roster is the
-# identity: rows are appended at launch by hooks/dispatch-preflight.sh and
-# completed at execution confirmation, so "this session launched it" is a fact on
-# disk rather than a memory. A target no row names is NOT OURS whatever directory
-# it sits in (spec ownership table: "unrostered target classifies foreign"), and
-# stopping it by name is refused.
+# (the bb20f616 exhibit, continuation.md §carry-overs). The identity is the
+# metadata's own filing: the platform writes an agent's metadata under the
+# subagents directory of the session that launched it, and nothing else writes
+# there, so "this session launched it" is a fact on disk rather than a memory.
+# A target filed under another session is NOT OURS, and stopping it by name is
+# refused.
 #
 # THE FULL AGENT ID IS THE ESCAPE HATCH, and it is not a loophole: an id is
 # unambiguous by construction, so naming one is a statement about a particular
@@ -286,14 +286,29 @@ STATE_DIR="${PATHS%|*}"; STATE_FILE="${PATHS#*|}"
 # rejected both "warn but allow" and "refuse always" for exactly this pair of
 # reasons. A by-id stop still needs a fresh observation like any other.
 #
-# The roster is read the way hooks/stop-check.sh reads it, deliberately
-# duplicated per TDD §9: by full id first (a `confirmed` row), falling back to
-# the NAME (the row may still be `intended`, mid-dispatch, before any id exists),
-# last row winning for each key. The two copies are driven over one fixture world
-# by tests/cross-gate-agreement.test.sh §F.
+# WHAT IDENTITY IS, corrected in slice 4/9: the metadata's own filing. An agent
+# under <session>/subagents/ was launched by <session>. Slice 4/6 keyed this on
+# ROSTER MEMBERSHIP and live operation broke both arms — unconfirmed rows (every
+# row, until a session restarts after the recorder ships) matched by NAME and
+# handed ownership to another session's corpse, while every agent dispatched
+# before the roster hook shipped had no row and was refused as foreign. The
+# roster keeps the job it can do: it carries the CONTRACT, and a `confirmed` row
+# still establishes ownership BY AGENT ID. It is never a name-oracle again. Read
+# the way hooks/stop-check.sh reads it, deliberately duplicated per TDD §9 and
+# driven over one fixture world by tests/cross-gate-agreement.test.sh §F.
+#
+# WHAT THIS CHECK STILL GUARDS, named honestly because it is narrower than what
+# the roster rule claimed to guard: resolution here is already scoped to
+# ${transcript}/subagents, so a target outside this session's own directory can
+# only resolve when the payload's transcript path and its session key DISAGREE.
+# That disagreement is precisely what a name-keyed rule could not see, and it is
+# the one way the bb20f616 collision reaches this gate rather than the
+# observation (whose scan is project-wide, which is where it did fire).
 AGENT_NAME=$(jq -r '.name // empty' "$META" 2>/dev/null)
+OWNING_SID="${SUBDIR%/subagents}"; OWNING_SID="${OWNING_SID##*/}"
 ROSTER_FILE="$STATE_DIR/roster-${SID}.state"
 ROSTER_ROW=""
+ROSTER_ID_MATCH=""
 if [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
   ROW_BY_ID=""; ROW_BY_NAME=""
   while IFS= read -r rline; do
@@ -304,35 +319,35 @@ if [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
     [ -n "$rid" ] && [ "$rid" = "$AGENT_ID" ] && ROW_BY_ID="$rline"
     [ -n "$rname" ] && [ "$rname" = "$AGENT_NAME" ] && ROW_BY_NAME="$rline"
   done < "$ROSTER_FILE"
+  ROSTER_ID_MATCH="$ROW_BY_ID"
   ROSTER_ROW="${ROW_BY_ID:-$ROW_BY_NAME}"
 fi
 
-if [ -z "$ROSTER_ROW" ]; then
-  # FOREIGN-LIVE or DEAD HISTORY, by the target's OWN session's transcript — the
-  # same existence check hooks/stop-check.sh, hooks/preflight-probe.sh and
+if [ "$OWNING_SID" != "$SID" ] && [ -z "$ROSTER_ID_MATCH" ]; then
+  # FOREIGN or DEAD HISTORY, by the OWNING session's transcript — the same
+  # existence check hooks/stop-check.sh, hooks/preflight-probe.sh and
   # hooks/dispatch-preflight.sh already make, so the operator reads one
-  # vocabulary across all four. The session directory is the resolved match's
-  # own; its transcript is that directory's `.jsonl` sibling.
+  # vocabulary across all four. It answers whether that session's transcript
+  # file still exists, and nothing about whether the agent is running, which is
+  # why neither label says `live` any more (slice 4/9).
   if [ -f "${SUBDIR%/subagents}.jsonl" ]; then
-    CLASSIFICATION="FOREIGN-LIVE"
-    WHOSE="its session is still live, but this session never launched it"
+    CLASSIFICATION="FOREIGN"
+    WHOSE="that session's transcript is still on disk, which says nothing about whether the agent is running"
   else
     CLASSIFICATION="DEAD HISTORY"
-    WHOSE="its session's transcript is gone — this is history's agent, not yours"
+    WHOSE="that session's transcript is gone — this is history's agent, not yours"
   fi
   if [ "${RAW%@*}" != "$AGENT_ID" ]; then
     # The way out is the id, so the id is what the Fix line observes.
     FIX_TARGET="$AGENT_ID"
-    deny "Target '${RAW}' is not in this session's roster: ${CLASSIFICATION}." \
-         "No row in ${ROSTER_FILE##*/} names '${AGENT_NAME:-(unnamed)}' or ${AGENT_ID}, and" \
+    deny "Target '${RAW}' was not launched by this session: ${CLASSIFICATION}." \
+         "Its metadata is filed under session ${OWNING_SID}, not this one (${SID}), and" \
          "${WHOSE}." \
          "A NAME is not an identity — it is reused across waves and written to disk by every" \
          "session that ever ran here, which is how a dead fleet came to answer to live names." \
          "Address it by its FULL AGENT ID instead, which is unambiguous by construction:" \
          "    ${AGENT_ID}" \
-         "(A by-id stop still needs a fresh observation of its own. If this agent IS one of" \
-         "yours, its launch was never journalled — check that the dispatch went through the" \
-         "start gate.)"
+         "(A by-id stop still needs a fresh observation of its own.)"
   fi
 fi
 

@@ -300,14 +300,28 @@ if [ -n "$REPO_ROOT" ] && [ -n "$OWN_SESSION_ID" ]; then
   ROSTER_PATH="$REPO_ROOT/.bionic/tmp/roster-${OWN_SESSION_ID}.state"
 fi
 
-# The resolved target is OURS iff a row in THIS session's own roster names it —
-# by full agent id first (the row is `confirmed`), falling back to NAME (the row
-# may still be `intended`, mid-dispatch). Last row wins for each key, matching
-# the append-only, never-rewritten roster (hooks/dispatch-preflight.sh,
-# hooks/execution-recorder.sh). An unrostered target is never OURS, whatever
-# session it lives under (spec ownership table: "unrostered target classifies
-# foreign").
+# OWNERSHIP IS THE METADATA'S OWN FILING (slice 4/9). An agent whose metadata
+# sits under <session>/subagents/ was launched by <session> — the platform files
+# it there and nothing else writes that directory. Slice 4/5 keyed this on ROSTER
+# MEMBERSHIP instead, and live operation broke both arms of that key:
+#
+#   * The NAME arm handed ownership away. Every row in a session that has not
+#     restarted since the recorder shipped is `status=intended` with an EMPTY
+#     `agent_id=`, so the name arm was the only one live — and a name is not an
+#     identity. A three-day-dead agent of another session, answering to a name
+#     this session's roster happened to carry, classified OURS and was then shown
+#     with THIS session's contracted progress path.
+#   * The absence of a row refused our own agents. Anything dispatched before the
+#     roster hook shipped has no row at all and classified foreign, of an agent
+#     sitting in this session's own subagents directory.
+#
+# So the directory decides, and the roster keeps the job it can actually do: it
+# is the CONTRACT source for a target already established as ours, and a
+# `confirmed` row still establishes ownership BY AGENT ID — an id is unambiguous
+# by construction, and a confirmed row is this session's own record of its own
+# launch. It is never consulted as a name-oracle again.
 ROSTER_ROW=""
+ROSTER_ID_MATCH=""
 if [ -n "$ROSTER_PATH" ] && [ -f "$ROSTER_PATH" ] && [ ! -L "$ROSTER_PATH" ]; then
   ROW_BY_ID=""; ROW_BY_NAME=""
   while IFS= read -r rline; do
@@ -318,17 +332,25 @@ if [ -n "$ROSTER_PATH" ] && [ -f "$ROSTER_PATH" ] && [ ! -L "$ROSTER_PATH" ]; th
     [ -n "$rid" ] && [ "$rid" = "$AGENT_ID" ] && ROW_BY_ID="$rline"
     [ -n "$rname" ] && [ "$rname" = "$AGENT_NAME" ] && ROW_BY_NAME="$rline"
   done < "$ROSTER_PATH"
+  ROSTER_ID_MATCH="$ROW_BY_ID"
   ROSTER_ROW="${ROW_BY_ID:-$ROW_BY_NAME}"
 fi
 
-# Not OURS: FOREIGN-LIVE or DEAD HISTORY, by the target's OWN session's
-# transcript — the exact liveness check hooks/preflight-probe.sh and
-# hooks/dispatch-preflight.sh already use (session_transcript_exists /
-# roster_session_live), duplicated here for the same TDD §9 reason as the
-# file-facts functions above. This is the bb20f616 distinction: metadata on
-# disk answering to a live-looking name, from a session whose own transcript
-# is gone.
-target_session_live() {  # <session id>
+# Not OURS: FOREIGN or DEAD HISTORY, by the owning session's transcript — the
+# same existence check hooks/preflight-probe.sh and hooks/dispatch-preflight.sh
+# already make (session_transcript_exists / roster_session_live), duplicated here
+# for the same TDD §9 reason as the file-facts functions above.
+#
+# WHAT THIS ANSWERS, stated exactly because the old name overstated it: whether
+# the owning session's transcript FILE EXISTS. Transcripts are not deleted when a
+# session ends — measured on this machine, all 57 sessions with subagent metadata
+# under this project satisfy it, including sessions that finished days ago. So it
+# separates "there is still a session on disk accounting for this agent" from the
+# bb20f616 shape, "metadata answering to a live-looking name, from a session whose
+# own transcript is gone". It says nothing whatever about whether the AGENT is
+# running, which is why the label no longer says `live`; the working log's age,
+# printed below, is the only evidence of that this command has.
+owning_session_on_disk() {  # <session id>
   local sid="$1" d
   [ -n "$sid" ] || return 1
   [ -d "$PROJECTS" ] || return 1
@@ -339,12 +361,17 @@ target_session_live() {  # <session id>
 }
 
 CLASSIFICATION="unknown"
+OURS_BECAUSE=""
 if [ -z "$OWN_SESSION_ID" ]; then
   CLASSIFICATION="unknown"
-elif [ -n "$ROSTER_ROW" ]; then
+elif [ "$SESSION_ID" = "$OWN_SESSION_ID" ]; then
   CLASSIFICATION="ours"
-elif target_session_live "$SESSION_ID"; then
-  CLASSIFICATION="foreign-live"
+  OURS_BECAUSE="its metadata is filed under this session's own subagents directory"
+elif [ -n "$ROSTER_ID_MATCH" ]; then
+  CLASSIFICATION="ours"
+  OURS_BECAUSE="this session's roster confirms it by agent id (roster-${OWN_SESSION_ID}.state)"
+elif owning_session_on_disk "$SESSION_ID"; then
+  CLASSIFICATION="foreign"
 else
   CLASSIFICATION="dead-history"
 fi
@@ -408,13 +435,14 @@ echo "               task: ${AGENT_DESC}"
 echo "Session:       ${SESSION_ID}"
 case "$CLASSIFICATION" in
   ours)
-    echo "Classification: OURS — this session's roster records it (roster-${OWN_SESSION_ID}.state)" ;;
-  foreign-live)
-    echo "Classification: FOREIGN-LIVE — owned by session ${SESSION_ID}; its transcript is still live, but this session never launched it." ;;
+    echo "Classification: OURS — ${OURS_BECAUSE}." ;;
+  foreign)
+    echo "Classification: FOREIGN — owned by session ${SESSION_ID}; that session's transcript is still on disk, but this session did not launch it."
+    echo "               (A transcript on disk does not mean the agent is still running — the working log's age below is the only evidence of that.)" ;;
   dead-history)
-    echo "Classification: DEAD HISTORY — owned by session ${SESSION_ID}; its transcript is gone or stale." ;;
+    echo "Classification: DEAD HISTORY — owned by session ${SESSION_ID}; that session's transcript is gone, so nothing on disk still accounts for it." ;;
   unknown)
-    echo "Classification: UNKNOWN — this session's own id is unavailable (CLAUDE_CODE_SESSION_ID unset), so roster membership could not be checked." ;;
+    echo "Classification: UNKNOWN — this session's own id is unavailable (CLAUDE_CODE_SESSION_ID unset), so ownership could not be established." ;;
 esac
 if [ "$CLASSIFICATION" = "ours" ]; then
   echo "Contract (roster):  deliverables=${ROSTER_DELIVERABLE:-(none recorded)}  progress=${ROSTER_PROGRESS:-(none recorded)}"

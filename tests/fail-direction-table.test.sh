@@ -85,17 +85,24 @@ make_world() {
   # from the payload's transcript path, and the OBSERVATION reaches it by
   # slugifying its cwd — since slice 4/4 the observed rows run the real producer,
   # so a fixture only the gate can reach would prove nothing about the pair.
+  # The session directory is named by the SESSION ID, because that is what the
+  # platform does and, since slice 4/9, what ownership reads: an agent under
+  # <session>/subagents/ was launched by <session>. A world whose directory was
+  # named anything else would classify every target foreign, and the rows below
+  # would be answering a question about the roster instead of the one they name.
   local cfg="$base/cfg" slug
   slug=$(printf '%s' "$repo" | sed 's/[^a-zA-Z0-9]/-/g')
-  mkdir -p "$repo/.bionic" "$cfg/projects/$slug/session/subagents"
+  mkdir -p "$repo/.bionic" "$cfg/projects/$slug/$SID_A/subagents" \
+           "$cfg/projects/$slug/$SID_B/subagents"
   git -C "$repo" init -q 2>/dev/null
-  printf '{}\n' > "$cfg/projects/$slug/session.jsonl"
+  printf '{}\n' > "$cfg/projects/$slug/$SID_A.jsonl"
+  printf '{}\n' > "$cfg/projects/$slug/$SID_B.jsonl"
   case "$wave" in
     yes)       write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: 4" ;;
     nocurrent) write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: pending" ;;
     no)        mkdir -p "$repo/.bionic/docs" ;;
   esac
-  printf '%s|%s|%s' "$repo" "$cfg/projects/$slug/session.jsonl" "$cfg/projects/$slug/session/subagents"
+  printf '%s|%s|%s' "$repo" "$cfg/projects/$slug/$SID_A.jsonl" "$cfg/projects/$slug/$SID_A/subagents"
 }
 
 plant_agent() {  # <subagents-dir> <agent-id> <name>
@@ -106,17 +113,16 @@ plant_agent() {  # <subagents-dir> <agent-id> <name>
 }
 
 # The session roster (slice 4/3's writer, row shape field-for-field from
-# hooks/dispatch-preflight.sh). Since slice 4/6 an UNROSTERED target is refused by
-# name, so every world whose row is about some other condition must say that this
-# session launched the agent — otherwise the row below would go green on the
-# foreign-stop rule and prove nothing about the cell it names.
-roster_row() {  # <repo> <sid> <name> <agent-id> [progress]
-  local repo="$1" sid="$2" name="$3" aid="$4" prog="${5:-}"
+# hooks/dispatch-preflight.sh). Since slice 4/9 the roster no longer decides
+# ownership — the session directory does — so a row here carries the CONTRACT and,
+# when it is `confirmed`, reaches a target outside this session's own directory.
+roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status]
+  local repo="$1" sid="$2" name="$3" aid="$4" prog="${5:-}" status="${6:-confirmed}"
   local f="$repo/.bionic/tmp/roster-$sid.state"
   mkdir -p "$repo/.bionic/tmp"
   [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
-  printf 'roster-state/v1|status=confirmed|session=%s|name=%s|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=%s|absent=|tool_use_id=toolu_01FIXTURE\n' \
-    "$sid" "$name" "$aid" "$prog" >> "$f"
+  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=%s|absent=|tool_use_id=toolu_01FIXTURE\n' \
+    "$status" "$sid" "$name" "$aid" "$prog" >> "$f"
   return 0
 }
 
@@ -215,12 +221,16 @@ plant_agent "$F_SUB" "aworker-1111111111111111" "worker"
 roster_row "$F_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 observe "$SID_B" "$F_TR" "$F_REPO" "worker"
 
-# Not ours at all (slice 4/6, AC-6): an agent this session's roster does not
-# record. By NAME it is refused; by FULL AGENT ID it is the documented
-# zombie-predecessor cleanup and passes on its own fresh observation.
-IFS='|' read -r X_REPO X_TR X_SUB <<< "$(make_world unrostered yes)"
-plant_agent "$X_SUB" "abb20f616-7777777777777" "worker"
-observe "$SID_A" "$X_TR" "$X_REPO" "worker"
+# Not ours at all (slice 4/6, AC-6; re-keyed in slice 4/9): an agent filed under
+# ANOTHER session's directory, which this session's roster nonetheless names on an
+# unconfirmed row — the corpse collision that fired in live operation. By NAME it
+# is refused; by FULL AGENT ID it is the documented zombie-predecessor cleanup and
+# passes on its own fresh observation.
+IFS='|' read -r X_REPO X_TR X_SUB <<< "$(make_world foreignowned yes)"
+X_TR_B="${X_TR%/*}/$SID_B.jsonl"
+plant_agent "${X_TR_B%.jsonl}/subagents" "abb20f616-7777777777777" "worker"
+roster_row "$X_REPO" "$SID_A" "worker" "" "" intended
+observe "$SID_A" "$X_TR_B" "$X_REPO" "worker"
 
 # A look taken by somebody else (slice 4/6, D-3): the record is fresh, this
 # session's, and about the right target — and it is not the stopper's own.
@@ -287,11 +297,11 @@ drive() {  # <condition>
     stop:unknown-schema)    p=$(payload TaskStop "$SID_A" "$V_TR" "$V_REPO" worker) ;;
     stop:stale-observation) p=$(payload TaskStop "$SID_A" "$S_TR" "$S_REPO" worker) ;;
     stop:symlinked-state)   p=$(payload TaskStop "$SID_A" "$L_TR" "$L_REPO" worker) ;;
-    stop:unrostered-by-name) p=$(payload TaskStop "$SID_A" "$X_TR" "$X_REPO" worker) ;;
+    stop:foreign-by-name)   p=$(payload TaskStop "$SID_A" "$X_TR_B" "$X_REPO" worker) ;;
     stop:borrowed-look)     p=$(payload TaskStop "$SID_A" "$B_TR" "$B_REPO" worker) ;;
     stop:progress-stale)    p=$(payload TaskStop "$SID_A" "$G_TR" "$G_REPO" worker) ;;
     stop:observed)          p=$(payload TaskStop "$SID_A" "$O_TR" "$O_REPO" worker) ;;
-    stop:unrostered-by-full-id) p=$(payload TaskStop "$SID_A" "$X_TR" "$X_REPO" abb20f616-7777777777777) ;;
+    stop:foreign-by-full-id) p=$(payload TaskStop "$SID_A" "$X_TR_B" "$X_REPO" abb20f616-7777777777777) ;;
     *) echo "unknown condition $1" >&2; return 9 ;;
   esac
   case "$1" in
@@ -334,11 +344,11 @@ stop|foreign-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|unknown-schema|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|stale-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|symlinked-state|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|unrostered-by-name|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|foreign-by-name|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|borrowed-look|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|progress-stale|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|observed|0|silent|Stop gate — the positive pair: a fresh observation permits
-stop|unrostered-by-full-id|0|silent|Stop gate — the positive pair: a fresh observation permits
+stop|foreign-by-full-id|0|silent|Stop gate — the positive pair: a fresh observation permits
 '
 
 echo "=== §7 rows driven as behaviour (AC-10) ==="
