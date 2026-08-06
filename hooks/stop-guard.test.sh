@@ -993,6 +993,41 @@ observe "$SID_A" "$XR_TR_B" "$XR_REPO" "worker"
 run_guard "$(mk_stop_payload "$SID_A" "$XR_TR_B" "$XR_REPO" "worker")"
 expect_status "another session's roster does not make a target ours" 2 "$GUARD_ST"
 
+# C-2 (Step-6 six-axis review). The by-id ownership clause is keyed on a
+# CONFIRMED row, not merely on a non-empty `agent_id=`. The comment beside it
+# always stated the invariant that way; the code checked only non-emptiness and
+# leaned on a property of a DIFFERENT file — hooks/dispatch-preflight.sh emits
+# `agent_id=` empty on every `intended` row — to keep that true. An invariant
+# enforced somewhere else is the shape slice 4/9 existed to remediate, and here
+# it opens the wall: an `intended` row carrying an id is enough to walk the
+# corpse past the foreign rule, and with a fresh record of its own the stop is
+# PERMITTED.
+IFS='|' read -r IR_REPO IR_TR IR_SUB <<< "$(make_world intendedid yes)"
+IR_TR_B="${IR_TR%/*}/$SID_B.jsonl"
+IR_SUB_B="${IR_TR_B%.jsonl}/subagents"
+plant_agent "$IR_SUB_B" "aintended-1919191919191" "stranger"
+roster_row "$IR_REPO" "$SID_A" "some-other-name" "aintended-1919191919191" "" "intended"
+observe "$SID_A" "$IR_TR_B" "$IR_REPO" "aintended-1919191919191"
+run_guard "$(mk_stop_payload "$SID_A" "$IR_TR_B" "$IR_REPO" "stranger")"
+expect_status "an INTENDED row's id does not make a foreign target ours: REFUSED" 2 "$GUARD_ST"
+expect_contains "…and it is the OWNERSHIP refusal, not the missing-observation one" \
+  "filed under session" "$GUARD_ERR"
+expect_absent "…which is what a fresh record of its own would otherwise have spent" \
+  "No observation" "$GUARD_ERR"
+
+# The other half of the same invariant, unchanged: a CONFIRMED row's id still
+# establishes ownership. Slice 4/9 kept that on purpose — an id is unambiguous
+# by construction and a confirmed row is this session's own record of its own
+# launch — so the tightening above must not take it away.
+IFS='|' read -r CR_REPO CR_TR CR_SUB <<< "$(make_world confirmedid yes)"
+CR_TR_B="${CR_TR%/*}/$SID_B.jsonl"
+CR_SUB_B="${CR_TR_B%.jsonl}/subagents"
+plant_agent "$CR_SUB_B" "aconfirmed-2121212121212" "stranger"
+roster_row "$CR_REPO" "$SID_A" "some-other-name" "aconfirmed-2121212121212" "" "confirmed"
+observe "$SID_A" "$CR_TR_B" "$CR_REPO" "aconfirmed-2121212121212"
+run_guard "$(mk_stop_payload "$SID_A" "$CR_TR_B" "$CR_REPO" "stranger")"
+expect_status "a CONFIRMED row's id still establishes ownership: PERMITTED" 0 "$GUARD_ST"
+
 # ============================================================
 echo ""
 echo "──────────────────────────────────────────────"

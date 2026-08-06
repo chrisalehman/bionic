@@ -329,7 +329,16 @@ if [ -n "$ROSTER_PATH" ] && [ -f "$ROSTER_PATH" ] && [ ! -L "$ROSTER_PATH" ]; th
     case "$rline" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
     rid=$(line_field "$rline" agent_id)
     rname=$(line_field "$rline" name)
-    [ -n "$rid" ] && [ "$rid" = "$AGENT_ID" ] && ROW_BY_ID="$rline"
+    # `confirmed`, not merely non-empty: the id on an UNCONFIRMED row is a claim
+    # about a launch that has not been observed to happen. What kept the weaker
+    # test safe was a property of a different file — hooks/dispatch-preflight.sh
+    # emits `agent_id=` empty on every `intended` row — and an invariant enforced
+    # elsewhere is exactly what slice 4/9 was remediating (Step-6 review C-2).
+    # Costs the pre-restart world nothing: its rows carry no id at all, so this
+    # clause never fired for them, and their CONTRACT still comes from the row
+    # by name below.
+    [ -n "$rid" ] && [ "$rid" = "$AGENT_ID" ] \
+      && [ "$(line_field "$rline" status)" = "confirmed" ] && ROW_BY_ID="$rline"
     [ -n "$rname" ] && [ "$rname" = "$AGENT_NAME" ] && ROW_BY_NAME="$rline"
   done < "$ROSTER_PATH"
   ROSTER_ID_MATCH="$ROW_BY_ID"
@@ -382,11 +391,12 @@ fi
 # the paths widens" (slice 4/5 brief). An explicit CLI value always wins; when it
 # differs from what the roster recorded, that is printed, never judged (§4: this
 # command decides nothing).
-ROSTER_DELIVERABLE=""; ROSTER_PROGRESS=""; ROSTER_CLAIMS=""
+ROSTER_DELIVERABLE=""; ROSTER_PROGRESS=""; ROSTER_CLAIMS=""; ROSTER_CADENCE=""
 if [ "$CLASSIFICATION" = "ours" ] && [ -n "$ROSTER_ROW" ]; then
   ROSTER_DELIVERABLE=$(line_field "$ROSTER_ROW" deliverable)
   ROSTER_PROGRESS=$(line_field "$ROSTER_ROW" progress)
   ROSTER_CLAIMS=$(line_field "$ROSTER_ROW" claims)
+  ROSTER_CADENCE=$(line_field "$ROSTER_ROW" cadence)
 fi
 
 ORIG_ARGS_COUNT="$#"
@@ -404,7 +414,16 @@ if [ "$ORIG_ARGS_COUNT" -gt 0 ]; then
   fi
 elif [ -n "$ROSTER_DELIVERABLE" ]; then
   DELIVERABLE_SOURCE="roster"
-  OLDIFS="$IFS"; IFS=','; set -- $ROSTER_DELIVERABLE; IFS="$OLDIFS"
+  # PATHNAME EXPANSION OFF for exactly this split. Setting IFS suppresses word
+  # splitting on other characters and says nothing about globbing, so a roster
+  # value of `docs/*.md` — which a brief can produce, since the lifter accepts
+  # any slash-and-letter token and the writer's sanitizer does not strip `*` —
+  # expanded against whatever happened to be sitting in the OBSERVER'S CWD.
+  # Files nobody contracted for were then reported PRESENT and rode into the
+  # durable record as confirmed deliverables (Step-6 review C-1/S-3). No wall
+  # opened; the human judgment this whole command exists to inform was the thing
+  # being fooled, which is worse to leave standing.
+  OLDIFS="$IFS"; IFS=','; set -f; set -- $ROSTER_DELIVERABLE; set +f; IFS="$OLDIFS"
 fi
 
 PROGRESS_SOURCE="none"
@@ -552,6 +571,15 @@ if [ "$PROGRESS_NAMED" -eq 1 ]; then
   else
     echo "progress: ${PROGRESS_PATH}  ABSENT"
     PROGRESS_STATE="absent"
+  fi
+  # THE DECLARED CADENCE, beside the age it qualifies. The ratified liveness
+  # contract extends the ≥15m rule by one number — "too quiet" means quieter than
+  # the AUTHOR'S OWN declaration, not a fixed clock — so the age above is
+  # unreadable without it. Printed, never compared: this command decides nothing,
+  # and the comparison belongs to whoever is doing the judging (P3's watcher, or
+  # the operator reading this).
+  if [ -n "$ROSTER_CADENCE" ]; then
+    echo "cadence:  ${ROSTER_CADENCE}  (declared in the dispatch contract)"
   fi
 fi
 

@@ -234,12 +234,37 @@ sanitize() {  # <value> <max-chars>
 # Deliverable and progress values are reduced to path-shaped tokens, because
 # their consumers (slices 4/5, 4/6) stat them; a slash-bearing token with no
 # letter is a fraction ("slice 4/3"), not a path.
+#
+# THE LIVENESS FIELDS (`cadence`, `claims`) join the same table, because slice
+# 4/7 shipped them into the same §Dispatch prose the labels above anchor on:
+# "The progress-artifact path carries a `cadence` alongside it" and "A subprocess
+# claim — a process pattern plus its output file — is conditional-required". They
+# were prose-only for one slice — hooks/stop-check.sh read `claims=` off a row no
+# writer could produce, which the Step-6 six-axis review called for what it was
+# (axis-3 FAIL: a shipped reader with no producer, its only test hand-writing an
+# impossible row). Two grammar notes, both forced by that ratified sentence:
+#
+#   * `cadence` may be introduced by whitespace instead of a colon, because the
+#     contract puts it ALONGSIDE the progress path inside one sentence
+#     ("Progress: <path>, cadence ~6m") rather than on a labeled line of its own.
+#     It is the only label with a relaxed separator, and the separator still has
+#     to be there — `cadences` is not a hit.
+#   * the subprocess claim declares two things in one span, and only one of them
+#     has a consumer: the PATTERN, which hooks/stop-check.sh existence-checks.
+#     So the pattern is what the row carries — the backticked or quoted run when
+#     the author marks one, else the text up to the first comma or arrow.
 LEAD_CHARS="(\"[<\`$(printf '\047')"
 TRAIL_CHARS=")\"]>\`,;:!?.$(printf '\047')"
+QUOTE_CHARS="\`\"$(printf '\047')"
 
 lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omitted
-  printf '%s' "$1" | awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" '
-    function addlabel(txt, kind) { NL++; LTXT[NL] = txt; LKIND[NL] = kind }
+  printf '%s' "$1" | awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" '
+    # <sep> is the regex between the label and its value; the default is the
+    # colon every labeled brief field uses.
+    function addlabel(txt, kind, sep) {
+      NL++; LTXT[NL] = txt; LKIND[NL] = kind
+      LSEP[NL] = (sep == "" ? "[ \t]*:" : sep)
+    }
     function trimtok(t,   ch) {
       while (length(t) > 0) { ch = substr(t, 1, 1);         if (index(LEAD,  ch) > 0) t = substr(t, 2);                    else break }
       while (length(t) > 0) { ch = substr(t, length(t), 1); if (index(TRAIL, ch) > 0) t = substr(t, 1, length(t) - 1);     else break }
@@ -253,6 +278,23 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       return 1
     }
     function collapse(s) { gsub(/[ \t\r\n]+/, " ", s); sub(/^ +/, "", s); sub(/ +$/, "", s); return s }
+    # The claimed PROCESS PATTERN out of a subprocess-claim span. Author-marked
+    # first (a backticked or quoted run is unambiguous), then the punctuation the
+    # sentence uses to separate the pattern from its output file.
+    function claimpat(s,   i, q, a, b) {
+      s = collapse(s)
+      for (i = 1; i <= length(QUOTES); i++) {
+        q = substr(QUOTES, i, 1)
+        a = index(s, q)
+        if (a == 0) continue
+        b = index(substr(s, a + 1), q)
+        if (b > 1) return substr(s, a + 1, b - 1)
+      }
+      a = index(s, ",");  if (a > 0) s = substr(s, 1, a - 1)
+      a = index(s, "->"); if (a > 0) s = substr(s, 1, a - 1)
+      a = index(s, "→");  if (a > 0) s = substr(s, 1, a - 1)
+      return collapse(s)
+    }
     function firsthit(kind,   j, best) {
       best = 0
       for (j = 1; j <= nh; j++) if (HK[j] == kind && (best == 0 || HLS[j] < HLS[best])) best = j
@@ -281,6 +323,8 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       NL = 0
       # LONGEST FIRST — see the nesting note above. `-` marks a label that only
       # BOUNDS a span; it is a real brief field, just not one the roster lifts.
+      addlabel("subprocess claims", "claims")
+      addlabel("subprocess claim",  "claims")
       addlabel("expected artifacts", "deliverable")
       addlabel("expected artifact",  "deliverable")
       addlabel("progress artifact",  "progress")
@@ -298,6 +342,8 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       addlabel("artifact",           "deliverable")
       addlabel("progress",           "progress")
       addlabel("duration",           "duration")
+      addlabel("cadence",            "cadence", "([ \t]*:|[ \t])[ \t]*")
+      addlabel("claims",             "claims")
       addlabel("scope",              "-")
       addlabel("model",              "-")
       addlabel("exit",               "-")
@@ -309,7 +355,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
         lab = LTXT[i]; from = 1
         while (from <= length(lc)) {
           rest = substr(lc, from)
-          if (match(rest, "(^|[^a-z])" lab "[ \t]*:") == 0) break
+          if (match(rest, "(^|[^a-z])" lab LSEP[i]) == 0) break
           p = from + RSTART - 1
           vend = p + RLENGTH                                  # first char AFTER the colon
           ls = p
@@ -324,6 +370,8 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       h = firsthit("deliverable"); if (h > 0) { v = paths(spanof(h), 4);      if (v != "") print "deliverable=" v }
       h = firsthit("duration");    if (h > 0) { v = collapse(spanof(h));      if (v != "") print "duration=" v }
       h = firsthit("progress");    if (h > 0) { v = paths(spanof(h), 1);      if (v != "") print "progress=" v }
+      h = firsthit("cadence");     if (h > 0) { v = collapse(spanof(h));      if (v != "") print "cadence=" v }
+      h = firsthit("claims");      if (h > 0) { v = claimpat(spanof(h));      if (v != "") print "claims=" v }
     }
   ' 2>/dev/null
 }
@@ -387,12 +435,21 @@ field_of() {  # <kind>
 C_DELIVERABLE=$(sanitize "$(field_of deliverable)" 300)
 C_DURATION=$(sanitize "$(field_of duration)" 80)
 C_PROGRESS=$(sanitize "$(field_of progress)" 300)
+C_CADENCE=$(sanitize "$(field_of cadence)" 80)
+C_CLAIMS=$(sanitize "$(field_of claims)" 300)
 
 # What is ABSENT is recorded as a field of its own, so a consumer never has to
 # guess whether an empty value means "the brief did not say" or "the brief said
 # nothing". `model` is deliberately not on this list: the Agent tool inherits
 # the orchestrator's model when a dispatch names none, so warning on it would
 # fire on the ordinary case and train the reader past the real findings.
+#
+# NEITHER LIVENESS FIELD IS ON IT EITHER, for the same reason read the other way.
+# The subprocess claim is CONDITIONAL-required — declared iff the task backgrounds
+# a long command — so its absence is the ordinary case and carries no finding.
+# `cadence` is required WITH a progress path, which makes its absence a
+# conditional judgment rather than the flat fact this field records; the roster
+# reports what the brief said and leaves that reading to the watcher (P3).
 ABSENT=""
 add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 [ -n "$AGENT_NAME" ]    || add_absent name
@@ -400,7 +457,7 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 [ -n "$C_DURATION" ]    || add_absent duration
 [ -n "$C_PROGRESS" ]    || add_absent progress
 
-ROW="roster-state/${ROSTER_VERSION}|status=intended|session=${PAYLOAD_SID}|name=${AGENT_NAME}|agent_id=|launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|subagent_type=${SUBAGENT_TYPE}|model=${AGENT_MODEL}|deliverable=${C_DELIVERABLE}|duration=${C_DURATION}|progress=${C_PROGRESS}|absent=${ABSENT}|tool_use_id=${TOOL_USE_ID}"
+ROW="roster-state/${ROSTER_VERSION}|status=intended|session=${PAYLOAD_SID}|name=${AGENT_NAME}|agent_id=|launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|subagent_type=${SUBAGENT_TYPE}|model=${AGENT_MODEL}|deliverable=${C_DELIVERABLE}|duration=${C_DURATION}|progress=${C_PROGRESS}|claims=${C_CLAIMS}|cadence=${C_CADENCE}|absent=${ABSENT}|tool_use_id=${TOOL_USE_ID}"
 
 WROTE=1
 if [ ! -e "$ROSTER_FILE" ]; then
