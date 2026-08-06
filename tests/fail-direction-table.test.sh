@@ -30,6 +30,9 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 # by hand: W1R_PARTY_SG=/tmp/mutant.sh bash tests/fail-direction-table.test.sh
 START_GATE="${W1R_PARTY_DP:-$REPO_ROOT/hooks/dispatch-preflight.sh}"
 STOP_GATE="${W1R_PARTY_SG:-$REPO_ROOT/hooks/stop-guard.sh}"
+# The producer and the writer that stand behind the stop gate's positive pair.
+OBSERVER="$REPO_ROOT/hooks/stop-check.sh"
+RECORDER="${W1R_PARTY_ER:-$REPO_ROOT/hooks/execution-recorder.sh}"
 PROBE="${W1R_PARTY_PROBE:-$REPO_ROOT/hooks/preflight-probe.sh}"
 DESIGN="$REPO_ROOT/design/orchestrator-subagent-coordination.md"
 
@@ -76,15 +79,23 @@ write_plan() {  # <path> <current-line>
 make_world() {
   local name="$1" wave="$2"
   local base="$SANDBOX/w/$name" repo="$SANDBOX/w/$name/repo"
-  mkdir -p "$repo/.bionic" "$base/session/subagents"
+  # The session metadata lives under a per-world CLAUDE_CONFIG_DIR rooted at
+  # `$base/cfg`, in the layout the platform uses:
+  # <config>/projects/<repo-slug>/<session>/subagents. The stop gate reaches it
+  # from the payload's transcript path, and the OBSERVATION reaches it by
+  # slugifying its cwd — since slice 4/4 the observed rows run the real producer,
+  # so a fixture only the gate can reach would prove nothing about the pair.
+  local cfg="$base/cfg" slug
+  slug=$(printf '%s' "$repo" | sed 's/[^a-zA-Z0-9]/-/g')
+  mkdir -p "$repo/.bionic" "$cfg/projects/$slug/session/subagents"
   git -C "$repo" init -q 2>/dev/null
-  printf '{}\n' > "$base/session.jsonl"
+  printf '{}\n' > "$cfg/projects/$slug/session.jsonl"
   case "$wave" in
     yes)       write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: 4" ;;
     nocurrent) write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: pending" ;;
     no)        mkdir -p "$repo/.bionic/docs" ;;
   esac
-  printf '%s|%s|%s' "$repo" "$base/session.jsonl" "$base/session/subagents"
+  printf '%s|%s|%s' "$repo" "$cfg/projects/$slug/session.jsonl" "$cfg/projects/$slug/session/subagents"
 }
 
 plant_agent() {  # <subagents-dir> <agent-id> <name>
@@ -143,13 +154,26 @@ printf '# attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\n' "
   > "$T_REPO/.bionic/tmp/preflight-$SID_A.state"
 
 # An observed active world — the stop gate's positive pair. The observation is
-# RECORDED BY THE RECORDER ARM, never hand-written: the row must be discharged by
-# the real producer→consumer path.
+# RECORDED BY THE REAL WRITER, never hand-written: the row must be discharged by
+# the real producer→recorder→gate path. Since slice 4/4 that writer is
+# hooks/execution-recorder.sh on PostToolUse, and it copies the machine line
+# hooks/stop-check.sh prints — so the producer is genuinely run here.
 IFS='|' read -r O_REPO O_TR O_SUB <<< "$(make_world observed yes)"
 plant_agent "$O_SUB" "aworker-1111111111111111" "worker"
 observe() {  # <sid> <transcript> <repo> <target>
-  payload Bash "$1" "$2" "$3" "bash ~/.claude/hooks/stop-check.sh $4" \
-    | bash "$STOP_GATE" >/dev/null 2>&1
+  local cfg="${2%/projects/*}" out
+  out=$( cd "$3" && CLAUDE_CONFIG_DIR="$cfg" bash "$OBSERVER" "$4" 2>/dev/null )
+  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg o "$out" \
+    '{session_id:$s, transcript_path:$t, cwd:$c,
+      prompt_id:"598cabc5-2776-479c-abcf-52c540a1c60e",
+      permission_mode:"bypassPermissions", effort:{level:"high"},
+      hook_event_name:"PostToolUse", tool_name:"Bash",
+      tool_input:{command:"bash ~/.claude/hooks/stop-check.sh", description:"observe"},
+      tool_response:{stdout:$o, stderr:"", interrupted:false,
+                     isImage:false, noOutputExpected:false},
+      tool_use_id:"toolu_01HQV9JAFdKC15TLMDKt2QgF", duration_ms:117}' \
+    | bash "$RECORDER" >/dev/null 2>&1
+  return 0
 }
 observe "$SID_A" "$O_TR" "$O_REPO" "worker"
 
