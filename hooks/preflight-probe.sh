@@ -75,6 +75,15 @@
 set -u
 
 ATTESTATION_VERSION=1
+# D-3 payload-shape canary (w3 slice 4/4): the same-actor wall in hooks/stop-guard.sh reads
+# observer identity from the undocumented top-level `agent_id` field on subagent-invoked
+# PostToolUse|Bash payloads (validated .bionic/docs/record/w3-slice1-posttooluse-probe.md,
+# CLI 2.1.222, and re-validated .bionic/docs/record/w3-canary-validation.md, CLI 2.1.223). The
+# CLI auto-updates and shape drift on that field would open D-3 silently, so every run compares
+# the pinned validated version against the installed `claude --version` and warns — never
+# blocks, never touches the attestation — on drift. Move this pin only after re-running the
+# 4/1 probe method and confirming the field's shape on the new version.
+PAYLOAD_SHAPE_VALIDATED_CLI="2.1.223"
 STATE_BASENAME_PREFIX="preflight-"
 STATE_BASENAME_SUFFIX=".state"
 LEGACY_STATE_BASENAME="preflight.state"
@@ -303,6 +312,16 @@ EOF
   [ "$OTHER_SESSIONS" -eq 0 ] && say "no other live session detected on this project"
 else
   say "session roster: this session's transcript directory was not found (context only)"
+fi
+
+# D-3 payload-shape canary (w3 slice 4/4): compare the pinned validated CLI version against
+# what's actually installed. Warn only — never blocking, never written into the attestation —
+# because the last-known-good behavior (the discriminator holding) is what the pin records,
+# not a live re-check of the discriminator itself (that needs a full probe run, not a version
+# string compare).
+_installed_cli_version="$(claude --version 2>/dev/null | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+if [ -n "$_installed_cli_version" ] && [ "$_installed_cli_version" != "$PAYLOAD_SHAPE_VALIDATED_CLI" ]; then
+  warn "payload shape (agent_id/D-3 discriminator) unvalidated on $_installed_cli_version; re-run the 4/1 probe method — record/w3-slice1-posttooluse-probe.md — and move the pin"
 fi
 
 # ---------------------------------------------------------------- state mutation

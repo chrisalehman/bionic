@@ -117,6 +117,18 @@ stub_dir() {  # <sandbox> <security-exit-code> -> echoes a PATH prefix with a `s
   printf '%s' "$d:$PATH"
 }
 
+claude_stub_dir() {  # <sandbox> <version> -> echoes a PATH prefix with a `claude` stub
+                      # reporting `--version` as "<version> (Claude Code)"
+  local sbx="$1"; local ver="$2"; local d="$sbx/claudestub"
+  mkdir -p "$d"
+  cat > "$d/claude" <<EOF
+#!/bin/bash
+echo "$ver (Claude Code)"
+EOF
+  chmod +x "$d/claude"
+  printf '%s' "$d:$PATH"
+}
+
 # ============================================================
 section "S1 — positive pair: passing environment writes the attestation (AC-1)"
 # ============================================================
@@ -577,6 +589,73 @@ expect_eq "documented exit codes == reachable exit codes (A5)" "$_doc_codes" "$_
 expect_nomatch "the producer performs no plan-directory walk (A7)" 'docs/plans' "$PROBE"
 
 expect_true "script is bash and runs under set -u" grep -q '^set -u' "$PROBE"
+
+# ============================================================
+section "S9 — payload-shape canary: CLI version pin for the D-3 agent_id discriminator (w3 slice 4/4)"
+# ============================================================
+#
+# The D-3 same-actor wall reads observer identity from the undocumented top-level agent_id
+# field on subagent-invoked PostToolUse|Bash payloads (validated
+# .bionic/docs/record/w3-slice1-posttooluse-probe.md and
+# .bionic/docs/record/w3-canary-validation.md). PAYLOAD_SHAPE_VALIDATED_CLI pins the CLI
+# version that validation was last run against; this probe compares it to the installed
+# `claude --version` and warns — never blocks, never touches the attestation — on drift.
+
+PIN="$(grep -m1 '^PAYLOAD_SHAPE_VALIDATED_CLI=' "$PROBE" | sed -E 's/^PAYLOAD_SHAPE_VALIDATED_CLI="?([^"]*)"?.*/\1/')"
+expect_true "the script pins a validated CLI version" [ -n "$PIN" ]
+
+# matching pin: the installed CLI reports exactly the pinned version -> silent
+SBX="$(mk_sandbox)"
+rc="$(run_probe "$SBX" PATH="$(claude_stub_dir "$SBX" "$PIN")")"
+expect_eq "matching pin still exits 0" "0" "$rc"
+expect_true "matching pin still writes the attestation" [ -f "$SBX/repo/$STATE_REL" ]
+expect_nomatch "matching pin prints no canary warning" 'unvalidated' "$OUT"
+expect_nomatch "matching pin prints no canary warning (stderr)" 'unvalidated' "$ERR"
+
+# mismatched pin: the installed CLI reports a different version -> one warn-only line naming
+# the risk and the fix, exit code and attestation unaffected
+SBX="$(mk_sandbox)"
+rc="$(run_probe "$SBX" PATH="$(claude_stub_dir "$SBX" "0.0.1")")"
+expect_eq "mismatched pin still exits 0 (warn only)" "0" "$rc"
+expect_true "mismatched pin still writes the attestation" [ -f "$SBX/repo/$STATE_REL" ]
+if grep -qE 'WARN.*unvalidated.*0\.0\.1' "$OUT" "$ERR" 2>/dev/null; then
+  ok "mismatched pin warns, naming the installed version"
+else
+  bad "mismatched pin warns, naming the installed version"
+fi
+if grep -qE 'agent_id.*D-3' "$OUT" "$ERR" 2>/dev/null; then
+  ok "mismatched-pin warning names the D-3 risk"
+else
+  bad "mismatched-pin warning names the D-3 risk"
+fi
+if grep -qE 'w3-slice1-posttooluse-probe\.md' "$OUT" "$ERR" 2>/dev/null; then
+  ok "mismatched-pin warning names the fix (re-run the probe method)"
+else
+  bad "mismatched-pin warning names the fix (re-run the probe method)"
+fi
+# exactly one warning line, never more
+_warncount="$(grep -cE 'unvalidated' "$OUT" "$ERR" 2>/dev/null | awk -F: '{s+=$NF} END{print s+0}')"
+expect_eq "mismatched pin prints exactly one warn line" "1" "$_warncount"
+
+# the attestation content itself is unaffected by a mismatched pin (no new field, no change
+# to the fields the start gate depends on)
+expect_match "mismatched-pin attestation is still keyed to this session" "^session_id=$SESSION_A\$" "$SBX/repo/$STATE_REL"
+expect_nomatch "the canary warning is never written INTO the attestation" 'unvalidated' "$SBX/repo/$STATE_REL"
+
+# a blocking failure alongside a mismatched pin still exits non-zero and writes nothing —
+# the canary is warn-only and never promotes or masks a real blocking failure
+SBX="$(mk_sandbox)"; rm -f "$SBX/config/.credentials.json"
+mkdir -p "$SBX/combostub"
+cat > "$SBX/combostub/claude" <<EOF
+#!/bin/bash
+echo "0.0.1 (Claude Code)"
+EOF
+chmod +x "$SBX/combostub/claude"
+printf '#!/bin/bash\nexit 1\n' > "$SBX/combostub/security"
+chmod +x "$SBX/combostub/security"
+rc="$(run_probe "$SBX" PATH="$SBX/combostub:$PATH")"
+expect_eq "mismatched pin does not mask a real blocking failure" "1" "$rc"
+expect_false "mismatched pin does not cause a spurious attestation on blocking failure" [ -e "$SBX/repo/$STATE_REL" ]
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'
