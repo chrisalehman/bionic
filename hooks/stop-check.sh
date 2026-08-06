@@ -13,9 +13,18 @@
 #
 # IT DECIDES NOTHING. No verdict, no recommendation, no stop. The judgment stays
 # with the reader; this command only makes the evidence visible. Its run is
-# observed by hooks/stop-guard.sh's Bash arm, which records that an examination
-# happened and what activity level it saw — so "I looked" becomes a fact rather
-# than a memory (design/orchestrator-subagent-coordination.md §4).
+# observed by hooks/execution-recorder.sh's PostToolUse|Bash arm, which reads the
+# MACHINE LINE this command prints on its success path and turns it into the
+# record a later stop spends — so "I looked" becomes a fact rather than a memory
+# (design/orchestrator-subagent-coordination.md §4).
+#
+# THE MACHINE LINE IS THE ONLY THING THE RECORDER READS (slice 4/4). It is
+# printed on the SUCCESS path and nowhere else: a usage error, an unresolved
+# target and an ambiguous target all exit non-zero having printed no such line,
+# so a run that showed the operator no evidence tier leaves nothing behind that
+# a stop could spend. That is the whole of the C6 closure — the recorder no
+# longer re-parses this command's ARGUMENTS with a second grammar (the F-1
+# divergence class), it reads this command's own OUTPUT.
 #
 # This is a PRODUCER, not a hook — it lives in hooks/ for test-harness pairing
 # only. Producers may think and take seconds; gates may only read (§3.2).
@@ -26,6 +35,11 @@
 set -uo pipefail
 
 MAX_MESSAGE_CHARS=600
+
+# The machine line's schema token. Versioned so the recorder can refuse a shape
+# it does not read rather than guess at it, and greppable as a fixed string so
+# the recorder's hot path is one `grep -F` on every Bash call in the session.
+MACHINE_SCHEMA="stop-check-observation/v1"
 
 usage() {  # [reason]
   [ -n "${1:-}" ] && echo "$1" >&2
@@ -93,6 +107,18 @@ done
 # suite, which drives every copy including this one.
 file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
 file_size()  { stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || echo 0; }
+
+# The machine line is pipe-delimited key=value, like the observation record it
+# becomes and like the roster row (hooks/dispatch-preflight.sh). A `|`, a newline
+# or a control character inside a VALUE would forge a field, and every value here
+# is operator-supplied — the typed target, the deliverable paths, the progress
+# path. They are normalized rather than refused: this command's job is to print
+# evidence, and a target with an odd character in it is still a target the
+# operator asked about.
+mline_value() {  # <value>
+  printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
+    -e 's/^ *//' -e 's/ *$//' | cut -c 1-400
+}
 
 fmt_epoch() {
   date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
@@ -240,6 +266,8 @@ echo ""
 
 # ---------- evidence 1: the working log (§2.2 — unfakeable, written by working) ----------
 echo "Working log:   ${LOG}"
+LOG_MTIME=0
+LOG_SIZE=0
 if [ -f "$LOG" ]; then
   LOG_MTIME=$(file_mtime "$LOG")
   LOG_SIZE=$(file_size "$LOG")
@@ -274,6 +302,12 @@ echo ""
 
 # ---------- evidence 3: the contracted deliverables (§2.2 — meaning from the contract) ----------
 echo "Deliverables:"
+# Each deliverable's state is accumulated for the machine line as
+# `<state>:<path>`, comma-joined — the same comma-joined path list the roster row
+# uses for the same concept (hooks/dispatch-preflight.sh's `deliverable=`), so
+# the two machine artifacts in .bionic/tmp/ render one concept one way.
+DELIV_STATES=""
+add_deliv() { DELIV_STATES="${DELIV_STATES:+$DELIV_STATES,}$1:$(mline_value "$2")"; }
 if [ "$#" -eq 0 ]; then
   echo "  (none named on the command line — pass each contracted path as an argument)"
 else
@@ -283,13 +317,17 @@ else
       DSIZE=$(file_size "$d"); DMTIME=$(file_mtime "$d")
       if [ "$DSIZE" -eq 0 ]; then
         echo "  ${d} — PRESENT but EMPTY, 0 bytes"
+        add_deliv empty "$d"
       else
         echo "  ${d} — PRESENT, ${DSIZE} bytes, last write $(fmt_epoch "$DMTIME") (age $(fmt_age $((NOW - DMTIME))))"
+        add_deliv present "$d"
       fi
     elif [ -d "$d" ]; then
       echo "  ${d} — PRESENT as a directory, $(find "$d" -type f 2>/dev/null | grep -c .) file(s)"
+      add_deliv dir "$d"
     else
       echo "  ${d} — ABSENT"
+      add_deliv absent "$d"
     fi
   done
 fi
@@ -306,6 +344,8 @@ fi
 #
 # Printed only when the contract named a path — the section is additive, and
 # without the flag this command's output is what it always was.
+PROGRESS_STATE="unnamed"
+PROGRESS_MTIME=0
 if [ "$PROGRESS_NAMED" -eq 1 ]; then
   echo ""
   echo "-- progress artifact (D-6) --"
@@ -314,11 +354,44 @@ if [ "$PROGRESS_NAMED" -eq 1 ]; then
     PSIZE=$(file_size "$PROGRESS_PATH")
     NOW=$(date -u +%s)
     echo "progress: ${PROGRESS_PATH}  last-write $(fmt_epoch "$PMTIME") ($(fmt_age $((NOW - PMTIME))) ago)  size ${PSIZE}B"
+    PROGRESS_STATE="present"; PROGRESS_MTIME="$PMTIME"
   else
     echo "progress: ${PROGRESS_PATH}  ABSENT"
+    PROGRESS_STATE="absent"
   fi
 fi
 
 echo ""
 echo "This command decides nothing. It prints evidence; the judgment is yours."
+
+# ---------- the machine line (slice 4/4 — the recorder's ONLY input) ----------
+#
+# Last line of a successful run, and the only line any machine reads. Three
+# properties earn their place:
+#
+#   * it is printed HERE, past every refusal path, so its existence IS the proof
+#     that an observation ran and produced an evidence tier. The recorder is
+#     PostToolUse and reads it out of the tool RESPONSE, so a command the harness
+#     refused to dispatch, a command that exited non-zero, and a command that
+#     merely MENTIONS this script all leave no line and therefore no record —
+#     the "recorded a look but nothing ran" class closed at its root rather than
+#     narrowed (tests/cross-gate-agreement.test.sh §C case 6);
+#   * it carries the RESOLVED identity and the file facts THIS RUN computed, so
+#     the recorder never re-resolves anything. One resolver decides who was
+#     looked at, which is what makes the operator's view and the record the same
+#     fact rather than two computations that must be kept in agreement (F-1);
+#   * `progress_state=unnamed` distinguishes "the contract named no progress
+#     artifact" from "it named one and the artifact is missing" — the D-6
+#     distinction a blank value would erase.
+printf '%s|target=%s|typed=%s|log=%s|mtime=%s|size=%s|deliverables=%s|progress=%s|progress_mtime=%s|progress_state=%s\n' \
+  "$MACHINE_SCHEMA" \
+  "$(mline_value "$AGENT_ID")" \
+  "$(mline_value "$TARGET")" \
+  "$(mline_value "$LOG")" \
+  "$LOG_MTIME" \
+  "$LOG_SIZE" \
+  "$DELIV_STATES" \
+  "$(mline_value "$PROGRESS_PATH")" \
+  "$PROGRESS_MTIME" \
+  "$PROGRESS_STATE"
 exit 0

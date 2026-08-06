@@ -17,9 +17,9 @@
 #
 #   The per-script suites (hooks/{preflight-probe,dispatch-preflight,stop-check,
 #   stop-guard}.test.sh) each drive ONE component against its own contract. Every
-#   one of them is green while three byte-identical copies of active-wave
+#   one of them is green while four byte-identical copies of active-wave
 #   detection drift apart, because no single-component suite ever asks the other
-#   copies the same question. This suite asks all three the SAME question with the
+#   copies the same question. This suite asks all four the SAME question with the
 #   SAME fixture and compares the answers. It adds no per-component assertions.
 #
 # HERMETIC. Throwaway git repos under a mktemp'd sandbox; HOME and
@@ -45,7 +45,7 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 
-# The three parties. Overridable so the suite can be driven against a MUTATED
+# The four parties. Overridable so the suite can be driven against a MUTATED
 # COPY of any one of them without the shipped file ever being modified — that
 # substitution is how §9's mutation-and-restore proof is taken here, and how a
 # reviewer can re-take it by hand:
@@ -53,6 +53,9 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 PARTY_DP="${W1R_PARTY_DP:-$REPO_ROOT/hooks/dispatch-preflight.sh}"
 PARTY_SG="${W1R_PARTY_SG:-$REPO_ROOT/hooks/stop-guard.sh}"
 PARTY_EG="${W1R_PARTY_EG:-$REPO_ROOT/hooks/canonical-sdlc-evidence-gate.sh}"
+# The recorder moved out of the stop gate at slice 4/4: observations are written
+# post-execution by their own script, from the producer's own printed output.
+PARTY_ER="${W1R_PARTY_ER:-$REPO_ROOT/hooks/execution-recorder.sh}"
 
 PROBE="$REPO_ROOT/hooks/preflight-probe.sh"
 OBSERVE="$REPO_ROOT/hooks/stop-check.sh"
@@ -118,6 +121,52 @@ mk_bash_payload() {  # <sid> <transcript> <cwd> <command>
       tool_input:{command:$m}, tool_use_id:"toolu_018jyjgop7KMxP6yKtoAWWtB"}'
 }
 
+# The recorder's event. FAITHFUL to .bionic/docs/record/w3-slice1-posttooluse-probe.md
+# capture A (orchestrator-invoked PostToolUse|Bash), field for field including the
+# tool_response object; capture A carries no top-level agent_id, which is the
+# orchestrator case. The stdout carried here is never synthesized in this suite —
+# it is whatever the real hooks/stop-check.sh printed.
+mk_bash_post() {  # <sid> <transcript> <cwd> <command> <stdout>
+  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg m "$4" --arg o "$5" \
+    '{session_id:$s, transcript_path:$t, cwd:$c,
+      prompt_id:"598cabc5-2776-479c-abcf-52c540a1c60e",
+      permission_mode:"bypassPermissions", effort:{level:"high"},
+      hook_event_name:"PostToolUse", tool_name:"Bash",
+      tool_input:{command:$m, description:"observe"},
+      tool_response:{stdout:$o, stderr:"", interrupted:false,
+                     isImage:false, noOutputExpected:false},
+      tool_use_id:"toolu_01HQV9JAFdKC15TLMDKt2QgF", duration_ms:117}'
+}
+
+# FAITHFUL to the same record's capture E (background dispatch, the mode this
+# repo uses): tool_response carries `agentId`, tool_input carries `name`.
+mk_agent_post() {  # <sid> <transcript> <cwd> <tool_use_id>
+  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg u "$4" \
+    '{session_id:$s, transcript_path:$t, cwd:$c,
+      prompt_id:"33f36a9c-ad3b-4bb4-afbd-325a18e62a9e",
+      permission_mode:"bypassPermissions", effort:{level:"high"},
+      hook_event_name:"PostToolUse", tool_name:"Agent",
+      tool_input:{description:"a dispatch", prompt:"go", subagent_type:"implementor",
+                  run_in_background:true, name:"battery"},
+      tool_response:{isAsync:true, status:"async_launched", agentId:"a26bd30bf8616411b",
+                     description:"a dispatch", resolvedModel:"claude-sonnet-5",
+                     prompt:"go", outputFile:"/tmp/tasks/a26bd30bf8616411b.output",
+                     canReadOutputFile:true},
+      tool_use_id:$u, duration_ms:6}'
+}
+
+# THE PRODUCER→RECORDER PAIR, DRIVEN END TO END. Since slice 4/4 the recorder
+# reads no command line: it copies the machine line the observation printed. So
+# the only honest way to ask "what did the recorder write for this command" is to
+# RUN the observation and hand its real stdout to the real recorder — which is
+# also what makes the two halves one fact rather than two parsers (F-1).
+run_pair() {  # <repo> <transcript> <sid> <args…> -> recorder's exit status; sets PAIR_OUT
+  local repo="$1" tr="$2" sid="$3"; shift 3
+  PAIR_OUT=$( cd "$repo" && bash "$OBSERVE" "$@" 2>/dev/null )
+  mk_bash_post "$sid" "$tr" "$repo" "bash ~/.claude/hooks/stop-check.sh $*" "$PAIR_OUT" \
+    | bash "$PARTY_ER" >/dev/null 2>&1
+}
+
 # ============================================================
 # THE SHARED QUESTION
 # ============================================================
@@ -173,6 +222,25 @@ verdict_sg() {  # <repo> -> yes|no|other:<detail>
     2) echo yes ;;
     *) echo "other:exit-$st" ;;
   esac
+}
+
+# The recorder holds the FOURTH copy of active-wave detection (slice 4/4), and a
+# duplicated wall nothing drives is a wall that diverges. Its observable is the
+# roster: with a wave active it completes an `intended` row on execution
+# confirmation, and outside one it is inert. The row is re-seeded on every call so
+# the answer describes this run and not a previous one.
+verdict_er() {  # <repo> -> yes|no|other:<detail>
+  local repo="$1" out st roster="$repo/.bionic/tmp/roster-$SID_A.state"
+  mkdir -p "$repo/.bionic/tmp"
+  {
+    printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
+    printf 'roster-state/v1|status=intended|session=%s|name=battery|agent_id=|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=|deliverable=|duration=|progress=|absent=|tool_use_id=toolu_BATTERY\n' \
+      "$SID_A"
+  } > "$roster"
+  out=$(mk_agent_post "$SID_A" "$SANDBOX/t.jsonl" "$repo" "toolu_BATTERY" | bash "$PARTY_ER" 2>&1); st=$?
+  if [ "$st" -ne 0 ]; then echo "other:exit-$st"; return; fi
+  if [ -n "$out" ]; then echo "other:output"; return; fi
+  if grep -q 'status=confirmed' "$roster" 2>/dev/null; then echo yes; else echo no; fi
 }
 
 # The evidence gate is the only party that reports the DERIVED VALUE, so its
@@ -346,19 +414,20 @@ EOF
 # run_battery <mode>  — mode=assert emits one assertion per fixture;
 #                       mode=detect returns 1 at the FIRST disagreement.
 run_battery() {
-  local mode="$1" name want cur repo a b c cnorm cval
+  local mode="$1" name want cur repo a b c d cnorm cval
   while IFS='|' read -r name want cur; do
     [ -n "$name" ] || continue
     repo="$SANDBOX/fx/$name/repo"
     a=$(verdict_dp "$repo"); b=$(verdict_sg "$repo"); c=$(verdict_eg "$repo")
+    d=$(verdict_er "$repo")
     cnorm="${c%%:*}"; cval=""
     [ "$cnorm" = "yes" ] && cval="${c#*:}"
     if [ "$mode" = "assert" ]; then
-      if [ "$a" = "$want" ] && [ "$b" = "$want" ] && [ "$cnorm" = "$want" ]; then
-        ok "all three parties agree on '$name': $want"
+      if [ "$a" = "$want" ] && [ "$b" = "$want" ] && [ "$cnorm" = "$want" ] && [ "$d" = "$want" ]; then
+        ok "all four parties agree on '$name': $want"
       else
-        no "all three parties agree on '$name': $want" \
-           "dispatch-preflight=$a stop-guard=$b evidence-gate=$c"
+        no "all four parties agree on '$name': $want" \
+           "dispatch-preflight=$a stop-guard=$b evidence-gate=$c execution-recorder=$d"
       fi
       if [ "$want" = "yes" ]; then
         expect_eq "  and the evidence gate derived current='$cur' for '$name'" "$cur" "$cval"
@@ -366,9 +435,9 @@ run_battery() {
     else
       # Detect mode also compares the DERIVED VALUE, so a mutation that selects a
       # different plan without flipping the predicate is caught too.
-      if [ "$a" != "$want" ] || [ "$b" != "$want" ] || [ "$cnorm" != "$want" ] \
+      if [ "$a" != "$want" ] || [ "$b" != "$want" ] || [ "$cnorm" != "$want" ] || [ "$d" != "$want" ] \
          || { [ "$want" = "yes" ] && [ "$cval" != "$cur" ]; }; then
-        printf 'disagreement on %s: want=%s/%s dp=%s sg=%s eg=%s\n' "$name" "$want" "$cur" "$a" "$b" "$c"
+        printf 'disagreement on %s: want=%s/%s dp=%s sg=%s eg=%s er=%s\n' "$name" "$want" "$cur" "$a" "$b" "$c" "$d"
         return 1
       fi
     fi
@@ -382,7 +451,7 @@ EOF
 echo ""
 echo "=== A1 — N-way agreement on active-wave detection (AC-9, checklist A8/A9) ==="
 # ============================================================
-echo "parties: $(basename "$PARTY_DP") · $(basename "$PARTY_SG") · $(basename "$PARTY_EG")"
+echo "parties: $(basename "$PARTY_DP") · $(basename "$PARTY_SG") · $(basename "$PARTY_EG") · $(basename "$PARTY_ER")"
 
 run_battery assert
 
@@ -564,8 +633,7 @@ expect_eq "start gate: a foreign session is refused" "2" "$ST"
 # which is exactly what they were green on before (Step-6 critic, issue 1).
 expect_contains "the observation the record attests to actually resolved the target" \
   "Resolved:      aworker-1111111111111111" "$( cd "$IREPO" && bash "$OBSERVE" worker 2>&1 )"
-mk_bash_payload "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh worker" \
-  | bash "$PARTY_SG" >/dev/null 2>&1
+run_pair "$IREPO" "$ITR" "$SID_A" worker
 SGSTATE="$IREPO/.bionic/tmp/stop-check.state"
 expect_eq "the recorder wrote an observation record" "yes" "$([ -f "$SGSTATE" ] && echo yes || echo no)"
 expect_contains "the recorder keys the record with the same session value" \
@@ -575,8 +643,7 @@ expect_eq "stop gate: the same session's observation discharges the stop" "0" "$
 
 # Re-observe (the first record was consumed by the permitted stop, D-2), then
 # prove a one-character-different session cannot spend it.
-mk_bash_payload "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh worker" \
-  | bash "$PARTY_SG" >/dev/null 2>&1
+run_pair "$IREPO" "$ITR" "$SID_A" worker
 OUT=$(mk_stop_payload "${SID_A%?}0" "$ITR" "$IREPO" "worker" | bash "$PARTY_SG" 2>&1); ST=$?
 expect_eq "stop gate: a one-character-different session is refused (exact compare)" "2" "$ST"
 expect_contains "stop gate: and says the record was another session's" "different session" "$OUT"
@@ -646,8 +713,7 @@ q_observation() {  # <typed> -> resolved|ambiguous|unresolved
 }
 q_recorder() {  # <typed> -> recorded|nothing
   rm -f "$RREPO/.bionic/tmp/stop-check.state"
-  mk_bash_payload "$SID_A" "$RTR" "$RREPO" "bash ~/.claude/hooks/stop-check.sh $1" \
-    | bash "$PARTY_SG" >/dev/null 2>&1
+  run_pair "$RREPO" "$RTR" "$SID_A" "$1"
   if grep -q '^v1|' "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null; then
     echo recorded
   else
@@ -716,17 +782,26 @@ expect_eq "C5 observation ignores metadata under \$HOME/.claude when CLAUDE_CONF
 expect_eq "C5 recorder writes nothing for it" "nothing" "$(q_recorder decoy)"
 expect_eq "C5 gate refuses it" "refused" "$(q_gate decoy)"
 
-# --- case 6: the ARGUMENT GRAMMAR itself. Cases 1-5 ask both halves about one
-# typed name; this one asks them about one COMMAND LINE, which is the thing they
-# actually share. The observation parses its own `$@`; the recorder re-parses the
-# same string out of the Bash payload with a grammar of its own (skip `-*`
-# tokens, take the first non-flag). Nothing held those two grammars together, and
-# a slice that widened one of them shipped: `--progress <path> <agent>` had the
-# operator looking at <agent> while the record named <path> — an attestation
-# about an agent nobody examined (Step-6 review F-1).
+# --- case 6: the ARGUMENT GRAMMAR itself — RESIDUAL CLOSED at slice 4/4.
 #
-# So the comparable observable here is the TARGET IDENTITY each half derives from
-# the same string, and the agreement includes refusing together. ---
+# Cases 1-5 ask both halves about one typed name; this one asks them about one
+# COMMAND LINE, which is the thing they actually share. It used to be the hardest
+# row in this file, because there were TWO readers of that line: the observation
+# parsed its own `$@`, and a PreToolUse recorder re-parsed the same string with a
+# grammar of its own (skip `-*` tokens, take the first non-flag). Nothing held
+# them together, and a slice that widened one of them shipped: `--progress <path>
+# <agent>` had the operator looking at <agent> while the record named <path> — an
+# attestation about an agent nobody examined (Step-6 review F-1). Narrowing the
+# producer then CONVERTED two ordinary typos into refused-observation-still-
+# recorded, and that residual was pinned here rather than claimed away (critic
+# finding A).
+#
+# There is now ONE reader. The recorder fires PostToolUse and copies the machine
+# line hooks/stop-check.sh prints on its success path, so a command the operator
+# watched fail printed no line and leaves nothing behind. The rows below are the
+# same rows, with the residual expectations replaced by the closure: every
+# refused form records NOTHING, and the documented form still records its target.
+# ---
 plant "$RPROJ/$SID_A/subagents" "aworker-7777777777777777" "worker"
 GPROG="$RREPO/.bionic/tmp/w-grammar.progress"
 mkdir -p "$RREPO/.bionic/tmp"; printf 'step 1\n' > "$GPROG"
@@ -737,9 +812,9 @@ g_observation() {  # <args…> -> the agent id the OBSERVATION resolved, or "ref
   if [ "$st" -ne 0 ] && printf '%s' "$out" | grep -qF 'Usage:'; then echo refused; return; fi
   printf '%s' "$out" | grep -E '^Resolved:' | grep -oE 'a[a-z0-9-]*-[0-9a-f]{16}' | head -1
 }
-g_recorder() {  # <command-string> -> the agent id the RECORDER wrote, or "nothing"
+g_recorder() {  # <args…> -> the agent id the RECORDER wrote, or "nothing"
   rm -f "$RREPO/.bionic/tmp/stop-check.state"
-  mk_bash_payload "$SID_A" "$RTR" "$RREPO" "$1" | bash "$PARTY_SG" >/dev/null 2>&1
+  run_pair "$RREPO" "$RTR" "$SID_A" "$@"
   local rec
   rec=$(grep '^v1|' "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null \
     | tr '|' '\n' | grep '^target=' | cut -d= -f2 | head -1)
@@ -753,53 +828,59 @@ expect_eq "C6 trailing form — the observation resolves the typed target" \
   "aworker-7777777777777777" "$(g_observation worker report.md --progress "$GPROG")"
 expect_eq "C6 trailing form — the recorder records the SAME agent from the same line" \
   "aworker-7777777777777777" \
-  "$(g_recorder "bash ~/.claude/hooks/stop-check.sh worker report.md --progress $GPROG")"
+  "$(g_recorder worker report.md --progress "$GPROG")"
 
-# The leading form, which is what diverged. The producer now refuses it, and the
-# recorder — whose `-*` skip walks past the flag and its value alike — finds no
-# resolvable token and writes nothing. Both halves refuse together, which is the
-# only agreement available when the command line is not one either can honour.
+# The leading form, which is what diverged. Both halves refuse together — the
+# producer with a usage error, the recorder because a usage error prints no
+# machine line.
 expect_eq "C6 leading form — the observation refuses it" \
   "refused" "$(g_observation --progress "$GPROG" worker)"
 expect_eq "C6 leading form — the recorder writes no record for it" \
-  "nothing" "$(g_recorder "bash ~/.claude/hooks/stop-check.sh --progress $GPROG worker")"
+  "nothing" "$(g_recorder --progress "$GPROG" worker)"
 
-# THE RESIDUAL, pinned rather than claimed away. The recorder is PreToolUse: it
-# reads the command TEXT before anything runs, so a command that fails in front
-# of the operator can still leave a record if some token in it happens to name a
-# live agent of this session (hooks/stop-guard.sh:280-288 states this class —
-# `false && bash …stop-check.sh x` is the same shape). Narrowing the producer
-# does not close it and was never able to; what it removes is the case where the
-# operator saw a full, successful evidence tier and had no reason to doubt the
-# record. This row exists so that residual cannot shrink or grow unnoticed.
-expect_eq "C6 residual — a refused command whose flag VALUE names a live agent still records it" \
-  "asolo-1111111111111111" \
-  "$(g_recorder "bash ~/.claude/hooks/stop-check.sh --progress solo worker")"
-expect_eq "C6 residual — but the observation gives that operator nothing to act on" \
+# THE RESIDUAL, CLOSED (critic finding A, spec AC-3). This was the row that
+# pinned a refused command still leaving a record because some token in it named
+# a live agent: the flag VALUE `solo` was taken as the target while the operator
+# saw a usage error. A PreToolUse reader could not do better — it fires before
+# the command runs and never learns the outcome. The PostToolUse recorder does
+# not read the command line at all, so there is no token for it to mistake.
+expect_eq "C6 CLOSED — a refused command whose flag VALUE names a live agent records NOTHING" \
+  "nothing" "$(g_recorder --progress solo worker)"
+expect_eq "C6 CLOSED — and the observation gave that operator nothing to act on" \
   "refused" "$(g_observation --progress solo worker)"
 
-# THE SAME RESIDUAL IN THE TARGET-FIRST DIRECTION, which the row above does not
-# reach: it pins only the flag-VALUE variant. Narrowing the producer did not just
-# remove divergent cases, it CONVERTED two ordinary typos — a mistyped flag and
-# the `=`-joined spelling — from honest agreement into refused-observation-still-
-# recorded. Both leave the target as the first non-flag token, which is exactly
-# what the recorder takes, so the operator now sees a usage error and zero
-# evidence while the record still names the target and carries the working log's
-# mtime and size that the gate's D-1 comparison spends. Closing it is a recorder
-# change (teach the `-*` skip that `--progress` consumes its successor, or move
-# the write to PostToolUse), which is a gate change outside this wave's ratified
-# Not Doing wall — routed to wave 3 (Step-6 critic, issue A). Asserted here so
-# the residual cannot shrink or grow unnoticed.
-expect_eq "C6 residual — a mistyped flag AFTER the target: the observation refuses it" \
+# THE SAME CLASS IN THE TARGET-FIRST DIRECTION, which the row above does not
+# reach: it pins only the flag-VALUE variant. Two ordinary typos — a mistyped
+# flag and the `=`-joined spelling — leave the target as the first non-flag
+# token, which is exactly what the old recorder took, so the operator saw a usage
+# error and zero evidence while the record still named the target and carried the
+# working log's mtime and size that the gate's D-1 comparison spends. Both now
+# record nothing, for the one reason that covers every member of the class: the
+# run printed no machine line.
+expect_eq "C6 CLOSED — a mistyped flag AFTER the target: the observation refuses it" \
   "refused" "$(g_observation worker --progres "$GPROG")"
-expect_eq "C6 residual — and the recorder records the target anyway" \
-  "aworker-7777777777777777" \
-  "$(g_recorder "bash ~/.claude/hooks/stop-check.sh worker --progres $GPROG")"
-expect_eq "C6 residual — the =-joined spelling: the observation refuses it" \
+expect_eq "C6 CLOSED — and the recorder writes nothing for it" \
+  "nothing" "$(g_recorder worker --progres "$GPROG")"
+expect_eq "C6 CLOSED — the =-joined spelling: the observation refuses it" \
   "refused" "$(g_observation worker "--progress=$GPROG")"
-expect_eq "C6 residual — and the recorder records the target for that one too" \
-  "aworker-7777777777777777" \
-  "$(g_recorder "bash ~/.claude/hooks/stop-check.sh worker --progress=$GPROG")"
+expect_eq "C6 CLOSED — and the recorder writes nothing for that one either" \
+  "nothing" "$(g_recorder worker "--progress=$GPROG")"
+
+# The class, not the instances: the observation's exit status and the recorder's
+# output are now ONE fact. Any command line at all — including ones nobody has
+# thought of — agrees by construction, because a non-zero producer prints no
+# machine line and the recorder has no other input.
+for form in "worker --unknown-flag" "--progress" "ghost" "worker@" ; do
+  # shellcheck disable=SC2086
+  if [ "$(g_observation $form)" = "refused" ] || [ -z "$(g_observation $form)" ]; then
+    # shellcheck disable=SC2086
+    expect_eq "C6 CLOSED — no evidence tier, no record: '$form'" "nothing" "$(g_recorder $form)"
+  else
+    # shellcheck disable=SC2086
+    expect_eq "C6 CLOSED — an evidence tier IS recorded: '$form'" \
+      "aworker-7777777777777777" "$(g_recorder $form)"
+  fi
+done
 
 # The derived FILE FACTS agree too: what the observation shows the reader as the
 # working log's size is what the recorder writes down as the activity level. Two
@@ -828,16 +909,22 @@ echo "=== D — cross-script security regressions (AC-8, TDD §8) ==="
 
 SECRET="sk-ant-LEAKCANARY-9f2b41"
 SREPO=$(new_repo "secrets")
-STR="$SANDBOX/fx/secrets/session.jsonl"; printf '{}\n' > "$STR"
-SSUB="$SANDBOX/fx/secrets/session/subagents"; mkdir -p "$SSUB"
+# The metadata lives under the CONFIGURED root, because the producer now has to
+# resolve the target for real before anything can be recorded (slice 4/4).
+SSLUG=$(printf '%s' "$SREPO" | sed 's/[^a-zA-Z0-9]/-/g')
+SPROJ="$CLAUDE_CONFIG_DIR/projects/$SSLUG"
+mkdir -p "$SPROJ/$SID_A/subagents"
+STR="$SPROJ/$SID_A.jsonl"; printf '{}\n' > "$STR"
+SSUB="$SPROJ/$SID_A/subagents"
 printf '{"name":"worker"}' > "$SSUB/agent-aworker-2222222222222222.meta.json"
 printf '{}\n' > "$SSUB/agent-aworker-2222222222222222.jsonl"
 write_plan "$SREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 
-# 1. the recorder arm, with the secret in the command line beside a real run
-mk_bash_payload "$SID_A" "$STR" "$SREPO" \
-  "export TOKEN=$SECRET && bash ~/.claude/hooks/stop-check.sh worker" \
-  | bash "$PARTY_SG" >/dev/null 2>&1
+# 1. the recorder, with the secret in the command line beside a real run
+SOUT=$( cd "$SREPO" && bash "$OBSERVE" worker 2>/dev/null )
+mk_bash_post "$SID_A" "$STR" "$SREPO" \
+  "export TOKEN=$SECRET && bash ~/.claude/hooks/stop-check.sh worker" "$SOUT" \
+  | bash "$PARTY_ER" >/dev/null 2>&1
 # 2. the start gate, with the secret in the dispatch description
 jq -n --arg s "$SID_A" --arg c "$SREPO" --arg d "dispatch carrying $SECRET" \
   '{session_id:$s, transcript_path:"/x.jsonl", cwd:$c, hook_event_name:"PreToolUse",
@@ -862,7 +949,7 @@ expect_contains "…and the state file the sweep covered is genuinely populated"
 
 # Temp-name unpredictability, all four scripts (AC-8). Static pins first: the
 # A2 defect was a literal `"${X}.tmp.$$"`.
-for s in "$PROBE" "$OBSERVE" "$PARTY_DP" "$PARTY_SG"; do
+for s in "$PROBE" "$OBSERVE" "$PARTY_DP" "$PARTY_SG" "$PARTY_ER"; do
   b=$(basename "$s")
   expect_absent "$b: no PID-derived temp name" '.tmp.$$' "$(cat "$s")"
   if grep -q 'mktemp' "$s"; then
@@ -876,18 +963,18 @@ done
 # Behavioural, not merely static: two recorder runs must produce two unrelated
 # temp names. The instrumentation is applied to a COPY (§9's technique) so the
 # shipped script carries no fault-injection seam; the original is re-checksummed.
-SG_SUM_BEFORE=$(shasum "$PARTY_SG")
-SGI="$MUTDIR/stop-guard-showtmp.sh"
+ER_SUM_BEFORE=$(shasum "$PARTY_ER")
+SGI="$MUTDIR/execution-recorder-showtmp.sh"
 awk '{ print }
-     /^    tmp=\$\(mktemp "\$STATE_DIR\/\.stop-check\.XXXXXX" 2>\/dev\/null\)/ {
-       print "    printf \"TMPNAME=%s\\n\" \"$tmp\" >&2" }' "$PARTY_SG" > "$SGI"
-if cmp -s "$PARTY_SG" "$SGI"; then
+     /^  tmp=\$\(mktemp "\$STATE_DIR\/\.stop-check\.XXXXXX" 2>\/dev\/null\)/ {
+       print "  printf \"TMPNAME=%s\\n\" \"$tmp\" >&2" }' "$PARTY_ER" > "$SGI"
+if cmp -s "$PARTY_ER" "$SGI"; then
   no "the recorder's mktemp call can be instrumented" "awk matched nothing — the mktemp step moved"
 else
   ok "the recorder's mktemp call can be instrumented"
-  N1=$(mk_bash_payload "$SID_A" "$STR" "$SREPO" "bash ~/.claude/hooks/stop-check.sh worker" \
+  N1=$(mk_bash_post "$SID_A" "$STR" "$SREPO" "bash ~/.claude/hooks/stop-check.sh worker" "$SOUT" \
        | bash "$SGI" 2>&1 >/dev/null | sed -n 's/^TMPNAME=//p' | head -1)
-  N2=$(mk_bash_payload "$SID_A" "$STR" "$SREPO" "bash ~/.claude/hooks/stop-check.sh worker" \
+  N2=$(mk_bash_post "$SID_A" "$STR" "$SREPO" "bash ~/.claude/hooks/stop-check.sh worker" "$SOUT" \
        | bash "$SGI" 2>&1 >/dev/null | sed -n 's/^TMPNAME=//p' | head -1)
   if [ -n "$N1" ] && [ -n "$N2" ] && [ "$N1" != "$N2" ]; then
     ok "two recorder runs produce two different temp names ($(basename "$N1") vs $(basename "$N2"))"
@@ -896,8 +983,8 @@ else
   fi
   expect_absent "the temp name is not derived from the PID" "$$" "$(basename "${N1:-x}")"
 fi
-expect_eq "stop-guard.sh is byte-identical after the instrumented copy ran" \
-  "$SG_SUM_BEFORE" "$(shasum "$PARTY_SG")"
+expect_eq "execution-recorder.sh is byte-identical after the instrumented copy ran" \
+  "$ER_SUM_BEFORE" "$(shasum "$PARTY_ER")"
 
 # The two read-only components write nothing at all — the strongest form of
 # "no artefact holds the command text". Snapshot the whole sandbox around a run.

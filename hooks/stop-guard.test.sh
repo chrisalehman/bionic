@@ -1,23 +1,29 @@
 #!/bin/bash
-# Tests for hooks/stop-guard.sh — ONE script, TWO arms (epic-15 wave-01R).
+# Tests for hooks/stop-guard.sh — the STOP GATE, PreToolUse|TaskStop
+# (epic-15 wave-01R; recorder arm removed at wave-03 slice 4/4).
 #
-#   Bash arm    (PreToolUse|Bash)     RECORDS an observation run into versioned
-#                                     state. Never blocks anything, ever.
-#   TaskStop arm (PreToolUse|TaskStop) GATES the stop: D-1 activity-boundary
-#                                     freshness, D-2 consume-on-stop.
+# The gate: D-1 activity-boundary freshness, D-2 consume-on-stop. Serves AC-4
+# (D-1), AC-5 (D-2), and the stop-side rows of AC-8/AC-10.
 #
-# Serves AC-3 (the recording half), AC-4 (D-1), AC-5 (D-2), and the stop-side
-# rows of AC-8/AC-10.
+# WHAT MOVED OUT. This script used to carry a second arm that WROTE the records
+# it now only reads. Those rows live in hooks/execution-recorder.test.sh, because
+# that is where the writer lives — one writer, one paired suite. The records this
+# suite spends are still never hand-written: `observe()` below runs the real
+# hooks/stop-check.sh and feeds its real output to the real recorder, so every
+# gate row here is discharged through the whole producer→recorder→gate path.
 #
-# HERMETIC. Every payload is crafted and piped straight into the NEW script;
-# nothing here invokes the TaskStop tool, touches the live installed hooks, or
-# writes outside a mktemp'd sandbox.
+# HERMETIC. Every payload is crafted and piped straight into the script under
+# test; nothing here invokes the TaskStop tool, touches the live installed hooks,
+# or writes outside a mktemp'd sandbox.
 #
 # Usage: bash hooks/stop-guard.test.sh
 
 set -uo pipefail
 
-GUARD="$(cd "$(dirname "$0")" && pwd)/stop-guard.sh"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+GUARD="$HERE/stop-guard.sh"
+RECORDER="$HERE/execution-recorder.sh"
+OBSERVE="$HERE/stop-check.sh"
 PASS=0
 FAIL=0
 TOTAL=0
@@ -54,9 +60,10 @@ expect_no_file()  { if [ -f "$2" ]; then no "$1" "file exists but should not: $2
 #     §2.2 establishes that `tool_input.task_id` is THE CALLER'S STRING AS TYPED
 #     ("victim", a name) and that no resolved agent id is present in the
 #     payload — the property every resolution test here depends on.
-#   * PreToolUse|Bash payload — same base fields with
-#     `tool_input.command`, per the same PreToolUse builder (§2.1 shows Bash
-#     PreToolUse firing through the identical pipeline; §2.9 captures one).
+#   * PostToolUse|Bash payload — FAITHFUL to
+#     .bionic/docs/record/w3-slice1-posttooluse-probe.md capture A (CLI 2.1.222),
+#     field for field including the tool_response object. Used only to drive the
+#     recorder that seeds this suite's records.
 #   * transcript_path → session directory — FAITHFUL to §2.5, which captures
 #     `agent_transcript_path` as "<transcript-dir>/<session-id>/subagents/agent-<id>.jsonl".
 #   * meta.json — FAITHFUL to §2.8 (verbatim field set), plus the named
@@ -64,9 +71,8 @@ expect_no_file()  { if [ -f "$2" ]; then no "$1" "file exists but should not: $2
 #   * SYNTHESIZED and declared: session ids, agent ids, plan text, message text.
 #     None is a platform surface.
 #
-# NOT modelled, deliberately: no PostToolUse payload appears in this suite. §2.3
-# shows PostToolUse is where the RESOLVED id lives — but the gate must decide
-# BEFORE the stop happens, so it only ever sees §2.2's unresolved reference.
+# The GATE itself never sees a PostToolUse payload: it must decide BEFORE the stop
+# happens, so it only ever reads §2.2's unresolved reference.
 
 mk_bash_payload() {  # <sid> <transcript> <cwd> <command>
   jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg cmd "$4" \
@@ -75,6 +81,18 @@ mk_bash_payload() {  # <sid> <transcript> <cwd> <command>
       permission_mode:"bypassPermissions", effort:{level:"high"},
       hook_event_name:"PreToolUse", tool_name:"Bash",
       tool_input:{command:$cmd}, tool_use_id:"toolu_018jyjgop7KMxP6yKtoAWWtB"}'
+}
+
+mk_bash_post() {  # <sid> <transcript> <cwd> <command> <stdout>
+  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg cmd "$4" --arg out "$5" \
+    '{session_id:$s, transcript_path:$t, cwd:$c,
+      prompt_id:"598cabc5-2776-479c-abcf-52c540a1c60e",
+      permission_mode:"bypassPermissions", effort:{level:"high"},
+      hook_event_name:"PostToolUse", tool_name:"Bash",
+      tool_input:{command:$cmd, description:"observe"},
+      tool_response:{stdout:$out, stderr:"", interrupted:false,
+                     isImage:false, noOutputExpected:false},
+      tool_use_id:"toolu_01HQV9JAFdKC15TLMDKt2QgF", duration_ms:117}'
 }
 
 mk_stop_payload() {  # <sid> <transcript> <cwd> <task_id>
@@ -147,8 +165,18 @@ plant_agent() {
 
 STATE_REL=".bionic/tmp/stop-check.state"
 
-observe() {  # <sid> <transcript> <repo> <typed-target>
-  run_guard "$(mk_bash_payload "$1" "$2" "$3" "bash ~/.claude/hooks/stop-check.sh $4")"
+# THE WHOLE PRODUCER→RECORDER PATH, run for real. Since slice 4/4 an observation
+# record exists only if hooks/stop-check.sh actually printed its machine line, so
+# seeding one by hand would seed a shape the shipped writer can no longer produce.
+# The metadata root is reached through CLAUDE_CONFIG_DIR, derived from the same
+# transcript path the gate resolves through, so both halves see one fixture world.
+observe() {  # <sid> <transcript> <repo> <typed-target> [args…]
+  local sid="$1" tr="$2" repo="$3"; shift 3
+  local cfg="${tr%/projects/*}" out
+  out=$( cd "$repo" && CLAUDE_CONFIG_DIR="$cfg" bash "$OBSERVE" "$@" 2>/dev/null )
+  printf '%s' "$(mk_bash_post "$sid" "$tr" "$repo" \
+    "bash ~/.claude/hooks/stop-check.sh $*" "$out")" | bash "$RECORDER" >/dev/null 2>&1
+  return 0
 }
 
 # ============================================================
@@ -163,17 +191,28 @@ run_guard "$(jq -n --arg c "$W1_REPO" '{session_id:"x", cwd:$c, hook_event_name:
 expect_status "an unrelated TOOL passes untouched" 0 "$GUARD_ST"
 expect_no_file "an unrelated tool writes no state" "$W1_REPO/$STATE_REL"
 
+# A Bash call is no longer this script's business AT ALL (slice 4/4 moved the
+# recorder out). It must pass untouched and, more importantly, write nothing:
+# a settings file that still carries the retired PreToolUse|Bash registration
+# must produce silence rather than a second writer of the same state.
 run_guard "$(mk_bash_payload "$SID_A" "$W1_TR" "$W1_REPO" "ls -la && git status")"
 expect_status "an unrelated Bash command passes untouched" 0 "$GUARD_ST"
 expect_no_file "an unrelated Bash command writes no state" "$W1_REPO/$STATE_REL"
+
+run_guard "$(mk_bash_payload "$SID_A" "$W1_TR" "$W1_REPO" "bash ~/.claude/hooks/stop-check.sh quiet-reviewer")"
+expect_status "a REAL observation command is no longer this gate's business" 0 "$GUARD_ST"
+expect_no_file "the stop gate writes no observation record, ever (one writer)" "$W1_REPO/$STATE_REL"
+expect_absent "the gate source no longer greps command lines for the observation" \
+  "grep -qF 'stop-check.sh'" "$(cat "$GUARD")"
 
 run_guard "$(jq -n --arg c "$W1_REPO" '{session_id:"x", cwd:$c, hook_event_name:"PreToolUse", tool_name:"Agent", tool_input:{prompt:"go"}}')"
 expect_status "the Agent tool is not this gate's business" 0 "$GUARD_ST"
 
 # Static order pin: the cheap relevance test must precede the plan-directory
 # walk in the source, not merely produce the same answer (arch-perf F8/F9 — the
-# defect was cost, which behavior alone cannot detect).
-_rel_line=$(grep -nE "grep -qF? '?stop-check\.sh" "$GUARD" | head -1 | cut -d: -f1)
+# defect was cost, which behavior alone cannot detect). The relevance test is now
+# the tool-name check itself.
+_rel_line=$(grep -n 'TOOL_NAME" = "TaskStop" \] || exit 0' "$GUARD" | head -1 | cut -d: -f1)
 _walk_line=$(grep -nE '^[[:space:]]*(PLAN=|find )' "$GUARD" | head -1 | cut -d: -f1)
 if [ -n "$_rel_line" ] && [ -n "$_walk_line" ] && [ "$_rel_line" -lt "$_walk_line" ]; then
   ok "relevance check precedes the plan walk in source order"
@@ -183,140 +222,19 @@ fi
 
 # ============================================================
 echo ""
-echo "=== Section 2: the Bash arm records the observation (AC-3) ==="
+echo "=== Section 2: WRITING moved out — see hooks/execution-recorder.test.sh ==="
 # ============================================================
-
-observe "$SID_A" "$W1_TR" "$W1_REPO" "quiet-reviewer"
-expect_status "recording an observation never blocks" 0 "$GUARD_ST"
-expect_file "an observation run writes state" "$W1_REPO/$STATE_REL"
-STATE=$(cat "$W1_REPO/$STATE_REL" 2>/dev/null)
-expect_contains "the record names the RESOLVED target" "aquiet-reviewer-deadbeefdeadbeef" "$STATE"
-expect_contains "the record names the observing session" "$SID_A" "$STATE"
-expect_matches "the record carries the activity level seen (log mtime)" 'mtime=[0-9]+' "$STATE"
-expect_matches "the record carries the activity level seen (log size)" 'size=[0-9]+' "$STATE"
-
-# COMMAND-WORD DISCIPLINE. A mention is not a run (checklist §C, the "recorded a
-# look but nothing ran" class). Each of these must record NOTHING.
-for mention in \
-  "cat hooks/stop-check.sh" \
-  "echo stop-check.sh quiet-reviewer" \
-  "grep -n stop-check.sh hooks/stop-guard.sh" \
-  "# bash ~/.claude/hooks/stop-check.sh quiet-reviewer"
-do
-  IFS='|' read -r M_REPO M_TR M_SUB <<< "$(make_world "m$RANDOM" yes)"
-  plant_agent "$M_SUB" "aquiet-reviewer-deadbeefdeadbeef" "quiet-reviewer"
-  run_guard "$(mk_bash_payload "$SID_A" "$M_TR" "$M_REPO" "$mention")"
-  expect_no_file "a mention is not a run: ${mention:0:34}" "$M_REPO/$STATE_REL"
-done
-
-# Two real runs in one command line record two observations.
-IFS='|' read -r W2_REPO W2_TR W2_SUB <<< "$(make_world w2 yes)"
-plant_agent "$W2_SUB" "aone-1111111111111111" "one"
-plant_agent "$W2_SUB" "atwo-2222222222222222" "two"
-run_guard "$(mk_bash_payload "$SID_A" "$W2_TR" "$W2_REPO" \
-  "bash ~/.claude/hooks/stop-check.sh one && bash ~/.claude/hooks/stop-check.sh two")"
-STATE=$(cat "$W2_REPO/$STATE_REL" 2>/dev/null)
-expect_contains "two chained runs record the first target" "aone-1111111111111111" "$STATE"
-expect_contains "two chained runs record the second target" "atwo-2222222222222222" "$STATE"
-
-# An unresolvable target records nothing and still never blocks.
-run_guard "$(mk_bash_payload "$SID_A" "$W2_TR" "$W2_REPO" "bash ~/.claude/hooks/stop-check.sh ghost")"
-expect_status "an unresolvable observation target never blocks" 0 "$GUARD_ST"
-expect_absent "an unresolvable observation target records nothing" "ghost" "$(cat "$W2_REPO/$STATE_REL")"
-
-# C1 (Step-6 correctness review, slice 4/7): AN OBSERVATION THAT PRINTED NO
-# EVIDENCE MUST RECORD NOTHING. The recorder fires PreToolUse — before the
-# observation runs — so it cannot read the producer's outcome. It must therefore
-# resolve against THE SAME DIRECTORY SET THE OPERATOR SAW: every session of this
-# project, then the all-projects fallback (hooks/stop-check.sh:103-133). Where
-# that set is ambiguous the operator was shown a candidate list and no evidence
-# tier at all, and a record written anyway attests to an examination that never
-# produced anything — the "recorded a look but nothing ran" class (checklist §C)
-# in a new shape.
-IFS='|' read -r C1_REPO C1_TR C1_SUB <<< "$(make_world c1 yes)"
-C1_OTHER="${C1_TR%/*}/$SID_B/subagents"
-plant_agent "$C1_SUB"  "aworker-1111111111111111" "worker"
-plant_agent "$C1_OTHER" "aworker-2222222222222222" "worker"
-observe "$SID_A" "$C1_TR" "$C1_REPO" "worker"
-expect_status "an ambiguous observation target never blocks" 0 "$GUARD_ST"
-if [ -f "$C1_REPO/$STATE_REL" ]; then
-  expect_absent "a name ambiguous ACROSS SESSIONS records nothing (C1)" \
-    "target=aworker-" "$(cat "$C1_REPO/$STATE_REL")"
-else
-  ok "a name ambiguous ACROSS SESSIONS records nothing (C1)"
-fi
-# …and the stop of that target is therefore refused, rather than discharged by a
-# record the operator's own output contradicts.
-run_guard "$(mk_stop_payload "$SID_A" "$C1_TR" "$C1_REPO" "worker")"
-expect_status "the stop after an evidence-less observation is REFUSED (C1)" 2 "$GUARD_ST"
-
-# The mirror image, fail-closed: a target that resolves ONLY in another session
-# is visible to the operator's observation but unstoppable from here, so no
-# dischargeable record may be written for it either.
-IFS='|' read -r C1B_REPO C1B_TR C1B_SUB <<< "$(make_world c1b yes)"
-plant_agent "${C1B_TR%/*}/$SID_B/subagents" "aforeign-3333333333333333" "foreign"
-observe "$SID_A" "$C1B_TR" "$C1B_REPO" "foreign"
-if [ -f "$C1B_REPO/$STATE_REL" ]; then
-  expect_absent "a target resolving only in ANOTHER session records nothing (C1)" \
-    "target=aforeign-3333333333333333" "$(cat "$C1B_REPO/$STATE_REL")"
-else
-  ok "a target resolving only in ANOTHER session records nothing (C1)"
-fi
-
-# Positive pair (a wall that refuses everything is equally broken, TDD §9):
-# unique in the operator's set AND in this session still records.
-IFS='|' read -r C1C_REPO C1C_TR C1C_SUB <<< "$(make_world c1c yes)"
-plant_agent "$C1C_SUB" "asolo-4444444444444444" "solo"
-observe "$SID_A" "$C1C_TR" "$C1C_REPO" "solo"
-expect_contains "an unambiguous target still records (C1 positive pair)" \
-  "target=asolo-4444444444444444" "$(cat "$C1C_REPO/$STATE_REL" 2>/dev/null)"
-
-# P2 (Step-6 performance review, slice 4/7): the observation state must not grow
-# without bound. Records written by OTHER sessions were pruned by nothing, and
-# both arms walk the file line by line at ~3ms per record, so a multi-session
-# wave paid a growing tax on every observation and every stop.
-IFS='|' read -r P2_REPO P2_TR P2_SUB <<< "$(make_world p2 yes)"
-plant_agent "$P2_SUB" "akeeper-7777777777777777" "keeper"
-mkdir -p "$P2_REPO/.bionic/tmp"
-{
-  printf '# bionic observation records — schema stop-check-state/v1\n'
-  _i=0
-  while [ "$_i" -lt 300 ]; do
-    # live-looking foreign records: their session directory still exists, so only
-    # the hard cap can drop them
-    printf 'v1|session=dead-%s|target=aghost-%s|typed=ghost|log=%s/agent-aghost-%s.jsonl|mtime=1|size=1\n' \
-      "$_i" "$_i" "$P2_SUB" "$_i"
-    _i=$((_i + 1))
-  done
-} > "$P2_REPO/$STATE_REL"
-observe "$SID_A" "$P2_TR" "$P2_REPO" "keeper"
-P2_COUNT=$(grep -c '^v1|' "$P2_REPO/$STATE_REL" 2>/dev/null || echo 0)
-if [ "$P2_COUNT" -le 200 ]; then
-  ok "the observation state is bounded, not unbounded (P2): $P2_COUNT records"
-else
-  no "the observation state is bounded, not unbounded (P2)" "$P2_COUNT records retained"
-fi
-expect_contains "the record just written survives the bound" \
-  "akeeper-7777777777777777" "$(cat "$P2_REPO/$STATE_REL" 2>/dev/null)"
-
-# A record whose session's subagents directory is gone can never discharge
-# anything — the gate resolves targets only through that directory — so it is
-# inert weight and gets dropped on the next write.
-IFS='|' read -r P2B_REPO P2B_TR P2B_SUB <<< "$(make_world p2b yes)"
-plant_agent "$P2B_SUB" "alive-8888888888888888" "alive"
-mkdir -p "$P2B_REPO/.bionic/tmp"
-printf '# bionic observation records — schema stop-check-state/v1\nv1|session=gone|target=avanished-9999999999999999|typed=vanished|log=/no/such/session/subagents/agent-avanished-9999999999999999.jsonl|mtime=1|size=1\n' \
-  > "$P2B_REPO/$STATE_REL"
-observe "$SID_A" "$P2B_TR" "$P2B_REPO" "alive"
-expect_absent "a record whose session directory is gone is pruned (P2)" \
-  "avanished-9999999999999999" "$(cat "$P2B_REPO/$STATE_REL" 2>/dev/null)"
-expect_contains "pruning does not disturb the record being written" \
-  "alive-8888888888888888" "$(cat "$P2B_REPO/$STATE_REL" 2>/dev/null)"
-
-# Credential-leak class (§8, AC-8): no command text reaches the state file.
-run_guard "$(mk_bash_payload "$SID_A" "$W2_TR" "$W2_REPO" \
-  "AWS_SECRET=hunter2 bash ~/.claude/hooks/stop-check.sh one")"
-expect_absent "no command text reaches the state file" "hunter2" "$(cat "$W2_REPO/$STATE_REL")"
+#
+# Everything that used to be asserted here — a run records its target, a mention
+# records nothing, an unresolvable or ambiguous target records nothing, the state
+# is bounded and pruned, no command text leaks into it — is asserted against the
+# script that now performs it, hooks/execution-recorder.sh. Duplicating those rows
+# here would pin this gate to behaviour it no longer has.
+#
+# What this suite still owes the reader is that the gate SPENDS a real record, and
+# every section below does exactly that: each one seeds through `observe()`, which
+# runs the real observation and the real recorder end to end.
+ok "the recording rows live with the writer (hooks/execution-recorder.test.sh)"
 
 # ============================================================
 echo ""
@@ -595,12 +513,13 @@ fi
 expect_status "the shipped script was never modified by the mutation proof" 0 \
   "$([ "$GUARD_SUM_BEFORE" = "$(shasum "$GUARD" | awk '{print $1}')" ]; echo $?)"
 
-# --- S2: neither arm may spin forever when the lock cannot be taken ---
+# --- S2: the gate may not spin forever when the lock cannot be taken ---
 #
 # `mkdir` fails for reasons a stale-lock reclaim cannot fix — an unwritable state
 # directory is repo-controlled — and `rm -rf` of an ABSENT path SUCCEEDS, so a
 # reclaim-and-retry loop with no hard bound never terminates. A PreToolUse hook
 # that never returns renders no verdict at all, which §7's table has no row for.
+# The writer's half of this row is in hooks/execution-recorder.test.sh §8.
 run_bounded() {  # <label> <secs> <payload> -> sets BOUNDED_ST (137 = killed)
   local secs="$2" payload="$3" waited=0 pid
   printf '%s' "$payload" | bash "$GUARD" >"$SANDBOX/.bout" 2>"$SANDBOX/.berr" &
@@ -621,14 +540,6 @@ plant_agent "$S2_SUB" "awedged-6666666666666666" "wedged"
 observe "$SID_A" "$S2_TR" "$S2_REPO" "wedged"        # a valid record, so the gate reaches the consume
 mkdir -p "$S2_REPO/.bionic/tmp"
 chmod 500 "$S2_REPO/.bionic/tmp"
-
-run_bounded "recorder" 12 "$(mk_bash_payload "$SID_A" "$S2_TR" "$S2_REPO" \
-  "bash ~/.claude/hooks/stop-check.sh wedged")"
-if [ "$BOUNDED_ST" = "137" ]; then
-  no "the RECORDER arm terminates when the lock cannot be taken (S2)" "still running after 12s"
-else
-  expect_status "the RECORDER arm never blocks, even unable to lock (S2)" 0 "$BOUNDED_ST"
-fi
 
 run_bounded "gate" 12 "$(mk_stop_payload "$SID_A" "$S2_TR" "$S2_REPO" "wedged")"
 if [ "$BOUNDED_ST" = "137" ]; then
@@ -654,14 +565,13 @@ VICTIM_FILE="$SANDBOX/sec-outside-file.txt"
 echo "ORIGINAL CONTENT" > "$VICTIM_FILE"
 ln -s "$VICTIM_FILE" "$S_REPO/$STATE_REL"
 observe "$SID_A" "$S_TR" "$S_REPO" "victim"
-expect_status "a planted state SYMLINK does not crash the recorder" 0 "$GUARD_ST"
 expect_contains "a planted state symlink is not written through (file level)" \
   "ORIGINAL CONTENT" "$(cat "$VICTIM_FILE")"
 
-# The gate refuses to READ through a planted symlink too — not only to write
-# through it. Without this the file-level guard has no discriminating test: `mv`
-# happens to replace a symlink rather than follow it, so the write side stays
-# safe for a reason that has nothing to do with the check.
+# The gate refuses to READ through a planted symlink — the direction that is
+# uniquely its own. A repo that can choose which file this gate reads its evidence
+# out of can OPEN the wall, which §8 forbids; the write side of the same planted
+# path is the writer's row, in hooks/execution-recorder.test.sh §7.
 run_guard "$(mk_stop_payload "$SID_A" "$S_TR" "$S_REPO" "victim")"
 expect_status "a symlinked state path refuses the stop" 2 "$GUARD_ST"
 expect_contains "the symlink refusal says what it found" "symlink" "$GUARD_ERR"
@@ -672,12 +582,13 @@ OUTSIDE_DIR="$SANDBOX/sec2-outside-dir"
 mkdir -p "$OUTSIDE_DIR" "$S2_REPO/.bionic"
 ln -s "$OUTSIDE_DIR" "$S2_REPO/.bionic/tmp"
 observe "$SID_A" "$S2_TR" "$S2_REPO" "victim"
-expect_status "a planted state DIRECTORY symlink does not crash the recorder" 0 "$GUARD_ST"
 if [ -z "$(ls -A "$OUTSIDE_DIR")" ]; then
   ok "a planted directory symlink is not written through (directory level)"
 else
   no "a planted directory symlink is not written through (directory level)" "$(ls -A "$OUTSIDE_DIR")"
 fi
+run_guard "$(mk_stop_payload "$SID_A" "$S2_TR" "$S2_REPO" "victim")"
+expect_status "a symlinked state DIRECTORY refuses the stop too" 2 "$GUARD_ST"
 
 # Unpredictable temp names: mktemp with an X-template, and no PID-based name.
 expect_matches "temp files use an mktemp X-template" 'mktemp.*XXXXXX' "$(cat "$GUARD")"

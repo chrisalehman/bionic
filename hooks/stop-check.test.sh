@@ -323,6 +323,11 @@ norm_volatile() {
     -e 's/\(age [^)]*\)/(age NORMALIZED)/' \
     -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z/TIMESTAMP/g'
 }
+# The machine line legitimately differs between the two runs — it carries the
+# progress state, which is the whole point of the flag — so it is compared in its
+# own section below rather than folded into this byte-equality claim about the
+# HUMAN-facing output.
+strip_machine() { printf '%s\n' "$1" | grep -v '^stop-check-observation/'; }
 strip_progress() {   # drop the header, the fact line, and the blank line before them
   printf '%s\n' "$1" | awk '
     /^-- progress artifact \(D-6\) --$/ { hold = 0; skip = 1; next }
@@ -331,7 +336,8 @@ strip_progress() {   # drop the header, the fact line, and the blank line before
     END { if (hold) print held }'
 }
 expect_equal "everything outside the section is unchanged by --progress" \
-  "$(norm_volatile "$OUT6_NONE")" "$(norm_volatile "$(strip_progress "$OUT6_FRESH")")"
+  "$(norm_volatile "$(strip_machine "$OUT6_NONE")")" \
+  "$(norm_volatile "$(strip_progress "$(strip_machine "$OUT6_FRESH")")")"
 
 # (c) The SAME artifact, ten minutes stale: the rendering must change on time
 # alone. Same path, same bytes — the only difference between these two runs is
@@ -439,6 +445,104 @@ expect_absent "--help is never treated as an agent name" "unresolved" "$OUT6_HEL
 OUT6_TRAIL=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG" -x); ST=$?
 expect_status "an unknown flag after a valid --progress pair exits 1" 1 "$ST"
 expect_contains "an unknown flag after a valid --progress pair prints usage" "Usage" "$OUT6_TRAIL"
+
+# ============================================================
+echo ""
+echo "=== Section 7: the machine line — printed on success, on nothing else ==="
+# ============================================================
+#
+# hooks/execution-recorder.sh reads this line and nothing else, so its presence
+# IS the claim "an observation ran and produced an evidence tier". The whole C6
+# closure rests on the second half of that: every path that shows the operator no
+# evidence tier must print no line (spec AC-3; the residual it replaces is pinned
+# in tests/cross-gate-agreement.test.sh §C case 6).
+
+IFS='|' read -r H7 R7 S7 <<< "$(make_world w7)"
+S7DIR=$(make_agent "$H7" "$S7" "77777777-7777-7777-7777-777777777777" \
+  "amachine-7777777777777777" "machine" "working")
+PROG7="$R7/.bionic/tmp/w7.progress"
+mkdir -p "$R7/.bionic/tmp"; printf 'stage 1\n' > "$PROG7"
+printf 'a report\n' > "$R7/report7.md"
+
+MLINE_OF() { printf '%s\n' "$1" | grep '^stop-check-observation/' ; }
+
+OUT7=$(run_check "$H7" "$R7" "machine"); ST=$?
+expect_status "a successful observation exits 0" 0 "$ST"
+M7=$(MLINE_OF "$OUT7")
+expect_matches "a successful run prints ONE versioned machine line" \
+  '^stop-check-observation/v1\|' "$M7"
+expect_equal "exactly one machine line, never two" "1" "$(printf '%s\n' "$OUT7" | grep -c '^stop-check-observation/')"
+expect_contains "the machine line names the RESOLVED target" \
+  "target=amachine-7777777777777777" "$M7"
+expect_contains "the machine line names the target AS TYPED" "typed=machine" "$M7"
+expect_contains "the machine line names the working log it read" \
+  "log=$S7DIR/agent-amachine-7777777777777777.jsonl" "$M7"
+expect_matches "the machine line carries the activity level (mtime)" 'mtime=[0-9]+' "$M7"
+expect_matches "the machine line carries the activity level (size)" 'size=[0-9]+' "$M7"
+expect_contains "with no --progress the progress state is 'unnamed', not blank" \
+  "progress_state=unnamed" "$M7"
+expect_equal "the machine line is the LAST line of a successful run" \
+  "$M7" "$(printf '%s\n' "$OUT7" | tail -1)"
+
+# The file facts the operator READ are the file facts the line CARRIES. One
+# computation, two renderings — this is what removes the F-1 divergence class.
+OUT7_SIZE=$(printf '%s\n' "$OUT7" | grep -E '^  size:' | grep -oE '[0-9]+' | head -1)
+expect_equal "the size printed for the reader is the size carried for the machine" \
+  "$OUT7_SIZE" "$(printf '%s' "$M7" | tr '|' '\n' | grep '^size=' | cut -d= -f2)"
+
+# Contract state rides along, for the D-6 comparison slices 4/5 and 4/6 make.
+OUT7B=$(run_check "$H7" "$R7" "machine" report7.md nosuch.md --progress "$PROG7")
+M7B=$(MLINE_OF "$OUT7B")
+expect_contains "each deliverable's state is carried, present" "present:report7.md" "$M7B"
+expect_contains "each deliverable's state is carried, absent" "absent:nosuch.md" "$M7B"
+expect_contains "a named-and-present progress artifact is 'present'" "progress_state=present" "$M7B"
+expect_matches "a present progress artifact carries its mtime" 'progress_mtime=[0-9]+' "$M7B"
+OUT7C=$(run_check "$H7" "$R7" "machine" --progress "$R7/.bionic/tmp/never-written")
+expect_contains "a named-but-missing progress artifact is 'absent', not 'unnamed'" \
+  "progress_state=absent" "$(MLINE_OF "$OUT7C")"
+
+# EVERY REFUSAL CLASS PRINTS NO LINE. Each of these is a run whose operator saw
+# no evidence tier; each must leave the recorder nothing to copy.
+check_no_line() {  # <label> <args…>
+  local label="$1"; shift
+  local out st
+  out=$(run_check "$H7" "$R7" "$@"); st=$?
+  if [ "$st" -eq 0 ]; then
+    no "$label — and the run itself failed" "expected a non-zero exit, got 0"
+  elif [ -z "$(MLINE_OF "$out")" ]; then
+    ok "$label"
+  else
+    no "$label" "printed: $(MLINE_OF "$out")"
+  fi
+}
+check_no_line "no arguments at all prints no machine line" ""
+check_no_line "a leading flag prints no machine line" --progress "$PROG7" machine
+check_no_line "a mistyped flag prints no machine line" machine --progres "$PROG7"
+check_no_line "the =-joined spelling prints no machine line" machine "--progress=$PROG7"
+check_no_line "an unknown flag prints no machine line" machine --unknown
+check_no_line "a second --progress prints no machine line" \
+  machine --progress "$PROG7" --progress "$PROG7"
+check_no_line "a --progress with no value prints no machine line" machine --progress
+check_no_line "an UNRESOLVED target prints no machine line" no-such-agent
+
+# Ambiguity: two agents answering to one name. The operator gets a candidate list
+# and no evidence tier, so there is nothing to record.
+make_agent "$H7" "$S7" "77777777-7777-7777-7777-777777777777" \
+  "atwin-1111111111111111" "twin" "working" >/dev/null
+make_agent "$H7" "$S7" "77777777-7777-7777-7777-777777777777" \
+  "atwin-2222222222222222" "twin" "working" >/dev/null
+check_no_line "an AMBIGUOUS target prints no machine line" twin
+
+# The line is pipe-delimited and read by key, so no operator-supplied value may
+# carry a `|` into it and forge a field.
+make_agent "$H7" "$S7" "77777777-7777-7777-7777-777777777777" \
+  "apipe-3333333333333333" "apipe-3333333333333333" "working" >/dev/null
+OUT7D=$(run_check "$H7" "$R7" "apipe-3333333333333333" 'rep|ort.md')
+M7D=$(MLINE_OF "$OUT7D")
+expect_absent "a deliverable path carrying a pipe does not forge a field" \
+  "rep|ort" "$M7D"
+expect_equal "the forged-field attempt still yields one line" "1" \
+  "$(printf '%s\n' "$OUT7D" | grep -c '^stop-check-observation/')"
 
 # ============================================================
 echo ""

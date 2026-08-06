@@ -980,7 +980,7 @@ _hooks_rc=$?
 [ ! -f "${HOOKSBX}/home/.claude/hooks/kill-check.sh" ] && ok "AC-7: old-name kill-check.sh removed" || no "AC-7: kill-check.sh still present"
 
 # New-name files present, executable, byte-identical to the repo copies.
-for h in dispatch-preflight.sh preflight-probe.sh stop-check.sh stop-guard.sh; do
+for h in dispatch-preflight.sh preflight-probe.sh stop-check.sh stop-guard.sh execution-recorder.sh; do
   installed="${HOOKSBX}/home/.claude/hooks/${h}"
   [ -f "$installed" ] && ok "AC-7: ${h} installed" || no "AC-7: ${h} not installed"
   [ -x "$installed" ] && ok "AC-7: ${h} is executable" || no "AC-7: ${h} not executable"
@@ -988,14 +988,24 @@ for h in dispatch-preflight.sh preflight-probe.sh stop-check.sh stop-guard.sh; d
     && ok "AC-7: ${h} byte-identical to repo copy" || no "AC-7: ${h} differs from repo copy"
 done
 
-# dispatch-preflight.sh (Agent) and stop-guard.sh (Bash + TaskStop) registered.
+# dispatch-preflight.sh (PreToolUse|Agent), stop-guard.sh (PreToolUse|TaskStop)
+# and execution-recorder.sh (PostToolUse|Bash + PostToolUse|Agent) registered.
+# stop-guard.sh's PreToolUse|Bash registration was RETIRED at wave-03 slice 4/4
+# when the recorder moved to its own PostToolUse script; the negative row below
+# pins the retirement, because MANAGED_HOOKS is convergent and a leftover entry
+# would put a second writer back in front of the same state file.
 _matcher_has_cmd() {  # <event> <matcher> <cmd>
   jq -e --arg ev "$1" --arg m "$2" --arg c "$3" \
     '(.hooks[$ev] // []) | any(.matcher == $m and (.hooks | any(.command == $c)))' \
     "$HOOKS_SETTINGS" >/dev/null
 }
 _matcher_has_cmd PreToolUse Bash "~/.claude/hooks/stop-guard.sh" \
-  && ok "AC-7: stop-guard.sh registered on PreToolUse|Bash" || no "AC-7: stop-guard.sh missing PreToolUse|Bash registration"
+  && no "AC-7: stop-guard.sh still registered on PreToolUse|Bash (retired at 4/4)" \
+  || ok "AC-7: stop-guard.sh is NOT registered on PreToolUse|Bash (recorder arm retired)"
+_matcher_has_cmd PostToolUse Bash "~/.claude/hooks/execution-recorder.sh" \
+  && ok "AC-7: execution-recorder.sh registered on PostToolUse|Bash" || no "AC-7: execution-recorder.sh missing PostToolUse|Bash registration"
+_matcher_has_cmd PostToolUse Agent "~/.claude/hooks/execution-recorder.sh" \
+  && ok "AC-7: execution-recorder.sh registered on PostToolUse|Agent" || no "AC-7: execution-recorder.sh missing PostToolUse|Agent registration"
 _matcher_has_cmd PreToolUse TaskStop "~/.claude/hooks/stop-guard.sh" \
   && ok "AC-7: stop-guard.sh registered on PreToolUse|TaskStop" || no "AC-7: stop-guard.sh missing PreToolUse|TaskStop registration"
 _matcher_has_cmd PreToolUse Agent "~/.claude/hooks/dispatch-preflight.sh" \
@@ -1017,7 +1027,7 @@ _total_registered="$(jq '[.hooks[]? | .[] | .hooks[]?] | length' "$HOOKS_SETTING
 
 # Manifest lists the new names and excludes the removed old names.
 manifest="${HOOKSBX}/home/.claude/hooks/.bionic-manifest"
-for h in dispatch-preflight.sh preflight-probe.sh stop-check.sh stop-guard.sh; do
+for h in dispatch-preflight.sh preflight-probe.sh stop-check.sh stop-guard.sh execution-recorder.sh; do
   grep -qxF "$h" "$manifest" 2>/dev/null && ok "AC-7: manifest lists ${h}" || no "AC-7: manifest missing ${h}"
 done
 grep -qxF "kill-guard.sh" "$manifest" 2>/dev/null && no "AC-7: manifest must not list removed old name kill-guard.sh" || ok "AC-7: manifest excludes kill-guard.sh"
