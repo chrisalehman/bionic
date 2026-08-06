@@ -435,6 +435,75 @@ expect_eq "the live foreign session's record is unchanged, still keyed to sessio
 expect_true "this session's own record was ALSO written (both valid concurrently)" [ -f "$SBX/repo/$STATE_REL" ]
 
 # ============================================================
+section "S6c — rostered-vs-unrostered scan (slice 4/7, display/warn only)"
+# ============================================================
+#
+# spec Design "Component boundaries and interfaces": "hooks/preflight-probe.sh
+# ... its other-live-session scan reports rostered-vs-unrostered." Two additions
+# to the existing warn-only scan, neither ever blocking (starts stay fail open):
+#   (a) per detected live foreign session, whether it carries a roster file at
+#       .bionic/tmp/roster-<sid>.state;
+#   (b) any agent-*.meta.json under that session's OWN subagents directory whose
+#       id is not named by an `agent_id=` field in ANY roster file on disk is
+#       flagged UNROSTERED.
+
+# (a) positive: a live foreign session that DOES carry a roster file
+SBX="$(mk_sandbox)"
+: > "$SBX/config/projects/$PROJSLUG/$SESSION_B.jsonl"
+mkdir -p "$SBX/repo/.bionic/tmp"
+printf 'roster-state/v1|status=confirmed|session=%s|name=foo|agent_id=deadbeef|launched_at=x\n' "$SESSION_B" \
+  > "$SBX/repo/.bionic/tmp/roster-${SESSION_B}.state"
+rc="$(run_probe "$SBX")"
+expect_eq "a live foreign session WITH a roster file still exits 0" "0" "$rc"
+if grep -qE "$SESSION_B.*roster: present" "$OUT" "$ERR" 2>/dev/null; then
+  ok "live foreign session reports roster: present"
+else
+  bad "live foreign session reports roster: present"
+fi
+
+# (a) negative: a live foreign session with NO roster file on disk
+SBX="$(mk_sandbox)"
+: > "$SBX/config/projects/$PROJSLUG/$SESSION_B.jsonl"
+rc="$(run_probe "$SBX")"
+expect_eq "a live foreign session with NO roster file still exits 0" "0" "$rc"
+if grep -qE "$SESSION_B.*roster: absent" "$OUT" "$ERR" 2>/dev/null; then
+  ok "live foreign session with no roster reports roster: absent"
+else
+  bad "live foreign session with no roster reports roster: absent"
+fi
+
+# (b) an agent-id under a live foreign session's subagents dir that NO roster
+# names is flagged UNROSTERED
+SBX="$(mk_sandbox)"
+: > "$SBX/config/projects/$PROJSLUG/$SESSION_B.jsonl"
+mkdir -p "$SBX/config/projects/$PROJSLUG/$SESSION_B/subagents"
+printf '{"name":"orphan"}' > "$SBX/config/projects/$PROJSLUG/$SESSION_B/subagents/agent-orphan123.meta.json"
+rc="$(run_probe "$SBX")"
+expect_eq "unrostered subagent metadata still exits 0 (display/warn only, never blocks)" "0" "$rc"
+if grep -qE "UNROSTERED.*orphan123" "$OUT" "$ERR" 2>/dev/null; then
+  ok "unrostered live subagent metadata is flagged UNROSTERED"
+else
+  bad "unrostered live subagent metadata is flagged UNROSTERED"
+fi
+
+# (b) the same shape, but the agent id IS named by a roster row on disk — no
+# UNROSTERED flag for it
+SBX="$(mk_sandbox)"
+: > "$SBX/config/projects/$PROJSLUG/$SESSION_B.jsonl"
+mkdir -p "$SBX/config/projects/$PROJSLUG/$SESSION_B/subagents"
+printf '{"name":"covered"}' > "$SBX/config/projects/$PROJSLUG/$SESSION_B/subagents/agent-covered456.meta.json"
+mkdir -p "$SBX/repo/.bionic/tmp"
+printf 'roster-state/v1|status=confirmed|session=%s|name=covered|agent_id=covered456|launched_at=x\n' "$SESSION_B" \
+  > "$SBX/repo/.bionic/tmp/roster-${SESSION_B}.state"
+rc="$(run_probe "$SBX")"
+expect_eq "a rostered subagent's session still exits 0" "0" "$rc"
+if grep -qE "UNROSTERED.*covered456" "$OUT" "$ERR" 2>/dev/null; then
+  bad "a rostered subagent is NOT flagged UNROSTERED" "unexpected UNROSTERED for covered456"
+else
+  ok "a rostered subagent is NOT flagged UNROSTERED"
+fi
+
+# ============================================================
 section "S7 — mutation-and-restore proofs (design §9, checklist A5/A2)"
 # ============================================================
 

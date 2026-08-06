@@ -150,6 +150,55 @@ expect_pin_in_file "overdue span: eventual stop still needs fresh observation" \
   "the eventual stop still requires its own fresh observation" "$SKILL"
 
 echo ""
+echo "=== Section 5e: Roster as SSoT (epic-15 w3 slice 4/7) ==="
+# Design ownership table: "the roster is SSoT for 'who is ours' — the plan's
+# dispatch ledger is a rendering of it." Extends the existing "Ledger the
+# dispatch" span rather than contradicting it.
+expect_pin_in_file "roster: authoritative launch record" \
+  "is the authoritative launch record" "$SKILL"
+expect_pin_in_file "roster: plan ledger renders it, not the reverse" \
+  "the plan's dispatch ledger renders it, not the reverse" "$SKILL"
+
+echo ""
+echo "=== Section 5f: Same-actor + foreign-stop rules (epic-15 w3 slice 4/7) ==="
+# spec AC-4 (D-3, same-actor) and AC-6 (D-3/R-F, foreign-stop) — rendered as
+# one sentence each inside the stopping standard, per hooks/stop-guard.sh's
+# shipped same-actor and foreign-stop checks (slice 4/6).
+expect_pin_in_file "same-actor rule: the discharging observation is the stopper's own" \
+  "The observation that discharges a stop is the stopper's own" "$SKILL"
+expect_pin_in_file "foreign-stop rule: not-launched is not stoppable by name" \
+  "What this session did not launch, it does not stop by name" "$SKILL"
+expect_pin_in_file "foreign-stop rule: full agent id is the deliberate path" \
+  "the full agent id is the deliberate path" "$SKILL"
+
+echo ""
+echo "=== Section 5g: Liveness fields, ratified simpler form (epic-15 w3 slice 4/7) ==="
+# Liveness contract (plan Assumptions, user-RATIFIED 2026-08-05): cadence rides
+# with the progress path; a subprocess claim is CONDITIONAL-REQUIRED; shape
+# emerges from field presence rather than a restated label (the F-1 class).
+expect_pin_in_file "liveness fields: heading" "**Liveness fields.**" "$SKILL"
+expect_pin_in_file "liveness fields: cadence rides with the progress path" \
+  "carries a \`cadence\` alongside it" "$SKILL"
+expect_pin_in_file "liveness fields: extends the 15-minute rule by one number" \
+  "extending the 15-minute rule by one number" "$SKILL"
+expect_pin_in_file "liveness fields: too-quiet is relative to the author's own declaration" \
+  "quieter than the author's own declaration" "$SKILL"
+expect_pin_in_file "liveness fields: subprocess claim is conditional-required" \
+  "is conditional-required: declared only when the task backgrounds a long-running command" "$SKILL"
+expect_pin_in_file "liveness fields: quiescence irrelevant while the claimed process exists" \
+  "quiescence is irrelevant" "$SKILL"
+expect_pin_in_file "liveness fields: absence with no deliverable wakes immediately" \
+  "wakes the watcher immediately" "$SKILL"
+expect_pin_in_file "liveness fields: shape emerges from field presence, no restated label" \
+  "shape emerges from which are present" "$SKILL"
+
+echo ""
+echo "=== Section 5h: Watcher-arming, P1 (epic-15 w3 slice 4/7) ==="
+expect_pin_in_file "watcher-arming: heading" "**Watcher-arming.**" "$SKILL"
+expect_pin_in_file "watcher-arming: long-shape declarations are armed at dispatch time" \
+  "is armed with a quiescence watcher at dispatch time" "$SKILL"
+
+echo ""
 echo "=== Section 6: superseded generic non-response text is gone ==="
 # Pre-wave text handled a "wedged agent" uniformly (kill-and-redispatch) with
 # no reader/writer distinction — exactly what the ratified non-response

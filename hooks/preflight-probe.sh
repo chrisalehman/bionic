@@ -81,6 +81,12 @@ LEGACY_STATE_BASENAME="preflight.state"
 LOCK_BASENAME=".preflight.lock"
 OTHER_SESSION_WINDOW_MIN=15   # warn-only liveness heuristic; mtime-based, known to
                               # false-positive on recently-dead sessions (spec Not Doing)
+# Reader copy of hooks/dispatch-preflight.sh's roster filename constants (slice
+# 4/7). This script only reads roster files, byte for byte, so a real prefix
+# mismatch is a mislabeled scan, never a write hazard — kept as a copy per TDD
+# §9 rather than a source, same precedent as the other cross-script duplicates.
+ROSTER_PREFIX="roster-"
+ROSTER_SUFFIX=".state"
 
 say()  { printf 'preflight: %s\n' "$1"; }
 warn() { printf 'preflight: WARN %s\n' "$1"; }
@@ -255,13 +261,42 @@ if [ -d "$CONFIG_DIR/projects" ]; then
     if [ -f "$_d$SESSION_ID.jsonl" ]; then PROJ_DIR="${_d%/}"; break; fi
   done
 fi
+# Rostered-vs-unrostered (spec Design: "its other-live-session scan reports
+# rostered-vs-unrostered"). Two additions per detected live foreign session,
+# both display/warn only — this is a context probe, never a blocking one, and
+# starts stay fail open whatever it finds:
+#   (a) whether that session carries a roster file at .bionic/tmp/roster-<sid>.state;
+#   (b) any agent-*.meta.json under that session's OWN subagents directory whose
+#       id no roster file on disk names (by `agent_id=` field) is UNROSTERED.
+# The roster file is the ONE covering fact (design ownership table); this reads
+# it, never writes it.
+report_roster_coverage() {  # <foreign session id> <that session's transcript dir>
+  local sid="$1" tdir="$2" has_roster="absent"
+  [ -f "$STATE_DIR/${ROSTER_PREFIX}${sid}${ROSTER_SUFFIX}" ] && has_roster="present"
+  warn "another live session on this project: $sid (transcript touched within ${OTHER_SESSION_WINDOW_MIN}m; roster: ${has_roster})"
+
+  local sub="$tdir/$sid/subagents"
+  [ -d "$sub" ] || return 0
+  local meta base aid rf covered
+  for meta in "$sub"/agent-*.meta.json; do
+    [ -f "$meta" ] || continue
+    base="${meta##*/}"; base="${base%.meta.json}"; aid="${base#agent-}"
+    covered=0
+    for rf in "$STATE_DIR"/"${ROSTER_PREFIX}"*"${ROSTER_SUFFIX}"; do
+      [ -f "$rf" ] || continue
+      if grep -qF "|agent_id=${aid}|" "$rf" 2>/dev/null; then covered=1; break; fi
+    done
+    [ "$covered" -eq 0 ] && warn "UNROSTERED live subagent metadata: ${aid} (session ${sid})"
+  done
+}
+
 if [ -n "$PROJ_DIR" ]; then
   while IFS= read -r _t; do
     [ -n "$_t" ] || continue
     _other="$(basename "$_t" .jsonl)"
     [ "$_other" = "$SESSION_ID" ] && continue
     OTHER_SESSIONS=$((OTHER_SESSIONS + 1))
-    warn "another live session on this project: $_other (transcript touched within ${OTHER_SESSION_WINDOW_MIN}m)"
+    report_roster_coverage "$_other" "$PROJ_DIR"
   done <<EOF
 $(find "$PROJ_DIR" -maxdepth 1 -name '*.jsonl' -mmin "-$OTHER_SESSION_WINDOW_MIN" 2>/dev/null)
 EOF
