@@ -189,7 +189,9 @@ done
 #
 # DELIBERATELY DUPLICATED from hooks/stop-check.sh, byte for byte, for the reason the TDD
 # gives (§9): a sourced library the installer misses is a silently inert watcher. The
-# copies are held together by the cross-gate agreement suite.
+# copies are held together by tests/cross-gate-agreement.test.sh §I.1, which extracts
+# file_mtime, line_field, claims_live and clean (stop-check.sh's mline_value) out of BOTH
+# files and compares the bodies — a one-side edit goes red there.
 
 file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
 
@@ -285,9 +287,9 @@ ledger_write() {  # <line> — append-only; the header is written once
 # and the unarmed nag in hooks/dispatch-preflight.sh): is an arming still open, and is its
 # process still there? Entries are replayed in order — an arm opens, a retire or an exit
 # naming the same pid closes.
-OPEN_PID=""; OPEN_TICK=""; OPEN_AT=""
+OPEN_PID=""; OPEN_TICK=""; OPEN_AT=""; OPEN_PID_BAD=""
 read_open_arming() {
-  OPEN_PID=""; OPEN_TICK=""; OPEN_AT=""
+  OPEN_PID=""; OPEN_TICK=""; OPEN_AT=""; OPEN_PID_BAD=""
   [ -f "$LEDGER_FILE" ] || return 0
   local line ev p
   while IFS= read -r line || [ -n "$line" ]; do
@@ -307,6 +309,32 @@ read_open_arming() {
         ;;
     esac
   done < "$LEDGER_FILE"
+
+  # VALIDATE BEFORE BELIEVING. This value came out of a file in the repo's own .bionic/tmp
+  # — the directory the header's threat model names as repo-controlled — and it reaches
+  # `kill -0` below and `kill -TERM` in `retire`. In POSIX kill a NEGATIVE pid is a process
+  # GROUP and -1 is "every process the caller may signal", so an unvalidated `pid=-1` makes
+  # one `retire` a session-wide SIGTERM; 0 is the caller's own group and 1 is init. No
+  # adversary is required — any truncated or partial write that leaves a `-` in the field
+  # lands in the same place. Rejecting everything that is not a plain integer above 1 makes
+  # both call sites safe by construction, at the cost of one comparison.
+  #
+  # A rejected entry is treated as NO open arming, never as a live one: the second-order
+  # damage of believing it is worse than the signal, because `status` would then report
+  # live=yes forever — `arm` refused permanently and the unarmed-dispatch nag silent, one
+  # bad byte both wedging the watcher and suppressing the warning about it.
+  case "$OPEN_PID" in
+    ''|*[!0-9]*|0|1) OPEN_PID_BAD="$OPEN_PID"; OPEN_PID=""; OPEN_TICK=""; OPEN_AT="" ;;
+  esac
+}
+
+# Rejected, but never in silence — this script's doctrine is "named, never guessed", and a
+# damaged ledger is exactly the state an operator needs told rather than smoothed over.
+warn_bad_pid() {
+  [ -n "$OPEN_PID_BAD" ] || return 0
+  say "the ledger's open arming carries an unusable pid (\"$OPEN_PID_BAD\"); it is ignored"
+  say "— nothing is treated as live and nothing was signalled. If $LEDGER_FILE is damaged,"
+  say "delete it: it is machine-local and safe to lose."
 }
 
 # A pid this shell can signal. Recycling is a theoretical false-positive and is accepted:
@@ -334,10 +362,36 @@ add_finding() {  # <class> <name> <agent_id> <detail>
 "
 }
 
-# Done-detection. Every declared deliverable must be present AND non-empty: an empty file
-# is a path that got created, not a deliverable that got written (the same substance test
-# hooks/stop-check.sh applies). Deliverables are comma-separated, as hooks/stop-check.sh
-# reads them.
+# Done-detection. ONE concept with TWO owners: hooks/stop-check.sh answers "is this
+# deliverable delivered?" for the operator, this script answers it for the watcher, and
+# they answered DIFFERENTLY until this branch set was mirrored onto stop-check.sh:526-541
+# (Step-6 review D-2). A regular file is delivered only with bytes in it (an empty file is
+# a path that got created, not a deliverable that got written); a DIRECTORY only with a
+# file somewhere in it — `[ -s <dir> ]` is TRUE for an empty directory on both BSD and GNU,
+# which used to mark a row SATISFIED, and satisfied means permanently exempt from watching;
+# anything else is absent. The two implementations are held to one answer by
+# tests/cross-gate-agreement.test.sh §I.2, which asks BOTH on shared fixtures and compares
+# their answers to each other rather than to a restatement, so the next divergence goes red
+# whichever side moves.
+#
+# The ONE deliberate divergence, pinned by that same section: a relative path resolves
+# against the REPO ROOT here and against the operator's cwd there. This process is armed
+# once as a background job and outlives the directory it was armed from, so a cwd-relative
+# reading would make a single roster row mean different things on two arms of the same
+# file; the operator's typed path, by contrast, is typed from somewhere on purpose.
+deliverable_delivered() {  # <one path, as the roster spells it>
+  local p; p="$(abs_path "$1")"
+  if [ -f "$p" ]; then
+    [ -s "$p" ]
+  elif [ -d "$p" ]; then
+    [ "$(find "$p" -type f 2>/dev/null | grep -c .)" -gt 0 ]
+  else
+    return 1
+  fi
+}
+
+# Deliverables are comma-separated, as hooks/stop-check.sh reads them. Every one of them
+# must be delivered; a row that declared none is never satisfied.
 deliverables_all_present() {  # <comma-separated list>
   local list="$1" p n=0 old
   [ -n "$list" ] || return 1
@@ -349,7 +403,7 @@ deliverables_all_present() {  # <comma-separated list>
     p="$(printf '%s' "$p" | sed -e 's/^ *//' -e 's/ *$//')"
     [ -n "$p" ] || continue
     n=$((n + 1))
-    [ -s "$(abs_path "$p")" ] || return 1
+    deliverable_delivered "$p" || return 1
   done
   [ "$n" -gt 0 ]
 }
@@ -444,10 +498,19 @@ evaluate_row() {  # <roster row>
 
 evaluate_roster() {
   FINDINGS=""; FINDING_COUNT=0; ROW_COUNT=0
+  # A symlinked roster is not read at all (§8) — but this process stays ARMED over one, so
+  # what it cannot watch is NAMED rather than returned on in silence. Every other
+  # path-safety refusal in this script is loud and exits 2; this is the one branch that
+  # keeps running, which is exactly why a silent return left the sweeper looking healthy
+  # while watching nothing (Step-6 review C-2). Tested BEFORE `-f`, which is true THROUGH a
+  # link to a file and false for a dangling one — both are the same unwatchable state.
+  if [ -L "$ROSTER_FILE" ]; then
+    note_degradation "(roster)" "symlinked-roster-unreadable"
+    return 0
+  fi
   # Absent is normal: `arm` runs before the session's first dispatch, and the roster
-  # appears when that dispatch does. A symlinked roster is not read at all (§8).
+  # appears when that dispatch does.
   [ -f "$ROSTER_FILE" ] || return 0
-  [ -L "$ROSTER_FILE" ] && return 0
   local line
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
@@ -497,6 +560,7 @@ case "$VERB" in
 
   status)
     read_open_arming
+    warn_bad_pid
     if pid_live "$OPEN_PID"; then
       say "a sweeper is live for this session (pid $OPEN_PID, armed $OPEN_AT, tick ${OPEN_TICK}s)"
       printf '%s|live=yes|pid=%s|tick=%s|armed_at=%s|session=%s|ledger=%s|findings=%s\n' \
@@ -516,6 +580,7 @@ case "$VERB" in
 
   retire)
     read_open_arming
+    warn_bad_pid
     if [ -z "$OPEN_PID" ]; then
       say "no open arming for this session; nothing to retire"
       exit 0
@@ -542,6 +607,7 @@ case "$VERB" in
 
   arm)
     read_open_arming
+    warn_bad_pid
     if pid_live "$OPEN_PID"; then
       die "REFUSED — a sweeper is already live for this session: pid $OPEN_PID, armed at $OPEN_AT, tick ${OPEN_TICK}s."
       die "One sweeper per session is the invariant this wave exists to restore, so a second"
