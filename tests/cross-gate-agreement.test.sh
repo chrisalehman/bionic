@@ -59,9 +59,16 @@ PARTY_ER="${W1R_PARTY_ER:-$REPO_ROOT/hooks/execution-recorder.sh}"
 
 PROBE="$REPO_ROOT/hooks/preflight-probe.sh"
 OBSERVE="$REPO_ROOT/hooks/stop-check.sh"
+SWEEPER="$REPO_ROOT/hooks/session-sweeper.sh"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/w1r-agreement.XXXXXX")" && pwd -P)"
-trap 'rm -rf "$SANDBOX"' EXIT
+BG_PIDS=""
+cleanup() {
+  local p
+  for p in $BG_PIDS; do kill -9 "$p" 2>/dev/null; done
+  rm -rf "$SANDBOX"
+}
+trap cleanup EXIT
 export HOME="$SANDBOX/home"
 export CLAUDE_CONFIG_DIR="$SANDBOX/cfg"     # NOT $HOME/.claude — see the header
 mkdir -p "$CLAUDE_CONFIG_DIR" "$HOME/.claude"
@@ -639,6 +646,19 @@ expect_contains "the producer spells the identity key 'session_id='" "session_id
 expect_contains "the start gate reads that same key by name" "'^session_id='" "$(cat "$PARTY_DP")"
 
 # Consumer 1 — the start gate: the produced value passes; one character off refuses.
+# "passes in silence" (below) needs a genuinely LIVE session sweeper armed for this
+# session/repo, or slice 4/3's unarmed nag fires legitimately and breaks that claim.
+# `exec` matters: without it the ledger's own pid would name a throwaway subshell, not
+# this process, and the nag's liveness check would target the wrong pid.
+( cd "$IREPO" && exec env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" arm --tick 300 ) \
+  >"$SANDBOX/identity-sweeper.out" 2>&1 &
+ISWEEPER_PID=$!
+BG_PIDS="$BG_PIDS $ISWEEPER_PID"
+_i=0
+while [ ! -s "$IREPO/.bionic/tmp/sweeper-$SID_A.state" ] && [ "$_i" -lt 50 ]; do
+  sleep 0.1; _i=$((_i + 1))
+done
+
 OUT=$(mk_agent_payload "$SID_A" "$IREPO" | bash "$PARTY_DP" 2>&1); ST=$?
 expect_eq "start gate: the producer's own session passes" "0" "$ST"
 expect_eq "start gate: and passes in silence" "" "$OUT"
