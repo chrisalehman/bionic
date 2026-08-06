@@ -1,14 +1,18 @@
 #!/bin/bash
-# THE STOP GATE — epic-15 wave-01R. ONE script, TWO registrations:
+# THE STOP GATE — epic-15 wave-01R, extended at wave-03 slice 4/6. ONE
+# registration, PreToolUse|TaskStop. A stop during an active wave is permitted
+# only against an observation that is:
 #
-#   PreToolUse|Bash     — the RECORDER arm. When the orchestrator runs
-#                         hooks/stop-check.sh, this records that an examination
-#                         happened and what activity level it saw. It NEVER
-#                         blocks anything, under any condition.
-#   PreToolUse|TaskStop — the GATE arm. A stop during an active wave is
-#                         permitted only against a fresh observation of that
-#                         target from this session (D-1), and one observation
-#                         discharges exactly one stop (D-2).
+#   OURS      — this session's (D-1), and the STOPPER'S OWN look, not another
+#               actor's borrowed one (D-3, slice 4/6);
+#   FRESH     — on both activity channels: the target's working log (D-1) and,
+#               where the work contract named one, its progress artifact (D-6,
+#               slice 4/6);
+#   SPENT     — one observation discharges exactly one stop (D-2).
+#
+# And it is a stop of an agent THIS SESSION LAUNCHED. A target the session roster
+# does not record is refused when addressed by name and permitted when addressed
+# by full agent id (AC-6, slice 4/6) — a name is not an identity.
 #
 # Why a gate at all: a stop is irreversible, and the failure mode it guards is
 # the orchestrator's own judgment lapsing mid-drift — so the guarantee cannot
@@ -16,8 +20,19 @@
 # §3.1). The gate reads state and decides; it never judges. Every judgment
 # belongs upstream, in the observation.
 #
+# THIS SCRIPT NO LONGER WRITES THE RECORDS IT SPENDS (slice 4/4). It used to
+# carry a second arm on PreToolUse|Bash that watched for hooks/stop-check.sh in a
+# command line and recorded an observation from the command TEXT. That arm fired
+# BEFORE the command ran, so it could never know whether one had — and it paid
+# for that twice: once when its command-line grammar diverged from the producer's
+# and the record named an agent nobody had examined (Step-6 review F-1), and once
+# as the standing residual where a refused or mistyped invocation still left a
+# consumable record (critic finding A). Recording now happens once, in
+# hooks/execution-recorder.sh on PostToolUse, from the machine line the
+# observation itself prints. There is exactly ONE writer of this state and this
+# gate is purely its reader.
+#
 # FAIL DIRECTIONS (TDD §7, pinned by hooks/stop-guard.test.sh):
-#   - the recorder arm never blocks, ever;
 #   - the gate is OPEN and SILENT before the active-wave verdict (an
 #     unconfigured machine is not a stop decision);
 #   - the gate is CLOSED and LOUD after it (irreversibility: the ambiguous case
@@ -31,11 +46,15 @@
 set -uo pipefail
 
 STATE_VERSION="v1"
-# The most records the observation state may retain (Step-6 review P2). Both arms
-# walk this file line by line, so its length is a cost every observation and every
-# stop pays; the bound is fail-closed, since a dropped record refuses a stop that
-# one re-observation re-arms.
-MAX_RECORDS=200
+# The session roster's schema token. Written by hooks/dispatch-preflight.sh at
+# launch and completed by hooks/execution-recorder.sh at execution confirmation;
+# read here, and by hooks/stop-check.sh, never written. A row this gate cannot
+# read is a row it will not guess at — an unknown version simply does not match,
+# which lands on the closed side.
+ROSTER_VERSION="v1"
+# The bound on this file's length lives with its WRITER, hooks/execution-recorder.sh
+# — this gate only reads it, and a reader that also capped it would be a second
+# opinion about how much evidence a session may hold.
 OBSERVE_CMD="bash ~/.claude/hooks/stop-check.sh"
 
 INPUT=$(cat)
@@ -57,8 +76,8 @@ file_size()  { stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || ech
 # Second copy of hooks/stop-check.sh's resolver, same deliberate duplication.
 # Comparison is LITERAL: a target string is never treated as a pattern.
 # The two copies are driven against one fixture world by
-# tests/cross-gate-agreement.test.sh §C, which asks the observation and this
-# recorder the same resolution question about the same typed name.
+# tests/cross-gate-agreement.test.sh §C, which asks the observation and this gate
+# the same resolution question about the same typed name.
 scan_subagent_dirs() {  # <typed> <dir>... -> "<agent-id>|<meta>|<subagents-dir>" per match
   local typed="$1"; shift
   local sub meta base id name
@@ -79,8 +98,8 @@ scan_subagent_dirs() {  # <typed> <dir>... -> "<agent-id>|<meta>|<subagents-dir>
 # §2.5 of record/epic-15-kill-interception-experiment.md captures the layout
 # verbatim: "<transcript-dir>/<session-id>/subagents/agent-<id>.jsonl". Scoping
 # resolution to the CALLER'S session is exact rather than heuristic — a session
-# can only stop its own tasks — and it is the same scoping on both arms, so the
-# recorder and the gate agree by construction.
+# can only stop its own tasks — and hooks/execution-recorder.sh scopes its writes
+# the same way, so writer and reader agree by construction.
 session_subagents_dir() {  # <transcript-path>
   local tr="$1"
   [ -n "$tr" ] || return 1
@@ -99,9 +118,9 @@ record_version() { printf '%s' "$1" | cut -d'|' -f1; }
 state_paths() {  # <repo> -> echoes "<state-dir>|<state-file>"; nonzero if unsafe
   local repo="$1"
   # A hostile repo controls its own .bionic/ contents (TDD §8). A symlink at
-  # either level redirects our write outside the repo — the proven
-  # arbitrary-file-overwrite shape from the discarded run's review. Refuse
-  # rather than follow; refusing to RECORD only makes the later stop refuse.
+  # any level lets a repo choose which file this gate reads its evidence out of —
+  # the OPEN direction, which §8 forbids a repo from reaching. Refuse rather than
+  # follow: this gate refuses the stop, which is the safe side.
   [ -L "$repo/.bionic" ] && return 1
   [ -L "$repo/.bionic/tmp" ] && return 1
   local dir="$repo/.bionic/tmp"
@@ -110,208 +129,7 @@ state_paths() {  # <repo> -> echoes "<state-dir>|<state-file>"; nonzero if unsaf
 }
 
 # ============================================================
-# ARM 1 — the RECORDER (PreToolUse|Bash). Never blocks.
-# ============================================================
-
-if [ "$TOOL_NAME" = "Bash" ]; then
-  CMD=$(_jq '.tool_input.command')
-
-  # RELEVANCE FIRST, before anything expensive. This arm is registered on every
-  # Bash call on the machine; the discarded run did a full plan-directory walk
-  # (jq + git + find, unbounded with plan count) on all of them before checking
-  # whether the command was even related (checklist A7). One fixed-string grep
-  # is the whole hot path for every unrelated command.
-  printf '%s' "$CMD" | grep -qF 'stop-check.sh' || exit 0
-
-  SID=$(_jq '.session_id')
-  TRANSCRIPT=$(_jq '.transcript_path')
-  CWD=$(_jq '.cwd')
-  [ -n "$SID" ] && [ -n "$TRANSCRIPT" ] && [ -n "$CWD" ] || exit 0
-
-  SUB=$(session_subagents_dir "$TRANSCRIPT") || exit 0
-  REPO=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null) || exit 0
-  [ -n "$REPO" ] || exit 0
-  PATHS=$(state_paths "$REPO") || exit 0
-  STATE_DIR="${PATHS%|*}"; STATE_FILE="${PATHS#*|}"
-
-  # THE DIRECTORY SET THE OPERATOR SAW (Step-6 review C1). This arm is
-  # PreToolUse: it fires BEFORE the observation runs and can never read the
-  # producer's outcome. So the only way "an examination happened" can be a fact
-  # is for this arm to ask the resolution question over the SAME candidate set
-  # hooks/stop-check.sh asks it over — every session of this project, then
-  # that producer's all-projects fallback. Where that set does not name
-  # exactly one agent, the operator was shown a candidate list or an "unresolved"
-  # message and NO evidence tier at all; a record written anyway would attest to
-  # an examination that produced nothing.
-  #
-  # The set is derived from the PAYLOAD, not from $HOME: §2.5's layout is
-  # <projects-root>/<project-slug>/<session-id>/subagents, so the caller's own
-  # session directory names the project directory outright — the operator's
-  # candidate set is its siblings, and the producer's last-resort all-projects
-  # sweep is one level up again. hooks/stop-check.sh has no payload and must
-  # reach the same two tiers by slugifying its cwd; this arm does not have to
-  # guess, and inherits nothing from $HOME or $CLAUDE_CONFIG_DIR.
-  PROJ_DIR="${SUB%/*/subagents}"        # <projects-root>/<project-slug>
-  PROJECTS_ROOT="${PROJ_DIR%/*}"        # <projects-root>
-
-  observation_dirs() {  # -> every session of THIS project, one dir per line
-    local d out=""
-    for d in "$PROJ_DIR"/*/subagents; do
-      [ -d "$d" ] && out="${out}${d}
-"
-    done
-    printf '%s' "$out"
-  }
-
-  is_interpreter() {
-    case "${1##*/}" in
-      bash|sh|zsh|dash|ksh|env|exec|command|nohup|time) return 0 ;;
-      *) return 1 ;;
-    esac
-  }
-
-  # Write one observation under a lock. Read-modify-write on shared state races
-  # otherwise (checklist A4), and the temp file must carry an unpredictable name
-  # (checklist A2) — a predictable one plus a planted symlink was a proven
-  # arbitrary-file overwrite.
-  write_record() {  # <session> <target-id> <typed> <log> <mtime> <size>
-    local sid="$1" tid="$2" typed="$3" log="$4" mt="$5" sz="$6"
-    case "$sid$tid$typed$log" in *'|'*) return 0 ;; esac
-    mkdir -p "$STATE_DIR" 2>/dev/null || return 0
-
-    local lock="$STATE_DIR/.stop-check.lock" tries=0 reclaimed=0
-    while ! mkdir "$lock" 2>/dev/null; do
-      tries=$((tries + 1))
-      # A lock left behind by a killed writer must not wall recording forever —
-      # but the reclaim gets exactly ONE go, and only against a lock that is
-      # actually there. `mkdir` also fails for reasons no reclaim can fix (an
-      # unwritable state directory, both repo-controlled), and `rm -rf` of an
-      # ABSENT path SUCCEEDS — so an unbounded reclaim-and-retry loop spins
-      # forever, blocking every Bash call in that repo (Step-6 review S2/A3).
-      if [ "$tries" -gt 20 ]; then
-        local age now
-        if [ "$reclaimed" -eq 0 ] && [ -d "$lock" ]; then
-          now=$(date -u +%s); age=$((now - $(file_mtime "$lock")))
-          if [ "$age" -gt 30 ]; then
-            reclaimed=1; tries=0
-            rm -rf "$lock" 2>/dev/null
-            continue
-          fi
-        fi
-        return 0   # this arm never blocks, ever — it simply records nothing
-      fi
-      sleep 0.1 2>/dev/null || sleep 1
-    done
-
-    local tmp
-    tmp=$(mktemp "$STATE_DIR/.stop-check.XXXXXX" 2>/dev/null) || { rm -rf "$lock"; return 0; }
-    {
-      printf '# bionic observation records — schema stop-check-state/%s\n' "$STATE_VERSION"
-      # One live record per (session, target): re-observing REPLACES, so a
-      # second stop can never find a second copy of the same look.
-      #
-      # Nothing else pruned this file: a record written by ANOTHER session
-      # survived every write, and both arms read it line by line at a few ms
-      # each, so a multi-session wave taxed every observation and every stop
-      # (Step-6 performance review P2). Two bounds, both fail-closed — a dropped
-      # record refuses a stop that a re-observation immediately re-arms:
-      #   * records whose session's subagents directory is gone are inert (the
-      #     gate resolves targets only through that directory) and are dropped;
-      #   * the survivors are capped, oldest first.
-      if [ -f "$STATE_FILE" ]; then
-        {
-          while IFS= read -r line; do
-            case "$line" in '#'*|'') continue ;; esac
-            [ "$(record_field "$line" session)" = "$sid" ] \
-              && [ "$(record_field "$line" target)" = "$tid" ] && continue
-            local rlog rdir
-            rlog=$(record_field "$line" log); rdir="${rlog%/agent-*}"
-            [ -n "$rdir" ] && [ ! -d "$rdir" ] && continue
-            printf '%s\n' "$line"
-          done < "$STATE_FILE"
-        } | tail -n "$((MAX_RECORDS - 1))"
-      fi
-      printf '%s|session=%s|target=%s|typed=%s|log=%s|mtime=%s|size=%s\n' \
-        "$STATE_VERSION" "$sid" "$tid" "$typed" "$log" "$mt" "$sz"
-    } > "$tmp" 2>/dev/null
-    mv -f "$tmp" "$STATE_FILE" 2>/dev/null || rm -f "$tmp"
-    rm -rf "$lock"
-    return 0
-  }
-
-  record_observation() {  # <typed>
-    local typed="$1" base matches count id meta sub log mt=0 sz=0 dirs d all=""
-    # `name@team` strips to the name; a bare `@team` keeps the whole string
-    # rather than scanning for the empty one (hooks/stop-check.sh:72-73 does the
-    # same — the copies are asked one question by the §C agreement battery).
-    base="${typed%@*}"; [ -n "$base" ] || base="$typed"
-
-    dirs=$(observation_dirs)
-    # shellcheck disable=SC2086
-    [ -n "$dirs" ] && matches=$(scan_subagent_dirs "$base" $dirs) || matches=""
-    if [ -z "$matches" ]; then
-      for d in "$PROJECTS_ROOT"/*/*/subagents; do
-        [ -d "$d" ] && all="${all}${d}
-"
-      done
-      # shellcheck disable=SC2086
-      [ -n "$all" ] && matches=$(scan_subagent_dirs "$base" $all)
-    fi
-    [ -n "$matches" ] || return 0
-    count=$(printf '%s\n' "$matches" | grep -c .)
-    [ "$count" -eq 1 ] || return 0
-    IFS='|' read -r id meta sub <<< "$matches"
-    # Resolved for the operator — but a session can only stop its own tasks, so a
-    # record the gate arm could never match is not worth writing, and one written
-    # for another session's agent would claim evidence about work this session
-    # cannot act on.
-    [ "$sub" = "$SUB" ] || return 0
-    log="$sub/agent-${id}.jsonl"
-    if [ -f "$log" ]; then mt=$(file_mtime "$log"); sz=$(file_size "$log"); fi
-    write_record "$SID" "$id" "$typed" "$log" "$mt" "$sz"
-  }
-
-  # WHAT COUNTS AS A RUN. `stop-check.sh` must appear as a COMMAND WORD — first
-  # token of a segment, or immediately after an interpreter. `cat hooks/stop-check.sh`,
-  # `grep -n stop-check.sh …` and a commented-out line all MENTION it without
-  # running it, and recording those would manufacture an examination that never
-  # happened.
-  #
-  # THE RESIDUAL, stated rather than claimed away (Step-6 review R3): this closes
-  # the MENTION half of checklist §C's "recorded a look but nothing ran" class,
-  # not the RUN half. This arm is PreToolUse — it fires before the command runs
-  # and never learns whether it ran or succeeded, so `false && bash …stop-check.sh
-  # x`, or a later PreToolUse hook blocking the whole call, still leaves a record
-  # behind. What C1's resolution adds is that such a record can only exist for a
-  # target the operator's own command WOULD have resolved uniquely; moving the
-  # write to the producer (or to PostToolUse) is what would close the rest, and
-  # that is a registration change, not a patch.
-  while IFS= read -r segment; do
-    [ -n "$segment" ] || continue
-    set -f; set -- $segment; set +f
-    [ "$#" -gt 0 ] || continue
-    case "$1" in '#'*) continue ;; esac
-    pos=0; prev=""
-    while [ "$#" -gt 0 ]; do
-      pos=$((pos + 1))
-      if [ "${1##*/}" = "stop-check.sh" ] && { [ "$pos" -eq 1 ] || is_interpreter "$prev"; }; then
-        shift
-        while [ "$#" -gt 0 ]; do
-          case "$1" in -*) shift; continue ;; esac
-          record_observation "$1"
-          break
-        done
-        break
-      fi
-      prev="$1"; shift
-    done
-  done <<< "$(printf '%s' "$CMD" | sed 's/&&/\n/g; s/||/\n/g; s/;/\n/g; s/|/\n/g')"
-
-  exit 0
-fi
-
-# ============================================================
-# ARM 2 — the GATE (PreToolUse|TaskStop).
+# THE GATE (PreToolUse|TaskStop).
 # ============================================================
 
 [ "$TOOL_NAME" = "TaskStop" ] || exit 0
@@ -323,9 +141,9 @@ CWD=$(_jq '.cwd')
 REPO=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null) || exit 0
 [ -n "$REPO" ] || exit 0
 
-# Third copy of active-wave detection (dispatch-preflight and the evidence gate
-# hold the others). Deliberately duplicated per TDD §9 and held together by the
-# N-way agreement suite, which drives all three including the evidence gate.
+# One of four copies of active-wave detection (dispatch-preflight, the evidence
+# gate and execution-recorder hold the others). Deliberately duplicated per TDD §9
+# and held together by the N-way agreement suite, which drives all four.
 resolve_docs_root() {
   local proj="$1" config="$1/.bionic/config.yaml" override
   if [ -f "$config" ]; then
@@ -378,6 +196,21 @@ echo "$CURRENT" | grep -qE '^([0-9]+[ab]?|T[0-9]+)$' || exit 0
 
 RAW=$(_jq '.tool_input.task_id')
 
+# THE ACTOR REQUESTING THIS STOP (D-3, slice 4/6). A subagent-invoked payload
+# carries a top-level `agent_id`; the orchestrator's does not (slice 4/1 probe,
+# assumption A resolved FULL). hooks/execution-recorder.sh renders the same field
+# the same way into `observer=` — absence as the literal token `orchestrator`, so
+# neither side ever has to decide what a blank means. One key, two payloads.
+ACTOR=$(_jq '.agent_id')
+[ -n "$ACTOR" ] || ACTOR="orchestrator"
+
+# What the Fix line names. It stays RUNNABLE AS PRINTED (Step-6 review R2) on
+# every path: a refusal that hands back a foreign target rewrites the TARGET to
+# the unambiguous full id, and one that names an unlooked-at progress artifact
+# appends the flag that looks at it. Both are still one pasteable command.
+FIX_TARGET="${RAW:-<agent-name-or-id>}"
+FIX_EXTRA=""
+
 deny() {  # <reason line>...
   echo "BLOCKED: a stop needs a fresh observation of its target — a wave is active." >&2
   echo "" >&2
@@ -388,7 +221,7 @@ deny() {  # <reason line>...
   # bracketed placeholders on it became three positional arguments the
   # observation reported as absent deliverables (Step-6 review R2). The optional
   # arguments are described beneath the command, never inside it.
-  echo "Fix: ${OBSERVE_CMD} ${RAW:-<agent-name-or-id>}" >&2
+  echo "Fix: ${OBSERVE_CMD} ${FIX_TARGET}${FIX_EXTRA}" >&2
   echo "     (pass each contracted deliverable path as a further argument)" >&2
   echo "Then read what it prints, and stop again if the evidence supports it." >&2
   echo "One observation discharges exactly one stop (D-2), and it goes stale the" >&2
@@ -434,6 +267,97 @@ PATHS=$(state_paths "$REPO") \
   || deny "The observation state path is a symlink; nothing here will read or write through it."
 STATE_DIR="${PATHS%|*}"; STATE_FILE="${PATHS#*|}"
 
+# ---------- AC-6: what this session did not launch, it does not stop BY NAME ----------
+#
+# A NAME IS NOT AN IDENTITY. It is chosen by the operator, reused across waves,
+# and written to disk by every session that ever ran here — which is how a dead
+# epic-14 fleet came to answer to the names a live session was still using
+# (the bb20f616 exhibit, continuation.md §carry-overs). The identity is the
+# metadata's own filing: the platform writes an agent's metadata under the
+# subagents directory of the session that launched it, and nothing else writes
+# there, so "this session launched it" is a fact on disk rather than a memory.
+# A target filed under another session is NOT OURS, and stopping it by name is
+# refused.
+#
+# THE FULL AGENT ID IS THE ESCAPE HATCH, and it is not a loophole: an id is
+# unambiguous by construction, so naming one is a statement about a particular
+# agent rather than a guess that resolved. Refusing those too would outlaw the
+# documented zombie-predecessor cleanup (by-id stops after a /clear); the design
+# rejected both "warn but allow" and "refuse always" for exactly this pair of
+# reasons. A by-id stop still needs a fresh observation like any other.
+#
+# WHAT IDENTITY IS, corrected in slice 4/9: the metadata's own filing. An agent
+# under <session>/subagents/ was launched by <session>. Slice 4/6 keyed this on
+# ROSTER MEMBERSHIP and live operation broke both arms — unconfirmed rows (every
+# row, until a session restarts after the recorder ships) matched by NAME and
+# handed ownership to another session's corpse, while every agent dispatched
+# before the roster hook shipped had no row and was refused as foreign. The
+# roster keeps the job it can do: it carries the CONTRACT, and a `confirmed` row
+# still establishes ownership BY AGENT ID. It is never a name-oracle again. Read
+# the way hooks/stop-check.sh reads it, deliberately duplicated per TDD §9 and
+# driven over one fixture world by tests/cross-gate-agreement.test.sh §F.
+#
+# WHAT THIS CHECK STILL GUARDS, named honestly because it is narrower than what
+# the roster rule claimed to guard: resolution here is already scoped to
+# ${transcript}/subagents, so a target outside this session's own directory can
+# only resolve when the payload's transcript path and its session key DISAGREE.
+# That disagreement is precisely what a name-keyed rule could not see, and it is
+# the one way the bb20f616 collision reaches this gate rather than the
+# observation (whose scan is project-wide, which is where it did fire).
+AGENT_NAME=$(jq -r '.name // empty' "$META" 2>/dev/null)
+OWNING_SID="${SUBDIR%/subagents}"; OWNING_SID="${OWNING_SID##*/}"
+ROSTER_FILE="$STATE_DIR/roster-${SID}.state"
+ROSTER_ROW=""
+ROSTER_ID_MATCH=""
+if [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
+  ROW_BY_ID=""; ROW_BY_NAME=""
+  while IFS= read -r rline; do
+    case "$rline" in '#'*|'') continue ;; esac
+    case "$rline" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
+    rid=$(record_field "$rline" agent_id)
+    rname=$(record_field "$rline" name)
+    # `confirmed`, not merely non-empty — the same tightening as
+    # hooks/stop-check.sh's copy, for the same reason (Step-6 review C-2): the
+    # comment above always stated the invariant this way, while the code leaned
+    # on hooks/dispatch-preflight.sh emitting `agent_id=` empty on `intended`
+    # rows to keep it true. Here the gap is a wall, not a display: an intended
+    # row carrying an id walked a foreign agent past the ownership rule.
+    [ -n "$rid" ] && [ "$rid" = "$AGENT_ID" ] \
+      && [ "$(record_field "$rline" status)" = "confirmed" ] && ROW_BY_ID="$rline"
+    [ -n "$rname" ] && [ "$rname" = "$AGENT_NAME" ] && ROW_BY_NAME="$rline"
+  done < "$ROSTER_FILE"
+  ROSTER_ID_MATCH="$ROW_BY_ID"
+  ROSTER_ROW="${ROW_BY_ID:-$ROW_BY_NAME}"
+fi
+
+if [ "$OWNING_SID" != "$SID" ] && [ -z "$ROSTER_ID_MATCH" ]; then
+  # FOREIGN or DEAD HISTORY, by the OWNING session's transcript — the same
+  # existence check hooks/stop-check.sh, hooks/preflight-probe.sh and
+  # hooks/dispatch-preflight.sh already make, so the operator reads one
+  # vocabulary across all four. It answers whether that session's transcript
+  # file still exists, and nothing about whether the agent is running, which is
+  # why neither label says `live` any more (slice 4/9).
+  if [ -f "${SUBDIR%/subagents}.jsonl" ]; then
+    CLASSIFICATION="FOREIGN"
+    WHOSE="that session's transcript is still on disk, which says nothing about whether the agent is running"
+  else
+    CLASSIFICATION="DEAD HISTORY"
+    WHOSE="that session's transcript is gone — this is history's agent, not yours"
+  fi
+  if [ "${RAW%@*}" != "$AGENT_ID" ]; then
+    # The way out is the id, so the id is what the Fix line observes.
+    FIX_TARGET="$AGENT_ID"
+    deny "Target '${RAW}' was not launched by this session: ${CLASSIFICATION}." \
+         "Its metadata is filed under session ${OWNING_SID}, not this one (${SID}), and" \
+         "${WHOSE}." \
+         "A NAME is not an identity — it is reused across waves and written to disk by every" \
+         "session that ever ran here, which is how a dead fleet came to answer to live names." \
+         "Address it by its FULL AGENT ID instead, which is unambiguous by construction:" \
+         "    ${AGENT_ID}" \
+         "(A by-id stop still needs a fresh observation of its own.)"
+  fi
+fi
+
 [ -f "$STATE_FILE" ] \
   || deny "No observation has been recorded in this repo at all."
 
@@ -460,6 +384,30 @@ if [ -z "$RECORD" ]; then
     "The only observation of '${RAW}' was recorded by a different session (${FOREIGN})." \
     "Another session's look is not evidence that I looked."
   deny "No observation of '${RAW}' (${AGENT_ID}) has been recorded by this session."
+fi
+
+# ---------- D-3: the look must be the STOPPER'S OWN (AC-4) ----------
+#
+# D-1 made an observation perishable. It never made one ATTRIBUTABLE: any record
+# for the target discharged any actor's stop, so a subagent's look could pay for
+# the orchestrator's stop and neither had seen what the other saw. Same session,
+# so the session key above says nothing about it — the actor is a finer grain
+# than the session, and it is the grain the judgment happens at, because the
+# reader of the evidence is who decides.
+#
+# A record with no observer at all cannot prove this either way, and unprovable
+# lands on the closed side (§7): the cost is one re-observation.
+REC_OBSERVER=$(record_field "$RECORD" observer)
+if [ -z "$REC_OBSERVER" ]; then
+  deny "The observation of '${RAW}' records no observer, so it cannot be shown to be yours." \
+       "A look nobody signed is not evidence that YOU looked (D-3). Observe again."
+fi
+if [ "$REC_OBSERVER" != "$ACTOR" ]; then
+  deny "The observation of '${RAW}' was made by a different actor." \
+       "    it was looked at by:  ${REC_OBSERVER}" \
+       "    this stop comes from: ${ACTOR}" \
+       "A look you did not take is not evidence that you looked (D-3): the reader of the" \
+       "evidence is who decides, and that reader has to be you. Take your own look."
 fi
 
 # ---------- D-1: freshness by ACTIVITY BOUNDARY ----------
@@ -489,6 +437,68 @@ if [ "$NOW_MTIME" != "$REC_MTIME" ] || [ "$NOW_SIZE" != "$REC_SIZE" ]; then
        "Its evidence tier now includes work you have not seen — which may be the very work a stop would destroy." \
        "This is an activity boundary, not a timer: an agent dormant since your look stays stoppable however long ago it was."
 fi
+
+# ---------- D-6: the contracted progress artifact is the SECOND activity channel (AC-5) ----------
+#
+# The comparison above watches one channel, and an agent that spends forty
+# minutes inside a single tool call writes nothing to it. "Dormant since your
+# look" is then true of a wedged agent and a working one alike — and the work
+# contract's own progress artifact, the one thing that separates them, counted
+# for nothing here. The rule is the log's rule, applied to the second channel:
+# any activity after the look stales the look.
+#
+# THE PATH COMES OUT OF THE RECORD, not out of a second resolution. The
+# observation already resolved it under the precedence slice 4/5 fixed (an
+# explicit --progress overrides the roster's row), and re-deriving it here would
+# be a second parser answering the same question — the F-1 divergence class this
+# wave closed elsewhere. What the roster is still consulted for is the one thing
+# the record cannot say: that a contracted channel was never looked at at all.
+#
+# A relative path is resolved against the REPO ROOT, which is where the contract
+# is written from and where the observation runs; the resolved path is printed in
+# the refusal so the comparison is never a hidden one.
+REC_PROGRESS=$(record_field "$RECORD" progress)
+REC_PMTIME=$(record_field "$RECORD" progress_mtime)
+REC_PSTATE=$(record_field "$RECORD" progress_state)
+
+abs_progress() {  # <path> -> absolute
+  case "$1" in /*) printf '%s\n' "$1" ;; *) printf '%s/%s\n' "$REPO" "$1" ;; esac
+}
+
+case "$REC_PSTATE" in
+  present|absent)
+    if [ -n "$REC_PROGRESS" ]; then
+      PROG_ABS=$(abs_progress "$REC_PROGRESS")
+      NOW_PSTATE="absent"; NOW_PMTIME=0
+      if [ -e "$PROG_ABS" ]; then NOW_PSTATE="present"; NOW_PMTIME=$(file_mtime "$PROG_ABS"); fi
+      if [ "$NOW_PSTATE" != "$REC_PSTATE" ] || [ "$NOW_PMTIME" != "$REC_PMTIME" ]; then
+        deny "'${RAW}' has written to its contracted PROGRESS ARTIFACT since your observation," \
+             "so that observation is stale." \
+             "    artifact: ${PROG_ABS}" \
+             "    at your look: ${REC_PSTATE} (mtime ${REC_PMTIME})   ·   now: ${NOW_PSTATE} (mtime ${NOW_PMTIME})" \
+             "This is the second activity channel (D-6): a long-running command silences the" \
+             "working log for its whole duration, and the progress artifact is what tells a" \
+             "wedged agent from a working one. It is an activity boundary, not a timer."
+      fi
+    fi
+    ;;
+  *)
+    # The look never opened a contracted channel. An artifact nobody looked at can
+    # never go stale, so without this the check above is dodgeable by simply
+    # looking wrong — which is the ordinary case whenever the observation ran
+    # without its own session key and so never saw the roster at all.
+    if [ -n "$ROSTER_ROW" ]; then
+      ROSTER_PROGRESS=$(record_field "$ROSTER_ROW" progress)
+      if [ -n "$ROSTER_PROGRESS" ]; then
+        FIX_EXTRA=" --progress ${ROSTER_PROGRESS}"
+        deny "The work contract for '${RAW}' names a progress artifact your observation never looked at." \
+             "    contracted progress: ${ROSTER_PROGRESS}   (from this session's roster)" \
+             "An observation that skips a contracted channel cannot be staled by it, so it is" \
+             "not evidence about the work this stop would end (D-6). Look at it, then stop."
+      fi
+    fi
+    ;;
+esac
 
 # ---------- D-2: consume on stop ----------
 #

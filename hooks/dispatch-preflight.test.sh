@@ -54,12 +54,24 @@ expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no outp
 #     differ) — the matcher "Task" matching tool_name "Agent" (§2.12,
 #     confirmed live in §2.1) independently corroborates that "Agent" is the
 #     real tool_name value for a subagent dispatch.
-#   * tool_name:"Agent" value and tool_input SHAPE — SHAPE-ONLY: no verbatim
-#     PreToolUse|Agent capture exists in the record (only SubagentStart,
-#     which fires after dispatch and carries agent_id/agent_type, was
-#     captured for the Agent-tool path — §2.4). This gate reads only
-#     tool_name, cwd, and session_id from the envelope, none of which come
-#     from tool_input, so the tool_input shape is never load-bearing here.
+#   * tool_name:"Agent" value and tool_input SHAPE — FAITHFUL as of slice 4/3
+#     to .bionic/docs/record/w3-slice1-posttooluse-probe.md capture E (an
+#     Agent-tool payload captured live at CLI 2.1.222): tool_input carries
+#     description, prompt, subagent_type, run_in_background, and — when the
+#     dispatch names one — name. The earlier note here ("SHAPE-ONLY, no
+#     verbatim Agent capture exists") described the pre-probe state and is
+#     superseded. tool_input became load-bearing in slice 4/3: the roster row
+#     is lifted from it.
+#   * tool_input.model — SHAPE-EXTRAPOLATED and declared: the Agent tool
+#     accepts a `model` override, but no captured payload carries one (every
+#     probe dispatch inherited). It is fixtured here because the roster
+#     records it WHEN PRESENT; its absence is deliberately not an absence
+#     finding, and S10c drives the no-model path.
+#   * dispatch brief text (BRIEF_FULL / the compact variant) — SYNTHESIZED,
+#     but its LABEL GRAMMAR is the shipped one: skills/canonical-sdlc/SKILL.md
+#     §Dispatch's seven-field sentence (span-pinned by
+#     tests/dispatch-spans.test.sh §5d) and the exemplar brief recorded
+#     verbatim at .bionic/docs/record/w2-ac3-run.md:25-40.
 #   * attestation record — FAITHFUL to hooks/preflight-probe.sh's own
 #     schema/comment block: `# comment` + `key=value` lines, read BY KEY
 #     (checklist A6), `session_id=` the field this gate keys on (Slice 4/1
@@ -70,13 +82,37 @@ expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no outp
 SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
 
-mk_agent_payload() {  # <sid> <cwd>
-  jq -n --arg s "$1" --arg c "$2" \
+# A realistic dispatch brief carrying all seven labeled contract fields in the
+# shipped grammar. The DEFAULT for every payload below, because a brief that
+# carries its contract fields is the ordinary case — the roster's absence
+# warning must not fire on it (that is what keeps the §7 "positive pair: pass in
+# silence" row true), and a fixture that omitted them would have made every
+# pre-slice-4/3 pass case silently exercise the absence path instead
+# (.claude memory: fixtures-can-pin-away-the-test). The absence path gets its
+# own bare-brief fixture in S10c, and both directions are asserted.
+BRIEF_FULL='Canonical-sdlc Step 4, slice 4/9 of epic-99 wave-01; build · audited · wave.
+Your slice: implement the widget behind the existing seam.
+Scope constraint: touch only lib/widget.sh and its paired suite.
+Expected artifact: .bionic/docs/record/w99-widget.txt
+Exit condition: the artifact exists and the paired suite is green.
+Expected duration: ~25 minutes.
+Progress artifact: .bionic/tmp/w99-widget.progress'
+
+# mk_agent_payload <sid> <cwd> [prompt] [name] [model]
+#
+# prompt/name/model default to the contract-complete brief; pass "-" for name or
+# model to omit the field from tool_input entirely (the absence cases).
+mk_agent_payload() {
+  local prompt="${3-$BRIEF_FULL}" name="${4-w99-impl}" model="${5-claude-sonnet-5}"
+  jq -n --arg s "$1" --arg c "$2" --arg p "$prompt" --arg n "$name" --arg m "$model" \
     '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
       prompt_id:"f3cd7d62-305d-47ed-9eaf-46fb12d4f4ed",
       permission_mode:"bypassPermissions", effort:{level:"high"},
       hook_event_name:"PreToolUse", tool_name:"Agent",
-      tool_input:{description:"a test dispatch", subagent_type:"implementor"},
+      tool_input:({description:"a test dispatch", subagent_type:"implementor",
+                   prompt:$p, run_in_background:true}
+                  + (if $n == "-" then {} else {name:$n} end)
+                  + (if $m == "-" then {} else {model:$m} end)),
       tool_use_id:"toolu_018jyjgop7KMxP6yKtoAWWtB"}'
 }
 
@@ -90,11 +126,29 @@ mk_bash_payload() {  # <sid> <cwd>  — an irrelevant tool, for the A7 hoist tes
 }
 
 GATE_OUT=""; GATE_ERR=""; GATE_ST=0
+# Set to a directory to drive the gate with a sandboxed CLAUDE_CONFIG_DIR — the
+# roster prune's liveness lookup reads <config>/projects/*/<session>.jsonl, and
+# the operator's REAL config dir would decide which fixtures survive otherwise.
+GATE_CONFIG_DIR=""
 run_gate() {  # <payload-json>
-  GATE_OUT=$(printf '%s' "$1" | bash "$GATE" 2>"$SANDBOX/.err"); GATE_ST=$?
+  if [ -n "$GATE_CONFIG_DIR" ]; then
+    GATE_OUT=$(printf '%s' "$1" | CLAUDE_CONFIG_DIR="$GATE_CONFIG_DIR" bash "$GATE" 2>"$SANDBOX/.err")
+  else
+    GATE_OUT=$(printf '%s' "$1" | bash "$GATE" 2>"$SANDBOX/.err")
+  fi
+  GATE_ST=$?
   GATE_ERR=$(cat "$SANDBOX/.err")
   return 0
 }
+
+# ---------- roster readers (slice 4/3) ----------
+#
+# BY KEY, never by position — the same rule the attestation and the observation
+# record already follow (checklist A6), so an added field is inert here.
+roster_path()  { printf '%s/.bionic/tmp/roster-%s.state' "$1" "$2"; }
+roster_rows()  { grep -v '^#' "$1" 2>/dev/null | grep -c . ; }
+roster_row()   { grep -v '^#' "$1" 2>/dev/null | sed -n "${2}p"; }   # <file> <n>
+roster_field() { printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-; }
 
 # make_repo <name> <active-wave:yes|no> -> echoes the repo path
 make_repo() {
@@ -132,6 +186,9 @@ PLAN
 }
 
 # write_attestation <repo> <session_id> [extra kv lines...]
+#
+# slice 4/2 (D-5): writes to the PER-SESSION filename, preflight-<sid>.state — the
+# filename is now the primary key, matching hooks/preflight-probe.sh's own scheme.
 write_attestation() {
   local repo="$1" sid="$2"; shift 2
   mkdir -p "$repo/.bionic/tmp"
@@ -144,6 +201,22 @@ write_attestation() {
     printf 'repo=%s\n' "$repo"
     local line
     for line in "$@"; do printf '%s\n' "$line"; done
+  } > "$repo/.bionic/tmp/preflight-$sid.state"
+  chmod 600 "$repo/.bionic/tmp/preflight-$sid.state"
+}
+
+# write_legacy_attestation <repo> <session_id> — the OLD, pre-wave-03 single-slot
+# filename. Used to prove the gate never consults it (slice 4/2).
+write_legacy_attestation() {
+  local repo="$1" sid="$2"
+  mkdir -p "$repo/.bionic/tmp"
+  {
+    printf '# bionic environment attestation — machine-local, safe to delete\n'
+    printf 'version=1\n'
+    printf 'kind=preflight-attestation\n'
+    printf 'session_id=%s\n' "$sid"
+    printf 'written_at=1785790000\n'
+    printf 'repo=%s\n' "$repo"
   } > "$repo/.bionic/tmp/preflight.state"
   chmod 600 "$repo/.bionic/tmp/preflight.state"
 }
@@ -243,14 +316,50 @@ case "$GATE_ERR" in
 esac
 
 # ============================================================
-echo "=== S6 — active wave + attestation is a FOREIGN session -> REFUSE (AC-2) ==="
+echo "=== S6 — active wave + only a FOREIGN session's attestation exists -> REFUSE (AC-2) ==="
 # ============================================================
+#
+# slice 4/2 (D-5): the foreign attestation is written at ITS OWN per-session filename
+# (preflight-<SID_B>.state) — there is no file at all for SID_A, which is exactly what
+# "foreign, however fresh, is not an attestation for this session" means once filenames
+# are the primary key.
 
 REPO=$(make_repo r6 yes)
 write_attestation "$REPO" "$SID_B"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "foreign attestation exits 2" "2" "$GATE_ST"
-expect_contains "foreign-attestation refusal names the fix command" "bash ~/.claude/hooks/preflight-probe.sh" "$GATE_ERR"
+expect_status "foreign-only attestation exits 2 (no file exists for this session)" "2" "$GATE_ST"
+expect_contains "foreign-only refusal names the fix command" "bash ~/.claude/hooks/preflight-probe.sh" "$GATE_ERR"
+
+# ============================================================
+echo "=== S6b — active wave + BOTH sessions hold valid attestations concurrently (AC-2) ==="
+# ============================================================
+#
+# The D-5 core case: two sessions on one repo, each with its own per-session file. Both
+# dispatches pass — session B's attestation existing is neither necessary nor sufficient
+# for session A's gate, and vice versa.
+
+REPO=$(make_repo r6b yes)
+write_attestation "$REPO" "$SID_A"
+write_attestation "$REPO" "$SID_B"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "session A's dispatch passes with both attestations present" "0" "$GATE_ST"
+expect_empty "session A's pass produces no stdout" "$GATE_OUT"
+run_gate "$(mk_agent_payload "$SID_B" "$REPO")"
+expect_status "session B's dispatch ALSO passes with both attestations present" "0" "$GATE_ST"
+expect_empty "session B's pass produces no stdout" "$GATE_OUT"
+
+# ============================================================
+echo "=== S6c — the legacy single-slot file is NEVER consulted (slice 4/2) ==="
+# ============================================================
+#
+# A legacy preflight.state carrying this session's own, perfectly valid-looking
+# session_id= must still refuse: only the per-session filename is ever read.
+
+REPO=$(make_repo r6c yes)
+write_legacy_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "a legacy single-slot attestation (even keyed to this session) still exits 2" "2" "$GATE_ST"
+expect_contains "legacy-file refusal names the fix command" "bash ~/.claude/hooks/preflight-probe.sh" "$GATE_ERR"
 
 # ============================================================
 echo "=== S7 — active wave + attestation IS this session -> pass, silent (AC-2) ==="
@@ -265,11 +374,11 @@ expect_empty "matching attestation produces no stderr" "$GATE_ERR"
 
 # forward-compatibility (A6): unknown extra fields, reordered, must still
 # read the session_id BY KEY, not by position — mirrors
-# preflight-probe.test.sh's own reorder case.
+# preflight-probe.test.sh's own reorder case. Written at the PER-SESSION path.
 REPO=$(make_repo r7b yes)
 mkdir -p "$REPO/.bionic/tmp"
 printf 'unknown_future_field=x\nsession_id=%s\nversion=1\nrepo=%s\n' "$SID_A" "$REPO" \
-  > "$REPO/.bionic/tmp/preflight.state"
+  > "$REPO/.bionic/tmp/preflight-$SID_A.state"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "reordered/extended attestation with a matching key still passes" "0" "$GATE_ST"
 expect_empty "reordered/extended pass produces no stdout" "$GATE_OUT"
@@ -280,7 +389,7 @@ echo "=== S8 — hostile/malformed attestation shapes -> REFUSE, never followed 
 
 # attestation path occupied by a directory
 REPO=$(make_repo r8a yes)
-mkdir -p "$REPO/.bionic/tmp/preflight.state"
+mkdir -p "$REPO/.bionic/tmp/preflight-$SID_A.state"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "attestation path is a directory -> refuse" "2" "$GATE_ST"
 
@@ -291,7 +400,7 @@ REPO=$(make_repo r8b yes)
 mkdir -p "$REPO/.bionic/tmp"
 DECOY="$SANDBOX/decoy-attestation"
 printf 'session_id=%s\nversion=1\n' "$SID_A" > "$DECOY"
-ln -s "$DECOY" "$REPO/.bionic/tmp/preflight.state"
+ln -s "$DECOY" "$REPO/.bionic/tmp/preflight-$SID_A.state"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "attestation path is a symlink -> refuse, not followed" "2" "$GATE_ST"
 
@@ -309,7 +418,7 @@ for _lvl in .bionic/tmp .bionic; do
   ELSEWHERE="$SANDBOX/elsewhere-$_tag/.bionic/tmp"
   mkdir -p "$ELSEWHERE"
   printf 'session_id=%s\nversion=1\nkind=preflight-attestation\n' "$SID_A" \
-    > "$ELSEWHERE/preflight.state"
+    > "$ELSEWHERE/preflight-$SID_A.state"
   if [ "$_lvl" = ".bionic/tmp" ]; then
     mkdir -p "$REPO/.bionic"
     ln -s "$ELSEWHERE" "$REPO/.bionic/tmp"
@@ -328,7 +437,7 @@ done
 # attestation file exists but is empty / has no session_id= line at all
 REPO=$(make_repo r8c yes)
 mkdir -p "$REPO/.bionic/tmp"
-printf 'version=1\nkind=preflight-attestation\n' > "$REPO/.bionic/tmp/preflight.state"
+printf 'version=1\nkind=preflight-attestation\n' > "$REPO/.bionic/tmp/preflight-$SID_A.state"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "attestation with no session_id= line -> refuse" "2" "$GATE_ST"
 
@@ -367,6 +476,415 @@ else
 fi
 expect_absent "fix-command run produces no 'No such file or directory'" "No such file or directory" "$RUN9_ERR"
 expect_absent "fix-command run produces no 'command not found'" "command not found" "$RUN9_ERR"
+
+# ============================================================
+echo "=== S10 — the roster row is written on the pass path (AC-1, launch half) ==="
+# ============================================================
+#
+# Governing design: spec §Design "Roster" + §Component boundaries. The row is
+# appended at launch with status `intended`; the full agent id and `confirmed`
+# are slice 4/4's, not this one's.
+
+REPO=$(make_repo r10 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+R10=$(roster_path "$REPO" "$SID_A")
+
+expect_status "a contract-complete dispatch still passes (verdict unchanged)" "0" "$GATE_ST"
+expect_empty "a contract-complete dispatch still prints nothing on stdout" "$GATE_OUT"
+expect_empty "a contract-complete dispatch still prints nothing on stderr" "$GATE_ERR"
+expect_status "the roster file exists at the per-session path" "0" "$([ -f "$R10" ] && echo 0 || echo 1)"
+expect_contains "the roster carries a versioned schema header" "roster-state/v1" "$(head -1 "$R10" 2>/dev/null)"
+expect_status "exactly one row was appended" "1" "$(roster_rows "$R10")"
+
+ROW=$(roster_row "$R10" 1)
+expect_contains "the row's leading field is the schema version" "roster-state/v1" "$(printf '%s' "$ROW" | cut -d'|' -f1)"
+expect_status "row status is 'intended'" "intended" "$(roster_field "$ROW" status)"
+expect_status "row carries this session's id" "$SID_A" "$(roster_field "$ROW" session)"
+expect_status "row carries the agent name from tool_input" "w99-impl" "$(roster_field "$ROW" name)"
+expect_status "row carries subagent_type from tool_input" "implementor" "$(roster_field "$ROW" subagent_type)"
+expect_status "row carries the model from tool_input" "claude-sonnet-5" "$(roster_field "$ROW" model)"
+expect_status "row carries the tool_use_id (the recorder's correlation key)" \
+  "toolu_018jyjgop7KMxP6yKtoAWWtB" "$(roster_field "$ROW" tool_use_id)"
+expect_status "row's agent_id is empty at launch (slice 4/4 fills it)" "" "$(roster_field "$ROW" agent_id)"
+
+LAUNCHED=$(roster_field "$ROW" launched_at)
+if printf '%s' "$LAUNCHED" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'; then
+  ok "row carries a UTC ISO launch timestamp ($LAUNCHED)"
+else
+  no "row carries a UTC ISO launch timestamp" "got '$LAUNCHED'"
+fi
+
+# contract state, lifted from the brief's labeled fields
+expect_status "row lifts the deliverable path from 'Expected artifact:'" \
+  ".bionic/docs/record/w99-widget.txt" "$(roster_field "$ROW" deliverable)"
+expect_contains "row lifts the expected duration" "25" "$(roster_field "$ROW" duration)"
+expect_status "row lifts the progress path from 'Progress artifact:'" \
+  ".bionic/tmp/w99-widget.progress" "$(roster_field "$ROW" progress)"
+expect_status "no contract field is recorded absent for a complete brief" "" "$(roster_field "$ROW" absent)"
+
+# ============================================================
+echo "=== S10b — the compact one-line label grammar is lifted too (AC-1) ==="
+# ============================================================
+#
+# Real briefs put two labels on one line ("Expected duration: ~35 minutes.
+# Progress: append to <path> per stage") — see the exemplar at
+# .bionic/docs/record/w2-ac3-run.md. A line-scoped extractor would swallow the
+# second label into the first's value; the span must end at the NEXT LABEL, not
+# at the newline.
+
+BRIEF_COMPACT='Slice 4/4 of epic-99 wave-01; build · audited · wave.
+Deliverables: (1) one commit `feat(x): thing (epic-99 w1 slice 4/4)`; (2) record/w99-two.txt, verbatim.
+Expected duration: ~35 minutes. Progress: append to .bionic/tmp/w99-two.progress per stage.
+Exit: both deliverables exist.'
+
+REPO=$(make_repo r10b yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_COMPACT" "w99-two")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "compact grammar: the dispatch passes" "0" "$GATE_ST"
+expect_contains "compact grammar: deliverable lifted from 'Deliverables:'" \
+  "record/w99-two.txt" "$(roster_field "$ROW" deliverable)"
+expect_contains "compact grammar: duration lifted, not swallowed by the next label" \
+  "35" "$(roster_field "$ROW" duration)"
+expect_absent "compact grammar: the duration value stops at the next label" \
+  "Progress" "$(roster_field "$ROW" duration)"
+expect_status "compact grammar: progress path lifted from a mid-line 'Progress:'" \
+  ".bionic/tmp/w99-two.progress" "$(roster_field "$ROW" progress)"
+# "4/4" inside the commit subject is slash-bearing but not a path; a lifted
+# deliverable list containing it would mean the extractor is matching fractions.
+expect_absent "compact grammar: a bare fraction is not lifted as a deliverable path" \
+  "4/4" "$(roster_field "$ROW" deliverable)"
+
+# ============================================================
+echo "=== S10c — a missing contract field is RECORDED + WARNED, never blocked (AC-1) ==="
+# ============================================================
+#
+# Spec §Component boundaries: "Extraction failure warns and records absence —
+# starts fail open (TDD §7)." The verdict is the load-bearing assertion here: a
+# malformed brief is a warning, not a refusal.
+
+REPO=$(make_repo r10c yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Go and do the thing, please." "-" "-")"
+R10C=$(roster_path "$REPO" "$SID_A")
+ROW=$(roster_row "$R10C" 1)
+
+expect_status "a brief with no contract fields at all still PASSES the gate" "0" "$GATE_ST"
+expect_empty "the absence warning never goes to stdout" "$GATE_OUT"
+expect_contains "the absence is warned on stderr" "WARN" "$GATE_ERR"
+expect_contains "the warning names the deliverable field" "deliverable" "$GATE_ERR"
+expect_contains "the warning names the duration field" "duration" "$GATE_ERR"
+expect_contains "the warning names the progress field" "progress" "$GATE_ERR"
+expect_absent "the warning is not phrased as a refusal" "BLOCKED" "$GATE_ERR"
+expect_status "the row is still appended for a fieldless brief" "1" "$(roster_rows "$R10C")"
+ABSENT=$(roster_field "$ROW" absent)
+expect_contains "the row records the deliverable absence" "deliverable" "$ABSENT"
+expect_contains "the row records the duration absence" "duration" "$ABSENT"
+expect_contains "the row records the progress absence" "progress" "$ABSENT"
+expect_contains "the row records the missing agent name" "name" "$ABSENT"
+expect_status "the absent contract field is empty in the row, not fabricated" "" "$(roster_field "$ROW" deliverable)"
+# An OMITTED model is not an absence finding — the Agent tool inherits the
+# orchestrator's model when none is given, so a warning here would fire on the
+# ordinary case and train the operator to read past the real ones.
+expect_absent "an omitted model is NOT recorded as an absence" "model" "$ABSENT"
+
+# ============================================================
+echo "=== S10L — the LIVENESS fields are lifted: cadence + the subprocess claim (6-axis A-1) ==="
+# ============================================================
+#
+# The ratified liveness contract shipped into skills/canonical-sdlc/SKILL.md
+# §Dispatch in slice 4/7 — "The progress-artifact path carries a `cadence`
+# alongside it" and "A subprocess claim — a process pattern plus its output file
+# — is conditional-required". The Step-6 six-axis review found the procedure
+# layer instructing authors to declare two fields this writer had no extraction
+# site for, with hooks/stop-check.sh:389 already READING `claims=` off the row
+# (axis-3 FAIL: a shipped reader with no producer). These cases are the writer
+# half of that closure; hooks/stop-check.test.sh §8(g) drives the reader half
+# over a row THIS gate really wrote.
+#
+# GRAMMAR, stated because it is the one place this extractor reads a value that
+# is not a path and not free text: `cadence` may be introduced by a colon OR by
+# whitespace alone, because the ratified sentence puts it "alongside" the
+# progress path inside one sentence rather than on a labeled line of its own.
+# The subprocess claim's PATTERN is the backticked/quoted run when the author
+# marks one, else the text up to the first comma or arrow; the output file half
+# is the path the same span carries.
+
+BRIEF_LIVENESS='Canonical-sdlc Step 4, slice 4/10 of epic-99 wave-01; build · audited · wave.
+Your slice: the widget, behind the existing seam.
+Expected artifact: .bionic/docs/record/w99-live.txt
+Expected duration: ~50 minutes. Progress: .bionic/tmp/w99-live.progress, cadence ~6m.
+Subprocess claim: `bash tests/run.sh` → .bionic/tmp/w99-suite.log
+Exit condition: the artifact exists and the suite is green.'
+
+REPO=$(make_repo r10L yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_LIVENESS" "w99-live")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+
+expect_status "liveness brief: the dispatch passes" "0" "$GATE_ST"
+expect_status "the row lifts the cadence declared beside the progress path" \
+  "~6m." "$(roster_field "$ROW" cadence)"
+expect_status "the row lifts the subprocess claim's PATTERN, backticks stripped" \
+  "bash tests/run.sh" "$(roster_field "$ROW" claims)"
+expect_status "the progress path still stops at the cadence that follows it" \
+  ".bionic/tmp/w99-live.progress" "$(roster_field "$ROW" progress)"
+expect_absent "the cadence value stops at the next label" \
+  "Subprocess" "$(roster_field "$ROW" cadence)"
+expect_absent "the claimed pattern does not swallow the output file beside it" \
+  "w99-suite.log" "$(roster_field "$ROW" claims)"
+expect_status "the duration is unharmed by the new labels" \
+  "~50 minutes." "$(roster_field "$ROW" duration)"
+
+# The colon form and the unquoted comma form — the two other shapes the ratified
+# sentence permits an author to write.
+#
+# The claim line reads `Subprocess claim:` rather than the bare `Claims:` this
+# fixture used until the Step-6 critic (F-2). That bare label was withdrawn from
+# the grammar because it also matched "verify every claim the report claims:" in
+# an ordinary review brief and invented a subprocess from it. The two properties
+# this case exists for are untouched by the respelling — a cadence introduced by
+# a colon on its own line, and an unquoted pattern that stops at the comma before
+# its output file — and the vocabulary it now uses is the contract's own.
+BRIEF_LIVENESS2='Slice 4/11 of epic-99 wave-01.
+Deliverables: record/w99-b.txt
+Expected duration: ~40 minutes.
+Progress: .bionic/tmp/w99-b.progress
+Cadence: every 5 minutes
+Subprocess claim: pgrep-me-w99, output .bionic/tmp/w99-b.log
+Exit: the deliverable exists.'
+
+REPO=$(make_repo r10L2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_LIVENESS2" "w99-live2")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "the colon form of cadence lifts too" \
+  "every 5 minutes" "$(roster_field "$ROW" cadence)"
+expect_status "an unquoted claim pattern stops at the comma before its output file" \
+  "pgrep-me-w99" "$(roster_field "$ROW" claims)"
+
+# CONDITIONAL-REQUIRED, both directions: a brief that declares neither field
+# leaves both EMPTY rather than fabricating one, and — because the subprocess
+# claim is declared only when the task backgrounds a long command — its absence
+# is never an absence FINDING. The whole point of the contract is that shape
+# emerges from which fields are present.
+REPO=$(make_repo r10L3 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-noclaim")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "a brief with no subprocess claim leaves claims= empty, not fabricated" \
+  "" "$(roster_field "$ROW" claims)"
+expect_status "a brief with no cadence leaves cadence= empty" "" "$(roster_field "$ROW" cadence)"
+expect_absent "an undeclared subprocess claim is NOT an absence finding" \
+  "claims" "$(roster_field "$ROW" absent)"
+
+# THE NEGATIVE DIRECTION, which is the one that was missing (Step-6 critic F-2).
+# Every case above declares a liveness contract and checks it is read correctly.
+# None checked the far more common brief that declares NONE and merely uses one
+# of the words in prose — and both labels fabricated a declaration from it.
+#
+# Fabrication is not neutral noise here. Under the ratified contract
+# (skills/canonical-sdlc/SKILL.md) field PRESENCE is the shape key — "shape
+# emerges from which are present… adding a subprocess claim is a delegated
+# command" — and a claims= value opens a `-- claimed process (P2) --` section
+# whose pgrep finds nothing and prints `live: no`, the ALARM direction. So a
+# brief that says "keep a steady cadence" was classified long-shape and armed a
+# quiescence watcher, and one that says "verify every claim" grew a phantom
+# subprocess. Both briefs below are verbatim from the critic's repro
+# (.bionic/docs/record/w3-critic-repro-lift.sh, briefs C and D).
+BRIEF_PROSE_CADENCE='Your slice: write the report.
+Deliverables: .bionic/docs/record/w99.md
+Expected duration: ~40 minutes.
+Progress: .bionic/tmp/w99.progress, a line per section.
+Scope constraint: keep a steady cadence and do not batch the sections.
+Exit: report written.'
+
+REPO=$(make_repo r10L4 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_PROSE_CADENCE" "w99-prose1")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "the word 'cadence' in ordinary prose declares no cadence" \
+  "" "$(roster_field "$ROW" cadence)"
+# …and the fix is not a blunt one: the fields this brief DOES declare still lift.
+expect_status "…while the progress path the same brief declares still lifts" \
+  ".bionic/tmp/w99.progress" "$(roster_field "$ROW" progress)"
+expect_status "…and its duration" "~40 minutes." "$(roster_field "$ROW" duration)"
+
+BRIEF_PROSE_CLAIMS='Your slice: audit the report.
+Deliverables: .bionic/docs/record/audit.md
+Expected duration: ~20 minutes.
+Progress: .bionic/tmp/audit.progress, a line per claim checked.
+Scope constraint: verify every claim the report claims: proof or the label unverified.
+Exit: audit written.'
+
+REPO=$(make_repo r10L5 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_PROSE_CLAIMS" "w99-prose2")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "a brief that REVIEWS claims declares no subprocess claim" \
+  "" "$(roster_field "$ROW" claims)"
+expect_status "…and grows no cadence either" "" "$(roster_field "$ROW" cadence)"
+expect_status "…while its own progress path is still read" \
+  ".bionic/tmp/audit.progress" "$(roster_field "$ROW" progress)"
+
+# The cadence rule stated as the rule it is: the word only declares a cadence
+# where the contract puts it — beside the progress path — so the SAME word in the
+# SAME brief lifts or does not lift depending on where it falls.
+BRIEF_CADENCE_PLACE='Your slice: build it.
+Deliverables: .bionic/docs/record/w99.md
+Expected duration: ~40 minutes.
+Progress: .bionic/tmp/w99.progress, cadence ~9m.
+Scope constraint: keep a steady cadence throughout.
+Exit: built.'
+
+REPO=$(make_repo r10L6 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_CADENCE_PLACE" "w99-place")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "the cadence beside the progress path is the one that counts" \
+  "~9m." "$(roster_field "$ROW" cadence)"
+
+# ============================================================
+echo "=== S10d — rows APPEND; the roster is a ledger, not a slot ==="
+# ============================================================
+
+REPO=$(make_repo r10d yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "first-agent")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "second-agent")"
+R10D=$(roster_path "$REPO" "$SID_A")
+expect_status "two dispatches leave two rows" "2" "$(roster_rows "$R10D")"
+expect_status "the first row survives the second dispatch" "first-agent" "$(roster_field "$(roster_row "$R10D" 1)" name)"
+expect_status "the second row is the second dispatch" "second-agent" "$(roster_field "$(roster_row "$R10D" 2)" name)"
+expect_status "the schema header is written once, not per row" "1" \
+  "$(grep -c '^# bionic session roster' "$R10D")"
+
+# ============================================================
+echo "=== S10e — the roster is per-session from birth (D-5) ==="
+# ============================================================
+
+REPO=$(make_repo r10e yes)
+write_attestation "$REPO" "$SID_A"
+write_attestation "$REPO" "$SID_B"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "agent-of-A")"
+run_gate "$(mk_agent_payload "$SID_B" "$REPO" "$BRIEF_FULL" "agent-of-B")"
+RA=$(roster_path "$REPO" "$SID_A"); RB=$(roster_path "$REPO" "$SID_B")
+expect_status "session A has its own roster file" "0" "$([ -f "$RA" ] && echo 0 || echo 1)"
+expect_status "session B has its own roster file" "0" "$([ -f "$RB" ] && echo 0 || echo 1)"
+expect_status "session A's roster holds only A's launch" "1" "$(roster_rows "$RA")"
+expect_status "session B's roster holds only B's launch" "1" "$(roster_rows "$RB")"
+expect_status "A's row is A's agent" "agent-of-A" "$(roster_field "$(roster_row "$RA" 1)" name)"
+expect_status "B's row is B's agent" "agent-of-B" "$(roster_field "$(roster_row "$RB" 1)" name)"
+expect_status "no shared single-slot roster.state was created" "1" \
+  "$([ -f "$REPO/.bionic/tmp/roster.state" ] && echo 0 || echo 1)"
+
+# ============================================================
+echo "=== S10f — dead-session rosters are pruned, LIVE foreign ones are not (D-5) ==="
+# ============================================================
+#
+# Same liveness rule slice 4/2 established for the attestation
+# (hooks/preflight-probe.sh: a session is live iff its transcript still exists
+# somewhere under CLAUDE_CONFIG_DIR/projects). A live foreign session's roster
+# surviving another session's dispatch IS the concurrency D-5 exists for.
+
+SID_DEAD="deadfeed-0000-4000-8000-000000000001"
+SID_LIVE="1ivefeed-0000-4000-8000-000000000002"
+CFG="$SANDBOX/cfg10f/.claude"
+mkdir -p "$CFG/projects/-some-project"
+: > "$CFG/projects/-some-project/$SID_LIVE.jsonl"
+: > "$CFG/projects/-some-project/$SID_A.jsonl"
+# SID_DEAD deliberately has NO transcript anywhere.
+
+REPO=$(make_repo r10f yes)
+write_attestation "$REPO" "$SID_A"
+mkdir -p "$REPO/.bionic/tmp"
+printf '# bionic session roster — schema roster-state/v1\nroster-state/v1|status=intended|session=%s|name=ghost\n' \
+  "$SID_DEAD" > "$(roster_path "$REPO" "$SID_DEAD")"
+printf '# bionic session roster — schema roster-state/v1\nroster-state/v1|status=intended|session=%s|name=neighbour\n' \
+  "$SID_LIVE" > "$(roster_path "$REPO" "$SID_LIVE")"
+
+GATE_CONFIG_DIR="$CFG"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+GATE_CONFIG_DIR=""
+
+expect_status "the dispatch still passes while pruning" "0" "$GATE_ST"
+expect_status "a DEAD session's roster is pruned" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_DEAD")" ] && echo 0 || echo 1)"
+expect_status "a LIVE foreign session's roster is left untouched" "0" \
+  "$([ -f "$(roster_path "$REPO" "$SID_LIVE")" ] && echo 0 || echo 1)"
+expect_contains "the live foreign roster's content is unmodified" "neighbour" \
+  "$(cat "$(roster_path "$REPO" "$SID_LIVE")" 2>/dev/null)"
+expect_status "our own roster was written" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+# The prune must not reach across artifacts: the attestation files share the
+# same directory and the same per-session scheme.
+expect_status "the prune leaves attestations alone" "0" \
+  "$([ -f "$REPO/.bionic/tmp/preflight-$SID_A.state" ] && echo 0 || echo 1)"
+
+# ============================================================
+echo "=== S10g — a roster WRITE FAILURE warns and leaves the verdict alone ==="
+# ============================================================
+#
+# TDD §7: starts fail open. The roster is a ledger, not a wall — a gate that
+# refused a dispatch because it could not journal it would be a new failure
+# mode, not a safety property.
+
+REPO=$(make_repo r10g yes)
+write_attestation "$REPO" "$SID_A"
+chmod 555 "$REPO/.bionic/tmp"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+chmod 755 "$REPO/.bionic/tmp"
+expect_status "an unwritable state dir does not change the PASS verdict" "0" "$GATE_ST"
+expect_empty "a write failure prints nothing on stdout" "$GATE_OUT"
+expect_contains "a write failure is warned on stderr" "WARN" "$GATE_ERR"
+expect_status "no roster file was left behind" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
+
+# ============================================================
+echo "=== S10h — a symlinked roster path is never written through (§8) ==="
+# ============================================================
+#
+# A hostile repo controls its own .bionic/ contents. It may make this gate fail
+# to journal; it must not gain an arbitrary-file append. (The DIRECTORY-level
+# variants are already refused upstream by the attestation check — S8 drives
+# them — so the file level is the only one reachable here.)
+
+REPO=$(make_repo r10h yes)
+write_attestation "$REPO" "$SID_A"
+DECOY_ROSTER="$SANDBOX/decoy-roster.txt"
+printf 'untouched\n' > "$DECOY_ROSTER"
+ln -s "$DECOY_ROSTER" "$(roster_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "a symlinked roster path does not change the PASS verdict" "0" "$GATE_ST"
+expect_contains "a symlinked roster path is warned" "WARN" "$GATE_ERR"
+expect_status "the symlink target is not appended to" "untouched" "$(cat "$DECOY_ROSTER")"
+
+# ============================================================
+echo "=== S10i — no row on any path that is not a launch ==="
+# ============================================================
+
+# refused dispatch (active wave, no attestation): the launch never happens.
+REPO=$(make_repo r10i yes)
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "a REFUSED dispatch still exits 2" "2" "$GATE_ST"
+expect_status "a refused dispatch writes no roster row" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
+
+# no active wave: this gate has nothing to decide and nothing to ledger.
+REPO=$(make_repo r10i2 no)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "a dispatch outside an active wave exits 0" "0" "$GATE_ST"
+expect_empty "a dispatch outside an active wave stays silent" "$GATE_ERR"
+expect_status "a dispatch outside an active wave writes no roster" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
+
+# a non-Agent tool is not a launch.
+REPO=$(make_repo r10i3 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_bash_payload "$SID_A" "$REPO")"
+expect_status "a Bash call in an attested active wave writes no roster" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
 
 echo ""
 echo "----------------------------------------"
