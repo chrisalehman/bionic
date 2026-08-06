@@ -741,37 +741,73 @@ run_rec "$(mk_bash_post "$SID_A" "$S2_TR" "$S2_REPO" "bash stop-check.sh real" "
 expect_contains "a real observation of a real log is still recorded" \
   "areal-7777777777777777" "$(cat "$S2_REPO/$STATE_REL" 2>/dev/null)"
 
-# P (performance). `stop-check.state` is capped at MAX_RECORDS because every stop
-# walks it; the roster had no cap, no rotation and no compaction — two rows per
-# dispatch, appended forever, and THIS arm rescans the whole file on every
-# dispatch. Measured on the review's fixture: 669 ms at 200 rows, 3152 ms at
-# 1000, against a registered 10 s hook timeout. It degrades to the closed side
-# (an unconfirmed row grants nothing) but silently, and the operator's only
-# symptom is by-name stops beginning to refuse.
+# P (performance). This arm rescans the whole roster on every dispatch, and the
+# roster grows two rows per dispatch for the life of the session. The cost was
+# real: `line_field` is four processes, the loop ran three of them PER ROW, and a
+# single completion measured 696 ms at 200 rows, 3180 ms at 1000 and 9260 ms at
+# 3000 — against the 10 s hook timeout claude-bootstrap.sh registers. Past that
+# the completion arm times out, rows silently stop reaching `confirmed`, and the
+# operator's only symptom is by-name stops beginning to refuse.
+#
+# THE FIX IS THE PREFILTER, NOT A CAP, and the difference matters enough to say
+# here (Step-6 critic F-1). The first remediation capped the file at MAX_RECORDS
+# and evicted by recency — which disarmed the D-6 staleness wall for exactly the
+# agents it exists for, because a live agent's roster row is the only copy of its
+# contract and eviction cannot tell a running agent from a finished one. That
+# whole chain is driven in tests/cross-gate-agreement.test.sh §F; what is pinned
+# HERE is the two properties this file owns: the ledger is never truncated, and
+# the scan stays cheap enough that it does not have to be.
+#
+# Haystacks stay ROW-SCOPED below, never the file: `expect_contains` is
+# `printf | grep -qF` under `pipefail`, and on a multi-megabyte haystack whose
+# match is near the top, grep exits first, printf takes SIGPIPE and the pipeline
+# returns 141 — a false FAIL on a string that is present.
 IFS='|' read -r PR_REPO PR_TR PR_SUB PR_CFG <<< "$(make_world rosterbound yes)"
 seed_roster "$PR_REPO" "$SID_A" "w99-impl" "$TUID"
 PR_ROSTER="$PR_REPO/.bionic/tmp/roster-${SID_A}.state"
+# A SECOND agent, still running, whose brief declared a progress path. It is the
+# OLDEST row in the file after the seed — the first thing eviction-by-recency
+# takes, and the row hooks/stop-guard.sh sources its refusal from.
+printf 'roster-state/v1|status=intended|session=%s|name=live-one|agent_id=|launched_at=2026-08-05T12:00:00Z|subagent_type=implementor|model=|deliverable=|duration=|progress=.bionic/tmp/live-one.progress|claims=|cadence=~6m.|absent=|tool_use_id=toolu_LIVEONE\n' \
+  "$SID_A" >> "$PR_ROSTER"
 {
   _i=0
-  while [ "$_i" -lt 300 ]; do
+  while [ "$_i" -lt 3000 ]; do
     printf 'roster-state/v1|status=confirmed|session=%s|name=old-%s|agent_id=aold-%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_OLD%s\n' \
       "$SID_A" "$_i" "$_i" "$_i"
     _i=$((_i + 1))
   done
 } >> "$PR_ROSTER"
+PR_BEFORE=$(grep -c '^roster-state/v1|' "$PR_ROSTER" 2>/dev/null || echo 0)
+
+# Seconds, not milliseconds, and deliberately: `date +%s` is the one clock every
+# platform this suite runs on has. The budget it has to discriminate is 0.1 s
+# against 9.3 s, so whole seconds are ample and nothing here can flake on
+# resolution.
+PR_T0=$(date -u +%s)
 run_rec "$(mk_agent_post "$SID_A" "$PR_TR" "$PR_REPO" "w99-impl" "$NEW_AID" "$TUID")"
-PR_COUNT=$(grep -c '^roster-state/v1|' "$PR_ROSTER" 2>/dev/null || echo 0)
-if [ "$PR_COUNT" -le 200 ]; then
-  ok "the roster is bounded like the observation state, not unbounded: $PR_COUNT rows"
+PR_ELAPSED=$(( $(date -u +%s) - PR_T0 ))
+if [ "$PR_ELAPSED" -lt 5 ]; then
+  ok "one completion against a 3000-row roster stays well inside the 10 s hook timeout: ${PR_ELAPSED}s"
 else
-  no "the roster is bounded like the observation state" "$PR_COUNT rows retained"
+  no "one completion against a 3000-row roster stays inside the hook timeout" \
+     "took ${PR_ELAPSED}s — the per-row prefilter is not doing its job"
 fi
-expect_contains "the row this event just confirmed survives the bound" \
-  "agent_id=$NEW_AID" "$(cat "$PR_ROSTER" 2>/dev/null)"
-expect_contains "the schema header survives the fold" \
-  "schema roster-state/v1" "$(cat "$PR_ROSTER" 2>/dev/null)"
-expect_contains "the NEWEST rows are the ones kept" "name=old-299" "$(cat "$PR_ROSTER" 2>/dev/null)"
-expect_absent "…and the oldest are the ones dropped" "name=old-0|" "$(cat "$PR_ROSTER" 2>/dev/null)"
+
+expect_eq "the ledger is NOT truncated: the completion is a pure append" \
+  "$((PR_BEFORE + 1))" "$(grep -c '^roster-state/v1|' "$PR_ROSTER" 2>/dev/null || echo 0)"
+expect_contains "the row this event confirmed is appended" \
+  "agent_id=$NEW_AID" "$(grep 'status=confirmed|.*name=w99-impl|' "$PR_ROSTER" 2>/dev/null)"
+expect_contains "the schema header is untouched" \
+  "schema roster-state/v1" "$(head -1 "$PR_ROSTER" 2>/dev/null)"
+PR_LIVE=$(grep 'name=live-one|' "$PR_ROSTER" 2>/dev/null)
+expect_contains "a LIVE agent's row is never evicted, however old (critic F-1)" \
+  "status=intended" "$PR_LIVE"
+expect_contains "…and it keeps the contract state that is its only copy" \
+  "progress=.bionic/tmp/live-one.progress" "$PR_LIVE"
+expect_contains "…including the cadence the brief declared beside it" "cadence=~6m." "$PR_LIVE"
+expect_contains "the oldest filler row is still there too — nothing rotates" \
+  "name=old-0|" "$(grep 'name=old-0|' "$PR_ROSTER" 2>/dev/null)"
 # A roster under the bound is still append-only: nothing is rewritten, and the
 # intended row it completes stays exactly where the launch put it.
 expect_eq "an under-bound roster keeps its intended row (completion is an append)" \
