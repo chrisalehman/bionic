@@ -21,11 +21,15 @@
 set -uo pipefail
 
 PROBE="$(cd "$(dirname "$0")" && pwd)/preflight-probe.sh"
+SWEEPER_SRC="$(cd "$(dirname "$0")" && pwd)/session-sweeper.sh"
 TMPROOT="$(mktemp -d)"
 OUT="$TMPROOT/stdout"; ERR="$TMPROOT/stderr"
 PASS=0; FAIL=0; TOTAL=0
+BG_PIDS=""
 
 cleanup() {
+  local p
+  for p in $BG_PIDS; do kill -9 "$p" 2>/dev/null; done
   # sandboxes may contain deliberately unwritable dirs (repo-not-writable case)
   chmod -R u+rwX "$TMPROOT" 2>/dev/null
   rm -rf "$TMPROOT"
@@ -69,6 +73,9 @@ expect_match() {  # <label> <regex> <file>
 expect_nomatch() {  # <label> <regex> <file>
   if [ ! -f "$3" ]; then bad "$1" "file absent: $3"; return; fi
   if grep -qE "$2" "$3"; then bad "$1" "unexpected match for /$2/"; else ok "$1"; fi
+}
+expect_contains() {  # <label> <needle> <haystack-string>
+  case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "no [$2] in: $(printf '%s' "$3" | head -c 200)" ;; esac
 }
 
 section() { printf '\n=== %s ===\n' "$1"; }
@@ -656,6 +663,71 @@ chmod +x "$SBX/combostub/security"
 rc="$(run_probe "$SBX" PATH="$SBX/combostub:$PATH")"
 expect_eq "mismatched pin does not mask a real blocking failure" "1" "$rc"
 expect_false "mismatched pin does not cause a spurious attestation on blocking failure" [ -e "$SBX/repo/$STATE_REL" ]
+
+# ============================================================
+section "S10 — sweeper arm line: print-only END-OF-RUN ACTION LINE (slice 4/3, AC-6)"
+# ============================================================
+#
+# spec §Component boundaries: "hooks/preflight-probe.sh (modified): after the roster-coverage
+# context probe, prints the arm command as an action line. Print-only — the probe never spawns
+# the sweeper (a process it spawned would be untracked by the harness and its exit-wake lost,
+# design D2)." Ownership table: the arm command string's SSoT is session-sweeper.sh; this probe
+# only renders it, and the printed command must invoke the INSTALLED sibling — the hooks
+# directory is derived from THIS script's own location ($0), never hardcoded.
+
+SBX="$(mk_sandbox)"
+rc="$(run_probe "$SBX")"
+expect_eq "a clean run with the arm line still exits 0" "0" "$rc"
+ARMLINE="$(grep -m1 '^preflight: ARM: ' "$OUT" | sed 's/^preflight: ARM: //')"
+expect_true "the probe prints an ARM: action line on stdout" [ -n "$ARMLINE" ]
+expect_contains "the arm line invokes session-sweeper.sh's arm verb" "session-sweeper.sh arm" "$ARMLINE"
+
+# static pin: the hooks directory in the printed line is DERIVED from the script's own
+# location (dirname "$0"), never a hardcoded ~/.claude path — this is what lets the same
+# line work whether the probe runs from a repo checkout or an installed copy.
+expect_true "the script derives its hooks dir from its own location, not a hardcoded path" \
+  grep -qE 'dirname "\$0"' "$PROBE"
+expect_nomatch "the arm line source does not hardcode ~/.claude/hooks" \
+  'ARM: bash ~/\.claude/hooks' "$PROBE"
+
+# the printed command actually names the SIBLING session-sweeper.sh sitting beside the probe
+# itself — proven by pointing at the sandbox's OWN copy of both scripts rather than trusting
+# string shape alone.
+SBX2="$(mk_sandbox)"
+mkdir -p "$SBX2/hooks-copy"
+cp "$PROBE" "$SBX2/hooks-copy/preflight-probe.sh"
+cp "$SWEEPER_SRC" "$SBX2/hooks-copy/session-sweeper.sh"
+chmod +x "$SBX2/hooks-copy/preflight-probe.sh" "$SBX2/hooks-copy/session-sweeper.sh"
+rc="$( ( cd "$SBX2/repo" && env -u ANTHROPIC_API_KEY \
+          HOME="$SBX2/home" CLAUDE_CONFIG_DIR="$SBX2/config" \
+          CLAUDE_CODE_SESSION_ID="$SESSION_A" \
+          bash "$SBX2/hooks-copy/preflight-probe.sh" ) >"$OUT" 2>"$ERR"; echo $? )"
+expect_eq "the copied-probe run still exits 0" "0" "$rc"
+ARMLINE2="$(grep -m1 '^preflight: ARM: ' "$OUT" | sed 's/^preflight: ARM: //')"
+expect_contains "the copy's arm line points at ITS OWN sibling copy" \
+  "$SBX2/hooks-copy/session-sweeper.sh" "$ARMLINE2"
+
+# the printed command is genuinely runnable: backgrounding it arms a real sweeper against
+# the sandbox repo, provable by the ledger it writes; retired immediately after. `exec`
+# matters — without it, the subshell's pid and the sweeper's own $$ (the pid the ledger
+# records) would differ, same reason session-sweeper.test.sh's sweep_bg uses it.
+( cd "$SBX2/repo" && exec env CLAUDE_CODE_SESSION_ID="$SESSION_A" $ARMLINE2 ) \
+  >"$TMPROOT/armrun.out" 2>&1 &
+ARMPID=$!
+BG_PIDS="$BG_PIDS $ARMPID"
+_i=0
+LEDGER="$SBX2/repo/.bionic/tmp/sweeper-${SESSION_A}.state"
+while [ ! -s "$LEDGER" ] && [ "$_i" -lt 50 ]; do sleep 0.1; _i=$((_i+1)); done
+expect_true "the printed ARM command, run for real, produces a sweeper ledger" [ -s "$LEDGER" ]
+expect_match "the ledger records a live arm event" '^sweeper-ledger/v1\|event=arm\|' "$LEDGER"
+( cd "$SBX2/repo" && env CLAUDE_CODE_SESSION_ID="$SESSION_A" \
+    bash "$SBX2/hooks-copy/session-sweeper.sh" retire ) >/dev/null 2>&1
+kill -9 "$ARMPID" 2>/dev/null
+
+# the probe never spawns the sweeper itself (D2): no process substring naming the sweeper
+# script appears as a background/exec invocation in the probe's own source.
+expect_nomatch "the probe source never execs or backgrounds session-sweeper.sh (D2)" \
+  'session-sweeper\.sh[^"]*&|exec[^\n]*session-sweeper\.sh' "$PROBE"
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'

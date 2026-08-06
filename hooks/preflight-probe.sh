@@ -324,6 +324,16 @@ if [ -n "$_installed_cli_version" ] && [ "$_installed_cli_version" != "$PAYLOAD_
   warn "payload shape (agent_id/D-3 discriminator) unvalidated on $_installed_cli_version; re-run the 4/1 probe method — record/w3-slice1-posttooluse-probe.md — and move the pin"
 fi
 
+# Sweeper arm line (slice 4/3, spec §Component boundaries): a print-only END-OF-RUN ACTION
+# LINE naming the exact command that arms this session's watcher (hooks/session-sweeper.sh).
+# The hooks directory is derived from THIS script's own location — never hardcoded — so the
+# printed command names the INSTALLED sibling wherever this probe actually runs from. This
+# probe NEVER spawns the sweeper itself: a probe-spawned process would be untracked by the
+# harness and its exit-wake lost (design D2). Copy-and-run only.
+_hooks_dir="$(cd "$(dirname "$0")" && pwd)"
+say "next: arm the session sweeper (watches this session's roster; never blocks, never spawned by this probe)"
+say "ARM: bash $_hooks_dir/session-sweeper.sh arm"
+
 # ---------------------------------------------------------------- state mutation
 
 # An unusable state directory does NOT mean the directory is empty: it can be readable
