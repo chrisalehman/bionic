@@ -316,7 +316,14 @@ if [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
     case "$rline" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
     rid=$(record_field "$rline" agent_id)
     rname=$(record_field "$rline" name)
-    [ -n "$rid" ] && [ "$rid" = "$AGENT_ID" ] && ROW_BY_ID="$rline"
+    # `confirmed`, not merely non-empty — the same tightening as
+    # hooks/stop-check.sh's copy, for the same reason (Step-6 review C-2): the
+    # comment above always stated the invariant this way, while the code leaned
+    # on hooks/dispatch-preflight.sh emitting `agent_id=` empty on `intended`
+    # rows to keep it true. Here the gap is a wall, not a display: an intended
+    # row carrying an id walked a foreign agent past the ownership rule.
+    [ -n "$rid" ] && [ "$rid" = "$AGENT_ID" ] \
+      && [ "$(record_field "$rline" status)" = "confirmed" ] && ROW_BY_ID="$rline"
     [ -n "$rname" ] && [ "$rname" = "$AGENT_NAME" ] && ROW_BY_NAME="$rline"
   done < "$ROSTER_FILE"
   ROSTER_ID_MATCH="$ROW_BY_ID"

@@ -1213,6 +1213,156 @@ expect_contains "the gate reads the per-session roster filename the writer write
 
 # ============================================================
 echo ""
+echo "=== G — the roster FILENAME is one pattern with five sites (6-axis D-1) ==="
+# ============================================================
+#
+# `roster-<session-id>.state` under `.bionic/tmp/` is constructed independently in
+# five places: hooks/dispatch-preflight.sh (the writer, via ROSTER_PREFIX/SUFFIX),
+# hooks/preflight-probe.sh (a declared reader copy of the same two constants), and
+# BARE LITERALS in hooks/execution-recorder.sh, hooks/stop-guard.sh and
+# hooks/stop-check.sh. The spec's ownership table named no owner for it, and the
+# only cross-surface guard was a substring grep for `roster-` in the gate's source
+# — which a change to the SUFFIX, or to the directory, passes untouched.
+#
+# So the pattern is driven, not grepped: the writer writes at the canonical path,
+# each reader is shown finding it there, and the same file at a MUTATED name is
+# found by NONE of them. The mutation is what makes this an agreement test rather
+# than a restatement — a suffix change goes red here in four places at once.
+G_ROSTER="$IREPO/.bionic/tmp/roster-$SID_A.state"
+G_MUTANT="$IREPO/.bionic/tmp/roster-$SID_A.txt"
+expect_eq "the writer's roster is at .bionic/tmp/roster-<session>.state" "yes" \
+  "$([ -f "$G_ROSTER" ] && echo yes || echo no)"
+
+# READER 1 — the recorder's completion arm. At the canonical name a dispatch's
+# `intended` row reaches `confirmed`; at any other name there is no row to
+# complete and none is invented.
+g_confirm() {  # -> the confirmed row, if any
+  jq -n --arg s "$SID_A" --arg t "$ITR" --arg c "$IREPO" \
+    '{session_id:$s, transcript_path:$t, cwd:$c, hook_event_name:"PostToolUse",
+      tool_name:"Agent",
+      tool_input:{description:"a dispatch", prompt:"go", subagent_type:"implementor",
+                  name:"w99-impl", run_in_background:true},
+      tool_response:{isAsync:true, status:"async_launched", agentId:"ag99confirm-5555555555",
+                     description:"a dispatch"},
+      tool_use_id:"toolu_018jyjgop7KMxP6yKtoAWWtB"}' \
+    | bash "$PARTY_ER" >/dev/null 2>&1
+  grep 'agent_id=ag99confirm-5555555555' "$G_ROSTER" 2>/dev/null
+}
+mv "$G_ROSTER" "$G_MUTANT"
+g_confirm >/dev/null 2>&1
+expect_eq "a roster at any other filename is not completed by the recorder" "no" \
+  "$([ -f "$G_ROSTER" ] && echo yes || echo no)"
+expect_absent "…and the mutant file is not written through either" \
+  "ag99confirm-5555555555" "$(cat "$G_MUTANT" 2>/dev/null)"
+mv "$G_MUTANT" "$G_ROSTER"
+expect_contains "the recorder completes the row at the canonical filename" \
+  "status=confirmed" "$(g_confirm)"
+
+# READER 2 — the observation. Its contract source is the roster; at any other
+# filename the same look reports no contract at all.
+g_progress_source() {
+  ( cd "$IREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" w99-impl 2>&1 ) \
+    | grep '^stop-check-observation/' | tr '|' '\n' | grep '^progress_source=' | cut -d= -f2-
+}
+expect_eq "the observation takes its contract from the canonical roster" \
+  "roster" "$(g_progress_source)"
+mv "$G_ROSTER" "$G_MUTANT"
+expect_eq "…and finds no contract when the roster is named anything else" \
+  "none" "$(g_progress_source)"
+mv "$G_MUTANT" "$G_ROSTER"
+
+# READER 3 — the stop gate. An observation that never opened the contracted
+# progress channel is refused BECAUSE the roster names one (D-6); with the roster
+# at any other name the gate cannot know a channel exists, and the stop stands.
+g_stop_unnamed() {  # -> the gate's exit status for a channel-blind observation
+  local out
+  out=$( cd "$IREPO" && env CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" bash "$OBSERVE" w99-impl 2>&1 )
+  mk_bash_post "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh w99-impl" "$out" \
+    | bash "$PARTY_ER" >/dev/null 2>&1
+  mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" >/dev/null 2>&1
+  echo $?
+}
+expect_eq "the stop gate reads the contracted channel out of the canonical roster" \
+  "2" "$(g_stop_unnamed)"
+mv "$G_ROSTER" "$G_MUTANT"
+expect_eq "…and knows of no channel when the roster is named anything else" \
+  "0" "$(g_stop_unnamed)"
+mv "$G_MUTANT" "$G_ROSTER"
+
+# READER 4 — the probe's roster coverage, which scans OTHER live sessions' roster
+# files by the same pattern.
+printf '{}\n' > "$IPROJ/$SID_B.jsonl"
+G_ROSTER_B="$IREPO/.bionic/tmp/roster-$SID_B.state"
+cp "$G_ROSTER" "$G_ROSTER_B"
+g_probe_roster() {
+  ( cd "$IREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" ANTHROPIC_API_KEY="sk-fixture-not-a-real-key" \
+      HOME="$SANDBOX/home" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" bash "$PROBE" 2>&1 ) \
+    | grep -F "another live session on this project: $SID_B"
+}
+expect_contains "the probe finds another session's roster at the canonical filename" \
+  "roster: present" "$(g_probe_roster)"
+mv "$G_ROSTER_B" "$IREPO/.bionic/tmp/roster-$SID_B.txt"
+expect_contains "…and reports absent for the same file under any other name" \
+  "roster: absent" "$(g_probe_roster)"
+rm -f "$IREPO/.bionic/tmp/roster-$SID_B.txt" "$IPROJ/$SID_B.jsonl"
+
+# Both halves of the name, spelled by all five sites — so a rename of either half
+# fails with a legible reason rather than silently halving the fleet's view.
+for _party in "$PARTY_DP" "$PROBE" "$PARTY_ER" "$PARTY_SG" "$OBSERVE"; do
+  _src=$(cat "$_party")
+  expect_contains "$(basename "$_party") spells the roster filename prefix" "roster-" "$_src"
+  expect_contains "$(basename "$_party") spells the roster filename suffix" ".state" "$_src"
+  expect_contains "$(basename "$_party") resolves it under .bionic/tmp" ".bionic/tmp" "$_src"
+done
+
+# ============================================================
+echo ""
+echo "=== H — the LIVENESS fields: writer lifts them, the observation displays them (6-axis A-1) ==="
+# ============================================================
+#
+# The axis-3 FAIL: hooks/stop-check.sh read `claims=` off the roster row and NO
+# writer emitted it, while slice 4/7 shipped procedure prose instructing authors
+# to declare both a `cadence` and a subprocess claim. A reader with no producer is
+# dead substrate, and the only test exercising it hand-wrote a row shape the
+# writer could not produce. Here the row is the one the real start gate wrote from
+# a real brief, and the real observation is run over it.
+
+H_BRIEF='Canonical-sdlc Step 4, slice 4/13 of epic-99 wave-01; build · audited · wave.
+Expected artifact: .bionic/docs/record/w99-live.txt
+Expected duration: ~45 minutes. Progress: .bionic/tmp/w99-live.progress, cadence ~7m.
+Subprocess claim: `w99-suite-marker` → .bionic/tmp/w99-live.log
+Exit condition: the artifact exists.'
+plant "$ISUB" "aw99live-9999999999999999" "w99-live"
+jq -n --arg s "$SID_A" --arg c "$IREPO" --arg p "$H_BRIEF" \
+  '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
+    permission_mode:"bypassPermissions", hook_event_name:"PreToolUse", tool_name:"Agent",
+    tool_input:{description:"a liveness dispatch", subagent_type:"implementor",
+                name:"w99-live", prompt:$p},
+    tool_use_id:"toolu_01LIVENESS"}' \
+  | bash "$PARTY_DP" >/dev/null 2>&1
+H_ROW=$(grep 'name=w99-live' "$G_ROSTER" 2>/dev/null | tail -1)
+expect_contains "the writer lifted the subprocess claim's pattern into the row" \
+  "claims=w99-suite-marker" "$H_ROW"
+expect_contains "the writer lifted the cadence declared beside the progress path" \
+  "cadence=~7m." "$H_ROW"
+
+H_OUT=$( cd "$IREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" w99-live 2>&1 )
+expect_contains "the observation reads that claim back off the row it was written to" \
+  "w99-suite-marker" "$H_OUT"
+expect_contains "…as the P2 claimed-process section, sourced from the roster" \
+  "source=roster" "$H_OUT"
+expect_contains "…and displays the declared cadence beside the progress age" \
+  "cadence:" "$H_OUT"
+expect_contains "…with the value the brief declared" "~7m." "$H_OUT"
+# The field NAMES, both ends — a rename fails here rather than turning the
+# display silently blank, which is how this defect shipped in the first place.
+expect_contains "the writer spells the claims key" "|claims=" "$(cat "$PARTY_DP")"
+expect_contains "the observation reads that same key" 'line_field "$ROSTER_ROW" claims' "$(cat "$OBSERVE")"
+expect_contains "the writer spells the cadence key" "|cadence=" "$(cat "$PARTY_DP")"
+expect_contains "the observation reads that same key" 'line_field "$ROSTER_ROW" cadence' "$(cat "$OBSERVE")"
+
+# ============================================================
+echo ""
 echo "──────────────────────────────────────────────"
 echo "cross-gate-agreement: ${PASS} passed, ${FAIL} failed, ${TOTAL} total"
 [ "$FAIL" -eq 0 ]

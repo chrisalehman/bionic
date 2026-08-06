@@ -590,6 +590,88 @@ expect_status "the absent contract field is empty in the row, not fabricated" ""
 expect_absent "an omitted model is NOT recorded as an absence" "model" "$ABSENT"
 
 # ============================================================
+echo "=== S10L — the LIVENESS fields are lifted: cadence + the subprocess claim (6-axis A-1) ==="
+# ============================================================
+#
+# The ratified liveness contract shipped into skills/canonical-sdlc/SKILL.md
+# §Dispatch in slice 4/7 — "The progress-artifact path carries a `cadence`
+# alongside it" and "A subprocess claim — a process pattern plus its output file
+# — is conditional-required". The Step-6 six-axis review found the procedure
+# layer instructing authors to declare two fields this writer had no extraction
+# site for, with hooks/stop-check.sh:389 already READING `claims=` off the row
+# (axis-3 FAIL: a shipped reader with no producer). These cases are the writer
+# half of that closure; hooks/stop-check.test.sh §8(g) drives the reader half
+# over a row THIS gate really wrote.
+#
+# GRAMMAR, stated because it is the one place this extractor reads a value that
+# is not a path and not free text: `cadence` may be introduced by a colon OR by
+# whitespace alone, because the ratified sentence puts it "alongside" the
+# progress path inside one sentence rather than on a labeled line of its own.
+# The subprocess claim's PATTERN is the backticked/quoted run when the author
+# marks one, else the text up to the first comma or arrow; the output file half
+# is the path the same span carries.
+
+BRIEF_LIVENESS='Canonical-sdlc Step 4, slice 4/10 of epic-99 wave-01; build · audited · wave.
+Your slice: the widget, behind the existing seam.
+Expected artifact: .bionic/docs/record/w99-live.txt
+Expected duration: ~50 minutes. Progress: .bionic/tmp/w99-live.progress, cadence ~6m.
+Subprocess claim: `bash tests/run.sh` → .bionic/tmp/w99-suite.log
+Exit condition: the artifact exists and the suite is green.'
+
+REPO=$(make_repo r10L yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_LIVENESS" "w99-live")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+
+expect_status "liveness brief: the dispatch passes" "0" "$GATE_ST"
+expect_status "the row lifts the cadence declared beside the progress path" \
+  "~6m." "$(roster_field "$ROW" cadence)"
+expect_status "the row lifts the subprocess claim's PATTERN, backticks stripped" \
+  "bash tests/run.sh" "$(roster_field "$ROW" claims)"
+expect_status "the progress path still stops at the cadence that follows it" \
+  ".bionic/tmp/w99-live.progress" "$(roster_field "$ROW" progress)"
+expect_absent "the cadence value stops at the next label" \
+  "Subprocess" "$(roster_field "$ROW" cadence)"
+expect_absent "the claimed pattern does not swallow the output file beside it" \
+  "w99-suite.log" "$(roster_field "$ROW" claims)"
+expect_status "the duration is unharmed by the new labels" \
+  "~50 minutes." "$(roster_field "$ROW" duration)"
+
+# The colon form and the unquoted comma form — the two other shapes the ratified
+# sentence permits an author to write.
+BRIEF_LIVENESS2='Slice 4/11 of epic-99 wave-01.
+Deliverables: record/w99-b.txt
+Expected duration: ~40 minutes.
+Progress: .bionic/tmp/w99-b.progress
+Cadence: every 5 minutes
+Claims: pgrep-me-w99, output .bionic/tmp/w99-b.log
+Exit: the deliverable exists.'
+
+REPO=$(make_repo r10L2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_LIVENESS2" "w99-live2")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "the colon form of cadence lifts too" \
+  "every 5 minutes" "$(roster_field "$ROW" cadence)"
+expect_status "an unquoted claim pattern stops at the comma before its output file" \
+  "pgrep-me-w99" "$(roster_field "$ROW" claims)"
+
+# CONDITIONAL-REQUIRED, both directions: a brief that declares neither field
+# leaves both EMPTY rather than fabricating one, and — because the subprocess
+# claim is declared only when the task backgrounds a long command — its absence
+# is never an absence FINDING. The whole point of the contract is that shape
+# emerges from which fields are present.
+REPO=$(make_repo r10L3 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-noclaim")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "a brief with no subprocess claim leaves claims= empty, not fabricated" \
+  "" "$(roster_field "$ROW" claims)"
+expect_status "a brief with no cadence leaves cadence= empty" "" "$(roster_field "$ROW" cadence)"
+expect_absent "an undeclared subprocess claim is NOT an absence finding" \
+  "claims" "$(roster_field "$ROW" absent)"
+
+# ============================================================
 echo "=== S10d — rows APPEND; the roster is a ledger, not a slot ==="
 # ============================================================
 

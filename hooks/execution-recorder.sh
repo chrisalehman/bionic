@@ -78,6 +78,23 @@ line_field() {  # <line> <key>
   printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
 }
 
+# DELIBERATELY DUPLICATED from hooks/dispatch-preflight.sh's sanitize(), pipeline
+# for pipeline, and for the same reason its comment gives: values are
+# pipe-delimited on one line, so a `|` forges a field and a newline forges a row.
+# This script checked for `|` alone until the Step-6 six-axis review (S-1) named
+# the asymmetry — a newline in a platform id then aborted the completion awk
+# outright and appended a blank line to the roster, and in the observation case
+# split one record across two lines, the second of them still schema-shaped.
+# Neither value is repo-supplied, so no §8 wall was open; what was open was one
+# artifact family normalizing two different ways forty lines apart. Normalizing
+# rather than refusing is the writer's rule too: the ledger records what it saw.
+sanitize() {  # <value> <max-chars>
+  printf '%s' "$1" \
+    | tr '\n\r\t|' '    ' \
+    | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//' \
+    | cut -c "1-$2"
+}
+
 # The session's own subagent directory, from the payload's transcript path.
 # §2.5 of record/epic-15-kill-interception-experiment.md captures the layout
 # verbatim: "<transcript-dir>/<session-id>/subagents/agent-<id>.jsonl".
@@ -200,7 +217,8 @@ ROSTER_FILE="$STATE_DIR/roster-${SID}.state"
 # the same `tool_use_id` and, in `tool_response.agentId`, the id that row was
 # waiting for — slice 4/1 capture E confirms the pair, in both dispatch modes.
 #
-# COMPLETION IS AN APPEND, NOT A REWRITE. The launch half appends without a lock
+# COMPLETION IS AN APPEND, NOT A REWRITE (with one bounded exception at the end
+# of this arm, where the file has outgrown its cap). The launch half appends without a lock
 # by design (a lock in front of a dispatch is a wedgeable failure mode on the
 # fail-open side), so a read-modify-write here would silently drop any row a
 # concurrent dispatch appended between our read and our rename. The completed row
@@ -228,9 +246,11 @@ if [ "$TOOL_NAME" = "Agent" ]; then
   done < "$ROSTER_FILE"
   [ -n "$ROW" ] || exit 0
 
-  # A `|` reaching here would forge a field. The id comes from the platform and
-  # the row from our own launch half, so this is a belt rather than a repair.
-  case "$AGENT_ID" in *'|'*) exit 0 ;; esac
+  # A `|` or a newline reaching here would forge a field or a row. The id comes
+  # from the platform and the row from our own launch half, so this is a belt
+  # rather than a repair — but it is the SAME belt the writer wears (S-1).
+  AGENT_ID=$(sanitize "$AGENT_ID" 200)
+  [ -n "$AGENT_ID" ] || exit 0
 
   # Substitute the two fields that execution confirms, leaving every other field
   # of the launched row — the contract state especially — where the brief put it,
@@ -244,6 +264,38 @@ if [ "$TOOL_NAME" = "Agent" ]; then
       printf "%s%s", (NR > 1 ? "|" : ""), f
     }')
   printf '%s\n' "$COMPLETED" >> "$ROSTER_FILE" 2>/dev/null
+
+  # THE BOUND, inherited from the observation state above (Step-6 review, axis 5).
+  # The roster had none: two rows per dispatch, appended forever, and THIS arm
+  # rescans the whole file on every dispatch — measured 669 ms at 200 rows and
+  # 3152 ms at 1000, against the 10 s hook timeout claude-bootstrap.sh registers.
+  # Past that the completion arm times out and rows silently stop reaching
+  # `confirmed`; the operator's only symptom is by-name stops beginning to refuse.
+  #
+  # WHAT THIS COSTS, said plainly because it amends the append-only rule stated
+  # above: the fold IS a rewrite, and hooks/dispatch-preflight.sh appends without
+  # a lock by design, so a launch landing inside this window can be dropped. It is
+  # taken because both directions of the loss are closed — a dropped `intended`
+  # row never confirms, and an absent row grants nothing (ownership rests on the
+  # metadata directory, not the roster) — while the unbounded file's failure is a
+  # timeout that closes the same wall without ever saying so. The window is one
+  # read and one rename of a ≤200-row file, under the lock the other writers take.
+  ROSTER_ROWS=$(grep -c "^roster-state/${ROSTER_VERSION}|" "$ROSTER_FILE" 2>/dev/null || echo 0)
+  if [ "${ROSTER_ROWS:-0}" -gt "$MAX_RECORDS" ]; then
+    lock="$STATE_DIR/.stop-check.lock"
+    if mkdir "$lock" 2>/dev/null; then
+      tmp=$(mktemp "$STATE_DIR/.roster.XXXXXX" 2>/dev/null) && {
+        {
+          printf '# bionic session roster — schema roster-state/%s — machine-local, safe to delete\n' \
+            "$ROSTER_VERSION"
+          grep "^roster-state/${ROSTER_VERSION}|" "$ROSTER_FILE" 2>/dev/null | tail -n "$MAX_RECORDS"
+        } > "$tmp" 2>/dev/null
+        mv -f "$tmp" "$ROSTER_FILE" 2>/dev/null || rm -f "$tmp"
+        chmod 600 "$ROSTER_FILE" 2>/dev/null
+      }
+      rm -rf "$lock"
+    fi
+  fi
   exit 0
 fi
 
@@ -264,9 +316,8 @@ SUB=$(session_subagents_dir "$TRANSCRIPT") || exit 0
 # whether a blank means "the orchestrator" or "the field was not written" — the
 # same absence-is-its-own-field rule the roster row follows. Agent ids are
 # `a`-prefixed hex (capture B/F), so the token cannot collide with one.
-OBSERVER=$(_jq '.agent_id')
+OBSERVER=$(sanitize "$(_jq '.agent_id')" 200)
 [ -n "$OBSERVER" ] || OBSERVER="orchestrator"
-case "$OBSERVER" in *'|'*) exit 0 ;; esac
 
 # Write one observation under a lock. Read-modify-write on shared state races
 # otherwise (checklist A4), and the temp file must carry an unpredictable name
@@ -355,6 +406,16 @@ while IFS= read -r mline; do
   # reports out-of-project matches explicitly); this is where that wider view
   # stops being dischargeable evidence.
   case "$M_LOG" in "$SUB"/*) : ;; *) continue ;; esac
+
+  # THE LOG MUST BE ON DISK. The residual disclosed above argues that forging a
+  # machine line costs the target's current log mtime and size, "which the gate
+  # re-checks against the live file". The re-check is real and has one hole: with
+  # no log on disk the gate reads mtime 0 / size 0, so a forged line carrying
+  # `mtime=0|size=0` matches it exactly, and with `progress_state=unnamed` the
+  # D-6 clause is skipped too (Step-6 review S-2). The producer just stat'ed the
+  # file it named, so this costs the real path nothing and closes the only
+  # match-by-zero shape.
+  [ -f "$M_LOG" ] || continue
 
   M_MTIME=$(line_field "$mline" mtime); M_SIZE=$(line_field "$mline" size)
   case "$M_MTIME" in ''|*[!0-9]*) continue ;; esac

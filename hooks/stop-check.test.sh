@@ -17,6 +17,10 @@
 set -uo pipefail
 
 CHECK="$(cd "$(dirname "$0")" && pwd)/stop-check.sh"
+# The roster's WRITER. Section 8 reads rows; §8(g) drives this script to produce
+# one, because a hand-written row cannot prove the reader is reading a field the
+# writer can actually emit (Step-6 six-axis review, axis-3 FAIL).
+WRITER="$(cd "$(dirname "$0")" && pwd)/dispatch-preflight.sh"
 PASS=0
 FAIL=0
 TOTAL=0
@@ -665,21 +669,78 @@ wait "$CLAIM_PID" 2>/dev/null
 OUT8G=$(run_check_as "$OWN8" "$H8" "$R8" "ours-target" --claims "$MARKER")
 expect_contains "P2: after the process exits, live: no" "live:     no" "$OUT8G"
 
-# --- (g) P2: claimed-process liveness SOURCED FROM THE ROSTER'S own claims= field ---
+# --- (g) P2 + cadence, over a row the REAL WRITER wrote from a REAL brief ---
+#
+# THIS CASE IS DELIBERATELY NOT HERMETIC-TO-THIS-SCRIPT, and that is the point.
+# Until the Step-6 six-axis review, this section hand-wrote a row carrying
+# `claims=<pattern>` — a field NO writer could produce, since
+# hooks/dispatch-preflight.sh's label table had no `claims` and no `cadence`
+# entry. The suite was green about a field that could not exist: a fixture
+# pinning away its own test (.claude memory: fixtures-can-pin-away-the-test),
+# and the reader it was pinning was dead substrate. So the row below is produced
+# by running the real start gate over a real dispatch brief, and the reader is
+# then driven over whatever that writer actually wrote. If the label grammar
+# regresses, this goes red HERE, where the display lives, rather than staying
+# green while the field silently vanishes from every live roster.
+#
+# The brief's shape is the ratified liveness contract's (SKILL.md §Dispatch):
+# a progress path with a cadence beside it, plus a conditional subprocess claim.
 make_agent "$H8" "$S8" "$OWN8" "aours-4444444444444444" "ours-claims" "working" >/dev/null
 MARKER2="$H8/claims-marker-w8-roster"
 ln -sf "$(command -v sleep)" "$MARKER2"
 "$MARKER2" 30 &
 CLAIM_PID2=$!
 sleep 0.3 2>/dev/null || true
-printf 'roster-state/v1|status=confirmed|session=%s|name=ours-claims|agent_id=aours-4444444444444444|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=%s|absent=|tool_use_id=toolu_B\n' \
-  "$OWN8" "$MARKER2" >> "$R8/.bionic/tmp/roster-${OWN8}.state"
+
+# What the start gate needs before it will journal anything: an active wave and
+# this session's own attestation. Both are fixtures of the WRITER's
+# preconditions, never of the value under test — the row itself is lifted from
+# the brief by the real extractor.
+mkdir -p "$R8/.bionic/docs/plans/epic-99"
+{
+  printf -- '---\n'
+  printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 13\n'
+  printf 'intent: build\nrigor: audited\nscale: wave\n'
+  printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 4\n'
+} > "$R8/.bionic/docs/plans/epic-99/wave-01.md"
+printf 'version=v1\nsession_id=%s\n' "$OWN8" > "$R8/.bionic/tmp/preflight-${OWN8}.state"
+
+echo "progress line" > "$R8/prog-g.progress"
+BRIEF_G="Canonical-sdlc Step 4, slice 4/12 of epic-99 wave-01; build · audited · wave.
+Expected artifact: $R8/deliv-a.md
+Expected duration: ~30 minutes. Progress: $R8/prog-g.progress, cadence ~6m.
+Subprocess claim: \`$MARKER2\` → $H8/claims-out.log
+Exit condition: the artifact exists."
+jq -n --arg s "$OWN8" --arg c "$R8" --arg p "$BRIEF_G" \
+  '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
+    hook_event_name:"PreToolUse", tool_name:"Agent",
+    tool_input:{description:"the claimed-process case", subagent_type:"implementor",
+                prompt:$p, name:"ours-claims", model:"opus", run_in_background:true},
+    tool_use_id:"toolu_01W8G"}' \
+  | ( cd "$R8" && HOME="$H8" CLAUDE_CONFIG_DIR="$H8/.claude" bash "$WRITER" >/dev/null 2>&1 )
+
+W8G_ROW=$(grep -v '^#' "$R8/.bionic/tmp/roster-${OWN8}.state" 2>/dev/null | grep 'name=ours-claims' | tail -1)
+expect_contains "the real start gate journalled the dispatch this case reads" \
+  "name=ours-claims" "$W8G_ROW"
+expect_contains "…and the row it wrote carries the claimed pattern the brief declared" \
+  "claims=$MARKER2" "$W8G_ROW"
+expect_contains "…and the cadence declared beside the progress path" "cadence=~6m." "$W8G_ROW"
+
 OUT8H=$(run_check_as "$OWN8" "$H8" "$R8" "ours-claims")
 expect_contains "P2 roster-sourced: claims section appears with no --claims flag" \
   "-- claimed process (P2) --" "$OUT8H"
 expect_contains "P2 roster-sourced: the roster's pattern is shown" "$MARKER2" "$OUT8H"
 expect_contains "P2 roster-sourced: source=roster is shown" "source=roster" "$OUT8H"
 expect_contains "P2 roster-sourced: a live matching process reports live: yes" "live:     yes" "$OUT8H"
+# The cadence is DISPLAY-ONLY, beside the progress age it qualifies: "too quiet"
+# means quieter than the author's own declaration, and this command decides
+# nothing — it prints the declaration and the age and stops there.
+expect_contains "cadence: the declared cadence is displayed in the D-6 section" \
+  "cadence:" "$OUT8H"
+expect_contains "cadence: the value is the one the brief declared" "~6m." "$OUT8H"
+for verdict in "safe to stop" "recommend" "verdict" "you should" "too quiet" "overdue"; do
+  expect_absent "the cadence display carries no verdict: '$verdict'" "$verdict" "$OUT8H"
+done
 kill "$CLAIM_PID2" 2>/dev/null
 wait "$CLAIM_PID2" 2>/dev/null
 
@@ -812,6 +873,95 @@ expect_contains "DEAD HISTORY still fires when the owning session's transcript i
   "Classification: DEAD HISTORY" "$OUT9E"
 expect_contains "…and the machine line carries classification=dead-history" \
   "|classification=dead-history|" "$M9E"
+
+# ============================================================
+echo ""
+echo "=== Section 10: six-axis review remediations (C-1/S-3 glob, C-2 confirmed-by-id) ==="
+# ============================================================
+
+IFS='|' read -r H10 R10 S10 <<< "$(make_world w10)"
+OWN10="10101010-0000-0000-0000-000000000001"
+FOREIGN10="10101010-0000-0000-0000-000000000002"
+mkdir -p "$R10/.bionic/tmp"
+
+# --- (a) C-1/S-3: a roster deliverable is never GLOB-EXPANDED against the cwd ---
+#
+# The roster's `deliverable=` is comma-joined and expanded with IFS=',' — and
+# setting IFS suppresses word splitting on other characters, never PATHNAME
+# expansion. A brief writing `Deliverables: docs/*.md` stores that literal
+# (ispath() accepts it, sanitize() does not strip `*`), and the unquoted
+# expansion then let whatever happened to sit in the OBSERVER'S CWD be reported
+# PRESENT and ride into the durable record as a confirmed deliverable. Repo
+# content deciding what an observation asserts is the §8 direction that matters
+# even when no wall opens: the human judgment this command exists to inform is
+# the thing being fooled.
+make_agent "$H10" "$S10" "$OWN10" "aours-1010101010101010" "glob-target" "working" >/dev/null
+mkdir -p "$R10/docs"
+echo "decoy a" > "$R10/docs/a.md"
+echo "decoy b" > "$R10/docs/b.md"
+{
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
+  printf 'roster-state/v1|status=confirmed|session=%s|name=glob-target|agent_id=aours-1010101010101010|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=docs/*.md|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_G\n' \
+    "$OWN10"
+} > "$R10/.bionic/tmp/roster-${OWN10}.state"
+
+OUT10A=$(run_check_as "$OWN10" "$H10" "$R10" "glob-target")
+M10A=$(printf '%s\n' "$OUT10A" | grep '^stop-check-observation/')
+expect_contains "C-1: the roster's literal pattern is reported as itself" "docs/*.md" "$OUT10A"
+expect_absent "C-1: a file merely sitting in the cwd is not reported PRESENT" \
+  "docs/a.md — PRESENT" "$OUT10A"
+expect_absent "C-1: …nor the second one" "docs/b.md — PRESENT" "$OUT10A"
+expect_contains "C-1: the unmatched literal is ABSENT, which is the honest answer" \
+  "docs/*.md — ABSENT" "$OUT10A"
+expect_status "C-1: the machine line carries exactly one deliverable state" \
+  "1" "$(printf '%s' "$M10A" | tr '|' '\n' | grep '^deliverables=' | tr ',' '\n' | grep -c .)"
+expect_absent "C-1: no cwd file rides into the durable record as a deliverable" \
+  "docs/a.md" "$M10A"
+
+# --- (b) C-2: OURS-by-roster-id keys on a CONFIRMED row, not merely a non-empty id ---
+#
+# Both surfaces stated the invariant as "a `confirmed` roster row still
+# establishes OURS, by agent id only" and enforced something weaker: any row
+# whose `agent_id=` is non-empty. What made that safe was a property of a
+# DIFFERENT file — hooks/dispatch-preflight.sh always emits `agent_id=` empty on
+# `intended` rows. The stated invariant and the enforced one differing is the
+# exact shape slice 4/9 was remediating, so it is enforced here.
+make_agent "$H10" "$S10" "$FOREIGN10" "aforeign-1010101010101010" "id-target" "working" >/dev/null
+printf 'roster-state/v1|status=intended|session=%s|name=other-name|agent_id=aforeign-1010101010101010|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_I\n' \
+  "$OWN10" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
+OUT10B=$(run_check_as "$OWN10" "$H10" "$R10" "id-target")
+expect_contains "C-2: an INTENDED row's id does not make a foreign agent ours" \
+  "Classification: FOREIGN" "$OUT10B"
+expect_absent "C-2: …and the OURS-by-id reason is not printed for it" \
+  "confirms it by agent id" "$OUT10B"
+
+# …while a CONFIRMED row's id still does, which is the invariant slice 4/9 kept.
+printf 'roster-state/v1|status=confirmed|session=%s|name=other-name|agent_id=aforeign-1010101010101010|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_I\n' \
+  "$OWN10" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
+OUT10C=$(run_check_as "$OWN10" "$H10" "$R10" "id-target")
+expect_contains "C-2: a CONFIRMED row's id still establishes OURS" \
+  "Classification: OURS" "$OUT10C"
+expect_contains "C-2: …naming the roster as the reason" "confirms it by agent id" "$OUT10C"
+
+# --- (c) C-2 regression guard: the PRE-RESTART world is untouched ---
+#
+# Every row in a session that has not restarted since the recorder shipped is
+# `status=intended` with an EMPTY `agent_id=`, so the by-id clause never fired
+# for them either way — their ownership rests on the 4/9 metadata-directory key
+# and their CONTRACT still comes from the row by name. Tightening the by-id
+# clause must not touch either, which is what this case pins.
+make_agent "$H10" "$S10" "$OWN10" "aours-9090909090909090" "prerestart" "working" >/dev/null
+echo "the deliverable" > "$R10/deliv-pre.md"
+printf 'roster-state/v1|status=intended|session=%s|name=prerestart|agent_id=|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=%s|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_P\n' \
+  "$OWN10" "$R10/deliv-pre.md" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
+OUT10D=$(run_check_as "$OWN10" "$H10" "$R10" "prerestart")
+M10D=$(printf '%s\n' "$OUT10D" | grep '^stop-check-observation/')
+expect_contains "C-2 regression: an unconfirmed row's own agent is still OURS by its directory" \
+  "Classification: OURS" "$OUT10D"
+expect_contains "C-2 regression: …by the directory key, not the roster" \
+  "subagents directory" "$OUT10D"
+expect_contains "C-2 regression: the contract still comes from the unconfirmed row" \
+  "deliverable_source=roster" "$M10D"
 
 # ============================================================
 echo ""

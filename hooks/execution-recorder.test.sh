@@ -676,6 +676,109 @@ done
 
 # ============================================================
 echo ""
+echo "=== Section 9: six-axis review remediations (S-1 sanitizer parity, S-2 log existence, P roster bound) ==="
+# ============================================================
+#
+# S-1. The writer these values land beside — hooks/dispatch-preflight.sh's
+# sanitize() — translates `\n\r\t|` and control characters out of every value,
+# because a pipe-delimited one-line record treats either as a field or a row
+# boundary. This script checked for `|` ALONE, forty lines from the sibling that
+# strips both.
+#
+# WHAT THE PIPE CHECK ALREADY BUYS, stated so the fix is not sold as more than it
+# is: a fully-shaped forged row needs pipes of its own, so it never got past the
+# existing guard, and neither value is repo-supplied anyway (§8's adversary never
+# reaches them). What a NEWLINE still does is split one record across two physical
+# lines — the tail of the real row becoming a second line the readers must
+# recognise and skip, one of which begins with the schema token itself. An
+# artifact whose line count depends on a platform value is the finding; parity
+# with the writer's own pipeline is the fix.
+
+IFS='|' read -r S1_REPO S1_TR S1_SUB S1_CFG <<< "$(make_world sanparity yes)"
+seed_roster "$S1_REPO" "$SID_A" "w99-impl" "$TUID"
+S1_ROSTER="$S1_REPO/.bionic/tmp/roster-${SID_A}.state"
+# No pipe of its own: everything after the newline is supplied by the REAL row's
+# own remaining fields, which is what makes the split line schema-shaped.
+S1_EVIL="aevil-3333333333333333
+roster-state/v1"
+run_rec "$(mk_agent_post "$SID_A" "$S1_TR" "$S1_REPO" "w99-impl" "$S1_EVIL" "$TUID")"
+expect_status "a newline-bearing agent id never blocks" 0 "$REC_ST"
+expect_eq "a newline in the platform's agentId cannot split the row it writes" \
+  "2" "$(grep -c '^roster-state/v1|' "$S1_ROSTER" 2>/dev/null)"
+expect_contains "…the id is normalized into the row instead, as the writer would" \
+  "agent_id=aevil-3333333333333333 roster-state/v1|" "$(cat "$S1_ROSTER" 2>/dev/null)"
+
+IFS='|' read -r S1B_REPO S1B_TR S1B_SUB S1B_CFG <<< "$(make_world sanparityobs yes)"
+plant_agent "$S1B_SUB" "aworker-1111111111111111" "worker"
+S1B_EVIL="aobserver-5555555555555555
+v1"
+run_observation "$S1B_CFG" "$S1B_REPO" worker >/dev/null 2>&1
+run_rec "$(mk_bash_post "$SID_A" "$S1B_TR" "$S1B_REPO" "bash stop-check.sh worker" "$OBS_OUT" "$S1B_EVIL")"
+expect_status "a newline-bearing observer id never blocks" 0 "$REC_ST"
+expect_eq "a newline in the payload's agent_id cannot split the record it writes" \
+  "1" "$(grep -c '^v1|' "$S1B_REPO/$STATE_REL" 2>/dev/null)"
+expect_contains "…the observer is normalized into the record instead" \
+  "observer=aobserver-5555555555555555 v1" "$(cat "$S1B_REPO/$STATE_REL" 2>/dev/null)"
+
+# S-2. The recorder's disclosed residual — a command that PRINTS a well-formed
+# machine line produces a record — argued that forging one costs the target's
+# CURRENT log mtime and size, "which the gate re-checks against the live file".
+# The re-check is real, and it has a hole the disclosure did not name: when the
+# target's log does not exist, the gate reads mtime 0 / size 0, so a forged line
+# carrying mtime=0|size=0 matches it exactly. A record for a log that is not on
+# disk can never be honest evidence anyway — the observation just stat'ed that
+# file — so it is refused at the door.
+IFS='|' read -r S2_REPO S2_TR S2_SUB S2_CFG <<< "$(make_world logexists yes)"
+plant_agent "$S2_SUB" "areal-7777777777777777" "real"
+run_rec "$(mk_bash_post "$SID_A" "$S2_TR" "$S2_REPO" "echo forged" \
+  "stop-check-observation/v1|target=aphantom-8888888888888888|typed=phantom|log=$S2_SUB/agent-aphantom-8888888888888888.jsonl|mtime=0|size=0|deliverables=|progress=|progress_mtime=0|progress_state=unnamed|classification=ours|deliverable_source=none|progress_source=none")"
+expect_status "a machine line naming a log that does not exist never blocks" 0 "$REC_ST"
+expect_absent "…and is not recorded: the match-by-zero forgery has nothing to match" \
+  "aphantom-8888888888888888" "$(cat "$S2_REPO/$STATE_REL" 2>/dev/null)"
+# The real path is untouched — the producer stat'ed the file it named, so it is there.
+run_observation "$S2_CFG" "$S2_REPO" real >/dev/null 2>&1
+run_rec "$(mk_bash_post "$SID_A" "$S2_TR" "$S2_REPO" "bash stop-check.sh real" "$OBS_OUT")"
+expect_contains "a real observation of a real log is still recorded" \
+  "areal-7777777777777777" "$(cat "$S2_REPO/$STATE_REL" 2>/dev/null)"
+
+# P (performance). `stop-check.state` is capped at MAX_RECORDS because every stop
+# walks it; the roster had no cap, no rotation and no compaction — two rows per
+# dispatch, appended forever, and THIS arm rescans the whole file on every
+# dispatch. Measured on the review's fixture: 669 ms at 200 rows, 3152 ms at
+# 1000, against a registered 10 s hook timeout. It degrades to the closed side
+# (an unconfirmed row grants nothing) but silently, and the operator's only
+# symptom is by-name stops beginning to refuse.
+IFS='|' read -r PR_REPO PR_TR PR_SUB PR_CFG <<< "$(make_world rosterbound yes)"
+seed_roster "$PR_REPO" "$SID_A" "w99-impl" "$TUID"
+PR_ROSTER="$PR_REPO/.bionic/tmp/roster-${SID_A}.state"
+{
+  _i=0
+  while [ "$_i" -lt 300 ]; do
+    printf 'roster-state/v1|status=confirmed|session=%s|name=old-%s|agent_id=aold-%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_OLD%s\n' \
+      "$SID_A" "$_i" "$_i" "$_i"
+    _i=$((_i + 1))
+  done
+} >> "$PR_ROSTER"
+run_rec "$(mk_agent_post "$SID_A" "$PR_TR" "$PR_REPO" "w99-impl" "$NEW_AID" "$TUID")"
+PR_COUNT=$(grep -c '^roster-state/v1|' "$PR_ROSTER" 2>/dev/null || echo 0)
+if [ "$PR_COUNT" -le 200 ]; then
+  ok "the roster is bounded like the observation state, not unbounded: $PR_COUNT rows"
+else
+  no "the roster is bounded like the observation state" "$PR_COUNT rows retained"
+fi
+expect_contains "the row this event just confirmed survives the bound" \
+  "agent_id=$NEW_AID" "$(cat "$PR_ROSTER" 2>/dev/null)"
+expect_contains "the schema header survives the fold" \
+  "schema roster-state/v1" "$(cat "$PR_ROSTER" 2>/dev/null)"
+expect_contains "the NEWEST rows are the ones kept" "name=old-299" "$(cat "$PR_ROSTER" 2>/dev/null)"
+expect_absent "…and the oldest are the ones dropped" "name=old-0|" "$(cat "$PR_ROSTER" 2>/dev/null)"
+# A roster under the bound is still append-only: nothing is rewritten, and the
+# intended row it completes stays exactly where the launch put it.
+expect_eq "an under-bound roster keeps its intended row (completion is an append)" \
+  "1" "$(grep -c 'status=intended' "$S1_ROSTER" 2>/dev/null)"
+
+# ============================================================
+echo ""
 echo "──────────────────────────────────────────────"
 echo "execution-recorder.sh: ${PASS}/${TOTAL} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ]
