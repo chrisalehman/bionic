@@ -30,6 +30,9 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 # by hand: W1R_PARTY_SG=/tmp/mutant.sh bash tests/fail-direction-table.test.sh
 START_GATE="${W1R_PARTY_DP:-$REPO_ROOT/hooks/dispatch-preflight.sh}"
 STOP_GATE="${W1R_PARTY_SG:-$REPO_ROOT/hooks/stop-guard.sh}"
+# The producer and the writer that stand behind the stop gate's positive pair.
+OBSERVER="$REPO_ROOT/hooks/stop-check.sh"
+RECORDER="${W1R_PARTY_ER:-$REPO_ROOT/hooks/execution-recorder.sh}"
 PROBE="${W1R_PARTY_PROBE:-$REPO_ROOT/hooks/preflight-probe.sh}"
 DESIGN="$REPO_ROOT/design/orchestrator-subagent-coordination.md"
 
@@ -76,15 +79,30 @@ write_plan() {  # <path> <current-line>
 make_world() {
   local name="$1" wave="$2"
   local base="$SANDBOX/w/$name" repo="$SANDBOX/w/$name/repo"
-  mkdir -p "$repo/.bionic" "$base/session/subagents"
+  # The session metadata lives under a per-world CLAUDE_CONFIG_DIR rooted at
+  # `$base/cfg`, in the layout the platform uses:
+  # <config>/projects/<repo-slug>/<session>/subagents. The stop gate reaches it
+  # from the payload's transcript path, and the OBSERVATION reaches it by
+  # slugifying its cwd — since slice 4/4 the observed rows run the real producer,
+  # so a fixture only the gate can reach would prove nothing about the pair.
+  # The session directory is named by the SESSION ID, because that is what the
+  # platform does and, since slice 4/9, what ownership reads: an agent under
+  # <session>/subagents/ was launched by <session>. A world whose directory was
+  # named anything else would classify every target foreign, and the rows below
+  # would be answering a question about the roster instead of the one they name.
+  local cfg="$base/cfg" slug
+  slug=$(printf '%s' "$repo" | sed 's/[^a-zA-Z0-9]/-/g')
+  mkdir -p "$repo/.bionic" "$cfg/projects/$slug/$SID_A/subagents" \
+           "$cfg/projects/$slug/$SID_B/subagents"
   git -C "$repo" init -q 2>/dev/null
-  printf '{}\n' > "$base/session.jsonl"
+  printf '{}\n' > "$cfg/projects/$slug/$SID_A.jsonl"
+  printf '{}\n' > "$cfg/projects/$slug/$SID_B.jsonl"
   case "$wave" in
     yes)       write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: 4" ;;
     nocurrent) write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: pending" ;;
     no)        mkdir -p "$repo/.bionic/docs" ;;
   esac
-  printf '%s|%s|%s' "$repo" "$base/session.jsonl" "$base/session/subagents"
+  printf '%s|%s|%s' "$repo" "$cfg/projects/$slug/$SID_A.jsonl" "$cfg/projects/$slug/$SID_A/subagents"
 }
 
 plant_agent() {  # <subagents-dir> <agent-id> <name>
@@ -94,11 +112,34 @@ plant_agent() {  # <subagents-dir> <agent-id> <name>
     > "$1/agent-$2.jsonl"
 }
 
+# The session roster (slice 4/3's writer, row shape field-for-field from
+# hooks/dispatch-preflight.sh). Since slice 4/9 the roster no longer decides
+# ownership — the session directory does — so a row here carries the CONTRACT and,
+# when it is `confirmed`, reaches a target outside this session's own directory.
+roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status]
+  local repo="$1" sid="$2" name="$3" aid="$4" prog="${5:-}" status="${6:-confirmed}"
+  local f="$repo/.bionic/tmp/roster-$sid.state"
+  mkdir -p "$repo/.bionic/tmp"
+  [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
+  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=%s|absent=|tool_use_id=toolu_01FIXTURE\n' \
+    "$status" "$sid" "$name" "$aid" "$prog" >> "$f"
+  return 0
+}
+
 payload() {  # <tool_name> <sid|-> <transcript|-> <cwd> <task_id-or-command|->
   local tool="$1" sid="$2" tr="$3" cwd="$4" arg="$5"
   local input='{}'
   case "$tool" in
-    Agent)    input=$(jq -n --arg d "a dispatch" '{description:$d, subagent_type:"implementor"}') ;;
+    # The brief carries its labeled contract fields (slice 4/3): the start gate
+    # now journals every launch to the session roster and warns on stderr when a
+    # brief names none of them. The `start|attested` row below is THE POSITIVE
+    # PAIR — an ordinary, well-formed dispatch — and its §7 direction is
+    # "pass in silence"; a fieldless brief is a malformed dispatch, whose warning
+    # is a different claim, driven in hooks/dispatch-preflight.test.sh S10c.
+    Agent)    input=$(jq -n --arg d "a dispatch" --arg p 'Expected artifact: .bionic/docs/record/w99.txt
+Expected duration: ~25 minutes.
+Progress artifact: .bionic/tmp/w99.progress' \
+                '{description:$d, subagent_type:"implementor", name:"w99-impl", prompt:$p}') ;;
     TaskStop) input=$(jq -n --arg k "$arg" '{task_id:$k}') ;;
     Bash)     input=$(jq -n --arg c "$arg" '{command:$c}') ;;
     *)        input=$(jq -n '{file_path:"/tmp/x"}') ;;
@@ -118,6 +159,7 @@ IFS='|' read -r A_REPO A_TR A_SUB <<< "$(make_world active yes)"
 plant_agent "$A_SUB" "aworker-1111111111111111" "worker"
 plant_agent "$A_SUB" "atwin-2222222222222222" "twin"
 plant_agent "$A_SUB" "atwin-3333333333333333" "twin"
+roster_row "$A_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 
 IFS='|' read -r I_REPO I_TR I_SUB <<< "$(make_world inert no)"
 plant_agent "$I_SUB" "aworker-1111111111111111" "worker"
@@ -125,26 +167,50 @@ plant_agent "$I_SUB" "aworker-1111111111111111" "worker"
 IFS='|' read -r N_REPO N_TR N_SUB <<< "$(make_world nocurrent nocurrent)"
 plant_agent "$N_SUB" "aworker-1111111111111111" "worker"
 
-# An attested active world — the start gate's positive pair.
+# An attested active world — the start gate's positive pair. slice 4/2 (D-5): the
+# attestation lives at the PER-SESSION filename the gate actually reads; the old shared
+# single-slot path is not consulted, so a fixture written there attests to nothing.
 IFS='|' read -r T_REPO T_TR T_SUB <<< "$(make_world attested yes)"
 mkdir -p "$T_REPO/.bionic/tmp"
 printf '# attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\n' "$SID_A" \
-  > "$T_REPO/.bionic/tmp/preflight.state"
+  > "$T_REPO/.bionic/tmp/preflight-$SID_A.state"
 
 # An observed active world — the stop gate's positive pair. The observation is
-# RECORDED BY THE RECORDER ARM, never hand-written: the row must be discharged by
-# the real producer→consumer path.
+# RECORDED BY THE REAL WRITER, never hand-written: the row must be discharged by
+# the real producer→recorder→gate path. Since slice 4/4 that writer is
+# hooks/execution-recorder.sh on PostToolUse, and it copies the machine line
+# hooks/stop-check.sh prints — so the producer is genuinely run here.
 IFS='|' read -r O_REPO O_TR O_SUB <<< "$(make_world observed yes)"
 plant_agent "$O_SUB" "aworker-1111111111111111" "worker"
-observe() {  # <sid> <transcript> <repo> <target>
-  payload Bash "$1" "$2" "$3" "bash ~/.claude/hooks/stop-check.sh $4" \
-    | bash "$STOP_GATE" >/dev/null 2>&1
+roster_row "$O_REPO" "$SID_A" "worker" "aworker-1111111111111111"
+# <observer> is the agent id of whoever RAN the observation — empty for the
+# orchestrator, which is how the platform renders it (the payload field is simply
+# absent). The producer's own session key travels on CLAUDE_CODE_SESSION_ID: it
+# is how the observation finds this session's roster, and therefore the only way a
+# contracted progress path reaches the record.
+observe() {  # <sid> <transcript> <repo> <target> [observer-agent-id]
+  local cfg="${2%/projects/*}" out
+  out=$( cd "$3" && CLAUDE_CONFIG_DIR="$cfg" CLAUDE_CODE_SESSION_ID="$1" \
+         bash "$OBSERVER" "$4" 2>/dev/null )
+  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg o "$out" --arg a "${5:-}" \
+    '{session_id:$s, transcript_path:$t, cwd:$c,
+      prompt_id:"598cabc5-2776-479c-abcf-52c540a1c60e",
+      permission_mode:"bypassPermissions", effort:{level:"high"},
+      hook_event_name:"PostToolUse", tool_name:"Bash",
+      tool_input:{command:"bash ~/.claude/hooks/stop-check.sh", description:"observe"},
+      tool_response:{stdout:$o, stderr:"", interrupted:false,
+                     isImage:false, noOutputExpected:false},
+      tool_use_id:"toolu_01HQV9JAFdKC15TLMDKt2QgF", duration_ms:117}
+     + (if $a == "" then {} else {agent_id:$a, agent_type:"general-purpose"} end)' \
+    | bash "$RECORDER" >/dev/null 2>&1
+  return 0
 }
 observe "$SID_A" "$O_TR" "$O_REPO" "worker"
 
 # Stale: observed, then the target writes again (D-1's activity boundary).
 IFS='|' read -r S_REPO S_TR S_SUB <<< "$(make_world stale yes)"
 plant_agent "$S_SUB" "aworker-1111111111111111" "worker"
+roster_row "$S_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 observe "$SID_A" "$S_TR" "$S_REPO" "worker"
 printf '{"type":"assistant","message":{"content":[{"type":"text","text":"more work"}]}}\n' \
   >> "$S_SUB/agent-aworker-1111111111111111.jsonl"
@@ -152,11 +218,41 @@ printf '{"type":"assistant","message":{"content":[{"type":"text","text":"more wo
 # Foreign: the only observation belongs to another session.
 IFS='|' read -r F_REPO F_TR F_SUB <<< "$(make_world foreign yes)"
 plant_agent "$F_SUB" "aworker-1111111111111111" "worker"
+roster_row "$F_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 observe "$SID_B" "$F_TR" "$F_REPO" "worker"
+
+# Not ours at all (slice 4/6, AC-6; re-keyed in slice 4/9): an agent filed under
+# ANOTHER session's directory, which this session's roster nonetheless names on an
+# unconfirmed row — the corpse collision that fired in live operation. By NAME it
+# is refused; by FULL AGENT ID it is the documented zombie-predecessor cleanup and
+# passes on its own fresh observation.
+IFS='|' read -r X_REPO X_TR X_SUB <<< "$(make_world foreignowned yes)"
+X_TR_B="${X_TR%/*}/$SID_B.jsonl"
+plant_agent "${X_TR_B%.jsonl}/subagents" "abb20f616-7777777777777" "worker"
+roster_row "$X_REPO" "$SID_A" "worker" "" "" intended
+observe "$SID_A" "$X_TR_B" "$X_REPO" "worker"
+
+# A look taken by somebody else (slice 4/6, D-3): the record is fresh, this
+# session's, and about the right target — and it is not the stopper's own.
+IFS='|' read -r B_REPO B_TR B_SUB <<< "$(make_world borrowedlook yes)"
+plant_agent "$B_SUB" "aworker-1111111111111111" "worker"
+roster_row "$B_REPO" "$SID_A" "worker" "aworker-1111111111111111"
+observe "$SID_A" "$B_TR" "$B_REPO" "worker" "asubagent-2020202020202020"
+
+# The contracted progress artifact written after the look (slice 4/6, D-6): the
+# working log is untouched, so this is the channel D-1 alone could not see.
+IFS='|' read -r G_REPO G_TR G_SUB <<< "$(make_world progressstale yes)"
+plant_agent "$G_SUB" "aworker-1111111111111111" "worker"
+roster_row "$G_REPO" "$SID_A" "worker" "aworker-1111111111111111" ".bionic/tmp/w99.progress"
+printf 'stage 1\n' > "$G_REPO/.bionic/tmp/w99.progress"
+observe "$SID_A" "$G_TR" "$G_REPO" "worker"
+sleep 1
+printf 'stage 2\n' >> "$G_REPO/.bionic/tmp/w99.progress"
 
 # Unknown schema version: a record this gate will not guess at (checklist A6).
 IFS='|' read -r V_REPO V_TR V_SUB <<< "$(make_world badversion yes)"
 plant_agent "$V_SUB" "aworker-1111111111111111" "worker"
+roster_row "$V_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 mkdir -p "$V_REPO/.bionic/tmp"
 printf 'v9|session=%s|target=%s|typed=worker|log=%s|mtime=1|size=1\n' \
   "$SID_A" "aworker-1111111111111111" "$V_SUB/agent-aworker-1111111111111111.jsonl" \
@@ -201,7 +297,11 @@ drive() {  # <condition>
     stop:unknown-schema)    p=$(payload TaskStop "$SID_A" "$V_TR" "$V_REPO" worker) ;;
     stop:stale-observation) p=$(payload TaskStop "$SID_A" "$S_TR" "$S_REPO" worker) ;;
     stop:symlinked-state)   p=$(payload TaskStop "$SID_A" "$L_TR" "$L_REPO" worker) ;;
+    stop:foreign-by-name)   p=$(payload TaskStop "$SID_A" "$X_TR_B" "$X_REPO" worker) ;;
+    stop:borrowed-look)     p=$(payload TaskStop "$SID_A" "$B_TR" "$B_REPO" worker) ;;
+    stop:progress-stale)    p=$(payload TaskStop "$SID_A" "$G_TR" "$G_REPO" worker) ;;
     stop:observed)          p=$(payload TaskStop "$SID_A" "$O_TR" "$O_REPO" worker) ;;
+    stop:foreign-by-full-id) p=$(payload TaskStop "$SID_A" "$X_TR_B" "$X_REPO" abb20f616-7777777777777) ;;
     *) echo "unknown condition $1" >&2; return 9 ;;
   esac
   case "$1" in
@@ -244,7 +344,11 @@ stop|foreign-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|unknown-schema|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|stale-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|symlinked-state|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|foreign-by-name|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|borrowed-look|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|progress-stale|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|observed|0|silent|Stop gate — the positive pair: a fresh observation permits
+stop|foreign-by-full-id|0|silent|Stop gate — the positive pair: a fresh observation permits
 '
 
 echo "=== §7 rows driven as behaviour (AC-10) ==="
@@ -313,9 +417,15 @@ echo "=== the producer's two rows (§7 rows 4 and 5) ==="
 
 P_REPO="$SANDBOX/w/producer/repo"; mkdir -p "$P_REPO/.bionic/tmp"
 git -C "$P_REPO" init -q 2>/dev/null
-PRIOR="$P_REPO/.bionic/tmp/preflight.state"
-printf '# attestation\nversion=1\nsession_id=%s\n' "$SID_B" > "$PRIOR"
-PRIOR_SUM=$(shasum "$PRIOR")
+
+# slice 4/2 (D-5): both rows are about what a run does to an attestation ALREADY on
+# disk, so each fixture must sit at the per-session filename that run actually governs.
+# Left at the old shared slot these rows stayed green for the wrong reason — the probe
+# now prunes that legacy file unconditionally, so "no attestation is on disk" below was
+# satisfied by the prune rather than by the blocking-failure delete it exists to pin.
+PRIOR_B="$P_REPO/.bionic/tmp/preflight-$SID_B.state"
+printf '# attestation\nversion=1\nsession_id=%s\n' "$SID_B" > "$PRIOR_B"
+PRIOR_SUM=$(shasum "$PRIOR_B")
 
 # Row 4 — no session key: REFUSE, and state is LEFT UNTOUCHED. An unkeyed run
 # cannot tell whose attestation is on disk, so deleting it would destroy another
@@ -324,16 +434,18 @@ OUT=$( cd "$P_REPO" && env -u CLAUDE_CODE_SESSION_ID ANTHROPIC_API_KEY=x \
        HOME="$HOME" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" bash "$PROBE" 2>&1 ); ST=$?
 expect_eq "environment check with no session key REFUSES (exit 3)" "3" "$ST"
 expect_contains "…and says so" "REFUSED" "$OUT"
-expect_eq "…and leaves existing state byte-identical" "$PRIOR_SUM" "$(shasum "$PRIOR")"
+expect_eq "…and leaves existing state byte-identical" "$PRIOR_SUM" "$(shasum "$PRIOR_B")"
 
 # Row 5 — a blocking probe fails: NO ATTESTATION, and the prior one is deleted.
-# A stale pass must not outlive the environment it described.
-printf '# attestation\nversion=1\nsession_id=%s\n' "$SID_A" > "$PRIOR"
+# A stale pass must not outlive the environment it described. The prior stamp is THIS
+# session's own, so pruning never touches it — only the blocking-failure path can.
+PRIOR_A="$P_REPO/.bionic/tmp/preflight-$SID_A.state"
+printf '# attestation\nversion=1\nsession_id=%s\n' "$SID_A" > "$PRIOR_A"
 OUT=$( cd "$P_REPO" && env -u ANTHROPIC_API_KEY CLAUDE_CODE_SESSION_ID="$SID_A" \
        HOME="$SANDBOX/nocred" CLAUDE_CONFIG_DIR="$SANDBOX/nocred/.claude" \
        PATH="$SANDBOX/stub:$PATH" bash "$PROBE" 2>&1 ); ST=$?
 expect_eq "environment check with a failing blocking probe exits 1" "1" "$ST"
-expect_eq "…and no attestation is on disk" "no" "$([ -e "$PRIOR" ] && echo yes || echo no)"
+expect_eq "…and no attestation is on disk" "no" "$([ -e "$PRIOR_A" ] && echo yes || echo no)"
 expect_contains "…and the prior attestation was deleted, loudly" "deleted" "$OUT"
 
 # ============================================================

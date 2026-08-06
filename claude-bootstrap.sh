@@ -1616,19 +1616,27 @@ do_install_hooks
 
 # Define all managed hooks (event|matcher_or_empty|command triples).
 # PreToolUse keys off the tool name (Bash/Write/Edit/Agent/TaskStop); Stop
-# takes no matcher. stop-guard.sh registers twice — one script, two arms
-# (design/orchestrator-subagent-coordination.md §4): the Bash arm records
-# observations, the TaskStop arm gates stops. preflight-probe.sh and
-# stop-check.sh are installed above (hooks/*.sh) but deliberately absent here
-# — unregistered companion scripts, run by hand.
+# takes no matcher. preflight-probe.sh and stop-check.sh are installed above
+# (hooks/*.sh) but deliberately absent here — unregistered companion scripts,
+# run by hand.
+#
+# execution-recorder.sh is the machine's FIRST PostToolUse registration, and it
+# registers twice — one script, two arms (epic-15 wave-03 slice 4/4): the Bash
+# arm turns stop-check.sh's printed machine line into an observation record, the
+# Agent arm completes the session roster's launch row once a dispatch has
+# actually spawned. Both facts are claims that something HAPPENED, which is why
+# neither can be recorded from PreToolUse; stop-guard.sh's retired Bash arm
+# recorded observations before the command ran and could never know whether it
+# did (design/orchestrator-subagent-coordination.md §4, spec AC-3).
 MANAGED_HOOKS=(
   "PreToolUse|Bash|~/.claude/hooks/protect-main.sh"
   "PreToolUse|Bash|~/.claude/hooks/protect-database.sh"
   "PreToolUse|Bash|~/.claude/hooks/canonical-sdlc-evidence-gate.sh"
   "PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh"
-  "PreToolUse|Bash|~/.claude/hooks/stop-guard.sh"
   "PreToolUse|TaskStop|~/.claude/hooks/stop-guard.sh"
   "PreToolUse|Agent|~/.claude/hooks/dispatch-preflight.sh"
+  "PostToolUse|Bash|~/.claude/hooks/execution-recorder.sh"
+  "PostToolUse|Agent|~/.claude/hooks/execution-recorder.sh"
   "PreToolUse|Write|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "Stop||~/.claude/hooks/context-spend.sh"

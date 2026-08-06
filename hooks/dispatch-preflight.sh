@@ -19,6 +19,12 @@
 # (§4 "The start gate"); this gate never re-derives or second-guesses what
 # the producer already decided.
 #
+# Attestation filename is per-session (design D-5, slice 4/2):
+#     .bionic/tmp/preflight-<this session's session_id>.state
+# A foreign session's attestation — however fresh — simply is not this file, so it is
+# never read at all; only THIS session's own filename is ever consulted, and the legacy
+# shared .bionic/tmp/preflight.state slot is not consulted either.
+#
 # FAIL DIRECTIONS (TDD §7, pinned by hooks/dispatch-preflight.test.sh):
 #   - not an Agent-tool call                            -> pass, silent  (A7 relevance hoist)
 #   - cwd/repo unresolvable                              -> pass, silent (ambiguity)
@@ -36,7 +42,6 @@
 set -uo pipefail
 
 PREFLIGHT_CMD="bash ~/.claude/hooks/preflight-probe.sh"
-STATE_REL=".bionic/tmp/preflight.state"
 
 INPUT=$(cat)
 _jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
@@ -125,7 +130,7 @@ deny() {  # <reason line>...
   exit 2
 }
 
-STATE_FILE="$REPO/$STATE_REL"
+STATE_FILE="$REPO/.bionic/tmp/preflight-${PAYLOAD_SID}.state"
 
 # A symlink ANYWHERE on the attestation path is never followed — a hostile repo
 # can AIM or CLOSE this wall but must not be able to OPEN it by planting content
@@ -160,6 +165,348 @@ ATTESTED_SID=$(grep -m1 '^session_id=' "$STATE_FILE" 2>/dev/null | cut -d= -f2-)
 if [ -z "$ATTESTED_SID" ] || [ "$ATTESTED_SID" != "$PAYLOAD_SID" ]; then
   deny "The attestation on disk is not this session's (foreign, or not a valid attestation record)." \
        "It may have been written by a different session, or the record could not be read."
+fi
+
+# ================================================================== THE ROSTER
+# (design D-5 + spec §Design "Roster"; slice 4/3 — the LAUNCH half of AC-1.)
+#
+# The gate has decided. Everything below is a LEDGER, never a wall: it appends
+# one row describing the launch that is about to happen, and it cannot change
+# the verdict. Starts fail open (TDD §7), so every failure here — an unwritable
+# directory, a hostile path, a brief that names none of its contract fields —
+# warns and lets the dispatch through. A gate that refused a dispatch because it
+# could not journal it would be a new failure mode, not a safety property.
+#
+# WHY THIS LIVES IN THE START GATE and not in a fresh hook: the row must exist
+# BEFORE the agent does. PostToolUse fires after the spawn, and the epic's whole
+# warrant is that an orchestrator's memory of what it launched is the thing that
+# fails. Slice 4/4 completes the row from the tool response (full agent id,
+# status `confirmed`); `tool_use_id` below is the key it correlates on.
+#
+# On printing: §4 forbids this gate from printing on the ALLOW path, and that
+# still holds for its verdict — a pass says nothing. The absence warning is not
+# the verdict; it is the roster reporting that a brief arrived malformed, which
+# the wave design ratified as "warns and records absence" (spec §Component
+# boundaries). A contract-complete brief — the ordinary case — is silent, which
+# is what keeps the §7 positive-pair row ("pass in silence") true in
+# tests/fail-direction-table.test.sh.
+#
+# Schema roster-state/v1 — one `#` header line plus one line per row, each
+# `<version>|key=value|...`, read BY KEY and never by position (checklist A6),
+# mirroring the observation record in hooks/stop-guard.sh so both machine
+# artifacts in .bionic/tmp/ parse the same way. Per-session filename from birth
+# (D-5): .bionic/tmp/roster-<session_id>.state.
+
+ROSTER_VERSION="v1"
+ROSTER_PREFIX="roster-"
+ROSTER_SUFFIX=".state"
+STATE_DIR="$REPO/.bionic/tmp"
+ROSTER_FILE="$STATE_DIR/${ROSTER_PREFIX}${PAYLOAD_SID}${ROSTER_SUFFIX}"
+
+warn() { printf 'dispatch-preflight: WARN %s\n' "$1" >&2; }
+
+# Values are pipe-delimited on one line, so a field carrying a newline or a `|`
+# would forge a row. Never a refusal — the ledger normalizes and records.
+sanitize() {  # <value> <max-chars>
+  printf '%s' "$1" \
+    | tr '\n\r\t|' '    ' \
+    | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//' \
+    | cut -c "1-$2"
+}
+
+# ---------- contract-state extraction ----------
+#
+# The anchors are the labeled fields the dispatch brief already carries — the
+# seven-field sentence in skills/canonical-sdlc/SKILL.md §Dispatch, span-pinned
+# by tests/dispatch-spans.test.sh §5d, with the exemplar brief recorded at
+# .bionic/docs/record/w2-ac3-run.md. This lifts the BRIEF's reading, never the
+# orchestrator's restatement (spec §Design invariant).
+#
+# Two properties earn the awk pass over a line-oriented grep:
+#   * a value span ends at the NEXT LABEL, not at the newline — real briefs put
+#     two fields on one line ("Expected duration: ~35 minutes. Progress: <path>")
+#     and a line-scoped reader swallows the second into the first;
+#   * labels nest ("progress" inside "progress artifact", "duration" inside
+#     "expected duration"), so labels are matched longest-first and a shorter
+#     one overlapping an accepted longer one is discarded. Without that, the
+#     inner match becomes a terminator for its own outer span and every value
+#     lifts empty.
+# Deliverable and progress values are reduced to path-shaped tokens, because
+# their consumers (slices 4/5, 4/6) stat them; a slash-bearing token with no
+# letter is a fraction ("slice 4/3"), not a path.
+#
+# THE LIVENESS FIELDS (`cadence`, `claims`) join the same table, because slice
+# 4/7 shipped them into the same §Dispatch prose the labels above anchor on:
+# "The progress-artifact path carries a `cadence` alongside it" and "A subprocess
+# claim — a process pattern plus its output file — is conditional-required". They
+# were prose-only for one slice — hooks/stop-check.sh read `claims=` off a row no
+# writer could produce, which the Step-6 six-axis review called for what it was
+# (axis-3 FAIL: a shipped reader with no producer, its only test hand-writing an
+# impossible row). Two grammar notes, both forced by that ratified sentence:
+#
+#   * `cadence` may be introduced by whitespace instead of a colon, because the
+#     contract puts it ALONGSIDE the progress path inside one sentence
+#     ("Progress: <path>, cadence ~6m") rather than on a labeled line of its own.
+#     It is the only label with a relaxed separator, and the separator still has
+#     to be there — `cadences` is not a hit. That relaxation is also why the hit
+#     is POSITIONAL: a lexical match alone turned every prose use of the word
+#     into a declaration (Step-6 critic F-2), so END additionally requires the
+#     hit to fall inside the span the progress label owns — which is exactly
+#     where the sentence above puts it.
+#   * the subprocess claim is spelled in the contract's own words — "A subprocess
+#     claim" — and those are the only two labels that lift it. A bare `claims`
+#     label was tried and withdrawn: it matched "verify every claim the report
+#     claims:" in an ordinary review brief and invented a subprocess for it,
+#     which the P2 display then reports as `live: no`, the alarm direction.
+#   * the subprocess claim declares two things in one span, and only one of them
+#     has a consumer: the PATTERN, which hooks/stop-check.sh existence-checks.
+#     So the pattern is what the row carries — the backticked or quoted run when
+#     the author marks one, else the text up to the first comma or arrow.
+LEAD_CHARS="(\"[<\`$(printf '\047')"
+TRAIL_CHARS=")\"]>\`,;:!?.$(printf '\047')"
+QUOTE_CHARS="\`\"$(printf '\047')"
+
+lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omitted
+  printf '%s' "$1" | awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" '
+    # <sep> is the regex between the label and its value; the default is the
+    # colon every labeled brief field uses.
+    function addlabel(txt, kind, sep) {
+      NL++; LTXT[NL] = txt; LKIND[NL] = kind
+      LSEP[NL] = (sep == "" ? "[ \t]*:" : sep)
+    }
+    function trimtok(t,   ch) {
+      while (length(t) > 0) { ch = substr(t, 1, 1);         if (index(LEAD,  ch) > 0) t = substr(t, 2);                    else break }
+      while (length(t) > 0) { ch = substr(t, length(t), 1); if (index(TRAIL, ch) > 0) t = substr(t, 1, length(t) - 1);     else break }
+      return t
+    }
+    function ispath(t) {
+      if (length(t) < 3)        return 0
+      if (index(t, "/") == 0)   return 0
+      if (t !~ /[A-Za-z]/)      return 0
+      if (substr(t, 1, 1) == "-") return 0
+      return 1
+    }
+    function collapse(s) { gsub(/[ \t\r\n]+/, " ", s); sub(/^ +/, "", s); sub(/ +$/, "", s); return s }
+    # The claimed PROCESS PATTERN out of a subprocess-claim span. Author-marked
+    # first (a backticked or quoted run is unambiguous), then the punctuation the
+    # sentence uses to separate the pattern from its output file.
+    function claimpat(s,   i, q, a, b) {
+      s = collapse(s)
+      for (i = 1; i <= length(QUOTES); i++) {
+        q = substr(QUOTES, i, 1)
+        a = index(s, q)
+        if (a == 0) continue
+        b = index(substr(s, a + 1), q)
+        if (b > 1) return substr(s, a + 1, b - 1)
+      }
+      a = index(s, ",");  if (a > 0) s = substr(s, 1, a - 1)
+      a = index(s, "->"); if (a > 0) s = substr(s, 1, a - 1)
+      a = index(s, "→");  if (a > 0) s = substr(s, 1, a - 1)
+      return collapse(s)
+    }
+    function firsthit(kind,   j, best) {
+      best = 0
+      for (j = 1; j <= nh; j++) if (HK[j] == kind && (best == 0 || HLS[j] < HLS[best])) best = j
+      return best
+    }
+    # The last character index of the span belonging to hit h. `skip` names one
+    # hit to IGNORE when looking for the terminator, which the cadence rule in
+    # END needs: it asks where the PROGRESS span would end if the cadence label
+    # were not sitting inside it, and without the skip that span would end at the
+    # very label whose membership is the question. (No apostrophes in here — the
+    # whole program is one single-quoted shell word.)
+    function spanend(h, skip,   j, e, s, bl) {
+      e = length(text)
+      for (j = 1; j <= nh; j++) if (j != skip && HLS[j] > HLS[h] && HLS[j] - 1 < e) e = HLS[j] - 1
+      s = substr(text, HVS[h], e - HVS[h] + 1)
+      bl = index(s, "\n\n")            # a blank line ends a field, whatever follows
+      if (bl > 0) e = HVS[h] + bl - 2
+      return e
+    }
+    function spanof(h) { return substr(text, HVS[h], spanend(h, 0) - HVS[h] + 1) }
+    function paths(s, maxn,   n, arr, i, t, out, seen, c) {
+      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0
+      for (i = 1; i <= n; i++) {
+        t = trimtok(arr[i])
+        if (!ispath(t) || seen[t]) continue
+        seen[t] = 1
+        out = (out == "" ? t : out "," t)
+        if (++c >= maxn) break
+      }
+      return out
+    }
+    BEGIN {
+      NL = 0
+      # LONGEST FIRST — see the nesting note above. `-` marks a label that only
+      # BOUNDS a span; it is a real brief field, just not one the roster lifts.
+      addlabel("subprocess claims", "claims")
+      addlabel("subprocess claim",  "claims")
+      addlabel("expected artifacts", "deliverable")
+      addlabel("expected artifact",  "deliverable")
+      addlabel("progress artifact",  "progress")
+      addlabel("expected duration",  "duration")
+      addlabel("scope constraint",   "-")
+      addlabel("exit condition",     "-")
+      addlabel("progress path",      "progress")
+      addlabel("deliverables",       "deliverable")
+      addlabel("current step",       "-")
+      addlabel("deliverable",        "deliverable")
+      addlabel("constraints",        "-")
+      addlabel("your slice",         "-")
+      addlabel("read first",         "-")
+      addlabel("artifacts",          "deliverable")
+      addlabel("artifact",           "deliverable")
+      addlabel("progress",           "progress")
+      addlabel("duration",           "duration")
+      addlabel("cadence",            "cadence", "([ \t]*:|[ \t])[ \t]*")
+      addlabel("scope",              "-")
+      addlabel("model",              "-")
+      addlabel("exit",               "-")
+    }
+    { text = text $0 "\n" }
+    END {
+      lc = tolower(text); nh = 0
+      for (i = 1; i <= NL; i++) {
+        lab = LTXT[i]; from = 1
+        while (from <= length(lc)) {
+          rest = substr(lc, from)
+          if (match(rest, "(^|[^a-z])" lab LSEP[i]) == 0) break
+          p = from + RSTART - 1
+          vend = p + RLENGTH                                  # first char AFTER the colon
+          ls = p
+          if (substr(lc, ls, length(lab)) != lab) ls = p + 1  # the guard char matched too
+          from = vend
+          clash = 0
+          for (j = 1; j <= nh; j++) if (ls <= HVS[j] - 1 && vend - 1 >= HLS[j]) { clash = 1; break }
+          if (clash) continue
+          nh++; HLS[nh] = ls; HVS[nh] = vend; HK[nh] = LKIND[i]
+        }
+      }
+      h = firsthit("deliverable"); if (h > 0) { v = paths(spanof(h), 4);      if (v != "") print "deliverable=" v }
+      h = firsthit("duration");    if (h > 0) { v = collapse(spanof(h));      if (v != "") print "duration=" v }
+      h = firsthit("progress");    if (h > 0) { v = paths(spanof(h), 1);      if (v != "") print "progress=" v }
+      # CADENCE IS POSITIONAL, not merely lexical (Step-6 critic F-2). It is the
+      # one label with a relaxed separator — whitespace will do, because the
+      # contract writes it inside the progress sentence rather than on a line of
+      # its own — and that relaxation made every prose occurrence of the word a
+      # declaration. "Scope constraint: keep a steady cadence and do not batch the
+      # sections" lifted `cadence=and do not batch the sections.`, and a
+      # fabricated liveness field is not inert: field presence is the shape key
+      # the watcher arms off. So the hit must fall where the contract puts it —
+      # after the progress label, inside the span that label owns.
+      h = firsthit("cadence")
+      if (h > 0) {
+        ph = firsthit("progress")
+        if (ph > 0 && HLS[h] > HLS[ph] && HLS[h] <= spanend(ph, h)) {
+          v = collapse(spanof(h)); if (v != "") print "cadence=" v
+        }
+      }
+      h = firsthit("claims");      if (h > 0) { v = claimpat(spanof(h));      if (v != "") print "claims=" v }
+    }
+  ' 2>/dev/null
+}
+
+# ---------- D-5 pruning ----------
+#
+# The same liveness rule slice 4/2 established for the attestation
+# (hooks/preflight-probe.sh): a session is live iff its transcript still exists
+# under CLAUDE_CONFIG_DIR/projects. A LIVE foreign session's roster is never
+# touched — that concurrency is the point of D-5 — and a dead session's is
+# reclaimed so a stale fleet cannot answer as "ours" (the bb20f616 class). There
+# is no legacy single-slot file to prune: this artifact is per-session from
+# birth.
+ROSTER_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+
+roster_session_live() {  # <session id>
+  local sid="$1" d
+  [ -n "$sid" ] || return 1
+  [ -d "$ROSTER_CONFIG_DIR/projects" ] || return 1
+  for d in "$ROSTER_CONFIG_DIR"/projects/*/; do
+    [ -f "${d}${sid}.jsonl" ] && return 0
+  done
+  return 1
+}
+
+prune_stale_rosters() {
+  local f base sid
+  for f in "$STATE_DIR"/"$ROSTER_PREFIX"*"$ROSTER_SUFFIX"; do
+    [ -e "$f" ] || continue
+    base="$(basename "$f")"
+    sid="${base#"$ROSTER_PREFIX"}"
+    sid="${sid%"$ROSTER_SUFFIX"}"
+    [ "$sid" = "$PAYLOAD_SID" ] && continue
+    roster_session_live "$sid" || rm -f "$f" 2>/dev/null
+  done
+}
+
+# ---------- the row ----------
+
+# The directory levels of this path were already discharged: the attestation
+# check above refuses outright if `.bionic` or `.bionic/tmp` is a symlink, so
+# reaching here means both are real directories. The roster FILE is its own
+# path and gets its own check — a hostile repo may make this gate fail to
+# journal, but must not gain an append to a file it points at (§8).
+if [ -L "$ROSTER_FILE" ]; then
+  warn "the roster path is a symbolic link; nothing was written through it: $ROSTER_FILE"
+  exit 0
+fi
+
+prune_stale_rosters
+
+AGENT_NAME=$(sanitize "$(_jq '.tool_input.name')" 200)
+SUBAGENT_TYPE=$(sanitize "$(_jq '.tool_input.subagent_type')" 200)
+AGENT_MODEL=$(sanitize "$(_jq '.tool_input.model')" 200)
+TOOL_USE_ID=$(sanitize "$(_jq '.tool_use_id')" 200)
+LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')")
+
+field_of() {  # <kind>
+  printf '%s\n' "$LIFTED" | grep -m1 "^$1=" | cut -d= -f2-
+}
+C_DELIVERABLE=$(sanitize "$(field_of deliverable)" 300)
+C_DURATION=$(sanitize "$(field_of duration)" 80)
+C_PROGRESS=$(sanitize "$(field_of progress)" 300)
+C_CADENCE=$(sanitize "$(field_of cadence)" 80)
+C_CLAIMS=$(sanitize "$(field_of claims)" 300)
+
+# What is ABSENT is recorded as a field of its own, so a consumer never has to
+# guess whether an empty value means "the brief did not say" or "the brief said
+# nothing". `model` is deliberately not on this list: the Agent tool inherits
+# the orchestrator's model when a dispatch names none, so warning on it would
+# fire on the ordinary case and train the reader past the real findings.
+#
+# NEITHER LIVENESS FIELD IS ON IT EITHER, for the same reason read the other way.
+# The subprocess claim is CONDITIONAL-required — declared iff the task backgrounds
+# a long command — so its absence is the ordinary case and carries no finding.
+# `cadence` is required WITH a progress path, which makes its absence a
+# conditional judgment rather than the flat fact this field records; the roster
+# reports what the brief said and leaves that reading to the watcher (P3).
+ABSENT=""
+add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
+[ -n "$AGENT_NAME" ]    || add_absent name
+[ -n "$C_DELIVERABLE" ] || add_absent deliverable
+[ -n "$C_DURATION" ]    || add_absent duration
+[ -n "$C_PROGRESS" ]    || add_absent progress
+
+ROW="roster-state/${ROSTER_VERSION}|status=intended|session=${PAYLOAD_SID}|name=${AGENT_NAME}|agent_id=|launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|subagent_type=${SUBAGENT_TYPE}|model=${AGENT_MODEL}|deliverable=${C_DELIVERABLE}|duration=${C_DURATION}|progress=${C_PROGRESS}|claims=${C_CLAIMS}|cadence=${C_CADENCE}|absent=${ABSENT}|tool_use_id=${TOOL_USE_ID}"
+
+WROTE=1
+if [ ! -e "$ROSTER_FILE" ]; then
+  # A concurrent dispatch in the same session can lose this race and write the
+  # header twice; both are comment lines and every reader skips them. The ROWS
+  # are what must not interleave, and each is a single short append.
+  printf '# bionic session roster — schema roster-state/%s — machine-local, safe to delete\n' \
+    "$ROSTER_VERSION" >> "$ROSTER_FILE" 2>/dev/null && chmod 600 "$ROSTER_FILE" 2>/dev/null
+fi
+printf '%s\n' "$ROW" >> "$ROSTER_FILE" 2>/dev/null || WROTE=0
+
+# No lock, unlike the observation record: that one is a read-modify-write of the
+# whole file, this one is a single O_APPEND write of well under a pipe buffer,
+# which the kernel does not interleave. A lock here would put a failure mode
+# (a wedged lock directory) in front of a dispatch, on the fail-open side.
+if [ "$WROTE" -eq 0 ]; then
+  warn "the launch could not be journalled to the roster (the dispatch is unaffected): $ROSTER_FILE"
+elif [ -n "$ABSENT" ]; then
+  warn "roster row for \"${AGENT_NAME:-(unnamed)}\" records absent brief field(s): ${ABSENT//,/, }"
 fi
 
 # Present and mine: pass in silence. Never print on the allow path (§4 "The
