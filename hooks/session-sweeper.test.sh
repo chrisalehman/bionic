@@ -28,7 +28,14 @@
 
 set -uo pipefail
 
-SWEEPER="$(cd "$(dirname "$0")" && pwd)/session-sweeper.sh"
+# Overridable so this suite can be driven against a MUTATED COPY of the sweeper without the
+# shipped file ever being modified — the same substitution
+# tests/cross-gate-agreement.test.sh offers for its four parties, and the only safe way to
+# take RED evidence for Section 7: an unguarded `retire` against a ledger carrying `pid=-1`
+# SIGTERMs every process the operator can signal, so the pre-guard proof is taken against a
+# copy whose `kill -TERM` is neutered:
+#   W4_SWEEPER_UNDER_TEST=/tmp/mutant.sh bash hooks/session-sweeper.test.sh
+SWEEPER="${W4_SWEEPER_UNDER_TEST:-$(cd "$(dirname "$0")" && pwd)/session-sweeper.sh}"
 TMPROOT="$(mktemp -d)"
 PASS=0; FAIL=0; TOTAL=0
 BG_PIDS=""
@@ -397,6 +404,64 @@ expect_true "an empty deliverable file does not satisfy a row" wait_exit "$P3H" 
 expect_contains "the empty-deliverable row is reported overdue" "class=overdue" \
   "$(cat "$(findings_of "$R3H")" 2>/dev/null)"
 
+# --- a DIRECTORY deliverable is judged by what is in it, exactly as hooks/stop-check.sh
+# judges one (6-axis D-2). `[ -s <dir> ]` is TRUE for an empty directory on both BSD and
+# GNU, so the naive substance test marked a row SATISFIED — permanently exempt from
+# watching — on a directory nobody had written anything into. The two implementations of
+# "is this deliverable delivered?" are bound on shared fixtures in
+# tests/cross-gate-agreement.test.sh §I; these two cases hold the sweeper's own half.
+R3I="$(make_repo s3i)"; new_roster "$R3I"
+mkdir -p "$R3I/empty-dir"
+add_row "$R3I" name=emptydir deliverable="$R3I/empty-dir" duration="1 minute" \
+        launched_at="$(iso_ago 600)"
+sweep_bg "$R3I" "$TMPROOT/s3i.out" arm --tick 1; P3I="$BGPID"
+expect_true "an EMPTY directory does not satisfy a row" wait_exit "$P3I" 20
+expect_contains "the empty-directory row is reported overdue" "class=overdue" \
+  "$(cat "$(findings_of "$R3I")" 2>/dev/null)"
+
+R3J="$(make_repo s3j)"; new_roster "$R3J"
+mkdir -p "$R3J/full-dir"; echo "the report" > "$R3J/full-dir/one.md"
+add_row "$R3J" name=fulldir deliverable="$R3J/full-dir" duration="1 minute" \
+        launched_at="$(iso_ago 600)"
+sweep_bg "$R3J" "$TMPROOT/s3j.out" arm --tick 1; P3J="$BGPID"
+sleep 3
+expect_true "a directory holding at least one file DOES satisfy a row" alive "$P3J"
+expect_false "the satisfied directory row wrote no findings" test -s "$(findings_of "$R3J")"
+sweep "$R3J" retire; wait_exit "$P3J" 15
+
+# --- a RELATIVE deliverable path is the REPO's, not the arming shell's cwd. Deliberate,
+# logged divergence from hooks/stop-check.sh (which resolves the paths TYPED at it against
+# the operator's own cwd): this process is armed once from whatever directory the harness
+# happened to be in and then outlives it, so a cwd-relative reading would make a roster
+# row mean different things on two arms of the same file.
+#
+# Both cases arm from a SUBDIRECTORY of the repo, which is what separates the two
+# readings: the roster and the ledger are repo-derived either way, so only the
+# deliverable's resolution can differ.
+R3K="$(make_repo s3k)"; new_roster "$R3K"
+mkdir -p "$R3K/sub"
+echo "the report" > "$R3K/rel-deliverable.md"
+add_row "$R3K" name=relative deliverable="rel-deliverable.md" duration="1 minute" \
+        launched_at="$(iso_ago 600)"
+( cd "$R3K/sub" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" arm --tick 1 \
+    >"$TMPROOT/s3k.out" 2>&1 ) &
+P3K=$!; BG_PIDS="$BG_PIDS $P3K"
+sleep 3
+expect_true "a relative deliverable IS resolved against the repo root" alive "$P3K"
+sweep "$R3K" retire; wait_exit "$P3K" 15
+
+R3K2="$(make_repo s3k2)"; new_roster "$R3K2"
+mkdir -p "$R3K2/sub"
+echo "the report" > "$R3K2/sub/rel-deliverable.md"
+add_row "$R3K2" name=relative-cwd deliverable="rel-deliverable.md" duration="1 minute" \
+        launched_at="$(iso_ago 600)"
+( cd "$R3K2/sub" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" arm --tick 1 \
+    >"$TMPROOT/s3k2.out" 2>&1 ) &
+P3K2=$!; BG_PIDS="$BG_PIDS $P3K2"
+expect_true "…and NOT against the arming shell's cwd" wait_exit "$P3K2" 20
+expect_contains "the cwd-relative row is reported overdue" "class=overdue" \
+  "$(cat "$(findings_of "$R3K2")" 2>/dev/null)"
+
 # ============================================================
 section "Section 4: the prose-lifted threshold parser"
 # ============================================================
@@ -552,6 +617,95 @@ ln -s "$TMPROOT/elsewhere-s10.state" "$(ledger_of "$R10")"
 sweep "$R10" arm --tick 1
 expect_eq "a symlinked ledger path REFUSES (exit 2)" "2" "$RC"
 expect_false "nothing was written through the ledger link" test -e "$TMPROOT/elsewhere-s10.state"
+
+# A symlinked ROSTER is not read (§8) — but the sweeper stays armed, so it must NAME what
+# it cannot watch instead of looking healthy while watching nothing (6-axis C-2). Every
+# other path-safety refusal in this script is loud; this branch is the arm's only one that
+# keeps running, which is exactly why the ledger has to carry it.
+R10B="$(make_repo s10b)"
+printf 'roster-state/v1|status=confirmed|session=%s|name=elsewhere|deliverable=|duration=1 minute|\n' \
+  "$SID" > "$TMPROOT/elsewhere-s10b-roster.state"
+ln -s "$TMPROOT/elsewhere-s10b-roster.state" "$(roster_of "$R10B")"
+sweep_bg "$R10B" "$TMPROOT/s10b.out" arm --tick 1; P10B="$BGPID"
+expect_true "arm over a symlinked roster still arms" wait_grep 'event=arm' "$(ledger_of "$R10B")" 10
+ARM10B="$(grep 'event=arm' "$(ledger_of "$R10B")" | head -1)"
+expect_contains "the arm entry NAMES the symlinked roster as a degradation" \
+  "symlinked-roster-unreadable" "$ARM10B"
+expect_contains "…attributed to the roster rather than to a row" "(roster)" "$ARM10B"
+expect_contains "the operator is told on stdout too" "symlinked-roster-unreadable" \
+  "$(cat "$TMPROOT/s10b.out")"
+expect_contains "no row from the symlinked file was read" "rows=0" "$ARM10B"
+sweep "$R10B" retire; wait_exit "$P10B" 15
+
+# A DANGLING symlinked roster is the same unwatchable state and must not be silent either.
+R10C="$(make_repo s10c)"
+ln -s "$TMPROOT/no-such-roster-s10c.state" "$(roster_of "$R10C")"
+sweep_bg "$R10C" "$TMPROOT/s10c.out" arm --tick 1; P10C="$BGPID"
+expect_true "arm over a dangling roster symlink still arms" wait_grep 'event=arm' "$(ledger_of "$R10C")" 10
+expect_contains "…and names the degradation" "symlinked-roster-unreadable" \
+  "$(grep 'event=arm' "$(ledger_of "$R10C")" | head -1)"
+sweep "$R10C" retire; wait_exit "$P10C" 15
+
+# ============================================================
+section "Section 7: the ledger's pid is validated before it is believed (6-axis S-1)"
+# ============================================================
+#
+# `pid=` is read out of a file in the repo's own .bionic/tmp — the directory the script
+# header's threat model names as repo-controlled — and it reaches `kill -0` and, in
+# `retire`, `kill -TERM`. In POSIX `kill` a NEGATIVE pid is a process group and `-1` is
+# "every process the caller may signal", so an unvalidated `pid=-1` turns `retire` into a
+# session-wide SIGTERM. `0` is the caller's own process group; `1` is init. No adversary is
+# required: a truncated or partial write that leaves a `-` in the field lands in the same
+# place, and the second-order damage is worse than the signal — `status` reports live=yes
+# forever, so `arm` refuses permanently and the unarmed-dispatch nag goes quiet.
+#
+# The three consequences are asserted for every rejected shape: status must report
+# not-live, arm must SUCCEED, and retire must neither signal nor journal a close.
+#
+# RED evidence for this section is taken against a copy whose `kill -TERM` is neutered
+# (W4_SWEEPER_UNDER_TEST above). Running it against an unguarded sweeper would terminate
+# the operator's own session, which is the finding.
+
+plant_arm() {  # <pid literal> <ledger path>
+  {
+    printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n'
+    printf 'sweeper-ledger/v1|event=arm|at=2026-08-06T00:00:00Z|epoch=1780000000|pid=%s|tick=120|session=%s|rows=0|degraded=\n' \
+      "$1" "$SID"
+  } > "$2"
+}
+
+_bad=0
+for BADPID in "-1" "-99999" "0" "1" "junk" "12x" " "; do
+  _bad=$((_bad + 1))
+  RB="$(make_repo "s7-$_bad")"; new_roster "$RB"
+  LB="$(ledger_of "$RB")"
+  plant_arm "$BADPID" "$LB"
+
+  sweep "$RB" status
+  expect_eq "pid=[$BADPID]: status exits 1 (nothing is live)" "1" "$RC"
+  expect_contains "pid=[$BADPID]: status reports live=no" "live=no" "$OUT"
+  expect_absent "pid=[$BADPID]: status never republishes the unusable pid" "pid=$BADPID|" "$OUT"
+
+  sweep "$RB" retire
+  expect_eq "pid=[$BADPID]: retire exits 0" "0" "$RC"
+  expect_eq "pid=[$BADPID]: retire journals NO close over an unusable pid" \
+    "0" "$(grep -c 'event=retire' "$LB")"
+  expect_contains "pid=[$BADPID]: retire says there was nothing to retire" "nothing to retire" "$OUT"
+
+  sweep_bg "$RB" "$TMPROOT/s7-$_bad.out" arm --tick 30; PB="$BGPID"
+  expect_true "pid=[$BADPID]: arm is NOT refused by the unusable entry" \
+    wait_grep "pid=$PB" "$LB" 10
+  sweep "$RB" retire; wait_exit "$PB" 15
+done
+
+# The guard rejects unusable shapes ONLY: a well-formed pid still refuses a second arm,
+# so the fix cannot have quietly disabled the single-live-sweeper invariant it protects.
+R7L="$(make_repo s7-live)"; new_roster "$R7L"
+sweep_bg "$R7L" "$TMPROOT/s7l.out" arm --tick 30; P7L="$BGPID"
+expect_true "a well-formed live pid is still believed" wait_grep "pid=$P7L" "$(ledger_of "$R7L")" 10
+sweep "$R7L" arm --tick 5
+expect_eq "…and still refuses a second arm (exit 1)" "1" "$RC"
+sweep "$R7L" retire; wait_exit "$P7L" 15
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'

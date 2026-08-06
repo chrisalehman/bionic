@@ -533,6 +533,12 @@ fi
 [ "$_sweeper_status_rc" = "1" ] && \
   warn "no session sweeper is armed for this session; arm one with: ${SWEEPER_ARM_CMD}"
 
-# Present and mine: pass in silence. Never print on the allow path (§4 "The
-# start gate": "Parses no check detail... Never: print on the allow path.").
+# Present and mine: pass in silence — the allow path prints NOTHING about the check it
+# just passed, which is what §4 "The start gate" bans ("Parses no check detail... Never:
+# print on the allow path"). The invariant is narrower than the quote reads: what may
+# never appear here is check DETAIL, the gate narrating its own reasoning. Two warn-only
+# lines above do print on this path, both ratified and neither a check detail — the
+# absent-brief-fields warning (a fact about the row just journalled) and the
+# unarmed-sweeper nag (a fact about this session's watching). Both are advisory, both
+# leave the exit status untouched, and a silent pass is still the common case.
 exit 0
