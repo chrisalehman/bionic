@@ -138,7 +138,22 @@ make_agent() {
 # derivation under test is unchanged; nothing here injects a projects path.
 run_check() {
   local home="$1" repo="$2"; shift 2
-  ( cd "$repo" && HOME="$home" CLAUDE_CONFIG_DIR="$home/.claude" bash "$CHECK" "$@" 2>&1 )
+  ( cd "$repo" && HOME="$home" CLAUDE_CONFIG_DIR="$home/.claude" CLAUDE_CODE_SESSION_ID= \
+      bash "$CHECK" "$@" 2>&1 )
+}
+
+# run_check_as <own-session-id> <home> <repo> [args...] — like run_check, but with
+# CLAUDE_CODE_SESSION_ID explicitly set: the channel stop-check.sh reads to learn
+# "this session's own id" for roster classification (slice 4/5), mirroring the
+# same resolution hooks/preflight-probe.sh already makes. run_check ALWAYS pins
+# this variable (empty above) rather than leaving it to the ambient shell — this
+# suite is run inside a real Claude Code session, which exports its own real
+# CLAUDE_CODE_SESSION_ID, and an unpinned test would silently vary its
+# classification verdict with whatever session happens to be running it.
+run_check_as() {
+  local sid="$1" home="$2" repo="$3"; shift 3
+  ( cd "$repo" && HOME="$home" CLAUDE_CONFIG_DIR="$home/.claude" CLAUDE_CODE_SESSION_ID="$sid" \
+      bash "$CHECK" "$@" 2>&1 )
 }
 
 # ============================================================
@@ -543,6 +558,137 @@ expect_absent "a deliverable path carrying a pipe does not forge a field" \
   "rep|ort" "$M7D"
 expect_equal "the forged-field attempt still yields one line" "1" \
   "$(printf '%s\n' "$OUT7D" | grep -c '^stop-check-observation/')"
+
+# ============================================================
+echo ""
+echo "=== Section 8: roster classification, contract-from-roster, P2 claims (slice 4/5, AC-6) ==="
+# ============================================================
+#
+# The roster's SCHEMA is hooks/dispatch-preflight.sh's (roster-state/v1); its
+# ROWS here are hand-built rather than produced by that gate, exactly like
+# tests/cross-gate-agreement.test.sh's verdict_er() — this suite's job is the
+# READER, and hooks/dispatch-preflight.test.sh already owns the writer.
+
+IFS='|' read -r H8 R8 S8 <<< "$(make_world w8)"
+OWN8="88888888-0000-0000-0000-000000000001"
+FOREIGN8="88888888-0000-0000-0000-000000000002"
+DEAD8="88888888-0000-0000-0000-000000000003"
+mkdir -p "$R8/.bionic/tmp"
+
+# --- (a) OURS: a roster row names the target; contract state is SOURCED from it ---
+make_agent "$H8" "$S8" "$OWN8" "aours-1111111111111111" "ours-target" "working away" >/dev/null
+echo "the deliverable body" > "$R8/deliv-a.md"
+echo "progress line" > "$R8/prog-a.progress"
+{
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
+  printf 'roster-state/v1|status=confirmed|session=%s|name=ours-target|agent_id=aours-1111111111111111|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=%s|duration=~10 minutes|progress=%s|claims=|absent=|tool_use_id=toolu_A\n' \
+    "$OWN8" "$R8/deliv-a.md" "$R8/prog-a.progress"
+} > "$R8/.bionic/tmp/roster-${OWN8}.state"
+
+OUT8A=$(run_check_as "$OWN8" "$H8" "$R8" "ours-target")
+expect_contains "OURS: classification line prints OURS" "Classification: OURS" "$OUT8A"
+expect_contains "OURS: contract line shows the roster deliverable path" "$R8/deliv-a.md" "$OUT8A"
+expect_contains "OURS: contract line shows the roster progress path" "$R8/prog-a.progress" "$OUT8A"
+expect_matches "OURS: the roster-sourced deliverable is checked and reported present" \
+  'deliv-a\.md.*(PRESENT|present)' "$OUT8A"
+expect_contains "OURS: the roster-sourced progress artifact section is printed" \
+  "-- progress artifact (D-6) --" "$OUT8A"
+M8A=$(printf '%s\n' "$OUT8A" | grep '^stop-check-observation/')
+expect_contains "OURS: machine line carries classification=ours" "classification=ours" "$M8A"
+expect_contains "OURS: machine line carries deliverable_source=roster" "deliverable_source=roster" "$M8A"
+expect_contains "OURS: machine line carries progress_source=roster" "progress_source=roster" "$M8A"
+
+# --- (b) OURS, but the CLI overrides: the override wins, the mismatch is printed, not judged ---
+echo "another deliverable" > "$R8/deliv-b.md"
+echo "another progress" > "$R8/prog-b.progress"
+OUT8B=$(run_check_as "$OWN8" "$H8" "$R8" "ours-target" "$R8/deliv-b.md" --progress "$R8/prog-b.progress")
+M8B=$(printf '%s\n' "$OUT8B" | grep '^stop-check-observation/')
+expect_contains "OURS+override: machine line carries deliverable_source=args" "deliverable_source=args" "$M8B"
+expect_contains "OURS+override: machine line carries progress_source=args" "progress_source=args" "$M8B"
+expect_contains "OURS+override: a deliverable mismatch is printed, not judged" \
+  "roster recorded a different deliverable set: $R8/deliv-a.md" "$OUT8B"
+expect_contains "OURS+override: a progress mismatch is printed, not judged" \
+  "roster recorded a different progress path: $R8/prog-a.progress" "$OUT8B"
+expect_contains "OURS+override: mismatch notes say they are not judged" "not judged" "$OUT8B"
+expect_matches "OURS+override: the CLI's own deliverable is still checked and reported" \
+  'deliv-b\.md.*(PRESENT|present)' "$OUT8B"
+for verdict in "safe to stop" "do not stop" "recommend" "verdict" "you should" "it is dead" "hung"; do
+  expect_absent "OURS+override carries no verdict: '$verdict'" "$verdict" "$OUT8B"
+done
+
+# --- (c) FOREIGN-LIVE: metadata under another session whose transcript is still live ---
+make_agent "$H8" "$S8" "$FOREIGN8" "aforeign8-2222222222222222" "foreign-target" "hi" >/dev/null
+OUT8C=$(run_check_as "$OWN8" "$H8" "$R8" "foreign-target")
+expect_contains "FOREIGN-LIVE: classification line prints FOREIGN-LIVE" "Classification: FOREIGN-LIVE" "$OUT8C"
+expect_absent "FOREIGN-LIVE: no roster contract line is printed" "Contract (roster):" "$OUT8C"
+M8C=$(printf '%s\n' "$OUT8C" | grep '^stop-check-observation/')
+expect_contains "FOREIGN-LIVE: machine line carries classification=foreign-live" "classification=foreign-live" "$M8C"
+
+# --- (d) DEAD HISTORY: the bb20f616 shape — metadata answering to a live-looking
+# name, from a session whose own transcript is gone. ---
+make_agent "$H8" "$S8" "$DEAD8" "adead8-3333333333333333" "dead-target" "old run" >/dev/null
+rm -f "$H8/.claude/projects/$S8/$DEAD8.jsonl"
+OUT8D=$(run_check_as "$OWN8" "$H8" "$R8" "dead-target")
+expect_contains "DEAD HISTORY: classification line prints DEAD HISTORY" "Classification: DEAD HISTORY" "$OUT8D"
+M8D=$(printf '%s\n' "$OUT8D" | grep '^stop-check-observation/')
+expect_contains "DEAD HISTORY: machine line carries classification=dead-history" "classification=dead-history" "$M8D"
+
+# --- (e) UNKNOWN: no own session id at all — classification never guesses ---
+OUT8E=$(run_check "$H8" "$R8" "foreign-target")
+expect_contains "UNKNOWN: classification line prints UNKNOWN when own session id is unavailable" \
+  "Classification: UNKNOWN" "$OUT8E"
+M8E=$(printf '%s\n' "$OUT8E" | grep '^stop-check-observation/')
+expect_contains "UNKNOWN: machine line carries classification=unknown" "classification=unknown" "$M8E"
+
+# --- classification applies only to what IS resolved (ambiguous-resolution unchanged) ---
+OUT8I=$(run_check_as "$OWN8" "$H8" "$R8" "no-such-target-w8")
+expect_absent "an unresolved target prints no Classification line" "Classification:" "$OUT8I"
+
+# --- (f) P2: claimed-process liveness via an explicit --claims pattern, a REAL process ---
+MARKER="$H8/claims-marker-w8"
+ln -sf "$(command -v sleep)" "$MARKER"
+"$MARKER" 30 &
+CLAIM_PID=$!
+sleep 0.3 2>/dev/null || true
+OUT8F=$(run_check_as "$OWN8" "$H8" "$R8" "ours-target" --claims "$MARKER")
+expect_contains "P2: claims section header printed" "-- claimed process (P2) --" "$OUT8F"
+expect_contains "P2: pattern and source=args are shown" "source=args" "$OUT8F"
+expect_contains "P2: a live matching process reports live: yes" "live:     yes" "$OUT8F"
+for verdict in "safe to stop" "recommend" "verdict" "you should" "hung" "stalled" "alive"; do
+  expect_absent "P2 claims section carries no verdict: '$verdict'" "$verdict" "$OUT8F"
+done
+kill "$CLAIM_PID" 2>/dev/null
+wait "$CLAIM_PID" 2>/dev/null
+
+OUT8G=$(run_check_as "$OWN8" "$H8" "$R8" "ours-target" --claims "$MARKER")
+expect_contains "P2: after the process exits, live: no" "live:     no" "$OUT8G"
+
+# --- (g) P2: claimed-process liveness SOURCED FROM THE ROSTER'S own claims= field ---
+make_agent "$H8" "$S8" "$OWN8" "aours-4444444444444444" "ours-claims" "working" >/dev/null
+MARKER2="$H8/claims-marker-w8-roster"
+ln -sf "$(command -v sleep)" "$MARKER2"
+"$MARKER2" 30 &
+CLAIM_PID2=$!
+sleep 0.3 2>/dev/null || true
+printf 'roster-state/v1|status=confirmed|session=%s|name=ours-claims|agent_id=aours-4444444444444444|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=%s|absent=|tool_use_id=toolu_B\n' \
+  "$OWN8" "$MARKER2" >> "$R8/.bionic/tmp/roster-${OWN8}.state"
+OUT8H=$(run_check_as "$OWN8" "$H8" "$R8" "ours-claims")
+expect_contains "P2 roster-sourced: claims section appears with no --claims flag" \
+  "-- claimed process (P2) --" "$OUT8H"
+expect_contains "P2 roster-sourced: the roster's pattern is shown" "$MARKER2" "$OUT8H"
+expect_contains "P2 roster-sourced: source=roster is shown" "source=roster" "$OUT8H"
+expect_contains "P2 roster-sourced: a live matching process reports live: yes" "live:     yes" "$OUT8H"
+kill "$CLAIM_PID2" 2>/dev/null
+wait "$CLAIM_PID2" 2>/dev/null
+
+# --- (h) --claims grammar mirrors --progress: one path, never zero, never two ---
+OUT8J=$(run_check "$H8" "$R8" "ours-target" --claims); ST=$?
+expect_status "--claims with no pattern exits 1" 1 "$ST"
+expect_contains "--claims with no pattern prints usage" "Usage" "$OUT8J"
+
+OUT8K=$(run_check "$H8" "$R8" "ours-target" --claims "$MARKER" --claims "$MARKER"); ST=$?
+expect_status "a second --claims exits 1" 1 "$ST"
+expect_contains "a second --claims prints usage" "Usage" "$OUT8K"
 
 # ============================================================
 echo ""
