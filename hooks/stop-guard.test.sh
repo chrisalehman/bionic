@@ -2,8 +2,10 @@
 # Tests for hooks/stop-guard.sh — the STOP GATE, PreToolUse|TaskStop
 # (epic-15 wave-01R; recorder arm removed at wave-03 slice 4/4).
 #
-# The gate: D-1 activity-boundary freshness, D-2 consume-on-stop. Serves AC-4
-# (D-1), AC-5 (D-2), and the stop-side rows of AC-8/AC-10.
+# The gate: D-1 activity-boundary freshness, D-2 consume-on-stop, and — since
+# wave-03 slice 4/6 — D-3 same-actor, D-6 progress staleness, and the
+# foreign-stop rule. Serves wave-01R's AC-4/AC-5 and the stop-side rows of
+# AC-8/AC-10, plus wave-03's AC-4 (§8), AC-5 (§9) and AC-6 (§10).
 #
 # WHAT MOVED OUT. This script used to carry a second arm that WROTE the records
 # it now only reads. Those rows live in hooks/execution-recorder.test.sh, because
@@ -104,6 +106,23 @@ mk_stop_payload() {  # <sid> <transcript> <cwd> <task_id>
       tool_input:{task_id:$id}, tool_use_id:"toolu_018jyjgop7KMxP6yKtoAWWtB"}'
 }
 
+# THE SAME PAYLOADS, INVOKED BY A SUBAGENT (slice 4/6, D-3). FAITHFUL to
+# .bionic/docs/record/w3-slice1-posttooluse-probe.md captures C and F: a
+# subagent-invoked PreToolUse or PostToolUse payload carries top-level `agent_id`
+# and `agent_type` alongside every field the orchestrator's payload has, and the
+# orchestrator's omits both. That presence/absence IS the actor key — the gate
+# reads it out of its own payload and the recorder read it out of its own, so a
+# same-actor comparison is one field against one field.
+mk_stop_payload_as() {  # <sid> <transcript> <cwd> <task_id> <invoking-agent-id>
+  mk_stop_payload "$1" "$2" "$3" "$4" \
+    | jq --arg a "$5" '. + {agent_id:$a, agent_type:"general-purpose"}'
+}
+
+mk_bash_post_as() {  # <sid> <transcript> <cwd> <command> <stdout> <invoking-agent-id>
+  mk_bash_post "$1" "$2" "$3" "$4" "$5" \
+    | jq --arg a "$6" '. + {agent_id:$a, agent_type:"general-purpose"}'
+}
+
 GUARD_OUT=""; GUARD_ERR=""; GUARD_ST=0
 run_guard() {  # <payload-json>
   GUARD_OUT=$(printf '%s' "$1" | bash "$GUARD" 2>"$SANDBOX/.err"); GUARD_ST=$?
@@ -170,12 +189,64 @@ STATE_REL=".bionic/tmp/stop-check.state"
 # seeding one by hand would seed a shape the shipped writer can no longer produce.
 # The metadata root is reached through CLAUDE_CONFIG_DIR, derived from the same
 # transcript path the gate resolves through, so both halves see one fixture world.
+# The observation's own session key travels on CLAUDE_CODE_SESSION_ID (slice
+# 4/5): it is how the producer finds THIS session's roster, and therefore how a
+# contracted progress path reaches the record at all. This suite runs inside a
+# real Claude Code session, which exports a real value — unpinned, every call
+# below would classify against whatever session happens to be running the suite
+# rather than against the fixture, and the suite's HERMETIC claim would be
+# quietly false. Pinned to the fixture session here; `observe_nosid` opts out
+# explicitly, where the missing key is the fact under test.
 observe() {  # <sid> <transcript> <repo> <typed-target> [args…]
+  observe_as "" "$@"
+}
+
+# <observer> is the agent id of the actor that RAN the observation — empty for
+# the orchestrator, which is exactly how the platform renders it (the field is
+# absent, and the recorder writes the literal token `orchestrator`).
+observe_as() {  # <observer-agent-id|""> <sid> <transcript> <repo> <typed-target> [args…]
+  local observer="$1" sid="$2" tr="$3" repo="$4"; shift 4
+  local cfg="${tr%/projects/*}" out payload
+  out=$( cd "$repo" && CLAUDE_CONFIG_DIR="$cfg" CLAUDE_CODE_SESSION_ID="$sid" \
+         bash "$OBSERVE" "$@" 2>/dev/null )
+  if [ -n "$observer" ]; then
+    payload=$(mk_bash_post_as "$sid" "$tr" "$repo" \
+      "bash ~/.claude/hooks/stop-check.sh $*" "$out" "$observer")
+  else
+    payload=$(mk_bash_post "$sid" "$tr" "$repo" \
+      "bash ~/.claude/hooks/stop-check.sh $*" "$out")
+  fi
+  printf '%s' "$payload" | bash "$RECORDER" >/dev/null 2>&1
+  return 0
+}
+
+# An observation run with NO own-session key — the degraded case slice 4/5 named
+# (classification `unknown`, roster invisible), driven here because it is the one
+# way a contracted progress artifact can go unlooked-at.
+observe_nosid() {  # <sid> <transcript> <repo> <typed-target> [args…]
   local sid="$1" tr="$2" repo="$3"; shift 3
   local cfg="${tr%/projects/*}" out
-  out=$( cd "$repo" && CLAUDE_CONFIG_DIR="$cfg" bash "$OBSERVE" "$@" 2>/dev/null )
+  out=$( cd "$repo" && env -u CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR="$cfg" \
+         bash "$OBSERVE" "$@" 2>/dev/null )
   printf '%s' "$(mk_bash_post "$sid" "$tr" "$repo" \
     "bash ~/.claude/hooks/stop-check.sh $*" "$out")" | bash "$RECORDER" >/dev/null 2>&1
+  return 0
+}
+
+# THE SESSION ROSTER, planted as the PRECONDITION it is at a real stop. Row shape
+# FAITHFUL to the writer, hooks/dispatch-preflight.sh's `ROW=` line (field for
+# field, in order); the writer itself is driven by its own suite and the two
+# shapes are held together by tests/cross-gate-agreement.test.sh. Without a row
+# the target is UNROSTERED, which is not a neutral fixture state since slice 4/6
+# — it is the foreign case, and every world below that expects a stop to reach
+# the record checks must say so.
+roster_row() {  # <repo> <sid> <name> <agent-id> [progress-path] [status]
+  local repo="$1" sid="$2" name="$3" aid="$4" prog="${5:-}" status="${6:-confirmed}"
+  local f="$repo/.bionic/tmp/roster-$sid.state"
+  mkdir -p "$repo/.bionic/tmp"
+  [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
+  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=%s|absent=|tool_use_id=toolu_01FIXTURE\n' \
+    "$status" "$sid" "$name" "$aid" "$prog" >> "$f"
   return 0
 }
 
@@ -243,6 +314,7 @@ echo "=== Section 3: the observation record is VERSIONED and key-addressed (chec
 
 IFS='|' read -r W3_REPO W3_TR W3_SUB <<< "$(make_world w3 yes)"
 plant_agent "$W3_SUB" "atarget-3333333333333333" "target"
+roster_row "$W3_REPO" "$SID_A" "target" "atarget-3333333333333333"
 observe "$SID_A" "$W3_TR" "$W3_REPO" "target"
 STATE=$(cat "$W3_REPO/$STATE_REL")
 expect_matches "the record leads with a schema version token" '(^|\|)v1(\||$)' "$STATE"
@@ -291,6 +363,7 @@ expect_empty "a plan with no valid current step: silent" "$GUARD_ERR"
 # --- after the verdict: CLOSED and LOUD ---
 IFS='|' read -r W4_REPO W4_TR W4_SUB <<< "$(make_world w4 yes)"
 plant_agent "$W4_SUB" "aquiet-reviewer-deadbeefdeadbeef" "quiet-reviewer"
+roster_row "$W4_REPO" "$SID_A" "quiet-reviewer" "aquiet-reviewer-deadbeefdeadbeef"
 
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "quiet-reviewer")"
 expect_status "active wave + no observation: REFUSED" 2 "$GUARD_ST"
@@ -324,6 +397,7 @@ expect_contains "an ambiguous name says so" "ambiguous" "$GUARD_ERR"
 # bypassed the evidence gate for a whole wave (.claude/rules/hook-authoring.md).
 IFS='|' read -r CR_REPO CR_TR CR_SUB <<< "$(make_world crplan yes)"
 plant_agent "$CR_SUB" "acrlf-0123456789abcdef" "crlf"
+roster_row "$CR_REPO" "$SID_A" "crlf" "acrlf-0123456789abcdef"
 CR_PLAN="$CR_REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
 tr '\n' '\r' < "$CR_PLAN" > "$CR_PLAN.cr" && mv "$CR_PLAN.cr" "$CR_PLAN"
 run_guard "$(mk_stop_payload "$SID_A" "$CR_TR" "$CR_REPO" "crlf")"
@@ -338,6 +412,7 @@ expect_empty "a permitted stop is silent" "$GUARD_ERR"
 # A foreign session's observation is not mine.
 IFS='|' read -r W5_REPO W5_TR W5_SUB <<< "$(make_world w5 yes)"
 plant_agent "$W5_SUB" "aquiet-reviewer-deadbeefdeadbeef" "quiet-reviewer"
+roster_row "$W5_REPO" "$SID_A" "quiet-reviewer" "aquiet-reviewer-deadbeefdeadbeef"
 observe "$SID_B" "$W5_TR" "$W5_REPO" "quiet-reviewer"
 run_guard "$(mk_stop_payload "$SID_A" "$W5_TR" "$W5_REPO" "quiet-reviewer")"
 expect_status "another session's observation does not discharge my stop" 2 "$GUARD_ST"
@@ -350,6 +425,7 @@ echo "=== Section 5: D-1 — freshness by ACTIVITY BOUNDARY, no clocks (AC-4) ==
 
 IFS='|' read -r D1_REPO D1_TR D1_SUB <<< "$(make_world d1 yes)"
 plant_agent "$D1_SUB" "aworker-7777777777777777" "worker"
+roster_row "$D1_REPO" "$SID_A" "worker" "aworker-7777777777777777"
 
 # STALE: the target wrote AFTER the observation. This is the founding incident
 # (UC-5) and the flaw the v1 exchange-keyed design provably re-permitted.
@@ -365,6 +441,7 @@ expect_absent "the staleness refusal quotes no clock window" "seconds ago" "$GUA
 # SUB-SECOND: a write inside the same mtime second still counts as activity.
 IFS='|' read -r D1B_REPO D1B_TR D1B_SUB <<< "$(make_world d1b yes)"
 plant_agent "$D1B_SUB" "aworker-8888888888888888" "worker"
+roster_row "$D1B_REPO" "$SID_A" "worker" "aworker-8888888888888888"
 observe "$SID_A" "$D1B_TR" "$D1B_REPO" "worker"
 LOG="$D1B_SUB/agent-aworker-8888888888888888.jsonl"
 MT=$(date -r "$LOG" +%Y%m%d%H%M.%S 2>/dev/null)
@@ -376,6 +453,7 @@ expect_status "a write within the same mtime second is still activity: REFUSED" 
 # DORMANT, HOWEVER OLD: no clock may expire an honest observation.
 IFS='|' read -r D2_REPO D2_TR D2_SUB <<< "$(make_world d1old yes)"
 plant_agent "$D2_SUB" "asleeper-9999999999999999" "sleeper" "202601010000"
+roster_row "$D2_REPO" "$SID_A" "sleeper" "asleeper-9999999999999999"
 observe "$SID_A" "$D2_TR" "$D2_REPO" "sleeper"
 touch -t 202601010000 "$D2_SUB/agent-asleeper-9999999999999999.jsonl"
 run_guard "$(mk_stop_payload "$SID_A" "$D2_TR" "$D2_REPO" "sleeper")"
@@ -388,6 +466,9 @@ IFS='|' read -r LX_REPO LX_TR LX_SUB <<< "$(make_world longx yes)"
 plant_agent "$LX_SUB" "aalpha-aaaaaaaaaaaaaaaa" "alpha"
 plant_agent "$LX_SUB" "abeta-bbbbbbbbbbbbbbbb"  "beta"
 plant_agent "$LX_SUB" "agamma-cccccccccccccccc" "gamma"
+roster_row "$LX_REPO" "$SID_A" "alpha" "aalpha-aaaaaaaaaaaaaaaa"
+roster_row "$LX_REPO" "$SID_A" "beta" "abeta-bbbbbbbbbbbbbbbb"
+roster_row "$LX_REPO" "$SID_A" "gamma" "agamma-cccccccccccccccc"
 observe "$SID_A" "$LX_TR" "$LX_REPO" "alpha"
 observe "$SID_A" "$LX_TR" "$LX_REPO" "beta"
 observe "$SID_A" "$LX_TR" "$LX_REPO" "gamma"
@@ -408,6 +489,7 @@ echo "=== Section 6: D-2 — one observation, one stop (AC-5) ==="
 
 IFS='|' read -r D2R_REPO D2R_TR D2R_SUB <<< "$(make_world d2 yes)"
 plant_agent "$D2R_SUB" "arunner-dddddddddddddddd" "runner"
+roster_row "$D2R_REPO" "$SID_A" "runner" "arunner-dddddddddddddddd"
 observe "$SID_A" "$D2R_TR" "$D2R_REPO" "runner"
 run_guard "$(mk_stop_payload "$SID_A" "$D2R_TR" "$D2R_REPO" "runner")"
 expect_status "the first stop is permitted" 0 "$GUARD_ST"
@@ -424,6 +506,7 @@ expect_status "re-observing re-arms the stop" 0 "$GUARD_ST"
 # A REFUSED stop consumes nothing — nothing was stopped.
 IFS='|' read -r D2B_REPO D2B_TR D2B_SUB <<< "$(make_world d2b yes)"
 plant_agent "$D2B_SUB" "abusy-eeeeeeeeeeeeeeee" "busy"
+roster_row "$D2B_REPO" "$SID_A" "busy" "abusy-eeeeeeeeeeeeeeee"
 observe "$SID_A" "$D2B_TR" "$D2B_REPO" "busy"
 sleep 1
 printf '{"type":"assistant","message":{"content":[{"type":"text","text":"awake"}]}}\n' \
@@ -447,6 +530,7 @@ echo "=== Section 6a: the refusal's Fix line is runnable AS PRINTED (R2) ==="
 # absent deliverables (R2) — a refusal that teaches the reader something false.
 IFS='|' read -r R2_REPO R2_TR R2_SUB <<< "$(make_world r2 yes)"
 plant_agent "$R2_SUB" "ablocked-aaaaaaaaaaaaaaaa" "blocked"
+roster_row "$R2_REPO" "$SID_A" "blocked" "ablocked-aaaaaaaaaaaaaaaa"
 run_guard "$(mk_stop_payload "$SID_A" "$R2_TR" "$R2_REPO" "blocked")"
 expect_status "the stop with no observation is refused (setup for R2)" 2 "$GUARD_ST"
 FIXLINE=$(printf '%s\n' "$GUARD_ERR" | grep '^Fix: ' | sed 's/^Fix: //')
@@ -496,6 +580,7 @@ fi
 
 IFS='|' read -r C3_REPO C3_TR C3_SUB <<< "$(make_world c3 yes)"
 plant_agent "$C3_SUB" "aunconsumable-5555555555555555" "unconsumable"
+roster_row "$C3_REPO" "$SID_A" "unconsumable" "aunconsumable-5555555555555555"
 observe "$SID_A" "$C3_TR" "$C3_REPO" "unconsumable"
 C3_PAYLOAD=$(mk_stop_payload "$SID_A" "$C3_TR" "$C3_REPO" "unconsumable")
 C3_ERR=$(printf '%s' "$C3_PAYLOAD" | bash "$MUTANT" 2>&1 >/dev/null)
@@ -537,6 +622,7 @@ run_bounded() {  # <label> <secs> <payload> -> sets BOUNDED_ST (137 = killed)
 
 IFS='|' read -r S2_REPO S2_TR S2_SUB <<< "$(make_world s2 yes)"
 plant_agent "$S2_SUB" "awedged-6666666666666666" "wedged"
+roster_row "$S2_REPO" "$SID_A" "wedged" "awedged-6666666666666666"
 observe "$SID_A" "$S2_TR" "$S2_REPO" "wedged"        # a valid record, so the gate reaches the consume
 mkdir -p "$S2_REPO/.bionic/tmp"
 chmod 500 "$S2_REPO/.bionic/tmp"
@@ -590,6 +676,21 @@ fi
 run_guard "$(mk_stop_payload "$SID_A" "$S2_TR" "$S2_REPO" "victim")"
 expect_status "a symlinked state DIRECTORY refuses the stop too" 2 "$GUARD_ST"
 
+# The ROSTER is repo-controlled state too, and it now decides whether a target is
+# ours — so a symlink at its own level would let a repo choose which file answers
+# that question, the OPEN direction §8 forbids a repo from reaching. Refusing to
+# read through it leaves the target unrostered, which is the closed side.
+IFS='|' read -r SR_REPO SR_TR SR_SUB <<< "$(make_world secroster yes)"
+plant_agent "$SR_SUB" "avictim-1818181818181818" "victim"
+roster_row "$SANDBOX/plantedroster" "$SID_A" "victim" "avictim-1818181818181818"
+mkdir -p "$SR_REPO/.bionic/tmp"
+ln -s "$SANDBOX/plantedroster/.bionic/tmp/roster-$SID_A.state" \
+  "$SR_REPO/.bionic/tmp/roster-$SID_A.state"
+run_guard "$(mk_stop_payload "$SID_A" "$SR_TR" "$SR_REPO" "victim")"
+expect_status "a symlinked roster refuses the stop" 2 "$GUARD_ST"
+expect_contains "…because it was not read through: the target stays unrostered" \
+  "not in this session's roster" "$GUARD_ERR"
+
 # Unpredictable temp names: mktemp with an X-template, and no PID-based name.
 expect_matches "temp files use an mktemp X-template" 'mktemp.*XXXXXX' "$(cat "$GUARD")"
 expect_absent "no PID-based temp filename" '.tmp.$$' "$(cat "$GUARD")"
@@ -600,6 +701,251 @@ printf '{"type":"assistant","message":{"content":[{"type":"text","text":"CANARY_
   >> "$S_SUB/agent-avictim-ffffffffffffffff.jsonl"
 run_guard "$(mk_stop_payload "$SID_A" "$S_TR" "$S_REPO" "victim")"
 expect_absent "the refusal prints no working-log contents" "CANARY_LOG_BODY" "$GUARD_ERR"
+
+# ============================================================
+echo ""
+echo "=== Section 8: D-3 — a stop is discharged only by the STOPPER'S OWN look (AC-4) ==="
+# ============================================================
+#
+# The borrowed look. D-1 makes an observation perishable, but nothing made it
+# ATTRIBUTABLE: any record for the target discharged any actor's stop, so a
+# subagent's look could pay for the orchestrator's stop and neither one had seen
+# what the other saw. Slice 4/1 resolved assumption (A) FULL — a subagent-invoked
+# payload carries top-level `agent_id`, the orchestrator's does not — so the
+# comparison is one payload field against the `observer=` field the recorder
+# wrote out of ITS payload. Same key, both ends.
+
+IFS='|' read -r SA_REPO SA_TR SA_SUB <<< "$(make_world sameactor yes)"
+plant_agent "$SA_SUB" "aworker-1010101010101010" "worker"
+roster_row "$SA_REPO" "$SID_A" "worker" "aworker-1010101010101010"
+SUBAGENT="asubagent-2020202020202020"
+
+observe_as "$SUBAGENT" "$SID_A" "$SA_TR" "$SA_REPO" "worker"
+expect_contains "the record carries the actor who looked" \
+  "observer=$SUBAGENT" "$(cat "$SA_REPO/$STATE_REL" 2>/dev/null)"
+
+run_guard "$(mk_stop_payload "$SID_A" "$SA_TR" "$SA_REPO" "worker")"
+expect_status "a subagent's look does not discharge the ORCHESTRATOR's stop" 2 "$GUARD_ST"
+expect_contains "the refusal names the actor who looked" "$SUBAGENT" "$GUARD_ERR"
+expect_contains "the refusal names the actor who is stopping" "orchestrator" "$GUARD_ERR"
+expect_contains "the same-actor refusal names the fix" "stop-check.sh" "$GUARD_ERR"
+expect_contains "a refused same-actor stop consumes nothing" \
+  "aworker-1010101010101010" "$(cat "$SA_REPO/$STATE_REL" 2>/dev/null)"
+
+# The positive pair: the actor that looked may spend its own look.
+run_guard "$(mk_stop_payload_as "$SID_A" "$SA_TR" "$SA_REPO" "worker" "$SUBAGENT")"
+expect_status "the actor who looked spends its own observation" 0 "$GUARD_ST"
+expect_empty "and does so in silence" "$GUARD_ERR"
+
+# The mirror image: the orchestrator looked, a subagent tries to spend it.
+IFS='|' read -r SB_REPO SB_TR SB_SUB <<< "$(make_world sameactor2 yes)"
+plant_agent "$SB_SUB" "aworker-3030303030303030" "worker"
+roster_row "$SB_REPO" "$SID_A" "worker" "aworker-3030303030303030"
+observe "$SID_A" "$SB_TR" "$SB_REPO" "worker"
+expect_contains "an orchestrator look records the orchestrator as observer" \
+  "observer=orchestrator" "$(cat "$SB_REPO/$STATE_REL" 2>/dev/null)"
+run_guard "$(mk_stop_payload_as "$SID_A" "$SB_TR" "$SB_REPO" "worker" "$SUBAGENT")"
+expect_status "the orchestrator's look does not discharge a SUBAGENT's stop" 2 "$GUARD_ST"
+expect_contains "the refusal names the subagent doing the stopping" "$SUBAGENT" "$GUARD_ERR"
+run_guard "$(mk_stop_payload "$SID_A" "$SB_TR" "$SB_REPO" "worker")"
+expect_status "…and the orchestrator can still spend its own" 0 "$GUARD_ST"
+
+# A record with no observer at all cannot prove same-actor, so it does not
+# discharge anything. Fail-closed: this is the §7 stop cell, and the cost of the
+# refusal is one re-observation.
+IFS='|' read -r SC_REPO SC_TR SC_SUB <<< "$(make_world sameactor3 yes)"
+plant_agent "$SC_SUB" "aworker-4040404040404040" "worker"
+roster_row "$SC_REPO" "$SID_A" "worker" "aworker-4040404040404040"
+observe "$SID_A" "$SC_TR" "$SC_REPO" "worker"
+sed -i.bak 's/|observer=[^|]*//' "$SC_REPO/$STATE_REL"; rm -f "$SC_REPO/$STATE_REL.bak"
+expect_absent "the observer field was genuinely stripped for this case" \
+  "observer=" "$(cat "$SC_REPO/$STATE_REL" 2>/dev/null)"
+run_guard "$(mk_stop_payload "$SID_A" "$SC_TR" "$SC_REPO" "worker")"
+expect_status "a record carrying no observer discharges nothing" 2 "$GUARD_ST"
+expect_contains "…and says the look cannot be attributed" "observer" "$GUARD_ERR"
+
+# ============================================================
+echo ""
+echo "=== Section 9: D-6 — the contracted progress artifact is a second activity channel (AC-5) ==="
+# ============================================================
+#
+# D-1 watched ONE channel: the working log. An agent that spends 40 minutes
+# inside a single tool call writes nothing to it, so "dormant since your look"
+# was true of a wedged agent and a working one alike — and the work contract's
+# own progress artifact, the thing that separates them, counted for nothing at
+# the gate. Since slice 4/5 the observation records the progress state it saw;
+# this gate compares that snapshot against the artifact as it is NOW, by exactly
+# the rule the working log already follows: any activity after the look stales
+# the look.
+
+PROG_REL=".bionic/tmp/prog.txt"
+
+IFS='|' read -r PG_REPO PG_TR PG_SUB <<< "$(make_world progress yes)"
+plant_agent "$PG_SUB" "arunner-1212121212121212" "runner"
+roster_row "$PG_REPO" "$SID_A" "runner" "arunner-1212121212121212" "$PROG_REL"
+mkdir -p "$PG_REPO/.bionic/tmp"
+printf 'stage 1\n' > "$PG_REPO/$PROG_REL"
+
+observe "$SID_A" "$PG_TR" "$PG_REPO" "runner"
+PG_STATE=$(cat "$PG_REPO/$STATE_REL" 2>/dev/null)
+expect_contains "the contract reached the record from the ROSTER, not the command line" \
+  "progress_source=roster" "$PG_STATE"
+expect_contains "the record carries the progress state the look saw" \
+  "progress_state=present" "$PG_STATE"
+
+# A stop taken with nothing having moved is permitted — the check must not refuse
+# on the mere existence of a progress contract.
+run_guard "$(mk_stop_payload "$SID_A" "$PG_TR" "$PG_REPO" "runner")"
+expect_status "progress unchanged since the look: PERMITTED" 0 "$GUARD_ST"
+
+observe "$SID_A" "$PG_TR" "$PG_REPO" "runner"
+sleep 1
+printf 'stage 2\n' >> "$PG_REPO/$PROG_REL"
+run_guard "$(mk_stop_payload "$SID_A" "$PG_TR" "$PG_REPO" "runner")"
+expect_status "progress written AFTER the look: REFUSED as stale" 2 "$GUARD_ST"
+expect_contains "the refusal names the progress artifact it compared" "$PROG_REL" "$GUARD_ERR"
+expect_contains "the refusal says the observation went stale" "stale" "$GUARD_ERR"
+expect_contains "the progress refusal names the fix" "stop-check.sh" "$GUARD_ERR"
+expect_absent "the progress refusal quotes no clock window" "seconds ago" "$GUARD_ERR"
+expect_absent "the progress refusal prints no progress CONTENTS" "stage 2" "$GUARD_ERR"
+expect_contains "a stop refused on progress staleness consumes nothing" \
+  "arunner-1212121212121212" "$(cat "$PG_REPO/$STATE_REL" 2>/dev/null)"
+
+# A fresh look over the NEW state re-arms it — the loop the refusal names has an exit.
+observe "$SID_A" "$PG_TR" "$PG_REPO" "runner"
+run_guard "$(mk_stop_payload "$SID_A" "$PG_TR" "$PG_REPO" "runner")"
+expect_status "a fresh look over the new progress state re-arms the stop" 0 "$GUARD_ST"
+
+# The artifact APPEARING is activity too: "absent" and "present" are different
+# states, and a first write may land inside the same mtime second as the look.
+IFS='|' read -r PA_REPO PA_TR PA_SUB <<< "$(make_world progressappear yes)"
+plant_agent "$PA_SUB" "arunner-1313131313131313" "runner"
+roster_row "$PA_REPO" "$SID_A" "runner" "arunner-1313131313131313" "$PROG_REL"
+mkdir -p "$PA_REPO/.bionic/tmp"
+observe "$SID_A" "$PA_TR" "$PA_REPO" "runner"
+expect_contains "the look recorded the contracted artifact as ABSENT" \
+  "progress_state=absent" "$(cat "$PA_REPO/$STATE_REL" 2>/dev/null)"
+printf 'first write\n' > "$PA_REPO/$PROG_REL"
+run_guard "$(mk_stop_payload "$SID_A" "$PA_TR" "$PA_REPO" "runner")"
+expect_status "the contracted artifact appearing after the look: REFUSED" 2 "$GUARD_ST"
+
+# NO progress contract: the whole check is inert, and the world behaves exactly
+# as it did before this slice. A wall that fires where nothing was contracted
+# would refuse every ordinary stop.
+IFS='|' read -r PN_REPO PN_TR PN_SUB <<< "$(make_world progressnone yes)"
+plant_agent "$PN_SUB" "arunner-1414141414141414" "runner"
+roster_row "$PN_REPO" "$SID_A" "runner" "arunner-1414141414141414"
+mkdir -p "$PN_REPO/.bionic/tmp"
+observe "$SID_A" "$PN_TR" "$PN_REPO" "runner"
+expect_contains "with no contracted path the look records progress_state=unnamed" \
+  "progress_state=unnamed" "$(cat "$PN_REPO/$STATE_REL" 2>/dev/null)"
+sleep 1
+printf 'unrelated\n' > "$PN_REPO/$PROG_REL"
+run_guard "$(mk_stop_payload "$SID_A" "$PN_TR" "$PN_REPO" "runner")"
+expect_status "no progress contract: an unrelated file's write changes nothing" 0 "$GUARD_ST"
+
+# A CONTRACTED channel the look never opened. The observation ran without its own
+# session key (slice 4/5's `unknown` case), so it never saw the roster and never
+# looked at the progress artifact — and an artifact nobody looked at can never go
+# stale, which would make the check above unreachable by simply looking wrong.
+IFS='|' read -r PU_REPO PU_TR PU_SUB <<< "$(make_world progressunseen yes)"
+plant_agent "$PU_SUB" "arunner-1515151515151515" "runner"
+roster_row "$PU_REPO" "$SID_A" "runner" "arunner-1515151515151515" "$PROG_REL"
+mkdir -p "$PU_REPO/.bionic/tmp"
+printf 'stage 1\n' > "$PU_REPO/$PROG_REL"
+observe_nosid "$SID_A" "$PU_TR" "$PU_REPO" "runner"
+expect_contains "the blind look recorded no progress channel at all" \
+  "progress_state=unnamed" "$(cat "$PU_REPO/$STATE_REL" 2>/dev/null)"
+run_guard "$(mk_stop_payload "$SID_A" "$PU_TR" "$PU_REPO" "runner")"
+expect_status "a look that skipped the contracted channel discharges nothing" 2 "$GUARD_ST"
+expect_contains "…and names the contracted path it should have looked at" "$PROG_REL" "$GUARD_ERR"
+PU_FIX=$(printf '%s\n' "$GUARD_ERR" | grep '^Fix: ' | sed 's/^Fix: //')
+expect_contains "…and the fix command carries the progress flag, runnable as printed" \
+  "--progress $PROG_REL" "$PU_FIX"
+# Following the fix as printed clears the refusal — the loop has a stated exit.
+observe_nosid "$SID_A" "$PU_TR" "$PU_REPO" "runner" "--progress" "$PROG_REL"
+run_guard "$(mk_stop_payload "$SID_A" "$PU_TR" "$PU_REPO" "runner")"
+expect_status "observing the contracted channel as instructed re-arms the stop" 0 "$GUARD_ST"
+
+# ============================================================
+echo ""
+echo "=== Section 10: AC-6 — what this session did not launch, it does not stop BY NAME ==="
+# ============================================================
+#
+# THE bb20f616 EXHIBIT. A previous epic's dead fleet left agent metadata on disk
+# answering to names a live session was still using; a stop by name resolved to
+# whichever one the scan found first. A name is not an identity — the session
+# roster is (slice 4/3), and a target no row names is not ours whatever directory
+# it sits in (spec ownership table). The escape hatch is the full agent id, which
+# is unambiguous by construction and is how the documented zombie-predecessor
+# cleanup is done; it buys no relief from the observation requirements.
+#
+# Agent id shape SYNTHESIZED after the exhibit named in continuation.md; the
+# session ids and names are fixtures, as everywhere else in this suite.
+
+IFS='|' read -r FG_REPO FG_TR FG_SUB <<< "$(make_world foreignstop yes)"
+plant_agent "$FG_SUB" "abb20f616-7777777777777" "reviewer"
+# NO roster row: this is history's agent, answering to a live-looking name.
+
+run_guard "$(mk_stop_payload "$SID_A" "$FG_TR" "$FG_REPO" "reviewer")"
+expect_status "an unrostered target addressed BY NAME: REFUSED" 2 "$GUARD_ST"
+expect_contains "the refusal names the roster as what it consulted" "roster" "$GUARD_ERR"
+expect_contains "the refusal names the classification" "FOREIGN-LIVE" "$GUARD_ERR"
+expect_contains "the refusal names the full-id escape hatch" \
+  "abb20f616-7777777777777" "$GUARD_ERR"
+
+# It refuses BY NAME even with a perfectly fresh look — the addressing form is
+# the point, not the evidence.
+observe "$SID_A" "$FG_TR" "$FG_REPO" "reviewer"
+run_guard "$(mk_stop_payload "$SID_A" "$FG_TR" "$FG_REPO" "reviewer")"
+expect_status "a fresh observation does not buy a by-NAME stop of a foreign target" 2 "$GUARD_ST"
+expect_contains "a by-name foreign refusal consumes nothing" \
+  "abb20f616-7777777777777" "$(cat "$FG_REPO/$STATE_REL" 2>/dev/null)"
+
+# `name@team` is still a name (P5: the platform hands the gate the string as typed).
+run_guard "$(mk_stop_payload "$SID_A" "$FG_TR" "$FG_REPO" "reviewer@team")"
+expect_status "name@team is a name: REFUSED" 2 "$GUARD_ST"
+
+# The escape hatch, spending the very record the by-name attempts left behind.
+run_guard "$(mk_stop_payload "$SID_A" "$FG_TR" "$FG_REPO" "abb20f616-7777777777777")"
+expect_status "the same target addressed by FULL AGENT ID: PERMITTED" 0 "$GUARD_ST"
+expect_empty "…and permitted in silence" "$GUARD_ERR"
+
+# The hatch is not a bypass: by-id still needs a fresh look of its own (D-2 spent
+# the record above).
+run_guard "$(mk_stop_payload "$SID_A" "$FG_TR" "$FG_REPO" "abb20f616-7777777777777")"
+expect_status "by full id with no observation left: still REFUSED" 2 "$GUARD_ST"
+expect_contains "…refused for the ordinary reason, not the foreign one" \
+  "No observation" "$GUARD_ERR"
+
+# DEAD HISTORY: the same rule, and the refusal says which case it is. The
+# distinction is the target's own session transcript — the check
+# hooks/stop-check.sh and hooks/preflight-probe.sh already make.
+IFS='|' read -r DH_REPO DH_TR DH_SUB <<< "$(make_world deadhistory yes)"
+plant_agent "$DH_SUB" "abb20f616-8888888888888" "reviewer"
+rm -f "$DH_TR"
+run_guard "$(mk_stop_payload "$SID_A" "$DH_TR" "$DH_REPO" "reviewer")"
+expect_status "a dead-history target addressed by name: REFUSED" 2 "$GUARD_ST"
+expect_contains "…and the refusal says the session is gone" "DEAD HISTORY" "$GUARD_ERR"
+
+# OURS by NAME alone — the mid-dispatch row, written `intended` before any agent
+# id exists (slice 4/3). A gate that matched only on `agent_id=` would refuse
+# every stop of an agent whose launch had not yet been confirmed.
+IFS='|' read -r OI_REPO OI_TR OI_SUB <<< "$(make_world oursintended yes)"
+plant_agent "$OI_SUB" "aworker-1616161616161616" "worker"
+roster_row "$OI_REPO" "$SID_A" "worker" "" "" "intended"
+observe "$SID_A" "$OI_TR" "$OI_REPO" "worker"
+run_guard "$(mk_stop_payload "$SID_A" "$OI_TR" "$OI_REPO" "worker")"
+expect_status "a roster row that names it by NAME alone still makes it OURS" 0 "$GUARD_ST"
+
+# A roster belonging to ANOTHER session proves nothing about this one: the file
+# is per-session by name (D-5), so this session simply never reads it.
+IFS='|' read -r XR_REPO XR_TR XR_SUB <<< "$(make_world foreignroster yes)"
+plant_agent "$XR_SUB" "aworker-1717171717171717" "worker"
+roster_row "$XR_REPO" "$SID_B" "worker" "aworker-1717171717171717"
+observe "$SID_A" "$XR_TR" "$XR_REPO" "worker"
+run_guard "$(mk_stop_payload "$SID_A" "$XR_TR" "$XR_REPO" "worker")"
+expect_status "another session's roster does not make a target ours" 2 "$GUARD_ST"
 
 # ============================================================
 echo ""
