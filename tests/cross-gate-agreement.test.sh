@@ -1177,6 +1177,75 @@ expect_eq "a write to the roster-contracted progress path stales the look" "2" "
 expect_contains "…and the gate names the same path the writer wrote" \
   ".bionic/tmp/w99.progress" "$OUT"
 
+# THE SAME CHAIN, WITH THE ROSTER LONG (Step-6 critic F-1). The shipped
+# performance remediation capped the roster at 200 rows and evicted by RECENCY,
+# which knows nothing about whether the evicted row belongs to an agent that is
+# still running. A live agent's row is the only copy of its contract, and the
+# refusal just proven above is sourced from it — so past the cap the wall did not
+# weaken, it disappeared: `record/w3-critic-repro-cap.sh` measured the identical
+# sequence as exit 2 under the cap and exit 0 over it, with the operator shown
+# `progress=(none recorded)`, indistinguishable from a brief that declared none.
+#
+# This is the row that failed. It belongs in THIS suite rather than the
+# recorder's own, because the property is cross-script: the file the recorder
+# writes is the file the gate reads, and the recorder alone cannot see that
+# dropping a row disarms another program. `hooks/execution-recorder.test.sh`
+# asserted only that the row THIS event confirmed survived the fold, which is why
+# 110/110 was green over the defect.
+F4_ROSTER="$IREPO/.bionic/tmp/roster-$SID_A.state"
+F4_BEFORE=$(grep -c '^roster-state/v1|' "$F4_ROSTER" 2>/dev/null || echo 0)
+{
+  _i=0
+  while [ "$_i" -lt 260 ]; do
+    printf 'roster-state/v1|status=confirmed|session=%s|name=old-%s|agent_id=aold-%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_OLD%s\n' \
+      "$SID_A" "$_i" "$_i" "$_i"
+    _i=$((_i + 1))
+  done
+} >> "$F4_ROSTER"
+
+# A SECOND dispatch, journalled by the REAL start gate, whose completion is the
+# event that used to rewrite the file. The live agent's row is the OLDEST in it,
+# which is exactly the position eviction-by-recency takes first.
+mk_agent_payload "$SID_A" "$IREPO" \
+  | jq '.tool_input.name = "w99-other" | .tool_use_id = "toolu_OTHERDISPATCH"' \
+  | bash "$PARTY_DP" >/dev/null 2>&1
+mk_agent_post "$SID_A" "$ITR" "$IREPO" "toolu_OTHERDISPATCH" \
+  | bash "$PARTY_ER" >/dev/null 2>&1
+expect_contains "the other dispatch's completion is journalled" \
+  "agent_id=a26bd30bf8616411b" "$(grep 'status=confirmed|.*name=w99-other|' "$F4_ROSTER" 2>/dev/null)"
+expect_eq "no row is evicted to make room for it (append-only, unbounded)" \
+  "$((F4_BEFORE + 262))" "$(grep -c '^roster-state/v1|' "$F4_ROSTER" 2>/dev/null || echo 0)"
+# Both of these read the ROW, never the file. Scoping is load-bearing twice over:
+# the second dispatch above carries the same brief, so a file-wide grep for the
+# contract would stay green with the live row gone — and `expect_contains` cannot
+# be trusted on a haystack this size at all. It is `printf | grep -qF` under
+# `pipefail`, so a match near the TOP of a 68 KB haystack makes grep exit before
+# printf finishes, printf takes SIGPIPE, and the pipeline returns 141: a FALSE
+# FAIL on a string that is present. Verified in isolation — same haystack, early
+# match 141, late match 0, and 0 with pipefail off. It fails safe (red, not
+# green) and it is not this slice's to fix in six suites at once, but it is why
+# nothing here hands a whole roster to an assertion.
+F4_LIVE_ROW=$(grep 'name=w99-impl|' "$F4_ROSTER" 2>/dev/null)
+expect_contains "the LIVE agent's row survives a long session" \
+  "name=w99-impl" "$F4_LIVE_ROW"
+expect_contains "…carrying the contract state that is its only copy" \
+  "progress=.bionic/tmp/w99.progress" "$F4_LIVE_ROW"
+
+# …and the wall that hangs off that row still fires. Same three steps as the
+# refusal above — observe, the agent writes, stop — with nothing different but
+# the length of the file.
+F4_OUT=$( cd "$IREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" w99-impl 2>&1 )
+expect_contains "the producer still reads the contract off the long roster" \
+  "progress_source=roster" "$(printf '%s\n' "$F4_OUT" | grep '^stop-check-observation/')"
+mk_bash_post "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh w99-impl" "$F4_OUT" \
+  | bash "$PARTY_ER" >/dev/null 2>&1
+sleep 1
+printf 'stage 3\n' >> "$IREPO/.bionic/tmp/w99.progress"
+OUT=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" 2>&1); ST=$?
+expect_eq "the D-6 staleness wall still refuses past the old cap (critic F-1)" "2" "$ST"
+expect_contains "…still naming the contracted path rather than (none recorded)" \
+  ".bionic/tmp/w99.progress" "$OUT"
+
 # THE OBSERVER FIELD, both ends. The recorder learns who looked from its own
 # payload's top-level `agent_id` (absent = the orchestrator); the gate learns who
 # is stopping from ITS payload's identical field. One key, two payloads.

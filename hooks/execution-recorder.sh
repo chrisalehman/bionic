@@ -217,15 +217,21 @@ ROSTER_FILE="$STATE_DIR/roster-${SID}.state"
 # the same `tool_use_id` and, in `tool_response.agentId`, the id that row was
 # waiting for — slice 4/1 capture E confirms the pair, in both dispatch modes.
 #
-# COMPLETION IS AN APPEND, NOT A REWRITE (with one bounded exception at the end
-# of this arm, where the file has outgrown its cap). The launch half appends without a lock
-# by design (a lock in front of a dispatch is a wedgeable failure mode on the
-# fail-open side), so a read-modify-write here would silently drop any row a
-# concurrent dispatch appended between our read and our rename. The completed row
-# is instead appended, and a reader takes the LAST row for a `tool_use_id` — the
-# fold is one line of shell and it costs a race nothing. Nothing is written from
-# memory: every field is either copied verbatim from the intended row on disk or
-# read out of this payload.
+# COMPLETION IS AN APPEND, NOT A REWRITE, without exception — this arm never
+# rewrites the roster and never removes a row from it. THE SERIALIZATION STORY,
+# stated plainly because it is the reason: hooks/dispatch-preflight.sh appends
+# WITHOUT A LOCK, by design and in writing ("No lock, unlike the observation
+# record… a single O_APPEND write of well under a pipe buffer, which the kernel
+# does not interleave. A lock here would put a failure mode… in front of a
+# dispatch, on the fail-open side"). The lock this script takes for the
+# OBSERVATION record therefore serializes it against stop-guard's consume and its
+# own writes — never against a launch. So any read-modify-write of the roster
+# here, however brief and whatever lock it held, would silently drop a row a
+# concurrent dispatch appended between the read and the rename. The completed row
+# is instead appended, and a reader takes the LAST row for a `tool_use_id`. That
+# fold is one line of shell in each reader and it costs a race nothing. Nothing is
+# written from memory: every field is either copied verbatim from the intended row
+# on disk or read out of this payload.
 #
 # A DISPATCH THAT WAS NEVER JOURNALLED IS NEVER CONFIRMED. Without a matching
 # `intended` row this arm writes nothing rather than inventing a row the start
@@ -239,6 +245,24 @@ if [ "$TOOL_NAME" = "Agent" ]; then
   while IFS= read -r line; do
     case "$line" in '#'*|'') continue ;; esac
     case "$line" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
+    # THE PREFILTER, and the whole reason this arm can afford an unbounded ledger
+    # (Step-6 critic F-1). `line_field` is four processes per call and this loop
+    # ran three of them on EVERY row of the file; at 3000 rows that measured
+    # 9260 ms against the 10 s hook timeout claude-bootstrap.sh registers, which
+    # is what pushed the review toward capping the file instead. A `case` is
+    # in-shell and matches only the row this event is about, so the expensive
+    # reads run once per dispatch rather than once per row.
+    #
+    # It is a SUPERSET filter, never the decision: the id is quoted, so glob
+    # metacharacters in a platform value are literal, but a row whose id merely
+    # STARTS WITH ours still reaches the `line_field` checks below — which are
+    # exact, and which stay the authority on all three fields. `tool_use_id` is
+    # the row's last field today, so both the mid-row and end-of-row forms are
+    # matched rather than assuming the writer's field order (checklist A6).
+    case "$line" in
+      *"|tool_use_id=$TOOL_USE_ID"|*"|tool_use_id=$TOOL_USE_ID|"*) : ;;
+      *) continue ;;
+    esac
     [ "$(line_field "$line" tool_use_id)" = "$TOOL_USE_ID" ] || continue
     [ "$(line_field "$line" status)" = "intended" ] || continue
     [ "$(line_field "$line" session)" = "$SID" ] || continue
@@ -265,37 +289,27 @@ if [ "$TOOL_NAME" = "Agent" ]; then
     }')
   printf '%s\n' "$COMPLETED" >> "$ROSTER_FILE" 2>/dev/null
 
-  # THE BOUND, inherited from the observation state above (Step-6 review, axis 5).
-  # The roster had none: two rows per dispatch, appended forever, and THIS arm
-  # rescans the whole file on every dispatch — measured 669 ms at 200 rows and
-  # 3152 ms at 1000, against the 10 s hook timeout claude-bootstrap.sh registers.
-  # Past that the completion arm times out and rows silently stop reaching
-  # `confirmed`; the operator's only symptom is by-name stops beginning to refuse.
+  # NO BOUND ON THE ROSTER, deliberately, and NOT by inheritance from the
+  # observation state above — the two files answer different questions and only
+  # one of them can afford to forget (Step-6 critic F-1, reproduced end to end in
+  # record/w3-critic-repro-cap.sh).
   #
-  # WHAT THIS COSTS, said plainly because it amends the append-only rule stated
-  # above: the fold IS a rewrite, and hooks/dispatch-preflight.sh appends without
-  # a lock by design, so a launch landing inside this window can be dropped. It is
-  # taken because both directions of the loss are closed — a dropped `intended`
-  # row never confirms, and an absent row grants nothing (ownership rests on the
-  # metadata directory, not the roster) — while the unbounded file's failure is a
-  # timeout that closes the same wall without ever saying so. The window is one
-  # read and one rename of a ≤200-row file, under the lock the other writers take.
-  ROSTER_ROWS=$(grep -c "^roster-state/${ROSTER_VERSION}|" "$ROSTER_FILE" 2>/dev/null || echo 0)
-  if [ "${ROSTER_ROWS:-0}" -gt "$MAX_RECORDS" ]; then
-    lock="$STATE_DIR/.stop-check.lock"
-    if mkdir "$lock" 2>/dev/null; then
-      tmp=$(mktemp "$STATE_DIR/.roster.XXXXXX" 2>/dev/null) && {
-        {
-          printf '# bionic session roster — schema roster-state/%s — machine-local, safe to delete\n' \
-            "$ROSTER_VERSION"
-          grep "^roster-state/${ROSTER_VERSION}|" "$ROSTER_FILE" 2>/dev/null | tail -n "$MAX_RECORDS"
-        } > "$tmp" 2>/dev/null
-        mv -f "$tmp" "$ROSTER_FILE" 2>/dev/null || rm -f "$tmp"
-        chmod 600 "$ROSTER_FILE" 2>/dev/null
-      }
-      rm -rf "$lock"
-    fi
-  fi
+  # A record in `stop-check.state` is a LOOK, spent by the next stop; dropping the
+  # oldest refuses a stop that one re-observation immediately re-arms, so the cap
+  # there degrades to the closed side. A roster row is a CONTRACT — the only copy
+  # of the progress path, cadence and subprocess claim the brief declared — and
+  # hooks/stop-guard.sh sources the D-6 progress-staleness refusal from it. Drop a
+  # LIVE agent's row and that wall cannot fire: the stop is PERMITTED, the operator
+  # is shown `progress=(none recorded)`, which is indistinguishable from "the brief
+  # declared no contract", and nothing warns on any surface. Eviction by recency
+  # cannot tell a finished agent from a running one, and the rows most likely to be
+  # oldest are the long-running agents D-6 exists for. That is a wall going inert,
+  # not a look being refused.
+  #
+  # The cost the cap was bought with is paid at its source instead — the prefilter
+  # above, which is what actually made this arm quadratic in session length. See
+  # tests/cross-gate-agreement.test.sh §F for the survival case driven writer →
+  # recorder → gate, and hooks/execution-recorder.test.sh's P block for the budget.
   exit 0
 fi
 

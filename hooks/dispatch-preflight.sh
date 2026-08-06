@@ -248,7 +248,16 @@ sanitize() {  # <value> <max-chars>
 #     contract puts it ALONGSIDE the progress path inside one sentence
 #     ("Progress: <path>, cadence ~6m") rather than on a labeled line of its own.
 #     It is the only label with a relaxed separator, and the separator still has
-#     to be there — `cadences` is not a hit.
+#     to be there — `cadences` is not a hit. That relaxation is also why the hit
+#     is POSITIONAL: a lexical match alone turned every prose use of the word
+#     into a declaration (Step-6 critic F-2), so END additionally requires the
+#     hit to fall inside the span the progress label owns — which is exactly
+#     where the sentence above puts it.
+#   * the subprocess claim is spelled in the contract's own words — "A subprocess
+#     claim" — and those are the only two labels that lift it. A bare `claims`
+#     label was tried and withdrawn: it matched "verify every claim the report
+#     claims:" in an ordinary review brief and invented a subprocess for it,
+#     which the P2 display then reports as `live: no`, the alarm direction.
 #   * the subprocess claim declares two things in one span, and only one of them
 #     has a consumer: the PATTERN, which hooks/stop-check.sh existence-checks.
 #     So the pattern is what the row carries — the backticked or quoted run when
@@ -300,14 +309,21 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       for (j = 1; j <= nh; j++) if (HK[j] == kind && (best == 0 || HLS[j] < HLS[best])) best = j
       return best
     }
-    function spanof(h,   j, e, s, bl) {
+    # The last character index of the span belonging to hit h. `skip` names one
+    # hit to IGNORE when looking for the terminator, which the cadence rule in
+    # END needs: it asks where the PROGRESS span would end if the cadence label
+    # were not sitting inside it, and without the skip that span would end at the
+    # very label whose membership is the question. (No apostrophes in here — the
+    # whole program is one single-quoted shell word.)
+    function spanend(h, skip,   j, e, s, bl) {
       e = length(text)
-      for (j = 1; j <= nh; j++) if (HLS[j] > HLS[h] && HLS[j] - 1 < e) e = HLS[j] - 1
+      for (j = 1; j <= nh; j++) if (j != skip && HLS[j] > HLS[h] && HLS[j] - 1 < e) e = HLS[j] - 1
       s = substr(text, HVS[h], e - HVS[h] + 1)
       bl = index(s, "\n\n")            # a blank line ends a field, whatever follows
-      if (bl > 0) s = substr(s, 1, bl - 1)
-      return s
+      if (bl > 0) e = HVS[h] + bl - 2
+      return e
     }
+    function spanof(h) { return substr(text, HVS[h], spanend(h, 0) - HVS[h] + 1) }
     function paths(s, maxn,   n, arr, i, t, out, seen, c) {
       n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0
       for (i = 1; i <= n; i++) {
@@ -343,7 +359,6 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       addlabel("progress",           "progress")
       addlabel("duration",           "duration")
       addlabel("cadence",            "cadence", "([ \t]*:|[ \t])[ \t]*")
-      addlabel("claims",             "claims")
       addlabel("scope",              "-")
       addlabel("model",              "-")
       addlabel("exit",               "-")
@@ -370,7 +385,22 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       h = firsthit("deliverable"); if (h > 0) { v = paths(spanof(h), 4);      if (v != "") print "deliverable=" v }
       h = firsthit("duration");    if (h > 0) { v = collapse(spanof(h));      if (v != "") print "duration=" v }
       h = firsthit("progress");    if (h > 0) { v = paths(spanof(h), 1);      if (v != "") print "progress=" v }
-      h = firsthit("cadence");     if (h > 0) { v = collapse(spanof(h));      if (v != "") print "cadence=" v }
+      # CADENCE IS POSITIONAL, not merely lexical (Step-6 critic F-2). It is the
+      # one label with a relaxed separator — whitespace will do, because the
+      # contract writes it inside the progress sentence rather than on a line of
+      # its own — and that relaxation made every prose occurrence of the word a
+      # declaration. "Scope constraint: keep a steady cadence and do not batch the
+      # sections" lifted `cadence=and do not batch the sections.`, and a
+      # fabricated liveness field is not inert: field presence is the shape key
+      # the watcher arms off. So the hit must fall where the contract puts it —
+      # after the progress label, inside the span that label owns.
+      h = firsthit("cadence")
+      if (h > 0) {
+        ph = firsthit("progress")
+        if (ph > 0 && HLS[h] > HLS[ph] && HLS[h] <= spanend(ph, h)) {
+          v = collapse(spanof(h)); if (v != "") print "cadence=" v
+        }
+      }
       h = firsthit("claims");      if (h > 0) { v = claimpat(spanof(h));      if (v != "") print "claims=" v }
     }
   ' 2>/dev/null

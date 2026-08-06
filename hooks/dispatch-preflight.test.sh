@@ -639,12 +639,20 @@ expect_status "the duration is unharmed by the new labels" \
 
 # The colon form and the unquoted comma form — the two other shapes the ratified
 # sentence permits an author to write.
+#
+# The claim line reads `Subprocess claim:` rather than the bare `Claims:` this
+# fixture used until the Step-6 critic (F-2). That bare label was withdrawn from
+# the grammar because it also matched "verify every claim the report claims:" in
+# an ordinary review brief and invented a subprocess from it. The two properties
+# this case exists for are untouched by the respelling — a cadence introduced by
+# a colon on its own line, and an unquoted pattern that stops at the comma before
+# its output file — and the vocabulary it now uses is the contract's own.
 BRIEF_LIVENESS2='Slice 4/11 of epic-99 wave-01.
 Deliverables: record/w99-b.txt
 Expected duration: ~40 minutes.
 Progress: .bionic/tmp/w99-b.progress
 Cadence: every 5 minutes
-Claims: pgrep-me-w99, output .bionic/tmp/w99-b.log
+Subprocess claim: pgrep-me-w99, output .bionic/tmp/w99-b.log
 Exit: the deliverable exists.'
 
 REPO=$(make_repo r10L2 yes)
@@ -670,6 +678,72 @@ expect_status "a brief with no subprocess claim leaves claims= empty, not fabric
 expect_status "a brief with no cadence leaves cadence= empty" "" "$(roster_field "$ROW" cadence)"
 expect_absent "an undeclared subprocess claim is NOT an absence finding" \
   "claims" "$(roster_field "$ROW" absent)"
+
+# THE NEGATIVE DIRECTION, which is the one that was missing (Step-6 critic F-2).
+# Every case above declares a liveness contract and checks it is read correctly.
+# None checked the far more common brief that declares NONE and merely uses one
+# of the words in prose — and both labels fabricated a declaration from it.
+#
+# Fabrication is not neutral noise here. Under the ratified contract
+# (skills/canonical-sdlc/SKILL.md) field PRESENCE is the shape key — "shape
+# emerges from which are present… adding a subprocess claim is a delegated
+# command" — and a claims= value opens a `-- claimed process (P2) --` section
+# whose pgrep finds nothing and prints `live: no`, the ALARM direction. So a
+# brief that says "keep a steady cadence" was classified long-shape and armed a
+# quiescence watcher, and one that says "verify every claim" grew a phantom
+# subprocess. Both briefs below are verbatim from the critic's repro
+# (.bionic/docs/record/w3-critic-repro-lift.sh, briefs C and D).
+BRIEF_PROSE_CADENCE='Your slice: write the report.
+Deliverables: .bionic/docs/record/w99.md
+Expected duration: ~40 minutes.
+Progress: .bionic/tmp/w99.progress, a line per section.
+Scope constraint: keep a steady cadence and do not batch the sections.
+Exit: report written.'
+
+REPO=$(make_repo r10L4 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_PROSE_CADENCE" "w99-prose1")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "the word 'cadence' in ordinary prose declares no cadence" \
+  "" "$(roster_field "$ROW" cadence)"
+# …and the fix is not a blunt one: the fields this brief DOES declare still lift.
+expect_status "…while the progress path the same brief declares still lifts" \
+  ".bionic/tmp/w99.progress" "$(roster_field "$ROW" progress)"
+expect_status "…and its duration" "~40 minutes." "$(roster_field "$ROW" duration)"
+
+BRIEF_PROSE_CLAIMS='Your slice: audit the report.
+Deliverables: .bionic/docs/record/audit.md
+Expected duration: ~20 minutes.
+Progress: .bionic/tmp/audit.progress, a line per claim checked.
+Scope constraint: verify every claim the report claims: proof or the label unverified.
+Exit: audit written.'
+
+REPO=$(make_repo r10L5 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_PROSE_CLAIMS" "w99-prose2")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "a brief that REVIEWS claims declares no subprocess claim" \
+  "" "$(roster_field "$ROW" claims)"
+expect_status "…and grows no cadence either" "" "$(roster_field "$ROW" cadence)"
+expect_status "…while its own progress path is still read" \
+  ".bionic/tmp/audit.progress" "$(roster_field "$ROW" progress)"
+
+# The cadence rule stated as the rule it is: the word only declares a cadence
+# where the contract puts it — beside the progress path — so the SAME word in the
+# SAME brief lifts or does not lift depending on where it falls.
+BRIEF_CADENCE_PLACE='Your slice: build it.
+Deliverables: .bionic/docs/record/w99.md
+Expected duration: ~40 minutes.
+Progress: .bionic/tmp/w99.progress, cadence ~9m.
+Scope constraint: keep a steady cadence throughout.
+Exit: built.'
+
+REPO=$(make_repo r10L6 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_CADENCE_PLACE" "w99-place")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "the cadence beside the progress path is the one that counts" \
+  "~9m." "$(roster_field "$ROW" cadence)"
 
 # ============================================================
 echo "=== S10d — rows APPEND; the roster is a ledger, not a slot ==="
