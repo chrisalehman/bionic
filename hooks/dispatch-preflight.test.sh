@@ -20,9 +20,16 @@ set -uo pipefail
 
 GATE="$(cd "$(dirname "$0")" && pwd)/dispatch-preflight.sh"
 PROBE_SRC="$(cd "$(dirname "$0")" && pwd)/preflight-probe.sh"
+SWEEPER_SRC="$(cd "$(dirname "$0")" && pwd)/session-sweeper.sh"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/dispatch-preflight-test.XXXXXX")" && pwd)"
-trap 'rm -rf "$SANDBOX"' EXIT
+BG_PIDS=""
+cleanup() {
+  local p
+  for p in $BG_PIDS; do kill -9 "$p" 2>/dev/null; done
+  rm -rf "$SANDBOX"
+}
+trap cleanup EXIT
 
 PASS=0
 FAIL=0
@@ -362,15 +369,23 @@ expect_status "a legacy single-slot attestation (even keyed to this session) sti
 expect_contains "legacy-file refusal names the fix command" "bash ~/.claude/hooks/preflight-probe.sh" "$GATE_ERR"
 
 # ============================================================
-echo "=== S7 — active wave + attestation IS this session -> pass, silent (AC-2) ==="
+echo "=== S7 — active wave + attestation IS this session -> pass, verdict silent (AC-2) ==="
 # ============================================================
+#
+# "Silent" here is about the VERDICT (no BLOCKED refusal, nothing on stdout ever) — not
+# absolute stderr silence, which S10c's absence warning already established is not the
+# invariant. Since slice 4/3 this fixture also has no sweeper armed, so its stderr is
+# exactly the unarmed-sweeper nag (S11 drives that behavior directly); asserted here too so
+# this section's own claim of what "silent" means stays accurate.
 
 REPO=$(make_repo r7 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "matching attestation exits 0" "0" "$GATE_ST"
 expect_empty "matching attestation produces no stdout (never print on the allow path)" "$GATE_OUT"
-expect_empty "matching attestation produces no stderr" "$GATE_ERR"
+expect_absent "matching attestation prints no BLOCKED refusal on stderr" "BLOCKED" "$GATE_ERR"
+expect_contains "matching attestation's only stderr is the unarmed-sweeper nag (no ledger armed here)" \
+  "no session sweeper is armed" "$GATE_ERR"
 
 # forward-compatibility (A6): unknown extra fields, reordered, must still
 # read the session_id BY KEY, not by position — mirrors
@@ -492,7 +507,10 @@ R10=$(roster_path "$REPO" "$SID_A")
 
 expect_status "a contract-complete dispatch still passes (verdict unchanged)" "0" "$GATE_ST"
 expect_empty "a contract-complete dispatch still prints nothing on stdout" "$GATE_OUT"
-expect_empty "a contract-complete dispatch still prints nothing on stderr" "$GATE_ERR"
+# Not absolute stderr silence since slice 4/3: this fixture arms no sweeper, so the
+# unarmed-sweeper nag (S11) is expected stderr, not a regression — the invariant this row
+# actually protects is "no BLOCKED refusal", asserted directly.
+expect_absent "a contract-complete dispatch prints no BLOCKED refusal on stderr" "BLOCKED" "$GATE_ERR"
 expect_status "the roster file exists at the per-session path" "0" "$([ -f "$R10" ] && echo 0 || echo 1)"
 expect_contains "the roster carries a versioned schema header" "roster-state/v1" "$(head -1 "$R10" 2>/dev/null)"
 expect_status "exactly one row was appended" "1" "$(roster_rows "$R10")"
@@ -885,6 +903,90 @@ write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_bash_payload "$SID_A" "$REPO")"
 expect_status "a Bash call in an attested active wave writes no roster" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
+
+# ============================================================
+echo "=== S11 — unarmed-sweeper nag: warn-only, never blocks (slice 4/3, AC-6) ==="
+# ============================================================
+#
+# spec §Component boundaries: "hooks/dispatch-preflight.sh (modified): warn-only unarmed
+# check at dispatch, sourced from the sweeper ledger's live-PID state." Ownership table row
+# "live-arming state": the sweeper ledger file is the single SSoT; the agreement test proves
+# this nag and the sweeper's OWN arm-refusal read that same ledger fixture and agree — which
+# is why the nag invokes the sibling `session-sweeper.sh status` (dirname-relative) rather
+# than a second hand-rolled ledger parser.
+
+ledger_path() { printf '%s/.bionic/tmp/sweeper-%s.state' "$1" "$2"; }
+
+# write_ledger_arm <repo> <sid> <pid> [tick] — a single open (never closed) arm entry, the
+# same shape session-sweeper.test.sh's own "stale open entry" fixture uses.
+write_ledger_arm() {
+  local repo="$1" sid="$2" pid="$3" tick="${4:-120}"
+  mkdir -p "$repo/.bionic/tmp"
+  {
+    printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n'
+    printf 'sweeper-ledger/v1|event=arm|at=2026-08-06T00:00:00Z|epoch=1780000000|pid=%s|tick=%s|session=%s|rows=0|degraded=\n' \
+      "$pid" "$tick" "$sid"
+  } > "$(ledger_path "$repo" "$sid")"
+  chmod 600 "$(ledger_path "$repo" "$sid")"
+}
+
+# ---- no ledger at all: never armed this session -> WARN, never blocks ----
+REPO=$(make_repo r11a yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "no-ledger dispatch still passes (never blocks)" "0" "$GATE_ST"
+expect_contains "no-ledger dispatch WARNs about the unarmed sweeper" "WARN" "$GATE_ERR"
+expect_contains "the nag names the exact arm command" \
+  "bash ~/.claude/hooks/session-sweeper.sh arm" "$GATE_ERR"
+
+# ---- a DEAD-pid arming on the ledger: not live -> WARN, agreement with arm's own refusal ----
+REPO=$(make_repo r11b yes)
+write_attestation "$REPO" "$SID_A"
+write_ledger_arm "$REPO" "$SID_A" "999999"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "dead-pid ledger dispatch still passes" "0" "$GATE_ST"
+expect_contains "dead-pid ledger dispatch WARNs (agrees: not live)" "WARN" "$GATE_ERR"
+expect_contains "the nag names the exact arm command (dead-pid case)" \
+  "bash ~/.claude/hooks/session-sweeper.sh arm" "$GATE_ERR"
+
+# AGREEMENT: the sweeper's OWN arm refusal, reading the identical ledger fixture, agrees —
+# a dead pid is NOT refused; a second arm entry is appended.
+( cd "$REPO" && exec env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER_SRC" arm --tick 30 ) \
+  >"$SANDBOX/s11b-arm.out" 2>&1 &
+P11B=$!
+BG_PIDS="$BG_PIDS $P11B"
+L11B="$(ledger_path "$REPO" "$SID_A")"
+_i=0
+while [ "$(grep -c 'event=arm' "$L11B" 2>/dev/null || echo 0)" -lt 2 ] && [ "$_i" -lt 50 ]; do
+  sleep 0.1; _i=$((_i + 1))
+done
+expect_status "agreement: arm over the dead-pid fixture SUCCEEDS (second arm entry appended)" \
+  "0" "$([ "$(grep -c 'event=arm' "$L11B" 2>/dev/null)" -ge 2 ] && echo 0 || echo 1)"
+( cd "$REPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER_SRC" retire ) >/dev/null 2>&1
+kill -9 "$P11B" 2>/dev/null
+
+# ---- a LIVE-pid arming on the ledger: live -> SILENT, agreement with arm's own refusal ----
+REPO=$(make_repo r11c yes)
+write_attestation "$REPO" "$SID_A"
+sleep 300 & LIVE_PID=$!
+BG_PIDS="$BG_PIDS $LIVE_PID"
+write_ledger_arm "$REPO" "$SID_A" "$LIVE_PID"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "live-pid ledger dispatch still passes" "0" "$GATE_ST"
+expect_empty "live-pid ledger dispatch stays completely silent (agrees: live)" "$GATE_ERR"
+
+# AGREEMENT: the sweeper's OWN arm refusal, reading the identical ledger fixture, agrees —
+# a live pid IS refused.
+RC_ARM=$( ( cd "$REPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER_SRC" arm --tick 30 \
+              >"$SANDBOX/s11c-arm.out" 2>&1 ); echo $? )
+expect_status "agreement: arm over the live-pid fixture is REFUSED (exit 1)" "1" "$RC_ARM"
+kill -9 "$LIVE_PID" 2>/dev/null
+
+# ---- the nag never fires on a REFUSED dispatch (no attestation): nothing is about to launch ----
+REPO=$(make_repo r11d yes)
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "a refused dispatch (no attestation) still exits 2" "2" "$GATE_ST"
+expect_absent "a refused dispatch prints no sweeper nag" "session-sweeper.sh" "$GATE_ERR"
 
 echo ""
 echo "----------------------------------------"

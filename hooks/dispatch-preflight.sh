@@ -42,6 +42,7 @@
 set -uo pipefail
 
 PREFLIGHT_CMD="bash ~/.claude/hooks/preflight-probe.sh"
+SWEEPER_ARM_CMD="bash ~/.claude/hooks/session-sweeper.sh arm"
 
 INPUT=$(cat)
 _jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
@@ -508,6 +509,29 @@ if [ "$WROTE" -eq 0 ]; then
 elif [ -n "$ABSENT" ]; then
   warn "roster row for \"${AGENT_NAME:-(unnamed)}\" records absent brief field(s): ${ABSENT//,/, }"
 fi
+
+# ========================================================== UNARMED-SWEEPER NAG (slice 4/3)
+#
+# Warn-only, AC-6: no live sweeper watching this session's roster names the arm command;
+# a live one is silent. NEVER blocks either way (ratified: no new walls) — this is a nag,
+# not a wall, and it runs only on a launch that is actually about to happen (the gate has
+# already decided to allow it by this point).
+#
+# Liveness is read by invoking the SIBLING hooks/session-sweeper.sh's own `status` verb,
+# dirname-relative to THIS script, rather than a second hand-rolled ledger parser — so this
+# nag and the sweeper's own arm-refusal read the identical ledger through the identical
+# code and can never disagree (spec ownership table row "live-arming state"). `status`
+# exits 1 for "not live" and 0 for "live"; any other exit (missing sibling, usage error) is
+# an ambiguity this nag stays silent on, the same fail-open direction as the rest of §7.
+_hooks_dir="$(cd "$(dirname "$0")" && pwd)"
+_sweeper_status_rc=""
+if [ -f "$_hooks_dir/session-sweeper.sh" ]; then
+  ( cd "$REPO" && env CLAUDE_CODE_SESSION_ID="$PAYLOAD_SID" bash "$_hooks_dir/session-sweeper.sh" status ) \
+    >/dev/null 2>/dev/null
+  _sweeper_status_rc=$?
+fi
+[ "$_sweeper_status_rc" = "1" ] && \
+  warn "no session sweeper is armed for this session; arm one with: ${SWEEPER_ARM_CMD}"
 
 # Present and mine: pass in silence. Never print on the allow path (§4 "The
 # start gate": "Parses no check detail... Never: print on the allow path.").
