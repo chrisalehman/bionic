@@ -236,10 +236,10 @@ observe_nosid() {  # <sid> <transcript> <repo> <typed-target> [args…]
 # THE SESSION ROSTER, planted as the PRECONDITION it is at a real stop. Row shape
 # FAITHFUL to the writer, hooks/dispatch-preflight.sh's `ROW=` line (field for
 # field, in order); the writer itself is driven by its own suite and the two
-# shapes are held together by tests/cross-gate-agreement.test.sh. Without a row
-# the target is UNROSTERED, which is not a neutral fixture state since slice 4/6
-# — it is the foreign case, and every world below that expects a stop to reach
-# the record checks must say so.
+# shapes are held together by tests/cross-gate-agreement.test.sh. Since slice 4/9
+# a row is no longer what makes a target ours — its directory is — so a world that
+# plants none is a perfectly ordinary one. What a row still carries is the
+# CONTRACT, and, when `confirmed`, ownership of a target filed elsewhere.
 roster_row() {  # <repo> <sid> <name> <agent-id> [progress-path] [status]
   local repo="$1" sid="$2" name="$3" aid="$4" prog="${5:-}" status="${6:-confirmed}"
   local f="$repo/.bionic/tmp/roster-$sid.state"
@@ -676,20 +676,25 @@ fi
 run_guard "$(mk_stop_payload "$SID_A" "$S2_TR" "$S2_REPO" "victim")"
 expect_status "a symlinked state DIRECTORY refuses the stop too" 2 "$GUARD_ST"
 
-# The ROSTER is repo-controlled state too, and it now decides whether a target is
-# ours — so a symlink at its own level would let a repo choose which file answers
-# that question, the OPEN direction §8 forbids a repo from reaching. Refusing to
-# read through it leaves the target unrostered, which is the closed side.
+# The ROSTER is repo-controlled state too, so a symlink at its own level would let
+# a repo choose which file answers a question the gate asks — the OPEN direction §8
+# forbids a repo from reaching. Since slice 4/9 the roster answers ownership for
+# exactly one case, a `confirmed` row keyed on AGENT ID reaching a target outside
+# this session's own directory, and that is the case driven here: a planted roster
+# claiming a foreign-filed agent as ours. Refusing to read through the link leaves
+# the claim unmade, which is the closed side. (A same-directory target needs no
+# roster at all now, so a repo has nothing to gain by pointing this file anywhere.)
 IFS='|' read -r SR_REPO SR_TR SR_SUB <<< "$(make_world secroster yes)"
-plant_agent "$SR_SUB" "avictim-1818181818181818" "victim"
+SR_TR_B="${SR_TR%/*}/$SID_B.jsonl"
+plant_agent "${SR_TR_B%.jsonl}/subagents" "avictim-1818181818181818" "victim"
 roster_row "$SANDBOX/plantedroster" "$SID_A" "victim" "avictim-1818181818181818"
 mkdir -p "$SR_REPO/.bionic/tmp"
 ln -s "$SANDBOX/plantedroster/.bionic/tmp/roster-$SID_A.state" \
   "$SR_REPO/.bionic/tmp/roster-$SID_A.state"
-run_guard "$(mk_stop_payload "$SID_A" "$SR_TR" "$SR_REPO" "victim")"
+run_guard "$(mk_stop_payload "$SID_A" "$SR_TR_B" "$SR_REPO" "victim")"
 expect_status "a symlinked roster refuses the stop" 2 "$GUARD_ST"
-expect_contains "…because it was not read through: the target stays unrostered" \
-  "not in this session's roster" "$GUARD_ERR"
+expect_contains "…because it was not read through: the ownership claim is never made" \
+  "was not launched by this session" "$GUARD_ERR"
 
 # Unpredictable temp names: mktemp with an X-template, and no PID-based name.
 expect_matches "temp files use an mktemp X-template" 'mktemp.*XXXXXX' "$(cat "$GUARD")"
@@ -874,77 +879,118 @@ echo "=== Section 10: AC-6 — what this session did not launch, it does not sto
 #
 # THE bb20f616 EXHIBIT. A previous epic's dead fleet left agent metadata on disk
 # answering to names a live session was still using; a stop by name resolved to
-# whichever one the scan found first. A name is not an identity — the session
-# roster is (slice 4/3), and a target no row names is not ours whatever directory
-# it sits in (spec ownership table). The escape hatch is the full agent id, which
-# is unambiguous by construction and is how the documented zombie-predecessor
-# cleanup is done; it buys no relief from the observation requirements.
+# whichever one the scan found first. A name is not an identity. The escape hatch
+# is the full agent id, which is unambiguous by construction and is how the
+# documented zombie-predecessor cleanup is done; it buys no relief from the
+# observation requirements.
+#
+# WHAT IDENTITY IS, corrected in slice 4/9 after live operation: the metadata's
+# own filing. An agent under <session>/subagents/ was launched by <session>. Slice
+# 4/6 keyed this on ROSTER MEMBERSHIP instead and both arms failed live —
+# unconfirmed rows (the standing state until a session restarts) matched by NAME
+# and handed ownership to another session's corpse, while every agent dispatched
+# before the roster hook shipped had no row and was refused as foreign. The roster
+# is still read for the CONTRACT, and a `confirmed` row still establishes
+# ownership BY AGENT ID; it is never a name-oracle again.
 #
 # Agent id shape SYNTHESIZED after the exhibit named in continuation.md; the
 # session ids and names are fixtures, as everywhere else in this suite.
 
+# The corpse collision AT THE GATE: an UNCONFIRMED row of ours (agent_id empty)
+# naming `reviewer`, and a `reviewer` filed under ANOTHER session's directory.
+# Reaching it needs a stop whose transcript path and session key disagree, which
+# is the only way a target outside this session's own directory ever resolves
+# here — and it is exactly the disagreement the owning-directory key detects.
 IFS='|' read -r FG_REPO FG_TR FG_SUB <<< "$(make_world foreignstop yes)"
-plant_agent "$FG_SUB" "abb20f616-7777777777777" "reviewer"
-# NO roster row: this is history's agent, answering to a live-looking name.
+FG_TR_B="${FG_TR%/*}/$SID_B.jsonl"
+FG_SUB_B="${FG_TR_B%.jsonl}/subagents"
+plant_agent "$FG_SUB_B" "abb20f616-7777777777777" "reviewer"
+roster_row "$FG_REPO" "$SID_A" "reviewer" "" "" "intended"
 
-run_guard "$(mk_stop_payload "$SID_A" "$FG_TR" "$FG_REPO" "reviewer")"
-expect_status "an unrostered target addressed BY NAME: REFUSED" 2 "$GUARD_ST"
-expect_contains "the refusal names the roster as what it consulted" "roster" "$GUARD_ERR"
-expect_contains "the refusal names the classification" "FOREIGN-LIVE" "$GUARD_ERR"
+# A fresh, well-formed observation first, so that what is asserted below is the
+# OWNERSHIP refusal and not the ordinary missing-observation one — without it every
+# assertion here would pass on a fixture that never reached the rule under test.
+# Before slice 4/9 this pair PERMITTED the stop: the name matched an unconfirmed
+# row, so the corpse was treated as ours and its record spent.
+observe "$SID_A" "$FG_TR_B" "$FG_REPO" "abb20f616-7777777777777"
+run_guard "$(mk_stop_payload "$SID_A" "$FG_TR_B" "$FG_REPO" "reviewer")"
+expect_status "a target filed under ANOTHER session, matched only by an unconfirmed row's NAME: REFUSED" \
+  2 "$GUARD_ST"
+expect_absent "…and it is not the missing-observation refusal — a fresh record exists" \
+  "No observation" "$GUARD_ERR"
+expect_contains "the refusal names the directory it keyed on" "filed under session" "$GUARD_ERR"
+expect_contains "the refusal names the classification" "FOREIGN" "$GUARD_ERR"
+expect_absent "…and never the retired label that claimed the agent was live" \
+  "FOREIGN-LIVE" "$GUARD_ERR"
 expect_contains "the refusal names the full-id escape hatch" \
   "abb20f616-7777777777777" "$GUARD_ERR"
 
-# It refuses BY NAME even with a perfectly fresh look — the addressing form is
-# the point, not the evidence.
-observe "$SID_A" "$FG_TR" "$FG_REPO" "reviewer"
-run_guard "$(mk_stop_payload "$SID_A" "$FG_TR" "$FG_REPO" "reviewer")"
-expect_status "a fresh observation does not buy a by-NAME stop of a foreign target" 2 "$GUARD_ST"
-expect_contains "a by-name foreign refusal consumes nothing" \
-  "abb20f616-7777777777777" "$(cat "$FG_REPO/$STATE_REL" 2>/dev/null)"
+# THE OTHER DIRECTION, and the one that broke live operation: an agent this
+# session really launched, with NO roster row at all — the standing state for
+# everything dispatched before the roster hook shipped. Slice 4/6 refused these.
+IFS='|' read -r UO_REPO UO_TR UO_SUB <<< "$(make_world unrosteredours yes)"
+plant_agent "$UO_SUB" "asibling-1818181818181818" "sibling"
+run_guard "$(mk_stop_payload "$SID_A" "$UO_TR" "$UO_REPO" "sibling")"
+expect_status "an unrostered agent under THIS session's own directory is not refused as foreign" \
+  2 "$GUARD_ST"
+expect_absent "…the refusal is the ordinary missing-observation one, not a foreign one" \
+  "FOREIGN" "$GUARD_ERR"
+observe "$SID_A" "$UO_TR" "$UO_REPO" "sibling"
+run_guard "$(mk_stop_payload "$SID_A" "$UO_TR" "$UO_REPO" "sibling")"
+expect_status "…and its fresh observation discharges the stop BY NAME" 0 "$GUARD_ST"
+expect_empty "…permitted in silence" "$GUARD_ERR"
 
 # `name@team` is still a name (P5: the platform hands the gate the string as typed).
-run_guard "$(mk_stop_payload "$SID_A" "$FG_TR" "$FG_REPO" "reviewer@team")"
+run_guard "$(mk_stop_payload "$SID_A" "$FG_TR_B" "$FG_REPO" "reviewer@team")"
 expect_status "name@team is a name: REFUSED" 2 "$GUARD_ST"
 
 # The escape hatch, spending the very record the by-name attempts left behind.
-run_guard "$(mk_stop_payload "$SID_A" "$FG_TR" "$FG_REPO" "abb20f616-7777777777777")"
+run_guard "$(mk_stop_payload "$SID_A" "$FG_TR_B" "$FG_REPO" "abb20f616-7777777777777")"
 expect_status "the same target addressed by FULL AGENT ID: PERMITTED" 0 "$GUARD_ST"
 expect_empty "…and permitted in silence" "$GUARD_ERR"
 
 # The hatch is not a bypass: by-id still needs a fresh look of its own (D-2 spent
 # the record above).
-run_guard "$(mk_stop_payload "$SID_A" "$FG_TR" "$FG_REPO" "abb20f616-7777777777777")"
+run_guard "$(mk_stop_payload "$SID_A" "$FG_TR_B" "$FG_REPO" "abb20f616-7777777777777")"
 expect_status "by full id with no observation left: still REFUSED" 2 "$GUARD_ST"
 expect_contains "…refused for the ordinary reason, not the foreign one" \
   "No observation" "$GUARD_ERR"
 
 # DEAD HISTORY: the same rule, and the refusal says which case it is. The
-# distinction is the target's own session transcript — the check
+# distinction is the OWNING session's transcript — the check
 # hooks/stop-check.sh and hooks/preflight-probe.sh already make.
 IFS='|' read -r DH_REPO DH_TR DH_SUB <<< "$(make_world deadhistory yes)"
-plant_agent "$DH_SUB" "abb20f616-8888888888888" "reviewer"
-rm -f "$DH_TR"
-run_guard "$(mk_stop_payload "$SID_A" "$DH_TR" "$DH_REPO" "reviewer")"
+DH_TR_B="${DH_TR%/*}/$SID_B.jsonl"
+plant_agent "${DH_TR_B%.jsonl}/subagents" "abb20f616-8888888888888" "reviewer"
+rm -f "$DH_TR_B"
+run_guard "$(mk_stop_payload "$SID_A" "$DH_TR_B" "$DH_REPO" "reviewer")"
 expect_status "a dead-history target addressed by name: REFUSED" 2 "$GUARD_ST"
-expect_contains "…and the refusal says the session is gone" "DEAD HISTORY" "$GUARD_ERR"
+expect_contains "…and the refusal says the owning session's transcript is gone" \
+  "DEAD HISTORY" "$GUARD_ERR"
 
-# OURS by NAME alone — the mid-dispatch row, written `intended` before any agent
-# id exists (slice 4/3). A gate that matched only on `agent_id=` would refuse
-# every stop of an agent whose launch had not yet been confirmed.
+# The `intended` row — written at dispatch, before any agent id exists (slice
+# 4/3) — is no longer what makes a target ours; the directory is. What it still
+# does is carry the CONTRACT, which is the one thing the record cannot supply.
 IFS='|' read -r OI_REPO OI_TR OI_SUB <<< "$(make_world oursintended yes)"
 plant_agent "$OI_SUB" "aworker-1616161616161616" "worker"
-roster_row "$OI_REPO" "$SID_A" "worker" "" "" "intended"
+mkdir -p "$OI_REPO/.bionic/tmp"
+roster_row "$OI_REPO" "$SID_A" "worker" "" "$PROG_REL" "intended"
+printf 'stage 1\n' > "$OI_REPO/$PROG_REL"
 observe "$SID_A" "$OI_TR" "$OI_REPO" "worker"
+expect_contains "an intended row still supplies the contracted progress path by NAME" \
+  "progress=$PROG_REL" "$(cat "$OI_REPO/$STATE_REL" 2>/dev/null)"
 run_guard "$(mk_stop_payload "$SID_A" "$OI_TR" "$OI_REPO" "worker")"
-expect_status "a roster row that names it by NAME alone still makes it OURS" 0 "$GUARD_ST"
+expect_status "…and the stop of an agent in this session's own directory is permitted" 0 "$GUARD_ST"
 
 # A roster belonging to ANOTHER session proves nothing about this one: the file
-# is per-session by name (D-5), so this session simply never reads it.
+# is per-session by name (D-5), so this session simply never reads it — and the
+# directory it names is not this session's either.
 IFS='|' read -r XR_REPO XR_TR XR_SUB <<< "$(make_world foreignroster yes)"
-plant_agent "$XR_SUB" "aworker-1717171717171717" "worker"
+XR_TR_B="${XR_TR%/*}/$SID_B.jsonl"
+plant_agent "${XR_TR_B%.jsonl}/subagents" "aworker-1717171717171717" "worker"
 roster_row "$XR_REPO" "$SID_B" "worker" "aworker-1717171717171717"
-observe "$SID_A" "$XR_TR" "$XR_REPO" "worker"
-run_guard "$(mk_stop_payload "$SID_A" "$XR_TR" "$XR_REPO" "worker")"
+observe "$SID_A" "$XR_TR_B" "$XR_REPO" "worker"
+run_guard "$(mk_stop_payload "$SID_A" "$XR_TR_B" "$XR_REPO" "worker")"
 expect_status "another session's roster does not make a target ours" 2 "$GUARD_ST"
 
 # ============================================================

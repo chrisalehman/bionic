@@ -616,13 +616,15 @@ for verdict in "safe to stop" "do not stop" "recommend" "verdict" "you should" "
   expect_absent "OURS+override carries no verdict: '$verdict'" "$verdict" "$OUT8B"
 done
 
-# --- (c) FOREIGN-LIVE: metadata under another session whose transcript is still live ---
+# --- (c) FOREIGN: metadata filed under another session, whose transcript is on disk.
+# Labelled `foreign-live` until slice 4/9, which is a liveness the existence check
+# never established — see Section 9 (d). ---
 make_agent "$H8" "$S8" "$FOREIGN8" "aforeign8-2222222222222222" "foreign-target" "hi" >/dev/null
 OUT8C=$(run_check_as "$OWN8" "$H8" "$R8" "foreign-target")
-expect_contains "FOREIGN-LIVE: classification line prints FOREIGN-LIVE" "Classification: FOREIGN-LIVE" "$OUT8C"
-expect_absent "FOREIGN-LIVE: no roster contract line is printed" "Contract (roster):" "$OUT8C"
+expect_contains "FOREIGN: classification line prints FOREIGN" "Classification: FOREIGN" "$OUT8C"
+expect_absent "FOREIGN: no roster contract line is printed" "Contract (roster):" "$OUT8C"
 M8C=$(printf '%s\n' "$OUT8C" | grep '^stop-check-observation/')
-expect_contains "FOREIGN-LIVE: machine line carries classification=foreign-live" "classification=foreign-live" "$M8C"
+expect_contains "FOREIGN: machine line carries classification=foreign" "|classification=foreign|" "$M8C"
 
 # --- (d) DEAD HISTORY: the bb20f616 shape — metadata answering to a live-looking
 # name, from a session whose own transcript is gone. ---
@@ -689,6 +691,127 @@ expect_contains "--claims with no pattern prints usage" "Usage" "$OUT8J"
 OUT8K=$(run_check "$H8" "$R8" "ours-target" --claims "$MARKER" --claims "$MARKER"); ST=$?
 expect_status "a second --claims exits 1" 1 "$ST"
 expect_contains "a second --claims prints usage" "Usage" "$OUT8K"
+
+# ============================================================
+echo ""
+echo "=== Section 9: ownership is the OWNING SESSION DIRECTORY (slice 4/9, AC-6) ==="
+# ============================================================
+#
+# Three defects that only live operation could produce, each reproduced here on
+# the shape it really took (plan §"Step-5 live findings", record/w3-walk.md §2).
+#
+# What slice 4/5 keyed ownership on was ROSTER MEMBERSHIP: a row matched by
+# `agent_id=`, falling back to `name=`. Both arms failed live and in opposite
+# directions.
+#
+#   D1 (false OURS). Every roster row in a session that has not restarted since
+#      the recorder shipped is `status=intended` with an EMPTY `agent_id=`, so the
+#      id arm never matches and the NAME arm is the only one live. A name is not
+#      an identity — it is reused across waves — so a three-day-dead agent from
+#      another session was called OURS off this session's unconfirmed row, and the
+#      display then handed it THIS session's contracted progress path.
+#
+#   D2 (false FOREIGN). An agent this session really did launch, dispatched before
+#      the roster hook existed, has no row at all and classified FOREIGN-LIVE with
+#      "this session never launched it" — of an agent sitting in this session's own
+#      subagents directory. (The observation was run from inside a subagent, which
+#      changes nothing: CLAUDE_CODE_SESSION_ID inside a subagent is measured
+#      identical to the orchestrator's own id, so the observer's identity was never
+#      what this keyed on. WHO looked is recorded by the recorder's `observer=`.)
+#
+# The key is the metadata's own filing: an agent under <session>/subagents/ was
+# launched by <session>. The roster stays the CONTRACT source for a target already
+# established as ours, and a `confirmed` row still establishes ownership BY AGENT
+# ID — an id is unambiguous by construction. It is never a name-oracle again.
+#
+#   D3 (false LIVE). `foreign-live` claimed a liveness the check never established:
+#      it tests whether the owning session's transcript FILE EXISTS, and transcripts
+#      are never deleted — measured, all 57 sessions with subagents under this
+#      project read "live", including sessions finished days ago. The label is now
+#      `foreign`, and it says what was actually looked at.
+
+IFS='|' read -r H9 R9 S9 <<< "$(make_world w9)"
+OWN9="99999999-0000-0000-0000-000000000001"
+OTHER9="99999999-0000-0000-0000-000000000002"
+GONE9="99999999-0000-0000-0000-000000000003"
+mkdir -p "$R9/.bionic/tmp"
+echo "our progress" > "$R9/prog-9.progress"
+
+# --- (a) D1, the corpse collision: an UNCONFIRMED row (agent_id empty) and a
+# same-NAME agent under ANOTHER session's directory. The row must grant nothing. ---
+make_agent "$H9" "$S9" "$OTHER9" "acorpse-1111111111111111" "walker" "three days ago" >/dev/null
+{
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
+  printf 'roster-state/v1|status=intended|session=%s|name=walker|agent_id=|launched_at=2026-08-05T00:00:00Z|subagent_type=researcher|model=|deliverable=|duration=|progress=%s|absent=deliverable|tool_use_id=toolu_W\n' \
+    "$OWN9" "$R9/prog-9.progress"
+} > "$R9/.bionic/tmp/roster-${OWN9}.state"
+
+OUT9A=$(run_check_as "$OWN9" "$H9" "$R9" "walker")
+M9A=$(printf '%s\n' "$OUT9A" | grep '^stop-check-observation/')
+expect_absent "D1: an unconfirmed row does NOT make another session's same-named agent OURS" \
+  "Classification: OURS" "$OUT9A"
+expect_contains "D1: it classifies FOREIGN instead" "Classification: FOREIGN" "$OUT9A"
+expect_contains "D1: machine line carries classification=foreign" "|classification=foreign|" "$M9A"
+expect_absent "D1: no roster contract line is printed for a target that is not ours" \
+  "Contract (roster):" "$OUT9A"
+expect_contains "D1: the display never hands it THIS session's contracted progress path" \
+  "progress_source=none" "$M9A"
+expect_absent "D1: …and the progress path itself never reaches the machine line" \
+  "prog-9.progress" "$M9A"
+
+# --- (b) D2: an agent under THIS session's own subagents directory, with NO roster
+# row at all — the standing state for anything dispatched before the roster shipped. ---
+make_agent "$H9" "$S9" "$OWN9" "asibling-2222222222222222" "sibling" "stopped a while back" >/dev/null
+OUT9B=$(run_check_as "$OWN9" "$H9" "$R9" "sibling")
+M9B=$(printf '%s\n' "$OUT9B" | grep '^stop-check-observation/')
+expect_contains "D2: an unrostered agent under this session's OWN directory is OURS" \
+  "Classification: OURS" "$OUT9B"
+expect_contains "D2: machine line carries classification=ours" "|classification=ours|" "$M9B"
+expect_absent "D2: the refuted claim 'this session never launched it' is not printed" \
+  "never launched it" "$OUT9B"
+
+# --- (c) the roster still establishes ownership BY AGENT ID, across directories:
+# a CONFIRMED row is a fact this session wrote about its own launch. ---
+make_agent "$H9" "$S9" "$OTHER9" "aconfirmed-3333333333333333" "elsewhere" "hi" >/dev/null
+printf 'roster-state/v1|status=confirmed|session=%s|name=elsewhere|agent_id=aconfirmed-3333333333333333|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=%s|absent=|tool_use_id=toolu_C\n' \
+  "$OWN9" "$R9/prog-9.progress" >> "$R9/.bionic/tmp/roster-${OWN9}.state"
+OUT9C=$(run_check_as "$OWN9" "$H9" "$R9" "elsewhere")
+M9C=$(printf '%s\n' "$OUT9C" | grep '^stop-check-observation/')
+expect_contains "a CONFIRMED row keyed on agent id still establishes OURS" \
+  "Classification: OURS" "$OUT9C"
+expect_contains "…and its contract is sourced from that row" "progress_source=roster" "$M9C"
+
+# --- (d) D3: the liveness label says what was looked at. Driven on its OWN target,
+# foreign under the old rule AND the new one — no roster row of any kind names it,
+# and it sits under another session's directory. Asserting this on (a) instead would
+# be a fixture pinning away its own test: (a) resolves OURS before the fix, so every
+# absence below would pass for the wrong reason. ---
+make_agent "$H9" "$S9" "$OTHER9" "astranger-5555555555555555" "stranger" "hi" >/dev/null
+OUT9D=$(run_check_as "$OWN9" "$H9" "$R9" "stranger")
+M9D=$(printf '%s\n' "$OUT9D" | grep '^stop-check-observation/')
+expect_contains "D3: the target is not ours under either rule" "Classification: FOREIGN" "$OUT9D"
+expect_absent "D3: the retired token 'foreign-live' is gone from the machine line" \
+  "foreign-live" "$M9D"
+expect_absent "D3: …and from the rendered classification line" "FOREIGN-LIVE" "$OUT9D"
+expect_contains "D3: the FOREIGN line names the owning session's TRANSCRIPT, not the agent" \
+  "transcript is still on disk" "$OUT9D"
+expect_contains "D3: …and disclaims the liveness it cannot know" \
+  "does not mean the agent is still running" "$OUT9D"
+for claim in "still live" "is live" "is alive"; do
+  expect_absent "D3: the FOREIGN classification claims no agent liveness: '$claim'" \
+    "$claim" "$OUT9D"
+done
+
+# --- (e) DEAD HISTORY is unchanged in meaning: the owning session's transcript is
+# GONE, so nothing on disk still accounts for the agent. ---
+make_agent "$H9" "$S9" "$GONE9" "aghost-4444444444444444" "ghost" "old run" >/dev/null
+rm -f "$H9/.claude/projects/$S9/$GONE9.jsonl"
+OUT9E=$(run_check_as "$OWN9" "$H9" "$R9" "ghost")
+M9E=$(printf '%s\n' "$OUT9E" | grep '^stop-check-observation/')
+expect_contains "DEAD HISTORY still fires when the owning session's transcript is gone" \
+  "Classification: DEAD HISTORY" "$OUT9E"
+expect_contains "…and the machine line carries classification=dead-history" \
+  "|classification=dead-history|" "$M9E"
 
 # ============================================================
 echo ""
