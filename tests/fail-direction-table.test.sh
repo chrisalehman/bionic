@@ -105,6 +105,21 @@ plant_agent() {  # <subagents-dir> <agent-id> <name>
     > "$1/agent-$2.jsonl"
 }
 
+# The session roster (slice 4/3's writer, row shape field-for-field from
+# hooks/dispatch-preflight.sh). Since slice 4/6 an UNROSTERED target is refused by
+# name, so every world whose row is about some other condition must say that this
+# session launched the agent — otherwise the row below would go green on the
+# foreign-stop rule and prove nothing about the cell it names.
+roster_row() {  # <repo> <sid> <name> <agent-id> [progress]
+  local repo="$1" sid="$2" name="$3" aid="$4" prog="${5:-}"
+  local f="$repo/.bionic/tmp/roster-$sid.state"
+  mkdir -p "$repo/.bionic/tmp"
+  [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
+  printf 'roster-state/v1|status=confirmed|session=%s|name=%s|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=%s|absent=|tool_use_id=toolu_01FIXTURE\n' \
+    "$sid" "$name" "$aid" "$prog" >> "$f"
+  return 0
+}
+
 payload() {  # <tool_name> <sid|-> <transcript|-> <cwd> <task_id-or-command|->
   local tool="$1" sid="$2" tr="$3" cwd="$4" arg="$5"
   local input='{}'
@@ -138,6 +153,7 @@ IFS='|' read -r A_REPO A_TR A_SUB <<< "$(make_world active yes)"
 plant_agent "$A_SUB" "aworker-1111111111111111" "worker"
 plant_agent "$A_SUB" "atwin-2222222222222222" "twin"
 plant_agent "$A_SUB" "atwin-3333333333333333" "twin"
+roster_row "$A_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 
 IFS='|' read -r I_REPO I_TR I_SUB <<< "$(make_world inert no)"
 plant_agent "$I_SUB" "aworker-1111111111111111" "worker"
@@ -160,10 +176,17 @@ printf '# attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\n' "
 # hooks/stop-check.sh prints — so the producer is genuinely run here.
 IFS='|' read -r O_REPO O_TR O_SUB <<< "$(make_world observed yes)"
 plant_agent "$O_SUB" "aworker-1111111111111111" "worker"
-observe() {  # <sid> <transcript> <repo> <target>
+roster_row "$O_REPO" "$SID_A" "worker" "aworker-1111111111111111"
+# <observer> is the agent id of whoever RAN the observation — empty for the
+# orchestrator, which is how the platform renders it (the payload field is simply
+# absent). The producer's own session key travels on CLAUDE_CODE_SESSION_ID: it
+# is how the observation finds this session's roster, and therefore the only way a
+# contracted progress path reaches the record.
+observe() {  # <sid> <transcript> <repo> <target> [observer-agent-id]
   local cfg="${2%/projects/*}" out
-  out=$( cd "$3" && CLAUDE_CONFIG_DIR="$cfg" bash "$OBSERVER" "$4" 2>/dev/null )
-  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg o "$out" \
+  out=$( cd "$3" && CLAUDE_CONFIG_DIR="$cfg" CLAUDE_CODE_SESSION_ID="$1" \
+         bash "$OBSERVER" "$4" 2>/dev/null )
+  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg o "$out" --arg a "${5:-}" \
     '{session_id:$s, transcript_path:$t, cwd:$c,
       prompt_id:"598cabc5-2776-479c-abcf-52c540a1c60e",
       permission_mode:"bypassPermissions", effort:{level:"high"},
@@ -171,7 +194,8 @@ observe() {  # <sid> <transcript> <repo> <target>
       tool_input:{command:"bash ~/.claude/hooks/stop-check.sh", description:"observe"},
       tool_response:{stdout:$o, stderr:"", interrupted:false,
                      isImage:false, noOutputExpected:false},
-      tool_use_id:"toolu_01HQV9JAFdKC15TLMDKt2QgF", duration_ms:117}' \
+      tool_use_id:"toolu_01HQV9JAFdKC15TLMDKt2QgF", duration_ms:117}
+     + (if $a == "" then {} else {agent_id:$a, agent_type:"general-purpose"} end)' \
     | bash "$RECORDER" >/dev/null 2>&1
   return 0
 }
@@ -180,6 +204,7 @@ observe "$SID_A" "$O_TR" "$O_REPO" "worker"
 # Stale: observed, then the target writes again (D-1's activity boundary).
 IFS='|' read -r S_REPO S_TR S_SUB <<< "$(make_world stale yes)"
 plant_agent "$S_SUB" "aworker-1111111111111111" "worker"
+roster_row "$S_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 observe "$SID_A" "$S_TR" "$S_REPO" "worker"
 printf '{"type":"assistant","message":{"content":[{"type":"text","text":"more work"}]}}\n' \
   >> "$S_SUB/agent-aworker-1111111111111111.jsonl"
@@ -187,11 +212,37 @@ printf '{"type":"assistant","message":{"content":[{"type":"text","text":"more wo
 # Foreign: the only observation belongs to another session.
 IFS='|' read -r F_REPO F_TR F_SUB <<< "$(make_world foreign yes)"
 plant_agent "$F_SUB" "aworker-1111111111111111" "worker"
+roster_row "$F_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 observe "$SID_B" "$F_TR" "$F_REPO" "worker"
+
+# Not ours at all (slice 4/6, AC-6): an agent this session's roster does not
+# record. By NAME it is refused; by FULL AGENT ID it is the documented
+# zombie-predecessor cleanup and passes on its own fresh observation.
+IFS='|' read -r X_REPO X_TR X_SUB <<< "$(make_world unrostered yes)"
+plant_agent "$X_SUB" "abb20f616-7777777777777" "worker"
+observe "$SID_A" "$X_TR" "$X_REPO" "worker"
+
+# A look taken by somebody else (slice 4/6, D-3): the record is fresh, this
+# session's, and about the right target — and it is not the stopper's own.
+IFS='|' read -r B_REPO B_TR B_SUB <<< "$(make_world borrowedlook yes)"
+plant_agent "$B_SUB" "aworker-1111111111111111" "worker"
+roster_row "$B_REPO" "$SID_A" "worker" "aworker-1111111111111111"
+observe "$SID_A" "$B_TR" "$B_REPO" "worker" "asubagent-2020202020202020"
+
+# The contracted progress artifact written after the look (slice 4/6, D-6): the
+# working log is untouched, so this is the channel D-1 alone could not see.
+IFS='|' read -r G_REPO G_TR G_SUB <<< "$(make_world progressstale yes)"
+plant_agent "$G_SUB" "aworker-1111111111111111" "worker"
+roster_row "$G_REPO" "$SID_A" "worker" "aworker-1111111111111111" ".bionic/tmp/w99.progress"
+printf 'stage 1\n' > "$G_REPO/.bionic/tmp/w99.progress"
+observe "$SID_A" "$G_TR" "$G_REPO" "worker"
+sleep 1
+printf 'stage 2\n' >> "$G_REPO/.bionic/tmp/w99.progress"
 
 # Unknown schema version: a record this gate will not guess at (checklist A6).
 IFS='|' read -r V_REPO V_TR V_SUB <<< "$(make_world badversion yes)"
 plant_agent "$V_SUB" "aworker-1111111111111111" "worker"
+roster_row "$V_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 mkdir -p "$V_REPO/.bionic/tmp"
 printf 'v9|session=%s|target=%s|typed=worker|log=%s|mtime=1|size=1\n' \
   "$SID_A" "aworker-1111111111111111" "$V_SUB/agent-aworker-1111111111111111.jsonl" \
@@ -236,7 +287,11 @@ drive() {  # <condition>
     stop:unknown-schema)    p=$(payload TaskStop "$SID_A" "$V_TR" "$V_REPO" worker) ;;
     stop:stale-observation) p=$(payload TaskStop "$SID_A" "$S_TR" "$S_REPO" worker) ;;
     stop:symlinked-state)   p=$(payload TaskStop "$SID_A" "$L_TR" "$L_REPO" worker) ;;
+    stop:unrostered-by-name) p=$(payload TaskStop "$SID_A" "$X_TR" "$X_REPO" worker) ;;
+    stop:borrowed-look)     p=$(payload TaskStop "$SID_A" "$B_TR" "$B_REPO" worker) ;;
+    stop:progress-stale)    p=$(payload TaskStop "$SID_A" "$G_TR" "$G_REPO" worker) ;;
     stop:observed)          p=$(payload TaskStop "$SID_A" "$O_TR" "$O_REPO" worker) ;;
+    stop:unrostered-by-full-id) p=$(payload TaskStop "$SID_A" "$X_TR" "$X_REPO" abb20f616-7777777777777) ;;
     *) echo "unknown condition $1" >&2; return 9 ;;
   esac
   case "$1" in
@@ -279,7 +334,11 @@ stop|foreign-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|unknown-schema|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|stale-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|symlinked-state|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|unrostered-by-name|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|borrowed-look|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|progress-stale|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|observed|0|silent|Stop gate — the positive pair: a fresh observation permits
+stop|unrostered-by-full-id|0|silent|Stop gate — the positive pair: a fresh observation permits
 '
 
 echo "=== §7 rows driven as behaviour (AC-10) ==="

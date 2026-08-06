@@ -175,6 +175,21 @@ run_pair() {  # <repo> <transcript> <sid> <args…> -> recorder's exit status; s
     | bash "$PARTY_ER" >/dev/null 2>&1
 }
 
+# THE SESSION ROSTER, in the shape its writer writes it — field for field from
+# hooks/dispatch-preflight.sh's `ROW=` line. Both the producer (classification,
+# contract state) and the stop gate (the foreign-stop rule) read this file, which
+# is precisely why it is planted from ONE helper here: a fixture written twice is
+# two shapes, and this suite exists to catch exactly that.
+roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status]
+  local repo="$1" sid="$2" name="$3" aid="$4" prog="${5:-}" status="${6:-confirmed}"
+  local f="$repo/.bionic/tmp/roster-$sid.state"
+  mkdir -p "$repo/.bionic/tmp"
+  [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
+  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=%s|absent=|tool_use_id=toolu_01FIXTURE\n' \
+    "$status" "$sid" "$name" "$aid" "$prog" >> "$f"
+  return 0
+}
+
 # ============================================================
 # THE SHARED QUESTION
 # ============================================================
@@ -641,6 +656,13 @@ expect_eq "start gate: a foreign session is refused" "2" "$ST"
 # which is exactly what they were green on before (Step-6 critic, issue 1).
 expect_contains "the observation the record attests to actually resolved the target" \
   "Resolved:      aworker-1111111111111111" "$( cd "$IREPO" && bash "$OBSERVE" worker 2>&1 )"
+# Since slice 4/6 the stop gate refuses a by-name stop of a target THIS session's
+# roster does not record, so an unrostered fixture would refuse for a reason that
+# has nothing to do with the session key this section is about. Both sessions get
+# a row: then the ONLY thing that differs between the two stops below is the
+# session value carried by the record and the payload.
+roster_row "$IREPO" "$SID_A" "worker" "aworker-1111111111111111"
+roster_row "$IREPO" "${SID_A%?}0" "worker" "aworker-1111111111111111"
 run_pair "$IREPO" "$ITR" "$SID_A" worker
 SGSTATE="$IREPO/.bionic/tmp/stop-check.state"
 expect_eq "the recorder wrote an observation record" "yes" "$([ -f "$SGSTATE" ] && echo yes || echo no)"
@@ -735,6 +757,10 @@ q_gate() {  # <typed> -> permitted|refused   (asked AFTER q_recorder, on its sta
 
 # --- case 1: unique in this session. All three say yes. ---
 plant "$RPROJ/$SID_A/subagents" "asolo-1111111111111111" "solo"
+# …and this session's roster records it, so the gate's answer to the RESOLUTION
+# question is not pre-empted by the foreign-stop rule (slice 4/6). The unrostered
+# case is section E's claim, driven there on an agent of its own.
+roster_row "$RREPO" "$SID_A" "solo" "asolo-1111111111111111"
 expect_eq "C1 observation resolves a uniquely-named agent" "resolved" "$(q_observation solo)"
 expect_eq "C1 recorder records the same agent" "recorded" "$(q_recorder solo)"
 expect_eq "C1 gate discharges the stop on that record" "permitted" "$(q_gate solo)"
@@ -1022,13 +1048,7 @@ echo "=== E — classification + contract-source ride the machine line into the 
 # agents already planted there) rather than building a new one, because the
 # claim under test is agreement over ONE resolution, not a new resolver case.
 
-ROSTER_E="$RREPO/.bionic/tmp/roster-$SID_A.state"
-mkdir -p "$RREPO/.bionic/tmp"
-{
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
-  printf 'roster-state/v1|status=confirmed|session=%s|name=worker|agent_id=aworker-7777777777777777|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|absent=|tool_use_id=toolu_E\n' \
-    "$SID_A"
-} > "$ROSTER_E"
+roster_row "$RREPO" "$SID_A" "worker" "aworker-7777777777777777"
 
 # --- a target THIS session's roster records: OURS, end to end ---
 E_OUT=$( cd "$RREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" worker 2>&1 )
@@ -1047,13 +1067,17 @@ expect_contains "the recorded observation carries deliverable_source=none (no CL
 expect_contains "the recorded observation carries progress_source=none" "progress_source=none" "$E_STATE"
 
 # --- an UNROSTERED target under this session's OWN directory: still not OURS
-# (spec ownership table: "unrostered target classifies foreign"), agreement holds ---
-E3_OUT=$( cd "$RREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" solo 2>&1 )
+# (spec ownership table: "unrostered target classifies foreign"), agreement holds.
+# Its own agent, planted here: every other agent in this world is rostered, because
+# since slice 4/6 being unrostered is not a neutral fixture state — it is the case
+# the stop gate refuses by name. ---
+plant "$RPROJ/$SID_A/subagents" "aloner-9999999999999999" "loner"
+E3_OUT=$( cd "$RREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" loner 2>&1 )
 E3_MLINE=$(printf '%s\n' "$E3_OUT" | grep '^stop-check-observation/')
 expect_contains "an unrostered target under this session's own directory still classifies not-ours" \
   "classification=foreign-live" "$E3_MLINE"
 
-mk_bash_post "$SID_A" "$RTR" "$RREPO" "bash ~/.claude/hooks/stop-check.sh solo" "$E3_OUT" \
+mk_bash_post "$SID_A" "$RTR" "$RREPO" "bash ~/.claude/hooks/stop-check.sh loner" "$E3_OUT" \
   | bash "$PARTY_ER" >/dev/null 2>&1
 E3_STATE=$(cat "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null)
 expect_contains "the recorder forwards a non-ours classification into the record too" \
@@ -1070,6 +1094,105 @@ mk_bash_post "$SID_A" "$RTR" "$RREPO" "bash ~/.claude/hooks/stop-check.sh worker
 E4_STATE=$(cat "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null)
 expect_contains "the recorded observation agrees: classification=unknown" \
   "classification=unknown" "$E4_STATE"
+
+# ============================================================
+echo ""
+echo "=== F — the roster row and the observer/progress fields: writer, producer and GATE agree (slice 4/6) ==="
+# ============================================================
+#
+# Slice 4/6 turned the stop gate into a reader of four things it had never read:
+# the session roster's `name=`/`agent_id=` (the foreign-stop rule), and the
+# record's `observer=`, `progress=`/`progress_mtime=`/`progress_state=` (the
+# same-actor and progress-staleness checks). Every one of them is written by one
+# script and read by another, which is this suite's whole subject — a field whose
+# producer and consumer drift apart fails silently and in the OPEN direction (the
+# gate simply stops finding what it is looking for).
+#
+# The roster row here is the one hooks/dispatch-preflight.sh REALLY WROTE in
+# section B, from the real brief in mk_agent_payload — not a fixture. So the
+# chain driven below is writer → producer → recorder → gate, end to end, over one
+# row.
+
+ROSTER_F="$IREPO/.bionic/tmp/roster-$SID_A.state"
+expect_contains "the start gate really journalled the dispatch (section B's own row)" \
+  "name=w99-impl" "$(cat "$ROSTER_F" 2>/dev/null)"
+expect_contains "…carrying the progress path lifted from the brief" \
+  "progress=.bionic/tmp/w99.progress" "$(cat "$ROSTER_F" 2>/dev/null)"
+
+# The agent that row describes, now spawned. Its id is what a confirmed row would
+# carry; the row itself is still `intended`, which is the mid-dispatch state the
+# NAME fallback exists for.
+plant "$ISUB" "aw99impl-8888888888888888" "w99-impl"
+printf 'stage 1\n' > "$IREPO/.bionic/tmp/w99.progress"
+
+F_OUT=$( cd "$IREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" w99-impl 2>&1 )
+expect_contains "the producer reads that row and calls the target OURS" \
+  "Classification: OURS" "$F_OUT"
+F_MLINE=$(printf '%s\n' "$F_OUT" | grep '^stop-check-observation/')
+expect_contains "…and takes the contracted progress path from it" \
+  "progress=.bionic/tmp/w99.progress" "$F_MLINE"
+expect_contains "…recording where the contract came from" "progress_source=roster" "$F_MLINE"
+expect_contains "…and the state it found the artifact in" "progress_state=present" "$F_MLINE"
+
+mk_bash_post "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh w99-impl" "$F_OUT" \
+  | bash "$PARTY_ER" >/dev/null 2>&1
+F_STATE=$(cat "$IREPO/.bionic/tmp/stop-check.state" 2>/dev/null)
+expect_contains "the recorder copies the progress path into the record verbatim" \
+  "progress=.bionic/tmp/w99.progress" "$F_STATE"
+expect_contains "…and the progress state beside it" "progress_state=present" "$F_STATE"
+expect_contains "…and the observer, which only it can see" "observer=orchestrator" "$F_STATE"
+
+# The gate now reads that record. Same row, same path, same answer: nothing has
+# moved, so the stop stands.
+ST=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" >/dev/null 2>&1; echo $?)
+expect_eq "the gate agrees the target is OURS and spends the record" "0" "$ST"
+
+# …and a write to THAT path — the one the writer named, the producer resolved and
+# the recorder stored — is what the gate calls stale. A disagreement anywhere in
+# that chain shows up here as a stop that quietly stays permitted.
+F2_OUT=$( cd "$IREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" w99-impl 2>&1 )
+mk_bash_post "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh w99-impl" "$F2_OUT" \
+  | bash "$PARTY_ER" >/dev/null 2>&1
+sleep 1
+printf 'stage 2\n' >> "$IREPO/.bionic/tmp/w99.progress"
+OUT=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" 2>&1); ST=$?
+expect_eq "a write to the roster-contracted progress path stales the look" "2" "$ST"
+expect_contains "…and the gate names the same path the writer wrote" \
+  ".bionic/tmp/w99.progress" "$OUT"
+
+# THE OBSERVER FIELD, both ends. The recorder learns who looked from its own
+# payload's top-level `agent_id` (absent = the orchestrator); the gate learns who
+# is stopping from ITS payload's identical field. One key, two payloads.
+F3_OUT=$( cd "$IREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" w99-impl 2>&1 )
+mk_bash_post "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh w99-impl" "$F3_OUT" \
+  | jq '. + {agent_id:"asubagent-2020202020202020", agent_type:"general-purpose"}' \
+  | bash "$PARTY_ER" >/dev/null 2>&1
+expect_contains "a subagent-invoked observation records that subagent as observer" \
+  "observer=asubagent-2020202020202020" "$(cat "$IREPO/.bionic/tmp/stop-check.state" 2>/dev/null)"
+OUT=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" 2>&1); ST=$?
+expect_eq "the orchestrator cannot spend a subagent's look" "2" "$ST"
+OUT=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" \
+      | jq '. + {agent_id:"asubagent-2020202020202020", agent_type:"general-purpose"}' \
+      | bash "$PARTY_SG" 2>&1); ST=$?
+expect_eq "the subagent that looked can" "0" "$ST"
+
+# The field NAMES themselves, stated as the agreement they are — so a rename
+# breaks this suite with a legible reason rather than turning a wall inert.
+expect_contains "the recorder writes the observer key" "observer=" "$(cat "$PARTY_ER")"
+expect_contains "the stop gate reads the observer key" "observer" "$(cat "$PARTY_SG")"
+expect_contains "the recorder and the gate read the same actor field" ".agent_id" "$(cat "$PARTY_ER")"
+expect_contains "…on both sides" ".agent_id" "$(cat "$PARTY_SG")"
+expect_contains "the producer prints the progress state key" "progress_state=" "$(cat "$OBSERVE")"
+expect_contains "the stop gate reads the progress state key" \
+  'record_field "$RECORD" progress_state' "$(cat "$PARTY_SG")"
+expect_contains "the roster writer spells the row's name key" "|name=" "$(cat "$PARTY_DP")"
+expect_contains "the stop gate reads the roster row by that key" \
+  'record_field "$rline" name' "$(cat "$PARTY_SG")"
+expect_contains "the roster writer spells the row's id key" "|agent_id=" "$(cat "$PARTY_DP")"
+expect_contains "the stop gate reads the roster row's id key too" \
+  'record_field "$rline" agent_id' "$(cat "$PARTY_SG")"
+expect_contains "the gate reads the per-session roster filename the writer writes" \
+  "roster-" "$(cat "$PARTY_SG")"
 
 # ============================================================
 echo ""
