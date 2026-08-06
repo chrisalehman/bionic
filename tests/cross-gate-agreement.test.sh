@@ -65,6 +65,14 @@ trap 'rm -rf "$SANDBOX"' EXIT
 export HOME="$SANDBOX/home"
 export CLAUDE_CONFIG_DIR="$SANDBOX/cfg"     # NOT $HOME/.claude — see the header
 mkdir -p "$CLAUDE_CONFIG_DIR" "$HOME/.claude"
+# Since slice 4/5, hooks/stop-check.sh reads CLAUDE_CODE_SESSION_ID to classify a
+# target against ITS OWN session's roster. This suite runs inside a real Claude
+# Code session, which exports a real one; unpinned, every bare `bash "$OBSERVE"`
+# call below would silently classify against WHATEVER session happens to be
+# running the suite instead of UNKNOWN, the always-reachable answer none of
+# these fixtures set a roster up for. Section E opts back in explicitly, per call,
+# exactly where OURS is the fact under test.
+unset CLAUDE_CODE_SESSION_ID
 
 PASS=0; FAIL=0; TOTAL=0
 ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
@@ -995,6 +1003,73 @@ mk_agent_payload "$SID_A" "$QREPO" | bash "$PARTY_DP" >/dev/null 2>&1
 expect_eq "the start gate creates no file anywhere in the repo" "$before" "$(find "$QREPO" | sort)"
 ( cd "$QREPO" && bash "$OBSERVE" nobody >/dev/null 2>&1 )
 expect_eq "the observation creates no file anywhere in the repo" "$before" "$(find "$QREPO" | sort)"
+
+# ============================================================
+echo ""
+echo "=== E — classification + contract-source ride the machine line into the recorded observation (slice 4/5) ==="
+# ============================================================
+#
+# hooks/stop-check.sh (producer) computes classification/deliverable_source/
+# progress_source and prints them on its machine line; hooks/execution-recorder.sh
+# (consumer) is supposed to copy them into the observation record verbatim,
+# unparsed — the same "one computation, two renderings" property §D2 above pins
+# for the file-facts fields. This section drives the REAL producer's REAL output
+# into the REAL recorder over the §C fixture world, so a divergence between the
+# two parsers (the F-1 shape this whole file exists to catch) shows up here
+# rather than in two suites that never compare notes.
+#
+# Reuses the §C fixture world (RREPO/RPROJ/RTR/SID_A, the "worker" and "solo"
+# agents already planted there) rather than building a new one, because the
+# claim under test is agreement over ONE resolution, not a new resolver case.
+
+ROSTER_E="$RREPO/.bionic/tmp/roster-$SID_A.state"
+mkdir -p "$RREPO/.bionic/tmp"
+{
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
+  printf 'roster-state/v1|status=confirmed|session=%s|name=worker|agent_id=aworker-7777777777777777|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|absent=|tool_use_id=toolu_E\n' \
+    "$SID_A"
+} > "$ROSTER_E"
+
+# --- a target THIS session's roster records: OURS, end to end ---
+E_OUT=$( cd "$RREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" worker 2>&1 )
+expect_contains "the observation classifies the roster-recorded target OURS" \
+  "Classification: OURS" "$E_OUT"
+E_MLINE=$(printf '%s\n' "$E_OUT" | grep '^stop-check-observation/')
+expect_contains "the machine line carries classification=ours" "classification=ours" "$E_MLINE"
+
+mk_bash_post "$SID_A" "$RTR" "$RREPO" "bash ~/.claude/hooks/stop-check.sh worker" "$E_OUT" \
+  | bash "$PARTY_ER" >/dev/null 2>&1
+E_STATE=$(cat "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null)
+expect_contains "the recorded observation agrees: classification=ours" \
+  "classification=ours" "$E_STATE"
+expect_contains "the recorded observation carries deliverable_source=none (no CLI arg, no roster deliverable)" \
+  "deliverable_source=none" "$E_STATE"
+expect_contains "the recorded observation carries progress_source=none" "progress_source=none" "$E_STATE"
+
+# --- an UNROSTERED target under this session's OWN directory: still not OURS
+# (spec ownership table: "unrostered target classifies foreign"), agreement holds ---
+E3_OUT=$( cd "$RREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" solo 2>&1 )
+E3_MLINE=$(printf '%s\n' "$E3_OUT" | grep '^stop-check-observation/')
+expect_contains "an unrostered target under this session's own directory still classifies not-ours" \
+  "classification=foreign-live" "$E3_MLINE"
+
+mk_bash_post "$SID_A" "$RTR" "$RREPO" "bash ~/.claude/hooks/stop-check.sh solo" "$E3_OUT" \
+  | bash "$PARTY_ER" >/dev/null 2>&1
+E3_STATE=$(cat "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null)
+expect_contains "the recorder forwards a non-ours classification into the record too" \
+  "classification=foreign-live" "$E3_STATE"
+
+# --- with no own session id at all, the producer says UNKNOWN and the recorder
+# copies that verbatim rather than defaulting to any other label ---
+E4_OUT=$( cd "$RREPO" && env -u CLAUDE_CODE_SESSION_ID bash "$OBSERVE" worker 2>&1 )
+E4_MLINE=$(printf '%s\n' "$E4_OUT" | grep '^stop-check-observation/')
+expect_contains "with no own session id the machine line carries classification=unknown" \
+  "classification=unknown" "$E4_MLINE"
+mk_bash_post "$SID_A" "$RTR" "$RREPO" "bash ~/.claude/hooks/stop-check.sh worker" "$E4_OUT" \
+  | bash "$PARTY_ER" >/dev/null 2>&1
+E4_STATE=$(cat "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null)
+expect_contains "the recorded observation agrees: classification=unknown" \
+  "classification=unknown" "$E4_STATE"
 
 # ============================================================
 echo ""

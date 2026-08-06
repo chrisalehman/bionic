@@ -84,6 +84,8 @@ TARGET="$1"; shift
 
 PROGRESS_PATH=""
 PROGRESS_NAMED=0
+CLAIMS_PATTERN=""
+CLAIMS_NAMED=0
 ARGN=$#
 while [ "$ARGN" -gt 0 ]; do
   arg="$1"; shift; ARGN=$((ARGN - 1))
@@ -93,6 +95,15 @@ while [ "$ARGN" -gt 0 ]; do
       [ "$ARGN" -gt 0 ] || usage "--progress needs a path."
       [ -n "$1" ] || usage "--progress needs a path."
       PROGRESS_PATH="$1"; shift; ARGN=$((ARGN - 1)); PROGRESS_NAMED=1 ;;
+    --claims)
+      # P2 (Liveness contract, ratified 2026-08-05): a subprocess claim is a
+      # PATTERN, checked for existence only — same grammar as --progress, and
+      # for the same reason (the target-first rule above is what the recorder
+      # can parse; a flag anywhere else would be unparseable by it too).
+      [ "$CLAIMS_NAMED" -eq 0 ] || usage "Only one --claims pattern may be named; got a second."
+      [ "$ARGN" -gt 0 ] || usage "--claims needs a pattern."
+      [ -n "$1" ] || usage "--claims needs a pattern."
+      CLAIMS_PATTERN="$1"; shift; ARGN=$((ARGN - 1)); CLAIMS_NAMED=1 ;;
     -*)
       usage "Unknown option: $arg" ;;
     *)
@@ -107,6 +118,26 @@ done
 # suite, which drives every copy including this one.
 file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
 file_size()  { stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || echo 0; }
+
+# One field out of a versioned pipe-delimited line, BY KEY, never by position
+# (checklist A6). DELIBERATELY DUPLICATED from hooks/execution-recorder.sh, which
+# reads the session roster with the identical function — the two copies are held
+# together by tests/cross-gate-agreement.test.sh. This copy reads the roster row
+# for classification and contract state (slice 4/5); it never writes one.
+line_field() {  # <line> <key>
+  printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
+}
+
+# Existence only, for P2 (Liveness contract). `pgrep -f` matches the full
+# command line; a `ps` fallback covers a machine without it.
+claims_live() {  # <pattern> -> 0 if a process matches, 1 otherwise
+  local pat="$1"
+  if command -v pgrep >/dev/null 2>&1; then
+    pgrep -f -- "$pat" >/dev/null 2>&1
+    return $?
+  fi
+  ps -eo command 2>/dev/null | grep -qF -- "$pat"
+}
 
 # The machine line is pipe-delimited key=value, like the observation record it
 # becomes and like the roster row (hooks/dispatch-preflight.sh). A `|`, a newline
@@ -255,10 +286,139 @@ AGENT_TYPE=$(jq -r '.customAgentType // .agentType // "—"' "$META" 2>/dev/null
 AGENT_MODEL=$(jq -r '.model // "—"' "$META" 2>/dev/null)
 AGENT_DESC=$(jq -r '.description // "—"' "$META" 2>/dev/null)
 
+# ---------- classification against the session roster (slice 4/5, AC-6) ----------
+#
+# THIS SESSION'S OWN id, for a script with no payload to carry one — the same
+# resolution hooks/preflight-probe.sh already makes (CLAUDE_CODE_SESSION_ID,
+# exported into every Bash subprocess Claude Code runs). Empty when this command
+# runs outside a Claude Code session, or the variable is otherwise unset;
+# classification then reports UNKNOWN rather than guessing.
+ROSTER_VERSION="v1"
+OWN_SESSION_ID="${CLAUDE_CODE_SESSION_ID:-}"
+ROSTER_PATH=""
+if [ -n "$REPO_ROOT" ] && [ -n "$OWN_SESSION_ID" ]; then
+  ROSTER_PATH="$REPO_ROOT/.bionic/tmp/roster-${OWN_SESSION_ID}.state"
+fi
+
+# The resolved target is OURS iff a row in THIS session's own roster names it —
+# by full agent id first (the row is `confirmed`), falling back to NAME (the row
+# may still be `intended`, mid-dispatch). Last row wins for each key, matching
+# the append-only, never-rewritten roster (hooks/dispatch-preflight.sh,
+# hooks/execution-recorder.sh). An unrostered target is never OURS, whatever
+# session it lives under (spec ownership table: "unrostered target classifies
+# foreign").
+ROSTER_ROW=""
+if [ -n "$ROSTER_PATH" ] && [ -f "$ROSTER_PATH" ] && [ ! -L "$ROSTER_PATH" ]; then
+  ROW_BY_ID=""; ROW_BY_NAME=""
+  while IFS= read -r rline; do
+    case "$rline" in '#'*|'') continue ;; esac
+    case "$rline" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
+    rid=$(line_field "$rline" agent_id)
+    rname=$(line_field "$rline" name)
+    [ -n "$rid" ] && [ "$rid" = "$AGENT_ID" ] && ROW_BY_ID="$rline"
+    [ -n "$rname" ] && [ "$rname" = "$AGENT_NAME" ] && ROW_BY_NAME="$rline"
+  done < "$ROSTER_PATH"
+  ROSTER_ROW="${ROW_BY_ID:-$ROW_BY_NAME}"
+fi
+
+# Not OURS: FOREIGN-LIVE or DEAD HISTORY, by the target's OWN session's
+# transcript — the exact liveness check hooks/preflight-probe.sh and
+# hooks/dispatch-preflight.sh already use (session_transcript_exists /
+# roster_session_live), duplicated here for the same TDD §9 reason as the
+# file-facts functions above. This is the bb20f616 distinction: metadata on
+# disk answering to a live-looking name, from a session whose own transcript
+# is gone.
+target_session_live() {  # <session id>
+  local sid="$1" d
+  [ -n "$sid" ] || return 1
+  [ -d "$PROJECTS" ] || return 1
+  for d in "$PROJECTS"/*/; do
+    [ -f "${d}${sid}.jsonl" ] && return 0
+  done
+  return 1
+}
+
+CLASSIFICATION="unknown"
+if [ -z "$OWN_SESSION_ID" ]; then
+  CLASSIFICATION="unknown"
+elif [ -n "$ROSTER_ROW" ]; then
+  CLASSIFICATION="ours"
+elif target_session_live "$SESSION_ID"; then
+  CLASSIFICATION="foreign-live"
+else
+  CLASSIFICATION="dead-history"
+fi
+
+# ---------- contract state: roster-sourced when OURS, CLI always overrides ----------
+#
+# "Deliverable/progress display logic itself is unchanged — only the SOURCE of
+# the paths widens" (slice 4/5 brief). An explicit CLI value always wins; when it
+# differs from what the roster recorded, that is printed, never judged (§4: this
+# command decides nothing).
+ROSTER_DELIVERABLE=""; ROSTER_PROGRESS=""; ROSTER_CLAIMS=""
+if [ "$CLASSIFICATION" = "ours" ] && [ -n "$ROSTER_ROW" ]; then
+  ROSTER_DELIVERABLE=$(line_field "$ROSTER_ROW" deliverable)
+  ROSTER_PROGRESS=$(line_field "$ROSTER_ROW" progress)
+  ROSTER_CLAIMS=$(line_field "$ROSTER_ROW" claims)
+fi
+
+ORIG_ARGS_COUNT="$#"
+ORIG_ARGS_JOINED=""
+if [ "$ORIG_ARGS_COUNT" -gt 0 ]; then
+  ORIG_ARGS_JOINED=$(IFS=,; echo "$*")
+fi
+
+DELIVERABLE_SOURCE="none"
+DELIVERABLE_MISMATCH=""
+if [ "$ORIG_ARGS_COUNT" -gt 0 ]; then
+  DELIVERABLE_SOURCE="args"
+  if [ -n "$ROSTER_DELIVERABLE" ] && [ "$ORIG_ARGS_JOINED" != "$ROSTER_DELIVERABLE" ]; then
+    DELIVERABLE_MISMATCH="$ROSTER_DELIVERABLE"
+  fi
+elif [ -n "$ROSTER_DELIVERABLE" ]; then
+  DELIVERABLE_SOURCE="roster"
+  OLDIFS="$IFS"; IFS=','; set -- $ROSTER_DELIVERABLE; IFS="$OLDIFS"
+fi
+
+PROGRESS_SOURCE="none"
+PROGRESS_MISMATCH=""
+if [ "$PROGRESS_NAMED" -eq 1 ]; then
+  PROGRESS_SOURCE="args"
+  if [ -n "$ROSTER_PROGRESS" ] && [ "$PROGRESS_PATH" != "$ROSTER_PROGRESS" ]; then
+    PROGRESS_MISMATCH="$ROSTER_PROGRESS"
+  fi
+elif [ -n "$ROSTER_PROGRESS" ]; then
+  PROGRESS_SOURCE="roster"
+  PROGRESS_PATH="$ROSTER_PROGRESS"
+  PROGRESS_NAMED=1
+fi
+
+CLAIMS_SOURCE="none"
+if [ "$CLAIMS_NAMED" -eq 1 ]; then
+  CLAIMS_SOURCE="args"
+elif [ -n "$ROSTER_CLAIMS" ]; then
+  CLAIMS_SOURCE="roster"
+  CLAIMS_PATTERN="$ROSTER_CLAIMS"
+  CLAIMS_NAMED=1
+fi
+
 echo "Resolved:      ${AGENT_ID}"
 echo "               name: ${AGENT_NAME} · type: ${AGENT_TYPE} · model: ${AGENT_MODEL}"
 echo "               task: ${AGENT_DESC}"
 echo "Session:       ${SESSION_ID}"
+case "$CLASSIFICATION" in
+  ours)
+    echo "Classification: OURS — this session's roster records it (roster-${OWN_SESSION_ID}.state)" ;;
+  foreign-live)
+    echo "Classification: FOREIGN-LIVE — owned by session ${SESSION_ID}; its transcript is still live, but this session never launched it." ;;
+  dead-history)
+    echo "Classification: DEAD HISTORY — owned by session ${SESSION_ID}; its transcript is gone or stale." ;;
+  unknown)
+    echo "Classification: UNKNOWN — this session's own id is unavailable (CLAUDE_CODE_SESSION_ID unset), so roster membership could not be checked." ;;
+esac
+if [ "$CLASSIFICATION" = "ours" ]; then
+  echo "Contract (roster):  deliverables=${ROSTER_DELIVERABLE:-(none recorded)}  progress=${ROSTER_PROGRESS:-(none recorded)}"
+fi
 if [ "$OUT_OF_PROJECT" -eq 1 ]; then
   echo "Note:          this agent was found outside this project's own directory."
 fi
@@ -302,6 +462,9 @@ echo ""
 
 # ---------- evidence 3: the contracted deliverables (§2.2 — meaning from the contract) ----------
 echo "Deliverables:"
+if [ -n "$DELIVERABLE_MISMATCH" ]; then
+  echo "  (note: the roster recorded a different deliverable set: ${DELIVERABLE_MISMATCH} — not judged)"
+fi
 # Each deliverable's state is accumulated for the machine line as
 # `<state>:<path>`, comma-joined — the same comma-joined path list the roster row
 # uses for the same concept (hooks/dispatch-preflight.sh's `deliverable=`), so
@@ -349,6 +512,9 @@ PROGRESS_MTIME=0
 if [ "$PROGRESS_NAMED" -eq 1 ]; then
   echo ""
   echo "-- progress artifact (D-6) --"
+  if [ -n "$PROGRESS_MISMATCH" ]; then
+    echo "  (note: the roster recorded a different progress path: ${PROGRESS_MISMATCH} — not judged)"
+  fi
   if [ -e "$PROGRESS_PATH" ]; then
     PMTIME=$(file_mtime "$PROGRESS_PATH")
     PSIZE=$(file_size "$PROGRESS_PATH")
@@ -359,6 +525,25 @@ if [ "$PROGRESS_NAMED" -eq 1 ]; then
     echo "progress: ${PROGRESS_PATH}  ABSENT"
     PROGRESS_STATE="absent"
   fi
+fi
+
+# ---------- P2: claimed-process liveness (Liveness contract, ratified 2026-08-05) ----------
+#
+# Existence only — is any process matching the claimed pattern running right
+# now? This is a display fact, exactly like everything else in this command: it
+# names nothing about health, only presence. Source is the roster's `claims=`
+# field when OURS and no --claims was typed, or the explicit flag when one
+# was — same override rule as deliverables and progress.
+if [ "$CLAIMS_NAMED" -eq 1 ]; then
+  echo ""
+  echo "-- claimed process (P2) --"
+  echo "claims:   pattern='${CLAIMS_PATTERN}'  source=${CLAIMS_SOURCE}"
+  if claims_live "$CLAIMS_PATTERN"; then
+    echo "live:     yes — a process matching this pattern exists right now"
+  else
+    echo "live:     no — no process matching this pattern was found"
+  fi
+  echo "This is an existence check only. It decides nothing."
 fi
 
 echo ""
@@ -383,7 +568,7 @@ echo "This command decides nothing. It prints evidence; the judgment is yours."
 #   * `progress_state=unnamed` distinguishes "the contract named no progress
 #     artifact" from "it named one and the artifact is missing" — the D-6
 #     distinction a blank value would erase.
-printf '%s|target=%s|typed=%s|log=%s|mtime=%s|size=%s|deliverables=%s|progress=%s|progress_mtime=%s|progress_state=%s\n' \
+printf '%s|target=%s|typed=%s|log=%s|mtime=%s|size=%s|deliverables=%s|progress=%s|progress_mtime=%s|progress_state=%s|classification=%s|deliverable_source=%s|progress_source=%s\n' \
   "$MACHINE_SCHEMA" \
   "$(mline_value "$AGENT_ID")" \
   "$(mline_value "$TARGET")" \
@@ -393,5 +578,8 @@ printf '%s|target=%s|typed=%s|log=%s|mtime=%s|size=%s|deliverables=%s|progress=%
   "$DELIV_STATES" \
   "$(mline_value "$PROGRESS_PATH")" \
   "$PROGRESS_MTIME" \
-  "$PROGRESS_STATE"
+  "$PROGRESS_STATE" \
+  "$(mline_value "$CLASSIFICATION")" \
+  "$(mline_value "$DELIVERABLE_SOURCE")" \
+  "$(mline_value "$PROGRESS_SOURCE")"
 exit 0

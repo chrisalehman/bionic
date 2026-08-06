@@ -272,8 +272,9 @@ case "$OBSERVER" in *'|'*) exit 0 ;; esac
 # otherwise (checklist A4), and the temp file must carry an unpredictable name
 # (checklist A2) — a predictable one plus a planted symlink was a proven
 # arbitrary-file overwrite.
-write_record() {  # <target-id> <typed> <log> <mtime> <size> <deliverables> <progress> <progress-mtime> <progress-state>
+write_record() {  # <target-id> <typed> <log> <mtime> <size> <deliverables> <progress> <progress-mtime> <progress-state> <classification> <deliverable-source> <progress-source>
   local tid="$1" typed="$2" log="$3" mt="$4" sz="$5" dl="$6" pp="$7" pm="$8" ps="$9"
+  local cl="${10}" dsrc="${11}" psrc="${12}"
   mkdir -p "$STATE_DIR" 2>/dev/null || return 0
 
   local lock="$STATE_DIR/.stop-check.lock" tries=0 reclaimed=0
@@ -328,9 +329,11 @@ write_record() {  # <target-id> <typed> <log> <mtime> <size> <deliverables> <pro
     # already reads; `observer` and the D-6 progress snapshot are additive, and
     # the gate's by-key reader is inert to fields it does not know (checklist A6),
     # which is why this is still `v1` rather than a version bump that would refuse
-    # every record until its reader caught up.
-    printf '%s|session=%s|target=%s|typed=%s|log=%s|mtime=%s|size=%s|observer=%s|deliverables=%s|progress=%s|progress_mtime=%s|progress_state=%s\n' \
-      "$STATE_VERSION" "$SID" "$tid" "$typed" "$log" "$mt" "$sz" "$OBSERVER" "$dl" "$pp" "$pm" "$ps"
+    # every record until its reader caught up. Slice 4/5 adds `classification` and
+    # the two contract-source fields the same way — copied verbatim from the
+    # producer's own machine line, additive, still `v1`.
+    printf '%s|session=%s|target=%s|typed=%s|log=%s|mtime=%s|size=%s|observer=%s|deliverables=%s|progress=%s|progress_mtime=%s|progress_state=%s|classification=%s|deliverable_source=%s|progress_source=%s\n' \
+      "$STATE_VERSION" "$SID" "$tid" "$typed" "$log" "$mt" "$sz" "$OBSERVER" "$dl" "$pp" "$pm" "$ps" "$cl" "$dsrc" "$psrc"
   } > "$tmp" 2>/dev/null
   mv -f "$tmp" "$STATE_FILE" 2>/dev/null || rm -f "$tmp"
   rm -rf "$lock"
@@ -360,7 +363,10 @@ while IFS= read -r mline; do
   write_record "$M_TARGET" "$(line_field "$mline" typed)" "$M_LOG" \
     "$M_MTIME" "$M_SIZE" "$(line_field "$mline" deliverables)" \
     "$(line_field "$mline" progress)" "$(line_field "$mline" progress_mtime)" \
-    "$(line_field "$mline" progress_state)"
+    "$(line_field "$mline" progress_state)" \
+    "$(line_field "$mline" classification)" \
+    "$(line_field "$mline" deliverable_source)" \
+    "$(line_field "$mline" progress_source)"
 done <<< "$MLINES"
 
 exit 0

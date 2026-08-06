@@ -180,7 +180,15 @@ STATE_REL=".bionic/tmp/stop-check.state"
 OBS_OUT=""; OBS_ST=0
 run_observation() {  # <config-dir> <repo> <args…>
   local cfg="$1" repo="$2"; shift 2
-  OBS_OUT=$(cd "$repo" && CLAUDE_CONFIG_DIR="$cfg" bash "$OBSERVE" "$@" 2>/dev/null); OBS_ST=$?
+  # CLAUDE_CODE_SESSION_ID pinned empty: since slice 4/5 the real stop-check.sh
+  # reads it to classify the target against ITS OWN session's roster, and this
+  # suite runs inside a real Claude Code session that exports a real one. Left
+  # unpinned, the observation's output — and so the record this arm's assertions
+  # inspect — would silently vary with whichever session happens to run the
+  # suite (none of this file's fixtures set up a roster, so the intended,
+  # always-reachable answer is UNKNOWN, not a leaked ambient session).
+  OBS_OUT=$(cd "$repo" && CLAUDE_CONFIG_DIR="$cfg" CLAUDE_CODE_SESSION_ID= \
+    bash "$OBSERVE" "$@" 2>/dev/null); OBS_ST=$?
   return 0
 }
 
