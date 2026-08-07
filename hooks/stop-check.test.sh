@@ -1,0 +1,970 @@
+#!/bin/bash
+# Tests for hooks/stop-check.sh — THE OBSERVATION (epic-15 wave-01R, AC-3).
+#
+# The observation is a PRODUCER, not a hook: the orchestrator runs it by hand
+# before stopping an agent. Its whole contract is "resolve the target, print the
+# evidence tier, decide NOTHING" (design/orchestrator-subagent-coordination.md
+# §4 "The observation"). These tests hold it to exactly that — including the
+# negative half, that no verdict vocabulary ever appears in its output.
+#
+# HERMETIC. Every run happens inside a mktemp'd sandbox with its own HOME and
+# its own git repo. Nothing here touches the operator's real ~/.claude, the real
+# projects directory, or the live installed hooks, and no test invokes the
+# TaskStop tool.
+#
+# Usage: bash hooks/stop-check.test.sh
+
+set -uo pipefail
+
+CHECK="$(cd "$(dirname "$0")" && pwd)/stop-check.sh"
+# The roster's WRITER. Section 8 reads rows; §8(g) drives this script to produce
+# one, because a hand-written row cannot prove the reader is reading a field the
+# writer can actually emit (Step-6 six-axis review, axis-3 FAIL).
+WRITER="$(cd "$(dirname "$0")" && pwd)/dispatch-preflight.sh"
+PASS=0
+FAIL=0
+TOTAL=0
+
+# `cd … && pwd` normalizes the path: $TMPDIR carries a trailing slash on
+# macOS, and a doubled separator would slugify differently from the cwd the
+# script under test actually sees.
+SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/stop-check-test.XXXXXX")" && pwd)"
+trap 'rm -rf "$SANDBOX"' EXIT
+
+# ---------- assertions ----------
+
+ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
+no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; }
+
+expect_contains() {  # <label> <needle> <haystack>
+  if printf '%s' "$3" | grep -qF -- "$2"; then ok "$1"; else no "$1" "missing: $2"; fi
+}
+
+expect_matches() {   # <label> <ERE> <haystack>
+  if printf '%s' "$3" | grep -qE -- "$2"; then ok "$1"; else no "$1" "no match for: $2"; fi
+}
+
+expect_absent() {    # <label> <needle> <haystack>
+  if printf '%s' "$3" | grep -qiF -- "$2"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi
+}
+
+expect_status() {    # <label> <expected> <actual>
+  if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected exit $2, got $3"; fi
+}
+
+expect_equal() {     # <label> <expected> <actual>
+  if [ "$2" = "$3" ]; then ok "$1"; else
+    no "$1" "outputs differ:"
+    diff <(printf '%s\n' "$2") <(printf '%s\n' "$3") | sed 's/^/      /'
+  fi
+}
+
+expect_differ() {    # <label> <a> <b>
+  if [ "$2" != "$3" ]; then ok "$1"; else no "$1" "both renderings are identical: $2"; fi
+}
+
+# ---------- fixtures ----------
+#
+# FIXTURE FIDELITY (declared per checklist §A / spec §Design).
+#
+# Source of truth: .bionic/docs/record/epic-15-kill-interception-experiment.md
+# (CLI 2.1.220 verbatim captures), corroborated by a direct read of this
+# machine's own projects directory on 2026-08-04.
+#
+#   * Directory layout — FAITHFUL. §2.5 captures
+#     `agent_transcript_path: ".../<session-id>/subagents/agent-<agent-id>.jsonl"`;
+#     the sibling `agent-<agent-id>.meta.json` is captured verbatim in §2.8. The
+#     same layout was read live at
+#     ~/.claude/projects/-Users-admin-workspace-personal-bionic/<sid>/subagents/.
+#   * meta.json field set — FAITHFUL to §2.8 for the anonymous case
+#     (`agentType`, `description`, `name`, `toolUseId`, `spawnDepth`). The live
+#     read added `model`, `taskKind`, `teamName`, `customAgentType`,
+#     `permissionMode` for named in-process teammates; both shapes appear below
+#     so the resolver is proven against each. `name` is the field the resolver
+#     keys on in both.
+#   * agent-id shape — FAITHFUL to both observed forms: the anonymous
+#     `a567bd5c6d1e03d67` (§2.2/§2.8) and the name-prefixed
+#     `aw1r-records-researcher-38fccb01411afdd2` read live.
+#   * Working-log line shape — FAITHFUL to the live read: JSONL, one object per
+#     line, assistant turns carrying `.message.content[]` entries of type
+#     `text` or `tool_use`.
+#   * SYNTHESIZED, and declared as such: the message TEXT, the deliverable
+#     files, and the git history. None of them are platform surfaces — they are
+#     ordinary content this script reads, and nothing about their bytes is
+#     platform-determined.
+
+slugify() { printf '%s' "$1" | sed 's/[^a-zA-Z0-9]/-/g'; }
+
+# make_world <name> — a sandbox HOME + a git repo, echoing "<home>|<repo>|<slug>"
+make_world() {
+  local name="$1"
+  local home="$SANDBOX/$name/home" repo="$SANDBOX/$name/repo"
+  mkdir -p "$home" "$repo"
+  git -C "$repo" init -q 2>/dev/null
+  git -C "$repo" config user.email t@example.com
+  git -C "$repo" config user.name "T"
+  echo "seed" > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" commit -qm "seed commit" 2>/dev/null
+  printf '%s|%s|%s\n' "$home" "$repo" "$(slugify "$repo")"
+}
+
+# make_agent <home> <slug> <session-id> <agent-id> <name> <last-text> [meta-extra-json]
+make_agent() {
+  local home="$1" slug="$2" sid="$3" aid="$4" aname="$5" text="$6" extra="${7:-}"
+  local dir="$home/.claude/projects/$slug/$sid/subagents"
+  mkdir -p "$dir"
+  : > "$home/.claude/projects/$slug/$sid.jsonl"
+  # meta.json — field set per §2.8 plus the live named-teammate fields.
+  if [ -n "$extra" ]; then
+    printf '{"agentType":"general-purpose","description":"a test agent","name":"%s","toolUseId":"toolu_01TEST","spawnDepth":0,%s}\n' \
+      "$aname" "$extra" > "$dir/agent-$aid.meta.json"
+  else
+    printf '{"agentType":"general-purpose","description":"a test agent","name":"%s","toolUseId":"toolu_01TEST","spawnDepth":0}\n' \
+      "$aname" > "$dir/agent-$aid.meta.json"
+  fi
+  # working log — JSONL, assistant turns with .message.content[]
+  {
+    printf '{"type":"user","message":{"content":[{"type":"text","text":"go"}]}}\n'
+    printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{}}]}}\n'
+    printf '{"type":"assistant","message":{"content":[{"type":"text","text":%s}]}}\n' "$(printf '%s' "$text" | jq -Rs .)"
+  } > "$dir/agent-$aid.jsonl"
+  printf '%s\n' "$dir"
+}
+
+# run_check <home> <repo> [args...]
+#
+# CLAUDE_CONFIG_DIR is redirected beside HOME, and for the same hermeticity
+# reason: the observation reads `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects`,
+# so on a machine where that variable is exported — this one exports it — a
+# suite that redirected only HOME would read the REAL metadata root. It is
+# pointed at "$home/.claude", the same directory make_agent plants under, so the
+# derivation under test is unchanged; nothing here injects a projects path.
+run_check() {
+  local home="$1" repo="$2"; shift 2
+  ( cd "$repo" && HOME="$home" CLAUDE_CONFIG_DIR="$home/.claude" CLAUDE_CODE_SESSION_ID= \
+      bash "$CHECK" "$@" 2>&1 )
+}
+
+# run_check_as <own-session-id> <home> <repo> [args...] — like run_check, but with
+# CLAUDE_CODE_SESSION_ID explicitly set: the channel stop-check.sh reads to learn
+# "this session's own id" for roster classification (slice 4/5), mirroring the
+# same resolution hooks/preflight-probe.sh already makes. run_check ALWAYS pins
+# this variable (empty above) rather than leaving it to the ambient shell — this
+# suite is run inside a real Claude Code session, which exports its own real
+# CLAUDE_CODE_SESSION_ID, and an unpinned test would silently vary its
+# classification verdict with whatever session happens to be running it.
+run_check_as() {
+  local sid="$1" home="$2" repo="$3"; shift 3
+  ( cd "$repo" && HOME="$home" CLAUDE_CONFIG_DIR="$home/.claude" CLAUDE_CODE_SESSION_ID="$sid" \
+      bash "$CHECK" "$@" 2>&1 )
+}
+
+# ============================================================
+echo ""
+echo "=== Section 1: target resolution against on-disk metadata (AC-3) ==="
+# ============================================================
+
+IFS='|' read -r H1 R1 S1 <<< "$(make_world w1)"
+make_agent "$H1" "$S1" "11111111-1111-1111-1111-111111111111" \
+  "aw1r-slice-4-3-3202dd476c0b4a5e" "w1r-slice-4-3" \
+  "I already completed this review — resending now." \
+  '"model":"opus","taskKind":"in_process_teammate","teamName":"session-11111111","customAgentType":"senior-implementor"' >/dev/null
+
+OUT=$(run_check "$H1" "$R1" "w1r-slice-4-3"); ST=$?
+expect_status "resolving by name exits 0" 0 "$ST"
+expect_contains "resolves a target typed as a NAME to its agent id" "aw1r-slice-4-3-3202dd476c0b4a5e" "$OUT"
+
+OUT=$(run_check "$H1" "$R1" "aw1r-slice-4-3-3202dd476c0b4a5e"); ST=$?
+expect_status "resolving by agent id exits 0" 0 "$ST"
+expect_contains "resolves a target typed as an AGENT ID" "aw1r-slice-4-3-3202dd476c0b4a5e" "$OUT"
+
+# P5: `name@team` is a legal TaskStop reference, so the observation must accept it.
+OUT=$(run_check "$H1" "$R1" "w1r-slice-4-3@session-11111111"); ST=$?
+expect_status "resolving by name@team exits 0" 0 "$ST"
+expect_contains "resolves a target typed as name@team" "aw1r-slice-4-3-3202dd476c0b4a5e" "$OUT"
+
+OUT=$(run_check "$H1" "$R1" "no-such-agent"); ST=$?
+expect_status "unresolvable target exits 1" 1 "$ST"
+expect_contains "unresolvable target says so" "unresolved" "$OUT"
+
+# Ambiguity: the same NAME in two different sessions of the same project.
+make_agent "$H1" "$S1" "22222222-2222-2222-2222-222222222222" \
+  "a567bd5c6d1e03d67" "w1r-slice-4-3" "older run" >/dev/null
+OUT=$(run_check "$H1" "$R1" "w1r-slice-4-3"); ST=$?
+expect_status "ambiguous target exits 1" 1 "$ST"
+expect_contains "ambiguous target says so" "ambiguous" "$OUT"
+expect_contains "ambiguous target lists candidate 1" "aw1r-slice-4-3-3202dd476c0b4a5e" "$OUT"
+expect_contains "ambiguous target lists candidate 2" "a567bd5c6d1e03d67" "$OUT"
+
+# ============================================================
+echo ""
+echo "=== Section 2: the evidence tier is printed (AC-3) ==="
+# ============================================================
+
+IFS='|' read -r H2 R2 S2 <<< "$(make_world w2)"
+DIR2=$(make_agent "$H2" "$S2" "33333333-3333-3333-3333-333333333333" \
+  "aquiet-reviewer-deadbeefdeadbeef" "quiet-reviewer" \
+  "I already completed this review — resending now.")
+echo "the deliverable body, with substance" > "$R2/report.md"
+
+OUT=$(run_check "$H2" "$R2" "quiet-reviewer" "report.md" "missing-report.md")
+
+# Working-log recency as ABSOLUTE time and as AGE (both, per AC-3).
+expect_matches "working-log recency printed as an absolute UTC timestamp" \
+  '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' "$OUT"
+expect_matches "working-log recency printed as an age" '\(age [0-9]' "$OUT"
+expect_contains "working log path printed" "agent-aquiet-reviewer-deadbeefdeadbeef.jsonl" "$OUT"
+
+# Last message — the agent's own words, the third evidence channel (§2.2).
+expect_contains "last message from the agent printed" "I already completed this review" "$OUT"
+
+# Repo activity.
+expect_contains "repo activity printed" "seed commit" "$OUT"
+
+# Contracted deliverables: existence AND substance.
+expect_matches "present deliverable reported as present, with size" \
+  'report\.md.*(PRESENT|present)' "$OUT"
+expect_matches "present deliverable reports its byte size" 'report\.md.*[0-9]+ bytes' "$OUT"
+expect_matches "absent deliverable reported as absent" \
+  'missing-report\.md.*(ABSENT|absent)' "$OUT"
+
+# ============================================================
+echo ""
+echo "=== Section 3: it decides NOTHING (AC-3, §4 'Never: stop anything, judge anything') ==="
+# ============================================================
+
+for verdict in "safe to stop" "do not stop" "recommend" "verdict" "you should" "it is dead" "hung"; do
+  expect_absent "observation output carries no verdict: '$verdict'" "$verdict" "$OUT"
+done
+expect_contains "observation states that it decides nothing" "decides nothing" "$OUT"
+
+# ============================================================
+echo ""
+echo "=== Section 4: no seam — the default projects root is derived, not injected ==="
+# ============================================================
+# Seam-blindness (a substituted value leaves the production path unverified):
+# every test above runs with only the two environment variables the production
+# path itself reads redirected — HOME and CLAUDE_CONFIG_DIR, pointed at the same
+# sandbox directory — so the projects-root derivation
+# (${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/<slugified-project-root>) is
+# itself under test; there is no injected path anywhere in this suite. The
+# CLAUDE_CONFIG_DIR half of that derivation is driven with the two roots
+# DIFFERENT in tests/cross-gate-agreement.test.sh §C, which is where it can be
+# compared against the other two renderings. This section pins the
+# derivation by its discriminating consequence: an agent under THIS project's
+# slug resolves quietly, while one found only under another project's slug
+# resolves with an explicit out-of-project note.
+
+IFS='|' read -r H4 R4 S4 <<< "$(make_world w4)"
+make_agent "$H4" "$(slugify "$SANDBOX/some-other-project")" \
+  "44444444-4444-4444-4444-444444444444" "aforeign-1234567890abcdef" "foreign" "hi" >/dev/null
+OUT=$(run_check "$H4" "$R4" "foreign"); ST=$?
+expect_status "an agent found only outside this project still resolves" 0 "$ST"
+expect_contains "an out-of-project match is flagged as such" "outside this project" "$OUT"
+
+# And the positive pair: an agent under THIS repo's slug resolves with no note.
+make_agent "$H4" "$S4" "55555555-5555-5555-5555-555555555555" \
+  "alocal-1234567890abcdef" "local" "hi" >/dev/null
+OUT=$(run_check "$H4" "$R4" "local"); ST=$?
+expect_status "an agent under this project's slug resolves" 0 "$ST"
+expect_absent "an in-project match carries no out-of-project note" "outside this project" "$OUT"
+
+# ============================================================
+echo ""
+echo "=== Section 5: usage and hostile inputs ==="
+# ============================================================
+
+OUT=$(run_check "$H1" "$R1"); ST=$?
+expect_status "no target argument exits 1" 1 "$ST"
+expect_contains "no target argument prints usage" "Usage" "$OUT"
+
+# A target string that is a glob must not expand into a match.
+OUT=$(run_check "$H2" "$R2" '*'); ST=$?
+expect_status "a glob target does not resolve" 1 "$ST"
+
+# Run from OUTSIDE any git repo (checklist A1: the fix command must be runnable
+# from any cwd). Resolution is rooted at the configured metadata directory, not
+# at the cwd, so it still works; repo activity is simply reported as
+# unavailable.
+OUT=$( cd "$SANDBOX" && HOME="$H2" CLAUDE_CONFIG_DIR="$H2/.claude" bash "$CHECK" "quiet-reviewer" 2>&1 ); ST=$?
+expect_status "runs from a non-repo cwd without crashing" 0 "$ST"
+expect_contains "non-repo cwd still prints the working log evidence" "agent-aquiet-reviewer-deadbeefdeadbeef.jsonl" "$OUT"
+
+# ============================================================
+echo ""
+echo "=== Section 6: the progress artifact — D-6's evidence level below the agent ==="
+# ============================================================
+#
+# An hour-long command silences the working log for the whole hour — one tool
+# call, one result at the end — so "quiet for 47 minutes" describes a healthy
+# suite and a wedged one identically (design §5 D-6). The task's own byproducts
+# are the level of evidence below the agent: the work contract names a progress
+# path, and the observation prints that artifact's facts. Facts only — the
+# section carries no verdict, exactly like every other channel here.
+
+IFS='|' read -r H6 R6 S6 <<< "$(make_world w6)"
+make_agent "$H6" "$S6" "66666666-6666-6666-6666-666666666666" \
+  "along-runner-66666666666666aa" "long-runner" "running the suite" >/dev/null
+
+PROG_DIR="$R6/.bionic/tmp"
+mkdir -p "$PROG_DIR"
+PROG="$PROG_DIR/w6.progress"
+# Written before the baseline run, not between the two: the flagged and
+# unflagged runs are compared below, and an untracked file appearing between
+# them would move the repo-activity line for reasons that have nothing to do
+# with this flag.
+printf 'step 1 done\n' > "$PROG"   # 12 bytes, written just now
+
+# (a) No flag, no section — and nothing else moves either. This is the wave-1
+# carve pin arriving at its destination: while the D-6 check was deferred, the
+# pin asserted the section was absent from the whole command; now that the
+# check has landed, the same negative assertion is the no-flag case.
+OUT6_NONE=$(run_check "$H6" "$R6" "long-runner")
+expect_absent "no --progress flag prints no progress-artifact section" "progress artifact" "$OUT6_NONE"
+
+# (b) A fresh artifact: absolute last-write, seconds-scale age, size.
+OUT6_FRESH=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG")
+expect_contains "the progress section prints its header" "-- progress artifact (D-6) --" "$OUT6_FRESH"
+expect_contains "the progress section prints the contracted path" "$PROG" "$OUT6_FRESH"
+expect_matches "a fresh artifact prints an absolute UTC last-write" \
+  '^progress: .*last-write [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' "$OUT6_FRESH"
+expect_matches "a fresh artifact prints a seconds-scale age" \
+  '^progress: .*\([0-9]{1,2}s ago\)' "$OUT6_FRESH"
+expect_matches "a fresh artifact prints its size in bytes" '^progress: .*size 12B' "$OUT6_FRESH"
+
+# Without the flag the output is byte-unchanged: the section is purely
+# additive. Compared with the volatile fields (ages, absolute timestamps)
+# normalized, and the three added lines — the blank separator, the header, the
+# fact line — removed from the flagged run.
+norm_volatile() {
+  printf '%s\n' "$1" | sed -E \
+    -e 's/\(age [^)]*\)/(age NORMALIZED)/' \
+    -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z/TIMESTAMP/g'
+}
+# The machine line legitimately differs between the two runs — it carries the
+# progress state, which is the whole point of the flag — so it is compared in its
+# own section below rather than folded into this byte-equality claim about the
+# HUMAN-facing output.
+strip_machine() { printf '%s\n' "$1" | grep -v '^stop-check-observation/'; }
+strip_progress() {   # drop the header, the fact line, and the blank line before them
+  printf '%s\n' "$1" | awk '
+    /^-- progress artifact \(D-6\) --$/ { hold = 0; skip = 1; next }
+    skip == 1 { skip = 0; next }
+    { if (hold) print held; held = $0; hold = 1 }
+    END { if (hold) print held }'
+}
+expect_equal "everything outside the section is unchanged by --progress" \
+  "$(norm_volatile "$(strip_machine "$OUT6_NONE")")" \
+  "$(norm_volatile "$(strip_progress "$(strip_machine "$OUT6_FRESH")")")"
+
+# (c) The SAME artifact, ten minutes stale: the rendering must change on time
+# alone. Same path, same bytes — the only difference between these two runs is
+# when the file was last written, which is the whole point of the channel.
+TEN_AGO=$(date -v-10M +%Y%m%d%H%M.%S 2>/dev/null || date -d '10 minutes ago' +%Y%m%d%H%M.%S 2>/dev/null)
+if [ -z "$TEN_AGO" ]; then
+  no "this platform's date can express a 10-minute-old timestamp" "neither date -v nor date -d worked"
+else
+  touch -t "$TEN_AGO" "$PROG"
+  OUT6_STALE=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG")
+  expect_matches "a stale artifact prints a minutes-scale age" \
+    '^progress: .*\(10m [0-9]+s ago\)' "$OUT6_STALE"
+  FRESH_LINE=$(printf '%s\n' "$OUT6_FRESH" | grep '^progress: ')
+  STALE_LINE=$(printf '%s\n' "$OUT6_STALE" | grep '^progress: ')
+  expect_differ "fresh and stale renderings of the same artifact are distinguishable" \
+    "$FRESH_LINE" "$STALE_LINE"
+fi
+
+# (d) Contracted but never written.
+OUT6_MISS=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG_DIR/never-written.progress"); ST=$?
+expect_status "a missing progress artifact is not an error" 0 "$ST"
+expect_matches "a missing progress artifact prints ABSENT" \
+  '^progress: .*never-written\.progress  ABSENT' "$OUT6_MISS"
+
+# Facts only: the section names no state of the agent.
+for verdict in "safe to stop" "recommend" "verdict" "you should" "hung" "stalled" "alive"; do
+  expect_absent "the progress section carries no verdict: '$verdict'" "$verdict" "$OUT6_FRESH"
+done
+
+# (e) One path, or it is a usage error — a second flag is ambiguous about which
+# artifact the contract named, and guessing is the failure this whole design
+# exists to prevent.
+OUT6_TWO=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG" --progress "$PROG"); ST=$?
+expect_status "a second --progress flag exits 1" 1 "$ST"
+expect_contains "a second --progress flag prints usage" "Usage" "$OUT6_TWO"
+
+OUT6_BARE=$(run_check "$H6" "$R6" "long-runner" --progress); ST=$?
+expect_status "--progress with no path exits 1" 1 "$ST"
+expect_contains "--progress with no path prints usage" "Usage" "$OUT6_BARE"
+
+# An EMPTY value is the same failure as a missing one, and worse in its output:
+# `--progress "$PROG"` with PROG unset is the ordinary trigger, and a token that
+# follows is not a path that was named. Printing `progress: ABSENT` for it states
+# an authoritative fact about an artifact nobody contracted, which is the exact
+# false negative D-6 exists to prevent — the reader concludes wedged and routes a
+# healthy agent into the non-response procedure (Step-6 critic, issue B).
+OUT6_EMPTY=$(run_check "$H6" "$R6" "long-runner" --progress ""); ST=$?
+expect_status "--progress with an empty path exits 1" 1 "$ST"
+expect_contains "--progress with an empty path prints usage" "Usage" "$OUT6_EMPTY"
+expect_absent "--progress with an empty path never prints a progress fact" "progress:" "$OUT6_EMPTY"
+
+# The flag and its value are never mistaken for contracted deliverables.
+echo "the deliverable body" > "$R6/report.md"
+OUT6_BOTH=$(run_check "$H6" "$R6" "long-runner" "report.md" --progress "$PROG")
+expect_matches "a deliverable named alongside --progress is still reported" \
+  'report\.md — PRESENT' "$OUT6_BOTH"
+expect_absent "the flag itself is never reported as a deliverable" "  --progress —" "$OUT6_BOTH"
+expect_absent "the flag's value is never reported as a deliverable" "w6.progress — " "$OUT6_BOTH"
+
+# (f) TARGET FIRST — the grammar is the one the RECORDER can parse.
+#
+# This command's run is observed by hooks/stop-guard.sh's Bash arm, which
+# re-parses the same command line to decide WHICH agent was examined. That
+# recorder skips leading `-*` tokens one at a time and takes the first non-flag
+# token; it does not know that `--progress` consumes the token after it. So a
+# leading `--progress <path> <agent>` makes the two halves disagree about the
+# target — the operator looks at <agent> while the record says <path> — and a
+# record naming an agent nobody examined is the wall opening on a look that was
+# never taken (Step-6 review F-1, proven with a two-agent fixture).
+#
+# The producer is therefore narrowed to exactly what the recorder already reads:
+# the target is the FIRST argument, `--progress <path>` may follow it, and any
+# other `-`-leading token anywhere is a usage error rather than a silent
+# deliverable. That last part is also F-2: `--progres` (one `s`) used to be
+# reported as an ABSENT deliverable while the reader believed they had asked for
+# a progress channel.
+
+OUT6_LEAD=$(run_check "$H6" "$R6" --progress "$PROG" "long-runner"); ST=$?
+expect_status "--progress BEFORE the target exits 1" 1 "$ST"
+expect_contains "--progress before the target prints usage" "Usage" "$OUT6_LEAD"
+expect_absent "--progress before the target prints no evidence tier" "OBSERVATION" "$OUT6_LEAD"
+
+# The usage error is an error: nothing on stdout, everything on stderr, so a
+# caller reading the observation's output gets no half-formed tier.
+OUT6_LEAD_STDOUT=$( cd "$R6" && HOME="$H6" CLAUDE_CONFIG_DIR="$H6/.claude" \
+  bash "$CHECK" --progress "$PROG" "long-runner" 2>/dev/null )
+expect_equal "a usage error writes nothing to stdout" "" "$OUT6_LEAD_STDOUT"
+
+OUT6_TYPO=$(run_check "$H6" "$R6" "long-runner" --progres "$PROG"); ST=$?
+expect_status "a mistyped flag exits 1 instead of becoming a deliverable" 1 "$ST"
+expect_contains "a mistyped flag prints usage" "Usage" "$OUT6_TYPO"
+expect_absent "a mistyped flag is never reported as a deliverable" "--progres —" "$OUT6_TYPO"
+
+OUT6_EQ=$(run_check "$H6" "$R6" "long-runner" "--progress=$PROG"); ST=$?
+expect_status "--progress=<path> exits 1 (one spelling, the one the recorder reads)" 1 "$ST"
+expect_contains "--progress=<path> prints usage" "Usage" "$OUT6_EQ"
+
+OUT6_HELP=$(run_check "$H6" "$R6" --help); ST=$?
+expect_status "--help exits 1" 1 "$ST"
+expect_contains "--help reaches usage rather than target resolution" "Usage" "$OUT6_HELP"
+expect_absent "--help is never treated as an agent name" "unresolved" "$OUT6_HELP"
+
+# Position is not the point — an unknown flag is a usage error wherever it sits,
+# including after a well-formed --progress pair.
+OUT6_TRAIL=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG" -x); ST=$?
+expect_status "an unknown flag after a valid --progress pair exits 1" 1 "$ST"
+expect_contains "an unknown flag after a valid --progress pair prints usage" "Usage" "$OUT6_TRAIL"
+
+# ============================================================
+echo ""
+echo "=== Section 7: the machine line — printed on success, on nothing else ==="
+# ============================================================
+#
+# hooks/execution-recorder.sh reads this line and nothing else, so its presence
+# IS the claim "an observation ran and produced an evidence tier". The whole C6
+# closure rests on the second half of that: every path that shows the operator no
+# evidence tier must print no line (spec AC-3; the residual it replaces is pinned
+# in tests/cross-gate-agreement.test.sh §C case 6).
+
+IFS='|' read -r H7 R7 S7 <<< "$(make_world w7)"
+S7DIR=$(make_agent "$H7" "$S7" "77777777-7777-7777-7777-777777777777" \
+  "amachine-7777777777777777" "machine" "working")
+PROG7="$R7/.bionic/tmp/w7.progress"
+mkdir -p "$R7/.bionic/tmp"; printf 'stage 1\n' > "$PROG7"
+printf 'a report\n' > "$R7/report7.md"
+
+MLINE_OF() { printf '%s\n' "$1" | grep '^stop-check-observation/' ; }
+
+OUT7=$(run_check "$H7" "$R7" "machine"); ST=$?
+expect_status "a successful observation exits 0" 0 "$ST"
+M7=$(MLINE_OF "$OUT7")
+expect_matches "a successful run prints ONE versioned machine line" \
+  '^stop-check-observation/v1\|' "$M7"
+expect_equal "exactly one machine line, never two" "1" "$(printf '%s\n' "$OUT7" | grep -c '^stop-check-observation/')"
+expect_contains "the machine line names the RESOLVED target" \
+  "target=amachine-7777777777777777" "$M7"
+expect_contains "the machine line names the target AS TYPED" "typed=machine" "$M7"
+expect_contains "the machine line names the working log it read" \
+  "log=$S7DIR/agent-amachine-7777777777777777.jsonl" "$M7"
+expect_matches "the machine line carries the activity level (mtime)" 'mtime=[0-9]+' "$M7"
+expect_matches "the machine line carries the activity level (size)" 'size=[0-9]+' "$M7"
+expect_contains "with no --progress the progress state is 'unnamed', not blank" \
+  "progress_state=unnamed" "$M7"
+expect_equal "the machine line is the LAST line of a successful run" \
+  "$M7" "$(printf '%s\n' "$OUT7" | tail -1)"
+
+# The file facts the operator READ are the file facts the line CARRIES. One
+# computation, two renderings — this is what removes the F-1 divergence class.
+OUT7_SIZE=$(printf '%s\n' "$OUT7" | grep -E '^  size:' | grep -oE '[0-9]+' | head -1)
+expect_equal "the size printed for the reader is the size carried for the machine" \
+  "$OUT7_SIZE" "$(printf '%s' "$M7" | tr '|' '\n' | grep '^size=' | cut -d= -f2)"
+
+# Contract state rides along, for the D-6 comparison slices 4/5 and 4/6 make.
+OUT7B=$(run_check "$H7" "$R7" "machine" report7.md nosuch.md --progress "$PROG7")
+M7B=$(MLINE_OF "$OUT7B")
+expect_contains "each deliverable's state is carried, present" "present:report7.md" "$M7B"
+expect_contains "each deliverable's state is carried, absent" "absent:nosuch.md" "$M7B"
+expect_contains "a named-and-present progress artifact is 'present'" "progress_state=present" "$M7B"
+expect_matches "a present progress artifact carries its mtime" 'progress_mtime=[0-9]+' "$M7B"
+OUT7C=$(run_check "$H7" "$R7" "machine" --progress "$R7/.bionic/tmp/never-written")
+expect_contains "a named-but-missing progress artifact is 'absent', not 'unnamed'" \
+  "progress_state=absent" "$(MLINE_OF "$OUT7C")"
+
+# EVERY REFUSAL CLASS PRINTS NO LINE. Each of these is a run whose operator saw
+# no evidence tier; each must leave the recorder nothing to copy.
+check_no_line() {  # <label> <args…>
+  local label="$1"; shift
+  local out st
+  out=$(run_check "$H7" "$R7" "$@"); st=$?
+  if [ "$st" -eq 0 ]; then
+    no "$label — and the run itself failed" "expected a non-zero exit, got 0"
+  elif [ -z "$(MLINE_OF "$out")" ]; then
+    ok "$label"
+  else
+    no "$label" "printed: $(MLINE_OF "$out")"
+  fi
+}
+check_no_line "no arguments at all prints no machine line" ""
+check_no_line "a leading flag prints no machine line" --progress "$PROG7" machine
+check_no_line "a mistyped flag prints no machine line" machine --progres "$PROG7"
+check_no_line "the =-joined spelling prints no machine line" machine "--progress=$PROG7"
+check_no_line "an unknown flag prints no machine line" machine --unknown
+check_no_line "a second --progress prints no machine line" \
+  machine --progress "$PROG7" --progress "$PROG7"
+check_no_line "a --progress with no value prints no machine line" machine --progress
+check_no_line "an UNRESOLVED target prints no machine line" no-such-agent
+
+# Ambiguity: two agents answering to one name. The operator gets a candidate list
+# and no evidence tier, so there is nothing to record.
+make_agent "$H7" "$S7" "77777777-7777-7777-7777-777777777777" \
+  "atwin-1111111111111111" "twin" "working" >/dev/null
+make_agent "$H7" "$S7" "77777777-7777-7777-7777-777777777777" \
+  "atwin-2222222222222222" "twin" "working" >/dev/null
+check_no_line "an AMBIGUOUS target prints no machine line" twin
+
+# The line is pipe-delimited and read by key, so no operator-supplied value may
+# carry a `|` into it and forge a field.
+make_agent "$H7" "$S7" "77777777-7777-7777-7777-777777777777" \
+  "apipe-3333333333333333" "apipe-3333333333333333" "working" >/dev/null
+OUT7D=$(run_check "$H7" "$R7" "apipe-3333333333333333" 'rep|ort.md')
+M7D=$(MLINE_OF "$OUT7D")
+expect_absent "a deliverable path carrying a pipe does not forge a field" \
+  "rep|ort" "$M7D"
+expect_equal "the forged-field attempt still yields one line" "1" \
+  "$(printf '%s\n' "$OUT7D" | grep -c '^stop-check-observation/')"
+
+# ============================================================
+echo ""
+echo "=== Section 8: roster classification, contract-from-roster, P2 claims (slice 4/5, AC-6) ==="
+# ============================================================
+#
+# The roster's SCHEMA is hooks/dispatch-preflight.sh's (roster-state/v1); its
+# ROWS here are hand-built rather than produced by that gate, exactly like
+# tests/cross-gate-agreement.test.sh's verdict_er() — this suite's job is the
+# READER, and hooks/dispatch-preflight.test.sh already owns the writer.
+
+IFS='|' read -r H8 R8 S8 <<< "$(make_world w8)"
+OWN8="88888888-0000-0000-0000-000000000001"
+FOREIGN8="88888888-0000-0000-0000-000000000002"
+DEAD8="88888888-0000-0000-0000-000000000003"
+mkdir -p "$R8/.bionic/tmp"
+
+# --- (a) OURS: a roster row names the target; contract state is SOURCED from it ---
+make_agent "$H8" "$S8" "$OWN8" "aours-1111111111111111" "ours-target" "working away" >/dev/null
+echo "the deliverable body" > "$R8/deliv-a.md"
+echo "progress line" > "$R8/prog-a.progress"
+{
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
+  printf 'roster-state/v1|status=confirmed|session=%s|name=ours-target|agent_id=aours-1111111111111111|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=%s|duration=~10 minutes|progress=%s|claims=|absent=|tool_use_id=toolu_A\n' \
+    "$OWN8" "$R8/deliv-a.md" "$R8/prog-a.progress"
+} > "$R8/.bionic/tmp/roster-${OWN8}.state"
+
+OUT8A=$(run_check_as "$OWN8" "$H8" "$R8" "ours-target")
+expect_contains "OURS: classification line prints OURS" "Classification: OURS" "$OUT8A"
+expect_contains "OURS: contract line shows the roster deliverable path" "$R8/deliv-a.md" "$OUT8A"
+expect_contains "OURS: contract line shows the roster progress path" "$R8/prog-a.progress" "$OUT8A"
+expect_matches "OURS: the roster-sourced deliverable is checked and reported present" \
+  'deliv-a\.md.*(PRESENT|present)' "$OUT8A"
+expect_contains "OURS: the roster-sourced progress artifact section is printed" \
+  "-- progress artifact (D-6) --" "$OUT8A"
+M8A=$(printf '%s\n' "$OUT8A" | grep '^stop-check-observation/')
+expect_contains "OURS: machine line carries classification=ours" "classification=ours" "$M8A"
+expect_contains "OURS: machine line carries deliverable_source=roster" "deliverable_source=roster" "$M8A"
+expect_contains "OURS: machine line carries progress_source=roster" "progress_source=roster" "$M8A"
+
+# --- (b) OURS, but the CLI overrides: the override wins, the mismatch is printed, not judged ---
+echo "another deliverable" > "$R8/deliv-b.md"
+echo "another progress" > "$R8/prog-b.progress"
+OUT8B=$(run_check_as "$OWN8" "$H8" "$R8" "ours-target" "$R8/deliv-b.md" --progress "$R8/prog-b.progress")
+M8B=$(printf '%s\n' "$OUT8B" | grep '^stop-check-observation/')
+expect_contains "OURS+override: machine line carries deliverable_source=args" "deliverable_source=args" "$M8B"
+expect_contains "OURS+override: machine line carries progress_source=args" "progress_source=args" "$M8B"
+expect_contains "OURS+override: a deliverable mismatch is printed, not judged" \
+  "roster recorded a different deliverable set: $R8/deliv-a.md" "$OUT8B"
+expect_contains "OURS+override: a progress mismatch is printed, not judged" \
+  "roster recorded a different progress path: $R8/prog-a.progress" "$OUT8B"
+expect_contains "OURS+override: mismatch notes say they are not judged" "not judged" "$OUT8B"
+expect_matches "OURS+override: the CLI's own deliverable is still checked and reported" \
+  'deliv-b\.md.*(PRESENT|present)' "$OUT8B"
+for verdict in "safe to stop" "do not stop" "recommend" "verdict" "you should" "it is dead" "hung"; do
+  expect_absent "OURS+override carries no verdict: '$verdict'" "$verdict" "$OUT8B"
+done
+
+# --- (c) FOREIGN: metadata filed under another session, whose transcript is on disk.
+# Labelled `foreign-live` until slice 4/9, which is a liveness the existence check
+# never established — see Section 9 (d). ---
+make_agent "$H8" "$S8" "$FOREIGN8" "aforeign8-2222222222222222" "foreign-target" "hi" >/dev/null
+OUT8C=$(run_check_as "$OWN8" "$H8" "$R8" "foreign-target")
+expect_contains "FOREIGN: classification line prints FOREIGN" "Classification: FOREIGN" "$OUT8C"
+expect_absent "FOREIGN: no roster contract line is printed" "Contract (roster):" "$OUT8C"
+M8C=$(printf '%s\n' "$OUT8C" | grep '^stop-check-observation/')
+expect_contains "FOREIGN: machine line carries classification=foreign" "|classification=foreign|" "$M8C"
+
+# --- (d) DEAD HISTORY: the bb20f616 shape — metadata answering to a live-looking
+# name, from a session whose own transcript is gone. ---
+make_agent "$H8" "$S8" "$DEAD8" "adead8-3333333333333333" "dead-target" "old run" >/dev/null
+rm -f "$H8/.claude/projects/$S8/$DEAD8.jsonl"
+OUT8D=$(run_check_as "$OWN8" "$H8" "$R8" "dead-target")
+expect_contains "DEAD HISTORY: classification line prints DEAD HISTORY" "Classification: DEAD HISTORY" "$OUT8D"
+M8D=$(printf '%s\n' "$OUT8D" | grep '^stop-check-observation/')
+expect_contains "DEAD HISTORY: machine line carries classification=dead-history" "classification=dead-history" "$M8D"
+
+# --- (e) UNKNOWN: no own session id at all — classification never guesses ---
+OUT8E=$(run_check "$H8" "$R8" "foreign-target")
+expect_contains "UNKNOWN: classification line prints UNKNOWN when own session id is unavailable" \
+  "Classification: UNKNOWN" "$OUT8E"
+M8E=$(printf '%s\n' "$OUT8E" | grep '^stop-check-observation/')
+expect_contains "UNKNOWN: machine line carries classification=unknown" "classification=unknown" "$M8E"
+
+# --- classification applies only to what IS resolved (ambiguous-resolution unchanged) ---
+OUT8I=$(run_check_as "$OWN8" "$H8" "$R8" "no-such-target-w8")
+expect_absent "an unresolved target prints no Classification line" "Classification:" "$OUT8I"
+
+# --- (f) P2: claimed-process liveness via an explicit --claims pattern, a REAL process ---
+MARKER="$H8/claims-marker-w8"
+ln -sf "$(command -v sleep)" "$MARKER"
+"$MARKER" 30 &
+CLAIM_PID=$!
+sleep 0.3 2>/dev/null || true
+OUT8F=$(run_check_as "$OWN8" "$H8" "$R8" "ours-target" --claims "$MARKER")
+expect_contains "P2: claims section header printed" "-- claimed process (P2) --" "$OUT8F"
+expect_contains "P2: pattern and source=args are shown" "source=args" "$OUT8F"
+expect_contains "P2: a live matching process reports live: yes" "live:     yes" "$OUT8F"
+for verdict in "safe to stop" "recommend" "verdict" "you should" "hung" "stalled" "alive"; do
+  expect_absent "P2 claims section carries no verdict: '$verdict'" "$verdict" "$OUT8F"
+done
+kill "$CLAIM_PID" 2>/dev/null
+wait "$CLAIM_PID" 2>/dev/null
+
+OUT8G=$(run_check_as "$OWN8" "$H8" "$R8" "ours-target" --claims "$MARKER")
+expect_contains "P2: after the process exits, live: no" "live:     no" "$OUT8G"
+
+# --- (g) P2 + cadence, over a row the REAL WRITER wrote from a REAL brief ---
+#
+# THIS CASE IS DELIBERATELY NOT HERMETIC-TO-THIS-SCRIPT, and that is the point.
+# Until the Step-6 six-axis review, this section hand-wrote a row carrying
+# `claims=<pattern>` — a field NO writer could produce, since
+# hooks/dispatch-preflight.sh's label table had no `claims` and no `cadence`
+# entry. The suite was green about a field that could not exist: a fixture
+# pinning away its own test (.claude memory: fixtures-can-pin-away-the-test),
+# and the reader it was pinning was dead substrate. So the row below is produced
+# by running the real start gate over a real dispatch brief, and the reader is
+# then driven over whatever that writer actually wrote. If the label grammar
+# regresses, this goes red HERE, where the display lives, rather than staying
+# green while the field silently vanishes from every live roster.
+#
+# The brief's shape is the ratified liveness contract's (SKILL.md §Dispatch):
+# a progress path with a cadence beside it, plus a conditional subprocess claim.
+make_agent "$H8" "$S8" "$OWN8" "aours-4444444444444444" "ours-claims" "working" >/dev/null
+MARKER2="$H8/claims-marker-w8-roster"
+ln -sf "$(command -v sleep)" "$MARKER2"
+"$MARKER2" 30 &
+CLAIM_PID2=$!
+sleep 0.3 2>/dev/null || true
+
+# What the start gate needs before it will journal anything: an active wave and
+# this session's own attestation. Both are fixtures of the WRITER's
+# preconditions, never of the value under test — the row itself is lifted from
+# the brief by the real extractor.
+mkdir -p "$R8/.bionic/docs/plans/epic-99"
+{
+  printf -- '---\n'
+  printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 13\n'
+  printf 'intent: build\nrigor: audited\nscale: wave\n'
+  printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 4\n'
+} > "$R8/.bionic/docs/plans/epic-99/wave-01.md"
+printf 'version=v1\nsession_id=%s\n' "$OWN8" > "$R8/.bionic/tmp/preflight-${OWN8}.state"
+
+echo "progress line" > "$R8/prog-g.progress"
+BRIEF_G="Canonical-sdlc Step 4, slice 4/12 of epic-99 wave-01; build · audited · wave.
+Expected artifact: $R8/deliv-a.md
+Expected duration: ~30 minutes. Progress: $R8/prog-g.progress, cadence ~6m.
+Subprocess claim: \`$MARKER2\` → $H8/claims-out.log
+Exit condition: the artifact exists."
+jq -n --arg s "$OWN8" --arg c "$R8" --arg p "$BRIEF_G" \
+  '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
+    hook_event_name:"PreToolUse", tool_name:"Agent",
+    tool_input:{description:"the claimed-process case", subagent_type:"implementor",
+                prompt:$p, name:"ours-claims", model:"opus", run_in_background:true},
+    tool_use_id:"toolu_01W8G"}' \
+  | ( cd "$R8" && HOME="$H8" CLAUDE_CONFIG_DIR="$H8/.claude" bash "$WRITER" >/dev/null 2>&1 )
+
+W8G_ROW=$(grep -v '^#' "$R8/.bionic/tmp/roster-${OWN8}.state" 2>/dev/null | grep 'name=ours-claims' | tail -1)
+expect_contains "the real start gate journalled the dispatch this case reads" \
+  "name=ours-claims" "$W8G_ROW"
+expect_contains "…and the row it wrote carries the claimed pattern the brief declared" \
+  "claims=$MARKER2" "$W8G_ROW"
+expect_contains "…and the cadence declared beside the progress path" "cadence=~6m." "$W8G_ROW"
+
+OUT8H=$(run_check_as "$OWN8" "$H8" "$R8" "ours-claims")
+expect_contains "P2 roster-sourced: claims section appears with no --claims flag" \
+  "-- claimed process (P2) --" "$OUT8H"
+expect_contains "P2 roster-sourced: the roster's pattern is shown" "$MARKER2" "$OUT8H"
+expect_contains "P2 roster-sourced: source=roster is shown" "source=roster" "$OUT8H"
+expect_contains "P2 roster-sourced: a live matching process reports live: yes" "live:     yes" "$OUT8H"
+# The cadence is DISPLAY-ONLY, beside the progress age it qualifies: "too quiet"
+# means quieter than the author's own declaration, and this command decides
+# nothing — it prints the declaration and the age and stops there.
+expect_contains "cadence: the declared cadence is displayed in the D-6 section" \
+  "cadence:" "$OUT8H"
+expect_contains "cadence: the value is the one the brief declared" "~6m." "$OUT8H"
+for verdict in "safe to stop" "recommend" "verdict" "you should" "too quiet" "overdue"; do
+  expect_absent "the cadence display carries no verdict: '$verdict'" "$verdict" "$OUT8H"
+done
+kill "$CLAIM_PID2" 2>/dev/null
+wait "$CLAIM_PID2" 2>/dev/null
+
+# --- (h) --claims grammar mirrors --progress: one path, never zero, never two ---
+OUT8J=$(run_check "$H8" "$R8" "ours-target" --claims); ST=$?
+expect_status "--claims with no pattern exits 1" 1 "$ST"
+expect_contains "--claims with no pattern prints usage" "Usage" "$OUT8J"
+
+OUT8K=$(run_check "$H8" "$R8" "ours-target" --claims "$MARKER" --claims "$MARKER"); ST=$?
+expect_status "a second --claims exits 1" 1 "$ST"
+expect_contains "a second --claims prints usage" "Usage" "$OUT8K"
+
+# ============================================================
+echo ""
+echo "=== Section 9: ownership is the OWNING SESSION DIRECTORY (slice 4/9, AC-6) ==="
+# ============================================================
+#
+# Three defects that only live operation could produce, each reproduced here on
+# the shape it really took (plan §"Step-5 live findings", record/w3-walk.md §2).
+#
+# What slice 4/5 keyed ownership on was ROSTER MEMBERSHIP: a row matched by
+# `agent_id=`, falling back to `name=`. Both arms failed live and in opposite
+# directions.
+#
+#   D1 (false OURS). Every roster row in a session that has not restarted since
+#      the recorder shipped is `status=intended` with an EMPTY `agent_id=`, so the
+#      id arm never matches and the NAME arm is the only one live. A name is not
+#      an identity — it is reused across waves — so a three-day-dead agent from
+#      another session was called OURS off this session's unconfirmed row, and the
+#      display then handed it THIS session's contracted progress path.
+#
+#   D2 (false FOREIGN). An agent this session really did launch, dispatched before
+#      the roster hook existed, has no row at all and classified FOREIGN-LIVE with
+#      "this session never launched it" — of an agent sitting in this session's own
+#      subagents directory. (The observation was run from inside a subagent, which
+#      changes nothing: CLAUDE_CODE_SESSION_ID inside a subagent is measured
+#      identical to the orchestrator's own id, so the observer's identity was never
+#      what this keyed on. WHO looked is recorded by the recorder's `observer=`.)
+#
+# The key is the metadata's own filing: an agent under <session>/subagents/ was
+# launched by <session>. The roster stays the CONTRACT source for a target already
+# established as ours, and a `confirmed` row still establishes ownership BY AGENT
+# ID — an id is unambiguous by construction. It is never a name-oracle again.
+#
+#   D3 (false LIVE). `foreign-live` claimed a liveness the check never established:
+#      it tests whether the owning session's transcript FILE EXISTS, and transcripts
+#      are never deleted — measured, all 57 sessions with subagents under this
+#      project read "live", including sessions finished days ago. The label is now
+#      `foreign`, and it says what was actually looked at.
+
+IFS='|' read -r H9 R9 S9 <<< "$(make_world w9)"
+OWN9="99999999-0000-0000-0000-000000000001"
+OTHER9="99999999-0000-0000-0000-000000000002"
+GONE9="99999999-0000-0000-0000-000000000003"
+mkdir -p "$R9/.bionic/tmp"
+echo "our progress" > "$R9/prog-9.progress"
+
+# --- (a) D1, the corpse collision: an UNCONFIRMED row (agent_id empty) and a
+# same-NAME agent under ANOTHER session's directory. The row must grant nothing. ---
+make_agent "$H9" "$S9" "$OTHER9" "acorpse-1111111111111111" "walker" "three days ago" >/dev/null
+{
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
+  printf 'roster-state/v1|status=intended|session=%s|name=walker|agent_id=|launched_at=2026-08-05T00:00:00Z|subagent_type=researcher|model=|deliverable=|duration=|progress=%s|absent=deliverable|tool_use_id=toolu_W\n' \
+    "$OWN9" "$R9/prog-9.progress"
+} > "$R9/.bionic/tmp/roster-${OWN9}.state"
+
+OUT9A=$(run_check_as "$OWN9" "$H9" "$R9" "walker")
+M9A=$(printf '%s\n' "$OUT9A" | grep '^stop-check-observation/')
+expect_absent "D1: an unconfirmed row does NOT make another session's same-named agent OURS" \
+  "Classification: OURS" "$OUT9A"
+expect_contains "D1: it classifies FOREIGN instead" "Classification: FOREIGN" "$OUT9A"
+expect_contains "D1: machine line carries classification=foreign" "|classification=foreign|" "$M9A"
+expect_absent "D1: no roster contract line is printed for a target that is not ours" \
+  "Contract (roster):" "$OUT9A"
+expect_contains "D1: the display never hands it THIS session's contracted progress path" \
+  "progress_source=none" "$M9A"
+expect_absent "D1: …and the progress path itself never reaches the machine line" \
+  "prog-9.progress" "$M9A"
+
+# --- (b) D2: an agent under THIS session's own subagents directory, with NO roster
+# row at all — the standing state for anything dispatched before the roster shipped. ---
+make_agent "$H9" "$S9" "$OWN9" "asibling-2222222222222222" "sibling" "stopped a while back" >/dev/null
+OUT9B=$(run_check_as "$OWN9" "$H9" "$R9" "sibling")
+M9B=$(printf '%s\n' "$OUT9B" | grep '^stop-check-observation/')
+expect_contains "D2: an unrostered agent under this session's OWN directory is OURS" \
+  "Classification: OURS" "$OUT9B"
+expect_contains "D2: machine line carries classification=ours" "|classification=ours|" "$M9B"
+expect_absent "D2: the refuted claim 'this session never launched it' is not printed" \
+  "never launched it" "$OUT9B"
+
+# --- (c) the roster still establishes ownership BY AGENT ID, across directories:
+# a CONFIRMED row is a fact this session wrote about its own launch. ---
+make_agent "$H9" "$S9" "$OTHER9" "aconfirmed-3333333333333333" "elsewhere" "hi" >/dev/null
+printf 'roster-state/v1|status=confirmed|session=%s|name=elsewhere|agent_id=aconfirmed-3333333333333333|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=%s|absent=|tool_use_id=toolu_C\n' \
+  "$OWN9" "$R9/prog-9.progress" >> "$R9/.bionic/tmp/roster-${OWN9}.state"
+OUT9C=$(run_check_as "$OWN9" "$H9" "$R9" "elsewhere")
+M9C=$(printf '%s\n' "$OUT9C" | grep '^stop-check-observation/')
+expect_contains "a CONFIRMED row keyed on agent id still establishes OURS" \
+  "Classification: OURS" "$OUT9C"
+expect_contains "…and its contract is sourced from that row" "progress_source=roster" "$M9C"
+
+# --- (d) D3: the liveness label says what was looked at. Driven on its OWN target,
+# foreign under the old rule AND the new one — no roster row of any kind names it,
+# and it sits under another session's directory. Asserting this on (a) instead would
+# be a fixture pinning away its own test: (a) resolves OURS before the fix, so every
+# absence below would pass for the wrong reason. ---
+make_agent "$H9" "$S9" "$OTHER9" "astranger-5555555555555555" "stranger" "hi" >/dev/null
+OUT9D=$(run_check_as "$OWN9" "$H9" "$R9" "stranger")
+M9D=$(printf '%s\n' "$OUT9D" | grep '^stop-check-observation/')
+expect_contains "D3: the target is not ours under either rule" "Classification: FOREIGN" "$OUT9D"
+expect_absent "D3: the retired token 'foreign-live' is gone from the machine line" \
+  "foreign-live" "$M9D"
+expect_absent "D3: …and from the rendered classification line" "FOREIGN-LIVE" "$OUT9D"
+expect_contains "D3: the FOREIGN line names the owning session's TRANSCRIPT, not the agent" \
+  "transcript is still on disk" "$OUT9D"
+expect_contains "D3: …and disclaims the liveness it cannot know" \
+  "does not mean the agent is still running" "$OUT9D"
+for claim in "still live" "is live" "is alive"; do
+  expect_absent "D3: the FOREIGN classification claims no agent liveness: '$claim'" \
+    "$claim" "$OUT9D"
+done
+
+# --- (e) DEAD HISTORY is unchanged in meaning: the owning session's transcript is
+# GONE, so nothing on disk still accounts for the agent. ---
+make_agent "$H9" "$S9" "$GONE9" "aghost-4444444444444444" "ghost" "old run" >/dev/null
+rm -f "$H9/.claude/projects/$S9/$GONE9.jsonl"
+OUT9E=$(run_check_as "$OWN9" "$H9" "$R9" "ghost")
+M9E=$(printf '%s\n' "$OUT9E" | grep '^stop-check-observation/')
+expect_contains "DEAD HISTORY still fires when the owning session's transcript is gone" \
+  "Classification: DEAD HISTORY" "$OUT9E"
+expect_contains "…and the machine line carries classification=dead-history" \
+  "|classification=dead-history|" "$M9E"
+
+# ============================================================
+echo ""
+echo "=== Section 10: six-axis review remediations (C-1/S-3 glob, C-2 confirmed-by-id) ==="
+# ============================================================
+
+IFS='|' read -r H10 R10 S10 <<< "$(make_world w10)"
+OWN10="10101010-0000-0000-0000-000000000001"
+FOREIGN10="10101010-0000-0000-0000-000000000002"
+mkdir -p "$R10/.bionic/tmp"
+
+# --- (a) C-1/S-3: a roster deliverable is never GLOB-EXPANDED against the cwd ---
+#
+# The roster's `deliverable=` is comma-joined and expanded with IFS=',' — and
+# setting IFS suppresses word splitting on other characters, never PATHNAME
+# expansion. A brief writing `Deliverables: docs/*.md` stores that literal
+# (ispath() accepts it, sanitize() does not strip `*`), and the unquoted
+# expansion then let whatever happened to sit in the OBSERVER'S CWD be reported
+# PRESENT and ride into the durable record as a confirmed deliverable. Repo
+# content deciding what an observation asserts is the §8 direction that matters
+# even when no wall opens: the human judgment this command exists to inform is
+# the thing being fooled.
+make_agent "$H10" "$S10" "$OWN10" "aours-1010101010101010" "glob-target" "working" >/dev/null
+mkdir -p "$R10/docs"
+echo "decoy a" > "$R10/docs/a.md"
+echo "decoy b" > "$R10/docs/b.md"
+{
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
+  printf 'roster-state/v1|status=confirmed|session=%s|name=glob-target|agent_id=aours-1010101010101010|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=docs/*.md|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_G\n' \
+    "$OWN10"
+} > "$R10/.bionic/tmp/roster-${OWN10}.state"
+
+OUT10A=$(run_check_as "$OWN10" "$H10" "$R10" "glob-target")
+M10A=$(printf '%s\n' "$OUT10A" | grep '^stop-check-observation/')
+expect_contains "C-1: the roster's literal pattern is reported as itself" "docs/*.md" "$OUT10A"
+expect_absent "C-1: a file merely sitting in the cwd is not reported PRESENT" \
+  "docs/a.md — PRESENT" "$OUT10A"
+expect_absent "C-1: …nor the second one" "docs/b.md — PRESENT" "$OUT10A"
+expect_contains "C-1: the unmatched literal is ABSENT, which is the honest answer" \
+  "docs/*.md — ABSENT" "$OUT10A"
+expect_status "C-1: the machine line carries exactly one deliverable state" \
+  "1" "$(printf '%s' "$M10A" | tr '|' '\n' | grep '^deliverables=' | tr ',' '\n' | grep -c .)"
+expect_absent "C-1: no cwd file rides into the durable record as a deliverable" \
+  "docs/a.md" "$M10A"
+
+# --- (b) C-2: OURS-by-roster-id keys on a CONFIRMED row, not merely a non-empty id ---
+#
+# Both surfaces stated the invariant as "a `confirmed` roster row still
+# establishes OURS, by agent id only" and enforced something weaker: any row
+# whose `agent_id=` is non-empty. What made that safe was a property of a
+# DIFFERENT file — hooks/dispatch-preflight.sh always emits `agent_id=` empty on
+# `intended` rows. The stated invariant and the enforced one differing is the
+# exact shape slice 4/9 was remediating, so it is enforced here.
+make_agent "$H10" "$S10" "$FOREIGN10" "aforeign-1010101010101010" "id-target" "working" >/dev/null
+printf 'roster-state/v1|status=intended|session=%s|name=other-name|agent_id=aforeign-1010101010101010|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_I\n' \
+  "$OWN10" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
+OUT10B=$(run_check_as "$OWN10" "$H10" "$R10" "id-target")
+expect_contains "C-2: an INTENDED row's id does not make a foreign agent ours" \
+  "Classification: FOREIGN" "$OUT10B"
+expect_absent "C-2: …and the OURS-by-id reason is not printed for it" \
+  "confirms it by agent id" "$OUT10B"
+
+# …while a CONFIRMED row's id still does, which is the invariant slice 4/9 kept.
+printf 'roster-state/v1|status=confirmed|session=%s|name=other-name|agent_id=aforeign-1010101010101010|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_I\n' \
+  "$OWN10" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
+OUT10C=$(run_check_as "$OWN10" "$H10" "$R10" "id-target")
+expect_contains "C-2: a CONFIRMED row's id still establishes OURS" \
+  "Classification: OURS" "$OUT10C"
+expect_contains "C-2: …naming the roster as the reason" "confirms it by agent id" "$OUT10C"
+
+# --- (c) C-2 regression guard: the PRE-RESTART world is untouched ---
+#
+# Every row in a session that has not restarted since the recorder shipped is
+# `status=intended` with an EMPTY `agent_id=`, so the by-id clause never fired
+# for them either way — their ownership rests on the 4/9 metadata-directory key
+# and their CONTRACT still comes from the row by name. Tightening the by-id
+# clause must not touch either, which is what this case pins.
+make_agent "$H10" "$S10" "$OWN10" "aours-9090909090909090" "prerestart" "working" >/dev/null
+echo "the deliverable" > "$R10/deliv-pre.md"
+printf 'roster-state/v1|status=intended|session=%s|name=prerestart|agent_id=|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=%s|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_P\n' \
+  "$OWN10" "$R10/deliv-pre.md" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
+OUT10D=$(run_check_as "$OWN10" "$H10" "$R10" "prerestart")
+M10D=$(printf '%s\n' "$OUT10D" | grep '^stop-check-observation/')
+expect_contains "C-2 regression: an unconfirmed row's own agent is still OURS by its directory" \
+  "Classification: OURS" "$OUT10D"
+expect_contains "C-2 regression: …by the directory key, not the roster" \
+  "subagents directory" "$OUT10D"
+expect_contains "C-2 regression: the contract still comes from the unconfirmed row" \
+  "deliverable_source=roster" "$M10D"
+
+# ============================================================
+echo ""
+echo "──────────────────────────────────────────────"
+echo "stop-check.sh: ${PASS}/${TOTAL} passed, ${FAIL} failed"
+[ "$FAIL" -eq 0 ]
