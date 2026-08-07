@@ -77,12 +77,16 @@
 # A second `arm` while the open entry's pid is LIVE is refused, naming that arming. This
 # enforcement lives in the script because the doctrine it enforces is the one the wave
 # exists to fix: monitors nobody could enumerate. A pid that is gone does not refuse — a
-# killed or crashed sweeper must never wedge the session.
+# killed or crashed sweeper must never wedge the session. An open entry whose pid cannot be
+# READ refuses too, in the other direction: it may be a live sweeper this script cannot see,
+# and the escape is the operator's (delete the ledger). Signalling stays fail-open over the
+# same entry — see the asymmetry note at warn_bad_pid.
 #
 # Exit codes:
 #   0 — arm delivered a finding, or was retired; retire completed; status found a live
 #       sweeper; ack recorded (ALWAYS, including a name no roster row carries)
-#   1 — arm refused because a live arming already exists; status found no live sweeper
+#   1 — arm refused because a live (or unreadable) arming already exists; status found no
+#       live sweeper, or could not tell (live=unknown)
 #   2 — usage error, or a refusal (a state path is a symbolic link, or is unwritable)
 #   3 — no session key; nothing read, nothing written
 #
@@ -317,9 +321,32 @@ read_open_arming() {
     ev="$(line_field "$line" event)"
     case "$ev" in
       arm)
-        OPEN_PID="$(line_field "$line" pid)"
-        OPEN_TICK="$(line_field "$line" tick)"
-        OPEN_AT="$(line_field "$line" at)"
+        # VALIDATE BEFORE BELIEVING, at the moment the value is read rather than after the
+        # replay. This value came out of a file in the repo's own .bionic/tmp — the
+        # directory the header's threat model names as repo-controlled — and it reaches
+        # `kill -0` below and `kill -TERM` in `retire`. In POSIX kill a NEGATIVE pid is a
+        # process GROUP and -1 is "every process the caller may signal", so an unvalidated
+        # `pid=-1` makes one `retire` a session-wide SIGTERM; 0 is the caller's own group
+        # and 1 is init. No adversary is required — any truncated or partial write that
+        # leaves a `-` in the field lands in the same place.
+        #
+        # An unreadable entry is REMEMBERED SEPARATELY and never allowed to overwrite a
+        # readable one. Validating after the replay instead let one corrupt line appended
+        # after a healthy one erase a live sweeper from every reader at once — the Step-6
+        # critic reproduced it: `status` denied a running sweeper, `arm` started a second
+        # over it, `retire` closed only the second, and the first survived unenumerable.
+        # Two open entries is not "the later one wins" when the later one cannot be read.
+        p="$(line_field "$line" pid)"
+        case "$p" in
+          ''|*[!0-9]*|0|1)
+            OPEN_PID_BAD="$p"
+            ;;
+          *)
+            OPEN_PID="$p"
+            OPEN_TICK="$(line_field "$line" tick)"
+            OPEN_AT="$(line_field "$line" at)"
+            ;;
+        esac
         ;;
       retire|exit)
         p="$(line_field "$line" pid)"
@@ -329,32 +356,35 @@ read_open_arming() {
         ;;
     esac
   done < "$LEDGER_FILE"
-
-  # VALIDATE BEFORE BELIEVING. This value came out of a file in the repo's own .bionic/tmp
-  # — the directory the header's threat model names as repo-controlled — and it reaches
-  # `kill -0` below and `kill -TERM` in `retire`. In POSIX kill a NEGATIVE pid is a process
-  # GROUP and -1 is "every process the caller may signal", so an unvalidated `pid=-1` makes
-  # one `retire` a session-wide SIGTERM; 0 is the caller's own group and 1 is init. No
-  # adversary is required — any truncated or partial write that leaves a `-` in the field
-  # lands in the same place. Rejecting everything that is not a plain integer above 1 makes
-  # both call sites safe by construction, at the cost of one comparison.
-  #
-  # A rejected entry is treated as NO open arming, never as a live one: the second-order
-  # damage of believing it is worse than the signal, because `status` would then report
-  # live=yes forever — `arm` refused permanently and the unarmed-dispatch nag silent, one
-  # bad byte both wedging the watcher and suppressing the warning about it.
-  case "$OPEN_PID" in
-    ''|*[!0-9]*|0|1) OPEN_PID_BAD="$OPEN_PID"; OPEN_PID=""; OPEN_TICK=""; OPEN_AT="" ;;
-  esac
+  # Note what CANNOT be closed: a close line can only name a pid, so an entry whose pid is
+  # unreadable is never matched by one. `OPEN_PID_BAD` therefore stands for the life of the
+  # file, and the only way out is the operator's — delete the ledger. That is the price of
+  # the asymmetry below, and it is charged in one direction only.
 }
 
+# WHAT A REJECTED ENTRY MEANS depends on which question is being asked, and getting that
+# wrong in either direction is a live defect this script has already had once:
+#
+#   signalling (retire)  FAIL-OPEN. Never `kill` a value that could not be validated —
+#                        `-1` alone is a session-wide SIGTERM. The bad value never reaches
+#                        a signal or a close line, so `retire` simply has nothing to do.
+#   arming (arm)         FAIL-CLOSED. Unreadable means "a sweeper MAY be live and this
+#                        script cannot see it", so a second is refused rather than stacked
+#                        over it. One sweeper per session is the invariant; an arm that
+#                        guesses "probably nothing is there" is how the invariant dies.
+#   answering (status)   NEITHER. It may not report not-live over an entry it cannot read;
+#                        the honest third answer is live=unknown, and it exits non-zero so
+#                        the dispatch nag WARNS (nothing is provably watching).
+#
 # Rejected, but never in silence — this script's doctrine is "named, never guessed", and a
 # damaged ledger is exactly the state an operator needs told rather than smoothed over.
 warn_bad_pid() {
   [ -n "$OPEN_PID_BAD" ] || return 0
-  say "the ledger's open arming carries an unusable pid (\"$OPEN_PID_BAD\"); it is ignored"
-  say "— nothing is treated as live and nothing was signalled. If $LEDGER_FILE is damaged,"
-  say "delete it: it is machine-local and safe to lose."
+  say "the ledger carries an open arming whose pid is unreadable (\"$OPEN_PID_BAD\"): it is"
+  say "never believed and never signalled, so a sweeper may be live for this session that"
+  say "this script cannot see. Arming is refused while it stands. Check for a stray sweeper"
+  say "(pgrep -f session-sweeper.sh), then delete $LEDGER_FILE — it is machine-local and"
+  say "safe to lose."
 }
 
 # A pid this shell can signal. Recycling is a theoretical false-positive and is accepted:
@@ -641,6 +671,18 @@ case "$VERB" in
         "$STATUS_SCHEMA" "$OPEN_PID" "$OPEN_TICK" "$OPEN_AT" "$SESSION_ID" "$ACKED_COUNT" "$LEDGER_FILE" "$FINDINGS_FILE"
       exit 0
     fi
+    # The third answer. Nothing readable is live, but an unreadable open entry might be —
+    # so this is not `live=no`, which is a claim about the world this script cannot support.
+    # Exit 1 all the same: not-provably-live is what the dispatch nag acts on, and warning
+    # over an unreadable ledger is the safe direction (silence would leave a session with
+    # nothing provably watching and nothing said about it).
+    if [ -z "$OPEN_PID" ] && [ -n "$OPEN_PID_BAD" ]; then
+      say "cannot tell whether a sweeper is live for this session: the ledger's open arming"
+      say "is unreadable. Resolve it before arming — see the note above."
+      printf '%s|live=unknown|pid=|tick=|armed_at=|session=%s|acked=%s|ledger=%s|findings=%s\n' \
+        "$STATUS_SCHEMA" "$SESSION_ID" "$ACKED_COUNT" "$LEDGER_FILE" "$FINDINGS_FILE"
+      exit 1
+    fi
     if [ -n "$OPEN_PID" ]; then
       say "the last arming (pid $OPEN_PID, armed $OPEN_AT) is no longer running; nothing is watching"
     else
@@ -731,6 +773,22 @@ case "$VERB" in
       die "One sweeper per session is the invariant this wave exists to restore, so a second"
       die "arming is refused rather than stacked. Retire the live one first:"
       die "  $RETIRE_COMMAND"
+      exit 1
+    fi
+
+    # FAIL-CLOSED over an entry this script cannot read. Nothing about the live case above
+    # can be established here — that is the whole content of the state — so the choice is
+    # between refusing an arm that may be unnecessary and starting a second sweeper over a
+    # live one that nothing can enumerate. The second is the failure this wave exists to
+    # end. No liveness test gates this: the script cannot distinguish a corrupt line with a
+    # live sweeper behind it from one with nothing behind it, so it refuses in both.
+    if [ -n "$OPEN_PID_BAD" ]; then
+      die "REFUSED — the ledger carries an open arming whose pid is unreadable (\"$OPEN_PID_BAD\")."
+      die "A sweeper may be live for this session and invisible to this script, so a second is"
+      die "not started over it. Confirm none is running, then delete the ledger and arm again:"
+      die "  pgrep -f session-sweeper.sh"
+      die "  rm $LEDGER_FILE"
+      die "  $ARM_COMMAND"
       exit 1
     fi
 

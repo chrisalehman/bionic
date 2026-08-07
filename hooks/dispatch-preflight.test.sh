@@ -982,6 +982,32 @@ RC_ARM=$( ( cd "$REPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER_SRC
 expect_status "agreement: arm over the live-pid fixture is REFUSED (exit 1)" "1" "$RC_ARM"
 kill -9 "$LIVE_PID" 2>/dev/null
 
+# ---- an UNREADABLE-pid arming: nothing is provably armed -> WARN (never silence) ----
+#
+# The Step-6 critic's F-1 state, from the nag's side. The sweeper answers `live=unknown`
+# here and exits 1, and that exit is what this nag reads — so the nag WARNs. That is the
+# safe direction and the deliberate one: nothing is provably watching this session, and a
+# nag that went quiet over a damaged ledger would hide exactly the state that needs saying.
+# The two readers still read one ledger through one parser; what differs is the ACTION each
+# takes on the third answer — the nag warns, arm refuses — which is the asymmetry
+# hooks/session-sweeper.sh's warn_bad_pid note records.
+REPO=$(make_repo r11e yes)
+write_attestation "$REPO" "$SID_A"
+write_ledger_arm "$REPO" "$SID_A" "-1"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "unreadable-pid ledger dispatch still passes (never blocks)" "0" "$GATE_ST"
+expect_contains "unreadable-pid ledger dispatch WARNs, never stays silent" "WARN" "$GATE_ERR"
+expect_contains "the nag names the exact arm command (unreadable-pid case)" \
+  "bash ~/.claude/hooks/session-sweeper.sh arm" "$GATE_ERR"
+
+# AGREEMENT-WITH-ASYMMETRY: over the identical fixture the sweeper's own arm REFUSES —
+# fail-closed where the nag is fail-toward-warning. Both are about the same unreadable
+# entry; neither pretends to know whether a sweeper is live.
+RC_ARM=$( ( cd "$REPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER_SRC" arm --tick 30 \
+              >"$SANDBOX/s11e-arm.out" 2>&1 ); echo $? )
+expect_status "agreement: arm over the unreadable-pid fixture is REFUSED (exit 1)" "1" "$RC_ARM"
+expect_contains "…naming the unreadable value" "unreadable" "$(cat "$SANDBOX/s11e-arm.out")"
+
 # ---- the nag never fires on a REFUSED dispatch (no attestation): nothing is about to launch ----
 REPO=$(make_repo r11d yes)
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"

@@ -659,8 +659,20 @@ section "Section 7: the ledger's pid is validated before it is believed (6-axis 
 # place, and the second-order damage is worse than the signal — `status` reports live=yes
 # forever, so `arm` refuses permanently and the unarmed-dispatch nag goes quiet.
 #
-# The three consequences are asserted for every rejected shape: status must report
-# not-live, arm must SUCCEED, and retire must neither signal nor journal a close.
+# The rejection is ASYMMETRIC, and the asymmetry is the whole of the Step-6 critic's F-1.
+# Rejecting symmetrically — the entry reading as "no open arming" for signalling AND for
+# arming AND for status alike — trades a fail-closed bug for a fail-open one: a corrupt
+# line appended after a healthy one erased a genuinely live sweeper from all three readers
+# at once, so `arm` started a second over it and `retire` closed only the second. Two live
+# sweepers, unenumerable, which is the defect class this wave exists to end. So:
+#   signalling  FAIL-OPEN   — `retire` never `kill`s a value it could not validate.
+#   arming      FAIL-CLOSED — an unreadable open entry means "a sweeper MAY be live",
+#                             and a second is refused rather than stacked over it.
+#   status      NEITHER     — it may not answer live=no over an entry it cannot read;
+#                             the third answer is live=unknown.
+# Asserted per rejected shape below: status reports live=unknown and exits non-zero (the
+# dispatch nag warns), arm REFUSES naming the escape, retire neither signals nor journals
+# a close — and deleting the ledger restores arming, which is the escape being real.
 #
 # RED evidence for this section is taken against a copy whose `kill -TERM` is neutered
 # (W4_SWEEPER_UNDER_TEST above). Running it against an unguarded sweeper would terminate
@@ -682,8 +694,9 @@ for BADPID in "-1" "-99999" "0" "1" "junk" "12x" " "; do
   plant_arm "$BADPID" "$LB"
 
   sweep "$RB" status
-  expect_eq "pid=[$BADPID]: status exits 1 (nothing is live)" "1" "$RC"
-  expect_contains "pid=[$BADPID]: status reports live=no" "live=no" "$OUT"
+  expect_eq "pid=[$BADPID]: status exits non-zero (nothing is PROVABLY live)" "1" "$RC"
+  expect_contains "pid=[$BADPID]: status answers live=unknown, never live=no" "live=unknown" "$OUT"
+  expect_absent "pid=[$BADPID]: status does not answer live=no over an unreadable entry" "live=no" "$OUT"
   expect_absent "pid=[$BADPID]: status never republishes the unusable pid" "pid=$BADPID|" "$OUT"
 
   sweep "$RB" retire
@@ -692,11 +705,67 @@ for BADPID in "-1" "-99999" "0" "1" "junk" "12x" " "; do
     "0" "$(grep -c 'event=retire' "$LB")"
   expect_contains "pid=[$BADPID]: retire says there was nothing to retire" "nothing to retire" "$OUT"
 
+  # FAIL-CLOSED: the script cannot tell this state from a live-sweeper one, so it refuses
+  # unconditionally — no live process is required anywhere for the refusal to be right.
+  sweep "$RB" arm --tick 30
+  expect_eq "pid=[$BADPID]: arm REFUSES over the unreadable entry (exit 1)" "1" "$RC"
+  expect_contains "pid=[$BADPID]: the refusal is named REFUSED" "REFUSED" "$OUT"
+  expect_contains "pid=[$BADPID]: the refusal names the unreadable value" \
+    "unreadable (\"$BADPID\")" "$OUT"
+  expect_contains "pid=[$BADPID]: the refusal names the escape (the ledger path)" "$LB" "$OUT"
+  expect_eq "pid=[$BADPID]: nothing was armed (the planted entry is the only one)" \
+    "1" "$(grep -c 'event=arm' "$LB")"
+
+  # …and the escape is REAL: the ledger is machine-local, so deleting it un-wedges arming.
+  rm -f "$LB"
   sweep_bg "$RB" "$TMPROOT/s7-$_bad.out" arm --tick 30; PB="$BGPID"
-  expect_true "pid=[$BADPID]: arm is NOT refused by the unusable entry" \
+  expect_true "pid=[$BADPID]: after deleting the ledger, arm succeeds" \
     wait_grep "pid=$PB" "$LB" 10
   sweep "$RB" retire; wait_exit "$PB" 15
 done
+
+# ---- F-2's truth-test: a REAL live sweeper the readers may never deny ----
+#
+# Every agreement test in this wave proves the three readers render ONE answer; none asked
+# whether that answer is TRUE of the world. In the critic's reproduction all three agreed
+# and all three were wrong. So: an actually-running sweeper, then the corrupt line appended
+# after its healthy one — the exact byte sequence a truncated write produces — and the
+# question is not "do the readers agree" but "is a live process still visible".
+R7F="$(make_repo s7-f1)"; new_roster "$R7F"
+L7F="$(ledger_of "$R7F")"
+sweep_bg "$R7F" "$TMPROOT/s7f.out" arm --tick 30; P7F="$BGPID"
+expect_true "a real sweeper is armed and ledgered" wait_grep "pid=$P7F" "$L7F" 10
+printf 'sweeper-ledger/v1|event=arm|at=2026-08-06T00:00:00Z|epoch=1780000000|pid=-1|tick=120|session=%s|rows=0|degraded=\n' \
+  "$SID" >> "$L7F"
+
+sweep "$R7F" status
+expect_true "F-1: the live sweeper is still running" alive "$P7F"
+expect_absent "F-1: status does NOT deny a live sweeper it can still see" "live=no" "$OUT"
+expect_contains "F-1: status still reports it live" "live=yes" "$OUT"
+expect_contains "F-1: …by its own well-formed pid" "pid=$P7F|" "$OUT"
+expect_contains "F-1: …and still names the corrupt entry" "unreadable (\"-1\")" "$OUT"
+
+sweep "$R7F" arm --tick 5
+expect_eq "F-1: a second arm is REFUSED (exit 1)" "1" "$RC"
+expect_contains "F-1: the refusal is named REFUSED" "REFUSED" "$OUT"
+
+sweep "$R7F" retire
+expect_eq "F-1: retire exits 0" "0" "$RC"
+expect_eq "F-1: retire journals exactly one close" "1" "$(grep -c 'event=retire' "$L7F")"
+expect_contains "F-1: …naming the live pid, not the unvalidated value" "pid=$P7F|" \
+  "$(grep 'event=retire' "$L7F")"
+expect_absent "F-1: nothing was signalled with the bad value" "pid=-1|session=$SID|by=retire" \
+  "$(grep 'event=retire' "$L7F")"
+expect_true "F-1: the real sweeper is actually gone" wait_exit "$P7F" 15
+
+# The bad entry outlives the retire it never named, and arming stays closed until the
+# operator takes the escape — an unreadable entry can never be proven closed.
+sweep "$R7F" arm --tick 30
+expect_eq "F-1: arming stays refused while the unreadable entry stands" "1" "$RC"
+rm -f "$L7F"
+sweep_bg "$R7F" "$TMPROOT/s7f2.out" arm --tick 30; P7F2="$BGPID"
+expect_true "F-1: deleting the ledger restores arming" wait_grep "pid=$P7F2" "$L7F" 10
+sweep "$R7F" retire; wait_exit "$P7F2" 15
 
 # The guard rejects unusable shapes ONLY: a well-formed pid still refuses a second arm,
 # so the fix cannot have quietly disabled the single-live-sweeper invariant it protects.
