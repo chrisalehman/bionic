@@ -59,9 +59,16 @@ PARTY_ER="${W1R_PARTY_ER:-$REPO_ROOT/hooks/execution-recorder.sh}"
 
 PROBE="$REPO_ROOT/hooks/preflight-probe.sh"
 OBSERVE="$REPO_ROOT/hooks/stop-check.sh"
+SWEEPER="$REPO_ROOT/hooks/session-sweeper.sh"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/w1r-agreement.XXXXXX")" && pwd -P)"
-trap 'rm -rf "$SANDBOX"' EXIT
+BG_PIDS=""
+cleanup() {
+  local p
+  for p in $BG_PIDS; do kill -9 "$p" 2>/dev/null; done
+  rm -rf "$SANDBOX"
+}
+trap cleanup EXIT
 export HOME="$SANDBOX/home"
 export CLAUDE_CONFIG_DIR="$SANDBOX/cfg"     # NOT $HOME/.claude — see the header
 mkdir -p "$CLAUDE_CONFIG_DIR" "$HOME/.claude"
@@ -639,6 +646,19 @@ expect_contains "the producer spells the identity key 'session_id='" "session_id
 expect_contains "the start gate reads that same key by name" "'^session_id='" "$(cat "$PARTY_DP")"
 
 # Consumer 1 — the start gate: the produced value passes; one character off refuses.
+# "passes in silence" (below) needs a genuinely LIVE session sweeper armed for this
+# session/repo, or slice 4/3's unarmed nag fires legitimately and breaks that claim.
+# `exec` matters: without it the ledger's own pid would name a throwaway subshell, not
+# this process, and the nag's liveness check would target the wrong pid.
+( cd "$IREPO" && exec env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" arm --tick 300 ) \
+  >"$SANDBOX/identity-sweeper.out" 2>&1 &
+ISWEEPER_PID=$!
+BG_PIDS="$BG_PIDS $ISWEEPER_PID"
+_i=0
+while [ ! -s "$IREPO/.bionic/tmp/sweeper-$SID_A.state" ] && [ "$_i" -lt 50 ]; do
+  sleep 0.1; _i=$((_i + 1))
+done
+
 OUT=$(mk_agent_payload "$SID_A" "$IREPO" | bash "$PARTY_DP" 2>&1); ST=$?
 expect_eq "start gate: the producer's own session passes" "0" "$ST"
 expect_eq "start gate: and passes in silence" "" "$OUT"
@@ -1429,6 +1449,132 @@ expect_contains "the writer spells the claims key" "|claims=" "$(cat "$PARTY_DP"
 expect_contains "the observation reads that same key" 'line_field "$ROSTER_ROW" claims' "$(cat "$OBSERVE")"
 expect_contains "the writer spells the cadence key" "|cadence=" "$(cat "$PARTY_DP")"
 expect_contains "the observation reads that same key" 'line_field "$ROSTER_ROW" cadence' "$(cat "$OBSERVE")"
+
+# ============================================================
+echo ""
+echo "=== I — DONE-DETECTION, and the primitives the sweeper says it copied (6-axis D-2, R-1) ==="
+# ============================================================
+#
+# hooks/session-sweeper.sh's own header declares four functions "DELIBERATELY DUPLICATED
+# from hooks/stop-check.sh, byte for byte… held together by the cross-gate agreement
+# suite". Until this section existed that last clause was false: nothing here compared a
+# single copy, so the comment named a guardrail the next reader would trust and the copies
+# could drift silently (6-axis R-1). Below it is true.
+#
+# The heavier half is D-2. "Is this roster row's deliverable delivered?" acquired a SECOND
+# owner when the sweeper shipped, and the two owners answered differently on the same
+# input — `[ -s <dir> ]` is TRUE for an empty directory, so the sweeper marked a row
+# SATISFIED (permanently exempt from watching) on a directory the stop gate reports as
+# "PRESENT as a directory, 0 file(s)". Both answers are asked here of the REAL scripts on
+# ONE set of fixtures, and compared to each other rather than only to a literal — which is
+# what goes red on the next divergence, whichever side moves.
+
+# --- I.1 the copied primitives ---
+#
+# BODIES are compared, not whole definitions: each file explains its copy in its own terms,
+# so the signature comments legitimately differ and only the executable text must not.
+fn_body() {  # <file> <function name> -> the function's body, signature and its comment stripped
+  awk -v n="$2" '
+    !f && index($0, n "()") == 1 {
+      f = 1; line = $0
+      sub(/^[^{]*\{/, "", line)
+      sub(/^[[:space:]]*#.*$/, "", line)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+      if (line != "") print line
+      if (line ~ /\}$/) exit
+      next
+    }
+    f { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; if ($0 == "}") exit }
+  ' "$1"
+}
+
+expect_eq "the extractor returns a body at all (this section is not vacuous)" "yes" \
+  "$([ -n "$(fn_body "$SWEEPER" line_field)" ] && echo yes || echo no)"
+for _fn in file_mtime line_field claims_live; do
+  expect_eq "the sweeper's ${_fn}() is the stop gate's, body for body" \
+    "$(fn_body "$OBSERVE" "$_fn")" "$(fn_body "$SWEEPER" "$_fn")"
+done
+# Same body, different name: the sweeper normalizes its findings exactly as the stop gate
+# normalizes its machine line, and says so in its comment.
+expect_eq "the sweeper's clean() is the stop gate's mline_value(), body for body" \
+  "$(fn_body "$OBSERVE" mline_value)" "$(fn_body "$SWEEPER" clean)"
+
+# --- I.2 done-detection: one concept, two implementations, one answer ---
+
+DREPO=$(new_repo "done-detection")
+DSLUG=$(printf '%s' "$DREPO" | sed 's/[^a-zA-Z0-9]/-/g')
+DPROJ="$CLAUDE_CONFIG_DIR/projects/$DSLUG"
+mkdir -p "$DPROJ/$SID_A/subagents"
+printf '{}\n' > "$DPROJ/$SID_A.jsonl"
+plant "$DPROJ/$SID_A/subagents" "adeliv-2222222222222222" "deliv"
+
+DFX="$DREPO/deliv"
+mkdir -p "$DFX/empty-dir" "$DFX/full-dir"
+: > "$DFX/empty-file.md"
+echo "the report"   > "$DFX/full-file.md"
+echo "the report"   > "$DFX/full-dir/one.md"
+echo "the report"   > "$DREPO/relative-target.md"
+D_LAUNCHED=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+  || date -u -d "-3600 seconds" +%Y-%m-%dT%H:%M:%SZ)
+
+# The stop gate's answer, read off the evidence it prints for a human rather than off a
+# reimplementation of its branches here.
+sc_answer() {  # <path as typed> -> delivered|not-delivered
+  local out
+  out=$( cd "$DREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" deliv "$1" 2>&1 )
+  case "$out" in
+    *"${1} — PRESENT as a directory, 0 file(s)"*) echo not-delivered ;;
+    *"${1} — PRESENT as a directory,"*)           echo delivered ;;
+    *"${1} — PRESENT but EMPTY"*)                 echo not-delivered ;;
+    *"${1} — PRESENT,"*)                          echo delivered ;;
+    *"${1} — ABSENT"*)                            echo not-delivered ;;
+    *) echo "other" ;;
+  esac
+}
+
+# The sweeper's answer, read off the behavior the answer CONTROLS: a satisfied row is
+# dropped from watching and never woken on, so a sweeper still alive after its tick has
+# answered "delivered", and one that exited on an overdue finding has answered "not".
+sw_answer() {  # <deliverable value> -> delivered|not-delivered
+  local rf="$DREPO/.bionic/tmp/roster-$SID_A.state" pid i=0
+  mkdir -p "$DREPO/.bionic/tmp"
+  rm -f "$rf" "$DREPO/.bionic/tmp/sweeper-$SID_A.state" \
+        "$DREPO/.bionic/tmp/sweeper-$SID_A-findings.log"
+  printf 'roster-state/v1|status=confirmed|session=%s|name=deliv|agent_id=adeliv-2222222222222222|launched_at=%s|subagent_type=implementor|model=opus|deliverable=%s|duration=1 minute|progress=|claims=|cadence=|absent=|tool_use_id=toolu_01DELIV\n' \
+    "$SID_A" "$D_LAUNCHED" "$1" > "$rf"
+  ( cd "$DREPO" && exec env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" arm --tick 1 ) \
+    >/dev/null 2>&1 &
+  pid=$!; BG_PIDS="$BG_PIDS $pid"
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
+  if kill -0 "$pid" 2>/dev/null; then
+    ( cd "$DREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" retire ) >/dev/null 2>&1
+    wait "$pid" 2>/dev/null
+    echo delivered
+  else
+    wait "$pid" 2>/dev/null
+    echo not-delivered
+  fi
+}
+
+agree_on() {  # <label> <path as typed> <the right answer>
+  local sc sw
+  sc=$(sc_answer "$2"); sw=$(sw_answer "$2")
+  expect_eq "$1: the stop gate answers $3" "$3" "$sc"
+  expect_eq "$1: the sweeper gives the stop gate's answer" "$sc" "$sw"
+}
+
+agree_on "a written file"        "$DFX/full-file.md"  delivered
+agree_on "an empty file"         "$DFX/empty-file.md" not-delivered
+agree_on "an absent path"        "$DFX/never.md"      not-delivered
+agree_on "an EMPTY directory"    "$DFX/empty-dir"     not-delivered
+agree_on "a populated directory" "$DFX/full-dir"      delivered
+# The one DELIBERATE divergence, pinned rather than hidden. A relative deliverable is the
+# REPO's to the sweeper — armed once as a background job, it outlives whatever directory it
+# was armed from, so a cwd-relative reading would make one roster row mean two things — and
+# the typed cwd's to the stop gate, which an operator runs while standing somewhere on
+# purpose. The two coincide exactly when that somewhere is the repo root, which is where
+# this case asks the question and where the roster's own paths are written from.
+agree_on "a repo-relative path, asked from the repo root" "relative-target.md" delivered
 
 # ============================================================
 echo ""
