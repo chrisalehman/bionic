@@ -1556,56 +1556,87 @@ if ! command -v jq &>/dev/null; then
   step_fail prereq "jq unavailable — settings.json hooks/env/statusline not configured" "brew install jq, then re-run ./claude-bootstrap.sh"
 fi
 
-# Build the set of hook files present in the repo (canonical source of truth).
-declare -a repo_hooks=()
-for hook in "${SCRIPT_DIR}"/hooks/*.sh; do
-  [ -f "$hook" ] || continue
-  [[ "$(basename "$hook")" == *.test.sh ]] && continue
-  repo_hooks+=("$(basename "$hook")")
-done
+# Installs every hooks/*.sh in the repo to ~/.claude/hooks/, removes any
+# installed file the repo no longer has (the repo is canonical — this generic,
+# name-agnostic cleanup is what retires a renamed hook's orphaned old-name
+# file, e.g. epic-15's kill-guard.sh/kill-check.sh → stop-guard.sh/
+# stop-check.sh, with no per-name code anywhere), and writes a manifest of
+# what this run installed so reset can attribute even if the repo changes
+# between install and reset. Sets $removed_hooks for the summary line below.
+# Factored into a function (mirrors do_install_agents) so the installer test
+# harness can extract and run it against a sandboxed SCRIPT_DIR/HOME.
+do_install_hooks() {
+  mkdir -p ~/.claude/hooks
 
-# Remove any installed hooks that no longer exist in the repo. The repo is
-# canonical — orphaned hooks in ~/.claude/hooks/ are deletion candidates from
-# prior refactors and must be cleaned up so they don't fire stale logic.
-removed_hooks=0
-for installed in ~/.claude/hooks/*.sh; do
-  [ -f "$installed" ] || continue
-  base="$(basename "$installed")"
-  found=0
-  for r in ${repo_hooks[@]+"${repo_hooks[@]}"}; do
-    if [ "$base" = "$r" ]; then found=1; break; fi
+  # Build the set of hook files present in the repo (canonical source of truth).
+  declare -a repo_hooks=()
+  for hook in "${SCRIPT_DIR}"/hooks/*.sh; do
+    [ -f "$hook" ] || continue
+    [[ "$(basename "$hook")" == *.test.sh ]] && continue
+    repo_hooks+=("$(basename "$hook")")
   done
-  if [ "$found" -eq 0 ]; then
-    rm -f "$installed"
-    echo "  ${base}... ✗ removed (no longer in repo)"
-    removed_hooks=$((removed_hooks + 1))
-  fi
-done
 
-# Install current hooks from the repo.
-for hook in "${SCRIPT_DIR}"/hooks/*.sh; do
-  [ -f "$hook" ] || continue
-  [[ "$(basename "$hook")" == *.test.sh ]] && continue
-  name="$(basename "$hook")"
-  step_start "$name"
-  if cp "$hook" ~/.claude/hooks/"$name" && chmod +x ~/.claude/hooks/"$name"; then
-    step_ok fs
-  else
-    step_fail fs "could not install hook to ~/.claude/hooks/${name}"
-  fi
-done
+  # Remove any installed hooks that no longer exist in the repo. The repo is
+  # canonical — orphaned hooks in ~/.claude/hooks/ are deletion candidates from
+  # prior refactors and must be cleaned up so they don't fire stale logic.
+  removed_hooks=0
+  for installed in ~/.claude/hooks/*.sh; do
+    [ -f "$installed" ] || continue
+    base="$(basename "$installed")"
+    found=0
+    for r in ${repo_hooks[@]+"${repo_hooks[@]}"}; do
+      if [ "$base" = "$r" ]; then found=1; break; fi
+    done
+    if [ "$found" -eq 0 ]; then
+      rm -f "$installed"
+      echo "  ${base}... ✗ removed (no longer in repo)"
+      removed_hooks=$((removed_hooks + 1))
+    fi
+  done
 
-# Manifest of bionic-owned hook files, so reset can attribute and remove them
-# even if the repo's hooks/ contents change between install and reset.
-{ for r in ${repo_hooks[@]+"${repo_hooks[@]}"}; do echo "$r"; done; } > ~/.claude/hooks/.bionic-manifest || true
+  # Install current hooks from the repo.
+  for hook in "${SCRIPT_DIR}"/hooks/*.sh; do
+    [ -f "$hook" ] || continue
+    [[ "$(basename "$hook")" == *.test.sh ]] && continue
+    name="$(basename "$hook")"
+    step_start "$name"
+    if cp "$hook" ~/.claude/hooks/"$name" && chmod +x ~/.claude/hooks/"$name"; then
+      step_ok fs
+    else
+      step_fail fs "could not install hook to ~/.claude/hooks/${name}"
+    fi
+  done
+
+  # Manifest of bionic-owned hook files, so reset can attribute and remove them
+  # even if the repo's hooks/ contents change between install and reset.
+  { for r in ${repo_hooks[@]+"${repo_hooks[@]}"}; do echo "$r"; done; } > ~/.claude/hooks/.bionic-manifest || true
+  return 0
+}
+do_install_hooks
 
 # Define all managed hooks (event|matcher_or_empty|command triples).
-# PreToolUse keys off Bash/Write/Edit matchers; Stop takes no matcher.
+# PreToolUse keys off the tool name (Bash/Write/Edit/Agent/TaskStop); Stop
+# takes no matcher. preflight-probe.sh and stop-check.sh are installed above
+# (hooks/*.sh) but deliberately absent here — unregistered companion scripts,
+# run by hand.
+#
+# execution-recorder.sh is the machine's FIRST PostToolUse registration, and it
+# registers twice — one script, two arms (epic-15 wave-03 slice 4/4): the Bash
+# arm turns stop-check.sh's printed machine line into an observation record, the
+# Agent arm completes the session roster's launch row once a dispatch has
+# actually spawned. Both facts are claims that something HAPPENED, which is why
+# neither can be recorded from PreToolUse; stop-guard.sh's retired Bash arm
+# recorded observations before the command ran and could never know whether it
+# did (design/orchestrator-subagent-coordination.md §4, spec AC-3).
 MANAGED_HOOKS=(
   "PreToolUse|Bash|~/.claude/hooks/protect-main.sh"
   "PreToolUse|Bash|~/.claude/hooks/protect-database.sh"
   "PreToolUse|Bash|~/.claude/hooks/canonical-sdlc-evidence-gate.sh"
   "PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh"
+  "PreToolUse|TaskStop|~/.claude/hooks/stop-guard.sh"
+  "PreToolUse|Agent|~/.claude/hooks/dispatch-preflight.sh"
+  "PostToolUse|Bash|~/.claude/hooks/execution-recorder.sh"
+  "PostToolUse|Agent|~/.claude/hooks/execution-recorder.sh"
   "PreToolUse|Write|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "Stop||~/.claude/hooks/context-spend.sh"

@@ -278,6 +278,39 @@ else
   fail "meta: SKILL-side axis-block drift NOT detected"
 fi
 
+# ===== Section 7: REPORT-CONTRACT duty block ×6, byte-identical =====
+echo "== Section 7: REPORT-CONTRACT duty block =="
+RC_FILES="auditor critic implementor researcher senior-implementor test-runner"
+for r in $RC_FILES; do
+  if [ -n "$(marker_block "$AGENTS/$r.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END)" ]; then
+    pass "$r.md: REPORT-CONTRACT block present"
+  else
+    fail "$r.md: REPORT-CONTRACT block missing/empty"
+  fi
+done
+
+# Presence + mutual identity alone cannot see WHAT the block says: six copies
+# emptied of meaning in unison are byte-identical and non-empty, and the suite
+# stays green (Step-6 critic reproduced this by inverting the core sentence in
+# all six files). One literal on the reference copy is enough — byte-identity
+# propagates the bind to the other five.
+if marker_block "$AGENTS/auditor.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END \
+   | grep -qF "carries the command that proves it and that command's output, or the explicit"; then
+  pass "auditor.md: REPORT-CONTRACT states the proof-or-label rule (literal pinned)"
+else
+  fail "auditor.md: REPORT-CONTRACT core sentence missing or reworded"
+fi
+
+for r in $RC_FILES; do
+  [ "$r" = "auditor" ] && continue
+  if diff <(marker_block "$AGENTS/auditor.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END) \
+          <(marker_block "$AGENTS/$r.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END) >/dev/null 2>&1; then
+    pass "$r.md: REPORT-CONTRACT byte-identical to auditor.md"
+  else
+    fail "$r.md: REPORT-CONTRACT drifted from auditor.md" "$(diff <(marker_block "$AGENTS/auditor.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END) <(marker_block "$AGENTS/$r.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END))"
+  fi
+done
+
 # ---------- summary ----------
 echo "──────────────────────────────────────────────"
 echo "agent-roles: ${PASS} passed, ${FAIL} failed"
