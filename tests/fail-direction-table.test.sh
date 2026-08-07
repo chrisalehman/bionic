@@ -34,10 +34,17 @@ STOP_GATE="${W1R_PARTY_SG:-$REPO_ROOT/hooks/stop-guard.sh}"
 OBSERVER="$REPO_ROOT/hooks/stop-check.sh"
 RECORDER="${W1R_PARTY_ER:-$REPO_ROOT/hooks/execution-recorder.sh}"
 PROBE="${W1R_PARTY_PROBE:-$REPO_ROOT/hooks/preflight-probe.sh}"
+SWEEPER="$REPO_ROOT/hooks/session-sweeper.sh"
 DESIGN="$REPO_ROOT/design/orchestrator-subagent-coordination.md"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/w1r-faildir.XXXXXX")" && pwd -P)"
-trap 'rm -rf "$SANDBOX"' EXIT
+BG_PIDS=""
+cleanup() {
+  local p
+  for p in $BG_PIDS; do kill -9 "$p" 2>/dev/null; done
+  rm -rf "$SANDBOX"
+}
+trap cleanup EXIT
 export HOME="$SANDBOX/home"
 export CLAUDE_CONFIG_DIR="$SANDBOX/home/.claude"
 mkdir -p "$CLAUDE_CONFIG_DIR" "$SANDBOX/plain" "$SANDBOX/stub" "$SANDBOX/nocred/.claude"
@@ -174,6 +181,20 @@ IFS='|' read -r T_REPO T_TR T_SUB <<< "$(make_world attested yes)"
 mkdir -p "$T_REPO/.bionic/tmp"
 printf '# attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\n' "$SID_A" \
   > "$T_REPO/.bionic/tmp/preflight-$SID_A.state"
+
+# `start|attested` (below) is THE POSITIVE PAIR and its §7 direction is literal silence on
+# both streams — so THIS world needs a genuinely LIVE session sweeper armed, or slice 4/3's
+# unarmed nag (hooks/dispatch-preflight.sh) fires legitimately and breaks that claim. `exec`
+# matters: without it the ledger's own pid would name a throwaway subshell, not this
+# process, and the liveness check the nag performs would target the wrong pid.
+( cd "$T_REPO" && exec env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" arm --tick 300 ) \
+  >"$SANDBOX/attested-sweeper.out" 2>&1 &
+T_SWEEPER_PID=$!
+BG_PIDS="$BG_PIDS $T_SWEEPER_PID"
+_i=0
+while [ ! -s "$T_REPO/.bionic/tmp/sweeper-$SID_A.state" ] && [ "$_i" -lt 50 ]; do
+  sleep 0.1; _i=$((_i + 1))
+done
 
 # An observed active world — the stop gate's positive pair. The observation is
 # RECORDED BY THE REAL WRITER, never hand-written: the row must be discharged by

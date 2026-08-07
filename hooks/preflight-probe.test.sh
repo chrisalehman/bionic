@@ -21,11 +21,15 @@
 set -uo pipefail
 
 PROBE="$(cd "$(dirname "$0")" && pwd)/preflight-probe.sh"
+SWEEPER_SRC="$(cd "$(dirname "$0")" && pwd)/session-sweeper.sh"
 TMPROOT="$(mktemp -d)"
 OUT="$TMPROOT/stdout"; ERR="$TMPROOT/stderr"
 PASS=0; FAIL=0; TOTAL=0
+BG_PIDS=""
 
 cleanup() {
+  local p
+  for p in $BG_PIDS; do kill -9 "$p" 2>/dev/null; done
   # sandboxes may contain deliberately unwritable dirs (repo-not-writable case)
   chmod -R u+rwX "$TMPROOT" 2>/dev/null
   rm -rf "$TMPROOT"
@@ -69,6 +73,9 @@ expect_match() {  # <label> <regex> <file>
 expect_nomatch() {  # <label> <regex> <file>
   if [ ! -f "$3" ]; then bad "$1" "file absent: $3"; return; fi
   if grep -qE "$2" "$3"; then bad "$1" "unexpected match for /$2/"; else ok "$1"; fi
+}
+expect_contains() {  # <label> <needle> <haystack-string>
+  case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "no [$2] in: $(printf '%s' "$3" | head -c 200)" ;; esac
 }
 
 section() { printf '\n=== %s ===\n' "$1"; }
@@ -114,6 +121,18 @@ stub_dir() {  # <sandbox> <security-exit-code> -> echoes a PATH prefix with a `s
   mkdir -p "$d"
   printf '#!/bin/bash\nexit %s\n' "$rc" > "$d/security"
   chmod +x "$d/security"
+  printf '%s' "$d:$PATH"
+}
+
+claude_stub_dir() {  # <sandbox> <version> -> echoes a PATH prefix with a `claude` stub
+                      # reporting `--version` as "<version> (Claude Code)"
+  local sbx="$1"; local ver="$2"; local d="$sbx/claudestub"
+  mkdir -p "$d"
+  cat > "$d/claude" <<EOF
+#!/bin/bash
+echo "$ver (Claude Code)"
+EOF
+  chmod +x "$d/claude"
   printf '%s' "$d:$PATH"
 }
 
@@ -577,6 +596,138 @@ expect_eq "documented exit codes == reachable exit codes (A5)" "$_doc_codes" "$_
 expect_nomatch "the producer performs no plan-directory walk (A7)" 'docs/plans' "$PROBE"
 
 expect_true "script is bash and runs under set -u" grep -q '^set -u' "$PROBE"
+
+# ============================================================
+section "S9 — payload-shape canary: CLI version pin for the D-3 agent_id discriminator (w3 slice 4/4)"
+# ============================================================
+#
+# The D-3 same-actor wall reads observer identity from the undocumented top-level agent_id
+# field on subagent-invoked PostToolUse|Bash payloads (validated
+# .bionic/docs/record/w3-slice1-posttooluse-probe.md and
+# .bionic/docs/record/w3-canary-validation.md). PAYLOAD_SHAPE_VALIDATED_CLI pins the CLI
+# version that validation was last run against; this probe compares it to the installed
+# `claude --version` and warns — never blocks, never touches the attestation — on drift.
+
+PIN="$(grep -m1 '^PAYLOAD_SHAPE_VALIDATED_CLI=' "$PROBE" | sed -E 's/^PAYLOAD_SHAPE_VALIDATED_CLI="?([^"]*)"?.*/\1/')"
+expect_true "the script pins a validated CLI version" [ -n "$PIN" ]
+
+# matching pin: the installed CLI reports exactly the pinned version -> silent
+SBX="$(mk_sandbox)"
+rc="$(run_probe "$SBX" PATH="$(claude_stub_dir "$SBX" "$PIN")")"
+expect_eq "matching pin still exits 0" "0" "$rc"
+expect_true "matching pin still writes the attestation" [ -f "$SBX/repo/$STATE_REL" ]
+expect_nomatch "matching pin prints no canary warning" 'unvalidated' "$OUT"
+expect_nomatch "matching pin prints no canary warning (stderr)" 'unvalidated' "$ERR"
+
+# mismatched pin: the installed CLI reports a different version -> one warn-only line naming
+# the risk and the fix, exit code and attestation unaffected
+SBX="$(mk_sandbox)"
+rc="$(run_probe "$SBX" PATH="$(claude_stub_dir "$SBX" "0.0.1")")"
+expect_eq "mismatched pin still exits 0 (warn only)" "0" "$rc"
+expect_true "mismatched pin still writes the attestation" [ -f "$SBX/repo/$STATE_REL" ]
+if grep -qE 'WARN.*unvalidated.*0\.0\.1' "$OUT" "$ERR" 2>/dev/null; then
+  ok "mismatched pin warns, naming the installed version"
+else
+  bad "mismatched pin warns, naming the installed version"
+fi
+if grep -qE 'agent_id.*D-3' "$OUT" "$ERR" 2>/dev/null; then
+  ok "mismatched-pin warning names the D-3 risk"
+else
+  bad "mismatched-pin warning names the D-3 risk"
+fi
+if grep -qE 'w3-slice1-posttooluse-probe\.md' "$OUT" "$ERR" 2>/dev/null; then
+  ok "mismatched-pin warning names the fix (re-run the probe method)"
+else
+  bad "mismatched-pin warning names the fix (re-run the probe method)"
+fi
+# exactly one warning line, never more
+_warncount="$(grep -cE 'unvalidated' "$OUT" "$ERR" 2>/dev/null | awk -F: '{s+=$NF} END{print s+0}')"
+expect_eq "mismatched pin prints exactly one warn line" "1" "$_warncount"
+
+# the attestation content itself is unaffected by a mismatched pin (no new field, no change
+# to the fields the start gate depends on)
+expect_match "mismatched-pin attestation is still keyed to this session" "^session_id=$SESSION_A\$" "$SBX/repo/$STATE_REL"
+expect_nomatch "the canary warning is never written INTO the attestation" 'unvalidated' "$SBX/repo/$STATE_REL"
+
+# a blocking failure alongside a mismatched pin still exits non-zero and writes nothing —
+# the canary is warn-only and never promotes or masks a real blocking failure
+SBX="$(mk_sandbox)"; rm -f "$SBX/config/.credentials.json"
+mkdir -p "$SBX/combostub"
+cat > "$SBX/combostub/claude" <<EOF
+#!/bin/bash
+echo "0.0.1 (Claude Code)"
+EOF
+chmod +x "$SBX/combostub/claude"
+printf '#!/bin/bash\nexit 1\n' > "$SBX/combostub/security"
+chmod +x "$SBX/combostub/security"
+rc="$(run_probe "$SBX" PATH="$SBX/combostub:$PATH")"
+expect_eq "mismatched pin does not mask a real blocking failure" "1" "$rc"
+expect_false "mismatched pin does not cause a spurious attestation on blocking failure" [ -e "$SBX/repo/$STATE_REL" ]
+
+# ============================================================
+section "S10 — sweeper arm line: print-only END-OF-RUN ACTION LINE (slice 4/3, AC-6)"
+# ============================================================
+#
+# spec §Component boundaries: "hooks/preflight-probe.sh (modified): after the roster-coverage
+# context probe, prints the arm command as an action line. Print-only — the probe never spawns
+# the sweeper (a process it spawned would be untracked by the harness and its exit-wake lost,
+# design D2)." Ownership table: the arm command string's SSoT is session-sweeper.sh; this probe
+# only renders it, and the printed command must invoke the INSTALLED sibling — the hooks
+# directory is derived from THIS script's own location ($0), never hardcoded.
+
+SBX="$(mk_sandbox)"
+rc="$(run_probe "$SBX")"
+expect_eq "a clean run with the arm line still exits 0" "0" "$rc"
+ARMLINE="$(grep -m1 '^preflight: ARM: ' "$OUT" | sed 's/^preflight: ARM: //')"
+expect_true "the probe prints an ARM: action line on stdout" [ -n "$ARMLINE" ]
+expect_contains "the arm line invokes session-sweeper.sh's arm verb" "session-sweeper.sh arm" "$ARMLINE"
+
+# static pin: the hooks directory in the printed line is DERIVED from the script's own
+# location (dirname "$0"), never a hardcoded ~/.claude path — this is what lets the same
+# line work whether the probe runs from a repo checkout or an installed copy.
+expect_true "the script derives its hooks dir from its own location, not a hardcoded path" \
+  grep -qE 'dirname "\$0"' "$PROBE"
+expect_nomatch "the arm line source does not hardcode ~/.claude/hooks" \
+  'ARM: bash ~/\.claude/hooks' "$PROBE"
+
+# the printed command actually names the SIBLING session-sweeper.sh sitting beside the probe
+# itself — proven by pointing at the sandbox's OWN copy of both scripts rather than trusting
+# string shape alone.
+SBX2="$(mk_sandbox)"
+mkdir -p "$SBX2/hooks-copy"
+cp "$PROBE" "$SBX2/hooks-copy/preflight-probe.sh"
+cp "$SWEEPER_SRC" "$SBX2/hooks-copy/session-sweeper.sh"
+chmod +x "$SBX2/hooks-copy/preflight-probe.sh" "$SBX2/hooks-copy/session-sweeper.sh"
+rc="$( ( cd "$SBX2/repo" && env -u ANTHROPIC_API_KEY \
+          HOME="$SBX2/home" CLAUDE_CONFIG_DIR="$SBX2/config" \
+          CLAUDE_CODE_SESSION_ID="$SESSION_A" \
+          bash "$SBX2/hooks-copy/preflight-probe.sh" ) >"$OUT" 2>"$ERR"; echo $? )"
+expect_eq "the copied-probe run still exits 0" "0" "$rc"
+ARMLINE2="$(grep -m1 '^preflight: ARM: ' "$OUT" | sed 's/^preflight: ARM: //')"
+expect_contains "the copy's arm line points at ITS OWN sibling copy" \
+  "$SBX2/hooks-copy/session-sweeper.sh" "$ARMLINE2"
+
+# the printed command is genuinely runnable: backgrounding it arms a real sweeper against
+# the sandbox repo, provable by the ledger it writes; retired immediately after. `exec`
+# matters — without it, the subshell's pid and the sweeper's own $$ (the pid the ledger
+# records) would differ, same reason session-sweeper.test.sh's sweep_bg uses it.
+( cd "$SBX2/repo" && exec env CLAUDE_CODE_SESSION_ID="$SESSION_A" $ARMLINE2 ) \
+  >"$TMPROOT/armrun.out" 2>&1 &
+ARMPID=$!
+BG_PIDS="$BG_PIDS $ARMPID"
+_i=0
+LEDGER="$SBX2/repo/.bionic/tmp/sweeper-${SESSION_A}.state"
+while [ ! -s "$LEDGER" ] && [ "$_i" -lt 50 ]; do sleep 0.1; _i=$((_i+1)); done
+expect_true "the printed ARM command, run for real, produces a sweeper ledger" [ -s "$LEDGER" ]
+expect_match "the ledger records a live arm event" '^sweeper-ledger/v1\|event=arm\|' "$LEDGER"
+( cd "$SBX2/repo" && env CLAUDE_CODE_SESSION_ID="$SESSION_A" \
+    bash "$SBX2/hooks-copy/session-sweeper.sh" retire ) >/dev/null 2>&1
+kill -9 "$ARMPID" 2>/dev/null
+
+# the probe never spawns the sweeper itself (D2): no process substring naming the sweeper
+# script appears as a background/exec invocation in the probe's own source.
+expect_nomatch "the probe source never execs or backgrounds session-sweeper.sh (D2)" \
+  'session-sweeper\.sh[^"]*&|exec[^\n]*session-sweeper\.sh' "$PROBE"
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'
