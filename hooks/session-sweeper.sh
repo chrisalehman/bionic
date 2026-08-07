@@ -307,6 +307,23 @@ ledger_write() {  # <line> — append-only; the header is written once
   printf '%s\n' "$1" >> "$LEDGER_FILE" 2>/dev/null
 }
 
+# How many ledger lines carry a pattern. Every count goes through here so the answer is ONE
+# LINE BY CONSTRUCTION, because `grep -c` is a trap for the obvious idiom: it prints its
+# count on stdout AND exits 1 when that count is zero, so a `|| printf 0` fallback appends a
+# second line to an answer grep already gave. The resulting two-line "0" reaches an integer
+# test, which rejects it on stderr while the surrounding `if` reads false and the verb
+# carries on — a live ack succeeded and complained at the same time (2026-08-07). Here
+# grep's exit status is discarded and only an all-digits answer is believed; an unreadable
+# file prints nothing, which is zero of them.
+ledger_count() {  # <pattern> -> a single integer, on stdout
+  local n
+  n="$(grep -c -- "$1" "$LEDGER_FILE" 2>/dev/null)"
+  case "$n" in
+    ''|*[!0-9]*) n=0 ;;
+  esac
+  printf '%s' "$n"
+}
+
 # The one question the ledger answers, asked by three readers (arm's refusal, `status`,
 # and the unarmed nag in hooks/dispatch-preflight.sh): is an arming still open, and is its
 # process still there? Entries are replayed in order — an arm opens, a retire or an exit
@@ -729,7 +746,7 @@ case "$VERB" in
     fi
 
     _known="$(roster_names)"
-    _before="$(grep -c '|event=ack|' "$LEDGER_FILE" 2>/dev/null || printf 0)"
+    _before="$(ledger_count '|event=ack|')"
     _recorded=""; _unknown=""
     for _name in "$@"; do
       _name="$(clean "$_name")"
@@ -741,7 +758,7 @@ case "$VERB" in
     done
     [ -n "$_recorded" ] || usage "ack needs at least one non-empty row name."
 
-    _after="$(grep -c '|event=ack|' "$LEDGER_FILE" 2>/dev/null || printf 0)"
+    _after="$(ledger_count '|event=ack|')"
     if [ "$_after" -le "$_before" ]; then
       die "REFUSED — the ack could not be journalled to $LEDGER_FILE."
       die "An unrecorded ack leaves the row watched and the sweeper firing on it, so the"
