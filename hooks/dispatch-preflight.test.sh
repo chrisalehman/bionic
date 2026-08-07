@@ -575,37 +575,144 @@ expect_absent "compact grammar: a bare fraction is not lifted as a deliverable p
   "4/4" "$(roster_field "$ROW" deliverable)"
 
 # ============================================================
-echo "=== S10c — a missing contract field is RECORDED + WARNED, never blocked (AC-1) ==="
+echo "=== S10c — a missing NON-deliverable field is RECORDED + WARNED, never blocked (AC-1) ==="
 # ============================================================
 #
 # Spec §Component boundaries: "Extraction failure warns and records absence —
 # starts fail open (TDD §7)." The verdict is the load-bearing assertion here: a
-# malformed brief is a warning, not a refusal.
+# brief missing everything BUT its deliverable is a warning, not a refusal.
+#
+# The deliverable is the one field that escaped this rule (S10W): a dispatch
+# that names none is refused outright. So this fixture carries a deliverable and
+# nothing else — which is also what keeps the two directions honest, since a
+# brief carrying no fields at all now never reaches the roster to be warned about.
 
 REPO=$(make_repo r10c yes)
 write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Go and do the thing, please." "-" "-")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" \
+  "Go and do the thing, please. Expected artifact: .bionic/docs/record/w99-min.txt" "-" "-")"
 R10C=$(roster_path "$REPO" "$SID_A")
 ROW=$(roster_row "$R10C" 1)
 
-expect_status "a brief with no contract fields at all still PASSES the gate" "0" "$GATE_ST"
+expect_status "a brief with only its deliverable still PASSES the gate" "0" "$GATE_ST"
 expect_empty "the absence warning never goes to stdout" "$GATE_OUT"
 expect_contains "the absence is warned on stderr" "WARN" "$GATE_ERR"
-expect_contains "the warning names the deliverable field" "deliverable" "$GATE_ERR"
 expect_contains "the warning names the duration field" "duration" "$GATE_ERR"
 expect_contains "the warning names the progress field" "progress" "$GATE_ERR"
 expect_absent "the warning is not phrased as a refusal" "BLOCKED" "$GATE_ERR"
-expect_status "the row is still appended for a fieldless brief" "1" "$(roster_rows "$R10C")"
+expect_status "the row is still appended for a near-fieldless brief" "1" "$(roster_rows "$R10C")"
 ABSENT=$(roster_field "$ROW" absent)
-expect_contains "the row records the deliverable absence" "deliverable" "$ABSENT"
 expect_contains "the row records the duration absence" "duration" "$ABSENT"
 expect_contains "the row records the progress absence" "progress" "$ABSENT"
 expect_contains "the row records the missing agent name" "name" "$ABSENT"
-expect_status "the absent contract field is empty in the row, not fabricated" "" "$(roster_field "$ROW" deliverable)"
+expect_absent "the deliverable it DID name is not recorded absent" "deliverable" "$ABSENT"
+expect_status "the absent contract field is empty in the row, not fabricated" "" "$(roster_field "$ROW" duration)"
 # An OMITTED model is not an absence finding — the Agent tool inherits the
 # orchestrator's model when none is given, so a warning here would fire on the
 # ordinary case and train the operator to read past the real ones.
 expect_absent "an omitted model is NOT recorded as an absence" "model" "$ABSENT"
+
+# ============================================================
+echo "=== S10W — a brief naming NO deliverable is REFUSED; the in-brief waiver is the only way through ==="
+# ============================================================
+#
+# USER-DIRECTED (epic-15 post-w4): "A wall. It should be a wall." The absence
+# warning above was the whole enforcement for the one contract field the rest of
+# the machinery cannot work without — the sweeper's delivered/not-delivered
+# predicate has nothing to stat, and a dispatch that dies quietly leaves nothing
+# behind. So this single field escalates from warn to REFUSAL, and every escape
+# from the refusal is a line in the brief, which means it lands on the roster.
+#
+# Everything else stays exactly where it was: progress absence warns, duration
+# absence warns, the unarmed-sweeper nag warns. This is one wall, not a policy.
+
+BRIEF_NO_DELIVERABLE='Your slice: go and do the thing, please.
+Expected duration: ~25 minutes.
+Progress artifact: .bionic/tmp/w99-nodeliv.progress'
+
+REPO=$(make_repo r10w yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_NO_DELIVERABLE" "w99-nodeliv")"
+
+expect_status "a dispatch whose brief names no deliverable is REFUSED" "2" "$GATE_ST"
+expect_empty "the refusal never goes to stdout" "$GATE_OUT"
+expect_contains "the refusal is phrased as a block" "BLOCKED" "$GATE_ERR"
+expect_contains "the refusal names the field that is missing" "names no deliverable" "$GATE_ERR"
+expect_contains "the refusal shows a label that lifts one" "Expected artifact:" "$GATE_ERR"
+expect_contains "the refusal names the waiver escape verbatim" "Deliverable-waiver:" "$GATE_ERR"
+# The wrong fix would be the environment attestation's — this refusal is a
+# different one and must not send the operator to re-run the probe.
+expect_absent "the refusal does not name the attestation fix command" "preflight-probe.sh" "$GATE_ERR"
+expect_status "a refused dispatch writes no roster row" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
+
+# ---- deliverable PRESENT: wholly unaffected ----
+REPO=$(make_repo r10w2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-hasdeliv")"
+expect_status "a brief that names a deliverable is not touched by the wall" "0" "$GATE_ST"
+expect_absent "…and prints no refusal" "BLOCKED" "$GATE_ERR"
+expect_status "…and is journalled as before" "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ---- progress absence stays WARN-ONLY: only the deliverable escalated ----
+BRIEF_NO_PROGRESS='Your slice: build the widget.
+Expected artifact: .bionic/docs/record/w99-noprog.txt
+Expected duration: ~25 minutes.'
+
+REPO=$(make_repo r10w3 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_NO_PROGRESS" "w99-noprog")"
+expect_status "an absent PROGRESS path still passes — only the deliverable escalated" "0" "$GATE_ST"
+expect_contains "…and is still warned" "progress" "$GATE_ERR"
+expect_absent "…and is never phrased as a refusal" "BLOCKED" "$GATE_ERR"
+
+# ---- the waiver: refusal becomes a warning that echoes the reason ----
+BRIEF_WAIVED='Your slice: answer one question from the tree; nothing durable is produced.
+Deliverable-waiver: read-only reconnaissance, the answer is the report itself
+Expected duration: ~10 minutes.
+Progress artifact: .bionic/tmp/w99-waived.progress'
+
+REPO=$(make_repo r10w4 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_WAIVED" "w99-waived")"
+R10W4=$(roster_path "$REPO" "$SID_A")
+ROW=$(roster_row "$R10W4" 1)
+
+expect_status "an in-brief waiver converts the refusal into a pass" "0" "$GATE_ST"
+expect_absent "a waived dispatch prints no refusal" "BLOCKED" "$GATE_ERR"
+expect_contains "the waiver is echoed on stderr, so it is never silent" \
+  "read-only reconnaissance, the answer is the report itself" "$GATE_ERR"
+expect_contains "the echo is a warning, not a verdict" "WARN" "$GATE_ERR"
+expect_status "the waived dispatch is journalled" "1" "$(roster_rows "$R10W4")"
+expect_status "the row LEDGERS the waiver reason — every waiver is on the record" \
+  "read-only reconnaissance, the answer is the report itself" "$(roster_field "$ROW" waiver)"
+# The waiver excuses the refusal; it does not make the fact untrue.
+expect_contains "the row still records the deliverable as absent" \
+  "deliverable" "$(roster_field "$ROW" absent)"
+expect_status "…and fabricates no deliverable path" "" "$(roster_field "$ROW" deliverable)"
+# The waiver value must stop where the next labelled field starts.
+expect_absent "the waiver reason does not swallow the field after it" \
+  "10 minutes" "$(roster_field "$ROW" waiver)"
+
+# ---- a waiver with no reason is not a waiver ----
+BRIEF_EMPTY_WAIVER='Your slice: do the thing.
+Deliverable-waiver:
+Expected duration: ~10 minutes.'
+
+REPO=$(make_repo r10w5 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_EMPTY_WAIVER" "w99-emptywaiver")"
+expect_status "a reasonless waiver does not open the wall" "2" "$GATE_ST"
+expect_contains "…and the refusal still names the escape" "Deliverable-waiver:" "$GATE_ERR"
+
+# ---- the ordinary brief records no waiver ----
+REPO=$(make_repo r10w6 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-nowaiver")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "a brief that waives nothing carries an empty waiver field" \
+  "" "$(roster_field "$ROW" waiver)"
+expect_absent "…and no waiver is echoed for it" "waived" "$GATE_ERR"
 
 # ============================================================
 echo "=== S10L — the LIVENESS fields are lifted: cadence + the subprocess claim (6-axis A-1) ==="

@@ -33,6 +33,8 @@
 #   - attestation missing, unreadable, symlinked, or
 #     keyed to a different session (foreign)              -> REFUSE, naming the fix command
 #   - attestation present and keyed to THIS session_id    -> pass, silent
+#   - brief names no deliverable and carries no waiver    -> REFUSE, naming both
+#     (the absent-deliverable wall, user-directed post-w4)   the fix and the waiver
 #
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
 # [WALL: hooks/dispatch-preflight.test.sh]
@@ -171,12 +173,15 @@ fi
 # ================================================================== THE ROSTER
 # (design D-5 + spec §Design "Roster"; slice 4/3 — the LAUNCH half of AC-1.)
 #
-# The gate has decided. Everything below is a LEDGER, never a wall: it appends
-# one row describing the launch that is about to happen, and it cannot change
-# the verdict. Starts fail open (TDD §7), so every failure here — an unwritable
-# directory, a hostile path, a brief that names none of its contract fields —
-# warns and lets the dispatch through. A gate that refused a dispatch because it
-# could not journal it would be a new failure mode, not a safety property.
+# The attestation gate has decided. Everything below is a LEDGER — it appends one
+# row describing the launch that is about to happen — with exactly ONE exception,
+# marked as such where it sits: the absent-deliverable wall (user-directed,
+# post-wave-04). Apart from that field, starts fail open (TDD §7), so every
+# failure here — an unwritable directory, a hostile path, a brief missing its
+# duration or progress path — warns and lets the dispatch through. A gate that
+# refused a dispatch because it could not JOURNAL it would be a new failure mode,
+# not a safety property; refusing one that gave itself nothing to be checked
+# against is the property the wave was built to have.
 #
 # WHY THIS LIVES IN THE START GATE and not in a fresh hook: the row must exist
 # BEFORE the agent does. PostToolUse fires after the spawn, and the epic's whole
@@ -340,6 +345,14 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       NL = 0
       # LONGEST FIRST — see the nesting note above. `-` marks a label that only
       # BOUNDS a span; it is a real brief field, just not one the roster lifts.
+      #
+      # `deliverable-waiver` heads the table because it is the longest label AND
+      # because it nests the shortest-but-one: a brief line reading
+      # `Deliverable-waiver: <reason>` must never lift as a `deliverable`. The
+      # separator rule already keeps them apart (`deliverable` requires a colon,
+      # and the next character here is a hyphen), but the ordering makes the
+      # intent structural rather than incidental.
+      addlabel("deliverable-waiver", "waiver")
       addlabel("subprocess claims", "claims")
       addlabel("subprocess claim",  "claims")
       addlabel("expected artifacts", "deliverable")
@@ -403,6 +416,11 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
         }
       }
       h = firsthit("claims");      if (h > 0) { v = claimpat(spanof(h));      if (v != "") print "claims=" v }
+      # The waiver is free text — a REASON, never a path — so it lifts collapsed
+      # and whole, ending where the next labelled field begins. An EMPTY value is
+      # not printed, which is the whole of the "a reasonless waiver is not a
+      # waiver" rule: the wall below reads presence, and presence means a reason.
+      h = firsthit("waiver");      if (h > 0) { v = collapse(spanof(h));      if (v != "") print "waiver=" v }
     }
   ' 2>/dev/null
 }
@@ -442,18 +460,6 @@ prune_stale_rosters() {
 
 # ---------- the row ----------
 
-# The directory levels of this path were already discharged: the attestation
-# check above refuses outright if `.bionic` or `.bionic/tmp` is a symlink, so
-# reaching here means both are real directories. The roster FILE is its own
-# path and gets its own check — a hostile repo may make this gate fail to
-# journal, but must not gain an append to a file it points at (§8).
-if [ -L "$ROSTER_FILE" ]; then
-  warn "the roster path is a symbolic link; nothing was written through it: $ROSTER_FILE"
-  exit 0
-fi
-
-prune_stale_rosters
-
 AGENT_NAME=$(sanitize "$(_jq '.tool_input.name')" 200)
 SUBAGENT_TYPE=$(sanitize "$(_jq '.tool_input.subagent_type')" 200)
 AGENT_MODEL=$(sanitize "$(_jq '.tool_input.model')" 200)
@@ -468,6 +474,7 @@ C_DURATION=$(sanitize "$(field_of duration)" 80)
 C_PROGRESS=$(sanitize "$(field_of progress)" 300)
 C_CADENCE=$(sanitize "$(field_of cadence)" 80)
 C_CLAIMS=$(sanitize "$(field_of claims)" 300)
+C_WAIVER=$(sanitize "$(field_of waiver)" 300)
 
 # What is ABSENT is recorded as a field of its own, so a consumer never has to
 # guess whether an empty value means "the brief did not say" or "the brief said
@@ -488,7 +495,65 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 [ -n "$C_DURATION" ]    || add_absent duration
 [ -n "$C_PROGRESS" ]    || add_absent progress
 
-ROW="roster-state/${ROSTER_VERSION}|status=intended|session=${PAYLOAD_SID}|name=${AGENT_NAME}|agent_id=|launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|subagent_type=${SUBAGENT_TYPE}|model=${AGENT_MODEL}|deliverable=${C_DELIVERABLE}|duration=${C_DURATION}|progress=${C_PROGRESS}|claims=${C_CLAIMS}|cadence=${C_CADENCE}|absent=${ABSENT}|tool_use_id=${TOOL_USE_ID}"
+# ======================================================= THE ABSENT-DELIVERABLE WALL
+# (user-directed, epic-15 post-wave-04: "A wall. It should be a wall.")
+#
+# THE ONE PLACE below the verdict where this file changes the verdict, and it is
+# deliberately narrow: exactly one absent field refuses, and only when the brief
+# offers no waiver. Everything else on this path stays advisory — an absent
+# progress path warns, an absent duration warns, an unarmed sweeper nags.
+#
+# Why this field and not the others: every downstream check the wave built is
+# keyed on a durable artifact. The sweeper's delivered / not-delivered predicate
+# stats the deliverable path; the stop gate asks whether the thing the agent was
+# sent to produce exists. A dispatch that names none is unfalsifiable by
+# construction — nothing to stat when it reports done, nothing left behind when
+# it dies quietly — and a warning was never going to fix that, because the
+# warning arrives in the same breath as the launch it failed to prevent.
+#
+# THE WAIVER IS THE ESCAPE, and it is deliberately IN THE BRIEF rather than an
+# environment variable or a flag: a waiver written into the dispatch text is
+# lifted by the same extractor as every other contract field, lands in the roster
+# row beside the absence it excuses, and is echoed on stderr as it passes. There
+# is no way to take it that leaves no record — which is the property that makes
+# refusing safe to live with. A waiver with no reason is not a waiver (the
+# extractor prints nothing for an empty span), so the escape always costs a
+# sentence.
+#
+# THIS SITS ABOVE the symlink and prune housekeeping on purpose. A hostile or
+# merely broken roster path must not be able to OPEN this wall by making the
+# journal step bail early — the same reasoning §8 applies to the attestation
+# path, read here in the refuse direction.
+if [ -z "$C_DELIVERABLE" ] && [ -z "$C_WAIVER" ]; then
+  echo "BLOCKED: this dispatch brief names no deliverable — a wave is active." >&2
+  echo "" >&2
+  echo "An agent with nothing durable to produce cannot be checked on: there is no" >&2
+  echo "path to stat when it reports done, and nothing left behind if it dies quietly." >&2
+  echo "" >&2
+  echo "Fix: name a durable artifact path in the brief —" >&2
+  echo "    Expected artifact: .bionic/docs/record/<name>.md" >&2
+  echo "  Any of these labels lifts one: Expected artifact(s), Deliverable(s), Artifact(s)." >&2
+  echo "" >&2
+  echo "Or waive it — the reason is recorded on the session roster either way:" >&2
+  echo "    Deliverable-waiver: <why this dispatch produces nothing durable>" >&2
+  echo "" >&2
+  echo "Then retry the dispatch." >&2
+  exit 2
+fi
+
+# The directory levels of this path were already discharged: the attestation
+# check above refuses outright if `.bionic` or `.bionic/tmp` is a symlink, so
+# reaching here means both are real directories. The roster FILE is its own
+# path and gets its own check — a hostile repo may make this gate fail to
+# journal, but must not gain an append to a file it points at (§8).
+if [ -L "$ROSTER_FILE" ]; then
+  warn "the roster path is a symbolic link; nothing was written through it: $ROSTER_FILE"
+  exit 0
+fi
+
+prune_stale_rosters
+
+ROW="roster-state/${ROSTER_VERSION}|status=intended|session=${PAYLOAD_SID}|name=${AGENT_NAME}|agent_id=|launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|subagent_type=${SUBAGENT_TYPE}|model=${AGENT_MODEL}|deliverable=${C_DELIVERABLE}|duration=${C_DURATION}|progress=${C_PROGRESS}|claims=${C_CLAIMS}|cadence=${C_CADENCE}|absent=${ABSENT}|waiver=${C_WAIVER}|tool_use_id=${TOOL_USE_ID}"
 
 WROTE=1
 if [ ! -e "$ROSTER_FILE" ]; then
@@ -506,8 +571,16 @@ printf '%s\n' "$ROW" >> "$ROSTER_FILE" 2>/dev/null || WROTE=0
 # (a wedged lock directory) in front of a dispatch, on the fail-open side.
 if [ "$WROTE" -eq 0 ]; then
   warn "the launch could not be journalled to the roster (the dispatch is unaffected): $ROSTER_FILE"
-elif [ -n "$ABSENT" ]; then
-  warn "roster row for \"${AGENT_NAME:-(unnamed)}\" records absent brief field(s): ${ABSENT//,/, }"
+else
+  if [ -n "$ABSENT" ]; then
+    warn "roster row for \"${AGENT_NAME:-(unnamed)}\" records absent brief field(s): ${ABSENT//,/, }"
+  fi
+  # The waiver echo. A dispatch that took the escape says so out loud as it
+  # passes, with the reason it gave — so the operator reads the waiver at the
+  # moment it is spent, not only later off the roster row that also holds it.
+  if [ -n "$C_WAIVER" ]; then
+    warn "the absent-deliverable wall was waived by the brief: ${C_WAIVER}"
+  fi
 fi
 
 # ========================================================== UNARMED-SWEEPER NAG (slice 4/3)
@@ -536,9 +609,10 @@ fi
 # Present and mine: pass in silence — the allow path prints NOTHING about the check it
 # just passed, which is what §4 "The start gate" bans ("Parses no check detail... Never:
 # print on the allow path"). The invariant is narrower than the quote reads: what may
-# never appear here is check DETAIL, the gate narrating its own reasoning. Two warn-only
-# lines above do print on this path, both ratified and neither a check detail — the
-# absent-brief-fields warning (a fact about the row just journalled) and the
-# unarmed-sweeper nag (a fact about this session's watching). Both are advisory, both
-# leave the exit status untouched, and a silent pass is still the common case.
+# never appear here is check DETAIL, the gate narrating its own reasoning. Three warn-only
+# lines above do print on this path, all ratified and none a check detail — the
+# absent-brief-fields warning (a fact about the row just journalled), the waiver echo (the
+# reason a brief gave for producing nothing durable), and the unarmed-sweeper nag (a fact
+# about this session's watching). All three are advisory, all three leave the exit status
+# untouched, and a silent pass is still the common case.
 exit 0
