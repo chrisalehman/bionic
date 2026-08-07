@@ -159,6 +159,28 @@ sweep() {  # <repo> <args...> -> sets OUT, RC
   OUT="$(cat "$TMPROOT/sweep.out")"
 }
 
+# Like `sweep`, but keeps the two streams APART. A verb that exits 0 while the shell
+# complains on stderr is invisible to a merged capture — that is precisely the shape of the
+# defect Section 8's live-caught case pins — so the cases that assert stderr SILENCE need
+# the streams separated. Same watchdog, same globals plus ERR.
+sweep_streams() {  # <repo> <args...> -> sets OUT, ERR, RC
+  local repo="$1"; shift
+  ( cd "$repo" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" "$@" ) \
+    > "$TMPROOT/sweep.out" 2> "$TMPROOT/sweep.err" &
+  local p=$! i=0
+  BG_PIDS="$BG_PIDS $p"
+  while kill -0 "$p" 2>/dev/null && [ "$i" -lt $(( SWEEP_BOUND * 10 )) ]; do
+    sleep 0.1; i=$((i+1))
+  done
+  if kill -0 "$p" 2>/dev/null; then
+    kill -9 "$p" 2>/dev/null; wait "$p" 2>/dev/null
+    RC=124
+  else
+    wait "$p" 2>/dev/null; RC=$?
+  fi
+  OUT="$(cat "$TMPROOT/sweep.out")"; ERR="$(cat "$TMPROOT/sweep.err")"
+}
+
 # `exec` matters: without it the job is the subshell and the ledger's pid (the sweeper's
 # own $$) would name a different process, so every liveness assertion would test the
 # wrong pid.
@@ -864,6 +886,28 @@ sweep "$R14" retire; wait_exit "$P14" 15
 sweep "$R14" ack
 expect_eq "ack with no name is a usage error (exit 2)" "2" "$RC"
 expect_contains "the usage names ack" "ack <name>" "$OUT"
+
+# --- the FIRST ack over an existing ledger says nothing on stderr (live-caught, post-w4) ---
+#
+# The state a live session hit: a sweeper armed (so the ledger exists and carries its arm
+# entry), no ack journalled yet, and a name whose roster row was written by a dispatch that
+# came AFTER the arming — so the roster is present and the acked name is not on it. The ack
+# succeeded and still printed a shell diagnostic, because `grep -c` prints its count AND
+# exits 1 when that count is zero: the `|| printf 0` fallback appended a SECOND line to an
+# already-complete answer, and the two-line "0" reached an integer test. Succeeding-while-
+# complaining is what makes this worth a case of its own — every existing ack assertion
+# above passes in the defective state, since none of them looks at stderr alone.
+R15="$(make_repo s15)"; new_roster "$R15"
+sweep_bg "$R15" "$TMPROOT/s15.out" arm --tick 60; P15="$BGPID"
+expect_true "the ledger carries the arming before the ack" \
+  wait_grep 'event=arm' "$(ledger_of "$R15")" 15
+sweep_streams "$R15" ack late-row
+expect_eq "the first ack over an armed ledger exits 0" "0" "$RC"
+expect_eq "…and writes NOTHING to stderr" "" "$ERR"
+expect_contains "…while stdout still confirms the ack" "acked: late-row" "$OUT"
+expect_contains "…and journals it" "name=late-row" \
+  "$(grep 'event=ack' "$(ledger_of "$R15")" 2>/dev/null)"
+sweep "$R15" retire; wait_exit "$P15" 15
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'
