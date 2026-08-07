@@ -11,6 +11,7 @@
 #     bash ~/.claude/hooks/session-sweeper.sh arm [--tick <seconds>]
 #     bash ~/.claude/hooks/session-sweeper.sh retire
 #     bash ~/.claude/hooks/session-sweeper.sh status
+#     bash ~/.claude/hooks/session-sweeper.sh ack <name> [<name> ...]
 #
 # WHAT IT IS. One long-lived process per session that reads the session roster and reports
 # broken promises. It replaces the per-dispatch monitors that preceded it — bespoke
@@ -40,6 +41,14 @@
 # Plus done-detection, which is not a finding: a row whose declared deliverables are all
 # present is SATISFIED, dropped from watching, and never woken on.
 #
+# ACK is the second way into that same exemption, and it exists because a roster row has no
+# completion event of its own. An agent that finished but declared no machine-visible
+# deliverable reads as overdue forever once its duration elapses, so the sweeper fires one
+# tick after every re-arm until somebody hand-prunes the roster. The orchestrator verifies
+# every agent's completion anyway; `ack` is that verification reaching the roster. An acked
+# row takes the SATISFIED path — out of every class at once, not out of one of them, and
+# never a fourth class or a second exemption mechanism.
+#
 # WHICH PREDICATES A ROW GETS is decided by field presence alone (spec AC-2):
 #   claims=            → process liveness ONLY. While the claimed process is alive, all
 #                        quiet is fine and no class fires for that row.
@@ -56,18 +65,23 @@
 #   sweeper-<session>.state          the ledger this script owns (append-only)
 #   sweeper-<session>-findings.log   the findings mirror this script owns
 #
-# THE LEDGER is append-only and answers one question: is a sweeper live for this session?
+# THE LEDGER is append-only and answers two questions: is a sweeper live for this session,
+# and which rows has the orchestrator closed?
 #   arm     — timestamp, pid, effective tick, row count, per-row degradations
 #   degrade — a degradation first seen after arm time (a row added mid-session)
 #   retire  — closes the open entry by pid
 #   exit    — closes it from inside, naming the reason and the finding count
+#   ack     — one row, closed by name. Append-only is what makes acks outlive the exit that
+#             delivers a finding: every roster pass re-gathers them from this file, so an
+#             ack taken before an exit is still in force after the re-arm.
 # A second `arm` while the open entry's pid is LIVE is refused, naming that arming. This
 # enforcement lives in the script because the doctrine it enforces is the one the wave
 # exists to fix: monitors nobody could enumerate. A pid that is gone does not refuse — a
 # killed or crashed sweeper must never wedge the session.
 #
 # Exit codes:
-#   0 — arm delivered a finding, or was retired; retire completed; status found a live sweeper
+#   0 — arm delivered a finding, or was retired; retire completed; status found a live
+#       sweeper; ack recorded (ALWAYS, including a name no roster row carries)
 #   1 — arm refused because a live arming already exists; status found no live sweeper
 #   2 — usage error, or a refusal (a state path is a symbolic link, or is unwritable)
 #   3 — no session key; nothing read, nothing written
@@ -97,6 +111,7 @@ ROSTER_SUFFIX=".state"
 DEFAULT_TICK=120
 ARM_COMMAND="bash ~/.claude/hooks/session-sweeper.sh arm"
 RETIRE_COMMAND="bash ~/.claude/hooks/session-sweeper.sh retire"
+ACK_COMMAND="bash ~/.claude/hooks/session-sweeper.sh ack"
 
 say()  { printf 'sweeper: %s\n' "$1"; }
 die()  { printf 'sweeper: %s\n' "$1" >&2; }
@@ -107,6 +122,7 @@ usage() {  # [message]
   die "  $ARM_COMMAND [--tick <seconds>]   watch this session's roster (default ${DEFAULT_TICK}s tick)"
   die "  $RETIRE_COMMAND                          close the live arming"
   die "  bash ~/.claude/hooks/session-sweeper.sh status   report whether one is live"
+  die "  $ACK_COMMAND <name> [<name> ...]   close those rows: done, verified"
   exit 2
 }
 
@@ -138,6 +154,10 @@ case "$VERB" in
     ;;
   retire|status)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
+    ;;
+  ack)
+    # The names stay in "$@" for the verb block below; nothing is shifted here.
+    [ $# -ge 1 ] || usage "ack needs at least one roster row name."
     ;;
   *) usage "unknown verb: $VERB" ;;
 esac
@@ -341,6 +361,40 @@ warn_bad_pid() {
 # the cost is one refused arm, and the fix is one `retire`.
 pid_live() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null; }
 
+# The ledger's other answer: which rows the orchestrator has closed. Re-read on every roster
+# pass rather than cached at arm time, so an ack taken while a sweeper is live lands on the
+# next tick and an ack taken before a delivering exit is still in force after the re-arm.
+ACKED_NAMES=""; ACKED_COUNT=0
+read_acked() {
+  ACKED_NAMES=""; ACKED_COUNT=0
+  [ -f "$LEDGER_FILE" ] || return 0
+  local line ev n
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in "$LEDGER_SCHEMA|"*) : ;; *) continue ;; esac
+    ev="$(line_field "$line" event)"
+    [ "$ev" = "ack" ] || continue
+    n="$(line_field "$line" name)"
+    # VALIDATE BEFORE BELIEVING, the same discipline the pid guard above applies to a value
+    # out of this same repo-controlled file — with a different hazard, because a name reaches
+    # a string comparison rather than `kill`. The shape that matters is the EMPTY one: every
+    # row carries a name (`(unnamed)` when the roster declared none), and an empty entry
+    # compared loosely would exempt the whole roster from watching in silence. Dropped, and
+    # a truncated write is the likelier author of one than an adversary. Names are cleaned
+    # at write time, so no entry here can carry a `|` or a newline to forge a field.
+    [ -n "$n" ] || continue
+    row_acked "$n" && continue
+    ACKED_NAMES="${ACKED_NAMES}${n}
+"
+    ACKED_COUNT=$((ACKED_COUNT + 1))
+  done < "$LEDGER_FILE"
+}
+
+# Whole-line match, never a substring: `w4-s1` must not be closed by an ack of `w4-s10`.
+row_acked() {  # <row name>
+  [ -n "$ACKED_NAMES" ] || return 1
+  printf '%s' "$ACKED_NAMES" | grep -qxF -- "$1"
+}
+
 # ---------------------------------------------------------------- evaluation
 #
 # One pass over the roster. FINDINGS accumulates the batch; DEGRADED_NEW accumulates
@@ -430,8 +484,11 @@ evaluate_row() {  # <roster row>
   ROW_COUNT=$((ROW_COUNT + 1))
 
   # SATISFIED: the work landed. Nothing about a delivered row is worth waking anyone for,
-  # whatever its clock says.
-  if deliverables_all_present "$deliv"; then
+  # whatever its clock says. An ACKED row is the same exemption reached by a different fact
+  # — the orchestrator verified this agent's completion and said so — which is why it is a
+  # second condition on this one branch rather than a check of its own further down. Both
+  # answers exempt the row from every class below, and neither is a finding.
+  if row_acked "$name" || deliverables_all_present "$deliv"; then
     return 0
   fi
 
@@ -496,8 +553,23 @@ evaluate_row() {  # <roster row>
   return 0
 }
 
+# Every name the roster declares, one per line. Read for the ack verb's "is this a row I
+# know about?" warning only — never for evaluation, which reads whole rows. A symlinked
+# roster is not read here either (§8), so an ack against one warns and records rather than
+# claiming the name is unknown on evidence it never had.
+roster_names() {
+  [ -L "$ROSTER_FILE" ] && return 0
+  [ -f "$ROSTER_FILE" ] || return 0
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
+    line_field "$line" name
+  done < "$ROSTER_FILE"
+}
+
 evaluate_roster() {
   FINDINGS=""; FINDING_COUNT=0; ROW_COUNT=0
+  read_acked
   # A symlinked roster is not read at all (§8) — but this process stays ARMED over one, so
   # what it cannot watch is NAMED rather than returned on in silence. Every other
   # path-safety refusal in this script is loud and exits 2; this is the one branch that
@@ -561,10 +633,12 @@ case "$VERB" in
   status)
     read_open_arming
     warn_bad_pid
+    read_acked
+    [ "$ACKED_COUNT" -gt 0 ] && say "$ACKED_COUNT row(s) acked for this session (exempt from every class)"
     if pid_live "$OPEN_PID"; then
       say "a sweeper is live for this session (pid $OPEN_PID, armed $OPEN_AT, tick ${OPEN_TICK}s)"
-      printf '%s|live=yes|pid=%s|tick=%s|armed_at=%s|session=%s|ledger=%s|findings=%s\n' \
-        "$STATUS_SCHEMA" "$OPEN_PID" "$OPEN_TICK" "$OPEN_AT" "$SESSION_ID" "$LEDGER_FILE" "$FINDINGS_FILE"
+      printf '%s|live=yes|pid=%s|tick=%s|armed_at=%s|session=%s|acked=%s|ledger=%s|findings=%s\n' \
+        "$STATUS_SCHEMA" "$OPEN_PID" "$OPEN_TICK" "$OPEN_AT" "$SESSION_ID" "$ACKED_COUNT" "$LEDGER_FILE" "$FINDINGS_FILE"
       exit 0
     fi
     if [ -n "$OPEN_PID" ]; then
@@ -573,8 +647,8 @@ case "$VERB" in
       say "no sweeper is armed for this session"
     fi
     say "arm one with: $ARM_COMMAND"
-    printf '%s|live=no|pid=%s|tick=%s|armed_at=%s|session=%s|ledger=%s|findings=%s\n' \
-      "$STATUS_SCHEMA" "${OPEN_PID:-}" "${OPEN_TICK:-}" "${OPEN_AT:-}" "$SESSION_ID" "$LEDGER_FILE" "$FINDINGS_FILE"
+    printf '%s|live=no|pid=%s|tick=%s|armed_at=%s|session=%s|acked=%s|ledger=%s|findings=%s\n' \
+      "$STATUS_SCHEMA" "${OPEN_PID:-}" "${OPEN_TICK:-}" "${OPEN_AT:-}" "$SESSION_ID" "$ACKED_COUNT" "$LEDGER_FILE" "$FINDINGS_FILE"
     exit 1
     ;;
 
@@ -602,6 +676,50 @@ case "$VERB" in
     else
       say "closed the ledger entry for pid $OPEN_PID, which was no longer running"
     fi
+    exit 0
+    ;;
+
+  ack)
+    mkdir -p "$STATE_DIR" 2>/dev/null
+    if [ ! -d "$STATE_DIR" ]; then
+      die "REFUSED — the state directory could not be created ($STATE_DIR)."
+      exit 2
+    fi
+
+    _known="$(roster_names)"
+    _before="$(grep -c '|event=ack|' "$LEDGER_FILE" 2>/dev/null || printf 0)"
+    _recorded=""; _unknown=""
+    for _name in "$@"; do
+      _name="$(clean "$_name")"
+      [ -n "$_name" ] || continue
+      printf '%s\n' "$_known" | grep -qxF -- "$_name" \
+        || _unknown="${_unknown}${_unknown:+, }${_name}"
+      ledger_write "${LEDGER_SCHEMA}|event=ack|at=$(iso_now)|epoch=$(now_epoch)|pid=$$|session=${SESSION_ID}|name=${_name}"
+      _recorded="${_recorded}${_recorded:+, }${_name}"
+    done
+    [ -n "$_recorded" ] || usage "ack needs at least one non-empty row name."
+
+    _after="$(grep -c '|event=ack|' "$LEDGER_FILE" 2>/dev/null || printf 0)"
+    if [ "$_after" -le "$_before" ]; then
+      die "REFUSED — the ack could not be journalled to $LEDGER_FILE."
+      die "An unrecorded ack leaves the row watched and the sweeper firing on it, so the"
+      die "failure is reported rather than assumed away."
+      exit 2
+    fi
+
+    read_acked
+    say "acked: $_recorded"
+    # A name no roster row carries is RECORDED, warned about, and never refused. Two reasons,
+    # both about what a refusal would cost: an ack can legitimately precede the row (the
+    # roster is written by the dispatch gate, and a re-dispatch under the same name is
+    # ordinary), and a roster this script cannot read — symlinked, or not yet written —
+    # would turn every ack into a refusal precisely when the operator most needs the row
+    # quieted. A typo's whole blast radius is one inert ledger line and this warning.
+    if [ -n "$_unknown" ]; then
+      say "no roster row carries: $_unknown — recorded anyway; each is exempt the moment a"
+      say "row of that name appears. Check the spelling against: $LEDGER_FILE"
+    fi
+    say "$ACKED_COUNT row(s) acked for this session; an acked row raises no finding of any class"
     exit 0
     ;;
 

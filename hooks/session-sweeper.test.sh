@@ -708,6 +708,95 @@ expect_eq "…and still refuses a second arm (exit 1)" "1" "$RC"
 sweep "$R7L" retire; wait_exit "$P7L" 15
 
 # ============================================================
+section "Section 8: ack — the orchestrator's completion event"
+# ============================================================
+#
+# A roster row has no completion event. A finished agent whose row carries no
+# machine-visible deliverable reads as overdue forever once its declared duration elapses,
+# so the sweeper fires one tick after every re-arm until someone hand-prunes the roster.
+# The orchestrator already verifies every agent's completion; `ack` is that verification
+# reaching the roster. An acked row takes the SAME exemption a satisfied row takes — it is
+# out of every finding class, not out of one of them.
+
+# --- the discriminating pair: two identical overdue rows, one acked ---
+R11="$(make_repo s11)"; new_roster "$R11"
+add_row "$R11" name=done-agent  duration="1 minute" launched_at="$(iso_ago 600)" deliverable="$R11/absent-a.md"
+add_row "$R11" name=still-going duration="1 minute" launched_at="$(iso_ago 600)" deliverable="$R11/absent-b.md"
+sweep "$R11" ack done-agent
+expect_eq "ack exits 0" "0" "$RC"
+expect_contains "ack journals an ack event" "event=ack" "$(cat "$(ledger_of "$R11")" 2>/dev/null)"
+expect_contains "the ack entry names the row it closed" "name=done-agent" \
+  "$(grep 'event=ack' "$(ledger_of "$R11")" 2>/dev/null)"
+expect_contains "the ack entry carries the session" "session=$SID" \
+  "$(grep 'event=ack' "$(ledger_of "$R11")" 2>/dev/null)"
+sweep_bg "$R11" "$TMPROOT/s11.out" arm --tick 1; P11="$BGPID"
+expect_true "the un-acked twin still breaks its promise" wait_exit "$P11" 20
+F11="$(cat "$(findings_of "$R11")" 2>/dev/null)"
+expect_contains "…and is delivered as overdue" "name=still-going" "$F11"
+expect_absent "the acked row raises NO finding under identical conditions" "name=done-agent" "$F11"
+
+# --- the ack outlives the delivering exit and the re-arm that follows it ---
+sweep_bg "$R11" "$TMPROOT/s11b.out" arm --tick 1; P11B="$BGPID"
+expect_true "the re-armed sweeper fires again on the un-acked row" wait_exit "$P11B" 20
+F11B="$(cat "$(findings_of "$R11")" 2>/dev/null)"
+expect_eq "…twice over, once per arming" "2" "$(printf '%s\n' "$F11B" | grep -c 'name=still-going')"
+expect_absent "the ack survives the exit and the re-arm" "name=done-agent" "$F11B"
+
+# --- exempt from EVERY class, not from one of them ---
+R12="$(make_repo s12)"; new_roster "$R12"
+PROG12="$R12/p.md"; echo "old" > "$PROG12"; backdate "$PROG12" 900
+add_row "$R12" name=every-class claims="bionic-no-such-process-marker-91731" \
+        progress="$PROG12" cadence="10 seconds" duration="1 minute" \
+        launched_at="$(iso_ago 3600)" deliverable="$R12/absent.md"
+sweep "$R12" ack every-class
+sweep_bg "$R12" "$TMPROOT/s12.out" arm --tick 1; P12="$BGPID"
+sleep 3
+expect_true "an acked row is exempt from dead-claim, stale-progress and overdue alike" alive "$P12"
+expect_false "…and nothing at all is written to the findings file" test -s "$(findings_of "$R12")"
+sweep "$R12" retire; wait_exit "$P12" 15
+
+# --- several names in one call, and a repeat that does not double-count ---
+R13="$(make_repo s13)"; new_roster "$R13"
+for n in one two three; do
+  add_row "$R13" name="row-$n" duration="1 minute" launched_at="$(iso_ago 600)" \
+          deliverable="$R13/absent-$n.md"
+done
+sweep "$R13" ack row-one row-two row-three
+expect_eq "ack takes several names in one call" "3" "$(grep -c 'event=ack' "$(ledger_of "$R13")")"
+sweep_bg "$R13" "$TMPROOT/s13.out" arm --tick 1; P13="$BGPID"
+sleep 3
+expect_true "every named row is exempt" alive "$P13"
+expect_false "a fully acked roster wakes nobody" test -s "$(findings_of "$R13")"
+sweep "$R13" ack row-one
+expect_eq "an ack against a live sweeper exits 0" "0" "$RC"
+expect_true "…and never signals or stops it" alive "$P13"
+sweep "$R13" status
+expect_eq "status over a live arming still exits 0" "0" "$RC"
+expect_contains "status counts the acked rows, a repeat counting once" "acked=3" "$OUT"
+sweep "$R13" retire; wait_exit "$P13" 15
+
+sweep "$R1" status
+expect_contains "status with nothing acked reports acked=0" "acked=0" "$OUT"
+
+# --- a name not on the roster: warned and recorded, never refused (assumption A-4) ---
+R14="$(make_repo s14)"; new_roster "$R14"
+add_row "$R14" name=real-row duration="4 hours" deliverable="$R14/absent.md"
+sweep "$R14" ack ghost-row
+expect_eq "ack of a name not on the roster still exits 0" "0" "$RC"
+expect_contains "…and says which name was not found" "ghost-row" "$OUT"
+expect_contains "…and records it anyway" "name=ghost-row" "$(grep 'event=ack' "$(ledger_of "$R14")")"
+add_row "$R14" name=ghost-row duration="1 minute" launched_at="$(iso_ago 600)" \
+        deliverable="$R14/absent-g.md"
+sweep_bg "$R14" "$TMPROOT/s14.out" arm --tick 1; P14="$BGPID"
+sleep 3
+expect_true "a row that arrives AFTER its ack is exempt too" alive "$P14"
+sweep "$R14" retire; wait_exit "$P14" 15
+
+sweep "$R14" ack
+expect_eq "ack with no name is a usage error (exit 2)" "2" "$RC"
+expect_contains "the usage names ack" "ack <name>" "$OUT"
+
+# ============================================================
 printf '\n──────────────────────────────────────────────\n'
 printf 'session-sweeper: %d passed, %d failed, %d total\n' "$PASS" "$FAIL" "$TOTAL"
 [ "$FAIL" -eq 0 ] || exit 1
