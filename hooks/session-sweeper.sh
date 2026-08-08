@@ -870,6 +870,22 @@ latest_rows() {
   ' "$ROSTER_FILE" 2>/dev/null
 }
 
+# The latest row for ONE name, or empty when none carries it. `ack`'s UNMET-warning check
+# needs exactly this — a single row for a single name — while `verdict`'s own loop needs
+# every row it can see; this is the minimal shared plumbing between the two callers, not a
+# second copy of the predicate (verdict_row stays the only place that computes MET/UNMET/
+# WAIVED/STILL-LIVE).
+row_for_name() {  # <name>
+  local _want="$1" _row _rname
+  while IFS= read -r _row; do
+    [ -n "$_row" ] || continue
+    _rname="$(line_field "$_row" name)"; [ -n "$_rname" ] || _rname="(unnamed)"
+    [ "$_rname" = "$_want" ] && { printf '%s\n' "$_row"; return 0; }
+  done <<EOF
+$(latest_rows)
+EOF
+}
+
 # ---------------------------------------------------------------- delivery
 
 deliver_findings() {
@@ -1044,7 +1060,21 @@ EOF
       [ -n "$_name" ] || continue
       printf '%s\n' "$_known" | grep -qxF -- "$_name" \
         || _unknown="${_unknown}${_unknown:+, }${_name}"
-      ledger_write "${LEDGER_SCHEMA}|event=ack|at=$(iso_now)|epoch=$(now_epoch)|pid=$$|session=${SESSION_ID}|name=${_name}"
+
+      # A row's verdict is a fact about the disk; ack is a fact about the WATCH (plan
+      # Assumptions §11) — an ack over an UNMET row does not close the contract, it warns
+      # about closing the watch on one that has not landed. verdict_row is the one place
+      # that computes MET/UNMET/WAIVED/STILL-LIVE; this reuses it rather than re-deriving it.
+      _ack_suffix=""
+      _ack_row="$(row_for_name "$_name")"
+      if [ -n "$_ack_row" ]; then
+        verdict_row "$_ack_row"
+        if [ "$VERDICT_STATE" = "UNMET" ]; then
+          say "WARNING: acking UNMET contract — $(clean "$VERDICT_DETAIL")"
+          _ack_suffix="|verdict=UNMET|detail=$(clean "$VERDICT_DETAIL")"
+        fi
+      fi
+      ledger_write "${LEDGER_SCHEMA}|event=ack|at=$(iso_now)|epoch=$(now_epoch)|pid=$$|session=${SESSION_ID}|name=${_name}${_ack_suffix}"
       _recorded="${_recorded}${_recorded:+, }${_name}"
     done
     [ -n "$_recorded" ] || usage "ack needs at least one non-empty row name."
@@ -1114,8 +1144,14 @@ EOF
     FINDINGS=""; FINDING_COUNT=0
     _armed_degradations="$DEGRADED_NEW"; DEGRADED_NEW=""
 
+    # Before/after ledger_count, ack's own shape (§ack above) — not `[ -s "$LEDGER_FILE" ]`.
+    # A header-only ledger from a prior arming already reads non-empty, so `-s` cannot tell
+    # a successful append from a failed one over it; counting THIS event before and after
+    # can.
+    _arm_before="$(ledger_count '|event=arm|')"
     ledger_write "${LEDGER_SCHEMA}|event=arm|at=$(iso_now)|epoch=$(now_epoch)|pid=$$|tick=${TICK}|session=${SESSION_ID}|rows=${ROW_COUNT}|degraded=$(clean "$_armed_degradations")"
-    if [ ! -s "$LEDGER_FILE" ]; then
+    _arm_after="$(ledger_count '|event=arm|')"
+    if [ "$_arm_after" -le "$_arm_before" ]; then
       die "REFUSED — the arming could not be journalled to $LEDGER_FILE."
       die "An unledgered sweeper is invisible to the next arm and to the dispatch gate, so"
       die "it is not started at all."
@@ -1126,6 +1162,9 @@ EOF
     [ -n "$_armed_degradations" ] && say "degraded rows (named, never guessed): $_armed_degradations"
     say "ledger:   $LEDGER_FILE"
     say "findings: $FINDINGS_FILE"
+    # Printed BEFORE the tick loop below, not after the first tick — a caller scripting
+    # against arm should not have to wait a whole tick to know it took.
+    say "ARMED pid=$$ tick=${TICK}"
 
     # A `sleep` run in the foreground would hold a TERM until it finished — a 120 s tick
     # would make `retire` look wedged for two minutes. Backgrounding the sleep and
