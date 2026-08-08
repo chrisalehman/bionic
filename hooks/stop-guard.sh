@@ -292,10 +292,13 @@ STATE_DIR="${PATHS%|*}"; STATE_FILE="${PATHS#*|}"
 # row, until a session restarts after the recorder ships) matched by NAME and
 # handed ownership to another session's corpse, while every agent dispatched
 # before the roster hook shipped had no row and was refused as foreign. The
-# roster keeps the job it can do: it carries the CONTRACT, and a `confirmed` row
-# still establishes ownership BY AGENT ID. It is never a name-oracle again. Read
-# the way hooks/stop-check.sh reads it, deliberately duplicated per TDD §9 and
-# driven over one fixture world by tests/cross-gate-agreement.test.sh §F.
+# roster keeps the job it can do: it carries the CONTRACT, and ownership by id is
+# established by a `confirmed` OR `identified` row carrying a NON-EMPTY `agent_id`
+# — in teammate mode the transcript-form id lands on the `identified` row while
+# the `confirmed` row's `agent_id=` is empty by design (the detail below says
+# why). It is never a name-oracle again. Read the way hooks/stop-check.sh reads
+# it, deliberately duplicated per TDD §9 and driven over one fixture world by
+# tests/cross-gate-agreement.test.sh §F.
 #
 # WHAT THIS CHECK STILL GUARDS, named honestly because it is narrower than what
 # the roster rule claimed to guard: resolution here is already scoped to
@@ -316,14 +319,28 @@ if [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
     case "$rline" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
     rid=$(record_field "$rline" agent_id)
     rname=$(record_field "$rline" name)
-    # `confirmed`, not merely non-empty — the same tightening as
-    # hooks/stop-check.sh's copy, for the same reason (Step-6 review C-2): the
-    # comment above always stated the invariant this way, while the code leaned
-    # on hooks/dispatch-preflight.sh emitting `agent_id=` empty on `intended`
-    # rows to keep it true. Here the gap is a wall, not a display: an intended
-    # row carrying an id walked a foreign agent past the ownership rule.
-    [ -n "$rid" ] && [ "$rid" = "$AGENT_ID" ] \
-      && [ "$(record_field "$rline" status)" = "confirmed" ] && ROW_BY_ID="$rline"
+    # `confirmed` or `identified`, never merely non-empty — the same accepted set
+    # as hooks/stop-check.sh's copy, for the same reasons.
+    #
+    # NOT `intended` (Step-6 review C-2): the comment above always stated the
+    # invariant this way, while the code leaned on hooks/dispatch-preflight.sh
+    # emitting `agent_id=` empty on `intended` rows to keep it true. Here the gap
+    # is a wall, not a display — an intended row carrying an id walked a foreign
+    # agent past the ownership rule.
+    #
+    # BUT `identified` TOO (epic-16 wave-01 slice 1), because `confirmed` alone
+    # is a set no teammate row can satisfy BY ID. The launch response carries
+    # only the addressing form `name@session-xxxx`, so hooks/execution-recorder.sh
+    # writes `agent_id=` EMPTY on a confirmed teammate row by design; the
+    # transcript-form id — the only form this gate ever resolves a target to —
+    # arrives one state later, from SubagentStart. Without this the rule was
+    # unreachable for every interactive dispatch this repo makes, while the
+    # suite's async-shaped fixtures kept it looking alive.
+    if [ -n "$rid" ] && [ "$rid" = "$AGENT_ID" ]; then
+      case "$(record_field "$rline" status)" in
+        confirmed|identified) ROW_BY_ID="$rline" ;;
+      esac
+    fi
     [ -n "$rname" ] && [ "$rname" = "$AGENT_NAME" ] && ROW_BY_NAME="$rline"
   done < "$ROSTER_FILE"
   ROSTER_ID_MATCH="$ROW_BY_ID"

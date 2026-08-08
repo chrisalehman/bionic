@@ -503,6 +503,11 @@ expect_contains "the completed row keeps the contract state the brief carried" \
 expect_contains "the completed row keeps the correlation key" "tool_use_id=$TUID" "$CONFIRMED"
 expect_eq "the intended row is not rewritten in place — completion is an append" \
   "1" "$(grep -c 'status=intended' "$ROSTER")"
+# The async shape carries no addressing id, so the completed row gains no
+# `teammate_id` field. The field is teammate-mode's alone (AC-10): a reader that
+# finds it knows which namespace the row's id is in without parsing the id.
+expect_absent "an async completion adds no teammate_id field" \
+  "teammate_id=" "$CONFIRMED"
 
 # The synchronous dispatch shape (capture D): a different tool_response, the same
 # agentId key, so the same completion.
@@ -519,6 +524,79 @@ run_rec "$(jq -n --arg s "$SID_A" --arg t "$RS_TR" --arg c "$RS_REPO" --arg u "$
     tool_use_id:$u, duration_ms:4795}')"
 expect_contains "a synchronous dispatch confirms the same way (capture D shape)" \
   "agent_id=a6bc0caf11962bbb6" "$(grep 'status=confirmed' "$RS_REPO/.bionic/tmp/roster-${SID_A}.state")"
+
+# ---------- the TEAMMATE payload shape (AC-10, epic-16 wave-01 slice 0) ----------
+#
+# FIXTURE FIDELITY: transcribed field for field from
+# .bionic/docs/record/landing-wave-capture-probe.md §3-A — the verbatim
+# PostToolUse|Agent payload captured live on CLI 2.1.226 from a pty-driven
+# interactive session with CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1. Only the
+# session id, transcript, cwd, name and tool_use_id are re-pointed at this
+# suite's sandbox; every tool_response key, its spelling and its value form are
+# the capture's own. This is the shape EVERY interactive dispatch on this machine
+# has produced since 07-12 (payload probe §Task 1(c)), and the shape the
+# recorder read straight past: it looked for `agentId` and the payload spells it
+# `agent_id`, so the guard at :140 exited before any roster work and no row on
+# any live session ever reached `confirmed`.
+#
+# THE TWO IDS ARE NOT THE SAME VALUE, which is why this is not a one-line
+# spelling fix. `tool_response.agent_id` here is the ADDRESSING form
+# `probemate@session-3b51bef0`; every later payload for the same teammate —
+# SubagentStart, SubagentStop, its own tool calls — carries the TRANSCRIPT form
+# `aprobemate-4da9be517e8f90bd` in top-level `agent_id`, and no payload contains
+# both (capture probe §3 conclusion 3). Writing the addressing form into
+# `agent_id=` would turn every by-id wall's input from EMPTY into WRONG — the
+# roster would assert an identity no observation can ever match. So the
+# addressing id lands in its own field and `agent_id=` stays empty here; the
+# transcript-form id arrives later, from SubagentStart (slice 1's `identified`
+# row). A confirmed row never carries a wrong-namespace id.
+mk_agent_post_teammate() {  # <sid> <transcript> <cwd> <name> <addressing-id> <tool_use_id>
+  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg n "$4" --arg a "$5" --arg u "$6" \
+    '{session_id:$s, transcript_path:$t, cwd:$c,
+      prompt_id:"95b0701b-7814-42ca-a26f-58123e667f9a",
+      permission_mode:"bypassPermissions", effort:{level:"high"},
+      hook_event_name:"PostToolUse", tool_name:"Agent",
+      tool_input:{description:"Run marker echo command",
+                  prompt:"run the bash command echo MARKER_TM_R5 then reply DONE",
+                  subagent_type:"general-purpose", run_in_background:true, name:$n},
+      tool_response:{status:"teammate_spawned",
+                     prompt:"run the bash command echo MARKER_TM_R5 then reply DONE",
+                     teammate_id:$a, agent_id:$a, agent_type:"general-purpose",
+                     model:"claude-opus-5", name:$n, color:"blue",
+                     tmux_session_name:"in-process", tmux_window_name:"in-process",
+                     tmux_pane_id:"in-process", team_name:"session-3b51bef0",
+                     is_splitpane:false, plan_mode_required:false},
+      tool_use_id:$u, duration_ms:9}'
+}
+
+IFS='|' read -r RT_REPO RT_TR RT_SUB RT_CFG <<< "$(make_world rosterteam yes)"
+seed_roster "$RT_REPO" "$SID_A" "probemate" "$TUID"
+RT_ROSTER="$RT_REPO/.bionic/tmp/roster-${SID_A}.state"
+TEAM_ID="probemate@session-3b51bef0"
+
+run_rec "$(mk_agent_post_teammate "$SID_A" "$RT_TR" "$RT_REPO" "probemate" "$TEAM_ID" "$TUID")"
+expect_status "a teammate_spawned dispatch never blocks" 0 "$REC_ST"
+RT_CONFIRMED=$(grep 'status=confirmed' "$RT_ROSTER" 2>/dev/null)
+expect_contains "the teammate payload completes the row to confirmed" \
+  "status=confirmed" "$RT_CONFIRMED"
+expect_contains "the addressing id is recorded in its own teammate_id field" \
+  "teammate_id=$TEAM_ID" "$RT_CONFIRMED"
+# The `@` is why this needs saying: the sanitizer strips `|`, newlines and
+# control characters, and an over-eager one would silently truncate the id at
+# the separator that makes it addressable.
+expect_contains "the addressing form survives the sanitizer intact" \
+  "@session-3b51bef0" "$RT_CONFIRMED"
+expect_contains "agent_id stays EMPTY — a confirmed row never carries a wrong-namespace id" \
+  "|agent_id=|" "$RT_CONFIRMED"
+expect_absent "the addressing id is never written into agent_id" \
+  "agent_id=probemate@" "$RT_CONFIRMED"
+expect_contains "the completed teammate row still names the agent" "name=probemate" "$RT_CONFIRMED"
+expect_contains "the completed teammate row keeps the contract state" \
+  "deliverable=.bionic/docs/record/w99.txt" "$RT_CONFIRMED"
+expect_contains "the completed teammate row keeps the correlation key" \
+  "tool_use_id=$TUID" "$RT_CONFIRMED"
+expect_eq "the teammate completion is an append, not a rewrite" \
+  "1" "$(grep -c 'status=intended' "$RT_ROSTER")"
 
 # A ROW NEVER CONFIRMED IS LEFT AS IS. That absence is the signal — the live
 # exhibit is a dispatch that returned "spawned successfully" and never produced an
@@ -812,6 +890,226 @@ expect_contains "the oldest filler row is still there too — nothing rotates" \
 # intended row it completes stays exactly where the launch put it.
 expect_eq "an under-bound roster keeps its intended row (completion is an append)" \
   "1" "$(grep -c 'status=intended' "$S1_ROSTER" 2>/dev/null)"
+
+# ============================================================
+echo ""
+echo "=== Section 10: the identification arm — SubagentStart → identified (AC-2, epic-16 w1 slice 1) ==="
+# ============================================================
+#
+# FIXTURE FIDELITY: mk_subagent_start is transcribed field for field from
+# .bionic/docs/record/landing-wave-capture-probe.md §3-C — the verbatim
+# SubagentStart payload captured live from a pty-driven interactive session with
+# CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1. Six keys, and NO `tool_name` among
+# them: that is why this arm cannot sit behind the tool-name gate the other two
+# share. Only the session id, transcript, cwd, name and agent id are re-pointed
+# at this suite's sandbox; the key set and its spellings are the capture's own.
+#
+# WHY THE JOIN IS BY NAME. The two id namespaces do not meet (capture probe §3
+# conclusion 3). The launch half learns the ADDRESSING form
+# (`probemate@session-3b51bef0`); this payload and every later one for the same
+# agent carry the TRANSCRIPT form (`aprobemate-4da9be517e8f90bd`); no payload
+# carries both. The only key spanning them is the NAME — `tool_input.name` at
+# launch, `agent_type` here. So this arm finds the latest `confirmed`-or-
+# `intended` row of THIS session's roster answering to that name, copies every
+# field of it forward, and appends the result as `identified` with the transcript
+# id in `agent_id=`. That row is the first one a by-id wall can match, which is
+# the whole of AC-2.
+#
+# The roster fixture below carries the writer's CURRENT field set — including
+# `source=` and `waiver=`, which hooks/dispatch-preflight.sh has emitted since
+# the absent-deliverable wall (4b16159) and which this suite's older
+# `seed_roster` predates. Every-field-copied-forward is only a meaningful claim
+# against the fields the writer actually writes.
+
+mk_subagent_start() {  # <sid> <transcript> <cwd> <agent-type> <agent-id>
+  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg n "$4" --arg a "$5" \
+    '{session_id:$s, transcript_path:$t, cwd:$c,
+      prompt_id:"95b0701b-7814-42ca-a26f-58123e667f9a",
+      agent_id:$a, agent_type:$n, hook_event_name:"SubagentStart"}'
+}
+
+seed_roster_full() {  # <repo> <sid> <name> <tool_use_id> [status] [agent-id] [teammate-id]
+  local repo="$1" sid="$2" name="$3" tuid="$4"
+  local status="${5:-intended}" aid="${6:-}" tid="${7:-}"
+  local f="$repo/.bionic/tmp/roster-${sid}.state"
+  mkdir -p "$repo/.bionic/tmp"
+  [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
+  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=2026-08-08T09:00:00Z|subagent_type=implementor|model=claude-opus-5|deliverable=.bionic/docs/record/w1-slice1-report.md|source=declared|duration=~25 minutes.|progress=.bionic/tmp/w1-s1-progress.md|claims=|cadence=~8m.|absent=|waiver=|tool_use_id=%s' \
+    "$status" "$sid" "$name" "$aid" "$tuid" >> "$f"
+  if [ -n "$tid" ]; then printf '|teammate_id=%s' "$tid" >> "$f"; fi
+  printf '\n' >> "$f"
+  return 0
+}
+
+START_ID="aprobemate-4da9be517e8f90bd"
+
+# ---------- the join over an intended row ----------
+IFS='|' read -r I1_REPO I1_TR I1_SUB I1_CFG <<< "$(make_world identintended yes)"
+seed_roster_full "$I1_REPO" "$SID_A" "probemate" "toolu_01IDENTA"
+I1_ROSTER="$I1_REPO/.bionic/tmp/roster-${SID_A}.state"
+
+run_rec "$(mk_subagent_start "$SID_A" "$I1_TR" "$I1_REPO" "probemate" "$START_ID")"
+expect_status "a SubagentStart never blocks" 0 "$REC_ST"
+I1_ROW=$(grep 'status=identified' "$I1_ROSTER" 2>/dev/null)
+expect_contains "the start appends an identified row" "status=identified" "$I1_ROW"
+expect_contains "…carrying the TRANSCRIPT-form id the by-id walls can match" \
+  "agent_id=$START_ID" "$I1_ROW"
+expect_contains "…named for the agent_type the payload carried" "name=probemate" "$I1_ROW"
+# Slice 2's verdict verb folds the roster to the LATEST row per name and reads
+# the contract off that row alone (plan Assumptions 8). Every field carried
+# forward is what makes that fold sound.
+expect_contains "…and the deliverable the brief contracted" \
+  "deliverable=.bionic/docs/record/w1-slice1-report.md" "$I1_ROW"
+expect_contains "…the launch clock the delivered predicate dates from" \
+  "launched_at=2026-08-08T09:00:00Z" "$I1_ROW"
+expect_contains "…the progress artifact and its cadence" \
+  "progress=.bionic/tmp/w1-s1-progress.md" "$I1_ROW"
+expect_contains "…the cadence beside it" "cadence=~8m." "$I1_ROW"
+expect_contains "…the deliverable's source designation" "source=declared" "$I1_ROW"
+expect_contains "…the waiver field the absent-deliverable wall writes" "waiver=" "$I1_ROW"
+expect_contains "…and the correlation key" "tool_use_id=toolu_01IDENTA" "$I1_ROW"
+expect_eq "identification is an APPEND — the intended row is left where the launch put it" \
+  "1" "$(grep -c 'status=intended' "$I1_ROSTER")"
+expect_eq "exactly one identified row is appended" \
+  "1" "$(grep -c 'status=identified' "$I1_ROSTER")"
+
+# ---------- the full chain: intended → confirmed → identified ----------
+#
+# The live teammate lifecycle. The confirmed row is the LATEST row for the name
+# when the start fires, so it is the one joined — and its `teammate_id`, the
+# addressing form nothing else records, must survive into the identified row or
+# the latest-row-per-name fold loses the only copy of it.
+IFS='|' read -r I2_REPO I2_TR I2_SUB I2_CFG <<< "$(make_world identchain yes)"
+I2_TUID="toolu_01IDENTCHAIN"
+seed_roster_full "$I2_REPO" "$SID_A" "probemate" "$I2_TUID"
+I2_ROSTER="$I2_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_agent_post_teammate "$SID_A" "$I2_TR" "$I2_REPO" "probemate" \
+  "probemate@session-3b51bef0" "$I2_TUID")"
+run_rec "$(mk_subagent_start "$SID_A" "$I2_TR" "$I2_REPO" "probemate" "$START_ID")"
+expect_status "the start after a teammate confirmation never blocks" 0 "$REC_ST"
+I2_ROW=$(grep 'status=identified' "$I2_ROSTER" 2>/dev/null)
+expect_contains "the start joins the CONFIRMED row, the latest for the name" \
+  "status=identified" "$I2_ROW"
+expect_contains "…and fills agent_id with the transcript form it finally has" \
+  "agent_id=$START_ID" "$I2_ROW"
+expect_contains "…while the addressing id recorded at confirmation rides forward" \
+  "teammate_id=probemate@session-3b51bef0" "$I2_ROW"
+expect_eq "the chain is three rows, none rewritten" \
+  "3" "$(grep -c '^roster-state/v1|' "$I2_ROSTER")"
+
+# The LATEST row wins, not the first: a name dispatched twice in one session has
+# two candidate rows, and the contract that belongs to the agent now starting is
+# the later one.
+IFS='|' read -r I3_REPO I3_TR I3_SUB I3_CFG <<< "$(make_world identlatest yes)"
+seed_roster_full "$I3_REPO" "$SID_A" "twice" "toolu_01FIRST"
+seed_roster_full "$I3_REPO" "$SID_A" "twice" "toolu_01SECOND"
+I3_ROSTER="$I3_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$I3_TR" "$I3_REPO" "twice" "$START_ID")"
+expect_contains "the join takes the LATEST row for the name" \
+  "tool_use_id=toolu_01SECOND" "$(grep 'status=identified' "$I3_ROSTER")"
+
+# ---------- the starts that are not ours to record ----------
+#
+# A start whose name is on no row of this session's roster is a foreign or
+# phantom agent. Nothing is invented in its place — the same rule the roster arm
+# already keeps for a dispatch the start gate never journalled.
+IFS='|' read -r I4_REPO I4_TR I4_SUB I4_CFG <<< "$(make_world identnomatch yes)"
+seed_roster_full "$I4_REPO" "$SID_A" "ours" "toolu_01OURS"
+I4_ROSTER="$I4_REPO/.bionic/tmp/roster-${SID_A}.state"
+
+run_rec "$(mk_subagent_start "$SID_A" "$I4_TR" "$I4_REPO" "stranger" "$START_ID")"
+expect_status "a start naming no row of ours never blocks" 0 "$REC_ST"
+expect_absent "…and records nothing" "status=identified" "$(cat "$I4_ROSTER")"
+expect_eq "…leaving the roster exactly as it was" \
+  "1" "$(grep -c '^roster-state/v1|' "$I4_ROSTER")"
+
+# The PHANTOM class, verbatim from capture probe §4: SubagentStop events fire
+# with an EMPTY `agent_type`, and the same shape is not ours to attribute at
+# start either. An empty name joins nothing rather than joining everything.
+run_rec "$(mk_subagent_start "$SID_A" "$I4_TR" "$I4_REPO" "" "$START_ID")"
+expect_status "a start with an empty agent_type never blocks" 0 "$REC_ST"
+expect_absent "…and records nothing (the phantom class)" "status=identified" "$(cat "$I4_ROSTER")"
+
+# Nothing to identify WITH is the same answer: an id is the entire point of the
+# row this arm writes.
+run_rec "$(mk_subagent_start "$SID_A" "$I4_TR" "$I4_REPO" "ours" "")"
+expect_status "a start with no agent_id never blocks" 0 "$REC_ST"
+expect_absent "…and records nothing without an id to record" \
+  "status=identified" "$(cat "$I4_ROSTER")"
+
+# The roster is per-session (D-5): another session's start never writes here, and
+# never conjures a roster of its own.
+run_rec "$(mk_subagent_start "$SID_B" "$I4_TR" "$I4_REPO" "ours" "$START_ID")"
+expect_absent "a foreign session's start identifies nothing of ours" \
+  "status=identified" "$(cat "$I4_ROSTER")"
+expect_no_file "…and creates no roster in its own name" \
+  "$I4_REPO/.bionic/tmp/roster-${SID_B}.state"
+
+# No roster at all, and no active wave: inert on both counts, like every other
+# arm of this script.
+IFS='|' read -r I5_REPO I5_TR I5_SUB I5_CFG <<< "$(make_world identnoroster yes)"
+run_rec "$(mk_subagent_start "$SID_A" "$I5_TR" "$I5_REPO" "orphan" "$START_ID")"
+expect_status "a start with no roster on disk never blocks" 0 "$REC_ST"
+expect_no_file "…and invents no roster" "$I5_REPO/.bionic/tmp/roster-${SID_A}.state"
+
+IFS='|' read -r I6_REPO I6_TR I6_SUB I6_CFG <<< "$(make_world identnowave no)"
+seed_roster_full "$I6_REPO" "$SID_A" "probemate" "toolu_01NOWAVE"
+run_rec "$(mk_subagent_start "$SID_A" "$I6_TR" "$I6_REPO" "probemate" "$START_ID")"
+expect_status "a start outside an active wave never blocks" 0 "$REC_ST"
+expect_absent "…and records nothing — the script is inert without a wave" \
+  "status=identified" "$(cat "$I6_REPO/.bionic/tmp/roster-${SID_A}.state")"
+
+# An `identified` row is not itself a join target: the states advance, and the
+# contract a second start needs still lives on the confirmed row it came from.
+run_rec "$(mk_subagent_start "$SID_A" "$I1_TR" "$I1_REPO" "probemate" "$START_ID")"
+expect_eq "a repeated start joins the intended/confirmed row again, never an identified one" \
+  "toolu_01IDENTA" \
+  "$(grep 'status=identified' "$I1_ROSTER" | tail -1 | tr '|' '\n' | grep '^tool_use_id=' | cut -d= -f2-)"
+
+# The sanitizer is the writer's, byte for byte (S-1): a platform id carrying a
+# `|` would otherwise forge a field on the row this arm appends.
+IFS='|' read -r I7_REPO I7_TR I7_SUB I7_CFG <<< "$(make_world identsanitize yes)"
+seed_roster_full "$I7_REPO" "$SID_A" "probemate" "toolu_01SAN"
+I7_ROSTER="$I7_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$I7_TR" "$I7_REPO" "probemate" \
+  "aevil-1111|status=confirmed|name=someone-else")"
+I7_ROW=$(grep 'status=identified' "$I7_ROSTER" 2>/dev/null)
+# The pipes become spaces, so the hostile text survives INSIDE the id value and
+# forges nothing: what the assertion has to test is the FIELD, not the substring.
+# Every reader here splits on `|` and takes the first match for a key, so a row
+# whose `name=` still reads `probemate` is a row the injection did not reach.
+expect_absent "a pipe in the platform id forges no name field" "|name=someone-else" "$I7_ROW"
+expect_contains "…the row still answers to the name it was joined on" \
+  "|name=probemate|" "$I7_ROW"
+expect_contains "…and the hostile text is confined to the id value" \
+  "agent_id=aevil-1111 status=confirmed name=someone-else" "$I7_ROW"
+expect_eq "…and the appended row is still one line" \
+  "1" "$(grep -c 'status=identified' "$I7_ROSTER")"
+
+# ============================================================
+echo ""
+echo "=== Section 11: the session key is shape-checked before it becomes a path (Step-6 S-4) ==="
+# ============================================================
+#
+# `roster-${SID}.state` interpolates the payload's `.session_id` straight into a write path.
+# The symlink guards cover `.bionic`, the state directory and the exact filenames — so a key
+# carrying path separators does not trip a guard, it leaves the guarded directory. Session
+# ids are harness-minted UUIDs today and nothing reaches this; but every other payload value
+# on this path is sanitized, this one was not, and this script's own threat model says the
+# repo is hostile. The check is the dispatch wall's, spelling for spelling.
+IFS='|' read -r I8_REPO I8_TR I8_SUB I8_CFG <<< "$(make_world identtraversal yes)"
+mkdir -p "$I8_REPO/.bionic/tmp/roster-x" "$I8_REPO/planted"
+SID_TRAVERSAL='x/../../../planted/evil'
+I8_PLANTED="$I8_REPO/planted/evil.state"
+seed_roster_full "$I8_REPO" "$SID_TRAVERSAL" "probemate" "toolu_01TRAVERSE"
+expect_file "the traversal fixture really does escape the state directory (not vacuous)" \
+  "$I8_PLANTED"
+run_rec "$(mk_subagent_start "$SID_TRAVERSAL" "$I8_TR" "$I8_REPO" "probemate" "$START_ID")"
+expect_status "a start whose session key carries path separators never blocks" 0 "$REC_ST"
+expect_absent "…and writes no row to the roster that key reached outside .bionic/tmp" \
+  "status=identified" "$(cat "$I8_PLANTED")"
+expect_eq "…leaving the planted file exactly one row long" \
+  "1" "$(grep -c '^roster-state/v1|' "$I8_PLANTED")"
 
 # ============================================================
 echo ""

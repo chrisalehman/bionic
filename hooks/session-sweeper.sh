@@ -12,6 +12,21 @@
 #     bash ~/.claude/hooks/session-sweeper.sh retire
 #     bash ~/.claude/hooks/session-sweeper.sh status
 #     bash ~/.claude/hooks/session-sweeper.sh ack <name> [<name> ...]
+#     bash ~/.claude/hooks/session-sweeper.sh verdict [<name>]
+#
+# `verdict` is the one verb that asks a DIFFERENT question from the loop below, and it is
+# documented at the code (§the landing verdict): the loop asks whether a row is worth
+# waking someone for, `verdict` asks whether its contract landed. It is read-only — it
+# writes no ledger entry, no findings file, nothing. Its states, in precedence order:
+#
+#     WAIVED      the brief waived this contract, and declared no artifact beside it
+#     AMBIGUOUS   two or more contracts share this name; none of them is judged
+#     MET         every declared artifact is on disk, non-empty, written after the launch
+#     STILL-LIVE  not landed, but the row's own claimed process or progress says it is working
+#     UNMET       declared, not delivered, nothing running
+#
+# AMBIGUOUS joined the set in the Step-6 review remediation (C-2); spec AC-3 lists the
+# other four.
 #
 # WHAT IT IS. One long-lived process per session that reads the session roster and reports
 # broken promises. It replaces the per-dispatch monitors that preceded it — bespoke
@@ -84,9 +99,10 @@
 #
 # Exit codes:
 #   0 — arm delivered a finding, or was retired; retire completed; status found a live
-#       sweeper; ack recorded (ALWAYS, including a name no roster row carries)
+#       sweeper; ack recorded (ALWAYS, including a name no roster row carries); verdict
+#       found no UNMET row (including: no rows at all, or no row of that name)
 #   1 — arm refused because a live (or unreadable) arming already exists; status found no
-#       live sweeper, or could not tell (live=unknown)
+#       live sweeper, or could not tell (live=unknown); verdict found at least one UNMET row
 #   2 — usage error, or a refusal (a state path is a symbolic link, or is unwritable)
 #   3 — no session key; nothing read, nothing written
 #
@@ -102,6 +118,7 @@ set -u
 LEDGER_SCHEMA="sweeper-ledger/v1"
 FINDING_SCHEMA="sweeper-finding/v1"
 STATUS_SCHEMA="sweeper-status/v1"
+VERDICT_SCHEMA="landing-verdict/v1"
 # Reader copy of hooks/dispatch-preflight.sh's roster constants (same precedent as
 # hooks/preflight-probe.sh's copy: this script only ever READS roster files, so a prefix
 # drift is a mislabeled scan, never a write hazard).
@@ -116,6 +133,7 @@ DEFAULT_TICK=120
 ARM_COMMAND="bash ~/.claude/hooks/session-sweeper.sh arm"
 RETIRE_COMMAND="bash ~/.claude/hooks/session-sweeper.sh retire"
 ACK_COMMAND="bash ~/.claude/hooks/session-sweeper.sh ack"
+VERDICT_COMMAND="bash ~/.claude/hooks/session-sweeper.sh verdict"
 
 say()  { printf 'sweeper: %s\n' "$1"; }
 die()  { printf 'sweeper: %s\n' "$1" >&2; }
@@ -127,6 +145,7 @@ usage() {  # [message]
   die "  $RETIRE_COMMAND                          close the live arming"
   die "  bash ~/.claude/hooks/session-sweeper.sh status   report whether one is live"
   die "  $ACK_COMMAND <name> [<name> ...]   close those rows: done, verified"
+  die "  $VERDICT_COMMAND [<name>]         did the contract land? (read-only)"
   exit 2
 }
 
@@ -135,6 +154,7 @@ usage() {  # [message]
 [ $# -ge 1 ] || usage "no verb given."
 VERB="$1"; shift
 TICK="$DEFAULT_TICK"
+VERDICT_NAME=""
 
 case "$VERB" in
   arm)
@@ -162,6 +182,14 @@ case "$VERB" in
   ack)
     # The names stay in "$@" for the verb block below; nothing is shifted here.
     [ $# -ge 1 ] || usage "ack needs at least one roster row name."
+    ;;
+  verdict)
+    # ONE name at most, on purpose. `verdict a b` is far likelier to be a caller that meant
+    # `ack a b` than a caller that wants two rows, and a verb whose exit code is a single
+    # yes/no about the whole run has no honest answer to spell for an arbitrary subset. The
+    # two shapes that exist are the whole session and one row.
+    [ $# -le 1 ] || usage "verdict takes at most one roster row name; got $#."
+    VERDICT_NAME="${1:-}"
     ;;
   *) usage "unknown verb: $VERB" ;;
 esac
@@ -643,6 +671,322 @@ flush_degradations() {
   DEGRADED_NEW=""
 }
 
+# ---------------------------------------------------------------- the landing verdict
+#
+# THE LANDING QUESTION, and it is not the watching question above. `evaluate_row` asks
+# whether a row is worth waking someone for right now; `verdict` asks whether its contract
+# LANDED, and it applies a STRICTER predicate to answer. The tick loop keeps its looser
+# exists-and-non-empty reading (epic-16 Not Doing #2): tightening a shipped watcher before
+# this predicate has field proof would turn every pre-existing artifact into a wake, and
+# this verb is where the strict reading earns that proof first.
+#
+# THE DIVERGENCES ARE NAMED, all of them — a comment that under-reports one is worse than
+# no comment, because the next reader trusts it (Step-6 architecture review A-1). Landing
+# and watching disagree on exactly these, and nowhere else:
+#   staleness   landing requires mtime AFTER the row's own launched_at; the loop does not
+#               date the artifact at all.
+#   symlinks    landing refuses a symlinked deliverable on BOTH its branches (a contract
+#               satisfied by `ln -s` is satisfied with zero bytes written, review S-3); the
+#               loop follows the link on its file branch and skips it on its directory one.
+#   waiver      landing reads `waiver=`; the loop does not, so a waived row can still raise
+#               an overdue finding. W+1, alongside Not Doing #2.
+#   no declared deliverable
+#               landing calls such a row MET vacuously (assumption 9); the loop's
+#               `deliverables_all_present ""` calls it unsatisfied and keeps watching.
+# hooks/stop-check.sh renders a THIRD reading of the same fact (`[ -f ]` ∧ size > 0) in its
+# operator-facing evidence; it blocks nothing on it.
+#
+# IT WRITES NOTHING. No ledger entry, no findings file, no roster row — a verdict is a read
+# of the disk, and the caller (hooks/landing-gate.sh, or an orchestrator answering an idle
+# ping) owns every consequence of it. ADR-003's zero-authority rule reaches its end here:
+# this verb cannot even record that it ran, which is what makes it safe to call from a hook
+# on every subagent stop.
+#
+# THE ACK DOES NOT REACH IT. An acked row is exempt from every finding CLASS above, because
+# ack is the orchestrator saying "I verified this agent finished" — a fact about the watch,
+# not about the disk. A contract is met by artifacts or it is not, so `verdict` re-reads the
+# disk for an acked row exactly as for any other. That separation is what lets `ack` warn on
+# an UNMET row instead of quietly erasing the discrepancy.
+
+epoch_iso() {  # <epoch seconds> -> ISO-8601 Z; empty when it cannot be rendered
+  [ -n "$1" ] || return 0
+  date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+    || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null
+}
+
+# The delivered predicate, ONE declared path at a time (AC-4). Every outcome names its
+# conjunct in the caller's readback — `delivered=`, `missing=`, `empty=`, `stale=` — because
+# a bare "not delivered" tells a stopping agent nothing it can act on, and this string IS
+# the refusal text the landing gate prints back to it.
+# THE DIRECTORY BRANCH IS BOUNDED, in both directions, and the bound is not a tuning knob.
+# A deliverable path comes off a roster row, which comes off brief prose: `Expected
+# artifact: /usr/share` is one ordinary line away from any brief, and this predicate runs
+# inside a SubagentStop hook on every stop. Unbounded, that row cost 86 s of filesystem walk
+# per stop (Step-6 review C-3). The cap on how many files are stat'd also caps the walk
+# itself — `head` closes the pipe and `find` stops — so a huge or non-repo directory cannot
+# stall the gate whatever path a row names.
+LANDING_DIR_MAXDEPTH=8
+LANDING_DIR_SCAN_CAP=200
+
+CONJUNCT=""
+landing_conjunct() {  # <path, as the roster spells it> <launched epoch|""> <launched ISO>
+  local raw="$1" le="$2" liso="$3" p mtime newest f count=0 capped=0
+  CONJUNCT=""
+  p="$(abs_path "$raw")"
+  # A SYMBOLIC LINK IS NOT A DELIVERED ARTIFACT — asked FIRST, so both branches below are
+  # held to one answer. The file branch used to follow the link ([ -e ], [ -s ] and stat all
+  # resolve) while the directory branch did not (`find -type f` skips links), so `ln -s`
+  # satisfied a file contract with zero bytes written and satisfied nothing inside a
+  # directory one (Step-6 review S-3). Refusing is the direction that agrees with what a
+  # landed artifact means: bytes this agent wrote, at a path the brief named.
+  if [ -L "$p" ]; then
+    CONJUNCT="symlink=$raw (a symbolic link is not a delivered artifact — write a real file)"
+    return 1
+  fi
+  if [ -d "$p" ]; then
+    # A directory deliverable is delivered when a FILE lives in it, and its clock is the
+    # newest file it holds. This mirrors deliverable_delivered one conjunct deeper, for the
+    # reason given there: `[ -s <dir> ]` is true for an empty directory on both BSD and GNU,
+    # so a size test alone would read a freshly-created directory as landed work. ONE
+    # traversal answers both halves — the count and the clock — where two used to.
+    newest=0
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      count=$((count + 1))
+      mtime="$(file_mtime "$f")"
+      case "$mtime" in ''|*[!0-9]*) mtime=0 ;; esac
+      [ "$mtime" -gt "$newest" ] && newest="$mtime"
+    done < <(find "$p" -maxdepth "$LANDING_DIR_MAXDEPTH" -type f 2>/dev/null \
+             | head -n "$LANDING_DIR_SCAN_CAP")
+    if [ "$count" -eq 0 ]; then
+      CONJUNCT="empty=$raw"; return 1
+    fi
+    [ "$count" -ge "$LANDING_DIR_SCAN_CAP" ] && capped=1
+    mtime="$newest"
+  elif [ -e "$p" ]; then
+    if [ ! -s "$p" ]; then
+      CONJUNCT="empty=$raw"; return 1
+    fi
+    mtime="$(file_mtime "$p")"
+  else
+    CONJUNCT="missing=$raw"; return 1
+  fi
+  # A TRUNCATED WALK CANNOT DATE THE DELIVERY, so it does not try: the newest file it saw is
+  # not the newest file there is, and judging staleness from it would refuse a stop on a
+  # partial answer. The conjunct is DROPPED and the detail says so — assumption 13's rule
+  # for an unreadable launched_at, reached from the other side.
+  if [ "$capped" -eq 1 ]; then
+    CONJUNCT="delivered=$raw (directory scan capped at $LANDING_DIR_SCAN_CAP files: not judged for staleness)"
+    return 0
+  fi
+  # STALENESS is judged only against a launch time this script could read. An unreadable
+  # `launched_at` DROPS the conjunct rather than dating the promise from a guess — the same
+  # "named, never guessed" rule the tick loop's degradations follow, and the caller says so
+  # in the detail instead of silently applying a two-conjunct predicate.
+  if [ -n "$le" ] && [ "$mtime" -le "$le" ]; then
+    CONJUNCT="stale=$raw (mtime $(epoch_iso "$mtime") < launched_at $liso)"
+    return 1
+  fi
+  CONJUNCT="delivered=$raw"
+  return 0
+}
+
+# STILL-LIVE reuses the loop's own observables and adds NO new liveness judgment: a claimed
+# process that exists, or a progress artifact written inside its declared cadence. Both are
+# fields the brief itself declared. The state exists so a verdict taken mid-flight does not
+# read as a broken contract — an agent that is visibly still working has not failed to land.
+LIVE_REASON=""
+row_still_live() {  # <claims> <progress> <cadence> <launched_at>
+  local claims="$1" prog="$2" cadence="$3" launched="$4" cad_s age mtime le p
+  LIVE_REASON=""
+  if [ -n "$claims" ] && claims_live "$claims"; then
+    LIVE_REASON="claimed process pattern \"$claims\" matches a live process"
+    return 0
+  fi
+  [ -n "$prog" ] || return 1
+  cad_s="$(parse_seconds "$cadence")" || return 1
+  p="$(abs_path "$prog")"
+  if [ -e "$p" ]; then
+    mtime="$(file_mtime "$p")"
+    age=$(( $(now_epoch) - mtime ))
+  else
+    # Never written: the promise is dated from the launch, exactly as evaluate_row dates it.
+    le="$(iso_epoch "$launched")"
+    [ -n "$le" ] || return 1
+    age=$(( $(now_epoch) - le ))
+  fi
+  [ "$age" -le "$cad_s" ] || return 1
+  LIVE_REASON="progress artifact $prog last changed ${age}s ago, inside the declared cadence \"$cadence\" (${cad_s}s)"
+  return 0
+}
+
+# One row in, one state out. PRECEDENCE, and each step is a decision:
+#   WAIVED      first — but NOT unconditionally, and that is the Step-6 review's S-1. A
+#               waiver is an explicit designation that this row's contract is not held, and
+#               the label reads "why this dispatch produces nothing durable": it is for a
+#               dispatch that names no artifact. A row carrying BOTH a DECLARED deliverable
+#               and a waiver is contradictory, and the contradiction is surfaced — the
+#               deliverable is judged and the detail says the waiver was disregarded —
+#               rather than resolved in the direction that checks nothing. One line of
+#               quoted documentation in a brief used to silence the whole contract, and the
+#               briefs in this repo quote the wall's own help text constantly. A waiver over
+#               an INFERRED path still wins: there only the waiver was declared.
+#   MET         a landed contract is MET whatever else is true of the row, including a
+#               still-running process: the artifacts are on disk and that is the question.
+#   STILL-LIVE  only for a row that has NOT landed. Visible work in flight is not a failure.
+#   UNMET       what is left: declared, not delivered, nothing running.
+# AMBIGUOUS is decided one level up, in the verdict loop, because it is a fact about the
+# NAME across rows rather than about any one row.
+# A row that declares NO deliverable is MET, vacuously and by design. The wall that refuses
+# an undeclared contract is hooks/dispatch-preflight.sh's, at dispatch, where it can still be
+# fixed; making this verb UNMET such a row would block a stopping agent with a refusal that
+# names nothing to write, which is the fail-CLOSED direction on a judgment this machinery
+# does not own (R7).
+VERDICT_STATE=""; VERDICT_DETAIL=""
+verdict_row() {  # <roster row>
+  local row="$1" launched deliv waiver source claims prog cadence le p n=0 fails="" oks="" old
+  local note=""
+  waiver="$(line_field "$row" waiver)"
+  source="$(line_field "$row" source)"
+  launched="$(line_field "$row" launched_at)"
+  deliv="$(line_field "$row" deliverable)"
+  claims="$(line_field "$row" claims)"
+  prog="$(line_field "$row" progress)"
+  cadence="$(line_field "$row" cadence)"
+  VERDICT_STATE=""; VERDICT_DETAIL=""
+
+  if [ -n "$waiver" ]; then
+    # `source=` is the writer's own word for where the path came from, so this asks no
+    # question of the prose. Anything but `inferred` reads as declared, which keeps rows
+    # written before the field existed on the safe side of the contradiction.
+    if [ -n "$deliv" ] && [ "$source" != "inferred" ]; then
+      note="waiver disregarded — the brief declared an artifact AND waived it, which cannot both hold: $waiver"
+    else
+      VERDICT_STATE="WAIVED"
+      VERDICT_DETAIL="the brief waived this contract: $waiver"
+      return 0
+    fi
+  fi
+
+  le="$(iso_epoch "$launched")"
+  # Deliverables are comma-separated, as hooks/stop-check.sh and deliverables_all_present
+  # read them. Every declared path is stat'd, not just up to the first failure: the readback
+  # has to name EVERY failing conjunct or an agent fixes one item per stop.
+  old="$IFS"; IFS=','; set -f
+  # shellcheck disable=SC2086
+  set -- $deliv
+  set +f; IFS="$old"
+  for p in "$@"; do
+    p="$(printf '%s' "$p" | sed -e 's/^ *//' -e 's/ *$//')"
+    [ -n "$p" ] || continue
+    n=$((n + 1))
+    if landing_conjunct "$p" "$le" "$launched"; then
+      oks="${oks}${oks:+; }${CONJUNCT}"
+    else
+      fails="${fails}${fails:+; }${CONJUNCT}"
+    fi
+  done
+
+  if [ "$n" -eq 0 ]; then
+    VERDICT_STATE="MET"
+    VERDICT_DETAIL="${note:+$note; }no deliverable declared — this row names nothing to hold it to"
+    return 0
+  fi
+  if [ -z "$fails" ]; then
+    VERDICT_STATE="MET"; VERDICT_DETAIL="${note:+$note; }$oks"
+    [ -n "$le" ] || VERDICT_DETAIL="${note:+$note; }$oks (launched_at \"$launched\" unreadable: not judged for staleness)"
+    return 0
+  fi
+  if row_still_live "$claims" "$prog" "$cadence" "$launched"; then
+    VERDICT_STATE="STILL-LIVE"
+    VERDICT_DETAIL="${note:+$note; }$LIVE_REASON; outstanding: $fails"
+    return 0
+  fi
+  VERDICT_STATE="UNMET"; VERDICT_DETAIL="${note:+$note; }$fails"
+  [ -n "$le" ] || VERDICT_DETAIL="${note:+$note; }$fails (launched_at \"$launched\" unreadable: not judged for staleness)"
+  return 0
+}
+
+# The roster is APPEND-ONLY and a contract ADVANCES along it — `intended` at the dispatch
+# wall, `confirmed` when the spawn returns, `identified` when the subagent starts. The
+# latest row for a name is the authoritative one (spec §1 domain model) and it is
+# self-sufficient, because every arm that appends copies the contract fields forward. So a
+# verdict is one line PER NAME rather than per row: a three-state chain is ONE contract, and
+# a gate handed three lines for one stopping agent would have to guess which to believe.
+#
+# One awk pass rather than a shell loop over `line_field`, which is four processes per field
+# per row: this verb runs inside a SubagentStop hook under the 10 s timeout
+# claude-bootstrap.sh registers, against a roster that is deliberately uncapped (the
+# recorder's F-1 note says why). The fold is the reader-side twin of the recorder's
+# "take the LAST row for a tool_use_id".
+#
+# IT EMITS THE NAME IT ALREADY PARSED, and the count of contracts under it, TAB-delimited
+# ahead of the row. Both callers used to throw the parsed name away and recover it with
+# `line_field` per folded row — five processes each, 9.665 s at 1000 rows against a 0.029 s
+# fold, on the path the landing gate runs at every subagent stop (Step-6 review, measured;
+# the same change measured 6.36 s → 0.125 s end to end). A tab cannot appear inside a field:
+# every writer on this roster runs its values through a sanitizer that turns one into a
+# space, and this fold does the same to the name it emits.
+#
+# THE CONTRACT COUNT is the C-2 answer. The roster is keyed by NAME and nothing else, so two
+# dispatches sharing a name are indistinguishable to every reader downstream — the fold used
+# to hand the later contract's deliverable to whichever agent stopped first. `tool_use_id` is
+# the one field that separates DISPATCHES from the state chain of a single dispatch
+# (intended → confirmed → identified all copy it forward), so counting its distinct non-empty
+# values per name counts contracts. Rows carrying none fold into one bucket: unknowable is
+# not the same as several.
+latest_rows() {
+  [ -f "$ROSTER_FILE" ] || return 0
+  awk -v pfx="roster-state/${ROSTER_VERSION}|" -v sid="$SESSION_ID" '
+    index($0, pfx) != 1 { next }
+    {
+      name = ""; rsession = ""; tuid = ""
+      nf = split($0, f, "|")
+      for (i = 1; i <= nf; i++) {
+        # FIRST field of a key wins, exactly as line_field takes `head -1`; a forged
+        # second `name=` further along the row must not overrule the writer.
+        if (name == "" && substr(f[i], 1, 5) == "name=") name = substr(f[i], 6)
+        if (rsession == "" && substr(f[i], 1, 8) == "session=") rsession = substr(f[i], 9)
+        if (tuid == "" && substr(f[i], 1, 12) == "tool_use_id=") tuid = substr(f[i], 13)
+      }
+      # The roster file is already per-session; this only fires on a hand-edited or copied
+      # file, and it costs one comparison to keep the verdict honest about whose promises
+      # it is answering for (evaluate_row makes the same check for the same reason).
+      if (rsession != "" && rsession != sid) next
+      if (name == "") name = "(unnamed)"
+      gsub(/\t/, " ", name)
+      if (tuid != "" && !((name SUBSEP tuid) in seen)) {
+        seen[name SUBSEP tuid] = 1
+        contracts[name]++
+      }
+      if (!(name in row)) { order[++n] = name }
+      row[name] = $0
+    }
+    END {
+      for (i = 1; i <= n; i++)
+        printf "%s\t%d\t%s\n", order[i], contracts[order[i]] + 0, row[order[i]]
+    }
+  ' "$ROSTER_FILE" 2>/dev/null
+}
+
+# The latest row for ONE name, or empty when none carries it. `ack`'s UNMET-warning check
+# needs exactly this — a single row for a single name — while `verdict`'s own loop needs
+# every row it can see; this is the minimal shared plumbing between the two callers, not a
+# second copy of the predicate (verdict_row stays the only place that computes MET/UNMET/
+# WAIVED/STILL-LIVE).
+row_for_name() {  # <name>
+  local _want="$1" _row _rname _nc
+  # `$'\t'` and not `"$(printf '\t')"`: an IFS prefix on a `while` condition is re-evaluated
+  # on EVERY iteration, so the command substitution would spend a subshell per row — the
+  # exact per-row process cost this fold exists to remove.
+  while IFS=$'\t' read -r _rname _nc _row; do
+    [ -n "$_row" ] || continue
+    [ "$_rname" = "$_want" ] && { printf '%s\n' "$_row"; return 0; }
+  done <<EOF
+$(latest_rows)
+EOF
+}
+
 # ---------------------------------------------------------------- delivery
 
 deliver_findings() {
@@ -711,6 +1055,83 @@ case "$VERB" in
     exit 1
     ;;
 
+  verdict)
+    # A symlinked roster is REFUSED here, where Section 5's loop only notes a degradation
+    # and keeps watching. The difference is what the two produce: the loop's answer is
+    # silence, which a degradation line qualifies; this verb's answer is a VERDICT, and a
+    # clean one computed over a roster the script was redirected away from is a false
+    # statement about contracts it never read. Exit 2 is the caller's fail-open path.
+    if [ -L "$ROSTER_FILE" ]; then
+      die "REFUSED — $ROSTER_FILE is a symbolic link; the roster was not read."
+      die "A verdict over a roster this script cannot trust would be a claim about contracts"
+      die "it never saw. Remove the link and re-run; nothing was written."
+      exit 2
+    fi
+
+    _want="$(clean "$VERDICT_NAME")"
+    _rows="$(latest_rows)"
+    _n=0; _met=0; _unmet=0; _waived=0; _live=0; _ambig=0; _unmet_lines=""
+    # The fold hands over the name and the contract count it already parsed; re-deriving
+    # them here with `line_field` is what made this loop 9.665 s at 1000 rows (see
+    # latest_rows). IFS is scoped to the read, and spelled `$'\t'` rather than as a command
+    # substitution, which an IFS prefix would re-run once per row.
+    while IFS=$'\t' read -r _rname _ncontracts _row; do
+      [ -n "$_row" ] || continue
+      [ -z "$_want" ] || [ "$_rname" = "$_want" ] || continue
+      verdict_row "$_row"
+      # ONE NAME, TWO CONTRACTS: the fold picked one of them and no reader can tell which
+      # this stopping agent holds — the earlier agent would be judged against the later
+      # one's artifact, and refused for not writing something that was never its job
+      # (Step-6 review C-2). Say so and hold nobody to it. A waiver is still answered
+      # first: it is an explicit designation, and it makes the ambiguity moot.
+      if [ "$VERDICT_STATE" != "WAIVED" ] && [ "${_ncontracts:-0}" -gt 1 ]; then
+        VERDICT_STATE="AMBIGUOUS"
+        VERDICT_DETAIL="$_ncontracts contracts share the name \"$_rname\" on this roster; no reader can tell which one is stopping, so none of them is judged. Re-dispatch under distinct names, or read the rows by tool_use_id."
+      fi
+      _n=$((_n + 1))
+      printf '%s|at=%s|session=%s|name=%s|state=%s|detail=%s\n' \
+        "$VERDICT_SCHEMA" "$(iso_now)" "$SESSION_ID" "$(clean "$_rname")" \
+        "$VERDICT_STATE" "$(clean "$VERDICT_DETAIL")"
+      case "$VERDICT_STATE" in
+        MET)        _met=$((_met + 1)) ;;
+        WAIVED)     _waived=$((_waived + 1)) ;;
+        STILL-LIVE) _live=$((_live + 1)) ;;
+        AMBIGUOUS)  _ambig=$((_ambig + 1)) ;;
+        UNMET)
+          _unmet=$((_unmet + 1))
+          _unmet_lines="${_unmet_lines}UNMET — ${_rname}: $(clean "$VERDICT_DETAIL")
+"
+          ;;
+      esac
+    done <<EOF
+$_rows
+EOF
+
+    # NOTHING TO ANSWER FOR IS NOT A FAILURE. A name on no roster row is the phantom class
+    # the landing gate filters on (AC-6), and a session with no roster is one that has not
+    # dispatched yet. Both exit 0 — this verb reports contracts it can see, and inventing an
+    # UNMET for a row that does not exist is exactly the false alarm the wave exists to end.
+    if [ "$_n" -eq 0 ]; then
+      if [ -n "$_want" ]; then
+        say "no row named \"$_want\" on this session's roster; there is no contract to hold"
+      else
+        say "no contract rows on this session's roster"
+      fi
+      exit 0
+    fi
+
+    say "$_n row(s): $_met MET, $_unmet UNMET, $_waived WAIVED, $_live STILL-LIVE, $_ambig AMBIGUOUS"
+    if [ "$_unmet" -gt 0 ]; then
+      printf '%s' "$_unmet_lines" | while IFS= read -r _l; do
+        [ -n "$_l" ] && say "$_l"
+      done
+      say "the named artifacts are not on disk as the brief declared them."
+      say "Nothing was stopped, judged, or recorded — this verb only reads."
+      exit 1
+    fi
+    exit 0
+    ;;
+
   retire)
     read_open_arming
     warn_bad_pid
@@ -746,19 +1167,38 @@ case "$VERB" in
     fi
 
     _known="$(roster_names)"
-    _before="$(ledger_count '|event=ack|')"
+    # SCOPED TO THIS PROCESS'S OWN LINES. A bare `|event=ack|` count answers "did some ack
+    # line appear", which a CONCURRENT caller's append satisfies just as well as ours — so a
+    # write that failed could be journalled as a success on somebody else's evidence
+    # (Step-6 review C-6). The trailing `|` is load-bearing: without it pid 123 matches
+    # pid 1234, the same trap retire_requested's regex already guards against.
+    _before="$(ledger_count "|event=ack|.*|pid=$$|")"
     _recorded=""; _unknown=""
     for _name in "$@"; do
       _name="$(clean "$_name")"
       [ -n "$_name" ] || continue
       printf '%s\n' "$_known" | grep -qxF -- "$_name" \
         || _unknown="${_unknown}${_unknown:+, }${_name}"
-      ledger_write "${LEDGER_SCHEMA}|event=ack|at=$(iso_now)|epoch=$(now_epoch)|pid=$$|session=${SESSION_ID}|name=${_name}"
+
+      # A row's verdict is a fact about the disk; ack is a fact about the WATCH (plan
+      # Assumptions §11) — an ack over an UNMET row does not close the contract, it warns
+      # about closing the watch on one that has not landed. verdict_row is the one place
+      # that computes MET/UNMET/WAIVED/STILL-LIVE; this reuses it rather than re-deriving it.
+      _ack_suffix=""
+      _ack_row="$(row_for_name "$_name")"
+      if [ -n "$_ack_row" ]; then
+        verdict_row "$_ack_row"
+        if [ "$VERDICT_STATE" = "UNMET" ]; then
+          say "WARNING: acking UNMET contract — $(clean "$VERDICT_DETAIL")"
+          _ack_suffix="|verdict=UNMET|detail=$(clean "$VERDICT_DETAIL")"
+        fi
+      fi
+      ledger_write "${LEDGER_SCHEMA}|event=ack|at=$(iso_now)|epoch=$(now_epoch)|pid=$$|session=${SESSION_ID}|name=${_name}${_ack_suffix}"
       _recorded="${_recorded}${_recorded:+, }${_name}"
     done
     [ -n "$_recorded" ] || usage "ack needs at least one non-empty row name."
 
-    _after="$(ledger_count '|event=ack|')"
+    _after="$(ledger_count "|event=ack|.*|pid=$$|")"
     if [ "$_after" -le "$_before" ]; then
       die "REFUSED — the ack could not be journalled to $LEDGER_FILE."
       die "An unrecorded ack leaves the row watched and the sweeper firing on it, so the"
@@ -823,8 +1263,16 @@ case "$VERB" in
     FINDINGS=""; FINDING_COUNT=0
     _armed_degradations="$DEGRADED_NEW"; DEGRADED_NEW=""
 
+    # Before/after ledger_count, ack's own shape (§ack above) — not `[ -s "$LEDGER_FILE" ]`.
+    # A header-only ledger from a prior arming already reads non-empty, so `-s` cannot tell
+    # a successful append from a failed one over it; counting THIS event before and after
+    # can — SCOPED TO THIS PID, because a bare `|event=arm|` count is satisfied by a
+    # concurrent arming's append and would journal our failed write as somebody else's
+    # success (Step-6 review C-6). The trailing `|` keeps pid 123 out of pid 1234.
+    _arm_before="$(ledger_count "|event=arm|.*|pid=$$|")"
     ledger_write "${LEDGER_SCHEMA}|event=arm|at=$(iso_now)|epoch=$(now_epoch)|pid=$$|tick=${TICK}|session=${SESSION_ID}|rows=${ROW_COUNT}|degraded=$(clean "$_armed_degradations")"
-    if [ ! -s "$LEDGER_FILE" ]; then
+    _arm_after="$(ledger_count "|event=arm|.*|pid=$$|")"
+    if [ "$_arm_after" -le "$_arm_before" ]; then
       die "REFUSED — the arming could not be journalled to $LEDGER_FILE."
       die "An unledgered sweeper is invisible to the next arm and to the dispatch gate, so"
       die "it is not started at all."
@@ -835,6 +1283,9 @@ case "$VERB" in
     [ -n "$_armed_degradations" ] && say "degraded rows (named, never guessed): $_armed_degradations"
     say "ledger:   $LEDGER_FILE"
     say "findings: $FINDINGS_FILE"
+    # Printed BEFORE the tick loop below, not after the first tick — a caller scripting
+    # against arm should not have to wait a whole tick to know it took.
+    say "ARMED pid=$$ tick=${TICK}"
 
     # A `sleep` run in the foreground would hold a TERM until it finished — a 120 s tick
     # would make `retire` look wedged for two minutes. Backgrounding the sleep and
