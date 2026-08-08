@@ -1640,6 +1640,7 @@ MANAGED_HOOKS=(
   "PreToolUse|Write|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "Stop||~/.claude/hooks/context-spend.sh"
+  "SubagentStop||~/.claude/hooks/landing-gate.sh"
 )
 
 # Rebuild hook config in global settings. Resetting .hooks to exactly the
