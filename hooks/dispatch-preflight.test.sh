@@ -1121,6 +1121,116 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "a refused dispatch (no attestation) still exits 2" "2" "$GATE_ST"
 expect_absent "a refused dispatch prints no sweeper nag" "session-sweeper.sh" "$GATE_ERR"
 
+# ============================================================
+echo "=== S12 — dispatch-wall record/ inference (slice 4/4, AC-8) ==="
+# ============================================================
+#
+# Interfaces produced (plan slice 4): an unlabeled path-shaped token whose
+# normalized form starts with `record/`, `.bionic/docs/record/`, or
+# `<docs-root>/record/` satisfies the deliverable wall; roster row records it
+# under `deliverable=` plus a new field `source=inferred` (labeled lifts
+# record `source=declared`). `.bionic/tmp/` and `/tmp/` prefixed tokens NEVER
+# satisfy the wall from inference. Labeled behavior for other paths —
+# including a labeled tmp path — stays byte-identical to today.
+
+# ---- RED 1: bare .bionic/docs/record/ mention, no label -> passes, source=inferred ----
+BRIEF_BARE_RECORD='Your slice: read the tree and note what you find.
+It belongs in .bionic/docs/record/w99-bare.md when finished.
+Expected duration: ~10 minutes.'
+
+REPO=$(make_repo r12a yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_BARE_RECORD" "w99-bare")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "an unlabeled .bionic/docs/record/ mention passes the wall" "0" "$GATE_ST"
+expect_absent "…and prints no refusal" "BLOCKED" "$GATE_ERR"
+expect_status "the roster records the inferred path as the deliverable" \
+  ".bionic/docs/record/w99-bare.md" "$(roster_field "$ROW" deliverable)"
+expect_status "the roster marks the source as inferred" "inferred" "$(roster_field "$ROW" source)"
+expect_absent "an inferred deliverable is not recorded absent" "deliverable" "$(roster_field "$ROW" absent)"
+
+# ---- a bare record/ prefix (no .bionic/docs/ prefix) infers too ----
+BRIEF_BARE_RECORD2='Your slice: capture findings as you go.
+Write to record/w99-bare2.md at the end.
+Expected duration: ~10 minutes.'
+
+REPO=$(make_repo r12a2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_BARE_RECORD2" "w99-bare2")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "a bare record/ prefix (no .bionic/docs/) also passes the wall" "0" "$GATE_ST"
+expect_status "…and is recorded as the inferred deliverable" \
+  "record/w99-bare2.md" "$(roster_field "$ROW" deliverable)"
+expect_status "…marked inferred" "inferred" "$(roster_field "$ROW" source)"
+
+# ---- RED 2: only a non-record path (Read first:) -> still refused (pinned negative) ----
+BRIEF_ONLY_READFIRST='Read first: skills/canonical-sdlc/SKILL.md
+Expected duration: ~10 minutes.'
+
+REPO=$(make_repo r12b yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ONLY_READFIRST" "w99-readfirst")"
+expect_status "a brief whose only path is a non-record 'Read first:' mention is still refused" \
+  "2" "$GATE_ST"
+expect_contains "…with the deliverable refusal" "names no deliverable" "$GATE_ERR"
+expect_status "a refused dispatch writes no roster row" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
+
+# ---- RED 3: only a .bionic/tmp/ path, unlabeled -> refused (tmp never inferred) ----
+BRIEF_ONLY_TMP='Your slice: write scratch notes to .bionic/tmp/w99-scratch.md as you go.
+Expected duration: ~10 minutes.'
+
+REPO=$(make_repo r12c yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ONLY_TMP" "w99-tmp")"
+expect_status "a brief whose only unlabeled path is under .bionic/tmp/ is refused" "2" "$GATE_ST"
+expect_contains "…with the deliverable refusal" "names no deliverable" "$GATE_ERR"
+
+# ---- an unlabeled /tmp/ (not .bionic/tmp/) path is refused too ----
+BRIEF_ONLY_SYSTMP='Your slice: write scratch notes to /tmp/w99-scratch.md as you go.
+Expected duration: ~10 minutes.'
+
+REPO=$(make_repo r12c2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ONLY_SYSTMP" "w99-systmp")"
+expect_status "a brief whose only unlabeled path is under /tmp/ is refused" "2" "$GATE_ST"
+
+# ---- RED 4: a labeled brief records source=declared; behavior otherwise unchanged ----
+REPO=$(make_repo r12d yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-declared")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "a labeled deliverable passes the wall (unchanged)" "0" "$GATE_ST"
+expect_status "the row's deliverable is exactly the labeled path" \
+  ".bionic/docs/record/w99-widget.txt" "$(roster_field "$ROW" deliverable)"
+expect_status "the row marks the source as declared" "declared" "$(roster_field "$ROW" source)"
+expect_status "duration is unaffected by the new inference field" \
+  "~25 minutes." "$(roster_field "$ROW" duration)"
+expect_status "progress is unaffected by the new inference field" \
+  ".bionic/tmp/w99-widget.progress" "$(roster_field "$ROW" progress)"
+
+# ---- a LABELED .bionic/tmp/ deliverable keeps today's behavior (label is explicit design) ----
+BRIEF_LABELED_TMP='Your slice: report interim status to a scratch file.
+Expected artifact: .bionic/tmp/w99-labeledtmp.txt
+Expected duration: ~10 minutes.'
+
+REPO=$(make_repo r12e yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_LABELED_TMP" "w99-labeledtmp")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "a LABELED .bionic/tmp/ deliverable still passes the wall (unchanged)" "0" "$GATE_ST"
+expect_status "…and is recorded exactly as labeled" \
+  ".bionic/tmp/w99-labeledtmp.txt" "$(roster_field "$ROW" deliverable)"
+expect_status "…marked declared, not inferred (the label is explicit designation)" \
+  "declared" "$(roster_field "$ROW" source)"
+
+# ---- the refusal text names the inference rule (interfaces: "gains one line") ----
+REPO=$(make_repo r12f yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ONLY_READFIRST" "w99-refusaltext")"
+expect_contains "the refusal names the record/ inference rule" "inferred automatically" "$GATE_ERR"
+expect_contains "the refusal names the tmp exclusion" ".bionic/tmp/ or /tmp/ paths never are" "$GATE_ERR"
+
 echo ""
 echo "----------------------------------------"
 echo "TOTAL: $TOTAL  PASS: $PASS  FAIL: $FAIL"
