@@ -88,6 +88,18 @@ resolve_docs_root() {
 }
 
 DOCS_ROOT=$(resolve_docs_root "$REPO")
+# The docs root as a BRIEF would spell it. `resolve_docs_root` always answers with
+# an absolute path, and the record/-inference below compares it against tokens
+# lifted verbatim out of dispatch prose — where a path under this repo is written
+# repo-relative essentially always. Without this form the `<docs-root>/record/`
+# prefix (slice 4/4's third accepted form) matched nothing a real brief contains
+# whenever `docs-root:` was overridden: the wall refused briefs naming a perfectly
+# good record/ artifact, and the branch was inert rather than wrong-looking. With
+# no override this is exactly `.bionic/docs`, so the default path is unchanged.
+case "$DOCS_ROOT" in
+  "$REPO"/*) DOCS_ROOT_REL="${DOCS_ROOT#"$REPO"/}" ;;
+  *)         DOCS_ROOT_REL="" ;;
+esac
 PLAN=""
 for d in "$DOCS_ROOT/plans" "$DOCS_ROOT/incidents"; do
   [ -d "$d" ] || continue
@@ -273,7 +285,7 @@ TRAIL_CHARS=")\"]>\`,;:!?.$(printf '\047')"
 QUOTE_CHARS="\`\"$(printf '\047')"
 
 lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omitted
-  printf '%s' "$1" | awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" -v DOCSROOT="$DOCS_ROOT" '
+  printf '%s' "$1" | awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" -v DOCSROOT="$DOCS_ROOT" -v DOCSROOTREL="$DOCS_ROOT_REL" '
     # <sep> is the regex between the label and its value; the default is the
     # colon every labeled brief field uses.
     function addlabel(txt, kind, sep) {
@@ -347,6 +359,12 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       if (substr(t, 1, length(".bionic/docs/record/")) == ".bionic/docs/record/") return 1
       if (DOCSROOT != "") {
         dr = DOCSROOT "/record/"
+        if (substr(t, 1, length(dr)) == dr) return 1
+      }
+      # The same root as a brief spells it. DOCSROOT is absolute and a brief is
+      # repo-relative, so without this the overridden form never fired at all.
+      if (DOCSROOTREL != "") {
+        dr = DOCSROOTREL "/record/"
         if (substr(t, 1, length(dr)) == dr) return 1
       }
       return 0

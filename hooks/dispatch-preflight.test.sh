@@ -1163,6 +1163,68 @@ expect_status "…and is recorded as the inferred deliverable" \
   "record/w99-bare2.md" "$(roster_field "$ROW" deliverable)"
 expect_status "…marked inferred" "inferred" "$(roster_field "$ROW" source)"
 
+# ---- the THIRD prefix form: <docs-root>/record/ under a config.yaml override ----
+#
+# Deferred from slice 4/4 and carried here as its flagged coverage gap. The plan
+# names three prefixes the inference accepts, and two of them are literals the
+# awk side can match without knowing anything about the repo. The third is
+# COMPUTED — `resolve_docs_root` reads `docs-root:` out of .bionic/config.yaml and
+# the value reaches the awk program as DOCSROOT — so it is the one form that can
+# go silently inert: an override that stops being passed in, or a DOCSROOT that
+# arrives absolute where the token is relative, leaves the branch matching
+# nothing while both literal prefixes keep the suite green.
+#
+# The fixture is built so a mis-resolution FLIPS the answer rather than changing a
+# value: the override names the ONLY directory holding a plan (so the wave is
+# active only if the override was read at all), and the deliverable token lives
+# under `custom-docs/record/`, which neither literal prefix matches.
+REPO=$(make_repo r12a3 no)
+mkdir -p "$REPO/.bionic" "$REPO/custom-docs/plans/epic-99-test"
+printf 'docs-root: custom-docs\n' > "$REPO/.bionic/config.yaml"
+cat > "$REPO/custom-docs/plans/epic-99-test/wave-01-test.plan.md" <<'PLAN'
+---
+governing-skill: canonical-sdlc
+canonical_sdlc_version: 13
+intent: build
+rigor: audited
+scale: wave
+---
+
+# Test wave plan
+
+## SDLC State
+
+integration-branch: main
+current: 4
+
+- Step 4: slices in flight
+PLAN
+write_attestation "$REPO" "$SID_A"
+
+BRIEF_DOCSROOT_RECORD='Your slice: read the tree and note what you find.
+It belongs in custom-docs/record/w99-override.md when finished.
+Expected duration: ~10 minutes.'
+
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_DOCSROOT_RECORD" "w99-override")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "an unlabeled <docs-root>/record/ path passes the wall under an override" \
+  "0" "$GATE_ST"
+expect_absent "…and prints no refusal" "BLOCKED" "$GATE_ERR"
+expect_status "…and is recorded as the inferred deliverable" \
+  "custom-docs/record/w99-override.md" "$(roster_field "$ROW" deliverable)"
+expect_status "…marked inferred" "inferred" "$(roster_field "$ROW" source)"
+
+# The DISCRIMINATOR, and the reason this fixture is not just a third happy path:
+# the same token under the same repo with NO override is a path like any other,
+# and the wall refuses the brief. Without this half, a DOCSROOT branch that
+# matched everything would pass the case above just as well.
+REPO=$(make_repo r12a4 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_DOCSROOT_RECORD" "w99-nooverride")"
+expect_status "the same token with NO docs-root override is refused (custom-docs/ is not record/)" \
+  "2" "$GATE_ST"
+expect_contains "…with the deliverable refusal" "names no deliverable" "$GATE_ERR"
+
 # ---- RED 2: only a non-record path (Read first:) -> still refused (pinned negative) ----
 BRIEF_ONLY_READFIRST='Read first: skills/canonical-sdlc/SKILL.md
 Expected duration: ~10 minutes.'
