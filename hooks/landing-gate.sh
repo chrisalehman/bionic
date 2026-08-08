@@ -26,14 +26,19 @@
 #     probe §4: an internal auxiliary agent fires these
 #     three times per teammate run)                     -> pass, silent
 #   - stop_hook_active true                             -> pass, silent (blocks ONCE)
-#   - cwd/repo unresolvable, or no session_id            -> pass, silent (ambiguity)
+#   - cwd/repo unresolvable, or no session_id, or a
+#     session_id that is not shaped like one             -> pass, silent (ambiguity)
 #   - no roster for this session                         -> pass, silent
 #   - no active wave                                     -> pass, silent
 #   - the sweeper is absent                              -> pass, silent
 #   - the verdict exits anything but 1, or prints no
-#     line for this name (refusal, error, MET, WAIVED,
-#     STILL-LIVE, name on no row)                        -> pass, silent
-#   - the verdict's line for this name says UNMET        -> REFUSE, quoting its detail
+#     line at all (refusal, error, MET, WAIVED,
+#     STILL-LIVE, AMBIGUOUS, name on no row)             -> pass, silent
+#   - the verdict's line says UNMET                      -> REFUSE, quoting its detail
+#
+# AMBIGUOUS is the one that is worth spelling out: two contracts on this roster share the
+# stopping agent's name, so no reader can tell which is its own. Passing is the recoverable
+# error there; blocking the wrong agent, with the wrong artifact named, is not.
 #
 # Exit code 2 = block the stop in Claude Code hooks; stderr goes back to the stopping
 # agent, which is why the refusal must name the artifacts rather than the rule.
@@ -79,6 +84,14 @@ REPO=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null) || exit 0
 # same reason.
 SID=$(_jq '.session_id')
 [ -n "$SID" ] || exit 0
+# SHAPE-CHECKED BEFORE IT BECOMES A PATH, exactly as hooks/dispatch-preflight.sh checks it.
+# This value is interpolated into `roster-${SID}.state` below and exported to the sweeper,
+# which builds its own ledger and findings paths from it; the symlink guards on those paths
+# check the state directory and the exact filenames, so a key carrying separators does not
+# trip a guard — it leaves the directory the guards protect. Session ids are harness-minted
+# UUIDs today and nothing reaches this, but every other payload value on this path is
+# sanitized and this one was not (Step-6 review S-4).
+case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
 
 # Existence only, and only to avoid spawning the sweeper on a session that has dispatched
 # nothing. Whether this name is ON the roster is the verdict verb's question, not this
@@ -159,10 +172,18 @@ VERDICT_RC=$?
 # authority, which is the one thing it has none of.
 [ "$VERDICT_RC" -eq 1 ] || exit 0
 
-# ONE LINE PER NAME is guaranteed by the verb (plan assumption 8: the roster is folded to the
-# latest row per name). Matched by name anyway, because exit 1 is a fact about the whole run
-# and only the line is a fact about this contract.
-LINE=$(printf '%s\n' "$VERDICT" | grep -F 'landing-verdict/v1|' | grep -F "|name=${NAME}|" | head -1)
+# THE LINE THE SCOPED VERB RETURNED, and no second lookup by name. `verdict <name>` answers
+# for that name alone and folds the roster to one row per name (plan assumption 8), so its
+# output carries at most one machine line and taking the first IS taking this contract's.
+#
+# It used to be re-matched here with `grep -F "|name=${NAME}|"` on the RAW `agent_type`,
+# which was a second reader of the same key with different normalization: the verb stores and
+# prints `clean()`-ed names, so any name whose stored form differed from its payload form
+# missed the line and the gate exited 0 — a silent disarm, and a disagreement between two
+# readers of one key is the class this wave exists to close (Step-6 review C-5). Deleting the
+# reader closes it structurally; there is nothing left to normalize. This reverses assumption
+# 29's defence-in-depth, deliberately: the defence cost more than it bought.
+LINE=$(printf '%s\n' "$VERDICT" | grep -F 'landing-verdict/v1|' | head -1)
 [ -n "$LINE" ] || exit 0
 
 _field() {  # <key> — by key, never by position, as every reader of these lines does

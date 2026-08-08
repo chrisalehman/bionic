@@ -1088,6 +1088,31 @@ expect_eq "…and the appended row is still one line" \
 
 # ============================================================
 echo ""
+echo "=== Section 11: the session key is shape-checked before it becomes a path (Step-6 S-4) ==="
+# ============================================================
+#
+# `roster-${SID}.state` interpolates the payload's `.session_id` straight into a write path.
+# The symlink guards cover `.bionic`, the state directory and the exact filenames — so a key
+# carrying path separators does not trip a guard, it leaves the guarded directory. Session
+# ids are harness-minted UUIDs today and nothing reaches this; but every other payload value
+# on this path is sanitized, this one was not, and this script's own threat model says the
+# repo is hostile. The check is the dispatch wall's, spelling for spelling.
+IFS='|' read -r I8_REPO I8_TR I8_SUB I8_CFG <<< "$(make_world identtraversal yes)"
+mkdir -p "$I8_REPO/.bionic/tmp/roster-x" "$I8_REPO/planted"
+SID_TRAVERSAL='x/../../../planted/evil'
+I8_PLANTED="$I8_REPO/planted/evil.state"
+seed_roster_full "$I8_REPO" "$SID_TRAVERSAL" "probemate" "toolu_01TRAVERSE"
+expect_file "the traversal fixture really does escape the state directory (not vacuous)" \
+  "$I8_PLANTED"
+run_rec "$(mk_subagent_start "$SID_TRAVERSAL" "$I8_TR" "$I8_REPO" "probemate" "$START_ID")"
+expect_status "a start whose session key carries path separators never blocks" 0 "$REC_ST"
+expect_absent "…and writes no row to the roster that key reached outside .bionic/tmp" \
+  "status=identified" "$(cat "$I8_PLANTED")"
+expect_eq "…leaving the planted file exactly one row long" \
+  "1" "$(grep -c '^roster-state/v1|' "$I8_PLANTED")"
+
+# ============================================================
+echo ""
 echo "──────────────────────────────────────────────"
 echo "execution-recorder.sh: ${PASS}/${TOTAL} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ]

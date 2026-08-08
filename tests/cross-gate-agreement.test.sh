@@ -1627,6 +1627,19 @@ agree_on "an empty file"         "$DFX/empty-file.md" not-delivered
 agree_on "an absent path"        "$DFX/never.md"      not-delivered
 agree_on "an EMPTY directory"    "$DFX/empty-dir"     not-delivered
 agree_on "a populated directory" "$DFX/full-dir"      delivered
+
+# SYMLINKS, added by the Step-6 security review (S-3). The two implementations here follow
+# a link on the file branch and skip it on the directory branch — and they do it IDENTICALLY,
+# which is what this section asserts. The THIRD renderer of delivered-ness, the landing
+# predicate in `verdict`, deliberately answers differently: since S-3 it refuses a symlinked
+# deliverable on both of its own branches (`symlink=`), because a contract satisfied by
+# `ln -s` is satisfied with zero bytes written. That divergence is named here rather than
+# left for the next reader to discover, and §J drives the landing side of it.
+mkdir -p "$DFX/link-dir"
+ln -s "$DFX/full-file.md" "$DFX/linked-file.md"
+ln -s "$DFX/full-file.md" "$DFX/link-dir/only-a-link.md"
+agree_on "a symlink to a written file"          "$DFX/linked-file.md" delivered
+agree_on "a directory holding only a symlink"   "$DFX/link-dir"       not-delivered
 # The one DELIBERATE divergence, pinned rather than hidden. A relative deliverable is the
 # REPO's to the sweeper — armed once as a background job, it outlives whatever directory it
 # was armed from, so a cwd-relative reading would make one roster row mean two things — and
@@ -1669,9 +1682,9 @@ J_LAUNCHED=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
 # absent-deliverable wall). A fixture missing a field the writer emits is how a
 # suite ends up green over a row shape nothing produces; the sweeper's and the
 # recorder's suites each had to make this same correction mid-wave.
-jrow() {  # <name> <deliverable> <progress> <cadence> <waiver>
-  printf 'roster-state/v1|status=confirmed|session=%s|name=%s|agent_id=|launched_at=%s|subagent_type=implementor|model=opus|deliverable=%s|source=declared|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=%s|tool_use_id=toolu_01LANDING\n' \
-    "$SID_A" "$1" "$J_LAUNCHED" "$2" "$3" "$4" "$5" >> "$JROSTER"
+jrow() {  # <name> <deliverable> <progress> <cadence> <waiver> [tool_use_id]
+  printf 'roster-state/v1|status=confirmed|session=%s|name=%s|agent_id=|launched_at=%s|subagent_type=implementor|model=opus|deliverable=%s|source=declared|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=%s|tool_use_id=%s\n' \
+    "$SID_A" "$1" "$J_LAUNCHED" "$2" "$3" "$4" "$5" "${6:-toolu_01LANDING}" >> "$JROSTER"
 }
 
 printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$JROSTER"
@@ -1681,12 +1694,27 @@ echo "written before the agent was ever dispatched" > "$JDELIV/stale.md"
 touch -t 202001010000 "$JDELIV/stale.md"
 printf 'stage 1\n' > "$JREPO/.bionic/tmp/live.progress"
 
+ln -s "$JDELIV/met.md" "$JDELIV/linked.md"
+
 jrow met    "$JDELIV/met.md"   ""                                    ""     ""
 jrow unmet  "$JDELIV/never.md" ""                                    ""     ""
 jrow empty  "$JDELIV/empty.md" ""                                    ""     ""
 jrow stale  "$JDELIV/stale.md" ""                                    ""     ""
-jrow waived "$JDELIV/never.md" ""                                    ""     "the orchestrator waived this contract"
 jrow live   "$JDELIV/never.md" "$JREPO/.bionic/tmp/live.progress"    "~5m"  ""
+# A GENUINE waiver names no artifact — the wall's own label reads "why this dispatch
+# produces nothing durable" (Step-6 review S-1). The row below it is the contradictory
+# shape: a declared artifact AND a waiver, which one line of quoted documentation in a
+# brief used to produce, and which used to silence the contract entirely.
+jrow waived ""                 ""                                    ""     "this dispatch produces nothing durable"
+jrow quoter "$JDELIV/never.md" ""                                    ""     "<why this dispatch produces nothing durable>"
+# The symlink half of S-3: a contract satisfied by `ln -s` is satisfied with zero bytes
+# written, so the landing predicate refuses it and the gate refuses the stop.
+jrow linked "$JDELIV/linked.md" ""                                   ""     ""
+# C-2: two dispatches share a name, so the fold cannot tell whose contract is whose. The
+# verb says AMBIGUOUS and the gate passes — a stop let through is recoverable, the wrong
+# agent blocked is not.
+jrow dup    "$JDELIV/met.md"   ""                                    ""     ""     toolu_01DUPA
+jrow dup    "$JDELIV/never.md" ""                                    ""     ""     toolu_01DUPB
 
 j_line() {  # <name> -> the verb's machine line for that name, or empty
   ( cd "$JREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" verdict "$1" 2>/dev/null ) \
@@ -1723,6 +1751,9 @@ unmet|UNMET|refuse
 empty|UNMET|refuse
 stale|UNMET|refuse
 waived|WAIVED|pass
+quoter|UNMET|refuse
+linked|UNMET|refuse
+dup|AMBIGUOUS|pass
 live|STILL-LIVE|pass
 ghost|NONE|pass
 '
@@ -1771,6 +1802,17 @@ j_gate stale
 expect_contains "a PRE-LAUNCH file refuses naming the stale= conjunct and both stamps" \
   "stale=$JDELIV/stale.md (mtime " "$J_GATE_ERR"
 expect_contains "…dated against the row's own launched_at" "launched_at $J_LAUNCHED" "$J_GATE_ERR"
+j_gate quoter
+expect_contains "a waiver beside a DECLARED artifact refuses, naming the artifact" \
+  "missing=$JDELIV/never.md" "$J_GATE_ERR"
+expect_contains "…and says the waiver was disregarded rather than silently honouring it" \
+  "waiver disregarded" "$J_GATE_ERR"
+j_gate linked
+expect_contains "a symlinked deliverable refuses naming the symlink= conjunct" \
+  "symlink=$JDELIV/linked.md" "$J_GATE_ERR"
+j_gate dup
+expect_eq "a name carrying two contracts is not blocked on either of them" "pass" "$J_ANSWER"
+expect_eq "…and is told nothing about an artifact that may not be its job" "" "$J_GATE_ERR"
 
 # THE ONE DELIBERATE DIVERGENCE, pinned rather than left implicit. On re-entry the
 # gate passes a contract the verb still calls UNMET — and the verb is re-run here
@@ -2191,11 +2233,43 @@ expect_contains "the recorder keeps its PostToolUse|Bash registration (the obser
 expect_contains "…and its PostToolUse|Agent registration (the completion arm)" \
   '"PostToolUse|Agent|~/.claude/hooks/execution-recorder.sh"' "$BOOTSTRAP_SRC"
 
-# Both new registrations take the NO-MATCHER branch of wire_managed_hooks, which is
-# the branch that emits no `timeout` key — these events carry no tool name to match
-# on. Spelled here because the empty middle field is easy to "fix" into a matcher.
+# Both new registrations take the NO-MATCHER branch of wire_managed_hooks — these
+# events carry no tool name to match on. Spelled here because the empty middle field
+# is easy to "fix" into a matcher.
 expect_eq "both new registrations declare an empty matcher" "2" \
   "$(printf '%s\n' "$BOOTSTRAP_SRC" | grep -cE '"Subagent(Start|Stop)\|\|~/\.claude/hooks/')"
+
+# --- L.2 EVERY registration is bounded by a timeout, whichever branch writes it ---
+#
+# The Step-6 review's C-4: `wire_managed_hooks` attached `"timeout": 10` only on the
+# matcher branch, so the two events this wave added — the ones that carry no matcher —
+# registered with no ceiling at all, and the platform default was the only thing in front
+# of the landing gate's verdict subprocess. A timeout is the safe direction here precisely
+# because the gate is fail-open: a hook that is killed lets the stop through.
+#
+# Driven rather than grepped: the real function is extracted from the real script and run
+# against a sandboxed settings file, the same convention tests/installer-behavior.test.sh
+# uses, so this asserts what bootstrap WRITES and not what its source looks like.
+LSBX="$SANDBOX/wiring"
+mkdir -p "$LSBX"
+LCODE="$LSBX/wire.sh"
+awk '/^wire_managed_hooks\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$REPO_ROOT/claude-bootstrap.sh" > "$LCODE"
+awk '/^MANAGED_HOOKS=\(/{f=1} f{print} f&&/^\)$/{exit}' "$REPO_ROOT/claude-bootstrap.sh" >> "$LCODE"
+LSETTINGS="$LSBX/settings.json"
+echo '{}' > "$LSETTINGS"
+# shellcheck disable=SC1090
+( . "$LCODE"; settings="$LSETTINGS"; wire_managed_hooks ) >/dev/null 2>&1
+L_RC=$?
+expect_eq "wire_managed_hooks runs against a sandboxed settings file" "0" "$L_RC"
+expect_eq "…and registers every managed hook (this section is not vacuous)" \
+  "$(printf '%s\n' "$BOOTSTRAP_SRC" | awk '/^MANAGED_HOOKS=\(/{f=1;next} f&&/^\)$/{exit} f&&/"/{n++} END{print n+0}')" \
+  "$(jq '[.hooks[][].hooks[]] | length' "$LSETTINGS" 2>/dev/null)"
+expect_eq "EVERY registered hook carries a timeout — the no-matcher branch included" "0" \
+  "$(jq '[.hooks[][].hooks[] | select(has("timeout") | not)] | length' "$LSETTINGS" 2>/dev/null)"
+expect_eq "…and the landing gate's own entry is bounded" "10" \
+  "$(jq -r '.hooks.SubagentStop[0].hooks[0].timeout' "$LSETTINGS" 2>/dev/null)"
+expect_eq "…as is the recorder's SubagentStart entry" "10" \
+  "$(jq -r '.hooks.SubagentStart[0].hooks[0].timeout' "$LSETTINGS" 2>/dev/null)"
 
 # ============================================================
 echo ""

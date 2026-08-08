@@ -135,9 +135,10 @@ iso_ago() {  # <seconds ago> -> UTC ISO-8601, the launched_at shape
 mkrow() {  # <key=value>...
   local status=confirmed session="$SID" name=agent agent_id=a000 launched_at=""
   local subagent_type=implementor model=opus deliverable="" duration="" progress=""
-  local claims="" cadence="" waiver="" tool_use_id=toolu_x kv
+  local claims="" cadence="" waiver="" tool_use_id=toolu_x source=declared kv
   for kv in "$@"; do
     case "$kv" in
+      source=*)      source="${kv#*=}" ;;
       status=*)      status="${kv#*=}" ;;
       session=*)     session="${kv#*=}" ;;
       name=*)        name="${kv#*=}" ;;
@@ -154,9 +155,9 @@ mkrow() {  # <key=value>...
     esac
   done
   [ -n "$launched_at" ] || launched_at="$(iso_ago 60)"
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=%s|deliverable=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|waiver=%s|tool_use_id=%s\n' \
+  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=%s|deliverable=%s|source=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|waiver=%s|tool_use_id=%s\n' \
     "$status" "$session" "$name" "$agent_id" "$launched_at" "$subagent_type" "$model" \
-    "$deliverable" "$duration" "$progress" "$claims" "$cadence" "$waiver" "$tool_use_id"
+    "$deliverable" "$source" "$duration" "$progress" "$claims" "$cadence" "$waiver" "$tool_use_id"
 }
 
 roster_of() { printf '%s/.bionic/tmp/roster-%s.state' "$1" "${2:-$SID}"; }
@@ -322,7 +323,10 @@ expect_status "2g: an unparseable payload passes" "0" "$RC"
 section "Section 3: the states the gate must never block"
 
 R3="$(make_wave_repo r3)"
-add_row "$R3" name=waived-row deliverable=.bionic/docs/record/never.md waiver="exploratory probe" launched_at="$(iso_ago 600)"
+# FIXTURE FIDELITY (Step-6 review S-1): a genuine waiver row names NO artifact — the wall's
+# waiver label reads "why this dispatch produces nothing durable". A row carrying a declared
+# artifact AND a waiver is contradictory and is answered for in Section 7.
+add_row "$R3" name=waived-row waiver="exploratory probe" launched_at="$(iso_ago 600)"
 add_row "$R3" name=met-row deliverable=.bionic/docs/record/landed.md launched_at="$(iso_ago 600)"
 deliver "$R3" .bionic/docs/record/landed.md
 
@@ -443,6 +447,71 @@ AFTER="$(ls -A "$R6/.bionic/tmp" | sort)"
 expect_eq "6c: blocking writes no state file of its own" "$BEFORE" "$AFTER"
 expect_eq "6c: the roster keeps exactly the two rows it was given — no row appended" \
   "2" "$(grep -c '^roster-state/v1|' "$(roster_of "$R6")" | tr -d ' ')"
+
+# ================================================================= Section 7
+section "Section 7: the Step-6 review remediations (C-5, C-2, S-1, S-4)"
+
+# --- C-5: two readers of one key, and only one of them normalizes ---
+#
+# The verb stores and prints `clean()`-normalized names; the gate grepped the RAW
+# `agent_type` back out of the verb's output, so any name whose stored form differs from
+# its payload form missed the line and the gate exited 0 — a silent disarm, which is the
+# exact class of disagreement this wave exists to close. The gate now reads the single line
+# the SCOPED verb returned, which removes the second reader rather than teaching it to
+# normalize.
+R7="$(make_wave_repo r7)"
+add_row "$R7" name="a b" deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)"
+run_gate "$GATE" "$(payload "$R7" "$SID" "a  b" false)"
+expect_status "7a: a name needing normalization still reaches its own contract (exit 2)" "2" "$RC"
+expect_contains "7a: …and the refusal names its artifact" \
+  "missing=.bionic/docs/record/never.md" "$OUT_STDERR"
+run_gate "$GATE" "$(payload "$R7" "$SID" "a b" false)"
+expect_status "7b: control — the exact stored form blocks as it always did" "2" "$RC"
+
+# --- C-2: a name carrying two contracts blocks nobody ---
+#
+# The gate joins by name, so a re-used agent name made agent #1 answerable for agent #2's
+# artifact. The verb now reports AMBIGUOUS and the gate passes on it: letting a stop through
+# is the recoverable error, blocking the wrong agent is not.
+R7B="$(make_wave_repo r7b)"
+deliver "$R7B" .bionic/docs/record/first.md
+add_row "$R7B" name=dup deliverable=.bionic/docs/record/first.md  tool_use_id=toolu_01FIRST \
+  launched_at="$(iso_ago 900)"
+add_row "$R7B" name=dup deliverable=.bionic/docs/record/second.md tool_use_id=toolu_01SECOND \
+  launched_at="$(iso_ago 600)"
+run_gate "$GATE" "$(payload "$R7B" "$SID" dup false)"
+expect_status "7c: an ambiguous name passes rather than blocking the wrong agent" "0" "$RC"
+expect_empty "7c: …silently, naming no artifact that may not be its job" "$OUT_STDERR"
+
+# --- S-1: a waiver does not silence a contract that also names an artifact ---
+R7C="$(make_wave_repo r7c)"
+add_row "$R7C" name=quoter deliverable=.bionic/docs/record/quoter-out.md source=declared \
+  waiver="<why this dispatch produces nothing durable>" launched_at="$(iso_ago 600)"
+run_gate "$GATE" "$(payload "$R7C" "$SID" quoter false)"
+expect_status "7d: a quoted waiver beside a declared artifact still blocks (exit 2)" "2" "$RC"
+expect_contains "7d: …naming the artifact the brief itself declared" \
+  "missing=.bionic/docs/record/quoter-out.md" "$OUT_STDERR"
+
+# --- S-4: the payload session key is shape-checked before it touches a path ---
+#
+# `roster-${SID}.state` interpolates the payload's session id straight into a path, and the
+# symlink guards check the state directory and the exact filenames — so a key carrying path
+# separators leaves the guarded directory entirely rather than tripping a guard. Session ids
+# are harness-minted UUIDs today; this is the one payload value on this path that got no
+# belt, and the repo is hostile by this machinery's own threat model.
+R7D="$(make_wave_repo r7d)"
+mkdir -p "$R7D/.bionic/tmp/roster-x" "$R7D/planted"
+SID_TRAVERSAL='x/../../../planted/evil'
+PLANTED="$R7D/planted/evil.state"
+printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$PLANTED"
+mkrow name=w1-s5 session="$SID_TRAVERSAL" deliverable=.bionic/docs/record/never.md \
+  launched_at="$(iso_ago 600)" >> "$PLANTED"
+expect_eq "7e: the traversal fixture really does escape the state directory (not vacuous)" \
+  "yes" "$([ -e "$R7D/.bionic/tmp/roster-${SID_TRAVERSAL}.state" ] && echo yes || echo no)"
+run_gate "$GATE" "$(payload "$R7D" "$SID_TRAVERSAL" w1-s5 false)"
+expect_status "7e: a session key carrying path separators is not a session key — pass" "0" "$RC"
+expect_absent "7e: …and no verdict is taken over the roster it reached" \
+  "LANDING CONTRACT" "$OUT_STDERR"
 
 # ---------- summary ----------
 printf '\n---\n%d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"

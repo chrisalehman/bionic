@@ -184,6 +184,13 @@ REPO=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null) || exit 0
 
 SID=$(_jq '.session_id')
 [ -n "$SID" ] || exit 0
+# SHAPE-CHECKED BEFORE IT BECOMES A PATH, exactly as hooks/dispatch-preflight.sh checks it.
+# This value is interpolated into the roster path below and this script APPENDS to that
+# file. The symlink guards check `.bionic`, the state directory and the exact filenames, so
+# a key carrying path separators does not trip a guard — it writes outside the directory the
+# guards protect. Session ids are harness-minted UUIDs today; every other payload value on
+# this write path is sanitized and this one was not (Step-6 review S-4).
+case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
 
 # ---------- active-wave detection ----------
 # FOURTH copy (dispatch-preflight, stop-guard and the evidence gate hold the
