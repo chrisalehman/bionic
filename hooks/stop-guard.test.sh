@@ -956,6 +956,42 @@ expect_status "by full id with no observation left: still REFUSED" 2 "$GUARD_ST"
 expect_contains "…refused for the ordinary reason, not the foreign one" \
   "No observation" "$GUARD_ERR"
 
+# THE `identified` STATE (epic-16 wave-01 slice 1). The by-id clause above keyed
+# on `confirmed` alone, and in teammate mode a confirmed row can never carry a
+# matchable id: the launch half only ever learns the ADDRESSING form, so
+# `agent_id=` is written EMPTY there by design (capture probe §3 conclusion 3,
+# recorder ARM 2). The transcript-form id arrives one state later, on
+# SubagentStart, as an `identified` row — so under the old accepted set the
+# ownership rule was unreachable for every teammate this repo dispatches, and
+# widening it to `confirmed|identified` is what makes it reachable at all.
+#
+# Reaching the rule at all needs a target whose OWNING directory disagrees with
+# the stopping session — the same construction the corpse-collision case above
+# uses, and the only path on which ROSTER_ID_MATCH is consulted.
+IFS='|' read -r ID_REPO ID_TR ID_SUB <<< "$(make_world identifiedrow yes)"
+ID_TR_B="${ID_TR%/*}/$SID_B.jsonl"
+ID_SUB_B="${ID_TR_B%.jsonl}/subagents"
+plant_agent "$ID_SUB_B" "aroamer-5555555555555555" "roamer"
+roster_row "$ID_REPO" "$SID_A" "roamer" "aroamer-5555555555555555" "" "identified"
+observe "$SID_A" "$ID_TR_B" "$ID_REPO" "roamer"
+run_guard "$(mk_stop_payload "$SID_A" "$ID_TR_B" "$ID_REPO" "roamer")"
+expect_status "an IDENTIFIED row's id establishes ownership just as a confirmed one does" \
+  0 "$GUARD_ST"
+expect_empty "…and the stop is permitted in silence" "$GUARD_ERR"
+
+# The tightening slice 4/9 bought is untouched: `intended` is still not an
+# ownership claim, because the id on an unconfirmed row is a claim about a launch
+# nothing has observed.
+IFS='|' read -r II_REPO II_TR II_SUB <<< "$(make_world intendedrow yes)"
+II_TR_B="${II_TR%/*}/$SID_B.jsonl"
+II_SUB_B="${II_TR_B%.jsonl}/subagents"
+plant_agent "$II_SUB_B" "adrifter-6666666666666666" "drifter"
+roster_row "$II_REPO" "$SID_A" "drifter" "adrifter-6666666666666666" "" "intended"
+observe "$SID_A" "$II_TR_B" "$II_REPO" "drifter"
+run_guard "$(mk_stop_payload "$SID_A" "$II_TR_B" "$II_REPO" "drifter")"
+expect_status "an INTENDED row's id still establishes nothing: REFUSED" 2 "$GUARD_ST"
+expect_contains "…as FOREIGN, by the owning directory" "FOREIGN" "$GUARD_ERR"
+
 # DEAD HISTORY: the same rule, and the refusal says which case it is. The
 # distinction is the OWNING session's transcript — the check
 # hooks/stop-check.sh and hooks/preflight-probe.sh already make.
