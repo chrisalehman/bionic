@@ -273,7 +273,7 @@ TRAIL_CHARS=")\"]>\`,;:!?.$(printf '\047')"
 QUOTE_CHARS="\`\"$(printf '\047')"
 
 lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omitted
-  printf '%s' "$1" | awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" '
+  printf '%s' "$1" | awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" -v DOCSROOT="$DOCS_ROOT" '
     # <sep> is the regex between the label and its value; the default is the
     # colon every labeled brief field uses.
     function addlabel(txt, kind, sep) {
@@ -330,6 +330,38 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       return e
     }
     function spanof(h) { return substr(text, HVS[h], spanend(h, 0) - HVS[h] + 1) }
+    # record/-inference (slice 4/4, AC-8): a path token nobody labeled can still
+    # satisfy the deliverable wall, but only under the three prefixes the plan
+    # names, and NEVER under a tmp prefix — a scratch path is never durable,
+    # labeled or not, and the exclusion is checked first so a token cannot
+    # sneak past it by also happening to contain "record/" somewhere past the
+    # tmp prefix.
+    function is_tmp_path(t) {
+      if (substr(t, 1, length(".bionic/tmp/")) == ".bionic/tmp/") return 1
+      if (substr(t, 1, length("/tmp/")) == "/tmp/") return 1
+      return 0
+    }
+    function is_record_path(t,   dr) {
+      if (is_tmp_path(t)) return 0
+      if (substr(t, 1, length("record/")) == "record/") return 1
+      if (substr(t, 1, length(".bionic/docs/record/")) == ".bionic/docs/record/") return 1
+      if (DOCSROOT != "") {
+        dr = DOCSROOT "/record/"
+        if (substr(t, 1, length(dr)) == dr) return 1
+      }
+      return 0
+    }
+    # Scans the WHOLE brief, not one label span — inference has no label to
+    # bound it. First path-shaped, record-prefixed, non-tmp token wins.
+    function scan_inferred(s,   n, arr, i, t) {
+      n = split(s, arr, /[ \t\r\n]+/)
+      for (i = 1; i <= n; i++) {
+        t = trimtok(arr[i])
+        if (!ispath(t)) continue
+        if (is_record_path(t)) return t
+      }
+      return ""
+    }
     function paths(s, maxn,   n, arr, i, t, out, seen, c) {
       n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0
       for (i = 1; i <= n; i++) {
@@ -396,7 +428,9 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
           nh++; HLS[nh] = ls; HVS[nh] = vend; HK[nh] = LKIND[i]
         }
       }
-      h = firsthit("deliverable"); if (h > 0) { v = paths(spanof(h), 4);      if (v != "") print "deliverable=" v }
+      h = firsthit("deliverable")
+      if (h > 0) { v = paths(spanof(h), 4); if (v != "") print "deliverable=" v }
+      else       { v = scan_inferred(text); if (v != "") print "inferred=" v }
       h = firsthit("duration");    if (h > 0) { v = collapse(spanof(h));      if (v != "") print "duration=" v }
       h = firsthit("progress");    if (h > 0) { v = paths(spanof(h), 1);      if (v != "") print "progress=" v }
       # CADENCE IS POSITIONAL, not merely lexical (Step-6 critic F-2). It is the
@@ -475,6 +509,22 @@ C_PROGRESS=$(sanitize "$(field_of progress)" 300)
 C_CADENCE=$(sanitize "$(field_of cadence)" 80)
 C_CLAIMS=$(sanitize "$(field_of claims)" 300)
 C_WAIVER=$(sanitize "$(field_of waiver)" 300)
+C_INFERRED=$(sanitize "$(field_of inferred)" 300)
+
+# record/-inference (slice 4/4, AC-8): a labeled deliverable always wins and is
+# recorded `source=declared`; only when the brief named none does an unlabeled
+# record/-prefixed path (never a tmp one — the awk side excludes it) step in,
+# recorded `source=inferred`. An inferred path satisfies the absent-deliverable
+# wall below the same way a labeled one always has, because by this point
+# C_DELIVERABLE is simply non-empty either way — the wall does not know or care
+# which kind it is looking at.
+C_SOURCE=""
+if [ -n "$C_DELIVERABLE" ]; then
+  C_SOURCE="declared"
+elif [ -n "$C_INFERRED" ]; then
+  C_DELIVERABLE="$C_INFERRED"
+  C_SOURCE="inferred"
+fi
 
 # What is ABSENT is recorded as a field of its own, so a consumer never has to
 # guess whether an empty value means "the brief did not say" or "the brief said
@@ -533,6 +583,7 @@ if [ -z "$C_DELIVERABLE" ] && [ -z "$C_WAIVER" ]; then
   echo "Fix: name a durable artifact path in the brief —" >&2
   echo "    Expected artifact: .bionic/docs/record/<name>.md" >&2
   echo "  Any of these labels lifts one: Expected artifact(s), Deliverable(s), Artifact(s)." >&2
+  echo "  An unlabeled record/ mention is inferred automatically — .bionic/tmp/ or /tmp/ paths never are." >&2
   echo "" >&2
   echo "Or waive it — the reason is recorded on the session roster either way:" >&2
   echo "    Deliverable-waiver: <why this dispatch produces nothing durable>" >&2
@@ -553,7 +604,7 @@ fi
 
 prune_stale_rosters
 
-ROW="roster-state/${ROSTER_VERSION}|status=intended|session=${PAYLOAD_SID}|name=${AGENT_NAME}|agent_id=|launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|subagent_type=${SUBAGENT_TYPE}|model=${AGENT_MODEL}|deliverable=${C_DELIVERABLE}|duration=${C_DURATION}|progress=${C_PROGRESS}|claims=${C_CLAIMS}|cadence=${C_CADENCE}|absent=${ABSENT}|waiver=${C_WAIVER}|tool_use_id=${TOOL_USE_ID}"
+ROW="roster-state/${ROSTER_VERSION}|status=intended|session=${PAYLOAD_SID}|name=${AGENT_NAME}|agent_id=|launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|subagent_type=${SUBAGENT_TYPE}|model=${AGENT_MODEL}|deliverable=${C_DELIVERABLE}|source=${C_SOURCE}|duration=${C_DURATION}|progress=${C_PROGRESS}|claims=${C_CLAIMS}|cadence=${C_CADENCE}|absent=${ABSENT}|waiver=${C_WAIVER}|tool_use_id=${TOOL_USE_ID}"
 
 WROTE=1
 if [ ! -e "$ROSTER_FILE" ]; then
