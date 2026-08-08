@@ -135,8 +135,22 @@ if [ "$TOOL_NAME" = "Bash" ]; then
   # against the live file before it discharges anything.
   [ -n "$MLINES" ] || exit 0
 else
-  AGENT_ID=$(_jq '.tool_response.agentId')
+  # TWO SPELLINGS, ONE FACT (AC-10). The dispatch modes name the same field
+  # differently: an async task launch returns `tool_response.agentId` (camel),
+  # and an interactive teammate spawn returns `tool_response.agent_id` (snake)
+  # alongside `teammate_id`. This guard read the camel spelling ALONE, so every
+  # dispatch from an interactive session — which is every dispatch this repo has
+  # made since 07-12 — exited here, and no roster row on any live session ever
+  # reached `confirmed` (record/landing-wave-payload-probe.md §Task 1). The
+  # fixture that made the arm look proven was faithful to the OTHER mode: it came
+  # from a `claude -p` child, and print mode can never take the teammate branch
+  # (capture probe §1).
+  AGENT_ID=$(_jq '.tool_response.agentId // .tool_response.agent_id')
   TOOL_USE_ID=$(_jq '.tool_use_id')
+  # WHICH NAMESPACE the id above is in, decided by the platform's own word for
+  # what it did rather than by sniffing the id's shape. Read here, spent below.
+  DISPATCH_STATUS=$(_jq '.tool_response.status')
+  TEAMMATE_ID=$(_jq '.tool_response.teammate_id // .tool_response.agent_id')
   [ -n "$AGENT_ID" ] && [ -n "$TOOL_USE_ID" ] || exit 0
 fi
 
@@ -214,8 +228,27 @@ ROSTER_FILE="$STATE_DIR/roster-${SID}.state"
 #
 # The launch half wrote an `intended` row at PreToolUse, keyed by `tool_use_id`
 # because no agent id exists yet at that moment (slice 4/3). This event carries
-# the same `tool_use_id` and, in `tool_response.agentId`, the id that row was
-# waiting for — slice 4/1 capture E confirms the pair, in both dispatch modes.
+# the same `tool_use_id` and an id for the agent that spawned — and WHICH id
+# depends on the dispatch mode, which is the whole of epic-16 slice 0.
+#
+# THE ID NAMESPACES DO NOT MEET. An async launch returns the transcript-form id
+# (`a26bd30bf8616411b`) — the same form every later observation of that agent
+# carries, so the roster's `agent_id=` is directly matchable and the by-id walls
+# work. A teammate spawn returns the ADDRESSING form
+# (`probemate@session-3b51bef0`) in both `agent_id` and `teammate_id`, while
+# every subsequent payload for that same teammate — SubagentStart, SubagentStop,
+# its own tool calls — carries the transcript form `aprobemate-4da9be517e8f90bd`
+# at top level. No payload carries both, and the only key bridging them is the
+# NAME (capture probe §3, conclusion 3).
+#
+# So the addressing id is recorded in a field of its own and `agent_id=` is left
+# EMPTY in teammate mode. Writing it into `agent_id=` would cost more than the
+# empty it replaces: hooks/stop-guard.sh's by-id match feeds the foreign-session
+# wall, and a roster asserting an identity no observation can ever produce turns
+# that wall's input from "unknown" into "wrong" — the failure the payload probe
+# named before either was written (§Task 1 fix direction 2). The transcript-form
+# id is not lost, only later: it arrives on SubagentStart, name-joined onto an
+# `identified` row. A `confirmed` row never carries a wrong-namespace id.
 #
 # COMPLETION IS AN APPEND, NOT A REWRITE, without exception — this arm never
 # rewrites the roster and never removes a row from it. THE SERIALIZATION STORY,
@@ -276,17 +309,39 @@ if [ "$TOOL_NAME" = "Agent" ]; then
   AGENT_ID=$(sanitize "$AGENT_ID" 200)
   [ -n "$AGENT_ID" ] || exit 0
 
-  # Substitute the two fields that execution confirms, leaving every other field
+  # The namespace split, spent. `teammate_spawned` is the platform's own word for
+  # the branch it took, so the mode is READ rather than inferred from the id's
+  # shape — an id-shape sniff would be a second grammar guessing at what the
+  # first one did, which is the defect class this whole script exists to avoid.
+  # The addressing form keeps the `@` that makes it addressable: sanitize strips
+  # `|`, newlines and control characters, and `@` is none of those.
+  ROW_AGENT_ID="$AGENT_ID"
+  ROW_TEAMMATE_ID=""
+  if [ "$DISPATCH_STATUS" = "teammate_spawned" ]; then
+    ROW_TEAMMATE_ID=$(sanitize "$TEAMMATE_ID" 200)
+    [ -n "$ROW_TEAMMATE_ID" ] || exit 0
+    ROW_AGENT_ID=""
+  fi
+
+  # Substitute the fields that execution confirms, leaving every other field
   # of the launched row — the contract state especially — where the brief put it,
   # so the completed row is self-sufficient for a consumer that reads only it.
-  COMPLETED=$(printf '%s' "$ROW" | awk -v id="$AGENT_ID" '
-    BEGIN { RS = "|"; ORS = "" }
+  # `teammate_id` is the one field the launch half does not write, so it is
+  # appended when absent and substituted when present: a launch row that grows
+  # the field later must not end up carrying two of them, since every reader
+  # takes the FIRST match for a key. In async mode it is not written at all —
+  # the field's presence is itself the statement of which namespace the row's id
+  # is in, and an always-empty field would say that much less clearly.
+  COMPLETED=$(printf '%s' "$ROW" | awk -v id="$ROW_AGENT_ID" -v tid="$ROW_TEAMMATE_ID" '
+    BEGIN { RS = "|"; ORS = ""; seen = 0 }
     {
       f = $0
       if (f ~ /^status=/)   f = "status=confirmed"
       if (f ~ /^agent_id=/) f = "agent_id=" id
+      if (tid != "" && f ~ /^teammate_id=/) { f = "teammate_id=" tid; seen = 1 }
       printf "%s%s", (NR > 1 ? "|" : ""), f
-    }')
+    }
+    END { if (tid != "" && !seen) printf "|teammate_id=%s", tid }')
   printf '%s\n' "$COMPLETED" >> "$ROSTER_FILE" 2>/dev/null
 
   # NO BOUND ON THE ROSTER, deliberately, and NOT by inheritance from the
