@@ -1621,13 +1621,31 @@ do_install_hooks
 # run by hand.
 #
 # execution-recorder.sh is the machine's FIRST PostToolUse registration, and it
-# registers twice — one script, two arms (epic-15 wave-03 slice 4/4): the Bash
-# arm turns stop-check.sh's printed machine line into an observation record, the
-# Agent arm completes the session roster's launch row once a dispatch has
-# actually spawned. Both facts are claims that something HAPPENED, which is why
-# neither can be recorded from PreToolUse; stop-guard.sh's retired Bash arm
-# recorded observations before the command ran and could never know whether it
-# did (design/orchestrator-subagent-coordination.md §4, spec AC-3).
+# registers THREE times — one script, three arms. Two are PostToolUse (epic-15
+# wave-03 slice 4/4): the Bash arm turns stop-check.sh's printed machine line into
+# an observation record, the Agent arm completes the session roster's launch row
+# once a dispatch has actually spawned. Both facts are claims that something
+# HAPPENED, which is why neither can be recorded from PreToolUse; stop-guard.sh's
+# retired Bash arm recorded observations before the command ran and could never
+# know whether it did (design/orchestrator-subagent-coordination.md §4, spec AC-3).
+#
+# The third is SubagentStart (epic-16 wave-01), and it is a different event family
+# rather than a third matcher: that payload carries no tool_name at all, so it can
+# only arrive through its own registration. It appends the `identified` row that
+# finally carries the TRANSCRIPT-form agent id — the first form the by-id ownership
+# walls in stop-guard.sh and stop-check.sh can match, and without it those walls are
+# unreachable for every interactive (teammate-mode) dispatch this machine makes.
+#
+# SubagentStop carries landing-gate.sh, the other half of the same wave: every
+# contract this machinery checks at LAUNCH (dispatch-preflight.sh's deliverable
+# wall) is now checked at LANDING, against the same named artifacts. Both events
+# take an EMPTY matcher — neither carries a tool name to match on — which is the
+# no-matcher branch of wire_managed_hooks below.
+#
+# Both registrations are exercised end to end by tests/cross-gate-agreement.test.sh
+# §L, which asserts in both directions: bootstrap names the event, and the hook
+# guards on that same spelling. A hook registered for an event it does not read —
+# or reading one nobody registered — is inert in the quietest way there is.
 MANAGED_HOOKS=(
   "PreToolUse|Bash|~/.claude/hooks/protect-main.sh"
   "PreToolUse|Bash|~/.claude/hooks/protect-database.sh"
@@ -1637,6 +1655,7 @@ MANAGED_HOOKS=(
   "PreToolUse|Agent|~/.claude/hooks/dispatch-preflight.sh"
   "PostToolUse|Bash|~/.claude/hooks/execution-recorder.sh"
   "PostToolUse|Agent|~/.claude/hooks/execution-recorder.sh"
+  "SubagentStart||~/.claude/hooks/execution-recorder.sh"
   "PreToolUse|Write|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "Stop||~/.claude/hooks/context-spend.sh"
