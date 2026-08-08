@@ -29,12 +29,15 @@
 #   - not an Agent-tool call                            -> pass, silent  (A7 relevance hoist)
 #   - cwd/repo unresolvable                              -> pass, silent (ambiguity)
 #   - no active wave                                     -> pass, silent (nothing to decide)
-#   - payload carries no session_id                      -> pass, silent (§7 table: start=open)
+#   - payload carries no session_id, or one that is not
+#     shaped like one (anything outside [A-Za-z0-9_-])    -> pass, silent (§7 table: start=open)
 #   - attestation missing, unreadable, symlinked, or
 #     keyed to a different session (foreign)              -> REFUSE, naming the fix command
 #   - attestation present and keyed to THIS session_id    -> pass, silent
 #   - brief names no deliverable and carries no waiver    -> REFUSE, naming both
 #     (the absent-deliverable wall, user-directed post-w4)   the fix and the waiver
+#   - brief names a deliverable that resolves OUTSIDE the -> REFUSE, naming the
+#     repo root (the containment wall, Step-6 review S-2)    path and where it lands
 #
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
 # [WALL: hooks/dispatch-preflight.test.sh]
@@ -133,6 +136,16 @@ echo "$CURRENT" | grep -qE '^([0-9]+[ab]?|T[0-9]+)$' || exit 0
 # cannot prove whose dispatch this is, so we cannot refuse it as foreign.
 PAYLOAD_SID=$(_jq '.session_id')
 [ -n "$PAYLOAD_SID" ] || exit 0
+
+# ...and the same direction for a session key that is not SHAPED like one. Every
+# state path this gate reads or writes is built by interpolating this value —
+# preflight-<sid>.state, roster-<sid>.state — and the symlink guards below check
+# $STATE_DIR and those exact filenames, so a key carrying a path separator leaves
+# the guarded directory entirely rather than tripping a guard (Step-6 review S-4).
+# Session ids are harness-minted UUIDs, so this refuses nothing real; it is the
+# belt every other payload value on these paths already wears via sanitize(),
+# taken in the one direction §7 assigns an unreadable session key — pass, silent.
+case "$PAYLOAD_SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
 
 deny() {  # <reason line>...
   echo "BLOCKED: this subagent start needs a this-session environment attestation — a wave is active." >&2
@@ -287,10 +300,24 @@ QUOTE_CHARS="\`\"$(printf '\047')"
 lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omitted
   printf '%s' "$1" | awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" -v DOCSROOT="$DOCS_ROOT" -v DOCSROOTREL="$DOCS_ROOT_REL" '
     # <sep> is the regex between the label and its value; the default is the
-    # colon every labeled brief field uses.
-    function addlabel(txt, kind, sep) {
+    # colon every labeled brief field uses. <bol> marks a label that only counts
+    # at the START of a line — see the waiver note in BEGIN.
+    function addlabel(txt, kind, sep, bol) {
       NL++; LTXT[NL] = txt; LKIND[NL] = kind
       LSEP[NL] = (sep == "" ? "[ \t]*:" : sep)
+      LBOL[NL] = (bol == "" ? 0 : 1)
+    }
+    # True iff position p is the first non-blank thing on its line. Leading
+    # whitespace still counts as a line start (an indented brief field is a
+    # field); anything else before it on the line does not.
+    function at_line_start(p,   k, ch) {
+      k = p - 1
+      while (k >= 1) {
+        ch = substr(lc, k, 1)
+        if (ch == " " || ch == "\t") { k--; continue }
+        return (ch == "\n")
+      }
+      return 1
     }
     function trimtok(t,   ch) {
       while (length(t) > 0) { ch = substr(t, 1, 1);         if (index(LEAD,  ch) > 0) t = substr(t, 2);                    else break }
@@ -369,17 +396,44 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       }
       return 0
     }
+    # True iff position p falls inside the span of an INPUT-designating label
+    # (`read first`, `scope constraint`). See the kind note in BEGIN: those spans
+    # name what the agent must CONSULT or must NOT TOUCH, so a path inside one is
+    # never a thing the agent produces.
+    function in_input_span(p,   j) {
+      for (j = 1; j <= nh; j++) {
+        if (HK[j] != "input") continue
+        if (p >= HLS[j] && p <= spanend(j, 0)) return 1
+      }
+      return 0
+    }
     # Scans the WHOLE brief, not one label span — inference has no label to
-    # bound it. First path-shaped, record-prefixed, non-tmp token wins.
-    function scan_inferred(s,   n, arr, i, t) {
-      n = split(s, arr, /[ \t\r\n]+/)
-      for (i = 1; i <= n; i++) {
-        t = trimtok(arr[i])
+    # bound it. First path-shaped, record-prefixed, non-tmp token OUTSIDE every
+    # input span wins.
+    #
+    # Why this walks positions instead of split()ing on whitespace: the input-span
+    # exclusion is positional, and a token divorced from its offset cannot be
+    # asked which span it came from. Step-6 review C-1 — a `Read first:` path
+    # became the declared deliverable and the landing gate then ordered the agent
+    # to overwrite the file it was sent to read.
+    function scan_inferred(   pos, t, start, rest) {
+      pos = 1
+      while (pos <= length(text)) {
+        rest = substr(text, pos)
+        if (match(rest, /[^ \t\r\n]+/) == 0) break
+        start = pos + RSTART - 1
+        t = substr(text, start, RLENGTH)
+        pos = start + RLENGTH
+        if (in_input_span(start)) continue
+        t = trimtok(t)
         if (!ispath(t)) continue
         if (is_record_path(t)) return t
       }
       return ""
     }
+    # A waiver REASON that is the angle-bracketed slot out of the wall message,
+    # copied rather than filled in. A real reason never opens with one.
+    function isplaceholder(v) { return (v ~ /^<[^<>]*>/) }
     function paths(s, maxn,   n, arr, i, t, out, seen, c) {
       n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0
       for (i = 1; i <= n; i++) {
@@ -396,20 +450,34 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # LONGEST FIRST — see the nesting note above. `-` marks a label that only
       # BOUNDS a span; it is a real brief field, just not one the roster lifts.
       #
+      # `input` is a second non-lifting kind, and it bounds spans identically —
+      # the difference is that the record/-inference scan REFUSES to take a path
+      # out of one (Step-6 review C-1). These two labels are the ones that name
+      # files the agent must read, or must leave alone; every other `-` label
+      # heads ordinary prose, where an unlabeled record/ path is exactly the
+      # deliverable the inference exists to find (S12, and the `Your slice:`
+      # spans those cases sit inside).
+      #
       # `deliverable-waiver` heads the table because it is the longest label AND
       # because it nests the shortest-but-one: a brief line reading
       # `Deliverable-waiver: <reason>` must never lift as a `deliverable`. The
       # separator rule already keeps them apart (`deliverable` requires a colon,
       # and the next character here is a hyphen), but the ordering makes the
       # intent structural rather than incidental.
-      addlabel("deliverable-waiver", "waiver")
+      #
+      # It is also the one label pinned to LINE START. It is the only label that
+      # OPENS a wall rather than filling a field, and briefs in this repo quote
+      # the wall message that names it constantly — so a mid-sentence occurrence
+      # is documentation, not a declaration (Step-6 review S-1: one quoted line
+      # silenced the landing contract for the whole dispatch).
+      addlabel("deliverable-waiver", "waiver", "", 1)
       addlabel("subprocess claims", "claims")
       addlabel("subprocess claim",  "claims")
       addlabel("expected artifacts", "deliverable")
       addlabel("expected artifact",  "deliverable")
       addlabel("progress artifact",  "progress")
       addlabel("expected duration",  "duration")
-      addlabel("scope constraint",   "-")
+      addlabel("scope constraint",   "input")
       addlabel("exit condition",     "-")
       addlabel("progress path",      "progress")
       addlabel("deliverables",       "deliverable")
@@ -417,7 +485,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       addlabel("deliverable",        "deliverable")
       addlabel("constraints",        "-")
       addlabel("your slice",         "-")
-      addlabel("read first",         "-")
+      addlabel("read first",         "input")
       addlabel("artifacts",          "deliverable")
       addlabel("artifact",           "deliverable")
       addlabel("progress",           "progress")
@@ -440,6 +508,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
           ls = p
           if (substr(lc, ls, length(lab)) != lab) ls = p + 1  # the guard char matched too
           from = vend
+          if (LBOL[i] && !at_line_start(ls)) continue
           clash = 0
           for (j = 1; j <= nh; j++) if (ls <= HVS[j] - 1 && vend - 1 >= HLS[j]) { clash = 1; break }
           if (clash) continue
@@ -458,7 +527,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       v = ""
       if (h > 0) { v = paths(spanof(h), 4) }
       if (v != "") { print "deliverable=" v }
-      else         { v = scan_inferred(text); if (v != "") print "inferred=" v }
+      else         { v = scan_inferred(); if (v != "") print "inferred=" v }
       h = firsthit("duration");    if (h > 0) { v = collapse(spanof(h));      if (v != "") print "duration=" v }
       h = firsthit("progress");    if (h > 0) { v = paths(spanof(h), 1);      if (v != "") print "progress=" v }
       # CADENCE IS POSITIONAL, not merely lexical (Step-6 critic F-2). It is the
@@ -482,7 +551,11 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # and whole, ending where the next labelled field begins. An EMPTY value is
       # not printed, which is the whole of the "a reasonless waiver is not a
       # waiver" rule: the wall below reads presence, and presence means a reason.
-      h = firsthit("waiver");      if (h > 0) { v = collapse(spanof(h));      if (v != "") print "waiver=" v }
+      # A PLACEHOLDER value is not printed for the same reason read one step
+      # further: the wall message hands the author a slot to fill, and a brief
+      # that quotes the slot back unfilled has given no reason at all (S-1).
+      h = firsthit("waiver")
+      if (h > 0) { v = collapse(spanof(h)); if (v != "" && !isplaceholder(v)) print "waiver=" v }
     }
   ' 2>/dev/null
 }
@@ -572,6 +645,93 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 [ -n "$C_DELIVERABLE" ] || add_absent deliverable
 [ -n "$C_DURATION" ]    || add_absent duration
 [ -n "$C_PROGRESS" ]    || add_absent progress
+
+# ========================================================= THE CONTAINMENT WALL
+# (Step-6 review S-2.)
+#
+# A deliverable is a path this repo's machinery will later STAT, and — on the
+# directory branch — WALK. Nothing downstream checks where it points: `abs_path`
+# in hooks/session-sweeper.sh prefixes the repo root for a relative path and
+# passes an absolute one straight through, so `Expected artifact: /usr/share`
+# stats and walks /usr/share on every subagent stop, and the refusal text hands
+# the stopping agent the mtime of whatever it found. Both halves are fixed HERE
+# rather than there, because dispatch is the moment the path is still editable by
+# the author who wrote it: at stop time the only available answer is to refuse an
+# agent for a brief it did not write.
+#
+# Resolution is LEXICAL for the part that does not exist yet — the deliverable is
+# by definition not on disk, so there is nothing there to realpath — and PHYSICAL
+# for the ancestor that does. Both halves are needed, and the second one is not
+# decoration: `git rev-parse --show-toplevel` reports the repo root with symlinks
+# resolved, so on a machine where a path component is a link (macOS `/var` ->
+# `/private/var`, `/tmp` -> `/private/tmp`) a brief spelling a perfectly good
+# in-repo absolute path compares against a root it can never match, and the wall
+# false-blocks. Resolving the existing prefix puts both sides in the same terms.
+#
+# It also means a symlinked ancestor INSIDE the repo that points out of it is
+# caught, which is the right answer rather than a bonus: what the landing check
+# will stat is where the link lands. An ancestor that cannot be entered at all is
+# an ambiguity, and takes §7 direction — fall back to the lexical answer rather
+# than refuse on a question this gate cannot answer.
+resolve_in_repo() {  # <path> -> absolute, `.`/`..` folded, existing prefix physical
+  local p="$1" abs out part had_f head rest phys
+  case "$p" in
+    /*) abs="$p" ;;
+    *)  abs="$REPO/$p" ;;
+  esac
+  case "$-" in *f*) had_f=1 ;; *) had_f=0 ;; esac
+  set -f   # a `*` inside a brief-supplied path is a character, never a glob
+  out=""
+  local IFS=/
+  for part in $abs; do
+    case "$part" in
+      ''|.) ;;
+      ..)   out="${out%/*}" ;;
+      *)    out="$out/$part" ;;
+    esac
+  done
+  unset IFS
+  [ "$had_f" -eq 1 ] || set +f
+  out="${out:-/}"
+
+  head="$out"; rest=""
+  while [ -n "$head" ] && [ ! -d "$head" ]; do
+    rest="${head##*/}${rest:+/$rest}"
+    head="${head%/*}"
+  done
+  if [ -n "$head" ]; then
+    phys=$(cd "$head" 2>/dev/null && pwd -P)
+  else
+    phys="/"
+  fi
+  [ -n "$phys" ] || { printf '%s' "$out"; return; }
+  case "$phys" in
+    /) printf '%s' "/$rest" ;;
+    *) printf '%s' "${phys}${rest:+/$rest}" ;;
+  esac
+}
+
+if [ -n "$C_DELIVERABLE" ]; then
+  D_ABS=$(resolve_in_repo "$C_DELIVERABLE")
+  case "$D_ABS" in
+    "$REPO"/*) : ;;
+    *)
+      echo "BLOCKED: this dispatch names a deliverable outside the repository — a wave is active." >&2
+      echo "" >&2
+      echo "    ${C_DELIVERABLE}" >&2
+      echo "  resolves to ${D_ABS}, which is not under ${REPO}." >&2
+      echo "" >&2
+      echo "The landing check stats — and, for a directory, walks — whatever this names," >&2
+      echo "on every stop of the agent that owns it. It must be a path inside this repo." >&2
+      echo "" >&2
+      echo "Fix: name a repo-relative artifact path in the brief —" >&2
+      echo "    Expected artifact: .bionic/docs/record/<name>.md" >&2
+      echo "" >&2
+      echo "Then retry the dispatch." >&2
+      exit 2
+      ;;
+  esac
+fi
 
 # ======================================================= THE ABSENT-DELIVERABLE WALL
 # (user-directed, epic-15 post-wave-04: "A wall. It should be a wall.")
