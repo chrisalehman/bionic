@@ -1231,6 +1231,36 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ONLY_READFIRST" "w99-refus
 expect_contains "the refusal names the record/ inference rule" "inferred automatically" "$GATE_ERR"
 expect_contains "the refusal names the tmp exclusion" ".bionic/tmp/ or /tmp/ paths never are" "$GATE_ERR"
 
+# ---- LIVE SPECIMEN (post-landing addendum): an earlier, PATHLESS deliverable-kind
+# label hit shadows a later, real labeled deliverable ----
+#
+# Caught live during this wave (a real dispatch brief false-blocked): a brief quoting
+# landing-verdict prose — "…per deliverable:" — ahead of its real "Expected artifact:"
+# line. `firsthit("deliverable")` picks the EARLIER hit by position ("per deliverable:"),
+# whose span ("missing=<x> | empty=<y>") carries no path-shaped token, so
+# `paths(spanof(h), 4)` returns empty. Landing slice 4 only fell through to the record/
+# inference scan when NO deliverable-kind hit existed at all (`h == 0`); a hit that
+# exists but yields no path (`h > 0`, `v == ""`) printed nothing and left the wall to
+# refuse a brief that in fact names a real, later, labeled deliverable. The fix widens
+# the fallback to `v == ""` (whether or not a hit was found), so the whole-brief inference
+# scan finds the record/ path that the shadowed label missed.
+BRIEF_SHADOW_LABEL='UNMET detail lists every failing conjunct, per deliverable:
+missing=<x> | empty=<y>
+
+Expected artifact: .bionic/docs/record/w1-specimen.md'
+
+REPO=$(make_repo r12g yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_SHADOW_LABEL" "w1-specimen")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "an earlier pathless 'per deliverable:' hit no longer shadows the real labeled line" \
+  "0" "$GATE_ST"
+expect_absent "…and prints no refusal" "BLOCKED" "$GATE_ERR"
+expect_status "the roster records the real deliverable, recovered via the inference scan" \
+  ".bionic/docs/record/w1-specimen.md" "$(roster_field "$ROW" deliverable)"
+expect_status "the recovered value is marked inferred (the shadowed label never yielded it directly)" \
+  "inferred" "$(roster_field "$ROW" source)"
+
 echo ""
 echo "----------------------------------------"
 echo "TOTAL: $TOTAL  PASS: $PASS  FAIL: $FAIL"
