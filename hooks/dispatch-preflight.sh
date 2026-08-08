@@ -324,11 +324,21 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       while (length(t) > 0) { ch = substr(t, length(t), 1); if (index(TRAIL, ch) > 0) t = substr(t, 1, length(t) - 1);     else break }
       return t
     }
+    # A token carrying an unfilled `<...>` slot is a TEMPLATE, not a path — the
+    # wall message below hands the author exactly one
+    # (`Expected artifact: .bionic/docs/record/<name>.md`) and briefs in this repo
+    # quote that text constantly, so the slot lifted as a real contract and
+    # nothing could ever satisfy it (Step-6 review C-1, second shape). The rule
+    # lives HERE, in the predicate both the labeled lift and the inference scan
+    # run every token through, so the two can never disagree about what a
+    # template is. A refusal follows from rejecting it, via the absent-deliverable
+    # wall — the author is told at dispatch, where the brief is still editable.
     function ispath(t) {
       if (length(t) < 3)        return 0
       if (index(t, "/") == 0)   return 0
       if (t !~ /[A-Za-z]/)      return 0
       if (substr(t, 1, 1) == "-") return 0
+      if (t ~ /<[^<>]*>/)       return 0
       return 1
     }
     function collapse(s) { gsub(/[ \t\r\n]+/, " ", s); sub(/^ +/, "", s); sub(/ +$/, "", s); return s }
