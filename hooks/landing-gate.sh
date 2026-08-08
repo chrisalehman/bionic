@@ -64,6 +64,14 @@ EVENT=$(_jq '.hook_event_name')
 # `agent_type` is the teammate's name, which is what the roster is keyed on.
 NAME=$(_jq '.agent_type')
 [ -n "$NAME" ] || exit 0
+# NON-EMPTY IS NOT ENOUGH: the sweeper's verdict scopes on clean("$NAME")
+# (session-sweeper.sh clean()), and a raw name made up only of the characters clean() folds
+# to nothing (`|`, whitespace, tab, CR, control) scopes to the EMPTY predicate — which widens
+# the verb to a BARE verdict, one line per name, and the head -1 below would then read the
+# FIRST roster row's foreign contract and block this agent citing it. So a name that cleans
+# to empty is guarded here the same way the session key is below (Step-6 critic F-1): fold the
+# same set clean() folds and, if nothing is left, pass silent — the ambiguity direction.
+case "$(printf '%s' "$NAME" | tr -d '[:space:][:cntrl:]|')" in "") exit 0 ;; esac
 
 # BLOCKS ONCE, and this is the whole mechanism. Claude Code re-enters the stop with
 # stop_hook_active true after a hook blocked it; refusing again would wedge an agent in a

@@ -316,10 +316,13 @@ fi
 #     sitting in this session's own subagents directory.
 #
 # So the directory decides, and the roster keeps the job it can actually do: it
-# is the CONTRACT source for a target already established as ours, and a
-# `confirmed` row still establishes ownership BY AGENT ID — an id is unambiguous
-# by construction, and a confirmed row is this session's own record of its own
-# launch. It is never consulted as a name-oracle again.
+# is the CONTRACT source for a target already established as ours, and ownership
+# by id is established by a `confirmed` OR `identified` row carrying a NON-EMPTY
+# `agent_id` — an id is unambiguous by construction. In teammate mode the
+# transcript-form id arrives on the `identified` row while the `confirmed` row's
+# `agent_id=` is EMPTY by design (the detail below and execution-recorder.sh's
+# ARM 2 say why), so `identified` is what makes the by-id clause reachable for an
+# interactive dispatch at all. It is never consulted as a name-oracle again.
 ROSTER_ROW=""
 ROSTER_ID_MATCH=""
 if [ -n "$ROSTER_PATH" ] && [ -f "$ROSTER_PATH" ] && [ ! -L "$ROSTER_PATH" ]; then
