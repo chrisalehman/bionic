@@ -1687,9 +1687,15 @@ wire_managed_hooks() {
       ' "$settings" > "$tmp" || return 1
       mv "$tmp" "$settings" || return 1
     else
+      # THE SAME TIMEOUT ON THIS BRANCH. An entry with no matcher is not an entry with no
+      # budget: the events that take this branch (SubagentStart, SubagentStop) run hooks
+      # that spawn subprocesses — the landing gate calls the sweeper's verdict verb over an
+      # uncapped roster — and nothing else bounds them. Both hooks are fail-open by design,
+      # so a killed hook lets the event through, which makes the ceiling free (Step-6
+      # review C-4; this reverses plan assumption 33).
       jq --arg ev "$event" --arg c "$cmd" '
         .hooks[$ev] += [{
-          "hooks": [{"type": "command", "command": $c}]
+          "hooks": [{"type": "command", "command": $c, "timeout": 10}]
         }]
       ' "$settings" > "$tmp" || return 1
       mv "$tmp" "$settings" || return 1
