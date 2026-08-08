@@ -316,14 +316,28 @@ if [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
     case "$rline" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
     rid=$(record_field "$rline" agent_id)
     rname=$(record_field "$rline" name)
-    # `confirmed`, not merely non-empty — the same tightening as
-    # hooks/stop-check.sh's copy, for the same reason (Step-6 review C-2): the
-    # comment above always stated the invariant this way, while the code leaned
-    # on hooks/dispatch-preflight.sh emitting `agent_id=` empty on `intended`
-    # rows to keep it true. Here the gap is a wall, not a display: an intended
-    # row carrying an id walked a foreign agent past the ownership rule.
-    [ -n "$rid" ] && [ "$rid" = "$AGENT_ID" ] \
-      && [ "$(record_field "$rline" status)" = "confirmed" ] && ROW_BY_ID="$rline"
+    # `confirmed` or `identified`, never merely non-empty — the same accepted set
+    # as hooks/stop-check.sh's copy, for the same reasons.
+    #
+    # NOT `intended` (Step-6 review C-2): the comment above always stated the
+    # invariant this way, while the code leaned on hooks/dispatch-preflight.sh
+    # emitting `agent_id=` empty on `intended` rows to keep it true. Here the gap
+    # is a wall, not a display — an intended row carrying an id walked a foreign
+    # agent past the ownership rule.
+    #
+    # BUT `identified` TOO (epic-16 wave-01 slice 1), because `confirmed` alone
+    # is a set no teammate row can satisfy BY ID. The launch response carries
+    # only the addressing form `name@session-xxxx`, so hooks/execution-recorder.sh
+    # writes `agent_id=` EMPTY on a confirmed teammate row by design; the
+    # transcript-form id — the only form this gate ever resolves a target to —
+    # arrives one state later, from SubagentStart. Without this the rule was
+    # unreachable for every interactive dispatch this repo makes, while the
+    # suite's async-shaped fixtures kept it looking alive.
+    if [ -n "$rid" ] && [ "$rid" = "$AGENT_ID" ]; then
+      case "$(record_field "$rline" status)" in
+        confirmed|identified) ROW_BY_ID="$rline" ;;
+      esac
+    fi
     [ -n "$rname" ] && [ "$rname" = "$AGENT_NAME" ] && ROW_BY_NAME="$rline"
   done < "$ROSTER_FILE"
   ROSTER_ID_MATCH="$ROW_BY_ID"

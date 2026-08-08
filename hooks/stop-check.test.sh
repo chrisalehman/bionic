@@ -943,6 +943,23 @@ expect_contains "C-2: a CONFIRMED row's id still establishes OURS" \
   "Classification: OURS" "$OUT10C"
 expect_contains "C-2: …naming the roster as the reason" "confirms it by agent id" "$OUT10C"
 
+# …and so does an IDENTIFIED row's (epic-16 wave-01 slice 1). `confirmed` alone
+# was an accepted set no teammate row could ever satisfy BY ID: the launch half
+# learns only the addressing form `name@session-xxxx`, so a confirmed row's
+# `agent_id=` is written empty in that mode by design (capture probe §3
+# conclusion 3). The transcript-form id — the one every observation of that agent
+# carries — arrives one state later, on SubagentStart. Refusing it here would
+# leave this rule dead for every teammate dispatch while looking alive in the
+# suite, because every fixture predating the wave was async-shaped.
+make_agent "$H10" "$S10" "$FOREIGN10" "aforeign-2020202020202020" "id-target-2" "working" >/dev/null
+printf 'roster-state/v1|status=identified|session=%s|name=started-name|agent_id=aforeign-2020202020202020|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_J\n' \
+  "$OWN10" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
+OUT10E=$(run_check_as "$OWN10" "$H10" "$R10" "id-target-2")
+expect_contains "an IDENTIFIED row's id establishes OURS — the state teammate ids arrive in" \
+  "Classification: OURS" "$OUT10E"
+expect_contains "…naming the same roster reason as a confirmed row" \
+  "confirms it by agent id" "$OUT10E"
+
 # --- (c) C-2 regression guard: the PRE-RESTART world is untouched ---
 #
 # Every row in a session that has not restarted since the recorder shipped is
