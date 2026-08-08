@@ -503,6 +503,11 @@ expect_contains "the completed row keeps the contract state the brief carried" \
 expect_contains "the completed row keeps the correlation key" "tool_use_id=$TUID" "$CONFIRMED"
 expect_eq "the intended row is not rewritten in place — completion is an append" \
   "1" "$(grep -c 'status=intended' "$ROSTER")"
+# The async shape carries no addressing id, so the completed row gains no
+# `teammate_id` field. The field is teammate-mode's alone (AC-10): a reader that
+# finds it knows which namespace the row's id is in without parsing the id.
+expect_absent "an async completion adds no teammate_id field" \
+  "teammate_id=" "$CONFIRMED"
 
 # The synchronous dispatch shape (capture D): a different tool_response, the same
 # agentId key, so the same completion.
@@ -519,6 +524,79 @@ run_rec "$(jq -n --arg s "$SID_A" --arg t "$RS_TR" --arg c "$RS_REPO" --arg u "$
     tool_use_id:$u, duration_ms:4795}')"
 expect_contains "a synchronous dispatch confirms the same way (capture D shape)" \
   "agent_id=a6bc0caf11962bbb6" "$(grep 'status=confirmed' "$RS_REPO/.bionic/tmp/roster-${SID_A}.state")"
+
+# ---------- the TEAMMATE payload shape (AC-10, epic-16 wave-01 slice 0) ----------
+#
+# FIXTURE FIDELITY: transcribed field for field from
+# .bionic/docs/record/landing-wave-capture-probe.md §3-A — the verbatim
+# PostToolUse|Agent payload captured live on CLI 2.1.226 from a pty-driven
+# interactive session with CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1. Only the
+# session id, transcript, cwd, name and tool_use_id are re-pointed at this
+# suite's sandbox; every tool_response key, its spelling and its value form are
+# the capture's own. This is the shape EVERY interactive dispatch on this machine
+# has produced since 07-12 (payload probe §Task 1(c)), and the shape the
+# recorder read straight past: it looked for `agentId` and the payload spells it
+# `agent_id`, so the guard at :140 exited before any roster work and no row on
+# any live session ever reached `confirmed`.
+#
+# THE TWO IDS ARE NOT THE SAME VALUE, which is why this is not a one-line
+# spelling fix. `tool_response.agent_id` here is the ADDRESSING form
+# `probemate@session-3b51bef0`; every later payload for the same teammate —
+# SubagentStart, SubagentStop, its own tool calls — carries the TRANSCRIPT form
+# `aprobemate-4da9be517e8f90bd` in top-level `agent_id`, and no payload contains
+# both (capture probe §3 conclusion 3). Writing the addressing form into
+# `agent_id=` would turn every by-id wall's input from EMPTY into WRONG — the
+# roster would assert an identity no observation can ever match. So the
+# addressing id lands in its own field and `agent_id=` stays empty here; the
+# transcript-form id arrives later, from SubagentStart (slice 1's `identified`
+# row). A confirmed row never carries a wrong-namespace id.
+mk_agent_post_teammate() {  # <sid> <transcript> <cwd> <name> <addressing-id> <tool_use_id>
+  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg n "$4" --arg a "$5" --arg u "$6" \
+    '{session_id:$s, transcript_path:$t, cwd:$c,
+      prompt_id:"95b0701b-7814-42ca-a26f-58123e667f9a",
+      permission_mode:"bypassPermissions", effort:{level:"high"},
+      hook_event_name:"PostToolUse", tool_name:"Agent",
+      tool_input:{description:"Run marker echo command",
+                  prompt:"run the bash command echo MARKER_TM_R5 then reply DONE",
+                  subagent_type:"general-purpose", run_in_background:true, name:$n},
+      tool_response:{status:"teammate_spawned",
+                     prompt:"run the bash command echo MARKER_TM_R5 then reply DONE",
+                     teammate_id:$a, agent_id:$a, agent_type:"general-purpose",
+                     model:"claude-opus-5", name:$n, color:"blue",
+                     tmux_session_name:"in-process", tmux_window_name:"in-process",
+                     tmux_pane_id:"in-process", team_name:"session-3b51bef0",
+                     is_splitpane:false, plan_mode_required:false},
+      tool_use_id:$u, duration_ms:9}'
+}
+
+IFS='|' read -r RT_REPO RT_TR RT_SUB RT_CFG <<< "$(make_world rosterteam yes)"
+seed_roster "$RT_REPO" "$SID_A" "probemate" "$TUID"
+RT_ROSTER="$RT_REPO/.bionic/tmp/roster-${SID_A}.state"
+TEAM_ID="probemate@session-3b51bef0"
+
+run_rec "$(mk_agent_post_teammate "$SID_A" "$RT_TR" "$RT_REPO" "probemate" "$TEAM_ID" "$TUID")"
+expect_status "a teammate_spawned dispatch never blocks" 0 "$REC_ST"
+RT_CONFIRMED=$(grep 'status=confirmed' "$RT_ROSTER" 2>/dev/null)
+expect_contains "the teammate payload completes the row to confirmed" \
+  "status=confirmed" "$RT_CONFIRMED"
+expect_contains "the addressing id is recorded in its own teammate_id field" \
+  "teammate_id=$TEAM_ID" "$RT_CONFIRMED"
+# The `@` is why this needs saying: the sanitizer strips `|`, newlines and
+# control characters, and an over-eager one would silently truncate the id at
+# the separator that makes it addressable.
+expect_contains "the addressing form survives the sanitizer intact" \
+  "@session-3b51bef0" "$RT_CONFIRMED"
+expect_contains "agent_id stays EMPTY — a confirmed row never carries a wrong-namespace id" \
+  "|agent_id=|" "$RT_CONFIRMED"
+expect_absent "the addressing id is never written into agent_id" \
+  "agent_id=probemate@" "$RT_CONFIRMED"
+expect_contains "the completed teammate row still names the agent" "name=probemate" "$RT_CONFIRMED"
+expect_contains "the completed teammate row keeps the contract state" \
+  "deliverable=.bionic/docs/record/w99.txt" "$RT_CONFIRMED"
+expect_contains "the completed teammate row keeps the correlation key" \
+  "tool_use_id=$TUID" "$RT_CONFIRMED"
+expect_eq "the teammate completion is an append, not a rewrite" \
+  "1" "$(grep -c 'status=intended' "$RT_ROSTER")"
 
 # A ROW NEVER CONFIRMED IS LEFT AS IS. That absence is the signal — the live
 # exhibit is a dispatch that returned "spawned successfully" and never produced an
