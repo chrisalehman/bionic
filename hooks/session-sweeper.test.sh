@@ -96,14 +96,17 @@ new_roster() {  # <repo>
     > "$(roster_of "$1")"
 }
 
-# Emits one roster-state/v1 row. Field set and ORDER are dispatch-preflight.sh:490's;
+# Emits one roster-state/v1 row. Field set and ORDER are those of the roster writer in
+# hooks/dispatch-preflight.sh (the `ROW=` assignment, `absent-deliverable wall` era —
+# `waiver=` is part of that row and was missing here until the verdict verb needed it);
 # every unnamed field takes the empty value that gate writes when a brief declares none.
 mkrow() {  # <key=value>...
   local status=confirmed session="$SID" name=agent agent_id=a000 launched_at=""
   local subagent_type=implementor model=opus deliverable="" duration="" progress=""
-  local claims="" cadence="" tool_use_id=toolu_x kv
+  local claims="" cadence="" waiver="" tool_use_id=toolu_x kv
   for kv in "$@"; do
     case "$kv" in
+      waiver=*)      waiver="${kv#*=}" ;;
       status=*)      status="${kv#*=}" ;;
       session=*)     session="${kv#*=}" ;;
       name=*)        name="${kv#*=}" ;;
@@ -119,9 +122,9 @@ mkrow() {  # <key=value>...
     esac
   done
   [ -n "$launched_at" ] || launched_at="$(iso_ago 60)"
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=%s|deliverable=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|tool_use_id=%s\n' \
+  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=%s|deliverable=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|waiver=%s|tool_use_id=%s\n' \
     "$status" "$session" "$name" "$agent_id" "$launched_at" "$subagent_type" "$model" \
-    "$deliverable" "$duration" "$progress" "$claims" "$cadence" "$tool_use_id"
+    "$deliverable" "$duration" "$progress" "$claims" "$cadence" "$waiver" "$tool_use_id"
 }
 
 add_row() {  # <repo> <key=value>...
@@ -908,6 +911,216 @@ expect_contains "…while stdout still confirms the ack" "acked: late-row" "$OUT
 expect_contains "…and journals it" "name=late-row" \
   "$(grep 'event=ack' "$(ledger_of "$R15")" 2>/dev/null)"
 sweep "$R15" retire; wait_exit "$P15" 15
+
+# ============================================================
+section "Section 9: verdict — the landing readback (epic-16 AC-3, AC-4)"
+# ============================================================
+#
+# The LANDING question, which is not the watching question Sections 3–5 ask. The tick loop
+# asks "is this row worth waking someone for"; `verdict` asks "did this contract land",
+# and it applies the STRICT predicate to answer: exists AND non-empty AND mtime after the
+# row's own `launched_at`. A file that was already on disk when the agent was dispatched is
+# not that agent's delivery, and saying so is the whole point — the same three conjuncts
+# are what the landing gate reads back to a stopping agent.
+#
+# EVERY NEGATIVE HERE CARRIES ITS PAIRED POSITIVE (AC-4's absence-readback rule): the same
+# row, the same command, one fact about the disk changed, and the state flips. A negative
+# case alone cannot tell "the predicate caught it" from "the verb never looked".
+#
+# Clock discipline is the house rule: launch times are roster fields (`iso_ago`) and file
+# ages are mtimes (`backdate`, which is `touch -t`). Nothing here sleeps.
+
+# --- the four conjuncts, each against its paired positive ---
+RV="$(make_repo vc)"; new_roster "$RV"
+L9="$(iso_ago 600)"
+DEL9="$RV/report.md"; echo "the landed report" > "$DEL9"
+add_row "$RV" name=lander deliverable="$DEL9" duration="4 hours" launched_at="$L9"
+
+sweep "$RV" verdict lander
+expect_eq "delivered: a met contract exits 0" "0" "$RC"
+expect_contains "delivered: a machine line is printed" "landing-verdict/v1|" "$OUT"
+expect_contains "delivered: the line names the row and its state" "name=lander|state=MET" "$OUT"
+expect_contains "delivered: the line carries this session" "session=$SID" "$OUT"
+expect_contains "delivered: the readback names the file it stat'd" "delivered=$DEL9" "$OUT"
+
+: > "$DEL9"   # exists, zero bytes, written now — only the emptiness is wrong
+sweep "$RV" verdict lander
+expect_eq "empty: an empty deliverable is UNMET (exit 1)" "1" "$RC"
+expect_contains "empty: the state is UNMET" "name=lander|state=UNMET" "$OUT"
+expect_contains "empty: the failing conjunct is named" "empty=$DEL9" "$OUT"
+expect_absent "empty: and it is not reported as missing" "missing=$DEL9" "$OUT"
+echo "written for real this time" > "$DEL9"
+sweep "$RV" verdict lander
+expect_eq "empty→filled: the paired positive exits 0" "0" "$RC"
+expect_contains "empty→filled: the paired positive is MET" "state=MET" "$OUT"
+
+backdate "$DEL9" 1200   # non-empty, but last written 20 min ago against a 10-min-old launch
+sweep "$RV" verdict lander
+expect_eq "stale: a pre-launch file is UNMET (exit 1)" "1" "$RC"
+expect_contains "stale: the failing conjunct is named" "stale=$DEL9" "$OUT"
+expect_contains "stale: the detail quotes the row's own launched_at" "launched_at $L9" "$OUT"
+expect_matches "stale: the detail renders the file's mtime as an ISO stamp" \
+  "mtime [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z" "$OUT"
+touch "$DEL9"
+sweep "$RV" verdict lander
+expect_eq "stale→rewritten: the paired positive exits 0" "0" "$RC"
+expect_contains "stale→rewritten: the paired positive is MET" "state=MET" "$OUT"
+
+rm -f "$DEL9"
+sweep "$RV" verdict lander
+expect_eq "missing: an absent deliverable is UNMET (exit 1)" "1" "$RC"
+expect_contains "missing: the failing conjunct is named" "missing=$DEL9" "$OUT"
+expect_absent "missing: and it is not reported as empty" "empty=$DEL9" "$OUT"
+echo "finally" > "$DEL9"
+sweep "$RV" verdict lander
+expect_eq "missing→written: the paired positive exits 0" "0" "$RC"
+expect_contains "missing→written: the paired positive is MET" "state=MET" "$OUT"
+
+# --- a partial set names ONLY what failed ---
+RVP="$(make_repo vp)"; new_roster "$RVP"
+echo "the first half" > "$RVP/one.md"
+add_row "$RVP" name=halfway deliverable="$RVP/one.md,$RVP/two.md" duration="4 hours" \
+        launched_at="$(iso_ago 600)"
+sweep "$RVP" verdict halfway
+expect_eq "partial: one absent deliverable is UNMET" "1" "$RC"
+expect_contains "partial: the absent one is named" "missing=$RVP/two.md" "$OUT"
+expect_absent "partial: the delivered one is not named as a failure" "missing=$RVP/one.md" "$OUT"
+
+# --- a directory deliverable: delivered when a file lives in it (the sibling reading) ---
+RVD="$(make_repo vd)"; new_roster "$RVD"
+mkdir -p "$RVD/record"
+add_row "$RVD" name=dirrow deliverable="$RVD/record" duration="4 hours" launched_at="$(iso_ago 600)"
+sweep "$RVD" verdict dirrow
+expect_eq "empty directory: UNMET (a created path is not a written deliverable)" "1" "$RC"
+expect_contains "empty directory: named as empty, never as missing" "empty=$RVD/record" "$OUT"
+echo "a landed artifact" > "$RVD/record/report.md"
+sweep "$RVD" verdict dirrow
+expect_eq "directory with a file in it: the paired positive exits 0" "0" "$RC"
+expect_contains "directory with a file in it: MET" "state=MET" "$OUT"
+
+# --- bare verdict over one row of every state: four lines, exit 1 ---
+RVB="$(make_repo vb)"; new_roster "$RVB"
+L9B="$(iso_ago 600)"
+echo "landed" > "$RVB/met.md"
+add_row "$RVB" name=row-met    deliverable="$RVB/met.md"   duration="4 hours" launched_at="$L9B"
+add_row "$RVB" name=row-unmet  deliverable="$RVB/never.md" duration="4 hours" launched_at="$L9B"
+add_row "$RVB" name=row-waived deliverable="$RVB/never2.md" duration="4 hours" launched_at="$L9B" \
+        waiver="exploratory probe: no artifact expected"
+CLAIM9="$TMPROOT/bionic-verdict-marker-55831.sh"
+printf '#!/bin/bash\nsleep 120\n' > "$CLAIM9"; chmod +x "$CLAIM9"
+bash "$CLAIM9" & CLAIM9PID=$!; BG_PIDS="$BG_PIDS $CLAIM9PID"
+add_row "$RVB" name=row-live claims="$CLAIM9" deliverable="$RVB/never3.md" duration="4 hours" \
+        launched_at="$L9B"
+
+sweep "$RVB" verdict
+expect_eq "bare verdict: one UNMET row makes the whole run exit 1" "1" "$RC"
+expect_eq "bare verdict: one machine line per row, no more" "4" \
+  "$(printf '%s\n' "$OUT" | grep -c '^landing-verdict/v1|')"
+expect_contains "bare verdict: the delivered row reads MET" "name=row-met|state=MET" "$OUT"
+expect_contains "bare verdict: the undelivered row reads UNMET" "name=row-unmet|state=UNMET" "$OUT"
+expect_contains "bare verdict: the waived row reads WAIVED" "name=row-waived|state=WAIVED" "$OUT"
+expect_contains "bare verdict: the row whose claim is alive reads STILL-LIVE" \
+  "name=row-live|state=STILL-LIVE" "$OUT"
+expect_contains "bare verdict: the UNMET line still names what is missing" \
+  "missing=$RVB/never.md" "$OUT"
+expect_contains "bare verdict: the waived line quotes the waiver" "exploratory probe" "$OUT"
+expect_contains "bare verdict: a human summary follows the machine lines" \
+  "1 MET, 1 UNMET, 1 WAIVED, 1 STILL-LIVE" "$OUT"
+# It reports state facts. Same doctrine as every other surface of this script.
+for word in "kill" "you should" "recommend" "hung" "is dead" "safe to stop"; do
+  expect_absent "verdict does not judge (\"$word\")" "$word" "$OUT"
+done
+
+# --- scoping: a name takes one row and answers for that row alone ---
+sweep "$RVB" verdict row-met
+expect_eq "verdict <name>: exactly one machine line" "1" \
+  "$(printf '%s\n' "$OUT" | grep -c '^landing-verdict/v1|')"
+expect_eq "verdict <name>: a MET row exits 0 even while a sibling row is UNMET" "0" "$RC"
+expect_contains "verdict <name>: the line is the row that was asked for" "name=row-met" "$OUT"
+expect_absent "verdict <name>: the sibling rows are not answered for" "row-unmet" "$OUT"
+sweep "$RVB" verdict row-unmet
+expect_eq "verdict <name>: an UNMET row exits 1" "1" "$RC"
+expect_contains "verdict <name>: …and names its conjunct" "missing=$RVB/never.md" "$OUT"
+kill -9 "$CLAIM9PID" 2>/dev/null; wait "$CLAIM9PID" 2>/dev/null
+sweep "$RVB" verdict row-live
+expect_eq "the same row once its claimed process is gone: UNMET" "1" "$RC"
+expect_contains "…and the conjunct is named" "missing=$RVB/never3.md" "$OUT"
+
+# --- still-live by progress: a progress artifact inside its declared cadence ---
+RVL="$(make_repo vl)"; new_roster "$RVL"
+PROG9="$RVL/w-progress.md"; echo "still working" > "$PROG9"
+add_row "$RVL" name=writer progress="$PROG9" cadence="every ~5 minutes" duration="4 hours" \
+        deliverable="$RVL/pending.md" launched_at="$(iso_ago 600)"
+sweep "$RVL" verdict writer
+expect_eq "fresh progress: an undelivered row is STILL-LIVE, not UNMET (exit 0)" "0" "$RC"
+expect_contains "fresh progress: the state says so" "state=STILL-LIVE" "$OUT"
+expect_contains "fresh progress: the outstanding deliverable is still named" \
+  "missing=$RVL/pending.md" "$OUT"
+backdate "$PROG9" 1800   # 30 min since the last write, against a 5-minute promise
+sweep "$RVL" verdict writer
+expect_eq "stale progress: the same row is UNMET once the promise lapses" "1" "$RC"
+expect_contains "stale progress: the state says so" "state=UNMET" "$OUT"
+
+# --- the roster is append-only: the LATEST row for a name is the answer ---
+RVS="$(make_repo vs)"; new_roster "$RVS"
+echo "landed" > "$RVS/final.md"
+add_row "$RVS" name=chained status=intended  deliverable="$RVS/never.md" duration="4 hours" \
+        launched_at="$(iso_ago 600)"
+add_row "$RVS" name=chained status=confirmed deliverable="$RVS/final.md" duration="4 hours" \
+        launched_at="$(iso_ago 600)"
+sweep "$RVS" verdict
+expect_eq "a three-state chain is ONE contract: one line per name" "1" \
+  "$(printf '%s\n' "$OUT" | grep -c '^landing-verdict/v1|')"
+expect_eq "…and the latest row is the one answered for" "0" "$RC"
+expect_contains "…which is the row that landed" "state=MET" "$OUT"
+
+# --- rows belonging to another session are not this session's contracts ---
+RVF="$(make_repo vf)"; new_roster "$RVF"
+add_row "$RVF" name=foreign session="$SID_FOREIGN" deliverable="$RVF/never.md" \
+        duration="4 hours" launched_at="$(iso_ago 600)"
+sweep "$RVF" verdict
+expect_eq "a foreign session's broken row is not this session's UNMET" "0" "$RC"
+expect_absent "…and is not answered for at all" "landing-verdict/v1|" "$OUT"
+
+# --- surface: usage, an unknown name, an empty roster ---
+sweep "$RVB" verdict row-met row-unmet
+expect_eq "verdict takes at most one name (exit 2)" "2" "$RC"
+expect_contains "…and the usage says so" "verdict" "$OUT"
+sweep "$RVB" verdict no-such-agent
+expect_eq "a name on no roster row is not an UNMET contract (exit 0)" "0" "$RC"
+expect_absent "…and no verdict line is invented for it" "landing-verdict/v1|" "$OUT"
+expect_contains "…while the answer still names what was asked" "no-such-agent" "$OUT"
+RVE="$(make_repo ve)"
+sweep "$RVE" verdict
+expect_eq "a session with no roster at all exits 0" "0" "$RC"
+expect_absent "…with no verdict lines" "landing-verdict/v1|" "$OUT"
+sweep "$RVE" nonsense-verb
+expect_contains "usage lists the verdict verb alongside the others" "verdict [<name>]" "$OUT"
+
+# --- verdict is READ-ONLY: it journals nothing, arms nothing, acks nothing ---
+RVR="$(make_repo vr)"; new_roster "$RVR"
+add_row "$RVR" name=readonly deliverable="$RVR/never.md" duration="4 hours" launched_at="$(iso_ago 600)"
+sweep "$RVR" verdict
+expect_eq "the read-only run saw its UNMET row" "1" "$RC"
+expect_false "verdict writes no ledger" test -e "$(ledger_of "$RVR")"
+expect_false "verdict writes no findings file" test -e "$(findings_of "$RVR")"
+expect_eq "verdict does not touch the roster" "1" \
+  "$(grep -c '^roster-state/v1|' "$(roster_of "$RVR")")"
+
+# --- an acked row is still judged: ack closes the WATCH, never the contract ---
+sweep "$RVR" ack readonly
+expect_eq "the ack is recorded" "0" "$RC"
+sweep "$RVR" verdict readonly
+expect_eq "an acked row whose artifact is absent is still UNMET" "1" "$RC"
+expect_contains "…and still names the missing artifact" "missing=$RVR/never.md" "$OUT"
+
+# --- a symlinked roster is refused, never guessed at (§8 path safety) ---
+RVY="$(make_repo vy)"; new_roster "$RVY"
+mv "$(roster_of "$RVY")" "$RVY/real-roster.state"
+ln -s "$RVY/real-roster.state" "$(roster_of "$RVY")"
+sweep "$RVY" verdict
+expect_eq "a symlinked roster refuses (exit 2), it does not report a clean session" "2" "$RC"
+expect_contains "…and says why" "symbolic link" "$OUT"
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'
