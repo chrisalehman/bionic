@@ -428,9 +428,19 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
           nh++; HLS[nh] = ls; HVS[nh] = vend; HK[nh] = LKIND[i]
         }
       }
+      # The fallback to the whole-brief inference scan triggers on an EMPTY VALUE
+      # (v == ""), not merely on the ABSENCE of a deliverable-kind hit (h == 0) —
+      # an earlier, pathless label hit (e.g. quoted landing-verdict prose reading
+      # "...per deliverable:") can win the firsthit position race over a later,
+      # real labeled deliverable and still yield nothing from its own span. Gating
+      # on h == 0 alone left that shadowed case refused despite a real record/
+      # path sitting later in the same brief; v == "" catches both shapes with
+      # the one scan (post-landing addendum, live specimen).
       h = firsthit("deliverable")
-      if (h > 0) { v = paths(spanof(h), 4); if (v != "") print "deliverable=" v }
-      else       { v = scan_inferred(text); if (v != "") print "inferred=" v }
+      v = ""
+      if (h > 0) { v = paths(spanof(h), 4) }
+      if (v != "") { print "deliverable=" v }
+      else         { v = scan_inferred(text); if (v != "") print "inferred=" v }
       h = firsthit("duration");    if (h > 0) { v = collapse(spanof(h));      if (v != "") print "duration=" v }
       h = firsthit("progress");    if (h > 0) { v = paths(spanof(h), 1);      if (v != "") print "progress=" v }
       # CADENCE IS POSITIONAL, not merely lexical (Step-6 critic F-2). It is the
