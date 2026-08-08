@@ -60,6 +60,13 @@ PARTY_ER="${W1R_PARTY_ER:-$REPO_ROOT/hooks/execution-recorder.sh}"
 PROBE="$REPO_ROOT/hooks/preflight-probe.sh"
 OBSERVE="$REPO_ROOT/hooks/stop-check.sh"
 SWEEPER="$REPO_ROOT/hooks/session-sweeper.sh"
+# The landing gate (epic-16 wave-01) is a fifth party and an overridable one for
+# the same reason the four above are: §J drives a MUTATED COPY of it to prove the
+# verdict/gate battery discriminates, and the shipped file is never touched.
+PARTY_LG="${W1R_PARTY_LG:-$REPO_ROOT/hooks/landing-gate.sh}"
+# §J also drives a mutated copy of the SWEEPER, to prove the opposite direction:
+# a change to the predicate moves both answers rather than splitting them.
+PARTY_SW="$SWEEPER"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/w1r-agreement.XXXXXX")" && pwd -P)"
 BG_PIDS=""
@@ -90,6 +97,9 @@ expect_absent()   { if printf '%s' "$3" | grep -qF -- "$2"; then no "$1" "unexpe
 
 SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
+# The landing gate's active-wave party (§A1/§A2) plants its own one-row roster; a dedicated
+# session id keeps it off roster-$SID_A.state, which verdict_er re-seeds on every call.
+SID_LG="2ae9d613-4c07-4b8a-9f51-7d02ac86be40"
 
 # ---------------------------------------------------------------- payloads
 #
@@ -168,6 +178,58 @@ mk_agent_post() {  # <sid> <transcript> <cwd> <tool_use_id>
                      prompt:"go", outputFile:"/tmp/tasks/a26bd30bf8616411b.output",
                      canReadOutputFile:true},
       tool_use_id:$u, duration_ms:6}'
+}
+
+# The TEAMMATE completion (epic-16 wave-01 slice 0). FAITHFUL to
+# .bionic/docs/record/landing-wave-capture-probe.md §3-A and the live re-capture
+# slice 0 took through the pty harness: `tool_response.status` is
+# `teammate_spawned`, and `agent_id`/`teammate_id` both carry the ADDRESSING form
+# `<name>@session-<id8>` — never the transcript form, which no PostToolUse
+# payload contains. This is the dispatch mode every interactive session on this
+# machine really uses; `mk_agent_post` above is the async one.
+mk_agent_post_teammate() {  # <sid> <transcript> <cwd> <name> <addressing-id> <tool_use_id>
+  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg n "$4" --arg a "$5" --arg u "$6" \
+    '{session_id:$s, transcript_path:$t, cwd:$c,
+      prompt_id:"95b0701b-7814-42ca-a26f-58123e667f9a",
+      permission_mode:"bypassPermissions", effort:{level:"high"},
+      hook_event_name:"PostToolUse", tool_name:"Agent",
+      tool_input:{description:"a dispatch", prompt:"go", subagent_type:"implementor",
+                  run_in_background:true, name:$n},
+      tool_response:{status:"teammate_spawned", prompt:"go",
+                     teammate_id:$a, agent_id:$a, agent_type:"implementor",
+                     model:"claude-opus-5", name:$n, color:"blue",
+                     tmux_session_name:"in-process", tmux_window_name:"in-process",
+                     tmux_pane_id:"in-process", team_name:"session-6c85684c",
+                     is_splitpane:false, plan_mode_required:false},
+      tool_use_id:$u, duration_ms:9}'
+}
+
+# The SubagentStart event (slice 1). VERBATIM shape from capture probe §3-C: six
+# keys and no `tool_name` at all, which is why the recorder's third arm cannot sit
+# behind the tool-name gate its other two share. `agent_type` is the teammate's
+# NAME here — the platform's own rename — and `agent_id` is the TRANSCRIPT form.
+mk_start_payload() {  # <sid> <transcript> <cwd> <name> <transcript-id>
+  jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg n "$4" --arg a "$5" \
+    '{session_id:$s, transcript_path:$t, cwd:$c,
+      prompt_id:"95b0701b-7814-42ca-a26f-58123e667f9a",
+      agent_id:$a, agent_type:$n, hook_event_name:"SubagentStart"}'
+}
+
+# The SubagentStop event (slice 5). FAITHFUL to capture probe §3-D, a live teammate
+# stop: `agent_type` carries the name, `agent_id` the transcript form,
+# `background_tasks[]` its task-id key. Only the four fields the gate reads vary.
+mk_substop_payload() {  # <cwd> <sid> <agent_type> <stop_hook_active true|false>
+  jq -n --arg c "$1" --arg s "$2" --arg a "$3" --argjson h "$4" \
+    '{session_id:$s, transcript_path:("/tmp/transcripts/" + $s + ".jsonl"), cwd:$c,
+      prompt_id:"95b0701b-7814-42ca-a26f-58123e667f9a",
+      permission_mode:"bypassPermissions",
+      agent_id:"aprobemate-4da9be517e8f90bd", agent_type:$a,
+      effort:{level:"high"}, hook_event_name:"SubagentStop", stop_hook_active:$h,
+      agent_transcript_path:("/tmp/transcripts/" + $s + "/subagents/agent-aprobemate-4da9be517e8f90bd.jsonl"),
+      last_assistant_message:"DONE\n\nRan the slice; report written.",
+      background_tasks:[{id:"tooha5cgi", type:"teammate", status:"running",
+                         description:"run the slice and report"}],
+      session_crons:[]}'
 }
 
 # THE PRODUCER→RECORDER PAIR, DRIVEN END TO END. Since slice 4/4 the recorder
@@ -287,6 +349,32 @@ verdict_eg() {  # <repo> -> yes:<current>|no|other:<detail>
     *"missing a valid 'current: N' line"*) echo no ;;
     *"empty '## SDLC State' section"*)     echo "other:empty-section" ;;
     *) echo "other:$(printf '%s' "$out" | head -1 | cut -c1-60)" ;;
+  esac
+}
+
+# The landing gate holds a FIFTH byte-identical copy of active-wave detection
+# (hooks/landing-gate.sh, the block deliberately duplicated from dispatch-preflight's) and
+# until this party existed it sat OUTSIDE the very battery meant to catch that copy drifting
+# — §J drives the gate's verdict/gate agreement, not its wave detection (Step-6 critic D-1).
+# Its observable is a SubagentStop over a roster carrying ONE unmet contract: with a wave
+# active the gate reaches the verdict, reads UNMET and refuses (exit 2); with no wave it
+# exits 0 before ever taking a verdict. So exit-2-with-the-refusal <=> yes and exit-0 <=> no,
+# the same predicate the other four answer. The gate resolves the sweeper as its own sibling,
+# so a MUTATED copy of it (§A2) must sit beside a sweeper — $MUTDIR carries one. The roster
+# is re-seeded per call under $SID_LG, off verdict_er's $SID_A file.
+verdict_lg() {  # <repo> -> yes|no|other:<detail>
+  local repo="$1" out st roster="$repo/.bionic/tmp/roster-$SID_LG.state"
+  mkdir -p "$repo/.bionic/tmp"
+  {
+    printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
+    printf 'roster-state/v1|status=confirmed|session=%s|name=lg-probe|agent_id=|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-lg.md|source=declared|duration=|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_LGPROBE\n' \
+      "$SID_LG"
+  } > "$roster"
+  out=$(mk_substop_payload "$repo" "$SID_LG" "lg-probe" false | bash "$PARTY_LG" 2>&1); st=$?
+  case "$st" in
+    0) echo no ;;
+    2) if printf '%s' "$out" | grep -qF 'LANDING CONTRACT UNMET'; then echo yes; else echo "other:block-no-detail"; fi ;;
+    *) echo "other:exit-$st" ;;
   esac
 }
 
@@ -444,20 +532,20 @@ EOF
 # run_battery <mode>  — mode=assert emits one assertion per fixture;
 #                       mode=detect returns 1 at the FIRST disagreement.
 run_battery() {
-  local mode="$1" name want cur repo a b c d cnorm cval
+  local mode="$1" name want cur repo a b c d e cnorm cval
   while IFS='|' read -r name want cur; do
     [ -n "$name" ] || continue
     repo="$SANDBOX/fx/$name/repo"
     a=$(verdict_dp "$repo"); b=$(verdict_sg "$repo"); c=$(verdict_eg "$repo")
-    d=$(verdict_er "$repo")
+    d=$(verdict_er "$repo"); e=$(verdict_lg "$repo")
     cnorm="${c%%:*}"; cval=""
     [ "$cnorm" = "yes" ] && cval="${c#*:}"
     if [ "$mode" = "assert" ]; then
-      if [ "$a" = "$want" ] && [ "$b" = "$want" ] && [ "$cnorm" = "$want" ] && [ "$d" = "$want" ]; then
-        ok "all four parties agree on '$name': $want"
+      if [ "$a" = "$want" ] && [ "$b" = "$want" ] && [ "$cnorm" = "$want" ] && [ "$d" = "$want" ] && [ "$e" = "$want" ]; then
+        ok "all five parties agree on '$name': $want"
       else
-        no "all four parties agree on '$name': $want" \
-           "dispatch-preflight=$a stop-guard=$b evidence-gate=$c execution-recorder=$d"
+        no "all five parties agree on '$name': $want" \
+           "dispatch-preflight=$a stop-guard=$b evidence-gate=$c execution-recorder=$d landing-gate=$e"
       fi
       if [ "$want" = "yes" ]; then
         expect_eq "  and the evidence gate derived current='$cur' for '$name'" "$cur" "$cval"
@@ -465,9 +553,9 @@ run_battery() {
     else
       # Detect mode also compares the DERIVED VALUE, so a mutation that selects a
       # different plan without flipping the predicate is caught too.
-      if [ "$a" != "$want" ] || [ "$b" != "$want" ] || [ "$cnorm" != "$want" ] || [ "$d" != "$want" ] \
+      if [ "$a" != "$want" ] || [ "$b" != "$want" ] || [ "$cnorm" != "$want" ] || [ "$d" != "$want" ] || [ "$e" != "$want" ] \
          || { [ "$want" = "yes" ] && [ "$cval" != "$cur" ]; }; then
-        printf 'disagreement on %s: want=%s/%s dp=%s sg=%s eg=%s er=%s\n' "$name" "$want" "$cur" "$a" "$b" "$c" "$d"
+        printf 'disagreement on %s: want=%s/%s dp=%s sg=%s eg=%s er=%s lg=%s\n' "$name" "$want" "$cur" "$a" "$b" "$c" "$d" "$e"
         return 1
       fi
     fi
@@ -481,7 +569,7 @@ EOF
 echo ""
 echo "=== A1 — N-way agreement on active-wave detection (AC-9, checklist A8/A9) ==="
 # ============================================================
-echo "parties: $(basename "$PARTY_DP") · $(basename "$PARTY_SG") · $(basename "$PARTY_EG") · $(basename "$PARTY_ER")"
+echo "parties: $(basename "$PARTY_DP") · $(basename "$PARTY_SG") · $(basename "$PARTY_EG") · $(basename "$PARTY_ER") · $(basename "$PARTY_LG")"
 
 run_battery assert
 
@@ -490,6 +578,12 @@ run_battery assert
 # actively-maintained origin absent from the test meant to catch drift.
 expect_contains "the actively-maintained origin is one of the driven parties" \
   "canonical-sdlc-evidence-gate.sh" "$PARTY_EG"
+# The landing gate carries a copy too (Step-6 critic D-1) — it is now a driven party, and
+# the copy it holds is really the active-wave detection block, not something else.
+expect_contains "the landing gate's active-wave copy is a driven party" \
+  "landing-gate.sh" "$PARTY_LG"
+expect_contains "…and the copy under test is genuinely the active-wave block" \
+  "active-wave detection" "$(cat "$PARTY_LG")"
 
 # ============================================================
 echo ""
@@ -504,8 +598,11 @@ echo "=== A2 — one-copy mutation goes RED (checklist A9, TDD §9) ==="
 # Every mutation is a plausible drift, not damage: a maintainer editing one copy
 # and not the other two.
 
-CKSUM_BEFORE=$(shasum "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" 2>/dev/null)
+CKSUM_BEFORE=$(shasum "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" "$PARTY_LG" 2>/dev/null)
 MUTDIR="$SANDBOX/mutants"; mkdir -p "$MUTDIR"
+# A MUTATED landing gate still resolves its sweeper as a SIBLING, so one lives here for the
+# LG party below to find. The shipped sweeper is never touched — this is a copy.
+cp "$PARTY_SW" "$MUTDIR/session-sweeper.sh"
 
 # mutate <src> <dst> <kind>  — rc 1 if the mutation matched nothing
 mutate() {
@@ -542,11 +639,15 @@ mutate() {
 
 MUTATIONS="docs-root-last-wins keep-quotes delete-cr depth-1 fence-blind anchor-current"
 
-for party in DP SG EG; do
+# LG is the landing gate's active-wave copy (Step-6 critic D-1): every mutation below is an
+# active-wave-detection drift, and the gate holds a byte-identical copy of that block, so the
+# same six drifts must move its answer too or its copy is uncovered.
+for party in DP SG EG LG; do
   case "$party" in
     DP) src="$PARTY_DP" ;;
     SG) src="$PARTY_SG" ;;
     EG) src="$PARTY_EG" ;;
+    LG) src="$PARTY_LG" ;;
   esac
   for m in $MUTATIONS; do
     dst="$MUTDIR/$party-$m.sh"
@@ -556,11 +657,12 @@ for party in DP SG EG; do
       no "mutation '$m' applies to $(basename "$src")" "the awk target matched nothing — the code moved"
       continue
     fi
-    saved_dp="$PARTY_DP"; saved_sg="$PARTY_SG"; saved_eg="$PARTY_EG"
+    saved_dp="$PARTY_DP"; saved_sg="$PARTY_SG"; saved_eg="$PARTY_EG"; saved_lg="$PARTY_LG"
     case "$party" in
       DP) PARTY_DP="$dst" ;;
       SG) PARTY_SG="$dst" ;;
       EG) PARTY_EG="$dst" ;;
+      LG) PARTY_LG="$dst" ;;
     esac
     if detail=$(run_battery detect); then
       no "one-copy mutation '$m' in $party makes the battery RED" \
@@ -568,12 +670,12 @@ for party in DP SG EG; do
     else
       ok "one-copy mutation '$m' in $party makes the battery RED"
     fi
-    PARTY_DP="$saved_dp"; PARTY_SG="$saved_sg"; PARTY_EG="$saved_eg"
+    PARTY_DP="$saved_dp"; PARTY_SG="$saved_sg"; PARTY_EG="$saved_eg"; PARTY_LG="$saved_lg"
   done
 done
 
-expect_eq "the three shipped parties are byte-identical to before the mutations" \
-  "$CKSUM_BEFORE" "$(shasum "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" 2>/dev/null)"
+expect_eq "the four shipped parties are byte-identical to before the mutations" \
+  "$CKSUM_BEFORE" "$(shasum "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" "$PARTY_LG" 2>/dev/null)"
 
 # ============================================================
 echo ""
@@ -1568,6 +1670,19 @@ agree_on "an empty file"         "$DFX/empty-file.md" not-delivered
 agree_on "an absent path"        "$DFX/never.md"      not-delivered
 agree_on "an EMPTY directory"    "$DFX/empty-dir"     not-delivered
 agree_on "a populated directory" "$DFX/full-dir"      delivered
+
+# SYMLINKS, added by the Step-6 security review (S-3). The two implementations here follow
+# a link on the file branch and skip it on the directory branch — and they do it IDENTICALLY,
+# which is what this section asserts. The THIRD renderer of delivered-ness, the landing
+# predicate in `verdict`, deliberately answers differently: since S-3 it refuses a symlinked
+# deliverable on both of its own branches (`symlink=`), because a contract satisfied by
+# `ln -s` is satisfied with zero bytes written. That divergence is named here rather than
+# left for the next reader to discover, and §J drives the landing side of it.
+mkdir -p "$DFX/link-dir"
+ln -s "$DFX/full-file.md" "$DFX/linked-file.md"
+ln -s "$DFX/full-file.md" "$DFX/link-dir/only-a-link.md"
+agree_on "a symlink to a written file"          "$DFX/linked-file.md" delivered
+agree_on "a directory holding only a symlink"   "$DFX/link-dir"       not-delivered
 # The one DELIBERATE divergence, pinned rather than hidden. A relative deliverable is the
 # REPO's to the sweeper — armed once as a background job, it outlives whatever directory it
 # was armed from, so a cwd-relative reading would make one roster row mean two things — and
@@ -1575,6 +1690,696 @@ agree_on "a populated directory" "$DFX/full-dir"      delivered
 # purpose. The two coincide exactly when that somewhere is the repo root, which is where
 # this case asks the question and where the roster's own paths are written from.
 agree_on "a repo-relative path, asked from the repo root" "relative-target.md" delivered
+
+# ============================================================
+echo ""
+echo "=== J — THE LANDING CONTRACT: the gate refuses exactly when the verdict says UNMET ==="
+# ============================================================
+#
+# epic-16 wave-01 split one answer across two scripts on purpose.
+# hooks/session-sweeper.sh's `verdict` verb OWNS the delivered predicate (spec
+# §Design ownership table); hooks/landing-gate.sh consumes it on SubagentStop and
+# refuses the stop when it reads UNMET. The gate holds NO copy of the predicate —
+# "a third copy of the delivered predicate in the landing gate" is a rejected
+# alternative in the spec — so the property worth driving here is not whether the
+# gate stats a file correctly, which it never does. It is AGREEMENT: over one
+# roster and one set of artifacts, the gate refuses a stop if and only if the verb
+# an orchestrator runs by hand says that contract is UNMET. Two people asking the
+# same question about the same agent must not get two answers.
+#
+# THE ASYMMETRY IS THE SUBJECT, and both directions are asserted rather than
+# assumed. §J.2 shows that only a change to the GATE can split the two answers,
+# and §J.3 shows that a change to the PREDICATE moves both together. That is what
+# having one owner buys operationally, and it is the claim this section keeps true.
+
+JREPO=$(new_repo "landing-contract")
+write_plan "$JREPO/.bionic/docs/plans/epic-16/wave-01.md" "current: 4"
+JDELIV="$JREPO/deliv"
+mkdir -p "$JDELIV" "$JREPO/.bionic/tmp"
+JROSTER="$JREPO/.bionic/tmp/roster-$SID_A.state"
+J_LAUNCHED=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+  || date -u -d "-3600 seconds" +%Y-%m-%dT%H:%M:%SZ)
+
+# Roster rows in the shape hooks/dispatch-preflight.sh's `ROW=` line really writes
+# TODAY — field for field, including `source=` (slice 4/4) and `waiver=` (the
+# absent-deliverable wall). A fixture missing a field the writer emits is how a
+# suite ends up green over a row shape nothing produces; the sweeper's and the
+# recorder's suites each had to make this same correction mid-wave.
+jrow() {  # <name> <deliverable> <progress> <cadence> <waiver> [tool_use_id]
+  printf 'roster-state/v1|status=confirmed|session=%s|name=%s|agent_id=|launched_at=%s|subagent_type=implementor|model=opus|deliverable=%s|source=declared|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=%s|tool_use_id=%s\n' \
+    "$SID_A" "$1" "$J_LAUNCHED" "$2" "$3" "$4" "$5" "${6:-toolu_01LANDING}" >> "$JROSTER"
+}
+
+printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$JROSTER"
+echo "the report" > "$JDELIV/met.md"
+: > "$JDELIV/empty.md"
+echo "written before the agent was ever dispatched" > "$JDELIV/stale.md"
+touch -t 202001010000 "$JDELIV/stale.md"
+printf 'stage 1\n' > "$JREPO/.bionic/tmp/live.progress"
+
+ln -s "$JDELIV/met.md" "$JDELIV/linked.md"
+
+jrow met    "$JDELIV/met.md"   ""                                    ""     ""
+jrow unmet  "$JDELIV/never.md" ""                                    ""     ""
+jrow empty  "$JDELIV/empty.md" ""                                    ""     ""
+jrow stale  "$JDELIV/stale.md" ""                                    ""     ""
+jrow live   "$JDELIV/never.md" "$JREPO/.bionic/tmp/live.progress"    "~5m"  ""
+# A GENUINE waiver names no artifact — the wall's own label reads "why this dispatch
+# produces nothing durable" (Step-6 review S-1). The row below it is the contradictory
+# shape: a declared artifact AND a waiver, which one line of quoted documentation in a
+# brief used to produce, and which used to silence the contract entirely.
+jrow waived ""                 ""                                    ""     "this dispatch produces nothing durable"
+jrow quoter "$JDELIV/never.md" ""                                    ""     "<why this dispatch produces nothing durable>"
+# The symlink half of S-3: a contract satisfied by `ln -s` is satisfied with zero bytes
+# written, so the landing predicate refuses it and the gate refuses the stop.
+jrow linked "$JDELIV/linked.md" ""                                   ""     ""
+# C-2: two dispatches share a name, so the fold cannot tell whose contract is whose. The
+# verb says AMBIGUOUS and the gate passes — a stop let through is recoverable, the wrong
+# agent blocked is not.
+jrow dup    "$JDELIV/met.md"   ""                                    ""     ""     toolu_01DUPA
+jrow dup    "$JDELIV/never.md" ""                                    ""     ""     toolu_01DUPB
+
+j_line() {  # <name> -> the verb's machine line for that name, or empty
+  ( cd "$JREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" verdict "$1" 2>/dev/null ) \
+    | grep -F 'landing-verdict/v1|' | grep -F "|name=$1|" | head -1
+}
+j_field() {  # <line> <key>
+  printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
+}
+j_verdict() {  # <name> -> the state the verb computed, or NONE when it prints no line
+  local l; l=$(j_line "$1")
+  if [ -z "$l" ]; then echo NONE; else j_field "$l" state; fi
+}
+# Globals rather than a captured echo: the refusal TEXT is asserted below, and a
+# `$(…)` call would throw the stderr away.
+J_ANSWER=""; J_GATE_ERR=""
+j_gate() {  # <name> [stop_hook_active] -> sets J_ANSWER + J_GATE_ERR
+  local st
+  J_GATE_ERR=$( mk_substop_payload "$JREPO" "$SID_A" "$1" "${2:-false}" \
+                | bash "$PARTY_LG" 2>&1 >/dev/null )
+  st=$?
+  case "$st" in
+    0) J_ANSWER=pass ;;
+    2) J_ANSWER=refuse ;;
+    *) J_ANSWER="other:exit-$st" ;;
+  esac
+}
+
+# name|the verb's state|the gate's answer.  `ghost` is on no roster row at all —
+# the phantom class the capture probe found firing three times per teammate run,
+# where the verb prints nothing and the gate must not invent a contract.
+J_CASES='
+met|MET|pass
+unmet|UNMET|refuse
+empty|UNMET|refuse
+stale|UNMET|refuse
+waived|WAIVED|pass
+quoter|UNMET|refuse
+linked|UNMET|refuse
+dup|AMBIGUOUS|pass
+live|STILL-LIVE|pass
+ghost|NONE|pass
+'
+
+run_j_battery() {  # assert|detect
+  local mode="$1" name want ans v
+  while IFS='|' read -r name want ans; do
+    [ -n "$name" ] || continue
+    v=$(j_verdict "$name"); j_gate "$name"
+    if [ "$mode" = "assert" ]; then
+      expect_eq "the verb computes $want for '$name'" "$want" "$v"
+      expect_eq "…and the gate answers $ans, which is what $want means for a stop" \
+        "$ans" "$J_ANSWER"
+      # The agreement itself, computed from the verb's own answer rather than from
+      # the table — so a case added to J_CASES with the wrong pairing cannot pass.
+      expect_eq "…gate refuses IFF the verb says UNMET ('$name')" \
+        "$([ "$v" = "UNMET" ] && echo refuse || echo pass)" "$J_ANSWER"
+    else
+      if [ "$v" != "$want" ]; then
+        printf 'the verb moved on %s: want=%s got=%s\n' "$name" "$want" "$v"; return 1
+      fi
+      if [ "$J_ANSWER" != "$ans" ]; then
+        printf 'gate/verb disagree on %s: verb=%s gate=%s (expected %s)\n' \
+          "$name" "$v" "$J_ANSWER" "$ans"; return 1
+      fi
+    fi
+  done <<EOF
+$(printf '%s' "$J_CASES")
+EOF
+  return 0
+}
+
+run_j_battery assert
+
+# The refusal is the VERB's detail, unedited — the strongest form of the agreement,
+# because the stopping agent is handed the same sentence the orchestrator reads.
+j_gate unmet
+expect_contains "the refusal quotes the verb's own detail, character for character" \
+  "$(j_field "$(j_line unmet)" detail)" "$J_GATE_ERR"
+expect_contains "…which names the missing artifact by the path the roster declared" \
+  "missing=$JDELIV/never.md" "$J_GATE_ERR"
+j_gate empty
+expect_contains "an EMPTY deliverable refuses naming the empty= conjunct" \
+  "empty=$JDELIV/empty.md" "$J_GATE_ERR"
+j_gate stale
+expect_contains "a PRE-LAUNCH file refuses naming the stale= conjunct and both stamps" \
+  "stale=$JDELIV/stale.md (mtime " "$J_GATE_ERR"
+expect_contains "…dated against the row's own launched_at" "launched_at $J_LAUNCHED" "$J_GATE_ERR"
+j_gate quoter
+expect_contains "a waiver beside a DECLARED artifact refuses, naming the artifact" \
+  "missing=$JDELIV/never.md" "$J_GATE_ERR"
+expect_contains "…and says the waiver was disregarded rather than silently honouring it" \
+  "waiver disregarded" "$J_GATE_ERR"
+j_gate linked
+expect_contains "a symlinked deliverable refuses naming the symlink= conjunct" \
+  "symlink=$JDELIV/linked.md" "$J_GATE_ERR"
+j_gate dup
+expect_eq "a name carrying two contracts is not blocked on either of them" "pass" "$J_ANSWER"
+expect_eq "…and is told nothing about an artifact that may not be its job" "" "$J_GATE_ERR"
+
+# THE ONE DELIBERATE DIVERGENCE, pinned rather than left implicit. On re-entry the
+# gate passes a contract the verb still calls UNMET — and the verb is re-run here
+# rather than assumed, so this asserts a difference in AUTHORITY, not a difference
+# of opinion about the disk. Blocking once is the R7 term: only the gate has a stop
+# to refuse, and an agent refused twice has no way out of the loop.
+j_gate unmet true
+expect_eq "on re-entry (stop_hook_active true) the gate passes" "pass" "$J_ANSWER"
+expect_eq "…while the verb's answer is unchanged, because the disk did not change" \
+  "UNMET" "$(j_verdict unmet)"
+
+# ============================================================
+echo ""
+echo "=== J.2 — only a GATE change can split the two answers (mutation goes RED) ==="
+# ============================================================
+#
+# Each mutation is applied to a COPY of the gate, installed in its own directory
+# beside a real sweeper — which is how bootstrap's flat `hooks/*.sh` install lets
+# the gate find its sibling, and therefore the production resolution rather than a
+# test seam. Every one is a plausible drift, not damage.
+
+JMUT="$SANDBOX/landing-mutants"
+J_CKSUM_BEFORE=$(shasum "$PARTY_LG" "$PARTY_SW" 2>/dev/null)
+
+j_mutant() {  # <kind> -> path to a mutant gate with a sibling sweeper, or empty
+  # Two statements, not one: `local a=1 b="$a"` expands every word BEFORE it
+  # assigns any of them, so under `set -u` the second reference is unbound.
+  local kind="$1"
+  local d="$JMUT/$kind"
+  mkdir -p "$d"
+  cp "$PARTY_SW" "$d/session-sweeper.sh"
+  case "$kind" in
+    # THE ID-NAMESPACE CONFUSION this whole wave exists to end: the join key
+    # becomes the transcript-form id instead of the name. Every roster row is
+    # keyed by name, so the verb is asked about a contract nobody holds.
+    name-from-agent-id)
+      awk '{ if (index($0, "NAME=") == 1 && index($0, "agent_type") > 0)
+               $0 = "NAME=$(_jq \".agent_id\")"
+             print }' "$PARTY_LG" > "$d/landing-gate.sh" ;;
+    # The hook process's ambient session key instead of the payload's (the gate
+    # documents why at the code) — a wrong or absent roster, silently.
+    ambient-session-key)
+      awk '{ sub(/CLAUDE_CODE_SESSION_ID="[$]SID" /, ""); print }' \
+        "$PARTY_LG" > "$d/landing-gate.sh" ;;
+    # The sweeper resolves its own state directory from the working directory, so
+    # dropping the cd asks the verb about whatever repo the hook happened to run in.
+    no-cd-to-repo)
+      awk '{ if (index($0, "VERDICT=$( cd ") > 0) $0 = "VERDICT=$( true"
+             print }' "$PARTY_LG" > "$d/landing-gate.sh" ;;
+    *) return 1 ;;
+  esac
+  cmp -s "$PARTY_LG" "$d/landing-gate.sh" && return 1
+  printf '%s' "$d/landing-gate.sh"
+}
+
+for m in name-from-agent-id ambient-session-key no-cd-to-repo; do
+  mpath=$(j_mutant "$m") || mpath=""
+  if [ -z "$mpath" ]; then
+    # A mutation that matched nothing is not a passing test — it means the code
+    # moved and this proof has gone vacuous.
+    no "gate mutation '$m' applies to landing-gate.sh" "the sed target matched nothing — the code moved"
+    continue
+  fi
+  j_saved="$PARTY_LG"; PARTY_LG="$mpath"
+  if jdetail=$(run_j_battery detect); then
+    no "one-gate mutation '$m' makes the landing battery RED" \
+       "the battery stayed green with the gate mutated — it does not discriminate"
+  else
+    ok "one-gate mutation '$m' makes the landing battery RED"
+  fi
+  PARTY_LG="$j_saved"
+done
+
+# ============================================================
+echo ""
+echo "=== J.3 — a PREDICATE change moves BOTH answers, never one (the single owner) ==="
+# ============================================================
+#
+# The mutant sweeper below reads an EMPTY file as delivered — the `[ -s ]` defect
+# §I.2 pins on the tick loop, here in the landing predicate. It is installed as the
+# sibling of an UNMUTATED copy of the gate, so the only thing that changed is the
+# owner of the predicate. Both answers flip together: that is not a lucky
+# coincidence, it is what "the gate owns no predicate" means in operation, and it
+# is the reason the two can never be caught telling different people different
+# things about one contract.
+JP="$JMUT/predicate"
+mkdir -p "$JP"
+cp "$PARTY_LG" "$JP/landing-gate.sh"
+awk '{ sub(/\[ ! -s "[$]p" \]/, "[ ! -e \"$p\" ]"); print }' "$PARTY_SW" > "$JP/session-sweeper.sh"
+if cmp -s "$PARTY_SW" "$JP/session-sweeper.sh"; then
+  no "predicate mutation applies to session-sweeper.sh" "the sed target matched nothing — the code moved"
+else
+  ok "predicate mutation applies to session-sweeper.sh"
+fi
+j_saved_lg="$PARTY_LG"; j_saved_sw="$PARTY_SW"
+PARTY_LG="$JP/landing-gate.sh"; PARTY_SW="$JP/session-sweeper.sh"
+j_gate empty
+expect_eq "with the predicate loosened, the verb calls the empty file delivered" \
+  "MET" "$(j_verdict empty)"
+expect_eq "…and the gate passes the same stop it refused a moment ago" "pass" "$J_ANSWER"
+PARTY_LG="$j_saved_lg"; PARTY_SW="$j_saved_sw"
+expect_eq "the shipped gate and sweeper are byte-identical to before the mutations" \
+  "$J_CKSUM_BEFORE" "$(shasum "$PARTY_LG" "$PARTY_SW" 2>/dev/null)"
+
+# ============================================================
+echo ""
+echo "=== J.4 — still-live has TWO owners that INTENTIONALLY differ; the difference is pinned ==="
+# ============================================================
+#
+# "Is this row still live?" is computed at TWO sites in hooks/session-sweeper.sh that serve
+# different masters and are SUPPOSED to disagree (Step-6 critic D-2; spec §Design ownership
+# table, the still-live row):
+#   * evaluate_row — the tick loop, a WAKE heuristic. A row that declared `claims=` opted
+#     into process-liveness as its ONLY signal, so a dead claimed process is a dead-claim
+#     finding full stop and progress is never consulted.
+#   * row_still_live — the verdict verb, a STOP exemption. A dead claim falls THROUGH to
+#     progress/cadence, so fresh progress can still answer STILL-LIVE and spare a stopping
+#     agent a false UNMET.
+# On a dead-claim-plus-fresh-progress row the two therefore answer DIFFERENTLY, and that is
+# correct — unifying them is a rejected disposition. This section PINS the difference: if
+# either site drifts toward the other, one assertion below goes red. It is the one section in
+# this suite asserting an INEQUALITY between two implementations rather than an equality.
+DLREPO=$(new_repo "still-live-divergence")
+write_plan "$DLREPO/.bionic/docs/plans/epic-16/wave-01.md" "current: 4"
+mkdir -p "$DLREPO/.bionic/tmp"
+DL_ROSTER="$DLREPO/.bionic/tmp/roster-$SID_A.state"
+DL_LAUNCHED=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+  || date -u -d "-3600 seconds" +%Y-%m-%dT%H:%M:%SZ)
+# FRESH progress written now, well inside the declared cadence; a DEAD claim no live process
+# carries; an ABSENT deliverable so the row has not landed and both sites still judge it.
+printf 'stage 1\n' > "$DLREPO/.bionic/tmp/dl.progress"
+DL_CLAIM="bionic-xgate-D2-deadclaim-no-such-process-9f5c1a2b"
+{
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
+  printf 'roster-state/v1|status=confirmed|session=%s|name=dl-row|agent_id=|launched_at=%s|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-dl.md|source=declared|duration=|progress=%s|claims=%s|cadence=~5m|absent=|waiver=|tool_use_id=toolu_DL\n' \
+    "$SID_A" "$DL_LAUNCHED" ".bionic/tmp/dl.progress" "$DL_CLAIM"
+} > "$DL_ROSTER"
+# Not vacuous: the claimed process really is dead.
+expect_eq "the claimed process is genuinely not running (test not vacuous)" "no" \
+  "$(pgrep -f -- "$DL_CLAIM" >/dev/null 2>&1 && echo yes || echo no)"
+
+# READER 1 — the verdict verb (row_still_live). Fresh progress outvotes the dead claim.
+DL_VERDICT=$( cd "$DLREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" verdict dl-row 2>/dev/null \
+  | grep -F 'landing-verdict/v1|' | grep -F '|name=dl-row|' | head -1 \
+  | tr '|' '\n' | grep '^state=' | head -1 | cut -d= -f2- )
+expect_eq "the verdict verb calls the dead-claim-plus-fresh-progress row STILL-LIVE" \
+  "STILL-LIVE" "$DL_VERDICT"
+
+# READER 2 — the tick loop (evaluate_row). The dead claim is a finding; progress is never
+# consulted. Armed at --tick 1, the sweeper exits on its first finding (deliver_findings),
+# leaving the class in the findings log — the same drive hooks/session-sweeper.test.sh uses.
+DL_FINDINGS="$DLREPO/.bionic/tmp/sweeper-$SID_A-findings.log"
+rm -f "$DL_FINDINGS" "$DLREPO/.bionic/tmp/sweeper-$SID_A.state"
+( cd "$DLREPO" && exec env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" arm --tick 1 ) \
+  >/dev/null 2>&1 &
+DL_PID=$!; BG_PIDS="$BG_PIDS $DL_PID"
+_i=0
+while kill -0 "$DL_PID" 2>/dev/null && [ "$_i" -lt 40 ]; do sleep 0.1; _i=$((_i + 1)); done
+if kill -0 "$DL_PID" 2>/dev/null; then
+  ( cd "$DLREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" retire ) >/dev/null 2>&1
+fi
+wait "$DL_PID" 2>/dev/null
+DL_FIND_TEXT="$(cat "$DL_FINDINGS" 2>/dev/null)"
+expect_contains "the tick loop raises a dead-claim finding for the SAME row" \
+  "class=dead-claim" "$DL_FIND_TEXT"
+expect_absent "…and NOT a stale-progress finding — the tick loop never consulted progress" \
+  "class=stale-progress" "$DL_FIND_TEXT"
+# The inequality itself, stated so the reason is legible if a future edit collapses it.
+expect_eq "the two owners of still-live answer DIFFERENTLY on this row, by design" "different" \
+  "$([ "$DL_VERDICT" = "STILL-LIVE" ] && printf '%s' "$DL_FIND_TEXT" | grep -qF 'class=dead-claim' && echo different || echo same)"
+
+# ============================================================
+echo ""
+echo "=== K — the IDENTITY CHAIN: intended → confirmed → identified, one contract ==="
+# ============================================================
+#
+# The roster is append-only and a contract ADVANCES along it: `intended` at the
+# dispatch wall, `confirmed` when the spawn returns, `identified` when the subagent
+# starts (spec §1). Three rows, ONE contract — and four readers that must not
+# disagree about it: the sweeper's verdict folds to the latest row per name,
+# hooks/stop-check.sh and hooks/stop-guard.sh take the row by id and fall back to
+# the row by name, and the recorder's own join reads the chain to extend it.
+#
+# The chain below is built by the REAL writers from a REAL brief — the start gate,
+# then the recorder's completion arm on a teammate-shaped payload, then the
+# recorder's identification arm on a SubagentStart. Nothing here is a hand-written
+# row, because the defect this section exists to catch is a writer that stops
+# copying a field forward, and a hand-written fixture would carry the fields the
+# test author remembered rather than the ones the writer emits.
+
+KREPO=$(new_repo "identity-chain")
+KSLUG=$(printf '%s' "$KREPO" | sed 's/[^a-zA-Z0-9]/-/g')
+KPROJ="$CLAUDE_CONFIG_DIR/projects/$KSLUG"
+KSUB="$KPROJ/$SID_A/subagents"
+KSUB_B="$KPROJ/$SID_B/subagents"
+mkdir -p "$KSUB" "$KSUB_B" "$KREPO/.bionic/tmp"
+KTR="$KPROJ/$SID_A.jsonl"; printf '{}\n' > "$KTR"
+KTR_B="$KPROJ/$SID_B.jsonl"; printf '{}\n' > "$KTR_B"
+write_plan "$KREPO/.bionic/docs/plans/epic-16/wave-01.md" "current: 4"
+KROSTER="$KREPO/.bionic/tmp/roster-$SID_A.state"
+KID="aw16chain-1234567890abcdef"
+
+# The attestation the dispatch wall demands, as a fixture: whether the producer and
+# the wall spell that key the same way is §B's subject, not this one.
+{
+  printf '# bionic environment attestation — machine-local, safe to delete\n'
+  printf 'version=1\nkind=preflight-attestation\n'
+  printf 'session_id=%s\nwritten_at=1785790000\nrepo=%s\n' "$SID_A" "$KREPO"
+} > "$KREPO/.bionic/tmp/preflight-$SID_A.state"
+
+K_BRIEF='Canonical-sdlc Step 4, slice 6 of epic-16 wave-01; build · audited · wave.
+Expected artifact: .bionic/docs/record/w16-chain.md
+Expected duration: ~30 minutes. Progress artifact: .bionic/tmp/w16-chain.progress, cadence ~7m.
+Subprocess claim: `w16-chain-marker` → .bionic/tmp/w16-chain.log
+Exit condition: the artifact exists.'
+
+# STAGE 1 — the dispatch wall writes `intended`.
+mk_agent_payload "$SID_A" "$KREPO" \
+  | jq --arg p "$K_BRIEF" '.tool_input.name = "w16-chain" | .tool_input.prompt = $p
+                           | .tool_use_id = "toolu_01CHAIN"' \
+  | bash "$PARTY_DP" >/dev/null 2>&1
+K_INTENDED=$(grep 'status=intended|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tail -1)
+expect_contains "the dispatch wall journalled the launch as intended" \
+  "status=intended" "$K_INTENDED"
+expect_contains "…carrying the deliverable the brief declared" \
+  "deliverable=.bionic/docs/record/w16-chain.md" "$K_INTENDED"
+
+# STAGE 2 — the spawn returns; the recorder completes the row to `confirmed`. The
+# TEAMMATE shape, which carries the addressing id and no transcript id at all.
+mk_agent_post_teammate "$SID_A" "$KTR" "$KREPO" "w16-chain" \
+  "w16-chain@session-6c85684c" "toolu_01CHAIN" | bash "$PARTY_ER" >/dev/null 2>&1
+K_CONFIRMED=$(grep 'status=confirmed|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tail -1)
+expect_contains "the spawn's completion advances the row to confirmed" \
+  "status=confirmed" "$K_CONFIRMED"
+expect_contains "…recording the ADDRESSING id in its own field" \
+  "teammate_id=w16-chain@session-6c85684c" "$K_CONFIRMED"
+expect_contains "…and leaving agent_id EMPTY, because no wall could ever match that form" \
+  "|agent_id=|" "$K_CONFIRMED"
+
+# STAGE 3 — the subagent starts; the recorder joins by name and writes `identified`
+# with the TRANSCRIPT-form id, the first form the by-id walls can match.
+mk_start_payload "$SID_A" "$KTR" "$KREPO" "w16-chain" "$KID" | bash "$PARTY_ER" >/dev/null 2>&1
+K_IDENTIFIED=$(grep 'status=identified|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tail -1)
+expect_contains "the start advances the row to identified" "status=identified" "$K_IDENTIFIED"
+expect_contains "…carrying the transcript-form id" "agent_id=$KID" "$K_IDENTIFIED"
+expect_eq "the chain is three rows for one name, in order" "intended confirmed identified" \
+  "$(grep '|name=w16-chain|' "$KROSTER" 2>/dev/null | tr '|' '\n' | grep '^status=' | cut -d= -f2 | tr '\n' ' ' | sed 's/ $//')"
+
+# --- K.1 the chain invariant: every contract field survives every advance ---
+#
+# "Every field copied forward" is the recorder's own claim, and it is load-bearing
+# rather than tidy: the verdict folds to the LATEST row per name and reads the whole
+# contract — deliverable, launch clock, progress path, cadence, claims, waiver — off
+# that row alone. A row that dropped a field would not merely be terse; it would
+# silently RETRACT the contract it inherited, and the verdict would then call it MET
+# for naming nothing. Compared generically, so a field added later is covered by this
+# test the day it is added rather than the day someone remembers to list it.
+k_contract_fields() {  # <row> -> the fields that must not change, one per line
+  printf '%s' "$1" | tr '|' '\n' \
+    | grep -v '^roster-state/' | grep -v '^status=' | grep -v '^agent_id=' \
+    | grep -v '^teammate_id='
+}
+expect_eq "every contract field survives intended → confirmed" \
+  "$(k_contract_fields "$K_INTENDED")" "$(k_contract_fields "$K_CONFIRMED")"
+expect_eq "every contract field survives confirmed → identified" \
+  "$(k_contract_fields "$K_CONFIRMED")" "$(k_contract_fields "$K_IDENTIFIED")"
+
+# --- K.2 the four readers, one row, one contract ---
+plant "$KSUB" "$KID" "w16-chain"
+
+# READER 1 — the sweeper's verdict. ONE line for the name, not three: a gate handed
+# a line per roster row would have to guess which to believe. Taken BEFORE the
+# progress artifact exists, because a progress file inside its declared cadence is
+# STILL-LIVE by design and this reader is being asked about the deliverable.
+K_VERDICT=$( cd "$KREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" verdict w16-chain 2>/dev/null )
+expect_eq "the verdict prints exactly ONE line for a three-row chain" "1" \
+  "$(printf '%s\n' "$K_VERDICT" | grep -cF 'landing-verdict/v1|')"
+K_VLINE=$(printf '%s\n' "$K_VERDICT" | grep -F 'landing-verdict/v1|' | head -1)
+# STILL-LIVE, and asserted rather than engineered away: this chain is seconds old
+# and its brief declared a ~7m cadence, so an agent that has not written anything
+# yet is visibly in flight, not in breach. What matters here is that the verb read
+# the CONTRACT off the chain at all — it names the outstanding artifact either way.
+expect_eq "…and it reads the contract off the chain, not off nothing" "STILL-LIVE" \
+  "$(j_field "$K_VLINE" state)"
+expect_contains "…naming the artifact the brief declared at dispatch, still outstanding" \
+  "outstanding: missing=.bionic/docs/record/w16-chain.md" "$(j_field "$K_VLINE" detail)"
+
+# The paired positive (AC-4's absence-readback rule): the same chain, the same verb,
+# with the artifact on disk. `sleep 1` because the delivered predicate is
+# mtime > launched_at and the row was written this second.
+sleep 1
+mkdir -p "$KREPO/.bionic/docs/record"
+echo "the slice report" > "$KREPO/.bionic/docs/record/w16-chain.md"
+K_VERDICT=$( cd "$KREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" verdict w16-chain 2>/dev/null )
+K_VLINE=$(printf '%s\n' "$K_VERDICT" | grep -F 'landing-verdict/v1|' | head -1)
+expect_eq "…and the same chain reads MET once the artifact lands" "MET" \
+  "$(j_field "$K_VLINE" state)"
+expect_contains "…naming it delivered, by the path the brief declared" \
+  "delivered=.bionic/docs/record/w16-chain.md" "$(j_field "$K_VLINE" detail)"
+
+# READER 2 — the observation. Same chain, same contract, reached by its own means:
+# it takes no payload, so it finds the roster by slugifying its own cwd.
+printf 'stage 1\n' > "$KREPO/.bionic/tmp/w16-chain.progress"
+K_OBS=$( cd "$KREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" w16-chain 2>&1 )
+K_MLINE=$(printf '%s\n' "$K_OBS" | grep '^stop-check-observation/')
+expect_contains "the observation calls the identified agent OURS" "Classification: OURS" "$K_OBS"
+expect_contains "…and shows the contract it read off the chain" \
+  "deliverables=.bionic/docs/record/w16-chain.md" "$K_OBS"
+expect_contains "…naming the roster as where that contract came from" \
+  "deliverable_source=roster" "$K_MLINE"
+expect_contains "…and the same progress path" "progress=.bionic/tmp/w16-chain.progress" "$K_MLINE"
+expect_contains "…from the same source" "progress_source=roster" "$K_MLINE"
+
+# THE READERS COMPARED TO EACH OTHER, not each to a literal — which is what goes red
+# when either one starts resolving a different row of the chain. The observation's
+# machine line renders each deliverable as `<state>:<path>`, so the state is stripped
+# before the paths are compared; the STATE itself is asserted separately, because
+# both readers must also agree the artifact is not there.
+k_sw_path() {  # the path the VERB says the contract names, whatever state it reports
+  j_field "$K_VLINE" detail \
+    | grep -oE '(missing|delivered|empty)=[^ ]+' | head -1 | cut -d= -f2-
+}
+K_SC_DELIV=$(printf '%s' "$K_MLINE" | tr '|' '\n' | grep '^deliverables=' | head -1 | cut -d= -f2-)
+expect_eq "the verb and the observation name the same deliverable" \
+  "$(k_sw_path)" "${K_SC_DELIV#*:}"
+expect_eq "…and agree it is on disk" "present" "${K_SC_DELIV%%:*}"
+expect_eq "…and it is the value on the row the writer wrote" \
+  "$(printf '%s' "$K_IDENTIFIED" | tr '|' '\n' | grep '^deliverable=' | head -1 | cut -d= -f2-)" \
+  "$(k_sw_path)"
+
+# READER 3 — the stop gate, over the D-6 channel the chain contracted. The refusal
+# is sourced from the roster row this gate resolved, so it names the path the START
+# gate lifted out of the brief three rows ago.
+mk_bash_post "$SID_A" "$KTR" "$KREPO" "bash ~/.claude/hooks/stop-check.sh w16-chain" "$K_OBS" \
+  | bash "$PARTY_ER" >/dev/null 2>&1
+sleep 1
+printf 'stage 2\n' >> "$KREPO/.bionic/tmp/w16-chain.progress"
+K_SG_OUT=$(mk_stop_payload "$SID_A" "$KTR" "$KREPO" "w16-chain" | bash "$PARTY_SG" 2>&1); K_SG_ST=$?
+expect_eq "the stop gate refuses a stop whose contracted channel moved under the look" \
+  "2" "$K_SG_ST"
+expect_contains "…naming the very path the chain carried forward" \
+  ".bionic/tmp/w16-chain.progress" "$K_SG_OUT"
+
+# READER 4 — the recorder's own join. A SECOND start re-joins the `confirmed` row
+# rather than chaining off its own output (states advance; a repeated start must not
+# compound a field loss), and the row it writes still carries the original dispatch's
+# tool_use_id — which is the proof it joined the chain rather than starting a new one.
+mk_start_payload "$SID_A" "$KTR" "$KREPO" "w16-chain" "aw16chain-fedcba0987654321" \
+  | bash "$PARTY_ER" >/dev/null 2>&1
+K_IDENT2=$(grep 'status=identified|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tail -1)
+expect_contains "a second start writes a second identified row" \
+  "agent_id=aw16chain-fedcba0987654321" "$K_IDENT2"
+expect_contains "…still carrying the original dispatch's tool_use_id" \
+  "tool_use_id=toolu_01CHAIN" "$K_IDENT2"
+expect_eq "…and the same contract as every row before it" \
+  "$(k_contract_fields "$K_INTENDED")" "$(k_contract_fields "$K_IDENT2")"
+
+# --- K.3 the identified row is what makes the by-id walls reachable (paired) ---
+#
+# R4's whole point. A confirmed teammate row's `agent_id=` is empty by design, so
+# `confirmed` alone is a set no teammate row can satisfy BY ID — the ownership rule
+# was unreachable for every interactive dispatch this repo makes while the suites'
+# async-shaped fixtures kept it looking alive. Both by-id readers are asked here over
+# ONE roster, in the one shape where the answer is observable: the agent's metadata
+# filed under ANOTHER session's directory, where only the roster can vouch for it.
+# The negative half removes the identified row and nothing else.
+# The agent MOVES rather than being copied: the same id filed under two session
+# directories of one project is the AMBIGUOUS case (§C2), which would answer this
+# question with "the operator was shown a candidate list" instead of with the
+# ownership rule under test.
+mkdir -p "$SANDBOX/k-own-meta"
+mv "$KSUB/agent-$KID.meta.json" "$KSUB/agent-$KID.jsonl" "$SANDBOX/k-own-meta/"
+plant "$KSUB_B" "$KID" "w16-chain"
+K_ROSTER_NOID="$SANDBOX/k-roster-without-identified.state"
+grep -v 'status=identified' "$KROSTER" > "$K_ROSTER_NOID"
+K_ROSTER_FULL="$SANDBOX/k-roster-full.state"
+cp "$KROSTER" "$K_ROSTER_FULL"
+
+k_observation_says() {  # -> the classification of the cross-session agent
+  local out
+  out=$( cd "$KREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" "$KID" 2>&1 )
+  case "$out" in
+    *"Classification: OURS"*)         echo ours ;;
+    *"Classification: FOREIGN"*)      echo foreign ;;
+    *"Classification: DEAD HISTORY"*) echo dead ;;
+    *) echo "other" ;;
+  esac
+}
+# The stop is BY NAME, which is the only shape the foreign wall guards: a by-id
+# stop is the documented escape hatch (an id is unambiguous by construction), so
+# asking by id would answer a different question. The payload's session key and its
+# transcript path DISAGREE — the gate's own comment names that as the one way a
+# cross-session target reaches it — and the observation/record pair runs first,
+# because the record wall sits behind the foreign one and an unrecorded look would
+# refuse both halves for the same uninteresting reason.
+k_stop_gate_says() {  # -> foreign | ours
+  local out
+  rm -f "$KREPO/.bionic/tmp/stop-check.state"
+  out=$( cd "$KREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" "$KID" 2>&1 )
+  mk_bash_post "$SID_A" "$KTR_B" "$KREPO" "bash ~/.claude/hooks/stop-check.sh $KID" "$out" \
+    | bash "$PARTY_ER" >/dev/null 2>&1
+  out=$(mk_stop_payload "$SID_A" "$KTR_B" "$KREPO" "w16-chain" | bash "$PARTY_SG" 2>&1)
+  case "$out" in
+    *"was not launched by this session"*) echo foreign ;;
+    *) echo ours ;;
+  esac
+}
+expect_eq "with the identified row, the observation vouches for a cross-session agent" \
+  "ours" "$(k_observation_says)"
+expect_eq "…and the stop gate's foreign wall stands down over the same row" \
+  "ours" "$(k_stop_gate_says)"
+cp "$K_ROSTER_NOID" "$KROSTER"
+expect_eq "without it — intended and confirmed only — the observation calls it foreign" \
+  "foreign" "$(k_observation_says)"
+expect_eq "…and the stop gate refuses it, both readers flipping on the same row" \
+  "foreign" "$(k_stop_gate_says)"
+cp "$K_ROSTER_FULL" "$KROSTER"
+
+# --- K.4 a forward-copy that drops a field goes RED here ---
+#
+# The mutation is the plausible one: an identification arm that writes a fresh row
+# instead of copying the joined row forward. It is applied to a COPY of the recorder
+# and driven over a SECOND chain, so the chain above is untouched.
+KMUT="$SANDBOX/recorder-mutant.sh"
+awk '{ print; if (index($0, "if (f ~ /^status=/)")) print "      if (f ~ /^deliverable=/) f = \"deliverable=\"" }' \
+  "$PARTY_ER" > "$KMUT"
+if cmp -s "$PARTY_ER" "$KMUT"; then
+  no "forward-copy mutation applies to execution-recorder.sh" "the awk target matched nothing — the code moved"
+else
+  ok "forward-copy mutation applies to execution-recorder.sh"
+  mk_agent_payload "$SID_A" "$KREPO" \
+    | jq --arg p "$K_BRIEF" '.tool_input.name = "w16-mut" | .tool_input.prompt = $p
+                             | .tool_use_id = "toolu_01MUT"' \
+    | bash "$PARTY_DP" >/dev/null 2>&1
+  mk_agent_post_teammate "$SID_A" "$KTR" "$KREPO" "w16-mut" \
+    "w16-mut@session-6c85684c" "toolu_01MUT" | bash "$KMUT" >/dev/null 2>&1
+  mk_start_payload "$SID_A" "$KTR" "$KREPO" "w16-mut" "aw16mut-1111111111111111" \
+    | bash "$KMUT" >/dev/null 2>&1
+  K_MUT_INTENDED=$(grep 'status=intended|.*|name=w16-mut|' "$KROSTER" 2>/dev/null | tail -1)
+  K_MUT_IDENT=$(grep 'status=identified|.*|name=w16-mut|' "$KROSTER" 2>/dev/null | tail -1)
+  if [ "$(k_contract_fields "$K_MUT_INTENDED")" = "$(k_contract_fields "$K_MUT_IDENT")" ]; then
+    no "a dropped forward-copy makes the chain invariant RED" \
+       "the invariant stayed green with the recorder mutated — it does not discriminate"
+  else
+    ok "a dropped forward-copy makes the chain invariant RED"
+  fi
+  # …and the consequence the invariant is a proxy for: the contract is RETRACTED.
+  # The verdict now calls a row MET for naming nothing, which is the false clean
+  # answer the landing gate would pass a stopping agent on.
+  expect_eq "…and the verdict then calls the retracted contract MET, vacuously" "MET" \
+    "$( cd "$KREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" verdict w16-mut 2>/dev/null \
+        | grep -F 'landing-verdict/v1|' | head -1 | tr '|' '\n' | grep '^state=' | cut -d= -f2- )"
+fi
+
+# ============================================================
+echo ""
+echo "=== L — the WIRING: every hook's event guard is an event bootstrap registers ==="
+# ============================================================
+#
+# A hook that reads an event nobody registered it for is inert, and inert in the
+# quietest possible way: it is installed, it is syntactically fine, its own suite is
+# green, and it never runs. Epic-16 shipped readers for two events this machine had
+# never registered — SubagentStart (the identification arm) and SubagentStop (the
+# landing gate) — so the registration is part of the agreement, not a deployment
+# detail. Both directions are asserted: bootstrap names the event, and the hook
+# guards on that same spelling.
+BOOTSTRAP_SRC=$(cat "$REPO_ROOT/claude-bootstrap.sh")
+
+expect_contains "bootstrap registers the landing gate on SubagentStop" \
+  '"SubagentStop||~/.claude/hooks/landing-gate.sh"' "$BOOTSTRAP_SRC"
+expect_contains "…and the gate guards on that same event name" \
+  '"$EVENT" = "SubagentStop"' "$(cat "$PARTY_LG")"
+
+expect_contains "bootstrap registers the recorder on SubagentStart" \
+  '"SubagentStart||~/.claude/hooks/execution-recorder.sh"' "$BOOTSTRAP_SRC"
+expect_contains "…and the recorder's identification arm guards on that same event name" \
+  '= "SubagentStart"' "$(cat "$PARTY_ER")"
+
+# The recorder's OTHER two arms, still registered: the identification arm is a third
+# registration of one script, and a convergent MANAGED_HOOKS rebuild removes whatever
+# it stops naming. A wiring change that dropped either of these would leave the
+# observation record and the roster's completion arm silently unwritten.
+expect_contains "the recorder keeps its PostToolUse|Bash registration (the observation arm)" \
+  '"PostToolUse|Bash|~/.claude/hooks/execution-recorder.sh"' "$BOOTSTRAP_SRC"
+expect_contains "…and its PostToolUse|Agent registration (the completion arm)" \
+  '"PostToolUse|Agent|~/.claude/hooks/execution-recorder.sh"' "$BOOTSTRAP_SRC"
+
+# Both new registrations take the NO-MATCHER branch of wire_managed_hooks — these
+# events carry no tool name to match on. Spelled here because the empty middle field
+# is easy to "fix" into a matcher.
+expect_eq "both new registrations declare an empty matcher" "2" \
+  "$(printf '%s\n' "$BOOTSTRAP_SRC" | grep -cE '"Subagent(Start|Stop)\|\|~/\.claude/hooks/')"
+
+# --- L.2 EVERY registration is bounded by a timeout, whichever branch writes it ---
+#
+# The Step-6 review's C-4: `wire_managed_hooks` attached `"timeout": 10` only on the
+# matcher branch, so the two events this wave added — the ones that carry no matcher —
+# registered with no ceiling at all, and the platform default was the only thing in front
+# of the landing gate's verdict subprocess. A timeout is the safe direction here precisely
+# because the gate is fail-open: a hook that is killed lets the stop through.
+#
+# Driven rather than grepped: the real function is extracted from the real script and run
+# against a sandboxed settings file, the same convention tests/installer-behavior.test.sh
+# uses, so this asserts what bootstrap WRITES and not what its source looks like.
+LSBX="$SANDBOX/wiring"
+mkdir -p "$LSBX"
+LCODE="$LSBX/wire.sh"
+awk '/^wire_managed_hooks\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$REPO_ROOT/claude-bootstrap.sh" > "$LCODE"
+awk '/^MANAGED_HOOKS=\(/{f=1} f{print} f&&/^\)$/{exit}' "$REPO_ROOT/claude-bootstrap.sh" >> "$LCODE"
+LSETTINGS="$LSBX/settings.json"
+echo '{}' > "$LSETTINGS"
+# shellcheck disable=SC1090
+( . "$LCODE"; settings="$LSETTINGS"; wire_managed_hooks ) >/dev/null 2>&1
+L_RC=$?
+expect_eq "wire_managed_hooks runs against a sandboxed settings file" "0" "$L_RC"
+expect_eq "…and registers every managed hook (this section is not vacuous)" \
+  "$(printf '%s\n' "$BOOTSTRAP_SRC" | awk '/^MANAGED_HOOKS=\(/{f=1;next} f&&/^\)$/{exit} f&&/"/{n++} END{print n+0}')" \
+  "$(jq '[.hooks[][].hooks[]] | length' "$LSETTINGS" 2>/dev/null)"
+expect_eq "EVERY registered hook carries a timeout — the no-matcher branch included" "0" \
+  "$(jq '[.hooks[][].hooks[] | select(has("timeout") | not)] | length' "$LSETTINGS" 2>/dev/null)"
+expect_eq "…and the landing gate's own entry is bounded" "10" \
+  "$(jq -r '.hooks.SubagentStop[0].hooks[0].timeout' "$LSETTINGS" 2>/dev/null)"
+expect_eq "…as is the recorder's SubagentStart entry" "10" \
+  "$(jq -r '.hooks.SubagentStart[0].hooks[0].timeout' "$LSETTINGS" 2>/dev/null)"
 
 # ============================================================
 echo ""

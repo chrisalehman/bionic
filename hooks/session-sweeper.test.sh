@@ -96,14 +96,18 @@ new_roster() {  # <repo>
     > "$(roster_of "$1")"
 }
 
-# Emits one roster-state/v1 row. Field set and ORDER are dispatch-preflight.sh:490's;
+# Emits one roster-state/v1 row. Field set and ORDER are those of the roster writer in
+# hooks/dispatch-preflight.sh (the `ROW=` assignment, `absent-deliverable wall` era —
+# `waiver=` is part of that row and was missing here until the verdict verb needed it);
 # every unnamed field takes the empty value that gate writes when a brief declares none.
 mkrow() {  # <key=value>...
   local status=confirmed session="$SID" name=agent agent_id=a000 launched_at=""
   local subagent_type=implementor model=opus deliverable="" duration="" progress=""
-  local claims="" cadence="" tool_use_id=toolu_x kv
+  local claims="" cadence="" waiver="" tool_use_id=toolu_x source=declared kv
   for kv in "$@"; do
     case "$kv" in
+      waiver=*)      waiver="${kv#*=}" ;;
+      source=*)      source="${kv#*=}" ;;
       status=*)      status="${kv#*=}" ;;
       session=*)     session="${kv#*=}" ;;
       name=*)        name="${kv#*=}" ;;
@@ -119,9 +123,9 @@ mkrow() {  # <key=value>...
     esac
   done
   [ -n "$launched_at" ] || launched_at="$(iso_ago 60)"
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=%s|deliverable=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|tool_use_id=%s\n' \
+  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=%s|deliverable=%s|source=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|waiver=%s|tool_use_id=%s\n' \
     "$status" "$session" "$name" "$agent_id" "$launched_at" "$subagent_type" "$model" \
-    "$deliverable" "$duration" "$progress" "$claims" "$cadence" "$tool_use_id"
+    "$deliverable" "$source" "$duration" "$progress" "$claims" "$cadence" "$waiver" "$tool_use_id"
 }
 
 add_row() {  # <repo> <key=value>...
@@ -908,6 +912,474 @@ expect_contains "…while stdout still confirms the ack" "acked: late-row" "$OUT
 expect_contains "…and journals it" "name=late-row" \
   "$(grep 'event=ack' "$(ledger_of "$R15")" 2>/dev/null)"
 sweep "$R15" retire; wait_exit "$P15" 15
+
+# ============================================================
+section "Section 9: verdict — the landing readback (epic-16 AC-3, AC-4)"
+# ============================================================
+#
+# The LANDING question, which is not the watching question Sections 3–5 ask. The tick loop
+# asks "is this row worth waking someone for"; `verdict` asks "did this contract land",
+# and it applies the STRICT predicate to answer: exists AND non-empty AND mtime after the
+# row's own `launched_at`. A file that was already on disk when the agent was dispatched is
+# not that agent's delivery, and saying so is the whole point — the same three conjuncts
+# are what the landing gate reads back to a stopping agent.
+#
+# EVERY NEGATIVE HERE CARRIES ITS PAIRED POSITIVE (AC-4's absence-readback rule): the same
+# row, the same command, one fact about the disk changed, and the state flips. A negative
+# case alone cannot tell "the predicate caught it" from "the verb never looked".
+#
+# Clock discipline is the house rule: launch times are roster fields (`iso_ago`) and file
+# ages are mtimes (`backdate`, which is `touch -t`). Nothing here sleeps.
+
+# --- the four conjuncts, each against its paired positive ---
+RV="$(make_repo vc)"; new_roster "$RV"
+L9="$(iso_ago 600)"
+DEL9="$RV/report.md"; echo "the landed report" > "$DEL9"
+add_row "$RV" name=lander deliverable="$DEL9" duration="4 hours" launched_at="$L9"
+
+sweep "$RV" verdict lander
+expect_eq "delivered: a met contract exits 0" "0" "$RC"
+expect_contains "delivered: a machine line is printed" "landing-verdict/v1|" "$OUT"
+expect_contains "delivered: the line names the row and its state" "name=lander|state=MET" "$OUT"
+expect_contains "delivered: the line carries this session" "session=$SID" "$OUT"
+expect_contains "delivered: the readback names the file it stat'd" "delivered=$DEL9" "$OUT"
+
+: > "$DEL9"   # exists, zero bytes, written now — only the emptiness is wrong
+sweep "$RV" verdict lander
+expect_eq "empty: an empty deliverable is UNMET (exit 1)" "1" "$RC"
+expect_contains "empty: the state is UNMET" "name=lander|state=UNMET" "$OUT"
+expect_contains "empty: the failing conjunct is named" "empty=$DEL9" "$OUT"
+expect_absent "empty: and it is not reported as missing" "missing=$DEL9" "$OUT"
+echo "written for real this time" > "$DEL9"
+sweep "$RV" verdict lander
+expect_eq "empty→filled: the paired positive exits 0" "0" "$RC"
+expect_contains "empty→filled: the paired positive is MET" "state=MET" "$OUT"
+
+backdate "$DEL9" 1200   # non-empty, but last written 20 min ago against a 10-min-old launch
+sweep "$RV" verdict lander
+expect_eq "stale: a pre-launch file is UNMET (exit 1)" "1" "$RC"
+expect_contains "stale: the failing conjunct is named" "stale=$DEL9" "$OUT"
+expect_contains "stale: the detail quotes the row's own launched_at" "launched_at $L9" "$OUT"
+expect_matches "stale: the detail renders the file's mtime as an ISO stamp" \
+  "mtime [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z" "$OUT"
+touch "$DEL9"
+sweep "$RV" verdict lander
+expect_eq "stale→rewritten: the paired positive exits 0" "0" "$RC"
+expect_contains "stale→rewritten: the paired positive is MET" "state=MET" "$OUT"
+
+rm -f "$DEL9"
+sweep "$RV" verdict lander
+expect_eq "missing: an absent deliverable is UNMET (exit 1)" "1" "$RC"
+expect_contains "missing: the failing conjunct is named" "missing=$DEL9" "$OUT"
+expect_absent "missing: and it is not reported as empty" "empty=$DEL9" "$OUT"
+echo "finally" > "$DEL9"
+sweep "$RV" verdict lander
+expect_eq "missing→written: the paired positive exits 0" "0" "$RC"
+expect_contains "missing→written: the paired positive is MET" "state=MET" "$OUT"
+
+# --- a partial set names ONLY what failed ---
+RVP="$(make_repo vp)"; new_roster "$RVP"
+echo "the first half" > "$RVP/one.md"
+add_row "$RVP" name=halfway deliverable="$RVP/one.md,$RVP/two.md" duration="4 hours" \
+        launched_at="$(iso_ago 600)"
+sweep "$RVP" verdict halfway
+expect_eq "partial: one absent deliverable is UNMET" "1" "$RC"
+expect_contains "partial: the absent one is named" "missing=$RVP/two.md" "$OUT"
+expect_absent "partial: the delivered one is not named as a failure" "missing=$RVP/one.md" "$OUT"
+
+# --- a directory deliverable: delivered when a file lives in it (the sibling reading) ---
+RVD="$(make_repo vd)"; new_roster "$RVD"
+mkdir -p "$RVD/record"
+add_row "$RVD" name=dirrow deliverable="$RVD/record" duration="4 hours" launched_at="$(iso_ago 600)"
+sweep "$RVD" verdict dirrow
+expect_eq "empty directory: UNMET (a created path is not a written deliverable)" "1" "$RC"
+expect_contains "empty directory: named as empty, never as missing" "empty=$RVD/record" "$OUT"
+echo "a landed artifact" > "$RVD/record/report.md"
+sweep "$RVD" verdict dirrow
+expect_eq "directory with a file in it: the paired positive exits 0" "0" "$RC"
+expect_contains "directory with a file in it: MET" "state=MET" "$OUT"
+
+# --- bare verdict over one row of every state: four lines, exit 1 ---
+RVB="$(make_repo vb)"; new_roster "$RVB"
+L9B="$(iso_ago 600)"
+echo "landed" > "$RVB/met.md"
+add_row "$RVB" name=row-met    deliverable="$RVB/met.md"   duration="4 hours" launched_at="$L9B"
+add_row "$RVB" name=row-unmet  deliverable="$RVB/never.md" duration="4 hours" launched_at="$L9B"
+# FIXTURE FIDELITY (Step-6 review S-1): a genuine waiver row declares NO deliverable —
+# the wall's own waiver label reads "why this dispatch produces nothing durable". A row
+# carrying BOTH a declared artifact and a waiver is contradictory, and Section 12 is where
+# that shape is answered for; it must not be the fixture that stands for WAIVED.
+add_row "$RVB" name=row-waived duration="4 hours" launched_at="$L9B" \
+        waiver="exploratory probe: no artifact expected"
+CLAIM9="$TMPROOT/bionic-verdict-marker-55831.sh"
+printf '#!/bin/bash\nsleep 120\n' > "$CLAIM9"; chmod +x "$CLAIM9"
+bash "$CLAIM9" & CLAIM9PID=$!; BG_PIDS="$BG_PIDS $CLAIM9PID"
+add_row "$RVB" name=row-live claims="$CLAIM9" deliverable="$RVB/never3.md" duration="4 hours" \
+        launched_at="$L9B"
+
+sweep "$RVB" verdict
+expect_eq "bare verdict: one UNMET row makes the whole run exit 1" "1" "$RC"
+expect_eq "bare verdict: one machine line per row, no more" "4" \
+  "$(printf '%s\n' "$OUT" | grep -c '^landing-verdict/v1|')"
+expect_contains "bare verdict: the delivered row reads MET" "name=row-met|state=MET" "$OUT"
+expect_contains "bare verdict: the undelivered row reads UNMET" "name=row-unmet|state=UNMET" "$OUT"
+expect_contains "bare verdict: the waived row reads WAIVED" "name=row-waived|state=WAIVED" "$OUT"
+expect_contains "bare verdict: the row whose claim is alive reads STILL-LIVE" \
+  "name=row-live|state=STILL-LIVE" "$OUT"
+expect_contains "bare verdict: the UNMET line still names what is missing" \
+  "missing=$RVB/never.md" "$OUT"
+expect_contains "bare verdict: the waived line quotes the waiver" "exploratory probe" "$OUT"
+expect_contains "bare verdict: a human summary follows the machine lines" \
+  "1 MET, 1 UNMET, 1 WAIVED, 1 STILL-LIVE" "$OUT"
+# It reports state facts. Same doctrine as every other surface of this script.
+for word in "kill" "you should" "recommend" "hung" "is dead" "safe to stop"; do
+  expect_absent "verdict does not judge (\"$word\")" "$word" "$OUT"
+done
+
+# --- scoping: a name takes one row and answers for that row alone ---
+sweep "$RVB" verdict row-met
+expect_eq "verdict <name>: exactly one machine line" "1" \
+  "$(printf '%s\n' "$OUT" | grep -c '^landing-verdict/v1|')"
+expect_eq "verdict <name>: a MET row exits 0 even while a sibling row is UNMET" "0" "$RC"
+expect_contains "verdict <name>: the line is the row that was asked for" "name=row-met" "$OUT"
+expect_absent "verdict <name>: the sibling rows are not answered for" "row-unmet" "$OUT"
+sweep "$RVB" verdict row-unmet
+expect_eq "verdict <name>: an UNMET row exits 1" "1" "$RC"
+expect_contains "verdict <name>: …and names its conjunct" "missing=$RVB/never.md" "$OUT"
+kill -9 "$CLAIM9PID" 2>/dev/null; wait "$CLAIM9PID" 2>/dev/null
+sweep "$RVB" verdict row-live
+expect_eq "the same row once its claimed process is gone: UNMET" "1" "$RC"
+expect_contains "…and the conjunct is named" "missing=$RVB/never3.md" "$OUT"
+
+# --- still-live by progress: a progress artifact inside its declared cadence ---
+RVL="$(make_repo vl)"; new_roster "$RVL"
+PROG9="$RVL/w-progress.md"; echo "still working" > "$PROG9"
+add_row "$RVL" name=writer progress="$PROG9" cadence="every ~5 minutes" duration="4 hours" \
+        deliverable="$RVL/pending.md" launched_at="$(iso_ago 600)"
+sweep "$RVL" verdict writer
+expect_eq "fresh progress: an undelivered row is STILL-LIVE, not UNMET (exit 0)" "0" "$RC"
+expect_contains "fresh progress: the state says so" "state=STILL-LIVE" "$OUT"
+expect_contains "fresh progress: the outstanding deliverable is still named" \
+  "missing=$RVL/pending.md" "$OUT"
+backdate "$PROG9" 1800   # 30 min since the last write, against a 5-minute promise
+sweep "$RVL" verdict writer
+expect_eq "stale progress: the same row is UNMET once the promise lapses" "1" "$RC"
+expect_contains "stale progress: the state says so" "state=UNMET" "$OUT"
+
+# --- the roster is append-only: the LATEST row for a name is the answer ---
+RVS="$(make_repo vs)"; new_roster "$RVS"
+echo "landed" > "$RVS/final.md"
+add_row "$RVS" name=chained status=intended  deliverable="$RVS/never.md" duration="4 hours" \
+        launched_at="$(iso_ago 600)"
+add_row "$RVS" name=chained status=confirmed deliverable="$RVS/final.md" duration="4 hours" \
+        launched_at="$(iso_ago 600)"
+sweep "$RVS" verdict
+expect_eq "a three-state chain is ONE contract: one line per name" "1" \
+  "$(printf '%s\n' "$OUT" | grep -c '^landing-verdict/v1|')"
+expect_eq "…and the latest row is the one answered for" "0" "$RC"
+expect_contains "…which is the row that landed" "state=MET" "$OUT"
+
+# --- rows belonging to another session are not this session's contracts ---
+RVF="$(make_repo vf)"; new_roster "$RVF"
+add_row "$RVF" name=foreign session="$SID_FOREIGN" deliverable="$RVF/never.md" \
+        duration="4 hours" launched_at="$(iso_ago 600)"
+sweep "$RVF" verdict
+expect_eq "a foreign session's broken row is not this session's UNMET" "0" "$RC"
+expect_absent "…and is not answered for at all" "landing-verdict/v1|" "$OUT"
+
+# --- surface: usage, an unknown name, an empty roster ---
+sweep "$RVB" verdict row-met row-unmet
+expect_eq "verdict takes at most one name (exit 2)" "2" "$RC"
+expect_contains "…and the usage says so" "verdict" "$OUT"
+sweep "$RVB" verdict no-such-agent
+expect_eq "a name on no roster row is not an UNMET contract (exit 0)" "0" "$RC"
+expect_absent "…and no verdict line is invented for it" "landing-verdict/v1|" "$OUT"
+expect_contains "…while the answer still names what was asked" "no-such-agent" "$OUT"
+RVE="$(make_repo ve)"
+sweep "$RVE" verdict
+expect_eq "a session with no roster at all exits 0" "0" "$RC"
+expect_absent "…with no verdict lines" "landing-verdict/v1|" "$OUT"
+sweep "$RVE" nonsense-verb
+expect_contains "usage lists the verdict verb alongside the others" "verdict [<name>]" "$OUT"
+
+# --- verdict is READ-ONLY: it journals nothing, arms nothing, acks nothing ---
+RVR="$(make_repo vr)"; new_roster "$RVR"
+add_row "$RVR" name=readonly deliverable="$RVR/never.md" duration="4 hours" launched_at="$(iso_ago 600)"
+sweep "$RVR" verdict
+expect_eq "the read-only run saw its UNMET row" "1" "$RC"
+expect_false "verdict writes no ledger" test -e "$(ledger_of "$RVR")"
+expect_false "verdict writes no findings file" test -e "$(findings_of "$RVR")"
+expect_eq "verdict does not touch the roster" "1" \
+  "$(grep -c '^roster-state/v1|' "$(roster_of "$RVR")")"
+
+# --- an acked row is still judged: ack closes the WATCH, never the contract ---
+sweep "$RVR" ack readonly
+expect_eq "the ack is recorded" "0" "$RC"
+sweep "$RVR" verdict readonly
+expect_eq "an acked row whose artifact is absent is still UNMET" "1" "$RC"
+expect_contains "…and still names the missing artifact" "missing=$RVR/never.md" "$OUT"
+
+# --- a symlinked roster is refused, never guessed at (§8 path safety) ---
+RVY="$(make_repo vy)"; new_roster "$RVY"
+mv "$(roster_of "$RVY")" "$RVY/real-roster.state"
+ln -s "$RVY/real-roster.state" "$(roster_of "$RVY")"
+sweep "$RVY" verdict
+expect_eq "a symlinked roster refuses (exit 2), it does not report a clean session" "2" "$RC"
+expect_contains "…and says why" "symbolic link" "$OUT"
+
+# ============================================================
+section "Section 10: ack — the UNMET warning (epic-16 w1 slice 3)"
+# ============================================================
+#
+# Ack does NOT reach the verdict (plan Assumptions §11): an acked row is re-stat'd like any
+# other. What changes here is only the WARNING — acking a row that has not landed still
+# records the ack (the watch closes either way), but says so, and journals the verdict it
+# overrode so the ledger carries the fact rather than losing it.
+
+# --- ack over an UNMET row: warns, and the ledger line carries the verdict ---
+R16="$(make_repo s16)"; new_roster "$R16"
+add_row "$R16" name=unmet-agent deliverable="$R16/absent.md" duration="4 hours" \
+        launched_at="$(iso_ago 600)"
+sweep "$R16" ack unmet-agent
+expect_eq "ack over an UNMET row still exits 0 (it still records)" "0" "$RC"
+expect_contains "…and prints the UNMET warning" "WARNING: acking UNMET contract" "$OUT"
+expect_contains "…naming the failing conjunct" "missing=$R16/absent.md" "$OUT"
+ACKLINE16="$(grep 'event=ack' "$(ledger_of "$R16")" 2>/dev/null | head -1)"
+expect_contains "the ledger line carries verdict=UNMET" "verdict=UNMET" "$ACKLINE16"
+expect_contains "…and the failing-conjunct detail" "detail=missing=$R16/absent.md" "$ACKLINE16"
+
+# --- ack over a MET row: no warning, journaled exactly as today ---
+R17="$(make_repo s17)"; new_roster "$R17"
+DEL17="$R17/report.md"; echo "landed" > "$DEL17"
+add_row "$R17" name=met-agent deliverable="$DEL17" duration="4 hours" launched_at="$(iso_ago 600)"
+sweep "$R17" ack met-agent
+expect_eq "ack over a MET row exits 0" "0" "$RC"
+expect_absent "…and prints no warning" "WARNING" "$OUT"
+ACKLINE17="$(grep 'event=ack' "$(ledger_of "$R17")" 2>/dev/null | head -1)"
+expect_absent "the ledger line carries no verdict field" "verdict=" "$ACKLINE17"
+
+# ============================================================
+section "Section 11: arm — the ledger handshake + the ARMED line (epic-16 w1 slice 3)"
+# ============================================================
+#
+# Two independent claims: (1) the `-s` check the old arm used is a hole — a header-only
+# ledger already reads non-empty, so a failed append is indistinguishable from a
+# successful one — and the before/after ledger_count delta (ack's own shape) closes it.
+# (2) the ARMED line prints on stdout before the tick loop is entered, not after the first
+# tick — an operator scripting against arm should not have to wait a whole tick to know it
+# took.
+
+# --- the -s hole: a header-only ledger whose append is forced to fail must REFUSE ---
+R18="$(make_repo s18)"; new_roster "$R18"
+L18="$(ledger_of "$R18")"
+printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' \
+  > "$L18"
+chmod 444 "$L18"
+sweep "$R18" arm --tick 1
+expect_eq "arm over a ledger whose append fails REFUSES (exit 2)" "2" "$RC"
+expect_contains "…and names the refusal" "REFUSED" "$OUT"
+expect_contains "…specifically the journalling failure" "could not be journalled" "$OUT"
+expect_eq "nothing was armed: the header-only ledger gained no arm entry" \
+  "0" "$(grep -c 'event=arm' "$L18" 2>/dev/null)"
+chmod u+w "$L18" 2>/dev/null
+
+# --- the ARMED line prints before the tick loop, not after the first tick ---
+R19="$(make_repo s19)"; new_roster "$R19"
+sweep_bg "$R19" "$TMPROOT/s19.out" arm --tick 1; P19="$BGPID"
+sleep 0.5
+kill -TERM "$P19" 2>/dev/null
+wait_exit "$P19" 15
+expect_contains "ARMED prints before the loop's first tick sleep" \
+  "ARMED pid=$P19 tick=1" "$(cat "$TMPROOT/s19.out" 2>/dev/null)"
+
+# ============================================================
+section "Section 12: the Step-6 review remediations (C-2, C-3, C-6, S-1, S-3, perf)"
+# ============================================================
+#
+# Six independent holes the Step-6 correctness/security and architecture/performance
+# reviews found in the verdict machinery, each with the repro that found it. They share a
+# section because they share a subject — what the verdict says when the INPUT is ordinary,
+# rather than when the code is wrong — and because five of the six are answered inside
+# `landing_conjunct` / `verdict_row` / `latest_rows`.
+
+# --- S-3: one direction for symlinks, held by BOTH branches of the predicate ---
+#
+# The file branch followed links ([ -e ], [ -s ], stat all resolve) and the directory
+# branch did not (`find -type f` skips them), so `ln -s` satisfied a file contract with
+# zero bytes written while the same link inside a directory contract satisfied nothing.
+# The direction taken: a symbolic link is not a delivered artifact, on either branch.
+RS3="$(make_repo s3link)"; new_roster "$RS3"
+echo "an artifact that lives somewhere else entirely" > "$RS3/real-target.md"
+ln -s "$RS3/real-target.md" "$RS3/linked.md"
+add_row "$RS3" name=symfile deliverable="$RS3/linked.md" duration="4 hours" \
+        launched_at="$(iso_ago 600)"
+sweep "$RS3" verdict symfile
+expect_eq "a symlinked deliverable is NOT delivered (exit 1)" "1" "$RC"
+expect_contains "…and the failing conjunct names it as a link" "symlink=$RS3/linked.md" "$OUT"
+expect_absent "…never as delivered" "delivered=$RS3/linked.md" "$OUT"
+rm -f "$RS3/linked.md"; echo "written for real this time" > "$RS3/linked.md"
+sweep "$RS3" verdict symfile
+expect_eq "paired positive: a real file at the same path is MET (exit 0)" "0" "$RC"
+expect_contains "paired positive: …and reads as delivered" "delivered=$RS3/linked.md" "$OUT"
+
+mkdir -p "$RS3/realdir"; echo "landed" > "$RS3/realdir/report.md"
+ln -s "$RS3/realdir" "$RS3/linkdir"
+add_row "$RS3" name=symdir deliverable="$RS3/linkdir" duration="4 hours" \
+        launched_at="$(iso_ago 600)"
+sweep "$RS3" verdict symdir
+expect_eq "a symlinked DIRECTORY deliverable is refused the same way (exit 1)" "1" "$RC"
+expect_contains "…by the same conjunct, so the two branches agree" \
+  "symlink=$RS3/linkdir" "$OUT"
+
+mkdir -p "$RS3/onlylink"; ln -s "$RS3/real-target.md" "$RS3/onlylink/x.md"
+add_row "$RS3" name=dironlylink deliverable="$RS3/onlylink" duration="4 hours" \
+        launched_at="$(iso_ago 600)"
+sweep "$RS3" verdict dironlylink
+expect_eq "a directory holding nothing but a symlink is empty, not delivered" "1" "$RC"
+expect_contains "…named as empty" "empty=$RS3/onlylink" "$OUT"
+
+# --- C-3(b): the directory branch is BOUNDED, on a path the roster chose ---
+#
+# The branch walked `find <path> -type f` TWICE with no depth or effort bound, then stat'd
+# every file it found: 86 s inside a SubagentStop hook from one roster row naming
+# /usr/share. One traversal now, capped; and when the cap truncates the walk the staleness
+# conjunct is DROPPED rather than judged from a partial answer — "named, never guessed",
+# the same degradation rule an unreadable launched_at follows.
+RC3="$(make_repo c3dir)"; new_roster "$RC3"
+BIGDIR="$RC3/bigdir"; mkdir -p "$BIGDIR"
+_i=1; while [ "$_i" -le 210 ]; do printf 'x\n' > "$BIGDIR/f$_i.md"; _i=$((_i + 1)); done
+_old_ts="$(date -v-7200S +%Y%m%d%H%M.%S 2>/dev/null || date -d '-7200 seconds' +%Y%m%d%H%M.%S)"
+find "$BIGDIR" -type f -exec touch -t "$_old_ts" {} +
+add_row "$RC3" name=bigrow deliverable="$BIGDIR" duration="4 hours" launched_at="$(iso_ago 600)"
+sweep "$RC3" verdict bigrow
+expect_eq "a directory bigger than the scan cap is delivered, not judged for staleness" "0" "$RC"
+expect_contains "…and the detail names the cap rather than implying a full walk" \
+  "scan capped" "$OUT"
+# The paired control: under the cap, the same backdated files ARE judged, and go stale.
+SMALLDIR="$RC3/smalldir"; mkdir -p "$SMALLDIR"
+printf 'x\n' > "$SMALLDIR/one.md"
+find "$SMALLDIR" -type f -exec touch -t "$_old_ts" {} +
+add_row "$RC3" name=smallrow deliverable="$SMALLDIR" duration="4 hours" launched_at="$(iso_ago 600)"
+sweep "$RC3" verdict smallrow
+expect_eq "paired control: a directory under the cap is still judged for staleness" "1" "$RC"
+expect_contains "…and reads stale" "stale=$SMALLDIR" "$OUT"
+
+# --- C-2: one name, two contracts — the verdict says so and judges neither ---
+#
+# The gate joins by name and `latest_rows` folds to the latest row per name, so a re-used
+# agent name made the EARLIER agent answerable for the LATER one's artifact: agent #1 landed
+# its own contract in full and was refused, told to write a file that was never its job.
+# There is no id the gate can use instead, so the answer is to say the name is ambiguous and
+# hold nobody to it — a stop let through beats the wrong agent blocked.
+RA="$(make_repo amb)"; new_roster "$RA"
+echo "the first agent's landed report" > "$RA/first.md"
+add_row "$RA" name=dup deliverable="$RA/first.md"  tool_use_id=toolu_01FIRST  \
+        duration="4 hours" launched_at="$(iso_ago 900)"
+add_row "$RA" name=dup deliverable="$RA/second.md" tool_use_id=toolu_01SECOND \
+        duration="4 hours" launched_at="$(iso_ago 600)"
+sweep "$RA" verdict dup
+expect_contains "two dispatches under one name read AMBIGUOUS" "name=dup|state=AMBIGUOUS" "$OUT"
+expect_eq "…and an ambiguous name is not an UNMET run (exit 0 — the gate's pass)" "0" "$RC"
+expect_contains "…the detail says how many contracts share the name" "2 contracts" "$OUT"
+expect_absent "…and no agent is told to write the other's artifact" \
+  "missing=$RA/second.md" "$OUT"
+
+# The paired control, and the reason the count is over DISPATCHES and not over rows: a
+# three-state chain is ONE contract advancing, and it must not read as three.
+RA2="$(make_repo amb2)"; new_roster "$RA2"
+echo "landed" > "$RA2/final.md"
+for _st in intended confirmed identified; do
+  add_row "$RA2" name=chain status="$_st" deliverable="$RA2/final.md" \
+          tool_use_id=toolu_01CHAIN duration="4 hours" launched_at="$(iso_ago 600)"
+done
+sweep "$RA2" verdict chain
+expect_eq "paired control: a three-state chain is one contract, answered normally" "0" "$RC"
+expect_contains "…as MET, never AMBIGUOUS" "name=chain|state=MET" "$OUT"
+sweep "$RA" verdict
+expect_contains "the bare readback counts ambiguous names in its summary" "AMBIGUOUS" "$OUT"
+
+# --- S-1 (precedence half): a waiver does not silence a DECLARED deliverable ---
+#
+# `WAIVED` was verdict_row's first unconditional branch, so one line of quoted prose in a
+# brief — the wall's own help text, which this repo's briefs quote constantly — silenced a
+# contract that also named an artifact. A row carrying both is contradictory, and the
+# contradiction is surfaced rather than resolved in the direction that checks nothing.
+RW="$(make_repo waiv)"; new_roster "$RW"
+add_row "$RW" name=truly-waived duration="4 hours" launched_at="$(iso_ago 600)" \
+        waiver="this dispatch produces nothing durable"
+sweep "$RW" verdict truly-waived
+expect_eq "a waiver over a row declaring NO artifact is still WAIVED (exit 0)" "0" "$RC"
+expect_contains "…and says so" "state=WAIVED" "$OUT"
+
+add_row "$RW" name=contradiction deliverable="$RW/never.md" source=declared \
+        duration="4 hours" launched_at="$(iso_ago 600)" \
+        waiver="<why this dispatch produces nothing durable>"
+sweep "$RW" verdict contradiction
+expect_eq "a waiver over a DECLARED deliverable does not silence the contract (exit 1)" "1" "$RC"
+expect_contains "…the state is the disk's answer" "state=UNMET" "$OUT"
+expect_contains "…which still names the artifact" "missing=$RW/never.md" "$OUT"
+expect_contains "…and the detail surfaces the contradiction rather than hiding it" \
+  "waiver disregarded" "$OUT"
+
+add_row "$RW" name=inferred-waived deliverable="$RW/never2.md" source=inferred \
+        duration="4 hours" launched_at="$(iso_ago 600)" \
+        waiver="a scouting pass: nothing durable comes out of it"
+sweep "$RW" verdict inferred-waived
+expect_eq "an explicit waiver still outranks an INFERRED path (exit 0)" "0" "$RC"
+expect_contains "…as WAIVED, because only the waiver was declared" "state=WAIVED" "$OUT"
+
+# --- C-6: the arm/ack delta-count counts the CALLER'S OWN line ---
+#
+# The guard asked "did the count of this event rise", which a CONCURRENT arm's append
+# satisfies just as well as our own — so a failed write could be journalled as a success by
+# somebody else's line. The race itself is not deterministically reproducible in a suite
+# (the window is between two adjacent statements), so the scoping is pinned at the source
+# and the ordinary paths are driven for regression beside it.
+SWEEPER_SRC="$(cat "$SWEEPER")"
+expect_matches "arm's delta-count is scoped to the arming pid, not to any arm line" \
+  'ledger_count .\|event=arm\|\.\*\|pid=\$\$\|.' "$SWEEPER_SRC"
+expect_matches "ack's delta-count is scoped to the acking pid, not to any ack line" \
+  'ledger_count .\|event=ack\|\.\*\|pid=\$\$\|.' "$SWEEPER_SRC"
+
+# …and the scoped count still answers correctly with a FOREIGN entry of the same event
+# already in the ledger, which is the shape that made the unscoped count wrong.
+R20="$(make_repo s20)"; new_roster "$R20"
+L20="$(ledger_of "$R20")"
+printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$L20"
+printf 'sweeper-ledger/v1|event=arm|at=%s|epoch=1|pid=999999|tick=120|session=%s|rows=0|degraded=\n' \
+  "$(iso_ago 600)" "$SID" >> "$L20"
+printf 'sweeper-ledger/v1|event=exit|at=%s|epoch=2|pid=999999|session=%s|reason=finding|findings=1\n' \
+  "$(iso_ago 590)" "$SID" >> "$L20"
+sweep_bg "$R20" "$TMPROOT/s20.out" arm --tick 1; P20="$BGPID"
+expect_true "arm succeeds over a ledger already holding another pid's arm entry" \
+  wait_grep "pid=$P20" "$L20" 10
+expect_contains "…and the ARMED line names our own pid" "ARMED pid=$P20" \
+  "$(cat "$TMPROOT/s20.out" 2>/dev/null)"
+kill -TERM "$P20" 2>/dev/null; wait_exit "$P20" 15
+sweep "$R20" ack somebody
+expect_eq "ack succeeds over a ledger already holding another pid's entries" "0" "$RC"
+
+# --- the perf half of the review: the fold's name is used, not re-derived per row ---
+#
+# `latest_rows` folded the roster in awk (0.029 s at 1000 rows) and then a shell loop called
+# `line_field` on every folded row to recover the name the fold had already parsed — five
+# processes per row, 9.665 s at 1000 rows, on the path the landing gate runs at EVERY
+# subagent stop. The bound below is ~40x the fixed cost and ~4x under the measured broken
+# one, so it discriminates without being a stopwatch.
+RP="$(make_repo perf)"; new_roster "$RP"
+awk -v sid="$SID" -v n=2000 -v la="$(iso_ago 600)" '
+  BEGIN {
+    for (i = 1; i <= n; i++)
+      printf "roster-state/v1|status=confirmed|session=%s|name=perf%04d|agent_id=a%04d|launched_at=%s|subagent_type=implementor|model=opus|deliverable=|source=declared|duration=4 hours|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_%04d\n", sid, i, i, la, i
+  }' >> "$(roster_of "$RP")"
+SWEEP_BOUND=30
+_t0=$(date -u +%s)
+sweep "$RP" verdict perf1999
+_t1=$(date -u +%s)
+SWEEP_BOUND=20
+expect_eq "a scoped verdict over a 2000-row roster answers (exit 0)" "0" "$RC"
+expect_contains "…for the row it was asked about" "name=perf1999|state=MET" "$OUT"
+expect_true "…within the stop path's budget (10 s at 2000 rows)" test "$(( _t1 - _t0 ))" -le 10
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'

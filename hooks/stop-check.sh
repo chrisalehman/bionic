@@ -316,10 +316,13 @@ fi
 #     sitting in this session's own subagents directory.
 #
 # So the directory decides, and the roster keeps the job it can actually do: it
-# is the CONTRACT source for a target already established as ours, and a
-# `confirmed` row still establishes ownership BY AGENT ID — an id is unambiguous
-# by construction, and a confirmed row is this session's own record of its own
-# launch. It is never consulted as a name-oracle again.
+# is the CONTRACT source for a target already established as ours, and ownership
+# by id is established by a `confirmed` OR `identified` row carrying a NON-EMPTY
+# `agent_id` — an id is unambiguous by construction. In teammate mode the
+# transcript-form id arrives on the `identified` row while the `confirmed` row's
+# `agent_id=` is EMPTY by design (the detail below and execution-recorder.sh's
+# ARM 2 say why), so `identified` is what makes the by-id clause reachable for an
+# interactive dispatch at all. It is never consulted as a name-oracle again.
 ROSTER_ROW=""
 ROSTER_ID_MATCH=""
 if [ -n "$ROSTER_PATH" ] && [ -f "$ROSTER_PATH" ] && [ ! -L "$ROSTER_PATH" ]; then
@@ -329,16 +332,27 @@ if [ -n "$ROSTER_PATH" ] && [ -f "$ROSTER_PATH" ] && [ ! -L "$ROSTER_PATH" ]; th
     case "$rline" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
     rid=$(line_field "$rline" agent_id)
     rname=$(line_field "$rline" name)
-    # `confirmed`, not merely non-empty: the id on an UNCONFIRMED row is a claim
-    # about a launch that has not been observed to happen. What kept the weaker
-    # test safe was a property of a different file — hooks/dispatch-preflight.sh
-    # emits `agent_id=` empty on every `intended` row — and an invariant enforced
-    # elsewhere is exactly what slice 4/9 was remediating (Step-6 review C-2).
-    # Costs the pre-restart world nothing: its rows carry no id at all, so this
-    # clause never fired for them, and their CONTRACT still comes from the row
-    # by name below.
-    [ -n "$rid" ] && [ "$rid" = "$AGENT_ID" ] \
-      && [ "$(line_field "$rline" status)" = "confirmed" ] && ROW_BY_ID="$rline"
+    # `confirmed` or `identified`, never merely non-empty: the id on an
+    # UNCONFIRMED row is a claim about a launch that has not been observed to
+    # happen. What kept the weaker test safe was a property of a different file —
+    # hooks/dispatch-preflight.sh emits `agent_id=` empty on every `intended` row
+    # — and an invariant enforced elsewhere is exactly what slice 4/9 was
+    # remediating (Step-6 review C-2). Costs the pre-restart world nothing: its
+    # rows carry no id at all, so this clause never fired for them, and their
+    # CONTRACT still comes from the row by name below.
+    #
+    # `identified` joins the set in epic-16 wave-01 slice 1, and is the state
+    # that makes the clause reachable at all for a teammate. A confirmed teammate
+    # row's `agent_id=` is EMPTY by design — the launch response knows only the
+    # addressing form `name@session-xxxx`, and writing that into the id field
+    # would make every by-id reader's input wrong rather than unknown. The
+    # transcript-form id, which is what this script resolves a target to, first
+    # appears on SubagentStart and lands on the `identified` row.
+    if [ -n "$rid" ] && [ "$rid" = "$AGENT_ID" ]; then
+      case "$(line_field "$rline" status)" in
+        confirmed|identified) ROW_BY_ID="$rline" ;;
+      esac
+    fi
     [ -n "$rname" ] && [ "$rname" = "$AGENT_NAME" ] && ROW_BY_NAME="$rline"
   done < "$ROSTER_PATH"
   ROSTER_ID_MATCH="$ROW_BY_ID"
