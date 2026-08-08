@@ -1123,6 +1123,71 @@ expect_eq "a symlinked roster refuses (exit 2), it does not report a clean sessi
 expect_contains "…and says why" "symbolic link" "$OUT"
 
 # ============================================================
+section "Section 10: ack — the UNMET warning (epic-16 w1 slice 3)"
+# ============================================================
+#
+# Ack does NOT reach the verdict (plan Assumptions §11): an acked row is re-stat'd like any
+# other. What changes here is only the WARNING — acking a row that has not landed still
+# records the ack (the watch closes either way), but says so, and journals the verdict it
+# overrode so the ledger carries the fact rather than losing it.
+
+# --- ack over an UNMET row: warns, and the ledger line carries the verdict ---
+R16="$(make_repo s16)"; new_roster "$R16"
+add_row "$R16" name=unmet-agent deliverable="$R16/absent.md" duration="4 hours" \
+        launched_at="$(iso_ago 600)"
+sweep "$R16" ack unmet-agent
+expect_eq "ack over an UNMET row still exits 0 (it still records)" "0" "$RC"
+expect_contains "…and prints the UNMET warning" "WARNING: acking UNMET contract" "$OUT"
+expect_contains "…naming the failing conjunct" "missing=$R16/absent.md" "$OUT"
+ACKLINE16="$(grep 'event=ack' "$(ledger_of "$R16")" 2>/dev/null | head -1)"
+expect_contains "the ledger line carries verdict=UNMET" "verdict=UNMET" "$ACKLINE16"
+expect_contains "…and the failing-conjunct detail" "detail=missing=$R16/absent.md" "$ACKLINE16"
+
+# --- ack over a MET row: no warning, journaled exactly as today ---
+R17="$(make_repo s17)"; new_roster "$R17"
+DEL17="$R17/report.md"; echo "landed" > "$DEL17"
+add_row "$R17" name=met-agent deliverable="$DEL17" duration="4 hours" launched_at="$(iso_ago 600)"
+sweep "$R17" ack met-agent
+expect_eq "ack over a MET row exits 0" "0" "$RC"
+expect_absent "…and prints no warning" "WARNING" "$OUT"
+ACKLINE17="$(grep 'event=ack' "$(ledger_of "$R17")" 2>/dev/null | head -1)"
+expect_absent "the ledger line carries no verdict field" "verdict=" "$ACKLINE17"
+
+# ============================================================
+section "Section 11: arm — the ledger handshake + the ARMED line (epic-16 w1 slice 3)"
+# ============================================================
+#
+# Two independent claims: (1) the `-s` check the old arm used is a hole — a header-only
+# ledger already reads non-empty, so a failed append is indistinguishable from a
+# successful one — and the before/after ledger_count delta (ack's own shape) closes it.
+# (2) the ARMED line prints on stdout before the tick loop is entered, not after the first
+# tick — an operator scripting against arm should not have to wait a whole tick to know it
+# took.
+
+# --- the -s hole: a header-only ledger whose append is forced to fail must REFUSE ---
+R18="$(make_repo s18)"; new_roster "$R18"
+L18="$(ledger_of "$R18")"
+printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' \
+  > "$L18"
+chmod 444 "$L18"
+sweep "$R18" arm --tick 1
+expect_eq "arm over a ledger whose append fails REFUSES (exit 2)" "2" "$RC"
+expect_contains "…and names the refusal" "REFUSED" "$OUT"
+expect_contains "…specifically the journalling failure" "could not be journalled" "$OUT"
+expect_eq "nothing was armed: the header-only ledger gained no arm entry" \
+  "0" "$(grep -c 'event=arm' "$L18" 2>/dev/null)"
+chmod u+w "$L18" 2>/dev/null
+
+# --- the ARMED line prints before the tick loop, not after the first tick ---
+R19="$(make_repo s19)"; new_roster "$R19"
+sweep_bg "$R19" "$TMPROOT/s19.out" arm --tick 1; P19="$BGPID"
+sleep 0.5
+kill -TERM "$P19" 2>/dev/null
+wait_exit "$P19" 15
+expect_contains "ARMED prints before the loop's first tick sleep" \
+  "ARMED pid=$P19 tick=1" "$(cat "$TMPROOT/s19.out" 2>/dev/null)"
+
+# ============================================================
 printf '\n──────────────────────────────────────────────\n'
 printf 'session-sweeper: %d passed, %d failed, %d total\n' "$PASS" "$FAIL" "$TOTAL"
 [ "$FAIL" -eq 0 ] || exit 1
