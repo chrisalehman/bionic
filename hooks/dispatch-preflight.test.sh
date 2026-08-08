@@ -1510,6 +1510,88 @@ expect_status "S-4: …and NO roster row is written outside the state directory"
   "$(grep -c '^roster-state/' "$REPO/.bionic/rogue.state" 2>/dev/null)"
 expect_absent "S-4: …and the escaped path is never named on stderr" "rogue.state" "$GATE_ERR"
 
+# ============================================================
+echo "=== S14 — remediation A-b: C-1 second shape, the placeholder DELIVERABLE ==="
+# ============================================================
+#
+# The half of C-1 that remediation A left open. The wall's own refusal text hands
+# the author a template line — `Expected artifact: .bionic/docs/record/<name>.md` —
+# and briefs in this repo quote that text constantly. Quoted back, the SLOT lifts
+# as a declared deliverable. Nothing can ever satisfy `<name>.md`, so before this
+# wave it was a wrong roster field and after it a permanent wall on that agent's
+# stop path: the landing gate demands a file whose name is a placeholder.
+#
+# The rejection lives in `ispath()` — the one predicate both the labeled lift
+# (`paths()`) and the record/-inference scan (`scan_inferred()`) run every token
+# through — so declared and inferred paths cannot disagree about what a template
+# is. A token carrying an unfilled `<…>` slot is not a path.
+#
+# EFFECT, chosen deliberately (assumption 60): a brief whose ONLY deliverable is a
+# placeholder is REFUSED by the absent-deliverable wall, not silently dropped. The
+# author gets told at dispatch, where the brief is still editable.
+
+BRIEF_QUOTES_HELP='Your slice: check that the wall message still reads right.
+It currently says: Fix: name a durable artifact path in the brief —
+    Expected artifact: .bionic/docs/record/<name>.md
+Report whether the wording drifted.
+Expected duration: 20 minutes'
+
+REPO=$(make_repo r14a yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_QUOTES_HELP" "helpquoter")"
+expect_status "C-1 shape-2: a brief whose only deliverable is the help-text placeholder is REFUSED" \
+  "2" "$GATE_ST"
+expect_contains "C-1 shape-2: …with the absent-deliverable refusal, at dispatch where it is fixable" \
+  "names no deliverable" "$GATE_ERR"
+expect_status "C-1 shape-2: …and no roster row carries a contract nothing can satisfy" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
+
+# THE DISCRIMINATOR: rejecting the slot must RECOVER the real artifact, not just
+# refuse. A quoted template ahead of a real labeled line wins the firsthit race
+# (the r12g shadow shape), so pre-fix this brief contracted the agent to
+# `<name>.md` and ignored the real path entirely.
+BRIEF_HELP_THEN_REAL='Your slice: verify the wall text, then write up what you find.
+The message reads: Expected artifact: .bionic/docs/record/<name>.md
+Expected artifact: .bionic/docs/record/w99-shape2.md
+Expected duration: 20 minutes'
+
+REPO=$(make_repo r14b yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_HELP_THEN_REAL" "helpquoter2")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "C-1 shape-2: a quoted template ahead of a real line no longer shadows it" \
+  "0" "$GATE_ST"
+expect_status "C-1 shape-2: …the row carries the REAL artifact, never the slot" \
+  ".bionic/docs/record/w99-shape2.md" "$(roster_field "$ROW" deliverable)"
+expect_absent "C-1 shape-2: …and the slot appears nowhere on the row" "<name>" "$ROW"
+
+# A real record/ path is untouched by the slot rejection — the S12 contract holds.
+REPO=$(make_repo r14c yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-stillworks")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "C-1 shape-2 control: an ordinary labeled deliverable is unaffected" \
+  ".bionic/docs/record/w99-widget.txt" "$(roster_field "$ROW" deliverable)"
+expect_status "…and is still marked declared" "declared" "$(roster_field "$ROW" source)"
+
+# The choke point is `ispath()`, so the same rule reaches the PROGRESS path: a
+# templated progress line is not a path either, and its absence is warned exactly
+# as a missing one is. Pinned so the shared-predicate choice is visible.
+BRIEF_PLACEHOLDER_PROGRESS='Your slice: build the widget.
+Expected artifact: .bionic/docs/record/w99-progplaceholder.md
+Progress artifact: .bionic/tmp/<name>.progress
+Expected duration: 20 minutes'
+
+REPO=$(make_repo r14d yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_PLACEHOLDER_PROGRESS" "progplaceholder")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "C-1 shape-2: a templated PROGRESS path is not a path either" \
+  "" "$(roster_field "$ROW" progress)"
+expect_contains "C-1 shape-2: …and its absence is warned, exactly as a missing one is" \
+  "progress" "$GATE_ERR"
+expect_status "C-1 shape-2: …while the real deliverable still passes the wall" "0" "$GATE_ST"
+
 echo ""
 echo "----------------------------------------"
 echo "TOTAL: $TOTAL  PASS: $PASS  FAIL: $FAIL"
