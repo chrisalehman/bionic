@@ -513,6 +513,26 @@ expect_status "7e: a session key carrying path separators is not a session key �
 expect_absent "7e: …and no verdict is taken over the roster it reached" \
   "LANDING CONTRACT" "$OUT_STDERR"
 
+# --- F-1: a name that is non-empty but CLEANS to empty must not drive a block ---
+#
+# The sweeper's verdict scopes on clean("$agent_type"); a raw name made only of the
+# characters clean() folds away (`|`, whitespace, controls) scopes to the empty predicate,
+# which widens the verb to a BARE verdict — one line per name — and `head -1` would then
+# read the FIRST roster row's foreign contract. The critic reproduced this as a fail-CLOSED
+# regression: with the first row UNMET, agent_type="|" blocked the "|" agent citing that
+# row's artifact. The gate now guards a clean-empty name the way S-4 guards the session key.
+# The first row is UNMET so a widened bare verdict would have exit-1'd on it.
+R7E="$(make_wave_repo r7e)"
+add_row "$R7E" name=solo   deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)"
+add_row "$R7E" name="twin" deliverable=.bionic/docs/record/other.md launched_at="$(iso_ago 600)"
+run_gate "$GATE" "$(payload "$R7E" "$SID" "|" false)"
+expect_status "7f: a pipe-only agent_type (clean-empty) passes, never blocks on a foreign row" "0" "$RC"
+expect_absent "7f: …and names no contract it was never dispatched under" \
+  "LANDING CONTRACT" "$OUT_STDERR"
+run_gate "$GATE" "$(payload "$R7E" "$SID" "   " false)"
+expect_status "7g: an all-whitespace agent_type (clean-empty) passes too" "0" "$RC"
+expect_absent "7g: …silently, naming no foreign contract" "LANDING CONTRACT" "$OUT_STDERR"
+
 # ---------- summary ----------
 printf '\n---\n%d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
 [ "$FAIL" -eq 0 ]

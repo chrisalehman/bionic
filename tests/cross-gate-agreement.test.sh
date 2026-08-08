@@ -97,6 +97,9 @@ expect_absent()   { if printf '%s' "$3" | grep -qF -- "$2"; then no "$1" "unexpe
 
 SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
+# The landing gate's active-wave party (§A1/§A2) plants its own one-row roster; a dedicated
+# session id keeps it off roster-$SID_A.state, which verdict_er re-seeds on every call.
+SID_LG="2ae9d613-4c07-4b8a-9f51-7d02ac86be40"
 
 # ---------------------------------------------------------------- payloads
 #
@@ -349,6 +352,32 @@ verdict_eg() {  # <repo> -> yes:<current>|no|other:<detail>
   esac
 }
 
+# The landing gate holds a FIFTH byte-identical copy of active-wave detection
+# (hooks/landing-gate.sh, the block deliberately duplicated from dispatch-preflight's) and
+# until this party existed it sat OUTSIDE the very battery meant to catch that copy drifting
+# — §J drives the gate's verdict/gate agreement, not its wave detection (Step-6 critic D-1).
+# Its observable is a SubagentStop over a roster carrying ONE unmet contract: with a wave
+# active the gate reaches the verdict, reads UNMET and refuses (exit 2); with no wave it
+# exits 0 before ever taking a verdict. So exit-2-with-the-refusal <=> yes and exit-0 <=> no,
+# the same predicate the other four answer. The gate resolves the sweeper as its own sibling,
+# so a MUTATED copy of it (§A2) must sit beside a sweeper — $MUTDIR carries one. The roster
+# is re-seeded per call under $SID_LG, off verdict_er's $SID_A file.
+verdict_lg() {  # <repo> -> yes|no|other:<detail>
+  local repo="$1" out st roster="$repo/.bionic/tmp/roster-$SID_LG.state"
+  mkdir -p "$repo/.bionic/tmp"
+  {
+    printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
+    printf 'roster-state/v1|status=confirmed|session=%s|name=lg-probe|agent_id=|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-lg.md|source=declared|duration=|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_LGPROBE\n' \
+      "$SID_LG"
+  } > "$roster"
+  out=$(mk_substop_payload "$repo" "$SID_LG" "lg-probe" false | bash "$PARTY_LG" 2>&1); st=$?
+  case "$st" in
+    0) echo no ;;
+    2) if printf '%s' "$out" | grep -qF 'LANDING CONTRACT UNMET'; then echo yes; else echo "other:block-no-detail"; fi ;;
+    *) echo "other:exit-$st" ;;
+  esac
+}
+
 # ---------------------------------------------------------------- fixtures
 
 write_plan() {  # <path> <state-body>
@@ -503,20 +532,20 @@ EOF
 # run_battery <mode>  — mode=assert emits one assertion per fixture;
 #                       mode=detect returns 1 at the FIRST disagreement.
 run_battery() {
-  local mode="$1" name want cur repo a b c d cnorm cval
+  local mode="$1" name want cur repo a b c d e cnorm cval
   while IFS='|' read -r name want cur; do
     [ -n "$name" ] || continue
     repo="$SANDBOX/fx/$name/repo"
     a=$(verdict_dp "$repo"); b=$(verdict_sg "$repo"); c=$(verdict_eg "$repo")
-    d=$(verdict_er "$repo")
+    d=$(verdict_er "$repo"); e=$(verdict_lg "$repo")
     cnorm="${c%%:*}"; cval=""
     [ "$cnorm" = "yes" ] && cval="${c#*:}"
     if [ "$mode" = "assert" ]; then
-      if [ "$a" = "$want" ] && [ "$b" = "$want" ] && [ "$cnorm" = "$want" ] && [ "$d" = "$want" ]; then
-        ok "all four parties agree on '$name': $want"
+      if [ "$a" = "$want" ] && [ "$b" = "$want" ] && [ "$cnorm" = "$want" ] && [ "$d" = "$want" ] && [ "$e" = "$want" ]; then
+        ok "all five parties agree on '$name': $want"
       else
-        no "all four parties agree on '$name': $want" \
-           "dispatch-preflight=$a stop-guard=$b evidence-gate=$c execution-recorder=$d"
+        no "all five parties agree on '$name': $want" \
+           "dispatch-preflight=$a stop-guard=$b evidence-gate=$c execution-recorder=$d landing-gate=$e"
       fi
       if [ "$want" = "yes" ]; then
         expect_eq "  and the evidence gate derived current='$cur' for '$name'" "$cur" "$cval"
@@ -524,9 +553,9 @@ run_battery() {
     else
       # Detect mode also compares the DERIVED VALUE, so a mutation that selects a
       # different plan without flipping the predicate is caught too.
-      if [ "$a" != "$want" ] || [ "$b" != "$want" ] || [ "$cnorm" != "$want" ] || [ "$d" != "$want" ] \
+      if [ "$a" != "$want" ] || [ "$b" != "$want" ] || [ "$cnorm" != "$want" ] || [ "$d" != "$want" ] || [ "$e" != "$want" ] \
          || { [ "$want" = "yes" ] && [ "$cval" != "$cur" ]; }; then
-        printf 'disagreement on %s: want=%s/%s dp=%s sg=%s eg=%s er=%s\n' "$name" "$want" "$cur" "$a" "$b" "$c" "$d"
+        printf 'disagreement on %s: want=%s/%s dp=%s sg=%s eg=%s er=%s lg=%s\n' "$name" "$want" "$cur" "$a" "$b" "$c" "$d" "$e"
         return 1
       fi
     fi
@@ -540,7 +569,7 @@ EOF
 echo ""
 echo "=== A1 — N-way agreement on active-wave detection (AC-9, checklist A8/A9) ==="
 # ============================================================
-echo "parties: $(basename "$PARTY_DP") · $(basename "$PARTY_SG") · $(basename "$PARTY_EG") · $(basename "$PARTY_ER")"
+echo "parties: $(basename "$PARTY_DP") · $(basename "$PARTY_SG") · $(basename "$PARTY_EG") · $(basename "$PARTY_ER") · $(basename "$PARTY_LG")"
 
 run_battery assert
 
@@ -549,6 +578,12 @@ run_battery assert
 # actively-maintained origin absent from the test meant to catch drift.
 expect_contains "the actively-maintained origin is one of the driven parties" \
   "canonical-sdlc-evidence-gate.sh" "$PARTY_EG"
+# The landing gate carries a copy too (Step-6 critic D-1) — it is now a driven party, and
+# the copy it holds is really the active-wave detection block, not something else.
+expect_contains "the landing gate's active-wave copy is a driven party" \
+  "landing-gate.sh" "$PARTY_LG"
+expect_contains "…and the copy under test is genuinely the active-wave block" \
+  "active-wave detection" "$(cat "$PARTY_LG")"
 
 # ============================================================
 echo ""
@@ -563,8 +598,11 @@ echo "=== A2 — one-copy mutation goes RED (checklist A9, TDD §9) ==="
 # Every mutation is a plausible drift, not damage: a maintainer editing one copy
 # and not the other two.
 
-CKSUM_BEFORE=$(shasum "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" 2>/dev/null)
+CKSUM_BEFORE=$(shasum "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" "$PARTY_LG" 2>/dev/null)
 MUTDIR="$SANDBOX/mutants"; mkdir -p "$MUTDIR"
+# A MUTATED landing gate still resolves its sweeper as a SIBLING, so one lives here for the
+# LG party below to find. The shipped sweeper is never touched — this is a copy.
+cp "$PARTY_SW" "$MUTDIR/session-sweeper.sh"
 
 # mutate <src> <dst> <kind>  — rc 1 if the mutation matched nothing
 mutate() {
@@ -601,11 +639,15 @@ mutate() {
 
 MUTATIONS="docs-root-last-wins keep-quotes delete-cr depth-1 fence-blind anchor-current"
 
-for party in DP SG EG; do
+# LG is the landing gate's active-wave copy (Step-6 critic D-1): every mutation below is an
+# active-wave-detection drift, and the gate holds a byte-identical copy of that block, so the
+# same six drifts must move its answer too or its copy is uncovered.
+for party in DP SG EG LG; do
   case "$party" in
     DP) src="$PARTY_DP" ;;
     SG) src="$PARTY_SG" ;;
     EG) src="$PARTY_EG" ;;
+    LG) src="$PARTY_LG" ;;
   esac
   for m in $MUTATIONS; do
     dst="$MUTDIR/$party-$m.sh"
@@ -615,11 +657,12 @@ for party in DP SG EG; do
       no "mutation '$m' applies to $(basename "$src")" "the awk target matched nothing — the code moved"
       continue
     fi
-    saved_dp="$PARTY_DP"; saved_sg="$PARTY_SG"; saved_eg="$PARTY_EG"
+    saved_dp="$PARTY_DP"; saved_sg="$PARTY_SG"; saved_eg="$PARTY_EG"; saved_lg="$PARTY_LG"
     case "$party" in
       DP) PARTY_DP="$dst" ;;
       SG) PARTY_SG="$dst" ;;
       EG) PARTY_EG="$dst" ;;
+      LG) PARTY_LG="$dst" ;;
     esac
     if detail=$(run_battery detect); then
       no "one-copy mutation '$m' in $party makes the battery RED" \
@@ -627,12 +670,12 @@ for party in DP SG EG; do
     else
       ok "one-copy mutation '$m' in $party makes the battery RED"
     fi
-    PARTY_DP="$saved_dp"; PARTY_SG="$saved_sg"; PARTY_EG="$saved_eg"
+    PARTY_DP="$saved_dp"; PARTY_SG="$saved_sg"; PARTY_EG="$saved_eg"; PARTY_LG="$saved_lg"
   done
 done
 
-expect_eq "the three shipped parties are byte-identical to before the mutations" \
-  "$CKSUM_BEFORE" "$(shasum "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" 2>/dev/null)"
+expect_eq "the four shipped parties are byte-identical to before the mutations" \
+  "$CKSUM_BEFORE" "$(shasum "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" "$PARTY_LG" 2>/dev/null)"
 
 # ============================================================
 echo ""
@@ -1916,6 +1959,73 @@ expect_eq "…and the gate passes the same stop it refused a moment ago" "pass" 
 PARTY_LG="$j_saved_lg"; PARTY_SW="$j_saved_sw"
 expect_eq "the shipped gate and sweeper are byte-identical to before the mutations" \
   "$J_CKSUM_BEFORE" "$(shasum "$PARTY_LG" "$PARTY_SW" 2>/dev/null)"
+
+# ============================================================
+echo ""
+echo "=== J.4 — still-live has TWO owners that INTENTIONALLY differ; the difference is pinned ==="
+# ============================================================
+#
+# "Is this row still live?" is computed at TWO sites in hooks/session-sweeper.sh that serve
+# different masters and are SUPPOSED to disagree (Step-6 critic D-2; spec §Design ownership
+# table, the still-live row):
+#   * evaluate_row — the tick loop, a WAKE heuristic. A row that declared `claims=` opted
+#     into process-liveness as its ONLY signal, so a dead claimed process is a dead-claim
+#     finding full stop and progress is never consulted.
+#   * row_still_live — the verdict verb, a STOP exemption. A dead claim falls THROUGH to
+#     progress/cadence, so fresh progress can still answer STILL-LIVE and spare a stopping
+#     agent a false UNMET.
+# On a dead-claim-plus-fresh-progress row the two therefore answer DIFFERENTLY, and that is
+# correct — unifying them is a rejected disposition. This section PINS the difference: if
+# either site drifts toward the other, one assertion below goes red. It is the one section in
+# this suite asserting an INEQUALITY between two implementations rather than an equality.
+DLREPO=$(new_repo "still-live-divergence")
+write_plan "$DLREPO/.bionic/docs/plans/epic-16/wave-01.md" "current: 4"
+mkdir -p "$DLREPO/.bionic/tmp"
+DL_ROSTER="$DLREPO/.bionic/tmp/roster-$SID_A.state"
+DL_LAUNCHED=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+  || date -u -d "-3600 seconds" +%Y-%m-%dT%H:%M:%SZ)
+# FRESH progress written now, well inside the declared cadence; a DEAD claim no live process
+# carries; an ABSENT deliverable so the row has not landed and both sites still judge it.
+printf 'stage 1\n' > "$DLREPO/.bionic/tmp/dl.progress"
+DL_CLAIM="bionic-xgate-D2-deadclaim-no-such-process-9f5c1a2b"
+{
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
+  printf 'roster-state/v1|status=confirmed|session=%s|name=dl-row|agent_id=|launched_at=%s|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-dl.md|source=declared|duration=|progress=%s|claims=%s|cadence=~5m|absent=|waiver=|tool_use_id=toolu_DL\n' \
+    "$SID_A" "$DL_LAUNCHED" ".bionic/tmp/dl.progress" "$DL_CLAIM"
+} > "$DL_ROSTER"
+# Not vacuous: the claimed process really is dead.
+expect_eq "the claimed process is genuinely not running (test not vacuous)" "no" \
+  "$(pgrep -f -- "$DL_CLAIM" >/dev/null 2>&1 && echo yes || echo no)"
+
+# READER 1 — the verdict verb (row_still_live). Fresh progress outvotes the dead claim.
+DL_VERDICT=$( cd "$DLREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" verdict dl-row 2>/dev/null \
+  | grep -F 'landing-verdict/v1|' | grep -F '|name=dl-row|' | head -1 \
+  | tr '|' '\n' | grep '^state=' | head -1 | cut -d= -f2- )
+expect_eq "the verdict verb calls the dead-claim-plus-fresh-progress row STILL-LIVE" \
+  "STILL-LIVE" "$DL_VERDICT"
+
+# READER 2 — the tick loop (evaluate_row). The dead claim is a finding; progress is never
+# consulted. Armed at --tick 1, the sweeper exits on its first finding (deliver_findings),
+# leaving the class in the findings log — the same drive hooks/session-sweeper.test.sh uses.
+DL_FINDINGS="$DLREPO/.bionic/tmp/sweeper-$SID_A-findings.log"
+rm -f "$DL_FINDINGS" "$DLREPO/.bionic/tmp/sweeper-$SID_A.state"
+( cd "$DLREPO" && exec env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" arm --tick 1 ) \
+  >/dev/null 2>&1 &
+DL_PID=$!; BG_PIDS="$BG_PIDS $DL_PID"
+_i=0
+while kill -0 "$DL_PID" 2>/dev/null && [ "$_i" -lt 40 ]; do sleep 0.1; _i=$((_i + 1)); done
+if kill -0 "$DL_PID" 2>/dev/null; then
+  ( cd "$DLREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" retire ) >/dev/null 2>&1
+fi
+wait "$DL_PID" 2>/dev/null
+DL_FIND_TEXT="$(cat "$DL_FINDINGS" 2>/dev/null)"
+expect_contains "the tick loop raises a dead-claim finding for the SAME row" \
+  "class=dead-claim" "$DL_FIND_TEXT"
+expect_absent "…and NOT a stale-progress finding — the tick loop never consulted progress" \
+  "class=stale-progress" "$DL_FIND_TEXT"
+# The inequality itself, stated so the reason is legible if a future edit collapses it.
+expect_eq "the two owners of still-live answer DIFFERENTLY on this row, by design" "different" \
+  "$([ "$DL_VERDICT" = "STILL-LIVE" ] && printf '%s' "$DL_FIND_TEXT" | grep -qF 'class=dead-claim' && echo different || echo same)"
 
 # ============================================================
 echo ""
