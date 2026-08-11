@@ -47,7 +47,6 @@
 set -uo pipefail
 
 PREFLIGHT_CMD="bash ~/.claude/hooks/preflight-probe.sh"
-SWEEPER_ARM_CMD="bash ~/.claude/hooks/session-sweeper.sh arm"
 
 INPUT=$(cat)
 _jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
@@ -749,11 +748,11 @@ fi
 # THE ONE PLACE below the verdict where this file changes the verdict, and it is
 # deliberately narrow: exactly one absent field refuses, and only when the brief
 # offers no waiver. Everything else on this path stays advisory — an absent
-# progress path warns, an absent duration warns, an unarmed sweeper nags.
+# progress path warns, an absent duration warns.
 #
 # Why this field and not the others: every downstream check the wave built is
-# keyed on a durable artifact. The sweeper's delivered / not-delivered predicate
-# stats the deliverable path; the stop gate asks whether the thing the agent was
+# keyed on a durable artifact. The sweeper's landing verdict stats the
+# deliverable path; the stop gate asks whether the thing the agent was
 # sent to produce exists. A dispatch that names none is unfalsifiable by
 # construction — nothing to stat when it reports done, nothing left behind when
 # it dies quietly — and a warning was never going to fix that, because the
@@ -832,36 +831,17 @@ else
   fi
 fi
 
-# ========================================================== UNARMED-SWEEPER NAG (slice 4/3)
-#
-# Warn-only, AC-6: no live sweeper watching this session's roster names the arm command;
-# a live one is silent. NEVER blocks either way (ratified: no new walls) — this is a nag,
-# not a wall, and it runs only on a launch that is actually about to happen (the gate has
-# already decided to allow it by this point).
-#
-# Liveness is read by invoking the SIBLING hooks/session-sweeper.sh's own `status` verb,
-# dirname-relative to THIS script, rather than a second hand-rolled ledger parser — so this
-# nag and the sweeper's own arm-refusal read the identical ledger through the identical
-# code and can never disagree (spec ownership table row "live-arming state"). `status`
-# exits 1 for "not live" and 0 for "live"; any other exit (missing sibling, usage error) is
-# an ambiguity this nag stays silent on, the same fail-open direction as the rest of §7.
-_hooks_dir="$(cd "$(dirname "$0")" && pwd)"
-_sweeper_status_rc=""
-if [ -f "$_hooks_dir/session-sweeper.sh" ]; then
-  ( cd "$REPO" && env CLAUDE_CODE_SESSION_ID="$PAYLOAD_SID" bash "$_hooks_dir/session-sweeper.sh" status ) \
-    >/dev/null 2>/dev/null
-  _sweeper_status_rc=$?
-fi
-[ "$_sweeper_status_rc" = "1" ] && \
-  warn "no session sweeper is armed for this session; arm one with: ${SWEEPER_ARM_CMD}"
-
 # Present and mine: pass in silence — the allow path prints NOTHING about the check it
 # just passed, which is what §4 "The start gate" bans ("Parses no check detail... Never:
 # print on the allow path"). The invariant is narrower than the quote reads: what may
-# never appear here is check DETAIL, the gate narrating its own reasoning. Three warn-only
-# lines above do print on this path, all ratified and none a check detail — the
-# absent-brief-fields warning (a fact about the row just journalled), the waiver echo (the
-# reason a brief gave for producing nothing durable), and the unarmed-sweeper nag (a fact
-# about this session's watching). All three are advisory, all three leave the exit status
-# untouched, and a silent pass is still the common case.
+# never appear here is check DETAIL, the gate narrating its own reasoning. Two warn-only
+# lines above do print on this path, both ratified and neither a check detail — the
+# absent-brief-fields warning (a fact about the row just journalled) and the waiver echo
+# (the reason a brief gave for producing nothing durable). Both are advisory, both leave
+# the exit status untouched, and a silent pass is still the common case.
+#
+# A THIRD warn-only line stood here until epic-16 wave-02: the unarmed-sweeper nag, which
+# asked a resident watcher whether it was alive and named the command to arm one. The
+# watcher is deleted — supervision reads facts at the moment of decision instead of
+# depending on a process staying up — so there is no arming left to nag about.
 exit 0
