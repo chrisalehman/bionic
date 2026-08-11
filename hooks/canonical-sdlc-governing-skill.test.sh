@@ -1618,6 +1618,79 @@ run_write "$DESIGN_SPECS/w15d.spec.md" \
   "$(build_spec design=specs/epic-01-demo/with-design.spec.md)"
 assert_eq "design_combined_valid exit 0" 0 "$HOOK_EXIT"
 
+# ============================================================
+# AC-13: the pinned-root wall
+# ============================================================
+#
+# AC-10's e2e case above (ac10_e2e_worktree) already pins the frontmatter-
+# declaring arm: a canonical *.plan.md written into a worktree's own
+# .bionic/ blocks and names the parent repo's docs root. This section covers
+# what that arm structurally cannot: an OPERATIONAL artifact (no
+# canonical-sdlc frontmatter — a record/ note, exactly the shape this very
+# report is written as) written under a non-pinned `.bionic` tree used to
+# fall straight through unblocked (the RED capture on disk at
+# .bionic/docs/record/w2-s8-pinnedroot-RED.txt). Two wrong-root shapes are
+# fixture-real, never mocked: a real `git worktree add` (AC-13's explicit
+# demand) and a plain `cd`-into-subdir stray `.bionic` inside the SAME repo
+# (no worktree involved at all) — the wall's TARGET_BIONIC/PINNED_BIONIC
+# comparison is agnostic to which kind of "wrong tree" it is.
+echo
+echo "=== AC-13: pinned-root wall ==="
+
+ac13_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$ac13_tmp")
+ac13_main="$ac13_tmp/main"
+mkdir -p "$ac13_main/.bionic/docs/record" "$ac13_main/subdir"
+git -C "$ac13_main" init -q .
+git -C "$ac13_main" commit -q --allow-empty -m init
+# Absolute worktree path from the repo root, per .claude/rules/git-worktree-
+# docs.md — `git worktree add` resolves relative paths against pwd, not the
+# repo root.
+git -C "$ac13_main" worktree add -q "$ac13_tmp/wt" -b ac13-wt
+ac13_wt="$ac13_tmp/wt"
+
+ac13_record_body='# operational artifact — no canonical-sdlc frontmatter at all'
+
+echo "ac13-1: real worktree — operational write under the worktree's OWN .bionic/ → block, names pinned root"
+run_write "$ac13_wt/.bionic/docs/record/w2-s8-ac13.md" "$ac13_record_body"
+assert_eq "ac13_wt_write exit 2" 2 "$HOOK_EXIT"
+assert_contains "ac13_wt_write names the pinned root" "Pinned root: $ac13_main/.bionic" "$HOOK_STDERR"
+assert_contains "ac13_wt_write names the wrong tree it refused" "$ac13_wt/.bionic" "$HOOK_STDERR"
+TOTAL=$((TOTAL + 1))
+if [ ! -f "$ac13_wt/.bionic/docs/record/w2-s8-ac13.md" ]; then
+  PASS=$((PASS + 1)); printf '  PASS  ac13_wt_write blocked write left no file behind\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac13_wt_write blocked write left a file behind\n'
+fi
+
+echo "ac13-2: paired positive — the IDENTICAL write to the pinned root passes"
+run_write "$ac13_main/.bionic/docs/record/w2-s8-ac13.md" "$ac13_record_body"
+assert_eq "ac13_pinned_pair exit 0" 0 "$HOOK_EXIT"
+
+echo "ac13-3: plain cd-into-subdir — a stray .bionic a level down in the SAME repo (no worktree) → block, names pinned root"
+# NOT a subshell: run_write sets HOOK_EXIT/HOOK_STDERR as globals the assert
+# calls below read, and a `(cd ... && run_write ...)` subshell would strand
+# those assignments where the assertions can never see them. cd back
+# immediately after, before any other test in this file runs.
+ac13_orig_pwd=$(pwd)
+cd "$ac13_main/subdir"
+run_write "$ac13_main/subdir/.bionic/docs/record/w2-s8-ac13-sub.md" "$ac13_record_body"
+cd "$ac13_orig_pwd"
+assert_eq "ac13_subdir_write exit 2" 2 "$HOOK_EXIT"
+assert_contains "ac13_subdir_write names the pinned root" "Pinned root: $ac13_main/.bionic" "$HOOK_STDERR"
+
+echo "ac13-4: paired positive — the IDENTICAL subdir-case write to the pinned root passes"
+run_write "$ac13_main/.bionic/docs/record/w2-s8-ac13-sub.md" "$ac13_record_body"
+assert_eq "ac13_subdir_pinned_pair exit 0" 0 "$HOOK_EXIT"
+
+echo "ac13-5: canonical (frontmatter-declaring) misplacement is still the AC-10 arm, unchanged — this wall is additive"
+run_write "$ac13_wt/.bionic/docs/plans/epic-01-demo/w2-s8-ac13-canon.plan.md" \
+  "$(build_plan intent=spike rigor=audited)"
+assert_eq "ac13_canonical_still_ac10_arm exit 2" 2 "$HOOK_EXIT"
+assert_contains "ac13_canonical_still_ac10_arm keeps the AC-10 misplacement wording" \
+  "is misplaced" "$HOOK_STDERR"
+assert_contains "ac13_canonical_still_ac10_arm names the pinned docs root, AC-10's shape" \
+  "$ac13_main/.bionic/docs/plans/" "$HOOK_STDERR"
+
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then
