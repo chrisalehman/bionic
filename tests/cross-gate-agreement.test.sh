@@ -748,19 +748,10 @@ expect_contains "the producer spells the identity key 'session_id='" "session_id
 expect_contains "the start gate reads that same key by name" "'^session_id='" "$(cat "$PARTY_DP")"
 
 # Consumer 1 — the start gate: the produced value passes; one character off refuses.
-# "passes in silence" (below) needs a genuinely LIVE session sweeper armed for this
-# session/repo, or slice 4/3's unarmed nag fires legitimately and breaks that claim.
-# `exec` matters: without it the ledger's own pid would name a throwaway subshell, not
-# this process, and the nag's liveness check would target the wrong pid.
-( cd "$IREPO" && exec env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" arm --tick 300 ) \
-  >"$SANDBOX/identity-sweeper.out" 2>&1 &
-ISWEEPER_PID=$!
-BG_PIDS="$BG_PIDS $ISWEEPER_PID"
-_i=0
-while [ ! -s "$IREPO/.bionic/tmp/sweeper-$SID_A.state" ] && [ "$_i" -lt 50 ]; do
-  sleep 0.1; _i=$((_i + 1))
-done
-
+# "Passes in silence" used to need a genuinely LIVE session sweeper armed for this
+# session/repo, or the unarmed-sweeper nag fired legitimately and broke the claim. Both the
+# nag and the watcher it asked about were deleted in epic-16 wave-02, so silence is the
+# gate's own unaided answer here.
 OUT=$(mk_agent_payload "$SID_A" "$IREPO" | bash "$PARTY_DP" 2>&1); ST=$?
 expect_eq "start gate: the producer's own session passes" "0" "$ST"
 expect_eq "start gate: and passes in silence" "" "$OUT"
@@ -1563,16 +1554,21 @@ echo "=== I — DONE-DETECTION, and the primitives the sweeper says it copied (6
 # single copy, so the comment named a guardrail the next reader would trust and the copies
 # could drift silently (6-axis R-1). Below it is true.
 #
-# The heavier half is D-2. "Is this roster row's deliverable delivered?" acquired a SECOND
-# owner when the sweeper shipped, and the two owners answered differently on the same
-# input — `[ -s <dir> ]` is TRUE for an empty directory, so the sweeper marked a row
-# SATISFIED (permanently exempt from watching) on a directory the stop gate reports as
-# "PRESENT as a directory, 0 file(s)". Both answers are asked here of the REAL scripts on
-# ONE set of fixtures, and compared to each other rather than only to a literal — which is
-# what goes red on the next divergence, whichever side moves.
+# The heavier half is D-2. "Is this roster row's deliverable delivered?" has TWO owners and
+# they answered differently on the same input. Both answers are asked here of the REAL
+# scripts on ONE set of fixtures, and compared to each other rather than only to a literal —
+# which is what goes red on the next divergence, whichever side moves.
+#
+# THE SWEEPER SIDE MOVED IN epic-16 wave-02, and this section moved with it. The sweeper
+# used to answer through its watch loop: a row whose declared deliverables were all present
+# was SATISFIED, dropped from watching, never woken on, and the loose `[ -s <dir> ]` reading
+# behind that was the original defect (true for an EMPTY directory on both BSD and GNU, so a
+# freshly-created directory read as landed work). The loop and its satisfied-check are
+# deleted. The sweeper is still an owner of this question — through `verdict`, which is now
+# its ONLY delivered-predicate — so the pairing is preserved and re-asked against that verb
+# rather than dropped with the loop.
 
 # --- I.1 the copied primitives ---
-#
 # BODIES are compared, not whole definitions: each file explains its copy in its own terms,
 # so the signature comments legitimately differ and only the executable text must not.
 fn_body() {  # <file> <function name> -> the function's body, signature and its comment stripped
@@ -1616,8 +1612,20 @@ mkdir -p "$DFX/empty-dir" "$DFX/full-dir"
 echo "the report"   > "$DFX/full-file.md"
 echo "the report"   > "$DFX/full-dir/one.md"
 echo "the report"   > "$DREPO/relative-target.md"
+# An hour back, so every fixture written above is NEWER than the launch and the landing
+# predicate's staleness conjunct is satisfied for all of them. Staleness is a NAMED
+# divergence between these two owners (the stop gate never dates the artifact at all), and
+# it is pinned separately below rather than smuggled into every row here.
 D_LAUNCHED=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
   || date -u -d "-3600 seconds" +%Y-%m-%dT%H:%M:%SZ)
+
+DROSTER="$DREPO/.bionic/tmp/roster-$SID_A.state"
+mkdir -p "$DREPO/.bionic/tmp"
+printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$DROSTER"
+d_row() {  # <name> <deliverable value>
+  printf 'roster-state/v1|status=confirmed|session=%s|name=%s|agent_id=adeliv-2222222222222222|launched_at=%s|subagent_type=implementor|model=opus|deliverable=%s|source=declared|duration=1 minute|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_01%s\n' \
+    "$SID_A" "$1" "$D_LAUNCHED" "$2" "$1" >> "$DROSTER"
+}
 
 # The stop gate's answer, read off the evidence it prints for a human rather than off a
 # reimplementation of its branches here.
@@ -1634,62 +1642,58 @@ sc_answer() {  # <path as typed> -> delivered|not-delivered
   esac
 }
 
-# The sweeper's answer, read off the behavior the answer CONTROLS: a satisfied row is
-# dropped from watching and never woken on, so a sweeper still alive after its tick has
-# answered "delivered", and one that exited on an overdue finding has answered "not".
-sw_answer() {  # <deliverable value> -> delivered|not-delivered
-  local rf="$DREPO/.bionic/tmp/roster-$SID_A.state" pid i=0
-  mkdir -p "$DREPO/.bionic/tmp"
-  rm -f "$rf" "$DREPO/.bionic/tmp/sweeper-$SID_A.state" \
-        "$DREPO/.bionic/tmp/sweeper-$SID_A-findings.log"
-  printf 'roster-state/v1|status=confirmed|session=%s|name=deliv|agent_id=adeliv-2222222222222222|launched_at=%s|subagent_type=implementor|model=opus|deliverable=%s|duration=1 minute|progress=|claims=|cadence=|absent=|tool_use_id=toolu_01DELIV\n' \
-    "$SID_A" "$D_LAUNCHED" "$1" > "$rf"
-  ( cd "$DREPO" && exec env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" arm --tick 1 ) \
-    >/dev/null 2>&1 &
-  pid=$!; BG_PIDS="$BG_PIDS $pid"
-  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
-  if kill -0 "$pid" 2>/dev/null; then
-    ( cd "$DREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" retire ) >/dev/null 2>&1
-    wait "$pid" 2>/dev/null
-    echo delivered
-  else
-    wait "$pid" 2>/dev/null
-    echo not-delivered
-  fi
+# The sweeper's answer, read off the state its ONE surviving predicate computes. MET is
+# delivered; anything else is not. The row carries no claims and no progress, so STILL-LIVE
+# cannot mask a failure to deliver — the state is the predicate's answer and nothing else.
+sw_answer() {  # <row name> -> delivered|not-delivered
+  local st
+  st=$( cd "$DREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" verdict "$1" 2>/dev/null \
+        | grep -F 'landing-verdict/v1|' | grep -F "|name=$1|" | head -1 \
+        | tr '|' '\n' | grep '^state=' | head -1 | cut -d= -f2- )
+  [ "$st" = "MET" ] && echo delivered || echo not-delivered
 }
 
-agree_on() {  # <label> <path as typed> <the right answer>
+agree_on() {  # <label> <row name> <path as typed> <the right answer>
   local sc sw
-  sc=$(sc_answer "$2"); sw=$(sw_answer "$2")
-  expect_eq "$1: the stop gate answers $3" "$3" "$sc"
+  d_row "$2" "$3"
+  sc=$(sc_answer "$3"); sw=$(sw_answer "$2")
+  expect_eq "$1: the stop gate answers $4" "$4" "$sc"
   expect_eq "$1: the sweeper gives the stop gate's answer" "$sc" "$sw"
 }
 
-agree_on "a written file"        "$DFX/full-file.md"  delivered
-agree_on "an empty file"         "$DFX/empty-file.md" not-delivered
-agree_on "an absent path"        "$DFX/never.md"      not-delivered
-agree_on "an EMPTY directory"    "$DFX/empty-dir"     not-delivered
-agree_on "a populated directory" "$DFX/full-dir"      delivered
+agree_on "a written file"        wfile "$DFX/full-file.md"  delivered
+agree_on "an empty file"         efile "$DFX/empty-file.md" not-delivered
+agree_on "an absent path"        nofile "$DFX/never.md"     not-delivered
+agree_on "an EMPTY directory"    edir  "$DFX/empty-dir"     not-delivered
+agree_on "a populated directory" fdir  "$DFX/full-dir"      delivered
+# A repo-relative path, asked from the repo root — which is where the roster's own paths are
+# written from, and the one place the two owners resolve it identically (the sweeper reads
+# it against the REPO, the stop gate against the operator's typed cwd).
+agree_on "a repo-relative path, asked from the repo root" relrow "relative-target.md" delivered
 
-# SYMLINKS, added by the Step-6 security review (S-3). The two implementations here follow
-# a link on the file branch and skip it on the directory branch — and they do it IDENTICALLY,
-# which is what this section asserts. The THIRD renderer of delivered-ness, the landing
-# predicate in `verdict`, deliberately answers differently: since S-3 it refuses a symlinked
-# deliverable on both of its own branches (`symlink=`), because a contract satisfied by
-# `ln -s` is satisfied with zero bytes written. That divergence is named here rather than
-# left for the next reader to discover, and §J drives the landing side of it.
-mkdir -p "$DFX/link-dir"
+# THE NAMED DIVERGENCES, pinned as INEQUALITIES rather than left for the next reader to
+# discover. These are the cases where the two owners are SUPPOSED to disagree, and a suite
+# that only asserted agreement would go green on a drift that collapsed one into the other.
+#
+# SYMLINKS (Step-6 security review S-3). The stop gate follows a link on its file branch;
+# the landing predicate refuses one on BOTH branches, because a contract satisfied by
+# `ln -s` is satisfied with zero bytes written.
 ln -s "$DFX/full-file.md" "$DFX/linked-file.md"
-ln -s "$DFX/full-file.md" "$DFX/link-dir/only-a-link.md"
-agree_on "a symlink to a written file"          "$DFX/linked-file.md" delivered
-agree_on "a directory holding only a symlink"   "$DFX/link-dir"       not-delivered
-# The one DELIBERATE divergence, pinned rather than hidden. A relative deliverable is the
-# REPO's to the sweeper — armed once as a background job, it outlives whatever directory it
-# was armed from, so a cwd-relative reading would make one roster row mean two things — and
-# the typed cwd's to the stop gate, which an operator runs while standing somewhere on
-# purpose. The two coincide exactly when that somewhere is the repo root, which is where
-# this case asks the question and where the roster's own paths are written from.
-agree_on "a repo-relative path, asked from the repo root" "relative-target.md" delivered
+d_row linkrow "$DFX/linked-file.md"
+expect_eq "a symlink to a written file: the stop gate reads it as delivered" \
+  "delivered" "$(sc_answer "$DFX/linked-file.md")"
+expect_eq "…while the landing predicate refuses it, by design" \
+  "not-delivered" "$(sw_answer linkrow)"
+
+# STALENESS. The landing predicate requires an mtime AFTER the row's own launched_at; the
+# stop gate does not date the artifact at all. Same file, same moment, two answers.
+echo "written before this agent was ever dispatched" > "$DFX/prelaunch.md"
+touch -t 202001010000 "$DFX/prelaunch.md"
+d_row stalerow "$DFX/prelaunch.md"
+expect_eq "a PRE-LAUNCH file: the stop gate reads it as delivered (it never dates it)" \
+  "delivered" "$(sc_answer "$DFX/prelaunch.md")"
+expect_eq "…while the landing predicate calls it stale, by design" \
+  "not-delivered" "$(sw_answer stalerow)"
 
 # ============================================================
 echo ""
@@ -1962,22 +1966,27 @@ expect_eq "the shipped gate and sweeper are byte-identical to before the mutatio
 
 # ============================================================
 echo ""
-echo "=== J.4 — still-live has TWO owners that INTENTIONALLY differ; the difference is pinned ==="
+echo "=== J.4 — still-live has ONE owner now; the row that split the two is pinned ==="
 # ============================================================
 #
-# "Is this row still live?" is computed at TWO sites in hooks/session-sweeper.sh that serve
-# different masters and are SUPPOSED to disagree (Step-6 critic D-2; spec §Design ownership
-# table, the still-live row):
+# "Is this row still live?" used to be computed at TWO sites in hooks/session-sweeper.sh
+# that served different masters and were SUPPOSED to disagree (wave-01 Step-6 critic D-2):
 #   * evaluate_row — the tick loop, a WAKE heuristic. A row that declared `claims=` opted
-#     into process-liveness as its ONLY signal, so a dead claimed process is a dead-claim
-#     finding full stop and progress is never consulted.
+#     into process-liveness as its ONLY signal, so a dead claimed process was a dead-claim
+#     finding full stop and progress was never consulted.
 #   * row_still_live — the verdict verb, a STOP exemption. A dead claim falls THROUGH to
 #     progress/cadence, so fresh progress can still answer STILL-LIVE and spare a stopping
 #     agent a false UNMET.
-# On a dead-claim-plus-fresh-progress row the two therefore answer DIFFERENTLY, and that is
-# correct — unifying them is a rejected disposition. This section PINS the difference: if
-# either site drifts toward the other, one assertion below goes red. It is the one section in
-# this suite asserting an INEQUALITY between two implementations rather than an equality.
+# On a dead-claim-plus-fresh-progress row the two answered DIFFERENTLY, and this section
+# pinned that inequality so neither could drift toward the other.
+#
+# THE TICK LOOP IS DELETED (epic-16 wave-02), so there is no second owner and no inequality
+# left to pin — an equality assertion between one implementation and nothing is not a test,
+# and asserting the difference persists would be asserting that deleted code still runs. What
+# survives is the SURVIVOR'S HALF, driven on the identical fixture: the row shape that split
+# the two owners is exactly the row shape most likely to be misjudged, and the verdict verb
+# must still call it STILL-LIVE. If a future edit collapses row_still_live into the loop's
+# old "a dead claim ends the question" reading, this goes red.
 DLREPO=$(new_repo "still-live-divergence")
 write_plan "$DLREPO/.bionic/docs/plans/epic-16/wave-01.md" "current: 4"
 mkdir -p "$DLREPO/.bionic/tmp"
@@ -1985,7 +1994,7 @@ DL_ROSTER="$DLREPO/.bionic/tmp/roster-$SID_A.state"
 DL_LAUNCHED=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
   || date -u -d "-3600 seconds" +%Y-%m-%dT%H:%M:%SZ)
 # FRESH progress written now, well inside the declared cadence; a DEAD claim no live process
-# carries; an ABSENT deliverable so the row has not landed and both sites still judge it.
+# carries; an ABSENT deliverable so the row has not landed and is genuinely judged.
 printf 'stage 1\n' > "$DLREPO/.bionic/tmp/dl.progress"
 DL_CLAIM="bionic-xgate-D2-deadclaim-no-such-process-9f5c1a2b"
 {
@@ -1997,35 +2006,31 @@ DL_CLAIM="bionic-xgate-D2-deadclaim-no-such-process-9f5c1a2b"
 expect_eq "the claimed process is genuinely not running (test not vacuous)" "no" \
   "$(pgrep -f -- "$DL_CLAIM" >/dev/null 2>&1 && echo yes || echo no)"
 
-# READER 1 — the verdict verb (row_still_live). Fresh progress outvotes the dead claim.
 DL_VERDICT=$( cd "$DLREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" verdict dl-row 2>/dev/null \
   | grep -F 'landing-verdict/v1|' | grep -F '|name=dl-row|' | head -1 \
   | tr '|' '\n' | grep '^state=' | head -1 | cut -d= -f2- )
 expect_eq "the verdict verb calls the dead-claim-plus-fresh-progress row STILL-LIVE" \
   "STILL-LIVE" "$DL_VERDICT"
 
-# READER 2 — the tick loop (evaluate_row). The dead claim is a finding; progress is never
-# consulted. Armed at --tick 1, the sweeper exits on its first finding (deliver_findings),
-# leaving the class in the findings log — the same drive hooks/session-sweeper.test.sh uses.
-DL_FINDINGS="$DLREPO/.bionic/tmp/sweeper-$SID_A-findings.log"
-rm -f "$DL_FINDINGS" "$DLREPO/.bionic/tmp/sweeper-$SID_A.state"
-( cd "$DLREPO" && exec env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" arm --tick 1 ) \
-  >/dev/null 2>&1 &
-DL_PID=$!; BG_PIDS="$BG_PIDS $DL_PID"
-_i=0
-while kill -0 "$DL_PID" 2>/dev/null && [ "$_i" -lt 40 ]; do sleep 0.1; _i=$((_i + 1)); done
-if kill -0 "$DL_PID" 2>/dev/null; then
-  ( cd "$DLREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" retire ) >/dev/null 2>&1
-fi
-wait "$DL_PID" 2>/dev/null
-DL_FIND_TEXT="$(cat "$DL_FINDINGS" 2>/dev/null)"
-expect_contains "the tick loop raises a dead-claim finding for the SAME row" \
-  "class=dead-claim" "$DL_FIND_TEXT"
-expect_absent "…and NOT a stale-progress finding — the tick loop never consulted progress" \
-  "class=stale-progress" "$DL_FIND_TEXT"
-# The inequality itself, stated so the reason is legible if a future edit collapses it.
-expect_eq "the two owners of still-live answer DIFFERENTLY on this row, by design" "different" \
-  "$([ "$DL_VERDICT" = "STILL-LIVE" ] && printf '%s' "$DL_FIND_TEXT" | grep -qF 'class=dead-claim' && echo different || echo same)"
+# The DISCRIMINATING half, and what makes the assertion above mean something: it is the
+# PROGRESS that carries the row, not a blanket refusal to judge a claimed row. Stale the
+# progress and the same row — same dead claim, same absent deliverable — reads UNMET.
+touch -t 202001010000 "$DLREPO/.bionic/tmp/dl.progress"
+DL_VERDICT_STALE=$( cd "$DLREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" verdict dl-row 2>/dev/null \
+  | grep -F 'landing-verdict/v1|' | grep -F '|name=dl-row|' | head -1 \
+  | tr '|' '\n' | grep '^state=' | head -1 | cut -d= -f2- )
+expect_eq "…and once that progress goes stale the same row is UNMET" "UNMET" "$DL_VERDICT_STALE"
+
+# The gate consumes exactly that, both ways round — one owner, and the stop follows it.
+j_saved_lg2="$PARTY_LG"
+JDL_ERR=$( mk_substop_payload "$DLREPO" "$SID_A" "dl-row" false | bash "$PARTY_LG" 2>&1 >/dev/null )
+JDL_ST=$?
+expect_eq "the gate refuses the stop on the UNMET reading" "2" "$JDL_ST"
+printf 'stage 2\n' > "$DLREPO/.bionic/tmp/dl.progress"
+JDL_ERR2=$( mk_substop_payload "$DLREPO" "$SID_A" "dl-row" false | bash "$PARTY_LG" 2>&1 >/dev/null )
+JDL_ST2=$?
+expect_eq "…and passes it the moment the progress is fresh again" "0" "$JDL_ST2"
+PARTY_LG="$j_saved_lg2"
 
 # ============================================================
 echo ""
