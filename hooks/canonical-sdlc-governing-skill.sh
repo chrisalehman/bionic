@@ -238,6 +238,28 @@ esac
 FILE_PATH_MATCH=$(physicalize "$FILE_PATH")
 DOCS_ROOT_MATCH=$(physicalize "$DOCS_ROOT")
 
+# ---------- R9/AC-13: pinned-root wall ----------
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+#
+# The `.bionic` tree is pinned to ONE physical location per project:
+# PROJECT_ROOT_FROM_PATH already resolves there via --git-common-dir,
+# unaffected by which worktree or subdirectory the write's own path happens
+# to sit under (AC-10). What that resolution does NOT already guarantee is
+# that the WRITE ITSELF lands there: the target path can carry its own
+# `.bionic` path segment that names a different tree entirely — a linked
+# worktree's phantom copy, or a stray `.bionic` created a level down inside a
+# subdirectory of the main repo — even though the computed root is correct.
+# PINNED_BIONIC is the one true tree; TARGET_BIONIC is whichever `.bionic`
+# segment (if any) the write's own path names. Scope: this project's single
+# pinned root (spec assumption 4) — a multi-project session is out of scope
+# by design, not by omission.
+PINNED_BIONIC="$PROJECT_ROOT_FROM_PATH/.bionic"
+case "$FILE_PATH_MATCH" in
+  */.bionic/*) TARGET_BIONIC="${FILE_PATH_MATCH%%/.bionic/*}/.bionic" ;;
+  */.bionic)   TARGET_BIONIC="$FILE_PATH_MATCH" ;;
+  *)           TARGET_BIONIC="" ;;
+esac
+
 IN_SCOPE=0
 case "$FILE_PATH_MATCH" in
   "$DOCS_ROOT_MATCH"/specs/*|"$DOCS_ROOT_MATCH"/plans/*|"$DOCS_ROOT_MATCH"/adrs/*|"$DOCS_ROOT_MATCH"/incidents/*) IN_SCOPE=1 ;;
@@ -333,6 +355,21 @@ if [ "$UNDER_DOCS_ROOT" -eq 0 ]; then
     echo "Docs root: $DOCS_ROOT" >&2
     echo "Fix: write it under $DOCS_ROOT/$MISPLACED_SUBDIR/ instead." >&2
     echo "     (the docs root is <project>/.bionic/docs by default; override with 'docs-root:' in $PROJECT_ROOT_FROM_PATH/.bionic/config.yaml)" >&2
+    exit 2
+  fi
+  # R9/AC-13: the frontmatter arm above only catches artifacts that
+  # self-declare canonical-sdlc frontmatter. An operational artifact (a
+  # record/ note, a progress file, anything without that frontmatter)
+  # written under a NON-pinned `.bionic` tree would otherwise fall straight
+  # through here unblocked — the exact gap this wall closes. A write whose
+  # own path carries no `.bionic` segment at all (an ordinary project file)
+  # is untouched: TARGET_BIONIC is empty and this arm is silent.
+  # [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+  if [ -n "$TARGET_BIONIC" ] && [ "$TARGET_BIONIC" != "$PINNED_BIONIC" ]; then
+    echo "BLOCKED: artifact write targets '$TARGET_BIONIC', not this project's pinned .bionic root." >&2
+    echo "Path: $FILE_PATH" >&2
+    echo "Pinned root: $PINNED_BIONIC" >&2
+    echo "Fix: write under $PINNED_BIONIC instead — the .bionic tree is pinned to the main repository root at Step 0 and is never re-derived from a worktree or subdirectory copy." >&2
     exit 2
   fi
   exit 0
