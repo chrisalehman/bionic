@@ -46,6 +46,11 @@ expect_contains() { if printf '%s' "$3" | grep -qF -- "$2"; then ok "$1"; else n
 expect_matches()  { if printf '%s' "$3" | grep -qE -- "$2"; then ok "$1"; else no "$1" "no match: $2"; fi; }
 expect_absent()   { if printf '%s' "$3" | grep -qF -- "$2"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
 expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
+# ONE line, counted rather than eyeballed: "one informational line" is the whole
+# of R3's promise about what a user-ordered stop costs the operator, and a
+# refusal-shaped wall of text that happens to exit 0 would satisfy every other
+# assertion here.
+expect_eq_lines() { local n; n=$(printf '%s\n' "$3" | grep -c .); if [ "$n" = "$2" ]; then ok "$1"; else no "$1" "expected $2 line(s), got $n"; fi; }
 expect_file()     { if [ -f "$2" ]; then ok "$1"; else no "$1" "no such file: $2"; fi; }
 expect_no_file()  { if [ -f "$2" ]; then no "$1" "file exists but should not: $2"; else ok "$1"; fi; }
 
@@ -240,13 +245,37 @@ observe_nosid() {  # <sid> <transcript> <repo> <typed-target> [args…]
 # a row is no longer what makes a target ours — its directory is — so a world that
 # plants none is a perfectly ordinary one. What a row still carries is the
 # CONTRACT, and, when `confirmed`, ownership of a target filed elsewhere.
-roster_row() {  # <repo> <sid> <name> <agent-id> [progress-path] [status]
+#
+# The CONTRACT FIELDS (deliverable, waiver, teammate_id) are optional trailing
+# arguments rather than a second helper: epic-16 wave-02 slice S3 made the row's
+# contract the thing that discharges a stop, so a suite that could only plant
+# contract-less rows could not express the discharging case at all. Every call
+# written before that slice passes none of them and gets the identical row it got
+# before — an empty `deliverable=` is what the writer emits for a dispatch that
+# declared nothing.
+roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status] [deliverable] [waiver] [teammate-id]
   local repo="$1" sid="$2" name="$3" aid="$4" prog="${5:-}" status="${6:-confirmed}"
+  local deliv="${7:-}" waiver="${8:-}" tmid="${9:-}"
   local f="$repo/.bionic/tmp/roster-$sid.state"
   mkdir -p "$repo/.bionic/tmp"
   [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=%s|absent=|tool_use_id=toolu_01FIXTURE\n' \
-    "$status" "$sid" "$name" "$aid" "$prog" >> "$f"
+  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=%s|duration=|progress=%s|absent=|waiver=%s|teammate_id=%s|tool_use_id=toolu_01FIXTURE\n' \
+    "$status" "$sid" "$name" "$aid" "$deliv" "$prog" "$waiver" "$tmid" >> "$f"
+  return 0
+}
+
+# The sweeper's own ack verb, run for real against the fixture repo — never a
+# hand-written ledger line. An ack is the ONLY thing that closes a row which
+# declared no machine-visible artifact, so the gate's ack discharge has to be
+# driven through the writer that actually ships.
+ack_row() {  # <repo> <sid> <name>
+  ( cd "$1" && CLAUDE_CODE_SESSION_ID="$2" bash "$HERE/session-sweeper.sh" ack "$3" ) >/dev/null 2>&1
+  return 0
+}
+
+# A user's stop order, recorded through the shipped helper for the same reason.
+order_stop() {  # <repo> <sid> <target> [--at <epoch>]
+  ( cd "$1" && CLAUDE_CODE_SESSION_ID="$2" bash "$HERE/stop-orders.sh" order "${@:3}" ) >/dev/null 2>&1
   return 0
 }
 
@@ -1063,6 +1092,197 @@ roster_row "$CR_REPO" "$SID_A" "some-other-name" "aconfirmed-2121212121212" "" "
 observe "$SID_A" "$CR_TR_B" "$CR_REPO" "aconfirmed-2121212121212"
 run_guard "$(mk_stop_payload "$SID_A" "$CR_TR_B" "$CR_REPO" "stranger")"
 expect_status "a CONFIRMED row's id still establishes ownership: PERMITTED" 0 "$GUARD_ST"
+
+# ============================================================
+echo ""
+echo "=== Section 11: FACTS DISCHARGE THE STOP (epic-16 w2 S3, AC-1/AC-2, R2) ==="
+# ============================================================
+#
+# The ceremony was never the point — the point was that a stop not destroy work
+# nobody had looked at. When the contract has LANDED, the artifact on disk is a
+# better answer to that question than any look, and it cannot go stale. So the
+# discharge set is a fact set: the sweeper's verdict says MET against a declared
+# artifact, or WAIVED, or the orchestrator has acked the row. Everything else is
+# unchanged — Sections 4 through 10 above are the same arc they were, and they
+# still pass, which is the paired positive for "ceremony survives".
+
+IFS='|' read -r F_REPO F_TR F_SUB <<< "$(make_world facts yes)"
+mkdir -p "$F_REPO/.bionic/docs/record"
+
+# --- MET: the artifact is on disk, written after the launch ---
+plant_agent "$F_SUB" "alander-1111111111111111" "lander"
+echo "the delivered artifact" > "$F_REPO/.bionic/docs/record/lander.md"
+roster_row "$F_REPO" "$SID_A" "lander" "alander-1111111111111111" "" "confirmed" \
+  ".bionic/docs/record/lander.md"
+run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "lander")"
+expect_status "MET contract: the stop passes with NO observation ever taken" 0 "$GUARD_ST"
+expect_empty "…and the gate says nothing at all — zero ceremony" "$GUARD_ERR"
+
+# --- paired negative: same world, same everything, artifact absent ---
+plant_agent "$F_SUB" "aslacker-2222222222222222" "slacker"
+roster_row "$F_REPO" "$SID_A" "slacker" "aslacker-2222222222222222" "" "confirmed" \
+  ".bionic/docs/record/slacker.md"
+run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "slacker")"
+expect_status "UNMET contract: the ceremony survives — REFUSED" 2 "$GUARD_ST"
+expect_contains "…with the observation refusal, not a landing one" \
+  "No observation has been recorded" "$GUARD_ERR"
+
+# --- WAIVED: an explicit designation discharges as surely as an artifact ---
+plant_agent "$F_SUB" "awaived-3333333333333333" "waived-one"
+roster_row "$F_REPO" "$SID_A" "waived-one" "awaived-3333333333333333" "" "confirmed" \
+  "" "this dispatch produces nothing durable"
+run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "waived-one")"
+expect_status "WAIVED contract: the stop passes with no observation" 0 "$GUARD_ST"
+expect_empty "…and silently" "$GUARD_ERR"
+
+# --- ACKED: the orchestrator's verification, made durable, closes the row ---
+#
+# This is the case the field kept paying for: an agent that finished, was
+# verified and was acked still cost an observation, a staleness round and four
+# calls to stop. The ack is invisible to `verdict` by wave-01 design (a contract
+# is met by artifacts or it is not), so the gate reads the sweeper's LEDGER —
+# and it reads a ledger this suite makes the real `ack` verb write.
+plant_agent "$F_SUB" "aacked-4444444444444444" "acked-one"
+roster_row "$F_REPO" "$SID_A" "acked-one" "aacked-4444444444444444" "" "confirmed" \
+  ".bionic/docs/record/never-written.md"
+ack_row "$F_REPO" "$SID_A" "acked-one"
+run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "acked-one")"
+expect_status "ACKED row: the stop passes though the contract is UNMET" 0 "$GUARD_ST"
+expect_empty "…and silently" "$GUARD_ERR"
+
+# An ack of a DIFFERENT row closes nothing here — whole-name match, never a
+# substring, and never the whole roster.
+plant_agent "$F_SUB" "aacked-5555555555555555" "acked-one-more"
+roster_row "$F_REPO" "$SID_A" "acked-one-more" "aacked-5555555555555555" "" "confirmed" \
+  ".bionic/docs/record/never-written-2.md"
+run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "acked-one-more")"
+expect_status "a neighbouring ack does not discharge this row: REFUSED" 2 "$GUARD_ST"
+
+# --- the VACUOUS MET keeps its ceremony ---
+#
+# `verdict` calls a row that declared no artifact MET, correctly — it names
+# nothing to hold the agent to. That is not a landing, and treating it as one
+# would discharge every contract-less dispatch on a fact nobody produced. AC-1
+# says MET means "artifact delivered"; ack is what closes the rest.
+plant_agent "$F_SUB" "anothing-6666666666666666" "declares-nothing"
+roster_row "$F_REPO" "$SID_A" "declares-nothing" "anothing-6666666666666666"
+run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "declares-nothing")"
+expect_status "a row that declared NOTHING is not discharged by its vacuous MET" 2 "$GUARD_ST"
+
+# --- a repo-controlled ledger cannot open this gate ---
+#
+# The CLOSED half of the pair whose open half is at the landing gate
+# (hooks/landing-gate.test.sh §8f). A repo owns its own .bionic/, so a symlinked ledger is
+# a set of acks nobody in this session recorded: the sweeper refuses to answer over it at
+# all, `ledger_acked` declines to follow it, and this gate — which is CLOSED and loud after
+# the active-wave verdict — refuses the stop. The same fixture passes at the landing gate,
+# which is fail-open by design. Opposite directions, one fixture, both deliberate.
+plant_agent "$F_SUB" "alinked-8888888888888888" "linked-ledger"
+roster_row "$F_REPO" "$SID_A" "linked-ledger" "alinked-8888888888888888" "" "confirmed" \
+  ".bionic/docs/record/lander.md"
+mkdir -p "$SANDBOX/elsewhere"
+printf '# bionic sweeper ledger — schema sweeper-ledger/v1\nsweeper-ledger/v1|event=ack|at=2026-08-11T00:00:00Z|epoch=1|pid=1|session=%s|name=linked-ledger\n' \
+  "$SID_A" > "$SANDBOX/elsewhere/ledger.state"
+ln -sf "$SANDBOX/elsewhere/ledger.state" "$F_REPO/.bionic/tmp/sweeper-$SID_A.state"
+run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "linked-ledger")"
+expect_status "a symlinked ledger discharges nothing: REFUSED though the artifact is there" 2 "$GUARD_ST"
+rm -f "$F_REPO/.bionic/tmp/sweeper-$SID_A.state"
+
+# --- no roster row at all: unchanged ---
+plant_agent "$F_SUB" "aunrostered-777777777777" "unrostered"
+run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "unrostered")"
+expect_status "a target on no roster row is unchanged by any of this" 2 "$GUARD_ST"
+
+# ============================================================
+echo ""
+echo "=== Section 12: the USER-ORDERED stop executes, and reports (R3, AC-2) ==="
+# ============================================================
+#
+# A human order is not evidence and it is not a discharge of the contract: it is
+# an INSTRUCTION, and the gate's job in front of one is to get out of the way and
+# say what is being given up. Never a refusal — a wall that argues with the
+# person it exists to serve has mistaken who it works for.
+
+IFS='|' read -r O_REPO O_TR O_SUB <<< "$(make_world orders yes)"
+mkdir -p "$O_REPO/.bionic/docs/record"
+plant_agent "$O_SUB" "aordered-1111111111111111" "ordered"
+roster_row "$O_REPO" "$SID_A" "ordered" "aordered-1111111111111111" "" "confirmed" \
+  ".bionic/docs/record/ordered.md"
+
+# Precondition: without the order this is the ordinary live+unmet refusal.
+run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "ordered")"
+expect_status "precondition — unmet and unordered: REFUSED" 2 "$GUARD_ST"
+
+order_stop "$O_REPO" "$SID_A" "ordered"
+run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "ordered")"
+expect_status "a user-ordered stop EXECUTES: permitted, no observation" 0 "$GUARD_ST"
+expect_contains "…and names what is being given up" \
+  ".bionic/docs/record/ordered.md" "$GUARD_ERR"
+expect_absent "…as information, never as a refusal" "BLOCKED" "$GUARD_ERR"
+expect_eq_lines "…in exactly one line" 1 "$GUARD_ERR"
+
+# An order names ONE target. A stop of a different agent is not covered by it.
+plant_agent "$O_SUB" "aunordered-22222222222" "unordered"
+roster_row "$O_REPO" "$SID_A" "unordered" "aunordered-22222222222" "" "confirmed" \
+  ".bionic/docs/record/unordered.md"
+run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "unordered")"
+expect_status "an order for another target discharges nothing here: REFUSED" 2 "$GUARD_ST"
+
+# AN ORDER IS A LIVE INSTRUCTION, NOT A STANDING ONE. It is bounded in time on
+# purpose — the one place in this gate where a clock is right, because what is
+# being bounded is an instruction's currency and not evidence's freshness. An
+# expired order leaves the ceremony exactly where it was.
+plant_agent "$O_SUB" "astale-333333333333333" "stale-order"
+roster_row "$O_REPO" "$SID_A" "stale-order" "astale-333333333333333" "" "confirmed" \
+  ".bionic/docs/record/stale-order.md"
+order_stop "$O_REPO" "$SID_A" "stale-order" --at $(( $(date -u +%s) - 86400 ))
+run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "stale-order")"
+expect_status "an EXPIRED order does not discharge: REFUSED" 2 "$GUARD_ST"
+
+# ============================================================
+echo ""
+echo "=== Section 13: an id form the STOPPER CAN ACTUALLY USE (field data 2026-08-11) ==="
+# ============================================================
+#
+# The by-id escape hatch was unreachable in the field. The gate hands back the
+# TRANSCRIPT-form id (`aname-<hex>`), the platform's stop primitive addresses a
+# teammate as `name@session-xxxxxxxx`, and nothing bridged the two — so the
+# refusal named a way out that the operator could not type. A refusal that cannot
+# be cleared is a refusal that costs four calls and an ambiguity round, which is
+# what it cost on 2026-08-11.
+
+IFS='|' read -r I_REPO I_TR I_SUB <<< "$(make_world idforms yes)"
+I_TR_B="${I_TR%/*}/$SID_B.jsonl"
+I_SUB_B="${I_TR_B%.jsonl}/subagents"
+plant_agent "$I_SUB_B" "aforeigner-11111111111" "foreigner"
+roster_row "$I_REPO" "$SID_A" "foreigner" "" "" "confirmed" "" "" "foreigner@session-${SID_B:0:8}"
+
+# The refusal still fires for a bare NAME — a name is not an identity, unchanged.
+observe "$SID_A" "$I_TR_B" "$I_REPO" "aforeigner-11111111111"
+run_guard "$(mk_stop_payload "$SID_A" "$I_TR_B" "$I_REPO" "foreigner")"
+expect_status "a bare name for a foreign-filed agent: still REFUSED" 2 "$GUARD_ST"
+expect_contains "…and the way out is an address the stop primitive accepts" \
+  "foreigner@session-${SID_B:0:8}" "$GUARD_ERR"
+
+# …and the addressing form the platform actually hands the operator RESOLVES as
+# an identity. It is unambiguous by construction in exactly the way the raw id
+# is: it carries the launching session.
+observe "$SID_A" "$I_TR_B" "$I_REPO" "aforeigner-11111111111"
+run_guard "$(mk_stop_payload "$SID_A" "$I_TR_B" "$I_REPO" "foreigner@session-${SID_B:0:8}")"
+expect_status "the name@session form is an IDENTITY, not a name: PERMITTED" 0 "$GUARD_ST"
+
+# The raw transcript id keeps working — this adds a form, it does not swap one.
+plant_agent "$I_SUB_B" "aforeigner-22222222222" "foreigner2"
+observe "$SID_A" "$I_TR_B" "$I_REPO" "aforeigner-22222222222"
+run_guard "$(mk_stop_payload "$SID_A" "$I_TR_B" "$I_REPO" "aforeigner-22222222222")"
+expect_status "the transcript-form id still resolves: PERMITTED" 0 "$GUARD_ST"
+
+# A `name@session-` form whose session is NOT the one the agent is filed under is
+# a guess that happens to be shaped like an id. It stays a name.
+plant_agent "$I_SUB_B" "aforeigner-33333333333" "foreigner3"
+observe "$SID_A" "$I_TR_B" "$I_REPO" "aforeigner-33333333333"
+run_guard "$(mk_stop_payload "$SID_A" "$I_TR_B" "$I_REPO" "foreigner3@session-deadbeef")"
+expect_status "a name@session naming the WRONG session is not an identity: REFUSED" 2 "$GUARD_ST"
 
 # ============================================================
 echo ""

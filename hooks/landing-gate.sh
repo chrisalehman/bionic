@@ -200,6 +200,39 @@ _field() {  # <key> — by key, never by position, as every reader of these line
 
 [ "$(_field state)" = "UNMET" ] || exit 0
 
+# HAS THE ORCHESTRATOR CLOSED THIS ROW? DELIBERATELY DUPLICATED, byte for byte, into
+# hooks/stop-guard.sh and hooks/landing-gate.sh — the TDD's §9 convention, for its reason:
+# a sourced library the installer misses is a silently inert wall. The three copies are
+# held together by tests/cross-gate-agreement.test.sh's stop-arc section, which drives all
+# three over one ledger written by the real `session-sweeper.sh ack`.
+#
+# It reads the sweeper's ledger rather than its verdict because ack is invisible to
+# `verdict` BY DESIGN (a contract is met by artifacts or it is not, which is what lets an
+# ack over an UNMET row warn instead of quietly erasing the discrepancy). Whole-name match,
+# never a substring: `w4-s1` must not be closed by an ack of `w4-s10`.
+ledger_acked() {  # <ledger-file> <name> -> 0 when an ack closed that row
+  local f="$1" want="$2" line n
+  [ -n "$want" ] || return 1
+  [ -L "$f" ] && return 1
+  [ -f "$f" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in "sweeper-ledger/v1|"*) : ;; *) continue ;; esac
+    case "$line" in *"|event=ack|"*) : ;; *) continue ;; esac
+    n=$(printf '%s' "$line" | tr '|' '\n' | grep '^name=' | head -1 | cut -d= -f2-)
+    [ -n "$n" ] && [ "$n" = "$want" ] && return 0
+  done < "$f"
+  return 1
+}
+
+# AN ACKED ROW IS CLOSED FOR EVERY READER (epic-16 wave-02 slice S3, R2). The orchestrator
+# verified this agent's completion and made that durable; refusing its stop over artifacts
+# a human has already accounted for is the false alarm this wave exists to end. Asked LAST,
+# after the state is known to be UNMET, so the pass paths pay nothing for it — and asked
+# with the NAME THE VERB ITSELF PRINTED rather than the raw payload field, because the
+# ledger stores the same cleaned form the verb prints and a second normalizer here is the
+# reader divergence C-5 closed by deleting one.
+ledger_acked "$REPO/.bionic/tmp/sweeper-${SID}.state" "$(_field name)" && exit 0
+
 # The refusal is the verb's own detail, unedited. It names every failing conjunct —
 # `missing=`, `empty=`, `stale=` with both stamps — because a stopping agent that is told
 # only "unmet" has nothing to act on, and the second stop passes whatever it does.
