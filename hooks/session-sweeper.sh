@@ -222,7 +222,7 @@ abs_path() {  # <path> — roster paths are usually absolute; a relative one is 
 #     promise is broken, and it is not broken until the longer bound passes.
 #   * zero is refused: a zero threshold would call every row late the instant it launched.
 parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be read
-  local raw="$1" s pairs count nums hi unit mult n
+  local raw="$1" s pairs count nums hi unit mult n allnums
   [ -n "$raw" ] || return 1
   s="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
   s="${s//\~/ }"; s="${s//–/-}"; s="${s//—/-}"; s="${s//,/ }"
@@ -241,6 +241,19 @@ parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be 
     s|sec|secs|second|seconds)   mult=1 ;;
     *) return 1 ;;
   esac
+  # REFUSE what `grep -oE` silently dropped rather than matched. It reports only what it
+  # matched, so two failure shapes above look identical to a single clean pair:
+  #   * a decimal point anywhere near a digit ("0.5h" matches the trailing "5h" and never
+  #     sees the "0."; the header's "whole numbers only" is a refusal, not a truncation).
+  #   * two pairs glued with no separator ("1h30m" — "1h" fails its own trailing-boundary
+  #     check and is silently skipped, leaving only "30m" for `pairs` to find).
+  # A decimal anywhere in the cleaned string fails outright; a mismatch between every digit
+  # run in the string and the digit run(s) actually captured inside the matched pair catches
+  # the glued case, because nothing legitimate is a digit run OUTSIDE the one pair.
+  printf '%s' "$s" | grep -qE '[0-9]+\.[0-9]+' && return 1
+  allnums="$(printf '%s' "$s" | grep -oE '[0-9]+')"
+  [ "$(printf '%s\n' "$allnums" | grep -c '[0-9]')" -eq "$(printf '%s\n' "$nums" | grep -c '[0-9]')" ] \
+    || return 1
   printf '%s' "$((hi * mult))"
 }
 

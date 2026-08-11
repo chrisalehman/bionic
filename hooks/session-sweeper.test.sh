@@ -278,19 +278,30 @@ parse_case mush        "whenever it feels right" 30 UNMET
 parse_case zero        "0 minutes"               30 UNMET
 parse_case units       "20 parsecs"              30 UNMET
 
-# NOT ASSERTED HERE, and deliberately: two forms the parser's own header says it refuses are
-# in fact READ, and reading them wrong. `0.5h` matches the trailing `5h` and becomes 5 hours;
-# `1h30m` matches only the trailing `30m` and becomes 30 minutes, because the first pair is
-# rejected for being followed by a digit. Both are pre-existing defects in a predicate this
-# slice only inherited — epic-16 wave-02 S1 deletes machinery and changes no surviving
-# behavior — so they are named here and carried out of the slice as a concern rather than
-# pinned in either direction. Asserting the current answer would ratify the misread;
-# asserting the documented one would fail a suite over a defect this slice did not cause.
+# FIXED (epic-16 w2 S2, standalone commit): the parser's header claims "whole numbers only,
+# `0.5h` is refused" and "exactly one number-unit pair, `1h30m` is refused", and until this
+# fix neither refusal held — `grep -oE` only reports what it matched, so a decimal point
+# ("0.5h" matches the trailing "5h" and never sees the "0.") and two pairs glued together
+# with no separator ("1h30m" — "1h" fails its own trailing-boundary check and is silently
+# skipped, leaving only "30m") both looked like one clean pair. Proof each is now REFUSED: a
+# 30-second-old artifact under either cadence would read STILL-LIVE if the buggy parse
+# (18000s / 1800s respectively) still applied, since both comfortably clear 30 seconds; a
+# refused cadence instead falls through to the disk's answer, and with no claims and an
+# absent deliverable that answer is UNMET. This is what makes both cases RED under the
+# pre-fix binary and GREEN after: the OLD code read STILL-LIVE here, not UNMET.
+parse_case malformed-decimal "0.5h"  30 UNMET
+parse_case malformed-glued   "1h30m" 30 UNMET
 
 # The paired positive for the whole refusal class: the SAME 30-second-old artifact under a
-# cadence the parser CAN read is STILL-LIVE, so the four rows above failed on the prose and
-# not on the clock.
+# cadence the parser CAN read is STILL-LIVE, so the rows above failed on the prose and not
+# on the clock.
 parse_case readable    "5 minutes"                30 STILL-LIVE
+
+# Paired positives proving the fix changes nothing about the forms it already accepted —
+# short-unit, hour, and plain-seconds spellings, each read INSIDE its own cadence.
+parse_case in-30m      "30m"                      30 STILL-LIVE
+parse_case in-2h       "2h"                     1800 STILL-LIVE
+parse_case in-45s      "45s"                      30 STILL-LIVE
 
 # A row with a cadence but NO progress path has nothing for the parser to clear.
 add_row "$R2" name=no-progress cadence="5 minutes" deliverable="$R2/absent-np.md" \
