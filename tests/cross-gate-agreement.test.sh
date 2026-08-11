@@ -2198,11 +2198,30 @@ mk_bash_post "$SID_A" "$KTR" "$KREPO" "bash ~/.claude/hooks/stop-check.sh w16-ch
   | bash "$PARTY_ER" >/dev/null 2>&1
 sleep 1
 printf 'stage 2\n' >> "$KREPO/.bionic/tmp/w16-chain.progress"
+# THE CONTRACT IS TAKEN BACK OFF DISK FIRST (epic-16 wave-02 slice S3). D-6 is a rule about
+# a stop that would end UNFINISHED work: since this wave, a LANDED contract discharges the
+# stop outright and no channel is consulted, which is AC-1 and is asserted as the paired
+# half below. Reader 3's question — does the chain carry the progress path all the way to
+# the gate's refusal — is only askable while the contract is outstanding, so the artifact
+# reader 1 delivered is moved aside for it and restored immediately after. Same chain, same
+# roster, same gate; the only thing that varies is the one fact that decides.
+mv "$KREPO/.bionic/docs/record/w16-chain.md" "$SANDBOX/k-chain-artifact.md"
 K_SG_OUT=$(mk_stop_payload "$SID_A" "$KTR" "$KREPO" "w16-chain" | bash "$PARTY_SG" 2>&1); K_SG_ST=$?
 expect_eq "the stop gate refuses a stop whose contracted channel moved under the look" \
   "2" "$K_SG_ST"
 expect_contains "…naming the very path the chain carried forward" \
   ".bionic/tmp/w16-chain.progress" "$K_SG_OUT"
+
+# THE OTHER DIRECTION, one fact apart: the artifact comes back, the verdict says MET, and
+# the identical stop — same stale observation, same moved progress channel — passes with no
+# ceremony at all. This is AC-1 read across the gates rather than inside one: the fact that
+# discharges the stop is the same fact the verb reports and the operator can see.
+mv "$SANDBOX/k-chain-artifact.md" "$KREPO/.bionic/docs/record/w16-chain.md"
+K_SG_OUT=$(mk_stop_payload "$SID_A" "$KTR" "$KREPO" "w16-chain" | bash "$PARTY_SG" 2>&1); K_SG_ST=$?
+expect_eq "…and once the contract has landed, the same stop passes with no ceremony" \
+  "0" "$K_SG_ST"
+expect_eq "…silently — nothing is demanded of a stop the disk already answers for" \
+  "" "$K_SG_OUT"
 
 # READER 4 — the recorder's own join. A SECOND start re-joins the `confirmed` row
 # rather than chaining off its own output (states advance; a repeated start must not
@@ -2385,6 +2404,128 @@ expect_eq "…and the landing gate's own entry is bounded" "10" \
   "$(jq -r '.hooks.SubagentStop[0].hooks[0].timeout' "$LSETTINGS" 2>/dev/null)"
 expect_eq "…as is the recorder's SubagentStart entry" "10" \
   "$(jq -r '.hooks.SubagentStart[0].hooks[0].timeout' "$LSETTINGS" 2>/dev/null)"
+
+# ============================================================
+echo ""
+echo "=== M — THE ACK, and the stop order: three readers, one file each (epic-16 w2 S3) ==="
+# ============================================================
+#
+# Two facts reach the stop arc from outside it, and each has ONE writer and several readers:
+#
+#   the ACK   — written by `hooks/session-sweeper.sh ack`, read by the stop gate, the
+#               landing gate and the stand-down helper. It is invisible to `verdict` by
+#               design (a contract is met by artifacts or it is not, which is what lets an
+#               ack over an UNMET row warn instead of quietly erasing the discrepancy), so
+#               each reader carries its own byte-identical copy of the reader — the §9
+#               convention, with the drift risk that convention always carries.
+#   the ORDER — written by `hooks/stop-orders.sh order`, read by the stop gate. Writer and
+#               reader each hold the validity window as a literal.
+#
+# Per-component suites drive each reader against its own fixtures. What none of them can
+# see is the CROSS-SCRIPT property: that the three copies are the same reader, that the
+# window is the same number, and that all three answer the same about one ledger the real
+# writer wrote.
+
+SG_M="$REPO_ROOT/hooks/stop-guard.sh"
+LG_M="$REPO_ROOT/hooks/landing-gate.sh"
+SO_M="$REPO_ROOT/hooks/stop-orders.sh"
+
+# --- M.1 one reader, three copies ---
+expect_eq "the ack reader extracts at all (this section is not vacuous)" "yes" \
+  "$([ -n "$(fn_body "$SG_M" ledger_acked)" ] && echo yes || echo no)"
+expect_eq "the stop gate's ledger_acked() is the landing gate's, body for body" \
+  "$(fn_body "$SG_M" ledger_acked)" "$(fn_body "$LG_M" ledger_acked)"
+expect_eq "…and the stand-down helper's, body for body" \
+  "$(fn_body "$SG_M" ledger_acked)" "$(fn_body "$SO_M" ledger_acked)"
+
+# --- M.2 one window, two holders ---
+_ttl_of() { grep -E '^ORDER_TTL_SECONDS=' "$1" | head -1 | cut -d= -f2; }
+expect_eq "the order window is a number at all" "yes" \
+  "$([ -n "$(_ttl_of "$SO_M")" ] && echo yes || echo no)"
+expect_eq "the order's WRITER and the gate that READS it hold one window" \
+  "$(_ttl_of "$SO_M")" "$(_ttl_of "$SG_M")"
+
+# --- M.3 one ledger, written by the real ack verb, read the same by all three ---
+MREPO=$(new_repo "ack-agreement")
+MSLUG=$(printf '%s' "$MREPO" | sed 's/[^a-zA-Z0-9]/-/g')
+MPROJ="$CLAUDE_CONFIG_DIR/projects/$MSLUG"
+MSUB="$MPROJ/$SID_A/subagents"
+mkdir -p "$MSUB" "$MREPO/.bionic/tmp"
+MTR="$MPROJ/$SID_A.jsonl"
+printf '{}\n' > "$MTR"
+plant "$MSUB" "afinished-1111111111111111" "finished"
+write_plan "$MREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+# A contract that will NEVER land: the artifact is not written, so every party's verdict is
+# UNMET and the ack is the only thing that can discharge anything. A fixture whose contract
+# landed would agree for the wrong reason.
+printf 'roster-state/v1|status=confirmed|session=%s|name=finished|agent_id=afinished-1111111111111111|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never.md|duration=|progress=|absent=|waiver=|teammate_id=finished@session-%s|tool_use_id=toolu_01FIXTURE\n' \
+  "$SID_A" "$(printf '%s' "$SID_A" | cut -c1-8)" \
+  >> "$MREPO/.bionic/tmp/roster-$SID_A.state"
+
+mk_subagent_stop() {  # <repo> <sid> <agent_type>
+  jq -n --arg c "$1" --arg s "$2" --arg a "$3" \
+    '{session_id:$s, cwd:$c, transcript_path:"/tmp/t.jsonl", agent_id:"afinished-1111111111111111",
+      agent_type:$a, hook_event_name:"SubagentStop", stop_hook_active:false,
+      background_tasks:[], session_crons:[]}'
+}
+
+# BEFORE the ack — all three say the row is open. This is the paired positive without which
+# the three assertions after it would pass over a fixture nothing could ever block.
+OUT=$(mk_stop_payload "$SID_A" "$MTR" "$MREPO" "finished" | bash "$SG_M" 2>&1); ST=$?
+expect_eq "before the ack: the stop gate refuses" "2" "$ST"
+OUT=$(mk_subagent_stop "$MREPO" "$SID_A" "finished" | bash "$LG_M" 2>&1); ST=$?
+expect_eq "before the ack: the landing gate refuses" "2" "$ST"
+OUT=$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" standdown 2>&1 )
+expect_contains "before the ack: the stand-down leaves it alone" "LEFT ALONE" "$OUT"
+
+# THE REAL WRITER writes the one file all three read.
+( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" ack finished ) >/dev/null 2>&1
+expect_eq "the ack verb wrote its ledger where all three readers look" "yes" \
+  "$([ -f "$MREPO/.bionic/tmp/sweeper-$SID_A.state" ] && echo yes || echo no)"
+
+OUT=$(mk_stop_payload "$SID_A" "$MTR" "$MREPO" "finished" | bash "$SG_M" 2>&1); ST=$?
+expect_eq "after the ack: the stop gate passes" "0" "$ST"
+OUT=$(mk_subagent_stop "$MREPO" "$SID_A" "finished" | bash "$LG_M" 2>&1); ST=$?
+expect_eq "after the ack: the landing gate passes" "0" "$ST"
+OUT=$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" standdown 2>&1 )
+expect_contains "after the ack: the stand-down puts it in the batch" "1 row(s) have landed" "$OUT"
+expect_contains "…addressed the way the stop primitive takes it" \
+  "finished@session-$(printf '%s' "$SID_A" | cut -c1-8)" "$OUT"
+
+# --- M.4 the order: one writer, one reader, one boundary ---
+_now=$(date -u +%s)
+_ttl=$(_ttl_of "$SO_M")
+# JUST INSIDE the window and JUST OUTSIDE it, placed by arithmetic rather than by waiting:
+# a suite that slept through a thirty-minute window would not be a suite. The pair is what
+# makes this an assertion about the boundary rather than about the happy path.
+# A FRESH WORLD, and no ack in it: the row above is acked, so an order placed there would
+# be discharged by the ack whatever the window said, and the boundary would go untested
+# while looking green.
+mk_order_world() {  # <label> <name> <agent-id> -> "<repo>|<transcript>"
+  local repo tr slug proj sub
+  repo=$(new_repo "$1")
+  slug=$(printf '%s' "$repo" | sed 's/[^a-zA-Z0-9]/-/g')
+  proj="$CLAUDE_CONFIG_DIR/projects/$slug"
+  sub="$proj/$SID_A/subagents"
+  mkdir -p "$sub" "$repo/.bionic/tmp"
+  tr="$proj/$SID_A.jsonl"
+  printf '{}\n' > "$tr"
+  plant "$sub" "$3" "$2"
+  write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+  roster_row "$repo" "$SID_A" "$2" "$3"
+  printf '%s|%s\n' "$repo" "$tr"
+}
+
+IFS='|' read -r IN_REPO IN_TR <<< "$(mk_order_world "order-inside" "inside" "ainside-1111111111111111")"
+( cd "$IN_REPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" order inside --at $((_now - _ttl + 60)) ) >/dev/null 2>&1
+OUT=$(mk_stop_payload "$SID_A" "$IN_TR" "$IN_REPO" "inside" | bash "$SG_M" 2>&1); ST=$?
+expect_eq "an order inside the shared window discharges the stop" "0" "$ST"
+expect_contains "…reporting what is given up rather than refusing" "STOP ORDERED" "$OUT"
+
+IFS='|' read -r EX_REPO EX_TR <<< "$(mk_order_world "order-expiry" "expired" "aexpired-2222222222222222")"
+( cd "$EX_REPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" order expired --at $((_now - _ttl - 60)) ) >/dev/null 2>&1
+OUT=$(mk_stop_payload "$SID_A" "$EX_TR" "$EX_REPO" "expired" | bash "$SG_M" 2>&1); ST=$?
+expect_eq "an order just outside it does not — the ceremony is where it was" "2" "$ST"
 
 # ============================================================
 echo ""

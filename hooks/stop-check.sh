@@ -250,6 +250,27 @@ if [ -z "$MATCHES" ]; then
   fi
 fi
 
+# ONE LOGICAL AGENT IS NOT AN AMBIGUITY (epic-16 wave-02 slice S3, field data 2026-08-11).
+# The scan above walks EVERY session directory of the project, and one agent's metadata can
+# be filed under more than one of them — the launching session's record and the agent's own
+# runtime session are two rows about the same agent. Refusing that as "two agents answer to
+# this name" sent the operator round an ambiguity loop over a target that was never
+# ambiguous: an AGENT ID identifies an agent, so two matches carrying one id are one match.
+# Only distinct ids are candidates.
+#
+# WHICH COPY SURVIVES: the one whose working log was written most recently. The log is the
+# evidence this whole command exists to print, and the freshest copy is the live one — the
+# stale copy is a record of the same agent, not a different one, so choosing between them
+# by anything else would print older evidence about the very same target.
+if [ -n "$MATCHES" ]; then
+  MATCHES=$(
+    printf '%s\n' "$MATCHES" | while IFS='|' read -r m_id m_meta m_sub; do
+      [ -n "$m_id" ] || continue
+      printf '%s|%s|%s|%s\n' "$(file_mtime "$m_sub/agent-${m_id}.jsonl")" "$m_id" "$m_meta" "$m_sub"
+    done | sort -t'|' -k1,1nr | awk -F'|' '!seen[$2]++ { print $2 "|" $3 "|" $4 }'
+  )
+fi
+
 MATCH_COUNT=0
 [ -n "$MATCHES" ] && MATCH_COUNT=$(printf '%s\n' "$MATCHES" | grep -c .)
 
@@ -269,10 +290,20 @@ if [ "$MATCH_COUNT" -gt 1 ]; then
   while IFS='|' read -r id meta sub; do
     [ -n "$id" ] || continue
     sid="${sub%/subagents}"; sid="${sid##*/}"
+    # BOTH FORMS, because the two readers of this list need different ones. The
+    # transcript-form id is what this command and hooks/stop-guard.sh resolve against; the
+    # `name@session-xxxxxxxx` form is what the platform's stop primitive takes for a
+    # teammate, and it is the only one an operator who is about to stop this agent can
+    # actually type (capture probe §3-D/§5). Printing only the id is what turned one stop
+    # into four calls and an ambiguity round on 2026-08-11.
+    cand_name=$(jq -r '.name // empty' "$meta" 2>/dev/null)
     echo "  ${id}   (session ${sid})"
+    [ -n "$cand_name" ] \
+      && echo "      stop it as: ${cand_name}@session-$(printf '%s' "$sid" | cut -c1-8)"
   done <<< "$MATCHES"
   echo ""
-  echo "Name the agent by its id above. This command decides nothing."
+  echo "Name the agent by an id above — observe it by the long id, stop it by the"
+  echo "name@session form. This command decides nothing."
   exit 1
 fi
 
