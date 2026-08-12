@@ -41,6 +41,8 @@
 #     and carries no waiver (the absent-deliverable wall)      label to add and the waiver
 #   - brief declares a deliverable only as a <slot>        -> REFUSE (no fill): a slot is
 #     template (epic-16 wave-02 R1, inference withdrawn)       not a concrete path; name it
+#   - brief names MORE THAN ONE path under its             -> REFUSE, naming every
+#     deliverable label (the ambiguity wall, R7/R6-1)          candidate: name exactly one
 #   - brief declares a deliverable that resolves OUTSIDE   -> REFUSE, naming the
 #     the repo root (the containment wall, review S-2)        path and where it lands
 #
@@ -517,16 +519,24 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
     # flipping a visibly-alive agent to UNMET (Step-6 review C-1/F-3); on duration= it
     # silently exempted a row from overdue notification (A-2). A sentence terminator
     # (. ? !) counts only when followed by whitespace or the end, so a period inside a
-    # value is never a false boundary. A comma or a closing bracket ends the clause too
-    # — the same restraint claimpat() already applies, and the exact shape the live
-    # specimen corrupted ("2m) claims=...").
+    # value is never a false boundary. A comma or a bracket ends the clause too — the
+    # same restraint claimpat() already applies, and the exact shape the live specimen
+    # corrupted ("2m) claims=...").
+    #
+    # BOTH brackets, not just the closing one (Step-6 R6 critic R6-3). With `(` absent
+    # from this set a balanced parenthetical truncated mid-phrase and left the bracket
+    # dangling — "~45 minutes (phase 1 only" — which hooks/session-poker.sh parse_seconds
+    # refuses, because it accounts for every number and the parentheticals own digit has
+    # no unit. An unreadable duration silently exempts the row from overdue notification,
+    # which is A-2 read from the writer side. Ending the value at the bracket yields the
+    # clean "~45 minutes" the author meant.
     function bound_field(s,   i, ch, nx, out) {
       out = ""
       i = 1
       while (i <= length(s)) {
         ch = substr(s, i, 1)
         if (ch == "\n" || ch == "\r") break
-        if (ch == "," || ch == ")") break
+        if (ch == "," || ch == ")" || ch == "(") break
         out = out ch
         if (ch == "." || ch == "?" || ch == "!") {
           nx = substr(s, i + 1, 1)
@@ -536,41 +546,39 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       }
       return collapse(out)
     }
-    # The first path-shaped token DECLARED under a deliverable label, and nothing after
-    # it. The span is bounded at the end of the first sentence of the label, so a
-    # following unlabeled input path ("...then read record/x.md") is out of reach, and
-    # only the FIRST path is taken so a run-on that names input files on the same line
-    # ("read A and do not touch B", Step-6 review C-2) never contracts the agent to
-    # them. A period inside a path (.bionic, .md) is never a sentence boundary because a
-    # terminator must be followed by whitespace or the end.
-    function first_path_in_span(h,   s, i, ch, nx, bounded, n, arr, k, t) {
-      s = spanof(h)
-      bounded = ""
-      i = 1
-      while (i <= length(s)) {
-        ch = substr(s, i, 1)
-        bounded = bounded ch
-        if (ch == "." || ch == "?" || ch == "!") {
-          nx = substr(s, i + 1, 1)
-          if (nx == "" || nx == " " || nx == "\t" || nx == "\r" || nx == "\n") break
-        }
-        i++
-      }
-      n = split(bounded, arr, /[ \t\r\n]+/)
-      for (k = 1; k <= n; k++) {
-        t = trimtok(arr[k])
-        if (ispath(t)) return t
-      }
-      return ""
-    }
+    # EVERY distinct path-shaped token DECLARED under a deliverable label, in position
+    # order, across the WHOLE span of the label — comma-joined, so one path is a bare
+    # value and two or more is the ambiguity the caller refuses on.
+    #
+    # WHY NOT THE FIRST ONE (Step-6 R6 critic R6-1, plan assumption 71). R1 read the
+    # FIRST SENTENCE of the label and took the FIRST path in it. That is still a guess,
+    # only with a smaller window: "Expected artifact: same shape as A, written to B"
+    # contracted A, and "read A first, then produce B" contracted A — the F-RD harm
+    # verbatim, now recorded source=declared, so the landing gate orders the agent to
+    # write A, which for that second brief means overwriting the report it was told to
+    # read.
+    # The extra paths in a deliverable sentence are usually INPUTS, so picking by position
+    # picks the wrong file more often than the right one. Assumption 48 says the wall
+    # never guesses: it declares or it refuses, and choosing among candidates is guessing.
+    # So the span must yield EXACTLY ONE path, and the caller refuses on zero or on many.
+    #
+    # AND WHY THE WHOLE SPAN. The first-sentence bound was the R1 containment for the
+    # trailing-input case; with ambiguity fatal it buys nothing and costs a false block —
+    # "Expected artifact: a written report. Put it at PATH when done." named a path under
+    # a canonical label and was refused for naming none (R6-4). The span is the one the
+    # label owns, bounded at the next label or a blank line as every other field is.
+    function span_paths(h) { return paths(spanof(h), DELIV_MAX) }
     # The declared deliverable: walk EVERY deliverable-kind label hit in position order
-    # and return the first that yields a concrete path. Iterating (rather than taking
+    # and return the paths of the first that yields any. Iterating (rather than taking
     # only firsthit) recovers a real labeled line that an earlier, pathless
     # deliverable-kind hit shadows — a brief quoting landing-verdict prose ("...per
-    # deliverable:") ahead of its real "Expected artifact:" line. The wall never guesses
-    # a deliverable from prose (epic-16 wave-02 R1, plan assumption 48); a template
-    # <slot> is not a concrete path (ispath rejects it), so a brief that declares only a
-    # slot yields nothing here and the absent-deliverable wall refuses it.
+    # deliverable:") ahead of its real "Expected artifact:" line. A hit that yields
+    # SEVERAL paths ends the walk rather than being skipped for a cleaner later one:
+    # ambiguity is a fact about the brief the author must resolve, not a hit to route
+    # around. The wall never guesses a deliverable from prose (epic-16 wave-02 R1, plan
+    # assumption 48); a template <slot> is not a concrete path (ispath rejects it), so a
+    # brief that declares only a slot yields nothing here and the absent-deliverable wall
+    # refuses it.
     function decl_deliverable(   j, best, t, visited) {
       for (;;) {
         best = 0
@@ -581,7 +589,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
         }
         if (best == 0) break
         visited[best] = 1
-        t = first_path_in_span(best)
+        t = span_paths(best)
         if (t != "") return t
       }
       return ""
@@ -602,15 +610,26 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
     }
     BEGIN {
       NL = 0
+      # How many candidate paths a deliverable span reports before it stops counting.
+      # One is the contract; anything above one is refused, and the number only has to
+      # be large enough for the refusal to show the author what it saw.
+      DELIV_MAX = 12
       # LONGEST FIRST — see the nesting note above. `-` marks a label that only
       # BOUNDS a span; it is a real brief field, just not one the roster lifts.
       #
       # `input` is a second non-lifting kind. Since inference was withdrawn (R1) it
-      # bounds spans exactly as `-` does — a path a brief tells the agent to read is
-      # never taken as the deliverable because NO prose path is ever taken; only a
-      # canonical label lifts one, and `read first` / `scope constraint` are not
-      # deliverable labels. The kind is kept distinct only to keep these two headings
-      # legible as inputs; nothing reads it any more.
+      # bounds spans exactly as `-` does — no prose path is ever lifted, and `read first`
+      # / `scope constraint` are not deliverable labels, so a path under one of them is
+      # out of every deliverable span and cannot become the contract. The kind is kept
+      # distinct only to keep these two headings legible as inputs; nothing reads it.
+      #
+      # THE STATEMENT THIS COMMENT USED TO MAKE — "a path a brief tells the agent to read
+      # is never taken as the deliverable" — was false while R1 shipped, and is now true
+      # for a different reason than it claimed (R6 critic R6-1). An input named INSIDE the
+      # deliverable label span is not out of reach of the extractor; what saves it is that
+      # a span holding two paths refuses the dispatch instead of picking one. The fix for
+      # such a brief is to move the reference out to its own line, which is what these
+      # input headings are for and what the ambiguity refusal tells the author to do.
       #
       # `deliverable-waiver` heads the table because it is the longest label AND
       # because it nests the shortest-but-one: a brief line reading
@@ -669,17 +688,28 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
           nh++; HLS[nh] = ls; HVS[nh] = vend; HK[nh] = LKIND[i]
         }
       }
-      # THE DELIVERABLE — declared only (epic-16 wave-02 R1, plan assumption 48). The
-      # wall never guesses a deliverable from prose. decl_deliverable() walks every
-      # deliverable-kind label hit and returns the first concrete path one of them
-      # yields; iterating (rather than stopping at firsthit) recovers a real labeled
-      # line an earlier pathless deliverable-kind hit shadows — the "...per
-      # deliverable:" live specimen. A brief that declares no concrete path prints
-      # nothing here, and the absent-deliverable wall below refuses it. There is no
-      # inference rung and no template fill: a guessed fact is a not-fact, and the whole
-      # point of the wall is that it holds only stated facts.
+      # THE DELIVERABLE — declared only, and EXACTLY ONE (epic-16 wave-02 R1 + R7, plan
+      # assumptions 48 and 71). The wall never guesses a deliverable: not from prose, and
+      # not from among the paths a declared label happens to contain. decl_deliverable()
+      # walks every deliverable-kind label hit and returns the paths of the first that
+      # yields any; iterating (rather than stopping at firsthit) recovers a real labeled
+      # line an earlier pathless deliverable-kind hit shadows — the "...per deliverable:"
+      # live specimen.
+      #
+      # TWO FIELDS OUT, NEVER BOTH. A single path is the contract and prints as
+      # `deliverable=`. Several is an ambiguity no reader downstream could detect once a
+      # winner was picked (the row would say `declared` either way), so it prints as
+      # `deliverable_ambiguous=` — a value nothing lifts onto a row, read by one wall
+      # below that refuses the dispatch and hands the author back every candidate. A brief
+      # that declares no concrete path prints neither, and the absent-deliverable wall
+      # refuses that instead. There is no inference rung and no template fill: a guessed
+      # fact is a not-fact, and the whole point of the wall is that it holds only stated
+      # facts.
       v = decl_deliverable()
-      if (v != "") print "deliverable=" v
+      if (v != "") {
+        if (index(v, ",") > 0) print "deliverable_ambiguous=" v
+        else                   print "deliverable=" v
+      }
       # Duration lifts a BOUNDED value, never a run-on span (Step-6 review C-1/F-3 +
       # A-2): the value ends at its first clause boundary. See bound_field().
       h = firsthit("duration");    if (h > 0) { v = bound_field(spanof(h));    if (v != "") print "duration=" v }
@@ -761,6 +791,9 @@ field_of() {  # <kind>
   printf '%s\n' "$LIFTED" | grep -m1 "^$1=" | cut -d= -f2-
 }
 C_DELIVERABLE=$(sanitize "$(field_of deliverable)" 300)
+# Never both: the extractor prints ONE of these two, so a non-empty list here means
+# `deliverable=` is empty and the ambiguity wall below owns the dispatch.
+C_DELIVERABLE_CANDIDATES=$(sanitize "$(field_of deliverable_ambiguous)" 900)
 C_DURATION=$(sanitize "$(field_of duration)" 80)
 C_PROGRESS=$(sanitize "$(field_of progress)" 300)
 C_CADENCE=$(sanitize "$(field_of cadence)" 80)
@@ -802,6 +835,50 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 [ -n "$C_DELIVERABLE" ] || add_absent deliverable
 [ -n "$C_DURATION" ]    || add_absent duration
 [ -n "$C_PROGRESS" ]    || add_absent progress
+
+# ======================================================= THE AMBIGUITY WALL
+# (Step-6 R6 critic R6-1; plan assumption 71, completing assumption 48.)
+#
+# A deliverable label whose span names more than one path has not declared a contract —
+# it has offered candidates. R1 resolved that by position (first path, first sentence),
+# which is the guess assumption 48 forbids wearing a declaration's clothes: the row said
+# `source=declared` whichever file the heuristic landed on, so no reader downstream could
+# tell a stated fact from a picked one, and the extra paths in a deliverable sentence are
+# usually the files the agent was told to READ. The landing check then stats a path the
+# agent never touched, the verdict comes back UNMET, and hooks/landing-gate.sh orders the
+# agent to write it — which for "read the auditor report first, then produce yours"
+# means overwriting the audit.
+#
+# So ambiguity is fatal at the one moment it is cheap to fix: dispatch, where the author
+# is still holding the brief. The refusal names every candidate rather than ranking them,
+# because ranking is the thing being withdrawn.
+#
+# IT SITS ABOVE THE CONTAINMENT WALL and is not conditioned on the waiver. Above,
+# because with several candidates there is no single path to resolve and contain. Not
+# waived, because the waiver excuses declaring nothing durable — a brief that names two
+# artifacts under a canonical label has declared something, unreadably, and only its
+# author knows which one is the contract.
+if [ -n "$C_DELIVERABLE_CANDIDATES" ]; then
+  echo "BLOCKED: this dispatch brief names more than one path under its deliverable label — a wave is active." >&2
+  echo "" >&2
+  echo "The label's span offers these candidates:" >&2
+  printf '%s\n' "$C_DELIVERABLE_CANDIDATES" | tr ',' '\n' | while IFS= read -r _cand; do
+    [ -n "$_cand" ] || continue
+    echo "    ${_cand}" >&2
+  done
+  echo "" >&2
+  echo "A deliverable is the ONE durable artifact this agent is contracted to produce, and" >&2
+  echo "the wall never picks among candidates — whichever it chose would be recorded as a" >&2
+  echo "declared fact, and the landing check would order this agent to write it." >&2
+  echo "" >&2
+  echo "Fix: name exactly one deliverable path in the label —" >&2
+  echo "    Expected artifact: .bionic/docs/record/my-slice-notes.md" >&2
+  echo "  References and inputs the agent should READ go outside the label's span: on their" >&2
+  echo "  own line, under Read first: or Scope constraint:, or after a blank line." >&2
+  echo "" >&2
+  echo "Then retry the dispatch." >&2
+  exit 2
+fi
 
 # ========================================================= THE CONTAINMENT WALL
 # (Step-6 review S-2.)
@@ -881,8 +958,16 @@ if [ -n "$C_DELIVERABLE" ]; then
       echo "The landing check stats — and, for a directory, walks — whatever this names," >&2
       echo "on every stop of the agent that owns it. It must be a path inside this repo." >&2
       echo "" >&2
+      # A CONCRETE NAME, never a <slot> (Step-6 R6 critic R6-2). This message hands the
+      # author a line to copy, and briefs in this repo quote wall text verbatim — so the
+      # example must be a brief that every wall here ACCEPTS. The slot form it used to
+      # recommend is refused by the sibling wall below (a template is not a path), and
+      # tests/cross-gate-agreement.test.sh §N.4 pins that refusal: this file was
+      # recommending, in one message, the exact string another of its messages rejects.
+      # hooks/dispatch-preflight.test.sh S18 drives each refusal's own Fix: line back
+      # through the gate so the two can never drift apart again.
       echo "Fix: name a repo-relative artifact path in the brief —" >&2
-      echo "    Expected artifact: .bionic/docs/record/<name>.md" >&2
+      echo "    Expected artifact: .bionic/docs/record/my-slice-notes.md" >&2
       echo "" >&2
       echo "Then retry the dispatch." >&2
       exit 2
