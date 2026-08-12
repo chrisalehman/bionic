@@ -136,10 +136,51 @@ resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default p
 # climb mirrors resolve_project_root's: walk up to the nearest existing
 # ancestor, physicalize that, re-attach the tail. Fail-open — an unresolvable
 # path is returned unchanged.
-physicalize() {  # $1=absolute path (need not exist) → ancestors resolved
-  local d rest p
-  d=$(dirname "$1")
-  rest=$(basename "$1")
+# FOLD `.` AND `..` LEXICALLY FIRST, before the filesystem is consulted at all — cs review
+# S-2, epic-16 w2 Step-6 remediation R4. The climb below resolves only the EXISTING ancestor
+# prefix, so a component that does not exist yet strands everything after it, `..` segments
+# included, as an unresolved literal: `<pinned>/.bionic/nonexistent/../../../other/.bionic/
+# docs/record/x.md` kept its climb un-folded, the pinned-root comparison found the harmless
+# `.bionic` at the front of that string, and the write landed OUTSIDE the repository. The
+# Write tool creates parent directories, so the non-existent segment was never an obstacle
+# to the write — only to the wall seeing where it was going.
+#
+# The loop is hooks/dispatch-preflight.sh resolve_in_repo()'s, which already folds this way
+# before comparing a deliverable path against the repo, and whose `set -f` guard is
+# load-bearing here too: a `*` inside a tool-supplied path is a character, never a glob.
+# Two walls in one wave had disagreed about how to resolve a path, and this is the weaker
+# one adopting the stronger one.
+#
+# A LEXICAL fold, deliberately, not realpath: `<symlink>/..` folds to the symlink's parent
+# rather than to its target's parent. Same reading resolve_in_repo takes, and for a wall
+# whose question is "which tree does this path NAME" it is the right one.
+fold_dots() {  # $1=path → `.` and `..` folded lexically, absolute
+  local p="$1" abs out part had_f
+  case "$p" in
+    /*) abs="$p" ;;
+    *)  abs="$(pwd)/$p" ;;
+  esac
+  case "$-" in *f*) had_f=1 ;; *) had_f=0 ;; esac
+  set -f
+  out=""
+  local IFS=/
+  for part in $abs; do
+    case "$part" in
+      ''|.) ;;
+      ..)   out="${out%/*}" ;;
+      *)    out="$out/$part" ;;
+    esac
+  done
+  unset IFS
+  [ "$had_f" -eq 1 ] || set +f
+  printf '%s\n' "${out:-/}"
+}
+
+physicalize() {  # $1=absolute path (need not exist) → folded, ancestors resolved
+  local d rest p folded
+  folded=$(fold_dots "$1")
+  d=$(dirname "$folded")
+  rest=$(basename "$folded")
   while [ ! -d "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
     rest="$(basename "$d")/$rest"
     d=$(dirname "$d")
@@ -147,7 +188,10 @@ physicalize() {  # $1=absolute path (need not exist) → ancestors resolved
   if p=$(cd "$d" 2>/dev/null && pwd -P); then
     printf '%s/%s\n' "${p%/}" "$rest"
   else
-    printf '%s\n' "$1"
+    # Fail-open on an unresolvable path, but never back to the UNFOLDED spelling: the fold
+    # is what the comparisons below are entitled to, and handing back the raw climb is the
+    # bypass this function just closed.
+    printf '%s\n' "$folded"
   fi
 }
 
@@ -237,6 +281,38 @@ esac
 # confusion.
 FILE_PATH_MATCH=$(physicalize "$FILE_PATH")
 DOCS_ROOT_MATCH=$(physicalize "$DOCS_ROOT")
+
+# ---------- R9/AC-13: pinned-root wall ----------
+# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+#
+# The `.bionic` tree is pinned to ONE physical location per project:
+# PROJECT_ROOT_FROM_PATH already resolves there via --git-common-dir,
+# unaffected by which worktree or subdirectory the write's own path happens
+# to sit under (AC-10). What that resolution does NOT already guarantee is
+# that the WRITE ITSELF lands there: the target path can carry its own
+# `.bionic` path segment that names a different tree entirely — a linked
+# worktree's phantom copy, or a stray `.bionic` created a level down inside a
+# subdirectory of the main repo — even though the computed root is correct.
+# PINNED_BIONIC is the one true tree; TARGET_BIONIC is whichever `.bionic`
+# segment (if any) the write's own path names. Scope: this project's single
+# pinned root (spec assumption 4) — a multi-project session is out of scope
+# by design, not by omission.
+#
+# THE DEEPEST `.bionic` SEGMENT IS THE TARGET, not the first one (`%` and not `%%` —
+# shortest suffix removed, so the prefix kept is the longest). cs review S-2, case C: a
+# path naming a second `.bionic` INSIDE the pinned tree —
+# `<pinned>/.bionic/tmp/scratch/.bionic/docs/record/x.md` — compared equal to the pinned
+# root under the first-match reading and passed. R4 rules that in scope: it is the same
+# phantom tree this wall already refuses one directory over (a stray `.bionic` a level
+# down inside `subdir/`), and the tree the write actually lands in is the deepest one its
+# own path names. The cost of the stricter reading is that a genuinely intended nested
+# `.bionic` is blocked with a message naming where to write instead.
+PINNED_BIONIC="$PROJECT_ROOT_FROM_PATH/.bionic"
+case "$FILE_PATH_MATCH" in
+  */.bionic/*) TARGET_BIONIC="${FILE_PATH_MATCH%/.bionic/*}/.bionic" ;;
+  */.bionic)   TARGET_BIONIC="$FILE_PATH_MATCH" ;;
+  *)           TARGET_BIONIC="" ;;
+esac
 
 IN_SCOPE=0
 case "$FILE_PATH_MATCH" in
@@ -333,6 +409,21 @@ if [ "$UNDER_DOCS_ROOT" -eq 0 ]; then
     echo "Docs root: $DOCS_ROOT" >&2
     echo "Fix: write it under $DOCS_ROOT/$MISPLACED_SUBDIR/ instead." >&2
     echo "     (the docs root is <project>/.bionic/docs by default; override with 'docs-root:' in $PROJECT_ROOT_FROM_PATH/.bionic/config.yaml)" >&2
+    exit 2
+  fi
+  # R9/AC-13: the frontmatter arm above only catches artifacts that
+  # self-declare canonical-sdlc frontmatter. An operational artifact (a
+  # record/ note, a progress file, anything without that frontmatter)
+  # written under a NON-pinned `.bionic` tree would otherwise fall straight
+  # through here unblocked — the exact gap this wall closes. A write whose
+  # own path carries no `.bionic` segment at all (an ordinary project file)
+  # is untouched: TARGET_BIONIC is empty and this arm is silent.
+  # [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+  if [ -n "$TARGET_BIONIC" ] && [ "$TARGET_BIONIC" != "$PINNED_BIONIC" ]; then
+    echo "BLOCKED: artifact write targets '$TARGET_BIONIC', not this project's pinned .bionic root." >&2
+    echo "Path: $FILE_PATH" >&2
+    echo "Pinned root: $PINNED_BIONIC" >&2
+    echo "Fix: write under $PINNED_BIONIC instead — the .bionic tree is pinned to the main repository root at Step 0 and is never re-derived from a worktree or subdirectory copy." >&2
     exit 2
   fi
   exit 0

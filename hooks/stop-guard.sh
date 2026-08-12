@@ -56,6 +56,12 @@ ROSTER_VERSION="v1"
 # — this gate only reads it, and a reader that also capped it would be a second
 # opinion about how much evidence a session may hold.
 OBSERVE_CMD="bash ~/.claude/hooks/stop-check.sh"
+ORDER_CMD="bash ~/.claude/hooks/stop-orders.sh order"
+# HOW LONG A HUMAN'S STOP ORDER IS CURRENT. Duplicated as a literal from its WRITER,
+# hooks/stop-orders.sh, and held to it by tests/cross-gate-agreement.test.sh §M, which
+# places an order either side of this boundary and asks this gate about it. See the
+# discharge block below for why an instruction gets a clock when evidence never does.
+ORDER_TTL_SECONDS=1800
 
 INPUT=$(cat)
 _jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
@@ -113,6 +119,7 @@ session_subagents_dir() {  # <transcript-path>
 record_field() {  # <record-line> <key>
   printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
 }
+
 record_version() { printf '%s' "$1" | cut -d'|' -f1; }
 
 state_paths() {  # <repo> -> echoes "<state-dir>|<state-file>"; nonzero if unsafe
@@ -225,7 +232,14 @@ deny() {  # <reason line>...
   echo "     (pass each contracted deliverable path as a further argument)" >&2
   echo "Then read what it prints, and stop again if the evidence supports it." >&2
   echo "One observation discharges exactly one stop (D-2), and it goes stale the" >&2
-  echo "moment the target writes again (D-1). Human-initiated stops bypass this gate." >&2
+  echo "moment the target writes again (D-1)." >&2
+  echo "" >&2
+  # THE OTHER TWO WAYS PAST THIS GATE, named at the refusal because a wall that only
+  # names its ceremony teaches the ceremony. A landed contract needs neither of them —
+  # this gate never asked in the first place.
+  echo "If a human ordered this stop, it executes — record the order and stop again:" >&2
+  echo "     ${ORDER_CMD} ${FIX_TARGET}" >&2
+  echo "A stop the human performs themselves does not reach this gate at all." >&2
   exit 2
 }
 
@@ -347,6 +361,41 @@ if [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
   ROSTER_ROW="${ROW_BY_ID:-$ROW_BY_NAME}"
 fi
 
+# HOW THE OPERATOR ADDRESSES THIS AGENT, in a form the platform's stop primitive accepts
+# (epic-16 wave-02 slice S3, from field data 2026-08-11). The launch response hands back
+# `name@session-xxxxxxxx` and that is what TaskStop takes for a teammate; the
+# TRANSCRIPT-form id this gate resolves to (`aname-<hex>`) is a THIRD namespace that
+# nothing bridges (capture probe §3-D/§5). So the refusal below used to name a way out the
+# operator could not type — it cost four calls and an ambiguity round to stop one finished,
+# verified, acked agent. The roster's recorded teammate address wins; the constructed form
+# is the fallback, built from the OWNING session because that is the session the address
+# names.
+ROSTER_TEAMMATE=$(record_field "$ROSTER_ROW" teammate_id)
+STOP_ADDRESS="$ROSTER_TEAMMATE"
+if [ -z "$STOP_ADDRESS" ]; then
+  STOP_ADDRESS="${AGENT_NAME:-$AGENT_ID}@session-$(printf '%s' "$OWNING_SID" | cut -c1-8)"
+fi
+
+# IS THE TYPED REFERENCE AN IDENTITY, or a name that happened to resolve? The distinction
+# is the whole of the AC-6 rule below, and until now only one spelling of an identity
+# existed here. `name@session-xxxxxxxx` is the other, and it is an identity by the same
+# argument the raw id is: it carries the launching session, so it cannot silently mean a
+# different agent that reused the name. It is accepted only when the session it names is
+# the one the target is actually filed under (or the one the roster recorded for it) — a
+# suffix naming any other session is a guess wearing an id's shape, and stays a name.
+typed_is_identity() {
+  [ "$RAW" = "$AGENT_ID" ] && return 0
+  case "$RAW" in *@*) : ;; *) return 1 ;; esac
+  [ -n "$ROSTER_TEAMMATE" ] && [ "$RAW" = "$ROSTER_TEAMMATE" ] && return 0
+  local base="${RAW%@*}" suffix="${RAW##*@}" want
+  [ "$base" = "$AGENT_ID" ] || { [ -n "$AGENT_NAME" ] && [ "$base" = "$AGENT_NAME" ]; } || return 1
+  case "$suffix" in session-*) : ;; *) return 1 ;; esac
+  want="${suffix#session-}"
+  [ -n "$want" ] || return 1
+  case "$OWNING_SID" in "$want"*) return 0 ;; esac
+  return 1
+}
+
 if [ "$OWNING_SID" != "$SID" ] && [ -z "$ROSTER_ID_MATCH" ]; then
   # FOREIGN or DEAD HISTORY, by the OWNING session's transcript — the same
   # existence check hooks/stop-check.sh, hooks/preflight-probe.sh and
@@ -361,7 +410,7 @@ if [ "$OWNING_SID" != "$SID" ] && [ -z "$ROSTER_ID_MATCH" ]; then
     CLASSIFICATION="DEAD HISTORY"
     WHOSE="that session's transcript is gone — this is history's agent, not yours"
   fi
-  if [ "${RAW%@*}" != "$AGENT_ID" ]; then
+  if ! typed_is_identity; then
     # The way out is the id, so the id is what the Fix line observes.
     FIX_TARGET="$AGENT_ID"
     deny "Target '${RAW}' was not launched by this session: ${CLASSIFICATION}." \
@@ -369,11 +418,131 @@ if [ "$OWNING_SID" != "$SID" ] && [ -z "$ROSTER_ID_MATCH" ]; then
          "${WHOSE}." \
          "A NAME is not an identity — it is reused across waves and written to disk by every" \
          "session that ever ran here, which is how a dead fleet came to answer to live names." \
-         "Address it by its FULL AGENT ID instead, which is unambiguous by construction:" \
+         "Address it by an IDENTITY instead. Either of these is unambiguous by construction," \
+         "and the first is the form the stop primitive takes for a teammate:" \
+         "    ${STOP_ADDRESS}" \
          "    ${AGENT_ID}" \
          "(A by-id stop still needs a fresh observation of its own.)"
   fi
 fi
+
+# ---------- epic-16 wave-02: FACTS DISCHARGE THE STOP (R2), ORDERS EXECUTE (R3) ----------
+#
+# The ceremony below was never the point. The point was that a stop not destroy work
+# nobody had looked at — and when the contract has LANDED, the artifact on disk answers
+# that better than any look can, because it cannot go stale and nobody has to remember to
+# take it. Wave-01 built the reader for exactly this question and gave it no authority:
+# `hooks/session-sweeper.sh verdict` is a stateless read of the disk, and this gate
+# CONSUMES it rather than forming a second opinion, the same way hooks/landing-gate.sh
+# does. A gate with its own copy of the predicate can disagree with the verb an
+# orchestrator reads by hand, and the two answers would be given to different people about
+# the same contract.
+#
+# WHAT DISCHARGES, and why each is a fact rather than a ritual:
+#   an ORDER    — a human asked for this stop. Not evidence, and not a claim the work
+#                 landed: an instruction, which this gate has no standing to argue with.
+#                 It reports what is being given up and gets out of the way.
+#   an ACK      — the orchestrator verified this agent's completion and made that durable.
+#                 It is the ONLY thing that can close a row which declared no
+#                 machine-visible artifact, which is the job it exists for. It arrives as
+#                 `acked=` on the verdict's own line (epic-16 wave-02 S9): this gate used to
+#                 open the sweeper's ledger through a private copy of a reader, one of three
+#                 such copies in the fleet, and the verb it was already running for `state=`
+#                 owns that file. One reader, one normalization of the name, one answer.
+#   MET/WAIVED  — the contract landed, or was explicitly waived at dispatch.
+#
+# WHAT DOES NOT: a MET over a row that DECLARED NOTHING. The verb calls such a row MET
+# correctly — it names nothing to hold the agent to — but that is an absence of a contract,
+# not a landing, and discharging on it would open the gate for every contract-less
+# dispatch on a fact nobody produced. AC-1 spells MET as "artifact delivered"; ack closes
+# the rest. Nothing else changes: a live agent with an unmet contract meets the same arc
+# it met before, which is what Sections 4–10 of the suite still pin.
+#
+# AND AN ACK FOR A NAME NO ROSTER ROW CARRIES no longer discharges anything here, which is
+# the one behaviour S9's promotion moved. The ack verb records such a name with a warning
+# and holds it "exempt the moment a row of that name appears" — the ack closes a ROW — and
+# with the answer riding a per-row verdict line there is no row for it to ride. This gate
+# was the only reader that had been closing on the bare name; the landing gate passes such a
+# stop for an unrelated reason and the stand-down never sees one, so this is the reading all
+# three now share. Pinned in the suite beside its paired positive.
+
+SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
+ORDERS_FILE="$STATE_DIR/stop-orders-${SID}.state"
+
+V_TAKEN=0; V_STATE=""; V_DETAIL=""; V_ACKED=""
+take_verdict() {
+  [ "$V_TAKEN" -eq 1 ] && return 0
+  V_TAKEN=1
+  [ -f "$SWEEPER" ] || return 0
+  [ -n "$AGENT_NAME" ] || return 0
+  # A NAME THAT CLEANS TO NOTHING WIDENS THE VERB, exactly as it does at the landing gate
+  # (Step-6 critic F-1): the verdict scopes on the sweeper's clean() of this value, and a
+  # name made only of the characters it folds scopes to the EMPTY predicate — one line per
+  # roster row, the first of which is some other agent's contract. Fold the same set and
+  # decline to ask rather than ask the wrong question.
+  case "$(printf '%s' "$AGENT_NAME" | tr -d '[:space:][:cntrl:]|')" in "") return 0 ;; esac
+  local out line
+  out=$( cd "$REPO" 2>/dev/null || exit 9
+         CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" verdict "$AGENT_NAME" 2>/dev/null )
+  line=$(printf '%s\n' "$out" | grep -F 'landing-verdict/v1|' | head -1)
+  [ -n "$line" ] || return 0
+  V_STATE=$(record_field "$line" state)
+  V_DETAIL=$(record_field "$line" detail)
+  V_ACKED=$(record_field "$line" acked)
+  return 0
+}
+
+# A HUMAN'S ORDER, and the one clock in this gate that belongs. D-1 refuses to put a window
+# on EVIDENCE, and that refusal stands: an observation is stale the moment its subject
+# writes, however recent, and good however old while the subject is dormant. An INSTRUCTION
+# is the other kind of thing — it is current when it is given and it stops being current,
+# and a standing order would open this gate for a name some later dispatch reuses. The
+# window is generous, the fail direction is the closed one (an expired order leaves the
+# ceremony exactly where it was), and the writer is hooks/stop-orders.sh.
+order_current() {
+  local f="$ORDERS_FILE" line t e now delta
+  [ -L "$f" ] && return 1
+  [ -f "$f" ] || return 1
+  now=$(date -u +%s)
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in "stop-order/v1|"*) : ;; *) continue ;; esac
+    t=$(record_field "$line" target)
+    [ -n "$t" ] || continue
+    # The order may name what the operator typed, the agent's name, or its id: all three
+    # are things a human says out loud, and an order that resolved to none of them would be
+    # a wall built out of spelling.
+    [ "$t" = "$RAW" ] || [ "$t" = "$AGENT_NAME" ] || [ "$t" = "$AGENT_ID" ] || continue
+    e=$(record_field "$line" epoch)
+    case "$e" in ''|*[!0-9]*) continue ;; esac
+    delta=$((now - e))
+    # A future-dated order is a skewed clock or a hand-edited file; a small tolerance
+    # absorbs the first and nothing here honours the second indefinitely.
+    [ "$delta" -le "$ORDER_TTL_SECONDS" ] && [ "$delta" -ge -60 ] && return 0
+  done < "$f"
+  return 1
+}
+
+if order_current; then
+  take_verdict
+  # ONE LINE, and it is information rather than a verdict on the operator. R3: a
+  # user-ordered stop executes at once; what an unmet contract earns is a sentence naming
+  # what is being given up, never a refusal.
+  if [ -z "$V_STATE" ]; then
+    echo "STOP ORDERED — executing. No contract row of this name is on the session roster." >&2
+  elif [ "$V_STATE" = "MET" ] || [ "$V_STATE" = "WAIVED" ]; then
+    echo "STOP ORDERED — executing. Its contract stands ${V_STATE}: nothing is given up." >&2
+  else
+    echo "STOP ORDERED — executing. Contract ${V_STATE}, giving up: ${V_DETAIL}" >&2
+  fi
+  exit 0
+fi
+
+take_verdict
+[ "$V_ACKED" = "yes" ] && exit 0
+case "$V_STATE" in
+  WAIVED) exit 0 ;;
+  MET)    [ -n "$(record_field "$ROSTER_ROW" deliverable)" ] && exit 0 ;;
+esac
 
 [ -f "$STATE_FILE" ] \
   || deny "No observation has been recorded in this repo at all."

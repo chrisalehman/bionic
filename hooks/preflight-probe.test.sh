@@ -21,7 +21,6 @@
 set -uo pipefail
 
 PROBE="$(cd "$(dirname "$0")" && pwd)/preflight-probe.sh"
-SWEEPER_SRC="$(cd "$(dirname "$0")" && pwd)/session-sweeper.sh"
 TMPROOT="$(mktemp -d)"
 OUT="$TMPROOT/stdout"; ERR="$TMPROOT/stderr"
 PASS=0; FAIL=0; TOTAL=0
@@ -665,69 +664,126 @@ expect_eq "mismatched pin does not mask a real blocking failure" "1" "$rc"
 expect_false "mismatched pin does not cause a spurious attestation on blocking failure" [ -e "$SBX/repo/$STATE_REL" ]
 
 # ============================================================
-section "S10 — sweeper arm line: print-only END-OF-RUN ACTION LINE (slice 4/3, AC-6)"
+section "S10 — the sweeper arm line is GONE (epic-16 w2 slice S1)"
 # ============================================================
 #
-# spec §Component boundaries: "hooks/preflight-probe.sh (modified): after the roster-coverage
-# context probe, prints the arm command as an action line. Print-only — the probe never spawns
-# the sweeper (a process it spawned would be untracked by the harness and its exit-wake lost,
-# design D2)." Ownership table: the arm command string's SSoT is session-sweeper.sh; this probe
-# only renders it, and the printed command must invoke the INSTALLED sibling — the hooks
-# directory is derived from THIS script's own location ($0), never hardcoded.
+# The probe used to close with a print-only ACTION LINE naming the command that armed this
+# session's watcher. The watcher is deleted — supervision reads facts off disk when a
+# decision needs them, so there is no process to point an operator at — and its absence is
+# pinned here, in the suite that used to pin its presence, because an action line telling an
+# operator to run a verb that no longer exists is worse than no line at all.
 
 SBX="$(mk_sandbox)"
 rc="$(run_probe "$SBX")"
-expect_eq "a clean run with the arm line still exits 0" "0" "$rc"
-ARMLINE="$(grep -m1 '^preflight: ARM: ' "$OUT" | sed 's/^preflight: ARM: //')"
-expect_true "the probe prints an ARM: action line on stdout" [ -n "$ARMLINE" ]
-expect_contains "the arm line invokes session-sweeper.sh's arm verb" "session-sweeper.sh arm" "$ARMLINE"
+expect_eq "a clean run without the arm line still exits 0" "0" "$rc"
+expect_eq "the probe prints no ARM: action line" "0" "$(grep -c '^preflight: ARM: ' "$OUT")"
+expect_nomatch "the probe never names the deleted arm verb" \
+  'session-sweeper\.sh arm' "$PROBE"
+expect_nomatch "…nor invites anyone to arm a sweeper" 'arm the session sweeper' "$PROBE"
 
-# static pin: the hooks directory in the printed line is DERIVED from the script's own
-# location (dirname "$0"), never a hardcoded ~/.claude path — this is what lets the same
-# line work whether the probe runs from a repo checkout or an installed copy.
-expect_true "the script derives its hooks dir from its own location, not a hardcoded path" \
-  grep -qE 'dirname "\$0"' "$PROBE"
-expect_nomatch "the arm line source does not hardcode ~/.claude/hooks" \
-  'ARM: bash ~/\.claude/hooks' "$PROBE"
-
-# the printed command actually names the SIBLING session-sweeper.sh sitting beside the probe
-# itself — proven by pointing at the sandbox's OWN copy of both scripts rather than trusting
-# string shape alone.
-SBX2="$(mk_sandbox)"
-mkdir -p "$SBX2/hooks-copy"
-cp "$PROBE" "$SBX2/hooks-copy/preflight-probe.sh"
-cp "$SWEEPER_SRC" "$SBX2/hooks-copy/session-sweeper.sh"
-chmod +x "$SBX2/hooks-copy/preflight-probe.sh" "$SBX2/hooks-copy/session-sweeper.sh"
-rc="$( ( cd "$SBX2/repo" && env -u ANTHROPIC_API_KEY \
-          HOME="$SBX2/home" CLAUDE_CONFIG_DIR="$SBX2/config" \
-          CLAUDE_CODE_SESSION_ID="$SESSION_A" \
-          bash "$SBX2/hooks-copy/preflight-probe.sh" ) >"$OUT" 2>"$ERR"; echo $? )"
-expect_eq "the copied-probe run still exits 0" "0" "$rc"
-ARMLINE2="$(grep -m1 '^preflight: ARM: ' "$OUT" | sed 's/^preflight: ARM: //')"
-expect_contains "the copy's arm line points at ITS OWN sibling copy" \
-  "$SBX2/hooks-copy/session-sweeper.sh" "$ARMLINE2"
-
-# the printed command is genuinely runnable: backgrounding it arms a real sweeper against
-# the sandbox repo, provable by the ledger it writes; retired immediately after. `exec`
-# matters — without it, the subshell's pid and the sweeper's own $$ (the pid the ledger
-# records) would differ, same reason session-sweeper.test.sh's sweep_bg uses it.
-( cd "$SBX2/repo" && exec env CLAUDE_CODE_SESSION_ID="$SESSION_A" $ARMLINE2 ) \
-  >"$TMPROOT/armrun.out" 2>&1 &
-ARMPID=$!
-BG_PIDS="$BG_PIDS $ARMPID"
-_i=0
-LEDGER="$SBX2/repo/.bionic/tmp/sweeper-${SESSION_A}.state"
-while [ ! -s "$LEDGER" ] && [ "$_i" -lt 50 ]; do sleep 0.1; _i=$((_i+1)); done
-expect_true "the printed ARM command, run for real, produces a sweeper ledger" [ -s "$LEDGER" ]
-expect_match "the ledger records a live arm event" '^sweeper-ledger/v1\|event=arm\|' "$LEDGER"
-( cd "$SBX2/repo" && env CLAUDE_CODE_SESSION_ID="$SESSION_A" \
-    bash "$SBX2/hooks-copy/session-sweeper.sh" retire ) >/dev/null 2>&1
-kill -9 "$ARMPID" 2>/dev/null
-
-# the probe never spawns the sweeper itself (D2): no process substring naming the sweeper
-# script appears as a background/exec invocation in the probe's own source.
+# The probe still never spawns the sweeper, which was true before the deletion and stays
+# true after it: nothing here backgrounds or execs the script under any verb.
 expect_nomatch "the probe source never execs or backgrounds session-sweeper.sh (D2)" \
   'session-sweeper\.sh[^"]*&|exec[^\n]*session-sweeper\.sh' "$PROBE"
+
+# ============================================================
+section "S11 — the project root is PINNED, never taken from the shell (epic-16 w2 S5, AC-4/R5)"
+# ============================================================
+#
+# THE FIELD CASE, from the Synthesis report §3: an attestation was taken, and then had to
+# be taken AGAIN, because the root it described came from wherever the shell happened to
+# be standing. `git rev-parse --show-toplevel` answers with the WORKTREE root, and the
+# dispatch wall reconstructs the attestation's filename from ITS root — so inside a
+# worktree the producer wrote into one `.bionic` and the consumer looked in another,
+# found nothing, and demanded the check be re-run on an environment that was already
+# proven. R9 names the invariant this violates: one address space, one writer per file.
+#
+# `resolve_project_root` (the byte-identical twin the write-gate hooks carry) maps a
+# worktree back onto the main repository through `--git-common-dir`, so both sides land
+# on the same tree.
+#
+# FIXTURE FIDELITY: a real `git worktree add`, never a mocked path — the mapping under
+# test is git's own answer about a tree, and a hand-built directory that merely looks
+# like a worktree would prove nothing about it.
+
+mk_committed_sandbox() {  # a sandbox whose repo has a commit, so worktrees can branch
+  local d; d="$(mk_sandbox)"
+  git -C "$d/repo" config user.email t@example.com
+  git -C "$d/repo" config user.name "T"
+  echo seed > "$d/repo/README.md"
+  git -C "$d/repo" add README.md >/dev/null 2>&1
+  git -C "$d/repo" commit -qm seed >/dev/null 2>&1
+  printf '%s' "$d"
+}
+
+run_probe_in() {  # <sandbox> <cwd> [KEY=VAL ...] -> echoes exit code
+  local sbx="$1" where="$2"; shift 2
+  ( cd "$where" && env -u ANTHROPIC_API_KEY \
+      HOME="$sbx/home" \
+      CLAUDE_CONFIG_DIR="$sbx/config" \
+      CLAUDE_CODE_SESSION_ID="$SESSION_A" \
+      "$@" bash "$PROBE" ) >"$OUT" 2>"$ERR"
+  echo $?
+}
+
+# ---- the paired positive: a SUBDIRECTORY already resolved correctly, and still does ----
+#
+# Without this, the worktree case below could pass on a probe that had simply stopped
+# resolving anything at all.
+SBX="$(mk_committed_sandbox)"
+mkdir -p "$SBX/repo/deep/nested/dir"
+rc="$(run_probe_in "$SBX" "$SBX/repo/deep/nested/dir")"
+expect_eq "from a subdirectory, the probe exits 0" "0" "$rc"
+expect_true "…and writes the attestation at the REPO root, not the subdirectory" \
+  [ -f "$SBX/repo/$STATE_REL" ]
+expect_false "…nothing was written under the subdirectory it was run from" \
+  [ -e "$SBX/repo/deep/nested/dir/.bionic" ]
+
+# ---- the field case: inside a real worktree, the root is the MAIN repository ----
+SBX="$(mk_committed_sandbox)"
+WT="$SBX/wt"
+git -C "$SBX/repo" worktree add -q -b probe-wt "$WT" >/dev/null 2>&1
+expect_true "fixture: a real git worktree exists" [ -e "$WT/.git" ]
+
+rc="$(run_probe_in "$SBX" "$WT")"
+expect_eq "run from inside a worktree, the probe exits 0" "0" "$rc"
+expect_true "…the attestation lands under the MAIN repository's .bionic" \
+  [ -f "$SBX/repo/$STATE_REL" ]
+expect_false "…and NOT under the worktree's own phantom .bionic (R9: one address space)" \
+  [ -e "$WT/.bionic" ]
+# The record's own `repo=` field is the half the dispatch wall never reads, which is
+# exactly why it has to be right here: nothing downstream would catch it being wrong.
+_att_repo="$(grep -m1 '^repo=' "$SBX/repo/$STATE_REL" | cut -d= -f2-)"
+expect_eq "…and the record NAMES the pinned root, not the worktree" \
+  "$(cd "$SBX/repo" && pwd -P)" "$(cd "$_att_repo" 2>/dev/null && pwd -P)"
+
+# ---- both at once: a subdirectory INSIDE a worktree, which is how the field case ran ----
+mkdir -p "$WT/deep/dir"
+rm -f "$SBX/repo/$STATE_REL"
+rc="$(run_probe_in "$SBX" "$WT/deep/dir")"
+expect_eq "from a subdirectory inside a worktree, the probe exits 0" "0" "$rc"
+expect_true "…and still lands on the pinned root" [ -f "$SBX/repo/$STATE_REL" ]
+expect_false "…with no .bionic left in the worktree subdirectory" [ -e "$WT/deep/dir/.bionic" ]
+
+# ---- paired negative: outside a git tree the fallback is unchanged ----
+#
+# `resolve_project_root` always answers, falling back to the working directory, and the
+# probe's own long-standing behavior there (attest against PWD) is deliberately kept —
+# this script is runnable outside a repo and refusing there would be a new failure mode.
+SBX="$(mk_committed_sandbox)"
+NOGIT="$SBX/notarepo"
+mkdir -p "$NOGIT"
+rc="$(run_probe_in "$SBX" "$NOGIT")"
+expect_eq "outside any git tree the probe still completes" "0" "$rc"
+expect_true "…attesting against the working directory, as it always has" \
+  [ -f "$NOGIT/$STATE_REL" ]
+
+# ---- the deletion stays deleted on this path too (S1 carry-check) ----
+#
+# The auto-probe path in the dispatch wall now REPRINTS this script's output verbatim
+# inside a refusal, so any advice left here reaches an operator through a second surface.
+expect_eq "the probe's print-only advice names no deleted machinery" "0" \
+  "$(grep -cE 'preflight: .*(arm|watcher|retire)' "$PROBE" | tr -d ' ')"
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'

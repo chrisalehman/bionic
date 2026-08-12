@@ -533,6 +533,67 @@ run_gate "$GATE" "$(payload "$R7E" "$SID" "   " false)"
 expect_status "7g: an all-whitespace agent_type (clean-empty) passes too" "0" "$RC"
 expect_absent "7g: …silently, naming no foreign contract" "LANDING CONTRACT" "$OUT_STDERR"
 
+# ================================================================= Section 8
+section "Section 8: an ACKED row is closed for every reader (epic-16 w2 S3, R2)"
+#
+# The orchestrator verifies every agent's completion, and `ack` is that verification made
+# durable so a row it closed stays closed across sessions. Blocking such an agent's stop
+# over artifacts a human has already accounted for is precisely the false alarm this wave
+# exists to end. The ack is invisible to `verdict` by design — a contract is met by
+# artifacts or it is not, which is what lets an ack over an UNMET row WARN instead of
+# quietly erasing the discrepancy — so the gate reads the ledger, and this suite makes the
+# REAL ack verb write the ledger it reads.
+
+SWEEPER_BIN="$(cd "$(dirname "$GATE")" && pwd)/session-sweeper.sh"
+ack_row() {  # <repo> <name>
+  ( cd "$1" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER_BIN" ack "$2" ) >/dev/null 2>&1
+  return 0
+}
+
+R8="$(make_wave_repo r8)"
+add_row "$R8" name=w2-s3 deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)"
+
+# The precondition, and the paired positive for everything below: unacked, this blocks.
+run_gate "$GATE" "$(payload "$R8" "$SID" w2-s3 false)"
+expect_status "8a: precondition — an unacked UNMET contract still blocks" "2" "$RC"
+
+ack_row "$R8" w2-s3
+run_gate "$GATE" "$(payload "$R8" "$SID" w2-s3 false)"
+expect_status "8b: once acked, the same stop passes" "0" "$RC"
+expect_empty "8c: …silently — the orchestrator already accounted for it" "$OUT_STDERR"
+
+# WHOLE-NAME MATCH, never a substring: an ack of a longer name must not close this row, or
+# one ack of `w4-s10` would quietly close `w4-s1` too.
+R8B="$(make_wave_repo r8b)"
+add_row "$R8B" name=w4-s1  deliverable=.bionic/docs/record/never.md  launched_at="$(iso_ago 600)"
+add_row "$R8B" name=w4-s10 deliverable=.bionic/docs/record/never2.md launched_at="$(iso_ago 600)"
+ack_row "$R8B" w4-s10
+run_gate "$GATE" "$(payload "$R8B" "$SID" w4-s1 false)"
+expect_status "8d: an ack of w4-s10 does not close w4-s1" "2" "$RC"
+run_gate "$GATE" "$(payload "$R8B" "$SID" w4-s10 false)"
+expect_status "8e: …and does close w4-s10" "0" "$RC"
+
+# A SYMLINKED LEDGER. Two guards fire, and the OUTER one decides: `session-sweeper.sh`
+# refuses outright when its own ledger path is a link (nothing was written through it, and
+# it will not answer over state it was redirected away from), so the verdict exits 2 and
+# this gate takes its documented fail-open — an answer it did not get is not one it may
+# refuse on. Since S9 the sweeper is the ONLY reader of that file, so there is no second
+# place a repo-controlled ledger could reach: no verdict line, no `acked=`, nothing to read.
+# The CLOSED half of this pair is at the stop gate, where the same fixture refuses the
+# stop (hooks/stop-guard.test.sh §11) — the two gates have opposite fail directions by
+# design and this is the fixture that shows it.
+R8C="$(make_wave_repo r8c)"
+add_row "$R8C" name=w2-s3 deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)"
+mkdir -p "$SANDBOX/elsewhere"
+( cd "$SANDBOX/elsewhere" && git init -q . 2>/dev/null )
+mkdir -p "$SANDBOX/elsewhere/.bionic/tmp"
+printf '# bionic sweeper ledger — schema sweeper-ledger/v1\nsweeper-ledger/v1|event=ack|at=2026-08-11T00:00:00Z|epoch=1|pid=1|session=%s|name=w2-s3\n' \
+  "$SID" > "$SANDBOX/elsewhere/ledger.state"
+ln -s "$SANDBOX/elsewhere/ledger.state" "$R8C/.bionic/tmp/sweeper-$SID.state"
+run_gate "$GATE" "$(payload "$R8C" "$SID" w2-s3 false)"
+expect_status "8f: a symlinked ledger: the verb refuses, this gate fail-opens" "0" "$RC"
+expect_empty "8g: …silently, claiming nothing about a contract it never read" "$OUT_STDERR"
+
 # ---------- summary ----------
 printf '\n---\n%d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
 [ "$FAIL" -eq 0 ]

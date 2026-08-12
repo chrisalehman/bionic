@@ -200,6 +200,19 @@ _field() {  # <key> — by key, never by position, as every reader of these line
 
 [ "$(_field state)" = "UNMET" ] || exit 0
 
+# AN ACKED ROW IS CLOSED FOR EVERY READER (epic-16 wave-02 slice S3, R2). The orchestrator
+# verified this agent's completion and made that durable; refusing its stop over artifacts
+# a human has already accounted for is the false alarm this wave exists to end.
+#
+# READ OFF THE VERDICT LINE, and this gate owns no more of it than it owns the state beside
+# it (S9). Until S9 the answer came from a `ledger_acked()` this file carried — one of three
+# byte-identical copies, each opening the sweeper's ledger and matching a name in it, which
+# is three readers of one file and three chances to disagree about it. The verb owns the
+# ledger; the verb was already being run for `state=`; the answer rides back on the same
+# line, keyed by the same cleaned name the verb prints. Asked LAST, after the state is known
+# to be UNMET, so the pass paths pay nothing for it.
+[ "$(_field acked)" = "yes" ] && exit 0
+
 # The refusal is the verb's own detail, unedited. It names every failing conjunct —
 # `missing=`, `empty=`, `stale=` with both stamps — because a stopping agent that is told
 # only "unmet" has nothing to act on, and the second stop passes whatever it does.
