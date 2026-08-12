@@ -982,6 +982,47 @@ expect_contains "C-2 regression: the contract still comes from the unconfirmed r
 
 # ============================================================
 echo ""
+echo "=== Section 11: one logical agent is not an ambiguity (epic-16 w2 S3, field 2026-08-11) ==="
+# ============================================================
+#
+# The scan walks every session directory of the project, and one agent's metadata can be
+# filed under more than one — the launching session's record and the agent's own runtime
+# session are two rows about the SAME agent. Refusing that as an ambiguity sent the
+# operator round a loop over a target that was never ambiguous. Two matches carrying one
+# agent id are one match; only distinct ids are candidates.
+
+IFS='|' read -r H11 R11 S11 <<< "$(make_world w11)"
+LAUNCHER11="aaaaaaaa-1111-1111-1111-111111111111"
+OWNRUN11="bbbbbbbb-2222-2222-2222-222222222222"
+make_agent "$H11" "$S11" "$LAUNCHER11" "atwinned-1111111111111111" "twinned" "older copy" >/dev/null
+make_agent "$H11" "$S11" "$OWNRUN11"  "atwinned-1111111111111111" "twinned" "the live copy" >/dev/null
+# The launch record is the older of the two — stamped so, because a fixture whose two
+# copies share a timestamp would leave "the freshest wins" untested while looking green.
+touch -t 202608010000 \
+  "$H11/.claude/projects/$S11/$LAUNCHER11/subagents/agent-atwinned-1111111111111111.jsonl"
+
+OUT11=$(run_check "$H11" "$R11" "twinned"); ST11=$?
+expect_status "one agent filed under two sessions RESOLVES, it does not refuse" 0 "$ST11"
+expect_absent "…and says nothing about ambiguity" "ambiguous" "$OUT11"
+expect_contains "…it is the same id either way" "atwinned-1111111111111111" "$OUT11"
+# The surviving copy is the freshest log — the stale copy is a record of the same agent,
+# and printing its evidence would be printing older facts about the very same target.
+expect_contains "…and the evidence printed is the LIVE copy's" "the live copy" "$OUT11"
+
+# THE PAIRED NEGATIVE: two DISTINCT ids under one name is a real ambiguity and still
+# refuses. Nothing here widens what resolves; it narrows what counts as two agents.
+make_agent "$H11" "$S11" "$LAUNCHER11" "areal-2222222222222222" "genuine" "one" >/dev/null
+make_agent "$H11" "$S11" "$OWNRUN11"  "areal-3333333333333333" "genuine" "two" >/dev/null
+OUT11B=$(run_check "$H11" "$R11" "genuine"); ST11B=$?
+expect_status "two DIFFERENT agents under one name still refuse" 1 "$ST11B"
+expect_contains "…as an ambiguity" "ambiguous" "$OUT11B"
+# And the candidate list now names an address the stopper can actually use.
+expect_contains "…listing an address the stop primitive accepts" \
+  "genuine@session-aaaaaaaa" "$OUT11B"
+expect_contains "…for every candidate" "genuine@session-bbbbbbbb" "$OUT11B"
+
+# ============================================================
+echo ""
 echo "──────────────────────────────────────────────"
 echo "stop-check.sh: ${PASS}/${TOTAL} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ]

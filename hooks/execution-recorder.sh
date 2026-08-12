@@ -252,6 +252,51 @@ ROSTER_FILE="$STATE_DIR/roster-${SID}.state"
 [ -L "$REPO/.bionic" ] && exit 0
 [ -L "$STATE_DIR" ] && exit 0
 
+# ONE LAUNCH REFERENCE PER AGENT ID, EVER (epic-16 wave-02 S6; AC-5; R6; spec
+# domain model "Roster row": `launched_at` is immutable across resume). A
+# resume carries the SAME transcript-form agent id an earlier row on this
+# roster already wrote down, but reaches this script beside a FRESH
+# `launched_at` — the field case shape is a new intended/confirmed cycle for
+# the same id, stamped at resume time. Left alone, that fresh stamp lands on
+# the row a later stop reads, and a deliverable authored BEFORE the resume —
+# by orchestrator takeover, the documented case — reads as authored before
+# nothing: its mtime predates a launch reference that moved out from under it
+# (record/w1-rc-verify-floor.md §Amendment-2).
+#
+# KEYED BY AGENT ID, NOT NAME. A name dispatched twice in one session is two
+# DIFFERENT agents — ARM 3's own join below exists for exactly that case, and
+# each dispatch is entitled to its own launch reference — so this must never
+# key on the field the join already uses. Only a repeat of the SAME agent id
+# is a resume. The scan returns the EARLIEST `launched_at` this session's
+# roster carries for that id: on a first sighting nothing matches yet (the
+# caller's own row is the first), so the caller's own value survives
+# untouched; on a resume it is the ORIGINAL dispatch's, however many fresher
+# rows now carry the same id.
+prior_launch_for_agent() {  # <agent-id> -> earliest launched_at for that id this session, or empty
+  local aid="$1" line found=""
+  [ -n "$aid" ] || return 0
+  [ -f "$ROSTER_FILE" ] || return 0
+  while IFS= read -r line; do
+    case "$line" in '#'*|'') continue ;; esac
+    case "$line" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
+    # Same prefilter discipline as ARM 2/ARM 3 below (Step-6 critic F-1): a
+    # cheap in-shell superset match before the exact `line_field` reads, so an
+    # unbounded roster does not pay four processes per row for a lookup that
+    # matches at most a handful of rows.
+    case "$line" in
+      *"|agent_id=$aid"|*"|agent_id=$aid|"*) : ;;
+      *) continue ;;
+    esac
+    [ "$(line_field "$line" agent_id)" = "$aid" ] || continue
+    [ "$(line_field "$line" session)" = "$SID" ] || continue
+    found=$(line_field "$line" launched_at)
+    [ -n "$found" ] || continue
+    printf '%s' "$found"
+    return 0
+  done < "$ROSTER_FILE"
+  return 0
+}
+
 # ============================================================
 # ARM 2 — the ROSTER (PostToolUse|Agent).
 # ============================================================
@@ -353,6 +398,15 @@ if [ "$TOOL_NAME" = "Agent" ]; then
     ROW_AGENT_ID=""
   fi
 
+  # S6 (AC-5, R6): a resume's fresh Agent-tool completion carries the SAME
+  # transcript-form id an earlier row on this session's roster already wrote
+  # down — see prior_launch_for_agent() above. Empty in the ordinary case (a
+  # first confirmation's own id has never appeared before), so this changes
+  # nothing there; teammate mode never reaches it, since ROW_AGENT_ID is empty
+  # until identification (ARM 3) supplies the transcript form.
+  PRIOR_LAUNCH=""
+  [ -n "$ROW_AGENT_ID" ] && PRIOR_LAUNCH=$(prior_launch_for_agent "$ROW_AGENT_ID")
+
   # Substitute the fields that execution confirms, leaving every other field
   # of the launched row — the contract state especially — where the brief put it,
   # so the completed row is self-sufficient for a consumer that reads only it.
@@ -362,13 +416,14 @@ if [ "$TOOL_NAME" = "Agent" ]; then
   # takes the FIRST match for a key. In async mode it is not written at all —
   # the field's presence is itself the statement of which namespace the row's id
   # is in, and an always-empty field would say that much less clearly.
-  COMPLETED=$(printf '%s' "$ROW" | awk -v id="$ROW_AGENT_ID" -v tid="$ROW_TEAMMATE_ID" '
+  COMPLETED=$(printf '%s' "$ROW" | awk -v id="$ROW_AGENT_ID" -v tid="$ROW_TEAMMATE_ID" -v pl="$PRIOR_LAUNCH" '
     BEGIN { RS = "|"; ORS = ""; seen = 0 }
     {
       f = $0
       if (f ~ /^status=/)   f = "status=confirmed"
       if (f ~ /^agent_id=/) f = "agent_id=" id
       if (tid != "" && f ~ /^teammate_id=/) { f = "teammate_id=" tid; seen = 1 }
+      if (pl != "" && f ~ /^launched_at=/) f = "launched_at=" pl
       printf "%s%s", (NR > 1 ? "|" : ""), f
     }
     END { if (tid != "" && !seen) printf "|teammate_id=%s", tid }')
@@ -472,17 +527,27 @@ if [ -n "$IS_START" ]; then
   done < "$ROSTER_FILE"
   [ -n "$ROW" ] || exit 0
 
+  # S6 (AC-5, R6): THE RESUME CASE. `agent_id` here is the transcript form, and
+  # a resume delivers this same event again for an id the roster already
+  # carries — see prior_launch_for_agent() above (defined beside ROSTER_FILE).
+  # On a first identification the id has never appeared before, so this is
+  # empty and changes nothing; on a resume it recovers the ORIGINAL dispatch's
+  # launch reference regardless of how many fresher rows now name the same id,
+  # including one this very join just picked up.
+  PRIOR_LAUNCH=$(prior_launch_for_agent "$START_ID")
+
   # `agent_id` is appended when the joined row has no such field and substituted
   # when it has one — ARM 2's rule for `teammate_id`, for ARM 2's reason: every
   # reader takes the FIRST match for a key, so a row carrying two of them would
   # answer with whichever the writer happened to put first. Today's writer always
   # emits the field, so the append branch is a belt against a writer that stops.
-  IDENTIFIED=$(printf '%s' "$ROW" | awk -v id="$START_ID" '
+  IDENTIFIED=$(printf '%s' "$ROW" | awk -v id="$START_ID" -v pl="$PRIOR_LAUNCH" '
     BEGIN { RS = "|"; ORS = ""; seen = 0 }
     {
       f = $0
       if (f ~ /^status=/)   f = "status=identified"
       if (f ~ /^agent_id=/) { f = "agent_id=" id; seen = 1 }
+      if (pl != "" && f ~ /^launched_at=/) f = "launched_at=" pl
       printf "%s%s", (NR > 1 ? "|" : ""), f
     }
     END { if (!seen) printf "|agent_id=%s", id }')
