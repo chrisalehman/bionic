@@ -48,6 +48,25 @@ expect_absent()   { if printf '%s' "$3" | grep -qF -- "$2"; then no "$1" "unexpe
 expect_file()     { if [ -f "$2" ]; then ok "$1"; else no "$1" "no such file: $2"; fi; }
 expect_no_file()  { if [ -f "$2" ]; then no "$1" "file exists but should not: $2"; else ok "$1"; fi; }
 
+# Portable clock helpers for Section 12 (S6): the delivered predicate the fix
+# protects compares a file's mtime against an ISO8601 `launched_at`, and both
+# directions of that conversion differ between BSD (macOS) and GNU date/touch.
+file_mtime_test() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+iso_to_epoch() {  # <ISO8601Z> -> epoch seconds, or empty
+  date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" '+%s' 2>/dev/null || date -u -d "$1" '+%s' 2>/dev/null
+}
+set_mtime_epoch() {  # <file> <epoch>
+  # `touch -t` interprets its timestamp argument in LOCAL time on both BSD and
+  # GNU touch, so the calendar string handed to it must be the LOCAL rendering
+  # of the epoch (no `-u`) — the earlier `-u` rendering fed a UTC calendar
+  # string through a local-time parser and silently offset every mtime by the
+  # host's UTC delta, large enough to flip the paired-negative's inequality.
+  local ts
+  ts=$(date -r "$2" '+%Y%m%d%H%M.%S' 2>/dev/null || date -d "@$2" '+%Y%m%d%H%M.%S' 2>/dev/null)
+  [ -n "$ts" ] && touch -t "$ts" "$1" 2>/dev/null
+  return 0
+}
+
 # ---------- fixtures ----------
 #
 # FIXTURE FIDELITY (declared per checklist §A / spec §Design).
@@ -1110,6 +1129,155 @@ expect_absent "…and writes no row to the roster that key reached outside .bion
   "status=identified" "$(cat "$I8_PLANTED")"
 expect_eq "…leaving the planted file exactly one row long" \
   "1" "$(grep -c '^roster-state/v1|' "$I8_PLANTED")"
+
+# ============================================================
+echo ""
+echo "=== Section 12: launch-reference immutability across resume (AC-5, R6, epic-16 w2 S6) ==="
+# ============================================================
+#
+# FIXTURE FIDELITY: this section replays the documented field sequence from
+# record/w1-rc-verify-floor.md §Amendment-2 verbatim in shape — dispatch,
+# a takeover authors the deliverable while the writer is presumed stalled, a
+# stand-down message resumes the SAME agent id, and the resumed row's launch
+# reference must still predate the takeover-authored artifact. Timestamps
+# below mirror that record's own clock (dispatched ~18:30Z, amendment written
+# ~18:45Z): T0 is the original dispatch, T_DELIVER is the takeover's write,
+# T_RESUME is the fresh stamp a resume's own intended/confirmed cycle carries.
+#
+# seed_roster_at parametrizes seed_roster_full's field set (source/waiver/
+# claims/cadence — the writer's CURRENT shape) by an explicit launched_at and
+# tool_use_id, so the two dispatch cycles in one roster (original + resume)
+# can carry different clocks under the same name and agent id.
+seed_roster_at() {  # <repo> <sid> <name> <tool_use_id> <launched_at> [status] [agent-id]
+  local repo="$1" sid="$2" name="$3" tuid="$4" lat="$5"
+  local status="${6:-intended}" aid="${7:-}"
+  local f="$repo/.bionic/tmp/roster-${sid}.state"
+  mkdir -p "$repo/.bionic/tmp"
+  [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
+  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=implementor|model=claude-sonnet-5|deliverable=.bionic/docs/record/w1-rc-verify.md|source=declared|duration=~25 minutes.|progress=.bionic/tmp/w1-rc.progress|claims=|cadence=~8m.|absent=|waiver=|tool_use_id=%s\n' \
+    "$status" "$sid" "$name" "$aid" "$lat" "$tuid" >> "$f"
+  return 0
+}
+
+RC_T0="2026-08-08T18:30:00Z"
+RC_T_DELIVER="2026-08-08T18:40:00Z"
+RC_T_RESUME="2026-08-08T19:00:00Z"
+RC_NAME="w1-rc-verify"
+RC_AID="aw1rcverify9c1c1c1c1c1c1c1"
+
+# ---------- the RED replay: launch → deliver → resume ----------
+IFS='|' read -r RC_REPO RC_TR RC_SUB RC_CFG <<< "$(make_world rcresume yes)"
+RC_ROSTER="$RC_REPO/.bionic/tmp/roster-${SID_A}.state"
+
+# 1. Launch — the original dispatch, at T0.
+seed_roster_at "$RC_REPO" "$SID_A" "$RC_NAME" "toolu_01RCORIG" "$RC_T0"
+run_rec "$(mk_agent_post "$SID_A" "$RC_TR" "$RC_REPO" "$RC_NAME" "$RC_AID" "toolu_01RCORIG")"
+run_rec "$(mk_subagent_start "$SID_A" "$RC_TR" "$RC_REPO" "$RC_NAME" "$RC_AID")"
+RC_FIRST_IDENT=$(grep 'status=identified' "$RC_ROSTER" 2>/dev/null | tail -1)
+expect_contains "the original dispatch identifies with its own launch clock" \
+  "launched_at=$RC_T0" "$RC_FIRST_IDENT"
+
+# 2. Deliver — a takeover authors the deliverable BEFORE the resume, exactly as
+# record/w1-rc-verify-floor.md §Amendment describes ("the results above are
+# now doubly confirmed" — written by the orchestrator, not the resumed agent).
+mkdir -p "$RC_REPO/.bionic/docs/record"
+printf 'takeover-authored report\n' > "$RC_REPO/.bionic/docs/record/w1-rc-verify.md"
+set_mtime_epoch "$RC_REPO/.bionic/docs/record/w1-rc-verify.md" "$(iso_to_epoch "$RC_T_DELIVER")"
+RC_DELIVER_MTIME=$(file_mtime_test "$RC_REPO/.bionic/docs/record/w1-rc-verify.md")
+
+# 3. Resume — the stand-down message wakes the SAME agent id; the field case
+# shows this reaching the roster as a fresh intended/confirmed cycle stamped
+# at resume time, then a fresh SubagentStart for that same id (the mechanism
+# named in the S6 brief: "SubagentStart firing again for an agent id the
+# roster already carries"). Nothing here is a new dispatch — same name, same
+# transcript-form agent id — which is exactly what distinguishes a resume from
+# the paired-negative case below.
+seed_roster_at "$RC_REPO" "$SID_A" "$RC_NAME" "toolu_01RCRESUME" "$RC_T_RESUME"
+run_rec "$(mk_agent_post "$SID_A" "$RC_TR" "$RC_REPO" "$RC_NAME" "$RC_AID" "toolu_01RCRESUME")"
+run_rec "$(mk_subagent_start "$SID_A" "$RC_TR" "$RC_REPO" "$RC_NAME" "$RC_AID")"
+
+RC_LAST_IDENT=$(grep 'status=identified' "$RC_ROSTER" 2>/dev/null | tail -1)
+RC_LAST_CONFIRMED=$(grep 'status=confirmed' "$RC_ROSTER" 2>/dev/null | tail -1)
+expect_contains "THE FIX: the resumed row still carries the ORIGINAL launch reference" \
+  "launched_at=$RC_T0" "$RC_LAST_IDENT"
+expect_absent "…never the resume's own fresh stamp" "launched_at=$RC_T_RESUME" "$RC_LAST_IDENT"
+expect_contains "…and the confirmed row underneath it is pinned the same way" \
+  "launched_at=$RC_T0" "$RC_LAST_CONFIRMED"
+expect_eq "…still keyed to the SAME transcript-form agent id" \
+  "1" "$(printf '%s' "$RC_LAST_IDENT" | grep -c "agent_id=$RC_AID")"
+expect_eq "…and the resume's own row is still an APPEND, not a rewrite" \
+  "2" "$(grep -c 'status=identified' "$RC_ROSTER" 2>/dev/null)"
+
+# The delivered predicate itself (mtime > launched_at), computed inline rather
+# than through hooks/session-sweeper.sh — that verb belongs to another file —
+# but this is the exact conjunct AC-5 asks the fix to preserve: an artifact
+# authored before the resume must still date after the reference the resumed
+# row now carries.
+RC_LAST_LAUNCHED=$(printf '%s' "$RC_LAST_IDENT" | tr '|' '\n' | grep '^launched_at=' | cut -d= -f2-)
+RC_LAUNCHED_EPOCH=$(iso_to_epoch "$RC_LAST_LAUNCHED")
+if [ -n "$RC_DELIVER_MTIME" ] && [ -n "$RC_LAUNCHED_EPOCH" ] && [ "$RC_DELIVER_MTIME" -gt "$RC_LAUNCHED_EPOCH" ]; then
+  ok "the delivered predicate holds: takeover-authored artifact postdates the resumed row's launch reference"
+else
+  no "the delivered predicate holds: takeover-authored artifact postdates the resumed row's launch reference" \
+     "artifact mtime=$RC_DELIVER_MTIME vs launched_at epoch=$RC_LAUNCHED_EPOCH (from '$RC_LAST_LAUNCHED')"
+fi
+
+# ---------- the paired negative: a genuinely NEW agent id is not sticky ----------
+#
+# Immutability is keyed by AGENT ID, never by name (S6 brief) — a name
+# dispatched under a DIFFERENT agent id is a different agent entirely (the
+# two-stage-identity class ARM 3's own "twice" fixture in Section 10 already
+# covers), and it must get its own fresh launch reference, not the first
+# agent's. An artifact that predates THIS launch must still read as
+# undelivered under it, however delivered it reads under the other agent's row.
+IFS='|' read -r RCN_REPO RCN_TR RCN_SUB RCN_CFG <<< "$(make_world rcresumeneg yes)"
+RCN_ROSTER="$RCN_REPO/.bionic/tmp/roster-${SID_A}.state"
+RCN_NAME="second-worker"
+RCN_AID="asecondworker9c1c1c1c1c1c1c"
+RCN_T_NEW="2026-08-08T20:00:00Z"
+
+# An artifact that already exists — old news to a BRAND NEW agent, since it
+# predates a launch reference that has nothing to do with it.
+mkdir -p "$RCN_REPO/.bionic/docs/record"
+printf 'unrelated pre-existing artifact\n' > "$RCN_REPO/.bionic/docs/record/w1-rc-verify.md"
+set_mtime_epoch "$RCN_REPO/.bionic/docs/record/w1-rc-verify.md" "$(iso_to_epoch "$RC_T_DELIVER")"
+RCN_ARTIFACT_MTIME=$(file_mtime_test "$RCN_REPO/.bionic/docs/record/w1-rc-verify.md")
+
+seed_roster_at "$RCN_REPO" "$SID_A" "$RCN_NAME" "toolu_01RCNEW" "$RCN_T_NEW"
+run_rec "$(mk_agent_post "$SID_A" "$RCN_TR" "$RCN_REPO" "$RCN_NAME" "$RCN_AID" "toolu_01RCNEW")"
+run_rec "$(mk_subagent_start "$SID_A" "$RCN_TR" "$RCN_REPO" "$RCN_NAME" "$RCN_AID")"
+
+RCN_IDENT=$(grep 'status=identified' "$RCN_ROSTER" 2>/dev/null | tail -1)
+expect_contains "a genuinely NEW agent id still gets its OWN fresh launch reference" \
+  "launched_at=$RCN_T_NEW" "$RCN_IDENT"
+expect_absent "…never another agent's launch reference (keyed by id, not name)" \
+  "launched_at=$RC_T0" "$RCN_IDENT"
+
+RCN_LAUNCHED=$(printf '%s' "$RCN_IDENT" | tr '|' '\n' | grep '^launched_at=' | cut -d= -f2-)
+RCN_LAUNCHED_EPOCH=$(iso_to_epoch "$RCN_LAUNCHED")
+if [ -n "$RCN_ARTIFACT_MTIME" ] && [ -n "$RCN_LAUNCHED_EPOCH" ] && [ "$RCN_ARTIFACT_MTIME" -lt "$RCN_LAUNCHED_EPOCH" ]; then
+  ok "the paired negative: a pre-existing artifact reads UNMET/stale under a brand new agent's launch reference"
+else
+  no "the paired negative: a pre-existing artifact reads UNMET/stale under a brand new agent's launch reference" \
+     "artifact mtime=$RCN_ARTIFACT_MTIME vs launched_at epoch=$RCN_LAUNCHED_EPOCH (from '$RCN_LAUNCHED')"
+fi
+
+# ---------- the confirmation-only half, isolated (ARM 2's own pin) ----------
+#
+# The fix lands in both arms (ARM 2's completion and ARM 3's identification):
+# this isolates ARM 2 alone, confirming a resume's fresh Agent-tool completion
+# is pinned even before any SubagentStart ever joins it.
+IFS='|' read -r RC2_REPO RC2_TR RC2_SUB RC2_CFG <<< "$(make_world rcresumearm2 yes)"
+RC2_ROSTER="$RC2_REPO/.bionic/tmp/roster-${SID_A}.state"
+seed_roster_at "$RC2_REPO" "$SID_A" "$RC_NAME" "toolu_01RC2ORIG" "$RC_T0"
+run_rec "$(mk_agent_post "$SID_A" "$RC2_TR" "$RC2_REPO" "$RC_NAME" "$RC_AID" "toolu_01RC2ORIG")"
+seed_roster_at "$RC2_REPO" "$SID_A" "$RC_NAME" "toolu_01RC2RESUME" "$RC_T_RESUME"
+run_rec "$(mk_agent_post "$SID_A" "$RC2_TR" "$RC2_REPO" "$RC_NAME" "$RC_AID" "toolu_01RC2RESUME")"
+RC2_LAST_CONFIRMED=$(grep 'status=confirmed' "$RC2_ROSTER" 2>/dev/null | tail -1)
+expect_contains "ARM 2 alone pins the resume's completion to the original launch reference" \
+  "launched_at=$RC_T0" "$RC2_LAST_CONFIRMED"
+expect_absent "…even though the resume's own intended row carried a fresh stamp" \
+  "launched_at=$RC_T_RESUME" "$RC2_LAST_CONFIRMED"
 
 # ============================================================
 echo ""
