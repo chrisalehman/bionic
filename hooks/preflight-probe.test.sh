@@ -687,6 +687,105 @@ expect_nomatch "the probe source never execs or backgrounds session-sweeper.sh (
   'session-sweeper\.sh[^"]*&|exec[^\n]*session-sweeper\.sh' "$PROBE"
 
 # ============================================================
+section "S11 — the project root is PINNED, never taken from the shell (epic-16 w2 S5, AC-4/R5)"
+# ============================================================
+#
+# THE FIELD CASE, from the Synthesis report §3: an attestation was taken, and then had to
+# be taken AGAIN, because the root it described came from wherever the shell happened to
+# be standing. `git rev-parse --show-toplevel` answers with the WORKTREE root, and the
+# dispatch wall reconstructs the attestation's filename from ITS root — so inside a
+# worktree the producer wrote into one `.bionic` and the consumer looked in another,
+# found nothing, and demanded the check be re-run on an environment that was already
+# proven. R9 names the invariant this violates: one address space, one writer per file.
+#
+# `resolve_project_root` (the byte-identical twin the write-gate hooks carry) maps a
+# worktree back onto the main repository through `--git-common-dir`, so both sides land
+# on the same tree.
+#
+# FIXTURE FIDELITY: a real `git worktree add`, never a mocked path — the mapping under
+# test is git's own answer about a tree, and a hand-built directory that merely looks
+# like a worktree would prove nothing about it.
+
+mk_committed_sandbox() {  # a sandbox whose repo has a commit, so worktrees can branch
+  local d; d="$(mk_sandbox)"
+  git -C "$d/repo" config user.email t@example.com
+  git -C "$d/repo" config user.name "T"
+  echo seed > "$d/repo/README.md"
+  git -C "$d/repo" add README.md >/dev/null 2>&1
+  git -C "$d/repo" commit -qm seed >/dev/null 2>&1
+  printf '%s' "$d"
+}
+
+run_probe_in() {  # <sandbox> <cwd> [KEY=VAL ...] -> echoes exit code
+  local sbx="$1" where="$2"; shift 2
+  ( cd "$where" && env -u ANTHROPIC_API_KEY \
+      HOME="$sbx/home" \
+      CLAUDE_CONFIG_DIR="$sbx/config" \
+      CLAUDE_CODE_SESSION_ID="$SESSION_A" \
+      "$@" bash "$PROBE" ) >"$OUT" 2>"$ERR"
+  echo $?
+}
+
+# ---- the paired positive: a SUBDIRECTORY already resolved correctly, and still does ----
+#
+# Without this, the worktree case below could pass on a probe that had simply stopped
+# resolving anything at all.
+SBX="$(mk_committed_sandbox)"
+mkdir -p "$SBX/repo/deep/nested/dir"
+rc="$(run_probe_in "$SBX" "$SBX/repo/deep/nested/dir")"
+expect_eq "from a subdirectory, the probe exits 0" "0" "$rc"
+expect_true "…and writes the attestation at the REPO root, not the subdirectory" \
+  [ -f "$SBX/repo/$STATE_REL" ]
+expect_false "…nothing was written under the subdirectory it was run from" \
+  [ -e "$SBX/repo/deep/nested/dir/.bionic" ]
+
+# ---- the field case: inside a real worktree, the root is the MAIN repository ----
+SBX="$(mk_committed_sandbox)"
+WT="$SBX/wt"
+git -C "$SBX/repo" worktree add -q -b probe-wt "$WT" >/dev/null 2>&1
+expect_true "fixture: a real git worktree exists" [ -e "$WT/.git" ]
+
+rc="$(run_probe_in "$SBX" "$WT")"
+expect_eq "run from inside a worktree, the probe exits 0" "0" "$rc"
+expect_true "…the attestation lands under the MAIN repository's .bionic" \
+  [ -f "$SBX/repo/$STATE_REL" ]
+expect_false "…and NOT under the worktree's own phantom .bionic (R9: one address space)" \
+  [ -e "$WT/.bionic" ]
+# The record's own `repo=` field is the half the dispatch wall never reads, which is
+# exactly why it has to be right here: nothing downstream would catch it being wrong.
+_att_repo="$(grep -m1 '^repo=' "$SBX/repo/$STATE_REL" | cut -d= -f2-)"
+expect_eq "…and the record NAMES the pinned root, not the worktree" \
+  "$(cd "$SBX/repo" && pwd -P)" "$(cd "$_att_repo" 2>/dev/null && pwd -P)"
+
+# ---- both at once: a subdirectory INSIDE a worktree, which is how the field case ran ----
+mkdir -p "$WT/deep/dir"
+rm -f "$SBX/repo/$STATE_REL"
+rc="$(run_probe_in "$SBX" "$WT/deep/dir")"
+expect_eq "from a subdirectory inside a worktree, the probe exits 0" "0" "$rc"
+expect_true "…and still lands on the pinned root" [ -f "$SBX/repo/$STATE_REL" ]
+expect_false "…with no .bionic left in the worktree subdirectory" [ -e "$WT/deep/dir/.bionic" ]
+
+# ---- paired negative: outside a git tree the fallback is unchanged ----
+#
+# `resolve_project_root` always answers, falling back to the working directory, and the
+# probe's own long-standing behavior there (attest against PWD) is deliberately kept —
+# this script is runnable outside a repo and refusing there would be a new failure mode.
+SBX="$(mk_committed_sandbox)"
+NOGIT="$SBX/notarepo"
+mkdir -p "$NOGIT"
+rc="$(run_probe_in "$SBX" "$NOGIT")"
+expect_eq "outside any git tree the probe still completes" "0" "$rc"
+expect_true "…attesting against the working directory, as it always has" \
+  [ -f "$NOGIT/$STATE_REL" ]
+
+# ---- the deletion stays deleted on this path too (S1 carry-check) ----
+#
+# The auto-probe path in the dispatch wall now REPRINTS this script's output verbatim
+# inside a refusal, so any advice left here reaches an operator through a second surface.
+expect_eq "the probe's print-only advice names no deleted machinery" "0" \
+  "$(grep -cE 'preflight: .*(arm|watcher|retire)' "$PROBE" | tr -d ' ')"
+
+# ============================================================
 printf '\n──────────────────────────────────────────────\n'
 printf 'preflight-probe.test.sh: %d passed, %d failed, %d total\n' "$PASS" "$FAIL" "$TOTAL"
 [ "$FAIL" -eq 0 ] || exit 1
