@@ -1131,15 +1131,48 @@ fi
 expect_eq "execution-recorder.sh is byte-identical after the instrumented copy ran" \
   "$ER_SUM_BEFORE" "$(shasum "$PARTY_ER")"
 
-# The two read-only components write nothing at all — the strongest form of
-# "no artefact holds the command text". Snapshot the whole sandbox around a run.
+# The components' repo footprint — the strongest form of "no artefact holds the
+# command text". Snapshot the whole sandbox around a run.
+#
+# RESCOPED at epic-16 wave-02, not relaxed. The start gate stopped being read-only
+# when R5 ("the environment probe auto-runs when needed") folded the attestation
+# into the combined preflight: with no attestation on disk the gate now runs
+# hooks/preflight-probe.sh inline, which creates its state directory and writes the
+# session-keyed attestation, and the gate then journals the accepted dispatch to the
+# session roster (wave-01 roster row, R8's "a refused dispatch leaves no row" read
+# in the positive direction). Those three paths are the whole ratified set.
+#
+# The direction the pin now runs: an EXACT delta, never a blanket exclusion of
+# .bionic/tmp. Three named paths may appear and a FOURTH entry of ANY kind — file
+# or directory, inside .bionic/tmp or anywhere else — still goes RED. The security
+# property this block exists for ("gates do not scribble in repos") therefore
+# survives at full strength for everything unsanctioned; what changed is that the
+# sanctioned set is enumerated instead of empty.
+#
+# The credential is PINNED rather than inherited. The probe's credential sources are
+# $ANTHROPIC_API_KEY first and the machine's LOGIN KEYCHAIN third, so an unpinned
+# drive lands on the refused path or the accepted one depending on whose machine
+# runs the suite — and only the accepted path writes any file at all. Pinning it
+# present is both hermetic and the stronger drive: it exercises the branch that
+# actually creates the artefacts this assertion is here to bound. The value is a
+# syntactic placeholder; the probe tests PRESENCE, never validity.
 QREPO=$(new_repo "quiet")
 write_plan "$QREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 before=$(find "$QREPO" | sort)
-mk_agent_payload "$SID_A" "$QREPO" | bash "$PARTY_DP" >/dev/null 2>&1
-expect_eq "the start gate creates no file anywhere in the repo" "$before" "$(find "$QREPO" | sort)"
+expected_after=$(printf '%s\n%s\n%s\n%s\n' "$before" \
+  "$QREPO/.bionic/tmp" \
+  "$QREPO/.bionic/tmp/preflight-$SID_A.state" \
+  "$QREPO/.bionic/tmp/roster-$SID_A.state" | sort)
+mk_agent_payload "$SID_A" "$QREPO" \
+  | env ANTHROPIC_API_KEY="pinned-placeholder-not-a-credential" bash "$PARTY_DP" >/dev/null 2>&1
+after_start=$(find "$QREPO" | sort)
+expect_eq "the start gate writes ONLY the attestation, the roster row and their state dir" \
+  "$expected_after" "$after_start"
+# The observation stays read-only ABSOLUTELY — zero footprint, no sanctioned set at
+# all. Compared against the POST-start listing rather than the pre-start one, so it
+# answers for its own writes instead of inheriting the start gate's.
 ( cd "$QREPO" && bash "$OBSERVE" nobody >/dev/null 2>&1 )
-expect_eq "the observation creates no file anywhere in the repo" "$before" "$(find "$QREPO" | sort)"
+expect_eq "the observation creates no file anywhere in the repo" "$after_start" "$(find "$QREPO" | sort)"
 
 # ============================================================
 echo ""
