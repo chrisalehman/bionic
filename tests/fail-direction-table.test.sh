@@ -34,7 +34,6 @@ STOP_GATE="${W1R_PARTY_SG:-$REPO_ROOT/hooks/stop-guard.sh}"
 OBSERVER="$REPO_ROOT/hooks/stop-check.sh"
 RECORDER="${W1R_PARTY_ER:-$REPO_ROOT/hooks/execution-recorder.sh}"
 PROBE="${W1R_PARTY_PROBE:-$REPO_ROOT/hooks/preflight-probe.sh}"
-SWEEPER="$REPO_ROOT/hooks/session-sweeper.sh"
 DESIGN="$REPO_ROOT/design/orchestrator-subagent-coordination.md"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/w1r-faildir.XXXXXX")" && pwd -P)"
@@ -42,6 +41,10 @@ BG_PIDS=""
 cleanup() {
   local p
   for p in $BG_PIDS; do kill -9 "$p" 2>/dev/null; done
+  # the probe-refuses fixture below leaves .bionic/tmp chmod 500 (unwritable) —
+  # restore write perms first or rm -rf cannot unlink inside it (same technique
+  # hooks/preflight-probe.test.sh's cleanup() uses for the same reason).
+  chmod -R u+rwX "$SANDBOX" 2>/dev/null
   rm -rf "$SANDBOX"
 }
 trap cleanup EXIT
@@ -56,6 +59,19 @@ mkdir -p "$CLAUDE_CONFIG_DIR" "$SANDBOX/plain" "$SANDBOX/stub" "$SANDBOX/nocred/
 # hooks/preflight-probe.test.sh uses.
 printf '#!/bin/bash\nexit 1\n' > "$SANDBOX/stub/security"
 chmod +x "$SANDBOX/stub/security"
+
+# R5 ("attestation never blocks") means every `drive start:*` call below may now
+# trigger the wall's auto-probe inline. That probe's credential check must
+# succeed DETERMINISTICALLY — not depend on this machine's real login keychain,
+# which is exactly the trap the `security` stub above exists to avoid for the
+# producer's own suite. The sandboxed-probe-environment technique
+# (hooks/preflight-probe.test.sh's mk_sandbox) is a credentials-file source: a
+# non-empty `.credentials.json` under the shared CLAUDE_CONFIG_DIR satisfies
+# credential source 2 before the probe ever reaches `security`, so every world
+# below auto-probes successfully unless a fixture deliberately breaks a
+# DIFFERENT blocking probe (start:probe-refuses breaks the state-dir probe, per
+# w2-s45-wallfacts.md §5 judgment call 9: never an absent credential).
+printf '{}' > "$CLAUDE_CONFIG_DIR/.credentials.json"
 
 PASS=0; FAIL=0; TOTAL=0
 ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
@@ -182,19 +198,26 @@ mkdir -p "$T_REPO/.bionic/tmp"
 printf '# attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\n' "$SID_A" \
   > "$T_REPO/.bionic/tmp/preflight-$SID_A.state"
 
+# WORLD ISOLATION (w2-s45-wallfacts.md §7 diagnosis): `make_world` gives this world its
+# OWN CLAUDE_CONFIG_DIR under $T_REPO/../cfg, but `drive()` runs the gate under the ONE
+# shared CLAUDE_CONFIG_DIR exported above — the config dir the auto-probe's D-5 pruning
+# actually reads. Under that shared dir session A has no transcript anywhere, so it reads
+# as dead: the FIRST auto-probe driven against this world (start|foreign-attestation,
+# session B, driven before start|attested below) prunes A's attestation as a dead
+# session's stale record, and start|attested then finds nothing and refuses. Planting A's
+# transcript under the SHARED config dir — not just the world's own — is what makes A
+# read as live wherever the gate actually looks; `session_transcript_exists()` in
+# hooks/preflight-probe.sh scans every project directory under CONFIG_DIR, not one keyed
+# to a specific repo, so this single file is sufficient regardless of slug.
+T_SLUG=$(printf '%s' "$T_REPO" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$CLAUDE_CONFIG_DIR/projects/$T_SLUG"
+printf '{}\n' > "$CLAUDE_CONFIG_DIR/projects/$T_SLUG/$SID_A.jsonl"
+
 # `start|attested` (below) is THE POSITIVE PAIR and its §7 direction is literal silence on
-# both streams — so THIS world needs a genuinely LIVE session sweeper armed, or slice 4/3's
-# unarmed nag (hooks/dispatch-preflight.sh) fires legitimately and breaks that claim. `exec`
-# matters: without it the ledger's own pid would name a throwaway subshell, not this
-# process, and the liveness check the nag performs would target the wrong pid.
-( cd "$T_REPO" && exec env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" arm --tick 300 ) \
-  >"$SANDBOX/attested-sweeper.out" 2>&1 &
-T_SWEEPER_PID=$!
-BG_PIDS="$BG_PIDS $T_SWEEPER_PID"
-_i=0
-while [ ! -s "$T_REPO/.bionic/tmp/sweeper-$SID_A.state" ] && [ "$_i" -lt 50 ]; do
-  sleep 0.1; _i=$((_i + 1))
-done
+# both streams. Until epic-16 wave-02 that claim needed a genuinely LIVE session sweeper
+# armed against this world, or the unarmed-sweeper nag fired legitimately and broke it. The
+# nag was deleted with the watcher, so silence is now the gate's own answer and this world
+# needs no live process standing behind it.
 
 # An observed active world — the stop gate's positive pair. The observation is
 # RECORDED BY THE REAL WRITER, never hand-written: the row must be discharged by
@@ -285,6 +308,18 @@ plant_agent "$L_SUB" "aworker-1111111111111111" "worker"
 mkdir -p "$L_REPO/.bionic/tmp"
 ln -s "$SANDBOX/elsewhere.state" "$L_REPO/.bionic/tmp/stop-check.state"
 
+# An unattested world whose STATE DIRECTORY is unwritable — the environment probe's
+# own state-dir blocking check genuinely fails (w2-s45-wallfacts.md §5 judgment call 9:
+# never an absent credential, since the third credential source is the machine login
+# keychain and no sandbox can take that away). This is the row that carries the
+# surviving REFUSE direction under R5: unlike start|unattested/foreign-attestation
+# above, the auto-probe here has a real, deterministic reason to refuse. Same
+# chmod-500 technique hooks/preflight-probe.test.sh uses for its own state-dir case.
+IFS='|' read -r U_REPO U_TR U_SUB <<< "$(make_world probeblocked yes)"
+plant_agent "$U_SUB" "aworker-1111111111111111" "worker"
+mkdir -p "$U_REPO/.bionic/tmp"
+chmod 500 "$U_REPO/.bionic/tmp"
+
 # ---------------------------------------------------------------- the driver
 
 DRV_ST=0; DRV_OUT=""; DRV_ERR=""
@@ -301,6 +336,7 @@ drive() {  # <condition>
     start:unattested)       p=$(payload Agent "$SID_A" "$A_TR" "$A_REPO" -) ;;
     start:foreign-attestation) p=$(payload Agent "$SID_B" "$T_TR" "$T_REPO" -) ;;
     start:attested)         p=$(payload Agent "$SID_A" "$T_TR" "$T_REPO" -) ;;
+    start:probe-refuses)    p=$(payload Agent "$SID_A" "$U_TR" "$U_REPO" -) ;;
     # --- stop gate ----------------------------------------------------------
     stop:irrelevant-tool)   p=$(payload Read "$SID_A" "$A_TR" "$A_REPO" -) ;;
     stop:empty-cwd)         p=$(payload TaskStop "$SID_A" "$A_TR" "" worker) ;;
@@ -337,7 +373,10 @@ drive() {  # <condition>
 # ============================================================
 # THE TABLE. One row per driven condition; the `direction` column is the §7 cell
 # it discharges. OPEN = exit 0; CLOSED = exit 2 (the code that blocks the tool
-# call). SILENT = nothing on either stream; LOUD = a refusal on stderr.
+# call). SILENT = nothing on either stream; LOUD = a refusal on stderr;
+# SILENT-WITH-ANNOUNCE = exit 0, stdout empty, but ONE operator-facing line on
+# stderr reporting that the wall took an action on the operator's behalf (R5:
+# the auto-probe ran and passed) — distinct from LOUD, which reports a refusal.
 # ============================================================
 TABLE='
 start|irrelevant-tool|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
@@ -346,9 +385,10 @@ start|non-git-cwd|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
 start|no-plan|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
 start|plan-names-no-step|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
 start|no-session-key|0|silent|Payload missing its session key — start: OPEN
-start|unattested|2|loud|Start gate — the decision it exists to make: REFUSE
-start|foreign-attestation|2|loud|Start gate — the decision it exists to make: REFUSE
+start|unattested|0|silent-with-announce|Start gate — R5 attestation never blocks: the wall auto-runs the probe, the probe succeeds, and the dispatch proceeds with one announce line
+start|foreign-attestation|0|silent-with-announce|Start gate — R5 attestation never blocks: a foreign-only attestation does not belong to this session, so the wall auto-probes exactly as unattested does and proceeds
 start|attested|0|silent|Start gate — the positive pair: pass in silence
+start|probe-refuses|2|loud|Start gate — the one surviving refusal under R5: the auto-probe itself genuinely fails (unwritable state dir), so the dispatch is REFUSED quoting the reason the probe gives
 stop|irrelevant-tool|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
 stop|empty-cwd|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
 stop|non-git-cwd|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
@@ -386,6 +426,13 @@ while IFS='|' read -r surface cond want_exit want_loud row; do
       ok "$surface/$cond is SILENT on both streams"
     else
       no "$surface/$cond is SILENT on both streams" "stdout='$DRV_OUT' stderr='$DRV_ERR'"
+    fi
+  elif [ "$want_loud" = "silent-with-announce" ]; then
+    if [ -z "$DRV_OUT" ] && [ -n "$DRV_ERR" ]; then
+      ok "$surface/$cond is SILENT-WITH-ANNOUNCE — stdout empty, one operator-facing line on stderr"
+    else
+      no "$surface/$cond is SILENT-WITH-ANNOUNCE — stdout empty, one operator-facing line on stderr" \
+         "stdout='$DRV_OUT' stderr='$DRV_ERR'"
     fi
   else
     if [ -n "$DRV_ERR" ]; then
@@ -427,7 +474,11 @@ expect_contains "the closed side names the missing key" "session key" "$S_STOP_E
 drive stop:no-observation
 expect_contains "every stop refusal names the observation command" \
   "~/.claude/hooks/stop-check.sh" "$DRV_ERR"
-drive start:unattested
+# R5: start:unattested no longer refuses (it auto-probes and passes silently-with-
+# announce, per the table above) — start:probe-refuses is now the row that carries
+# a genuine start-gate refusal, so it is what exercises this "every refusal names
+# the fix" claim.
+drive start:probe-refuses
 expect_contains "every start refusal names the environment check" \
   "~/.claude/hooks/preflight-probe.sh" "$DRV_ERR"
 

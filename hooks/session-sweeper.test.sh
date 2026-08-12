@@ -1,28 +1,37 @@
 #!/bin/bash
-# Tests for hooks/session-sweeper.sh — epic-15 wave-04's ONE session-level watcher.
+# Tests for hooks/session-sweeper.sh — the landing verdict and the ack that closes a row.
 #
-# Governing design: .bionic/docs/specs/epic-15-orchestrator-subagent-coordination/
-# wave-04-watchers.spec.md §Design (sweeper shape, interview-ratified 2026-08-06).
-# Serves AC-2 (predicates derived from roster row field presence) and AC-3 (arm/retire
-# ledger, retire-before-rearm refusal).
+# Governing design: .bionic/docs/specs/epic-16-landing-contract/
+# wave-02-fact-based-supervision.spec.md §Design (deletion inventory, interview-ratified
+# 2026-08-11), succeeding epic-15 wave-04's watcher spec. Serves AC-9 (the deleted
+# watch-half leaves nothing behind) and carries wave-01's verdict coverage forward intact.
+#
+# WHAT THIS SUITE NO LONGER DRIVES. Until epic-16 wave-02 the sweeper was also a resident
+# watcher — armed once per session, sleeping on a tick, reporting findings by exiting — and
+# most of this file drove that loop. The loop, the `arm`/`retire`/`status` verbs, the
+# findings file and the advisory satisfied-check are deleted, so their cases are gone with
+# them. Nothing here starts a background process any more; every case is one foreground
+# invocation that reads the disk and exits. The assertions those cases carried that were
+# about something OTHER than the loop were migrated rather than dropped: the prose
+# threshold parser is now driven through `verdict`'s STILL-LIVE path (Section 2), path
+# safety through the two surviving verbs (Section 3), and the ack exemption through the
+# ledger it writes (Section 4).
 #
 # Hermetic: every case runs inside a throwaway sandbox git repo. Nothing reads or writes
 # the real .bionic/tmp, the real roster, or a live wave. The only machine-global fact any
 # case consults is process liveness, and the process it consults is one this suite starts
 # and kills itself.
 #
-# CLOCK ACCELERATION (house rule): the tick is a parameter, so every loop case runs at
-# `--tick 1` and every threshold is seconds-to-minutes rather than the 120 s default.
-# Thresholds that would otherwise need real waiting are reached by BACKDATING — launch
-# time is a roster field and progress staleness is an mtime, so both are fixture data.
-# Nothing here sleeps for a declared cadence.
+# CLOCK DISCIPLINE (house rule): nothing here sleeps for a declared threshold. Launch times
+# are roster fields (`iso_ago`) and artifact ages are mtimes (`backdate`, which is
+# `touch -t`), so every threshold is fixture data.
 #
 # FIXTURE FIDELITY: roster rows are generated to the roster-state/v1 schema exactly as
-# written by hooks/dispatch-preflight.sh:490 (field set and order), shaped after the
-# confirmed-row fixture in hooks/stop-check.test.sh:588. This suite's subject is the
-# READER; hooks/dispatch-preflight.test.sh owns the writer. Rows are hand-built here for
-# the same reason that suite hand-builds them: the shapes under test (unparseable cadence,
-# a 45-minute-old launch) are not producible from a live dispatch inside a test.
+# written by hooks/dispatch-preflight.sh (field set and order), shaped after the
+# confirmed-row fixture in hooks/stop-check.test.sh. This suite's subject is the READER;
+# hooks/dispatch-preflight.test.sh owns the writer. Rows are hand-built here for the same
+# reason that suite hand-builds them: the shapes under test (an unparseable cadence, a
+# 45-minute-old launch) are not producible from a live dispatch inside a test.
 #
 # Usage: bash hooks/session-sweeper.test.sh
 
@@ -30,10 +39,8 @@ set -uo pipefail
 
 # Overridable so this suite can be driven against a MUTATED COPY of the sweeper without the
 # shipped file ever being modified — the same substitution
-# tests/cross-gate-agreement.test.sh offers for its four parties, and the only safe way to
-# take RED evidence for Section 7: an unguarded `retire` against a ledger carrying `pid=-1`
-# SIGTERMs every process the operator can signal, so the pre-guard proof is taken against a
-# copy whose `kill -TERM` is neutered:
+# tests/cross-gate-agreement.test.sh offers for its parties, and the way to take RED
+# evidence for any predicate case without editing what ships:
 #   W4_SWEEPER_UNDER_TEST=/tmp/mutant.sh bash hooks/session-sweeper.test.sh
 SWEEPER="${W4_SWEEPER_UNDER_TEST:-$(cd "$(dirname "$0")" && pwd)/session-sweeper.sh}"
 TMPROOT="$(mktemp -d)"
@@ -78,7 +85,7 @@ make_repo() {  # <label> -> repo path
 
 roster_of()   { printf '%s/.bionic/tmp/roster-%s.state'          "$1" "${2:-$SID}"; }
 ledger_of()   { printf '%s/.bionic/tmp/sweeper-%s.state'         "$1" "${2:-$SID}"; }
-findings_of() { printf '%s/.bionic/tmp/sweeper-%s-findings.log'  "$1" "${2:-$SID}"; }
+state_dir_of(){ printf '%s/.bionic/tmp'                          "$1"; }
 
 iso_ago() {  # <seconds ago> -> UTC ISO-8601, the launched_at shape
   date -u -v-"$1"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
@@ -139,11 +146,10 @@ add_row() {  # <repo> <key=value>...
 # code and the background pid in a subshell, where `wait` cannot reach the job and the
 # cleanup trap cannot kill it.
 
-# Every foreground case here is a fast path — a refusal, a usage error, `status`, or
-# `retire`. If one of them BLOCKS, the bug is that a verb entered the watch loop when it
-# should not have, and a suite that hangs on it would wedge `bash tests/run.sh` rather
-# than report the defect. So the runner is its own watchdog: RC=124 on a run that overruns
-# the bound, which fails whatever the case expected.
+# Every case here is a fast path: this script reads the disk and exits, and nothing it does
+# can legitimately block. If one of them BLOCKS, a suite that hangs on it would wedge
+# `bash tests/run.sh` rather than report the defect. So the runner is its own watchdog:
+# RC=124 on a run that overruns the bound, which fails whatever the case expected.
 SWEEP_BOUND=20
 sweep() {  # <repo> <args...> -> sets OUT, RC
   local repo="$1"; shift
@@ -185,742 +191,293 @@ sweep_streams() {  # <repo> <args...> -> sets OUT, ERR, RC
   OUT="$(cat "$TMPROOT/sweep.out")"; ERR="$(cat "$TMPROOT/sweep.err")"
 }
 
-# `exec` matters: without it the job is the subshell and the ledger's pid (the sweeper's
-# own $$) would name a different process, so every liveness assertion would test the
-# wrong pid.
-sweep_bg() {  # <repo> <outfile> <args...> -> sets BGPID
-  local repo="$1" out="$2"; shift 2
-  ( cd "$repo" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" "$@" >"$out" 2>&1 ) &
-  BGPID=$!
-  BG_PIDS="$BG_PIDS $BGPID"
-}
-
-wait_grep() {  # <pattern> <file> <timeout-seconds>
-  local i=0 lim=$(( $3 * 10 ))
-  while [ "$i" -lt "$lim" ]; do
-    [ -f "$2" ] && grep -qE "$1" "$2" 2>/dev/null && return 0
-    sleep 0.1; i=$((i+1))
-  done
-  return 1
-}
-
-wait_exit() {  # <pid> <timeout-seconds>
-  local i=0 lim=$(( $2 * 10 ))
-  while [ "$i" -lt "$lim" ]; do
-    kill -0 "$1" 2>/dev/null || return 0
-    sleep 0.1; i=$((i+1))
-  done
-  return 1
-}
-
-alive() { kill -0 "$1" 2>/dev/null; }
-
 # ============================================================
-section "Section 1: surface — verbs, refusals, the tick parameter"
+section "Section 1: surface — the two verbs, and the refusals"
 # ============================================================
 
 R1="$(make_repo s1)"; new_roster "$R1"
 
-OUT="$( cd "$R1" && CLAUDE_CODE_SESSION_ID="" bash "$SWEEPER" status 2>&1 )"; RC=$?
+OUT="$( cd "$R1" && CLAUDE_CODE_SESSION_ID="" bash "$SWEEPER" verdict 2>&1 )"; RC=$?
 expect_eq "no session key REFUSES with exit 3" "3" "$RC"
 expect_contains "no session key: the refusal says why" "session key" "$OUT"
 
 sweep "$R1"
 expect_eq "no verb is a usage error (exit 2)" "2" "$RC"
-expect_contains "usage names arm" "arm" "$OUT"
-expect_contains "usage names retire" "retire" "$OUT"
-expect_contains "usage names status" "status" "$OUT"
+expect_contains "usage names verdict" "verdict" "$OUT"
+expect_contains "usage names ack" "ack" "$OUT"
 
 sweep "$R1" sweep-everything
 expect_eq "an unknown verb is a usage error (exit 2)" "2" "$RC"
 
-sweep "$R1" arm --tick
-expect_eq "--tick with no value is refused" "2" "$RC"
-sweep "$R1" arm --tick soon
-expect_eq "--tick with a non-numeric value is refused" "2" "$RC"
-expect_contains "the non-numeric tick refusal names the flag" "--tick" "$OUT"
-sweep "$R1" arm --tick 0
-expect_eq "--tick 0 is refused" "2" "$RC"
-
-sweep "$R1" status
-expect_eq "status with nothing armed exits 1" "1" "$RC"
-expect_contains "status with nothing armed reports not-live" "live=no" "$OUT"
-
-# ============================================================
-section "Section 2: the ledger — arm fields, refusal, retire, re-arm (AC-3)"
-# ============================================================
-
-R2="$(make_repo s2)"; new_roster "$R2"
-L2="$(ledger_of "$R2")"
-sweep_bg "$R2" "$TMPROOT/s2.out" arm --tick 30; P2="$BGPID"
-expect_true "arm writes an arm entry to the ledger" wait_grep 'event=arm' "$L2" 10
-
-ARMLINE="$(grep 'event=arm' "$L2" 2>/dev/null | head -1)"
-expect_contains "the arm entry is a versioned pipe-delimited line" "sweeper-ledger/v1|" "$ARMLINE"
-expect_matches "the arm entry carries a UTC timestamp" 'at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' "$ARMLINE"
-expect_contains "the arm entry carries the arming pid" "pid=$P2" "$ARMLINE"
-expect_contains "the arm entry carries the effective tick" "tick=30" "$ARMLINE"
-expect_contains "the arm entry carries the session" "session=$SID" "$ARMLINE"
-expect_true "the ledger is at the path the design names" test -f "$R2/.bionic/tmp/sweeper-$SID.state"
-
-sweep "$R2" status
-expect_eq "status with a live arming exits 0" "0" "$RC"
-expect_contains "status reports live=yes" "live=yes" "$OUT"
-expect_contains "status names the live pid" "pid=$P2" "$OUT"
-expect_contains "status names the effective tick" "tick=30" "$OUT"
-
-sweep "$R2" arm --tick 5
-expect_eq "a second arm over a live arming is REFUSED (exit 1)" "1" "$RC"
-expect_contains "the refusal names the live arming's pid" "$P2" "$OUT"
-expect_matches "the refusal names when the live arming was armed" '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' "$OUT"
-expect_contains "the refusal says how to proceed" "retire" "$OUT"
-expect_eq "the refused arm wrote no second arm entry" "1" "$(grep -c 'event=arm' "$L2")"
-expect_true "the refused arm did not disturb the live one" alive "$P2"
-
-sweep "$R2" retire
-expect_eq "retire succeeds (exit 0)" "0" "$RC"
-expect_eq "retire closes the open entry" "1" "$(grep -c 'event=retire' "$L2")"
-expect_contains "the retire entry names the pid it closed" "pid=$P2" "$(grep 'event=retire' "$L2")"
-expect_true "the retired sweeper exits" wait_exit "$P2" 15
-
-sweep "$R2" status
-expect_eq "status after retire exits 1" "1" "$RC"
-expect_contains "status after retire reports not-live" "live=no" "$OUT"
-
-sweep_bg "$R2" "$TMPROOT/s2b.out" arm --tick 30; P2B="$BGPID"
-expect_true "re-arm after retire succeeds" wait_grep "pid=$P2B" "$L2" 10
-expect_eq "the ledger now holds two arm entries" "2" "$(grep -c 'event=arm' "$L2")"
-expect_eq "append-only: the first arm entry survives" "1" "$(grep -c "event=arm|.*|pid=$P2|" "$L2")"
-expect_eq "append-only: the retire entry survives" "1" "$(grep -c 'event=retire' "$L2")"
-sweep "$R2" retire; wait_exit "$P2B" 15
-
-# A prior arming whose pid is gone (killed, crashed, session ended) must not wedge the
-# session: it is a LIVE pid that refuses, not an open entry.
-R2C="$(make_repo s2c)"; new_roster "$R2C"
-L2C="$(ledger_of "$R2C")"
-{
-  printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n'
-  printf 'sweeper-ledger/v1|event=arm|at=2026-08-06T00:00:00Z|epoch=1780000000|pid=999999|tick=120|session=%s|rows=0|degraded=\n' "$SID"
-} > "$L2C"
-sweep_bg "$R2C" "$TMPROOT/s2c.out" arm --tick 30; P2C="$BGPID"
-expect_true "arm over a STALE open entry (dead pid) succeeds" wait_grep "pid=$P2C" "$L2C" 10
-sweep "$R2C" retire; wait_exit "$P2C" 15
-
-# The tick default is the sweeper's own (spec ownership table) and it is a FLAG, never
-# ambient: no environment variable moves it.
-R2D="$(make_repo s2d)"; new_roster "$R2D"
-L2D="$(ledger_of "$R2D")"
-( cd "$R2D" && exec env CLAUDE_CODE_SESSION_ID="$SID" SWEEPER_TICK=3 BIONIC_SWEEPER_TICK=3 \
-    bash "$SWEEPER" arm > "$TMPROOT/s2d.out" 2>&1 ) &
-P2D=$!; BG_PIDS="$BG_PIDS $P2D"
-expect_true "arm without --tick writes an arm entry" wait_grep 'event=arm' "$L2D" 10
-expect_contains "the default tick is 120 s" "tick=120" "$(grep 'event=arm' "$L2D" | head -1)"
-expect_absent "no environment variable overrides the tick" "tick=3" "$(grep 'event=arm' "$L2D" | head -1)"
-sweep "$R2D" retire; wait_exit "$P2D" 15
-
-# ============================================================
-section "Section 3: predicates by field presence — the three classes (AC-2)"
-# ============================================================
-
-# --- stale progress: progress + cadence, mtime older than the declared cadence ---
-R3="$(make_repo s3)"; new_roster "$R3"
-PROG3="$R3/w-progress.md"; echo "a line" > "$PROG3"; backdate "$PROG3" 600
-add_row "$R3" name=staler progress="$PROG3" cadence="every ~2 minutes" \
-        duration="4 hours" deliverable="$R3/never-written.md" launched_at="$(iso_ago 300)"
-sweep_bg "$R3" "$TMPROOT/s3.out" arm --tick 1; P3="$BGPID"
-expect_true "stale progress: the sweeper exits — the exit IS the delivery" wait_exit "$P3" 20
-wait "$P3" 2>/dev/null; RC3=$?
-expect_eq "stale progress: the delivering exit is 0" "0" "$RC3"
-F3="$(cat "$(findings_of "$R3")" 2>/dev/null)"
-expect_contains "stale progress: a finding line is mirrored to the findings file" "sweeper-finding/v1|" "$F3"
-expect_contains "stale progress: the finding names its class" "class=stale-progress" "$F3"
-expect_contains "stale progress: the finding names the row" "name=staler" "$F3"
-expect_contains "stale progress: the finding names the progress path" "$PROG3" "$F3"
-O3="$(cat "$TMPROOT/s3.out")"
-expect_contains "stale progress: the wake is printed on stdout too" "stale-progress" "$O3"
-LED3="$(cat "$(ledger_of "$R3")")"
-expect_contains "stale progress: the ledger records the delivering exit" "event=exit" "$LED3"
-expect_contains "stale progress: the exit entry names the reason" "reason=finding" "$LED3"
-# It reports state facts. It never judges, never prescribes, never stops anything.
-for word in "kill" "you should" "recommend" "hung" "is dead" "safe to stop"; do
-  expect_absent "stale progress: the finding does not judge (\"$word\")" "$word" "$F3$O3"
+# THE DELETED VERBS ARE GONE, not silently accepted. `arm`, `retire` and `status` were the
+# resident watcher's whole surface; a caller still spelling one of them gets the same
+# unknown-verb refusal as any other typo rather than a no-op that looks like it worked.
+for _dead in arm retire status; do
+  sweep "$R1" "$_dead"
+  expect_eq "the deleted verb \"$_dead\" is refused as unknown (exit 2)" "2" "$RC"
+  expect_contains "…and the usage names only the two surviving verbs" "verdict [<name>]" "$OUT"
 done
+sweep "$R1" arm --tick 1
+expect_eq "the deleted --tick flag has no verb left to take it (exit 2)" "2" "$RC"
 
-# --- fresh progress inside the declared cadence: silence holds ---
-R3B="$(make_repo s3b)"; new_roster "$R3B"
-PROG3B="$R3B/w-progress.md"; echo "just written" > "$PROG3B"
-add_row "$R3B" name=fresh progress="$PROG3B" cadence="every ~5 min" duration="4 hours"
-sweep_bg "$R3B" "$TMPROOT/s3b.out" arm --tick 1; P3B="$BGPID"
-sleep 3
-expect_true "fresh progress: the sweeper is still watching" alive "$P3B"
-expect_false "fresh progress: no findings were written" test -s "$(findings_of "$R3B")"
-sweep "$R3B" retire; wait_exit "$P3B" 15
-
-# --- dead claim: the claimed process is absent AND the deliverables are absent ---
-R3C="$(make_repo s3c)"; new_roster "$R3C"
-add_row "$R3C" name=claimer claims="bionic-no-such-process-marker-91731" \
-        deliverable="$R3C/absent-report.md" duration="4 hours"
-sweep_bg "$R3C" "$TMPROOT/s3c.out" arm --tick 1; P3C="$BGPID"
-expect_true "dead claim: the sweeper exits on the finding" wait_exit "$P3C" 20
-F3C="$(cat "$(findings_of "$R3C")" 2>/dev/null)"
-expect_contains "dead claim: the finding names its class" "class=dead-claim" "$F3C"
-expect_contains "dead claim: the finding names the row" "name=claimer" "$F3C"
-expect_contains "dead claim: the finding names the claimed pattern" "bionic-no-such-process-marker-91731" "$F3C"
-
-# --- a live claimed process quiets EVERY class for that row ---
-R3D="$(make_repo s3d)"; new_roster "$R3D"
-CLAIMSCRIPT="$TMPROOT/bionic-claim-marker-40217.sh"
-printf '#!/bin/bash\nsleep 60\n' > "$CLAIMSCRIPT"; chmod +x "$CLAIMSCRIPT"
-bash "$CLAIMSCRIPT" & CLAIMPID=$!; BG_PIDS="$BG_PIDS $CLAIMPID"
-PROG3D="$R3D/claimer-progress.md"; echo "old" > "$PROG3D"; backdate "$PROG3D" 900
-# Everything else about this row is broken — launched far past its duration, progress far
-# past its cadence, deliverable absent. The live claim is the only quieting fact.
-add_row "$R3D" name=busy claims="$CLAIMSCRIPT" progress="$PROG3D" cadence="10 seconds" \
-        duration="1 minute" deliverable="$R3D/absent.md" launched_at="$(iso_ago 3600)"
-sweep_bg "$R3D" "$TMPROOT/s3d.out" arm --tick 1; P3D="$BGPID"
-sleep 3
-expect_true "live claim: the sweeper is still watching" alive "$P3D"
-expect_false "live claim: no finding of any class was raised" test -s "$(findings_of "$R3D")"
-kill -9 "$CLAIMPID" 2>/dev/null; wait "$CLAIMPID" 2>/dev/null
-expect_true "live claim: once the claimed process is gone the row breaks" wait_exit "$P3D" 20
-expect_contains "live claim: the finding that follows is dead-claim" "class=dead-claim" \
-  "$(cat "$(findings_of "$R3D")" 2>/dev/null)"
-
-# --- overdue: a turns-shaped row (no progress, no claims) against its declared duration ---
-R3E="$(make_repo s3e)"; new_roster "$R3E"
-add_row "$R3E" name=slowpoke duration="20 minutes" launched_at="$(iso_ago 1500)" \
-        deliverable="$R3E/absent.md"
-sweep_bg "$R3E" "$TMPROOT/s3e.out" arm --tick 1; P3E="$BGPID"
-expect_true "overdue: the sweeper exits on the finding" wait_exit "$P3E" 20
-F3E="$(cat "$(findings_of "$R3E")" 2>/dev/null)"
-expect_contains "overdue: the finding names its class" "class=overdue" "$F3E"
-expect_contains "overdue: the finding names the row" "name=slowpoke" "$F3E"
-expect_contains "overdue: the finding names the declared duration" "20 minutes" "$F3E"
-
-# --- done-detection: every declared deliverable present ⇒ satisfied, never woken on ---
-R3F="$(make_repo s3f)"; new_roster "$R3F"
-echo "the report" > "$R3F/one.md"; echo "the appendix" > "$R3F/two.md"
-PROG3F="$R3F/done-progress.md"; echo "stale" > "$PROG3F"; backdate "$PROG3F" 900
-add_row "$R3F" name=finished deliverable="$R3F/one.md,$R3F/two.md" duration="1 minute" \
-        progress="$PROG3F" cadence="10 seconds" claims="bionic-no-such-process-marker-91731" \
-        launched_at="$(iso_ago 3600)"
-sweep_bg "$R3F" "$TMPROOT/s3f.out" arm --tick 1; P3F="$BGPID"
-sleep 3
-expect_true "satisfied: a row with all deliverables present is never woken on" alive "$P3F"
-expect_false "satisfied: no findings were written" test -s "$(findings_of "$R3F")"
-sweep "$R3F" retire; wait_exit "$P3F" 15
-
-# --- a PARTIAL deliverable set is not done ---
-R3G="$(make_repo s3g)"; new_roster "$R3G"
-echo "only the first" > "$R3G/one.md"
-add_row "$R3G" name=halfway deliverable="$R3G/one.md,$R3G/two.md" duration="1 minute" \
-        launched_at="$(iso_ago 600)"
-sweep_bg "$R3G" "$TMPROOT/s3g.out" arm --tick 1; P3G="$BGPID"
-expect_true "partial deliverables: the row is NOT satisfied and still breaks" wait_exit "$P3G" 20
-expect_contains "partial deliverables: the finding is overdue" "class=overdue" \
-  "$(cat "$(findings_of "$R3G")" 2>/dev/null)"
-
-# --- an empty deliverable file is not a delivered deliverable ---
-R3H="$(make_repo s3h)"; new_roster "$R3H"
-: > "$R3H/empty.md"
-add_row "$R3H" name=emptyhanded deliverable="$R3H/empty.md" duration="1 minute" \
-        launched_at="$(iso_ago 600)"
-sweep_bg "$R3H" "$TMPROOT/s3h.out" arm --tick 1; P3H="$BGPID"
-expect_true "an empty deliverable file does not satisfy a row" wait_exit "$P3H" 20
-expect_contains "the empty-deliverable row is reported overdue" "class=overdue" \
-  "$(cat "$(findings_of "$R3H")" 2>/dev/null)"
-
-# --- a DIRECTORY deliverable is judged by what is in it, exactly as hooks/stop-check.sh
-# judges one (6-axis D-2). `[ -s <dir> ]` is TRUE for an empty directory on both BSD and
-# GNU, so the naive substance test marked a row SATISFIED — permanently exempt from
-# watching — on a directory nobody had written anything into. The two implementations of
-# "is this deliverable delivered?" are bound on shared fixtures in
-# tests/cross-gate-agreement.test.sh §I; these two cases hold the sweeper's own half.
-R3I="$(make_repo s3i)"; new_roster "$R3I"
-mkdir -p "$R3I/empty-dir"
-add_row "$R3I" name=emptydir deliverable="$R3I/empty-dir" duration="1 minute" \
-        launched_at="$(iso_ago 600)"
-sweep_bg "$R3I" "$TMPROOT/s3i.out" arm --tick 1; P3I="$BGPID"
-expect_true "an EMPTY directory does not satisfy a row" wait_exit "$P3I" 20
-expect_contains "the empty-directory row is reported overdue" "class=overdue" \
-  "$(cat "$(findings_of "$R3I")" 2>/dev/null)"
-
-R3J="$(make_repo s3j)"; new_roster "$R3J"
-mkdir -p "$R3J/full-dir"; echo "the report" > "$R3J/full-dir/one.md"
-add_row "$R3J" name=fulldir deliverable="$R3J/full-dir" duration="1 minute" \
-        launched_at="$(iso_ago 600)"
-sweep_bg "$R3J" "$TMPROOT/s3j.out" arm --tick 1; P3J="$BGPID"
-sleep 3
-expect_true "a directory holding at least one file DOES satisfy a row" alive "$P3J"
-expect_false "the satisfied directory row wrote no findings" test -s "$(findings_of "$R3J")"
-sweep "$R3J" retire; wait_exit "$P3J" 15
-
-# --- a RELATIVE deliverable path is the REPO's, not the arming shell's cwd. Deliberate,
-# logged divergence from hooks/stop-check.sh (which resolves the paths TYPED at it against
-# the operator's own cwd): this process is armed once from whatever directory the harness
-# happened to be in and then outlives it, so a cwd-relative reading would make a roster
-# row mean different things on two arms of the same file.
-#
-# Both cases arm from a SUBDIRECTORY of the repo, which is what separates the two
-# readings: the roster and the ledger are repo-derived either way, so only the
-# deliverable's resolution can differ.
-R3K="$(make_repo s3k)"; new_roster "$R3K"
-mkdir -p "$R3K/sub"
-echo "the report" > "$R3K/rel-deliverable.md"
-add_row "$R3K" name=relative deliverable="rel-deliverable.md" duration="1 minute" \
-        launched_at="$(iso_ago 600)"
-( cd "$R3K/sub" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" arm --tick 1 \
-    >"$TMPROOT/s3k.out" 2>&1 ) &
-P3K=$!; BG_PIDS="$BG_PIDS $P3K"
-sleep 3
-expect_true "a relative deliverable IS resolved against the repo root" alive "$P3K"
-sweep "$R3K" retire; wait_exit "$P3K" 15
-
-R3K2="$(make_repo s3k2)"; new_roster "$R3K2"
-mkdir -p "$R3K2/sub"
-echo "the report" > "$R3K2/sub/rel-deliverable.md"
-add_row "$R3K2" name=relative-cwd deliverable="rel-deliverable.md" duration="1 minute" \
-        launched_at="$(iso_ago 600)"
-( cd "$R3K2/sub" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" arm --tick 1 \
-    >"$TMPROOT/s3k2.out" 2>&1 ) &
-P3K2=$!; BG_PIDS="$BG_PIDS $P3K2"
-expect_true "…and NOT against the arming shell's cwd" wait_exit "$P3K2" 20
-expect_contains "the cwd-relative row is reported overdue" "class=overdue" \
-  "$(cat "$(findings_of "$R3K2")" 2>/dev/null)"
+# The source-level half of this claim — that no deleted symbol survives anywhere in the
+# repo — is AC-9's grep inventory and deliberately NOT restated here: a list of the dead
+# names inside a test file is itself a reference the inventory would then have to explain
+# away. Behavior is what this suite owns; the inventory owns the corpus.
 
 # ============================================================
-section "Section 4: the prose-lifted threshold parser"
+section "Section 2: the prose-lifted threshold parser (migrated from the deleted loop)"
 # ============================================================
 #
-# Cadence and duration arrive as prose the dispatch gate lifted out of a brief. The parser
-# is deterministic: units it knows, a range read at its generous end, and no guess for
-# anything else. Rows are batched into one quiet run and one firing run so the whole table
-# costs two ticks rather than a dozen.
-
-R4="$(make_repo s4)"; new_roster "$R4"
-add_row "$R4" name=q-minutes  duration="20 minutes"      launched_at="$(iso_ago 60)"   deliverable="$R4/x.md"
-add_row "$R4" name=q-tilde    duration="~10 minutes"     launched_at="$(iso_ago 60)"   deliverable="$R4/x.md"
-add_row "$R4" name=q-hour     duration="1 hour"          launched_at="$(iso_ago 600)"  deliverable="$R4/x.md"
-add_row "$R4" name=q-seconds  duration="90 seconds"      launched_at="$(iso_ago 30)"   deliverable="$R4/x.md"
-add_row "$R4" name=q-range    duration="30–40 minutes"   launched_at="$(iso_ago 2100)" deliverable="$R4/x.md"
-add_row "$R4" name=q-short    duration="2m"              launched_at="$(iso_ago 60)"   deliverable="$R4/x.md"
-# An unparseable duration on a turns-shaped row: nothing to compare against, so no finding
-# is manufactured from it.
-add_row "$R4" name=q-unparse  duration="when it is done" launched_at="$(iso_ago 9000)" deliverable="$R4/x.md"
-# A row declaring no threshold at all is unwatchable, not overdue.
-add_row "$R4" name=q-bare     launched_at="$(iso_ago 9000)"
-# A row belonging to another session is not this sweeper's to watch.
-add_row "$R4" name=q-foreign  session="$SID_FOREIGN" duration="1 minute" launched_at="$(iso_ago 9000)"
-# Lines the reader must skip rather than choke on.
-printf 'roster-state/v9|status=confirmed|name=q-future|duration=1 minute|launched_at=%s\n' "$(iso_ago 9000)" >> "$(roster_of "$R4")"
-printf 'not a roster row at all\n' >> "$(roster_of "$R4")"
-sweep_bg "$R4" "$TMPROOT/s4.out" arm --tick 1; P4="$BGPID"
-sleep 3
-expect_true "parser: every in-bounds / unparseable / foreign row stays quiet" alive "$P4"
-expect_false "parser: nothing was written for the quiet table" test -s "$(findings_of "$R4")"
-L4="$(cat "$(ledger_of "$R4")" 2>/dev/null)"
-expect_contains "an unparseable DURATION is named as a degradation at arm time" "q-unparse" "$L4"
-expect_contains "a row declaring no threshold at all is named as a degradation" "q-bare" "$L4"
-sweep "$R4" retire; wait_exit "$P4" 15
-
-R4B="$(make_repo s4b)"; new_roster "$R4B"
-add_row "$R4B" name=f-minutes duration="20 minutes"    launched_at="$(iso_ago 1300)" deliverable="$R4B/x.md"
-add_row "$R4B" name=f-tilde   duration="~10 minutes"   launched_at="$(iso_ago 700)"  deliverable="$R4B/x.md"
-add_row "$R4B" name=f-hour    duration="1 hour"        launched_at="$(iso_ago 3700)" deliverable="$R4B/x.md"
-add_row "$R4B" name=f-seconds duration="90 seconds"    launched_at="$(iso_ago 200)"  deliverable="$R4B/x.md"
-add_row "$R4B" name=f-range   duration="30–40 minutes" launched_at="$(iso_ago 2700)" deliverable="$R4B/x.md"
-add_row "$R4B" name=f-short   duration="2m"            launched_at="$(iso_ago 200)"  deliverable="$R4B/x.md"
-sweep_bg "$R4B" "$TMPROOT/s4b.out" arm --tick 1; P4B="$BGPID"
-expect_true "parser: the out-of-bounds table wakes the orchestrator" wait_exit "$P4B" 20
-F4B="$(cat "$(findings_of "$R4B")" 2>/dev/null)"
-for n in f-minutes f-tilde f-hour f-seconds f-range f-short; do
-  expect_contains "parser: \"$n\" is read as overdue" "name=$n" "$F4B"
-done
-expect_eq "parser: a range is read at its generous end (35 min quiet, 45 min overdue)" \
-  "1" "$(printf '%s\n' "$F4B" | grep -c 'name=f-range')"
-
-# --- an unparseable CADENCE degrades that row to overdue-only, and says so ---
-R4C="$(make_repo s4c)"; new_roster "$R4C"
-PROG4C="$R4C/degraded-progress.md"; echo "old" > "$PROG4C"; backdate "$PROG4C" 900
-add_row "$R4C" name=cadence-mush progress="$PROG4C" cadence="whenever it feels right" \
-        duration="4 hours" launched_at="$(iso_ago 60)" deliverable="$R4C/absent.md"
-sweep_bg "$R4C" "$TMPROOT/s4c.out" arm --tick 1; P4C="$BGPID"
-expect_true "unparseable cadence: an arm entry is written" wait_grep 'event=arm' "$(ledger_of "$R4C")" 10
-L4C="$(grep 'event=arm' "$(ledger_of "$R4C")" | head -1)"
-expect_contains "unparseable cadence: the degradation names the row" "cadence-mush" "$L4C"
-expect_contains "unparseable cadence: the degradation names the surviving predicate" "overdue-only" "$L4C"
-sleep 3
-expect_true "unparseable cadence: no stale-progress finding is guessed from it" alive "$P4C"
-expect_false "unparseable cadence: nothing was written to the findings file" test -s "$(findings_of "$R4C")"
-sweep "$R4C" retire; wait_exit "$P4C" 15
-
-# ...and the same shape still goes overdue on its declared duration.
-R4D="$(make_repo s4d)"; new_roster "$R4D"
-PROG4D="$R4D/degraded-progress.md"; echo "old" > "$PROG4D"; backdate "$PROG4D" 900
-add_row "$R4D" name=cadence-mush-2 progress="$PROG4D" cadence="whenever it feels right" \
-        duration="1 minute" launched_at="$(iso_ago 600)" deliverable="$R4D/absent.md"
-sweep_bg "$R4D" "$TMPROOT/s4d.out" arm --tick 1; P4D="$BGPID"
-expect_true "a cadence-degraded row is still watched for overdue" wait_exit "$P4D" 20
-F4D="$(cat "$(findings_of "$R4D")" 2>/dev/null)"
-expect_contains "the degraded row's finding is overdue" "class=overdue" "$F4D"
-expect_absent "the degraded row raises no stale-progress finding" "class=stale-progress" "$F4D"
-
-# ============================================================
-section "Section 5: the loop — fresh roster reads, batching, delivery"
-# ============================================================
-
-# --- the roster is re-read every tick: a row added AFTER arm is watched ---
-R5="$(make_repo s5)"; new_roster "$R5"
-add_row "$R5" name=quiet-one duration="4 hours" deliverable="$R5/absent.md"
-sweep_bg "$R5" "$TMPROOT/s5.out" arm --tick 1; P5="$BGPID"
-expect_true "roster re-read: the sweeper arms over the initial roster" wait_grep 'event=arm' "$(ledger_of "$R5")" 10
-sleep 2
-expect_true "roster re-read: it is quiet while the initial roster holds" alive "$P5"
-add_row "$R5" name=late-arrival duration="1 minute" launched_at="$(iso_ago 600)" \
-        deliverable="$R5/absent.md"
-expect_true "roster re-read: a row added after arm wakes it" wait_exit "$P5" 20
-expect_contains "roster re-read: the finding names the late row" "name=late-arrival" \
-  "$(cat "$(findings_of "$R5")" 2>/dev/null)"
-
-# --- findings batch per tick: every broken row in ONE exit ---
-R6="$(make_repo s6)"; new_roster "$R6"
-PROG6="$R6/p.md"; echo "old" > "$PROG6"; backdate "$PROG6" 900
-add_row "$R6" name=broken-a duration="1 minute" launched_at="$(iso_ago 600)" deliverable="$R6/absent-a.md"
-add_row "$R6" name=broken-b claims="bionic-no-such-process-marker-91731" deliverable="$R6/absent-b.md" duration="4 hours"
-add_row "$R6" name=broken-c progress="$PROG6" cadence="10 seconds" duration="4 hours" deliverable="$R6/absent-c.md"
-sweep_bg "$R6" "$TMPROOT/s6.out" arm --tick 1; P6="$BGPID"
-expect_true "batching: one exit delivers the whole tick" wait_exit "$P6" 20
-F6="$(cat "$(findings_of "$R6")" 2>/dev/null)"
-expect_eq "batching: all three broken rows are in the batch" "3" \
-  "$(printf '%s\n' "$F6" | grep -c '^sweeper-finding/v1|')"
-expect_contains "batching: the overdue row is in it" "name=broken-a" "$F6"
-expect_contains "batching: the dead-claim row is in it" "name=broken-b" "$F6"
-expect_contains "batching: the stale-progress row is in it" "name=broken-c" "$F6"
-expect_eq "batching: the batch is delivered once, not row by row" "1" \
-  "$(grep -c 'event=exit' "$(ledger_of "$R6")")"
-expect_contains "batching: the exit entry counts the findings" "findings=3" \
-  "$(grep 'event=exit' "$(ledger_of "$R6")")"
-# The findings file is the hedge against a lost wake, so it must be on disk BY the time
-# the process is gone — which is exactly what waiting on the pid above establishes.
-expect_true "the findings file is on disk once the delivering process is gone" \
-  test -s "$(findings_of "$R6")"
-
-# --- the first evaluation happens AFTER a tick, not at arm ---
-R7="$(make_repo s7)"; new_roster "$R7"
-add_row "$R7" name=instant duration="1 minute" launched_at="$(iso_ago 600)" deliverable="$R7/absent.md"
-sweep_bg "$R7" "$TMPROOT/s7.out" arm --tick 5; P7="$BGPID"
-sleep 2
-expect_true "the loop sleeps its tick before the first evaluation" alive "$P7"
-expect_true "the broken row is delivered on the following tick" wait_exit "$P7" 20
-expect_contains "the delivery names the row it was waiting on" "name=instant" \
-  "$(cat "$(findings_of "$R7")" 2>/dev/null)"
-
-# --- arming before any roster exists is legitimate: rows arrive later ---
-R8="$(make_repo s8)"
-sweep_bg "$R8" "$TMPROOT/s8.out" arm --tick 1; P8="$BGPID"
-expect_true "arm succeeds before any dispatch has written a roster" wait_grep 'event=arm' "$(ledger_of "$R8")" 10
-sleep 2
-expect_true "an absent roster is zero rows, not an error" alive "$P8"
-new_roster "$R8"
-add_row "$R8" name=first-ever duration="1 minute" launched_at="$(iso_ago 600)" deliverable="$R8/absent.md"
-expect_true "the first row to appear is watched" wait_exit "$P8" 20
-
-# ============================================================
-section "Section 6: path safety"
-# ============================================================
-
-R9="$(make_repo s9)"
-rm -rf "$R9/.bionic/tmp"
-mkdir -p "$TMPROOT/elsewhere-s9"
-ln -s "$TMPROOT/elsewhere-s9" "$R9/.bionic/tmp"
-sweep "$R9" arm --tick 1
-expect_eq "a symlinked state directory REFUSES (exit 2)" "2" "$RC"
-expect_contains "the refusal names the symbolic link" "symbolic link" "$OUT"
-expect_false "nothing was written through the link" test -e "$TMPROOT/elsewhere-s9/sweeper-$SID.state"
-
-R10="$(make_repo s10)"; new_roster "$R10"
-ln -s "$TMPROOT/elsewhere-s10.state" "$(ledger_of "$R10")"
-sweep "$R10" arm --tick 1
-expect_eq "a symlinked ledger path REFUSES (exit 2)" "2" "$RC"
-expect_false "nothing was written through the ledger link" test -e "$TMPROOT/elsewhere-s10.state"
-
-# A symlinked ROSTER is not read (§8) — but the sweeper stays armed, so it must NAME what
-# it cannot watch instead of looking healthy while watching nothing (6-axis C-2). Every
-# other path-safety refusal in this script is loud; this branch is the arm's only one that
-# keeps running, which is exactly why the ledger has to carry it.
-R10B="$(make_repo s10b)"
-printf 'roster-state/v1|status=confirmed|session=%s|name=elsewhere|deliverable=|duration=1 minute|\n' \
-  "$SID" > "$TMPROOT/elsewhere-s10b-roster.state"
-ln -s "$TMPROOT/elsewhere-s10b-roster.state" "$(roster_of "$R10B")"
-sweep_bg "$R10B" "$TMPROOT/s10b.out" arm --tick 1; P10B="$BGPID"
-expect_true "arm over a symlinked roster still arms" wait_grep 'event=arm' "$(ledger_of "$R10B")" 10
-ARM10B="$(grep 'event=arm' "$(ledger_of "$R10B")" | head -1)"
-expect_contains "the arm entry NAMES the symlinked roster as a degradation" \
-  "symlinked-roster-unreadable" "$ARM10B"
-expect_contains "…attributed to the roster rather than to a row" "(roster)" "$ARM10B"
-expect_contains "the operator is told on stdout too" "symlinked-roster-unreadable" \
-  "$(cat "$TMPROOT/s10b.out")"
-expect_contains "no row from the symlinked file was read" "rows=0" "$ARM10B"
-sweep "$R10B" retire; wait_exit "$P10B" 15
-
-# A DANGLING symlinked roster is the same unwatchable state and must not be silent either.
-R10C="$(make_repo s10c)"
-ln -s "$TMPROOT/no-such-roster-s10c.state" "$(roster_of "$R10C")"
-sweep_bg "$R10C" "$TMPROOT/s10c.out" arm --tick 1; P10C="$BGPID"
-expect_true "arm over a dangling roster symlink still arms" wait_grep 'event=arm' "$(ledger_of "$R10C")" 10
-expect_contains "…and names the degradation" "symlinked-roster-unreadable" \
-  "$(grep 'event=arm' "$(ledger_of "$R10C")" | head -1)"
-sweep "$R10C" retire; wait_exit "$P10C" 15
-
-# ============================================================
-section "Section 7: the ledger's pid is validated before it is believed (6-axis S-1)"
-# ============================================================
+# `cadence=` arrives as prose the dispatch gate lifted out of a brief. The parser is
+# deterministic: units it knows, a range read at its generous end, and no guess for anything
+# else. It used to be driven through the tick loop's stale-progress class; with that loop
+# deleted the ONE surviving consumer is `row_still_live`, which is where the same table is
+# asked now. The observable is the verdict: a row whose progress artifact was written INSIDE
+# its declared cadence is STILL-LIVE, and the same row once the promise lapses is UNMET.
+# Every form therefore carries its own paired positive by construction.
 #
-# `pid=` is read out of a file in the repo's own .bionic/tmp — the directory the script
-# header's threat model names as repo-controlled — and it reaches `kill -0` and, in
-# `retire`, `kill -TERM`. In POSIX `kill` a NEGATIVE pid is a process group and `-1` is
-# "every process the caller may signal", so an unvalidated `pid=-1` turns `retire` into a
-# session-wide SIGTERM. `0` is the caller's own process group; `1` is init. No adversary is
-# required: a truncated or partial write that leaves a `-` in the field lands in the same
-# place, and the second-order damage is worse than the signal — `status` reports live=yes
-# forever, so `arm` refuses permanently and the unarmed-dispatch nag goes quiet.
-#
-# The rejection is ASYMMETRIC, and the asymmetry is the whole of the Step-6 critic's F-1.
-# Rejecting symmetrically — the entry reading as "no open arming" for signalling AND for
-# arming AND for status alike — trades a fail-closed bug for a fail-open one: a corrupt
-# line appended after a healthy one erased a genuinely live sweeper from all three readers
-# at once, so `arm` started a second over it and `retire` closed only the second. Two live
-# sweepers, unenumerable, which is the defect class this wave exists to end. So:
-#   signalling  FAIL-OPEN   — `retire` never `kill`s a value it could not validate.
-#   arming      FAIL-CLOSED — an unreadable open entry means "a sweeper MAY be live",
-#                             and a second is refused rather than stacked over it.
-#   status      NEITHER     — it may not answer live=no over an entry it cannot read;
-#                             the third answer is live=unknown.
-# Asserted per rejected shape below: status reports live=unknown and exits non-zero (the
-# dispatch nag warns), arm REFUSES naming the escape, retire neither signals nor journals
-# a close — and deleting the ledger restores arming, which is the escape being real.
-#
-# RED evidence for this section is taken against a copy whose `kill -TERM` is neutered
-# (W4_SWEEPER_UNDER_TEST above). Running it against an unguarded sweeper would terminate
-# the operator's own session, which is the finding.
+# Each row declares an absent deliverable, so the only thing separating STILL-LIVE from
+# UNMET is whether the parser read the cadence and the progress mtime cleared it.
 
-plant_arm() {  # <pid literal> <ledger path>
-  {
-    printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n'
-    printf 'sweeper-ledger/v1|event=arm|at=2026-08-06T00:00:00Z|epoch=1780000000|pid=%s|tick=120|session=%s|rows=0|degraded=\n' \
-      "$1" "$SID"
-  } > "$2"
+R2="$(make_repo s2parse)"; new_roster "$R2"
+
+# <name> <cadence prose> <progress age, seconds> <expected state>
+parse_case() {
+  local name="$1" cadence="$2" age="$3" want="$4"
+  local prog="$R2/prog-$name.md"
+  echo "working" > "$prog"; backdate "$prog" "$age"
+  add_row "$R2" name="$name" progress="$prog" cadence="$cadence" \
+          deliverable="$R2/absent-$name.md" duration="4 hours" launched_at="$(iso_ago 60)"
+  sweep "$R2" verdict "$name"
+  expect_contains "cadence \"$cadence\" at ${age}s reads $want" "name=$name|state=$want" "$OUT"
 }
 
-_bad=0
-for BADPID in "-1" "-99999" "0" "1" "junk" "12x" " "; do
-  _bad=$((_bad + 1))
-  RB="$(make_repo "s7-$_bad")"; new_roster "$RB"
-  LB="$(ledger_of "$RB")"
-  plant_arm "$BADPID" "$LB"
+# INSIDE the declared cadence — the parser read the unit and the row is still working.
+parse_case in-minutes  "20 minutes"      600  STILL-LIVE
+parse_case in-tilde    "every ~10 min"   300  STILL-LIVE
+parse_case in-hour     "1 hour"         1800  STILL-LIVE
+parse_case in-seconds  "90 seconds"       30  STILL-LIVE
+parse_case in-short    "2m"               30  STILL-LIVE
 
-  sweep "$RB" status
-  expect_eq "pid=[$BADPID]: status exits non-zero (nothing is PROVABLY live)" "1" "$RC"
-  expect_contains "pid=[$BADPID]: status answers live=unknown, never live=no" "live=unknown" "$OUT"
-  expect_absent "pid=[$BADPID]: status does not answer live=no over an unreadable entry" "live=no" "$OUT"
-  expect_absent "pid=[$BADPID]: status never republishes the unusable pid" "pid=$BADPID|" "$OUT"
+# PAST it — the same units, the same rows, one fact about the disk changed.
+parse_case out-minutes "20 minutes"     1500  UNMET
+parse_case out-tilde   "every ~10 min"   900  UNMET
+parse_case out-hour    "1 hour"         4200  UNMET
+parse_case out-seconds "90 seconds"      200  UNMET
+parse_case out-short   "2m"              200  UNMET
 
-  sweep "$RB" retire
-  expect_eq "pid=[$BADPID]: retire exits 0" "0" "$RC"
-  expect_eq "pid=[$BADPID]: retire journals NO close over an unusable pid" \
-    "0" "$(grep -c 'event=retire' "$LB")"
-  expect_contains "pid=[$BADPID]: retire says there was nothing to retire" "nothing to retire" "$OUT"
+# A RANGE is read at its GENEROUS end: 35 minutes is inside "30–40 minutes" and 45 is not.
+# The strict reading would call the first one UNMET, so this pair is what discriminates.
+parse_case in-range    "30–40 minutes"  2100  STILL-LIVE
+parse_case out-range   "30–40 minutes"  2700  UNMET
 
-  # FAIL-CLOSED: the script cannot tell this state from a live-sweeper one, so it refuses
-  # unconditionally — no live process is required anywhere for the refusal to be right.
-  sweep "$RB" arm --tick 30
-  expect_eq "pid=[$BADPID]: arm REFUSES over the unreadable entry (exit 1)" "1" "$RC"
-  expect_contains "pid=[$BADPID]: the refusal is named REFUSED" "REFUSED" "$OUT"
-  expect_contains "pid=[$BADPID]: the refusal names the unreadable value" \
-    "unreadable (\"$BADPID\")" "$OUT"
-  expect_contains "pid=[$BADPID]: the refusal names the escape (the ledger path)" "$LB" "$OUT"
-  expect_eq "pid=[$BADPID]: nothing was armed (the planted entry is the only one)" \
-    "1" "$(grep -c 'event=arm' "$LB")"
+# UNREADABLE PROSE IS NOT A GUESSED INTERVAL. The parser refuses, so no cadence clears the
+# row and the verdict falls through to the disk's answer — never to an invented threshold.
+parse_case mush        "whenever it feels right" 30 UNMET
+parse_case zero        "0 minutes"               30 UNMET
+parse_case units       "20 parsecs"              30 UNMET
 
-  # …and the escape is REAL: the ledger is machine-local, so deleting it un-wedges arming.
-  rm -f "$LB"
-  sweep_bg "$RB" "$TMPROOT/s7-$_bad.out" arm --tick 30; PB="$BGPID"
-  expect_true "pid=[$BADPID]: after deleting the ledger, arm succeeds" \
-    wait_grep "pid=$PB" "$LB" 10
-  sweep "$RB" retire; wait_exit "$PB" 15
-done
+# FIXED (epic-16 w2 S2, standalone commit): the parser's header claims "whole numbers only,
+# `0.5h` is refused" and "exactly one number-unit pair, `1h30m` is refused", and until this
+# fix neither refusal held — `grep -oE` only reports what it matched, so a decimal point
+# ("0.5h" matches the trailing "5h" and never sees the "0.") and two pairs glued together
+# with no separator ("1h30m" — "1h" fails its own trailing-boundary check and is silently
+# skipped, leaving only "30m") both looked like one clean pair. Proof each is now REFUSED: a
+# 30-second-old artifact under either cadence would read STILL-LIVE if the buggy parse
+# (18000s / 1800s respectively) still applied, since both comfortably clear 30 seconds; a
+# refused cadence instead falls through to the disk's answer, and with no claims and an
+# absent deliverable that answer is UNMET. This is what makes both cases RED under the
+# pre-fix binary and GREEN after: the OLD code read STILL-LIVE here, not UNMET.
+parse_case malformed-decimal "0.5h"  30 UNMET
+parse_case malformed-glued   "1h30m" 30 UNMET
 
-# ---- F-2's truth-test: a REAL live sweeper the readers may never deny ----
-#
-# Every agreement test in this wave proves the three readers render ONE answer; none asked
-# whether that answer is TRUE of the world. In the critic's reproduction all three agreed
-# and all three were wrong. So: an actually-running sweeper, then the corrupt line appended
-# after its healthy one — the exact byte sequence a truncated write produces — and the
-# question is not "do the readers agree" but "is a live process still visible".
-R7F="$(make_repo s7-f1)"; new_roster "$R7F"
-L7F="$(ledger_of "$R7F")"
-sweep_bg "$R7F" "$TMPROOT/s7f.out" arm --tick 30; P7F="$BGPID"
-expect_true "a real sweeper is armed and ledgered" wait_grep "pid=$P7F" "$L7F" 10
-printf 'sweeper-ledger/v1|event=arm|at=2026-08-06T00:00:00Z|epoch=1780000000|pid=-1|tick=120|session=%s|rows=0|degraded=\n' \
-  "$SID" >> "$L7F"
+# The paired positive for the whole refusal class: the SAME 30-second-old artifact under a
+# cadence the parser CAN read is STILL-LIVE, so the rows above failed on the prose and not
+# on the clock.
+parse_case readable    "5 minutes"                30 STILL-LIVE
 
-sweep "$R7F" status
-expect_true "F-1: the live sweeper is still running" alive "$P7F"
-expect_absent "F-1: status does NOT deny a live sweeper it can still see" "live=no" "$OUT"
-expect_contains "F-1: status still reports it live" "live=yes" "$OUT"
-expect_contains "F-1: …by its own well-formed pid" "pid=$P7F|" "$OUT"
-expect_contains "F-1: …and still names the corrupt entry" "unreadable (\"-1\")" "$OUT"
+# Paired positives proving the fix changes nothing about the forms it already accepted —
+# short-unit, hour, and plain-seconds spellings, each read INSIDE its own cadence.
+parse_case in-30m      "30m"                      30 STILL-LIVE
+parse_case in-2h       "2h"                     1800 STILL-LIVE
+parse_case in-45s      "45s"                      30 STILL-LIVE
 
-sweep "$R7F" arm --tick 5
-expect_eq "F-1: a second arm is REFUSED (exit 1)" "1" "$RC"
-expect_contains "F-1: the refusal is named REFUSED" "REFUSED" "$OUT"
+# A row with a cadence but NO progress path has nothing for the parser to clear.
+add_row "$R2" name=no-progress cadence="5 minutes" deliverable="$R2/absent-np.md" \
+        duration="4 hours" launched_at="$(iso_ago 600)"
+sweep "$R2" verdict no-progress
+expect_contains "a cadence with no progress path leaves the row UNMET" \
+  "name=no-progress|state=UNMET" "$OUT"
 
-sweep "$R7F" retire
-expect_eq "F-1: retire exits 0" "0" "$RC"
-expect_eq "F-1: retire journals exactly one close" "1" "$(grep -c 'event=retire' "$L7F")"
-expect_contains "F-1: …naming the live pid, not the unvalidated value" "pid=$P7F|" \
-  "$(grep 'event=retire' "$L7F")"
-expect_absent "F-1: nothing was signalled with the bad value" "pid=-1|session=$SID|by=retire" \
-  "$(grep 'event=retire' "$L7F")"
-expect_true "F-1: the real sweeper is actually gone" wait_exit "$P7F" 15
-
-# The bad entry outlives the retire it never named, and arming stays closed until the
-# operator takes the escape — an unreadable entry can never be proven closed.
-sweep "$R7F" arm --tick 30
-expect_eq "F-1: arming stays refused while the unreadable entry stands" "1" "$RC"
-rm -f "$L7F"
-sweep_bg "$R7F" "$TMPROOT/s7f2.out" arm --tick 30; P7F2="$BGPID"
-expect_true "F-1: deleting the ledger restores arming" wait_grep "pid=$P7F2" "$L7F" 10
-sweep "$R7F" retire; wait_exit "$P7F2" 15
-
-# The guard rejects unusable shapes ONLY: a well-formed pid still refuses a second arm,
-# so the fix cannot have quietly disabled the single-live-sweeper invariant it protects.
-R7L="$(make_repo s7-live)"; new_roster "$R7L"
-sweep_bg "$R7L" "$TMPROOT/s7l.out" arm --tick 30; P7L="$BGPID"
-expect_true "a well-formed live pid is still believed" wait_grep "pid=$P7L" "$(ledger_of "$R7L")" 10
-sweep "$R7L" arm --tick 5
-expect_eq "…and still refuses a second arm (exit 1)" "1" "$RC"
-sweep "$R7L" retire; wait_exit "$P7L" 15
+# A progress artifact NEVER WRITTEN is dated from the launch, exactly as one that stopped
+# being written would be: inside the cadence it is still live, past it, it is not.
+add_row "$R2" name=never-written progress="$R2/no-such-progress.md" cadence="10 minutes" \
+        deliverable="$R2/absent-nw.md" duration="4 hours" launched_at="$(iso_ago 120)"
+sweep "$R2" verdict never-written
+expect_contains "an unwritten progress artifact inside the cadence dates from the launch" \
+  "name=never-written|state=STILL-LIVE" "$OUT"
+add_row "$R2" name=never-written-late progress="$R2/no-such-progress.md" cadence="10 minutes" \
+        deliverable="$R2/absent-nwl.md" duration="4 hours" launched_at="$(iso_ago 1800)"
+sweep "$R2" verdict never-written-late
+expect_contains "…and past it the same row is UNMET" \
+  "name=never-written-late|state=UNMET" "$OUT"
 
 # ============================================================
-section "Section 8: ack — the orchestrator's completion event"
+section "Section 3: path safety"
 # ============================================================
 #
-# A roster row has no completion event. A finished agent whose row carries no
-# machine-visible deliverable reads as overdue forever once its declared duration elapses,
-# so the sweeper fires one tick after every re-arm until someone hand-prunes the roster.
-# The orchestrator already verifies every agent's completion; `ack` is that verification
-# reaching the roster. An acked row takes the SAME exemption a satisfied row takes — it is
-# out of every finding class, not out of one of them.
+# Hostile-repo posture (design §8): a repo controls its own .bionic/ contents, so every path
+# this script writes is checked for symlink redirection first. These cases used to be driven
+# through `arm`, the only verb that wrote at the time; they are driven through the two
+# surviving verbs now, which is where the same refusals live.
 
-# --- the discriminating pair: two identical overdue rows, one acked ---
-R11="$(make_repo s11)"; new_roster "$R11"
-add_row "$R11" name=done-agent  duration="1 minute" launched_at="$(iso_ago 600)" deliverable="$R11/absent-a.md"
-add_row "$R11" name=still-going duration="1 minute" launched_at="$(iso_ago 600)" deliverable="$R11/absent-b.md"
-sweep "$R11" ack done-agent
+R3="$(make_repo s3dir)"
+rm -rf "$R3/.bionic/tmp"
+mkdir -p "$TMPROOT/elsewhere-s3"
+ln -s "$TMPROOT/elsewhere-s3" "$R3/.bionic/tmp"
+sweep "$R3" ack somebody
+expect_eq "a symlinked state directory REFUSES the writing verb (exit 2)" "2" "$RC"
+expect_contains "the refusal names the symbolic link" "symbolic link" "$OUT"
+expect_false "nothing was written through the link" test -e "$TMPROOT/elsewhere-s3/sweeper-$SID.state"
+sweep "$R3" verdict
+expect_eq "…and the reading verb refuses over it too (exit 2)" "2" "$RC"
+
+R3B="$(make_repo s3ledger)"; new_roster "$R3B"
+ln -s "$TMPROOT/elsewhere-s3-ledger.state" "$(ledger_of "$R3B")"
+sweep "$R3B" ack somebody
+expect_eq "a symlinked ledger path REFUSES (exit 2)" "2" "$RC"
+expect_false "nothing was written through the ledger link" test -e "$TMPROOT/elsewhere-s3-ledger.state"
+# The guard sits ahead of the verb dispatch, so the READING verb refuses over the same link
+# even though it would never have opened the ledger. Pinned as-is rather than narrowed: the
+# refusal is unchanged from wave-01, and a redirected state directory is a fact the operator
+# needs told whichever question was being asked.
+sweep "$R3B" verdict
+expect_eq "…and the reading verb refuses over the same link too (exit 2)" "2" "$RC"
+expect_contains "…naming the link rather than answering over it" "symbolic link" "$OUT"
+
+# A symlinked ROSTER splits the two verbs, and the split is the point. `verdict` REFUSES:
+# its answer is a claim about contracts, and a clean one computed over a roster the script
+# was redirected away from is a false statement. `ack` RECORDS ANYWAY: its answer is a
+# ledger line the operator asked for, and refusing it would deny the one action still
+# available precisely when the roster cannot be read.
+R3C="$(make_repo s3roster)"
+printf 'roster-state/v1|status=confirmed|session=%s|name=elsewhere|deliverable=|duration=1 minute|\n' \
+  "$SID" > "$TMPROOT/elsewhere-s3-roster.state"
+ln -s "$TMPROOT/elsewhere-s3-roster.state" "$(roster_of "$R3C")"
+sweep "$R3C" verdict
+expect_eq "verdict over a symlinked roster REFUSES (exit 2), never a clean session" "2" "$RC"
+expect_contains "…and says why" "symbolic link" "$OUT"
+expect_absent "…and invents no verdict line for the rows it did not read" "landing-verdict/v1|" "$OUT"
+sweep "$R3C" ack elsewhere
+expect_eq "ack over a symlinked roster still records (exit 0)" "0" "$RC"
+expect_contains "…and warns rather than claiming the name is unknown on evidence it never had" \
+  "elsewhere" "$OUT"
+expect_contains "…journalling it all the same" "name=elsewhere" \
+  "$(grep 'event=ack' "$(ledger_of "$R3C")" 2>/dev/null)"
+
+# A DANGLING roster symlink is the same unreadable state and is answered the same way —
+# tested BEFORE `-f`, which is true THROUGH a link to a file and false for a dangling one.
+R3D="$(make_repo s3dangle)"
+ln -s "$TMPROOT/no-such-roster-s3d.state" "$(roster_of "$R3D")"
+sweep "$R3D" verdict
+expect_eq "verdict over a DANGLING roster symlink refuses the same way (exit 2)" "2" "$RC"
+
+# ============================================================
+section "Section 4: ack — the orchestrator's completion event"
+# ============================================================
+#
+# A roster row has no completion event of its own. An agent that finished but declared no
+# machine-visible deliverable leaves nothing on disk to read, and the orchestrator verifies
+# every agent's completion anyway; `ack` is that verification made durable.
+#
+# WHAT OBSERVES AN ACK, since the watcher was deleted: the ledger it appends to, and the
+# count it reports back. The old cases here observed it through the tick loop — an acked row
+# raised no finding where its un-acked twin did — and that observable is gone with the loop.
+# The fact under test is the same one: an ack is recorded, once per name, durably, and it
+# survives everything.
+
+R4="$(make_repo s4ack)"; new_roster "$R4"
+add_row "$R4" name=done-agent  duration="1 minute" launched_at="$(iso_ago 600)" deliverable="$R4/absent-a.md"
+add_row "$R4" name=still-going duration="1 minute" launched_at="$(iso_ago 600)" deliverable="$R4/absent-b.md"
+sweep "$R4" ack done-agent
 expect_eq "ack exits 0" "0" "$RC"
-expect_contains "ack journals an ack event" "event=ack" "$(cat "$(ledger_of "$R11")" 2>/dev/null)"
+expect_contains "ack journals an ack event" "event=ack" "$(cat "$(ledger_of "$R4")" 2>/dev/null)"
 expect_contains "the ack entry names the row it closed" "name=done-agent" \
-  "$(grep 'event=ack' "$(ledger_of "$R11")" 2>/dev/null)"
+  "$(grep 'event=ack' "$(ledger_of "$R4")" 2>/dev/null)"
 expect_contains "the ack entry carries the session" "session=$SID" \
-  "$(grep 'event=ack' "$(ledger_of "$R11")" 2>/dev/null)"
-sweep_bg "$R11" "$TMPROOT/s11.out" arm --tick 1; P11="$BGPID"
-expect_true "the un-acked twin still breaks its promise" wait_exit "$P11" 20
-F11="$(cat "$(findings_of "$R11")" 2>/dev/null)"
-expect_contains "…and is delivered as overdue" "name=still-going" "$F11"
-expect_absent "the acked row raises NO finding under identical conditions" "name=done-agent" "$F11"
-
-# --- the ack outlives the delivering exit and the re-arm that follows it ---
-sweep_bg "$R11" "$TMPROOT/s11b.out" arm --tick 1; P11B="$BGPID"
-expect_true "the re-armed sweeper fires again on the un-acked row" wait_exit "$P11B" 20
-F11B="$(cat "$(findings_of "$R11")" 2>/dev/null)"
-expect_eq "…twice over, once per arming" "2" "$(printf '%s\n' "$F11B" | grep -c 'name=still-going')"
-expect_absent "the ack survives the exit and the re-arm" "name=done-agent" "$F11B"
-
-# --- exempt from EVERY class, not from one of them ---
-R12="$(make_repo s12)"; new_roster "$R12"
-PROG12="$R12/p.md"; echo "old" > "$PROG12"; backdate "$PROG12" 900
-add_row "$R12" name=every-class claims="bionic-no-such-process-marker-91731" \
-        progress="$PROG12" cadence="10 seconds" duration="1 minute" \
-        launched_at="$(iso_ago 3600)" deliverable="$R12/absent.md"
-sweep "$R12" ack every-class
-sweep_bg "$R12" "$TMPROOT/s12.out" arm --tick 1; P12="$BGPID"
-sleep 3
-expect_true "an acked row is exempt from dead-claim, stale-progress and overdue alike" alive "$P12"
-expect_false "…and nothing at all is written to the findings file" test -s "$(findings_of "$R12")"
-sweep "$R12" retire; wait_exit "$P12" 15
+  "$(grep 'event=ack' "$(ledger_of "$R4")" 2>/dev/null)"
+expect_contains "…and the count comes back" "1 row(s) acked" "$OUT"
+# The discriminating half: the twin row was NOT closed by its neighbour's ack.
+expect_absent "the un-acked twin is not in the ledger" "name=still-going" \
+  "$(cat "$(ledger_of "$R4")" 2>/dev/null)"
 
 # --- several names in one call, and a repeat that does not double-count ---
-R13="$(make_repo s13)"; new_roster "$R13"
+R5="$(make_repo s5ack)"; new_roster "$R5"
 for n in one two three; do
-  add_row "$R13" name="row-$n" duration="1 minute" launched_at="$(iso_ago 600)" \
-          deliverable="$R13/absent-$n.md"
+  add_row "$R5" name="row-$n" duration="1 minute" launched_at="$(iso_ago 600)" \
+          deliverable="$R5/absent-$n.md"
 done
-sweep "$R13" ack row-one row-two row-three
-expect_eq "ack takes several names in one call" "3" "$(grep -c 'event=ack' "$(ledger_of "$R13")")"
-sweep_bg "$R13" "$TMPROOT/s13.out" arm --tick 1; P13="$BGPID"
-sleep 3
-expect_true "every named row is exempt" alive "$P13"
-expect_false "a fully acked roster wakes nobody" test -s "$(findings_of "$R13")"
-sweep "$R13" ack row-one
-expect_eq "an ack against a live sweeper exits 0" "0" "$RC"
-expect_true "…and never signals or stops it" alive "$P13"
-sweep "$R13" status
-expect_eq "status over a live arming still exits 0" "0" "$RC"
-expect_contains "status counts the acked rows, a repeat counting once" "acked=3" "$OUT"
-sweep "$R13" retire; wait_exit "$P13" 15
-
-sweep "$R1" status
-expect_contains "status with nothing acked reports acked=0" "acked=0" "$OUT"
+sweep "$R5" ack row-one row-two row-three
+expect_eq "ack takes several names in one call" "3" "$(grep -c 'event=ack' "$(ledger_of "$R5")")"
+expect_contains "…and counts them" "3 row(s) acked" "$OUT"
+sweep "$R5" ack row-one
+expect_eq "a repeated ack still exits 0" "0" "$RC"
+expect_eq "…and appends its line, append-only as the ledger is" "4" \
+  "$(grep -c 'event=ack' "$(ledger_of "$R5")")"
+expect_contains "…while the COUNT of closed rows is de-duplicated by name" "3 row(s) acked" "$OUT"
 
 # --- a name not on the roster: warned and recorded, never refused (assumption A-4) ---
-R14="$(make_repo s14)"; new_roster "$R14"
-add_row "$R14" name=real-row duration="4 hours" deliverable="$R14/absent.md"
-sweep "$R14" ack ghost-row
+R6="$(make_repo s6ack)"; new_roster "$R6"
+add_row "$R6" name=real-row duration="4 hours" deliverable="$R6/absent.md"
+sweep "$R6" ack ghost-row
 expect_eq "ack of a name not on the roster still exits 0" "0" "$RC"
 expect_contains "…and says which name was not found" "ghost-row" "$OUT"
-expect_contains "…and records it anyway" "name=ghost-row" "$(grep 'event=ack' "$(ledger_of "$R14")")"
-add_row "$R14" name=ghost-row duration="1 minute" launched_at="$(iso_ago 600)" \
-        deliverable="$R14/absent-g.md"
-sweep_bg "$R14" "$TMPROOT/s14.out" arm --tick 1; P14="$BGPID"
-sleep 3
-expect_true "a row that arrives AFTER its ack is exempt too" alive "$P14"
-sweep "$R14" retire; wait_exit "$P14" 15
+expect_contains "…and records it anyway" "name=ghost-row" "$(grep 'event=ack' "$(ledger_of "$R6")")"
+# An ack can legitimately precede its row: the roster is written by the dispatch gate, and
+# the row that arrives afterwards is closed by the ack already standing for it.
+add_row "$R6" name=ghost-row duration="1 minute" launched_at="$(iso_ago 600)" \
+        deliverable="$R6/absent-g.md"
+sweep "$R6" ack second-ghost
+expect_contains "a row that arrived AFTER its ack is counted as closed" "2 row(s) acked" "$OUT"
 
-sweep "$R14" ack
+sweep "$R6" ack
 expect_eq "ack with no name is a usage error (exit 2)" "2" "$RC"
 expect_contains "the usage names ack" "ack <name>" "$OUT"
 
 # --- the FIRST ack over an existing ledger says nothing on stderr (live-caught, post-w4) ---
 #
-# The state a live session hit: a sweeper armed (so the ledger exists and carries its arm
-# entry), no ack journalled yet, and a name whose roster row was written by a dispatch that
-# came AFTER the arming — so the roster is present and the acked name is not on it. The ack
-# succeeded and still printed a shell diagnostic, because `grep -c` prints its count AND
-# exits 1 when that count is zero: the `|| printf 0` fallback appended a SECOND line to an
-# already-complete answer, and the two-line "0" reached an integer test. Succeeding-while-
-# complaining is what makes this worth a case of its own — every existing ack assertion
-# above passes in the defective state, since none of them looks at stderr alone.
-R15="$(make_repo s15)"; new_roster "$R15"
-sweep_bg "$R15" "$TMPROOT/s15.out" arm --tick 60; P15="$BGPID"
-expect_true "the ledger carries the arming before the ack" \
-  wait_grep 'event=arm' "$(ledger_of "$R15")" 15
-sweep_streams "$R15" ack late-row
-expect_eq "the first ack over an armed ledger exits 0" "0" "$RC"
+# The state a live session hit: a ledger that exists and carries lines, no ack journalled
+# yet, and a name whose roster row is not there. The ack succeeded and still printed a shell
+# diagnostic, because `grep -c` prints its count AND exits 1 when that count is zero: the
+# `|| printf 0` fallback appended a SECOND line to an already-complete answer, and the
+# two-line "0" reached an integer test. Succeeding-while-complaining is what makes this worth
+# a case of its own — every other ack assertion here passes in the defective state, since
+# none of them looks at stderr alone. The pre-ack ledger is the bare header the script's own
+# first write lays down, which is the zero-count shape the defect lived on.
+R7="$(make_repo s7ack)"; new_roster "$R7"
+printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' \
+  > "$(ledger_of "$R7")"
+sweep_streams "$R7" ack late-row
+expect_eq "the first ack over a header-only ledger exits 0" "0" "$RC"
 expect_eq "…and writes NOTHING to stderr" "" "$ERR"
 expect_contains "…while stdout still confirms the ack" "acked: late-row" "$OUT"
 expect_contains "…and journals it" "name=late-row" \
-  "$(grep 'event=ack' "$(ledger_of "$R15")" 2>/dev/null)"
-sweep "$R15" retire; wait_exit "$P15" 15
+  "$(grep 'event=ack' "$(ledger_of "$R7")" 2>/dev/null)"
+
+# --- an ack is durable: a second process reads it back ---
+sweep "$R7" ack another-row
+expect_contains "a later invocation counts the earlier ack too" "2 row(s) acked" "$OUT"
 
 # ============================================================
-section "Section 9: verdict — the landing readback (epic-16 AC-3, AC-4)"
+section "Section 5: verdict — the landing readback (epic-16 w1 AC-3, AC-4)"
 # ============================================================
 #
-# The LANDING question, which is not the watching question Sections 3–5 ask. The tick loop
-# asks "is this row worth waking someone for"; `verdict` asks "did this contract land",
-# and it applies the STRICT predicate to answer: exists AND non-empty AND mtime after the
-# row's own `launched_at`. A file that was already on disk when the agent was dispatched is
+# The LANDING question: did this contract land? The STRICT predicate answers it — exists
+# AND non-empty AND mtime after the row's own `launched_at`. Since epic-16 wave-02 it is the
+# only delivered-predicate this script owns; the looser reading it once shared the file with
+# died with the watch loop rather than being promoted into it. A file that was already on
+# disk when the agent was dispatched is
 # not that agent's delivery, and saying so is the whole point — the same three conjuncts
 # are what the landing gate reads back to a stopping agent.
 #
@@ -1007,7 +564,7 @@ add_row "$RVB" name=row-met    deliverable="$RVB/met.md"   duration="4 hours" la
 add_row "$RVB" name=row-unmet  deliverable="$RVB/never.md" duration="4 hours" launched_at="$L9B"
 # FIXTURE FIDELITY (Step-6 review S-1): a genuine waiver row declares NO deliverable —
 # the wall's own waiver label reads "why this dispatch produces nothing durable". A row
-# carrying BOTH a declared artifact and a waiver is contradictory, and Section 12 is where
+# carrying BOTH a declared artifact and a waiver is contradictory, and Section 7 is where
 # that shape is answered for; it must not be the fixture that stands for WAIVED.
 add_row "$RVB" name=row-waived duration="4 hours" launched_at="$L9B" \
         waiver="exploratory probe: no artifact expected"
@@ -1102,17 +659,22 @@ expect_absent "…with no verdict lines" "landing-verdict/v1|" "$OUT"
 sweep "$RVE" nonsense-verb
 expect_contains "usage lists the verdict verb alongside the others" "verdict [<name>]" "$OUT"
 
-# --- verdict is READ-ONLY: it journals nothing, arms nothing, acks nothing ---
+# --- verdict is READ-ONLY: it journals nothing and acks nothing ---
 RVR="$(make_repo vr)"; new_roster "$RVR"
 add_row "$RVR" name=readonly deliverable="$RVR/never.md" duration="4 hours" launched_at="$(iso_ago 600)"
 sweep "$RVR" verdict
 expect_eq "the read-only run saw its UNMET row" "1" "$RC"
 expect_false "verdict writes no ledger" test -e "$(ledger_of "$RVR")"
-expect_false "verdict writes no findings file" test -e "$(findings_of "$RVR")"
 expect_eq "verdict does not touch the roster" "1" \
   "$(grep -c '^roster-state/v1|' "$(roster_of "$RVR")")"
+# The state directory holds the roster it was handed and NOTHING this verb put there —
+# asserted over the whole directory rather than against a list of filenames, so a state
+# file nobody thought to name is caught too.
+expect_eq "verdict leaves no other state file behind" "roster-$SID.state" \
+  "$(ls -1 "$(state_dir_of "$RVR")" 2>/dev/null | tr '\n' ' ' | sed -e 's/ *$//')"
 
-# --- an acked row is still judged: ack closes the WATCH, never the contract ---
+# --- an acked row is still judged: an ack closes the orchestrator's watch on a row, and
+#     never the contract itself ---
 sweep "$RVR" ack readonly
 expect_eq "the ack is recorded" "0" "$RC"
 sweep "$RVR" verdict readonly
@@ -1128,12 +690,13 @@ expect_eq "a symlinked roster refuses (exit 2), it does not report a clean sessi
 expect_contains "…and says why" "symbolic link" "$OUT"
 
 # ============================================================
-section "Section 10: ack — the UNMET warning (epic-16 w1 slice 3)"
+section "Section 6: ack — the UNMET warning (epic-16 w1 slice 3)"
 # ============================================================
 #
-# Ack does NOT reach the verdict (plan Assumptions §11): an acked row is re-stat'd like any
+# Ack does NOT reach the verdict: an acked row is re-stat'd like any
 # other. What changes here is only the WARNING — acking a row that has not landed still
-# records the ack (the watch closes either way), but says so, and journals the verdict it
+# records the ack (the orchestrator still verified the agent finished), but says so, and
+# journals the verdict it
 # overrode so the ledger carries the fact rather than losing it.
 
 # --- ack over an UNMET row: warns, and the ledger line carries the verdict ---
@@ -1158,42 +721,7 @@ expect_absent "…and prints no warning" "WARNING" "$OUT"
 ACKLINE17="$(grep 'event=ack' "$(ledger_of "$R17")" 2>/dev/null | head -1)"
 expect_absent "the ledger line carries no verdict field" "verdict=" "$ACKLINE17"
 
-# ============================================================
-section "Section 11: arm — the ledger handshake + the ARMED line (epic-16 w1 slice 3)"
-# ============================================================
-#
-# Two independent claims: (1) the `-s` check the old arm used is a hole — a header-only
-# ledger already reads non-empty, so a failed append is indistinguishable from a
-# successful one — and the before/after ledger_count delta (ack's own shape) closes it.
-# (2) the ARMED line prints on stdout before the tick loop is entered, not after the first
-# tick — an operator scripting against arm should not have to wait a whole tick to know it
-# took.
-
-# --- the -s hole: a header-only ledger whose append is forced to fail must REFUSE ---
-R18="$(make_repo s18)"; new_roster "$R18"
-L18="$(ledger_of "$R18")"
-printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' \
-  > "$L18"
-chmod 444 "$L18"
-sweep "$R18" arm --tick 1
-expect_eq "arm over a ledger whose append fails REFUSES (exit 2)" "2" "$RC"
-expect_contains "…and names the refusal" "REFUSED" "$OUT"
-expect_contains "…specifically the journalling failure" "could not be journalled" "$OUT"
-expect_eq "nothing was armed: the header-only ledger gained no arm entry" \
-  "0" "$(grep -c 'event=arm' "$L18" 2>/dev/null)"
-chmod u+w "$L18" 2>/dev/null
-
-# --- the ARMED line prints before the tick loop, not after the first tick ---
-R19="$(make_repo s19)"; new_roster "$R19"
-sweep_bg "$R19" "$TMPROOT/s19.out" arm --tick 1; P19="$BGPID"
-sleep 0.5
-kill -TERM "$P19" 2>/dev/null
-wait_exit "$P19" 15
-expect_contains "ARMED prints before the loop's first tick sleep" \
-  "ARMED pid=$P19 tick=1" "$(cat "$TMPROOT/s19.out" 2>/dev/null)"
-
-# ============================================================
-section "Section 12: the Step-6 review remediations (C-2, C-3, C-6, S-1, S-3, perf)"
+section "Section 7: the wave-01 Step-6 review remediations (C-2, C-3, C-6, S-1, S-3, perf)"
 # ============================================================
 #
 # Six independent holes the Step-6 correctness/security and architecture/performance
@@ -1328,36 +856,30 @@ sweep "$RW" verdict inferred-waived
 expect_eq "an explicit waiver still outranks an INFERRED path (exit 0)" "0" "$RC"
 expect_contains "…as WAIVED, because only the waiver was declared" "state=WAIVED" "$OUT"
 
-# --- C-6: the arm/ack delta-count counts the CALLER'S OWN line ---
+# --- C-6: the ack delta-count counts the CALLER'S OWN line ---
 #
-# The guard asked "did the count of this event rise", which a CONCURRENT arm's append
+# The guard asked "did the count of this event rise", which a CONCURRENT caller's append
 # satisfies just as well as our own — so a failed write could be journalled as a success by
 # somebody else's line. The race itself is not deterministically reproducible in a suite
 # (the window is between two adjacent statements), so the scoping is pinned at the source
-# and the ordinary paths are driven for regression beside it.
+# and the ordinary path is driven for regression beside it. The arm half of this pin retired
+# with the `arm` verb; ack is the only journalling verb left.
 SWEEPER_SRC="$(cat "$SWEEPER")"
-expect_matches "arm's delta-count is scoped to the arming pid, not to any arm line" \
-  'ledger_count .\|event=arm\|\.\*\|pid=\$\$\|.' "$SWEEPER_SRC"
 expect_matches "ack's delta-count is scoped to the acking pid, not to any ack line" \
   'ledger_count .\|event=ack\|\.\*\|pid=\$\$\|.' "$SWEEPER_SRC"
 
-# …and the scoped count still answers correctly with a FOREIGN entry of the same event
-# already in the ledger, which is the shape that made the unscoped count wrong.
+# …and the scoped count still answers correctly with a FOREIGN entry already in the ledger,
+# which is the shape that made the unscoped count wrong.
 R20="$(make_repo s20)"; new_roster "$R20"
 L20="$(ledger_of "$R20")"
 printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n' > "$L20"
-printf 'sweeper-ledger/v1|event=arm|at=%s|epoch=1|pid=999999|tick=120|session=%s|rows=0|degraded=\n' \
+printf 'sweeper-ledger/v1|event=ack|at=%s|epoch=1|pid=999999|session=%s|name=somebody-elses-row\n' \
   "$(iso_ago 600)" "$SID" >> "$L20"
-printf 'sweeper-ledger/v1|event=exit|at=%s|epoch=2|pid=999999|session=%s|reason=finding|findings=1\n' \
-  "$(iso_ago 590)" "$SID" >> "$L20"
-sweep_bg "$R20" "$TMPROOT/s20.out" arm --tick 1; P20="$BGPID"
-expect_true "arm succeeds over a ledger already holding another pid's arm entry" \
-  wait_grep "pid=$P20" "$L20" 10
-expect_contains "…and the ARMED line names our own pid" "ARMED pid=$P20" \
-  "$(cat "$TMPROOT/s20.out" 2>/dev/null)"
-kill -TERM "$P20" 2>/dev/null; wait_exit "$P20" 15
-sweep "$R20" ack somebody
-expect_eq "ack succeeds over a ledger already holding another pid's entries" "0" "$RC"
+sweep "$R20" ack mine
+expect_eq "ack succeeds over a ledger already holding another pid's ack entry" "0" "$RC"
+expect_contains "…journalling its own line under its own pid" "name=mine" \
+  "$(grep "pid=$$" "$L20" 2>/dev/null || grep 'name=mine' "$L20")"
+expect_contains "…and counting both rows as closed" "2 row(s) acked" "$OUT"
 
 # --- the perf half of the review: the fold's name is used, not re-derived per row ---
 #
@@ -1380,6 +902,98 @@ SWEEP_BOUND=20
 expect_eq "a scoped verdict over a 2000-row roster answers (exit 0)" "0" "$RC"
 expect_contains "…for the row it was asked about" "name=perf1999|state=MET" "$OUT"
 expect_true "…within the stop path's budget (10 s at 2000 rows)" test "$(( _t1 - _t0 ))" -le 10
+
+# ============================================================
+section "Section 8: acked= — the ack rides the verdict line (epic-16 w2 S9)"
+# ============================================================
+#
+# THE ACK REACHES THE GATES THROUGH THIS FIELD, and through nothing else. Until S9 each of
+# the three stop-side scripts carried its own byte-identical copy of a ledger reader, and
+# the ledger had four readers in the fleet. The ledger has one reader now — this file, which
+# owns it — and the answer rides out on the verdict line every one of those scripts already
+# invokes for `state=`.
+#
+# WHAT DID NOT CHANGE, and this section's real subject: the ACK'S SEMANTICS. `acked=` is a
+# REPORT of a fact about the orchestrator's verification, sitting beside a state that is
+# still computed from the disk alone. It moves no state, changes no exit code, and closes
+# no contract here — an acked UNMET row still reads UNMET, still exits 1, and still WARNS
+# at the ack verb (Section 6). What a reader does with the pair is the reader's, exactly as
+# it was when the reader had to open the ledger itself.
+
+R18="$(make_repo s18acked)"; new_roster "$R18"
+add_row "$R18" name=w4-s1  deliverable="$R18/absent-1.md" duration="4 hours" launched_at="$(iso_ago 600)"
+add_row "$R18" name=w4-s10 deliverable="$R18/absent-10.md" duration="4 hours" launched_at="$(iso_ago 600)"
+DEL18="$R18/landed.md"; echo "landed" > "$DEL18"
+add_row "$R18" name=lander deliverable="$DEL18" duration="4 hours" launched_at="$(iso_ago 600)"
+
+# --- unacked: the field is present and says no ---
+#
+# PRESENT, not absent. A gate that read an empty `acked=` could not tell "this row was not
+# acked" from "this verb does not carry the field", and the second is the shape a version
+# skew would produce.
+sweep "$R18" verdict w4-s1
+expect_contains "an unacked row carries acked=no" "|acked=no|" "$OUT"
+expect_contains "…beside the state the disk computed" "name=w4-s1|state=UNMET|acked=no|" "$OUT"
+expect_eq "…and the verb still exits 1 for an UNMET row" "1" "$RC"
+
+# --- acked, by the real verb: the field flips and NOTHING else does ---
+sweep "$R18" ack w4-s1
+expect_eq "the real ack verb records" "0" "$RC"
+sweep "$R18" verdict w4-s1
+expect_contains "the acked row carries acked=yes" "|acked=yes|" "$OUT"
+expect_contains "…while the STATE is still the disk's answer, untouched by the ack" \
+  "name=w4-s1|state=UNMET|acked=yes|" "$OUT"
+expect_contains "…and the detail still names the failing conjunct" "missing=$R18/absent-1.md" "$OUT"
+expect_eq "…and the exit code is unchanged: an ack does not close a contract here" "1" "$RC"
+
+# --- whole-name match, never a substring: the neighbour is not closed ---
+sweep "$R18" verdict w4-s10
+expect_contains "an ack of w4-s1 does not mark w4-s10 acked" "name=w4-s10|state=UNMET|acked=no|" "$OUT"
+
+# --- a MET row can be acked too, and the two facts stay separate ---
+sweep "$R18" ack lander
+sweep "$R18" verdict lander
+expect_contains "a MET row that was acked reports both facts" "name=lander|state=MET|acked=yes|" "$OUT"
+
+# --- the bare verdict answers per row, not per roster ---
+sweep "$R18" verdict
+expect_contains "bare verdict: the acked row says so" "name=w4-s1|state=UNMET|acked=yes|" "$OUT"
+expect_contains "bare verdict: its unacked neighbour says so too" "name=w4-s10|state=UNMET|acked=no|" "$OUT"
+
+# --- an ack for a name NO ROW carries invents nothing ---
+#
+# The ack verb records such a name deliberately (Section 4) and says it is "exempt the
+# moment a row of that name appears". No row, no line: this verb answers for contracts on
+# the roster, and a machine line for a row that does not exist would be a contract nobody
+# declared — the fail-open direction every reader downstream would then act on.
+sweep "$R18" ack no-such-row
+sweep "$R18" verdict no-such-row
+expect_absent "an ack for a rowless name invents no verdict line" "landing-verdict/v1|" "$OUT"
+expect_contains "…and the verb says exactly that" "no row named" "$OUT"
+expect_eq "…exiting 0, because there is no contract to hold" "0" "$RC"
+
+# --- the ledger is read at DECISION TIME, not cached from anywhere ---
+#
+# The durability claim the gates depend on: an ack taken by a process that has since exited
+# is in force for the next reader. Same session, second invocation, nothing resident.
+R19="$(make_repo s19acked)"; new_roster "$R19"
+add_row "$R19" name=durable deliverable="$R19/absent.md" duration="4 hours" launched_at="$(iso_ago 600)"
+sweep "$R19" verdict durable
+expect_contains "before: acked=no" "|acked=no|" "$OUT"
+sweep "$R19" ack durable
+sweep "$R19" verdict durable
+expect_contains "after, from a different process: acked=yes" "|acked=yes|" "$OUT"
+
+# A symlinked ledger is refused for BOTH verbs before either reads a row (Section 3), so
+# there is no path on which this field is computed over a ledger the script was redirected
+# away from. Asserted here because the field is what the gates now trust.
+ln -sf "$TMPROOT/elsewhere-ledger" "$(ledger_of "$R19")"
+printf 'sweeper-ledger/v1|event=ack|at=x|epoch=1|pid=1|session=%s|name=durable\n' "$SID" \
+  > "$TMPROOT/elsewhere-ledger"
+sweep "$R19" verdict durable
+expect_eq "a symlinked ledger refuses the verdict outright (exit 2)" "2" "$RC"
+expect_absent "…printing no line for any reader to trust" "landing-verdict/v1|" "$OUT"
+rm -f "$(ledger_of "$R19")"
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'

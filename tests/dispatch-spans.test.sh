@@ -187,15 +187,19 @@ expect_pin_in_file "liveness fields: subprocess claim is conditional-required" \
   "is conditional-required: declared only when the task backgrounds a long-running command" "$SKILL"
 expect_pin_in_file "liveness fields: quiescence irrelevant while the claimed process exists" \
   "quiescence is irrelevant" "$SKILL"
-expect_pin_in_file "liveness fields: absence with no deliverable wakes immediately" \
-  "wakes the watcher immediately" "$SKILL"
+expect_pin_in_file "liveness fields: absence with no deliverable is what reads as broken" \
+  "is what the landing verdict reads as a broken contract" "$SKILL"
 expect_pin_in_file "liveness fields: shape emerges from field presence, no restated label" \
   "shape emerges from which are present" "$SKILL"
 
 echo ""
-echo "=== Section 5h: Watcher-arming, P1 (epic-15 w3 slice 4/7) ==="
-expect_pin_in_file "watcher-arming: heading" "**Watcher-arming.**" "$SKILL"
-expect_pin_in_file "watcher-arming: long-shape declarations are armed at dispatch time" \
+echo "=== Section 5h: the Watcher-arming duty is GONE (epic-16 w2 slice S1) ==="
+# The duty said a long-shape dispatch is armed with a quiescence watcher at dispatch time.
+# The watcher is deleted, so the duty is deleted with it — and its absence is pinned in the
+# same file that used to pin its presence, because a doctrine paragraph nobody notices is
+# missing is exactly how a deleted subsystem grows a second life in a brief.
+expect_absent_in_file "the Watcher-arming heading is gone" "**Watcher-arming.**" "$SKILL"
+expect_absent_in_file "…and so is the duty it carried" \
   "is armed with a quiescence watcher at dispatch time" "$SKILL"
 
 echo ""

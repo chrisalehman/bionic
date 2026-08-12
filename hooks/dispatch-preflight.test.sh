@@ -20,7 +20,6 @@ set -uo pipefail
 
 GATE="$(cd "$(dirname "$0")" && pwd)/dispatch-preflight.sh"
 PROBE_SRC="$(cd "$(dirname "$0")" && pwd)/preflight-probe.sh"
-SWEEPER_SRC="$(cd "$(dirname "$0")" && pwd)/session-sweeper.sh"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/dispatch-preflight-test.XXXXXX")" && pwd)"
 BG_PIDS=""
@@ -137,16 +136,49 @@ GATE_OUT=""; GATE_ERR=""; GATE_ST=0
 # roster prune's liveness lookup reads <config>/projects/*/<session>.jsonl, and
 # the operator's REAL config dir would decide which fixtures survive otherwise.
 GATE_CONFIG_DIR=""
+# Extra `KEY=VALUE` assignments for the gate's own environment, applied unquoted so a
+# space-free list can carry several (none of the values below contain spaces). Added for
+# the combined preflight (S16): the gate now runs the real preflight-probe.sh inline, and
+# the probe reads a credential and a config dir out of the environment — which must be the
+# SANDBOX's, never the operator's.
+GATE_ENV=""
 run_gate() {  # <payload-json>
   if [ -n "$GATE_CONFIG_DIR" ]; then
-    GATE_OUT=$(printf '%s' "$1" | CLAUDE_CONFIG_DIR="$GATE_CONFIG_DIR" bash "$GATE" 2>"$SANDBOX/.err")
+    # shellcheck disable=SC2086
+    GATE_OUT=$(printf '%s' "$1" | env $GATE_ENV CLAUDE_CONFIG_DIR="$GATE_CONFIG_DIR" bash "$GATE" 2>"$SANDBOX/.err")
   else
-    GATE_OUT=$(printf '%s' "$1" | bash "$GATE" 2>"$SANDBOX/.err")
+    # shellcheck disable=SC2086
+    GATE_OUT=$(printf '%s' "$1" | env $GATE_ENV bash "$GATE" 2>"$SANDBOX/.err")
   fi
   GATE_ST=$?
   GATE_ERR=$(cat "$SANDBOX/.err")
   return 0
 }
+
+# ---------- the combined preflight's environment (epic-16 w2 S5) ----------
+#
+# As of R5 the gate RUNS hooks/preflight-probe.sh inline whenever this session has no
+# attestation on disk, so most cases in this file now reach the real producer. Its
+# blocking probes read a credential and its D-5 pruning reads a config directory, and
+# both of those are machine-global by default: the operator's login keychain answers the
+# credential probe no matter what a sandbox does, and the operator's own `~/.claude`
+# decides which fixture rosters look "live". Substituting the ENVIRONMENT (not the
+# script) is the same technique preflight-probe.test.sh uses, and it is on for the whole
+# file so that no case accidentally depends on the machine it runs on.
+#
+# The transcript file makes THIS session look live to the probe's own scan; SESSION B
+# gets one too, since several cases below turn on a live foreign session being left
+# alone rather than pruned.
+PROBE_ENV_HOME="$SANDBOX/probehome"
+PROBE_ENV_PROJ="$PROBE_ENV_HOME/.claude/projects/-sandbox"
+mkdir -p "$PROBE_ENV_PROJ"
+: > "$PROBE_ENV_PROJ/$SID_A.jsonl"
+: > "$PROBE_ENV_PROJ/$SID_B.jsonl"
+probe_env_on() {
+  GATE_CONFIG_DIR="$PROBE_ENV_HOME/.claude"
+  GATE_ENV="ANTHROPIC_API_KEY=sk-fixture-marker HOME=$PROBE_ENV_HOME"
+}
+probe_env_on
 
 # ---------- roster readers (slice 4/3) ----------
 #
@@ -308,14 +340,37 @@ expect_empty "missing session_id produces no stdout" "$GATE_OUT"
 expect_empty "missing session_id produces no stderr" "$GATE_ERR"
 
 # ============================================================
-echo "=== S5 — active wave + no attestation on disk -> REFUSE, fix command named (AC-2) ==="
+echo "=== S5 — active wave + no attestation on disk -> AUTO-PROBE, then pass (AC-2 / AC-4) ==="
 # ============================================================
+#
+# THE DIRECTION REVERSED IN EPIC-16 WAVE-02 (R5). Through wave-01 this refused and named
+# a command for the operator to run by hand — and the Synthesis field report measured
+# what that cost: five serialized minutes between deciding to dispatch and the agent
+# existing, paid again after every /clear, which re-fires the this-session demand
+# mid-wave although nothing about the machine has changed.
+#
+# A missing attestation is not evidence of a broken environment; it is the absence of
+# evidence, and re-reading the fact costs a second and cannot go stale. So the gate takes
+# the reading itself. The refusal did not disappear — it MOVED, onto the probe's own
+# verdict (S16 drives that half, and the arc end to end).
 
 REPO=$(make_repo r5 yes)
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "no attestation in an active wave exits 2" "2" "$GATE_ST"
-expect_empty "refusal produces no stdout" "$GATE_OUT"
-expect_contains "refusal names the install-path fix command" "bash ~/.claude/hooks/preflight-probe.sh" "$GATE_ERR"
+expect_status "no attestation in an active wave no longer refuses" "0" "$GATE_ST"
+expect_empty "the auto-probe path produces no stdout" "$GATE_OUT"
+expect_absent "…and no refusal is printed" "BLOCKED" "$GATE_ERR"
+expect_status "…the attestation it was missing now exists" "0" \
+  "$([ -f "$REPO/.bionic/tmp/preflight-$SID_A.state" ] && echo 0 || echo 1)"
+
+# The fix command survives where it still means something — the probe-failure refusal —
+# and checklist A1's requirement on it is unchanged: an install-path spelling, runnable
+# from any cwd, never this gate itself. Driven here on the one path that still refuses.
+REPO=$(make_repo r5b yes)
+mkdir -p "$REPO/.bionic/tmp"; chmod 500 "$REPO/.bionic/tmp"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+chmod 700 "$REPO/.bionic/tmp"
+expect_contains "a probe-failure refusal still names the install-path fix command" \
+  "bash ~/.claude/hooks/preflight-probe.sh" "$GATE_ERR"
 expect_absent "refusal does not name a repo-relative fix command (checklist A1)" "hooks/preflight-probe.sh\"" "$GATE_ERR"
 case "$GATE_ERR" in
   *"hooks/dispatch-preflight.sh"*) no "refusal never names itself as the fix" ;;
@@ -323,19 +378,24 @@ case "$GATE_ERR" in
 esac
 
 # ============================================================
-echo "=== S6 — active wave + only a FOREIGN session's attestation exists -> REFUSE (AC-2) ==="
+echo "=== S6 — active wave + only a FOREIGN session's attestation exists -> AUTO-PROBE (AC-2) ==="
 # ============================================================
 #
 # slice 4/2 (D-5): the foreign attestation is written at ITS OWN per-session filename
 # (preflight-<SID_B>.state) — there is no file at all for SID_A, which is exactly what
 # "foreign, however fresh, is not an attestation for this session" means once filenames
-# are the primary key.
+# are the primary key. That reading is UNCHANGED by R5; what changed is what follows from
+# it. A foreign record is still never read as mine — the gate takes my own reading
+# instead of refusing, and B's record is left exactly where it was.
 
 REPO=$(make_repo r6 yes)
 write_attestation "$REPO" "$SID_B"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "foreign-only attestation exits 2 (no file exists for this session)" "2" "$GATE_ST"
-expect_contains "foreign-only refusal names the fix command" "bash ~/.claude/hooks/preflight-probe.sh" "$GATE_ERR"
+expect_status "foreign-only attestation auto-probes rather than refusing" "0" "$GATE_ST"
+expect_status "…and this session gets a record of its OWN, at its own filename" "0" \
+  "$([ -f "$REPO/.bionic/tmp/preflight-$SID_A.state" ] && echo 0 || echo 1)"
+expect_status "…while the LIVE foreign session's record is untouched (D-5)" "0" \
+  "$([ -f "$REPO/.bionic/tmp/preflight-$SID_B.state" ] && echo 0 || echo 1)"
 
 # ============================================================
 echo "=== S6b — active wave + BOTH sessions hold valid attestations concurrently (AC-2) ==="
@@ -365,8 +425,13 @@ echo "=== S6c — the legacy single-slot file is NEVER consulted (slice 4/2) ===
 REPO=$(make_repo r6c yes)
 write_legacy_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "a legacy single-slot attestation (even keyed to this session) still exits 2" "2" "$GATE_ST"
-expect_contains "legacy-file refusal names the fix command" "bash ~/.claude/hooks/preflight-probe.sh" "$GATE_ERR"
+expect_status "a legacy single-slot attestation is not consulted; the probe runs instead" "0" "$GATE_ST"
+expect_status "…and the record that admits the dispatch is at the PER-SESSION filename" "0" \
+  "$([ -f "$REPO/.bionic/tmp/preflight-$SID_A.state" ] && echo 0 || echo 1)"
+# The probe prunes the legacy slot on every run — the strongest form of "never consulted"
+# is that the file is not there to consult by the time the next dispatch asks.
+expect_status "…the legacy slot is gone, not merely ignored" "0" \
+  "$([ -f "$REPO/.bionic/tmp/preflight.state" ] && echo 1 || echo 0)"
 
 # ============================================================
 echo "=== S7 — active wave + attestation IS this session -> pass, verdict silent (AC-2) ==="
@@ -374,9 +439,9 @@ echo "=== S7 — active wave + attestation IS this session -> pass, verdict sile
 #
 # "Silent" here is about the VERDICT (no BLOCKED refusal, nothing on stdout ever) — not
 # absolute stderr silence, which S10c's absence warning already established is not the
-# invariant. Since slice 4/3 this fixture also has no sweeper armed, so its stderr is
-# exactly the unarmed-sweeper nag (S11 drives that behavior directly); asserted here too so
-# this section's own claim of what "silent" means stays accurate.
+# invariant. Since the unarmed-sweeper nag was deleted with the watcher (epic-16 w2 S1) a
+# contract-complete fixture like this one has nothing to say on stderr either, and that is
+# asserted directly below rather than left implied.
 
 REPO=$(make_repo r7 yes)
 write_attestation "$REPO" "$SID_A"
@@ -384,8 +449,8 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "matching attestation exits 0" "0" "$GATE_ST"
 expect_empty "matching attestation produces no stdout (never print on the allow path)" "$GATE_OUT"
 expect_absent "matching attestation prints no BLOCKED refusal on stderr" "BLOCKED" "$GATE_ERR"
-expect_contains "matching attestation's only stderr is the unarmed-sweeper nag (no ledger armed here)" \
-  "no session sweeper is armed" "$GATE_ERR"
+expect_absent "…and says nothing about a sweeper being armed (the nag is deleted)" \
+  "sweeper" "$GATE_ERR"
 
 # forward-compatibility (A6): unknown extra fields, reordered, must still
 # read the session_id BY KEY, not by position — mirrors
@@ -449,20 +514,32 @@ for _lvl in .bionic/tmp .bionic; do
     "2" "$GATE_ST"
 done
 
-# attestation file exists but is empty / has no session_id= line at all
+# attestation file exists but is empty / has no session_id= line at all. Unlike the
+# hostile shapes above, this is not an attack — it is an unreadable fact, which R5 treats
+# as no fact at all: the probe re-takes it and overwrites the unreadable record. The
+# security property is untouched, because the two are distinguished by WHO fixes them —
+# a symlink is refused by the probe, a bad record is replaced by it.
 REPO=$(make_repo r8c yes)
 mkdir -p "$REPO/.bionic/tmp"
 printf 'version=1\nkind=preflight-attestation\n' > "$REPO/.bionic/tmp/preflight-$SID_A.state"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "attestation with no session_id= line -> refuse" "2" "$GATE_ST"
+expect_status "attestation with no session_id= line -> re-taken, not refused" "0" "$GATE_ST"
+expect_status "…and the unreadable record is replaced by a keyed one" "0" \
+  "$(grep -qx "session_id=$SID_A" "$REPO/.bionic/tmp/preflight-$SID_A.state" && echo 0 || echo 1)"
 
 # ============================================================
 echo "=== S9 — the fix command is runnable from a NON-REPO cwd (checklist A1) ==="
 # ============================================================
 
+# The fix line now lives on the surviving refusal — a probe that FAILED — rather than on
+# a missing attestation, which the gate takes for itself (S5). What A1 asks of it is
+# unchanged: whatever command the refusal hands an operator has to run from wherever they
+# are standing, which a repo-relative spelling does not.
 REPO=$(make_repo r9 yes)
+mkdir -p "$REPO/.bionic/tmp"; chmod 500 "$REPO/.bionic/tmp"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-FIXLINE=$(printf '%s\n' "$GATE_ERR" | grep '^Fix: ' | sed 's/^Fix: //')
+chmod 700 "$REPO/.bionic/tmp"
+FIXLINE=$(printf '%s\n' "$GATE_ERR" | grep -o 'bash ~/.claude/hooks/preflight-probe.sh' | head -1)
 expect_contains "a fix line was captured to execute" "preflight-probe.sh" "$FIXLINE"
 
 RUNHOME="$SANDBOX/run9/home"
@@ -507,10 +584,11 @@ R10=$(roster_path "$REPO" "$SID_A")
 
 expect_status "a contract-complete dispatch still passes (verdict unchanged)" "0" "$GATE_ST"
 expect_empty "a contract-complete dispatch still prints nothing on stdout" "$GATE_OUT"
-# Not absolute stderr silence since slice 4/3: this fixture arms no sweeper, so the
-# unarmed-sweeper nag (S11) is expected stderr, not a regression — the invariant this row
-# actually protects is "no BLOCKED refusal", asserted directly.
+# The invariant this row protects is "no BLOCKED refusal", asserted directly. Since the
+# unarmed-sweeper nag was deleted with the watcher there is nothing else on this stream for
+# a contract-complete dispatch either.
 expect_absent "a contract-complete dispatch prints no BLOCKED refusal on stderr" "BLOCKED" "$GATE_ERR"
+expect_absent "…and nothing about an unarmed sweeper" "sweeper" "$GATE_ERR"
 expect_status "the roster file exists at the per-session path" "0" "$([ -f "$R10" ] && echo 0 || echo 1)"
 expect_contains "the roster carries a versioned schema header" "roster-state/v1" "$(head -1 "$R10" 2>/dev/null)"
 expect_status "exactly one row was appended" "1" "$(roster_rows "$R10")"
@@ -589,8 +667,13 @@ echo "=== S10c — a missing NON-deliverable field is RECORDED + WARNED, never b
 
 REPO=$(make_repo r10c yes)
 write_attestation "$REPO" "$SID_A"
+# The label sits on its OWN line (R8: final-audit A-1 pinned the deliverable-kind
+# labels to line start) — a trailing mid-line occurrence would no longer register
+# as a hit at all, and this fixture is meant to test the near-fieldless-brief
+# warning path, not the line-start rule.
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" \
-  "Go and do the thing, please. Expected artifact: .bionic/docs/record/w99-min.txt" "-" "-")"
+  "Go and do the thing, please.
+Expected artifact: .bionic/docs/record/w99-min.txt" "-" "-")"
 R10C=$(roster_path "$REPO" "$SID_A")
 ROW=$(roster_row "$R10C" 1)
 
@@ -618,13 +701,13 @@ echo "=== S10W — a brief naming NO deliverable is REFUSED; the in-brief waiver
 #
 # USER-DIRECTED (epic-15 post-w4): "A wall. It should be a wall." The absence
 # warning above was the whole enforcement for the one contract field the rest of
-# the machinery cannot work without — the sweeper's delivered/not-delivered
-# predicate has nothing to stat, and a dispatch that dies quietly leaves nothing
-# behind. So this single field escalates from warn to REFUSAL, and every escape
-# from the refusal is a line in the brief, which means it lands on the roster.
+# the machinery cannot work without — the sweeper's landing verdict has nothing to
+# stat, and a dispatch that dies quietly leaves nothing behind. So this single
+# field escalates from warn to REFUSAL, and every escape from the refusal is a
+# line in the brief, which means it lands on the roster.
 #
 # Everything else stays exactly where it was: progress absence warns, duration
-# absence warns, the unarmed-sweeper nag warns. This is one wall, not a policy.
+# absence warns. This is one wall, not a policy.
 
 BRIEF_NO_DELIVERABLE='Your slice: go and do the thing, please.
 Expected duration: ~25 minutes.
@@ -755,12 +838,62 @@ expect_status "the row lifts the subprocess claim's PATTERN, backticks stripped"
   "bash tests/run.sh" "$(roster_field "$ROW" claims)"
 expect_status "the progress path still stops at the cadence that follows it" \
   ".bionic/tmp/w99-live.progress" "$(roster_field "$ROW" progress)"
-expect_absent "the cadence value stops at the next label" \
-  "Subprocess" "$(roster_field "$ROW" cadence)"
+# THE REWRITTEN ASSERTION (Step-6 critic N-2). The line here used to read
+#   expect_absent "the cadence value stops at the next label" "Subprocess" …
+# which certified a property that was never under threat — the span was ALWAYS
+# bounded by the next label — while the real defect (a value running ON past its
+# own duration token, on its own line, before any label) went undriven and the
+# green masked it. The property that matters is that cadence carries the token
+# and NOTHING after it; the run-on case below drives the shape the production
+# writer actually emits, and this pins the no-run-on baseline exactly.
+expect_status "cadence carries the duration token and no run-on (real property, N-2)" \
+  "~6m." "$(roster_field "$ROW" cadence)"
 expect_absent "the claimed pattern does not swallow the output file beside it" \
   "w99-suite.log" "$(roster_field "$ROW" claims)"
 expect_status "the duration is unharmed by the new labels" \
   "~50 minutes." "$(roster_field "$ROW" duration)"
+
+# ---- THE RUN-ON case (Step-6 critic N-2, C-1/F-3 root): cadence followed by
+# run-on NON-label prose on the SAME line must still lift a bounded token. This
+# is the shape the production writer emitted onto the live roster
+# (w2-t3-victim2: `cadence=2m) claims=…`) — the field-merge that flipped a
+# visibly-alive agent to UNMET by feeding parse_seconds a value it refuses. The
+# defect is NOT rescued by a following label: the run-on sits BEFORE the label,
+# already inside the value. Bounded extraction stops at the first clause
+# boundary (comma / closing bracket / newline), the same restraint claimpat()
+# already applies to the subprocess pattern.
+BRIEF_CADENCE_RUNON='Canonical-sdlc Step 4, slice 4/12 of epic-99 wave-01; build · audited · wave.
+Your slice: the widget behind the seam.
+Expected artifact: .bionic/docs/record/w99-runon.txt
+Expected duration: ~50 minutes.
+Progress: .bionic/tmp/w99-runon.progress, cadence 2m) claims=w99-marker,/var/tmp/f3 and keep going
+Exit condition: the artifact exists.'
+
+REPO=$(make_repo r10Lrunon yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_CADENCE_RUNON" "w99-runon")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "run-on cadence: the dispatch passes" "0" "$GATE_ST"
+expect_status "run-on cadence: the value is the bounded token, not the swallowed line" \
+  "2m" "$(roster_field "$ROW" cadence)"
+expect_absent "run-on cadence: the swallowed 'claims=' text never enters the cadence field" \
+  "claims=" "$(roster_field "$ROW" cadence)"
+expect_absent "run-on cadence: nor does the swallowed path" \
+  "/var/tmp/f3" "$(roster_field "$ROW" cadence)"
+# The same bounded discipline protects duration from a run-on sentence (A-2:
+# an unreadable duration silently exempts a row from overdue notification forever).
+BRIEF_DURATION_RUNON='Your slice: build it.
+Expected artifact: .bionic/docs/record/w99-durrunon.txt
+Expected duration: ~15 minutes. Every verbatim output you quote is its own evidence, laid out.
+Progress: .bionic/tmp/w99-durrunon.progress'
+REPO=$(make_repo r10Ldur yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_DURATION_RUNON" "w99-durrunon")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "run-on duration: the value stops at the end of its own sentence" \
+  "~15 minutes." "$(roster_field "$ROW" duration)"
+expect_absent "run-on duration: the following sentence never enters the field" \
+  "verbatim" "$(roster_field "$ROW" duration)"
 
 # The colon form and the unquoted comma form — the two other shapes the ratified
 # sentence permits an author to write.
@@ -931,7 +1064,7 @@ printf '# bionic session roster — schema roster-state/v1\nroster-state/v1|stat
 
 GATE_CONFIG_DIR="$CFG"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-GATE_CONFIG_DIR=""
+probe_env_on   # restore the file-wide sandbox, never the operator's own config dir
 
 expect_status "the dispatch still passes while pruning" "0" "$GATE_ST"
 expect_status "a DEAD session's roster is pruned" "1" \
@@ -988,9 +1121,14 @@ expect_status "the symlink target is not appended to" "untouched" "$(cat "$DECOY
 echo "=== S10i — no row on any path that is not a launch ==="
 # ============================================================
 
-# refused dispatch (active wave, no attestation): the launch never happens.
+# refused dispatch (active wave, the environment probe refuses): the launch never
+# happens. The driver moved with the wall itself in epic-16 wave-02 — a missing
+# attestation is now taken rather than refused, so the refusal this case needs is the one
+# that survived: a blocking probe failure, here an unwritable state directory.
 REPO=$(make_repo r10i yes)
+mkdir -p "$REPO/.bionic/tmp"; chmod 500 "$REPO/.bionic/tmp"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+chmod 700 "$REPO/.bionic/tmp"
 expect_status "a REFUSED dispatch still exits 2" "2" "$GATE_ST"
 expect_status "a refused dispatch writes no roster row" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
@@ -1012,128 +1150,76 @@ expect_status "a Bash call in an attested active wave writes no roster" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
 
 # ============================================================
-echo "=== S11 — unarmed-sweeper nag: warn-only, never blocks (slice 4/3, AC-6) ==="
+echo "=== S11 — the unarmed-sweeper nag is GONE (epic-16 w2 slice S1) ==="
 # ============================================================
 #
-# spec §Component boundaries: "hooks/dispatch-preflight.sh (modified): warn-only unarmed
-# check at dispatch, sourced from the sweeper ledger's live-PID state." Ownership table row
-# "live-arming state": the sweeper ledger file is the single SSoT; the agreement test proves
-# this nag and the sweeper's OWN arm-refusal read that same ledger fixture and agree — which
-# is why the nag invokes the sibling `session-sweeper.sh status` (dirname-relative) rather
-# than a second hand-rolled ledger parser.
+# A warn-only nag stood here: it asked the sibling sweeper whether a watcher was live for
+# this session and, when none was, named the command to arm one. Both the watcher and its
+# `status` verb are deleted, so the nag went with them — supervision reads facts off disk at
+# the moment a decision needs them rather than depending on a process staying up.
+#
+# Pinned as an ABSENCE, in the section that used to drive its presence, for two reasons. A
+# nag that names a verb the CLI no longer answers to is worse than no nag: it sends an
+# operator to a refusal. And this gate has a standing invariant that the allow path prints
+# nothing but ratified advisories — a stale one would be invisible to every other assertion
+# here, all of which only ask about BLOCKED.
 
-ledger_path() { printf '%s/.bionic/tmp/sweeper-%s.state' "$1" "$2"; }
-
-# write_ledger_arm <repo> <sid> <pid> [tick] — a single open (never closed) arm entry, the
-# same shape session-sweeper.test.sh's own "stale open entry" fixture uses.
-write_ledger_arm() {
-  local repo="$1" sid="$2" pid="$3" tick="${4:-120}"
-  mkdir -p "$repo/.bionic/tmp"
-  {
-    printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n'
-    printf 'sweeper-ledger/v1|event=arm|at=2026-08-06T00:00:00Z|epoch=1780000000|pid=%s|tick=%s|session=%s|rows=0|degraded=\n' \
-      "$pid" "$tick" "$sid"
-  } > "$(ledger_path "$repo" "$sid")"
-  chmod 600 "$(ledger_path "$repo" "$sid")"
-}
-
-# ---- no ledger at all: never armed this session -> WARN, never blocks ----
+# ---- no ledger at all: the dispatch passes in SILENCE, where it used to warn ----
 REPO=$(make_repo r11a yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "no-ledger dispatch still passes (never blocks)" "0" "$GATE_ST"
-expect_contains "no-ledger dispatch WARNs about the unarmed sweeper" "WARN" "$GATE_ERR"
-expect_contains "the nag names the exact arm command" \
-  "bash ~/.claude/hooks/session-sweeper.sh arm" "$GATE_ERR"
+expect_status "no-ledger dispatch passes" "0" "$GATE_ST"
+expect_empty "…in silence: there is no sweeper state left to nag about" "$GATE_ERR"
 
-# ---- a DEAD-pid arming on the ledger: not live -> WARN, agreement with arm's own refusal ----
+# ---- a ledger present but naming no live anything: still silent ----
+#
+# The ledger survives as ack's journal, so this fixture is the shape a real session leaves
+# behind. The gate must not read it, or resurrect an opinion about it.
 REPO=$(make_repo r11b yes)
 write_attestation "$REPO" "$SID_A"
-write_ledger_arm "$REPO" "$SID_A" "999999"
+mkdir -p "$REPO/.bionic/tmp"
+{
+  printf '# bionic session sweeper ledger — schema sweeper-ledger/v1 — machine-local, safe to delete\n'
+  printf 'sweeper-ledger/v1|event=ack|at=2026-08-06T00:00:00Z|epoch=1780000000|pid=999999|session=%s|name=some-row\n' \
+    "$SID_A"
+} > "$REPO/.bionic/tmp/sweeper-$SID_A.state"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "dead-pid ledger dispatch still passes" "0" "$GATE_ST"
-expect_contains "dead-pid ledger dispatch WARNs (agrees: not live)" "WARN" "$GATE_ERR"
-expect_contains "the nag names the exact arm command (dead-pid case)" \
-  "bash ~/.claude/hooks/session-sweeper.sh arm" "$GATE_ERR"
+expect_status "a dispatch over an ack-only ledger passes" "0" "$GATE_ST"
+expect_empty "…and still says nothing about it" "$GATE_ERR"
 
-# AGREEMENT: the sweeper's OWN arm refusal, reading the identical ledger fixture, agrees —
-# a dead pid is NOT refused; a second arm entry is appended.
-( cd "$REPO" && exec env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER_SRC" arm --tick 30 ) \
-  >"$SANDBOX/s11b-arm.out" 2>&1 &
-P11B=$!
-BG_PIDS="$BG_PIDS $P11B"
-L11B="$(ledger_path "$REPO" "$SID_A")"
-_i=0
-while [ "$(grep -c 'event=arm' "$L11B" 2>/dev/null || echo 0)" -lt 2 ] && [ "$_i" -lt 50 ]; do
-  sleep 0.1; _i=$((_i + 1))
-done
-expect_status "agreement: arm over the dead-pid fixture SUCCEEDS (second arm entry appended)" \
-  "0" "$([ "$(grep -c 'event=arm' "$L11B" 2>/dev/null)" -ge 2 ] && echo 0 || echo 1)"
-( cd "$REPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER_SRC" retire ) >/dev/null 2>&1
-kill -9 "$P11B" 2>/dev/null
+# ---- the gate never names the deleted verbs, and never invokes the sweeper at all ----
+GATE_SRC="$(cat "$GATE")"
+expect_absent "the gate source names no arm command" "session-sweeper.sh arm" "$GATE_SRC"
+expect_absent "…and carries no SWEEPER_ARM_CMD constant" "SWEEPER_ARM_CMD" "$GATE_SRC"
+# The stronger claim, and the one that keeps a future nag from growing back through some
+# other verb: this gate runs the sweeper on NO path. It writes the roster the verdict later
+# reads; it never asks the verdict anything.
+expect_status "the gate executes the sweeper on no path at all" "0" \
+  "$(printf '%s' "$GATE_SRC" | grep -cE 'bash [^\n]*session-sweeper\.sh')"
 
-# ---- a LIVE-pid arming on the ledger: live -> SILENT, agreement with arm's own refusal ----
-REPO=$(make_repo r11c yes)
-write_attestation "$REPO" "$SID_A"
-sleep 300 & LIVE_PID=$!
-BG_PIDS="$BG_PIDS $LIVE_PID"
-write_ledger_arm "$REPO" "$SID_A" "$LIVE_PID"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "live-pid ledger dispatch still passes" "0" "$GATE_ST"
-expect_empty "live-pid ledger dispatch stays completely silent (agrees: live)" "$GATE_ERR"
-
-# AGREEMENT: the sweeper's OWN arm refusal, reading the identical ledger fixture, agrees —
-# a live pid IS refused.
-RC_ARM=$( ( cd "$REPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER_SRC" arm --tick 30 \
-              >"$SANDBOX/s11c-arm.out" 2>&1 ); echo $? )
-expect_status "agreement: arm over the live-pid fixture is REFUSED (exit 1)" "1" "$RC_ARM"
-kill -9 "$LIVE_PID" 2>/dev/null
-
-# ---- an UNREADABLE-pid arming: nothing is provably armed -> WARN (never silence) ----
-#
-# The Step-6 critic's F-1 state, from the nag's side. The sweeper answers `live=unknown`
-# here and exits 1, and that exit is what this nag reads — so the nag WARNs. That is the
-# safe direction and the deliberate one: nothing is provably watching this session, and a
-# nag that went quiet over a damaged ledger would hide exactly the state that needs saying.
-# The two readers still read one ledger through one parser; what differs is the ACTION each
-# takes on the third answer — the nag warns, arm refuses — which is the asymmetry
-# hooks/session-sweeper.sh's warn_bad_pid note records.
-REPO=$(make_repo r11e yes)
-write_attestation "$REPO" "$SID_A"
-write_ledger_arm "$REPO" "$SID_A" "-1"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "unreadable-pid ledger dispatch still passes (never blocks)" "0" "$GATE_ST"
-expect_contains "unreadable-pid ledger dispatch WARNs, never stays silent" "WARN" "$GATE_ERR"
-expect_contains "the nag names the exact arm command (unreadable-pid case)" \
-  "bash ~/.claude/hooks/session-sweeper.sh arm" "$GATE_ERR"
-
-# AGREEMENT-WITH-ASYMMETRY: over the identical fixture the sweeper's own arm REFUSES —
-# fail-closed where the nag is fail-toward-warning. Both are about the same unreadable
-# entry; neither pretends to know whether a sweeper is live.
-RC_ARM=$( ( cd "$REPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER_SRC" arm --tick 30 \
-              >"$SANDBOX/s11e-arm.out" 2>&1 ); echo $? )
-expect_status "agreement: arm over the unreadable-pid fixture is REFUSED (exit 1)" "1" "$RC_ARM"
-expect_contains "…naming the unreadable value" "unreadable" "$(cat "$SANDBOX/s11e-arm.out")"
-
-# ---- the nag never fires on a REFUSED dispatch (no attestation): nothing is about to launch ----
+# ---- a REFUSED dispatch is unchanged: still exits 2, still says nothing about a sweeper ----
 REPO=$(make_repo r11d yes)
+mkdir -p "$REPO/.bionic/tmp"; chmod 500 "$REPO/.bionic/tmp"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "a refused dispatch (no attestation) still exits 2" "2" "$GATE_ST"
+chmod 700 "$REPO/.bionic/tmp"
+expect_status "a refused dispatch (the probe refused) still exits 2" "2" "$GATE_ST"
 expect_absent "a refused dispatch prints no sweeper nag" "session-sweeper.sh" "$GATE_ERR"
 
 # ============================================================
-echo "=== S12 — dispatch-wall record/ inference (slice 4/4, AC-8) ==="
+echo "=== S12 — inference WITHDRAWN: an unlabeled path never satisfies the wall (R1, AC-3) ==="
 # ============================================================
 #
-# Interfaces produced (plan slice 4): an unlabeled path-shaped token whose
-# normalized form starts with `record/`, `.bionic/docs/record/`, or
-# `<docs-root>/record/` satisfies the deliverable wall; roster row records it
-# under `deliverable=` plus a new field `source=inferred` (labeled lifts
-# record `source=declared`). `.bionic/tmp/` and `/tmp/` prefixed tokens NEVER
-# satisfy the wall from inference. Labeled behavior for other paths —
-# including a labeled tmp path — stays byte-identical to today.
+# THE REVERSAL (Step-6 decision, plan assumption 48). Wave-02 R4 let an unlabeled
+# `record/`-prefixed path satisfy the deliverable wall by INFERENCE — walking the
+# whole brief for a path-shaped token. The Step-6 critic (N-1) found the machine
+# then enforced that GUESS with a declared fact's full weight: the landing gate
+# ordered the agent to write a path the wall picked out of prose. Chris's ruling:
+# the wall NEVER guesses a deliverable from prose. A deliverable comes ONLY from a
+# canonical label; a brief that declares none REFUSES at dispatch, naming what to
+# add. These cases pin the withdrawal: every prose path that used to infer now
+# refuses, and only a labeled declaration passes.
 
-# ---- RED 1: bare .bionic/docs/record/ mention, no label -> passes, source=inferred ----
+# ---- an unlabeled .bionic/docs/record/ mention no longer infers -> REFUSE ----
 BRIEF_BARE_RECORD='Your slice: read the tree and note what you find.
 It belongs in .bionic/docs/record/w99-bare.md when finished.
 Expected duration: ~10 minutes.'
@@ -1141,15 +1227,12 @@ Expected duration: ~10 minutes.'
 REPO=$(make_repo r12a yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_BARE_RECORD" "w99-bare")"
-ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "an unlabeled .bionic/docs/record/ mention passes the wall" "0" "$GATE_ST"
-expect_absent "…and prints no refusal" "BLOCKED" "$GATE_ERR"
-expect_status "the roster records the inferred path as the deliverable" \
-  ".bionic/docs/record/w99-bare.md" "$(roster_field "$ROW" deliverable)"
-expect_status "the roster marks the source as inferred" "inferred" "$(roster_field "$ROW" source)"
-expect_absent "an inferred deliverable is not recorded absent" "deliverable" "$(roster_field "$ROW" absent)"
+expect_status "an unlabeled .bionic/docs/record/ mention is REFUSED (no inference)" "2" "$GATE_ST"
+expect_contains "…with the absent-deliverable refusal" "names no deliverable" "$GATE_ERR"
+expect_status "…and no prose path is lifted onto a roster row" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
 
-# ---- a bare record/ prefix (no .bionic/docs/ prefix) infers too ----
+# ---- a bare record/ prefix in prose is refused the same way ----
 BRIEF_BARE_RECORD2='Your slice: capture findings as you go.
 Write to record/w99-bare2.md at the end.
 Expected duration: ~10 minutes.'
@@ -1157,88 +1240,40 @@ Expected duration: ~10 minutes.'
 REPO=$(make_repo r12a2 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_BARE_RECORD2" "w99-bare2")"
-ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "a bare record/ prefix (no .bionic/docs/) also passes the wall" "0" "$GATE_ST"
-expect_status "…and is recorded as the inferred deliverable" \
-  "record/w99-bare2.md" "$(roster_field "$ROW" deliverable)"
-expect_status "…marked inferred" "inferred" "$(roster_field "$ROW" source)"
+expect_status "a bare record/ prefix in prose is also REFUSED" "2" "$GATE_ST"
+expect_contains "…with the absent-deliverable refusal" "names no deliverable" "$GATE_ERR"
 
-# ---- the THIRD prefix form: <docs-root>/record/ under a config.yaml override ----
+# ---- the same, but DECLARED: adding a canonical label is the whole fix ----
 #
-# Deferred from slice 4/4 and carried here as its flagged coverage gap. The plan
-# names three prefixes the inference accepts, and two of them are literals the
-# awk side can match without knowing anything about the repo. The third is
-# COMPUTED — `resolve_docs_root` reads `docs-root:` out of .bionic/config.yaml and
-# the value reaches the awk program as DOCSROOT — so it is the one form that can
-# go silently inert: an override that stops being passed in, or a DOCSROOT that
-# arrives absolute where the token is relative, leaves the branch matching
-# nothing while both literal prefixes keep the suite green.
-#
-# The fixture is built so a mis-resolution FLIPS the answer rather than changing a
-# value: the override names the ONLY directory holding a plan (so the wave is
-# active only if the override was read at all), and the deliverable token lives
-# under `custom-docs/record/`, which neither literal prefix matches.
-REPO=$(make_repo r12a3 no)
-mkdir -p "$REPO/.bionic" "$REPO/custom-docs/plans/epic-99-test"
-printf 'docs-root: custom-docs\n' > "$REPO/.bionic/config.yaml"
-cat > "$REPO/custom-docs/plans/epic-99-test/wave-01-test.plan.md" <<'PLAN'
----
-governing-skill: canonical-sdlc
-canonical_sdlc_version: 13
-intent: build
-rigor: audited
-scale: wave
----
-
-# Test wave plan
-
-## SDLC State
-
-integration-branch: main
-current: 4
-
-- Step 4: slices in flight
-PLAN
-write_attestation "$REPO" "$SID_A"
-
-BRIEF_DOCSROOT_RECORD='Your slice: read the tree and note what you find.
-It belongs in custom-docs/record/w99-override.md when finished.
+# The friction R1 accepts is that a brief must DECLARE its deliverable. The same
+# work, with `Expected artifact:` in front of the path, passes and is `declared`.
+BRIEF_BARE_DECLARED='Your slice: read the tree and note what you find.
+Expected artifact: .bionic/docs/record/w99-bare.md
 Expected duration: ~10 minutes.'
 
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_DOCSROOT_RECORD" "w99-override")"
-ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "an unlabeled <docs-root>/record/ path passes the wall under an override" \
-  "0" "$GATE_ST"
-expect_absent "…and prints no refusal" "BLOCKED" "$GATE_ERR"
-expect_status "…and is recorded as the inferred deliverable" \
-  "custom-docs/record/w99-override.md" "$(roster_field "$ROW" deliverable)"
-expect_status "…marked inferred" "inferred" "$(roster_field "$ROW" source)"
-
-# The DISCRIMINATOR, and the reason this fixture is not just a third happy path:
-# the same token under the same repo with NO override is a path like any other,
-# and the wall refuses the brief. Without this half, a DOCSROOT branch that
-# matched everything would pass the case above just as well.
-REPO=$(make_repo r12a4 yes)
+REPO=$(make_repo r12a3 yes)
 write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_DOCSROOT_RECORD" "w99-nooverride")"
-expect_status "the same token with NO docs-root override is refused (custom-docs/ is not record/)" \
-  "2" "$GATE_ST"
-expect_contains "…with the deliverable refusal" "names no deliverable" "$GATE_ERR"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_BARE_DECLARED" "w99-baredecl")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "declaring the same path with a canonical label passes" "0" "$GATE_ST"
+expect_status "…and the row carries the declared path" \
+  ".bionic/docs/record/w99-bare.md" "$(roster_field "$ROW" deliverable)"
+expect_status "…marked declared" "declared" "$(roster_field "$ROW" source)"
 
-# ---- RED 2: only a non-record path (Read first:) -> still refused (pinned negative) ----
+# ---- a non-record path in a 'Read first:' is still refused (unchanged) ----
 BRIEF_ONLY_READFIRST='Read first: skills/canonical-sdlc/SKILL.md
 Expected duration: ~10 minutes.'
 
 REPO=$(make_repo r12b yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ONLY_READFIRST" "w99-readfirst")"
-expect_status "a brief whose only path is a non-record 'Read first:' mention is still refused" \
+expect_status "a brief whose only path is a non-record 'Read first:' mention is refused" \
   "2" "$GATE_ST"
 expect_contains "…with the deliverable refusal" "names no deliverable" "$GATE_ERR"
 expect_status "a refused dispatch writes no roster row" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
 
-# ---- RED 3: only a .bionic/tmp/ path, unlabeled -> refused (tmp never inferred) ----
+# ---- an unlabeled .bionic/tmp/ path is refused (a scratch path was never durable) ----
 BRIEF_ONLY_TMP='Your slice: write scratch notes to .bionic/tmp/w99-scratch.md as you go.
 Expected duration: ~10 minutes.'
 
@@ -1248,16 +1283,7 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ONLY_TMP" "w99-tmp")"
 expect_status "a brief whose only unlabeled path is under .bionic/tmp/ is refused" "2" "$GATE_ST"
 expect_contains "…with the deliverable refusal" "names no deliverable" "$GATE_ERR"
 
-# ---- an unlabeled /tmp/ (not .bionic/tmp/) path is refused too ----
-BRIEF_ONLY_SYSTMP='Your slice: write scratch notes to /tmp/w99-scratch.md as you go.
-Expected duration: ~10 minutes.'
-
-REPO=$(make_repo r12c2 yes)
-write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ONLY_SYSTMP" "w99-systmp")"
-expect_status "a brief whose only unlabeled path is under /tmp/ is refused" "2" "$GATE_ST"
-
-# ---- RED 4: a labeled brief records source=declared; behavior otherwise unchanged ----
+# ---- a labeled brief records source=declared; behavior otherwise unchanged ----
 REPO=$(make_repo r12d yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-declared")"
@@ -1266,9 +1292,9 @@ expect_status "a labeled deliverable passes the wall (unchanged)" "0" "$GATE_ST"
 expect_status "the row's deliverable is exactly the labeled path" \
   ".bionic/docs/record/w99-widget.txt" "$(roster_field "$ROW" deliverable)"
 expect_status "the row marks the source as declared" "declared" "$(roster_field "$ROW" source)"
-expect_status "duration is unaffected by the new inference field" \
+expect_status "duration is unaffected" \
   "~25 minutes." "$(roster_field "$ROW" duration)"
-expect_status "progress is unaffected by the new inference field" \
+expect_status "progress is unaffected" \
   ".bionic/tmp/w99-widget.progress" "$(roster_field "$ROW" progress)"
 
 # ---- a LABELED .bionic/tmp/ deliverable keeps today's behavior (label is explicit design) ----
@@ -1283,29 +1309,28 @@ ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_status "a LABELED .bionic/tmp/ deliverable still passes the wall (unchanged)" "0" "$GATE_ST"
 expect_status "…and is recorded exactly as labeled" \
   ".bionic/tmp/w99-labeledtmp.txt" "$(roster_field "$ROW" deliverable)"
-expect_status "…marked declared, not inferred (the label is explicit designation)" \
+expect_status "…marked declared (the label is explicit designation)" \
   "declared" "$(roster_field "$ROW" source)"
 
-# ---- the refusal text names the inference rule (interfaces: "gains one line") ----
+# ---- the refusal text names the declared-only rule, not an inference rule ----
 REPO=$(make_repo r12f yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ONLY_READFIRST" "w99-refusaltext")"
-expect_contains "the refusal names the record/ inference rule" "inferred automatically" "$GATE_ERR"
-expect_contains "the refusal names the tmp exclusion" ".bionic/tmp/ or /tmp/ paths never are" "$GATE_ERR"
+expect_contains "the refusal names a canonical label to add" "Expected artifact:" "$GATE_ERR"
+expect_contains "the refusal says the wall never guesses" "never guesses" "$GATE_ERR"
+expect_absent "…and no longer promises to infer an unlabeled record/ mention" \
+  "inferred automatically" "$GATE_ERR"
 
-# ---- LIVE SPECIMEN (post-landing addendum): an earlier, PATHLESS deliverable-kind
-# label hit shadows a later, real labeled deliverable ----
+# ---- SHADOWED LABEL: an earlier pathless deliverable-kind hit no longer hides a
+# later real labeled line — the declared extractor iterates every deliverable hit ----
 #
-# Caught live during this wave (a real dispatch brief false-blocked): a brief quoting
-# landing-verdict prose — "…per deliverable:" — ahead of its real "Expected artifact:"
-# line. `firsthit("deliverable")` picks the EARLIER hit by position ("per deliverable:"),
-# whose span ("missing=<x> | empty=<y>") carries no path-shaped token, so
-# `paths(spanof(h), 4)` returns empty. Landing slice 4 only fell through to the record/
-# inference scan when NO deliverable-kind hit existed at all (`h == 0`); a hit that
-# exists but yields no path (`h > 0`, `v == ""`) printed nothing and left the wall to
-# refuse a brief that in fact names a real, later, labeled deliverable. The fix widens
-# the fallback to `v == ""` (whether or not a hit was found), so the whole-brief inference
-# scan finds the record/ path that the shadowed label missed.
+# The live specimen (a real brief false-blocked): a brief quoting landing-verdict
+# prose — "…per deliverable:" — ahead of its real "Expected artifact:" line. The
+# bare `deliverable` label hits FIRST by position, and its span ("missing=<x> |
+# empty=<y>") carries no path. Under R1 the extractor does not stop at the first
+# hit; it walks EVERY deliverable-kind hit in order and returns the first that
+# yields a path — so the real, later, labeled line is recovered, and recorded
+# `declared` because it came from a label, not from a prose scan.
 BRIEF_SHADOW_LABEL='UNMET detail lists every failing conjunct, per deliverable:
 missing=<x> | empty=<y>
 
@@ -1318,23 +1343,26 @@ ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_status "an earlier pathless 'per deliverable:' hit no longer shadows the real labeled line" \
   "0" "$GATE_ST"
 expect_absent "…and prints no refusal" "BLOCKED" "$GATE_ERR"
-expect_status "the roster records the real deliverable, recovered via the inference scan" \
+expect_status "the roster records the real declared deliverable, recovered by iterating hits" \
   ".bionic/docs/record/w1-specimen.md" "$(roster_field "$ROW" deliverable)"
-expect_status "the recovered value is marked inferred (the shadowed label never yielded it directly)" \
-  "inferred" "$(roster_field "$ROW" source)"
+expect_status "the recovered value is DECLARED — it came from a label, not a prose scan" \
+  "declared" "$(roster_field "$ROW" source)"
 
 # ============================================================
-echo "=== S13 — Step-6 review remediation A: C-1, S-1, S-2, S-4 ==="
+echo "=== S13 — Step-6 review remediation A + R1: C-1/C-2/F-RD, S-1, S-2, S-4 ==="
 # ============================================================
 #
-# Four holes found by the independent Step-6 CORRECTNESS+SECURITY reviewer
-# (.bionic/docs/record/w1-review-corr-sec.md). Each case below was written and run
-# against the PRE-FIX gate first and observed to fail; the repros are the
-# reviewer's own, re-expressed in this harness.
+# Holes found by the independent Step-6 reviewers (w1-review-corr-sec.md and, for
+# this wave, w2-review-cs.md C-2 + w2-review-rd.md F-RD). Each case below was
+# written and run against the PRE-FIX gate first and observed to fail.
 
-# ---------- C-1 (Major) — a READ-FIRST input must never be inferred as the
-# deliverable. The gate would otherwise name an input as the contract, and the
-# landing gate then orders the agent to overwrite the file it was told to read.
+# ---------- C-1/F-RD (blocking) — a path the brief tells the agent to READ, or
+# merely names in prose, must never become the deliverable. Under R1 the property
+# is enforced structurally, not by a label whitelist: the deliverable comes ONLY
+# from a canonical label, so an input path (labeled or bare prose) is refused, not
+# guessed. This ends the whitelist arms race the critic named — F-RD walked past
+# the wave-01 `Read first:`/`scope constraint:` whitelist through a `Context:`
+# heading the guard did not know.
 
 BRIEF_READFIRST_RECORD='Please review the design.
 
@@ -1345,13 +1373,13 @@ Expected duration: 20 minutes'
 REPO=$(make_repo r13a yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_READFIRST_RECORD" "readerbot")"
-expect_status "C-1: a record/ path inside a Read-first span is NOT inferred — the dispatch is refused" \
+expect_status "C-1: a record/ path inside a Read-first span is never the deliverable — the dispatch is refused" \
   "2" "$GATE_ST"
 expect_contains "C-1: …with the absent-deliverable refusal" "names no deliverable" "$GATE_ERR"
 expect_status "C-1: …and no roster row claims the input as a deliverable" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
 
-# The same exclusion for the other input-designating label the review named.
+# The other input-designating label, refused the same way.
 BRIEF_SCOPE_RECORD='Your slice: tidy the tree.
 Scope constraint: do not touch .bionic/docs/record/context.md.
 Expected duration: 20 minutes'
@@ -1359,30 +1387,72 @@ Expected duration: 20 minutes'
 REPO=$(make_repo r13b yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_SCOPE_RECORD" "scopebot")"
-expect_status "C-1: a record/ path inside a Scope-constraint span is NOT inferred either" \
+expect_status "C-1: a record/ path inside a Scope-constraint span is never the deliverable either" \
   "2" "$GATE_ST"
 
-# THE DISCRIMINATOR: the exclusion is scoped to the input span, not to the whole
-# brief. The same brief that names a Read-first input AND, outside that span, a
-# record/ path to write still infers the latter — otherwise the fix would simply
-# be "inference off", and S12's prose-inference cases would be the only thing
-# holding it (they carry no input label at all).
-BRIEF_READFIRST_PLUS_OUT='Please review the design.
-
-Read first: .bionic/docs/record/w1-walk.md and the spec.
-
-Write your findings to .bionic/docs/record/w99-findings.md when you are done.
+# F-RD, EXACT re-materialization: the review's own brief named its inputs under a
+# `Context:` heading the wave-01 whitelist did not recognise, and the wall inferred
+# the AUDITOR's report as the reviewer's deliverable — the landing gate then ordered
+# the reviewer to overwrite an independent audit. Under R1 there is no inference:
+# `Context:` is not a canonical deliverable label, so the path is never lifted and
+# the dispatch REFUSES, naming what to declare.
+BRIEF_CONTEXT_PATH='Your slice: an independent read-and-duplication review.
+Context: read the auditor report record/w2-auditor-report.md and the spec first.
+Report: your findings belong in record/w2-review-rd.md.
 Expected duration: 20 minutes'
 
-REPO=$(make_repo r13c yes)
+REPO=$(make_repo r13frd yes)
 write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_READFIRST_PLUS_OUT" "readerbot2")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_CONTEXT_PATH" "w2-rev-rd")"
+expect_status "F-RD: a 'Context:' record/ path is NOT lifted as the deliverable — the dispatch is refused" \
+  "2" "$GATE_ST"
+expect_contains "F-RD: …with the absent-deliverable refusal" "names no deliverable" "$GATE_ERR"
+expect_status "F-RD: …and no roster row contracts the reviewer to the auditor's report" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
+
+# C-2 (w2-review-cs.md) — the LABELLED span used to take up to four path tokens and
+# run on into whatever prose followed, so files the brief named as INPUTS ("while
+# you are there, read …"; "do not touch …") were recorded `source=declared` and the
+# landing gate demanded all four. R1 answered by taking the FIRST path in the label's
+# first sentence; the R6 critic showed that is a guess with a declaration's weight
+# (R6-1), so R7 refuses instead: a span yielding more than one path names candidates
+# and asks the author which one is theirs. The input paths are still never contracted —
+# now because nothing is contracted until the brief is unambiguous.
+BRIEF_LABEL_RUNON='Your slice: write the report.
+Expected artifact: record/w99-report.md — and while you are there, read record/legacy-notes.md
+and do not touch tests/run.sh or .bionic/docs/plans/epic-99-test/wave-01-test.plan.md
+Expected duration: ~20 minutes.'
+
+REPO=$(make_repo r13c2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_LABEL_RUNON" "runonbot")"
+expect_status "C-2: a run-on labelled span naming four paths is REFUSED as ambiguous (R7)" \
+  "2" "$GATE_ST"
+expect_contains "C-2: …the refusal names the declared artifact" \
+  "record/w99-report.md" "$GATE_ERR"
+expect_contains "C-2: …and the 'read …' input path, so neither is chosen for the author" \
+  "record/legacy-notes.md" "$GATE_ERR"
+expect_contains "C-2: …and the 'do not touch' suite runner" "tests/run.sh" "$GATE_ERR"
+expect_status "C-2: …and no roster row demands any of the four" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
+
+# THE PAIRED POSITIVE: the exactly-one rule must not become "declaring is off" — a
+# properly DECLARED path outside any input mention still lifts, and this is the
+# resubmission the refusal above asks for: the same brief with the input clauses moved
+# to their own labeled lines.
+BRIEF_LABEL_CLEAN='Your slice: write the report.
+Expected artifact: record/w99-report.md
+Read first: record/legacy-notes.md
+Expected duration: ~20 minutes.'
+
+REPO=$(make_repo r13c3 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_LABEL_CLEAN" "cleanbot")"
 ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "C-1: a record/ path OUTSIDE the input span still infers (the exclusion is scoped)" \
-  "0" "$GATE_ST"
-expect_status "C-1: …and it is the OUT path, never the Read-first input" \
-  ".bionic/docs/record/w99-findings.md" "$(roster_field "$ROW" deliverable)"
-expect_status "C-1: …marked inferred" "inferred" "$(roster_field "$ROW" source)"
+expect_status "C-2 paired positive: a cleanly declared deliverable still passes" "0" "$GATE_ST"
+expect_status "C-2 paired positive: …recorded as the declared path" \
+  "record/w99-report.md" "$(roster_field "$ROW" deliverable)"
+expect_status "C-2 paired positive: …marked declared" "declared" "$(roster_field "$ROW" source)"
 
 # ---------- S-1 (High) — the waiver label lifts only at LINE START, and a
 # placeholder-shaped reason is not a reason. One quoted line of documentation
@@ -1511,24 +1581,19 @@ expect_status "S-4: …and NO roster row is written outside the state directory"
 expect_absent "S-4: …and the escaped path is never named on stderr" "rogue.state" "$GATE_ERR"
 
 # ============================================================
-echo "=== S14 — remediation A-b: C-1 second shape, the placeholder DELIVERABLE ==="
+echo "=== S14 — a templated deliverable is not a declaration: it REFUSES (R1) ==="
 # ============================================================
 #
-# The half of C-1 that remediation A left open. The wall's own refusal text hands
-# the author a template line — `Expected artifact: .bionic/docs/record/<name>.md` —
-# and briefs in this repo quote that text constantly. Quoted back, the SLOT lifts
-# as a declared deliverable. Nothing can ever satisfy `<name>.md`, so before this
-# wave it was a wrong roster field and after it a permanent wall on that agent's
-# stop path: the landing gate demands a file whose name is a placeholder.
-#
-# The rejection lives in `ispath()` — the one predicate both the labeled lift
-# (`paths()`) and the record/-inference scan (`scan_inferred()`) run every token
-# through — so declared and inferred paths cannot disagree about what a template
-# is. A token carrying an unfilled `<…>` slot is not a path.
-#
-# EFFECT, chosen deliberately (assumption 60): a brief whose ONLY deliverable is a
-# placeholder is REFUSED by the absent-deliverable wall, not silently dropped. The
-# author gets told at dispatch, where the brief is still editable.
+# The `<slot>` shape has a long lineage. Wave-01 remediation A-b made `ispath()`
+# reject any token carrying an unfilled `<…>` slot, so a brief quoting the wall's
+# own help text — `Expected artifact: .bionic/docs/record/<name>.md` — could not
+# lift a contract nothing would satisfy. Wave-02 R4 then FILLED the slot from the
+# agent name and recorded `source=inferred`. R1 withdraws that fill: filling a slot
+# from the agent's name is guessing a deliverable, which is exactly what the wall
+# must never do. A slot is still not a path (ispath rejects it), so a brief whose
+# ONLY deliverable is a template names no concrete path and REFUSES — the author is
+# told at dispatch to name it exactly. A real declared line alongside the template
+# is still recovered (the extractor iterates every deliverable hit).
 
 BRIEF_QUOTES_HELP='Your slice: check that the wall message still reads right.
 It currently says: Fix: name a durable artifact path in the brief —
@@ -1539,17 +1604,14 @@ Expected duration: 20 minutes'
 REPO=$(make_repo r14a yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_QUOTES_HELP" "helpquoter")"
-expect_status "C-1 shape-2: a brief whose only deliverable is the help-text placeholder is REFUSED" \
+expect_status "a brief whose only deliverable is the help-text template is REFUSED (no fill)" \
   "2" "$GATE_ST"
-expect_contains "C-1 shape-2: …with the absent-deliverable refusal, at dispatch where it is fixable" \
-  "names no deliverable" "$GATE_ERR"
-expect_status "C-1 shape-2: …and no roster row carries a contract nothing can satisfy" "1" \
+expect_contains "…with the absent-deliverable refusal" "names no deliverable" "$GATE_ERR"
+expect_status "…and no roster row is written at all" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
 
-# THE DISCRIMINATOR: rejecting the slot must RECOVER the real artifact, not just
-# refuse. A quoted template ahead of a real labeled line wins the firsthit race
-# (the r12g shadow shape), so pre-fix this brief contracted the agent to
-# `<name>.md` and ignored the real path entirely.
+# A quoted template ahead of a REAL labeled line: the real one is recovered (the
+# extractor walks every deliverable hit), and the slot never reaches the row.
 BRIEF_HELP_THEN_REAL='Your slice: verify the wall text, then write up what you find.
 The message reads: Expected artifact: .bionic/docs/record/<name>.md
 Expected artifact: .bionic/docs/record/w99-shape2.md
@@ -1559,24 +1621,24 @@ REPO=$(make_repo r14b yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_HELP_THEN_REAL" "helpquoter2")"
 ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "C-1 shape-2: a quoted template ahead of a real line no longer shadows it" \
-  "0" "$GATE_ST"
-expect_status "C-1 shape-2: …the row carries the REAL artifact, never the slot" \
+expect_status "a quoted template ahead of a real line does not shadow it" "0" "$GATE_ST"
+expect_status "…the row carries the REAL artifact, never the slot" \
   ".bionic/docs/record/w99-shape2.md" "$(roster_field "$ROW" deliverable)"
-expect_absent "C-1 shape-2: …and the slot appears nowhere on the row" "<name>" "$ROW"
+expect_status "…recorded declared (it came from a label)" "declared" "$(roster_field "$ROW" source)"
+expect_absent "…and the slot appears nowhere on the row" "<name>" "$ROW"
 
-# A real record/ path is untouched by the slot rejection — the S12 contract holds.
+# An ordinary labeled deliverable is untouched by any of this.
 REPO=$(make_repo r14c yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-stillworks")"
 ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "C-1 shape-2 control: an ordinary labeled deliverable is unaffected" \
+expect_status "control: an ordinary labeled deliverable is unaffected" \
   ".bionic/docs/record/w99-widget.txt" "$(roster_field "$ROW" deliverable)"
 expect_status "…and is still marked declared" "declared" "$(roster_field "$ROW" source)"
 
-# The choke point is `ispath()`, so the same rule reaches the PROGRESS path: a
-# templated progress line is not a path either, and its absence is warned exactly
-# as a missing one is. Pinned so the shared-predicate choice is visible.
+# A templated PROGRESS path is also not filled — progress is advisory (absent
+# warns), so a template that names no concrete path leaves it EMPTY and WARNED,
+# exactly as a missing one is. The real deliverable is unaffected.
 BRIEF_PLACEHOLDER_PROGRESS='Your slice: build the widget.
 Expected artifact: .bionic/docs/record/w99-progplaceholder.md
 Progress artifact: .bionic/tmp/<name>.progress
@@ -1586,11 +1648,512 @@ REPO=$(make_repo r14d yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_PLACEHOLDER_PROGRESS" "progplaceholder")"
 ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "C-1 shape-2: a templated PROGRESS path is not a path either" \
+expect_status "a templated PROGRESS path is not filled — the field is left empty" \
   "" "$(roster_field "$ROW" progress)"
-expect_contains "C-1 shape-2: …and its absence is warned, exactly as a missing one is" \
-  "progress" "$GATE_ERR"
-expect_status "C-1 shape-2: …while the real deliverable still passes the wall" "0" "$GATE_ST"
+expect_absent "…so no slot reaches the field the liveness check stats" "<" \
+  "$(roster_field "$ROW" progress)"
+expect_contains "…and the absent progress path is warned" "progress" "$GATE_ERR"
+expect_status "…while the real deliverable still passes the wall" "0" "$GATE_ST"
+
+# ============================================================
+echo "=== S15 — the ship-day corners now pass BY DECLARING, not by guessing (R1, AC-3) ==="
+# ============================================================
+#
+# The two 2026-08-08 false blocks were GRAMMAR corners
+# (`plans/epic-16-landing-contract/continuation.md` §charter-seed, decision 3: "Both of
+# the day's false blocks were grammar corners (mid-string `<slot>` vs `^<`, and the
+# quoted-help-text deliverable lift)"). R4 answered them by GUESSING a deliverable from
+# prose and filling slots from the agent name. The Step-6 critic (N-1) showed the guess
+# is then enforced with a declared fact's full weight, so Chris withdrew inference: the
+# friction the wave wanted to remove was the requirement to DECLARE, and the reframe is
+# that declaring is cheap and robustly parsed while guessing is off-thesis. So each
+# corner now takes the same shape — as-written it REFUSES (there is no concrete declared
+# path), and adding one canonical label makes it pass as `declared`.
+#
+# FIXTURE FIDELITY — declared, narrower than "verbatim": no ship-day brief text survives
+# on disk (searched: `grep -rn "names no deliverable\|false-block" .bionic/docs/record/`);
+# what survives is a DESCRIPTION of each corner in the charter seed, commit 121d277's
+# message, and `record/w1-remediation-A2-report.md`. These briefs are RECONSTRUCTED to
+# those descriptions. What IS verbatim is the thing that made the corner:
+# BRIEF_QUOTES_HELP quotes this gate's own help text, where every ship-day `<name>.md`
+# came from. Each corner is driven BOTH ways — refused as-written, accepted once declared.
+
+# ---- corner 1: the MID-STRING slot in prose. As-written -> REFUSE ----
+BRIEF_CORNER1='Canonical-sdlc Step 4, slice S4 of epic-99 wave-02; build · audited · wave.
+Your slice: reconcile the label grammar with the declared parse.
+Write your findings to .bionic/docs/record/w2-<slice>-notes.md when the suite is green.
+Expected duration: ~20 minutes.'
+
+REPO=$(make_repo r15a yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_CORNER1" "corner1")"
+expect_status "AC-3 corner 1 (mid-string slot in prose): REFUSED, no path is guessed" "2" "$GATE_ST"
+expect_contains "AC-3 corner 1: …with the absent-deliverable refusal" "names no deliverable" "$GATE_ERR"
+expect_status "AC-3 corner 1: …and no roster row is written" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
+
+# corner 1, DECLARED: adding a canonical label with a concrete name is the whole fix.
+BRIEF_CORNER1_FIXED='Canonical-sdlc Step 4, slice S4 of epic-99 wave-02; build · audited · wave.
+Your slice: reconcile the label grammar with the declared parse.
+Expected artifact: .bionic/docs/record/w2-s4-notes.md
+Expected duration: ~20 minutes.'
+
+REPO=$(make_repo r15a2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_CORNER1_FIXED" "corner1")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "AC-3 corner 1 fixed: declaring a concrete path passes" "0" "$GATE_ST"
+expect_status "AC-3 corner 1 fixed: …the row carries the declared path" \
+  ".bionic/docs/record/w2-s4-notes.md" "$(roster_field "$ROW" deliverable)"
+expect_status "AC-3 corner 1 fixed: …marked declared" "declared" "$(roster_field "$ROW" source)"
+expect_absent "AC-3 corner 1 fixed: …no slot survives onto the roster" "<" "$ROW"
+
+# ---- corner 2: the QUOTED-HELP-TEXT template. As-written it REFUSES (S14 r14a); the
+# fix is BRIEF_HELP_THEN_REAL — the same quote plus a real declared line (S14 r14b).
+# Both are pinned in S14; here we assert the FRAMING: the corner's resolution is to
+# declare, and the declared line is what carries the contract.
+REPO=$(make_repo r15b yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_HELP_THEN_REAL" "helpquoter")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "AC-3 corner 2 (quoted help text + a real declaration): passes" "0" "$GATE_ST"
+expect_status "AC-3 corner 2: …the declared line carries the contract, not the quoted slot" \
+  ".bionic/docs/record/w99-shape2.md" "$(roster_field "$ROW" deliverable)"
+expect_status "AC-3 corner 2: …recorded declared" "declared" "$(roster_field "$ROW" source)"
+
+# ---- THE PLANTED FAILURE (AC-3): a brief naming no concrete path STILL refuses ----
+#
+# The wall did not become advisory. A brief that names no concrete declared path — no
+# label, no record/ mention, no template — has given the machinery nothing to stat.
+BRIEF_NOTHING='Your slice: read the wall message through and tell me whether the wording drifted.
+Expected duration: ~15 minutes.'
+
+REPO=$(make_repo r15c yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_NOTHING" "saysnothing")"
+expect_status "AC-3 planted failure: a brief naming no plausible deliverable is STILL refused" \
+  "2" "$GATE_ST"
+expect_contains "AC-3 planted failure: …with the absent-deliverable refusal" \
+  "names no deliverable" "$GATE_ERR"
+
+# ---- an unnamed dispatch whose only deliverable is a template is refused (no fill,
+# no ancestor fallback) — the withdrawal is total, not "fill when a name exists" ----
+REPO=$(make_repo r15f yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_QUOTES_HELP" "-")"
+expect_status "AC-3: an unnamed dispatch with only a templated path is REFUSED" "2" "$GATE_ST"
+expect_contains "AC-3: …with the absent-deliverable refusal" "names no deliverable" "$GATE_ERR"
+
+# ---- a real declared path always wins over a quoted template, wherever it sits, and
+# is recorded DECLARED — the extractor walks every deliverable hit and takes the first
+# that yields a concrete path ----
+REPO=$(make_repo r15h yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_HELP_THEN_REAL" "helpquoter2")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "AC-3: a quoted template ahead of a real line still loses to it" \
+  ".bionic/docs/record/w99-shape2.md" "$(roster_field "$ROW" deliverable)"
+expect_status "AC-3: …recorded declared, because a label yielded it" \
+  "declared" "$(roster_field "$ROW" source)"
+
+# ============================================================
+echo "=== S16 — the combined preflight: a missing attestation AUTO-RUNS the probe (epic-16 w2 S5, AC-4) ==="
+# ============================================================
+#
+# Synthesis §3, the five serialized minutes between order and spawn: the operator was
+# refused, ran the probe by hand, retried, and only then dispatched. R5 makes the
+# attestation a FACT the gate takes for itself — the probe is run inline, once, and the
+# dispatch proceeds. Blocking survives in exactly one place on this path: the probe
+# REFUSING, which means the environment is genuinely broken and the fleet would die.
+#
+# The probe invoked here is the REAL `hooks/preflight-probe.sh` sitting beside the gate —
+# no stub, no seam. Its environment is substituted instead (a sandboxed config dir and a
+# fixture credential), which is the same technique preflight-probe.test.sh uses.
+
+# ---- ONE invocation, order to spawn: no attestation in, dispatch out ----
+REPO=$(make_repo r16a yes)
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "AC-4: a dispatch with NO attestation is no longer refused" "0" "$GATE_ST"
+expect_status "AC-4: …the probe ran inline and left this session's attestation on disk" "0" \
+  "$([ -f "$REPO/.bionic/tmp/preflight-$SID_A.state" ] && echo 0 || echo 1)"
+expect_status "AC-4: …keyed to THIS session, not whatever the shell was" "0" \
+  "$(grep -qx "session_id=$SID_A" "$REPO/.bionic/tmp/preflight-$SID_A.state" && echo 0 || echo 1)"
+expect_contains "AC-4: …and the auto-run is announced, not silent" "attestation" "$GATE_ERR"
+expect_absent "AC-4: …with no refusal anywhere in it" "BLOCKED" "$GATE_ERR"
+expect_status "AC-4: …the dispatch is journalled exactly once (one invocation, one row)" "1" \
+  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+# The probe roots from the PINNED root, so the record it writes describes the repo the
+# gate is guarding — the Synthesis field case (attestation redone because the root came
+# from the shell's working directory) read the other way round.
+# Compared PHYSICALLY on both sides. The sandbox lives under the platform temp dir,
+# which is reached through a symlink on macOS (/var -> /private/var), so a string compare
+# against the test's own spelling of the path would fail on a correct answer.
+ATT_REPO=$(grep -m1 '^repo=' "$REPO/.bionic/tmp/preflight-$SID_A.state" | cut -d= -f2-)
+expect_status "AC-4: …and the attestation names the pinned repo root" \
+  "$(cd "$REPO" && pwd -P)" "$(cd "$ATT_REPO" 2>/dev/null && pwd -P)"
+
+# ---- a FOREIGN-only attestation is the same fact: absent for me ----
+REPO=$(make_repo r16b yes)
+write_attestation "$REPO" "$SID_B"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "AC-4: a foreign-only attestation auto-probes rather than refusing" "0" "$GATE_ST"
+expect_status "AC-4: …and session B's record is left strictly alone" "0" \
+  "$([ -f "$REPO/.bionic/tmp/preflight-$SID_B.state" ] && echo 0 || echo 1)"
+
+# ---- probe FAILURE fails CLOSED: the one surviving attestation refusal ----
+#
+# Driven by an unwritable state directory rather than an absent credential: the
+# credential's third source is the machine keychain, which no sandbox can take away, so
+# an absent-credential fixture would pass on this operator's machine and fail on a build
+# box. An unwritable directory is the same blocking-probe class and is deterministic.
+REPO=$(make_repo r16c yes)
+mkdir -p "$REPO/.bionic/tmp"
+chmod 500 "$REPO/.bionic/tmp"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+chmod 700 "$REPO/.bionic/tmp"
+expect_status "AC-4: a probe that FAILS blocks the dispatch (the environment is broken)" \
+  "2" "$GATE_ST"
+expect_contains "AC-4: …the refusal is phrased as a block" "BLOCKED" "$GATE_ERR"
+expect_contains "AC-4: …and hands over the probe's own reason, not a paraphrase" \
+  "state dir" "$GATE_ERR"
+expect_status "AC-4: …and a blocked dispatch is journalled nowhere (AC-12)" "0" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 1 || echo 0)"
+
+# ============================================================
+echo "=== S17 — ledger hygiene: a refusal leaves NO row; a same-path claim WARNS (epic-16 w2 S4, AC-12) ==="
+# ============================================================
+#
+# The F-4 phantom-intended-rows class, closed by inventory rather than by inspection: the
+# roster is compared BYTE FOR BYTE across a refused dispatch, so a row added anywhere on
+# any refusal path fails this regardless of what it says. Each absence assertion carries
+# its accepted-dispatch twin, because "no row was written" is trivially true of a gate
+# that writes no rows at all.
+
+# ---- the paired positive first: an accepted dispatch writes exactly one row ----
+REPO=$(make_repo r17a yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "AC-12 paired positive: an ACCEPTED dispatch creates exactly one row" "1" \
+  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ---- and each refusal path leaves the inventory untouched ----
+#
+# The roster is pre-seeded with a real accepted dispatch so the comparison is against a
+# NON-EMPTY ledger: "identical" then means the refusal added nothing, not that the file
+# never existed.
+for _case in nodeliverable outofrepo; do
+  REPO=$(make_repo "r17-$_case" yes)
+  write_attestation "$REPO" "$SID_A"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "seed-row")"
+  RP="$(roster_path "$REPO" "$SID_A")"
+  BEFORE="$(cat "$RP" 2>/dev/null)"
+  BEFORE_N="$(roster_rows "$RP")"
+  case "$_case" in
+    nodeliverable) _brief="$BRIEF_NOTHING" ;;
+    outofrepo)     _brief='Your slice: build it.
+Expected artifact: ../../../../../../etc/hosts
+Expected duration: ~15 minutes.' ;;
+  esac
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$_brief" "ghost-$_case")"
+  expect_status "AC-12 ($_case): the dispatch is refused" "2" "$GATE_ST"
+  expect_status "AC-12 ($_case): the roster is byte-identical across the refusal" \
+    "$BEFORE" "$(cat "$RP" 2>/dev/null)"
+  expect_status "AC-12 ($_case): …and still holds only the accepted dispatch's row" \
+    "$BEFORE_N" "$(roster_rows "$RP")"
+  expect_absent "AC-12 ($_case): the refused agent's name appears on no row" \
+    "ghost-$_case" "$(cat "$RP" 2>/dev/null)"
+done
+
+# ---- a second dispatch claiming a path an open row already owns: WARN, never block ----
+REPO=$(make_repo r17b yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "first-owner")"
+expect_status "AC-12: the first claim on a path passes silently" "0" "$GATE_ST"
+expect_absent "AC-12: …with no contention warning, since nothing else owns it" \
+  "already" "$GATE_ERR"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "second-owner")"
+expect_status "AC-12: a second dispatch claiming the same deliverable is NOT blocked" "0" "$GATE_ST"
+expect_contains "AC-12: …it draws a warning" "already" "$GATE_ERR"
+expect_contains "AC-12: …that names the OWNING row" "first-owner" "$GATE_ERR"
+expect_contains "AC-12: …and the contested path" ".bionic/docs/record/w99-widget.txt" "$GATE_ERR"
+expect_status "AC-12: …and the second row is journalled all the same" "2" \
+  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# a DIFFERENT path in the same session is not contention
+REPO=$(make_repo r17c yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "owner-a")"
+BRIEF_OTHER_PATH='Your slice: build the other widget.
+Expected artifact: .bionic/docs/record/w99-other.txt
+Expected duration: ~25 minutes.
+Progress artifact: .bionic/tmp/w99-other.progress'
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_OTHER_PATH" "owner-b")"
+expect_status "AC-12 paired negative: a distinct deliverable draws no contention warning" "0" "$GATE_ST"
+expect_absent "AC-12 paired negative: …and says nothing about an owner" "already" "$GATE_ERR"
+
+# ============================================================
+echo "=== S18 — EXACTLY ONE path under the deliverable label (R7: R6 critic R6-1/R6-2/R6-3/R6-4) ==="
+# ============================================================
+#
+# R1 withdrew prose inference but kept a guess inside the label: it read the FIRST
+# SENTENCE of the label span and took the FIRST path-shaped token in it. The R6 critic
+# showed that is F-RD wearing a declaration's clothes — "same shape as A, written to B"
+# contracted A, recorded `source=declared`, and the landing gate then ordered the agent
+# to write A (an existing report it was told to READ). Worse than pre-R1, where the
+# over-broad span at least CONTAINED the real deliverable.
+#
+# THE RULE (plan assumption 71, faithful completion of 48s never guess — declare or
+# refuse): the deliverable labels span must yield EXACTLY ONE path. Zero refuses (name
+# one); more than one REFUSES, naming every candidate, because choosing among them is
+# the guess. No position heuristic, no reading-verb whitelist, no first-wins.
+#
+# Because ambiguity is now fatal rather than resolved, the search window WIDENS back to
+# the whole span — which retires the false-block R1s first-sentence bound introduced
+# (a path in the labels second sentence was invisible, and the refusal told the author
+# to name a path they had already named).
+
+# ---- R6-1 CASE 9: two paths in one deliverable sentence -> REFUSE, both named ----
+BRIEF_TWO_PATHS_SHAPE='You are reviewing the wave.
+
+Expected artifact: same shape as .bionic/docs/record/w2-critic-report.md, written to .bionic/docs/record/w2-probe-frd.md
+Expected duration: 30 minutes.'
+
+REPO=$(make_repo r18a yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_PATHS_SHAPE" "shapebot")"
+expect_status "R6-1 CASE 9: a deliverable span naming two paths is REFUSED, never resolved" \
+  "2" "$GATE_ST"
+expect_contains "R6-1 CASE 9: …the refusal names the reference path" \
+  ".bionic/docs/record/w2-critic-report.md" "$GATE_ERR"
+expect_contains "R6-1 CASE 9: …and the real artifact, so neither is silently contracted" \
+  ".bionic/docs/record/w2-probe-frd.md" "$GATE_ERR"
+expect_contains "R6-1 CASE 9: …and asks for exactly one" "exactly one" "$GATE_ERR"
+expect_status "R6-1 CASE 9: …and no roster row contracts the agent to either" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
+
+# ---- R6-1 CASE 10: the read-then-produce ordering, the F-RD harm verbatim ----
+BRIEF_TWO_PATHS_READ='Your slice: an independent read-and-duplication review.
+Deliverable: read .bionic/docs/record/w2-auditor-report.md first, then produce .bionic/docs/record/w2-probe-frd2.md
+Expected duration: 20 minutes'
+
+REPO=$(make_repo r18b yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_PATHS_READ" "readproducebot")"
+expect_status "R6-1 CASE 10: read-X-then-produce-Y is REFUSED, not contracted to X" "2" "$GATE_ST"
+expect_contains "R6-1 CASE 10: …the auditors report is named as a candidate, not taken" \
+  ".bionic/docs/record/w2-auditor-report.md" "$GATE_ERR"
+expect_contains "R6-1 CASE 10: …alongside the artifact the agent was actually sent to write" \
+  ".bionic/docs/record/w2-probe-frd2.md" "$GATE_ERR"
+expect_status "R6-1 CASE 10: …and no row is written for either" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
+
+# ---- the refusal DIAGNOSES ambiguity, and is not the absent-deliverable message ----
+expect_absent "the ambiguity refusal is not misfiled as an absent deliverable" \
+  "names no deliverable" "$GATE_ERR"
+expect_contains "…it says where references belong instead" "outside" "$GATE_ERR"
+
+# ---- THE RESUBMISSION: CASE 9 with one path in the label and the reference moved out ----
+BRIEF_TWO_PATHS_FIXED='You are reviewing the wave.
+
+Read first: .bionic/docs/record/w2-critic-report.md — match its shape.
+Expected artifact: .bionic/docs/record/w2-probe-frd.md
+Expected duration: 30 minutes.'
+
+REPO=$(make_repo r18c yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_PATHS_FIXED" "shapebot")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "the resubmission — one path in the label, the reference outside it — passes" \
+  "0" "$GATE_ST"
+expect_status "…contracted to the artifact the brief actually asked for" \
+  ".bionic/docs/record/w2-probe-frd.md" "$(roster_field "$ROW" deliverable)"
+expect_absent "…and never to the reference it was told to read" \
+  "w2-critic-report" "$(roster_field "$ROW" deliverable)"
+expect_status "…marked declared" "declared" "$(roster_field "$ROW" source)"
+
+# ---- R6-4 CASE 5: a path in the labels SECOND sentence is declared, not absent ----
+#
+# R1 bounded the search at the end of the first sentence, so this brief — which names a
+# concrete path under a canonical label — was refused for naming none, and the message
+# told the author to do what they had already done. With ambiguity fatal, the window can
+# safely be the whole span.
+BRIEF_LATE_PATH='Your slice: assess the wave.
+Expected artifact: a written report. Put it at .bionic/docs/record/w2-probe-late.md when done.
+Expected duration: 20 minutes'
+
+REPO=$(make_repo r18d yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_LATE_PATH" "latepathbot")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "R6-4 CASE 5: a path in the labels second sentence PASSES (no first-sentence bound)" \
+  "0" "$GATE_ST"
+expect_status "R6-4 CASE 5: …and is the contract" \
+  ".bionic/docs/record/w2-probe-late.md" "$(roster_field "$ROW" deliverable)"
+expect_status "R6-4 CASE 5: …recorded declared, because a label yielded it" \
+  "declared" "$(roster_field "$ROW" source)"
+
+# ---- paired positive: one path plus surrounding prose in the span still passes ----
+BRIEF_ONE_PATH_PROSE='Your slice: build the widget.
+Expected artifact: .bionic/docs/record/w99-prose.md — the behavior table, the evidence,
+and the judgment calls, written as prose rather than a log. Keep it short.
+Expected duration: ~20 minutes.'
+
+REPO=$(make_repo r18e yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ONE_PATH_PROSE" "prosebot")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "paired positive: a one-path span wrapped in prose passes" "0" "$GATE_ST"
+expect_status "paired positive: …with that path as the contract" \
+  ".bionic/docs/record/w99-prose.md" "$(roster_field "$ROW" deliverable)"
+
+# ---- the same path named twice is ONE path, not an ambiguity ----
+BRIEF_SAME_TWICE='Your slice: build the widget.
+Expected artifact: .bionic/docs/record/w99-twice.md — append to .bionic/docs/record/w99-twice.md as you go.
+Expected duration: ~20 minutes.'
+
+REPO=$(make_repo r18f yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_SAME_TWICE" "twicebot")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "one path named twice is not an ambiguity" "0" "$GATE_ST"
+expect_status "…and lifts once" \
+  ".bionic/docs/record/w99-twice.md" "$(roster_field "$ROW" deliverable)"
+
+# ---- a WAIVER does not excuse an ambiguous declaration (R7 judgment call) ----
+#
+# The waiver excuses declaring NOTHING durable. A brief that declares a label naming two
+# artifacts has not waived anything — it has written a contract the machine cannot read,
+# and the author is the only one who can say which path is theirs.
+BRIEF_AMBIG_WAIVED='Your slice: review the wave.
+Deliverable-waiver: this dispatch returns its findings in the final message.
+Expected artifact: compare .bionic/docs/record/a-notes.md against .bionic/docs/record/b-notes.md
+Expected duration: 20 minutes'
+
+REPO=$(make_repo r18g yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_AMBIG_WAIVED" "waivedambig")"
+expect_status "a waiver does not excuse an ambiguous deliverable label" "2" "$GATE_ST"
+expect_contains "…and the refusal still names both candidates" "a-notes.md" "$GATE_ERR"
+
+# ---- R6-2: every refusal message recommends a brief the walls ACCEPT ----
+#
+# The containment refusal handed the author `Expected artifact: .bionic/docs/record/<name>.md`
+# — the literal string tests/cross-gate-agreement.test.sh §N.4 pins as REFUSED, and which
+# the SIBLING refusal (the absent-deliverable wall) explicitly calls out as not a name.
+# Two refusal messages in one file in direct contradiction, green the whole time because
+# no test read a Fix: line. This pin reads each walls own recommendation back out of its
+# stderr and DRIVES IT: an author who follows the Fix: line verbatim must not be refused.
+# It never hardcodes the example, so it holds when the wording is next edited.
+fix_example() {  # <stderr> -> the artifact path the Fix: block recommends
+  printf '%s\n' "$1" \
+    | grep -m1 -E '^[[:space:]]+Expected artifact: ' \
+    | sed -e 's/^[[:space:]]*Expected artifact: //' -e 's/[[:space:]]*$//'
+}
+
+BRIEF_OUT_OF_REPO='Your slice: build it.
+Expected artifact: ../../../../../../etc/hosts
+Expected duration: ~15 minutes.'
+
+for _wall in containment absent ambiguous; do
+  case "$_wall" in
+    containment) _b="$BRIEF_OUT_OF_REPO" ;;
+    absent)      _b="$BRIEF_NOTHING" ;;
+    ambiguous)   _b="$BRIEF_TWO_PATHS_SHAPE" ;;
+  esac
+  REPO=$(make_repo "r18h-$_wall" yes)
+  write_attestation "$REPO" "$SID_A"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$_b" "fixline-$_wall")"
+  expect_status "self-consistency ($_wall): the wall refuses" "2" "$GATE_ST"
+  _ex=$(fix_example "$GATE_ERR")
+  expect_status "self-consistency ($_wall): its Fix: block recommends a labeled example" "0" \
+    "$([ -n "$_ex" ] && echo 0 || echo 1)"
+  expect_absent "self-consistency ($_wall): …carrying no slot the walls themselves refuse" \
+    "<" "$_ex"
+  REPO=$(make_repo "r18i-$_wall" yes)
+  write_attestation "$REPO" "$SID_A"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your slice: do the work.
+Expected artifact: $_ex
+Expected duration: ~15 minutes." "followed-$_wall")"
+  expect_status "self-consistency ($_wall): a brief following that Fix: line verbatim PASSES" \
+    "0" "$GATE_ST"
+  expect_status "self-consistency ($_wall): …and the recommended path is what lands on the row" \
+    "$_ex" "$(roster_field "$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)" deliverable)"
+done
+
+# ---- R6-3: a parenthetical duration lifts readable, not truncated mid-phrase ----
+#
+# bound_field ended a value at `)` but not `(`, so a balanced parenthetical truncated with
+# a dangling open bracket — `~45 minutes (phase 1 only` — which the poker's parse_seconds
+# refuses (two numbers, one matched unit pair). An unreadable duration silently exempts the
+# row from overdue notification, which is A-2 read from the writer side.
+BRIEF_PAREN_DURATION='Your slice: build the widget.
+Expected artifact: .bionic/docs/record/w99-paren.md
+Expected duration: ~45 minutes (phase 1 only), phase 2 is a separate dispatch.'
+
+REPO=$(make_repo r18j yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_PAREN_DURATION" "parenbot")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "R6-3: a parenthetical duration lifts the clause before the bracket" \
+  "~45 minutes" "$(roster_field "$ROW" duration)"
+expect_absent "R6-3: …with no dangling open bracket for parse_seconds to choke on" \
+  "(" "$(roster_field "$ROW" duration)"
+expect_absent "R6-3: …and none of the parentheticals own numbers" \
+  "phase" "$(roster_field "$ROW" duration)"
+
+# ============================================================
+echo "=== S19 — deliverable-kind labels are LINE-START ONLY (R8: final-audit A-1) ==="
+# ============================================================
+#
+# record/w2-r7-audit.md A-1: R7's ambiguity wall refuses when a deliverable SPAN
+# holds two paths, but each of its three refusal messages quotes the same
+# concrete, liftable example — "Expected artifact: .bionic/docs/record/
+# my-slice-notes.md" — and briefs in this repo quote wall text constantly. A
+# brief that quotes that line in PROSE ahead of its real, later "Expected
+# artifact:" line puts each label in its OWN span (one path apiece), so the
+# ambiguity wall never sees two paths in one span; decl_deliverable() then
+# takes the FIRST hit that yields any path and silently contracts the agent to
+# a file it will never write, recorded source=declared as though a human named
+# it — the one shape that routes around the ambiguity wall entirely.
+#
+# THE FIX: the same mechanism `deliverable-waiver` already uses (S-1) — a
+# deliverable-kind label counts only at LINE START. A mid-line occurrence is
+# prose, not a declaration, and must not even register as a hit.
+
+# ---- the audit's own P2 specimen, verbatim ----
+BRIEF_P2_BAIT='Your slice: build the widget.
+The wall told me to write: Expected artifact: .bionic/docs/record/my-slice-notes.md
+Expected artifact: .bionic/docs/record/w2-probe-real.md
+Expected duration: 20 minutes'
+
+REPO=$(make_repo r19a yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_P2_BAIT" "p2bot")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "A-1: a quoted wall-message bait ahead of the real label passes" \
+  "0" "$GATE_ST"
+expect_status "A-1: …contracted to the REAL line-start label's path" \
+  ".bionic/docs/record/w2-probe-real.md" "$(roster_field "$ROW" deliverable)"
+expect_absent "A-1: …never to the mid-line quoted bait" \
+  "my-slice-notes.md" "$(roster_field "$ROW" deliverable)"
+expect_status "A-1: …still recorded declared" "declared" "$(roster_field "$ROW" source)"
+
+# ---- CONTROL: the bare `deliverable` label, same shape — proves the pin
+# generalizes across the canonical variants, not just `expected artifact` ----
+BRIEF_P2_BARE='Your slice: review the wave.
+It said: Deliverable: .bionic/docs/record/bait-bare.md is the example.
+Deliverable: .bionic/docs/record/w2-real-bare.md
+Expected duration: 20 minutes'
+
+REPO=$(make_repo r19b yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_P2_BARE" "p2barebot")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "A-1 control (bare label): passes" "0" "$GATE_ST"
+expect_status "A-1 control (bare label): contracted to the real line-start path" \
+  ".bionic/docs/record/w2-real-bare.md" "$(roster_field "$ROW" deliverable)"
+expect_absent "A-1 control (bare label): never to the mid-line bait" \
+  "bait-bare.md" "$(roster_field "$ROW" deliverable)"
 
 echo ""
 echo "----------------------------------------"

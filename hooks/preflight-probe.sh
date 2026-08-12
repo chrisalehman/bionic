@@ -117,7 +117,47 @@ CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
 # ---------------------------------------------------------------- where state lives
 
-REPO="$(git rev-parse --show-toplevel 2>/dev/null)"
+# THE PINNED ROOT (epic-16 wave-02, R5/AC-4).
+#
+# DELIBERATELY DUPLICATED, byte for byte, from hooks/canonical-sdlc-governing-skill.sh —
+# which holds the origin, with twins in the evidence gate and (as of this wave) the
+# dispatch wall. Same reason every other cross-script copy in hooks/ exists (TDD §9): a
+# sourced library the installer misses is a silently inert consumer, and this script is
+# installed on its own.
+#
+# WHY IT REPLACED `rev-parse --show-toplevel`. That answers with whatever tree the SHELL
+# happens to stand in, and the attestation is a per-repo fact whose filename the dispatch
+# wall then reconstructs from ITS root. Inside a git worktree the two disagree: the probe
+# writes into the worktree's own `.bionic`, the wall looks in the main repository's, finds
+# nothing, and the operator re-takes an attestation that was already good — the Synthesis
+# field case, verbatim ("attestation redone because root derived from shell CWD").
+# `--git-common-dir` maps a worktree back onto the main repository, so both sides land on
+# one address space (R9). From a SUBDIRECTORY the two already agreed; that half is
+# unchanged and is pinned so it stays that way.
+resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default pwd)
+  local d common root
+  d=$(dirname "$1")
+  while [ ! -d "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
+    d=$(dirname "$d")
+  done
+  if common=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+    dirname "$common"
+    return
+  fi
+  if common=$(git -C "$d" rev-parse --git-common-dir 2>/dev/null); then
+    case "$common" in
+      /*) root=$(dirname "$common") ;;
+      *)  root=$(cd "$d" 2>/dev/null && cd "$(dirname "$common")" 2>/dev/null && pwd -P) ;;
+    esac
+    if [ -n "$root" ]; then
+      printf '%s\n' "$root"
+      return
+    fi
+  fi
+  printf '%s\n' "${2:-$(pwd)}"
+}
+
+REPO="$(resolve_project_root "$PWD/." "$PWD")"
 [ -n "$REPO" ] || REPO="$PWD"
 REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
 if [ -z "$REPO_REAL" ]; then
@@ -324,15 +364,10 @@ if [ -n "$_installed_cli_version" ] && [ "$_installed_cli_version" != "$PAYLOAD_
   warn "payload shape (agent_id/D-3 discriminator) unvalidated on $_installed_cli_version; re-run the 4/1 probe method — record/w3-slice1-posttooluse-probe.md — and move the pin"
 fi
 
-# Sweeper arm line (slice 4/3, spec §Component boundaries): a print-only END-OF-RUN ACTION
-# LINE naming the exact command that arms this session's watcher (hooks/session-sweeper.sh).
-# The hooks directory is derived from THIS script's own location — never hardcoded — so the
-# printed command names the INSTALLED sibling wherever this probe actually runs from. This
-# probe NEVER spawns the sweeper itself: a probe-spawned process would be untracked by the
-# harness and its exit-wake lost (design D2). Copy-and-run only.
-_hooks_dir="$(cd "$(dirname "$0")" && pwd)"
-say "next: arm the session sweeper (watches this session's roster; never blocks, never spawned by this probe)"
-say "ARM: bash $_hooks_dir/session-sweeper.sh arm"
+# An END-OF-RUN ACTION LINE naming the command that arms this session's watcher stood here
+# until epic-16 wave-02. The watcher is deleted: supervision reads facts off disk at the
+# moment a decision needs them, so there is no process for this probe to point an operator
+# at, and nothing here to keep alive.
 
 # ---------------------------------------------------------------- state mutation
 
