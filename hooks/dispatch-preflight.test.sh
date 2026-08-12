@@ -667,8 +667,13 @@ echo "=== S10c — a missing NON-deliverable field is RECORDED + WARNED, never b
 
 REPO=$(make_repo r10c yes)
 write_attestation "$REPO" "$SID_A"
+# The label sits on its OWN line (R8: final-audit A-1 pinned the deliverable-kind
+# labels to line start) — a trailing mid-line occurrence would no longer register
+# as a hit at all, and this fixture is meant to test the near-fieldless-brief
+# warning path, not the line-start rule.
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" \
-  "Go and do the thing, please. Expected artifact: .bionic/docs/record/w99-min.txt" "-" "-")"
+  "Go and do the thing, please.
+Expected artifact: .bionic/docs/record/w99-min.txt" "-" "-")"
 R10C=$(roster_path "$REPO" "$SID_A")
 ROW=$(roster_row "$R10C" 1)
 
@@ -2095,6 +2100,60 @@ expect_absent "R6-3: …with no dangling open bracket for parse_seconds to choke
   "(" "$(roster_field "$ROW" duration)"
 expect_absent "R6-3: …and none of the parentheticals own numbers" \
   "phase" "$(roster_field "$ROW" duration)"
+
+# ============================================================
+echo "=== S19 — deliverable-kind labels are LINE-START ONLY (R8: final-audit A-1) ==="
+# ============================================================
+#
+# record/w2-r7-audit.md A-1: R7's ambiguity wall refuses when a deliverable SPAN
+# holds two paths, but each of its three refusal messages quotes the same
+# concrete, liftable example — "Expected artifact: .bionic/docs/record/
+# my-slice-notes.md" — and briefs in this repo quote wall text constantly. A
+# brief that quotes that line in PROSE ahead of its real, later "Expected
+# artifact:" line puts each label in its OWN span (one path apiece), so the
+# ambiguity wall never sees two paths in one span; decl_deliverable() then
+# takes the FIRST hit that yields any path and silently contracts the agent to
+# a file it will never write, recorded source=declared as though a human named
+# it — the one shape that routes around the ambiguity wall entirely.
+#
+# THE FIX: the same mechanism `deliverable-waiver` already uses (S-1) — a
+# deliverable-kind label counts only at LINE START. A mid-line occurrence is
+# prose, not a declaration, and must not even register as a hit.
+
+# ---- the audit's own P2 specimen, verbatim ----
+BRIEF_P2_BAIT='Your slice: build the widget.
+The wall told me to write: Expected artifact: .bionic/docs/record/my-slice-notes.md
+Expected artifact: .bionic/docs/record/w2-probe-real.md
+Expected duration: 20 minutes'
+
+REPO=$(make_repo r19a yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_P2_BAIT" "p2bot")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "A-1: a quoted wall-message bait ahead of the real label passes" \
+  "0" "$GATE_ST"
+expect_status "A-1: …contracted to the REAL line-start label's path" \
+  ".bionic/docs/record/w2-probe-real.md" "$(roster_field "$ROW" deliverable)"
+expect_absent "A-1: …never to the mid-line quoted bait" \
+  "my-slice-notes.md" "$(roster_field "$ROW" deliverable)"
+expect_status "A-1: …still recorded declared" "declared" "$(roster_field "$ROW" source)"
+
+# ---- CONTROL: the bare `deliverable` label, same shape — proves the pin
+# generalizes across the canonical variants, not just `expected artifact` ----
+BRIEF_P2_BARE='Your slice: review the wave.
+It said: Deliverable: .bionic/docs/record/bait-bare.md is the example.
+Deliverable: .bionic/docs/record/w2-real-bare.md
+Expected duration: 20 minutes'
+
+REPO=$(make_repo r19b yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_P2_BARE" "p2barebot")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "A-1 control (bare label): passes" "0" "$GATE_ST"
+expect_status "A-1 control (bare label): contracted to the real line-start path" \
+  ".bionic/docs/record/w2-real-bare.md" "$(roster_field "$ROW" deliverable)"
+expect_absent "A-1 control (bare label): never to the mid-line bait" \
+  "bait-bare.md" "$(roster_field "$ROW" deliverable)"
 
 echo ""
 echo "----------------------------------------"
