@@ -37,9 +37,13 @@
 # roster row has no completion event of its own. An agent that finished but declared no
 # machine-visible deliverable leaves nothing on disk to read; the orchestrator verifies
 # every agent's completion anyway, and `ack` is that verification made durable, so a row it
-# closed stays closed across sessions. It does NOT reach `verdict`: a contract is met by
-# artifacts or it is not, which is what lets an ack over an UNMET row WARN instead of
-# quietly erasing the discrepancy.
+# closed stays closed across sessions. It does NOT reach the verdict's STATE: a contract is
+# met by artifacts or it is not, which is what lets an ack over an UNMET row WARN instead of
+# quietly erasing the discrepancy. It DOES ride out beside that state, as `acked=` on the
+# verdict machine line (epic-16 wave-02 S9) — a report of a second fact, never an input to
+# the first. Before S9 the three stop-side scripts each opened this ledger through their own
+# byte-identical copy of a reader; the ledger has ONE reader now, here, and everything
+# downstream consumes a field on a line it was already asking for.
 #
 # FILES (all under .bionic/tmp/, all machine-local, all safe to delete):
 #   roster-<session>.state   read-only input, schema roster-state/v1, owned by
@@ -362,11 +366,17 @@ roster_names() {
 # even record that it ran, which is what makes it safe to call from a hook on every
 # subagent stop.
 #
-# THE ACK DOES NOT REACH IT. An ack is the orchestrator saying "I verified this agent
+# THE ACK DOES NOT REACH THE STATE. An ack is the orchestrator saying "I verified this agent
 # finished" — a fact about the verification, not about the disk. A contract is met by
 # artifacts or it is not, so `verdict` re-reads the disk for an acked row exactly as for any
 # other. That separation is what lets `ack` warn on an UNMET row instead of quietly erasing
 # the discrepancy.
+#
+# IT DOES REACH THE LINE, as `acked=yes|no` beside the state (epic-16 wave-02 S9). Two facts,
+# spelled separately, computed independently, carried together — because every consumer of
+# this line needs both and none of them should have to open the ledger to get the second.
+# The exit code is the state's alone: an acked UNMET row still exits 1, exactly as it did
+# when the callers read the ledger themselves, and what to do about the pair stays theirs.
 
 epoch_iso() {  # <epoch seconds> -> ISO-8601 Z; empty when it cannot be rendered
   [ -n "$1" ] || return 0
@@ -668,6 +678,12 @@ case "$VERB" in
     fi
 
     _want="$(clean "$VERDICT_NAME")"
+    # ONCE, ahead of the loop: the ledger is one file and every row asks it the same
+    # question, so a per-row read would be a file open per row on the path a SubagentStop
+    # hook runs. Read here rather than cached anywhere across invocations — an ack taken by
+    # a process that has since exited is still in force, which is the whole durability
+    # claim the stop-side consumers rest on.
+    read_acked
     _rows="$(latest_rows)"
     _n=0; _met=0; _unmet=0; _waived=0; _live=0; _ambig=0; _unmet_lines=""
     # The fold hands over the name and the contract count it already parsed; re-deriving
@@ -688,9 +704,17 @@ case "$VERB" in
         VERDICT_DETAIL="$_ncontracts contracts share the name \"$_rname\" on this roster; no reader can tell which one is stopping, so none of them is judged. Re-dispatch under distinct names, or read the rows by tool_use_id."
       fi
       _n=$((_n + 1))
-      printf '%s|at=%s|session=%s|name=%s|state=%s|detail=%s\n' \
-        "$VERDICT_SCHEMA" "$(iso_now)" "$SESSION_ID" "$(clean "$_rname")" \
-        "$VERDICT_STATE" "$(clean "$VERDICT_DETAIL")"
+      # THE ACK, REPORTED BESIDE THE STATE and never folded into it (S9). Asked with the
+      # CLEANED name — the form the ack verb stores and this line prints — so the one
+      # reader of the ledger and the one printer of the answer normalize the key identically;
+      # a second normalization is the C-5 divergence class, and this is the site that used to
+      # have three of them downstream. `no` is printed rather than left empty on purpose: a
+      # consumer must be able to tell "not acked" from "this verb does not carry the field".
+      _pname="$(clean "$_rname")"
+      _acked=no; row_acked "$_pname" && _acked=yes
+      printf '%s|at=%s|session=%s|name=%s|state=%s|acked=%s|detail=%s\n' \
+        "$VERDICT_SCHEMA" "$(iso_now)" "$SESSION_ID" "$_pname" \
+        "$VERDICT_STATE" "$_acked" "$(clean "$VERDICT_DETAIL")"
       case "$VERDICT_STATE" in
         MET)        _met=$((_met + 1)) ;;
         WAIVED)     _waived=$((_waived + 1)) ;;

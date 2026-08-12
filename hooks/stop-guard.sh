@@ -120,29 +120,6 @@ record_field() {  # <record-line> <key>
   printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
 }
 
-# HAS THE ORCHESTRATOR CLOSED THIS ROW? DELIBERATELY DUPLICATED, byte for byte, into
-# hooks/stop-guard.sh and hooks/landing-gate.sh — the TDD's §9 convention, for its reason:
-# a sourced library the installer misses is a silently inert wall. The three copies are
-# held together by tests/cross-gate-agreement.test.sh's stop-arc section, which drives all
-# three over one ledger written by the real `session-sweeper.sh ack`.
-#
-# It reads the sweeper's ledger rather than its verdict because ack is invisible to
-# `verdict` BY DESIGN (a contract is met by artifacts or it is not, which is what lets an
-# ack over an UNMET row warn instead of quietly erasing the discrepancy). Whole-name match,
-# never a substring: `w4-s1` must not be closed by an ack of `w4-s10`.
-ledger_acked() {  # <ledger-file> <name> -> 0 when an ack closed that row
-  local f="$1" want="$2" line n
-  [ -n "$want" ] || return 1
-  [ -L "$f" ] && return 1
-  [ -f "$f" ] || return 1
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in "sweeper-ledger/v1|"*) : ;; *) continue ;; esac
-    case "$line" in *"|event=ack|"*) : ;; *) continue ;; esac
-    n=$(printf '%s' "$line" | tr '|' '\n' | grep '^name=' | head -1 | cut -d= -f2-)
-    [ -n "$n" ] && [ "$n" = "$want" ] && return 0
-  done < "$f"
-  return 1
-}
 record_version() { printf '%s' "$1" | cut -d'|' -f1; }
 
 state_paths() {  # <repo> -> echoes "<state-dir>|<state-file>"; nonzero if unsafe
@@ -467,7 +444,11 @@ fi
 #                 It reports what is being given up and gets out of the way.
 #   an ACK      — the orchestrator verified this agent's completion and made that durable.
 #                 It is the ONLY thing that can close a row which declared no
-#                 machine-visible artifact, which is the job it exists for.
+#                 machine-visible artifact, which is the job it exists for. It arrives as
+#                 `acked=` on the verdict's own line (epic-16 wave-02 S9): this gate used to
+#                 open the sweeper's ledger through a private copy of a reader, one of three
+#                 such copies in the fleet, and the verb it was already running for `state=`
+#                 owns that file. One reader, one normalization of the name, one answer.
 #   MET/WAIVED  — the contract landed, or was explicitly waived at dispatch.
 #
 # WHAT DOES NOT: a MET over a row that DECLARED NOTHING. The verb calls such a row MET
@@ -476,12 +457,19 @@ fi
 # dispatch on a fact nobody produced. AC-1 spells MET as "artifact delivered"; ack closes
 # the rest. Nothing else changes: a live agent with an unmet contract meets the same arc
 # it met before, which is what Sections 4–10 of the suite still pin.
+#
+# AND AN ACK FOR A NAME NO ROSTER ROW CARRIES no longer discharges anything here, which is
+# the one behaviour S9's promotion moved. The ack verb records such a name with a warning
+# and holds it "exempt the moment a row of that name appears" — the ack closes a ROW — and
+# with the answer riding a per-row verdict line there is no row for it to ride. This gate
+# was the only reader that had been closing on the bare name; the landing gate passes such a
+# stop for an unrelated reason and the stand-down never sees one, so this is the reading all
+# three now share. Pinned in the suite beside its paired positive.
 
 SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
-LEDGER_FILE="$STATE_DIR/sweeper-${SID}.state"
 ORDERS_FILE="$STATE_DIR/stop-orders-${SID}.state"
 
-V_TAKEN=0; V_STATE=""; V_DETAIL=""
+V_TAKEN=0; V_STATE=""; V_DETAIL=""; V_ACKED=""
 take_verdict() {
   [ "$V_TAKEN" -eq 1 ] && return 0
   V_TAKEN=1
@@ -500,6 +488,7 @@ take_verdict() {
   [ -n "$line" ] || return 0
   V_STATE=$(record_field "$line" state)
   V_DETAIL=$(record_field "$line" detail)
+  V_ACKED=$(record_field "$line" acked)
   return 0
 }
 
@@ -548,9 +537,8 @@ if order_current; then
   exit 0
 fi
 
-ledger_acked "$LEDGER_FILE" "$AGENT_NAME" && exit 0
-
 take_verdict
+[ "$V_ACKED" = "yes" ] && exit 0
 case "$V_STATE" in
   WAIVED) exit 0 ;;
   MET)    [ -n "$(record_field "$ROSTER_ROW" deliverable)" ] && exit 0 ;;
