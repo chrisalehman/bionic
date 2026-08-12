@@ -31,13 +31,23 @@
 #   - no active wave                                     -> pass, silent (nothing to decide)
 #   - payload carries no session_id, or one that is not
 #     shaped like one (anything outside [A-Za-z0-9_-])    -> pass, silent (§7 table: start=open)
-#   - attestation missing, unreadable, symlinked, or
-#     keyed to a different session (foreign)              -> REFUSE, naming the fix command
 #   - attestation present and keyed to THIS session_id    -> pass, silent
+#   - attestation missing, unreadable, symlinked, or
+#     keyed to a different session (foreign)              -> AUTO-RUN the probe, then
+#     (the combined preflight, epic-16 wave-02 R5)           pass on what it finds
+#   - the auto-run probe REFUSES                          -> REFUSE, quoting the probe
+#     (the environment is genuinely broken; fail closed)     and naming the fix command
 #   - brief names no deliverable and carries no waiver    -> REFUSE, naming both
 #     (the absent-deliverable wall, user-directed post-w4)   the fix and the waiver
+#   - brief names a deliverable only as an unfilled       -> pass, WARN, and infer the
+#     template (epic-16 wave-02 R4)                          row from the agent name
 #   - brief names a deliverable that resolves OUTSIDE the -> REFUSE, naming the
 #     repo root (the containment wall, Step-6 review S-2)    path and where it lands
+#
+# TWO ROOTS THIS FILE NEVER RE-DERIVES (epic-16 wave-02 R9): the project root comes
+# from `resolve_project_root` (the main repository, never a worktree or the shell's
+# cwd), and every state path hangs off it — so the probe on the other side of the
+# combined preflight writes where this gate reads.
 #
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
 # [WALL: hooks/dispatch-preflight.test.sh]
@@ -60,8 +70,49 @@ TOOL_NAME=$(_jq '.tool_name')
 # ---------- ambiguity: cannot even locate the repo -> OPEN, silent ----------
 CWD=$(_jq '.cwd')
 [ -n "$CWD" ] || exit 0
-REPO=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null) || exit 0
-[ -n "$REPO" ] || exit 0
+git -C "$CWD" rev-parse --show-toplevel >/dev/null 2>&1 || exit 0
+
+# ---------- the PINNED root (epic-16 wave-02, R5/R9) ----------
+#
+# DELIBERATELY DUPLICATED, byte for byte, from hooks/canonical-sdlc-governing-skill.sh —
+# which holds the origin, with a second twin in the evidence gate. Same reason as
+# resolve_docs_root below: a sourced library the installer misses is a silently inert
+# wall, so these hooks carry copies and an agreement suite holds them together.
+#
+# WHY IT REPLACED `rev-parse --show-toplevel` HERE. That answers with the WORKTREE root,
+# and every path this gate owns hangs off the answer: the attestation it reads, the
+# roster it appends, the containment wall it measures deliverables against. The probe on
+# the other side of the combined preflight below resolves its root the same way, and two
+# scripts that disagree about which `.bionic` is real produce the exact failure R9 names
+# — a probe writing an attestation the gate then cannot find, and a roster that dies with
+# the worktree. `--git-common-dir` maps a worktree back onto the main repository, so both
+# sides land on one address space. On an ordinary checkout the two answers are identical,
+# which is why nothing outside a worktree changes.
+resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default pwd)
+  local d common root
+  d=$(dirname "$1")
+  while [ ! -d "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
+    d=$(dirname "$d")
+  done
+  if common=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+    dirname "$common"
+    return
+  fi
+  if common=$(git -C "$d" rev-parse --git-common-dir 2>/dev/null); then
+    case "$common" in
+      /*) root=$(dirname "$common") ;;
+      *)  root=$(cd "$d" 2>/dev/null && cd "$(dirname "$common")" 2>/dev/null && pwd -P) ;;
+    esac
+    if [ -n "$root" ]; then
+      printf '%s\n' "$root"
+      return
+    fi
+  fi
+  printf '%s\n' "${2:-$(pwd)}"
+}
+
+REPO=$(resolve_project_root "$CWD/." "$CWD")
+[ -n "$REPO" ] && [ -d "$REPO" ] || exit 0
 
 # ---------- active-wave detection ----------
 # DELIBERATELY DUPLICATED, byte for byte where the logic overlaps, from
@@ -147,7 +198,7 @@ PAYLOAD_SID=$(_jq '.session_id')
 case "$PAYLOAD_SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
 
 deny() {  # <reason line>...
-  echo "BLOCKED: this subagent start needs a this-session environment attestation — a wave is active." >&2
+  echo "BLOCKED: this subagent start needs a working environment — a wave is active." >&2
   echo "" >&2
   local line
   for line in "$@"; do echo "$line" >&2; done
@@ -169,12 +220,8 @@ STATE_FILE="$REPO/.bionic/tmp/preflight-${PAYLOAD_SID}.state"
 # so the record's own `repo=` field never exposes the mismatch. Checklist A3
 # names this class; it was discharged for the WRITE path only. The sibling stop
 # gate refuses at all three levels (hooks/stop-guard.sh's state_paths()); these
-# are the same three. Treated the same as "missing": refuse.
-if [ -L "$REPO/.bionic" ] || [ -L "$REPO/.bionic/tmp" ] \
-   || [ -L "$STATE_FILE" ] || [ ! -f "$STATE_FILE" ]; then
-  deny "No environment attestation was found for this repo."
-fi
-
+# are the same three.
+#
 # Read by KEY, never by position (checklist A6) — mirrors the producer's own
 # readback. This gate parses no check detail beyond the session key: the
 # attestation's existence, keyed to THIS session, is the whole verdict
@@ -188,10 +235,81 @@ fi
 # a schema bump — the expensive direction here — while an unreadable observation
 # record must refuse a stop, because that side's ambiguity is what the wall is
 # for. Recorded in the spec's ownership table beside both schema rows.
-ATTESTED_SID=$(grep -m1 '^session_id=' "$STATE_FILE" 2>/dev/null | cut -d= -f2-)
-if [ -z "$ATTESTED_SID" ] || [ "$ATTESTED_SID" != "$PAYLOAD_SID" ]; then
-  deny "The attestation on disk is not this session's (foreign, or not a valid attestation record)." \
-       "It may have been written by a different session, or the record could not be read."
+attested() {
+  [ ! -L "$REPO/.bionic" ] && [ ! -L "$REPO/.bionic/tmp" ] \
+    && [ ! -L "$STATE_FILE" ] && [ -f "$STATE_FILE" ] || return 1
+  local sid
+  sid=$(grep -m1 '^session_id=' "$STATE_FILE" 2>/dev/null | cut -d= -f2-)
+  [ -n "$sid" ] && [ "$sid" = "$PAYLOAD_SID" ]
+}
+
+# ==================================================== THE COMBINED PREFLIGHT
+# (epic-16 wave-02, R5/AC-4; Synthesis field report §3.)
+#
+# WHAT THIS REPLACED. Every branch above used to end in `deny`, and the fix it
+# named was a command the operator ran by hand: refused, run the probe, retry,
+# dispatch. Five serialized minutes between deciding to dispatch and the agent
+# existing, paid per session and again after every /clear — which re-fires the
+# this-session demand mid-wave, when nothing about the machine has changed.
+#
+# THE ASYMMETRY THAT MAKES IT SAFE. A missing attestation is not evidence of a
+# broken environment; it is the absence of evidence either way, and the way to
+# turn an absent fact into a present one is to go and read it. That costs a second
+# and cannot go stale, which is the whole argument against carrying a claim across
+# sessions. So an absent, foreign, or unreadable attestation AUTO-RUNS the probe
+# and the dispatch proceeds on what it finds.
+#
+# BLOCKING SURVIVES IN EXACTLY ONE PLACE ON THIS PATH: the probe REFUSING. That is
+# a positive finding — no credential, an unwritable repo, an unwritable or
+# redirected state directory — and it is the finding a fleet dies of collectively.
+# Fail closed on it. The hostile-repo posture is unchanged and now enforced by the
+# producer rather than restated here: the probe refuses on a symlinked `.bionic`,
+# `.bionic/tmp`, or attestation path, so a repo can still CLOSE this wall and
+# still cannot OPEN it — the planted content is never read, before or after.
+if ! attested; then
+  # The probe next to this script, so a test drives the real producer and an
+  # installed gate finds its installed sibling. `$0` is the gate's own path on
+  # both; the config-dir form is the fallback for an exotic invocation.
+  PROBE_SCRIPT="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/preflight-probe.sh"
+  [ -f "$PROBE_SCRIPT" ] || PROBE_SCRIPT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/preflight-probe.sh"
+
+  if [ ! -f "$PROBE_SCRIPT" ]; then
+    deny "No environment attestation was found for this repo, and the probe that writes one" \
+         "could not be located (looked beside this gate and under the Claude config directory)."
+  fi
+
+  # Run it AT THE PINNED ROOT and with THIS dispatch's session key, rather than
+  # letting it inherit the shell. Both are the Synthesis field case read directly:
+  # the attestation that had to be redone was taken against a root derived from the
+  # working directory, and an attestation keyed to anything but the session whose
+  # dispatch this is would be one this gate then refuses to read.
+  PROBE_OUT=$(cd "$REPO" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$PAYLOAD_SID" \
+                bash "$PROBE_SCRIPT" 2>&1)
+  PROBE_ST=$?
+
+  if [ "$PROBE_ST" -ne 0 ] || ! attested; then
+    # The probe's own words, not a paraphrase of them: it is the component that
+    # knows WHICH check failed, and an operator handed "something went wrong" has
+    # to run it again by hand to learn anything. Indented so the quotation is
+    # visibly the probe speaking.
+    {
+      echo "BLOCKED: the environment check refused, so this dispatch would launch into a broken environment." >&2
+      echo "" >&2
+      echo "The check was run automatically for this session and did not pass:" >&2
+      printf '%s\n' "$PROBE_OUT" | sed 's/^/    /' >&2
+      echo "" >&2
+      echo "A fleet inherits this environment and dies collectively if it is wrong." >&2
+      echo "Fix the failure above, then retry the dispatch (or re-run by hand: ${PREFLIGHT_CMD})." >&2
+    }
+    exit 2
+  fi
+
+  # Announced, never silent. §4 bans printing CHECK DETAIL on the allow path; this
+  # is not detail, it is the gate reporting an action it took on the operator's
+  # behalf — the same class as the roster's absence warning, and the operator has
+  # to be able to see that a probe ran without being asked.
+  printf 'dispatch-preflight: no this-session attestation was present; the environment check was run automatically and passed (%s)\n' \
+    "$STATE_FILE" >&2
 fi
 
 # ================================================================== THE ROSTER
@@ -330,16 +448,43 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
     # nothing could ever satisfy it (Step-6 review C-1, second shape). The rule
     # lives HERE, in the predicate both the labeled lift and the inference scan
     # run every token through, so the two can never disagree about what a
-    # template is. A refusal follows from rejecting it, via the absent-deliverable
-    # wall — the author is told at dispatch, where the brief is still editable.
-    function ispath(t) {
+    # template is.
+    #
+    # WHAT FOLLOWS FROM REJECTING IT CHANGED in epic-16 wave-02 (R4). Wave-01 let
+    # the rejection fall through to the absent-deliverable wall and REFUSE, so the
+    # author was told at dispatch while the brief was still editable. Ship day
+    # 2026-08-08 then spent that refusal twice on briefs with nothing wrong in
+    # substance, and the wave charter named both as grammar corners. A template is
+    # not an absence: it names the LOCATION and leaves the NAME open, and the
+    # dispatch itself carries a name. So templates are still not paths — they lift
+    # SEPARATELY, under their own kind, and the shell side fills the slot. The
+    # separation is the point: a filled path can never be mistaken for one the
+    # author wrote, and it is recorded `source=inferred` for exactly that reason.
+    #
+    # The unterminated form (`<name` after trimtok has eaten a trailing `>`) counts
+    # as a template too. Without that clause `.bionic/tmp/<name>` passed the four
+    # shape checks and lifted as a literal path — a contract with a bracket in its
+    # basename, which nothing would ever satisfy.
+    # The unterminated forms are counted too, in BOTH directions, because trimtok
+    # runs first and its LEAD/TRAIL sets contain both brackets: `<name>` alone comes
+    # out as `name`, and `<somewhere>/out.md` comes out as `somewhere>/out.md`,
+    # which passes all four shape checks and would lift as a literal path with a
+    # bracket in it. An orphaned bracket on either side is the residue of a slot,
+    # never a filename anyone typed.
+    function istemplate(t) {
+      if (t ~ /<[^<>]*>/)  return 1     # a whole slot
+      if (t ~ /<[^<>]*$/)  return 1     # opening bracket, closer eaten by trimtok
+      if (t ~ /^[^<>]*>/)  return 1     # closing bracket, opener eaten by trimtok
+      return 0
+    }
+    function pathshaped(t) {
       if (length(t) < 3)        return 0
       if (index(t, "/") == 0)   return 0
       if (t !~ /[A-Za-z]/)      return 0
       if (substr(t, 1, 1) == "-") return 0
-      if (t ~ /<[^<>]*>/)       return 0
       return 1
     }
+    function ispath(t) { return (pathshaped(t) && !istemplate(t)) }
     function collapse(s) { gsub(/[ \t\r\n]+/, " ", s); sub(/^ +/, "", s); sub(/ +$/, "", s); return s }
     # The claimed PROCESS PATTERN out of a subprocess-claim span. Author-marked
     # first (a backticked or quoted run is unambiguous), then the punctuation the
@@ -440,6 +585,26 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       }
       return ""
     }
+    # scan_inferred()`s twin for templates, and it keeps BOTH of that scan`s
+    # restraints rather than relaxing them for a weaker kind of evidence: never out
+    # of an input span (the C-1 finding — the agent must not be contracted to a file
+    # it was sent to read, and a slot in that path does not make it any more its
+    # output), and never a tmp path (a scratch file is not durable, filled or not).
+    function scan_templated(   pos, t, start, rest) {
+      pos = 1
+      while (pos <= length(text)) {
+        rest = substr(text, pos)
+        if (match(rest, /[^ \t\r\n]+/) == 0) break
+        start = pos + RSTART - 1
+        t = substr(text, start, RLENGTH)
+        pos = start + RLENGTH
+        if (in_input_span(start)) continue
+        t = trimtok(t)
+        if (!pathshaped(t) || !istemplate(t)) continue
+        if (is_record_path(t)) return t
+      }
+      return ""
+    }
     # A waiver REASON that is the angle-bracketed slot out of the wall message,
     # copied rather than filled in. A real reason never opens with one.
     function isplaceholder(v) { return (v ~ /^<[^<>]*>/) }
@@ -448,6 +613,20 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       for (i = 1; i <= n; i++) {
         t = trimtok(arr[i])
         if (!ispath(t) || seen[t]) continue
+        seen[t] = 1
+        out = (out == "" ? t : out "," t)
+        if (++c >= maxn) break
+      }
+      return out
+    }
+    # paths()`s twin for the template kind — same span, same trimming, the one
+    # predicate inverted. One token only: a filled path is a GUESS, and guessing a
+    # conjunction of them would multiply one uncertainty into several.
+    function templates(s, maxn,   n, arr, i, t, out, seen, c) {
+      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0
+      for (i = 1; i <= n; i++) {
+        t = trimtok(arr[i])
+        if (!pathshaped(t) || !istemplate(t) || seen[t]) continue
         seen[t] = 1
         out = (out == "" ? t : out "," t)
         if (++c >= maxn) break
@@ -532,13 +711,40 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # on h == 0 alone left that shadowed case refused despite a real record/
       # path sitting later in the same brief; v == "" catches both shapes with
       # the one scan (post-landing addendum, live specimen).
+      #
+      # THE LADDER, strongest evidence first (epic-16 wave-02, R4). Each rung is
+      # tried only when every rung above it found nothing, so a path the author
+      # actually wrote can never be demoted by a guess sitting earlier in the text:
+      #   1. a labeled, slot-free path            -> deliverable= (source=declared)
+      #   2. an unlabeled record/ path            -> inferred=    (source=inferred)
+      #   3. a labeled template, then an unlabeled record/ template
+      #                                           -> templated=   (shell fills it)
+      # Nothing below rung 3 exists: a brief offering none of the three has named no
+      # location at all, and that is the substance the wall still refuses on.
       h = firsthit("deliverable")
       v = ""
       if (h > 0) { v = paths(spanof(h), 4) }
       if (v != "") { print "deliverable=" v }
-      else         { v = scan_inferred(); if (v != "") print "inferred=" v }
+      else {
+        v = scan_inferred()
+        if (v != "") { print "inferred=" v }
+        else {
+          tv = ""
+          if (h > 0) { tv = templates(spanof(h), 1) }
+          if (tv == "") { tv = scan_templated() }
+          if (tv != "") { print "templated=" tv }
+        }
+      }
       h = firsthit("duration");    if (h > 0) { v = collapse(spanof(h));      if (v != "") print "duration=" v }
-      h = firsthit("progress");    if (h > 0) { v = paths(spanof(h), 1);      if (v != "") print "progress=" v }
+      # The progress field takes the same two rungs, because `ispath` is the one
+      # predicate both fields run through and a rule that filled one spelling but
+      # not the other is how two fields come to disagree about what a template is.
+      h = firsthit("progress")
+      if (h > 0) {
+        v = paths(spanof(h), 1)
+        if (v != "") { print "progress=" v }
+        else { v = templates(spanof(h), 1); if (v != "") print "progress_templated=" v }
+      }
       # CADENCE IS POSITIONAL, not merely lexical (Step-6 critic F-2). It is the
       # one label with a relaxed separator — whitespace will do, because the
       # contract writes it inside the progress sentence rather than on a line of
@@ -620,6 +826,53 @@ C_CADENCE=$(sanitize "$(field_of cadence)" 80)
 C_CLAIMS=$(sanitize "$(field_of claims)" 300)
 C_WAIVER=$(sanitize "$(field_of waiver)" 300)
 C_INFERRED=$(sanitize "$(field_of inferred)" 300)
+C_TEMPLATED=$(sanitize "$(field_of templated)" 300)
+C_PROGRESS_TEMPLATED=$(sanitize "$(field_of progress_templated)" 300)
+
+# ---------- filling a template (epic-16 wave-02, R4) ----------
+#
+# The slot's own word for what belongs in it is `<name>`, and a dispatch carries
+# exactly one name — the agent's. So the fill is not a heuristic about this repo's
+# file-naming habits; it is reading the template the way its author wrote it. The
+# result is a real, satisfiable, falsifiable path, which is the property the
+# absent-deliverable wall exists to guarantee and the one a raw slot destroys.
+#
+# The name is reduced to a filename alphabet first. It reaches here through
+# `sanitize`, which already removed the row-forging characters, but this value goes
+# somewhere sanitize does not care about — INTO A PATH, and into a sed replacement
+# on the way. A `/` would silently redirect the contract into a subdirectory and a
+# `&` would duplicate the match; both are folded to `-` rather than escaped, because
+# a contract path is going to be a filename either way.
+SLOT_NAME=$(printf '%s' "$AGENT_NAME" | tr -c 'A-Za-z0-9._-' '-' | sed -e 's/^-*//' -e 's/-*$//')
+
+fill_name() {  # <templated path> -> slot-filled path, or "" when it cannot be filled
+  local out
+  [ -n "$SLOT_NAME" ] || return 0
+  out=$(printf '%s' "$1" | sed -e "s|<[^<>]*>|$SLOT_NAME|g" -e "s|<[^<>]*\$|$SLOT_NAME|")
+  # A surviving bracket means the fill did not close the shape, and a half-filled
+  # path is worse than none: it looks like a contract and can never be one.
+  case "$out" in *'<'*|*'>'*|'') return 0 ;; esac
+  printf '%s' "$out"
+}
+
+slotfree_ancestor() {  # <templated path> -> deepest slot-free ancestor dir, or ""
+  # The fallback when there is no name to fill with — the Agent tool does not
+  # require one. The LOCATION is still evidence even when the name is not, and the
+  # landing check already understands a directory contract (it lands when a file
+  # appears inside). Deliberately weaker than a filename; still a fact something can
+  # be stat'd against, which an unfilled slot never was. A template whose slot sits
+  # in the FIRST component leaves nothing here, and that is the honest answer:
+  # `<somewhere>/out.md` names no location at all.
+  #
+  # The cut takes the first bracket of EITHER kind, matching istemplate: trimtok may
+  # already have eaten one side, and cutting only at `<` would keep an orphaned `>`
+  # inside the surviving directory name.
+  local head="${1%%[<>]*}"
+  case "$head" in
+    */*) printf '%s' "${head%/*}" ;;
+    *)   : ;;   # no slash before the slot: no directory was named, so nothing here
+  esac
+}
 
 # record/-inference (slice 4/4, AC-8): a labeled deliverable always wins and is
 # recorded `source=declared`; only when the brief named none does an unlabeled
@@ -628,12 +881,38 @@ C_INFERRED=$(sanitize "$(field_of inferred)" 300)
 # wall below the same way a labeled one always has, because by this point
 # C_DELIVERABLE is simply non-empty either way — the wall does not know or care
 # which kind it is looking at.
+#
+# THE THIRD RUNG (epic-16 wave-02, R4) sits below both: a template, filled. It is
+# recorded `source=inferred` rather than under a word of its own, and that is a
+# decision with a consumer behind it — hooks/session-sweeper.sh reads this field to
+# resolve a brief that both declares an artifact and waives it, and treats
+# ANYTHING BUT `inferred` as declared. A new third value would therefore be read as
+# "the author declared this", which is precisely what a filled slot is not. One
+# reader, two values, no drift.
 C_SOURCE=""
+C_TEMPLATE_ORIGIN=""
 if [ -n "$C_DELIVERABLE" ]; then
   C_SOURCE="declared"
 elif [ -n "$C_INFERRED" ]; then
   C_DELIVERABLE="$C_INFERRED"
   C_SOURCE="inferred"
+elif [ -n "$C_TEMPLATED" ]; then
+  C_DELIVERABLE=$(fill_name "$C_TEMPLATED")
+  [ -n "$C_DELIVERABLE" ] || C_DELIVERABLE=$(slotfree_ancestor "$C_TEMPLATED")
+  if [ -n "$C_DELIVERABLE" ]; then
+    C_SOURCE="inferred"
+    C_TEMPLATE_ORIGIN="$C_TEMPLATED"
+  fi
+fi
+
+# The progress path takes the same fill. It has no wall behind it — an absent
+# progress path warns and passes — so the only question is whether the row carries a
+# path something could be stat'd against, and a slot never was one. The fallback
+# directory is not useful here (liveness is read off ONE file's mtime), so a
+# progress template with no name to fill it is left absent and warned, exactly as a
+# missing one is.
+if [ -z "$C_PROGRESS" ] && [ -n "$C_PROGRESS_TEMPLATED" ]; then
+  C_PROGRESS=$(fill_name "$C_PROGRESS_TEMPLATED")
 fi
 
 # What is ABSENT is recorded as a field of its own, so a consumer never has to
@@ -801,6 +1080,57 @@ fi
 
 prune_stale_rosters
 
+# ---------- same-path contention (epic-16 wave-02, R8/AC-12) ----------
+#
+# Read BEFORE the append, or the row about to be written answers for itself. Two
+# dispatches contracted to one file is not an error and is never refused — it is
+# how a takeover, a retry, or a deliberately split task legitimately looks — but it
+# is the shape behind a whole class of confusing verdicts: whichever agent stops
+# second inherits a contract the first one landed, so the landing gate says MET on
+# work this agent did not do. Naming the owning row at dispatch is the cheapest
+# moment to notice, and the operator is the one who knows which case it is.
+#
+# "OWNS" IS READ AS "IS ON THIS SESSION'S ROSTER", and that is a deliberately wide
+# reading. Closure is not a fact any hook writes — no writer ever sets a status
+# meaning `done`, because whether a contract is discharged is computed from disk by
+# the verdict, which this gate is forbidden to re-implement or even to invoke. So
+# the alternatives were a wide warning or no warning at all. A warning is the tier
+# where a false positive costs a sentence, which is the right side to be wrong on.
+owning_row_for() {  # <deliverable path> -> the owning row's name, or ""
+  [ -n "$1" ] && [ -f "$ROSTER_FILE" ] || return 0
+  awk -F'|' -v want="$1" '
+    /^#/ { next }
+    {
+      name = ""; deliv = ""
+      for (i = 1; i <= NF; i++) {
+        if ($i ~ /^name=/)        name  = substr($i, 6)
+        else if ($i ~ /^deliverable=/) deliv = substr($i, 13)
+      }
+      if (deliv == "") next
+      n = split(deliv, parts, ",")
+      for (j = 1; j <= n; j++) {
+        p = parts[j]; gsub(/^ +| +$/, "", p)
+        if (p != "" && p == want) { print name; exit }
+      }
+    }
+  ' "$ROSTER_FILE" 2>/dev/null
+}
+
+CONTENDED_OWNER=""
+CONTENDED_PATH=""
+if [ -n "$C_DELIVERABLE" ]; then
+  _old_ifs="$IFS"; IFS=','; set -f
+  # shellcheck disable=SC2086
+  set -- $C_DELIVERABLE
+  set +f; IFS="$_old_ifs"
+  for _d in "$@"; do
+    _d="${_d# }"; _d="${_d% }"
+    [ -n "$_d" ] || continue
+    CONTENDED_OWNER=$(owning_row_for "$_d")
+    if [ -n "$CONTENDED_OWNER" ]; then CONTENDED_PATH="$_d"; break; fi
+  done
+fi
+
 ROW="roster-state/${ROSTER_VERSION}|status=intended|session=${PAYLOAD_SID}|name=${AGENT_NAME}|agent_id=|launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|subagent_type=${SUBAGENT_TYPE}|model=${AGENT_MODEL}|deliverable=${C_DELIVERABLE}|source=${C_SOURCE}|duration=${C_DURATION}|progress=${C_PROGRESS}|claims=${C_CLAIMS}|cadence=${C_CADENCE}|absent=${ABSENT}|waiver=${C_WAIVER}|tool_use_id=${TOOL_USE_ID}"
 
 WROTE=1
@@ -828,6 +1158,16 @@ else
   # moment it is spent, not only later off the roster row that also holds it.
   if [ -n "$C_WAIVER" ]; then
     warn "the absent-deliverable wall was waived by the brief: ${C_WAIVER}"
+  fi
+  # The inference echo. A filled slot is this gate's reading of the brief, not the
+  # brief's own words, so it says both — what the brief spelled and what the row now
+  # holds — at the one moment the brief is still editable. Silence here would leave
+  # an author believing they had named a contract they had only sketched.
+  if [ -n "$C_TEMPLATE_ORIGIN" ]; then
+    warn "the brief spelled its deliverable as a template (${C_TEMPLATE_ORIGIN}); the row was inferred as ${C_DELIVERABLE} — name it exactly, or re-dispatch with the slot filled in"
+  fi
+  if [ -n "$CONTENDED_OWNER" ]; then
+    warn "the deliverable ${CONTENDED_PATH} is already owned by an open roster row: \"${CONTENDED_OWNER}\" — two rows on one artifact make the second landing verdict unfalsifiable"
   fi
 fi
 
