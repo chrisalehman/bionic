@@ -136,10 +136,51 @@ resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default p
 # climb mirrors resolve_project_root's: walk up to the nearest existing
 # ancestor, physicalize that, re-attach the tail. Fail-open — an unresolvable
 # path is returned unchanged.
-physicalize() {  # $1=absolute path (need not exist) → ancestors resolved
-  local d rest p
-  d=$(dirname "$1")
-  rest=$(basename "$1")
+# FOLD `.` AND `..` LEXICALLY FIRST, before the filesystem is consulted at all — cs review
+# S-2, epic-16 w2 Step-6 remediation R4. The climb below resolves only the EXISTING ancestor
+# prefix, so a component that does not exist yet strands everything after it, `..` segments
+# included, as an unresolved literal: `<pinned>/.bionic/nonexistent/../../../other/.bionic/
+# docs/record/x.md` kept its climb un-folded, the pinned-root comparison found the harmless
+# `.bionic` at the front of that string, and the write landed OUTSIDE the repository. The
+# Write tool creates parent directories, so the non-existent segment was never an obstacle
+# to the write — only to the wall seeing where it was going.
+#
+# The loop is hooks/dispatch-preflight.sh resolve_in_repo()'s, which already folds this way
+# before comparing a deliverable path against the repo, and whose `set -f` guard is
+# load-bearing here too: a `*` inside a tool-supplied path is a character, never a glob.
+# Two walls in one wave had disagreed about how to resolve a path, and this is the weaker
+# one adopting the stronger one.
+#
+# A LEXICAL fold, deliberately, not realpath: `<symlink>/..` folds to the symlink's parent
+# rather than to its target's parent. Same reading resolve_in_repo takes, and for a wall
+# whose question is "which tree does this path NAME" it is the right one.
+fold_dots() {  # $1=path → `.` and `..` folded lexically, absolute
+  local p="$1" abs out part had_f
+  case "$p" in
+    /*) abs="$p" ;;
+    *)  abs="$(pwd)/$p" ;;
+  esac
+  case "$-" in *f*) had_f=1 ;; *) had_f=0 ;; esac
+  set -f
+  out=""
+  local IFS=/
+  for part in $abs; do
+    case "$part" in
+      ''|.) ;;
+      ..)   out="${out%/*}" ;;
+      *)    out="$out/$part" ;;
+    esac
+  done
+  unset IFS
+  [ "$had_f" -eq 1 ] || set +f
+  printf '%s\n' "${out:-/}"
+}
+
+physicalize() {  # $1=absolute path (need not exist) → folded, ancestors resolved
+  local d rest p folded
+  folded=$(fold_dots "$1")
+  d=$(dirname "$folded")
+  rest=$(basename "$folded")
   while [ ! -d "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
     rest="$(basename "$d")/$rest"
     d=$(dirname "$d")
@@ -147,7 +188,10 @@ physicalize() {  # $1=absolute path (need not exist) → ancestors resolved
   if p=$(cd "$d" 2>/dev/null && pwd -P); then
     printf '%s/%s\n' "${p%/}" "$rest"
   else
-    printf '%s\n' "$1"
+    # Fail-open on an unresolvable path, but never back to the UNFOLDED spelling: the fold
+    # is what the comparisons below are entitled to, and handing back the raw climb is the
+    # bypass this function just closed.
+    printf '%s\n' "$folded"
   fi
 }
 
@@ -253,9 +297,19 @@ DOCS_ROOT_MATCH=$(physicalize "$DOCS_ROOT")
 # segment (if any) the write's own path names. Scope: this project's single
 # pinned root (spec assumption 4) — a multi-project session is out of scope
 # by design, not by omission.
+#
+# THE DEEPEST `.bionic` SEGMENT IS THE TARGET, not the first one (`%` and not `%%` —
+# shortest suffix removed, so the prefix kept is the longest). cs review S-2, case C: a
+# path naming a second `.bionic` INSIDE the pinned tree —
+# `<pinned>/.bionic/tmp/scratch/.bionic/docs/record/x.md` — compared equal to the pinned
+# root under the first-match reading and passed. R4 rules that in scope: it is the same
+# phantom tree this wall already refuses one directory over (a stray `.bionic` a level
+# down inside `subdir/`), and the tree the write actually lands in is the deepest one its
+# own path names. The cost of the stricter reading is that a genuinely intended nested
+# `.bionic` is blocked with a message naming where to write instead.
 PINNED_BIONIC="$PROJECT_ROOT_FROM_PATH/.bionic"
 case "$FILE_PATH_MATCH" in
-  */.bionic/*) TARGET_BIONIC="${FILE_PATH_MATCH%%/.bionic/*}/.bionic" ;;
+  */.bionic/*) TARGET_BIONIC="${FILE_PATH_MATCH%/.bionic/*}/.bionic" ;;
   */.bionic)   TARGET_BIONIC="$FILE_PATH_MATCH" ;;
   *)           TARGET_BIONIC="" ;;
 esac
