@@ -55,7 +55,6 @@
 set -u
 
 ORDER_SCHEMA="stop-order/v1"
-LEDGER_SCHEMA="sweeper-ledger/v1"
 ROSTER_VERSION="v1"
 
 # HOW LONG AN ORDER IS CURRENT, in seconds. Duplicated as a literal in
@@ -142,7 +141,6 @@ for _component in "$BIONIC_DIR" "$STATE_DIR"; do
 done
 
 ROSTER_FILE="$STATE_DIR/roster-${SESSION_ID}.state"
-LEDGER_FILE="$STATE_DIR/sweeper-${SESSION_ID}.state"
 ORDERS_FILE="$STATE_DIR/stop-orders-${SESSION_ID}.state"
 
 if [ -L "$ORDERS_FILE" ]; then
@@ -170,30 +168,6 @@ line_field() {  # <line> <key>
 clean() {  # <value>
   printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
     -e 's/^ *//' -e 's/ *$//' | cut -c 1-400
-}
-
-# HAS THE ORCHESTRATOR CLOSED THIS ROW? DELIBERATELY DUPLICATED, byte for byte, into
-# hooks/stop-guard.sh and hooks/landing-gate.sh — the TDD's §9 convention, for its reason:
-# a sourced library the installer misses is a silently inert wall. The three copies are
-# held together by tests/cross-gate-agreement.test.sh's stop-arc section, which drives all
-# three over one ledger written by the real `session-sweeper.sh ack`.
-#
-# It reads the sweeper's ledger rather than its verdict because ack is invisible to
-# `verdict` BY DESIGN (a contract is met by artifacts or it is not, which is what lets an
-# ack over an UNMET row warn instead of quietly erasing the discrepancy). Whole-name match,
-# never a substring: `w4-s1` must not be closed by an ack of `w4-s10`.
-ledger_acked() {  # <ledger-file> <name> -> 0 when an ack closed that row
-  local f="$1" want="$2" line n
-  [ -n "$want" ] || return 1
-  [ -L "$f" ] && return 1
-  [ -f "$f" ] || return 1
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in "sweeper-ledger/v1|"*) : ;; *) continue ;; esac
-    case "$line" in *"|event=ack|"*) : ;; *) continue ;; esac
-    n=$(printf '%s' "$line" | tr '|' '\n' | grep '^name=' | head -1 | cut -d= -f2-)
-    [ -n "$n" ] && [ "$n" = "$want" ] && return 0
-  done < "$f"
-  return 1
 }
 
 # The LATEST roster row for a name. The roster is append-only and a contract advances along
@@ -307,7 +281,11 @@ case "$VERB" in
       # declared nothing stats MET for want of anything to hold it to, and standing one
       # down on that is standing it down on a fact nobody produced — an ack is what closes
       # those, which is the job ack exists for.
-      if ledger_acked "$LEDGER_FILE" "$_name"; then
+      #
+      # The ack is read off the SAME LINE this loop is already walking (epic-16 wave-02 S9).
+      # It used to come from a private copy of a ledger reader living in this file, one of
+      # three; the verb that printed the line owns the ledger, so it prints the answer too.
+      if [ "$(line_field "$_l" acked)" = "yes" ]; then
         _why="acked"
       elif [ "$_state" = "WAIVED" ]; then
         _why="waived"

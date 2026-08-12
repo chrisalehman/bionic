@@ -2440,36 +2440,49 @@ expect_eq "…as is the recorder's SubagentStart entry" "10" \
 
 # ============================================================
 echo ""
-echo "=== M — THE ACK, and the stop order: three readers, one file each (epic-16 w2 S3) ==="
+echo "=== M — THE ACK, and the stop order: ONE owner, three consumers (epic-16 w2 S3/S9) ==="
 # ============================================================
 #
 # Two facts reach the stop arc from outside it, and each has ONE writer and several readers:
 #
-#   the ACK   — written by `hooks/session-sweeper.sh ack`, read by the stop gate, the
-#               landing gate and the stand-down helper. It is invisible to `verdict` by
-#               design (a contract is met by artifacts or it is not, which is what lets an
-#               ack over an UNMET row warn instead of quietly erasing the discrepancy), so
-#               each reader carries its own byte-identical copy of the reader — the §9
-#               convention, with the drift risk that convention always carries.
+#   the ACK   — written by `hooks/session-sweeper.sh ack`, consumed by the stop gate, the
+#               landing gate and the stand-down helper. Until epic-16 wave-02 S9 each of
+#               those three opened the ledger itself through a byte-identical copy of a
+#               `ledger_acked()` reader, and this section pinned the three bodies against
+#               each other — the §9 convention, with the drift risk that convention always
+#               carries. S9 promoted the answer onto the verdict machine line as `acked=`,
+#               so the ledger now has ONE reader in the fleet: the file that owns it. The
+#               three consumers read a field off a line they were already invoking the verb
+#               to get.
 #   the ORDER — written by `hooks/stop-orders.sh order`, read by the stop gate. Writer and
 #               reader each hold the validity window as a literal.
 #
-# Per-component suites drive each reader against its own fixtures. What none of them can
-# see is the CROSS-SCRIPT property: that the three copies are the same reader, that the
-# window is the same number, and that all three answer the same about one ledger the real
-# writer wrote.
+# Per-component suites drive each consumer against its own fixtures. What none of them can
+# see is the CROSS-SCRIPT property: that no consumer carries an ack-reading of its own, that
+# the window is the same number, and that all three answer the same about one ledger the
+# real writer wrote — including when the single owner is mutated to lie (§M.5).
 
 SG_M="$REPO_ROOT/hooks/stop-guard.sh"
 LG_M="$REPO_ROOT/hooks/landing-gate.sh"
 SO_M="$REPO_ROOT/hooks/stop-orders.sh"
 
-# --- M.1 one reader, three copies ---
-expect_eq "the ack reader extracts at all (this section is not vacuous)" "yes" \
-  "$([ -n "$(fn_body "$SG_M" ledger_acked)" ] && echo yes || echo no)"
-expect_eq "the stop gate's ledger_acked() is the landing gate's, body for body" \
-  "$(fn_body "$SG_M" ledger_acked)" "$(fn_body "$LG_M" ledger_acked)"
-expect_eq "…and the stand-down helper's, body for body" \
-  "$(fn_body "$SG_M" ledger_acked)" "$(fn_body "$SO_M" ledger_acked)"
+# --- M.1 ONE OWNER: no consumer reads the ledger, in any of the three ways it could ---
+#
+# The extractor is checked against a function that DOES survive, so an emptied `fn_body`
+# result below means "the reader is gone" rather than "the extractor stopped working".
+expect_eq "the extractor still finds a live function in the stop gate (not vacuous)" "yes" \
+  "$([ -n "$(fn_body "$SG_M" take_verdict)" ] && echo yes || echo no)"
+for _m in "$SG_M" "$LG_M" "$SO_M"; do
+  expect_eq "$(basename "$_m") carries no ledger_acked() of its own" "" \
+    "$(fn_body "$_m" ledger_acked)"
+  # Defining the reader is one way back; building the ledger's PATH is the other, and it is
+  # the one an edit reaches first. `sweeper-$` is how all three used to spell it.
+  expect_eq "…and never builds the ack ledger's path" "0" \
+    "$(grep -cF 'sweeper-$' "$_m")"
+  # And the ack EVENT itself: a grep against the ledger would need this literal.
+  expect_eq "…and never matches the ack event itself" "0" \
+    "$(grep -cF 'event=ack' "$_m")"
+done
 
 # --- M.2 one window, two holders ---
 _ttl_of() { grep -E '^ORDER_TTL_SECONDS=' "$1" | head -1 | cut -d= -f2; }
@@ -2502,8 +2515,15 @@ mk_subagent_stop() {  # <repo> <sid> <agent_type>
       background_tasks:[], session_crons:[]}'
 }
 
+m_vline() {  # -> the verdict machine line all three consumers read for this fixture
+  ( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" verdict finished 2>/dev/null ) \
+    | grep -F 'landing-verdict/v1|' | head -1
+}
+
 # BEFORE the ack — all three say the row is open. This is the paired positive without which
 # the three assertions after it would pass over a fixture nothing could ever block.
+expect_contains "before the ack: the one line all three read says acked=no" \
+  "|acked=no|" "$(m_vline)"
 OUT=$(mk_stop_payload "$SID_A" "$MTR" "$MREPO" "finished" | bash "$SG_M" 2>&1); ST=$?
 expect_eq "before the ack: the stop gate refuses" "2" "$ST"
 OUT=$(mk_subagent_stop "$MREPO" "$SID_A" "finished" | bash "$LG_M" 2>&1); ST=$?
@@ -2513,8 +2533,16 @@ expect_contains "before the ack: the stand-down leaves it alone" "LEFT ALONE" "$
 
 # THE REAL WRITER writes the one file all three read.
 ( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" ack finished ) >/dev/null 2>&1
-expect_eq "the ack verb wrote its ledger where all three readers look" "yes" \
+expect_eq "the ack verb wrote its ledger where its one reader looks" "yes" \
   "$([ -f "$MREPO/.bionic/tmp/sweeper-$SID_A.state" ] && echo yes || echo no)"
+
+# THE PROMOTION, end to end over the real writer: the same line now says acked=yes, and the
+# STATE beside it did not move. The ack changed what the consumers know, not what the disk
+# says — which is what "the ack's semantics are unchanged" means concretely.
+M_VLINE=$(m_vline)
+expect_contains "after the ack: the one line all three read says acked=yes" "|acked=yes|" "$M_VLINE"
+expect_contains "…while the contract itself is still UNMET, computed from the disk alone" \
+  "|state=UNMET|" "$M_VLINE"
 
 OUT=$(mk_stop_payload "$SID_A" "$MTR" "$MREPO" "finished" | bash "$SG_M" 2>&1); ST=$?
 expect_eq "after the ack: the stop gate passes" "0" "$ST"
@@ -2524,6 +2552,45 @@ OUT=$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" standdown 2>&
 expect_contains "after the ack: the stand-down puts it in the batch" "1 row(s) have landed" "$OUT"
 expect_contains "…addressed the way the stop primitive takes it" \
   "finished@session-$(printf '%s' "$SID_A" | cut -c1-8)" "$OUT"
+
+# --- M.3b ONE OWNER, PROVEN BY MUTATION: blind the field, all three go back to holding ---
+#
+# What the three-copy pin used to buy was drift detection between the copies. With the
+# copies gone that proof has to be replaced rather than dropped, and this is the stronger
+# form of it: the three consumers are byte-identical copies of what ships, only the OWNER is
+# mutated — to report every row unacked — and all three answers move together. A consumer
+# that had kept a private reader would stay green here, which is exactly the regression
+# §M.1's greps cannot catch on their own (a reader spelled some other way).
+#
+# The mutant is installed in its own directory beside the gates, which is how bootstrap's
+# flat `hooks/*.sh` install lets each of them find its sibling — the production resolution,
+# not a test seam.
+MMUT="$SANDBOX/ack-mutant"
+mkdir -p "$MMUT"
+cp "$SG_M" "$MMUT/stop-guard.sh"
+cp "$LG_M" "$MMUT/landing-gate.sh"
+cp "$SO_M" "$MMUT/stop-orders.sh"
+awk '{ if (index($0, "row_acked \"$_pname\"") > 0) $0 = "    _acked=no"
+       print }' "$SWEEPER" > "$MMUT/session-sweeper.sh"
+if cmp -s "$SWEEPER" "$MMUT/session-sweeper.sh"; then
+  no "the acked= mutation applies to session-sweeper.sh" \
+     "the mutation target matched nothing — the code moved and this proof is vacuous"
+else
+  ok "the acked= mutation applies to session-sweeper.sh"
+fi
+expect_contains "the mutated owner reports the acked row as unacked" "|acked=no|" \
+  "$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$MMUT/session-sweeper.sh" verdict finished 2>/dev/null )"
+OUT=$(mk_stop_payload "$SID_A" "$MTR" "$MREPO" "finished" | bash "$MMUT/stop-guard.sh" 2>&1); ST=$?
+expect_eq "…and the stop gate refuses the stop it passed a moment ago" "2" "$ST"
+OUT=$(mk_subagent_stop "$MREPO" "$SID_A" "finished" | bash "$MMUT/landing-gate.sh" 2>&1); ST=$?
+expect_eq "…and the landing gate refuses it too" "2" "$ST"
+OUT=$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$MMUT/stop-orders.sh" standdown 2>&1 )
+expect_contains "…and the stand-down puts it back in LEFT ALONE" "LEFT ALONE" "$OUT"
+# The shipped files were never touched: the substitution is by path, and this says so.
+expect_eq "the three shipped consumers are byte-identical to before the mutation" "" \
+  "$(cmp -s "$SG_M" "$MMUT/stop-guard.sh" || echo differs
+     cmp -s "$LG_M" "$MMUT/landing-gate.sh" || echo differs
+     cmp -s "$SO_M" "$MMUT/stop-orders.sh" || echo differs)"
 
 # --- M.4 the order: one writer, one reader, one boundary ---
 _now=$(date -u +%s)

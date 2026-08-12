@@ -904,6 +904,98 @@ expect_contains "…for the row it was asked about" "name=perf1999|state=MET" "$
 expect_true "…within the stop path's budget (10 s at 2000 rows)" test "$(( _t1 - _t0 ))" -le 10
 
 # ============================================================
+section "Section 8: acked= — the ack rides the verdict line (epic-16 w2 S9)"
+# ============================================================
+#
+# THE ACK REACHES THE GATES THROUGH THIS FIELD, and through nothing else. Until S9 each of
+# the three stop-side scripts carried its own byte-identical copy of a ledger reader, and
+# the ledger had four readers in the fleet. The ledger has one reader now — this file, which
+# owns it — and the answer rides out on the verdict line every one of those scripts already
+# invokes for `state=`.
+#
+# WHAT DID NOT CHANGE, and this section's real subject: the ACK'S SEMANTICS. `acked=` is a
+# REPORT of a fact about the orchestrator's verification, sitting beside a state that is
+# still computed from the disk alone. It moves no state, changes no exit code, and closes
+# no contract here — an acked UNMET row still reads UNMET, still exits 1, and still WARNS
+# at the ack verb (Section 6). What a reader does with the pair is the reader's, exactly as
+# it was when the reader had to open the ledger itself.
+
+R18="$(make_repo s18acked)"; new_roster "$R18"
+add_row "$R18" name=w4-s1  deliverable="$R18/absent-1.md" duration="4 hours" launched_at="$(iso_ago 600)"
+add_row "$R18" name=w4-s10 deliverable="$R18/absent-10.md" duration="4 hours" launched_at="$(iso_ago 600)"
+DEL18="$R18/landed.md"; echo "landed" > "$DEL18"
+add_row "$R18" name=lander deliverable="$DEL18" duration="4 hours" launched_at="$(iso_ago 600)"
+
+# --- unacked: the field is present and says no ---
+#
+# PRESENT, not absent. A gate that read an empty `acked=` could not tell "this row was not
+# acked" from "this verb does not carry the field", and the second is the shape a version
+# skew would produce.
+sweep "$R18" verdict w4-s1
+expect_contains "an unacked row carries acked=no" "|acked=no|" "$OUT"
+expect_contains "…beside the state the disk computed" "name=w4-s1|state=UNMET|acked=no|" "$OUT"
+expect_eq "…and the verb still exits 1 for an UNMET row" "1" "$RC"
+
+# --- acked, by the real verb: the field flips and NOTHING else does ---
+sweep "$R18" ack w4-s1
+expect_eq "the real ack verb records" "0" "$RC"
+sweep "$R18" verdict w4-s1
+expect_contains "the acked row carries acked=yes" "|acked=yes|" "$OUT"
+expect_contains "…while the STATE is still the disk's answer, untouched by the ack" \
+  "name=w4-s1|state=UNMET|acked=yes|" "$OUT"
+expect_contains "…and the detail still names the failing conjunct" "missing=$R18/absent-1.md" "$OUT"
+expect_eq "…and the exit code is unchanged: an ack does not close a contract here" "1" "$RC"
+
+# --- whole-name match, never a substring: the neighbour is not closed ---
+sweep "$R18" verdict w4-s10
+expect_contains "an ack of w4-s1 does not mark w4-s10 acked" "name=w4-s10|state=UNMET|acked=no|" "$OUT"
+
+# --- a MET row can be acked too, and the two facts stay separate ---
+sweep "$R18" ack lander
+sweep "$R18" verdict lander
+expect_contains "a MET row that was acked reports both facts" "name=lander|state=MET|acked=yes|" "$OUT"
+
+# --- the bare verdict answers per row, not per roster ---
+sweep "$R18" verdict
+expect_contains "bare verdict: the acked row says so" "name=w4-s1|state=UNMET|acked=yes|" "$OUT"
+expect_contains "bare verdict: its unacked neighbour says so too" "name=w4-s10|state=UNMET|acked=no|" "$OUT"
+
+# --- an ack for a name NO ROW carries invents nothing ---
+#
+# The ack verb records such a name deliberately (Section 4) and says it is "exempt the
+# moment a row of that name appears". No row, no line: this verb answers for contracts on
+# the roster, and a machine line for a row that does not exist would be a contract nobody
+# declared — the fail-open direction every reader downstream would then act on.
+sweep "$R18" ack no-such-row
+sweep "$R18" verdict no-such-row
+expect_absent "an ack for a rowless name invents no verdict line" "landing-verdict/v1|" "$OUT"
+expect_contains "…and the verb says exactly that" "no row named" "$OUT"
+expect_eq "…exiting 0, because there is no contract to hold" "0" "$RC"
+
+# --- the ledger is read at DECISION TIME, not cached from anywhere ---
+#
+# The durability claim the gates depend on: an ack taken by a process that has since exited
+# is in force for the next reader. Same session, second invocation, nothing resident.
+R19="$(make_repo s19acked)"; new_roster "$R19"
+add_row "$R19" name=durable deliverable="$R19/absent.md" duration="4 hours" launched_at="$(iso_ago 600)"
+sweep "$R19" verdict durable
+expect_contains "before: acked=no" "|acked=no|" "$OUT"
+sweep "$R19" ack durable
+sweep "$R19" verdict durable
+expect_contains "after, from a different process: acked=yes" "|acked=yes|" "$OUT"
+
+# A symlinked ledger is refused for BOTH verbs before either reads a row (Section 3), so
+# there is no path on which this field is computed over a ledger the script was redirected
+# away from. Asserted here because the field is what the gates now trust.
+ln -sf "$TMPROOT/elsewhere-ledger" "$(ledger_of "$R19")"
+printf 'sweeper-ledger/v1|event=ack|at=x|epoch=1|pid=1|session=%s|name=durable\n' "$SID" \
+  > "$TMPROOT/elsewhere-ledger"
+sweep "$R19" verdict durable
+expect_eq "a symlinked ledger refuses the verdict outright (exit 2)" "2" "$RC"
+expect_absent "…printing no line for any reader to trust" "landing-verdict/v1|" "$OUT"
+rm -f "$(ledger_of "$R19")"
+
+# ============================================================
 printf '\n──────────────────────────────────────────────\n'
 printf 'session-sweeper: %d passed, %d failed, %d total\n' "$PASS" "$FAIL" "$TOTAL"
 [ "$FAIL" -eq 0 ] || exit 1

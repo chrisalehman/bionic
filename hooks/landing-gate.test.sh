@@ -577,8 +577,8 @@ expect_status "8e: …and does close w4-s10" "0" "$RC"
 # refuses outright when its own ledger path is a link (nothing was written through it, and
 # it will not answer over state it was redirected away from), so the verdict exits 2 and
 # this gate takes its documented fail-open — an answer it did not get is not one it may
-# refuse on. The gate's own `ledger_acked` declines the link too, so no ack out of a
-# repo-controlled file ever closes a row here; it simply never gets that far.
+# refuse on. Since S9 the sweeper is the ONLY reader of that file, so there is no second
+# place a repo-controlled ledger could reach: no verdict line, no `acked=`, nothing to read.
 # The CLOSED half of this pair is at the stop gate, where the same fixture refuses the
 # stop (hooks/stop-guard.test.sh §11) — the two gates have opposite fail directions by
 # design and this is the fixture that shows it.

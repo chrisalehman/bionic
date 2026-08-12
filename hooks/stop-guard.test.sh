@@ -1173,9 +1173,12 @@ expect_status "a row that declared NOTHING is not discharged by its vacuous MET"
 #
 # The CLOSED half of the pair whose open half is at the landing gate
 # (hooks/landing-gate.test.sh §8f). A repo owns its own .bionic/, so a symlinked ledger is
-# a set of acks nobody in this session recorded: the sweeper refuses to answer over it at
-# all, `ledger_acked` declines to follow it, and this gate — which is CLOSED and loud after
-# the active-wave verdict — refuses the stop. The same fixture passes at the landing gate,
+# a set of acks nobody in this session recorded: the sweeper — the ONE reader of that file
+# since S9 — refuses to answer over it at all, so no `acked=` reaches this gate, and this
+# gate, which is CLOSED and loud after the active-wave verdict, refuses the stop even though
+# the artifact is on disk. That last part is the point: the refusal costs a re-run, and the
+# alternative was letting a repo choose which acks this session recorded. The same fixture
+# passes at the landing gate,
 # which is fail-open by design. Opposite directions, one fixture, both deliberate.
 plant_agent "$F_SUB" "alinked-8888888888888888" "linked-ledger"
 roster_row "$F_REPO" "$SID_A" "linked-ledger" "alinked-8888888888888888" "" "confirmed" \
@@ -1192,6 +1195,26 @@ rm -f "$F_REPO/.bionic/tmp/sweeper-$SID_A.state"
 plant_agent "$F_SUB" "aunrostered-777777777777" "unrostered"
 run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "unrostered")"
 expect_status "a target on no roster row is unchanged by any of this" 2 "$GUARD_ST"
+
+# --- an ack for a name NO ROSTER ROW carries closes nothing here (epic-16 w2 S9) ---
+#
+# The one behavioural delta of S9's `acked=` promotion, pinned rather than left to be
+# discovered. This gate used to open the ledger itself and match a bare name in it, so an
+# ack recorded for a name the roster never carried discharged the stop. The ack now reaches
+# it as a field on the verdict line for a ROW, and there is no row — so the ceremony stands.
+#
+# That is the ack verb's OWN semantics, which the gate had been the odd one out on: an ack
+# for an unknown name is recorded with a warning and is "exempt the moment a row of that
+# name appears" (session-sweeper.sh's ack verb, and hooks/session-sweeper.test.sh §4). The
+# landing gate has always passed such a stop for an unrelated reason (a name on no row makes
+# the verb exit 0 and the gate fail open), and the stand-down never sees one, so this is the
+# reading all three now share.
+plant_agent "$F_SUB" "aackless-9999999999999999" "acked-but-rowless"
+ack_row "$F_REPO" "$SID_A" "acked-but-rowless"
+run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "acked-but-rowless")"
+expect_status "an ack over a name no roster row carries does not discharge the stop" 2 "$GUARD_ST"
+# The paired positive is one case up: the SAME ack verb, over a name that HAS a row, passes
+# the same gate silently ("ACKED row: the stop passes though the contract is UNMET").
 
 # ============================================================
 echo ""
