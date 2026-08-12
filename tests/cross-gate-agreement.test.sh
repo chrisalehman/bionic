@@ -2629,6 +2629,402 @@ expect_eq "an order just outside it does not — the ceremony is where it was" "
 
 # ============================================================
 echo ""
+echo "=== N — the wave-02 facts: one root, one vocabulary, one launch reference (S9) ==="
+# ============================================================
+#
+# Six rows specified by the slices that could not add them: `record/w2-s45-wallfacts.md` §6
+# (the wall and the probe became one preflight, and duplicated the root resolver a fourth
+# time doing it) and `record/w2-s6-launchref.md` §6 (the launch reference stopped being
+# re-stamped on resume, in a file whose readers live elsewhere). Each is a property no
+# single-component suite can see, because in each case the writer and the reader are
+# different scripts.
+#
+# WHAT IS DEFERRED, and named rather than quietly dropped: w2-s6 §6 row 3, teammate-mode
+# resume driven end to end. It needs a real repeated `teammate_spawned` PostToolUse capture —
+# the same payload delivered twice for one agent — and no such capture exists on disk. The
+# suite's `mk_agent_post_teammate` is faithful to a SINGLE spawn (capture probe §3-A); a
+# second one synthesized here would be this suite asserting against its own guess about what
+# a resume looks like in that mode, which is the fixture-fidelity failure the header forbids.
+# The async half of the same property IS driven, at §N.6.
+
+# ---------------------------------------------------------------- N.1 four bodies, one root
+#
+# `resolve_project_root()` is a FOUR-copy family since S4+S5 (w2-s45 §5 call 7): the
+# governing-skill hook is the origin, the evidence gate its long-standing twin, and the
+# dispatch wall and the probe took copies when R5 made the wall run the probe inline. The
+# wall's copy is not optional decoration — a probe that roots at the main repository while
+# the gate still roots at the worktree writes an attestation the gate can never find, which
+# is a new failure mode manufactured by fixing half a pair.
+DP_N="$REPO_ROOT/hooks/dispatch-preflight.sh"
+PB_N="$REPO_ROOT/hooks/preflight-probe.sh"
+GS_N="$REPO_ROOT/hooks/canonical-sdlc-governing-skill.sh"
+EG_N="$REPO_ROOT/hooks/canonical-sdlc-evidence-gate.sh"
+
+expect_eq "the root resolver extracts at all (this section is not vacuous)" "yes" \
+  "$([ -n "$(fn_body "$GS_N" resolve_project_root)" ] && echo yes || echo no)"
+for _n in "$DP_N" "$PB_N" "$EG_N"; do
+  expect_eq "$(basename "$_n")'s resolve_project_root() is the origin's, body for body" \
+    "$(fn_body "$GS_N" resolve_project_root)" "$(fn_body "$_n" resolve_project_root)"
+done
+
+# ---------------------------------------------------------------- N.2 four ANSWERS, one root
+#
+# Bodies being equal is a claim about the text. This is the claim about the ANSWER, taken
+# where the field case took it: inside a real `git worktree add`, which is the input that
+# separates a resolver that maps a worktree onto its main repository from one that does not.
+# Each function is extracted from its own shipped file and run in its own subshell, so four
+# definitions of one name cannot shadow each other.
+NREPO="$SANDBOX/fx/nroot/repo"
+mkdir -p "$NREPO"
+git -C "$NREPO" init -q 2>/dev/null
+git -C "$NREPO" config user.email t@example.com
+git -C "$NREPO" config user.name "T"
+echo seed > "$NREPO/README.md"
+git -C "$NREPO" add README.md >/dev/null 2>&1
+git -C "$NREPO" commit -qm seed >/dev/null 2>&1
+NWT="$SANDBOX/fx/nroot/wt"
+git -C "$NREPO" worktree add -q -b n-root-wt "$NWT" >/dev/null 2>&1
+expect_eq "fixture: a real git worktree exists (never a mocked path)" "yes" \
+  "$([ -e "$NWT/.git" ] && echo yes || echo no)"
+
+root_via() {  # <file> <path-inside-the-tree> [fallback] -> that file's answer
+  local f="$1" p="$2" fb="${3:-}"
+  ( eval "$(awk '/^resolve_project_root\(\)/,/^\}/' "$f")"
+    resolve_project_root "$p" "$fb" ) 2>/dev/null
+}
+
+NMAIN=$(cd "$NREPO" && pwd -P)
+# Deep inside the worktree AND deep inside a directory that does not exist yet — a
+# PreToolUse gate meets the second shape on the first artifact write into a project, and
+# the climb-to-the-nearest-existing-ancestor is the part of the resolver that handles it.
+for _p in "$NWT/.bionic/docs/record/x.md" "$NWT/deep/not/created/yet/x.md"; do
+  for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N"; do
+    expect_eq "$(basename "$_n") roots '${_p#$NWT/}' at the MAIN repository, not the worktree" \
+      "$NMAIN" "$(cd "$NWT" && root_via "$_n" "$_p")"
+  done
+done
+# The paired negative: outside any repository all four fall back, and to the SAME fallback.
+# Without it the four could agree by having all stopped resolving anything.
+NOUT="$SANDBOX/fx/nroot/notarepo"
+mkdir -p "$NOUT"
+for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N"; do
+  expect_eq "$(basename "$_n") falls back outside any repository" \
+    "$NOUT" "$(cd "$NOUT" && root_via "$_n" "$NOUT/x.md" "$NOUT")"
+done
+# ONE-COPY MUTATION GOES RED, the §A2 discipline applied to this family: drop the
+# `--git-common-dir` half from a copy of the wall's resolver and it answers the WORKTREE —
+# the pre-R9 behaviour, and the one that made a worktree its own address space.
+N_MUT_ROOT="$SANDBOX/fx/rootless-preflight.sh"
+awk '{ if (index($0, "--path-format=absolute --git-common-dir") > 0 || index($0, "--git-common-dir 2") > 0)
+         sub(/--git-common-dir/, "--show-toplevel")
+       print }' "$DP_N" > "$N_MUT_ROOT"
+if cmp -s "$DP_N" "$N_MUT_ROOT"; then
+  no "the root mutation applies to dispatch-preflight.sh" \
+     "the mutation target matched nothing — the resolver moved and this proof is vacuous"
+else
+  ok "the root mutation applies to dispatch-preflight.sh"
+fi
+expect_eq "a resolver that stops mapping worktrees no longer answers the main repository" "no" \
+  "$([ "$(cd "$NWT" && root_via "$N_MUT_ROOT" "$NWT/.bionic/docs/record/x.md")" = "$NMAIN" ] \
+     && echo yes || echo no)"
+
+# ------------------------------------------- N.3 producer and consumer, one attestation path
+#
+# w2-s45 §6 row 2. The probe WRITES the attestation and the dispatch wall READS it, and since
+# R5 the wall runs the probe itself when it finds none. From a worktree cwd those two paths
+# are only equal because both sides resolve the root the same way — the inequality that would
+# silently re-break the combined preflight, and it would present as a wall that auto-probes on
+# every single dispatch while an attestation sits on disk one directory over.
+#
+# The credential is pinned PRESENT (a syntactic placeholder — the probe tests presence, never
+# validity) for the reason §D records: unpinned, the probe consults the machine login keychain
+# and the drive lands on the refused path or the accepted one depending on whose machine runs
+# the suite. Only the accepted path writes anything, which is the path under test here.
+write_plan "$NREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+NENV=(env HOME="$SANDBOX/home" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR"
+      ANTHROPIC_API_KEY="pinned-placeholder-not-a-credential")
+
+( cd "$NWT" && "${NENV[@]}" CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PROBE" ) >/dev/null 2>&1
+NATT="$NREPO/.bionic/tmp/preflight-$SID_A.state"
+expect_eq "the PRODUCER, run from the worktree, writes under the main repository" "yes" \
+  "$([ -f "$NATT" ] && echo yes || echo no)"
+expect_eq "…and leaves no phantom .bionic in the worktree (R9: one address space)" "no" \
+  "$([ -e "$NWT/.bionic" ] && echo yes || echo no)"
+
+# THE CONSUMER, from the same worktree cwd. It must FIND that record — the observable is the
+# absence of the auto-probe announce line, which the wall prints only when it had to take an
+# attestation of its own. A wall that looked in the worktree would announce every time.
+N_OUT=$(mk_agent_payload "$SID_A" "$NWT" | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_ST=$?
+expect_eq "the CONSUMER, from the same worktree, passes the dispatch" "0" "$N_ST"
+expect_absent "…without re-taking an attestation it already had" \
+  "the environment check was run automatically" "$N_OUT"
+expect_eq "…and its roster row landed under the main repository too" "yes" \
+  "$([ -f "$NREPO/.bionic/tmp/roster-$SID_A.state" ] && echo yes || echo no)"
+expect_eq "…with no phantom .bionic in the worktree from the gate either" "no" \
+  "$([ -e "$NWT/.bionic" ] && echo yes || echo no)"
+
+# THE DISCRIMINATING HALF: remove the record and the same dispatch announces. Without it the
+# assertions above would pass over a wall that had simply stopped announcing anything.
+rm -f "$NATT"
+N_OUT=$(mk_agent_payload "$SID_A" "$NWT" | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_ST=$?
+expect_eq "with the record gone the dispatch still passes (R5: attestation never blocks)" "0" "$N_ST"
+expect_contains "…and says it took one automatically" \
+  "the environment check was run automatically" "$N_OUT"
+expect_eq "…writing it back to the same path the consumer reads" "yes" \
+  "$([ -f "$NATT" ] && echo yes || echo no)"
+
+# --------------------------------------------------- N.4 source=: two words, and one reader
+#
+# w2-s45 §6 row 3. `hooks/dispatch-preflight.sh` writes `source=` onto every roster row and
+# `hooks/session-sweeper.sh` is its only reader, branching on `!= "inferred"` — so a THIRD
+# value would not fail, it would read as "the author declared this", which is exactly what a
+# filled template is not (w2-s45 §5 call 1). Two words, one reader, asserted from both ends.
+N_SRC_VALUES=$(grep -oE '^[[:space:]]*C_SOURCE="[a-z]*"' "$DP_N" \
+  | sed -E 's/.*"([a-z]*)"/\1/' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/ $//')
+expect_eq "the writer's vocabulary is exactly two words" "declared inferred" "$N_SRC_VALUES"
+expect_eq "…and the sweeper is the only script that reads the field" "1" \
+  "$(grep -rlF 'line_field "$row" source' "$REPO_ROOT/hooks" | grep -c .)"
+expect_eq "…reading it exactly once" "1" "$(grep -cF 'line_field "$row" source' "$SWEEPER")"
+
+# Driven, not just grepped: three briefs, three routes to a path, and the field the writer
+# actually emits for each. The templated brief is the one S4 added and the one whose value is
+# load-bearing — it must read `inferred`, because the author declared a slot, not a path.
+NSRC=$(new_repo "source-vocab")
+write_plan "$NSRC/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+n_dispatch() {  # <name> <prompt> -> the roster row the wall wrote for it
+  jq -n --arg s "$SID_A" --arg c "$NSRC" --arg n "$1" --arg p "$2" \
+    '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
+      hook_event_name:"PreToolUse", tool_name:"Agent",
+      tool_input:{description:"a dispatch", subagent_type:"implementor", name:$n, prompt:$p},
+      tool_use_id:("toolu_01" + $n)}' \
+    | "${NENV[@]}" bash "$PARTY_DP" >/dev/null 2>&1
+  grep -F "|name=$1|" "$NSRC/.bionic/tmp/roster-$SID_A.state" 2>/dev/null | tail -1
+}
+expect_contains "a LABELED slot-free path records source=declared" "|source=declared|" \
+  "$(n_dispatch declaring 'Expected artifact: .bionic/docs/record/declared.md')"
+expect_contains "an UNLABELED record/ path records source=inferred" "|source=inferred|" \
+  "$(n_dispatch inferring 'the notes go in .bionic/docs/record/inferred.md when done')"
+expect_contains "a TEMPLATED path records source=inferred, never a third word" "|source=inferred|" \
+  "$(n_dispatch filling 'Expected artifact: .bionic/docs/record/<name>.md')"
+
+# ------------------------------------------------- N.5 the ghost row, asked of every writer
+#
+# w2-s45 §6 row 4. AC-12's "a refused dispatch leaves no row" is pinned in the wall's own
+# suite, where the wall is the only writer in the room. The roster has THREE writers, and the
+# other two are stop-side: a refused dispatch that later drew a row from `execution-recorder`
+# would be a ghost with a different author, invisible to the wall's own before/after check.
+#
+# The recorder's two roster arms both key on a row the LAUNCH half wrote — ARM 2 on a matching
+# `intended` row for the tool_use_id, ARM 3 on a matching intended/confirmed row for the name.
+# A refused dispatch wrote neither, so both must find nothing and write nothing. In the field
+# the tool call never runs at all (the wall exits 2), which is exactly why the defensive
+# question is worth asking here rather than assuming the ordering holds.
+NGH=$(new_repo "ghost-row")
+write_plan "$NGH/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+mkdir -p "$NGH/.bionic/tmp"
+# A brief naming NO inferable deliverable: the one shape R4 still refuses (AC-3's planted
+# failure), and therefore the one that reaches this section with a refusal to leave no trace.
+N_REFUSED=$(jq -n --arg s "$SID_A" --arg c "$NGH" \
+  '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
+    hook_event_name:"PreToolUse", tool_name:"Agent",
+    tool_input:{description:"a dispatch", subagent_type:"implementor", name:"ghosted",
+                prompt:"Go and do the thing. Report back when you are finished."},
+    tool_use_id:"toolu_01GHOST"}')
+printf '%s' "$N_REFUSED" | "${NENV[@]}" bash "$PARTY_DP" >/dev/null 2>&1
+N_WALL_ST=$?
+expect_eq "the wall refuses a brief naming no inferable deliverable" "2" "$N_WALL_ST"
+N_INV_BEFORE=$(cat "$NGH/.bionic/tmp/roster-$SID_A.state" 2>/dev/null; echo "[no roster]")
+
+# Now both stop-side writers, for the dispatch that never happened.
+jq -n --arg s "$SID_A" --arg c "$NGH" \
+  '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
+    hook_event_name:"PostToolUse", tool_name:"Agent",
+    tool_input:{description:"a dispatch", prompt:"go", subagent_type:"implementor",
+                run_in_background:true, name:"ghosted"},
+    tool_response:{isAsync:true, status:"async_launched", agentId:"aghosted-1111111111111111"},
+    tool_use_id:"toolu_01GHOST"}' | bash "$PARTY_ER" >/dev/null 2>&1
+mk_start_payload "$SID_A" "/irrelevant.jsonl" "$NGH" "ghosted" "aghosted-1111111111111111" \
+  | bash "$PARTY_ER" >/dev/null 2>&1
+N_INV_AFTER=$(cat "$NGH/.bionic/tmp/roster-$SID_A.state" 2>/dev/null; echo "[no roster]")
+expect_eq "no stop-side writer manufactures a row for a dispatch the wall refused" \
+  "$N_INV_BEFORE" "$N_INV_AFTER"
+expect_eq "…and the sweeper has no contract to answer for either" "0" \
+  "$( cd "$NGH" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" verdict ghosted >/dev/null 2>&1; echo $? )"
+
+# THE PAIRED POSITIVE, over the identical machinery: an ACCEPTED dispatch draws exactly one
+# row from the wall and one more from each stop-side arm. Without it the three assertions
+# above would pass over a recorder that had stopped writing rows at all.
+printf '%s' "$N_REFUSED" \
+  | jq '.tool_input.prompt = "Expected artifact: .bionic/docs/record/accepted.md"
+        | .tool_input.name = "accepted" | .tool_use_id = "toolu_01ACCEPT"' \
+  | "${NENV[@]}" bash "$PARTY_DP" >/dev/null 2>&1
+expect_eq "an accepted dispatch draws exactly one row from the wall" "1" \
+  "$(grep -cF '|name=accepted|' "$NGH/.bionic/tmp/roster-$SID_A.state" 2>/dev/null)"
+jq -n --arg s "$SID_A" --arg c "$NGH" \
+  '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
+    hook_event_name:"PostToolUse", tool_name:"Agent",
+    tool_input:{description:"a dispatch", prompt:"go", subagent_type:"implementor",
+                run_in_background:true, name:"accepted"},
+    tool_response:{isAsync:true, status:"async_launched", agentId:"aaccepted-2222222222222222"},
+    tool_use_id:"toolu_01ACCEPT"}' | bash "$PARTY_ER" >/dev/null 2>&1
+expect_eq "…and the recorder advances it rather than ignoring the roster" "1" \
+  "$(grep -cF '|status=confirmed|' "$NGH/.bionic/tmp/roster-$SID_A.state" 2>/dev/null)"
+
+# ------------------------------------- N.6 the launch reference: written once, read by three
+#
+# w2-s6 §6 rows 1 and 2, driven as one arc because they are two halves of one property. The
+# roster row is written by `hooks/dispatch-preflight.sh`, carried forward and pinned by
+# `hooks/execution-recorder.sh`, and DATED AGAINST by `hooks/session-sweeper.sh` — three
+# scripts, one field, and S6 could only prove the middle one from inside its own suite.
+#
+# THE FIELD-SHAPE HALF FIRST (row 2), because the rest is meaningless without it: a silent
+# rename of `launched_at=` at the writer would make the pin scan for a key that no longer
+# exists and FAIL OPEN — find nothing, treat every resume as a new agent, restore the exact
+# bug S6 fixed, and stay green everywhere. This is what makes that rename fail loud.
+n_row_keys() {  # <file> -> the keys the roster ROW template emits, in order
+  grep -F 'ROW="roster-state/' "$1" | head -1 | tr '|' '\n' | sed -n 's/^\([a-z_]*\)=.*/\1/p' \
+    | tr '\n' ' ' | sed 's/ $//'
+}
+N_KEYS=$(n_row_keys "$DP_N")
+expect_contains "the writer's row template carries launched_at at all" "launched_at" "$N_KEYS"
+expect_contains "…and the recorder's immutability helper scans for that exact spelling" \
+  "launched_at" "$(fn_body "$REPO_ROOT/hooks/execution-recorder.sh" prior_launch_for_agent)"
+expect_contains "…and the verdict dates its staleness conjunct against it" \
+  'line_field "$row" launched_at' "$(cat "$SWEEPER")"
+# Proven loud by mutation: rename the key at the writer and the first assertion above is the
+# one that goes red, which is the point — the failure is a suite failure, not a silent
+# fail-open at 3am.
+N_MUT_DP="$SANDBOX/fx/renamed-preflight.sh"
+awk '{ if (index($0, "ROW=\"roster-state/") > 0) gsub(/launched_at=/, "launchedat=")
+       print }' "$DP_N" > "$N_MUT_DP"
+if cmp -s "$DP_N" "$N_MUT_DP"; then
+  no "the launched_at rename applies to dispatch-preflight.sh" \
+     "the mutation target matched nothing — the row template moved and this proof is vacuous"
+else
+  ok "the launched_at rename applies to dispatch-preflight.sh"
+fi
+expect_absent "a renamed launched_at is CAUGHT, not silently tolerated" \
+  "launched_at" "$(n_row_keys "$N_MUT_DP")"
+
+# THE END-TO-END HALF (row 1): every writer real, every reader real, and the observable is the
+# VERDICT rather than the roster row — which is the gap S6's own suite could not close, since
+# it owns the recorder and not the thing that reads it.
+NLR=$(new_repo "launch-ref")
+write_plan "$NLR/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+NLR_ART="$NLR/.bionic/docs/record/resumed.md"
+mkdir -p "$NLR/.bionic/docs/record"
+NLR_ID="aresumed-3333333333333333"
+
+n_cycle() {  # <tool_use_id> — one full dispatch cycle through all three real hooks
+  jq -n --arg s "$SID_A" --arg c "$NLR" --arg u "$1" --arg d "$NLR_ART" \
+    '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
+      hook_event_name:"PreToolUse", tool_name:"Agent",
+      tool_input:{description:"a dispatch", subagent_type:"implementor", name:"resumed",
+                  prompt:("Expected artifact: " + $d)},
+      tool_use_id:$u}' | "${NENV[@]}" bash "$PARTY_DP" >/dev/null 2>&1
+  jq -n --arg s "$SID_A" --arg c "$NLR" --arg u "$1" --arg a "$NLR_ID" \
+    '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
+      hook_event_name:"PostToolUse", tool_name:"Agent",
+      tool_input:{description:"a dispatch", prompt:"go", subagent_type:"implementor",
+                  run_in_background:true, name:"resumed"},
+      tool_response:{isAsync:true, status:"async_launched", agentId:$a},
+      tool_use_id:$u}' | bash "$PARTY_ER" >/dev/null 2>&1
+  mk_start_payload "$SID_A" "/irrelevant.jsonl" "$NLR" "resumed" "$NLR_ID" \
+    | bash "$PARTY_ER" >/dev/null 2>&1
+}
+n_state() {  # -> the verdict's state for the row, over the live roster
+  ( cd "$NLR" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" verdict resumed 2>/dev/null ) \
+    | grep -F 'landing-verdict/v1|' | head -1 | tr '|' '\n' | grep '^state=' | cut -d= -f2-
+}
+n_latest_row() {  # -> the last row the real recorder wrote for this name
+  grep -F '|name=resumed|' "$NLR/.bionic/tmp/roster-$SID_A.state" | tail -1
+}
+# THE READER, ASKED ABOUT ONE ROW. The row handed over is the REAL recorder's own output
+# line, copied verbatim onto a fresh roster — not a hand-built fixture — because the
+# discriminating question here is what a reader makes of the row the resume produced, and on
+# the live roster that same reader answers AMBIGUOUS about the NAME (see below) whatever the
+# row says. This is `latest_rows`' fold with the two-contract count removed, and nothing else.
+n_state_of_row() {  # <roster row> -> the verdict's state for it alone
+  local d="$SANDBOX/fx/lr-fold"
+  rm -rf "$d"; mkdir -p "$d/.bionic/tmp"
+  git -C "$d" init -q 2>/dev/null
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+    > "$d/.bionic/tmp/roster-$SID_A.state"
+  printf '%s\n' "$1" >> "$d/.bionic/tmp/roster-$SID_A.state"
+  ( cd "$d" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" verdict resumed 2>/dev/null ) \
+    | grep -F 'landing-verdict/v1|' | head -1 | tr '|' '\n' | grep '^state=' | cut -d= -f2-
+}
+
+n_cycle toolu_01CYCLEA
+# THE ROSTER IS AGED, and only the roster: both cycles would otherwise be stamped in the same
+# second and there would be no difference for the pin to preserve. An hour between a dispatch
+# and its resume is the field case's own shape (`record/w1-rc-verify-floor.md` §Amendment-2),
+# and every hook that reads these rows below is the real one reading a real row.
+N_T0=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "-3600 seconds" +%Y-%m-%dT%H:%M:%SZ)
+sed -i.bak -E "s/launched_at=[^|]*/launched_at=$N_T0/" "$NLR/.bionic/tmp/roster-$SID_A.state"
+rm -f "$NLR/.bionic/tmp/roster-$SID_A.state.bak"
+# The takeover's delivery: written between the original launch and the resume, which is the
+# artifact the field case's landing gate called missing.
+echo "the takeover wrote this" > "$NLR_ART"
+touch -t "$(date -v-1800S +%Y%m%d%H%M.%S 2>/dev/null || date -d "-1800 seconds" +%Y%m%d%H%M.%S)" "$NLR_ART"
+expect_eq "before the resume, the delivered contract reads MET" "MET" "$(n_state)"
+
+n_cycle toolu_01CYCLEB
+N_RESUMED_ROW=$(n_latest_row)
+expect_eq "the resume kept the ORIGINAL launch reference, through the real hooks" "$N_T0" \
+  "$(printf '%s' "$N_RESUMED_ROW" | tr '|' '\n' | grep '^launched_at=' | cut -d= -f2-)"
+expect_eq "…and appended its own row rather than rewriting one" "2" \
+  "$(grep -cF '|status=identified|' "$NLR/.bionic/tmp/roster-$SID_A.state")"
+expect_eq "…so the reader still calls the delivered contract MET over that row" \
+  "MET" "$(n_state_of_row "$N_RESUMED_ROW")"
+
+# WHAT THE LIVE ROSTER SAYS, and it is not MET — recorded here because it is the thing no
+# component suite could see, and because the honest answer is worth more than a green line.
+#
+# A resume through the real hook path is a SECOND Agent-tool cycle, so it writes a second
+# `tool_use_id` under one name, and `verdict` counts contracts by distinct tool_use_id
+# (wave-01 Step-6 review C-2: two dispatches sharing a name are indistinguishable to every
+# reader downstream). The name therefore reads AMBIGUOUS, not MET, and no row is judged.
+#
+# THE FAIL DIRECTION IS THE SAFE ONE and that is why this is pinned rather than fixed here:
+# the landing gate PASSES an AMBIGUOUS name (§J's `dup` row), so R6 holds — work delivered
+# before a resume still cannot be read as undelivered, and the gate still cannot manufacture
+# an UNMET over an artifact that exists. What is lost is only the sharpness of AC-5's "yields
+# MET": through this route it yields "not judged". Reconciling C-2's contract count with S6's
+# resume (same agent id, two tool_use_ids — arguably ONE contract resumed, not two dispatched)
+# is a change to a wave-01 remediation and to S6's own keying rule, which is a cross-slice
+# decision this slice surfaces rather than takes.
+expect_eq "on the LIVE roster the resumed name reads AMBIGUOUS, not MET (recorded finding)" \
+  "AMBIGUOUS" "$(n_state)"
+expect_eq "…and AMBIGUOUS is the state the landing gate passes, so R6 still holds" "pass" \
+  "$(printf '%s' "$J_CASES" | grep '^dup|' | cut -d'|' -f3)"
+
+# THE DISCRIMINATING HALF, by mutation of the middle party: with the override removed the
+# resume re-stamps, the artifact predates the fresh stamp, and the verdict manufactures the
+# UNMET the field case actually suffered. This is the assertion that proves the three above
+# are about the pin rather than about a fixture that could never have failed.
+N_MUT_ER="$SANDBOX/fx/unpinned-recorder.sh"
+awk '{ if (index($0, "PRIOR_LAUNCH=$(prior_launch_for_agent") > 0)
+         sub(/prior_launch_for_agent/, "true prior_launch_for_agent")
+       print }' "$REPO_ROOT/hooks/execution-recorder.sh" > "$N_MUT_ER"
+if cmp -s "$REPO_ROOT/hooks/execution-recorder.sh" "$N_MUT_ER"; then
+  no "the launch-pin mutation applies to execution-recorder.sh" \
+     "the mutation target matched nothing — the code moved and this proof is vacuous"
+else
+  ok "the launch-pin mutation applies to execution-recorder.sh"
+fi
+n_saved_er="$PARTY_ER"; PARTY_ER="$N_MUT_ER"
+n_cycle toolu_01CYCLEC
+N_UNPINNED_ROW=$(n_latest_row)
+expect_eq "with the pin removed the resume re-stamps the launch reference" "no" \
+  "$([ "$(printf '%s' "$N_UNPINNED_ROW" | tr '|' '\n' | grep '^launched_at=' | cut -d= -f2-)" \
+      = "$N_T0" ] && echo yes || echo no)"
+expect_eq "…and the reader then calls the SAME delivered artifact stale — the field case" \
+  "UNMET" "$(n_state_of_row "$N_UNPINNED_ROW")"
+PARTY_ER="$n_saved_er"
+
+# ============================================================
+echo ""
 echo "──────────────────────────────────────────────"
 echo "cross-gate-agreement: ${PASS} passed, ${FAIL} failed, ${TOTAL} total"
 [ "$FAIL" -eq 0 ]
