@@ -196,11 +196,66 @@ expect_contains "…it is left alone until an ack closes it" "nobody to stand do
 run_orders "$R5" standdown
 expect_contains "…and the ack is what puts it in the batch" "1 row(s) have landed" "$OUT"
 
+# THE APPEND-ONLY ADVANCE, pinned in this suite because standdown now reads the roster
+# through ONE pre-loop fold instead of re-walking the file per verdict row (ap review P-1,
+# epic-16 w2 Step-6 remediation R4). The behaviour is unchanged and that is the point of
+# the pin: a contract advances along the roster and every writer copies the fields forward,
+# so the LAST row carrying a name is the authoritative one, and a rewrite that starts
+# taking the first row must not be able to stay green here. The cross-script half — the
+# sweeper, the poker and this script agreeing on the same doubled roster — is
+# tests/cross-gate-agreement.test.sh §P.
+R5B="$(make_repo advanced)"
+echo landed > "$R5B/.bionic/docs/record/advanced.md"
+roster_row "$R5B" "advancing" "" "" "stale-address@session-6c85684c"
+roster_row "$R5B" "advancing" ".bionic/docs/record/advanced.md" "" "live-address@session-6c85684c"
+run_orders "$R5B" standdown
+expect_status "a roster carrying two rows for one name still answers" 0 "$ST"
+STANDDOWN_BLOCK=$(printf '%s\n' "$OUT" | sed -n '/STAND DOWN/,/LEFT ALONE/p')
+expect_contains "the LATER row is the contract: the batch addresses it by that row" \
+  "live-address@session-6c85684c" "$STANDDOWN_BLOCK"
+expect_absent "…and never by the superseded row's address" "stale-address@session-6c85684c" "$OUT"
+expect_contains "…counted once, not twice" "1 row(s) have landed" "$OUT"
+
 # An empty roster is not an error and not a batch.
 R6="$(make_repo emptyroster)"
 run_orders "$R6" standdown
 expect_status "an empty roster answers cleanly" 0 "$ST"
 expect_contains "…and says there is nothing to do" "nothing to stand down" "$OUT"
+
+# ============================================================
+echo ""
+echo "=== Section 4: the pinned root — a worktree cwd answers for the MAIN repository (6-axis A-1) ==="
+# ============================================================
+#
+# ap review A-1: from a worktree cwd, `git rev-parse --show-toplevel` answers the WORKTREE
+# root, not the repository resolve_project_root maps onto (dispatch-preflight.sh's own
+# convention, epic-16 w2 Step-6 remediation R3). A roster written at the main root then
+# reads as having no contract rows at all from inside the worktree.
+
+R7="$(make_repo worktree)"
+echo seed > "$R7/README.md"
+git -C "$R7" add README.md >/dev/null 2>&1
+git -C "$R7" commit -qm seed >/dev/null 2>&1
+roster_row "$R7" "live-worker" ".bionic/docs/record/never.md" "" "live-worker@session-6c85684c"
+
+R7WT="$SANDBOX/worktree-wt"
+# A REAL `git worktree add` (never a mocked path) — built from the repo root, since
+# `git worktree add` resolves relative paths against pwd (.claude/rules/git-worktree-docs.md).
+git -C "$R7" worktree add -q -b w-r3-wt "$R7WT" >/dev/null 2>&1
+[ -e "$R7WT/.git" ] && ok "fixture: a real git worktree exists" \
+  || no "fixture: a real git worktree exists"
+
+run_orders "$R7" standdown
+expect_status "from the main repo root, standdown sees the true roster" 0 "$ST"
+expect_contains "…and leaves the open row alone (not a landing)" "live-worker" "$OUT"
+
+run_orders "$R7WT" standdown
+expect_status "from the WORKTREE cwd, the SAME session's standdown still reads the true roster" 0 "$ST"
+expect_contains "…still names the open row through the worktree cwd" "live-worker" "$OUT"
+expect_absent "…never claims there are no contract rows through the wrong root" \
+  "no contract rows on this session's roster" "$OUT"
+
+git -C "$R7" worktree remove --force "$R7WT" >/dev/null 2>&1
 
 # ============================================================
 echo ""

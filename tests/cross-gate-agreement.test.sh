@@ -2647,27 +2647,34 @@ echo "=== N — the wave-02 facts: one root, one vocabulary, one launch referenc
 # a resume looks like in that mode, which is the fixture-fidelity failure the header forbids.
 # The async half of the same property IS driven, at §N.6.
 
-# ---------------------------------------------------------------- N.1 four bodies, one root
+# ---------------------------------------------------------------- N.1 six bodies, one root
 #
-# `resolve_project_root()` is a FOUR-copy family since S4+S5 (w2-s45 §5 call 7): the
+# `resolve_project_root()` is a SIX-copy family: FOUR since S4+S5 (w2-s45 §5 call 7) — the
 # governing-skill hook is the origin, the evidence gate its long-standing twin, and the
-# dispatch wall and the probe took copies when R5 made the wall run the probe inline. The
-# wall's copy is not optional decoration — a probe that roots at the main repository while
-# the gate still roots at the worktree writes an attestation the gate can never find, which
-# is a new failure mode manufactured by fixing half a pair.
+# dispatch wall and the probe took copies when R5 made the wall run the probe inline — plus
+# TWO MORE from epic-16 w2 Step-6 remediation R3 (ap review A-1): the poker and stop-orders
+# used to answer `git rev-parse --show-toplevel`, which names a worktree's own root rather
+# than the main repository the roster lives under, and DISARM is terminal by doctrine once
+# a tick takes that wrong answer. Extending this loop rather than adding a second one is
+# what keeps D-2's "exactly four copies, no fifth" pin from failing on this wave's own fix
+# — the critic named the trap by number (remediation-trap analysis #4): a resolver swap
+# that does not extend the agreement test manufactures a fresh duplication finding in the
+# act of closing A-1.
 DP_N="$REPO_ROOT/hooks/dispatch-preflight.sh"
 PB_N="$REPO_ROOT/hooks/preflight-probe.sh"
 GS_N="$REPO_ROOT/hooks/canonical-sdlc-governing-skill.sh"
 EG_N="$REPO_ROOT/hooks/canonical-sdlc-evidence-gate.sh"
+SP_N="$REPO_ROOT/hooks/session-poker.sh"
+SO_N="$REPO_ROOT/hooks/stop-orders.sh"
 
 expect_eq "the root resolver extracts at all (this section is not vacuous)" "yes" \
   "$([ -n "$(fn_body "$GS_N" resolve_project_root)" ] && echo yes || echo no)"
-for _n in "$DP_N" "$PB_N" "$EG_N"; do
+for _n in "$DP_N" "$PB_N" "$EG_N" "$SP_N" "$SO_N"; do
   expect_eq "$(basename "$_n")'s resolve_project_root() is the origin's, body for body" \
     "$(fn_body "$GS_N" resolve_project_root)" "$(fn_body "$_n" resolve_project_root)"
 done
 
-# ---------------------------------------------------------------- N.2 four ANSWERS, one root
+# ---------------------------------------------------------------- N.2 six ANSWERS, one root
 #
 # Bodies being equal is a claim about the text. This is the claim about the ANSWER, taken
 # where the field case took it: inside a real `git worktree add`, which is the input that
@@ -2698,16 +2705,16 @@ NMAIN=$(cd "$NREPO" && pwd -P)
 # PreToolUse gate meets the second shape on the first artifact write into a project, and
 # the climb-to-the-nearest-existing-ancestor is the part of the resolver that handles it.
 for _p in "$NWT/.bionic/docs/record/x.md" "$NWT/deep/not/created/yet/x.md"; do
-  for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N"; do
+  for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N"; do
     expect_eq "$(basename "$_n") roots '${_p#$NWT/}' at the MAIN repository, not the worktree" \
       "$NMAIN" "$(cd "$NWT" && root_via "$_n" "$_p")"
   done
 done
-# The paired negative: outside any repository all four fall back, and to the SAME fallback.
-# Without it the four could agree by having all stopped resolving anything.
+# The paired negative: outside any repository all six fall back, and to the SAME fallback.
+# Without it the six could agree by having all stopped resolving anything.
 NOUT="$SANDBOX/fx/nroot/notarepo"
 mkdir -p "$NOUT"
-for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N"; do
+for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N"; do
   expect_eq "$(basename "$_n") falls back outside any repository" \
     "$NOUT" "$(cd "$NOUT" && root_via "$_n" "$NOUT/x.md" "$NOUT")"
 done
@@ -3032,6 +3039,126 @@ expect_eq "with the pin removed the resume re-stamps the launch reference" "no" 
 expect_eq "…and the reader then calls the SAME delivered artifact stale — the field case" \
   "UNMET" "$(n_state_of_row "$N_UNPINNED_ROW")"
 PARTY_ER="$n_saved_er"
+
+# ============================================================
+echo ""
+echo "=== O — session-poker's copied primitives, CODE-identical (6-axis D-1) ==="
+# ============================================================
+#
+# hooks/session-poker.sh's own header declared five functions "DELIBERATELY DUPLICATED from
+# hooks/session-sweeper.sh, byte for byte" and called parse_seconds's copy "verbatim" —
+# rd review D-1 (blocking-grade): nothing anywhere compared a single copy, and the
+# "verbatim" claim was already false. `parse_seconds`'s SWEEPER copy carries nine lines of
+# internal rationale comments (why "0.5h" and "1h30m" are refused) that the POKER copy
+# drops, because that rationale describes the sweeper's own history — reading `cadence=` —
+# which this script never does; it reads `duration=` instead. The §I.1 precedent this loop
+# follows already excludes SIGNATURE comments from its body comparison ("each file explains
+# its copy in its own terms"); this loop goes one step further and excludes every
+# pure-comment line inside the body too, because parse_seconds is the one primitive here
+# whose internal comments are legitimately script-specific. What must not drift silently is
+# the EXECUTABLE TEXT, so that is what is compared — epic-16 w2 Step-6 remediation R3, and
+# the two header comments this closes (session-poker.sh:84-88, :109-111) now say exactly
+# this: code-identical, not byte-identical (R-3).
+SPO="$REPO_ROOT/hooks/session-poker.sh"
+
+fn_code() {  # <file> <function name> -> fn_body with pure-comment lines stripped too
+  fn_body "$1" "$2" | grep -v '^#'
+}
+
+expect_eq "the extractor returns code at all (this section is not vacuous)" "yes" \
+  "$([ -n "$(fn_code "$SWEEPER" parse_seconds)" ] && echo yes || echo no)"
+for _fn in now_epoch iso_now line_field clean parse_seconds; do
+  expect_eq "the poker's ${_fn}() is the sweeper's, CODE for code" \
+    "$(fn_code "$SWEEPER" "$_fn")" "$(fn_code "$SPO" "$_fn")"
+done
+# The discriminating half: parse_seconds is NOT byte-identical (the comments legitimately
+# differ), which is the whole reason this loop compares code rather than bytes. Without this
+# the five expect_eq's above could be silently vacuous by fn_code stripping everything.
+expect_eq "…and parse_seconds is genuinely NOT byte-identical (comments differ, proving fn_code isn't vacuous)" \
+  "no" "$([ "$(fn_body "$SWEEPER" parse_seconds)" = "$(fn_body "$SPO" parse_seconds)" ] && echo yes || echo no)"
+
+# ============================================================
+echo ""
+echo "=== P — the three roster folds agree that the LATER row wins (ap review P-1) ==="
+# ============================================================
+#
+# The roster is append-only and a contract advances along it (`intended` → `confirmed` →
+# `identified`), every writer copying the contract fields forward — so the LAST row carrying
+# a name is the authoritative one. Three scripts fold the file on that rule and none of them
+# can share code with the others (there is no library in this repo by decision, and each
+# fold answers its own caller: hooks/session-sweeper.sh latest_rows also counts contracts
+# and filters by session; hooks/session-poker.sh takes one row by name; hooks/stop-orders.sh
+# needs a whole batch at once and, since epic-16 w2 Step-6 remediation R4, folds ONCE
+# instead of re-walking the file per verdict row — the fix for P-1, whose per-row re-walk
+# cost ~14·N² processes and 63 s at N=100).
+#
+# A code-comparison loop like §O cannot hold these three together, because they are
+# legitimately different code. This is the behavioural equivalent: ONE roster in which a
+# name appears TWICE, and all three asked what they see. A fold that silently starts taking
+# the FIRST row — the plausible drift, and the one an off-by-one in a rewrite produces —
+# turns this section red in three places at once.
+#
+# Overridable for the same reason the parties at the top of this file are: the
+# discrimination proof for this section is a MUTATED copy of one fold — made to take the
+# first row instead of the last — driven against the same fixture, with the shipped files
+# never touched. A mutant copy must sit in a directory that also carries session-sweeper.sh,
+# since both scripts resolve it as a sibling:
+#   W2_PARTY_ORD=/tmp/mut/stop-orders.sh bash tests/cross-gate-agreement.test.sh
+PORD="${W2_PARTY_ORD:-$REPO_ROOT/hooks/stop-orders.sh}"
+PPOKE="${W2_PARTY_POKE:-$REPO_ROOT/hooks/session-poker.sh}"
+PREPO=$(new_repo "fold-agreement")
+mkdir -p "$PREPO/.bionic/tmp" "$PREPO/.bionic/docs/record"
+PROSTER="$PREPO/.bionic/tmp/roster-$SID_A.state"
+P_LANDED="$PREPO/.bionic/docs/record/p-landed.md"
+printf 'landed\n' > "$P_LANDED"
+P_OLD=$(date -u -v-100000S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || date -u -d '-100000 seconds' +%Y-%m-%dT%H:%M:%SZ)
+P_NEW=$(date -u -v-60S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || date -u -d '-60 seconds' +%Y-%m-%dT%H:%M:%SZ)
+
+p_row() {  # <name> <deliverable> <duration> <launched_at> <teammate_id>
+  printf 'roster-state/v1|status=confirmed|session=%s|name=%s|agent_id=|launched_at=%s|subagent_type=implementor|model=opus|deliverable=%s|source=declared|duration=%s|progress=|claims=|cadence=|absent=|waiver=|teammate_id=%s|tool_use_id=toolu_P%s\n' \
+    "$SID_A" "$1" "$4" "$2" "$3" "$5" "$1"
+}
+
+printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+  > "$PROSTER"
+# dup-open: the EARLIER row would read as landed and unhurried (a delivered artifact, four
+# hours to do it, launched a minute ago); the LATER row is the true contract and is neither.
+p_row dup-open "$P_LANDED"                "4 hours"  "$P_NEW" "first@session-p"  >> "$PROSTER"
+p_row dup-open "$PREPO/never-written.md"  "1 minute" "$P_OLD" "second@session-p" >> "$PROSTER"
+# dup-landed: both rows have landed, so the row that wins is visible in the ADDRESS the
+# stand-down prints — the one field standdown reads off the roster for a landed row.
+p_row dup-landed "$P_LANDED" "4 hours" "$P_NEW" "first@session-p"  >> "$PROSTER"
+p_row dup-landed "$P_LANDED" "4 hours" "$P_NEW" "second@session-p" >> "$PROSTER"
+
+expect_eq "fixture: each name really is on the roster twice (this section is not vacuous)" \
+  "2" "$(grep -c '|name=dup-open|' "$PROSTER")"
+
+P_VERDICT=$( cd "$PREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" verdict 2>/dev/null )
+# PARTY 1 — the sweeper latest_rows. The earlier row points at a file that EXISTS; reading
+# it would make this row MET.
+expect_contains "the sweeper judges dup-open from the LATER row (UNMET, not the earlier landed one)" \
+  "|name=dup-open|state=UNMET|" "$P_VERDICT"
+expect_contains "…and its detail names the LATER row deliverable" \
+  "never-written.md" "$P_VERDICT"
+
+# PARTY 2 — the poker per-row lookup. `duration=`/`launched_at=` come from the roster, not
+# from the verdict line: the earlier row (four hours, launched a minute ago) is nowhere near
+# due, the later one (one minute, launched a day ago) is long past.
+P_TICK=$( cd "$PREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PPOKE" tick 2>&1 )
+expect_contains "the poker reads dup-open duration off the LATER row (NOTIFY, not QUIET)" \
+  "decision=NOTIFY" "$P_TICK"
+expect_contains "…naming that row" "rows=dup-open" "$P_TICK"
+
+# PARTY 3 — stop-orders single pre-loop fold. Both dup-landed rows have landed, so the
+# stand-down prints an address, and the address is the discriminator.
+P_STAND=$( cd "$PREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PORD" standdown 2>&1 )
+expect_contains "the stand-down addresses dup-landed by the LATER row teammate id" \
+  "second@session-p   (met — dup-landed)" "$P_STAND"
+expect_absent "…and never by the earlier one" "first@session-p" "$P_STAND"
+# The stand-down must still leave the unlanded row alone, folded or not.
+expect_contains "…while dup-open is left alone, not stood down" "LEFT ALONE" "$P_STAND"
 
 # ============================================================
 echo ""

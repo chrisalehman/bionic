@@ -28,12 +28,18 @@
 # self-wake loop) is what turns a NOTIFY line into an actual push. Zero authority, exactly
 # like `verdict` (ADR-003) — this verb cannot even record that it ran.
 #
+# AN ACKED ROW IS CLOSED HERE, exactly as it is for the other three consumers of the
+# verdict line (hooks/landing-gate.sh, hooks/stop-orders.sh, hooks/stop-guard.sh): it is
+# neither open nor notifiable. `acked=` is read PER ROW off the verdict line below, never
+# from the ledger — the verb that owns the ledger is the verb that prints the answer.
+#
 # DECISIONS, in precedence order:
 #   DISARM   the roster carries no OPEN row — an empty roster (spec's "disarmed on empty
 #            roster" invariant, literally) generalizes here to the roster having nothing
-#            open at all: every row MET or WAIVED is the same "nothing left to wait for" as
-#            no rows existing, so both read DISARM (S2 design decision, logged to the plan).
-#   NOTIFY   at least one UNMET row's elapsed time (now − launched_at) exceeds its own
+#            open at all: every row MET, WAIVED or ACKED is the same "nothing left to wait
+#            for" as no rows existing, so all read DISARM (S2 design decision plus epic-16
+#            w2 Step-6 remediation R4, both logged to the plan).
+#   NOTIFY   at least one UNACKED UNMET row's elapsed time (now − launched_at) exceeds its own
 #            declared `duration=`, read by the same parser `verdict` uses for `cadence=`
 #            (hooks/session-sweeper.sh's parse_seconds, duplicated below — see that file's
 #            fix, same commit lineage, epic-16 w2 S2). A row whose duration is unreadable or
@@ -81,11 +87,17 @@ esac
 
 # ---------------------------------------------------------------- portable facts
 #
-# DELIBERATELY DUPLICATED from hooks/session-sweeper.sh, byte for byte, for the reason that
-# file's own header gives (§9 there): a sourced library the installer misses is a silently
-# inert consumer, and every duplicate here answers the SAME question its sibling answers so
-# the two cannot quietly drift into different readings of one fact. `parse_seconds` is
-# duplicated post-fix (epic-16 w2 S2, same commit that fixed the original).
+# DELIBERATELY DUPLICATED from hooks/session-sweeper.sh, CODE-identical (not byte-identical —
+# each file's comments explain its own copy in its own terms, exactly as
+# tests/cross-gate-agreement.test.sh's §I.1 already treats signature comments for its own
+# duplicated family), for the reason that file's own header gives (§9 there): a sourced
+# library the installer misses is a silently inert consumer, and every duplicate here answers
+# the SAME question its sibling answers so the two cannot quietly drift into different
+# readings of one fact. `parse_seconds` is duplicated post-fix (epic-16 w2 S2, same commit
+# that fixed the original). The five are held together by tests/cross-gate-agreement.test.sh
+# §O, which compares executable text with every pure-comment line stripped from both sides —
+# epic-16 w2 Step-6 remediation R3, closing rd review D-1 (this claim used to name no test,
+# and was already false for parse_seconds before that fix).
 
 now_epoch() { date -u +%s; }
 iso_now()   { date -u +%Y-%m-%dT%H:%M:%SZ; }
@@ -107,8 +119,10 @@ clean() {  # <value>
 }
 
 # The prose duration/cadence parser. Deliberate limits, each a refusal rather than a guess —
-# see hooks/session-sweeper.sh's copy for the full rationale; this is that function's
-# POST-FIX body, verbatim.
+# see hooks/session-sweeper.sh's copy for the full rationale (its own comments there are
+# specific to ITS callers, e.g. `cadence=`, which this script never reads — that is why this
+# copy's comments are shorter, not why the code differs). This is that function's POST-FIX
+# body, CODE-identical (§O compares it with comments on both sides stripped).
 parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be read
   local raw="$1" s pairs count nums hi unit mult n allnums
   [ -n "$raw" ] || return 1
@@ -136,6 +150,40 @@ parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be 
   printf '%s' "$((hi * mult))"
 }
 
+# ---------------------------------------------------------------- the pinned root
+#
+# DELIBERATELY DUPLICATED, byte for byte, from hooks/dispatch-preflight.sh's copy
+# (the origin is hooks/canonical-sdlc-governing-skill.sh; tests/cross-gate-agreement.test.sh
+# §N.1/§N.2 compare six copies now, this one included). epic-16 w2 Step-6 remediation R3,
+# closing ap review A-1: this script used to answer `git rev-parse --show-toplevel`, which
+# names the WORKTREE root. A worktree cwd would then poll a roster file that only ever
+# existed under the MAIN repository, read it as empty, and DISARM — silently and
+# permanently, since DISARM ends the self-wake for the rest of the session (doctrine,
+# skills/canonical-sdlc/SKILL.md §Dispatch). `--git-common-dir` maps a worktree back onto its
+# main repository, so both this script and the roster's writer land on one address space.
+resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default pwd)
+  local d common root
+  d=$(dirname "$1")
+  while [ ! -d "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
+    d=$(dirname "$d")
+  done
+  if common=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+    dirname "$common"
+    return
+  fi
+  if common=$(git -C "$d" rev-parse --git-common-dir 2>/dev/null); then
+    case "$common" in
+      /*) root=$(dirname "$common") ;;
+      *)  root=$(cd "$d" 2>/dev/null && cd "$(dirname "$common")" 2>/dev/null && pwd -P) ;;
+    esac
+    if [ -n "$root" ]; then
+      printf '%s\n' "$root"
+      return
+    fi
+  fi
+  printf '%s\n' "${2:-$(pwd)}"
+}
+
 # ---------------------------------------------------------------- the interval knob
 #
 # `poker-interval:` in <project>/.bionic/config.yaml — the exact convention
@@ -149,7 +197,7 @@ parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be 
 # everywhere else a prose value is read (parse_seconds itself, the two hooks above).
 poker_interval_seconds() {
   local repo cfg raw ov
-  repo="$(git rev-parse --show-toplevel 2>/dev/null)"; [ -n "$repo" ] || repo="$PWD"
+  repo="$(resolve_project_root "$PWD/." "$PWD")"
   cfg="$repo/.bionic/config.yaml"
   raw="$POKER_INTERVAL_DEFAULT"
   if [ -f "$cfg" ] && [ ! -L "$cfg" ]; then
@@ -190,7 +238,7 @@ case "$VERB" in
       exit 2
     fi
 
-    REPO="$(git rev-parse --show-toplevel 2>/dev/null)"; [ -n "$REPO" ] || REPO="$PWD"
+    REPO="$(resolve_project_root "$PWD/." "$PWD")"
     REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
     if [ -z "$REPO_REAL" ]; then
       die "REFUSED — cannot resolve the working directory."
@@ -222,6 +270,30 @@ case "$VERB" in
       TOTAL=$((TOTAL + 1))
       RNAME="$(line_field "$LINE" name)"
       RSTATE="$(line_field "$LINE" state)"
+
+      # THE ACK CLOSES THE ROW HERE TOO, before the state is looked at at all: excluded from
+      # OPEN and therefore from DISARM's precondition, and excluded from NOTIFY eligibility.
+      # Read per row off the verdict line this loop is already walking — never from the
+      # ledger, whose one owner is the verb that prints this line (hooks/session-sweeper.sh,
+      # S9) — and spelled exactly as the three consumers that already read it:
+      # hooks/landing-gate.sh:214, hooks/stop-orders.sh:319, hooks/stop-guard.sh:491.
+      # This is what makes the ack verb's own closing sentence true —
+      #   hooks/session-sweeper.sh:817 "an acked row is closed for every reader"
+      # — which it was not while this script was the fourth reader that ignored the field
+      # (cs review C-4, epic-16 w2 Step-6 remediation R4). Two structural consequences were
+      # riding on the omission, both worse than the noise: an acked-UNMET row is never MET
+      # and never WAIVED, and its artifact was accounted for by a human rather than written
+      # to disk, so it held OPEN above zero PERMANENTLY and DISARM — the end of the
+      # self-wake — was unreachable by the ordinary path that closes an artifact-less row;
+      # and every tick re-notified the same closed work, growing the NOTIFY set
+      # monotonically across a wave. AC-7's contract moves with this (assumption 41), which
+      # is why hooks/session-poker.test.sh §3 re-authors the accelerated-clock cases rather
+      # than re-running them.
+      #
+      # TOTAL still counts an acked row: it is on the roster, and "how many contracts does
+      # this session carry" is not the question the ack answers. Only `open=` moves.
+      [ "$(line_field "$LINE" acked)" = "yes" ] && continue
+
       case "$RSTATE" in
         MET|WAIVED) : ;;                      # closed — not open
         *)          OPEN=$((OPEN + 1)) ;;      # STILL-LIVE, UNMET, AMBIGUOUS — open
@@ -245,6 +317,22 @@ case "$VERB" in
     done <<EOF
 $VERDICT_OUT
 EOF
+
+    # "No roster" and "empty roster" are different facts, and only the latter may DISARM
+    # (ap review A-1, item 2). A roster with zero verdict lines because the file plain does
+    # not exist is indistinguishable, from the arithmetic alone, from a roster that exists
+    # and legitimately has nothing open yet — but the first case is usually the wrong project
+    # root having been resolved, and DISARM is silent and terminal for the rest of the
+    # session (doctrine, skills/canonical-sdlc/SKILL.md §Dispatch: "DISARM also ends the
+    # self-wake"). Checked only on the TOTAL=0 path: any row at all on the roster proves the
+    # file exists, so OPEN=0-with-TOTAL>0 can never be the absent-file case.
+    if [ "$TOTAL" -eq 0 ] && [ ! -e "$ROSTER_FILE" ]; then
+      die "REFUSED — no roster at $ROSTER_FILE; this is not the same as an empty one."
+      die "An absent roster usually means the wrong project root was resolved, or nothing has"
+      die "been dispatched yet on this session — either way, nothing was read to decide DISARM"
+      die "from, and DISARM ends the self-wake for the rest of this session."
+      exit 2
+    fi
 
     # DISARM — no open row, whether because the roster is empty or because every row on it
     # is already MET/WAIVED (S2 design decision: "no open rows" generalizes the spec's

@@ -104,6 +104,19 @@ add_row() {  # <repo> <key=value>...
   mkrow "$@" >> "$(roster_of "$repo")"
 }
 
+# THE ACK IS PLANTED THROUGH THE REAL VERB, never by hand-writing a ledger line. `acked=`
+# reaches the poker on the verdict line (hooks/session-sweeper.sh:715), and the only writer
+# of the ledger that line is computed from is `ack` itself — a fabricated ledger would pin
+# this suite to a private idea of the ledger's shape rather than to the one the sweeper
+# actually keeps. The sweeper is resolved exactly as the poker resolves it, as a sibling of
+# the script under test, so a mutated poker copy still acks through the shipped sweeper.
+SWEEPER_FOR_ACK="$(cd "$(dirname "$POKER")" && pwd)/session-sweeper.sh"
+ack_rows() {  # <repo> <name>...
+  local repo="$1"; shift
+  ( cd "$repo" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER_FOR_ACK" ack "$@" ) \
+    >/dev/null 2>&1
+}
+
 # ---------- running the poker (same watchdog shape as hooks/session-sweeper.test.sh) ----------
 
 POKE_BOUND=20
@@ -174,8 +187,39 @@ expect_eq "a malformed override REFUSES rather than silently defaulting (exit 2)
 expect_contains "…and names where to fix it" "config.yaml" "$OUT"
 
 # ============================================================
-section "Section 3: tick — the four accelerated-clock decisions (AC-7)"
+section "Section 3: tick — the accelerated-clock decisions (AC-7, re-authored for the ack)"
 # ============================================================
+#
+# AC-7's CONTRACT MOVED at epic-16 w2 Step-6 remediation R4 (cs review C-4), so this case
+# list is re-authored rather than re-run: the ack is now an input to every decision below,
+# and cases that used to read "an UNMET row past its duration NOTIFYs" now read "an UNACKED
+# UNMET row past its duration NOTIFYs". Rerunning the old list green would have proven
+# nothing about the property that changed.
+#
+# WHAT CHANGED. `acked=yes|no` rides beside the state on every verdict line
+# (hooks/session-sweeper.sh:715), and three consumers already treated an acked row as
+# closed — hooks/landing-gate.sh:214, hooks/stop-orders.sh:319, hooks/stop-guard.sh:491.
+# The poker read the state alone, which made the sweeper's own closing sentence false:
+#
+#   hooks/session-sweeper.sh:817 — "an acked row is closed for every reader"
+#
+# It now is. An acked row is excluded from OPEN counting and from NOTIFY eligibility here
+# exactly as it is there, which closes the two structural consequences C-4 named: DISARM
+# was unreachable while any acked-UNMET row sat on the roster (the self-wake was immortal),
+# and the NOTIFY set grew monotonically across a wave, re-alarming on work a human had
+# already accounted for.
+#
+# The case list AC-7 is now driven by:
+#   DISARM  — empty roster; every row MET; every row UNMET-but-ACKED (new).
+#   NOTIFY  — an UNACKED UNMET row past its duration; a mixed roster naming only the
+#             unacked overdue row (both paired positives for the exclusion above).
+#   QUIET   — an UNMET row inside its duration; an unreadable duration; an ACKED overdue
+#             row beside an unacked row that is not yet due (new).
+#   REFUSE  — an absent roster (Section 5), unchanged by the ack.
+#
+# The ack reaches the poker on the verdict line it already parses, per row, and never from
+# the ledger: the verb that owns the ledger is the verb that prints the answer (S9, and
+# critic N-1's one-owner discipline).
 
 # --- empty roster -> DISARM ---
 R3E="$(make_repo s3-empty)"; new_roster "$R3E"
@@ -210,12 +254,14 @@ expect_contains "…open=1" "open=1" "$OUT"
 expect_absent   "…never DISARM" "decision=DISARM" "$OUT"
 expect_absent   "…never NOTIFY — not past duration yet" "decision=NOTIFY" "$OUT"
 
-# --- UNMET, past its declared duration -> exactly one NOTIFY, naming the row ---
+# --- UNACKED UNMET, past its declared duration -> exactly one NOTIFY, naming the row ---
+# The paired positive for the acked cases below: the ack is what closes a row, and a row
+# nobody acked is still surfaced however the state was reached.
 R3N="$(make_repo s3-notify)"; new_roster "$R3N"
 add_row "$R3N" name=overdue-agent deliverable="$R3N/absent-overdue.md" \
   duration="1 minute" launched_at="$(iso_ago 120)"
 poke "$R3N" tick
-expect_eq "an UNMET row past its duration signals NOTIFY (exit 1)" "1" "$RC"
+expect_eq "an UNACKED UNMET row past its duration signals NOTIFY (exit 1)" "1" "$RC"
 expect_contains "…decision=NOTIFY" "decision=NOTIFY" "$OUT"
 expect_contains "…naming the row" "rows=overdue-agent" "$OUT"
 expect_contains "…the human line names it too" "overdue-agent" "$OUT"
@@ -255,6 +301,75 @@ expect_eq "an unreadable duration never invents a threshold (exit 0)" "0" "$RC"
 expect_contains "…QUIETs rather than guessing, however old the row is" "decision=QUIET" "$OUT"
 expect_absent   "…never NOTIFY on a duration the parser refused" "decision=NOTIFY" "$OUT"
 
+# ---------- the ack closes a row for the poker too (cs review C-4) ----------
+#
+# Three consequences, each pinned against the behaviour that shipped before R4: a roster of
+# acked rows could never DISARM, an acked row was re-notified on every tick, and the OPEN
+# count carried rows a human had already closed. Every fixture below acks through the real
+# `ack` verb, so what is under test is the poker reading `acked=` off the verdict line — not
+# this suite's idea of a ledger.
+
+# --- every row UNMET-but-ACKED -> DISARM (the previously immortal self-wake) ---
+# Before R4 this roster held OPEN at 3 forever: an acked row is never MET and never WAIVED,
+# and its artifact — accounted for by a human rather than written to disk — will never
+# appear. DISARM requires OPEN=0, so the self-wake could not be ended by the ordinary path
+# an orchestrator uses to close a row that produced no artifact.
+R3AK="$(make_repo s3-all-acked)"; new_roster "$R3AK"
+add_row "$R3AK" name=acked-1 deliverable="$R3AK/absent-1.md" duration="1 minute" \
+  launched_at="$(iso_ago 600)"
+add_row "$R3AK" name=acked-2 deliverable="$R3AK/absent-2.md" duration="1 minute" \
+  launched_at="$(iso_ago 600)"
+add_row "$R3AK" name=acked-3 deliverable="$R3AK/absent-3.md" duration="4 hours" \
+  launched_at="$(iso_ago 60)"
+ack_rows "$R3AK" acked-1 acked-2 acked-3
+poke "$R3AK" tick
+expect_eq "a roster of ACKED UNMET rows ticks quietly (exit 0)" "0" "$RC"
+expect_contains "…and DISARMs — an acked row is closed for every reader, this one included" \
+  "decision=DISARM" "$OUT"
+expect_contains "…open=0 though every row is UNMET" "open=0" "$OUT"
+expect_contains "…total still counts them (they are on the roster, they are just closed)" \
+  "total=3" "$OUT"
+expect_absent   "…never NOTIFY on rows a human already closed" "decision=NOTIFY" "$OUT"
+
+# --- an ACKED row past its duration -> no notification (the wolf-cry) ---
+# The take-2 capture (record/w2-t3-ac6-take2.txt:29) showed 10 of 11 open rows notified,
+# nine of them acked ~15 minutes earlier — every tick re-alarming on closed work, which is
+# the false-alarm class this wave exists to end.
+R3AN="$(make_repo s3-acked-overdue)"; new_roster "$R3AN"
+add_row "$R3AN" name=acked-overdue deliverable="$R3AN/absent-acked-overdue.md" \
+  duration="1 minute" launched_at="$(iso_ago 100000)"
+ack_rows "$R3AN" acked-overdue
+poke "$R3AN" tick
+expect_eq "an ACKED row long past its duration raises no notification (exit 0)" "0" "$RC"
+expect_absent "…never NOTIFY" "decision=NOTIFY" "$OUT"
+expect_absent "…and never names the acked row" "acked-overdue" "$OUT"
+expect_contains "…the roster having nothing else open, it DISARMs" "decision=DISARM" "$OUT"
+
+# --- paired positive: the SAME row, unacked, still NOTIFYs ---
+# The discriminator for the case above: identical fixture, no ack. Without this the acked
+# case could pass because the fixture never notified in the first place.
+R3AP="$(make_repo s3-acked-pair)"; new_roster "$R3AP"
+add_row "$R3AP" name=acked-overdue deliverable="$R3AP/absent-acked-overdue.md" \
+  duration="1 minute" launched_at="$(iso_ago 100000)"
+poke "$R3AP" tick
+expect_eq "the IDENTICAL row with no ack still signals NOTIFY (exit 1)" "1" "$RC"
+expect_contains "…naming it" "rows=acked-overdue" "$OUT"
+
+# --- mixed roster: only UNACKED rows are counted open, and only they can notify ---
+R3AM="$(make_repo s3-acked-mixed)"; new_roster "$R3AM"
+add_row "$R3AM" name=closed-by-ack deliverable="$R3AM/absent-closed.md" \
+  duration="1 minute" launched_at="$(iso_ago 100000)"
+add_row "$R3AM" name=still-open deliverable="$R3AM/absent-open.md" \
+  duration="4 hours" launched_at="$(iso_ago 60)"
+ack_rows "$R3AM" closed-by-ack
+poke "$R3AM" tick
+expect_eq "a mixed roster QUIETs when the only overdue row is acked (exit 0)" "0" "$RC"
+expect_contains "…decides QUIET, not DISARM — one row is genuinely still open" \
+  "decision=QUIET" "$OUT"
+expect_contains "…open=1 counts only the unacked row" "open=1" "$OUT"
+expect_contains "…total=2 still counts both" "total=2" "$OUT"
+expect_absent   "…and the acked overdue row raises nothing" "decision=NOTIFY" "$OUT"
+
 # ============================================================
 section "Section 4: refusals propagate from the sweeper's one read"
 # ============================================================
@@ -266,6 +381,64 @@ ln -s "$TMPROOT/elsewhere-s4" "$R4/.bionic/tmp"
 poke "$R4" tick
 expect_eq "a symlinked state directory REFUSES the tick too (exit 2)" "2" "$RC"
 expect_contains "…the refusal names the symbolic link" "symbolic link" "$OUT"
+
+# ============================================================
+section "Section 5: the pinned root — a worktree cwd answers for the MAIN repository (6-axis A-1)"
+# ============================================================
+#
+# ap review A-1: from a worktree cwd, `git rev-parse --show-toplevel` answers the WORKTREE
+# root, not the repository resolve_project_root maps onto (dispatch-preflight.sh's own
+# convention, epic-16 w2 Step-6 remediation R3). A roster written at the main root then
+# reads as an empty roster from inside the worktree, and DISARM is terminal by doctrine
+# (skills/canonical-sdlc/SKILL.md §Dispatch: "DISARM also ends the self-wake") — one tick
+# taken from a worktree cwd would end supervision for the rest of the session while real
+# work is still open.
+
+R5="$(make_repo s5-worktree)"
+( cd "$R5" && git config user.email t@example.com && git config user.name T \
+  && echo seed > README.md && git add README.md && git commit -qm seed ) >/dev/null 2>&1
+new_roster "$R5"
+add_row "$R5" name=live-worker deliverable="$R5/absent-worker.md" \
+  duration="1 minute" launched_at="$(iso_ago 120)"
+
+R5WT="$TMPROOT/s5-worktree-wt"
+# A REAL `git worktree add` (never a mocked path) — built from the repo root, since
+# `git worktree add` resolves relative paths against pwd (.claude/rules/git-worktree-docs.md).
+( cd "$R5" && git worktree add -q -b s5-r3-wt "$R5WT" ) >/dev/null 2>&1
+expect_eq "fixture: a real git worktree exists" "yes" "$([ -e "$R5WT/.git" ] && echo yes || echo no)"
+
+poke "$R5" tick
+expect_eq "from the main repo root, tick sees the open overdue row (NOTIFY, exit 1)" "1" "$RC"
+expect_contains "…and names it" "rows=live-worker" "$OUT"
+
+poke "$R5WT" tick
+expect_eq "from the WORKTREE cwd, the SAME session's tick still reads the true roster (NOTIFY, exit 1)" \
+  "1" "$RC"
+expect_contains "…still names the open row through the worktree cwd" "rows=live-worker" "$OUT"
+expect_absent "…never quietly DISARMs because the worktree cwd resolved the wrong root" \
+  "decision=DISARM" "$OUT"
+
+( cd "$R5" && git worktree remove --force "$R5WT" ) >/dev/null 2>&1
+
+# `interval` shares the same resolver (session-poker.sh:152) — a config override that lives
+# at the main repo root must be honoured from the worktree cwd too.
+mkdir -p "$R5/.bionic"
+printf 'poker-interval: 7m\n' > "$R5/.bionic/config.yaml"
+( cd "$R5" && git worktree add -q -b s5-r3-wt2 "$R5WT" ) >/dev/null 2>&1
+poke "$R5WT" interval
+expect_eq "…and the interval knob reads the main repo's override from the worktree too (7m = 420s)" \
+  "420" "$OUT"
+( cd "$R5" && git worktree remove --force "$R5WT" ) >/dev/null 2>&1
+
+# ---------- the "no roster" vs "empty roster" distinction (ap review A-1, item 2) ----------
+R5B="$(make_repo s5-no-roster)"
+# No new_roster call: the state directory exists but the roster FILE itself does not — the
+# absent-file case, deliberately distinct from the header-only roster Section 3's "empty
+# roster" case plants.
+poke "$R5B" tick
+expect_eq "an ABSENT roster REFUSES rather than silently DISARMing (exit 2)" "2" "$RC"
+expect_contains "…and says it is a refusal, not a decision line" "REFUSED" "$OUT"
+expect_absent "…never prints a decision line for a roster it never found" "decision=" "$OUT"
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'

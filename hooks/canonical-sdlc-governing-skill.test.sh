@@ -1682,6 +1682,77 @@ echo "ac13-4: paired positive — the IDENTICAL subdir-case write to the pinned 
 run_write "$ac13_main/.bionic/docs/record/w2-s8-ac13-sub.md" "$ac13_record_body"
 assert_eq "ac13_subdir_pinned_pair exit 0" 0 "$HOOK_EXIT"
 
+# ---------- ac13-6..9: the wall folds `..` lexically (cs review S-2) ----------
+#
+# The wall used to compare a path whose `..` segments had never been folded. physicalize()
+# resolves only the EXISTING ancestor prefix, so any component that does not yet exist
+# strands the rest of the path — its `..` segments included — as an unresolved literal, and
+# the `.bionic` the comparison then found was the PINNED one sitting harmlessly at the front
+# of the string. The Write tool creates parent directories, so a non-existent segment is no
+# obstacle to the write itself: only to the wall seeing where the write lands. Measured
+# escape, cs review S-2, with the file landing outside the repository.
+#
+# The fix folds `.`/`..` lexically before any comparison, which is what
+# hooks/dispatch-preflight.sh's resolve_in_repo() already does for the deliverable path —
+# two walls in one wave had disagreed about how to resolve a path, and the weaker one was
+# the newer one.
+#
+# A LEXICAL fold is deliberate, not an approximation of realpath: `<symlink>/..` folds to
+# the symlink's parent rather than its target's parent. That is the same reading
+# resolve_in_repo takes, and for a hygiene wall the question is which tree the path NAMES.
+
+ac13_sibling="$ac13_tmp/other"
+
+echo "ac13-6: traversal through a NON-EXISTENT segment escapes to a sibling .bionic → block"
+run_write "$ac13_main/.bionic/nonexistent/../../../other/.bionic/docs/record/w2-r4-esc.md" \
+  "$ac13_record_body"
+assert_eq "ac13_traversal_missing exit 2" 2 "$HOOK_EXIT"
+assert_contains "ac13_traversal_missing names the escaped-to tree" \
+  "$ac13_sibling/.bionic" "$HOOK_STDERR"
+assert_contains "ac13_traversal_missing names the pinned root" \
+  "Pinned root: $ac13_main/.bionic" "$HOOK_STDERR"
+
+echo "ac13-7: the same escape through EXISTING segments (control) still blocks"
+# The control the cs review used to prove the first case was about resolution, not about
+# escaping: identical destination, every segment on the way there real.
+run_write "$ac13_main/.bionic/docs/../../../other/.bionic/docs/record/w2-r4-esc2.md" \
+  "$ac13_record_body"
+assert_eq "ac13_traversal_existing exit 2" 2 "$HOOK_EXIT"
+assert_contains "ac13_traversal_existing names the escaped-to tree" \
+  "$ac13_sibling/.bionic" "$HOOK_STDERR"
+
+echo 'ac13-8: paired positive — a climbing path that folds back ONTO the pinned root passes'
+# The discriminator against a fix that refuses every climb outright: folding is not
+# refusing, and a legitimate write spelled with a climb through a segment that does not
+# exist yet — the exact shape ac13-6 escapes through — still lands.
+run_write "$ac13_main/.bionic/nonexistent/../docs/record/w2-r4-legit.md" \
+  "$ac13_record_body"
+assert_eq "ac13_traversal_pinned_pair exit 0" 0 "$HOOK_EXIT"
+
+echo "ac13-9: a NESTED .bionic inside the pinned tree is a phantom tree too → block"
+# DISPOSITION DECIDED HERE (cs review rated this arguably-in-scope; R4 rules it IN).
+# `%%` took the SHORTEST prefix, so a path naming a second `.bionic` deeper inside the
+# pinned one compared equal to the pinned root and passed. It is the same defect ac13-3
+# blocks one directory over: a stray `.bionic` created a level down is a tree nobody
+# reads, whether the level down is inside `subdir/` or inside `.bionic/tmp/`. The wall's
+# own stated scope — "a stray `.bionic` created a level down inside a subdirectory of the
+# main repo" — covers it, and the comparison now takes the DEEPEST `.bionic` segment the
+# path names, which is the one the write actually lands in. Cost of the stricter reading:
+# a write to a genuinely intended nested `.bionic` is blocked with a message naming where
+# to write instead. No such path exists in this repo or in the artifact conventions.
+run_write "$ac13_main/.bionic/tmp/scratch/.bionic/docs/record/w2-r4-nested.md" \
+  "$ac13_record_body"
+assert_eq "ac13_nested exit 2" 2 "$HOOK_EXIT"
+assert_contains "ac13_nested names the nested tree it refused" \
+  "$ac13_main/.bionic/tmp/scratch/.bionic" "$HOOK_STDERR"
+assert_contains "ac13_nested names the pinned root" \
+  "Pinned root: $ac13_main/.bionic" "$HOOK_STDERR"
+
+echo "ac13-10: paired positive — the pinned tree's own operational path is untouched"
+# The nested rule must not catch the ordinary write it sits next to.
+run_write "$ac13_main/.bionic/tmp/scratch/notes.md" "$ac13_record_body"
+assert_eq "ac13_nested_pair exit 0" 0 "$HOOK_EXIT"
+
 echo "ac13-5: canonical (frontmatter-declaring) misplacement is still the AC-10 arm, unchanged — this wall is additive"
 run_write "$ac13_wt/.bionic/docs/plans/epic-01-demo/w2-s8-ac13-canon.plan.md" \
   "$(build_plan intent=spike rigor=audited)"
