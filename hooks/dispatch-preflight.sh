@@ -37,12 +37,12 @@
 #     (the combined preflight, epic-16 wave-02 R5)           pass on what it finds
 #   - the auto-run probe REFUSES                          -> REFUSE, quoting the probe
 #     (the environment is genuinely broken; fail closed)     and naming the fix command
-#   - brief names no deliverable and carries no waiver    -> REFUSE, naming both
-#     (the absent-deliverable wall, user-directed post-w4)   the fix and the waiver
-#   - brief names a deliverable only as an unfilled       -> pass, WARN, and infer the
-#     template (epic-16 wave-02 R4)                          row from the agent name
-#   - brief names a deliverable that resolves OUTSIDE the -> REFUSE, naming the
-#     repo root (the containment wall, Step-6 review S-2)    path and where it lands
+#   - brief declares no deliverable in a canonical label   -> REFUSE, naming the
+#     and carries no waiver (the absent-deliverable wall)      label to add and the waiver
+#   - brief declares a deliverable only as a <slot>        -> REFUSE (no fill): a slot is
+#     template (epic-16 wave-02 R1, inference withdrawn)       not a concrete path; name it
+#   - brief declares a deliverable that resolves OUTSIDE   -> REFUSE, naming the
+#     the repo root (the containment wall, review S-2)        path and where it lands
 #
 # TWO ROOTS THIS FILE NEVER RE-DERIVES (epic-16 wave-02 R9): the project root comes
 # from `resolve_project_root` (the main repository, never a worktree or the shell's
@@ -141,18 +141,6 @@ resolve_docs_root() {
 }
 
 DOCS_ROOT=$(resolve_docs_root "$REPO")
-# The docs root as a BRIEF would spell it. `resolve_docs_root` always answers with
-# an absolute path, and the record/-inference below compares it against tokens
-# lifted verbatim out of dispatch prose — where a path under this repo is written
-# repo-relative essentially always. Without this form the `<docs-root>/record/`
-# prefix (slice 4/4's third accepted form) matched nothing a real brief contains
-# whenever `docs-root:` was overridden: the wall refused briefs naming a perfectly
-# good record/ artifact, and the branch was inert rather than wrong-looking. With
-# no override this is exactly `.bionic/docs`, so the default path is unchanged.
-case "$DOCS_ROOT" in
-  "$REPO"/*) DOCS_ROOT_REL="${DOCS_ROOT#"$REPO"/}" ;;
-  *)         DOCS_ROOT_REL="" ;;
-esac
 PLAN=""
 for d in "$DOCS_ROOT/plans" "$DOCS_ROOT/incidents"; do
   [ -d "$d" ] || continue
@@ -371,9 +359,14 @@ sanitize() {  # <value> <max-chars>
 # orchestrator's restatement (spec §Design invariant).
 #
 # Two properties earn the awk pass over a line-oriented grep:
-#   * a value span ends at the NEXT LABEL, not at the newline — real briefs put
+#   * a raw label span reaches the NEXT LABEL, not the newline — real briefs put
 #     two fields on one line ("Expected duration: ~35 minutes. Progress: <path>")
-#     and a line-scoped reader swallows the second into the first;
+#     and a line-scoped reader swallows the second into the first. That span is then
+#     BOUNDED per field before use (epic-16 wave-02 R1): the deliverable takes the
+#     first path-shaped token inside the label's own first sentence (never a
+#     following input path — Step-6 review C-2), and duration/cadence take a value
+#     bounded at the first clause boundary (never a run-on — C-1/F-3). Progress,
+#     claims and the waiver reason still consume their whole span;
 #   * labels nest ("progress" inside "progress artifact", "duration" inside
 #     "expected duration"), so labels are matched longest-first and a shorter
 #     one overlapping an accepted longer one is discarded. Without that, the
@@ -415,7 +408,7 @@ TRAIL_CHARS=")\"]>\`,;:!?.$(printf '\047')"
 QUOTE_CHARS="\`\"$(printf '\047')"
 
 lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omitted
-  printf '%s' "$1" | awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" -v DOCSROOT="$DOCS_ROOT" -v DOCSROOTREL="$DOCS_ROOT_REL" '
+  printf '%s' "$1" | awk -v LEAD="$LEAD_CHARS" -v TRAIL="$TRAIL_CHARS" -v QUOTES="$QUOTE_CHARS" '
     # <sep> is the regex between the label and its value; the default is the
     # colon every labeled brief field uses. <bol> marks a label that only counts
     # at the START of a line — see the waiver note in BEGIN.
@@ -441,25 +434,19 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       while (length(t) > 0) { ch = substr(t, length(t), 1); if (index(TRAIL, ch) > 0) t = substr(t, 1, length(t) - 1);     else break }
       return t
     }
-    # A token carrying an unfilled `<...>` slot is a TEMPLATE, not a path — the
-    # wall message below hands the author exactly one
-    # (`Expected artifact: .bionic/docs/record/<name>.md`) and briefs in this repo
-    # quote that text constantly, so the slot lifted as a real contract and
-    # nothing could ever satisfy it (Step-6 review C-1, second shape). The rule
-    # lives HERE, in the predicate both the labeled lift and the inference scan
-    # run every token through, so the two can never disagree about what a
-    # template is.
+    # A token carrying an unfilled `<...>` slot is a TEMPLATE, not a path. The wall
+    # message hands the author a label example and briefs in this repo quote it, so a
+    # slot must never lift as a real contract — nothing could ever satisfy it
+    # (Step-6 review C-1, second shape). The rule lives in `ispath()`, the one
+    # predicate every declared token runs through.
     #
-    # WHAT FOLLOWS FROM REJECTING IT CHANGED in epic-16 wave-02 (R4). Wave-01 let
-    # the rejection fall through to the absent-deliverable wall and REFUSE, so the
-    # author was told at dispatch while the brief was still editable. Ship day
-    # 2026-08-08 then spent that refusal twice on briefs with nothing wrong in
-    # substance, and the wave charter named both as grammar corners. A template is
-    # not an absence: it names the LOCATION and leaves the NAME open, and the
-    # dispatch itself carries a name. So templates are still not paths — they lift
-    # SEPARATELY, under their own kind, and the shell side fills the slot. The
-    # separation is the point: a filled path can never be mistaken for one the
-    # author wrote, and it is recorded `source=inferred` for exactly that reason.
+    # WHAT FOLLOWS FROM REJECTING IT (epic-16 wave-02 R1, inference withdrawn): a
+    # template is not a concrete path, so a brief whose only deliverable is a slot
+    # yields nothing and the absent-deliverable wall REFUSES it, telling the author at
+    # dispatch to name it exactly. Wave-02 R4 briefly filled the slot from the agent
+    # name and recorded `source=inferred`; the Step-6 critic (N-1) showed that fill is
+    # a GUESS enforced with a declared fact weight, so it was withdrawn — the wall
+    # never guesses a deliverable, and declaring one is the cheap, robust fix.
     #
     # The unterminated form (`<name` after trimtok has eaten a trailing `>`) counts
     # as a template too. Without that clause `.bionic/tmp/<name>` passed the four
@@ -523,85 +510,79 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       return e
     }
     function spanof(h) { return substr(text, HVS[h], spanend(h, 0) - HVS[h] + 1) }
-    # record/-inference (slice 4/4, AC-8): a path token nobody labeled can still
-    # satisfy the deliverable wall, but only under the three prefixes the plan
-    # names, and NEVER under a tmp prefix — a scratch path is never durable,
-    # labeled or not, and the exclusion is checked first so a token cannot
-    # sneak past it by also happening to contain "record/" somewhere past the
-    # tmp prefix.
-    function is_tmp_path(t) {
-      if (substr(t, 1, length(".bionic/tmp/")) == ".bionic/tmp/") return 1
-      if (substr(t, 1, length("/tmp/")) == "/tmp/") return 1
-      return 0
-    }
-    function is_record_path(t,   dr) {
-      if (is_tmp_path(t)) return 0
-      if (substr(t, 1, length("record/")) == "record/") return 1
-      if (substr(t, 1, length(".bionic/docs/record/")) == ".bionic/docs/record/") return 1
-      if (DOCSROOT != "") {
-        dr = DOCSROOT "/record/"
-        if (substr(t, 1, length(dr)) == dr) return 1
+    # ---- bounded field extraction (epic-16 wave-02 R1) ----
+    # A field value ends at the first CLAUSE boundary, never at "the next label or a
+    # blank line". That run-on reading (the old spanof value) let cadence or duration
+    # swallow the prose after it. On cadence= it fed parse_seconds a value it refuses,
+    # flipping a visibly-alive agent to UNMET (Step-6 review C-1/F-3); on duration= it
+    # silently exempted a row from overdue notification (A-2). A sentence terminator
+    # (. ? !) counts only when followed by whitespace or the end, so a period inside a
+    # value is never a false boundary. A comma or a closing bracket ends the clause too
+    # — the same restraint claimpat() already applies, and the exact shape the live
+    # specimen corrupted ("2m) claims=...").
+    function bound_field(s,   i, ch, nx, out) {
+      out = ""
+      i = 1
+      while (i <= length(s)) {
+        ch = substr(s, i, 1)
+        if (ch == "\n" || ch == "\r") break
+        if (ch == "," || ch == ")") break
+        out = out ch
+        if (ch == "." || ch == "?" || ch == "!") {
+          nx = substr(s, i + 1, 1)
+          if (nx == "" || nx == " " || nx == "\t" || nx == "\r" || nx == "\n") break
+        }
+        i++
       }
-      # The same root as a brief spells it. DOCSROOT is absolute and a brief is
-      # repo-relative, so without this the overridden form never fired at all.
-      if (DOCSROOTREL != "") {
-        dr = DOCSROOTREL "/record/"
-        if (substr(t, 1, length(dr)) == dr) return 1
-      }
-      return 0
+      return collapse(out)
     }
-    # True iff position p falls inside the span of an INPUT-designating label
-    # (`read first`, `scope constraint`). See the kind note in BEGIN: those spans
-    # name what the agent must CONSULT or must NOT TOUCH, so a path inside one is
-    # never a thing the agent produces.
-    function in_input_span(p,   j) {
-      for (j = 1; j <= nh; j++) {
-        if (HK[j] != "input") continue
-        if (p >= HLS[j] && p <= spanend(j, 0)) return 1
+    # The first path-shaped token DECLARED under a deliverable label, and nothing after
+    # it. The span is bounded at the end of the first sentence of the label, so a
+    # following unlabeled input path ("...then read record/x.md") is out of reach, and
+    # only the FIRST path is taken so a run-on that names input files on the same line
+    # ("read A and do not touch B", Step-6 review C-2) never contracts the agent to
+    # them. A period inside a path (.bionic, .md) is never a sentence boundary because a
+    # terminator must be followed by whitespace or the end.
+    function first_path_in_span(h,   s, i, ch, nx, bounded, n, arr, k, t) {
+      s = spanof(h)
+      bounded = ""
+      i = 1
+      while (i <= length(s)) {
+        ch = substr(s, i, 1)
+        bounded = bounded ch
+        if (ch == "." || ch == "?" || ch == "!") {
+          nx = substr(s, i + 1, 1)
+          if (nx == "" || nx == " " || nx == "\t" || nx == "\r" || nx == "\n") break
+        }
+        i++
       }
-      return 0
-    }
-    # Scans the WHOLE brief, not one label span — inference has no label to
-    # bound it. First path-shaped, record-prefixed, non-tmp token OUTSIDE every
-    # input span wins.
-    #
-    # Why this walks positions instead of split()ing on whitespace: the input-span
-    # exclusion is positional, and a token divorced from its offset cannot be
-    # asked which span it came from. Step-6 review C-1 — a `Read first:` path
-    # became the declared deliverable and the landing gate then ordered the agent
-    # to overwrite the file it was sent to read.
-    function scan_inferred(   pos, t, start, rest) {
-      pos = 1
-      while (pos <= length(text)) {
-        rest = substr(text, pos)
-        if (match(rest, /[^ \t\r\n]+/) == 0) break
-        start = pos + RSTART - 1
-        t = substr(text, start, RLENGTH)
-        pos = start + RLENGTH
-        if (in_input_span(start)) continue
-        t = trimtok(t)
-        if (!ispath(t)) continue
-        if (is_record_path(t)) return t
+      n = split(bounded, arr, /[ \t\r\n]+/)
+      for (k = 1; k <= n; k++) {
+        t = trimtok(arr[k])
+        if (ispath(t)) return t
       }
       return ""
     }
-    # scan_inferred()`s twin for templates, and it keeps BOTH of that scan`s
-    # restraints rather than relaxing them for a weaker kind of evidence: never out
-    # of an input span (the C-1 finding — the agent must not be contracted to a file
-    # it was sent to read, and a slot in that path does not make it any more its
-    # output), and never a tmp path (a scratch file is not durable, filled or not).
-    function scan_templated(   pos, t, start, rest) {
-      pos = 1
-      while (pos <= length(text)) {
-        rest = substr(text, pos)
-        if (match(rest, /[^ \t\r\n]+/) == 0) break
-        start = pos + RSTART - 1
-        t = substr(text, start, RLENGTH)
-        pos = start + RLENGTH
-        if (in_input_span(start)) continue
-        t = trimtok(t)
-        if (!pathshaped(t) || !istemplate(t)) continue
-        if (is_record_path(t)) return t
+    # The declared deliverable: walk EVERY deliverable-kind label hit in position order
+    # and return the first that yields a concrete path. Iterating (rather than taking
+    # only firsthit) recovers a real labeled line that an earlier, pathless
+    # deliverable-kind hit shadows — a brief quoting landing-verdict prose ("...per
+    # deliverable:") ahead of its real "Expected artifact:" line. The wall never guesses
+    # a deliverable from prose (epic-16 wave-02 R1, plan assumption 48); a template
+    # <slot> is not a concrete path (ispath rejects it), so a brief that declares only a
+    # slot yields nothing here and the absent-deliverable wall refuses it.
+    function decl_deliverable(   j, best, t, visited) {
+      for (;;) {
+        best = 0
+        for (j = 1; j <= nh; j++) {
+          if (HK[j] != "deliverable") continue
+          if (visited[j]) continue
+          if (best == 0 || HLS[j] < HLS[best]) best = j
+        }
+        if (best == 0) break
+        visited[best] = 1
+        t = first_path_in_span(best)
+        if (t != "") return t
       }
       return ""
     }
@@ -619,32 +600,17 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       }
       return out
     }
-    # paths()`s twin for the template kind — same span, same trimming, the one
-    # predicate inverted. One token only: a filled path is a GUESS, and guessing a
-    # conjunction of them would multiply one uncertainty into several.
-    function templates(s, maxn,   n, arr, i, t, out, seen, c) {
-      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0
-      for (i = 1; i <= n; i++) {
-        t = trimtok(arr[i])
-        if (!pathshaped(t) || !istemplate(t) || seen[t]) continue
-        seen[t] = 1
-        out = (out == "" ? t : out "," t)
-        if (++c >= maxn) break
-      }
-      return out
-    }
     BEGIN {
       NL = 0
       # LONGEST FIRST — see the nesting note above. `-` marks a label that only
       # BOUNDS a span; it is a real brief field, just not one the roster lifts.
       #
-      # `input` is a second non-lifting kind, and it bounds spans identically —
-      # the difference is that the record/-inference scan REFUSES to take a path
-      # out of one (Step-6 review C-1). These two labels are the ones that name
-      # files the agent must read, or must leave alone; every other `-` label
-      # heads ordinary prose, where an unlabeled record/ path is exactly the
-      # deliverable the inference exists to find (S12, and the `Your slice:`
-      # spans those cases sit inside).
+      # `input` is a second non-lifting kind. Since inference was withdrawn (R1) it
+      # bounds spans exactly as `-` does — a path a brief tells the agent to read is
+      # never taken as the deliverable because NO prose path is ever taken; only a
+      # canonical label lifts one, and `read first` / `scope constraint` are not
+      # deliverable labels. The kind is kept distinct only to keep these two headings
+      # legible as inputs; nothing reads it any more.
       #
       # `deliverable-waiver` heads the table because it is the longest label AND
       # because it nests the shortest-but-one: a brief line reading
@@ -703,62 +669,37 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
           nh++; HLS[nh] = ls; HVS[nh] = vend; HK[nh] = LKIND[i]
         }
       }
-      # The fallback to the whole-brief inference scan triggers on an EMPTY VALUE
-      # (v == ""), not merely on the ABSENCE of a deliverable-kind hit (h == 0) —
-      # an earlier, pathless label hit (e.g. quoted landing-verdict prose reading
-      # "...per deliverable:") can win the firsthit position race over a later,
-      # real labeled deliverable and still yield nothing from its own span. Gating
-      # on h == 0 alone left that shadowed case refused despite a real record/
-      # path sitting later in the same brief; v == "" catches both shapes with
-      # the one scan (post-landing addendum, live specimen).
-      #
-      # THE LADDER, strongest evidence first (epic-16 wave-02, R4). Each rung is
-      # tried only when every rung above it found nothing, so a path the author
-      # actually wrote can never be demoted by a guess sitting earlier in the text:
-      #   1. a labeled, slot-free path            -> deliverable= (source=declared)
-      #   2. an unlabeled record/ path            -> inferred=    (source=inferred)
-      #   3. a labeled template, then an unlabeled record/ template
-      #                                           -> templated=   (shell fills it)
-      # Nothing below rung 3 exists: a brief offering none of the three has named no
-      # location at all, and that is the substance the wall still refuses on.
-      h = firsthit("deliverable")
-      v = ""
-      if (h > 0) { v = paths(spanof(h), 4) }
-      if (v != "") { print "deliverable=" v }
-      else {
-        v = scan_inferred()
-        if (v != "") { print "inferred=" v }
-        else {
-          tv = ""
-          if (h > 0) { tv = templates(spanof(h), 1) }
-          if (tv == "") { tv = scan_templated() }
-          if (tv != "") { print "templated=" tv }
-        }
-      }
-      h = firsthit("duration");    if (h > 0) { v = collapse(spanof(h));      if (v != "") print "duration=" v }
-      # The progress field takes the same two rungs, because `ispath` is the one
-      # predicate both fields run through and a rule that filled one spelling but
-      # not the other is how two fields come to disagree about what a template is.
+      # THE DELIVERABLE — declared only (epic-16 wave-02 R1, plan assumption 48). The
+      # wall never guesses a deliverable from prose. decl_deliverable() walks every
+      # deliverable-kind label hit and returns the first concrete path one of them
+      # yields; iterating (rather than stopping at firsthit) recovers a real labeled
+      # line an earlier pathless deliverable-kind hit shadows — the "...per
+      # deliverable:" live specimen. A brief that declares no concrete path prints
+      # nothing here, and the absent-deliverable wall below refuses it. There is no
+      # inference rung and no template fill: a guessed fact is a not-fact, and the whole
+      # point of the wall is that it holds only stated facts.
+      v = decl_deliverable()
+      if (v != "") print "deliverable=" v
+      # Duration lifts a BOUNDED value, never a run-on span (Step-6 review C-1/F-3 +
+      # A-2): the value ends at its first clause boundary. See bound_field().
+      h = firsthit("duration");    if (h > 0) { v = bound_field(spanof(h));    if (v != "") print "duration=" v }
+      # The progress path is the first path in its label span. Advisory only — an
+      # absent one warns — so a templated or missing progress path lifts nothing and is
+      # warned, never filled (the deliverable rule applied to the field with no wall).
       h = firsthit("progress")
-      if (h > 0) {
-        v = paths(spanof(h), 1)
-        if (v != "") { print "progress=" v }
-        else { v = templates(spanof(h), 1); if (v != "") print "progress_templated=" v }
-      }
-      # CADENCE IS POSITIONAL, not merely lexical (Step-6 critic F-2). It is the
-      # one label with a relaxed separator — whitespace will do, because the
-      # contract writes it inside the progress sentence rather than on a line of
-      # its own — and that relaxation made every prose occurrence of the word a
-      # declaration. "Scope constraint: keep a steady cadence and do not batch the
-      # sections" lifted `cadence=and do not batch the sections.`, and a
-      # fabricated liveness field is not inert: field presence is the shape key
-      # the watcher arms off. So the hit must fall where the contract puts it —
-      # after the progress label, inside the span that label owns.
+      if (h > 0) { v = paths(spanof(h), 1); if (v != "") print "progress=" v }
+      # CADENCE IS POSITIONAL, not merely lexical (Step-6 critic F-2). It is the one
+      # label with a relaxed separator — whitespace will do, because the contract writes
+      # it inside the progress sentence rather than on a line of its own — and that
+      # relaxation made every prose occurrence of the word a declaration. So the hit
+      # must fall where the contract puts it: after the progress label, inside the span
+      # that label owns. The value is bounded, so a run-on ("cadence 2m) claims=...", the
+      # live specimen) lifts the duration token alone and never corrupts the field.
       h = firsthit("cadence")
       if (h > 0) {
         ph = firsthit("progress")
         if (ph > 0 && HLS[h] > HLS[ph] && HLS[h] <= spanend(ph, h)) {
-          v = collapse(spanof(h)); if (v != "") print "cadence=" v
+          v = bound_field(spanof(h)); if (v != "") print "cadence=" v
         }
       }
       h = firsthit("claims");      if (h > 0) { v = claimpat(spanof(h));      if (v != "") print "claims=" v }
@@ -825,94 +766,22 @@ C_PROGRESS=$(sanitize "$(field_of progress)" 300)
 C_CADENCE=$(sanitize "$(field_of cadence)" 80)
 C_CLAIMS=$(sanitize "$(field_of claims)" 300)
 C_WAIVER=$(sanitize "$(field_of waiver)" 300)
-C_INFERRED=$(sanitize "$(field_of inferred)" 300)
-C_TEMPLATED=$(sanitize "$(field_of templated)" 300)
-C_PROGRESS_TEMPLATED=$(sanitize "$(field_of progress_templated)" 300)
-
-# ---------- filling a template (epic-16 wave-02, R4) ----------
+# ---------- provenance (epic-16 wave-02, R1 — inference withdrawn) ----------
 #
-# The slot's own word for what belongs in it is `<name>`, and a dispatch carries
-# exactly one name — the agent's. So the fill is not a heuristic about this repo's
-# file-naming habits; it is reading the template the way its author wrote it. The
-# result is a real, satisfiable, falsifiable path, which is the property the
-# absent-deliverable wall exists to guarantee and the one a raw slot destroys.
-#
-# The name is reduced to a filename alphabet first. It reaches here through
-# `sanitize`, which already removed the row-forging characters, but this value goes
-# somewhere sanitize does not care about — INTO A PATH, and into a sed replacement
-# on the way. A `/` would silently redirect the contract into a subdirectory and a
-# `&` would duplicate the match; both are folded to `-` rather than escaped, because
-# a contract path is going to be a filename either way.
-SLOT_NAME=$(printf '%s' "$AGENT_NAME" | tr -c 'A-Za-z0-9._-' '-' | sed -e 's/^-*//' -e 's/-*$//')
-
-fill_name() {  # <templated path> -> slot-filled path, or "" when it cannot be filled
-  local out
-  [ -n "$SLOT_NAME" ] || return 0
-  out=$(printf '%s' "$1" | sed -e "s|<[^<>]*>|$SLOT_NAME|g" -e "s|<[^<>]*\$|$SLOT_NAME|")
-  # A surviving bracket means the fill did not close the shape, and a half-filled
-  # path is worse than none: it looks like a contract and can never be one.
-  case "$out" in *'<'*|*'>'*|'') return 0 ;; esac
-  printf '%s' "$out"
-}
-
-slotfree_ancestor() {  # <templated path> -> deepest slot-free ancestor dir, or ""
-  # The fallback when there is no name to fill with — the Agent tool does not
-  # require one. The LOCATION is still evidence even when the name is not, and the
-  # landing check already understands a directory contract (it lands when a file
-  # appears inside). Deliberately weaker than a filename; still a fact something can
-  # be stat'd against, which an unfilled slot never was. A template whose slot sits
-  # in the FIRST component leaves nothing here, and that is the honest answer:
-  # `<somewhere>/out.md` names no location at all.
-  #
-  # The cut takes the first bracket of EITHER kind, matching istemplate: trimtok may
-  # already have eaten one side, and cutting only at `<` would keep an orphaned `>`
-  # inside the surviving directory name.
-  local head="${1%%[<>]*}"
-  case "$head" in
-    */*) printf '%s' "${head%/*}" ;;
-    *)   : ;;   # no slash before the slot: no directory was named, so nothing here
-  esac
-}
-
-# record/-inference (slice 4/4, AC-8): a labeled deliverable always wins and is
-# recorded `source=declared`; only when the brief named none does an unlabeled
-# record/-prefixed path (never a tmp one — the awk side excludes it) step in,
-# recorded `source=inferred`. An inferred path satisfies the absent-deliverable
-# wall below the same way a labeled one always has, because by this point
-# C_DELIVERABLE is simply non-empty either way — the wall does not know or care
-# which kind it is looking at.
-#
-# THE THIRD RUNG (epic-16 wave-02, R4) sits below both: a template, filled. It is
-# recorded `source=inferred` rather than under a word of its own, and that is a
-# decision with a consumer behind it — hooks/session-sweeper.sh reads this field to
-# resolve a brief that both declares an artifact and waives it, and treats
-# ANYTHING BUT `inferred` as declared. A new third value would therefore be read as
-# "the author declared this", which is precisely what a filled slot is not. One
-# reader, two values, no drift.
+# The deliverable is DECLARED or it is ABSENT. The wall never guesses one from prose,
+# so there is no inferred value and no filled template to record — `source=` carries
+# exactly one non-empty value, `declared`. The field is kept because
+# hooks/session-sweeper.sh reads it to resolve a brief that both declares an artifact
+# AND waives it: it treats anything but `inferred` as declared, so `declared` and an
+# empty source read the same there, and nothing writes `inferred` any more. Withdrawing
+# inference retired the fill machinery (fill_name / slotfree_ancestor) and the
+# `inferred` / `templated` / `progress_templated` awk outputs with the guesser they
+# served (plan assumption 48, Step-6 critic N-1). A templated deliverable is not a
+# concrete path, so it lifts nothing and the absent-deliverable wall refuses it — the
+# author is told at dispatch to name it exactly.
 C_SOURCE=""
-C_TEMPLATE_ORIGIN=""
 if [ -n "$C_DELIVERABLE" ]; then
   C_SOURCE="declared"
-elif [ -n "$C_INFERRED" ]; then
-  C_DELIVERABLE="$C_INFERRED"
-  C_SOURCE="inferred"
-elif [ -n "$C_TEMPLATED" ]; then
-  C_DELIVERABLE=$(fill_name "$C_TEMPLATED")
-  [ -n "$C_DELIVERABLE" ] || C_DELIVERABLE=$(slotfree_ancestor "$C_TEMPLATED")
-  if [ -n "$C_DELIVERABLE" ]; then
-    C_SOURCE="inferred"
-    C_TEMPLATE_ORIGIN="$C_TEMPLATED"
-  fi
-fi
-
-# The progress path takes the same fill. It has no wall behind it — an absent
-# progress path warns and passes — so the only question is whether the row carries a
-# path something could be stat'd against, and a slot never was one. The fallback
-# directory is not useful here (liveness is read off ONE file's mtime), so a
-# progress template with no name to fill it is left absent and warned, exactly as a
-# missing one is.
-if [ -z "$C_PROGRESS" ] && [ -n "$C_PROGRESS_TEMPLATED" ]; then
-  C_PROGRESS=$(fill_name "$C_PROGRESS_TEMPLATED")
 fi
 
 # What is ABSENT is recorded as a field of its own, so a consumer never has to
@@ -1056,10 +925,10 @@ if [ -z "$C_DELIVERABLE" ] && [ -z "$C_WAIVER" ]; then
   echo "An agent with nothing durable to produce cannot be checked on: there is no" >&2
   echo "path to stat when it reports done, and nothing left behind if it dies quietly." >&2
   echo "" >&2
-  echo "Fix: name a durable artifact path in the brief —" >&2
-  echo "    Expected artifact: .bionic/docs/record/<name>.md" >&2
+  echo "Fix: declare a durable artifact path with a canonical label —" >&2
+  echo "    Expected artifact: .bionic/docs/record/my-slice-notes.md" >&2
   echo "  Any of these labels lifts one: Expected artifact(s), Deliverable(s), Artifact(s)." >&2
-  echo "  An unlabeled record/ mention is inferred automatically — .bionic/tmp/ or /tmp/ paths never are." >&2
+  echo "  Name a concrete path — the wall never guesses one from prose, and a <slot> is not a name." >&2
   echo "" >&2
   echo "Or waive it — the reason is recorded on the session roster either way:" >&2
   echo "    Deliverable-waiver: <why this dispatch produces nothing durable>" >&2
@@ -1158,13 +1027,6 @@ else
   # moment it is spent, not only later off the roster row that also holds it.
   if [ -n "$C_WAIVER" ]; then
     warn "the absent-deliverable wall was waived by the brief: ${C_WAIVER}"
-  fi
-  # The inference echo. A filled slot is this gate's reading of the brief, not the
-  # brief's own words, so it says both — what the brief spelled and what the row now
-  # holds — at the one moment the brief is still editable. Silence here would leave
-  # an author believing they had named a contract they had only sketched.
-  if [ -n "$C_TEMPLATE_ORIGIN" ]; then
-    warn "the brief spelled its deliverable as a template (${C_TEMPLATE_ORIGIN}); the row was inferred as ${C_DELIVERABLE} — name it exactly, or re-dispatch with the slot filled in"
   fi
   if [ -n "$CONTENDED_OWNER" ]; then
     warn "the deliverable ${CONTENDED_PATH} is already owned by an open roster row: \"${CONTENDED_OWNER}\" — two rows on one artifact make the second landing verdict unfalsifiable"

@@ -2773,39 +2773,49 @@ expect_contains "…and says it took one automatically" \
 expect_eq "…writing it back to the same path the consumer reads" "yes" \
   "$([ -f "$NATT" ] && echo yes || echo no)"
 
-# --------------------------------------------------- N.4 source=: two words, and one reader
+# --------------------------------------------------- N.4 source=: one word, and one reader
 #
-# w2-s45 §6 row 3. `hooks/dispatch-preflight.sh` writes `source=` onto every roster row and
-# `hooks/session-sweeper.sh` is its only reader, branching on `!= "inferred"` — so a THIRD
-# value would not fail, it would read as "the author declared this", which is exactly what a
-# filled template is not (w2-s45 §5 call 1). Two words, one reader, asserted from both ends.
+# w2-s45 §6 row 3, RE-EXPRESSED at R1 (inference withdrawn — plan assumption 48). Wave-02 R4
+# let `hooks/dispatch-preflight.sh` write `source=inferred` for a deliverable it GUESSED from
+# prose; the Step-6 critic (N-1) showed the guess was then enforced with a declared fact's
+# full weight, so Chris withdrew inference. The wall now writes `source=` with exactly one
+# non-empty value, `declared`. `hooks/session-sweeper.sh` is still its only reader, branching
+# on `!= "inferred"` — a branch that is now always true (no writer emits `inferred`), harmless,
+# and left in place because touching the sweeper is outside R1's file set. One word, one reader.
 N_SRC_VALUES=$(grep -oE '^[[:space:]]*C_SOURCE="[a-z]*"' "$DP_N" \
   | sed -E 's/.*"([a-z]*)"/\1/' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/ $//')
-expect_eq "the writer's vocabulary is exactly two words" "declared inferred" "$N_SRC_VALUES"
+expect_eq "the writer's vocabulary is one word" "declared" "$N_SRC_VALUES"
 expect_eq "…and the sweeper is the only script that reads the field" "1" \
   "$(grep -rlF 'line_field "$row" source' "$REPO_ROOT/hooks" | grep -c .)"
 expect_eq "…reading it exactly once" "1" "$(grep -cF 'line_field "$row" source' "$SWEEPER")"
 
-# Driven, not just grepped: three briefs, three routes to a path, and the field the writer
-# actually emits for each. The templated brief is the one S4 added and the one whose value is
-# load-bearing — it must read `inferred`, because the author declared a slot, not a path.
+# Driven, not just grepped: three briefs, three routes to a path, and what the writer does with
+# each now that it never guesses. A LABELED slot-free path is `declared` and lands; an UNLABELED
+# prose path and a TEMPLATED `<slot>` are both REFUSED at dispatch (exit 2, no roster row) —
+# the withdrawal, asserted from the writer's own output in the paired exit-AND-inventory shape.
 NSRC=$(new_repo "source-vocab")
 write_plan "$NSRC/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
-n_dispatch() {  # <name> <prompt> -> the roster row the wall wrote for it
+# Run in the CURRENT shell (never a command-substitution subshell) so the wall's own exit
+# code survives to the assertion; read the roster row in a separate step.
+n_dispatch() {  # <name> <prompt> — runs the wall in this shell; its exit is the function's exit
   jq -n --arg s "$SID_A" --arg c "$NSRC" --arg n "$1" --arg p "$2" \
     '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
       hook_event_name:"PreToolUse", tool_name:"Agent",
       tool_input:{description:"a dispatch", subagent_type:"implementor", name:$n, prompt:$p},
       tool_use_id:("toolu_01" + $n)}' \
     | "${NENV[@]}" bash "$PARTY_DP" >/dev/null 2>&1
-  grep -F "|name=$1|" "$NSRC/.bionic/tmp/roster-$SID_A.state" 2>/dev/null | tail -1
 }
-expect_contains "a LABELED slot-free path records source=declared" "|source=declared|" \
-  "$(n_dispatch declaring 'Expected artifact: .bionic/docs/record/declared.md')"
-expect_contains "an UNLABELED record/ path records source=inferred" "|source=inferred|" \
-  "$(n_dispatch inferring 'the notes go in .bionic/docs/record/inferred.md when done')"
-expect_contains "a TEMPLATED path records source=inferred, never a third word" "|source=inferred|" \
-  "$(n_dispatch filling 'Expected artifact: .bionic/docs/record/<name>.md')"
+n_row() { grep -F "|name=$1|" "$NSRC/.bionic/tmp/roster-$SID_A.state" 2>/dev/null | tail -1; }
+
+n_dispatch declaring 'Expected artifact: .bionic/docs/record/declared.md'; N_ST=$?
+expect_eq "a LABELED slot-free path passes the wall" "0" "$N_ST"
+expect_contains "…and records source=declared" "|source=declared|" "$(n_row declaring)"
+n_dispatch inferring 'the notes go in .bionic/docs/record/inferred.md when done'; N_ST=$?
+expect_eq "an UNLABELED record/ path is REFUSED at dispatch (no inference)" "2" "$N_ST"
+expect_eq "…and writes no roster row" "" "$(n_row inferring)"
+n_dispatch filling 'Expected artifact: .bionic/docs/record/<name>.md'; N_ST=$?
+expect_eq "a TEMPLATED <slot> path is REFUSED at dispatch (no fill)" "2" "$N_ST"
+expect_eq "…and writes no roster row" "" "$(n_row filling)"
 
 # ------------------------------------------------- N.5 the ghost row, asked of every writer
 #
