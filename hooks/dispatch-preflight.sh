@@ -638,29 +638,55 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # and the next character here is a hyphen), but the ordering makes the
       # intent structural rather than incidental.
       #
-      # It is also the one label pinned to LINE START. It is the only label that
-      # OPENS a wall rather than filling a field, and briefs in this repo quote
-      # the wall message that names it constantly — so a mid-sentence occurrence
-      # is documentation, not a declaration (Step-6 review S-1: one quoted line
-      # silenced the landing contract for the whole dispatch).
+      # It is also pinned to LINE START, and — since final-audit A-1 — so are the
+      # six deliverable-kind labels below (expected artifact(s), deliverable(s),
+      # artifact(s)). It is the only label that OPENS a wall rather than filling
+      # a field, and briefs in this repo quote the wall message that names it
+      # constantly — so a mid-sentence occurrence is documentation, not a
+      # declaration (Step-6 review S-1: one quoted line silenced the landing
+      # contract for the whole dispatch).
+      #
+      # THE SAME HAZARD REACHES THE DELIVERABLE LABELS (final-audit A-1,
+      # record/w2-r7-audit.md). Every refusal this wall prints recommends the
+      # same concrete, copy-paste example — Expected artifact:
+      # .bionic/docs/record/my-slice-notes.md — and a brief that quotes that
+      # line in prose ahead of its real, later label puts each occurrence in its
+      # OWN span, one path apiece, so the ambiguity wall below never sees two
+      # paths in one span. decl_deliverable() then takes the FIRST hit that
+      # yields any path and silently contracts the agent to a file it will never
+      # write, recorded source=declared as though a human named it — the one
+      # shape that routes around the ambiguity wall entirely. Pinning the six
+      # deliverable-kind spellings to line start closes it the same way S-1
+      # closed it for the waiver: a mid-sentence occurrence never becomes a hit.
+      #
+      # THE REMAINING LABELS ARE DELIBERATELY LEFT UNPINNED (cadence, duration,
+      # progress, subprocess claim). None of them is quoted as a copy-paste
+      # example in any wall message, so the bait mechanism above does not reach
+      # them. cadence is also POSITIONAL by design (S10L) — it is meant to sit
+      # mid-sentence inside the progress span (Progress: PATH, cadence ~5m), and
+      # pinning it to line start would break that grammar outright. A wrong
+      # duration or progress value is a misread number or path the watcher acts
+      # on; a wrong deliverable is a file-write contract the landing gate later
+      # enforces by ordering the agent to overwrite whatever it names. The harms
+      # are not the same size, and the fix is scoped to the one that is.
       addlabel("deliverable-waiver", "waiver", "", 1)
       addlabel("subprocess claims", "claims")
       addlabel("subprocess claim",  "claims")
-      addlabel("expected artifacts", "deliverable")
-      addlabel("expected artifact",  "deliverable")
+      addlabel("expected artifacts", "deliverable", "", 1)
+      addlabel("expected artifact",  "deliverable", "", 1)
       addlabel("progress artifact",  "progress")
       addlabel("expected duration",  "duration")
       addlabel("scope constraint",   "input")
       addlabel("exit condition",     "-")
       addlabel("progress path",      "progress")
-      addlabel("deliverables",       "deliverable")
+      addlabel("deliverables",       "deliverable", "", 1)
       addlabel("current step",       "-")
-      addlabel("deliverable",        "deliverable")
+      addlabel("deliverable",        "deliverable", "", 1)
       addlabel("constraints",        "-")
       addlabel("your slice",         "-")
       addlabel("read first",         "input")
-      addlabel("artifacts",          "deliverable")
-      addlabel("artifact",           "deliverable")
+      addlabel("artifacts",          "deliverable", "", 1)
+      addlabel("artifact",           "deliverable", "", 1)
       addlabel("progress",           "progress")
       addlabel("duration",           "duration")
       addlabel("cadence",            "cadence", "([ \t]*:|[ \t])[ \t]*")
