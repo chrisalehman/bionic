@@ -1408,8 +1408,11 @@ expect_status "F-RD: …and no roster row contracts the reviewer to the auditor'
 # C-2 (w2-review-cs.md) — the LABELLED span used to take up to four path tokens and
 # run on into whatever prose followed, so files the brief named as INPUTS ("while
 # you are there, read …"; "do not touch …") were recorded `source=declared` and the
-# landing gate demanded all four. Under R1 the declared extractor takes exactly the
-# FIRST path in the label's own sentence, so a following input path is never taken.
+# landing gate demanded all four. R1 answered by taking the FIRST path in the label's
+# first sentence; the R6 critic showed that is a guess with a declaration's weight
+# (R6-1), so R7 refuses instead: a span yielding more than one path names candidates
+# and asks the author which one is theirs. The input paths are still never contracted —
+# now because nothing is contracted until the brief is unambiguous.
 BRIEF_LABEL_RUNON='Your slice: write the report.
 Expected artifact: record/w99-report.md — and while you are there, read record/legacy-notes.md
 and do not touch tests/run.sh or .bionic/docs/plans/epic-99-test/wave-01-test.plan.md
@@ -1418,20 +1421,20 @@ Expected duration: ~20 minutes.'
 REPO=$(make_repo r13c2 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_LABEL_RUNON" "runonbot")"
-ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "C-2: a run-on labelled span passes with only its declared path" "0" "$GATE_ST"
-expect_status "C-2: the deliverable is exactly the FIRST path in the label's sentence" \
-  "record/w99-report.md" "$(roster_field "$ROW" deliverable)"
-expect_absent "C-2: the following 'read …' input path is never taken" \
-  "legacy-notes" "$(roster_field "$ROW" deliverable)"
-expect_absent "C-2: nor the 'do not touch' suite runner" \
-  "run.sh" "$(roster_field "$ROW" deliverable)"
-expect_absent "C-2: nor the wave plan the brief named as an input" \
-  "wave-01-test.plan.md" "$(roster_field "$ROW" deliverable)"
+expect_status "C-2: a run-on labelled span naming four paths is REFUSED as ambiguous (R7)" \
+  "2" "$GATE_ST"
+expect_contains "C-2: …the refusal names the declared artifact" \
+  "record/w99-report.md" "$GATE_ERR"
+expect_contains "C-2: …and the 'read …' input path, so neither is chosen for the author" \
+  "record/legacy-notes.md" "$GATE_ERR"
+expect_contains "C-2: …and the 'do not touch' suite runner" "tests/run.sh" "$GATE_ERR"
+expect_status "C-2: …and no roster row demands any of the four" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
 
-# THE PAIRED POSITIVE: the first-path rule must not become "inference off" — a
-# properly DECLARED path outside any input mention still lifts. This is the same
-# brief with the input clauses removed to their own labeled lines.
+# THE PAIRED POSITIVE: the exactly-one rule must not become "declaring is off" — a
+# properly DECLARED path outside any input mention still lifts, and this is the
+# resubmission the refusal above asks for: the same brief with the input clauses moved
+# to their own labeled lines.
 BRIEF_LABEL_CLEAN='Your slice: write the report.
 Expected artifact: record/w99-report.md
 Read first: record/legacy-notes.md
@@ -1882,6 +1885,216 @@ Progress artifact: .bionic/tmp/w99-other.progress'
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_OTHER_PATH" "owner-b")"
 expect_status "AC-12 paired negative: a distinct deliverable draws no contention warning" "0" "$GATE_ST"
 expect_absent "AC-12 paired negative: …and says nothing about an owner" "already" "$GATE_ERR"
+
+# ============================================================
+echo "=== S18 — EXACTLY ONE path under the deliverable label (R7: R6 critic R6-1/R6-2/R6-3/R6-4) ==="
+# ============================================================
+#
+# R1 withdrew prose inference but kept a guess inside the label: it read the FIRST
+# SENTENCE of the label span and took the FIRST path-shaped token in it. The R6 critic
+# showed that is F-RD wearing a declaration's clothes — "same shape as A, written to B"
+# contracted A, recorded `source=declared`, and the landing gate then ordered the agent
+# to write A (an existing report it was told to READ). Worse than pre-R1, where the
+# over-broad span at least CONTAINED the real deliverable.
+#
+# THE RULE (plan assumption 71, faithful completion of 48s never guess — declare or
+# refuse): the deliverable labels span must yield EXACTLY ONE path. Zero refuses (name
+# one); more than one REFUSES, naming every candidate, because choosing among them is
+# the guess. No position heuristic, no reading-verb whitelist, no first-wins.
+#
+# Because ambiguity is now fatal rather than resolved, the search window WIDENS back to
+# the whole span — which retires the false-block R1s first-sentence bound introduced
+# (a path in the labels second sentence was invisible, and the refusal told the author
+# to name a path they had already named).
+
+# ---- R6-1 CASE 9: two paths in one deliverable sentence -> REFUSE, both named ----
+BRIEF_TWO_PATHS_SHAPE='You are reviewing the wave.
+
+Expected artifact: same shape as .bionic/docs/record/w2-critic-report.md, written to .bionic/docs/record/w2-probe-frd.md
+Expected duration: 30 minutes.'
+
+REPO=$(make_repo r18a yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_PATHS_SHAPE" "shapebot")"
+expect_status "R6-1 CASE 9: a deliverable span naming two paths is REFUSED, never resolved" \
+  "2" "$GATE_ST"
+expect_contains "R6-1 CASE 9: …the refusal names the reference path" \
+  ".bionic/docs/record/w2-critic-report.md" "$GATE_ERR"
+expect_contains "R6-1 CASE 9: …and the real artifact, so neither is silently contracted" \
+  ".bionic/docs/record/w2-probe-frd.md" "$GATE_ERR"
+expect_contains "R6-1 CASE 9: …and asks for exactly one" "exactly one" "$GATE_ERR"
+expect_status "R6-1 CASE 9: …and no roster row contracts the agent to either" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
+
+# ---- R6-1 CASE 10: the read-then-produce ordering, the F-RD harm verbatim ----
+BRIEF_TWO_PATHS_READ='Your slice: an independent read-and-duplication review.
+Deliverable: read .bionic/docs/record/w2-auditor-report.md first, then produce .bionic/docs/record/w2-probe-frd2.md
+Expected duration: 20 minutes'
+
+REPO=$(make_repo r18b yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_PATHS_READ" "readproducebot")"
+expect_status "R6-1 CASE 10: read-X-then-produce-Y is REFUSED, not contracted to X" "2" "$GATE_ST"
+expect_contains "R6-1 CASE 10: …the auditors report is named as a candidate, not taken" \
+  ".bionic/docs/record/w2-auditor-report.md" "$GATE_ERR"
+expect_contains "R6-1 CASE 10: …alongside the artifact the agent was actually sent to write" \
+  ".bionic/docs/record/w2-probe-frd2.md" "$GATE_ERR"
+expect_status "R6-1 CASE 10: …and no row is written for either" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
+
+# ---- the refusal DIAGNOSES ambiguity, and is not the absent-deliverable message ----
+expect_absent "the ambiguity refusal is not misfiled as an absent deliverable" \
+  "names no deliverable" "$GATE_ERR"
+expect_contains "…it says where references belong instead" "outside" "$GATE_ERR"
+
+# ---- THE RESUBMISSION: CASE 9 with one path in the label and the reference moved out ----
+BRIEF_TWO_PATHS_FIXED='You are reviewing the wave.
+
+Read first: .bionic/docs/record/w2-critic-report.md — match its shape.
+Expected artifact: .bionic/docs/record/w2-probe-frd.md
+Expected duration: 30 minutes.'
+
+REPO=$(make_repo r18c yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_PATHS_FIXED" "shapebot")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "the resubmission — one path in the label, the reference outside it — passes" \
+  "0" "$GATE_ST"
+expect_status "…contracted to the artifact the brief actually asked for" \
+  ".bionic/docs/record/w2-probe-frd.md" "$(roster_field "$ROW" deliverable)"
+expect_absent "…and never to the reference it was told to read" \
+  "w2-critic-report" "$(roster_field "$ROW" deliverable)"
+expect_status "…marked declared" "declared" "$(roster_field "$ROW" source)"
+
+# ---- R6-4 CASE 5: a path in the labels SECOND sentence is declared, not absent ----
+#
+# R1 bounded the search at the end of the first sentence, so this brief — which names a
+# concrete path under a canonical label — was refused for naming none, and the message
+# told the author to do what they had already done. With ambiguity fatal, the window can
+# safely be the whole span.
+BRIEF_LATE_PATH='Your slice: assess the wave.
+Expected artifact: a written report. Put it at .bionic/docs/record/w2-probe-late.md when done.
+Expected duration: 20 minutes'
+
+REPO=$(make_repo r18d yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_LATE_PATH" "latepathbot")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "R6-4 CASE 5: a path in the labels second sentence PASSES (no first-sentence bound)" \
+  "0" "$GATE_ST"
+expect_status "R6-4 CASE 5: …and is the contract" \
+  ".bionic/docs/record/w2-probe-late.md" "$(roster_field "$ROW" deliverable)"
+expect_status "R6-4 CASE 5: …recorded declared, because a label yielded it" \
+  "declared" "$(roster_field "$ROW" source)"
+
+# ---- paired positive: one path plus surrounding prose in the span still passes ----
+BRIEF_ONE_PATH_PROSE='Your slice: build the widget.
+Expected artifact: .bionic/docs/record/w99-prose.md — the behavior table, the evidence,
+and the judgment calls, written as prose rather than a log. Keep it short.
+Expected duration: ~20 minutes.'
+
+REPO=$(make_repo r18e yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ONE_PATH_PROSE" "prosebot")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "paired positive: a one-path span wrapped in prose passes" "0" "$GATE_ST"
+expect_status "paired positive: …with that path as the contract" \
+  ".bionic/docs/record/w99-prose.md" "$(roster_field "$ROW" deliverable)"
+
+# ---- the same path named twice is ONE path, not an ambiguity ----
+BRIEF_SAME_TWICE='Your slice: build the widget.
+Expected artifact: .bionic/docs/record/w99-twice.md — append to .bionic/docs/record/w99-twice.md as you go.
+Expected duration: ~20 minutes.'
+
+REPO=$(make_repo r18f yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_SAME_TWICE" "twicebot")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "one path named twice is not an ambiguity" "0" "$GATE_ST"
+expect_status "…and lifts once" \
+  ".bionic/docs/record/w99-twice.md" "$(roster_field "$ROW" deliverable)"
+
+# ---- a WAIVER does not excuse an ambiguous declaration (R7 judgment call) ----
+#
+# The waiver excuses declaring NOTHING durable. A brief that declares a label naming two
+# artifacts has not waived anything — it has written a contract the machine cannot read,
+# and the author is the only one who can say which path is theirs.
+BRIEF_AMBIG_WAIVED='Your slice: review the wave.
+Deliverable-waiver: this dispatch returns its findings in the final message.
+Expected artifact: compare .bionic/docs/record/a-notes.md against .bionic/docs/record/b-notes.md
+Expected duration: 20 minutes'
+
+REPO=$(make_repo r18g yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_AMBIG_WAIVED" "waivedambig")"
+expect_status "a waiver does not excuse an ambiguous deliverable label" "2" "$GATE_ST"
+expect_contains "…and the refusal still names both candidates" "a-notes.md" "$GATE_ERR"
+
+# ---- R6-2: every refusal message recommends a brief the walls ACCEPT ----
+#
+# The containment refusal handed the author `Expected artifact: .bionic/docs/record/<name>.md`
+# — the literal string tests/cross-gate-agreement.test.sh §N.4 pins as REFUSED, and which
+# the SIBLING refusal (the absent-deliverable wall) explicitly calls out as not a name.
+# Two refusal messages in one file in direct contradiction, green the whole time because
+# no test read a Fix: line. This pin reads each walls own recommendation back out of its
+# stderr and DRIVES IT: an author who follows the Fix: line verbatim must not be refused.
+# It never hardcodes the example, so it holds when the wording is next edited.
+fix_example() {  # <stderr> -> the artifact path the Fix: block recommends
+  printf '%s\n' "$1" \
+    | grep -m1 -E '^[[:space:]]+Expected artifact: ' \
+    | sed -e 's/^[[:space:]]*Expected artifact: //' -e 's/[[:space:]]*$//'
+}
+
+BRIEF_OUT_OF_REPO='Your slice: build it.
+Expected artifact: ../../../../../../etc/hosts
+Expected duration: ~15 minutes.'
+
+for _wall in containment absent ambiguous; do
+  case "$_wall" in
+    containment) _b="$BRIEF_OUT_OF_REPO" ;;
+    absent)      _b="$BRIEF_NOTHING" ;;
+    ambiguous)   _b="$BRIEF_TWO_PATHS_SHAPE" ;;
+  esac
+  REPO=$(make_repo "r18h-$_wall" yes)
+  write_attestation "$REPO" "$SID_A"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$_b" "fixline-$_wall")"
+  expect_status "self-consistency ($_wall): the wall refuses" "2" "$GATE_ST"
+  _ex=$(fix_example "$GATE_ERR")
+  expect_status "self-consistency ($_wall): its Fix: block recommends a labeled example" "0" \
+    "$([ -n "$_ex" ] && echo 0 || echo 1)"
+  expect_absent "self-consistency ($_wall): …carrying no slot the walls themselves refuse" \
+    "<" "$_ex"
+  REPO=$(make_repo "r18i-$_wall" yes)
+  write_attestation "$REPO" "$SID_A"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your slice: do the work.
+Expected artifact: $_ex
+Expected duration: ~15 minutes." "followed-$_wall")"
+  expect_status "self-consistency ($_wall): a brief following that Fix: line verbatim PASSES" \
+    "0" "$GATE_ST"
+  expect_status "self-consistency ($_wall): …and the recommended path is what lands on the row" \
+    "$_ex" "$(roster_field "$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)" deliverable)"
+done
+
+# ---- R6-3: a parenthetical duration lifts readable, not truncated mid-phrase ----
+#
+# bound_field ended a value at `)` but not `(`, so a balanced parenthetical truncated with
+# a dangling open bracket — `~45 minutes (phase 1 only` — which the poker's parse_seconds
+# refuses (two numbers, one matched unit pair). An unreadable duration silently exempts the
+# row from overdue notification, which is A-2 read from the writer side.
+BRIEF_PAREN_DURATION='Your slice: build the widget.
+Expected artifact: .bionic/docs/record/w99-paren.md
+Expected duration: ~45 minutes (phase 1 only), phase 2 is a separate dispatch.'
+
+REPO=$(make_repo r18j yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_PAREN_DURATION" "parenbot")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "R6-3: a parenthetical duration lifts the clause before the bracket" \
+  "~45 minutes" "$(roster_field "$ROW" duration)"
+expect_absent "R6-3: …with no dangling open bracket for parse_seconds to choke on" \
+  "(" "$(roster_field "$ROW" duration)"
+expect_absent "R6-3: …and none of the parentheticals own numbers" \
+  "phase" "$(roster_field "$ROW" duration)"
 
 echo ""
 echo "----------------------------------------"
