@@ -1763,6 +1763,40 @@ assert_contains "ac13_canonical_still_ac10_arm names the pinned docs root, AC-10
   "$ac13_main/.bionic/docs/plans/" "$HOOK_STDERR"
 
 echo
+echo "=== AC-14: no-git fallback walks up from the TARGET, not the shell ==="
+#
+# session-20260812-bionic-root-pin. resolve_project_root()'s no-git fallback used to answer
+# `pwd` unconditionally, so a session whose shell cwd sat somewhere else entirely pinned the
+# wall to the WRONG project (live repro: .bionic/docs/record/session-20260812-bionic-root-pin/
+# ac1-red-live.md). ac14_ws is deliberately never `git init`'d — this is the arm the AC-13
+# fixtures above (all real git repos) never exercise.
+
+ac14_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$ac14_tmp")
+ac14_ws="$ac14_tmp/ws"
+mkdir -p "$ac14_ws/.bionic/docs/record"
+ac14_unrelated="$ac14_tmp/unrelated"
+mkdir -p "$ac14_unrelated"
+ac14_record_body='# operational artifact — no canonical-sdlc frontmatter at all'
+
+echo "ac14-1 (REPRO): hook cwd in an unrelated dir, Write into the workspace's OWN .bionic/ → exit 0 (walk-up finds the real tree; exit 2 before the fix)"
+ac14_orig_pwd=$(pwd)
+cd "$ac14_unrelated"
+run_write "$ac14_ws/.bionic/docs/record/ac14-repro.md" "$ac14_record_body"
+cd "$ac14_orig_pwd"
+assert_eq "ac14_repro exit 0" 0 "$HOOK_EXIT"
+
+echo "ac14-2 (CONTAINMENT): same workspace, Write targeting a .bionic one level down that does NOT exist on disk → still exit 2 (phantom tree refused; the pin is ac14_ws, the target names ac14_ws/sub/.bionic)"
+ac14_orig_pwd=$(pwd)
+cd "$ac14_unrelated"
+run_write "$ac14_ws/sub/.bionic/docs/record/ac14-phantom.md" "$ac14_record_body"
+cd "$ac14_orig_pwd"
+assert_eq "ac14_phantom exit 2" 2 "$HOOK_EXIT"
+assert_contains "ac14_phantom names the pinned root (the real workspace tree)" \
+  "Pinned root: $ac14_ws/.bionic" "$HOOK_STDERR"
+assert_contains "ac14_phantom names the phantom tree it refused" \
+  "$ac14_ws/sub/.bionic" "$HOOK_STDERR"
+
+echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
 if [ "$FAIL" -ne 0 ]; then
   exit 1

@@ -2718,6 +2718,32 @@ for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N"; do
   expect_eq "$(basename "$_n") falls back outside any repository" \
     "$NOUT" "$(cd "$NOUT" && root_via "$_n" "$NOUT/x.md" "$NOUT")"
 done
+
+# --------------------------------------- N.2b no-git fallback follows the TARGET, not the shell
+#
+# session-20260812-bionic-root-pin: outside any git repository, the fallback used to answer
+# `pwd` unconditionally — the pin followed the SHELL's cwd, not the project the target path
+# actually named (live repro: .bionic/docs/record/session-20260812-bionic-root-pin/
+# ac1-red-live.md). The fix walks up from the nearest existing ancestor of the target path
+# for the nearest directory that already carries a `.bionic/` tree and answers there; only
+# when none exists does the supplied fallback remain. NBWS is a non-git workspace carrying a
+# real `.bionic/` — never `git init`'d, which is the point: this is the arm the two
+# git-derived checks above never reach.
+NBWS="$SANDBOX/fx/nroot/bws"
+mkdir -p "$NBWS/.bionic/docs/record"
+mkdir -p "$NBWS/sub"
+expect_eq "fixture: NBWS carries a real .bionic/ and is NOT a git repository" "yes-nogit" \
+  "$([ -d "$NBWS/.bionic" ] && ! git -C "$NBWS" rev-parse --show-toplevel >/dev/null 2>&1 \
+       && echo yes-nogit || echo no)"
+# Asked from $NOUT — a directory unrelated to NBWS and itself outside any repository, so a
+# resolver that answered `pwd` (the old bug) would land on $NOUT, not $NBWS.
+for _p in "$NBWS/.bionic/docs/record/x.md" "$NBWS/sub/deep/not/created/yet/x.md"; do
+  for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N"; do
+    expect_eq "$(basename "$_n") roots '${_p#$NBWS/}' at NBWS from an unrelated cwd, not the fallback" \
+      "$NBWS" "$(cd "$NOUT" && root_via "$_n" "$_p" "$NOUT")"
+  done
+done
+
 # ONE-COPY MUTATION GOES RED, the §A2 discipline applied to this family: drop the
 # `--git-common-dir` half from a copy of the wall's resolver and it answers the WORKTREE —
 # the pre-R9 behaviour, and the one that made a worktree its own address space.

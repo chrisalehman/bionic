@@ -138,6 +138,20 @@ resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default p
       return
     fi
   fi
+  # NO-GIT FALLBACK: the pin follows the TARGET, never the shell. Outside any
+  # repository, walk up from the nearest existing ancestor of the target for
+  # the nearest directory already carrying a `.bionic/` tree and answer there;
+  # only when none exists does the supplied fallback (default pwd) win — which
+  # preserves the first-write-into-a-fresh-project path and changes nothing
+  # inside a git repository, where the arms above always answer first.
+  root="$d"
+  while [ -n "$root" ] && [ "$root" != "/" ] && [ "$root" != "." ]; do
+    if [ -d "$root/.bionic" ]; then
+      printf '%s\n' "$root"
+      return
+    fi
+    root=$(dirname "$root")
+  done
   printf '%s\n' "${2:-$(pwd)}"
 }
 
