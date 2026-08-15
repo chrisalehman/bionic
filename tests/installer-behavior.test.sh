@@ -989,27 +989,71 @@ for h in dispatch-preflight.sh preflight-probe.sh stop-check.sh stop-guard.sh ex
 done
 
 # dispatch-preflight.sh (PreToolUse|Agent), stop-guard.sh (PreToolUse|TaskStop)
-# and execution-recorder.sh (PostToolUse|Bash + PostToolUse|Agent) registered.
-# stop-guard.sh's PreToolUse|Bash registration was RETIRED at wave-03 slice 4/4
-# when the recorder moved to its own PostToolUse script; the negative row below
-# pins the retirement, because MANAGED_HOOKS is convergent and a leftover entry
-# would put a second writer back in front of the same state file.
+# and execution-recorder.sh (PostToolUse|Bash + PostToolUse|Agent) moved out of
+# MANAGED_HOOKS into skills/canonical-sdlc/SKILL.md's `hooks:` frontmatter
+# (session-20260814-wave-detector-terminal-state, R1): wire_managed_hooks no
+# longer writes any of these four registrations into settings.json at all —
+# they now bind only for the duration of a session that invokes
+# /canonical-sdlc. The four checks below assert both sides: absent from the
+# wired settings this sandboxed run produces (that's the point of the move),
+# present in the SKILL.md frontmatter block.
+# stop-guard.sh's PreToolUse|Bash registration was separately RETIRED at
+# wave-03 slice 4/4 when the recorder moved to its own PostToolUse script; the
+# negative row below pins that unrelated retirement, because MANAGED_HOOKS is
+# convergent and a leftover entry would put a second writer back in front of
+# the same state file.
 _matcher_has_cmd() {  # <event> <matcher> <cmd>
   jq -e --arg ev "$1" --arg m "$2" --arg c "$3" \
     '(.hooks[$ev] // []) | any(.matcher == $m and (.hooks | any(.command == $c)))' \
     "$HOOKS_SETTINGS" >/dev/null
 }
+SKILL_MD="${REPO}/skills/canonical-sdlc/SKILL.md"
+_skill_frontmatter_has() {  # <event> <matcher> <cmd>
+  awk -v want_event="$1" -v want_matcher="$2" -v want_cmd="$3" '
+    /^hooks:$/ { active=1; next }
+    active && /^---$/ { active=0 }
+    active && /^[A-Za-z]/ { active=0 }
+    !active { next }
+    /^  [A-Za-z]+:$/ { event=$0; sub(/^  /,"",event); sub(/:$/,"",event); matcher=""; next }
+    /^    - matcher: "/ { matcher=$0; sub(/^    - matcher: "/,"",matcher); sub(/"$/,"",matcher); next }
+    /^          command: / {
+      cmd=$0; sub(/^          command: /,"",cmd)
+      if (event == want_event && matcher == want_matcher && cmd == want_cmd) found=1
+    }
+    END { exit !found }
+  ' "$SKILL_MD"
+}
 _matcher_has_cmd PreToolUse Bash "~/.claude/hooks/stop-guard.sh" \
   && no "AC-7: stop-guard.sh still registered on PreToolUse|Bash (retired at 4/4)" \
   || ok "AC-7: stop-guard.sh is NOT registered on PreToolUse|Bash (recorder arm retired)"
+
 _matcher_has_cmd PostToolUse Bash "~/.claude/hooks/execution-recorder.sh" \
-  && ok "AC-7: execution-recorder.sh registered on PostToolUse|Bash" || no "AC-7: execution-recorder.sh missing PostToolUse|Bash registration"
+  && no "AC-7: execution-recorder.sh still wired to PostToolUse|Bash (should have moved to SKILL.md frontmatter)" \
+  || ok "AC-7: execution-recorder.sh NOT wired to PostToolUse|Bash (sdlc-scoped, frontmatter-only now)"
+_skill_frontmatter_has PostToolUse Bash "~/.claude/hooks/execution-recorder.sh" \
+  && ok "AC-7: SKILL.md frontmatter registers execution-recorder.sh on PostToolUse|Bash" \
+  || no "AC-7: SKILL.md frontmatter missing execution-recorder.sh on PostToolUse|Bash"
+
 _matcher_has_cmd PostToolUse Agent "~/.claude/hooks/execution-recorder.sh" \
-  && ok "AC-7: execution-recorder.sh registered on PostToolUse|Agent" || no "AC-7: execution-recorder.sh missing PostToolUse|Agent registration"
+  && no "AC-7: execution-recorder.sh still wired to PostToolUse|Agent (should have moved to SKILL.md frontmatter)" \
+  || ok "AC-7: execution-recorder.sh NOT wired to PostToolUse|Agent (sdlc-scoped, frontmatter-only now)"
+_skill_frontmatter_has PostToolUse Agent "~/.claude/hooks/execution-recorder.sh" \
+  && ok "AC-7: SKILL.md frontmatter registers execution-recorder.sh on PostToolUse|Agent" \
+  || no "AC-7: SKILL.md frontmatter missing execution-recorder.sh on PostToolUse|Agent"
+
 _matcher_has_cmd PreToolUse TaskStop "~/.claude/hooks/stop-guard.sh" \
-  && ok "AC-7: stop-guard.sh registered on PreToolUse|TaskStop" || no "AC-7: stop-guard.sh missing PreToolUse|TaskStop registration"
+  && no "AC-7: stop-guard.sh still wired to PreToolUse|TaskStop (should have moved to SKILL.md frontmatter)" \
+  || ok "AC-7: stop-guard.sh NOT wired to PreToolUse|TaskStop (sdlc-scoped, frontmatter-only now)"
+_skill_frontmatter_has PreToolUse TaskStop "~/.claude/hooks/stop-guard.sh" \
+  && ok "AC-7: SKILL.md frontmatter registers stop-guard.sh on PreToolUse|TaskStop" \
+  || no "AC-7: SKILL.md frontmatter missing stop-guard.sh on PreToolUse|TaskStop"
+
 _matcher_has_cmd PreToolUse Agent "~/.claude/hooks/dispatch-preflight.sh" \
-  && ok "AC-7: dispatch-preflight.sh registered on PreToolUse|Agent" || no "AC-7: dispatch-preflight.sh missing PreToolUse|Agent registration"
+  && no "AC-7: dispatch-preflight.sh still wired to PreToolUse|Agent (should have moved to SKILL.md frontmatter)" \
+  || ok "AC-7: dispatch-preflight.sh NOT wired to PreToolUse|Agent (sdlc-scoped, frontmatter-only now)"
+_skill_frontmatter_has PreToolUse Agent "~/.claude/hooks/dispatch-preflight.sh" \
+  && ok "AC-7: SKILL.md frontmatter registers dispatch-preflight.sh on PreToolUse|Agent" \
+  || no "AC-7: SKILL.md frontmatter missing dispatch-preflight.sh on PreToolUse|Agent"
 
 # preflight-probe.sh and stop-check.sh are installed but stay UNREGISTERED
 # (companion scripts, run by hand — never appear as a hooks[].command anywhere).
