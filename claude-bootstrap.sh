@@ -1631,20 +1631,43 @@ do_install_hooks
 # settings.json on the next run — so the shrink itself is what strips those
 # seven from a machine's global settings.json at next bootstrap.
 #
-# The three entries remaining are unconditional walls that must bind in every
-# session regardless of skill invocation: protect-main/protect-database guard
-# destructive git ops, farm-out-reminder nudges long-running Bash off the main
-# thread. None of the three are sdlc-scoped.
+# The three unconditional entries are walls that must bind in every session
+# regardless of skill invocation: protect-main/protect-database guard destructive
+# git ops, farm-out-reminder nudges long-running Bash off the main thread. None of
+# the three are sdlc-scoped.
+#
+# THE THREE GUARDED ENTRIES ARE A DIFFERENT ANIMAL (session-20260815-landing-
+# supervision T6, design D1). The dispatch wall and the artifact wall are back in
+# this array — but behind hooks/agent-context-guard.sh, and for one reason: a
+# tool-class event raised inside a teammate or subagent context is dispatched
+# under the AGENT key, so it never reaches a skill-frontmatter registration, and
+# every wall this repo installs has therefore stopped at depth one (measured both
+# directions, with a main-thread positive control, in
+# .bionic/docs/record/session-20260815-landing-supervision/t1-probe-report.md §3).
+# The settings channel is the one that IS alive there.
+#
+# It is alive on the main thread too, and in every session on this machine — so
+# these entries would re-globalise exactly what the move above made skill-scoped
+# if they pointed straight at the walls. The guard is what makes them safe: it
+# runs the named wall only when the payload carries a top-level `agent_id` AND
+# this session has a roster on disk, and exits 0 in silence otherwise. Every
+# main-thread tool call — the overwhelming majority, armed or not — leaves on the
+# first of those two reads, before anything touches a filesystem.
+# Neither wall is registered twice for the same event: skill channel owns the main
+# thread, this channel owns the agent contexts, and the guard is the partition.
 #
 # Both sides of the moved registrations are exercised end to end by
-# tests/cross-gate-agreement.test.sh §L, which now asserts three ways:
-# SKILL.md's frontmatter agrees with the hook scripts' own event-spelling
-# guards, the seven moved names are absent from this array, and the three
-# survivors are present.
+# tests/cross-gate-agreement.test.sh §L, which now asserts four ways: SKILL.md's
+# frontmatter agrees with the hook scripts' own event-spelling guards, the moved
+# names are absent from this array UNGUARDED, the unconditional survivors are
+# present, and every agent-context entry names the guard ahead of its wall.
 MANAGED_HOOKS=(
   "PreToolUse|Bash|~/.claude/hooks/protect-main.sh"
   "PreToolUse|Bash|~/.claude/hooks/protect-database.sh"
   "PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh"
+  "PreToolUse|Agent|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/dispatch-preflight.sh"
+  "PreToolUse|Write|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/canonical-sdlc-governing-skill.sh"
+  "PreToolUse|Edit|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/canonical-sdlc-governing-skill.sh"
 )
 
 # Rebuild hook config in global settings. Resetting .hooks to exactly the
