@@ -57,8 +57,51 @@
 # nothing is MET vacuously by the verb's own rule, so skipping it cannot change an answer,
 # only the cost of getting one.
 #
+# THE SECOND ARM: TEAMMATES LAND AT SubagentStop (session-20260815, T2; design D2).
+# Everything above is true of an async subagent and false of a named teammate. A teammate
+# carries THREE id namespaces that do not join — the addressing form at dispatch
+# (`mate@session-7b7a693c`), the transcript form on SubagentStart/Stop
+# (`amate-fdaa80c4b3cb703f`), and an opaque nine-character token in `background_tasks[]` that
+# appears in no dispatch-time payload at all — and its row NEVER LEAVES that array: measured
+# `status:"running"` on the last Stop of the session, 2 m 41 s after the teammate had
+# delivered its own SubagentStop (t1-probe-report.md §2.1–§2.3, CLI 2.1.233). So the sweep
+# predicate is not merely unjoinable for teammates, it is wrong in both directions: today
+# every teammate row is skipped for want of an id, and the moment a writer fills one, every
+# teammate reads as LANDED 2.8 s after dispatch, while it is still working.
+#
+# `SubagentStop` is the transition itself rather than a reconstruction of it, and it carries
+# the id, the name and the moment in one payload. This arm therefore takes the SAME verdict
+# from the SAME verb, writes the SAME marker through the SAME append, and speaks the SAME
+# refusal — what differs is only which row is judged and when. It reads no live set (the
+# stopping teammate is still in it), joins by `agent_id` first and by `agent_type` — which
+# carries the dispatch NAME for a teammate — second, and both joins are scoped to rows
+# carrying a non-empty `teammate_id=`.
+#
+# THAT SCOPE CUTS BOTH WAYS, and the sweep half of it is in the fold below: teammate rows are
+# skipped there. An async subagent stopping on this event is passed over in silence, because
+# the sweep is the arm that owns it and the marker written here is exactly what would tell
+# the sweep the row is already answered for — verdicting an async row here would not
+# duplicate the sweep, it would silently replace the refusal the orchestrator sees with one
+# delivered somewhere else.
+#
+# WHERE THE REFUSAL GOES, stated because it differs from the sweep and the difference is not
+# ours to change: a blocking Stop-hook exit on the main thread reaches the orchestrator,
+# while on SubagentStop the harness delivers the feedback TO THE SUBAGENT and lets it
+# continue so it can act on it (read out of the shipped CLI 2.1.233 binary:
+# "additionalContext is non-error feedback delivered to the subagent; the subagent continues
+# so it can act on it", beside the block-cap guidance "For Stop/SubagentStop hooks, check
+# stop_hook_active in the input and return success while it is true"). So the agent that
+# broke its contract is the one told about it, at the one moment it can still fix it, and the
+# orchestrator-facing record is the roster marker plus the poker overdue NOTIFY that reads
+# the same rows. `stop_hook_active` is honoured here for the reason the binary gives.
+#
 # FAIL DIRECTIONS (pinned by hooks/landing-gate.test.sh):
-#   - not a Stop payload                                 -> pass, silent (relevance hoist)
+#   - not a Stop or SubagentStop payload                 -> pass, silent (relevance hoist)
+#   - SubagentStop with no agent_id, or one carrying
+#     field separators                                   -> pass, silent
+#   - SubagentStop matching no teammate row (a phantom
+#     harness agent, or an async subagent the sweep
+#     owns)                                              -> pass, silent
 #   - no `background_tasks` key: nothing to tell landed
 #     from live                                          -> pass, silent (ambiguity)
 #   - stop_hook_active true                              -> pass, silent (blocks ONCE)
@@ -94,18 +137,53 @@ _jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 
 # ---------- relevance first: the cheapest checks, before any git resolution ----------
 
-# Registered for Stop alone, so this only fires on a hand-run or a future registration
-# change; an absent field is not treated as a mismatch.
+# TWO EVENTS, TWO ARMS, ONE ROSTER SPLIT BETWEEN THEM. `Stop` is the sweep (below);
+# `SubagentStop` is the teammate landing verdict, and it arrives on the settings channel
+# behind hooks/agent-context-guard.sh because no subagent-context event reaches the skill
+# frontmatter at all. An absent field is not treated as a mismatch, so a hand-run payload
+# still sweeps.
 EVENT=$(_jq '.hook_event_name')
-[ -z "$EVENT" ] || [ "$EVENT" = "Stop" ] || exit 0
+case "$EVENT" in
+  ""|Stop)      MODE=sweep ;;
+  SubagentStop) MODE=landing ;;
+  *)            exit 0 ;;
+esac
 
-# THE LIVE SET, and the whole of the landed/live discrimination. Its ABSENCE is not an empty
-# set: an empty array means every dispatch has finished (the payload says so on every turn
-# where nothing is running), while a missing key means this is not a payload that can tell
-# us, and judging on it would hold running agents to contracts they are still working on.
-[ "$(printf '%s' "$INPUT" | jq -r 'if has("background_tasks") then "yes" else empty end' 2>/dev/null)" = "yes" ] || exit 0
-LIVE_IDS="|$(printf '%s' "$INPUT" \
-  | jq -r '[.background_tasks[]?.id // empty] | join("|")' 2>/dev/null | tr -d '\n')|"
+# Read on BOTH paths, so neither is a variable bound on only some of them (`set -u`), and
+# read here rather than at the join so the shape checks sit beside every other one.
+STOP_AGENT_ID=""
+STOP_AGENT_NAME=""
+LIVE_IDS=""
+
+if [ "$MODE" = "sweep" ]; then
+  # THE LIVE SET, and the whole of the landed/live discrimination. Its ABSENCE is not an empty
+  # set: an empty array means every dispatch has finished (the payload says so on every turn
+  # where nothing is running), while a missing key means this is not a payload that can tell
+  # us, and judging on it would hold running agents to contracts they are still working on.
+  [ "$(printf '%s' "$INPUT" | jq -r 'if has("background_tasks") then "yes" else empty end' 2>/dev/null)" = "yes" ] || exit 0
+  LIVE_IDS="|$(printf '%s' "$INPUT" \
+    | jq -r '[.background_tasks[]?.id // empty] | join("|")' 2>/dev/null | tr -d '\n')|"
+else
+  # THE LANDING ARM READS NO LIVE SET, and that is the point of it rather than an omission.
+  # This payload carries `background_tasks[]` too, and the stopping teammate is STILL IN IT —
+  # measured `status:"running"` on the last Stop of the session, 2 m 41 s after its own
+  # SubagentStop, because an in-process teammate stays addressable until the session ends
+  # (t1-probe-report.md §2.3). Landing-by-disappearance is a subagent-only signal; here the
+  # EVENT is the landing, delivered with the id, the name and the moment in one payload.
+  STOP_AGENT_ID=$(_jq '.agent_id')
+  [ -n "$STOP_AGENT_ID" ] || exit 0
+  # SHAPE-CHECKED BEFORE IT BECOMES A FIELD, on the same reasoning the session key gets: this
+  # value is written into a `landing-swept/v1|…|agent_id=` marker line, and a `|` or a newline
+  # in it would forge a field or a whole row on the roster. The transcript form is
+  # `a<name>-<16 hex>` and names are alphanumeric, so this silences nothing real.
+  case "$STOP_AGENT_ID" in *[!A-Za-z0-9_.@-]*) exit 0 ;; esac
+  # The NAME, for the fallback join, and only if it is shaped like one. `agent_type` carries
+  # the dispatch name for a teammate and the subagent type for an async dispatch (t1 §2.1);
+  # the harness's own phantom agents send it empty. An unusable value drops the fallback
+  # rather than the whole arm — the id join above may still place the row.
+  STOP_AGENT_NAME=$(_jq '.agent_type')
+  case "$STOP_AGENT_NAME" in *[!A-Za-z0-9_-]*) STOP_AGENT_NAME="" ;; esac
+fi
 
 # BLOCKS ONCE, and this is the whole mechanism. Claude Code re-enters the stop with
 # stop_hook_active true after a hook blocked it; refusing again would wedge the turn in a
@@ -246,7 +324,8 @@ SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
 # contract-bearing row. A tab cannot appear inside a field — every writer on this roster runs
 # its values through a sanitizer that turns one into a space — and the name is folded the
 # same way the verb folds it.
-CANDIDATES=$(awk -v pfx="roster-state/${ROSTER_VERSION}|" -v spfx="${SWEPT_SCHEMA}|" -v sid="$SID" '
+CANDIDATES=$(awk -v pfx="roster-state/${ROSTER_VERSION}|" -v spfx="${SWEPT_SCHEMA}|" -v sid="$SID" \
+                 -v mode="$MODE" -v pid="$STOP_AGENT_ID" -v atype="$STOP_AGENT_NAME" '
   index($0, spfx) == 1 {
     nf = split($0, f, "|"); a = ""
     for (i = 1; i <= nf; i++)
@@ -256,13 +335,14 @@ CANDIDATES=$(awk -v pfx="roster-state/${ROSTER_VERSION}|" -v spfx="${SWEPT_SCHEM
   }
   index($0, pfx) != 1 { next }
   {
-    name = ""; rsession = ""; aid = ""; deliv = ""
+    name = ""; rsession = ""; aid = ""; deliv = ""; tid = ""
     nf = split($0, f, "|")
     for (i = 1; i <= nf; i++) {
       if (name == ""     && substr(f[i], 1, 5)  == "name=")        name     = substr(f[i], 6)
       if (rsession == "" && substr(f[i], 1, 8)  == "session=")     rsession = substr(f[i], 9)
       if (aid == ""      && substr(f[i], 1, 9)  == "agent_id=")    aid      = substr(f[i], 10)
       if (deliv == ""    && substr(f[i], 1, 12) == "deliverable=") deliv    = substr(f[i], 13)
+      if (tid == ""      && substr(f[i], 1, 12) == "teammate_id=") tid      = substr(f[i], 13)
     }
     # The roster file is already per-session; this only fires on a hand-edited or copied
     # file, and it costs one comparison to keep the sweep honest about whose promises it is
@@ -272,11 +352,52 @@ CANDIDATES=$(awk -v pfx="roster-state/${ROSTER_VERSION}|" -v spfx="${SWEPT_SCHEM
     gsub(/\t/, " ", name)
     if (!(name in seen)) { seen[name] = 1; order[++n] = name }
     if (aid != "") agent[name] = aid
+    # `teammate_id` is monotone the way `agent_id` is — the launch wall never writes it and
+    # the completion arm fills it once — so the latest row that CARRIES one wins, and a row
+    # appended without copying it forward cannot un-teammate a contract.
+    if (tid != "") tm[name] = tid
     dl[name] = deliv
   }
   END {
+    # ---------- the landing arm: ONE row, the one that just stopped ----------
+    if (mode == "landing") {
+      nm = ""
+      # BY ID FIRST. The transcript form is filled onto the row by the recorder at
+      # SubagentStart, and it is the same string this payload carries — the strongest key
+      # available, and the one that survives two dispatches sharing a name.
+      for (i = 1; i <= n; i++) {
+        k = order[i]
+        if (tm[k] == "") continue
+        if ((k in agent) && agent[k] != "" && agent[k] == pid) nm = k
+      }
+      # BY NAME SECOND, and only over teammate rows. For a teammate `agent_type` carries the
+      # dispatch name; for an async dispatch it carries the subagent type, which names no row
+      # and is the join wave-03 removed for cause. The scope reads the statement the row
+      # writer made about dispatch mode, never a guess at the shape of an id.
+      if (nm == "" && atype != "" && (atype in seen) && tm[atype] != "") nm = atype
+      # A stop we cannot place is not ours to answer for: the harness sends its own internal
+      # agents through this event, and their ids are on no row of ours.
+      if (nm == "") exit
+      if (dl[nm] == "") exit                # declares nothing; MET vacuously either way
+      a = ((nm in agent) && agent[nm] != "") ? agent[nm] : pid
+      if (a == "") exit
+      # Both keys, because the marker may have been written under either: the row id when the
+      # identification arm ran, the payload id when it did not.
+      if ((a in swept) || (pid in swept)) exit
+      printf "%s\t%s\n", a, nm
+      exit
+    }
+
+    # ---------- the sweep: every row the payload says has landed ----------
     for (i = 1; i <= n; i++) {
       nm = order[i]
+      # TEAMMATES BELONG TO THE OTHER ARM, and this skip is load-bearing rather than tidy.
+      # A teammate is keyed in `background_tasks[]` under a namespace its `agent_id` is not
+      # in, and it NEVER LEAVES that array anyway (t1 §2.3) — so the moment the recorder
+      # fills the row id, the landed/live predicate here reads every teammate as landed on
+      # the first Stop after dispatch, 2.8 s in, and refuses a contract the agent is still
+      # working on. The sweep judges what it can place; the SubagentStop arm judges the rest.
+      if (tm[nm] != "") continue
       if (!(nm in agent)) continue          # never confirmed: cannot be placed
       if (dl[nm] == "") continue            # declares nothing; MET vacuously either way
       if (agent[nm] in swept) continue      # already answered for, once and for all
