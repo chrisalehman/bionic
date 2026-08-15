@@ -711,9 +711,29 @@ expect_true "MANAGED_HOOKS includes protect-main.sh" grep -q 'protect-main\.sh' 
 # 4e: MANAGED_HOOKS includes protect-database.sh
 expect_true "MANAGED_HOOKS includes protect-database.sh" grep -q 'protect-database\.sh' "$BOOTSTRAP"
 
-# 4h: MANAGED_HOOKS includes canonical-sdlc-evidence-gate.sh as a PreToolUse|Bash hook
-expect_true "MANAGED_HOOKS includes canonical-sdlc-evidence-gate.sh as PreToolUse|Bash" \
-  grep -qE '^\s*"PreToolUse\|Bash\|.*canonical-sdlc-evidence-gate\.sh"' "$BOOTSTRAP"
+# 4h: canonical-sdlc-evidence-gate.sh moved out of MANAGED_HOOKS into
+# skills/canonical-sdlc/SKILL.md's frontmatter hooks: block (session-20260814-
+# wave-detector-terminal-state, R1) — absent from the global array (the shell's
+# bare `grep` is ugrep with ignore-files active and lies about absence, so this
+# goes through /usr/bin/grep), present as a PreToolUse|Bash command entry in
+# the skill frontmatter.
+expect_false "MANAGED_HOOKS no longer includes canonical-sdlc-evidence-gate.sh (moved to SKILL.md frontmatter)" \
+  /usr/bin/grep -qF '"PreToolUse|Bash|~/.claude/hooks/canonical-sdlc-evidence-gate.sh"' "$BOOTSTRAP"
+
+expect_true "skills/canonical-sdlc/SKILL.md frontmatter registers canonical-sdlc-evidence-gate.sh as PreToolUse|Bash" \
+  awk '
+    /^hooks:$/ { active=1; next }
+    active && /^---$/ { active=0 }
+    active && /^[A-Za-z]/ { active=0 }
+    !active { next }
+    /^  [A-Za-z]+:$/ { event=$0; sub(/^  /,"",event); sub(/:$/,"",event); matcher=""; next }
+    /^    - matcher: "/ { matcher=$0; sub(/^    - matcher: "/,"",matcher); sub(/"$/,"",matcher); next }
+    /^          command: / {
+      cmd=$0; sub(/^          command: /,"",cmd)
+      if (event == "PreToolUse" && matcher == "Bash" && cmd ~ /canonical-sdlc-evidence-gate\.sh$/) found=1
+    }
+    END { exit !found }
+  ' "${REPO}/skills/canonical-sdlc/SKILL.md"
 
 # 4m: hooks/ dir contains at least one non-test hook
 _hook_count=0

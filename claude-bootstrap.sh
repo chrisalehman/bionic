@@ -1614,52 +1614,37 @@ do_install_hooks() {
 }
 do_install_hooks
 
-# Define all managed hooks (event|matcher_or_empty|command triples).
-# PreToolUse keys off the tool name (Bash/Write/Edit/Agent/TaskStop); Stop
+# Define the globally-managed hooks (event|matcher_or_empty|command triples).
+# PreToolUse keys off the tool name (Bash/TaskStop/Agent/Write/Edit); Stop
 # takes no matcher. preflight-probe.sh and stop-check.sh are installed above
 # (hooks/*.sh) but deliberately absent here — unregistered companion scripts,
 # run by hand.
 #
-# execution-recorder.sh is the machine's FIRST PostToolUse registration, and it
-# registers THREE times — one script, three arms. Two are PostToolUse (epic-15
-# wave-03 slice 4/4): the Bash arm turns stop-check.sh's printed machine line into
-# an observation record, the Agent arm completes the session roster's launch row
-# once a dispatch has actually spawned. Both facts are claims that something
-# HAPPENED, which is why neither can be recorded from PreToolUse; stop-guard.sh's
-# retired Bash arm recorded observations before the command ran and could never
-# know whether it did (design/orchestrator-subagent-coordination.md §4, spec AC-3).
+# The seven sdlc wall registrations (canonical-sdlc-evidence-gate.sh,
+# stop-guard.sh, dispatch-preflight.sh, canonical-sdlc-governing-skill.sh ×2,
+# execution-recorder.sh's PostToolUse+SubagentStart arms, context-spend.sh,
+# landing-gate.sh) moved out of this array (session-20260814-wave-detector-
+# terminal-state, R1): they now register from `skills/canonical-sdlc/SKILL.md`'s
+# `hooks:` frontmatter, live only for the duration of a session that invokes
+# `/canonical-sdlc`, and are gone from every ordinary session. This array is
+# convergent the same way it always was — an entry removed here is removed from
+# settings.json on the next run — so the shrink itself is what strips those
+# seven from a machine's global settings.json at next bootstrap.
 #
-# The third is SubagentStart (epic-16 wave-01), and it is a different event family
-# rather than a third matcher: that payload carries no tool_name at all, so it can
-# only arrive through its own registration. It appends the `identified` row that
-# finally carries the TRANSCRIPT-form agent id — the first form the by-id ownership
-# walls in stop-guard.sh and stop-check.sh can match, and without it those walls are
-# unreachable for every interactive (teammate-mode) dispatch this machine makes.
+# The three entries remaining are unconditional walls that must bind in every
+# session regardless of skill invocation: protect-main/protect-database guard
+# destructive git ops, farm-out-reminder nudges long-running Bash off the main
+# thread. None of the three are sdlc-scoped.
 #
-# SubagentStop carries landing-gate.sh, the other half of the same wave: every
-# contract this machinery checks at LAUNCH (dispatch-preflight.sh's deliverable
-# wall) is now checked at LANDING, against the same named artifacts. Both events
-# take an EMPTY matcher — neither carries a tool name to match on — which is the
-# no-matcher branch of wire_managed_hooks below.
-#
-# Both registrations are exercised end to end by tests/cross-gate-agreement.test.sh
-# §L, which asserts in both directions: bootstrap names the event, and the hook
-# guards on that same spelling. A hook registered for an event it does not read —
-# or reading one nobody registered — is inert in the quietest way there is.
+# Both sides of the moved registrations are exercised end to end by
+# tests/cross-gate-agreement.test.sh §L, which now asserts three ways:
+# SKILL.md's frontmatter agrees with the hook scripts' own event-spelling
+# guards, the seven moved names are absent from this array, and the three
+# survivors are present.
 MANAGED_HOOKS=(
   "PreToolUse|Bash|~/.claude/hooks/protect-main.sh"
   "PreToolUse|Bash|~/.claude/hooks/protect-database.sh"
-  "PreToolUse|Bash|~/.claude/hooks/canonical-sdlc-evidence-gate.sh"
   "PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh"
-  "PreToolUse|TaskStop|~/.claude/hooks/stop-guard.sh"
-  "PreToolUse|Agent|~/.claude/hooks/dispatch-preflight.sh"
-  "PostToolUse|Bash|~/.claude/hooks/execution-recorder.sh"
-  "PostToolUse|Agent|~/.claude/hooks/execution-recorder.sh"
-  "SubagentStart||~/.claude/hooks/execution-recorder.sh"
-  "PreToolUse|Write|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
-  "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh"
-  "Stop||~/.claude/hooks/context-spend.sh"
-  "SubagentStop||~/.claude/hooks/landing-gate.sh"
 )
 
 # Rebuild hook config in global settings. Resetting .hooks to exactly the
@@ -1715,6 +1700,7 @@ fi
 if [ "$removed_hooks" -gt 0 ]; then
   echo "  cleaned up ${removed_hooks} stale hook file(s) from ~/.claude/hooks/"
 fi
+echo "  sdlc walls are skill-scoped, register on /canonical-sdlc invocation"
 
 # ─── Account-mirror symlinks ────────────────────────────────────────────────
 #
