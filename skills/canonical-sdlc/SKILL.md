@@ -1,6 +1,57 @@
 ---
 name: canonical-sdlc
 description: Use when starting a large-scale development effort (new feature, architectural change, multi-day project) or when picking the skill for the current SDLC step. Routes to the canonical skill per step and gates every commit on the current step's evidence.
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: ~/.claude/hooks/canonical-sdlc-evidence-gate.sh
+          timeout: 10
+    - matcher: "TaskStop"
+      hooks:
+        - type: command
+          command: ~/.claude/hooks/stop-guard.sh
+          timeout: 10
+    - matcher: "Agent"
+      hooks:
+        - type: command
+          command: ~/.claude/hooks/dispatch-preflight.sh
+          timeout: 10
+    - matcher: "Write"
+      hooks:
+        - type: command
+          command: ~/.claude/hooks/canonical-sdlc-governing-skill.sh
+          timeout: 10
+    - matcher: "Edit"
+      hooks:
+        - type: command
+          command: ~/.claude/hooks/canonical-sdlc-governing-skill.sh
+          timeout: 10
+  PostToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: ~/.claude/hooks/execution-recorder.sh
+          timeout: 10
+    - matcher: "Agent"
+      hooks:
+        - type: command
+          command: ~/.claude/hooks/execution-recorder.sh
+          timeout: 10
+  SubagentStart:
+    - hooks:
+        - type: command
+          command: ~/.claude/hooks/execution-recorder.sh
+          timeout: 10
+  Stop:
+    - hooks:
+        - type: command
+          command: ~/.claude/hooks/context-spend.sh
+          timeout: 10
+        - type: command
+          command: ~/.claude/hooks/landing-gate.sh
+          timeout: 10
 layer: governance
 needs:
   - agent-skills:context-engineering

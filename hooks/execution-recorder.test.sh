@@ -528,6 +528,43 @@ expect_eq "the intended row is not rewritten in place — completion is an appen
 expect_absent "an async completion adds no teammate_id field" \
   "teammate_id=" "$CONFIRMED"
 
+# THE NAME COMES OFF THE DISPATCH ITSELF (epic-16 wave-03, T4c). `tool_input.name`
+# is the one place the harness spells the dispatch name, and this event carries it
+# beside the agent id — the single payload that holds both (T4b §3). Recording it
+# here makes the confirmed row self-sufficient for the name AND the id, so nothing
+# downstream has to recover a name from `agent_type`, which carries the subagent
+# TYPE and never the name (t4-probes-report.md §5.1).
+IFS='|' read -r RN_REPO RN_TR RN_SUB RN_CFG <<< "$(make_world rostername yes)"
+seed_roster "$RN_REPO" "$SID_A" "stale-name" "$TUID"
+RN_ROSTER="$RN_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_agent_post "$SID_A" "$RN_TR" "$RN_REPO" "dispatch-name" "$NEW_AID" "$TUID")"
+RN_CONFIRMED=$(grep 'status=confirmed' "$RN_ROSTER" 2>/dev/null)
+expect_contains "the confirmed row takes its name from tool_input.name" \
+  "|name=dispatch-name|" "$RN_CONFIRMED"
+expect_contains "…beside the agent id from the same payload" \
+  "agent_id=$NEW_AID" "$RN_CONFIRMED"
+
+# An UNNAMED dispatch carries no `tool_input.name` at all, and the launch row's own
+# (empty) name must survive rather than being overwritten by an empty read that
+# looks the same but is not the same decision.
+IFS='|' read -r RU_REPO RU_TR RU_SUB RU_CFG <<< "$(make_world rosterunnamed yes)"
+seed_roster "$RU_REPO" "$SID_A" "" "$TUID"
+RU_ROSTER="$RU_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(jq -n --arg s "$SID_A" --arg t "$RU_TR" --arg c "$RU_REPO" --arg u "$TUID" \
+  --arg a "$NEW_AID" \
+  '{session_id:$s, transcript_path:$t, cwd:$c, permission_mode:"bypassPermissions",
+    effort:{level:"high"}, hook_event_name:"PostToolUse", tool_name:"Agent",
+    tool_input:{description:"a dispatch", prompt:"go", subagent_type:"implementor",
+                run_in_background:true},
+    tool_response:{isAsync:true, status:"async_launched", agentId:$a,
+                   description:"a dispatch", resolvedModel:"claude-sonnet-5"},
+    tool_use_id:$u, duration_ms:6}')"
+expect_status "an unnamed dispatch confirms without blocking" 0 "$REC_ST"
+expect_contains "…and is confirmed by its id, with the name left empty" \
+  "|name=|" "$(grep 'status=confirmed' "$RU_ROSTER" 2>/dev/null)"
+expect_contains "…which is the row the landing sweep joins on" \
+  "agent_id=$NEW_AID" "$(grep 'status=confirmed' "$RU_ROSTER" 2>/dev/null)"
+
 # The synchronous dispatch shape (capture D): a different tool_response, the same
 # agentId key, so the same completion.
 IFS='|' read -r RS_REPO RS_TR RS_SUB RS_CFG <<< "$(make_world rostersync yes)"
@@ -923,16 +960,23 @@ echo "=== Section 10: the identification arm — SubagentStart → identified (A
 # share. Only the session id, transcript, cwd, name and agent id are re-pointed
 # at this suite's sandbox; the key set and its spellings are the capture's own.
 #
-# WHY THE JOIN IS BY NAME. The two id namespaces do not meet (capture probe §3
-# conclusion 3). The launch half learns the ADDRESSING form
-# (`probemate@session-3b51bef0`); this payload and every later one for the same
-# agent carry the TRANSCRIPT form (`aprobemate-4da9be517e8f90bd`); no payload
-# carries both. The only key spanning them is the NAME — `tool_input.name` at
-# launch, `agent_type` here. So this arm finds the latest `confirmed`-or-
-# `intended` row of THIS session's roster answering to that name, copies every
-# field of it forward, and appends the result as `identified` with the transcript
-# id in `agent_id=`. That row is the first one a by-id wall can match, which is
-# the whole of AC-2.
+# WHY THE JOIN IS BY AGENT ID, and no longer by name (epic-16 wave-03, T4c). The
+# name join read `agent_type` as "the teammate's name". T4b §3 measured that field
+# on a live Agent dispatch and it carries the subagent TYPE (`general-purpose`),
+# never the dispatch name — so every by-name join missed and this arm was inert
+# even when it did receive its event (t4-probes-report.md §5.1). The payload has
+# exactly seven keys and only ONE of them can key a row: `agent_id`, the
+# transcript-form id, which is byte-identical to the `tool_response.agentId` the
+# roster arm already wrote at confirmation and to the `background_tasks[].id` the
+# landing sweep reads (T4b §4, measured on one dispatch across all three).
+#
+# THE COST, stated rather than discovered later: an `intended` row carries an
+# EMPTY `agent_id` until the roster arm completes it, so this arm can no longer
+# rescue a dispatch whose PostToolUse never fired, and a teammate-mode row — whose
+# `agent_id=` is deliberately left empty because the launch response carries only
+# the ADDRESSING form — is never identified at all. Both are joins that were
+# ALREADY missing (they keyed on a field that does not carry a name); what changes
+# is that the miss is now structural and visible instead of silent.
 #
 # The roster fixture below carries the writer's CURRENT field set — including
 # `source=` and `waiver=`, which hooks/dispatch-preflight.sh has emitted since
@@ -962,18 +1006,25 @@ seed_roster_full() {  # <repo> <sid> <name> <tool_use_id> [status] [agent-id] [t
 
 START_ID="aprobemate-4da9be517e8f90bd"
 
-# ---------- the join over an intended row ----------
+# ---------- the join over a confirmed row ----------
 IFS='|' read -r I1_REPO I1_TR I1_SUB I1_CFG <<< "$(make_world identintended yes)"
-seed_roster_full "$I1_REPO" "$SID_A" "probemate" "toolu_01IDENTA"
+seed_roster_full "$I1_REPO" "$SID_A" "probemate" "toolu_01IDENTA" confirmed "$START_ID"
 I1_ROSTER="$I1_REPO/.bionic/tmp/roster-${SID_A}.state"
 
-run_rec "$(mk_subagent_start "$SID_A" "$I1_TR" "$I1_REPO" "probemate" "$START_ID")"
+run_rec "$(mk_subagent_start "$SID_A" "$I1_TR" "$I1_REPO" "general-purpose" "$START_ID")"
 expect_status "a SubagentStart never blocks" 0 "$REC_ST"
 I1_ROW=$(grep 'status=identified' "$I1_ROSTER" 2>/dev/null)
 expect_contains "the start appends an identified row" "status=identified" "$I1_ROW"
 expect_contains "…carrying the TRANSCRIPT-form id the by-id walls can match" \
   "agent_id=$START_ID" "$I1_ROW"
-expect_contains "…named for the agent_type the payload carried" "name=probemate" "$I1_ROW"
+# THE §5.1 FIX, asserted directly: the payload's `agent_type` is `general-purpose`
+# — the subagent TYPE — and the row still answers to the dispatch name the brief
+# gave it. A join that read agent_type as a name would have written `probemate`
+# nowhere and matched nothing.
+expect_contains "…still named for the DISPATCH, never for the payload's agent_type" \
+  "name=probemate" "$I1_ROW"
+expect_absent "…and agent_type never becomes a name on the row" \
+  "name=general-purpose" "$I1_ROW"
 # Slice 2's verdict verb folds the roster to the LATEST row per name and reads
 # the contract off that row alone (plan Assumptions 8). Every field carried
 # forward is what makes that fold sound.
@@ -987,80 +1038,107 @@ expect_contains "…the cadence beside it" "cadence=~8m." "$I1_ROW"
 expect_contains "…the deliverable's source designation" "source=declared" "$I1_ROW"
 expect_contains "…the waiver field the absent-deliverable wall writes" "waiver=" "$I1_ROW"
 expect_contains "…and the correlation key" "tool_use_id=toolu_01IDENTA" "$I1_ROW"
-expect_eq "identification is an APPEND — the intended row is left where the launch put it" \
-  "1" "$(grep -c 'status=intended' "$I1_ROSTER")"
+expect_eq "identification is an APPEND — the confirmed row is left where the launch put it" \
+  "1" "$(grep -c 'status=confirmed' "$I1_ROSTER")"
 expect_eq "exactly one identified row is appended" \
   "1" "$(grep -c 'status=identified' "$I1_ROSTER")"
 
 # ---------- the full chain: intended → confirmed → identified ----------
 #
-# The live teammate lifecycle. The confirmed row is the LATEST row for the name
-# when the start fires, so it is the one joined — and its `teammate_id`, the
-# addressing form nothing else records, must survive into the identified row or
-# the latest-row-per-name fold loses the only copy of it.
+# The async dispatch lifecycle, which is the one the id join can span end to end:
+# `tool_response.agentId` at confirmation is the SAME string this event carries,
+# so the confirmed row is the join target and every contract field on it rides
+# forward.
 IFS='|' read -r I2_REPO I2_TR I2_SUB I2_CFG <<< "$(make_world identchain yes)"
 I2_TUID="toolu_01IDENTCHAIN"
 seed_roster_full "$I2_REPO" "$SID_A" "probemate" "$I2_TUID"
 I2_ROSTER="$I2_REPO/.bionic/tmp/roster-${SID_A}.state"
-run_rec "$(mk_agent_post_teammate "$SID_A" "$I2_TR" "$I2_REPO" "probemate" \
-  "probemate@session-3b51bef0" "$I2_TUID")"
-run_rec "$(mk_subagent_start "$SID_A" "$I2_TR" "$I2_REPO" "probemate" "$START_ID")"
-expect_status "the start after a teammate confirmation never blocks" 0 "$REC_ST"
+run_rec "$(mk_agent_post "$SID_A" "$I2_TR" "$I2_REPO" "probemate" "$START_ID" "$I2_TUID")"
+run_rec "$(mk_subagent_start "$SID_A" "$I2_TR" "$I2_REPO" "general-purpose" "$START_ID")"
+expect_status "the start after a confirmation never blocks" 0 "$REC_ST"
 I2_ROW=$(grep 'status=identified' "$I2_ROSTER" 2>/dev/null)
-expect_contains "the start joins the CONFIRMED row, the latest for the name" \
+expect_contains "the start joins the CONFIRMED row, whose agent_id it matches" \
   "status=identified" "$I2_ROW"
-expect_contains "…and fills agent_id with the transcript form it finally has" \
+expect_contains "…carrying the same transcript-form id the confirmation recorded" \
   "agent_id=$START_ID" "$I2_ROW"
-expect_contains "…while the addressing id recorded at confirmation rides forward" \
-  "teammate_id=probemate@session-3b51bef0" "$I2_ROW"
+expect_contains "…and the deliverable the brief contracted rides forward" \
+  "deliverable=.bionic/docs/record/w1-slice1-report.md" "$I2_ROW"
 expect_eq "the chain is three rows, none rewritten" \
   "3" "$(grep -c '^roster-state/v1|' "$I2_ROSTER")"
 
-# The LATEST row wins, not the first: a name dispatched twice in one session has
-# two candidate rows, and the contract that belongs to the agent now starting is
-# the later one.
+# A TEAMMATE confirmation leaves `agent_id=` empty on purpose (the launch response
+# carries only the ADDRESSING form), so there is no id to join on and this arm
+# writes nothing. Stated as a test rather than left as a surprise: the row stays
+# `confirmed`, which is exactly what "never identified" should look like on disk.
+IFS='|' read -r I2B_REPO I2B_TR I2B_SUB I2B_CFG <<< "$(make_world identteammate yes)"
+I2B_TUID="toolu_01IDENTTEAM"
+seed_roster_full "$I2B_REPO" "$SID_A" "probemate" "$I2B_TUID"
+I2B_ROSTER="$I2B_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_agent_post_teammate "$SID_A" "$I2B_TR" "$I2B_REPO" "probemate" \
+  "probemate@session-3b51bef0" "$I2B_TUID")"
+run_rec "$(mk_subagent_start "$SID_A" "$I2B_TR" "$I2B_REPO" "probemate" "$START_ID")"
+expect_status "a start after a TEAMMATE confirmation never blocks" 0 "$REC_ST"
+expect_absent "…and identifies nothing: no row carries an id to join on" \
+  "status=identified" "$(cat "$I2B_ROSTER")"
+expect_contains "…while the confirmed row and its addressing id are untouched" \
+  "teammate_id=probemate@session-3b51bef0" "$(cat "$I2B_ROSTER")"
+
+# The LATEST row wins, not the first: an id can appear on several rows of one
+# session (intended → confirmed, or a resume), and the contract that belongs to
+# the agent now starting is the later one.
 IFS='|' read -r I3_REPO I3_TR I3_SUB I3_CFG <<< "$(make_world identlatest yes)"
-seed_roster_full "$I3_REPO" "$SID_A" "twice" "toolu_01FIRST"
-seed_roster_full "$I3_REPO" "$SID_A" "twice" "toolu_01SECOND"
+seed_roster_full "$I3_REPO" "$SID_A" "twice" "toolu_01FIRST" confirmed "$START_ID"
+seed_roster_full "$I3_REPO" "$SID_A" "twice" "toolu_01SECOND" confirmed "$START_ID"
 I3_ROSTER="$I3_REPO/.bionic/tmp/roster-${SID_A}.state"
-run_rec "$(mk_subagent_start "$SID_A" "$I3_TR" "$I3_REPO" "twice" "$START_ID")"
-expect_contains "the join takes the LATEST row for the name" \
+run_rec "$(mk_subagent_start "$SID_A" "$I3_TR" "$I3_REPO" "general-purpose" "$START_ID")"
+expect_contains "the join takes the LATEST row for the id" \
   "tool_use_id=toolu_01SECOND" "$(grep 'status=identified' "$I3_ROSTER")"
 
 # ---------- the starts that are not ours to record ----------
 #
-# A start whose name is on no row of this session's roster is a foreign or
-# phantom agent. Nothing is invented in its place — the same rule the roster arm
-# already keeps for a dispatch the start gate never journalled.
+# A start whose id is on no row of this session's roster is a foreign or phantom
+# agent. Nothing is invented in its place — the same rule the roster arm already
+# keeps for a dispatch the start gate never journalled.
 IFS='|' read -r I4_REPO I4_TR I4_SUB I4_CFG <<< "$(make_world identnomatch yes)"
-seed_roster_full "$I4_REPO" "$SID_A" "ours" "toolu_01OURS"
+seed_roster_full "$I4_REPO" "$SID_A" "ours" "toolu_01OURS" confirmed "$START_ID"
 I4_ROSTER="$I4_REPO/.bionic/tmp/roster-${SID_A}.state"
 
-run_rec "$(mk_subagent_start "$SID_A" "$I4_TR" "$I4_REPO" "stranger" "$START_ID")"
-expect_status "a start naming no row of ours never blocks" 0 "$REC_ST"
+run_rec "$(mk_subagent_start "$SID_A" "$I4_TR" "$I4_REPO" "general-purpose" "astranger-000")"
+expect_status "a start whose id is on no row of ours never blocks" 0 "$REC_ST"
 expect_absent "…and records nothing" "status=identified" "$(cat "$I4_ROSTER")"
 expect_eq "…leaving the roster exactly as it was" \
   "1" "$(grep -c '^roster-state/v1|' "$I4_ROSTER")"
 
-# The PHANTOM class, verbatim from capture probe §4: SubagentStop events fire
-# with an EMPTY `agent_type`, and the same shape is not ours to attribute at
-# start either. An empty name joins nothing rather than joining everything.
+# AN UNJOINABLE ROW IS NOT A WILDCARD. `agent_id=` is empty on every `intended`
+# row, and an empty id must never match one: matching would identify a dispatch
+# that has not been confirmed to exist.
+IFS='|' read -r I4B_REPO I4B_TR I4B_SUB I4B_CFG <<< "$(make_world identemptyid yes)"
+seed_roster_full "$I4B_REPO" "$SID_A" "ours" "toolu_01EMPTYID"
+I4B_ROSTER="$I4B_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$I4B_TR" "$I4B_REPO" "general-purpose" "$START_ID")"
+expect_status "a start over an intended row with no agent_id never blocks" 0 "$REC_ST"
+expect_absent "…and joins nothing: an empty id is not a key" \
+  "status=identified" "$(cat "$I4B_ROSTER")"
+
+# The PHANTOM class, verbatim from capture probe §4: these events fire with an
+# EMPTY `agent_type`, and that field is no longer read at all — the id is what
+# decides, so a phantom carrying an id we never dispatched joins nothing.
 run_rec "$(mk_subagent_start "$SID_A" "$I4_TR" "$I4_REPO" "" "$START_ID")"
 expect_status "a start with an empty agent_type never blocks" 0 "$REC_ST"
-expect_absent "…and records nothing (the phantom class)" "status=identified" "$(cat "$I4_ROSTER")"
-
-# Nothing to identify WITH is the same answer: an id is the entire point of the
-# row this arm writes.
-run_rec "$(mk_subagent_start "$SID_A" "$I4_TR" "$I4_REPO" "ours" "")"
-expect_status "a start with no agent_id never blocks" 0 "$REC_ST"
-expect_absent "…and records nothing without an id to record" \
+expect_contains "…and agent_type is not consulted: the id still joins its row" \
   "status=identified" "$(cat "$I4_ROSTER")"
+
+# Nothing to identify WITH is the whole point of the row this arm writes.
+run_rec "$(mk_subagent_start "$SID_A" "$I4_TR" "$I4_REPO" "general-purpose" "")"
+expect_status "a start with no agent_id never blocks" 0 "$REC_ST"
+expect_eq "…and records nothing without an id to record" \
+  "1" "$(grep -c 'status=identified' "$I4_ROSTER")"
 
 # The roster is per-session (D-5): another session's start never writes here, and
 # never conjures a roster of its own.
-run_rec "$(mk_subagent_start "$SID_B" "$I4_TR" "$I4_REPO" "ours" "$START_ID")"
-expect_absent "a foreign session's start identifies nothing of ours" \
-  "status=identified" "$(cat "$I4_ROSTER")"
+run_rec "$(mk_subagent_start "$SID_B" "$I4_TR" "$I4_REPO" "general-purpose" "$START_ID")"
+expect_eq "a foreign session's start identifies nothing of ours" \
+  "1" "$(grep -c 'status=identified' "$I4_ROSTER")"
 expect_no_file "…and creates no roster in its own name" \
   "$I4_REPO/.bionic/tmp/roster-${SID_B}.state"
 
@@ -1072,25 +1150,28 @@ expect_status "a start with no roster on disk never blocks" 0 "$REC_ST"
 expect_no_file "…and invents no roster" "$I5_REPO/.bionic/tmp/roster-${SID_A}.state"
 
 IFS='|' read -r I6_REPO I6_TR I6_SUB I6_CFG <<< "$(make_world identnowave no)"
-seed_roster_full "$I6_REPO" "$SID_A" "probemate" "toolu_01NOWAVE"
-run_rec "$(mk_subagent_start "$SID_A" "$I6_TR" "$I6_REPO" "probemate" "$START_ID")"
+seed_roster_full "$I6_REPO" "$SID_A" "probemate" "toolu_01NOWAVE" confirmed "$START_ID"
+run_rec "$(mk_subagent_start "$SID_A" "$I6_TR" "$I6_REPO" "general-purpose" "$START_ID")"
 expect_status "a start outside an active wave never blocks" 0 "$REC_ST"
 expect_absent "…and records nothing — the script is inert without a wave" \
   "status=identified" "$(cat "$I6_REPO/.bionic/tmp/roster-${SID_A}.state")"
 
 # An `identified` row is not itself a join target: the states advance, and the
 # contract a second start needs still lives on the confirmed row it came from.
-run_rec "$(mk_subagent_start "$SID_A" "$I1_TR" "$I1_REPO" "probemate" "$START_ID")"
+run_rec "$(mk_subagent_start "$SID_A" "$I1_TR" "$I1_REPO" "general-purpose" "$START_ID")"
 expect_eq "a repeated start joins the intended/confirmed row again, never an identified one" \
   "toolu_01IDENTA" \
   "$(grep 'status=identified' "$I1_ROSTER" | tail -1 | tr '|' '\n' | grep '^tool_use_id=' | cut -d= -f2-)"
 
 # The sanitizer is the writer's, byte for byte (S-1): a platform id carrying a
-# `|` would otherwise forge a field on the row this arm appends.
+# `|` would otherwise forge a field on the row this arm appends. The id is
+# sanitized BEFORE it is compared, so the value matched against the roster is the
+# value that was written there.
 IFS='|' read -r I7_REPO I7_TR I7_SUB I7_CFG <<< "$(make_world identsanitize yes)"
-seed_roster_full "$I7_REPO" "$SID_A" "probemate" "toolu_01SAN"
+seed_roster_full "$I7_REPO" "$SID_A" "probemate" "toolu_01SAN" confirmed \
+  "aevil-1111 status=confirmed name=someone-else"
 I7_ROSTER="$I7_REPO/.bionic/tmp/roster-${SID_A}.state"
-run_rec "$(mk_subagent_start "$SID_A" "$I7_TR" "$I7_REPO" "probemate" \
+run_rec "$(mk_subagent_start "$SID_A" "$I7_TR" "$I7_REPO" "general-purpose" \
   "aevil-1111|status=confirmed|name=someone-else")"
 I7_ROW=$(grep 'status=identified' "$I7_ROSTER" 2>/dev/null)
 # The pipes become spaces, so the hostile text survives INSIDE the id value and
@@ -1120,10 +1201,10 @@ IFS='|' read -r I8_REPO I8_TR I8_SUB I8_CFG <<< "$(make_world identtraversal yes
 mkdir -p "$I8_REPO/.bionic/tmp/roster-x" "$I8_REPO/planted"
 SID_TRAVERSAL='x/../../../planted/evil'
 I8_PLANTED="$I8_REPO/planted/evil.state"
-seed_roster_full "$I8_REPO" "$SID_TRAVERSAL" "probemate" "toolu_01TRAVERSE"
+seed_roster_full "$I8_REPO" "$SID_TRAVERSAL" "probemate" "toolu_01TRAVERSE" confirmed "$START_ID"
 expect_file "the traversal fixture really does escape the state directory (not vacuous)" \
   "$I8_PLANTED"
-run_rec "$(mk_subagent_start "$SID_TRAVERSAL" "$I8_TR" "$I8_REPO" "probemate" "$START_ID")"
+run_rec "$(mk_subagent_start "$SID_TRAVERSAL" "$I8_TR" "$I8_REPO" "general-purpose" "$START_ID")"
 expect_status "a start whose session key carries path separators never blocks" 0 "$REC_ST"
 expect_absent "…and writes no row to the roster that key reached outside .bionic/tmp" \
   "status=identified" "$(cat "$I8_PLANTED")"
