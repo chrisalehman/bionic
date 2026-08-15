@@ -414,7 +414,6 @@ _field() {  # <key> — by key, never by position, as every reader of these line
 }
 
 REFUSALS=""
-MARKS=""
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 while IFS=$'\t' read -r AID NAME; do
@@ -443,8 +442,14 @@ while IFS=$'\t' read -r AID NAME; do
   [ -n "$LINE" ] || continue
 
   STATE=$(_field state)
-  MARKS="${MARKS}${SWEPT_SCHEMA}|at=${NOW}|session=${SID}|name=${NAME}|agent_id=${AID}|state=${STATE}
-"
+  # APPENDED HERE, PER ROW, THE MOMENT ITS VERDICT IS DECIDED — not accumulated across the
+  # whole loop and written once at the end (t6-review.md F-2, measured: a sweep killed 5s
+  # into a 200-candidate run, ~60 already verdicted, banked ZERO marks under the old single
+  # trailing append). This is the same lock-free discipline the trailing append relied on —
+  # one line, well under a pipe buffer, O_APPEND — just paid once per row instead of once
+  # per sweep, so a sweep killed mid-loop still banks every verdict already decided.
+  printf '%s|at=%s|session=%s|name=%s|agent_id=%s|state=%s\n' \
+    "$SWEPT_SCHEMA" "$NOW" "$SID" "$NAME" "$AID" "$STATE" >> "$ROSTER_FILE" 2>/dev/null
 
   [ "$VERDICT_RC" -eq 1 ] || continue
   [ "$STATE" = "UNMET" ] || continue
@@ -465,13 +470,6 @@ while IFS=$'\t' read -r AID NAME; do
 done <<EOF
 $CANDIDATES
 EOF
-
-# ONE APPEND, AFTER the verdicts and BEFORE the refusal — a single O_APPEND write of well
-# under a pipe buffer, which the kernel does not interleave, and which is the same
-# lock-free discipline hooks/dispatch-preflight.sh states for its own roster append. The
-# marker is written even when the row refuses: the promise is "asked once", not "asked until
-# it passes", and a refusal that re-armed itself every turn is the loop this design forbids.
-[ -n "$MARKS" ] && printf '%s' "$MARKS" >> "$ROSTER_FILE" 2>/dev/null
 
 [ -n "$REFUSALS" ] || exit 0
 printf '%s' "$REFUSALS" >&2

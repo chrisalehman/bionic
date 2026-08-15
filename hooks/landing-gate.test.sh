@@ -59,6 +59,8 @@ expect_contains() { if printf '%s' "$3" | grep -qF -- "$2"; then ok "$1"; else n
 expect_absent()   { if printf '%s' "$3" | grep -qF -- "$2"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
 expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
 expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected [$2] got [$3]"; fi; }
+expect_gt()       { if [ "$2" -gt "$3" ] 2>/dev/null; then ok "$1"; else no "$1" "expected > $3, got $2"; fi; }
+expect_lt()       { if [ "$2" -lt "$3" ] 2>/dev/null; then ok "$1"; else no "$1" "expected < $3, got $2"; fi; }
 section()         { printf '\n=== %s ===\n' "$1"; }
 
 # ---------- fixtures ----------
@@ -812,6 +814,88 @@ expect_status "13c: a landed subagent beside a teammate still refuses" "2" "$RC"
 expect_contains "13c: …naming the subagent row" "async-one" "$OUT_STDERR"
 expect_absent "13c: …and never the teammate, whose event has not arrived" "w2mate" "$OUT_STDERR"
 expect_eq "13c: …with one marker, for the subagent alone" "1" "$(swept_count "$R13C")"
+
+# ================================================================= Section 14
+section "Section 14: crash-safe marks — a sweep killed mid-loop banks every already-decided verdict (T3, AC-3, R3)"
+
+# THE FAILURE THIS CLOSES (t6-review.md F-2, measured). The sweep used to accumulate every
+# marker line in a shell variable across the whole loop and write them in ONE append AFTER
+# it. A sweep killed mid-loop therefore journalled nothing — the review's own repro killed
+# the hook 5s into a 200-candidate sweep (~60 already verdicted) and found zero
+# landing-swept lines afterward. Past ~120 candidates the 10s hook timeout saturates the
+# same way: the sweep is killed, no marks land, the candidate set is IDENTICAL on the next
+# Stop, and it times out again — permanently, with the wall silently inert. The real
+# verdict subprocess (~70-90ms/candidate, measured both by the review and locally) is what
+# gives this fixture real, unstubbed time to kill into.
+
+R14="$(make_wave_repo r14)"
+N14=30
+i=1
+while [ "$i" -le "$N14" ]; do
+  AID14=$(printf 'ak14%013x' "$i")
+  add_row "$R14" name="k14-$i" agent_id="$AID14" \
+    deliverable=".bionic/docs/record/never-$i.md" launched_at="$(iso_ago 600)" \
+    tool_use_id="toolu_K14_$i"
+  i=$((i + 1))
+done
+
+PAYLOAD14="$SANDBOX/payload14.json"
+stop_payload "$R14" "$SID" false > "$PAYLOAD14"
+
+( exec bash "$GATE" < "$PAYLOAD14" ) > "$SANDBOX/gate14.out" 2> "$SANDBOX/gate14.err" &
+GATE14_PID=$!
+BG_PIDS="$BG_PIDS $GATE14_PID"
+
+# Poll for the FIRST sign of progress WHILE THE PROCESS IS STILL ALIVE, then kill it
+# immediately — that is what proves the kill lands mid-loop rather than after the sweep
+# would have finished on its own. Bounded at 8s so a hung gate fails the section loudly
+# instead of wedging the suite.
+SEEN_MIDFLIGHT=0
+waited14=0
+while [ "$waited14" -lt 400 ]; do
+  if ! kill -0 "$GATE14_PID" 2>/dev/null; then
+    break
+  fi
+  CUR14=$(swept_count "$R14")
+  if [ "$CUR14" -gt 0 ] 2>/dev/null; then
+    kill -9 "$GATE14_PID" 2>/dev/null
+    SEEN_MIDFLIGHT=1
+    break
+  fi
+  sleep 0.02
+  waited14=$((waited14 + 1))
+done
+# Make sure the process is really gone before reading the roster's final state — a kill
+# signal is delivered, not necessarily reaped, before the next line runs.
+wait "$GATE14_PID" 2>/dev/null
+
+MIDFLIGHT_COUNT=$(swept_count "$R14")
+expect_eq "14a: the kill really did land mid-loop, with the process still alive" "1" "$SEEN_MIDFLIGHT"
+expect_gt "14b: at least one already-decided verdict was banked before the kill" \
+  "$MIDFLIGHT_COUNT" "0"
+expect_lt "14c: …and not every candidate — this really was a mid-loop kill, not a finished sweep" \
+  "$MIDFLIGHT_COUNT" "$N14"
+
+# THE PAIRED POSITIVE: an uninterrupted sweep over the same shape banks every candidate
+# exactly once, and a second sweep over the identical (still-landed) roster does not
+# double the count — the per-row append preserves exactly the idempotency guarantee the
+# single trailing append used to provide.
+R14B="$(make_wave_repo r14b)"
+N14B=8
+i=1
+while [ "$i" -le "$N14B" ]; do
+  AID14B=$(printf 'ak14b%012x' "$i")
+  add_row "$R14B" name="k14b-$i" agent_id="$AID14B" \
+    deliverable=".bionic/docs/record/never-$i.md" launched_at="$(iso_ago 600)" \
+    tool_use_id="toolu_K14B_$i"
+  i=$((i + 1))
+done
+run_gate "$GATE" "$(stop_payload "$R14B" "$SID" false)"
+expect_status "14d: an uninterrupted multi-candidate sweep refuses (all UNMET)" "2" "$RC"
+expect_eq "14e: …and banks every candidate exactly once" "$N14B" "$(swept_count "$R14B")"
+run_gate "$GATE" "$(stop_payload "$R14B" "$SID" false)"
+expect_status "14f: the identical sweep re-run passes — nothing left to verdict" "0" "$RC"
+expect_eq "14g: …and the count does not double" "$N14B" "$(swept_count "$R14B")"
 
 # ---------- summary ----------
 printf '\n---\n%d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
