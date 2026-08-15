@@ -391,8 +391,9 @@ epoch_iso() {  # <epoch seconds> -> ISO-8601 Z; empty when it cannot be rendered
 # THE DIRECTORY BRANCH IS BOUNDED, in both directions, and the bound is not a tuning knob.
 # A deliverable path comes off a roster row, which comes off brief prose: `Expected
 # artifact: /usr/share` is one ordinary line away from any brief, and this predicate runs
-# inside a SubagentStop hook on every stop. Unbounded, that row cost 86 s of filesystem walk
-# per stop (Step-6 review C-3). The cap on how many files are stat'd also caps the walk
+# from the Stop-sweep (`hooks/landing-gate.sh`, invoked on the harness's Stop event — a
+# SubagentStop-registered wall never runs at all, t4b-probe-report.md §3) on every sweep.
+# Unbounded, that row cost 86 s of filesystem walk per stop (Step-6 review C-3). The cap on how many files are stat'd also caps the walk
 # itself — `head` closes the pipe and `find` stops — so a huge or non-repo directory cannot
 # stall the gate whatever path a row names.
 LANDING_DIR_MAXDEPTH=8
@@ -588,7 +589,8 @@ verdict_row() {  # <roster row>
 # a gate handed three lines for one stopping agent would have to guess which to believe.
 #
 # One awk pass rather than a shell loop over `line_field`, which is four processes per field
-# per row: this verb runs inside a SubagentStop hook under the 10 s timeout
+# per row: this verb runs from the Stop-sweep (`hooks/landing-gate.sh`, invoked on the
+# harness's Stop event, not SubagentStop — see that file's header) under the 10 s timeout
 # claude-bootstrap.sh registers, against a roster that is deliberately uncapped (the
 # recorder's F-1 note says why). The fold is the reader-side twin of the recorder's
 # "take the LAST row for a tool_use_id".
@@ -679,8 +681,9 @@ case "$VERB" in
 
     _want="$(clean "$VERDICT_NAME")"
     # ONCE, ahead of the loop: the ledger is one file and every row asks it the same
-    # question, so a per-row read would be a file open per row on the path a SubagentStop
-    # hook runs. Read here rather than cached anywhere across invocations — an ack taken by
+    # question, so a per-row read would be a file open per row on the path the Stop-sweep
+    # runs (`hooks/landing-gate.sh`, the harness's Stop event — not SubagentStop). Read here
+    # rather than cached anywhere across invocations — an ack taken by
     # a process that has since exited is still in force, which is the whole durability
     # claim the stop-side consumers rest on.
     read_acked

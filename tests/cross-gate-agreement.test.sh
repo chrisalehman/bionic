@@ -621,7 +621,7 @@ echo "=== A2 — one-copy mutation goes RED (checklist A9, TDD §9) ==="
 # Every mutation is a plausible drift, not damage: a maintainer editing one copy
 # and not the other two.
 
-CKSUM_BEFORE=$(shasum "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" "$PARTY_LG" 2>/dev/null)
+CKSUM_BEFORE=$(shasum "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" "$PARTY_ER" "$PARTY_LG" 2>/dev/null)
 MUTDIR="$SANDBOX/mutants"; mkdir -p "$MUTDIR"
 # A MUTATED landing gate still resolves its sweeper as a SIBLING, so one lives here for the
 # LG party below to find. The shipped sweeper is never touched — this is a copy.
@@ -664,12 +664,17 @@ MUTATIONS="docs-root-last-wins keep-quotes delete-cr depth-1 fence-blind anchor-
 
 # LG is the landing gate's active-wave copy (Step-6 critic D-1): every mutation below is an
 # active-wave-detection drift, and the gate holds a byte-identical copy of that block, so the
-# same six drifts must move its answer too or its copy is uncovered.
-for party in DP SG EG LG; do
+# same six drifts must move its answer too or its copy is uncovered. ER is
+# execution-recorder's copy (t6-review.md F-1's sibling finding, F-4): §A1 drives all five
+# parties over the fixture matrix, but until now this loop asserted only DP/SG/EG/LG — ER's
+# copy was held by shared-fixture agreement alone, never by a demonstration that drifting it
+# turns the battery red the way it does for the other four.
+for party in DP SG EG ER LG; do
   case "$party" in
     DP) src="$PARTY_DP" ;;
     SG) src="$PARTY_SG" ;;
     EG) src="$PARTY_EG" ;;
+    ER) src="$PARTY_ER" ;;
     LG) src="$PARTY_LG" ;;
   esac
   for m in $MUTATIONS; do
@@ -680,11 +685,12 @@ for party in DP SG EG LG; do
       no "mutation '$m' applies to $(basename "$src")" "the awk target matched nothing — the code moved"
       continue
     fi
-    saved_dp="$PARTY_DP"; saved_sg="$PARTY_SG"; saved_eg="$PARTY_EG"; saved_lg="$PARTY_LG"
+    saved_dp="$PARTY_DP"; saved_sg="$PARTY_SG"; saved_eg="$PARTY_EG"; saved_er="$PARTY_ER"; saved_lg="$PARTY_LG"
     case "$party" in
       DP) PARTY_DP="$dst" ;;
       SG) PARTY_SG="$dst" ;;
       EG) PARTY_EG="$dst" ;;
+      ER) PARTY_ER="$dst" ;;
       LG) PARTY_LG="$dst" ;;
     esac
     if detail=$(run_battery detect); then
@@ -693,12 +699,12 @@ for party in DP SG EG LG; do
     else
       ok "one-copy mutation '$m' in $party makes the battery RED"
     fi
-    PARTY_DP="$saved_dp"; PARTY_SG="$saved_sg"; PARTY_EG="$saved_eg"; PARTY_LG="$saved_lg"
+    PARTY_DP="$saved_dp"; PARTY_SG="$saved_sg"; PARTY_EG="$saved_eg"; PARTY_ER="$saved_er"; PARTY_LG="$saved_lg"
   done
 done
 
-expect_eq "the four shipped parties are byte-identical to before the mutations" \
-  "$CKSUM_BEFORE" "$(shasum "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" "$PARTY_LG" 2>/dev/null)"
+expect_eq "the five shipped parties are byte-identical to before the mutations" \
+  "$CKSUM_BEFORE" "$(shasum "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" "$PARTY_ER" "$PARTY_LG" 2>/dev/null)"
 
 # ============================================================
 echo ""
