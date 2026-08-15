@@ -61,7 +61,7 @@ The core profile is [`claude-config.txt`](claude-config.txt) — the authoritati
 | **Subagent roles** | implementor, senior-implementor, researcher, auditor, critic, test-runner — hand-written, carrying the invariant duties canonical-sdlc dispatches against |
 | **MCP servers** | context7, chrome-devtools *(Pencil's server self-registers whenever the Pencil app is running)* |
 | **Skills** | **bionic:canonical-sdlc** *(flagship)*, bionic:browser-verify, bionic:map-instrument-narrow, bionic:excalidraw-diagram, humanizer, notebooklm, impeccable |
-| **Hooks** | protect-main, protect-database, farm-out-reminder, canonical-sdlc-evidence-gate, canonical-sdlc-governing-skill, context-spend |
+| **Hooks** | Global: protect-main, protect-database, plus agent-context-guard wrappers for depth coverage. Armed-session only (registered by the canonical-sdlc skill on invocation): farm-out-reminder, the evidence/governing-skill gates, context-spend, and the landing/supervision fleet |
 | **Philosophy** | Operating principles and approval boundaries → [`claude-global.md`](claude-global.md), installed to `~/.claude/CLAUDE.md` |
 | **Shell alias** | `claude` → `claude --dangerously-skip-permissions` |
 
