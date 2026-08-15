@@ -36,8 +36,17 @@
 # failure — the false-alarm shape this machinery exists to end. Each verdicted row is
 # journalled as a `landing-swept/v1|` line in the roster file it belongs to. That is the one
 # thing this script writes, and it rides IN the roster because the promise it keeps must not
-# outlive the rows it is about: every roster reader in the fleet filters on the
-# `roster-state/v1|` prefix, so the marker is inert to all of them.
+# outlive the rows it is about. Inertness to the rest of the fleet is NOT a blanket property
+# of every roster reader — it holds per reader, for one of two separate reasons, and both
+# must be true or the marker leaks into a reader's answer (t6-review.md F-1, reproduced live:
+# `hooks/session-poker.sh` read the roster with no schema filter and the marker silenced its
+# overdue NOTIFY for the swept row). `hooks/execution-recorder.sh`, `hooks/session-sweeper.sh`,
+# `hooks/stop-guard.sh`, `hooks/stop-check.sh` and `hooks/stop-orders.sh` filter on the
+# `roster-state/v1|` prefix before reading a row, so the marker's `landing-swept/v1|` prefix
+# never matches. `hooks/dispatch-preflight.sh` does NOT filter on that prefix and is immune
+# only by accident: its `owning_row_for` skips any row with no `deliverable=`, a field the
+# marker never carries. That second immunity is undeclared to its own reader and untested —
+# one added field to the marker's schema would turn it into a second instance of this bug.
 #
 # IT OWNS NO PREDICATE. The question "did this contract land" is answered by
 # `hooks/session-sweeper.sh verdict <name>`, and this script parses that verb's machine line
@@ -138,9 +147,10 @@ ROSTER_FILE="$REPO/.bionic/tmp/roster-${SID}.state"
 
 # ---------- active-wave detection ----------
 # DELIBERATELY DUPLICATED, byte for byte where the logic overlaps, from
-# hooks/dispatch-preflight.sh's copy (stop-guard and the evidence gate hold the others). A
-# shared library is rejected by design (TDD §9): a sourced file the installer misses is a
-# silently inert wall. The copies are held together by tests/cross-gate-agreement.test.sh.
+# hooks/dispatch-preflight.sh's copy (stop-guard, execution-recorder and the evidence gate
+# hold the others). A shared library is rejected by design (TDD §9): a sourced file the
+# installer misses is a silently inert wall. The copies are held together by
+# tests/cross-gate-agreement.test.sh.
 resolve_docs_root() {
   local proj="$1" config="$1/.bionic/config.yaml" override
   if [ -f "$config" ]; then

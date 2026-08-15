@@ -268,6 +268,21 @@ expect_contains "…the human line names it too" "overdue-agent" "$OUT"
 expect_absent   "…never QUIET on the same tick" "decision=QUIET" "$OUT"
 expect_absent   "…never DISARM on the same tick" "decision=DISARM" "$OUT"
 
+# --- F-1 regression (t6-review.md §1): a landing-swept/v1 marker for this name, appended
+# after the roster row, must not shadow it when NOTIFY reads duration=/launched_at= off the
+# roster directly. The marker carries |name=<NAME>| but no duration=/launched_at=, so a
+# by-name lookup that does not filter to the roster schema first takes the marker on
+# `tail -1` and silently drops the row from NOTIFY eligibility (parse_seconds("") refuses).
+R3SW="$(make_repo s3-swept-marker)"; new_roster "$R3SW"
+add_row "$R3SW" name=overdue-swept deliverable="$R3SW/absent-overdue-swept.md" \
+  duration="1 minute" launched_at="$(iso_ago 120)"
+printf 'landing-swept/v1|at=%s|session=%s|name=overdue-swept|agent_id=a000|state=UNMET\n' \
+  "$(iso_ago 1)" "$SID" >> "$(roster_of "$R3SW")"
+poke "$R3SW" tick
+expect_eq "a landing-swept marker after the row does not silence NOTIFY (exit 1)" "1" "$RC"
+expect_contains "…decision=NOTIFY survives the marker" "decision=NOTIFY" "$OUT"
+expect_contains "…naming the row" "rows=overdue-swept" "$OUT"
+
 # --- all rows closed (MET), roster non-empty -> DISARM generalizes past "empty" ---
 R3C="$(make_repo s3-closed)"; new_roster "$R3C"
 DEL_C="$R3C/delivered.md"; echo "done" > "$DEL_C"

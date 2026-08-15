@@ -317,7 +317,14 @@ case "$VERB" in
       # Duration is a SECOND, ADVISORY-ONLY read of this one row — never a re-judgment of
       # MET/UNMET, which stays verdict's alone. The roster is append-only; the last line
       # carrying this name is its latest contract, the same row verdict itself just folded.
-      ROW_LINE="$(grep -F "|name=${RNAME}|" "$ROSTER_FILE" 2>/dev/null | tail -1)"
+      # Filtered to the roster-state/v1 schema FIRST (t6-review.md F-1): a landing-swept/v1
+      # marker for this same name also carries `|name=<name>|` and is appended AFTER the
+      # roster rows, so an unfiltered `tail -1` takes the marker instead — it has no
+      # duration=/launched_at=, and the row's overdue NOTIFY goes silent for the rest of the
+      # session. Same schema-prefix discipline as every other roster reader in the fleet
+      # (e.g. hooks/execution-recorder.sh's `roster-state/${ROSTER_VERSION}|` filters).
+      ROW_LINE="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
+        | grep -F "|name=${RNAME}|" | tail -1)"
       [ -n "$ROW_LINE" ] || continue
       DUR_RAW="$(line_field "$ROW_LINE" duration)"
       LAUNCHED_RAW="$(line_field "$ROW_LINE" launched_at)"
