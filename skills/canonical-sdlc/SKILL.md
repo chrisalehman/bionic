@@ -8,6 +8,9 @@ hooks:
         - type: command
           command: ~/.claude/hooks/canonical-sdlc-evidence-gate.sh
           timeout: 10
+        - type: command
+          command: ~/.claude/hooks/farm-out-reminder.sh
+          timeout: 10
     - matcher: "TaskStop"
       hooks:
         - type: command

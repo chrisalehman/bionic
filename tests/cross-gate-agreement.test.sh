@@ -2582,9 +2582,14 @@ expect_absent_ug() {
   if printf '%s' "$3" | /usr/bin/grep -qF -- "$2"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi
 }
 
-# --- L.1 frontmatter <-> script: the ten sdlc registrations live in SKILL.md's
-# `hooks:` frontmatter block, same event/matcher/command shape MANAGED_HOOKS used to
-# carry, each entry bounded by the same timeout: 10 the Step-6 review demanded.
+# --- L.1 frontmatter <-> script: the eleven sdlc-scoped registrations live in
+# SKILL.md's `hooks:` frontmatter block, same event/matcher/command shape MANAGED_HOOKS
+# used to carry, each entry bounded by the same timeout: 10 the Step-6 review demanded.
+# farm-out-reminder.sh joined this block at session-20260815 T5 — it guards a
+# workflow preference, not irreversible damage, so it binds only in armed sessions
+# now, sharing the PreToolUse|Bash matcher entry with the evidence gate (two
+# commands under one matcher, same shape the Stop event already uses for its two
+# no-matcher hooks).
 # Line-anchored extraction of the pinned shape — pin the span, not the label.
 SKILL_HOOKS_ROWS=$(awk '
   /^hooks:$/ { active=1; next }
@@ -2600,6 +2605,8 @@ SKILL_HOOKS_ROWS=$(awk '
 
 expect_contains "frontmatter registers the evidence gate on PreToolUse|Bash, timeout 10" \
   "PreToolUse|Bash|~/.claude/hooks/canonical-sdlc-evidence-gate.sh|10" "$SKILL_HOOKS_ROWS"
+expect_contains "…and farm-out-reminder on PreToolUse|Bash, timeout 10 (session-20260815 T5)" \
+  "PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…the stop guard on PreToolUse|TaskStop, timeout 10" \
   "PreToolUse|TaskStop|~/.claude/hooks/stop-guard.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…dispatch-preflight on PreToolUse|Agent, timeout 10" \
@@ -2625,8 +2632,8 @@ expect_contains "…and the landing sweep on Stop (no matcher), timeout 10" \
   "Stop||~/.claude/hooks/landing-gate.sh|10" "$SKILL_HOOKS_ROWS"
 expect_absent_ug "…with NOTHING left registered on SubagentStop" \
   "SubagentStop" "$SKILL_HOOKS_ROWS"
-expect_eq "…exactly ten registrations in the frontmatter block, nothing extra" \
-  "10" "$(printf '%s\n' "$SKILL_HOOKS_ROWS" | /usr/bin/grep -c '|')"
+expect_eq "…exactly eleven registrations in the frontmatter block, nothing extra" \
+  "11" "$(printf '%s\n' "$SKILL_HOOKS_ROWS" | /usr/bin/grep -c '|')"
 
 # THE EVENT NAMES THE GATE ANSWERS TO, pinned as the SPAN that decides them rather than as a
 # literal comparison that a refactor can move: the relevance hoist is one `case` over
@@ -2712,17 +2719,21 @@ expect_eq "…and the landing gate is registered here for SubagentStop alone" "1
 expect_eq "…never for Stop, which the skill channel owns" "0" \
   "$(printf '%s\n' "$MANAGED_HOOKS_SRC" | /usr/bin/grep -c '"Stop|')"
 
-# --- L.3 MANAGED_HOOKS presence: the three non-sdlc hooks are untouched by the move
-# (R2: guard-set parity for everything that was never sdlc-scoped) — exact set, not
-# just "still there somewhere among leftovers."
+# --- L.3 MANAGED_HOOKS presence: the two irreversible-damage guards are untouched
+# by the move (R2: guard-set parity for the hooks that stay global no matter what)
+# — exact set, not just "still there somewhere among leftovers."
 expect_contains "MANAGED_HOOKS keeps protect-main.sh on PreToolUse|Bash" \
   '"PreToolUse|Bash|~/.claude/hooks/protect-main.sh"' "$MANAGED_HOOKS_SRC"
 expect_contains "…protect-database.sh on PreToolUse|Bash" \
   '"PreToolUse|Bash|~/.claude/hooks/protect-database.sh"' "$MANAGED_HOOKS_SRC"
-expect_contains "…and farm-out-reminder.sh on PreToolUse|Bash" \
-  '"PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh"' "$MANAGED_HOOKS_SRC"
-expect_eq "…and exactly seven entries total — three unconditional, four guarded" \
-  "7" "$(printf '%s\n' "$MANAGED_HOOKS_SRC" | /usr/bin/grep -c '"')"
+# farm-out-reminder.sh moved OUT of this array at session-20260815 T5 (AC-6):
+# unlike the three walls above it, it guards a workflow preference rather than
+# irreversible damage, so it now binds only in armed sessions, registered once
+# through the skill frontmatter (pinned in L.1) with no agent-context twin here.
+expect_absent_ug "…and farm-out-reminder.sh is no longer here at all (moved to skill frontmatter, T5)" \
+  "hooks/farm-out-reminder.sh" "$MANAGED_HOOKS_SRC"
+expect_eq "…and exactly six entries total — two unconditional, four guarded" \
+  "6" "$(printf '%s\n' "$MANAGED_HOOKS_SRC" | /usr/bin/grep -c '"')"
 
 # --- L.4 EVERY registration is bounded by a timeout, whichever branch writes it ---
 #

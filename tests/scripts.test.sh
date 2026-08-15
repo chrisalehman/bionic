@@ -735,6 +735,30 @@ expect_true "skills/canonical-sdlc/SKILL.md frontmatter registers canonical-sdlc
     END { exit !found }
   ' "${REPO}/skills/canonical-sdlc/SKILL.md"
 
+# 4i: farm-out-reminder.sh moved out of MANAGED_HOOKS into skills/canonical-sdlc/
+# SKILL.md's frontmatter hooks: block (session-20260815-landing-supervision T5,
+# AC-6) — it guards a workflow preference rather than irreversible damage, so it
+# now binds only in armed sessions, same pattern as canonical-sdlc-evidence-gate.sh
+# above (4h) except it shares the PreToolUse|Bash matcher entry with that hook
+# rather than opening its own.
+expect_false "MANAGED_HOOKS no longer includes farm-out-reminder.sh (moved to SKILL.md frontmatter)" \
+  /usr/bin/grep -qF '"PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh"' "$BOOTSTRAP"
+
+expect_true "skills/canonical-sdlc/SKILL.md frontmatter registers farm-out-reminder.sh as PreToolUse|Bash" \
+  awk '
+    /^hooks:$/ { active=1; next }
+    active && /^---$/ { active=0 }
+    active && /^[A-Za-z]/ { active=0 }
+    !active { next }
+    /^  [A-Za-z]+:$/ { event=$0; sub(/^  /,"",event); sub(/:$/,"",event); matcher=""; next }
+    /^    - matcher: "/ { matcher=$0; sub(/^    - matcher: "/,"",matcher); sub(/"$/,"",matcher); next }
+    /^          command: / {
+      cmd=$0; sub(/^          command: /,"",cmd)
+      if (event == "PreToolUse" && matcher == "Bash" && cmd ~ /farm-out-reminder\.sh$/) found=1
+    }
+    END { exit !found }
+  ' "${REPO}/skills/canonical-sdlc/SKILL.md"
+
 # 4m: hooks/ dir contains at least one non-test hook
 _hook_count=0
 for hook in "${REPO}/hooks/"*.sh; do

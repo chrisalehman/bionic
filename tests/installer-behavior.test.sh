@@ -1055,6 +1055,18 @@ _skill_frontmatter_has PreToolUse Agent "~/.claude/hooks/dispatch-preflight.sh" 
   && ok "AC-7: SKILL.md frontmatter registers dispatch-preflight.sh on PreToolUse|Agent" \
   || no "AC-7: SKILL.md frontmatter missing dispatch-preflight.sh on PreToolUse|Agent"
 
+# farm-out-reminder.sh (PreToolUse|Bash) moved out of MANAGED_HOOKS into the SKILL.md
+# frontmatter at session-20260815-landing-supervision T5 (AC-6): unlike the four
+# checks above, it does NOT come back guarded — it guards a workflow preference
+# rather than irreversible damage, so armed-session-only coverage is the whole
+# story, no agent-context twin needed.
+_matcher_has_cmd PreToolUse Bash "~/.claude/hooks/farm-out-reminder.sh" \
+  && no "AC-7: farm-out-reminder.sh still wired to PreToolUse|Bash (should have moved to SKILL.md frontmatter)" \
+  || ok "AC-7: farm-out-reminder.sh NOT wired to PreToolUse|Bash (armed-session-scoped, frontmatter-only now)"
+_skill_frontmatter_has PreToolUse Bash "~/.claude/hooks/farm-out-reminder.sh" \
+  && ok "AC-7: SKILL.md frontmatter registers farm-out-reminder.sh on PreToolUse|Bash" \
+  || no "AC-7: SKILL.md frontmatter missing farm-out-reminder.sh on PreToolUse|Bash"
+
 # preflight-probe.sh and stop-check.sh are installed but stay UNREGISTERED
 # (companion scripts, run by hand — never appear as a hooks[].command anywhere).
 for companion in preflight-probe.sh stop-check.sh; do

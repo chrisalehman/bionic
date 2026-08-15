@@ -1631,10 +1631,17 @@ do_install_hooks
 # settings.json on the next run — so the shrink itself is what strips those
 # seven from a machine's global settings.json at next bootstrap.
 #
-# The three unconditional entries are walls that must bind in every session
+# farm-out-reminder.sh moved OUT of this array too (session-20260815-landing-
+# supervision T5, AC-6) — unlike the seven above, it isn't sdlc governance, it
+# nudges long-running Bash off the main thread as a workflow preference. But that
+# is exactly why it belongs with them rather than with the two entries below: a
+# workflow preference should bind only in an armed session, not on every Bash
+# call this machine ever runs. It now registers from the same SKILL.md `hooks:`
+# frontmatter, sharing the PreToolUse|Bash matcher entry with the evidence gate.
+#
+# The two unconditional entries left are walls that must bind in every session
 # regardless of skill invocation: protect-main/protect-database guard destructive
-# git ops, farm-out-reminder nudges long-running Bash off the main thread. None of
-# the three are sdlc-scoped.
+# git ops, irreversible damage rather than a preference. Neither is sdlc-scoped.
 #
 # THE FOUR GUARDED ENTRIES ARE A DIFFERENT ANIMAL (session-20260815-landing-
 # supervision T6/T2, design D1/D2). The dispatch wall and the artifact wall are
@@ -1672,7 +1679,6 @@ do_install_hooks
 MANAGED_HOOKS=(
   "PreToolUse|Bash|~/.claude/hooks/protect-main.sh"
   "PreToolUse|Bash|~/.claude/hooks/protect-database.sh"
-  "PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh"
   "PreToolUse|Agent|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/dispatch-preflight.sh"
   "PreToolUse|Write|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "PreToolUse|Edit|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/canonical-sdlc-governing-skill.sh"
