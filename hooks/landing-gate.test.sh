@@ -457,6 +457,62 @@ expect_empty "4h: …silently, claiming nothing about a dispatch that may never 
 expect_eq "4h: …and is not marked swept, so a later identification still gets its verdict" \
   "0" "$(swept_count "$R4C")"
 
+# THE MONOTONE SEQUENCE ITSELF (t6-review.md F-3 sub-gap): `intended` (agent_id empty) then
+# `identified` (agent_id filled) for the SAME contract, appended as two roster rows the way
+# hooks/dispatch-preflight.sh and hooks/execution-recorder.sh really write them — the
+# two-row lifecycle the monotone `if (aid != "") agent[name] = aid` rule exists for. 4h
+# drove an all-empty row; 8c (below) drives two ALREADY-filled duplicate rows; neither drove
+# the TRANSITION. Subagent-shaped (no `teammate_id=`), so this is the sweep's row, not the
+# SubagentStop arm's (session-20260815 T2 teammate-skip).
+R4I="$(make_wave_repo r4i)"
+add_row "$R4I" name=w4-t2mono status=intended agent_id= \
+  deliverable=.bionic/docs/record/never-mono.md tool_use_id=toolu_MONO \
+  launched_at="$(iso_ago 600)"
+add_row "$R4I" name=w4-t2mono status=identified agent_id="$AID_A" \
+  deliverable=.bionic/docs/record/never-mono.md tool_use_id=toolu_MONO \
+  launched_at="$(iso_ago 600)"
+run_gate "$GATE" "$(stop_payload "$R4I" "$SID" false)"
+expect_status "4i: intended-then-identified — the LATER row's agent_id places it, and it refuses on its own contract" \
+  "2" "$RC"
+expect_contains "4i: …naming its artifact" "missing=.bionic/docs/record/never-mono.md" "$OUT_STDERR"
+expect_contains "4i: …and the marker keys on the row that actually carries an id" \
+  "agent_id=$AID_A" "$(swept_lines "$R4I")"
+
+# THE DISCRIMINATING HALF: a copy of the gate with the monotone guard INVERTED (`aid == ""`
+# instead of `aid != ""`) — the classic off-by-negation typo. Against the identical fixture
+# it takes the EMPTY row's non-answer, the candidate's AID goes blank, and the gate's own
+# `[ -n "$AID" ] ... || continue` drops the row silently — a genuinely UNMET contract
+# passes. The mutant copy sits beside a real sweeper, the production resolution.
+MONODIR="$SANDBOX/hooks-mono-mutant"
+mkdir -p "$MONODIR"
+cp "$HOOKS_DIR/session-sweeper.sh" "$MONODIR/session-sweeper.sh"
+awk '{
+       if ($0 == "    if (aid != \"\") agent[name] = aid") {
+         print "    if (aid == \"\") agent[name] = aid"
+         next
+       }
+       print
+     }' "$GATE" > "$MONODIR/landing-gate.sh"
+if cmp -s "$GATE" "$MONODIR/landing-gate.sh"; then
+  no "4i-mut: the inverted-guard mutation applies to landing-gate.sh" \
+     "the mutation target matched nothing — the rule moved and this proof is vacuous"
+else
+  ok "4i-mut: the inverted-guard mutation applies to landing-gate.sh"
+fi
+
+R4I_MUT="$(make_wave_repo r4i-mut)"
+add_row "$R4I_MUT" name=w4-t2mono status=intended agent_id= \
+  deliverable=.bionic/docs/record/never-mono.md tool_use_id=toolu_MONO \
+  launched_at="$(iso_ago 600)"
+add_row "$R4I_MUT" name=w4-t2mono status=identified agent_id="$AID_A" \
+  deliverable=.bionic/docs/record/never-mono.md tool_use_id=toolu_MONO \
+  launched_at="$(iso_ago 600)"
+run_gate "$MONODIR/landing-gate.sh" "$(stop_payload "$R4I_MUT" "$SID" false)"
+expect_status "4i-mut: with the guard inverted, the SAME genuinely-UNMET contract passes silently" \
+  "0" "$RC"
+expect_eq "4i-mut: …and nothing is marked — the row was dropped by the blank-AID skip, never judged" \
+  "0" "$(swept_count "$R4I_MUT")"
+
 # ================================================================= Section 5
 section "Section 5: no active wave — nothing to hold anyone to"
 
