@@ -417,8 +417,8 @@ Step 5: TODO" "new.md" > /dev/null
 expect_block "newest plan rules — bad state blocks even with valid older plan" \
   "$h7" 'git commit -m "x"' "placeholder"
 
-# Inverse: newer plan without ## SDLC State lets commit pass even if
-# an older plan has bad state.
+# A marker-less newer file is SKIPPED by plan selection (landing-supervision T8):
+# it no longer shields an older plan from enforcement. The bad older plan governs.
 h7b=$(make_home)
 write_plan "$h7b" "$FM
 ## SDLC State
@@ -427,8 +427,15 @@ Step 5: TODO" "old-bad.md" > /dev/null
 touch -t 202001010000 "$h7b/.bionic/docs/plans/old-bad.md" 2>/dev/null || \
   touch -d "2020-01-01" "$h7b/.bionic/docs/plans/old-bad.md" 2>/dev/null || true
 write_plan "$h7b" "# unrelated plan, no SDLC State" "new-neutral.md" > /dev/null
-expect_allow "newest plan without SDLC State — allow despite bad older plan" \
-  "$h7b" 'git commit -m "x"'
+expect_block "marker-less newest is skipped — bad older plan still governs" \
+  "$h7b" 'git commit -m "x"' "placeholder"
+
+# Preserved ambiguity: when ONLY marker-less files exist, there is no plan to
+# enforce and the commit passes silently (the ratified pass-on-ambiguity direction).
+h7c=$(make_home)
+write_plan "$h7c" "# unrelated plan, no SDLC State" "only-neutral.md" > /dev/null
+expect_allow "only marker-less files — no wave, commit passes" \
+  "$h7c" 'git commit -m "x"'
 
 # ============================================================
 # Section 8: project-local plan directory (.bionic/docs/plans/)

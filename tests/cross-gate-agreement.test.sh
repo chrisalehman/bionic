@@ -438,7 +438,10 @@ plan-cr-only|yes|4
 current-indented|yes|4
 current-duplicate-lines|yes|4
 current-fenced-only|no|-
-newest-plan-wins|no|-
+newest-plan-wins|yes|8b
+marker-less-newest-loses|yes|4
+fenced-only-newest-loses|yes|4
+only-marker-less-files|no|-
 nested-two-deep|yes|4
 nested-three-deep|no|-
 incidents-dir|yes|4
@@ -520,13 +523,53 @@ build_fixture() {  # <name> -> repo path
         printf 'The section looks like this:\n\n```\n## SDLC State\n\ncurrent: 4\n```\n'
       } > "$repo/.bionic/docs/plans/epic-99/wave-01.md" ;;
     newest-plan-wins)
-      # NEWEST wins: the newer file is not a run, so the answer is no. An
-      # oldest-wins selection flips it.
+      # NEWEST among CANDIDATE PLANS wins. Both files are real plans here, so the
+      # predicate cannot discriminate and the DERIVED VALUE is what does: an
+      # oldest-wins selection reports 4 instead of 8b. This fixture used to make
+      # the newer file a marker-less note and expect `no` — which pinned the
+      # off-switch (record/session-20260815-landing-supervision/t8-forensic-read.md)
+      # as intended behaviour. That shape is now its own fixture, expecting the
+      # opposite; the newest-wins claim survives here, on two plans.
       write_plan "$repo/.bionic/docs/plans/epic-99/a-older.md" "current: 4"
       touch -t 202001010000 "$repo/.bionic/docs/plans/epic-99/a-older.md"
-      printf -- '---\ncanonical_sdlc_version: 13\n---\n\n# Later notes\n' \
-        > "$repo/.bionic/docs/plans/epic-99/b-newer.md"
+      write_plan "$repo/.bionic/docs/plans/epic-99/b-newer.md" "current: 8b"
       touch -t 203001010000 "$repo/.bionic/docs/plans/epic-99/b-newer.md" ;;
+    marker-less-newest-loses)
+      # AC-10, THE OFF-SWITCH. A stray marker-less *.md — a continuation note, a
+      # probe scrap, a Step-9 artifact — is newest under plans/ while a real plan
+      # with a live `current:` sits beside it. Selecting the stray reads `current:`
+      # empty and every wall in this battery passes silently with a wave running.
+      # That is not hypothetical: it disarmed this repo for ~15 minutes on
+      # 2026-08-15, twice, by two agents, neither trying. The real plan must win.
+      write_plan "$repo/.bionic/docs/plans/epic-99/session.plan.md" "current: 4"
+      touch -t 202001010000 "$repo/.bionic/docs/plans/epic-99/session.plan.md"
+      printf -- '---\ncanonical_sdlc_version: 13\n---\n\n# Continuation\n\ncurrent: 4\n' \
+        > "$repo/.bionic/docs/plans/epic-99/continuation.md"
+      touch -t 203001010000 "$repo/.bionic/docs/plans/epic-99/continuation.md" ;;
+    fenced-only-newest-loses)
+      # The same shape one turn subtler: the newest file DOES contain the string
+      # `## SDLC State`, inside a fenced example. A fence-blind candidate filter
+      # accepts it, `current:` parses empty through the fence-aware read, and the
+      # off-switch is back — so the candidate filter is fence-aware exactly like
+      # the read it feeds. (The fenced file alone still passes silently:
+      # `current-fenced-only` holds that direction.)
+      write_plan "$repo/.bionic/docs/plans/epic-99/session.plan.md" "current: 4"
+      touch -t 202001010000 "$repo/.bionic/docs/plans/epic-99/session.plan.md"
+      {
+        printf -- '---\ncanonical_sdlc_version: 13\n---\n\n# Schema notes\n\n'
+        printf 'The section looks like this:\n\n```\n## SDLC State\n\ncurrent: 4\n```\n'
+      } > "$repo/.bionic/docs/plans/epic-99/schema-notes.md"
+      touch -t 203001010000 "$repo/.bionic/docs/plans/epic-99/schema-notes.md" ;;
+    only-marker-less-files)
+      # THE PRESERVED AMBIGUITY. A plans tree holding no valid plan at all still
+      # reads as "no wave" and passes SILENTLY — the ratified fail direction, and
+      # the reason the fix is a candidate filter rather than a refusal: skipping
+      # every candidate must land in the same place as finding none.
+      mkdir -p "$repo/.bionic/docs/plans/epic-99"
+      printf -- '---\ncanonical_sdlc_version: 13\n---\n\n# Continuation\n' \
+        > "$repo/.bionic/docs/plans/epic-99/continuation.md"
+      printf '# Scratch\n\ncurrent: 4\n' \
+        > "$repo/.bionic/docs/plans/epic-99/scratch.md" ;;
     nested-two-deep)
       write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: 4" ;;
     nested-three-deep)
@@ -650,6 +693,9 @@ mutate() {
     fence-blind)           # stop skipping fenced content
       awk '{ t=$0; sub(/^[ \t]+/,"",t); sub(/[ \t]+$/,"",t); if (t=="fence { next }") next; print }' \
         "$src" > "$dst" ;;
+    no-marker-skip)        # accept marker-less candidates again (revert the AC-10 skip)
+      awk '{ t=$0; sub(/^[ \t]+/,"",t); sub(/[ \t]+$/,"",t);
+             if (t=="has_sdlc_state \"$f\" || continue") next; print }' "$src" > "$dst" ;;
     anchor-current)        # lose the leading-whitespace tolerance on `current:`
       awk '{ i=index($0,"'"'"'^[[:space:]]*current[[:space:]]*:'"'"'");
              if (i>0) { $0=substr($0,1,i-1) "'"'"'^current:'"'"'" substr($0,i+38) }
@@ -660,7 +706,7 @@ mutate() {
   return 0
 }
 
-MUTATIONS="docs-root-last-wins keep-quotes delete-cr depth-1 fence-blind anchor-current"
+MUTATIONS="docs-root-last-wins keep-quotes delete-cr depth-1 fence-blind anchor-current no-marker-skip"
 
 # LG is the landing gate's active-wave copy (Step-6 critic D-1): every mutation below is an
 # active-wave-detection drift, and the gate holds a byte-identical copy of that block, so the
