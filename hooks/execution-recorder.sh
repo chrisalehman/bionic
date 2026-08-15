@@ -9,10 +9,12 @@
 #   PostToolUse|Agent — the ROSTER arm. When a dispatch has actually spawned, the
 #                       session roster's `intended` row is completed with the
 #                       full agent id and status `confirmed`.
-#   SubagentStart     — the IDENTIFICATION arm (epic-16 wave-01). When the agent
-#                       itself starts, its TRANSCRIPT-form id is name-joined onto
-#                       the roster as an `identified` row — the first state whose
-#                       id the by-id walls can actually match.
+#   SubagentStart     — the IDENTIFICATION arm (epic-16 wave-01; re-keyed in
+#                       wave-03). When the agent itself starts, its TRANSCRIPT-form
+#                       id is joined BY THAT ID onto the roster as an `identified`
+#                       row. It used to join by name, off this payload's
+#                       `agent_type` — which carries the subagent TYPE, so the join
+#                       never matched (t4-probes-report.md §5.1).
 #
 # WHY POSTTOOLUSE IS THE WHOLE POINT. Both facts this script records are claims
 # that something HAPPENED, and a PreToolUse hook cannot make either one: it fires
@@ -130,14 +132,18 @@ session_subagents_dir() {  # <transcript-path>
 STDOUT=""
 MLINES=""
 if [ -n "$IS_START" ]; then
-  # The two fields the identification is made of, and the whole of the cheap
-  # test for this arm. `agent_type` is the teammate's NAME here — not the
-  # subagent type it is at dispatch, where the same word names the template
-  # (`tool_input.subagent_type`). The rename is the platform's; the join below
-  # depends on reading it as a name.
-  START_NAME=$(_jq '.agent_type')
+  # THE ONE FIELD THE IDENTIFICATION IS MADE OF, and the whole of the cheap test
+  # for this arm. It used to read `agent_type` beside it as "the teammate's
+  # NAME" — measured wrong in wave-03: on a live Agent dispatch that field
+  # carries the subagent TYPE (`general-purpose`), so every by-name join missed
+  # and this arm was inert even when it did receive its event
+  # (record/session-20260814-wave-detector-terminal-state/t4-probes-report.md
+  # §5.1, t4b-probe-report.md §3). The payload has seven keys and only `agent_id`
+  # can key a row: it is the TRANSCRIPT form, byte-identical to the
+  # `tool_response.agentId` ARM 2 records at confirmation and to the
+  # `background_tasks[].id` the landing sweep reads.
   START_ID=$(_jq '.agent_id')
-  [ -n "$START_NAME" ] && [ -n "$START_ID" ] || exit 0
+  [ -n "$START_ID" ] || exit 0
 elif [ "$TOOL_NAME" = "Bash" ]; then
   # A Bash tool_response is an object carrying stdout/stderr (slice 4/1 capture
   # A); a failed call can hand back a bare string instead, and `tostring` keeps
@@ -170,6 +176,13 @@ else
   # (capture probe §1).
   AGENT_ID=$(_jq '.tool_response.agentId // .tool_response.agent_id')
   TOOL_USE_ID=$(_jq '.tool_use_id')
+  # THE DISPATCH NAME, off the one payload that carries it beside the agent id
+  # (t4b-probe-report.md §3: `tool_input.name` and `tool_response.agentId` arrive
+  # together on this event and nowhere else). Recording it makes the completed row
+  # self-sufficient for BOTH keys, so nothing downstream has to recover a name
+  # from `agent_type` — the field that carries the subagent type. Absent on an
+  # unnamed dispatch, in which case the launch row's own name stands.
+  DISPATCH_NAME=$(_jq '.tool_input.name')
   # WHICH NAMESPACE the id above is in, decided by the platform's own word for
   # what it did rather than by sniffing the id's shape. Read here, spent below.
   DISPATCH_STATUS=$(_jq '.tool_response.status')
@@ -416,12 +429,15 @@ if [ "$TOOL_NAME" = "Agent" ]; then
   # takes the FIRST match for a key. In async mode it is not written at all —
   # the field's presence is itself the statement of which namespace the row's id
   # is in, and an always-empty field would say that much less clearly.
-  COMPLETED=$(printf '%s' "$ROW" | awk -v id="$ROW_AGENT_ID" -v tid="$ROW_TEAMMATE_ID" -v pl="$PRIOR_LAUNCH" '
+  ROW_NAME=$(sanitize "$DISPATCH_NAME" 200)
+
+  COMPLETED=$(printf '%s' "$ROW" | awk -v id="$ROW_AGENT_ID" -v tid="$ROW_TEAMMATE_ID" -v pl="$PRIOR_LAUNCH" -v nm="$ROW_NAME" '
     BEGIN { RS = "|"; ORS = ""; seen = 0 }
     {
       f = $0
       if (f ~ /^status=/)   f = "status=confirmed"
       if (f ~ /^agent_id=/) f = "agent_id=" id
+      if (nm != "" && f ~ /^name=/) f = "name=" nm
       if (tid != "" && f ~ /^teammate_id=/) { f = "teammate_id=" tid; seen = 1 }
       if (pl != "" && f ~ /^launched_at=/) f = "launched_at=" pl
       printf "%s%s", (NR > 1 ? "|" : ""), f
@@ -466,27 +482,38 @@ fi
 # appears — the same form every later observation of that agent carries, and the
 # form hooks/stop-guard.sh and hooks/stop-check.sh match on.
 #
-# THE JOIN IS BY NAME because nothing else spans the two namespaces. No payload
-# carries both ids, and there is no on-disk binding to recover it from either:
-# teammate metadata has no `toolUseId` key, so the correlation key ARM 2 joins on
-# does not exist here (capture probe §3-F). What does span them is the name —
-# `tool_input.name` at launch, `agent_type` from this event onward (§3 conclusion
-# 3). The lookup is scoped to THIS session's roster file and re-checked against
-# the row's own `session=` field, so a name this session never dispatched joins
-# nothing.
+# THE JOIN IS BY AGENT ID, and the change is a repair (epic-16 wave-03, T4c).
+# It used to be by NAME, read out of this payload's `agent_type` — which the
+# wave-01 capture probe read as the teammate's name and wave-03 measured as the
+# subagent TYPE (`general-purpose`) on a live Agent dispatch. Every by-name join
+# therefore missed, silently, and this arm was inert even when its event arrived
+# (t4-probes-report.md §5.1). This payload has seven keys and only one of them can
+# key a row: `agent_id`, the transcript form, which is the SAME string ARM 2 wrote
+# into `agent_id=` from `tool_response.agentId` and the SAME string the landing
+# sweep matches against `background_tasks[].id` (t4b-probe-report.md §4, all three
+# observed on one dispatch). The lookup is scoped to THIS session's roster file and
+# re-checked against the row's own `session=` field, so an id this session never
+# dispatched joins nothing.
+#
+# WHAT THE REPAIR COSTS, stated rather than left to be discovered. An `intended`
+# row carries an EMPTY `agent_id` until ARM 2 completes it, and an empty id is not
+# a key — so this arm can no longer rescue a dispatch whose PostToolUse never
+# fired. A TEAMMATE row is never identified at all, because ARM 2 deliberately
+# leaves its `agent_id=` empty (the launch response carries only the ADDRESSING
+# form, and writing that into `agent_id=` would turn every by-id wall's input from
+# unknown into wrong). Both were ALREADY missing — a join on a field that carries
+# no name matches nothing either — and what changes is that the miss is structural
+# and visible instead of silent. The alternative, keeping a name join beside this
+# one, is keeping the defect: `agent_type` is not a name.
 #
 # LATEST WINS, and `intended` is accepted alongside `confirmed`. The roster is
-# append-only and the latest row for a name is authoritative, so a name
-# dispatched twice in one session identifies against the later contract.
-# `intended` is in the accepted set because a row reaches `confirmed` only if
-# ARM 2 ran, and this arm must still work for an async dispatch whose
-# PostToolUse never fired — the alternative is a start we watched happen that we
-# refuse to write down.
+# append-only and the latest row for an id is authoritative, so a resume
+# identifies against the later contract.
 #
-# A START WE CANNOT PLACE IS NOT OURS TO RECORD. An empty `agent_type` is the
-# phantom shape the capture probe found firing at §4, a name on no row of ours is
-# a foreign agent, and either one exits 0 having written nothing — inventing a
-# row here would put a contract on the roster that no brief ever declared.
+# A START WE CANNOT PLACE IS NOT OURS TO RECORD. An id on no row of ours is a
+# foreign or phantom agent — the shape the capture probe found firing at §4 — and
+# it exits 0 having written nothing: inventing a row here would put a contract on
+# the roster that no brief ever declared.
 #
 # EVERY FIELD IS COPIED FORWARD, exactly as ARM 2 does and for a sharper reason:
 # hooks/session-sweeper.sh's verdict folds the roster to the LATEST row per name
@@ -498,11 +525,10 @@ if [ -n "$IS_START" ]; then
   [ -L "$ROSTER_FILE" ] && exit 0
 
   # The same belt the writer wears (S-1): a `|` or a newline in a platform value
-  # forges a field or a row. The name is sanitized BEFORE it is compared, so the
+  # forges a field or a row. The id is sanitized BEFORE it is compared, so the
   # value matched against the roster is the value that was written there.
-  START_NAME=$(sanitize "$START_NAME" 200)
   START_ID=$(sanitize "$START_ID" 200)
-  [ -n "$START_NAME" ] && [ -n "$START_ID" ] || exit 0
+  [ -n "$START_ID" ] || exit 0
 
   ROW=""
   while IFS= read -r line; do
@@ -510,17 +536,17 @@ if [ -n "$IS_START" ]; then
     case "$line" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
     # The same prefilter discipline as ARM 2 (Step-6 critic F-1): `line_field` is
     # four processes per call, and an unbounded roster cannot afford three of
-    # them on every row. The `case` is in-shell and the name is quoted, so glob
+    # them on every row. The `case` is in-shell and the id is quoted, so glob
     # metacharacters in a platform value stay literal. It is a SUPERSET filter —
-    # a row whose name merely starts with ours still reaches the exact checks
-    # below, which stay the authority. `name=` is mid-row in every shape the
+    # a row whose id merely starts with ours still reaches the exact checks
+    # below, which stay the authority. `agent_id=` is mid-row in every shape the
     # writer emits, but the end-of-row form is matched too rather than assuming
     # the field order (checklist A6).
     case "$line" in
-      *"|name=$START_NAME"|*"|name=$START_NAME|"*) : ;;
+      *"|agent_id=$START_ID"|*"|agent_id=$START_ID|"*) : ;;
       *) continue ;;
     esac
-    [ "$(line_field "$line" name)" = "$START_NAME" ] || continue
+    [ "$(line_field "$line" agent_id)" = "$START_ID" ] || continue
     case "$(line_field "$line" status)" in intended|confirmed) : ;; *) continue ;; esac
     [ "$(line_field "$line" session)" = "$SID" ] || continue
     ROW="$line"

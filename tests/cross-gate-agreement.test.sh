@@ -165,17 +165,18 @@ mk_bash_post() {  # <sid> <transcript> <cwd> <command> <stdout>
 
 # FAITHFUL to the same record's capture E (background dispatch, the mode this
 # repo uses): tool_response carries `agentId`, tool_input carries `name`.
-mk_agent_post() {  # <sid> <transcript> <cwd> <tool_use_id>
+mk_agent_post() {  # <sid> <transcript> <cwd> <tool_use_id> [name] [agentId]
   jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg u "$4" \
+    --arg n "${5:-battery}" --arg a "${6:-a26bd30bf8616411b}" \
     '{session_id:$s, transcript_path:$t, cwd:$c,
       prompt_id:"33f36a9c-ad3b-4bb4-afbd-325a18e62a9e",
       permission_mode:"bypassPermissions", effort:{level:"high"},
       hook_event_name:"PostToolUse", tool_name:"Agent",
       tool_input:{description:"a dispatch", prompt:"go", subagent_type:"implementor",
-                  run_in_background:true, name:"battery"},
-      tool_response:{isAsync:true, status:"async_launched", agentId:"a26bd30bf8616411b",
+                  run_in_background:true, name:$n},
+      tool_response:{isAsync:true, status:"async_launched", agentId:$a,
                      description:"a dispatch", resolvedModel:"claude-sonnet-5",
-                     prompt:"go", outputFile:"/tmp/tasks/a26bd30bf8616411b.output",
+                     prompt:"go", outputFile:("/tmp/tasks/" + $a + ".output"),
                      canReadOutputFile:true},
       tool_use_id:$u, duration_ms:6}'
 }
@@ -230,6 +231,26 @@ mk_substop_payload() {  # <cwd> <sid> <agent_type> <stop_hook_active true|false>
       background_tasks:[{id:"tooha5cgi", type:"teammate", status:"running",
                          description:"run the slice and report"}],
       session_crons:[]}'
+}
+
+# The LANDING SWEEP's event (epic-16 wave-03, T4c). FAITHFUL to
+# .bionic/docs/record/session-20260814-wave-detector-terminal-state/t4b-probe-report.md
+# §2.1 (the eleven-key Stop envelope) and §2.2 (the `background_tasks[]` row shape,
+# `{id, type, status, description, agent_type}`). The ids passed here are the LIVE set —
+# every roster row whose agent_id is absent from it has landed and is judged.
+mk_stopsweep_payload() {  # <cwd> <sid> <stop_hook_active true|false> [live-agent-id...]
+  local c="$1" s="$2" h="$3"; shift 3
+  local live
+  live=$(printf '%s\n' "$@" | jq -R 'select(length > 0)' | jq -s \
+    'map({id:., type:"subagent", status:"running", description:"a live dispatch",
+          agent_type:"general-purpose"})')
+  jq -n --arg c "$c" --arg s "$s" --argjson h "$h" --argjson bg "$live" \
+    '{session_id:$s, transcript_path:("/tmp/transcripts/" + $s + ".jsonl"), cwd:$c,
+      prompt_id:"e30e6fb0-3868-467c-b092-ca03e55b4cd5",
+      permission_mode:"bypassPermissions", effort:{level:"high"},
+      hook_event_name:"Stop", stop_hook_active:$h,
+      last_assistant_message:"The background probe agent completed and returned PONG.",
+      background_tasks:$bg, session_crons:[]}'
 }
 
 # THE PRODUCER→RECORDER PAIR, DRIVEN END TO END. Since slice 4/4 the recorder
@@ -356,21 +377,23 @@ verdict_eg() {  # <repo> -> yes:<current>|no|other:<detail>
 # (hooks/landing-gate.sh, the block deliberately duplicated from dispatch-preflight's) and
 # until this party existed it sat OUTSIDE the very battery meant to catch that copy drifting
 # — §J drives the gate's verdict/gate agreement, not its wave detection (Step-6 critic D-1).
-# Its observable is a SubagentStop over a roster carrying ONE unmet contract: with a wave
-# active the gate reaches the verdict, reads UNMET and refuses (exit 2); with no wave it
-# exits 0 before ever taking a verdict. So exit-2-with-the-refusal <=> yes and exit-0 <=> no,
-# the same predicate the other four answer. The gate resolves the sweeper as its own sibling,
-# so a MUTATED copy of it (§A2) must sit beside a sweeper — $MUTDIR carries one. The roster
-# is re-seeded per call under $SID_LG, off verdict_er's $SID_A file.
+# Its observable is a Stop over a roster carrying ONE unmet contract that has LANDED (its
+# agent_id is absent from the payload's background_tasks): with a wave active the gate
+# reaches the verdict, reads UNMET and refuses (exit 2); with no wave it exits 0 before ever
+# taking a verdict. So exit-2-with-the-refusal <=> yes and exit-0 <=> no, the same predicate
+# the other four answer. The gate resolves the sweeper as its own sibling, so a MUTATED copy
+# of it (§A2) must sit beside a sweeper — $MUTDIR carries one. The roster is re-seeded per
+# call under $SID_LG, off verdict_er's $SID_A file — which also clears the sweep's own
+# idempotency marker, so every call is this row's first verdict.
 verdict_lg() {  # <repo> -> yes|no|other:<detail>
   local repo="$1" out st roster="$repo/.bionic/tmp/roster-$SID_LG.state"
   mkdir -p "$repo/.bionic/tmp"
   {
     printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
-    printf 'roster-state/v1|status=confirmed|session=%s|name=lg-probe|agent_id=|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-lg.md|source=declared|duration=|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_LGPROBE\n' \
+    printf 'roster-state/v1|status=confirmed|session=%s|name=lg-probe|agent_id=alg-probe-0001|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-lg.md|source=declared|duration=|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_LGPROBE\n' \
       "$SID_LG"
   } > "$roster"
-  out=$(mk_substop_payload "$repo" "$SID_LG" "lg-probe" false | bash "$PARTY_LG" 2>&1); st=$?
+  out=$(mk_stopsweep_payload "$repo" "$SID_LG" false | bash "$PARTY_LG" 2>&1); st=$?
   case "$st" in
     0) echo no ;;
     2) if printf '%s' "$out" | grep -qF 'LANDING CONTRACT UNMET'; then echo yes; else echo "other:block-no-detail"; fi ;;
@@ -1355,7 +1378,7 @@ F4_BEFORE=$(grep -c '^roster-state/v1|' "$F4_ROSTER" 2>/dev/null || echo 0)
 mk_agent_payload "$SID_A" "$IREPO" \
   | jq '.tool_input.name = "w99-other" | .tool_use_id = "toolu_OTHERDISPATCH"' \
   | bash "$PARTY_DP" >/dev/null 2>&1
-mk_agent_post "$SID_A" "$ITR" "$IREPO" "toolu_OTHERDISPATCH" \
+mk_agent_post "$SID_A" "$ITR" "$IREPO" "toolu_OTHERDISPATCH" "w99-other" \
   | bash "$PARTY_ER" >/dev/null 2>&1
 expect_contains "the other dispatch's completion is journalled" \
   "agent_id=a26bd30bf8616411b" "$(grep 'status=confirmed|.*name=w99-other|' "$F4_ROSTER" 2>/dev/null)"
@@ -1762,9 +1785,13 @@ J_LAUNCHED=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
 # absent-deliverable wall). A fixture missing a field the writer emits is how a
 # suite ends up green over a row shape nothing produces; the sweeper's and the
 # recorder's suites each had to make this same correction mid-wave.
+#
+# `agent_id=` is filled here because it is the SWEEP's join key (epic-16 wave-03, T4c): a
+# row whose id is absent from the Stop payload's `background_tasks[]` has landed and is
+# judged, and one still listed there is skipped. The rest of the row is the writer's own.
 jrow() {  # <name> <deliverable> <progress> <cadence> <waiver> [tool_use_id]
-  printf 'roster-state/v1|status=confirmed|session=%s|name=%s|agent_id=|launched_at=%s|subagent_type=implementor|model=opus|deliverable=%s|source=declared|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=%s|tool_use_id=%s\n' \
-    "$SID_A" "$1" "$J_LAUNCHED" "$2" "$3" "$4" "$5" "${6:-toolu_01LANDING}" >> "$JROSTER"
+  printf 'roster-state/v1|status=confirmed|session=%s|name=%s|agent_id=a-%s|launched_at=%s|subagent_type=implementor|model=opus|deliverable=%s|source=declared|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=%s|tool_use_id=%s\n' \
+    "$SID_A" "$1" "$1" "$J_LAUNCHED" "$2" "$3" "$4" "$5" "${6:-toolu_01LANDING}" >> "$JROSTER"
 }
 
 printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$JROSTER"
@@ -1796,6 +1823,10 @@ jrow linked "$JDELIV/linked.md" ""                                   ""     ""
 jrow dup    "$JDELIV/met.md"   ""                                    ""     ""     toolu_01DUPA
 jrow dup    "$JDELIV/never.md" ""                                    ""     ""     toolu_01DUPB
 
+# The battery's baseline, restored before every gate call (see j_gate): the sweep is
+# idempotent by design and journals a marker into this file to stay that way.
+cp "$JROSTER" "$JROSTER.pristine"
+
 j_line() {  # <name> -> the verb's machine line for that name, or empty
   ( cd "$JREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" verdict "$1" 2>/dev/null ) \
     | grep -F 'landing-verdict/v1|' | grep -F "|name=$1|" | head -1
@@ -1807,12 +1838,28 @@ j_verdict() {  # <name> -> the state the verb computed, or NONE when it prints n
   local l; l=$(j_line "$1")
   if [ -z "$l" ]; then echo NONE; else j_field "$l" state; fi
 }
+# THE SWEEP JUDGES EVERY LANDED ROW AT ONCE, so asking it about ONE row means declaring
+# every OTHER row still in flight. That is the mechanism's own vocabulary rather than a test
+# seam: `background_tasks[]` is the payload's list of what is still running, and the gate
+# skips exactly those. `ghost` is on no roster row, so nothing lands and nothing is judged.
+J_ALL="met unmet empty stale live waived quoter linked dup"
+j_live_except() {  # <name> -> every OTHER row's agent id
+  local want="$1" n
+  for n in $J_ALL; do [ "$n" = "$want" ] || printf 'a-%s\n' "$n"; done
+}
+
 # Globals rather than a captured echo: the refusal TEXT is asserted below, and a
 # `$(…)` call would throw the stderr away.
 J_ANSWER=""; J_GATE_ERR=""
 j_gate() {  # <name> [stop_hook_active] -> sets J_ANSWER + J_GATE_ERR
   local st
-  J_GATE_ERR=$( mk_substop_payload "$JREPO" "$SID_A" "$1" "${2:-false}" \
+  # THE ROSTER IS RESTORED FIRST. The sweep verdicts each landed row exactly ONCE and
+  # journals a marker into the roster file to keep that promise; a battery that asked twice
+  # about one row would be measuring the marker, not the agreement. Restoring is also what
+  # every real session gets — a fresh roster per session.
+  cp "$JROSTER.pristine" "$JROSTER"
+  # shellcheck disable=SC2046
+  J_GATE_ERR=$( mk_stopsweep_payload "$JREPO" "$SID_A" "${2:-false}" $(j_live_except "$1") \
                 | bash "$PARTY_LG" 2>&1 >/dev/null )
   st=$?
   case "$st" in
@@ -1925,12 +1972,12 @@ j_mutant() {  # <kind> -> path to a mutant gate with a sibling sweeper, or empty
   mkdir -p "$d"
   cp "$PARTY_SW" "$d/session-sweeper.sh"
   case "$kind" in
-    # THE ID-NAMESPACE CONFUSION this whole wave exists to end: the join key
-    # becomes the transcript-form id instead of the name. Every roster row is
-    # keyed by name, so the verb is asked about a contract nobody holds.
-    name-from-agent-id)
-      awk '{ if (index($0, "NAME=") == 1 && index($0, "agent_type") > 0)
-               $0 = "NAME=$(_jq \".agent_id\")"
+    # THE LANDED/LIVE DISCRIMINATION DROPPED. `background_tasks[]` is the payload's
+    # list of what is STILL RUNNING (T4b §2.2), and skipping those rows is the whole
+    # of "judge it when it lands". Without the skip the sweep holds every mid-flight
+    # agent to a contract it has not finished — the false-alarm direction.
+    ignore-background-tasks)
+      awk '{ if (index($0, "$LIVE_IDS") > 0 && index($0, "case ") > 0) next
              print }' "$PARTY_LG" > "$d/landing-gate.sh" ;;
     # The hook process's ambient session key instead of the payload's (the gate
     # documents why at the code) — a wrong or absent roster, silently.
@@ -1948,7 +1995,7 @@ j_mutant() {  # <kind> -> path to a mutant gate with a sibling sweeper, or empty
   printf '%s' "$d/landing-gate.sh"
 }
 
-for m in name-from-agent-id ambient-session-key no-cd-to-repo; do
+for m in ignore-background-tasks ambient-session-key no-cd-to-repo; do
   mpath=$(j_mutant "$m") || mpath=""
   if [ -z "$mpath" ]; then
     # A mutation that matched nothing is not a passing test — it means the code
@@ -2032,7 +2079,7 @@ printf 'stage 1\n' > "$DLREPO/.bionic/tmp/dl.progress"
 DL_CLAIM="bionic-xgate-D2-deadclaim-no-such-process-9f5c1a2b"
 {
   printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
-  printf 'roster-state/v1|status=confirmed|session=%s|name=dl-row|agent_id=|launched_at=%s|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-dl.md|source=declared|duration=|progress=%s|claims=%s|cadence=~5m|absent=|waiver=|tool_use_id=toolu_DL\n' \
+  printf 'roster-state/v1|status=confirmed|session=%s|name=dl-row|agent_id=adl-row-0001|launched_at=%s|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-dl.md|source=declared|duration=|progress=%s|claims=%s|cadence=~5m|absent=|waiver=|tool_use_id=toolu_DL\n' \
     "$SID_A" "$DL_LAUNCHED" ".bionic/tmp/dl.progress" "$DL_CLAIM"
 } > "$DL_ROSTER"
 # Not vacuous: the claimed process really is dead.
@@ -2056,12 +2103,17 @@ expect_eq "…and once that progress goes stale the same row is UNMET" "UNMET" "
 
 # The gate consumes exactly that, both ways round — one owner, and the stop follows it.
 j_saved_lg2="$PARTY_LG"
-JDL_ERR=$( mk_substop_payload "$DLREPO" "$SID_A" "dl-row" false | bash "$PARTY_LG" 2>&1 >/dev/null )
-JDL_ST=$?
+# The sweep answers once per row, ever, so the marker it journals is cleared between the
+# two halves: what is being asked twice is the PREDICATE, not the idempotency.
+dl_sweep() {  # -> sets JDL_ST; echoes the refusal
+  /usr/bin/grep -v '^landing-swept/' "$DL_ROSTER" > "$DL_ROSTER.tmp" 2>/dev/null
+  mv "$DL_ROSTER.tmp" "$DL_ROSTER"
+  mk_stopsweep_payload "$DLREPO" "$SID_A" false | bash "$PARTY_LG" 2>&1 >/dev/null
+}
+JDL_ERR=$(dl_sweep); JDL_ST=$?
 expect_eq "the gate refuses the stop on the UNMET reading" "2" "$JDL_ST"
 printf 'stage 2\n' > "$DLREPO/.bionic/tmp/dl.progress"
-JDL_ERR2=$( mk_substop_payload "$DLREPO" "$SID_A" "dl-row" false | bash "$PARTY_LG" 2>&1 >/dev/null )
-JDL_ST2=$?
+JDL_ERR2=$(dl_sweep); JDL_ST2=$?
 expect_eq "…and passes it the moment the progress is fresh again" "0" "$JDL_ST2"
 PARTY_LG="$j_saved_lg2"
 
@@ -2122,19 +2174,22 @@ expect_contains "…carrying the deliverable the brief declared" \
   "deliverable=.bionic/docs/record/w16-chain.md" "$K_INTENDED"
 
 # STAGE 2 — the spawn returns; the recorder completes the row to `confirmed`. The
-# TEAMMATE shape, which carries the addressing id and no transcript id at all.
-mk_agent_post_teammate "$SID_A" "$KTR" "$KREPO" "w16-chain" \
-  "w16-chain@session-6c85684c" "toolu_01CHAIN" | bash "$PARTY_ER" >/dev/null 2>&1
+# ASYNC shape, which is the one the id join spans end to end: `tool_response.agentId`
+# here is the same string SubagentStart carries below and the same string the landing
+# sweep matches against `background_tasks[].id` (t4b-probe-report.md §4). The TEAMMATE
+# shape — addressing id recorded, `agent_id=` deliberately left empty, and therefore
+# never identified — is pinned in hooks/execution-recorder.test.sh Section 10.
+mk_agent_post "$SID_A" "$KTR" "$KREPO" "toolu_01CHAIN" "w16-chain" "$KID" \
+  | bash "$PARTY_ER" >/dev/null 2>&1
 K_CONFIRMED=$(grep 'status=confirmed|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tail -1)
 expect_contains "the spawn's completion advances the row to confirmed" \
   "status=confirmed" "$K_CONFIRMED"
-expect_contains "…recording the ADDRESSING id in its own field" \
-  "teammate_id=w16-chain@session-6c85684c" "$K_CONFIRMED"
-expect_contains "…and leaving agent_id EMPTY, because no wall could ever match that form" \
-  "|agent_id=|" "$K_CONFIRMED"
+expect_contains "…recording the transcript-form id the join needs" \
+  "agent_id=$KID" "$K_CONFIRMED"
+expect_absent "…and no teammate_id, because this dispatch was not a teammate spawn" \
+  "teammate_id=" "$K_CONFIRMED"
 
-# STAGE 3 — the subagent starts; the recorder joins by name and writes `identified`
-# with the TRANSCRIPT-form id, the first form the by-id walls can match.
+# STAGE 3 — the subagent starts; the recorder joins BY THAT ID and writes `identified`.
 mk_start_payload "$SID_A" "$KTR" "$KREPO" "w16-chain" "$KID" | bash "$PARTY_ER" >/dev/null 2>&1
 K_IDENTIFIED=$(grep 'status=identified|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tail -1)
 expect_contains "the start advances the row to identified" "status=identified" "$K_IDENTIFIED"
@@ -2256,15 +2311,18 @@ expect_eq "…and once the contract has landed, the same stop passes with no cer
 expect_eq "…silently — nothing is demanded of a stop the disk already answers for" \
   "" "$K_SG_OUT"
 
-# READER 4 — the recorder's own join. A SECOND start re-joins the `confirmed` row
-# rather than chaining off its own output (states advance; a repeated start must not
-# compound a field loss), and the row it writes still carries the original dispatch's
-# tool_use_id — which is the proof it joined the chain rather than starting a new one.
-mk_start_payload "$SID_A" "$KTR" "$KREPO" "w16-chain" "aw16chain-fedcba0987654321" \
+# READER 4 — the recorder's own join. A SECOND start for the SAME agent (the resume
+# shape) re-joins the `confirmed` row rather than chaining off its own output — states
+# advance, and a repeated start must not compound a field loss — and the row it writes
+# still carries the original dispatch's tool_use_id, which is the proof it joined the
+# chain rather than starting a new one. The id is the key, so a start for a DIFFERENT
+# id is a different agent and joins nothing here.
+mk_start_payload "$SID_A" "$KTR" "$KREPO" "w16-chain" "$KID" \
   | bash "$PARTY_ER" >/dev/null 2>&1
 K_IDENT2=$(grep 'status=identified|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tail -1)
-expect_contains "a second start writes a second identified row" \
-  "agent_id=aw16chain-fedcba0987654321" "$K_IDENT2"
+expect_eq "a second start writes a second identified row" \
+  "2" "$(grep -c 'status=identified|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tr -d ' ')"
+expect_contains "…carrying the id it joined on" "agent_id=$KID" "$K_IDENT2"
 expect_contains "…still carrying the original dispatch's tool_use_id" \
   "tool_use_id=toolu_01CHAIN" "$K_IDENT2"
 expect_eq "…and the same contract as every row before it" \
@@ -2272,13 +2330,17 @@ expect_eq "…and the same contract as every row before it" \
 
 # --- K.3 the identified row is what makes the by-id walls reachable (paired) ---
 #
-# R4's whole point. A confirmed teammate row's `agent_id=` is empty by design, so
-# `confirmed` alone is a set no teammate row can satisfy BY ID — the ownership rule
-# was unreachable for every interactive dispatch this repo makes while the suites'
-# async-shaped fixtures kept it looking alive. Both by-id readers are asked here over
+# R4's whole point, re-aimed at what actually supplies the key (epic-16 wave-03). The
+# by-id walls can only vouch for an agent whose TRANSCRIPT-form id is on the roster;
+# a row that carries no such id is a row no by-id reader can satisfy. On an async
+# dispatch the roster arm supplies it at confirmation and the identification arm
+# re-states it; on a TEAMMATE dispatch neither does — `agent_id=` is deliberately
+# empty because the launch response carries only the addressing form, and since the
+# identification join is by id there is nothing to join with. That gap is real and
+# named in hooks/execution-recorder.sh; what is pinned HERE is the consequence, over
 # ONE roster, in the one shape where the answer is observable: the agent's metadata
 # filed under ANOTHER session's directory, where only the roster can vouch for it.
-# The negative half removes the identified row and nothing else.
+# The negative half strips the transcript id from every row and nothing else.
 # The agent MOVES rather than being copied: the same id filed under two session
 # directories of one project is the AMBIGUOUS case (§C2), which would answer this
 # question with "the operator was shown a candidate list" instead of with the
@@ -2287,7 +2349,7 @@ mkdir -p "$SANDBOX/k-own-meta"
 mv "$KSUB/agent-$KID.meta.json" "$KSUB/agent-$KID.jsonl" "$SANDBOX/k-own-meta/"
 plant "$KSUB_B" "$KID" "w16-chain"
 K_ROSTER_NOID="$SANDBOX/k-roster-without-identified.state"
-grep -v 'status=identified' "$KROSTER" > "$K_ROSTER_NOID"
+grep -v 'status=identified' "$KROSTER" | sed -e "s/|agent_id=$KID|/|agent_id=|/" > "$K_ROSTER_NOID"
 K_ROSTER_FULL="$SANDBOX/k-roster-full.state"
 cp "$KROSTER" "$K_ROSTER_FULL"
 
@@ -2325,7 +2387,7 @@ expect_eq "with the identified row, the observation vouches for a cross-session 
 expect_eq "…and the stop gate's foreign wall stands down over the same row" \
   "ours" "$(k_stop_gate_says)"
 cp "$K_ROSTER_NOID" "$KROSTER"
-expect_eq "without it — intended and confirmed only — the observation calls it foreign" \
+expect_eq "without the transcript id anywhere on the roster, the observation calls it foreign" \
   "foreign" "$(k_observation_says)"
 expect_eq "…and the stop gate refuses it, both readers flipping on the same row" \
   "foreign" "$(k_stop_gate_says)"
@@ -2347,8 +2409,8 @@ else
     | jq --arg p "$K_BRIEF" '.tool_input.name = "w16-mut" | .tool_input.prompt = $p
                              | .tool_use_id = "toolu_01MUT"' \
     | bash "$PARTY_DP" >/dev/null 2>&1
-  mk_agent_post_teammate "$SID_A" "$KTR" "$KREPO" "w16-mut" \
-    "w16-mut@session-6c85684c" "toolu_01MUT" | bash "$KMUT" >/dev/null 2>&1
+  mk_agent_post "$SID_A" "$KTR" "$KREPO" "toolu_01MUT" "w16-mut" "aw16mut-1111111111111111" \
+    | bash "$KMUT" >/dev/null 2>&1
   mk_start_payload "$SID_A" "$KTR" "$KREPO" "w16-mut" "aw16mut-1111111111111111" \
     | bash "$KMUT" >/dev/null 2>&1
   K_MUT_INTENDED=$(grep 'status=intended|.*|name=w16-mut|' "$KROSTER" 2>/dev/null | tail -1)
@@ -2369,44 +2431,138 @@ fi
 
 # ============================================================
 echo ""
-echo "=== L — the WIRING: every hook's event guard is an event bootstrap registers ==="
+echo "=== L — the WIRING: registration is three-sided (frontmatter, absence, presence) ==="
 # ============================================================
 #
 # A hook that reads an event nobody registered it for is inert, and inert in the
 # quietest possible way: it is installed, it is syntactically fine, its own suite is
-# green, and it never runs. Epic-16 shipped readers for two events this machine had
-# never registered — SubagentStart (the identification arm) and SubagentStop (the
-# landing gate) — so the registration is part of the agreement, not a deployment
-# detail. Both directions are asserted: bootstrap names the event, and the hook
-# guards on that same spelling.
+# green, and it never runs. Epic-16 wave-2 moves the seven sdlc hook scripts' ten
+# event/matcher registrations OUT of MANAGED_HOOKS/settings.json and INTO the
+# `hooks:` frontmatter block of skills/canonical-sdlc/SKILL.md, so the walls bind
+# only in sessions that actually invoke the skill (R1). Three sides now have to
+# agree or the move is silently wrong in one of three ways: the frontmatter could
+# name the wrong shape, a moved script could linger behind in MANAGED_HOOKS (firing
+# in EVERY session, defeating R1), or a script that should stay global could get
+# swept out by mistake.
 BOOTSTRAP_SRC=$(cat "$REPO_ROOT/claude-bootstrap.sh")
+SKILL_SRC="$REPO_ROOT/skills/canonical-sdlc/SKILL.md"
+MANAGED_HOOKS_SRC=$(awk '/^MANAGED_HOOKS=\(/{f=1} f{print} f&&/^\)$/{exit}' "$REPO_ROOT/claude-bootstrap.sh")
 
-expect_contains "bootstrap registers the landing gate on SubagentStop" \
-  '"SubagentStop||~/.claude/hooks/landing-gate.sh"' "$BOOTSTRAP_SRC"
-expect_contains "…and the gate guards on that same event name" \
-  '"$EVENT" = "SubagentStop"' "$(cat "$PARTY_LG")"
+# the shell's bare `grep` is ugrep with ignore-files active and lies about absence
+# (reports 0 hits inside paths it silently skips) — every absence check below goes
+# through /usr/bin/grep instead.
+expect_absent_ug() {
+  if printf '%s' "$3" | /usr/bin/grep -qF -- "$2"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi
+}
 
-expect_contains "bootstrap registers the recorder on SubagentStart" \
-  '"SubagentStart||~/.claude/hooks/execution-recorder.sh"' "$BOOTSTRAP_SRC"
+# --- L.1 frontmatter <-> script: the ten sdlc registrations live in SKILL.md's
+# `hooks:` frontmatter block, same event/matcher/command shape MANAGED_HOOKS used to
+# carry, each entry bounded by the same timeout: 10 the Step-6 review demanded.
+# Line-anchored extraction of the pinned shape — pin the span, not the label.
+SKILL_HOOKS_ROWS=$(awk '
+  /^hooks:$/ { active=1; next }
+  active && /^---$/ { active=0 }
+  active && /^[A-Za-z]/ { active=0 }
+  !active { next }
+  /^  [A-Za-z]+:$/ { event=$0; sub(/^  /,"",event); sub(/:$/,"",event); matcher=""; next }
+  /^    - matcher: "/ { matcher=$0; sub(/^    - matcher: "/,"",matcher); sub(/"$/,"",matcher); next }
+  /^    - hooks:$/ { matcher=""; next }
+  /^          command: / { cmd=$0; sub(/^          command: /,"",cmd); next }
+  /^          timeout: / { t=$0; sub(/^          timeout: /,"",t); print event "|" matcher "|" cmd "|" t }
+' "$SKILL_SRC")
+
+expect_contains "frontmatter registers the evidence gate on PreToolUse|Bash, timeout 10" \
+  "PreToolUse|Bash|~/.claude/hooks/canonical-sdlc-evidence-gate.sh|10" "$SKILL_HOOKS_ROWS"
+expect_contains "…the stop guard on PreToolUse|TaskStop, timeout 10" \
+  "PreToolUse|TaskStop|~/.claude/hooks/stop-guard.sh|10" "$SKILL_HOOKS_ROWS"
+expect_contains "…dispatch-preflight on PreToolUse|Agent, timeout 10" \
+  "PreToolUse|Agent|~/.claude/hooks/dispatch-preflight.sh|10" "$SKILL_HOOKS_ROWS"
+expect_contains "…the governing-skill gate on PreToolUse|Write, timeout 10" \
+  "PreToolUse|Write|~/.claude/hooks/canonical-sdlc-governing-skill.sh|10" "$SKILL_HOOKS_ROWS"
+expect_contains "…and on PreToolUse|Edit, timeout 10" \
+  "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh|10" "$SKILL_HOOKS_ROWS"
+expect_contains "…the recorder's observation arm on PostToolUse|Bash, timeout 10" \
+  "PostToolUse|Bash|~/.claude/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
+expect_contains "…its completion arm on PostToolUse|Agent, timeout 10" \
+  "PostToolUse|Agent|~/.claude/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
+expect_contains "…its identification arm on SubagentStart (no matcher), timeout 10" \
+  "SubagentStart||~/.claude/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
+expect_contains "…context-spend on Stop (no matcher), timeout 10" \
+  "Stop||~/.claude/hooks/context-spend.sh|10" "$SKILL_HOOKS_ROWS"
+# THE LANDING SWEEP MOVED TO Stop (epic-16 wave-03, T4c). SubagentStop is dispatched in the
+# SUBAGENT's context, and skill-frontmatter hooks are looked up by SESSION id — so no
+# subagent-context event can ever reach this channel (T4b §3, from the shipped binary). A
+# registration left on SubagentStop is a wall that is installed, syntactically fine, green in
+# its own suite, and never runs.
+expect_contains "…and the landing sweep on Stop (no matcher), timeout 10" \
+  "Stop||~/.claude/hooks/landing-gate.sh|10" "$SKILL_HOOKS_ROWS"
+expect_absent_ug "…with NOTHING left registered on SubagentStop" \
+  "SubagentStop" "$SKILL_HOOKS_ROWS"
+expect_eq "…exactly ten registrations in the frontmatter block, nothing extra" \
+  "10" "$(printf '%s\n' "$SKILL_HOOKS_ROWS" | /usr/bin/grep -c '|')"
+
+expect_contains "…and the landing sweep itself guards on that same event name" \
+  '"$EVENT" = "Stop"' "$(cat "$PARTY_LG")"
+expect_absent_ug "…and no longer answers to the event it can never receive" \
+  'SubagentStop"' "$(cat "$PARTY_LG")"
 expect_contains "…and the recorder's identification arm guards on that same event name" \
   '= "SubagentStart"' "$(cat "$PARTY_ER")"
 
-# The recorder's OTHER two arms, still registered: the identification arm is a third
-# registration of one script, and a convergent MANAGED_HOOKS rebuild removes whatever
-# it stops naming. A wiring change that dropped either of these would leave the
-# observation record and the roster's completion arm silently unwritten.
-expect_contains "the recorder keeps its PostToolUse|Bash registration (the observation arm)" \
-  '"PostToolUse|Bash|~/.claude/hooks/execution-recorder.sh"' "$BOOTSTRAP_SRC"
-expect_contains "…and its PostToolUse|Agent registration (the completion arm)" \
-  '"PostToolUse|Agent|~/.claude/hooks/execution-recorder.sh"' "$BOOTSTRAP_SRC"
+# --- L.5 THE EVENT-NAME WHITELIST: one bad key voids the WHOLE block, silently ---
+#
+# T4b §5, bisected over four single-variable fixture skills: a `hooks:` block naming an
+# event the harness does not know disarms EVERY registration in that skill — including the
+# valid ones — with no error, no warning in `--output-format stream-json`, and no stderr.
+# The skill still loads and its slash command still resolves. `TaskStop` is the proven case
+# (it is a valid PreToolUse MATCHER, which is exactly why a hand would reach for it as an
+# event key), and nothing else in this repo would notice: every other assertion in §L reads
+# the file rather than the harness, so a voided block passes all of them.
+#
+# This test is therefore the only detector, and it is a WHITELIST rather than a blacklist:
+# the failure is silent, so the safe default for an unrecognised key is red.
+VALID_HOOK_EVENTS="PreToolUse PostToolUse Notification UserPromptSubmit Stop SubagentStop SubagentStart PreCompact SessionStart SessionEnd"
+SKILL_EVENT_KEYS=$(awk '
+  /^hooks:$/ { active=1; next }
+  active && /^---$/ { active=0 }
+  active && /^[A-Za-z]/ { active=0 }
+  !active { next }
+  /^  [A-Za-z]+:$/ { k=$0; sub(/^  /,"",k); sub(/:$/,"",k); print k }
+' "$SKILL_SRC")
+expect_eq "the frontmatter block declares at least one event key (this test is not vacuous)" \
+  "yes" "$([ -n "$SKILL_EVENT_KEYS" ] && echo yes || echo no)"
+L5_BAD=""
+for k in $SKILL_EVENT_KEYS; do
+  case " $VALID_HOOK_EVENTS " in
+    *" $k "*) : ;;
+    *) L5_BAD="${L5_BAD}${L5_BAD:+, }$k" ;;
+  esac
+done
+expect_eq "every top-level key in the hooks: block is a hook event the harness knows" \
+  "" "$L5_BAD"
 
-# Both new registrations take the NO-MATCHER branch of wire_managed_hooks — these
-# events carry no tool name to match on. Spelled here because the empty middle field
-# is easy to "fix" into a matcher.
-expect_eq "both new registrations declare an empty matcher" "2" \
-  "$(printf '%s\n' "$BOOTSTRAP_SRC" | grep -cE '"Subagent(Start|Stop)\|\|~/\.claude/hooks/')"
+# --- L.2 MANAGED_HOOKS absence: none of the seven moved sdlc scripts appear ANYWHERE
+# in the array bootstrap still converges on install — a lingering entry would fire
+# the wall in every session, defeating R1 even after the frontmatter side is right.
+for script in canonical-sdlc-evidence-gate.sh stop-guard.sh dispatch-preflight.sh \
+              execution-recorder.sh canonical-sdlc-governing-skill.sh \
+              context-spend.sh landing-gate.sh; do
+  expect_absent_ug "MANAGED_HOOKS no longer names $script (moved to frontmatter)" \
+    "hooks/$script" "$MANAGED_HOOKS_SRC"
+done
 
-# --- L.2 EVERY registration is bounded by a timeout, whichever branch writes it ---
+# --- L.3 MANAGED_HOOKS presence: the three non-sdlc hooks are untouched by the move
+# (R2: guard-set parity for everything that was never sdlc-scoped) — exact set, not
+# just "still there somewhere among leftovers."
+expect_contains "MANAGED_HOOKS keeps protect-main.sh on PreToolUse|Bash" \
+  '"PreToolUse|Bash|~/.claude/hooks/protect-main.sh"' "$MANAGED_HOOKS_SRC"
+expect_contains "…protect-database.sh on PreToolUse|Bash" \
+  '"PreToolUse|Bash|~/.claude/hooks/protect-database.sh"' "$MANAGED_HOOKS_SRC"
+expect_contains "…and farm-out-reminder.sh on PreToolUse|Bash" \
+  '"PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh"' "$MANAGED_HOOKS_SRC"
+expect_eq "…and exactly three entries total — nothing else survives the move" \
+  "3" "$(printf '%s\n' "$MANAGED_HOOKS_SRC" | /usr/bin/grep -c '"')"
+
+# --- L.4 EVERY registration is bounded by a timeout, whichever branch writes it ---
 #
 # The Step-6 review's C-4: `wire_managed_hooks` attached `"timeout": 10` only on the
 # matcher branch, so the two events this wave added — the ones that carry no matcher —
@@ -2433,10 +2589,6 @@ expect_eq "…and registers every managed hook (this section is not vacuous)" \
   "$(jq '[.hooks[][].hooks[]] | length' "$LSETTINGS" 2>/dev/null)"
 expect_eq "EVERY registered hook carries a timeout — the no-matcher branch included" "0" \
   "$(jq '[.hooks[][].hooks[] | select(has("timeout") | not)] | length' "$LSETTINGS" 2>/dev/null)"
-expect_eq "…and the landing gate's own entry is bounded" "10" \
-  "$(jq -r '.hooks.SubagentStop[0].hooks[0].timeout' "$LSETTINGS" 2>/dev/null)"
-expect_eq "…as is the recorder's SubagentStart entry" "10" \
-  "$(jq -r '.hooks.SubagentStart[0].hooks[0].timeout' "$LSETTINGS" 2>/dev/null)"
 
 # ============================================================
 echo ""
@@ -2508,11 +2660,15 @@ printf 'roster-state/v1|status=confirmed|session=%s|name=finished|agent_id=afini
   "$SID_A" "$(printf '%s' "$SID_A" | cut -c1-8)" \
   >> "$MREPO/.bionic/tmp/roster-$SID_A.state"
 
-mk_subagent_stop() {  # <repo> <sid> <agent_type>
-  jq -n --arg c "$1" --arg s "$2" --arg a "$3" \
-    '{session_id:$s, cwd:$c, transcript_path:"/tmp/t.jsonl", agent_id:"afinished-1111111111111111",
-      agent_type:$a, hook_event_name:"SubagentStop", stop_hook_active:false,
-      background_tasks:[], session_crons:[]}'
+# The landing sweep answers for each row ONCE, ever, and journals a marker into the roster
+# to keep that promise. Each of the three drives below is a separate question about the same
+# fixture, so the marker is cleared first — the property under test is what the consumers
+# read off ONE ledger, not the sweep's idempotency (which hooks/landing-gate.test.sh owns).
+MROSTER="$MREPO/.bionic/tmp/roster-$SID_A.state"
+m_sweep() {  # <gate path> -> the gate's exit status, refusal on stdout
+  /usr/bin/grep -v '^landing-swept/' "$MROSTER" > "$MROSTER.tmp" 2>/dev/null
+  mv "$MROSTER.tmp" "$MROSTER"
+  mk_stopsweep_payload "$MREPO" "$SID_A" false | bash "$1" 2>&1
 }
 
 m_vline() {  # -> the verdict machine line all three consumers read for this fixture
@@ -2526,7 +2682,7 @@ expect_contains "before the ack: the one line all three read says acked=no" \
   "|acked=no|" "$(m_vline)"
 OUT=$(mk_stop_payload "$SID_A" "$MTR" "$MREPO" "finished" | bash "$SG_M" 2>&1); ST=$?
 expect_eq "before the ack: the stop gate refuses" "2" "$ST"
-OUT=$(mk_subagent_stop "$MREPO" "$SID_A" "finished" | bash "$LG_M" 2>&1); ST=$?
+OUT=$(m_sweep "$LG_M"); ST=$?
 expect_eq "before the ack: the landing gate refuses" "2" "$ST"
 OUT=$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" standdown 2>&1 )
 expect_contains "before the ack: the stand-down leaves it alone" "LEFT ALONE" "$OUT"
@@ -2546,7 +2702,7 @@ expect_contains "…while the contract itself is still UNMET, computed from the 
 
 OUT=$(mk_stop_payload "$SID_A" "$MTR" "$MREPO" "finished" | bash "$SG_M" 2>&1); ST=$?
 expect_eq "after the ack: the stop gate passes" "0" "$ST"
-OUT=$(mk_subagent_stop "$MREPO" "$SID_A" "finished" | bash "$LG_M" 2>&1); ST=$?
+OUT=$(m_sweep "$LG_M"); ST=$?
 expect_eq "after the ack: the landing gate passes" "0" "$ST"
 OUT=$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" standdown 2>&1 )
 expect_contains "after the ack: the stand-down puts it in the batch" "1 row(s) have landed" "$OUT"
@@ -2582,7 +2738,7 @@ expect_contains "the mutated owner reports the acked row as unacked" "|acked=no|
   "$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$MMUT/session-sweeper.sh" verdict finished 2>/dev/null )"
 OUT=$(mk_stop_payload "$SID_A" "$MTR" "$MREPO" "finished" | bash "$MMUT/stop-guard.sh" 2>&1); ST=$?
 expect_eq "…and the stop gate refuses the stop it passed a moment ago" "2" "$ST"
-OUT=$(mk_subagent_stop "$MREPO" "$SID_A" "finished" | bash "$MMUT/landing-gate.sh" 2>&1); ST=$?
+OUT=$(m_sweep "$MMUT/landing-gate.sh"); ST=$?
 expect_eq "…and the landing gate refuses it too" "2" "$ST"
 OUT=$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$MMUT/stop-orders.sh" standdown 2>&1 )
 expect_contains "…and the stand-down puts it back in LEFT ALONE" "LEFT ALONE" "$OUT"
