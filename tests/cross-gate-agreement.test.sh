@@ -2546,15 +2546,25 @@ done
 expect_eq "every top-level key in the hooks: block is a hook event the harness knows" \
   "" "$L5_BAD"
 
-# --- L.2 MANAGED_HOOKS absence: none of the seven moved sdlc scripts appear ANYWHERE
-# in the array bootstrap still converges on install — a lingering entry would fire
-# the wall in every session, defeating R1 even after the frontmatter side is right.
-for script in canonical-sdlc-evidence-gate.sh stop-guard.sh dispatch-preflight.sh \
-              execution-recorder.sh canonical-sdlc-governing-skill.sh \
-              context-spend.sh landing-gate.sh; do
+# --- L.2 MANAGED_HOOKS absence: none of the five sdlc scripts that stayed
+# skill-only appears ANYWHERE in the array bootstrap still converges on install — a
+# lingering entry would fire the wall in every session, defeating R1 even after the
+# frontmatter side is right.
+for script in canonical-sdlc-evidence-gate.sh stop-guard.sh \
+              execution-recorder.sh context-spend.sh landing-gate.sh; do
   expect_absent_ug "MANAGED_HOOKS no longer names $script (moved to frontmatter)" \
     "hooks/$script" "$MANAGED_HOOKS_SRC"
 done
+# THE TWO WALLS THAT CAME BACK (session-20260815 T6) are a conditional absence, not
+# an absence: they are named in this array again, and every occurrence must sit
+# behind hooks/agent-context-guard.sh. A bare entry would be the R1 regression this
+# section was written to catch — the wall firing in every session on the machine —
+# wearing the new registration's clothes, and §L.6 below (which asserts the guarded
+# form is PRESENT) would still pass beside it.
+L2_UNGUARDED=$(printf '%s\n' "$MANAGED_HOOKS_SRC" \
+  | /usr/bin/grep -E 'dispatch-preflight\.sh|canonical-sdlc-governing-skill\.sh' \
+  | /usr/bin/grep -v 'agent-context-guard\.sh')
+expect_eq "…and the two walls that returned are never named UNGUARDED" "" "$L2_UNGUARDED"
 
 # --- L.3 MANAGED_HOOKS presence: the three non-sdlc hooks are untouched by the move
 # (R2: guard-set parity for everything that was never sdlc-scoped) — exact set, not
@@ -2565,8 +2575,8 @@ expect_contains "…protect-database.sh on PreToolUse|Bash" \
   '"PreToolUse|Bash|~/.claude/hooks/protect-database.sh"' "$MANAGED_HOOKS_SRC"
 expect_contains "…and farm-out-reminder.sh on PreToolUse|Bash" \
   '"PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh"' "$MANAGED_HOOKS_SRC"
-expect_eq "…and exactly three entries total — nothing else survives the move" \
-  "3" "$(printf '%s\n' "$MANAGED_HOOKS_SRC" | /usr/bin/grep -c '"')"
+expect_eq "…and exactly six entries total — three unconditional, three guarded" \
+  "6" "$(printf '%s\n' "$MANAGED_HOOKS_SRC" | /usr/bin/grep -c '"')"
 
 # --- L.4 EVERY registration is bounded by a timeout, whichever branch writes it ---
 #
@@ -2595,6 +2605,67 @@ expect_eq "…and registers every managed hook (this section is not vacuous)" \
   "$(jq '[.hooks[][].hooks[]] | length' "$LSETTINGS" 2>/dev/null)"
 expect_eq "EVERY registered hook carries a timeout — the no-matcher branch included" "0" \
   "$(jq '[.hooks[][].hooks[] | select(has("timeout") | not)] | length' "$LSETTINGS" 2>/dev/null)"
+
+# --- L.6 THE AGENT-CONTEXT CHANNEL: one wall, two channels, one partition ---
+# (session-20260815-landing-supervision T6; design D1, plan AC-7/AC-8.)
+#
+# A tool-class event raised inside a teammate or subagent context is dispatched under
+# the AGENT key and never reaches a skill-frontmatter registration (t1-probe-report.md
+# §3, both directions, main-thread positive control in the same session). So the
+# dispatch wall and the artifact wall are registered a SECOND time, through settings —
+# the channel that is alive there — behind hooks/agent-context-guard.sh, which runs the
+# named wall only for a payload carrying a top-level agent_id in a session that has a
+# roster on disk.
+#
+# THE TOPOLOGY IS THE THING THIS SECTION OWNS, and it has three ways to be silently
+# wrong, one per assertion below: the settings entry could point straight at a wall
+# (that wall then fires in every session on the machine — L.2 above), the guard could
+# ALSO be registered on the skill channel (both channels live on one event, so a
+# main-thread refusal prints twice and a dispatch journals twice), or the two channels
+# could drift onto different events (a wall covering the main thread on one event and
+# agent contexts on another, which reads as coverage and is not).
+ACG_PATH="$REPO_ROOT/hooks/agent-context-guard.sh"
+expect_eq "the partition guard exists as a hook script" "yes" \
+  "$([ -f "$ACG_PATH" ] && echo yes || echo no)"
+expect_contains "MANAGED_HOOKS registers the DISPATCH wall for agent contexts, behind the guard" \
+  '"PreToolUse|Agent|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/dispatch-preflight.sh"' \
+  "$MANAGED_HOOKS_SRC"
+expect_contains "…the ARTIFACT wall on Write, behind the guard" \
+  '"PreToolUse|Write|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/canonical-sdlc-governing-skill.sh"' \
+  "$MANAGED_HOOKS_SRC"
+expect_contains "…and on Edit, behind the guard" \
+  '"PreToolUse|Edit|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/canonical-sdlc-governing-skill.sh"' \
+  "$MANAGED_HOOKS_SRC"
+expect_absent_ug "…and the guard itself is NOT on the skill channel (no event has two live channels)" \
+  "agent-context-guard" "$SKILL_HOOKS_ROWS"
+
+# The two channels cover the SAME three events: for each guarded settings entry there is
+# a frontmatter row registering the same wall on the same event/matcher, straight (that
+# is the main-thread half, asserted by value in L.1 and re-read here as a pair).
+for _pair in "PreToolUse|Agent|~/.claude/hooks/dispatch-preflight.sh|10" \
+             "PreToolUse|Write|~/.claude/hooks/canonical-sdlc-governing-skill.sh|10" \
+             "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh|10"; do
+  expect_contains "the skill channel still covers the main thread for ${_pair%%|*}|$(echo "$_pair" | cut -d'|' -f2)" \
+    "$_pair" "$SKILL_HOOKS_ROWS"
+done
+
+# Driven, not grepped: what bootstrap WRITES for a guarded entry is one command string
+# carrying both paths, with its matcher and its timeout — the shape the harness executes
+# through a shell, and the shape that hands the guard its argument.
+L6_CMDS=$(jq -r '.hooks.PreToolUse[]? | select(.matcher=="Agent") | .hooks[].command' "$LSETTINGS" 2>/dev/null)
+expect_contains "wire_managed_hooks writes the guarded dispatch entry as ONE command with the wall as its argument" \
+  "agent-context-guard.sh ~/.claude/hooks/dispatch-preflight.sh" "$L6_CMDS"
+expect_eq "…and the guarded entries are bounded by the same timeout: 10" "0" \
+  "$(jq '[.hooks.PreToolUse[]? | select(.matcher=="Agent" or .matcher=="Write" or .matcher=="Edit")
+         | .hooks[] | select(.timeout != 10)] | length' "$LSETTINGS" 2>/dev/null)"
+
+# The wall behind the guard is the one that skips its JOURNAL in an agent context —
+# the reader and the writer of BIONIC_HOOK_CHANNEL are one pair across two files, and a
+# rename on either side silently restores nested rostering.
+expect_contains "the guard sets the channel marker the dispatch wall reads" \
+  'BIONIC_HOOK_CHANNEL=agent-context' "$(cat "$ACG_PATH")"
+expect_contains "…and the dispatch wall skips its roster append on exactly that value" \
+  '"${BIONIC_HOOK_CHANNEL:-}" = "agent-context"' "$(cat "$PARTY_DP")"
 
 # ============================================================
 echo ""
@@ -2809,9 +2880,9 @@ echo "=== N — the wave-02 facts: one root, one vocabulary, one launch referenc
 # a resume looks like in that mode, which is the fixture-fidelity failure the header forbids.
 # The async half of the same property IS driven, at §N.6.
 
-# ---------------------------------------------------------------- N.1 six bodies, one root
+# -------------------------------------------------------------- N.1 seven bodies, one root
 #
-# `resolve_project_root()` is a SIX-copy family: FOUR since S4+S5 (w2-s45 §5 call 7) — the
+# `resolve_project_root()` is a SEVEN-copy family: FOUR since S4+S5 (w2-s45 §5 call 7) — the
 # governing-skill hook is the origin, the evidence gate its long-standing twin, and the
 # dispatch wall and the probe took copies when R5 made the wall run the probe inline — plus
 # TWO MORE from epic-16 w2 Step-6 remediation R3 (ap review A-1): the poker and stop-orders
@@ -2821,22 +2892,27 @@ echo "=== N — the wave-02 facts: one root, one vocabulary, one launch referenc
 # what keeps D-2's "exactly four copies, no fifth" pin from failing on this wave's own fix
 # — the critic named the trap by number (remediation-trap analysis #4): a resolver swap
 # that does not extend the agreement test manufactures a fresh duplication finding in the
-# act of closing A-1.
+# act of closing A-1. The SEVENTH joined for the same reason as the sixth
+# (session-20260815-landing-supervision T6): hooks/agent-context-guard.sh decides whether
+# a session is armed by stating a roster under the project root, and a guard that rooted a
+# worktree at its own tree would answer "unarmed" for every agent context inside a worktree
+# of an armed session — a wall that goes quiet exactly where it was added to bind.
 DP_N="$REPO_ROOT/hooks/dispatch-preflight.sh"
 PB_N="$REPO_ROOT/hooks/preflight-probe.sh"
 GS_N="$REPO_ROOT/hooks/canonical-sdlc-governing-skill.sh"
 EG_N="$REPO_ROOT/hooks/canonical-sdlc-evidence-gate.sh"
 SP_N="$REPO_ROOT/hooks/session-poker.sh"
 SO_N="$REPO_ROOT/hooks/stop-orders.sh"
+ACG_N="$REPO_ROOT/hooks/agent-context-guard.sh"
 
 expect_eq "the root resolver extracts at all (this section is not vacuous)" "yes" \
   "$([ -n "$(fn_body "$GS_N" resolve_project_root)" ] && echo yes || echo no)"
-for _n in "$DP_N" "$PB_N" "$EG_N" "$SP_N" "$SO_N"; do
+for _n in "$DP_N" "$PB_N" "$EG_N" "$SP_N" "$SO_N" "$ACG_N"; do
   expect_eq "$(basename "$_n")'s resolve_project_root() is the origin's, body for body" \
     "$(fn_body "$GS_N" resolve_project_root)" "$(fn_body "$_n" resolve_project_root)"
 done
 
-# ---------------------------------------------------------------- N.2 six ANSWERS, one root
+# -------------------------------------------------------------- N.2 seven ANSWERS, one root
 #
 # Bodies being equal is a claim about the text. This is the claim about the ANSWER, taken
 # where the field case took it: inside a real `git worktree add`, which is the input that
@@ -2867,16 +2943,16 @@ NMAIN=$(cd "$NREPO" && pwd -P)
 # PreToolUse gate meets the second shape on the first artifact write into a project, and
 # the climb-to-the-nearest-existing-ancestor is the part of the resolver that handles it.
 for _p in "$NWT/.bionic/docs/record/x.md" "$NWT/deep/not/created/yet/x.md"; do
-  for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N"; do
+  for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N" "$ACG_N"; do
     expect_eq "$(basename "$_n") roots '${_p#$NWT/}' at the MAIN repository, not the worktree" \
       "$NMAIN" "$(cd "$NWT" && root_via "$_n" "$_p")"
   done
 done
-# The paired negative: outside any repository all six fall back, and to the SAME fallback.
-# Without it the six could agree by having all stopped resolving anything.
+# The paired negative: outside any repository all seven fall back, and to the SAME fallback.
+# Without it the seven could agree by having all stopped resolving anything.
 NOUT="$SANDBOX/fx/nroot/notarepo"
 mkdir -p "$NOUT"
-for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N"; do
+for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N" "$ACG_N"; do
   expect_eq "$(basename "$_n") falls back outside any repository" \
     "$NOUT" "$(cd "$NOUT" && root_via "$_n" "$NOUT/x.md" "$NOUT")"
 done
@@ -2900,7 +2976,7 @@ expect_eq "fixture: NBWS carries a real .bionic/ and is NOT a git repository" "y
 # Asked from $NOUT — a directory unrelated to NBWS and itself outside any repository, so a
 # resolver that answered `pwd` (the old bug) would land on $NOUT, not $NBWS.
 for _p in "$NBWS/.bionic/docs/record/x.md" "$NBWS/sub/deep/not/created/yet/x.md"; do
-  for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N"; do
+  for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N" "$ACG_N"; do
     expect_eq "$(basename "$_n") roots '${_p#$NBWS/}' at NBWS from an unrelated cwd, not the fallback" \
       "$NBWS" "$(cd "$NOUT" && root_via "$_n" "$_p" "$NOUT")"
   done

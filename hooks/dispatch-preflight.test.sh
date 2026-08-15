@@ -2155,6 +2155,62 @@ expect_status "A-1 control (bare label): contracted to the real line-start path"
 expect_absent "A-1 control (bare label): never to the mid-line bait" \
   "bait-bare.md" "$(roster_field "$ROW" deliverable)"
 
+# ============================================================
+echo "=== S20 — the agent-context channel: walls travel, the LEDGER does not (T6, D1) ==="
+# ============================================================
+#
+# hooks/agent-context-guard.sh registers this gate a second time, through
+# settings.json, so a dispatch made from INSIDE a teammate or subagent context meets
+# the same walls a main-thread one does — the skill channel is dead there
+# (.bionic/docs/record/session-20260815-landing-supervision/t1-probe-report.md §3).
+# What must not travel with the walls is the journal: the roster is the depth-one
+# ledger of what the ORCHESTRATOR launched, and rows for a teammate's own subagents
+# are contracts nobody confirms, lands or checks.
+#
+# The guard is the only writer of BIONIC_HOOK_CHANNEL and this is its only reader;
+# tests/cross-gate-agreement.test.sh §L.6 pins the pair across the two files.
+#
+# BOTH DIRECTIONS, because a suppression that suppressed the WALL as well would look
+# identical from the roster's side — and would be the R2 hole reopening in the act of
+# closing it.
+REPO=$(make_repo r20 yes)
+write_attestation "$REPO" "$SID_A"
+S20_SAVED_ENV="$GATE_ENV"
+GATE_ENV="$GATE_ENV BIONIC_HOOK_CHANNEL=agent-context"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "a contract-complete dispatch in an agent context passes" "0" "$GATE_ST"
+expect_status "…and writes NO roster row (the ledger stays at depth one)" "1" \
+  "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
+
+# The wall itself is untouched by the channel — a deliverable-less brief is refused
+# at depth, which is the entire point of the second registration.
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Canonical-sdlc Step 4. Do the thing.
+Exit condition: the suite is green.')"
+expect_status "a deliverable-less dispatch in an agent context is still REFUSED" "2" "$GATE_ST"
+expect_contains "…by the absent-deliverable wall, in its own words" \
+  "BLOCKED: this dispatch brief names no deliverable" "$GATE_ERR"
+GATE_ENV="$S20_SAVED_ENV"
+
+# The paired positive: the same dispatch with no channel marker — the main thread, as
+# the skill channel delivers it — still journals its row.
+REPO=$(make_repo r20b yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "the same dispatch on the main thread passes" "0" "$GATE_ST"
+expect_status "…and DOES journal exactly one row" "1" \
+  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# An unrelated value in the variable is not the channel: only the guard's exact
+# spelling suppresses, so a stray export cannot silently stop the ledger.
+S20_SAVED_ENV="$GATE_ENV"
+GATE_ENV="$GATE_ENV BIONIC_HOOK_CHANNEL=something-else"
+REPO=$(make_repo r20c yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "an unrecognised channel value journals normally" "1" \
+  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+GATE_ENV="$S20_SAVED_ENV"
+
 echo ""
 echo "----------------------------------------"
 echo "TOTAL: $TOTAL  PASS: $PASS  FAIL: $FAIL"

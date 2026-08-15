@@ -1062,6 +1062,27 @@ if [ -z "$C_DELIVERABLE" ] && [ -z "$C_WAIVER" ]; then
   exit 2
 fi
 
+# ---------- THE LEDGER STOPS AT DEPTH ONE ----------
+# (session-20260815-landing-supervision T6; design D1 "writers stay put".)
+#
+# Every wall above this line has now run, and that is the whole of what travels
+# into an agent context: hooks/agent-context-guard.sh registers THIS script on the
+# settings channel so a dispatch made from inside a teammate or subagent meets the
+# same refusals a main-thread one does. What must NOT travel is the journal. The
+# roster is the depth-one ledger of what the orchestrator launched, read by the
+# landing verdict and the poker as the set of contracts this session owes; a
+# teammate's own subagents accreting rows into it would add contracts nobody
+# confirms, nobody lands, and nobody was ever going to check — a teammate's
+# deliverable subsumes its subtree.
+#
+# So the channel, not the payload, decides: the guard sets this variable and
+# nothing else does, which keeps the reading local to the one caller that knows
+# which channel it is. Silent, and on the pass side — a dispatch that got this far
+# has been allowed, and this line only declines to write it down.
+if [ "${BIONIC_HOOK_CHANNEL:-}" = "agent-context" ]; then
+  exit 0
+fi
+
 # The directory levels of this path were already discharged: the attestation
 # check above refuses outright if `.bionic` or `.bionic/tmp` is a symlink, so
 # reaching here means both are real directories. The roster FILE is its own
