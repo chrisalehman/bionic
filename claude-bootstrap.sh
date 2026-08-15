@@ -1636,9 +1636,9 @@ do_install_hooks
 # git ops, farm-out-reminder nudges long-running Bash off the main thread. None of
 # the three are sdlc-scoped.
 #
-# THE THREE GUARDED ENTRIES ARE A DIFFERENT ANIMAL (session-20260815-landing-
-# supervision T6, design D1). The dispatch wall and the artifact wall are back in
-# this array — but behind hooks/agent-context-guard.sh, and for one reason: a
+# THE FOUR GUARDED ENTRIES ARE A DIFFERENT ANIMAL (session-20260815-landing-
+# supervision T6/T2, design D1/D2). The dispatch wall and the artifact wall are
+# back in this array — but behind hooks/agent-context-guard.sh, and for one reason: a
 # tool-class event raised inside a teammate or subagent context is dispatched
 # under the AGENT key, so it never reaches a skill-frontmatter registration, and
 # every wall this repo installs has therefore stopped at depth one (measured both
@@ -1656,6 +1656,14 @@ do_install_hooks
 # Neither wall is registered twice for the same event: skill channel owns the main
 # thread, this channel owns the agent contexts, and the guard is the partition.
 #
+# THE FOURTH GUARDED ENTRY — the landing verdict on SubagentStop (T2, design D2) —
+# is the same channel for a different reason. That event has no main-thread half at
+# all: it fires only in an agent context, so there is nothing for the skill channel
+# to own and no partition to keep, only a wall that could not otherwise be reached.
+# The landing gate keeps its Stop registration in the frontmatter (the sweep, which
+# judges async subagents) and gains this one (the verdict a named teammate lands on,
+# at the moment it stops). Two events, two arms, one script, one channel each.
+#
 # Both sides of the moved registrations are exercised end to end by
 # tests/cross-gate-agreement.test.sh §L, which now asserts four ways: SKILL.md's
 # frontmatter agrees with the hook scripts' own event-spelling guards, the moved
@@ -1668,6 +1676,7 @@ MANAGED_HOOKS=(
   "PreToolUse|Agent|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/dispatch-preflight.sh"
   "PreToolUse|Write|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/canonical-sdlc-governing-skill.sh"
   "PreToolUse|Edit|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/canonical-sdlc-governing-skill.sh"
+  "SubagentStop||~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/landing-gate.sh"
 )
 
 # Rebuild hook config in global settings. Resetting .hooks to exactly the

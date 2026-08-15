@@ -142,6 +142,16 @@ if [ -n "$IS_START" ]; then
   # can key a row: it is the TRANSCRIPT form, byte-identical to the
   # `tool_response.agentId` ARM 2 records at confirmation and to the
   # `background_tasks[].id` the landing sweep reads.
+  #
+  # AND THE FIELD THAT IDENTIFIES A TEAMMATE, re-read (session-20260815, T2).
+  # `agent_type` is not one field with one meaning: measured on one live session it
+  # carries `general-purpose` — the TYPE — for an async dispatch, and the dispatch
+  # NAME for a named teammate (t1-probe-report.md §2.1). Wave-03 read the first
+  # half and removed the join for cause; the second half is the ONLY identifying
+  # field a teammate payload has, and without it a teammate row is never joinable
+  # at all. The join below is therefore by id first and by this name second, with
+  # the name half scoped to rows the writer marked as teammates.
+  START_TYPE=$(_jq '.agent_type')
   START_ID=$(_jq '.agent_id')
   [ -n "$START_ID" ] || exit 0
 elif [ "$TOOL_NAME" = "Bash" ]; then
@@ -575,6 +585,48 @@ if [ -n "$IS_START" ]; then
     [ "$(line_field "$line" session)" = "$SID" ] || continue
     ROW="$line"
   done < "$ROSTER_FILE"
+
+  # THE NAME JOIN, SCOPED TO TEAMMATE ROWS (session-20260815, T2 — design D2, tactical
+  # default 2). Only reached when the id join found nothing, which for a teammate is
+  # every time: ARM 2 leaves `agent_id=` empty on that branch, so there is no id on
+  # the row for the loop above to match, and until now the row was never identified
+  # at all — which is what left every teammate outside the landing contract.
+  #
+  # THE SCOPE IS THE WHOLE OF THE REPAIR, and it is not the wave-03 join returning.
+  # That join was unscoped and keyed on a field carrying the subagent TYPE, so it
+  # matched a row whenever a type happened to be spelled like a name. This one fires
+  # only over rows whose `teammate_id=` is non-empty — a field ARM 2 writes if and
+  # only if the platform said `teammate_spawned` — so it discriminates on the
+  # writer's recorded dispatch mode, never on the shape of an id or the vocabulary
+  # of a type. An async row cannot reach it; a phantom start (empty `agent_type`,
+  # t1 §4.6) matches nothing, and is checked for rather than assumed.
+  #
+  # RESIDUAL, kept and documented rather than solved here: one NAME dispatched twice
+  # in one session is two agents on two rows, and the later row wins — the same
+  # residual the resume case above already carries, and the reason the landing
+  # verdict prefers the id this arm fills over the name it joined on.
+  # The same belt the writer wears, before the value is compared against what the
+  # writer stored: the roster holds sanitized names, so an unsanitized needle would
+  # miss a row it should match rather than merely failing safe.
+  START_TYPE=$(sanitize "$START_TYPE" 200)
+  if [ -z "$ROW" ] && [ -n "$START_TYPE" ]; then
+    while IFS= read -r line; do
+      case "$line" in '#'*|'') continue ;; esac
+      case "$line" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
+      # Superset prefilter, exactly as the id join above: in-shell, quoted so glob
+      # metacharacters stay literal, and matching both the mid-row and end-of-row
+      # forms rather than assuming the writer field order (checklist A6).
+      case "$line" in
+        *"|name=$START_TYPE"|*"|name=$START_TYPE|"*) : ;;
+        *) continue ;;
+      esac
+      [ "$(line_field "$line" name)" = "$START_TYPE" ] || continue
+      [ -n "$(line_field "$line" teammate_id)" ] || continue
+      case "$(line_field "$line" status)" in intended|confirmed) : ;; *) continue ;; esac
+      [ "$(line_field "$line" session)" = "$SID" ] || continue
+      ROW="$line"
+    done < "$ROSTER_FILE"
+  fi
   [ -n "$ROW" ] || exit 0
 
   # S6 (AC-5, R6): THE RESUME CASE. `agent_id` here is the transcript form, and

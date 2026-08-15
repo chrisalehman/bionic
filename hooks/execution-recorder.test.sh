@@ -1067,9 +1067,18 @@ expect_eq "the chain is three rows, none rewritten" \
   "3" "$(grep -c '^roster-state/v1|' "$I2_ROSTER")"
 
 # A TEAMMATE confirmation leaves `agent_id=` empty on purpose (the launch response
-# carries only the ADDRESSING form), so there is no id to join on and this arm
-# writes nothing. Stated as a test rather than left as a surprise: the row stays
-# `confirmed`, which is exactly what "never identified" should look like on disk.
+# carries only the ADDRESSING form), so there is no id to join on — and until
+# session-20260815 T2 that meant a teammate row was never identified at all, which
+# is what left every teammate outside the landing contract.
+#
+# THE NAME JOIN RETURNS, SCOPED (design D2, tactical default 2). `agent_type` is
+# not one field with one meaning: t1-probe-report.md §2.1 measured it carrying the
+# subagent TYPE (`general-purpose`) for an async dispatch and the dispatch NAME
+# (`t1mate`) for a teammate, on one live session. Wave-03 read the first half and
+# removed the join for cause; the second half is the only identifying field a
+# teammate payload has. So the join comes back keyed on the row's `teammate_id=`
+# being non-empty — the writer's own statement of which dispatch mode the row is,
+# never a sniff at the id's shape — and an async row is untouched by it.
 IFS='|' read -r I2B_REPO I2B_TR I2B_SUB I2B_CFG <<< "$(make_world identteammate yes)"
 I2B_TUID="toolu_01IDENTTEAM"
 seed_roster_full "$I2B_REPO" "$SID_A" "probemate" "$I2B_TUID"
@@ -1078,10 +1087,40 @@ run_rec "$(mk_agent_post_teammate "$SID_A" "$I2B_TR" "$I2B_REPO" "probemate" \
   "probemate@session-3b51bef0" "$I2B_TUID")"
 run_rec "$(mk_subagent_start "$SID_A" "$I2B_TR" "$I2B_REPO" "probemate" "$START_ID")"
 expect_status "a start after a TEAMMATE confirmation never blocks" 0 "$REC_ST"
-expect_absent "…and identifies nothing: no row carries an id to join on" \
-  "status=identified" "$(cat "$I2B_ROSTER")"
-expect_contains "…while the confirmed row and its addressing id are untouched" \
-  "teammate_id=probemate@session-3b51bef0" "$(cat "$I2B_ROSTER")"
+I2B_ROW=$(grep 'status=identified' "$I2B_ROSTER" 2>/dev/null)
+expect_contains "…and the teammate row IS identified, by name" "status=identified" "$I2B_ROW"
+expect_contains "…carrying the TRANSCRIPT-form id the landing verdict joins on" \
+  "agent_id=$START_ID" "$I2B_ROW"
+expect_contains "…while the addressing id rides forward untouched" \
+  "teammate_id=probemate@session-3b51bef0" "$I2B_ROW"
+expect_contains "…and so does the contract the brief declared" \
+  "deliverable=.bionic/docs/record/w1-slice1-report.md" "$I2B_ROW"
+expect_eq "…exactly one identified row is appended" \
+  "1" "$(grep -c 'status=identified' "$I2B_ROSTER")"
+
+# THE SCOPE, driven from the other side: an ASYNC row whose name happens to equal
+# the payload's `agent_type` is NOT joined by name. For an async dispatch that
+# field is the subagent type, so a name join there is the wave-03 defect returning
+# — it would identify a row on a coincidence of vocabulary ("implementor",
+# "general-purpose") rather than on a fact about the dispatch.
+IFS='|' read -r I2C_REPO I2C_TR I2C_SUB I2C_CFG <<< "$(make_world identasyncname yes)"
+seed_roster_full "$I2C_REPO" "$SID_A" "general-purpose" "toolu_01ASYNCNAME"
+I2C_ROSTER="$I2C_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$I2C_TR" "$I2C_REPO" "general-purpose" "$START_ID")"
+expect_status "a start over an async row named like its agent_type never blocks" 0 "$REC_ST"
+expect_absent "…and identifies nothing: the name join is teammate-scoped" \
+  "status=identified" "$(cat "$I2C_ROSTER")"
+
+# A PHANTOM start — the harness's own internal agents carry an EMPTY agent_type
+# (t1 §4.6) — must not join the row whose name is empty either, and there is
+# nothing else it could key on.
+IFS='|' read -r I2D_REPO I2D_TR I2D_SUB I2D_CFG <<< "$(make_world identphantom yes)"
+seed_roster_full "$I2D_REPO" "$SID_A" "" "toolu_01PHANTOM" confirmed "" "probe@session-3b51bef0"
+I2D_ROSTER="$I2D_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$I2D_TR" "$I2D_REPO" "" "a12b83613c5edc596")"
+expect_status "a phantom start never blocks" 0 "$REC_ST"
+expect_absent "…and joins no row on an empty name" \
+  "status=identified" "$(cat "$I2D_ROSTER")"
 
 # The LATEST row wins, not the first: an id can appear on several rows of one
 # session (intended → confirmed, or a resume), and the contract that belongs to

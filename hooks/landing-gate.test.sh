@@ -100,6 +100,16 @@ bg_tasks() {  # <agent-id>...
   printf ']'
 }
 
+# THE TEAMMATE'S OWN LIVE ROW. A named teammate is entered in `background_tasks[]` under a
+# THIRD id namespace — an opaque nine-character token that appears in no other payload the
+# session ever sees — and it NEVER LEAVES that array: measured `status:"running"` on the last
+# Stop of the session, 2 m 41 s after the teammate had delivered its own SubagentStop
+# (t1-probe-report.md §2.1, §2.3, CLI 2.1.233). Landing-by-disappearance is a subagent-only
+# signal, so this row is what the SubagentStop arm must be indifferent to.
+bg_teammate() {  # <opaque-id>
+  printf '{"id":"%s","type":"teammate","status":"running","description":"a named teammate, still addressable..."}' "$1"
+}
+
 stop_payload() {  # <cwd> <session_id> <stop_hook_active> [live-agent-id...]
   local cwd="$1" sid="$2" active="$3"; shift 3
   cat <<JSON
@@ -119,20 +129,30 @@ stop_payload() {  # <cwd> <session_id> <stop_hook_active> [live-agent-id...]
 JSON
 }
 
-# The event the gate used to own. It is another script's business now, and a payload the
-# skill channel never receives at all (T4b §3).
-substop_payload() {  # <cwd> <session_id>
-  local cwd="$1" sid="$2"
+# THE LANDING EVENT FOR A TEAMMATE (session-20260815-landing-supervision, T2). The key set is
+# t1-probe-report.md §2.1's verbatim SubagentStop capture: agent_id (the TRANSCRIPT form),
+# agent_type (which carries the dispatch NAME for a teammate and the subagent TYPE for an
+# async dispatch — both readings are right, for different dispatch modes), agent_transcript_path,
+# last_assistant_message, stop_hook_active, and the whole `background_tasks[]` array the Stop
+# payload carries. This event reaches the gate through the SETTINGS channel behind
+# hooks/agent-context-guard.sh; the skill channel never receives it (t1 §3).
+substop_payload() {  # <cwd> <session_id> <agent_id> <agent_type> <stop_hook_active> [live-bg-json]
+  local cwd="$1" sid="$2" aid="$3" atype="$4" active="$5" bg="${6:-[]}"
   cat <<JSON
 {
   "session_id": "$sid",
   "transcript_path": "/tmp/transcripts/$sid.jsonl",
+  "agent_transcript_path": "/tmp/transcripts/$sid/subagents/agent-$aid.jsonl",
   "cwd": "$cwd",
-  "agent_id": "$AID_A",
-  "agent_type": "general-purpose",
+  "prompt_id": "e30e6fb0-3868-467c-b092-ca03e55b4cd5",
+  "permission_mode": "bypassPermissions",
+  "effort": { "level": "high" },
+  "agent_id": "$aid",
+  "agent_type": "$atype",
   "hook_event_name": "SubagentStop",
-  "stop_hook_active": false,
-  "background_tasks": [],
+  "stop_hook_active": $active,
+  "last_assistant_message": "Both steps completed.",
+  "background_tasks": $bg,
   "session_crons": []
 }
 JSON
@@ -147,10 +167,11 @@ iso_ago() {  # <seconds ago> -> UTC ISO-8601, the launched_at shape
 mkrow() {  # <key=value>...
   local status=confirmed session="$SID" name=agent agent_id="$AID_A" launched_at=""
   local subagent_type=implementor model=opus deliverable="" duration="" progress=""
-  local claims="" cadence="" waiver="" tool_use_id=toolu_x source=declared kv
+  local claims="" cadence="" waiver="" tool_use_id=toolu_x source=declared teammate_id="" kv
   for kv in "$@"; do
     case "$kv" in
       source=*)      source="${kv#*=}" ;;
+      teammate_id=*) teammate_id="${kv#*=}" ;;
       status=*)      status="${kv#*=}" ;;
       session=*)     session="${kv#*=}" ;;
       name=*)        name="${kv#*=}" ;;
@@ -167,9 +188,17 @@ mkrow() {  # <key=value>...
     esac
   done
   [ -n "$launched_at" ] || launched_at="$(iso_ago 60)"
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=%s|deliverable=%s|source=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|waiver=%s|tool_use_id=%s\n' \
+  # `teammate_id` is APPENDED rather than slotted, because that is how the writer emits it:
+  # hooks/execution-recorder.sh's completion arm substitutes the field when the launch row
+  # already carries one and appends it at the end when it does not — and the launch wall
+  # never writes it, so every real teammate row carries it last. It is the field that says
+  # which namespace the row's id is in, and (this slice) which half of the machinery owns
+  # the row's landing verdict.
+  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=%s|deliverable=%s|source=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|waiver=%s|tool_use_id=%s' \
     "$status" "$session" "$name" "$agent_id" "$launched_at" "$subagent_type" "$model" \
     "$deliverable" "$source" "$duration" "$progress" "$claims" "$cadence" "$waiver" "$tool_use_id"
+  [ -n "$teammate_id" ] && printf '|teammate_id=%s' "$teammate_id"
+  printf '\n'
 }
 
 roster_of() { printf '%s/.bionic/tmp/roster-%s.state' "$1" "${2:-$SID}"; }
@@ -381,10 +410,16 @@ R4="$(make_wave_repo r4)"
 add_row "$R4" name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
   launched_at="$(iso_ago 600)"
 
-run_gate "$GATE" "$(substop_payload "$R4" "$SID")"
-expect_status "4a: a SubagentStop payload is no longer this gate's business" "0" "$RC"
+# A SubagentStop whose id belongs to a SUBAGENT row is not this arm's business either: the
+# roster's responsibility partition gives async dispatches to the Stop-sweep, which judges
+# them by disappearance from `background_tasks[]`, and teammates to the SubagentStop arm.
+# Verdicting here would not merely duplicate the sweep — it would STEAL the refusal, since
+# the marker this arm writes is what tells the sweep a row is answered for, and the sweep's
+# refusal is the one that reaches the orchestrator (Section 12's rationale).
+run_gate "$GATE" "$(substop_payload "$R4" "$SID" "$AID_A" general-purpose false)"
+expect_status "4a: a SubagentStop over a SUBAGENT row belongs to the sweep — pass" "0" "$RC"
 expect_empty "4a: …silently" "$OUT_STDERR"
-expect_eq "4a: …and nothing is swept on an event we do not own" "0" "$(swept_count "$R4")"
+expect_eq "4a: …and nothing is swept out from under the sweep" "0" "$(swept_count "$R4")"
 
 run_gate "$GATE" "$(stop_payload "" "$SID" false)"
 expect_status "4b: no cwd — the repo is unresolvable, pass" "0" "$RC"
@@ -624,6 +659,159 @@ expect_status "11b: a session key carrying path separators is not a session key 
 expect_absent "11c: …and no verdict is taken over the roster it reached" \
   "LANDING CONTRACT" "$OUT_STDERR"
 expect_absent "11d: …and no marker is written into it" "landing-swept" "$(cat "$PLANTED")"
+
+# ================================================================= Section 12
+section "Section 12: TEAMMATES LAND AT SubagentStop (session-20260815 T2, R1/AC-2)"
+
+# WHY A SECOND ARM AND NOT A BETTER JOIN. The sweep's discrimination is "a roster row whose
+# agent_id is absent from background_tasks[] has landed", and for a named teammate that
+# predicate is wrong in BOTH directions (t1-probe-report.md §2.3): the three id namespaces a
+# teammate carries never join — the addressing form at dispatch, the transcript form on
+# SubagentStart/Stop, and an opaque token in background_tasks[] — and the teammate's row never
+# leaves that array at all, so a filled agent_id would read as LANDED on the first Stop after
+# dispatch, 2.8 s in, while the teammate is still working. SubagentStop is the transition
+# itself, delivered with every fact the verdict needs in one payload: no join to reconstruct,
+# no disappearance to infer.
+#
+# The arm reuses the sweep's own machinery unchanged — the same `session-sweeper.sh verdict`
+# verb, the same landing-swept/v1 marker through the same append, the same refusal text — so
+# what is new here is WHICH ROW is judged and WHEN, and nothing about how.
+TEAM_AID="aw2mate-fdaa80c4b3cb703f"        # transcript form: `a` + name + `-` + 16 hex (t1 §2.2)
+TEAM_ADDR="w2mate@session-3b51bef0"        # addressing form, the field that says "teammate"
+TEAM_BG="[$(bg_teammate t5triyxvo)]"       # its own still-running row, for the whole session
+
+R12="$(make_wave_repo r12)"
+add_row "$R12" name=w2mate agent_id="$TEAM_AID" teammate_id="$TEAM_ADDR" \
+  deliverable=.bionic/docs/record/mate.md launched_at="$(iso_ago 600)"
+deliver "$R12" .bionic/docs/record/mate.md
+run_gate "$GATE" "$(substop_payload "$R12" "$SID" "$TEAM_AID" w2mate false "$TEAM_BG")"
+expect_status "12a: a teammate that delivered lands MET, and passes" "0" "$RC"
+expect_empty "12a: …silently — a met contract is not news" "$OUT_STDERR"
+expect_eq "12a: …and is marked swept, through the same append the sweep uses" \
+  "1" "$(swept_count "$R12")"
+expect_contains "12a: …recording the state the verb computed" "state=MET" "$(swept_lines "$R12")"
+expect_contains "12a: …keyed by the transcript-form id ARM 3 filled in" \
+  "agent_id=$TEAM_AID" "$(swept_lines "$R12")"
+
+R12B="$(make_wave_repo r12b)"
+add_row "$R12B" name=w2mate agent_id="$TEAM_AID" teammate_id="$TEAM_ADDR" \
+  deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)"
+run_gate "$GATE" "$(substop_payload "$R12B" "$SID" "$TEAM_AID" w2mate false "$TEAM_BG")"
+expect_status "12b: a teammate that did NOT deliver is refused (exit 2)" "2" "$RC"
+expect_contains "12b: …in the sweep's own words, unedited" "LANDING CONTRACT UNMET" "$OUT_STDERR"
+expect_contains "12b: …naming the row" "w2mate" "$OUT_STDERR"
+expect_contains "12b: …and the artifact that is not on disk" \
+  "missing=.bionic/docs/record/never.md" "$OUT_STDERR"
+expect_contains "12b: …and telling the reader how to pass" "$REFUSAL_TAIL" "$OUT_STDERR"
+expect_empty "12b: the refusal goes to stderr, never stdout" "$OUT_STDOUT"
+expect_contains "12b: …and the row is marked, so it is asked about once" \
+  "state=UNMET" "$(swept_lines "$R12B")"
+
+# ONCE PER ROW, EVER — the same promise the sweep makes. A blocked SubagentStop is re-entered
+# with stop_hook_active true (the harness's own guidance for Stop/SubagentStop hooks, read out
+# of the shipped binary), and the teammate can stop again after that: neither re-entry may
+# re-refuse, or the agent is wedged in a loop it has no way out of.
+run_gate "$GATE" "$(substop_payload "$R12B" "$SID" "$TEAM_AID" w2mate true "$TEAM_BG")"
+expect_status "12c: the blocked re-entry (stop_hook_active) passes" "0" "$RC"
+expect_empty "12c: …silently" "$OUT_STDERR"
+expect_eq "12c: …and takes no second verdict" "1" "$(swept_count "$R12B")"
+run_gate "$GATE" "$(substop_payload "$R12B" "$SID" "$TEAM_AID" w2mate false "$TEAM_BG")"
+expect_status "12d: a later SubagentStop for the same marked row passes" "0" "$RC"
+expect_empty "12d: …silently" "$OUT_STDERR"
+expect_eq "12d: …and writes no second marker" "1" "$(swept_count "$R12B")"
+
+# THE ROW IS STILL IN background_tasks[] IN EVERY CASE ABOVE — that is the fixture's point,
+# not an accident (t1 §2.3). This arm must not consult the live set: the event IS the landing.
+expect_contains "12e: the fixtures really do keep the teammate live in background_tasks" \
+  '"type":"teammate"' "$TEAM_BG"
+
+# THE NAME FALLBACK. `agent_id=` is filled by the recorder's identification arm at
+# SubagentStart; if that event was lost, the row is still joinable here because SubagentStop's
+# `agent_type` carries the dispatch NAME for a teammate (t1 §2.1 — the field wave-03 read as
+# the subagent type, which it is for an async dispatch and is not for a teammate). The marker
+# then keys on the id the PAYLOAD carries, which is the same transcript form the join would
+# have written, so the row is still answered for exactly once.
+R12F="$(make_wave_repo r12f)"
+add_row "$R12F" name=w2mate agent_id= status=confirmed teammate_id="$TEAM_ADDR" \
+  deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)"
+run_gate "$GATE" "$(substop_payload "$R12F" "$SID" "$TEAM_AID" w2mate false "$TEAM_BG")"
+expect_status "12f: an unidentified teammate row is joined by NAME, and refuses" "2" "$RC"
+expect_contains "12f: …naming the row" "w2mate" "$OUT_STDERR"
+expect_contains "12f: …and the marker keys on the id the payload carried" \
+  "agent_id=$TEAM_AID" "$(swept_lines "$R12F")"
+run_gate "$GATE" "$(substop_payload "$R12F" "$SID" "$TEAM_AID" w2mate false "$TEAM_BG")"
+expect_eq "12f: …once, and not again on the next stop" "1" "$(swept_count "$R12F")"
+
+# THE PHANTOMS. Roughly nine harness-internal SubagentStops arrive per session carrying an
+# `agent_type` of "" and an id on no row of ours (t1 §4.6). They are a read to budget for, not
+# a correctness problem — but only if a no-match is silent.
+R12G="$(make_wave_repo r12g)"
+add_row "$R12G" name=w2mate agent_id="$TEAM_AID" teammate_id="$TEAM_ADDR" \
+  deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)"
+run_gate "$GATE" "$(substop_payload "$R12G" "$SID" "a12b83613c5edc596" "" false "$TEAM_BG")"
+expect_status "12g: a phantom SubagentStop matching no roster row passes" "0" "$RC"
+expect_empty "12g: …silently" "$OUT_STDERR"
+expect_eq "12g: …and marks nothing, so the real row keeps its verdict owed" \
+  "0" "$(swept_count "$R12G")"
+
+# The same ways out the sweep has, on the new event.
+R12H="$(make_repo r12h)"
+new_roster "$R12H"
+add_row "$R12H" name=w2mate agent_id="$TEAM_AID" teammate_id="$TEAM_ADDR" \
+  deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)"
+run_gate "$GATE" "$(substop_payload "$R12H" "$SID" "$TEAM_AID" w2mate false "$TEAM_BG")"
+expect_status "12h: no active wave — a teammate is held to nothing" "0" "$RC"
+expect_eq "12h: …and nothing is marked outside a wave" "0" "$(swept_count "$R12H")"
+
+R12I="$(make_wave_repo r12i)"
+add_row "$R12I" name=w2mate agent_id="$TEAM_AID" teammate_id="$TEAM_ADDR" \
+  waiver="exploratory probe" launched_at="$(iso_ago 600)"
+run_gate "$GATE" "$(substop_payload "$R12I" "$SID" "$TEAM_AID" w2mate false "$TEAM_BG")"
+expect_status "12i: a teammate row declaring no artifact passes" "0" "$RC"
+expect_empty "12i: …silently" "$OUT_STDERR"
+expect_eq "12i: …and is not marked, exactly as the sweep leaves it" "0" "$(swept_count "$R12I")"
+
+# ================================================================= Section 13
+section "Section 13: the sweep SKIPS teammate rows — the partition, both halves"
+
+# THIS SKIP IS LOAD-BEARING, not hygiene. Once the recorder's scoped name join fills a
+# teammate row's `agent_id` with the transcript form, that id is absent from
+# `background_tasks[]` by construction — the array keys teammates under a different namespace
+# entirely — so the sweep's landed/live predicate reads EVERY teammate as landed on the first
+# Stop after dispatch, 2.8 s in, and turns today's silence into a false refusal on every
+# teammate dispatch (t1 §2.3). The two arms partition the roster on one field: rows carrying a
+# `teammate_id=` belong to SubagentStop, rows without it to the sweep.
+R13="$(make_wave_repo r13)"
+add_row "$R13" name=w2mate agent_id="$TEAM_AID" teammate_id="$TEAM_ADDR" \
+  deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)"
+run_gate "$GATE" "$(stop_payload "$R13" "$SID" false)"
+expect_status "13a: a teammate row with a filled id is NOT swept-landed" "0" "$RC"
+expect_empty "13a: …and the sweep says nothing about it" "$OUT_STDERR"
+expect_eq "13a: …and marks nothing, leaving the verdict to its own event" \
+  "0" "$(swept_count "$R13")"
+
+# THE DISCRIMINATING PAIR: the same row, same id, same missing artifact, differing only in the
+# field the partition reads. Without it this section would pass over any implementation that
+# simply stopped sweeping.
+R13B="$(make_wave_repo r13b)"
+add_row "$R13B" name=w2mate agent_id="$TEAM_AID" \
+  deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)"
+run_gate "$GATE" "$(stop_payload "$R13B" "$SID" false)"
+expect_status "13b: …while the identical row WITHOUT teammate_id is swept and refuses" "2" "$RC"
+expect_contains "13b: …naming it" "w2mate" "$OUT_STDERR"
+expect_eq "13b: …and marked once" "1" "$(swept_count "$R13B")"
+
+# A teammate row does not shield its neighbours: the skip is per row, on the same fold.
+R13C="$(make_wave_repo r13c)"
+add_row "$R13C" name=w2mate agent_id="$TEAM_AID" teammate_id="$TEAM_ADDR" \
+  deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)" tool_use_id=toolu_MATE
+add_row "$R13C" name=async-one agent_id="$AID_B" \
+  deliverable=.bionic/docs/record/never2.md launched_at="$(iso_ago 600)" tool_use_id=toolu_ASYNC
+run_gate "$GATE" "$(stop_payload "$R13C" "$SID" false)"
+expect_status "13c: a landed subagent beside a teammate still refuses" "2" "$RC"
+expect_contains "13c: …naming the subagent row" "async-one" "$OUT_STDERR"
+expect_absent "13c: …and never the teammate, whose event has not arrived" "w2mate" "$OUT_STDERR"
+expect_eq "13c: …with one marker, for the subagent alone" "1" "$(swept_count "$R13C")"
 
 # ---------- summary ----------
 printf '\n---\n%d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"

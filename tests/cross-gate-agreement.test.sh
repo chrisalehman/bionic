@@ -253,6 +253,20 @@ mk_stopsweep_payload() {  # <cwd> <sid> <stop_hook_active true|false> [live-agen
       background_tasks:$bg, session_crons:[]}'
 }
 
+# The landing gate's OTHER arm (session-20260815 T2): a named teammate is judged at its own
+# SubagentStop rather than by disappearing from `background_tasks[]`, which it never does.
+# Key set from t1-probe-report.md §2.1; `agent_type` carries the dispatch NAME for a teammate.
+mk_substop_payload() {  # <cwd> <sid> <agent-id> <agent-type> <stop_hook_active true|false>
+  jq -n --arg c "$1" --arg s "$2" --arg a "$3" --arg t "$4" --argjson h "$5" \
+    '{session_id:$s, transcript_path:("/tmp/transcripts/" + $s + ".jsonl"),
+      agent_transcript_path:("/tmp/transcripts/" + $s + "/subagents/agent-" + $a + ".jsonl"),
+      cwd:$c, prompt_id:"e30e6fb0-3868-467c-b092-ca03e55b4cd5",
+      permission_mode:"bypassPermissions", effort:{level:"high"},
+      agent_id:$a, agent_type:$t,
+      hook_event_name:"SubagentStop", stop_hook_active:$h,
+      last_assistant_message:"Done.", background_tasks:[], session_crons:[]}'
+}
+
 # THE PRODUCER→RECORDER PAIR, DRIVEN END TO END. Since slice 4/4 the recorder
 # reads no command line: it copies the machine line the observation printed. So
 # the only honest way to ask "what did the recorder write for this command" is to
@@ -2553,10 +2567,26 @@ expect_absent_ug "…with NOTHING left registered on SubagentStop" \
 expect_eq "…exactly ten registrations in the frontmatter block, nothing extra" \
   "10" "$(printf '%s\n' "$SKILL_HOOKS_ROWS" | /usr/bin/grep -c '|')"
 
-expect_contains "…and the landing sweep itself guards on that same event name" \
-  '"$EVENT" = "Stop"' "$(cat "$PARTY_LG")"
-expect_absent_ug "…and no longer answers to the event it can never receive" \
-  'SubagentStop"' "$(cat "$PARTY_LG")"
+# THE EVENT NAMES THE GATE ANSWERS TO, pinned as the SPAN that decides them rather than as a
+# literal comparison that a refactor can move: the relevance hoist is one `case` over
+# `$EVENT`, and a registration whose event name is absent from these arms is a wall that
+# exits before it reads anything (session-20260815 T2 turned the two `[ ]` tests into this
+# case when the second arm arrived).
+LG_EVENT_ARMS=$(awk '/^case "\$EVENT" in$/{f=1} f{print} f&&/^esac$/{exit}' "$PARTY_LG")
+expect_eq "the landing gate decides relevance in one event case (not vacuous)" "yes" \
+  "$([ -n "$LG_EVENT_ARMS" ] && echo yes || echo no)"
+expect_contains "…and the landing sweep itself answers the event the frontmatter registers" \
+  "Stop)" "$LG_EVENT_ARMS"
+# THE SECOND ARM (session-20260815 T2). The gate answers SubagentStop again — but through
+# the SETTINGS channel behind the partition guard, never through this frontmatter block, and
+# for teammate rows alone. Both halves are asserted, because either one alone is a wall in
+# the wrong place: a frontmatter registration on SubagentStop is inert (it can never be
+# delivered), and a script that stopped reading the event would leave the settings entry
+# pointing at an arm that exits at its relevance hoist.
+expect_contains "…and answers SubagentStop as its second arm, for teammate rows" \
+  "SubagentStop) MODE=landing" "$LG_EVENT_ARMS"
+expect_absent_ug "…while the frontmatter block still registers nothing on that event" \
+  "SubagentStop" "$SKILL_HOOKS_ROWS"
 expect_contains "…and the recorder's identification arm guards on that same event name" \
   '= "SubagentStart"' "$(cat "$PARTY_ER")"
 
@@ -2597,20 +2627,29 @@ expect_eq "every top-level key in the hooks: block is a hook event the harness k
 # lingering entry would fire the wall in every session, defeating R1 even after the
 # frontmatter side is right.
 for script in canonical-sdlc-evidence-gate.sh stop-guard.sh \
-              execution-recorder.sh context-spend.sh landing-gate.sh; do
+              execution-recorder.sh context-spend.sh; do
   expect_absent_ug "MANAGED_HOOKS no longer names $script (moved to frontmatter)" \
     "hooks/$script" "$MANAGED_HOOKS_SRC"
 done
-# THE TWO WALLS THAT CAME BACK (session-20260815 T6) are a conditional absence, not
-# an absence: they are named in this array again, and every occurrence must sit
-# behind hooks/agent-context-guard.sh. A bare entry would be the R1 regression this
-# section was written to catch — the wall firing in every session on the machine —
-# wearing the new registration's clothes, and §L.6 below (which asserts the guarded
-# form is PRESENT) would still pass beside it.
+# THE THREE WALLS THAT CAME BACK (session-20260815 T6, then T2) are a conditional
+# absence, not an absence: they are named in this array again, and every occurrence
+# must sit behind hooks/agent-context-guard.sh. A bare entry would be the R1
+# regression this section was written to catch — the wall firing in every session on
+# the machine — wearing the new registration's clothes, and §L.6 below (which asserts
+# the guarded form is PRESENT) would still pass beside it. The landing gate joined
+# them when teammates got their landing verdict: its Stop arm stays skill-scoped, and
+# only the SubagentStop arm needs the channel that reaches an agent context.
 L2_UNGUARDED=$(printf '%s\n' "$MANAGED_HOOKS_SRC" \
-  | /usr/bin/grep -E 'dispatch-preflight\.sh|canonical-sdlc-governing-skill\.sh' \
+  | /usr/bin/grep -E 'dispatch-preflight\.sh|canonical-sdlc-governing-skill\.sh|landing-gate\.sh' \
   | /usr/bin/grep -v 'agent-context-guard\.sh')
-expect_eq "…and the two walls that returned are never named UNGUARDED" "" "$L2_UNGUARDED"
+expect_eq "…and the three walls that returned are never named UNGUARDED" "" "$L2_UNGUARDED"
+# The landing gate is the one wall registered on TWO events across the two channels, so
+# its settings entry must not drift onto the event the skill channel already owns: a
+# second Stop registration would sweep twice per turn and journal two markers.
+expect_eq "…and the landing gate is registered here for SubagentStop alone" "1" \
+  "$(printf '%s\n' "$MANAGED_HOOKS_SRC" | /usr/bin/grep -c 'landing-gate\.sh')"
+expect_eq "…never for Stop, which the skill channel owns" "0" \
+  "$(printf '%s\n' "$MANAGED_HOOKS_SRC" | /usr/bin/grep -c '"Stop|')"
 
 # --- L.3 MANAGED_HOOKS presence: the three non-sdlc hooks are untouched by the move
 # (R2: guard-set parity for everything that was never sdlc-scoped) — exact set, not
@@ -2621,8 +2660,8 @@ expect_contains "…protect-database.sh on PreToolUse|Bash" \
   '"PreToolUse|Bash|~/.claude/hooks/protect-database.sh"' "$MANAGED_HOOKS_SRC"
 expect_contains "…and farm-out-reminder.sh on PreToolUse|Bash" \
   '"PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh"' "$MANAGED_HOOKS_SRC"
-expect_eq "…and exactly six entries total — three unconditional, three guarded" \
-  "6" "$(printf '%s\n' "$MANAGED_HOOKS_SRC" | /usr/bin/grep -c '"')"
+expect_eq "…and exactly seven entries total — three unconditional, four guarded" \
+  "7" "$(printf '%s\n' "$MANAGED_HOOKS_SRC" | /usr/bin/grep -c '"')"
 
 # --- L.4 EVERY registration is bounded by a timeout, whichever branch writes it ---
 #
@@ -2682,6 +2721,9 @@ expect_contains "…the ARTIFACT wall on Write, behind the guard" \
 expect_contains "…and on Edit, behind the guard" \
   '"PreToolUse|Edit|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/canonical-sdlc-governing-skill.sh"' \
   "$MANAGED_HOOKS_SRC"
+expect_contains "…and the LANDING verdict on SubagentStop, behind the guard" \
+  '"SubagentStop||~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/landing-gate.sh"' \
+  "$MANAGED_HOOKS_SRC"
 expect_absent_ug "…and the guard itself is NOT on the skill channel (no event has two live channels)" \
   "agent-context-guard" "$SKILL_HOOKS_ROWS"
 
@@ -2694,6 +2736,16 @@ for _pair in "PreToolUse|Agent|~/.claude/hooks/dispatch-preflight.sh|10" \
   expect_contains "the skill channel still covers the main thread for ${_pair%%|*}|$(echo "$_pair" | cut -d'|' -f2)" \
     "$_pair" "$SKILL_HOOKS_ROWS"
 done
+
+# SubagentStop IS THE ONE EXCEPTION TO THAT PAIRING, and it is not a gap. The other three
+# events exist on both sides of the depth line — a Write happens on the main thread and
+# inside an agent — so each needs a channel for each. SubagentStop only ever fires in an
+# agent context: there is no main-thread half to cover, and a frontmatter row for it would
+# be a registration that can never be delivered (asserted absent in L.1). The settings entry
+# is therefore the whole of that event's coverage, which is why the guarded form above is
+# pinned by value.
+expect_eq "the SubagentStop entry has no skill-channel twin, and needs none" "0" \
+  "$(printf '%s\n' "$SKILL_HOOKS_ROWS" | /usr/bin/grep -c '^SubagentStop|')"
 
 # Driven, not grepped: what bootstrap WRITES for a guarded entry is one command string
 # carrying both paths, with its matcher and its timeout — the shape the harness executes
@@ -2788,10 +2840,18 @@ printf 'roster-state/v1|status=confirmed|session=%s|name=finished|agent_id=afini
 # fixture, so the marker is cleared first — the property under test is what the consumers
 # read off ONE ledger, not the sweep's idempotency (which hooks/landing-gate.test.sh owns).
 MROSTER="$MREPO/.bionic/tmp/roster-$SID_A.state"
+#
+# THE FIXTURE ROW IS A TEAMMATE ROW — it carries a `teammate_id=`, as every row the
+# completion arm writes for a named dispatch does — so the arm that answers for it is the
+# SubagentStop verdict, not the Stop-sweep (which skips those rows by design: their ids are
+# in a namespace `background_tasks[]` does not use, and they never leave that array anyway).
+# Driving the gate through the arm that actually owns the row is what keeps this section
+# about the ACK rather than about routing, and it asks the new arm the same question the
+# other two consumers are asked: does one ack ledger close this row for you too.
 m_sweep() {  # <gate path> -> the gate's exit status, refusal on stdout
   /usr/bin/grep -v '^landing-swept/' "$MROSTER" > "$MROSTER.tmp" 2>/dev/null
   mv "$MROSTER.tmp" "$MROSTER"
-  mk_stopsweep_payload "$MREPO" "$SID_A" false | bash "$1" 2>&1
+  mk_substop_payload "$MREPO" "$SID_A" "afinished-1111111111111111" finished false | bash "$1" 2>&1
 }
 
 m_vline() {  # -> the verdict machine line all three consumers read for this fixture
