@@ -1719,6 +1719,67 @@ done
 expect_eq "the sweeper's clean() is the stop gate's mline_value(), body for body" \
   "$(fn_body "$OBSERVE" mline_value)" "$(fn_body "$SWEEPER" clean)"
 
+# THE COPY COUNT WAS FIVE, NOT TWO (t6-review.md F-5): execution-recorder.sh's own
+# line_field() sat outside this section entirely, and landing-gate.sh's own by-key reader
+# was PINNED NOWHERE — it is the fifth copy and the one this wave added. Its signature is a
+# genuinely different SHAPE (one argument, reading a global $LINE rather than taking the
+# line as a parameter, because every candidate in its sweep loop already lives in that
+# variable) — a byte comparison would be comparing apples to a legitimate shape change, so
+# this half is BEHAVIOURAL: the same synthetic roster line, asked for the same key by all
+# FIVE extractors (three literally named line_field, one named record_field, one shaped as
+# _field), each run from ITS OWN file in its own subshell — the same precedent §N.2 uses for
+# resolve_project_root — so five same-named definitions never shadow each other and the real
+# pipeline is what answers, never a hand-copied stand-in.
+expect_eq "the sweeper's line_field() is execution-recorder's, body for body" \
+  "$(fn_body "$SWEEPER" line_field)" "$(fn_body "$PARTY_ER" line_field)"
+expect_eq "the sweeper's line_field() is stop-guard's record_field(), body for body" \
+  "$(fn_body "$SWEEPER" line_field)" "$(fn_body "$PARTY_SG" record_field)"
+
+field2_via() {  # <file> <fn-name> <line> <key> -> a <line> <key> extractor, real source, real call
+  local f="$1" n="$2" line="$3" key="$4"
+  ( eval "$(awk -v n="$n" '$0 ~ "^" n "\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$f")"
+    "$n" "$line" "$key" ) 2>/dev/null
+}
+field1_via() {  # <file> <line> <key> -> landing-gate.sh's ONE-argument _field(), real source
+  local f="$1" line="$2" key="$3"
+  ( eval "$(awk '/^_field\(\)/,/^\}/' "$f")"
+    LINE="$line" _field "$key" ) 2>/dev/null
+}
+
+I1_LINE='roster-state/v1|status=confirmed|name=w4-i1|agent_id=ai1test0000000000|deliverable=.bionic/docs/record/i1.md|state=UNMET'
+expect_eq "fixture: the by-key extractors have something to disagree about" "yes" \
+  "$([ -n "$(field2_via "$SWEEPER" line_field "$I1_LINE" agent_id)" ] && echo yes || echo no)"
+for _key in status name agent_id deliverable state; do
+  I1_WANT=$(field2_via "$SWEEPER" line_field "$I1_LINE" "$_key")
+  expect_eq "…and stop-check's line_field(${_key}), called for real, agrees" \
+    "$I1_WANT" "$(field2_via "$OBSERVE" line_field "$I1_LINE" "$_key")"
+  expect_eq "…and execution-recorder's line_field(${_key}), called for real, agrees" \
+    "$I1_WANT" "$(field2_via "$PARTY_ER" line_field "$I1_LINE" "$_key")"
+  expect_eq "…and stop-guard's record_field(${_key}), called for real, agrees" \
+    "$I1_WANT" "$(field2_via "$PARTY_SG" record_field "$I1_LINE" "$_key")"
+  expect_eq "…and landing-gate's _field(${_key}), called for real through its own \$LINE, agrees" \
+    "$I1_WANT" "$(field1_via "$PARTY_LG" "$I1_LINE" "$_key")"
+done
+
+# THE DISCRIMINATING HALF: a copy of landing-gate.sh with the anchor dropped from _field()'s
+# grep — the plausible drift where "asked for the FIELD" turns into an unanchored SUBSTRING
+# match. A decoy field (`prev_status=`) that carries the real key as a substring is what
+# makes the unanchored pattern answer wrong instead of merely reading identically anyway.
+I1_MUT_DIR="$SANDBOX/fx/i1-unanchored"
+mkdir -p "$I1_MUT_DIR"
+awk '{ sub(/grep "\^\$1="/, "grep \"$1=\""); print }' "$PARTY_LG" > "$I1_MUT_DIR/landing-gate.sh"
+if cmp -s "$PARTY_LG" "$I1_MUT_DIR/landing-gate.sh"; then
+  no "the unanchored-grep mutation applies to landing-gate.sh" \
+     "the mutation target matched nothing — the extractor moved and this proof is vacuous"
+else
+  ok "the unanchored-grep mutation applies to landing-gate.sh"
+fi
+I1_DECOY='roster-state/v1|prev_status=confirmed|status=UNMET'
+expect_eq "the real _field(), anchored, reads the true field" \
+  "UNMET" "$(field1_via "$PARTY_LG" "$I1_DECOY" status)"
+expect_eq "…and the unanchored mutant is fooled by the decoy field instead (§I.1 discriminates)" \
+  "confirmed" "$(field1_via "$I1_MUT_DIR/landing-gate.sh" "$I1_DECOY" status)"
+
 # --- I.2 done-detection: one concept, two implementations, one answer ---
 
 DREPO=$(new_repo "done-detection")
@@ -2765,6 +2826,48 @@ expect_contains "the guard sets the channel marker the dispatch wall reads" \
 expect_contains "…and the dispatch wall skips its roster append on exactly that value" \
   '"${BIONIC_HOOK_CHANNEL:-}" = "agent-context"' "$(cat "$PARTY_DP")"
 
+# --- L.7 the frontmatter PARSER itself: three copies in TEST CODE, no agreement (t6-review.md
+# F-5, low severity but real). §L.1's own row-extractor (above), installer-behavior.test.sh's
+# `_skill_frontmatter_has`, and scripts.test.sh's inline check all walk the `hooks:` block the
+# same way before diverging into their own caller's shape (row-collector vs point predicate) —
+# drift here makes a TEST go vacuous rather than production wrong, and silently: a parser that
+# stops matching just answers "not found", indistinguishable from a parser correctly reporting
+# a registration that is genuinely absent. What the three share BYTE FOR BYTE is the state
+# machine that walks the block, so that is what is pinned — as a SPAN, on the same precedent
+# §O uses for code shared by legitimately different callers — extracted from each file's own
+# source on disk rather than retyped by hand.
+frontmatter_parser_span() {  # <file> -> the 6-line `hooks:` state-machine prologue, ws-normalized
+  awk '
+    p == 0 && index($0, "/^hooks:$/ { active=1; next }") > 0 { p = 1 }
+    p { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; c++; if (c == 6) exit }
+  ' "$1"
+}
+L7_CG=$(frontmatter_parser_span "$REPO_ROOT/tests/cross-gate-agreement.test.sh")
+L7_IB=$(frontmatter_parser_span "$REPO_ROOT/tests/installer-behavior.test.sh")
+L7_SC=$(frontmatter_parser_span "$REPO_ROOT/tests/scripts.test.sh")
+expect_eq "the span extractor found something at all (this section is not vacuous)" "yes" \
+  "$([ -n "$L7_CG" ] && echo yes || echo no)"
+expect_eq "installer-behavior.test.sh's frontmatter parser opens the SAME state machine, span for span" \
+  "$L7_CG" "$L7_IB"
+expect_eq "scripts.test.sh's frontmatter parser opens the SAME state machine, span for span" \
+  "$L7_CG" "$L7_SC"
+
+# THE DISCRIMINATING HALF: a copy of scripts.test.sh with one clause in the shared span
+# dropped (the `!active { next }` early exit), driven through the SAME extractor — proving
+# the pin catches a real divergence rather than comparing three empty strings.
+L7_MUT="$SANDBOX/fx/l7-drifted-scripts.test.sh"
+mkdir -p "$SANDBOX/fx"
+awk '{ if ($0 ~ /!active \{ next \}/) next; print }' \
+  "$REPO_ROOT/tests/scripts.test.sh" > "$L7_MUT"
+if cmp -s "$REPO_ROOT/tests/scripts.test.sh" "$L7_MUT"; then
+  no "the dropped-clause mutation applies to scripts.test.sh" \
+     "the mutation target matched nothing — the parser moved and this proof is vacuous"
+else
+  ok "the dropped-clause mutation applies to scripts.test.sh"
+fi
+expect_eq "…and the drifted copy no longer agrees with the other two (§L.7 discriminates)" \
+  "no" "$([ "$L7_CG" = "$(frontmatter_parser_span "$L7_MUT")" ] && echo yes || echo no)"
+
 # ============================================================
 echo ""
 echo "=== M — THE ACK, and the stop order: ONE owner, three consumers (epic-16 w2 S3/S9) ==="
@@ -3529,6 +3632,77 @@ expect_contains "the stand-down addresses dup-landed by the LATER row teammate i
 expect_absent "…and never by the earlier one" "first@session-p" "$P_STAND"
 # The stand-down must still leave the unlanded row alone, folded or not.
 expect_contains "…while dup-open is left alone, not stood down" "LEFT ALONE" "$P_STAND"
+
+# PARTY 4 — landing-gate.sh's OWN copy of the fold (t6-review.md F-3: a fourth "later row
+# wins" implementation, outside this section until now). It needs an active wave to reach
+# its fold at all, which the three parties above do not. The fixture mirrors dup-open's own
+# shape: an EARLIER row that declares NO deliverable (so a fold that took the FIRST row
+# would drop the contract entirely — `if (dl[nm] == "") continue`) and a LATER row that
+# declares a genuinely missing one — so the correct (last-row-wins) fold refuses, and a
+# first-row-wins drift passes the same contract silently.
+p_lg_fixture() {  # <repo> -> an active wave + an lg-dup roster, earlier row bare
+  mkdir -p "$1/.bionic/tmp" "$1/.bionic/docs/record"
+  write_plan "$1/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+  {
+    printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
+    # SAME tool_use_id on both rows — the real writers (dispatch-preflight, then
+    # execution-recorder at confirm/identify) never mint a second one for the same
+    # dispatch, and the sweeper's OWN fold counts distinct tool_use_id as distinct
+    # CONTRACTS: two different ids here would read as an unrelated second dispatch
+    # sharing a name (AMBIGUOUS, §N's `dup` shape) rather than the SAME contract's
+    # two rows, which is what this fixture is about.
+    p_row lg-dup "" "1 minute" "$P_NEW" "" | sed "s/agent_id=|/agent_id=alg-dup-early001|/"
+    printf 'roster-state/v1|status=confirmed|session=%s|name=lg-dup|agent_id=alg-dup-late0001|launched_at=%s|subagent_type=implementor|model=opus|deliverable=%s|source=declared|duration=1 minute|progress=|claims=|cadence=|absent=|waiver=|teammate_id=|tool_use_id=toolu_Plg-dup\n' \
+      "$SID_A" "$P_NEW" "$1/.bionic/docs/record/lg-never-written.md"
+  } > "$1/.bionic/tmp/roster-$SID_A.state"
+}
+
+PLGREPO=$(new_repo "fold-agreement-lg")
+p_lg_fixture "$PLGREPO"
+PLG_ROSTER="$PLGREPO/.bionic/tmp/roster-$SID_A.state"
+expect_eq "fixture: lg-dup is on the roster twice, the earlier row bare (this half is not vacuous)" \
+  "2" "$(grep -c '|name=lg-dup|' "$PLG_ROSTER")"
+
+LG_OUT=$( mk_stopsweep_payload "$PLGREPO" "$SID_A" false | bash "$PARTY_LG" 2>&1 ); LG_RC=$?
+expect_eq "landing-gate joins §P: it refuses lg-dup, folding to the LATER row (the genuinely missing artifact)" \
+  "2" "$LG_RC"
+expect_contains "…naming the LATER row deliverable" \
+  "lg-never-written.md" "$LG_OUT"
+LG_MARK=$(grep -F '|name=lg-dup|' "$PLG_ROSTER" | grep -F 'landing-swept/v1|' | tail -1)
+expect_contains "…and the roster marker is keyed to the LATER row agent_id" \
+  "agent_id=alg-dup-late0001" "$LG_MARK"
+
+# THE DISCRIMINATING HALF: a copy of landing-gate.sh mutated to take the FIRST row's
+# deliverable instead of the last, sibling of a real sweeper, driven against an identical
+# fresh fixture (a fresh repo, so the real run's marker above cannot mask the mutant's
+# silence).
+LG_MUT_DIR="$SANDBOX/fx/lg-first-wins"
+mkdir -p "$LG_MUT_DIR"
+cp "$SWEEPER" "$LG_MUT_DIR/session-sweeper.sh"
+awk '{
+       if ($0 == "    dl[name] = deliv") {
+         print "    if (!(name in dl)) dl[name] = deliv"
+         next
+       }
+       print
+     }' "$PARTY_LG" > "$LG_MUT_DIR/landing-gate.sh"
+if cmp -s "$PARTY_LG" "$LG_MUT_DIR/landing-gate.sh"; then
+  no "the first-row-wins mutation applies to landing-gate.sh" \
+     "the mutation target matched nothing — the fold moved and this proof is vacuous"
+else
+  ok "the first-row-wins mutation applies to landing-gate.sh"
+fi
+
+PLGREPO2=$(new_repo "fold-agreement-lg-mut")
+p_lg_fixture "$PLGREPO2"
+PLG_ROSTER2="$PLGREPO2/.bionic/tmp/roster-$SID_A.state"
+lg_saved="$PARTY_LG"; PARTY_LG="$LG_MUT_DIR/landing-gate.sh"
+LG_MUT_OUT=$( mk_stopsweep_payload "$PLGREPO2" "$SID_A" false | bash "$PARTY_LG" 2>&1 ); LG_MUT_RC=$?
+PARTY_LG="$lg_saved"
+expect_eq "…and with the fold flipped to first-row-wins, the SAME contract passes SILENTLY (§P discriminates)" \
+  "0" "$LG_MUT_RC"
+expect_eq "…no marker at all — the row was dropped by the empty-deliverable prefilter, never judged" \
+  "0" "$(grep -F '|name=lg-dup|' "$PLG_ROSTER2" | grep -cF 'landing-swept/v1|')"
 
 # ============================================================
 echo ""
