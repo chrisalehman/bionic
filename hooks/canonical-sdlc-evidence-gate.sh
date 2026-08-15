@@ -200,6 +200,27 @@ resolve_docs_root() {
   echo "$proj/.bionic/docs"
 }
 
+# A CANDIDATE IS A PLAN ONLY IF IT CARRIES AN UNFENCED `## SDLC State` HEADING.
+# Without this filter a stray marker-less *.md that happens to be newest under
+# plans/ — a continuation note, a Step-9 artifact, a probe scrap — WINS the
+# newest race, `current:` parses empty, and every wall reading this block passes
+# silently while a wave is live. That is measured, not hypothetical: it disarmed
+# the dispatch wall repo-wide for ~15 minutes on 2026-08-15, and again in the
+# probe that investigated it, neither time on purpose
+# (record/session-20260815-landing-supervision/t8-forensic-read.md).
+# Fence-aware, because the read it feeds is: a schema example is documentation,
+# not a run. Line endings TRANSLATED, never deleted, for the reason spelled out
+# at the `current:` read. A file that cannot be read is not a candidate — falling
+# back to an older real plan keeps the walls armed, the safe direction. Skipping
+# EVERY candidate lands where finding none lands: no wave, pass, silent.
+has_sdlc_state() {
+  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1" 2>/dev/null | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## SDLC State/ { found = 1 }
+    END { exit !found }'
+}
+
 # Read unconditionally, next to the other globals: this hook runs `set -u`, and
 # a variable bound on only some code paths crashes the others. See
 # `.claude/rules/hook-authoring.md` (machine-local, gitignored, authored in
@@ -230,6 +251,7 @@ for d in "${PLAN_DIRS[@]}"; do
   # conventions (<docs-root>/plans/<name>.md) are covered at depth 1.
   while IFS= read -r -d '' f; do
     if [ -z "$PLAN" ] || [ "$f" -nt "$PLAN" ]; then
+      has_sdlc_state "$f" || continue
       PLAN="$f"
     fi
   done < <(find "$d" -maxdepth 2 -type f -name '*.md' -print0 2>/dev/null)
