@@ -348,6 +348,7 @@ drive() {  # <condition>
     stop:empty-target)      p=$(payload TaskStop "$SID_A" "$A_TR" "$A_REPO" "") ;;
     stop:no-transcript)     p=$(payload TaskStop "$SID_A" - "$A_REPO" worker) ;;
     stop:unresolvable)      p=$(payload TaskStop "$SID_A" "$A_TR" "$A_REPO" ghost) ;;
+    stop:unresolvable-addressed) p=$(payload TaskStop "$SID_A" "$A_TR" "$A_REPO" "ghost@session-deadbeef") ;;
     stop:ambiguous)         p=$(payload TaskStop "$SID_A" "$A_TR" "$A_REPO" twin) ;;
     stop:no-observation)    p=$(payload TaskStop "$SID_A" "$A_TR" "$A_REPO" worker) ;;
     stop:foreign-observation) p=$(payload TaskStop "$SID_A" "$F_TR" "$F_REPO" worker) ;;
@@ -377,6 +378,11 @@ drive() {  # <condition>
 # SILENT-WITH-ANNOUNCE = exit 0, stdout empty, but ONE operator-facing line on
 # stderr reporting that the wall took an action on the operator's behalf (R5:
 # the auto-probe ran and passed) — distinct from LOUD, which reports a refusal.
+# PASSTHROUGH = exit 0, stdout empty, and the specific PASSTHROUGH-labeled line
+# on stderr naming the target that was let through unrefused (T4, AC-6,
+# session-20260815-landing-cleanup: a TaskStop target that resolves to no agent
+# AND wears no agent-address shape is not this gate's business) — distinct from
+# SILENT-WITH-ANNOUNCE, whose announce line is the auto-probe's, not this one's.
 # ============================================================
 TABLE='
 start|irrelevant-tool|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
@@ -398,7 +404,8 @@ stop|no-session-key-inert|0|silent|Stop gate — before the active-wave verdict:
 stop|no-session-key|2|loud|Payload missing its session key — stop: CLOSED
 stop|empty-target|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|no-transcript|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|unresolvable|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|unresolvable|0|passthrough|Stop gate — T4 carve: an unresolved target wearing no agent-address shape passes through, OPEN
+stop|unresolvable-addressed|2|loud|Stop gate — T4 carve: an unresolved target that DOES wear an agent-address shape still refuses, CLOSED
 stop|ambiguous|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|no-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|foreign-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
@@ -432,6 +439,13 @@ while IFS='|' read -r surface cond want_exit want_loud row; do
       ok "$surface/$cond is SILENT-WITH-ANNOUNCE — stdout empty, one operator-facing line on stderr"
     else
       no "$surface/$cond is SILENT-WITH-ANNOUNCE — stdout empty, one operator-facing line on stderr" \
+         "stdout='$DRV_OUT' stderr='$DRV_ERR'"
+    fi
+  elif [ "$want_loud" = "passthrough" ]; then
+    if [ -z "$DRV_OUT" ] && printf '%s' "$DRV_ERR" | grep -qF 'PASSTHROUGH'; then
+      ok "$surface/$cond is PASSTHROUGH — stdout empty, PASSTHROUGH line present on stderr"
+    else
+      no "$surface/$cond is PASSTHROUGH — stdout empty, PASSTHROUGH line present on stderr" \
          "stdout='$DRV_OUT' stderr='$DRV_ERR'"
     fi
   else
