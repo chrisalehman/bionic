@@ -46,6 +46,10 @@ run "dispatch-spans.test.sh" bash tests/dispatch-spans.test.sh
 # to the glob above and must stay hand-listed.
 run "cross-gate-agreement.test.sh" bash tests/cross-gate-agreement.test.sh
 run "fail-direction-table.test.sh" bash tests/fail-direction-table.test.sh
+# hooks/hooks.json (plugin-format manifest, epic-17 wave-01 slice 2) is also
+# a cross-COMPONENT proof — it pins against claude-bootstrap.sh's
+# MANAGED_HOOKS array, not any single hook script.
+run "plugin-hooks.test.sh" bash tests/plugin-hooks.test.sh
 # Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
 # 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so
