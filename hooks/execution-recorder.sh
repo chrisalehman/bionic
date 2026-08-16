@@ -586,20 +586,47 @@ if [ -n "$IS_START" ]; then
     ROW="$line"
   done < "$ROSTER_FILE"
 
-  # THE NAME JOIN, SCOPED TO TEAMMATE ROWS (session-20260815, T2 — design D2, tactical
-  # default 2). Only reached when the id join found nothing, which for a teammate is
-  # every time: ARM 2 leaves `agent_id=` empty on that branch, so there is no id on
-  # the row for the loop above to match, and until now the row was never identified
-  # at all — which is what left every teammate outside the landing contract.
+  # THE NAME JOIN (session-20260815, T2 — design D2, tactical default 2), WIDENED
+  # TO THE DOOR (session-20260815-landing-cleanup, T1). Only reached when the id
+  # join found nothing, which for a teammate is every time: ARM 2 leaves
+  # `agent_id=` empty on that branch, so there is no id on the row for the loop
+  # above to match, and without this join the row is never identified at all —
+  # which is what left every teammate outside the landing contract.
   #
-  # THE SCOPE IS THE WHOLE OF THE REPAIR, and it is not the wave-03 join returning.
-  # That join was unscoped and keyed on a field carrying the subagent TYPE, so it
-  # matched a row whenever a type happened to be spelled like a name. This one fires
-  # only over rows whose `teammate_id=` is non-empty — a field ARM 2 writes if and
-  # only if the platform said `teammate_spawned` — so it discriminates on the
-  # writer's recorded dispatch mode, never on the shape of an id or the vocabulary
-  # of a type. An async row cannot reach it; a phantom start (empty `agent_type`,
-  # t1 §4.6) matches nothing, and is checked for rather than assumed.
+  # WHY THE TEAMMATE SCOPE HAD TO GO, measured rather than argued. The join was
+  # first written to fire only over rows whose `teammate_id=` is non-empty — the
+  # writer's own statement that the platform said `teammate_spawned`. But that
+  # field is written by ARM 2, at PostToolUse|Agent, and this event arrives BEFORE
+  # it: at a teammate's FIRST SubagentStart the row is still `intended`, with an
+  # empty `agent_id=` for the loop above and an empty `teammate_id=` for the scope
+  # here, so identification could not fire at the door — only at a resume, after a
+  # completion had filled the field. Live measurement on the predecessor wave's own
+  # roster: three confirmed teammate contracts, all three `agent_id=` empty, none
+  # ever identified, zero sweep markers (step2-research-a1-a3.md §A1(3), quoting
+  # t1-probe-report.md:41-51). A scope that can only be satisfied after the moment
+  # it guards is not a scope, it is an off switch.
+  #
+  # WHAT GUARDS IT INSTEAD is that same field carrying two meanings — the fact the
+  # wave-03 removal was right about and this join is built on rather than against.
+  # `agent_type` carries the dispatch NAME for a teammate and the subagent TYPE for
+  # an async dispatch (t1-probe-report.md §2.1, both measured on one live session).
+  # The wave-03 join was UNSCOPED and matched that field against a type; this one
+  # matches it against `name=` — the string the dispatch itself chose — exact,
+  # non-empty, and only over rows this session journalled. An async start therefore
+  # arrives carrying a type and finds no row named for it, and a phantom start
+  # (empty `agent_type`, t1 §4.6) matches nothing, which is checked for rather than
+  # assumed.
+  #
+  # THE RESIDUAL IS ONE DISPATCH LITERALLY NAMED AFTER A SUBAGENT TYPE (plan
+  # Assumptions A-D1): a teammate named `general-purpose` and an async dispatch of
+  # TYPE `general-purpose` are the same string on this payload, and nothing on the
+  # roster separates them. Accepted, and pinned from the residual side in
+  # hooks/execution-recorder.test.sh Section 10 so that un-accepting it is a design
+  # change rather than a silent one.
+  #
+  # `intended` AND `confirmed` are both join targets, as they are for the id loop
+  # above. The door case is the `intended` half; the `confirmed` half is what keeps
+  # a teammate identifiable at a resume, or when the completion beat the start.
   #
   # RESIDUAL, kept and documented rather than solved here: one NAME dispatched twice
   # in one session is two agents on two rows, and the later row wins — the same
@@ -621,7 +648,6 @@ if [ -n "$IS_START" ]; then
         *) continue ;;
       esac
       [ "$(line_field "$line" name)" = "$START_TYPE" ] || continue
-      [ -n "$(line_field "$line" teammate_id)" ] || continue
       case "$(line_field "$line" status)" in intended|confirmed) : ;; *) continue ;; esac
       [ "$(line_field "$line" session)" = "$SID" ] || continue
       ROW="$line"

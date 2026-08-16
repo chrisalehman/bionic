@@ -1098,17 +1098,84 @@ expect_contains "…and so does the contract the brief declared" \
 expect_eq "…exactly one identified row is appended" \
   "1" "$(grep -c 'status=identified' "$I2B_ROSTER")"
 
-# THE SCOPE, driven from the other side: an ASYNC row whose name happens to equal
-# the payload's `agent_type` is NOT joined by name. For an async dispatch that
-# field is the subagent type, so a name join there is the wave-03 defect returning
-# — it would identify a row on a coincidence of vocabulary ("implementor",
-# "general-purpose") rather than on a fact about the dispatch.
+# ---------- THE BADGE AT THE DOOR (session-20260815-landing-cleanup, T1) ----------
+#
+# The block above identifies a teammate only AFTER its PostToolUse has landed —
+# that is what puts a non-empty `teammate_id=` on the row for the name join to
+# scope itself to. But `teammate_id=` is written by ARM 2, and ARM 2 runs at
+# PostToolUse|Agent: at the FIRST SubagentStart the row is still `intended`, with
+# an empty `agent_id=` AND an empty `teammate_id=`, so the id join has no key and
+# the name join has no scope. Identification could not fire at the door, only at a
+# resume — which is exactly what left the predecessor wave's teammates uncontracted
+# on their own live roster (step2-research-a1-a3.md §A1(3): three confirmed
+# teammate rows, all `agent_id=` empty, zero sweep markers).
+#
+# The join therefore widens: `agent_type` against `name=` on this session's own
+# rows, exact and non-empty, no `teammate_id=` precondition. The misjoin guard is
+# the field's own two meanings — a teammate start carries the dispatch NAME, an
+# async start carries the subagent TYPE, and a type is not a name (the paired
+# negative below drives exactly that).
+#
+# FIXTURE FIDELITY: the teammate shapes here are the live capture's own, not
+# invented — `agent_type` = the dispatch name and `agent_id` =
+# `at1mate-fdaa80c4b3cb703f` for teammate `t1mate`, against `agent_type` =
+# `general-purpose` and `agent_id` = `af3d9128ea3b393af` for the unnamed async
+# subagent, both transcribed from the side-by-side payload table in
+# .bionic/docs/record/session-20260815-landing-cleanup/step2-research-a1-a3.md
+# §A1(3), which quotes the live dual-channel capture in
+# record/session-20260815-landing-supervision/t1-probe-report.md:100-121.
+TM_START_ID="at1mate-fdaa80c4b3cb703f"
+ASYNC_START_ID="af3d9128ea3b393af"
+
+IFS='|' read -r I2E_REPO I2E_TR I2E_SUB I2E_CFG <<< "$(make_world identdoor yes)"
+seed_roster_full "$I2E_REPO" "$SID_A" "t1mate" "toolu_01DOOR"
+I2E_ROSTER="$I2E_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$I2E_TR" "$I2E_REPO" "t1mate" "$TM_START_ID")"
+expect_status "a teammate's FIRST start — no confirmation yet — never blocks" 0 "$REC_ST"
+I2E_ROW=$(grep 'status=identified' "$I2E_ROSTER" 2>/dev/null)
+expect_contains "the first start identifies the INTENDED row, before any PostToolUse" \
+  "status=identified" "$I2E_ROW"
+expect_contains "…filling the transcript-form id the by-id walls match on" \
+  "agent_id=$TM_START_ID" "$I2E_ROW"
+expect_contains "…on the row the dispatch named" "name=t1mate" "$I2E_ROW"
+expect_contains "…with the contract the brief declared riding forward" \
+  "deliverable=.bionic/docs/record/w1-slice1-report.md" "$I2E_ROW"
+expect_contains "…and the correlation key the launch wrote" \
+  "tool_use_id=toolu_01DOOR" "$I2E_ROW"
+expect_eq "…exactly one identified row is appended" \
+  "1" "$(grep -c 'status=identified' "$I2E_ROSTER")"
+expect_eq "…and identification is an APPEND: the intended row stays where the launch put it" \
+  "1" "$(grep -c 'status=intended' "$I2E_ROSTER")"
+
+# THE PAIRED NEGATIVE, and the whole of the misjoin guard: an ASYNC-shaped start
+# — `agent_type` carrying the subagent TYPE, `agent_id` the collapsed transcript
+# form — against a NAMED intended row identifies nothing. A type is not a name,
+# so the exact match simply misses; nothing on the roster is advanced by an event
+# that names no row of ours.
+IFS='|' read -r I2F_REPO I2F_TR I2F_SUB I2F_CFG <<< "$(make_world identasyncshape yes)"
+seed_roster_full "$I2F_REPO" "$SID_A" "probemate" "toolu_01ASYNCSHAPE"
+I2F_ROSTER="$I2F_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$I2F_TR" "$I2F_REPO" "general-purpose" "$ASYNC_START_ID")"
+expect_status "an async-shaped start over a named intended row never blocks" 0 "$REC_ST"
+expect_absent "…and identifies nothing: a subagent TYPE is not a dispatch NAME" \
+  "status=identified" "$(cat "$I2F_ROSTER")"
+expect_eq "…leaving the roster exactly as it was" \
+  "1" "$(grep -c '^roster-state/v1|' "$I2F_ROSTER")"
+
+# THE RESIDUAL THE WIDENING BUYS, pinned rather than left to be discovered
+# (plan Assumptions A-D1). Dropping the `teammate_id=` scope means the join can no
+# longer tell a teammate named `general-purpose` from an async dispatch of TYPE
+# `general-purpose` — one dispatch literally named after a subagent type collides,
+# and the roster's own vocabulary is the only thing that could separate them. The
+# wave-03 defect this resembles was UNSCOPED and matched a type against a type;
+# this match is exact, non-empty and session-scoped, and it costs exactly this row.
+# Flipping this assertion back is a design change, not a fix.
 IFS='|' read -r I2C_REPO I2C_TR I2C_SUB I2C_CFG <<< "$(make_world identasyncname yes)"
 seed_roster_full "$I2C_REPO" "$SID_A" "general-purpose" "toolu_01ASYNCNAME"
 I2C_ROSTER="$I2C_REPO/.bionic/tmp/roster-${SID_A}.state"
 run_rec "$(mk_subagent_start "$SID_A" "$I2C_TR" "$I2C_REPO" "general-purpose" "$START_ID")"
-expect_status "a start over an async row named like its agent_type never blocks" 0 "$REC_ST"
-expect_absent "…and identifies nothing: the name join is teammate-scoped" \
+expect_status "a start over a row named after a subagent type never blocks" 0 "$REC_ST"
+expect_contains "…and DOES identify it — the accepted A-D1 collision, name against name" \
   "status=identified" "$(cat "$I2C_ROSTER")"
 
 # A PHANTOM start — the harness's own internal agents carry an EMPTY agent_type
