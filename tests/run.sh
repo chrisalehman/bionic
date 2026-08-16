@@ -25,6 +25,9 @@ run() {  # run <label> <cmd...>   — gating
     echo "✓ PASS"; pass=$((pass+1))
   else
     echo "✗ FAIL"; fail=$((fail+1)); failed="${failed}\n    - ${label}"
+    echo "───── ${label}: captured output ─────"
+    cat "$TMP/out"
+    echo "───── end ${label} ─────"
   fi
 }
 
