@@ -46,6 +46,10 @@ run "dispatch-spans.test.sh" bash tests/dispatch-spans.test.sh
 # to the glob above and must stay hand-listed.
 run "cross-gate-agreement.test.sh" bash tests/cross-gate-agreement.test.sh
 run "fail-direction-table.test.sh" bash tests/fail-direction-table.test.sh
+# Cross-FILE proof (epic-17 W1 S3): the plugin-layout path rewrite, and the near-identical
+# state paths it must not have touched. Spans SKILL.md, hooks/ and claude-bootstrap.sh, so
+# like the two above it belongs to no single hook and must stay hand-listed.
+run "plugin-paths.test.sh" bash tests/plugin-paths.test.sh
 # Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
 # 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so

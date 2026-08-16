@@ -486,15 +486,19 @@ expect_contains "the closed side names the missing key" "session key" "$S_STOP_E
 # The cost asymmetry §7 derives the whole table from, asserted where a reader
 # meets it: the stop refusal must always name the way forward.
 drive stop:no-observation
+# Since epic-17 W1 S3 both gates resolve the script they name beside themselves from "$0"
+# rather than spelling an installed-path literal — still absolute, so §7's requirement that
+# a refusal name a way forward runnable from any cwd is unchanged, and it survives a plugin
+# payload where ~/.claude/hooks/ holds nothing.
 expect_contains "every stop refusal names the observation command" \
-  "~/.claude/hooks/stop-check.sh" "$DRV_ERR"
+  "$REPO_ROOT/hooks/stop-check.sh" "$DRV_ERR"
 # R5: start:unattested no longer refuses (it auto-probes and passes silently-with-
 # announce, per the table above) — start:probe-refuses is now the row that carries
 # a genuine start-gate refusal, so it is what exercises this "every refusal names
 # the fix" claim.
 drive start:probe-refuses
 expect_contains "every start refusal names the environment check" \
-  "~/.claude/hooks/preflight-probe.sh" "$DRV_ERR"
+  "$REPO_ROOT/hooks/preflight-probe.sh" "$DRV_ERR"
 
 # ============================================================
 echo ""

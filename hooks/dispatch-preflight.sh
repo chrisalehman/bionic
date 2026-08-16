@@ -58,7 +58,17 @@
 
 set -uo pipefail
 
-PREFLIGHT_CMD="bash ~/.claude/hooks/preflight-probe.sh"
+# THIS SCRIPT'S OWN DIRECTORY, and therefore its siblings'. Every bionic hook and every
+# script a hook invokes ships in one directory, so `$0` resolves the neighbour identically
+# in a repo checkout, in a bootstrap-installed ~/.claude/hooks/, and in an installed plugin
+# payload. Deliberately NOT ${CLAUDE_PLUGIN_ROOT}: the harness runs this gate straight out
+# of the repo, where no plugin is mounted and that variable does not exist.
+HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+[ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
+
+# The fix line a refusal hands an operator. Absolute, so it runs from any cwd (checklist A1)
+# — which is what the installed-path spelling used to buy, now bought without the literal.
+PREFLIGHT_CMD="bash ${HOOK_DIR}/preflight-probe.sh"
 
 INPUT=$(cat)
 _jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
@@ -298,7 +308,7 @@ if ! attested; then
   # The probe next to this script, so a test drives the real producer and an
   # installed gate finds its installed sibling. `$0` is the gate's own path on
   # both; the config-dir form is the fallback for an exotic invocation.
-  PROBE_SCRIPT="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/preflight-probe.sh"
+  PROBE_SCRIPT="${HOOK_DIR}/preflight-probe.sh"
   [ -f "$PROBE_SCRIPT" ] || PROBE_SCRIPT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/preflight-probe.sh"
 
   if [ ! -f "$PROBE_SCRIPT" ]; then

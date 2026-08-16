@@ -1030,28 +1030,28 @@ _matcher_has_cmd PreToolUse Bash "~/.claude/hooks/stop-guard.sh" \
 _matcher_has_cmd PostToolUse Bash "~/.claude/hooks/execution-recorder.sh" \
   && no "AC-7: execution-recorder.sh still wired to PostToolUse|Bash (should have moved to SKILL.md frontmatter)" \
   || ok "AC-7: execution-recorder.sh NOT wired to PostToolUse|Bash (sdlc-scoped, frontmatter-only now)"
-_skill_frontmatter_has PostToolUse Bash "~/.claude/hooks/execution-recorder.sh" \
+_skill_frontmatter_has PostToolUse Bash '${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh' \
   && ok "AC-7: SKILL.md frontmatter registers execution-recorder.sh on PostToolUse|Bash" \
   || no "AC-7: SKILL.md frontmatter missing execution-recorder.sh on PostToolUse|Bash"
 
 _matcher_has_cmd PostToolUse Agent "~/.claude/hooks/execution-recorder.sh" \
   && no "AC-7: execution-recorder.sh still wired to PostToolUse|Agent (should have moved to SKILL.md frontmatter)" \
   || ok "AC-7: execution-recorder.sh NOT wired to PostToolUse|Agent (sdlc-scoped, frontmatter-only now)"
-_skill_frontmatter_has PostToolUse Agent "~/.claude/hooks/execution-recorder.sh" \
+_skill_frontmatter_has PostToolUse Agent '${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh' \
   && ok "AC-7: SKILL.md frontmatter registers execution-recorder.sh on PostToolUse|Agent" \
   || no "AC-7: SKILL.md frontmatter missing execution-recorder.sh on PostToolUse|Agent"
 
 _matcher_has_cmd PreToolUse TaskStop "~/.claude/hooks/stop-guard.sh" \
   && no "AC-7: stop-guard.sh still wired to PreToolUse|TaskStop (should have moved to SKILL.md frontmatter)" \
   || ok "AC-7: stop-guard.sh NOT wired to PreToolUse|TaskStop (sdlc-scoped, frontmatter-only now)"
-_skill_frontmatter_has PreToolUse TaskStop "~/.claude/hooks/stop-guard.sh" \
+_skill_frontmatter_has PreToolUse TaskStop '${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.sh' \
   && ok "AC-7: SKILL.md frontmatter registers stop-guard.sh on PreToolUse|TaskStop" \
   || no "AC-7: SKILL.md frontmatter missing stop-guard.sh on PreToolUse|TaskStop"
 
 _matcher_has_cmd PreToolUse Agent "~/.claude/hooks/dispatch-preflight.sh" \
   && no "AC-7: dispatch-preflight.sh still wired to PreToolUse|Agent (should have moved to SKILL.md frontmatter)" \
   || ok "AC-7: dispatch-preflight.sh NOT wired to PreToolUse|Agent (sdlc-scoped, frontmatter-only now)"
-_skill_frontmatter_has PreToolUse Agent "~/.claude/hooks/dispatch-preflight.sh" \
+_skill_frontmatter_has PreToolUse Agent '${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh' \
   && ok "AC-7: SKILL.md frontmatter registers dispatch-preflight.sh on PreToolUse|Agent" \
   || no "AC-7: SKILL.md frontmatter missing dispatch-preflight.sh on PreToolUse|Agent"
 
@@ -1063,7 +1063,7 @@ _skill_frontmatter_has PreToolUse Agent "~/.claude/hooks/dispatch-preflight.sh" 
 _matcher_has_cmd PreToolUse Bash "~/.claude/hooks/farm-out-reminder.sh" \
   && no "AC-7: farm-out-reminder.sh still wired to PreToolUse|Bash (should have moved to SKILL.md frontmatter)" \
   || ok "AC-7: farm-out-reminder.sh NOT wired to PreToolUse|Bash (armed-session-scoped, frontmatter-only now)"
-_skill_frontmatter_has PreToolUse Bash "~/.claude/hooks/farm-out-reminder.sh" \
+_skill_frontmatter_has PreToolUse Bash '${CLAUDE_PLUGIN_ROOT}/hooks/farm-out-reminder.sh' \
   && ok "AC-7: SKILL.md frontmatter registers farm-out-reminder.sh on PreToolUse|Bash" \
   || no "AC-7: SKILL.md frontmatter missing farm-out-reminder.sh on PreToolUse|Bash"
 
