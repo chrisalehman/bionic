@@ -280,18 +280,47 @@ MATCHES=$(scan_subagent_dirs "${RAW%@*}" "$SUB")
 MATCH_COUNT=0
 [ -n "$MATCHES" ] && MATCH_COUNT=$(printf '%s\n' "$MATCHES" | grep -c .)
 
+# THE SHAPE CARVE (T4, AC-6, session-20260815-landing-cleanup). scan_subagent_dirs
+# only ever iterates agent-*.meta.json — the Agent tool's own bookkeeping — so any
+# OTHER kind of TaskStop target (chief among them a background bash task id,
+# A-D4) is unconditionally MATCH_COUNT=0 here, forever, with no code path back to
+# order_current() below: the deny() call two lines down is an unconditional
+# `exit 2`, so the escape hatch this gate documents in its own header (a human's
+# order executes) was permanently unreachable for a target of this kind
+# (step2-research-a1-a3.md §A3). The carve is by SHAPE, not by trying harder to
+# resolve: refuse only a target wearing an AGENT-ADDRESS shape — the two forms
+# this gate resolves an identity to elsewhere in this file (`name@session-xxxx`,
+# see typed_is_identity below; and the bare transcript form `a<hex>` /
+# `a<name>-<16hex>`, `AGENT_ID` throughout) — since only those shapes could ever
+# have named an Agent-tool dispatch in the first place (A-D3: TaskStop on an
+# unknown id already fails cleanly on the platform side and stops nothing, so
+# this gate does not have to be the one thing standing between a passthrough and
+# an accidental stop). Anything else gets out of the way — logged once, so this
+# is never a silent gate.
+is_address_shaped() {  # <typed> -> 0 if it wears an agent-address shape
+  local t="$1"
+  case "$t" in *@session-*) return 0 ;; esac
+  printf '%s' "$t" | grep -qE '^a[0-9a-f]+$' && return 0
+  printf '%s' "$t" | grep -qE '^a.+-[0-9a-f]{16}$' && return 0
+  return 1
+}
+
 if [ "$MATCH_COUNT" -eq 0 ]; then
-  # Naming the SCOPE is what makes this refusal clearable (Step-6 review R4).
-  # Resolution is this session's own agents; a target another session launched
-  # resolves for the observation — which scans the whole project — and never
-  # here, so without this clause the named fix succeeds and the stop refuses
-  # identically forever, with nothing in the message naming the way out.
-  deny "Target '${RAW}' is unresolved: no agent in THIS session's metadata answers to it." \
-       "The platform hands this gate the name AS TYPED and resolves nothing for it (P5)." \
-       "Resolution is scoped to agents this session launched — one session cannot stop" \
-       "another's tasks, so no observation can discharge this. If the agent belongs to a" \
-       "different session, stop it from there, or stop it yourself (a human-initiated stop" \
-       "bypasses this gate). Otherwise check the name against what you launched it under."
+  if is_address_shaped "$RAW"; then
+    # Naming the SCOPE is what makes this refusal clearable (Step-6 review R4).
+    # Resolution is this session's own agents; a target another session launched
+    # resolves for the observation — which scans the whole project — and never
+    # here, so without this clause the named fix succeeds and the stop refuses
+    # identically forever, with nothing in the message naming the way out.
+    deny "Target '${RAW}' is unresolved: no agent in THIS session's metadata answers to it." \
+         "The platform hands this gate the name AS TYPED and resolves nothing for it (P5)." \
+         "Resolution is scoped to agents this session launched — one session cannot stop" \
+         "another's tasks, so no observation can discharge this. If the agent belongs to a" \
+         "different session, stop it from there, or stop it yourself (a human-initiated stop" \
+         "bypasses this gate). Otherwise check the name against what you launched it under."
+  fi
+  echo "PASSTHROUGH: '${RAW}' resolves to no agent in THIS session's metadata and wears no agent-address shape — not an Agent-tool dispatch this gate has standing to guard. The stop proceeds." >&2
+  exit 0
 fi
 if [ "$MATCH_COUNT" -gt 1 ]; then
   deny "Target '${RAW}' is ambiguous: ${MATCH_COUNT} agents in this session answer to it." \

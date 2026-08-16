@@ -410,8 +410,8 @@ run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "")"
 expect_status "active wave + empty task_id: REFUSED" 2 "$GUARD_ST"
 
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "no-such-agent")"
-expect_status "active wave + unresolvable name: REFUSED" 2 "$GUARD_ST"
-expect_contains "an unresolvable name says so" "unresolved" "$GUARD_ERR"
+expect_status "active wave + unresolvable name (not address-shaped): PASSES THROUGH (T4)" 0 "$GUARD_ST"
+expect_matches "…and the passthrough is logged, never silent" 'PASSTHROUGH' "$GUARD_ERR"
 
 # Ambiguity: two live agents answering to the same name in one session.
 plant_agent "$W4_SUB" "adouble-5555555555555555" "twin"
@@ -446,6 +446,51 @@ observe "$SID_B" "$W5_TR" "$W5_REPO" "quiet-reviewer"
 run_guard "$(mk_stop_payload "$SID_A" "$W5_TR" "$W5_REPO" "quiet-reviewer")"
 expect_status "another session's observation does not discharge my stop" 2 "$GUARD_ST"
 expect_contains "the foreign-session refusal says whose it was" "session" "$GUARD_ERR"
+
+# ============================================================
+echo ""
+echo "=== Section 4a: unsupervised-target passthrough (T4, AC-6) ==="
+# ============================================================
+#
+# scan_subagent_dirs only ever iterates agent-*.meta.json — the Agent tool's own
+# bookkeeping. A background bash task id never gets one (A-D4), so MATCH_COUNT
+# was unconditionally 0 for it, forever, with no code path back to
+# order_current() — the escape hatch this gate's own header advertises
+# (step2-research-a1-a3.md §A3). The ratified carve (session.plan.md ## Design
+# ¶T4): refuse only a target wearing an AGENT-ADDRESS shape (`@session-`, or
+# transcript-form `a<hex>` / `a<name>-<16hex>`); everything else passes through,
+# logged once, never silent.
+
+# (a) A bash-background-task-shaped id (A-D4 probe evidence: t5triyxvo) carries
+# no agent metadata and wears no address shape: PASSES THROUGH.
+run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "t5triyxvo")"
+expect_status "a bash-task-shaped target with no metadata: PASSES THROUGH" 0 "$GUARD_ST"
+expect_matches "…and the passthrough is logged, never silent" 'PASSTHROUGH' "$GUARD_ERR"
+expect_eq_lines "…in exactly one line" 1 "$GUARD_ERR"
+
+# (b) An addressing-form target (`name@session-xxxx`) with no metadata IS
+# address-shaped: stays REFUSED, the verbatim unresolved-target message unchanged.
+run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "ghost@session-deadbeef")"
+expect_status "an addressing-form target with no metadata: still REFUSED" 2 "$GUARD_ST"
+expect_contains "…the verbatim unresolved-target message" "is unresolved" "$GUARD_ERR"
+
+# (c) Transcript-form targets (`a`+hex, and `a<name>-<16hex>`) with no metadata
+# ARE address-shaped: stay REFUSED.
+run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "af3d9128ea3b393af")"
+expect_status "a hex transcript-form target with no metadata: still REFUSED" 2 "$GUARD_ST"
+expect_contains "…the verbatim unresolved-target message" "is unresolved" "$GUARD_ERR"
+
+run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "aghost-0123456789abcdef")"
+expect_status "a named transcript-form target with no metadata: still REFUSED" 2 "$GUARD_ST"
+expect_contains "…the verbatim unresolved-target message" "is unresolved" "$GUARD_ERR"
+
+# (d) A supervised named target (metadata present) still engages the FULL guard
+# path, untouched — the passthrough branch is reached only at MATCH_COUNT=0.
+# Already pinned above in this same fixture world: "active wave + no
+# observation: REFUSED" and "active wave + fresh observation: PERMITTED" both
+# resolve quiet-reviewer's real agent-*.meta.json and run the whole gate,
+# roster lookup, D-1/D-2/D-3/D-6 checks included.
+ok "a supervised named target still engages the full guard path (see 'active wave + no observation' / 'fresh observation' above)"
 
 # ============================================================
 echo ""
