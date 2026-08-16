@@ -46,6 +46,8 @@ run "dispatch-spans.test.sh" bash tests/dispatch-spans.test.sh
 # to the glob above and must stay hand-listed.
 run "cross-gate-agreement.test.sh" bash tests/cross-gate-agreement.test.sh
 run "fail-direction-table.test.sh" bash tests/fail-direction-table.test.sh
+# Epic-17 wave-01 slice S1: bionic plugin manifest + marketplace manifest + LICENSE.
+run "plugin-manifest.test.sh" bash tests/plugin-manifest.test.sh
 # Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
 # 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so
