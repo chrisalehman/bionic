@@ -92,8 +92,18 @@ PASS=0; FAIL=0; TOTAL=0
 ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
 no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
 expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-expect_contains() { if printf '%s' "$3" | grep -qF -- "$2"; then ok "$1"; else no "$1" "missing: $2"; fi; }
-expect_absent()   { if printf '%s' "$3" | grep -qF -- "$2"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
+# The haystack reaches grep by here-string, NOT by `printf ... | grep -q`. Under
+# the `set -o pipefail` above, that pipe is a race: `grep -q` exits on the first
+# match without draining stdin, so for any haystack past the 64 KiB pipe buffer
+# — every whole-hook-file assertion in §F/§G/§H/§L below — the printf builtin is
+# still mid-write when grep leaves, takes SIGPIPE, and reports 141. pipefail
+# then makes 141 the PIPELINE status even though grep exited 0 having FOUND the
+# needle, so expect_contains reports `missing:` for a needle that is present and
+# expect_absent returns a false GREEN on a needle that is. That is the whole of
+# the epic-17-w1 "cross-gate flake" — an in-process scheduling race, not state
+# pollution. Pinned by tests/assert-helper-race.test.sh.
+expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
+expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
 
 SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
