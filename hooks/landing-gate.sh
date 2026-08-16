@@ -78,11 +78,24 @@
 # carrying a non-empty `teammate_id=`.
 #
 # THAT SCOPE CUTS BOTH WAYS, and the sweep half of it is in the fold below: teammate rows are
-# skipped there. An async subagent stopping on this event is passed over in silence, because
+# skipped there, with the one exception the next paragraph names. An async subagent stopping on this event is passed over in silence, because
 # the sweep is the arm that owns it and the marker written here is exactly what would tell
 # the sweep the row is already answered for — verdicting an async row here would not
 # duplicate the sweep, it would silently replace the refusal the orchestrator sees with one
 # delivered somewhere else.
+#
+# THE SUPERSESSION RECHECK (session-20260815-landing-cleanup, T3; ruling: supersede). The one
+# thing the sweep does with a teammate row, and it is not a verdict. A refused teammate is
+# told inside its own sidechain at the one moment it can still act, and it acts: measured
+# live, the teammate read the feedback, wrote the promised artifact, and the roster still read
+# `state=UNMET` when the session ended (record/session-20260815-landing-supervision/
+# live-verify.md §B2). The refusal was correct and its record was a false statement about the
+# world. So on any later Stop, a teammate row whose LATEST marker says UNMET and whose
+# deliverable the verb now finds gets a SECOND marker appended, saying MET. Both persist, in
+# order: the stream is history plus current state, and nothing is ever rewritten. It never
+# refuses, it never writes a FIRST verdict for a teammate (an unmarked row stays the
+# SubagentStop arm's, delivered or not), it costs nothing once the answer is MET, and it needs
+# no clock of its own — Stop already fires on every turn end and shortly after every landing.
 #
 # WHERE THE REFUSAL GOES, stated because it differs from the sweep and the difference is not
 # ours to change: a blocking Stop-hook exit on the main thread reaches the orchestrator,
@@ -118,6 +131,11 @@
 #   - the verdict says anything but UNMET, or says UNMET
 #     over an acked row                                  -> mark swept, pass
 #   - the verdict says UNMET on a landed row             -> REFUSE, quoting its detail
+#   - a swept teammate row, latest marker UNMET, and the
+#     verdict now says MET                               -> append a superseding marker, pass
+#   - the same row, verdict still anything but MET       -> nothing appended, pass, silent
+#   - a teammate row with NO marker at all               -> skip, unmarked (never a first
+#                                                          verdict from this event)
 #
 # Exit code 2 = block the stop in Claude Code hooks; stderr goes back to the orchestrator,
 # which is why the refusal must name the row and its artifacts rather than the rule.
@@ -320,17 +338,28 @@ SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
 # this is monotone rather than a preference, and it keeps a row joinable if a future writer
 # ever appends without copying it forward.
 #
-# The output is TAB-delimited `<agent_id> <name>`, one line per unswept, joinable,
+# The output is TAB-delimited `<agent_id> <name> <kind>`, one line per unswept, joinable,
 # contract-bearing row. A tab cannot appear inside a field — every writer on this roster runs
 # its values through a sanitizer that turns one into a space — and the name is folded the
-# same way the verb folds it.
+# same way the verb folds it. `kind` is `verdict` for a row being answered for the first (and
+# only) time, and `recheck` for the supersession arm below, which is the one caller that may
+# write a SECOND marker for a row and the one that never refuses.
 CANDIDATES=$(awk -v pfx="roster-state/${ROSTER_VERSION}|" -v spfx="${SWEPT_SCHEMA}|" -v sid="$SID" \
                  -v mode="$MODE" -v pid="$STOP_AGENT_ID" -v atype="$STOP_AGENT_NAME" '
   index($0, spfx) == 1 {
-    nf = split($0, f, "|"); a = ""
-    for (i = 1; i <= nf; i++)
-      if (a == "" && substr(f[i], 1, 9) == "agent_id=") a = substr(f[i], 10)
+    nf = split($0, f, "|"); a = ""; mn = ""; ms = ""
+    for (i = 1; i <= nf; i++) {
+      if (a  == "" && substr(f[i], 1,  9) == "agent_id=") a  = substr(f[i], 10)
+      if (mn == "" && substr(f[i], 1,  5) == "name=")     mn = substr(f[i], 6)
+      if (ms == "" && substr(f[i], 1,  6) == "state=")    ms = substr(f[i], 7)
+    }
     if (a != "") swept[a] = 1
+    # THE LATEST ANSWER, PER ROW, and latest means LAST IN THE FILE: this is an append-only
+    # journal, so file order is chronological and an unconditional assignment leaves the most
+    # recent marker standing. The recheck arm below reads exactly these two facts — what the
+    # last answer said, and which id it was keyed by — and asks for nothing the marker does
+    # not already carry.
+    if (mn != "") { mstate[mn] = ms; if (a != "") magent[mn] = a }
     next
   }
   index($0, pfx) != 1 { next }
@@ -384,7 +413,7 @@ CANDIDATES=$(awk -v pfx="roster-state/${ROSTER_VERSION}|" -v spfx="${SWEPT_SCHEM
       # Both keys, because the marker may have been written under either: the row id when the
       # identification arm ran, the payload id when it did not.
       if ((a in swept) || (pid in swept)) exit
-      printf "%s\t%s\n", a, nm
+      printf "%s\t%s\t%s\n", a, nm, "verdict"
       exit
     }
 
@@ -397,11 +426,42 @@ CANDIDATES=$(awk -v pfx="roster-state/${ROSTER_VERSION}|" -v spfx="${SWEPT_SCHEM
       # fills the row id, the landed/live predicate here reads every teammate as landed on
       # the first Stop after dispatch, 2.8 s in, and refuses a contract the agent is still
       # working on. The sweep judges what it can place; the SubagentStop arm judges the rest.
-      if (tm[nm] != "") continue
+      #
+      # ONE EXCEPTION, AND IT IS NOT A VERDICT (session-20260815-landing-cleanup T3, AC-5).
+      # A teammate refused at SubagentStop is told so INSIDE its own sidechain, at the one
+      # moment it can still act — and it does: measured live, the refused teammate read the
+      # feedback and wrote the promised artifact, while the roster still said UNMET when the
+      # session ended (live-verify.md B2). The refusal was right and its record was a lie
+      # about the world. So a teammate row whose LATEST marker says UNMET, and whose
+      # contracted deliverable the verb now finds, gets a SUPERSEDING marker appended: the
+      # stream carries history plus current state, nothing is rewritten, and the block-once
+      # promise is untouched because a supersession never speaks. The Stop cadence is the
+      # clock; no timer is added for it.
+      #
+      # NEVER A FIRST VERDICT. A teammate row with no marker at all is left exactly where the
+      # skip above leaves it, delivered or not — the sweep cannot tell a working teammate
+      # from a finished one, and answering here is the 2.8-second false refusal this whole
+      # partition exists to prevent. The recheck can only ever change an answer that the
+      # SubagentStop arm already gave.
+      if (tm[nm] != "") {
+        if (!(nm in mstate)) continue       # unanswered: not this arm to answer
+        if (mstate[nm] != "UNMET") continue # the current answer is no failure; nothing to supersede
+        if (dl[nm] == "") continue          # declares nothing; MET vacuously either way
+        ra = ""
+        # The id off the MARKER first, and the row only as a fallback: in teammate mode a row
+        # carries no `agent_id=` at all (the addressing form lives in `teammate_id=`), and the
+        # marker was keyed by the transcript form off the stopping payload. Superseding under
+        # a different key would leave two markers no reader could tell were about one answer.
+        if ((nm in magent) && magent[nm] != "") ra = magent[nm]
+        else if ((nm in agent) && agent[nm] != "") ra = agent[nm]
+        if (ra == "") continue
+        printf "%s\t%s\t%s\n", ra, nm, "recheck"
+        continue
+      }
       if (!(nm in agent)) continue          # never confirmed: cannot be placed
       if (dl[nm] == "") continue            # declares nothing; MET vacuously either way
       if (agent[nm] in swept) continue      # already answered for, once and for all
-      printf "%s\t%s\n", agent[nm], nm
+      printf "%s\t%s\t%s\n", agent[nm], nm, "verdict"
     }
   }
 ' "$ROSTER_FILE" 2>/dev/null)
@@ -416,7 +476,7 @@ _field() {  # <key> — by key, never by position, as every reader of these line
 REFUSALS=""
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-while IFS=$'\t' read -r AID NAME; do
+while IFS=$'\t' read -r AID NAME KIND; do
   [ -n "$AID" ] && [ -n "$NAME" ] || continue
   # STILL IN FLIGHT — the payload says so, and an agent that is visibly still working has
   # not failed to land. No verdict, and no marker: its one answer is still owed.
@@ -442,6 +502,16 @@ while IFS=$'\t' read -r AID NAME; do
   [ -n "$LINE" ] || continue
 
   STATE=$(_field state)
+
+  # A RECHECK SPENDS A MARKER ONLY ON A CHANGED ANSWER. The row already has one saying UNMET;
+  # a second saying the same thing records nothing and would be appended on every turn end
+  # for the rest of the session — the marker-spam shape. Only MET supersedes: STILL-LIVE,
+  # WAIVED and AMBIGUOUS are not the recovery this arm exists to record, and UNMET is the
+  # answer already standing.
+  if [ "$KIND" = "recheck" ] && [ "$STATE" != "MET" ]; then
+    continue
+  fi
+
   # APPENDED HERE, PER ROW, THE MOMENT ITS VERDICT IS DECIDED — not accumulated across the
   # whole loop and written once at the end (t6-review.md F-2, measured: a sweep killed 5s
   # into a 200-candidate run, ~60 already verdicted, banked ZERO marks under the old single
@@ -450,6 +520,12 @@ while IFS=$'\t' read -r AID NAME; do
   # per sweep, so a sweep killed mid-loop still banks every verdict already decided.
   printf '%s|at=%s|session=%s|name=%s|agent_id=%s|state=%s\n' \
     "$SWEPT_SCHEMA" "$NOW" "$SID" "$NAME" "$AID" "$STATE" >> "$ROSTER_FILE" 2>/dev/null
+
+  # AND A SUPERSESSION NEVER SPEAKS. Its marker is MET by construction, so nothing below
+  # would fire anyway — but the reason it must not is stronger than the arithmetic: the row
+  # has already been refused once, the agent has already acted on that refusal, and the whole
+  # promise of this gate is that it blocks once. Recording the recovery is the entire job.
+  [ "$KIND" = "recheck" ] && continue
 
   [ "$VERDICT_RC" -eq 1 ] || continue
   [ "$STATE" = "UNMET" ] || continue
