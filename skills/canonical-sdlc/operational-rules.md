@@ -356,3 +356,22 @@ destroys the one thing the approval display is built to carry — the path the u
 - **CORRECTED 2026-07-27 (epic-12 wave-01): the always-loaded project-notebook tier this rule described no longer exists.** The old rule ("memory sweep must be recursive — read `INDEX.md` AND every Deep Context pointer") named a load mechanism that epic-12 deleted. What survives is the lesson underneath it, which was never about recursion: **a catalogue entry is not the knowledge.** The 2026-04-16 dry-run that produced the original rule picked a stale design (SessionEnd option C) because the better approach lived one pointer deeper than the entry point that was read.
 
 - **Design-time memory check — the live form of that lesson.** Before ratifying a mechanism at Step 1/2, grep the mechanism's moving parts against the recorded operational record (`.bionic/docs/record/`, `.bionic/docs/ideas/`) and the always-loaded fact bank. Epic-06 shipped "run old playwright CLI under system node" while epic-04's hang lesson sat unread in the record — every downstream gate then verified a doomed design. For anything that executes external binaries, the Verification Matrix needs one live-execution row at Step 5, pre-merge: T2-with-stubbed-binaries cannot catch version-pair incompatibilities.
+
+## Arming doctrine (standing, ratified 2026-08-15 — landing-supervision run)
+
+- **Arming is per-process and never survives a resume.** `--resume` (plain or
+  `--fork-session`) rehydrates the conversation, not the skill-channel hook
+  registration; the walls are silent in the resumed process until the governing skill is
+  re-invoked. Re-invocation after ANY resume is standing practice, not a repair.
+- **A `/hooks` listing is never proof of arming — only a wall observably firing is.**
+  The healthy probe is a deliverable-less dispatch (expect refusal); the roster row is
+  authoritative only within a session already proven armed (an unarmed session's roster
+  records nothing).
+- **The Skill-tool invocation arms identically to the typed slash command** (proven by
+  refused probe immediately after `Skill(canonical-sdlc)` in a process where the same
+  probe launched unwalled minutes earlier) — an orchestrator can self-heal arming after
+  a resume without user action.
+- Origin: the 2026-08-15 "first-arming failure" investigation — root-caused NOT to
+  registration (t8-forensic-read.md: the newest-plan off-switch, since fixed) — plus
+  direct resume measurements (t7-resume-probe.md rounds 2–3), both under
+  record/session-20260815-landing-supervision/.
