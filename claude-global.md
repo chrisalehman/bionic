@@ -20,3 +20,14 @@ Say which you need — a decision, an approval, an action only I can take, or an
 ## Ask first
 
 Secrets and credentials · billing · production infrastructure. When blocked, stop and tell me — don't work around it.
+
+## Notifying me
+
+To reach me away from the terminal (long task done, decision needed, walk ready):
+`source ~/.claude/cron.env && curl -s -H "Title: <project> — <event>" -H "Priority: high" -d "<one line>" "https://ntfy.sh/$BIONIC_NTFY_TOPIC"`
+Title ALWAYS leads with the project name (e.g. "bionic — walk ready"), so I can tell
+sessions apart on the phone. One machine-global topic; my phone is subscribed (proven
+2026-08-15). Use it alongside the harness PushNotification (desktop leg works; its mobile
+leg is upstream-broken — anthropics/claude-code#50949 — don't debug my phone for it).
+Don't rotate the topic without telling me. Notify on real events only, never routine
+progress.
