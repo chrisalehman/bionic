@@ -46,6 +46,11 @@ run "dispatch-spans.test.sh" bash tests/dispatch-spans.test.sh
 # to the glob above and must stay hand-listed.
 run "cross-gate-agreement.test.sh" bash tests/cross-gate-agreement.test.sh
 run "fail-direction-table.test.sh" bash tests/fail-direction-table.test.sh
+# Harness-on-harness (epic-17 W1). Pins the assertion helpers every suite above
+# hand-copies: under pipefail, `printf "$haystack" | grep -q` is a SIGPIPE race
+# that reports a present needle as missing and an absent-check as green. Also
+# hand-listed, same reason as the two lines above.
+run "assert-helper-race.test.sh" bash tests/assert-helper-race.test.sh
 # Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
 # 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so
