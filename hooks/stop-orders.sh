@@ -54,6 +54,13 @@
 
 set -u
 
+# THIS SCRIPT'S OWN PATH, so the usage it prints names the copy the operator actually
+# invoked — identical in a repo checkout, in a bootstrap-installed ~/.claude/hooks/, and in
+# an installed plugin payload. Deliberately NOT ${CLAUDE_PLUGIN_ROOT}: this script is run by
+# hand and by the harness outside any plugin context, where that variable does not exist.
+HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+[ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
+
 ORDER_SCHEMA="stop-order/v1"
 ROSTER_VERSION="v1"
 
@@ -69,9 +76,9 @@ die() { printf 'stop-orders: %s\n' "$1" >&2; }
 usage() {  # [message]
   [ $# -gt 0 ] && die "$1"
   die "Usage:"
-  die "  bash ~/.claude/hooks/stop-orders.sh order <target> [--at <epoch>]"
+  die "  bash ${HOOK_DIR}/stop-orders.sh order <target> [--at <epoch>]"
   die "        record a human's stop order and print what stopping gives up"
-  die "  bash ~/.claude/hooks/stop-orders.sh standdown"
+  die "  bash ${HOOK_DIR}/stop-orders.sh standdown"
   die "        list every landed row with an address you can stop it by"
   exit 2
 }

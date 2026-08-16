@@ -74,6 +74,14 @@
 
 set -u
 
+# THIS SCRIPT'S OWN PATH, so the re-run line it prints names the copy the operator actually
+# invoked — identical in a repo checkout, in a bootstrap-installed ~/.claude/hooks/, and in
+# an installed plugin payload. Deliberately NOT ${CLAUDE_PLUGIN_ROOT}: this probe is run by
+# hand, by hooks/dispatch-preflight.sh, and by the harness outside any plugin context, where
+# that variable does not exist. Absolute, so the line runs from any cwd (checklist A1).
+HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+[ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
+
 ATTESTATION_VERSION=1
 # D-3 payload-shape canary (w3 slice 4/4): the same-actor wall in hooks/stop-guard.sh reads
 # observer identity from the undocumented top-level `agent_id` field on subagent-invoked
@@ -410,7 +418,7 @@ if [ "$STATE_DIR_OK" -eq 0 ]; then
     die "BLOCKED — a blocking probe failed. No attestation was written, and any earlier"
     die "attestation has been deleted or emptied."
   fi
-  die "Fix the failure above and re-run: bash ~/.claude/hooks/preflight-probe.sh"
+  die "Fix the failure above and re-run: bash ${HOOK_DIR}/preflight-probe.sh"
   exit 1
 fi
 
@@ -453,7 +461,7 @@ if [ "$BLOCKING_FAILED" -eq 1 ]; then
   rm -f "$STATE_FILE"
   die "BLOCKED — a blocking probe failed. No attestation was written, and any earlier"
   die "attestation has been deleted. Fix the failure above and re-run:"
-  die "  bash ~/.claude/hooks/preflight-probe.sh"
+  die "  bash ${HOOK_DIR}/preflight-probe.sh"
   exit 1
 fi
 
