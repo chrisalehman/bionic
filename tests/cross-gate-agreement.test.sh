@@ -3717,6 +3717,27 @@ expect_eq "…no marker at all — the row was dropped by the empty-deliverable 
 
 # ============================================================
 echo ""
+echo "=== Q — has_sdlc_state() is a five-copy family, held by a wall (session-20260815-landing-cleanup T2) ==="
+# ============================================================
+#
+# §A2's active-wave-detection loop above pins CALL SITES: the `no-marker-skip`
+# mutation proves each of DP/SG/EG/ER/LG breaks if its `has_sdlc_state "$f" ||
+# continue` guard is deleted. It never asks whether the PREDICATE itself — the
+# function body every call site invokes — is still the same text in all five
+# files. This section closes exactly that gap, mirroring §N.1's body-for-body
+# method: `canonical-sdlc-evidence-gate.sh` is the designated origin (the file
+# that documents the fence-aware, CR-normalizing contract at its definition
+# site), one non-vacuity check proves the extractor pulls a real body from it,
+# then the other four carriers are compared against that origin, body for body.
+expect_eq "the has_sdlc_state() extractor returns a body at all (this section is not vacuous)" "yes" \
+  "$([ -n "$(fn_body "$PARTY_EG" has_sdlc_state)" ] && echo yes || echo no)"
+for _q in "$PARTY_DP" "$PARTY_ER" "$PARTY_LG" "$PARTY_SG"; do
+  expect_eq "$(basename "$_q")'s has_sdlc_state() is the evidence gate's, body for body" \
+    "$(fn_body "$PARTY_EG" has_sdlc_state)" "$(fn_body "$_q" has_sdlc_state)"
+done
+
+# ============================================================
+echo ""
 echo "──────────────────────────────────────────────"
 echo "cross-gate-agreement: ${PASS} passed, ${FAIL} failed, ${TOTAL} total"
 [ "$FAIL" -eq 0 ]
