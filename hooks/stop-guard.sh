@@ -318,9 +318,17 @@ if [ "$MATCH_COUNT" -eq 0 ]; then
          "another's tasks, so no observation can discharge this. If the agent belongs to a" \
          "different session, stop it from there, or stop it yourself (a human-initiated stop" \
          "bypasses this gate). Otherwise check the name against what you launched it under."
+  else
+    # STRUCTURAL, not remote-controlled (Step-6 review flag 2-B): this branch is
+    # reachable only when `is_address_shaped` is false. Before, the refusal above
+    # and this passthrough were mutually exclusive solely because `deny()` ends in
+    # an unconditional `exit 2` in another function, 40 lines away — a refactor
+    # that made `deny()` non-exiting would have printed a contradictory
+    # PASSTHROUGH line after every refusal and then silently exited 0. The `else`
+    # makes that impossible regardless of what `deny()` does.
+    echo "PASSTHROUGH: '${RAW}' resolves to no agent in THIS session's metadata and wears no agent-address shape — not an Agent-tool dispatch this gate has standing to guard. The stop proceeds." >&2
+    exit 0
   fi
-  echo "PASSTHROUGH: '${RAW}' resolves to no agent in THIS session's metadata and wears no agent-address shape — not an Agent-tool dispatch this gate has standing to guard. The stop proceeds." >&2
-  exit 0
 fi
 if [ "$MATCH_COUNT" -gt 1 ]; then
   deny "Target '${RAW}' is ambiguous: ${MATCH_COUNT} agents in this session answer to it." \

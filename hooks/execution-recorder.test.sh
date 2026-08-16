@@ -1166,9 +1166,13 @@ expect_eq "…leaving the roster exactly as it was" \
 # (plan Assumptions A-D1). Dropping the `teammate_id=` scope means the join can no
 # longer tell a teammate named `general-purpose` from an async dispatch of TYPE
 # `general-purpose` — one dispatch literally named after a subagent type collides,
-# and the roster's own vocabulary is the only thing that could separate them. The
-# wave-03 defect this resembles was UNSCOPED and matched a type against a type;
-# this match is exact, non-empty and session-scoped, and it costs exactly this row.
+# and the roster's own vocabulary is the only thing that could separate them. This
+# is not a new, differently-scoped join resembling a prior defect: it is the SAME
+# join `47e8961` wrote and `27a8e4c` deleted, with the same predicates (name=
+# equality, intended|confirmed, session-scoped) — deleted on the belief that
+# `agent_type` never carries a dispatch name, a belief this wave's research
+# falsified (t1-probe-report.md §2.1; see hooks/execution-recorder.sh's ARM 3
+# name-join comment). It costs exactly this row, restored along with the join.
 # Flipping this assertion back is a design change, not a fix.
 IFS='|' read -r I2C_REPO I2C_TR I2C_SUB I2C_CFG <<< "$(make_world identasyncname yes)"
 seed_roster_full "$I2C_REPO" "$SID_A" "general-purpose" "toolu_01ASYNCNAME"
