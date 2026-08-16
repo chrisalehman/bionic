@@ -79,8 +79,14 @@ ROSTER_VERSION="v1"
 ROSTER_PREFIX="roster-"
 ROSTER_SUFFIX=".state"
 
-ACK_COMMAND="bash ~/.claude/hooks/session-sweeper.sh ack"
-VERDICT_COMMAND="bash ~/.claude/hooks/session-sweeper.sh verdict"
+# THIS SCRIPT'S OWN PATH, so the usage it prints names the copy the operator actually
+# invoked — identical in a repo checkout, in a bootstrap-installed ~/.claude/hooks/, and in
+# an installed plugin payload. Deliberately NOT ${CLAUDE_PLUGIN_ROOT}: this script is run by
+# hand and by the harness outside any plugin context, where that variable does not exist.
+HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+[ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
+ACK_COMMAND="bash ${HOOK_DIR}/session-sweeper.sh ack"
+VERDICT_COMMAND="bash ${HOOK_DIR}/session-sweeper.sh verdict"
 
 say()  { printf 'sweeper: %s\n' "$1"; }
 die()  { printf 'sweeper: %s\n' "$1" >&2; }

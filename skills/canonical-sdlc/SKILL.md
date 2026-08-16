@@ -6,54 +6,54 @@ hooks:
     - matcher: "Bash"
       hooks:
         - type: command
-          command: ~/.claude/hooks/canonical-sdlc-evidence-gate.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-evidence-gate.sh
           timeout: 10
         - type: command
-          command: ~/.claude/hooks/farm-out-reminder.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/farm-out-reminder.sh
           timeout: 10
     - matcher: "TaskStop"
       hooks:
         - type: command
-          command: ~/.claude/hooks/stop-guard.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.sh
           timeout: 10
     - matcher: "Agent"
       hooks:
         - type: command
-          command: ~/.claude/hooks/dispatch-preflight.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh
           timeout: 10
     - matcher: "Write"
       hooks:
         - type: command
-          command: ~/.claude/hooks/canonical-sdlc-governing-skill.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh
           timeout: 10
     - matcher: "Edit"
       hooks:
         - type: command
-          command: ~/.claude/hooks/canonical-sdlc-governing-skill.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh
           timeout: 10
   PostToolUse:
     - matcher: "Bash"
       hooks:
         - type: command
-          command: ~/.claude/hooks/execution-recorder.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh
           timeout: 10
     - matcher: "Agent"
       hooks:
         - type: command
-          command: ~/.claude/hooks/execution-recorder.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh
           timeout: 10
   SubagentStart:
     - hooks:
         - type: command
-          command: ~/.claude/hooks/execution-recorder.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh
           timeout: 10
   Stop:
     - hooks:
         - type: command
-          command: ~/.claude/hooks/context-spend.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/context-spend.sh
           timeout: 10
         - type: command
-          command: ~/.claude/hooks/landing-gate.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh
           timeout: 10
 layer: governance
 needs:

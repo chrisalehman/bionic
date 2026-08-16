@@ -2634,32 +2634,32 @@ SKILL_HOOKS_ROWS=$(awk '
 ' "$SKILL_SRC")
 
 expect_contains "frontmatter registers the evidence gate on PreToolUse|Bash, timeout 10" \
-  "PreToolUse|Bash|~/.claude/hooks/canonical-sdlc-evidence-gate.sh|10" "$SKILL_HOOKS_ROWS"
+  "PreToolUse|Bash|\${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-evidence-gate.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…and farm-out-reminder on PreToolUse|Bash, timeout 10 (session-20260815 T5)" \
-  "PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh|10" "$SKILL_HOOKS_ROWS"
+  "PreToolUse|Bash|\${CLAUDE_PLUGIN_ROOT}/hooks/farm-out-reminder.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…the stop guard on PreToolUse|TaskStop, timeout 10" \
-  "PreToolUse|TaskStop|~/.claude/hooks/stop-guard.sh|10" "$SKILL_HOOKS_ROWS"
+  "PreToolUse|TaskStop|\${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…dispatch-preflight on PreToolUse|Agent, timeout 10" \
-  "PreToolUse|Agent|~/.claude/hooks/dispatch-preflight.sh|10" "$SKILL_HOOKS_ROWS"
+  "PreToolUse|Agent|\${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…the governing-skill gate on PreToolUse|Write, timeout 10" \
-  "PreToolUse|Write|~/.claude/hooks/canonical-sdlc-governing-skill.sh|10" "$SKILL_HOOKS_ROWS"
+  "PreToolUse|Write|\${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…and on PreToolUse|Edit, timeout 10" \
-  "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh|10" "$SKILL_HOOKS_ROWS"
+  "PreToolUse|Edit|\${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…the recorder's observation arm on PostToolUse|Bash, timeout 10" \
-  "PostToolUse|Bash|~/.claude/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
+  "PostToolUse|Bash|\${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…its completion arm on PostToolUse|Agent, timeout 10" \
-  "PostToolUse|Agent|~/.claude/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
+  "PostToolUse|Agent|\${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…its identification arm on SubagentStart (no matcher), timeout 10" \
-  "SubagentStart||~/.claude/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
+  "SubagentStart||\${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…context-spend on Stop (no matcher), timeout 10" \
-  "Stop||~/.claude/hooks/context-spend.sh|10" "$SKILL_HOOKS_ROWS"
+  "Stop||\${CLAUDE_PLUGIN_ROOT}/hooks/context-spend.sh|10" "$SKILL_HOOKS_ROWS"
 # THE LANDING SWEEP MOVED TO Stop (epic-16 wave-03, T4c). SubagentStop is dispatched in the
 # SUBAGENT's context, and skill-frontmatter hooks are looked up by SESSION id — so no
 # subagent-context event can ever reach this channel (T4b §3, from the shipped binary). A
 # registration left on SubagentStop is a wall that is installed, syntactically fine, green in
 # its own suite, and never runs.
 expect_contains "…and the landing sweep on Stop (no matcher), timeout 10" \
-  "Stop||~/.claude/hooks/landing-gate.sh|10" "$SKILL_HOOKS_ROWS"
+  "Stop||\${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh|10" "$SKILL_HOOKS_ROWS"
 expect_absent_ug "…with NOTHING left registered on SubagentStop" \
   "SubagentStop" "$SKILL_HOOKS_ROWS"
 expect_eq "…exactly eleven registrations in the frontmatter block, nothing extra" \
@@ -2832,9 +2832,9 @@ expect_absent_ug "…and the guard itself is NOT on the skill channel (no event 
 # The two channels cover the SAME three events: for each guarded settings entry there is
 # a frontmatter row registering the same wall on the same event/matcher, straight (that
 # is the main-thread half, asserted by value in L.1 and re-read here as a pair).
-for _pair in "PreToolUse|Agent|~/.claude/hooks/dispatch-preflight.sh|10" \
-             "PreToolUse|Write|~/.claude/hooks/canonical-sdlc-governing-skill.sh|10" \
-             "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh|10"; do
+for _pair in "PreToolUse|Agent|\${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|10" \
+             "PreToolUse|Write|\${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10" \
+             "PreToolUse|Edit|\${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10"; do
   expect_contains "the skill channel still covers the main thread for ${_pair%%|*}|$(echo "$_pair" | cut -d'|' -f2)" \
     "$_pair" "$SKILL_HOOKS_ROWS"
 done
