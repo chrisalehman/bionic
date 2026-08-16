@@ -453,6 +453,11 @@ CANDIDATES=$(awk -v pfx="roster-state/${ROSTER_VERSION}|" -v spfx="${SWEPT_SCHEM
         # marker was keyed by the transcript form off the stopping payload. Superseding under
         # a different key would leave two markers no reader could tell were about one answer.
         if ((nm in magent) && magent[nm] != "") ra = magent[nm]
+        # UNREACHABLE while this file is the only writer of landing-swept marker lines
+        # (Step-6 review flag 3-A; grep -rn SWEPT_SCHEMA hooks/*.sh confirms one writer,
+        # below in this file) and its write path refuses to append unless agent_id is
+        # non-empty, so magent[nm] is always populated whenever mstate[nm] exists.
+        # Kept as belt-on-belt against a future second writer, not a live path.
         else if ((nm in agent) && agent[nm] != "") ra = agent[nm]
         if (ra == "") continue
         printf "%s\t%s\t%s\n", ra, nm, "recheck"

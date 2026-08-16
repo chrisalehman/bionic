@@ -485,12 +485,19 @@ expect_status "a named transcript-form target with no metadata: still REFUSED" 2
 expect_contains "…the verbatim unresolved-target message" "is unresolved" "$GUARD_ERR"
 
 # (d) A supervised named target (metadata present) still engages the FULL guard
-# path, untouched — the passthrough branch is reached only at MATCH_COUNT=0.
-# Already pinned above in this same fixture world: "active wave + no
-# observation: REFUSED" and "active wave + fresh observation: PERMITTED" both
-# resolve quiet-reviewer's real agent-*.meta.json and run the whole gate,
-# roster lookup, D-1/D-2/D-3/D-6 checks included.
-ok "a supervised named target still engages the full guard path (see 'active wave + no observation' / 'fresh observation' above)"
+# path, untouched — the passthrough branch is reached only at MATCH_COUNT=0, and
+# a target that resolves to a real agent of this session never gets there.
+# DRIVEN (Step-6 review flag 2-C: a bare `ok` here asserted nothing and could not
+# fail). Quiet-reviewer's own REFUSED/PERMITTED pair above already proves the
+# full path for that name; this plants a SECOND, never-observed teammate in the
+# same active-wave world so the assertion here carries its own evidence rather
+# than pointing at rows planted for a different purpose.
+plant_agent "$W4_SUB" "ahushed-reviewer-7777777777777777" "hushed-reviewer"
+roster_row "$W4_REPO" "$SID_A" "hushed-reviewer" "ahushed-reviewer-7777777777777777"
+run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "hushed-reviewer")"
+expect_status "a supervised named target still engages the full guard path: REFUSED for want of an observation" 2 "$GUARD_ST"
+expect_contains "…the full no-observation refusal names the observation command" "stop-check.sh" "$GUARD_ERR"
+expect_absent "…and this is NOT the passthrough branch" "PASSTHROUGH" "$GUARD_ERR"
 
 # ============================================================
 echo ""

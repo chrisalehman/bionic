@@ -149,8 +149,10 @@ if [ -n "$IS_START" ]; then
   # NAME for a named teammate (t1-probe-report.md §2.1). Wave-03 read the first
   # half and removed the join for cause; the second half is the ONLY identifying
   # field a teammate payload has, and without it a teammate row is never joinable
-  # at all. The join below is therefore by id first and by this name second, with
-  # the name half scoped to rows the writer marked as teammates.
+  # at all. The join below is therefore by id first and by this name second, over
+  # rows whose status is `intended` or `confirmed` and whose session matches this
+  # one — not scoped to rows the writer marked as teammates; that scope is gone
+  # (see the name join further down, and Step-6 review flag 2-A).
   START_TYPE=$(_jq '.agent_type')
   START_ID=$(_jq '.agent_id')
   [ -n "$START_ID" ] || exit 0
@@ -610,12 +612,18 @@ if [ -n "$IS_START" ]; then
   # wave-03 removal was right about and this join is built on rather than against.
   # `agent_type` carries the dispatch NAME for a teammate and the subagent TYPE for
   # an async dispatch (t1-probe-report.md §2.1, both measured on one live session).
-  # The wave-03 join was UNSCOPED and matched that field against a type; this one
-  # matches it against `name=` — the string the dispatch itself chose — exact,
-  # non-empty, and only over rows this session journalled. An async start therefore
-  # arrives carrying a type and finds no row named for it, and a phantom start
-  # (empty `agent_type`, t1 §4.6) matches nothing, which is checked for rather than
-  # assumed.
+  # THE CORRECTED HISTORY (Step-6 review flag 1-A; the prior text here had it
+  # backwards). This join is not new and was never unscoped: it was WRITTEN at
+  # `47e8961` (epic-16 w1 slice 1/7) with the same predicates as today's — `name=`
+  # equality, `intended|confirmed`, session-scoped (`git show
+  # 47e8961:hooks/execution-recorder.sh`) — then DELETED at `27a8e4c`, whose own
+  # message gives the cause: "the execution recorder's identification arm keyed on
+  # agent_type, which carries the subagent TYPE and never the dispatch name, so
+  # every by-name join missed silently." It was removed on the belief that it was
+  # a no-op, not that it misjoined. This wave's research falsified that belief
+  # (t1-probe-report.md §2.1: `agent_type` carries the dispatch NAME for a
+  # teammate). So this is not a rescoped join — it is the same join, restored,
+  # because the measurement its removal rested on was wrong.
   #
   # THE RESIDUAL IS ONE DISPATCH LITERALLY NAMED AFTER A SUBAGENT TYPE (plan
   # Assumptions A-D1): a teammate named `general-purpose` and an async dispatch of
