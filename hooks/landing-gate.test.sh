@@ -953,6 +953,160 @@ run_gate "$GATE" "$(stop_payload "$R14B" "$SID" false)"
 expect_status "14f: the identical sweep re-run passes — nothing left to verdict" "0" "$RC"
 expect_eq "14g: …and the count does not double" "$N14B" "$(swept_count "$R14B")"
 
+# ================================================================= Section 15
+section "Section 15: SUPERSESSION — a failed teammate that fixes it gets a second answer (T3, AC-5)"
+
+# THE STATE THIS CLOSES, measured live (record/session-20260815-landing-supervision/
+# live-verify.md §B2): the teammate was refused, READ the refusal inside its own sidechain,
+# WROTE the promised artifact, and the roster still said `state=UNMET` when the session
+# ended. The refusal worked exactly as designed and the record of it was a lie about the
+# world — the marker stream carried the failure and never the recovery.
+#
+# The ruling is SUPERSEDE (plan AC-4, user "Option 1"): the stream records history PLUS
+# current state, so nothing is rewritten and a second, later marker says what is true now.
+# The Stop sweep is the clock (A-D2), and the arm re-sees teammate rows without disturbing
+# the landing arm (A-D5) because it appends a superseding marker, never a sweep verdict.
+#
+# FIXTURE FIDELITY (declared): the roster rows below are the B2 capture's shape, verbatim in
+# every field this arm reads — `intended` then `confirmed`, BOTH carrying `agent_id=` EMPTY
+# (teammate mode puts the addressing form in `teammate_id=` and leaves `agent_id=` for the
+# identification arm), `teammate_id=<name>@session-<8 hex>` on the confirmed row only. The
+# UNMET marker is not hand-written here: every case below DRIVES THE REAL SubagentStop ARM
+# to produce it, which is how B2 got its `landing-swept/v1|…|agent_id=alvteam2-…|state=UNMET`
+# line — keyed by the transcript-form id off the stopping payload, since no row carried one.
+SUP_AID="alvteam2-63ab84a110ebd22f"        # transcript form, B2 verbatim
+SUP_ADDR="lvteam2@session-8475b6b6"        # addressing form, B2 verbatim
+SUP_BG="[$(bg_teammate t5triyxvo)]"
+
+met_markers()   { swept_lines "$1" | /usr/bin/grep -c 'state=MET'   | tr -d ' '; }
+unmet_markers() { swept_lines "$1" | /usr/bin/grep -c 'state=UNMET' | tr -d ' '; }
+
+# ---- the positive: refused, then delivered, then superseded ----
+R15="$(make_wave_repo r15)"
+add_row "$R15" name=lvteam2 status=intended agent_id= \
+  deliverable=.bionic/docs/record/lv-b2-PROBE.txt launched_at="$(iso_ago 600)" \
+  tool_use_id=toolu_016TJwSU68bkmhRuBxKFREi4
+add_row "$R15" name=lvteam2 status=confirmed agent_id= teammate_id="$SUP_ADDR" \
+  deliverable=.bionic/docs/record/lv-b2-PROBE.txt launched_at="$(iso_ago 600)" \
+  tool_use_id=toolu_016TJwSU68bkmhRuBxKFREi4
+run_gate "$GATE" "$(substop_payload "$R15" "$SID" "$SUP_AID" lvteam2 false "$SUP_BG")"
+expect_status "15a: precondition — the teammate lands UNMET and is refused" "2" "$RC"
+expect_eq "15a: …with exactly one marker, the failure" "1" "$(swept_count "$R15")"
+expect_contains "15a: …recording UNMET" "state=UNMET" "$(swept_lines "$R15")"
+
+# It reads the refusal and writes the file — the exact recovery B2 recorded (sidechain index
+# 6, a Write of the promised path, after the injected `Stop hook feedback:` turn).
+deliver "$R15" .bionic/docs/record/lv-b2-PROBE.txt
+run_gate "$GATE" "$(stop_payload "$R15" "$SID" false)"
+expect_status "15b: the next sweep passes — a supersession is not news, and never refuses" "0" "$RC"
+expect_empty "15b: …silently" "$OUT_STDERR"
+expect_eq "15b: …and appends a SECOND marker beside the first" "2" "$(swept_count "$R15")"
+expect_eq "15b: …the failure is still there, unedited (append-only)" "1" "$(unmet_markers "$R15")"
+expect_eq "15b: …and the current state is beside it" "1" "$(met_markers "$R15")"
+expect_contains "15b: …the OLDER line is the UNMET one — order is chronological" \
+  "state=UNMET" "$(swept_lines "$R15" | head -1)"
+expect_contains "15b: …and the LATER line is the superseding MET" \
+  "state=MET" "$(swept_lines "$R15" | tail -1)"
+expect_contains "15b: …keyed by the same agent id the failure was keyed by" \
+  "agent_id=$SUP_AID" "$(swept_lines "$R15" | tail -1)"
+expect_contains "15b: …and naming the same row" "name=lvteam2" "$(swept_lines "$R15" | tail -1)"
+
+# ---- idempotent: a superseded row is answered, not a standing invitation ----
+run_gate "$GATE" "$(stop_payload "$R15" "$SID" false)"
+expect_status "15c: the next sweep over the superseded row passes" "0" "$RC"
+expect_eq "15c: …and writes NO third marker — the latest answer is already MET" \
+  "2" "$(swept_count "$R15")"
+run_gate "$GATE" "$(stop_payload "$R15" "$SID" false)"
+expect_eq "15c: …and no fourth, however many turns end (no marker spam)" "2" "$(swept_count "$R15")"
+
+# ---- the negative: still not delivered, still nothing appended ----
+R15D="$(make_wave_repo r15d)"
+add_row "$R15D" name=lvteam2 status=intended agent_id= \
+  deliverable=.bionic/docs/record/lv-b2-PROBE.txt launched_at="$(iso_ago 600)"
+add_row "$R15D" name=lvteam2 status=confirmed agent_id= teammate_id="$SUP_ADDR" \
+  deliverable=.bionic/docs/record/lv-b2-PROBE.txt launched_at="$(iso_ago 600)"
+run_gate "$GATE" "$(substop_payload "$R15D" "$SID" "$SUP_AID" lvteam2 false "$SUP_BG")"
+expect_status "15d: precondition — refused, and the artifact is still absent" "2" "$RC"
+run_gate "$GATE" "$(stop_payload "$R15D" "$SID" false)"
+expect_status "15d: the sweep passes — the UNMET row is not re-refused by the recheck" "0" "$RC"
+expect_empty "15d: …silently, on the same block-once promise (Assumption 27)" "$OUT_STDERR"
+expect_eq "15d: …and appends NOTHING: the answer has not changed" "1" "$(swept_count "$R15D")"
+expect_eq "15d: …the failure standing alone" "1" "$(unmet_markers "$R15D")"
+
+# ---- NEVER A FIRST VERDICT. A teammate row the SubagentStop arm has not answered for is
+# not the sweep's to answer, delivered or not: the sweep cannot tell a working teammate from
+# a finished one (its row never leaves background_tasks[], t1 §2.3), so a first verdict here
+# is the 2.8-second false refusal Section 13 exists to prevent. The recheck only ever
+# SUPERSEDES an answer that already exists.
+R15E="$(make_wave_repo r15e)"
+add_row "$R15E" name=lvteam2 status=confirmed agent_id= teammate_id="$SUP_ADDR" \
+  deliverable=.bionic/docs/record/lv-b2-PROBE.txt launched_at="$(iso_ago 600)"
+deliver "$R15E" .bionic/docs/record/lv-b2-PROBE.txt
+run_gate "$GATE" "$(stop_payload "$R15E" "$SID" false)"
+expect_status "15e: an unmarked teammate row, deliverable present — the sweep passes" "0" "$RC"
+expect_empty "15e: …silently" "$OUT_STDERR"
+expect_eq "15e: …and marks NOTHING: a recheck is not a first verdict" "0" "$(swept_count "$R15E")"
+
+R15F="$(make_wave_repo r15f)"
+add_row "$R15F" name=lvteam2 status=confirmed agent_id= teammate_id="$SUP_ADDR" \
+  deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)"
+run_gate "$GATE" "$(stop_payload "$R15F" "$SID" false)"
+expect_status "15f: …and the same row with the artifact ABSENT still passes, unmarked" "0" "$RC"
+expect_eq "15f: …exactly as Section 13 pins it" "0" "$(swept_count "$R15F")"
+
+# ---- THE PARTITION HOLDS. An async row is the sweep proper, and its already-swept guard is
+# untouched by this arm: once answered it is answered, whatever later appears on disk.
+R15G="$(make_wave_repo r15g)"
+add_row "$R15G" name=async-one agent_id="$AID_A" \
+  deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)"
+run_gate "$GATE" "$(stop_payload "$R15G" "$SID" false)"
+expect_status "15g: precondition — the async row is swept UNMET and refuses" "2" "$RC"
+deliver "$R15G" .bionic/docs/record/never.md
+run_gate "$GATE" "$(stop_payload "$R15G" "$SID" false)"
+expect_status "15g: a later Stop over the delivered async row passes" "0" "$RC"
+expect_eq "15g: …and the already-swept guard still closes it, once and for all" \
+  "1" "$(swept_count "$R15G")"
+
+# ---- THE DISCRIMINATING HALF. 15e and 15f pass against the pre-T3 gate too — they are the
+# behaviour that must SURVIVE the change, which makes them silent about whether the guard
+# that preserves it is even there. This pair fixes that, on the shape where the difference is
+# visible: an ARM3-IDENTIFIED teammate row (`agent_id=` filled, which is what the
+# identification arm writes) that has never been marked, with its artifact already on disk.
+# The real gate must leave it alone; a copy with the never-a-first-verdict guard removed marks
+# it, which is the 2.8-second false verdict the partition exists to prevent.
+R15H="$(make_wave_repo r15h)"
+add_row "$R15H" name=w2mate agent_id="$TEAM_AID" teammate_id="$TEAM_ADDR" \
+  deliverable=.bionic/docs/record/mate.md launched_at="$(iso_ago 600)"
+deliver "$R15H" .bionic/docs/record/mate.md
+run_gate "$GATE" "$(stop_payload "$R15H" "$SID" false)"
+expect_status "15h: an identified but unmarked teammate row is left to its own arm" "0" "$RC"
+expect_eq "15h: …and marks nothing, delivered or not" "0" "$(swept_count "$R15H")"
+
+SUPDIR="$SANDBOX/hooks-supersede-mutant"
+mkdir -p "$SUPDIR"
+cp "$HOOKS_DIR/session-sweeper.sh" "$SUPDIR/session-sweeper.sh"
+# BOTH guards go, because either one alone still holds the line: an unmarked row has no
+# latest state, so the UNMET comparison rejects it too. The mutant is therefore the
+# over-broad implementation this arm could plausibly have been written as — supersede any
+# teammate row whose artifact is on disk — rather than a single-character typo.
+awk '{
+       if (index($0, "(nm in mstate)") > 0 || index($0, "mstate[nm] !=") > 0) {
+         print "        if (0) continue"
+         next
+       }
+       print
+     }' "$GATE" > "$SUPDIR/landing-gate.sh"
+expect_eq "15h-mut: the guard PAIR is where the mutation says it is (not vacuous)" \
+  "2" "$(diff "$GATE" "$SUPDIR/landing-gate.sh" | /usr/bin/grep -c '^< ' | tr -d ' ')"
+
+R15H_MUT="$(make_wave_repo r15h-mut)"
+add_row "$R15H_MUT" name=w2mate agent_id="$TEAM_AID" teammate_id="$TEAM_ADDR" \
+  deliverable=.bionic/docs/record/mate.md launched_at="$(iso_ago 600)"
+deliver "$R15H_MUT" .bionic/docs/record/mate.md
+run_gate "$SUPDIR/landing-gate.sh" "$(stop_payload "$R15H_MUT" "$SID" false)"
+expect_eq "15h-mut: with the guard removed the SAME row is marked — the fixture really does discriminate" \
+  "1" "$(swept_count "$R15H_MUT")"
+
 # ---------- summary ----------
 printf '\n---\n%d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
 [ "$FAIL" -eq 0 ]
