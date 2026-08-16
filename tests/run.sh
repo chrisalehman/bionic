@@ -52,6 +52,11 @@ run "plugin-manifest.test.sh" bash tests/plugin-manifest.test.sh
 # a cross-COMPONENT proof — it pins against claude-bootstrap.sh's
 # MANAGED_HOOKS array, not any single hook script.
 run "plugin-hooks.test.sh" bash tests/plugin-hooks.test.sh
+# Harness-on-harness (epic-17 W1). Pins the assertion helpers every suite above
+# hand-copies: under pipefail, `printf "$haystack" | grep -q` is a SIGPIPE race
+# that reports a present needle as missing and an absent-check as green. Also
+# hand-listed, same reason as the two lines above.
+run "assert-helper-race.test.sh" bash tests/assert-helper-race.test.sh
 # Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
 # 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so
