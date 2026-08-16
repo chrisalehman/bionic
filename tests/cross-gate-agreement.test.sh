@@ -612,7 +612,7 @@ EOF
 # run_battery <mode>  — mode=assert emits one assertion per fixture;
 #                       mode=detect returns 1 at the FIRST disagreement.
 run_battery() {
-  local mode="$1" name want cur repo a b c d e cnorm cval
+  local mode="$1" name want cur repo a b c d e cnorm cval want_sg
   while IFS='|' read -r name want cur; do
     [ -n "$name" ] || continue
     repo="$SANDBOX/fx/$name/repo"
@@ -620,8 +620,16 @@ run_battery() {
     d=$(verdict_er "$repo"); e=$(verdict_lg "$repo")
     cnorm="${c%%:*}"; cval=""
     [ "$cnorm" = "yes" ] && cval="${c#*:}"
+    # T4 (session-20260815-landing-cleanup): verdict_sg always drives stop-guard
+    # with the fixed target "no-such-agent" — non-address-shaped. With a wave
+    # active, MATCH_COUNT=0 + the shape carve now PASSES THROUGH instead of
+    # refusing, a ratified divergence (design ¶T4), not a defect. Only
+    # stop-guard's expectation moves here; the other four parties' semantics
+    # are unchanged by T4, so their comparisons still read "$want" directly.
+    want_sg="$want"
+    [ "$want" = "yes" ] && want_sg="other:pass-with-output"
     if [ "$mode" = "assert" ]; then
-      if [ "$a" = "$want" ] && [ "$b" = "$want" ] && [ "$cnorm" = "$want" ] && [ "$d" = "$want" ] && [ "$e" = "$want" ]; then
+      if [ "$a" = "$want" ] && [ "$b" = "$want_sg" ] && [ "$cnorm" = "$want" ] && [ "$d" = "$want" ] && [ "$e" = "$want" ]; then
         ok "all five parties agree on '$name': $want"
       else
         no "all five parties agree on '$name': $want" \
@@ -633,7 +641,7 @@ run_battery() {
     else
       # Detect mode also compares the DERIVED VALUE, so a mutation that selects a
       # different plan without flipping the predicate is caught too.
-      if [ "$a" != "$want" ] || [ "$b" != "$want" ] || [ "$cnorm" != "$want" ] || [ "$d" != "$want" ] || [ "$e" != "$want" ] \
+      if [ "$a" != "$want" ] || [ "$b" != "$want_sg" ] || [ "$cnorm" != "$want" ] || [ "$d" != "$want" ] || [ "$e" != "$want" ] \
          || { [ "$want" = "yes" ] && [ "$cval" != "$cur" ]; }; then
         printf 'disagreement on %s: want=%s/%s dp=%s sg=%s eg=%s er=%s lg=%s\n' "$name" "$want" "$cur" "$a" "$b" "$c" "$d" "$e"
         return 1
@@ -782,7 +790,11 @@ echo "=== A3 — the one KNOWN divergence, pinned so it cannot drift silently ==
 TREPO=$(new_repo "known-divergence")
 write_plan "$TREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: T4"
 expect_eq "T-token, wave scale: the start gate reads an active wave"  "yes" "$(verdict_dp "$TREPO")"
-expect_eq "T-token, wave scale: the stop gate reads an active wave"   "yes" "$(verdict_sg "$TREPO")"
+# T4 (session-20260815-landing-cleanup): the stop gate still READS this as an
+# active wave (it reaches the MATCH_COUNT/shape-carve code at all), but
+# verdict_sg's fixed target "no-such-agent" is non-address-shaped, so the
+# ratified shape carve now passes it through instead of refusing.
+expect_eq "T-token, wave scale: the stop gate reads an active wave"   "other:pass-with-output" "$(verdict_sg "$TREPO")"
 expect_eq "T-token, wave scale: the evidence gate rejects the plan instead" \
   "no" "$(verdict_eg "$TREPO")"
 
@@ -978,23 +990,29 @@ expect_eq "C2 gate refuses it" "refused" "$(q_gate dup)"
 # --- case 3: resolves only in ANOTHER session of this project. A KNOWN,
 # PINNED divergence, not a defect: the observation is project-wide because it has
 # no payload to scope it, while a stop is session-scoped because a session can
-# only stop its own tasks. The divergence runs fail-closed in every direction —
-# the operator can look, nothing records, the stop refuses — and the refusal
-# names the scope so the loop has a stated exit (readability R4). ---
+# only stop its own tasks. Before T4 this ran fail-closed in every direction —
+# the operator could look, nothing recorded, the stop refused, naming the scope
+# so the loop had a stated exit (readability R4). T4 (session-20260815-
+# landing-cleanup) re-bases the stop-guard leg only: "foreign" wears no
+# agent-address shape, so MATCH_COUNT=0 now passes it through instead of
+# refusing — a ratified divergence (design ¶T4), never silent (one logged
+# passthrough line names why it did not refuse). ---
 plant "$RPROJ/$SID_B/subagents" "aforeign-4444444444444444" "foreign"
 expect_eq "C3 observation can still SHOW another session's agent" \
   "resolved" "$(q_observation foreign)"
 expect_eq "C3 recorder records nothing for it (only this session's agents)" \
   "nothing" "$(q_recorder foreign)"
-expect_eq "C3 gate refuses it" "refused" "$(q_gate foreign)"
+expect_eq "C3 gate passes it through instead of refusing" "permitted" "$(q_gate foreign)"
 OUT=$(mk_stop_payload "$SID_A" "$RTR" "$RREPO" "foreign" | bash "$PARTY_SG" 2>&1)
-expect_contains "C3 the refusal NAMES the scope, so the named fix is not an endless loop" \
-  "scoped to agents this session launched" "$OUT"
+expect_contains "C3 the passthrough NAMES why, so it is never a silent gate" \
+  "resolves to no agent in THIS session's metadata and wears no agent-address shape" "$OUT"
 
-# --- case 4: unknown to both. ---
+# --- case 4: unknown to both. "nobody" wears no agent-address shape, so T4's
+# shape carve passes the stop through rather than refusing (same ratified
+# divergence as case 3). ---
 expect_eq "C4 observation reports an unknown name unresolved" "unresolved" "$(q_observation nobody)"
 expect_eq "C4 recorder writes nothing" "nothing" "$(q_recorder nobody)"
-expect_eq "C4 gate refuses" "refused" "$(q_gate nobody)"
+expect_eq "C4 gate passes it through instead of refusing" "permitted" "$(q_gate nobody)"
 
 # --- case 5: the metadata root itself. The recorder and the gate reach the
 # directories through the PAYLOAD's transcript path; the observation has no
@@ -1007,14 +1025,16 @@ expect_eq "C4 gate refuses" "refused" "$(q_gate nobody)"
 #
 # Cases 1-4 above already run under the divergent roots and prove the AGREEING
 # direction. This one plants a decoy under the default root and proves the
-# observation does not answer from it. ---
+# observation does not answer from it. "decoy" wears no agent-address shape
+# either, so T4's shape carve passes the gate's stop through rather than
+# refusing (same ratified divergence as cases 3-4). ---
 HOMEPROJ="$HOME/.claude/projects/$RSLUG"
 mkdir -p "$HOMEPROJ/$SID_A/subagents"
 plant "$HOMEPROJ/$SID_A/subagents" "adecoy-6666666666666666" "decoy"
 expect_eq "C5 observation ignores metadata under \$HOME/.claude when CLAUDE_CONFIG_DIR names another root" \
   "unresolved" "$(q_observation decoy)"
 expect_eq "C5 recorder writes nothing for it" "nothing" "$(q_recorder decoy)"
-expect_eq "C5 gate refuses it" "refused" "$(q_gate decoy)"
+expect_eq "C5 gate passes it through instead of refusing" "permitted" "$(q_gate decoy)"
 
 # --- case 6: the ARGUMENT GRAMMAR itself — RESIDUAL CLOSED at slice 4/4.
 #
