@@ -55,8 +55,16 @@ ROSTER_VERSION="v1"
 # The bound on this file's length lives with its WRITER, hooks/execution-recorder.sh
 # — this gate only reads it, and a reader that also capped it would be a second
 # opinion about how much evidence a session may hold.
-OBSERVE_CMD="bash ~/.claude/hooks/stop-check.sh"
-ORDER_CMD="bash ~/.claude/hooks/stop-orders.sh order"
+# THIS SCRIPT'S OWN DIRECTORY, and therefore its siblings'. hooks/stop-check.sh and
+# hooks/stop-orders.sh ship beside this gate, so `$0` resolves them identically in a repo
+# checkout, in a bootstrap-installed ~/.claude/hooks/, and in an installed plugin payload.
+# Deliberately NOT ${CLAUDE_PLUGIN_ROOT}: the harness runs this gate straight out of the
+# repo, where no plugin is mounted and that variable does not exist. The fix lines below
+# stay absolute — a refusal has to hand an operator something runnable from any cwd.
+HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+[ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
+OBSERVE_CMD="bash ${HOOK_DIR}/stop-check.sh"
+ORDER_CMD="bash ${HOOK_DIR}/stop-orders.sh order"
 # HOW LONG A HUMAN'S STOP ORDER IS CURRENT. Duplicated as a literal from its WRITER,
 # hooks/stop-orders.sh, and held to it by tests/cross-gate-agreement.test.sh §M, which
 # places an order either side of this boundary and asks this gate about it. See the

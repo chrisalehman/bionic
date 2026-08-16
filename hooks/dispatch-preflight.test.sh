@@ -370,7 +370,7 @@ mkdir -p "$REPO/.bionic/tmp"; chmod 500 "$REPO/.bionic/tmp"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 chmod 700 "$REPO/.bionic/tmp"
 expect_contains "a probe-failure refusal still names the install-path fix command" \
-  "bash ~/.claude/hooks/preflight-probe.sh" "$GATE_ERR"
+  "bash $PROBE_SRC" "$GATE_ERR"
 expect_absent "refusal does not name a repo-relative fix command (checklist A1)" "hooks/preflight-probe.sh\"" "$GATE_ERR"
 case "$GATE_ERR" in
   *"hooks/dispatch-preflight.sh"*) no "refusal never names itself as the fix" ;;
@@ -539,9 +539,13 @@ REPO=$(make_repo r9 yes)
 mkdir -p "$REPO/.bionic/tmp"; chmod 500 "$REPO/.bionic/tmp"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 chmod 700 "$REPO/.bionic/tmp"
-FIXLINE=$(printf '%s\n' "$GATE_ERR" | grep -o 'bash ~/.claude/hooks/preflight-probe.sh' | head -1)
+FIXLINE=$(printf '%s\n' "$GATE_ERR" | grep -oF "bash $PROBE_SRC" | head -1)
 expect_contains "a fix line was captured to execute" "preflight-probe.sh" "$FIXLINE"
 
+# A throwaway HOME, so executing the captured fix line cannot touch the real one. Since
+# epic-17 W1 S3 the fix line resolves the probe beside the GATE rather than under $HOME, so
+# the installed copy below is no longer what makes the line runnable — it stays as the
+# hostile case: a stale ~/.claude/hooks/ copy that the fix line must NOT be reaching for.
 RUNHOME="$SANDBOX/run9/home"
 mkdir -p "$RUNHOME/.claude/hooks"
 cp "$PROBE_SRC" "$RUNHOME/.claude/hooks/preflight-probe.sh"
