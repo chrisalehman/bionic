@@ -98,6 +98,11 @@ run "spawn-worktree.test.sh" bash tests/spawn-worktree.test.sh
 run "profile.test.sh" bash tests/profile.test.sh
 # Command-file conventions (epic-17 W3 S9, spec AC-1): globs payload/commands/*.md.
 run "command-format.test.sh" bash tests/command-format.test.sh
+# Footprint removal (epic-17 W3 S8, spec AC-4): payload/scripts/remove.sh driven
+# against fixture machines — the never-list wall, the per-item consent gates, and
+# the standalone door (the script alone, no payload libraries beside it).
+# Hand-listed like every suite outside hooks/.
+run "remove.test.sh" bash tests/remove.test.sh
 # Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
 # 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so

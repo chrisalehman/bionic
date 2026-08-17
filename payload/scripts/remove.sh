@@ -1,0 +1,672 @@
+#!/bin/bash
+# remove.sh — consented teardown of bionic's machine footprint (epic-17
+# wave-03, spec AC-4; ownership table row "footprint removal").
+#
+# WHAT THIS FILE OWNS. Everything bionic's own scripts put on a machine, and the
+# order it comes back off in. One item at a time, each one announced before it is
+# asked about and asked about before it happens: the legacy `.zshrc` alias block,
+# the `CLAUDE_CODE_ENABLE_TODO_TOOLS` export, stale managed-hook entries in user
+# settings, the permission marker block, lane-3b dependency installs, the plugin
+# data directory — and then the native plugin uninstall as the finisher.
+#
+# THE NEVER-LIST IS NOT A PREFERENCE. Three classes are excluded from removal and
+# consent does not unlock them:
+#
+#   `.bionic/` trees      plans, specs, the operational record, memory. These are
+#                         the user's work, not bionic's footprint.
+#   shared binaries       git, node, jq, docker, ... bionic ENSURED them; it does
+#                         not own them. deps.sh marks every such row `keep-shared`
+#                         and `remove_dep` declines them even when told yes.
+#   the pnpm store        a shared content-addressable cache other projects
+#                         hard-link out of.
+#
+# THE REMOVER MUST NOT DEPEND ON THE THING IT REMOVES. This is the one payload
+# script reachable standalone — `curl`-fetched to a machine whose plugin is
+# already gone (spec AC-4; doctor prints the one-liner for exactly that state).
+# There, `scripts/lib/*` do not exist. So:
+#
+#   * Every fact this script needs, it establishes itself. It does not source
+#     detect.sh. The predicates are deliberately the SAME predicates detect.sh
+#     uses — the todo-tools export regex, the `bionic:start` marker, the
+#     `.claude/hooks/` substring, the profile begin/end sentinels — and
+#     tests/remove.test.sh pins them against detect.sh and profile.sh so the two
+#     cannot drift apart silently.
+#   * Where a library IS beside the script, the library owner does the work:
+#     `profile_strip` strips the permission block and `remove_dep` applies the
+#     three-valued removal policy. The inline strip below is the standalone
+#     fallback for the first of those, and the two are pinned to produce
+#     byte-identical output from the same input.
+#   * The one thing that genuinely cannot be reconstructed standalone is the
+#     dependency TABLE — it ships with the payload and there is no second copy of
+#     it, by design (AC-8). Standalone says so, out loud, and moves on. A silently
+#     skipped item would be the worse failure.
+#
+# CONSENT, PER ITEM, FROM STDIN. No `--all`, no assume-yes env knob: deps.sh
+# ratified "consent per event, never silent, never unattended" and a flag that
+# switched it off would be the hole in it. An item with nothing to do is not
+# asked about — consent to do nothing is noise, not safety.
+#
+# THE FINISHER IS INVOKED, NOT PRINTED. `claude plugin uninstall` works from a
+# script subprocess mid-session and takes effect immediately
+# (record/epic-17-w3/probe-uninstall-semantics.md, VERDICT IMMEDIATE), so there is
+# no "run this yourself afterwards" branch. Dependencies PERSIST past the parent
+# uninstall (probe-dep-persistence.md) and the CLI names its own primitive for
+# them, so the last offer is `claude plugin prune`, driven from that command's own
+# `--dry-run` listing rather than from a hand-rolled walk of plugin.json.
+#
+# ROOTS ARE OVERRIDABLE, read at CALL time (detect.sh's convention):
+#
+#   BIONIC_CLAUDE_HOME       the CLI's config dir      ${CLAUDE_CONFIG_DIR:-~/.claude}
+#   BIONIC_SETTINGS_FILE     user settings.json        <claude-home>/settings.json
+#   BIONIC_SHELL_RC          the rc bionic edited      ~/.zshrc or ~/.bashrc, per $SHELL
+#   BIONIC_PLUGIN_DATA_DIR   plugin data root          <claude-home>/plugins/data
+#
+# NO EXTERNAL TEXT TOOLS. No `dirname`, no `basename`, and — going past what
+# detect.sh needs — no `grep`, `awk` or `sed` either: every match and every rewrite
+# below is bash's own. detect.sh avoids coreutils so it can be SOURCED on a broken
+# machine; this script is the one that RUNS on it, and a missing or shadowed
+# `grep` silently reporting a dirty machine as clean is the failure that matters
+# here. `jq` is the single exception, and its absence is reported, never assumed
+# away. (See "TEXT WORK IS DONE IN BASH ITSELF" below.)
+#
+# Usage:  bash remove.sh          (as /bionic:remove, or standalone by raw URL)
+
+set -uo pipefail
+
+# Every default root below hangs off $HOME. An unset HOME would make them resolve
+# against `/`, so it is checked once, up front, where the message can say so —
+# rather than as a bare unbound-variable abort halfway through a teardown.
+: "${HOME:?remove.sh: HOME is not set — cannot locate the configuration for this machine}"
+
+# ─── Roots ───────────────────────────────────────────────────────────────────
+
+_rm_self_dir() {
+  local self="${BASH_SOURCE[0]:-$0}"
+  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
+}
+
+_rm_claude_home()      { echo "${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"; }
+_rm_settings_file()    { echo "${BIONIC_SETTINGS_FILE:-$(_rm_claude_home)/settings.json}"; }
+_rm_plugin_data_dir()  { echo "${BIONIC_PLUGIN_DATA_DIR:-$(_rm_claude_home)/plugins/data}"; }
+
+_rm_shell_rc() {
+  if [ -n "${BIONIC_SHELL_RC:-}" ]; then echo "$BIONIC_SHELL_RC"; return; fi
+  local shell_name="${SHELL:-/bin/bash}"
+  case "${shell_name##*/}" in
+    zsh) echo "$HOME/.zshrc" ;;
+    *)   echo "$HOME/.bashrc" ;;
+  esac
+}
+
+_rm_have() { command -v "${1:-}" >/dev/null 2>&1; }
+
+# ─── The shared literals ─────────────────────────────────────────────────────
+#
+# Each of these is a copy of a constant that lives in the payload libraries, and
+# each copy exists because the standalone door cannot read those libraries. They
+# are pinned to their originals by tests/remove.test.sh; changing one without the
+# other is what that pin exists to catch.
+
+# from detect.sh: the rc block markers and the two rc predicates
+RM_RC_START='# ─── bionic:start ───'
+RM_RC_END='# ─── bionic:end ───'
+RM_TODO_EXPORT_RE='^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=1'
+RM_LEGACY_ALIAS_RE='alias claude=.*dangerously-skip-permissions'
+# from detect.sh: the substring that makes a managed-hook entry a stale one
+RM_STALE_HOOK_SUBSTR='.claude/hooks/'
+# from profile.sh: the sentinels bracketing the block bionic owns
+RM_PROFILE_BEGIN_PREFIX='Bash(: bionic-profile-begin version='
+RM_PROFILE_END='Bash(: bionic-profile-end)'
+
+# ─── Mode ────────────────────────────────────────────────────────────────────
+
+RM_LIB_DIR="$(_rm_self_dir)/lib"
+RM_MODE=standalone
+if [ -f "${RM_LIB_DIR}/deps.sh" ] && [ -f "${RM_LIB_DIR}/profile.sh" ]; then
+  # shellcheck source=/dev/null
+  . "${RM_LIB_DIR}/deps.sh" && . "${RM_LIB_DIR}/profile.sh" && RM_MODE=payload
+fi
+
+# ─── Outcome records ─────────────────────────────────────────────────────────
+
+RM_REMOVED=0
+RM_CLEAN=0
+RM_SKIPPED=0
+RM_SKIPPED_LIST=""
+RM_LEFTOVERS=""
+
+_rm_removed() { RM_REMOVED=$((RM_REMOVED + 1)); echo "  ✓ ${1}"; }
+_rm_clean()   { RM_CLEAN=$((RM_CLEAN + 1));     echo "  ✓ ${1} — already clean"; }
+_rm_skipped() {
+  RM_SKIPPED=$((RM_SKIPPED + 1))
+  RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ ${1}"$'\n'
+  echo "  declined — ${1} left in place."
+}
+_rm_leftover() { RM_LEFTOVERS="${RM_LEFTOVERS}    ✗ ${1}"$'\n'; echo "  ⚠ ${1}"; }
+
+# ─── Consent ─────────────────────────────────────────────────────────────────
+#
+# Identical in shape to deps.sh's `_dep_consent`, and identical in rule: nothing
+# but an explicit yes counts, and EOF (a non-interactive stdin) counts as no.
+
+_rm_consent() {  # <prompt>
+  local prompt="$1" answer=""
+  printf '  %s [y/N] ' "$prompt"
+  IFS= read -r answer || { echo ""; return 1; }
+  echo ""
+  case "$answer" in y|Y|yes|YES|Yes) return 0 ;; *) return 1 ;; esac
+}
+
+# ─── File helpers ────────────────────────────────────────────────────────────
+
+# Whole-file read that keeps the trailing byte, so a rewrite can reproduce the
+# file's own newline shape. Same mechanism profile.sh uses and for the same
+# reason: `$(...)` would strip the very byte the round trip turns on.
+_rm_slurp_into() {  # <varname> <file>
+  local __rm_var="$1" __rm_file="$2" __rm_text
+  [ -f "$__rm_file" ] || return 1
+  IFS= read -r -d '' __rm_text < "$__rm_file" || true
+  printf -v "$__rm_var" '%s' "$__rm_text"
+}
+
+_rm_write() {  # <file> <content> <trailing-newline 0|1>
+  local file="$1" content="$2" nl="$3" tmp="${1}.bionic.tmp"
+  if [ "$nl" = "1" ]; then printf '%s\n' "$content" > "$tmp"; else printf '%s' "$content" > "$tmp"; fi
+  mv "$tmp" "$file"
+}
+
+# TEXT WORK IS DONE IN BASH ITSELF, not by grep/awk/sed. detect.sh refuses
+# `dirname` so it can be sourced on a broken machine; this script is the one that
+# RUNS on the broken machine, so it goes further: bash's own `[[ =~ ]]` and `case`
+# do every match and every rewrite below. Three things follow from that. A missing
+# coreutil cannot silently turn a dirty rc file into a clean report. A `grep`
+# shadowed by an alias or a lookalike on the user's PATH cannot either. And the
+# behaviour is the same on a machine whose /bin is bare. `jq` is the one exception
+# — JSON is not bash's job — and its absence is reported rather than assumed away.
+
+_rm_file_has_literal() {  # <file> <string>
+  local file="$1" needle="$2" text
+  [ -f "$file" ] || return 1
+  _rm_slurp_into text "$file" || return 1
+  case "$text" in *"$needle"*) return 0 ;; *) return 1 ;; esac
+}
+
+_rm_file_has_line_matching() {  # <file> <ere>
+  local file="$1" ere="$2" line
+  [ -f "$file" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ $ere ]] && return 0
+  done < "$file"
+  return 1
+}
+
+# Drops every line matching an ERE.
+_rm_filter_out_lines() {  # <file> <ere>
+  local file="$1"
+  local ere="$2"
+  local tmp="${file}.bionic.tmp"
+  local line
+  : > "$tmp" || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ $ere ]] && continue
+    printf '%s\n' "$line" >> "$tmp"
+  done < "$file"
+  mv "$tmp" "$file"
+}
+
+# Drops a marker-delimited block, markers included. Line equality is exact —
+# these markers carry box-drawing dashes, and a fuzzy match would be a rewrite
+# rule for lines nobody wrote.
+_rm_strip_marker_block() {  # <file> <start-line> <end-line>
+  local file="$1" start="$2" end="$3"
+  local tmp="${file}.bionic.tmp"
+  local line skip=0
+  : > "$tmp" || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$line" = "$start" ]; then skip=1; continue; fi
+    if [ "$line" = "$end" ];   then skip=0; continue; fi
+    [ "$skip" = "1" ] && continue
+    printf '%s\n' "$line" >> "$tmp"
+  done < "$file"
+  mv "$tmp" "$file"
+}
+
+_rm_indent() {  # <text> — four spaces on every line, no sed
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    printf '    %s\n' "$line"
+  done <<< "$1"
+}
+
+# rm -rf with the never-list as a precondition rather than as a hope. Nothing
+# under a `.bionic` path is removable by this script, whatever it was handed.
+_rm_purge_dir() {  # <dir>
+  local target="${1:-}"
+  [ -n "$target" ] || return 1
+  case "$target" in
+    */.bionic|*/.bionic/*) echo "  refusing to remove a .bionic path: ${target}" >&2; return 1 ;;
+    /|"$HOME") echo "  refusing to remove ${target}" >&2; return 1 ;;
+  esac
+  rm -rf "$target"
+}
+
+echo ""
+echo "bionic remove — consented teardown of the machine footprint"
+if [ "$RM_MODE" = "payload" ]; then
+  echo "mode: payload — the plugin's libraries are beside this script"
+else
+  echo "mode: standalone — the payload libraries are not beside this script"
+fi
+echo ""
+
+# ─── Item: the shell rc's legacy alias block ─────────────────────────────────
+#
+# Two shapes, because two eras of claude-bootstrap.sh wrote them: the
+# marker-delimited block, and — older still — a bare alias line with no markers
+# at all. The markers are matched verbatim, box-drawing dashes included; they are
+# what makes the block addressable.
+#
+# The rc FILE is never deleted, even if the block was all it held. claude-reset.sh
+# deletes an emptied rc; a script that can be curl-fetched onto an unknown machine
+# should not.
+
+RC_FILE="$(_rm_shell_rc)"
+rc_variant=none
+if [ -f "$RC_FILE" ]; then
+  if _rm_file_has_literal "$RC_FILE" "$RM_RC_START"; then
+    rc_variant=marked
+  elif _rm_file_has_line_matching "$RC_FILE" "$RM_LEGACY_ALIAS_RE"; then
+    rc_variant=legacy
+  fi
+fi
+
+echo "legacy shell alias block:"
+case "$rc_variant" in
+  none)
+    _rm_clean "legacy alias block in ${RC_FILE}"
+    ;;
+  marked)
+    echo "  ${RC_FILE} carries the bionic marker block; bionic would delete the block and everything between its markers."
+    if _rm_consent "Remove the marker block from ${RC_FILE}?"; then
+      if _rm_strip_marker_block "$RC_FILE" "$RM_RC_START" "$RM_RC_END"; then
+        _rm_removed "legacy alias block in ${RC_FILE}"
+      else
+        rm -f "${RC_FILE}.bionic.tmp"
+        _rm_leftover "could not rewrite ${RC_FILE} — the alias block is still there"
+      fi
+    else
+      _rm_skipped "legacy alias block in ${RC_FILE}"
+    fi
+    ;;
+  legacy)
+    echo "  ${RC_FILE} carries an unmarked legacy alias line; bionic would delete that line."
+    if _rm_consent "Remove the legacy alias line from ${RC_FILE}?"; then
+      if _rm_filter_out_lines "$RC_FILE" "$RM_LEGACY_ALIAS_RE"; then
+        _rm_removed "legacy alias line in ${RC_FILE}"
+      else
+        _rm_leftover "could not rewrite ${RC_FILE} — the legacy alias line is still there"
+      fi
+    else
+      _rm_skipped "legacy alias line in ${RC_FILE}"
+    fi
+    ;;
+esac
+echo ""
+
+# ─── Item: the CLAUDE_CODE_ENABLE_TODO_TOOLS export ──────────────────────────
+#
+# The predicate is detect.sh's, character for character: a commented-out export
+# is NOT present, so it is not removed either.
+
+echo "todo-tools export:"
+if _rm_file_has_line_matching "$RC_FILE" "$RM_TODO_EXPORT_RE"; then
+  echo "  ${RC_FILE} exports CLAUDE_CODE_ENABLE_TODO_TOOLS=1; bionic would delete that line."
+  if _rm_consent "Remove the CLAUDE_CODE_ENABLE_TODO_TOOLS export from ${RC_FILE}?"; then
+    if _rm_filter_out_lines "$RC_FILE" "$RM_TODO_EXPORT_RE"; then
+      _rm_removed "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
+    else
+      _rm_leftover "could not rewrite ${RC_FILE} — the export is still there"
+    fi
+  else
+    _rm_skipped "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
+  fi
+else
+  _rm_clean "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
+fi
+echo ""
+
+# ─── Item: stale managed-hook entries in user settings ───────────────────────
+#
+# Entries whose command still names the pre-plugin `~/.claude/hooks/` copies. The
+# plugin channel registers its hooks through the payload's own hooks.json, so one
+# of these is a migrated machine firing a stale duplicate of a hook the plugin
+# already provides.
+#
+# The filter reaches INSIDE each matcher group rather than dropping the group: a
+# group can hold a bionic hook and a foreign one, and dropping it whole would
+# remove somebody else's hook. Groups left empty are collapsed afterwards, and a
+# `hooks` object left empty is deleted — the same shape claude-reset.sh produced.
+
+RM_SETTINGS="$(_rm_settings_file)"
+
+RM_STALE_COUNT_JQ='[ (.hooks // {}) | to_entries[] | .value[]? | .hooks[]?
+                     | .command? // empty
+                     | select(contains("'"${RM_STALE_HOOK_SUBSTR}"'")) ] | length'
+
+RM_STALE_STRIP_JQ='
+  if (.hooks | type) != "object" then .
+  else
+      .hooks |= with_entries(
+        .value |= ( map( .hooks |= map(select(((.command? // "") | contains("'"${RM_STALE_HOOK_SUBSTR}"'")) | not)) )
+                    | map(select((.hooks | length) > 0)) )
+      )
+    | .hooks |= with_entries(select((.value | length) > 0))
+    | if (.hooks | length) == 0 then del(.hooks) else . end
+  end
+'
+
+echo "stale settings.json managed-hook entries:"
+stale_count=0
+if [ -f "$RM_SETTINGS" ]; then
+  if _rm_have jq; then
+    stale_count="$(jq "$RM_STALE_COUNT_JQ" "$RM_SETTINGS" 2>/dev/null)"
+    case "$stale_count" in ''|*[!0-9]*) stale_count=unknown ;; esac
+  else
+    stale_count=unknown
+  fi
+fi
+
+if [ "$stale_count" = "unknown" ]; then
+  _rm_leftover "cannot read ${RM_SETTINGS} without jq — managed-hook entries left as they are"
+elif [ "$stale_count" = "0" ]; then
+  _rm_clean "stale managed-hook entries in ${RM_SETTINGS}"
+else
+  echo "  ${RM_SETTINGS} carries ${stale_count} hook entr(y/ies) still pointing at ${RM_STALE_HOOK_SUBSTR}; bionic would delete those entries and nothing else."
+  if _rm_consent "Remove ${stale_count} stale managed-hook entr(y/ies) from ${RM_SETTINGS}?"; then
+    rm_settings_nl=0
+    # shellcheck disable=SC2154  # set by printf -v inside _rm_slurp_into
+    _rm_slurp_into rm_settings_text "$RM_SETTINGS" && case "$rm_settings_text" in *$'\n') rm_settings_nl=1 ;; esac
+    if rm_stripped="$(jq "$RM_STALE_STRIP_JQ" "$RM_SETTINGS" 2>/dev/null)"; then
+      _rm_write "$RM_SETTINGS" "$rm_stripped" "$rm_settings_nl"
+      _rm_removed "${stale_count} stale managed-hook entr(y/ies) in ${RM_SETTINGS}"
+    else
+      _rm_leftover "${RM_SETTINGS} is not valid JSON — refusing to write; the stale entries are still there"
+    fi
+  else
+    _rm_skipped "stale managed-hook entries in ${RM_SETTINGS}"
+  fi
+fi
+echo ""
+
+# ─── Item: the permission marker block ───────────────────────────────────────
+#
+# In payload mode the owner does it: profile.sh's `profile_strip` removes the
+# block, collapses the containers it created, and preserves the file's newline
+# shape. Standalone there is no owner to call, so the jq program below is a
+# verbatim copy of profile.sh's `_PROFILE_STRIP_JQ`. Two implementations of one
+# behavior is precisely the drift the ownership table exists to prevent, which is
+# why tests/remove.test.sh drives the same fixture through both and requires
+# byte-identical output.
+
+RM_PROFILE_STRIP_JQ='
+  if (.permissions | type) != "object" then .
+  elif (.permissions.allow | type) != "array" then .
+  else
+    .permissions.allow as $a
+    | ($a | map(type == "string" and startswith("'"${RM_PROFILE_BEGIN_PREFIX}"'")) | index(true)) as $b
+    | ($a | map(. == "'"${RM_PROFILE_END}"'") | index(true)) as $e
+    | if $b == null or $e == null or $e < $b then .
+      else .permissions.allow = ($a[0:$b] + $a[$e+1:]) end
+  end
+  | if (.permissions | type) == "object"
+       and (.permissions.allow | type) == "array"
+       and (.permissions.allow | length) == 0
+    then del(.permissions.allow) else . end
+  | if (.permissions | type) == "object" and (.permissions | length) == 0
+    then del(.permissions) else . end
+'
+
+echo "permission marker block:"
+if _rm_file_has_literal "$RM_SETTINGS" "$RM_PROFILE_BEGIN_PREFIX"; then
+  echo "  ${RM_SETTINGS} carries bionic's permission marker block; bionic would remove the block and leave every rule outside it."
+  if _rm_consent "Remove bionic's permission marker block from ${RM_SETTINGS}?"; then
+    if [ "$RM_MODE" = "payload" ]; then
+      if profile_strip; then
+        _rm_removed "permission marker block in ${RM_SETTINGS}"
+      else
+        _rm_leftover "could not strip the permission marker block from ${RM_SETTINGS}"
+      fi
+    elif ! _rm_have jq; then
+      _rm_leftover "jq is required to edit ${RM_SETTINGS} safely — the permission block is still applied"
+    else
+      rm_profile_nl=0
+      # shellcheck disable=SC2154  # set by printf -v inside _rm_slurp_into
+      _rm_slurp_into rm_profile_text "$RM_SETTINGS" && case "$rm_profile_text" in *$'\n') rm_profile_nl=1 ;; esac
+      if rm_profile_stripped="$(jq "$RM_PROFILE_STRIP_JQ" "$RM_SETTINGS" 2>/dev/null)"; then
+        _rm_write "$RM_SETTINGS" "$rm_profile_stripped" "$rm_profile_nl"
+        _rm_removed "permission marker block in ${RM_SETTINGS}"
+      else
+        _rm_leftover "${RM_SETTINGS} is not valid JSON — refusing to write; the permission block is still applied"
+      fi
+    fi
+  else
+    _rm_skipped "permission marker block in ${RM_SETTINGS}"
+  fi
+else
+  _rm_clean "permission marker block in ${RM_SETTINGS}"
+fi
+echo ""
+
+# ─── Item: lane-3b dependency installs ───────────────────────────────────────
+#
+# The table is the payload's, and there is no second copy of it — so this item
+# exists only in payload mode, and standalone says exactly that instead of
+# pretending the machine is clean.
+#
+# `remove_dep` is the SSoT for what happens to a dependency: `keep-shared`
+# declines with consent already given, `native-uninstall-offer` defers to the
+# finisher below, and only `remove-on-consent` rows ever reach a command. Presence
+# is asked first so a machine is not interrogated about packages it never had.
+#
+# The dep names are read on fd 3 deliberately: a `while read < <(...)` loop would
+# take the loop's stdin from the process substitution, and remove_dep's consent
+# prompt would then read a dependency name as the user's answer.
+
+echo "lane-3b dependencies:"
+if [ "$RM_MODE" != "payload" ]; then
+  echo "  the dependency table ships with the payload — not available standalone."
+  echo "  (reinstall bionic and run /bionic:remove for the dependency pass, or remove them by hand)"
+  _rm_leftover "lane-3b dependency teardown was not attempted (standalone mode)"
+else
+  dep_lines="$(dep_names_lane 3b)"
+  while IFS= read -r dep_name <&3; do
+    [ -n "$dep_name" ] || continue
+    dep_behavior="$(dep_field "$dep_name" removal_behavior)"
+    dep_present="$(check_dep "$dep_name")"
+    dep_present="${dep_present#present=}"; dep_present="${dep_present%%|*}"
+
+    case "$dep_present" in
+      yes)
+        if remove_dep "$dep_name"; then
+          if [ "$dep_behavior" = "keep-shared" ]; then
+            RM_CLEAN=$((RM_CLEAN + 1))
+          else
+            RM_REMOVED=$((RM_REMOVED + 1))
+          fi
+        else
+          RM_SKIPPED=$((RM_SKIPPED + 1))
+          RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ dependency ${dep_name}"$'\n'
+        fi
+        ;;
+      no)
+        _rm_clean "dependency ${dep_name} (not installed)"
+        ;;
+      *)
+        echo "  ${dep_name}: presence is not knowable on this machine — left in place."
+        ;;
+    esac
+  done 3<<< "$dep_lines"
+fi
+echo ""
+
+# ─── Item: the plugin data directory ─────────────────────────────────────────
+#
+# `~/.claude/plugins/data/<plugin>-<marketplace>` is the state that survives
+# plugin updates. The CLI's own uninstall deletes it unless `--keep-data` is
+# passed, which is why the answer given here binds the finisher below: declining
+# to remove the data and then watching the uninstall delete it anyway would make
+# this prompt a lie.
+#
+# The glob is `bionic-*` and it is announced entry by entry before the question,
+# because a plugin whose name merely STARTS with "bionic" would also match it and
+# the user is the one who can tell.
+
+RM_DATA_DECLINED=0
+RM_DATA_ROOT="$(_rm_plugin_data_dir)"
+
+echo "plugin data:"
+rm_data_found=""
+for rm_data_dir in "$RM_DATA_ROOT"/bionic-*; do
+  [ -d "$rm_data_dir" ] || continue
+  rm_data_found="${rm_data_found}${rm_data_dir}"$'\n'
+done
+
+if [ -z "$rm_data_found" ]; then
+  _rm_clean "plugin data under ${RM_DATA_ROOT}"
+else
+  echo "  bionic would delete these plugin data directories:"
+  printf '%s' "$rm_data_found" | while IFS= read -r rm_line; do
+    [ -n "$rm_line" ] && echo "    ${rm_line}"
+  done
+  if _rm_consent "Remove bionic's plugin data?"; then
+    rm_data_failed=0
+    while IFS= read -r rm_data_dir <&3; do
+      [ -n "$rm_data_dir" ] || continue
+      _rm_purge_dir "$rm_data_dir" || rm_data_failed=1
+    done 3<<< "$rm_data_found"
+    if [ "$rm_data_failed" = "0" ]; then
+      _rm_removed "plugin data under ${RM_DATA_ROOT}"
+    else
+      _rm_leftover "some plugin data under ${RM_DATA_ROOT} could not be removed"
+    fi
+  else
+    RM_DATA_DECLINED=1
+    _rm_skipped "plugin data under ${RM_DATA_ROOT}"
+  fi
+fi
+echo ""
+
+# ─── Finisher: the native plugin uninstall ───────────────────────────────────
+#
+# Invoked directly, in this process, with no "come back next session" caveat:
+# mid-session uninstall is immediate at the registry level and the very next
+# `plugin list` sees it gone (probe-uninstall-semantics.md).
+#
+# The plugin's ID is asked of the CLI rather than assumed, because the standalone
+# door's whole premise is a machine whose answer may be "nothing is registered" —
+# and because a machine could carry bionic from a differently-named marketplace.
+
+echo "native plugin uninstall:"
+rm_plugin_id=""
+if ! _rm_have claude; then
+  _rm_leftover "the claude CLI is not on PATH — the native plugin uninstall cannot be invoked here"
+else
+  rm_listing="$(claude plugin list --json 2>/dev/null)" || rm_listing=""
+  if [ -n "$rm_listing" ] && _rm_have jq; then
+    rm_plugin_id="$(printf '%s' "$rm_listing" \
+      | jq -r '[ .[]? | select((.id? // "" | split("@")[0]) == "bionic") | .id ][0] // empty' 2>/dev/null)"
+  elif [ -n "$rm_listing" ]; then
+    # No jq: the id is pulled out of the listing text by bash's own regex
+    # engine. A machine missing jq is exactly the machine this door serves.
+    if [[ "$rm_listing" =~ \"(bionic@[^\"]+)\" ]]; then rm_plugin_id="${BASH_REMATCH[1]}"; fi
+  fi
+
+  if [ -z "$rm_plugin_id" ]; then
+    _rm_clean "the bionic plugin (not registered with the CLI)"
+  else
+    # The plan is printed from the same argv that runs, so the command the user
+    # consented to is by construction the command that executes (deps.sh's rule).
+    rm_uninstall_argv=(claude plugin uninstall "$rm_plugin_id" --yes)
+    [ "$RM_DATA_DECLINED" = "1" ] && rm_uninstall_argv+=(--keep-data)
+    echo "  bionic would run: ${rm_uninstall_argv[*]}"
+    if _rm_consent "Uninstall ${rm_plugin_id} now?"; then
+      if "${rm_uninstall_argv[@]}"; then
+        _rm_removed "plugin ${rm_plugin_id}"
+      else
+        _rm_leftover "claude plugin uninstall ${rm_plugin_id} failed — the plugin is still registered"
+      fi
+    else
+      _rm_skipped "plugin ${rm_plugin_id}"
+    fi
+  fi
+fi
+echo ""
+
+# ─── Finisher: orphaned dependencies ─────────────────────────────────────────
+#
+# Lane-3a dependencies survive the parent uninstall (probe-dep-persistence.md),
+# and the CLI volunteers its own primitive for them in the uninstall's output.
+# The offer is built from `prune --dry-run`'s listing verbatim — bionic does not
+# walk plugin.json and decide for itself what is orphaned.
+
+echo "orphaned dependencies:"
+if ! _rm_have claude; then
+  _rm_clean "orphaned dependencies (no claude CLI to ask)"
+else
+  rm_prune_dry="$(claude plugin prune --dry-run 2>/dev/null)" || rm_prune_dry=""
+  case "$rm_prune_dry" in
+    *@*)
+      echo "  the CLI reports these auto-installed dependencies are no longer needed:"
+      _rm_indent "$rm_prune_dry"
+      if _rm_consent "Run claude plugin prune to remove them?"; then
+        if claude plugin prune --yes; then
+          _rm_removed "orphaned dependencies (claude plugin prune)"
+        else
+          _rm_leftover "claude plugin prune failed — the orphaned dependencies are still installed"
+        fi
+      else
+        _rm_skipped "orphaned dependencies"
+      fi
+      ;;
+    *)
+      _rm_clean "orphaned dependencies (the CLI names none)"
+      ;;
+  esac
+fi
+echo ""
+
+# ─── End summary ─────────────────────────────────────────────────────────────
+
+if [ -z "$RM_LEFTOVERS" ]; then
+  echo "# ─── remove complete ───────────────────────────────────────────"
+else
+  echo "# ─── remove finished — leftovers present ──────────────────────"
+fi
+echo ""
+printf '  %d removed · %d already clean · %d skipped by you\n' "$RM_REMOVED" "$RM_CLEAN" "$RM_SKIPPED"
+echo ""
+
+if [ -n "$RM_SKIPPED_LIST" ]; then
+  echo "  Skipped (your choice — still on this machine)"
+  printf '%s' "$RM_SKIPPED_LIST"
+  echo ""
+fi
+
+if [ -n "$RM_LEFTOVERS" ]; then
+  echo "  Leftovers (bionic could not finish these)"
+  printf '%s' "$RM_LEFTOVERS"
+  echo ""
+fi
+
+echo "  Left in place by design"
+echo "    • .bionic/ trees — plans, specs, the record and memory are your work, not bionic's footprint"
+echo "    • shared binaries bionic ensured but does not own (git, node, jq, docker, ...)"
+echo "    • the pnpm store — a shared cache other projects hard-link from (reclaim with: pnpm store prune)"
+echo ""
+echo "  Next steps"
+echo "    • Restart your shell if the rc file changed"
+echo "    • Claude Code still works, without bionic's skills, hooks and agents"
+echo "    • Reinstall anytime: claude plugin install bionic@bionic"
+echo ""
+
+exit 0
