@@ -96,6 +96,8 @@ run "spawn-worktree.test.sh" bash tests/spawn-worktree.test.sh
 # payload/permissions/ and payload/scripts/lib/profile.sh, driven against fixture settings
 # files in a temp tree. Hand-listed like every suite outside hooks/.
 run "profile.test.sh" bash tests/profile.test.sh
+# Command-file conventions (epic-17 W3 S9, spec AC-1): globs payload/commands/*.md.
+run "command-format.test.sh" bash tests/command-format.test.sh
 # Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
 # 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so
