@@ -13,7 +13,9 @@
 
 set -uo pipefail
 
-HOOK="$(cd "$(dirname "$0")" && pwd)/context-spend.sh"
+. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+
+HOOK="${BIONIC_HOOKS_DIR}/context-spend.sh"
 PASS=0; FAIL=0; TOTAL=0
 
 # Incident 0001: the audit file lives under $HOME, never in the project tree.

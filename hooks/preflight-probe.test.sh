@@ -20,7 +20,9 @@
 
 set -uo pipefail
 
-PROBE="$(cd "$(dirname "$0")" && pwd)/preflight-probe.sh"
+. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+
+PROBE="${BIONIC_HOOKS_DIR}/preflight-probe.sh"
 TMPROOT="$(mktemp -d)"
 OUT="$TMPROOT/stdout"; ERR="$TMPROOT/stderr"
 PASS=0; FAIL=0; TOTAL=0

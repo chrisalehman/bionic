@@ -34,7 +34,9 @@
 
 set -uo pipefail
 
-HOOKS_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+
+HOOKS_DIR="${BIONIC_HOOKS_DIR}"
 GATE="$HOOKS_DIR/landing-gate.sh"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/landing-gate-test.XXXXXX")" && pwd)"

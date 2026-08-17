@@ -42,7 +42,9 @@
 
 set -uo pipefail
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
+. "$(dirname "$0")/lib/resolve-roots.sh"
+
+REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
 MARKETPLACE_JSON="${REPO}/.claude-plugin/marketplace.json"
 
@@ -170,7 +172,7 @@ else
   for s in $RATIFIED_SKILLS; do
     if [ ! -L "${PAYLOAD}/skills/${s}" ]; then
       no "payload/skills/${s} is a symlink"
-    elif [ "$(cd "${PAYLOAD}/skills" && cd "$(readlink "$s")" && pwd)" = "${REPO}/skills/${s}" ]; then
+    elif [ "$(cd "${PAYLOAD}/skills" && cd "$(readlink "$s")" && pwd)" = "${BIONIC_SKILLS_DIR}/${s}" ]; then
       ok "payload/skills/${s} -> skills/${s}/ (repo single owner)"
     else
       no "payload/skills/${s} -> skills/${s}/ (resolved elsewhere: $(readlink "${PAYLOAD}/skills/${s}"))"
@@ -186,7 +188,7 @@ else
   fi
 
   # The holdout is a payload decision, not a deletion: the skill still lives in the repo.
-  [ -f "${REPO}/skills/${EXCLUDED_SKILL}/SKILL.md" ]
+  [ -f "${BIONIC_SKILLS_DIR}/${EXCLUDED_SKILL}/SKILL.md" ]
   check $? "${EXCLUDED_SKILL} still exists in the repo (held out, not removed)"
 fi
 

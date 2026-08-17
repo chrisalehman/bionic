@@ -23,10 +23,12 @@
 
 set -uo pipefail
 
+. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+
 # Overridable exactly as hooks/session-sweeper.test.sh offers, for RED evidence against a
 # mutated copy without ever touching the shipped file:
 #   W2_POKER_UNDER_TEST=/tmp/mutant.sh bash hooks/session-poker.test.sh
-POKER="${W2_POKER_UNDER_TEST:-$(cd "$(dirname "$0")" && pwd)/session-poker.sh}"
+POKER="${W2_POKER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-poker.sh}"
 TMPROOT="$(mktemp -d)"
 PASS=0; FAIL=0; TOTAL=0
 
