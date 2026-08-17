@@ -65,6 +65,10 @@ run "plugin-paths.test.sh" bash tests/plugin-paths.test.sh
 # to the point, what it must NOT. Pins marketplace.json's source field against the payload/
 # link tree and the repo's single-owner layout, so it too is hand-listed.
 run "plugin-payload.test.sh" bash tests/plugin-payload.test.sh
+# Harness-on-harness (epic-17 W2 S1). Catch-proof for tests/lib/resolve-roots.sh, the
+# path-resolution seam every suite sources: plants a doctored tree and proves the
+# override binds in BOTH directions. Belongs to no single hook, so hand-listed.
+run "seam-resolution.test.sh" bash tests/seam-resolution.test.sh
 # Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
 # 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so
