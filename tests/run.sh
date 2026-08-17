@@ -92,6 +92,7 @@ run "plugin-lib.test.sh" bash tests/plugin-lib.test.sh
 # section of plugin-lib.test.sh — different subject, different fixture regime — and so,
 # like every suite outside hooks/, hand-listed here or it never runs.
 run "spawn-worktree.test.sh" bash tests/spawn-worktree.test.sh
+run "command-format.test.sh" bash tests/command-format.test.sh
 # Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
 # 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so
