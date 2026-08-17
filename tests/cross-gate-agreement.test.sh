@@ -2595,17 +2595,30 @@ echo "=== L — the WIRING: registration is three-sided (frontmatter, absence, p
 #
 # A hook that reads an event nobody registered it for is inert, and inert in the
 # quietest possible way: it is installed, it is syntactically fine, its own suite is
-# green, and it never runs. Epic-16 wave-2 moves the seven sdlc hook scripts' ten
-# event/matcher registrations OUT of MANAGED_HOOKS/settings.json and INTO the
-# `hooks:` frontmatter block of skills/canonical-sdlc/SKILL.md, so the walls bind
-# only in sessions that actually invoke the skill (R1). Three sides now have to
-# agree or the move is silently wrong in one of three ways: the frontmatter could
-# name the wrong shape, a moved script could linger behind in MANAGED_HOOKS (firing
-# in EVERY session, defeating R1), or a script that should stay global could get
-# swept out by mistake.
-BOOTSTRAP_SRC=$(cat "$BIONIC_SCRIPTS_DIR/claude-bootstrap.sh")
+# green, and it never runs. The registration surface this repo SHIPS is two payload
+# manifests, and only those two:
+#
+#   the SKILL-SCOPED channel — the `hooks:` frontmatter block of
+#     skills/canonical-sdlc/SKILL.md, carrying the seven sdlc hook scripts' eleven
+#     event/matcher registrations, which bind only in sessions that actually invoke
+#     the skill (epic-16 wave-2 R1).
+#   the ALWAYS-ON channel — hooks/hooks.json, the plugin hook manifest, carrying the
+#     six walls that must bind in every session no matter what skill is armed.
+#
+# Three sides have to agree or the partition is silently wrong in one of three ways:
+# the frontmatter could name the wrong shape, a skill-scoped script could linger in
+# the always-on manifest (firing in EVERY session, defeating R1), or a script that
+# has to stay global could get swept out by mistake.
+#
+# THIS SECTION READS PAYLOAD FILES ONLY (epic-17 wave-02 S3, AC-1). Every assertion
+# that used to derive its expected shape from the condemned installer script's own
+# registration array now lives in tests/plugin-hooks.test.sh — the designated
+# transitional home, which retires whole when the installer does at W5. The two
+# always-on surfaces are pinned against each other there, so an assertion made here
+# against hooks/hooks.json still transitively binds the installer for as long as the
+# installer exists.
 SKILL_SRC="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
-MANAGED_HOOKS_SRC=$(awk '/^MANAGED_HOOKS=\(/{f=1} f{print} f&&/^\)$/{exit}' "$BIONIC_SCRIPTS_DIR/claude-bootstrap.sh")
+HOOKS_JSON_SRC="$BIONIC_HOOKS_DIR/hooks.json"
 
 # the shell's bare `grep` is ugrep with ignore-files active and lies about absence
 # (reports 0 hits inside paths it silently skips) — every absence check below goes
@@ -2615,8 +2628,9 @@ expect_absent_ug() {
 }
 
 # --- L.1 frontmatter <-> script: the eleven sdlc-scoped registrations live in
-# SKILL.md's `hooks:` frontmatter block, same event/matcher/command shape MANAGED_HOOKS
-# used to carry, each entry bounded by the same timeout: 10 the Step-6 review demanded.
+# SKILL.md's `hooks:` frontmatter block, in the same event/matcher/command shape the
+# always-on channel uses, each entry bounded by the same timeout: 10 the Step-6 review
+# demanded.
 # farm-out-reminder.sh joined this block at session-20260815 T5 — it guards a
 # workflow preference, not irreversible damage, so it binds only in armed sessions
 # now, sharing the PreToolUse|Bash matcher entry with the evidence gate (two
@@ -2722,78 +2736,113 @@ done
 expect_eq "every top-level key in the hooks: block is a hook event the harness knows" \
   "" "$L5_BAD"
 
-# --- L.2 MANAGED_HOOKS absence: none of the five sdlc scripts that stayed
-# skill-only appears ANYWHERE in the array bootstrap still converges on install — a
-# lingering entry would fire the wall in every session, defeating R1 even after the
-# frontmatter side is right.
+# THE ALWAYS-ON MANIFEST, flattened to the SAME event|matcher|command|timeout row shape
+# L.1 extracts from the frontmatter block, so the two channels are read the same way and
+# compared without translation. The plugin format makes both `matcher` and `timeout`
+# optional at the group/leaf level; an absent key yields an empty field rather than a
+# missing column, so a row is always four fields wide.
+HOOKS_JSON_ROWS=$(jq -r '
+  .hooks | to_entries[] | .key as $ev | .value[]
+  | (.matcher // "") as $mt
+  | .hooks[] | "\($ev)|\($mt)|\(.command)|\(.timeout // "")"
+' "$HOOKS_JSON_SRC" 2>/dev/null)
+expect_eq "the always-on manifest parses into rows at all (§L.2/L.3/L.6 are not vacuous)" "yes" \
+  "$([ -n "$HOOKS_JSON_ROWS" ] && echo yes || echo no)"
+
+# --- L.2 ALWAYS-ON ABSENCE: none of the four sdlc scripts that stayed skill-only
+# appears ANYWHERE in hooks/hooks.json — a lingering entry would fire the wall in every
+# session, defeating R1 even after the frontmatter side is right.
 for script in canonical-sdlc-evidence-gate.sh stop-guard.sh \
               execution-recorder.sh context-spend.sh; do
-  expect_absent_ug "MANAGED_HOOKS no longer names $script (moved to frontmatter)" \
-    "hooks/$script" "$MANAGED_HOOKS_SRC"
+  expect_absent_ug "the always-on manifest no longer names $script (skill frontmatter only)" \
+    "hooks/$script" "$HOOKS_JSON_ROWS"
 done
 # THE THREE WALLS THAT CAME BACK (session-20260815 T6, then T2) are a conditional
-# absence, not an absence: they are named in this array again, and every occurrence
+# absence, not an absence: they are named in this manifest again, and every occurrence
 # must sit behind hooks/agent-context-guard.sh. A bare entry would be the R1
 # regression this section was written to catch — the wall firing in every session on
 # the machine — wearing the new registration's clothes, and §L.6 below (which asserts
 # the guarded form is PRESENT) would still pass beside it. The landing gate joined
 # them when teammates got their landing verdict: its Stop arm stays skill-scoped, and
 # only the SubagentStop arm needs the channel that reaches an agent context.
-L2_UNGUARDED=$(printf '%s\n' "$MANAGED_HOOKS_SRC" \
+L2_UNGUARDED=$(printf '%s\n' "$HOOKS_JSON_ROWS" \
   | /usr/bin/grep -E 'dispatch-preflight\.sh|canonical-sdlc-governing-skill\.sh|landing-gate\.sh' \
   | /usr/bin/grep -v 'agent-context-guard\.sh')
 expect_eq "…and the three walls that returned are never named UNGUARDED" "" "$L2_UNGUARDED"
 # The landing gate is the one wall registered on TWO events across the two channels, so
-# its settings entry must not drift onto the event the skill channel already owns: a
+# its always-on entry must not drift onto the event the skill channel already owns: a
 # second Stop registration would sweep twice per turn and journal two markers.
-expect_eq "…and the landing gate is registered here for SubagentStop alone" "1" \
-  "$(printf '%s\n' "$MANAGED_HOOKS_SRC" | /usr/bin/grep -c 'landing-gate\.sh')"
-expect_eq "…never for Stop, which the skill channel owns" "0" \
-  "$(printf '%s\n' "$MANAGED_HOOKS_SRC" | /usr/bin/grep -c '"Stop|')"
+expect_eq "…and the landing gate is registered here exactly once" "1" \
+  "$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -c 'landing-gate\.sh')"
+expect_eq "…that one registration sitting on SubagentStop" "1" \
+  "$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -c '^SubagentStop|.*landing-gate\.sh')"
+expect_eq "…never on Stop, which the skill channel owns" "0" \
+  "$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -c '^Stop|')"
 
-# --- L.3 MANAGED_HOOKS presence: the two irreversible-damage guards are untouched
+# --- L.3 ALWAYS-ON PRESENCE: the two irreversible-damage guards are untouched
 # by the move (R2: guard-set parity for the hooks that stay global no matter what)
 # — exact set, not just "still there somewhere among leftovers."
-expect_contains "MANAGED_HOOKS keeps protect-main.sh on PreToolUse|Bash" \
-  '"PreToolUse|Bash|~/.claude/hooks/protect-main.sh"' "$MANAGED_HOOKS_SRC"
+#
+# Pinned BY VALUE including the ${CLAUDE_PLUGIN_ROOT} spelling, because the manifest is
+# what the harness executes: a command that reverted to a machine-local ~ path is a wall
+# that cannot resolve inside an installed plugin, and it fails in the quiet direction.
+expect_contains "the always-on manifest keeps protect-main.sh on PreToolUse|Bash" \
+  'PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/protect-main.sh|' "$HOOKS_JSON_ROWS"
 expect_contains "…protect-database.sh on PreToolUse|Bash" \
-  '"PreToolUse|Bash|~/.claude/hooks/protect-database.sh"' "$MANAGED_HOOKS_SRC"
-# farm-out-reminder.sh moved OUT of this array at session-20260815 T5 (AC-6):
+  'PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/protect-database.sh|' "$HOOKS_JSON_ROWS"
+# farm-out-reminder.sh moved OUT of the always-on set at session-20260815 T5 (AC-6):
 # unlike the three walls above it, it guards a workflow preference rather than
 # irreversible damage, so it now binds only in armed sessions, registered once
 # through the skill frontmatter (pinned in L.1) with no agent-context twin here.
 expect_absent_ug "…and farm-out-reminder.sh is no longer here at all (moved to skill frontmatter, T5)" \
-  "hooks/farm-out-reminder.sh" "$MANAGED_HOOKS_SRC"
-expect_eq "…and exactly six entries total — two unconditional, four guarded" \
-  "6" "$(printf '%s\n' "$MANAGED_HOOKS_SRC" | /usr/bin/grep -c '"')"
+  "hooks/farm-out-reminder.sh" "$HOOKS_JSON_ROWS"
+expect_eq "…and exactly six registrations total — two unconditional, four guarded" \
+  "6" "$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -c '|')"
+expect_eq "…every one of them resolving through \${CLAUDE_PLUGIN_ROOT}, never a machine-local path" \
+  "0" "$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -cvF '${CLAUDE_PLUGIN_ROOT}/hooks/')"
 
-# --- L.4 EVERY registration is bounded by a timeout, whichever branch writes it ---
+# --- L.4 EVERY registration is bounded by a timeout, on the channel that renders one ---
 #
-# The Step-6 review's C-4: `wire_managed_hooks` attached `"timeout": 10` only on the
-# matcher branch, so the two events this wave added — the ones that carry no matcher —
+# The Step-6 review's C-4: the settings writer attached `"timeout": 10` only on the
+# matcher branch, so the two events that wave added — the ones that carry no matcher —
 # registered with no ceiling at all, and the platform default was the only thing in front
 # of the landing gate's verdict subprocess. A timeout is the safe direction here precisely
 # because the gate is fail-open: a hook that is killed lets the stop through.
 #
-# Driven rather than grepped: the real function is extracted from the real script and run
-# against a sandboxed settings file, the same convention tests/installer-behavior.test.sh
-# uses, so this asserts what bootstrap WRITES and not what its source looks like.
-LSBX="$SANDBOX/wiring"
-mkdir -p "$LSBX"
-LCODE="$LSBX/wire.sh"
-awk '/^wire_managed_hooks\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$BIONIC_SCRIPTS_DIR/claude-bootstrap.sh" > "$LCODE"
-awk '/^MANAGED_HOOKS=\(/{f=1} f{print} f&&/^\)$/{exit}' "$BIONIC_SCRIPTS_DIR/claude-bootstrap.sh" >> "$LCODE"
-LSETTINGS="$LSBX/settings.json"
-echo '{}' > "$LSETTINGS"
-# shellcheck disable=SC1090
-( . "$LCODE"; settings="$LSETTINGS"; wire_managed_hooks ) >/dev/null 2>&1
-L_RC=$?
-expect_eq "wire_managed_hooks runs against a sandboxed settings file" "0" "$L_RC"
-expect_eq "…and registers every managed hook (this section is not vacuous)" \
-  "$(printf '%s\n' "$BOOTSTRAP_SRC" | awk '/^MANAGED_HOOKS=\(/{f=1;next} f&&/^\)$/{exit} f&&/"/{n++} END{print n+0}')" \
-  "$(jq '[.hooks[][].hooks[]] | length' "$LSETTINGS" 2>/dev/null)"
-expect_eq "EVERY registered hook carries a timeout — the no-matcher branch included" "0" \
-  "$(jq '[.hooks[][].hooks[] | select(has("timeout") | not)] | length' "$LSETTINGS" 2>/dev/null)"
+# Asserted GENERICALLY rather than row by row: L.1's eleven literals each carry `|10`,
+# but a TWELFTH row added with no timeout at all would pass every one of them.
+#
+# COUNTED AT THE SOURCE, not over L.1's rows. That extractor only emits a row when it
+# reaches a `timeout:` line, so a registration whose bound was deleted DISAPPEARS from
+# the row set instead of showing up in it unbounded — "every row carries a timeout" is
+# vacuous by construction over those rows (proved: the strip-a-timeout mutation reds the
+# count arms and leaves an over-rows check green). The pairing has to be counted off the
+# block itself, which is what these two arms do.
+skill_block_count() {  # <line-pattern> -> how many times it occurs INSIDE the hooks: block
+  awk -v pat="$1" '
+    /^hooks:$/ { active=1; next }
+    active && /^---$/ { active=0 }
+    active && /^[A-Za-z]/ { active=0 }
+    !active { next }
+    $0 ~ pat { n++ }
+    END { print n+0 }
+  ' "$SKILL_SRC"
+}
+L4_CMDS=$(skill_block_count '^ +command: ')
+L4_BOUNDS=$(skill_block_count '^ +timeout: ')
+expect_eq "EVERY command in the frontmatter block is paired with a timeout — none unbounded" \
+  "$L4_CMDS" "$L4_BOUNDS"
+expect_eq "…and the block still declares all eleven of them (the pairing is not vacuous)" \
+  "11" "$L4_CMDS"
+expect_eq "…each bounded by the ceiling the Step-6 review demanded: 10" "11" \
+  "$(printf '%s\n' "$SKILL_HOOKS_ROWS" | awk -F'|' '$4 == "10" { n++ } END { print n+0 }')"
+# THE ALWAYS-ON CHANNEL RENDERS NO CEILING TODAY. hooks/hooks.json's six entries carry no
+# `timeout` key at all, so those walls run on the platform default — the C-4 protection
+# does not exist on that channel. That is a property of the payload manifest, not of this
+# suite, and it is deliberately asserted in NEITHER direction here: pinning the current
+# state would make the fix red. Flagged by epic-17 wave-02 S3 for a manifest-owning slice.
+# The ceiling the installer still writes into settings.json is driven end to end in
+# tests/plugin-hooks.test.sh, which retires with the installer at W5.
 
 # --- L.6 THE AGENT-CONTEXT CHANNEL: one wall, two channels, one partition ---
 # (session-20260815-landing-supervision T6; design D1, plan AC-7/AC-8.)
@@ -2807,31 +2856,36 @@ expect_eq "EVERY registered hook carries a timeout — the no-matcher branch inc
 # roster on disk.
 #
 # THE TOPOLOGY IS THE THING THIS SECTION OWNS, and it has three ways to be silently
-# wrong, one per assertion below: the settings entry could point straight at a wall
+# wrong, one per assertion below: the always-on entry could point straight at a wall
 # (that wall then fires in every session on the machine — L.2 above), the guard could
 # ALSO be registered on the skill channel (both channels live on one event, so a
 # main-thread refusal prints twice and a dispatch journals twice), or the two channels
 # could drift onto different events (a wall covering the main thread on one event and
 # agent contexts on another, which reads as coverage and is not).
+#
+# The four guarded entries are pinned as WHOLE ROWS, which asserts two things at once:
+# that the guard fronts the wall, and that the pair is ONE command string carrying both
+# paths — the shape a shell executes and the shape that hands the guard its argument. In
+# the plugin manifest that shape is the stored form, so it is read, not driven.
 ACG_PATH="$BIONIC_HOOKS_DIR/agent-context-guard.sh"
 expect_eq "the partition guard exists as a hook script" "yes" \
   "$([ -f "$ACG_PATH" ] && echo yes || echo no)"
-expect_contains "MANAGED_HOOKS registers the DISPATCH wall for agent contexts, behind the guard" \
-  '"PreToolUse|Agent|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/dispatch-preflight.sh"' \
-  "$MANAGED_HOOKS_SRC"
+expect_contains "the always-on manifest registers the DISPATCH wall for agent contexts, behind the guard" \
+  'PreToolUse|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|' \
+  "$HOOKS_JSON_ROWS"
 expect_contains "…the ARTIFACT wall on Write, behind the guard" \
-  '"PreToolUse|Write|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/canonical-sdlc-governing-skill.sh"' \
-  "$MANAGED_HOOKS_SRC"
+  'PreToolUse|Write|${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|' \
+  "$HOOKS_JSON_ROWS"
 expect_contains "…and on Edit, behind the guard" \
-  '"PreToolUse|Edit|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/canonical-sdlc-governing-skill.sh"' \
-  "$MANAGED_HOOKS_SRC"
-expect_contains "…and the LANDING verdict on SubagentStop, behind the guard" \
-  '"SubagentStop||~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/landing-gate.sh"' \
-  "$MANAGED_HOOKS_SRC"
+  'PreToolUse|Edit|${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|' \
+  "$HOOKS_JSON_ROWS"
+expect_contains "…and the LANDING verdict on SubagentStop, behind the guard, with no matcher" \
+  'SubagentStop||${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh|' \
+  "$HOOKS_JSON_ROWS"
 expect_absent_ug "…and the guard itself is NOT on the skill channel (no event has two live channels)" \
   "agent-context-guard" "$SKILL_HOOKS_ROWS"
 
-# The two channels cover the SAME three events: for each guarded settings entry there is
+# The two channels cover the SAME three events: for each guarded always-on entry there is
 # a frontmatter row registering the same wall on the same event/matcher, straight (that
 # is the main-thread half, asserted by value in L.1 and re-read here as a pair).
 for _pair in "PreToolUse|Agent|\${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|10" \
@@ -2845,21 +2899,11 @@ done
 # events exist on both sides of the depth line — a Write happens on the main thread and
 # inside an agent — so each needs a channel for each. SubagentStop only ever fires in an
 # agent context: there is no main-thread half to cover, and a frontmatter row for it would
-# be a registration that can never be delivered (asserted absent in L.1). The settings entry
-# is therefore the whole of that event's coverage, which is why the guarded form above is
-# pinned by value.
+# be a registration that can never be delivered (asserted absent in L.1). The always-on
+# entry is therefore the whole of that event's coverage, which is why the guarded form
+# above is pinned by value.
 expect_eq "the SubagentStop entry has no skill-channel twin, and needs none" "0" \
   "$(printf '%s\n' "$SKILL_HOOKS_ROWS" | /usr/bin/grep -c '^SubagentStop|')"
-
-# Driven, not grepped: what bootstrap WRITES for a guarded entry is one command string
-# carrying both paths, with its matcher and its timeout — the shape the harness executes
-# through a shell, and the shape that hands the guard its argument.
-L6_CMDS=$(jq -r '.hooks.PreToolUse[]? | select(.matcher=="Agent") | .hooks[].command' "$LSETTINGS" 2>/dev/null)
-expect_contains "wire_managed_hooks writes the guarded dispatch entry as ONE command with the wall as its argument" \
-  "agent-context-guard.sh ~/.claude/hooks/dispatch-preflight.sh" "$L6_CMDS"
-expect_eq "…and the guarded entries are bounded by the same timeout: 10" "0" \
-  "$(jq '[.hooks.PreToolUse[]? | select(.matcher=="Agent" or .matcher=="Write" or .matcher=="Edit")
-         | .hooks[] | select(.timeout != 10)] | length' "$LSETTINGS" 2>/dev/null)"
 
 # The wall behind the guard is the one that skips its JOURNAL in an agent context —
 # the reader and the writer of BIONIC_HOOK_CHANNEL are one pair across two files, and a
