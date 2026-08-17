@@ -1,20 +1,25 @@
 #!/bin/bash
 # Tests for the bionic plugin manifest, marketplace manifest, and LICENSE.
 # Epic-17 wave-01 slice S1. Asserts:
-#   - .claude-plugin/plugin.json exists, is valid JSON, name=bionic, semver
+#   - payload/.claude-plugin/plugin.json exists, is valid JSON, name=bionic, semver
 #     version, license MIT, non-empty dependencies array
 #   - .claude-plugin/marketplace.json exists, is valid JSON, carries a bionic
-#     plugin entry sourcing the repo root, and an
+#     plugin entry sourcing the payload subtree, and an
 #     allowCrossMarketplaceDependenciesOn list covering every marketplace
 #     named in plugin.json dependencies
 #   - LICENSE exists at repo root and contains "MIT License"
+#
+# S6 amendment (payload boundary): the plugin manifest moved from the repo root to
+# payload/, and the marketplace entry's source moved with it. The repo root stays the
+# MARKETPLACE root (it holds .claude-plugin/marketplace.json); the payload subtree is the
+# PLUGIN root. Rationale and the measurements behind it: tests/plugin-payload.test.sh.
 #
 # Usage: bash tests/plugin-manifest.test.sh
 
 set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-PLUGIN_JSON="${REPO}/.claude-plugin/plugin.json"
+PLUGIN_JSON="${REPO}/payload/.claude-plugin/plugin.json"
 MARKETPLACE_JSON="${REPO}/.claude-plugin/marketplace.json"
 LICENSE_FILE="${REPO}/LICENSE"
 
@@ -62,11 +67,11 @@ expect_contains() {
 }
 
 # ============================================================
-# SECTION 1: .claude-plugin/plugin.json
+# SECTION 1: payload/.claude-plugin/plugin.json
 # ============================================================
 
 echo ""
-echo "=== Section 1: .claude-plugin/plugin.json ==="
+echo "=== Section 1: payload/.claude-plugin/plugin.json ==="
 
 expect_true "plugin.json exists" test -f "$PLUGIN_JSON"
 
@@ -108,13 +113,13 @@ found = False
 for p in plugins:
     if p.get('name') == 'bionic':
         src = p.get('source', '')
-        if src in ('./', '.'):
+        if src == './payload':
             found = True
-        elif isinstance(src, dict) and src.get('source') in ('./', '.'):
+        elif isinstance(src, dict) and src.get('source') == './payload':
             found = True
 print('yes' if found else 'no')
 " 2>/dev/null)"
-  expect_eq "marketplace.json carries a bionic plugin entry sourcing repo root" "yes" "$HAS_BIONIC_ENTRY"
+  expect_eq "marketplace.json carries a bionic plugin entry sourcing ./payload" "yes" "$HAS_BIONIC_ENTRY"
 
   if [ -f "$PLUGIN_JSON" ]; then
     MISSING_MARKETPLACES="$(python3 -c "

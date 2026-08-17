@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "bionic",
-      "source": "./",
+      "source": "./payload",
       "description": "Bionic — hooks, skills, and agent-orchestration guardrails for Claude Code."
     }
   ]
