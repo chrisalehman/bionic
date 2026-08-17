@@ -1,0 +1,31 @@
+{
+  "version": "0.1.0",
+  "_about": {
+    "what": "bionic's shipped permission profile TEMPLATE. Rendered at setup by scripts/lib/profile.sh, applied into the USER settings layer under explicit consent, diffed by doctor, stripped by remove.",
+    "token": "__BIONIC_PLUGIN_ROOT__ is replaced with this machine's concrete plugin root. Permission rules take literal paths and globs only — no variable expansion — so the token must never reach a settings file (record/epic-17-w3/probe-identity-match.md, design D2-final).",
+    "markers": "The first and last allow entries bracket the block bionic owns. They are exact-match rules for ':' — bash's no-op builtin — so they authorize nothing while remaining valid rule syntax the CLI can only ignore. Everything in permissions.allow outside them is the machine's own accretion.",
+    "version_rule": "version here, and the version carried by the begin marker, both equal payload/.claude-plugin/plugin.json's version. One manifest is the truth (ADR-002); tests/version-ssot.test.sh and tests/profile.test.sh pin all three together.",
+    "derivation": "Every rule below has a named invoker. hooks/* mirrors the six scripts named in hooks/hooks.json's commands. scripts/* is the command surface's four payload scripts. tests/run.sh is the suite CLAUDE.md makes every agent run, in both the plain and farm-out-allowed spellings. The claude plugin rules are scoped to bionic's own plugin@marketplace pair. Nothing here grants a whole tool, a bare wildcard, or a permission-skipping flag; a rule with no invoker behind it is an unearned grant."
+  },
+  "permissions": {
+    "allow": [
+      "Bash(: bionic-profile-begin version=0.1.0)",
+      "Bash(bash __BIONIC_PLUGIN_ROOT__/scripts/setup.sh:*)",
+      "Bash(bash __BIONIC_PLUGIN_ROOT__/scripts/doctor.sh:*)",
+      "Bash(bash __BIONIC_PLUGIN_ROOT__/scripts/remove.sh:*)",
+      "Bash(bash __BIONIC_PLUGIN_ROOT__/scripts/spawn-worktree.sh:*)",
+      "Bash(bash __BIONIC_PLUGIN_ROOT__/hooks/agent-context-guard.sh:*)",
+      "Bash(bash __BIONIC_PLUGIN_ROOT__/hooks/canonical-sdlc-governing-skill.sh:*)",
+      "Bash(bash __BIONIC_PLUGIN_ROOT__/hooks/dispatch-preflight.sh:*)",
+      "Bash(bash __BIONIC_PLUGIN_ROOT__/hooks/landing-gate.sh:*)",
+      "Bash(bash __BIONIC_PLUGIN_ROOT__/hooks/protect-database.sh:*)",
+      "Bash(bash __BIONIC_PLUGIN_ROOT__/hooks/protect-main.sh:*)",
+      "Bash(bash tests/run.sh:*)",
+      "Bash(FARM_OUT_ALLOW=1 bash tests/run.sh:*)",
+      "Bash(claude plugin list:*)",
+      "Bash(claude plugin install bionic@bionic:*)",
+      "Bash(claude plugin uninstall bionic@bionic:*)",
+      "Bash(: bionic-profile-end)"
+    ]
+  }
+}

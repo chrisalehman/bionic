@@ -139,9 +139,10 @@ else
 
   STRAY="$(find "$PAYLOAD" -type f \
              ! -path "${PAYLOAD}/.claude-plugin/*" \
-             ! -path "${PAYLOAD}/scripts/*" 2>/dev/null | sed "s|${REPO}/||" | sort)"
+             ! -path "${PAYLOAD}/scripts/*" \
+             ! -path "${PAYLOAD}/permissions/*" 2>/dev/null | sed "s|${REPO}/||" | sort)"
   if [ -z "$STRAY" ]; then
-    ok "payload/ holds no copy of anything the repo owns (outside .claude-plugin/ and scripts/)"
+    ok "payload/ holds no copy of anything the repo owns (outside .claude-plugin/, scripts/ and permissions/)"
   else
     no "payload/ holds no copy of anything the repo owns (found: $(echo "$STRAY" | tr '\n' ' '))"
   fi
@@ -164,6 +165,23 @@ else
     no "no repo-root scripts/ twin beside payload/scripts/ (found ${REPO}/scripts)"
   else
     ok "no repo-root scripts/ twin beside payload/scripts/"
+  fi
+
+  # payload/permissions/ is the same carve-out for the same reason (epic-17 W3 S5, spec
+  # AC-6): the shipped permission-profile template has no repo-root owner to link back to —
+  # the payload IS its owner — so it gets the identical pair of guards.
+  if [ -d "${PAYLOAD}/permissions" ]; then
+    PERM_LINKS="$(find "${PAYLOAD}/permissions" -type l 2>/dev/null | sed "s|${REPO}/||" | sort)"
+    if [ -z "$PERM_LINKS" ]; then
+      ok "payload/permissions/ contains no symlinks (the payload owns these files outright)"
+    else
+      no "payload/permissions/ contains no symlinks (found: $(echo "$PERM_LINKS" | tr '\n' ' '))"
+    fi
+  fi
+  if [ -e "${REPO}/permissions" ]; then
+    no "no repo-root permissions/ twin beside payload/permissions/ (found ${REPO}/permissions)"
+  else
+    ok "no repo-root permissions/ twin beside payload/permissions/"
   fi
 
   # Each link must resolve, and must resolve to the repo's single owner.
