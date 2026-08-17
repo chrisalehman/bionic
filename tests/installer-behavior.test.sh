@@ -1233,6 +1233,97 @@ else
   no "C1: a skill with no frontmatter hooks was modified by the install"
 fi
 
+# ---------- C1-R: the installer must not announce success on an effect it never
+# checked (critic-report.md ADDENDUM, finding C1-R) ----------
+#
+# Detection (_skill_frontmatter_has_plugin_root) and translation
+# (_localize_skill_frontmatter) used DIFFERENT bounds for "where the frontmatter block
+# starts": the original detector required it to open at line 1 exactly, and nothing
+# re-checked the detector's verdict after translating — do_install_local_skill counted
+# awk's exit status (an ATTEMPT) as proof of an EFFECT. Two edges:
+#   EDGE A — a YAML folded scalar (`command: >-`, path on the next line). The detector
+#     DOES see the literal (it scans every frontmatter line), but the translator only
+#     rewrites lines whose FIRST token is `command:` — the continuation line survives
+#     untouched, and (pre-fix) the installer reports success anyway.
+#   EDGE B — a single blank line before the opening `---`. The NR==1 guard never
+#     recognizes the frontmatter block at all, so detection is negative and translation
+#     is skipped outright (pre-fix) — a silent miss with no warning of any kind.
+# The fix: both functions now open the frontmatter block at the FIRST NON-EMPTY line
+# (still requiring it be `---`, so a file whose first non-empty line isn't `---` still
+# has no frontmatter) — one shared block definition, not two — and
+# do_install_local_skill re-checks the SAME detector after translating, treating a
+# still-positive result as a failure. Edge A is now expected to have an unfixable
+# literal and get refused; edge B is now expected to be detected AND cleanly translated
+# (the blank line no longer defeats detection, and there is nothing else that would
+# block a single-line `command:` from translating).
+mkdir -p "${SKSBX}/src4/skills/edgea" "${SKSBX}/src4/skills/edgeb"
+cat > "${SKSBX}/src4/skills/edgea/SKILL.md" <<'EDGEA'
+---
+name: edgea
+description: Probe skill. Use when the user says edgea.
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: >-
+            ${CLAUDE_PLUGIN_ROOT}/hooks/edgea-gate.sh
+          timeout: 10
+---
+
+# edgea
+
+Probe for the YAML folded-scalar edge case (C1-R edge A).
+EDGEA
+cat > "${SKSBX}/src4/skills/edgeb/SKILL.md" <<'EDGEB'
+
+---
+name: edgeb
+description: Probe skill. Use when the user says edgeb.
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/edgeb-gate.sh
+          timeout: 10
+---
+
+# edgeb
+
+Probe for the leading-blank-line edge case (C1-R edge B).
+EDGEB
+
+# Captures stdout+stderr instead of discarding it — the C1-R assertions read the
+# installer's own step_ok/step_fail line, not just the file it produced.
+_install_skill_into_capture() {  # <src-root> <home-root> <skill-name>
+  ( export SCRIPT_DIR="$1" HOME="$2"; do_install_local_skill "$3" ) 2>&1
+}
+
+_OUT_EDGEA="$(_install_skill_into_capture "${SKSBX}/src4" "${SKSBX}/home4a" edgea)"
+_edgea_inst="${SKSBX}/home4a/.claude/skills/edgea/SKILL.md"
+
+echo "$_OUT_EDGEA" | /usr/bin/grep -qF -- 'failed (continuing)' \
+  && ok "C1-R: EDGE A (folded scalar) — installer LOUDLY refuses instead of reporting success" \
+  || no "C1-R: EDGE A (folded scalar) — installer did not refuse (output: $_OUT_EDGEA)"
+
+_n_edgea_cpr="$(/usr/bin/grep -cF -- '${CLAUDE_PLUGIN_ROOT}' "$_edgea_inst" 2>/dev/null)"
+[ "${_n_edgea_cpr:-0}" -ge 1 ] \
+  && ok "C1-R: EDGE A — the un-translatable literal really is still there (the refusal is honest, not decorative)" \
+  || no "C1-R: EDGE A — expected an untranslated literal to justify the refusal, found ${_n_edgea_cpr:-0}"
+
+_OUT_EDGEB="$(_install_skill_into_capture "${SKSBX}/src4" "${SKSBX}/home4b" edgeb)"
+_edgeb_inst="${SKSBX}/home4b/.claude/skills/edgeb/SKILL.md"
+
+_n_edgeb_cpr="$(/usr/bin/grep -cF -- '${CLAUDE_PLUGIN_ROOT}' "$_edgeb_inst" 2>/dev/null)"
+[ "${_n_edgeb_cpr:-1}" = "0" ] \
+  && ok "C1-R: EDGE B (leading blank line) — detected and fully translated, zero literals remain" \
+  || no "C1-R: EDGE B — literal survived untranslated (${_n_edgeb_cpr:-unknown} remaining; the blank-line guard is still blind)"
+
+echo "$_OUT_EDGEB" | /usr/bin/grep -qF -- 'failed (continuing)' \
+  && no "C1-R: EDGE B — should succeed once cleanly translated, not refuse (output: $_OUT_EDGEB)" \
+  || ok "C1-R: EDGE B — installer reports success (clean translation, not a refusal)"
+
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
 echo "========================================"

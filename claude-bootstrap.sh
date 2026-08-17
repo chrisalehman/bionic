@@ -704,8 +704,16 @@ do_install_github_skill_pack() {
 _skill_frontmatter_has_plugin_root() {  # <skill-md>; 0 = frontmatter carries a plugin-root hook path
   [ -f "$1" ] || return 1
   awk '
-    NR == 1 && $0 == "---" { fm = 1; next }
-    fm && $0 == "---" { fm = 0 }
+    # The frontmatter opener is the FIRST NON-EMPTY line being "---" (tolerates leading
+    # blank lines — critic-report.md ADDENDUM finding C1-R, edge B). A file whose first
+    # non-empty line is not "---" still has no frontmatter block at all.
+    !started {
+      if ($0 == "") { next }
+      started = 1
+      if ($0 == "---") { fm = 1 }
+      next
+    }
+    fm && $0 == "---" { fm = 0; next }
     fm && index($0, "${CLAUDE_PLUGIN_ROOT}/hooks/") > 0 { found = 1 }
     END { exit !found }
   ' "$1" 2>/dev/null
@@ -730,7 +738,14 @@ _localize_skill_frontmatter() {  # <skill-md>; rewrite plugin-root hook commands
       sub(/^-[ \t]+/, "", t)
       return (substr(t, 1, 8) == "command:")
     }
-    NR == 1 && $0 == "---" { fm = 1; print; next }
+    # Same block-opener rule as the detector: FIRST NON-EMPTY line being "---". One
+    # shared definition, not two — a second NR==1-only copy here is exactly the
+    # asymmetry that let edge B pass through untranslated with no warning.
+    !started {
+      print
+      if ($0 != "") { started = 1; if ($0 == "---") { fm = 1 } }
+      next
+    }
     fm && $0 == "---" { fm = 0; print; next }
     fm && is_command_key($0) { print localize($0); next }
     { print }
@@ -758,7 +773,10 @@ do_install_local_skill() {
     local localize_fail=0 localized=0 skill_md
     while IFS= read -r skill_md; do
       _skill_frontmatter_has_plugin_root "$skill_md" || continue
-      if _localize_skill_frontmatter "$skill_md"; then
+      # Re-check the SAME detector after translating (critic-report.md ADDENDUM finding
+      # C1-R) — the detector is the single oracle for both halves, so a still-positive
+      # result after translation is treated as a failure rather than a reported success.
+      if _localize_skill_frontmatter "$skill_md" && ! _skill_frontmatter_has_plugin_root "$skill_md"; then
         localized=$((localized + 1))
       else
         localize_fail=1
