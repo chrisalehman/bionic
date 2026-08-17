@@ -10,8 +10,6 @@ set -euo pipefail
 
 . "$(dirname "$0")/../tests/lib/resolve-roots.sh"
 
-REPO="${BIONIC_SCRIPTS_DIR}"
-
 PASS=0
 FAIL=0
 TOTAL=0

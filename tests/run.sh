@@ -6,14 +6,20 @@
 # no auth) plus the Docker mock install e2e when docker is present.
 #
 #   GATING suites (set the exit code — must be green):
-#     hooks/*.test.sh                  hook behavior
-#     tests/scripts.test.sh            config well-formedness + hook/script structural checks
-#     tests/installer-behavior.test.sh installer fns: gcloud cask, pnpm store, resilience
+#     hooks/*.test.sh                  every hook's behavior suite (globbed)
+#     the hand-listed `run` lines below every suite outside hooks/ — the glob does
+#                                      NOT reach them, so a new one is invisible
+#                                      until its `run` line is added by name
 #     tests/bootstrap-e2e-docker.sh    whole bootstrap on a fresh OS (docker only)
 #
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
+
+. tests/lib/resolve-roots.sh
+printf 'Roots: hooks=%s skills=%s scripts=%s\n\n' \
+  "$BIONIC_HOOKS_DIR" "$BIONIC_SKILLS_DIR" "$BIONIC_SCRIPTS_DIR"
+
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 pass=0; fail=0; skip=0; failed=""

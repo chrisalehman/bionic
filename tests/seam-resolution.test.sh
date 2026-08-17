@@ -43,6 +43,8 @@
 
 set -uo pipefail
 
+# NOT the seam: a catch-proof cannot resolve its subject through its subject. This is
+# the one legacy-idiom site outside tests/lib/resolve-roots.sh (spec AC-3, plan A11).
 REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 SEAM="${REPO}/tests/lib/resolve-roots.sh"
 MARKER="SEAM-DOCTORED-MARKER-b7f3"
@@ -188,6 +190,19 @@ probe3() { BIONIC_HOOKS_DIR="$DOC/hooks" BIONIC_SKILLS_DIR="$DOC/skills" BIONIC_
              probe "$REPO" "$SEAM" "$1"; }
 expect_eq "all three overrides together each bind to their own class" \
   "1 1 1" "$(probe3 mark-hooks) $(probe3 mark-skills) $(probe3 mark-scripts)"
+
+echo ""
+echo "=== Group 6: no suite resolves privately (spec AC-3, enumerated) ==="
+# The seam is only a seam while it is the ONLY answer. A suite added later with a
+# hardcoded offset opts out silently: it sources nothing, reds nothing, and goes
+# blind the day an overridden root goes live (W5 cold install).
+UNSEAMED=""
+for f in "$REPO"/hooks/*.test.sh "$REPO"/tests/*.test.sh "$REPO"/lib/*.test.sh; do
+  [ -f "$f" ] || continue
+  case "$f" in */seam-resolution.test.sh) continue ;; esac   # documented exemption, :46
+  /usr/bin/grep -q 'resolve-roots\.sh' "$f" || UNSEAMED="$UNSEAMED ${f#$REPO/}"
+done
+expect_eq "every suite sources the path-resolution seam" "" "$UNSEAMED"
 
 echo ""
 echo "========================================"
