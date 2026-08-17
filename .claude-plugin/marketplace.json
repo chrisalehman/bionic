@@ -4,15 +4,25 @@
   "owner": {
     "name": "Chris Lehman"
   },
-  "allowCrossMarketplaceDependenciesOn": [
-    "claude-plugins-official",
-    "addy-agent-skills"
-  ],
   "plugins": [
     {
       "name": "bionic",
       "source": "./payload",
       "description": "Bionic — hooks, skills, and agent-orchestration guardrails for Claude Code."
+    },
+    {
+      "name": "superpowers",
+      "description": "Superpowers teaches Claude brainstorming, subagent driven development with built in code review, systematic debugging, and red/green TDD. Additionally, it teaches Claude how to author and test new skills.",
+      "category": "development",
+      "source": { "source": "url", "url": "https://github.com/obra/superpowers.git", "sha": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797" },
+      "homepage": "https://github.com/obra/superpowers.git"
+    },
+    {
+      "name": "agent-skills",
+      "description": "Production-grade engineering skills covering every phase of software development: spec, plan, build, verify, review, and ship.",
+      "source": { "source": "url", "url": "https://github.com/addyosmani/agent-skills.git" },
+      "homepage": "https://github.com/addyosmani/agent-skills",
+      "license": "MIT"
     }
   ]
 }
