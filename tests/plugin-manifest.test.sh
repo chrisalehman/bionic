@@ -4,9 +4,10 @@
 #   - payload/.claude-plugin/plugin.json exists, is valid JSON, name=bionic, semver
 #     version, license MIT, non-empty dependencies array
 #   - .claude-plugin/marketplace.json exists, is valid JSON, carries a bionic
-#     plugin entry sourcing the payload subtree, and an
-#     allowCrossMarketplaceDependenciesOn list covering every marketplace
-#     named in plugin.json dependencies
+#     plugin entry sourcing the payload subtree; every plugin.json dependency
+#     is declared under bionic's own marketplace (same-marketplace, epic-17
+#     W3 S3 AC-7/AC-8) and no allowCrossMarketplaceDependenciesOn field
+#     survives now that nothing crosses marketplaces
 #   - LICENSE exists at repo root and contains "MIT License"
 #
 # S6 amendment (payload boundary): the plugin manifest moved from the repo root to
@@ -124,39 +125,41 @@ print('yes' if found else 'no')
   expect_eq "marketplace.json carries a bionic plugin entry sourcing ./payload" "yes" "$HAS_BIONIC_ENTRY"
 
   if [ -f "$PLUGIN_JSON" ]; then
-    MISSING_MARKETPLACES="$(python3 -c "
+    # RE-DERIVED (epic-17 W3 S3, AC-7/AC-8). What Section 2 pinned before: an
+    # equality check that allowCrossMarketplaceDependenciesOn named EXACTLY
+    # the marketplaces plugin.json's dependencies pointed at (F6,
+    # review-6axis.md) — the W2 model, where both deps were declared under
+    # marketplaces OTHER than bionic's own (claude-plugins-official,
+    # addy-agent-skills), so an explicit cross-marketplace trust grant was a
+    # real security boundary. S3 re-points both deps at marketplace "bionic"
+    # — the SAME marketplace that contains the requesting plugin — because a
+    # same-marketplace, unconstrained dependency is what the probe proved
+    # actually installs cleanly (record/epic-17-w3/probe-ac6-marketplace-
+    # entry.md); "cross-marketplace" no longer describes any declared
+    # dependency. What this pins NOW: no dependency names a marketplace other
+    # than "bionic" (the same-marketplace invariant AC-7 requires), and
+    # marketplace.json carries no allowCrossMarketplaceDependenciesOn field at
+    # all — a trust grant left in a public artifact for a mechanism no
+    # shipped dependency uses is the same residual-trust defect F6 named,
+    # just with the allow-set now empty by construction instead of drifted.
+    NON_BIONIC_MARKETPLACES="$(python3 -c "
 import json
 plugin = json.load(open('$PLUGIN_JSON'))
-mkt = json.load(open('$MARKETPLACE_JSON'))
-allow = set(mkt.get('allowCrossMarketplaceDependenciesOn', []))
 deps = plugin.get('dependencies', [])
-named = set()
-for dep in deps:
-    if isinstance(dep, dict) and dep.get('marketplace'):
-        named.add(dep['marketplace'])
-missing = sorted(named - allow)
-print(','.join(missing))
+named = sorted({dep['marketplace'] for dep in deps
+                if isinstance(dep, dict) and dep.get('marketplace') and dep['marketplace'] != 'bionic'})
+print(','.join(named))
 " 2>/dev/null)"
-    expect_eq "marketplace.json allowCrossMarketplaceDependenciesOn covers every dependency marketplace" "" "$MISSING_MARKETPLACES"
+    expect_eq "every plugin.json dependency is declared under bionic's own marketplace (no cross-marketplace deps)" \
+      "" "$NON_BIONIC_MARKETPLACES"
 
-    # F6 (review-6axis.md): the coverage check above pins only named ⊆ allow. A trust list
-    # in a public artifact must be pinned as EQUALITY — an unneeded marketplace added to the
-    # allowlist (named ⊉ allow, i.e. allow - named nonempty) grants a real dependency
-    # resolution trust that no shipped dependency requires, and must fail the suite too.
-    EXTRA_MARKETPLACES="$(python3 -c "
+    HAS_ALLOWLIST="$(python3 -c "
 import json
-plugin = json.load(open('$PLUGIN_JSON'))
-mkt = json.load(open('$MARKETPLACE_JSON'))
-allow = set(mkt.get('allowCrossMarketplaceDependenciesOn', []))
-deps = plugin.get('dependencies', [])
-named = set()
-for dep in deps:
-    if isinstance(dep, dict) and dep.get('marketplace'):
-        named.add(dep['marketplace'])
-extra = sorted(allow - named)
-print(','.join(extra))
+d = json.load(open('$MARKETPLACE_JSON'))
+print('yes' if 'allowCrossMarketplaceDependenciesOn' in d else 'no')
 " 2>/dev/null)"
-    expect_eq "marketplace.json allowCrossMarketplaceDependenciesOn names no marketplace beyond the dependency set" "" "$EXTRA_MARKETPLACES"
+    expect_eq "marketplace.json carries no allowCrossMarketplaceDependenciesOn field (no cross-marketplace deps to grant)" \
+      "no" "$HAS_ALLOWLIST"
   fi
 else
   echo "SKIP: remaining Section 2 checks (marketplace.json missing)"
