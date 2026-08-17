@@ -136,6 +136,25 @@ missing = sorted(named - allow)
 print(','.join(missing))
 " 2>/dev/null)"
     expect_eq "marketplace.json allowCrossMarketplaceDependenciesOn covers every dependency marketplace" "" "$MISSING_MARKETPLACES"
+
+    # F6 (review-6axis.md): the coverage check above pins only named ⊆ allow. A trust list
+    # in a public artifact must be pinned as EQUALITY — an unneeded marketplace added to the
+    # allowlist (named ⊉ allow, i.e. allow - named nonempty) grants a real dependency
+    # resolution trust that no shipped dependency requires, and must fail the suite too.
+    EXTRA_MARKETPLACES="$(python3 -c "
+import json
+plugin = json.load(open('$PLUGIN_JSON'))
+mkt = json.load(open('$MARKETPLACE_JSON'))
+allow = set(mkt.get('allowCrossMarketplaceDependenciesOn', []))
+deps = plugin.get('dependencies', [])
+named = set()
+for dep in deps:
+    if isinstance(dep, dict) and dep.get('marketplace'):
+        named.add(dep['marketplace'])
+extra = sorted(allow - named)
+print(','.join(extra))
+" 2>/dev/null)"
+    expect_eq "marketplace.json allowCrossMarketplaceDependenciesOn names no marketplace beyond the dependency set" "" "$EXTRA_MARKETPLACES"
   fi
 else
   echo "SKIP: remaining Section 2 checks (marketplace.json missing)"
