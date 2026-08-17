@@ -81,6 +81,11 @@ run "seam-resolution.test.sh" bash tests/seam-resolution.test.sh
 # payload/.claude-plugin/plugin.json, .claude-plugin/marketplace.json and two
 # hooks, so like the others it belongs to no single hook and stays hand-listed.
 run "version-ssot.test.sh" bash tests/version-ssot.test.sh
+# Payload libraries (epic-17 W3 S1): the dependency SSoT table in
+# payload/scripts/lib/deps.sh and the machine-fact functions in
+# payload/scripts/lib/detect.sh, driven against fixture roots and a fixture
+# PATH. Belongs to no single hook, so hand-listed like the rest.
+run "plugin-lib.test.sh" bash tests/plugin-lib.test.sh
 # Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
 # 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so
