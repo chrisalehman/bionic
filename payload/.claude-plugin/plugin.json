@@ -1,0 +1,13 @@
+{
+  "name": "bionic",
+  "version": "0.1.0",
+  "description": "Bionic — hooks, skills, and agent-orchestration guardrails for Claude Code.",
+  "author": {
+    "name": "Chris Lehman"
+  },
+  "license": "MIT",
+  "dependencies": [
+    { "name": "superpowers", "marketplace": "claude-plugins-official" },
+    { "name": "agent-skills", "marketplace": "addy-agent-skills" }
+  ]
+}

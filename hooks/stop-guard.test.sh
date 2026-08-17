@@ -42,9 +42,9 @@ ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
 no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; }
 
 expect_status()   { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected exit $2, got $3"; fi; }
-expect_contains() { if printf '%s' "$3" | grep -qF -- "$2"; then ok "$1"; else no "$1" "missing: $2"; fi; }
-expect_matches()  { if printf '%s' "$3" | grep -qE -- "$2"; then ok "$1"; else no "$1" "no match: $2"; fi; }
-expect_absent()   { if printf '%s' "$3" | grep -qF -- "$2"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
+expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
+expect_matches()  { if grep -qE -- "$2" <<<"$3"; then ok "$1"; else no "$1" "no match: $2"; fi; }
+expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
 expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
 # ONE line, counted rather than eyeballed: "one informational line" is the whole
 # of R3's promise about what a user-ordered stop costs the operator, and a
@@ -397,8 +397,12 @@ roster_row "$W4_REPO" "$SID_A" "quiet-reviewer" "aquiet-reviewer-deadbeefdeadbee
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "quiet-reviewer")"
 expect_status "active wave + no observation: REFUSED" 2 "$GUARD_ST"
 expect_contains "the refusal names the observation command" "stop-check.sh" "$GUARD_ERR"
-expect_contains "the fix command uses the INSTALL path, not a repo-relative one (A1)" \
-  "~/.claude/hooks/stop-check.sh" "$GUARD_ERR"
+# A1 asks for a command an operator can run from wherever they are standing. The gate used
+# to buy that with an installed-path literal; since epic-17 W1 S3 it buys it by resolving
+# hooks/stop-check.sh beside itself from "$0", which is absolute for the same reason and
+# stays correct in a plugin payload where ~/.claude/hooks/ no longer holds anything.
+expect_contains "the fix command uses the resolved INSTALL path, not a repo-relative one (A1)" \
+  "$HERE/stop-check.sh" "$GUARD_ERR"
 expect_absent "the fix command is not repo-relative" "bash hooks/stop-check.sh" "$GUARD_ERR"
 expect_contains "the refusal names the target as typed" "quiet-reviewer" "$GUARD_ERR"
 
