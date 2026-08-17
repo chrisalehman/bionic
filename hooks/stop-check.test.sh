@@ -16,11 +16,13 @@
 
 set -uo pipefail
 
-CHECK="$(cd "$(dirname "$0")" && pwd)/stop-check.sh"
+. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+
+CHECK="${BIONIC_HOOKS_DIR}/stop-check.sh"
 # The roster's WRITER. Section 8 reads rows; §8(g) drives this script to produce
 # one, because a hand-written row cannot prove the reader is reading a field the
 # writer can actually emit (Step-6 six-axis review, axis-3 FAIL).
-WRITER="$(cd "$(dirname "$0")" && pwd)/dispatch-preflight.sh"
+WRITER="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
 PASS=0
 FAIL=0
 TOTAL=0

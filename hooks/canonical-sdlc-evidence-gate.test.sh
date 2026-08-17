@@ -16,7 +16,9 @@
 
 set -euo pipefail
 
-HOOK="$(cd "$(dirname "$0")" && pwd)/canonical-sdlc-evidence-gate.sh"
+. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+
+HOOK="${BIONIC_HOOKS_DIR}/canonical-sdlc-evidence-gate.sh"
 PASS=0
 FAIL=0
 TOTAL=0

@@ -18,8 +18,10 @@
 
 set -uo pipefail
 
-GATE="$(cd "$(dirname "$0")" && pwd)/dispatch-preflight.sh"
-PROBE_SRC="$(cd "$(dirname "$0")" && pwd)/preflight-probe.sh"
+. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+
+GATE="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
+PROBE_SRC="${BIONIC_HOOKS_DIR}/preflight-probe.sh"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/dispatch-preflight-test.XXXXXX")" && pwd)"
 BG_PIDS=""
