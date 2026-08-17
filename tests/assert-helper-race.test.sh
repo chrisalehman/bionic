@@ -42,7 +42,9 @@
 
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+. "$(dirname "$0")/lib/resolve-roots.sh"
+
+REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 cd "$REPO_ROOT" || exit 1
 
 PASS=0; FAIL=0; TOTAL=0
@@ -64,6 +66,11 @@ hooks/stop-check.test.sh
 hooks/stop-guard.test.sh
 hooks/stop-orders.test.sh
 "
+# tests/seam-resolution.test.sh also sets pipefail and defines expect_contains/
+# expect_absent, but is pipe-free by construction (containment via `case`, never
+# `printf | grep -q`) — nothing here to pin. Named rather than silently omitted
+# so this list stays an enumeration, not a judgment call (epic-17-w2 S1 concern,
+# resolved by S2).
 
 # The haystack: 512 KiB, eight times the 64 KiB pipe buffer, with the needle in
 # the FIRST line. Under the racy idiom grep matches on its first read() and

@@ -17,8 +17,10 @@
 
 set -uo pipefail
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
-BOOTSTRAP="${REPO}/claude-bootstrap.sh"
+. "$(dirname "$0")/lib/resolve-roots.sh"
+
+REPO="${BIONIC_SCRIPTS_DIR}"
+BOOTSTRAP="${BIONIC_SCRIPTS_DIR}/claude-bootstrap.sh"
 SBX="$(mktemp -d)"
 BIN="${SBX}/bin"; LOG="${SBX}/calls.log"; CODE="${SBX}/code.sh"
 mkdir -p "$BIN"; : > "$LOG"
@@ -984,7 +986,7 @@ for h in dispatch-preflight.sh preflight-probe.sh stop-check.sh stop-guard.sh ex
   installed="${HOOKSBX}/home/.claude/hooks/${h}"
   [ -f "$installed" ] && ok "AC-7: ${h} installed" || no "AC-7: ${h} not installed"
   [ -x "$installed" ] && ok "AC-7: ${h} is executable" || no "AC-7: ${h} not executable"
-  diff -q "${REPO}/hooks/${h}" "$installed" >/dev/null 2>&1 \
+  diff -q "${BIONIC_HOOKS_DIR}/${h}" "$installed" >/dev/null 2>&1 \
     && ok "AC-7: ${h} byte-identical to repo copy" || no "AC-7: ${h} differs from repo copy"
 done
 
@@ -1007,7 +1009,7 @@ _matcher_has_cmd() {  # <event> <matcher> <cmd>
     '(.hooks[$ev] // []) | any(.matcher == $m and (.hooks | any(.command == $c)))' \
     "$HOOKS_SETTINGS" >/dev/null
 }
-SKILL_MD="${REPO}/skills/canonical-sdlc/SKILL.md"
+SKILL_MD="${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
 _skill_frontmatter_has() {  # <event> <matcher> <cmd>
   awk -v want_event="$1" -v want_matcher="$2" -v want_cmd="$3" '
     /^hooks:$/ { active=1; next }
@@ -1122,7 +1124,7 @@ source "$SKILLS_CODE"
 
 SKSBX="${SBX}/skills-sandbox"
 mkdir -p "${SKSBX}/home" "${SKSBX}/src/skills"
-cp -R "${REPO}/skills/canonical-sdlc" "${SKSBX}/src/skills/canonical-sdlc"
+cp -R "${BIONIC_SKILLS_DIR}/canonical-sdlc" "${SKSBX}/src/skills/canonical-sdlc"
 
 _install_skill_into() {  # <src-root> <home-root> <skill-name>
   ( export SCRIPT_DIR="$1" HOME="$2"; do_install_local_skill "$3" ) >/dev/null 2>&1

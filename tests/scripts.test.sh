@@ -8,10 +8,12 @@
 
 set -euo pipefail
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
+. "$(dirname "$0")/lib/resolve-roots.sh"
+
+REPO="${BIONIC_SCRIPTS_DIR}"
 CONFIG="${REPO}/claude-config.txt"
-BOOTSTRAP="${REPO}/claude-bootstrap.sh"
-RESET="${REPO}/claude-reset.sh"
+BOOTSTRAP="${BIONIC_SCRIPTS_DIR}/claude-bootstrap.sh"
+RESET="${BIONIC_SCRIPTS_DIR}/claude-reset.sh"
 
 PASS=0
 FAIL=0
@@ -356,7 +358,7 @@ expect_eq "all type fields are known types" "" "$_unknown_types"
 _missing_skills=""
 _check_local_skill_exists() {
   local name="$1"
-  if [ ! -f "${REPO}/skills/${name}/SKILL.md" ]; then
+  if [ ! -f "${BIONIC_SKILLS_DIR}/${name}/SKILL.md" ]; then
     _missing_skills="${_missing_skills}${name} "
   fi
 }
@@ -664,13 +666,13 @@ echo "=== Section 4: Hook file consistency ==="
 
 # 4a: Every non-test .sh in hooks/ has a matching .test.sh
 _hooks_missing_tests=""
-for hook in "${REPO}/hooks/"*.sh; do
+for hook in "${BIONIC_HOOKS_DIR}/"*.sh; do
   [ -f "$hook" ] || continue
   name="$(basename "$hook")"
   if echo "$name" | grep -q '\.test\.sh$'; then
     continue
   fi
-  testfile="${REPO}/hooks/${name%.sh}.test.sh"
+  testfile="${BIONIC_HOOKS_DIR}/${name%.sh}.test.sh"
   if [ ! -f "$testfile" ]; then
     _hooks_missing_tests="${_hooks_missing_tests}${name} "
   fi
@@ -679,11 +681,11 @@ expect_eq "every hook .sh has a matching .test.sh" "" "$_hooks_missing_tests"
 
 # 4b: Every .test.sh in hooks/ has a corresponding non-test hook
 _tests_missing_hooks=""
-for test in "${REPO}/hooks/"*.test.sh; do
+for test in "${BIONIC_HOOKS_DIR}/"*.test.sh; do
   [ -f "$test" ] || continue
   name="$(basename "$test")"
   hookname="${name%.test.sh}.sh"
-  if [ ! -f "${REPO}/hooks/${hookname}" ]; then
+  if [ ! -f "${BIONIC_HOOKS_DIR}/${hookname}" ]; then
     _tests_missing_hooks="${_tests_missing_hooks}${name} "
   fi
 done
@@ -697,7 +699,7 @@ while IFS= read -r line; do
     hookfile="$(echo "$line" | grep -oE 'hooks/[^"]+\.sh' | head -1)"
     if [ -n "$hookfile" ]; then
       basename_hook="$(basename "$hookfile")"
-      if [ ! -f "${REPO}/hooks/${basename_hook}" ]; then
+      if [ ! -f "${BIONIC_HOOKS_DIR}/${basename_hook}" ]; then
         _missing_managed_hooks="${_missing_managed_hooks}${basename_hook} "
       fi
     fi
@@ -733,7 +735,7 @@ expect_true "skills/canonical-sdlc/SKILL.md frontmatter registers canonical-sdlc
       if (event == "PreToolUse" && matcher == "Bash" && cmd ~ /canonical-sdlc-evidence-gate\.sh$/) found=1
     }
     END { exit !found }
-  ' "${REPO}/skills/canonical-sdlc/SKILL.md"
+  ' "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
 
 # 4i: farm-out-reminder.sh moved out of MANAGED_HOOKS into skills/canonical-sdlc/
 # SKILL.md's frontmatter hooks: block (session-20260815-landing-supervision T5,
@@ -757,11 +759,11 @@ expect_true "skills/canonical-sdlc/SKILL.md frontmatter registers farm-out-remin
       if (event == "PreToolUse" && matcher == "Bash" && cmd ~ /farm-out-reminder\.sh$/) found=1
     }
     END { exit !found }
-  ' "${REPO}/skills/canonical-sdlc/SKILL.md"
+  ' "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
 
 # 4m: hooks/ dir contains at least one non-test hook
 _hook_count=0
-for hook in "${REPO}/hooks/"*.sh; do
+for hook in "${BIONIC_HOOKS_DIR}/"*.sh; do
   [ -f "$hook" ] || continue
   if ! echo "$(basename "$hook")" | grep -q '\.test\.sh$'; then
     _hook_count=$((_hook_count + 1))
@@ -771,8 +773,8 @@ expect_true "hooks/ contains at least one non-test hook" [ "$_hook_count" -gt 0 
 
 # 4p: both canonical-sdlc hooks pin exactly one supported version and neither
 # carries a version-dispatch chain.
-_egate="${REPO}/hooks/canonical-sdlc-evidence-gate.sh"
-_gskill="${REPO}/hooks/canonical-sdlc-governing-skill.sh"
+_egate="${BIONIC_HOOKS_DIR}/canonical-sdlc-evidence-gate.sh"
+_gskill="${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh"
 expect_true "evidence-gate hook pins SUPPORTED_SDLC_VERSION" \
   grep -q 'SUPPORTED_SDLC_VERSION=13' "$_egate"
 expect_true "governing-skill hook pins SUPPORTED_SDLC_VERSION" \
