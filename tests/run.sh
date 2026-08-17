@@ -107,6 +107,11 @@ run "setup.test.sh" bash tests/setup.test.sh
 # whole fixture MACHINES — payload tree, plugin registry, settings, rc, caches — with a
 # no-mutation wall (sha256 + path enumeration, before and after) as its axis test.
 run "doctor.test.sh" bash tests/doctor.test.sh
+# Footprint removal (epic-17 W3 S8, spec AC-4): payload/scripts/remove.sh driven
+# against fixture machines — the never-list wall, the per-item consent gates, and
+# the standalone door (the script alone, no payload libraries beside it).
+# Hand-listed like every suite outside hooks/.
+run "remove.test.sh" bash tests/remove.test.sh
 # Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
 # 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so
