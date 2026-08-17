@@ -103,6 +103,10 @@ run "command-format.test.sh" bash tests/command-format.test.sh
 # fixture bytes as the evidence for every consented, declined and idempotent claim.
 # Hand-listed like every suite outside hooks/.
 run "setup.test.sh" bash tests/setup.test.sh
+# The read-only diagnosis (epic-17 W3 S7, spec AC-3): payload/scripts/doctor.sh driven over
+# whole fixture MACHINES — payload tree, plugin registry, settings, rc, caches — with a
+# no-mutation wall (sha256 + path enumeration, before and after) as its axis test.
+run "doctor.test.sh" bash tests/doctor.test.sh
 # Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
 # 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so
