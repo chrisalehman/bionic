@@ -31,7 +31,9 @@
 
 set -uo pipefail
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
+. "$(dirname "$0")/lib/resolve-roots.sh"
+
+REPO="${BIONIC_SCRIPTS_DIR}"
 G=/usr/bin/grep   # the shell `grep` on this machine is ugrep and skips/mis-reports; see
                   # .claude/rules — every absence claim here goes through the real grep.
 
@@ -55,7 +57,7 @@ echo "=== A — skills/canonical-sdlc/SKILL.md: the registration channel ==="
 # in it is registered by the plugin mechanism, which is exactly where ${CLAUDE_PLUGIN_ROOT}
 # is substituted.
 
-SKILL="${REPO}/skills/canonical-sdlc/SKILL.md"
+SKILL="${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
 
 # The frontmatter block, bounded generously. The eleven commands live at :9–:56 today; the
 # bound is 80 so a line-shifting edit inside the block still gets scanned rather than
@@ -233,7 +235,7 @@ expect_line "stop-orders' usage names its own resolved path" \
 # constant referencing an unset variable under `set -u` would abort the hook.
 for s in dispatch-preflight stop-guard session-sweeper session-poker \
          preflight-probe stop-check stop-orders; do
-  if $G -qF -- 'HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"' "${REPO}/hooks/${s}.sh"; then
+  if $G -qF -- 'HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"' "${BIONIC_HOOKS_DIR}/${s}.sh"; then
     ok "  ${s}.sh derives HOOK_DIR from \$0"
   else
     no "  ${s}.sh derives HOOK_DIR from \$0"
@@ -296,7 +298,7 @@ done
 # claude-bootstrap.sh is out of this epic's W1 scope entirely — it stays the live install
 # mechanism until W5, and its six MANAGED_HOOKS literals must still spell the directory it
 # installs to. This is the pin that fails loudly if a later sweep gets mechanical.
-BOOT="${REPO}/claude-bootstrap.sh"
+BOOT="${BIONIC_SCRIPTS_DIR}/claude-bootstrap.sh"
 N_MANAGED=$($G -cF -- '~/.claude/hooks/' "$BOOT")
 if [ "$N_MANAGED" -ge 6 ]; then
   ok "claude-bootstrap.sh still installs to ~/.claude/hooks/ (${N_MANAGED} references)"

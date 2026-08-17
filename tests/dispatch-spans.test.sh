@@ -17,8 +17,10 @@
 
 set -uo pipefail
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
-SKILL="${REPO}/skills/canonical-sdlc/SKILL.md"
+. "$(dirname "$0")/lib/resolve-roots.sh"
+
+REPO="${BIONIC_SCRIPTS_DIR}"
+SKILL="${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
 
 PASS=0
 FAIL=0

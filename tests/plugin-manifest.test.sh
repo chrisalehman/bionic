@@ -18,7 +18,9 @@
 
 set -uo pipefail
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
+. "$(dirname "$0")/lib/resolve-roots.sh"
+
+REPO="${BIONIC_SCRIPTS_DIR}"
 PLUGIN_JSON="${REPO}/payload/.claude-plugin/plugin.json"
 MARKETPLACE_JSON="${REPO}/.claude-plugin/marketplace.json"
 LICENSE_FILE="${REPO}/LICENSE"

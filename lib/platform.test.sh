@@ -8,7 +8,9 @@
 
 set -euo pipefail
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
+. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+
+REPO="${BIONIC_SCRIPTS_DIR}"
 
 PASS=0
 FAIL=0
@@ -56,7 +58,7 @@ expect_eq() {
 
 # ---------- source the library ----------
 
-source "${REPO}/lib/platform.sh"
+source "${BIONIC_SCRIPTS_DIR}/lib/platform.sh"
 
 # ============================================================
 # SECTION 1: OS detection
@@ -184,7 +186,7 @@ echo "=== Section 6: Unsupported OS handling ==="
 # 6a: Sourcing with a mocked unsupported uname should fail
 # We can't easily mock uname, but we can verify the case statement
 # covers exactly Darwin and Linux by checking the source
-expect_true "platform.sh has unsupported OS exit" grep -q "Unsupported OS" "${REPO}/lib/platform.sh"
+expect_true "platform.sh has unsupported OS exit" grep -q "Unsupported OS" "${BIONIC_SCRIPTS_DIR}/lib/platform.sh"
 
 # ============================================================
 # SECTION 7: Library is purely declarative
@@ -194,12 +196,12 @@ echo ""
 echo "=== Section 7: Library properties ==="
 
 # 7a: platform.sh does not contain install/apt/brew-install commands
-expect_false "platform.sh does not run apt install" grep -q "apt install\|apt-get install" "${REPO}/lib/platform.sh"
-expect_false "platform.sh does not run brew install" grep -q "brew install" "${REPO}/lib/platform.sh"
+expect_false "platform.sh does not run apt install" grep -q "apt install\|apt-get install" "${BIONIC_SCRIPTS_DIR}/lib/platform.sh"
+expect_false "platform.sh does not run brew install" grep -q "brew install" "${BIONIC_SCRIPTS_DIR}/lib/platform.sh"
 
 # 7b: Both bootstrap and reset source the library
-expect_true "bootstrap sources lib/platform.sh" grep -q 'source.*lib/platform\.sh' "${REPO}/claude-bootstrap.sh"
-expect_true "reset sources lib/platform.sh" grep -q 'source.*lib/platform\.sh' "${REPO}/claude-reset.sh"
+expect_true "bootstrap sources lib/platform.sh" grep -q 'source.*lib/platform\.sh' "${BIONIC_SCRIPTS_DIR}/claude-bootstrap.sh"
+expect_true "reset sources lib/platform.sh" grep -q 'source.*lib/platform\.sh' "${BIONIC_SCRIPTS_DIR}/claude-reset.sh"
 
 # ============================================================
 # Results

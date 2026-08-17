@@ -24,16 +24,18 @@
 
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+. "$(dirname "$0")/lib/resolve-roots.sh"
+
+REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 # Overridable so the table can be driven against a MUTATED COPY without the
 # shipped file ever being modified — §9's mutation-and-restore proof, repeatable
 # by hand: W1R_PARTY_SG=/tmp/mutant.sh bash tests/fail-direction-table.test.sh
-START_GATE="${W1R_PARTY_DP:-$REPO_ROOT/hooks/dispatch-preflight.sh}"
-STOP_GATE="${W1R_PARTY_SG:-$REPO_ROOT/hooks/stop-guard.sh}"
+START_GATE="${W1R_PARTY_DP:-$BIONIC_HOOKS_DIR/dispatch-preflight.sh}"
+STOP_GATE="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop-guard.sh}"
 # The producer and the writer that stand behind the stop gate's positive pair.
-OBSERVER="$REPO_ROOT/hooks/stop-check.sh"
-RECORDER="${W1R_PARTY_ER:-$REPO_ROOT/hooks/execution-recorder.sh}"
-PROBE="${W1R_PARTY_PROBE:-$REPO_ROOT/hooks/preflight-probe.sh}"
+OBSERVER="$BIONIC_HOOKS_DIR/stop-check.sh"
+RECORDER="${W1R_PARTY_ER:-$BIONIC_HOOKS_DIR/execution-recorder.sh}"
+PROBE="${W1R_PARTY_PROBE:-$BIONIC_HOOKS_DIR/preflight-probe.sh}"
 DESIGN="$REPO_ROOT/design/orchestrator-subagent-coordination.md"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/w1r-faildir.XXXXXX")" && pwd -P)"
@@ -491,14 +493,14 @@ drive stop:no-observation
 # a refusal name a way forward runnable from any cwd is unchanged, and it survives a plugin
 # payload where ~/.claude/hooks/ holds nothing.
 expect_contains "every stop refusal names the observation command" \
-  "$REPO_ROOT/hooks/stop-check.sh" "$DRV_ERR"
+  "$BIONIC_HOOKS_DIR/stop-check.sh" "$DRV_ERR"
 # R5: start:unattested no longer refuses (it auto-probes and passes silently-with-
 # announce, per the table above) — start:probe-refuses is now the row that carries
 # a genuine start-gate refusal, so it is what exercises this "every refusal names
 # the fix" claim.
 drive start:probe-refuses
 expect_contains "every start refusal names the environment check" \
-  "$REPO_ROOT/hooks/preflight-probe.sh" "$DRV_ERR"
+  "$BIONIC_HOOKS_DIR/preflight-probe.sh" "$DRV_ERR"
 
 # ============================================================
 echo ""

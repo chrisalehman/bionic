@@ -18,9 +18,11 @@
 
 set -uo pipefail
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
-BOOTSTRAP="${REPO}/claude-bootstrap.sh"
-HOOKS_JSON="${REPO}/hooks/hooks.json"
+. "$(dirname "$0")/lib/resolve-roots.sh"
+
+REPO="${BIONIC_SCRIPTS_DIR}"
+BOOTSTRAP="${BIONIC_SCRIPTS_DIR}/claude-bootstrap.sh"
+HOOKS_JSON="${BIONIC_HOOKS_DIR}/hooks.json"
 
 PASS=0
 FAIL=0

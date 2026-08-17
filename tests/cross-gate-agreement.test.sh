@@ -43,27 +43,29 @@
 
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+. "$(dirname "$0")/lib/resolve-roots.sh"
+
+REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 
 # The four parties. Overridable so the suite can be driven against a MUTATED
 # COPY of any one of them without the shipped file ever being modified — that
 # substitution is how §9's mutation-and-restore proof is taken here, and how a
 # reviewer can re-take it by hand:
 #   W1R_PARTY_DP=/tmp/mutant.sh bash tests/cross-gate-agreement.test.sh
-PARTY_DP="${W1R_PARTY_DP:-$REPO_ROOT/hooks/dispatch-preflight.sh}"
-PARTY_SG="${W1R_PARTY_SG:-$REPO_ROOT/hooks/stop-guard.sh}"
-PARTY_EG="${W1R_PARTY_EG:-$REPO_ROOT/hooks/canonical-sdlc-evidence-gate.sh}"
+PARTY_DP="${W1R_PARTY_DP:-$BIONIC_HOOKS_DIR/dispatch-preflight.sh}"
+PARTY_SG="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop-guard.sh}"
+PARTY_EG="${W1R_PARTY_EG:-$BIONIC_HOOKS_DIR/canonical-sdlc-evidence-gate.sh}"
 # The recorder moved out of the stop gate at slice 4/4: observations are written
 # post-execution by their own script, from the producer's own printed output.
-PARTY_ER="${W1R_PARTY_ER:-$REPO_ROOT/hooks/execution-recorder.sh}"
+PARTY_ER="${W1R_PARTY_ER:-$BIONIC_HOOKS_DIR/execution-recorder.sh}"
 
-PROBE="$REPO_ROOT/hooks/preflight-probe.sh"
-OBSERVE="$REPO_ROOT/hooks/stop-check.sh"
-SWEEPER="$REPO_ROOT/hooks/session-sweeper.sh"
+PROBE="$BIONIC_HOOKS_DIR/preflight-probe.sh"
+OBSERVE="$BIONIC_HOOKS_DIR/stop-check.sh"
+SWEEPER="$BIONIC_HOOKS_DIR/session-sweeper.sh"
 # The landing gate (epic-16 wave-01) is a fifth party and an overridable one for
 # the same reason the four above are: §J drives a MUTATED COPY of it to prove the
 # verdict/gate battery discriminates, and the shipped file is never touched.
-PARTY_LG="${W1R_PARTY_LG:-$REPO_ROOT/hooks/landing-gate.sh}"
+PARTY_LG="${W1R_PARTY_LG:-$BIONIC_HOOKS_DIR/landing-gate.sh}"
 # §J also drives a mutated copy of the SWEEPER, to prove the opposite direction:
 # a change to the predicate moves both answers rather than splitting them.
 PARTY_SW="$SWEEPER"
@@ -2601,9 +2603,9 @@ echo "=== L — the WIRING: registration is three-sided (frontmatter, absence, p
 # name the wrong shape, a moved script could linger behind in MANAGED_HOOKS (firing
 # in EVERY session, defeating R1), or a script that should stay global could get
 # swept out by mistake.
-BOOTSTRAP_SRC=$(cat "$REPO_ROOT/claude-bootstrap.sh")
-SKILL_SRC="$REPO_ROOT/skills/canonical-sdlc/SKILL.md"
-MANAGED_HOOKS_SRC=$(awk '/^MANAGED_HOOKS=\(/{f=1} f{print} f&&/^\)$/{exit}' "$REPO_ROOT/claude-bootstrap.sh")
+BOOTSTRAP_SRC=$(cat "$BIONIC_SCRIPTS_DIR/claude-bootstrap.sh")
+SKILL_SRC="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
+MANAGED_HOOKS_SRC=$(awk '/^MANAGED_HOOKS=\(/{f=1} f{print} f&&/^\)$/{exit}' "$BIONIC_SCRIPTS_DIR/claude-bootstrap.sh")
 
 # the shell's bare `grep` is ugrep with ignore-files active and lies about absence
 # (reports 0 hits inside paths it silently skips) — every absence check below goes
@@ -2779,8 +2781,8 @@ expect_eq "…and exactly six entries total — two unconditional, four guarded"
 LSBX="$SANDBOX/wiring"
 mkdir -p "$LSBX"
 LCODE="$LSBX/wire.sh"
-awk '/^wire_managed_hooks\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$REPO_ROOT/claude-bootstrap.sh" > "$LCODE"
-awk '/^MANAGED_HOOKS=\(/{f=1} f{print} f&&/^\)$/{exit}' "$REPO_ROOT/claude-bootstrap.sh" >> "$LCODE"
+awk '/^wire_managed_hooks\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$BIONIC_SCRIPTS_DIR/claude-bootstrap.sh" > "$LCODE"
+awk '/^MANAGED_HOOKS=\(/{f=1} f{print} f&&/^\)$/{exit}' "$BIONIC_SCRIPTS_DIR/claude-bootstrap.sh" >> "$LCODE"
 LSETTINGS="$LSBX/settings.json"
 echo '{}' > "$LSETTINGS"
 # shellcheck disable=SC1090
@@ -2811,7 +2813,7 @@ expect_eq "EVERY registered hook carries a timeout — the no-matcher branch inc
 # main-thread refusal prints twice and a dispatch journals twice), or the two channels
 # could drift onto different events (a wall covering the main thread on one event and
 # agent contexts on another, which reads as coverage and is not).
-ACG_PATH="$REPO_ROOT/hooks/agent-context-guard.sh"
+ACG_PATH="$BIONIC_HOOKS_DIR/agent-context-guard.sh"
 expect_eq "the partition guard exists as a hook script" "yes" \
   "$([ -f "$ACG_PATH" ] && echo yes || echo no)"
 expect_contains "MANAGED_HOOKS registers the DISPATCH wall for agent contexts, behind the guard" \
@@ -2933,9 +2935,9 @@ echo "=== M — THE ACK, and the stop order: ONE owner, three consumers (epic-16
 # the window is the same number, and that all three answer the same about one ledger the
 # real writer wrote — including when the single owner is mutated to lie (§M.5).
 
-SG_M="$REPO_ROOT/hooks/stop-guard.sh"
-LG_M="$REPO_ROOT/hooks/landing-gate.sh"
-SO_M="$REPO_ROOT/hooks/stop-orders.sh"
+SG_M="$BIONIC_HOOKS_DIR/stop-guard.sh"
+LG_M="$BIONIC_HOOKS_DIR/landing-gate.sh"
+SO_M="$BIONIC_HOOKS_DIR/stop-orders.sh"
 
 # --- M.1 ONE OWNER: no consumer reads the ledger, in any of the three ways it could ---
 #
@@ -3147,13 +3149,13 @@ echo "=== N — the wave-02 facts: one root, one vocabulary, one launch referenc
 # a session is armed by stating a roster under the project root, and a guard that rooted a
 # worktree at its own tree would answer "unarmed" for every agent context inside a worktree
 # of an armed session — a wall that goes quiet exactly where it was added to bind.
-DP_N="$REPO_ROOT/hooks/dispatch-preflight.sh"
-PB_N="$REPO_ROOT/hooks/preflight-probe.sh"
-GS_N="$REPO_ROOT/hooks/canonical-sdlc-governing-skill.sh"
-EG_N="$REPO_ROOT/hooks/canonical-sdlc-evidence-gate.sh"
-SP_N="$REPO_ROOT/hooks/session-poker.sh"
-SO_N="$REPO_ROOT/hooks/stop-orders.sh"
-ACG_N="$REPO_ROOT/hooks/agent-context-guard.sh"
+DP_N="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
+PB_N="$BIONIC_HOOKS_DIR/preflight-probe.sh"
+GS_N="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
+EG_N="$BIONIC_HOOKS_DIR/canonical-sdlc-evidence-gate.sh"
+SP_N="$BIONIC_HOOKS_DIR/session-poker.sh"
+SO_N="$BIONIC_HOOKS_DIR/stop-orders.sh"
+ACG_N="$BIONIC_HOOKS_DIR/agent-context-guard.sh"
 
 expect_eq "the root resolver extracts at all (this section is not vacuous)" "yes" \
   "$([ -n "$(fn_body "$GS_N" resolve_project_root)" ] && echo yes || echo no)"
@@ -3307,7 +3309,7 @@ N_SRC_VALUES=$(grep -oE '^[[:space:]]*C_SOURCE="[a-z]*"' "$DP_N" \
   | sed -E 's/.*"([a-z]*)"/\1/' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/ $//')
 expect_eq "the writer's vocabulary is one word" "declared" "$N_SRC_VALUES"
 expect_eq "…and the sweeper is the only script that reads the field" "1" \
-  "$(grep -rlF 'line_field "$row" source' "$REPO_ROOT/hooks" | grep -c .)"
+  "$(grep -rlF 'line_field "$row" source' "$BIONIC_HOOKS_DIR" | grep -c .)"
 expect_eq "…reading it exactly once" "1" "$(grep -cF 'line_field "$row" source' "$SWEEPER")"
 
 # Driven, not just grepped: three briefs, three routes to a path, and what the writer does with
@@ -3419,7 +3421,7 @@ n_row_keys() {  # <file> -> the keys the roster ROW template emits, in order
 N_KEYS=$(n_row_keys "$DP_N")
 expect_contains "the writer's row template carries launched_at at all" "launched_at" "$N_KEYS"
 expect_contains "…and the recorder's immutability helper scans for that exact spelling" \
-  "launched_at" "$(fn_body "$REPO_ROOT/hooks/execution-recorder.sh" prior_launch_for_agent)"
+  "launched_at" "$(fn_body "$BIONIC_HOOKS_DIR/execution-recorder.sh" prior_launch_for_agent)"
 expect_contains "…and the verdict dates its staleness conjunct against it" \
   'line_field "$row" launched_at' "$(cat "$SWEEPER")"
 # Proven loud by mutation: rename the key at the writer and the first assertion above is the
@@ -3537,8 +3539,8 @@ expect_eq "…and AMBIGUOUS is the state the landing gate passes, so R6 still ho
 N_MUT_ER="$SANDBOX/fx/unpinned-recorder.sh"
 awk '{ if (index($0, "PRIOR_LAUNCH=$(prior_launch_for_agent") > 0)
          sub(/prior_launch_for_agent/, "true prior_launch_for_agent")
-       print }' "$REPO_ROOT/hooks/execution-recorder.sh" > "$N_MUT_ER"
-if cmp -s "$REPO_ROOT/hooks/execution-recorder.sh" "$N_MUT_ER"; then
+       print }' "$BIONIC_HOOKS_DIR/execution-recorder.sh" > "$N_MUT_ER"
+if cmp -s "$BIONIC_HOOKS_DIR/execution-recorder.sh" "$N_MUT_ER"; then
   no "the launch-pin mutation applies to execution-recorder.sh" \
      "the mutation target matched nothing — the code moved and this proof is vacuous"
 else
@@ -3573,7 +3575,7 @@ echo "=== O — session-poker's copied primitives, CODE-identical (6-axis D-1) =
 # the EXECUTABLE TEXT, so that is what is compared — epic-16 w2 Step-6 remediation R3, and
 # the two header comments this closes (session-poker.sh:84-88, :109-111) now say exactly
 # this: code-identical, not byte-identical (R-3).
-SPO="$REPO_ROOT/hooks/session-poker.sh"
+SPO="$BIONIC_HOOKS_DIR/session-poker.sh"
 
 fn_code() {  # <file> <function name> -> fn_body with pure-comment lines stripped too
   fn_body "$1" "$2" | grep -v '^#'
@@ -3618,8 +3620,8 @@ echo "=== P — the three roster folds agree that the LATER row wins (ap review 
 # never touched. A mutant copy must sit in a directory that also carries session-sweeper.sh,
 # since both scripts resolve it as a sibling:
 #   W2_PARTY_ORD=/tmp/mut/stop-orders.sh bash tests/cross-gate-agreement.test.sh
-PORD="${W2_PARTY_ORD:-$REPO_ROOT/hooks/stop-orders.sh}"
-PPOKE="${W2_PARTY_POKE:-$REPO_ROOT/hooks/session-poker.sh}"
+PORD="${W2_PARTY_ORD:-$BIONIC_HOOKS_DIR/stop-orders.sh}"
+PPOKE="${W2_PARTY_POKE:-$BIONIC_HOOKS_DIR/session-poker.sh}"
 PREPO=$(new_repo "fold-agreement")
 mkdir -p "$PREPO/.bionic/tmp" "$PREPO/.bionic/docs/record"
 PROSTER="$PREPO/.bionic/tmp/roster-$SID_A.state"
