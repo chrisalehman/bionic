@@ -37,12 +37,14 @@
 
 set -uo pipefail
 
+. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+
 # Overridable so this suite can be driven against a MUTATED COPY of the sweeper without the
 # shipped file ever being modified — the same substitution
 # tests/cross-gate-agreement.test.sh offers for its parties, and the way to take RED
 # evidence for any predicate case without editing what ships:
 #   W4_SWEEPER_UNDER_TEST=/tmp/mutant.sh bash hooks/session-sweeper.test.sh
-SWEEPER="${W4_SWEEPER_UNDER_TEST:-$(cd "$(dirname "$0")" && pwd)/session-sweeper.sh}"
+SWEEPER="${W4_SWEEPER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-sweeper.sh}"
 TMPROOT="$(mktemp -d)"
 PASS=0; FAIL=0; TOTAL=0
 BG_PIDS=""

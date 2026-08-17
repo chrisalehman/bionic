@@ -22,7 +22,9 @@
 
 set -uo pipefail
 
-HERE="$(cd "$(dirname "$0")" && pwd)"
+. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+
+HERE="${BIONIC_HOOKS_DIR}"
 GUARD="$HERE/stop-guard.sh"
 RECORDER="$HERE/execution-recorder.sh"
 OBSERVE="$HERE/stop-check.sh"

@@ -10,7 +10,9 @@
 #
 # Usage: bash hooks/farm-out-reminder.test.sh
 set -uo pipefail
-HOOK="$(cd "$(dirname "$0")" && pwd)/farm-out-reminder.sh"
+
+. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+HOOK="${BIONIC_HOOKS_DIR}/farm-out-reminder.sh"
 PASS=0; FAIL=0; TOTAL=0
 pass() { PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); }
 fail() { FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); echo "FAIL: $1" >&2; }

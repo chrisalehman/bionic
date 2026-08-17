@@ -11,9 +11,11 @@
 
 set -uo pipefail
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
-SKILL="${REPO}/skills/canonical-sdlc/SKILL.md"
-RULES="${REPO}/skills/canonical-sdlc/operational-rules.md"
+. "$(dirname "$0")/lib/resolve-roots.sh"
+
+REPO="${BIONIC_SCRIPTS_DIR}"
+SKILL="${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
+RULES="${BIONIC_SKILLS_DIR}/canonical-sdlc/operational-rules.md"
 README="${REPO}/README.md"
 
 PASS=0
@@ -230,7 +232,7 @@ echo "=== Section 5: lifecycle diagram pins ==="
 # and the version-stamped title directly against the raw JSON. The file is
 # plain JSON text; each label's newline is the literal two-character sequence
 # backslash-n, not an actual line break, so grep -F matches it as written here.
-DIAGRAM="${REPO}/skills/canonical-sdlc/diagrams/lifecycle.excalidraw"
+DIAGRAM="${BIONIC_SKILLS_DIR}/canonical-sdlc/diagrams/lifecycle.excalidraw"
 
 expect_pin_in_file "lifecycle.excalidraw pin: '1\\nScope' label" \
   '1\nScope' "$DIAGRAM"

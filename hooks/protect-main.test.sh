@@ -8,7 +8,9 @@
 
 set -euo pipefail
 
-HOOK="$(cd "$(dirname "$0")" && pwd)/protect-main.sh"
+. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+
+HOOK="${BIONIC_HOOKS_DIR}/protect-main.sh"
 PASS=0
 FAIL=0
 TOTAL=0

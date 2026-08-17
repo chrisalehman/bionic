@@ -16,9 +16,11 @@
 
 set -uo pipefail
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
+. "$(dirname "$0")/lib/resolve-roots.sh"
+
+REPO="${BIONIC_SCRIPTS_DIR}"
 AGENTS="$REPO/agents"
-SKILL="$REPO/skills/canonical-sdlc/SKILL.md"
+SKILL="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 PASS=0; FAIL=0
