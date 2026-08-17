@@ -86,6 +86,12 @@ run "version-ssot.test.sh" bash tests/version-ssot.test.sh
 # payload/scripts/lib/detect.sh, driven against fixture roots and a fixture
 # PATH. Belongs to no single hook, so hand-listed like the rest.
 run "plugin-lib.test.sh" bash tests/plugin-lib.test.sh
+# The worktree contract (epic-17 W3 S2, spec AC-10 / D4): payload/scripts/spawn-worktree.sh
+# driven against scratch git repositories, with its attestation line pinned byte-exactly
+# because dispatchers quote that line into their ledger rows. Its own suite rather than a
+# section of plugin-lib.test.sh — different subject, different fixture regime — and so,
+# like every suite outside hooks/, hand-listed here or it never runs.
+run "spawn-worktree.test.sh" bash tests/spawn-worktree.test.sh
 # Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
 # 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so
