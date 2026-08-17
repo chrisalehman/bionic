@@ -10,7 +10,9 @@
 
 set -euo pipefail
 
-HOOK="$(cd "$(dirname "$0")" && pwd)/canonical-sdlc-governing-skill.sh"
+. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+
+HOOK="${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh"
 PASS=0
 FAIL=0
 TOTAL=0

@@ -37,7 +37,9 @@
 
 set -uo pipefail
 
-HOOKS_DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+
+HOOKS_DIR="${BIONIC_HOOKS_DIR}"
 GUARD="$HOOKS_DIR/agent-context-guard.sh"
 DISPATCH_WALL="$HOOKS_DIR/dispatch-preflight.sh"
 ARTIFACT_WALL="$HOOKS_DIR/canonical-sdlc-governing-skill.sh"
