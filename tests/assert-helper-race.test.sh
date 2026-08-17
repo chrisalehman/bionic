@@ -71,6 +71,11 @@ hooks/stop-orders.test.sh
 # `printf | grep -q`) — nothing here to pin. Named rather than silently omitted
 # so this list stays an enumeration, not a judgment call (epic-17-w2 S1 concern,
 # resolved by S2).
+# tests/plugin-hooks.test.sh also sets pipefail and defines expect_contains_lit/
+# expect_absent_lit/expect_equal, but is pipe-free by construction (containment
+# via `case`, never `printf | grep -q`) — nothing here to pin. Named rather than
+# silently omitted so this list stays an enumeration, not a judgment call
+# (epic-17-w2 S3 concern, resolved by S5).
 
 # The haystack: 512 KiB, eight times the 64 KiB pipe buffer, with the needle in
 # the FIRST line. Under the racy idiom grep matches on its first read() and
