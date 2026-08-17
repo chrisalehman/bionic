@@ -64,6 +64,13 @@
 
 set -u
 
+# THIS SCRIPT'S OWN PATH, so the usage it prints names the copy the operator actually
+# invoked — identical in a repo checkout, in a bootstrap-installed ~/.claude/hooks/, and in
+# an installed plugin payload. Deliberately NOT ${CLAUDE_PLUGIN_ROOT}: this script is run by
+# hand and by the harness outside any plugin context, where that variable does not exist.
+HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+[ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
+
 POKER_DECISION_SCHEMA="poker-tick/v1"
 POKER_INTERVAL_DEFAULT="30m"
 
@@ -73,8 +80,8 @@ die()  { printf 'poker: %s\n' "$1" >&2; }
 usage() {  # [message]
   [ $# -gt 0 ] && die "$1"
   die "Usage:"
-  die "  bash ~/.claude/hooks/session-poker.sh tick       one decision over this session's roster (read-only)"
-  die "  bash ~/.claude/hooks/session-poker.sh interval    the configured self-wake interval, in seconds"
+  die "  bash ${HOOK_DIR}/session-poker.sh tick       one decision over this session's roster (read-only)"
+  die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured self-wake interval, in seconds"
   exit 2
 }
 

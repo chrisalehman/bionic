@@ -686,6 +686,78 @@ do_install_github_skill_pack() {
   return 0
 }
 
+# ─── Local-skill frontmatter localization ────────────────────────────────────
+#
+# A SKILL.md's `hooks:` frontmatter is written for the PLUGIN channel, where the runtime
+# substitutes ${CLAUDE_PLUGIN_ROOT} at hook-registration time. This installer targets a
+# different layout — ~/.claude/skills/ — where no plugin root exists, so a verbatim copy
+# would register every hook command against a variable with no value. That failure is
+# SILENT: no stderr, no hook-error, no session-visible warning; the wall simply never fires.
+#
+# So the installer translates for its own target layout on the way in. Two hard bounds:
+#   - The leading `---`-delimited frontmatter block ONLY. Prose that documents the plugin
+#     channel is true prose and must survive verbatim.
+#   - `command:` keys ONLY, inside that block.
+# And it is a no-op when there is nothing to translate, which makes it idempotent: a source
+# already in installed spelling copies through byte-identical.
+
+_skill_frontmatter_has_plugin_root() {  # <skill-md>; 0 = frontmatter carries a plugin-root hook path
+  [ -f "$1" ] || return 1
+  awk '
+    # The frontmatter opener is the FIRST NON-EMPTY line being "---" (tolerates leading
+    # blank lines — critic-report.md ADDENDUM finding C1-R, edge B). A file whose first
+    # non-empty line is not "---" still has no frontmatter block at all.
+    !started {
+      if ($0 == "") { next }
+      started = 1
+      if ($0 == "---") { fm = 1 }
+      next
+    }
+    fm && $0 == "---" { fm = 0; next }
+    fm && index($0, "${CLAUDE_PLUGIN_ROOT}/hooks/") > 0 { found = 1 }
+    END { exit !found }
+  ' "$1" 2>/dev/null
+}
+
+_localize_skill_frontmatter() {  # <skill-md>; rewrite plugin-root hook commands in place
+  local file="$1"
+  local tmp="${file}.bionic-localize.$$"
+  if awk '
+    function localize(s,   i, needle, out) {
+      needle = "${CLAUDE_PLUGIN_ROOT}/hooks/"
+      out = ""
+      while ((i = index(s, needle)) > 0) {
+        out = out substr(s, 1, i - 1) "~/.claude/hooks/"
+        s = substr(s, i + length(needle))
+      }
+      return out s
+    }
+    function is_command_key(s,   t) {
+      t = s
+      sub(/^[ \t]+/, "", t)
+      sub(/^-[ \t]+/, "", t)
+      return (substr(t, 1, 8) == "command:")
+    }
+    # Same block-opener rule as the detector: FIRST NON-EMPTY line being "---". One
+    # shared definition, not two — a second NR==1-only copy here is exactly the
+    # asymmetry that let edge B pass through untranslated with no warning.
+    !started {
+      print
+      if ($0 != "") { started = 1; if ($0 == "---") { fm = 1 } }
+      next
+    }
+    fm && $0 == "---" { fm = 0; print; next }
+    fm && is_command_key($0) { print localize($0); next }
+    { print }
+  ' "$file" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+    if mv "$tmp" "$file"; then
+      return 0
+    fi
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
 do_install_local_skill() {
   local name="$1"
   local source="${SCRIPT_DIR}/skills/${name}"
@@ -697,7 +769,28 @@ do_install_local_skill() {
   mkdir -p ~/.claude/skills
   rm -rf ~/.claude/skills/"${name}"
   if cp -r "$source" ~/.claude/skills/"${name}"; then
-    step_ok fs
+    # Translate the INSTALLED copy only — the repo source stays plugin-spelled.
+    local localize_fail=0 localized=0 skill_md
+    while IFS= read -r skill_md; do
+      _skill_frontmatter_has_plugin_root "$skill_md" || continue
+      # Re-check the SAME detector after translating (critic-report.md ADDENDUM finding
+      # C1-R) — the detector is the single oracle for both halves, so a still-positive
+      # result after translation is treated as a failure rather than a reported success.
+      if _localize_skill_frontmatter "$skill_md" && ! _skill_frontmatter_has_plugin_root "$skill_md"; then
+        localized=$((localized + 1))
+      else
+        localize_fail=1
+      fi
+    done < <(find ~/.claude/skills/"${name}" -type f -name SKILL.md 2>/dev/null)
+    if [ "$localize_fail" -ne 0 ]; then
+      # Warn-and-continue: the skill is installed and usable, but its hook registrations
+      # point at an unresolvable path, so say so rather than passing silently.
+      step_fail fs "hook paths in ~/.claude/skills/${name} could not be localized (frontmatter hooks will not fire)" "check write permissions on ~/.claude/skills/${name} and re-run"
+    elif [ "$localized" -gt 0 ]; then
+      step_ok fs "${localized} SKILL.md hook path(s) localized"
+    else
+      step_ok fs
+    fi
   else
     step_fail fs "copy to ~/.claude/skills/${name} failed"
   fi

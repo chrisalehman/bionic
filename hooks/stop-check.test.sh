@@ -37,15 +37,15 @@ ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
 no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; }
 
 expect_contains() {  # <label> <needle> <haystack>
-  if printf '%s' "$3" | grep -qF -- "$2"; then ok "$1"; else no "$1" "missing: $2"; fi
+  if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi
 }
 
 expect_matches() {   # <label> <ERE> <haystack>
-  if printf '%s' "$3" | grep -qE -- "$2"; then ok "$1"; else no "$1" "no match for: $2"; fi
+  if grep -qE -- "$2" <<<"$3"; then ok "$1"; else no "$1" "no match for: $2"; fi
 }
 
 expect_absent() {    # <label> <needle> <haystack>
-  if printf '%s' "$3" | grep -qiF -- "$2"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi
+  if grep -qiF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi
 }
 
 expect_status() {    # <label> <expected> <actual>

@@ -34,6 +34,13 @@
 
 set -uo pipefail
 
+# THIS SCRIPT'S OWN PATH, so the usage it prints names the copy the operator actually
+# invoked — identical in a repo checkout, in a bootstrap-installed ~/.claude/hooks/, and in
+# an installed plugin payload. Deliberately NOT ${CLAUDE_PLUGIN_ROOT}: this script is run by
+# hand and by the harness outside any plugin context, where that variable does not exist.
+HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+[ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
+
 MAX_MESSAGE_CHARS=600
 
 # The machine line's schema token. Versioned so the recorder can refuse a shape
@@ -43,7 +50,7 @@ MACHINE_SCHEMA="stop-check-observation/v1"
 
 usage() {  # [reason]
   [ -n "${1:-}" ] && echo "$1" >&2
-  echo "Usage: bash ~/.claude/hooks/stop-check.sh <agent-name-or-id> [deliverable-path ...] [--progress <path>]" >&2
+  echo "Usage: bash ${HOOK_DIR}/stop-check.sh <agent-name-or-id> [deliverable-path ...] [--progress <path>]" >&2
   echo "" >&2
   echo "Prints one subagent's evidence tier. Decides nothing." >&2
   exit 1
