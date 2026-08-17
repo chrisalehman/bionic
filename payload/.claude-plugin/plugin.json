@@ -7,7 +7,7 @@
   },
   "license": "MIT",
   "dependencies": [
-    { "name": "superpowers", "marketplace": "claude-plugins-official" },
-    { "name": "agent-skills", "marketplace": "addy-agent-skills" }
+    { "name": "superpowers", "marketplace": "claude-plugins-official", "version": "^6.3.0" },
+    { "name": "agent-skills", "marketplace": "addy-agent-skills", "version": "^1.0.0" }
   ]
 }
