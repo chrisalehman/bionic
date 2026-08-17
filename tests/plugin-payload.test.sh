@@ -113,11 +113,24 @@ fi
 
 # ============================================================
 echo ""
-echo "=== C — the payload holds links, never copies ==="
+echo "=== C — one owner per file: link to the repo's owner, or BE the owner ==="
 # ============================================================
 #
-# Everything under payload/ except the plugin manifest must be a symlink. A regular file
-# here is a second copy of something the repo already owns, and a second copy drifts.
+# The invariant this section defends is SINGLE OWNERSHIP, not symlink-ness. A second copy
+# of something the repo already owns drifts, so anything the repo owns — hooks/, agents/,
+# skills/, LICENSE — appears here only as a link back to that owner.
+#
+# payload/scripts/ is the other way to satisfy the same invariant: the payload IS the owner.
+# These files have no repo-root twin to drift from — the whole point of the wave-03 command
+# surface is that installation logic lives in the payload and nowhere else (wave-03 spec
+# §Design, component boundaries), and claude-bootstrap.sh, the last root-level installer,
+# retires at W5. Carving them out of the link check is therefore not a hole in the
+# invariant; the two assertions below close it by proving they own themselves and that no
+# root-level twin has appeared beside them.
+#
+# AMENDED epic-17 W3 S1. Before that, the check read "everything except the plugin manifest
+# must be a symlink", which was true only because every payload file then had a repo-root
+# owner.
 
 if [ ! -d "$PAYLOAD" ]; then
   no "payload/ exists"
@@ -125,11 +138,32 @@ else
   ok "payload/ exists"
 
   STRAY="$(find "$PAYLOAD" -type f \
-             ! -path "${PAYLOAD}/.claude-plugin/*" 2>/dev/null | sed "s|${REPO}/||" | sort)"
+             ! -path "${PAYLOAD}/.claude-plugin/*" \
+             ! -path "${PAYLOAD}/scripts/*" 2>/dev/null | sed "s|${REPO}/||" | sort)"
   if [ -z "$STRAY" ]; then
-    ok "payload/ contains no regular files outside .claude-plugin/ (no second owner)"
+    ok "payload/ holds no copy of anything the repo owns (outside .claude-plugin/ and scripts/)"
   else
-    no "payload/ contains no regular files outside .claude-plugin/ (found: $(echo "$STRAY" | tr '\n' ' '))"
+    no "payload/ holds no copy of anything the repo owns (found: $(echo "$STRAY" | tr '\n' ' '))"
+  fi
+
+  # The carve-out's two guards. First: payload/scripts/ must own its files outright —
+  # a symlink in there would point at a second owner and reopen exactly the drift the
+  # section exists to prevent.
+  if [ -d "${PAYLOAD}/scripts" ]; then
+    SCRIPT_LINKS="$(find "${PAYLOAD}/scripts" -type l 2>/dev/null | sed "s|${REPO}/||" | sort)"
+    if [ -z "$SCRIPT_LINKS" ]; then
+      ok "payload/scripts/ contains no symlinks (the payload owns these files outright)"
+    else
+      no "payload/scripts/ contains no symlinks (found: $(echo "$SCRIPT_LINKS" | tr '\n' ' '))"
+    fi
+  fi
+
+  # Second: no root-level scripts/ twin. If one ever appears, ownership is ambiguous again
+  # and the carve-out above is no longer safe.
+  if [ -e "${REPO}/scripts" ]; then
+    no "no repo-root scripts/ twin beside payload/scripts/ (found ${REPO}/scripts)"
+  else
+    ok "no repo-root scripts/ twin beside payload/scripts/"
   fi
 
   # Each link must resolve, and must resolve to the repo's single owner.
