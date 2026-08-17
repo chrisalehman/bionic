@@ -30,6 +30,14 @@
 # is a vendored fork of coleam00/excalidraw-diagram-skill (repo-inventory.md §3) and carries
 # a uv project + .venv. `scripts/` joins in a later wave.
 #
+# TRAVERSAL TRAP — `grep -r`/`-R` over payload/ is a FALSE-NEGATIVE ABSENCE MACHINE. payload/
+# is a tree of top-level symlinks (see §C above); `grep -r`/`-R` does not descend a symlinked
+# directory, so `grep -Rl '<pattern>' payload/` silently reports zero hits even when the
+# pattern is present throughout the dereferenced tree (review-6axis.md F3: measured 0 vs the
+# true 28 for `.bionic/` alone). Any absence claim about payload/ content — here or in a
+# future audit — must use `find -L payload ...` (as this suite does throughout) or
+# `/usr/bin/grep` with explicit dereference, never a bare recursive grep.
+#
 # Usage: bash tests/plugin-payload.test.sh
 
 set -uo pipefail
