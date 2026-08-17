@@ -103,7 +103,8 @@ expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2
 # needle, so expect_contains reports `missing:` for a needle that is present and
 # expect_absent returns a false GREEN on a needle that is. That is the whole of
 # the epic-17-w1 "cross-gate flake" — an in-process scheduling race, not state
-# pollution. Pinned by tests/assert-helper-race.test.sh.
+# pollution. expect_contains/expect_absent here are pinned by
+# tests/assert-helper-race.test.sh; expect_absent_ug below (§L) is pinned there too.
 expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
 expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
 
@@ -2624,7 +2625,7 @@ HOOKS_JSON_SRC="$BIONIC_HOOKS_DIR/hooks.json"
 # (reports 0 hits inside paths it silently skips) — every absence check below goes
 # through /usr/bin/grep instead.
 expect_absent_ug() {
-  if printf '%s' "$3" | /usr/bin/grep -qF -- "$2"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi
+  if /usr/bin/grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi
 }
 
 # --- L.1 frontmatter <-> script: the eleven sdlc-scoped registrations live in

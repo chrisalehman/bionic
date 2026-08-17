@@ -197,12 +197,26 @@ echo "=== Group 6: no suite resolves privately (spec AC-3, enumerated) ==="
 # hardcoded offset opts out silently: it sources nothing, reds nothing, and goes
 # blind the day an overridden root goes live (W5 cold install).
 UNSEAMED=""
+LEGACY_IDIOM=""
 for f in "$REPO"/hooks/*.test.sh "$REPO"/tests/*.test.sh "$REPO"/lib/*.test.sh; do
   [ -f "$f" ] || continue
   case "$f" in */seam-resolution.test.sh) continue ;; esac   # documented exemption, :46
   /usr/bin/grep -q 'resolve-roots\.sh' "$f" || UNSEAMED="$UNSEAMED ${f#$REPO/}"
+  # The complementary negative: sourcing the seam does not by itself prove a
+  # suite stopped computing its OWN offset alongside it (a partial conversion —
+  # the more likely drift shape than a total opt-out, given S2 converted 29
+  # sites). Neither pre-seam idiom may appear anywhere in this glob; the two
+  # documented exemptions (tests/lib/resolve-roots.sh itself, which the glob
+  # never reaches, and this suite's own REPO line at :48, which uses `pwd -P`
+  # rather than the legacy `pwd`) are excluded from the match by construction,
+  # not by a case-arm here.
+  if /usr/bin/grep -qF '$(cd "$(dirname "$0")" && pwd)' "$f" || \
+     /usr/bin/grep -qF '$(cd "$(dirname "$0")/.." && pwd)' "$f"; then
+    LEGACY_IDIOM="$LEGACY_IDIOM ${f#$REPO/}"
+  fi
 done
 expect_eq "every suite sources the path-resolution seam" "" "$UNSEAMED"
+expect_eq "no suite keeps a private legacy offset alongside the seam" "" "$LEGACY_IDIOM"
 
 echo ""
 echo "========================================"
