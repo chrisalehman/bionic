@@ -105,7 +105,7 @@ done
 
 # ============================================================
 echo ""
-echo "=== B — hooks/*.sh: no installed-path literal on any executable line ==="
+echo "=== B — the payload: no installed-path literal on any executable or normative line ==="
 # ============================================================
 #
 # Comments are exempt and only comments are. `# Installed globally by claude-bootstrap.sh to
@@ -114,8 +114,8 @@ echo "=== B — hooks/*.sh: no installed-path literal on any executable line ===
 # false one. What may not survive is a literal on a line that RUNS or that the machinery
 # PRINTS as a command to run.
 
-check_script() {  # <relative-path>
-  local rel="$1" file="${REPO}/$1" hits
+check_script_at() {  # <absolute-path> <label>
+  local file="$1" rel="$2" hits
   # Strip comment-only lines (first non-blank character is `#`), then look for the literal.
   hits=$($G -nE -- "$FORBIDDEN" "$file" | $G -vE '^[0-9]+:[[:space:]]*#' || true)
   if [ -z "$hits" ]; then
@@ -135,10 +135,72 @@ check_script() {  # <relative-path>
 # rewritten and the assertion still passed, because the string was coming from a file nobody
 # had looked at. Globbing is what closes that class — an enumeration can only ever pin what
 # somebody already noticed.
-for s in "${REPO}"/hooks/*.sh; do
-  case "$s" in *.test.sh) continue ;; esac
-  check_script "hooks/$(basename "$s")"
-done
+# THE SET IS THE PAYLOAD, NOT hooks/ (Step-5 audit finding A2).
+#
+# Until this change the wall stood over `hooks/*.sh` alone, while the ratified payload also
+# ships `agents/` and three skills. The invariant held there — but only because nobody had
+# written a literal into them yet, and a W3/W4 addition could have broken it in silence.
+#
+# The set is derived from `payload/` itself rather than enumerated here. `payload/` is the
+# S6 link tree, and that tree IS the boundary the installer copies: an agent or skill added
+# to the payload is covered on the day it is linked in, with no list in this file to update.
+# `find -L` follows those links onto the repo's single owners, so each file is read exactly
+# once at its real path. Same reason the hooks loop globs rather than enumerates — an
+# enumeration can only ever pin what somebody already noticed.
+PAYLOAD_DIR="${REPO}/payload"
+if [ ! -d "$PAYLOAD_DIR" ]; then
+  no "payload/ exists (the path wall derives its file set from it)"
+  PAYLOAD_TEXT=""
+else
+  ok "payload/ exists (the path wall derives its file set from it)"
+  PAYLOAD_TEXT=$(find -L "$PAYLOAD_DIR" -type f \
+                   \( -name '*.sh' -o -name '*.md' -o -name '*.json' -o -name '*.txt' \) \
+                   2>/dev/null | sort -u)
+fi
+
+# ---- B1: every SHIPPED SCRIPT in the payload, wherever it lives ----
+PAYLOAD_SCRIPTS=$(printf '%s\n' "$PAYLOAD_TEXT" | $G -E '\.sh$' | $G -vE '\.test\.sh$' || true)
+if [ -z "$PAYLOAD_SCRIPTS" ]; then
+  no "the payload ships at least one script to check"
+else
+  ok "the payload ships $(printf '%s\n' "$PAYLOAD_SCRIPTS" | wc -l | tr -d ' ') non-test scripts"
+fi
+while IFS= read -r s; do
+  [ -n "$s" ] || continue
+  check_script_at "$s" "payload:${s#${REPO}/}"
+done <<< "$PAYLOAD_SCRIPTS"
+
+# ---- B2: the payload's PROSE — agents/ and the skills ----
+#
+# A markdown file has no executable line, so the comment exemption that makes B1 workable
+# does not transfer: in an agent role or a skill, a path written in prose IS the instruction,
+# and a reader who follows `bash ~/.claude/hooks/x.sh` on a machine where the payload arrived
+# as a plugin is following it to a file that is not there. So the rule here is stricter than
+# B1's — every occurrence counts — and the only survivors are the two the slice deliberately
+# did NOT convert, pinned by their exact text in section A above. Converting them means
+# deleting the pin there AND the exemption here, in the same change; adding a third one
+# anywhere in the payload fails right here.
+KNOWN_UNCONVERTED='bash ~/\.claude/hooks/session-poker\.sh|bash ~/\.claude/hooks/stop-orders\.sh'
+PROSE_FILES=$(printf '%s\n' "$PAYLOAD_TEXT" | $G -vE '\.sh$' || true)
+if [ -z "$PROSE_FILES" ]; then
+  no "the payload ships at least one prose file to check"
+else
+  ok "the payload ships $(printf '%s\n' "$PROSE_FILES" | wc -l | tr -d ' ') prose/manifest files"
+fi
+PROSE_HITS=""
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  h=$($G -nE -- "$FORBIDDEN" "$f" | $G -vE -- "$KNOWN_UNCONVERTED" || true)
+  [ -n "$h" ] && PROSE_HITS="${PROSE_HITS}${f#${REPO}/}:
+$(printf '%s\n' "$h" | sed 's/^/       /')
+"
+done <<< "$PROSE_FILES"
+if [ -z "$PROSE_HITS" ]; then
+  ok "payload prose carries no installed-path literal beyond the two pinned operator commands"
+else
+  no "payload prose carries no installed-path literal beyond the two pinned operator commands"
+  printf '%s' "$PROSE_HITS"
+fi
 
 # ---- and the positive form: each command constant resolves from "$0" ----
 #
@@ -183,16 +245,27 @@ done
 # The harness runs these scripts straight out of the repo, with no plugin mounted. A hook
 # that reached for ${CLAUDE_PLUGIN_ROOT} would resolve it to nothing under `set -u`, or to
 # an empty prefix without it — the exact failure this slice's two-rule split avoids.
-# Comment-only lines are exempt for the same reason as in check_script — and here they are
-# load-bearing documentation: each rewritten script says in a comment WHY it resolves from
-# `$0` and not from the plugin variable. A mention cannot break a hook; a use can.
-PR_HITS=$($G -nF -- '${CLAUDE_PLUGIN_ROOT}' "${REPO}"/hooks/*.sh 2>/dev/null \
-          | $G -vE ':[0-9]+:[[:space:]]*#' || true)
+# Comment-only lines are exempt for the same reason as in check_script_at — and here they
+# are load-bearing documentation: each rewritten script says in a comment WHY it resolves
+# from `$0` and not from the plugin variable. A mention cannot break a hook; a use can.
+#
+# Widened with B1 to every shipped script in the payload: a skill that ships a helper script
+# inherits this constraint the day it lands, because the harness runs that script out of the
+# repo too. (Prose is NOT in this set — skills/canonical-sdlc/SKILL.md's frontmatter must
+# spell ${CLAUDE_PLUGIN_ROOT}, and section A is what pins that.)
+PR_HITS=""
+while IFS= read -r s; do
+  [ -n "$s" ] || continue
+  h=$($G -nF -- '${CLAUDE_PLUGIN_ROOT}' "$s" 2>/dev/null | $G -vE '^[0-9]+:[[:space:]]*#' || true)
+  [ -n "$h" ] && PR_HITS="${PR_HITS}${s#${REPO}/}:
+$(printf '%s\n' "$h" | sed 's/^/       /')
+"
+done <<< "$PAYLOAD_SCRIPTS"
 if [ -z "$PR_HITS" ]; then
-  ok "no hook script depends on \${CLAUDE_PLUGIN_ROOT}"
+  ok "no shipped payload script depends on \${CLAUDE_PLUGIN_ROOT}"
 else
-  no "no hook script depends on \${CLAUDE_PLUGIN_ROOT}"
-  printf '%s\n' "$PR_HITS" | sed 's/^/       /'
+  no "no shipped payload script depends on \${CLAUDE_PLUGIN_ROOT}"
+  printf '%s' "$PR_HITS"
 fi
 
 # ============================================================
