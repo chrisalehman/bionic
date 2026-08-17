@@ -1089,6 +1089,150 @@ done
 grep -qxF "kill-guard.sh" "$manifest" 2>/dev/null && no "AC-7: manifest must not list removed old name kill-guard.sh" || ok "AC-7: manifest excludes kill-guard.sh"
 grep -qxF "kill-check.sh" "$manifest" 2>/dev/null && no "AC-7: manifest must not list removed old name kill-check.sh" || ok "AC-7: manifest excludes kill-check.sh"
 
+# ---------- C1: local-skill install TRANSLATES frontmatter hook paths ----------
+# epic-17 wave-01 Step-6 critic finding C1 (BLOCKING).
+#
+# skills/canonical-sdlc/SKILL.md's `hooks:` frontmatter is addressed to
+# ${CLAUDE_PLUGIN_ROOT} — correct for the plugin channel, and pinned there by
+# tests/plugin-paths.test.sh §A. That same file is ALSO the install source for the
+# non-plugin channel: claude-config.txt carries `local-skill | canonical-sdlc`, and
+# do_install_local_skill copies it into ~/.claude/skills/. Outside a plugin there is no
+# plugin root, so a verbatim copy registers eleven hook commands against a variable with
+# no value — and the failure is SILENT (critic proved 2/2, order-independent, empty
+# stderr: no hook-error, no session-visible warning).
+#
+# The wall below is on the INSTALLED copy, not the repo copy. plugin-paths.test.sh keeps
+# asserting the repo/payload spelling is ${CLAUDE_PLUGIN_ROOT}; this asserts the installed
+# spelling is ~/.claude/hooks/. Neither weakens the other — they pin the two ENDS of a
+# translation, and it is precisely the absence of a translation between them that C1 found.
+#
+# Four properties, because a canonical-sdlc-shaped fix would be a fix for one file:
+#   1. translation happens, completely, on the installed copy (11/11, zero CPR literals)
+#   2. the SOURCE tree is not mutated (the repo stays plugin-spelled)
+#   3. idempotent — a source already in installed spelling passes through unchanged
+#   4. bounded — frontmatter `command:` lines only; PROSE mentioning the variable, and
+#      skills with no frontmatter hooks at all, come through byte-identical
+SKILLS_CODE="${SBX}/skills_code.sh"
+: > "$SKILLS_CODE"
+for fn in _skill_frontmatter_has_plugin_root _localize_skill_frontmatter do_install_local_skill; do
+  awk -v fn="$fn" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP" >> "$SKILLS_CODE"
+done
+# shellcheck disable=SC1090
+source "$SKILLS_CODE"
+
+SKSBX="${SBX}/skills-sandbox"
+mkdir -p "${SKSBX}/home" "${SKSBX}/src/skills"
+cp -R "${REPO}/skills/canonical-sdlc" "${SKSBX}/src/skills/canonical-sdlc"
+
+_install_skill_into() {  # <src-root> <home-root> <skill-name>
+  ( export SCRIPT_DIR="$1" HOME="$2"; do_install_local_skill "$3" ) >/dev/null 2>&1
+}
+# Frontmatter window: the eleven commands live at :9–:56 today. 80 is the same generous
+# bound tests/plugin-paths.test.sh §A uses, so a line-shifting edit still lands inside it.
+_fm() { sed -n '1,80p' "$1"; }
+
+_install_skill_into "${SKSBX}/src" "${SKSBX}/home" canonical-sdlc
+_inst="${SKSBX}/home/.claude/skills/canonical-sdlc/SKILL.md"
+
+if [ -f "$_inst" ]; then
+  ok "C1: do_install_local_skill installed canonical-sdlc into the sandboxed HOME"
+else
+  no "C1: do_install_local_skill did not produce ${_inst}"
+fi
+
+_n_installed="$(_fm "$_inst" 2>/dev/null | /usr/bin/grep -cF -- 'command: ~/.claude/hooks/')"
+[ "$_n_installed" = "11" ] \
+  && ok "C1: installed frontmatter registers all 11 commands under ~/.claude/hooks/" \
+  || no "C1: installed frontmatter registers ${_n_installed} commands under ~/.claude/hooks/, want 11"
+
+_n_cpr="$(_fm "$_inst" 2>/dev/null | /usr/bin/grep -cF -- '${CLAUDE_PLUGIN_ROOT}')"
+[ "$_n_cpr" = "0" ] \
+  && ok "C1: installed frontmatter carries zero \${CLAUDE_PLUGIN_ROOT} literals" \
+  || no "C1: installed frontmatter still carries ${_n_cpr} \${CLAUDE_PLUGIN_ROOT} literals (armed walls would be disarmed)"
+
+# By name — a count alone passes if one command is duplicated and another dropped.
+for s in canonical-sdlc-evidence-gate farm-out-reminder stop-guard dispatch-preflight \
+         canonical-sdlc-governing-skill execution-recorder context-spend landing-gate; do
+  _fm "$_inst" 2>/dev/null | /usr/bin/grep -qF -- "command: ~/.claude/hooks/${s}.sh" \
+    && ok "C1:   installed registration resolvable: ${s}.sh" \
+    || no "C1:   installed registration resolvable: ${s}.sh"
+done
+
+# 2. The source tree is an INPUT, never a casualty: the repo copy stays plugin-spelled.
+_n_src="$(_fm "${SKSBX}/src/skills/canonical-sdlc/SKILL.md" | /usr/bin/grep -cF -- 'command: ${CLAUDE_PLUGIN_ROOT}/hooks/')"
+[ "$_n_src" = "11" ] \
+  && ok "C1: the install SOURCE is untouched (still 11 \${CLAUDE_PLUGIN_ROOT} commands)" \
+  || no "C1: the install source was mutated (${_n_src} plugin-root commands left, want 11)"
+
+# 3. Idempotent: re-installing from a source that is ALREADY in installed spelling must
+# pass through unchanged — otherwise a second bootstrap run (or a source that a future wave
+# converts) would double-rewrite or corrupt.
+mkdir -p "${SKSBX}/src2/skills"
+cp -R "${SKSBX}/home/.claude/skills/canonical-sdlc" "${SKSBX}/src2/skills/canonical-sdlc"
+_install_skill_into "${SKSBX}/src2" "${SKSBX}/home2" canonical-sdlc
+if diff -q "${SKSBX}/src2/skills/canonical-sdlc/SKILL.md" \
+           "${SKSBX}/home2/.claude/skills/canonical-sdlc/SKILL.md" >/dev/null 2>&1; then
+  ok "C1: idempotent — an already-installed-spelling source copies through byte-identical"
+else
+  no "C1: re-installing an already-translated skill changed it (translation is not idempotent)"
+fi
+
+# 4. Bounded. Two synthetic skills, because canonical-sdlc alone cannot distinguish
+# "rewrites frontmatter commands" from "rewrites every occurrence in the file".
+mkdir -p "${SKSBX}/src3/skills/prosey" "${SKSBX}/src3/skills/plainskill"
+cat > "${SKSBX}/src3/skills/prosey/SKILL.md" <<'PROSEY'
+---
+name: prosey
+description: Probe skill. Use when the user says prosey.
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/prosey-gate.sh
+          timeout: 10
+---
+
+# prosey
+
+Plugin payloads are mounted at ${CLAUDE_PLUGIN_ROOT}/hooks/ — this sentence is DOCUMENTATION
+about the plugin channel and must survive the install verbatim. Run
+`bash ${CLAUDE_PLUGIN_ROOT}/hooks/prosey-gate.sh` to check it by hand.
+PROSEY
+cat > "${SKSBX}/src3/skills/plainskill/SKILL.md" <<'PLAIN'
+---
+name: plainskill
+description: Probe skill with no hooks. Use when the user says plainskill.
+---
+
+# plainskill
+
+Nothing to translate here.
+PLAIN
+
+_install_skill_into "${SKSBX}/src3" "${SKSBX}/home3" prosey
+_install_skill_into "${SKSBX}/src3" "${SKSBX}/home3" plainskill
+_prosey="${SKSBX}/home3/.claude/skills/prosey/SKILL.md"
+_plain="${SKSBX}/home3/.claude/skills/plainskill/SKILL.md"
+
+/usr/bin/grep -qF -- 'command: ~/.claude/hooks/prosey-gate.sh' "$_prosey" 2>/dev/null \
+  && ok "C1: translation is generic — a non-canonical-sdlc local skill is translated too" \
+  || no "C1: translation is canonical-sdlc-specific (prosey's frontmatter was not translated)"
+
+# Body only (everything past the closing `---`), so this row measures the PROSE and cannot
+# be satisfied or broken by whatever the frontmatter rows above already cover.
+_n_prose="$(awk 'NR==1&&$0=="---"{fm=1;next} fm&&$0=="---"{fm=0;body=1;next} body' "$_prosey" 2>/dev/null \
+  | /usr/bin/grep -cF -- '${CLAUDE_PLUGIN_ROOT}/hooks/')"
+[ "$_n_prose" = "2" ] \
+  && ok "C1: PROSE mentions of \${CLAUDE_PLUGIN_ROOT} survive the install (both of them)" \
+  || no "C1: prose mentions of \${CLAUDE_PLUGIN_ROOT} were rewritten (${_n_prose} of 2 left) — the rewrite is not bounded to frontmatter"
+
+if diff -q "${SKSBX}/src3/skills/plainskill/SKILL.md" "$_plain" >/dev/null 2>&1; then
+  ok "C1: inert for a skill with no frontmatter hooks (byte-identical copy)"
+else
+  no "C1: a skill with no frontmatter hooks was modified by the install"
+fi
+
 echo "========================================"
 echo "Installer behavior: ${PASS} passed, ${FAIL} failed"
 echo "========================================"
