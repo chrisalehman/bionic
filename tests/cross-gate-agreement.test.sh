@@ -2923,6 +2923,15 @@ expect_contains "…and the dispatch wall skips its roster append on exactly tha
 # machine that walks the block, so that is what is pinned — as a SPAN, on the same precedent
 # §O uses for code shared by legitimately different callers — extracted from each file's own
 # source on disk rather than retyped by hand.
+#
+# KNOWN UNPINNED FOURTH COPY (review-fold, epic-17 W2, DO-NOW 7 fallback). This file's own
+# `skill_block_count` (:2821-2830) walks the same `hooks:` block state machine as a fourth
+# site, and `frontmatter_parser_span` below stops at the FIRST occurrence in each file, so it
+# extracts this section's L.1 copy and never reaches `skill_block_count`'s — the pin below
+# does not see it. Deliberately left unpinned here rather than folded in blind: promoted to
+# W4, trigger EVENT "any further edit to the SKILL.md frontmatter parsers" (t6-review.md
+# DO-NOW 7). Low severity — drift here makes a test go quiet, not production go wrong, same
+# as the three copies this section does pin.
 frontmatter_parser_span() {  # <file> -> the 6-line `hooks:` state-machine prologue, ws-normalized
   awk '
     p == 0 && index($0, "/^hooks:$/ { active=1; next }") > 0 { p = 1 }

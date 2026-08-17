@@ -74,20 +74,17 @@ expect_eq "(b) marketplace.json bionic entry has no version field" "no" "$BIONIC
 echo ""
 echo "=== Arm (c): every dependencies entry carries a semver version constraint ==="
 
-DEP_VERSION_REPORT="$(python3 -c "
+DEP_REPORT="$(python3 -c "
 import json, re
 d = json.load(open('$PLUGIN_JSON'))
 deps = d.get('dependencies', [])
-pattern = re.compile(r'^~?\^?[0-9]')
-bad = []
-for dep in deps:
-    name = dep.get('name', '?')
-    v = dep.get('version')
-    if not v or not pattern.match(v):
-        bad.append(name)
-print(','.join(bad))
+pattern = re.compile(r'^(\^|~|>=|<=|>|<|=)?[0-9]+\.[0-9]+\.[0-9]+')
+bad = [dep.get('name','?') for dep in deps
+       if not dep.get('version') or not pattern.match(dep['version'])]
+print('%d|%s' % (len(deps), ','.join(bad)))
 " 2>/dev/null)"
-expect_eq "(c) every dependencies entry carries a version field matching ^~?\\\^?[0-9]" "" "$DEP_VERSION_REPORT"
+expect_eq "(c) both dependencies are present and each carries a semver-range version" \
+  "2|" "$DEP_REPORT"
 
 echo ""
 echo "=== Arm (d): bridge pair SUPPORTED_SDLC_VERSION <-> plugin major, pinned 13 <-> 0 ==="
