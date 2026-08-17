@@ -128,6 +128,10 @@ echo "=== C — one owner per file: link to the repo's owner, or BE the owner ==
 # invariant; the two assertions below close it by proving they own themselves and that no
 # root-level twin has appeared beside them.
 #
+# payload/commands/ is the same carve-out for the same reason (epic-17 W3 S9): the shipped
+# slash-command files (help.md and its siblings) are payload-native content with no
+# repo-root twin to link back to — the payload IS their owner too.
+#
 # AMENDED epic-17 W3 S1. Before that, the check read "everything except the plugin manifest
 # must be a symlink", which was true only because every payload file then had a repo-root
 # owner.
@@ -139,9 +143,10 @@ else
 
   STRAY="$(find "$PAYLOAD" -type f \
              ! -path "${PAYLOAD}/.claude-plugin/*" \
-             ! -path "${PAYLOAD}/scripts/*" 2>/dev/null | sed "s|${REPO}/||" | sort)"
+             ! -path "${PAYLOAD}/scripts/*" \
+             ! -path "${PAYLOAD}/commands/*" 2>/dev/null | sed "s|${REPO}/||" | sort)"
   if [ -z "$STRAY" ]; then
-    ok "payload/ holds no copy of anything the repo owns (outside .claude-plugin/ and scripts/)"
+    ok "payload/ holds no copy of anything the repo owns (outside .claude-plugin/, scripts/ and commands/)"
   else
     no "payload/ holds no copy of anything the repo owns (found: $(echo "$STRAY" | tr '\n' ' '))"
   fi
@@ -164,6 +169,21 @@ else
     no "no repo-root scripts/ twin beside payload/scripts/ (found ${REPO}/scripts)"
   else
     ok "no repo-root scripts/ twin beside payload/scripts/"
+  fi
+
+  # payload/commands/ gets the identical pair of guards, same reasoning.
+  if [ -d "${PAYLOAD}/commands" ]; then
+    COMMAND_LINKS="$(find "${PAYLOAD}/commands" -type l 2>/dev/null | sed "s|${REPO}/||" | sort)"
+    if [ -z "$COMMAND_LINKS" ]; then
+      ok "payload/commands/ contains no symlinks (the payload owns these files outright)"
+    else
+      no "payload/commands/ contains no symlinks (found: $(echo "$COMMAND_LINKS" | tr '\n' ' '))"
+    fi
+  fi
+  if [ -e "${REPO}/commands" ]; then
+    no "no repo-root commands/ twin beside payload/commands/ (found ${REPO}/commands)"
+  else
+    ok "no repo-root commands/ twin beside payload/commands/"
   fi
 
   # Each link must resolve, and must resolve to the repo's single owner.
