@@ -43,6 +43,8 @@ set -uo pipefail
 REPO="${BIONIC_SCRIPTS_DIR}"
 DEPS_SH="${REPO}/payload/scripts/lib/deps.sh"
 DETECT_SH="${REPO}/payload/scripts/lib/detect.sh"
+PLUGIN_JSON="${REPO}/payload/.claude-plugin/plugin.json"
+MARKETPLACE_JSON="${REPO}/.claude-plugin/marketplace.json"
 
 PASS=0; FAIL=0; TOTAL=0
 ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
@@ -593,7 +595,122 @@ expect_eq "detect_dep exits 0" "0" "$rc"
 expect_eq "detect_dep prints exactly one line" "1" "$(printf '%s\n' "$out" | grep -c .)"
 
 echo ""
-echo "=== Group 17: the suite is registered in tests/run.sh by name ==="
+echo "=== Group 18: manifest agreement — deps.sh table <-> plugin.json <-> marketplace.json (AC-8) ==="
+#
+# The dep table is the SSoT for lane-3a dependencies. plugin.json's
+# `dependencies` array and marketplace.json's url-sourced entries are
+# RENDERINGS of those rows, never independent authorities (ownership table,
+# wave-03 spec §Design). Version constraints are deliberately ABSENT from
+# plugin.json: the CLI cannot resolve a same-marketplace, version-constrained
+# dependency — reproduced on a fresh scratch config with a confirmed-existing
+# matching upstream tag (record/epic-17-w3/probe-ac6-marketplace-entry.md) — so
+# the constraint lives ONLY in this table; a version key reappearing in
+# plugin.json is a silent regression to the broken shape, not a harmless
+# duplicate.
+#
+# manifest_agreement_report prints one problem line per disagreement, either
+# direction, or nothing when the three parties agree. It is driven against the
+# real manifests for the golden case and against a mutated TMP copy for the
+# mutation-and-restore proof below — the real files are never written to.
+
+MANIFEST_JSON_HELPER="$TMP/manifest_agreement.py"
+cat > "$MANIFEST_JSON_HELPER" <<'PYEOF'
+import json, sys
+
+plugin_path, marketplace_path, table_json = sys.argv[1], sys.argv[2], sys.argv[3]
+table = json.loads(table_json)  # {name: source_url}
+plugin = json.load(open(plugin_path))
+mkt = json.load(open(marketplace_path))
+
+problems = []
+
+deps = {d.get('name'): d for d in plugin.get('dependencies', []) if isinstance(d, dict)}
+for name in table:
+    if name not in deps:
+        problems.append("plugin.json missing dependency: %s" % name)
+for name, d in deps.items():
+    if name not in table:
+        problems.append("plugin.json has dependency with no table row: %s" % name)
+        continue
+    if d.get('marketplace') != 'bionic':
+        problems.append("plugin.json %s marketplace != bionic: %r" % (name, d.get('marketplace')))
+    if 'version' in d:
+        problems.append("plugin.json %s carries a version key: %r" % (name, d.get('version')))
+
+entries = {p.get('name'): p for p in mkt.get('plugins', [])}
+for name, url in table.items():
+    if name not in entries:
+        problems.append("marketplace.json missing entry: %s" % name)
+        continue
+    src = entries[name].get('source', {})
+    entry_url = src.get('url', '') if isinstance(src, dict) else ''
+    if entry_url != url:
+        problems.append("marketplace.json %s source_url mismatch: table=%r entry=%r" % (name, url, entry_url))
+for name, p in entries.items():
+    if name != 'bionic' and name not in table and isinstance(p.get('source'), dict):
+        problems.append("marketplace.json has url-sourced entry with no table row: %s" % name)
+
+print('\n'.join(problems))
+PYEOF
+
+LANE3A_NAMES="$(deps_run -- dep_names_lane 3a | sort)"
+TABLE_JSON="$(python3 -c "
+import json, sys
+names = sys.argv[1].split()
+print(json.dumps({n: sys.argv[2 + i] for i, n in enumerate(names)}))
+" "$LANE3A_NAMES" $(while IFS= read -r n; do [ -n "$n" ] && deps_run -- dep_field "$n" source_url; done <<< "$LANE3A_NAMES"))"
+
+manifest_agreement_report() {  # <plugin.json path> <marketplace.json path>
+  python3 "$MANIFEST_JSON_HELPER" "$1" "$2" "$TABLE_JSON"
+}
+
+expect_eq "table, plugin.json, and marketplace.json agree in both directions (golden case)" \
+  "" "$(manifest_agreement_report "$PLUGIN_JSON" "$MARKETPLACE_JSON")"
+
+echo ""
+echo "=== Group 19: mutation-and-restore — both agreement pins actually discriminate ==="
+#
+# A pin that stays green on a mutated copy proves nothing (fixtures-can-pin-
+# away-the-test). Mutations are applied to TMP copies; the shipped manifests
+# are checksummed before and after and asserted byte-identical at the end.
+
+MANIFEST_CKSUM_BEFORE="$(shasum "$PLUGIN_JSON" "$MARKETPLACE_JSON" 2>/dev/null)"
+
+# Mutation 1: break a source_url in a marketplace.json copy.
+MUT_MKT="$TMP/marketplace.mutant.json"
+python3 -c "
+import json
+d = json.load(open('$MARKETPLACE_JSON'))
+for p in d['plugins']:
+    if p.get('name') == 'superpowers':
+        p['source']['url'] = 'https://example.invalid/not-superpowers.git'
+json.dump(d, open('$MUT_MKT', 'w'))
+"
+MUT1_REPORT="$(manifest_agreement_report "$PLUGIN_JSON" "$MUT_MKT")"
+expect_true "mutation 1 (broken source_url) makes the agreement pin non-empty" test -n "$MUT1_REPORT"
+expect_match "mutation 1 is reported as a source_url mismatch on superpowers" \
+  "*superpowers source_url mismatch*" "$MUT1_REPORT"
+
+# Mutation 2: re-add a version key in a plugin.json copy.
+MUT_PLUGIN="$TMP/plugin.mutant.json"
+python3 -c "
+import json
+d = json.load(open('$PLUGIN_JSON'))
+for dep in d['dependencies']:
+    if dep.get('name') == 'superpowers':
+        dep['version'] = '^6.3.0'
+json.dump(d, open('$MUT_PLUGIN', 'w'))
+"
+MUT2_REPORT="$(manifest_agreement_report "$MUT_PLUGIN" "$MARKETPLACE_JSON")"
+expect_true "mutation 2 (reintroduced version key) makes the agreement pin non-empty" test -n "$MUT2_REPORT"
+expect_match "mutation 2 is reported as a version key on superpowers" \
+  "*superpowers carries a version key*" "$MUT2_REPORT"
+
+expect_eq "the shipped plugin.json and marketplace.json are byte-identical to before the mutations" \
+  "$MANIFEST_CKSUM_BEFORE" "$(shasum "$PLUGIN_JSON" "$MARKETPLACE_JSON" 2>/dev/null)"
+
+echo ""
+echo "=== Group 20: the suite is registered in tests/run.sh by name ==="
 #
 # tests/*.test.sh is NOT globbed by the runner — an unregistered suite is a
 # silent false green (tests/run.sh:39-42 records the last time that happened).
