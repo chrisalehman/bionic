@@ -96,6 +96,11 @@ run "spawn-worktree.test.sh" bash tests/spawn-worktree.test.sh
 # payload/permissions/ and payload/scripts/lib/profile.sh, driven against fixture settings
 # files in a temp tree. Hand-listed like every suite outside hooks/.
 run "profile.test.sh" bash tests/profile.test.sh
+# The JIT / degradation contract (epic-17 W3 S10, spec AC-5): payload/scripts/lib/jit.sh's
+# jit_check + jit_offer, driven against a fixture PATH, proving jit_offer calls install_dep
+# BY NAME (the ownership-table agreement) and mutates nothing on decline. Hand-listed like
+# every suite outside hooks/.
+run "jit.test.sh" bash tests/jit.test.sh
 # Command-file conventions (epic-17 W3 S9, spec AC-1): globs payload/commands/*.md.
 run "command-format.test.sh" bash tests/command-format.test.sh
 # /bionic:setup (epic-17 W3 S6, spec AC-2 / AC-6): payload/scripts/setup.sh driven end to
