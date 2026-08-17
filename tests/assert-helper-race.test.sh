@@ -152,9 +152,11 @@ done
 echo
 echo "── B. expect_absent never returns a false green on a present needle ──"
 for _s in $SUITES; do
-  _def="$(extract_fn "$_s" expect_absent)" || continue
-  expect_eq "$_s expect_absent() catches a present needle in a 512 KiB haystack ($ITERS/$ITERS)" \
-    "0" "$(probe "$_def" expect_absent no)"
+  for _fn in expect_absent expect_absent_ug; do
+    _def="$(extract_fn "$_s" "$_fn")" || continue
+    expect_eq "$_s $_fn() catches a present needle in a 512 KiB haystack ($ITERS/$ITERS)" \
+      "0" "$(probe "$_def" "$_fn" no)"
+  done
 done
 
 # ------------------------------------------------------------- C. the idiom

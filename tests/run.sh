@@ -16,9 +16,9 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
-. tests/lib/resolve-roots.sh
-printf 'Roots: hooks=%s skills=%s scripts=%s\n\n' \
-  "$BIONIC_HOOKS_DIR" "$BIONIC_SKILLS_DIR" "$BIONIC_SCRIPTS_DIR"
+( . tests/lib/resolve-roots.sh
+  printf 'Roots: hooks=%s skills=%s scripts=%s\n\n' \
+    "$BIONIC_HOOKS_DIR" "$BIONIC_SKILLS_DIR" "$BIONIC_SCRIPTS_DIR" )
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
