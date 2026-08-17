@@ -69,6 +69,12 @@ run "plugin-payload.test.sh" bash tests/plugin-payload.test.sh
 # path-resolution seam every suite sources: plants a doctored tree and proves the
 # override binds in BOTH directions. Belongs to no single hook, so hand-listed.
 run "seam-resolution.test.sh" bash tests/seam-resolution.test.sh
+# Cross-FILE proof (epic-17 W2 S4): plugin.json is the single version owner
+# (public semver + dependency ranges); the marketplace entry abstains; the
+# SUPPORTED_SDLC_VERSION bridge pair is pinned against the plugin major. Spans
+# payload/.claude-plugin/plugin.json, .claude-plugin/marketplace.json and two
+# hooks, so like the others it belongs to no single hook and stays hand-listed.
+run "version-ssot.test.sh" bash tests/version-ssot.test.sh
 # Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
 # 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so
