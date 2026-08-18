@@ -1,7 +1,7 @@
 #!/bin/bash
 # ENVIRONMENT CHECK — the start-side PRODUCER of epic-15's dispatch resilience.
 # Design: design/orchestrator-subagent-coordination.md §4 "The environment check", §7, §8.
-# [WALL: hooks/preflight-probe.test.sh]
+# [WALL: tests/preflight-probe.test.sh]
 #
 # This is NOT a hook. It lives in hooks/ for test-harness pairing only; the component
 # boundary is the registration list, and this script is never registered. It is run by

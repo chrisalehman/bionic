@@ -28,22 +28,22 @@
 #
 # FIXTURE FIDELITY: roster rows are generated to the roster-state/v1 schema exactly as
 # written by hooks/dispatch-preflight.sh (field set and order), shaped after the
-# confirmed-row fixture in hooks/stop-check.test.sh. This suite's subject is the READER;
-# hooks/dispatch-preflight.test.sh owns the writer. Rows are hand-built here for the same
+# confirmed-row fixture in tests/stop-check.test.sh. This suite's subject is the READER;
+# tests/dispatch-preflight.test.sh owns the writer. Rows are hand-built here for the same
 # reason that suite hand-builds them: the shapes under test (an unparseable cadence, a
 # 45-minute-old launch) are not producible from a live dispatch inside a test.
 #
-# Usage: bash hooks/session-sweeper.test.sh
+# Usage: bash tests/session-sweeper.test.sh
 
 set -uo pipefail
 
-. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/resolve-roots.sh"
 
 # Overridable so this suite can be driven against a MUTATED COPY of the sweeper without the
 # shipped file ever being modified — the same substitution
 # tests/cross-gate-agreement.test.sh offers for its parties, and the way to take RED
 # evidence for any predicate case without editing what ships:
-#   W4_SWEEPER_UNDER_TEST=/tmp/mutant.sh bash hooks/session-sweeper.test.sh
+#   W4_SWEEPER_UNDER_TEST=/tmp/mutant.sh bash tests/session-sweeper.test.sh
 SWEEPER="${W4_SWEEPER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-sweeper.sh}"
 TMPROOT="$(mktemp -d)"
 PASS=0; FAIL=0; TOTAL=0

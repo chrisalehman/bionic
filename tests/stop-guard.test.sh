@@ -8,7 +8,7 @@
 # AC-8/AC-10, plus wave-03's AC-4 (§8), AC-5 (§9) and AC-6 (§10).
 #
 # WHAT MOVED OUT. This script used to carry a second arm that WROTE the records
-# it now only reads. Those rows live in hooks/execution-recorder.test.sh, because
+# it now only reads. Those rows live in tests/execution-recorder.test.sh, because
 # that is where the writer lives — one writer, one paired suite. The records this
 # suite spends are still never hand-written: `observe()` below runs the real
 # hooks/stop-check.sh and feeds its real output to the real recorder, so every
@@ -18,11 +18,11 @@
 # test; nothing here invokes the TaskStop tool, touches the live installed hooks,
 # or writes outside a mktemp'd sandbox.
 #
-# Usage: bash hooks/stop-guard.test.sh
+# Usage: bash tests/stop-guard.test.sh
 
 set -uo pipefail
 
-. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/resolve-roots.sh"
 
 HERE="${BIONIC_HOOKS_DIR}"
 GUARD="$HERE/stop-guard.sh"
@@ -324,7 +324,7 @@ fi
 
 # ============================================================
 echo ""
-echo "=== Section 2: WRITING moved out — see hooks/execution-recorder.test.sh ==="
+echo "=== Section 2: WRITING moved out — see tests/execution-recorder.test.sh ==="
 # ============================================================
 #
 # Everything that used to be asserted here — a run records its target, a mention
@@ -336,7 +336,7 @@ echo "=== Section 2: WRITING moved out — see hooks/execution-recorder.test.sh 
 # What this suite still owes the reader is that the gate SPENDS a real record, and
 # every section below does exactly that: each one seeds through `observe()`, which
 # runs the real observation and the real recorder end to end.
-ok "the recording rows live with the writer (hooks/execution-recorder.test.sh)"
+ok "the recording rows live with the writer (tests/execution-recorder.test.sh)"
 
 # ============================================================
 echo ""
@@ -691,7 +691,7 @@ expect_status "the shipped script was never modified by the mutation proof" 0 \
 # directory is repo-controlled — and `rm -rf` of an ABSENT path SUCCEEDS, so a
 # reclaim-and-retry loop with no hard bound never terminates. A PreToolUse hook
 # that never returns renders no verdict at all, which §7's table has no row for.
-# The writer's half of this row is in hooks/execution-recorder.test.sh §8.
+# The writer's half of this row is in tests/execution-recorder.test.sh §8.
 run_bounded() {  # <label> <secs> <payload> -> sets BOUNDED_ST (137 = killed)
   local secs="$2" payload="$3" waited=0 pid
   printf '%s' "$payload" | bash "$GUARD" >"$SANDBOX/.bout" 2>"$SANDBOX/.berr" &
@@ -744,7 +744,7 @@ expect_contains "a planted state symlink is not written through (file level)" \
 # The gate refuses to READ through a planted symlink — the direction that is
 # uniquely its own. A repo that can choose which file this gate reads its evidence
 # out of can OPEN the wall, which §8 forbids; the write side of the same planted
-# path is the writer's row, in hooks/execution-recorder.test.sh §7.
+# path is the writer's row, in tests/execution-recorder.test.sh §7.
 run_guard "$(mk_stop_payload "$SID_A" "$S_TR" "$S_REPO" "victim")"
 expect_status "a symlinked state path refuses the stop" 2 "$GUARD_ST"
 expect_contains "the symlink refusal says what it found" "symlink" "$GUARD_ERR"
@@ -1230,7 +1230,7 @@ expect_status "a row that declared NOTHING is not discharged by its vacuous MET"
 # --- a repo-controlled ledger cannot open this gate ---
 #
 # The CLOSED half of the pair whose open half is at the landing gate
-# (hooks/landing-gate.test.sh §8f). A repo owns its own .bionic/, so a symlinked ledger is
+# (tests/landing-gate.test.sh §8f). A repo owns its own .bionic/, so a symlinked ledger is
 # a set of acks nobody in this session recorded: the sweeper — the ONE reader of that file
 # since S9 — refuses to answer over it at all, so no `acked=` reaches this gate, and this
 # gate, which is CLOSED and loud after the active-wave verdict, refuses the stop even though
@@ -1263,7 +1263,7 @@ expect_status "a target on no roster row is unchanged by any of this" 2 "$GUARD_
 #
 # That is the ack verb's OWN semantics, which the gate had been the odd one out on: an ack
 # for an unknown name is recorded with a warning and is "exempt the moment a row of that
-# name appears" (session-sweeper.sh's ack verb, and hooks/session-sweeper.test.sh §4). The
+# name appears" (session-sweeper.sh's ack verb, and tests/session-sweeper.test.sh §4). The
 # landing gate has always passed such a stop for an unrelated reason (a name on no row makes
 # the verb exit 0 and the gate fail open), and the stand-down never sees one, so this is the
 # reading all three now share.

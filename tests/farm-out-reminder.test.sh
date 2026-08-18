@@ -8,10 +8,10 @@
 # — here it only proves missing-keys classifies as main and stays silent
 # under the skeleton (no classifier yet).
 #
-# Usage: bash hooks/farm-out-reminder.test.sh
+# Usage: bash tests/farm-out-reminder.test.sh
 set -uo pipefail
 
-. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/resolve-roots.sh"
 HOOK="${BIONIC_HOOKS_DIR}/farm-out-reminder.sh"
 PASS=0; FAIL=0; TOTAL=0
 pass() { PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); }
@@ -246,10 +246,10 @@ d2() {
 d2
 
 echo ""
-echo "=== D3: bash hooks/context-spend.test.sh (main) → deny, class=suite ==="
+echo "=== D3: bash tests/context-spend.test.sh (main) → deny, class=suite ==="
 d3() {
   setup
-  run_hook "$(stdin_for 'bash hooks/context-spend.test.sh' '')"
+  run_hook "$(stdin_for 'bash tests/context-spend.test.sh' '')"
   assert_deny "D3 *.test.sh → deny"
   assert_audit_has "D3 audit class=suite" "farm-out deny: class=suite"
 }

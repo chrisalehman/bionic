@@ -28,7 +28,7 @@
 #
 # This is a PRODUCER, not a hook — it lives in hooks/ for test-harness pairing
 # only. Producers may think and take seconds; gates may only read (§3.2).
-# [WALL: hooks/stop-check.test.sh]
+# [WALL: tests/stop-check.test.sh]
 #
 # Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
 
@@ -179,7 +179,7 @@ fmt_age() {  # <seconds> -> "3m 12s"
 # A typed reference is a NAME, an agent id, or `name@team` — all three are legal
 # TaskStop inputs, and none of them is resolved for us. Comparison is LITERAL:
 # a target string is never treated as a pattern.
-# [WALL: hooks/stop-check.test.sh]
+# [WALL: tests/stop-check.test.sh]
 
 slugify() { printf '%s' "$1" | sed 's/[^a-zA-Z0-9]/-/g'; }
 

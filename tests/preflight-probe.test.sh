@@ -16,11 +16,11 @@
 # .bionic/docs/record/epic-15-kill-interception-experiment.md (CLI 2.1.220 verbatim
 # captures); anything not traceable to it is declared shape-only.
 #
-# Usage: bash hooks/preflight-probe.test.sh
+# Usage: bash tests/preflight-probe.test.sh
 
 set -uo pipefail
 
-. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/resolve-roots.sh"
 
 PROBE="${BIONIC_HOOKS_DIR}/preflight-probe.sh"
 TMPROOT="$(mktemp -d)"

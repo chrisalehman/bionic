@@ -30,10 +30,11 @@
 # otherwise slip through.
 #
 # Location independence gets its own group: the helper is sourced from
-# hooks/*.test.sh, tests/*.test.sh and lib/platform.test.sh, by absolute and by
-# relative reference, from whatever cwd the runner happens to be in. It must
-# derive <repo> from its OWN path, never the caller's pwd — the naive
-# implementation is green from the repo root and wrong from anywhere else.
+# tests/*.test.sh (including the hooks/*.test.sh suites moved under tests/ at
+# epic-17 W4 S9) and lib/platform.test.sh, by absolute and by relative
+# reference, from whatever cwd the runner happens to be in. It must derive
+# <repo> from its OWN path, never the caller's pwd — the naive implementation
+# is green from the repo root and wrong from anywhere else.
 #
 # HERMETIC. Copies files into a mktemp tree, forks bash and grep. No sandbox, no
 # network, no hooks, no writes outside $TMP.
@@ -198,7 +199,10 @@ echo "=== Group 6: no suite resolves privately (spec AC-3, enumerated) ==="
 # blind the day an overridden root goes live (W5 cold install).
 UNSEAMED=""
 LEGACY_IDIOM=""
-for f in "$REPO"/hooks/*.test.sh "$REPO"/tests/*.test.sh "$REPO"/lib/*.test.sh; do
+# hooks/*.test.sh moved under tests/ at epic-17 W4 S9 (spec AC-9); hooks/ now
+# holds only the hook scripts themselves, so that glob element is retired
+# rather than kept as a permanently-vacuous no-op.
+for f in "$REPO"/tests/*.test.sh "$REPO"/lib/*.test.sh; do
   [ -f "$f" ] || continue
   case "$f" in */seam-resolution.test.sh) continue ;; esac   # documented exemption, :46
   /usr/bin/grep -q 'resolve-roots\.sh' "$f" || UNSEAMED="$UNSEAMED ${f#$REPO/}"
