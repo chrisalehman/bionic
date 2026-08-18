@@ -232,6 +232,84 @@ expect_eq "every rule is Tool(pattern)-shaped" "" "$BAD_SHAPE"
 BAD_WILD="$(jq -r '.permissions.allow[] | select(test("^[A-Za-z_]+\\(\\*?\\)$"))' "$TEMPLATE" 2>/dev/null)"
 expect_eq "no rule grants a whole tool" "" "$BAD_WILD"
 
+# F-S2 — THE ANCHORING WALL, and the reason it is a wall and not a fix.
+#
+# This profile is applied into the USER settings layer, which is machine-wide.
+# A rule naming a RELATIVE path therefore fires in every repository on the
+# machine, not only in bionic's: `Bash(bash tests/run.sh:*)` pre-approved the
+# suite runner of any checkout that happened to have one — a repo cloned to
+# review a PR, a colleague's tree. The two rules of that shape were moved out to
+# bionic's own project-scope settings, where they belong by scope (Chris,
+# 2026-08-17, F-S2 option 1). Moving them fixes the instance; this fixes the
+# class, because nothing else stopped the next one being added.
+#
+# EVERY rule must fall in one of three anchored categories:
+#   1. rooted at __BIONIC_PLUGIN_ROOT__ — an absolute path on this machine
+#   2. scoped to bionic@bionic — the plugin's own plugin@marketplace pair
+#   3. path-free, and enumerated BY LITERAL below
+#
+# Category 3 is pinned as an exact list rather than a predicate on purpose. It
+# holds the two `:` marker rules (bash no-ops that authorise nothing and exist to
+# bracket the block) and `claude plugin list`, which names no path in any
+# repository and so cannot carry the F-S2 hazard. An exemption that could be
+# EARNED by a predicate would be an exemption a future rule could earn by
+# accident; this one has to be typed into this file, in front of whoever is
+# adding it.
+# The list is matched as PREFIXES so the begin marker's version suffix does not
+# have to be restated here (Group 3 owns that pin); everything else is written
+# whole.
+ANCHOR_EXEMPT='Bash(: bionic-profile-begin version=
+Bash(: bionic-profile-end)
+Bash(claude plugin list:*)'
+
+rule_is_anchored() {  # <rule>
+  local r="$1" ex
+  case "$r" in
+    *"__BIONIC_PLUGIN_ROOT__"*) return 0 ;;
+    *"bionic@bionic"*)          return 0 ;;
+  esac
+  while IFS= read -r ex; do
+    [ -n "$ex" ] || continue
+    case "$r" in "$ex"*) return 0 ;; esac
+  done <<< "$ANCHOR_EXEMPT"
+  return 1
+}
+
+UNANCHORED=""
+while IFS= read -r rule; do
+  [ -n "$rule" ] || continue
+  rule_is_anchored "$rule" || UNANCHORED="${UNANCHORED} ${rule}"
+done < <(jq -r '.permissions.allow[]' "$TEMPLATE" 2>/dev/null)
+expect_eq "every template rule is anchored to the plugin root, to bionic@bionic, or is a pinned path-free rule" \
+  "" "$UNANCHORED"
+
+# The wall is non-vacuous in both directions. Forward: the exact shape F-S2
+# removed must still be REJECTED by the classifier, so the class cannot come
+# back by someone re-adding it.
+expect_false "the wall rejects the shape F-S2 removed (it is not vacuous)" \
+  rule_is_anchored "Bash(bash tests/run.sh:*)"
+expect_false "and its farm-out spelling" \
+  rule_is_anchored "Bash(FARM_OUT_ALLOW=1 bash tests/run.sh:*)"
+# ...while an anchored rule is accepted, so the classifier is not simply saying
+# no to everything.
+expect_true "the wall accepts a plugin-root-anchored rule" \
+  rule_is_anchored "Bash(bash __BIONIC_PLUGIN_ROOT__/scripts/doctor.sh:*)"
+# Backward: every exemption names a rule actually IN the template, so the list
+# cannot rot into a licence for rules nobody ships any more.
+STALE_EXEMPT=""
+while IFS= read -r ex; do
+  [ -n "$ex" ] || continue
+  grep -qF "$ex" "$TEMPLATE" || STALE_EXEMPT="${STALE_EXEMPT} ${ex}"
+done <<< "$ANCHOR_EXEMPT"
+expect_eq "every path-free exemption names a rule the template actually ships" "" "$STALE_EXEMPT"
+
+# And the rules that moved are asserted GONE, not merely un-walled: the fix and
+# the wall are separate claims and a wall cannot prove a deletion happened.
+expect_nomatch "the unanchored suite-runner rule is out of the template" \
+  '*Bash(bash tests/run.sh:\**' "$TPL_TEXT"
+expect_nomatch "so is its farm-out spelling" \
+  '*FARM_OUT_ALLOW=1 bash tests/run.sh*' "$TPL_TEXT"
+
 echo ""
 echo "=== Group 3: the version pin — one manifest is the truth (ADR-002) ==="
 
@@ -309,8 +387,13 @@ for s in setup.sh doctor.sh remove.sh spawn-worktree.sh; do
   expect_true "the template covers scripts/${s}" \
     grep -qF "__BIONIC_PLUGIN_ROOT__/scripts/${s}" "$TEMPLATE"
 done
-# (c) the suite runner CLAUDE.md makes every agent run
-expect_true "the template covers tests/run.sh" grep -qF 'bash tests/run.sh' "$TEMPLATE"
+# (c) WAS the suite runner CLAUDE.md makes every agent run. Removed 2026-08-17
+# (F-S2, Chris's option 1): `bash tests/run.sh` is a relative path, and this
+# profile lands in the machine-wide USER layer, so the rule pre-approved the
+# suite runner of every repository on the machine. The two rules live in
+# bionic's own project-scope settings now, where the scope matches the claim.
+# Group 2's anchoring wall is this assertion's replacement, and it is the
+# INVERSE: it asserts no rule of that shape is in the template at all.
 # (d) plugin CLI operations, scoped to bionic's own plugin@marketplace pair
 expect_true "the template covers claude plugin install, scoped to bionic@bionic" \
   grep -qF 'claude plugin install bionic@bionic' "$TEMPLATE"
