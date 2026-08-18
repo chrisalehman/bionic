@@ -67,15 +67,25 @@ BIONIC_LEGACY_HOOK_STRIP_JQ='
 # CONSENT IS THE CALLER'S, as it is everywhere else in this payload: this
 # function never prompts and never asks whether it should. It is handed a path
 # and it writes.
+#
+# THE FILE'S MODE SURVIVES THE REWRITE. `mv` replaces the inode, so without the
+# capture-and-reapply below this function would hand settings.json the umask's
+# mode instead of its own — widening a file that routinely holds an `env` block
+# with tokens from 0600 to 0644 as a side effect of a hook cleanup. `stat` is
+# spelled both ways because BSD and GNU take different flags and neither accepts
+# the other's; an absent `stat` leaves `mode` empty and the rewrite still lands,
+# which is the same honest degradation this file already practises for `jq`.
 hooks_strip_legacy_channel() {  # <settings-file>
   local settings="${1:-}"
-  local tmp
+  local tmp mode
   [ -n "$settings" ] || return 1
   [ -f "$settings" ] || return 1
   command -v jq >/dev/null 2>&1 || return 1
 
   tmp="${settings}.bionic.tmp"
+  mode="$(stat -f '%Lp' "$settings" 2>/dev/null || stat -c '%a' "$settings" 2>/dev/null)"
   if jq "$BIONIC_LEGACY_HOOK_STRIP_JQ" "$settings" > "$tmp" && mv "$tmp" "$settings"; then
+    [ -n "$mode" ] && chmod "$mode" "$settings"
     return 0
   fi
   rm -f "$tmp"
