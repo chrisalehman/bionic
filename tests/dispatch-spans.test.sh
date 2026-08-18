@@ -21,6 +21,7 @@ set -uo pipefail
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 SKILL="${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
+POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
 
 PASS=0
 FAIL=0
@@ -286,12 +287,59 @@ expect_absent_in_file "no installed-path poker literal survives" \
 expect_absent_in_file "no installed-path stop-orders literal survives" \
   "bash ~/.claude/hooks/stop-orders.sh" "$SKILL"
 
-expect_count_in_file "exactly 2 plugin-rooted session-poker invocations (interval, tick)" \
-  'bash ${CLAUDE_PLUGIN_ROOT}/hooks/session-poker.sh' 2 "$SKILL"
-expect_count_in_file "exactly 2 plugin-rooted stop-orders invocations (standdown, order)" \
-  'bash ${CLAUDE_PLUGIN_ROOT}/hooks/stop-orders.sh' 2 "$SKILL"
+# The spelling is plugin-rooted WITH the payload's established fallback (F-1, 2026-08-18).
+# A bare `${CLAUDE_PLUGIN_ROOT}` is only expanded by the CLI at command-registration time; in
+# a model's own Bash shell the variable is unset, so the bare form expands to `/hooks/...`
+# and exits 127 — and these four are commands a model runs by hand, the patrol prompt's
+# first duty among them. The fallback keeps C-10's plugin-rooted intent and makes the command
+# resolve wherever a shell rather than the CLI does the expanding.
+expect_count_in_file "exactly 2 fallback-rooted session-poker invocations (interval, tick)" \
+  'bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/hooks/session-poker.sh' 2 "$SKILL"
+expect_count_in_file "exactly 2 fallback-rooted stop-orders invocations (standdown, order)" \
+  'bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/hooks/stop-orders.sh' 2 "$SKILL"
+# The bare form is what the fallback replaced: pinning its absence on these two scripts is
+# what makes a silent revert of any one site red rather than merely uncounted.
+expect_count_in_file "no bare-plugin-root poker invocation survives" \
+  'bash ${CLAUDE_PLUGIN_ROOT}/hooks/session-poker.sh' 0 "$SKILL"
+expect_count_in_file "no bare-plugin-root stop-orders invocation survives" \
+  'bash ${CLAUDE_PLUGIN_ROOT}/hooks/stop-orders.sh' 0 "$SKILL"
 expect_count_in_file "zero installed-hooks-directory literals anywhere in the skill" \
   '~/.claude/hooks/' 0 "$SKILL"
+
+echo ""
+echo "=== Section 5k: heartbeat doctrine agrees across BOTH its rendering surfaces ==="
+# Ownership row 4 gives heartbeat doctrine two owners: SKILL.md §Dispatch and this script's
+# own header prose. §5i/§5j read SKILL.md only, so they are presence pins on one owner, not
+# an agreement test for the pair — and the pair silently diverged for a whole wave (the
+# header kept documenting the retired self-wake loop and the `~/.claude` spelling long after
+# the doctrine replaced both). These arms read BOTH files for the same literals, so a rewrite
+# of either surface alone goes red.
+for _surface in "$SKILL" "$POKER"; do
+  _which="$(basename "$_surface")"
+  expect_pin_in_file "agreement/${_which}: one clock per run" \
+    "One clock per run, and only one." "$_surface"
+  expect_pin_in_file "agreement/${_which}: armed at engagement, not on dispatch" \
+    "Arm it at engagement" "$_surface"
+  expect_pin_in_file "agreement/${_which}: disarmed by CronDelete at run close" \
+    '`CronDelete` the job at run close' "$_surface"
+  expect_pin_in_file "agreement/${_which}: the tick command, in the runnable spelling" \
+    'bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/hooks/session-poker.sh tick' "$_surface"
+done
+unset _surface _which
+
+# The retired mechanism must not survive as a live claim on either surface. The header may
+# NAME the self-wake loop in its supersession note — what it may not do is spell the tick
+# command the old way, which is the form an operator would actually paste.
+expect_absent_in_file "poker header carries no installed-path invocation" \
+  "bash ~/.claude/hooks/session-poker.sh" "$POKER"
+expect_absent_in_file "poker header no longer calls its caller the self-wake loop" \
+  "the doctrine's self-wake loop" "$POKER"
+# Count-scoped so a second, contradicting copy of the arming rule cannot be added to either
+# surface without this going red (same reasoning as close-out.test.sh §5).
+expect_count_in_file "the arming rule has exactly one copy in the skill" \
+  "One clock per run, and only one." 1 "$SKILL"
+expect_count_in_file "…and exactly one in the poker header" \
+  "One clock per run, and only one." 1 "$POKER"
 
 echo ""
 echo "=== Section 6: superseded generic non-response text is gone ==="
