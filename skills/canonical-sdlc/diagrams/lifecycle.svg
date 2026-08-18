@@ -143,10 +143,10 @@
   <text class="step" data-step="9" data-step-name="Close-out" x="1166" y="376" font-size="16" fill="#16191d"><tspan font-weight="700">9</tspan><tspan dx="10" font-weight="600">Close-out</tspan></text>
   <text x="1166" y="398" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">agent-skills:</text>
   <text x="1166" y="410" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">shipping-and-launch</text>
-  <text x="1166" y="434" font-size="10.5" fill="#3a424c">· deploy with rollback ready</text>
-  <text x="1166" y="450" font-size="10.5" fill="#3a424c">· verify deployed; monitor once</text>
-  <text x="1166" y="466" font-size="10.5" fill="#3a424c">· one terminal disposition each</text>
-  <text x="1166" y="482" font-size="10.5" fill="#3a424c">· close-out report + handoff</text>
+  <text x="1166" y="434" font-size="10.5" fill="#3a424c">· one terminal disposition each</text>
+  <text x="1166" y="450" font-size="10.5" fill="#3a424c">· no finding leaves homeless</text>
+  <text x="1166" y="466" font-size="10.5" fill="#3a424c">· close-out report + handoff</text>
+  <text x="1166" y="482" font-size="10.5" fill="#3a424c">· heartbeat disarmed at close</text>
 
   <line x1="244" y1="423" x2="258" y2="423" stroke="#8b949e" stroke-width="1.6" marker-end="url(#arrow)"/>
   <line x1="466" y1="423" x2="480" y2="423" stroke="#8b949e" stroke-width="1.6" marker-end="url(#arrow)"/>
