@@ -21,7 +21,9 @@ test-harness traps, doc-path and worktree discipline, and agent/dispatch discipl
 declares its own `paths:` globs and loads only when a matching file is read.
 
 `.claude/rules/` is **committed** (epic-17 W4, 2026-08-18) via a `.gitignore` negation pair —
-the rest of `.claude/` (settings, local worktree state) stays gitignored as machine-local. A
-fresh clone now carries the path-scoped channel; shipped-plugin-surface absorption (rendering
-this discipline into the plugin's own agent files) is in progress this same wave — see
-`.claude/rules/` for the current file set until that lands.
+the rest of `.claude/` (settings, local worktree state) stays gitignored as machine-local, so
+a fresh clone carries the path-scoped channel and nothing else. Rules addressed to a
+*dispatched agent* belong in `agents-src/blocks/` instead, which renders into the six role
+files under `agents/` and ships with the plugin; the two channels differ in when an edit
+lands (a rules file on the next read, a role file on the next session), not in reach.
+`tests/scripts.test.sh` pins the roster of files here, so adding one is a deliberate act.

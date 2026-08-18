@@ -68,7 +68,7 @@ run "installer-behavior.test.sh" bash tests/installer-behavior.test.sh
 run "agent-roles.test.sh" bash tests/agent-roles.test.sh
 # The agent-file render pipeline (epic-17 W4 S2, spec AC-2): agents-src/ blocks + templates
 # + render.sh against the committed finals under agents/. Cross-FILE by nature — it spans a
-# source tree and an output tree — so, like every suite outside hooks/, hand-listed here.
+# source tree and an output tree.
 run "agent-render.test.sh" bash tests/agent-render.test.sh
 run "interview-protocol.test.sh" bash tests/interview-protocol.test.sh
 # Cross-FILE proof (epic-17 W4 S7, spec AC-5 / epic AC-11): the terminal-disposition
@@ -138,8 +138,7 @@ run "command-format.test.sh" bash tests/command-format.test.sh
 # The diagram pins (epic-17 W4 S8, spec AC-6 / design D4): the two composed-SVG diagrams
 # under skills/canonical-sdlc/diagrams/ read as text and compared against what they draw —
 # the hooks' SUPPORTED_SDLC_VERSION, hooks.json's six always-on entries, and SKILL.md's ten
-# steps and frontmatter hook set. Spans hooks/, skills/ and the SVGs, so it belongs to no
-# single hook and is hand-listed like every suite outside hooks/.
+# steps and frontmatter hook set. Spans hooks/, skills/ and the SVGs.
 run "diagrams.test.sh" bash tests/diagrams.test.sh
 # /bionic:setup (epic-17 W3 S6, spec AC-2 / AC-6): payload/scripts/setup.sh driven end to
 # end against fixture trees and a stateful `claude` shim on a replaced PATH, with the

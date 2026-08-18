@@ -2237,7 +2237,13 @@ DL_LAUNCHED=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
 # FRESH progress written now, well inside the declared cadence; a DEAD claim no live process
 # carries; an ABSENT deliverable so the row has not landed and is genuinely judged.
 printf 'stage 1\n' > "$DLREPO/.bionic/tmp/dl.progress"
-DL_CLAIM="bionic-xgate-D2-deadclaim-no-such-process-9f5c1a2b"
+# `-$$` is load-bearing, not decoration. This claim exists to be DEAD — the arm below asserts
+# `pgrep -f` matches nothing, and hooks/stop-check.sh reads liveness the same way. `pgrep -f`
+# matches on full argv, and a concurrent `tests/run.sh` running this very file carries the
+# literal in its own argv, so a fixed string makes each run's shell satisfy the other run's
+# "no such process" claim. The pid suffix gives every run a private literal that no sibling's
+# argv can contain, which is what makes the claim's deadness a property of this run alone.
+DL_CLAIM="bionic-xgate-D2-deadclaim-no-such-process-9f5c1a2b-$$"
 {
   printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
   printf 'roster-state/v1|status=confirmed|session=%s|name=dl-row|agent_id=adl-row-0001|launched_at=%s|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-dl.md|source=declared|duration=|progress=%s|claims=%s|cadence=~5m|absent=|waiver=|tool_use_id=toolu_DL\n' \
