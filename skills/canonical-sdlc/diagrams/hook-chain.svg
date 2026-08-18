@@ -1,0 +1,276 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1750" viewBox="0 0 1400 1750"
+     font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <!--
+    canonical-sdlc — hook chain.
+
+    THIS FILE IS THE SOURCE. There is no .excalidraw beside it and no export step:
+    the picture is composed text, which is what lets tests/diagrams.test.sh read it.
+    Pinned there against the code it draws:
+      * the three class="version-pin" renderings == hooks' SUPPORTED_SDLC_VERSION
+      * the six class="hook-entry" rows          == hooks/hooks.json, entry for entry
+        (data-event / data-matcher / data-guard / data-hook are what the pin compares)
+      * the class="armed-entry" rows' hook set   == the hooks: block in ../SKILL.md's
+        YAML frontmatter, in both directions
+  -->
+
+  <rect x="0" y="0" width="1400" height="1750" fill="#ffffff"/>
+
+  <!-- ============================ header ============================ -->
+  <text x="40" y="52" font-size="26" font-weight="700" fill="#16191d">Hook chain — what fires on which event, and which arm blocks</text>
+  <text x="40" y="80" font-size="14" fill="#626b76">Two registration channels carry the walls, and a guard keeps exactly one of them live per event. Every entry is rooted at <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">${CLAUDE_PLUGIN_ROOT}</tspan> and runs with <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">timeout: 10</tspan>.</text>
+  <line x1="40" y1="98" x2="1360" y2="98" stroke="#dde1e6" stroke-width="1"/>
+
+  <!-- ============================ lane A ============================ -->
+  <text x="40" y="122" font-size="12.5" font-weight="700" letter-spacing="1.2" fill="#16191d">ALWAYS ON</text>
+  <text x="146" y="122" font-size="12" fill="#626b76"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5">payload/hooks/hooks.json</tspan> — installed with the plugin, live in every session on the machine, whether or not the skill was ever invoked.</text>
+  <text x="54" y="144" font-size="9.5" font-weight="700" letter-spacing="1.1" fill="#8b949e">EVENT</text>
+  <text x="266" y="144" font-size="9.5" font-weight="700" letter-spacing="1.1" fill="#8b949e">WHAT RUNS</text>
+  <text x="556" y="144" font-size="9.5" font-weight="700" letter-spacing="1.1" fill="#8b949e">ARM</text>
+  <text x="702" y="144" font-size="9.5" font-weight="700" letter-spacing="1.1" fill="#8b949e">WHAT IT STOPS</text>
+  <line x1="40" y1="152" x2="1360" y2="152" stroke="#c9ced6" stroke-width="1.2"/>
+
+  <!-- lane A row 1 -->
+  <rect x="40" y="156" width="1320" height="60" fill="#fafbfc"/>
+  <text x="54" y="180" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">PreToolUse · Bash</text>
+  <text class="hook-entry" data-event="PreToolUse" data-matcher="Bash" data-guard="" data-hook="protect-main.sh" x="266" y="180" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">protect-main.sh</text>
+  <rect x="556" y="169" width="126" height="20" rx="4" fill="#fef3f2" stroke="#b42318" stroke-width="1.2"/>
+  <text x="619" y="183" font-size="10" font-weight="600" fill="#b42318" text-anchor="middle">BLOCK · exit 2</text>
+  <text x="702" y="178" font-size="10.5" fill="#3a424c">A git push to main or master. The command is split on &amp;&amp; / || / ; and only real command segments are read, so a</text>
+  <text x="702" y="194" font-size="10.5" fill="#3a424c">commit message that happens to mention pushing is not a hit. The user pushes to main from their own terminal.</text>
+
+  <!-- lane A row 2 -->
+  <rect x="40" y="216" width="1320" height="60" fill="#ffffff"/>
+  <text x="54" y="240" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">PreToolUse · Bash</text>
+  <text class="hook-entry" data-event="PreToolUse" data-matcher="Bash" data-guard="" data-hook="protect-database.sh" x="266" y="240" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">protect-database.sh</text>
+  <rect x="556" y="229" width="126" height="20" rx="4" fill="#fef3f2" stroke="#b42318" stroke-width="1.2"/>
+  <text x="619" y="243" font-size="10" font-weight="600" fill="#b42318" text-anchor="middle">BLOCK · exit 2</text>
+  <text x="702" y="238" font-size="10.5" fill="#3a424c">DROP, TRUNCATE, ALTER TABLE … DROP, and a DELETE with no WHERE — through psql, mysql, sqlite3 and the</text>
+  <text x="702" y="254" font-size="10.5" fill="#3a424c">other common database CLIs.</text>
+
+  <!-- lane A row 3 -->
+  <rect x="40" y="276" width="1320" height="60" fill="#fafbfc"/>
+  <text x="54" y="300" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">PreToolUse · Agent</text>
+  <text x="266" y="294" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">agent-context-guard.sh</text>
+  <text class="hook-entry" data-event="PreToolUse" data-matcher="Agent" data-guard="agent-context-guard.sh" data-hook="dispatch-preflight.sh" x="266" y="310" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">→ dispatch-preflight.sh</text>
+  <rect x="556" y="289" width="126" height="20" rx="4" fill="#fef3f2" stroke="#b42318" stroke-width="1.2"/>
+  <text x="619" y="303" font-size="10" font-weight="600" fill="#b42318" text-anchor="middle">BLOCK · exit 2</text>
+  <text x="702" y="298" font-size="10.5" fill="#3a424c">A dispatch, during an active wave, with no this-session environment attestation — or whose brief names no single</text>
+  <text x="702" y="314" font-size="10.5" fill="#3a424c">Expected artifact: path (zero refuses to name one, more than one refuses to choose). Outside a wave: untouched.</text>
+
+  <!-- lane A row 4 -->
+  <rect x="40" y="336" width="1320" height="60" fill="#ffffff"/>
+  <text x="54" y="360" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">PreToolUse · Write</text>
+  <text x="266" y="354" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">agent-context-guard.sh</text>
+  <text class="hook-entry" data-event="PreToolUse" data-matcher="Write" data-guard="agent-context-guard.sh" data-hook="canonical-sdlc-governing-skill.sh" x="266" y="370" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">→ canonical-sdlc-governing-skill.sh</text>
+  <rect x="556" y="349" width="126" height="20" rx="4" fill="#fef3f2" stroke="#b42318" stroke-width="1.2"/>
+  <text x="619" y="363" font-size="10" font-weight="600" fill="#b42318" text-anchor="middle">BLOCK · exit 2</text>
+  <text x="702" y="358" font-size="10.5" fill="#3a424c">An artifact under &lt;docs-root&gt;/{specs,plans,adrs,incidents}/ that fails the ladder below — the full frontmatter</text>
+  <text x="702" y="374" font-size="10.5" fill="#3a424c">contract, plus the three-way design rule on a wave-or-epic spec.</text>
+
+  <!-- lane A row 5 -->
+  <rect x="40" y="396" width="1320" height="60" fill="#fafbfc"/>
+  <text x="54" y="420" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">PreToolUse · Edit</text>
+  <text x="266" y="414" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">agent-context-guard.sh</text>
+  <text class="hook-entry" data-event="PreToolUse" data-matcher="Edit" data-guard="agent-context-guard.sh" data-hook="canonical-sdlc-governing-skill.sh" x="266" y="430" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">→ canonical-sdlc-governing-skill.sh</text>
+  <rect x="556" y="409" width="126" height="20" rx="4" fill="#fef3f2" stroke="#b42318" stroke-width="1.2"/>
+  <text x="619" y="423" font-size="10" font-weight="600" fill="#b42318" text-anchor="middle">BLOCK · exit 2</text>
+  <text x="702" y="418" font-size="10.5" fill="#3a424c">The same wall, reached on the Edit path — but it validates Write CONTENT only, so one valid write covers every</text>
+  <text x="702" y="434" font-size="10.5" fill="#3a424c">later edit of that file. A known hole, listed again at the bottom of this page rather than left to be discovered.</text>
+
+  <!-- lane A row 6 -->
+  <rect x="40" y="456" width="1320" height="60" fill="#ffffff"/>
+  <text x="54" y="480" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">SubagentStop</text>
+  <text x="266" y="474" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">agent-context-guard.sh</text>
+  <text class="hook-entry" data-event="SubagentStop" data-matcher="" data-guard="agent-context-guard.sh" data-hook="landing-gate.sh" x="266" y="490" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">→ landing-gate.sh</text>
+  <rect x="556" y="469" width="126" height="20" rx="4" fill="#fef3f2" stroke="#b42318" stroke-width="1.2"/>
+  <text x="619" y="483" font-size="10" font-weight="600" fill="#b42318" text-anchor="middle">BLOCK · once</text>
+  <text x="702" y="478" font-size="10.5" fill="#3a424c">The landing sweep, reached from inside an agent context. It refuses the stop exactly once if a contract that has</text>
+  <text x="702" y="494" font-size="10.5" fill="#3a424c">landed since the last sweep named artifacts that are not on disk, then lets the next one through.</text>
+  <line x1="40" y1="516" x2="1360" y2="516" stroke="#c9ced6" stroke-width="1.2"/>
+
+  <!-- ============================ the channel partition ============================ -->
+  <rect x="40" y="536" width="1320" height="106" rx="8" fill="#f6f7f9" stroke="#c9ced6" stroke-width="1.2"/>
+  <text x="58" y="560" font-size="13" font-weight="700" fill="#16191d">THE CHANNEL PARTITION — why the same wall is registered twice, and what keeps it from firing twice</text>
+  <text x="58" y="582" font-size="10.5" fill="#3a424c">A skill-frontmatter hook is looked up by SESSION id, and a tool event raised inside a subagent is dispatched under the AGENT id — so a wall registered on the skill channel is structurally invisible from inside an agent, which is</text>
+  <text x="58" y="598" font-size="10.5" fill="#3a424c">how delegation used to escape every wall this repo installed. The plugin channel above is alive in both places, so pointing it straight at a wall would double-fire on the main thread. It points at <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10">agent-context-guard.sh</tspan> instead,</text>
+  <text x="58" y="614" font-size="10.5" fill="#3a424c">which execs the wall it was handed <tspan font-style="italic">by argument</tspan> only when (1) the payload carries a top-level <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10">agent_id</tspan> — this is an agent context — and (2) <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10">.bionic/tmp/roster-&lt;session_id&gt;.state</tspan> exists — this session is armed.</text>
+  <text x="58" y="630" font-size="10.5" fill="#3a424c">Anything else, ambiguity included, exits 0 in silence: the guard never refuses on its own account and never prints, because a refusal nobody wrote would be attributed to the wall standing behind it.</text>
+
+  <!-- ============================ lane B ============================ -->
+  <text x="40" y="678" font-size="12.5" font-weight="700" letter-spacing="1.2" fill="#16191d">ARMED BY THE SKILL</text>
+  <text x="222" y="678" font-size="12" fill="#626b76">the <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5">hooks:</tspan> block in <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5">skills/canonical-sdlc/SKILL.md</tspan> frontmatter — live on the main thread only while the skill is loaded, and gone when it is not.</text>
+  <text x="54" y="700" font-size="9.5" font-weight="700" letter-spacing="1.1" fill="#8b949e">EVENT</text>
+  <text x="266" y="700" font-size="9.5" font-weight="700" letter-spacing="1.1" fill="#8b949e">WHAT RUNS</text>
+  <text x="556" y="700" font-size="9.5" font-weight="700" letter-spacing="1.1" fill="#8b949e">ARM</text>
+  <text x="702" y="700" font-size="9.5" font-weight="700" letter-spacing="1.1" fill="#8b949e">WHAT IT DOES</text>
+  <line x1="40" y1="708" x2="1360" y2="708" stroke="#c9ced6" stroke-width="1.2"/>
+
+  <!-- lane B row 1 -->
+  <rect x="40" y="712" width="1320" height="52" fill="#fafbfc"/>
+  <text x="54" y="734" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">PreToolUse · Bash</text>
+  <text class="armed-entry" data-hook="canonical-sdlc-evidence-gate.sh" x="266" y="734" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">canonical-sdlc-evidence-gate.sh</text>
+  <rect x="556" y="723" width="126" height="20" rx="4" fill="#fef3f2" stroke="#b42318" stroke-width="1.2"/>
+  <text x="619" y="737" font-size="10" font-weight="600" fill="#b42318" text-anchor="middle">BLOCK · exit 2</text>
+  <text x="702" y="732" font-size="10.5" fill="#3a424c">The commit wall — its ladder is below. It fires only on a real git commit segment (quote-aware), so every other</text>
+  <text x="702" y="748" font-size="10.5" fill="#3a424c">Bash command passes it untouched.</text>
+
+  <!-- lane B row 2 -->
+  <rect x="40" y="764" width="1320" height="52" fill="#ffffff"/>
+  <text x="54" y="786" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">PreToolUse · Bash</text>
+  <text class="armed-entry" data-hook="farm-out-reminder.sh" x="266" y="786" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">farm-out-reminder.sh</text>
+  <rect x="556" y="775" width="126" height="20" rx="4" fill="#fffaeb" stroke="#b54708" stroke-width="1.2"/>
+  <text x="619" y="789" font-size="10" font-weight="600" fill="#b54708" text-anchor="middle">DENY · via JSON</text>
+  <text x="702" y="784" font-size="10.5" fill="#3a424c">A long-running main-thread command — the full test suite, the bootstrap — is denied with a redirect naming the</text>
+  <text x="702" y="800" font-size="10.5" fill="#3a424c">role that should run it; fuzzy matches get one nudge per class per session. Exit 0 always: the decision is stdout JSON.</text>
+
+  <!-- lane B row 3 -->
+  <rect x="40" y="816" width="1320" height="52" fill="#fafbfc"/>
+  <text x="54" y="838" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">PreToolUse · TaskStop</text>
+  <text class="armed-entry" data-hook="stop-guard.sh" x="266" y="838" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">stop-guard.sh</text>
+  <rect x="556" y="827" width="126" height="20" rx="4" fill="#fef3f2" stroke="#b42318" stroke-width="1.2"/>
+  <text x="619" y="841" font-size="10" font-weight="600" fill="#b42318" text-anchor="middle">BLOCK · exit 2</text>
+  <text x="702" y="836" font-size="10.5" fill="#3a424c">A stop backed by no fresh observation, by a spent one, or by another actor's borrowed look — and a stop of a target</text>
+  <text x="702" y="852" font-size="10.5" fill="#3a424c">this session never launched, when addressed by name. The full agent id is the deliberate path past that refusal.</text>
+
+  <!-- lane B row 4 -->
+  <rect x="40" y="868" width="1320" height="52" fill="#ffffff"/>
+  <text x="54" y="890" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">PreToolUse · Agent</text>
+  <text class="armed-entry" data-hook="dispatch-preflight.sh" x="266" y="890" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">dispatch-preflight.sh</text>
+  <rect x="556" y="879" width="126" height="20" rx="4" fill="#fef3f2" stroke="#b42318" stroke-width="1.2"/>
+  <text x="619" y="893" font-size="10" font-weight="600" fill="#b42318" text-anchor="middle">BLOCK · exit 2</text>
+  <text x="702" y="888" font-size="10.5" fill="#3a424c">The start gate, reached on the main-thread channel — the same script lane A reaches through the guard. This is also</text>
+  <text x="702" y="904" font-size="10.5" fill="#3a424c">the arm that writes the session roster row, which is why the guard hands the agent-context copy a flag to skip it.</text>
+
+  <!-- lane B row 5 -->
+  <rect x="40" y="920" width="1320" height="52" fill="#fafbfc"/>
+  <text x="54" y="942" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">PreToolUse · Write, Edit</text>
+  <text class="armed-entry" data-hook="canonical-sdlc-governing-skill.sh" x="266" y="942" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">canonical-sdlc-governing-skill.sh</text>
+  <rect x="556" y="931" width="126" height="20" rx="4" fill="#fef3f2" stroke="#b42318" stroke-width="1.2"/>
+  <text x="619" y="945" font-size="10" font-weight="600" fill="#b42318" text-anchor="middle">BLOCK · exit 2</text>
+  <text x="702" y="940" font-size="10.5" fill="#3a424c">The artifact wall, reached on the main-thread channel — one registration per matcher, the same script behind both,</text>
+  <text x="702" y="956" font-size="10.5" fill="#3a424c">and the ladder below is what it walks.</text>
+
+  <!-- lane B row 6 -->
+  <rect x="40" y="972" width="1320" height="52" fill="#ffffff"/>
+  <text x="54" y="994" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">PostToolUse · Bash</text>
+  <text class="armed-entry" data-hook="execution-recorder.sh" x="266" y="994" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">execution-recorder.sh</text>
+  <rect x="556" y="983" width="126" height="20" rx="4" fill="#f0f4ff" stroke="#3538cd" stroke-width="1.2"/>
+  <text x="619" y="997" font-size="10" font-weight="600" fill="#3538cd" text-anchor="middle">RECORD</text>
+  <text x="702" y="992" font-size="10.5" fill="#3a424c">The observation arm. When stop-check.sh has run and printed its machine line, that line becomes the record a later</text>
+  <text x="702" y="1008" font-size="10.5" fill="#3a424c">stop is allowed to spend — one observation, exactly one stop.</text>
+
+  <!-- lane B row 7 -->
+  <rect x="40" y="1024" width="1320" height="52" fill="#fafbfc"/>
+  <text x="54" y="1046" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">PostToolUse · Agent</text>
+  <text class="armed-entry" data-hook="execution-recorder.sh" x="266" y="1046" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">execution-recorder.sh</text>
+  <rect x="556" y="1035" width="126" height="20" rx="4" fill="#f0f4ff" stroke="#3538cd" stroke-width="1.2"/>
+  <text x="619" y="1049" font-size="10" font-weight="600" fill="#3538cd" text-anchor="middle">RECORD</text>
+  <text x="702" y="1044" font-size="10.5" fill="#3a424c">The roster arm. A dispatch that actually spawned completes its <tspan font-style="italic">intended</tspan> row with the full agent id and status</text>
+  <text x="702" y="1060" font-size="10.5" fill="#3a424c"><tspan font-style="italic">confirmed</tspan> — the launch record that survives the conversation turning.</text>
+
+  <!-- lane B row 8 -->
+  <rect x="40" y="1076" width="1320" height="52" fill="#ffffff"/>
+  <text x="54" y="1098" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">SubagentStart</text>
+  <text class="armed-entry" data-hook="execution-recorder.sh" x="266" y="1098" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">execution-recorder.sh</text>
+  <rect x="556" y="1087" width="126" height="20" rx="4" fill="#f0f4ff" stroke="#3538cd" stroke-width="1.2"/>
+  <text x="619" y="1101" font-size="10" font-weight="600" fill="#3538cd" text-anchor="middle">RECORD</text>
+  <text x="702" y="1096" font-size="10.5" fill="#3a424c">The identification arm. The agent's own transcript-form id joins the roster BY THAT ID — not by name, and not by</text>
+  <text x="702" y="1112" font-size="10.5" fill="#3a424c">the payload's agent_type, which carries the subagent TYPE and made the join collide.</text>
+
+  <!-- lane B row 9 -->
+  <rect x="40" y="1128" width="1320" height="52" fill="#fafbfc"/>
+  <text x="54" y="1150" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">Stop</text>
+  <text class="armed-entry" data-hook="context-spend.sh" x="266" y="1150" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">context-spend.sh</text>
+  <rect x="556" y="1139" width="126" height="20" rx="4" fill="#eff8ff" stroke="#175cd3" stroke-width="1.2"/>
+  <text x="619" y="1153" font-size="10" font-weight="600" fill="#175cd3" text-anchor="middle">LOG ONLY</text>
+  <text x="702" y="1148" font-size="10.5" fill="#3a424c">One context-spend line per SDLC step boundary. A missing jq, transcript, usage block or plan means exit 0 and</text>
+  <text x="702" y="1164" font-size="10.5" fill="#3a424c">silence; it never writes stdout at all, because a Stop hook's stdout could be read as a block payload.</text>
+
+  <!-- lane B row 10 -->
+  <rect x="40" y="1180" width="1320" height="52" fill="#ffffff"/>
+  <text x="54" y="1202" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">Stop</text>
+  <text class="armed-entry" data-hook="landing-gate.sh" x="266" y="1202" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">landing-gate.sh</text>
+  <rect x="556" y="1191" width="126" height="20" rx="4" fill="#fef3f2" stroke="#b42318" stroke-width="1.2"/>
+  <text x="619" y="1205" font-size="10" font-weight="600" fill="#b42318" text-anchor="middle">BLOCK · once</text>
+  <text x="702" y="1200" font-size="10.5" fill="#3a424c">The landing sweep at the orchestrator's own turn end: a verdict for every contract that has landed since the last</text>
+  <text x="702" y="1216" font-size="10.5" fill="#3a424c">sweep, and one refusal if any of them named an artifact that is not on disk. Outside an active wave: untouched.</text>
+  <line x1="40" y1="1232" x2="1360" y2="1232" stroke="#c9ced6" stroke-width="1.2"/>
+
+  <!-- ============================ the two ladders ============================ -->
+  <text x="40" y="1272" font-size="12.5" font-weight="700" letter-spacing="1.2" fill="#16191d">THE TWO SDLC LADDERS — first failure wins, and it names itself</text>
+
+  <rect x="40" y="1286" width="650" height="304" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
+  <text x="58" y="1310" font-size="12.5" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#16191d">canonical-sdlc-governing-skill.sh</text>
+  <text x="58" y="1327" font-size="10.5" font-style="italic" fill="#626b76">PreToolUse · Write, Edit — the artifact wall</text>
+  <text x="58" y="1352" font-size="10.5" font-weight="700" fill="#3a424c">1</text>
+  <text x="76" y="1352" font-size="10.5" fill="#3a424c">the path is under &lt;docs-root&gt;/{specs,plans,adrs,incidents}/</text>
+  <text x="58" y="1370" font-size="10.5" font-weight="700" fill="#3a424c">2</text>
+  <text x="76" y="1370" font-size="10.5" fill="#3a424c">governing-skill: is present in the frontmatter</text>
+  <text x="58" y="1388" font-size="10.5" font-weight="700" fill="#3a424c">3</text>
+  <text class="version-pin" data-pin="hook-chain-governing-ladder" x="76" y="1388" font-size="10.5" fill="#3a424c">canonical_sdlc_version == 13</text>
+  <text x="58" y="1406" font-size="10.5" font-weight="700" fill="#3a424c">4</text>
+  <text x="76" y="1406" font-size="10.5" fill="#3a424c">the triple is present and enum-valid — intent · rigor · scale</text>
+  <text x="58" y="1424" font-size="10.5" font-weight="700" fill="#3a424c">5</text>
+  <text x="76" y="1424" font-size="10.5" fill="#3a424c">no mode: line, and the intent × scale cell is not barred</text>
+  <text x="58" y="1442" font-size="10.5" font-weight="700" fill="#3a424c">6</text>
+  <text x="76" y="1442" font-size="10.5" fill="#3a424c">flags and model_plan present; walk: is required or exempt</text>
+  <text x="58" y="1460" font-size="10.5" font-weight="700" fill="#3a424c">7</text>
+  <text x="76" y="1460" font-size="10.5" fill="#3a424c">## Verification Matrix present once sdlc-step ≥ 3</text>
+  <text x="58" y="1478" font-size="10.5" font-weight="700" fill="#3a424c">8</text>
+  <text x="76" y="1478" font-size="10.5" fill="#3a424c">a wave-or-epic SPEC satisfies one design arm: a flush-left</text>
+  <text x="76" y="1494" font-size="10.5" fill="#3a424c">## Design in place, a design: pointer that resolves to a file</text>
+  <text x="76" y="1510" font-size="10.5" fill="#3a424c">carrying one, or a design-waived: token</text>
+  <text x="58" y="1534" font-size="10.5" fill="#16191d">All pass → the Write proceeds. Any failure → exit 2, and the file is</text>
+  <text x="58" y="1550" font-size="10.5" fill="#16191d">never written.</text>
+  <text x="58" y="1570" font-size="10.5" fill="#175cd3">LOG-ONLY: rigor-floor consistency — and it logs user-overridden rather</text>
+  <text x="58" y="1583" font-size="10.5" fill="#175cd3">than a violation when rigor-override: is present. Plans and task-scale artifacts are untouched.</text>
+
+  <rect x="710" y="1286" width="650" height="304" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
+  <text x="728" y="1310" font-size="12.5" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#16191d">canonical-sdlc-evidence-gate.sh</text>
+  <text x="728" y="1327" font-size="10.5" font-style="italic" fill="#626b76">PreToolUse · Bash — the commit wall, on real git commit segments only</text>
+  <text x="728" y="1352" font-size="10.5" font-weight="700" fill="#3a424c">1</text>
+  <text x="746" y="1352" font-size="10.5" fill="#3a424c">newest plan under the plan dirs → its ## SDLC State, fence-aware</text>
+  <text x="728" y="1370" font-size="10.5" font-weight="700" fill="#3a424c">2</text>
+  <text class="version-pin" data-pin="hook-chain-evidence-ladder" x="746" y="1370" font-size="10.5" fill="#3a424c">canonical_sdlc_version == 13</text>
+  <text x="728" y="1388" font-size="10.5" font-weight="700" fill="#3a424c">3</text>
+  <text x="746" y="1388" font-size="10.5" fill="#3a424c">current: N — or current: T&lt;n&gt; at scale: task</text>
+  <text x="728" y="1406" font-size="10.5" font-weight="700" fill="#3a424c">4</text>
+  <text x="746" y="1406" font-size="10.5" fill="#3a424c">Step N's evidence keys present, and none of them a placeholder</text>
+  <text x="746" y="1422" font-size="10.5" fill="#3a424c">(todo · pending · in progress · xxx · tbd · placeholder all reject)</text>
+  <text x="728" y="1440" font-size="10.5" font-weight="700" fill="#3a424c">5</text>
+  <text x="746" y="1440" font-size="10.5" fill="#3a424c">at Step 5: cmd / pass / total / output with pass == total, a valid</text>
+  <text x="746" y="1456" font-size="10.5" fill="#3a424c">## Verification Matrix, and a non-empty auditor: once no row is pending</text>
+  <text x="728" y="1474" font-size="10.5" font-weight="700" fill="#3a424c">6</text>
+  <text x="746" y="1474" font-size="10.5" fill="#3a424c">from current: 5 onward — no AC block says provenance: implementation</text>
+  <text x="728" y="1492" font-size="10.5" font-weight="700" fill="#3a424c">7</text>
+  <text x="746" y="1492" font-size="10.5" fill="#3a424c">from current: 5 onward — walk-artifact: resolves to a real file under</text>
+  <text x="746" y="1508" font-size="10.5" fill="#3a424c">&lt;docs-root&gt;/record/ and names the AC, once any row is discharged</text>
+  <text x="746" y="1524" font-size="10.5" fill="#3a424c">(unless the plan declares walk: exempt)</text>
+  <text x="728" y="1548" font-size="10.5" fill="#16191d">Valid → the commit proceeds. Otherwise → exit 2, and git never runs.</text>
+  <text x="728" y="1570" font-size="10.5" fill="#175cd3">LOG-ONLY: the epic merge-target check, and the intent-scoped Step-5 keys</text>
+  <text x="728" y="1583" font-size="10.5" fill="#175cd3">for refactor (behavior-preservation · compat-matrix · revert-plan) and tune (baseline · target · re-measure).</text>
+
+  <!-- ============================ closing callouts ============================ -->
+  <rect x="40" y="1614" width="426" height="104" rx="8" fill="#f6f7f9" stroke="#dde1e6" stroke-width="1.2"/>
+  <text x="58" y="1636" font-size="11.5" font-weight="700" letter-spacing="0.8" fill="#16191d">ONE SUPPORTED VERSION</text>
+  <text class="version-pin" data-pin="hook-chain-version-callout" x="58" y="1657" font-size="10.5" fill="#3a424c">canonical_sdlc_version: 13 is the only value either hook accepts.</text>
+  <text x="58" y="1672" font-size="10.5" fill="#3a424c">Anything else — older, empty, malformed — exits 2 naming the value it</text>
+  <text x="58" y="1687" font-size="10.5" fill="#3a424c">found. No dispatch chain, no ladder, no grandfathering. The hooks own</text>
+  <text x="58" y="1702" font-size="10.5" fill="#3a424c">the number; this page's three renderings of it are pinned against them.</text>
+
+  <rect x="487" y="1614" width="426" height="104" rx="8" fill="#eff8ff" stroke="#a8cdf5" stroke-width="1.2"/>
+  <text x="505" y="1636" font-size="11.5" font-weight="700" letter-spacing="0.8" fill="#175cd3">THE LOG-ONLY SIDE CHANNEL</text>
+  <text x="505" y="1657" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">$HOME/.claude/logs/&lt;project-slug&gt;/sdlc-audit.md</text>
+  <text x="505" y="1674" font-size="10.5" fill="#3a424c">Deliberately outside every consuming project tree. One line per finding</text>
+  <text x="505" y="1689" font-size="10.5" fill="#3a424c">plus an stderr echo, and it never blocks the wave. Promoting any of it to</text>
+  <text x="505" y="1704" font-size="10.5" fill="#3a424c">blocking is a later decision, made by the user from this data.</text>
+
+  <rect x="934" y="1614" width="426" height="104" rx="8" fill="#fffaeb" stroke="#eaba7a" stroke-width="1.2"/>
+  <text x="952" y="1636" font-size="11.5" font-weight="700" letter-spacing="0.8" fill="#b54708">KNOWN HOLES — NOT ENFORCEMENT</text>
+  <text x="952" y="1657" font-size="10.5" fill="#3a424c">The governing-skill hook validates Write content, not Edit content: one</text>
+  <text x="952" y="1672" font-size="10.5" fill="#3a424c">valid write covers every later edit. Flag VALUES are never checked, only</text>
+  <text x="952" y="1687" font-size="10.5" fill="#3a424c">presence. The evidence gate reads the plan's text, so an Edit writing</text>
+  <text x="952" y="1702" font-size="10.5" fill="#3a424c">evidence for tests never run passes unseen. Proof-shape is a heuristic.</text>
+
+  <text x="1360" y="1738" font-size="10" text-anchor="end" fill="#626b76">composed SVG — this file is the source · pinned by tests/diagrams.test.sh</text>
+</svg>
