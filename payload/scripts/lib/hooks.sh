@@ -75,6 +75,14 @@ BIONIC_LEGACY_HOOK_STRIP_JQ='
 # spelled both ways because BSD and GNU take different flags and neither accepts
 # the other's; an absent `stat` leaves `mode` empty and the rewrite still lands,
 # which is the same honest degradation this file already practises for `jq`.
+#
+# THE ORDER IS THE FIX. `umask 077` and the `chmod` both come BEFORE the `mv`, so
+# the rename publishes an already-correct inode. Repairing the mode afterwards —
+# the obvious spelling — leaves the tmp holding the tokens at 0644 under a
+# predictable name, and makes the widening PERMANENT if the process dies in the
+# window between the two. Do not move either below the rename. profile.sh's
+# `_profile_write` carries the same ordering, and tests/remove.test.sh pins the
+# shape across all three writers.
 hooks_strip_legacy_channel() {  # <settings-file>
   local settings="${1:-}"
   local tmp mode
@@ -84,8 +92,9 @@ hooks_strip_legacy_channel() {  # <settings-file>
 
   tmp="${settings}.bionic.tmp"
   mode="$(stat -f '%Lp' "$settings" 2>/dev/null || stat -c '%a' "$settings" 2>/dev/null)"
-  if jq "$BIONIC_LEGACY_HOOK_STRIP_JQ" "$settings" > "$tmp" && mv "$tmp" "$settings"; then
-    [ -n "$mode" ] && chmod "$mode" "$settings"
+  if (umask 077; jq "$BIONIC_LEGACY_HOOK_STRIP_JQ" "$settings" > "$tmp") \
+     && { [ -z "$mode" ] || chmod "$mode" "$tmp"; } \
+     && mv "$tmp" "$settings"; then
     return 0
   fi
   rm -f "$tmp"

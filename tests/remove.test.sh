@@ -495,6 +495,68 @@ expect_true "hooks_strip_legacy_channel rewrote the 0644 fixture too" \
 expect_eq "hooks_strip_legacy_channel does not narrow a 0644 file" \
   "644" "$(file_mode "$LIB_MODE_SETTINGS")"
 
+# R-1. The mode must be right AT THE RENAME, not repaired after it.
+#
+# The arms above measure the mode once the writer has returned, which a writer
+# that publishes a 0644 inode and then chmods it back would also satisfy — while
+# leaving the tmp file (predictable name, full settings content, tokens included)
+# world-readable for the span before the rename, and while leaving the widening
+# PERMANENT if the process dies between `mv` and `chmod`. That second case is the
+# very defect these arms were added to close, so the property is stronger than
+# they state: the inode the rename publishes is already correct and no repair is
+# owed. profile.test.sh Group 14b makes the same measurement on the shared
+# `_profile_write`/`_rm_write` body; this is the payload door's own writer, which
+# is a different function and cannot be covered by the byte-identity pin below.
+#
+# The shim shadows only `mv` and `chmod`, and only to observe and to stop the
+# clock — `hooks_strip_legacy_channel` itself is the shipped one doing real work.
+HOOK_WRITE_SHIM="$TMP/hook-write-instant-shim.sh"
+cat > "$HOOK_WRITE_SHIM" <<'SHIM'
+_BIONIC_TEST_DEAD=0
+mv() {
+  { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; } >> "$BIONIC_TEST_MODE_LOG"
+  command mv "$@"
+  local rc=$?
+  _BIONIC_TEST_DEAD=1
+  return $rc
+}
+chmod() {
+  if [ "$_BIONIC_TEST_DEAD" = "1" ]; then return 0; fi
+  command chmod "$@"
+}
+SHIM
+
+ARM="$(new_arm lib-strip-mode-instant)"
+INST_SETTINGS="$ARM/home/.claude/settings.json"
+plant_legacy_channel_hooks "$ARM"
+chmod 600 "$INST_SETTINGS"
+INST_LOG="$TMP/hook-instant-mode.log"; : > "$INST_LOG"
+expect_eq "instant arm fixture: settings.json really starts at 0600" \
+  "600" "$(file_mode "$INST_SETTINGS")"
+expect_true "hooks_strip_legacy_channel rewrote the instant-arm fixture" \
+  env BIONIC_TEST_MODE_LOG="$INST_LOG" \
+    bash -c '. "$1"; . "$2"; hooks_strip_legacy_channel "$3"' _ "$HOOKS_SH" "$HOOK_WRITE_SHIM" "$INST_SETTINGS"
+expect_true "instant arm: the shimmed rename really was reached (not vacuous)" \
+  test -s "$INST_LOG"
+expect_eq "hooks_strip_legacy_channel's tmp already wears 0600 when mv renames it" \
+  "600" "$(head -1 "$INST_LOG" | tr -d ' ')"
+expect_eq "a process that dies the instant that mv lands still leaves it at 0600" \
+  "600" "$(file_mode "$INST_SETTINGS")"
+
+# The other direction, so neither arm can pass by hard-coding 0600.
+ARM="$(new_arm lib-strip-mode-instant-644)"
+INST_SETTINGS_644="$ARM/home/.claude/settings.json"
+plant_legacy_channel_hooks "$ARM"
+chmod 644 "$INST_SETTINGS_644"
+INST_LOG_644="$TMP/hook-instant-mode-644.log"; : > "$INST_LOG_644"
+expect_true "hooks_strip_legacy_channel rewrote the 0644 instant-arm fixture" \
+  env BIONIC_TEST_MODE_LOG="$INST_LOG_644" \
+    bash -c '. "$1"; . "$2"; hooks_strip_legacy_channel "$3"' _ "$HOOKS_SH" "$HOOK_WRITE_SHIM" "$INST_SETTINGS_644"
+expect_eq "the tmp for a 0644 settings file is 0644 at the rename, not narrowed" \
+  "644" "$(head -1 "$INST_LOG_644" | tr -d ' ')"
+expect_eq "and dying right after that rename leaves it at 0644" \
+  "644" "$(file_mode "$INST_SETTINGS_644")"
+
 echo ""
 echo "=== Group 8: the permission marker block (profile_strip semantics) ==="
 
@@ -597,6 +659,49 @@ expect_true "remove.sh's writer was extracted" test -n "$RM_WRITER"
 expect_eq "profile.sh and remove.sh carry the same settings writer" "$PROFILE_WRITER" "$RM_WRITER"
 expect_true "the extracted writer is the real one (it carries the mode capture)" \
   bash -c 'case "$1" in *"stat -f"*) exit 0 ;; esac; exit 1' _ "$PROFILE_WRITER"
+
+# R-1's pin, and the reason it is SHAPE rather than byte-identity. There is a
+# THIRD settings writer — hooks.sh's `hooks_strip_legacy_channel` — and the pin
+# above cannot reach it: it is a jq rewrite with its own failure cleanup, not the
+# same function under a third name, so byte-equality would be a false demand. The
+# ORDERING is what all three must share, and it is what R-1 found missing:
+#
+#   1. the tmp is created inside a `umask 077` subshell, so the file that holds
+#      the settings content is never briefly world-readable under a predictable
+#      name; and
+#   2. the captured mode is applied to the TMP, BEFORE the rename, so `mv`
+#      publishes an already-correct inode and a crash right after it owes nothing.
+#
+# A writer that chmods the DESTINATION is the pre-R-1 shape and fails (2) here.
+writer_shape_ok() {  # <label> <body>
+  local body="$2" umask_line chmod_line mv_line
+  case "$body" in *"umask 077"*) ;; *) return 1 ;; esac
+  # Line numbers, so "chmod before mv" is asserted as ordering and not merely as
+  # co-presence — the pre-R-1 body contains both tokens too.
+  umask_line="$(printf '%s\n' "$body" | grep -n 'umask 077' | head -1 | cut -d: -f1)"
+  chmod_line="$(printf '%s\n' "$body" | grep -n 'chmod "\$mode" "\$tmp"' | head -1 | cut -d: -f1)"
+  mv_line="$(printf '%s\n' "$body" | grep -n 'mv "\$tmp"' | head -1 | cut -d: -f1)"
+  [ -n "$umask_line" ] && [ -n "$chmod_line" ] && [ -n "$mv_line" ] || return 1
+  [ "$umask_line" -lt "$mv_line" ] && [ "$chmod_line" -lt "$mv_line" ]
+}
+
+HOOKS_WRITER="$(sh_function_body "$HOOKS_SH" hooks_strip_legacy_channel)"
+expect_true "hooks.sh's writer was extracted (the third-writer pin is not vacuous)" \
+  test -n "$HOOKS_WRITER"
+expect_true "profile.sh's writer chmods the tmp under umask 077 before the rename" \
+  writer_shape_ok profile "$PROFILE_WRITER"
+expect_true "remove.sh's writer does too" \
+  writer_shape_ok remove "$RM_WRITER"
+expect_true "and so does hooks.sh's, which byte-identity cannot reach" \
+  writer_shape_ok hooks "$HOOKS_WRITER"
+# The shape check discriminates: the pre-R-1 body — same tokens, chmod after the
+# rename and on the destination — must fail it, or it is pinning nothing.
+PRE_R1_BODY='_w() {
+  mv "$tmp" "$file" || return 1
+  [ -n "$mode" ] && chmod "$mode" "$file"
+}'
+expect_false "the pre-R-1 writer shape (chmod after mv, on the destination) fails this pin" \
+  writer_shape_ok pre-r1 "$PRE_R1_BODY"
 
 # F-S4. The consent RULE, pinned across the payload/standalone seam.
 #

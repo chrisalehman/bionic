@@ -708,6 +708,109 @@ prof_run BIONIC_SETTINGS_FILE="$S_MODE_644" -- profile_apply "$RENDERED" --conse
 expect_eq "a 0644 settings file is not narrowed either" "644" "$(file_mode "$S_MODE_644")"
 
 echo ""
+echo "=== Group 14b: the mode is right AT the rename, not repaired after it (R-1) ==="
+#
+# Group 14 measures the mode when the dust settles. That is not the whole claim.
+# A writer that renames a 0644 tmp into place and then chmods it back to 0600
+# passes every assertion above while doing two things the finding above forbids:
+#
+#   (a) the tmp file — a PREDICTABLE name, "<settings>.bionic.tmp", in a
+#       directory the user does not necessarily own exclusively — carries the
+#       full settings content, tokens included, at the umask's mode for the
+#       whole span between its creation and the rename; and
+#   (b) if the process dies in the window between `mv` and `chmod`, the widening
+#       is not a window at all, it is PERMANENT — the exact defect Group 14 was
+#       written to close.
+#
+# So the property is not "the mode is correct afterwards", it is "the inode the
+# rename PUBLISHES is already correct, and no repair is owed". Both arms below
+# measure that instant. Neither stubs the value under test: the writer is the
+# shipped `_profile_write`, doing its real work on a real file. The shim shadows
+# only the two coreutils it calls, and only to observe and to stop the clock.
+
+WRITE_SHIM="$TMP/write-instant-shim.sh"
+cat > "$WRITE_SHIM" <<'SHIM'
+# Shadows `mv` and `chmod` in the writer's OWN shell (both are called unqualified
+# from the function body, so a shell function intercepts them).
+#
+# `mv` records the mode of its SOURCE — the tmp file, which is the inode about to
+# become settings.json — and then does the real rename. From that moment the
+# process is declared DEAD: every later `chmod` returns success without doing
+# anything, which is what a crash immediately after the rename looks like from
+# the filesystem's side. The kill is triggered by the rename EVENT, not by the
+# chmod's target, so it cannot be tuned to spare one writer and not another.
+_BIONIC_TEST_DEAD=0
+mv() {
+  { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; } >> "$BIONIC_TEST_MODE_LOG"
+  command mv "$@"
+  local rc=$?
+  _BIONIC_TEST_DEAD=1
+  return $rc
+}
+chmod() {
+  if [ "$_BIONIC_TEST_DEAD" = "1" ]; then return 0; fi
+  command chmod "$@"
+}
+SHIM
+
+# The same controlled environment as prof_run, with the shim sourced AFTER the
+# library so its definitions win.
+prof_run_shimmed() {  # <env-assignments...> -- <function> [args]
+  local -a envs=()
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
+  shift
+  env -i HOME="$TMP/home" PATH="$BASE_BIN" "${envs[@]}" \
+    bash -c '. "$1"; . "$2"; shift 2; "$@"' _ "$PROFILE_SH" "$WRITE_SHIM" "$@" 2>&1
+}
+
+S_INST="$TMP/s-instant.json"; cp "$SET_REAL" "$S_INST"; chmod 600 "$S_INST"
+MODE_LOG="$TMP/instant-mode.log"; : > "$MODE_LOG"
+expect_eq "instant arm fixture: settings.json really starts at 0600" "600" "$(file_mode "$S_INST")"
+
+prof_run_shimmed BIONIC_SETTINGS_FILE="$S_INST" BIONIC_TEST_MODE_LOG="$MODE_LOG" \
+  -- profile_apply "$RENDERED" --consented >/dev/null 2>&1
+
+# The shim is only worth its lines if it actually ran — an arm that silently
+# never reached `mv` would pass both assertions below by measuring nothing.
+expect_true "instant arm: the shimmed rename really was reached (the arm is not vacuous)" \
+  test -s "$MODE_LOG"
+
+# (a) The tmp carried the settings content at the captured mode, not the umask's.
+expect_eq "the tmp file already wears the settings file's mode when mv renames it" \
+  "600" "$(head -1 "$MODE_LOG" | tr -d ' ')"
+
+# (b) The rename published a correct inode, so a death right after it costs
+# nothing. Every chmod after the rename was swallowed by the shim.
+expect_eq "a process that dies the instant mv lands still leaves settings.json at 0600" \
+  "600" "$(file_mode "$S_INST")"
+
+# Both directions again, so neither arm can pass by hard-coding 600: the tmp for
+# a 0644 file must be 0644 at the rename, not narrowed to 077's 0600.
+S_INST_644="$TMP/s-instant-644.json"; cp "$SET_REAL" "$S_INST_644"; chmod 644 "$S_INST_644"
+MODE_LOG_644="$TMP/instant-mode-644.log"; : > "$MODE_LOG_644"
+prof_run_shimmed BIONIC_SETTINGS_FILE="$S_INST_644" BIONIC_TEST_MODE_LOG="$MODE_LOG_644" \
+  -- profile_apply "$RENDERED" --consented >/dev/null 2>&1
+expect_eq "the tmp for a 0644 settings file is 0644 at the rename, not narrowed" \
+  "644" "$(head -1 "$MODE_LOG_644" | tr -d ' ')"
+expect_eq "and dying right after that rename leaves it at 0644" \
+  "644" "$(file_mode "$S_INST_644")"
+
+# The strip path reaches the writer independently of apply, and a fix applied to
+# one call site would not cover the other — Group 14 makes that argument for the
+# settled mode, and it holds identically for the instant.
+S_INST_STRIP="$TMP/s-instant-strip.json"; cp "$SET_REAL" "$S_INST_STRIP"
+prof_run BIONIC_SETTINGS_FILE="$S_INST_STRIP" -- profile_apply "$RENDERED" --consented >/dev/null 2>&1
+chmod 600 "$S_INST_STRIP"
+MODE_LOG_STRIP="$TMP/instant-mode-strip.log"; : > "$MODE_LOG_STRIP"
+prof_run_shimmed BIONIC_SETTINGS_FILE="$S_INST_STRIP" BIONIC_TEST_MODE_LOG="$MODE_LOG_STRIP" \
+  -- profile_strip >/dev/null 2>&1
+expect_true "strip instant arm: the shimmed rename was reached" test -s "$MODE_LOG_STRIP"
+expect_eq "profile_strip's tmp also wears 0600 at the rename" \
+  "600" "$(head -1 "$MODE_LOG_STRIP" | tr -d ' ')"
+expect_eq "and a death right after profile_strip's rename leaves 0600" \
+  "600" "$(file_mode "$S_INST_STRIP")"
+
+echo ""
 echo "=== Group 15: mutation and restore — these assertions can go red ==="
 #
 # Each arm doctors a COPY, re-runs the assertion against the copy, and records
