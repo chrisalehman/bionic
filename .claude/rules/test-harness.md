@@ -18,15 +18,15 @@ Migrated from `.bionic/memory/INDEX.md` (epic-12 wave-01 slice 6). Both entries 
   new bootstrap function needs a `(set -e; fn)` subshell regression test. Bit epic-06: a bare
   `cat` command-substitution aborted the whole bootstrap on an unreadable `.links` entry.
 
-- **`bash tests/run.sh` is the one gating command.** It glob-picks every `hooks/*.test.sh`,
-  then runs a growing list of **hand-listed** suites outside `hooks/` — the glob does not
-  reach them, so each one is invisible until its `run` line is added by name (see
-  `tests/run.sh` for the current list; it has drifted past "four" and is not repeated here
-  to avoid a second stale count) — plus the Docker mock e2e. There is no CI — this suite is
+- **`bash tests/run.sh` is the one gating command.** Every suite it runs is **hand-listed
+  by name** — there is no discovery glob at all (epic-17 W4 S9 moved the hook tests from
+  `hooks/` into `tests/` and retired the then-vacuous `hooks/*.test.sh` glob; `tests/run.sh`'s
+  own header records it). See `tests/run.sh` for the current list — it is not repeated here
+  to avoid a second stale count — plus the Docker mock e2e. There is no CI — this suite is
   the gate. A green run still says nothing about the *installed* hooks under
   `~/.claude/hooks/`; see `.claude/rules/bootstrap-install.md`.
 
-- **Only `hooks/*.test.sh` globs. Everything outside `hooks/` is hand-listed by name.** A new
+- **Nothing is auto-discovered. Every suite is hand-listed by name.** A new
   `tests/foo.test.sh` is NOT picked up — it silently never runs, and the suite stays green
   while covering nothing. Add the `run` line in `tests/run.sh` in the same commit as the suite.
   This is a recorded failure on this repo, not a hypothetical: the retired root `./test.sh`
