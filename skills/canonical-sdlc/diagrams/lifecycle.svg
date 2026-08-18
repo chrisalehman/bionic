@@ -118,7 +118,7 @@
   <text x="500" y="424" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">code-review-and-quality</text>
   <text x="500" y="446" font-size="10.5" fill="#3a424c">· six axes, each PASS/FLAG/FAIL</text>
   <text x="500" y="462" font-size="10.5" fill="#3a424c">· duplication reads the design</text>
-  <text x="500" y="478" font-size="10.5" fill="#3a424c">· independent critic at audited</text>
+  <text x="500" y="478" font-size="10.5" fill="#3a424c">· independent critic (audited)</text>
 
   <!-- step 7 -->
   <rect x="706" y="350" width="200" height="146" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>

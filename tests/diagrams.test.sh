@@ -341,6 +341,15 @@ expect_true "hook-chain.svg's header does mention class=\"hook-entry\" in prose"
 expect_eq "…and the extractor still sees exactly six entries, not seven" \
   "6" "$(svg_hook_entries "$HOOKCHAIN" | grep -c .)"
 
+# G11. the twice-regressed critic bullet (review F-6 → rfold fix → rfold2 revert,
+# delta-audit D-1): free prose in a node is invisible to every structural pin, and
+# this one string has now been broken twice — so it gets its own literal pin.
+# "(audited)" is the reviewed fix; "at audited" is the dangling-adjective defect.
+expect_true "lifecycle.svg names the independent critic with '(audited)', the reviewed form" \
+  grep -q 'independent critic (audited)' "$LIFECYCLE"
+expect_false "…and the dangling-adjective regression 'critic at audited' is absent" \
+  grep -q 'independent critic at audited' "$LIFECYCLE"
+
 # ============================================================
 echo ""
 echo "========================================"
