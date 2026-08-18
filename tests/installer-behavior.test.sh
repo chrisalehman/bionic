@@ -18,6 +18,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/frontmatter-parser.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 BOOTSTRAP="${BIONIC_SCRIPTS_DIR}/claude-bootstrap.sh"
@@ -1010,20 +1011,10 @@ _matcher_has_cmd() {  # <event> <matcher> <cmd>
     "$HOOKS_SETTINGS" >/dev/null
 }
 SKILL_MD="${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
+# Shared with cross-gate-agreement.test.sh and scripts.test.sh via
+# tests/lib/frontmatter-parser.sh (epic-17 W4 AC-12 dedupe).
 _skill_frontmatter_has() {  # <event> <matcher> <cmd>
-  awk -v want_event="$1" -v want_matcher="$2" -v want_cmd="$3" '
-    /^hooks:$/ { active=1; next }
-    active && /^---$/ { active=0 }
-    active && /^[A-Za-z]/ { active=0 }
-    !active { next }
-    /^  [A-Za-z]+:$/ { event=$0; sub(/^  /,"",event); sub(/:$/,"",event); matcher=""; next }
-    /^    - matcher: "/ { matcher=$0; sub(/^    - matcher: "/,"",matcher); sub(/"$/,"",matcher); next }
-    /^          command: / {
-      cmd=$0; sub(/^          command: /,"",cmd)
-      if (event == want_event && matcher == want_matcher && cmd == want_cmd) found=1
-    }
-    END { exit !found }
-  ' "$SKILL_MD"
+  skill_hooks_has "$SKILL_MD" "$1" "$2" "$3"
 }
 _matcher_has_cmd PreToolUse Bash "~/.claude/hooks/stop-guard.sh" \
   && no "AC-7: stop-guard.sh still registered on PreToolUse|Bash (retired at 4/4)" \
