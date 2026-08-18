@@ -107,7 +107,7 @@ _setup_self_dir() {
 
 SETUP_LIB_DIR="${BIONIC_LIB_DIR:-$(_setup_self_dir)/lib}"
 
-for _setup_lib in deps.sh detect.sh profile.sh; do
+for _setup_lib in deps.sh detect.sh profile.sh hooks.sh; do
   if [ ! -f "${SETUP_LIB_DIR}/${_setup_lib}" ]; then
     echo "setup.sh: cannot find ${SETUP_LIB_DIR}/${_setup_lib} — the payload looks incomplete." >&2
     echo "          reinstall with: claude plugin install bionic@bionic" >&2
@@ -120,6 +120,8 @@ done
 . "${SETUP_LIB_DIR}/detect.sh"
 # shellcheck source=/dev/null
 . "${SETUP_LIB_DIR}/profile.sh"
+# shellcheck source=/dev/null
+. "${SETUP_LIB_DIR}/hooks.sh"
 
 # ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -400,18 +402,24 @@ setup_legacy_alias() {
   return 0
 }
 
-# ─── Step 6 — legacy-channel managed-hook entries ─────────────────────────────────────
+# ─── Step 6 — legacy-channel managed-hook entries ────────────────────────────
 #
-# The filter matches detect.sh's own predicate exactly (a hook command naming
-# `.claude/hooks/`), because the count that decided to prompt and the edit that
-# clears it must be the same question. Foreign hooks — anything not pointing
-# into the pre-plugin directory — are untouched: this is bionic's leftover being
-# removed, not the machine's hook config being taken over.
+# COUNT here, REWRITE in hooks.sh. This step decides whether to ask and what to
+# say; it does not carry a jq program of its own, because it used to and
+# remove.sh's differently-shaped copy of the same rewrite drifted away from it
+# unpinned. The count that decides to prompt and the edit that clears it are the
+# same question, so they spell the same predicate — and the one caller with a
+# real excuse for a second copy is remove.sh's standalone door, not this script,
+# which refuses to start without the libraries beside it.
+#
+# Foreign hooks — anything not pointing into the pre-plugin directory — are
+# untouched: this is bionic's leftover being removed, not the machine's hook
+# config being taken over.
 
 setup_legacy_channel_hooks() {
   say ""
   say "6. Legacy-channel managed-hook entries"
-  local line count settings tmp
+  local line count settings
   line="$(detect_legacy_channel_hooks)"; count="${line#*count=}"
   settings="$(_dep_settings_file)"
 
@@ -437,20 +445,9 @@ setup_legacy_channel_hooks() {
     return 0
   fi
 
-  tmp="${settings}.bionic.tmp"
-  if jq '
-        if (.hooks | type) != "object" then .
-        else
-          .hooks |= ( with_entries(
-                        .value |= ( map(.hooks |= map(select((((.command // "") | contains(".claude/hooks/")) | not))))
-                                    | map(select((((.hooks // []) | length) > 0))) ) )
-                      | with_entries(select((((.value // []) | length) > 0))) )
-          | if (.hooks | length) == 0 then del(.hooks) else . end
-        end
-      ' "$settings" > "$tmp" && mv "$tmp" "$settings"; then
+  if hooks_strip_legacy_channel "$settings"; then
     say "   removed."
   else
-    rm -f "$tmp"
     say "   could not rewrite ${settings}."
     action "remove ${count} legacy-channel managed-hook entr(ies) from ${settings} by hand"
   fi

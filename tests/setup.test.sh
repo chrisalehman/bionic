@@ -504,6 +504,21 @@ expect_eq "consented cleanup: legacy-channel entries are gone" "env:legacy-chann
 expect_match "cleanup keeps a foreign hook that is not bionic's leftover" '*other-tool*' "$(cat "$FIX/ch/settings.json")"
 expect_match "cleanup keeps unrelated settings keys" '*"model"*' "$(cat "$FIX/ch/settings.json")"
 
+# D-1/D-2 — the setup-side WALL. Every assertion above uses detect.sh as an
+# ORACLE: it proves setup AGREES with the library on this fixture, which a
+# second implementation can do right up until the day it drifts. The ownership
+# table's row 1 names a wall, and doctor had one while setup did not — setup
+# carried its own jq strip program, structurally different from remove.sh's,
+# with nothing pinning them together.
+#
+# setup has no standalone-door excuse for a copy: it refuses to run at all
+# without the libraries beside it. So the rewrite lives in hooks.sh and this
+# asserts setup does not grow a second one.
+expect_true "setup.sh calls the library strip rather than carrying one" \
+  bash -c 'grep -qF "hooks_strip_legacy_channel" "$1"' _ "$SETUP_SH"
+expect_eq "setup.sh contains no jq rewrite program of its own" "" \
+  "$(grep -n 'with_entries' "$SETUP_SH" || true)"
+
 new_fixture hooks-declined
 plant_cli_plugin "bionic@bionic" true
 plant_legacy_channel_settings

@@ -49,6 +49,7 @@ REMOVE_SH="${REPO}/payload/scripts/remove.sh"
 REMOVE_MD="${REPO}/payload/commands/remove.md"
 PROFILE_SH="${REPO}/payload/scripts/lib/profile.sh"
 DETECT_SH="${REPO}/payload/scripts/lib/detect.sh"
+HOOKS_SH="${REPO}/payload/scripts/lib/hooks.sh"
 TEMPLATE="${REPO}/payload/permissions/profile.template.json"
 
 PASS=0; FAIL=0; TOTAL=0
@@ -459,6 +460,31 @@ expect_true "remove.sh carries detect.sh's legacy-channel-hook predicate verbati
   bash -c 'grep -qF ".claude/hooks/" "$1"' _ "$REMOVE_SH"
 expect_true "detect.sh carries the same predicate" \
   bash -c 'grep -qF ".claude/hooks/" "$1"' _ "$DETECT_SH"
+
+# D-1. The predicate was pinned; the REWRITE was not, in either direction. Two
+# structurally different jq programs did the same job — setup.sh's inline copy
+# and remove.sh's — and fixing one file's group-collapse behaviour would have
+# left the other silently on the old shape. setup.sh's copy is gone (it calls
+# hooks.sh, which it always has beside it); remove.sh's stays, because the
+# standalone door has to run where hooks.sh does not exist. So the surviving
+# pair is pinned on the program itself.
+#
+# The two files differ legitimately on exactly one thing: the NAME of the
+# variable holding the predicate substring. Extract each program's body and
+# neutralise that one difference, then require equality.
+jq_strip_program() {  # <file> <VAR_NAME>
+  sed -n "/^$2='\$/,/^'\$/p" "$1" \
+    | sed -e '1d' -e '$d' -e 's/'"'"'"\${[A-Za-z_][A-Za-z0-9_]*}"'"'"'/<PREDICATE>/g'
+}
+LIB_STRIP_PROGRAM="$(jq_strip_program "$HOOKS_SH" BIONIC_LEGACY_HOOK_STRIP_JQ)"
+RM_STRIP_PROGRAM="$(jq_strip_program "$REMOVE_SH" RM_LEGACY_HOOK_STRIP_JQ)"
+expect_true "the library's strip program was extracted (the pin is not vacuous)" \
+  test -n "$LIB_STRIP_PROGRAM"
+expect_true "remove.sh's inline strip program was extracted" test -n "$RM_STRIP_PROGRAM"
+expect_eq "hooks.sh and remove.sh's standalone copy are the same strip program" \
+  "$LIB_STRIP_PROGRAM" "$RM_STRIP_PROGRAM"
+expect_true "the extracted program is the real one (it carries the predicate)" \
+  bash -c 'case "$1" in *"<PREDICATE>"*) exit 0 ;; esac; exit 1' _ "$LIB_STRIP_PROGRAM"
 
 echo ""
 echo "=== Group 9: payload mode and standalone mode agree on the profile strip ==="
