@@ -113,24 +113,75 @@ fi
 
 # ============================================================
 echo ""
-echo "=== C — the payload holds links, never copies ==="
+echo "=== C — one owner per file: link to the repo's owner, or BE the owner ==="
 # ============================================================
 #
-# Everything under payload/ except the plugin manifest must be a symlink. A regular file
-# here is a second copy of something the repo already owns, and a second copy drifts.
+# The invariant this section defends is SINGLE OWNERSHIP, not symlink-ness. A second copy
+# of something the repo already owns drifts, so anything the repo owns — hooks/, agents/,
+# skills/, LICENSE — appears here only as a link back to that owner.
+#
+# THE PAYLOAD-NATIVE DIRECTORIES are the other way to satisfy the same invariant: the
+# payload IS the owner. These files have no repo-root twin to drift from — the whole point
+# of the wave-03 command surface is that installation logic lives in the payload and nowhere
+# else (wave-03 spec §Design, component boundaries), and claude-bootstrap.sh, the last
+# root-level installer, retires at W5.
+#
+#   scripts/      the four commands and the libraries behind them (W3 S1)
+#   permissions/  the permission-profile template (W3 S5, spec AC-6)
+#   commands/     the shipped slash-command files (W3 S9)
+#
+# Carving them out of the link check is not a hole in the invariant: each is closed by the
+# SAME pair of guards — no symlinks inside it, so it cannot point at a second owner, and no
+# repo-root twin beside it, so ownership cannot become ambiguous later. That pair is written
+# once below and applied to the list, and the list is what the `find` exclusions are built
+# from, so a fourth payload-native directory is one entry here rather than a paste plus an
+# exclusion someone forgets.
+#
+# AMENDED epic-17 W3 S1. Before that, the check read "everything except the plugin manifest
+# must be a symlink", which was true only because every payload file then had a repo-root
+# owner.
+
+PAYLOAD_NATIVE_DIRS="scripts permissions commands"
 
 if [ ! -d "$PAYLOAD" ]; then
   no "payload/ exists"
 else
   ok "payload/ exists"
 
-  STRAY="$(find "$PAYLOAD" -type f \
-             ! -path "${PAYLOAD}/.claude-plugin/*" 2>/dev/null | sed "s|${REPO}/||" | sort)"
+  # The exclusions and the guards below are built from ONE list, so they cannot fall out of
+  # step with each other.
+  FIND_EXCLUSIONS=(! -path "${PAYLOAD}/.claude-plugin/*")
+  for native in $PAYLOAD_NATIVE_DIRS; do
+    FIND_EXCLUSIONS+=(! -path "${PAYLOAD}/${native}/*")
+  done
+
+  STRAY="$(find "$PAYLOAD" -type f "${FIND_EXCLUSIONS[@]}" 2>/dev/null | sed "s|${REPO}/||" | sort)"
   if [ -z "$STRAY" ]; then
-    ok "payload/ contains no regular files outside .claude-plugin/ (no second owner)"
+    ok "payload/ holds no copy of anything the repo owns (outside .claude-plugin/ and the payload-native dirs)"
   else
-    no "payload/ contains no regular files outside .claude-plugin/ (found: $(echo "$STRAY" | tr '\n' ' '))"
+    no "payload/ holds no copy of anything the repo owns (found: $(echo "$STRAY" | tr '\n' ' '))"
   fi
+
+  # The carve-out's two guards, once, for every payload-native directory.
+  #
+  # First: it must own its files outright — a symlink in there would point at a second owner
+  # and reopen exactly the drift this section exists to prevent. Second: no root-level twin;
+  # if one ever appears, ownership is ambiguous again and the carve-out is no longer safe.
+  for native in $PAYLOAD_NATIVE_DIRS; do
+    if [ -d "${PAYLOAD}/${native}" ]; then
+      NATIVE_LINKS="$(find "${PAYLOAD}/${native}" -type l 2>/dev/null | sed "s|${REPO}/||" | sort)"
+      if [ -z "$NATIVE_LINKS" ]; then
+        ok "payload/${native}/ contains no symlinks (the payload owns these files outright)"
+      else
+        no "payload/${native}/ contains no symlinks (found: $(echo "$NATIVE_LINKS" | tr '\n' ' '))"
+      fi
+    fi
+    if [ -e "${REPO}/${native}" ]; then
+      no "no repo-root ${native}/ twin beside payload/${native}/ (found ${REPO}/${native})"
+    else
+      ok "no repo-root ${native}/ twin beside payload/${native}/"
+    fi
+  done
 
   # Each link must resolve, and must resolve to the repo's single owner.
   for pair in "hooks:hooks" "agents:agents"; do
