@@ -9,6 +9,7 @@
 set -euo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/frontmatter-parser.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 CONFIG="${REPO}/claude-config.txt"
@@ -722,20 +723,11 @@ expect_true "MANAGED_HOOKS includes protect-database.sh" grep -q 'protect-databa
 expect_false "MANAGED_HOOKS no longer includes canonical-sdlc-evidence-gate.sh (moved to SKILL.md frontmatter)" \
   /usr/bin/grep -qF '"PreToolUse|Bash|~/.claude/hooks/canonical-sdlc-evidence-gate.sh"' "$BOOTSTRAP"
 
+# Shared with cross-gate-agreement.test.sh and installer-behavior.test.sh via
+# tests/lib/frontmatter-parser.sh (epic-17 W4 AC-12 dedupe).
 expect_true "skills/canonical-sdlc/SKILL.md frontmatter registers canonical-sdlc-evidence-gate.sh as PreToolUse|Bash" \
-  awk '
-    /^hooks:$/ { active=1; next }
-    active && /^---$/ { active=0 }
-    active && /^[A-Za-z]/ { active=0 }
-    !active { next }
-    /^  [A-Za-z]+:$/ { event=$0; sub(/^  /,"",event); sub(/:$/,"",event); matcher=""; next }
-    /^    - matcher: "/ { matcher=$0; sub(/^    - matcher: "/,"",matcher); sub(/"$/,"",matcher); next }
-    /^          command: / {
-      cmd=$0; sub(/^          command: /,"",cmd)
-      if (event == "PreToolUse" && matcher == "Bash" && cmd ~ /canonical-sdlc-evidence-gate\.sh$/) found=1
-    }
-    END { exit !found }
-  ' "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
+  skill_hooks_has "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md" PreToolUse Bash \
+    '${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-evidence-gate.sh'
 
 # 4i: farm-out-reminder.sh moved out of MANAGED_HOOKS into skills/canonical-sdlc/
 # SKILL.md's frontmatter hooks: block (session-20260815-landing-supervision T5,
@@ -747,19 +739,8 @@ expect_false "MANAGED_HOOKS no longer includes farm-out-reminder.sh (moved to SK
   /usr/bin/grep -qF '"PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh"' "$BOOTSTRAP"
 
 expect_true "skills/canonical-sdlc/SKILL.md frontmatter registers farm-out-reminder.sh as PreToolUse|Bash" \
-  awk '
-    /^hooks:$/ { active=1; next }
-    active && /^---$/ { active=0 }
-    active && /^[A-Za-z]/ { active=0 }
-    !active { next }
-    /^  [A-Za-z]+:$/ { event=$0; sub(/^  /,"",event); sub(/:$/,"",event); matcher=""; next }
-    /^    - matcher: "/ { matcher=$0; sub(/^    - matcher: "/,"",matcher); sub(/"$/,"",matcher); next }
-    /^          command: / {
-      cmd=$0; sub(/^          command: /,"",cmd)
-      if (event == "PreToolUse" && matcher == "Bash" && cmd ~ /farm-out-reminder\.sh$/) found=1
-    }
-    END { exit !found }
-  ' "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
+  skill_hooks_has "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md" PreToolUse Bash \
+    '${CLAUDE_PLUGIN_ROOT}/hooks/farm-out-reminder.sh'
 
 # 4m: hooks/ dir contains at least one non-test hook
 _hook_count=0
