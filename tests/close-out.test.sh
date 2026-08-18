@@ -70,27 +70,28 @@ else
   fail "operational-rules.md TERMDISP block missing/empty"
 fi
 
-# ===== Section 2: RED evidence against the pre-slice tree (git HEAD) =====
-# HEAD predates this slice's commit — neither file carries the section yet, so
-# the pin must refuse rather than pass vacuously on two empty blocks.
-echo "== Section 2: RED against pre-slice HEAD (both surfaces absent) =="
-HEAD_SKILL="$TMP/head-SKILL.md"
-HEAD_RULES="$TMP/head-operational-rules.md"
-if git -C "$REPO" show HEAD:skills/canonical-sdlc/SKILL.md > "$HEAD_SKILL" 2>/dev/null \
-   && git -C "$REPO" show HEAD:skills/canonical-sdlc/operational-rules.md > "$HEAD_RULES" 2>/dev/null; then
-  # Presence is the load-bearing half of the pin here: `diff` on two EMPTY
-  # streams reports "identical" (exit 0), so byte-identity alone vacuously
-  # "passes" when both surfaces are absent — a real drift-check must gate on
-  # presence first, exactly as Section 1 does above. This is why the pin is
-  # two batteries, not one; a rewrite that dropped Section 1 and kept only
-  # termdisp_matches would let "both surfaces deleted" slip through green.
-  if [ -z "$(marker_block "$HEAD_SKILL" TERMDISP-BEGIN TERMDISP-END)" ] \
-     && [ -z "$(marker_block "$HEAD_RULES" TERMDISP-BEGIN TERMDISP-END)" ]; then
-    pass "meta: pre-slice HEAD carries no TERMDISP block on either surface (RED precondition holds)"
+# ===== Section 2: the vacuous-match hazard, demonstrated hermetically =====
+# Two surfaces with NO marker block at all must not let the byte-identity half
+# "pass" — `diff` on two EMPTY extractions reports identical (exit 0), so a
+# rewrite that dropped Section 1's presence gate and kept only
+# termdisp_matches would let "both surfaces deleted" slip through green.
+# Absence is SYNTHESIZED here (marker-stripped copies), not read from git
+# history: an earlier version anchored this on `git show HEAD:` being
+# pre-slice, which is true exactly once — the arm went permanently red the
+# moment the slice merged (RED evidence is perishable; mutation proof, in
+# Section 3, is the durable discriminator).
+echo "== Section 2: vacuous-match hazard on two absent blocks (synthesized) =="
+BARE_SKILL="$TMP/bare-SKILL.md"
+BARE_RULES="$TMP/bare-operational-rules.md"
+if sed '/TERMDISP-BEGIN/,/TERMDISP-END/d' "$SKILL" > "$BARE_SKILL" \
+   && sed '/TERMDISP-BEGIN/,/TERMDISP-END/d' "$RULES" > "$BARE_RULES"; then
+  if [ -z "$(marker_block "$BARE_SKILL" TERMDISP-BEGIN TERMDISP-END)" ] \
+     && [ -z "$(marker_block "$BARE_RULES" TERMDISP-BEGIN TERMDISP-END)" ]; then
+    pass "meta: stripped copies carry no TERMDISP block on either surface (absence synthesized)"
   else
-    fail "meta: pre-slice HEAD unexpectedly already carries a TERMDISP block — RED precondition invalid"
+    fail "meta: marker strip failed — synthesized-absence precondition invalid"
   fi
-  if termdisp_matches "$HEAD_SKILL" "$HEAD_RULES"; then
+  if termdisp_matches "$BARE_SKILL" "$BARE_RULES"; then
     pass "meta: confirms the vacuous-match hazard on two absent blocks — presence (Section 1) is what actually reds out, not byte-identity"
   else
     fail "meta: unexpected — two empty marker_block extractions diffed as non-identical"
