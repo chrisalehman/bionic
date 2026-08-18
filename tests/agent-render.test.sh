@@ -280,7 +280,89 @@ fi
 
 # ============================================================
 echo ""
-echo "=== G — the suite itself changed nothing under agents/ ==="
+echo "=== G — the checksum manifest is a pipeline OUTPUT, refreshed by every render ==="
+# ============================================================
+#
+# Spec AC-4. payload/integrity/agents.sha256 is what /bionic:doctor compares the user's
+# installed role files against, and it is only useful if it is never older than the finals.
+# Making it a by-product of the same render that writes those finals is what buys that: one
+# command produces both, so "I re-rendered but forgot the manifest" is not a reachable state.
+#
+# The freshness of the COMMITTED manifest is proven in §C — `--check` covers it — so what
+# is proven here is the wiring, on the hermetic copy §F left behind: the write path emits a
+# manifest, a source edit propagates into its digests, and a manifest that drifts from the
+# finals turns --check red on its own.
+
+REPO_MANIFEST="$REPO/payload/integrity/agents.sha256"
+[ -f "$REPO_MANIFEST" ]; check $? "payload/integrity/agents.sha256 exists (the committed manifest)"
+
+# A fresh copy: §F's last mutation deliberately left the fixture broken.
+rm -rf "$TMP/m"; mkdir -p "$TMP/m"
+cp -R "$SRC" "$TMP/m/agents-src" && cp -R "$OUT" "$TMP/m/agents"
+M_RENDER="$TMP/m/agents-src/render.sh"
+M_MANIFEST="$TMP/m/payload/integrity/agents.sha256"
+
+"$M_RENDER" >/dev/null 2>&1
+[ -f "$M_MANIFEST" ]; check $? "a write-mode render emits the manifest, creating its directory if needed"
+
+if [ -f "$M_MANIFEST" ]; then
+  M_ROWS="$(grep -v '^#' "$M_MANIFEST" | grep -v '^[[:space:]]*$' | wc -l | tr -d ' ')"
+  if [ "$M_ROWS" = 6 ]; then
+    pass "the rendered manifest carries one row per rendered final (6)"
+  else
+    fail "the rendered manifest carries one row per rendered final (6)" "found $M_ROWS"
+  fi
+
+  # Every digest is the digest of the file the same render just wrote.
+  M_BAD=""
+  while IFS= read -r row; do
+    case "$row" in ''|'#'*) continue ;; esac
+    w="$(echo "$row" | awk '{print $1}')"; p="$(echo "$row" | awk '{print $2}')"
+    g="$(shasum -a 256 "$TMP/m/$p" 2>/dev/null | awk '{print $1}')"
+    [ "$g" = "$w" ] || M_BAD="${M_BAD}${p} "
+  done < "$M_MANIFEST"
+  if [ -z "$M_BAD" ]; then
+    pass "every rendered digest matches the final the same render wrote"
+  else
+    fail "every rendered digest matches the final the same render wrote" "$M_BAD"
+  fi
+
+  # G1 — the manifest FOLLOWS the sources. A block edit changes six finals, so it must
+  # change six digests; a manifest written once and never refreshed passes every arm above
+  # and still ships stale, which is the whole failure this wiring exists to prevent.
+  M_BEFORE="$(cat "$M_MANIFEST")"
+  printf '%s\n' "- A rule the manifest has never heard of." >> "$TMP/m/agents-src/blocks/survival.md"
+  "$M_RENDER" >/dev/null 2>&1
+  M_AFTER="$(cat "$M_MANIFEST")"
+  if [ "$M_BEFORE" != "$M_AFTER" ]; then
+    pass "meta: a block-source edit propagates into the manifest's digests"
+  else
+    fail "meta: a block-source edit propagates into the manifest's digests"
+  fi
+
+  # G2 — a manifest that drifts from the finals is staleness, and --check is the one command
+  # that reports the whole staleness class. Corrupting a digest with the finals untouched is
+  # the direction §F cannot reach.
+  "$M_RENDER" --check >/dev/null 2>&1
+  check $? "meta: the re-rendered fixture is green before the manifest is corrupted"
+  # Zeroed digests, comment rows preserved — a substitution that cannot accidentally be a
+  # no-op the way "change the first character" is when the digest already starts with it.
+  awk '/^#/ || NF == 0 { print; next }
+       { printf "%064d  %s\n", 0, $2 }' "$M_MANIFEST" > "$M_MANIFEST.tmp" \
+    && mv "$M_MANIFEST.tmp" "$M_MANIFEST"
+  if ! "$M_RENDER" --check >/dev/null 2>&1; then
+    pass "meta: a corrupted manifest turns --check RED with the finals untouched"
+  else
+    fail "meta: a corrupted manifest turns --check RED with the finals untouched"
+  fi
+  "$M_RENDER" >/dev/null 2>&1
+  "$M_RENDER" --check >/dev/null 2>&1
+  check $? "meta: re-rendering repairs the manifest and returns the fixture to green"
+fi
+
+# ============================================================
+echo ""
+echo "=== H — the suite itself changed nothing under agents/ ==="
 # ============================================================
 #
 # The wall behind §D's rule. Everything above that could write ran against $TMP; if a
