@@ -457,6 +457,32 @@ This test used to live in the always-loaded global config, which is where a prec
 
 Atomic, one task. Merge the wave into the declared integration branch (local merge; pushing is the user's gate) and remove the worktree. Default is merge — parking requires an explicit `## Wake Note`. Then, when `cleanup_on_finish: true`: skip if frontmatter already has `cleaned:`; wipe `.bionic/tmp/*`; assert zero non-completed tasks; strip stray `continuation-checkpoint.md`/`handoff-*.md`; set `cleaned: <today>`.
 
+### Step 9 — Ship
+
+Deploy per `deploy_target`, verify at the deployed surface, and monitor at least one cycle — `n/a:` only when `deploy_target: none` (the Evidence shapes table below names the three keys).
+
+**Close-out is an institution, not a courtesy.** Every finding this run's rigor machinery surfaced — walk, matrix discharge, auditor, critic — gets exactly one terminal disposition. "Continuation candidate" is abolished; nothing leaves this step homeless.
+
+<!-- TERMDISP-BEGIN -->
+> Abolish "continuation candidate." Every finding gets exactly one of three terminal
+> dispositions at wave close:
+> 1. **DO-NOW** — folded into the closing wave.
+> 2. **ACCEPT-CLOSED** — ruled won't-fix, recorded beside its reasoning, and never
+>    carried forward again. An accepted residual is knowledge, not work.
+> 3. **PROMOTE** — kept only with one of two homes: **(a) a trigger** — the named
+>    EVENT that reactivates it ("diagnose the flake when it next fires — output now
+>    preserved"), or **(b) a charter** — promotion into a named future effort (an
+>    ideas/ seed or epic charter) by the user's explicit materiality ruling at close.
+>    A charter costs a decision and gives the work its own document that competes
+>    for prioritization openly. What stays forbidden is the homeless deferral: an
+>    item on a wave's continuation list with no decision, no home, no identity —
+>    that is what schedules cleanup waves by momentum. (Amended 2026-08-16 on
+>    Chris's catch: the original trigger-only form had no bin for legitimately
+>    deferred major work — the plugin conversion itself is the proof case.)
+<!-- TERMDISP-END -->
+
+The vehicle is a single-turn close-out report, sent to the user at Step 9 and never re-run as ceremony: plain English, at the altitude of decisions rather than of code, covering ten parts — goal, accomplished, deferred-with-dispositions (each finding's DO-NOW / ACCEPT-CLOSED / PROMOTE named), special attention, material risks, challenges, decisions, success/failure verdict, learnings, next. Authoring detail per part and the anti-ceremony bound live in `operational-rules.md`. Write `continuation.md` (§Handoff above) alongside it — the report is what the user reads; the file is what the next wave opens.
+
 ## Evidence shapes
 
 One evidence artifact per step under `Step N:` in `## SDLC State`. The gate validates the current step only.

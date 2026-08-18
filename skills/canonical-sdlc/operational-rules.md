@@ -327,6 +327,62 @@ at the Step-3 approval alongside everything else.
 artifact; a pointer means one does and here is where. Waiving because the design lives elsewhere
 destroys the one thing the approval display is built to carry — the path the user would open.
 
+## Close-out report (Step 9)
+
+SKILL.md carries the terminal-disposition rule and names the report's ten parts; this is the
+authoring detail — what each part is for, and the bound that keeps the whole thing from
+growing back into ceremony.
+
+<!-- TERMDISP-BEGIN -->
+> Abolish "continuation candidate." Every finding gets exactly one of three terminal
+> dispositions at wave close:
+> 1. **DO-NOW** — folded into the closing wave.
+> 2. **ACCEPT-CLOSED** — ruled won't-fix, recorded beside its reasoning, and never
+>    carried forward again. An accepted residual is knowledge, not work.
+> 3. **PROMOTE** — kept only with one of two homes: **(a) a trigger** — the named
+>    EVENT that reactivates it ("diagnose the flake when it next fires — output now
+>    preserved"), or **(b) a charter** — promotion into a named future effort (an
+>    ideas/ seed or epic charter) by the user's explicit materiality ruling at close.
+>    A charter costs a decision and gives the work its own document that competes
+>    for prioritization openly. What stays forbidden is the homeless deferral: an
+>    item on a wave's continuation list with no decision, no home, no identity —
+>    that is what schedules cleanup waves by momentum. (Amended 2026-08-16 on
+>    Chris's catch: the original trigger-only form had no bin for legitimately
+>    deferred major work — the plugin conversion itself is the proof case.)
+<!-- TERMDISP-END -->
+
+**The report is one turn.** Not a document, not a file the user has to open — it is the
+close-out message itself, sent once, at Step 9. A close-out that spans multiple turns or
+defers its verdict to a linked artifact has already become the ceremony the rule exists to
+forbid.
+
+**Ten parts, plain English, at the altitude of decisions:**
+
+- **Goal** — what this run set out to do, in one sentence.
+- **Accomplished** — what shipped, named plainly.
+- **Deferred, with dispositions** — every finding that did not ship, each carrying its
+  terminal disposition: DO-NOW (folded in already, so this list should hold none of them),
+  ACCEPT-CLOSED (won't-fix, with the one-line reason), or PROMOTE (its trigger event or its
+  chartered home, named). A finding with no disposition is the defect this template exists
+  to catch.
+- **Special attention** — anything the reader should look at closely before trusting the
+  rest of the report.
+- **Material risks** — what could still go wrong, named, not hedged.
+- **Challenges** — what made this run harder than the plan assumed.
+- **Decisions** — the calls made along the way that a later reader would want to know were
+  made on purpose.
+- **Success/failure verdict** — one plain sentence: did this run meet its goal.
+- **Learnings** — what this run taught that the next one should carry forward.
+- **Next** — the immediate next action, named.
+
+**The anti-ceremony bound.** The whole report is readable in the time it takes to read this
+paragraph twice. A per-AC breakdown, a restated Verification Matrix, a section for every
+step's evidence, or a sub-heading per finding are all the same failure — institutional
+confirmation dressed up as an audit. If a part has nothing to say, it gets one clause ("no
+material risks") rather than a heading with nothing under it. Plain English means no jargon a
+plain reader would have to look up, and conceptual altitude means decisions and outcomes, not
+diffs, commands, or file paths.
+
 ## Evidence gate
 
 - **Canonical-sdlc plan files must include a `## SDLC State` section** — `current: N` (or `T<n>` at task scale) and `Step N: <evidence>` lines. The `canonical-sdlc-evidence-gate.sh` PreToolUse hook blocks `git commit` when the current step's evidence line is missing, empty, or a placeholder (TODO/pending/in progress/XXX/TBD/placeholder). Update `## SDLC State` *before* staging, not after.
