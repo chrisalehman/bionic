@@ -22,8 +22,9 @@ Code.
 
 Bionic installs in two tiers:
 
-- **Tier 1 — plugin install.** `claude plugin install bionic` alone yields a
-  fully live core: skill, hooks, agents.
+- **Tier 1 — plugin install.** `claude plugin install bionic@bionic` alone
+  yields a fully live core: skill, hooks, agents. It needs bionic's marketplace
+  registered first — `claude plugin marketplace add chrisalehman/bionic`.
 - **Tier 2 — environment setup.** `/bionic:setup` wraps tier 1 — it invokes
   the plugin install first, then does the environment work (dependencies,
   permissions, machine configuration) tier 1 alone doesn't cover. Tier 1 is

@@ -5,8 +5,17 @@
 # a MACHINE for bionic to work, in one idempotent, re-runnable pass. Tier 2
 # contains tier 1 — the native plugin install is this script's first step, not a
 # prerequisite the user is expected to have done — so `/bionic:setup` is a
-# complete answer to "set this machine up", from a cold box or from a box that
-# is already three quarters of the way there.
+# complete answer to "set this machine up", whether the box is three quarters of
+# the way there or has nothing but bionic's marketplace registered.
+#
+# THAT PRECONDITION IS REAL AND IT IS NOT "COLD". Step 1 installs the plugin; it
+# does not ADD the marketplace the plugin comes from, and `claude plugin
+# marketplace add` is a mutation nobody consented to at the moment this script
+# is reached. A genuinely cold box needs that one command by hand first (the
+# Step-5 field walk measured exactly this). It is not machinery worth building:
+# in the production story the user reaches `/bionic:setup` through the installed
+# plugin, so the only caller who can be on a cold box is a developer running
+# this script directly, and they are the person who added the marketplace.
 #
 # WHAT IT DOES NOT OWN. Facts and mechanisms. Whether a dependency is present is
 # `detect.sh`/`deps.sh`'s answer; HOW a dependency installs is `deps.sh`'s
