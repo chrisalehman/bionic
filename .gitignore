@@ -40,8 +40,10 @@ node_modules/
 # Git worktrees
 .worktrees/
 
-# Project notebook (local, not shared)
-.bionic/
+# Project notebook (local, not shared) — no trailing slash: worktrees carry
+# .bionic as a SYMLINK to the main checkout's dir, and the dir-only `.bionic/`
+# pattern misses it (flagged by two W4 slices)
+.bionic
 
 # playwright
 .playwright-cli
