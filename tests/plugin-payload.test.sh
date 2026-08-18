@@ -48,11 +48,19 @@ REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
 MARKETPLACE_JSON="${REPO}/.claude-plugin/marketplace.json"
 
-# The size ceiling the installed tree must respect. S4 measured 153 MB with no boundary;
-# the ratified payload materialises to single-digit MB. 5 MB is a wall with real headroom
-# over today's measurement, not a fitted constant — it is small enough that re-admitting
-# `tests/`, `.bionic/` or the excalidraw venv breaks it immediately.
-MAX_PAYLOAD_KB=5120
+# The size ceiling the installed tree must respect. S4 measured 153 MB with no boundary; the
+# first wall was 5 MB, chosen when the payload still carried 2.5 MB of diagram PNGs and the
+# hook test suites. Both are gone (epic-17 W4: S9 moved hooks/*.test.sh under tests/, S8
+# retired the PNG + .excalidraw pair for composed SVG), and the tree now measures 976 KB —
+# so a 5 MB wall had stopped discriminating: the payload could quintuple without tripping it.
+#
+# RE-FIT ONCE, to 1.5 MB (spec AC-9's ratified ceiling, so the wall and the criterion are one
+# number rather than two constants free to disagree). That leaves ~57% headroom over today's
+# measurement — loose enough that ordinary doc and script growth never trips it, tight enough
+# that every failure mode this arm exists for still breaks it on contact: the retired PNG pair
+# alone was 2.5 MB, `tests/` is over 1 MB, and the excalidraw venv is 134 MB. The comparison is
+# `-le`, so the ceiling is inclusive, matching the "≤ 1.5M" the criterion states.
+MAX_PAYLOAD_KB=1536
 
 # Ratified payload skills, and the one bionic-authored skill deliberately held back.
 RATIFIED_SKILLS="browser-verify canonical-sdlc map-instrument-narrow"
@@ -268,10 +276,10 @@ if [ -d "$PAYLOAD" ]; then
 
   # Dereferenced size — what the installer will actually copy.
   PAYLOAD_KB="$(du -skL "$PAYLOAD" 2>/dev/null | awk '{print $1}')"
-  if [ -n "$PAYLOAD_KB" ] && [ "$PAYLOAD_KB" -lt "$MAX_PAYLOAD_KB" ]; then
-    ok "dereferenced payload is under ${MAX_PAYLOAD_KB} KB (measured ${PAYLOAD_KB} KB)"
+  if [ -n "$PAYLOAD_KB" ] && [ "$PAYLOAD_KB" -le "$MAX_PAYLOAD_KB" ]; then
+    ok "dereferenced payload is within ${MAX_PAYLOAD_KB} KB (measured ${PAYLOAD_KB} KB)"
   else
-    no "dereferenced payload is under ${MAX_PAYLOAD_KB} KB (measured ${PAYLOAD_KB:-unknown} KB)"
+    no "dereferenced payload is within ${MAX_PAYLOAD_KB} KB (measured ${PAYLOAD_KB:-unknown} KB)"
   fi
 fi
 
