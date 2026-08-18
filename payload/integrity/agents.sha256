@@ -3,7 +3,7 @@
 # `bash agents-src/render.sh`. /bionic:doctor reads it to report whether an installed
 # machine's role files are stock or locally modified.
 4a6075e5cf53f64ef284894d11704938d20f0e3c2b03aec1538dc424a5c089d1  agents/auditor.md
-b87d13984d2f97353729081a68429aa3f24d9170a48a9099cf2b0784c1c5a2cb  agents/critic.md
+73528009b6b1afcd6ee4c0dcf41c84a57bded32f52170892ef3be7bf97c3dbfe  agents/critic.md
 0a7ef3f2a98e9e68758639b0f5d105fcf28aa992e5649b8728a9d2f59d7fa93f  agents/implementor.md
 51607dbd4c7bf31711063bae15195279310da507c9a509ddd0e0407fccf02cb2  agents/researcher.md
 7509449d3e6aca55a4f31ac18ddd2a31641fe60da220a5fb78fe41b7a26589d8  agents/senior-implementor.md
