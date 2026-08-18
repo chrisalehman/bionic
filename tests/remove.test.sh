@@ -703,6 +703,36 @@ PRE_R1_BODY='_w() {
 expect_false "the pre-R-1 writer shape (chmod after mv, on the destination) fails this pin" \
   writer_shape_ok pre-r1 "$PRE_R1_BODY"
 
+# The FOURTH writer, and the wall that stops a fifth appearing unpinned.
+#
+# deps.sh records and clears the statusline, and both of those are edits to the
+# same ~/.claude/settings.json — two more `jq … > tmp && mv` writers, which the
+# three pins above said nothing about. They were measurably worse than the ones
+# above ever were: no mode capture at all, so a 0600 settings.json came back at
+# 0644 on EVERY install and every removal, no crash required. They are now one
+# shared writer, `_dep_settings_write_jq`, and it is held to the same shape.
+DEPS_WRITER="$(sh_function_body "$DEPS_SH" _dep_settings_write_jq)"
+expect_true "deps.sh's settings writer was extracted (the fourth-writer pin is not vacuous)" \
+  test -n "$DEPS_WRITER"
+expect_true "and deps.sh's writer chmods the tmp under umask 077 before the rename too" \
+  writer_shape_ok deps "$DEPS_WRITER"
+
+# The wall. A pin over the writers that exist cannot stop a SIXTH being written
+# beside them, and that is exactly how deps.sh's two came to be missed: nothing
+# failed when they were added. Every rename of a tmp over a settings file in the
+# payload is counted, and the count is pinned to the writers that are pinned
+# above — `_profile_write`/`_rm_write` rename over a generic `$file` and are held
+# by byte-identity, so the signature that matters here is the settings-named one.
+# A new one fails this arm and its author has to route through a pinned writer or
+# extend the pin.
+SETTINGS_MV_LINES="$(/usr/bin/grep -rln 'mv "\$tmp" "\$settings"' "${REPO}/payload" | sort)"
+expect_eq "exactly two files in the payload rename a tmp over a settings file" \
+  "${REPO}/payload/scripts/lib/deps.sh
+${REPO}/payload/scripts/lib/hooks.sh" \
+  "$SETTINGS_MV_LINES"
+expect_eq "and deps.sh does it in exactly one place (both statusline arms share one writer)" \
+  "1" "$(/usr/bin/grep -c 'mv "\$tmp" "\$settings"' "$DEPS_SH" | tr -d ' ')"
+
 # F-S4. The consent RULE, pinned across the payload/standalone seam.
 #
 # remove.sh's standalone door reimplements the prompt as `_rm_consent`, because
