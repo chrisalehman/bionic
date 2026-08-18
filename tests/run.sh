@@ -6,10 +6,15 @@
 # no auth) plus the Docker mock install e2e when docker is present.
 #
 #   GATING suites (set the exit code — must be green):
-#     hooks/*.test.sh                  every hook's behavior suite (globbed)
-#     the hand-listed `run` lines below every suite outside hooks/ — the glob does
-#                                      NOT reach them, so a new one is invisible
-#                                      until its `run` line is added by name
+#     the hand-listed `run` lines below, one per suite — nothing here is
+#                                      globbed; a new suite is invisible until
+#                                      its `run` line is added by name (epic-17
+#                                      W4 S9: hooks/*.test.sh moved under tests/,
+#                                      which retired the old hooks/*.test.sh glob
+#                                      — hooks/ now holds only the hook scripts
+#                                      themselves, and tests/ is not
+#                                      hook-exclusive, so uniform hand-listing is
+#                                      the only honest discovery left)
 #     tests/bootstrap-e2e-docker.sh    whole bootstrap on a fresh OS (docker only)
 #
 set -uo pipefail
@@ -38,10 +43,26 @@ run() {  # run <label> <cmd...>   — gating
 }
 
 echo "Gating suites:"
-for t in hooks/*.test.sh; do
-  [ -f "$t" ] || continue
-  run "$(basename "$t")" bash "$t"
-done
+# Moved from hooks/*.test.sh (epic-17 W4 S9, spec AC-9 / D3 "move the tests"): one
+# hook behavior suite per hook script, hand-listed like every suite below —
+# hooks/ retains only the *.sh scripts themselves, so there is no longer a
+# directory whose contents are safely globbable as "the hook tests".
+run "agent-context-guard.test.sh" bash tests/agent-context-guard.test.sh
+run "canonical-sdlc-evidence-gate.test.sh" bash tests/canonical-sdlc-evidence-gate.test.sh
+run "canonical-sdlc-governing-skill.test.sh" bash tests/canonical-sdlc-governing-skill.test.sh
+run "context-spend.test.sh" bash tests/context-spend.test.sh
+run "dispatch-preflight.test.sh" bash tests/dispatch-preflight.test.sh
+run "execution-recorder.test.sh" bash tests/execution-recorder.test.sh
+run "farm-out-reminder.test.sh" bash tests/farm-out-reminder.test.sh
+run "landing-gate.test.sh" bash tests/landing-gate.test.sh
+run "preflight-probe.test.sh" bash tests/preflight-probe.test.sh
+run "protect-database.test.sh" bash tests/protect-database.test.sh
+run "protect-main.test.sh" bash tests/protect-main.test.sh
+run "session-poker.test.sh" bash tests/session-poker.test.sh
+run "session-sweeper.test.sh" bash tests/session-sweeper.test.sh
+run "stop-check.test.sh" bash tests/stop-check.test.sh
+run "stop-guard.test.sh" bash tests/stop-guard.test.sh
+run "stop-orders.test.sh" bash tests/stop-orders.test.sh
 run "scripts.test.sh" bash tests/scripts.test.sh
 run "installer-behavior.test.sh" bash tests/installer-behavior.test.sh
 run "agent-roles.test.sh" bash tests/agent-roles.test.sh

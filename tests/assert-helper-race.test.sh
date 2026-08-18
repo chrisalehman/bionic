@@ -54,17 +54,18 @@ expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got
 
 # Every suite file that sets `pipefail` AND defines expect_* helpers. Hand-listed
 # on purpose: a new suite is invisible to this pin until it is added by name,
-# same discipline tests/run.sh uses.
+# same discipline tests/run.sh uses. The seven hooks/*.test.sh paths moved to
+# tests/ at epic-17 W4 S9 (spec AC-9) — hooks/ no longer holds test files.
 SUITES="
 tests/cross-gate-agreement.test.sh
 tests/fail-direction-table.test.sh
-hooks/agent-context-guard.test.sh
-hooks/dispatch-preflight.test.sh
-hooks/execution-recorder.test.sh
-hooks/landing-gate.test.sh
-hooks/stop-check.test.sh
-hooks/stop-guard.test.sh
-hooks/stop-orders.test.sh
+tests/agent-context-guard.test.sh
+tests/dispatch-preflight.test.sh
+tests/execution-recorder.test.sh
+tests/landing-gate.test.sh
+tests/stop-check.test.sh
+tests/stop-guard.test.sh
+tests/stop-orders.test.sh
 "
 # tests/seam-resolution.test.sh also sets pipefail and defines expect_contains/
 # expect_absent, but is pipe-free by construction (containment via `case`, never

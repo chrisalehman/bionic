@@ -18,11 +18,11 @@
 # whole thesis of this slice is that one program's output is the other's input,
 # and a synthesized machine line would test the two halves apart.
 #
-# Usage: bash hooks/execution-recorder.test.sh
+# Usage: bash tests/execution-recorder.test.sh
 
 set -uo pipefail
 
-. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/resolve-roots.sh"
 
 HERE="${BIONIC_HOOKS_DIR}"
 REC="$HERE/execution-recorder.sh"

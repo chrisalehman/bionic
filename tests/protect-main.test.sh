@@ -4,11 +4,11 @@
 # verifying that pushes to main/master are always blocked and
 # pushes to feature branches are allowed.
 #
-# Usage: bash hooks/protect-main.test.sh
+# Usage: bash tests/protect-main.test.sh
 
 set -euo pipefail
 
-. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/resolve-roots.sh"
 
 HOOK="${BIONIC_HOOKS_DIR}/protect-main.sh"
 PASS=0

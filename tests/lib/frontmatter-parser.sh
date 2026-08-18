@@ -33,3 +33,22 @@ skill_hooks_has() {
   skill_hooks_rows "$1" | awk -F'|' -v e="$2" -v m="$3" -v c="$4" \
     '$1 == e && $2 == m && $3 == c { found=1 } END { exit !found }'
 }
+
+# skill_hooks_event_keys <file>
+#   Prints one line per top-level key inside the file's `hooks:` frontmatter
+#   block (the event names themselves), regardless of whether a complete row
+#   follows — unlike skill_hooks_rows, which only emits once a full
+#   event/matcher/command/timeout chain is seen. Callers validating that every
+#   declared key IS a hook event the harness knows (a whitelist check, where a
+#   silent miss must be impossible) need the key on its own, before it is known
+#   whether the rest of its block is well-formed. Same prologue as
+#   skill_hooks_rows (epic-17 W4 S9 A5 fold: the fifth hand-copied call site).
+skill_hooks_event_keys() {
+  awk '
+    /^hooks:$/ { active=1; next }
+    active && /^---$/ { active=0 }
+    active && /^[A-Za-z]/ { active=0 }
+    !active { next }
+    /^  [A-Za-z]+:$/ { k=$0; sub(/^  /,"",k); sub(/:$/,"",k); print k }
+  ' "$1"
+}

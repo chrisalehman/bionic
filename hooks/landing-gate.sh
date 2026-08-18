@@ -108,7 +108,7 @@
 # orchestrator-facing record is the roster marker plus the poker overdue NOTIFY that reads
 # the same rows. `stop_hook_active` is honoured here for the reason the binary gives.
 #
-# FAIL DIRECTIONS (pinned by hooks/landing-gate.test.sh):
+# FAIL DIRECTIONS (pinned by tests/landing-gate.test.sh):
 #   - not a Stop or SubagentStop payload                 -> pass, silent (relevance hoist)
 #   - SubagentStop with no agent_id, or one carrying
 #     field separators                                   -> pass, silent
@@ -139,7 +139,7 @@
 #
 # Exit code 2 = block the stop in Claude Code hooks; stderr goes back to the orchestrator,
 # which is why the refusal must name the row and its artifacts rather than the rule.
-# [WALL: hooks/landing-gate.test.sh]
+# [WALL: tests/landing-gate.test.sh]
 #
 # Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
 
