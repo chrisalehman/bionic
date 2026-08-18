@@ -1575,7 +1575,7 @@ validate_dispatch_ledger() {
 }
 
 # Step numbering: 4 worktree · 5 Verify gate · 7 Document · 8 Integrate &
-# close · 9 Ship. Steps 1/2/3/6 are pointer steps handled upstream, except
+# close · 9 Close-out. Steps 1/2/3/6 are pointer steps handled upstream, except
 # that Step 6 reaches here so the matrix prefix check can fire.
 INTEGRATE_STEP=8
 SHIP_STEP=9
