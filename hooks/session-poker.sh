@@ -4,7 +4,7 @@
 #         §Design ("Poker"), succeeding epic-09/epic-10's resident cron poker — deliberately
 #         NOT resurrected (spec §Rejected alternatives: "OS cron / launchd for the tick" is
 #         residency in configuration form, ratified against).
-# [WALL: hooks/session-poker.test.sh]
+# [WALL: tests/session-poker.test.sh]
 #
 # This is NOT a hook, exactly like hooks/session-sweeper.sh: it lives in hooks/ for
 # test-harness pairing and bootstrap installation only (claude-bootstrap.sh installs every
@@ -308,7 +308,7 @@ case "$VERB" in
       # self-wake — was unreachable by the ordinary path that closes an artifact-less row;
       # and every tick re-notified the same closed work, growing the NOTIFY set
       # monotonically across a wave. AC-7's contract moves with this (assumption 41), which
-      # is why hooks/session-poker.test.sh §3 re-authors the accelerated-clock cases rather
+      # is why tests/session-poker.test.sh §3 re-authors the accelerated-clock cases rather
       # than re-running them.
       #
       # TOTAL still counts an acked row: it is on the roster, and "how many contracts does

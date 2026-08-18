@@ -2,7 +2,7 @@
 # SESSION SWEEPER — the landing verdict, and the ack that closes a row.
 # Design: .bionic/docs/specs/epic-16-landing-contract/wave-02-fact-based-supervision.spec.md
 #         §Design ("Deletion inventory"), succeeding epic-15 wave-04's watcher design.
-# [WALL: hooks/session-sweeper.test.sh]
+# [WALL: tests/session-sweeper.test.sh]
 #
 # This is NOT a hook. Like hooks/preflight-probe.sh it lives in hooks/ for test-harness
 # pairing and bootstrap installation only; it is never registered in MANAGED_HOOKS. It is

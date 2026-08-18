@@ -14,11 +14,11 @@
 # runnability check, which installs a COPY of the real producer into a
 # sandboxed HOME specifically to prove its fix command executes.
 #
-# Usage: bash hooks/dispatch-preflight.test.sh
+# Usage: bash tests/dispatch-preflight.test.sh
 
 set -uo pipefail
 
-. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/resolve-roots.sh"
 
 GATE="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
 PROBE_SRC="${BIONIC_HOOKS_DIR}/preflight-probe.sh"
@@ -814,7 +814,7 @@ echo "=== S10L — the LIVENESS fields are lifted: cadence + the subprocess clai
 # layer instructing authors to declare two fields this writer had no extraction
 # site for, with hooks/stop-check.sh:389 already READING `claims=` off the row
 # (axis-3 FAIL: a shipped reader with no producer). These cases are the writer
-# half of that closure; hooks/stop-check.test.sh §8(g) drives the reader half
+# half of that closure; tests/stop-check.test.sh §8(g) drives the reader half
 # over a row THIS gate really wrote.
 #
 # GRAMMAR, stated because it is the one place this extractor reads a value that

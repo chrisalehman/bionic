@@ -6,11 +6,11 @@
 # inspects the posted JSON and, for Edit, reads the file at the given
 # path.
 #
-# Usage: bash hooks/canonical-sdlc-governing-skill.test.sh
+# Usage: bash tests/canonical-sdlc-governing-skill.test.sh
 
 set -euo pipefail
 
-. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/resolve-roots.sh"
 
 HOOK="${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh"
 PASS=0

@@ -129,7 +129,7 @@ SID_LG="2ae9d613-4c07-4b8a-9f51-7d02ac86be40"
 # about on stderr. This suite's claim is producer/consumer AGREEMENT ON THE
 # ATTESTATION — "passes in silence" below means the attestation raised nothing —
 # so the fixture is the ordinary dispatch, not a malformed one. The warning
-# itself is driven where it belongs, in hooks/dispatch-preflight.test.sh S10c.
+# itself is driven where it belongs, in tests/dispatch-preflight.test.sh S10c.
 
 mk_agent_payload() {  # <sid> <cwd>
   jq -n --arg s "$1" --arg c "$2" \
@@ -1458,7 +1458,7 @@ expect_contains "…and the gate names the same path the writer wrote" \
 # This is the row that failed. It belongs in THIS suite rather than the
 # recorder's own, because the property is cross-script: the file the recorder
 # writes is the file the gate reads, and the recorder alone cannot see that
-# dropping a row disarms another program. `hooks/execution-recorder.test.sh`
+# dropping a row disarms another program. `tests/execution-recorder.test.sh`
 # asserted only that the row THIS event confirmed survived the fold, which is why
 # 110/110 was green over the defect.
 F4_ROSTER="$IREPO/.bionic/tmp/roster-$SID_A.state"
@@ -2339,7 +2339,7 @@ expect_contains "…carrying the deliverable the brief declared" \
 # here is the same string SubagentStart carries below and the same string the landing
 # sweep matches against `background_tasks[].id` (t4b-probe-report.md §4). The TEAMMATE
 # shape — addressing id recorded, `agent_id=` deliberately left empty, and therefore
-# never identified — is pinned in hooks/execution-recorder.test.sh Section 10.
+# never identified — is pinned in tests/execution-recorder.test.sh Section 10.
 mk_agent_post "$SID_A" "$KTR" "$KREPO" "toolu_01CHAIN" "w16-chain" "$KID" \
   | bash "$PARTY_ER" >/dev/null 2>&1
 K_CONFIRMED=$(grep 'status=confirmed|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tail -1)
@@ -2711,13 +2711,15 @@ expect_contains "…and the recorder's identification arm guards on that same ev
 # This test is therefore the only detector, and it is a WHITELIST rather than a blacklist:
 # the failure is silent, so the safe default for an unrecognised key is red.
 VALID_HOOK_EVENTS="PreToolUse PostToolUse Notification UserPromptSubmit Stop SubagentStop SubagentStart PreCompact SessionStart SessionEnd"
-SKILL_EVENT_KEYS=$(awk '
-  /^hooks:$/ { active=1; next }
-  active && /^---$/ { active=0 }
-  active && /^[A-Za-z]/ { active=0 }
-  !active { next }
-  /^  [A-Za-z]+:$/ { k=$0; sub(/^  /,"",k); sub(/:$/,"",k); print k }
-' "$SKILL_SRC")
+# epic-17 W4 S9 A5 fold: this hand-copied the 4-line hooks: prologue as the fifth
+# call site (skill_hooks_rows itself, skill_block_count, installer-behavior.test.sh's
+# _skill_frontmatter_has, and scripts.test.sh's two inline checks were the four AC-12
+# named) — now shares tests/lib/frontmatter-parser.sh's skill_hooks_event_keys, which
+# is the same prologue+key-line logic, not skill_hooks_rows (that helper only emits a
+# key once a FULL event/matcher/command/timeout chain follows it, which would silently
+# under-detect an incomplete malformed entry under a bad key — the exact silent-miss
+# this test exists to make impossible).
+SKILL_EVENT_KEYS=$(skill_hooks_event_keys "$SKILL_SRC")
 expect_eq "the frontmatter block declares at least one event key (this test is not vacuous)" \
   "yes" "$([ -n "$SKILL_EVENT_KEYS" ] && echo yes || echo no)"
 L5_BAD=""
@@ -3025,7 +3027,7 @@ printf 'roster-state/v1|status=confirmed|session=%s|name=finished|agent_id=afini
 # The landing sweep answers for each row ONCE, ever, and journals a marker into the roster
 # to keep that promise. Each of the three drives below is a separate question about the same
 # fixture, so the marker is cleared first — the property under test is what the consumers
-# read off ONE ledger, not the sweep's idempotency (which hooks/landing-gate.test.sh owns).
+# read off ONE ledger, not the sweep's idempotency (which tests/landing-gate.test.sh owns).
 MROSTER="$MREPO/.bionic/tmp/roster-$SID_A.state"
 #
 # THE FIXTURE ROW IS A TEAMMATE ROW — it carries a `teammate_id=`, as every row the

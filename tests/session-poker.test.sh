@@ -9,7 +9,7 @@
 # side of AC-6; the "no watcher process at any point" process-table bracket is AC-6's own
 # live T3 arc and is not hermetic.
 #
-# Hermetic, same posture as hooks/session-sweeper.test.sh: every case runs inside a
+# Hermetic, same posture as tests/session-sweeper.test.sh: every case runs inside a
 # throwaway sandbox git repo. Nothing reads or writes the real .bionic/tmp, the real
 # roster, or a live wave.
 #
@@ -19,15 +19,15 @@
 # .bionic/config.yaml override — every threshold is fixture data, never a wait, and every
 # override lives inside its own throwaway repo so nothing needs restoring at teardown.
 #
-# Usage: bash hooks/session-poker.test.sh
+# Usage: bash tests/session-poker.test.sh
 
 set -uo pipefail
 
-. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/resolve-roots.sh"
 
-# Overridable exactly as hooks/session-sweeper.test.sh offers, for RED evidence against a
+# Overridable exactly as tests/session-sweeper.test.sh offers, for RED evidence against a
 # mutated copy without ever touching the shipped file:
-#   W2_POKER_UNDER_TEST=/tmp/mutant.sh bash hooks/session-poker.test.sh
+#   W2_POKER_UNDER_TEST=/tmp/mutant.sh bash tests/session-poker.test.sh
 POKER="${W2_POKER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-poker.sh}"
 TMPROOT="$(mktemp -d)"
 PASS=0; FAIL=0; TOTAL=0
@@ -48,7 +48,7 @@ expect_contains() { case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "no [$2] in: $(p
 expect_absent()   { case "$3" in *"$2"*) bad "$1" "unexpected [$2] in: $(printf '%s' "$3" | head -3)" ;; *) ok "$1" ;; esac; }
 section()         { printf '\n=== %s ===\n' "$1"; }
 
-# ---------- sandbox + fixture builders (mirrors hooks/session-sweeper.test.sh) ----------
+# ---------- sandbox + fixture builders (mirrors tests/session-sweeper.test.sh) ----------
 
 make_repo() {  # <label> -> repo path
   local r="$TMPROOT/$1"
@@ -75,7 +75,7 @@ new_roster() {  # <repo>
     > "$(roster_of "$1")"
 }
 
-# Subset of hooks/session-sweeper.test.sh's mkrow — the fields the poker actually reads
+# Subset of tests/session-sweeper.test.sh's mkrow — the fields the poker actually reads
 # (name, launched_at, deliverable, duration, progress, claims, cadence, waiver), same
 # schema shape and field order as the roster writer in hooks/dispatch-preflight.sh.
 mkrow() {  # <key=value>...
@@ -119,7 +119,7 @@ ack_rows() {  # <repo> <name>...
     >/dev/null 2>&1
 }
 
-# ---------- running the poker (same watchdog shape as hooks/session-sweeper.test.sh) ----------
+# ---------- running the poker (same watchdog shape as tests/session-sweeper.test.sh) ----------
 
 POKE_BOUND=20
 poke() {  # <repo> <args...> -> sets OUT, RC

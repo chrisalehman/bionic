@@ -30,11 +30,11 @@
 # produces, so Section 6 gets its absent/erroring sweeper by running a COPY of the gate out
 # of a directory holding a different sibling — no env override, no PATH seam.
 #
-# Usage: bash hooks/landing-gate.test.sh
+# Usage: bash tests/landing-gate.test.sh
 
 set -uo pipefail
 
-. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/resolve-roots.sh"
 
 HOOKS_DIR="${BIONIC_HOOKS_DIR}"
 GATE="$HOOKS_DIR/landing-gate.sh"
@@ -80,7 +80,7 @@ section()         { printf '\n=== %s ===\n' "$1"; }
 #     slice is built on, so the fixtures spell one form and never three.
 #   * roster rows — the roster-state/v1 field set and ORDER written by
 #     hooks/dispatch-preflight.sh (the `ROW=` assignment), copied from
-#     hooks/session-sweeper.test.sh's `mkrow`. This suite's subject reads the roster for the
+#     tests/session-sweeper.test.sh's `mkrow`. This suite's subject reads the roster for the
 #     JOIN KEY only; the contract is read by the sweeper, which is the real one here.
 #   * SYNTHESIZED and declared: session ids, plan text, deliverable paths, the marker process
 #     a STILL-LIVE row claims. None is a platform surface.
