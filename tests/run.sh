@@ -66,6 +66,10 @@ run "stop-orders.test.sh" bash tests/stop-orders.test.sh
 run "scripts.test.sh" bash tests/scripts.test.sh
 run "installer-behavior.test.sh" bash tests/installer-behavior.test.sh
 run "agent-roles.test.sh" bash tests/agent-roles.test.sh
+# The agent-file render pipeline (epic-17 W4 S2, spec AC-2): agents-src/ blocks + templates
+# + render.sh against the committed finals under agents/. Cross-FILE by nature — it spans a
+# source tree and an output tree — so, like every suite outside hooks/, hand-listed here.
+run "agent-render.test.sh" bash tests/agent-render.test.sh
 run "interview-protocol.test.sh" bash tests/interview-protocol.test.sh
 # Cross-FILE proof (epic-17 W4 S7, spec AC-5 / epic AC-11): the terminal-disposition
 # rule's normative literal, pinned byte-identical between SKILL.md's Step 9 and
