@@ -120,7 +120,7 @@
   <text x="506" y="466" font-size="10.5" fill="#3a424c">· six axes, each PASS/FLAG/FAIL</text>
   <text x="506" y="481" font-size="10.5" fill="#3a424c">· the duplication axis anchors on</text>
   <text x="506" y="496" font-size="10.5" fill="#3a424c">&#160; the design's ownership table</text>
-  <text x="506" y="511" font-size="10.5" fill="#3a424c">· an independent critic, at audited</text>
+  <text x="506" y="511" font-size="10.5" fill="#3a424c">· an independent critic (audited)</text>
 
   <!-- step 7 -->
   <rect x="715" y="364" width="195" height="152" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
