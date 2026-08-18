@@ -372,7 +372,16 @@ expect_match "remove_dep git says why it is keeping the binary" "*keep-shared*" 
 echo ""
 echo "=== Group 9: detect_plugin_integrity — all three hook states ==="
 
-plant_plugin() {  # <root> <version|-> <hooks: ok|degraded|absent>
+plant_hook_scripts() {  # <root> <name>...
+  local root="$1"; shift
+  local name
+  for name in "$@"; do
+    printf '#!/bin/bash\nexit 0\n' > "${root}/hooks/${name}"
+    chmod +x "${root}/hooks/${name}"
+  done
+}
+
+plant_plugin() {  # <root> <version|-> <hooks: ok|degraded|chained-gap|absent>
   local root="$1" ver="$2" hooks="$3"
   mkdir -p "${root}/.claude-plugin" "${root}/hooks"
   if [ "$ver" != "-" ]; then
@@ -383,23 +392,38 @@ JSON
   case "$hooks" in
     absent) rm -f "${root}/hooks/hooks.json" ;;
     *)
+      # Fixture-faithful to the shipped payload/hooks/hooks.json that S4
+      # re-derived in this same wave: one plain entry plus a CHAINED one
+      # ("agent-context-guard.sh <inner>"). Four of the six shipped entries
+      # chain, so a fixture carrying only the plain shape cannot reach the
+      # state that matters most — a payload where the OUTER script is there
+      # and an inner one is not. That is the `chained-gap` arm below.
       cat > "${root}/hooks/hooks.json" <<'JSON'
 {
   "hooks": {
     "PreToolUse": [
       { "matcher": "Bash",
         "hooks": [ { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/protect-main.sh", "timeout": 10 } ] }
+    ],
+    "PreCompact": [
+      { "matcher": "",
+        "hooks": [ { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh", "timeout": 10 } ] }
     ]
   }
 }
 JSON
-      [ "$hooks" = "ok" ] && { printf '#!/bin/bash\nexit 0\n' > "${root}/hooks/protect-main.sh"; chmod +x "${root}/hooks/protect-main.sh"; }
+      case "$hooks" in
+        ok)          plant_hook_scripts "$root" protect-main.sh agent-context-guard.sh dispatch-preflight.sh ;;
+        chained-gap) plant_hook_scripts "$root" protect-main.sh agent-context-guard.sh ;;
+        degraded)    : ;;   # nothing planted — even the FIRST token is missing
+      esac
       ;;
   esac
 }
 
 PL_OK="$TMP/pl-ok";        plant_plugin "$PL_OK" 0.1.0 ok
 PL_DEG="$TMP/pl-degraded"; plant_plugin "$PL_DEG" 0.1.0 degraded
+PL_CHAIN="$TMP/pl-chain";  plant_plugin "$PL_CHAIN" 0.1.0 chained-gap
 PL_ABS="$TMP/pl-absent";   plant_plugin "$PL_ABS" 0.1.0 absent
 PL_NOVER="$TMP/pl-nover";  plant_plugin "$PL_NOVER" - ok
 
@@ -408,6 +432,13 @@ expect_eq "detect_plugin_integrity: intact payload" "plugin: version=0.1.0 hooks
 expect_eq "detect_plugin_integrity: hooks.json references a missing script" \
   "plugin: version=0.1.0 hooks=degraded" \
   "$(detect_run BIONIC_PLUGIN_ROOT="$PL_DEG" -- detect_plugin_integrity)"
+# R-1. The outer script of a chained command is present, the INNER one is not.
+# Reading only the first whitespace token calls this payload healthy while half
+# its hooks are missing files — a half-copied install that lost the evidence
+# gate, the governing-skill gate and the landing gate reports clean.
+expect_eq "detect_plugin_integrity: a CHAINED command's second script is missing" \
+  "plugin: version=0.1.0 hooks=degraded" \
+  "$(detect_run BIONIC_PLUGIN_ROOT="$PL_CHAIN" -- detect_plugin_integrity)"
 expect_eq "detect_plugin_integrity: no hooks.json at all" "plugin: version=0.1.0 hooks=absent" \
   "$(detect_run BIONIC_PLUGIN_ROOT="$PL_ABS" -- detect_plugin_integrity)"
 expect_eq "detect_plugin_integrity: unreadable plugin.json -> version=unknown" \

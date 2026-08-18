@@ -87,7 +87,8 @@ _detect_shell_rc() {
 # invisible to any check that only asks whether hooks.json exists.
 
 detect_plugin_integrity() {
-  local root version="unknown" hooks_json hooks_state cmd script
+  local root version="unknown" hooks_json hooks_state cmd script tok
+  local -a toks
   root="$(_detect_plugin_root)"
   hooks_json="${root}/hooks/hooks.json"
 
@@ -108,13 +109,23 @@ detect_plugin_integrity() {
     # Every command in hooks.json names a script under the plugin root via
     # ${CLAUDE_PLUGIN_ROOT}. Resolve that prefix against the root we are
     # actually inspecting and confirm the file is there.
+    #
+    # EVERY token, not just the first. Four of the six shipped entries CHAIN
+    # two scripts (`agent-context-guard.sh <inner>`), and the inner one is
+    # where the evidence gate, the governing-skill gate and the landing gate
+    # live. Reading `${cmd%% *}` alone called a payload missing all three
+    # healthy. `read -a` splits on whitespace without letting the shell glob
+    # the pieces; the `/*` guard then skips anything that is not a resolved
+    # absolute path (a flag, a plain argument, an unexpanded env reference).
     while IFS= read -r cmd; do
       [ -n "$cmd" ] || continue
-      script="${cmd%% *}"
-      script="${script//\$\{CLAUDE_PLUGIN_ROOT\}/$root}"
-      script="${script//\$CLAUDE_PLUGIN_ROOT/$root}"
-      case "$script" in /*) ;; *) continue ;; esac
-      [ -f "$script" ] || { hooks_state="degraded"; break; }
+      read -r -a toks <<<"$cmd"
+      for tok in "${toks[@]}"; do
+        script="${tok//\$\{CLAUDE_PLUGIN_ROOT\}/$root}"
+        script="${script//\$CLAUDE_PLUGIN_ROOT/$root}"
+        case "$script" in /*) ;; *) continue ;; esac
+        [ -f "$script" ] || { hooks_state="degraded"; break 2; }
+      done
     done < <(grep -oE '"command"[[:space:]]*:[[:space:]]*"[^"]+"' "$hooks_json" 2>/dev/null \
              | sed -e 's/.*:[[:space:]]*"//' -e 's/"$//')
   fi
