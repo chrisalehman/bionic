@@ -22,8 +22,11 @@
 *.swo
 *~
 
-# Claude Code local state (worktrees, settings)
-.claude/
+# Claude Code local state (worktrees, settings) — .claude/rules/ ships committed
+# (epic-17 W4 S4: process-load-bearing rules reach every clone/subagent); the rest of
+# .claude/ (settings, local worktree state) stays machine-local.
+.claude/*
+!.claude/rules/
 
 # Direnv (machine-specific env vars)
 .envrc
