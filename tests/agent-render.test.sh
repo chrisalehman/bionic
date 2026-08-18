@@ -293,6 +293,80 @@ else
   fail "agents/ is byte-identical to how this suite found it" "$(diff <(echo "$REPO_FP") <(fingerprint "$OUT"))"
 fi
 
+# ============================================================
+echo ""
+echo "=== H — the absorbed survival rules live in exactly ONE place ==="
+# ============================================================
+#
+# S3's prune. Foreground-first and poll-don't-watch reached a dispatched agent only through
+# `.claude/rules/agent-discipline.md` — a repo-local, pay-per-read channel. They now ship
+# inside every role file via blocks/survival.md, so the rules-file copies are duplicates, and
+# a duplicate is a drift source: the two texts already disagreed on the watcher's name
+# ("a Monitor" vs "a watcher") before this wave.
+#
+# The arm binds BOTH directions, because a prune has two failure modes. Under-pruning leaves
+# the duplicate standing (§H1). OVER-pruning is the quieter one: the foreground-first bullet
+# also carried the `claims=` declaration duty, which survival.md does NOT absorb — it is
+# addressed to the orchestrator writing a brief, not to the agent reading a role file — so
+# deleting that bullet whole would silently drop a live rule (§H2).
+
+RULES="$REPO/.claude/rules/agent-discipline.md"
+SURVIVAL="$SRC/blocks/survival.md"
+
+[ -f "$RULES" ]; check $? ".claude/rules/agent-discipline.md is present (committed by S4)"
+
+# H1 — absorbed: present in the block source, gone from the rules file.
+# Spans, not headings: each literal is a piece of the obligation itself, so a reworded
+# heading cannot satisfy the pin and a surviving paragraph cannot hide under a renamed one.
+while IFS='|' read -r label absorbed_span rules_span; do
+  [ -z "$label" ] && continue
+  if grep -qF "$absorbed_span" "$SURVIVAL"; then
+    pass "absorbed ($label): the rule is in blocks/survival.md"
+  else
+    fail "absorbed ($label): the rule is in blocks/survival.md" "missing span: $absorbed_span"
+  fi
+  if grep -qF "$rules_span" "$RULES"; then
+    fail "absorbed ($label): the duplicate is gone from agent-discipline.md" \
+         "still present: $rules_span"
+  else
+    pass "absorbed ($label): the duplicate is gone from agent-discipline.md"
+  fi
+done <<'ABSORBED'
+foreground-first|runs in the FOREGROUND|A command with a known bound under 10 minutes runs FOREGROUND
+timeout-ceiling|not a ceiling|2-minute default is a default, not a ceiling
+poll-don't-watch|a foreground command that outlives roughly 120 seconds|Poll-don't-watch when the tool auto-backgrounds you
+lost-wake|the wake is the thing that gets lost|the wake is what gets lost
+ABSORBED
+
+# H2 — NOT absorbed: these must survive the prune. survival.md is addressed to a dispatched
+# agent; these three spans are addressed to whoever writes the brief, so they have no home in
+# a role file and the rules file is still their only one.
+while IFS='|' read -r label span; do
+  [ -z "$label" ] && continue
+  if grep -qF "$span" "$RULES"; then
+    pass "kept ($label): survives the prune in agent-discipline.md"
+  else
+    fail "kept ($label): survives the prune in agent-discipline.md" "over-pruned, missing: $span"
+  fi
+  if grep -qF "$span" "$SURVIVAL"; then
+    fail "kept ($label): stays OUT of the shipped block" "leaked into survival.md: $span"
+  else
+    pass "kept ($label): stays OUT of the shipped block"
+  fi
+done <<'KEPT'
+claims-declaration|`claims=` process pattern
+roster-verdict|STILL-LIVE instead of UNMET
+advisory-only|This channel is advisory only
+KEPT
+
+# H3 — the tombstone. A prune that leaves no forwarding address makes the next reader think
+# the rule was repealed rather than moved, so the pointer is part of the deliverable.
+if grep -qF 'agents-src/blocks/survival.md' "$RULES"; then
+  pass "tombstone: agent-discipline.md names the block source as the content's new home"
+else
+  fail "tombstone: agent-discipline.md names the block source as the content's new home"
+fi
+
 # ---------- summary ----------
 echo ""
 echo "──────────────────────────────────────────────"
