@@ -42,7 +42,7 @@ never a substitute for it.
 - Run every suite through a log: `<suite command> 2>&1 | tee "$LOG"` — stdout stays live, the log persists.
 - Log path: `.bionic/tmp/test-runner-<suite>-<timestamp>.log` when the project has `.bionic/tmp/`; otherwise `mktemp -t test-runner-<suite>`.
 - Always name every log path in your report — the log is your named output artifact, so the orchestrator or the user can tail results even if your report is delayed or lost.
-- Preserve the suite's exit code across the pipe (`set -o pipefail` or `${PIPESTATUS[0]}`) — the tee must never convert a red suite into a green exit.
+- Preserve the suite's exit code across the pipe — the tee must never convert a red suite into a green exit. `set -o pipefail` works identically in bash and zsh; the per-stage array is shell-specific — `${PIPESTATUS[0]}` in **bash** (zero-indexed), `${pipestatus[1]}` in **zsh** (one-indexed) — details in the Survival rules below.
 
 ## Survival rules
 
