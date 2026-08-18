@@ -726,6 +726,14 @@ for name, url in table.items():
     entry_url = src.get('url', '') if isinstance(src, dict) else ''
     if entry_url != url:
         problems.append("marketplace.json %s source_url mismatch: table=%r entry=%r" % (name, url, entry_url))
+    # Every url-sourced entry carries a commit pin. This is the supply-chain
+    # claim — "the code installed is the code that was reviewed" — and it is
+    # NOT the version constraint the table owns; an unpinned entry tracks
+    # whatever HEAD the default branch is at install time, and these
+    # dependencies ship skills and agents whose text Claude reads and acts on.
+    # Pinning one and not the other is the shape this asserts away.
+    if not str(src.get('sha', '') if isinstance(src, dict) else '').strip():
+        problems.append("marketplace.json %s is url-sourced with no sha pin" % name)
 for name, p in entries.items():
     if name != 'bionic' and name not in table and isinstance(p.get('source'), dict):
         problems.append("marketplace.json has url-sourced entry with no table row: %s" % name)
@@ -785,6 +793,24 @@ MUT2_REPORT="$(manifest_agreement_report "$MUT_PLUGIN" "$MARKETPLACE_JSON")"
 expect_true "mutation 2 (reintroduced version key) makes the agreement pin non-empty" test -n "$MUT2_REPORT"
 expect_match "mutation 2 is reported as a version key on superpowers" \
   "*superpowers carries a version key*" "$MUT2_REPORT"
+
+# Mutation 3: drop a sha pin in a marketplace.json copy. The asymmetry this
+# catches is the one that actually shipped — superpowers pinned, agent-skills
+# tracking the default branch's HEAD — so the pin has to be proven able to see
+# an ABSENT sha, not merely a wrong one.
+MUT_MKT_NOSHA="$TMP/marketplace.nosha.json"
+python3 -c "
+import json
+d = json.load(open('$MARKETPLACE_JSON'))
+for p in d['plugins']:
+    if p.get('name') == 'agent-skills':
+        p['source'].pop('sha', None)
+json.dump(d, open('$MUT_MKT_NOSHA', 'w'))
+"
+MUT3_REPORT="$(manifest_agreement_report "$PLUGIN_JSON" "$MUT_MKT_NOSHA")"
+expect_true "mutation 3 (sha pin removed) makes the agreement pin non-empty" test -n "$MUT3_REPORT"
+expect_match "mutation 3 is reported as a missing sha pin on agent-skills" \
+  "*agent-skills is url-sourced with no sha pin*" "$MUT3_REPORT"
 
 expect_eq "the shipped plugin.json and marketplace.json are byte-identical to before the mutations" \
   "$MANIFEST_CKSUM_BEFORE" "$(shasum "$PLUGIN_JSON" "$MARKETPLACE_JSON" 2>/dev/null)"

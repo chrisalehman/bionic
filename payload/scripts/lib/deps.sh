@@ -73,6 +73,17 @@ _dep_playwright_cache() {
 #                         install this shape. `native` means the harness does it.
 #   removal_behavior      native-uninstall-offer | remove-on-consent | keep-shared
 #
+# THE ONE FIELD THIS TABLE DOES NOT OWN is the commit `sha` on a lane-3a
+# marketplace entry. It is deliberately not a seventh column: a sha is a
+# SUPPLY-CHAIN pin — "the code installed is the code that was reviewed" — and
+# `constraint` above is a VERSION claim — "the installed version satisfies this
+# range". Different questions, different lifetimes, different owners: the
+# constraint is doctor's to judge on every run, the sha is the manifest's to
+# state once and change only by review. So marketplace.json is the sha's author
+# by written exception, and tests/plugin-lib.test.sh Group 18 requires EVERY
+# url-sourced entry to carry one. Saying nothing here is what let one
+# dependency ship pinned and the other tracking a moving branch head.
+#
 # PROVENANCE. Lane 3a: the wave's ratified D1 values (agent-skills is ^0.6.0 —
 # the ^1.0.0 in today's plugin.json is stale and D3 ratified the correction).
 # Lane 3b: ported from claude-bootstrap.sh, which retires at W5 and is the
