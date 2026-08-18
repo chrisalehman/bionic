@@ -631,6 +631,57 @@ expect_eq "detect_half_uninstalled: detect+profile, plugin still registered -> s
   "$(detect_and_profile_run BIONIC_CLAUDE_HOME="$CH_BIONIC" BIONIC_SHELL_RC="$RC_WITHOUT" \
       BIONIC_SETTINGS_FILE="$SET_PROFILE_ONLY" -- detect_half_uninstalled)"
 
+# C-2 — REGISTRATION AS A FACT OF ITS OWN. The registration probe above was
+# computed inside detect_half_uninstalled and reachable nowhere else, so setup's
+# step 6 could not consult it and told every user the plugin registers a
+# replacement for the hooks it was about to delete — false on every machine
+# before the W5 cutover. A machine fact that only one caller can see is a fact
+# with one caller by accident, not by design; this exposes it the way every
+# other line here is exposed, and detect_half_uninstalled now reads it rather
+# than recomputing it.
+
+expect_eq "detect_plugin_registered: bionic in installed_plugins.json -> yes" \
+  "plugin:registered=yes" \
+  "$(detect_run BIONIC_CLAUDE_HOME="$CH_BIONIC" -- detect_plugin_registered)"
+expect_eq "detect_plugin_registered: a registry with no bionic entry -> no" \
+  "plugin:registered=no" \
+  "$(detect_run BIONIC_CLAUDE_HOME="$CH_EMPTY" -- detect_plugin_registered)"
+expect_eq "detect_plugin_registered: another marketplace's plugin is not bionic" \
+  "plugin:registered=no" \
+  "$(detect_run BIONIC_CLAUDE_HOME="$CH_OK" -- detect_plugin_registered)"
+expect_eq "detect_plugin_registered: no registry file at all -> no (nothing is installed)" \
+  "plugin:registered=no" \
+  "$(detect_run BIONIC_CLAUDE_HOME="$TMP/ch-absent" -- detect_plugin_registered)"
+
+# The honest unknown, in the one case where guessing would be a lie: the file is
+# there and jq cannot parse it. Answering `no` would tell setup to promise the
+# user nothing replaces their hooks; answering `yes` would promise that
+# something does. Neither is known.
+CH_MALFORMED="$TMP/ch-malformed"; mkdir -p "$CH_MALFORMED/plugins"
+printf '%s' '{"plugins": {' > "$CH_MALFORMED/plugins/installed_plugins.json"
+expect_eq "detect_plugin_registered: unparseable registry -> unknown, never a guess" \
+  "plugin:registered=unknown" \
+  "$(detect_run BIONIC_CLAUDE_HOME="$CH_MALFORMED" -- detect_plugin_registered)"
+
+# No jq: the grep fallback the half-uninstalled probe already carried. It is a
+# real answer, not an unknown — the key is a literal string in the file.
+expect_eq "detect_plugin_registered: no jq on PATH still reads the registry -> yes" \
+  "plugin:registered=yes" \
+  "$(env -i HOME="$TMP/home" PATH="$NOJQ_BIN" BIONIC_CLAUDE_HOME="$CH_BIONIC" \
+      bash -c '. "$1"; detect_plugin_registered' _ "$DETECT_SH" 2>&1)"
+expect_eq "detect_plugin_registered: no jq, no bionic entry -> no" \
+  "plugin:registered=no" \
+  "$(env -i HOME="$TMP/home" PATH="$NOJQ_BIN" BIONIC_CLAUDE_HOME="$CH_EMPTY" \
+      bash -c '. "$1"; detect_plugin_registered' _ "$DETECT_SH" 2>&1)"
+
+# The extraction did not move the half-uninstalled verdict. An `unknown`
+# registration must not be reported as half-uninstalled: that verdict tells the
+# user their machine is broken and points them at the standalone remove door.
+expect_eq "detect_half_uninstalled: an unparseable registry is not a half-uninstall claim" \
+  "state:half-uninstalled=no" \
+  "$(detect_run BIONIC_CLAUDE_HOME="$CH_MALFORMED" BIONIC_SHELL_RC="$RC_LEGACY" \
+      BIONIC_SETTINGS_FILE="$SET_STALE" -- detect_half_uninstalled)"
+
 echo ""
 echo "=== Group 15: read-only contract — no detect function mutates ==="
 #
@@ -656,6 +707,7 @@ expect_match "detect_all emits the plugin line"        "*plugin: version=*"     
 expect_match "detect_all emits the todo-tools line"    "*env:todo-tools present=*"   "$DETECT_ALL"
 expect_match "detect_all emits the zshrc-legacy line"  "*env:zshrc-legacy present=*" "$DETECT_ALL"
 expect_match "detect_all emits the stale-hooks line"   "*env:legacy-channel-hooks count=*" "$DETECT_ALL"
+expect_match "detect_all emits the registration line"  "*plugin:registered=*"        "$DETECT_ALL"
 expect_match "detect_all emits the half-uninstalled line" "*state:half-uninstalled=*" "$DETECT_ALL"
 expect_match "detect_all emits a dep line per row"     "*dep:superpowers lane=3a*"   "$DETECT_ALL"
 
@@ -663,7 +715,7 @@ echo ""
 echo "=== Group 16: every detect function prints exactly one line and exits 0 ==="
 
 for fn in detect_plugin_integrity detect_env_todo_tools detect_zshrc_legacy_block \
-          detect_legacy_channel_hooks detect_half_uninstalled; do
+          detect_legacy_channel_hooks detect_plugin_registered detect_half_uninstalled; do
   out="$(detect_run BIONIC_PLUGIN_ROOT="$PL_OK" BIONIC_CLAUDE_HOME="$CH_OK" \
     BIONIC_SHELL_RC="$RC_LEGACY" BIONIC_SETTINGS_FILE="$SET_STALE" -- "$fn")"
   rc=$?

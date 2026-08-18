@@ -533,6 +533,45 @@ plant_cli_plugin "bionic@bionic" true
 OUT="$(run_setup "$NO")"
 expect_match "no legacy-channel entries: setup says so rather than prompting" '*no legacy-channel managed-hook entries*' "$OUT"
 
+# C-2 — WHAT THE PROMPT PROMISES, in both machine states.
+#
+# The prompt used to say, unconditionally, that the plugin registers its own
+# copy of each hook through the payload's hooks.json. That is a safety claim —
+# "delete these, something already covers them" — and it is false on every
+# machine where the plugin is not registered with the CLI, which is every
+# machine before the W5 cutover. A user who answered `y` severed their hook
+# enforcement outright on the strength of it.
+#
+# The registration is a machine fact (detect_plugin_registered), so the sentence
+# is conditional on it. Both branches are asserted, and each asserts the ABSENCE
+# of the other's claim — otherwise a prompt that printed both would pass both.
+
+new_fixture hooks-registered
+plant_cli_plugin "bionic@bionic" true
+plant_installed "bionic@bionic" "0.1.0"
+plant_legacy_channel_settings
+OUT="$(run_setup "$NO")"
+expect_match "registered: the prompt says the plugin registers its own copy" \
+  '*registers its own copy*' "$OUT"
+expect_no_match "registered: it does not also warn that nothing takes their place" \
+  '*nothing takes their place*' "$OUT"
+
+new_fixture hooks-unregistered
+plant_cli_plugin "bionic@bionic" true
+plant_legacy_channel_settings
+OUT="$(run_setup "$NO")"
+expect_match "unregistered: the prompt says plainly that nothing takes their place" \
+  '*nothing takes their place*' "$OUT"
+expect_no_match "unregistered: the false replacement claim is not printed" \
+  '*registers its own copy*' "$OUT"
+expect_match "unregistered: the prompt names the plugin's absence as the reason" \
+  '*NOT registered with the CLI*' "$OUT"
+
+# The fixture pair really does differ only in the registration fact, so the
+# discrimination above is the registration and not some other fixture drift.
+expect_eq "the two arms differ in the registration fact, and in that alone" \
+  "plugin:registered=no" "$(lib_query "$LIB_DIR/detect.sh" detect_plugin_registered)"
+
 new_fixture hooks-nojq
 plant_cli_plugin "bionic@bionic" true
 plant_legacy_channel_settings
