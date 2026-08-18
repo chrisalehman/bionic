@@ -6,8 +6,18 @@
 #   2. frontmatter: name / model∈set / effort∈set, exact per-file values
 #   3. disallowedTools present on researcher/auditor/critic/test-runner, absent on both implementors
 #   4. mandate byte-diff: SKILL.md auditor+critic blockquotes == role-file MANDATE marker blocks
-#   5. shared-core drift: SHARED-CORE blocks byte-identical across the two implementor files
-#   6. meta-evidence: planted one-byte drift makes 4 & 5 go RED (both directions for the mandate)
+#   6. meta-evidence: planted one-byte drift makes 4 go RED (both directions)
+#
+# WHAT THIS SUITE NO LONGER DOES (epic-17 W4 S2, spec AC-2 / design ledger D1). Sections 5
+# and 7 held the role files' SHARED-CORE and REPORT-CONTRACT blocks in agreement PAIRWISE —
+# every file byte-diffed against a reference copy. Those blocks now have exactly one source
+# apiece under agents-src/blocks/ and the finals are generated from it, so there is no
+# second copy to drift: identity by construction retires identity by enforcement. Their
+# replacements live in tests/agent-render.test.sh — one regenerate-and-diff arm for
+# staleness, presence arms for the blocks, content literals on the sources.
+#
+# What stays here is everything construction CANNOT make true: the frontmatter values, and
+# the MANDATE/AXIS pins, which compare a role file against a DIFFERENT surface (SKILL.md).
 #
 # Meta-evidence never mutates the real files — it plants drift into temp copies.
 # Harness idiom mirrors hooks/*.test.sh: PASS/FAIL counters, nonzero exit on any fail.
@@ -85,12 +95,6 @@ axis_matches() {
        <(blockquote_block "$2" "$3" "$4") >/dev/null 2>&1
 }
 
-# sharedcore_matches <file1> <file2>: SHARED-CORE blocks byte-identical.
-sharedcore_matches() {
-  diff <(marker_block "$1" SHARED-CORE-BEGIN SHARED-CORE-END) \
-       <(marker_block "$2" SHARED-CORE-BEGIN SHARED-CORE-END) >/dev/null 2>&1
-}
-
 # ---------- drift planters (write a mutated copy; never touch the source) ----------
 
 # plant_blockquote_drift <in> <out> <begin> <end>: append a byte to the '> ' line inside a marker block.
@@ -117,16 +121,6 @@ plant_skill_drift() {
 plant_skill_para_drift() {
   awk -v s="$3" '
     !done && index($0,s) {print $0 "X"; done=1; next}
-    {print}
-  ' "$1" > "$2"
-}
-
-# plant_block_content_drift <in> <out> <begin> <end>: append a byte to the first non-blank line in a block.
-plant_block_content_drift() {
-  awk -v b="$3" -v e="$4" '
-    index($0,b) {inb=1; print; next}
-    index($0,e) {inb=0; print; next}
-    inb && !done && NF {print $0 "X"; done=1; next}
     {print}
   ' "$1" > "$2"
 }
@@ -215,19 +209,6 @@ else
   fail "critic.md duplication-axis/agreement-test block drifted from SKILL.md" "$(diff <(skill_paragraph "$SKILL" "$DUP_ANCHOR"; skill_paragraph "$SKILL" "$AGREE_ANCHOR") <(blockquote_block "$AGENTS/critic.md" AXIS-BEGIN AXIS-END))"
 fi
 
-# ===== Section 5: shared-core drift =====
-echo "== Section 5: shared implementor core =="
-if [ -n "$(marker_block "$AGENTS/implementor.md" SHARED-CORE-BEGIN SHARED-CORE-END)" ]; then
-  pass "implementor.md shared-core block non-empty"
-else
-  fail "implementor.md shared-core block empty"
-fi
-if sharedcore_matches "$AGENTS/implementor.md" "$AGENTS/senior-implementor.md"; then
-  pass "shared-core byte-identical across both implementor files"
-else
-  fail "shared-core drifted between implementor files" "$(diff <(marker_block "$AGENTS/implementor.md" SHARED-CORE-BEGIN SHARED-CORE-END) <(marker_block "$AGENTS/senior-implementor.md" SHARED-CORE-BEGIN SHARED-CORE-END))"
-fi
-
 # ===== Section 6: meta-evidence (planted drift must go RED, both directions) =====
 echo "== Section 6: meta-evidence =="
 # 6a. role-side mandate drift (auditor role file copy drifted)
@@ -258,13 +239,6 @@ if ! mandate_matches "$TMP/skill-drift-critic.md" "$CRITIC_ANCHOR" "$AGENTS/crit
 else
   fail "meta: SKILL-side critic mandate drift NOT detected"
 fi
-# 6d. shared-core drift (one block drifted)
-plant_block_content_drift "$AGENTS/implementor.md" "$TMP/impl-drift.md" SHARED-CORE-BEGIN SHARED-CORE-END
-if ! sharedcore_matches "$TMP/impl-drift.md" "$AGENTS/senior-implementor.md"; then
-  pass "meta: shared-core drift detected"
-else
-  fail "meta: shared-core drift NOT detected"
-fi
 # 6e. role-side axis-block drift (critic.md duplication-axis/agreement-test copy drifted)
 plant_blockquote_drift "$AGENTS/critic.md" "$TMP/critic-axis-drift.md" AXIS-BEGIN AXIS-END
 if ! axis_matches "$SKILL" "$TMP/critic-axis-drift.md" AXIS-BEGIN AXIS-END; then
@@ -279,39 +253,6 @@ if ! axis_matches "$TMP/skill-axis-drift.md" "$AGENTS/critic.md" AXIS-BEGIN AXIS
 else
   fail "meta: SKILL-side axis-block drift NOT detected"
 fi
-
-# ===== Section 7: REPORT-CONTRACT duty block ×6, byte-identical =====
-echo "== Section 7: REPORT-CONTRACT duty block =="
-RC_FILES="auditor critic implementor researcher senior-implementor test-runner"
-for r in $RC_FILES; do
-  if [ -n "$(marker_block "$AGENTS/$r.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END)" ]; then
-    pass "$r.md: REPORT-CONTRACT block present"
-  else
-    fail "$r.md: REPORT-CONTRACT block missing/empty"
-  fi
-done
-
-# Presence + mutual identity alone cannot see WHAT the block says: six copies
-# emptied of meaning in unison are byte-identical and non-empty, and the suite
-# stays green (Step-6 critic reproduced this by inverting the core sentence in
-# all six files). One literal on the reference copy is enough — byte-identity
-# propagates the bind to the other five.
-if marker_block "$AGENTS/auditor.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END \
-   | grep -qF "carries the command that proves it and that command's output, or the explicit"; then
-  pass "auditor.md: REPORT-CONTRACT states the proof-or-label rule (literal pinned)"
-else
-  fail "auditor.md: REPORT-CONTRACT core sentence missing or reworded"
-fi
-
-for r in $RC_FILES; do
-  [ "$r" = "auditor" ] && continue
-  if diff <(marker_block "$AGENTS/auditor.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END) \
-          <(marker_block "$AGENTS/$r.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END) >/dev/null 2>&1; then
-    pass "$r.md: REPORT-CONTRACT byte-identical to auditor.md"
-  else
-    fail "$r.md: REPORT-CONTRACT drifted from auditor.md" "$(diff <(marker_block "$AGENTS/auditor.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END) <(marker_block "$AGENTS/$r.md" REPORT-CONTRACT-BEGIN REPORT-CONTRACT-END))"
-  fi
-done
 
 # ---------- summary ----------
 echo "──────────────────────────────────────────────"

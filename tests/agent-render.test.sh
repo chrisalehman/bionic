@@ -149,16 +149,31 @@ echo "=== D — rendering is deterministic: a re-render changes nothing ==="
 #
 # --check compares; this proves the WRITE path agrees with it, so `render.sh` after an
 # innocent re-run never produces a diff someone has to explain.
+#
+# THIS SUITE NEVER RUNS THE WRITE PATH AGAINST THE REPO. An earlier draft did, and the
+# consequence showed up the first time the arms were mutation-proven: §C reports staleness
+# and then §D silently REPAIRS it, so the tree is clean by the time anyone looks and a
+# second run is green. A test that repairs what it measures destroys its own evidence. The
+# whole write path therefore runs against the same hermetic copy §F mutates — assembled
+# here, so §D and §F share one fixture and one copy step.
 
-FP_BEFORE="$(fingerprint "$OUT")"
-RENDER_OUT="$("$RENDER" 2>&1)"; RENDER_RC=$?
-check "$RENDER_RC" "render.sh (write mode) exits clean on the committed tree" "$RENDER_OUT"
-FP_AFTER="$(fingerprint "$OUT")"
+cp -R "$SRC" "$TMP/agents-src" && cp -R "$OUT" "$TMP/agents"
+FIXTURE_RENDER="$TMP/agents-src/render.sh"
+FIXTURE_OUT="$TMP/agents"
+
+FP_BEFORE="$(fingerprint "$FIXTURE_OUT")"
+RENDER_OUT="$("$FIXTURE_RENDER" 2>&1)"; RENDER_RC=$?
+check "$RENDER_RC" "render.sh (write mode) exits clean on a copy of the committed tree" "$RENDER_OUT"
+FP_AFTER="$(fingerprint "$FIXTURE_OUT")"
 if [ "$FP_BEFORE" = "$FP_AFTER" ]; then
   pass "a re-render leaves every rendered final byte-identical"
 else
   fail "a re-render leaves every rendered final byte-identical" "$(diff <(echo "$FP_BEFORE") <(echo "$FP_AFTER"))"
 fi
+
+# The repo tree is exactly where it was — the arm above proves the write path is a no-op on
+# a matching tree, and this proves the suite itself did not touch the real one.
+REPO_FP="$(fingerprint "$OUT")"
 
 # ============================================================
 echo ""
@@ -191,23 +206,31 @@ for r in implementor senior-implementor; do
   fi
 done
 
-# Presence of a marker pair says nothing about what is between it — six blocks emptied of
-# meaning in unison are present, non-empty and mutually identical. The survival block exists
-# to carry four specific survival rules; each gets a literal, on the block SOURCE (one site,
-# and --check propagates the bind to all six finals).
-SURVIVAL_SRC="$SRC/blocks/survival.md"
-while IFS='|' read -r label needle; do
-  if grep -qF "$needle" "$SURVIVAL_SRC" 2>/dev/null; then
-    pass "survival block states: $label"
+# Presence of a marker pair says nothing about what is between it. A block emptied of its
+# meaning is still present, still non-empty, and — now that there is one source — still
+# rendered identically into all six finals; construction propagates a gutted block as
+# faithfully as a good one. So each block's load-bearing sentence gets a literal, pinned on
+# the SOURCE: one site, and --check carries the bind out to every final.
+#
+# This is where Section 7's core-sentence pin from agent-roles.test.sh moved to. The
+# Step-6 critic that produced that pin had reproduced the failure it guards by inverting
+# the sentence in all six files at once; with one source, one pin covers the same ground.
+while IFS='|' read -r blockfile label needle; do
+  if grep -qF "$needle" "$SRC/blocks/$blockfile.md" 2>/dev/null; then
+    pass "$blockfile block states: $label"
   else
-    fail "survival block states: $label (missing literal '$needle')"
+    fail "$blockfile block states: $label (missing literal '$needle')"
   fi
 done <<'LITERALS'
-poll-don't-watch|poll the output file
-foreground-first with an explicit generous timeout|600000 ms
-the farm-out wall binds the orchestrator, not a dispatched agent|FARM_OUT_ALLOW=1
-never end your turn while a command is running|Never end your turn while a command is running
-suite output always goes to a file|validate the FILE
+survival|poll-don't-watch|poll the output file
+survival|foreground-first with an explicit generous timeout|600000 ms
+survival|the farm-out wall binds the orchestrator, not a dispatched agent|FARM_OUT_ALLOW=1
+survival|never end your turn while a command is running|Never end your turn while a command is running
+survival|suite output always goes to a file|validate the FILE
+report-contract|the proof-or-label rule|carries the command that proves it and that command's output, or the explicit
+report-contract|completion is signaled, never inferred|idle is
+shared-core|RED before GREEN|never write implementation before a red test
+shared-core|completion-by-artifact|that message, not going idle, is what closes the phase
 LITERALS
 
 # ============================================================
@@ -215,12 +238,9 @@ echo ""
 echo "=== F — meta-evidence: --check goes RED in BOTH staleness directions ==="
 # ============================================================
 #
-# Both mutations are planted into a hermetic copy of the tree; the real agents-src/ and
+# Both mutations are planted into the hermetic copy §D assembled; the real agents-src/ and
 # agents/ are never touched. render.sh derives its output directory from its own location,
 # so the copy runs the production path unaltered.
-
-cp -R "$SRC" "$TMP/agents-src" && cp -R "$OUT" "$TMP/agents"
-FIXTURE_RENDER="$TMP/agents-src/render.sh"
 
 BASE_OUT="$("$FIXTURE_RENDER" --check 2>&1)"; BASE_RC=$?
 check "$BASE_RC" "meta: the untouched fixture copy is green (the mutations below are what turn it red)" "$BASE_OUT"
@@ -256,6 +276,21 @@ if ! "$FIXTURE_RENDER" >/dev/null 2>&1; then
   pass "meta: a missing block source makes render.sh exit nonzero"
 else
   fail "meta: a missing block source makes render.sh exit nonzero"
+fi
+
+# ============================================================
+echo ""
+echo "=== G — the suite itself changed nothing under agents/ ==="
+# ============================================================
+#
+# The wall behind §D's rule. Everything above that could write ran against $TMP; if a
+# future arm reaches for the real tree "just to re-render", this is what catches it, and
+# the reason it matters is that such an arm would repair the staleness §C exists to report.
+
+if [ "$REPO_FP" = "$(fingerprint "$OUT")" ]; then
+  pass "agents/ is byte-identical to how this suite found it"
+else
+  fail "agents/ is byte-identical to how this suite found it" "$(diff <(echo "$REPO_FP") <(fingerprint "$OUT"))"
 fi
 
 # ---------- summary ----------
