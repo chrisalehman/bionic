@@ -313,6 +313,16 @@ echo "=== H — the absorbed survival rules live in exactly ONE place ==="
 RULES="$REPO/.claude/rules/agent-discipline.md"
 SURVIVAL="$SRC/blocks/survival.md"
 
+# flat <file>: the file as one whitespace-normalized line. Every span below is prose inside a
+# hard-wrapped markdown bullet, so a line-oriented grep pins the WRAP as much as the words —
+# rewrapping a paragraph would fail an arm whose rule never changed, and (worse) re-wrapping a
+# duplicate would satisfy an absence arm that should still be red. Normalizing first makes
+# these pins guard the sentence rather than the line break it happens to sit across.
+flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
+
+RULES_FLAT="$(flat "$RULES")"
+SURVIVAL_FLAT="$(flat "$SURVIVAL")"
+
 [ -f "$RULES" ]; check $? ".claude/rules/agent-discipline.md is present (committed by S4)"
 
 # H1 — absorbed: present in the block source, gone from the rules file.
@@ -320,12 +330,12 @@ SURVIVAL="$SRC/blocks/survival.md"
 # heading cannot satisfy the pin and a surviving paragraph cannot hide under a renamed one.
 while IFS='|' read -r label absorbed_span rules_span; do
   [ -z "$label" ] && continue
-  if grep -qF "$absorbed_span" "$SURVIVAL"; then
+  if printf '%s' "$SURVIVAL_FLAT" | grep -qF "$absorbed_span"; then
     pass "absorbed ($label): the rule is in blocks/survival.md"
   else
     fail "absorbed ($label): the rule is in blocks/survival.md" "missing span: $absorbed_span"
   fi
-  if grep -qF "$rules_span" "$RULES"; then
+  if printf '%s' "$RULES_FLAT" | grep -qF "$rules_span"; then
     fail "absorbed ($label): the duplicate is gone from agent-discipline.md" \
          "still present: $rules_span"
   else
@@ -343,12 +353,12 @@ ABSORBED
 # a role file and the rules file is still their only one.
 while IFS='|' read -r label span; do
   [ -z "$label" ] && continue
-  if grep -qF "$span" "$RULES"; then
+  if printf '%s' "$RULES_FLAT" | grep -qF "$span"; then
     pass "kept ($label): survives the prune in agent-discipline.md"
   else
     fail "kept ($label): survives the prune in agent-discipline.md" "over-pruned, missing: $span"
   fi
-  if grep -qF "$span" "$SURVIVAL"; then
+  if printf '%s' "$SURVIVAL_FLAT" | grep -qF "$span"; then
     fail "kept ($label): stays OUT of the shipped block" "leaked into survival.md: $span"
   else
     pass "kept ($label): stays OUT of the shipped block"
@@ -361,7 +371,7 @@ KEPT
 
 # H3 — the tombstone. A prune that leaves no forwarding address makes the next reader think
 # the rule was repealed rather than moved, so the pointer is part of the deliverable.
-if grep -qF 'agents-src/blocks/survival.md' "$RULES"; then
+if printf '%s' "$RULES_FLAT" | grep -qF 'agents-src/blocks/survival.md'; then
   pass "tombstone: agent-discipline.md names the block source as the content's new home"
 else
   fail "tombstone: agent-discipline.md names the block source as the content's new home"
