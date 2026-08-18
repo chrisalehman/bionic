@@ -34,10 +34,10 @@
 #                           the block is retired footprint. Ported here because
 #                           the installer retires at W5 and this obligation must
 #                           not retire with it.
-#   6. stale managed hooks  settings.json entries still naming ~/.claude/hooks/.
+#   6. legacy-channel hooks settings.json entries still naming ~/.claude/hooks/.
 #                           The plugin registers its own hooks through the
-#                           payload's hooks.json; a leftover settings entry fires
-#                           a stale COPY of a hook the plugin already provides.
+#                           payload's hooks.json, so a settings entry naming that
+#                           directory is registered through the OTHER channel.
 #                           Also ported from the retiring installer.
 #   7. permission profile   rendered against this machine's plugin root and
 #                           applied under explicit consent (AC-6). Consent is
@@ -391,7 +391,7 @@ setup_legacy_alias() {
   return 0
 }
 
-# ─── Step 6 — stale managed-hook entries ─────────────────────────────────────
+# ─── Step 6 — legacy-channel managed-hook entries ─────────────────────────────────────
 #
 # The filter matches detect.sh's own predicate exactly (a hook command naming
 # `.claude/hooks/`), because the count that decided to prompt and the edit that
@@ -399,20 +399,20 @@ setup_legacy_alias() {
 # into the pre-plugin directory — are untouched: this is bionic's leftover being
 # removed, not the machine's hook config being taken over.
 
-setup_stale_hooks() {
+setup_legacy_channel_hooks() {
   say ""
-  say "6. Stale managed-hook entries"
+  say "6. Legacy-channel managed-hook entries"
   local line count settings tmp
-  line="$(detect_stale_settings_hooks)"; count="${line#*count=}"
+  line="$(detect_legacy_channel_hooks)"; count="${line#*count=}"
   settings="$(_dep_settings_file)"
 
   case "$count" in
     0)
-      say "   no stale managed-hook entries in ${settings} — nothing to remove."
+      say "   no legacy-channel managed-hook entries in ${settings} — nothing to remove."
       return 0 ;;
     unknown)
-      say "   stale managed-hook entries: count unknown — jq is unavailable, so ${settings} was not parsed."
-      action "install jq, then re-run /bionic:setup — stale managed-hook entries could not be counted"
+      say "   legacy-channel managed-hook entries: count unknown — jq is unavailable, so ${settings} was not parsed."
+      action "install jq, then re-run /bionic:setup — legacy-channel managed-hook entries could not be counted"
       return 0 ;;
   esac
 
@@ -420,10 +420,11 @@ setup_stale_hooks() {
   # tests/plugin-paths.test.sh forbids an installed-path literal on any
   # executable line in the payload, and a user-facing string is still one.
   say "   ${count} hook entr(ies) in ${settings} still point into the machine's pre-plugin hooks directory."
-  say "   The plugin registers its own hooks; these fire a stale copy of a hook bionic already provides."
-  if ! consent "   Remove the stale entries from ${settings}?"; then
+  say "   They are registered through the settings channel rather than the plugin channel; the plugin"
+  say "   registers its own copy of each through the payload's hooks.json."
+  if ! consent "   Remove the legacy-channel entries from ${settings}?"; then
     say "   declined — ${settings} is unchanged."
-    action "remove ${count} stale managed-hook entr(ies) from ${settings}"
+    action "remove ${count} legacy-channel managed-hook entr(ies) from ${settings}"
     return 0
   fi
 
@@ -442,7 +443,7 @@ setup_stale_hooks() {
   else
     rm -f "$tmp"
     say "   could not rewrite ${settings}."
-    action "remove ${count} stale managed-hook entr(ies) from ${settings} by hand"
+    action "remove ${count} legacy-channel managed-hook entr(ies) from ${settings} by hand"
   fi
   return 0
 }
@@ -531,7 +532,7 @@ setup_dep_enable_verify
 setup_dep_install_loop
 setup_env_export
 setup_legacy_alias
-setup_stale_hooks
+setup_legacy_channel_hooks
 setup_profile
 setup_summary
 

@@ -28,7 +28,7 @@
 #
 # BOTH ARMS, ALWAYS — plus the third. Every section is rendered on a fully
 # HEALTHY machine and on a BROKEN one (absences, a constraint violation, a stale
-# profile, a legacy rc block, stale settings entries, half-uninstalled). A
+# profile, a legacy rc block, legacy-channel hook entries, half-uninstalled). A
 # section that only ever renders one way proves nothing. The third arm is
 # UNKNOWN: S1's resolution makes `present=unknown` and `count=unknown` legal
 # values, and a doctor that coerced them to `no`/`0` would report a machine it
@@ -405,8 +405,8 @@ expect_match "healthy: TODO_TOOLS export reported present" \
   "*present*" "$(line_of "$H_OUT" "CLAUDE_CODE_ENABLE_TODO_TOOLS")"
 expect_match "healthy: legacy .zshrc alias block reported absent" \
   "*absent*" "$(line_of "$H_OUT" "legacy .zshrc")"
-expect_match "healthy: zero stale settings.json hook entries" \
-  "*0*" "$(line_of "$H_OUT" "stale settings.json hook entries")"
+expect_match "healthy: zero legacy-channel managed-hook entries" \
+  "*0*" "$(line_of "$H_OUT" "legacy-channel managed-hook entries")"
 expect_match "healthy: ccstatusline reported present" \
   "*present*" "$(line_of "$H_OUT" "ccstatusline statusline")"
 
@@ -492,8 +492,8 @@ expect_match "broken: TODO_TOOLS export reported absent" \
   "*absent*" "$(line_of "$B_OUT" "CLAUDE_CODE_ENABLE_TODO_TOOLS")"
 expect_match "broken: legacy .zshrc alias block reported present" \
   "*present*" "$(line_of "$B_OUT" "legacy .zshrc")"
-expect_match "broken: two stale settings.json hook entries counted" \
-  "*2*" "$(line_of "$B_OUT" "stale settings.json hook entries")"
+expect_match "broken: two legacy-channel managed-hook entries counted" \
+  "*2*" "$(line_of "$B_OUT" "legacy-channel managed-hook entries")"
 expect_match "broken: ccstatusline reported absent" \
   "*absent*" "$(line_of "$B_OUT" "ccstatusline statusline")"
 
@@ -583,9 +583,9 @@ expect_match "no jq: lane-3a presence renders unknown" "*unknown*" "$SP_LINE"
 # assertion would pass on the very value it is meant to reject.
 expect_not_match "no jq: lane-3a presence is NOT coerced to no" "*superpowers* no *" "$SP_LINE"
 
-STALE_LINE="$(line_of "$U_OUT" "stale settings.json hook entries")"
-expect_match "no jq: the stale-hook COUNT renders unknown" "*unknown*" "$STALE_LINE"
-expect_not_match "no jq: the stale-hook count is NOT coerced to 0" "*entries*0*" "$STALE_LINE"
+LEGACY_HOOK_LINE="$(line_of "$U_OUT" "legacy-channel managed-hook entries")"
+expect_match "no jq: the legacy-channel hook COUNT renders unknown" "*unknown*" "$LEGACY_HOOK_LINE"
+expect_not_match "no jq: the legacy-channel hook count is NOT coerced to 0" "*entries*0*" "$LEGACY_HOOK_LINE"
 
 ACC_LINE="$(line_of "$U_OUT" "accretion outside block")"
 expect_match "no jq: accretion renders unknown" "*unknown*" "$ACC_LINE"
@@ -683,7 +683,7 @@ echo "=== Group 8: doctor renders detect.sh's facts — it does not re-derive th
 # the identical string.
 
 for fn in detect_plugin_integrity detect_dep detect_env_todo_tools \
-          detect_zshrc_legacy_block detect_stale_settings_hooks \
+          detect_zshrc_legacy_block detect_legacy_channel_hooks \
           detect_half_uninstalled detect_profile_state profile_diff; do
   expect_true "doctor.sh calls ${fn} from the libraries" grep -q "${fn}" "$DOCTOR_SH"
 done

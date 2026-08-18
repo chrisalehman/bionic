@@ -4,7 +4,8 @@
 # WHAT THIS FILE OWNS. Every observable truth about the machine bionic is
 # running on: is the payload intact, is a dependency there and at what version,
 # does the shell rc carry the flag, is there a legacy alias block, are there
-# stale managed-hook registrations, is this box half-uninstalled. One function
+# hook registrations still on the legacy settings channel, is this box
+# half-uninstalled. One function
 # per fact class, and every door — doctor's report, setup's action list, a
 # route's just-in-time offer, remove's teardown — reads the SAME function. A
 # second implementation of any of these is the defect the ownership table
@@ -19,7 +20,7 @@
 #   dep:<name> lane=<3a|3b> present=<yes|no|unknown> version=<v|unknown> constraint=<c> verdict=<ok|violation|unknown>
 #   env:todo-tools present=<yes|no>
 #   env:zshrc-legacy present=<yes|no>
-#   env:stale-managed-hooks count=<n|unknown>
+#   env:legacy-channel-hooks count=<n|unknown>
 #   state:half-uninstalled=<yes|no>
 #
 # `unknown` APPEARS WHERE HONESTY REQUIRES IT. Two of these values can read
@@ -191,17 +192,25 @@ detect_zshrc_legacy_block() {
 # Managed-hook entries in USER settings.json that still point at the
 # pre-plugin copies under ~/.claude/hooks/. The plugin channel registers hooks
 # through the payload's own hooks.json using ${CLAUDE_PLUGIN_ROOT}, so any
-# settings.json command naming .claude/hooks/ is a migrated machine's leftover
-# — it fires a stale copy of a hook the plugin already provides.
-detect_stale_settings_hooks() {
+# settings.json command naming .claude/hooks/ is registered through the
+# SETTINGS channel rather than the plugin channel.
+#
+# THAT IS ALL THIS COUNTS, and the name says so. The predicate is a path match
+# with no staleness term in it: on a machine that has not cut over yet, the
+# entries it finds are six LIVE hooks doing their job, and calling them "stale"
+# was a claim this function has no evidence for. Which channel a hook is
+# registered through is a fact; whether that registration is redundant depends
+# on the cutover, which is a later wave's business. Callers that want to say
+# more must find the extra evidence themselves.
+detect_legacy_channel_hooks() {
   local settings count
   settings="${BIONIC_SETTINGS_FILE:-${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/settings.json}"
   if ! command -v jq >/dev/null 2>&1; then
-    echo "env:stale-managed-hooks count=unknown"
+    echo "env:legacy-channel-hooks count=unknown"
     return 0
   fi
   if [ ! -f "$settings" ]; then
-    echo "env:stale-managed-hooks count=0"
+    echo "env:legacy-channel-hooks count=0"
     return 0
   fi
   count="$(jq '[ (.hooks // {}) | to_entries[] | .value[]? | .hooks[]?
@@ -210,7 +219,7 @@ detect_stale_settings_hooks() {
   case "$count" in
     ''|*[!0-9]*) count=unknown ;;
   esac
-  echo "env:stale-managed-hooks count=${count}"
+  echo "env:legacy-channel-hooks count=${count}"
   return 0
 }
 
@@ -251,7 +260,7 @@ detect_half_uninstalled() {
   if [ "$registered" = "no" ]; then
     line="$(detect_zshrc_legacy_block)";   [ "$line" = "env:zshrc-legacy present=yes" ] && footprint=yes
     line="$(detect_env_todo_tools)";       [ "$line" = "env:todo-tools present=yes" ] && footprint=yes
-    line="$(detect_stale_settings_hooks)"
+    line="$(detect_legacy_channel_hooks)"
     case "$line" in *"count=0"|*"count=unknown") ;; *) footprint=yes ;; esac
     if declare -F detect_profile_state >/dev/null 2>&1; then
       line="$(detect_profile_state)"
@@ -276,7 +285,7 @@ detect_all() {
   detect_plugin_integrity
   detect_env_todo_tools
   detect_zshrc_legacy_block
-  detect_stale_settings_hooks
+  detect_legacy_channel_hooks
   detect_half_uninstalled
   while IFS= read -r name; do
     [ -n "$name" ] && detect_dep "$name"

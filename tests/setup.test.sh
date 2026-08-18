@@ -5,7 +5,7 @@
 # WHAT THIS SUITE OWNS. payload/scripts/setup.sh — the whole of `/bionic:setup`:
 # the native plugin install wrapper, lane-3a enable-verify, the lane-3b install
 # loop, the shell-rc export, the two ported bootstrap obligations (legacy alias
-# block, stale managed-hook entries), the consented permission-profile apply,
+# block, legacy-channel managed-hook entries), the consented permission-profile apply,
 # and the end summary. It also owns payload/commands/setup.md's existence and
 # its one structural rule that command-format.test.sh cannot state (the wrapper
 # adds no logic — it invokes the script and nothing else).
@@ -35,7 +35,7 @@
 # from claude-bootstrap.sh's own ALIAS_START/ALIAS_END/ALIAS_CONTENT
 # assignments rather than retyped here: a fixture that spells the box-drawing
 # markers by hand would keep passing after the installer's markers changed, and
-# the markers are the whole addressability of the block. The stale-hook
+# the markers are the whole addressability of the block. The legacy-channel-hook
 # settings fixture copies the shape claude-bootstrap.sh's wire_managed_hooks
 # writes (matcher + hooks[].command + timeout).
 #
@@ -473,14 +473,14 @@ OUT="$(run_setup "$YES")"
 expect_match "no legacy block: setup says there is nothing to remove" '*legacy*' "$OUT"
 
 # ---------------------------------------------------------------------------
-# Group 7 — (f) stale settings.json managed-hook cleanup, jq-gated.
+# Group 7 — (f) legacy-channel settings.json managed-hook cleanup, jq-gated.
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "=== Group 7: stale managed-hook cleanup ==="
+echo "=== Group 7: legacy-channel managed-hook cleanup ==="
 
 # Shape copied from claude-bootstrap.sh's wire_managed_hooks output.
-plant_stale_settings() {
+plant_legacy_channel_settings() {
   cat > "$FIX/ch/settings.json" <<'JSON'
 {
   "model": "opus",
@@ -497,30 +497,30 @@ JSON
 
 new_fixture hooks-clean
 plant_cli_plugin "bionic@bionic" true
-plant_stale_settings
+plant_legacy_channel_settings
 OUT="$(run_setup "$YES")"
-expect_eq "consented cleanup: stale entries are gone" "env:stale-managed-hooks count=0" \
-  "$(lib_query "$LIB_DIR/detect.sh" detect_stale_settings_hooks)"
+expect_eq "consented cleanup: legacy-channel entries are gone" "env:legacy-channel-hooks count=0" \
+  "$(lib_query "$LIB_DIR/detect.sh" detect_legacy_channel_hooks)"
 expect_match "cleanup keeps a foreign hook that is not bionic's leftover" '*other-tool*' "$(cat "$FIX/ch/settings.json")"
 expect_match "cleanup keeps unrelated settings keys" '*"model"*' "$(cat "$FIX/ch/settings.json")"
 
 new_fixture hooks-declined
 plant_cli_plugin "bionic@bionic" true
-plant_stale_settings
+plant_legacy_channel_settings
 SETTINGS_BEFORE="$(cat "$FIX/ch/settings.json")"
 OUT="$(run_setup "$NO")"
 expect_eq "declined cleanup: settings.json untouched, byte for byte" \
   "$SETTINGS_BEFORE" "$(cat "$FIX/ch/settings.json")"
-expect_match "declined cleanup: the count is named in the summary" '*stale*' "$OUT"
+expect_match "declined cleanup: the count is named in the summary" '*2 legacy-channel managed-hook*' "$OUT"
 
 new_fixture hooks-none
 plant_cli_plugin "bionic@bionic" true
 OUT="$(run_setup "$NO")"
-expect_match "no stale entries: setup says so rather than prompting" '*stale managed-hook*' "$OUT"
+expect_match "no legacy-channel entries: setup says so rather than prompting" '*no legacy-channel managed-hook entries*' "$OUT"
 
 new_fixture hooks-nojq
 plant_cli_plugin "bionic@bionic" true
-plant_stale_settings
+plant_legacy_channel_settings
 SETTINGS_BEFORE="$(cat "$FIX/ch/settings.json")"
 OUT="$(SETUP_PATH="$NOJQ_BIN" run_setup "$YES")"
 expect_eq "no jq: settings.json is never edited blind" "$SETTINGS_BEFORE" "$(cat "$FIX/ch/settings.json")"
@@ -567,7 +567,7 @@ new_fixture idempotence
 plant_cli_plugin "superpowers@bionic" false
 plant_installed "superpowers@bionic" "6.3.0"
 plant_installed "agent-skills@bionic" "0.6.7"
-plant_stale_settings
+plant_legacy_channel_settings
 printf 'export PATH="$HOME/bin:$PATH"\n\n%s\n%s\n%s\n' "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
 
 RUN1="$(run_setup "$YES")"
@@ -579,8 +579,8 @@ expect_eq "run 2 leaves the fixture tree byte-identical to run 1" "$FP1" "$FP2"
 expect_match "run 2 sees the plugin already installed" '*already installed*' "$RUN2"
 expect_match "run 2 sees the export already present" '*already*' "$RUN2"
 expect_no_match "run 2 finds no legacy alias block left to remove" "*${ALIAS_START}*" "$(cat "$FIX/rc")"
-expect_eq "run 2 finds no stale hook entries left" "env:stale-managed-hooks count=0" \
-  "$(lib_query "$LIB_DIR/detect.sh" detect_stale_settings_hooks)"
+expect_eq "run 2 finds no legacy-channel hook entries left" "env:legacy-channel-hooks count=0" \
+  "$(lib_query "$LIB_DIR/detect.sh" detect_legacy_channel_hooks)"
 
 # ---------------------------------------------------------------------------
 # Group 10 — a fully declined run mutates NOTHING.
@@ -590,7 +590,7 @@ echo ""
 echo "=== Group 10: refusal is total ==="
 
 new_fixture refuse-all
-plant_stale_settings
+plant_legacy_channel_settings
 printf 'export PATH="$HOME/bin:$PATH"\n\n%s\n%s\n%s\n' "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
 FP_BEFORE="$(fingerprint "$FIX")"
 OUT="$(run_setup "")"                 # EOF on the first prompt: no answer at all

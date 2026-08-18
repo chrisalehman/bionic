@@ -5,7 +5,7 @@
 # WHAT THIS FILE OWNS. Everything bionic's own scripts put on a machine, and the
 # order it comes back off in. One item at a time, each one announced before it is
 # asked about and asked about before it happens: the legacy `.zshrc` alias block,
-# the `CLAUDE_CODE_ENABLE_TODO_TOOLS` export, stale managed-hook entries in user
+# the `CLAUDE_CODE_ENABLE_TODO_TOOLS` export, legacy-channel managed-hook entries in
 # settings, the permission marker block, lane-3b dependency installs, the plugin
 # data directory — and then the native plugin uninstall as the finisher.
 #
@@ -112,8 +112,8 @@ RM_RC_START='# ─── bionic:start ───'
 RM_RC_END='# ─── bionic:end ───'
 RM_TODO_EXPORT_RE='^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=1'
 RM_LEGACY_ALIAS_RE='alias claude=.*dangerously-skip-permissions'
-# from detect.sh: the substring that makes a managed-hook entry a stale one
-RM_STALE_HOOK_SUBSTR='.claude/hooks/'
+# from detect.sh: the substring that puts a managed-hook entry on the legacy channel
+RM_LEGACY_HOOK_SUBSTR='.claude/hooks/'
 # from profile.sh: the sentinels bracketing the block bionic owns
 RM_PROFILE_BEGIN_PREFIX='Bash(: bionic-profile-begin version='
 RM_PROFILE_END='Bash(: bionic-profile-end)'
@@ -335,12 +335,12 @@ else
 fi
 echo ""
 
-# ─── Item: stale managed-hook entries in user settings ───────────────────────
+# ─── Item: legacy-channel managed-hook entries in settings ───────────────────
 #
 # Entries whose command still names the pre-plugin `~/.claude/hooks/` copies. The
 # plugin channel registers its hooks through the payload's own hooks.json, so one
-# of these is a migrated machine firing a stale duplicate of a hook the plugin
-# already provides.
+# of these is a migrated machine still firing its copy through the settings
+# channel, alongside the plugin's own registration of the same hook.
 #
 # The filter reaches INSIDE each matcher group rather than dropping the group: a
 # group can hold a bionic hook and a foreign one, and dropping it whole would
@@ -349,15 +349,15 @@ echo ""
 
 RM_SETTINGS="$(_rm_settings_file)"
 
-RM_STALE_COUNT_JQ='[ (.hooks // {}) | to_entries[] | .value[]? | .hooks[]?
+RM_LEGACY_HOOK_COUNT_JQ='[ (.hooks // {}) | to_entries[] | .value[]? | .hooks[]?
                      | .command? // empty
-                     | select(contains("'"${RM_STALE_HOOK_SUBSTR}"'")) ] | length'
+                     | select(contains("'"${RM_LEGACY_HOOK_SUBSTR}"'")) ] | length'
 
-RM_STALE_STRIP_JQ='
+RM_LEGACY_HOOK_STRIP_JQ='
   if (.hooks | type) != "object" then .
   else
       .hooks |= with_entries(
-        .value |= ( map( .hooks |= map(select(((.command? // "") | contains("'"${RM_STALE_HOOK_SUBSTR}"'")) | not)) )
+        .value |= ( map( .hooks |= map(select(((.command? // "") | contains("'"${RM_LEGACY_HOOK_SUBSTR}"'")) | not)) )
                     | map(select((.hooks | length) > 0)) )
       )
     | .hooks |= with_entries(select((.value | length) > 0))
@@ -365,35 +365,35 @@ RM_STALE_STRIP_JQ='
   end
 '
 
-echo "stale settings.json managed-hook entries:"
-stale_count=0
+echo "legacy-channel managed-hook entries in settings.json:"
+legacy_hook_count=0
 if [ -f "$RM_SETTINGS" ]; then
   if _rm_have jq; then
-    stale_count="$(jq "$RM_STALE_COUNT_JQ" "$RM_SETTINGS" 2>/dev/null)"
-    case "$stale_count" in ''|*[!0-9]*) stale_count=unknown ;; esac
+    legacy_hook_count="$(jq "$RM_LEGACY_HOOK_COUNT_JQ" "$RM_SETTINGS" 2>/dev/null)"
+    case "$legacy_hook_count" in ''|*[!0-9]*) legacy_hook_count=unknown ;; esac
   else
-    stale_count=unknown
+    legacy_hook_count=unknown
   fi
 fi
 
-if [ "$stale_count" = "unknown" ]; then
+if [ "$legacy_hook_count" = "unknown" ]; then
   _rm_leftover "cannot read ${RM_SETTINGS} without jq — managed-hook entries left as they are"
-elif [ "$stale_count" = "0" ]; then
-  _rm_clean "stale managed-hook entries in ${RM_SETTINGS}"
+elif [ "$legacy_hook_count" = "0" ]; then
+  _rm_clean "legacy-channel managed-hook entries in ${RM_SETTINGS}"
 else
-  echo "  ${RM_SETTINGS} carries ${stale_count} hook entr(y/ies) still pointing at ${RM_STALE_HOOK_SUBSTR}; bionic would delete those entries and nothing else."
-  if _rm_consent "Remove ${stale_count} stale managed-hook entr(y/ies) from ${RM_SETTINGS}?"; then
+  echo "  ${RM_SETTINGS} carries ${legacy_hook_count} hook entr(y/ies) still pointing at ${RM_LEGACY_HOOK_SUBSTR}; bionic would delete those entries and nothing else."
+  if _rm_consent "Remove ${legacy_hook_count} legacy-channel managed-hook entr(y/ies) from ${RM_SETTINGS}?"; then
     rm_settings_nl=0
     # shellcheck disable=SC2154  # set by printf -v inside _rm_slurp_into
     _rm_slurp_into rm_settings_text "$RM_SETTINGS" && case "$rm_settings_text" in *$'\n') rm_settings_nl=1 ;; esac
-    if rm_stripped="$(jq "$RM_STALE_STRIP_JQ" "$RM_SETTINGS" 2>/dev/null)"; then
+    if rm_stripped="$(jq "$RM_LEGACY_HOOK_STRIP_JQ" "$RM_SETTINGS" 2>/dev/null)"; then
       _rm_write "$RM_SETTINGS" "$rm_stripped" "$rm_settings_nl"
-      _rm_removed "${stale_count} stale managed-hook entr(y/ies) in ${RM_SETTINGS}"
+      _rm_removed "${legacy_hook_count} legacy-channel managed-hook entr(y/ies) in ${RM_SETTINGS}"
     else
-      _rm_leftover "${RM_SETTINGS} is not valid JSON — refusing to write; the stale entries are still there"
+      _rm_leftover "${RM_SETTINGS} is not valid JSON — refusing to write; the legacy-channel entries are still there"
     fi
   else
-    _rm_skipped "stale managed-hook entries in ${RM_SETTINGS}"
+    _rm_skipped "legacy-channel managed-hook entries in ${RM_SETTINGS}"
   fi
 fi
 echo ""
