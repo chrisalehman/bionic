@@ -120,89 +120,68 @@ echo "=== C — one owner per file: link to the repo's owner, or BE the owner ==
 # of something the repo already owns drifts, so anything the repo owns — hooks/, agents/,
 # skills/, LICENSE — appears here only as a link back to that owner.
 #
-# payload/scripts/ is the other way to satisfy the same invariant: the payload IS the owner.
-# These files have no repo-root twin to drift from — the whole point of the wave-03 command
-# surface is that installation logic lives in the payload and nowhere else (wave-03 spec
-# §Design, component boundaries), and claude-bootstrap.sh, the last root-level installer,
-# retires at W5. Carving them out of the link check is therefore not a hole in the
-# invariant; the two assertions below close it by proving they own themselves and that no
-# root-level twin has appeared beside them.
+# THE PAYLOAD-NATIVE DIRECTORIES are the other way to satisfy the same invariant: the
+# payload IS the owner. These files have no repo-root twin to drift from — the whole point
+# of the wave-03 command surface is that installation logic lives in the payload and nowhere
+# else (wave-03 spec §Design, component boundaries), and claude-bootstrap.sh, the last
+# root-level installer, retires at W5.
 #
-# payload/commands/ is the same carve-out for the same reason (epic-17 W3 S9): the shipped
-# slash-command files (help.md and its siblings) are payload-native content with no
-# repo-root twin to link back to — the payload IS their owner too.
+#   scripts/      the four commands and the libraries behind them (W3 S1)
+#   permissions/  the permission-profile template (W3 S5, spec AC-6)
+#   commands/     the shipped slash-command files (W3 S9)
+#
+# Carving them out of the link check is not a hole in the invariant: each is closed by the
+# SAME pair of guards — no symlinks inside it, so it cannot point at a second owner, and no
+# repo-root twin beside it, so ownership cannot become ambiguous later. That pair is written
+# once below and applied to the list, and the list is what the `find` exclusions are built
+# from, so a fourth payload-native directory is one entry here rather than a paste plus an
+# exclusion someone forgets.
 #
 # AMENDED epic-17 W3 S1. Before that, the check read "everything except the plugin manifest
 # must be a symlink", which was true only because every payload file then had a repo-root
 # owner.
+
+PAYLOAD_NATIVE_DIRS="scripts permissions commands"
 
 if [ ! -d "$PAYLOAD" ]; then
   no "payload/ exists"
 else
   ok "payload/ exists"
 
-  STRAY="$(find "$PAYLOAD" -type f \
-             ! -path "${PAYLOAD}/.claude-plugin/*" \
-             ! -path "${PAYLOAD}/scripts/*" \
-             ! -path "${PAYLOAD}/permissions/*" \
-             ! -path "${PAYLOAD}/commands/*" 2>/dev/null | sed "s|${REPO}/||" | sort)"
+  # The exclusions and the guards below are built from ONE list, so they cannot fall out of
+  # step with each other.
+  FIND_EXCLUSIONS=(! -path "${PAYLOAD}/.claude-plugin/*")
+  for native in $PAYLOAD_NATIVE_DIRS; do
+    FIND_EXCLUSIONS+=(! -path "${PAYLOAD}/${native}/*")
+  done
+
+  STRAY="$(find "$PAYLOAD" -type f "${FIND_EXCLUSIONS[@]}" 2>/dev/null | sed "s|${REPO}/||" | sort)"
   if [ -z "$STRAY" ]; then
-    ok "payload/ holds no copy of anything the repo owns (outside .claude-plugin/, scripts/, permissions/ and commands/)"
+    ok "payload/ holds no copy of anything the repo owns (outside .claude-plugin/ and the payload-native dirs)"
   else
     no "payload/ holds no copy of anything the repo owns (found: $(echo "$STRAY" | tr '\n' ' '))"
   fi
 
-  # The carve-out's two guards. First: payload/scripts/ must own its files outright —
-  # a symlink in there would point at a second owner and reopen exactly the drift the
-  # section exists to prevent.
-  if [ -d "${PAYLOAD}/scripts" ]; then
-    SCRIPT_LINKS="$(find "${PAYLOAD}/scripts" -type l 2>/dev/null | sed "s|${REPO}/||" | sort)"
-    if [ -z "$SCRIPT_LINKS" ]; then
-      ok "payload/scripts/ contains no symlinks (the payload owns these files outright)"
-    else
-      no "payload/scripts/ contains no symlinks (found: $(echo "$SCRIPT_LINKS" | tr '\n' ' '))"
+  # The carve-out's two guards, once, for every payload-native directory.
+  #
+  # First: it must own its files outright — a symlink in there would point at a second owner
+  # and reopen exactly the drift this section exists to prevent. Second: no root-level twin;
+  # if one ever appears, ownership is ambiguous again and the carve-out is no longer safe.
+  for native in $PAYLOAD_NATIVE_DIRS; do
+    if [ -d "${PAYLOAD}/${native}" ]; then
+      NATIVE_LINKS="$(find "${PAYLOAD}/${native}" -type l 2>/dev/null | sed "s|${REPO}/||" | sort)"
+      if [ -z "$NATIVE_LINKS" ]; then
+        ok "payload/${native}/ contains no symlinks (the payload owns these files outright)"
+      else
+        no "payload/${native}/ contains no symlinks (found: $(echo "$NATIVE_LINKS" | tr '\n' ' '))"
+      fi
     fi
-  fi
-
-  # Second: no root-level scripts/ twin. If one ever appears, ownership is ambiguous again
-  # and the carve-out above is no longer safe.
-  if [ -e "${REPO}/scripts" ]; then
-    no "no repo-root scripts/ twin beside payload/scripts/ (found ${REPO}/scripts)"
-  else
-    ok "no repo-root scripts/ twin beside payload/scripts/"
-  fi
-
-  # payload/permissions/ is the same carve-out for the same reason (epic-17 W3 S5, spec
-  # AC-6): the shipped permission-profile template has no repo-root owner to link back to —
-  # the payload IS its owner — so it gets the identical pair of guards.
-  if [ -d "${PAYLOAD}/permissions" ]; then
-    PERM_LINKS="$(find "${PAYLOAD}/permissions" -type l 2>/dev/null | sed "s|${REPO}/||" | sort)"
-    if [ -z "$PERM_LINKS" ]; then
-      ok "payload/permissions/ contains no symlinks (the payload owns these files outright)"
+    if [ -e "${REPO}/${native}" ]; then
+      no "no repo-root ${native}/ twin beside payload/${native}/ (found ${REPO}/${native})"
     else
-      no "payload/permissions/ contains no symlinks (found: $(echo "$PERM_LINKS" | tr '\n' ' '))"
+      ok "no repo-root ${native}/ twin beside payload/${native}/"
     fi
-  fi
-  if [ -e "${REPO}/permissions" ]; then
-    no "no repo-root permissions/ twin beside payload/permissions/ (found ${REPO}/permissions)"
-  else
-    ok "no repo-root permissions/ twin beside payload/permissions/"
-  fi
-
-  # payload/commands/ gets the identical pair of guards, same reasoning (epic-17 W3 S9).
-  if [ -d "${PAYLOAD}/commands" ]; then
-    COMMAND_LINKS="$(find "${PAYLOAD}/commands" -type l 2>/dev/null | sed "s|${REPO}/||" | sort)"
-    if [ -z "$COMMAND_LINKS" ]; then
-      ok "payload/commands/ contains no symlinks (the payload owns these files outright)"
-    else
-      no "payload/commands/ contains no symlinks (found: $(echo "$COMMAND_LINKS" | tr '\n' ' '))"
-    fi
-  fi
-  if [ -e "${REPO}/commands" ]; then
-    no "no repo-root commands/ twin beside payload/commands/ (found ${REPO}/commands)"
-  else
-    ok "no repo-root commands/ twin beside payload/commands/"
-  fi
+  done
 
   # Each link must resolve, and must resolve to the repo's single owner.
   for pair in "hooks:hooks" "agents:agents"; do
