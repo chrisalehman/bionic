@@ -223,6 +223,58 @@ detect_legacy_channel_hooks() {
   return 0
 }
 
+# ─── Plugin registration ─────────────────────────────────────────────────────
+#
+# Is bionic registered with the CLI on this machine? This is the fact that says
+# whether the PLUGIN channel is live, and it is not the same question as
+# `detect_plugin_integrity`, which asks whether a payload tree is on disk and
+# well-formed: a machine can carry a perfectly good payload the CLI has never
+# been told about, and that machine is exactly the one every user is on before
+# the cutover.
+#
+# It matters to more than the half-uninstall verdict. Anything that offers to
+# REMOVE a settings-channel registration is implicitly claiming the plugin
+# channel covers what it removes, and that claim is only true when this fact
+# says yes — setup's step 6 promised it unconditionally until this line existed
+# for it to read.
+#
+# `unknown` is a real answer, not a hedge. A registry file that is present and
+# unparseable supports neither "yes" nor "no", and both lies are expensive in
+# opposite directions: `no` tells a covered user their hooks will stop firing,
+# `yes` tells an uncovered one they are safe to delete their only enforcement.
+# A registry that is simply ABSENT is a different case — the CLI writes that
+# file when it installs anything, so its absence means nothing is installed.
+detect_plugin_registered() {
+  local installed_json count
+  installed_json="${BIONIC_INSTALLED_PLUGINS_FILE:-${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/installed_plugins.json}"
+
+  if [ ! -f "$installed_json" ]; then
+    echo "plugin:registered=no"
+    return 0
+  fi
+
+  # No jq: the key is a literal string in the file, so grep answers this one
+  # honestly rather than degrading. `"bionic@` cannot match another plugin —
+  # the marketplace suffix follows the name, never precedes it.
+  if ! command -v jq >/dev/null 2>&1; then
+    if grep -q '"bionic@' "$installed_json" 2>/dev/null; then
+      echo "plugin:registered=yes"
+    else
+      echo "plugin:registered=no"
+    fi
+    return 0
+  fi
+
+  count="$(jq -r '[ (.plugins // {}) | keys[] | select(split("@")[0] == "bionic") ] | length' \
+            "$installed_json" 2>/dev/null)"
+  case "$count" in
+    ''|*[!0-9]*) echo "plugin:registered=unknown" ;;
+    0)           echo "plugin:registered=no" ;;
+    *)           echo "plugin:registered=yes" ;;
+  esac
+  return 0
+}
+
 # ─── Half-uninstalled ────────────────────────────────────────────────────────
 #
 # The plugin is gone but its machine footprint is not. This is the state
@@ -245,17 +297,19 @@ detect_legacy_channel_hooks() {
 # would fail exactly there. profile.sh's line wears this file's shape on
 # purpose, so `applied=` reads the way `present=` does.
 detect_half_uninstalled() {
-  local installed_json registered=no footprint=no line
+  local registered footprint=no line
 
-  installed_json="${BIONIC_INSTALLED_PLUGINS_FILE:-${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/installed_plugins.json}"
-  if [ -f "$installed_json" ] && command -v jq >/dev/null 2>&1; then
-    if [ "$(jq -r '[ (.plugins // {}) | keys[] | select(split("@")[0] == "bionic") ] | length' \
-              "$installed_json" 2>/dev/null)" != "0" ]; then
-      registered=yes
-    fi
-  elif [ -f "$installed_json" ]; then
-    grep -q '"bionic@' "$installed_json" 2>/dev/null && registered=yes
-  fi
+  # The registration probe used to live inline here, which made it a fact only
+  # this verdict could see. It is `detect_plugin_registered` now; nothing about
+  # the disjunction below changed, including that an `unknown` registration is
+  # NOT treated as "gone" — this verdict tells the user their machine is broken
+  # and points them at the standalone remove door, and it must not say that on
+  # a registry it could not read.
+  line="$(detect_plugin_registered)"
+  case "$line" in
+    "plugin:registered=no") registered=no ;;
+    *)                      registered=yes ;;
+  esac
 
   if [ "$registered" = "no" ]; then
     line="$(detect_zshrc_legacy_block)";   [ "$line" = "env:zshrc-legacy present=yes" ] && footprint=yes
@@ -286,6 +340,7 @@ detect_all() {
   detect_env_todo_tools
   detect_zshrc_legacy_block
   detect_legacy_channel_hooks
+  detect_plugin_registered
   detect_half_uninstalled
   while IFS= read -r name; do
     [ -n "$name" ] && detect_dep "$name"

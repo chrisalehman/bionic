@@ -419,9 +419,10 @@ setup_legacy_alias() {
 setup_legacy_channel_hooks() {
   say ""
   say "6. Legacy-channel managed-hook entries"
-  local line count settings
+  local line count settings registered
   line="$(detect_legacy_channel_hooks)"; count="${line#*count=}"
   settings="$(_dep_settings_file)"
+  line="$(detect_plugin_registered)";    registered="${line#*registered=}"
 
   case "$count" in
     0)
@@ -437,8 +438,22 @@ setup_legacy_channel_hooks() {
   # tests/plugin-paths.test.sh forbids an installed-path literal on any
   # executable line in the payload, and a user-facing string is still one.
   say "   ${count} hook entr(ies) in ${settings} still point into the machine's pre-plugin hooks directory."
-  say "   They are registered through the settings channel rather than the plugin channel; the plugin"
-  say "   registers its own copy of each through the payload's hooks.json."
+  say "   They are registered through the settings channel rather than the plugin channel."
+  # WHAT THIS PROMPT IS ALLOWED TO PROMISE. Offering to delete a user's only
+  # live hook registrations is safe when the plugin channel already carries the
+  # same hooks and destructive when it does not, and which of those is true is a
+  # machine fact — not a property of this script. It was stated unconditionally
+  # until `detect_plugin_registered` existed to condition it on, which made the
+  # sentence false on every machine before the plugin is installed. `unknown`
+  # falls to the cautious branch on purpose: an unreadable registry is not
+  # evidence of coverage.
+  if [ "$registered" = "yes" ]; then
+    say "   The plugin registers its own copy of each through the payload's hooks.json, so the same"
+    say "   hooks keep firing through the plugin channel once these are gone."
+  else
+    say "   The plugin is NOT registered with the CLI on this machine, so nothing takes their place:"
+    say "   removing these entries leaves these hooks not firing at all until the plugin is installed."
+  fi
   if ! consent "   Remove the legacy-channel entries from ${settings}?"; then
     say "   declined — ${settings} is unchanged."
     action "remove ${count} legacy-channel managed-hook entr(ies) from ${settings}"
