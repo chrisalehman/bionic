@@ -14,7 +14,11 @@ subagents, and choosing between overlapping skills. Migrated from
 
 **Routing note (slice 6 judgment call).** This is the weakest path-glob *fit* of the rules
 files — most of it fires regardless of which file is being touched — and it is here because
-`.claude/rules/` is the only channel measured to reach a dispatched subagent. Project
+`.claude/rules/` is the only channel measured to reach a dispatched subagent. *(Corrected
+2026-08-18, epic-17 W4 S3: no longer the only one. A role file under `~/.claude/agents/`
+reaches a dispatched agent too — measured by live readback — but it is snapshotted at CLI
+start, so an edit lands on the NEXT session while this file lands on the next read. That
+timing difference, not reach, is now what decides which channel a rule belongs in.)* Project
 `CLAUDE.md` was measured **absent** from a fresh subagent this session despite being committed
 before dispatch; auto-memory measures present but contradicts its own documentation, so the
 wave forbids depending on it (assumption 3). Auto-memory is a legitimate destination for the
@@ -63,31 +67,20 @@ at session start, so AC-2 is unaffected. The cost is ~8 KB whenever a matching f
 
 ## Subagent dispatch
 
-- **Foreground-first for bounded commands** (2026-08-06, epic-15 wave-04 D3, user-ratified).
-  A command with a known bound under 10 minutes runs FOREGROUND with an explicit `timeout`
-  (the Bash tool's 2-minute default is a default, not a ceiling — ask for up to 600000 ms).
-  `bash tests/run.sh` (3–5 min) is the canonical case: never a legitimate background job.
-  Backgrounding is reserved for work that genuinely exceeds 10 minutes or must run alongside
-  other work — and then the dispatch brief MUST declare it (`claims=` process pattern +
-  output file) so it lands on the session roster the landing verdict later reads. Residual
-  background jobs keep the lost-wake fallback: poll your own output file rather than trusting
-  the completion wake. Rationale: "background it and poll" manufactured both the lost-wake
-  losses (5+ on 2026-08-06) and the silent-looking-but-alive states that needed watching
-  machinery at all. *(Amended 2026-08-11, epic-16 wave-02 S1: the resident sweeper that
-  "watched" a claimed process is deleted. Declaring `claims=` still matters — it is what
-  lets the verdict call a mid-flight row STILL-LIVE instead of UNMET — but nothing is
-  watching it between decisions.)* This channel is advisory only — no bionic machinery relies on this file
-  existing (zero field-reliance, user-ratified 2026-08-06).
+> **Moved (epic-17 W4, 2026-08-18).** Foreground-first and poll-don't-watch now live in
+> `agents-src/blocks/survival.md`, rendered into all six `agents/*.md` role files, so a
+> dispatched agent carries them in its own role definition instead of reading them here.
+> Live readback and the propagation measurement: `.bionic/docs/record/epic-17-w4/s3-report.md`.
+> What stays below is addressed to whoever writes the brief, which no role file can reach.
 
-- **Poll-don't-watch when the tool auto-backgrounds you** (2026-08-17, epic-17 W3: three
-  writers died on this in one wave; the one briefed otherwise survived). The Bash tool
-  auto-backgrounds a foreground command that runs past ~120 s even when you asked for a
-  600000 ms timeout. When that happens, do NOT end your turn expecting a completion wake and
-  do NOT arm a Monitor and go idle — the wake is what gets lost, and you will die with your
-  suite finished and green. Stay in your turn and poll the output file with repeated short
-  foreground commands (e.g. bounded `until grep -qE '^Gating:' <output>; do sleep 5; done`
-  chunks) until the run completes, then proceed. A completion notification that does arrive
-  is corroboration, never the thing you wait on.
+- **Backgrounding gets DECLARED in the brief** (2026-08-06, epic-15 wave-04 D3,
+  user-ratified). When work genuinely exceeds 10 minutes or must run alongside other work,
+  the dispatch brief MUST declare it (`claims=` process pattern + output file) so it lands
+  on the session roster the landing verdict later reads. *(Amended 2026-08-11, epic-16
+  wave-02 S1: the resident sweeper that "watched" a claimed process is deleted. Declaring
+  `claims=` still matters — it is what lets the verdict call a mid-flight row STILL-LIVE
+  instead of UNMET — but nothing is watching it between decisions.)* This channel is advisory only — no bionic machinery relies on this file
+  existing (zero field-reliance, user-ratified 2026-08-06).
 
 - **Normative values ship as VERBATIM tables in dispatch briefs, never paraphrase**
   (2026-07-18, epic-07 wave 1). Two competent opus implementers resolved the same spec
