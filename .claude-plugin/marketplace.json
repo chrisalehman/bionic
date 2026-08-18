@@ -20,7 +20,7 @@
     {
       "name": "agent-skills",
       "description": "Production-grade engineering skills covering every phase of software development: spec, plan, build, verify, review, and ship.",
-      "source": { "source": "url", "url": "https://github.com/addyosmani/agent-skills.git" },
+      "source": { "source": "url", "url": "https://github.com/addyosmani/agent-skills.git", "sha": "df1edb2e05487d0aa6d93c747141e0aed1187f25" },
       "homepage": "https://github.com/addyosmani/agent-skills",
       "license": "MIT"
     }
