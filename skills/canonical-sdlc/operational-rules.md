@@ -265,7 +265,7 @@ column is the obligation the reviewer reads back. Shape:
 ```
 | concept | owning module (SSoT) | rendering surfaces | agreement test |
 |---|---|---|---|
-| version pin value | no single place — typed at each site; that IS the finding | both hooks · scripts.test.sh assertions · SKILL.md prose · this file's version history · hook-chain diagram | pin-sync rows in tests/scripts.test.sh pin the two hook sites; the prose and diagram sites drift silently |
+| version pin value | no single place — typed at each site; that IS the finding | both hooks · scripts.test.sh assertions · SKILL.md prose · this file's version history · the two SVG diagrams | pin-sync rows in tests/scripts.test.sh pin the two hook sites, and tests/diagrams.test.sh pins the four diagram renderings against the hook's value; the two prose sites drift silently |
 | agreement-test exemplar + authoring rules | SKILL.md §Step 6 | SKILL.md §Step 6 · agents/critic.md AXIS block · this section | AXIS-marker rows in tests/agent-roles.test.sh — the pin covers two of the three surfaces; this section is the unpinned one |
 ```
 
@@ -282,10 +282,13 @@ column is the obligation the reviewer reads back. Shape:
   `SUPPORTED_SDLC_VERSION` pin-sync rows in `tests/scripts.test.sh`: one logical constant, two
   rendering sites pinned — the two hooks — and one test that goes red the moment either moves
   alone. It is also the honest limit, and the limit is the half worth knowing while you write the
-  cell: the version paragraph in `SKILL.md`, the version-history bullet at the top of this file
-  and the version renderings in `diagrams/hook-chain.excalidraw` are rendering sites *outside*
-  that tuple, and they drift silently — which is exactly the row the table above writes down
-  rather than rounding up to "pinned". `none — <why>`
+  cell: the version paragraph in `SKILL.md` and the version-history bullet at the top of this file
+  are rendering sites *outside* that tuple, and they drift silently — which is exactly the row the
+  table above writes down rather than rounding up to "pinned". The diagrams used to sit in that
+  same unpinned set and no longer do: composing them as SVG made their four version renderings
+  greppable, and `tests/diagrams.test.sh` reads the hook's value rather than restating it. That is
+  the general move — a surface becomes pinnable by changing its format, not by promising to
+  remember it. `none — <why>`
   is a legitimate cell — some pairs are prose against prose, and a mandate dispatched verbatim
   has no seam to test — but it is a cell the reviewer will stop on, so give it the reason.
 

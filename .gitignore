@@ -10,9 +10,9 @@
 !architecture.png
 !architecture.excalidraw
 
-# Exception: canonical-sdlc skill diagrams (lifecycle, hook chain)
-!skills/canonical-sdlc/diagrams/*.png
-!skills/canonical-sdlc/diagrams/*.excalidraw
+# The canonical-sdlc diagrams need no exception: they are composed SVG, which is
+# neither generated nor ignored (epic-17 W4, 2026-08-18 — the .png/.excalidraw pair
+# retired with them, and tests/diagrams.test.sh refuses either coming back).
 
 # OS
 .DS_Store
