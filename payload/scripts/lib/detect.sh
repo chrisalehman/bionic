@@ -202,6 +202,24 @@ detect_zshrc_legacy_block() {
 # registered through is a fact; whether that registration is redundant depends
 # on the cutover, which is a later wave's business. Callers that want to say
 # more must find the extra evidence themselves.
+#
+# THE PREDICATE AND THE PROGRAM ARE NAMED, not inline, because remove.sh's
+# standalone door carries a second copy of both — legitimately, since that door
+# has to run on the machine where these libraries are already gone. A copy that
+# is entitled to exist still has to be pinned against its original, and an
+# inline program is a program the pin cannot reach: tests/remove.test.sh
+# extracts these two assignments, neutralises the one difference the two files
+# are entitled to (the variable's name), and requires the rest to be equal.
+# hooks.sh's header makes the same argument for the STRIP program; this is the
+# other half of the same channel.
+DETECT_LEGACY_HOOK_SUBSTR='.claude/hooks/'
+
+DETECT_LEGACY_HOOK_COUNT_JQ='
+  [ (.hooks // {}) | to_entries[] | .value[]? | .hooks[]?
+    | .command? // empty
+    | select(contains("'"${DETECT_LEGACY_HOOK_SUBSTR}"'")) ] | length
+'
+
 detect_legacy_channel_hooks() {
   local settings count
   settings="${BIONIC_SETTINGS_FILE:-${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/settings.json}"
@@ -213,9 +231,7 @@ detect_legacy_channel_hooks() {
     echo "env:legacy-channel-hooks count=0"
     return 0
   fi
-  count="$(jq '[ (.hooks // {}) | to_entries[] | .value[]? | .hooks[]?
-                 | .command? // empty
-                 | select(contains(".claude/hooks/")) ] | length' "$settings" 2>/dev/null)"
+  count="$(jq "$DETECT_LEGACY_HOOK_COUNT_JQ" "$settings" 2>/dev/null)"
   case "$count" in
     ''|*[!0-9]*) count=unknown ;;
   esac

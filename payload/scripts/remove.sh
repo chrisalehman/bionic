@@ -359,9 +359,16 @@ echo ""
 
 RM_SETTINGS="$(_rm_settings_file)"
 
-RM_LEGACY_HOOK_COUNT_JQ='[ (.hooks // {}) | to_entries[] | .value[]? | .hooks[]?
-                     | .command? // empty
-                     | select(contains("'"${RM_LEGACY_HOOK_SUBSTR}"'")) ] | length'
+# Byte-identical to detect.sh's DETECT_LEGACY_HOOK_COUNT_JQ apart from the name
+# of the variable interpolated into it — the same arrangement the strip program
+# already has, and pinned in the same place. detect.sh is the declared single
+# source for machine facts; this is the standalone door's copy, which exists
+# because the door must answer on a machine where detect.sh is gone.
+RM_LEGACY_HOOK_COUNT_JQ='
+  [ (.hooks // {}) | to_entries[] | .value[]? | .hooks[]?
+    | .command? // empty
+    | select(contains("'"${RM_LEGACY_HOOK_SUBSTR}"'")) ] | length
+'
 
 RM_LEGACY_HOOK_STRIP_JQ='
   if (.hooks | type) != "object" then .

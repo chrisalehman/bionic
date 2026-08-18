@@ -554,6 +554,33 @@ expect_eq "hooks.sh and remove.sh's standalone copy are the same strip program" 
 expect_true "the extracted program is the real one (it carries the predicate)" \
   bash -c 'case "$1" in *"<PREDICATE>"*) exit 0 ;; esac; exit 1' _ "$LIB_STRIP_PROGRAM"
 
+# C-6. The same argument, unchanged, applied to the COUNT — which the strip pin
+# left out. hooks.sh's own header states the case: "Only the SUBSTRING was
+# pinned between them, never the rewrite: fix one file's group-collapse
+# behaviour and the other silently keeps the old one." detect.sh's count and
+# remove.sh's are the same jq program modulo the predicate's variable name, and
+# detect.sh is the DECLARED single source for machine facts — its ownership row
+# reads "no second detect implementation (grep wall); doors call detect.sh",
+# while remove.sh's standalone door carries exactly such a second
+# implementation. It is entitled to (the door has to run where the libraries do
+# not), which makes it a decision needing a pin, not a violation.
+#
+# The pin could not reach it before: detect.sh spelled its program INLINE inside
+# the function, so there was no assignment for the extractor to find. It is a
+# named variable now, in the same shape remove.sh's is, and the two are compared
+# the way the strip programs are.
+COUNT_PROGRAM_DETECT="$(jq_strip_program "$DETECT_SH" DETECT_LEGACY_HOOK_COUNT_JQ)"
+COUNT_PROGRAM_RM="$(jq_strip_program "$REMOVE_SH" RM_LEGACY_HOOK_COUNT_JQ)"
+expect_true "detect.sh's count program was extracted (the pin is not vacuous)" \
+  test -n "$COUNT_PROGRAM_DETECT"
+expect_true "remove.sh's inline count program was extracted" test -n "$COUNT_PROGRAM_RM"
+expect_eq "detect.sh and remove.sh's standalone copy are the same count program" \
+  "$COUNT_PROGRAM_DETECT" "$COUNT_PROGRAM_RM"
+expect_true "the extracted count program is the real one (it carries the predicate)" \
+  bash -c 'case "$1" in *"<PREDICATE>"*) exit 0 ;; esac; exit 1' _ "$COUNT_PROGRAM_DETECT"
+expect_true "and it is the counting program, not the stripping one" \
+  bash -c 'case "$1" in *"| length"*) exit 0 ;; esac; exit 1' _ "$COUNT_PROGRAM_DETECT"
+
 # C-1's corollary. The settings WRITER is the second thing duplicated across the
 # payload/standalone seam — profile.sh's `_profile_write` and remove.sh's
 # `_rm_write` are the same function under two names, and the mode-preservation
