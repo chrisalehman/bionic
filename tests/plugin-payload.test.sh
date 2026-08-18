@@ -129,6 +129,8 @@ echo "=== C — one owner per file: link to the repo's owner, or BE the owner ==
 #   scripts/      the four commands and the libraries behind them (W3 S1)
 #   permissions/  the permission-profile template (W3 S5, spec AC-6)
 #   commands/     the shipped slash-command files (W3 S9)
+#   ccstatusline/ the ccstatusline widget-layout settings.json (W4 S11, spec AC-11 — moved
+#                 from a repo-root ccstatusline/ dir that had no other consumer)
 #
 # Carving them out of the link check is not a hole in the invariant: each is closed by the
 # SAME pair of guards — no symlinks inside it, so it cannot point at a second owner, and no
@@ -141,7 +143,7 @@ echo "=== C — one owner per file: link to the repo's owner, or BE the owner ==
 # must be a symlink", which was true only because every payload file then had a repo-root
 # owner.
 
-PAYLOAD_NATIVE_DIRS="scripts permissions commands"
+PAYLOAD_NATIVE_DIRS="scripts permissions commands ccstatusline"
 
 if [ ! -d "$PAYLOAD" ]; then
   no "payload/ exists"
@@ -254,7 +256,7 @@ echo "=== E — nothing outside the boundary is reachable through the payload ==
 
 if [ -d "$PAYLOAD" ]; then
   for bad in .bionic .claude .git tests claude-bootstrap.sh claude-reset.sh \
-             ccstatusline design architecture.png node_modules .venv .DS_Store; do
+             design architecture.png node_modules .venv .DS_Store; do
     HITS="$(find -L "$PAYLOAD" -name "$bad" 2>/dev/null | head -5)"
     if [ -z "$HITS" ]; then
       ok "payload tree contains no '$bad'"

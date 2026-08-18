@@ -1925,13 +1925,13 @@ fi
 
 section "ccstatusline config"
 step_start "settings.json → ~/.config/ccstatusline/settings.json"
-if [ ! -f "${SCRIPT_DIR}/ccstatusline/settings.json" ]; then
-  step_fail config "ccstatusline/settings.json missing from repo"
-elif diff -q "${SCRIPT_DIR}/ccstatusline/settings.json" ~/.config/ccstatusline/settings.json &>/dev/null; then
+if [ ! -f "${SCRIPT_DIR}/payload/ccstatusline/settings.json" ]; then
+  step_fail config "payload/ccstatusline/settings.json missing from repo"
+elif diff -q "${SCRIPT_DIR}/payload/ccstatusline/settings.json" ~/.config/ccstatusline/settings.json &>/dev/null; then
   step_cached fs "already up to date"
 else
   mkdir -p ~/.config/ccstatusline
-  if cp "${SCRIPT_DIR}/ccstatusline/settings.json" ~/.config/ccstatusline/settings.json; then
+  if cp "${SCRIPT_DIR}/payload/ccstatusline/settings.json" ~/.config/ccstatusline/settings.json; then
     step_ok fs
   else
     step_fail fs "could not write ~/.config/ccstatusline/settings.json"
@@ -2067,7 +2067,7 @@ fi
 
 echo ""
 echo "  ccstatusline config:"
-if diff -q "${SCRIPT_DIR}/ccstatusline/settings.json" ~/.config/ccstatusline/settings.json &>/dev/null; then
+if diff -q "${SCRIPT_DIR}/payload/ccstatusline/settings.json" ~/.config/ccstatusline/settings.json &>/dev/null; then
   echo "    settings.json ✓"
 else
   echo "    settings.json — out of sync"
