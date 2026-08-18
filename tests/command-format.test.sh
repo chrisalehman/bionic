@@ -100,6 +100,15 @@ if [ -d "$COMMANDS_DIR" ]; then
 
     bad="$(bad_script_invocations "$f")"
     expect_eq "$base: every .sh invocation is rooted at \${CLAUDE_PLUGIN_ROOT}" "" "$bad"
+
+    # R-4. A command file that tells the user to run `claude plugin install
+    # bionic` is naming something the machine does not run: every other
+    # surface in the payload spells the marketplace-qualified id, and the
+    # bare form is not a shorthand for it. Match the install verb with any
+    # id that is not `bionic@`-qualified.
+    bare_install="$(grep -nE 'plugin install +bionic([^@a-zA-Z0-9_-]|$)' "$f" || true)"
+    expect_eq "$base: no unqualified \`plugin install bionic\` (the id is bionic@bionic)" \
+      "" "$bare_install"
   done
 else
   echo "SKIP: remaining Section 1 checks (payload/commands/ missing)"
