@@ -418,18 +418,63 @@ _dep_install_argv() {  # <name> — one token per line
   esac
 }
 
+# THE ONE SETTINGS WRITER IN THIS FILE. Both statusline arms — recording the
+# line on install and clearing it on removal — are jq rewrites of the same
+# ~/.claude/settings.json, so they are one function rather than two copies of
+# six lines. They were two copies once, and the drift that cost is exactly this:
+# the mode repair that landed in the payload's other writers never reached
+# either of them, and no test noticed. tests/remove.test.sh pins this body's
+# shape alongside the other three and walls the payload against a fifth writer
+# appearing beside them.
+#
+# THE FILE'S MODE SURVIVES THE REWRITE. `mv` replaces the inode, so without the
+# capture-and-reapply below a settings.json the user deliberately kept at 0600 —
+# it routinely holds an `env` block with tokens — would come back at whatever the
+# umask says, as a side effect of recording a statusline. `stat` is spelled both
+# ways because BSD and GNU take different flags and neither accepts the other's;
+# an absent `stat` leaves `mode` empty and the rewrite still lands, which is the
+# same honest degradation this file already practises for `jq`.
+#
+# THE ORDER IS THE FIX. `umask 077` and the `chmod` both come BEFORE the `mv`, so
+# the rename publishes an already-correct inode. Repairing the mode afterwards —
+# the obvious spelling — leaves the tmp holding the tokens at 0644 under a
+# predictable name, and makes the widening PERMANENT if the process dies in the
+# window between the two. Do not move either below the rename. The guard is
+# spelled `-z … ||` rather than `-n … &&` because this is a single `&&` chain: on
+# a machine with no `stat` the `-n` spelling would break the chain and skip the
+# rename entirely, turning honest degradation into a silent refusal to write.
+# hooks.sh's `hooks_strip_legacy_channel` carries the same shape for the same
+# reasons.
+_dep_settings_write_jq() {  # <settings-file> <jq-program> [jq-arg...]
+  local settings="${1:-}" program="${2:-}"
+  shift 2 || return 1
+  local tmp="${settings}.bionic.tmp" mode
+  mode="$(stat -f '%Lp' "$settings" 2>/dev/null || stat -c '%a' "$settings" 2>/dev/null)"
+  if (umask 077; jq "$@" "$program" "$settings" > "$tmp") \
+     && { [ -z "$mode" ] || chmod "$mode" "$tmp"; } \
+     && mv "$tmp" "$settings"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
 # The statusline is a settings.json edit, not a package install: `npx
 # ccstatusline@latest` is the command Claude Code runs to RENDER the line, and
 # installing it means recording that command. Ported from
 # claude-bootstrap.sh's do_set_statusline.
 _dep_install_statusline() {
-  local settings tmp cmd
-  settings="$(_dep_settings_file)"; tmp="${settings}.bionic.tmp"
+  local settings cmd
+  settings="$(_dep_settings_file)"
   cmd="npx $(_dep_locator_target "$(dep_field ccstatusline source_url)")"
   _dep_have jq || { echo "  jq is not installed — cannot edit ${settings}" >&2; return 1; }
+  # Deliberately NOT under `umask 077`: the defect being fixed is widening a mode
+  # the USER chose, and a file that does not exist yet carries no such choice.
+  # bionic creating settings.json at 0600 where the CLI would have made it 0644
+  # is a different decision, and not this fold's to make.
   [ -f "$settings" ] || echo '{}' > "$settings"
-  jq --arg c "$cmd" '.statusLine = {"type": "command", "command": $c}' "$settings" > "$tmp" \
-    && mv "$tmp" "$settings"
+  _dep_settings_write_jq "$settings" \
+    '.statusLine = {"type": "command", "command": $c}' --arg c "$cmd"
 }
 
 install_dep() {  # <name>
@@ -513,11 +558,11 @@ remove_dep() {  # <name>
     case "$(dep_field "$name" install_fn_or_check)" in
       playwright-browser) rm -rf "$(_dep_playwright_cache)" ;;
       statusline)
-        local settings tmp
-        settings="$(_dep_settings_file)"; tmp="${settings}.bionic.tmp"
+        local settings
+        settings="$(_dep_settings_file)"
         _dep_have jq || return 1
         [ -f "$settings" ] || return 0
-        jq 'del(.statusLine)' "$settings" > "$tmp" && mv "$tmp" "$settings"
+        _dep_settings_write_jq "$settings" 'del(.statusLine)'
         ;;
     esac
   fi
