@@ -108,7 +108,7 @@ PLUGIN_HOOKS="${PLUGIN_FACT##*hooks=}"
 
 TODO_FACT="$(detect_env_todo_tools)";        TODO_STATE="${TODO_FACT##*present=}"
 LEGACY_FACT="$(detect_zshrc_legacy_block)";  LEGACY_STATE="${LEGACY_FACT##*present=}"
-STALE_FACT="$(detect_stale_settings_hooks)"; STALE_COUNT="${STALE_FACT##*count=}"
+LEGACY_HOOK_FACT="$(detect_legacy_channel_hooks)"; LEGACY_HOOK_COUNT="${LEGACY_HOOK_FACT##*count=}"
 HALF_FACT="$(detect_half_uninstalled)";      HALF_STATE="${HALF_FACT##*half-uninstalled=}"
 
 PROFILE_FACT="$(detect_profile_state)"
@@ -298,11 +298,11 @@ echo ""
 echo "=== ENVIRONMENT ==="
 printf '  %-38s %s\n' "CLAUDE_CODE_ENABLE_TODO_TOOLS export" "$(_doctor_word "$TODO_STATE")"
 printf '  %-38s %s\n' "legacy .zshrc alias block" "$(_doctor_word "$LEGACY_STATE")"
-if [ "$STALE_COUNT" = "unknown" ]; then
-  printf '  %-38s %s\n' "stale settings.json hook entries" \
+if [ "$LEGACY_HOOK_COUNT" = "unknown" ]; then
+  printf '  %-38s %s\n' "legacy-channel managed-hook entries" \
     "unknown — jq is not on PATH, so settings.json cannot be read"
 else
-  printf '  %-38s %s\n' "stale settings.json hook entries" "$STALE_COUNT"
+  printf '  %-38s %s\n' "legacy-channel managed-hook entries" "$LEGACY_HOOK_COUNT"
 fi
 if [ "$CCSTATUSLINE_STATE" = "unknown" ]; then
   printf '  %-38s %s\n' "ccstatusline statusline" \
@@ -407,9 +407,9 @@ add_setup_reason() {
 [ "$N_VIOLATION" -gt 0 ] && add_setup_reason "repair ${N_VIOLATION} constraint $(_doctor_plural "$N_VIOLATION" violation violations)"
 [ "$TODO_STATE" = "no" ] && add_setup_reason "write the CLAUDE_CODE_ENABLE_TODO_TOOLS export"
 [ "$LEGACY_STATE" = "yes" ] && add_setup_reason "remove the legacy .zshrc alias block"
-case "$STALE_COUNT" in
+case "$LEGACY_HOOK_COUNT" in
   unknown|0) ;;
-  *) add_setup_reason "clean ${STALE_COUNT} stale settings.json hook $(_doctor_plural "$STALE_COUNT" entry entries)" ;;
+  *) add_setup_reason "clean ${LEGACY_HOOK_COUNT} legacy-channel managed-hook $(_doctor_plural "$LEGACY_HOOK_COUNT" entry entries) out of settings.json" ;;
 esac
 if [ -n "$SETUP_REASONS" ]; then
   echo "  → run /bionic:setup — it would ${SETUP_REASONS}."

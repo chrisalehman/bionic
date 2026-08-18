@@ -143,9 +143,9 @@ export CLAUDE_CODE_ENABLE_TODO_TOOLS=1
 RC
 }
 
-# settings.json carrying two stale managed-hook entries (the pre-plugin
+# settings.json carrying two legacy-channel managed-hook entries (the pre-plugin
 # ~/.claude/hooks/ copies) plus one foreign entry that must survive.
-plant_stale_hooks() {  # <arm>
+plant_legacy_channel_hooks() {  # <arm>
   cat > "$1/home/.claude/settings.json" <<'JSON'
 {
   "hooks": {
@@ -301,7 +301,7 @@ ARM="$(new_arm never-list)"
 plant_never_list "$ARM"
 plant_zshrc_marked "$ARM"
 plant_todo_export "$ARM"
-plant_stale_hooks "$ARM"
+plant_legacy_channel_hooks "$ARM"
 plant_profile_block "$ARM"
 plant_plugin_data "$ARM"
 plant_claude_stub "$ARM" yes yes
@@ -337,7 +337,7 @@ ARM="$(new_arm all-no)"
 plant_never_list "$ARM"
 plant_zshrc_marked "$ARM"
 plant_todo_export "$ARM"
-plant_stale_hooks "$ARM"
+plant_legacy_channel_hooks "$ARM"
 plant_profile_block "$ARM"
 plant_plugin_data "$ARM"
 plant_claude_stub "$ARM" yes yes
@@ -409,22 +409,22 @@ expect_true "detect.sh carries the same predicate (the pin has two ends)" \
   bash -c 'grep -qF "$1" "$2"' _ "$TODO_PREDICATE" "$DETECT_SH"
 
 echo ""
-echo "=== Group 7: stale settings.json managed-hook entries ==="
+echo "=== Group 7: legacy-channel managed-hook entries in settings.json ==="
 
-ARM="$(new_arm stale-hooks)"
-plant_stale_hooks "$ARM"
+ARM="$(new_arm legacy-channel-hooks)"
+plant_legacy_channel_hooks "$ARM"
 plant_claude_stub "$ARM" no no
 OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
 SETTINGS_TEXT="$(cat "$ARM/home/.claude/settings.json")"
-expect_not_contains "stale hooks: the ~/.claude/hooks/ PreToolUse entry is gone" \
+expect_not_contains "legacy-channel hooks: the ~/.claude/hooks/ PreToolUse entry is gone" \
   ".claude/hooks/protect-main.sh" "$SETTINGS_TEXT"
-expect_not_contains "stale hooks: the ~/.claude/hooks/ Stop entry is gone" \
+expect_not_contains "legacy-channel hooks: the ~/.claude/hooks/ Stop entry is gone" \
   ".claude/hooks/landing-gate.sh" "$SETTINGS_TEXT"
-expect_contains "stale hooks: a FOREIGN hook entry survives" "/opt/other-tool/guard.sh" "$SETTINGS_TEXT"
-expect_contains "stale hooks: unrelated settings keys survive" '"model"' "$SETTINGS_TEXT"
-expect_true "stale hooks: the result is still valid JSON" jq -e . "$ARM/home/.claude/settings.json"
-expect_eq "stale hooks: detect.sh now counts zero" "env:stale-managed-hooks count=0" \
-  "$(BIONIC_SETTINGS_FILE="$ARM/home/.claude/settings.json" bash -c '. "$1"; detect_stale_settings_hooks' _ "$DETECT_SH")"
+expect_contains "legacy-channel hooks: a FOREIGN hook entry survives" "/opt/other-tool/guard.sh" "$SETTINGS_TEXT"
+expect_contains "legacy-channel hooks: unrelated settings keys survive" '"model"' "$SETTINGS_TEXT"
+expect_true "legacy-channel hooks: the result is still valid JSON" jq -e . "$ARM/home/.claude/settings.json"
+expect_eq "legacy-channel hooks: detect.sh now counts zero" "env:legacy-channel-hooks count=0" \
+  "$(BIONIC_SETTINGS_FILE="$ARM/home/.claude/settings.json" bash -c '. "$1"; detect_legacy_channel_hooks' _ "$DETECT_SH")"
 
 echo ""
 echo "=== Group 8: the permission marker block (profile_strip semantics) ==="
@@ -454,8 +454,8 @@ for sentinel in 'Bash(: bionic-profile-begin version=' 'Bash(: bionic-profile-en
     bash -c 'grep -qF "$1" "$2"' _ "$sentinel" "$PROFILE_SH"
 done
 
-# And the third: the stale-managed-hook substring detect.sh counts on.
-expect_true "remove.sh carries detect.sh's stale-hook predicate verbatim" \
+# And the third: the legacy-channel managed-hook substring detect.sh counts on.
+expect_true "remove.sh carries detect.sh's legacy-channel-hook predicate verbatim" \
   bash -c 'grep -qF ".claude/hooks/" "$1"' _ "$REMOVE_SH"
 expect_true "detect.sh carries the same predicate" \
   bash -c 'grep -qF ".claude/hooks/" "$1"' _ "$DETECT_SH"
@@ -490,7 +490,7 @@ ARM="$(new_arm standalone-door)"
 plant_never_list "$ARM"
 plant_zshrc_marked "$ARM"
 plant_todo_export "$ARM"
-plant_stale_hooks "$ARM"
+plant_legacy_channel_hooks "$ARM"
 plant_profile_block "$ARM"
 plant_plugin_data "$ARM"
 # The machine this door exists for: the plugin is already gone from the CLI.
@@ -505,7 +505,7 @@ expect_contains "standalone: announces the mode it is running in" "standalone" "
 expect_not_contains "standalone: the zshrc block was still removed" "bionic:start" "$RC_TEXT"
 expect_true "standalone: the todo-tools export was still removed" \
   bash -c '! grep -qE "^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=1" "$1"' _ "$ARM/home/.zshrc"
-expect_not_contains "standalone: the stale managed-hook entry was still removed" \
+expect_not_contains "standalone: the legacy-channel managed-hook entry was still removed" \
   ".claude/hooks/protect-main.sh" "$SETTINGS_TEXT"
 expect_not_contains "standalone: the permission marker block was still removed" \
   "bionic-profile-begin" "$SETTINGS_TEXT"
@@ -552,7 +552,7 @@ ARM="$(new_arm bare-path)"
 plant_never_list "$ARM"
 plant_zshrc_marked "$ARM"
 plant_todo_export "$ARM"
-plant_stale_hooks "$ARM"
+plant_legacy_channel_hooks "$ARM"
 plant_profile_block "$ARM"
 plant_plugin_data "$ARM"
 plant_claude_stub "$ARM" no no
@@ -570,7 +570,7 @@ expect_true "bare PATH: the todo-tools export was still found and removed" \
   bash -c '! grep -qE "^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=1" "$1"' _ "$ARM/home/.zshrc"
 expect_not_contains "bare PATH: the permission marker block was still removed" \
   "bionic-profile-begin" "$SETTINGS_TEXT"
-expect_not_contains "bare PATH: the stale managed-hook entry was still removed" \
+expect_not_contains "bare PATH: the legacy-channel managed-hook entry was still removed" \
   ".claude/hooks/protect-main.sh" "$SETTINGS_TEXT"
 expect_not_contains "bare PATH: no command-not-found anywhere in the transcript" \
   "command not found" "$OUT_BARE"

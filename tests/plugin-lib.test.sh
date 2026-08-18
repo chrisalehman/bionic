@@ -505,7 +505,7 @@ expect_eq "detect_zshrc_legacy_block: rc file missing entirely" "env:zshrc-legac
   "$(detect_run BIONIC_SHELL_RC="$TMP/rc-nonexistent" -- detect_zshrc_legacy_block)"
 
 echo ""
-echo "=== Group 13: detect_stale_settings_hooks — counts, both arms ==="
+echo "=== Group 13: detect_legacy_channel_hooks — counts, both arms ==="
 #
 # Fixture shape copied from the real user settings.json hook block written by
 # claude-bootstrap.sh's wire_managed_hooks (MANAGED_HOOKS, :1772-1779).
@@ -540,22 +540,22 @@ JSON
 
 SET_NOHOOKS="$TMP/settings-nohooks.json"; echo '{"model":"opus"}' > "$SET_NOHOOKS"
 
-expect_eq "detect_stale_settings_hooks: two legacy entries counted, plugin entry not" \
-  "env:stale-managed-hooks count=2" \
-  "$(detect_run BIONIC_SETTINGS_FILE="$SET_STALE" -- detect_stale_settings_hooks)"
-expect_eq "detect_stale_settings_hooks: a clean plugin-channel settings file counts 0" \
-  "env:stale-managed-hooks count=0" \
-  "$(detect_run BIONIC_SETTINGS_FILE="$SET_CLEAN" -- detect_stale_settings_hooks)"
-expect_eq "detect_stale_settings_hooks: settings with no hooks key counts 0" \
-  "env:stale-managed-hooks count=0" \
-  "$(detect_run BIONIC_SETTINGS_FILE="$SET_NOHOOKS" -- detect_stale_settings_hooks)"
-expect_eq "detect_stale_settings_hooks: missing settings file counts 0" \
-  "env:stale-managed-hooks count=0" \
-  "$(detect_run BIONIC_SETTINGS_FILE="$TMP/settings-nonexistent.json" -- detect_stale_settings_hooks)"
-expect_eq "detect_stale_settings_hooks: no jq on PATH -> count=unknown, never a false 0" \
-  "env:stale-managed-hooks count=unknown" \
+expect_eq "detect_legacy_channel_hooks: two legacy entries counted, plugin entry not" \
+  "env:legacy-channel-hooks count=2" \
+  "$(detect_run BIONIC_SETTINGS_FILE="$SET_STALE" -- detect_legacy_channel_hooks)"
+expect_eq "detect_legacy_channel_hooks: a clean plugin-channel settings file counts 0" \
+  "env:legacy-channel-hooks count=0" \
+  "$(detect_run BIONIC_SETTINGS_FILE="$SET_CLEAN" -- detect_legacy_channel_hooks)"
+expect_eq "detect_legacy_channel_hooks: settings with no hooks key counts 0" \
+  "env:legacy-channel-hooks count=0" \
+  "$(detect_run BIONIC_SETTINGS_FILE="$SET_NOHOOKS" -- detect_legacy_channel_hooks)"
+expect_eq "detect_legacy_channel_hooks: missing settings file counts 0" \
+  "env:legacy-channel-hooks count=0" \
+  "$(detect_run BIONIC_SETTINGS_FILE="$TMP/settings-nonexistent.json" -- detect_legacy_channel_hooks)"
+expect_eq "detect_legacy_channel_hooks: no jq on PATH -> count=unknown, never a false 0" \
+  "env:legacy-channel-hooks count=unknown" \
   "$(env -i HOME="$TMP/home" PATH="$NOJQ_BIN" BIONIC_SETTINGS_FILE="$SET_STALE" \
-      bash -c '. "$1"; detect_stale_settings_hooks' _ "$DETECT_SH" 2>&1)"
+      bash -c '. "$1"; detect_legacy_channel_hooks' _ "$DETECT_SH" 2>&1)"
 
 echo ""
 echo "=== Group 14: detect_half_uninstalled — both arms ==="
@@ -655,7 +655,7 @@ DETECT_ALL="$(detect_run BIONIC_PLUGIN_ROOT="$PL_OK" BIONIC_CLAUDE_HOME="$CH_OK"
 expect_match "detect_all emits the plugin line"        "*plugin: version=*"          "$DETECT_ALL"
 expect_match "detect_all emits the todo-tools line"    "*env:todo-tools present=*"   "$DETECT_ALL"
 expect_match "detect_all emits the zshrc-legacy line"  "*env:zshrc-legacy present=*" "$DETECT_ALL"
-expect_match "detect_all emits the stale-hooks line"   "*env:stale-managed-hooks count=*" "$DETECT_ALL"
+expect_match "detect_all emits the stale-hooks line"   "*env:legacy-channel-hooks count=*" "$DETECT_ALL"
 expect_match "detect_all emits the half-uninstalled line" "*state:half-uninstalled=*" "$DETECT_ALL"
 expect_match "detect_all emits a dep line per row"     "*dep:superpowers lane=3a*"   "$DETECT_ALL"
 
@@ -663,7 +663,7 @@ echo ""
 echo "=== Group 16: every detect function prints exactly one line and exits 0 ==="
 
 for fn in detect_plugin_integrity detect_env_todo_tools detect_zshrc_legacy_block \
-          detect_stale_settings_hooks detect_half_uninstalled; do
+          detect_legacy_channel_hooks detect_half_uninstalled; do
   out="$(detect_run BIONIC_PLUGIN_ROOT="$PL_OK" BIONIC_CLAUDE_HOME="$CH_OK" \
     BIONIC_SHELL_RC="$RC_LEGACY" BIONIC_SETTINGS_FILE="$SET_STALE" -- "$fn")"
   rc=$?
