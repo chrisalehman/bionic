@@ -247,17 +247,51 @@ echo "=== Group 9: route wiring — the two owner SKILL.md files name the contra
 
 CANONICAL_SKILL="${REPO}/skills/canonical-sdlc/SKILL.md"
 BROWSER_SKILL="${REPO}/skills/browser-verify/SKILL.md"
+EXCALIDRAW_SKILL="${REPO}/skills/excalidraw-diagram/SKILL.md"
 
 expect_true "canonical-sdlc SKILL.md names jit_check" grep -q 'jit_check' "$CANONICAL_SKILL"
 expect_true "canonical-sdlc SKILL.md names jit_offer" grep -q 'jit_offer' "$CANONICAL_SKILL"
 expect_true "browser-verify SKILL.md names jit_check" grep -q 'jit_check' "$BROWSER_SKILL"
 expect_true "browser-verify SKILL.md names jit_offer" grep -q 'jit_offer' "$BROWSER_SKILL"
+expect_true "excalidraw-diagram SKILL.md names jit_check" grep -q 'jit_check' "$EXCALIDRAW_SKILL"
+expect_true "excalidraw-diagram SKILL.md names jit_offer" grep -q 'jit_offer' "$EXCALIDRAW_SKILL"
 
 echo ""
 echo "=== Group 10: the suite is registered in tests/run.sh by name ==="
 
 expect_true "tests/run.sh names jit.test.sh" \
   grep -q 'run "jit.test.sh" bash tests/jit.test.sh' "${REPO}/tests/run.sh"
+
+echo ""
+echo "=== Group 11: excalidraw-diagram route fixes (epic-17 w4 S10, AC-10) ==="
+#
+# AC-10: the skill is a default-off opt-in (out of the payload since W1); its
+# hardcoded ~/.claude/skills/ literal (a bootstrap-era assumption — that path
+# is only where a manually-dropped personal skill happens to land, and hardcoding
+# it ignores CLAUDE_CONFIG_DIR the same way deps.sh's roots section guards
+# against) is replaced with the config-dir-aware form deps.sh already
+# establishes; uv and playwright-chromium are its two lane-3b rows and both
+# get the same one-sentence JIT-naming treatment as Group 9's two skills
+# (proven above); the skill states its own default-off/opt-in status so the
+# AC's language is traceable in the shipped doc, not just in this suite.
+
+EXCALIDRAW_README="${REPO}/skills/excalidraw-diagram/README.md"
+
+expect_true "excalidraw-diagram SKILL.md names uv's dependency-table row" grep -q '\buv\b' "$EXCALIDRAW_SKILL"
+expect_true "excalidraw-diagram SKILL.md names playwright-chromium" grep -q 'playwright-chromium' "$EXCALIDRAW_SKILL"
+
+expect_false "excalidraw-diagram SKILL.md carries no hardcoded ~/.claude/skills/ literal" \
+  grep -q '~/\.claude/skills/' "$EXCALIDRAW_SKILL"
+expect_false "excalidraw-diagram README.md carries no hardcoded ~/.claude/skills/ literal" \
+  grep -q '~/\.claude/skills/' "$EXCALIDRAW_README"
+
+expect_true "excalidraw-diagram SKILL.md uses the config-dir-aware path idiom" \
+  grep -q 'CLAUDE_CONFIG_DIR' "$EXCALIDRAW_SKILL"
+expect_true "excalidraw-diagram README.md uses the config-dir-aware path idiom" \
+  grep -q 'CLAUDE_CONFIG_DIR' "$EXCALIDRAW_README"
+
+expect_true "excalidraw-diagram SKILL.md states its default-off/opt-in status" \
+  grep -qi 'default-off' "$EXCALIDRAW_SKILL"
 
 echo ""
 echo "========================================"
