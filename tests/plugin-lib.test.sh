@@ -374,6 +374,194 @@ expect_eq "remove_dep git (keep-shared) removes nothing even with consent" "0" \
 expect_match "remove_dep git says why it is keeping the binary" "*keep-shared*" "$KEEP_OUT"
 
 echo ""
+echo "=== Group 8b: the statusline writers preserve settings.json's MODE ==="
+#
+# C-1 and R-1, on the two settings writers in this file. `~/.claude/settings.json`
+# routinely carries an `env` block with tokens, so a machine that chose 0600 for
+# it must still have 0600 after bionic records or clears the statusline —
+# widening a credential-bearing file to 0644 is a machine side effect, not a
+# formatting detail. Neither writer captured the mode at all before this group
+# existed, so the widening here was UNCONDITIONAL rather than a crash window:
+# every install, every removal, no race required.
+#
+# Both writers are driven through their LIVE entry points — `install_dep`'s
+# statusline branch and `remove_dep ccstatusline` — not through the helper they
+# share, so what is measured is the path the setup loop actually walks.
+#
+# Both directions are asserted for each, so no arm can pass by pinning one
+# constant: a writer that narrowed every file to 0600 fails the 0644 arm.
+
+file_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
+
+# BASE_BIN deliberately carries no `stat` — the payload's mode capture degrades
+# honestly without it (A18), and the last arm in this group proves that. The
+# repair itself can only be measured on a machine that HAS `stat`, so this group
+# gets a bin dir that is BASE_BIN plus that one binary and nothing else.
+STL_BIN="$TMP/statusline-bin"; mkdir -p "$STL_BIN"
+for _stl_real in "$BASE_BIN"/*; do ln -sf "$_stl_real" "$STL_BIN/" 2>/dev/null; done
+_stl_stat="$(command -v stat 2>/dev/null)" && ln -sf "$_stl_stat" "$STL_BIN/stat" 2>/dev/null
+expect_true "the statusline arms have a stat on PATH (the repair is reachable)" \
+  test -x "$STL_BIN/stat"
+
+# A settings.json carrying a token, so every arm below also witnesses that the
+# rewrite preserved the content it was not asked to touch.
+STL_TOKEN='sk-fixture-not-a-real-token'
+plant_settings() {  # <path> <mode> [extra-json-object]
+  local path="$1" mode="$2" extra="${3:-{\}}"
+  printf '{"env":{"ANTHROPIC_AUTH_TOKEN":"%s"},"model":"opus"}' "$STL_TOKEN" \
+    | jq --argjson extra "$extra" '. + $extra' > "$path"
+  chmod "$mode" "$path"
+}
+
+# One library function, one controlled environment, one settings file. `answer`
+# is fed on stdin because the live entry points are consent-gated.
+stl_run() {  # <settings-file> <answer|-> [shim] -- <fn> [args]
+  local settings="$1" answer="$2" shim="$3"; shift 4
+  local prog='. "$1"; shift; "$@"'
+  [ "$shim" = "-" ] || prog='. "$1"; . "$BIONIC_TEST_SHIM"; shift; "$@"'
+  if [ "$answer" = "-" ]; then
+    env -i HOME="$TMP/home" PATH="$STL_BIN" BIONIC_TEST_CALLS="$CALLS" \
+      BIONIC_SETTINGS_FILE="$settings" BIONIC_TEST_SHIM="$shim" \
+      BIONIC_TEST_MODE_LOG="${STL_LOG:-/dev/null}" \
+      bash -c "$prog" _ "$DEPS_SH" "$@" 2>&1
+  else
+    echo "$answer" | env -i HOME="$TMP/home" PATH="$STL_BIN" BIONIC_TEST_CALLS="$CALLS" \
+      BIONIC_SETTINGS_FILE="$settings" BIONIC_TEST_SHIM="$shim" \
+      BIONIC_TEST_MODE_LOG="${STL_LOG:-/dev/null}" \
+      bash -c "$prog" _ "$DEPS_SH" "$@" 2>&1
+  fi
+}
+
+STL_DIR="$TMP/statusline-arms"; mkdir -p "$STL_DIR"
+STL_LINE='{"statusLine":{"type":"command","command":"npx ccstatusline@latest"}}'
+
+# --- install, through install_dep's consent gate, on a 0600 file -------------
+STL_S="$STL_DIR/install-600.json"
+plant_settings "$STL_S" 600
+expect_eq "install fixture: settings.json really starts at 0600 (not vacuous)" \
+  "600" "$(file_mode "$STL_S")"
+STL_OUT="$(stl_run "$STL_S" y - -- install_dep ccstatusline)"
+expect_match "install_dep really recorded the statusline (the arm is not vacuous)" \
+  '*ccstatusline*' "$(cat "$STL_S")"
+expect_match "and the token already in the file survived the rewrite" \
+  "*${STL_TOKEN}*" "$(cat "$STL_S")"
+expect_eq "recording the statusline leaves a 0600 settings.json at 0600" \
+  "600" "$(file_mode "$STL_S")"
+
+# --- and the other direction, so 0600 cannot be hard-coded ------------------
+STL_S644="$STL_DIR/install-644.json"
+plant_settings "$STL_S644" 644
+STL_OUT="$(stl_run "$STL_S644" y - -- install_dep ccstatusline)"
+expect_match "install_dep recorded the statusline on the 0644 fixture too" \
+  '*ccstatusline*' "$(cat "$STL_S644")"
+expect_eq "recording the statusline does not narrow a 0644 settings.json" \
+  "644" "$(file_mode "$STL_S644")"
+
+# --- removal, through remove_dep's consent gate, on a 0600 file -------------
+STL_R="$STL_DIR/remove-600.json"
+plant_settings "$STL_R" 600 "$STL_LINE"
+expect_eq "removal fixture: settings.json really starts at 0600 (not vacuous)" \
+  "600" "$(file_mode "$STL_R")"
+STL_OUT="$(stl_run "$STL_R" y - -- remove_dep ccstatusline)"
+expect_true "remove_dep ccstatusline really cleared .statusLine (not vacuous)" \
+  jq -e '.statusLine == null' "$STL_R"
+expect_match "and the removal left the token it was not asked to touch" \
+  "*${STL_TOKEN}*" "$(cat "$STL_R")"
+expect_eq "clearing the statusline leaves a 0600 settings.json at 0600" \
+  "600" "$(file_mode "$STL_R")"
+
+STL_R644="$STL_DIR/remove-644.json"
+plant_settings "$STL_R644" 644 "$STL_LINE"
+STL_OUT="$(stl_run "$STL_R644" y - -- remove_dep ccstatusline)"
+expect_true "remove_dep cleared .statusLine on the 0644 fixture too" \
+  jq -e '.statusLine == null' "$STL_R644"
+expect_eq "clearing the statusline does not narrow a 0644 settings.json" \
+  "644" "$(file_mode "$STL_R644")"
+
+# --- R-1: the mode must be right AT THE RENAME, not repaired after it -------
+#
+# The arms above measure the mode once the writer has returned, which a writer
+# that publishes a 0644 inode and then chmods it back would also satisfy — while
+# leaving the tmp (predictable name, whole settings content, tokens included)
+# world-readable for the span before the rename, and leaving the widening
+# PERMANENT if the process dies in that window. The shim shadows only `mv` and
+# `chmod`, and only to observe and to stop the clock: it stats the RENAME'S
+# SOURCE — the inode about to become settings.json — logs that mode, does the
+# real rename, and then declares the process dead so every later `chmod` returns
+# success without acting. The kill is triggered by the rename EVENT, so it cannot
+# be tuned to spare one writer's spelling. Same mechanism as
+# tests/remove.test.sh's instant arms, on this file's two writers.
+STL_SHIM="$TMP/statusline-write-shim.sh"
+cat > "$STL_SHIM" <<'SHIM'
+_BIONIC_TEST_DEAD=0
+mv() {
+  { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; } >> "$BIONIC_TEST_MODE_LOG"
+  command mv "$@"
+  local rc=$?
+  _BIONIC_TEST_DEAD=1
+  return $rc
+}
+chmod() {
+  if [ "$_BIONIC_TEST_DEAD" = "1" ]; then return 0; fi
+  command chmod "$@"
+}
+SHIM
+
+STL_I="$STL_DIR/install-instant.json"
+plant_settings "$STL_I" 600
+STL_LOG="$TMP/statusline-instant-install.log"; : > "$STL_LOG"
+STL_OUT="$(stl_run "$STL_I" y "$STL_SHIM" -- install_dep ccstatusline)"
+expect_true "install instant arm: the shimmed rename really was reached (not vacuous)" \
+  test -s "$STL_LOG"
+expect_eq "the install writer's tmp already wears 0600 when mv renames it" \
+  "600" "$(head -1 "$STL_LOG" | tr -d ' ')"
+expect_eq "a process that dies the instant that mv lands still leaves it at 0600" \
+  "600" "$(file_mode "$STL_I")"
+
+STL_I644="$STL_DIR/install-instant-644.json"
+plant_settings "$STL_I644" 644
+STL_LOG="$TMP/statusline-instant-install-644.log"; : > "$STL_LOG"
+STL_OUT="$(stl_run "$STL_I644" y "$STL_SHIM" -- install_dep ccstatusline)"
+expect_eq "the install writer's tmp for a 0644 file is 0644 at the rename, not narrowed" \
+  "644" "$(head -1 "$STL_LOG" | tr -d ' ')"
+
+STL_RI="$STL_DIR/remove-instant.json"
+plant_settings "$STL_RI" 600 "$STL_LINE"
+STL_LOG="$TMP/statusline-instant-remove.log"; : > "$STL_LOG"
+STL_OUT="$(stl_run "$STL_RI" y "$STL_SHIM" -- remove_dep ccstatusline)"
+expect_true "removal instant arm: the shimmed rename really was reached (not vacuous)" \
+  test -s "$STL_LOG"
+expect_eq "the removal writer's tmp already wears 0600 when mv renames it" \
+  "600" "$(head -1 "$STL_LOG" | tr -d ' ')"
+expect_eq "and a death right after THAT rename leaves 0600 too" \
+  "600" "$(file_mode "$STL_RI")"
+
+STL_RI644="$STL_DIR/remove-instant-644.json"
+plant_settings "$STL_RI644" 644 "$STL_LINE"
+STL_LOG="$TMP/statusline-instant-remove-644.log"; : > "$STL_LOG"
+STL_OUT="$(stl_run "$STL_RI644" y "$STL_SHIM" -- remove_dep ccstatusline)"
+expect_eq "the removal writer's tmp for a 0644 file is 0644 at the rename" \
+  "644" "$(head -1 "$STL_LOG" | tr -d ' ')"
+unset STL_LOG
+
+# --- A18's honest degradation, on a machine with no `stat` ------------------
+#
+# BASE_BIN has no `stat`, so the mode cannot be captured. The write must still
+# land: an absent coreutil turns the repair off, it does not turn the writer
+# into a refusal. This is the same degradation the payload already practises for
+# `jq`, and the consequence A18 recorded deliberately — on such a machine the
+# pre-fold widening persists, silently.
+STL_NS="$STL_DIR/no-stat.json"
+plant_settings "$STL_NS" 600
+STL_OUT="$(echo y | env -i HOME="$TMP/home" PATH="$BASE_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_SETTINGS_FILE="$STL_NS" \
+  bash -c '. "$1"; install_dep ccstatusline' _ "$DEPS_SH" 2>&1)"
+expect_match "with no stat on PATH the statusline is still recorded (write, don't chmod)" \
+  '*ccstatusline*' "$(cat "$STL_NS")"
+expect_true "and the file is still valid JSON after that degraded write" \
+  jq -e . "$STL_NS"
+
+echo ""
 echo "=== Group 9: detect_plugin_integrity — all three hook states ==="
 
 plant_hook_scripts() {  # <root> <name>...
