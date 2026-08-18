@@ -378,7 +378,14 @@ ACTED=no
 if [ "$HALF_STATE" = "yes" ]; then
   echo "  → this machine is half-uninstalled: bionic is no longer registered with the CLI,"
   echo "      but its footprint is still here. Finish the removal with:"
-  echo "      curl -fsSL ${BIONIC_REMOVE_RAW_URL} | bash"
+  # The `set -o pipefail` wrapper is not decoration. `curl … | bash` reports
+  # BASH's status, and bash handed an empty stream exits 0 — so a fetch that
+  # 404s (a moved script, no network, a private repo) leaves the user with a
+  # command that looked like it worked and removed nothing. The wrapper is a
+  # subshell, so it fixes the status without touching the options of the shell
+  # the user pasted it into. `-S` inside `-fsSL` is what puts curl's own error
+  # on the terminal; the wrapper is what stops the pipe from swallowing it.
+  echo "      bash -c 'set -o pipefail; curl -fsSL ${BIONIC_REMOVE_RAW_URL} | bash'"
   ACTED=yes
 fi
 
