@@ -43,6 +43,10 @@ set -uo pipefail
 REPO="${BIONIC_SCRIPTS_DIR}"
 DEPS_SH="${REPO}/payload/scripts/lib/deps.sh"
 DETECT_SH="${REPO}/payload/scripts/lib/detect.sh"
+# profile.sh is tests/profile.test.sh's subject; it is named here only for the
+# one arm that needs doctor's load-out — both libraries sourced together — to
+# reach detect_half_uninstalled's fourth term (Group 14, R-2).
+PROFILE_SH="${REPO}/payload/scripts/lib/profile.sh"
 PLUGIN_JSON="${REPO}/payload/.claude-plugin/plugin.json"
 MARKETPLACE_JSON="${REPO}/.claude-plugin/marketplace.json"
 
@@ -581,6 +585,51 @@ expect_eq "detect_half_uninstalled: plugin still installed, same footprint -> no
   "state:half-uninstalled=no" \
   "$(detect_run BIONIC_CLAUDE_HOME="$CH_BIONIC" BIONIC_SHELL_RC="$RC_LEGACY" \
       BIONIC_SETTINGS_FILE="$SET_STALE" -- detect_half_uninstalled)"
+
+# R-2 — the FOURTH term. detect.sh owns three pieces of footprint; the applied
+# permission block is profile.sh's, and it is reachable on its own: a user who
+# runs /bionic:remove, declines the permission-block question and accepts the
+# uninstall lands with the block as the only leftover. Both files' headers said
+# the disjunction joined there and neither joined it, so doctor read
+# half-uninstalled=no and withheld the one fix that machine has.
+#
+# The consult is SOFT — `declare -F` — because detect.sh must stay sourceable
+# alone. That is not a nicety here: the standalone remove.sh door exists for
+# exactly the machine where the payload (and so profile.sh) is gone. Hence two
+# arms on one machine state, differing only in which libraries are loaded.
+SET_PROFILE_ONLY="$TMP/settings-profile-only.json"
+cat > "$SET_PROFILE_ONLY" <<'JSON'
+{
+  "permissions": {
+    "allow": [
+      "Bash(: bionic-profile-begin version=0.1.0)",
+      "Bash(bash /Users/nobody/.claude/plugins/bionic/scripts/doctor.sh:*)",
+      "Bash(: bionic-profile-end)"
+    ]
+  }
+}
+JSON
+
+detect_and_profile_run() {  # <env-assignments...> -- <function> [args]
+  local -a envs=()
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
+  shift
+  env -i HOME="$TMP/home" PATH="$BASE_BIN" BIONIC_TEST_CALLS="$CALLS" "${envs[@]}" \
+    bash -c '. "$1"; . "$2"; shift 2; "$@"' _ "$DETECT_SH" "$PROFILE_SH" "$@" 2>&1
+}
+
+expect_eq "detect_half_uninstalled: doctor's load-out (detect+profile) sees the permission block as footprint" \
+  "state:half-uninstalled=yes" \
+  "$(detect_and_profile_run BIONIC_CLAUDE_HOME="$CH_EMPTY" BIONIC_SHELL_RC="$RC_WITHOUT" \
+      BIONIC_SETTINGS_FILE="$SET_PROFILE_ONLY" -- detect_half_uninstalled)"
+expect_eq "detect_half_uninstalled: detect.sh ALONE degrades to its own three terms, same machine" \
+  "state:half-uninstalled=no" \
+  "$(detect_run BIONIC_CLAUDE_HOME="$CH_EMPTY" BIONIC_SHELL_RC="$RC_WITHOUT" \
+      BIONIC_SETTINGS_FILE="$SET_PROFILE_ONLY" -- detect_half_uninstalled)"
+expect_eq "detect_half_uninstalled: detect+profile, plugin still registered -> still no" \
+  "state:half-uninstalled=no" \
+  "$(detect_and_profile_run BIONIC_CLAUDE_HOME="$CH_BIONIC" BIONIC_SHELL_RC="$RC_WITHOUT" \
+      BIONIC_SETTINGS_FILE="$SET_PROFILE_ONLY" -- detect_half_uninstalled)"
 
 echo ""
 echo "=== Group 15: read-only contract — no detect function mutates ==="
