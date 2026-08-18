@@ -53,6 +53,22 @@ expect_absent_in_file() {
   fi
 }
 
+# expect_count_in_file <label> <needle> <expected-count> <file>
+# Occurrence count, not line count — `grep -c` would collapse two hits on one line into
+# one, which is exactly the reversion a count-scoped pin exists to catch.
+expect_count_in_file() {
+  local label="$1" needle="$2" want="$3" file="$4" got
+  TOTAL=$((TOTAL + 1))
+  got=$(grep -oF -- "$needle" "$file" 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$got" = "$want" ]; then
+    echo "PASS: $label"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: $label (wanted ${want} occurrences of '$needle' in $file, got ${got})"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
 echo ""
 echo "=== Section 1: §Dispatch exists ==="
 expect_pin_in_file "SKILL.md carries a Dispatch section" "## Dispatch" "$SKILL"
@@ -203,6 +219,79 @@ echo "=== Section 5h: the Watcher-arming duty is GONE (epic-16 w2 slice S1) ==="
 expect_absent_in_file "the Watcher-arming heading is gone" "**Watcher-arming.**" "$SKILL"
 expect_absent_in_file "…and so is the duty it carried" \
   "is armed with a quiescence watcher at dispatch time" "$SKILL"
+
+echo ""
+echo "=== Section 5i: the heartbeat doctrine (epic-17 W4 S6, spec AC-8 as amended) ==="
+# ONE heartbeat replaces the old dispatch-conditional poker duty. What is pinned here is
+# the OBLIGATION SPAN, never the paragraph's name: a rename leaves the duty intact, and a
+# reworded arming trigger is the defect this suite exists to catch. The arming trigger is
+# the sharpest literal in the doctrine — "at engagement, every session" and "when you
+# dispatch something" are the two readings that diverge, and the wrong one leaves an
+# orchestrator working alone with no pulse for the whole stretch (design-ledger D2, arming
+# trigger CORRECTED by Chris 2026-08-18).
+expect_pin_in_file "heartbeat: one clock per run" \
+  "One clock per run, and only one." "$SKILL"
+expect_pin_in_file "heartbeat: armed at ENGAGEMENT, every session of the run" \
+  "the Step-0 confirmation of a new run, or the resume ritual of an open one, in every session of that run" "$SKILL"
+expect_pin_in_file "heartbeat: arming is not dispatch-conditional" \
+  "Arming is not conditional on having dispatched anything" "$SKILL"
+expect_pin_in_file "heartbeat: the interval is the poker's" \
+  "config knob \`poker-interval:\` in \`.bionic/config.yaml\`, default 30m" "$SKILL"
+expect_pin_in_file "heartbeat: CronDelete at run close" \
+  "\`CronDelete\` the job at run close." "$SKILL"
+expect_pin_in_file "heartbeat: 7-day expiry is the backstop, not the disarm" \
+  "the forgotten-disarm backstop, not the disarm" "$SKILL"
+expect_pin_in_file "heartbeat: subagents stay timerless" \
+  "a dispatched agent arms nothing" "$SKILL"
+expect_pin_in_file "heartbeat: the manual /loop poke ritual is retired" \
+  "The manual \`/loop\` poke ritual is retired" "$SKILL"
+
+# The patrol prompt's four reads, then the continue.
+expect_pin_in_file "patrol: idempotent by construction" \
+  "idempotent by construction" "$SKILL"
+expect_pin_in_file "patrol: the poker is the decision brain" \
+  "is the decision brain — the prompt gathers, the poker decides" "$SKILL"
+expect_pin_in_file "patrol: liveness reads the contracted cadence, not the tick interval" \
+  "quieter than the \`cadence\` its own brief declared" "$SKILL"
+expect_pin_in_file "patrol: continue toward the goal until a wall" \
+  "Then continue toward the goal until a wall." "$SKILL"
+
+# The tool-grounded duty clauses, transcribed VERBATIM from spec AC-8 (as amended
+# 2026-08-18) rather than paraphrased — normative values ship as verbatim text, because two
+# implementers once resolved the same paraphrased span in opposite directions. Pinned whole,
+# as one fixed string, so a "clarifying" reword of any clause in the chain fails here.
+expect_pin_in_file "patrol: the AC-8 tool-grounded duty clauses, verbatim and whole" \
+  "The panel and task-list duties are TOOL-GROUNDED, never judgment-worded: panel refresh = ListAgents, then TaskStop on each listed lineage whose ledger row is fact-discharged (CLOSED / MET / acked), and a listed agent with NO ledger row is surfaced as a duplicate-session tell, never silently stopped; task-list refresh = TaskList, then chronological display order (current-step slice entries first, dependency order, later-step entries after) restored mechanically — TaskCreate fresh copies of every entry that must sort later, TaskUpdate status=deleted on the stale originals, no-op when ascending-ID order already matches — then statuses reconciled with verified reality; where the task tools are absent (version-gated), the plan ledger stands in as the task list." \
+  "$SKILL"
+# Named separately so a truncation of the chain's tail reports as the fallback going missing
+# rather than as one opaque 771-byte string failing.
+expect_pin_in_file "patrol: the version-gated fallback names the plan ledger" \
+  "where the task tools are absent (version-gated), the plan ledger stands in as the task list" "$SKILL"
+
+echo ""
+echo "=== Section 5j: the retired poker duty, and the re-rooted invocation paths ==="
+# The old duty armed the wake ON DISPATCH. Its absence is pinned in the same file that
+# pinned its presence: a doctrine paragraph nobody notices is missing is how a superseded
+# rule grows a second life in a brief (same reasoning as §5h's watcher).
+expect_absent_in_file "the old poker-duty heading is gone" "**The poker duty.**" "$SKILL"
+expect_absent_in_file "…and so is its dispatch-conditional arming rule" \
+  "Dispatching a long-shape unit arms a session-scoped self-wake" "$SKILL"
+
+# C-10: the two operator commands were the last installed-path literals in the skill. They
+# are COUNT-scoped, not merely present — `interval` and `tick` are two invocations of the
+# same script, and `standdown` and `order` two of the other, so a spelling that survives on
+# one line while the other reverts would pass a bare presence check.
+expect_absent_in_file "no installed-path poker literal survives" \
+  "bash ~/.claude/hooks/session-poker.sh" "$SKILL"
+expect_absent_in_file "no installed-path stop-orders literal survives" \
+  "bash ~/.claude/hooks/stop-orders.sh" "$SKILL"
+
+expect_count_in_file "exactly 2 plugin-rooted session-poker invocations (interval, tick)" \
+  'bash ${CLAUDE_PLUGIN_ROOT}/hooks/session-poker.sh' 2 "$SKILL"
+expect_count_in_file "exactly 2 plugin-rooted stop-orders invocations (standdown, order)" \
+  'bash ${CLAUDE_PLUGIN_ROOT}/hooks/stop-orders.sh' 2 "$SKILL"
+expect_count_in_file "zero installed-hooks-directory literals anywhere in the skill" \
+  '~/.claude/hooks/' 0 "$SKILL"
 
 echo ""
 echo "=== Section 6: superseded generic non-response text is gone ==="
