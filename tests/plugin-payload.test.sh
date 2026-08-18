@@ -254,7 +254,8 @@ echo "=== E — nothing outside the boundary is reachable through the payload ==
 
 if [ -d "$PAYLOAD" ]; then
   for bad in .bionic .claude .git tests claude-bootstrap.sh claude-reset.sh \
-             ccstatusline design architecture.png node_modules .venv .DS_Store; do
+             ccstatusline design architecture.png node_modules .venv .DS_Store \
+             agents-src; do
     HITS="$(find -L "$PAYLOAD" -name "$bad" 2>/dev/null | head -5)"
     if [ -z "$HITS" ]; then
       ok "payload tree contains no '$bad'"
@@ -297,6 +298,73 @@ if git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
   fi
 else
   echo "SKIP: git checks (not a git checkout)"
+fi
+
+# ============================================================
+echo ""
+echo "=== G — the agent RENDER PIPELINE stays repo-side: finals ship, sources never do ==="
+# ============================================================
+#
+# epic-17 W4 S2 / spec AC-2. agents/ is rendered from agents-src/ (blocks + templates +
+# render.sh). The rendered finals are product — they ARE the agent role files the plugin
+# installs. Everything upstream of them is build-time apparatus: shipping it would put a
+# second, editable copy of every shared block on the user's machine, and the render script
+# would happily overwrite their installed agents from it.
+#
+# The `agents-src` entry in §E's bad-name list catches the directory arriving whole. This
+# section is the finer sieve: the ARTIFACT KINDS, wherever they land. `find -L` is
+# mandatory here for the reason §E's preamble gives — payload/ is a symlink tree and a bare
+# recursive grep reports zero for anything below one.
+
+if [ -d "$PAYLOAD" ]; then
+  # Templates and the render script, by shape rather than by parent directory.
+  TMPL_HITS="$(find -L "$PAYLOAD" -name '*.tmpl' 2>/dev/null | head -5)"
+  if [ -z "$TMPL_HITS" ]; then
+    ok "payload tree ships no role-file templates (*.tmpl)"
+  else
+    no "payload tree ships no role-file templates (found: $(echo "$TMPL_HITS" | tr '\n' ' '))"
+  fi
+
+  RENDER_HITS="$(find -L "$PAYLOAD" -name 'render.sh' 2>/dev/null | head -5)"
+  if [ -z "$RENDER_HITS" ]; then
+    ok "payload tree ships no render.sh"
+  else
+    no "payload tree ships no render.sh (found: $(echo "$RENDER_HITS" | tr '\n' ' '))"
+  fi
+
+  # The block sources by content signature: a block file is what carries the shared duty
+  # text without the role frontmatter around it. Name-matching alone would miss a rename,
+  # so this asks whether any file under the payload is a naked block.
+  BLOCK_HITS=""
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    head -1 "$f" 2>/dev/null | grep -q '^---$' && continue
+    grep -qF "carries the command that proves it and that command's output" "$f" 2>/dev/null \
+      && BLOCK_HITS="${BLOCK_HITS}${f} "
+  done <<EOF
+$(find -L "$PAYLOAD" -type f -name '*.md' 2>/dev/null)
+EOF
+  if [ -z "$BLOCK_HITS" ]; then
+    ok "payload tree ships no naked block source (shared duty text outside a role file)"
+  else
+    no "payload tree ships no naked block source (found: $BLOCK_HITS)"
+  fi
+
+  # The positive half — the wall must not be satisfiable by shipping nothing. The rendered
+  # finals ARE product and have to be reachable through the payload, generated header and
+  # all, or the plugin installs an agent-less harness.
+  RENDERED_OK=1
+  for r in auditor critic implementor researcher senior-implementor test-runner; do
+    if [ ! -f "${PAYLOAD}/agents/${r}.md" ]; then
+      RENDERED_OK=0; break
+    fi
+    grep -qF "GENERATED FILE — DO NOT EDIT" "${PAYLOAD}/agents/${r}.md" 2>/dev/null || RENDERED_OK=0
+  done
+  if [ "$RENDERED_OK" = 1 ]; then
+    ok "all six RENDERED finals are reachable through payload/agents/ and carry their generated header"
+  else
+    no "all six RENDERED finals are reachable through payload/agents/ and carry their generated header"
+  fi
 fi
 
 # ============================================================
