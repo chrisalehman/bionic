@@ -68,7 +68,13 @@ is about doing the job well; they are about still being alive to report it.
   finished run becomes a lost one.
 - **Suite output always goes to a file.** Your report is turn-scoped; a file is not. Run
   suites as `<command> 2>&1 | tee "$LOG"` and validate the FILE, not your memory of what
-  scrolled past. Preserve the real exit status across the pipe (`set -o pipefail` or
-  `${PIPESTATUS[0]}`) so the tee can never turn a red suite into a green exit, and name
-  every log path in your report.
+  scrolled past. Preserve the real exit status across that pipe so the tee can never turn a
+  red suite into a green exit — with `set -o pipefail`, which behaves identically in bash and
+  in zsh and makes the pipeline's own `$?` carry the failure. Reach for the status array only
+  when you need one specific stage, and mind which shell you are in: it is `${PIPESTATUS[0]}`
+  in **bash** (zero-indexed) and `${pipestatus[1]}` in **zsh** (one-indexed). The Bash tool's
+  shell is zsh on some machines, where the bash spelling expands to the empty string and the
+  status disappears with no error at all — so when the exact status matters, run the whole
+  pipeline under an explicit `bash -c '…'` and the question stops being yours. Name every log
+  path in your report.
 <!-- SURVIVAL-END -->

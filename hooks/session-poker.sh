@@ -11,22 +11,28 @@
 # hooks/*.sh into ~/.claude/hooks/) and is never registered in MANAGED_HOOKS. It is invoked
 # ON DEMAND, one question per invocation, and holds no process open:
 #
-#     bash ~/.claude/hooks/session-poker.sh tick       one decision over this roster (read-only)
-#     bash ~/.claude/hooks/session-poker.sh interval    the configured self-wake interval, seconds
+#     bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/hooks/session-poker.sh tick       one decision over this roster (read-only)
+#     bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/hooks/session-poker.sh interval   the configured heartbeat interval, seconds
 #
-# WHAT IT IS. The poker is a session-scoped self-wake, not a resident process (spec R1). The
-# doctrine that ARMS it lives in skills/canonical-sdlc/SKILL.md §Dispatch: the orchestrator's
-# own harness self-wake primitive sleeps `interval` seconds and calls `tick`; THIS SCRIPT
-# DECIDES, the harness schedules. `tick` is exactly ONE `verdict` read over the whole roster,
-# plus — for any UNMET row only — a direct roster lookup of that one row's own
-# `duration=`/`launched_at=` fields (verdict's own output carries neither). Never a per-row
-# verdict call, never a second judgment of MET/UNMET/STILL-LIVE: that judgment belongs to
-# `verdict` alone (ownership table, spec §Design) and this script only consumes it.
+# WHAT IT IS. The poker is the decision brain of a session-scoped heartbeat, not a resident
+# process (spec R1). The doctrine that ARMS it lives in skills/canonical-sdlc/SKILL.md
+# §Dispatch, and the mechanism is a SESSION CRON: One clock per run, and only one.
+# Arm it at engagement — never on dispatch, never one per unit — and then
+# `CronDelete` the job at run close.
+# Each tick delivers the patrol prompt, whose FIRST duty is `tick` and whose LAST is to
+# continue the run's actual work rather than report on it; THIS SCRIPT DECIDES, the session
+# cron schedules. (Epic-17 W4 superseded the earlier mechanism, a harness self-wake primitive
+# that slept `interval` seconds between calls; `interval` survives it as the cron's period.)
+# `tick` is exactly ONE `verdict` read over the whole roster, plus — for any UNMET row only —
+# a direct roster lookup of that one row's own `duration=`/`launched_at=` fields (verdict's
+# own output carries neither). Never a per-row verdict call, never a second judgment of
+# MET/UNMET/STILL-LIVE: that judgment belongs to `verdict` alone (ownership table,
+# spec §Design) and this script only consumes it.
 #
 # WHAT IT NEVER DOES. It never stops, kills, arms, or notifies on its own authority. The
-# decision is printed on stdout as ONE machine-readable line, and the caller (the doctrine's
-# self-wake loop) is what turns a NOTIFY line into an actual push. Zero authority, exactly
-# like `verdict` (ADR-003) — this verb cannot even record that it ran.
+# decision is printed on stdout as ONE machine-readable line, and the caller (the patrol
+# prompt the heartbeat delivers) is what turns a NOTIFY line into an actual push. Zero
+# authority, exactly like `verdict` (ADR-003) — this verb cannot even record that it ran.
 #
 # AN ACKED ROW IS CLOSED HERE, exactly as it is for the other three consumers of the
 # verdict line (hooks/landing-gate.sh, hooks/stop-orders.sh, hooks/stop-guard.sh): it is
@@ -81,7 +87,7 @@ usage() {  # [message]
   [ $# -gt 0 ] && die "$1"
   die "Usage:"
   die "  bash ${HOOK_DIR}/session-poker.sh tick       one decision over this session's roster (read-only)"
-  die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured self-wake interval, in seconds"
+  die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured heartbeat interval, in seconds"
   exit 2
 }
 
@@ -165,7 +171,7 @@ parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be 
 # closing ap review A-1: this script used to answer `git rev-parse --show-toplevel`, which
 # names the WORKTREE root. A worktree cwd would then poll a roster file that only ever
 # existed under the MAIN repository, read it as empty, and DISARM — silently and
-# permanently, since DISARM ends the self-wake for the rest of the session (doctrine,
+# permanently, since DISARM ends the heartbeat for the rest of the session (doctrine,
 # skills/canonical-sdlc/SKILL.md §Dispatch). `--git-common-dir` maps a worktree back onto its
 # main repository, so both this script and the roster's writer land on one address space.
 resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default pwd)
@@ -352,13 +358,13 @@ EOF
     # and legitimately has nothing open yet — but the first case is usually the wrong project
     # root having been resolved, and DISARM is silent and terminal for the rest of the
     # session (doctrine, skills/canonical-sdlc/SKILL.md §Dispatch: "DISARM also ends the
-    # self-wake"). Checked only on the TOTAL=0 path: any row at all on the roster proves the
+    # heartbeat"). Checked only on the TOTAL=0 path: any row at all on the roster proves the
     # file exists, so OPEN=0-with-TOTAL>0 can never be the absent-file case.
     if [ "$TOTAL" -eq 0 ] && [ ! -e "$ROSTER_FILE" ]; then
       die "REFUSED — no roster at $ROSTER_FILE; this is not the same as an empty one."
       die "An absent roster usually means the wrong project root was resolved, or nothing has"
       die "been dispatched yet on this session — either way, nothing was read to decide DISARM"
-      die "from, and DISARM ends the self-wake for the rest of this session."
+      die "from, and DISARM ends the heartbeat for the rest of this session."
       exit 2
     fi
 
@@ -368,7 +374,7 @@ EOF
     if [ "$TOTAL" -eq 0 ] || [ "$OPEN" -eq 0 ]; then
       printf '%s|at=%s|session=%s|decision=DISARM|total=%s|open=%s\n' \
         "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN"
-      say "DISARM — no open row on this roster; the self-wake may stop."
+      say "DISARM — no open row on this roster; the heartbeat may stop."
       exit 0
     fi
 
