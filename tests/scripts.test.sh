@@ -665,7 +665,18 @@ expect_eq "no active entry appears in both core and everything profiles" "" "$_o
 echo ""
 echo "=== Section 4: Hook file consistency ==="
 
-# 4a: Every non-test .sh in hooks/ has a matching .test.sh
+# Epic-17 W4 S9 (spec AC-9): hooks/*.test.sh moved to tests/, so hooks/ no longer
+# holds test files at all and tests/ is no longer hook-exclusive — a bare
+# existence scan of tests/*.test.sh can't tell a hook's test apart from an
+# unrelated suite like doctor.test.sh (neither has a hooks/*.sh namesake, for
+# different reasons). 4b's orphan direction (a lingering test for a deleted
+# hook) needs to know WHICH tests/*.test.sh are hook-derived; this manifest is
+# that fact, fixed at the move and re-checked below for drift rather than
+# re-derived from directory placement.
+TESTS_DIR="${REPO}/tests"
+HOOK_TEST_NAMES="agent-context-guard canonical-sdlc-evidence-gate canonical-sdlc-governing-skill context-spend dispatch-preflight execution-recorder farm-out-reminder landing-gate preflight-probe protect-database protect-main session-poker session-sweeper stop-check stop-guard stop-orders"
+
+# 4a: Every non-test .sh in hooks/ has a matching tests/<name>.test.sh
 _hooks_missing_tests=""
 for hook in "${BIONIC_HOOKS_DIR}/"*.sh; do
   [ -f "$hook" ] || continue
@@ -673,24 +684,48 @@ for hook in "${BIONIC_HOOKS_DIR}/"*.sh; do
   if echo "$name" | grep -q '\.test\.sh$'; then
     continue
   fi
-  testfile="${BIONIC_HOOKS_DIR}/${name%.sh}.test.sh"
+  testfile="${TESTS_DIR}/${name%.sh}.test.sh"
   if [ ! -f "$testfile" ]; then
     _hooks_missing_tests="${_hooks_missing_tests}${name} "
   fi
 done
-expect_eq "every hook .sh has a matching .test.sh" "" "$_hooks_missing_tests"
+expect_eq "every hook .sh has a matching tests/*.test.sh" "" "$_hooks_missing_tests"
 
-# 4b: Every .test.sh in hooks/ has a corresponding non-test hook
+# 4b: Every manifested hook test has a corresponding non-test hook (orphan check).
+# The manifest also gets checked for staleness in the other direction — a hook
+# test that exists on disk but fell out of HOOK_TEST_NAMES would silently escape
+# this whole section, so 4b's own no-drift arm below closes that gap.
 _tests_missing_hooks=""
-for test in "${BIONIC_HOOKS_DIR}/"*.test.sh; do
-  [ -f "$test" ] || continue
-  name="$(basename "$test")"
-  hookname="${name%.test.sh}.sh"
-  if [ ! -f "${BIONIC_HOOKS_DIR}/${hookname}" ]; then
-    _tests_missing_hooks="${_tests_missing_hooks}${name} "
+for name in $HOOK_TEST_NAMES; do
+  testfile="${TESTS_DIR}/${name}.test.sh"
+  if [ ! -f "$testfile" ]; then
+    _tests_missing_hooks="${_tests_missing_hooks}${name}.test.sh(manifested-but-absent) "
+    continue
+  fi
+  if [ ! -f "${BIONIC_HOOKS_DIR}/${name}.sh" ]; then
+    _tests_missing_hooks="${_tests_missing_hooks}${name}.test.sh "
   fi
 done
-expect_eq "every .test.sh has a corresponding hook .sh" "" "$_tests_missing_hooks"
+expect_eq "every manifested hook test has a corresponding hook .sh" "" "$_tests_missing_hooks"
+
+# 4b-drift: no test file living alongside the manifested ones LOOKS like a hook
+# test (same basename shape as a real hooks/*.sh) but is missing from the
+# manifest — that would be an orphan 4b can't see. Scoped to names that are
+# currently real hooks/*.sh basenames, so unrelated suites (doctor.test.sh, etc.)
+# never enter this comparison.
+_unmanifested_hook_tests=""
+for hook in "${BIONIC_HOOKS_DIR}/"*.sh; do
+  [ -f "$hook" ] || continue
+  name="$(basename "$hook" .sh)"
+  echo "$name" | grep -q '\.test$' && continue
+  if [ -f "${TESTS_DIR}/${name}.test.sh" ]; then
+    case " $HOOK_TEST_NAMES " in
+      *" $name "*) : ;;
+      *) _unmanifested_hook_tests="${_unmanifested_hook_tests}${name}.test.sh " ;;
+    esac
+  fi
+done
+expect_eq "no hook's test file is missing from HOOK_TEST_NAMES" "" "$_unmanifested_hook_tests"
 
 # 4c: Every hook file referenced inside MANAGED_HOOKS in bootstrap exists in hooks/
 _missing_managed_hooks=""

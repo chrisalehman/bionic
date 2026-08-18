@@ -9,11 +9,11 @@
 #   stdin  keys: session_id, transcript_path, cwd, hook_event_name, stop_hook_active
 #   entry: message.model + message.usage with top-level token fields AND iterations[]
 #
-# Usage: bash hooks/context-spend.test.sh
+# Usage: bash tests/context-spend.test.sh
 
 set -uo pipefail
 
-. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/resolve-roots.sh"
 
 HOOK="${BIONIC_HOOKS_DIR}/context-spend.sh"
 PASS=0; FAIL=0; TOTAL=0

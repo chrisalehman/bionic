@@ -32,14 +32,14 @@
 # observation itself prints. There is exactly ONE writer of this state and this
 # gate is purely its reader.
 #
-# FAIL DIRECTIONS (TDD §7, pinned by hooks/stop-guard.test.sh):
+# FAIL DIRECTIONS (TDD §7, pinned by tests/stop-guard.test.sh):
 #   - the gate is OPEN and SILENT before the active-wave verdict (an
 #     unconfigured machine is not a stop decision);
 #   - the gate is CLOSED and LOUD after it (irreversibility: the ambiguous case
 #     is exactly what the wall exists for).
 #
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
-# [WALL: hooks/stop-guard.test.sh]
+# [WALL: tests/stop-guard.test.sh]
 #
 # Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
 

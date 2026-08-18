@@ -56,7 +56,7 @@
 # wall, and never rostered.
 #
 # Exit code 2 (from the wall behind it) = block the tool call entirely.
-# [WALL: hooks/agent-context-guard.test.sh]
+# [WALL: tests/agent-context-guard.test.sh]
 #
 # Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
 

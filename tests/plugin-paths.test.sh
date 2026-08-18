@@ -132,7 +132,7 @@ check_script_at() {  # <absolute-path> <label>
 # dispatch-preflight, stop-guard, session-sweeper and session-poker; driving the suite found
 # three more scripts printing an installed-path command at RUNTIME — preflight-probe.sh
 # (:413, :456), stop-check.sh (:46) and stop-orders.sh (:72, :74). The gap was invisible from
-# the enumeration because hooks/dispatch-preflight.test.sh asserts on the fix line the GATE
+# the enumeration because tests/dispatch-preflight.test.sh asserts on the fix line the GATE
 # emits, and that line is the PROBE's stderr passed through: the gate's own literal was
 # rewritten and the assertion still passed, because the string was coming from a file nobody
 # had looked at. Globbing is what closes that class — an enumeration can only ever pin what
