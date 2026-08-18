@@ -514,6 +514,51 @@ expect_contains "broken: the half-uninstalled action line is the curl fallback o
 expect_contains "broken: the curl one-liner targets the raw remove.sh URL" \
   "/payload/scripts/remove.sh" "$B"
 
+# R-3.1 — the door's URL is pinned to the shipped script's real location.
+#
+# The constant is a lone string: nothing connects it to the file it serves, so
+# moving or renaming payload/scripts/remove.sh in a later wave breaks the only
+# fix a half-uninstalled machine has, silently and at a distance. The URL is
+# <scheme>://<host>/<owner>/<repo>/<ref>/<repo-relative-path>, so field 7 on is
+# a path this checkout can be asked about directly. The `test -f` is the half
+# that catches a rename nobody thought to mirror here.
+DOOR_URL="$(awk -F'"' '/^BIONIC_REMOVE_RAW_URL=/ { print $2; exit }' "$DOCTOR_SH")"
+DOOR_PATH="$(printf '%s\n' "$DOOR_URL" | cut -d/ -f7-)"
+REMOVE_SH="${REPO}/payload/scripts/remove.sh"
+expect_eq "the door URL's path tail is the shipped remover's repo-relative path" \
+  "${REMOVE_SH#"${REPO}/"}" "$DOOR_PATH"
+expect_true "the path the door URL serves names a file that exists in this checkout" \
+  test -f "${REPO}/${DOOR_PATH}"
+
+# R-3.2 — the one-liner's FAILURE must reach the person who ran it.
+#
+# `<fetch> | bash` gives the pipeline bash's status, not curl's: a fetch that
+# 404s pipes an empty stream into a shell that exits 0, so the only fix a
+# half-uninstalled machine has appears to succeed while doing nothing. Pinning
+# the literal text cannot see this — the spelling that swallows the status and
+# the spelling that reports it both contain "curl -fsSL". So drive it: take the
+# line doctor actually printed, run it with a `curl` that fails the way a 404
+# fails, and require a non-zero status out the other end.
+ONELINER="$(awk '/curl -fsSL/ { sub(/^[[:space:]]+/, ""); print; exit }' "$B_OUT")"
+expect_true "the printed one-liner was extracted" test -n "$ONELINER"
+
+FAILING_CURL_BIN="$TMP/failing-curl-bin"; mkdir -p "$FAILING_CURL_BIN"
+cat > "$FAILING_CURL_BIN/curl" <<'STUB'
+#!/bin/bash
+echo "curl: (56) The requested URL returned error: 404" >&2
+exit 22
+STUB
+chmod +x "$FAILING_CURL_BIN/curl"
+
+ONELINER_RC=0
+PATH="$FAILING_CURL_BIN:$PATH" bash -c "$ONELINER" >/dev/null 2>&1 || ONELINER_RC=$?
+expect_true "the one-liner exits non-zero when the fetch fails (the pipe does not eat it)" \
+  test "$ONELINER_RC" -ne 0
+
+ONELINER_ERR="$(PATH="$FAILING_CURL_BIN:$PATH" bash -c "$ONELINER" 2>&1 >/dev/null)"
+expect_contains "the one-liner lets the transport error reach the user's terminal" \
+  "404" "$ONELINER_ERR"
+
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== Group 5: unknown-valued facts render as unknown, never coerced ==="
