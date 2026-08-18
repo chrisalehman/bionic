@@ -89,21 +89,36 @@ for s in canonical-sdlc-evidence-gate farm-out-reminder stop-guard dispatch-pref
   fi
 done
 
-# ---- the two prose lines this slice deliberately did NOT rewrite ----
+# ---- the two prose lines W1 deliberately did NOT rewrite, converted in W4 S6 ----
 #
-# SKILL.md:497 and :515 hand an OPERATOR (or the model, through the Bash tool) a command to
-# type. They are not hook registrations, so nothing substitutes ${CLAUDE_PLUGIN_ROOT} in
-# them, and the docs do not establish that the variable is exported into a tool shell. They
-# are pinned here as KNOWN-UNCONVERTED so the open question stays visible instead of being
-# quietly absorbed: whoever gives operator commands a plugin-layout spelling must delete
-# these two pins in the same change.
-for pin in 'bash ~/.claude/hooks/session-poker.sh' 'bash ~/.claude/hooks/stop-orders.sh'; do
+# Until S6 these were pinned here as KNOWN-UNCONVERTED, with a standing instruction to
+# delete the pins in whichever change gave operator commands a plugin-layout spelling. AC-8
+# (C-10) is that change: the poker path is now ${CLAUDE_PLUGIN_ROOT}-rooted, matching the
+# spelling W3 already shipped in payload/commands/*.md and in this file's own
+# spawn-worktree.sh sentence. The open question the old pins guarded is NOT closed by the
+# conversion — ${CLAUDE_PLUGIN_ROOT} is measured UNSET in an ad-hoc Bash tool shell
+# (2026-08-18, S6), so these lines resolve only where the harness substitutes the variable,
+# exactly as the /bionic:* commands do. Recording it here rather than in a pin, because the
+# pin's job is to hold the spelling the epic ratified, not to litigate it.
+#
+# The absence half is not enough on its own: deleting the lines outright would satisfy it.
+# So each is pinned at its converted spelling, and both are count-scoped in
+# tests/dispatch-spans.test.sh §5j (two invocations of each script, on two lines that a
+# partial revert could split).
+for pin in 'bash ${CLAUDE_PLUGIN_ROOT}/hooks/session-poker.sh' \
+           'bash ${CLAUDE_PLUGIN_ROOT}/hooks/stop-orders.sh'; do
   if $G -qF -- "$pin" "$SKILL"; then
-    ok "known-unconverted operator command still pinned: ${pin}"
+    ok "operator command carries the plugin-rooted spelling: ${pin}"
   else
-    no "known-unconverted operator command still pinned: ${pin} (if this was converted, delete this pin)"
+    no "operator command carries the plugin-rooted spelling: ${pin}"
   fi
 done
+if $G -qE -- "$FORBIDDEN" "$SKILL"; then
+  no "no installed-path hook literal survives anywhere in SKILL.md"
+  $G -nE -- "$FORBIDDEN" "$SKILL" | sed 's/^/       /'
+else
+  ok "no installed-path hook literal survives anywhere in SKILL.md"
+fi
 
 # ============================================================
 echo ""
@@ -178,11 +193,13 @@ done <<< "$PAYLOAD_SCRIPTS"
 # does not transfer: in an agent role or a skill, a path written in prose IS the instruction,
 # and a reader who follows `bash ~/.claude/hooks/x.sh` on a machine where the payload arrived
 # as a plugin is following it to a file that is not there. So the rule here is stricter than
-# B1's — every occurrence counts — and the only survivors are the two the slice deliberately
-# did NOT convert, pinned by their exact text in section A above. Converting them means
-# deleting the pin there AND the exemption here, in the same change; adding a third one
-# anywhere in the payload fails right here.
-KNOWN_UNCONVERTED='bash ~/\.claude/hooks/session-poker\.sh|bash ~/\.claude/hooks/stop-orders\.sh'
+# B1's — every occurrence counts, with no exemptions at all.
+#
+# W1 carved out two: the poker and stop-orders operator commands in canonical-sdlc/SKILL.md.
+# W4 S6 (AC-8 / C-10) converted both to ${CLAUDE_PLUGIN_ROOT}, so the carve-out is deleted
+# here in the same change that removed its subject — leaving the payload's prose rule
+# absolute. A new installed-path literal anywhere in the payload now fails right here, with
+# nowhere to be excused to.
 PROSE_FILES=$(printf '%s\n' "$PAYLOAD_TEXT" | $G -vE '\.sh$' || true)
 if [ -z "$PROSE_FILES" ]; then
   no "the payload ships at least one prose file to check"
@@ -192,15 +209,15 @@ fi
 PROSE_HITS=""
 while IFS= read -r f; do
   [ -n "$f" ] || continue
-  h=$($G -nE -- "$FORBIDDEN" "$f" | $G -vE -- "$KNOWN_UNCONVERTED" || true)
+  h=$($G -nE -- "$FORBIDDEN" "$f" || true)
   [ -n "$h" ] && PROSE_HITS="${PROSE_HITS}${f#${REPO}/}:
 $(printf '%s\n' "$h" | sed 's/^/       /')
 "
 done <<< "$PROSE_FILES"
 if [ -z "$PROSE_HITS" ]; then
-  ok "payload prose carries no installed-path literal beyond the two pinned operator commands"
+  ok "payload prose carries no installed-path literal at all"
 else
-  no "payload prose carries no installed-path literal beyond the two pinned operator commands"
+  no "payload prose carries no installed-path literal at all"
   printf '%s' "$PROSE_HITS"
 fi
 
