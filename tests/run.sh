@@ -67,6 +67,13 @@ run "scripts.test.sh" bash tests/scripts.test.sh
 run "installer-behavior.test.sh" bash tests/installer-behavior.test.sh
 run "agent-roles.test.sh" bash tests/agent-roles.test.sh
 run "interview-protocol.test.sh" bash tests/interview-protocol.test.sh
+# Cross-FILE proof (epic-17 W4 S7, spec AC-5 / epic AC-11): the terminal-disposition
+# rule's normative literal, pinned byte-identical between SKILL.md's Step 9 and
+# operational-rules.md's close-out section, plus a count-scoped guard against a
+# third, unpinned copy landing under skills/ or agents/. Same class as
+# interview-protocol.test.sh above (a SKILL.md <-> operational-rules.md pin), kept
+# in its own file because it is a distinct ownership-table concept.
+run "close-out.test.sh" bash tests/close-out.test.sh
 run "dispatch-spans.test.sh" bash tests/dispatch-spans.test.sh
 # Cross-COMPONENT proofs (epic-15 W1R slice 4/6). They belong to no single hook,
 # so they live here rather than under hooks/ — which also means they are invisible
