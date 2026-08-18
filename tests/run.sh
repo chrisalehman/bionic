@@ -45,6 +45,10 @@ done
 run "scripts.test.sh" bash tests/scripts.test.sh
 run "installer-behavior.test.sh" bash tests/installer-behavior.test.sh
 run "agent-roles.test.sh" bash tests/agent-roles.test.sh
+# The agent-file render pipeline (epic-17 W4 S2, spec AC-2): agents-src/ blocks + templates
+# + render.sh against the committed finals under agents/. Cross-FILE by nature — it spans a
+# source tree and an output tree — so, like every suite outside hooks/, hand-listed here.
+run "agent-render.test.sh" bash tests/agent-render.test.sh
 run "interview-protocol.test.sh" bash tests/interview-protocol.test.sh
 run "dispatch-spans.test.sh" bash tests/dispatch-spans.test.sh
 # Cross-COMPONENT proofs (epic-15 W1R slice 4/6). They belong to no single hook,
