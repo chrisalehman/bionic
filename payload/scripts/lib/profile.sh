@@ -248,10 +248,30 @@ profile_apply() {  # <rendered-file> <consent-token>
 # Atomic write that preserves the file's trailing-newline shape. The CLI writes
 # canonical JSON with NO trailing newline; a hand-edited file may have one.
 # Reproducing whichever was there is half of what makes the round trip byte-exact.
+#
+# AND THE MODE, which is the other half. `mv` replaces the inode, so without the
+# capture-and-reapply below the file comes back wearing the umask's mode rather
+# than its own — a settings.json the user deliberately kept at 0600 (it routinely
+# holds an `env` block with tokens) would be silently widened to 0644 by an
+# unrelated permission-profile apply.
+#
+# `stat` is spelled both ways because BSD and GNU disagree and neither accepts
+# the other's flag; `chmod --reference` is GNU-only and is not an option. If the
+# file did not exist, or `stat` is not on this machine's PATH at all, `mode` is
+# empty and nothing is chmod'd — the write still lands, which keeps this the same
+# honest degradation the rest of the payload practises rather than a hard new
+# dependency.
+#
+# Byte-identical to remove.sh's `_rm_write` apart from the name, and pinned that
+# way in tests/remove.test.sh — the seam this crosses is the same one the strip
+# program crosses, for the same reason.
 _profile_write() {  # <file> <content> <trailing-newline 0|1>
-  local file="$1" content="$2" nl="$3" tmp="${1}.bionic.tmp"
+  local file="$1" content="$2" nl="$3" tmp="${1}.bionic.tmp" mode
+  mode="$(stat -f '%Lp' "$file" 2>/dev/null || stat -c '%a' "$file" 2>/dev/null)"
   if [ "$nl" = "1" ]; then printf '%s\n' "$content" > "$tmp"; else printf '%s' "$content" > "$tmp"; fi
-  mv "$tmp" "$file"
+  mv "$tmp" "$file" || return 1
+  [ -n "$mode" ] && chmod "$mode" "$file"
+  return 0
 }
 
 # ─── Strip ───────────────────────────────────────────────────────────────────

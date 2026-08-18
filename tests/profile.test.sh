@@ -74,7 +74,7 @@ mkdir -p "$TMP/home"
 # REPLACED, never prefixed, so nothing on this machine's real PATH can be
 # reached by accident.
 BASE_BIN="$TMP/base-bin"; mkdir -p "$BASE_BIN"
-for real in bash sh env cat grep sed awk mkdir rm cp mv chmod ls tr head tail sort uniq wc diff jq python3; do
+for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat ls tr head tail sort uniq wc diff jq python3; do
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BASE_BIN}/${real}" 2>/dev/null
 done
 # The same bin dir minus jq — the honest-degradation arms run against this one.
@@ -597,7 +597,35 @@ expect_true "and none of them left a temp file behind" \
   bash -c '[ "$(ls -1 "$1" | wc -l | tr -d " ")" = "1" ]' _ "$FP_DIR"
 
 echo ""
-echo "=== Group 14: mutation and restore — these assertions can go red ==="
+echo "=== Group 14: the write preserves the settings file's own mode ==="
+#
+# `mv` replaces the inode, so a tmp+mv writer hands the file whatever the
+# umask says rather than the mode it had. ~/.claude/settings.json routinely
+# carries an `env` block with tokens, so a machine that chose 0600 for it must
+# still have 0600 after /bionic:setup applies the profile — silently widening
+# it to 0644 is a machine side effect no other group here measures.
+#
+# Both mutating paths are asserted: apply and strip reach _profile_write
+# independently, and a fix applied to one call site would not cover the other.
+
+file_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
+
+S_MODE="$TMP/s-mode.json"; cp "$SET_REAL" "$S_MODE"; chmod 600 "$S_MODE"
+expect_eq "the fixture really starts at 0600 (the arm is not vacuous)" "600" "$(file_mode "$S_MODE")"
+prof_run BIONIC_SETTINGS_FILE="$S_MODE" -- profile_apply "$RENDERED" --consented >/dev/null 2>&1
+expect_eq "profile_apply leaves a 0600 settings file at 0600" "600" "$(file_mode "$S_MODE")"
+prof_run BIONIC_SETTINGS_FILE="$S_MODE" -- profile_strip >/dev/null 2>&1
+expect_eq "profile_strip leaves it at 0600 too" "600" "$(file_mode "$S_MODE")"
+
+# The other direction, so neither arm can pass by hard-coding one mode: a file
+# the machine deliberately left world-readable keeps THAT mode, and a writer
+# that narrowed every file to 0600 would fail here.
+S_MODE_644="$TMP/s-mode-644.json"; cp "$SET_REAL" "$S_MODE_644"; chmod 644 "$S_MODE_644"
+prof_run BIONIC_SETTINGS_FILE="$S_MODE_644" -- profile_apply "$RENDERED" --consented >/dev/null 2>&1
+expect_eq "a 0644 settings file is not narrowed either" "644" "$(file_mode "$S_MODE_644")"
+
+echo ""
+echo "=== Group 15: mutation and restore — these assertions can go red ==="
 #
 # Each arm doctors a COPY, re-runs the assertion against the copy, and records
 # that the doctored build failed. The production files are never touched.
@@ -655,7 +683,7 @@ expect_true "MUTATION 4: a greedy strip loses the machine's own rules (assertion
   bash -c '[ "${1:-0}" != "3" ]' _ "$M4_SURVIVORS"
 
 echo ""
-echo "=== Group 15: the suite is registered in tests/run.sh by name ==="
+echo "=== Group 16: the suite is registered in tests/run.sh by name ==="
 #
 # tests/*.test.sh is NOT globbed by the runner — an unregistered suite is a
 # silent false green (tests/run.sh's own header records the last time that

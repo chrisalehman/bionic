@@ -86,7 +86,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 # ---------------------------------------------------------------------------
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
-for real in bash sh env cat grep sed awk mkdir rm cp mv chmod ls tr head tail sort uniq wc \
+for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat ls tr head tail sort uniq wc \
             jq mktemp find xargs shasum uname date touch diff printf true false; do
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BIN}/${real}" 2>/dev/null
 done

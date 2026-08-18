@@ -87,7 +87,7 @@ make_stub() {  # <bindir> <name> [body]
 # REPLACED, never prefixed, so a real brew/npm/claude can never be reached.
 BASE_BIN="$TMP/base-bin"
 mkdir -p "$BASE_BIN"
-for real in bash sh env cat grep sed awk mkdir rm cp mv chmod ls tr head tail sort uniq wc find jq shasum date; do
+for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat ls tr head tail sort uniq wc find jq shasum date; do
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BASE_BIN}/${real}" 2>/dev/null
 done
 
@@ -442,6 +442,59 @@ expect_true "legacy-channel hooks: the result is still valid JSON" jq -e . "$ARM
 expect_eq "legacy-channel hooks: detect.sh now counts zero" "env:legacy-channel-hooks count=0" \
   "$(BIONIC_SETTINGS_FILE="$ARM/home/.claude/settings.json" bash -c '. "$1"; detect_legacy_channel_hooks' _ "$DETECT_SH")"
 
+# THE MODE, which no other assertion here measures. Every settings writer in the
+# payload is `write tmp` + `mv`, and `mv` replaces the inode: the file comes back
+# wearing the umask's mode rather than its own. ~/.claude/settings.json routinely
+# carries an `env` block with tokens, so a machine that chose 0600 for it must
+# still have 0600 after /bionic:remove rewrites it — silently widening a
+# credential-bearing file to 0644 is a machine side effect, not a formatting
+# detail. Both writers that touch this file are asserted: remove.sh's own
+# _rm_write (the standalone door) and hooks_strip_legacy_channel (the payload
+# door setup calls).
+#
+# Both directions are asserted for each, so neither arm can pass by pinning one
+# constant: a writer that narrowed every file to 0600 fails the 0644 arm.
+
+file_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
+
+ARM="$(new_arm hook-strip-mode-600)"
+plant_legacy_channel_hooks "$ARM"
+plant_claude_stub "$ARM" no no
+chmod 600 "$ARM/home/.claude/settings.json"
+expect_eq "fixture: settings.json really starts at 0600 (the arm is not vacuous)" \
+  "600" "$(file_mode "$ARM/home/.claude/settings.json")"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+expect_not_contains "mode arm: remove.sh really did rewrite the file" \
+  ".claude/hooks/protect-main.sh" "$(cat "$ARM/home/.claude/settings.json")"
+expect_eq "remove.sh's rewrite leaves a 0600 settings.json at 0600" \
+  "600" "$(file_mode "$ARM/home/.claude/settings.json")"
+
+ARM="$(new_arm hook-strip-mode-644)"
+plant_legacy_channel_hooks "$ARM"
+plant_claude_stub "$ARM" no no
+chmod 644 "$ARM/home/.claude/settings.json"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+expect_eq "remove.sh does not narrow a 0644 settings.json either" \
+  "644" "$(file_mode "$ARM/home/.claude/settings.json")"
+
+ARM="$(new_arm lib-strip-mode)"
+LIB_MODE_SETTINGS="$ARM/home/.claude/settings.json"
+plant_legacy_channel_hooks "$ARM"
+chmod 600 "$LIB_MODE_SETTINGS"
+expect_true "hooks_strip_legacy_channel rewrote the 0600 fixture" \
+  bash -c '. "$1"; hooks_strip_legacy_channel "$2"' _ "$HOOKS_SH" "$LIB_MODE_SETTINGS"
+expect_not_contains "mode arm: the library really did rewrite the file" \
+  ".claude/hooks/protect-main.sh" "$(cat "$LIB_MODE_SETTINGS")"
+expect_eq "hooks_strip_legacy_channel leaves a 0600 settings.json at 0600" \
+  "600" "$(file_mode "$LIB_MODE_SETTINGS")"
+
+plant_legacy_channel_hooks "$ARM"
+chmod 644 "$LIB_MODE_SETTINGS"
+expect_true "hooks_strip_legacy_channel rewrote the 0644 fixture too" \
+  bash -c '. "$1"; hooks_strip_legacy_channel "$2"' _ "$HOOKS_SH" "$LIB_MODE_SETTINGS"
+expect_eq "hooks_strip_legacy_channel does not narrow a 0644 file" \
+  "644" "$(file_mode "$LIB_MODE_SETTINGS")"
+
 echo ""
 echo "=== Group 8: the permission marker block (profile_strip semantics) ==="
 
@@ -500,6 +553,23 @@ expect_eq "hooks.sh and remove.sh's standalone copy are the same strip program" 
   "$LIB_STRIP_PROGRAM" "$RM_STRIP_PROGRAM"
 expect_true "the extracted program is the real one (it carries the predicate)" \
   bash -c 'case "$1" in *"<PREDICATE>"*) exit 0 ;; esac; exit 1' _ "$LIB_STRIP_PROGRAM"
+
+# C-1's corollary. The settings WRITER is the second thing duplicated across the
+# payload/standalone seam — profile.sh's `_profile_write` and remove.sh's
+# `_rm_write` are the same function under two names, and the mode-preservation
+# fix above had to be made in both. D-1's argument applies unchanged: pinning the
+# behaviour in one file and not the other is how the two drift. The only
+# legitimate difference is the function's NAME, so that is what gets neutralised.
+sh_function_body() {  # <file> <fn-name>
+  sed -n "/^$2() {/,/^}/p" "$1" | sed -e '1s/^[A-Za-z_][A-Za-z0-9_]*()/<WRITER>()/'
+}
+PROFILE_WRITER="$(sh_function_body "$PROFILE_SH" _profile_write)"
+RM_WRITER="$(sh_function_body "$REMOVE_SH" _rm_write)"
+expect_true "profile.sh's writer was extracted (the pin is not vacuous)" test -n "$PROFILE_WRITER"
+expect_true "remove.sh's writer was extracted" test -n "$RM_WRITER"
+expect_eq "profile.sh and remove.sh carry the same settings writer" "$PROFILE_WRITER" "$RM_WRITER"
+expect_true "the extracted writer is the real one (it carries the mode capture)" \
+  bash -c 'case "$1" in *"stat -f"*) exit 0 ;; esac; exit 1' _ "$PROFILE_WRITER"
 
 # F-S4. The consent RULE, pinned across the payload/standalone seam.
 #
