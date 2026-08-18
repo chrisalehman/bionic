@@ -868,7 +868,77 @@ expect_eq "the shipped plugin.json and marketplace.json are byte-identical to be
   "$MANIFEST_CKSUM_BEFORE" "$(shasum "$PLUGIN_JSON" "$MARKETPLACE_JSON" 2>/dev/null)"
 
 echo ""
-echo "=== Group 20: the suite is registered in tests/run.sh by name ==="
+echo "=== Group 20: the sha ACTUATES the version the constraint JUDGES (C-4) ==="
+#
+# marketplace.json's `sha` and the table's version constraint were treated as
+# answering different questions on different clocks. They do not. The sha is
+# HONOURED by the CLI — measured, not assumed: an isolated-config install of a
+# marketplace entry pinned to superpowers v6.2.0 (3dcbd5c…) landed 6.2.0 and not
+# HEAD's 6.3.0 (record/epic-17-w3/critic-report.md, C-3). So the sha DETERMINES
+# the version that arrives through bionic's marketplace, and the table's
+# constraint JUDGES that same version, and doctor renders the verdict. They are
+# an actuator and a judge on one quantity, and nothing joined them: a future sha
+# bump could ship a dependency that bionic's own doctor immediately reports as
+# violating bionic's own constraint, with this suite green.
+#
+# WHAT THIS PIN IS, HONESTLY. It is a TRIPWIRE, not a resolver. Resolving a sha
+# to a version means reaching the network, which this suite must not do, so the
+# known pairs live below as fixture data with their provenance. The pin has two
+# halves and the first is what does the work: every sha in marketplace.json must
+# appear in the table. Bump a sha and the fixture goes stale, which fails, which
+# forces a human to re-derive the pair — and re-deriving it is what runs the
+# constraint check on the new version. The tripwire cannot catch a bump; it can
+# only make one impossible to land silently.
+#
+# PROVENANCE of each pair, from the critic's measurements:
+#   b36e082 -> superpowers 6.3.0   `git ls-remote https://github.com/obra/superpowers.git HEAD`
+#                                  + cache path ~/.claude/plugins/cache/bionic/superpowers/6.3.0
+#   df1edb2 -> agent-skills 0.6.7  `git ls-remote https://github.com/addyosmani/agent-skills.git HEAD`
+#                                  + cache path ~/.claude/plugins/cache/bionic/agent-skills/0.6.7
+#   3dcbd5c -> superpowers 6.2.0   the discriminating install under an isolated
+#                                  CLAUDE_CONFIG_DIR; installed_plugins.json read back
+#                                  {"version":"6.2.0","gitCommitSha":"3dcbd5c…"}
+SHA_VERSION_PAIRS='superpowers|b36e0829c6d0140e93cfef2ca599b1b07d4a7797|6.3.0
+agent-skills|df1edb2e05487d0aa6d93c747141e0aed1187f25|0.6.7
+superpowers|3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9|6.2.0'
+
+sha_to_version() {  # <plugin> <sha> -> the known version, or empty
+  local want="$1|$2" row
+  while IFS= read -r row; do
+    case "$row" in "${want}|"*) printf '%s' "${row##*|}"; return 0 ;; esac
+  done <<< "$SHA_VERSION_PAIRS"
+  return 1
+}
+
+while IFS= read -r dep_name; do
+  [ -n "$dep_name" ] || continue
+  MKT_SHA="$(jq -r --arg n "$dep_name" \
+    '[.plugins[] | select(.name == $n) | .source.sha // ""] | first // ""' "$MARKETPLACE_JSON")"
+  KNOWN_VERSION="$(sha_to_version "$dep_name" "$MKT_SHA" || true)"
+  DEP_CONSTRAINT="$(deps_run -- dep_field "$dep_name" constraint)"
+
+  expect_true "${dep_name}: marketplace.json's sha is one this suite has a version for" \
+    test -n "$KNOWN_VERSION"
+  expect_eq "${dep_name}: the version that sha installs satisfies the table's ${DEP_CONSTRAINT}" \
+    "ok" "$(deps_run -- dep_constraint_verdict "$DEP_CONSTRAINT" "${KNOWN_VERSION:-0.0.0}")"
+done <<< "$(deps_run -- dep_names_lane 3a)"
+
+# The judge is live, not decorative: the third fixture pair is a REAL sha that
+# installs a version the table would reject. Without this arm, a pair table
+# whose versions all happened to satisfy everything would look identical to one
+# that was never checked.
+expect_eq "a sha that installs superpowers 6.2.0 would be caught (the check discriminates)" \
+  "violation" \
+  "$(deps_run -- dep_constraint_verdict "$(deps_run -- dep_field superpowers constraint)" \
+      "$(sha_to_version superpowers 3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9)")"
+
+# And the first half is non-vacuous: an unknown sha must fail the lookup rather
+# than fall through to some default.
+expect_false "an unrecorded sha has no version, so a bump cannot pass silently" \
+  sha_to_version superpowers 0000000000000000000000000000000000000000
+
+echo ""
+echo "=== Group 21: the suite is registered in tests/run.sh by name ==="
 #
 # tests/*.test.sh is NOT globbed by the runner — an unregistered suite is a
 # silent false green (tests/run.sh:39-42 records the last time that happened).
