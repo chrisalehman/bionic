@@ -407,7 +407,7 @@ section "Section 5: the pinned root — a worktree cwd answers for the MAIN repo
 # root, not the repository resolve_project_root maps onto (dispatch-preflight.sh's own
 # convention, epic-16 w2 Step-6 remediation R3). A roster written at the main root then
 # reads as an empty roster from inside the worktree, and DISARM is terminal by doctrine
-# (skills/canonical-sdlc/SKILL.md §Dispatch: "DISARM also ends the self-wake") — one tick
+# (skills/canonical-sdlc/SKILL.md §Dispatch: "DISARM also ends the heartbeat") — one tick
 # taken from a worktree cwd would end supervision for the rest of the session while real
 # work is still open.
 

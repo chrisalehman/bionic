@@ -12,20 +12,30 @@ Anchors for the recurring traps when changing hooks in `bionic/hooks/`. Migrated
 
 > **STALENESS NOTICE (self-retiring, ADR-003 pattern — see
 > `.bionic/docs/adrs/epic-17-plugin-conversion/adr-003-self-retiring-transitional-tests.md`
-> for the precedent this follows).** This section's registration mechanics
-> (`MANAGED_HOOKS`, `tests/run.sh`'s `hooks/*.test.sh` glob-pick) describe the bootstrap-era
-> hook-install path. **Retirement trigger: W5's deletion of `claude-bootstrap.sh`.** When
-> that lands, this section either deletes or gets rewritten for the plugin-era
-> `hooks/hooks.json` registration path (already live since W3) — the rest of this file
-> (false-positive traps, MCP dependency traps, hook-writing discipline below) is NOT
-> bootstrap-era and survives untouched. Added epic-17 W4 S4, 2026-08-18.
+> for the precedent this follows).** One clause of this section is bootstrap-era: the
+> `MANAGED_HOOKS` array, which lives in `claude-bootstrap.sh` and describes how a hook gets
+> installed into `~/.claude/hooks/`. **Retirement trigger: W5's deletion of
+> `claude-bootstrap.sh`.** When that lands, the `MANAGED_HOOKS` entry drops out of the
+> registration list below and the plugin-era `hooks/hooks.json` path (live since W3) is the
+> whole story. Everything else here — the run-line requirement, the test pairing, and the
+> rest of this file (false-positive traps, MCP dependency traps, hook-writing discipline) —
+> is NOT bootstrap-era and survives untouched. Added epic-17 W4 S4, 2026-08-18; re-scoped
+> W4 remediation fold after the glob claim below was corrected.
 
 - **STALE-CORRECTED 2026-07-20 (wave-02): there is NO CI — `.github/workflows/` does not
   exist** (CI excised 2026-06-27, "no CI by design"; the old file-listed ci.yml rule is dead).
-  Registration coverage for a new hook is structural: `tests/run.sh` glob-picks
-  `hooks/*.test.sh` automatically, and `tests/scripts.test.sh` 4a/4b/4c enforce hook↔test
-  pairing + `MANAGED_HOOKS` existence. Adding a hook = source file + `.test.sh` sibling +
-  `MANAGED_HOOKS` entry; nothing else to register.
+  *(Corrected again 2026-08-18, epic-17 W4: the glob this bullet described is gone. S9 moved
+  the hook tests out of `hooks/` into `tests/` and retired the `hooks/*.test.sh` glob-pick;
+  `tests/run.sh` now hand-lists all 42 suites by name and discovers nothing.)* Registration
+  coverage for a new hook is partly structural and partly manual. Structural:
+  `tests/scripts.test.sh` 4a/4b/4c enforce hook↔test pairing and `MANAGED_HOOKS` existence.
+  Manual, and enforced by nothing: the suite's own `run` line in `tests/run.sh`. **Adding a
+  hook = source file + `.test.sh` sibling + `MANAGED_HOOKS` entry + a `run "<name>.test.sh"`
+  line in `tests/run.sh`.** Omit that last one and 4a still passes — the pairing exists — but
+  the suite never executes and the gate stays green over nothing. Several suites defend
+  themselves by grepping `tests/run.sh` for their own `run` line as an assertion
+  (`tests/doctor.test.sh:907` is the pattern to copy); no arm checks the set as a whole, so
+  a new suite that skips both the `run` line and the self-check is invisible.
 
 - **Architecture diagram (`architecture.excalidraw`) is manually authored and needs
   regeneration for install-layer changes** (new hooks, new install types, new managed files).

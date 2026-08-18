@@ -93,20 +93,26 @@ done
 #
 # Until S6 these were pinned here as KNOWN-UNCONVERTED, with a standing instruction to
 # delete the pins in whichever change gave operator commands a plugin-layout spelling. AC-8
-# (C-10) is that change: the poker path is now ${CLAUDE_PLUGIN_ROOT}-rooted, matching the
+# (C-10) is that change: the poker path became ${CLAUDE_PLUGIN_ROOT}-rooted, matching the
 # spelling W3 already shipped in payload/commands/*.md and in this file's own
-# spawn-worktree.sh sentence. The open question the old pins guarded is NOT closed by the
-# conversion — ${CLAUDE_PLUGIN_ROOT} is measured UNSET in an ad-hoc Bash tool shell
-# (2026-08-18, S6), so these lines resolve only where the harness substitutes the variable,
-# exactly as the /bionic:* commands do. Recording it here rather than in a pin, because the
-# pin's job is to hold the spelling the epic ratified, not to litigate it.
+# spawn-worktree.sh sentence.
+#
+# The open question C-10 left behind is now CLOSED, and closing it moved this pin (W4
+# remediation fold, review F-1). ${CLAUDE_PLUGIN_ROOT} is measured UNSET in an ad-hoc Bash
+# tool shell, so the bare form resolved only where the harness substitutes the variable —
+# and unlike the /bionic:* commands, these four are commands a MODEL types into its own
+# shell, the patrol prompt's first duty on every tick among them. Bare, they exited 127.
+# The spelling is therefore ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}: still plugin-rooted where
+# the CLI expands it, and resolving to the installed path where a shell does. That is the
+# payload's own established fallback idiom, not a third form.
 #
 # The absence half is not enough on its own: deleting the lines outright would satisfy it.
 # So each is pinned at its converted spelling, and both are count-scoped in
 # tests/dispatch-spans.test.sh §5j (two invocations of each script, on two lines that a
-# partial revert could split).
-for pin in 'bash ${CLAUDE_PLUGIN_ROOT}/hooks/session-poker.sh' \
-           'bash ${CLAUDE_PLUGIN_ROOT}/hooks/stop-orders.sh'; do
+# partial revert could split) — which also pins the bare form's ABSENCE, so a revert of
+# this spelling cannot pass by satisfying an older pin somewhere else.
+for pin in 'bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/hooks/session-poker.sh' \
+           'bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/hooks/stop-orders.sh'; do
   if $G -qF -- "$pin" "$SKILL"; then
     ok "operator command carries the plugin-rooted spelling: ${pin}"
   else
