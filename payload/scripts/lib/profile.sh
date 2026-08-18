@@ -351,8 +351,15 @@ profile_diff() {  # <template-path> <plugin-root>
 # detect.sh owns (the legacy rc block, stale managed-hook entries, the
 # todo-tools export). The permission marker block is the fourth piece of
 # footprint and it is this library's fact, which is why this function wears
-# detect.sh's name and line shape: a caller joining the disjunction reads
-# `applied=` exactly as it reads `present=`.
+# detect.sh's name and line shape: the disjunction reads `applied=` exactly as
+# it reads `present=`.
+#
+# The join is real and it lives THERE, not here: detect_half_uninstalled tests
+# `declare -F detect_profile_state` and consults this function when the caller
+# has loaded us. Doctor sources both libraries, so the fourth term is live on
+# every door a user actually reaches; detect.sh sourced alone keeps its three.
+# Nothing in this file may assume it is the one being called — this function is
+# a fact, and who reads it is the reader's business.
 #
 # Presence and version are read TEXTUALLY, so they survive a machine with no
 # `jq` — the state where the question matters most.
