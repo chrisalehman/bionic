@@ -50,6 +50,7 @@ REMOVE_MD="${REPO}/payload/commands/remove.md"
 PROFILE_SH="${REPO}/payload/scripts/lib/profile.sh"
 DETECT_SH="${REPO}/payload/scripts/lib/detect.sh"
 HOOKS_SH="${REPO}/payload/scripts/lib/hooks.sh"
+DEPS_SH="${REPO}/payload/scripts/lib/deps.sh"
 TEMPLATE="${REPO}/payload/permissions/profile.template.json"
 
 PASS=0; FAIL=0; TOTAL=0
@@ -499,6 +500,25 @@ expect_eq "hooks.sh and remove.sh's standalone copy are the same strip program" 
   "$LIB_STRIP_PROGRAM" "$RM_STRIP_PROGRAM"
 expect_true "the extracted program is the real one (it carries the predicate)" \
   bash -c 'case "$1" in *"<PREDICATE>"*) exit 0 ;; esac; exit 1' _ "$LIB_STRIP_PROGRAM"
+
+# F-S4. The consent RULE, pinned across the payload/standalone seam.
+#
+# remove.sh's standalone door reimplements the prompt as `_rm_consent`, because
+# on the machine that door exists for, deps.sh is gone. Both gates are exercised
+# — Group 15's mutation 3 here, setup.test.sh's all-decline arms there — but
+# nothing asserted the two obey the SAME rule, so an edit to one was invisible
+# to the other. The rule has two halves and both are load-bearing: only an
+# explicit yes proceeds, and EOF on stdin declines (the fail-closed direction,
+# which is what makes an unattended run safe).
+for consent_rule in \
+  'IFS= read -r answer || { echo ""; return 1; }' \
+  'case "$answer" in y|Y|yes|YES|Yes) return 0 ;; *) return 1 ;; esac'
+do
+  expect_true "remove.sh's _rm_consent carries the rule verbatim: ${consent_rule}" \
+    bash -c 'grep -qF "$1" "$2"' _ "$consent_rule" "$REMOVE_SH"
+  expect_true "deps.sh's _dep_consent carries it too (the pin has two ends): ${consent_rule}" \
+    bash -c 'grep -qF "$1" "$2"' _ "$consent_rule" "$DEPS_SH"
+done
 
 echo ""
 echo "=== Group 9: payload mode and standalone mode agree on the profile strip ==="
