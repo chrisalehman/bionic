@@ -459,8 +459,6 @@ Atomic, one task. Merge the wave into the declared integration branch (local mer
 
 ### Step 9 — Close-out
 
-Deploy per `deploy_target`, verify at the deployed surface, and monitor at least one cycle — `n/a:` only when `deploy_target: none` (the Evidence shapes table below names the three keys).
-
 **Close-out is an institution, not a courtesy.** Every finding this run's rigor machinery surfaced — walk, matrix discharge, auditor, critic — gets exactly one terminal disposition. "Continuation candidate" is abolished; nothing leaves this step homeless.
 
 <!-- TERMDISP-BEGIN -->
@@ -482,6 +480,8 @@ Deploy per `deploy_target`, verify at the deployed surface, and monitor at least
 <!-- TERMDISP-END -->
 
 The vehicle is a single-turn close-out report, sent to the user at Step 9 and never re-run as ceremony: plain English, at the altitude of decisions rather than of code, covering ten parts — goal, accomplished, deferred-with-dispositions (each finding's DO-NOW / ACCEPT-CLOSED / PROMOTE named), special attention, material risks, challenges, decisions, success/failure verdict, learnings, next. Authoring detail per part and the anti-ceremony bound live in `operational-rules.md`. Write `continuation.md` (§Handoff above) alongside it — the report is what the user reads; the file is what the next wave opens.
+
+Where `deploy_target` names a live surface, the release lands and is watched for one cycle before the report claims done; the Evidence shapes table below names the three keys that record it, and `n/a:` applies only when `deploy_target: none`.
 
 ## Evidence shapes
 
