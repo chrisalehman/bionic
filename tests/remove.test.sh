@@ -163,23 +163,37 @@ plant_legacy_channel_hooks() {  # <arm>
 JSON
 }
 
-# The rendered permission block, applied exactly as profile.sh would apply it,
-# plus one accretion rule outside the block that must survive.
-plant_profile_block() {  # <arm>
+# The rendered permission block, applied exactly as profile.sh would apply it.
+#
+# TWO SHAPES, because the strip has two branches an accretion rule hides. With a
+# rule outside the block, removing the block leaves `permissions.allow`
+# non-empty and the container-collapse steps never run. With the block as the
+# ONLY allow entry, the array empties (`del(.permissions.allow)`) and then the
+# object does (`del(.permissions)`) — the branches that decide whether a cleaned
+# settings file is `{}`-littered or tidy. Mode `block-only` reaches them; the
+# default keeps the accretion rule and is what every earlier arm asserts on.
+plant_profile_block() {  # <arm> [with-accretion|block-only]
   # One `local` per line: `local a="$1" b="$a/x"` reads the OLD $a, which under
   # `set -u` is an unbound-variable abort (the trap the S8 brief names).
   local arm="$1"
+  local mode="${2:-with-accretion}"
   local rendered="${arm}/rendered.json"
   BIONIC_PROFILE_TEMPLATE="$TEMPLATE" \
   BIONIC_SETTINGS_FILE="$arm/home/.claude/settings.json" \
     bash -c '. "$1"; render_profile "$2" "$3" > "$4"' _ \
       "$PROFILE_SH" "$TEMPLATE" "/fixture/plugin/root" "$rendered"
-  # An accretion rule the machine owns, planted BEFORE the block goes in.
-  if [ -f "$arm/home/.claude/settings.json" ]; then
-    jq '.permissions.allow = ((.permissions.allow // []) + ["Bash(echo the-machines-own-rule)"])' \
-      "$arm/home/.claude/settings.json" > "$arm/tmp.json" && mv "$arm/tmp.json" "$arm/home/.claude/settings.json"
+  if [ "$mode" = "block-only" ]; then
+    # A settings file with a key that is not permissions, so the arm proves
+    # `.permissions` is deleted rather than the whole file being emptied.
+    printf '%s' '{"model":"opus"}' > "$arm/home/.claude/settings.json"
   else
-    printf '%s' '{"permissions":{"allow":["Bash(echo the-machines-own-rule)"]}}' > "$arm/home/.claude/settings.json"
+    # An accretion rule the machine owns, planted BEFORE the block goes in.
+    if [ -f "$arm/home/.claude/settings.json" ]; then
+      jq '.permissions.allow = ((.permissions.allow // []) + ["Bash(echo the-machines-own-rule)"])' \
+        "$arm/home/.claude/settings.json" > "$arm/tmp.json" && mv "$arm/tmp.json" "$arm/home/.claude/settings.json"
+    else
+      printf '%s' '{"permissions":{"allow":["Bash(echo the-machines-own-rule)"]}}' > "$arm/home/.claude/settings.json"
+    fi
   fi
   BIONIC_SETTINGS_FILE="$arm/home/.claude/settings.json" \
     bash -c '. "$1"; profile_apply "$2" --consented' _ "$PROFILE_SH" "$rendered" >/dev/null 2>&1
@@ -509,6 +523,29 @@ OUT_S="$(run_remove "$STANDALONE_DIR/remove.sh" "$ARM_S" "$ALL_YES")"
 expect_eq "payload-mode strip and standalone-mode strip produce byte-identical settings" \
   "$(shasum < "$ARM_P/home/.claude/settings.json")" "$(shasum < "$ARM_S/home/.claude/settings.json")"
 
+# D-3(a). The arm above is a single fixture, and its accretion rule keeps
+# `permissions.allow` non-empty after the block comes out — so the two
+# container-collapse branches never execute and the differential says nothing
+# about them. This second arm plants the block as the ONLY allow entry, which
+# is the ordinary state of a machine that never added a rule of its own.
+ARM_P2="$(new_arm strip-payload-blockonly)"
+plant_claude_stub "$ARM_P2" no no; plant_profile_block "$ARM_P2" block-only
+ARM_S2="$(new_arm strip-standalone-blockonly)"
+plant_claude_stub "$ARM_S2" no no; plant_profile_block "$ARM_S2" block-only
+expect_eq "block-only fixture parity: both arms start byte-identical" \
+  "$(shasum < "$ARM_P2/home/.claude/settings.json")" "$(shasum < "$ARM_S2/home/.claude/settings.json")"
+
+run_remove "$REMOVE_SH" "$ARM_P2" "$ALL_YES" >/dev/null 2>&1
+run_remove "$STANDALONE_DIR/remove.sh" "$ARM_S2" "$ALL_YES" >/dev/null 2>&1
+expect_eq "block-only: payload and standalone strips still produce byte-identical settings" \
+  "$(shasum < "$ARM_P2/home/.claude/settings.json")" "$(shasum < "$ARM_S2/home/.claude/settings.json")"
+# And the collapse actually happened — otherwise the arm proves only that two
+# implementations agree on doing nothing.
+P2_TEXT="$(cat "$ARM_P2/home/.claude/settings.json")"
+expect_not_contains "block-only: the emptied permissions object is deleted, not left as {}" \
+  '"permissions"' "$P2_TEXT"
+expect_contains "block-only: the unrelated settings key survives" '"model"' "$P2_TEXT"
+
 echo ""
 echo "=== Group 10: the STANDALONE door (no payload libraries anywhere) ==="
 
@@ -721,6 +758,7 @@ echo "=== Group 15: mutation-and-restore — the checks discriminate ==="
 # production files. The production files are never written.
 
 MUT="$TMP/mutants"; mkdir -p "$MUT"
+REMOVE_SH_CKSUM_BEFORE="$(shasum < "$REMOVE_SH")"
 
 # Mutation 1: a remove.sh that ignores the never-list and deletes .bionic.
 sed 's|^# ─── Item: the shell rc|rm -rf "${HOME}/.bionic"\n# ─── Item: the shell rc|' "$REMOVE_SH" > "$MUT/remove-nukes-bionic.sh"
@@ -762,8 +800,39 @@ else
   no "MUTANT (consent always yes): mutation did not apply — _rm_consent was renamed"
 fi
 
+# Mutation 4: perturb the INLINE profile-strip jq itself. The three mutations
+# above cover the never-list, the wrapper rule and the consent gate; none
+# touched RM_PROFILE_STRIP_JQ, so Group 9's differential — the only thing
+# standing between remove.sh's standalone copy and profile.sh's original — had
+# never been shown able to fail. Dropping the container-collapse step is the
+# smallest edit that changes the OUTPUT rather than crashing the program, and
+# it is invisible on a fixture carrying an accretion rule, which is why this
+# runs on the block-only shape.
+sed 's|^    then del(\.permissions) else \. end$|    then . else . end|' "$REMOVE_SH" > "$MUT/remove-weak-strip.sh"
+if [ "$(shasum < "$MUT/remove-weak-strip.sh")" != "$(shasum < "$REMOVE_SH")" ]; then
+  ARM_MP="$(new_arm mutant-strip-payload)"
+  plant_claude_stub "$ARM_MP" no no; plant_profile_block "$ARM_MP" block-only
+  ARM_MS="$(new_arm mutant-strip-standalone)"
+  plant_claude_stub "$ARM_MS" no no; plant_profile_block "$ARM_MS" block-only
+  MUT_STANDALONE="$TMP/standalone-mutant"; mkdir -p "$MUT_STANDALONE"
+  cp "$MUT/remove-weak-strip.sh" "$MUT_STANDALONE/remove.sh"
+  run_remove "$REMOVE_SH" "$ARM_MP" "$ALL_YES" >/dev/null 2>&1
+  run_remove "$MUT_STANDALONE/remove.sh" "$ARM_MS" "$ALL_YES" >/dev/null 2>&1
+  if [ "$(shasum < "$ARM_MP/home/.claude/settings.json")" = "$(shasum < "$ARM_MS/home/.claude/settings.json")" ]; then
+    no "MUTANT (weakened profile strip): Group 9's differential failed to discriminate"
+  else
+    ok "MUTANT (weakened profile strip): Group 9's differential goes red as expected"
+  fi
+  expect_contains "MUTANT (weakened profile strip): the mutant leaves the empty permissions object behind" \
+    '"permissions"' "$(cat "$ARM_MS/home/.claude/settings.json")"
+else
+  no "MUTANT (weakened profile strip): mutation did not apply — RM_PROFILE_STRIP_JQ was reshaped"
+fi
+
 # The production files are unchanged by every arm above.
 expect_true "production remove.sh untouched by the mutation arms" bash -n "$REMOVE_SH"
+expect_eq "production remove.sh is byte-identical to before the mutation arms" \
+  "$REMOVE_SH_CKSUM_BEFORE" "$(shasum < "$REMOVE_SH")"
 
 echo ""
 echo "=== Group 16: the suite is registered in tests/run.sh by name ==="
