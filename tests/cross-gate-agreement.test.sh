@@ -2802,7 +2802,7 @@ expect_eq "…and exactly six registrations total — two unconditional, four gu
 expect_eq "…every one of them resolving through \${CLAUDE_PLUGIN_ROOT}, never a machine-local path" \
   "0" "$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -cvF '${CLAUDE_PLUGIN_ROOT}/hooks/')"
 
-# --- L.4 EVERY registration is bounded by a timeout, on the channel that renders one ---
+# --- L.4 EVERY registration is bounded by a timeout ---
 #
 # The Step-6 review's C-4: the settings writer attached `"timeout": 10` only on the
 # matcher branch, so the two events that wave added — the ones that carry no matcher —
@@ -2810,38 +2810,49 @@ expect_eq "…every one of them resolving through \${CLAUDE_PLUGIN_ROOT}, never 
 # of the landing gate's verdict subprocess. A timeout is the safe direction here precisely
 # because the gate is fail-open: a hook that is killed lets the stop through.
 #
-# Asserted GENERICALLY rather than row by row: L.1's eleven literals each carry `|10`,
-# but a TWELFTH row added with no timeout at all would pass every one of them.
+# SKILL-SCOPED CHANNEL: already exhaustively pinned by L.1 — each of the eleven literal
+# rows carries `|10` (2653-2679 above) and the total-row-count assertion (2682-2683) catches
+# a stripped `timeout:` line the same way a dedicated pairing arm would: that row's
+# extractor only emits once it reaches a `timeout:` line, so a stripped bound drops the
+# whole row out of SKILL_HOOKS_ROWS, failing BOTH the per-command literal and the total
+# count. No separate arm needed here for that channel. `skill_block_count` stays defined at
+# §L.7 below for the frontmatter-parser-agreement tracking (a fourth copy of that state
+# machine, deliberately left unpinned there) — this section no longer calls it.
 #
-# COUNTED AT THE SOURCE, not over L.1's rows. That extractor only emits a row when it
-# reaches a `timeout:` line, so a registration whose bound was deleted DISAPPEARS from
-# the row set instead of showing up in it unbounded — "every row carries a timeout" is
-# vacuous by construction over those rows (proved: the strip-a-timeout mutation reds the
-# count arms and leaves an over-rows check green). The pairing has to be counted off the
-# block itself, which is what these two arms do.
-skill_block_count() {  # <line-pattern> -> how many times it occurs INSIDE the hooks: block
-  awk -v pat="$1" '
-    /^hooks:$/ { active=1; next }
-    active && /^---$/ { active=0 }
-    active && /^[A-Za-z]/ { active=0 }
-    !active { next }
-    $0 ~ pat { n++ }
-    END { print n+0 }
-  ' "$SKILL_SRC"
-}
-L4_CMDS=$(skill_block_count '^ +command: ')
-L4_BOUNDS=$(skill_block_count '^ +timeout: ')
-expect_eq "EVERY command in the frontmatter block is paired with a timeout — none unbounded" \
-  "$L4_CMDS" "$L4_BOUNDS"
-expect_eq "…and the block still declares all eleven of them (the pairing is not vacuous)" \
-  "11" "$L4_CMDS"
-expect_eq "…each bounded by the ceiling the Step-6 review demanded: 10" "11" \
-  "$(printf '%s\n' "$SKILL_HOOKS_ROWS" | awk -F'|' '$4 == "10" { n++ } END { print n+0 }')"
-# THE ALWAYS-ON CHANNEL RENDERS NO CEILING TODAY. hooks/hooks.json's six entries carry no
-# `timeout` key at all, so those walls run on the platform default — the C-4 protection
-# does not exist on that channel. That is a property of the payload manifest, not of this
-# suite, and it is deliberately asserted in NEITHER direction here: pinning the current
-# state would make the fix red. Flagged by epic-17 wave-02 S3 for a manifest-owning slice.
+# ALWAYS-ON CHANNEL — RE-DERIVED epic-17 wave-03 S4, closing the gap wave-02's A13/A17
+# flagged (`.bionic/docs/record/epic-17-w3/probe-hooks-timeout.md`, VERDICT: HONORED at
+# hook-object/entry level — the plugin-channel field is enforced identically to the
+# settings-channel field: silent kill at the declared ceiling, tool call proceeds, no error
+# surfaced). `hooks/hooks.json` now carries `"timeout": 10` on all six entries. Asserted
+# structurally over the parsed JSON, not over HOOKS_JSON_ROWS' flattened text — the same
+# anti-vacuity reasoning the retired skill-side arm used: a leaf missing its `timeout` key
+# must fail a presence count taken over ALL leaves, not just the ones that happen to render
+# one.
+L4_HJ_TOTAL=$(jq '[.hooks | to_entries[] | .value[] | .hooks[]] | length' "$HOOKS_JSON_SRC")
+L4_HJ_TIMED=$(jq '[.hooks | to_entries[] | .value[] | .hooks[] | select(has("timeout"))] | length' "$HOOKS_JSON_SRC")
+expect_eq "the always-on manifest: EVERY hook entry carries a timeout key — none unbounded" \
+  "$L4_HJ_TOTAL" "$L4_HJ_TIMED"
+expect_eq "…and it still declares all six of them (the pairing is not vacuous)" "6" "$L4_HJ_TOTAL"
+expect_eq "…each bounded by the ceiling the Step-6 review demanded: 10" "0" \
+  "$(jq '[.hooks | to_entries[] | .value[] | .hooks[] | select(.timeout != 10)] | length' "$HOOKS_JSON_SRC")"
+
+# --- L.4b CROSS-CHANNEL RENDERING AGREEMENT (S4, logged call) ---
+#
+# Both channels now render a timeout for every registration they carry. The dispatch brief's
+# scope note invited this specific check: if the two channels both state 10, pin their
+# agreement rather than leaving it coincidental — a future edit to one channel's ceiling
+# without the other should go red, not silently fork the value. Computed off the
+# already-extracted row sets (L.1's SKILL_HOOKS_ROWS, L.2/L.3's HOOKS_JSON_ROWS) rather than
+# re-reading either source: each channel's value set collapses to a single value if every
+# row in it agrees with its neighbors, so "one value, and it's 10" on each side plus "the two
+# single values match" is the whole agreement claim in three checks.
+L4B_SKILL_VALUES=$(printf '%s\n' "$SKILL_HOOKS_ROWS" | awk -F'|' '{print $4}' | sort -u)
+L4B_HJ_VALUES=$(printf '%s\n' "$HOOKS_JSON_ROWS" | awk -F'|' '{print $4}' | sort -u)
+expect_eq "the skill-scoped channel renders exactly one timeout value across all its rows" \
+  "10" "$L4B_SKILL_VALUES"
+expect_eq "the always-on channel renders exactly one timeout value across all its rows" \
+  "10" "$L4B_HJ_VALUES"
+expect_eq "…and the two channels AGREE on that ceiling" "$L4B_SKILL_VALUES" "$L4B_HJ_VALUES"
 # The ceiling the installer still writes into settings.json is driven end to end in
 # tests/plugin-hooks.test.sh, which retires with the installer at W5.
 
@@ -2926,13 +2937,25 @@ expect_contains "…and the dispatch wall skips its roster append on exactly tha
 # source on disk rather than retyped by hand.
 #
 # KNOWN UNPINNED FOURTH COPY (review-fold, epic-17 W2, DO-NOW 7 fallback). This file's own
-# `skill_block_count` (:2821-2830) walks the same `hooks:` block state machine as a fourth
-# site, and `frontmatter_parser_span` below stops at the FIRST occurrence in each file, so it
-# extracts this section's L.1 copy and never reaches `skill_block_count`'s — the pin below
-# does not see it. Deliberately left unpinned here rather than folded in blind: promoted to
-# W4, trigger EVENT "any further edit to the SKILL.md frontmatter parsers" (t6-review.md
-# DO-NOW 7). Low severity — drift here makes a test go quiet, not production go wrong, same
-# as the three copies this section does pin.
+# `skill_block_count` (below — moved here from the retired §L.4 pairing arm by wave-03 S4,
+# which stopped calling it but left the function itself defined; see §L.4's comment) walks
+# the same `hooks:` block state machine as a fourth site, and `frontmatter_parser_span`
+# below stops at the FIRST occurrence in each file, so it extracts this section's L.1 copy
+# and never reaches `skill_block_count`'s — the pin below does not see it. Deliberately left
+# unpinned here rather than folded in blind: promoted to W4, trigger EVENT "any further edit
+# to the SKILL.md frontmatter parsers" (t6-review.md DO-NOW 7). Low severity — drift here
+# makes a test go quiet, not production go wrong, same as the three copies this section does
+# pin.
+skill_block_count() {  # <line-pattern> -> how many times it occurs INSIDE the hooks: block
+  awk -v pat="$1" '
+    /^hooks:$/ { active=1; next }
+    active && /^---$/ { active=0 }
+    active && /^[A-Za-z]/ { active=0 }
+    !active { next }
+    $0 ~ pat { n++ }
+    END { print n+0 }
+  ' "$SKILL_SRC"
+}
 frontmatter_parser_span() {  # <file> -> the 6-line `hooks:` state-machine prologue, ws-normalized
   awk '
     p == 0 && index($0, "/^hooks:$/ { active=1; next }") > 0 { p = 1 }

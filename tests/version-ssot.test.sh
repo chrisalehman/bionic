@@ -1,9 +1,13 @@
 #!/bin/bash
 # VERSION SSOT — epic-17 wave-02 slice S4 (spec AC-5, AC-6).
 #
-# WHAT THE MODEL IS. plugin.json is the single version owner: public semver +
-# dependency range constraints in one manifest. The marketplace entry
-# deliberately ABSTAINS from carrying its own `version` (verified precedence:
+# WHAT THE MODEL IS. plugin.json is the single version owner for bionic's own
+# public semver. Third-party dependency range constraints do NOT live here as
+# of epic-17 W3 S3 (AC-8) — the CLI cannot resolve them against a
+# same-marketplace dependency declaration, so they live only in
+# payload/scripts/lib/deps.sh's table; see arm (c)'s re-derivation note below.
+# The marketplace entry deliberately ABSTAINS from carrying its own `version`
+# (verified precedence:
 # plugin.json is checked FIRST in the CLI's version-resolution chain, so an
 # entry copy would be shadowed redundancy — record/epic-17-w2/
 # marketplace-schema-probe.md). SUPPORTED_SDLC_VERSION is a SEPARATE
@@ -16,8 +20,20 @@
 #       `version` field (the paired negative to (a); the document-root
 #       `version` in marketplace.json is a DIFFERENT concept and is never
 #       touched or asserted here).
-#   (c) every entry in plugin.json's `dependencies` array carries a `version`
-#       field holding a semver range.
+#   (c) [RE-DERIVED epic-17 W3 S3, AC-8] no entry in plugin.json's
+#       `dependencies` array carries a `version` field. What this arm pinned
+#       before: the reverse — every entry carried its OWN semver-range
+#       `version`, the W2 model where plugin.json was sole owner of both the
+#       public version AND every dependency's constraint (ADR-002 point 2).
+#       AC-8 supersedes that: the CLI cannot resolve a same-marketplace,
+#       version-constrained dependency (probe-ac6-marketplace-entry.md,
+#       reproduced on a fresh scratch config against a confirmed-existing
+#       upstream tag), so the constraint now lives ONLY in
+#       payload/scripts/lib/deps.sh's table, and plugin.json's dependencies
+#       must be constraint-free. The table-to-manifest agreement pin (that the
+#       table's rows are correctly rendered, sans constraint) lives in
+#       tests/plugin-lib.test.sh, Group 18 — this arm only proves the negative
+#       shape, paired with arm (b) above.
 #   (d) the bridge pair: hooks/canonical-sdlc-evidence-gate.sh and
 #       hooks/canonical-sdlc-governing-skill.sh equality-check the same
 #       SUPPORTED_SDLC_VERSION; that value is pinned against plugin.json's
@@ -72,19 +88,17 @@ else:
 expect_eq "(b) marketplace.json bionic entry has no version field" "no" "$BIONIC_ENTRY_HAS_VERSION"
 
 echo ""
-echo "=== Arm (c): every dependencies entry carries a semver version constraint ==="
+echo "=== Arm (c): dependencies carry NO version field (S3: constraint lives only in deps.sh, AC-8) ==="
 
-DEP_REPORT="$(python3 -c "
-import json, re
+DEP_VERSION_REPORT="$(python3 -c "
+import json
 d = json.load(open('$PLUGIN_JSON'))
 deps = d.get('dependencies', [])
-pattern = re.compile(r'^(\^|~|>=|<=|>|<|=)?[0-9]+\.[0-9]+\.[0-9]+')
-bad = [dep.get('name','?') for dep in deps
-       if not dep.get('version') or not pattern.match(dep['version'])]
+bad = [dep.get('name','?') for dep in deps if 'version' in dep]
 print('%d|%s' % (len(deps), ','.join(bad)))
 " 2>/dev/null)"
-expect_eq "(c) both dependencies are present and each carries a semver-range version" \
-  "2|" "$DEP_REPORT"
+expect_eq "(c) both dependencies are present and NEITHER carries a version field" \
+  "2|" "$DEP_VERSION_REPORT"
 
 echo ""
 echo "=== Arm (d): bridge pair SUPPORTED_SDLC_VERSION <-> plugin major, pinned 13 <-> 0 ==="
@@ -98,6 +112,32 @@ expect_eq "(d) SUPPORTED_SDLC_VERSION is pinned at 13" "13" "$EVIDENCE_GATE_VERS
 PLUGIN_MAJOR="${PLUGIN_VERSION%%.*}"
 expect_eq "(d) plugin.json major version is pinned at 0 (paired with SUPPORTED_SDLC_VERSION 13)" \
   "0" "$PLUGIN_MAJOR"
+
+echo ""
+echo "=== Arm (e): the permission profile template renders plugin.json's version ==="
+#
+# Added epic-17 W3 S5. The ownership table makes plugin.json the single version
+# owner and names "profile template version" as one of its rendering surfaces,
+# so the template joins the same agreement the dependency manifests are held to.
+# TWO copies live in that file and both are pinned: the `version` field, and the
+# version carried by the begin marker — the marker's copy is what an applied
+# block reports long after the payload has moved on, so a desync there would
+# make doctor confidently report the wrong installed version.
+
+PROFILE_TEMPLATE="${REPO}/payload/permissions/profile.template.json"
+expect_true "(e) payload/permissions/profile.template.json exists" test -f "$PROFILE_TEMPLATE"
+TEMPLATE_VERSION="$(python3 -c "import json; print(json.load(open('$PROFILE_TEMPLATE')).get('version',''))" 2>/dev/null)"
+expect_eq "(e) profile template version equals plugin.json version" "$PLUGIN_VERSION" "$TEMPLATE_VERSION"
+
+MARKER_VERSION="$(python3 -c "
+import json
+p='$PROFILE_TEMPLATE'
+rules=json.load(open(p)).get('permissions',{}).get('allow',[])
+pre='Bash(: bionic-profile-begin version='
+hits=[r for r in rules if isinstance(r,str) and r.startswith(pre)]
+print(hits[0][len(pre):].rstrip(')') if len(hits)==1 else '')
+" 2>/dev/null)"
+expect_eq "(e) the begin marker's version equals plugin.json version" "$PLUGIN_VERSION" "$MARKER_VERSION"
 
 echo ""
 echo "========================================"

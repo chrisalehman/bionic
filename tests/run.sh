@@ -81,6 +81,42 @@ run "seam-resolution.test.sh" bash tests/seam-resolution.test.sh
 # payload/.claude-plugin/plugin.json, .claude-plugin/marketplace.json and two
 # hooks, so like the others it belongs to no single hook and stays hand-listed.
 run "version-ssot.test.sh" bash tests/version-ssot.test.sh
+# Payload libraries (epic-17 W3 S1): the dependency SSoT table in
+# payload/scripts/lib/deps.sh and the machine-fact functions in
+# payload/scripts/lib/detect.sh, driven against fixture roots and a fixture
+# PATH. Belongs to no single hook, so hand-listed like the rest.
+run "plugin-lib.test.sh" bash tests/plugin-lib.test.sh
+# The worktree contract (epic-17 W3 S2, spec AC-10 / D4): payload/scripts/spawn-worktree.sh
+# driven against scratch git repositories, with its attestation line pinned byte-exactly
+# because dispatchers quote that line into their ledger rows. Its own suite rather than a
+# section of plugin-lib.test.sh — different subject, different fixture regime — and so,
+# like every suite outside hooks/, hand-listed here or it never runs.
+run "spawn-worktree.test.sh" bash tests/spawn-worktree.test.sh
+# The permission pipeline (epic-17 W3 S5, spec AC-6 / D2-final): the shipped template in
+# payload/permissions/ and payload/scripts/lib/profile.sh, driven against fixture settings
+# files in a temp tree. Hand-listed like every suite outside hooks/.
+run "profile.test.sh" bash tests/profile.test.sh
+# The JIT / degradation contract (epic-17 W3 S10, spec AC-5): payload/scripts/lib/jit.sh's
+# jit_check + jit_offer, driven against a fixture PATH, proving jit_offer calls install_dep
+# BY NAME (the ownership-table agreement) and mutates nothing on decline. Hand-listed like
+# every suite outside hooks/.
+run "jit.test.sh" bash tests/jit.test.sh
+# Command-file conventions (epic-17 W3 S9, spec AC-1): globs payload/commands/*.md.
+run "command-format.test.sh" bash tests/command-format.test.sh
+# /bionic:setup (epic-17 W3 S6, spec AC-2 / AC-6): payload/scripts/setup.sh driven end to
+# end against fixture trees and a stateful `claude` shim on a replaced PATH, with the
+# fixture bytes as the evidence for every consented, declined and idempotent claim.
+# Hand-listed like every suite outside hooks/.
+run "setup.test.sh" bash tests/setup.test.sh
+# The read-only diagnosis (epic-17 W3 S7, spec AC-3): payload/scripts/doctor.sh driven over
+# whole fixture MACHINES — payload tree, plugin registry, settings, rc, caches — with a
+# no-mutation wall (sha256 + path enumeration, before and after) as its axis test.
+run "doctor.test.sh" bash tests/doctor.test.sh
+# Footprint removal (epic-17 W3 S8, spec AC-4): payload/scripts/remove.sh driven
+# against fixture machines — the never-list wall, the per-item consent gates, and
+# the standalone door (the script alone, no payload libraries beside it).
+# Hand-listed like every suite outside hooks/.
+run "remove.test.sh" bash tests/remove.test.sh
 # Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
 # 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so
