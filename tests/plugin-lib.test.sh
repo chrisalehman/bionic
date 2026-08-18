@@ -937,6 +937,41 @@ expect_eq "a sha that installs superpowers 6.2.0 would be caught (the check disc
 expect_false "an unrecorded sha has no version, so a bump cannot pass silently" \
   sha_to_version superpowers 0000000000000000000000000000000000000000
 
+# R-2. COVERAGE, stated over marketplace.json itself.
+#
+# The loop above walks the dependency table's lane-3a names, so it reaches
+# marketplace.json only sideways — through Group 18's reverse pin, which fails
+# any url-sourced entry with no table row. That pin carries a name-based
+# exemption for the literal `bionic`, which is right for the SHIPPED entry
+# (`"source": "./payload"`, a string, no sha to pair) and wrong as a hole in this
+# tripwire: an entry named `bionic` with an object source and any sha at all was
+# checked by nothing. Measured before this loop existed — an arbitrary sha
+# planted on such an entry left the suite at 137/137.
+#
+# A22's invariant is unconditional: every sha in marketplace.json appears in the
+# pair table. So the coverage assertion iterates marketplace.json's own entries,
+# and exempts no name. An object source with a missing or empty sha fails here
+# too, which is Group 18's claim from the other side — the two arms disagreeing
+# is itself something worth failing on.
+MKT_OBJ_ENTRIES="$(jq -r '.plugins[] | select((.source | type) == "object") | "\(.name)|\(.source.sha // "")"' "$MARKETPLACE_JSON")"
+
+MKT_OBJ_SEEN=0
+while IFS='|' read -r ENT_NAME ENT_SHA; do
+  [ -n "$ENT_NAME" ] || continue
+  MKT_OBJ_SEEN=$((MKT_OBJ_SEEN + 1))
+  expect_true "marketplace.json entry '${ENT_NAME}' carries a sha this suite has a version for" \
+    sha_to_version "$ENT_NAME" "$ENT_SHA"
+done <<< "$MKT_OBJ_ENTRIES"
+
+# The loop is only a tripwire if it actually walked the file. A jq that silently
+# selected nothing would leave every assertion above unexecuted and the group
+# green, which is the failure mode this whole group exists to prevent.
+expect_eq "the coverage loop walked every url-sourced entry in marketplace.json" \
+  "$(jq '[.plugins[] | select((.source | type) == "object")] | length' "$MARKETPLACE_JSON")" \
+  "$MKT_OBJ_SEEN"
+expect_true "and there was more than one of them (the count arm is not comparing 0 to 0)" \
+  test "$MKT_OBJ_SEEN" -ge 2
+
 echo ""
 echo "=== Group 21: the suite is registered in tests/run.sh by name ==="
 #
