@@ -557,6 +557,53 @@ expect_eq "the tmp for a 0644 settings file is 0644 at the rename, not narrowed"
 expect_eq "and dying right after that rename leaves it at 0644" \
   "644" "$(file_mode "$INST_SETTINGS_644")"
 
+# N-1. The `umask 077` half, measured rather than grepped.
+#
+# The arms above stop the clock at the RENAME, which is downstream of the chmod:
+# a writer whose umask no longer reaches the redirect still hands `mv` a 0600
+# tmp, because the chmod put it there. The pin below (`writer_shape_ok`) asserts
+# the `umask 077` token is present and above the rename, and a token is not a
+# mode — detach the umask from the redirect and every one of those arms stays
+# green while the tmp goes back to being born 0644 with the tokens in it. That
+# window is the whole of R-1's first half, so it is measured here directly: stop
+# the clock at the CHMOD instead, and read the mode the tmp was BORN with.
+#
+# The fixture is 0644 deliberately. On a 0600 fixture the expected value would
+# also be the destination's own mode, and an arm that cannot tell the umask from
+# the chmod is the arm that let this through. Here the umask's 0600 and the
+# destination's 0644 are different numbers, so only the umask can produce it —
+# and the last arm shows the chmod still restores the user's 0644 afterwards.
+#
+# The ambient umask is pinned to 022 inside the run: what is under test is the
+# writer's own umask, not the one the suite happened to inherit, and a runner
+# whose umask were already 077 would make this arm pass on the shim's borrowed
+# strictness. The shim shadows only `chmod`, and only to observe.
+HOOK_UMASK_SHIM="$TMP/hook-umask-birth-shim.sh"
+cat > "$HOOK_UMASK_SHIM" <<'SHIM'
+chmod() {
+  { stat -f '%Lp' "$2" 2>/dev/null || stat -c '%a' "$2" 2>/dev/null; } >> "$BIONIC_TEST_BIRTH_LOG"
+  command chmod "$@"
+}
+SHIM
+
+ARM="$(new_arm lib-strip-umask-birth)"
+BIRTH_SETTINGS="$ARM/home/.claude/settings.json"
+plant_legacy_channel_hooks "$ARM"
+chmod 644 "$BIRTH_SETTINGS"
+BIRTH_LOG="$TMP/hook-birth-mode.log"; : > "$BIRTH_LOG"
+expect_eq "birth arm fixture: settings.json really starts at 0644" \
+  "644" "$(file_mode "$BIRTH_SETTINGS")"
+expect_true "hooks_strip_legacy_channel rewrote the birth-arm fixture" \
+  env BIONIC_TEST_BIRTH_LOG="$BIRTH_LOG" \
+    bash -c 'umask 022; . "$1"; . "$2"; hooks_strip_legacy_channel "$3"' \
+      _ "$HOOKS_SH" "$HOOK_UMASK_SHIM" "$BIRTH_SETTINGS"
+expect_true "birth arm: the shimmed chmod really was reached (not vacuous)" \
+  test -s "$BIRTH_LOG"
+expect_eq "the tmp is BORN 0600 under the writer's own umask, before any chmod" \
+  "600" "$(head -1 "$BIRTH_LOG" | tr -d ' ')"
+expect_eq "and the chmod still hands the destination back its own 0644" \
+  "644" "$(file_mode "$BIRTH_SETTINGS")"
+
 echo ""
 echo "=== Group 8: the permission marker block (profile_strip semantics) ==="
 
@@ -732,6 +779,12 @@ ${REPO}/payload/scripts/lib/hooks.sh" \
   "$SETTINGS_MV_LINES"
 expect_eq "and deps.sh does it in exactly one place (both statusline arms share one writer)" \
   "1" "$(/usr/bin/grep -c 'mv "\$tmp" "\$settings"' "$DEPS_SH" | tr -d ' ')"
+# The same count for hooks.sh, because the file list above cannot see inside a
+# file: a SECOND writer appended to hooks.sh leaves the list at two names and
+# walks past the wall. deps.sh was counted and hooks.sh was not, which made the
+# wall asymmetric between the only two files it names.
+expect_eq "and hooks.sh does it in exactly one place too (a second writer inside it is not a new file)" \
+  "1" "$(/usr/bin/grep -c 'mv "\$tmp" "\$settings"' "$HOOKS_SH" | tr -d ' ')"
 
 # F-S4. The consent RULE, pinned across the payload/standalone seam.
 #
