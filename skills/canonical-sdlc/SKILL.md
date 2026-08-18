@@ -119,7 +119,7 @@ Triple not yet declared → say so and list the axes. Invoked as `help` → rend
 | `refactor` | Change structure, preserve behavior. Covers upgrades, migrations, removals/deprecations. | `behavior-preservation:` in the Step-5 block; migrations add `compat-matrix:`/`revert-plan:` (or `n/a: not a migration`). Log-only. |
 | `tune` | Move a NAMED measurement toward a target. If you cannot name the measurement, it is not tune. | `baseline:`/`target:`/`re-measure:` in the Step-5 block, all three. Log-only. |
 | `spike` | Timeboxed research. **Ships no code at any rigor.** | Writeup only at `<docs-root>/spikes/spike-<slug>-<YYYYMMDD>.md`. No plan file, no spec, no ADR, no commits to the integration branch. |
-| `incident-response` | A live deployed surface — production or tooling — is broken for its users. The clock matters. | RCA, not ADR. Floors at `audited`. Monitoring-gap closure is part of Ship. |
+| `incident-response` | A live deployed surface — production or tooling — is broken for its users. The clock matters. | RCA, not ADR. Floors at `audited`. Monitoring-gap closure is part of Close-out. |
 
 **rigor** — how hard the evidence tries to lie. Cumulative.
 
@@ -193,7 +193,7 @@ Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `inten
 | 6 Review | `agent-skills:code-review-and-quality` | Every axis has a verdict; independent critic attached |
 | 7 Document | `agent-skills:documentation-and-adrs` | Every decision at medium significance or above is recorded |
 | 8 Integrate | `superpowers:finishing-a-development-branch` | Wave reachable from the integration branch; worktree removed; tmp wiped |
-| 9 Ship | `agent-skills:shipping-and-launch` | Checklist + rollback; `continuation.md` written |
+| 9 Close-out | `agent-skills:shipping-and-launch` | Checklist + rollback; `continuation.md` written |
 
 Committing is a cross-cutting rhythm (~once per step), not a numbered step. Update `## SDLC State` **before staging** — the gate reads the file, not the diff. Do not add a `commit:` field; the SHA lives in git.
 
@@ -457,7 +457,7 @@ This test used to live in the always-loaded global config, which is where a prec
 
 Atomic, one task. Merge the wave into the declared integration branch (local merge; pushing is the user's gate) and remove the worktree. Default is merge — parking requires an explicit `## Wake Note`. Then, when `cleanup_on_finish: true`: skip if frontmatter already has `cleaned:`; wipe `.bionic/tmp/*`; assert zero non-completed tasks; strip stray `continuation-checkpoint.md`/`handoff-*.md`; set `cleaned: <today>`.
 
-### Step 9 — Ship
+### Step 9 — Close-out
 
 Deploy per `deploy_target`, verify at the deployed surface, and monitor at least one cycle — `n/a:` only when `deploy_target: none` (the Evidence shapes table below names the three keys).
 
@@ -526,7 +526,10 @@ Roles, by `subagent_type`: `researcher` and `test-runner` for exploration and me
 
 - **Tick the poker.** `bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/hooks/session-poker.sh tick` is the decision brain — the prompt gathers, the poker decides, per row. A QUIET or DISARM decision is a no-op; DISARM also ends the heartbeat. A NOTIFY decision surfaces the named row through the non-response procedure below — the poker only decides, it never stops or messages on its own.
 - **Read liveness against the contracted cadence,** never against the tick interval: a row is quiet when it is quieter than the `cadence` its own brief declared (Liveness fields, above), so a tick that finds every progress file inside its declared cadence has found nothing and says nothing.
-- The panel and task-list duties are TOOL-GROUNDED, never judgment-worded: panel refresh = ListAgents, then TaskStop on each listed lineage whose ledger row is fact-discharged (CLOSED / MET / acked), and a listed agent with NO ledger row is surfaced as a duplicate-session tell, never silently stopped; task-list refresh = TaskList, then chronological display order (current-step slice entries first, dependency order, later-step entries after) restored mechanically — TaskCreate fresh copies of every entry that must sort later, TaskUpdate status=deleted on the stale originals, no-op when ascending-ID order already matches — then statuses reconciled with verified reality; where the task tools are absent (version-gated), the plan ledger stands in as the task list.
+- **Keep the panel and the task list honest.** Both duties are TOOL-GROUNDED, never judgment-worded:
+  - *Panel refresh* = ListAgents, then TaskStop on each listed lineage whose ledger row is fact-discharged (CLOSED / MET / acked). A listed agent with NO ledger row is surfaced as a duplicate-session tell, never silently stopped.
+  - *Task-list refresh* = TaskList, then chronological display order (current-step slice entries first, dependency order, later-step entries after) restored mechanically — TaskCreate fresh copies of every entry that must sort later, TaskUpdate status=deleted on the stale originals, no-op when ascending-ID order already matches — then statuses reconciled with verified reality.
+  - *Fallback:* where the task tools are absent (version-gated), the plan ledger stands in as the task list.
 - **Then continue toward the goal until a wall.** The tick is not a status report. After the reads, resume the run's actual work and keep going until something genuinely blocks — a decision only the user can take, a gate whose evidence is not yet earned, a dependency not yet merged. An interactive stretch is already standing at the blocked-on-user wall, so the tick no-ops quietly there rather than manufacturing activity.
 
 **Phase-gated dispatch.** A brief for slice work splits into a deliverable phase and bookkeeping, with a hard report gate between them: the writer stops at the gate and sends the completion message before touching bookkeeping. A redirect sent mid-phase is read at the gate — not before, and not after the whole task — bounding the steering race instead of pretending mail delivery is instant. Expected-duration estimates quote the deliverable phase only; bookkeeping is not the writer's clock to keep.
@@ -537,7 +540,7 @@ Roles, by `subagent_type`: `researcher` and `test-runner` for exploration and me
 
 **Parallel by default, justify sequential** — but dispatch serially when units share state (one local DB, a shared reset, count-based assertions).
 
-**Parallel writers work in spawned worktrees.** Whoever dispatches a parallel writer creates that writer's tree first: creation authority follows dispatch authority at every level, orchestrator included — during a parallel-writer phase an orchestrator that writes tracked files takes a tree of its own, and `.bionic` plan and ledger writes remain a file-ownership question rather than an exemption from this one. The tree comes from `${CLAUDE_PLUGIN_ROOT}/scripts/spawn-worktree.sh`, which verifies what it built and attests it in a single line; the dispatcher quotes that line into the unit's ledger row, so what the row claims about a base commit is something the machine measured rather than something the brief asked for. Teardown is never automatic — the merge decision is the dispatcher's, taken later. The harness `isolation: worktree` param is retired from bionic briefs at every level: it creates trees no ledger row can account for.
+**Parallel writers work in spawned worktrees.** Whoever dispatches a parallel writer creates that writer's tree first: creation authority follows dispatch authority at every level, orchestrator included — during a parallel-writer phase an orchestrator that writes tracked files takes a tree of its own, and `.bionic` plan and ledger writes remain a file-ownership question rather than an exemption from this one. The tree comes from `${CLAUDE_PLUGIN_ROOT}/scripts/spawn-worktree.sh`, which verifies what it built and attests it in a single line; that path is written the way the CLI substitutes it inside a registered command file, so a model running the script from its own shell — where `${CLAUDE_PLUGIN_ROOT}` is unset and payload-native scripts have no `~/.claude` fallback to expand into — must resolve the plugin root first; the dispatcher quotes that line into the unit's ledger row, so what the row claims about a base commit is something the machine measured rather than something the brief asked for. Teardown is never automatic — the merge decision is the dispatcher's, taken later. The harness `isolation: worktree` param is retired from bionic briefs at every level: it creates trees no ledger row can account for.
 
 **The starting standard.** A subagent may be dispatched only when: the environment attestation from this session is present; a work contract exists at launch, naming the task and a durable deliverable path; and the launch is ledgered the moment it happens.
 

@@ -259,13 +259,32 @@ expect_pin_in_file "patrol: continue toward the goal until a wall" \
 
 # The tool-grounded duty clauses, transcribed VERBATIM from spec AC-8 (as amended
 # 2026-08-18) rather than paraphrased — normative values ship as verbatim text, because two
-# implementers once resolved the same paraphrased span in opposite directions. Pinned whole,
-# as one fixed string, so a "clarifying" reword of any clause in the chain fails here.
-expect_pin_in_file "patrol: the AC-8 tool-grounded duty clauses, verbatim and whole" \
-  "The panel and task-list duties are TOOL-GROUNDED, never judgment-worded: panel refresh = ListAgents, then TaskStop on each listed lineage whose ledger row is fact-discharged (CLOSED / MET / acked), and a listed agent with NO ledger row is surfaced as a duplicate-session tell, never silently stopped; task-list refresh = TaskList, then chronological display order (current-step slice entries first, dependency order, later-step entries after) restored mechanically — TaskCreate fresh copies of every entry that must sort later, TaskUpdate status=deleted on the stale originals, no-op when ascending-ID order already matches — then statuses reconciled with verified reality; where the task tools are absent (version-gated), the plan ledger stands in as the task list." \
+# implementers once resolved the same paraphrased span in opposite directions.
+#
+# PIN MOVED 2026-08-18 (W4 rfold2, review F-7). The span used to be one 112-word run-on
+# bullet and was pinned as one 771-byte fixed string. F-7 broke it into a bold lead-in plus
+# three sub-bullets for scanability, and a fixed-string grep cannot span the newlines that
+# split introduced. So the whole-string pin becomes one pin per CLAUSE, covering the same
+# normative text with nothing dropped: a "clarifying" reword of any clause still fails here,
+# and each failure now names which clause moved instead of one opaque byte-count.
+expect_pin_in_file "patrol: the duties are tool-grounded, not judgment-worded" \
+  "Both duties are TOOL-GROUNDED, never judgment-worded" "$SKILL"
+expect_pin_in_file "patrol: panel refresh is ListAgents then a fact-discharged TaskStop" \
+  "= ListAgents, then TaskStop on each listed lineage whose ledger row is fact-discharged (CLOSED / MET / acked)" \
   "$SKILL"
+expect_pin_in_file "patrol: a listed agent with no ledger row is a duplicate-session tell" \
+  "A listed agent with NO ledger row is surfaced as a duplicate-session tell, never silently stopped" \
+  "$SKILL"
+expect_pin_in_file "patrol: task-list refresh is TaskList then mechanical chronological order" \
+  "= TaskList, then chronological display order (current-step slice entries first, dependency order, later-step entries after) restored mechanically" \
+  "$SKILL"
+expect_pin_in_file "patrol: the reorder mechanics, TaskCreate/TaskUpdate and the no-op case" \
+  "TaskCreate fresh copies of every entry that must sort later, TaskUpdate status=deleted on the stale originals, no-op when ascending-ID order already matches" \
+  "$SKILL"
+expect_pin_in_file "patrol: statuses reconciled with verified reality" \
+  "then statuses reconciled with verified reality" "$SKILL"
 # Named separately so a truncation of the chain's tail reports as the fallback going missing
-# rather than as one opaque 771-byte string failing.
+# rather than as one clause among six failing.
 expect_pin_in_file "patrol: the version-gated fallback names the plan ledger" \
   "where the task tools are absent (version-gated), the plan ledger stands in as the task list" "$SKILL"
 
