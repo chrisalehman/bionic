@@ -17,6 +17,7 @@
 # exit code. The line shapes are fixed and consumed by later slices verbatim:
 #
 #   plugin: version=<v> hooks=<ok|degraded|absent>
+#   agents: state=<stock|modified|unknown> total=<n|unknown> modified=<n|unknown> names=<a.md,b.md|-> cause=<text|->
 #   dep:<name> lane=<3a|3b> present=<yes|no|unknown> version=<v|unknown> constraint=<c> verdict=<ok|violation|unknown>
 #   env:todo-tools present=<yes|no>
 #   env:zshrc-legacy present=<yes|no>
@@ -132,6 +133,79 @@ detect_plugin_integrity() {
   fi
 
   echo "plugin: version=${version} hooks=${hooks_state}"
+  return 0
+}
+
+# ─── Rendered-agent integrity ────────────────────────────────────────────────
+#
+# Has anything edited the role files this payload installed? The six agent files
+# are instructions a dispatched subagent obeys, so a stray edit there changes
+# behaviour everywhere and leaves no trace anywhere else — the machine keeps
+# working, differently. The payload ships a checksum manifest beside them
+# (integrity/agents.sha256, written by agents-src/render.sh), and this compares
+# it against what is on disk.
+#
+# REPORTING, NOT POLICING. A user who edited a role file may have meant to; that
+# is their machine. The fact line says WHICH files differ and stops there — no
+# repair, no exit status, no second mention. The caller renders one line.
+#
+# THE THIRD VALUE MATTERS MOST HERE. Two conditions make the question
+# unanswerable: no manifest (an old payload, or a hand-assembled install) and no
+# sha256 tool on PATH. Answering `stock` in either case would report the very
+# state this function exists to detect as the state it exists to reassure about,
+# so both return `unknown` with the cause named.
+
+_detect_sha256() {  # <file> -> hex digest on stdout; nonzero if no tool can answer
+  local out
+  if command -v shasum >/dev/null 2>&1; then
+    out="$(shasum -a 256 "$1" 2>/dev/null)" || return 1
+  elif command -v sha256sum >/dev/null 2>&1; then
+    out="$(sha256sum "$1" 2>/dev/null)" || return 1
+  else
+    return 1
+  fi
+  [ -n "$out" ] || return 1
+  echo "${out%% *}"
+}
+
+detect_agent_integrity() {
+  local root manifest line want rel got total=0 modified=0 names=""
+  root="$(_detect_plugin_root)"
+  manifest="${root}/integrity/agents.sha256"
+
+  if [ ! -f "$manifest" ]; then
+    echo "agents: state=unknown total=unknown modified=unknown names=- cause=this payload ships no checksum manifest at integrity/agents.sha256"
+    return 0
+  fi
+  if ! command -v shasum >/dev/null 2>&1 && ! command -v sha256sum >/dev/null 2>&1; then
+    echo "agents: state=unknown total=unknown modified=unknown names=- cause=neither shasum nor sha256sum is on PATH, so the agent files cannot be digested"
+    return 0
+  fi
+
+  # `<digest>  <path>` rows, path relative to the plugin root; `#` comments and
+  # blank lines skipped. A row whose file is GONE counts as modified and is
+  # named: deleting a role file is a local change like any other, and silently
+  # skipping it would report five-of-six as a whole set.
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue ;; esac
+    want="${line%% *}"
+    rel="${line#* }"; rel="${rel# }"
+    [ -n "$want" ] && [ -n "$rel" ] || continue
+    total=$((total + 1))
+    got="$(_detect_sha256 "${root}/${rel}")" || got=""
+    if [ "$got" != "$want" ]; then
+      modified=$((modified + 1))
+      names="${names:+${names},}${rel##*/}"
+    fi
+  done < "$manifest"
+
+  if [ "$total" = 0 ]; then
+    echo "agents: state=unknown total=0 modified=unknown names=- cause=the checksum manifest lists no files"
+  elif [ "$modified" = 0 ]; then
+    echo "agents: state=stock total=${total} modified=0 names=- cause=-"
+  else
+    echo "agents: state=modified total=${total} modified=${modified} names=${names} cause=-"
+  fi
   return 0
 }
 

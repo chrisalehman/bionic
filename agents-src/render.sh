@@ -33,10 +33,13 @@
 # whatever heading reads right for that role.
 #
 # USAGE
-#   bash agents-src/render.sh            rewrite the six finals
+#   bash agents-src/render.sh            rewrite the six finals and the checksum manifest
+#                                        (payload/integrity/agents.sha256, spec AC-4 — the
+#                                        file /bionic:doctor reads to tell a user whether
+#                                        their installed role files are stock)
 #   bash agents-src/render.sh --check    re-render into memory and diff against the
-#                                        committed finals; exit 1 with the diff if any
-#                                        differ. This is the whole staleness class in one
+#                                        committed finals AND the committed manifest;
+#                                        exit 1 with the diff if any differ. This is the whole staleness class in one
 #                                        command, and tests/agent-render.test.sh is where
 #                                        it runs. It fails identically whether the OUTPUT
 #                                        was hand-edited or a SOURCE was edited without a
@@ -58,7 +61,45 @@ OUT_DIR="$REPO_DIR/agents"
 
 ROLES="auditor critic implementor researcher senior-implementor test-runner"
 
+# THE CHECKSUM MANIFEST (epic-17 W4 S5, spec AC-4). /bionic:doctor compares a user's
+# installed role files against this file and reports one line: stock, or modified locally.
+# It is written HERE, by the same command that writes the finals, for one reason — a
+# manifest maintained separately is a manifest that ships stale, and a stale manifest
+# accuses a user who edited nothing. The paths inside it are PLUGIN-ROOT-relative
+# (`agents/<role>.md`), which is what they resolve to on the installed machine and, through
+# payload/agents -> ../agents, here as well.
+MANIFEST_REL="payload/integrity/agents.sha256"
+MANIFEST="$REPO_DIR/$MANIFEST_REL"
+
 die() { echo "render.sh: $1" >&2; exit 1; }
+
+# Digest one file. shasum is present on macOS and on any box with perl; sha256sum is the
+# GNU spelling. Nothing else is tried: a manifest written by an unknown tool would be a
+# manifest doctor cannot reproduce.
+sha256_of() {  # <file>
+  local out
+  if command -v shasum >/dev/null 2>&1; then
+    out="$(shasum -a 256 "$1")" || return 1
+  elif command -v sha256sum >/dev/null 2>&1; then
+    out="$(sha256sum "$1")" || return 1
+  else
+    return 1
+  fi
+  echo "${out%% *}"
+}
+
+# The manifest bytes for a directory of rendered finals, on stdout.
+manifest_for() {  # <dir-holding-the-six-finals>
+  local dir="$1" role digest
+  echo "# GENERATED — sha256 of the rendered agent files, plugin-root-relative."
+  echo "# Written by agents-src/render.sh alongside the finals themselves; regenerate with"
+  echo "# \`bash agents-src/render.sh\`. /bionic:doctor reads it to report whether an installed"
+  echo "# machine's role files are stock or locally modified."
+  for role in $ROLES; do
+    digest="$(sha256_of "$dir/$role.md")" || return 1
+    printf '%s  agents/%s.md\n' "$digest" "$role"
+  done
+}
 
 generated_header() {  # $1=role
   cat <<EOF
@@ -149,17 +190,49 @@ for role in $ROLES; do
   fi
 done
 
+# The manifest, from the bytes just rendered. Skipped entirely when a render failed: a
+# manifest of a partial render is worse than none, because doctor would then report a
+# healthy machine as modified.
+MANIFEST_STALE=no
+if [ "$RC" = 0 ]; then
+  if ! manifest_for "$WORK" > "$WORK/agents.sha256"; then
+    echo "render.sh: cannot compute checksums (no shasum or sha256sum on PATH)" >&2
+    RC=1
+  elif [ "$MODE" = check ]; then
+    if [ ! -f "$MANIFEST" ]; then
+      echo "render.sh: $MANIFEST_REL does not exist (the finals render, no manifest is committed)" >&2
+      MANIFEST_STALE=yes; RC=1
+    elif ! diff -u "$MANIFEST" "$WORK/agents.sha256" > "$WORK/manifest.diff" 2>&1; then
+      echo "── $MANIFEST_REL differs from a fresh render ──"
+      sed -e "s|$WORK/|<rendered>/|" -e "s|$MANIFEST|$MANIFEST_REL|" "$WORK/manifest.diff"
+      MANIFEST_STALE=yes; RC=1
+    fi
+  else
+    # `mkdir -p` rather than a precondition: unlike agents/, the manifest's directory is an
+    # output location, and a copy of the tree that has never been rendered has no reason to
+    # carry one already (tests/agent-render.test.sh renders into exactly such a copy).
+    if mkdir -p "${MANIFEST%/*}" 2>/dev/null && cp "$WORK/agents.sha256" "$MANIFEST"; then
+      :
+    else
+      echo "render.sh: cannot write $MANIFEST_REL" >&2
+      RC=1
+    fi
+  fi
+fi
+
 if [ "$MODE" = check ]; then
   if [ "$RC" = 0 ]; then
-    echo "render.sh --check: all six finals match a fresh render"
+    echo "render.sh --check: all six finals match a fresh render, and so does the manifest"
   else
+    [ "$MANIFEST_STALE" = yes ] && STALE="$STALE $MANIFEST_REL"
     echo "render.sh --check: STALE —${STALE:- (render failure)}" >&2
     echo "  the committed file is not the render of the committed source. Either a final was" >&2
-    echo "  edited directly, or a block/template was edited without re-rendering." >&2
+    echo "  edited directly, a block/template was edited without re-rendering, or the manifest" >&2
+    echo "  was not refreshed with the finals." >&2
     echo "  Repair: bash agents-src/render.sh — then commit the finals with the sources." >&2
   fi
 else
-  [ "$RC" = 0 ] && echo "render.sh: rendered six role files into agents/"
+  [ "$RC" = 0 ] && echo "render.sh: rendered six role files into agents/ and refreshed $MANIFEST_REL"
 fi
 
 exit "$RC"

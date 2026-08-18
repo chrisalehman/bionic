@@ -100,7 +100,7 @@ STUB
 
 # The bin dir every arm starts from: real coreutils and the real jq, nothing else.
 BASE_BIN="$TMP/bin-base"; mkdir -p "$BASE_BIN"
-for real in bash sh env cat grep sed awk mkdir rm cp mv chmod ls tr head tail sort uniq wc jq python3 find; do
+for real in bash sh env cat grep sed awk mkdir rm cp mv chmod ls tr head tail sort uniq wc jq python3 find shasum; do
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BASE_BIN}/${real}" 2>/dev/null
 done
 
@@ -161,6 +161,12 @@ make_version_stub "$BROKEN_BIN" rg   "ripgrep 15.2.0"
 # the applied permission block are all unreadable.
 NOJQ_BIN="$TMP/bin-nojq"; mkdir -p "$NOJQ_BIN"; cp -R "$FULL_BIN"/. "$NOJQ_BIN"/; rm -f "$NOJQ_BIN/jq"
 
+# A machine with no sha256 tool at all. The integrity check is the only fact
+# that needs one, and a box that cannot digest a file has not been read clean —
+# it has not been read. Both spellings go, because either would answer.
+NOSHA_BIN="$TMP/bin-nosha"; mkdir -p "$NOSHA_BIN"; cp -R "$FULL_BIN"/. "$NOSHA_BIN"/
+rm -f "$NOSHA_BIN/shasum" "$NOSHA_BIN/sha256sum"
+
 # A plugin-shaped dependency's installed tree. Roster lines are what this exists
 # to carry: `skills/*/SKILL.md` + `agents/*.md`, the counting method doctor
 # declares. Counts are the real ones on this machine (superpowers 14 + 0,
@@ -214,6 +220,32 @@ JSON
   if [ "$flavor" = "healthy" ]; then
     printf '#!/bin/bash\nexit 0\n' > "$m/plugin/hooks/protect-main.sh"
     chmod +x "$m/plugin/hooks/protect-main.sh"
+  fi
+
+  # ── the rendered agent files and the shipped checksum manifest ───────────
+  #
+  # AC-4's subject. The manifest is written HERE by shasum directly rather than
+  # by agents-src/render.sh: a fixture built by the code under test can pin the
+  # test away (memory: fixtures-can-pin-away-the-test), and what is under test
+  # is doctor's READING of a manifest, not the writer's ability to agree with
+  # itself. The `#` header line is included because the shipped manifest carries
+  # one, so the comment-skipping path is exercised rather than assumed.
+  #
+  # healthy = STOCK (every file matches). broken = MODIFIED-LOCALLY: one file
+  # gains a line AFTER the manifest is taken, which is exactly the shape of a
+  # user editing an installed role file.
+  mkdir -p "$m/plugin/agents" "$m/plugin/integrity"
+  for a in auditor critic implementor researcher senior-implementor test-runner; do
+    printf -- '---\nname: %s\n---\nFixture role file for %s.\n' "$a" "$a" > "$m/plugin/agents/${a}.md"
+  done
+  {
+    printf '# sha256 of the rendered agent files, relative to the plugin root.\n'
+    ( cd "$m/plugin" && for a in agents/*.md; do
+        printf '%s  %s\n' "$(shasum -a 256 "$a" | awk '{print $1}')" "$a"
+      done )
+  } > "$m/plugin/integrity/agents.sha256"
+  if [ "$flavor" != "healthy" ]; then
+    printf 'A line the user added by hand.\n' >> "$m/plugin/agents/critic.md"
   fi
 
   # ── the plugin registry ──────────────────────────────────────────────────
@@ -384,6 +416,16 @@ expect_match "healthy: plugin version rendered from the payload manifest" \
 expect_match "healthy: hooks state renders ok" \
   "*ok*" "$(line_of "$H_OUT" "hooks")"
 
+# AC-4, the STOCK arm. One line, in the integrity section, naming the state and
+# how many files it covers — a "stock" with no count is a claim the reader
+# cannot size.
+H_AGENTS="$(line_of "$H_OUT" "agent files")"
+expect_match "healthy: the agent-integrity line reports stock" "*stock*" "$H_AGENTS"
+expect_match "healthy: the stock line says how many files it covers" "*6*" "$H_AGENTS"
+expect_not_match "healthy: a stock machine is not called modified" "*modified*" "$H_AGENTS"
+expect_not_contains "healthy: no reinstall nag when the files are stock" \
+  "reinstall restores stock" "$H"
+
 # Both lanes, presence AND version AND constraint AND verdict — the dep table is
 # the sole constraint-agreement surface (AC-3, AC-8), so the verdict must be
 # rendered per row, not inferred by the reader.
@@ -465,6 +507,24 @@ done
 
 expect_match "broken: hooks.json naming a missing script renders degraded" \
   "*degraded*" "$(line_of "$B_OUT" "hooks ")"
+
+# AC-4, the MODIFIED-LOCALLY arm. The framing is fixed by the AC and is the
+# whole difference between a report and a scolding: an edited role file is a
+# legitimate thing for a user to have done, and the line says so before it says
+# how to undo it.
+B_AGENTS="$(line_of "$B_OUT" "agent files")"
+expect_match "broken: the agent-integrity line reports the local modification" \
+  "*modified locally*" "$B_AGENTS"
+expect_match "broken: the modified line counts them against the shipped total" \
+  "*1 of 6*" "$B_AGENTS"
+expect_match "broken: the modified line NAMES the file that differs" "*critic.md*" "$B_AGENTS"
+expect_contains "broken: the modified line carries the AC's exact framing" \
+  "may be intentional; reinstall restores stock" "$B_AGENTS"
+# REPORT-NEVER-POLICE. Exactly one line about integrity, and none of it in the
+# SUMMARY: the summary is the action list, and a local edit is not a defect to
+# be actioned. (Exit 0 is asserted at the top of this group for the whole run.)
+B_AGENT_LINES="$(grep -c "agent files" "$B_OUT" 2>/dev/null | tr -d ' ')"
+expect_eq "broken: integrity is ONE line, not a section of nagging" "1" "$B_AGENT_LINES"
 
 # The constraint violation — the whole point of carrying the dep table's
 # constraint into the report.
@@ -598,6 +658,32 @@ expect_match "no jq: the roster count renders unknown, not 0" "*unknown*" \
 expect_contains "no jq: the cause of the unknowns is named" "jq is not on PATH" "$U"
 expect_contains "no jq: the summary names installing jq as an action" "install jq" "$U"
 
+# AC-4's third value. Two ways the integrity question cannot be answered — no
+# digest tool, and no manifest to compare against — and both must read `unknown`
+# with a named cause rather than the confident wrong answer in either direction.
+# Calling an unreadable machine "stock" is the dangerous one: it is the state
+# this line exists to detect, reported as the state it exists to reassure about.
+NS_OUT="$TMP/nosha.out"
+doctor_run "$DOCTOR_SH" "$NOSHA_BIN" "$HEALTHY" > "$NS_OUT" 2>&1
+NS_RC=$?
+expect_eq "no sha tool: doctor still exits 0" "0" "$NS_RC"
+NS_AGENTS="$(line_of "$NS_OUT" "agent files")"
+expect_match "no sha tool: the integrity line renders unknown" "*unknown*" "$NS_AGENTS"
+expect_not_match "no sha tool: an unreadable machine is NOT reported stock" "*stock*" "$NS_AGENTS"
+expect_match "no sha tool: the unknown names its cause" "*sha*" "$NS_AGENTS"
+
+NOMAN="$TMP/machine-nomanifest"; cp -R "$HEALTHY" "$NOMAN"; rm -rf "$NOMAN/plugin/integrity"
+NM_OUT="$TMP/nomanifest.out"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$NOMAN" > "$NM_OUT" 2>&1
+NM_RC=$?
+expect_eq "no manifest: doctor still exits 0" "0" "$NM_RC"
+NM_AGENTS="$(line_of "$NM_OUT" "agent files")"
+expect_match "no manifest: the integrity line renders unknown" "*unknown*" "$NM_AGENTS"
+expect_not_match "no manifest: a payload with nothing to compare is NOT reported stock" \
+  "*stock*" "$NM_AGENTS"
+expect_match "no manifest: the unknown names the missing manifest as its cause" \
+  "*manifest*" "$NM_AGENTS"
+
 # The mechanism-level unknown, present on a fully healthy machine: the pnpm
 # content-addressable store is a cache with no installed-state to read, so `no`
 # would be a lie on a warm machine.
@@ -634,6 +720,15 @@ awk '/=== SUMMARY ===/{f=1; next} f' "$B_OUT" > "$TMP/broken-summary.txt"
 SETUP_ACTION="$(line_of "$TMP/broken-summary.txt" "→ run /bionic:setup")"
 expect_match "broken: the setup action names the absences it would repair" "*absent*" "$SETUP_ACTION"
 expect_match "broken: the setup action names the constraint violation it would repair" "*violation*" "$SETUP_ACTION"
+
+# AC-4's report-never-police clause, measured where policing would show up. The
+# broken machine HAS a locally modified role file; the summary is where doctor
+# tells a user what to do, and a modified agent file is not something to do
+# anything about. The line above already says how to undo it if they want to.
+expect_not_contains "broken: the summary raises no action over a locally modified agent file" \
+  "reinstall restores stock" "$B_SUM"
+expect_not_contains "broken: the summary does not restate the integrity fact" \
+  "agent files" "$B_SUM"
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -682,7 +777,7 @@ echo "=== Group 8: doctor renders detect.sh's facts — it does not re-derive th
 # is invisible to every output assertion above: a hand-rolled probe can produce
 # the identical string.
 
-for fn in detect_plugin_integrity detect_dep detect_env_todo_tools \
+for fn in detect_plugin_integrity detect_agent_integrity detect_dep detect_env_todo_tools \
           detect_zshrc_legacy_block detect_legacy_channel_hooks \
           detect_half_uninstalled detect_profile_state profile_diff; do
   expect_true "doctor.sh calls ${fn} from the libraries" grep -q "${fn}" "$DOCTOR_SH"
