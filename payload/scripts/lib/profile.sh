@@ -255,6 +255,14 @@ profile_apply() {  # <rendered-file> <consent-token>
 # holds an `env` block with tokens) would be silently widened to 0644 by an
 # unrelated permission-profile apply.
 #
+# THE ORDER IS THE FIX, NOT AN ACCIDENT. `umask 077` and the `chmod` both come
+# BEFORE the `mv`, so the rename publishes an inode that is already correct.
+# Repairing the mode after the rename — the obvious spelling — leaves two holes
+# this one does not: the tmp file carries the whole settings content, tokens
+# included, at the umask's 0644 under a name anyone can predict, and a process
+# that dies between the `mv` and the `chmod` makes the widening PERMANENT rather
+# than momentary. Do not move either line below the rename.
+#
 # `stat` is spelled both ways because BSD and GNU disagree and neither accepts
 # the other's flag; `chmod --reference` is GNU-only and is not an option. If the
 # file did not exist, or `stat` is not on this machine's PATH at all, `mode` is
@@ -268,9 +276,9 @@ profile_apply() {  # <rendered-file> <consent-token>
 _profile_write() {  # <file> <content> <trailing-newline 0|1>
   local file="$1" content="$2" nl="$3" tmp="${1}.bionic.tmp" mode
   mode="$(stat -f '%Lp' "$file" 2>/dev/null || stat -c '%a' "$file" 2>/dev/null)"
-  if [ "$nl" = "1" ]; then printf '%s\n' "$content" > "$tmp"; else printf '%s' "$content" > "$tmp"; fi
+  if [ "$nl" = "1" ]; then (umask 077; printf '%s\n' "$content" > "$tmp"); else (umask 077; printf '%s' "$content" > "$tmp"); fi
+  [ -n "$mode" ] && chmod "$mode" "$tmp"
   mv "$tmp" "$file" || return 1
-  [ -n "$mode" ] && chmod "$mode" "$file"
   return 0
 }
 

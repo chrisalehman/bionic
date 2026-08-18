@@ -173,15 +173,16 @@ _rm_slurp_into() {  # <varname> <file>
 # what tests/remove.test.sh pins. The mode capture is not decoration: `mv`
 # replaces the inode, so a settings.json the user kept at 0600 would come back at
 # whatever the umask says, and this script's whole job is editing that file. See
-# profile.sh for why `stat` is spelled twice and why an absent `stat` degrades to
+# profile.sh for why `stat` is spelled twice, why an absent `stat` degrades to
 # "write, don't chmod" rather than to a refusal — the standalone door runs on the
-# machine with the bare /bin.
+# machine with the bare /bin — and why the `umask 077` and the `chmod` must both
+# stay ABOVE the `mv`.
 _rm_write() {  # <file> <content> <trailing-newline 0|1>
   local file="$1" content="$2" nl="$3" tmp="${1}.bionic.tmp" mode
   mode="$(stat -f '%Lp' "$file" 2>/dev/null || stat -c '%a' "$file" 2>/dev/null)"
-  if [ "$nl" = "1" ]; then printf '%s\n' "$content" > "$tmp"; else printf '%s' "$content" > "$tmp"; fi
+  if [ "$nl" = "1" ]; then (umask 077; printf '%s\n' "$content" > "$tmp"); else (umask 077; printf '%s' "$content" > "$tmp"); fi
+  [ -n "$mode" ] && chmod "$mode" "$tmp"
   mv "$tmp" "$file" || return 1
-  [ -n "$mode" ] && chmod "$mode" "$file"
   return 0
 }
 
