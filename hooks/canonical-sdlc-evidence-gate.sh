@@ -1146,6 +1146,31 @@ matrix_block() {
     f'
 }
 
+# The `user-confirmed:` value out of an AC block (empty when absent).
+user_confirmed_value() {
+  echo "$1" | grep -E '^[[:space:]]*user-confirmed[[:space:]]*:' | head -1 \
+    | sed -E 's/^[[:space:]]*user-confirmed[[:space:]]*:[[:space:]]*//' \
+    | sed -E 's/[[:space:]]+$//'
+}
+
+# Is an AC block's `user-confirmed:` in the attributed form
+# `<user> <YYYY-MM-DD> <what>`? This is what lets a T4 row discharge without a
+# waiver below, so it is the one place the shape is checked rather than merely
+# recorded — unlike `waiver:` and `rigor-override:`, whose presence is the whole
+# test because a human wrote them by definition.
+#
+# What the form buys: a record naming WHO confirmed and WHEN. What it cannot
+# buy, and is not sold as buying: whether the named human actually said it. A
+# fabricated `chris 2026-08-19 ...` passes here. The check refuses the shape an
+# agent's own claim naturally takes — "confirmed after the re-render",
+# "2026-08-18 the wall renders" — which is the failure mode that was actually
+# observed, not a defense against a determined forger.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+user_confirmed_form_ok() {
+  echo "$(user_confirmed_value "$1")" \
+    | grep -qE '^[A-Za-z][A-Za-z0-9._-]*[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+[^[:space:]]'
+}
+
 # 3-line BLOCKED/Plan/Fix emit for the matrix arm (mirrors the pattern
 # every other validator uses). $1 = message tail, $2 = fix line.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
@@ -1301,12 +1326,29 @@ validate_matrix() {
       done
     fi
     # Once past the Verify gate, every non-waived row must be CONFIRMED.
+    #
+    # T4 is the exception, and it is not a relaxation. T4's evidence IS the
+    # user's own confirmation — an independent auditor sent at it can only
+    # re-read what the user said, which is transcription, not independence. So
+    # a legitimately user-confirmed row used to have exactly one way past this
+    # arm: the Waiver Protocol, which recorded a waiver where nothing had been
+    # waived (epic-17 W4 paid its AC-7 in that form, and the row reads forever
+    # as if the criterion had been let go). A T4 row carrying a well-formed
+    # `user-confirmed: <user> <date> <what>` now discharges on that value —
+    # the same value keys_for_tier already demanded of it — and an
+    # agent-shaped claim with no attributed human still meets the wall.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     if [ "$CURRENT" -gt 5 ] 2>/dev/null; then
       if [ "$status" = "waived" ] || echo "$ev" | grep -qE 'waiver:' \
          || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
         :
+      elif [ "$tier" = "T4" ] && user_confirmed_form_ok "$block_txt"; then
+        :
       elif [ "$aud" != "CONFIRMED" ]; then
+        if [ "$tier" = "T4" ]; then
+          block_matrix "matrix row '${ac}' (T4) auditor verdict is '${aud:-empty}', not CONFIRMED, and its 'user-confirmed:' names no attributed user, at step ${CURRENT}." \
+            "record the user's own confirmation as 'user-confirmed: <user> <date> <what they confirmed>' in the '${ac}:' block — a T4 row discharges on that, no waiver needed. An unattributed or agent-written claim is not one."
+        fi
         block_matrix "matrix row '${ac}' auditor verdict is '${aud:-empty}', not CONFIRMED, at step ${CURRENT}." \
           "the independent auditor must CONFIRM every non-waived row before advancing past the Verify gate, or the row must be waived."
       fi

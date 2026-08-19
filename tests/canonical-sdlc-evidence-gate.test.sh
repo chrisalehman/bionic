@@ -4455,6 +4455,144 @@ expect_allow "29h Step 9, unowed trio recorded alongside delivered → allow" \
   "$h29h" 'git commit -m "x"'
 
 # ============================================================
+# Section 30: T4 rows discharge on the user's own confirmation
+# ============================================================
+#
+# THE BLIND SPOT THIS CLOSES. Past the Verify gate, every non-waived row must
+# carry an auditor verdict of CONFIRMED. T4 is the tier whose evidence IS the
+# user's confirmation — an independent agent auditing it can only re-read what
+# the user said, which is not independence, it is transcription. So a
+# legitimately user-confirmed T4 row had exactly one way past this arm: the
+# Waiver Protocol. That recorded a waiver where nothing was waived. Epic-17 W4
+# paid it in that form for its AC-7 and the row reads, permanently, as if the
+# criterion had been let go.
+#
+# THE FIX. A T4 row whose AC block carries a well-formed
+# `user-confirmed: <user> <date> <what>` discharges without a waiver. Nothing
+# else moves: the tier's evidence key was always `user-confirmed` (keys_for_tier),
+# and this arm now reads that same value as the discharge it already was.
+#
+# THE IMPOSTOR, AND THE HONEST LIMIT. The form check is an ATTRIBUTION check —
+# a leading user token, an ISO date, and something said. An agent-shaped claim
+# ("confirmed after re-render", "2026-08-18 the wall renders") carries no
+# attributed human and is refused. What no hook can see is whether the named
+# human actually said it; a fabricated `chris 2026-08-19 ...` passes the form.
+# The form buys a record that names who and when — it does not buy honesty, and
+# it is not sold as if it did.
+echo ""
+echo "=== Section 30: T4 rows discharge on user-confirmed, impostors do not ==="
+
+# $1 = tier, $2 = auditor cell, $3 = the block's user-confirmed value.
+t4_matrix() {
+  printf '## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | %s | discharged | see AC-1 | %s |
+
+AC-1:
+  user-confirmed: %s
+  tier-run: rendered the wall in the live client
+  fresh: rebuilt from the deployed payload
+  cold-client: fresh session, no snapshot carryover
+  contact: user opened it and read the text back
+  readback: quoted the rendered literal verbatim\n' "$1" "$2" "$3"
+}
+
+GOOD_CONFIRM='chris 2026-08-18 read the rendered wall in his own client and confirmed the wording'
+
+# 30a — the case the blind spot refused: a real user confirmation, no auditor
+# verdict, no waiver → allow.
+h30a=$(make_home)
+write_plan "$h30a" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 "" "$GOOD_CONFIRM")")" > /dev/null
+expect_allow "30a T4 + well-formed user-confirmed, no auditor cell → allow" \
+  "$h30a" 'git commit -m "x"'
+
+# 30b — an agent-shaped claim: no attributed human, no date. Still refused.
+h30b=$(make_home)
+write_plan "$h30b" "$(wave_plan 6 "$step6_body" \
+  "$(t4_matrix T4 "" "confirmed by the implementor agent after the re-render")")" > /dev/null
+expect_block "30b T4 + agent-shaped user-confirmed → block (no attributed user)" \
+  "$h30b" 'git commit -m "x"' "CONFIRMED"
+
+# 30c — a date with nobody attached is not an attribution either.
+h30c=$(make_home)
+write_plan "$h30c" "$(wave_plan 6 "$step6_body" \
+  "$(t4_matrix T4 "" "2026-08-18 the wall renders as specified")")" > /dev/null
+expect_block "30c T4 + dated but unattributed user-confirmed → block" \
+  "$h30c" 'git commit -m "x"' "CONFIRMED"
+
+# 30d — the exemption is T4-scoped. A T3 row cannot buy its way past the
+# auditor by writing a user's name into its block: T3's evidence is a live
+# reading an auditor CAN re-take independently, so the verdict still stands.
+h30d=$(make_home)
+write_plan "$h30d" "$(wave_plan 6 "$step6_body" "$(t4_matrix T3 "" "$GOOD_CONFIRM")")" > /dev/null
+expect_block "30d T3 + well-formed user-confirmed → block (exemption is T4-only)" \
+  "$h30d" 'git commit -m "x"' "CONFIRMED"
+
+# 30e — no regression: a T4 row an auditor DID confirm still passes.
+h30e=$(make_home)
+write_plan "$h30e" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 CONFIRMED "$GOOD_CONFIRM")")" > /dev/null
+expect_allow "30e T4 + CONFIRMED auditor cell → allow (unchanged)" \
+  "$h30e" 'git commit -m "x"'
+
+# 30f — pinned scope boundary: the form check lives in the post-Verify arm
+# only. At current: 5 the row is still being discharged and the contract there
+# is the one it always was — `user-confirmed` present, non-empty, not a
+# placeholder. An impostor value passes the VERIFY gate and meets the form
+# check on the 5->6 advance, which is where the authority claim is actually
+# made. Widening the check to Step 5 would false-block mid-discharge commits
+# on plans written before this contract existed.
+h30f=$(make_home)
+write_plan "$h30f" "$(wave_plan 5 "$step5_base" \
+  "$(t4_matrix T4 CONFIRMED "confirmed by the implementor agent")")" > /dev/null
+expect_allow "30f impostor at current: 5 → allow (form check is post-Verify only)" \
+  "$h30f" 'git commit -m "x"'
+
+# 30g — META-EVIDENCE, and the durable half of this section.
+#
+# 30b/30c/30d block against the PRE-fix hook too, for the old reason (no
+# CONFIRMED verdict at all). A test that reads green on both sides of a change
+# proves nothing about the change, so the impostor arms are re-run here against
+# a DOCTORED hook whose attribution form check has been loosened to accept any
+# non-empty value. If the form check is what refuses the impostor, 30b's
+# fixture must ALLOW there. If it does not, the impostor arms above are
+# passing on the missing-verdict rule and this section is decorative.
+#
+# The doctored copy lives in a temp dir and the real hook is never touched.
+h30g_dir=$(mktemp -d); cleanup_dirs+=("$h30g_dir")
+DOCTORED_HOOK="$h30g_dir/loose-gate.sh"
+sed 's#user_confirmed_form_ok "\$block_txt"#[ -n "$(user_confirmed_value "$block_txt")" ]#' \
+  "$HOOK" > "$DOCTORED_HOOK"
+
+TOTAL=$((TOTAL + 1))
+if ! diff -q "$HOOK" "$DOCTORED_HOOK" > /dev/null 2>&1; then
+  echo "PASS: 30g meta: the doctored copy differs from the real hook (mutation landed)"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: 30g meta: the form-check mutation did not apply — the sed anchor moved, so the arms below prove nothing"
+  FAIL=$((FAIL + 1))
+fi
+
+_real_hook="$HOOK"
+HOOK="$DOCTORED_HOOK"
+expect_allow "30g meta: with the form check loosened, the impostor PASSES → the form check is what refuses it" \
+  "$h30b" 'git commit -m "x"'
+expect_allow "30g meta: the unattributed-date impostor passes too under the loosened form" \
+  "$h30c" 'git commit -m "x"'
+# T4-scoping is a separate predicate from the form, so the T3 row must STILL
+# block against the doctored hook — the tier arm is not what was loosened.
+expect_block "30g meta: the T3 row still blocks under the loosened form (tier scope is a separate arm)" \
+  "$h30d" 'git commit -m "x"' "CONFIRMED"
+HOOK="$_real_hook"
+
+# Restore-proof: the real hook still refuses the impostor after the detour.
+expect_block "30g meta: the real hook still refuses the impostor after the mutation proof" \
+  "$h30b" 'git commit -m "x"' "CONFIRMED"
+
+# ============================================================
 # Summary
 # ============================================================
 
