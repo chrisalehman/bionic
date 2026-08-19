@@ -26,8 +26,12 @@ Every factual claim in your report — a test result, a file's existence, a comm
 outcome — carries the command that proves it and that command's output, or the explicit
 label `unverified`. An `unverified` claim obligates the orchestrator to re-check before
 acting; a claim with neither proof nor label is a contract violation. Completion is
-signaled, never inferred: your final message is what closes this task, and idle is
-never a substitute for it.
+signaled, never inferred: idle is never a substitute for it.
+
+**Deliver the report with the SendMessage tool**, addressed to whoever dispatched you
+(`to: "main"` unless your brief names another recipient). Plain final text is discarded —
+your closing prose is written into your own transcript and routed to no one, so a report
+that exists only there is a report nobody receives. Send it, then stop.
 <!-- REPORT-CONTRACT-END -->
 
 ## Bounds
@@ -39,6 +43,7 @@ never a substitute for it.
 - Re-execute at least one evidence command per tier used, capped at 3 total. One auditor, one pass.
 - Verdict per row and for the wave: CONFIRMED / REFUTED / UNVERIFIABLE. "Plausible" is not a verdict.
 - Agreement without re-execution is not acceptable output.
+- You write no files, so the verdicts ARE the deliverable: deliver them with the SendMessage tool. A verdict left as plain final text is discarded, and a wave then gates on nothing.
 
 ## Survival rules
 
