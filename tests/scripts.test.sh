@@ -792,16 +792,16 @@ expect_true "hooks/ contains at least one non-test hook" [ "$_hook_count" -gt 0 
 _egate="${BIONIC_HOOKS_DIR}/canonical-sdlc-evidence-gate.sh"
 _gskill="${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh"
 expect_true "evidence-gate hook pins SUPPORTED_SDLC_VERSION" \
-  grep -q 'SUPPORTED_SDLC_VERSION=13' "$_egate"
+  grep -q 'SUPPORTED_SDLC_VERSION=14' "$_egate"
 expect_true "governing-skill hook pins SUPPORTED_SDLC_VERSION" \
-  grep -q 'SUPPORTED_SDLC_VERSION=13' "$_gskill"
+  grep -q 'SUPPORTED_SDLC_VERSION=14' "$_gskill"
 # The contract: comparing SDLC_VERSION to the $SUPPORTED_SDLC_VERSION *variable*
 # is the one legitimate check; comparing it to a version *literal* is the
 # regression. Three shapes a reintroduced version arm actually takes in bash:
 #   1. a dereference compared to a digit — [ "$SDLC_VERSION" != "11" ],
 #      [[ ${SDLC_VERSION} == 9 ]], [ "$SDLC_VERSION" -ne 10 ]
 #   2. a bare name compared to a digit in arithmetic context — (( SDLC_VERSION == 11 ))
-#      (two-char operators only, so the SUPPORTED_SDLC_VERSION=13 pin is not flagged)
+#      (two-char operators only, so the SUPPORTED_SDLC_VERSION=14 pin is not flagged)
 #   3. a case dispatch — case "$SDLC_VERSION" in 11) ...
 _vdispatch_re='\$\{?(SUPPORTED_)?SDLC_VERSION\}?"?[[:space:]]*(=|==|!=|-eq|-ne|-lt|-le|-gt|-ge)[[:space:]]*"?[0-9]'
 _vdispatch_re="${_vdispatch_re}|(^|[^A-Z_])SDLC_VERSION[[:space:]]*(==|!=|-eq|-ne)[[:space:]]*\"?[0-9]"
