@@ -350,6 +350,113 @@ if ! attested; then
     "$STATE_FILE" >&2
 fi
 
+# ============================================================== THE ARMING WALL
+# (epic-17 wave-05, spec AC-6; design ledger D-C, ratified 2026-08-19.)
+#
+# WHAT THIS ASKS THAT NOTHING ELSE DOES. Every wall above decides whether the dispatch is
+# well-formed and whether the environment it inherits is sound. This one asks whether
+# anything is WATCHING. The Patrol is the run's one clock — armed at engagement, ticking the
+# poker, surfacing rows that have gone past their declared duration — and a fleet launched
+# under a Patrol that was never armed, or that was armed and has silently stopped firing,
+# dies quiet: no notify, no landing verdict read by anyone, nothing until a human wanders
+# back. The failure is measured, repeatedly, across epic-16 and epic-17.
+#
+# THE STAMP IS THE SIGNAL. hooks/session-poker.sh writes .bionic/tmp/patrol-<sid>.state on
+# `arm` and on every `tick` BEFORE it decides anything, so the file's age measures firings
+# LANDING rather than decisions succeeding. Two states refuse here and they are named
+# separately, because the operator does something different about each: ABSENT is a Patrol
+# that was never armed (arm it), and older than 2x the poker-interval is one that was armed
+# and has died (re-arm it, and find out why the clock stopped).
+#
+# SCOPE IS THE PREDICATE ALREADY ABOVE — no second definition of "active". Outside a wave
+# this script exited hundreds of lines ago; a dispatch reaching this point is by
+# construction one the run is accountable for. The wall sits after the attestation gate on
+# purpose: a broken environment is the more urgent finding, and reporting "no Patrol" to an
+# operator whose repo is unwritable would name the second problem first.
+#
+# THE INTERVAL IS THE POKER'S OWN, obtained by invoking its `interval` verb rather than by
+# re-reading `poker-interval:` here. One knob, one reader. When that read fails — no poker
+# beside this gate, a malformed override the poker itself refuses — the gate has an
+# AMBIGUITY rather than a finding, and takes the direction §7 assigns every start-side
+# ambiguity: say so on stderr and let the dispatch through. A wall that refused because it
+# could not measure would be a new failure mode, not a safety property.
+#
+# HONEST LIMIT, inherited from the stamp: this attests that Patrol firings are landing. It
+# cannot see the CLI's cron table, so a job deleted seconds ago still looks alive for up to
+# 2x the interval. That window is the price of measuring the thing that actually matters.
+
+STATE_DIR="$REPO/.bionic/tmp"
+PATROL_STAMP_FILE="$STATE_DIR/patrol-${PAYLOAD_SID}.state"
+
+# The poker beside this gate, so a test drives the real one and an installed gate finds its
+# installed sibling — the same resolution, and the same config-dir fallback, the probe above
+# already uses.
+POKER_SCRIPT="${HOOK_DIR}/session-poker.sh"
+[ -f "$POKER_SCRIPT" ] || POKER_SCRIPT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/session-poker.sh"
+
+patrol_deny() {  # <state line>...
+  echo "patrol checkpoint: this dispatch is refused — the Patrol is not alive for this session." >&2
+  echo "" >&2
+  local line
+  for line in "$@"; do echo "$line" >&2; done
+  echo "" >&2
+  echo "A dispatch with no Patrol behind it is an agent nobody is waiting on." >&2
+  echo "" >&2
+  echo "Fix: re-arm the Patrol — both halves, the clock and the stamp:" >&2
+  echo "  1. CronCreate a RECURRING session job at the interval \`bash ${POKER_SCRIPT} interval\`" >&2
+  echo "     reports, carrying the patrol prompt (skills/canonical-sdlc/SKILL.md §Dispatch)." >&2
+  echo "  2. bash ${POKER_SCRIPT} arm" >&2
+  echo "" >&2
+  echo "Then retry the dispatch." >&2
+  exit 2
+}
+
+PATROL_INTERVAL=""
+if [ -f "$POKER_SCRIPT" ]; then
+  PATROL_INTERVAL=$( cd "$REPO" 2>/dev/null && bash "$POKER_SCRIPT" interval 2>/dev/null )
+  case "$PATROL_INTERVAL" in
+    ''|*[!0-9]*) PATROL_INTERVAL="" ;;
+  esac
+fi
+
+if [ -z "$PATROL_INTERVAL" ] || [ "$PATROL_INTERVAL" -le 0 ]; then
+  echo "dispatch-preflight: the Patrol interval could not be read from ${POKER_SCRIPT}; the arming wall did not run for this dispatch." >&2
+else
+  PATROL_MAX_AGE=$(( PATROL_INTERVAL * 2 ))
+
+  # A symlink is not a stamp. The directory levels were discharged by the attestation gate
+  # above (it refuses outright on a symlinked `.bionic` or `.bionic/tmp`, and the probe it
+  # runs refuses on the same three), so only the file's own path is checked here — the same
+  # split the roster append below makes, and for the same reason (§8): a hostile repo may
+  # CLOSE this wall and must never be able to OPEN it.
+  if [ -L "$PATROL_STAMP_FILE" ] || [ ! -f "$PATROL_STAMP_FILE" ]; then
+    patrol_deny \
+      "There is no Patrol stamp for this session at:" \
+      "    ${PATROL_STAMP_FILE}" \
+      "The Patrol was never armed on this session (a symbolic link at that path is never" \
+      "followed and reads the same way), so nothing is watching the fleet this dispatch joins."
+  fi
+
+  PATROL_MTIME=$(stat -f %m "$PATROL_STAMP_FILE" 2>/dev/null \
+                 || stat -c %Y "$PATROL_STAMP_FILE" 2>/dev/null)
+  case "$PATROL_MTIME" in
+    ''|*[!0-9]*)
+      echo "dispatch-preflight: the Patrol stamp's age could not be read (${PATROL_STAMP_FILE}); the staleness half of the arming wall did not run." >&2
+      ;;
+    *)
+      PATROL_AGE=$(( $(date -u +%s) - PATROL_MTIME ))
+      [ "$PATROL_AGE" -lt 0 ] && PATROL_AGE=0
+      if [ "$PATROL_AGE" -gt "$PATROL_MAX_AGE" ]; then
+        patrol_deny \
+          "The Patrol was armed on this session and has stopped firing." \
+          "Its last stamp is ${PATROL_AGE}s old — past the ${PATROL_MAX_AGE}s limit," \
+          "which is 2x the ${PATROL_INTERVAL}s poker-interval this project configures:" \
+          "    ${PATROL_STAMP_FILE}"
+      fi
+      ;;
+  esac
+fi
+
 # ================================================================== THE ROSTER
 # (design D-5 + spec §Design "Roster"; slice 4/3 — the LAUNCH half of AC-1.)
 #
@@ -386,7 +493,7 @@ fi
 ROSTER_VERSION="v1"
 ROSTER_PREFIX="roster-"
 ROSTER_SUFFIX=".state"
-STATE_DIR="$REPO/.bionic/tmp"
+# STATE_DIR is set above, at the arming wall — the first thing on this path to need it.
 ROSTER_FILE="$STATE_DIR/${ROSTER_PREFIX}${PAYLOAD_SID}${ROSTER_SUFFIX}"
 
 warn() { printf 'dispatch-preflight: WARN %s\n' "$1" >&2; }

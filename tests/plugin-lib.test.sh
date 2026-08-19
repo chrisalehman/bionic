@@ -64,6 +64,11 @@ expect_match() {
   # shellcheck disable=SC2053  # RHS is a glob on purpose
   if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "'$actual' does not match '$pattern'"; fi
 }
+expect_no_match() {
+  local label="$1" pattern="$2" actual="$3"
+  # shellcheck disable=SC2053  # RHS is a glob on purpose
+  if [[ "$actual" == $pattern ]]; then no "$label" "'$actual' unexpectedly matches '$pattern'"; else ok "$label"; fi
+}
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
@@ -1168,6 +1173,123 @@ echo "=== Group 21: the suite is registered in tests/run.sh by name ==="
 
 expect_true "tests/run.sh names plugin-lib.test.sh" \
   grep -q 'run "plugin-lib.test.sh" bash tests/plugin-lib.test.sh' "${REPO}/tests/run.sh"
+
+
+echo ""
+echo "=== Group R: detect_plugin_root — the CLI's registry is the only oracle (W5 4/4, AC-5) ==="
+#
+# WHY THIS FUNCTION EXISTS. Payload-native scripts are invoked from a model's own shell as
+# often as from a registered command file, and `${CLAUDE_PLUGIN_ROOT}` is set only in the
+# latter. The old spelling papered over that with `${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}`,
+# which resolves — silently, and to a bootstrap-era copy that may be an older build than the
+# plugin the CLI actually loaded. A wrong-version hook that runs is worse than no hook: it
+# reports on a doctrine nobody is following.
+#
+# So the root is RESOLVED, once per session at Patrol arming, out of the record the CLI
+# itself loads from: ~/.claude/plugins/installed_plugins.json. Ratified 2026-08-19 (design
+# ledger D-B, "the reliable source of truth we control" — with the correction that the
+# registry is CLI-owned, and reliable BECAUSE it is).
+#
+# EVERY FAILURE IS LOUD AND EVERY FAILURE IS EMPTY-HANDED. There is no fallback path in
+# this function, by design: the one thing it must never do is hand back a plausible
+# directory it did not read out of the registry.
+#
+# The chain is detect_plugin_registered's, SHARED not copied — one expression naming the
+# registry file, so a machine whose config dir moves cannot have the two answer about
+# different files.
+
+root_run() {  # <env-assignments...> -- [args] ; sets R_OUT, R_ERR, R_ST
+  local -a envs=()
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
+  shift
+  R_OUT=$(env -i HOME="$TMP/home" PATH="${R_PATH:-$BASE_BIN}" "${envs[@]}" \
+    bash -c '. "$1"; shift; detect_plugin_root "$@"' _ "$DETECT_SH" "$@" 2>"$TMP/root.err")
+  R_ST=$?
+  R_ERR=$(cat "$TMP/root.err")
+}
+
+# A registry whose installPath points at a tree that actually exists — the ordinary machine.
+R_REAL="$TMP/real-plugin-root"
+mkdir -p "$R_REAL/hooks" "$R_REAL/scripts/lib"
+R_CH="$TMP/ch-root-ok"; mkdir -p "$R_CH/plugins"
+cat > "$R_CH/plugins/installed_plugins.json" <<JSON
+{
+  "version": 2,
+  "plugins": {
+    "superpowers@claude-plugins-official": [
+      { "scope": "user", "installPath": "/elsewhere/superpowers", "version": "6.3.0" }
+    ],
+    "bionic@bionic": [
+      { "scope": "user", "installPath": "${R_REAL}", "version": "0.1.0" }
+    ]
+  }
+}
+JSON
+
+root_run BIONIC_CLAUDE_HOME="$R_CH" --
+expect_eq "detect_plugin_root: a registered bionic resolves to its installPath" "$R_REAL" "$R_OUT"
+expect_eq "…exit 0" "0" "$R_ST"
+expect_eq "…and says nothing on stderr on the success path" "" "$R_ERR"
+
+# The neighbouring entry is not bionic's, and a substring match would take it.
+R_CH_NEAR="$TMP/ch-root-near"; mkdir -p "$R_CH_NEAR/plugins"
+cat > "$R_CH_NEAR/plugins/installed_plugins.json" <<JSON
+{ "version": 2, "plugins": {
+  "bionic-extras@somewhere": [ { "installPath": "/wrong/one", "version": "9.9.9" } ] } }
+JSON
+root_run BIONIC_CLAUDE_HOME="$R_CH_NEAR" --
+expect_eq "detect_plugin_root: 'bionic-extras' is not bionic (name matched whole, not by prefix)" \
+  "1" "$R_ST"
+expect_eq "…and hands back nothing at all" "" "$R_OUT"
+
+# ---- every failure arm: loud, named fix, empty stdout, no $HOME/.claude anywhere ----
+root_run BIONIC_CLAUDE_HOME="$TMP/ch-nonexistent" --
+expect_eq "detect_plugin_root: no registry file -> refusal (exit 1)" "1" "$R_ST"
+expect_eq "…and prints NOTHING on stdout, so a caller cannot use a half-answer" "" "$R_OUT"
+expect_match "…and names the fix" "*claude plugin install bionic@bionic*" "$R_ERR"
+expect_no_match "…and never re-offers the retired \${CLAUDE_PLUGIN_ROOT:-\$HOME/.claude} fallback" \
+  "*CLAUDE_PLUGIN_ROOT:-\$HOME*" "$R_ERR"
+
+root_run BIONIC_CLAUDE_HOME="$CH_EMPTY" --
+expect_eq "detect_plugin_root: registry with no bionic entry -> refusal" "1" "$R_ST"
+expect_match "…named as not-installed rather than as a parse problem" "*not installed*" "$R_ERR"
+
+root_run BIONIC_CLAUDE_HOME="$CH_MALFORMED" --
+expect_eq "detect_plugin_root: unparseable registry -> refusal, never a guess" "1" "$R_ST"
+expect_eq "…and still hands back nothing" "" "$R_OUT"
+
+# The stale-install hazard AC-5 names: the registry says a tree is there and it is not.
+R_CH_GONE="$TMP/ch-root-gone"; mkdir -p "$R_CH_GONE/plugins"
+cat > "$R_CH_GONE/plugins/installed_plugins.json" <<JSON
+{ "version": 2, "plugins": {
+  "bionic@bionic": [ { "installPath": "$TMP/deleted-by-someone", "version": "0.1.0" } ] } }
+JSON
+root_run BIONIC_CLAUDE_HOME="$R_CH_GONE" --
+expect_eq "detect_plugin_root: a registered path that is GONE is a refusal, not a return" \
+  "1" "$R_ST"
+expect_match "…and names the path it could not find" "*deleted-by-someone*" "$R_ERR"
+
+# ---- the no-jq lane resolves the same path, not an unknown ----
+R_PATH="$NOJQ_BIN" root_run BIONIC_CLAUDE_HOME="$R_CH" --
+expect_eq "detect_plugin_root: no jq on PATH still resolves, by the grep lane" "$R_REAL" "$R_OUT"
+unset R_PATH
+
+# ---- the chain is honoured, and it is the SAME chain detect_plugin_registered walks ----
+root_run CLAUDE_CONFIG_DIR="$R_CH" --
+expect_eq "detect_plugin_root: CLAUDE_CONFIG_DIR is honoured when BIONIC_CLAUDE_HOME is not set" \
+  "$R_REAL" "$R_OUT"
+root_run BIONIC_INSTALLED_PLUGINS_FILE="$R_CH/plugins/installed_plugins.json" \
+         BIONIC_CLAUDE_HOME="$TMP/ch-nonexistent" --
+expect_eq "detect_plugin_root: the file override wins over the config dir, as it does for registration" \
+  "$R_REAL" "$R_OUT"
+expect_eq "…and detect_plugin_registered answers from that same overridden file" \
+  "plugin:registered=yes" \
+  "$(detect_run BIONIC_INSTALLED_PLUGINS_FILE="$R_CH/plugins/installed_plugins.json" \
+       BIONIC_CLAUDE_HOME="$TMP/ch-nonexistent" -- detect_plugin_registered)"
+
+# ---- read-only, like every other fact here ----
+expect_eq "detect_plugin_root writes nothing into the config dir it read" \
+  "installed_plugins.json" "$(ls "$R_CH/plugins")"
 
 echo ""
 echo "========================================"

@@ -123,7 +123,19 @@ make_world() {
   printf '{}\n' > "$cfg/projects/$slug/$SID_A.jsonl"
   printf '{}\n' > "$cfg/projects/$slug/$SID_B.jsonl"
   case "$wave" in
-    yes)       write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: 4" ;;
+    yes)       write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+               # A LIVE WAVE HAS A LIVE PATROL (epic-17 W5 4/4). The arming wall refuses a
+               # dispatch whose session carries no fresh Patrol stamp, and every start-gate
+               # row below rides an active world — so an unarmed fixture would rewrite this
+               # whole table to one answer. The unarmed direction gets its OWN row
+               # (start|patrol-unarmed), driven against a world built without this.
+               mkdir -p "$repo/.bionic/tmp"
+               for _psid in "$SID_A" "$SID_B"; do
+                 printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
+                   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_psid" \
+                   > "$repo/.bionic/tmp/patrol-$_psid.state"
+                 chmod 600 "$repo/.bionic/tmp/patrol-$_psid.state"
+               done ;;
     nocurrent) write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: pending" ;;
     no)        mkdir -p "$repo/.bionic/docs" ;;
   esac
@@ -310,6 +322,19 @@ plant_agent "$L_SUB" "aworker-1111111111111111" "worker"
 mkdir -p "$L_REPO/.bionic/tmp"
 ln -s "$SANDBOX/elsewhere.state" "$L_REPO/.bionic/tmp/stop-check.state"
 
+# AN ATTESTED ACTIVE WORLD WHOSE PATROL WAS NEVER ARMED (epic-17 W5 4/4, spec AC-6). The
+# environment is sound and the brief is well-formed; what is missing is the clock that would
+# notice the dispatched agent dying. Its direction is REFUSE, LOUD — the second surviving
+# refusal on this path, and the only one that is not about the environment.
+IFS='|' read -r Q_REPO Q_TR Q_SUB <<< "$(make_world patrol-unarmed yes)"
+mkdir -p "$Q_REPO/.bionic/tmp"
+printf '# attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\n' "$SID_A" \
+  > "$Q_REPO/.bionic/tmp/preflight-$SID_A.state"
+rm -f "$Q_REPO"/.bionic/tmp/patrol-*.state
+Q_SLUG=$(printf '%s' "$Q_REPO" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$CLAUDE_CONFIG_DIR/projects/$Q_SLUG"
+printf '{}\n' > "$CLAUDE_CONFIG_DIR/projects/$Q_SLUG/$SID_A.jsonl"
+
 # An unattested world whose STATE DIRECTORY is unwritable — the environment probe's
 # own state-dir blocking check genuinely fails (w2-s45-wallfacts.md §5 judgment call 9:
 # never an absent credential, since the third credential source is the machine login
@@ -339,6 +364,7 @@ drive() {  # <condition>
     start:foreign-attestation) p=$(payload Agent "$SID_B" "$T_TR" "$T_REPO" -) ;;
     start:attested)         p=$(payload Agent "$SID_A" "$T_TR" "$T_REPO" -) ;;
     start:probe-refuses)    p=$(payload Agent "$SID_A" "$U_TR" "$U_REPO" -) ;;
+    start:patrol-unarmed)   p=$(payload Agent "$SID_A" "$Q_TR" "$Q_REPO" -) ;;
     # --- stop gate ----------------------------------------------------------
     stop:irrelevant-tool)   p=$(payload Read "$SID_A" "$A_TR" "$A_REPO" -) ;;
     stop:empty-cwd)         p=$(payload TaskStop "$SID_A" "$A_TR" "" worker) ;;
@@ -396,7 +422,8 @@ start|no-session-key|0|silent|Payload missing its session key — start: OPEN
 start|unattested|0|silent-with-announce|Start gate — R5 attestation never blocks: the wall auto-runs the probe, the probe succeeds, and the dispatch proceeds with one announce line
 start|foreign-attestation|0|silent-with-announce|Start gate — R5 attestation never blocks: a foreign-only attestation does not belong to this session, so the wall auto-probes exactly as unattested does and proceeds
 start|attested|0|silent|Start gate — the positive pair: pass in silence
-start|probe-refuses|2|loud|Start gate — the one surviving refusal under R5: the auto-probe itself genuinely fails (unwritable state dir), so the dispatch is REFUSED quoting the reason the probe gives
+start|probe-refuses|2|loud|Start gate — one of two surviving refusals under R5: the auto-probe itself genuinely fails (unwritable state dir), so the dispatch is REFUSED quoting the reason the probe gives
+start|patrol-unarmed|2|loud|Start gate — the arming wall: environment sound, brief well-formed, but no Patrol has stamped this session, so nothing would notice the dispatched agent dying — REFUSED with both re-arm commands named
 stop|irrelevant-tool|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
 stop|empty-cwd|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
 stop|non-git-cwd|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
