@@ -94,7 +94,7 @@ SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
 write_plan() {  # <path> <current-line>
   mkdir -p "$(dirname "$1")"
   {
-    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 13\n'
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
     printf 'intent: build\nrigor: audited\nscale: wave\n---\n\n# Fixture plan\n\n'
     printf '## SDLC State\n\nintegration-branch: main\n%s\n\n- Step 4: evidence\n' "$2"
   } > "$1"

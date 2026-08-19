@@ -701,7 +701,7 @@ sleep 0.3 2>/dev/null || true
 mkdir -p "$R8/.bionic/docs/plans/epic-99"
 {
   printf -- '---\n'
-  printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 13\n'
+  printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
   printf 'intent: build\nrigor: audited\nscale: wave\n'
   printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 4\n'
 } > "$R8/.bionic/docs/plans/epic-99/wave-01.md"

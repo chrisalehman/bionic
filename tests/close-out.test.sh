@@ -161,6 +161,128 @@ fi
 # tracked skills/ or agents/ file. Each of those is a distinct, non-2 count,
 # so the single equality check above discriminates all three failure shapes.
 
+# ===== Section 6: the v14 evidence-key contract, gate <-> doctrine =====
+#
+# Ownership-table row (epic-17 W5 spec, ## Design):
+#   close-out evidence keys (v14) | canonical-sdlc-evidence-gate.sh (SSoT)
+#   | SKILL.md Step-9 prose + evidence-shapes row | this arm
+#
+# The gate is the owner: `validate_ship_step` is where the four keys are
+# demanded, and everything else is a rendering of it. This arm reads the key
+# set OUT of the hook — never a typed literal — so a contract change that
+# moves the hook and forgets the doctrine goes red here instead of leaving
+# two Step-9 contracts in the corpus, one of which nobody enforces.
+#
+# Extraction is deliberately narrow: `shape_block delivered` and the trio's
+# `for f in ...` loop are the two lines that ARE the demand. A key named only
+# in a comment or a fix hint is prose, and prose is what this suite exists to
+# distrust.
+echo "== Section 6: v14 close-out keys — gate is the owner, doctrine renders it =="
+GATE="${BIONIC_HOOKS_DIR}/canonical-sdlc-evidence-gate.sh"
+
+# gate_keys <file>: the four demanded keys, one per line, sorted.
+gate_keys() {
+  {
+    sed -n '/^validate_ship_step()/,/^}/p' "$1" \
+      | sed -n 's/^[[:space:]]*shape_block[[:space:]]*//p' | tr ' ' '\n'
+    sed -n '/^validate_ship_step()/,/^}/p' "$1" \
+      | sed -n 's/^[[:space:]]*for f in \(.*\); do$/\1/p' | tr ' ' '\n'
+  } | grep -E '^[a-z-]+$' | sort -u
+}
+
+GATE_KEYS="$(gate_keys "$GATE")"
+EXPECTED_KEYS="$(printf 'delivered\ndeployed\nmonitored\nverified\n')"
+if [ "$GATE_KEYS" = "$EXPECTED_KEYS" ]; then
+  pass "evidence gate demands exactly the four v14 close-out keys"
+else
+  fail "evidence gate's Step-9 key set is not the v14 four" \
+    "$(diff <(echo "$EXPECTED_KEYS") <(echo "$GATE_KEYS"))"
+fi
+
+# Every key the gate demands is rendered in SKILL.md's Step-9 surfaces. The
+# search is scoped to the ## Evidence shapes table row plus the Step-9 section,
+# so a key that appears only in some unrelated paragraph does not count.
+skill_step9_surface() {
+  awk '/^### Step 9 — Close-out/ {f=1} /^## Evidence shapes/ {f=1} f' "$SKILL"
+}
+S9="$(skill_step9_surface)"
+for k in $GATE_KEYS; do
+  if echo "$S9" | grep -qF -- "\`${k}:\`"; then
+    pass "SKILL.md Step-9 surface renders the gate's '${k}:' key"
+  else
+    fail "SKILL.md Step-9 surface never names the gate's '${k}:' key"
+  fi
+done
+
+# The retired v13 keys are gone from the shipped contract text. A doctrine that
+# still tells a reader to write `verified-at:` is worse than silence: the gate
+# would refuse the commit and the text would be the reason they wrote it.
+for dead in 'deploy:' 'verified-at:' 'monitor:'; do
+  if echo "$S9" | grep -qF -- "\`${dead}\`"; then
+    fail "SKILL.md Step-9 surface still teaches the retired v13 key '${dead}'"
+  else
+    pass "retired v13 key '${dead}' is gone from SKILL.md's Step-9 surface"
+  fi
+done
+
+# meta: the extractor discriminates. A doctored hook that drops `delivered`
+# from the demand must change the key set this arm reads.
+sed 's/^  shape_block delivered$/  : delivered/' "$GATE" > "$TMP/gate-nodelivered.sh"
+if [ "$(gate_keys "$TMP/gate-nodelivered.sh")" != "$EXPECTED_KEYS" ]; then
+  pass "meta: a gate that stops demanding 'delivered' is detected"
+else
+  fail "meta: dropping the 'delivered' demand did not move the extracted key set"
+fi
+
+# ===== Section 7: deploy_target is n/a by default and never inferred =====
+#
+# AC-3. The trio above is opt-in only because this is true, so the two arms
+# belong in one suite: a Step-0 that quietly infers a live surface from
+# "deploy signals" would put every ordinary run back on the hook for a
+# release it never performed.
+echo "== Section 7: deploy_target defaults n/a, never inferred (AC-3) =="
+
+STEP0="$(awk '/^### Step 0 — Configure/ {f=1} /^### Step 1/ {f=0} f' "$SKILL")"
+if [ -n "$STEP0" ]; then
+  pass "SKILL.md Step 0 section extracted"
+else
+  fail "SKILL.md Step 0 section not found — the anchors moved"
+fi
+
+if echo "$STEP0" | grep -qi 'never inferred'; then
+  pass "Step 0 says deploy_target is never inferred"
+else
+  fail "Step 0 does not say deploy_target is never inferred"
+fi
+
+if echo "$STEP0" | grep -qF 'from deploy signals`'; then
+  fail "Step 0 still infers deploy_target 'from deploy signals'"
+else
+  pass "the retired 'from deploy signals' inference is gone from Step 0"
+fi
+
+# The confirmation display is the surface the user approves from, so it carries
+# the rule too — an `[inferred: ...]` annotation on that line would tell the
+# user the agent derived a value it is forbidden to derive.
+DISPLAY_LINE="$(echo "$STEP0" | grep -E '^[[:space:]]*deploy_target:' | head -1)"
+if [ -n "$DISPLAY_LINE" ]; then
+  pass "Step-0 confirmation display carries a deploy_target line"
+else
+  fail "Step-0 confirmation display has no deploy_target line"
+fi
+if echo "$DISPLAY_LINE" | grep -q '\[inferred:'; then
+  fail "the confirmation display still annotates deploy_target as '[inferred: ...]'"
+else
+  pass "the confirmation display no longer annotates deploy_target as inferred"
+fi
+
+# The gate's own predicate agrees on what "not named" means: absent, none, n/a.
+if grep -qE '^[[:space:]]*""\|none\|n/a\|n/a:\*\)[[:space:]]*return 1' "$GATE"; then
+  pass "the gate reads absent/none/n-a as 'no live surface named'"
+else
+  fail "the gate's deploy_target_named predicate does not read absent/none/n-a as unnamed"
+fi
+
 # ---------- summary ----------
 echo "──────────────────────────────────────────────"
 echo "close-out: ${PASS} passed, ${FAIL} failed"
