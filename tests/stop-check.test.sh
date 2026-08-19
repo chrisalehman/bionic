@@ -12,11 +12,11 @@
 # projects directory, or the live installed hooks, and no test invokes the
 # TaskStop tool.
 #
-# Usage: bash hooks/stop-check.test.sh
+# Usage: bash tests/stop-check.test.sh
 
 set -uo pipefail
 
-. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/resolve-roots.sh"
 
 CHECK="${BIONIC_HOOKS_DIR}/stop-check.sh"
 # The roster's WRITER. Section 8 reads rows; §8(g) drives this script to produce
@@ -573,7 +573,7 @@ echo "=== Section 8: roster classification, contract-from-roster, P2 claims (sli
 # The roster's SCHEMA is hooks/dispatch-preflight.sh's (roster-state/v1); its
 # ROWS here are hand-built rather than produced by that gate, exactly like
 # tests/cross-gate-agreement.test.sh's verdict_er() — this suite's job is the
-# READER, and hooks/dispatch-preflight.test.sh already owns the writer.
+# READER, and tests/dispatch-preflight.test.sh already owns the writer.
 
 IFS='|' read -r H8 R8 S8 <<< "$(make_world w8)"
 OWN8="88888888-0000-0000-0000-000000000001"

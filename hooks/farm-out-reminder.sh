@@ -76,7 +76,7 @@ log_event() {  # $1=event $2=class
   return 0
 }
 
-# [WALL: hooks/farm-out-reminder.test.sh]
+# [WALL: tests/farm-out-reminder.test.sh]
 emit_deny() {  # $1=class $2=role
   jq -n --arg r "$(deny_reason "$1" "$2")" \
     '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}' 2>/dev/null
@@ -135,7 +135,7 @@ classify_tier1() {  # $1=flat cmd → sets CLASS ROLE, rc 0 on match
   # inside a word (`echo remake`) never matches. A short (<3-segment) chain
   # that carries a tier-1 token thus denies here on purpose; the ≥3-segment
   # &&-chain is a separate arm (class=chain) reached only when this one skips.
-  # [WALL: hooks/farm-out-reminder.test.sh]
+  # [WALL: tests/farm-out-reminder.test.sh]
   if printf '%s' "$c" | grep -qE '(^|[;&| ])bash +([^ ]*/)?(test\.sh|tests/run\.sh)([;&| ]|$)|(^|[;&| ])bash +[^ ]+\.test\.sh([;&| ]|$)|^(npm|pnpm|yarn) +test([;&| ]|$)|^pytest([;&| ]|$)|^go +test([;&| ]|$)|^cargo +test([;&| ]|$)|^make +test([;&| ]|$)'; then
     CLASS="suite"; ROLE="test-runner"; return 0; fi
   # Command position only: start-of-command or after a real separator

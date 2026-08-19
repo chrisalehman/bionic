@@ -119,7 +119,7 @@ Triple not yet declared → say so and list the axes. Invoked as `help` → rend
 | `refactor` | Change structure, preserve behavior. Covers upgrades, migrations, removals/deprecations. | `behavior-preservation:` in the Step-5 block; migrations add `compat-matrix:`/`revert-plan:` (or `n/a: not a migration`). Log-only. |
 | `tune` | Move a NAMED measurement toward a target. If you cannot name the measurement, it is not tune. | `baseline:`/`target:`/`re-measure:` in the Step-5 block, all three. Log-only. |
 | `spike` | Timeboxed research. **Ships no code at any rigor.** | Writeup only at `<docs-root>/spikes/spike-<slug>-<YYYYMMDD>.md`. No plan file, no spec, no ADR, no commits to the integration branch. |
-| `incident-response` | A live deployed surface — production or tooling — is broken for its users. The clock matters. | RCA, not ADR. Floors at `audited`. Monitoring-gap closure is part of Ship. |
+| `incident-response` | A live deployed surface — production or tooling — is broken for its users. The clock matters. | RCA, not ADR. Floors at `audited`. Monitoring-gap closure is part of Close-out. |
 
 **rigor** — how hard the evidence tries to lie. Cumulative.
 
@@ -193,7 +193,7 @@ Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `inten
 | 6 Review | `agent-skills:code-review-and-quality` | Every axis has a verdict; independent critic attached |
 | 7 Document | `agent-skills:documentation-and-adrs` | Every decision at medium significance or above is recorded |
 | 8 Integrate | `superpowers:finishing-a-development-branch` | Wave reachable from the integration branch; worktree removed; tmp wiped |
-| 9 Ship | `agent-skills:shipping-and-launch` | Checklist + rollback; `continuation.md` written |
+| 9 Close-out | `agent-skills:shipping-and-launch` | Checklist + rollback; `continuation.md` written |
 
 Committing is a cross-cutting rhythm (~once per step), not a numbered step. Update `## SDLC State` **before staging** — the gate reads the file, not the diff. Do not add a `commit:` field; the SHA lives in git.
 
@@ -437,7 +437,7 @@ Note the hole: the hook checks only that the token `waiver` is present — not w
 
 **Duplication axis — one implementation site per concept.** The design's ownership table is the anchor: its owner column already says where each concept lives, so the axis is a comparison, not a hunt. A second site computing or deciding the same thing is a FLAG; a concept the table gives two owners is a FAIL; a concept the wave introduced and the table never named is a FLAG against the design, not against the code.
 
-**Agreement tests.** Each shared-truth pair in the ownership table — one concept, more than one rendering surface — names one hermetic test that fails when the surfaces disagree. The standing exemplar is the `SUPPORTED_SDLC_VERSION` pin-sync rows in `tests/scripts.test.sh`: one logical constant, two rendering sites pinned — the two hooks — and a test that goes red the moment either moves alone. It is also the honest limit: the version paragraph in `SKILL.md` and the version renderings in `diagrams/hook-chain.excalidraw` are rendering sites *outside* that tuple, and they drift silently — the prose-drift class this axis exists to catch, in the exemplar named to teach it. A listed pair with no named test is a FLAG, and "the suite covers it" is not a named test.
+**Agreement tests.** Each shared-truth pair in the ownership table — one concept, more than one rendering surface — names one hermetic test that fails when the surfaces disagree. The standing exemplar is the `SUPPORTED_SDLC_VERSION` pin-sync rows in `tests/scripts.test.sh`: one logical constant, two rendering sites pinned — the two hooks — and a test that goes red the moment either moves alone. The same constant's four diagram renderings — three in `diagrams/hook-chain.svg`, one in `diagrams/lifecycle.svg`'s title — are pinned the same way in `tests/diagrams.test.sh`, which reads the value out of the hook rather than restating it; composing those pictures as text is what moved them out of the unpinnable set, and a picture is worth pinning precisely because nobody re-reads it. It is also the honest limit: the version paragraph in `SKILL.md` and the version-history bullet in `operational-rules.md` are rendering sites *outside* both tuples, and they drift silently — the prose-drift class this axis exists to catch, in the exemplar named to teach it. A listed pair with no named test is a FLAG, and "the suite covers it" is not a named test.
 
 Neither of these is a wall. **No hook sees the duplication axis or the agreement-test obligation** — they are carried by the reviewer and critic mandates and enforced by judgment, which is the whole reason the ownership table is authored at Step 2 where a human ratifies it.
 
@@ -456,6 +456,32 @@ This test used to live in the always-loaded global config, which is where a prec
 ### Step 8 — Integrate & close
 
 Atomic, one task. Merge the wave into the declared integration branch (local merge; pushing is the user's gate) and remove the worktree. Default is merge — parking requires an explicit `## Wake Note`. Then, when `cleanup_on_finish: true`: skip if frontmatter already has `cleaned:`; wipe `.bionic/tmp/*`; assert zero non-completed tasks; strip stray `continuation-checkpoint.md`/`handoff-*.md`; set `cleaned: <today>`.
+
+### Step 9 — Close-out
+
+**Close-out is an institution, not a courtesy.** Every finding this run's rigor machinery surfaced — walk, matrix discharge, auditor, critic — gets exactly one terminal disposition. "Continuation candidate" is abolished; nothing leaves this step homeless.
+
+<!-- TERMDISP-BEGIN -->
+> Abolish "continuation candidate." Every finding gets exactly one of three terminal
+> dispositions at wave close:
+> 1. **DO-NOW** — folded into the closing wave.
+> 2. **ACCEPT-CLOSED** — ruled won't-fix, recorded beside its reasoning, and never
+>    carried forward again. An accepted residual is knowledge, not work.
+> 3. **PROMOTE** — kept only with one of two homes: **(a) a trigger** — the named
+>    EVENT that reactivates it ("diagnose the flake when it next fires — output now
+>    preserved"), or **(b) a charter** — promotion into a named future effort (an
+>    ideas/ seed or epic charter) by the user's explicit materiality ruling at close.
+>    A charter costs a decision and gives the work its own document that competes
+>    for prioritization openly. What stays forbidden is the homeless deferral: an
+>    item on a wave's continuation list with no decision, no home, no identity —
+>    that is what schedules cleanup waves by momentum. (Amended 2026-08-16 on
+>    Chris's catch: the original trigger-only form had no bin for legitimately
+>    deferred major work — the plugin conversion itself is the proof case.)
+<!-- TERMDISP-END -->
+
+The vehicle is a single-turn close-out report, sent to the user at Step 9 and never re-run as ceremony: plain English, at the altitude of decisions rather than of code, covering ten parts — goal, accomplished, deferred-with-dispositions (each finding's DO-NOW / ACCEPT-CLOSED / PROMOTE named), special attention, material risks, challenges, decisions, success/failure verdict, learnings, next. Authoring detail per part and the anti-ceremony bound live in `operational-rules.md`. Write `continuation.md` (§Handoff above) alongside it — the report is what the user reads; the file is what the next wave opens.
+
+Where `deploy_target` names a live surface, the release lands and is watched for one cycle before the report claims done; the Evidence shapes table below names the three keys that record it, and `n/a:` applies only when `deploy_target: none`.
 
 ## Evidence shapes
 
@@ -494,7 +520,17 @@ Roles, by `subagent_type`: `researcher` and `test-runner` for exploration and me
 
 **Liveness fields.** The progress-artifact path carries a `cadence` alongside it — how often the task is expected to write there, extending the 15-minute rule by one number: "too quiet" means quieter than the author's own declaration, not a fixed clock. A subprocess claim — a process pattern plus its output file — is conditional-required: declared only when the task backgrounds a long-running command. While the claimed process exists, quiescence is irrelevant; its absence with no deliverable is what the landing verdict reads as a broken contract. No shape label rides beside these fields — shape emerges from which are present: no progress path is short/turns, progress-plus-cadence is long in-agent, adding a subprocess claim is a delegated command.
 
-**The poker duty.** Dispatching a long-shape unit arms a session-scoped self-wake at the interval `bash ~/.claude/hooks/session-poker.sh interval` reports (config knob `poker-interval:` in `.bionic/config.yaml`, default 30m) — never an OS cron, never a resident process; the wake dies with the session, and the roster on disk is the record that survives it. Each wake ticks: `bash ~/.claude/hooks/session-poker.sh tick`. A QUIET or DISARM decision is a no-op; DISARM also ends the self-wake. A NOTIFY decision surfaces the named row through the non-response procedure below — the poker only decides, it never stops or messages on its own.
+**The heartbeat.** One clock per run, and only one. **Arm it at engagement** — the Step-0 confirmation of a new run, or the resume ritual of an open one, in every session of that run — as a session cron (`CronCreate`) at the interval `bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/hooks/session-poker.sh interval` reports (config knob `poker-interval:` in `.bionic/config.yaml`, default 30m). Arming is not conditional on having dispatched anything: the heartbeat carries the run, not the roster, and a session that waits for a subagent to exist has no pulse for every stretch it works alone. Never an OS cron, never a resident process — the job is session-scoped, dies with the session, and the roster on disk is the record that survives it; its 7-day auto-expiry is the forgotten-disarm backstop, not the disarm. `CronDelete` the job at run close. **Subagents stay timerless:** a dispatched agent arms nothing — it holds its turn and polls its own output, and the one heartbeat lives in the session that dispatched it. The manual `/loop` poke ritual is retired with the old poker duty it carried: its work is the patrol prompt's now, and a second timer is a second answer to "what should I be doing right now."
+
+**The patrol prompt.** The armed job carries ONE prompt, idempotent by construction so that firing at an awkward moment costs a no-op rather than a duplicate action, and it ends by continuing the run rather than by reporting on it. Four reads, then the work:
+
+- **Tick the poker.** `bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/hooks/session-poker.sh tick` is the decision brain — the prompt gathers, the poker decides, per row. A QUIET or DISARM decision is a no-op; DISARM also ends the heartbeat. A NOTIFY decision surfaces the named row through the non-response procedure below — the poker only decides, it never stops or messages on its own.
+- **Read liveness against the contracted cadence,** never against the tick interval: a row is quiet when it is quieter than the `cadence` its own brief declared (Liveness fields, above), so a tick that finds every progress file inside its declared cadence has found nothing and says nothing.
+- **Keep the panel and the task list honest.** Both duties are TOOL-GROUNDED, never judgment-worded:
+  - *Panel refresh* = ListAgents, then TaskStop on each listed lineage whose ledger row is fact-discharged (CLOSED / MET / acked). A listed agent with NO ledger row is surfaced as a duplicate-session tell, never silently stopped.
+  - *Task-list refresh* = TaskList, then chronological display order (current-step slice entries first, dependency order, later-step entries after) restored mechanically — TaskCreate fresh copies of every entry that must sort later, TaskUpdate status=deleted on the stale originals, no-op when ascending-ID order already matches — then statuses reconciled with verified reality.
+  - *Fallback:* where the task tools are absent (version-gated), the plan ledger stands in as the task list.
+- **Then continue toward the goal until a wall.** The tick is not a status report. After the reads, resume the run's actual work and keep going until something genuinely blocks — a decision only the user can take, a gate whose evidence is not yet earned, a dependency not yet merged. An interactive stretch is already standing at the blocked-on-user wall, so the tick no-ops quietly there rather than manufacturing activity.
 
 **Phase-gated dispatch.** A brief for slice work splits into a deliverable phase and bookkeeping, with a hard report gate between them: the writer stops at the gate and sends the completion message before touching bookkeeping. A redirect sent mid-phase is read at the gate — not before, and not after the whole task — bounding the steering race instead of pretending mail delivery is instant. Expected-duration estimates quote the deliverable phase only; bookkeeping is not the writer's clock to keep.
 
@@ -504,7 +540,7 @@ Roles, by `subagent_type`: `researcher` and `test-runner` for exploration and me
 
 **Parallel by default, justify sequential** — but dispatch serially when units share state (one local DB, a shared reset, count-based assertions).
 
-**Parallel writers work in spawned worktrees.** Whoever dispatches a parallel writer creates that writer's tree first: creation authority follows dispatch authority at every level, orchestrator included — during a parallel-writer phase an orchestrator that writes tracked files takes a tree of its own, and `.bionic` plan and ledger writes remain a file-ownership question rather than an exemption from this one. The tree comes from `${CLAUDE_PLUGIN_ROOT}/scripts/spawn-worktree.sh`, which verifies what it built and attests it in a single line; the dispatcher quotes that line into the unit's ledger row, so what the row claims about a base commit is something the machine measured rather than something the brief asked for. Teardown is never automatic — the merge decision is the dispatcher's, taken later. The harness `isolation: worktree` param is retired from bionic briefs at every level: it creates trees no ledger row can account for.
+**Parallel writers work in spawned worktrees.** Whoever dispatches a parallel writer creates that writer's tree first: creation authority follows dispatch authority at every level, orchestrator included — during a parallel-writer phase an orchestrator that writes tracked files takes a tree of its own, and `.bionic` plan and ledger writes remain a file-ownership question rather than an exemption from this one. The tree comes from `${CLAUDE_PLUGIN_ROOT}/scripts/spawn-worktree.sh`, which verifies what it built and attests it in a single line; that path is written the way the CLI substitutes it inside a registered command file, so a model running the script from its own shell — where `${CLAUDE_PLUGIN_ROOT}` is unset and payload-native scripts have no `~/.claude` fallback to expand into — must resolve the plugin root first; the dispatcher quotes that line into the unit's ledger row, so what the row claims about a base commit is something the machine measured rather than something the brief asked for. Teardown is never automatic — the merge decision is the dispatcher's, taken later. The harness `isolation: worktree` param is retired from bionic briefs at every level: it creates trees no ledger row can account for.
 
 **The starting standard.** A subagent may be dispatched only when: the environment attestation from this session is present; a work contract exists at launch, naming the task and a durable deliverable path; and the launch is ledgered the moment it happens.
 
@@ -514,7 +550,7 @@ Roles, by `subagent_type`: `researcher` and `test-runner` for exploration and me
 
 **Facts discharge stops.** A row whose verdict reads MET, WAIVED, or acked is stopped by a single TaskStop with no observation call first. A user-ordered stop executes at once regardless of verdict; an unmet contract yields one informational line naming what was missing, never a refusal. The ceremony below survives only for a live agent with an unmet contract.
 
-Two operator commands carry the fact-discharged paths: `bash ~/.claude/hooks/stop-orders.sh standdown` computes the batch of landed/acked rows with stoppable addresses (and names what it will not touch) before closing a batch or wave; `bash ~/.claude/hooks/stop-orders.sh order <target>` records a human stop order the gate honors immediately (30-minute validity; expiry fails closed). Addressing rule: **observe by the long transcript id, stop by `name@session-xxxxxxxx`** — different namespaces, and the machinery prints both.
+Two operator commands carry the fact-discharged paths: `bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/hooks/stop-orders.sh standdown` computes the batch of landed/acked rows with stoppable addresses (and names what it will not touch) before closing a batch or wave; `bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/hooks/stop-orders.sh order <target>` records a human stop order the gate honors immediately (30-minute validity; expiry fails closed). Addressing rule: **observe by the long transcript id, stop by `name@session-xxxxxxxx`** — different namespaces, and the machinery prints both.
 
 **The stopping standard.** For a live agent with an unmet contract, a subagent may be stopped only when a fresh observation of that target has been recorded first. Freshness is the activity boundary, not a clock (D-1): a stop is permitted only if the target's last working-log activity is no later than what the observation recorded — anything written since is stale by definition, dormancy since the observation is valid however old. One observation discharges exactly one stop (D-2); a second stop needs a fresh observation. Where the brief contracted a progress artifact, the observation of that target names that path — the D-6 channel is evidence the contract already promised, and an observation that omits it is the agent-level look that was insufficient before. The observation that discharges a stop is the stopper's own — a look recorded by a different actor does not close it. What this session did not launch, it does not stop by name; the full agent id is the deliberate path past that refusal. Never on an idle notification, never on elapsed silence alone.
 
@@ -536,4 +572,6 @@ Before ending a turn, reconcile: every `active` row either has a verified result
 
 ## Diagrams
 
-`diagrams/lifecycle.png` — the 10 steps, the two gates, and the commit rhythm. `diagrams/hook-chain.png` — which hook fires on which tool event, and which arms block versus log. Sources are the paired `.excalidraw` files.
+`diagrams/lifecycle.svg` — the 10 steps, the two gates, and the commit rhythm. `diagrams/hook-chain.svg` — which hook fires on which tool event, and which arms block versus log. Each file is its own sole source: hand-composed text, no paired drawing file, no export step, and so nothing that can be stale relative to it. Because the text is greppable, `tests/diagrams.test.sh` pins what the pictures claim — the four version renderings against the hooks' `SUPPORTED_SDLC_VERSION`, the six always-on entries against `hooks/hooks.json`, the ten steps and the armed hook set against this file — and every pin re-proves itself against a doctored copy on each run.
+
+**Format policy.** Composed SVG is the default for a diagram here, because it is the only format that is simultaneously the editable source, the shipped artifact, and a test surface. Excalidraw (`bionic:excalidraw-diagram`) is the backup, for a drawing whose layout is genuinely hand-arranged rather than composed; it ships an export beside its source and re-accepts the is-that-current relationship, so reach for it when the picture is worth that cost. Any other format is a judgment call, argued at the time against one question: what will pin this picture to the truth after its author has moved on.

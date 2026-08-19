@@ -44,6 +44,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/frontmatter-parser.sh"
 
 REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 
@@ -128,7 +129,7 @@ SID_LG="2ae9d613-4c07-4b8a-9f51-7d02ac86be40"
 # about on stderr. This suite's claim is producer/consumer AGREEMENT ON THE
 # ATTESTATION — "passes in silence" below means the attestation raised nothing —
 # so the fixture is the ordinary dispatch, not a malformed one. The warning
-# itself is driven where it belongs, in hooks/dispatch-preflight.test.sh S10c.
+# itself is driven where it belongs, in tests/dispatch-preflight.test.sh S10c.
 
 mk_agent_payload() {  # <sid> <cwd>
   jq -n --arg s "$1" --arg c "$2" \
@@ -1457,7 +1458,7 @@ expect_contains "…and the gate names the same path the writer wrote" \
 # This is the row that failed. It belongs in THIS suite rather than the
 # recorder's own, because the property is cross-script: the file the recorder
 # writes is the file the gate reads, and the recorder alone cannot see that
-# dropping a row disarms another program. `hooks/execution-recorder.test.sh`
+# dropping a row disarms another program. `tests/execution-recorder.test.sh`
 # asserted only that the row THIS event confirmed survived the fold, which is why
 # 110/110 was green over the defect.
 F4_ROSTER="$IREPO/.bionic/tmp/roster-$SID_A.state"
@@ -2236,7 +2237,13 @@ DL_LAUNCHED=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
 # FRESH progress written now, well inside the declared cadence; a DEAD claim no live process
 # carries; an ABSENT deliverable so the row has not landed and is genuinely judged.
 printf 'stage 1\n' > "$DLREPO/.bionic/tmp/dl.progress"
-DL_CLAIM="bionic-xgate-D2-deadclaim-no-such-process-9f5c1a2b"
+# `-$$` is load-bearing, not decoration. This claim exists to be DEAD — the arm below asserts
+# `pgrep -f` matches nothing, and hooks/stop-check.sh reads liveness the same way. `pgrep -f`
+# matches on full argv, and a concurrent `tests/run.sh` running this very file carries the
+# literal in its own argv, so a fixed string makes each run's shell satisfy the other run's
+# "no such process" claim. The pid suffix gives every run a private literal that no sibling's
+# argv can contain, which is what makes the claim's deadness a property of this run alone.
+DL_CLAIM="bionic-xgate-D2-deadclaim-no-such-process-9f5c1a2b-$$"
 {
   printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
   printf 'roster-state/v1|status=confirmed|session=%s|name=dl-row|agent_id=adl-row-0001|launched_at=%s|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-dl.md|source=declared|duration=|progress=%s|claims=%s|cadence=~5m|absent=|waiver=|tool_use_id=toolu_DL\n' \
@@ -2338,7 +2345,7 @@ expect_contains "…carrying the deliverable the brief declared" \
 # here is the same string SubagentStart carries below and the same string the landing
 # sweep matches against `background_tasks[].id` (t4b-probe-report.md §4). The TEAMMATE
 # shape — addressing id recorded, `agent_id=` deliberately left empty, and therefore
-# never identified — is pinned in hooks/execution-recorder.test.sh Section 10.
+# never identified — is pinned in tests/execution-recorder.test.sh Section 10.
 mk_agent_post "$SID_A" "$KTR" "$KREPO" "toolu_01CHAIN" "w16-chain" "$KID" \
   | bash "$PARTY_ER" >/dev/null 2>&1
 K_CONFIRMED=$(grep 'status=confirmed|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tail -1)
@@ -2638,17 +2645,9 @@ expect_absent_ug() {
 # commands under one matcher, same shape the Stop event already uses for its two
 # no-matcher hooks).
 # Line-anchored extraction of the pinned shape — pin the span, not the label.
-SKILL_HOOKS_ROWS=$(awk '
-  /^hooks:$/ { active=1; next }
-  active && /^---$/ { active=0 }
-  active && /^[A-Za-z]/ { active=0 }
-  !active { next }
-  /^  [A-Za-z]+:$/ { event=$0; sub(/^  /,"",event); sub(/:$/,"",event); matcher=""; next }
-  /^    - matcher: "/ { matcher=$0; sub(/^    - matcher: "/,"",matcher); sub(/"$/,"",matcher); next }
-  /^    - hooks:$/ { matcher=""; next }
-  /^          command: / { cmd=$0; sub(/^          command: /,"",cmd); next }
-  /^          timeout: / { t=$0; sub(/^          timeout: /,"",t); print event "|" matcher "|" cmd "|" t }
-' "$SKILL_SRC")
+# Shared with installer-behavior.test.sh and scripts.test.sh via
+# tests/lib/frontmatter-parser.sh (epic-17 W4 AC-12 dedupe — see §L.7 below).
+SKILL_HOOKS_ROWS=$(skill_hooks_rows "$SKILL_SRC")
 
 expect_contains "frontmatter registers the evidence gate on PreToolUse|Bash, timeout 10" \
   "PreToolUse|Bash|\${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-evidence-gate.sh|10" "$SKILL_HOOKS_ROWS"
@@ -2718,13 +2717,15 @@ expect_contains "…and the recorder's identification arm guards on that same ev
 # This test is therefore the only detector, and it is a WHITELIST rather than a blacklist:
 # the failure is silent, so the safe default for an unrecognised key is red.
 VALID_HOOK_EVENTS="PreToolUse PostToolUse Notification UserPromptSubmit Stop SubagentStop SubagentStart PreCompact SessionStart SessionEnd"
-SKILL_EVENT_KEYS=$(awk '
-  /^hooks:$/ { active=1; next }
-  active && /^---$/ { active=0 }
-  active && /^[A-Za-z]/ { active=0 }
-  !active { next }
-  /^  [A-Za-z]+:$/ { k=$0; sub(/^  /,"",k); sub(/:$/,"",k); print k }
-' "$SKILL_SRC")
+# epic-17 W4 S9 A5 fold: this hand-copied the 4-line hooks: prologue as the fifth
+# call site (skill_hooks_rows itself, skill_block_count, installer-behavior.test.sh's
+# _skill_frontmatter_has, and scripts.test.sh's two inline checks were the four AC-12
+# named) — now shares tests/lib/frontmatter-parser.sh's skill_hooks_event_keys, which
+# is the same prologue+key-line logic, not skill_hooks_rows (that helper only emits a
+# key once a FULL event/matcher/command/timeout chain follows it, which would silently
+# under-detect an incomplete malformed entry under a bad key — the exact silent-miss
+# this test exists to make impossible).
+SKILL_EVENT_KEYS=$(skill_hooks_event_keys "$SKILL_SRC")
 expect_eq "the frontmatter block declares at least one event key (this test is not vacuous)" \
   "yes" "$([ -n "$SKILL_EVENT_KEYS" ] && echo yes || echo no)"
 L5_BAD=""
@@ -2815,9 +2816,8 @@ expect_eq "…every one of them resolving through \${CLAUDE_PLUGIN_ROOT}, never 
 # a stripped `timeout:` line the same way a dedicated pairing arm would: that row's
 # extractor only emits once it reaches a `timeout:` line, so a stripped bound drops the
 # whole row out of SKILL_HOOKS_ROWS, failing BOTH the per-command literal and the total
-# count. No separate arm needed here for that channel. `skill_block_count` stays defined at
-# §L.7 below for the frontmatter-parser-agreement tracking (a fourth copy of that state
-# machine, deliberately left unpinned there) — this section no longer calls it.
+# count. No separate arm needed here for that channel. (The `skill_block_count` leftover
+# this section used to point at was retired at §L.7 below, epic-17 W4 AC-12 dedupe.)
 #
 # ALWAYS-ON CHANNEL — RE-DERIVED epic-17 wave-03 S4, closing the gap wave-02's A13/A17
 # flagged (`.bionic/docs/record/epic-17-w3/probe-hooks-timeout.md`, VERDICT: HONORED at
@@ -2925,68 +2925,40 @@ expect_contains "the guard sets the channel marker the dispatch wall reads" \
 expect_contains "…and the dispatch wall skips its roster append on exactly that value" \
   '"${BIONIC_HOOK_CHANNEL:-}" = "agent-context"' "$(cat "$PARTY_DP")"
 
-# --- L.7 the frontmatter PARSER itself: three copies in TEST CODE, no agreement (t6-review.md
-# F-5, low severity but real). §L.1's own row-extractor (above), installer-behavior.test.sh's
-# `_skill_frontmatter_has`, and scripts.test.sh's inline check all walk the `hooks:` block the
-# same way before diverging into their own caller's shape (row-collector vs point predicate) —
-# drift here makes a TEST go vacuous rather than production wrong, and silently: a parser that
-# stops matching just answers "not found", indistinguishable from a parser correctly reporting
-# a registration that is genuinely absent. What the three share BYTE FOR BYTE is the state
-# machine that walks the block, so that is what is pinned — as a SPAN, on the same precedent
-# §O uses for code shared by legitimately different callers — extracted from each file's own
-# source on disk rather than retyped by hand.
+# --- L.7 the frontmatter PARSER, deduplicated (epic-17 W4, AC-12) ---
 #
-# KNOWN UNPINNED FOURTH COPY (review-fold, epic-17 W2, DO-NOW 7 fallback). This file's own
-# `skill_block_count` (below — moved here from the retired §L.4 pairing arm by wave-03 S4,
-# which stopped calling it but left the function itself defined; see §L.4's comment) walks
-# the same `hooks:` block state machine as a fourth site, and `frontmatter_parser_span`
-# below stops at the FIRST occurrence in each file, so it extracts this section's L.1 copy
-# and never reaches `skill_block_count`'s — the pin below does not see it. Deliberately left
-# unpinned here rather than folded in blind: promoted to W4, trigger EVENT "any further edit
-# to the SKILL.md frontmatter parsers" (t6-review.md DO-NOW 7). Low severity — drift here
-# makes a test go quiet, not production go wrong, same as the three copies this section does
-# pin.
-skill_block_count() {  # <line-pattern> -> how many times it occurs INSIDE the hooks: block
-  awk -v pat="$1" '
-    /^hooks:$/ { active=1; next }
-    active && /^---$/ { active=0 }
-    active && /^[A-Za-z]/ { active=0 }
-    !active { next }
-    $0 ~ pat { n++ }
-    END { print n+0 }
-  ' "$SKILL_SRC"
-}
-frontmatter_parser_span() {  # <file> -> the 6-line `hooks:` state-machine prologue, ws-normalized
-  awk '
-    p == 0 && index($0, "/^hooks:$/ { active=1; next }") > 0 { p = 1 }
-    p { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; c++; if (c == 6) exit }
-  ' "$1"
-}
-L7_CG=$(frontmatter_parser_span "$REPO_ROOT/tests/cross-gate-agreement.test.sh")
-L7_IB=$(frontmatter_parser_span "$REPO_ROOT/tests/installer-behavior.test.sh")
-L7_SC=$(frontmatter_parser_span "$REPO_ROOT/tests/scripts.test.sh")
-expect_eq "the span extractor found something at all (this section is not vacuous)" "yes" \
-  "$([ -n "$L7_CG" ] && echo yes || echo no)"
-expect_eq "installer-behavior.test.sh's frontmatter parser opens the SAME state machine, span for span" \
-  "$L7_CG" "$L7_IB"
-expect_eq "scripts.test.sh's frontmatter parser opens the SAME state machine, span for span" \
-  "$L7_CG" "$L7_SC"
-
-# THE DISCRIMINATING HALF: a copy of scripts.test.sh with one clause in the shared span
-# dropped (the `!active { next }` early exit), driven through the SAME extractor — proving
-# the pin catches a real divergence rather than comparing three empty strings.
-L7_MUT="$SANDBOX/fx/l7-drifted-scripts.test.sh"
-mkdir -p "$SANDBOX/fx"
-awk '{ if ($0 ~ /!active \{ next \}/) next; print }' \
-  "$REPO_ROOT/tests/scripts.test.sh" > "$L7_MUT"
-if cmp -s "$REPO_ROOT/tests/scripts.test.sh" "$L7_MUT"; then
-  no "the dropped-clause mutation applies to scripts.test.sh" \
-     "the mutation target matched nothing — the parser moved and this proof is vacuous"
-else
-  ok "the dropped-clause mutation applies to scripts.test.sh"
-fi
-expect_eq "…and the drifted copy no longer agrees with the other two (§L.7 discriminates)" \
-  "no" "$([ "$L7_CG" = "$(frontmatter_parser_span "$L7_MUT")" ] && echo yes || echo no)"
+# Formerly three pinned copies plus a known-unpinned fourth (t6-review.md F-5, W2 review
+# DO-NOW 7, W3 close disposition #9): this file's own L.1 row-extractor, a dead
+# `skill_block_count` left over from the retired §L.4 pairing arm (defined, never called),
+# installer-behavior.test.sh's `_skill_frontmatter_has`, and scripts.test.sh's two inline
+# checks all hand-copied the same `hooks:` block entry/exit state machine before diverging
+# into their own caller's shape.
+#
+# AC-12 collapses all four into ONE shared implementation — tests/lib/frontmatter-parser.sh's
+# `skill_hooks_rows`/`skill_hooks_has`, sourced by this file, installer-behavior.test.sh and
+# scripts.test.sh (design D5, wave-04-content-moves.spec.md's ownership table: "dedupe removes
+# the plurality"). There is no second copy left to drift out of step with a first, so the
+# byte-identity span pin this section used to carry has nothing left to compare — extending it
+# instead (the W2-preferred fallback: parameterise the span extractor by occurrence and add a
+# fourth comparison arm) would have kept four hand-copies alive under one more layer of
+# machinery, exactly the fragility R9 forbids extending. What is asserted instead is the
+# dedupe holding at exactly the four sites AC-12 named — not the unrelated §L.5
+# SKILL_EVENT_KEYS extractor above, which shares the same block-entry prologue but was never
+# one of the tracked four and stays out of this wave's scope (flagged, not folded in blind).
+for _f in "$REPO_ROOT/tests/cross-gate-agreement.test.sh" \
+          "$REPO_ROOT/tests/installer-behavior.test.sh" \
+          "$REPO_ROOT/tests/scripts.test.sh"; do
+  expect_true "$(basename "$_f") sources the shared frontmatter-parser helper" \
+    /usr/bin/grep -q 'lib/frontmatter-parser\.sh' "$_f"
+done
+expect_eq "installer-behavior.test.sh no longer hand-copies the hooks: block state machine" \
+  "0" "$(/usr/bin/grep -c '/\^hooks:\$/ { active=1; next }' \
+      "$REPO_ROOT/tests/installer-behavior.test.sh")"
+expect_eq "scripts.test.sh no longer hand-copies the hooks: block state machine (either site)" \
+  "0" "$(/usr/bin/grep -c '/\^hooks:\$/ { active=1; next }' \
+      "$REPO_ROOT/tests/scripts.test.sh")"
+expect_eq "…and this file's own dead \`skill_block_count\` copy (the known-unpinned fourth) is gone" \
+  "0" "$(/usr/bin/grep -c '^skill_block_count() {' "$REPO_ROOT/tests/cross-gate-agreement.test.sh")"
 
 # ============================================================
 echo ""
@@ -3061,7 +3033,7 @@ printf 'roster-state/v1|status=confirmed|session=%s|name=finished|agent_id=afini
 # The landing sweep answers for each row ONCE, ever, and journals a marker into the roster
 # to keep that promise. Each of the three drives below is a separate question about the same
 # fixture, so the marker is cleared first — the property under test is what the consumers
-# read off ONE ledger, not the sweep's idempotency (which hooks/landing-gate.test.sh owns).
+# read off ONE ledger, not the sweep's idempotency (which tests/landing-gate.test.sh owns).
 MROSTER="$MREPO/.bionic/tmp/roster-$SID_A.state"
 #
 # THE FIXTURE ROW IS A TEAMMATE ROW — it carries a `teammate_id=`, as every row the

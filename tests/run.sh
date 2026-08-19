@@ -6,10 +6,15 @@
 # no auth) plus the Docker mock install e2e when docker is present.
 #
 #   GATING suites (set the exit code — must be green):
-#     hooks/*.test.sh                  every hook's behavior suite (globbed)
-#     the hand-listed `run` lines below every suite outside hooks/ — the glob does
-#                                      NOT reach them, so a new one is invisible
-#                                      until its `run` line is added by name
+#     the hand-listed `run` lines below, one per suite — nothing here is
+#                                      globbed; a new suite is invisible until
+#                                      its `run` line is added by name (epic-17
+#                                      W4 S9: hooks/*.test.sh moved under tests/,
+#                                      which retired the old hooks/*.test.sh glob
+#                                      — hooks/ now holds only the hook scripts
+#                                      themselves, and tests/ is not
+#                                      hook-exclusive, so uniform hand-listing is
+#                                      the only honest discovery left)
 #     tests/bootstrap-e2e-docker.sh    whole bootstrap on a fresh OS (docker only)
 #
 set -uo pipefail
@@ -38,14 +43,41 @@ run() {  # run <label> <cmd...>   — gating
 }
 
 echo "Gating suites:"
-for t in hooks/*.test.sh; do
-  [ -f "$t" ] || continue
-  run "$(basename "$t")" bash "$t"
-done
+# Moved from hooks/*.test.sh (epic-17 W4 S9, spec AC-9 / D3 "move the tests"): one
+# hook behavior suite per hook script, hand-listed like every suite below —
+# hooks/ retains only the *.sh scripts themselves, so there is no longer a
+# directory whose contents are safely globbable as "the hook tests".
+run "agent-context-guard.test.sh" bash tests/agent-context-guard.test.sh
+run "canonical-sdlc-evidence-gate.test.sh" bash tests/canonical-sdlc-evidence-gate.test.sh
+run "canonical-sdlc-governing-skill.test.sh" bash tests/canonical-sdlc-governing-skill.test.sh
+run "context-spend.test.sh" bash tests/context-spend.test.sh
+run "dispatch-preflight.test.sh" bash tests/dispatch-preflight.test.sh
+run "execution-recorder.test.sh" bash tests/execution-recorder.test.sh
+run "farm-out-reminder.test.sh" bash tests/farm-out-reminder.test.sh
+run "landing-gate.test.sh" bash tests/landing-gate.test.sh
+run "preflight-probe.test.sh" bash tests/preflight-probe.test.sh
+run "protect-database.test.sh" bash tests/protect-database.test.sh
+run "protect-main.test.sh" bash tests/protect-main.test.sh
+run "session-poker.test.sh" bash tests/session-poker.test.sh
+run "session-sweeper.test.sh" bash tests/session-sweeper.test.sh
+run "stop-check.test.sh" bash tests/stop-check.test.sh
+run "stop-guard.test.sh" bash tests/stop-guard.test.sh
+run "stop-orders.test.sh" bash tests/stop-orders.test.sh
 run "scripts.test.sh" bash tests/scripts.test.sh
 run "installer-behavior.test.sh" bash tests/installer-behavior.test.sh
 run "agent-roles.test.sh" bash tests/agent-roles.test.sh
+# The agent-file render pipeline (epic-17 W4 S2, spec AC-2): agents-src/ blocks + templates
+# + render.sh against the committed finals under agents/. Cross-FILE by nature — it spans a
+# source tree and an output tree.
+run "agent-render.test.sh" bash tests/agent-render.test.sh
 run "interview-protocol.test.sh" bash tests/interview-protocol.test.sh
+# Cross-FILE proof (epic-17 W4 S7, spec AC-5 / epic AC-11): the terminal-disposition
+# rule's normative literal, pinned byte-identical between SKILL.md's Step 9 and
+# operational-rules.md's close-out section, plus a count-scoped guard against a
+# third, unpinned copy landing under skills/ or agents/. Same class as
+# interview-protocol.test.sh above (a SKILL.md <-> operational-rules.md pin), kept
+# in its own file because it is a distinct ownership-table concept.
+run "close-out.test.sh" bash tests/close-out.test.sh
 run "dispatch-spans.test.sh" bash tests/dispatch-spans.test.sh
 # Cross-COMPONENT proofs (epic-15 W1R slice 4/6). They belong to no single hook,
 # so they live here rather than under hooks/ — which also means they are invisible
@@ -103,6 +135,11 @@ run "profile.test.sh" bash tests/profile.test.sh
 run "jit.test.sh" bash tests/jit.test.sh
 # Command-file conventions (epic-17 W3 S9, spec AC-1): globs payload/commands/*.md.
 run "command-format.test.sh" bash tests/command-format.test.sh
+# The diagram pins (epic-17 W4 S8, spec AC-6 / design D4): the two composed-SVG diagrams
+# under skills/canonical-sdlc/diagrams/ read as text and compared against what they draw —
+# the hooks' SUPPORTED_SDLC_VERSION, hooks.json's six always-on entries, and SKILL.md's ten
+# steps and frontmatter hook set. Spans hooks/, skills/ and the SVGs.
+run "diagrams.test.sh" bash tests/diagrams.test.sh
 # /bionic:setup (epic-17 W3 S6, spec AC-2 / AC-6): payload/scripts/setup.sh driven end to
 # end against fixture trees and a stateful `claude` shim on a replaced PATH, with the
 # fixture bytes as the evidence for every consented, declined and idempotent claim.

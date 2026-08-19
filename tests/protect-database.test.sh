@@ -3,11 +3,11 @@
 # Verifies that destructive database operations are blocked
 # while safe operations are allowed.
 #
-# Usage: bash hooks/protect-database.test.sh
+# Usage: bash tests/protect-database.test.sh
 
 set -euo pipefail
 
-. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/resolve-roots.sh"
 
 HOOK="${BIONIC_HOOKS_DIR}/protect-database.sh"
 PASS=0

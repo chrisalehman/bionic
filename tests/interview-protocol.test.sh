@@ -225,23 +225,21 @@ fi
 # ============================================================
 
 echo ""
-echo "=== Section 5: lifecycle diagram pins ==="
+echo "=== Section 5: lifecycle diagram pins — MOVED (epic-17 W4 S8) ==="
 
-# Critic Issue 3 (Step-6 remediation): the spec's ownership table declared the
-# diagram "recorded unpinned" — retire that by pinning the renamed step labels
-# and the version-stamped title directly against the raw JSON. The file is
-# plain JSON text; each label's newline is the literal two-character sequence
-# backslash-n, not an actual line break, so grep -F matches it as written here.
-DIAGRAM="${BIONIC_SKILLS_DIR}/canonical-sdlc/diagrams/lifecycle.excalidraw"
-
-expect_pin_in_file "lifecycle.excalidraw pin: '1\\nScope' label" \
-  '1\nScope' "$DIAGRAM"
-
-expect_pin_in_file "lifecycle.excalidraw pin: '2\\nDesign' label" \
-  '2\nDesign' "$DIAGRAM"
-
-expect_pin_in_file "lifecycle.excalidraw pin: 'Lifecycle (v13)' title" \
-  'Lifecycle (v13)' "$DIAGRAM"
+# This section used to pin three literals against diagrams/lifecycle.excalidraw:
+# the '1\nScope' and '2\nDesign' step labels and the 'Lifecycle (v13)' title.
+# That file no longer exists. The diagram is now a composed SVG that is its own
+# sole source (spec AC-6 / design D4), and the same three claims are pinned far
+# harder in tests/diagrams.test.sh: the step labels against SKILL.md's whole
+# ## Steps table rather than two hand-picked rows, and the title's version
+# against the hooks' SUPPORTED_SDLC_VERSION rather than a typed literal that
+# would need editing on every contract bump.
+#
+# Nothing is asserted here. Re-adding a diagram pin to THIS suite would give the
+# concept two owners — exactly the duplication the diagram suite was written to
+# resolve. The pointer stays because a reader who remembers Section 5 needs to
+# find where it went.
 
 # ============================================================
 # Results

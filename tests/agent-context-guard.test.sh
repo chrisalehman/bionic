@@ -16,7 +16,7 @@
 # Repos are throwaway git inits under a mktemp'd sandbox.
 #
 # FIXTURE FIDELITY (declared, per .claude memory fixtures-can-pin-away-the-test):
-#   * PreToolUse payload envelope — the shape hooks/dispatch-preflight.test.sh
+#   * PreToolUse payload envelope — the shape tests/dispatch-preflight.test.sh
 #     already pins from the CLI 2.1.220 verbatim captures, plus the ONE field
 #     this guard turns on: a top-level `agent_id`. That field's presence in an
 #     agent context and absence on the main thread is measured, not assumed —
@@ -33,11 +33,11 @@
 # which must refuse it — proving the payload is refusable and the silence is the
 # guard's decision rather than a dud fixture.
 #
-# Usage: bash hooks/agent-context-guard.test.sh
+# Usage: bash tests/agent-context-guard.test.sh
 
 set -uo pipefail
 
-. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/resolve-roots.sh"
 
 HOOKS_DIR="${BIONIC_HOOKS_DIR}"
 GUARD="$HOOKS_DIR/agent-context-guard.sh"

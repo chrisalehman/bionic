@@ -25,7 +25,7 @@
 # never read at all; only THIS session's own filename is ever consulted, and the legacy
 # shared .bionic/tmp/preflight.state slot is not consulted either.
 #
-# FAIL DIRECTIONS (TDD §7, pinned by hooks/dispatch-preflight.test.sh):
+# FAIL DIRECTIONS (TDD §7, pinned by tests/dispatch-preflight.test.sh):
 #   - not an Agent-tool call                            -> pass, silent  (A7 relevance hoist)
 #   - cwd/repo unresolvable                              -> pass, silent (ambiguity)
 #   - no active wave                                     -> pass, silent (nothing to decide)
@@ -52,7 +52,7 @@
 # combined preflight writes where this gate reads.
 #
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
-# [WALL: hooks/dispatch-preflight.test.sh]
+# [WALL: tests/dispatch-preflight.test.sh]
 #
 # Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
 
@@ -1038,7 +1038,7 @@ if [ -n "$C_DELIVERABLE" ]; then
       # recommend is refused by the sibling wall below (a template is not a path), and
       # tests/cross-gate-agreement.test.sh §N.4 pins that refusal: this file was
       # recommending, in one message, the exact string another of its messages rejects.
-      # hooks/dispatch-preflight.test.sh S18 drives each refusal's own Fix: line back
+      # tests/dispatch-preflight.test.sh S18 drives each refusal's own Fix: line back
       # through the gate so the two can never drift apart again.
       echo "Fix: name a repo-relative artifact path in the brief —" >&2
       echo "    Expected artifact: .bionic/docs/record/my-slice-notes.md" >&2

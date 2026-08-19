@@ -2,7 +2,7 @@
 # STOP ORDERS — the human's instruction, and the batch stand-down.
 # Design: .bionic/docs/specs/epic-16-landing-contract/wave-02-fact-based-supervision.spec.md
 #         §Design (R3, R8), slice S3.
-# [WALL: hooks/stop-orders.test.sh]
+# [WALL: tests/stop-orders.test.sh]
 #
 # This is NOT a hook. Like hooks/session-sweeper.sh and hooks/stop-check.sh it lives in
 # hooks/ for test-harness pairing and bootstrap installation only; it is never registered

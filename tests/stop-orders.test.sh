@@ -15,11 +15,11 @@
 #     shipped writer actually produces.
 #   * SYNTHESIZED and declared: session ids, agent ids, artifact contents.
 #
-# Usage: bash hooks/stop-orders.test.sh
+# Usage: bash tests/stop-orders.test.sh
 
 set -uo pipefail
 
-. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/resolve-roots.sh"
 
 HERE="${BIONIC_HOOKS_DIR}"
 ORDERS="$HERE/stop-orders.sh"
