@@ -64,7 +64,6 @@ run "stop-check.test.sh" bash tests/stop-check.test.sh
 run "stop-guard.test.sh" bash tests/stop-guard.test.sh
 run "stop-orders.test.sh" bash tests/stop-orders.test.sh
 run "scripts.test.sh" bash tests/scripts.test.sh
-run "installer-behavior.test.sh" bash tests/installer-behavior.test.sh
 run "agent-roles.test.sh" bash tests/agent-roles.test.sh
 # The agent-file render pipeline (epic-17 W4 S2, spec AC-2): agents-src/ blocks + templates
 # + render.sh against the committed finals under agents/. Cross-FILE by nature — it spans a
@@ -89,7 +88,6 @@ run "plugin-manifest.test.sh" bash tests/plugin-manifest.test.sh
 # hooks/hooks.json (plugin-format manifest, epic-17 wave-01 slice 2) is also
 # a cross-COMPONENT proof — it pins against claude-bootstrap.sh's
 # MANAGED_HOOKS array, not any single hook script.
-run "plugin-hooks.test.sh" bash tests/plugin-hooks.test.sh
 # Harness-on-harness (epic-17 W1). Pins the assertion helpers every suite above
 # hand-copies: under pipefail, `printf "$haystack" | grep -q` is a SIGPIPE race
 # that reports a present needle as missing and an absent-check as green. Also
@@ -155,7 +153,7 @@ run "doctor.test.sh" bash tests/doctor.test.sh
 # Hand-listed like every suite outside hooks/.
 run "remove.test.sh" bash tests/remove.test.sh
 # Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
-# 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
+# 8 suites and omitted agent-roles and marker-verify — a
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so
 # retiring it without this line would have traded one blind spot for another.
 run "platform.test.sh" bash lib/platform.test.sh

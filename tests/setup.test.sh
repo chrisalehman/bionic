@@ -31,13 +31,17 @@
 # the recorder file the shims append to and the bytes of the fixture tree —
 # never a dry-run flag the production path would never set.
 #
-# FIXTURE FIDELITY. The legacy alias-block fixtures are DERIVED at run time
-# from claude-bootstrap.sh's own ALIAS_START/ALIAS_END/ALIAS_CONTENT
-# assignments rather than retyped here: a fixture that spells the box-drawing
-# markers by hand would keep passing after the installer's markers changed, and
-# the markers are the whole addressability of the block. The legacy-channel-hook
-# settings fixture copies the shape claude-bootstrap.sh's wire_managed_hooks
-# writes (matcher + hooks[].command + timeout).
+# FIXTURE FIDELITY. The legacy alias-block fixtures used to be DERIVED at run
+# time from claude-bootstrap.sh's own ALIAS_START/ALIAS_END/ALIAS_CONTENT
+# assignments. That installer retired at epic-17 W5 (4/6), and the only
+# remaining copies of those markers are the ones under test — deriving from
+# them would be a fixture that changes whenever the thing it checks changes.
+# So Group 6 now STATES the markers and pins all three production copies
+# (setup.sh, detect.sh, remove.sh) against that statement. The
+# legacy-channel-hook settings fixture keeps the settings.json shape the
+# retired installer used to write (matcher + hooks[].command + timeout) —
+# that shape is Claude Code's, not the installer's, and did not retire with
+# it.
 #
 # BOTH ARMS, ALWAYS. Every mutating step is asserted in its consented AND its
 # declined form, and the declined form is proven by bytes (the fixture tree is
@@ -59,7 +63,6 @@ SETUP_SH="${REPO}/payload/scripts/setup.sh"
 SETUP_MD="${REPO}/payload/commands/setup.md"
 LIB_DIR="${REPO}/payload/scripts/lib"
 TEMPLATE="${REPO}/payload/permissions/profile.template.json"
-BOOTSTRAP="${REPO}/claude-bootstrap.sh"
 
 PASS=0; FAIL=0; TOTAL=0
 ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
@@ -414,30 +417,54 @@ expect_eq "pre-existing export outside the markers: no block added" "$RC_BEFORE"
 # ---------------------------------------------------------------------------
 # Group 6 — (e) the ported legacy .zshrc alias removal, BOTH variants.
 #
-# Fixtures derived from claude-bootstrap.sh's own assignments, not retyped.
+# Fixture markers are STATED below and every production copy is pinned to them.
 # ---------------------------------------------------------------------------
 
 echo ""
 echo "=== Group 6: legacy alias-block removal (ported from the installer) ==="
 
-read_bootstrap_literal() {  # <VARNAME> — the RHS of `VARNAME="..."` in claude-bootstrap.sh
-  local var="$1" line
-  line="$(grep -m1 "^${var}=" "$BOOTSTRAP" 2>/dev/null)"
+# The installer these literals used to be read out of (claude-bootstrap.sh) was
+# deleted at epic-17 W5 (4/6). Deriving them from payload/scripts/setup.sh
+# instead would be deriving the fixture from the script under test: change the
+# markers there and the fixture would change with them and keep passing, which
+# is the discrimination this block exists to have. So the literals are STATED
+# here — the suite is now the independent statement of what the markers are —
+# and every production copy is pinned against that statement below.
+ALIAS_START='# ─── bionic:start ───'
+ALIAS_END='# ─── bionic:end ───'
+ALIAS_CONTENT="alias claude='claude --dangerously-skip-permissions'"
+
+read_script_literal() {  # <file> <VARNAME> — the RHS of `VARNAME='...'` in <file>
+  local file="$1" var="$2" line
+  line="$(grep -m1 "^${var}=" "$file" 2>/dev/null)"
   line="${line#*=}"
   line="${line#\"}"; line="${line%\"}"
   line="${line#\'}"; line="${line%\'}"
   printf '%s' "$line"
 }
 
-ALIAS_START="$(read_bootstrap_literal ALIAS_START)"
-ALIAS_END="$(read_bootstrap_literal ALIAS_END)"
-ALIAS_CONTENT="$(read_bootstrap_literal ALIAS_CONTENT)"
+# Pin 1 — the script under test agrees with the stated markers.
+expect_eq "marker pin: setup.sh SETUP_ALIAS_START is the stated start marker" \
+  "$ALIAS_START" "$(read_script_literal "$SETUP_SH" SETUP_ALIAS_START)"
+expect_eq "marker pin: setup.sh SETUP_ALIAS_END is the stated end marker" \
+  "$ALIAS_END" "$(read_script_literal "$SETUP_SH" SETUP_ALIAS_END)"
 
-expect_true "fixture fidelity: ALIAS_START read out of claude-bootstrap.sh" test -n "$ALIAS_START"
-expect_true "fixture fidelity: ALIAS_END read out of claude-bootstrap.sh" test -n "$ALIAS_END"
-expect_true "fixture fidelity: ALIAS_CONTENT read out of claude-bootstrap.sh" test -n "$ALIAS_CONTENT"
-expect_match "fixture fidelity: the alias content is the one the installer writes" \
-  '*dangerously-skip-permissions*' "$ALIAS_CONTENT"
+# Pin 2 — the other two surfaces that must address the same block agree too.
+# detect.sh decides whether the block is PRESENT and remove.sh's standalone
+# door strips it on a machine where these libraries are already gone; a marker
+# that drifts in any one of the three makes the block unaddressable from that
+# surface alone, which is exactly the failure no single-file check would see.
+expect_true "marker pin: detect.sh addresses the same start marker" \
+  grep -qF "$ALIAS_START" "${REPO}/payload/scripts/lib/detect.sh"
+expect_eq "marker pin: remove.sh RM_RC_START is the stated start marker" \
+  "$ALIAS_START" "$(read_script_literal "${REPO}/payload/scripts/remove.sh" RM_RC_START)"
+expect_eq "marker pin: remove.sh RM_RC_END is the stated end marker" \
+  "$ALIAS_END" "$(read_script_literal "${REPO}/payload/scripts/remove.sh" RM_RC_END)"
+
+# Pin 3 — the unmarked (pre-marker) spelling setup.sh migrates still matches
+# the alias line this fixture writes, or the UNMARKED variant below is inert.
+expect_true "marker pin: setup.sh's unmarked pattern matches the fixture alias line" \
+  bash -c 'printf "%s\n" "$1" | grep -qE "$(grep -m1 "^SETUP_ALIAS_PATTERN=" "$2" | sed "s/^[^=]*=//; s/^.//; s/.$//")"' _ "$ALIAS_CONTENT" "$SETUP_SH"
 
 new_fixture alias-marked
 plant_cli_plugin "bionic@bionic" true
@@ -479,7 +506,8 @@ expect_match "no legacy block: setup says there is nothing to remove" '*legacy*'
 echo ""
 echo "=== Group 7: legacy-channel managed-hook cleanup ==="
 
-# Shape copied from claude-bootstrap.sh's wire_managed_hooks output.
+# Shape of a settings.json managed-hook entry (matcher + hooks[].command +
+# timeout) — Claude Code's schema, formerly written by the retired installer.
 plant_legacy_channel_settings() {
   cat > "$FIX/ch/settings.json" <<'JSON'
 {

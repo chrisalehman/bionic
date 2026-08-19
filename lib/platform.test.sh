@@ -197,9 +197,13 @@ echo "=== Section 7: Library properties ==="
 expect_false "platform.sh does not run apt install" grep -q "apt install\|apt-get install" "${BIONIC_SCRIPTS_DIR}/lib/platform.sh"
 expect_false "platform.sh does not run brew install" grep -q "brew install" "${BIONIC_SCRIPTS_DIR}/lib/platform.sh"
 
-# 7b: Both bootstrap and reset source the library
-expect_true "bootstrap sources lib/platform.sh" grep -q 'source.*lib/platform\.sh' "${BIONIC_SCRIPTS_DIR}/claude-bootstrap.sh"
-expect_true "reset sources lib/platform.sh" grep -q 'source.*lib/platform\.sh' "${BIONIC_SCRIPTS_DIR}/claude-reset.sh"
+# 7b RETIRED at epic-17 W5 (4/6). The two consumers this pinned —
+# claude-bootstrap.sh and claude-reset.sh — were deleted when the installer
+# retired in favour of the plugin channel, and nothing in the shipped payload
+# sources this library: the payload resolves its own platform facts through
+# payload/scripts/lib/detect.sh. Re-add a sourcing assertion here only when a
+# real consumer exists again; an assertion aimed at a deleted file is a wall
+# that can only fail or be deleted, never pass.
 
 # ============================================================
 # Results
