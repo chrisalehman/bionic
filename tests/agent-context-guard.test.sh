@@ -104,6 +104,13 @@ PLAN
     printf 'repo=%s\n' "$repo"
   } > "$repo/.bionic/tmp/preflight-$SID.state"
   chmod 600 "$repo/.bionic/tmp/preflight-$SID.state"
+  # A LIVE WAVE HAS A LIVE PATROL (epic-17 W5 4/4). hooks/dispatch-preflight.sh refuses any
+  # dispatch — nested ones included, which is the whole subject of G5 — whose session has no
+  # fresh Patrol stamp. Armed here so the guard's own walls are what these cases measure,
+  # not the arming wall in front of them (tests/dispatch-preflight.test.sh S21 owns that).
+  printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SID" > "$repo/.bionic/tmp/patrol-$SID.state"
+  chmod 600 "$repo/.bionic/tmp/patrol-$SID.state"
   printf '%s' "$repo"
 }
 
