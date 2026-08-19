@@ -1,5 +1,7 @@
 #!/bin/bash
-# Tests for claude-bootstrap.sh and claude-reset.sh shared logic.
+# Tests for the repo's config file, its hook roster, and the .claude/rules/
+# roster. (Named for claude-bootstrap.sh/claude-reset.sh, which it also covered
+# until those retired at epic-17 W5 — see the retired Sections 3 and 5.)
 # Covers config parsing, config file well-formedness, script symmetry,
 # hook consistency, and shell alias marker consistency.
 # Does NOT run bootstrap or reset — no side effects.
@@ -13,8 +15,6 @@ set -euo pipefail
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 CONFIG="${REPO}/claude-config.txt"
-BOOTSTRAP="${BIONIC_SCRIPTS_DIR}/claude-bootstrap.sh"
-RESET="${BIONIC_SCRIPTS_DIR}/claude-reset.sh"
 
 PASS=0
 FAIL=0
@@ -452,211 +452,27 @@ read_config "pnpm-store" _check_motion_store
 expect_eq "motion is registered as a pnpm-store library" "1" "$_motion_store"
 
 # ============================================================
-# SECTION 3: Bootstrap/reset script symmetry
+# SECTION 3: RETIRED — bootstrap/reset script symmetry
 # ============================================================
-
-echo ""
-echo "=== Section 3: Bootstrap/reset script symmetry ==="
-
-# 3a: Both scripts define read_config
-expect_true "bootstrap defines read_config function" grep -q "^read_config()" "$BOOTSTRAP"
-expect_true "reset defines read_config function" grep -q "^read_config()" "$RESET"
-
-# 3b: Both scripts derive the core config path from SCRIPT_DIR and accept
-# profile files as positional args (CONFIG_FILES array).
-expect_true "bootstrap uses CONFIG_FILES from SCRIPT_DIR" grep -q 'CONFIG_FILES=(.*claude-config' "$BOOTSTRAP"
-expect_true "reset uses CONFIG_FILES from SCRIPT_DIR" grep -q 'CONFIG_FILES=(.*claude-config' "$RESET"
-
-# 3c-3k: Every config type read in bootstrap is also read in reset
-for config_type in mcp-server env-var statusline plugin global-memory github-skill local-skill local-command npm-global uv-tool marketplace; do
-  expect_true "bootstrap reads type: ${config_type}" grep -q "\"${config_type}\"" "$BOOTSTRAP"
-  expect_true "reset reads type: ${config_type}" grep -q "\"${config_type}\"" "$RESET"
-done
-
-# 3l: context7 MCP server entry is active (not commented out) in config
-_ctx7_found=0
-_check_ctx7_config() {
-  if [ "$1" = "context7" ]; then
-    _ctx7_found=1
-  fi
-}
-read_config "mcp-server" _check_ctx7_config
-expect_eq "context7 MCP server entry is active in config" "1" "$_ctx7_found"
-
-# 3m: Any active mcp-server entries with env vars list at least one var
-_mcp_with_empty_env=""
-_check_mcp_has_env() {
-  local name="$1" env_vars="$3"
-  # If f3 is non-empty but all whitespace, that's a malformed entry
-  if [ -n "$env_vars" ]; then
-    local trimmed
-    trimmed="$(echo "$env_vars" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    if [ -z "$trimmed" ]; then
-      _mcp_with_empty_env="${_mcp_with_empty_env}${name} "
-    fi
-  fi
-}
-read_config "mcp-server" _check_mcp_has_env
-expect_eq "no mcp-server entries have whitespace-only env var list" "" "$_mcp_with_empty_env"
-
-# 3n: read_config function body is identical in bootstrap and reset
-_bootstrap_fn="$(awk '/^read_config\(\)/{found=1} found{print} found && /^\}$/{exit}' "$BOOTSTRAP")"
-_reset_fn="$(awk '/^read_config\(\)/{found=1} found{print} found && /^\}$/{exit}' "$RESET")"
-expect_eq "read_config function body identical in bootstrap and reset" "$_bootstrap_fn" "$_reset_fn"
-
-# 3o: Both scripts source lib/platform.sh
-expect_true "bootstrap sources lib/platform.sh" grep -q 'source.*lib/platform\.sh' "$BOOTSTRAP"
-expect_true "reset sources lib/platform.sh" grep -q 'source.*lib/platform\.sh' "$RESET"
-
-# 3p: agent-skills plugin entry is active (not commented out) in config
-_agent_skills_found=0
-_agent_skills_source=""
-_check_agent_skills() {
-  if [ "$1" = "agent-skills" ]; then
-    _agent_skills_found=1
-    _agent_skills_source="$2"
-  fi
-}
-read_config "plugin" _check_agent_skills
-expect_eq "agent-skills plugin entry is active in config" "1" "$_agent_skills_found"
-expect_eq "agent-skills plugin sourced from addy-agent-skills" "addy-agent-skills" "$_agent_skills_source"
-
-# 3q: addyosmani/agent-skills marketplace entry is active in config
-_addy_marketplace_found=0
-_check_addy_marketplace() {
-  if [ "$1" = "addyosmani/agent-skills" ]; then
-    _addy_marketplace_found=1
-  fi
-}
-read_config "marketplace" _check_addy_marketplace
-expect_eq "addyosmani/agent-skills marketplace entry is active in config" "1" "$_addy_marketplace_found"
-
-# 3r: chrome-devtools MCP server entry is active (not commented out) in config
-# Required by agent-skills:browser-testing-with-devtools, which assumes a
-# `chrome-devtools` MCP server is configured.
-_cdt_found=0
-_cdt_pkg=""
-_cdt_env=""
-_check_cdt() {
-  if [ "$1" = "chrome-devtools" ]; then
-    _cdt_found=1
-    _cdt_pkg="$2"
-    _cdt_env="$3"
-  fi
-}
-read_config "mcp-server" _check_cdt
-expect_eq "chrome-devtools MCP server entry is active in config" "1" "$_cdt_found"
-
-# 3s: chrome-devtools uses the official upstream package (chrome-devtools-mcp).
-# The addy-agent-skills SKILL.md references @anthropic/chrome-devtools-mcp,
-# which is wrong — the real package on npm is chrome-devtools-mcp. This test
-# guards against accidentally adopting the bad name.
-expect_eq "chrome-devtools package is chrome-devtools-mcp@latest" "chrome-devtools-mcp@latest" "$_cdt_pkg"
-
-# 3t: chrome-devtools requires no env vars (no auth — runs against local Chrome)
-expect_eq "chrome-devtools entry has no required env vars" "" "$_cdt_env"
-
-# 3u: Bootstrap reads the install-only config types (brew-cask, pnpm-store).
-# Like brew-dep, these are NOT undone by reset (shared system / cache state),
-# so they are intentionally excluded from the symmetry loop above.
-expect_true "bootstrap reads type: brew-cask" grep -q '"brew-cask"' "$BOOTSTRAP"
-expect_true "bootstrap reads type: pnpm-store" grep -q '"pnpm-store"' "$BOOTSTRAP"
-
-# 3v: Resilience posture — the install phase must run to completion even when a
-# step fails. Bootstrap defines the retry + failure-collection helpers and the
-# network installers record failures (non-fatal) instead of `exit 1`.
-expect_true "bootstrap defines run_retry helper" grep -q "^run_retry()" "$BOOTSTRAP"
-expect_true "bootstrap defines record_fail helper" grep -q "^record_fail()" "$BOOTSTRAP"
-expect_true "bootstrap defines step_fail helper" grep -q "^step_fail()" "$BOOTSTRAP"
-expect_true "bootstrap defines step_stream helper (heartbeat for >30s downloads)" grep -q "^step_stream()" "$BOOTSTRAP"
-expect_true "bootstrap defines the read-only updates advisory" grep -q "^collect_updates()" "$BOOTSTRAP"
-# The advisory must stay read-only: no upgrade verbs outside echoed remediation text.
-expect_false "advisory never runs brew upgrade itself" grep -qE '^\s*(run_retry )?brew upgrade' "$BOOTSTRAP"
-expect_true "bootstrap collects INSTALL_FAILURES" grep -q "INSTALL_FAILURES=" "$BOOTSTRAP"
-expect_true "bootstrap collects STEP_RECORDS" grep -q "STEP_RECORDS=" "$BOOTSTRAP"
-
-# Extract a function body from the bootstrap for content assertions.
-_fn_body() {
-  awk -v fn="$1" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}$/{exit}' "$BOOTSTRAP"
-}
-expect_contains "marketplace installer records failures (non-fatal)" "step_fail" "$(_fn_body do_install_marketplace)"
-expect_contains "plugin installer records failures (non-fatal)" "step_fail" "$(_fn_body do_install_plugin)"
-expect_contains "mcp installer records failures (non-fatal, retried)" "run_retry claude mcp add" "$(_fn_body do_configure_mcp_server)"
-# step_fail must keep feeding the legacy INSTALL_FAILURES array.
-expect_contains "step_fail records into INSTALL_FAILURES" "record_fail" "$(_fn_body step_fail)"
-# The marketplace + plugin installers used to `exit 1` on failure; ensure that
-# fail-fast behavior is gone.
-expect_false "marketplace/plugin installers no longer hard-exit" grep -qE 'echo "FAILED" >&2|echo "FAILED: \$output" >&2' "$BOOTSTRAP"
-
-# 3w: stdin discipline — read_config detaches the callback's stdin, and
-# run_retry detaches the child's stdin (defense in depth for the tap-install
-# stdin-theft bug).
-expect_contains "read_config detaches callback stdin" '</dev/null' "$(_fn_body read_config)"
-expect_contains "run_retry detaches child stdin" '</dev/null' "$(_fn_body run_retry)"
-
-# 3x: SSH→HTTPS structural fix — plugin installs must not depend on GitHub SSH
-# keys existing on a fresh machine.
-expect_true "bootstrap rewrites git SSH to HTTPS for its process" grep -q "GIT_CONFIG_KEY_0='url.https://github.com/.insteadOf'" "$BOOTSTRAP"
-expect_true "bootstrap disables git terminal prompts" grep -q 'GIT_TERMINAL_PROMPT=0' "$BOOTSTRAP"
-
-# 3x2: manifest symmetry — bootstrap writes install-time manifests (skill-pack
-# skills, bionic-owned hooks, agent role files); reset consumes them so
-# removal works offline and survives repo renames.
-expect_true "bootstrap writes skill-pack manifest" grep -qF '.pack-${name}.manifest' "$BOOTSTRAP"
-expect_true "reset reads skill-pack manifest" grep -qF '.pack-${name}.manifest' "$RESET"
-expect_true "bootstrap writes hook manifest" grep -qF '.bionic-manifest' "$BOOTSTRAP"
-expect_true "reset consumes hook manifest" grep -qF '.bionic-manifest' "$RESET"
-expect_true "bootstrap writes agents manifest" grep -qF 'agents/.bionic-manifest' "$BOOTSTRAP"
-expect_true "reset reads agents manifest" grep -qF 'agents/.bionic-manifest' "$RESET"
-expect_true "reset has an agents leftover-audit block" grep -qF 'LEFTOVERS+=("agent ' "$RESET"
-
-# 3x2b: agents removal is MANIFEST-ONLY — ~/.claude/agents/ is Claude Code's
-# standard USER subagent directory, so attribution for removal comes from the
-# install-time manifest alone, never a repo glob (deliberate divergence from
-# the hooks precedent above, which does union repo+manifest).
-expect_false "reset agents removal no longer globs repo agents/*.md" \
-  grep -qF 'for agent in "${SCRIPT_DIR}"/agents/*.md' "$RESET"
-expect_true "reset agents removal reads the manifest" \
-  grep -qF 'if [ -f ~/.claude/agents/.bionic-manifest ]; then' "$RESET"
-
-# 3x3: reset reverts account-mirror symlinks (and restores backups)
-expect_true "reset handles account-mirror symlinks" grep -q 'Account-mirror symlinks' "$RESET"
-expect_true "reset restores mirror backups" grep -qF '.bak-' "$RESET"
-
-# 3y: profile superset rule — every active entry in any profile file must also
-# appear in claude-config.everything.txt (the catalog is the superset). Trivial
-# while everything.txt is the only profile; guards future profile additions.
-_superset_missing=""
-EVERYTHING="${REPO}/claude-config.everything.txt"
-if [ -f "$EVERYTHING" ]; then
-  for profile in "${REPO}"/claude-config.*.txt; do
-    [ "$profile" = "$EVERYTHING" ] && continue
-    while IFS= read -r line; do
-      stripped="$(echo "$line" | sed 's/^[[:space:]]*//')"
-      [ -z "$stripped" ] && continue
-      case "$stripped" in "#"*) continue ;; esac
-      if ! grep -qxF "$line" "$EVERYTHING"; then
-        _superset_missing="${_superset_missing}$(basename "$profile"): ${line}\n"
-      fi
-    done < "$profile"
-  done
-fi
-expect_eq "every profile entry appears in claude-config.everything.txt" "" "$_superset_missing"
-
-# 3z: core/everything disjoint — an active entry duplicated in both files is
-# redundant (core always applies) and hides drift.
-_overlap=""
-if [ -f "$EVERYTHING" ]; then
-  while IFS= read -r line; do
-    stripped="$(echo "$line" | sed 's/^[[:space:]]*//')"
-    [ -z "$stripped" ] && continue
-    case "$stripped" in "#"*) continue ;; esac
-    if grep -qxF "$line" "$CONFIG"; then
-      _overlap="${_overlap}${line}\n"
-    fi
-  done < "$EVERYTHING"
-fi
-expect_eq "no active entry appears in both core and everything profiles" "" "$_overlap"
+#
+# claude-bootstrap.sh and claude-reset.sh were DELETED at epic-17 W5 (4/6):
+# the plugin channel installs the payload now, and /bionic:setup carries the
+# two obligations the installer still owned (the legacy .zshrc alias block and
+# the legacy-channel managed-hook entries). This section asserted symmetry
+# BETWEEN those two files — every claim in it named at least one of them, so
+# there is nothing left here to point at and no surviving surface the claims
+# could be retargeted to.
+#
+# Where the coverage went, so this is a move and not a loss:
+#   - config-type reading (3c-3k)   -> Section 1 already drives read_config
+#                                      directly, over the same claude-config.txt
+#   - install/remove symmetry        -> tests/setup.test.sh (setup side) and
+#                                      tests/remove.test.sh (removal side),
+#                                      both against the shipped payload
+#   - lib/platform.sh sourcing (3o)  -> retired with its only two consumers;
+#                                      see lib/platform.test.sh §7b
+#   - manifest symmetry (3x2)        -> the manifests were install-time
+#                                      artifacts of the retired installer
 
 # ============================================================
 # SECTION 4: Hook file consistency
@@ -727,51 +543,74 @@ for hook in "${BIONIC_HOOKS_DIR}/"*.sh; do
 done
 expect_eq "no hook's test file is missing from HOOK_TEST_NAMES" "" "$_unmanifested_hook_tests"
 
-# 4c: Every hook file referenced inside MANAGED_HOOKS in bootstrap exists in hooks/
+# 4c: Every hook the ALWAYS-ON channel registers exists in hooks/.
+#
+# The array this used to read — claude-bootstrap.sh's MANAGED_HOOKS — retired
+# with the installer at epic-17 W5 (4/6). Its successor is the payload's own
+# hooks/hooks.json, which is what the CLI reads to register the always-on
+# walls; the registrations there spell their commands
+# ${CLAUDE_PLUGIN_ROOT}/hooks/<name>.sh. The check is unchanged in kind: a
+# registration naming a file that is not there is a wall that cannot fire, and
+# it is the registration side, not the file side, that has always been the one
+# that drifts.
+HOOKS_JSON="${BIONIC_HOOKS_DIR}/hooks.json"
+expect_true "payload hooks.json exists (the always-on channel)" test -f "$HOOKS_JSON"
+
+_alwayson_commands="$(jq -r '[.hooks | to_entries[] | .value[]? | .hooks[]? | .command] | .[]' "$HOOKS_JSON" 2>/dev/null)"
+
 _missing_managed_hooks=""
-while IFS= read -r line; do
-  # Lines look like: "PreToolUse|Bash|~/.claude/hooks/foo.sh"
-  if echo "$line" | grep -qE '"[^"]+\|[^|]*\|[^"]+\.sh"'; then
-    hookfile="$(echo "$line" | grep -oE 'hooks/[^"]+\.sh' | head -1)"
-    if [ -n "$hookfile" ]; then
-      basename_hook="$(basename "$hookfile")"
-      if [ ! -f "${BIONIC_HOOKS_DIR}/${basename_hook}" ]; then
-        _missing_managed_hooks="${_missing_managed_hooks}${basename_hook} "
-      fi
-    fi
-  fi
-done < <(grep -A 20 'MANAGED_HOOKS=(' "$BOOTSTRAP" | grep -v 'MANAGED_HOOKS=(')
-expect_eq "all MANAGED_HOOKS entries exist in hooks/ dir" "" "$_missing_managed_hooks"
+for _word in $_alwayson_commands; do
+  case "$_word" in
+    *'/hooks/'*.sh)
+      _bn="$(basename "$_word")"
+      [ -f "${BIONIC_HOOKS_DIR}/${_bn}" ] || _missing_managed_hooks="${_missing_managed_hooks}${_bn} "
+      ;;
+  esac
+done
+expect_eq "every hooks.json registration names a file that exists in hooks/" "" "$_missing_managed_hooks"
 
-# 4d: MANAGED_HOOKS includes protect-main.sh
-expect_true "MANAGED_HOOKS includes protect-main.sh" grep -q 'protect-main\.sh' "$BOOTSTRAP"
+# Every always-on command is rooted at ${CLAUDE_PLUGIN_ROOT} — never an
+# installed-path literal. This is the channel half of the same claim
+# tests/plugin-paths.test.sh makes about the payload's contents.
+_unrooted=""
+for _word in $_alwayson_commands; do
+  case "$_word" in
+    '${CLAUDE_PLUGIN_ROOT}/hooks/'*) ;;
+    *) _unrooted="${_unrooted}${_word} " ;;
+  esac
+done
+expect_eq "every hooks.json command is rooted at \${CLAUDE_PLUGIN_ROOT}/hooks/" "" "$_unrooted"
 
-# 4e: MANAGED_HOOKS includes protect-database.sh
-expect_true "MANAGED_HOOKS includes protect-database.sh" grep -q 'protect-database\.sh' "$BOOTSTRAP"
+# 4d: the always-on channel registers protect-main.sh
+expect_true "always-on channel registers protect-main.sh" \
+  /usr/bin/grep -qF '${CLAUDE_PLUGIN_ROOT}/hooks/protect-main.sh' "$HOOKS_JSON"
 
-# 4h: canonical-sdlc-evidence-gate.sh moved out of MANAGED_HOOKS into
-# skills/canonical-sdlc/SKILL.md's frontmatter hooks: block (session-20260814-
-# wave-detector-terminal-state, R1) — absent from the global array (the shell's
-# bare `grep` is ugrep with ignore-files active and lies about absence, so this
-# goes through /usr/bin/grep), present as a PreToolUse|Bash command entry in
-# the skill frontmatter.
-expect_false "MANAGED_HOOKS no longer includes canonical-sdlc-evidence-gate.sh (moved to SKILL.md frontmatter)" \
-  /usr/bin/grep -qF '"PreToolUse|Bash|~/.claude/hooks/canonical-sdlc-evidence-gate.sh"' "$BOOTSTRAP"
+# 4e: the always-on channel registers protect-database.sh
+expect_true "always-on channel registers protect-database.sh" \
+  /usr/bin/grep -qF '${CLAUDE_PLUGIN_ROOT}/hooks/protect-database.sh' "$HOOKS_JSON"
 
-# Shared with cross-gate-agreement.test.sh and installer-behavior.test.sh via
-# tests/lib/frontmatter-parser.sh (epic-17 W4 AC-12 dedupe).
+# 4h: canonical-sdlc-evidence-gate.sh is ARMED-SCOPED, not always-on
+# (session-20260814-wave-detector-terminal-state, R1). It must be absent from
+# the always-on channel and present in the skill frontmatter. The claim used to
+# be made against MANAGED_HOOKS; hooks.json is the same claim on the channel
+# that replaced it. (The shell's bare `grep` is ugrep with ignore-files active
+# and lies about absence, so every absence check here goes through
+# /usr/bin/grep.)
+expect_false "always-on channel does NOT register canonical-sdlc-evidence-gate.sh (armed-scoped, SKILL.md frontmatter)" \
+  /usr/bin/grep -qF 'canonical-sdlc-evidence-gate.sh' "$HOOKS_JSON"
+
+# Shared with cross-gate-agreement.test.sh via tests/lib/frontmatter-parser.sh
+# (epic-17 W4 AC-12 dedupe).
 expect_true "skills/canonical-sdlc/SKILL.md frontmatter registers canonical-sdlc-evidence-gate.sh as PreToolUse|Bash" \
   skill_hooks_has "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md" PreToolUse Bash \
     '${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-evidence-gate.sh'
 
-# 4i: farm-out-reminder.sh moved out of MANAGED_HOOKS into skills/canonical-sdlc/
-# SKILL.md's frontmatter hooks: block (session-20260815-landing-supervision T5,
-# AC-6) — it guards a workflow preference rather than irreversible damage, so it
-# now binds only in armed sessions, same pattern as canonical-sdlc-evidence-gate.sh
-# above (4h) except it shares the PreToolUse|Bash matcher entry with that hook
-# rather than opening its own.
-expect_false "MANAGED_HOOKS no longer includes farm-out-reminder.sh (moved to SKILL.md frontmatter)" \
-  /usr/bin/grep -qF '"PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh"' "$BOOTSTRAP"
+# 4i: farm-out-reminder.sh is armed-scoped for the same reason
+# (session-20260815-landing-supervision T5, AC-6) — it guards a workflow
+# preference rather than irreversible damage, so it binds only in armed
+# sessions, sharing the PreToolUse|Bash matcher entry with 4h's hook.
+expect_false "always-on channel does NOT register farm-out-reminder.sh (armed-scoped, SKILL.md frontmatter)" \
+  /usr/bin/grep -qF 'farm-out-reminder.sh' "$HOOKS_JSON"
 
 expect_true "skills/canonical-sdlc/SKILL.md frontmatter registers farm-out-reminder.sh as PreToolUse|Bash" \
   skill_hooks_has "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md" PreToolUse Bash \
@@ -820,61 +659,17 @@ expect_true "README Hooks list mentions both canonical-sdlc hooks" \
   grep -qE 'canonical-sdlc-evidence-gate.*canonical-sdlc-governing-skill' "${REPO}/README.md"
 
 # ============================================================
-# SECTION 5: Shell alias marker consistency
+# SECTION 5: RETIRED — shell alias marker consistency
 # ============================================================
-
-echo ""
-echo "=== Section 5: Shell alias marker consistency ==="
-
-# 5a: Bootstrap defines ALIAS_START containing 'bionic:start'
-_bootstrap_start="$(grep 'ALIAS_START=' "$BOOTSTRAP" | head -1)"
-expect_contains "bootstrap ALIAS_START contains bionic:start" "bionic:start" "$_bootstrap_start"
-
-# 5b: Bootstrap defines ALIAS_END containing 'bionic:end'
-_bootstrap_end="$(grep 'ALIAS_END=' "$BOOTSTRAP" | head -1)"
-expect_contains "bootstrap ALIAS_END contains bionic:end" "bionic:end" "$_bootstrap_end"
-
-# 5c: Reset defines ALIAS_START with the same value as bootstrap
-_reset_start="$(grep 'ALIAS_START=' "$RESET" | head -1)"
-expect_eq "reset ALIAS_START matches bootstrap ALIAS_START" "$_bootstrap_start" "$_reset_start"
-
-# 5d: Reset defines ALIAS_END with the same value as bootstrap
-_reset_end="$(grep 'ALIAS_END=' "$RESET" | head -1)"
-expect_eq "reset ALIAS_END matches bootstrap ALIAS_END" "$_bootstrap_end" "$_reset_end"
-
-# 5e: Bootstrap uses bionic:start marker (may also reference old claude-setup:start for migration)
-expect_true "bootstrap references bionic:start" grep -q 'bionic:start' "$BOOTSTRAP"
-expect_true "npm-update advisory uses the inspected npm's absolute path (multi-node prefix safety)" \
-  grep -q '{npmbin} install -g ${pkg}@latest' "$BOOTSTRAP"
-expect_true "npm-update advisory resolves npmbin from command -v" \
-  grep -q 'npmbin="$(command -v npm)"' "$BOOTSTRAP"
-# The active start_marker variable must be bionic:start (not the legacy value)
-_bs_active_marker="$(grep 'start_marker=' "$BOOTSTRAP" | grep -v 'old_start' | grep -v '#' | head -1)"
-expect_contains "bootstrap active start_marker uses bionic:start" "bionic:start" "$_bs_active_marker"
-
-# 5f: Reset uses bionic:start marker (no migration code — must not reference old claude-setup:start at all)
-expect_true "reset references bionic:start" grep -q 'bionic:start' "$RESET"
-expect_false "reset does not reference claude-setup:start" grep -q 'claude-setup:start' "$RESET"
-
-# 5g: Bootstrap global-memory section uses bionic:start and bionic:end markers
-expect_true "bootstrap global-memory start_marker is bionic:start" \
-  grep -q 'bionic:start' "$BOOTSTRAP"
-expect_true "bootstrap global-memory end_marker is bionic:end" \
-  grep -q 'bionic:end' "$BOOTSTRAP"
-
-# 5h: Reset global-memory section uses bionic:start and bionic:end markers
-expect_true "reset global-memory start_marker is bionic:start" \
-  grep -q 'bionic:start' "$RESET"
-expect_true "reset global-memory end_marker is bionic:end" \
-  grep -q 'bionic:end' "$RESET"
-
-# 5i: Bootstrap verification section checks for bionic:start in shell rc
-_bootstrap_verify_shell="$(grep -A 3 '"  Shell alias:"' "$BOOTSTRAP" 2>/dev/null || grep -A 3 'Shell alias:' "$BOOTSTRAP" | head -6)"
-expect_contains "bootstrap verification checks bionic:start in shell rc" "bionic:start" "$_bootstrap_verify_shell"
-
-# 5j: Reset verification section checks for bionic:start in shell rc
-_reset_verify_shell="$(grep -A 3 'Shell alias:' "$RESET" | head -8)"
-expect_contains "reset verification checks bionic:start in shell rc" "bionic:start" "$_reset_verify_shell"
+#
+# This section pinned ALIAS_START/ALIAS_END agreement between
+# claude-bootstrap.sh and claude-reset.sh, both deleted at epic-17 W5 (4/6).
+# The markers themselves did NOT retire — a machine bootstrapped before the
+# cutover still carries the block, and removing it is now /bionic:setup's job.
+# Their pin moved to tests/setup.test.sh Group 6, which STATES the marker
+# literals and requires all three surviving copies to match: setup.sh
+# (SETUP_ALIAS_START/END), detect.sh (the presence probe) and remove.sh
+# (RM_RC_START/END).
 
 # ============================================================
 # SECTION 6: .claude/rules/ roster
