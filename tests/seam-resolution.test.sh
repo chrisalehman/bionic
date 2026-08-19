@@ -7,7 +7,7 @@
 #
 #     BIONIC_HOOKS_DIR    <repo>/hooks
 #     BIONIC_SKILLS_DIR   <repo>/skills
-#     BIONIC_SCRIPTS_DIR  <repo>            (root scripts, e.g. claude-bootstrap.sh)
+#     BIONIC_SCRIPTS_DIR  <repo>            (root scripts, e.g. wsl-setup.sh)
 #
 # It is mechanism-agnostic: it points at directories and knows nothing about how
 # those directories came to exist (installer tests own that).
@@ -81,9 +81,14 @@ printf '# %s\n' "$MARKER" >> "$DOC/hooks/canonical-sdlc-evidence-gate.sh"
 cp "$REPO/skills/canonical-sdlc/SKILL.md" "$DOC/skills/canonical-sdlc/SKILL.md"
 printf '\n<!-- %s -->\n' "$MARKER" >> "$DOC/skills/canonical-sdlc/SKILL.md"
 
-# root-scripts class — the real bootstrap, marker appended.
-cp "$REPO/claude-bootstrap.sh" "$DOC/root/claude-bootstrap.sh"
-printf '# %s\n' "$MARKER" >> "$DOC/root/claude-bootstrap.sh"
+# root-scripts class — a real root script, marker appended. This was
+# claude-bootstrap.sh until epic-17 W5 (4/6) deleted the installer; the class
+# under test is "scripts at the repo root", not that particular script, so the
+# representative moved to the root script that survived. Any root *.sh would
+# serve — what the fixture needs is a file the seam can resolve to and a marker
+# only the doctored copy carries.
+cp "$REPO/wsl-setup.sh" "$DOC/root/wsl-setup.sh"
+printf '# %s\n' "$MARKER" >> "$DOC/root/wsl-setup.sh"
 
 # ------------------------------------------------------------------
 # The probe: a stand-in consumer suite. Sources the seam exactly the way a real
@@ -107,7 +112,7 @@ case "$2" in
   # Marker reads: did the consumer land in the doctored copy or the repo copy?
   mark-hooks)   grep -c 'SEAM-DOCTORED-MARKER-b7f3' "${BIONIC_HOOKS_DIR}/canonical-sdlc-evidence-gate.sh" ;;
   mark-skills)  grep -c 'SEAM-DOCTORED-MARKER-b7f3' "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md" ;;
-  mark-scripts) grep -c 'SEAM-DOCTORED-MARKER-b7f3' "${BIONIC_SCRIPTS_DIR}/claude-bootstrap.sh" ;;
+  mark-scripts) grep -c 'SEAM-DOCTORED-MARKER-b7f3' "${BIONIC_SCRIPTS_DIR}/wsl-setup.sh" ;;
   *) echo "PROBE-UNKNOWN-CHECK"; exit 4 ;;
 esac
 PROBE

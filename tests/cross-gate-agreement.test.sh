@@ -2967,15 +2967,20 @@ expect_contains "…and the dispatch wall skips its roster append on exactly tha
 # dedupe holding at exactly the four sites AC-12 named — not the unrelated §L.5
 # SKILL_EVENT_KEYS extractor above, which shares the same block-entry prologue but was never
 # one of the tracked four and stays out of this wave's scope (flagged, not folded in blind).
+# One of AC-12's four sites — installer-behavior.test.sh — was DELETED at
+# epic-17 W5 (4/6) together with claude-bootstrap.sh, the installer it was the
+# behavioural test for. A dedupe claim about a file that no longer exists is
+# not a weaker claim, it is an unfalsifiable one, so that arm is dropped rather
+# than kept passing vacuously. The dedupe itself is unaffected: the remaining
+# sites still share the one implementation, and its ABSENCE from the deleted
+# file is now guaranteed by the file's absence.
 for _f in "$REPO_ROOT/tests/cross-gate-agreement.test.sh" \
-          "$REPO_ROOT/tests/installer-behavior.test.sh" \
           "$REPO_ROOT/tests/scripts.test.sh"; do
   expect_true "$(basename "$_f") sources the shared frontmatter-parser helper" \
     /usr/bin/grep -q 'lib/frontmatter-parser\.sh' "$_f"
 done
-expect_eq "installer-behavior.test.sh no longer hand-copies the hooks: block state machine" \
-  "0" "$(/usr/bin/grep -c '/\^hooks:\$/ { active=1; next }' \
-      "$REPO_ROOT/tests/installer-behavior.test.sh")"
+expect_false "installer-behavior.test.sh is gone (retired with claude-bootstrap.sh, W5 4/6)" \
+  test -e "$REPO_ROOT/tests/installer-behavior.test.sh"
 expect_eq "scripts.test.sh no longer hand-copies the hooks: block state machine (either site)" \
   "0" "$(/usr/bin/grep -c '/\^hooks:\$/ { active=1; next }' \
       "$REPO_ROOT/tests/scripts.test.sh")"
