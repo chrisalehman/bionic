@@ -336,25 +336,36 @@ for s in hooks/context-spend.sh hooks/farm-out-reminder.sh hooks/canonical-sdlc-
   fi
 done
 
-# claude-bootstrap.sh is out of this epic's W1 scope entirely — it stays the live install
-# mechanism until W5, and its six MANAGED_HOOKS literals must still spell the directory it
-# installs to. This is the pin that fails loudly if a later sweep gets mechanical.
-BOOT="${BIONIC_SCRIPTS_DIR}/claude-bootstrap.sh"
-N_MANAGED=$($G -cF -- '~/.claude/hooks/' "$BOOT")
-if [ "$N_MANAGED" -ge 6 ]; then
-  ok "claude-bootstrap.sh still installs to ~/.claude/hooks/ (${N_MANAGED} references)"
-else
-  no "claude-bootstrap.sh still installs to ~/.claude/hooks/ (${N_MANAGED} references, expected >= 6)"
-fi
-for m in 'PreToolUse|Bash|~/.claude/hooks/protect-main.sh' \
-         'PreToolUse|Bash|~/.claude/hooks/protect-database.sh' \
-         'SubagentStop||~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/landing-gate.sh'; do
-  if $G -qF -- "\"$m\"" "$BOOT"; then
-    ok "  MANAGED_HOOKS entry intact: ${m%%|*}…"
+# THE INSTALLER IS GONE. This block used to pin the opposite: claude-bootstrap.sh
+# was out of the epic's W1 scope, stayed the live install mechanism until W5, and
+# its six MANAGED_HOOKS literals had to keep spelling ~/.claude/hooks/ — a guard
+# against a mechanical sweep rewriting the one file that was still entitled to
+# that spelling. W5 (4/6) deleted it, so the guard inverts: what must now be true
+# is that neither script is there, and that no root-level script has inherited the
+# installed-path spelling they were the sole licensed users of. Kept as an
+# assertion rather than deleted, because "the exception is gone" is exactly the
+# fact the rest of this suite's absence checks silently assume.
+for _gone in claude-bootstrap.sh claude-reset.sh; do
+  if [ -e "${BIONIC_SCRIPTS_DIR}/${_gone}" ]; then
+    no "retired installer is gone: ${_gone}"
   else
-    no "  MANAGED_HOOKS entry intact: ${m}"
+    ok "retired installer is gone: ${_gone}"
   fi
 done
+
+_root_offenders=""
+for _rs in "${BIONIC_SCRIPTS_DIR}"/*.sh; do
+  [ -f "$_rs" ] || continue
+  case "$(basename "$_rs")" in *.test.sh) continue ;; esac
+  if $G -qF -- '~/.claude/hooks/' "$_rs"; then
+    _root_offenders="${_root_offenders}$(basename "$_rs") "
+  fi
+done
+if [ -z "$_root_offenders" ]; then
+  ok "no root-level script carries the installed-path hook spelling any more"
+else
+  no "no root-level script carries the installed-path hook spelling any more (found: ${_root_offenders})"
+fi
 
 # ============================================================
 echo ""
