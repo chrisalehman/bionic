@@ -706,6 +706,13 @@ mkdir -p "$R8/.bionic/docs/plans/epic-99"
   printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 4\n'
 } > "$R8/.bionic/docs/plans/epic-99/wave-01.md"
 printf 'version=v1\nsession_id=%s\n' "$OWN8" > "$R8/.bionic/tmp/preflight-${OWN8}.state"
+# …and this session's Patrol stamp, the third writer precondition since epic-17 W5 4/4: the
+# start gate refuses a dispatch whose session has no fresh one, and this case needs the gate
+# to actually JOURNAL a row. Also a fixture of the writer's preconditions, never of the value
+# under test.
+printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$OWN8" > "$R8/.bionic/tmp/patrol-${OWN8}.state"
+chmod 600 "$R8/.bionic/tmp/patrol-${OWN8}.state"
 
 echo "progress line" > "$R8/prog-g.progress"
 BRIEF_G="Canonical-sdlc Step 4, slice 4/12 of epic-99 wave-01; build · audited · wave.

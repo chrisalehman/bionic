@@ -97,26 +97,44 @@ done
 # spelling W3 already shipped in payload/commands/*.md and in this file's own
 # spawn-worktree.sh sentence.
 #
-# The open question C-10 left behind is now CLOSED, and closing it moved this pin (W4
-# remediation fold, review F-1). ${CLAUDE_PLUGIN_ROOT} is measured UNSET in an ad-hoc Bash
-# tool shell, so the bare form resolved only where the harness substitutes the variable —
-# and unlike the /bionic:* commands, these four are commands a MODEL types into its own
-# shell, the patrol prompt's first duty on every tick among them. Bare, they exited 127.
-# The spelling is therefore ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}: still plugin-rooted where
-# the CLI expands it, and resolving to the installed path where a shell does. That is the
-# payload's own established fallback idiom, not a third form.
+# The open question C-10 left behind is now CLOSED, and closing it moved this pin twice.
+# W4 (review F-1): ${CLAUDE_PLUGIN_ROOT} is measured UNSET in an ad-hoc Bash tool shell, so
+# the bare form resolved only where the harness substitutes the variable — and unlike the
+# /bionic:* commands, these are commands a MODEL types into its own shell, the patrol
+# prompt's first duty on every tick among them. Bare, they exited 127. The fix then was the
+# fallback ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}.
+#
+# W5 4/4 (spec AC-5) retires the fallback in turn, and for the opposite failure: it ALWAYS
+# resolves. What it resolves to in a model's shell is the bootstrap-era ~/.claude copy,
+# which after the cutover is whatever build happened to be installed last — possibly older
+# than the plugin the CLI itself loads. A hook running from the wrong build reports success
+# while enforcing a doctrine nobody is following, and nothing in the output says so. The
+# spelling is now the PLACEHOLDER <plugin-root>, which cannot be pasted by accident, paired
+# with a doctrine paragraph that resolves the real root once per session out of the CLI's
+# registry (skills/canonical-sdlc/SKILL.md §Dispatch; hooks/session-poker.sh's own header).
 #
 # The absence half is not enough on its own: deleting the lines outright would satisfy it.
 # So each is pinned at its converted spelling, and both are count-scoped in
-# tests/dispatch-spans.test.sh §5j (two invocations of each script, on two lines that a
-# partial revert could split) — which also pins the bare form's ABSENCE, so a revert of
-# this spelling cannot pass by satisfying an older pin somewhere else.
-for pin in 'bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/hooks/session-poker.sh' \
-           'bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/hooks/stop-orders.sh'; do
+# tests/dispatch-spans.test.sh §5j (three invocations of the poker, two of stop-orders, on
+# lines a partial revert could split) — which also pins the ABSENCE of both retired forms,
+# so a revert cannot pass by satisfying an older pin somewhere else.
+for pin in 'bash <plugin-root>/hooks/session-poker.sh' \
+           'bash <plugin-root>/hooks/stop-orders.sh'; do
   if $G -qF -- "$pin" "$SKILL"; then
-    ok "operator command carries the plugin-rooted spelling: ${pin}"
+    ok "operator command carries the resolved-root spelling: ${pin}"
   else
-    no "operator command carries the plugin-rooted spelling: ${pin}"
+    no "operator command carries the resolved-root spelling: ${pin}"
+  fi
+done
+# The retired fallback survives in exactly one place — the sentence explaining why it is
+# retired — and never as a command. Pinned as an INVOCATION absence, not a string absence,
+# so the supersession note is allowed to keep naming the trap it closed.
+for pin in 'bash ${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}/hooks/'; do
+  if $G -qF -- "$pin" "$SKILL"; then
+    no "no fallback-rooted hook invocation survives in SKILL.md"
+    $G -nF -- "$pin" "$SKILL" | sed 's/^/       /'
+  else
+    ok "no fallback-rooted hook invocation survives in SKILL.md"
   fi
 done
 if $G -qE -- "$FORBIDDEN" "$SKILL"; then
