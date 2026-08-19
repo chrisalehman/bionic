@@ -283,7 +283,7 @@ echo "=== G — meta-evidence: each pin goes RED against a doctored copy ==="
 # ============================================================
 
 # G1. diagram-side version drift — the version rendering moves alone.
-sed 's/canonical_sdlc_version == 13/canonical_sdlc_version == 99/' "$HOOKCHAIN" > "$TMP/hc-version-drift.svg"
+sed 's/canonical_sdlc_version == 14/canonical_sdlc_version == 99/' "$HOOKCHAIN" > "$TMP/hc-version-drift.svg"
 expect_false "meta: a diagram-side version drift is detected" \
   check_versions "$VERSION" "$TMP/hc-version-drift.svg" "$LIFECYCLE"
 

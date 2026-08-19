@@ -401,7 +401,7 @@ MULTI_AGENT=$(frontmatter_get multi_agent)
 # no version dispatch anywhere below this line, so there is also no path that
 # reaches `exit 0` by matching no arm.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-SUPPORTED_SDLC_VERSION=13
+SUPPORTED_SDLC_VERSION=14
 
 if [ "$SDLC_VERSION" != "$SUPPORTED_SDLC_VERSION" ]; then
   echo "BLOCKED: canonical-sdlc evidence-gate: plan declares canonical_sdlc_version: '$SDLC_VERSION'." >&2
@@ -1022,22 +1022,55 @@ validate_integrate_step() {
   esac
 }
 
-# Ship step: deploy/verified-at/monitor, OR `n/a` only when
-# deploy_target=none.
+# Does frontmatter name a LIVE surface this run operates? The default answer
+# is no. `deploy_target` is n/a by default and is never inferred from deploy
+# signals — a target exists only when the user names one — so an absent line,
+# `none`, and `n/a` (with or without a trailing reason) all read as "no live
+# surface". Case-insensitive, matching every other value comparison in this
+# hook.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+deploy_target_named() {
+  case "$(printf '%s' "$DEPLOY_TARGET" | tr '[:upper:]' '[:lower:]')" in
+    ""|none|n/a|n/a:*) return 1 ;;
+    *)                 return 0 ;;
+  esac
+}
+
+# Close-out step (v14 contract, ratified 2026-08-19):
+#
+#   `delivered:` ALWAYS — the terminal state of the work. Step 9's default
+#   endpoint is a PR open and ready for a human to review, or commits landed
+#   locally and ready to push; everything past that boundary is the human's
+#   process, not the run's to claim.
+#
+#   `deployed:` / `verified:` / `monitored:` owed EXACTLY when a deploy_target
+#   is named — the run that operates its own live surface (bionic's own
+#   dogfood is the example).
+#
+# Supersedes v13, where the trio was owed whenever any target existed and
+# `n/a:` discharged the step at `deploy_target: none`. That rule encoded
+# wave==release, which is the exception and not the rule, and it let a run
+# with no live surface close without ever naming what it delivered.
+#
+# An UNOWED trio is tolerated, not refused: a run that deployed something
+# without having declared a target and says so is recording more than it owes,
+# and refusing that commit would punish honesty. The wall is on the absent
+# claim, never on the extra one.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_ship_step() {
-  local step="$1" prefix
-  if block_has_na; then
-    if [ -n "$DEPLOY_TARGET" ] && [ "$DEPLOY_TARGET" != "none" ]; then
-      prefix=$(step_prefix "$step")
-      echo "BLOCKED: ${prefix} 'n/a:' is only valid when deploy_target=none in frontmatter (got deploy_target=${DEPLOY_TARGET})." >&2
-      echo "Plan: $PLAN" >&2
-      echo "Fix: provide 'deploy:', 'verified-at:', and 'monitor:' fields, or change deploy_target to none." >&2
-      exit 2
-    fi
-  else
-    shape_block deploy verified-at monitor
-  fi
+  local step="$1" prefix f
+  local missing=()
+  shape_block delivered
+  deploy_target_named || return 0
+  for f in deployed verified monitored; do
+    block_has "$f" || missing+=("$f")
+  done
+  [ "${#missing[@]}" -eq 0 ] && return 0
+  prefix=$(step_prefix "$step")
+  echo "BLOCKED: ${prefix} frontmatter names deploy_target=${DEPLOY_TARGET}, so the close-out owes the deploy trio; missing: ${missing[*]}" >&2
+  echo "Plan: $PLAN" >&2
+  echo "Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block — or, if this run operates no live surface, set 'deploy_target: n/a' in frontmatter (the trio is owed exactly when a target is named)." >&2
+  exit 2
 }
 
 # ---------- pre-registered Verification Matrix ----------
@@ -1111,6 +1144,31 @@ matrix_block() {
     index(hdr, ac)==1 {f=1; next}
     /^[^[:space:]]/ {f=0}
     f'
+}
+
+# The `user-confirmed:` value out of an AC block (empty when absent).
+user_confirmed_value() {
+  echo "$1" | grep -E '^[[:space:]]*user-confirmed[[:space:]]*:' | head -1 \
+    | sed -E 's/^[[:space:]]*user-confirmed[[:space:]]*:[[:space:]]*//' \
+    | sed -E 's/[[:space:]]+$//'
+}
+
+# Is an AC block's `user-confirmed:` in the attributed form
+# `<user> <YYYY-MM-DD> <what>`? This is what lets a T4 row discharge without a
+# waiver below, so it is the one place the shape is checked rather than merely
+# recorded — unlike `waiver:` and `rigor-override:`, whose presence is the whole
+# test because a human wrote them by definition.
+#
+# What the form buys: a record naming WHO confirmed and WHEN. What it cannot
+# buy, and is not sold as buying: whether the named human actually said it. A
+# fabricated `chris 2026-08-19 ...` passes here. The check refuses the shape an
+# agent's own claim naturally takes — "confirmed after the re-render",
+# "2026-08-18 the wall renders" — which is the failure mode that was actually
+# observed, not a defense against a determined forger.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+user_confirmed_form_ok() {
+  echo "$(user_confirmed_value "$1")" \
+    | grep -qE '^[A-Za-z][A-Za-z0-9._-]*[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+[^[:space:]]'
 }
 
 # 3-line BLOCKED/Plan/Fix emit for the matrix arm (mirrors the pattern
@@ -1268,12 +1326,29 @@ validate_matrix() {
       done
     fi
     # Once past the Verify gate, every non-waived row must be CONFIRMED.
+    #
+    # T4 is the exception, and it is not a relaxation. T4's evidence IS the
+    # user's own confirmation — an independent auditor sent at it can only
+    # re-read what the user said, which is transcription, not independence. So
+    # a legitimately user-confirmed row used to have exactly one way past this
+    # arm: the Waiver Protocol, which recorded a waiver where nothing had been
+    # waived (epic-17 W4 paid its AC-7 in that form, and the row reads forever
+    # as if the criterion had been let go). A T4 row carrying a well-formed
+    # `user-confirmed: <user> <date> <what>` now discharges on that value —
+    # the same value keys_for_tier already demanded of it — and an
+    # agent-shaped claim with no attributed human still meets the wall.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     if [ "$CURRENT" -gt 5 ] 2>/dev/null; then
       if [ "$status" = "waived" ] || echo "$ev" | grep -qE 'waiver:' \
          || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
         :
+      elif [ "$tier" = "T4" ] && user_confirmed_form_ok "$block_txt"; then
+        :
       elif [ "$aud" != "CONFIRMED" ]; then
+        if [ "$tier" = "T4" ]; then
+          block_matrix "matrix row '${ac}' (T4) auditor verdict is '${aud:-empty}', not CONFIRMED, and its 'user-confirmed:' names no attributed user, at step ${CURRENT}." \
+            "record the user's own confirmation as 'user-confirmed: <user> <date> <what they confirmed>' in the '${ac}:' block — a T4 row discharges on that, no waiver needed. An unattributed or agent-written claim is not one."
+        fi
         block_matrix "matrix row '${ac}' auditor verdict is '${aud:-empty}', not CONFIRMED, at step ${CURRENT}." \
           "the independent auditor must CONFIRM every non-waived row before advancing past the Verify gate, or the row must be waived."
       fi

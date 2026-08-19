@@ -236,7 +236,7 @@ plan_active() {  # <repo>
 ---
 governing-skill: superpowers:writing-plans
 sdlc-step: 4
-canonical_sdlc_version: 13
+canonical_sdlc_version: 14
 ---
 
 # Wave 01 — landing contract

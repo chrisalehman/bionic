@@ -37,8 +37,13 @@
 #   (d) the bridge pair: hooks/canonical-sdlc-evidence-gate.sh and
 #       hooks/canonical-sdlc-governing-skill.sh equality-check the same
 #       SUPPORTED_SDLC_VERSION; that value is pinned against plugin.json's
-#       major version as the literal pair 13 <-> 0. The pair moves only by a
-#       conscious edit to this file, never silently.
+#       major version as the literal pair 14 <-> 0. The pair moves only by a
+#       conscious edit to this file, never silently. Moved 13 -> 14 on
+#       2026-08-19 (epic-17 W5, close-out contract v14) with the major left at
+#       0: the bridge rule reads contract-bump => major-bump, and pre-1.0 is
+#       exactly where that rule has nothing to say — every 0.x release is
+#       already licensed to break. The first 1.0.0 is Chris's publish package,
+#       and the rule binds from there.
 #
 # HERMETIC. Reads plugin.json, marketplace.json and the two hook files by
 # path; no network, no install, no mutation of the repo tree.
@@ -101,16 +106,16 @@ expect_eq "(c) both dependencies are present and NEITHER carries a version field
   "2|" "$DEP_VERSION_REPORT"
 
 echo ""
-echo "=== Arm (d): bridge pair SUPPORTED_SDLC_VERSION <-> plugin major, pinned 13 <-> 0 ==="
+echo "=== Arm (d): bridge pair SUPPORTED_SDLC_VERSION <-> plugin major, pinned 14 <-> 0 ==="
 
 EVIDENCE_GATE_VERSION="$(grep -oE '^SUPPORTED_SDLC_VERSION=[0-9]+' "$EVIDENCE_GATE_HOOK" 2>/dev/null | head -1 | cut -d= -f2)"
 GOVERNING_SKILL_VERSION="$(grep -oE '^SUPPORTED_SDLC_VERSION=[0-9]+' "$GOVERNING_SKILL_HOOK" 2>/dev/null | head -1 | cut -d= -f2)"
 expect_eq "(d) evidence-gate SUPPORTED_SDLC_VERSION equals governing-skill's" \
   "$GOVERNING_SKILL_VERSION" "$EVIDENCE_GATE_VERSION"
-expect_eq "(d) SUPPORTED_SDLC_VERSION is pinned at 13" "13" "$EVIDENCE_GATE_VERSION"
+expect_eq "(d) SUPPORTED_SDLC_VERSION is pinned at 14" "14" "$EVIDENCE_GATE_VERSION"
 
 PLUGIN_MAJOR="${PLUGIN_VERSION%%.*}"
-expect_eq "(d) plugin.json major version is pinned at 0 (paired with SUPPORTED_SDLC_VERSION 13)" \
+expect_eq "(d) plugin.json major version is pinned at 0 (paired with SUPPORTED_SDLC_VERSION 14)" \
   "0" "$PLUGIN_MAJOR"
 
 echo ""

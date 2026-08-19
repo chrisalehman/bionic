@@ -159,7 +159,7 @@ make_world() {
     cat > "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" <<'PLAN'
 ---
 governing-skill: canonical-sdlc
-canonical_sdlc_version: 13
+canonical_sdlc_version: 14
 intent: build
 rigor: audited
 scale: wave
