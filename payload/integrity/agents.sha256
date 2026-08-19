@@ -1,0 +1,10 @@
+# GENERATED — sha256 of the rendered agent files, plugin-root-relative.
+# Written by agents-src/render.sh alongside the finals themselves; regenerate with
+# `bash agents-src/render.sh`. /bionic:doctor reads it to report whether an installed
+# machine's role files are stock or locally modified.
+ca6f4413729fdfb17639062d8e0522c1a583baba000bd01fcdb10d634b529ea3  agents/auditor.md
+7c906b2578ba13266d71ca4a85abee19fcb3a0d8579c8d0136793ad13d3d1e46  agents/critic.md
+0f5c9345bdc36f8774325e4e870594c622d39f927728693e7e283001e23dff5c  agents/implementor.md
+8c8b9926d0374c273d25aa36c253a929e9581ac0a03d77378199f5261c71eac3  agents/researcher.md
+79e000d0121c0223dcf1dbe92fd621fbbd3e55a528bec549dcb319c0861a135d  agents/senior-implementor.md
+7da649acba738682e3c3ec1793a127c5b80bdfdce4099aba32ee1bc0baa5df7f  agents/test-runner.md

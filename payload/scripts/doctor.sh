@@ -106,6 +106,13 @@ PLUGIN_FACT="$(detect_plugin_integrity)"
 PLUGIN_VERSION="${PLUGIN_FACT#plugin: version=}"; PLUGIN_VERSION="${PLUGIN_VERSION%% *}"
 PLUGIN_HOOKS="${PLUGIN_FACT##*hooks=}"
 
+AGENT_FACT="$(detect_agent_integrity)"
+AGENT_STATE="${AGENT_FACT#*state=}";       AGENT_STATE="${AGENT_STATE%% *}"
+AGENT_TOTAL="${AGENT_FACT#*total=}";       AGENT_TOTAL="${AGENT_TOTAL%% *}"
+AGENT_MODIFIED="${AGENT_FACT#*modified=}"; AGENT_MODIFIED="${AGENT_MODIFIED%% *}"
+AGENT_NAMES="${AGENT_FACT#*names=}";       AGENT_NAMES="${AGENT_NAMES%% *}"
+AGENT_CAUSE="${AGENT_FACT##*cause=}"
+
 TODO_FACT="$(detect_env_todo_tools)";        TODO_STATE="${TODO_FACT##*present=}"
 LEGACY_FACT="$(detect_zshrc_legacy_block)";  LEGACY_STATE="${LEGACY_FACT##*present=}"
 LEGACY_HOOK_FACT="$(detect_legacy_channel_hooks)"; LEGACY_HOOK_COUNT="${LEGACY_HOOK_FACT##*count=}"
@@ -271,6 +278,23 @@ case "$PLUGIN_HOOKS" in
   degraded) printf '  %-19s %s\n' "hooks" "degraded — a hooks.json command names a script that is not on disk" ;;
   absent)   printf '  %-19s %s\n' "hooks" "absent — the payload carries no hooks/hooks.json" ;;
   *)        printf '  %-19s %s\n' "hooks" "$PLUGIN_HOOKS" ;;
+esac
+# ONE LINE, AND IT REPORTS RATHER THAN POLICES (spec AC-4). The six role files
+# are instructions subagents obey, so a hand-edit there changes behaviour with
+# no other symptom — worth a line. It is not worth a verdict: editing your own
+# installed files is allowed, so the line names the state, names the files, and
+# names the undo in the same breath. Deliberately absent: any exit-code effect,
+# any repair, and any second mention in the SUMMARY, whose action lines would
+# turn "you changed something" into "you should change it back".
+case "$AGENT_STATE" in
+  stock)
+    printf '  %-19s %s\n' "agent files" \
+      "stock — all ${AGENT_TOTAL} match the checksums this payload shipped" ;;
+  modified)
+    printf '  %-19s %s\n' "agent files" \
+      "${AGENT_MODIFIED} of ${AGENT_TOTAL} modified locally (${AGENT_NAMES//,/, }) — may be intentional; reinstall restores stock" ;;
+  *)
+    printf '  %-19s %s\n' "agent files" "unknown — ${AGENT_CAUSE}" ;;
 esac
 printf '  %-19s %s\n' "payload root" "$(_detect_plugin_root)"
 

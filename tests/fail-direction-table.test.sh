@@ -45,7 +45,7 @@ cleanup() {
   for p in $BG_PIDS; do kill -9 "$p" 2>/dev/null; done
   # the probe-refuses fixture below leaves .bionic/tmp chmod 500 (unwritable) —
   # restore write perms first or rm -rf cannot unlink inside it (same technique
-  # hooks/preflight-probe.test.sh's cleanup() uses for the same reason).
+  # tests/preflight-probe.test.sh's cleanup() uses for the same reason).
   chmod -R u+rwX "$SANDBOX" 2>/dev/null
   rm -rf "$SANDBOX"
 }
@@ -58,7 +58,7 @@ mkdir -p "$CLAUDE_CONFIG_DIR" "$SANDBOX/plain" "$SANDBOX/stub" "$SANDBOX/nocred/
 # would satisfy the producer's credential probe and the row-5 case below could
 # never fail its blocking probe. Substituting the COMMAND (an environment
 # substitution via PATH, not a seam inside the script) is the same technique
-# hooks/preflight-probe.test.sh uses.
+# tests/preflight-probe.test.sh uses.
 printf '#!/bin/bash\nexit 1\n' > "$SANDBOX/stub/security"
 chmod +x "$SANDBOX/stub/security"
 
@@ -67,7 +67,7 @@ chmod +x "$SANDBOX/stub/security"
 # succeed DETERMINISTICALLY — not depend on this machine's real login keychain,
 # which is exactly the trap the `security` stub above exists to avoid for the
 # producer's own suite. The sandboxed-probe-environment technique
-# (hooks/preflight-probe.test.sh's mk_sandbox) is a credentials-file source: a
+# (tests/preflight-probe.test.sh's mk_sandbox) is a credentials-file source: a
 # non-empty `.credentials.json` under the shared CLAUDE_CONFIG_DIR satisfies
 # credential source 2 before the probe ever reaches `security`, so every world
 # below auto-probes successfully unless a fixture deliberately breaks a
@@ -160,7 +160,7 @@ payload() {  # <tool_name> <sid|-> <transcript|-> <cwd> <task_id-or-command|->
     # brief names none of them. The `start|attested` row below is THE POSITIVE
     # PAIR — an ordinary, well-formed dispatch — and its §7 direction is
     # "pass in silence"; a fieldless brief is a malformed dispatch, whose warning
-    # is a different claim, driven in hooks/dispatch-preflight.test.sh S10c.
+    # is a different claim, driven in tests/dispatch-preflight.test.sh S10c.
     Agent)    input=$(jq -n --arg d "a dispatch" --arg p 'Expected artifact: .bionic/docs/record/w99.txt
 Expected duration: ~25 minutes.
 Progress artifact: .bionic/tmp/w99.progress' \
@@ -316,7 +316,7 @@ ln -s "$SANDBOX/elsewhere.state" "$L_REPO/.bionic/tmp/stop-check.state"
 # keychain and no sandbox can take that away). This is the row that carries the
 # surviving REFUSE direction under R5: unlike start|unattested/foreign-attestation
 # above, the auto-probe here has a real, deterministic reason to refuse. Same
-# chmod-500 technique hooks/preflight-probe.test.sh uses for its own state-dir case.
+# chmod-500 technique tests/preflight-probe.test.sh uses for its own state-dir case.
 IFS='|' read -r U_REPO U_TR U_SUB <<< "$(make_world probeblocked yes)"
 plant_agent "$U_SUB" "aworker-1111111111111111" "worker"
 mkdir -p "$U_REPO/.bionic/tmp"

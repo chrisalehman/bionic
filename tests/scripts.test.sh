@@ -9,6 +9,7 @@
 set -euo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/frontmatter-parser.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 CONFIG="${REPO}/claude-config.txt"
@@ -664,7 +665,18 @@ expect_eq "no active entry appears in both core and everything profiles" "" "$_o
 echo ""
 echo "=== Section 4: Hook file consistency ==="
 
-# 4a: Every non-test .sh in hooks/ has a matching .test.sh
+# Epic-17 W4 S9 (spec AC-9): hooks/*.test.sh moved to tests/, so hooks/ no longer
+# holds test files at all and tests/ is no longer hook-exclusive — a bare
+# existence scan of tests/*.test.sh can't tell a hook's test apart from an
+# unrelated suite like doctor.test.sh (neither has a hooks/*.sh namesake, for
+# different reasons). 4b's orphan direction (a lingering test for a deleted
+# hook) needs to know WHICH tests/*.test.sh are hook-derived; this manifest is
+# that fact, fixed at the move and re-checked below for drift rather than
+# re-derived from directory placement.
+TESTS_DIR="${REPO}/tests"
+HOOK_TEST_NAMES="agent-context-guard canonical-sdlc-evidence-gate canonical-sdlc-governing-skill context-spend dispatch-preflight execution-recorder farm-out-reminder landing-gate preflight-probe protect-database protect-main session-poker session-sweeper stop-check stop-guard stop-orders"
+
+# 4a: Every non-test .sh in hooks/ has a matching tests/<name>.test.sh
 _hooks_missing_tests=""
 for hook in "${BIONIC_HOOKS_DIR}/"*.sh; do
   [ -f "$hook" ] || continue
@@ -672,24 +684,48 @@ for hook in "${BIONIC_HOOKS_DIR}/"*.sh; do
   if echo "$name" | grep -q '\.test\.sh$'; then
     continue
   fi
-  testfile="${BIONIC_HOOKS_DIR}/${name%.sh}.test.sh"
+  testfile="${TESTS_DIR}/${name%.sh}.test.sh"
   if [ ! -f "$testfile" ]; then
     _hooks_missing_tests="${_hooks_missing_tests}${name} "
   fi
 done
-expect_eq "every hook .sh has a matching .test.sh" "" "$_hooks_missing_tests"
+expect_eq "every hook .sh has a matching tests/*.test.sh" "" "$_hooks_missing_tests"
 
-# 4b: Every .test.sh in hooks/ has a corresponding non-test hook
+# 4b: Every manifested hook test has a corresponding non-test hook (orphan check).
+# The manifest also gets checked for staleness in the other direction — a hook
+# test that exists on disk but fell out of HOOK_TEST_NAMES would silently escape
+# this whole section, so 4b's own no-drift arm below closes that gap.
 _tests_missing_hooks=""
-for test in "${BIONIC_HOOKS_DIR}/"*.test.sh; do
-  [ -f "$test" ] || continue
-  name="$(basename "$test")"
-  hookname="${name%.test.sh}.sh"
-  if [ ! -f "${BIONIC_HOOKS_DIR}/${hookname}" ]; then
-    _tests_missing_hooks="${_tests_missing_hooks}${name} "
+for name in $HOOK_TEST_NAMES; do
+  testfile="${TESTS_DIR}/${name}.test.sh"
+  if [ ! -f "$testfile" ]; then
+    _tests_missing_hooks="${_tests_missing_hooks}${name}.test.sh(manifested-but-absent) "
+    continue
+  fi
+  if [ ! -f "${BIONIC_HOOKS_DIR}/${name}.sh" ]; then
+    _tests_missing_hooks="${_tests_missing_hooks}${name}.test.sh "
   fi
 done
-expect_eq "every .test.sh has a corresponding hook .sh" "" "$_tests_missing_hooks"
+expect_eq "every manifested hook test has a corresponding hook .sh" "" "$_tests_missing_hooks"
+
+# 4b-drift: no test file living alongside the manifested ones LOOKS like a hook
+# test (same basename shape as a real hooks/*.sh) but is missing from the
+# manifest — that would be an orphan 4b can't see. Scoped to names that are
+# currently real hooks/*.sh basenames, so unrelated suites (doctor.test.sh, etc.)
+# never enter this comparison.
+_unmanifested_hook_tests=""
+for hook in "${BIONIC_HOOKS_DIR}/"*.sh; do
+  [ -f "$hook" ] || continue
+  name="$(basename "$hook" .sh)"
+  echo "$name" | grep -q '\.test$' && continue
+  if [ -f "${TESTS_DIR}/${name}.test.sh" ]; then
+    case " $HOOK_TEST_NAMES " in
+      *" $name "*) : ;;
+      *) _unmanifested_hook_tests="${_unmanifested_hook_tests}${name}.test.sh " ;;
+    esac
+  fi
+done
+expect_eq "no hook's test file is missing from HOOK_TEST_NAMES" "" "$_unmanifested_hook_tests"
 
 # 4c: Every hook file referenced inside MANAGED_HOOKS in bootstrap exists in hooks/
 _missing_managed_hooks=""
@@ -722,20 +758,11 @@ expect_true "MANAGED_HOOKS includes protect-database.sh" grep -q 'protect-databa
 expect_false "MANAGED_HOOKS no longer includes canonical-sdlc-evidence-gate.sh (moved to SKILL.md frontmatter)" \
   /usr/bin/grep -qF '"PreToolUse|Bash|~/.claude/hooks/canonical-sdlc-evidence-gate.sh"' "$BOOTSTRAP"
 
+# Shared with cross-gate-agreement.test.sh and installer-behavior.test.sh via
+# tests/lib/frontmatter-parser.sh (epic-17 W4 AC-12 dedupe).
 expect_true "skills/canonical-sdlc/SKILL.md frontmatter registers canonical-sdlc-evidence-gate.sh as PreToolUse|Bash" \
-  awk '
-    /^hooks:$/ { active=1; next }
-    active && /^---$/ { active=0 }
-    active && /^[A-Za-z]/ { active=0 }
-    !active { next }
-    /^  [A-Za-z]+:$/ { event=$0; sub(/^  /,"",event); sub(/:$/,"",event); matcher=""; next }
-    /^    - matcher: "/ { matcher=$0; sub(/^    - matcher: "/,"",matcher); sub(/"$/,"",matcher); next }
-    /^          command: / {
-      cmd=$0; sub(/^          command: /,"",cmd)
-      if (event == "PreToolUse" && matcher == "Bash" && cmd ~ /canonical-sdlc-evidence-gate\.sh$/) found=1
-    }
-    END { exit !found }
-  ' "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
+  skill_hooks_has "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md" PreToolUse Bash \
+    '${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-evidence-gate.sh'
 
 # 4i: farm-out-reminder.sh moved out of MANAGED_HOOKS into skills/canonical-sdlc/
 # SKILL.md's frontmatter hooks: block (session-20260815-landing-supervision T5,
@@ -747,19 +774,8 @@ expect_false "MANAGED_HOOKS no longer includes farm-out-reminder.sh (moved to SK
   /usr/bin/grep -qF '"PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh"' "$BOOTSTRAP"
 
 expect_true "skills/canonical-sdlc/SKILL.md frontmatter registers farm-out-reminder.sh as PreToolUse|Bash" \
-  awk '
-    /^hooks:$/ { active=1; next }
-    active && /^---$/ { active=0 }
-    active && /^[A-Za-z]/ { active=0 }
-    !active { next }
-    /^  [A-Za-z]+:$/ { event=$0; sub(/^  /,"",event); sub(/:$/,"",event); matcher=""; next }
-    /^    - matcher: "/ { matcher=$0; sub(/^    - matcher: "/,"",matcher); sub(/"$/,"",matcher); next }
-    /^          command: / {
-      cmd=$0; sub(/^          command: /,"",cmd)
-      if (event == "PreToolUse" && matcher == "Bash" && cmd ~ /farm-out-reminder\.sh$/) found=1
-    }
-    END { exit !found }
-  ' "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
+  skill_hooks_has "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md" PreToolUse Bash \
+    '${CLAUDE_PLUGIN_ROOT}/hooks/farm-out-reminder.sh'
 
 # 4m: hooks/ dir contains at least one non-test hook
 _hook_count=0
@@ -859,6 +875,43 @@ expect_contains "bootstrap verification checks bionic:start in shell rc" "bionic
 # 5j: Reset verification section checks for bionic:start in shell rc
 _reset_verify_shell="$(grep -A 3 'Shell alias:' "$RESET" | head -8)"
 expect_contains "reset verification checks bionic:start in shell rc" "bionic:start" "$_reset_verify_shell"
+
+# ============================================================
+# SECTION 6: .claude/rules/ roster
+# ============================================================
+
+echo ""
+echo "=== Section 6: .claude/rules/ roster ==="
+
+# Epic-17 W4 remediation fold (review F-3). The .gitignore negation pair made
+# `.claude/rules/` a permanently committable surface — the first part of `.claude/`
+# a fresh clone receives. S4 audited its five files once, by hand, for machine paths
+# and consumer-project names. A one-time audit does not survive the next addition,
+# and nothing else in the suite looks at this directory, so the roster itself is the
+# wall: a sixth committed file, a renamed one, or a subdirectory trips this and gets
+# the same read S4's five got.
+#
+# git ls-files, not the filesystem, on purpose. What matters is what a clone RECEIVES.
+# An untracked scratch file under .claude/rules/ is machine-local and none of this
+# suite's business; a COMMITTED one is a new public surface. `--` separates the
+# pathspec so a directory named like a flag cannot be misread, and the pathspec is
+# non-empty by construction here (the five files below), which is what keeps this
+# from being the silent zero-match failure git-grep-style pathspecs are prone to.
+EXPECTED_RULES="agent-discipline.md
+bootstrap-install.md
+git-worktree-docs.md
+hook-authoring.md
+test-harness.md"
+
+_actual_rules="$(cd "$REPO" && git ls-files -- .claude/rules/ | sed 's#^\.claude/rules/##' | LC_ALL=C sort)"
+expect_eq "the committed .claude/rules/ roster is exactly the five audited files" \
+  "$EXPECTED_RULES" "$_actual_rules"
+
+# Stated as its own arm so a subdirectory reports as a subdirectory rather than as an
+# opaque roster mismatch: any tracked path under .claude/rules/ with a further slash in
+# it is a nested tree the audit never covered.
+_nested_rules="$(cd "$REPO" && git ls-files -- .claude/rules/ | sed 's#^\.claude/rules/##' | grep '/' || true)"
+expect_eq "no committed subdirectory under .claude/rules/" "" "$_nested_rules"
 
 # ============================================================
 # Results

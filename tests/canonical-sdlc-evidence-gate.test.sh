@@ -12,11 +12,11 @@
 # the directory this gate deliberately does NOT search (2026-07-28); the cases
 # that plant something there use write_global_note().
 #
-# Usage: bash hooks/canonical-sdlc-evidence-gate.test.sh
+# Usage: bash tests/canonical-sdlc-evidence-gate.test.sh
 
 set -euo pipefail
 
-. "$(dirname "$0")/../tests/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/resolve-roots.sh"
 
 HOOK="${BIONIC_HOOKS_DIR}/canonical-sdlc-evidence-gate.sh"
 PASS=0

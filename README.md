@@ -116,6 +116,6 @@ The shell alias runs Claude with `--dangerously-skip-permissions`. That removes 
 | What gets installed | [`claude-config.txt`](claude-config.txt) · [`claude-config.everything.txt`](claude-config.everything.txt) |
 | Operating philosophy | [`claude-global.md`](claude-global.md) |
 | Skills | [`skills/`](skills/) — each has its own `SKILL.md` |
-| Hooks | [`hooks/`](hooks/) — each has a paired `.test.sh` |
+| Hooks | [`hooks/`](hooks/) — each has a paired `.test.sh` under [`tests/`](tests/) |
 | Subagent roles | [`agents/`](agents/) |
 | Tests | `./test.sh` → [`tests/run.sh`](tests/run.sh) |

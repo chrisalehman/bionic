@@ -20,8 +20,10 @@ See `.claude/rules/` for guidance scoped by path — hook authoring, bootstrap/i
 test-harness traps, doc-path and worktree discipline, and agent/dispatch discipline. Each file
 declares its own `paths:` globs and loads only when a matching file is read.
 
-`.claude/` is **gitignored by decision** — it is machine-local, and these rule files are
-**authored in place**. A fresh clone will not contain them, and neither `./claude-bootstrap.sh`
-nor any other script recreates them: there is currently **no distribution mechanism at all**.
-That is a known gap, not a deletion — on any machine but this one the path-scoped channel is
-empty, and nothing here will reach a dispatched subagent.
+`.claude/rules/` is **committed** (epic-17 W4, 2026-08-18) via a `.gitignore` negation pair —
+the rest of `.claude/` (settings, local worktree state) stays gitignored as machine-local, so
+a fresh clone carries the path-scoped channel and nothing else. Rules addressed to a
+*dispatched agent* belong in `agents-src/blocks/` instead, which renders into the six role
+files under `agents/` and ships with the plugin; the two channels differ in when an edit
+lands (a rules file on the next read, a role file on the next session), not in reach.
+`tests/scripts.test.sh` pins the roster of files here, so adding one is a deliberate act.

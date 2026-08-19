@@ -43,7 +43,7 @@
 # in one cheap test before that: anything that is not this script's business
 # leaves after a single fixed-string grep.
 #
-# [WALL: hooks/execution-recorder.test.sh]
+# [WALL: tests/execution-recorder.test.sh]
 #
 # Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
 
@@ -501,7 +501,7 @@ if [ "$TOOL_NAME" = "Agent" ]; then
   # The cost the cap was bought with is paid at its source instead — the prefilter
   # above, which is what actually made this arm quadratic in session length. See
   # tests/cross-gate-agreement.test.sh §F for the survival case driven writer →
-  # recorder → gate, and hooks/execution-recorder.test.sh's P block for the budget.
+  # recorder → gate, and tests/execution-recorder.test.sh's P block for the budget.
   exit 0
 fi
 
@@ -629,7 +629,7 @@ if [ -n "$IS_START" ]; then
   # Assumptions A-D1): a teammate named `general-purpose` and an async dispatch of
   # TYPE `general-purpose` are the same string on this payload, and nothing on the
   # roster separates them. Accepted, and pinned from the residual side in
-  # hooks/execution-recorder.test.sh Section 10 so that un-accepting it is a design
+  # tests/execution-recorder.test.sh Section 10 so that un-accepting it is a design
   # change rather than a silent one.
   #
   # `intended` AND `confirmed` are both join targets, as they are for the id loop
