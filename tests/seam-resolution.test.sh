@@ -70,7 +70,7 @@ DOC="$TMP/doctored"
 mkdir -p "$DOC/hooks" "$DOC/skills/canonical-sdlc" "$DOC/root"
 
 # hooks class — the real pin-sync subject. The repo copy says
-# SUPPORTED_SDLC_VERSION=13; the doctored copy says 99999. Neither value can be
+# SUPPORTED_SDLC_VERSION=14; the doctored copy says 99999. Neither value can be
 # read from the other file, so the named check's ANSWER names which file it read.
 cp "$REPO/hooks/canonical-sdlc-evidence-gate.sh" "$DOC/hooks/canonical-sdlc-evidence-gate.sh"
 sed -i.bak 's/^SUPPORTED_SDLC_VERSION=.*/SUPPORTED_SDLC_VERSION=99999/' "$DOC/hooks/canonical-sdlc-evidence-gate.sh"
@@ -150,7 +150,7 @@ _v="$(BIONIC_HOOKS_DIR="$DOC/hooks" probe "$REPO" "$SEAM" read-hooks)"
 expect_eq "hooks override: named check reads the doctored constant" \
   "SUPPORTED_SDLC_VERSION=99999" "$_v"
 expect_absent "hooks override: named check does NOT read the repo constant" \
-  "SUPPORTED_SDLC_VERSION=13" "$_v"
+  "SUPPORTED_SDLC_VERSION=14" "$_v"
 expect_eq "hooks override: doctored marker is present in what was read" \
   "1" "$(BIONIC_HOOKS_DIR="$DOC/hooks" probe "$REPO" "$SEAM" mark-hooks)"
 expect_eq "skills override: marker is present in what was read" \
@@ -165,7 +165,7 @@ echo "=== Group 4: override unset -> the same check reads the REPO copy ==="
 
 _v="$(probe "$REPO" "$SEAM" read-hooks)"
 expect_eq "no override: named check reads the repo constant" \
-  "SUPPORTED_SDLC_VERSION=13" "$_v"
+  "SUPPORTED_SDLC_VERSION=14" "$_v"
 expect_absent "no override: named check does NOT read the doctored constant" \
   "SUPPORTED_SDLC_VERSION=99999" "$_v"
 expect_eq "no override: hooks read carries no doctored marker" \

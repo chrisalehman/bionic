@@ -176,7 +176,7 @@ artifacts that the plan pointed at. The reasoning survived in the plan's own pro
 evidence did not, which turns an audited record into testimony. Give an agent a `record/` path
 in its brief, or you will pay this once too.
 
-Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 13`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`. Plan files additionally carry `walk: required | exempt` — Step 0's derivation, and the key the Verify gate reads — Step 0's `design-interview:` value beside it, and, where the run's rigor sits below its derived floor, `rigor-override:` beside those. None of the three is required to write, but a `walk:` value outside the enum blocks. Spec files at `scale: wave` or `scale: epic` carry `design: <path>` or `design-waived: <user> <date> <reason>` unless the `## Design` section is in place — the three-way rule, Step 2.
+Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 14`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`. Plan files additionally carry `walk: required | exempt` — Step 0's derivation, and the key the Verify gate reads — Step 0's `design-interview:` value beside it, and, where the run's rigor sits below its derived floor, `rigor-override:` beside those. None of the three is required to write, but a `walk:` value outside the enum blocks. Spec files at `scale: wave` or `scale: epic` carry `design: <path>` or `design-waived: <user> <date> <reason>` unless the `## Design` section is in place — the three-way rule, Step 2.
 
 **13 is the only supported version.** Any other value — an older number, an empty value, a typo — blocks at both hooks. There is one contract; an artifact either meets it or does not write. A run that predates it is brought forward to 13, not exempted.
 
@@ -207,7 +207,7 @@ Committing is a cross-cutting rhythm (~once per step), not a numbered step. Upda
 
 1. **Pre-flight.** `.bionic/` exists; `docs-root:` read from `.bionic/config.yaml` (default `.bionic/docs`) with `{specs,plans,adrs,incidents}/` present; `mkdir -p .bionic/tmp/`; both hooks installed and executable (if not, warn and record in `## Assumptions`).
 2. **Classify the triple silently.** Infer from the request's verbs and named artifacts. Do NOT interrogate. Interview by exception only, 1–3 questions, on exactly three conditions: a genuine intent collision the classification rules do not resolve (the standing gray zones are **mechanism-swap** and **reference-content**); a suspected but unconfirmed security/privacy surface; or a scale that could be one session or several.
-3. **Infer the flags.** `language` from repo files; `surface_type`/`has_ui` from the request; `multi_agent` defaults **true** (infer `false` only when there is genuinely nothing to offload — never key it off an installed plugin catalog, which silently disables the dispatched-task ledger guard); `deploy_target` from deploy signals; `cleanup_on_finish` true; `use_worktree` false; `integration_branch` from the epic plan, else the current mainline, else `main` — print it as `unknown` rather than dropping it; `model_plan` from `multi_agent` and the detected session model.
+3. **Infer the flags.** `language` from repo files; `surface_type`/`has_ui` from the request; `multi_agent` defaults **true** (infer `false` only when there is genuinely nothing to offload — never key it off an installed plugin catalog, which silently disables the dispatched-task ledger guard); `deploy_target` **defaults to `n/a` and is never inferred** — a live surface exists only where the user names one, in the request or at this step's confirmation, and deploy-shaped signals in the repo are not that naming; `cleanup_on_finish` true; `use_worktree` false; `integration_branch` from the epic plan, else the current mainline, else `main` — print it as `unknown` rather than dropping it; `model_plan` from `multi_agent` and the detected session model.
 4. **Derive the walk requirement.** From the declared surface flags: a surface an agent can open and drive → `walk: required`; nothing drivable → `walk: exempt`. It prints in the confirmation display and is recorded as plan-frontmatter `walk:`. **Exemptions derive from declared configuration and are ratified at Step 0, never invented mid-run** — there is no mid-run `n/a`, and the Verify gate reads an absent or unrecognized key as `required`, so an omission never becomes an exemption.
 5. **Derive the Verification Matrix.** One row per acceptance criterion. Tier defaults: user-visible behavior → **T3**; engine-divergent → **T2 both engines** plus **T3** for the user-visible AC; pure substrate with no runtime surface → **T1/T2** with a one-line justification; perceptual fidelity → **T3**, T4 available; docs → **T0/none**.
 6. **Present the confirmation display in full, in the layout below.** Every section, every flag, every inference rationale, every matrix row, the `integration-branch:` line. Never elide, sample, summarize, defer, or restate it as prose — the user is approving exactly what they can see, and an abbreviated display invalidates the confirmation. Print every matrix row even past 12 ACs; a matrix is precisely what must not be sampled. An unknown value prints as `unknown` rather than dropping its line.
@@ -238,7 +238,7 @@ Discriminator flags:
   language:        <value>      [inferred: <evidence>]
   has_ui:          <value>      [inferred: <evidence>]
   multi_agent:     <value>      [inferred: <evidence>]
-  deploy_target:   <value>      [inferred: <evidence>]
+  deploy_target:   <value>      [n/a unless you name a live surface — never inferred]
 
 Opt-in flags:
   cleanup_on_finish: <value>    [<consequence at Step 8>]
@@ -481,7 +481,9 @@ Atomic, one task. Merge the wave into the declared integration branch (local mer
 
 The vehicle is a single-turn close-out report, sent to the user at Step 9 and never re-run as ceremony: plain English, at the altitude of decisions rather than of code, covering ten parts — goal, accomplished, deferred-with-dispositions (each finding's DO-NOW / ACCEPT-CLOSED / PROMOTE named), special attention, material risks, challenges, decisions, success/failure verdict, learnings, next. Authoring detail per part and the anti-ceremony bound live in `operational-rules.md`. Write `continuation.md` (§Handoff above) alongside it — the report is what the user reads; the file is what the next wave opens.
 
-Where `deploy_target` names a live surface, the release lands and is watched for one cycle before the report claims done; the Evidence shapes table below names the three keys that record it, and `n/a:` applies only when `deploy_target: none`.
+**Where the run ends.** Every close-out records `delivered:` — the terminal state of the work, which is a PR open and ready for a human to review, or commits landed locally and ready to push. That boundary is the default endpoint of the lifecycle: what happens past it is the human's process, and a run that claims it has overstated what it did.
+
+Where — and only where — `deploy_target` names a live surface this run operates, the close-out also carries `deployed:`, `verified:`, and `monitored:`: the release lands, it is verified on the surface, and it is watched for one cycle before the report claims done. `deploy_target` defaults to `n/a` and is never inferred (Step 0), so this trio is strictly opt-in — the ordinary run owes nothing past delivery.
 
 ## Evidence shapes
 
@@ -496,7 +498,7 @@ One evidence artifact per step under `Step N:` in `## SDLC State`. The gate vali
 | 6 | pointer to the 6-axis body + critic findings; matrix re-validated here |
 | 7 | `adr:` OR `rca:` OR `n/a:` |
 | 8 | `merge:`, `worktree-removed:`, and (`cleanup:`, `tmp-wiped:`, `tasks-completed:` OR `cleanup: n/a`) |
-| 9 | `deploy:`, `verified-at:`, `monitor:` OR `n/a:` (only when `deploy_target: none`) |
+| 9 | `delivered:` always; plus `deployed:`, `verified:`, `monitored:` exactly when `deploy_target` names a live surface |
 
 **Placeholder ban.** These exact values are rejected anywhere evidence is required: `todo`, `pending`, `in progress`, `inprogress`, `xxx`, `tbd`, `placeholder`.
 

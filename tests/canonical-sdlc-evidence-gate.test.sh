@@ -178,7 +178,7 @@ expect_block() {
 # rigor lanes) out of the way so each fixture isolates the behavior under test.
 FM='---
 governing-skill: canonical-sdlc
-canonical_sdlc_version: 13
+canonical_sdlc_version: 14
 intent: build
 rigor: tested
 scale: wave
@@ -625,7 +625,7 @@ matrix_frontmatter() {
   cat <<EOF
 ---
 governing-skill: canonical-sdlc
-canonical_sdlc_version: 13
+canonical_sdlc_version: 14
 intent: build
 rigor: audited
 scale: wave
@@ -1402,7 +1402,7 @@ frontmatter() {
   local scale="${1:-wave}" deploy="${2:-none}" use_wt="${3:-false}" epic="${4:-}"
   printf -- '---\n'
   printf -- 'governing-skill: canonical-sdlc\n'
-  printf -- 'canonical_sdlc_version: 13\n'
+  printf -- 'canonical_sdlc_version: 14\n'
   printf -- 'intent: build\n'
   printf -- 'rigor: audited\n'
   printf -- 'scale: %s\n' "$scale"
@@ -1442,7 +1442,7 @@ task_plan() {
 task_frontmatter_rigor() {  # $1 rigor
   printf -- '---\n'
   printf -- 'governing-skill: canonical-sdlc\n'
-  printf -- 'canonical_sdlc_version: 13\n'
+  printf -- 'canonical_sdlc_version: 14\n'
   printf -- 'intent: build\n'
   printf -- 'rigor: %s\n' "$1"
   printf -- 'scale: task\n'
@@ -1628,7 +1628,7 @@ make_epic_project() {
   local proj
   proj=$(make_project)
   mkdir -p "$proj/.bionic/docs/plans/epic-fix"
-  printf -- '---\ncanonical_sdlc_version: 13\nintent: build\nrigor: audited\nscale: epic\n---\n## SDLC State\nintegration-branch: %s\ncurrent: 1\n' \
+  printf -- '---\ncanonical_sdlc_version: 14\nintent: build\nrigor: audited\nscale: epic\n---\n## SDLC State\nintegration-branch: %s\ncurrent: 1\n' \
     "$branch" > "$proj/.bionic/docs/plans/epic-fix/epic.plan.md"
   touch -t 202001010000 "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" 2>/dev/null || \
     touch -d "2020-01-01" "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" 2>/dev/null || true
@@ -1753,7 +1753,7 @@ make_epic_project_fenced() {
   mkdir -p "$proj/.bionic/docs/plans/epic-fix"
   cat > "$proj/.bionic/docs/plans/epic-fix/epic.plan.md" <<EOF
 ---
-canonical_sdlc_version: 13
+canonical_sdlc_version: 14
 intent: build
 rigor: audited
 scale: epic
@@ -1832,7 +1832,7 @@ r7_frontmatter() {
   local intent="$1" scale="${2:-wave}"
   printf -- '---\n'
   printf -- 'governing-skill: canonical-sdlc\n'
-  printf -- 'canonical_sdlc_version: 13\n'
+  printf -- 'canonical_sdlc_version: 14\n'
   printf -- 'intent: %s\n' "$intent"
   printf -- 'rigor: audited\n'
   printf -- 'scale: %s\n' "$scale"
@@ -2207,7 +2207,7 @@ h21c=$(make_home)
 printf '%s\n' "$(r7_wave_plan tune 5 "$step5_base" "$matrix_complete")" \
   > "$ac10_main/.bionic/docs/plans/active.md"
 touch "$ac10_main/.bionic/docs/plans/active.md"
-printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 13\nintent: build\nrigor: tested\nscale: wave\n---\n## SDLC State\ncurrent: 5\nStep 5: TODO\n' \
+printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: tested\nscale: wave\n---\n## SDLC State\ncurrent: 5\nStep 5: TODO\n' \
   > "$ac10_wt/.bionic/docs/plans/decoy.md"
 touch "$ac10_wt/.bionic/docs/plans/decoy.md"
 TOTAL=$((TOTAL + 1))
@@ -2657,7 +2657,7 @@ d7_wave_frontmatter() {
   local rigor="${1:-audited}" multi="${2:-true}"
   printf -- '---\n'
   printf -- 'governing-skill: canonical-sdlc\n'
-  printf -- 'canonical_sdlc_version: 13\n'
+  printf -- 'canonical_sdlc_version: 14\n'
   printf -- 'intent: build\n'
   printf -- 'rigor: %s\n' "$rigor"
   printf -- 'scale: wave\n'
@@ -3313,7 +3313,7 @@ expect_allow "22f7b same evidence + standalone 'critic no-blocking' token → al
 # Section 23: canonical_sdlc_version — exactly one supported value
 # ============================================================
 #
-# The hook supports canonical_sdlc_version: 13 and nothing else. Every other
+# The hook supports canonical_sdlc_version: 14 and nothing else. Every other
 # value blocks with exit 2 and a message naming the value found. One
 # table-driven case over representative bad values — an older number, a much
 # older number, a legacy single digit, a far-future number, an empty value, and
@@ -3334,7 +3334,7 @@ versioned_plan() {  # $1 = the canonical_sdlc_version value to declare
   printf -- '## SDLC State\ncurrent: 3\nStep 3: .bionic/docs/plans/wave-01.plan.md\n'
 }
 
-for bad_version in 11 12 9 2 99 "" banana 12.0 v12; do
+for bad_version in 13 12 11 9 2 99 "" banana 12.0 v12; do
   h=$(make_home)
   write_plan "$h" "$(versioned_plan "$bad_version")" > /dev/null
   expect_block "unsupported canonical_sdlc_version '${bad_version:-<empty>}' → block, naming the value found" \
@@ -3359,8 +3359,8 @@ expect_block "absent canonical_sdlc_version → block" \
 # The supported value passes the version gate (proved by reaching — and
 # satisfying — the evidence checks beyond it).
 h23ok=$(make_home)
-write_plan "$h23ok" "$(versioned_plan 13)" > /dev/null
-expect_allow "canonical_sdlc_version: 13 → allow" "$h23ok" 'git commit -m "x"'
+write_plan "$h23ok" "$(versioned_plan 14)" > /dev/null
+expect_allow "canonical_sdlc_version: 14 → allow" "$h23ok" 'git commit -m "x"'
 
 # ============================================================
 # Section 24: AC-13 — the plan-search fail-open
@@ -3385,7 +3385,7 @@ echo "=== Section 24: AC-13 — misplaced plan blocks, absent plan never does ==
 
 s24_marked_plan() {  # a plan carrying the run-state marker + a satisfied state
   printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-  printf -- 'canonical_sdlc_version: 13\nintent: build\nrigor: tested\nscale: wave\n---\n'
+  printf -- 'canonical_sdlc_version: 14\nintent: build\nrigor: tested\nscale: wave\n---\n'
   printf -- '## SDLC State\ncurrent: 3\nStep 3: .bionic/docs/plans/wave-01.plan.md\n'
 }
 
@@ -3475,7 +3475,7 @@ fi
 s24_h5=$(make_home)
 s24_p5=$(mktemp -d); cleanup_dirs+=("$s24_p5")
 mkdir -p "$s24_p5/docs"
-{ printf '# How to write a plan\n\n```\n---\ncanonical_sdlc_version: 13\n---\n```\n'; } \
+{ printf '# How to write a plan\n\n```\n---\ncanonical_sdlc_version: 14\n---\n```\n'; } \
   > "$s24_p5/docs/example.plan.md"
 TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s24_h5" "$s24_p5" 'git commit -m "x"'
@@ -3625,7 +3625,7 @@ echo ""
 echo "=== Section 25: one root per repo across both hooks (worktrees) ==="
 
 s25_plan() {  # a canonical plan whose current step evidence is a placeholder
-  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 13\n'
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
   printf -- 'intent: build\nrigor: tested\nscale: wave\n'
   printf -- 'deploy_target: none\nuse_worktree: true\nhas_ui: false\n---\n'
   printf -- '## SDLC State\ncurrent: 5\nStep 5: TODO\n'
@@ -3681,7 +3681,7 @@ git -C "$s25_main2" worktree add -q "$s25_tmp2/wt" -b s25-wt2
 s25_wt2="$s25_tmp2/wt"
 s25_marked_plan_body() {
   printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
-  printf -- 'canonical_sdlc_version: 13\nintent: build\nrigor: tested\nscale: wave\n---\n'
+  printf -- 'canonical_sdlc_version: 14\nintent: build\nrigor: tested\nscale: wave\n---\n'
   printf -- '## SDLC State\ncurrent: 3\nStep 3: .bionic/docs/plans/wave-01.plan.md\n'
 }
 s25_marked_plan_body > "$s25_main2/notes/rogue.plan.md"
@@ -3732,7 +3732,7 @@ governing-skill: superpowers:writing-plans
 sdlc-step: 3
 epic: epic-01-demo
 wave: wave-01-x
-canonical_sdlc_version: 13
+canonical_sdlc_version: 14
 intent: build
 rigor: tested
 scale: wave
@@ -3868,7 +3868,7 @@ echo "=== Section 26: walk-artifact arm ==="
 walk_frontmatter() {
   local walk_line="${1:-}"
   printf -- '---\n'
-  printf -- 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 13\n'
+  printf -- 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
   printf -- 'intent: build\nrigor: audited\nscale: wave\n'
   printf -- 'deploy_target: none\nuse_worktree: false\nhas_ui: true\n'
   if [ -n "$walk_line" ]; then
@@ -4335,6 +4335,124 @@ h28h=$(make_home)
 write_plan "$h28h" "$(plan 5 "$step5_base" "$(leader_matrix '  - ' "$leader_t1_keys")")" > /dev/null
 expect_block "28h '  - AC-1:' (indented) → block (pinned boundary: strip is flush-left only)" \
   "$h28h" 'git commit -m "x"' "missing evidence key"
+
+# ============================================================
+# Section 29: Step 9 close-out contract (v14)
+# ============================================================
+#
+# The v14 contract, ratified 2026-08-19 (epic-17 W5, design ledger D-A):
+#
+#   delivered:  ALWAYS. Every run has a terminal state — a PR open and ready
+#               for a human to review, or commits landed locally ready to
+#               push. Nothing past that boundary is the run's to claim.
+#   deployed: / verified: / monitored:
+#               owed EXACTLY when frontmatter names a live deploy_target.
+#
+# What died with v13: the trio was owed whenever a target existed, and `n/a:`
+# discharged the step only at `deploy_target: none`. That rule encoded
+# wave==release — the exception, not the rule — and it let a run with no live
+# surface close by writing `n/a` instead of naming what it delivered.
+#
+# `deploy_target` itself is n/a by default and is never inferred (AC-3), so
+# the trio is strictly opt-in: 29a/29e/29e2 are the ordinary run, 29c is the
+# dogfood run that operates its own surface.
+echo ""
+echo "=== Section 29: Step 9 close-out contract (v14) ==="
+
+# A plan at current: 9. $1 = deploy_target value, $2 = the Step-9 block body.
+# Reuses Section 17's matrix_complete, since current: 9 revalidates the matrix
+# as a prefix check before the step shape is ever reached.
+ship_plan() {
+  printf '%s\n## SDLC State\ncurrent: 9\nStep 9:\n%s\n\n%s\n' \
+    "$(frontmatter wave "$1")" "$2" "$matrix_complete"
+}
+
+ship_delivered="  delivered: PR #412 open and review-ready — 6 commits on wave/17-05"
+ship_trio="  deployed: ./claude-bootstrap.sh rc=0 to this machine
+  verified: installed hook spot-check reads SUPPORTED_SDLC_VERSION=14
+  monitored: one Patrol cycle clean, no wall misfires"
+
+# 29a — no live surface, `delivered:` present → allow. The default run's whole
+# close-out obligation is this one line.
+h29a=$(make_home)
+write_plan "$h29a" "$(ship_plan none "$ship_delivered")" > /dev/null
+expect_allow "29a Step 9, deploy_target none, delivered: → allow" \
+  "$h29a" 'git commit -m "x"'
+
+# 29b — `delivered:` missing → block. The terminal state is not optional.
+h29b=$(make_home)
+write_plan "$h29b" "$(ship_plan none "  note: wrapped it up")" > /dev/null
+expect_block "29b Step 9 without delivered: → block naming the key" \
+  "$h29b" 'git commit -m "x"' "delivered"
+
+# 29c — a named live surface: delivered + the full trio → allow.
+h29c=$(make_home)
+write_plan "$h29c" "$(ship_plan local-harness "$ship_delivered
+$ship_trio")" > /dev/null
+expect_allow "29c Step 9, deploy_target named, delivered + trio → allow" \
+  "$h29c" 'git commit -m "x"'
+
+# 29d — a named live surface with `delivered:` only → block, naming what the
+# named target owes.
+h29d=$(make_home)
+write_plan "$h29d" "$(ship_plan local-harness "$ship_delivered")" > /dev/null
+expect_block "29d Step 9, deploy_target named, trio missing → block" \
+  "$h29d" 'git commit -m "x"' "deployed"
+
+# 29e — `deploy_target: n/a` is not a named surface (AC-3's default value), so
+# the trio is not owed.
+h29e=$(make_home)
+write_plan "$h29e" "$(ship_plan n/a "$ship_delivered")" > /dev/null
+expect_allow "29e Step 9, deploy_target n/a, delivered: alone → allow" \
+  "$h29e" 'git commit -m "x"'
+
+# 29e2 — no `deploy_target` line at all reads the same way. An omission is
+# never a named surface, so it can never conjure the trio into existence.
+h29e2=$(make_home)
+write_plan "$h29e2" "---
+governing-skill: canonical-sdlc
+canonical_sdlc_version: 14
+intent: build
+rigor: audited
+scale: wave
+use_worktree: false
+has_ui: false
+walk: exempt
+---
+
+## SDLC State
+current: 9
+Step 9:
+$ship_delivered
+
+$matrix_complete" > /dev/null
+expect_allow "29e2 Step 9, no deploy_target line, delivered: alone → allow" \
+  "$h29e2" 'git commit -m "x"'
+
+# 29f — the v13 shape (deploy:/verified-at:/monitor:) no longer discharges the
+# step: it names a release and never names the delivery.
+h29f=$(make_home)
+write_plan "$h29f" "$(ship_plan none "  deploy: shipped to prod at 14:02
+  verified-at: https://app.example/health
+  monitor: one cycle clean")" > /dev/null
+expect_block "29f Step 9 in the retired v13 shape → block on delivered" \
+  "$h29f" 'git commit -m "x"' "delivered"
+
+# 29g — `n/a:` was v13's escape at deploy_target: none. Under v14 there is
+# nothing to escape: the run still has to name what it delivered.
+h29g=$(make_home)
+write_plan "$h29g" "$(ship_plan none "  n/a: nothing to deploy")" > /dev/null
+expect_block "29g Step 9 with the retired 'n/a:' escape → block on delivered" \
+  "$h29g" 'git commit -m "x"' "delivered"
+
+# 29h — a run with no named target that deployed something anyway and said so
+# is recording MORE than it owes, which is never a reason to refuse a commit.
+# The trio is unowed here, not forbidden.
+h29h=$(make_home)
+write_plan "$h29h" "$(ship_plan none "$ship_delivered
+$ship_trio")" > /dev/null
+expect_allow "29h Step 9, unowed trio recorded alongside delivered → allow" \
+  "$h29h" 'git commit -m "x"'
 
 # ============================================================
 # Summary

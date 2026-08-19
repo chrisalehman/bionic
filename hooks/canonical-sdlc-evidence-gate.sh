@@ -401,7 +401,7 @@ MULTI_AGENT=$(frontmatter_get multi_agent)
 # no version dispatch anywhere below this line, so there is also no path that
 # reaches `exit 0` by matching no arm.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-SUPPORTED_SDLC_VERSION=13
+SUPPORTED_SDLC_VERSION=14
 
 if [ "$SDLC_VERSION" != "$SUPPORTED_SDLC_VERSION" ]; then
   echo "BLOCKED: canonical-sdlc evidence-gate: plan declares canonical_sdlc_version: '$SDLC_VERSION'." >&2
@@ -1022,22 +1022,55 @@ validate_integrate_step() {
   esac
 }
 
-# Ship step: deploy/verified-at/monitor, OR `n/a` only when
-# deploy_target=none.
+# Does frontmatter name a LIVE surface this run operates? The default answer
+# is no. `deploy_target` is n/a by default and is never inferred from deploy
+# signals — a target exists only when the user names one — so an absent line,
+# `none`, and `n/a` (with or without a trailing reason) all read as "no live
+# surface". Case-insensitive, matching every other value comparison in this
+# hook.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+deploy_target_named() {
+  case "$(printf '%s' "$DEPLOY_TARGET" | tr '[:upper:]' '[:lower:]')" in
+    ""|none|n/a|n/a:*) return 1 ;;
+    *)                 return 0 ;;
+  esac
+}
+
+# Close-out step (v14 contract, ratified 2026-08-19):
+#
+#   `delivered:` ALWAYS — the terminal state of the work. Step 9's default
+#   endpoint is a PR open and ready for a human to review, or commits landed
+#   locally and ready to push; everything past that boundary is the human's
+#   process, not the run's to claim.
+#
+#   `deployed:` / `verified:` / `monitored:` owed EXACTLY when a deploy_target
+#   is named — the run that operates its own live surface (bionic's own
+#   dogfood is the example).
+#
+# Supersedes v13, where the trio was owed whenever any target existed and
+# `n/a:` discharged the step at `deploy_target: none`. That rule encoded
+# wave==release, which is the exception and not the rule, and it let a run
+# with no live surface close without ever naming what it delivered.
+#
+# An UNOWED trio is tolerated, not refused: a run that deployed something
+# without having declared a target and says so is recording more than it owes,
+# and refusing that commit would punish honesty. The wall is on the absent
+# claim, never on the extra one.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_ship_step() {
-  local step="$1" prefix
-  if block_has_na; then
-    if [ -n "$DEPLOY_TARGET" ] && [ "$DEPLOY_TARGET" != "none" ]; then
-      prefix=$(step_prefix "$step")
-      echo "BLOCKED: ${prefix} 'n/a:' is only valid when deploy_target=none in frontmatter (got deploy_target=${DEPLOY_TARGET})." >&2
-      echo "Plan: $PLAN" >&2
-      echo "Fix: provide 'deploy:', 'verified-at:', and 'monitor:' fields, or change deploy_target to none." >&2
-      exit 2
-    fi
-  else
-    shape_block deploy verified-at monitor
-  fi
+  local step="$1" prefix f
+  local missing=()
+  shape_block delivered
+  deploy_target_named || return 0
+  for f in deployed verified monitored; do
+    block_has "$f" || missing+=("$f")
+  done
+  [ "${#missing[@]}" -eq 0 ] && return 0
+  prefix=$(step_prefix "$step")
+  echo "BLOCKED: ${prefix} frontmatter names deploy_target=${DEPLOY_TARGET}, so the close-out owes the deploy trio; missing: ${missing[*]}" >&2
+  echo "Plan: $PLAN" >&2
+  echo "Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block — or, if this run operates no live surface, set 'deploy_target: n/a' in frontmatter (the trio is owed exactly when a target is named)." >&2
+  exit 2
 }
 
 # ---------- pre-registered Verification Matrix ----------

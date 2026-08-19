@@ -435,7 +435,7 @@ write_plan() {  # <path> <state-body>
   mkdir -p "$(dirname "$1")"
   {
     printf -- '---\n'
-    printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 13\n'
+    printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
     printf 'intent: build\nrigor: audited\nscale: wave\n'
     printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\n'
     printf '%s\n' "$2"
@@ -487,7 +487,7 @@ build_fixture() {  # <name> -> repo path
       mkdir -p "$repo/.bionic/docs" ;;
     no-sdlc-state)
       mkdir -p "$repo/.bionic/docs/plans/epic-99"
-      printf -- '---\ncanonical_sdlc_version: 13\n---\n\n# Notes\n\ncurrent: 4\n' \
+      printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# Notes\n\ncurrent: 4\n' \
         > "$repo/.bionic/docs/plans/epic-99/wave-01.md" ;;
 
     # --- A9's undiscriminated parser edges, each built so a mis-parse FLIPS ---
@@ -547,7 +547,7 @@ build_fixture() {  # <name> -> repo path
       # documents the schema rather than running it.
       mkdir -p "$repo/.bionic/docs/plans/epic-99"
       {
-        printf -- '---\ncanonical_sdlc_version: 13\nscale: wave\n---\n\n# Schema doc\n\n'
+        printf -- '---\ncanonical_sdlc_version: 14\nscale: wave\n---\n\n# Schema doc\n\n'
         printf 'The section looks like this:\n\n```\n## SDLC State\n\ncurrent: 4\n```\n'
       } > "$repo/.bionic/docs/plans/epic-99/wave-01.md" ;;
     newest-plan-wins)
@@ -571,7 +571,7 @@ build_fixture() {  # <name> -> repo path
       # 2026-08-15, twice, by two agents, neither trying. The real plan must win.
       write_plan "$repo/.bionic/docs/plans/epic-99/session.plan.md" "current: 4"
       touch -t 202001010000 "$repo/.bionic/docs/plans/epic-99/session.plan.md"
-      printf -- '---\ncanonical_sdlc_version: 13\n---\n\n# Continuation\n\ncurrent: 4\n' \
+      printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# Continuation\n\ncurrent: 4\n' \
         > "$repo/.bionic/docs/plans/epic-99/continuation.md"
       touch -t 203001010000 "$repo/.bionic/docs/plans/epic-99/continuation.md" ;;
     fenced-only-newest-loses)
@@ -584,7 +584,7 @@ build_fixture() {  # <name> -> repo path
       write_plan "$repo/.bionic/docs/plans/epic-99/session.plan.md" "current: 4"
       touch -t 202001010000 "$repo/.bionic/docs/plans/epic-99/session.plan.md"
       {
-        printf -- '---\ncanonical_sdlc_version: 13\n---\n\n# Schema notes\n\n'
+        printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# Schema notes\n\n'
         printf 'The section looks like this:\n\n```\n## SDLC State\n\ncurrent: 4\n```\n'
       } > "$repo/.bionic/docs/plans/epic-99/schema-notes.md"
       touch -t 203001010000 "$repo/.bionic/docs/plans/epic-99/schema-notes.md" ;;
@@ -594,7 +594,7 @@ build_fixture() {  # <name> -> repo path
       # the reason the fix is a candidate filter rather than a refusal: skipping
       # every candidate must land in the same place as finding none.
       mkdir -p "$repo/.bionic/docs/plans/epic-99"
-      printf -- '---\ncanonical_sdlc_version: 13\n---\n\n# Continuation\n' \
+      printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# Continuation\n' \
         > "$repo/.bionic/docs/plans/epic-99/continuation.md"
       printf '# Scratch\n\ncurrent: 4\n' \
         > "$repo/.bionic/docs/plans/epic-99/scratch.md" ;;

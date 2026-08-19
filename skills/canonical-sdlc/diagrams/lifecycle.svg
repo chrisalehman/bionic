@@ -27,7 +27,7 @@
   <rect x="0" y="0" width="1400" height="920" fill="#ffffff"/>
 
   <!-- ============================ header ============================ -->
-  <text class="version-pin" data-pin="lifecycle-title" x="40" y="52" font-size="26" font-weight="700" fill="#16191d">Canonical SDLC — Lifecycle (v13)</text>
+  <text class="version-pin" data-pin="lifecycle-title" x="40" y="52" font-size="26" font-weight="700" fill="#16191d">Canonical SDLC — Lifecycle (v14)</text>
   <text x="40" y="78" font-size="14" fill="#626b76">Ten steps · two quality gates · one approval checkpoint · intent × rigor × scale. Committing is a rhythm that crosses every step, never a step of its own.</text>
   <line x1="40" y1="96" x2="1360" y2="96" stroke="#dde1e6" stroke-width="1"/>
 
