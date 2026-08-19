@@ -334,9 +334,17 @@ detect_legacy_channel_hooks() {
 # `yes` tells an uncovered one they are safe to delete their only enforcement.
 # A registry that is simply ABSENT is a different case — the CLI writes that
 # file when it installs anything, so its absence means nothing is installed.
+# The registry file, named ONCE. Both the registration fact and the root resolver below
+# read it through this expression, so a machine whose config dir moves cannot have the two
+# answering about different files — the drift that makes a "registered" plugin resolve to a
+# root nobody installed.
+_detect_installed_plugins_file() {
+  printf '%s' "${BIONIC_INSTALLED_PLUGINS_FILE:-${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/installed_plugins.json}"
+}
+
 detect_plugin_registered() {
   local installed_json count
-  installed_json="${BIONIC_INSTALLED_PLUGINS_FILE:-${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/installed_plugins.json}"
+  installed_json="$(_detect_installed_plugins_file)"
 
   if [ ! -f "$installed_json" ]; then
     echo "plugin:registered=no"
@@ -362,6 +370,83 @@ detect_plugin_registered() {
     0)           echo "plugin:registered=no" ;;
     *)           echo "plugin:registered=yes" ;;
   esac
+  return 0
+}
+
+# ─── The installed plugin root ───────────────────────────────────────────────
+#
+# WHERE THE PLUGIN ACTUALLY IS, answered out of the CLI's own record rather than guessed.
+#
+# THE PROBLEM THIS RETIRES. Payload-native scripts are typed into a model's own shell as
+# often as they are registered as commands, and `${CLAUDE_PLUGIN_ROOT}` is substituted only
+# in the latter. The old spelling covered the gap with `${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}`
+# — which always resolves, and resolves to a bootstrap-era copy that can be an OLDER BUILD
+# than the plugin the CLI loaded. A stale hook that runs is worse than a missing one: it
+# enforces a doctrine nobody is following and reports success doing it.
+#
+# THE ORACLE IS THE REGISTRY, ratified 2026-08-19 (design ledger D-B). Not because we own
+# it — we do not, its schema is CLI-internal — but because it is the same record the CLI
+# itself loads from, which is the only property that makes an answer here true. The schema
+# being someone else's is why the parse is pinned by tests and why an unreadable file
+# REFUSES instead of degrading.
+#
+# THIS IS THE ONE FUNCTION IN THIS FILE THAT DOES NOT ANSWER `unknown`, and the deviation is
+# the point. Every other fact here feeds a REPORT, where "I could not tell" is a legitimate
+# and useful value. This one feeds a PATH that something is about to execute, and there is
+# no honest degraded form of that: a caller handed a plausible directory cannot tell it
+# apart from a resolved one. So the contract is: the absolute installPath on stdout and exit
+# 0, or NOTHING on stdout, a named fix on stderr, and exit 1. No fallback exists anywhere in
+# this function, deliberately — including the one it was written to replace.
+DETECT_PLUGIN_ROOT_JQ='.plugins // {} | to_entries[] | select(.key | split("@")[0] == "bionic") | .value[0].installPath // empty'
+
+_detect_plugin_root_refuse() {  # <what went wrong>
+  echo "detect_plugin_root: REFUSED — $1" >&2
+  echo "  Fix: claude plugin install bionic@bionic" >&2
+  echo "  There is deliberately no fallback root: a guessed path can be an older build than" >&2
+  echo "  the one the CLI loads, and a stale hook that runs is worse than a missing one." >&2
+  return 1
+}
+
+detect_plugin_root() {
+  local reg root
+
+  reg="$(_detect_installed_plugins_file)"
+  if [ ! -f "$reg" ]; then
+    _detect_plugin_root_refuse "no plugin registry at ${reg} — bionic is not installed."
+    return 1
+  fi
+
+  if command -v jq >/dev/null 2>&1; then
+    root="$(jq -r "$DETECT_PLUGIN_ROOT_JQ" "$reg" 2>/dev/null | head -1)"
+  else
+    # No jq: the same whole-name match detect_plugin_registered's fallback makes — `"bionic@`
+    # cannot match another plugin, because the marketplace suffix follows the name and never
+    # precedes it, and `bionic-extras@` does not carry the `@` in that position. The first
+    # installPath after the key is this entry's; `exit` stops before the next plugin's.
+    root="$(awk '
+      /"bionic@/ { f = 1 }
+      f && /"installPath"/ {
+        line = $0
+        sub(/.*"installPath"[[:space:]]*:[[:space:]]*"/, "", line)
+        sub(/".*/, "", line)
+        print line
+        exit
+      }' "$reg" 2>/dev/null)"
+  fi
+
+  case "$root" in
+    ''|null)
+      _detect_plugin_root_refuse "no bionic entry in ${reg}, or the registry could not be read — bionic is not installed."
+      return 1
+      ;;
+  esac
+
+  if [ ! -d "$root" ]; then
+    _detect_plugin_root_refuse "the registry names ${root} as bionic's install path, and no such directory exists — the install is broken or half-removed."
+    return 1
+  fi
+
+  printf '%s\n' "$root"
   return 0
 }
 
