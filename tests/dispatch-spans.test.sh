@@ -361,6 +361,56 @@ expect_count_in_file "…and exactly one in the poker header" \
   "One clock per run, and only one." 1 "$POKER"
 
 echo ""
+echo "=== Section 5l: the completion-signal doctrine (epic-17 W5 slice 4/1, spec AC-1) ==="
+# Root cause, measured across W4: a finished subagent wrote its report as plain final TEXT,
+# which routes nowhere — the orchestrator saw an idle notification and an empty mailbox, and
+# two read-only deliveries (auditor, critic) were reconstructed out of transcripts after the
+# fact. The fix is a delivery CHANNEL stated in the doctrine and carried by every role file:
+# the report is handed over by the SendMessage tool. What is pinned here is the obligation,
+# not the paragraph name — and the broken form is pinned by its own arm, because "your final
+# message is the report" is the phrasing several W4 briefs actually shipped.
+expect_pin_in_file "completion signal: the final act is a SendMessage naming the artifacts" \
+  "A writer's final act is a \`SendMessage\` naming the artifact path(s) it produced" "$SKILL"
+expect_pin_in_file "completion signal: plain final text is discarded" \
+  "plain final text is discarded" "$SKILL"
+expect_pin_in_file "completion signal: the broken brief form is named and banned" \
+  "a brief that contracts for the report as a final message is contracting for a report that never arrives" \
+  "$SKILL"
+expect_pin_in_file "completion signal: idle is still not a completion signal" \
+  "only the sent message closes the phase" "$SKILL"
+
+# The safety net keeps its rank. This arm exists because the recovery recipe below is the
+# kind of text that quietly gets promoted to "the proof" on a rewrite.
+expect_pin_in_file "transcript recovery: heading" \
+  "**When a report is lost anyway.**" "$SKILL"
+expect_pin_in_file "transcript recovery: artifacts/ledger/progress stay the primary proof" \
+  "are the safety net and remain the primary proof" "$SKILL"
+expect_pin_in_file "transcript recovery: the message is the latency channel, not the evidence" \
+  "the message is the latency channel, not the evidence" "$SKILL"
+expect_pin_in_file "transcript recovery: the transcript path" \
+  "subagents/agent-*.jsonl" "$SKILL"
+expect_pin_in_file "transcript recovery: what to extract" \
+  "the last long \`assistant\` text block" "$SKILL"
+expect_pin_in_file "transcript recovery: persist before acting" \
+  "persist it under \`<docs-root>/record/\` before acting on it" "$SKILL"
+
+# The wakeup ban. A date-pinned one-shot is the shape that reads correct and dies silently:
+# CronCreate DROPS a tick whose minute finds the session busy, and a one-shot has exactly one
+# minute (re-measured, epic-17 W4 S6).
+expect_pin_in_file "wakeups: heading states the rule, not a topic" \
+  "**Wakeups are recurring, never date-pinned.**" "$SKILL"
+expect_pin_in_file "wakeups: the one-shot is banned in those words" \
+  "A one-shot \`CronCreate\` pinned to a wall-clock minute is banned" "$SKILL"
+expect_pin_in_file "wakeups: the mechanism — busy minutes drop, they do not queue" \
+  "a busy minute DROPS the tick rather than queuing it" "$SKILL"
+expect_pin_in_file "wakeups: the sanctioned form is recurring-then-delete" \
+  "create a SHORT RECURRING job and \`CronDelete\` it on its first fire" "$SKILL"
+# Count-scoped: a second, softer copy of the rule elsewhere in the section is how a ban
+# becomes a suggestion (same reasoning as the arming-rule count arms above).
+expect_count_in_file "the wakeup ban has exactly one copy in the skill" \
+  "**Wakeups are recurring, never date-pinned.**" 1 "$SKILL"
+
+echo ""
 echo "=== Section 6: superseded generic non-response text is gone ==="
 # Pre-wave text handled a "wedged agent" uniformly (kill-and-redispatch) with
 # no reader/writer distinction — exactly what the ratified non-response

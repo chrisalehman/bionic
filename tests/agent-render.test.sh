@@ -229,9 +229,35 @@ survival|never end your turn while a command is running|Never end your turn whil
 survival|suite output always goes to a file|validate the FILE
 report-contract|the proof-or-label rule|carries the command that proves it and that command's output, or the explicit
 report-contract|completion is signaled, never inferred|idle is
+report-contract|the report is DELIVERED by the SendMessage tool|Deliver the report with the SendMessage tool
+report-contract|plain final text routes nowhere|Plain final text is discarded
 shared-core|RED before GREEN|never write implementation before a red test
 shared-core|completion-by-artifact|that message, not going idle, is what closes the phase
+shared-core|the closing act is a sent message, not closing prose|your closing act is a SendMessage
 LITERALS
+
+# ---------- E2: the read-only roles' delivery duty (epic-17 W5 slice 4/1, spec AC-1) ----
+#
+# The shared block above binds all six finals, and for a writer it is enough: its artifact
+# is on disk whatever happens to its prose. The auditor and the critic write NOTHING — the
+# verdicts and the findings ARE the deliverable — so for those two a report left as plain
+# final text is not a slow report, it is a destroyed one. Their own templates say so in
+# their own words, and that is what these arms pin: the duty is on the SHIPPED role file,
+# because a duty that lives only in a brief is a duty the next brief forgets. Two W4
+# deliveries were lost exactly here (auditor and critic, both read-only).
+while IFS='|' read -r role label needle; do
+  [ -z "$role" ] && continue
+  if grep -qF "$needle" "$OUT/$role.md" 2>/dev/null; then
+    pass "agents/$role.md: $label"
+  else
+    fail "agents/$role.md: $label" "missing literal: $needle"
+  fi
+done <<'READONLY_DELIVERY'
+auditor|the verdicts are delivered with SendMessage|deliver them with the SendMessage tool
+auditor|a verdict left as plain final text is discarded|plain final text is discarded
+critic|the findings are delivered with SendMessage|deliver them with the SendMessage tool
+critic|a finding left as plain final text is discarded|plain final text is discarded
+READONLY_DELIVERY
 
 # ============================================================
 echo ""

@@ -3,5 +3,5 @@
 - Never write ledger rows in the plan — the orchestrator ledgers. You report; it records.
 - No scope pivot: if the approach is blocked, surface the blocker and stop. Do not switch strategies mid-slice.
 - Scoped changes stay scoped: an unrelated problem you spot gets flagged DONE_WITH_CONCERNS in your report, never fixed inline.
-- Completion-by-artifact: your final message names the artifact path(s) this task produced — that message, not going idle, is what closes the phase.
+- Completion-by-artifact: your closing act is a SendMessage naming the artifact path(s) this task produced — that message, not going idle, is what closes the phase.
 - Phase-gated briefs: stop at the hard report gate and send that message before touching bookkeeping; a redirect arriving mid-phase is read at the gate, not before.
