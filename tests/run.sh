@@ -143,6 +143,13 @@ run "profile.test.sh" bash tests/profile.test.sh
 run "jit.test.sh" bash tests/jit.test.sh
 # Command-file conventions (epic-17 W3 S9, spec AC-1): globs payload/commands/*.md.
 run "command-format.test.sh" bash tests/command-format.test.sh
+# Command PERMISSIONS (epic-17 W6 S9b, walk finding W-1 / plan A-5.4): the byte-for-byte
+# agreement between each command file's own `allowed-tools` rule prefix, every fenced
+# `bash` invocation in that same file, and profile.template.json's rule for the same
+# script. A permission rule prefix-matches the literal command string, so one quote
+# character in a body silently un-authorizes it — which is what walled bionic's own
+# commands. Hand-listed like every suite outside hooks/.
+run "command-permissions.test.sh" bash tests/command-permissions.test.sh
 # The end-user README (epic-17 W6 S8, spec AC-4): README.md's "## Installation
 # (30-second setup)" section pinned to the ratified reference shape — two
 # `claude plugin` command lines, the in-session twin, the `claude plugin list`

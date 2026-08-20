@@ -77,6 +77,15 @@ tests/stop-orders.test.sh
 # construction — containment is bash `[[ == * ]]`, and every grep in it runs
 # against a FILE argument, never another process's stdout. Named rather than
 # silently omitted, for the reason the paragraph above gives.
+# tests/command-permissions.test.sh (epic-17 W6 S9b) is the same case again:
+# pipefail plus its own expect_* helpers, pipe-free by construction — the
+# prefix and containment arms are bash `[[ == * ]]`, every grep/awk in it runs
+# against a FILE argument, and the values it judges are passed to helpers
+# directly rather than interpolated into a `bash -c` string (they contain the
+# double quote by definition — it is the regression that suite exists to wall).
+# Its helpers are named expect_prefix/expect_not_prefix/expect_nonempty, none of
+# which sections A and B know how to probe. Named rather than silently omitted,
+# for the reason the paragraph above gives.
 # tests/plugin-hooks.test.sh was the third such file (pipefail + its own
 # expect_contains_lit/expect_absent_lit/expect_equal, pipe-free by
 # construction). It retired at epic-17 W5 (4/6) with claude-bootstrap.sh, the

@@ -1754,8 +1754,14 @@ expect_not_contains "an unknown option prints no report" "=== LOAD STATE ===" "$
 if [ -f "$DOCTOR_MD" ]; then
   DMD="$(cat "$DOCTOR_MD")"
   expect_contains "doctor.md: tells the model to ask the question" "Ask the user that question" "$DMD"
+  # UNQUOTED, and that is load-bearing rather than cosmetic (epic-17 W6 S9b, plan A-5.4):
+  # a permission rule prefix-matches the literal command string, so the quoted spelling
+  # this pin used to carry was the spelling that hit the approval wall. The agreement
+  # between this line and the file's own `allowed-tools` rule is owned by
+  # tests/command-permissions.test.sh; the pin here stays because the --updates relay is
+  # doctor's own contract and must be provable from doctor's own suite.
   expect_contains "doctor.md: names the flag to run on a yes" \
-    'bash "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh" --updates' "$DMD"
+    'bash ${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh --updates' "$DMD"
   expect_contains "doctor.md: and to show what comes back" "UPDATES" "$DMD"
   # RENDERED, NOT HAND-EDITED — the file says so itself, and the template is where the
   # text lives. A hand edit here is what `render.sh --check` exists to catch.
