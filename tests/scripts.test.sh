@@ -726,6 +726,71 @@ _nested_rules="$(cd "$REPO" && git ls-files -- .claude/rules/ | sed 's#^\.claude
 expect_eq "no committed subdirectory under .claude/rules/" "" "$_nested_rules"
 
 # ============================================================
+# SECTION 7: wsl-setup.sh — the last clone-and-run script
+# ============================================================
+
+echo ""
+echo "=== Section 7: wsl-setup.sh — the last clone-and-run script ==="
+
+# Epic-17 W5 Step-6 review, RV-2. wsl-setup.sh is the ONE script bionic still asks a
+# person to clone the repo and run: a bare Ubuntu box under WSL2 has no CLI to type
+# `/bionic:setup` into, so something has to put one there. Everything past that point
+# is the plugin channel and then /bionic:setup.
+#
+# Its two ends both pointed at claude-bootstrap.sh, which 4/6 deleted — the header
+# ("installs prerequisites so that claude-bootstrap.sh can run") and, worse, the
+# next-steps block, which printed `./claude-bootstrap.sh` as the literal command to
+# type next. That is a dead end at the exact moment a new user has done everything
+# right, and nothing in the suite was looking at this file, which is why it survived
+# a whole wave of installer retirement.
+#
+# The pin is an AGREEMENT, not a spelling: the commands wsl-setup prints have to be
+# the commands README's Install section states, read out of README at run time. A
+# rename of the marketplace or the plugin moves both together or fails here.
+WSL="${REPO}/wsl-setup.sh"
+README_SRC="${REPO}/README.md"
+
+expect_true "wsl-setup.sh exists (it is the WSL entry point README step 4 names)" \
+  test -f "$WSL"
+
+# --- 7a: no retired root script survives anywhere in the file ---
+for _dead in claude-bootstrap.sh claude-reset.sh; do
+  _hits="$(/usr/bin/grep -c -F -- "$_dead" "$WSL" 2>/dev/null || true)"
+  expect_eq "wsl-setup.sh names no retired root script: ${_dead}" "0" "${_hits:-0}"
+done
+
+# --- 7b: the install commands AGREE with README's Install section ---
+#
+# Derived, not restated. Every fenced `claude plugin ...` line in README is required to
+# appear in wsl-setup.sh's output, so the two surfaces cannot drift apart in one
+# direction. Leading whitespace is stripped on both sides — README fences them at
+# column 0 and wsl-setup indents them inside an echo — because the agreement is about
+# the COMMAND, not its indentation.
+_readme_cmds="$(/usr/bin/grep -oE '^claude plugin [a-z]+ [^ ]+.*$' "$README_SRC" | LC_ALL=C sort -u)"
+# No backticks in this label: it is inside a double-quoted string, where a backtick pair
+# is command substitution and would silently eat the words it was meant to quote.
+expect_true "README states at least one plugin-install command to agree with" \
+  test -n "$_readme_cmds"
+
+_missing_cmds=""
+while IFS= read -r _cmd; do
+  [ -n "$_cmd" ] || continue
+  /usr/bin/grep -qF -- "$_cmd" "$WSL" || _missing_cmds="${_missing_cmds}${_cmd}; "
+done <<EOF
+$_readme_cmds
+EOF
+expect_eq "wsl-setup.sh's next steps carry every README install command" "" "$_missing_cmds"
+
+# --- 7c: and it hands the user to tier 2 rather than stopping at tier 1 ---
+#
+# Named separately from 7b because it is a different claim: 7b says the plugin gets
+# installed, this says the machine gets set up. A WSL box that just ran wsl-setup is
+# exactly the box that still needs /bionic:setup, so ending at the plugin install
+# would leave the user one undiscoverable step short.
+expect_true "wsl-setup.sh points the user at /bionic:setup for the machine tier" \
+  /usr/bin/grep -qF -- "/bionic:setup" "$WSL"
+
+# ============================================================
 # Results
 # ============================================================
 

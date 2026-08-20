@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 #
 # wsl-setup.sh
-# One-time setup for WSL2 (Ubuntu). Installs prerequisites so that
-# claude-bootstrap.sh can run. Idempotent — safe to run multiple times.
+# One-time setup for WSL2 (Ubuntu). Installs the prerequisites the Claude Code CLI
+# needs on a bare Ubuntu box, so that bionic can be installed as a plugin from
+# inside it. Idempotent — safe to run multiple times.
+#
+# This is the ONLY script bionic asks anyone to clone the repo and run. Everything
+# past this point is the CLI's own plugin mechanism (README "Install") and then
+# /bionic:setup, which is where machine setup actually lives — this file is not a
+# WSL variant of it and must never grow into one.
 #
 # Prerequisites: WSL2 with Ubuntu installed (wsl --install from PowerShell)
 #
@@ -108,7 +114,10 @@ if [ "$errors" -gt 0 ]; then
 else
   echo "Done ✓"
   echo ""
-  echo "Next steps:"
-  echo "  cd bionic"
-  echo "  ./claude-bootstrap.sh"
+  echo "Next steps — register the marketplace, install the plugin, set up the machine:"
+  echo "  claude plugin marketplace add chrisalehman/bionic"
+  echo "  claude plugin install bionic@bionic"
+  echo ""
+  echo "Then, in a Claude Code session:"
+  echo "  /bionic:setup"
 fi
