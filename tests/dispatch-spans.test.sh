@@ -270,6 +270,23 @@ expect_pin_in_file "arming wall: the arm command is named where arming is instru
 expect_pin_in_file "arming wall: the honest limit is stated, not implied" \
   "it cannot see the CLI's cron table" "$SKILL"
 
+# --- W5 4/8 (AC-13): the bootstrap-era caveat inside the worktree paragraph is GONE.
+#
+# The spawn-worktree sentence used to explain a model's own shell by naming two facts:
+# that ${CLAUDE_PLUGIN_ROOT} is unset there, and that payload-native scripts have no
+# ~/.claude copy to fall back on. The first is still true and still load-bearing. The
+# second was an apology for a gap 4/4 closed — the root is resolved once, at Patrol
+# arming, and baked into everything the session writes — and a caveat that survives its
+# own fix reads as a live limitation of the thing that fixed it.
+#
+# PINNED AS AN ABSENCE because that is the only direction a revert travels: the sentence
+# is prose, and prose regrows. The surviving half is pinned present in the same breath,
+# so deleting the whole clause cannot pass this by satisfying the absence alone.
+expect_absent_in_file "the retired fallback caveat does not survive in the worktree paragraph" \
+  "no \`~/.claude\` fallback to expand into" "$SKILL"
+expect_pin_in_file "…while the fact it was attached to still stands" \
+  "where \`\${CLAUDE_PLUGIN_ROOT}\` is unset" "$SKILL"
+
 # --- W5 4/4 (AC-5): the plugin root is resolved, once, and never guessed.
 expect_pin_in_file "plugin root: resolved once per session, at arming" \
   "resolve the root ONCE per session, at Patrol arming" "$SKILL"

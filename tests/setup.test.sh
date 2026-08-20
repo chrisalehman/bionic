@@ -778,8 +778,145 @@ run_setup "$YES" >/dev/null 2>&1
 expect_eq "RESTORED (production setup.sh): the second run appends nothing" \
   "$RC_ONE" "$(cat "$FIX/rc")"
 
+# Mutation 4 — delete the legacy-skill-copy consent gate. A declined run must
+# now remove the directory; if it does not, the gate was never what stopped it.
+grep -v '# consent gate: legacy skill copy' "$SETUP_SH" > "$MUT"
+expect_true "mutation 4: the consent-gate line exists to delete" \
+  bash -c "[ \"\$(wc -l < '$MUT')\" -lt \"\$(wc -l < '$SETUP_SH')\" ]"
+new_fixture mut4
+plant_cli_plugin "bionic@bionic" true
+mkdir -p "$FIX/ch/skills/canonical-sdlc"
+printf -- '---\nname: canonical-sdlc\n---\nbody\n' > "$FIX/ch/skills/canonical-sdlc/SKILL.md"
+SETUP_UNDER_TEST="$MUT" run_setup "$NO" >/dev/null 2>&1
+expect_true "MUTATED (consent gate removed): a declined run now removes the skill copy" \
+  bash -c '[ ! -e "$1" ]' _ "$FIX/ch/skills/canonical-sdlc"
+
+new_fixture mut4-control
+plant_cli_plugin "bionic@bionic" true
+mkdir -p "$FIX/ch/skills/canonical-sdlc"
+printf -- '---\nname: canonical-sdlc\n---\nbody\n' > "$FIX/ch/skills/canonical-sdlc/SKILL.md"
+run_setup "$NO" >/dev/null 2>&1
+expect_true "RESTORED (production setup.sh): a declined run leaves the skill copy alone" \
+  test -f "$FIX/ch/skills/canonical-sdlc/SKILL.md"
+
 # The production file was never opened for writing above — only read.
 expect_true "production setup.sh still parses after the mutation arms" bash -n "$SETUP_SH"
+
+
+# ---------------------------------------------------------------------------
+# Group 13 — (h) the legacy installed skill copy (epic-17 W5, 4/6 concern C-1;
+# spec AC-8 names it as part of the shipped migration).
+#
+# WHY THIS STEP EXISTS AT ALL. The retired installer rendered bionic's skills
+# into the CLI's OWN skills directory. The plugin ships the same skill inside
+# its payload, so after the cutover that installed copy is a second
+# canonical-sdlc — and not an inert one: 4/6 measured eleven hook-registration
+# lines in its frontmatter, every one of them spelled for the pre-plugin hooks
+# directory. A session loading it arms the same walls twice, once through the
+# channel that was supposed to have retired, and nothing in the output says so.
+#
+# 4/6 removed that copy OUT OF BAND to keep its live-fire attribution clean and
+# reported the gap rather than papering over it. This group is the gap closing:
+# the removal is the SHIPPED migration's own act, under consent, idempotent.
+#
+# BOTH ARMS BY BYTES, as everywhere else here — the declined arm fingerprints
+# the whole fixture tree, so "left alone" is a measurement rather than the
+# absence of a log line.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 13: legacy installed skill copy (C-1 / AC-8) ==="
+
+# The shape the installer left: a skill directory under the CLI's config dir,
+# carrying a SKILL.md whose frontmatter registers hooks through the pre-plugin
+# channel. The registration lines are what made this copy dangerous rather than
+# merely redundant, so the fixture carries them.
+plant_legacy_skill_copy() {
+  mkdir -p "$FIX/ch/skills/canonical-sdlc"
+  cat > "$FIX/ch/skills/canonical-sdlc/SKILL.md" <<'SKILLMD'
+---
+name: canonical-sdlc
+description: bootstrap-era rendered copy
+hooks:
+  PreToolUse:
+    - matcher: Bash
+      hooks:
+        - type: command
+          command: ~/.claude/hooks/farm-out-reminder.sh
+---
+The pre-plugin rendered body.
+SKILLMD
+  printf 'a reference file the installer also rendered\n' > "$FIX/ch/skills/canonical-sdlc/reference.md"
+}
+
+new_fixture skill-copy-consented
+plant_cli_plugin "bionic@bionic" true
+plant_legacy_skill_copy
+_present_of() {  # <fact line> -> the present= field
+  local l="$1"; l="${l#*present=}"; printf %s "${l%% *}"
+}
+
+expect_eq "fixture: the library sees the planted copy before setup runs" \
+  "yes" "$(_present_of "$(lib_query "$LIB_DIR/detect.sh" detect_legacy_skill_copy)")"
+OUT="$(run_setup "$YES")"
+expect_true "consented: the legacy skill directory is gone" \
+  bash -c '[ ! -e "$1" ]' _ "$FIX/ch/skills/canonical-sdlc"
+expect_eq "consented: the library agrees the copy is gone" \
+  "no" "$(_present_of "$(lib_query "$LIB_DIR/detect.sh" detect_legacy_skill_copy)")"
+expect_match "consented: setup names the directory it removed" '*skills/canonical-sdlc*' "$OUT"
+expect_match "consented: setup says why the copy mattered (the second registration)" \
+  '*twice*' "$OUT"
+
+new_fixture skill-copy-declined
+plant_cli_plugin "bionic@bionic" true
+plant_legacy_skill_copy
+FP_BEFORE="$(fingerprint "$FIX")"
+OUT="$(run_setup "$NO")"
+expect_eq "declined: the whole fixture tree is byte-identical" "$FP_BEFORE" "$(fingerprint "$FIX")"
+expect_true "declined: the SKILL.md is still there" \
+  test -f "$FIX/ch/skills/canonical-sdlc/SKILL.md"
+expect_match "declined: the end summary carries the action line" \
+  '*pre-plugin skill copy*' "$OUT"
+
+# ABSENT IS A NO-OP, and specifically not a prompt. A machine that never ran
+# the installer — every machine a cold user brings — must not be asked about a
+# directory that does not exist, and must not collect an action line for it.
+new_fixture skill-copy-absent
+plant_cli_plugin "bionic@bionic" true
+OUT="$(run_setup "$NO")"
+expect_no_match "absent: setup does not ask about a copy that is not there" \
+  '*Remove *skills/canonical-sdlc*' "$OUT"
+expect_match "absent: setup says there is nothing to remove" \
+  '*no pre-plugin skill copy*' "$OUT"
+expect_true "absent: no skills directory was created" \
+  bash -c '[ ! -e "$1" ]' _ "$FIX/ch/skills"
+
+# Idempotence over this step specifically: a second consented run against an
+# already-clean machine performs no mutation and asks nothing.
+new_fixture skill-copy-idempotent
+plant_cli_plugin "bionic@bionic" true
+plant_legacy_skill_copy
+run_setup "$YES" >/dev/null 2>&1
+FP_ONE="$(fingerprint "$FIX")"
+OUT="$(run_setup "$YES")"
+expect_eq "idempotent: the second consented run mutates nothing" "$FP_ONE" "$(fingerprint "$FIX")"
+expect_match "idempotent: the second run reports nothing to remove" \
+  '*no pre-plugin skill copy*' "$OUT"
+
+# THE PREDICATE IS NARROW ON PURPOSE. The same installer left copies of
+# bionic's other two skills behind. 4/6 measured those as registering nothing,
+# and their disposition belongs to the wave's close-out — a consented step that
+# removed directories nobody has decided about would be the larger defect. So
+# a sibling directory is proof the step reads a NAME, not a wildcard.
+new_fixture skill-copy-siblings
+plant_cli_plugin "bionic@bionic" true
+plant_legacy_skill_copy
+mkdir -p "$FIX/ch/skills/browser-verify"
+printf -- '---\nname: browser-verify\n---\nbody\n' > "$FIX/ch/skills/browser-verify/SKILL.md"
+run_setup "$YES" >/dev/null 2>&1
+expect_true "the named copy went" bash -c '[ ! -e "$1" ]' _ "$FIX/ch/skills/canonical-sdlc"
+expect_true "a sibling skill directory is untouched" \
+  test -f "$FIX/ch/skills/browser-verify/SKILL.md"
 
 # ---------------------------------------------------------------------------
 # Results

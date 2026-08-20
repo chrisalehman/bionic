@@ -680,11 +680,20 @@ echo "=== Section 6: .claude/rules/ roster ==="
 
 # Epic-17 W4 remediation fold (review F-3). The .gitignore negation pair made
 # `.claude/rules/` a permanently committable surface — the first part of `.claude/`
-# a fresh clone receives. S4 audited its five files once, by hand, for machine paths
+# a fresh clone receives. S4 audited its files once, by hand, for machine paths
 # and consumer-project names. A one-time audit does not survive the next addition,
 # and nothing else in the suite looks at this directory, so the roster itself is the
-# wall: a sixth committed file, a renamed one, or a subdirectory trips this and gets
-# the same read S4's five got.
+# wall: a new committed file, a renamed one, or a subdirectory trips this and gets
+# the same read S4's originals got.
+#
+# THE ROSTER WENT FROM FIVE TO FOUR AT W5 (4/8, spec AC-13). `bootstrap-install.md`
+# described the installer era whole — install types, sync mechanics, the mirror,
+# the blast radius of a bootstrap run — and carried a self-retiring notice naming
+# its own trigger: W5's deletion of claude-bootstrap.sh. That trigger fired in 4/6.
+# The file was deleted rather than edited down because the notice was explicit that
+# nothing in it had a post-bootstrap successor. This pin is what made the deletion
+# a deliberate act rather than a silent one: it went red on the `git rm` and had to
+# be moved by hand, which is the whole point of stating the roster.
 #
 # git ls-files, not the filesystem, on purpose. What matters is what a clone RECEIVES.
 # An untracked scratch file under .claude/rules/ is machine-local and none of this
@@ -693,14 +702,22 @@ echo "=== Section 6: .claude/rules/ roster ==="
 # non-empty by construction here (the five files below), which is what keeps this
 # from being the silent zero-match failure git-grep-style pathspecs are prone to.
 EXPECTED_RULES="agent-discipline.md
-bootstrap-install.md
 git-worktree-docs.md
 hook-authoring.md
 test-harness.md"
 
 _actual_rules="$(cd "$REPO" && git ls-files -- .claude/rules/ | sed 's#^\.claude/rules/##' | LC_ALL=C sort)"
-expect_eq "the committed .claude/rules/ roster is exactly the five audited files" \
+expect_eq "the committed .claude/rules/ roster is exactly the four audited files" \
   "$EXPECTED_RULES" "$_actual_rules"
+
+# The retirement, stated as its own arm. The roster equality above already fails if
+# the file comes back, but it fails as an opaque set mismatch; this names the file
+# and the reason, so a revert reports what it reverted rather than that something
+# moved. Absence goes through /usr/bin/grep-free machinery on purpose — this is a
+# git question, not a text one, and git ls-files cannot lie about a tracked path.
+_bootstrap_rule="$(cd "$REPO" && git ls-files -- .claude/rules/bootstrap-install.md)"
+expect_eq "the bootstrap-era rules file stays retired (its trigger fired at W5 4/6)" \
+  "" "$_bootstrap_rule"
 
 # Stated as its own arm so a subdirectory reports as a subdirectory rather than as an
 # opaque roster mismatch: any tracked path under .claude/rules/ with a further slash in
