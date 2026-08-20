@@ -1,36 +1,60 @@
 ---
 description: bionic overview — what it is, the command roster, and where to start.
 ---
+<!-- GENERATED FILE — DO NOT EDIT.
+     Rendered from agents-src/templates/commands/help.md.tmpl and the shared blocks in
+     agents-src/blocks/. Edit those, then re-render; the render check goes red whenever
+     this file and its sources disagree. -->
+
+<!-- VOICE-CONTRACT-BEGIN -->
+Presentation contract — what the user sees from this command:
+- Start with one line: "Running bionic <command>…". Nothing about how or why.
+- Relay the script's questions exactly as asked; pass the user's answer as given.
+  Never answer for the user, never editorialize.
+- On success show the script's output, then at most one closing line. Say nothing
+  about shells, stdin, pipes, re-runs, hooks, tool calls, or what you did.
+- On a real error show the error verbatim and the fix, in one block. Never
+  paraphrase an error away or bury it under a summary.
+- At most one caveat line, only if it changes what the user should do next
+  (e.g. "Takes effect after /reload-plugins or a new session.").
+- Product words only. Never print internal names: lanes, letter-number codes,
+  hook or function names, step identifiers.
+<!-- VOICE-CONTRACT-END -->
+
+Render the page below in full, verbatim, every time this command runs — even if it was
+shown earlier in this session; never summarize it or refer back to an earlier rendering.
+
+Read the installed version first, and print its output as the page's opening line:
+
+```bash
+printf 'bionic %s (installed)\n' "$(jq -r .version "${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json")"
+```
 
 # bionic
 
-Bionic is a Claude Code plugin that carries canonical-sdlc guardrails, hooks,
-and agent-orchestration discipline into any project you work on with Claude
-Code.
+Bionic is a Claude Code plugin that carries canonical-sdlc guardrails, hooks, and
+agent-orchestration discipline into any project you work on with Claude Code. It travels
+with you rather than with a repository: install it once and every project you open gets
+the same working discipline.
 
 ## Commands
 
-- `/bionic:help` — this page: what bionic is, the command roster, and where
-  to start.
-- `/bionic:setup` — idempotent machine setup; wraps the native plugin install.
-- `/bionic:doctor` — read-only diagnosis of the current install and machine
-  state; never treats.
-- `/bionic:remove` — consented teardown of bionic's machine footprint,
-  finishing with the native plugin uninstall.
+- `/bionic:help` — this page: what bionic is, the command roster, and where to start.
+- `/bionic:setup` — idempotent machine setup, one consented item at a time.
+- `/bionic:doctor` — read-only diagnosis of this machine; it changes nothing.
+- `/bionic:remove` — consented teardown, finishing with the plugin uninstall.
 
-## Tiers
+## It arrives in two steps
 
-Bionic installs in two tiers:
-
-- **Tier 1 — plugin install.** `claude plugin install bionic@bionic` alone
-  yields a fully live core: skill, hooks, agents. It needs bionic's marketplace
-  registered first — `claude plugin marketplace add chrisalehman/bionic`.
-- **Tier 2 — environment setup.** `/bionic:setup` wraps tier 1 — it invokes
-  the plugin install first, then does the environment work (dependencies,
-  permissions, machine configuration) tier 1 alone doesn't cover. Tier 1 is
-  contained in tier 2.
+- **Tier 1 — the plugin install.** Installing bionic gives you the whole core: the skill,
+  the hooks, the agent roster. Nothing further is required to start using it.
+- **Tier 2 — `/bionic:setup`.** Adds what installing a plugin cannot: the tools bionic's
+  workflows reach for, your shell environment, and a permission profile. It asks before
+  every change and can be run again any time.
 
 ## Where to start
 
-- Fresh machine → run `/bionic:setup`.
-- Something looks wrong → run `/bionic:doctor`.
+- Run `/bionic:doctor` first. It reports what this machine already has and what is
+  missing, and it never changes anything.
+- Run `/bionic:setup` for anything doctor says is missing.
+- If something looks wrong later, `/bionic:doctor` again is the place to look.
