@@ -22,8 +22,25 @@ Presentation contract — what the user sees from this command:
   hook or function names, step identifiers.
 <!-- VOICE-CONTRACT-END -->
 
-Run:
+Run this once, with no flags:
 
 ```bash
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh
 ```
+
+It asks about one item at a time and treats every question it cannot put to a person as a
+no, so a first run changes nothing and reports what it would have asked. Show the user each
+question it printed, word for word, one at a time, and wait for their answer. Never answer
+one for them and never guess which one they meant.
+
+When the user says yes to a question, do that one item and nothing else. Every question
+names its own item, and each declined line repeats the name beside the command that runs it:
+
+```bash
+printf 'y\n' | bash ${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh --only <item>
+```
+
+`bash ${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh --list` prints the item names on their own.
+
+A no is finished: never work around it, never re-ask it, and never run an item the user did
+not accept.

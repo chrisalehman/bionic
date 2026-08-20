@@ -297,6 +297,85 @@ for c in $SCRIPTED_COMMANDS; do
 done
 
 # ---------------------------------------------------------------------------
+# Section 6: the PIPED invocation the addressable-consent route uses.
+#
+# WHY IT NEEDS ITS OWN SECTION. Section 2 reads lines that START with `bash `.
+# The route a user is given for saying yes to one item does not — it is
+# `printf 'y\n' | bash <root>/scripts/<x>.sh --only <item>` — so Section 2 walks
+# straight past it, and the rule that has to cover it is the same rule.
+#
+# MEASURED, NOT ASSUMED (epic-17 W6 S12, and the critic's F-2 capture before it):
+# the permission layer splits a pipeline and matches each segment on its own. A
+# scratch project command carrying this exact rule form ran the unquoted piped
+# body with no prompt, and the SAME rule walled the quoted piped body with "This
+# Bash command contains multiple operations. The following part requires
+# approval: bash \"…/setup.sh\" --only permission-mode". So the segment after the
+# pipe is a literal command string like any other, and this section is the
+# agreement test for it.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Section 6: the piped --only invocation ↔ the same rule ==="
+
+# Every fenced line that pipes into `bash `, with everything up to and including
+# the pipe removed — i.e. the command string the permission layer will match.
+fenced_piped_bash_segments() {
+  awk '
+    BEGIN { fm = 0; fence = 0 }
+    /^---$/ && fm < 2 { fm++; next }
+    fm < 2 { next }
+    /^```/ { fence = 1 - fence; next }
+    fence == 1 && /\| bash / {
+      i = index($0, "| bash ")
+      print substr($0, i + 2)
+    }
+  ' "$1"
+}
+
+for c in $SCRIPTED_COMMANDS; do
+  f="${COMMANDS_DIR}/${c}.md"
+  [ -f "$f" ] || continue
+  case "$c" in doctor) continue ;; esac   # doctor mutates nothing and asks nothing
+
+  prefix="$(allowed_tools_rule_prefix "$f")"
+  if [ -z "$prefix" ]; then
+    no "${c}.md: rule prefix extractable (Section 6 arms need it)"
+    continue
+  fi
+
+  piped_count=0
+  while IFS= read -r seg; do
+    [ -n "$seg" ] || continue
+    piped_count=$((piped_count + 1))
+    expect_prefix "${c}.md: piped invocation ${piped_count} is covered by the file's own rule" \
+      "$prefix" "$seg"
+    expect_true "${c}.md: piped invocation ${piped_count} carries the --only flag" \
+      bash -c 'case "$1" in *" --only "*) exit 0 ;; *) exit 1 ;; esac' _ "$seg"
+  done < <(fenced_piped_bash_segments "$f")
+
+  expect_gt0 "${c}.md: the addressable-consent route is present at all" "$piped_count"
+done
+
+# Mutation-and-restore: re-quote the piped body in a COPY and watch the
+# agreement break. Without this the section is an absence, and an absence
+# proves nothing about the extractor that looked for it.
+for c in setup remove; do
+  f="${COMMANDS_DIR}/${c}.md"
+  [ -f "$f" ] || continue
+  DOCTORED="${TMP}/${c}-piped-doctored.md"
+  sed -e 's,| bash \${CLAUDE_PLUGIN_ROOT}/scripts/\([a-z]*\)\.sh,| bash "${CLAUDE_PLUGIN_ROOT}/scripts/\1.sh",' \
+      "$f" > "$DOCTORED"
+  prefix="$(allowed_tools_rule_prefix "$f")"
+  mut_seg="$(fenced_piped_bash_segments "$DOCTORED" | head -1)"
+  expect_nonempty "MUTATED ${c}.md: the piped line is still extractable (arm is live)" "$mut_seg"
+  expect_not_prefix "MUTATED ${c}.md: Section 6 goes red — the rule no longer covers the piped body" \
+    "$prefix" "$mut_seg"
+  prod_seg="$(fenced_piped_bash_segments "$f" | head -1)"
+  expect_prefix "production ${c}.md untouched: the piped body is still covered" \
+    "$prefix" "$prod_seg"
+done
+
+# ---------------------------------------------------------------------------
 # Results
 # ---------------------------------------------------------------------------
 
