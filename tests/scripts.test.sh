@@ -14,7 +14,6 @@ set -euo pipefail
 . "$(dirname "$0")/lib/frontmatter-parser.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
-CONFIG="${REPO}/claude-config.txt"
 
 PASS=0
 FAIL=0
@@ -78,7 +77,9 @@ expect_contains() {
 # run it against a temp file without sourcing the full scripts (side effects).
 
 # CONFIG_FILES: the config file(s) read_config operates against.
-# Set to a tmpfile for Section 1 parsing tests; set to $CONFIG for real-config tests.
+# Set to a tmpfile for Section 1 parsing tests — read_config's own logic is what's under
+# test, not any particular file's contents (the repo's dependency roster is
+# payload/scripts/lib/deps.sh's alone; see Section 2).
 # The EXIT trap only cleans up the tmpfiles (created here for Section 1).
 CONFIG_FILES=()
 S1_TMPFILE="$(mktemp)"
@@ -306,150 +307,28 @@ expect_eq "profile layering: core entries + profile additions, duplicates dedupe
 CONFIG_FILES=("$S1_TMPFILE")
 
 # ============================================================
-# SECTION 2: Config file consistency (claude-config.txt)
+# SECTION 2: No dead dependency config at the repo root
 # ============================================================
+#
+# claude-config.txt and claude-config.everything.txt were the bootstrap era's
+# dependency roster, superseded by payload/scripts/lib/deps.sh and deleted at
+# epic-17 W6 (A-4.S3.F): the dependency roster has exactly ONE owner now. This
+# section pins that no second declaring file has reappeared at the repo root
+# to drift out of sync with it. (The type/entry-shape coverage this section
+# used to run against claude-config.txt's contents lives on structurally in
+# Section 1, which drives the same read_config parser against synthetic
+# fixtures — that coverage was always of the parser, not of any one file's
+# bytes.)
 
 echo ""
-echo "=== Section 2: Config file consistency (claude-config.txt) ==="
+echo "=== Section 2: No dead dependency config at the repo root ==="
 
-CONFIG_FILES=("$CONFIG")
-
-KNOWN_TYPES="brew-dep brew-cask npm-global pnpm-store uv-tool mcp-server plugin marketplace github-skill github-skill-pack local-skill local-command global-memory env-var statusline"
-
-# 2a: Every uncommented, non-blank line has at least one pipe delimiter
-# (checked across core AND all profile config files)
-_bad_lines=""
-for _cfg in "$CONFIG" "${REPO}"/claude-config.*.txt; do
+_stray_config=""
+for _cfg in "${REPO}"/claude-config*.txt; do
   [ -f "$_cfg" ] || continue
-  while IFS= read -r line; do
-    stripped="$(echo "$line" | sed 's/^[[:space:]]*//')"
-    [ -z "$stripped" ] && continue
-    if echo "$stripped" | grep -q '^#'; then
-      continue
-    fi
-    if ! echo "$line" | grep -q '|'; then
-      _bad_lines="${_bad_lines}$(basename "$_cfg"): ${line}\n"
-    fi
-  done < "$_cfg"
+  _stray_config="${_stray_config}$(basename "$_cfg") "
 done
-expect_eq "all uncommented non-blank lines have a pipe delimiter" "" "$_bad_lines"
-
-# 2b: Every type field on uncommented lines is a known type
-# (checked across core AND all profile config files)
-_unknown_types=""
-for _cfg in "$CONFIG" "${REPO}"/claude-config.*.txt; do
-  [ -f "$_cfg" ] || continue
-  while IFS='|' read -r entry_type _rest; do
-    entry_type="$(echo "$entry_type" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    found=0
-    for known in $KNOWN_TYPES; do
-      if [ "$entry_type" = "$known" ]; then
-        found=1
-        break
-      fi
-    done
-    if [ "$found" -eq 0 ]; then
-      _unknown_types="${_unknown_types}${entry_type} "
-    fi
-  done < <(grep -v '^\s*#' "$_cfg" | grep -v '^\s*$')
-done
-expect_eq "all type fields are known types" "" "$_unknown_types"
-
-# 2c: Every local-skill entry has a skills/<name>/SKILL.md file
-_missing_skills=""
-_check_local_skill_exists() {
-  local name="$1"
-  if [ ! -f "${BIONIC_SKILLS_DIR}/${name}/SKILL.md" ]; then
-    _missing_skills="${_missing_skills}${name} "
-  fi
-}
-read_config "local-skill" _check_local_skill_exists
-expect_eq "all local-skill entries have SKILL.md" "" "$_missing_skills"
-
-# 2c-bis: Every local-command entry has a commands/<name>.md file
-_missing_commands=""
-_check_local_command_exists() {
-  local name="$1"
-  if [ ! -f "${REPO}/commands/${name}.md" ]; then
-    _missing_commands="${_missing_commands}${name} "
-  fi
-}
-read_config "local-command" _check_local_command_exists
-expect_eq "all local-command entries have commands/<name>.md" "" "$_missing_commands"
-
-# 2d: Every global-memory file exists in the repo root
-_missing_gm=""
-_check_gm_exists() {
-  local file="$1"
-  if [ ! -f "${REPO}/${file}" ]; then
-    _missing_gm="${_missing_gm}${file} "
-  fi
-}
-read_config "global-memory" _check_gm_exists
-expect_eq "all global-memory files exist in repo" "" "$_missing_gm"
-
-# 2e: MCP server env var lists use valid identifier syntax (UPPER_SNAKE_CASE, comma-separated)
-_bad_env_vars=""
-_check_mcp_env_format() {
-  local name="$1" env_vars="$3"
-  [ -z "$env_vars" ] && return 0
-  local old_ifs="$IFS"
-  IFS=',' read -ra vars <<< "$env_vars"
-  IFS="$old_ifs"
-  for var in "${vars[@]}"; do
-    var="$(echo "$var" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    if [ -z "$var" ] || ! echo "$var" | grep -qE '^[A-Z_][A-Z0-9_]*$'; then
-      _bad_env_vars="${_bad_env_vars}${name}:${var} "
-    fi
-  done
-}
-read_config "mcp-server" _check_mcp_env_format
-expect_eq "MCP env var names are valid UPPER_SNAKE_CASE identifiers" "" "$_bad_env_vars"
-
-# 2f: Config file has at least one brew-dep entry
-_brew_total=0
-_count_brew_real() { _brew_total=$((_brew_total + 1)); }
-read_config "brew-dep" _count_brew_real
-expect_true "config has at least one brew-dep entry" [ "$_brew_total" -gt 0 ]
-
-# 2g: Config file has at least one mcp-server entry
-_mcp_total=0
-_count_mcp_real() { _mcp_total=$((_mcp_total + 1)); }
-read_config "mcp-server" _count_mcp_real
-expect_true "config has at least one mcp-server entry" [ "$_mcp_total" -gt 0 ]
-
-# 2h: Config file has exactly one statusline entry
-_statusline_total=0
-_count_statusline() { _statusline_total=$((_statusline_total + 1)); }
-read_config "statusline" _count_statusline
-expect_eq "config has exactly one statusline entry" "1" "$_statusline_total"
-
-# 2i: Config file has exactly one global-memory entry
-_gm_total=0
-_count_gm() { _gm_total=$((_gm_total + 1)); }
-read_config "global-memory" _count_gm
-expect_eq "config has exactly one global-memory entry" "1" "$_gm_total"
-
-# 2j: gcloud is installed as a brew-cask mapping to the gcloud-cli cask.
-# Regression guard: the google-cloud-sdk cask was renamed (now 404s) and there
-# is no `gcloud` formula, so the old `brew-dep | gcloud` entry failed on a
-# fresh machine.
-_gcloud_cask=""
-_check_gcloud_cask() { if [ "$1" = "gcloud" ]; then _gcloud_cask="$2"; fi; }
-read_config "brew-cask" _check_gcloud_cask
-expect_eq "gcloud is a brew-cask mapping to gcloud-cli" "gcloud-cli" "$_gcloud_cask"
-
-# 2k: gcloud is NOT a brew-dep (that would install the nonexistent formula)
-_gcloud_brewdep=0
-_check_gcloud_brewdep() { if [ "$1" = "gcloud" ]; then _gcloud_brewdep=1; fi; }
-read_config "brew-dep" _check_gcloud_brewdep
-expect_eq "gcloud is not a (broken) brew-dep formula entry" "0" "$_gcloud_brewdep"
-
-# 2l: motion is pre-warmed into the pnpm store
-_motion_store=0
-_check_motion_store() { if [ "$1" = "motion" ]; then _motion_store=1; fi; }
-read_config "pnpm-store" _check_motion_store
-expect_eq "motion is registered as a pnpm-store library" "1" "$_motion_store"
+expect_eq "no claude-config*.txt at the repo root — the dependency roster has one owner, payload/scripts/lib/deps.sh" "" "$_stray_config"
 
 # ============================================================
 # SECTION 3: RETIRED — bootstrap/reset script symmetry
