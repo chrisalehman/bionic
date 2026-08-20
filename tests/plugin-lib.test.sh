@@ -337,14 +337,16 @@ done <<< "$NAMES"
 expect_eq "every named consumer route mentions the dependency it consumes" "" "$MENTION_REPORT"
 
 # The exemption is itself pinned: if a later wave gives motion a route that
-# names it, this fails and the exemption comes out.
+# names it, this fails and the exemption comes out. Vendored trees (.venv,
+# node_modules) are excluded: they exist on a developer checkout and never in a
+# worktree, and a pin that flips with the machine is not an absence claim.
 # /usr/bin/grep, not the PATH one: this shell's `grep` is ugrep with
 # --ignore-files, and it reports zero hits inside .claude/ even when the
 # directory is named explicitly — an absence claim built on it would be a
 # guaranteed pass (memory: grep-skips-hidden-dirs).
 GREP_ABS="$(command -v /usr/bin/grep || echo grep)"
 expect_false "the one mention exemption (motion) is still needed — no repo file names the package" \
-  bash -c '"$2" -rIlw --include="*.md" motion "$1/skills" "$1/agents-src" "$1/.claude/rules" 2>/dev/null | "$2" -q .' \
+  bash -c '"$2" -rIlw --include="*.md" --exclude-dir=.venv --exclude-dir=node_modules motion "$1/skills" "$1/agents-src" "$1/.claude/rules" 2>/dev/null | "$2" -q .' \
   _ "$REPO" "$GREP_ABS"
 
 # Mutation-and-restore: the pin has to be able to SEE a bad consumer, or it is
