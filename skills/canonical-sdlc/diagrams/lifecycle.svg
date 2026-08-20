@@ -146,7 +146,7 @@
   <text x="1166" y="434" font-size="10.5" fill="#3a424c">· one terminal disposition each</text>
   <text x="1166" y="450" font-size="10.5" fill="#3a424c">· no finding leaves homeless</text>
   <text x="1166" y="466" font-size="10.5" fill="#3a424c">· close-out report + handoff</text>
-  <text x="1166" y="482" font-size="10.5" fill="#3a424c">· heartbeat disarmed at close</text>
+  <text x="1166" y="482" font-size="10.5" fill="#3a424c">· Patrol disarmed at close</text>
 
   <line x1="244" y1="423" x2="258" y2="423" stroke="#8b949e" stroke-width="1.6" marker-end="url(#arrow)"/>
   <line x1="466" y1="423" x2="480" y2="423" stroke="#8b949e" stroke-width="1.6" marker-end="url(#arrow)"/>
