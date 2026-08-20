@@ -1,4 +1,5 @@
 ---
+allowed-tools: Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/remove.sh:*)
 description: Consented teardown of the bionic machine footprint, finishing with the native plugin uninstall.
 ---
 <!-- GENERATED-HEADER -->
@@ -10,5 +11,5 @@ A declined item is finished, not deferred: never work around a no, and never re-
 Run:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/remove.sh"
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/remove.sh
 ```
