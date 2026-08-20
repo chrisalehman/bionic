@@ -2,35 +2,39 @@
 
 One engineer, mass-augmented. Bionic is a Claude Code plugin that turns the CLI into a structured engineering practice — parallel specialist teams, an enforced SDLC, and guardrails that block the commands you'd regret.
 
-## Install
+## Installation (30-second setup)
 
-Register this repo as a marketplace once, then install the plugin:
+### 1. Get bionic
 
 ```bash
 claude plugin marketplace add chrisalehman/bionic
-claude plugin install bionic@bionic
+claude plugin install bionic
 ```
 
-That is the whole of **tier 1**, and tier 1 is a working install: the canonical-sdlc skill, the always-on hooks, and the six subagent roles are live in your next session. Nothing is copied into `~/.claude` and nothing on your machine is modified — the CLI mounts the payload where it keeps its plugins, and an update moves it there.
+The first tells Claude Code where bionic lives; the second installs it.
 
-**Tier 2** is the machine footprint tier 1 deliberately does not touch — dependencies, the shell environment, a permission profile:
+<details>
+<summary>From inside a session</summary>
 
 ```
-/bionic:setup
+/plugin marketplace add chrisalehman/bionic
+/plugin install bionic
 ```
 
-Tier 2 contains tier 1: `/bionic:setup` runs the plugin install itself, so it is a complete answer to "set this machine up" whether the box is most of the way there or has nothing but the marketplace registered. It asks before every change, one item at a time, declines gracefully, and is idempotent — a second run on a set-up machine mutates nothing.
+</details>
 
-### Commands
+### 2. Run `/bionic:setup`
 
-| Command | What |
-|---|---|
-| `/bionic:help` | What bionic is, the command roster, where to start |
-| `/bionic:setup` | Machine setup — consented per item, idempotent, re-runnable |
-| `/bionic:doctor` | Read-only diagnosis: plugin integrity, tier state, dependencies, environment, permission profile. Changes nothing |
-| `/bionic:remove` | Consented teardown of the machine footprint, finishing with the native plugin uninstall |
+It will ask about:
 
-If something looks wrong, `/bionic:doctor` is the first move — it reports state and names the fix for anything broken, and it never treats.
+- Tools bionic's skills use, one at a time
+- Optional extras, each with a one-line why — default no
+- Whether to set Claude Code's permission mode to auto (recommended)
+
+### 3. Done.
+
+`/bionic:help` for the tour, `/bionic:doctor` if anything looks off. If `/bionic:doctor`
+isn't recognized, run `claude plugin list` — the Error line says why.
 
 ## Patterns That Change How You Ship
 
