@@ -837,6 +837,17 @@ expect_contains "healthy: the pnpm-store unknown carries its named cause" \
   "content-addressable store is a cache" "$H"
 expect_not_contains "healthy: a no-action unknown does not manufacture a setup reason" \
   "→ run /bionic:setup" "$H"
+# SIX-AXIS REVIEW C-2. The second clause used to read "/bionic:setup re-warms the
+# store either way". True at the wave base, where setup walked every non-native row;
+# false at the tip, where setup asks about `core|basic|extra` only and AC-11 makes a
+# when-needed tool nobody's to install until a route needs it. The string survived
+# because the display lint judges vocabulary, not truth — so the pin is on the
+# sentence, and it is keyed on the CLASS the claim is about rather than on the
+# mechanism that happens to produce the unknown.
+expect_not_contains "healthy: the unknown does not send the user to a command that no longer touches this row" \
+  "re-warms the store" "$H"
+expect_contains "healthy: it names what actually installs a when-needed row" \
+  "motion is installed the first time a workflow needs it" "$H"
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -1680,6 +1691,49 @@ expect_contains "slow Homebrew: and names which manager could not answer" \
   "Homebrew" "$SB_UPDATES"
 # The other manager is INDEPENDENT: one timing out must not silence the other.
 expect_contains "slow Homebrew: npm's answer still renders" "@playwright/cli" "$SB_UPDATES"
+
+# ── a manager that FORKS: the bound has to release the CALLER, not just the child ──
+#
+# SIX-AXIS REVIEW C-1. The stub above `exec`s its sleep, so doctor's direct child
+# IS the sleeping process and killing it ends the wait. The real managers are the
+# other shape: `brew` is a shell script that runs Ruby, `npm` a shim that runs
+# node. There the child forks a grandchild which inherits doctor's stdout, and a
+# bound that kills only the child returns 124 on time while the caller's command
+# substitution stays blocked on the still-open pipe until the grandchild exits —
+# measured at 45 s against a 3 s bound before this arm existed. The honest "not
+# checked" row was then true in VALUE and false in TIME, which is the half of
+# AC-14 a user actually feels.
+#
+# THE MEASUREMENT IS THE ASSERTION. Nothing about the row's text discriminates
+# this defect (the text was always right); only the clock does.
+FORK_BIN="$TMP/bin-forkbrew"; mkdir -p "$FORK_BIN"; cp -R "$FULL_BIN"/. "$FORK_BIN"/
+printf '#!/bin/bash\n/bin/sleep 45\n' > "$FORK_BIN/brew"; chmod +x "$FORK_BIN/brew"
+FB_OUT="$TMP/updates-forkbrew.out"
+FB_START="$(date +%s)"
+printf 'y\n' | doctor_run "$DOCTOR_SH" "$FORK_BIN" "$HEALTHY" "BIONIC_DOCTOR_PROBE_SECONDS=3" > "$FB_OUT" 2>&1
+FB_RC=$?
+FB_ELAPSED=$(( $(date +%s) - FB_START ))
+FB_UPDATES="$(awk '/=== UPDATES ===/{f=1; next} f' "$FB_OUT")"
+expect_eq "forking Homebrew: doctor still exits 0" "0" "$FB_RC"
+expect_true "forking Homebrew: the whole run returns near the bound, not near the grandchild's 45 s (elapsed=${FB_ELAPSED}s)" \
+  test "$FB_ELAPSED" -le 10
+expect_contains "forking Homebrew: and the row is still the honest one" "not checked" "$FB_UPDATES"
+expect_contains "forking Homebrew: the other manager still answers" "@playwright/cli" "$FB_UPDATES"
+
+# ── …and nothing is left running behind it ──
+#
+# The elapsed arm above passes on a bound that merely stops holding the pipe. This
+# one is what pins the process-GROUP kill: the stub's grandchild would write the
+# marker six seconds after doctor gave up on it, and a bound that signalled only
+# the direct child would leave it alive to do exactly that.
+LEAK_MARK="$TMP/forked-grandchild-survived"
+LEAK_BIN="$TMP/bin-leakbrew"; mkdir -p "$LEAK_BIN"; cp -R "$FULL_BIN"/. "$LEAK_BIN"/
+printf '#!/bin/bash\n/bin/sh -c "/bin/sleep 6; echo leaked > %s"\n' "$LEAK_MARK" > "$LEAK_BIN/brew"
+chmod +x "$LEAK_BIN/brew"
+printf 'y\n' | doctor_run "$DOCTOR_SH" "$LEAK_BIN" "$HEALTHY" "BIONIC_DOCTOR_PROBE_SECONDS=2" >/dev/null 2>&1
+sleep 9
+expect_true "forking Homebrew: the grandchild died with the group rather than outliving the run" \
+  test ! -f "$LEAK_MARK"
 
 # ── the wall still holds on the path that shells out ──
 UP_WALL="$TMP/wall-updates"; rm -rf "$UP_WALL"; cp -R "$HEALTHY" "$UP_WALL"

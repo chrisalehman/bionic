@@ -51,6 +51,9 @@ PROFILE_SH="${REPO}/payload/scripts/lib/profile.sh"
 DETECT_SH="${REPO}/payload/scripts/lib/detect.sh"
 HOOKS_SH="${REPO}/payload/scripts/lib/hooks.sh"
 DEPS_SH="${REPO}/payload/scripts/lib/deps.sh"
+# Read, never run: Group 19's ownership arms are about a value setup.sh WRITES and
+# this script resets, and a shared value with only one reader is not shared.
+SETUP_SH="${REPO}/payload/scripts/setup.sh"
 TEMPLATE="${REPO}/payload/permissions/profile.template.json"
 
 PASS=0; FAIL=0; TOTAL=0
@@ -199,6 +202,19 @@ plant_profile_block() {  # <arm> [with-accretion|block-only]
   fi
   BIONIC_SETTINGS_FILE="$arm/home/.claude/settings.json" \
     bash -c '. "$1"; profile_apply "$2" --consented' _ "$PROFILE_SH" "$rendered" >/dev/null 2>&1
+}
+
+# A plugin in the CLI's own install registry — the file `check_dep` reads for a
+# `native` row. This is how a machine that took the design route's mid-session
+# offer looks afterwards: `impeccable@bionic` installed, declared by nobody.
+plant_native_plugin() {  # <arm> <name> <version>
+  local arm="$1" name="$2" version="$3"
+  local file="$arm/home/.claude/plugins/installed_plugins.json"
+  mkdir -p "${file%/*}"
+  [ -f "$file" ] || printf '%s\n' '{"plugins":{}}' > "$file"
+  jq --arg k "${name}@bionic" --arg v "$version" \
+     '.plugins[$k] = [ { "scope": "user", "installPath": ("/fixture/" + $k), "version": $v } ]' \
+     "$file" > "$arm/reg.tmp" && mv "$arm/reg.tmp" "$file"
 }
 
 plant_plugin_data() {  # <arm>
@@ -367,11 +383,23 @@ expect_eq "all-yes: shared binary rg untouched" "$FP_RG_BEFORE" "$(shasum "$ARM/
 expect_eq "all-yes: shared binary git untouched" "$FP_GIT_BEFORE" "$(shasum "$ARM/bin/git" | awk '{print $1}')"
 expect_contains "all-yes: the summary names what is left in place by design" \
   "Left in place by design" "$OUT_ALLYES"
+# R-1: the transcript's second line used to be `mode: payload — the plugin's
+# libraries are beside this script`, which is the script telling the user which
+# of its own branches it took. What a user needs from that line is whether the
+# full teardown is available.
+expect_contains "all-yes: the run says what it can do, in words" \
+  "running from the plugin" "$OUT_ALLYES"
+expect_not_contains "all-yes: and not as an internal mode value" "mode: payload" "$OUT_ALLYES"
 
 # The keep-shared policy is three-valued: consent does not unlock it.
 CALLS_ALLYES="$(cat "$ARM/calls.log")"
 expect_not_contains "all-yes: no brew uninstall of a keep-shared row" "brew uninstall" "$CALLS_ALLYES"
-expect_contains "all-yes: keep-shared rows are reported, not removed" "keep-shared" "$OUT_ALLYES"
+expect_contains "all-yes: the shared binaries are reported, not removed" \
+  "kept — shared with other tools" "$OUT_ALLYES"
+# R-1: and the POLICY NAME never reaches the terminal — `keep-shared` is a column
+# value in deps.sh's table, not a thing a user has any way to know.
+expect_not_contains "all-yes: and the removal-policy value is not printed at the user" \
+  "keep-shared" "$OUT_ALLYES"
 
 echo ""
 echo "=== Group 4: per-item consent — an ALL-NO run leaves the machine byte-identical ==="
@@ -897,6 +925,9 @@ RC_TEXT="$(cat "$ARM/home/.zshrc")"
 SETTINGS_TEXT="$(cat "$ARM/home/.claude/settings.json")"
 
 expect_contains "standalone: announces the mode it is running in" "standalone" "$OUT_STANDALONE"
+# R-1: it announces it in words, not as `mode: <internal value>` — the transcript's
+# second line was the internal runtime word, printed before anything else.
+expect_not_contains "standalone: and not as an internal mode value" "mode: standalone" "$OUT_STANDALONE"
 expect_not_contains "standalone: the zshrc block was still removed" "bionic:start" "$RC_TEXT"
 expect_true "standalone: the todo-tools export was still removed" \
   bash -c '! grep -qE "^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=1" "$1"' _ "$ARM/home/.zshrc"
@@ -973,9 +1004,16 @@ expect_eq "bare PATH: the never-list still survives" \
   "$FP_NEVER_BEFORE" "$(fingerprint "$ARM/home/.bionic")"
 
 echo ""
-echo "=== Group 11: lane-3b dependencies via remove_dep (payload mode only) ==="
-
-ARM="$(new_arm lane3b)"
+echo "=== Group 11: the tool pass — every class bionic installs itself (payload mode only) ==="
+#
+# ENUMERATED BY CLASS, NOT BY THE RETIRED LANE VIEW (six-axis review A-1). The
+# teardown candidates are `basic|when-needed|extra` — every row except `core`,
+# which is the bionic plugin's own declared dependencies and belongs to the
+# native uninstall and prune in Group 12. `dep_names_lane 3b` used to compute
+# this set as "kind != native", which silently dropped the one native row that
+# is not core (A-2, below) and printed the new taxonomy's words over the old
+# taxonomy's set.
+ARM="$(new_arm toolpass)"
 plant_never_list "$ARM"
 plant_claude_stub "$ARM" no no
 # npm answers "installed" for the package probe, and records the uninstall.
@@ -992,12 +1030,65 @@ chmod +x "$ARM/bin/npm"
 
 OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
 CALLS="$(cat "$ARM/calls.log")"
-expect_contains "lane-3b: a present remove-on-consent dep reaches its real uninstall command" \
+expect_contains "tool pass: a present consented dep reaches its real uninstall command" \
   "npm uninstall -g @playwright/cli" "$CALLS"
-expect_not_contains "lane-3b: a keep-shared binary is never uninstalled, consent or not" \
+expect_not_contains "tool pass: a shared binary is never uninstalled, consent or not" \
   "brew uninstall" "$CALLS"
-expect_contains "lane-3b: the keep-shared policy is stated in the transcript" "keep-shared" "$OUT"
-expect_true "lane-3b: the keep-shared binary is still on the fixture PATH" test -x "$ARM/bin/rg"
+# R-1: the policy is stated in words the user can act on, and the table's own
+# value for it stays in the table.
+expect_contains "tool pass: the shared-binary policy is stated in the transcript" \
+  "kept — shared with other tools, bionic never removes it" "$OUT"
+expect_not_contains "tool pass: …and stated without the table's column value" "keep-shared" "$OUT"
+expect_true "tool pass: the shared binary is still on the fixture PATH" test -x "$ARM/bin/rg"
+
+# ---- A-2: the plugin the JIT route can install, and nothing could remove ----
+#
+# `install_plugin_native` puts `impeccable@bionic` on a machine mid-session, on
+# one consent, from `jit_offer`. It is `kind=native` and class `when-needed`, so
+# the old lane-3b walk never saw it — and its `native-uninstall-offer` arm said
+# "removed by the plugin uninstall, not here", which is false by construction:
+# A-3.1 rules that bionic's plugin.json declares the two core rows only, so
+# nothing about removing bionic touches this one. A machine that used the design
+# route once kept the plugin after a full, all-yes teardown.
+ARM="$(new_arm native-when-needed-present)"
+plant_never_list "$ARM"
+plant_claude_stub "$ARM" no no
+plant_native_plugin "$ARM" impeccable 4.1.1
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+CALLS="$(cat "$ARM/calls.log")"
+expect_contains "installed plugin: the teardown asks about it, in the same words as any other row" \
+  "Remove impeccable now?" "$OUT"
+expect_contains "installed plugin: a consented removal runs the CLI's own uninstall" \
+  "plugin uninstall impeccable@bionic" "$CALLS"
+expect_not_contains "installed plugin: and never claims some other step already took it" \
+  "removed by the plugin uninstall" "$OUT"
+# The counter is the only trace a dependency removal leaves in the summary, and
+# this arm plants exactly one removable thing, so the count is the assertion.
+expect_contains "installed plugin: counted as removed in the summary" "1 removed" "$OUT"
+
+# ---- declined: the offer is an offer ----
+ARM="$(new_arm native-when-needed-declined)"
+plant_never_list "$ARM"
+plant_claude_stub "$ARM" no no
+plant_native_plugin "$ARM" impeccable 4.1.1
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
+CALLS="$(cat "$ARM/calls.log")"
+expect_not_contains "installed plugin: a declined offer uninstalls nothing" \
+  "plugin uninstall impeccable@bionic" "$CALLS"
+expect_contains "installed plugin: and says so in the skipped shape the script already uses" \
+  "declined — impeccable left in place." "$OUT"
+
+# ---- absent: no question about a plugin this machine never installed ----
+ARM="$(new_arm native-when-needed-absent)"
+plant_never_list "$ARM"
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+CALLS="$(cat "$ARM/calls.log")"
+expect_not_contains "absent plugin: nothing is asked" "Remove impeccable now?" "$OUT"
+expect_not_contains "absent plugin: nothing is uninstalled" \
+  "plugin uninstall impeccable@bionic" "$CALLS"
+expect_contains "absent plugin: it opens already clean, like any absent row" \
+  "dependency impeccable (not installed)" "$OUT"
 
 echo ""
 echo "=== Group 12: the native finisher — uninstall, --keep-data, prune ==="
@@ -1368,6 +1459,70 @@ expect_contains "default mode: no key — already clean" \
   "default permission mode" "$OUT"
 expect_contains "default mode: no key — the already-clean shape the script already uses" \
   "default permission mode in ${ARM}/home/.claude/settings.json — already clean" "$OUT"
+
+# ---- D-1: ONE OWNER for the value, and both ends read it ----
+#
+# `auto` used to be a bare literal in two files — setup.sh wrote it, this script
+# compared against it — with nothing making them agree. The reset is DEFINED as
+# "the one value bionic knows it wrote", so a setup that started writing
+# `acceptEdits` would leave both suites green while the teardown silently matched
+# nothing and left the setting behind. deps.sh owns the value now.
+#
+# THE STANDALONE DOOR IS WHY THIS IS A FALLBACK AND NOT A SECOND OWNER. Fetched
+# by URL onto a machine with no payload beside it, this script has no deps.sh to
+# read — the same reason every literal in its "shared literals" section exists.
+# So: the owner's value when there is an owner, one declared fallback when there
+# is not, and the arms below pin the fallback to the owner and pin the BEHAVIOUR
+# to whatever the owner currently says.
+DEPS_MODE="$(bash -c '. "$1"; printf "%s" "${BIONIC_DEFAULT_PERMISSION_MODE:-}"' _ "$DEPS_SH")"
+expect_eq "one owner: deps.sh holds the default permission mode bionic offers" "auto" "$DEPS_MODE"
+
+# Non-comment lines carrying the value as a literal, in either script. The word
+# on its own — `automatic` and `auto-update` are not the value, and `${…:-auto}`
+# is. Comments are exempt: a comment is where the rule gets explained, and a lint
+# that could not tell a prohibition from a violation would forbid writing it down.
+auto_literals() {  # <script>
+  /usr/bin/grep -nE '(^|[^A-Za-z])auto([^A-Za-z-]|$)' "$1" \
+    | /usr/bin/grep -vE '^[0-9]+:[[:space:]]*#' || true
+}
+expect_eq "one owner: setup.sh carries the value nowhere — it reads the owner's" \
+  "" "$(auto_literals "$SETUP_SH")"
+RM_AUTO="$(auto_literals "$REMOVE_SH")"
+expect_eq "one owner: remove.sh carries exactly one, and it is the standalone fallback" "1" \
+  "$(printf '%s' "$RM_AUTO" | /usr/bin/grep -c 'BIONIC_DEFAULT_PERMISSION_MODE:-auto' | tr -d ' ')"
+expect_eq "one owner: …and nothing else in remove.sh spells the value out" "1" \
+  "$(printf '%s' "$RM_AUTO" | /usr/bin/grep -c . | tr -d ' ')"
+
+# ---- the mutation arm: move the owner's value, and the teardown follows it ----
+#
+# An agreement test that only reads source can be satisfied by a coincidence.
+# This one changes the constant in a COPY of the payload and drives the real
+# script against it: the value it resets, and the value it names in the question,
+# both have to move.
+MUT="$TMP/mutant-payload"; mkdir -p "$MUT/lib"
+cp "$REMOVE_SH" "$MUT/remove.sh"
+cp "${REPO}/payload/scripts/lib/"*.sh "$MUT/lib/"
+sed 's/^BIONIC_DEFAULT_PERMISSION_MODE=.*/BIONIC_DEFAULT_PERMISSION_MODE="plan"/' "$DEPS_SH" > "$MUT/lib/deps.sh"
+expect_true "mutation: the copy really carries the moved value" \
+  bash -c 'grep -qF "BIONIC_DEFAULT_PERMISSION_MODE=\"plan\"" "$1"' _ "$MUT/lib/deps.sh"
+
+ARM="$(new_arm mutated-owner-plan)"
+plant_default_mode "$ARM" plan
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$MUT/remove.sh" "$ARM" "$ALL_YES")"
+expect_eq "mutation: the teardown resets the value the owner now names" "" \
+  "$(jq -r '.permissions.defaultMode // ""' "$ARM/home/.claude/settings.json")"
+expect_contains "mutation: and the question it asks names that value too" \
+  "bionic set it to plan at setup." "$OUT"
+
+ARM="$(new_arm mutated-owner-auto)"
+plant_default_mode "$ARM" auto
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$MUT/remove.sh" "$ARM" "$ALL_YES")"
+expect_eq "mutation: a planted auto is now somebody else's setting and is left alone" \
+  "auto" "$(jq -r '.permissions.defaultMode // ""' "$ARM/home/.claude/settings.json")"
+expect_not_contains "mutation: and it is not even asked about" \
+  "Reset Claude Code's default permission mode?" "$OUT"
 
 # ---- the one-pass property: the item sits with the profile strip, before the finisher ----
 expect_true "default mode: the item's source sits before the native-uninstall finisher" \
