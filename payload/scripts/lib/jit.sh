@@ -46,10 +46,11 @@ if ! declare -F check_dep >/dev/null 2>&1; then
   . "$(cd "$(_jit_self_dir)" && pwd -P)/deps.sh"
 fi
 
-# The catalog a native-kind row installs from, spelled the same way and read
-# from the same env var setup.sh reads it from — a machine that re-points
-# bionic's marketplace re-points the offer with it.
-JIT_MARKETPLACE="${BIONIC_DEP_MARKETPLACE:-bionic}"
+# The catalog a native-kind row installs from used to be spelled here, because
+# this file composed the install command itself. `install_plugin_native` composes
+# it now and reads `BIONIC_DEP_MARKETPLACE` at call time exactly as this did, so
+# a second copy of the default would be a second opinion about which catalog a
+# plugin comes from — and the one that drifted would be the one nobody ran.
 
 # ─── jit_check ───────────────────────────────────────────────────────────
 
@@ -103,22 +104,33 @@ jit_check() {  # <dep-name>
 # ("declined — <name> stays absent."), and jit_offer adds no output of its
 # own there beyond the degradation line, which is also stdout.
 #
-# ONE ROW CANNOT BE INSTALLED FROM HERE, AND SAYS SO INSTEAD (wave-06 D-B/AC-11).
-# `impeccable` is `when-needed` AND `native`: the moment to install it is the
-# moment the design route asks for it, but the thing that installs it is the
-# plugin harness, and `install_dep` REFUSES every native row by design — a
-# second installer for a natively-installed plugin is the kludge the ownership
-# table exists to prevent. Handing it to install_dep anyway would print
-# deps.sh's own refusal at a user who did nothing wrong. So a native row gets
-# the one command that does install it, and the reload that makes it live: a
-# newly installed plugin is not in the session that asked for it until the CLI
-# re-reads its plugins. Nothing is mutated here and nothing is asked, because
-# there is no answer this function could act on.
+# ONE ROW GOES THROUGH THE OTHER INSTALLER (wave-06 D-B/AC-11, plan
+# A-4.S4.4-RULING). `impeccable` is `when-needed` AND `native`: the moment to
+# install it is the moment the design route asks for it, but the thing that
+# installs a plugin is the CLI, and `install_dep` REFUSES every native row by
+# design — a second installer for a natively-installed plugin is the kludge the
+# ownership table exists to prevent. Handing it to install_dep anyway would print
+# deps.sh's refusal at a user who did nothing wrong.
+#
+# The first cut of this branch printed the command and asked nothing, which
+# narrowed AC-11's "one question at the moment of need" for exactly one row. The
+# fix went to the layer it lives instead: deps.sh now owns `install_plugin_native`
+# — one consent question, then the CLI's install, then the one line saying when
+# it takes effect — and setup's first step calls the same function. So this file
+# is still not a second installer; it is a second CALLER of the one that exists,
+# which is precisely what it already is for install_dep.
+#
+# AND IT STILL RETURNS NON-ZERO, EVEN ON A SUCCESSFUL INSTALL. The plugin is on
+# the machine; it is not in the session that asked for it until the plugins are
+# re-read. `jit_offer`'s return answers "can this route use the capability NOW",
+# and for a native row installed this second the honest answer is no. The
+# contracted degradation line prints for the same reason: the route has to know
+# what this run does without it.
 jit_offer() {  # <dep-name> <route> <capability> <what-changes>
   local name="${1:-}" route="${2:-}" capability="${3:-}" degrade="${4:-}"
   echo "  ${route}: ${capability} needs ${name}, which is not installed."
   if [ "$(dep_field "$name" kind 2>/dev/null)" = "native" ]; then
-    echo "  Install it with: claude plugin install ${name}@${JIT_MARKETPLACE}, then run /reload-plugins"
+    install_plugin_native "$name"
     echo "  ${route} continues without ${capability}: ${degrade}"
     return 1
   fi

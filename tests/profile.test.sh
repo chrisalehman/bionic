@@ -134,6 +134,17 @@ FAKE_ROOT_V2="$TMP/home/.claude/plugins/cache/bionic/bionic/0.2.0"
 # That last line is the load-bearing one: the CLI writes jq-canonical JSON with
 # NO trailing newline. Both shapes are fixtured below, because a round trip that
 # is byte-exact on one and not the other is not byte-exact.
+#
+# THE CAPTURED LITERAL MOVED, AND THE FIXTURES DELIBERATELY DID NOT FOLLOW IT.
+# Wave-06 S5 harvests that captured rule into the shipped block (AC-12) — it was
+# precisely the prompt bionic's own offer of `@pencil.dev/cli` generates, which
+# is what "harvest the gap" means. A fixture that kept the same literal as its
+# stand-in for "a rule of the MACHINE's own" would stop discriminating the moment
+# the block carries it: the `index(...) != null` assertions below would hold
+# whether or not the user's own rule survived an apply. So the accretion rules
+# use a DIFFERENT foreign server name. The capture above is left as measured —
+# the shape it documents (one MCP rule, no trailing newline) is what the fixtures
+# reproduce, and the shape is the part that was ever load-bearing.
 
 # write_settings <path> — canonical JSON from stdin, no trailing newline.
 write_settings() {
@@ -154,7 +165,7 @@ write_settings "$SET_REAL" <<'JSON'
   "model": "opusplan",
   "theme": "dark",
   "env": { "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1" },
-  "permissions": { "allow": ["mcp__pencil"] },
+  "permissions": { "allow": ["mcp__notion"] },
   "enabledPlugins": { "bionic@bionic": true },
   "statusLine": { "type": "command", "command": "npx ccstatusline@latest" }
 }
@@ -164,7 +175,7 @@ SET_REAL_NL="$TMP/settings-real-nl.json"
 write_settings_nl "$SET_REAL_NL" <<'JSON'
 {
   "model": "opusplan",
-  "permissions": { "allow": ["mcp__pencil"] }
+  "permissions": { "allow": ["mcp__notion"] }
 }
 JSON
 
@@ -179,7 +190,7 @@ SET_ACCRETED="$TMP/settings-accreted.json"
 write_settings "$SET_ACCRETED" <<'JSON'
 {
   "model": "opusplan",
-  "permissions": { "allow": ["mcp__pencil", "Bash(gh pr view:*)", "Read(~/notes/*)"] }
+  "permissions": { "allow": ["mcp__notion", "Bash(gh pr view:*)", "Read(~/notes/*)"] }
 }
 JSON
 
@@ -227,8 +238,29 @@ expect_true "the template sets no defaultMode (it never widens the mode)" \
   jq -e '.permissions | has("defaultMode") | not' "$TEMPLATE"
 
 # Every rule is Tool(pattern)-shaped, and no rule's pattern is a lone wildcard.
-BAD_SHAPE="$(jq -r '.permissions.allow[] | select(test("^[A-Za-z_]+\\(.+\\)$") | not)' "$TEMPLATE" 2>/dev/null)"
-expect_eq "every rule is Tool(pattern)-shaped" "" "$BAD_SHAPE"
+#
+# TWO GRAMMARS, AND THE SECOND ONE HAS NO PARENTHESES TO CHECK. A Bash/Read rule
+# is `Tool(pattern)`. An MCP permission is `mcp__<server>` or
+# `mcp__<server>__<tool>` — the CLI's own spelling, which takes no pattern at
+# all, so there is nothing for the first regex to match and a template carrying
+# one would fail a check that only knows the parenthesised form. The two are
+# judged separately rather than by loosening the first: an MCP rule is pinned to
+# its own shape, so `mcp__` cannot become the hole through which an unshaped
+# string enters the allow list.
+# ONE backslash, not two: these reach jq through --arg, so they are regex source
+# and never a jq string literal. The inline spelling above needed `\\(` because
+# jq's own lexer ate one of them first.
+RULE_SHAPE='^[A-Za-z_]+\(.+\)$'
+MCP_SHAPE='^mcp__[A-Za-z0-9-]+(__[A-Za-z0-9-]+)?$'
+BAD_SHAPE="$(jq -r --arg r "$RULE_SHAPE" --arg m "$MCP_SHAPE" \
+  '.permissions.allow[] | select((test($r) or test($m)) | not)' "$TEMPLATE" 2>/dev/null)"
+expect_eq "every rule is Tool(pattern)-shaped or an mcp__ server rule" "" "$BAD_SHAPE"
+# Non-vacuous in both directions: the classifier must still reject a string that
+# is neither, and must accept the MCP form it was widened for.
+expect_eq "the shape check still rejects a bare unshaped string" "Bash" \
+  "$(jq -rn --arg r "$RULE_SHAPE" --arg m "$MCP_SHAPE" '["Bash"] | .[] | select((test($r) or test($m)) | not)')"
+expect_eq "the shape check accepts the mcp__ form" "" \
+  "$(jq -rn --arg r "$RULE_SHAPE" --arg m "$MCP_SHAPE" '["mcp__pencil"] | .[] | select((test($r) or test($m)) | not)')"
 BAD_WILD="$(jq -r '.permissions.allow[] | select(test("^[A-Za-z_]+\\(\\*?\\)$"))' "$TEMPLATE" 2>/dev/null)"
 expect_eq "no rule grants a whole tool" "" "$BAD_WILD"
 
@@ -258,9 +290,15 @@ expect_eq "no rule grants a whole tool" "" "$BAD_WILD"
 # The list is matched as PREFIXES so the begin marker's version suffix does not
 # have to be restated here (Group 3 owns that pin); everything else is written
 # whole.
+# `mcp__pencil` joins the list at wave-06 S5 (AC-12) for the reason category 3
+# exists: an MCP permission names a SERVER, not a path, so it cannot carry the
+# F-S2 hazard of firing in a repository it was never meant for. It is typed in
+# here, in front of whoever adds the next one, exactly as the paragraph above
+# requires — and Group 5's MCP arm is the separate claim that it is EARNED.
 ANCHOR_EXEMPT='Bash(: bionic-profile-begin version=
 Bash(: bionic-profile-end)
-Bash(claude plugin list:*)'
+Bash(claude plugin list:*)
+mcp__pencil'
 
 rule_is_anchored() {  # <rule>
   local r="$1" ex
@@ -402,6 +440,44 @@ expect_true "the template covers claude plugin uninstall, scoped to bionic@bioni
 expect_false "no unscoped claude plugin install grant" \
   grep -qF '"Bash(claude plugin install:*)"' "$TEMPLATE"
 
+# (e) the MCP rules, added at wave-06 S5 (AC-12). An MCP permission has no path
+# and no command to derive it from, so the derivation it answers to is the
+# dependency table: the server named by the rule must belong to a tool bionic
+# itself offers to install. `mcp__pencil` is earned by the `@pencil.dev/cli`
+# row — bionic offers that tool at setup, and the prompt its server raises is
+# therefore bionic's own machinery asking, which is what AC-12 calls a gap to
+# harvest. Drop the row from deps.sh and this arm turns red rather than leaving
+# a grant standing with nothing behind it.
+#
+# The match is on the SERVER segment being a substring of some row's name, not
+# on equality: an npm package name (`@pencil.dev/cli`) and the server it
+# registers (`pencil`) are different strings by construction. Loose enough to
+# admit a rule whose server is named after a row; strict enough that a rule for
+# a server no row installs has nothing to point at.
+MCP_RULES="$(jq -r '.permissions.allow[] | select(startswith("mcp__"))' "$TEMPLATE" 2>/dev/null)"
+expect_true "the template carries at least one MCP rule (the arm is not vacuous)" \
+  test -n "$MCP_RULES"
+expect_true "the harvested pencil rule is in the template (AC-12)" \
+  grep -qF '"mcp__pencil"' "$TEMPLATE"
+DEP_NAMES="$(bash -c '. "$1"; dep_names' _ "${REPO}/payload/scripts/lib/deps.sh" 2>/dev/null)"
+expect_true "the dependency table was readable (the arm is not vacuous)" test -n "$DEP_NAMES"
+mcp_rule_earned() {  # <rule>
+  local s="${1#mcp__}"; s="${s%%__*}"
+  case "$DEP_NAMES" in *"$s"*) return 0 ;; *) return 1 ;; esac
+}
+
+UNEARNED_MCP=""
+while IFS= read -r rule; do
+  [ -n "$rule" ] || continue
+  mcp_rule_earned "$rule" || UNEARNED_MCP="${UNEARNED_MCP} ${rule}"
+done <<< "$MCP_RULES"
+expect_eq "every MCP rule names a server a dependency-table row installs" "" "$UNEARNED_MCP"
+
+# Both directions on the same classifier, so the arm above cannot be a function
+# that says yes to everything.
+expect_true  "the MCP derivation accepts the harvested pencil rule" mcp_rule_earned "mcp__pencil"
+expect_false "the MCP derivation rejects a server no row installs"  mcp_rule_earned "mcp__unearned-server"
+
 echo ""
 echo "=== Group 6: render_profile — deterministic, total, and nothing else moved ==="
 
@@ -472,7 +548,7 @@ expect_true "profile_apply applies with the consent token" \
   _ "$PROFILE_SH" "$RENDERED" "$S_OK"
 expect_true "the applied file is still valid JSON" jq -e . "$S_OK"
 expect_eq "the pre-existing rule survived the apply" "true" \
-  "$(jq '.permissions.allow | index("mcp__pencil") != null' "$S_OK" 2>/dev/null)"
+  "$(jq '.permissions.allow | index("mcp__notion") != null' "$S_OK" 2>/dev/null)"
 expect_eq "every template rule is now in the settings allow list" "true" \
   "$(jq -s '(.[0].permissions.allow - .[1].permissions.allow) | length == 0' "$RENDERED" "$S_OK" 2>/dev/null)"
 expect_eq "unrelated settings keys are untouched" \
@@ -519,7 +595,7 @@ expect_eq "the new root is the one now applied" "true" \
 expect_eq "no rule from the old root survives" "true" \
   "$(jq --arg r "$FAKE_ROOT" '[.permissions.allow[] | select(contains($r + "/"))] | length == 0' "$S_TWICE")"
 expect_eq "the machine's own rule survived both applies" "true" \
-  "$(jq '.permissions.allow | index("mcp__pencil") != null' "$S_TWICE")"
+  "$(jq '.permissions.allow | index("mcp__notion") != null' "$S_TWICE")"
 
 echo ""
 echo "=== Group 9: profile_strip — safe on a machine that never applied ==="

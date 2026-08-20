@@ -5,7 +5,8 @@
     "token": "__BIONIC_PLUGIN_ROOT__ is replaced with this machine's concrete plugin root. Permission rules take literal paths and globs only — no variable expansion — so the token must never reach a settings file (record/epic-17-w3/probe-identity-match.md, design D2-final).",
     "markers": "The first and last allow entries bracket the block bionic owns. They are exact-match rules for ':' — bash's no-op builtin — so they authorize nothing while remaining valid rule syntax the CLI can only ignore. Everything in permissions.allow outside them is the machine's own accretion.",
     "version_rule": "version here, and the version carried by the begin marker, both equal payload/.claude-plugin/plugin.json's version. One manifest is the truth (ADR-002); tests/version-ssot.test.sh and tests/profile.test.sh pin all three together.",
-    "derivation": "Every rule below has a named invoker. hooks/* mirrors the six scripts named in hooks/hooks.json's commands. scripts/* is the command surface's four payload scripts. The claude plugin rules are scoped to bionic's own plugin@marketplace pair. Nothing here grants a whole tool, a bare wildcard, or a permission-skipping flag; a rule with no invoker behind it is an unearned grant.",
+    "derivation": "Every rule below has a named invoker. hooks/* mirrors the six scripts named in hooks/hooks.json's commands. scripts/* is the command surface's four payload scripts. The claude plugin rules are scoped to bionic's own plugin@marketplace pair. mcp__pencil is the one MCP rule and its invoker is the @pencil.dev/cli row in scripts/lib/deps.sh — bionic offers that tool at setup, so the prompt its server raises is bionic's own machinery asking, which is the gap AC-12 says to harvest rather than leave the user to answer forever. Nothing here grants a whole tool, a bare wildcard, or a permission-skipping flag; a rule with no invoker behind it is an unearned grant.",
+    "grammars": "Two rule shapes live here and only one has parentheses. A Bash/Read rule is Tool(pattern); an MCP permission is mcp__<server> or mcp__<server>__<tool>, the CLI's own spelling, which takes no pattern at all. tests/profile.test.sh judges the two separately so that admitting the second did not loosen the check on the first.",
     "anchoring": "This profile is applied into the USER settings layer, which is machine-wide, so every rule here must be anchored: rooted at __BIONIC_PLUGIN_ROOT__, scoped to bionic@bionic, or naming no path at all. A rule with a RELATIVE path would fire in every repository on the machine. Two suite-runner rules of exactly that shape were moved out to bionic's own project-scope settings (F-S2, Chris 2026-08-17); tests/profile.test.sh walls the class so it cannot return."
   },
   "permissions": {
@@ -24,6 +25,7 @@
       "Bash(claude plugin list:*)",
       "Bash(claude plugin install bionic@bionic:*)",
       "Bash(claude plugin uninstall bionic@bionic:*)",
+      "mcp__pencil",
       "Bash(: bionic-profile-end)"
     ]
   }

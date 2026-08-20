@@ -585,6 +585,55 @@ install_dep() {  # <name>
   if [ "${#argv[@]}" -gt 0 ]; then "${argv[@]}"; else _dep_install_statusline; fi
 }
 
+# ─── The OTHER installer, and why there are exactly two ──────────────────────
+#
+# `install_dep` refuses every native row above, and that refusal is right: there
+# is no argv bionic could run to install a plugin, because installing a plugin
+# is the CLI's own act. What the refusal did NOT do is give anybody a way to ASK
+# for one. Setup's first step grew its own copy of the question, and when a
+# when-needed row turned out to be native too (`impeccable`, the design route's
+# dependency) the just-in-time offer had nothing to call and printed a command
+# for the user to paste instead — an offer with no answer, for the one class of
+# tool the ratified policy says to install at the moment of need (D-B, AC-11).
+#
+# So this is that missing entry point, and it is deliberately a SIBLING of
+# install_dep rather than a branch inside it. The two differ in every part that
+# matters — who executes the install, what the plan sentence is, and whether the
+# result is usable in the session that asked — and folding them together would
+# be the second-installer kludge the ownership table exists to prevent. What
+# they share is the only thing that must not fork: the consent gate, which is
+# `_dep_consent` here exactly as it is there.
+#
+# CONSENT, THEN THE CLI, THEN THE ONE THING THE USER HAS TO KNOW. The plan is
+# printed before the question and run after it, from the same string. The `--yes`
+# is not a consent bypass: it suppresses the CLI's own second prompt about a
+# decision this function has already had with the user, and without it a
+# consented install would sit waiting on a question nobody can see.
+#
+# THE CAVEAT IS THE POINT OF THE THIRD LINE. A plugin the CLI installs mid-run
+# is not loaded into the session that asked for it until the plugins are re-read.
+# Saying so is the one line that changes what the user does next, which is
+# exactly the bar the voice contract sets for a caveat.
+#
+# Callers: setup.sh's first step (bionic itself) and jit.sh's `jit_offer` for a
+# native `when-needed` row. Both reach the CLI through this function and nowhere
+# else.
+install_plugin_native() {  # <name>
+  local name="${1:-}" marketplace id
+  [ -n "$name" ] || { echo "deps.sh: install_plugin_native needs a plugin name" >&2; return 1; }
+  marketplace="${BIONIC_DEP_MARKETPLACE:-bionic}"
+  id="${name}@${marketplace}"
+
+  echo "  ${name} is not installed. bionic would run: claude plugin install ${id} --scope user --yes"
+  _dep_consent "  Install ${name} now?" || { echo "  declined — ${name} stays absent."; return 1; }
+
+  if claude plugin install "$id" --scope user --yes; then
+    echo "  Takes effect after /reload-plugins or a new session."
+    return 0
+  fi
+  return 1
+}
+
 # ─── Remove ──────────────────────────────────────────────────────────────────
 
 _dep_remove_argv() {  # <name> — one token per line
