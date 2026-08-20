@@ -1304,6 +1304,80 @@ expect_true "one pass: the second run still ends with zero recreated data" \
   bash -c '[ ! -d "$1" ]' _ "$ARM/home/.claude/plugins/data/bionic-bionic"
 
 echo ""
+echo "=== Group 19: bionic's default permission mode (A-4.S5.F-RULING (a)) ==="
+#
+# setup.sh's _setup_default_mode (AC-12) writes `.permissions.defaultMode = "auto"`
+# OUTSIDE the marker block the item above strips — a preference of the machine's, not
+# one of bionic's rendered rules — so a machine torn down after answering yes to that
+# question keeps `defaultMode: auto` behind. This item closes that footprint leftover:
+# ask to reset it only when the value is still exactly what bionic offers; any other
+# value, or no key at all, is left alone with no question at all.
+
+plant_default_mode() {  # <arm> <value>
+  local arm="$1" value="$2" settings="$1/home/.claude/settings.json"
+  if [ -f "$settings" ]; then
+    jq --arg v "$value" '.permissions.defaultMode = $v' "$settings" > "$arm/tmp.json" && mv "$arm/tmp.json" "$settings"
+  else
+    printf '{"permissions":{"defaultMode":"%s"}}\n' "$value" > "$settings"
+  fi
+}
+
+# ---- defaultMode=auto, consent given: the key goes, counted as removed ----
+ARM="$(new_arm default-mode-auto-yes)"
+plant_default_mode "$ARM" auto
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+expect_contains "default mode: asks the exact question when it is bionic's auto" \
+  "Reset Claude Code's default permission mode? bionic set it to auto at setup. [y/N]" "$OUT"
+expect_eq "default mode: consented — the key is gone" \
+  "" "$(jq -r '.permissions.defaultMode // ""' "$ARM/home/.claude/settings.json")"
+expect_contains "default mode: consented — counted as removed" \
+  "✓ default permission mode" "$OUT"
+
+# ---- defaultMode=auto, consent declined: the key stays, reported skipped ----
+ARM="$(new_arm default-mode-auto-no)"
+plant_default_mode "$ARM" auto
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
+expect_eq "default mode: declined — the key is untouched" \
+  "auto" "$(jq -r '.permissions.defaultMode // ""' "$ARM/home/.claude/settings.json")"
+expect_contains "default mode: declined — reported in the Skipped list" \
+  "default permission mode" "$OUT"
+expect_contains "default mode: declined — the skipped-line shape the script already uses" \
+  "declined — default permission mode" "$OUT"
+
+# ---- defaultMode=plan (not bionic's value): no question, untouched ----
+ARM="$(new_arm default-mode-plan)"
+plant_default_mode "$ARM" plan
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+expect_not_contains "default mode: a non-auto value is never asked about" \
+  "Reset Claude Code's default permission mode" "$OUT"
+expect_eq "default mode: a non-auto value is left exactly as it was" \
+  "plan" "$(jq -r '.permissions.defaultMode // ""' "$ARM/home/.claude/settings.json")"
+expect_contains "default mode: a non-auto value reports already clean" \
+  "default permission mode" "$OUT"
+
+# ---- no key at all: already clean, no question ----
+ARM="$(new_arm default-mode-absent)"
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+expect_not_contains "default mode: no key — never asked about" \
+  "Reset Claude Code's default permission mode" "$OUT"
+expect_contains "default mode: no key — already clean" \
+  "default permission mode" "$OUT"
+expect_contains "default mode: no key — the already-clean shape the script already uses" \
+  "default permission mode in ${ARM}/home/.claude/settings.json — already clean" "$OUT"
+
+# ---- the one-pass property: the item sits with the profile strip, before the finisher ----
+expect_true "default mode: the item's source sits before the native-uninstall finisher" \
+  bash -c '
+    a=$(grep -n "default permission mode:" "$1" | head -1 | cut -d: -f1)
+    b=$(grep -n "native plugin uninstall:" "$1" | head -1 | cut -d: -f1)
+    [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]
+  ' _ "$REMOVE_SH"
+
+echo ""
 echo "=== Group 16: the suite is registered in tests/run.sh by name ==="
 
 expect_true "tests/run.sh runs remove.test.sh by name" \

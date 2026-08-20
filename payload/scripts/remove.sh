@@ -528,6 +528,46 @@ else
 fi
 echo ""
 
+# ─── Item: the default permission mode ───────────────────────────────────────
+#
+# setup.sh's permission-mode step can write `.permissions.defaultMode = "auto"`
+# OUTSIDE the marker block stripped above — a preference of the machine's, not
+# one of bionic's rendered rules (A-4.S5.6) — so that strip does not touch it
+# and a machine torn down after answering yes to that question keeps
+# `defaultMode: auto` behind. This closes the leftover: reset it ONLY when the
+# value is still exactly what bionic offers. Any other value, or no key at
+# all, is somebody else's setting or somebody else's choice and gets no
+# question at all — this item does not decide permission mode, it only offers
+# to undo the one value it knows it wrote.
+#
+# jq REQUIRED to tell "auto" from anything else. A substring check — the way
+# the marker block item above tells its block is present — cannot distinguish
+# a real `defaultMode` of "auto" from the word appearing anywhere else in the
+# file, so without jq this item cannot tell whether it applies and says so
+# rather than guessing either way.
+
+echo "default permission mode:"
+if ! _rm_have jq; then
+  _rm_leftover "jq is required to read ${RM_SETTINGS} — the default permission mode was not checked"
+elif [ -f "$RM_SETTINGS" ] && [ "$(jq -r '.permissions.defaultMode // ""' "$RM_SETTINGS" 2>/dev/null)" = "auto" ]; then
+  if _rm_consent "Reset Claude Code's default permission mode? bionic set it to auto at setup."; then
+    rm_mode_nl=0
+    # shellcheck disable=SC2154  # set by printf -v inside _rm_slurp_into
+    _rm_slurp_into rm_mode_text "$RM_SETTINGS" && case "$rm_mode_text" in *$'\n') rm_mode_nl=1 ;; esac
+    if rm_mode_stripped="$(jq 'del(.permissions.defaultMode)' "$RM_SETTINGS" 2>/dev/null)"; then
+      _rm_write "$RM_SETTINGS" "$rm_mode_stripped" "$rm_mode_nl"
+      _rm_removed "default permission mode in ${RM_SETTINGS}"
+    else
+      _rm_leftover "${RM_SETTINGS} is not valid JSON — refusing to write; the default permission mode is unchanged"
+    fi
+  else
+    _rm_skipped "default permission mode in ${RM_SETTINGS}"
+  fi
+else
+  _rm_clean "default permission mode in ${RM_SETTINGS}"
+fi
+echo ""
+
 # ─── Item: lane-3b dependency installs ───────────────────────────────────────
 #
 # The table is the payload's, and there is no second copy of it — so this item
