@@ -188,6 +188,38 @@ poke "$R2" interval
 expect_eq "a malformed override REFUSES rather than silently defaulting (exit 2)" "2" "$RC"
 expect_contains "…and names where to fix it" "config.yaml" "$OUT"
 
+# ---------- interval-default: the constant, with the config taken out of the question ----------
+#
+# ADDED FOR THE ARMING WALL (critic C-2, W5). `interval` above is right to refuse a
+# malformed override — that is this repo's posture everywhere a prose value is read. But
+# hooks/dispatch-preflight.sh has to measure staleness even then, because `.bionic/config.yaml`
+# is machine-local and agent-writable and one bad line there must not be able to disarm a
+# wall. Rather than retype 1800 in the gate — two copies of a constant that drift the first
+# time either moves — the gate asks this verb.
+#
+# THE PROPERTY THAT MATTERS TO ITS CALLER is that the config cannot change the answer, so
+# every arm below is driven ON TOP of a config the `interval` verb refuses or overrides.
+poke "$R2" interval-default
+expect_eq "interval-default answers 0 even though the live config is malformed" "0" "$RC"
+expect_eq "…with this script's own default, in seconds (30m = 1800s)" "1800" "$OUT"
+
+printf 'poker-interval: 5m\n' > "$R2/.bionic/config.yaml"
+poke "$R2" interval-default
+expect_eq "…and a perfectly VALID override does not move it either" "1800" "$OUT"
+poke "$R2" interval
+expect_eq "…while `interval`, on the same repo, still reads that override (5m = 300s)" "300" "$OUT"
+
+poke "$R1"
+expect_contains "usage names interval-default" "interval-default" "$OUT"
+
+# The gate's fallback is only worth having if it tracks the constant. Mutation-proof: move
+# POKER_INTERVAL_DEFAULT on a copy and the verb has to move with it — a verb that printed a
+# literal 1800 would answer 1800 here.
+POKER_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-default-mut.XXXXXX")/session-poker.sh"
+sed 's/^POKER_INTERVAL_DEFAULT="30m"$/POKER_INTERVAL_DEFAULT="7m"/' "$POKER" > "$POKER_MUT"
+OUT="$( cd "$R2" && CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER_MUT" interval-default 2>&1 )"; RC=$?
+expect_eq "the verb answers from the CONSTANT, not from a literal (doctored 7m = 420s)" "420" "$OUT"
+
 # ============================================================
 section "Section 3: tick — the accelerated-clock decisions (AC-7, re-authored for the ack)"
 # ============================================================
