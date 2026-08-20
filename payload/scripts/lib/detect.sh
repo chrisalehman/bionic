@@ -24,6 +24,8 @@
 #   env:legacy-channel-hooks count=<n|unknown>
 #   env:legacy-hook-files count=<n|unknown> path=<dir> names=<a.sh,b.sh|-> [cause=<text>]
 #   state:half-uninstalled=<yes|no>
+#   load-state=<loaded|failed|absent|unknown> error=<CLI error text|-> [cause=<text>]
+#   dup=<bare-name> ids=<a@x>,<b@y> fix=<consolidation command>
 #
 # `unknown` APPEARS WHERE HONESTY REQUIRES IT. Two of these values can read
 # `unknown` where the spec's table sketched only yes/no: a dependency whose
@@ -45,6 +47,7 @@
 #   BIONIC_CLAUDE_HOME     the CLI's config dir        ${CLAUDE_CONFIG_DIR:-~/.claude}
 #   BIONIC_SETTINGS_FILE   user settings.json          <claude-home>/settings.json
 #   BIONIC_SHELL_RC        the shell rc bionic edits   ~/.zshrc or ~/.bashrc, per $SHELL
+#   BIONIC_PLUGIN_LIST_CMD the CLI's own listing       `claude plugin list`
 #
 # Sourced, never executed:  . "${CLAUDE_PLUGIN_ROOT}/scripts/lib/detect.sh"
 
@@ -759,6 +762,263 @@ detect_registry_sha_lag() {  # [<repo-dir>] -> one line, always exit 0
   else
     echo "plugin:registry-sha state=not-in-repo registry=${sha} repo=${head} cause=-"
   fi
+  return 0
+}
+
+# ─── Is the CLI actually LOADING us? ─────────────────────────────────────────
+#
+# THE FACT NOTHING IN THIS FILE COULD ANSWER UNTIL NOW, and the most expensive
+# one to get wrong. Epic-17 W5's F12 measurement: `claude plugin install
+# bionic@bionic` exits 0, prints a green success line, writes the registry entry
+# — and if a dependency is missing the plugin loads NOTHING. No hook fires, no
+# command exists, and the only surface on the whole machine that says so is
+# `claude plugin list`. Four reproductions, all silent. Every other fact in this
+# file was measured healthy on that machine while the plugin was completely
+# inert, because they all read the REGISTRY and the registry was right: bionic
+# was installed. Installed and loaded are two different questions.
+#
+# WHY A COMMAND AND NOT A FILE. The load decision is the CLI's, taken at session
+# start from the dependency graph, and it is not written anywhere we can read.
+# The listing is the CLI reporting its own conclusion, which makes it the only
+# honest source — so this is the one fact function that SHELLS OUT.
+#
+# THE SEAM IS THE COMMAND ITSELF. `BIONIC_PLUGIN_LIST_CMD` (default
+# `claude plugin list`), split on whitespace and executed as argv — not `eval`,
+# which would make an env var a code-execution channel for no gain. The suite
+# points it at captured CLI transcripts; production never sets it.
+#
+# UNRECOGNIZED IS `unknown`, NEVER `loaded` (plan A-3.2). This probe exists to
+# be believed on a machine where everything else reads healthy, so the one
+# failure it must never have is optimism: a parser that shrugs at an output it
+# does not understand and calls it fine would report green on exactly the box
+# that is broken. Three separate honesty gates below — the command must run, the
+# output must be recognizable as a listing at all, and the status word must be
+# one of the two we have actually seen — and every one of them falls to
+# `unknown` with its cause named.
+#
+# ABSENT vs UNKNOWN is the distinction that gate two buys. "This listing is real
+# and your plugin is not in it" and "I cannot tell what I am reading" are
+# different answers with different fixes, and collapsing them would let a
+# garbled listing masquerade as a clean uninstall.
+
+detect_plugin_load_state() {  # <plugin-id> -> one line, always exit 0
+  local id="${1:-}" cmd out st parsed rows found status err
+  local -a argv=()
+
+  if [ -z "$id" ]; then
+    echo "load-state=unknown error=- cause=no plugin id was given"
+    return 0
+  fi
+
+  cmd="${BIONIC_PLUGIN_LIST_CMD:-claude plugin list}"
+  # Whitespace split into argv. A command string is not a shell program here:
+  # no quoting, no operators, no eval. That is a deliberate ceiling on what a
+  # seam can do, and everything the seam is FOR fits under it.
+  read -r -a argv <<<"$cmd" || true
+  if [ "${#argv[@]}" -eq 0 ]; then
+    echo "load-state=unknown error=- cause=the plugin listing command is empty, so nothing could be asked"
+    return 0
+  fi
+
+  out="$( "${argv[@]}" 2>/dev/null )"
+  st=$?
+  if [ "$st" -ne 0 ]; then
+    echo "load-state=unknown error=- cause=\`${cmd}\` exited ${st}, so the plugin listing could not be read"
+    return 0
+  fi
+
+  # THE LISTING IS A BLOCK FORMAT, AND THIS WAS MEASURED, NOT ASSUMED. What the
+  # CLI prints today (measured on this machine, 2026-08-20) is one BLOCK per
+  # plugin — the id alone on a `❯` line, with Version / Scope / Status indented
+  # beneath it:
+  #
+  #   Installed plugins:
+  #
+  #     ❯ bionic@bionic
+  #       Version: 0.1.0
+  #       Scope: user
+  #       Status: ✔ enabled
+  #
+  # W5's F12 report renders the same listing as one line per plugin
+  # (`❯ bionic@bionic  0.1.0  user  Status: ✔ enabled`). That rendering is the
+  # report's own reflow, not CLI bytes — the first cut of this parser was
+  # written against it and answered `absent` for a plugin this machine had
+  # loaded, which is precisely the confident wrong answer this file forbids.
+  # BOTH shapes are parsed, because the elided one may equally be an older CLI's
+  # real output and neither is worth betting a silent `absent` on.
+  #
+  # ONE pass, four answers, on separate lines rather than tab-joined: a status
+  # line is someone else's string and may hold tabs, and `read` splitting on a
+  # whitespace IFS silently collapses empty fields. Line-per-field cannot.
+  #
+  #   rows    how many plugin entries were seen at all (gate two)
+  #   found   1 if one of them names this id
+  #   status  that entry's Status line, verbatim
+  #   error   the first Error: line inside that entry, prefix stripped
+  #
+  # `inblock` is what keeps a failing NEIGHBOUR's status and error off our
+  # answer: both belong to the last entry opened, and an entry that is not ours
+  # closes the block rather than leaving it open.
+  parsed="$(awk -v id="$id" '
+    {
+      isheader  = (index($0, "❯") > 0)
+      hasstatus = (index($0, "Status:") > 0)
+
+      # An entry opens on a `❯` line — or, if this listing has no glyph at all,
+      # on a Status line that carries its own id (the one-line shape).
+      if (isheader || (hasstatus && !anyheader)) {
+        rows++
+        hit = 0
+        n = split($0, f, /[ \t]+/)
+        for (i = 1; i <= n; i++) if (f[i] == id) hit = 1
+        inblock = hit
+        if (hit) found = 1
+      }
+      if (isheader) anyheader = 1
+
+      if (inblock && hasstatus && status == "") status = $0
+      if (inblock && err == "" && index($0, "Error:") > 0) {
+        line = $0
+        sub(/^[ \t]*/, "", line)
+        sub(/^Error:[ \t]*/, "", line)
+        err = line
+      }
+    }
+    END {
+      printf "%d\n%d\n%s\n%s\n", rows + 0, found + 0, status, err
+    }
+  ' <<<"$out")"
+
+  { IFS= read -r rows; IFS= read -r found; IFS= read -r status; IFS= read -r err; } <<<"$parsed"
+
+  if [ "${found:-0}" != "1" ]; then
+    if [ "${rows:-0}" -eq 0 ] 2>/dev/null; then
+      echo "load-state=unknown error=- cause=the output of \`${cmd}\` is not a plugin listing"
+    else
+      echo "load-state=absent error=-"
+    fi
+    return 0
+  fi
+
+  # Order matters: `failed to load` is checked before anything else because a
+  # status that says both is a failure, and `not enabled`/`disabled` are ruled
+  # out before the `enabled` substring can catch them.
+  if [ -z "$status" ]; then
+    echo "load-state=unknown error=- cause=the listing names ${id} but reports no status for it"
+    return 0
+  fi
+
+  case "$status" in
+    *"failed to load"*)
+      if [ -n "$err" ]; then
+        echo "load-state=failed error=${err}"
+      else
+        echo "load-state=failed error=-"
+      fi ;;
+    *"not enabled"*|*disabled*)
+      # Installed and switched off is a deliberate choice, not a failure — but
+      # it is not one of the four states either, and it is certainly not
+      # `loaded`. Named for what it is so the renderer can say so.
+      echo "load-state=unknown error=- cause=the CLI reports ${id} as not enabled: ${status}" ;;
+    *enabled*)
+      echo "load-state=loaded error=-" ;;
+    *)
+      echo "load-state=unknown error=- cause=the CLI reports ${id} in a state this reader does not know: ${status}" ;;
+  esac
+  return 0
+}
+
+# ─── Two catalogs, one name ──────────────────────────────────────────────────
+#
+# SILENT DUPLICATION IS THE DEFECT (spec R5). Nothing stops a machine holding
+# `superpowers@bionic` and `superpowers@claude-plugins-official` at once — or two
+# `bionic`s — and nothing tells the user, so which copy a session actually loads
+# becomes a coin flip they never saw tossed. The registry knows; nobody asked it.
+#
+# BARE NAME IS THE COLLISION, not the key. Registry keys are `<name>@<catalog>`
+# and are unique by construction, so the duplicate is invisible to any check that
+# compares keys. Two keys whose `split("@")[0]` match ARE the finding.
+#
+# REPORTS, NEVER RESOLVES. This hands back the consolidation command and stops.
+# Setup asks (consolidate / coexist / skip) and doctor lists; neither is this
+# function's business, and coexistence is a legitimate choice a user may make
+# deliberately — which is exactly why the answer is a question and not an action.
+#
+# WHO LOSES. When one side is `@bionic`, bionic's own catalog is the copy this
+# machine's install chose, so the fix names the OTHER one. With no `@bionic`
+# side, bionic has no standing to pick a winner and does not pretend to: the fix
+# names both and says to choose.
+#
+# NO jq, NO ANSWER — and specifically not silence. Zero lines means "no
+# duplicates", which is a claim; a reader that cannot parse the registry has not
+# earned it. So the honest degradation is one `dup=unknown` line carrying its
+# cause, and the same for a registry that is present and unparseable. A registry
+# that is simply ABSENT is different: the CLI writes that file when it installs
+# anything, so nothing installed means nothing duplicated, and zero lines is true.
+DETECT_PLUGIN_DUPLICATES_JQ='[ (.plugins // {}) | keys[] ]
+  | group_by(split("@")[0])
+  | map(select(length > 1))[]
+  | "\(.[0] | split("@")[0])\t\(join(","))"'
+
+_detect_duplicate_fix() {  # <comma-separated ids> -> the fix clause
+  local ids="$1" id bionic_side=0 losers="" all="" out=""
+
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    all="${all}${id}
+"
+    case "$id" in
+      *@bionic) bionic_side=$((bionic_side + 1)) ;;
+      *)        losers="${losers}${id}
+" ;;
+    esac
+  done <<<"${ids//,/$'\n'}"
+
+  if [ "$bionic_side" -ge 1 ] && [ -n "$losers" ]; then
+    while IFS= read -r id; do
+      [ -n "$id" ] || continue
+      out="${out}${out:+; }claude plugin uninstall ${id}"
+    done <<<"$losers"
+    printf '%s' "$out"
+    return 0
+  fi
+
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    if [ -z "$out" ]; then
+      out="choose one: claude plugin uninstall ${id}"
+    else
+      out="${out}, or claude plugin uninstall ${id}"
+    fi
+  done <<<"$all"
+  printf '%s' "$out"
+  return 0
+}
+
+detect_plugin_duplicates() {  # -> zero or more lines, always exit 0
+  local reg out bare ids
+
+  reg="$(_detect_installed_plugins_file)"
+  [ -f "$reg" ] || return 0
+
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "dup=unknown ids=- fix=- cause=jq is not on PATH, so the plugin registry cannot be read"
+    return 0
+  fi
+
+  if ! out="$(jq -r "$DETECT_PLUGIN_DUPLICATES_JQ" "$reg" 2>/dev/null)"; then
+    echo "dup=unknown ids=- fix=- cause=the plugin registry at ${reg} could not be parsed"
+    return 0
+  fi
+
+  [ -n "$out" ] || return 0
+
+  # Exactly two fields, neither ever empty, so a tab IFS is safe here in a way
+  # it would not be for the load-state parse above.
+  while IFS="$(printf '\t')" read -r bare ids; do
+    [ -n "$bare" ] || continue
+    echo "dup=${bare} ids=${ids} fix=$(_detect_duplicate_fix "$ids")"
+  done <<<"$out"
   return 0
 }
 
