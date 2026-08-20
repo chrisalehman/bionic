@@ -515,6 +515,12 @@ case "$AGENT_STATE" in
 esac
 printf '  %-19s %s\n' "payload root" "$(_detect_plugin_root)"
 
+# WHICH COMMIT IS INSTALLED, against which commit this tree is on. The label says exactly
+# that: it read `registry sha` until epic-17 W6 S9a, which is the name of the FILE the fact
+# comes from rather than the name of the fact, and a user who never asked about a registry
+# reads it as git internals leaking into a report meant for them (walk finding W-3). Same
+# fact, same states, product word.
+#
 # WHICH COMMIT IS INSTALLED, against which commit this tree is on. ONE LINE, AND IT REPORTS
 # RATHER THAN POLICES — the agent-files posture, and deliberately: an install behind the tip
 # is what a developer machine looks like between any two commits, so a SUMMARY action line
@@ -525,16 +531,16 @@ printf '  %-19s %s\n' "payload root" "$(_detect_plugin_root)"
 _doctor_sha12() { printf '%.12s' "${1:-}"; }
 case "$REG_SHA_STATE" in
   match)
-    printf '  %-19s %s\n' "registry sha" \
+    printf '  %-19s %s\n' "installed commit" \
       "match — the installed build is this tree's HEAD ($(_doctor_sha12 "$REG_SHA_REG"))" ;;
   lag)
-    printf '  %-19s %s\n' "registry sha" \
+    printf '  %-19s %s\n' "installed commit" \
       "installed at $(_doctor_sha12 "$REG_SHA_REG"), this tree is $(_doctor_sha12 "$REG_SHA_REPO") — the install is behind; re-run: claude plugin install bionic@bionic" ;;
   not-in-repo)
-    printf '  %-19s %s\n' "registry sha" \
+    printf '  %-19s %s\n' "installed commit" \
       "installed at $(_doctor_sha12 "$REG_SHA_REG") — not a commit in this repository, so this tree is not what is running" ;;
   *)
-    printf '  %-19s %s\n' "registry sha" "unknown — ${REG_SHA_CAUSE}" ;;
+    printf '  %-19s %s\n' "installed commit" "unknown — ${REG_SHA_CAUSE}" ;;
 esac
 
 echo ""
@@ -710,7 +716,7 @@ echo ""
 echo "=== ROSTER FOOTPRINT ==="
 echo "  Skill and agent METADATA — name plus description — loads into every session;"
 echo "  bodies are just-in-time. A dependency's standing session cost is therefore the"
-echo "  number of roster entries it contributes (design-ledger D6)."
+echo "  number of roster entries it contributes."
 echo "  method: for a plugin-shaped dependency, roster lines = the count of"
 echo "          skills/*/SKILL.md plus agents/*.md under the installPath the CLI"
 echo "          recorded for it. Everything else — binaries, packages, MCP"

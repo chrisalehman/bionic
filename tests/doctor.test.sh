@@ -1338,21 +1338,26 @@ g15_run() {  # -> stdout, run FROM the fixture repo
 
 g15_set_sha "$G15_TIP"
 G15_MATCH_OUT="$TMP/g15-match.out"; g15_run > "$G15_MATCH_OUT" 2>&1
-G15_MATCH="$(line_of "$G15_MATCH_OUT" "registry sha")"
-expect_match "the registry-sha line renders when the install is at the tip" "*match*" "$G15_MATCH"
+G15_MATCH="$(line_of "$G15_MATCH_OUT" "installed commit")"
+expect_match "the installed-commit line renders when the install is at the tip" "*match*" "$G15_MATCH"
 expect_match "…naming the sha the two agreed on" "*${G15_TIP:0:12}*" "$G15_MATCH"
 expect_contains "…inside PLUGIN INTEGRITY, where the other install facts live" \
-  "registry sha" "$(sed -n '/=== PLUGIN INTEGRITY ===/,/=== TIER STATE ===/p' "$G15_MATCH_OUT")"
+  "installed commit" "$(sed -n '/=== PLUGIN INTEGRITY ===/,/=== TIER STATE ===/p' "$G15_MATCH_OUT")"
+# The LABEL is product language, not registry vocabulary (epic-17 W6 S9a; walk finding W-3:
+# "registry sha" reads as git internals to a user who never asked about a registry). The
+# fact is unchanged — which commit is installed — and only the word for it moved.
+expect_not_contains "…and never under the old registry-internals label" \
+  "registry sha" "$G15_MATCH_OUT"
 
 g15_set_sha "$G15_PREV"
 G15_LAG_OUT="$TMP/g15-lag.out"; g15_run > "$G15_LAG_OUT" 2>&1
-G15_LAG="$(line_of "$G15_LAG_OUT" "registry sha")"
+G15_LAG="$(line_of "$G15_LAG_OUT" "installed commit")"
 expect_match "an install behind the tip renders as lag" "*behind*" "$G15_LAG"
 expect_match "…naming the installed sha" "*${G15_PREV:0:12}*" "$G15_LAG"
 expect_match "…and the tip it is behind" "*${G15_TIP:0:12}*" "$G15_LAG"
 expect_match "…and the action, inline" "*claude plugin install bionic@bionic*" "$G15_LAG"
 expect_eq "…and exactly one such line, not one per state" "1" \
-  "$(grep -c "registry sha" "$G15_LAG_OUT" | tr -d ' ')"
+  "$(grep -c "installed commit" "$G15_LAG_OUT" | tr -d ' ')"
 expect_eq "doctor still exits 0 with a lagging install (a diagnosis is not a failure)" "0" \
   "$( g15_run > /dev/null 2>&1; echo $? )"
 
@@ -1360,7 +1365,7 @@ expect_eq "doctor still exits 0 with a lagging install (a diagnosis is not a fai
 # would change what is running rather than refresh it.
 g15_set_sha "0123456789abcdef0123456789abcdef01234567"
 G15_FOREIGN_OUT="$TMP/g15-foreign.out"; g15_run > "$G15_FOREIGN_OUT" 2>&1
-G15_FOREIGN="$(line_of "$G15_FOREIGN_OUT" "registry sha")"
+G15_FOREIGN="$(line_of "$G15_FOREIGN_OUT" "installed commit")"
 expect_match "a foreign sha is not reported as lag" "*not a commit in this repository*" "$G15_FOREIGN"
 expect_not_match "…and is not confused with the lag wording" "*behind*" "$G15_FOREIGN"
 
@@ -1368,10 +1373,10 @@ expect_not_match "…and is not confused with the lag wording" "*behind*" "$G15_
 # right answer, and the suite's other arms all run this way — so the healthy machine above
 # has already rendered it, and this pins that it did rather than staying silent.
 expect_match "off a repo the line still renders, as unknown with a cause" \
-  "*unknown*" "$(line_of "$H_OUT" "registry sha")"
+  "*unknown*" "$(line_of "$H_OUT" "installed commit")"
 # The cause is RENDERED, not the word "cause": doctor's contract is that every unknown it
 # prints carries a named reason, so what is pinned is that something follows the dash.
-G15_H_LINE="$(line_of "$H_OUT" "registry sha")"
+G15_H_LINE="$(line_of "$H_OUT" "installed commit")"
 expect_eq "…naming why it could not tell, rather than shrugging" "0" \
   "$([ -n "${G15_H_LINE##*unknown — }" ] && [ "${G15_H_LINE##*unknown — }" != "$G15_H_LINE" ] && echo 0 || echo 1)"
 
@@ -1379,6 +1384,14 @@ expect_eq "…naming why it could not tell, rather than shrugging" "0" \
 # is used. Pinned as an absence so it cannot come back with the next edit to that block.
 expect_eq "doctor.sh carries no unread HOOK_FILES_NAMES assignment" "" \
   "$(grep -n 'HOOK_FILES_NAMES' "$DOCTOR_SH" || true)"
+
+# NO DESIGN-DOC CITATION ON THE DISPLAY (epic-17 W6 S9a; walk finding W-3). ROSTER FOOTPRINT
+# explained its counting method and then cited the design ledger by letter-number for it —
+# a pointer into a document the user does not have, dropped into a read-only report. The
+# explanation stays and the citation goes; the source comment above the code keeps it, which
+# is where a reader who needs the provenance actually is. tests/script-vocabulary.test.sh
+# guards the class from the source side; this measures the rendered output.
+expect_not_contains "doctor's output cites no design document" "design-ledger" "$(cat "$H_OUT")"
 
 # ---------------------------------------------------------------------------
 echo ""

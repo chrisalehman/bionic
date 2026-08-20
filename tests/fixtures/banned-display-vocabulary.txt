@@ -36,3 +36,8 @@ detect_
 stdin
 non-interactive
 pipefail
+
+# ROSTER FOOTPRINT cited the design ledger by letter-number on a printed line (epic-17 W6
+# S9a, walk finding W-3). A design-doc pointer is provenance for a reader of the SOURCE; on
+# a user's terminal it is a reference into a document they do not have.
+design-ledger

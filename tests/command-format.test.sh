@@ -18,12 +18,16 @@
 #      probe-identity-match.md; nothing else is a portable install-time path).
 #
 # help.md CARRIES A THIRD RULE ON TOP: it is the orientation page, so it must
-# contain the four-command roster and it must not act on the machine. Until
-# epic-17 W6 that was pinned as "zero `${CLAUDE_PLUGIN_ROOT}` invocations".
-# W6 S1 (spec AC-2) opens the page with `bionic <version> (installed)` read from
-# plugin.json — the single owner of the version — so the rule is now EXACTLY ONE
-# invocation and it is a READ. The roster still describes the scripts and never
-# calls them; the one read changes nothing on the machine.
+# contain the four-command roster and it must not act on the machine. That was
+# pinned as "zero `${CLAUDE_PLUGIN_ROOT}` invocations" until epic-17 W6 S1,
+# which opened the page with `bionic <version> (installed)` READ from plugin.json
+# at runtime and narrowed the pin to "exactly one, and it is a read". The Step-5
+# walk (finding W-2) measured what that read costs a user: from a session whose
+# working directory is not this repo it is REFUSED, and the refusal prints above
+# the page. W6 S9a bakes the version at RENDER time instead — plugin.json is
+# still the version's single owner, help.md is a rendering of it — so the pin
+# returns to its strongest form: ZERO invocations, static content, no tool call
+# of any kind.
 #
 # HERMETIC. No network, no `claude` CLI. Fixtures for the positive/negative
 # arms are planted in a scratch dir; the checker functions run against both
@@ -150,33 +154,46 @@ if [ -f "$HELP_MD" ]; then
   expect_contains "help.md: fresh machine points at /bionic:setup" "/bionic:setup" "$HELP_TEXT"
   expect_contains "help.md: something-wrong points at /bionic:doctor" "/bionic:doctor" "$HELP_TEXT"
 
-  # ONE READ, AND ONLY ONE (epic-17 W6 S1, spec AC-2; plan assumption A-1.3).
+  # ZERO INVOCATIONS: THE PAGE IS STATIC (epic-17 W6 S9a; walk finding W-2).
   #
-  # This pin used to read "zero ${CLAUDE_PLUGIN_ROOT} invocations". That was the strongest
-  # true statement while help.md was pure prose, and it is now false by design: AC-2 opens
-  # the page with `bionic <version> (installed)`, and plugin.json is the single owner of
-  # that version — so the page has to READ it rather than carry a second copy that goes
-  # stale the first time the version moves. The old pin is retired deliberately, not
-  # weakened by accident, and what replaces it is the narrower statement that is still
-  # true: exactly one invocation, and it is a read of the manifest. Nothing help.md does
-  # can change this machine.
+  # The runtime read this pin was narrowed for is gone. What the walk measured: run
+  # `/bionic:help` from any session whose working directory is not this repo and the read of
+  # plugin.json is refused — a permission notice the first time, a working-directory sandbox
+  # error the second, each printed ABOVE the page in different words, and no version line
+  # either time. A front door whose first line is an error about a file the user never named
+  # is worse than a front door with no version on it.
+  #
+  # So the version is baked at RENDER time: agents-src/render.sh substitutes
+  # @@PLUGIN_VERSION@@ from payload/.claude-plugin/plugin.json, exactly as marketplace.json
+  # is a rendering of the dependency list. plugin.json remains the version's single owner —
+  # a baked value is a copy, and the copy is kept honest by `render.sh --check`, which goes
+  # red the moment the owner moves without a re-render (tests/agent-render.test.sh §I5) and
+  # by the agreement arm below on the shipped side.
   bad="$(bad_script_invocations "$HELP_MD")"
   expect_eq "help.md: no non-rooted .sh invocations" "" "$bad"
   inv_count="$(grep -oE '\$\{CLAUDE_PLUGIN_ROOT\}' "$HELP_MD" 2>/dev/null | wc -l | tr -d ' ')"
-  expect_eq "help.md: exactly one \${CLAUDE_PLUGIN_ROOT} invocation (the version read)" "1" "$inv_count"
+  expect_eq "help.md: zero \${CLAUDE_PLUGIN_ROOT} invocations (the page acts on nothing)" "0" "$inv_count"
+  sh_count="$(grep -oE '[A-Za-z0-9_./{}$-]*\.sh' "$HELP_MD" 2>/dev/null | wc -l | tr -d ' ')"
+  expect_eq "help.md: names no script at all" "0" "$sh_count"
+  fence_count="$(grep -cE '^[[:space:]]*```' "$HELP_MD" 2>/dev/null | tr -d ' ')"
+  expect_eq "help.md: carries no fenced code block" "0" "$fence_count"
+  subst_count="$(grep -oE '\$\(' "$HELP_MD" 2>/dev/null | wc -l | tr -d ' ')"
+  expect_eq "help.md: carries no command substitution" "0" "$subst_count"
 
-  inv_line="$(grep -F '${CLAUDE_PLUGIN_ROOT}' "$HELP_MD" 2>/dev/null)"
-  expect_contains "help.md: the one invocation reads the manifest version (jq -r .version)" \
-    'jq -r .version' "$inv_line"
-  expect_contains "help.md: the one invocation names plugin.json, the version's single owner" \
-    '${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json' "$inv_line"
-  # A read, not a write: no redirection, no in-place edit, no mover on that line.
-  expect_not_contains "help.md: the one invocation redirects nothing"      '>'       "$inv_line"
-  expect_not_contains "help.md: the one invocation edits nothing in place" 'sed -i'  "$inv_line"
-
-  # The header AC-2 pins is a format string in the file, so the wording is provable here;
-  # that the rendered first line carries the real version is the live (T3) half.
-  expect_contains "help.md: the version header reads 'bionic <version> (installed)'" \
+  # THE VERSION LINE, and its agreement with the file that owns the version.
+  PLUGIN_JSON="${REPO}/payload/.claude-plugin/plugin.json"
+  expect_true "payload/.claude-plugin/plugin.json exists (the version's single owner)" test -f "$PLUGIN_JSON"
+  PJ_VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$PLUGIN_JSON" 2>/dev/null | head -1)"
+  expect_true "plugin.json declares a non-empty version" bash -c "[ -n '$PJ_VERSION' ]"
+  expect_contains "help.md carries the baked version line 'bionic ${PJ_VERSION} (installed)'" \
+    "bionic ${PJ_VERSION} (installed)" "$HELP_TEXT"
+  # ...and it OPENS the page: the first line that is either the version line or the page
+  # heading has to be the version line, or the page opens with something else.
+  first_page_line="$(grep -m1 -E '^(bionic |# bionic$)' "$HELP_MD" 2>/dev/null)"
+  expect_eq "help.md: the version line opens the page, ahead of the heading" \
+    "bionic ${PJ_VERSION} (installed)" "$first_page_line"
+  # The runtime read's format string is gone, not merely joined by a static line.
+  expect_not_contains "help.md: no printf format string left where the version goes" \
     'bionic %s (installed)' "$HELP_TEXT"
 else
   echo "SKIP: remaining Section 2 checks (help.md missing)"
@@ -292,24 +309,29 @@ if [ -f "$HELP_MD" ]; then
   doctored_text="$(cat "$DOCTORED")"
   expect_not_contains "MUTATED help.md (doctor line stripped): roster check now fails as expected" "/bionic:doctor" "$doctored_text"
 
-  # Mutation 2: inject a SECOND \${CLAUDE_PLUGIN_ROOT} invocation into a copy —
-  # the exactly-one check must go red. Rewritten at W6 S1 with the pin it
-  # proves: the old arm injected the FIRST invocation and asserted the count
-  # was above zero, which is now the healthy state, so left as it was it would
-  # have gone on passing while proving nothing.
+  # Mutation 2: inject an invocation, in a fence, into a copy — the
+  # zero-invocation pin and the no-fence pin must BOTH go red. Rewritten at W6
+  # S9a: this arm injected a SECOND invocation while exactly-one was the
+  # healthy state; with the version baked at render time the healthy state is
+  # zero again, so left as it was the arm would have gone on passing while
+  # proving nothing about the pin it sits under.
   cp "$HELP_MD" "$DOCTORED"
   printf '\n```bash\nbash "${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh"\n```\n' >> "$DOCTORED"
   doctored_inv_count="$(grep -oE '\$\{CLAUDE_PLUGIN_ROOT\}' "$DOCTORED" 2>/dev/null | wc -l | tr -d ' ')"
-  expect_true "MUTATED help.md (second invocation injected): exactly-one check now fails as expected" bash -c "[ '$doctored_inv_count' -ne 1 ]"
+  expect_true "MUTATED help.md (invocation injected): the zero-invocation check now fails as expected" bash -c "[ '$doctored_inv_count' -ne 0 ]"
+  doctored_fence_count="$(grep -cE '^[[:space:]]*```' "$DOCTORED" 2>/dev/null | tr -d ' ')"
+  expect_true "MUTATED help.md (fenced block injected): the no-fence check now fails as expected" bash -c "[ '$doctored_fence_count' -ne 0 ]"
 
-  # Mutation 3: turn the one read into a WRITE. The page may look at this
-  # machine; it may never change it, and a redirection on that line is the
-  # cheapest way that rule gets broken.
-  cp "$HELP_MD" "$DOCTORED"
-  printf '\n```bash\njq ".version = \\"9.9.9\\"" "${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json" > /tmp/x\n```\n' >> "$DOCTORED"
-  doctored_inv_line="$(grep -F '${CLAUDE_PLUGIN_ROOT}' "$DOCTORED" 2>/dev/null)"
-  expect_contains "MUTATED help.md (read turned into a write): the redirection is visible to the read-only check" \
-    '>' "$doctored_inv_line"
+  # Mutation 3: bake a version its owner does not carry. A copied value is only
+  # safe while something compares it against the copy's source, and an absence
+  # check ("the page never disagrees with plugin.json") proves nothing on its
+  # own — this is the arm that shows the comparison discriminates.
+  sed "s|^bionic ${PJ_VERSION} (installed)\$|bionic 9.9.9 (installed)|" "$HELP_MD" > "$DOCTORED"
+  doctored_text="$(cat "$DOCTORED")"
+  expect_not_contains "MUTATED help.md (version drifted from plugin.json): the agreement check now fails as expected" \
+    "bionic ${PJ_VERSION} (installed)" "$doctored_text"
+  expect_contains "MUTATED help.md: ...and the drifted value is what it now carries" \
+    "bionic 9.9.9 (installed)" "$doctored_text"
 
   # Restore proof: the production file was never opened for writing above —
   # only read (cat/grep into $DOCTORED copies) — so it still passes clean.
