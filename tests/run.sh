@@ -2,8 +2,8 @@
 #
 # tests/run.sh — one-command test runner for bionic.
 #
-# No CI needed: just `bash tests/run.sh`. Runs every hermetic suite (no network,
-# no auth) plus the Docker mock install e2e when docker is present.
+# No CI needed: just `bash tests/run.sh`. Every gating suite is hermetic — no
+# network, no auth, no daemon — and every one of them runs on every invocation.
 #
 #   GATING suites (set the exit code — must be green):
 #     the hand-listed `run` lines below, one per suite — nothing here is
@@ -15,7 +15,12 @@
 #                                      themselves, and tests/ is not
 #                                      hook-exclusive, so uniform hand-listing is
 #                                      the only honest discovery left)
-#     tests/bootstrap-e2e-docker.sh    whole bootstrap on a fresh OS (docker only)
+#
+# There is no conditional suite and no skip category. The last one was
+# tests/bootstrap-e2e-docker.sh, which ran the whole of claude-bootstrap.sh in a
+# container; the installer was deleted in epic-17 W5 (4/6) and the suite went
+# with it (W5 audit F-3) — it had been green only because the Docker daemon was
+# down, and would have gone red the moment a contributor ran it daemon-up.
 #
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -27,7 +32,7 @@ cd "$REPO"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
-pass=0; fail=0; skip=0; failed=""
+pass=0; fail=0; failed=""
 
 run() {  # run <label> <cmd...>   — gating
   local label="$1"; shift
@@ -157,14 +162,9 @@ run "remove.test.sh" bash tests/remove.test.sh
 # false green — but it was the ONLY runner carrying lib/platform.test.sh, so
 # retiring it without this line would have traded one blind spot for another.
 run "platform.test.sh" bash lib/platform.test.sh
-if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  run "bootstrap-e2e-docker.sh (mock)" bash tests/bootstrap-e2e-docker.sh
-else
-  printf '  %-36s ' "bootstrap-e2e-docker.sh (mock)"; echo "⤼ SKIP (docker unavailable)"; skip=$((skip+1))
-fi
 
 echo "──────────────────────────────────────────────"
-echo "Gating: ${pass} passed, ${fail} failed, ${skip} skipped"
+echo "Gating: ${pass} passed, ${fail} failed"
 if [ "$fail" -ne 0 ]; then
   echo -e "Failed:${failed}"
   exit 1
