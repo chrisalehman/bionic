@@ -22,6 +22,7 @@
 #   env:todo-tools present=<yes|no>
 #   env:zshrc-legacy present=<yes|no>
 #   env:legacy-channel-hooks count=<n|unknown>
+#   env:legacy-hook-files count=<n|unknown> path=<dir> names=<a.sh,b.sh|-> [cause=<text>]
 #   state:half-uninstalled=<yes|no>
 #
 # `unknown` APPEARS WHERE HONESTY REQUIRES IT. Two of these values can read
@@ -343,6 +344,61 @@ detect_legacy_skill_copy() {
     present=yes
   fi
   echo "env:legacy-skill-copy present=${present} path=${dir}"
+  return 0
+}
+
+# ─── The legacy installed hook FILES ─────────────────────────────────────────
+#
+# THE OTHER HALF OF A QUESTION THIS LIBRARY ONLY ANSWERED HALFWAY. The retired installer
+# copied every hooks/*.sh into the CLI's own hooks directory and then wired those copies
+# into settings.json. `detect_legacy_channel_hooks` above counts the REGISTRATIONS. Nothing
+# counted the FILES — so a machine cleaned of every registration and a machine still
+# carrying eighteen scripts read identically in the report, and the second one is the one
+# whose owner can SEE the directory. A diagnosis that does not mention what a person can
+# see with `ls` is the kind a person stops believing.
+#
+# INERT IS NOT ABSENT, which is why this is worth a line of its own. With the registrations
+# gone the files run nothing; they are disk, not behaviour. But they are also an OLDER BUILD
+# of every wall this repo ships, sitting under a path that four eras of documentation told
+# people to invoke, and the close-out that removes them needs to know they are there.
+#
+# PAYLOAD-SIDE NAMES ONLY — `detect_installed_agent_copies` states the rule and it binds
+# here for a sharper reason: this count is read by a person deciding what to delete. A .sh
+# in that directory the payload does not ship is somebody's OWN hook, and reporting it as
+# bionic's leftover invites them to delete their own work. Over-reporting and under-
+# reporting are not symmetric here, so the error is taken in the safe direction.
+#
+# `unknown` WHERE THE COMPARISON CANNOT BE MADE. A payload with no hooks/ directory gives
+# nothing to match names against, and `0` there would report "nothing was left behind" about
+# a machine nobody managed to look at — the same substitution of reassurance for measurement
+# the integrity functions above refuse.
+detect_legacy_hook_files() {
+  local root dir f name count=0 names="" payload_total=0
+
+  root="$(_detect_plugin_root)"
+  dir="${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/hooks"
+
+  for f in "${root}/hooks/"*.sh; do
+    [ -f "$f" ] || continue
+    payload_total=$((payload_total + 1))
+  done
+  if [ "$payload_total" = 0 ]; then
+    echo "env:legacy-hook-files count=unknown path=${dir} names=- cause=this payload ships no hooks/ directory to match names against"
+    return 0
+  fi
+
+  if [ -d "$dir" ]; then
+    for f in "${root}/hooks/"*.sh; do
+      [ -f "$f" ] || continue
+      name="${f##*/}"
+      if [ -f "${dir}/${name}" ]; then
+        count=$((count + 1))
+        names="${names}${names:+,}${name}"
+      fi
+    done
+  fi
+
+  echo "env:legacy-hook-files count=${count} path=${dir} names=${names:--}"
   return 0
 }
 
@@ -711,6 +767,7 @@ detect_all() {
   detect_env_todo_tools
   detect_zshrc_legacy_block
   detect_legacy_channel_hooks
+  detect_legacy_hook_files
   detect_legacy_skill_copy
   detect_installed_agent_copies
   detect_plugin_registered

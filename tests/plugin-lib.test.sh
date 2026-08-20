@@ -1292,6 +1292,78 @@ expect_eq "detect_plugin_root writes nothing into the config dir it read" \
   "installed_plugins.json" "$(ls "$R_CH/plugins")"
 
 echo ""
+echo "=== Group T: detect_legacy_hook_files — the other thing the installer left (W5 RV-5) ==="
+#
+# WHAT THIS SEES THAT NOTHING ELSE DID. The retired installer copied every hooks/*.sh into
+# the CLI's own hooks directory. `detect_legacy_channel_hooks` already counts the
+# REGISTRATIONS those copies were wired through, in settings.json — but a machine can be
+# cleaned of every registration and still carry the FILES, and the two states look identical
+# in the report. The files are the half a person can see in a directory listing and the half
+# the report never mentioned, which is exactly the shape of a diagnosis nobody trusts.
+#
+# PAYLOAD-SIDE NAMES ONLY, the same rule `detect_installed_agent_copies` states: a .sh in
+# that directory that the payload does not ship is somebody's OWN hook, and counting it would
+# report a person's work as bionic's leftover. It is the strictly safer error too — this
+# count is read by a human deciding whether to delete things.
+#
+# `unknown` WHERE THE COMPARISON CANNOT BE MADE, and it is a real state, not a defensive one:
+# a payload with no hooks/ directory gives nothing to match names against, and answering `0`
+# there would report "nothing left behind" on a machine nobody looked at.
+
+T_PAY="$TMP/legacy-hooks-payload"; mkdir -p "$T_PAY/hooks"
+for h in protect-main.sh landing-gate.sh stop-guard.sh; do
+  printf '#!/bin/bash\nexit 0\n' > "$T_PAY/hooks/$h"
+done
+
+# A CLI home carrying three of the payload's names plus one that is not bionic's at all.
+T_CH_PRESENT="$TMP/legacy-hooks-ch-present"; mkdir -p "$T_CH_PRESENT/hooks"
+for h in protect-main.sh landing-gate.sh my-own-hook.sh; do
+  printf '#!/bin/bash\nexit 0\n' > "$T_CH_PRESENT/hooks/$h"
+done
+
+T_CH_CLEAN="$TMP/legacy-hooks-ch-clean"; mkdir -p "$T_CH_CLEAN"   # no hooks/ at all
+T_CH_EMPTY="$TMP/legacy-hooks-ch-empty"; mkdir -p "$T_CH_EMPTY/hooks"
+
+t_run() {  # <claude-home> [payload-root]
+  detect_run BIONIC_PLUGIN_ROOT="${2:-$T_PAY}" BIONIC_CLAUDE_HOME="$1" -- detect_legacy_hook_files
+}
+
+expect_eq "legacy hook files: two payload-named leftovers counted, the user's own hook NOT" \
+  "env:legacy-hook-files count=2 path=${T_CH_PRESENT}/hooks names=landing-gate.sh,protect-main.sh" \
+  "$(t_run "$T_CH_PRESENT")"
+expect_eq "legacy hook files: no hooks directory at all is a clean 0, not an unknown" \
+  "env:legacy-hook-files count=0 path=${T_CH_CLEAN}/hooks names=-" \
+  "$(t_run "$T_CH_CLEAN")"
+expect_eq "legacy hook files: an empty hooks directory is 0 too (the directory is not the fact)" \
+  "env:legacy-hook-files count=0 path=${T_CH_EMPTY}/hooks names=-" \
+  "$(t_run "$T_CH_EMPTY")"
+
+# The unknown arm: nothing to match names against.
+T_PAY_BARE="$TMP/legacy-hooks-payload-bare"; mkdir -p "$T_PAY_BARE"
+expect_match "legacy hook files: a payload with no hooks/ cannot answer, and says so" \
+  "*count=unknown*" "$(t_run "$T_CH_PRESENT" "$T_PAY_BARE")"
+expect_match "…naming the reason rather than reporting a clean machine" \
+  "*ships no hooks/*" "$(t_run "$T_CH_PRESENT" "$T_PAY_BARE")"
+
+# READ-ONLY, and this one matters more than most: the line it produces is what a person
+# reads before deleting files.
+T_FP_BEFORE="$(find "$T_CH_PRESENT" | sort; find "$T_CH_PRESENT" -type f -exec shasum -a 256 {} \; 2>/dev/null | sort)"
+t_run "$T_CH_PRESENT" >/dev/null 2>&1
+T_FP_AFTER="$(find "$T_CH_PRESENT" | sort; find "$T_CH_PRESENT" -type f -exec shasum -a 256 {} \; 2>/dev/null | sort)"
+expect_eq "detect_legacy_hook_files changes nothing in the directory it counts" \
+  "$T_FP_BEFORE" "$T_FP_AFTER"
+
+# One line, exit 0 — the file's contract, which Group 16 asserts for the older functions.
+t_out="$(t_run "$T_CH_PRESENT")"; t_rc=$?
+expect_eq "detect_legacy_hook_files exits 0" "0" "$t_rc"
+expect_eq "detect_legacy_hook_files prints exactly one line" "1" "$(printf '%s\n' "$t_out" | grep -c .)"
+
+# And it joins the sweep, so `detect_all` is still the whole of what this library knows.
+T_ALL="$(detect_run BIONIC_PLUGIN_ROOT="$T_PAY" BIONIC_CLAUDE_HOME="$T_CH_PRESENT" \
+  BIONIC_SHELL_RC="$RC_LEGACY" BIONIC_SETTINGS_FILE="$SET_STALE" -- detect_all)"
+expect_match "detect_all emits the legacy-hook-files line" "*env:legacy-hook-files count=*" "$T_ALL"
+
+echo ""
 echo "=== Group S: detect_plugin_install_path — ONE registry parse, not two (W5 Step-6 RV-4/RV-7) ==="
 #
 # THE DEFECT THIS CLOSES. The Step-6 review found the registry schema being parsed in two
