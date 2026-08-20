@@ -532,13 +532,26 @@ expect_false "evidence-gate hook has no version-dispatch chain" \
 expect_false "governing-skill hook has no version-dispatch chain" \
   grep -qE "$_vdispatch_re" "$_gskill"
 
-# 4r: README promotes canonical-sdlc as flagship (Wave 6 closure; Wave 7 repointed link)
-expect_true "README has a Canonical SDLC pattern subsection" \
-  grep -q '\*\*Canonical SDLC\*\*' "${REPO}/README.md"
-expect_true "README Skills row mentions bionic:canonical-sdlc as flagship" \
+# 4r: README promotes canonical-sdlc as flagship (Wave 6 closure; Wave 7 repointed
+# link; RE-POINTED at wave-06 S13, when the README was rewritten from the payload).
+#
+# THE OBLIGATION IS UNCHANGED and it is what these four pin: the README must present
+# canonical-sdlc as the flagship, must name it the way a user invokes it, and must
+# tell a reader that BOTH lifecycle walls exist. What moved is the RENDERING. The
+# retired spellings pinned the shape of a page that no longer exists — a bold
+# `**Canonical SDLC**` list item inside a patterns section the user deleted, and one
+# sentence naming the two wall SCRIPTS by filename. That page is product-facing and
+# the rewrite bans internal names on it, so a filename pin would now require the
+# README to break its own rule to stay green. These pin the CLAIMS instead, each in
+# the words the page actually uses, so a rewrite that drops one still goes red.
+expect_true "README presents canonical-sdlc as the flagship" \
+  grep -qE 'centerpiece is .?canonical-sdlc' "${REPO}/README.md"
+expect_true "README names the skill as a user invokes it" \
   grep -q 'bionic:canonical-sdlc' "${REPO}/README.md"
-expect_true "README Hooks list mentions both canonical-sdlc hooks" \
-  grep -qE 'canonical-sdlc-evidence-gate.*canonical-sdlc-governing-skill' "${REPO}/README.md"
+expect_true "README states the commit-evidence wall" \
+  grep -q 'no evidence for the step' "${REPO}/README.md"
+expect_true "README states the artifact-frontmatter wall" \
+  grep -q 'will not write without' "${REPO}/README.md"
 
 # ============================================================
 # SECTION 5: RETIRED — shell alias marker consistency
