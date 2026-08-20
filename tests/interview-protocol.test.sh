@@ -177,8 +177,12 @@ expect_pin_in_file "SKILL.md pin: steps table row '2 Design'" "2 Design" "$SKILL
 # pair for this concept — the absence checks below guard files that render no
 # step names at all. Without this pin a README revert to "ideate → spec" leaves
 # the suite green while the two surfaces disagree (Step-6 review FLAG 3).
-expect_pin_in_file "README.md pin: lifecycle line carries 'scope → design'" \
-  "scope → design" "$README"
+#
+# The separator changed at wave-06 S13 (arrows → a prose list) when the README was
+# rewritten; the step NAMES and their order are what this pin was ever about, and
+# the needle still fails on the "ideate"/"spec" revert it was written to catch.
+expect_pin_in_file "README.md pin: lifecycle line carries 'scope, design'" \
+  "scope, design" "$README"
 
 # expect_zero_occurrences_in_file <label> <needle> <file>
 # Fixed-string absence check. On failure, names every offending file:line so
