@@ -1,13 +1,14 @@
 #!/bin/bash
 # jit.sh — the route-facing degradation contract (epic-17 wave-03, spec AC-5).
 #
-# WHAT THIS FILE OWNS. The two functions a route calls when it needs a lane-3b
-# dependency it cannot assume is there: "is it present" (jit_check) and "offer
-# to install it, on consent, right now" (jit_offer). Both lean entirely on
+# WHAT THIS FILE OWNS. The two functions a route calls when it needs a
+# `when-needed` dependency it cannot assume is there: "is it present"
+# (jit_check) and "offer to install it, on consent, right now" (jit_offer).
+# Both lean entirely on
 # deps.sh's own table and its ONE mutating entry point, install_dep. jit_offer
 # is not a second installer: it calls install_dep BY NAME, so a route's JIT
-# offer and setup's own loop over the lane-3b rows always reach the identical
-# function (ownership table, wave-03 spec §Design, "per-dep install" row) —
+# offer and setup's own loop over the rows bionic installs itself always reach
+# the identical function (ownership table, wave-03 spec §Design, "per-dep install" row) —
 # tests/jit.test.sh proves that dynamically, by overriding `install_dep` after
 # sourcing this file and watching jit_offer's "yes" path land in the override.
 #
@@ -22,10 +23,12 @@
 # changes>") names three things only the calling route can supply. Recorded
 # as this slice's discretionary resolution — see the wave report.
 #
-# CONSENT. jit_offer asks EXACTLY ONE question, and it is install_dep's own —
+# CONSENT. jit_offer asks AT MOST ONE question, and it is install_dep's own —
 # jit.sh adds no second prompt and no dry-run seam. There is no assume-yes
 # knob here either: the "consent per event, never silent, never unattended"
-# rule binds through the function jit_offer delegates to.
+# rule binds through the function jit_offer delegates to. The one row it asks
+# NOTHING about is the native-kind one, which this file cannot install at all;
+# see the note above jit_offer.
 #
 # ROOTS. jit.sh reads no paths of its own — every root deps.sh's functions
 # touch is already overridable there, and jit.sh calls them through their own
@@ -42,6 +45,11 @@ if ! declare -F check_dep >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$(cd "$(_jit_self_dir)" && pwd -P)/deps.sh"
 fi
+
+# The catalog a native-kind row installs from, spelled the same way and read
+# from the same env var setup.sh reads it from — a machine that re-points
+# bionic's marketplace re-points the offer with it.
+JIT_MARKETPLACE="${BIONIC_DEP_MARKETPLACE:-bionic}"
 
 # ─── jit_check ───────────────────────────────────────────────────────────
 
@@ -94,9 +102,26 @@ jit_check() {  # <dep-name>
 # decline path: install_dep's own decline message is stdout-only
 # ("declined — <name> stays absent."), and jit_offer adds no output of its
 # own there beyond the degradation line, which is also stdout.
+#
+# ONE ROW CANNOT BE INSTALLED FROM HERE, AND SAYS SO INSTEAD (wave-06 D-B/AC-11).
+# `impeccable` is `when-needed` AND `native`: the moment to install it is the
+# moment the design route asks for it, but the thing that installs it is the
+# plugin harness, and `install_dep` REFUSES every native row by design — a
+# second installer for a natively-installed plugin is the kludge the ownership
+# table exists to prevent. Handing it to install_dep anyway would print
+# deps.sh's own refusal at a user who did nothing wrong. So a native row gets
+# the one command that does install it, and the reload that makes it live: a
+# newly installed plugin is not in the session that asked for it until the CLI
+# re-reads its plugins. Nothing is mutated here and nothing is asked, because
+# there is no answer this function could act on.
 jit_offer() {  # <dep-name> <route> <capability> <what-changes>
   local name="${1:-}" route="${2:-}" capability="${3:-}" degrade="${4:-}"
   echo "  ${route}: ${capability} needs ${name}, which is not installed."
+  if [ "$(dep_field "$name" kind 2>/dev/null)" = "native" ]; then
+    echo "  Install it with: claude plugin install ${name}@${JIT_MARKETPLACE}, then run /reload-plugins"
+    echo "  ${route} continues without ${capability}: ${degrade}"
+    return 1
+  fi
   if install_dep "$name"; then
     return 0
   fi
