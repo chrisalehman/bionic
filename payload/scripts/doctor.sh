@@ -7,20 +7,32 @@
 # ownership table says so in one word — doctor "diagnoses, never treats" — and
 # that word is the whole contract: no mutations, one pass, exit 0.
 #
-# ONE QUESTION, ASKED LAST, AND ONLY WHERE SOMEBODY CAN ANSWER IT (wave-06,
-# ratified D-D). The instant report — everything this machine can be asked about
-# without leaving it — prints in full first. Then doctor asks whether to check
-# for tool updates, because that is the one fact that costs a network round trip
-# to two package managers and a user waiting on a diagnosis should not pay for it
-# unasked. The rejected shapes are what this one has to keep out: always-on is a
-# forced wait, an argument is forgettable, and a cache would make the read-only
-# report write a file. Answering yes appends UPDATES and nothing else changes:
-# doctor prints the upgrade command, and never runs it.
+# ONE QUESTION, ASKED LAST (wave-06, ratified D-D). The instant report —
+# everything this machine can be asked about without leaving it — prints in full
+# first. Then doctor asks whether to check for tool updates, because that is the
+# one fact that costs a network round trip to two package managers and a user
+# waiting on a diagnosis should not pay for it unasked. The rejected shapes are
+# what this one has to keep out: always-on is a forced wait, an argument alone is
+# forgettable, and a cache would make the read-only report write a file.
+# Answering yes appends UPDATES and nothing else changes: doctor prints the
+# upgrade command, and never runs it.
 #
-# UNATTENDED IS SILENT. Where stdin cannot carry an answer — a closed stream, or
-# the socket a tool harness hands a script — no question is printed, no manager
-# is asked, and nothing is said about why. A report nobody is reading must not
-# carry a question nobody can answer.
+# THE QUESTION IS ALWAYS PRINTED; ONLY THE WAITING IS CONDITIONAL. Where stdin
+# can carry an answer — a terminal, a pipe, a file — doctor asks and waits. Where
+# it cannot (a closed stream, or the socket a tool harness hands a script) the
+# same line is printed and the run ends: no wait, and no narration of why. That
+# is setup.sh's rule applied here — it prints every consented question as it
+# declines it, so whoever is relaying the script's output can put the question to
+# the person who can answer it. A question the reader never sees is a feature
+# nobody can use.
+#
+# `--updates` IS THAT ANSWER COMING BACK. The relay runs doctor again with the
+# flag, which skips the question and appends UPDATES. It is NOT an assume-yes
+# knob: the rule setup states in its own header — that an env var switching
+# consent off would be the hole in "consent per event" — guards MUTATIONS, and
+# this flag guards a read. Two package managers are asked what is outdated; the
+# upgrade command is printed and never run. By the time the flag is passed the
+# user has already said yes.
 #
 # EVERY SHELL-OUT IS BOUNDED. Three of the facts below leave this process: the
 # CLI's own plugin listing, `brew outdated`, `npm outdated -g`. Each runs under a
@@ -30,10 +42,14 @@
 # useless at the only moment it was needed. A probe that runs out of time is
 # `unknown` with a cause, never a confident answer.
 #
-# EXIT 0, ALWAYS. A diagnosis is not a failure. A machine with eleven absent
-# dependencies and a stale permission profile has been diagnosed *successfully*;
-# reporting that as a non-zero exit would make every caller treat a working
-# doctor as a broken one. The report's content is the signal, never the status.
+# EXIT 0, ALWAYS — FOR A DIAGNOSIS. A diagnosis is not a failure. A machine with
+# eleven absent dependencies and a stale permission profile has been diagnosed
+# *successfully*; reporting that as a non-zero exit would make every caller treat
+# a working doctor as a broken one. The report's content is the signal, never the
+# status. The one exception is an option this script does not know, which has
+# diagnosed nothing: answering a misspelled flag with a clean report and status 0
+# would tell a caller that asked for something, and did not get it, that all was
+# well. That exits 2, before any fact is gathered.
 #
 # WHY READ-ONLY IS STRUCTURAL AND NOT MERELY INTENDED. Doctor calls only the
 # read-only half of each library — detect.sh's fact functions, profile.sh's
@@ -65,6 +81,21 @@
 # Executed, never sourced:  bash "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh"
 
 set -uo pipefail
+
+# ─── Options ─────────────────────────────────────────────────────────────────
+#
+# Parsed FIRST, before a single fact is gathered: a caller who misspelled the one
+# flag should be told so immediately, not after a full report they will not read.
+DOCTOR_WANT_UPDATES=no
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --updates) DOCTOR_WANT_UPDATES=yes ;;
+    *)
+      echo "doctor.sh: unknown option '$1' — the only option is --updates" >&2
+      exit 2 ;;
+  esac
+  shift
+done
 
 # No `dirname` here for the same reason the libraries give: a diagnosis that
 # needs coreutils to locate itself dies on the broken machine it exists for.
@@ -922,31 +953,47 @@ _doctor_updates_npm() {
   return 0
 }
 
-if _doctor_can_ask; then
+_doctor_render_updates() {
+  local UPDATES_BREW UPDATES_NPM
+  UPDATES_BREW="$(_doctor_updates_brew)"
+  UPDATES_NPM="$(_doctor_updates_npm)"
+  echo "=== UPDATES ==="
+  # THE COMMAND IS THE DELIVERABLE. Doctor diagnoses and never treats, so what a
+  # row hands over is the exact line to run, not an offer to run it.
+  echo "  Nothing is installed or upgraded here — each row is the command to run."
   echo ""
-  printf 'Check for tool updates? This asks Homebrew and npm and can take up to 30 seconds. [y/N] '
+  if [ -z "$UPDATES_BREW" ] && [ -z "$UPDATES_NPM" ]; then
+    echo "  Every managed tool is at its latest version."
+  else
+    # `printf '%s\n'`, and only when there is something to print: command
+    # substitution eats the trailing newline, so the bare `%s` that every other
+    # block here uses would run the last brew row into the first npm one.
+    [ -n "$UPDATES_BREW" ] && printf '%s\n' "$UPDATES_BREW"
+    [ -n "$UPDATES_NPM" ] && printf '%s\n' "$UPDATES_NPM"
+  fi
+  return 0
+}
+
+# The question, written once. Three places would otherwise spell it: the prompt
+# that waits, the line that does not, and a caller trying to match it.
+DOCTOR_UPDATES_QUESTION="Check for tool updates? This asks Homebrew and npm and can take up to 30 seconds. [y/N]"
+
+echo ""
+if [ "$DOCTOR_WANT_UPDATES" = "yes" ]; then
+  # The answer already given, coming back as a second run. No question, no read.
+  _doctor_render_updates
+elif _doctor_can_ask; then
+  printf '%s ' "$DOCTOR_UPDATES_QUESTION"
   IFS= read -r DOCTOR_UPDATE_ANSWER || DOCTOR_UPDATE_ANSWER=""
   echo ""
   case "$DOCTOR_UPDATE_ANSWER" in
-    y|Y|yes|YES|Yes)
-      UPDATES_BREW="$(_doctor_updates_brew)"
-      UPDATES_NPM="$(_doctor_updates_npm)"
-      echo "=== UPDATES ==="
-      # THE COMMAND IS THE DELIVERABLE. Doctor diagnoses and never treats, so
-      # what a row hands over is the exact line to run, not an offer to run it.
-      echo "  Nothing is installed or upgraded here — each row is the command to run."
-      echo ""
-      if [ -z "$UPDATES_BREW" ] && [ -z "$UPDATES_NPM" ]; then
-        echo "  Every managed tool is at its latest version."
-      else
-        # `printf '%s\n'`, and only when there is something to print: command
-        # substitution eats the trailing newline, so the bare `%s` that every
-        # other block here uses would run the last brew row into the first npm one.
-        [ -n "$UPDATES_BREW" ] && printf '%s\n' "$UPDATES_BREW"
-        [ -n "$UPDATES_NPM" ] && printf '%s\n' "$UPDATES_NPM"
-      fi
-      ;;
+    y|Y|yes|YES|Yes) _doctor_render_updates ;;
   esac
+else
+  # Printed, not asked. Whoever is relaying this report can put the question to
+  # the person who can answer it and come back with `--updates`; the line itself
+  # says nothing about why nobody was waited for.
+  printf '%s\n' "$DOCTOR_UPDATES_QUESTION"
 fi
 
 exit 0
