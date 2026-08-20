@@ -283,6 +283,201 @@ else
   fail "the gate's deploy_target_named predicate does not read absent/none/n-a as unnamed"
 fi
 
+# ===== Section 8: the T4 user-confirmed discharge — gate <-> doctrine =====
+#
+# Ownership-table row (epic-17 W5 spec, ## Design; declared by 4/3's A22 and
+# left unbuilt — W5 audit F-4):
+#   T4 user-confirmed discharge | canonical-sdlc-evidence-gate.sh (SSoT)
+#   | SKILL.md #### Waiver Protocol | this arm
+#
+# WHAT CHANGED AND WHY IT NEEDS A PIN. 4/3 moved an AUTHORITY contract: what
+# discharges a matrix row. Before it, a legitimately user-confirmed T4 row had
+# exactly one way past the CONFIRMED wall — the Waiver Protocol, which recorded
+# a waiver where nothing had been waived, so the row read forever as a criterion
+# that was let go. After it, a T4 block carrying a well-formed
+# `user-confirmed: <user> <date> <what>` discharges on that value alone.
+#
+# That contract now lives in two places: the branch in the hook that lets the
+# row through, and the paragraph in SKILL.md that tells an agent how to write
+# one. Neither is derivable from the other, and a drift between them is
+# expensive in a specific way — an agent reading stale doctrine either reaches
+# for a waiver it does not need (re-creating the exact defect 4/3 fixed) or
+# writes a shape the gate refuses. Section 6 pins the Step-9 evidence keys this
+# same way, off this same hook; this row is its sibling and belongs beside it.
+#
+# EXTRACTION, not transcription. Key and tier are read OUT of the hook's own
+# source — the grep pattern that recognises the key, and the branch condition
+# that gates the discharge. A typed literal here would pin this suite to the
+# contract as it stood the day it was written, which is the failure this row
+# exists to prevent.
+echo "== Section 8: T4 user-confirmed discharge — gate is the owner, doctrine renders it =="
+
+# uc_key <gate>: the evidence key the gate recognises, read off the pattern in
+# user_confirmed_value() rather than typed.
+uc_key() {
+  sed -n '/^user_confirmed_value()/,/^}/p' "$1" \
+    | sed -nE "s/.*grep -E .\^\[\[:space:\]\]\*([a-z][a-z-]*)\[\[:space:\]\]\*:.*/\1/p" \
+    | head -1
+}
+
+# uc_tier <gate>: the tier the discharge branch is conditioned on, read off the
+# branch itself — the one line that IS the authority change.
+uc_tier() {
+  grep -E 'user_confirmed_form_ok "\$block_txt"' "$1" \
+    | sed -nE 's/.*"\$tier" = "(T[0-9])".*/\1/p' | head -1
+}
+
+# uc_form_needs_date <gate>: does the form check demand a YYYY-MM-DD?
+uc_form_needs_date() {
+  sed -n '/^user_confirmed_form_ok()/,/^}/p' "$1" \
+    | grep -q '\[0-9\]{4}-\[0-9\]{2}-\[0-9\]{2}'
+}
+
+# uc_form_needs_user <gate>: does a leading name token precede that date?
+uc_form_needs_user() {
+  sed -n '/^user_confirmed_form_ok()/,/^}/p' "$1" \
+    | grep -q '\^\[A-Za-z\]\[A-Za-z0-9._-\]\*\[\[:space:\]\]+\[0-9\]{4}'
+}
+
+# waiver_protocol <skill>: the #### Waiver Protocol section body. Bounded to that
+# section on purpose — "no waiver" said anywhere else in a 900-line SKILL.md is
+# not this contract being stated.
+waiver_protocol() {
+  awk '/^#### Waiver Protocol/{f=1; next} f && /^#+ /{exit} f' "$1"
+}
+
+# uc_contract_agrees <gate> <skill>: 0 when every fact the gate enforces about the
+# T4 discharge is stated in the Waiver Protocol section. Written as one predicate
+# so the meta battery below can re-run the WHOLE agreement against doctored
+# copies of either side.
+uc_contract_agrees() {
+  local g="$1" sk="$2" key tier doc
+  key="$(uc_key "$g")"
+  tier="$(uc_tier "$g")"
+  if [ -z "$key" ] || [ -z "$tier" ]; then
+    echo "gate: could not read the discharge contract (key='${key}' tier='${tier}')" >&2; return 1
+  fi
+  doc="$(waiver_protocol "$sk")"
+  if [ -z "$doc" ]; then echo "doctrine: #### Waiver Protocol section not found" >&2; return 1; fi
+
+  # the key, rendered in the gate's own attributed order
+  if ! grep -qF -- "\`${key}: <user> <date>" <<< "$doc"; then
+    echo "doctrine never renders '${key}: <user> <date> ...'" >&2; return 1
+  fi
+  # the tier the branch is gated on
+  if ! grep -qw -- "$tier" <<< "$doc"; then
+    echo "doctrine never names tier ${tier}" >&2; return 1
+  fi
+  # the two shape demands, each asserted only because the gate makes it
+  if uc_form_needs_date "$g" && ! grep -qF -- '<date>' <<< "$doc"; then
+    echo "gate demands a YYYY-MM-DD; doctrine's placeholder carries no <date>" >&2; return 1
+  fi
+  if uc_form_needs_user "$g" && ! grep -qF -- '<user>' <<< "$doc"; then
+    echo "gate demands a leading name token; doctrine's placeholder carries no <user>" >&2; return 1
+  fi
+  # what the branch DOES: past the wall without a waiver and without a verdict
+  if ! grep -qF -- 'no waiver' <<< "$doc"; then
+    echo "doctrine does not state that the T4 discharge needs no waiver" >&2; return 1
+  fi
+  if ! grep -qF -- 'no auditor verdict' <<< "$doc"; then
+    echo "doctrine does not state that the T4 discharge needs no auditor verdict" >&2; return 1
+  fi
+  return 0
+}
+
+UC_KEY="$(uc_key "$GATE")"
+UC_TIER="$(uc_tier "$GATE")"
+
+if [ -n "$UC_KEY" ] && [ -n "$UC_TIER" ]; then
+  pass "gate's discharge contract is readable: key '${UC_KEY}:' on tier ${UC_TIER}"
+else
+  fail "gate's discharge contract is not readable" "key='${UC_KEY}' tier='${UC_TIER}'"
+fi
+
+if uc_contract_agrees "$GATE" "$SKILL" 2>/dev/null; then
+  pass "SKILL.md's Waiver Protocol states the same T4 discharge contract the gate enforces"
+else
+  fail "SKILL.md's Waiver Protocol and the evidence gate disagree on the T4 discharge" \
+    "$(uc_contract_agrees "$GATE" "$SKILL" 2>&1)"
+fi
+
+# The negative half. 4/3's fix is only worth anything if the doctrine stops
+# telling readers to waive a T4 row; a Waiver Protocol that lists the discharge
+# AND still counts it among the user-only waiver moves is two contracts.
+WP="$(waiver_protocol "$SKILL")"
+if grep -qF -- 'needs no waiver' <<< "$WP"; then
+  pass "Waiver Protocol says a user-confirmed T4 row needs no waiver"
+else
+  fail "Waiver Protocol never says a user-confirmed T4 row needs no waiver"
+fi
+if grep -qF -- 'unattributed' <<< "$WP"; then
+  pass "…and that an unattributed or agent-written claim is not one (the form check's whole point)"
+else
+  fail "Waiver Protocol does not distinguish an unattributed/agent-written claim"
+fi
+
+# ----- meta: the agreement discriminates, proven on doctored copies -----
+# Same discipline as Section 4: the sources are never touched, and each doctored
+# copy moves ONE side of the contract.
+
+# 8-meta-a. gate-side key rename — the hook starts reading a different key.
+sed 's/user-confirmed\[\[:space:\]\]\*:/user-verified[[:space:]]*:/' "$GATE" > "$TMP/gate-key-renamed.sh"
+if [ "$(uc_key "$TMP/gate-key-renamed.sh")" != "$UC_KEY" ] \
+   && ! uc_contract_agrees "$TMP/gate-key-renamed.sh" "$SKILL" 2>/dev/null; then
+  pass "meta: a gate-side rename of the evidence key is detected"
+else
+  fail "meta: renaming the gate's evidence key did not break the agreement"
+fi
+
+# 8-meta-b. gate-side tier move — the discharge is re-aimed at another tier.
+sed 's/elif \[ "$tier" = "T4" \] \&\& user_confirmed_form_ok/elif [ "$tier" = "T3" ] \&\& user_confirmed_form_ok/' \
+  "$GATE" > "$TMP/gate-tier-moved.sh"
+if [ "$(uc_tier "$TMP/gate-tier-moved.sh")" = "T3" ]; then
+  pass "meta: the tier extractor follows the branch when it moves (T4 -> T3)"
+else
+  fail "meta: the tier extractor did not follow a moved discharge branch" \
+    "read '$(uc_tier "$TMP/gate-tier-moved.sh")'"
+fi
+
+# 8-meta-c. gate-side relaxation — the form check stops demanding a date, and the
+# doctrine that still promises one is now over-specified relative to the gate.
+# The arm here is the extractor's own discrimination: a relaxed gate must read
+# as relaxed, or the conditional assertions above are vacuous.
+sed 's/\[0-9\]{4}-\[0-9\]{2}-\[0-9\]{2}/[0-9]+/' "$GATE" > "$TMP/gate-nodate.sh"
+if ! uc_form_needs_date "$TMP/gate-nodate.sh"; then
+  pass "meta: a gate that stops demanding YYYY-MM-DD reads as relaxed"
+else
+  fail "meta: the date demand is not actually read out of the gate"
+fi
+
+# 8-meta-d. doctrine-side drift — the Waiver Protocol loses the discharge
+# paragraph and goes back to teaching the waiver. This is the regression that
+# actually costs: an agent reads it, waives a row nothing waived, and the matrix
+# records a criterion as let go.
+grep -vF -- 'needs no waiver' "$SKILL" > "$TMP/skill-uc-dropped.md"
+if ! uc_contract_agrees "$GATE" "$TMP/skill-uc-dropped.md" 2>/dev/null; then
+  pass "meta: doctrine losing the waiver-free discharge is detected"
+else
+  fail "meta: doctrine losing the waiver-free discharge was NOT detected"
+fi
+
+# 8-meta-e. doctrine-side shape drift — the placeholder drops the date, so an
+# agent writing what the doctrine shows would be refused by the gate.
+sed 's/`user-confirmed: <user> <date> <what they confirmed>`/`user-confirmed: <user> <what they confirmed>`/g' \
+  "$SKILL" > "$TMP/skill-uc-nodate.md"
+if ! uc_contract_agrees "$GATE" "$TMP/skill-uc-nodate.md" 2>/dev/null; then
+  pass "meta: doctrine dropping <date> from the rendered form is detected"
+else
+  fail "meta: doctrine dropping <date> from the rendered form was NOT detected"
+fi
+
+# and the sources are untouched by all of the above
+if uc_contract_agrees "$GATE" "$SKILL" 2>/dev/null; then
+  pass "meta: gate and SKILL.md still agree after the mutation battery (temp copies only)"
+else
+  fail "meta: a mutation helper touched a source file"
+fi
+
 # ---------- summary ----------
 echo "──────────────────────────────────────────────"
 echo "close-out: ${PASS} passed, ${FAIL} failed"
