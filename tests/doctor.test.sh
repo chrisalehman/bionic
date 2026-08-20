@@ -381,12 +381,29 @@ RC
 # loaded — `cat` on a fixture file, through the same seam production leaves unset.
 # Arms that need another state pass their own BIONIC_PLUGIN_LIST_CMD; `env`
 # applies assignments in order, so the later one wins.
+# The one question doctor asks, verbatim (ratified D-D wording). Defined once: three
+# groups assert on it, and a copy that drifted would let the wording change while every
+# arm stayed green.
+UPDATES_QUESTION="Check for tool updates? This asks Homebrew and npm and can take up to 30 seconds. [y/N]"
+
 LISTING_HEALTHY="${REPO}/tests/fixtures/plugin-list-healthy.txt"
 LISTING_DEPBROKEN="${REPO}/tests/fixtures/plugin-list-dep-broken.txt"
 
 # Run a doctor script against a fixture machine with a controlled environment.
-doctor_run() {  # <doctor.sh> <bin-dir> <machine-root> [extra env assignments...]
+#
+# Everything after the machine root is an ENV ASSIGNMENT until a bare `--`; everything
+# after that is an ARGUMENT to doctor.sh itself. The separator was added at S6b, when
+# doctor grew its first flag: without it `--updates` would have been handed to `env`,
+# which would have read it as one of ITS options and failed in a way that looks nothing
+# like the thing under test.
+doctor_run() {  # <doctor.sh> <bin-dir> <machine-root> [env assignments...] [-- <script args...>]
   local sh="$1" bin="$2" m="$3"; shift 3
+  local a seen=0
+  local -a envs=() args=()
+  for a in "$@"; do
+    if [ "$seen" = "0" ] && [ "$a" = "--" ]; then seen=1; continue; fi
+    if [ "$seen" = "1" ]; then args+=("$a"); else envs+=("$a"); fi
+  done
   env -i \
     HOME="$m/home" \
     PATH="$bin" \
@@ -399,8 +416,8 @@ doctor_run() {  # <doctor.sh> <bin-dir> <machine-root> [extra env assignments...
     BIONIC_SHELL_RC="$m/rc" \
     BIONIC_PROFILE_TEMPLATE="$TEMPLATE" \
     BIONIC_PLAYWRIGHT_CACHE="$m/playwright-cache" \
-    "$@" \
-    bash "$sh" 2>&1
+    ${envs[@]+"${envs[@]}"} \
+    bash "$sh" ${args[@]+"${args[@]}"} 2>&1
 }
 
 # The no-mutation wall's sensor: content AND shape. A checksum per file catches
@@ -437,8 +454,18 @@ if [ -f "$DOCTOR_MD" ]; then
   expect_contains "doctor.md invokes scripts/doctor.sh" '${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh' "$MD_TEXT"
   # A thin wrapper: no installation or diagnosis logic in command prose (design
   # boundaries — "installation logic NEVER lives in command prose").
-  MD_SH_COUNT="$(grep -c 'CLAUDE_PLUGIN_ROOT' "$DOCTOR_MD" 2>/dev/null | tr -d ' ')"
-  expect_eq "doctor.md invokes exactly one script (thin wrapper)" "1" "$MD_SH_COUNT"
+  #
+  # THE PIN IS REWRITTEN, NOT EXEMPTED (wave-06 S6b). It used to read "exactly one
+  # ${CLAUDE_PLUGIN_ROOT} invocation", which was the strongest true statement while
+  # doctor had one entry point. It has two now — the report, and the same script with
+  # `--updates` when the user answers yes to the question the report ends with — and
+  # counting them is no longer what the pin was protecting. What it was protecting is
+  # that command prose runs NOTHING but this one read-only script: so every invocation
+  # must name scripts/doctor.sh, and nothing else may appear.
+  MD_INVOCATIONS="$(grep -oE '\$\{CLAUDE_PLUGIN_ROOT\}[^"'"'"'`]*' "$DOCTOR_MD" 2>/dev/null | sed 's/[[:space:]]*$//')"
+  MD_FOREIGN="$(printf '%s\n' "$MD_INVOCATIONS" | grep -v '^\${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh' || true)"
+  expect_eq "doctor.md: every invocation is the read-only doctor.sh, and nothing else" "" "$MD_FOREIGN"
+  expect_true "doctor.md: at least one invocation exists" test -n "$MD_INVOCATIONS"
 fi
 
 if [ ! -f "$DOCTOR_SH" ]; then
@@ -816,8 +843,16 @@ echo ""
 echo "=== Group 6: the SUMMARY block — action lines only ==="
 # ---------------------------------------------------------------------------
 
-H_SUM="$(awk '/=== SUMMARY ===/{f=1; next} f' "$H_OUT")"
-B_SUM="$(awk '/=== SUMMARY ===/{f=1; next} f' "$B_OUT")"
+# THE SUMMARY BLOCK ENDS WHERE ITS INDENTATION DOES (widened at S6b). Every summary
+# line is indented — an action line or the continuation of one — and the report now ends
+# with one unindented line: the question doctor asks after the report is complete. That
+# line is not a summary item, and an extractor that ran to EOF would read it as a fact
+# restated in the action block, which is the one thing this group forbids.
+summary_block() {  # <doctor-output-file>
+  awk '/=== SUMMARY ===/{f=1; next} f && /^[^[:space:]]/{f=0} f' "$1"
+}
+H_SUM="$(summary_block "$H_OUT")"
+B_SUM="$(summary_block "$B_OUT")"
 
 H_SUM_SQUASHED="$(printf '%s' "$H_SUM" | tr -d '[:space:]')"
 expect_true "healthy: the summary block is non-empty" test -n "$H_SUM_SQUASHED"
@@ -826,14 +861,14 @@ expect_contains "broken: the summary carries the curl fallback one-liner" "curl 
 
 # "Action lines only": every non-blank summary line either starts an action
 # (`→`) or is the indented continuation of one. No fact restatements.
-SUM_NON_ACTION="$(awk '/=== SUMMARY ===/{f=1; next} f && NF && $0 !~ /→/ && $0 !~ /^ {6}/' "$B_OUT")"
+SUM_NON_ACTION="$(summary_block "$B_OUT" | awk 'NF && $0 !~ /→/ && $0 !~ /^ {6}/')"
 expect_eq "broken: the summary contains action lines only (no restated facts)" "" "$SUM_NON_ACTION"
 
 # The setup action states WHY it is being recommended — a bare "run /bionic:setup"
 # is not a diagnosis. Extracted from the SUMMARY SECTION, not the whole report:
 # the degradation map names the same command per row, and grepping the file would
 # return one of those rows instead.
-awk '/=== SUMMARY ===/{f=1; next} f' "$B_OUT" > "$TMP/broken-summary.txt"
+summary_block "$B_OUT" > "$TMP/broken-summary.txt"
 SETUP_ACTION="$(line_of "$TMP/broken-summary.txt" "→ run /bionic:setup")"
 expect_match "broken: the setup action names the absences it would repair" "*absent*" "$SETUP_ACTION"
 expect_match "broken: the setup action names the constraint violation it would repair" "*violation*" "$SETUP_ACTION"
@@ -867,8 +902,14 @@ NP_OUT="$TMP/noprompt.out"
 doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" < /dev/null > "$NP_OUT" 2>&1
 NP_RC=$?
 NP="$(cat "$NP_OUT")"
-expect_eq "doctor completes with stdin closed (it never prompts)" "0" "$NP_RC"
-expect_not_contains "doctor emits no consent prompt" "[y/N]" "$NP"
+expect_eq "doctor completes with stdin closed (it never blocks on an answer)" "0" "$NP_RC"
+# THE QUESTION IS PRINTED EVEN HERE, and that is the corrected behaviour (A-4.S6.F-RULING,
+# 2026-08-20): setup prints each consented question as it declines it so the model can relay
+# it, and doctor's one question follows the same rule. What must never happen is a WAIT —
+# the arm above is the proof, since this run has no answer to give.
+expect_contains "doctor prints its one question even where nothing can answer it" \
+  "$UPDATES_QUESTION" "$NP"
+expect_not_contains "…and asks nothing else" "Install " "$NP"
 expect_eq "doctor with stdin closed produces the same report as with stdin open" \
   "$(cat "$H_OUT")" "$NP"
 
@@ -1415,7 +1456,7 @@ expect_contains "dep-broken: the CLI's own Error line is rendered verbatim" \
 expect_contains "dep-broken: and the fix rides in the same section" \
   "claude plugin install" "$DB_LOAD"
 expect_contains "dep-broken: a plugin that did not load earns a SUMMARY action" \
-  "→ " "$(awk '/=== SUMMARY ===/{f=1; next} f' "$DB_OUT")"
+  "→ " "$(summary_block "$DB_OUT")"
 
 # ── absent: a real listing that does not name bionic ──
 ABSENT_LISTING="$TMP/plugin-list-absent.txt"
@@ -1542,10 +1583,18 @@ echo "=== Group 19: the closing question and UPDATES (AC-14) ==="
 # nobody can answer, nor an explanation of why it was not asked.
 
 QUESTION="Check for tool updates?"
-expect_not_contains "unattended: no question is printed" "$QUESTION" "$H"
-expect_not_contains "unattended: no consent prompt of any shape" "[y/N]" "$H"
-expect_not_contains "unattended: and no UPDATES section" "=== UPDATES ===" "$H"
-expect_not_contains "unattended: nothing is said about why it was not asked" "no terminal" "$H"
+expect_contains "unattended: the question is printed, verbatim and in full" \
+  "$UPDATES_QUESTION" "$H"
+expect_not_contains "unattended: but nothing is appended" "=== UPDATES ===" "$H"
+# NO NARRATION EITHER WAY. The line is the question and nothing else — not "declined",
+# not "skipped", not an explanation of what could not be reached. A reader who wants the
+# check answers it; a log that nobody reads carries one unanswered line.
+for _narration in "no terminal" "declined" "skipped" "not asked" "unattended"; do
+  expect_not_contains "unattended: nothing is said about why (${_narration})" "$_narration" "$H"
+done
+# And it is the LAST thing the report says, after SUMMARY.
+expect_contains "unattended: the question comes after the summary" "$UPDATES_QUESTION" \
+  "$(awk '/=== SUMMARY ===/{f=1} f' "$H_OUT")"
 # And nothing was asked of the package managers either — the check is what costs
 # thirty seconds, so a silent No must not have paid for it.
 : > "$CALLS"
@@ -1631,6 +1680,90 @@ UPGRADE_CALLS="$(grep -nE '^[[:space:]]*(brew[[:space:]]+(install|upgrade)|npm[[
 expect_eq "doctor.sh contains no upgrade invocation anywhere" "" "$UPGRADE_CALLS"
 expect_true "the fifteen-second bound is the shipped default, not only the test's" \
   grep -q 'BIONIC_DOCTOR_PROBE_SECONDS:-15' "$DOCTOR_SH"
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Group 20: --updates, the answer the model relays back (A-4.S6.F-RULING) ==="
+# ---------------------------------------------------------------------------
+#
+# THE GAP THIS CLOSES. Doctor asks its question on stdout and reads the answer from
+# stdin, which works for a person at a terminal and for a caller that pipes. It does not
+# work for the path the product actually takes: the model runs the script from a tool
+# whose stdin can carry nothing, sees the question, and has no way to answer it. Setup
+# solved the same problem the same way — print the question, let the model relay it, act
+# on the answer in a second run — and `--updates` IS that second run.
+#
+# NOT AN ASSUME-YES KNOB. The rule setup states in its own header ("an env var that
+# switched consent off would be the hole in consent per event") guards MUTATIONS. This
+# flag guards a read: two package managers asked what is outdated, with the upgrade
+# command printed and never run. The user has already said yes by the time it is passed.
+
+# ---- the flag runs the check without asking ----
+: > "$CALLS"
+F_OUT="$TMP/updates-flag.out"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" -- --updates > "$F_OUT" 2>&1
+F_RC=$?
+F="$(cat "$F_OUT")"
+expect_eq "--updates: doctor still exits 0" "0" "$F_RC"
+expect_contains "--updates: the UPDATES section renders" "=== UPDATES ===" "$F"
+expect_not_contains "--updates: and the question is NOT asked again" "$UPDATES_QUESTION" "$F"
+F_UPDATES="$(awk '/=== UPDATES ===/{f=1; next} f' "$F_OUT")"
+expect_match "--updates: the outdated brew-managed row is there" "*rg*15.2.0*15.3.0*" "$F_UPDATES"
+expect_contains "--updates: with its exact upgrade command" "brew upgrade ripgrep" "$F_UPDATES"
+expect_match "--updates: and the npm-global row" "*@playwright/cli*0.1.18*0.2.0*" "$F_UPDATES"
+expect_eq "--updates: UPDATES is still the last section, after SUMMARY" \
+  "$(printf '%s\nUPDATES' "$EXPECTED_ROSTER")" "$(section_roster "$F_OUT")"
+expect_eq "--updates: still no mutating package-manager call" "" \
+  "$(grep -E '^(brew|npm) (install|upgrade|uninstall)' "$CALLS" || true)"
+
+# The whole point: it works where NOTHING can answer a question. This run's stdin is the
+# suite's own closed stream — the shape the model's tool hands the script.
+expect_contains "--updates: it worked with no answer channel at all" "brew upgrade ripgrep" "$F"
+
+# It does not read stdin either — an answer piped at it is ignored, not consumed as a No.
+P_OUT="$TMP/updates-flag-piped-no.out"
+printf 'n\n' | doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" -- --updates > "$P_OUT" 2>&1
+expect_contains "--updates: a piped answer cannot un-ask a question that was never asked" \
+  "=== UPDATES ===" "$(cat "$P_OUT")"
+
+# ---- read-only holds on the flag path too ----
+FLAG_WALL="$TMP/wall-updates-flag"; rm -rf "$FLAG_WALL"; cp -R "$HEALTHY" "$FLAG_WALL"
+FLAG_BEFORE="$(fingerprint "$FLAG_WALL")"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$FLAG_WALL" -- --updates >/dev/null 2>&1
+expect_eq "NO-MUTATION WALL (--updates): every fixture file byte-identical, no path added" \
+  "$FLAG_BEFORE" "$(fingerprint "$FLAG_WALL")"
+
+# ---- an option doctor does not know is a CALLER error, not a diagnosis ----
+#
+# The always-exit-0 rule covers diagnoses: a machine with eleven absent dependencies has
+# been diagnosed successfully. A misspelled flag has diagnosed nothing, and answering it
+# with a clean report and status 0 would tell a caller that asked for updates, and did not
+# get them, that everything went fine.
+BAD_OUT="$TMP/updates-badflag.out"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" -- --uptades > "$BAD_OUT" 2>&1
+BAD_RC=$?
+expect_ne "an unknown option does not exit 0" "0" "$BAD_RC"
+expect_contains "an unknown option says which option exists" "--updates" "$(cat "$BAD_OUT")"
+expect_not_contains "an unknown option prints no report" "=== LOAD STATE ===" "$(cat "$BAD_OUT")"
+
+# ---- the command file carries the relay instruction ----
+#
+# The script half is useless without it: the model has to KNOW to ask the question and to
+# come back with the flag. That instruction is a command-file line, and it is rendered
+# from the template like every other line in that file.
+if [ -f "$DOCTOR_MD" ]; then
+  DMD="$(cat "$DOCTOR_MD")"
+  expect_contains "doctor.md: tells the model to ask the question" "Ask the user that question" "$DMD"
+  expect_contains "doctor.md: names the flag to run on a yes" \
+    'bash "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh" --updates' "$DMD"
+  expect_contains "doctor.md: and to show what comes back" "UPDATES" "$DMD"
+  # RENDERED, NOT HAND-EDITED — the file says so itself, and the template is where the
+  # text lives. A hand edit here is what `render.sh --check` exists to catch.
+  expect_true "the instruction lives in the template, not only in the rendered file" \
+    grep -q -- '--updates' "${REPO}/agents-src/templates/commands/doctor.md.tmpl"
+  expect_true "render.sh --check is green (the rendered file matches its sources)" \
+    bash "${REPO}/agents-src/render.sh" --check
+fi
 
 # ---------------------------------------------------------------------------
 echo ""

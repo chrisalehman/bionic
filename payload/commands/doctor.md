@@ -29,3 +29,12 @@ Run:
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh"
 ```
+
+Doctor ends with one question about checking for tool updates.
+Ask the user that question, verbatim. If they say yes, run:
+
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh" --updates
+```
+
+and show its UPDATES section.
