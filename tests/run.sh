@@ -136,6 +136,11 @@ run "profile.test.sh" bash tests/profile.test.sh
 run "jit.test.sh" bash tests/jit.test.sh
 # Command-file conventions (epic-17 W3 S9, spec AC-1): globs payload/commands/*.md.
 run "command-format.test.sh" bash tests/command-format.test.sh
+# The end-user README (epic-17 W6 S8, spec AC-4): README.md's "## Installation
+# (30-second setup)" section pinned to the ratified reference shape — two
+# `claude plugin` command lines, the in-session twin, the `claude plugin list`
+# fallback, zero mechanism words. Hand-listed like every suite outside hooks/.
+run "readme.test.sh" bash tests/readme.test.sh
 # The diagram pins (epic-17 W4 S8, spec AC-6 / design D4): the two composed-SVG diagrams
 # under skills/canonical-sdlc/diagrams/ read as text and compared against what they draw —
 # the hooks' SUPPORTED_SDLC_VERSION, hooks.json's six always-on entries, and SKILL.md's ten
