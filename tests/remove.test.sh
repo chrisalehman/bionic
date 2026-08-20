@@ -231,6 +231,32 @@ STUB
   chmod +x "$arm/bin/claude"
 }
 
+# `claude` stub whose `plugin uninstall` recreates plugins/data/bionic-bionic
+# as a side effect — the exact shape of Chris's live-teardown finding
+# (r1-surface-map.md Item 4): bionic registered, one orphan to prune, and the
+# uninstall itself repopulates the data directory it was supposed to empty.
+plant_claude_stub_data_recreated() {  # <arm>
+  local arm="$1"
+  cat > "$arm/bin/claude" <<'STUB'
+#!/bin/bash
+echo "claude $*" >> "$BIONIC_TEST_CALLS"
+DATA_DIR="${BIONIC_PLUGIN_DATA_DIR:-$HOME/.claude/plugins/data}"
+case "$*" in
+  "plugin list --json") printf '%s\n' '[{"id":"bionic@bionic","version":"0.1.0","scope":"user","enabled":true}]' ;;
+  "plugin prune --dry-run") printf '%s\n' '1 auto-installed plugin no longer needed at user scope:
+  superpowers@bionic (6.3.0)
+(dry run — nothing removed)' ;;
+  "plugin uninstall bionic@bionic --yes")
+    mkdir -p "${DATA_DIR}/bionic-bionic"
+    printf 'recreated by uninstall\n' > "${DATA_DIR}/bionic-bionic/state.json"
+    ;;
+  "mcp get"*) exit 1 ;;
+esac
+exit 0
+STUB
+  chmod +x "$arm/bin/claude"
+}
+
 answers_file() {  # <path> <token> [count]
   local path="$1" token="$2" count="${3:-60}" i
   : > "$path"
@@ -1244,6 +1270,37 @@ plant_claude_stub "$ARM" no no
 OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
 expect_contains "closing claim: a run that finished everything still says so plainly" \
   "without bionic's skills, hooks and agents" "$OUT"
+
+echo ""
+echo "=== Group 18: remove.sh finishes in one pass — the uninstall recreates plugin data (AC-7) ==="
+#
+# r1-surface-map.md Item 4: `claude plugin uninstall` re-creates an empty
+# plugins/data/bionic-bionic directory as a side effect, and the plugin-data
+# question in this script only ever ran BEFORE the uninstall — so the
+# recreated directory had no code path checking it again before the summary.
+# The order is: native uninstall runs, then a re-check of the data directory,
+# then the prune offer — all in the same pass, with zero stray dirs left.
+
+ARM="$(new_arm one-pass-recreated-data)"
+plant_plugin_data "$ARM"
+plant_claude_stub_data_recreated "$ARM"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+CALLS="$(cat "$ARM/calls.log")"
+expect_true "one pass: the uninstall-recreated plugin data directory is gone at the end" \
+  bash -c '[ ! -d "$1" ]' _ "$ARM/home/.claude/plugins/data/bionic-bionic"
+expect_contains "one pass: the prune offer is reached in the same run" \
+  "the CLI reports these auto-installed dependencies are no longer needed" "$OUT"
+expect_contains "one pass: a consented prune actually runs" \
+  "plugin prune --yes" "$CALLS"
+expect_contains "one pass: the uninstall itself ran (this is not a no-op arm)" \
+  "plugin uninstall bionic@bionic --yes" "$CALLS"
+
+# ---- a second run over the same arm: the plugin-data item opens already clean ----
+OUT2="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+expect_contains "one pass: a second run finds the plugin-data item already clean" \
+  "plugin data under ${ARM}/home/.claude/plugins/data — already clean" "$OUT2"
+expect_true "one pass: the second run still ends with zero recreated data" \
+  bash -c '[ ! -d "$1" ]' _ "$ARM/home/.claude/plugins/data/bionic-bionic"
 
 echo ""
 echo "=== Group 16: the suite is registered in tests/run.sh by name ==="

@@ -663,6 +663,36 @@ else
     if _rm_consent "Uninstall ${rm_plugin_id} now?"; then
       if "${rm_uninstall_argv[@]}"; then
         _rm_removed "plugin ${rm_plugin_id}"
+        # ─── Re-check: plugin data, in case the uninstall recreated it ──────
+        #
+        # Chris's live teardown showed `claude plugin uninstall` re-creating
+        # an empty plugins/data/bionic-bionic directory as a side effect of
+        # the uninstall itself, independent of the question asked above —
+        # that question ran BEFORE this call and never looked again
+        # (r1-surface-map.md Item 4). The consent already given is honored
+        # against what is actually on disk now, not re-asked: a user who
+        # consented to removing bionic's plugin data gets that promise kept
+        # even if the CLI resurrects the directory afterward; a user who
+        # declined is left exactly as they asked, recreated or not.
+        if [ "$RM_DATA_DECLINED" = "0" ]; then
+          rm_data_recheck=""
+          for rm_data_dir in "$RM_DATA_ROOT"/bionic-*; do
+            [ -d "$rm_data_dir" ] || continue
+            rm_data_recheck="${rm_data_recheck}${rm_data_dir}"$'\n'
+          done
+          if [ -n "$rm_data_recheck" ]; then
+            rm_data_recheck_failed=0
+            while IFS= read -r rm_data_dir <&3; do
+              [ -n "$rm_data_dir" ] || continue
+              _rm_purge_dir "$rm_data_dir" || rm_data_recheck_failed=1
+            done 3<<< "$rm_data_recheck"
+            if [ "$rm_data_recheck_failed" = "0" ]; then
+              _rm_removed "plugin data under ${RM_DATA_ROOT} — recreated by the uninstall, removed again"
+            else
+              _rm_leftover "some plugin data under ${RM_DATA_ROOT} could not be removed after the uninstall recreated it"
+            fi
+          fi
+        fi
       else
         _rm_leftover "claude plugin uninstall ${rm_plugin_id} failed — the plugin is still registered"
       fi
