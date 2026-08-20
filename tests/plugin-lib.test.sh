@@ -583,6 +583,16 @@ expect_match "remove_dep git says why it is keeping the binary" \
   "*kept — shared with other tools, bionic never removes it*" "$KEEP_OUT"
 expect_no_match "…without printing the table's own value for the policy" "*keep-shared*" "$KEEP_OUT"
 
+# Three registry shapes, one per answer `_dep_native_registry_state` can give.
+# Written here rather than reused from Group 5 because the question is different:
+# Group 5 asks "is a plugin of this name present at all", these ask "whose".
+REG_OURS="$TMP/reg-ours.json"
+REG_OTHER="$TMP/reg-other.json"
+REG_EMPTY="$TMP/reg-empty.json"
+printf '%s\n' '{"version":2,"plugins":{"impeccable@bionic":[{"scope":"user","version":"4.1.1"}]}}' > "$REG_OURS"
+printf '%s\n' '{"version":2,"plugins":{"impeccable@claude-plugins-official":[{"scope":"user","version":"4.1.1"}]}}' > "$REG_OTHER"
+printf '%s\n' '{"version":2,"plugins":{}}' > "$REG_EMPTY"
+
 # ---- the two native behaviours, which are not one behaviour (A-2) ----
 #
 # `native-uninstall-offer` used to mean one sentence for every native row:
@@ -602,6 +612,7 @@ expect_match "…and says which step does take it" "*removing bionic removes it*
 
 : > "$CALLS"
 JIT_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_INSTALLED_PLUGINS_FILE="$REG_OURS" \
   bash -c 'echo y | { . "$1"; remove_dep impeccable; }' _ "$DEPS_SH" 2>&1)"
 expect_match "remove_dep on a plugin nothing declares offers the CLI's own uninstall" \
   "*claude plugin uninstall impeccable@bionic*" "$(cat "$CALLS")"
@@ -610,9 +621,37 @@ expect_no_match "…and never claims some other step already took it" \
 
 : > "$CALLS"
 JIT_NO="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_INSTALLED_PLUGINS_FILE="$REG_OURS" \
   bash -c 'echo n | { . "$1"; remove_dep impeccable; }' _ "$DEPS_SH" 2>&1)"
 expect_eq "a declined offer uninstalls nothing" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
 expect_match "…and says so" "*declined — impeccable left in place.*" "$JIT_NO"
+
+# ---- and the offer is made about OUR copy only (critic F-4) ----
+#
+# The two arms above now plant the registry key, because that is what the offer
+# is derived from: `check_dep` matches the bare NAME across catalogs, so
+# "present" cannot answer "did bionic install this". The registry is asked the
+# exact-id question, and the two answers that are not `ours` produce a sentence
+# rather than a question — there is no question whose yes bionic could honour.
+: > "$CALLS"
+JIT_OTHER="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_INSTALLED_PLUGINS_FILE="$REG_OTHER" \
+  bash -c 'echo y | { . "$1"; remove_dep impeccable; }' _ "$DEPS_SH" 2>&1)"
+expect_eq "another catalog's copy: nothing reaches the CLI, on a yes" "0" \
+  "$(grep -c . "$CALLS" | tr -d ' ')"
+expect_match "another catalog's copy: the transcript says whose it is" \
+  "*installed from another catalog*" "$JIT_OTHER"
+expect_no_match "another catalog's copy: and no question was asked at all" \
+  "*Remove impeccable now?*" "$JIT_OTHER"
+
+: > "$CALLS"
+JIT_NONE="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_INSTALLED_PLUGINS_FILE="$REG_EMPTY" \
+  bash -c 'echo y | { . "$1"; remove_dep impeccable; }' _ "$DEPS_SH" 2>&1)"
+expect_eq "no copy at all: nothing reaches the CLI, on a yes" "0" \
+  "$(grep -c . "$CALLS" | tr -d ' ')"
+expect_match "no copy at all: and it is not described as somebody else's" \
+  "*nothing here to remove*" "$JIT_NONE"
 
 # ---- D-1: the default permission mode has an owner, and it is this file ----
 #

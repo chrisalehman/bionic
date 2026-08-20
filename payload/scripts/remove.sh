@@ -619,16 +619,30 @@ else
 
     case "$dep_present" in
       yes)
-        if remove_dep "$dep_name"; then
-          if [ "$dep_behavior" = "keep-shared" ]; then
+        # THREE OUTCOMES, NOT TWO (critic F-4). `remove_dep` answers 0 for "done
+        # what this row's policy says", non-zero for "not done" — and the two
+        # not-done cases are different facts about the machine. Exit 2 is "left
+        # in place by policy, nothing was asked and nothing was declined": the
+        # same-named plugin from another catalog that bionic never installed. It
+        # is counted with the rows that were already clean, because reporting an
+        # untouched plugin as removed and reporting it as declined are both false.
+        remove_dep "$dep_name"; dep_rc=$?
+        case "$dep_rc" in
+          0)
+            if [ "$dep_behavior" = "keep-shared" ]; then
+              RM_CLEAN=$((RM_CLEAN + 1))
+            else
+              RM_REMOVED=$((RM_REMOVED + 1))
+            fi
+            ;;
+          2)
             RM_CLEAN=$((RM_CLEAN + 1))
-          else
-            RM_REMOVED=$((RM_REMOVED + 1))
-          fi
-        else
-          RM_SKIPPED=$((RM_SKIPPED + 1))
-          RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ dependency ${dep_name}"$'\n'
-        fi
+            ;;
+          *)
+            RM_SKIPPED=$((RM_SKIPPED + 1))
+            RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ dependency ${dep_name}"$'\n'
+            ;;
+        esac
         ;;
       no)
         _rm_clean "dependency ${dep_name} (not installed)"

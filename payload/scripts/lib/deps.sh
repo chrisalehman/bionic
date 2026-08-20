@@ -469,6 +469,18 @@ check_dep() {  # <name> -> present=<yes|no|unknown>|version=<v|unknown>|verdict=
   echo "present=${present}|version=${version}|verdict=${verdict}"
 }
 
+# ─── Display indentation ─────────────────────────────────────────────────────
+#
+# THE CALLER OWNS THE DEPTH (six-axis review R-2). The prose this file prints
+# lands inside somebody else's block — setup's numbered steps, which sit three
+# spaces in, or remove's items, which sit two — and the indent used to be a bare
+# literal here, so the seam between two files was visible on the user's screen:
+# setup's own sentence three spaces in, the install prose beneath it two, down
+# the whole step. The caller sets `BIONIC_DEP_INDENT` once; every line this file
+# prints reads it. Two spaces is the default because that is what remove.sh and
+# a route's just-in-time offer already use.
+_dep_indent() { printf '%s' "${BIONIC_DEP_INDENT:-  }"; }
+
 # ─── Consent ─────────────────────────────────────────────────────────────────
 
 _dep_consent() {  # <prompt> — non-zero unless the answer is an explicit yes
@@ -554,7 +566,7 @@ _dep_install_statusline() {
   local settings cmd
   settings="$(_dep_settings_file)"
   cmd="npx $(_dep_locator_target "$(dep_field ccstatusline source_url)")"
-  _dep_have jq || { echo "  jq is not installed — cannot edit ${settings}" >&2; return 1; }
+  _dep_have jq || { echo "$(_dep_indent)jq is not installed — cannot edit ${settings}" >&2; return 1; }
   # Deliberately NOT under `umask 077`: the defect being fixed is widening a mode
   # the USER chose, and a file that does not exist yet carries no such choice.
   # bionic creating settings.json at 0600 where the CLI would have made it 0644
@@ -585,8 +597,8 @@ install_dep() {  # <name>
     plan="${argv[*]}"
   fi
 
-  echo "  ${name} is not installed. bionic would run: ${plan}"
-  _dep_consent "  Install ${name} now?" || { echo "  declined — ${name} stays absent."; return 1; }
+  echo "$(_dep_indent)${name} is not installed. bionic would run: ${plan}"
+  _dep_consent "$(_dep_indent)Install ${name} now?" || { echo "$(_dep_indent)declined — ${name} stays absent."; return 1; }
 
   if [ "${#argv[@]}" -gt 0 ]; then "${argv[@]}"; else _dep_install_statusline; fi
 }
@@ -627,14 +639,25 @@ install_dep() {  # <name>
 install_plugin_native() {  # <name>
   local name="${1:-}" marketplace id
   [ -n "$name" ] || { echo "deps.sh: install_plugin_native needs a plugin name" >&2; return 1; }
+  # THE ONE EXTERNAL THIS FILE USED TO CALL UNGUARDED (critic F-5). `jq`, `npm`
+  # and `brew` all pass through `_dep_have` first; these two did not, so a machine
+  # without the CLI got `deps.sh: line 664: claude: command not found` — a library
+  # filename and a line number on a user's terminal, which is the exact class of
+  # display this wave exists to remove and the one class no source lint can see,
+  # because bash writes the string at runtime. Guarded BEFORE the plan is printed:
+  # an offer whose yes cannot be honoured is a worse thing to show than no offer.
+  _dep_have claude || {
+    echo "$(_dep_indent)the Claude Code CLI is not on PATH — bionic cannot install a plugin without it."
+    return 1
+  }
   marketplace="${BIONIC_DEP_MARKETPLACE:-bionic}"
   id="${name}@${marketplace}"
 
-  echo "  ${name} is not installed. bionic would run: claude plugin install ${id} --scope user --yes"
-  _dep_consent "  Install ${name} now?" || { echo "  declined — ${name} stays absent."; return 1; }
+  echo "$(_dep_indent)${name} is not installed. bionic would run: claude plugin install ${id} --scope user --yes"
+  _dep_consent "$(_dep_indent)Install ${name} now?" || { echo "$(_dep_indent)declined — ${name} stays absent."; return 1; }
 
   if claude plugin install "$id" --scope user --yes; then
-    echo "  Takes effect after /reload-plugins or a new session."
+    echo "$(_dep_indent)Takes effect after /reload-plugins or a new session."
     return 0
   fi
   return 1
@@ -655,14 +678,51 @@ install_plugin_native() {  # <name>
 remove_plugin_native() {  # <name>
   local name="${1:-}" marketplace id
   [ -n "$name" ] || { echo "deps.sh: remove_plugin_native needs a plugin name" >&2; return 1; }
+  # Same guard, same reason as install_plugin_native (critic F-5), and it matters
+  # more here: remove.sh's standalone door exists for a machine where bionic's
+  # world is partly gone, which is exactly where the CLI may already be missing.
+  _dep_have claude || {
+    echo "$(_dep_indent)the Claude Code CLI is not on PATH — bionic cannot uninstall a plugin without it."
+    return 1
+  }
   marketplace="${BIONIC_DEP_MARKETPLACE:-bionic}"
   id="${name}@${marketplace}"
 
-  echo "  ${name}: bionic would run: claude plugin uninstall ${id} --yes"
-  _dep_consent "  Remove ${name} now?" || { echo "  declined — ${name} left in place."; return 1; }
+  echo "$(_dep_indent)${name}: bionic would run: claude plugin uninstall ${id} --yes"
+  _dep_consent "$(_dep_indent)Remove ${name} now?" || { echo "$(_dep_indent)declined — ${name} left in place."; return 1; }
 
   claude plugin uninstall "$id" --yes || return 1
   return 0
+}
+
+# WHOSE COPY IS THIS? (critic F-4.) `_dep_check_native` matches on the NAME half
+# across catalogs, deliberately — S3 re-points bionic's own marketplace and that
+# match is what survives it — so "present" says nothing about who installed what
+# is present. The teardown needs the other question, and only the teardown does:
+# a `<name>@bionic` key is a plugin bionic's own route installed and nothing else
+# will ever remove; a `<name>@somebody-else` key is the user's own, and removing
+# it would be a mutation nobody asked for under an id that does not exist.
+#
+# Three states rather than a yes/no, because "not ours" and "not there at all"
+# are different sentences to a reader and only one of them is about a catalog:
+#
+#   ours     `<name>@<bionic's marketplace>` is a key in the registry
+#   other    the name is there, under somebody else's catalog
+#   absent   no key of that name at all
+#   unknown  the registry could not be read (no jq)
+_dep_native_registry_state() {  # <name> -> ours|other|absent|unknown
+  local name="${1:-}" id file out
+  [ -n "$name" ] || { echo unknown; return 0; }
+  id="${name}@${BIONIC_DEP_MARKETPLACE:-bionic}"
+  _dep_have jq || { echo unknown; return 0; }
+  file="$(_dep_installed_json)"
+  [ -f "$file" ] || { echo absent; return 0; }
+  out="$(jq -r --arg n "$name" --arg k "$id" '
+      (.plugins // {}) as $p
+      | if ($p | has($k)) then "ours"
+        elif ([ $p | keys[] | select((split("@")[0]) == $n) ] | length) > 0 then "other"
+        else "absent" end' "$file" 2>/dev/null)" || out=""
+  case "$out" in ours|other|absent) echo "$out" ;; *) echo unknown ;; esac
 }
 
 _dep_remove_argv() {  # <name> — one token per line
@@ -677,6 +737,16 @@ _dep_remove_argv() {  # <name> — one token per line
   esac
 }
 
+# THE ONE ENTRY POINT FOR "what happens to this dependency", and its answer is
+# an exit code with three meanings, not two:
+#
+#   0  this row's policy was carried out — removed, or kept with the user told why
+#   2  left in place by policy, nothing asked and nothing declined (critic F-4:
+#      a same-named plugin from a catalog bionic never installed from)
+#   1  not done — declined, or a mechanism that failed or could not be read
+#
+# The caller counts 0 and 2 as settled and 1 as outstanding; remove.sh's summary
+# is built on that split.
 remove_dep() {  # <name>
   local name="${1:-}" behavior plan line
   local -a argv=()
@@ -686,7 +756,7 @@ remove_dep() {  # <name>
     keep-shared)
       # R-1: `keep-shared` is this table's word for the policy, not the user's.
       # What reaches the terminal is what was decided and why.
-      echo "  ${name}: kept — shared with other tools, bionic never removes it."
+      echo "$(_dep_indent)${name}: kept — shared with other tools, bionic never removes it."
       return 0
       ;;
     native-uninstall-offer)
@@ -706,11 +776,32 @@ remove_dep() {  # <name>
       #     by construction and left the plugin behind after a full, all-yes
       #     teardown.
       if [ "$(dep_field "$name" class)" = "core" ]; then
-        echo "  ${name}: bionic declares this plugin, so removing bionic removes it too."
+        echo "$(_dep_indent)${name}: bionic declares this plugin, so removing bionic removes it too."
         return 0
       fi
-      remove_plugin_native "$name"
-      return $?
+      # AND THE ID HAS TO BE THE ONE THE REGISTRY HOLDS (critic F-4). The presence
+      # probe two functions up matches the bare name across catalogs, so a user's
+      # own `impeccable` from another catalog read as present and was offered for
+      # removal under `impeccable@bionic` — an id that does not exist. The CLI
+      # answered "not installed", the non-zero landed in the skipped bucket, and a
+      # user who said yes was reported as having skipped it.
+      #
+      # There is no question to ask about somebody else's copy, so none is asked:
+      # exit 2 says "left in place by policy, nothing was declined", which is the
+      # bucket the caller counts as clean rather than as a refusal.
+      case "$(_dep_native_registry_state "$name")" in
+        ours)
+          remove_plugin_native "$name"; return $? ;;
+        other)
+          echo "$(_dep_indent)${name}: installed from another catalog — bionic did not install it and leaves it alone."
+          return 2 ;;
+        absent)
+          echo "$(_dep_indent)${name}: bionic did not install this plugin, so there is nothing here to remove."
+          return 2 ;;
+        *)
+          echo "$(_dep_indent)${name}: the list of installed plugins could not be read, so ${name} is left in place."
+          return 1 ;;
+      esac
       ;;
   esac
 
@@ -719,7 +810,7 @@ remove_dep() {  # <name>
       plan="rm -rf $(_dep_playwright_cache)"
       ;;
     pnpm-store)
-      echo "  ${name}: lives in the shared pnpm store — removing it would evict a cache other projects hard-link from; leaving it."
+      echo "$(_dep_indent)${name}: lives in the shared pnpm store — removing it would evict a cache other projects hard-link from; leaving it."
       return 0
       ;;
     statusline)
@@ -732,8 +823,8 @@ remove_dep() {  # <name>
       ;;
   esac
 
-  echo "  ${name}: bionic would run: ${plan}"
-  _dep_consent "  Remove ${name} now?" || { echo "  declined — ${name} left in place."; return 1; }
+  echo "$(_dep_indent)${name}: bionic would run: ${plan}"
+  _dep_consent "$(_dep_indent)Remove ${name} now?" || { echo "$(_dep_indent)declined — ${name} left in place."; return 1; }
 
   if [ "${#argv[@]}" -gt 0 ]; then
     "${argv[@]}"
