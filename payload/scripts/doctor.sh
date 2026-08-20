@@ -157,21 +157,24 @@ HAVE_JQ=yes; command -v jq >/dev/null 2>&1 || HAVE_JQ=no
 # three views of the same facts and a second pass would be a second chance to
 # disagree with the first.
 
-# The installed tree of a plugin-shaped dependency, as the CLI recorded it.
-# `installPath` is the registry's own answer to "where did this land", which is
-# what makes the roster count a measurement rather than a guess about layout.
-_doctor_install_path() {  # <name>
-  local name="${1:-}" file path
-  file="${BIONIC_INSTALLED_PLUGINS_FILE:-${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/installed_plugins.json}"
-  [ -f "$file" ] || return 1
-  command -v jq >/dev/null 2>&1 || return 1
-  path="$(jq -r --arg n "$name" '
-      [ (.plugins // {}) | to_entries[]
-        | select((.key | split("@")[0]) == $n)
-        | .value[0].installPath // empty ] | first // ""' "$file" 2>/dev/null)"
-  [ -n "$path" ] || return 1
-  echo "$path"
-}
+# The installed tree of a plugin-shaped dependency, as the CLI recorded it, comes from
+# detect.sh's `detect_plugin_install_path` — the same parse `detect_plugin_root` resolves
+# bionic through. `installPath` is the registry's own answer to "where did this land", which
+# is what makes the roster count a measurement rather than a guess about layout.
+#
+# THIS USED TO BE A SECOND PARSE (Step-6 review, RV-7). A local `_doctor_install_path` read
+# the same CLI-internal schema with its own jq program, which is a duplication that cannot
+# be noticed from either side: the CLI renames a field, the pinned copy in detect.sh gets
+# fixed, and this one keeps answering in the old shape just as confidently. It also left
+# detect_plugin_root with zero production callsites (RV-4) — the parse under test was the
+# parse nobody ran. Deleting the local copy discharges both: one reading, and it is the
+# reading the suite drives.
+#
+# TWO THINGS IMPROVED IN THE MOVE, both in the direction of answering rather than shrugging.
+# The local copy gave up outright without `jq`; the shared parse has an awk lane, so a
+# jq-less box now gets real roster counts instead of `unknown` wherever presence itself was
+# knowable. And the shared parse checks that the recorded directory EXISTS, so a stale
+# registry entry reports as unreadable here rather than as a confident count of zero.
 
 # ROSTER FOOTPRINT, the counting method (design-ledger D6). Skill and agent
 # METADATA — name plus description — is what loads into every session; the
@@ -225,7 +228,7 @@ while IFS= read -r dep_name; do
     ROSTER_ROWS="${ROSTER_ROWS}$(printf '  %-22s %-9s %s' \
       "$dep_name" "0" "(not installed — contributes nothing this session)")"$'\n'
   else
-    install_path="$(_doctor_install_path "$dep_name")" || install_path=""
+    install_path="$(detect_plugin_install_path "$dep_name")" || install_path=""
     if [ -z "$install_path" ] || [ ! -d "$install_path" ]; then
       ROSTER_ROWS="${ROSTER_ROWS}$(printf '  %-22s %-9s %s' \
         "$dep_name" "unknown" "(the registry records no readable installPath for it)")"$'\n'

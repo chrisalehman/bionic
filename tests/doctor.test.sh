@@ -989,6 +989,38 @@ expect_true "doctor renders the library fact rather than listing the directory i
 expect_true "the fact function lives in detect.sh" \
   grep -q '^detect_installed_agent_copies()' "${REPO}/payload/scripts/lib/detect.sh"
 
+# --- RV-7: the registry schema is read in ONE file, and it is not this one ---
+#
+# doctor.sh used to carry `_doctor_install_path`, its own jq program over the CLI's
+# `installed_plugins.json`. Same schema as detect_plugin_root's, different expression, and
+# neither side could notice the other drifting — a CLI field rename would be fixed in the
+# pinned copy and left standing in this one, answering just as confidently. Worse, it meant
+# detect_plugin_root had no production callsite at all: the parse the suite drove was not
+# the parse that ran.
+#
+# So the arm is a DUPLICATION wall, not a behaviour one. The behaviour is already covered by
+# the roster-footprint counts above (14 and 28, both read through the shared function now);
+# what this stops is the second reading coming back.
+expect_true "doctor resolves an install path through the shared library function" \
+  grep -q 'detect_plugin_install_path' "$DOCTOR_SH"
+expect_true "…and that function lives in detect.sh" \
+  grep -q '^detect_plugin_install_path()' "${REPO}/payload/scripts/lib/detect.sh"
+expect_true "the retired local parse is gone from doctor.sh" \
+  bash -c '! grep -q "^_doctor_install_path()" "$1"' _ "$DOCTOR_SH"
+# The schema itself, named as an absence — but the absence has to be of the PARSE, not of
+# the word. doctor legitimately says "installPath" out loud in two report strings, because
+# explaining where a count came from is its job; what it must never do again is run a
+# program over that field. So the pin is `jq` and `installPath` on one line, which is what
+# the retired copy was and what any re-fork would be.
+expect_eq "no jq program in doctor.sh reads the registry's installPath field" "" \
+  "$(grep -nE 'jq[^|]*installPath|installPath[^|]*jq' "$DOCTOR_SH" || true)"
+# And the multi-line form the retired copy actually used, caught by its other half: doctor
+# names the registry FILE nowhere except in prose. Selecting the file is detect.sh's job via
+# _detect_installed_plugins_file, which is the one expression that decides which registry
+# every answer in the payload comes from.
+expect_eq "doctor.sh opens the plugin registry file nowhere in its own code" "" \
+  "$(grep -n 'installed_plugins\.json' "$DOCTOR_SH" | grep -vE '^[0-9]+:[[:space:]]*(#|echo)' || true)"
+
 # ---------------------------------------------------------------------------
 echo ""
 echo "========================================"
