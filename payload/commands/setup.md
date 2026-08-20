@@ -1,4 +1,5 @@
 ---
+allowed-tools: Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh:*)
 description: Set this machine up for bionic — idempotent, consented, one item at a time.
 ---
 <!-- GENERATED FILE — DO NOT EDIT.
@@ -24,5 +25,5 @@ Presentation contract — what the user sees from this command:
 Run:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh"
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh
 ```
