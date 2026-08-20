@@ -116,6 +116,13 @@ AGENT_CAUSE="${AGENT_FACT##*cause=}"
 TODO_FACT="$(detect_env_todo_tools)";        TODO_STATE="${TODO_FACT##*present=}"
 LEGACY_FACT="$(detect_zshrc_legacy_block)";  LEGACY_STATE="${LEGACY_FACT##*present=}"
 LEGACY_HOOK_FACT="$(detect_legacy_channel_hooks)"; LEGACY_HOOK_COUNT="${LEGACY_HOOK_FACT##*count=}"
+SKILL_COPY_FACT="$(detect_legacy_skill_copy)"
+SKILL_COPY_STATE="${SKILL_COPY_FACT#*present=}"; SKILL_COPY_STATE="${SKILL_COPY_STATE%% *}"
+SKILL_COPY_PATH="${SKILL_COPY_FACT##*path=}"
+HOOK_FILES_FACT="$(detect_legacy_hook_files)"
+HOOK_FILES_COUNT="${HOOK_FILES_FACT#*count=}"; HOOK_FILES_COUNT="${HOOK_FILES_COUNT%% *}"
+HOOK_FILES_NAMES="${HOOK_FILES_FACT#*names=}"; HOOK_FILES_NAMES="${HOOK_FILES_NAMES%% *}"
+HOOK_FILES_CAUSE="${HOOK_FILES_FACT##*cause=}"
 INST_AGENT_FACT="$(detect_installed_agent_copies)"
 INST_AGENT_STATE="${INST_AGENT_FACT#*state=}"; INST_AGENT_STATE="${INST_AGENT_STATE%% *}"
 INST_AGENT_TOTAL="${INST_AGENT_FACT#*total=}"; INST_AGENT_TOTAL="${INST_AGENT_TOTAL%% *}"
@@ -337,6 +344,45 @@ if [ "$LEGACY_HOOK_COUNT" = "unknown" ]; then
 else
   printf '  %-38s %s\n' "legacy-channel managed-hook entries" "$LEGACY_HOOK_COUNT"
 fi
+# THE SKILL COPY IS NOT INERT, and that is the whole reason it gets a line and an action
+# while the hook files below get only a line. The retired installer rendered canonical-sdlc
+# into the CLI's own skills directory, and W5 (4/6) measured eleven hook registrations in
+# that copy's frontmatter — every one spelled for the pre-plugin hooks directory. A session
+# that loads it arms the same walls twice, through the channel the cutover retired, and
+# until now nothing in this report said so: doctor could call a machine clean while it was
+# running two of everything.
+if [ "$SKILL_COPY_STATE" = "yes" ]; then
+  printf '  %-38s %s\n' "legacy installed skill copy" \
+    "${SKILL_COPY_PATH} — a second canonical-sdlc, arming the same walls again"
+else
+  printf '  %-38s %s\n' "legacy installed skill copy" \
+    "none — the skill ships in the payload"
+fi
+# THE HOOK FILES ARE THE OTHER HALF OF A QUESTION THIS REPORT ONLY ANSWERED HALFWAY. The
+# line above counts REGISTRATIONS in settings.json; the installer also left the scripts
+# themselves in the CLI's hooks directory, and a machine cleaned of every registration still
+# has them. That machine and a clean one read identically here until now — and the person
+# reading is the one who can see the directory with `ls`.
+#
+# REPORTED, NEVER PRESCRIBED — the same contract the agent-copies line keeps. With the
+# registrations gone these files run nothing: they are disk, not behaviour, and turning
+# "this exists" into "you should delete it" on an otherwise-fine machine is how a diagnosis
+# turns into nagging. The close-out that removes them is a decision, not a default.
+if [ "$HOOK_FILES_COUNT" = "unknown" ]; then
+  printf '  %-38s %s\n' "legacy installed hook files" "unknown — ${HOOK_FILES_CAUSE}"
+elif [ "$HOOK_FILES_COUNT" = "0" ]; then
+  printf '  %-38s %s\n' "legacy installed hook files" \
+    "none — hooks run from the payload"
+else
+  # The COUNT, and where to look — not the roster. A machine that never ran a cleanup
+  # carries sixteen of these, and sixteen filenames on one line is a paragraph nobody
+  # reads. The agent-copies line above names its files because it names only the ones that
+  # DRIFTED, which is a short and actionable set; here every leftover is the same leftover
+  # and the number is the whole finding. The names stay in the fact line for a caller that
+  # wants them.
+  printf '  %-38s %s\n' "legacy installed hook files" \
+    "${HOOK_FILES_COUNT} left by the retired installer, inert — see ${SKILL_COPY_PATH%/skills/*}/hooks"
+fi
 # THE PLUGIN-ERA TRUTH LEADS, because it is the half a reader needs whichever
 # state the machine is in: role files ship in the PAYLOAD, and anything in the
 # CLI's own agents directory is what the retired installer left. Those copies
@@ -470,6 +516,12 @@ case "$LEGACY_HOOK_COUNT" in
   unknown|0) ;;
   *) add_setup_reason "clean ${LEGACY_HOOK_COUNT} legacy-channel managed-hook $(_doctor_plural "$LEGACY_HOOK_COUNT" entry entries) out of settings.json" ;;
 esac
+# The skill copy, and NOT the hook files beside it. Setup step 7 owns the consented removal,
+# so there is a real thing to offer; and unlike the files, this copy is doing something —
+# arming eleven registrations a second time. The asymmetry is the point, and
+# tests/doctor.test.sh Group 14 pins it from the other side with a machine whose only
+# leftover is hook files and whose summary still reads "nothing to do".
+[ "$SKILL_COPY_STATE" = "yes" ] && add_setup_reason "remove the legacy skill copy at ${SKILL_COPY_PATH}"
 if [ -n "$SETUP_REASONS" ]; then
   echo "  → run /bionic:setup — it would ${SETUP_REASONS}."
   ACTED=yes
