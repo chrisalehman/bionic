@@ -1745,8 +1745,16 @@ expect_eq "NO-MUTATION WALL (updates, answered yes): still byte-identical, no pa
 # ── and the source itself carries no upgrade ──
 UPGRADE_CALLS="$(grep -nE '^[[:space:]]*(brew[[:space:]]+(install|upgrade)|npm[[:space:]]+(install|update))' "$DOCTOR_SH" || true)"
 expect_eq "doctor.sh contains no upgrade invocation anywhere" "" "$UPGRADE_CALLS"
+# ONE OWNER, AND IT IS NO LONGER THIS FILE (critic F-3). The bound moved into
+# detect.sh at S11 so setup — which runs the same plugin listing through the same
+# probe — is bounded by the same code rather than by a second copy of it. The
+# shipped default is asserted where it now lives, and doctor is asserted to carry
+# no bound of its own, which is what would make "one owner" a claim about the
+# tree instead of about this line.
 expect_true "the fifteen-second bound is the shipped default, not only the test's" \
-  grep -q 'BIONIC_DOCTOR_PROBE_SECONDS:-15' "$DOCTOR_SH"
+  grep -q 'BIONIC_DOCTOR_PROBE_SECONDS:-15' "${REPO}/payload/scripts/lib/detect.sh"
+expect_eq "doctor.sh implements no bound of its own" "" \
+  "$(grep -n 'kill -TERM' "$DOCTOR_SH" || true)"
 
 # ---------------------------------------------------------------------------
 echo ""

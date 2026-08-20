@@ -89,8 +89,11 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 # ---------------------------------------------------------------------------
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
+# `sleep` earns its place: it is what the probe bound polls with, and without it
+# on PATH `detect_bounded` degrades to an unbounded `wait` by design. A fixture
+# PATH missing it would make Group 14 measure the degradation instead of the bound.
 for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat ls tr head tail sort uniq wc \
-            jq mktemp find xargs shasum uname date touch diff printf true false; do
+            jq mktemp find xargs shasum uname date touch diff printf true false sleep; do
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BIN}/${real}" 2>/dev/null
 done
 
@@ -596,8 +599,27 @@ expect_match "extras are asked with a default-No prompt" '*\[y/N\]*' "$EXTRAS"
 # One why line per extra and no more: a single shared sentence at the top of the
 # step would satisfy every per-row assertion above while telling the user
 # nothing about three of the four tools.
-WHY_LINES="$(awk '/^   [a-z@][^ ]* — ./ { n++ } END { print n + 0 }' <<< "$EXTRAS")"
+# Keyed on the four NAMES, not on the shape `<word> — <text>`: deps.sh's own
+# `declined — <name> stays absent.` has that shape too, and now sits at the same
+# indent (R-2), so a shape-only count would credit it as a why line.
+WHY_LINES="$(awk '
+  /^   (ccstatusline|notebooklm|context7|@pencil\.dev\/cli) — ./ { n++ }
+  END { print n + 0 }' <<< "$EXTRAS")"
 expect_eq "exactly one why line per extra, no shared sentence standing in" "4" "$WHY_LINES"
+
+# ONE INDENT OWNER (six-axis review R-2). Step 4 is written by two files —
+# setup's own `say` lines and the install prose deps.sh prints — and the seam
+# between them used to be visible on the user's screen: three spaces for one,
+# two for the other, alternating down the step. The caller owns the indent now
+# (`BIONIC_DEP_INDENT`), so every line of the step sits at the same depth
+# whichever file wrote it. Measured on the transcript, which is the only place
+# the defect existed.
+BAD_INDENT="$(awk '
+  NR == 1 { next }                      # the step header itself
+  /^[[:space:]]*$/ { next }             # blank separators
+  { match($0, /^ */); if (RLENGTH != 3) printf "%d(%d): %s\n", NR, RLENGTH, $0 }
+' <<< "$EXTRAS")"
+expect_eq "step 4: every printed line sits three spaces in, whichever file wrote it" "" "$BAD_INDENT"
 
 # Declining every extra mutates nothing — the default really is No.
 expect_no_match "declined extras: nothing was installed" '*npm install -g @pencil.dev/cli*' "$(cat "$CALLS")"
@@ -1216,6 +1238,81 @@ run_setup "$YES" >/dev/null 2>&1
 expect_true "the named copy went" bash -c '[ ! -e "$1" ]' _ "$FIX/ch/skills/canonical-sdlc"
 expect_true "a sibling skill directory is untouched" \
   test -f "$FIX/ch/skills/browser-verify/SKILL.md"
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Group 14: the load-state read is bounded (critic F-3) ==="
+# ---------------------------------------------------------------------------
+#
+# THE ASYMMETRY THIS CLOSES. Doctor bounds the three external calls it does not
+# control, on the stated ground that any of them can wedge and an unbounded
+# probe wedges the report with them. Setup ran the SAME plugin listing, through
+# the same probe, unbounded — after the install, with the report half-printed
+# and no way for the user to tell a wedge from a crash. Setup is the command a
+# stranger runs first, so it is the worse place to hang, not the better one.
+#
+# The bound is one owner now (`detect_bounded` in detect.sh); this arm measures
+# the CALLER being released, because a bound that stops waiting on its own child
+# while the caller's pipe stays open is not a bound (the same defect the six-axis
+# review's C-1 found in doctor's first cut).
+
+new_fixture bounded-load-state
+plant_cli_plugin "bionic@bionic" true
+WEDGE="$TMP/wedged-listing"
+cat > "$WEDGE" <<'STUB'
+#!/bin/bash
+# A listing that never answers: a CLI mid-update, a lock nobody releases.
+/bin/sleep 45
+echo "too late"
+STUB
+chmod +x "$WEDGE"
+
+WEDGE_START="$(date +%s)"
+OUT="$(run_setup "$NO" "BIONIC_PLUGIN_LIST_CMD=$WEDGE" "BIONIC_DOCTOR_PROBE_SECONDS=2")"
+WEDGE_ELAPSED=$(( $(date +%s) - WEDGE_START ))
+
+expect_true "a wedged listing does not wedge setup: the whole run returns inside 10s" \
+  bash -c '[ "$1" -le 10 ]' _ "$WEDGE_ELAPSED"
+expect_match "…and step 1 says the load state is unknown rather than nothing at all" \
+  '*load state is unknown*' "$OUT"
+expect_match "…and names the bound as the reason, in seconds the user can read" \
+  '*did not answer within 2 seconds*' "$OUT"
+expect_match "…and the summary carries an action line about the load state" \
+  '*claude plugin list*' "$OUT"
+# The measured elapsed is printed so a failure is diagnosable from the log alone.
+echo "      (bounded load-state arm: elapsed=${WEDGE_ELAPSED}s, bound=2s, probe sleeps 45s)"
+
+# ONE OWNER FOR THE BOUND. setup.sh must not carry a second implementation, and
+# the fifteen-second shipped default must live where both callers read it.
+expect_true "the bound's shipped default lives in detect.sh, the one both scripts read" \
+  /usr/bin/grep -q 'BIONIC_DOCTOR_PROBE_SECONDS:-15' "$LIB_DIR/detect.sh"
+expect_eq "setup.sh implements no bound of its own" "" \
+  "$(/usr/bin/grep -n 'kill -TERM' "$SETUP_SH" || true)"
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Group 15: the instruction lines name a route that works (critic F-1) ==="
+# ---------------------------------------------------------------------------
+#
+# WHAT WAS FALSE. Consent reaches this script only through its standard input.
+# The model runs it from a tool whose stdin carries nothing, so every question
+# declines — and setup then told the user to "re-run /bionic:setup and answer y",
+# which is the one thing that cannot work: a second run through the same command
+# declines identically, because the interactivity of the SESSION does not give
+# the SCRIPT an answer channel. The fix here is the honest half only — the text
+# names the terminal invocation, which is the route that can actually be
+# answered. Consent mechanics are untouched.
+
+new_fixture honest-instruction
+plant_cli_plugin "bionic@bionic" true
+OUT="$(run_setup "$NO")"
+
+expect_no_match "no action line promises that re-running the command can be answered" \
+  '*re-run /bionic:setup and answer y*' "$OUT"
+expect_match "the permission-profile action names the terminal invocation instead" \
+  '*scripts/setup.sh*' "$OUT"
+expect_match "…in the unquoted form a person can paste" '*bash /*scripts/setup.sh*' "$OUT"
+expect_match "…and still says which answer applies it" '*answer y*' "$OUT"
 
 # ---------------------------------------------------------------------------
 # Results

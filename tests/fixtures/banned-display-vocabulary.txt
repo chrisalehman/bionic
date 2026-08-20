@@ -53,3 +53,42 @@ keep-shared
 remove-on-consent
 native-uninstall-offer
 mode: payload
+
+# LIBRARY FUNCTION-NAME PREFIXES. The three payload scripts already had theirs on this
+# list (`_setup_`, `_rm_`, `_doctor_`, `detect_`); the libraries beneath them did not, so
+# `_dep_`, `_jit_` and `_profile_` could reach a terminal through any line the scripts
+# print. `_detect_` needs no entry — `detect_` already catches it as a substring.
+# tests/script-vocabulary.test.sh derives the roster from payload/scripts/lib/*.sh, so a
+# new library prefix arrives here deliberately rather than by somebody noticing.
+_dep_
+_jit_
+_profile_
+
+# HOOK FILE NAMES — AC-6's own words, and until epic-17 W6 S11 the list held no file name
+# of any kind, so that clause of the criterion was green by absence rather than by
+# measurement (critic F-6). These are the basenames bionic ships under payload/hooks/. A
+# user told that something is wrong needs to know which capability stopped, not which
+# script implements it.
+#
+# THIS IS NOT A BAN ON PATHS (plan A-6.3's ruling). A shipped file path printed as an
+# ADDRESS the reader is being pointed at — doctor's "the constraint column is the table in
+# scripts/lib/deps.sh", or "every hooks.json command resolves to a file on disk" — is
+# product information a person can act on. Neither line contains a hook basename, so the
+# ruling needs no exemption in the lint to hold; tests/script-vocabulary.test.sh measures
+# that it still does.
+agent-context-guard.sh
+canonical-sdlc-evidence-gate.sh
+canonical-sdlc-governing-skill.sh
+context-spend.sh
+dispatch-preflight.sh
+execution-recorder.sh
+farm-out-reminder.sh
+landing-gate.sh
+preflight-probe.sh
+protect-database.sh
+protect-main.sh
+session-poker.sh
+session-sweeper.sh
+stop-check.sh
+stop-guard.sh
+stop-orders.sh
