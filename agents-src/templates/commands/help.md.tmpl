@@ -8,11 +8,7 @@ description: bionic overview — what it is, the command roster, and where to st
 Render the page below in full, verbatim, every time this command runs — even if it was
 shown earlier in this session; never summarize it or refer back to an earlier rendering.
 
-Read the installed version first, and print its output as the page's opening line:
-
-```bash
-printf 'bionic %s (installed)\n' "$(jq -r .version "${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json")"
-```
+bionic @@PLUGIN_VERSION@@ (installed)
 
 # bionic
 

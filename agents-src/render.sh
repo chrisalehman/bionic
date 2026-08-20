@@ -41,6 +41,27 @@
 #                                block's own filename upper-cased. Marker and source can
 #                                therefore never drift apart.
 #
+# ONE PLACEHOLDER, substituted INLINE wherever it appears in a template line:
+#
+#   @@PLUGIN_VERSION@@           the `.version` field of payload/.claude-plugin/plugin.json.
+#                                Unlike the two directives above it is not a line of its own:
+#                                the SENTENCE belongs to the template (help.md's opening line
+#                                reads `bionic @@PLUGIN_VERSION@@ (installed)`) and only the
+#                                VALUE comes from here.
+#
+# WHY THE VERSION IS BAKED AT RENDER TIME (epic-17 W6 S9a, walk finding W-2). help.md used to
+# read plugin.json at RUNTIME, from ${CLAUDE_PLUGIN_ROOT}, so that the page and the manifest
+# could not disagree. The Step-5 walk measured what that costs a user: run /bionic:help from
+# any session whose working directory is not this repo and the read is REFUSED — a permission
+# notice one time, a working-directory sandbox error the next — printed above the page, in
+# different words each time, with no version line either way. Baking it moves plugin.json
+# from a file the shipped page reads into a file THIS PIPELINE reads, which is a source like
+# any block or template: `--check` goes red when the committed page and the committed
+# plugin.json disagree, in both directions, so plugin.json stays the version's single owner
+# and help.md is a rendering of it — the same relationship marketplace.json has with the
+# dependency list. A missing or version-less plugin.json is a hard failure, for the same
+# reason a missing block is: a page rendered with a hole in it would leave --check green.
+#
 # Section HEADINGS stay in the templates rather than in the blocks: a block owns doctrine,
 # a template owns document structure, and a final is free to place a shared block under
 # whatever heading reads right for that file.
@@ -103,7 +124,36 @@ ROLES="auditor critic implementor researcher senior-implementor test-runner"
 MANIFEST_REL="payload/integrity/agents.sha256"
 MANIFEST="$REPO_DIR/$MANIFEST_REL"
 
+PLUGIN_JSON_REL="payload/.claude-plugin/plugin.json"
+PLUGIN_JSON="$REPO_DIR/$PLUGIN_JSON_REL"
+VERSION_PLACEHOLDER='@@PLUGIN_VERSION@@'
+
 die() { echo "render.sh: $1" >&2; exit 1; }
+
+# The plugin version, read once and cached. Read LAZILY — only a template that actually
+# carries the placeholder needs it — so a render unit that has nothing to do with the plugin
+# manifest does not acquire a dependency on it, and the error, when there is one, names the
+# template that asked.
+#
+# `jq` when it is here, a field read when it is not: this script runs from the suite on
+# machines where jq is a bionic dependency rather than a given, and a renderer that silently
+# skipped the substitution on such a machine would commit a page with the placeholder still
+# in it. Both paths return the same bytes for a manifest of this shape, and an empty result
+# from either is a failure, never a default.
+PLUGIN_VERSION=""
+plugin_version() {
+  [ -n "$PLUGIN_VERSION" ] && { printf '%s' "$PLUGIN_VERSION"; return 0; }
+  [ -f "$PLUGIN_JSON" ] || { echo "render.sh: $PLUGIN_JSON_REL does not exist, and a template needs the plugin version from it" >&2; return 1; }
+  local v=""
+  if command -v jq >/dev/null 2>&1; then
+    v="$(jq -r '.version // empty' "$PLUGIN_JSON" 2>/dev/null)"
+  else
+    v="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$PLUGIN_JSON" 2>/dev/null | head -1)"
+  fi
+  [ -n "$v" ] || { echo "render.sh: $PLUGIN_JSON_REL declares no non-empty .version" >&2; return 1; }
+  PLUGIN_VERSION="$v"
+  printf '%s' "$PLUGIN_VERSION"
+}
 
 # Digest one file. shasum is present on macOS and on any box with perl; sha256sum is the
 # GNU spelling. Nothing else is tried: a manifest written by an unknown tool would be a
@@ -168,7 +218,7 @@ render_one() {
   local tmpl="$1" tmpl_rel="$2"
   [ -f "$tmpl" ] || { echo "render.sh: no template at $tmpl" >&2; return 1; }
 
-  local line name upper block saw_header=0
+  local line name upper block version saw_header=0
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       "<!-- GENERATED-HEADER -->")
@@ -187,6 +237,12 @@ render_one() {
         printf '<!-- %s-END -->\n' "$upper"
         ;;
       *)
+        # Bash's own replacement rather than sed: a version string is arbitrary text, and
+        # `&` or `|` in it would be a sed metacharacter waiting for a release to trip over.
+        if [ "${line#*$VERSION_PLACEHOLDER}" != "$line" ]; then
+          version="$(plugin_version)" || return 1
+          line="${line//$VERSION_PLACEHOLDER/$version}"
+        fi
         printf '%s\n' "$line"
         ;;
     esac
