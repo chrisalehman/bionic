@@ -503,7 +503,120 @@ detect_plugin_registered() {
 # apart from a resolved one. So the contract is: the absolute installPath on stdout and exit
 # 0, or NOTHING on stdout, a named fix on stderr, and exit 1. No fallback exists anywhere in
 # this function, deliberately — including the one it was written to replace.
+# ─── THE PARSE ──────────────────────────────────────────────────────────────
+#
+# ONE reading of the registry's schema, for ANY plugin name. Generalized at W5 Step-6
+# (review RV-4/RV-7): doctor.sh had grown a second, unpinned parse of the same CLI-internal
+# shape, and the pinned one — detect_plugin_root — had no production callsite at all, so the
+# copy under test was the copy that did not run. Two readings of a schema we do not own is
+# the exact duplication this file's ownership rule exists to forbid: the CLI renames
+# `installPath`, one of them gets fixed, and the other keeps answering in the old shape with
+# no less confidence.
+#
+# QUIET, DELIBERATELY, and this is the one place this file's posture splits by CALLER rather
+# than by fact. Loudness is a claim about CONSEQUENCE, not about failure. Asking where
+# `superpowers` landed and finding it absent is an ORDINARY answer that `/bionic:doctor`
+# renders in a table cell twenty times a run; a parse that shouted it would bury the report
+# on exactly the half-configured machine the report exists for. So the parse says nothing and
+# the SPECIALIZATION below — bionic's own, feeding a path something is about to execute —
+# carries the three-line refusal and the named fix.
+#
+# THE EXIT CODE CARRIES WHAT THE STDERR NO LONGER DOES, so no distinction was lost in the
+# move; detect_plugin_root rebuilds its three refusal messages from these:
+#
+#   0  resolved; the absolute installPath is on stdout
+#   2  no registry file at all
+#   3  no entry for this name, or the registry could not be parsed
+#   4  the entry is there and names a directory that does not exist
+#
+# THE TWO JQ PROGRAMS ARE ONE PROGRAM. `DETECT_PLUGIN_ROOT_JQ` below stays a bionic-shaped
+# one-line literal because it is also the DOCTRINE SEED: skills/canonical-sdlc/SKILL.md
+# carries it verbatim for a model to paste at Patrol arming, which is the one moment nothing
+# in this file can be sourced yet (resolving the plugin root is precisely what you cannot do
+# from inside the plugin). `--arg n` is not pasteable, so the literal cannot simply become
+# the general form. tests/dispatch-spans.test.sh §5i reads it out of here with a `sed` that
+# requires exactly that spelling, and tests/plugin-lib.test.sh Group S pins the literal to be
+# this general program with `$n` bound to "bionic" and nothing else — so the seed cannot
+# quietly become a THIRD parse.
+DETECT_PLUGIN_INSTALL_PATH_JQ='.plugins // {} | to_entries[] | select(.key | split("@")[0] == $n) | .value[0].installPath // empty'
 DETECT_PLUGIN_ROOT_JQ='.plugins // {} | to_entries[] | select(.key | split("@")[0] == "bionic") | .value[0].installPath // empty'
+
+# The raw reading: what the registry RECORDS for this name, with no claim that the
+# directory is there. Split out from the public function for one reason — the refusal
+# detect_plugin_root prints when a recorded tree has vanished has to NAME the path it could
+# not find, and the public function deliberately hands back nothing in that case. One parse,
+# two questions: "what is written down" and "is it true".
+_detect_registry_install_path() {  # <plugin-name>
+  local name="${1:-}" reg path
+
+  [ -n "$name" ] || return 3
+
+  reg="$(_detect_installed_plugins_file)"
+  [ -f "$reg" ] || return 2
+
+  if command -v jq >/dev/null 2>&1; then
+    path="$(jq -r --arg n "$name" "$DETECT_PLUGIN_INSTALL_PATH_JQ" "$reg" 2>/dev/null | head -1)"
+  else
+    # No jq: the key is a literal string in the file, and the marketplace suffix follows the
+    # name rather than preceding it, so `"<name>@` is a whole-name match — `superpowers-extras@`
+    # does not carry the `@` in that position. `index()` and not a regex, on purpose: a plugin
+    # name is someone else's string and a `.` or `+` in it must be a character, not a
+    # metacharacter. The first installPath after the key is this entry's; `exit` stops before
+    # the next plugin's.
+    path="$(awk -v key="\"${name}@" '
+      index($0, key) { f = 1 }
+      f && /"installPath"/ {
+        line = $0
+        sub(/.*"installPath"[[:space:]]*:[[:space:]]*"/, "", line)
+        sub(/".*/, "", line)
+        print line
+        exit
+      }' "$reg" 2>/dev/null)"
+  fi
+
+  case "$path" in
+    ''|null) return 3 ;;
+  esac
+
+  printf '%s\n' "$path"
+  return 0
+}
+
+detect_plugin_install_path() {  # <plugin-name>
+  local path st
+  path="$(_detect_registry_install_path "${1:-}")"; st=$?
+  [ "$st" -eq 0 ] || return "$st"
+  [ -d "$path" ] || return 4
+  printf '%s\n' "$path"
+  return 0
+}
+
+# ─── The installed plugin root ───────────────────────────────────────────────
+#
+# WHERE THE PLUGIN ACTUALLY IS, answered out of the CLI's own record rather than guessed.
+# Bionic's specialization of the parse above; the reading is shared, the POSTURE is this
+# function's own.
+#
+# THE PROBLEM THIS RETIRES. Payload-native scripts are typed into a model's own shell as
+# often as they are registered as commands, and `${CLAUDE_PLUGIN_ROOT}` is substituted only
+# in the latter. The old spelling covered the gap with `${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}`
+# — which always resolves, and resolves to a bootstrap-era copy that can be an OLDER BUILD
+# than the plugin the CLI loaded. A stale hook that runs is worse than a missing one: it
+# enforces a doctrine nobody is following and reports success doing it.
+#
+# THE ORACLE IS THE REGISTRY, ratified 2026-08-19 (design ledger D-B). Not because we own
+# it — we do not, its schema is CLI-internal — but because it is the same record the CLI
+# itself loads from, which is the only property that makes an answer here true. The schema
+# being someone else's is why the parse is pinned by tests and why an unreadable file
+# REFUSES instead of degrading.
+#
+# THIS IS THE ONE FUNCTION IN THIS FILE THAT DOES NOT ANSWER `unknown`, and the deviation is
+# the point. Every other fact here feeds a REPORT, where "I could not tell" is a legitimate
+# and useful value. This one feeds a PATH that something is about to execute, and there is
+# no honest degraded form of that: a caller handed a plausible directory cannot tell it
+# apart from a resolved one. So the contract is: the absolute installPath on stdout and exit
+# 0, or NOTHING on stdout, a named fix on stderr, and exit 1. No fallback exists anywhere in
+# this function, deliberately — including the one it was written to replace.
 
 _detect_plugin_root_refuse() {  # <what went wrong>
   echo "detect_plugin_root: REFUSED — $1" >&2
@@ -514,46 +627,23 @@ _detect_plugin_root_refuse() {  # <what went wrong>
 }
 
 detect_plugin_root() {
-  local reg root
+  local root st reg
 
+  # The refusals name the file and the path, so the registry expression is re-read here for
+  # the MESSAGE only — never for a second answer. The parse below is the only reading that
+  # decides anything.
   reg="$(_detect_installed_plugins_file)"
-  if [ ! -f "$reg" ]; then
-    _detect_plugin_root_refuse "no plugin registry at ${reg} — bionic is not installed."
-    return 1
-  fi
 
-  if command -v jq >/dev/null 2>&1; then
-    root="$(jq -r "$DETECT_PLUGIN_ROOT_JQ" "$reg" 2>/dev/null | head -1)"
-  else
-    # No jq: the same whole-name match detect_plugin_registered's fallback makes — `"bionic@`
-    # cannot match another plugin, because the marketplace suffix follows the name and never
-    # precedes it, and `bionic-extras@` does not carry the `@` in that position. The first
-    # installPath after the key is this entry's; `exit` stops before the next plugin's.
-    root="$(awk '
-      /"bionic@/ { f = 1 }
-      f && /"installPath"/ {
-        line = $0
-        sub(/.*"installPath"[[:space:]]*:[[:space:]]*"/, "", line)
-        sub(/".*/, "", line)
-        print line
-        exit
-      }' "$reg" 2>/dev/null)"
-  fi
+  root="$(detect_plugin_install_path bionic)"
+  st=$?
+  [ "$st" -eq 0 ] && { printf '%s\n' "$root"; return 0; }
 
-  case "$root" in
-    ''|null)
-      _detect_plugin_root_refuse "no bionic entry in ${reg}, or the registry could not be read — bionic is not installed."
-      return 1
-      ;;
+  case "$st" in
+    2) _detect_plugin_root_refuse "no plugin registry at ${reg} — bionic is not installed." ;;
+    4) _detect_plugin_root_refuse "the registry names $(_detect_registry_install_path bionic) as bionic's install path, and no such directory exists — the install is broken or half-removed." ;;
+    *) _detect_plugin_root_refuse "no bionic entry in ${reg}, or the registry could not be read — bionic is not installed." ;;
   esac
-
-  if [ ! -d "$root" ]; then
-    _detect_plugin_root_refuse "the registry names ${root} as bionic's install path, and no such directory exists — the install is broken or half-removed."
-    return 1
-  fi
-
-  printf '%s\n' "$root"
-  return 0
+  return 1
 }
 
 # ─── Half-uninstalled ────────────────────────────────────────────────────────

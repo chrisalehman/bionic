@@ -535,7 +535,7 @@ jq -r '.plugins // {} | to_entries[] | select(.key | split("@")[0] == "bionic") 
   "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json"
 ```
 
-That expression is `detect_plugin_root`'s own, held byte-identical to the copy in `<plugin-root>/scripts/lib/detect.sh` by the span suite; the function is what every payload script and hook calls, and it refuses loudly — *plugin not installed — run `claude plugin install bionic@bionic`* — rather than falling back to anything. Empty output above means exactly that, and no other root is substituted for it.
+That expression is `detect_plugin_root`'s own, held byte-identical to the copy in `<plugin-root>/scripts/lib/detect.sh` by the span suite. That function is bionic's specialization of the single registry parse the payload has — `/bionic:doctor` resolves every dependency's install path through the same reading — and where the shared parse is quiet, this one refuses loudly: *plugin not installed — run `claude plugin install bionic@bionic`*, rather than falling back to anything. Empty output above means exactly that, and no other root is substituted for it.
 
 **Wakeups are recurring, never date-pinned.** A one-shot `CronCreate` pinned to a wall-clock minute is banned: a busy minute DROPS the tick rather than queuing it, so a one-shot whose single match minute finds the session working dies silently and never fires again (re-measured epic-17 W4 S6, alongside the 1m floor and the 7-day expiry). When a run needs a wake, create a SHORT RECURRING job and `CronDelete` it on its first fire — a recurring job that loses a busy tick simply fires on the next one, which is the whole difference between a wake that survives contention and one that does not.
 
