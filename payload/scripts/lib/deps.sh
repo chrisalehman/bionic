@@ -2,12 +2,13 @@
 # deps.sh — the dependency SSoT (epic-17 wave-03, spec AC-8).
 #
 # WHAT THIS FILE OWNS. The set of things bionic depends on, and everything that
-# is true of a dependency *by declaration*: its lane, where it comes from, what
-# version range it must satisfy, how it is installed, and what happens to it
-# when bionic is removed. One row per dependency. Nothing else in the repo may
-# author that set — `plugin.json`'s `dependencies` array and
-# `marketplace.json`'s entries are RENDERINGS of the lane-3a rows below, pinned
-# by agreement tests that fail on drift.
+# is true of a dependency *by declaration*: its class, the route that consumes
+# it, where it comes from, what version range it must satisfy, how it is
+# installed, and what happens to it when bionic is removed. One row per
+# dependency. Nothing else in the repo may author that set — `plugin.json`'s
+# `dependencies` array renders the `core` rows and `marketplace.json`'s
+# url-sourced entries render the `native`-kind rows, both pinned by agreement
+# tests that fail on drift.
 #
 # WHAT IT DOES NOT OWN. Machine facts. "Is superpowers installed on THIS box"
 # is a question about a machine, not about the dependency set; `detect.sh` owns
@@ -17,15 +18,38 @@
 # formatting, and `detect.sh`'s `detect_dep` is its only formatter. There is no
 # second implementation of either half.
 #
-# THE TWO LANES.
-#   3a — resolved by the CLI's own plugin-dependency mechanism. bionic declares
-#        them and the harness installs them. `install_dep` REFUSES these rows:
-#        a second installer for a natively-installed plugin is precisely the
-#        kludge D1 rejected.
-#   3b — everything else: binaries, npm/uv/pnpm packages, MCP registrations,
-#        browser payloads, the statusline. These have no native mechanism, so
-#        the functions below are their only installer — the same function for
-#        the setup loop and for a just-in-time offer (AC-5: one owner).
+# THE FOUR CLASSES (wave-06 D-B, ratified 2026-08-20). `class` answers WHEN
+# bionic installs a tool, which is the question the old two-lane split could not
+# express — it named the install MECHANISM and let the moment be implied.
+#   core        — the two plugin dependencies the CLI's own mechanism resolves.
+#                 bionic declares them; the harness installs them. Nothing else
+#                 is ever core.
+#   basic       — the substrate every machine needs. Asked once at setup, one
+#                 consent each, and never removed by bionic: it ensured them, it
+#                 does not own them.
+#   when-needed — installed with ONE question the first time a route actually
+#                 needs the tool. Setup never asks about these rows.
+#   extra       — offered once at setup with a line of why, default No.
+#
+# `kind` is the orthogonal question — HOW a row installs — and it is what
+# `install_dep` and `check_dep` dispatch on. `native` means the plugin harness
+# does it, and `install_dep` REFUSES every native row whatever its class: a
+# second installer for a natively-installed plugin is precisely the kludge D1
+# rejected. Every non-native row has exactly one installer, the one below —
+# the same function for the setup loop and for a just-in-time offer (AC-5).
+#
+# CLASS AND KIND ARE NOT THE SAME CUT, and impeccable is the row that proves it:
+# it is `when-needed` (a route asks for it at the moment of use) and `native`
+# (the harness installs it, from bionic's own marketplace). That is why the
+# marketplace rendering rule is stated over `kind` and the plugin.json
+# dependency rule over `class`.
+#
+# TRACEABILITY. Every row names its `consumer`: the repo-relative path of the
+# doctrine file that uses it, or one of exactly two literals — `substrate` for
+# the basics no single route owns, `extra` for the optional offers. A row with
+# no consumer is a row nobody can justify, and the wave dropped two of them
+# (`yq`, `gcloud`) on exactly that test. tests/plugin-lib.test.sh Group 3c
+# resolves every path.
 #
 # CONSENT. `install_dep` and `remove_dep` are the only mutating entry points,
 # and neither mutates before an explicit answer on stdin. No assume-yes knob
@@ -60,20 +84,25 @@ _dep_playwright_cache() {
 #                         and what doctor prints. For a binary that is the command
 #                         name (`rg`), for a package-shaped dep the package
 #                         (`@playwright/cli`), for an MCP server its server name.
-#   lane                  3a | 3b
-#   source_url            the install target. `scheme:target` for the package
+#   class                 core | basic | when-needed | extra — WHEN bionic installs it.
+#   consumer              the doctrine route that uses it: a repo-relative path
+#                         that resolves, or the literal `substrate` / `extra`.
+#                         Repo-relative, not payload-relative: the traceability
+#                         claim is about this repository's doctrine, and some
+#                         routes (excalidraw-diagram) ship outside the payload.
+#   mechanism             the install target. `scheme:target` for the package
 #                         managers (brew, brew-cask, npm, uv, pnpm, npx); a bare
-#                         https git URL for lane-3a, whose renderings need it
-#                         verbatim.
+#                         https git URL for a native row, whose renderings need
+#                         it verbatim.
 #   constraint            a semver range, or `any` where no range is declared.
 #                         `any` is a real declaration — it says the dependency
 #                         is unpinned — not a missing value.
-#   install_fn_or_check   the MECHANISM. Names the `_dep_check_*` /
+#   kind                  HOW it installs. Names the `_dep_check_*` /
 #                         `_dep_install_*` pair that knows how to probe and
 #                         install this shape. `native` means the harness does it.
 #   removal_behavior      native-uninstall-offer | remove-on-consent | keep-shared
 #
-# THE ONE FIELD THIS TABLE DOES NOT OWN is the commit `sha` on a lane-3a
+# THE ONE FIELD THIS TABLE DOES NOT OWN is the commit `sha` on a native-kind
 # marketplace entry. It is deliberately not a seventh column: a sha is a
 # SUPPLY-CHAIN pin — "the code installed is the code that was reviewed" — and
 # `constraint` above is a VERSION claim — "the installed version satisfies this
@@ -84,51 +113,95 @@ _dep_playwright_cache() {
 # url-sourced entry to carry one. Saying nothing here is what let one
 # dependency ship pinned and the other tracking a moving branch head.
 #
-# PROVENANCE. Lane 3a: the wave's ratified D1 values (agent-skills is ^0.6.0 —
-# the ^1.0.0 in today's plugin.json is stale and D3 ratified the correction).
-# Lane 3b: ported from claude-bootstrap.sh, which retires at W5 and is the
-# authority on what actually gets installed today — claude-config.txt supplies
-# the roster, and the `do_install_*` / `verify_*` pairs supply the commands.
+# PROVENANCE. Native rows: the wave-03 ratified D1 values (agent-skills is
+# ^0.6.0 — the ^1.0.0 in today's plugin.json is stale and D3 ratified the
+# correction), plus impeccable at wave-06 S3, whose `^4.1.0` was verified
+# against the upstream tags rather than assumed: `git ls-remote --tags
+# https://github.com/pbakaus/impeccable.git` puts skill-v4.1.1 at the top of the
+# skill line, and that commit's `.claude-plugin/plugin.json` declares version
+# 4.1.1. Everything else: ported from claude-bootstrap.sh, deleted at W5 and the
+# authority on what actually got installed — claude-config.txt supplied the
+# roster and the `do_install_*` / `verify_*` pairs the commands. Classes are
+# D-B's ratified roster, verbatim.
 
 BIONIC_DEP_TABLE="$(cat <<'TABLE'
-superpowers|3a|https://github.com/obra/superpowers.git|^6.3.0|native|native-uninstall-offer
-agent-skills|3a|https://github.com/addyosmani/agent-skills.git|^0.6.0|native|native-uninstall-offer
-git|3b|brew:git|any|brew-dep|keep-shared
-node|3b|brew:node|any|brew-dep|keep-shared
-pnpm|3b|brew:pnpm|any|brew-dep|keep-shared
-gh|3b|brew:gh|any|brew-dep|keep-shared
-jq|3b|brew:jq|any|brew-dep|keep-shared
-rg|3b|brew:ripgrep|any|brew-dep|keep-shared
-uv|3b|brew:uv|any|brew-dep|keep-shared
-docker|3b|brew:docker|any|brew-dep|keep-shared
-yq|3b|brew:yq|any|brew-dep|keep-shared
-aws|3b|brew:awscli|any|brew-dep|keep-shared
-gcloud|3b|brew-cask:gcloud-cli|any|brew-cask|keep-shared
-@playwright/cli|3b|npm:@playwright/cli|any|npm-global|remove-on-consent
-@pencil.dev/cli|3b|npm:@pencil.dev/cli|any|npm-global|remove-on-consent
-notebooklm|3b|uv:notebooklm-py|any|uv-tool|remove-on-consent
-motion|3b|pnpm:motion|any|pnpm-store|remove-on-consent
-context7|3b|npm:@upstash/context7-mcp@latest|any|mcp-server|remove-on-consent
-chrome-devtools|3b|npm:chrome-devtools-mcp@latest|any|mcp-server|remove-on-consent
-playwright-chromium|3b|npx:playwright@latest|any|playwright-browser|remove-on-consent
-ccstatusline|3b|npx:ccstatusline@latest|any|statusline|remove-on-consent
+superpowers|core|skills/canonical-sdlc/SKILL.md|https://github.com/obra/superpowers.git|^6.3.0|native|native-uninstall-offer
+agent-skills|core|skills/canonical-sdlc/SKILL.md|https://github.com/addyosmani/agent-skills.git|^0.6.0|native|native-uninstall-offer
+git|basic|substrate|brew:git|any|brew-dep|keep-shared
+node|basic|substrate|brew:node|any|brew-dep|keep-shared
+pnpm|basic|substrate|brew:pnpm|any|brew-dep|keep-shared
+gh|basic|substrate|brew:gh|any|brew-dep|keep-shared
+jq|basic|substrate|brew:jq|any|brew-dep|keep-shared
+rg|basic|substrate|brew:ripgrep|any|brew-dep|keep-shared
+uv|basic|substrate|brew:uv|any|brew-dep|keep-shared
+docker|basic|substrate|brew:docker|any|brew-dep|keep-shared
+aws|basic|substrate|brew:awscli|any|brew-dep|keep-shared
+impeccable|when-needed|skills/canonical-sdlc/SKILL.md|https://github.com/pbakaus/impeccable.git|^4.1.0|native|native-uninstall-offer
+@playwright/cli|when-needed|skills/browser-verify/SKILL.md|npm:@playwright/cli|any|npm-global|remove-on-consent
+chrome-devtools|when-needed|skills/browser-verify/SKILL.md|npm:chrome-devtools-mcp@latest|any|mcp-server|remove-on-consent
+playwright-chromium|when-needed|skills/excalidraw-diagram/SKILL.md|npx:playwright@latest|any|playwright-browser|remove-on-consent
+motion|when-needed|skills/canonical-sdlc/SKILL.md|pnpm:motion|any|pnpm-store|remove-on-consent
+ccstatusline|extra|extra|npx:ccstatusline@latest|any|statusline|remove-on-consent
+notebooklm|extra|extra|uv:notebooklm-py|any|uv-tool|remove-on-consent
+context7|extra|extra|npm:@upstash/context7-mcp@latest|any|mcp-server|remove-on-consent
+@pencil.dev/cli|extra|extra|npm:@pencil.dev/cli|any|npm-global|remove-on-consent
 TABLE
 )"
 
-# The eleven brew rows and the cask are `keep-shared` deliberately. bionic
-# ENSURED git/node/docker/... on this machine; it does not own them, and
-# pulling `git` off a box because bionic is leaving is not a removal anyone
-# asked for. The reset charter names shared binaries as the excluded class.
+# The nine brew rows are `keep-shared` deliberately, and that is now what the
+# `basic` class MEANS rather than a coincidence of their removal policy: bionic
+# ENSURED git/node/docker/... on this machine; it does not own them, and pulling
+# `git` off a box because bionic is leaving is not a removal anyone asked for.
+# The reset charter names shared binaries as the excluded class.
+#
+# TWO ROWS LEFT AT WAVE-06 S3. `yq` and `gcloud` had no consumer — no skill, no
+# rule, no agent file, no test named either — and neither is universal enough to
+# justify as substrate. D-B dropped them by name. They are not commented out
+# here: a commented row is a row that comes back without a decision.
+#
+# `motion` is the one when-needed row whose consumer file does not yet name the
+# package (it is pre-warmed into the pnpm store for the design route). The class
+# is D-B's ratified call; the gap is recorded as the single declared exemption
+# in tests/plugin-lib.test.sh Group 3c, so it fails loudly the day it is fixed.
 
 # ─── Table access ────────────────────────────────────────────────────────────
 
 dep_names() { printf '%s\n' "$BIONIC_DEP_TABLE" | while IFS='|' read -r n _; do [ -n "$n" ] && echo "$n"; done; }
 
-dep_names_lane() {  # <lane>
+dep_names_class() {  # <core|basic|when-needed|extra>
   local want="${1:-}"
-  printf '%s\n' "$BIONIC_DEP_TABLE" | while IFS='|' read -r n lane _; do
-    [ -n "$n" ] && [ "$lane" = "$want" ] && echo "$n"
+  printf '%s\n' "$BIONIC_DEP_TABLE" | while IFS='|' read -r n class _; do
+    [ -n "$n" ] && [ "$class" = "$want" ] && echo "$n"
   done
+  return 0
+}
+
+dep_names_kind() {  # <native|brew-dep|npm-global|…>
+  local want="${1:-}"
+  printf '%s\n' "$BIONIC_DEP_TABLE" | while IFS='|' read -r n _ _ _ _ kind _; do
+    [ -n "$n" ] && [ "$kind" = "$want" ] && echo "$n"
+  done
+  return 0
+}
+
+# DEPRECATED — the pre-wave-06 view, kept because setup.sh and remove.sh still
+# walk it and neither is this slice's to restructure (S4 and S7 retire the call
+# sites). It is a VIEW over class and kind, never a stored field:
+#   3a = the rows the harness installs  (class core)
+#   3b = the rows bionic installs itself (kind != native)
+# A native row outside `core` — impeccable — is in NEITHER list, and that is the
+# point rather than an oversight. Putting it in 3b would have setup offer a
+# when-needed tool it must not ask about (AC-11) and hand `install_dep` a row it
+# is required to refuse; putting it in 3a would have setup tell the user to
+# reinstall bionic so a dependency it never declares would resolve.
+dep_names_lane() {  # <3a|3b>
+  local want="${1:-}"
+  case "$want" in
+    3a) dep_names_class core ;;
+    3b) printf '%s\n' "$BIONIC_DEP_TABLE" | while IFS='|' read -r n _ _ _ _ kind _; do
+          [ -n "$n" ] && [ "$kind" != "native" ] && echo "$n"
+        done ;;
+  esac
   return 0
 }
 
@@ -142,28 +215,36 @@ dep_row() {  # <name> — the whole row, verbatim. Non-zero if there is no such 
 
 dep_field() {  # <name> <field>
   local name="${1:-}" field="${2:-}" row
-  local f_name f_lane f_src f_con f_inst f_rem
+  local f_name f_class f_consumer f_mech f_con f_kind f_rem
   row="$(dep_row "$name")" || { echo "deps.sh: no such dependency: ${name}" >&2; return 1; }
-  IFS='|' read -r f_name f_lane f_src f_con f_inst f_rem <<< "$row"
+  IFS='|' read -r f_name f_class f_consumer f_mech f_con f_kind f_rem <<< "$row"
   case "$field" in
     name)                printf '%s\n' "$f_name" ;;
-    lane)                printf '%s\n' "$f_lane" ;;
-    source_url)          printf '%s\n' "$f_src" ;;
+    class)               printf '%s\n' "$f_class" ;;
+    consumer)            printf '%s\n' "$f_consumer" ;;
+    mechanism|source_url)          printf '%s\n' "$f_mech" ;;
     constraint)          printf '%s\n' "$f_con" ;;
-    install_fn_or_check) printf '%s\n' "$f_inst" ;;
+    kind|install_fn_or_check)      printf '%s\n' "$f_kind" ;;
     removal_behavior)    printf '%s\n' "$f_rem" ;;
+    # DEPRECATED, derived, and consistent with `dep_names_lane` by
+    # construction — the same rule computed the same way, so the field and the
+    # list can never disagree about a row. detect.sh is its only caller.
+    lane)
+      if [ "$f_class" = "core" ]; then printf '3a\n'
+      elif [ "$f_kind" != "native" ]; then printf '3b\n'
+      else printf 'none\n'; fi ;;
     *) echo "deps.sh: no such field: ${field}" >&2; return 1 ;;
   esac
 }
 
-# Reports any row whose field count is not exactly 6. Silence means the table
+# Reports any row whose field count is not exactly 7. Silence means the table
 # is well-formed; the suite asserts on the silence.
 dep_table_field_count_report() {
   local line n
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     n="$(printf '%s' "$line" | tr -cd '|' | wc -c | tr -d ' ')"
-    [ "$n" = "5" ] || echo "${line} (has $((n + 1)) fields, want 6)"
+    [ "$n" = "6" ] || echo "${line} (has $((n + 1)) fields, want 7)"
   done <<< "$BIONIC_DEP_TABLE"
   return 0
 }
@@ -273,7 +354,7 @@ _dep_version_from_probe() {  # <argv...>
 # — reporting `no` there would be a confident wrong answer, and doctor would
 # nag about a dependency that is in fact fine.
 
-_dep_check_native() {  # lane-3a: the harness's own install registry
+_dep_check_native() {  # native kind: the harness's own install registry
   local name="$1" file ver
   file="$(_dep_installed_json)"
   _dep_have jq || { echo "unknown|unknown"; return 0; }
@@ -394,7 +475,7 @@ _dep_consent() {  # <prompt> — non-zero unless the answer is an explicit yes
 
 # ─── Install ─────────────────────────────────────────────────────────────────
 #
-# One mutating entry point. The setup loop calls it once per lane-3b row; a
+# One mutating entry point. The setup loop calls it once per row it installs; a
 # route that hits an absent dependency calls it for that one row (AC-5). There
 # is no third path and no silent path.
 
@@ -478,12 +559,15 @@ _dep_install_statusline() {
 }
 
 install_dep() {  # <name>
-  local name="${1:-}" lane plan line
+  local name="${1:-}" kind plan line
   local -a argv=()
-  lane="$(dep_field "$name" lane)" || return 1
+  kind="$(dep_field "$name" kind)" || return 1
 
-  if [ "$lane" = "3a" ]; then
-    echo "deps.sh: ${name} is lane-3a — the plugin harness installs it; there is no second installer." >&2
+  # KIND, not class. Every native row is the harness's — the two core plugins
+  # and the when-needed one alike — and a class-keyed guard would hand
+  # impeccable to a mechanism that has no argv for it.
+  if [ "$kind" = "native" ]; then
+    echo "deps.sh: ${name} is installed by the plugin harness; there is no second installer." >&2
     return 1
   fi
 
@@ -526,7 +610,7 @@ remove_dep() {  # <name>
       return 0
       ;;
     native-uninstall-offer)
-      echo "  ${name}: lane-3a — removed by the native plugin uninstall, not here."
+      echo "  ${name}: removed by the plugin uninstall, not here."
       return 0
       ;;
   esac

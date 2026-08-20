@@ -3,7 +3,7 @@
 # "all machine mutation behind consent lives in scripts").
 #
 # WHAT THIS SUITE OWNS. payload/scripts/setup.sh — the whole of `/bionic:setup`:
-# the native plugin install wrapper, lane-3a enable-verify, the lane-3b install
+# the native plugin install wrapper, core enable-verify, the bionic-installed
 # loop, the shell-rc export, the two ported bootstrap obligations (legacy alias
 # block, legacy-channel managed-hook entries), the consented permission-profile apply,
 # and the end summary. It also owns payload/commands/setup.md's existence and
@@ -200,7 +200,7 @@ plant_cli_plugin() {  # <id> <enabled>
   grep -q "^$1 " "$STATE/plugins" 2>/dev/null || echo "$1 $2" >> "$STATE/plugins"
 }
 
-# A lane-3a row in the registry file check_dep reads.
+# A core row in the registry file check_dep reads.
 plant_installed() {  # <key> <version>
   local key="$1" ver="$2" tmp="$FIX/ch/plugins/installed_plugins.json.tmp"
   jq --arg k "$key" --arg v "$ver" \
@@ -298,11 +298,11 @@ expect_match "no jq: install state is reported unknown, never a confident answer
 expect_match "no jq: the summary names jq as the fix" '*jq*' "$OUT"
 
 # ---------------------------------------------------------------------------
-# Group 3 — (b) lane-3a enable-verify, repair by explicit enable (P2).
+# Group 3 — (b) core enable-verify, repair by explicit enable (P2).
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "=== Group 3: lane-3a enable-verify ==="
+echo "=== Group 3: core enable-verify ==="
 
 new_fixture enable-ok
 plant_cli_plugin "bionic@bionic" true
@@ -340,37 +340,40 @@ expect_no_match "absent dep is not 'enabled'" '*enable agent-skills*' "$(cat "$C
 expect_match "absent dep: summary names it" '*agent-skills*' "$OUT"
 
 # ---------------------------------------------------------------------------
-# Group 4 — (c) the lane-3b loop, through the ONE install_dep function (AC-5).
+# Group 4 — (c) the install loop, through the ONE install_dep function (AC-5).
+# Wave-06 S3 renamed the taxonomy: the rows walked here are every row whose
+# `kind` is not `native` — the basics, the extras, and the when-needed rows the
+# loop does not yet skip (S4 restructures the loop itself).
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "=== Group 4: lane-3b install loop ==="
+echo "=== Group 4: the install loop ==="
 
 new_fixture deps-consent
 plant_cli_plugin "bionic@bionic" true
 OUT="$(run_setup "$YES")"
 CALLTEXT="$(cat "$CALLS")"
-expect_match "lane-3b: a brew row installs through install_dep's own argv" '*brew install ripgrep*' "$CALLTEXT"
-expect_match "lane-3b: an npm row installs through install_dep's own argv" '*npm install -g @playwright/cli*' "$CALLTEXT"
-expect_match "lane-3b: an mcp row registers through install_dep's own argv" '*mcp add context7*' "$CALLTEXT"
-expect_no_match "lane-3a rows never reach install_dep (native mechanism owns them)" \
+expect_match "a brew row installs through install_dep's own argv" '*brew install ripgrep*' "$CALLTEXT"
+expect_match "an npm row installs through install_dep's own argv" '*npm install -g @playwright/cli*' "$CALLTEXT"
+expect_match "an mcp row registers through install_dep's own argv" '*mcp add context7*' "$CALLTEXT"
+expect_no_match "native-kind rows never reach install_dep (the harness owns them)" \
   '*brew install superpowers*' "$CALLTEXT"
 # The list must be read on its own descriptor. A `while read ... done < <(list)`
 # loop hands the BODY the same stdin, so the consent prompt inside it eats the
 # next dependency NAME as the answer — declining every item and silently
 # skipping the rest of the table. Reaching the LAST row is the catch.
-expect_match "lane-3b: the loop reaches its last row (the list is never eaten by the consent prompts)" \
+expect_match "the loop reaches its last row (the list is never eaten by the consent prompts)" \
   '*ccstatusline*' "$OUT"
-expect_match "lane-3b: a consented row actually mutates (statusline recorded in settings)" \
+expect_match "a consented row actually mutates (statusline recorded in settings)" \
   '*ccstatusline*' "$(cat "$FIX/ch/settings.json")"
 
 new_fixture deps-declined
 plant_cli_plugin "bionic@bionic" true
 OUT="$(run_setup "$NO")"
 CALLTEXT="$(cat "$CALLS")"
-expect_no_match "declined lane-3b: no brew install ran" '*brew install*' "$CALLTEXT"
-expect_no_match "declined lane-3b: no npm install ran" '*npm install*' "$CALLTEXT"
-expect_match "declined lane-3b: the dependency is named in the summary" '*ripgrep*' "$OUT"
+expect_no_match "declined: no brew install ran" '*brew install*' "$CALLTEXT"
+expect_no_match "declined: no npm install ran" '*npm install*' "$CALLTEXT"
+expect_match "declined: the dependency is named in the summary" '*ripgrep*' "$OUT"
 
 new_fixture deps-unknown
 plant_cli_plugin "bionic@bionic" true

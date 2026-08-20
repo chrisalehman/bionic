@@ -23,6 +23,14 @@
       "source": { "source": "url", "url": "https://github.com/addyosmani/agent-skills.git", "sha": "df1edb2e05487d0aa6d93c747141e0aed1187f25" },
       "homepage": "https://github.com/addyosmani/agent-skills",
       "license": "MIT"
+    },
+    {
+      "name": "impeccable",
+      "description": "Design fluency for frontend development — the design route canonical-sdlc sends UX work to. Installed the first time a route needs it, never as a mandatory dependency.",
+      "category": "development",
+      "source": { "source": "url", "url": "https://github.com/pbakaus/impeccable.git", "sha": "5a149f3fdb1b5793f10567233b1dcab98fc305fd" },
+      "homepage": "https://impeccable.style",
+      "license": "Apache-2.0"
     }
   ]
 }

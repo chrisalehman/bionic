@@ -113,9 +113,7 @@ make_version_stub "$FULL_BIN" gh     "gh version 2.97.0 (2026-07-31)"
 make_version_stub "$FULL_BIN" rg     "ripgrep 15.2.0"
 make_version_stub "$FULL_BIN" uv     "uv 0.12.5 (Homebrew 2026-08-14 aarch64-apple-darwin)"
 make_version_stub "$FULL_BIN" docker "Docker version 29.2.1, build a5c7197"
-make_version_stub "$FULL_BIN" yq     "yq (https://github.com/mikefarah/yq/) version v4.53.3"
 make_version_stub "$FULL_BIN" aws    "aws-cli/2.25.1 Python/3.12.9 Darwin/25.5.0 exe/x86_64"
-make_version_stub "$FULL_BIN" gcloud "Google Cloud SDK 495.0.0"
 make_version_stub "$FULL_BIN" notebooklm "notebooklm 0.9.3"
 
 # `npm list -g --depth=0 <pkg>`, real shape — captured 2026-08-17:
@@ -148,8 +146,8 @@ exit 0
 STUB
 chmod +x "$FULL_BIN/claude"
 
-# The broken machine's PATH: base plus four binaries. pnpm/gh/uv/docker/yq/aws/
-# gcloud/notebooklm are ABSENT (present=no); npm and claude are absent too, which
+# The broken machine's PATH: base plus four binaries. pnpm/gh/uv/docker/aws/
+# notebooklm are ABSENT (present=no); npm and claude are absent too, which
 # is a different fact — their mechanisms cannot answer at all (present=unknown).
 BROKEN_BIN="$TMP/bin-broken"; mkdir -p "$BROKEN_BIN"; cp -R "$BASE_BIN"/. "$BROKEN_BIN"/
 make_version_stub "$BROKEN_BIN" git  "git version 2.50.1 (Apple Git-155)"
@@ -254,6 +252,10 @@ JSON
   if [ "$flavor" = "healthy" ]; then
     plant_installed_tree "$m/installs/superpowers"  14 0
     plant_installed_tree "$m/installs/agent-skills" 24 4
+    # The when-needed native row is INSTALLED on the healthy machine: absent, it
+    # would put a dependency action in a summary this file pins as "nothing to
+    # do". One skill, no agents — impeccable's real shape.
+    plant_installed_tree "$m/installs/impeccable"   1 0
     cat > "$m/claude-home/plugins/installed_plugins.json" <<JSON
 { "plugins": {
     "bionic@bionic": [ { "scope": "user", "installPath": "${m}/plugin", "version": "0.1.0",
@@ -261,7 +263,9 @@ JSON
     "superpowers@bionic": [ { "scope": "user", "installPath": "${m}/installs/superpowers", "version": "6.3.0",
                               "installedAt": "2026-08-17T00:00:00.000Z" } ],
     "agent-skills@bionic": [ { "scope": "user", "installPath": "${m}/installs/agent-skills", "version": "0.6.1",
-                               "installedAt": "2026-08-17T00:00:00.000Z" } ] } }
+                               "installedAt": "2026-08-17T00:00:00.000Z" } ],
+    "impeccable@bionic": [ { "scope": "user", "installPath": "${m}/installs/impeccable", "version": "4.1.1",
+                             "installedAt": "2026-08-20T00:00:00.000Z" } ] } }
 JSON
   else
     # bionic itself is gone from the registry — the half-uninstalled precondition.
@@ -426,17 +430,28 @@ expect_not_match "healthy: a stock machine is not called modified" "*modified*" 
 expect_not_contains "healthy: no reinstall nag when the files are stock" \
   "reinstall restores stock" "$H"
 
-# Both lanes, presence AND version AND constraint AND verdict — the dep table is
-# the sole constraint-agreement surface (AC-3, AC-8), so the verdict must be
+# Every class, presence AND version AND constraint AND verdict — the dep table
+# is the sole constraint-agreement surface (AC-3, AC-8), so the verdict must be
 # rendered per row, not inferred by the reader.
-expect_match "healthy: lane-3a superpowers row carries lane/present/version/constraint/verdict" \
+#
+# THE `3a`/`3b` TOKENS IN THESE GLOBS ARE THE OUTPUT, NOT THE CLASSIFICATION.
+# Wave-06 S3 replaced the lane column in the TABLE with `class`; the column
+# doctor PRINTS is still derived-lane, and renaming it is S6's slice (a display
+# change under the voice contract, which is where internal vocabulary is
+# supposed to die). Labels below name the class; globs match what doctor emits
+# today, so this file stays honest about both.
+expect_match "healthy: core superpowers row carries lane/present/version/constraint/verdict" \
   "*3a*superpowers*yes*6.3.0*^6.3.0*ok*" "$(line_of "$H_OUT" "superpowers")"
-expect_match "healthy: lane-3a agent-skills row satisfies the corrected ^0.6.0 constraint" \
+expect_match "healthy: core agent-skills row satisfies the corrected ^0.6.0 constraint" \
   "*3a*agent-skills*yes*0.6.1*^0.6.0*ok*" "$(line_of "$H_OUT" "agent-skills")"
-expect_match "healthy: lane-3b rg row renders present with its captured version" \
+expect_match "healthy: basic rg row renders present with its captured version" \
   "*3b*rg*yes*15.2.0*any*ok*" "$(line_of "$H_OUT" " rg ")"
-expect_match "healthy: lane-3b npm-global row renders the package version npm reported" \
+expect_match "healthy: when-needed npm-global row renders the package version npm reported" \
   "*3b*@playwright/cli*yes*0.1.18*" "$(line_of "$H_OUT" "@playwright/cli")"
+# The when-needed NATIVE row: same registry probe as the core rows, judged
+# against its own ^4.1.0, and it belongs to neither legacy lane.
+expect_match "healthy: when-needed impeccable row renders present at 4.1.1, verdict ok" \
+  "*impeccable*yes*4.1.1*^4.1.0*ok*" "$(line_of "$H_OUT" "impeccable")"
 expect_match "healthy: mcp-server row renders present" \
   "*3b*context7*yes*" "$(line_of "$H_OUT" "context7")"
 expect_match "healthy: playwright browser cache row renders present" \
@@ -536,14 +551,18 @@ expect_match "broken: the violation line names /bionic:setup as the fix" \
   "*/bionic:setup*" "$(line_of "$B_OUT" "violates constraint")"
 
 # Absences, both lanes, each with a named fix.
-expect_match "broken: absent lane-3a dependency renders present=no" \
+# `aws` carries the absent-basic case that `yq` used to: yq and gcloud were
+# dropped from the table at wave-06 S3 (no consumer, no test, not universal),
+# and the case they stood for — a substrate binary missing from PATH — is
+# exactly what aws is on the broken machine.
+expect_match "broken: absent core dependency renders present=no" \
   "*3a*agent-skills*no*" "$(line_of "$B_OUT" "agent-skills")"
-expect_match "broken: absent lane-3b dependency renders present=no" \
-  "*3b*yq*no*" "$(line_of "$B_OUT" " yq ")"
+expect_match "broken: absent basic dependency renders present=no" \
+  "*3b*aws*no*" "$(line_of "$B_OUT" " aws ")"
 DEG="$(awk '/=== DEGRADATION MAP ===/,/=== SUMMARY ===/' "$B_OUT")"
-expect_contains "broken: the degradation map names the absent lane-3a dependency" "agent-skills" "$DEG"
-expect_contains "broken: the degradation map names the absent lane-3b dependency" "yq" "$DEG"
-expect_contains "broken: an absent lane-3b dependency is offered the just-in-time install wording" \
+expect_contains "broken: the degradation map names the absent core dependency" "agent-skills" "$DEG"
+expect_contains "broken: the degradation map names the absent basic dependency" "aws" "$DEG"
+expect_contains "broken: an absent bionic-installed dependency is offered the just-in-time install wording" \
   "just-in-time" "$DEG"
 expect_contains "broken: every degradation line names a fix (arrow-delimited)" "→" "$DEG"
 
