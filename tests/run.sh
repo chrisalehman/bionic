@@ -155,6 +155,11 @@ run "readme.test.sh" bash tests/readme.test.sh
 # agent-render.test.sh; this suite owns presence and content. Hand-listed like every suite
 # outside hooks/.
 run "voice-contract.test.sh" bash tests/voice-contract.test.sh
+# The other half of AC-6 (epic-17 W6 S4): every line setup.sh, doctor.sh and remove.sh PRINT
+# judged against the same one banned-vocabulary list voice-contract.test.sh reads — display
+# verbs, prompts, and the self-appending accumulators the action and degradation lines are
+# built in. Hand-listed like every suite outside hooks/.
+run "script-vocabulary.test.sh" bash tests/script-vocabulary.test.sh
 # The diagram pins (epic-17 W4 S8, spec AC-6 / design D4): the two composed-SVG diagrams
 # under skills/canonical-sdlc/diagrams/ read as text and compared against what they draw —
 # the hooks' SUPPORTED_SDLC_VERSION, hooks.json's six always-on entries, and SKILL.md's ten

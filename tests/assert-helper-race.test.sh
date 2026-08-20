@@ -72,6 +72,11 @@ tests/stop-orders.test.sh
 # `printf | grep -q`) — nothing here to pin. Named rather than silently omitted
 # so this list stays an enumeration, not a judgment call (epic-17-w2 S1 concern,
 # resolved by S2).
+# tests/script-vocabulary.test.sh (epic-17 W6 S4) is the same case as
+# seam-resolution.test.sh: pipefail plus its own expect_* helpers, pipe-free by
+# construction — containment is bash `[[ == * ]]`, and every grep in it runs
+# against a FILE argument, never another process's stdout. Named rather than
+# silently omitted, for the reason the paragraph above gives.
 # tests/plugin-hooks.test.sh was the third such file (pipefail + its own
 # expect_contains_lit/expect_absent_lit/expect_equal, pipe-free by
 # construction). It retired at epic-17 W5 (4/6) with claude-bootstrap.sh, the

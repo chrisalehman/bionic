@@ -543,11 +543,11 @@ echo ""
 # take the loop's stdin from the process substitution, and remove_dep's consent
 # prompt would then read a dependency name as the user's answer.
 
-echo "lane-3b dependencies:"
+echo "tools bionic installed:"
 if [ "$RM_MODE" != "payload" ]; then
   echo "  the dependency table ships with the payload — not available standalone."
   echo "  (reinstall bionic and run /bionic:remove for the dependency pass, or remove them by hand)"
-  _rm_leftover "lane-3b dependency teardown was not attempted (standalone mode)"
+  _rm_leftover "tool teardown was not attempted (standalone mode)"
 else
   dep_lines="$(dep_names_lane 3b)"
   while IFS= read -r dep_name <&3; do

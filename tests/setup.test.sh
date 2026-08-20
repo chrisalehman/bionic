@@ -340,30 +340,40 @@ expect_no_match "absent dep is not 'enabled'" '*enable agent-skills*' "$(cat "$C
 expect_match "absent dep: summary names it" '*agent-skills*' "$OUT"
 
 # ---------------------------------------------------------------------------
-# Group 4 — (c) the install loop, through the ONE install_dep function (AC-5).
-# Wave-06 S3 renamed the taxonomy: the rows walked here are every row whose
-# `kind` is not `native` — the basics, the extras, and the when-needed rows the
-# loop does not yet skip (S4 restructures the loop itself).
+# Group 4 — (c) the install loops, through the ONE install_dep function (AC-5).
+#
+# WAVE-06 S4 SPLIT ONE LOOP INTO TWO, and the split is the requirement. D-B
+# ratified four dependency CLASSES answering *when* bionic installs a tool, and
+# AC-11 states the consequence: setup asks about the basics and the optional
+# extras, and about no `when-needed` row at all. The pre-S4 loop walked every
+# row whose kind was not native, which is the basics, the extras AND the
+# when-needed rows together — so a user setting up a machine was asked to
+# install a headless browser and an MCP server for routes they might never
+# take. Step 3 now walks `dep_names_class basic` and step 4 walks
+# `dep_names_class extra`; nothing walks `when-needed`, whose install offer
+# belongs to the route that needs it (lib/jit.sh).
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "=== Group 4: the install loop ==="
+echo "=== Group 4: the install loops (basics, then extras) ==="
 
 new_fixture deps-consent
 plant_cli_plugin "bionic@bionic" true
 OUT="$(run_setup "$YES")"
 CALLTEXT="$(cat "$CALLS")"
-expect_match "a brew row installs through install_dep's own argv" '*brew install ripgrep*' "$CALLTEXT"
-expect_match "an npm row installs through install_dep's own argv" '*npm install -g @playwright/cli*' "$CALLTEXT"
-expect_match "an mcp row registers through install_dep's own argv" '*mcp add context7*' "$CALLTEXT"
+expect_match "a basic row installs through install_dep's own argv" '*brew install ripgrep*' "$CALLTEXT"
+expect_match "an extra npm row installs through install_dep's own argv" '*npm install -g @pencil.dev/cli*' "$CALLTEXT"
+expect_match "an extra mcp row registers through install_dep's own argv" '*mcp add context7*' "$CALLTEXT"
 expect_no_match "native-kind rows never reach install_dep (the harness owns them)" \
   '*brew install superpowers*' "$CALLTEXT"
 # The list must be read on its own descriptor. A `while read ... done < <(list)`
 # loop hands the BODY the same stdin, so the consent prompt inside it eats the
 # next dependency NAME as the answer — declining every item and silently
-# skipping the rest of the table. Reaching the LAST row is the catch.
-expect_match "the loop reaches its last row (the list is never eaten by the consent prompts)" \
-  '*ccstatusline*' "$OUT"
+# skipping the rest of the table. Reaching the LAST row of BOTH loops is the
+# catch, so each loop is asserted on its own final row.
+expect_match "the basics loop reaches its last row (the list is never eaten by the prompts)" \
+  '*aws*' "$OUT"
+expect_match "the extras loop reaches its last row" '*@pencil.dev/cli*' "$OUT"
 expect_match "a consented row actually mutates (statusline recorded in settings)" \
   '*ccstatusline*' "$(cat "$FIX/ch/settings.json")"
 
@@ -375,11 +385,79 @@ expect_no_match "declined: no brew install ran" '*brew install*' "$CALLTEXT"
 expect_no_match "declined: no npm install ran" '*npm install*' "$CALLTEXT"
 expect_match "declined: the dependency is named in the summary" '*ripgrep*' "$OUT"
 
+# `ccstatusline` is the extras row whose presence probe needs jq (the statusline
+# lives in settings.json). Without jq its presence is unreadable, and the loop
+# must say so and OFFER rather than assume either way — the same honest-unknown
+# rule the rest of the script follows. This arm replaces the pre-S4 one, which
+# read `motion`: motion is `when-needed` now and setup never mentions it.
 new_fixture deps-unknown
 plant_cli_plugin "bionic@bionic" true
+OUT="$(SETUP_PATH="$NOJQ_BIN" run_setup "$NO")"
+expect_match "a presence the probe cannot read reports unknown, never a confident no" \
+  '*ccstatusline*unknown*' "$OUT"
+
+# ---------------------------------------------------------------------------
+# Group 4b — AC-11 by name: WHICH rows setup is allowed to ask about.
+#
+# Both directions, because either alone is satisfiable by a broken loop: a loop
+# that asks about nothing passes "no when-needed row appears", and the pre-S4
+# loop passes "every basic appears". The four extras additionally carry the
+# shape D-B ratified for them — one line of why, and a question that defaults to
+# No — and the why-line is asserted per row rather than in aggregate, since one
+# shared sentence would satisfy a count.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 4b: setup asks about basics and extras only (AC-11) ==="
+
+new_fixture classes
+plant_cli_plugin "bionic@bionic" true
 OUT="$(run_setup "$NO")"
-expect_match "a mechanism with no presence surface reports unknown, never a confident no" \
-  '*motion*unknown*' "$OUT"
+
+# The step blocks, so a name found in one step is not credited to another. The
+# transcript's step headers are the only delimiters available and they are what
+# the user reads, which makes them the right ones to key on.
+step_block() {  # <this-step-header-prefix> <next-step-header-prefix>
+  awk -v a="$1" -v b="$2" 'index($0, a) == 1 { f = 1 } f && index($0, b) == 1 { f = 0 } f' <<< "$OUT"
+}
+TOOLS="$(step_block "3. Tools" "4. ")"
+EXTRAS="$(step_block "4. Optional extras" "5. ")"
+
+expect_match "the tools step has its own header" '*3. Tools*' "$OUT"
+expect_match "the extras step has its own header" '*4. Optional extras*' "$OUT"
+
+for basic in git node pnpm gh jq rg uv docker aws; do
+  expect_match "basic offered at setup: ${basic}" "*${basic}*" "$TOOLS"
+done
+
+# The when-needed rows, checked against the WHOLE transcript: "setup asks about
+# no when-needed tool" is a claim about the run, not about one step.
+# `impeccable` is the one that is also native-kind, so a loop keyed on class
+# rather than kind would hand it to install_dep, which is required to refuse it
+# — the failure would surface as an error message, not as an offer.
+for jit in impeccable "@playwright/cli" playwright-chromium chrome-devtools motion; do
+  expect_no_match "when-needed row is NOT offered at setup: ${jit}" "*${jit}*" "$OUT"
+done
+
+for extra in ccstatusline notebooklm context7 "@pencil.dev/cli"; do
+  expect_match "extra offered at setup: ${extra}" "*${extra}*" "$EXTRAS"
+  expect_match "extra carries its own line of why: ${extra}" "*   ${extra} — *" "$EXTRAS"
+done
+
+# `[y/N]` is deps.sh's own prompt shape and the capital N IS the default, so
+# asserting it here asserts that an extra goes through the one consent gate
+# rather than through a second prompt written for this step.
+expect_match "extras are asked with a default-No prompt" '*[y/N]*' "$EXTRAS"
+
+# One why line per extra and no more: a single shared sentence at the top of the
+# step would satisfy every per-row assertion above while telling the user
+# nothing about three of the four tools.
+WHY_LINES="$(awk '/^   [a-z@][^ ]* — ./ { n++ } END { print n + 0 }' <<< "$EXTRAS")"
+expect_eq "exactly one why line per extra, no shared sentence standing in" "4" "$WHY_LINES"
+
+# Declining every extra mutates nothing — the default really is No.
+expect_no_match "declined extras: nothing was installed" '*npm install -g @pencil.dev/cli*' "$(cat "$CALLS")"
+expect_no_match "declined extras: no statusline recorded" '*statusLine*' "$(cat "$FIX/ch/settings.json")"
 
 # ---------------------------------------------------------------------------
 # Group 5 — (d) the CLAUDE_CODE_ENABLE_TODO_TOOLS export, marker-scoped.
