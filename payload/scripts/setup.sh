@@ -850,8 +850,9 @@ _setup_profile_block() {
 # removing. Without jq the value cannot be read at all, so the honest answer is
 # to say so and change nothing — never to write over a mode we could not see.
 _setup_default_mode() {
-  local settings mode
+  local settings mode want
   settings="$(_dep_settings_file)"
+  want="$BIONIC_DEFAULT_PERMISSION_MODE"
 
   if ! command -v jq >/dev/null 2>&1; then
     say "   the default permission mode is unknown — jq is unavailable, so ${settings} was not parsed."
@@ -865,19 +866,24 @@ _setup_default_mode() {
     mode=""
   fi
 
-  if [ "$mode" = "auto" ]; then say "   the default permission mode is already auto — nothing to do."; return 0; fi  # idempotence guard: default mode
+  # THE VALUE IS DEPS.SH'S, NOT THIS FILE'S (six-axis review D-1). remove.sh
+  # offers to reset exactly the value bionic wrote and leaves any other alone,
+  # so the two scripts are one decision; this used to be a bare literal here and
+  # a second bare literal there, agreeing by luck. Written with `--arg` so a
+  # value with a quote in it could never become part of the jq program.
+  if [ "$mode" = "$want" ]; then say "   the default permission mode is already ${want} — nothing to do."; return 0; fi  # idempotence guard: default mode
 
   say "   Claude Code asks before each command unless a default mode says otherwise."
-  if ! consent "   Set Claude Code's default permission mode to auto? Recommended — you approve once, not on every command."; then say "   declined — the default permission mode is unchanged."; action "set Claude Code's default permission mode to auto in ${settings} (re-run /bionic:setup and answer y at the permission step)"; return 0; fi  # consent gate: default mode
+  if ! consent "   Set Claude Code's default permission mode to ${want}? Recommended — you approve once, not on every command."; then say "   declined — the default permission mode is unchanged."; action "set Claude Code's default permission mode to ${want} in ${settings} (re-run /bionic:setup and answer y at the permission step)"; return 0; fi  # consent gate: default mode
 
   # Created only AFTER consent: a declined run must leave a machine that has no
   # settings file without one.
   [ -f "$settings" ] || echo '{}' > "$settings"
-  if _dep_settings_write_jq "$settings" '.permissions.defaultMode = "auto"'; then
+  if _dep_settings_write_jq "$settings" '.permissions.defaultMode = $m' --arg m "$want"; then
     say "   set."
   else
     say "   the default permission mode could not be set."
-    action "set Claude Code's default permission mode to auto in ${settings} by hand"
+    action "set Claude Code's default permission mode to ${want} in ${settings} by hand"
   fi
   return 0
 }

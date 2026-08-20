@@ -256,24 +256,37 @@ expect_eq "native row: impeccable (byte-exact, when-needed — never a third cor
   "$(deps_run -- dep_row impeccable)"
 
 echo ""
-echo "=== Group 3b: the deprecated lane lists still answer for the callers S3 does not own ==="
+echo "=== Group 3b: the lane view is retired (six-axis review A-1) ==="
 #
-# setup.sh and remove.sh still walk `dep_names_lane`; S4/S6/S7 retire those call
-# sites. Until then the alias has to mean exactly what it meant before: 3a = the
-# rows the harness installs (class core), 3b = the rows bionic's own installers
-# handle (kind != native). impeccable is native and NOT core, so it is in
-# neither list — putting it in 3b would have setup offer a when-needed tool
-# (AC-11) and hand install_dep a row it must refuse.
+# S3 kept `dep_names_lane` as a deprecated VIEW because setup.sh and remove.sh
+# still walked it, and said S4/S7 would retire the call sites. S4 did. S7 did
+# not, and the six-axis review found `remove.sh:592` still computing the teardown
+# set as "kind != native" — which silently dropped `impeccable`, the one native
+# row that is not core, and then printed the new taxonomy's words over the old
+# taxonomy's set. remove.sh walks the classes now, so the view has no caller and
+# is gone.
+#
+# THE FIELD IS NOT THE LIST, and only the list retired. `dep_field <n> lane` is
+# still detect.sh's (its fact line renders `lane=`), and it answers a different
+# question — which lane is this row in — from the one the list answered, which
+# was which rows do I walk. The arms above pin the field; these pin the removal.
 
-lane_names() { deps_run -- dep_names_lane "$1" | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'; }
+expect_false "dep_names_lane is gone — nothing enumerates by lane any more" \
+  bash -c '. "$1"; type dep_names_lane' _ "$DEPS_SH"
+# Calls, not mentions: two comments record the retirement, and a check that could
+# not tell those from a caller would forbid recording it.
+expect_eq "…and no payload script calls it" "" \
+  "$(/usr/bin/grep -rn 'dep_names_lane' "${REPO}/payload" | /usr/bin/grep -vE ':[[:space:]]*#' || true)"
 
-expect_eq "dep_names_lane 3a == dep_names_class core" \
-  "$(class_names core)" "$(lane_names 3a)"
-expect_eq "dep_names_lane 3b is every row bionic installs itself" \
-  "@pencil.dev/cli @playwright/cli aws ccstatusline chrome-devtools context7 docker gh git jq motion node notebooklm playwright-chromium pnpm rg uv" \
-  "$(lane_names 3b)"
-expect_no_match "dep_names_lane 3b never yields the when-needed native row" \
-  "*impeccable*" "$(lane_names 3b)"
+# The set remove.sh walks now, stated once: every class except core. `core` is
+# the plugin's own declared dependencies, which the native uninstall and prune
+# take — and `impeccable`, which the retired view dropped, is in this one.
+TEARDOWN_SET="$( { deps_run -- dep_names_class basic
+                   deps_run -- dep_names_class when-needed
+                   deps_run -- dep_names_class extra; } | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "the teardown set is every row outside core" \
+  "@pencil.dev/cli @playwright/cli aws ccstatusline chrome-devtools context7 docker gh git impeccable jq motion node notebooklm playwright-chromium pnpm rg uv" \
+  "$TEARDOWN_SET"
 
 echo ""
 echo "=== Group 3c: consumer agreement — every row names something real (AC-10) ==="
@@ -564,7 +577,51 @@ KEEP_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALL
   bash -c 'echo y | { . "$1"; remove_dep git; }' _ "$DEPS_SH" 2>&1)"
 expect_eq "remove_dep git (keep-shared) removes nothing even with consent" "0" \
   "$(grep -c . "$CALLS" | tr -d ' ')"
-expect_match "remove_dep git says why it is keeping the binary" "*keep-shared*" "$KEEP_OUT"
+# R-1: the reason is stated in words a user can act on. `keep-shared` is a column
+# value in the table above — the transcript printed it nine times in a row.
+expect_match "remove_dep git says why it is keeping the binary" \
+  "*kept — shared with other tools, bionic never removes it*" "$KEEP_OUT"
+expect_no_match "…without printing the table's own value for the policy" "*keep-shared*" "$KEEP_OUT"
+
+# ---- the two native behaviours, which are not one behaviour (A-2) ----
+#
+# `native-uninstall-offer` used to mean one sentence for every native row:
+# "removed by the plugin uninstall, not here". For `superpowers` that is true —
+# bionic's plugin.json declares it, so removing bionic takes it. For
+# `impeccable` it is false by construction (A-3.1: plugin.json declares the two
+# core rows only; the marketplace entry makes the JIT offer one command and
+# declares no dependency), and `install_plugin_native` can put it on a machine
+# mid-session from `jit_offer`. So the row that nothing declares gets an offer of
+# its own, and the rows bionic declares keep the deferral.
+: > "$CALLS"
+CORE_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  bash -c 'echo y | { . "$1"; remove_dep superpowers; }' _ "$DEPS_SH" 2>&1)"
+expect_eq "remove_dep on a declared plugin runs nothing itself" "0" \
+  "$(grep -c . "$CALLS" | tr -d ' ')"
+expect_match "…and says which step does take it" "*removing bionic removes it*" "$CORE_OUT"
+
+: > "$CALLS"
+JIT_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  bash -c 'echo y | { . "$1"; remove_dep impeccable; }' _ "$DEPS_SH" 2>&1)"
+expect_match "remove_dep on a plugin nothing declares offers the CLI's own uninstall" \
+  "*claude plugin uninstall impeccable@bionic*" "$(cat "$CALLS")"
+expect_no_match "…and never claims some other step already took it" \
+  "*removed by the plugin uninstall*" "$JIT_OUT"
+
+: > "$CALLS"
+JIT_NO="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  bash -c 'echo n | { . "$1"; remove_dep impeccable; }' _ "$DEPS_SH" 2>&1)"
+expect_eq "a declined offer uninstalls nothing" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
+expect_match "…and says so" "*declined — impeccable left in place.*" "$JIT_NO"
+
+# ---- D-1: the default permission mode has an owner, and it is this file ----
+#
+# setup.sh writes it and remove.sh resets exactly this value and no other; the
+# two used to hold independent literals. The behavioural halves are pinned in
+# tests/setup.test.sh and tests/remove.test.sh (mutation arms, both directions);
+# what belongs here is that the owner exists and reads back.
+expect_eq "deps.sh owns the default permission mode bionic offers" "auto" \
+  "$(bash -c '. "$1"; printf "%s" "${BIONIC_DEFAULT_PERMISSION_MODE:-}"' _ "$DEPS_SH")"
 
 echo ""
 echo "=== Group 8b: the statusline writers preserve settings.json's MODE ==="
