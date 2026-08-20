@@ -317,7 +317,22 @@ expect_match "with no seam set and no claude on PATH, the default is unknown (he
   "load-state=unknown *" \
   "$(probe_run -- detect_plugin_load_state bionic@bionic)"
 expect_true "detect.sh names 'claude plugin list' as the seam's default" \
-  /usr/bin/grep -q 'BIONIC_PLUGIN_LIST_CMD:-claude plugin list' "$DETECT_SH"
+  /usr/bin/grep -q 'BIONIC_PLUGIN_LIST_CMD-claude plugin list' "$DETECT_SH"
+
+# AN EXPLICITLY-EMPTY SEAM IS HONOURED AS EMPTY (six-axis review C-3). `${VAR:-d}`
+# treats "" as unset and falls back to the default, so a suite that CLEARED the
+# variable instead of pointing it at a fixture reached the real CLI and passed —
+# the guard at the top of the probe was unreachable through its own seam. `${VAR-d}`
+# is the one-character difference: set-but-empty stays empty and meets the guard.
+EMPTY_SEAM="$(probe_run BIONIC_PLUGIN_LIST_CMD="" -- detect_plugin_load_state bionic@bionic)"
+expect_match "an explicitly-empty seam reaches the empty-command guard" \
+  "load-state=unknown *" "$EMPTY_SEAM"
+expect_match "…and names the empty command as the cause" \
+  "*the plugin listing command is empty*" "$EMPTY_SEAM"
+# The negative half: an empty seam must not fall back to the real listing. PATH here
+# carries no `claude` at all, so the fallback's own cause sentence is the tell.
+expect_no_match "…and never falls back to the shipped default command" \
+  "*claude plugin list*" "$EMPTY_SEAM"
 
 echo ""
 echo "=== Group 4: detect_plugin_load_state exits 0 and writes nothing ==="

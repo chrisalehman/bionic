@@ -765,6 +765,120 @@ detect_registry_sha_lag() {  # [<repo-dir>] -> one line, always exit 0
   return 0
 }
 
+# ─── Bounded execution ───────────────────────────────────────────────────────
+#
+# THE THINGS BIONIC RUNS THAT IT DOES NOT CONTROL. Almost every fact in this file
+# is a file read. A few are other people's programs — the CLI, Homebrew, npm —
+# and any of them can wedge: a network mirror that never answers, a package
+# manager waiting on its own lock, a CLI mid-update. Unbounded, whatever asked
+# the question wedges with them.
+#
+# ONE OWNER, TWO CALLERS (epic-17 W6 S11, critic F-3). This lived in doctor.sh,
+# so doctor's plugin listing was bounded and setup's — the SAME probe, the same
+# `claude plugin list` — was not. Setup is the command a stranger runs first, and
+# it ran it after the install with the report half-printed, where a wedge is
+# indistinguishable from a crash. A bound that only one of two callers has is a
+# bound the product does not have, so it lives here now, beside the probe, and
+# both scripts call it.
+#
+# ONE MECHANISM, ONE BOUND: a background job in its own process group, plus a
+# poll that signals the group when the limit is up. It runs shell functions and
+# external commands alike, which `timeout(1)` cannot, and it reaches a forked
+# grandchild, which `timeout(1)` also cannot — see `detect_bounded` below for
+# why that second one is the difference between a bound and a bound that binds.
+#
+# KILLING IS THE POINT, so the child is started in a way that can be killed AND
+# in a way that cannot hold the caller open: its stdout is a file this function
+# reads afterwards — never the caller's command-substitution pipe — and its stdin
+# is closed, so a probe can never eat the answer to a question the caller asks
+# later.
+#
+# NO `sleep`, NO BOUND — deliberately, and stated rather than hidden. On a
+# machine so bare that coreutils is missing, waiting on the probe is a better
+# failure than spinning a hot loop against it.
+#
+# THE SEAM KEEPS ITS NAME. `BIONIC_DOCTOR_PROBE_SECONDS` was named when doctor
+# was the only caller. It is cited by the Step-5 captures and by the suites that
+# accelerate it, and renaming it would invalidate evidence to buy nothing a
+# reader of this file cannot see in one line.
+detect_probe_seconds() { echo "${BIONIC_DOCTOR_PROBE_SECONDS:-15}"; }
+
+# WHAT A BOUND OWES, AND THE HALF THE FIRST CUT DID NOT PAY (six-axis review C-1).
+# A bound has to release the CALLER on time, not merely stop waiting on its own
+# child. The first cut did the second only, and the two come apart on exactly the
+# shape both real probes have: `brew` is a shell script that runs Ruby, `npm` a
+# shim that runs node. The child forks a grandchild, the grandchild inherits the
+# stdout it was started with — the caller's `$(…)` pipe — and killing the child
+# leaves that pipe open. Measured: `rc=124 elapsed=45s` against a three-second
+# bound. The row said "not checked" honestly and printed it forty-two seconds late.
+#
+# SO THE PROBE NEVER WRITES TO THE CALLER'S PIPE. Its stdout goes to a file that
+# this function alone reads, after the wait is over: whatever the grandchild does
+# next, it does to a file nobody is waiting on. That is what makes the bound bind.
+#
+# AND THE GROUP IS WHAT GETS SIGNALLED. `set -m` puts the job in a process group
+# of its own (pgid == pid), so `kill -TERM -$pid` reaches the grandchild too and
+# a probe that timed out is not left running on the machine afterwards. Monitor
+# mode is restored immediately: it is on for the launch, not for the script.
+#
+# ONE MECHANISM, NOT TWO. This used to hand external commands to `timeout` when
+# one existed. `timeout(1)` signals the child and not the group, so it carries
+# the same defect this function was just fixed for, and on bionic's platform it
+# never ran at all (`command -v timeout` is empty on stock macOS). A second
+# mechanism that cannot honour the contract is worse than no second mechanism.
+# Supersedes A-4.S6.5's two-mechanism note.
+#
+# THE TEMPORARY FILE IS NOT A CHANGE TO THIS MACHINE. It lives under $TMPDIR,
+# carries the pid so two callers cannot collide, and is removed as it is read.
+# "Nothing on this machine is changed" is a claim about the user's configuration
+# — settings, plugins, dependencies — and no probe output ever reaches one.
+_DETECT_BOUND_SEQ=0
+
+_detect_bound_read() {  # <file> — pass on what the probe managed to say, then forget it
+  local file="${1:-}" payload
+  # `$(<file)` is bash's own read: no `cat`, so a machine missing coreutils
+  # still gets the probe's answer rather than an empty one.
+  if [ -s "$file" ]; then payload="$(<"$file")"; printf '%s\n' "$payload"; fi
+  rm -f "$file" 2>/dev/null || true
+  return 0
+}
+
+detect_bounded() {  # <seconds> <command...> — passes stdout through; 124 on timeout
+  local limit="${1:-15}"; shift
+  local pid waited=0 rc out_file had_monitor
+
+  _DETECT_BOUND_SEQ=$((_DETECT_BOUND_SEQ + 1))
+  out_file="${TMPDIR:-/tmp}/bionic-probe.$$.${_DETECT_BOUND_SEQ}"
+  : > "$out_file" 2>/dev/null || out_file="/dev/null"
+
+  case "$-" in *m*) had_monitor=yes ;; *) had_monitor=no ;; esac
+  set -m
+  "$@" </dev/null > "$out_file" &
+  pid=$!
+  [ "$had_monitor" = "yes" ] || set +m
+
+  if ! command -v sleep >/dev/null 2>&1; then
+    wait "$pid"; rc=$?
+    _detect_bound_read "$out_file"
+    return $rc
+  fi
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$waited" -ge "$limit" ]; then
+      # The group first — `-$pid` is the process group `set -m` gave this job —
+      # and the bare pid as the fallback for a kernel that refused the group.
+      kill -TERM "-${pid}" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      _detect_bound_read "$out_file"
+      return 124
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  wait "$pid"; rc=$?
+  _detect_bound_read "$out_file"
+  return $rc
+}
+
 # ─── Is the CLI actually LOADING us? ─────────────────────────────────────────
 #
 # THE FACT NOTHING IN THIS FILE COULD ANSWER UNTIL NOW, and the most expensive
@@ -810,7 +924,13 @@ detect_plugin_load_state() {  # <plugin-id> -> one line, always exit 0
     return 0
   fi
 
-  cmd="${BIONIC_PLUGIN_LIST_CMD:-claude plugin list}"
+  # `${VAR-default}`, NOT `${VAR:-default}` (six-axis review C-3). With the colon,
+  # an explicitly-empty seam counts as unset and falls back to the real CLI — so
+  # the empty-command guard three lines down was unreachable through the seam that
+  # is supposed to reach it, and a suite that CLEARED the variable instead of
+  # pointing it at a fixture would have run the live `claude plugin list` and
+  # passed. Without the colon, set-but-empty stays empty and meets the guard.
+  cmd="${BIONIC_PLUGIN_LIST_CMD-claude plugin list}"
   # Whitespace split into argv. A command string is not a shell program here:
   # no quoting, no operators, no eval. That is a deliberate ceiling on what a
   # seam can do, and everything the seam is FOR fits under it.
