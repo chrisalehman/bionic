@@ -121,8 +121,13 @@ SKILL_COPY_STATE="${SKILL_COPY_FACT#*present=}"; SKILL_COPY_STATE="${SKILL_COPY_
 SKILL_COPY_PATH="${SKILL_COPY_FACT##*path=}"
 HOOK_FILES_FACT="$(detect_legacy_hook_files)"
 HOOK_FILES_COUNT="${HOOK_FILES_FACT#*count=}"; HOOK_FILES_COUNT="${HOOK_FILES_COUNT%% *}"
-HOOK_FILES_NAMES="${HOOK_FILES_FACT#*names=}"; HOOK_FILES_NAMES="${HOOK_FILES_NAMES%% *}"
 HOOK_FILES_CAUSE="${HOOK_FILES_FACT##*cause=}"
+REG_SHA_FACT="$(detect_registry_sha_lag)"
+REG_SHA_STATE="${REG_SHA_FACT#*state=}"; REG_SHA_STATE="${REG_SHA_STATE%% *}"
+REG_SHA_REG="${REG_SHA_FACT#*registry=}"; REG_SHA_REG="${REG_SHA_REG%% *}"
+REG_SHA_REPO="${REG_SHA_FACT#*repo=}";    REG_SHA_REPO="${REG_SHA_REPO%% *}"
+REG_SHA_CAUSE="${REG_SHA_FACT##*cause=}"
+
 INST_AGENT_FACT="$(detect_installed_agent_copies)"
 INST_AGENT_STATE="${INST_AGENT_FACT#*state=}"; INST_AGENT_STATE="${INST_AGENT_STATE%% *}"
 INST_AGENT_TOTAL="${INST_AGENT_FACT#*total=}"; INST_AGENT_TOTAL="${INST_AGENT_TOTAL%% *}"
@@ -313,6 +318,28 @@ case "$AGENT_STATE" in
     printf '  %-19s %s\n' "agent files" "unknown — ${AGENT_CAUSE}" ;;
 esac
 printf '  %-19s %s\n' "payload root" "$(_detect_plugin_root)"
+
+# WHICH COMMIT IS INSTALLED, against which commit this tree is on. ONE LINE, AND IT REPORTS
+# RATHER THAN POLICES — the agent-files posture, and deliberately: an install behind the tip
+# is what a developer machine looks like between any two commits, so a SUMMARY action line
+# would nag on every one of them. The action rides inline on the one state that has one.
+#
+# `unknown` is the ORDINARY answer here and carries no apology: installed from the public
+# feed, with no checkout of this repo under the cwd, the question genuinely has no answer.
+_doctor_sha12() { printf '%.12s' "${1:-}"; }
+case "$REG_SHA_STATE" in
+  match)
+    printf '  %-19s %s\n' "registry sha" \
+      "match — the installed build is this tree's HEAD ($(_doctor_sha12 "$REG_SHA_REG"))" ;;
+  lag)
+    printf '  %-19s %s\n' "registry sha" \
+      "installed at $(_doctor_sha12 "$REG_SHA_REG"), this tree is $(_doctor_sha12 "$REG_SHA_REPO") — the install is behind; re-run: claude plugin install bionic@bionic" ;;
+  not-in-repo)
+    printf '  %-19s %s\n' "registry sha" \
+      "installed at $(_doctor_sha12 "$REG_SHA_REG") — not a commit in this repository, so this tree is not what is running" ;;
+  *)
+    printf '  %-19s %s\n' "registry sha" "unknown — ${REG_SHA_CAUSE}" ;;
+esac
 
 echo ""
 echo "=== TIER STATE ==="

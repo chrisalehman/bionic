@@ -4551,6 +4551,51 @@ write_plan "$h30f" "$(wave_plan 5 "$step5_base" \
 expect_allow "30f impostor at current: 5 → allow (form check is post-Verify only)" \
   "$h30f" 'git commit -m "x"'
 
+# 30h — THE REFUTATION ARM (critic C-1, W5). The exemption above replaces the
+# WAIVER FORM a user-confirmed row used to be paid in; it does not replace the
+# AUDITOR. Those are different authorities and the design ratified only the
+# first substitution. Written as a plain `elif` ahead of the verdict test, the
+# arm let a T4 row carrying a well-formed `user-confirmed:` walk past an
+# auditor's STANDING REFUTED — the one verdict in the vocabulary that is a
+# positive finding rather than an absence, and the one this very wave produced
+# three of on its first audit pass. So the exemption is scoped to an auditor
+# cell that is EMPTY (nobody has ruled) or CONFIRMED (agreement): a refutation
+# on the record meets the wall, and the refusal names the refutation rather
+# than the attribution, because the attribution is fine and re-writing it is
+# not the fix.
+h30h=$(make_home)
+write_plan "$h30h" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 REFUTED "$GOOD_CONFIRM")")" > /dev/null
+expect_block "30h T4 + well-formed user-confirmed + auditor REFUTED → block" \
+  "$h30h" 'git commit -m "x"' "REFUTED"
+
+# 30i — UNVERIFIABLE is the auditor's other positive finding: it says the
+# evidence could not be checked, which is not the same as nobody having looked.
+# Same arm, same reason.
+h30i=$(make_home)
+write_plan "$h30i" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 UNVERIFIABLE "$GOOD_CONFIRM")")" > /dev/null
+expect_block "30i T4 + well-formed user-confirmed + auditor UNVERIFIABLE → block" \
+  "$h30i" 'git commit -m "x"' "UNVERIFIABLE"
+
+# 30j — the refusal has to say WHAT is wrong. 30h asserts the verdict token
+# appears; this asserts the sentence is about the standing refutation and not
+# about the attribution the row got right. A message that told the user to
+# re-write a correct `user-confirmed:` line would send them to fix the one
+# thing that is not broken.
+h30j=$(make_home)
+write_plan "$h30j" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 REFUTED "$GOOD_CONFIRM")")" > /dev/null
+expect_block "30j the refusal names the standing auditor finding, not the attribution" \
+  "$h30j" 'git commit -m "x"' "does not overturn"
+
+# 30k — and the positive twin, so the pair discriminates: the SAME row with the
+# SAME confirmation and a CONFIRMED verdict passes. (30e proves the well-formed
+# + CONFIRMED case at the top of this section; this arm is stated beside its
+# refutation twin so a future edit that broke the agreement case would fail
+# next to the one that proves the refusal.)
+h30k=$(make_home)
+write_plan "$h30k" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 CONFIRMED "$GOOD_CONFIRM")")" > /dev/null
+expect_allow "30k T4 + well-formed user-confirmed + auditor CONFIRMED → allow" \
+  "$h30k" 'git commit -m "x"'
+
 # 30g — META-EVIDENCE, and the durable half of this section.
 #
 # 30b/30c/30d block against the PRE-fix hook too, for the old reason (no
