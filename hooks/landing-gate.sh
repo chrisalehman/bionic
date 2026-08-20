@@ -141,7 +141,7 @@
 # which is why the refusal must name the row and its artifacts rather than the rule.
 # [WALL: tests/landing-gate.test.sh]
 #
-# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
+# Registered on both channels: hooks/hooks.json (agent contexts, behind agent-context-guard.sh) and skills/canonical-sdlc/SKILL.md frontmatter (main thread).
 
 set -uo pipefail
 
@@ -319,8 +319,9 @@ echo "$CURRENT" | grep -qE '^([0-9]+[ab]?|T[0-9]+)$' || exit 0
 
 # ---------- a wave is active: sweep ----------
 
-# The sweeper is this script's SIBLING — claude-bootstrap.sh installs every hooks/*.sh into
-# one directory, so the same resolution holds in the repo and in ~/.claude/hooks/. No PATH
+# The sweeper is this script's SIBLING — the payload ships every hooks/*.sh in one
+# directory, so the same resolution holds in the repo and under the mounted plugin's
+# hooks/ that hooks/hooks.json roots at ${CLAUDE_PLUGIN_ROOT}. No PATH
 # lookup (a hook's PATH is not ours to trust) and no environment override (a seam on the
 # path under test would leave the production path unverified).
 SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"

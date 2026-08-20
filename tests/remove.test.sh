@@ -1140,6 +1140,112 @@ expect_eq "production remove.sh is byte-identical to before the mutation arms" \
   "$REMOVE_SH_CKSUM_BEFORE" "$(shasum < "$REMOVE_SH")"
 
 echo ""
+echo "=== Group 17: the legacy installed skill copy — the thing remove.sh left behind (W5 RV-6) ==="
+#
+# THE FINDING, and it is the worst kind: remove.sh finished, printed "Claude Code still
+# works, without bionic's skills, hooks and agents", and left a rendered canonical-sdlc
+# sitting in the CLI's own skills directory with eleven hook registrations in its
+# frontmatter. On a pre-plugin machine the user ran a teardown, was told bionic was gone,
+# and kept arming bionic's walls every session. Setup step 7 already removed it; the
+# REMOVER did not know it existed.
+#
+# WHY THIS IS AN INLINE PREDICATE AND NOT A detect.sh CALL. remove.sh is the one payload
+# script reachable standalone — curl-fetched onto a machine whose plugin is already gone,
+# where scripts/lib/ does not exist — so it may not source detect.sh, by the rule stated at
+# the top of that file. The established answer is a SHARED LITERAL pinned at both ends, the
+# same treatment RM_RC_START and the todo-tools regex get. The predicate is pinned here too,
+# not just the name: directory PLUS SKILL.md, because this authorises a recursive delete and
+# a bare directory of that name is not evidence the installer rendered anything.
+
+plant_legacy_skill_copy() {  # <arm>
+  mkdir -p "$1/home/.claude/skills/canonical-sdlc"
+  printf -- '---\nname: canonical-sdlc\nhooks:\n  PreToolUse: []\n---\nThe copy the installer rendered.\n' \
+    > "$1/home/.claude/skills/canonical-sdlc/SKILL.md"
+}
+
+# ---- consent given: it goes ----
+ARM="$(new_arm legacy-skill-copy-yes)"
+plant_legacy_skill_copy "$ARM"
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+expect_true "skill copy: consented, the directory is gone" \
+  bash -c '! test -e "$1"' _ "$ARM/home/.claude/skills/canonical-sdlc"
+# The item's own label, not the word "removed": every step in this script reports
+# removals, so a bare "removed" arm would pass on somebody else's line.
+RM_SKILL_LABEL="legacy installed skill copy"
+expect_contains "skill copy: and the run names THIS item as removed" \
+  "✓ ${RM_SKILL_LABEL}" "$OUT"
+
+# ---- consent declined: it stays, and the report says so ----
+ARM="$(new_arm legacy-skill-copy-no)"
+plant_legacy_skill_copy "$ARM"
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
+expect_true "skill copy: declined, the directory is untouched" \
+  test -f "$ARM/home/.claude/skills/canonical-sdlc/SKILL.md"
+# "Skipped" alone is in every run's summary header. What has to be true is that THIS
+# item is named in the list under it.
+expect_contains "skill copy: declining lands THIS item in the Skipped list, not silence" \
+  "${RM_SKILL_LABEL}" "$OUT"
+
+# ---- absent: a no-op, and never a phantom prompt ----
+ARM="$(new_arm legacy-skill-copy-absent)"
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+# Same trap: "already clean" appears on several lines of a clean run. Pin the label.
+expect_contains "skill copy: absent reports THIS item already-clean rather than nothing at all" \
+  "${RM_SKILL_LABEL} — already clean" "$OUT"
+expect_true "skill copy: absent creates no skills directory as a side effect" \
+  bash -c '! test -e "$1"' _ "$ARM/home/.claude/skills"
+
+# ---- IDEMPOTENT: a second all-yes run over the same arm changes nothing more ----
+ARM="$(new_arm legacy-skill-copy-twice)"
+plant_legacy_skill_copy "$ARM"
+plant_claude_stub "$ARM" no no
+run_remove "$REMOVE_SH" "$ARM" "$ALL_YES" >/dev/null 2>&1
+FP_ONCE="$(fingerprint "$ARM/home")"
+run_remove "$REMOVE_SH" "$ARM" "$ALL_YES" >/dev/null 2>&1
+expect_eq "skill copy: a second remove run is a no-op on the machine" "$FP_ONCE" "$(fingerprint "$ARM/home")"
+
+# ---- the bare-directory guard: a directory without SKILL.md is not a rendered skill ----
+ARM="$(new_arm legacy-skill-copy-bare)"
+mkdir -p "$ARM/home/.claude/skills/canonical-sdlc"
+printf 'a note the user left here\n' > "$ARM/home/.claude/skills/canonical-sdlc/README.md"
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+expect_true "skill copy: a directory with no SKILL.md is NOT deleted (the delete is recursive)" \
+  test -f "$ARM/home/.claude/skills/canonical-sdlc/README.md"
+
+# ---- the shared literal and the predicate, pinned at BOTH ends ----
+expect_true "remove.sh carries detect.sh's legacy skill name verbatim" \
+  bash -c 'grep -qF "canonical-sdlc" "$1"' _ "$REMOVE_SH"
+expect_true "detect.sh states it as the constant remove.sh copies" \
+  bash -c 'grep -qF "DETECT_LEGACY_SKILL_NAME=" "$1"' _ "$DETECT_SH"
+DETECT_SKILL_NAME="$(sed -n "s/^DETECT_LEGACY_SKILL_NAME='\(.*\)'\$/\1/p" "$DETECT_SH" | head -1)"
+RM_SKILL_NAME="$(sed -n "s/^RM_LEGACY_SKILL_NAME='\(.*\)'\$/\1/p" "$REMOVE_SH" | head -1)"
+expect_eq "the two constants are the same string (the pin has two ends)" \
+  "$DETECT_SKILL_NAME" "$RM_SKILL_NAME"
+expect_ne "…and neither is empty, which would make the arm above vacuous" "" "$RM_SKILL_NAME"
+
+# ---- the closing claim is TRUE on every machine, which is the other half of RV-6 ----
+#
+# "Claude Code still works, without bionic's skills, hooks and agents" was printed
+# unconditionally, including on the run that had just been told NOT to remove the skill
+# copy. A summary that contradicts its own Skipped list four lines above it is worse than
+# no summary: it teaches the reader to stop reading it.
+ARM="$(new_arm closing-claim-declined)"
+plant_legacy_skill_copy "$ARM"
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
+expect_not_contains "closing claim: a run that skipped things does not claim bionic is gone" \
+  "without bionic's skills, hooks and agents" "$OUT"
+ARM="$(new_arm closing-claim-clean)"
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+expect_contains "closing claim: a run that finished everything still says so plainly" \
+  "without bionic's skills, hooks and agents" "$OUT"
+
+echo ""
 echo "=== Group 16: the suite is registered in tests/run.sh by name ==="
 
 expect_true "tests/run.sh runs remove.test.sh by name" \

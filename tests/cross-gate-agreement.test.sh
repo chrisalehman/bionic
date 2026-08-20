@@ -2642,11 +2642,10 @@ echo "=== L — the WIRING: registration is three-sided (frontmatter, absence, p
 #
 # THIS SECTION READS PAYLOAD FILES ONLY (epic-17 wave-02 S3, AC-1). Every assertion
 # that used to derive its expected shape from the condemned installer script's own
-# registration array now lives in tests/plugin-hooks.test.sh — the designated
-# transitional home, which retires whole when the installer does at W5. The two
-# always-on surfaces are pinned against each other there, so an assertion made here
-# against hooks/hooks.json still transitively binds the installer for as long as the
-# installer exists.
+# registration array lived in tests/plugin-hooks.test.sh — the designated transitional
+# home, which retired whole with the installer at W5 (4/6). hooks/hooks.json is the only
+# always-on surface left, so an assertion made here against it binds the whole channel
+# with nothing left to cross-check it against.
 SKILL_SRC="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
 HOOKS_JSON_SRC="$BIONIC_HOOKS_DIR/hooks.json"
 
@@ -2875,8 +2874,8 @@ expect_eq "the skill-scoped channel renders exactly one timeout value across all
 expect_eq "the always-on channel renders exactly one timeout value across all its rows" \
   "10" "$L4B_HJ_VALUES"
 expect_eq "…and the two channels AGREE on that ceiling" "$L4B_SKILL_VALUES" "$L4B_HJ_VALUES"
-# The ceiling the installer still writes into settings.json is driven end to end in
-# tests/plugin-hooks.test.sh, which retires with the installer at W5.
+# The ceiling the installer used to write into settings.json was driven end to end in
+# tests/plugin-hooks.test.sh, which retired with the installer at W5 (4/6).
 
 # --- L.6 THE AGENT-CONTEXT CHANNEL: one wall, two channels, one partition ---
 # (session-20260815-landing-supervision T6; design D1, plan AC-7/AC-8.)

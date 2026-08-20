@@ -5,8 +5,8 @@
 # [WALL: tests/stop-orders.test.sh]
 #
 # This is NOT a hook. Like hooks/session-sweeper.sh and hooks/stop-check.sh it lives in
-# hooks/ for test-harness pairing and bootstrap installation only; it is never registered
-# in MANAGED_HOOKS. Two questions, one invocation each:
+# hooks/ for test-harness pairing and to ride the payload's hooks/ directory into the
+# mounted plugin; it is registered on NO channel. Two questions, one invocation each:
 #
 #     bash ~/.claude/hooks/stop-orders.sh order <target> [--at <epoch>]
 #     bash ~/.claude/hooks/stop-orders.sh standdown
@@ -50,7 +50,7 @@
 #
 # Session key: CLAUDE_CODE_SESSION_ID, exactly as hooks/session-sweeper.sh takes it.
 #
-# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
+# Registered on no channel — invoked on demand from the mounted plugin payload.
 
 set -u
 
