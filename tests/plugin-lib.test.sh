@@ -907,8 +907,12 @@ expect_match "detect_all emits a dep line per row"     "*dep:superpowers lane=3a
 echo ""
 echo "=== Group 16: every detect function prints exactly one line and exits 0 ==="
 
+# detect_registry_sha_lag is in this list deliberately, driven with NO git on PATH: this
+# group's contract is the shape of the answer, not the answer, and the unknown path is the
+# one an ordinary user's machine takes.
 for fn in detect_plugin_integrity detect_env_todo_tools detect_zshrc_legacy_block \
-          detect_legacy_channel_hooks detect_plugin_registered detect_half_uninstalled; do
+          detect_legacy_channel_hooks detect_plugin_registered detect_half_uninstalled \
+          detect_registry_sha_lag; do
   out="$(detect_run BIONIC_PLUGIN_ROOT="$PL_OK" BIONIC_CLAUDE_HOME="$CH_OK" \
     BIONIC_SHELL_RC="$RC_LEGACY" BIONIC_SETTINGS_FILE="$SET_STALE" -- "$fn")"
   rc=$?
@@ -1485,6 +1489,162 @@ expect_eq "the general jq program is readable as a one-line single-quoted litera
   "0" "$([ -n "$S_GEN" ] && echo 0 || echo 1)"
 expect_eq "DETECT_PLUGIN_ROOT_JQ is the general program with \$n bound to \"bionic\", exactly" \
   "${S_GEN//\$n/\"bionic\"}" "$S_LIT"
+
+echo ""
+echo "=== Group W: detect_registry_sha_lag — the installed build vs the repo tip (W5 critic C-6) ==="
+#
+# THE DEFECT THIS CLOSES. Twice in this epic the machine ran an installed payload built
+# from a commit the working tree had long since passed — F-1 at Step 5, and again at the
+# Step-6 tip, 20 files apart. Both times every wall, every suite and the doctor itself
+# reported a healthy machine, because nothing on it compares the two. The registry already
+# records which commit the install came from (`gitCommitSha`); the repo knows its own tip.
+# The whole fix is to ask.
+#
+# WHAT IT IS NOT. Not a verdict, not an exit code, and not a repair — the same posture the
+# agent-files line takes. A user who installed from the public feed has no repo here at
+# all and reads `unknown`, which is the correct answer and not a complaint. This matters to
+# exactly one machine shape — the one developing the plugin it is running — and for that
+# shape it is the difference between "my fix did not work" and "my fix is not installed".
+#
+# HERMETIC AND REAL: real `git init` fixtures, real commits, a real registry file. The
+# question is about two live records agreeing, and a stubbed git would be a seam standing
+# in for the very value under test.
+
+W_BIN="$TMP/bin-git"; mkdir -p "$W_BIN"; cp -R "$BASE_BIN/." "$W_BIN/" 2>/dev/null
+for real in git; do
+  p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${W_BIN}/${real}" 2>/dev/null
+done
+
+sha_run() {  # <cwd> <env-assignments...> -- ; sets W_OUT
+  local cwd="$1"; shift
+  local -a envs=()
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
+  shift
+  W_OUT=$(env -i HOME="$TMP/home" PATH="$W_BIN" "${envs[@]}" \
+    bash -c 'cd "$1" || exit 9; . "$2"; detect_registry_sha_lag' _ "$cwd" "$DETECT_SH" 2>&1)
+}
+
+w_registry() {  # <config-home> <sha-or-empty>
+  mkdir -p "$1/plugins"
+  if [ -n "${2:-}" ]; then
+    cat > "$1/plugins/installed_plugins.json" <<JSON
+{ "version": 2, "plugins": { "bionic@bionic": [
+  { "scope": "user", "installPath": "/somewhere/bionic/0.1.0", "version": "0.1.0",
+    "gitCommitSha": "$2" } ] } }
+JSON
+  else
+    cat > "$1/plugins/installed_plugins.json" <<JSON
+{ "version": 2, "plugins": { "bionic@bionic": [
+  { "scope": "user", "installPath": "/somewhere/bionic/0.1.0", "version": "0.1.0" } ] } }
+JSON
+  fi
+}
+
+# A repo with two commits, so "the tip" and "a commit this repo has" are different shas.
+W_REPO="$TMP/w-repo"; mkdir -p "$W_REPO"
+( cd "$W_REPO" \
+  && git init -q . \
+  && git config user.email t@t && git config user.name t \
+  && echo one > f && git add f && git commit -qm one \
+  && echo two > f && git commit -qam two ) >/dev/null 2>&1
+W_TIP=$( cd "$W_REPO" && git rev-parse HEAD )
+W_PREV=$( cd "$W_REPO" && git rev-parse HEAD~1 )
+expect_eq "fixture: the repo has two distinct commits" "0" \
+  "$([ -n "$W_TIP" ] && [ -n "$W_PREV" ] && [ "$W_TIP" != "$W_PREV" ] && echo 0 || echo 1)"
+
+# ---- match: the installed build IS the tip ----
+W_CH="$TMP/w-ch-match"; w_registry "$W_CH" "$W_TIP"
+sha_run "$W_REPO" BIONIC_CLAUDE_HOME="$W_CH" --
+expect_match "an install at the repo tip reads match" "*state=match*" "$W_OUT"
+expect_match "…and shows the sha it agreed on" "*registry=${W_TIP}*" "$W_OUT"
+expect_eq "…on exactly one line" "1" "$(printf '%s\n' "$W_OUT" | grep -c .)"
+
+# ---- lag: the installed build is a commit this repo has, but not the tip ----
+#
+# THE F-1 SHAPE, exactly: an install taken before the last few commits landed.
+W_CH="$TMP/w-ch-lag"; w_registry "$W_CH" "$W_PREV"
+sha_run "$W_REPO" BIONIC_CLAUDE_HOME="$W_CH" --
+expect_match "an install behind the tip reads lag" "*state=lag*" "$W_OUT"
+expect_match "…naming the installed sha" "*registry=${W_PREV}*" "$W_OUT"
+expect_match "…and the tip it is behind" "*repo=${W_TIP}*" "$W_OUT"
+
+# ---- not-in-repo: the recorded sha is not a commit here ----
+#
+# A DIFFERENT ANSWER FROM `lag`, and the distinction is the actionable one: lag means
+# reinstall, this means the installed build came from somewhere else entirely.
+W_CH="$TMP/w-ch-foreign"; w_registry "$W_CH" "0123456789abcdef0123456789abcdef01234567"
+sha_run "$W_REPO" BIONIC_CLAUDE_HOME="$W_CH" --
+expect_match "a sha this repo does not have reads not-in-repo" "*state=not-in-repo*" "$W_OUT"
+
+# ---- unknown, with a named cause, on each way of not being able to tell ----
+W_NOTREPO="$TMP/w-not-a-repo"; mkdir -p "$W_NOTREPO"
+W_CH="$TMP/w-ch-unknown"; w_registry "$W_CH" "$W_TIP"
+sha_run "$W_NOTREPO" BIONIC_CLAUDE_HOME="$W_CH" --
+expect_match "outside a git repository the answer is unknown" "*state=unknown*" "$W_OUT"
+expect_match "…with a named cause, never a bare shrug" "*cause=*repositor*" "$W_OUT"
+
+W_CH="$TMP/w-ch-nosha"; w_registry "$W_CH" ""
+sha_run "$W_REPO" BIONIC_CLAUDE_HOME="$W_CH" --
+expect_match "a registry entry with no gitCommitSha reads unknown" "*state=unknown*" "$W_OUT"
+expect_match "…and says the record carries no sha, naming the field" \
+  "*cause=*no gitCommitSha*" "$W_OUT"
+
+W_CH="$TMP/w-ch-absent"; mkdir -p "$W_CH/plugins"
+sha_run "$W_REPO" BIONIC_CLAUDE_HOME="$W_CH" --
+expect_match "no registry file at all reads unknown" "*state=unknown*" "$W_OUT"
+
+# ---- read-only, and exit 0, like every other fact in this file ----
+W_FP_BEFORE="$(find "$W_REPO" "$TMP/w-ch-lag" -type f 2>/dev/null | sort)"
+W_CH="$TMP/w-ch-lag"
+env -i HOME="$TMP/home" PATH="$W_BIN" BIONIC_CLAUDE_HOME="$W_CH" \
+  bash -c 'cd "$1" || exit 9; . "$2"; detect_registry_sha_lag' _ "$W_REPO" "$DETECT_SH" >/dev/null 2>&1
+expect_eq "detect_registry_sha_lag exits 0 even on the lag path" "0" "$?"
+expect_eq "…and adds no file to the repo or the config dir it read" \
+  "$W_FP_BEFORE" "$(find "$W_REPO" "$TMP/w-ch-lag" -type f 2>/dev/null | sort)"
+
+echo ""
+echo "=== Group U: the doctrine block appears ONCE (W5 critic C-4) ==="
+#
+# 6cc4f38 left a second, orphaned copy of the 24-line "installed plugin root" doctrine
+# block above THE PARSE — in the very commit whose message forbids duplicating a doctrine.
+# Nothing caught it, because a comment block has no behaviour to test. It is worth an arm
+# anyway: this file's whole argument is that one schema gets one reading, and a reader who
+# meets the doctrine twice cannot tell which function it governs.
+#
+# COUNTED, not diffed: the header line is the cheapest thing that is exactly as unique as
+# the block it opens, and a count is the assertion — "once" — stated directly.
+U_BLOCK_HEADER='─── The installed plugin root ───'
+U_COUNT=$(/usr/bin/grep -cF -- "$U_BLOCK_HEADER" "$DETECT_SH")
+expect_eq "the installed-plugin-root doctrine block opens exactly once in detect.sh" \
+  "1" "$U_COUNT"
+
+# The same question asked of the sentence deepest inside the block, so a future duplication
+# that renamed the header would still be caught by the body.
+U_BODY_COUNT=$(/usr/bin/grep -cF -- "No fallback exists anywhere in" "$DETECT_SH")
+expect_eq "…and its closing contract sentence appears exactly once too" "1" "$U_BODY_COUNT"
+
+echo ""
+echo "=== Group V: the registry's truth is two-path, and detect.sh says so (W5 critic C-5) ==="
+#
+# THE CLAIM THAT WAS TOO STRONG. The doctrine block above detect_plugin_root justifies the
+# registry as oracle by saying it is "the same record the CLI itself loads from". W5's S7
+# measured that: on a DIRECTORY-source marketplace the CLI reads the marketplace's source
+# tree and never opens the cache the registry names. The registry's ANSWER is still right —
+# the cache was written from that source at install — but the reason offered is not the
+# reason, and the difference is exactly what a user chasing a stale root has to know.
+#
+# Both halves are pinned, because the disclosure is only useful as a PAIR: the condition
+# under which the two paths diverge, and the fact that makes them agree anyway.
+# Case-INSENSITIVE on the condition term alone: this file writes its emphasis in capitals
+# ("a DIRECTORY-SOURCE MARKETPLACE"), and which words are shouted is a style choice that a
+# later edit is free to make differently. The disclosure is what is pinned, not the shouting.
+V_DOCTRINE_HITS=$(/usr/bin/grep -ci "directory-source marketplace" "$DETECT_SH")
+expect_eq "detect.sh discloses the directory-source condition" \
+  "0" "$([ "$V_DOCTRINE_HITS" -ge 1 ] && echo 0 || echo 1)"
+expect_eq "…and names what keeps the two paths in agreement" \
+  "0" "$(/usr/bin/grep -q "as of the last (re)install" "$DETECT_SH" && echo 0 || echo 1)"
+expect_eq "…and says the git-source feed is right by construction" \
+  "0" "$(/usr/bin/grep -q "right by construction" "$DETECT_SH" && echo 0 || echo 1)"
 
 echo ""
 echo "========================================"
