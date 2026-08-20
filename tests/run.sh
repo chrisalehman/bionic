@@ -119,6 +119,13 @@ run "version-ssot.test.sh" bash tests/version-ssot.test.sh
 # payload/scripts/lib/detect.sh, driven against fixture roots and a fixture
 # PATH. Belongs to no single hook, so hand-listed like the rest.
 run "plugin-lib.test.sh" bash tests/plugin-lib.test.sh
+# The read-only probes added at epic-17 W6 S2 (spec R5/AC-8, AC-9; R8/AC-13):
+# detect_plugin_load_state and detect_plugin_duplicates, driven against the
+# `claude plugin list` transcripts captured during W5's F12 measurement and a
+# planted plugin registry. Its own suite rather than a group in plugin-lib —
+# different fixture regime (a captured CLI transcript, not a fixture tree) — and
+# so, like every suite outside hooks/, hand-listed here or it never runs.
+run "detect-probes.test.sh" bash tests/detect-probes.test.sh
 # The worktree contract (epic-17 W3 S2, spec AC-10 / D4): payload/scripts/spawn-worktree.sh
 # driven against scratch git repositories, with its attestation line pinned byte-exactly
 # because dispatchers quote that line into their ledger rows. Its own suite rather than a
