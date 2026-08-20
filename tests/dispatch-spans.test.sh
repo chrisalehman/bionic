@@ -297,6 +297,21 @@ expect_pin_in_file "plugin root: the named fix on failure, verbatim" \
 expect_pin_in_file "plugin root: and no other root is substituted for a failed resolution" \
   "no other root is substituted for it" "$SKILL"
 
+# --- W5 critic C-5: the registry's truth is TWO-PATH, and the shipped text says so.
+#
+# The doctrine asserts the registry is the oracle BECAUSE it is "the same record the CLI
+# itself loads from". S7 measured that false for a DIRECTORY-source marketplace — the CLI
+# reads the marketplace's source tree and never touches the cache the registry names — and
+# that is this machine and every dogfood install. The answer is still right (the two agree
+# as of the last install), but the REASON given for trusting it is not the reason it is
+# true, and a user debugging a stale root needs the real condition, not the slogan. It
+# belongs in the SHIPPED text, which is what these two pins hold: the plan's AC-5 readback
+# is not something a user ever sees.
+expect_pin_in_file "plugin root: the two-path condition is disclosed, not just the slogan" \
+  "directory-source marketplace" "$SKILL"
+expect_pin_in_file "plugin root: …and names what makes the two agree" \
+  "as of the last (re)install" "$SKILL"
+
 # THE IDIOM IS THE LIBRARY'S, NOT A SECOND READING OF THE REGISTRY. The doctrine has to
 # carry a runnable seed — resolving the plugin root is precisely the thing you cannot do
 # from inside the plugin, so `detect_plugin_root` cannot be sourced before it has answered.
