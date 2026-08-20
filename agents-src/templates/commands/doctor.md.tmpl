@@ -1,4 +1,5 @@
 ---
+allowed-tools: Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh:*)
 description: Read-only diagnosis of the bionic install on this machine — plugin integrity, tier state, dependencies, environment, permission profile, and what to do about anything broken. Changes nothing.
 ---
 <!-- GENERATED-HEADER -->
@@ -11,14 +12,14 @@ act on an item only if the user asks for it.
 Run:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh"
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh
 ```
 
 Doctor ends with one question about checking for tool updates.
 Ask the user that question, verbatim. If they say yes, run:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh" --updates
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh --updates
 ```
 
 and show its UPDATES section.

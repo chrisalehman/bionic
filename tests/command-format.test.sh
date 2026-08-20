@@ -193,15 +193,22 @@ echo "=== Section 3: fixture positive/negative arms ==="
 FIXDIR="$TMP/fixture-commands"
 mkdir -p "$FIXDIR"
 
+# The positive fixture models the RATIFIED spelling, unquoted (epic-17 W6 S9b,
+# plan A-5.4): a permission rule prefix-matches the literal command string, so
+# the quoted form this fixture used to carry is the form that hits the approval
+# wall. What this fixture is here to prove is unchanged — the path is rooted at
+# ${CLAUDE_PLUGIN_ROOT} — and quoting was never part of that rule; the
+# rule-vs-body agreement lives in tests/command-permissions.test.sh.
 cat > "$FIXDIR/good.md" <<'EOF'
 ---
+allowed-tools: Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh:*)
 description: a well-formed command file
 ---
 
 Run:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh"
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh
 ```
 EOF
 
@@ -298,7 +305,7 @@ if [ -f "$HELP_MD" ]; then
   # was above zero, which is now the healthy state, so left as it was it would
   # have gone on passing while proving nothing.
   cp "$HELP_MD" "$DOCTORED"
-  printf '\n```bash\nbash "${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh"\n```\n' >> "$DOCTORED"
+  printf '\n```bash\nbash ${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh\n```\n' >> "$DOCTORED"
   doctored_inv_count="$(grep -oE '\$\{CLAUDE_PLUGIN_ROOT\}' "$DOCTORED" 2>/dev/null | wc -l | tr -d ' ')"
   expect_true "MUTATED help.md (second invocation injected): exactly-one check now fails as expected" bash -c "[ '$doctored_inv_count' -ne 1 ]"
 
