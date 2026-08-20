@@ -124,7 +124,7 @@
 #   BIONIC_INSTALLED_PLUGINS_FILE  the CLI's install registry
 #   BIONIC_SHELL_RC       the shell rc bionic edits
 #
-# Executed, never sourced:  bash "${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh"
+# Executed, never sourced:  bash ${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh
 
 set -uo pipefail
 
