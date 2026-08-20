@@ -24,11 +24,7 @@ Presentation contract — what the user sees from this command:
 Render the page below in full, verbatim, every time this command runs — even if it was
 shown earlier in this session; never summarize it or refer back to an earlier rendering.
 
-Read the installed version first, and print its output as the page's opening line:
-
-```bash
-printf 'bionic %s (installed)\n' "$(jq -r .version "${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json")"
-```
+bionic 0.1.0 (installed)
 
 # bionic
 
