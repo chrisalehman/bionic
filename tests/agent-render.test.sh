@@ -62,7 +62,9 @@ CMD_OUT="$REPO/payload/commands"
 # in the copy: render.sh refuses to run against a missing out-dir rather than inventing one.
 # payload/integrity/ comes along too: --check reads the committed manifest, so a copy without
 # one is a copy that reports staleness for a reason the mutation under test did not cause —
-# which is how a meta-arm can appear to prove something it never exercised.
+# which is how a meta-arm can appear to prove something it never exercised. So does
+# payload/.claude-plugin/plugin.json, an INPUT since W6 S9a: help.md's opening version line
+# is substituted from it at render time, and a copy without it cannot render at all.
 copy_tree() {
   local dest="$1"
   mkdir -p "$dest/payload" || return 1
@@ -71,6 +73,9 @@ copy_tree() {
   cp -R "$CMD_OUT" "$dest/payload/commands" || return 1
   if [ -d "$REPO/payload/integrity" ]; then
     cp -R "$REPO/payload/integrity" "$dest/payload/integrity" || return 1
+  fi
+  if [ -d "$REPO/payload/.claude-plugin" ]; then
+    cp -R "$REPO/payload/.claude-plugin" "$dest/payload/.claude-plugin" || return 1
   fi
 }
 
@@ -635,6 +640,83 @@ if [ -z "$C_PROPAGATED" ]; then
   pass "meta: the re-render propagated the block edit into all four command files"
 else
   fail "meta: the re-render propagated the block edit into all four command files" "missing in:$C_PROPAGATED"
+fi
+
+# I5c/I5d/I5e — THE VERSION IS A THIRD KIND OF SOURCE (epic-17 W6 S9a, walk finding W-2).
+#
+# help.md opens with `bionic <version> (installed)`. Until S9a the page READ that at runtime
+# from ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json; the Step-5 walk measured the read
+# being refused from any session outside this repo, printing an error above the page and no
+# version at all. It is substituted at RENDER time now, which moves plugin.json from being a
+# file the shipped page reads into being a file the PIPELINE reads — a source like a block or
+# a template, and staleness against it has to be caught the same way or the baked value is
+# just a copy nothing checks. `plugin.json is the single owner` is the claim; --check going
+# red in both directions is what makes it true rather than aspirational.
+C_PJ="$TMP/c/payload/.claude-plugin/plugin.json"
+C_HELP="$TMP/c/payload/commands/help.md"
+
+[ -f "$C_PJ" ]; check $? "the hermetic copy carries payload/.claude-plugin/plugin.json (a render INPUT)"
+C_VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$C_PJ" 2>/dev/null | head -1)"
+if [ -n "$C_VERSION" ]; then
+  pass "plugin.json declares a version ($C_VERSION)"
+else
+  fail "plugin.json declares a version"
+fi
+if grep -qF "bionic $C_VERSION (installed)" "$C_HELP" 2>/dev/null; then
+  pass "the rendered help.md opens with the version plugin.json declares"
+else
+  fail "the rendered help.md opens with the version plugin.json declares" \
+    "wanted 'bionic $C_VERSION (installed)'"
+fi
+
+# I5c — the baked line edited in the OUTPUT. The "I'll just bump it in the file" direction.
+sed "s|^bionic $C_VERSION (installed)\$|bionic 9.9.9 (installed)|" "$C_HELP" > "$TMP/c-help.tmp" \
+  && cp "$TMP/c-help.tmp" "$C_HELP"
+if ! "$C_RENDER" --check >/dev/null 2>&1; then
+  pass "meta: editing the baked version line in help.md turns --check RED"
+else
+  fail "meta: editing the baked version line in help.md turns --check RED"
+fi
+"$C_RENDER" >/dev/null 2>&1
+"$C_RENDER" --check >/dev/null 2>&1
+check $? "meta: re-rendering restores the version line and returns the fixture to green"
+
+# I5d — the OWNER moved and nobody re-rendered. The direction that matters in practice: the
+# version is bumped in plugin.json at release time, and a page carrying the old one is a page
+# that lies to every user who runs it.
+sed 's|"version": "'"$C_VERSION"'"|"version": "9.9.9"|' "$C_PJ" > "$TMP/c-pj.tmp" \
+  && cp "$TMP/c-pj.tmp" "$C_PJ"
+if ! "$C_RENDER" --check >/dev/null 2>&1; then
+  pass "meta: bumping plugin.json's version with no re-render turns --check RED"
+else
+  fail "meta: bumping plugin.json's version with no re-render turns --check RED"
+fi
+"$C_RENDER" >/dev/null 2>&1
+"$C_RENDER" --check >/dev/null 2>&1
+check $? "meta: re-rendering after the version bump returns the fixture to green"
+if grep -qF "bionic 9.9.9 (installed)" "$C_HELP" 2>/dev/null; then
+  pass "meta: ...and the re-rendered help.md carries the bumped version"
+else
+  fail "meta: ...and the re-rendered help.md carries the bumped version"
+fi
+# ...and only help.md: the other three command files have no version line to bump.
+C_VERSION_LEAK=""
+for c in setup doctor remove; do
+  grep -qF "9.9.9" "$TMP/c/payload/commands/$c.md" 2>/dev/null && C_VERSION_LEAK="$C_VERSION_LEAK $c"
+done
+if [ -z "$C_VERSION_LEAK" ]; then
+  pass "meta: the version reaches help.md alone, not every command file"
+else
+  fail "meta: the version reaches help.md alone, not every command file" "also in:$C_VERSION_LEAK"
+fi
+
+# I5e — a missing owner must be LOUD, the same rule as a missing block (§F3): a render that
+# quietly emitted `bionic  (installed)` would leave --check green on a page with a hole in it.
+rm -f "$C_PJ"
+if ! "$C_RENDER" >/dev/null 2>&1; then
+  pass "meta: a missing plugin.json makes render.sh exit nonzero"
+else
+  fail "meta: a missing plugin.json makes render.sh exit nonzero"
 fi
 
 # I6 — and the real payload/commands/ is exactly where this suite found it.
