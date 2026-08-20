@@ -41,10 +41,27 @@
 #     it, by design (AC-8). Standalone says so, out loud, and moves on. A silently
 #     skipped item would be the worse failure.
 #
-# CONSENT, PER ITEM, FROM STDIN. No `--all`, no assume-yes env knob: deps.sh
-# ratified "consent per event, never silent, never unattended" and a flag that
-# switched it off would be the hole in it. An item with nothing to do is not
-# asked about — consent to do nothing is noise, not safety.
+# CONSENT, PER ITEM, READ FROM THIS SCRIPT'S OWN INPUT. No `--all`, no
+# assume-yes env knob: deps.sh ratified "consent per event, never silent, never
+# unattended" and a flag that switched it off would be the hole in it. An item
+# with nothing to do is not asked about — consent to do nothing is noise, not
+# safety.
+#
+# TWO FLAGS, AND NEITHER OF THEM IS AN ANSWER (critic F-1 and F-2):
+#
+#   --list          print the name of every item this machine can be asked
+#                   about, one per line, and exit.
+#   --only <name>   ask about exactly that one item. Every other item is neither
+#                   run nor asked about.
+#
+# The answer channel is one line read from this script's input, and a line read
+# that way is POSITIONAL — it lands on the first question asked, which is
+# whichever item this machine happens to have. So the yes is made addressable
+# rather than the questions made skippable: `--only` narrows WHICH question is
+# asked, never whether it is asked, and the answer to it can only consent to the
+# item that was named. `_rm_item_ids` is the one place the roster is spelled —
+# `--list` prints it and `--only` is checked against it, so a name a reader can
+# see is a name this script takes.
 #
 # THE FINISHER IS INVOKED, NOT PRINTED. `claude plugin uninstall` works from a
 # script subprocess mid-session and takes effect immediately
@@ -100,6 +117,46 @@ _rm_shell_rc() {
 
 _rm_have() { command -v "${1:-}" >/dev/null 2>&1; }
 
+# ─── The invocation a person can type, when there is one ─────────────────────
+#
+# A declined item ends with one line saying how to say yes to just that item,
+# and the line has to name a route that exists. This script is the one payload
+# script that can be fetched and piped straight into a shell, and there is no
+# file on disk to point at when it is — so the path is RESOLVED rather than
+# composed, and when it does not resolve the route line is simply not printed.
+# A sentence naming a path nobody has is the failure this line exists to end.
+
+RM_SELF_CMD=""
+_rm_resolve_self() {
+  local self="${BASH_SOURCE[0]:-$0}" dir
+  case "$self" in */*) ;; *) return 1 ;; esac
+  dir="$(cd "${self%/*}" 2>/dev/null && pwd -P)" || return 1
+  [ -f "${dir}/${self##*/}" ] || return 1
+  RM_SELF_CMD="bash ${dir}/${self##*/}"
+  return 0
+}
+_rm_resolve_self || RM_SELF_CMD=""
+
+RM_YES_PIPE="printf 'y\\n' | "
+
+# ONE OWNER for the sentence. The decline line and the end summary both quote
+# it, so they cannot come to disagree about what the user should run.
+_rm_answer_yes() {  # <name> — the route, or nothing when there is no path to name
+  [ -n "$RM_SELF_CMD" ] || return 0
+  printf 'answer yes to %s with: %s%s --only %s' "$1" "$RM_YES_PIPE" "$RM_SELF_CMD" "$1"
+}
+
+# ─── Which items this run is doing ───────────────────────────────────────────
+#
+# Empty means the whole teardown, which is the only thing this script did before
+# and is still what it does with no flags. A name means that item and nothing
+# else: every item below asks this before it prints its own header, so a
+# narrowed run is SILENT about the items it is not doing rather than listing
+# them as skipped.
+
+RM_ONLY=""
+_rm_wants() { [ -z "$RM_ONLY" ] || [ "$RM_ONLY" = "$1" ]; }
+
 # ─── The shared literals ─────────────────────────────────────────────────────
 #
 # Each of these is a copy of a constant that lives in the payload libraries, and
@@ -151,10 +208,18 @@ RM_LEFTOVERS=""
 
 _rm_removed() { RM_REMOVED=$((RM_REMOVED + 1)); echo "  ✓ ${1}"; }
 _rm_clean()   { RM_CLEAN=$((RM_CLEAN + 1));     echo "  ✓ ${1} — already clean"; }
-_rm_skipped() {
+_rm_skipped() {  # <name> <what was left>
+  local route
+  route="$(_rm_answer_yes "$1")"
   RM_SKIPPED=$((RM_SKIPPED + 1))
-  RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ ${1}"$'\n'
-  echo "  declined — ${1} left in place."
+  if [ -n "$route" ]; then
+    RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ ${2} — ${route}"$'\n'
+  else
+    RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ ${2}"$'\n'
+  fi
+  echo "  declined — ${2} left in place."
+  [ -n "$route" ] && echo "  ${route}"
+  return 0
 }
 _rm_leftover() { RM_LEFTOVERS="${RM_LEFTOVERS}    ✗ ${1}"$'\n'; echo "  ⚠ ${1}"; }
 
@@ -275,6 +340,91 @@ _rm_purge_dir() {  # <dir>
   rm -rf "$target"
 }
 
+# ─── The roots every item reads ──────────────────────────────────────────────
+#
+# Resolved once, above the items, because more than one item reads each of them
+# and because an item is a function now: a root computed inside one of them
+# would be invisible to the next.
+
+RC_FILE="$(_rm_shell_rc)"
+RM_SETTINGS="$(_rm_settings_file)"
+RM_LEGACY_SKILL_DIR="$(_rm_claude_home)/skills/${RM_LEGACY_SKILL_NAME}"
+RM_DATA_ROOT="$(_rm_plugin_data_dir)"
+RM_DATA_DECLINED=0
+
+# ─── The roster ──────────────────────────────────────────────────────────────
+#
+# Every item this machine can be asked about, in the order the whole teardown
+# asks about them. The tool rows are READ from the dependency table, never
+# restated — and they exist only in payload mode, because standalone there is no
+# table to read and the tools item says exactly that instead of pretending.
+
+_rm_item_ids() {
+  local n
+  echo "legacy-alias"
+  echo "shell-env"
+  echo "legacy-hooks"
+  echo "legacy-skill-copy"
+  echo "permission-profile"
+  echo "permission-mode"
+  if [ "$RM_MODE" = "payload" ]; then
+    # fd 3: the standard input belongs to the questions, never to a list.
+    while IFS= read -r n <&3; do
+      [ -n "$n" ] && echo "tool:${n}"
+    done 3<<< "$( { dep_names_class basic; dep_names_class when-needed; dep_names_class extra; } )"
+  fi
+  echo "plugin-data"
+  echo "plugin"
+  echo "orphaned-dependencies"
+  return 0
+}
+
+# ─── Arguments ───────────────────────────────────────────────────────────────
+#
+# Read here rather than in a wrapper, because the roster they are checked
+# against is built from the dependency table this script has already decided
+# whether it can see. An unrecognised name stops the run before anything is
+# printed at it: a narrowed run that silently did nothing would look exactly
+# like a machine that was already clean.
+
+rm_list=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --list)
+      rm_list=1; shift ;;
+    --only)
+      if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
+        echo "remove: --only needs the name of the one item to remove."
+        echo "        run ${RM_SELF_CMD:-this script} --list to see the names."
+        exit 2
+      fi
+      RM_ONLY="$2"; shift 2 ;;
+    --only=*)
+      RM_ONLY="${1#--only=}"; shift ;;
+    *)
+      echo "remove: ${1} is not something this command takes."
+      echo "        run ${RM_SELF_CMD:-this script} --list to see what can be removed one item at a time."
+      exit 2 ;;
+  esac
+done
+
+if [ "$rm_list" = "1" ]; then
+  _rm_item_ids
+  exit 0
+fi
+
+if [ -n "$RM_ONLY" ]; then
+  rm_known=""
+  while IFS= read -r rm_id <&3; do
+    [ "$rm_id" = "$RM_ONLY" ] && { rm_known=1; break; }
+  done 3< <(_rm_item_ids)
+  if [ -z "$rm_known" ]; then
+    echo "remove: there is nothing called ${RM_ONLY} to remove on this machine."
+    echo "        run ${RM_SELF_CMD:-this script} --list to see the names."
+    exit 2
+  fi
+fi
+
 echo ""
 echo "bionic remove — consented teardown of the machine footprint"
 # WHAT THIS LINE IS FOR (R-1). `mode: payload` named one of this script's own
@@ -298,70 +448,75 @@ echo ""
 # deletes an emptied rc; a script that can be curl-fetched onto an unknown machine
 # should not.
 
-RC_FILE="$(_rm_shell_rc)"
-rc_variant=none
-if [ -f "$RC_FILE" ]; then
-  if _rm_file_has_literal "$RC_FILE" "$RM_RC_START"; then
-    rc_variant=marked
-  elif _rm_file_has_line_matching "$RC_FILE" "$RM_LEGACY_ALIAS_RE"; then
-    rc_variant=legacy
+_rm_item_legacy_alias() {
+  _rm_wants legacy-alias || return 0
+  rc_variant=none
+  if [ -f "$RC_FILE" ]; then
+    if _rm_file_has_literal "$RC_FILE" "$RM_RC_START"; then
+      rc_variant=marked
+    elif _rm_file_has_line_matching "$RC_FILE" "$RM_LEGACY_ALIAS_RE"; then
+      rc_variant=legacy
+    fi
   fi
-fi
 
-echo "legacy shell alias block:"
-case "$rc_variant" in
-  none)
-    _rm_clean "legacy alias block in ${RC_FILE}"
-    ;;
-  marked)
-    echo "  ${RC_FILE} carries the bionic marker block; bionic would delete the block and everything between its markers."
-    if _rm_consent "Remove the marker block from ${RC_FILE}?"; then
-      if _rm_strip_marker_block "$RC_FILE" "$RM_RC_START" "$RM_RC_END"; then
-        _rm_removed "legacy alias block in ${RC_FILE}"
+  echo "legacy shell alias block:"
+  case "$rc_variant" in
+    none)
+      _rm_clean "legacy alias block in ${RC_FILE}"
+      ;;
+    marked)
+      echo "  ${RC_FILE} carries the bionic marker block; bionic would delete the block and everything between its markers."
+      if _rm_consent "Remove the marker block from ${RC_FILE}?"; then
+        if _rm_strip_marker_block "$RC_FILE" "$RM_RC_START" "$RM_RC_END"; then
+          _rm_removed "legacy alias block in ${RC_FILE}"
+        else
+          rm -f "${RC_FILE}.bionic.tmp"
+          _rm_leftover "could not rewrite ${RC_FILE} — the alias block is still there"
+        fi
       else
-        rm -f "${RC_FILE}.bionic.tmp"
-        _rm_leftover "could not rewrite ${RC_FILE} — the alias block is still there"
+        _rm_skipped legacy-alias "legacy alias block in ${RC_FILE}"
       fi
-    else
-      _rm_skipped "legacy alias block in ${RC_FILE}"
-    fi
-    ;;
-  legacy)
-    echo "  ${RC_FILE} carries an unmarked legacy alias line; bionic would delete that line."
-    if _rm_consent "Remove the legacy alias line from ${RC_FILE}?"; then
-      if _rm_filter_out_lines "$RC_FILE" "$RM_LEGACY_ALIAS_RE"; then
-        _rm_removed "legacy alias line in ${RC_FILE}"
+      ;;
+    legacy)
+      echo "  ${RC_FILE} carries an unmarked legacy alias line; bionic would delete that line."
+      if _rm_consent "Remove the legacy alias line from ${RC_FILE}?"; then
+        if _rm_filter_out_lines "$RC_FILE" "$RM_LEGACY_ALIAS_RE"; then
+          _rm_removed "legacy alias line in ${RC_FILE}"
+        else
+          _rm_leftover "could not rewrite ${RC_FILE} — the legacy alias line is still there"
+        fi
       else
-        _rm_leftover "could not rewrite ${RC_FILE} — the legacy alias line is still there"
+        _rm_skipped legacy-alias "legacy alias line in ${RC_FILE}"
       fi
-    else
-      _rm_skipped "legacy alias line in ${RC_FILE}"
-    fi
-    ;;
-esac
-echo ""
+      ;;
+  esac
+  echo ""
+}
 
 # ─── Item: the CLAUDE_CODE_ENABLE_TODO_TOOLS export ──────────────────────────
 #
 # The predicate is detect.sh's, character for character: a commented-out export
 # is NOT present, so it is not removed either.
 
-echo "todo-tools export:"
-if _rm_file_has_line_matching "$RC_FILE" "$RM_TODO_EXPORT_RE"; then
-  echo "  ${RC_FILE} exports CLAUDE_CODE_ENABLE_TODO_TOOLS=1; bionic would delete that line."
-  if _rm_consent "Remove the CLAUDE_CODE_ENABLE_TODO_TOOLS export from ${RC_FILE}?"; then
-    if _rm_filter_out_lines "$RC_FILE" "$RM_TODO_EXPORT_RE"; then
-      _rm_removed "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
+_rm_item_shell_env() {
+  _rm_wants shell-env || return 0
+  echo "todo-tools export:"
+  if _rm_file_has_line_matching "$RC_FILE" "$RM_TODO_EXPORT_RE"; then
+    echo "  ${RC_FILE} exports CLAUDE_CODE_ENABLE_TODO_TOOLS=1; bionic would delete that line."
+    if _rm_consent "Remove the CLAUDE_CODE_ENABLE_TODO_TOOLS export from ${RC_FILE}?"; then
+      if _rm_filter_out_lines "$RC_FILE" "$RM_TODO_EXPORT_RE"; then
+        _rm_removed "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
+      else
+        _rm_leftover "could not rewrite ${RC_FILE} — the export is still there"
+      fi
     else
-      _rm_leftover "could not rewrite ${RC_FILE} — the export is still there"
+      _rm_skipped shell-env "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
     fi
   else
-    _rm_skipped "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
+    _rm_clean "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
   fi
-else
-  _rm_clean "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
-fi
-echo ""
+  echo ""
+}
 
 # ─── Item: legacy-channel managed-hook entries in settings ───────────────────
 #
@@ -374,8 +529,6 @@ echo ""
 # group can hold a bionic hook and a foreign one, and dropping it whole would
 # remove somebody else's hook. Groups left empty are collapsed afterwards, and a
 # `hooks` object left empty is deleted — the same shape claude-reset.sh produced.
-
-RM_SETTINGS="$(_rm_settings_file)"
 
 # Byte-identical to detect.sh's DETECT_LEGACY_HOOK_COUNT_JQ apart from the name
 # of the variable interpolated into it — the same arrangement the strip program
@@ -400,38 +553,41 @@ RM_LEGACY_HOOK_STRIP_JQ='
   end
 '
 
-echo "legacy-channel managed-hook entries in settings.json:"
-legacy_hook_count=0
-if [ -f "$RM_SETTINGS" ]; then
-  if _rm_have jq; then
-    legacy_hook_count="$(jq "$RM_LEGACY_HOOK_COUNT_JQ" "$RM_SETTINGS" 2>/dev/null)"
-    case "$legacy_hook_count" in ''|*[!0-9]*) legacy_hook_count=unknown ;; esac
-  else
-    legacy_hook_count=unknown
-  fi
-fi
-
-if [ "$legacy_hook_count" = "unknown" ]; then
-  _rm_leftover "cannot read ${RM_SETTINGS} without jq — managed-hook entries left as they are"
-elif [ "$legacy_hook_count" = "0" ]; then
-  _rm_clean "legacy-channel managed-hook entries in ${RM_SETTINGS}"
-else
-  echo "  ${RM_SETTINGS} carries ${legacy_hook_count} hook entr(y/ies) still pointing at ${RM_LEGACY_HOOK_SUBSTR}; bionic would delete those entries and nothing else."
-  if _rm_consent "Remove ${legacy_hook_count} legacy-channel managed-hook entr(y/ies) from ${RM_SETTINGS}?"; then
-    rm_settings_nl=0
-    # shellcheck disable=SC2154  # set by printf -v inside _rm_slurp_into
-    _rm_slurp_into rm_settings_text "$RM_SETTINGS" && case "$rm_settings_text" in *$'\n') rm_settings_nl=1 ;; esac
-    if rm_stripped="$(jq "$RM_LEGACY_HOOK_STRIP_JQ" "$RM_SETTINGS" 2>/dev/null)"; then
-      _rm_write "$RM_SETTINGS" "$rm_stripped" "$rm_settings_nl"
-      _rm_removed "${legacy_hook_count} legacy-channel managed-hook entr(y/ies) in ${RM_SETTINGS}"
+_rm_item_legacy_hooks() {
+  _rm_wants legacy-hooks || return 0
+  echo "legacy-channel managed-hook entries in settings.json:"
+  legacy_hook_count=0
+  if [ -f "$RM_SETTINGS" ]; then
+    if _rm_have jq; then
+      legacy_hook_count="$(jq "$RM_LEGACY_HOOK_COUNT_JQ" "$RM_SETTINGS" 2>/dev/null)"
+      case "$legacy_hook_count" in ''|*[!0-9]*) legacy_hook_count=unknown ;; esac
     else
-      _rm_leftover "${RM_SETTINGS} is not valid JSON — refusing to write; the legacy-channel entries are still there"
+      legacy_hook_count=unknown
     fi
-  else
-    _rm_skipped "legacy-channel managed-hook entries in ${RM_SETTINGS}"
   fi
-fi
-echo ""
+
+  if [ "$legacy_hook_count" = "unknown" ]; then
+    _rm_leftover "cannot read ${RM_SETTINGS} without jq — managed-hook entries left as they are"
+  elif [ "$legacy_hook_count" = "0" ]; then
+    _rm_clean "legacy-channel managed-hook entries in ${RM_SETTINGS}"
+  else
+    echo "  ${RM_SETTINGS} carries ${legacy_hook_count} hook entr(y/ies) still pointing at ${RM_LEGACY_HOOK_SUBSTR}; bionic would delete those entries and nothing else."
+    if _rm_consent "Remove ${legacy_hook_count} legacy-channel managed-hook entr(y/ies) from ${RM_SETTINGS}?"; then
+      rm_settings_nl=0
+      # shellcheck disable=SC2154  # set by printf -v inside _rm_slurp_into
+      _rm_slurp_into rm_settings_text "$RM_SETTINGS" && case "$rm_settings_text" in *$'\n') rm_settings_nl=1 ;; esac
+      if rm_stripped="$(jq "$RM_LEGACY_HOOK_STRIP_JQ" "$RM_SETTINGS" 2>/dev/null)"; then
+        _rm_write "$RM_SETTINGS" "$rm_stripped" "$rm_settings_nl"
+        _rm_removed "${legacy_hook_count} legacy-channel managed-hook entr(y/ies) in ${RM_SETTINGS}"
+      else
+        _rm_leftover "${RM_SETTINGS} is not valid JSON — refusing to write; the legacy-channel entries are still there"
+      fi
+    else
+      _rm_skipped legacy-hooks "legacy-channel managed-hook entries in ${RM_SETTINGS}"
+    fi
+  fi
+  echo ""
+}
 
 # ─── Item: the legacy installed skill copy ───────────────────────────────────
 #
@@ -455,29 +611,30 @@ echo ""
 # that name is not evidence that the installer rendered anything into it. Re-checked at
 # DELETE time as well as at ASK time, the same way setup step 7 re-derives its guards, so a
 # resolution that went wrong between the prompt and the removal takes nothing with it.
-RM_LEGACY_SKILL_DIR="$(_rm_claude_home)/skills/${RM_LEGACY_SKILL_NAME}"
-
-echo "legacy installed skill copy:"
-if [ -d "$RM_LEGACY_SKILL_DIR" ] && [ -f "${RM_LEGACY_SKILL_DIR}/SKILL.md" ]; then
-  echo "  ${RM_LEGACY_SKILL_DIR} is a pre-plugin rendered copy of a skill the payload also ships."
-  echo "  Its frontmatter registers hooks through the pre-plugin channel, so a session that loads"
-  echo "  it arms the same walls twice — once from the plugin, once from this copy."
-  if _rm_consent "Remove ${RM_LEGACY_SKILL_DIR} and everything under it?"; then
-    if [ -d "$RM_LEGACY_SKILL_DIR" ] && [ -f "${RM_LEGACY_SKILL_DIR}/SKILL.md" ]; then
-      rm -rf "$RM_LEGACY_SKILL_DIR" 2>/dev/null
-    fi
-    if [ ! -e "$RM_LEGACY_SKILL_DIR" ]; then
-      _rm_removed "legacy installed skill copy at ${RM_LEGACY_SKILL_DIR}"
+_rm_item_legacy_skill_copy() {
+  _rm_wants legacy-skill-copy || return 0
+  echo "legacy installed skill copy:"
+  if [ -d "$RM_LEGACY_SKILL_DIR" ] && [ -f "${RM_LEGACY_SKILL_DIR}/SKILL.md" ]; then
+    echo "  ${RM_LEGACY_SKILL_DIR} is a pre-plugin rendered copy of a skill the payload also ships."
+    echo "  Its frontmatter registers hooks through the pre-plugin channel, so a session that loads"
+    echo "  it arms the same walls twice — once from the plugin, once from this copy."
+    if _rm_consent "Remove ${RM_LEGACY_SKILL_DIR} and everything under it?"; then
+      if [ -d "$RM_LEGACY_SKILL_DIR" ] && [ -f "${RM_LEGACY_SKILL_DIR}/SKILL.md" ]; then
+        rm -rf "$RM_LEGACY_SKILL_DIR" 2>/dev/null
+      fi
+      if [ ! -e "$RM_LEGACY_SKILL_DIR" ]; then
+        _rm_removed "legacy installed skill copy at ${RM_LEGACY_SKILL_DIR}"
+      else
+        _rm_leftover "could not remove ${RM_LEGACY_SKILL_DIR} — the legacy skill copy is still there"
+      fi
     else
-      _rm_leftover "could not remove ${RM_LEGACY_SKILL_DIR} — the legacy skill copy is still there"
+      _rm_skipped legacy-skill-copy "legacy installed skill copy at ${RM_LEGACY_SKILL_DIR}"
     fi
   else
-    _rm_skipped "legacy installed skill copy at ${RM_LEGACY_SKILL_DIR}"
+    _rm_clean "legacy installed skill copy"
   fi
-else
-  _rm_clean "legacy installed skill copy"
-fi
-echo ""
+  echo ""
+}
 
 # ─── Item: the permission marker block ───────────────────────────────────────
 #
@@ -507,36 +664,39 @@ RM_PROFILE_STRIP_JQ='
     then del(.permissions) else . end
 '
 
-echo "permission marker block:"
-if _rm_file_has_literal "$RM_SETTINGS" "$RM_PROFILE_BEGIN_PREFIX"; then
-  echo "  ${RM_SETTINGS} carries bionic's permission marker block; bionic would remove the block and leave every rule outside it."
-  if _rm_consent "Remove bionic's permission marker block from ${RM_SETTINGS}?"; then
-    if [ "$RM_MODE" = "payload" ]; then
-      if profile_strip; then
-        _rm_removed "permission marker block in ${RM_SETTINGS}"
+_rm_item_permission_profile() {
+  _rm_wants permission-profile || return 0
+  echo "permission marker block:"
+  if _rm_file_has_literal "$RM_SETTINGS" "$RM_PROFILE_BEGIN_PREFIX"; then
+    echo "  ${RM_SETTINGS} carries bionic's permission marker block; bionic would remove the block and leave every rule outside it."
+    if _rm_consent "Remove bionic's permission marker block from ${RM_SETTINGS}?"; then
+      if [ "$RM_MODE" = "payload" ]; then
+        if profile_strip; then
+          _rm_removed "permission marker block in ${RM_SETTINGS}"
+        else
+          _rm_leftover "could not strip the permission marker block from ${RM_SETTINGS}"
+        fi
+      elif ! _rm_have jq; then
+        _rm_leftover "jq is required to edit ${RM_SETTINGS} safely — the permission block is still applied"
       else
-        _rm_leftover "could not strip the permission marker block from ${RM_SETTINGS}"
+        rm_profile_nl=0
+        # shellcheck disable=SC2154  # set by printf -v inside _rm_slurp_into
+        _rm_slurp_into rm_profile_text "$RM_SETTINGS" && case "$rm_profile_text" in *$'\n') rm_profile_nl=1 ;; esac
+        if rm_profile_stripped="$(jq "$RM_PROFILE_STRIP_JQ" "$RM_SETTINGS" 2>/dev/null)"; then
+          _rm_write "$RM_SETTINGS" "$rm_profile_stripped" "$rm_profile_nl"
+          _rm_removed "permission marker block in ${RM_SETTINGS}"
+        else
+          _rm_leftover "${RM_SETTINGS} is not valid JSON — refusing to write; the permission block is still applied"
+        fi
       fi
-    elif ! _rm_have jq; then
-      _rm_leftover "jq is required to edit ${RM_SETTINGS} safely — the permission block is still applied"
     else
-      rm_profile_nl=0
-      # shellcheck disable=SC2154  # set by printf -v inside _rm_slurp_into
-      _rm_slurp_into rm_profile_text "$RM_SETTINGS" && case "$rm_profile_text" in *$'\n') rm_profile_nl=1 ;; esac
-      if rm_profile_stripped="$(jq "$RM_PROFILE_STRIP_JQ" "$RM_SETTINGS" 2>/dev/null)"; then
-        _rm_write "$RM_SETTINGS" "$rm_profile_stripped" "$rm_profile_nl"
-        _rm_removed "permission marker block in ${RM_SETTINGS}"
-      else
-        _rm_leftover "${RM_SETTINGS} is not valid JSON — refusing to write; the permission block is still applied"
-      fi
+      _rm_skipped permission-profile "permission marker block in ${RM_SETTINGS}"
     fi
   else
-    _rm_skipped "permission marker block in ${RM_SETTINGS}"
+    _rm_clean "permission marker block in ${RM_SETTINGS}"
   fi
-else
-  _rm_clean "permission marker block in ${RM_SETTINGS}"
-fi
-echo ""
+  echo ""
+}
 
 # ─── Item: the default permission mode ───────────────────────────────────────
 #
@@ -557,28 +717,31 @@ echo ""
 # file, so without jq this item cannot tell whether it applies and says so
 # rather than guessing either way.
 
-echo "default permission mode:"
-rm_mode_value="$(_rm_default_mode)"
-if ! _rm_have jq; then
-  _rm_leftover "jq is required to read ${RM_SETTINGS} — the default permission mode was not checked"
-elif [ -f "$RM_SETTINGS" ] && [ "$(jq -r '.permissions.defaultMode // ""' "$RM_SETTINGS" 2>/dev/null)" = "$rm_mode_value" ]; then
-  if _rm_consent "Reset Claude Code's default permission mode? bionic set it to ${rm_mode_value} at setup."; then
-    rm_mode_nl=0
-    # shellcheck disable=SC2154  # set by printf -v inside _rm_slurp_into
-    _rm_slurp_into rm_mode_text "$RM_SETTINGS" && case "$rm_mode_text" in *$'\n') rm_mode_nl=1 ;; esac
-    if rm_mode_stripped="$(jq 'del(.permissions.defaultMode)' "$RM_SETTINGS" 2>/dev/null)"; then
-      _rm_write "$RM_SETTINGS" "$rm_mode_stripped" "$rm_mode_nl"
-      _rm_removed "default permission mode in ${RM_SETTINGS}"
+_rm_item_permission_mode() {
+  _rm_wants permission-mode || return 0
+  echo "default permission mode:"
+  rm_mode_value="$(_rm_default_mode)"
+  if ! _rm_have jq; then
+    _rm_leftover "jq is required to read ${RM_SETTINGS} — the default permission mode was not checked"
+  elif [ -f "$RM_SETTINGS" ] && [ "$(jq -r '.permissions.defaultMode // ""' "$RM_SETTINGS" 2>/dev/null)" = "$rm_mode_value" ]; then
+    if _rm_consent "Reset Claude Code's default permission mode? bionic set it to ${rm_mode_value} at setup."; then
+      rm_mode_nl=0
+      # shellcheck disable=SC2154  # set by printf -v inside _rm_slurp_into
+      _rm_slurp_into rm_mode_text "$RM_SETTINGS" && case "$rm_mode_text" in *$'\n') rm_mode_nl=1 ;; esac
+      if rm_mode_stripped="$(jq 'del(.permissions.defaultMode)' "$RM_SETTINGS" 2>/dev/null)"; then
+        _rm_write "$RM_SETTINGS" "$rm_mode_stripped" "$rm_mode_nl"
+        _rm_removed "default permission mode in ${RM_SETTINGS}"
+      else
+        _rm_leftover "${RM_SETTINGS} is not valid JSON — refusing to write; the default permission mode is unchanged"
+      fi
     else
-      _rm_leftover "${RM_SETTINGS} is not valid JSON — refusing to write; the default permission mode is unchanged"
+      _rm_skipped permission-mode "default permission mode in ${RM_SETTINGS}"
     fi
   else
-    _rm_skipped "default permission mode in ${RM_SETTINGS}"
+    _rm_clean "default permission mode in ${RM_SETTINGS}"
   fi
-else
-  _rm_clean "default permission mode in ${RM_SETTINGS}"
-fi
-echo ""
+  echo ""
+}
 
 # ─── Item: the tools bionic installed ────────────────────────────────────────
 #
@@ -604,56 +767,63 @@ echo ""
 # take the loop's stdin from the process substitution, and remove_dep's consent
 # prompt would then read a dependency name as the user's answer.
 
-echo "tools bionic installed:"
-if [ "$RM_MODE" != "payload" ]; then
-  echo "  the dependency table ships with the payload — not available standalone."
-  echo "  (reinstall bionic and run /bionic:remove for the dependency pass, or remove them by hand)"
-  _rm_leftover "tool teardown was not attempted (standalone mode)"
-else
-  dep_lines="$( { dep_names_class basic; dep_names_class when-needed; dep_names_class extra; } )"
-  while IFS= read -r dep_name <&3; do
-    [ -n "$dep_name" ] || continue
-    dep_behavior="$(dep_field "$dep_name" removal_behavior)"
-    dep_present="$(check_dep "$dep_name")"
-    dep_present="${dep_present#present=}"; dep_present="${dep_present%%|*}"
+_rm_item_tools() {
+  # A class of items, not one: each row in the table is its own name, so the
+  # gate is per row below. The block runs when the whole teardown runs, or when
+  # the name asked for is one of its rows.
+  case "$RM_ONLY" in ''|tool:*) ;; *) return 0 ;; esac
+  echo "tools bionic installed:"
+  if [ "$RM_MODE" != "payload" ]; then
+    echo "  the dependency table ships with the payload — not available standalone."
+    echo "  (reinstall bionic and run /bionic:remove for the dependency pass, or remove them by hand)"
+    _rm_leftover "tool teardown was not attempted (standalone mode)"
+  else
+    dep_lines="$( { dep_names_class basic; dep_names_class when-needed; dep_names_class extra; } )"
+    while IFS= read -r dep_name <&3; do
+      [ -n "$dep_name" ] || continue
+      _rm_wants "tool:${dep_name}" || continue
+      dep_behavior="$(dep_field "$dep_name" removal_behavior)"
+      dep_present="$(check_dep "$dep_name")"
+      dep_present="${dep_present#present=}"; dep_present="${dep_present%%|*}"
 
-    case "$dep_present" in
-      yes)
-        # THREE OUTCOMES, NOT TWO (critic F-4). `remove_dep` answers 0 for "done
-        # what this row's policy says", non-zero for "not done" — and the two
-        # not-done cases are different facts about the machine. Exit 2 is "left
-        # in place by policy, nothing was asked and nothing was declined": the
-        # same-named plugin from another catalog that bionic never installed. It
-        # is counted with the rows that were already clean, because reporting an
-        # untouched plugin as removed and reporting it as declined are both false.
-        remove_dep "$dep_name"; dep_rc=$?
-        case "$dep_rc" in
-          0)
-            if [ "$dep_behavior" = "keep-shared" ]; then
+      case "$dep_present" in
+        yes)
+          # THREE OUTCOMES, NOT TWO (critic F-4). `remove_dep` answers 0 for "done
+          # what this row's policy says", non-zero for "not done" — and the two
+          # not-done cases are different facts about the machine. Exit 2 is "left
+          # in place by policy, nothing was asked and nothing was declined": the
+          # same-named plugin from another catalog that bionic never installed. It
+          # is counted with the rows that were already clean, because reporting an
+          # untouched plugin as removed and reporting it as declined are both false.
+          remove_dep "$dep_name"; dep_rc=$?
+          case "$dep_rc" in
+            0)
+              if [ "$dep_behavior" = "keep-shared" ]; then
+                RM_CLEAN=$((RM_CLEAN + 1))
+              else
+                RM_REMOVED=$((RM_REMOVED + 1))
+              fi
+              ;;
+            2)
               RM_CLEAN=$((RM_CLEAN + 1))
-            else
-              RM_REMOVED=$((RM_REMOVED + 1))
-            fi
-            ;;
-          2)
-            RM_CLEAN=$((RM_CLEAN + 1))
-            ;;
-          *)
-            RM_SKIPPED=$((RM_SKIPPED + 1))
-            RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ dependency ${dep_name}"$'\n'
-            ;;
-        esac
-        ;;
-      no)
-        _rm_clean "dependency ${dep_name} (not installed)"
-        ;;
-      *)
-        echo "  ${dep_name}: presence is not knowable on this machine — left in place."
-        ;;
-    esac
-  done 3<<< "$dep_lines"
-fi
-echo ""
+              ;;
+            *)
+              RM_SKIPPED=$((RM_SKIPPED + 1))
+              RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ dependency ${dep_name} — $(_rm_answer_yes "tool:${dep_name}")"$'\n'
+              ;;
+          esac
+          ;;
+        no)
+          _rm_clean "dependency ${dep_name} (not installed)"
+          ;;
+        *)
+          echo "  ${dep_name}: presence is not knowable on this machine — left in place."
+          ;;
+      esac
+    done 3<<< "$dep_lines"
+  fi
+  echo ""
+}
 
 # ─── Item: the plugin data directory ─────────────────────────────────────────
 #
@@ -667,40 +837,40 @@ echo ""
 # because a plugin whose name merely STARTS with "bionic" would also match it and
 # the user is the one who can tell.
 
-RM_DATA_DECLINED=0
-RM_DATA_ROOT="$(_rm_plugin_data_dir)"
-
-echo "plugin data:"
-rm_data_found=""
-for rm_data_dir in "$RM_DATA_ROOT"/bionic-*; do
-  [ -d "$rm_data_dir" ] || continue
-  rm_data_found="${rm_data_found}${rm_data_dir}"$'\n'
-done
-
-if [ -z "$rm_data_found" ]; then
-  _rm_clean "plugin data under ${RM_DATA_ROOT}"
-else
-  echo "  bionic would delete these plugin data directories:"
-  printf '%s' "$rm_data_found" | while IFS= read -r rm_line; do
-    [ -n "$rm_line" ] && echo "    ${rm_line}"
+_rm_item_plugin_data() {
+  _rm_wants plugin-data || return 0
+  echo "plugin data:"
+  rm_data_found=""
+  for rm_data_dir in "$RM_DATA_ROOT"/bionic-*; do
+    [ -d "$rm_data_dir" ] || continue
+    rm_data_found="${rm_data_found}${rm_data_dir}"$'\n'
   done
-  if _rm_consent "Remove bionic's plugin data?"; then
-    rm_data_failed=0
-    while IFS= read -r rm_data_dir <&3; do
-      [ -n "$rm_data_dir" ] || continue
-      _rm_purge_dir "$rm_data_dir" || rm_data_failed=1
-    done 3<<< "$rm_data_found"
-    if [ "$rm_data_failed" = "0" ]; then
-      _rm_removed "plugin data under ${RM_DATA_ROOT}"
-    else
-      _rm_leftover "some plugin data under ${RM_DATA_ROOT} could not be removed"
-    fi
+
+  if [ -z "$rm_data_found" ]; then
+    _rm_clean "plugin data under ${RM_DATA_ROOT}"
   else
-    RM_DATA_DECLINED=1
-    _rm_skipped "plugin data under ${RM_DATA_ROOT}"
+    echo "  bionic would delete these plugin data directories:"
+    printf '%s' "$rm_data_found" | while IFS= read -r rm_line; do
+      [ -n "$rm_line" ] && echo "    ${rm_line}"
+    done
+    if _rm_consent "Remove bionic's plugin data?"; then
+      rm_data_failed=0
+      while IFS= read -r rm_data_dir <&3; do
+        [ -n "$rm_data_dir" ] || continue
+        _rm_purge_dir "$rm_data_dir" || rm_data_failed=1
+      done 3<<< "$rm_data_found"
+      if [ "$rm_data_failed" = "0" ]; then
+        _rm_removed "plugin data under ${RM_DATA_ROOT}"
+      else
+        _rm_leftover "some plugin data under ${RM_DATA_ROOT} could not be removed"
+      fi
+    else
+      RM_DATA_DECLINED=1
+      _rm_skipped plugin-data "plugin data under ${RM_DATA_ROOT}"
+    fi
   fi
-fi
-echo ""
+  echo ""
+}
 
 # ─── Finisher: the native plugin uninstall ───────────────────────────────────
 #
@@ -712,71 +882,80 @@ echo ""
 # door's whole premise is a machine whose answer may be "nothing is registered" —
 # and because a machine could carry bionic from a differently-named marketplace.
 
-echo "native plugin uninstall:"
-rm_plugin_id=""
-if ! _rm_have claude; then
-  _rm_leftover "the claude CLI is not on PATH — the native plugin uninstall cannot be invoked here"
-else
-  rm_listing="$(claude plugin list --json 2>/dev/null)" || rm_listing=""
-  if [ -n "$rm_listing" ] && _rm_have jq; then
-    rm_plugin_id="$(printf '%s' "$rm_listing" \
-      | jq -r '[ .[]? | select((.id? // "" | split("@")[0]) == "bionic") | .id ][0] // empty' 2>/dev/null)"
-  elif [ -n "$rm_listing" ]; then
-    # No jq: the id is pulled out of the listing text by bash's own regex
-    # engine. A machine missing jq is exactly the machine this door serves.
-    if [[ "$rm_listing" =~ \"(bionic@[^\"]+)\" ]]; then rm_plugin_id="${BASH_REMATCH[1]}"; fi
-  fi
-
-  if [ -z "$rm_plugin_id" ]; then
-    _rm_clean "the bionic plugin (not registered with the CLI)"
+_rm_item_plugin() {
+  _rm_wants plugin || return 0
+  # AN ANSWER NOBODY GAVE IS A NO. The uninstall deletes the plugin data unless
+  # it is told to keep it, and the question about that data is a DIFFERENT item —
+  # one a narrowed run never asked. So a run narrowed to the uninstall keeps the
+  # data it was given no permission to take; a whole pass is unchanged, because
+  # there the question really was asked and its answer is already recorded.
+  _rm_wants plugin-data || RM_DATA_DECLINED=1
+  echo "native plugin uninstall:"
+  rm_plugin_id=""
+  if ! _rm_have claude; then
+    _rm_leftover "the claude CLI is not on PATH — the native plugin uninstall cannot be invoked here"
   else
-    # The plan is printed from the same argv that runs, so the command the user
-    # consented to is by construction the command that executes (deps.sh's rule).
-    rm_uninstall_argv=(claude plugin uninstall "$rm_plugin_id" --yes)
-    [ "$RM_DATA_DECLINED" = "1" ] && rm_uninstall_argv+=(--keep-data)
-    echo "  bionic would run: ${rm_uninstall_argv[*]}"
-    if _rm_consent "Uninstall ${rm_plugin_id} now?"; then
-      if "${rm_uninstall_argv[@]}"; then
-        _rm_removed "plugin ${rm_plugin_id}"
-        # ─── Re-check: plugin data, in case the uninstall recreated it ──────
-        #
-        # Chris's live teardown showed `claude plugin uninstall` re-creating
-        # an empty plugins/data/bionic-bionic directory as a side effect of
-        # the uninstall itself, independent of the question asked above —
-        # that question ran BEFORE this call and never looked again
-        # (r1-surface-map.md Item 4). The consent already given is honored
-        # against what is actually on disk now, not re-asked: a user who
-        # consented to removing bionic's plugin data gets that promise kept
-        # even if the CLI resurrects the directory afterward; a user who
-        # declined is left exactly as they asked, recreated or not.
-        if [ "$RM_DATA_DECLINED" = "0" ]; then
-          rm_data_recheck=""
-          for rm_data_dir in "$RM_DATA_ROOT"/bionic-*; do
-            [ -d "$rm_data_dir" ] || continue
-            rm_data_recheck="${rm_data_recheck}${rm_data_dir}"$'\n'
-          done
-          if [ -n "$rm_data_recheck" ]; then
-            rm_data_recheck_failed=0
-            while IFS= read -r rm_data_dir <&3; do
-              [ -n "$rm_data_dir" ] || continue
-              _rm_purge_dir "$rm_data_dir" || rm_data_recheck_failed=1
-            done 3<<< "$rm_data_recheck"
-            if [ "$rm_data_recheck_failed" = "0" ]; then
-              _rm_removed "plugin data under ${RM_DATA_ROOT} — recreated by the uninstall, removed again"
-            else
-              _rm_leftover "some plugin data under ${RM_DATA_ROOT} could not be removed after the uninstall recreated it"
+    rm_listing="$(claude plugin list --json 2>/dev/null)" || rm_listing=""
+    if [ -n "$rm_listing" ] && _rm_have jq; then
+      rm_plugin_id="$(printf '%s' "$rm_listing" \
+        | jq -r '[ .[]? | select((.id? // "" | split("@")[0]) == "bionic") | .id ][0] // empty' 2>/dev/null)"
+    elif [ -n "$rm_listing" ]; then
+      # No jq: the id is pulled out of the listing text by bash's own regex
+      # engine. A machine missing jq is exactly the machine this door serves.
+      if [[ "$rm_listing" =~ \"(bionic@[^\"]+)\" ]]; then rm_plugin_id="${BASH_REMATCH[1]}"; fi
+    fi
+
+    if [ -z "$rm_plugin_id" ]; then
+      _rm_clean "the bionic plugin (not registered with the CLI)"
+    else
+      # The plan is printed from the same argv that runs, so the command the user
+      # consented to is by construction the command that executes (deps.sh's rule).
+      rm_uninstall_argv=(claude plugin uninstall "$rm_plugin_id" --yes)
+      [ "$RM_DATA_DECLINED" = "1" ] && rm_uninstall_argv+=(--keep-data)
+      echo "  bionic would run: ${rm_uninstall_argv[*]}"
+      if _rm_consent "Uninstall ${rm_plugin_id} now?"; then
+        if "${rm_uninstall_argv[@]}"; then
+          _rm_removed "plugin ${rm_plugin_id}"
+          # ─── Re-check: plugin data, in case the uninstall recreated it ──────
+          #
+          # Chris's live teardown showed `claude plugin uninstall` re-creating
+          # an empty plugins/data/bionic-bionic directory as a side effect of
+          # the uninstall itself, independent of the question asked above —
+          # that question ran BEFORE this call and never looked again
+          # (r1-surface-map.md Item 4). The consent already given is honored
+          # against what is actually on disk now, not re-asked: a user who
+          # consented to removing bionic's plugin data gets that promise kept
+          # even if the CLI resurrects the directory afterward; a user who
+          # declined is left exactly as they asked, recreated or not.
+          if [ "$RM_DATA_DECLINED" = "0" ]; then
+            rm_data_recheck=""
+            for rm_data_dir in "$RM_DATA_ROOT"/bionic-*; do
+              [ -d "$rm_data_dir" ] || continue
+              rm_data_recheck="${rm_data_recheck}${rm_data_dir}"$'\n'
+            done
+            if [ -n "$rm_data_recheck" ]; then
+              rm_data_recheck_failed=0
+              while IFS= read -r rm_data_dir <&3; do
+                [ -n "$rm_data_dir" ] || continue
+                _rm_purge_dir "$rm_data_dir" || rm_data_recheck_failed=1
+              done 3<<< "$rm_data_recheck"
+              if [ "$rm_data_recheck_failed" = "0" ]; then
+                _rm_removed "plugin data under ${RM_DATA_ROOT} — recreated by the uninstall, removed again"
+              else
+                _rm_leftover "some plugin data under ${RM_DATA_ROOT} could not be removed after the uninstall recreated it"
+              fi
             fi
           fi
+        else
+          _rm_leftover "claude plugin uninstall ${rm_plugin_id} failed — the plugin is still registered"
         fi
       else
-        _rm_leftover "claude plugin uninstall ${rm_plugin_id} failed — the plugin is still registered"
+        _rm_skipped plugin "plugin ${rm_plugin_id}"
       fi
-    else
-      _rm_skipped "plugin ${rm_plugin_id}"
     fi
   fi
-fi
-echo ""
+  echo ""
+}
 
 # ─── Finisher: orphaned dependencies ─────────────────────────────────────────
 #
@@ -785,33 +964,66 @@ echo ""
 # The offer is built from `prune --dry-run`'s listing verbatim — bionic does not
 # walk plugin.json and decide for itself what is orphaned.
 
-echo "orphaned dependencies:"
-if ! _rm_have claude; then
-  _rm_clean "orphaned dependencies (no claude CLI to ask)"
-else
-  rm_prune_dry="$(claude plugin prune --dry-run 2>/dev/null)" || rm_prune_dry=""
-  case "$rm_prune_dry" in
-    *@*)
-      echo "  the CLI reports these auto-installed dependencies are no longer needed:"
-      _rm_indent "$rm_prune_dry"
-      if _rm_consent "Run claude plugin prune to remove them?"; then
-        if claude plugin prune --yes; then
-          _rm_removed "orphaned dependencies (claude plugin prune)"
+_rm_item_orphans() {
+  _rm_wants orphaned-dependencies || return 0
+  echo "orphaned dependencies:"
+  if ! _rm_have claude; then
+    _rm_clean "orphaned dependencies (no claude CLI to ask)"
+  else
+    rm_prune_dry="$(claude plugin prune --dry-run 2>/dev/null)" || rm_prune_dry=""
+    case "$rm_prune_dry" in
+      *@*)
+        echo "  the CLI reports these auto-installed dependencies are no longer needed:"
+        _rm_indent "$rm_prune_dry"
+        if _rm_consent "Run claude plugin prune to remove them?"; then
+          if claude plugin prune --yes; then
+            _rm_removed "orphaned dependencies (claude plugin prune)"
+          else
+            _rm_leftover "claude plugin prune failed — the orphaned dependencies are still installed"
+          fi
         else
-          _rm_leftover "claude plugin prune failed — the orphaned dependencies are still installed"
+          _rm_skipped orphaned-dependencies "orphaned dependencies"
         fi
-      else
-        _rm_skipped "orphaned dependencies"
-      fi
-      ;;
-    *)
-      _rm_clean "orphaned dependencies (the CLI names none)"
-      ;;
-  esac
-fi
-echo ""
+        ;;
+      *)
+        _rm_clean "orphaned dependencies (the CLI names none)"
+        ;;
+    esac
+  fi
+  echo ""
+}
+
+# ─── Run ─────────────────────────────────────────────────────────────────────
+
+_rm_item_legacy_alias
+_rm_item_shell_env
+_rm_item_legacy_hooks
+_rm_item_legacy_skill_copy
+_rm_item_permission_profile
+_rm_item_permission_mode
+_rm_item_tools
+_rm_item_plugin_data
+_rm_item_plugin
+_rm_item_orphans
 
 # ─── End summary ─────────────────────────────────────────────────────────────
+#
+# A NARROWED RUN GETS THE HALF OF THIS THAT IS ABOUT IT. The banner, the
+# never-list and the next steps are claims about a WHOLE teardown — "Claude Code
+# still works, without bionic's skills, hooks and agents" is false after one
+# item — so they belong to the run that earns them. What a narrowed run does
+# print is what it did: the counts, and anything it could not finish.
+
+if [ -n "$RM_ONLY" ]; then
+  printf '  %d removed · %d already clean · %d skipped by you\n' "$RM_REMOVED" "$RM_CLEAN" "$RM_SKIPPED"
+  echo ""
+  if [ -n "$RM_LEFTOVERS" ]; then
+    echo "  Leftovers (bionic could not finish these)"
+    printf '%s' "$RM_LEFTOVERS"
+    echo ""
+  fi
+  exit 0
+fi
 
 if [ -z "$RM_LEFTOVERS" ]; then
   echo "# ─── remove complete ───────────────────────────────────────────"

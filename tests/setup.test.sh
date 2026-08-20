@@ -230,6 +230,13 @@ plant_installed() {  # <key> <version>
     "$FIX/ch/plugins/installed_plugins.json" > "$tmp" && mv "$tmp" "$FIX/ch/plugins/installed_plugins.json"
 }
 
+# SETUP_FLAGS carries the script's own arguments — `--list`, `--only <name>` —
+# and is deliberately a string, word-split at the call: an empty bash 3.2 array
+# under `set -u` is an unbound variable, which is the same trap setup.sh's own
+# action accumulator documents. Item names carry no spaces, so splitting is
+# exactly the right behaviour here rather than a shortcut.
+SETUP_FLAGS=""
+
 run_setup() {  # <answers> [extra env assignments...] — stdout+stderr of one setup run
   local answers="$1"; shift
   local script="${SETUP_UNDER_TEST:-$SETUP_SH}"
@@ -246,7 +253,7 @@ run_setup() {  # <answers> [extra env assignments...] — stdout+stderr of one s
     BIONIC_SETTINGS_FILE="$FIX/ch/settings.json" \
     BIONIC_INSTALLED_PLUGINS_FILE="$FIX/ch/plugins/installed_plugins.json" \
     BIONIC_SHELL_RC="$FIX/rc" \
-    "$@" bash "$script" 2>&1
+    "$@" bash "$script" ${SETUP_FLAGS:-} 2>&1
 }
 
 YES="$(for _ in $(seq 1 60); do printf 'y\n'; done)"
@@ -1313,6 +1320,179 @@ expect_match "the permission-profile action names the terminal invocation instea
   '*scripts/setup.sh*' "$OUT"
 expect_match "…in the unquoted form a person can paste" '*bash /*scripts/setup.sh*' "$OUT"
 expect_match "…and still says which answer applies it" '*answer y*' "$OUT"
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Group 16: the yes is addressable — --list and --only (critic F-2) ==="
+# ---------------------------------------------------------------------------
+#
+# WHAT WAS UNSAFE. Group 15 made the instruction honest; it did not make the
+# answer aimable. The one channel that works is an answer delivered on this
+# script's input, and an answer delivered that way is POSITIONAL — it is read by
+# the FIRST question asked, which is whichever item this machine happens to have
+# unfinished. A user who said "yes, set the permission mode" and had that yes
+# relayed the obvious way got question one instead, which on the wave's own live
+# capture was an offer to install a documentation server.
+#
+# WHAT THESE ARMS PIN. `--only <name>` runs exactly the item named and asks
+# about nothing else, so the answer can only reach the question it was given
+# for; `--list` publishes the names; and the two agree, so a name a reader can
+# see is a name the dispatcher takes. The declined action lines carry that route
+# with the item's own name in it.
+#
+# WHAT THEY MUST NOT SHOW, and Group 10 above is the standing proof: no arm here
+# introduces a way to answer a question without answering it. `--only` narrows
+# WHICH question is asked; the answer is still one `y` on the standard input,
+# and a run with nothing on that input still declines.
+
+# ---- the roster, and its agreement with the dispatcher ----
+new_fixture only-list
+plant_cli_plugin "bionic@bionic" true
+SETUP_FLAGS="--list"
+LIST_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+
+expect_match "--list names the permission-mode item" '*permission-mode*' "$LIST_OUT"
+expect_match "--list names a tool row read from the dependency table" '*tool:git*' "$LIST_OUT"
+expect_match "--list names a core dependency row" '*dependency:superpowers*' "$LIST_OUT"
+
+# Every line is a bare pasteable name: no header, no prose, no leading spaces.
+LIST_JUNK=""
+while IFS= read -r _id; do
+  case "$_id" in
+    ''|*' '*|*$'\t'*) LIST_JUNK="${LIST_JUNK}[${_id}]" ;;
+  esac
+done <<< "$LIST_OUT"
+expect_eq "--list prints names only — one per line, nothing a reader cannot paste" "" "$LIST_JUNK"
+
+# AC-11 still holds through the new door: the flag cannot reach a row the full
+# pass would never offer. `impeccable` is when-needed and native-kind, which
+# install_dep is required to refuse outright.
+expect_no_match "--list offers no when-needed row (AC-11 holds through the flag)" \
+  '*tool:impeccable*' "$LIST_OUT"
+
+# THE AGREEMENT ARM. One owner for the roster means every printed name is a name
+# `--only` accepts. Exit 2 is the dispatcher's "no such item", so any 2 here is a
+# name that could be read and not used.
+# Lines that are not bare names are the junk arm's business, not this one's;
+# driving a whole setup run for each of them is how this arm would take minutes
+# against a tree that has no --list at all.
+LIST_REJECTED=""
+while IFS= read -r _id; do
+  [ -n "$_id" ] || continue
+  case "$_id" in *' '*|*$'\t'*) continue ;; esac
+  SETUP_FLAGS="--only $_id"
+  run_setup "" >/dev/null 2>&1
+  [ "$?" = "2" ] && LIST_REJECTED="${LIST_REJECTED}${_id} "
+  SETUP_FLAGS=""
+done <<< "$LIST_OUT"
+expect_eq "every name --list prints is a name --only accepts" "" "$LIST_REJECTED"
+
+# ---- an unknown name is refused, and says where the names are ----
+new_fixture only-unknown
+plant_cli_plugin "bionic@bionic" true
+SETUP_FLAGS="--only not-an-item"
+UNKNOWN_OUT="$(run_setup "")"; UNKNOWN_RC=$?
+SETUP_FLAGS=""
+expect_eq "--only with an unknown name exits 2" "2" "$UNKNOWN_RC"
+expect_match "…and says so in words, naming what was asked for" '*not-an-item*' "$UNKNOWN_OUT"
+expect_match "…and points at --list for the names" '*--list*' "$UNKNOWN_OUT"
+expect_no_match "…and asks nothing before refusing" '*\[y/N\]*' "$UNKNOWN_OUT"
+
+SETUP_FLAGS="--only"
+MISSING_OUT="$(run_setup "")"; MISSING_RC=$?
+SETUP_FLAGS=""
+expect_eq "--only with no name at all exits 2 rather than running everything" "2" "$MISSING_RC"
+expect_match "…and says a name is what is missing" '*--only needs the name*' "$MISSING_OUT"
+
+# ---- one consented item, and NOTHING else, by bytes ----
+#
+# The claim is not "the mode was written" — it is "the mode was written and
+# nothing else moved". So the whole fixture tree is fingerprinted either side of
+# the run and the difference has to be one file.
+new_fixture only-one-mutation
+plant_cli_plugin "bionic@bionic" true
+RC_BEFORE="$(cat "$FIX/rc")"
+FP_BEFORE="$(fingerprint "$FIX")"
+SETUP_FLAGS="--only permission-mode"
+ONE_OUT="$(run_setup "y
+")"
+SETUP_FLAGS=""
+FP_AFTER="$(fingerprint "$FIX")"
+
+expect_eq "--only permission-mode writes the mode deps.sh owns" "auto" \
+  "$(jq -r '.permissions.defaultMode // ""' "$FIX/ch/settings.json")"
+expect_eq "…and the shell rc is byte-identical" "$RC_BEFORE" "$(cat "$FIX/rc")"
+printf '%s\n' "$FP_BEFORE" > "$TMP/fp-before.txt"
+printf '%s\n' "$FP_AFTER"  > "$TMP/fp-after.txt"
+diff "$TMP/fp-before.txt" "$TMP/fp-after.txt" > "$TMP/fp-diff.txt" 2>&1
+CHANGED="$(/usr/bin/grep -c '^[<>]' "$TMP/fp-diff.txt" | tr -d ' ')"
+expect_eq "…and one file in the tree changed — the settings file, and only it" "2" "$CHANGED"
+expect_true "…and that file is settings.json" \
+  /usr/bin/grep -q 'settings.json' "$TMP/fp-diff.txt"
+expect_match "…and the one question asked was that item's own" \
+  '*default permission mode*' "$ONE_OUT"
+expect_no_match "…and no other step printed a header" '*3. Tools*' "$ONE_OUT"
+expect_no_match "…nor the shell-environment step" '*5. Shell environment*' "$ONE_OUT"
+expect_no_match "…nor the permission-profile half of its own step" \
+  '*bionic ships a permission profile*' "$ONE_OUT"
+expect_no_match "…and the summary does not claim the whole machine is set up" \
+  '*this machine is set up*' "$ONE_OUT"
+
+# ---- exactly ONE question is asked, so the answer cannot land on another ----
+#
+# This is the defect stated as a count. Two questions and one answer is the
+# positional hazard; one question and one answer is the fix.
+new_fixture only-one-question
+plant_cli_plugin "bionic@bionic" true
+SETUP_FLAGS="--only shell-env"
+DECLINE_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+printf '%s\n' "$DECLINE_OUT" > "$TMP/only-decline.txt"
+QCOUNT="$(/usr/bin/grep -c '\[y/N\]' "$TMP/only-decline.txt" | tr -d ' ')"
+expect_eq "--only asks exactly one question" "1" "$QCOUNT"
+expect_match "…the one it was told to ask" '*Add the export to*' "$DECLINE_OUT"
+expect_match "…a run with nothing to answer with still declines" '*declined*' "$DECLINE_OUT"
+expect_eq "…and the rc file is untouched by the decline" "$(printf 'export PATH="$HOME/bin:$PATH"\n')" \
+  "$(cat "$FIX/rc")"
+
+# ---- the declined action line carries the route, with the item's own name ----
+expect_match "the declined item's action line names the item" '*--only shell-env*' "$DECLINE_OUT"
+expect_match "…and the invocation that delivers one answer to it" \
+  '*| bash /*scripts/setup.sh --only shell-env*' "$DECLINE_OUT"
+# The answer half, matched as a fixed string against a FILE: the route is only a
+# route if it actually carries a yes, and the newline in it is a literal
+# backslash-n that a glob pattern cannot state without escaping itself twice.
+expect_true "…with the answer itself supplied on the input" \
+  /usr/bin/grep -qF "printf 'y\\n' |" "$TMP/only-decline.txt"
+
+# A whole declined pass carries the same route for every item it asked about, so
+# a user reading the summary can act on any line in it.
+new_fixture only-route-everywhere
+plant_cli_plugin "bionic@bionic" true
+ALL_NO_OUT="$(run_setup "$NO")"
+for _item in shell-env permission-profile permission-mode; do
+  expect_match "the whole-pass summary names --only ${_item}" "*--only ${_item}*" "$ALL_NO_OUT"
+done
+
+# ONE OWNER FOR THE SENTENCE. Two spellings of "how to say yes" is how an action
+# line and a summary come to name different commands, which is the class of
+# defect Group 15 exists for. The route is composed in exactly one function.
+expect_eq "setup.sh composes the route sentence in one place" "1" \
+  "$(/usr/bin/grep -c 'answer yes to %s with' "$SETUP_SH" | tr -d ' ')"
+expect_eq "…and no other line in setup.sh spells the piped invocation" "1" \
+  "$(/usr/bin/grep -c "printf 'y" "$SETUP_SH" | tr -d ' ')"
+
+# NO ASSUME-YES CAME IN WITH THE FLAG. The wave's ratified rule is consent per
+# item from the standard input, and the two shapes that would break it are a
+# flag and an environment knob. Neither exists, and this arm is what keeps it
+# that way when the next flag is added.
+# Anchored on an argument arm, not on the characters: `--yes)` also closes the
+# install argv this script prints.
+expect_eq "setup.sh takes no assume-yes argument" "" \
+  "$(/usr/bin/grep -nE '^[[:space:]]*--(yes|all)\)' "$SETUP_SH" || true)"
+expect_eq "setup.sh reads no assume-yes environment knob" "" \
+  "$(/usr/bin/grep -niE 'BIONIC_(ASSUME_YES|YES|NONINTERACTIVE)' "$SETUP_SH" || true)"
 
 # ---------------------------------------------------------------------------
 # Results

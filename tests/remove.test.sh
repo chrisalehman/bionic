@@ -306,6 +306,8 @@ ALL_NO="$TMP/answers-no";  answers_file "$ALL_NO" n
 
 # One run of a remove script against one arm. The env vars are exactly the
 # roots the payload libraries already read, plus the two this script adds.
+REMOVE_FLAGS=""
+
 run_remove() {  # <script> <arm> <answers-file> [extra env assignments...]
   local script="$1" arm="$2" answers="$3"; shift 3
   env -i \
@@ -320,7 +322,7 @@ run_remove() {  # <script> <arm> <answers-file> [extra env assignments...]
     BIONIC_PLAYWRIGHT_CACHE="$arm/home/.cache/ms-playwright" \
     BIONIC_PROFILE_TEMPLATE="$TEMPLATE" \
     "$@" \
-    bash "$script" < "$answers" 2>&1
+    bash "$script" ${REMOVE_FLAGS:-} < "$answers" 2>&1
 }
 
 # Names + content of every file under a directory, path-relative so two arms
@@ -1618,6 +1620,166 @@ expect_true "default mode: the item's source sits before the native-uninstall fi
     b=$(grep -n "native plugin uninstall:" "$1" | head -1 | cut -d: -f1)
     [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]
   ' _ "$REMOVE_SH"
+
+echo ""
+echo "=== Group 19: the yes is addressable — --list and --only (critic F-2) ==="
+#
+# THE SAME DEFECT THIS SCRIPT'S SIBLING HAS. An answer reaches this script on its
+# own input and nowhere else, and an answer delivered that way is POSITIONAL: it
+# lands on the FIRST question asked, which is whichever item this machine
+# happens to carry. A relayed "yes, take the permission block off" could uninstall
+# the plugin instead. `--only <name>` makes the yes aimable — one item asked
+# about, one answer possible — and `--list` publishes the names.
+#
+# NOTHING HERE ANSWERS A QUESTION. Group 4 above is the standing proof that an
+# all-no run leaves the machine byte-identical, and the arms below add no route
+# around it: the answer is still one `y` read from the input, per item.
+
+ARM="$(new_arm only-list)"
+plant_never_list "$ARM"
+plant_claude_stub "$ARM" yes no
+REMOVE_FLAGS="--list"
+LIST_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
+REMOVE_FLAGS=""
+
+printf '%s\n' "$LIST_OUT" > "$TMP/rm-list.txt"
+expect_contains "--list names the permission-mode item" "permission-mode" "$LIST_OUT"
+expect_contains "--list names a tool row read from the dependency table" "tool:git" "$LIST_OUT"
+# Whole-line matching, because `plugin` is a prefix of `plugin-data`: a
+# substring arm here would pass on a roster that never named the finisher.
+expect_true "--list names the finisher as a name of its own" \
+  /usr/bin/grep -qxF 'plugin' "$TMP/rm-list.txt"
+expect_true "--list names the plugin-data item as a name of its own" \
+  /usr/bin/grep -qxF 'plugin-data' "$TMP/rm-list.txt"
+LIST_JUNK=""
+while IFS= read -r rm_id; do
+  case "$rm_id" in ''|*' '*|*"$(printf '\t')"*) LIST_JUNK="${LIST_JUNK}[${rm_id}]" ;; esac
+done < "$TMP/rm-list.txt"
+expect_eq "--list prints names only — one per line, nothing a reader cannot paste" "" "$LIST_JUNK"
+
+# THE AGREEMENT ARM. One owner for the roster means every name a reader can see
+# is a name the dispatcher takes. Exit 2 is "no such item".
+LIST_REJECTED=""
+while IFS= read -r rm_id; do
+  [ -n "$rm_id" ] || continue
+  case "$rm_id" in *' '*) continue ;; esac
+  REMOVE_FLAGS="--only $rm_id"
+  run_remove "$REMOVE_SH" "$ARM" "$ALL_NO" >/dev/null 2>&1
+  [ "$?" = "2" ] && LIST_REJECTED="${LIST_REJECTED}${rm_id} "
+  REMOVE_FLAGS=""
+done < "$TMP/rm-list.txt"
+expect_eq "every name --list prints is a name --only accepts" "" "$LIST_REJECTED"
+
+# ---- an unknown name is refused before anything is asked ----
+ARM="$(new_arm only-unknown)"
+plant_zshrc_marked "$ARM"
+plant_claude_stub "$ARM" no no
+REMOVE_FLAGS="--only not-an-item"
+UNKNOWN_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"; UNKNOWN_RC=$?
+REMOVE_FLAGS=""
+expect_eq "--only with an unknown name exits 2" "2" "$UNKNOWN_RC"
+expect_contains "…and says so in words, naming what was asked for" "not-an-item" "$UNKNOWN_OUT"
+expect_contains "…and points at --list for the names" "--list" "$UNKNOWN_OUT"
+expect_not_contains "…and asks nothing before refusing" "[y/N]" "$UNKNOWN_OUT"
+expect_true "…and removes nothing: the planted alias block is still there" \
+  bash -c 'grep -qF "bionic:start" "$1"' _ "$ARM/home/.zshrc"
+
+# ---- one consented item, and NOTHING else, by bytes ----
+ARM="$(new_arm only-one-mutation)"
+plant_default_mode "$ARM" auto
+plant_zshrc_marked "$ARM"
+plant_todo_export "$ARM"
+plant_plugin_data "$ARM"
+plant_claude_stub "$ARM" yes yes
+RC_BEFORE="$(cat "$ARM/home/.zshrc")"
+FP_BEFORE="$(fingerprint "$ARM/home")"
+REMOVE_FLAGS="--only permission-mode"
+ONE_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+REMOVE_FLAGS=""
+FP_AFTER="$(fingerprint "$ARM/home")"
+
+expect_eq "--only permission-mode resets the value bionic wrote" "" \
+  "$(jq -r '.permissions.defaultMode // ""' "$ARM/home/.claude/settings.json")"
+expect_eq "…and the shell rc is byte-identical" "$RC_BEFORE" "$(cat "$ARM/home/.zshrc")"
+expect_true "…and the plugin data directory is still there" \
+  test -d "$ARM/home/.claude/plugins/data/bionic-bionic"
+printf '%s\n' "$FP_BEFORE" > "$TMP/rm-fp-before.txt"
+printf '%s\n' "$FP_AFTER"  > "$TMP/rm-fp-after.txt"
+diff "$TMP/rm-fp-before.txt" "$TMP/rm-fp-after.txt" > "$TMP/rm-fp-diff.txt" 2>&1
+RM_CHANGED="$(/usr/bin/grep -c '^[<>]' "$TMP/rm-fp-diff.txt" | tr -d ' ')"
+expect_eq "…and one file changed, no more" "2" "$RM_CHANGED"
+expect_true "…and that file is settings.json" \
+  /usr/bin/grep -q 'settings.json' "$TMP/rm-fp-diff.txt"
+expect_not_contains "…the finisher was never reached" "plugin uninstall" "$(cat "$ARM/calls.log")"
+expect_not_contains "…and no other item printed its header" "todo-tools export:" "$ONE_OUT"
+expect_not_contains "…and the closing claim is not made after one item" \
+  "without bionic's skills, hooks and agents" "$ONE_OUT"
+
+printf '%s\n' "$ONE_OUT" > "$TMP/rm-one.txt"
+RM_QCOUNT="$(/usr/bin/grep -c '\[y/N\]' "$TMP/rm-one.txt" | tr -d ' ')"
+expect_eq "--only asks exactly one question" "1" "$RM_QCOUNT"
+
+# ---- AN ANSWER NOBODY GAVE IS A NO ----
+#
+# The uninstall deletes the plugin data unless told to keep it, and the question
+# about that data is a DIFFERENT item — one a narrowed run never asked. Narrowed
+# to the finisher, the teardown must keep what it was given no permission to take.
+ARM="$(new_arm only-plugin-keeps-data)"
+plant_plugin_data "$ARM"
+plant_claude_stub "$ARM" yes no
+REMOVE_FLAGS="--only plugin"
+FINISH_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+REMOVE_FLAGS=""
+expect_contains "--only plugin uninstalls the plugin" "plugin uninstall bionic@bionic --yes" \
+  "$(cat "$ARM/calls.log")"
+expect_contains "…and keeps the data it was never asked about" "--keep-data" "$(cat "$ARM/calls.log")"
+expect_true "…so the data directory survives" \
+  test -d "$ARM/home/.claude/plugins/data/bionic-bionic"
+expect_not_contains "…and the data question was not asked either" "Remove bionic's plugin data?" "$FINISH_OUT"
+
+# ---- the declined line carries the route, with the item's own name ----
+ARM="$(new_arm only-declined-route)"
+plant_zshrc_marked "$ARM"
+plant_claude_stub "$ARM" no no
+REMOVE_FLAGS="--only legacy-alias"
+DECLINE_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
+REMOVE_FLAGS=""
+printf '%s\n' "$DECLINE_OUT" > "$TMP/rm-decline.txt"
+expect_contains "the declined item names itself" "--only legacy-alias" "$DECLINE_OUT"
+expect_contains "…in an unquoted invocation a person can paste" \
+  "| bash /" "$DECLINE_OUT"
+expect_true "…with the answer itself supplied on the input" \
+  /usr/bin/grep -qF "printf 'y\\n' |" "$TMP/rm-decline.txt"
+
+# A whole declined pass carries the route on every item it asked about, and the
+# end summary repeats it beside the thing that was left.
+ARM="$(new_arm route-everywhere)"
+plant_never_list "$ARM"
+plant_zshrc_marked "$ARM"
+plant_todo_export "$ARM"
+plant_profile_block "$ARM"
+plant_plugin_data "$ARM"
+plant_claude_stub "$ARM" yes yes
+ALL_NO_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
+for rm_item in legacy-alias shell-env permission-profile plugin-data plugin; do
+  expect_contains "the whole-pass output names --only ${rm_item}" "--only ${rm_item}" "$ALL_NO_OUT"
+done
+expect_contains "the Skipped list carries the route beside what was left" \
+  "⚠ legacy alias block in" "$ALL_NO_OUT"
+
+# ONE OWNER FOR THE SENTENCE, so a decline line and a summary line cannot come to
+# name two different commands.
+expect_eq "remove.sh composes the route sentence in one place" "1" \
+  "$(/usr/bin/grep -c 'answer yes to %s with' "$REMOVE_SH" | tr -d ' ')"
+
+# NO ASSUME-YES CAME IN WITH THE FLAGS. The header's own rule, kept a rule.
+# ANCHORED, because `--yes)` also closes the uninstall argv array below: the
+# question is whether this script has an ARGUMENT arm called --yes, not whether
+# the four characters appear anywhere in it.
+expect_eq "remove.sh takes no assume-yes argument of its own" "" \
+  "$(/usr/bin/grep -nE '^[[:space:]]*--(yes|all)\)' "$REMOVE_SH" || true)"
+expect_eq "remove.sh reads no assume-yes environment knob" "" \
+  "$(/usr/bin/grep -niE 'BIONIC_(ASSUME_YES|YES|NONINTERACTIVE)' "$REMOVE_SH" || true)"
 
 echo ""
 echo "=== Group 16: the suite is registered in tests/run.sh by name ==="
