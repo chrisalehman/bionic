@@ -25,39 +25,53 @@
 # fact it recomputed itself would be a second implementation of somebody else's
 # truth, which is the defect the wave's ownership table exists to prevent.
 #
-# THE EIGHT STEPS, in this order and for these reasons:
+# THE NINE STEPS, in this order and for these reasons:
 #
-#   1. plugin install       tier 1 first: everything after it assumes the payload
+#   1. plugin               tier 1 first: everything after it assumes the payload
 #                           is installed, and a machine that skips it gets an
 #                           honest action line rather than six confusing ones.
-#   2. lane-3a enable-verify the harness installs these; what it does NOT always
-#                           do is leave them enabled (measured: W1 run B landed
-#                           superpowers `enabled: false`). Repair is an explicit
-#                           `claude plugin enable`, never a reinstall.
-#   3. lane-3b install loop the deps with no native mechanism, one row at a time
-#                           through `install_dep` — the setup loop and the JIT
-#                           offer are the same function called twice.
-#   4. shell rc export      CLAUDE_CODE_ENABLE_TODO_TOOLS=1, marker-scoped.
-#   5. legacy alias removal the block claude-bootstrap.sh used to write. Auto
+#   2. dependencies         the two plugins bionic declares. The harness installs
+#                           these; what it does NOT always do is leave them
+#                           enabled (measured: W1 run B landed superpowers
+#                           `enabled: false`). Repair is an explicit `claude
+#                           plugin enable`, never a reinstall.
+#   3. tools                the substrate every machine needs — git, node, jq and
+#                           the rest — one row at a time through `install_dep`,
+#                           the same function a just-in-time offer calls.
+#   4. optional extras      the four tools nobody needs to work: offered once,
+#                           each with a line of what it is, default No.
+#   5. shell environment    CLAUDE_CODE_ENABLE_TODO_TOOLS=1, marker-scoped.
+#   6. legacy shell alias   the block claude-bootstrap.sh used to write. Auto
 #                           mode is the default now and the safer equivalent, so
 #                           the block is retired footprint. Ported here because
 #                           the installer retires at W5 and this obligation must
 #                           not retire with it.
-#   6. legacy-channel hooks settings.json entries still naming ~/.claude/hooks/.
-#                           The plugin registers its own hooks through the
-#                           payload's hooks.json, so a settings entry naming that
-#                           directory is registered through the OTHER channel.
-#                           Also ported from the retiring installer.
-#   7. legacy skill copy    the skill directory claude-bootstrap.sh rendered into
+#   7. legacy-channel hooks settings.json entries still naming the machine's
+#                           pre-plugin hooks directory. The plugin registers its
+#                           own hooks through the payload's hooks.json, so a
+#                           settings entry naming that directory is registered
+#                           through the OTHER channel. Also ported from the
+#                           retiring installer.
+#   8. legacy skill copy    the skill directory claude-bootstrap.sh rendered into
 #                           the CLI's own skills directory. The payload ships the
 #                           same skill, so the installed copy is a second one that
 #                           still registers hooks through the pre-plugin channel.
 #                           Named by AC-8; the gap 4/6 found and reported.
-#   8. permission profile   rendered against this machine's plugin root and
+#   9. permission profile   rendered against this machine's plugin root and
 #                           applied under explicit consent (AC-6). Consent is
 #                           obtained HERE and handed to `profile_apply` as a
 #                           token: the library never asks, so there is exactly
 #                           one place in the system where consent is decided.
+#
+# WHICH TOOLS THIS SCRIPT IS ALLOWED TO ASK ABOUT (wave-06 D-B, spec AC-11).
+# Steps 3 and 4 walk `dep_names_class basic` and `dep_names_class extra`, and
+# nothing here walks `when-needed`. That class exists because the moment to ask
+# about a headless browser is the moment a route wants one — `lib/jit.sh` makes
+# that offer, from the same `install_dep`. Setup asking would be asking about a
+# capability the user has not reached, and one of those rows (impeccable) is
+# native-kind, which `install_dep` is required to refuse outright. The classes
+# are read from the table, never restated here: a second roster is a second
+# opinion about what bionic depends on.
 #
 # CONSENT, AND WHY THERE IS ONE PROMPT SHAPE. Every mutation below is gated, per
 # item, on an explicit `y` on stdin, and the gate is `deps.sh`'s `_dep_consent`
@@ -69,7 +83,7 @@
 # fail-closed direction.
 #
 # WARN AND CONTINUE. `set -e` is deliberately absent. A machine that cannot do
-# step 3 can still do steps 4-8, and stopping at the first problem is how a user
+# step 3 can still do steps 4-9, and stopping at the first problem is how a user
 # ends up running setup five times. Every step that could not finish appends an
 # ACTION LINE, and the run ends with all of them together — the summary is the
 # interface, not the scroll. Exit status is 0 whenever setup itself worked,
@@ -112,7 +126,7 @@ _setup_self_dir() {
 
 SETUP_LIB_DIR="${BIONIC_LIB_DIR:-$(_setup_self_dir)/lib}"
 
-for _setup_lib in deps.sh detect.sh profile.sh hooks.sh; do
+for _setup_lib in deps.sh detect.sh profile.sh hooks.sh jit.sh; do
   if [ ! -f "${SETUP_LIB_DIR}/${_setup_lib}" ]; then
     echo "setup.sh: cannot find ${SETUP_LIB_DIR}/${_setup_lib} — the payload looks incomplete." >&2
     echo "          reinstall with: claude plugin install bionic@bionic" >&2
@@ -127,6 +141,16 @@ done
 . "${SETUP_LIB_DIR}/profile.sh"
 # shellcheck source=/dev/null
 . "${SETUP_LIB_DIR}/hooks.sh"
+# jit.sh, for ONE function: `_jit_fix_line`, which spells the command that would
+# install a row by hand. The summary needs that sentence and so does a route's
+# just-in-time offer, and it has to be the SAME sentence — an action line that
+# named a different command from the one a "yes" would run is a lie the user
+# only discovers by pasting it. Sourcing the route contract to reuse its wording
+# is cheaper than a second copy of the same derivation, which is what this
+# script printed before: the raw `mechanism` field (`brew:git`), a locator the
+# table stores and nobody can type.
+# shellcheck source=/dev/null
+. "${SETUP_LIB_DIR}/jit.sh"
 
 # ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -163,7 +187,7 @@ consent() { _dep_consent "$1"; }   # deps.sh owns the one prompt shape
 
 # ─── The CLI's own view of a plugin ──────────────────────────────────────────
 #
-# Presence of a lane-3a dependency is `check_dep`'s answer (it reads the install
+# Presence of a core dependency is `check_dep`'s answer (it reads the install
 # registry, and it is the one owner of that fact). ENABLED-ness is not in that
 # registry at all — it lives in the CLI's settings — so it is asked of the CLI
 # itself, the same tool that would repair it. Matching is on the NAME half of
@@ -215,7 +239,7 @@ _setup_rc_strip_block() {  # <file> <start-marker> <end-marker>
 
 setup_plugin_install() {
   say ""
-  say "1. Plugin install"
+  say "1. Plugin"
   local state id
   IFS='|' read -r state id <<< "$(_setup_cli_plugin bionic)"
 
@@ -245,16 +269,17 @@ setup_plugin_install() {
   return 0
 }
 
-# ─── Step 2 — lane-3a: present AND enabled ───────────────────────────────────
+# ─── Step 2 — the core dependencies: present AND enabled ─────────────────────
 #
 # The harness installs these; the measured failure mode is that it can leave one
 # `enabled: false`, which looks installed to every check that only counts rows.
 # Repair is an explicit enable — never a reinstall, which would be the second
-# installer lane 3a exists to avoid.
+# installer the native install mechanism exists to avoid.
 
 setup_dep_enable_verify() {
   say ""
-  say "2. Dependencies — lane 3a (installed by the plugin harness)"
+  say "2. Dependencies"
+  say "   The two plugins bionic depends on. They are installed with bionic itself."
   local name line present state id
   # The list is read on fd 3, NEVER on stdin. A `while read ... done < <(list)`
   # loop redirects the BODY's stdin too, so the consent prompt inside it would
@@ -284,7 +309,7 @@ setup_dep_enable_verify() {
         fi
         ;;
       absent)
-        say "   ${name}: not installed — the plugin harness installs it with bionic."
+        say "   ${name}: not installed — it should have come with bionic, so this install is incomplete."
         action "reinstall bionic so its dependencies resolve: claude plugin install ${SETUP_PLUGIN_ID} --scope user --yes (${name} is missing)"
         ;;
       *)
@@ -292,27 +317,33 @@ setup_dep_enable_verify() {
         action "install jq, then re-run /bionic:setup — ${name}'s enabled-state read as unknown"
         ;;
     esac
-  done 3< <(dep_names_lane 3a)
+  done 3< <(dep_names_class core)
   return 0
 }
 
-# ─── Step 3 — lane-3b: one row at a time, through the one installer ──────────
+# ─── Steps 3 and 4 — one row at a time, through the one installer ────────────
 #
-# `unknown` presence gets an OFFER, not a skip. Two mechanisms genuinely have no
-# presence surface (the pnpm store is a cache, not an install), and the
-# installer they replace re-warmed those unconditionally; skipping them would
-# quietly drop coverage the old installer had. The offer is consented like every
-# other, and the unknown is named in the same breath so the user is deciding
-# with the real state in front of them.
+# ONE BODY, TWO STEPS. The basics and the extras differ in what the user is told
+# before the question, not in what the question does: both consent per item,
+# both mutate through `install_dep`, both accept "no" as a complete answer. So
+# the walk is one function taking a class, and the difference is one line of
+# prose printed ahead of each extra.
+#
+# `unknown` presence gets an OFFER, not a skip. Some mechanisms genuinely have
+# no presence surface to read (the pnpm store is a cache, not an install; the
+# statusline lives in a settings file jq may not be there to parse), and the
+# installer these steps replaced re-warmed those unconditionally — skipping them
+# would quietly drop coverage the old installer had. The offer is consented like
+# every other, and the unknown is named in the same breath so the user is
+# deciding with the real state in front of them.
 
-setup_dep_install_loop() {
-  say ""
-  say "3. Dependencies — lane 3b (bionic's own installers)"
+_setup_install_class() {  # <class>
   local name raw present
   # fd 3, not stdin — see the note in setup_dep_enable_verify. install_dep
   # prompts, so this loop must leave stdin alone.
   while IFS= read -r name <&3; do
     [ -n "$name" ] || continue
+    [ "$(dep_field "$name" class)" = "extra" ] && say "   ${name} — $(_setup_extra_why "$name")"
     raw="$(check_dep "$name")" || continue
     present="${raw#present=}"; present="${present%%|*}"
     case "$present" in
@@ -320,22 +351,56 @@ setup_dep_install_loop() {
         say "   ${name}: present."
         ;;
       unknown)
-        say "   ${name}: presence unknown — this mechanism has no presence surface to read."
-        install_dep "$name" || action "install ${name} by hand ($(dep_field "$name" source_url)) — bionic could not confirm it"
+        say "   ${name}: presence unknown — bionic has no way to read whether this one is here."
+        install_dep "$name" || action "install ${name} by hand: $(_jit_fix_line "$name") — bionic could not confirm whether it is already there"
         ;;
       *)
-        install_dep "$name" || action "install ${name} by hand: $(dep_field "$name" source_url)"
+        install_dep "$name" || action "install ${name} by hand: $(_jit_fix_line "$name")"
         ;;
     esac
-  done 3< <(dep_names_lane 3b)
+  done 3< <(dep_names_class "$1")
   return 0
 }
 
-# ─── Step 4 — the todo-tools export ──────────────────────────────────────────
+# WHAT AN EXTRA IS, IN ONE SENTENCE. D-B's rule for this class is "asked once,
+# default No, one line of why each", and the why is the only part the dependency
+# table cannot supply: `consumer` answers which route needs a tool, and the
+# whole point of an extra is that no route does. So the sentences live here,
+# beside the step that prints them, rather than as an eighth column nothing else
+# would read. A row with no sentence says so plainly instead of printing an
+# empty dash — the table is the roster, and this function must never become a
+# second one that can silently disagree with it.
+_setup_extra_why() {  # <name>
+  case "${1:-}" in
+    ccstatusline)    echo "a status line in Claude Code showing the model, context use and session cost." ;;
+    notebooklm)      echo "a command-line client for Google NotebookLM, for research passes over sources." ;;
+    context7)        echo "up-to-date documentation for libraries, fetched on demand inside a session." ;;
+    '@pencil.dev/cli') echo "the Pencil design tool's command line, for turning design files into code." ;;
+    *)               echo "an optional extra; bionic ships no description for it." ;;
+  esac
+}
+
+setup_tools_loop() {
+  say ""
+  say "3. Tools"
+  say "   The substrate bionic expects on a working machine. Asked one at a time;"
+  say "   bionic never removes these, because it did not put them on your machine to own."
+  _setup_install_class basic
+}
+
+setup_extras_loop() {
+  say ""
+  say "4. Optional extras"
+  say "   Nothing here is needed to use bionic. Each is offered once, with a line of"
+  say "   what it is, and the answer is No unless you say otherwise."
+  _setup_install_class extra
+}
+
+# ─── Step 5 — the todo-tools export ──────────────────────────────────────────
 
 setup_env_export() {
   say ""
-  say "4. Shell environment"
+  say "5. Shell environment"
   local rc line present
   rc="$(_detect_shell_rc)"
   line="$(detect_env_todo_tools)"; present="${line#*present=}"
@@ -358,11 +423,11 @@ setup_env_export() {
   return 0
 }
 
-# ─── Step 5 — the retired alias block ────────────────────────────────────────
+# ─── Step 6 — the retired alias block ────────────────────────────────────────
 
 setup_legacy_alias() {
   say ""
-  say "5. Legacy shell alias"
+  say "6. Legacy shell alias"
   local rc line present tmp
   rc="$(_detect_shell_rc)"
   line="$(detect_zshrc_legacy_block)"; present="${line#*present=}"
@@ -407,7 +472,7 @@ setup_legacy_alias() {
   return 0
 }
 
-# ─── Step 6 — legacy-channel managed-hook entries ────────────────────────────
+# ─── Step 7 — legacy-channel managed-hook entries ────────────────────────────
 #
 # COUNT here, REWRITE in hooks.sh. This step decides whether to ask and what to
 # say; it does not carry a jq program of its own, because it used to and
@@ -423,7 +488,7 @@ setup_legacy_alias() {
 
 setup_legacy_channel_hooks() {
   say ""
-  say "6. Legacy-channel managed-hook entries"
+  say "7. Legacy-channel managed-hook entries"
   local line count settings registered
   line="$(detect_legacy_channel_hooks)"; count="${line#*count=}"
   settings="$(_dep_settings_file)"
@@ -474,7 +539,7 @@ setup_legacy_channel_hooks() {
   return 0
 }
 
-# ─── Step 7 — the legacy installed skill copy ────────────────────────────────
+# ─── Step 8 — the legacy installed skill copy ────────────────────────────────
 #
 # The third ported obligation, and the one the installer never had: it CREATED
 # this. `claude-bootstrap.sh` rendered bionic's skills into the CLI's own
@@ -495,7 +560,7 @@ setup_legacy_channel_hooks() {
 
 setup_legacy_skill_copy() {
   say ""
-  say "7. Legacy installed skill copy"
+  say "8. Legacy installed skill copy"
   local line present dir
   line="$(detect_legacy_skill_copy)"
   present="${line#*present=}"; present="${present%% *}"
@@ -529,7 +594,7 @@ setup_legacy_skill_copy() {
   return 0
 }
 
-# ─── Step 8 — the permission profile ─────────────────────────────────────────
+# ─── Step 9 — the permission profile ─────────────────────────────────────────
 #
 # Consent is obtained here and handed to `profile_apply` as a token. The library
 # refuses to write without it and never prompts, so there is one conversation
@@ -537,7 +602,7 @@ setup_legacy_skill_copy() {
 
 setup_profile() {
   say ""
-  say "8. Permission profile"
+  say "9. Permission profile"
   local state applied stale template root settings rendered
   state="$(detect_profile_state)"
   applied="${state#*applied=}"; applied="${applied%% *}"
@@ -585,6 +650,11 @@ setup_profile() {
     action "apply the permission profile: see the message above (jq is required to edit ${settings} safely)"
   fi
   rm -f "$rendered"
+  # INSERTION POINT (wave-06 S5): the default-permission-mode question goes HERE,
+  # at the end of this step and after the profile decision — it is the second
+  # thing this step asks about the same settings file, and asking it before the
+  # profile would put the smaller question first. It is its own consent, whatever
+  # was answered above.
   return 0
 }
 
@@ -609,8 +679,14 @@ setup_summary() {
 say "bionic setup — every change below is asked for first, one item at a time."
 
 setup_plugin_install
+# INSERTION POINT (wave-06 S5): the load-state line and the duplicates step go
+# HERE, between the plugin install and the dependencies — the load state is a
+# fact about the install that just happened, and a duplicate has to be settled
+# before anything else is installed beside it. Adding them renumbers every step
+# below, headers included.
 setup_dep_enable_verify
-setup_dep_install_loop
+setup_tools_loop
+setup_extras_loop
 setup_env_export
 setup_legacy_alias
 setup_legacy_channel_hooks

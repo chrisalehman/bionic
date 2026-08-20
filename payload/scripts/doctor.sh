@@ -271,9 +271,9 @@ while IFS= read -r dep_name; do
     no)
       N_ABSENT=$((N_ABSENT + 1))
       if [ "$lane" = "3a" ]; then
-        DEGRADATION="${DEGRADATION}  ${dep_name} is absent (lane 3a) → run /bionic:setup — it wraps the native plugin install"$'\n'
+        DEGRADATION="${DEGRADATION}  ${dep_name} is absent (installed with bionic) → run /bionic:setup — it wraps the native plugin install"$'\n'
       else
-        DEGRADATION="${DEGRADATION}  ${dep_name} is absent (lane 3b) → run /bionic:setup, or accept the just-in-time install offer the next route needing ${dep_name} makes"$'\n'
+        DEGRADATION="${DEGRADATION}  ${dep_name} is absent (installed by bionic) → run /bionic:setup, or accept the just-in-time install offer the next route needing ${dep_name} makes"$'\n'
       fi
       ;;
     *)
@@ -354,8 +354,8 @@ printf '  %-28s %s\n' "half-uninstalled" "$HALF_STATE"
 
 echo ""
 echo "=== DEPENDENCIES ==="
-echo "  Both lanes. The constraint column is the dep table in scripts/lib/deps.sh —"
-echo "  the sole place a dependency's version range is declared — and the verdict is"
+echo "  Every dependency bionic knows about. The constraint column is bionic's own"
+echo "  declaration of the version range a dependency must satisfy, and the verdict is"
 echo "  that range judged against what this machine actually has."
 echo ""
 printf '  %-5s %-22s %-8s %-11s %-11s %s\n' lane name present version constraint verdict
@@ -473,9 +473,9 @@ echo "=== ROSTER FOOTPRINT ==="
 echo "  Skill and agent METADATA — name plus description — loads into every session;"
 echo "  bodies are just-in-time. A dependency's standing session cost is therefore the"
 echo "  number of roster entries it contributes (design-ledger D6)."
-echo "  method: for a plugin-shaped (lane 3a) dependency, roster lines = the count of"
+echo "  method: for a plugin-shaped dependency, roster lines = the count of"
 echo "          skills/*/SKILL.md plus agents/*.md under the installPath the CLI"
-echo "          recorded in plugins/installed_plugins.json. Lane-3b dependencies are"
+echo "          recorded in plugins/installed_plugins.json. The others are"
 echo "          binaries, packages and MCP registrations: no skill or agent metadata,"
 echo "          so no roster cost."
 echo ""
