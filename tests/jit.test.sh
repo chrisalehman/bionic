@@ -270,7 +270,7 @@ echo "=== Group 11: excalidraw-diagram route fixes (epic-17 w4 S10, AC-10) ==="
 # is only where a manually-dropped personal skill happens to land, and hardcoding
 # it ignores CLAUDE_CONFIG_DIR the same way deps.sh's roots section guards
 # against) is replaced with the config-dir-aware form deps.sh already
-# establishes; uv and playwright-chromium are its two lane-3b rows and both
+# establishes; uv and playwright-chromium are its two dependency-table rows and both
 # get the same one-sentence JIT-naming treatment as Group 9's two skills
 # (proven above); the skill states its own default-off/opt-in status so the
 # AC's language is traceable in the shipped doc, not just in this suite.
