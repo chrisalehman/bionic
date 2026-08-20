@@ -17,6 +17,7 @@
 #   the ten lifecycle steps    SKILL.md ## Steps table                (D) 10 steps
 #   skill-armed hook set       SKILL.md frontmatter hooks: block      (E) set equality
 #   every hook the SVGs name   the files in hooks/                    (F) no phantoms
+#   the Patrol's name          SKILL.md's Patrol doctrine             (H) retired words
 #
 # HOW THE SVG CARRIES ITS PINS. Three element classes, each with data-* attributes
 # that ARE the comparison (the visible text is prose; the attributes are the claim):
@@ -349,6 +350,75 @@ expect_true "lifecycle.svg names the independent critic with '(audited)', the re
   grep -q 'independent critic (audited)' "$LIFECYCLE"
 expect_false "…and the dangling-adjective regression 'critic at audited' is absent" \
   grep -q 'independent critic at audited' "$LIFECYCLE"
+
+# ============================================================
+echo ""
+echo "=== H — the Patrol's name: retired vocabulary is banned from diagrams/ ==="
+# ============================================================
+
+# WHY THIS IS A SECTION AND NOT ANOTHER STRUCTURAL PIN. The doctrine that Step 9
+# disarms names ONE clock, and its name is "the Patrol" (SKILL.md Step 9; the
+# earlier spellings "heartbeat" and "session-cron" are retired vocabulary). That
+# claim lives in a node's free prose, and free prose is invisible to every
+# data-* pin above — which is exactly how lifecycle.svg shipped "· heartbeat
+# disarmed at close" through a wave that edited the file (epic-17 W5 audit F-2).
+# G11 pinned one such string after it regressed twice; this section pins the
+# vocabulary itself, as a directory-scoped wall rather than a per-string patch.
+#
+# The negative reads RAW BYTES, not svg_body() — deliberately. Everywhere else
+# in this file, comment-blindness is what keeps a pin's own documentation from
+# counting as an element. Here the retired word is banned outright, including
+# from a comment: an SVG comment that still explains the system in the old
+# vocabulary is a reader meeting retired doctrine, and the wall is worth more
+# than the freedom to write the dead word down.
+#
+# Scope is the DIRECTORY, enumerated file by file (find + per-file grep) rather
+# than `grep -r`, so a third file landing in diagrams/ is covered on the day it
+# lands and no recursive-grep ignore semantics stand between the claim and the
+# bytes.
+
+RETIRED_VOCAB='heartbeat|session-cron|session cron'
+PATROL_CLOSE_LITERAL='Patrol disarmed at close'
+
+# retired_vocab_hits <dir>: "<file>:<lineno>:<text>" for every retired-vocabulary
+# hit under <dir>. Empty output is the passing state.
+retired_vocab_hits() {
+  find "$1" -type f 2>/dev/null | sort | while IFS= read -r _f; do
+    grep -niE "$RETIRED_VOCAB" "$_f" 2>/dev/null | sed "s|^|${_f}:|"
+  done
+}
+
+expect_eq "no diagram under diagrams/ names the retired clock vocabulary" \
+  "" "$(retired_vocab_hits "$DIAGRAMS" | tr '\n' ' ')"
+
+# The paired positive. A ban alone is satisfied by saying nothing at all — the
+# close-out node could lose the line entirely and the negative above would go
+# green on the silence. This arm is what makes the pair a rename rather than a
+# deletion.
+expect_true "lifecycle.svg's close-out node names the Patrol: '${PATROL_CLOSE_LITERAL}'" \
+  grep -qF "$PATROL_CLOSE_LITERAL" "$LIFECYCLE"
+
+# H-meta. Both halves re-proven against doctored copies, same discipline as G.
+mkdir -p "$TMP/diagrams-doctored"
+cp "$LIFECYCLE" "$HOOKCHAIN" "$TMP/diagrams-doctored/"
+
+sed "s/${PATROL_CLOSE_LITERAL}/heartbeat disarmed at close/" "$LIFECYCLE" \
+  > "$TMP/diagrams-doctored/lifecycle.svg"
+expect_true "meta: a regression to the retired vocabulary is detected" \
+  [ -n "$(retired_vocab_hits "$TMP/diagrams-doctored")" ]
+
+# …and the same doctored copy is what the positive must catch, so the pair
+# cannot be satisfied by a rename in one direction only.
+expect_false "meta: the doctored copy no longer names the Patrol at close" \
+  grep -qF "$PATROL_CLOSE_LITERAL" "$TMP/diagrams-doctored/lifecycle.svg"
+
+# A retired word arriving in a NEW file under diagrams/ — the case a per-string
+# pin cannot see and the directory scope exists for.
+cp "$LIFECYCLE" "$TMP/diagrams-doctored/lifecycle.svg"
+printf '<!-- the session-cron fires every 30m -->\n' > "$TMP/diagrams-doctored/newcomer.svg"
+expect_true "meta: a retired word in a NEW file under diagrams/ is detected" \
+  [ -n "$(retired_vocab_hits "$TMP/diagrams-doctored")" ]
+rm -f "$TMP/diagrams-doctored/newcomer.svg"
 
 # ============================================================
 echo ""
