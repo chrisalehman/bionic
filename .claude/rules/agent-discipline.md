@@ -3,7 +3,6 @@ paths:
   - "**/*.sh"
   - "**/*.md"
   - "claude-global.md"
-  - "claude-config.txt"
 ---
 
 # Agent-behavior discipline
