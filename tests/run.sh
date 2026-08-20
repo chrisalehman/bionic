@@ -136,6 +136,13 @@ run "profile.test.sh" bash tests/profile.test.sh
 run "jit.test.sh" bash tests/jit.test.sh
 # Command-file conventions (epic-17 W3 S9, spec AC-1): globs payload/commands/*.md.
 run "command-format.test.sh" bash tests/command-format.test.sh
+# The presentation contract (epic-17 W6 S1, spec R3 / AC-5 / AC-6): the one voice block at
+# agents-src/blocks/voice-contract.md, its byte-identical presence in all four shipped
+# command files, help.md's render-in-full instruction, and the banned-display-vocabulary
+# lint over the command surface. Staleness of the render itself belongs to
+# agent-render.test.sh; this suite owns presence and content. Hand-listed like every suite
+# outside hooks/.
+run "voice-contract.test.sh" bash tests/voice-contract.test.sh
 # The diagram pins (epic-17 W4 S8, spec AC-6 / design D4): the two composed-SVG diagrams
 # under skills/canonical-sdlc/diagrams/ read as text and compared against what they draw —
 # the hooks' SUPPORTED_SDLC_VERSION, hooks.json's six always-on entries, and SKILL.md's ten

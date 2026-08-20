@@ -1,0 +1,38 @@
+# BANNED DISPLAY VOCABULARY — epic-17 wave-06 slice S1 (spec AC-6).
+#
+# One list, two lints. tests/voice-contract.test.sh reads it to check the four shipped
+# command files; the script-output lint (slice S4) reads it to check every line
+# setup.sh/doctor.sh/remove.sh print. The ownership table names "one list file under
+# tests/" precisely so the two lints cannot drift to two opinions about what is internal.
+#
+# WHAT BELONGS HERE: vocabulary that exists only inside bionic's own machinery — the old
+# dependency-lane codes, script-internal function-name prefixes, and shell mechanism words
+# a user has no reason to meet. Chris, 2026-08-20: "This concept of 'lane' and in
+# particular references to '3b' are very confusing. Why are we exposing this to the user?"
+#
+# WHAT DOES NOT: ordinary product words that happen to name a bionic feature (hooks,
+# skills, agents, tiers), and the fix half of a real error message. The contract is loud on
+# real errors; it is silent about how the machine works when nothing is wrong.
+#
+# FORMAT — consumers must honour it:
+#   * one token per line;
+#   * a line whose first non-blank character is `#` is a comment;
+#   * blank lines are ignored;
+#   * matching is case-insensitive SUBSTRING matching, so `lane` also catches `lanes`
+#     and `Lane`. Add a token only when no legitimate product word contains it.
+#
+# The voice block itself quotes several of these tokens (it is the text that BANS them),
+# so both lints exempt the block's own body — see tests/voice-contract.test.sh.
+
+lane
+3a
+3b
+lane-3a
+lane-3b
+_setup_
+_rm_
+_doctor_
+detect_
+stdin
+non-interactive
+pipefail
