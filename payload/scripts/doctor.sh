@@ -116,6 +116,12 @@ AGENT_CAUSE="${AGENT_FACT##*cause=}"
 TODO_FACT="$(detect_env_todo_tools)";        TODO_STATE="${TODO_FACT##*present=}"
 LEGACY_FACT="$(detect_zshrc_legacy_block)";  LEGACY_STATE="${LEGACY_FACT##*present=}"
 LEGACY_HOOK_FACT="$(detect_legacy_channel_hooks)"; LEGACY_HOOK_COUNT="${LEGACY_HOOK_FACT##*count=}"
+INST_AGENT_FACT="$(detect_installed_agent_copies)"
+INST_AGENT_STATE="${INST_AGENT_FACT#*state=}"; INST_AGENT_STATE="${INST_AGENT_STATE%% *}"
+INST_AGENT_TOTAL="${INST_AGENT_FACT#*total=}"; INST_AGENT_TOTAL="${INST_AGENT_TOTAL%% *}"
+INST_AGENT_DRIFT="${INST_AGENT_FACT#*drift=}"; INST_AGENT_DRIFT="${INST_AGENT_DRIFT%% *}"
+INST_AGENT_NAMES="${INST_AGENT_FACT#*names=}"; INST_AGENT_NAMES="${INST_AGENT_NAMES%% *}"
+INST_AGENT_CAUSE="${INST_AGENT_FACT##*cause=}"
 HALF_FACT="$(detect_half_uninstalled)";      HALF_STATE="${HALF_FACT##*half-uninstalled=}"
 
 PROFILE_FACT="$(detect_profile_state)"
@@ -328,6 +334,32 @@ if [ "$LEGACY_HOOK_COUNT" = "unknown" ]; then
 else
   printf '  %-38s %s\n' "legacy-channel managed-hook entries" "$LEGACY_HOOK_COUNT"
 fi
+# THE PLUGIN-ERA TRUTH LEADS, because it is the half a reader needs whichever
+# state the machine is in: role files ship in the PAYLOAD, and anything in the
+# CLI's own agents directory is what the retired installer left. Those copies
+# are what a session actually loads, so a machine can be running dispatch
+# instructions two plugin updates old with no other symptom.
+#
+# READ-ONLY, AND NO ACTION LINE — the same contract the agent-integrity line
+# keeps. /bionic:setup owns the offer to remove a legacy copy, under consent;
+# doctor's job is to say the directory is there. A SUMMARY entry here would
+# turn "this exists" into "you should delete it" on a machine that is otherwise
+# fine.
+case "$INST_AGENT_STATE" in
+  absent)
+    printf '  %-38s %s\n' "installed agent role files" \
+      "none — role files ship in the payload" ;;
+  present)
+    if [ "$INST_AGENT_DRIFT" = "0" ]; then
+      printf '  %-38s %s\n' "installed agent role files" \
+        "${INST_AGENT_TOTAL} legacy copies, none differing from the payload (the payload is what ships)" ;
+    else
+      printf '  %-38s %s\n' "installed agent role files" \
+        "${INST_AGENT_TOTAL} legacy copies, ${INST_AGENT_DRIFT} differing from the payload (${INST_AGENT_NAMES//,/, }) — the payload is what ships" ;
+    fi ;;
+  *)
+    printf '  %-38s %s\n' "installed agent role files" "unknown — ${INST_AGENT_CAUSE}" ;;
+esac
 if [ "$CCSTATUSLINE_STATE" = "unknown" ]; then
   printf '  %-38s %s\n' "ccstatusline statusline" \
     "unknown — $(_doctor_unknown_cause statusline)"

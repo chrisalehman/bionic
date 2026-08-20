@@ -25,7 +25,7 @@
 # fact it recomputed itself would be a second implementation of somebody else's
 # truth, which is the defect the wave's ownership table exists to prevent.
 #
-# THE SEVEN STEPS, in this order and for these reasons:
+# THE EIGHT STEPS, in this order and for these reasons:
 #
 #   1. plugin install       tier 1 first: everything after it assumes the payload
 #                           is installed, and a machine that skips it gets an
@@ -48,7 +48,12 @@
 #                           payload's hooks.json, so a settings entry naming that
 #                           directory is registered through the OTHER channel.
 #                           Also ported from the retiring installer.
-#   7. permission profile   rendered against this machine's plugin root and
+#   7. legacy skill copy    the skill directory claude-bootstrap.sh rendered into
+#                           the CLI's own skills directory. The payload ships the
+#                           same skill, so the installed copy is a second one that
+#                           still registers hooks through the pre-plugin channel.
+#                           Named by AC-8; the gap 4/6 found and reported.
+#   8. permission profile   rendered against this machine's plugin root and
 #                           applied under explicit consent (AC-6). Consent is
 #                           obtained HERE and handed to `profile_apply` as a
 #                           token: the library never asks, so there is exactly
@@ -64,7 +69,7 @@
 # fail-closed direction.
 #
 # WARN AND CONTINUE. `set -e` is deliberately absent. A machine that cannot do
-# step 3 can still do steps 4-7, and stopping at the first problem is how a user
+# step 3 can still do steps 4-8, and stopping at the first problem is how a user
 # ends up running setup five times. Every step that could not finish appends an
 # ACTION LINE, and the run ends with all of them together — the summary is the
 # interface, not the scroll. Exit status is 0 whenever setup itself worked,
@@ -469,7 +474,62 @@ setup_legacy_channel_hooks() {
   return 0
 }
 
-# ─── Step 7 — the permission profile ─────────────────────────────────────────
+# ─── Step 7 — the legacy installed skill copy ────────────────────────────────
+#
+# The third ported obligation, and the one the installer never had: it CREATED
+# this. `claude-bootstrap.sh` rendered bionic's skills into the CLI's own
+# skills directory, and the plugin ships the same skill inside its payload — so
+# after the cutover the installed copy is a second canonical-sdlc whose
+# frontmatter still registers hooks through the pre-plugin channel. A session
+# that loads it arms the same walls twice, silently, from a build no plugin
+# update will ever move.
+#
+# W5 4/6 hit exactly this and removed the copy by hand to keep its live-fire
+# attribution clean, then reported the gap rather than closing it quietly. This
+# step is the gap closed: the removal is the shipped migration's own act.
+#
+# WHAT THE PROMPT NAMES IS WHAT GOES. `detect_legacy_skill_copy` resolves one
+# directory; this step prints that path, asks about that path, and removes that
+# path. Sibling copies the same installer left are a separate decision and are
+# not offered here — see the library's note.
+
+setup_legacy_skill_copy() {
+  say ""
+  say "7. Legacy installed skill copy"
+  local line present dir
+  line="$(detect_legacy_skill_copy)"
+  present="${line#*present=}"; present="${present%% *}"
+  dir="${line##*path=}"
+
+  if [ "$present" != "yes" ]; then
+    say "   no pre-plugin skill copy in the CLI's skills directory — nothing to remove."
+    return 0
+  fi
+
+  say "   ${dir} is a pre-plugin rendered copy of a skill this payload already ships."
+  say "   Its frontmatter registers hooks through the pre-plugin channel, so a session that"
+  say "   loads it arms the same walls twice — once from the plugin, once from the retired copy."
+  # The gate is one line so a mutation arm can delete it whole and watch the
+  # decline stop protecting anything (tests/setup.test.sh Group 12, mutation 4).
+  if ! consent "   Remove ${dir} and everything under it?"; then say "   declined — ${dir} is unchanged."; action "remove the pre-plugin skill copy at ${dir}"; return 0; fi  # consent gate: legacy skill copy
+
+  # The guard is not decoration. This is the only recursive delete in the
+  # script, and the path it takes comes from an environment the caller controls;
+  # re-reading the two conditions the fact function used means a resolution that
+  # went wrong between then and now removes nothing.
+  if [ -n "$dir" ] && [ -d "$dir" ] && [ -f "${dir}/SKILL.md" ]; then
+    rm -rf "$dir" 2>/dev/null
+  fi
+  if [ ! -e "$dir" ]; then
+    say "   removed."
+  else
+    say "   could not remove ${dir}."
+    action "remove the pre-plugin skill copy at ${dir} by hand"
+  fi
+  return 0
+}
+
+# ─── Step 8 — the permission profile ─────────────────────────────────────────
 #
 # Consent is obtained here and handed to `profile_apply` as a token. The library
 # refuses to write without it and never prompts, so there is one conversation
@@ -477,7 +537,7 @@ setup_legacy_channel_hooks() {
 
 setup_profile() {
   say ""
-  say "7. Permission profile"
+  say "8. Permission profile"
   local state applied stale template root settings rendered
   state="$(detect_profile_state)"
   applied="${state#*applied=}"; applied="${applied%% *}"
@@ -554,6 +614,7 @@ setup_dep_install_loop
 setup_env_export
 setup_legacy_alias
 setup_legacy_channel_hooks
+setup_legacy_skill_copy
 setup_profile
 setup_summary
 
