@@ -31,8 +31,8 @@
 #
 # Location independence gets its own group: the helper is sourced from
 # tests/*.test.sh (including the hooks/*.test.sh suites moved under tests/ at
-# epic-17 W4 S9) and lib/platform.test.sh, by absolute and by relative
-# reference, from whatever cwd the runner happens to be in. It must derive
+# epic-17 W4 S9), by absolute and by relative reference, from whatever cwd the
+# runner happens to be in. It must derive
 # <repo> from its OWN path, never the caller's pwd — the naive implementation
 # is green from the repo root and wrong from anywhere else.
 #
@@ -145,8 +145,13 @@ expect_eq "relative source from cwd=<repo>/tests resolves <repo>/hooks" \
   "$REPO/hooks" "$(probe "$REPO/tests" "lib/resolve-roots.sh" var-hooks)"
 expect_eq "relative source from cwd=<repo>/hooks resolves <repo>/skills" \
   "$REPO/skills" "$(probe "$REPO/hooks" "../tests/lib/resolve-roots.sh" var-skills)"
-expect_eq "relative source from cwd=<repo>/lib resolves <repo>" \
-  "$REPO" "$(probe "$REPO/lib" "../tests/lib/resolve-roots.sh" var-scripts)"
+# cwd was <repo>/lib until the W5 Step-6 review retired lib/platform.sh and left
+# that directory empty (and so untracked, and so absent from a fresh clone). What
+# the arm needs is only a directory ONE level below the repo, so the seam is
+# reached by the same `../tests/lib/...` spelling; skills/ is that, and unlike
+# lib/ it is a directory the payload itself ships.
+expect_eq "relative source from cwd=<repo>/skills resolves <repo>" \
+  "$REPO" "$(probe "$REPO/skills" "../tests/lib/resolve-roots.sh" var-scripts)"
 
 echo ""
 echo "=== Group 3: override set -> the named check reads the DOCTORED copy ==="
@@ -206,8 +211,11 @@ UNSEAMED=""
 LEGACY_IDIOM=""
 # hooks/*.test.sh moved under tests/ at epic-17 W4 S9 (spec AC-9); hooks/ now
 # holds only the hook scripts themselves, so that glob element is retired
-# rather than kept as a permanently-vacuous no-op.
-for f in "$REPO"/tests/*.test.sh "$REPO"/lib/*.test.sh; do
+# rather than kept as a permanently-vacuous no-op. `lib/*.test.sh` went the same
+# way at the W5 Step-6 review, and for the same reason: lib/platform.sh and its
+# suite retired together, `lib/` is empty, and `[ -f ] || continue` would have
+# hidden the dead element forever rather than reporting it.
+for f in "$REPO"/tests/*.test.sh; do
   [ -f "$f" ] || continue
   case "$f" in */seam-resolution.test.sh) continue ;; esac   # documented exemption, :46
   /usr/bin/grep -q 'resolve-roots\.sh' "$f" || UNSEAMED="$UNSEAMED ${f#$REPO/}"

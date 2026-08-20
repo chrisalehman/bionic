@@ -469,8 +469,11 @@ expect_eq "motion is registered as a pnpm-store library" "1" "$_motion_store"
 #   - install/remove symmetry        -> tests/setup.test.sh (setup side) and
 #                                      tests/remove.test.sh (removal side),
 #                                      both against the shipped payload
-#   - lib/platform.sh sourcing (3o)  -> retired with its only two consumers;
-#                                      see lib/platform.test.sh §7b
+#   - lib/platform.sh sourcing (3o)  -> the library retired WITH those two
+#                                      consumers at the Step-6 review: nothing in
+#                                      the payload ever sourced it, so its own
+#                                      suite was its last one. tests/run.sh
+#                                      carries the note on where its facts went.
 #   - manifest symmetry (3x2)        -> the manifests were install-time
 #                                      artifacts of the retired installer
 

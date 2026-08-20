@@ -155,11 +155,16 @@ run "doctor.test.sh" bash tests/doctor.test.sh
 # the standalone door (the script alone, no payload libraries beside it).
 # Hand-listed like every suite outside hooks/.
 run "remove.test.sh" bash tests/remove.test.sh
-# Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
-# 8 suites and omitted agent-roles and marker-verify — a
-# false green — but it was the ONLY runner carrying lib/platform.test.sh, so
-# retiring it without this line would have traded one blind spot for another.
-run "platform.test.sh" bash lib/platform.test.sh
+# lib/platform.test.sh RETIRED at epic-17 W5 (Step-6 review). The library it
+# covered exported OS, BREW_PREFIX, SHELL_RC, PLAYWRIGHT_CACHE and sed_inplace
+# for exactly two consumers — claude-bootstrap.sh and claude-reset.sh — and 4/6
+# deleted both. Nothing in the payload ever sourced it, so from that commit its
+# own suite was its only consumer and the pair was a closed loop testing itself.
+# Where the facts went, so this is a move and not a loss: the shell rc lives in
+# detect.sh (_detect_shell_rc) and remove.sh (_rm_shell_rc), the Playwright cache
+# in the dep table's BIONIC_PLAYWRIGHT_CACHE probe, and the payload does its own
+# rewriting in bash rather than sed, so sed_inplace has no successor because it
+# has no question left to answer.
 
 echo "──────────────────────────────────────────────"
 echo "Gating: ${pass} passed, ${fail} failed"
