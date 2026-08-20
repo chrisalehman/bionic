@@ -1,0 +1,17 @@
+Installed plugins:
+
+  ❯ agent-skills@bionic
+    Version: 0.6.7
+    Scope: user
+    Status: ✔ enabled
+
+  ❯ bionic@bionic
+    Version: 0.1.0
+    Scope: user
+    Status: ✔ enabled
+
+  ❯ superpowers@bionic
+    Version: 6.3.0
+    Scope: user
+    Status: ✔ enabled
+
