@@ -307,7 +307,12 @@ attested() {
 if ! attested; then
   # The probe next to this script, so a test drives the real producer and an
   # installed gate finds its installed sibling. `$0` is the gate's own path on
-  # both; the config-dir form is the fallback for an exotic invocation.
+  # both, and it is the lane that is expected to resolve on every machine: both
+  # registration channels point at ONE tree, and a script's siblings are in it.
+  # The config-dir form is a residual second lane for an exotic invocation, and
+  # it is worth less every day — after the Step-9 legacy teardown there are no
+  # hooks under `${CLAUDE_CONFIG_DIR}/hooks/` on a plugin-only machine at all.
+  # Which is exactly why the miss below is a DENY and not a skip (critic C-2).
   PROBE_SCRIPT="${HOOK_DIR}/preflight-probe.sh"
   [ -f "$PROBE_SCRIPT" ] || PROBE_SCRIPT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/preflight-probe.sh"
 
@@ -389,8 +394,16 @@ STATE_DIR="$REPO/.bionic/tmp"
 PATROL_STAMP_FILE="$STATE_DIR/patrol-${PAYLOAD_SID}.state"
 
 # The poker beside this gate, so a test drives the real one and an installed gate finds its
-# installed sibling — the same resolution, and the same config-dir fallback, the probe above
-# already uses.
+# installed sibling — the same resolution, and the same residual config-dir second lane, the
+# probe above already uses, and for the same reason: the two registration channels serve ONE
+# tree, so the sibling lane is the one that answers.
+#
+# WHERE THIS ONE DIFFERS FROM THE PROBE'S (critic C-2, W5): a missing probe DENIES, and a
+# missing poker used to skip the arming wall in silence — so on a machine where the legacy
+# `${CLAUDE_CONFIG_DIR}/hooks/` copies are gone and the sibling lane somehow missed too, a
+# teardown would have quietly bought a disarmed wall. The arms below now degrade per-arm
+# instead: the never-armed half needs no poker at all and still refuses, and the staleness
+# half says out loud that it did not run.
 POKER_SCRIPT="${HOOK_DIR}/session-poker.sh"
 [ -f "$POKER_SCRIPT" ] || POKER_SCRIPT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/session-poker.sh"
 
@@ -411,31 +424,65 @@ patrol_deny() {  # <state line>...
   exit 2
 }
 
+# THE INTERVAL IS A THRESHOLD, NOT A PRECONDITION (critic C-2, W5). This block used to
+# skip BOTH arms when the interval could not be read — so one unparseable line in
+# `.bionic/config.yaml`, a file that is machine-local and agent-writable, disabled the
+# whole wall. That contradicts §8 twenty lines below in this same script: a hostile repo
+# may CLOSE a wall and must never be able to OPEN one. And the line that gets you there is
+# the likeliest typo available — a BARE NUMBER (`poker-interval: 30`) makes the poker
+# refuse, where `30m` and `30 minutes` both parse.
+#
+# Only the STALENESS arm needs a number. An absent stamp is absent at every interval, so
+# that arm runs unconditionally now. For staleness, an unreadable config falls back to the
+# poker's own POKER_INTERVAL_DEFAULT — asked for through its read-only `interval-default`
+# verb rather than retyped here, because two copies of that constant drift the first time
+# either moves and the gate would then be measuring against a threshold nobody configured.
 PATROL_INTERVAL=""
+PATROL_INTERVAL_SOURCE=configured
 if [ -f "$POKER_SCRIPT" ]; then
   PATROL_INTERVAL=$( cd "$REPO" 2>/dev/null && bash "$POKER_SCRIPT" interval 2>/dev/null )
   case "$PATROL_INTERVAL" in
     ''|*[!0-9]*) PATROL_INTERVAL="" ;;
   esac
+  if [ -z "$PATROL_INTERVAL" ] || [ "$PATROL_INTERVAL" -le 0 ]; then
+    PATROL_INTERVAL=$( bash "$POKER_SCRIPT" interval-default 2>/dev/null )
+    case "$PATROL_INTERVAL" in
+      ''|*[!0-9]*) PATROL_INTERVAL="" ;;
+    esac
+    PATROL_INTERVAL_SOURCE=default
+    echo "dispatch-preflight: the Patrol interval could not be read from this project's config — interval unreadable, wall ran at default (${PATROL_INTERVAL:-none}s)." >&2
+  fi
 fi
 
+# A symlink is not a stamp. The directory levels were discharged by the attestation gate
+# above (it refuses outright on a symlinked `.bionic` or `.bionic/tmp`, and the probe it
+# runs refuses on the same three), so only the file's own path is checked here — the same
+# split the roster append below makes, and for the same reason (§8): a hostile repo may
+# CLOSE this wall and must never be able to OPEN it.
+#
+# UNCONDITIONAL, and that is the C-2 fix in one word: this arm asks whether anything armed
+# the Patrol, a question with no threshold in it.
+if [ -L "$PATROL_STAMP_FILE" ] || [ ! -f "$PATROL_STAMP_FILE" ]; then
+  patrol_deny \
+    "There is no Patrol stamp for this session at:" \
+    "    ${PATROL_STAMP_FILE}" \
+    "The Patrol was never armed on this session (a symbolic link at that path is never" \
+    "followed and reads the same way), so nothing is watching the fleet this dispatch joins."
+fi
+
+# The staleness half. Its threshold may be the project's or the poker's default; what it
+# may never be is silently absent, so the one case with no number at all — the poker
+# unreachable on BOTH lanes, which is what a machine looks like once the legacy
+# `${CLAUDE_CONFIG_DIR}/hooks/` copies are torn down and the sibling lane misses too —
+# says which half did not run rather than letting the whole wall go quiet.
 if [ -z "$PATROL_INTERVAL" ] || [ "$PATROL_INTERVAL" -le 0 ]; then
-  echo "dispatch-preflight: the Patrol interval could not be read from ${POKER_SCRIPT}; the arming wall did not run for this dispatch." >&2
+  echo "dispatch-preflight: no Patrol interval could be obtained (${POKER_SCRIPT} is not readable on either lane); the staleness half of the arming wall did not run, though the never-armed half did." >&2
 else
   PATROL_MAX_AGE=$(( PATROL_INTERVAL * 2 ))
-
-  # A symlink is not a stamp. The directory levels were discharged by the attestation gate
-  # above (it refuses outright on a symlinked `.bionic` or `.bionic/tmp`, and the probe it
-  # runs refuses on the same three), so only the file's own path is checked here — the same
-  # split the roster append below makes, and for the same reason (§8): a hostile repo may
-  # CLOSE this wall and must never be able to OPEN it.
-  if [ -L "$PATROL_STAMP_FILE" ] || [ ! -f "$PATROL_STAMP_FILE" ]; then
-    patrol_deny \
-      "There is no Patrol stamp for this session at:" \
-      "    ${PATROL_STAMP_FILE}" \
-      "The Patrol was never armed on this session (a symbolic link at that path is never" \
-      "followed and reads the same way), so nothing is watching the fleet this dispatch joins."
-  fi
+  case "$PATROL_INTERVAL_SOURCE" in
+    default) PATROL_INTERVAL_WORDS="the poker's ${PATROL_INTERVAL}s default interval (this project's configured value could not be read)" ;;
+    *)       PATROL_INTERVAL_WORDS="the ${PATROL_INTERVAL}s poker-interval this project configures" ;;
+  esac
 
   PATROL_MTIME=$(stat -f %m "$PATROL_STAMP_FILE" 2>/dev/null \
                  || stat -c %Y "$PATROL_STAMP_FILE" 2>/dev/null)
@@ -450,7 +497,7 @@ else
         patrol_deny \
           "The Patrol was armed on this session and has stopped firing." \
           "Its last stamp is ${PATROL_AGE}s old — past the ${PATROL_MAX_AGE}s limit," \
-          "which is 2x the ${PATROL_INTERVAL}s poker-interval this project configures:" \
+          "which is 2x ${PATROL_INTERVAL_WORDS}:" \
           "    ${PATROL_STAMP_FILE}"
       fi
       ;;

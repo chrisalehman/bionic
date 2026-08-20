@@ -134,13 +134,14 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh tick       one decision over this session's roster (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh arm        stamp the Patrol as alive for this session (no roster needed)"
   die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
+  die "  bash ${HOOK_DIR}/session-poker.sh interval-default   this script's built-in default interval, in seconds (ignores config)"
   exit 2
 }
 
 [ $# -eq 1 ] || usage "exactly one verb required."
 VERB="$1"
 case "$VERB" in
-  tick|arm|interval) : ;;
+  tick|arm|interval|interval-default) : ;;
   *) usage "unknown verb: $VERB" ;;
 esac
 
@@ -330,6 +331,25 @@ case "$VERB" in
     SECS="$(poker_interval_seconds)" || {
       die "REFUSED — the configured poker-interval could not be read as a duration."
       die "Fix or remove the 'poker-interval:' line in .bionic/config.yaml; the default is $POKER_INTERVAL_DEFAULT."
+      exit 2
+    }
+    printf '%s\n' "$SECS"
+    exit 0
+    ;;
+
+  # THE DEFAULT, WITHOUT THE CONFIG — added for hooks/dispatch-preflight.sh's arming wall
+  # (critic C-2, W5). That wall needs a threshold even when `interval` above REFUSES,
+  # because a project's config file is machine-local and agent-writable and one unparseable
+  # line there must not be able to disarm a wall. It could have retyped 1800; then this
+  # script's constant and the gate's would drift the first time either moved, which is the
+  # duplication this repo's ownership rule exists to forbid. So the constant and the
+  # duration parse stay here, where they already lived, and the gate asks.
+  #
+  # NOTHING ELSE READS THE CONFIG ON THIS PATH, deliberately: the whole value of this verb
+  # to its caller is that a hostile or broken config.yaml cannot change what it answers.
+  interval-default)
+    SECS="$(parse_seconds "$POKER_INTERVAL_DEFAULT")" || {
+      die "REFUSED — this script's own POKER_INTERVAL_DEFAULT ('$POKER_INTERVAL_DEFAULT') is not a duration."
       exit 2
     }
     printf '%s\n' "$SECS"
