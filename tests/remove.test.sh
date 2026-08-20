@@ -207,14 +207,35 @@ plant_profile_block() {  # <arm> [with-accretion|block-only]
 # A plugin in the CLI's own install registry — the file `check_dep` reads for a
 # `native` row. This is how a machine that took the design route's mid-session
 # offer looks afterwards: `impeccable@bionic` installed, declared by nobody.
-plant_native_plugin() {  # <arm> <name> <version>
-  local arm="$1" name="$2" version="$3"
+# The catalog is a parameter because the two cases that matter differ ONLY in it:
+# `impeccable@bionic` is a plugin bionic's own route installed, and
+# `impeccable@claude-plugins-official` is the user's own copy of a same-named
+# plugin. The presence probe matches on the NAME half and cannot tell them apart
+# (deliberately — S3 re-points bionic's catalog and that match is what survives
+# it), so the teardown has to ask the registry the exact-id question itself.
+plant_native_plugin() {  # <arm> <name> <version> [catalog=bionic]
+  local arm="$1" name="$2" version="$3" catalog="${4:-bionic}"
   local file="$arm/home/.claude/plugins/installed_plugins.json"
   mkdir -p "${file%/*}"
   [ -f "$file" ] || printf '%s\n' '{"plugins":{}}' > "$file"
-  jq --arg k "${name}@bionic" --arg v "$version" \
+  jq --arg k "${name}@${catalog}" --arg v "$version" \
      '.plugins[$k] = [ { "scope": "user", "installPath": ("/fixture/" + $k), "version": $v } ]' \
      "$file" > "$arm/reg.tmp" && mv "$arm/reg.tmp" "$file"
+}
+
+# One library function against one arm's roots — the shape the critic's own
+# reproduction took, and the only way to measure what a single deps.sh function
+# prints without the rest of the teardown's output around it.
+dep_query() {  # <arm> <function> [args] — PATH is the arm's bin, answers on stdin
+  local arm="$1"; shift
+  env -i \
+    HOME="$arm/home" \
+    PATH="$arm/bin" \
+    BIONIC_TEST_CALLS="$arm/calls.log" \
+    BIONIC_CLAUDE_HOME="$arm/home/.claude" \
+    BIONIC_SETTINGS_FILE="$arm/home/.claude/settings.json" \
+    BIONIC_INSTALLED_PLUGINS_FILE="$arm/home/.claude/plugins/installed_plugins.json" \
+    bash -c '. "$1"; shift; "$@"' _ "$DEPS_SH" "$@" 2>&1
 }
 
 plant_plugin_data() {  # <arm>
@@ -1089,6 +1110,72 @@ expect_not_contains "absent plugin: nothing is uninstalled" \
   "plugin uninstall impeccable@bionic" "$CALLS"
 expect_contains "absent plugin: it opens already clean, like any absent row" \
   "dependency impeccable (not installed)" "$OUT"
+
+# ---- F-4: a same-named plugin from ANOTHER catalog is not bionic's to remove ----
+#
+# The presence probe is marketplace-agnostic on purpose — it matches the bare
+# NAME across catalogs, which is what let S3 re-point bionic's own marketplace
+# without breaking every native row. The teardown composed the uninstall id as
+# `<name>@bionic` regardless, so a user's own `impeccable` from the official
+# catalog read as present and was offered for removal with an id that does not
+# exist: the CLI answered "not installed", the non-zero landed in the skipped
+# bucket, and a user who said YES was reported as having skipped it.
+#
+# The registry is asked the exact-id question now, and the other-catalog copy is
+# reported rather than asked about — there is no question whose yes bionic could
+# honour.
+ARM="$(new_arm native-other-catalog)"
+plant_never_list "$ARM"
+plant_claude_stub "$ARM" no no
+plant_native_plugin "$ARM" impeccable 4.1.1 claude-plugins-official
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+CALLS="$(cat "$ARM/calls.log")"
+expect_not_contains "another catalog: no question is asked about a plugin bionic did not install" \
+  "Remove impeccable now?" "$OUT"
+expect_not_contains "another catalog: nothing is uninstalled, on an ALL-YES run" \
+  "plugin uninstall impeccable" "$CALLS"
+expect_contains "another catalog: the transcript says whose plugin it is and what bionic did" \
+  "installed from another catalog" "$OUT"
+expect_not_contains "another catalog: it is never reported as skipped by the user" \
+  "⚠ dependency impeccable" "$OUT"
+
+# The positive half of the same discrimination, argv captured: the id bionic
+# composes is the id the registry actually holds.
+ARM="$(new_arm native-own-catalog-argv)"
+plant_never_list "$ARM"
+plant_claude_stub "$ARM" no no
+plant_native_plugin "$ARM" impeccable 4.1.1 bionic
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+CALLS="$(cat "$ARM/calls.log")"
+expect_contains "own catalog: the offer is made" "Remove impeccable now?" "$OUT"
+expect_contains "own catalog: the argv the CLI received names the key the registry holds" \
+  "claude plugin uninstall impeccable@bionic --yes" "$CALLS"
+
+# ---- F-5: `claude` off PATH is a product line, not a bash error ----
+#
+# `install_plugin_native` and `remove_plugin_native` were the only externals in
+# deps.sh called without a presence guard, so a machine without the CLI got a
+# library filename and a line number on its terminal — the exact class of display
+# this wave exists to remove, and one no source lint can see, because bash writes
+# the string at runtime. It matters most at remove's standalone door, whose whole
+# premise is a machine where bionic's world is partly gone.
+ARM="$(new_arm native-no-claude)"
+plant_never_list "$ARM"
+plant_native_plugin "$ARM" impeccable 4.1.1 bionic
+rm -f "$ARM/bin/claude"
+RM_NOCLI="$(printf 'y\n' | dep_query "$ARM" remove_dep impeccable)"
+expect_contains "no CLI: one product line naming what is missing and what it blocks" \
+  "the Claude Code CLI is not on PATH" "$RM_NOCLI"
+expect_not_contains "no CLI: no bash error reaches the terminal" "command not found" "$RM_NOCLI"
+expect_not_contains "no CLI: no library filename" "deps.sh" "$RM_NOCLI"
+expect_not_contains "no CLI: no line number" "line " "$RM_NOCLI"
+printf 'y\n' | dep_query "$ARM" remove_dep impeccable >/dev/null 2>&1; RM_NOCLI_ST=$?
+expect_ne "no CLI: and the function reports failure rather than a silent success" "0" "$RM_NOCLI_ST"
+
+IN_NOCLI="$(printf 'y\n' | dep_query "$ARM" install_plugin_native impeccable)"
+expect_contains "no CLI: the install side says the same thing" \
+  "the Claude Code CLI is not on PATH" "$IN_NOCLI"
+expect_not_contains "no CLI: …and no bash error there either" "command not found" "$IN_NOCLI"
 
 echo ""
 echo "=== Group 12: the native finisher — uninstall, --keep-data, prune ==="

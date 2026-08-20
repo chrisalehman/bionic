@@ -165,6 +165,13 @@ done
 
 # ─── Constants ───────────────────────────────────────────────────────────────
 
+# THE DEPTH THIS SCRIPT'S BLOCKS SIT AT, declared once for both files that print
+# into them (six-axis review R-2). setup's own `say` lines are written three
+# spaces in; deps.sh prints the install prose that lands between them, and until
+# this existed it used its own two-space literal, so the seam between the two
+# files was visible on the user's screen down the whole of step 4.
+BIONIC_DEP_INDENT="   "
+
 SETUP_DEP_MARKETPLACE="${BIONIC_DEP_MARKETPLACE:-bionic}"
 # The default is COMPOSED from the marketplace above rather than spelled whole,
 # because `install_plugin_native` composes the id it installs the same way. A
@@ -196,6 +203,22 @@ SETUP_ALIAS_PATTERN='alias claude=.*dangerously-skip-permissions'
 # bash a stock macOS box runs this script with.
 
 SETUP_ACTIONS=""
+
+# THE INVOCATION A PERSON CAN TYPE (critic F-1). Consent reaches this script
+# through its standard input and nowhere else. The model runs it from a tool
+# whose stdin carries nothing, so every question declines — and the action lines
+# used to answer that by telling the user to "re-run /bionic:setup and answer y",
+# which is the one route that cannot work: a second run through the same command
+# declines identically, because the interactivity of the SESSION is not an answer
+# channel for the SCRIPT. So an action line that asks for an answer names the
+# terminal invocation, resolved to a real path rather than left as a variable the
+# reader's shell has never heard of.
+_setup_self_path() {
+  local dir
+  dir="$(cd "$(_setup_self_dir)" 2>/dev/null && pwd -P)" || dir="$(_setup_self_dir)"
+  echo "${dir}/${BASH_SOURCE[0]##*/}"
+}
+SETUP_SELF_CMD="bash $(_setup_self_path)"
 
 say()    { printf '%s\n' "$*"; }
 action() { SETUP_ACTIONS="${SETUP_ACTIONS}${1}"$'\n'; }
@@ -299,9 +322,21 @@ setup_plugin_install() {
 # `unknown` renders its cause verbatim: the probe names why it could not look
 # (A-4.S2.4), and an unknown with no reason is a shrug the user cannot act on.
 
+#
+# BOUNDED, BECAUSE THIS ONE SHELLS OUT (critic F-3). Every other fact step 1
+# reads is a file; this one runs the CLI's own listing, and a CLI mid-update or
+# a listing waiting on a lock never answers. Unbounded it hung setup here —
+# after the install, with the report half-printed, where a user cannot tell a
+# wedge from a crash. `detect_bounded` is the same bound doctor uses, from the
+# same owner; a timeout arrives as the `unknown` state with the wait named as
+# its cause, which is the shape the four-state case below already handles.
 setup_load_state() {
-  local line state err cause
-  line="$(detect_plugin_load_state "$SETUP_PLUGIN_ID")"
+  local line state err cause rc
+  line="$(detect_bounded "$(detect_probe_seconds)" detect_plugin_load_state "$SETUP_PLUGIN_ID")"
+  rc=$?
+  if [ "$rc" = "124" ] || [ -z "$line" ]; then
+    line="load-state=unknown error=- cause=the plugin listing did not answer within $(detect_probe_seconds) seconds"
+  fi
   state="${line#load-state=}"; state="${state%% *}"
   err="${line#*error=}";       err="${err%% cause=*}"
   case "$line" in *cause=*) cause="${line#*cause=}" ;; *) cause="" ;; esac
@@ -817,7 +852,7 @@ _setup_profile_block() {
   if ! consent "   Apply the permission profile to ${settings}?"; then
     rm -f "$rendered"
     say "   declined — ${settings} is unchanged."
-    action "apply the permission profile: re-run /bionic:setup and answer y at the permission step"
+    action "apply the permission profile: run ${SETUP_SELF_CMD} in your terminal and answer y at the permission-profile question"
     return 0
   fi
 
@@ -874,7 +909,7 @@ _setup_default_mode() {
   if [ "$mode" = "$want" ]; then say "   the default permission mode is already ${want} — nothing to do."; return 0; fi  # idempotence guard: default mode
 
   say "   Claude Code asks before each command unless a default mode says otherwise."
-  if ! consent "   Set Claude Code's default permission mode to ${want}? Recommended — you approve once, not on every command."; then say "   declined — the default permission mode is unchanged."; action "set Claude Code's default permission mode to ${want} in ${settings} (re-run /bionic:setup and answer y at the permission step)"; return 0; fi  # consent gate: default mode
+  if ! consent "   Set Claude Code's default permission mode to ${want}? Recommended — you approve once, not on every command."; then say "   declined — the default permission mode is unchanged."; action "set Claude Code's default permission mode to ${want} in ${settings} (run ${SETUP_SELF_CMD} in your terminal and answer y at the default-permission-mode question)"; return 0; fi  # consent gate: default mode
 
   # Created only AFTER consent: a declined run must leave a machine that has no
   # settings file without one.

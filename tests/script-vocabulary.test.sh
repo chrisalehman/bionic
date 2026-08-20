@@ -330,10 +330,63 @@ mutate_and_lint "printf with a bare-word column header" \
 mutate_and_lint "an action line built by the accumulator" \
   's|SETUP_ACTIONS="${SETUP_ACTIONS}${1}"|SETUP_ACTIONS="${SETUP_ACTIONS}lane 3b: ${1}"|'
 
+# 4 — a shipped hook's FILE NAME used as vocabulary on a printed line (critic F-6).
+# AC-6 names "hook file names" as one of the classes the lint enforces; until S11 the
+# list held no file name of any kind, so the clause was green by absence rather than by
+# measurement. This arm is what makes it a measurement.
+mutate_and_lint "a hook file name printed as vocabulary" \
+  's|say "1. Plugin"|say "1. Plugin — session-poker.sh"|'
+
 RESTORED="$(banned_hits setup.sh)"
 expect_eq "RESTORED (production setup.sh): still clean" "" "$RESTORED"
 expect_true "production setup.sh still parses after the mutation arms" \
   bash -n "${REPO}/payload/scripts/setup.sh"
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== F — the list covers every class AC-6 names (critic F-6) ==="
+# ---------------------------------------------------------------------------
+#
+# AC-6 requires the lint to run "against one banned list (lane, 3a, 3b, hook file names,
+# function names, step IDs)". Section C can only ever find tokens the list carries, so a
+# class missing from the list reads as satisfied when it was never looked for. These two
+# arms derive the roster from the SHIPPED files rather than from a second hand-written
+# copy, so a new hook or a new library prefix arrives on the list deliberately — the day
+# someone adds payload/hooks/whatever.sh, this suite says so.
+#
+# WHAT IS NOT BANNED, per A-6.3's ruling: a shipped file PATH printed as an address the
+# reader is being pointed at — doctor's "the constraint column is the table in
+# scripts/lib/deps.sh", and its "every hooks.json command resolves to a file on disk" —
+# is product information a user can act on, not bookkeeping. Only `payload/hooks/*.sh`
+# basenames are on the list, and neither of those two lines contains one, so the ruling
+# needs no exemption in the lint to hold. Section C measures that it does.
+
+MISSING_HOOKS=""
+for _h in "${REPO}"/payload/hooks/*.sh; do
+  [ -f "$_h" ] || continue
+  _b="${_h##*/}"
+  grep -qxF -- "$_b" "$TMP/banned-tokens.txt" || MISSING_HOOKS="${MISSING_HOOKS}${_b} "
+done
+expect_eq "every shipped hook basename is on the banned list" "" "$MISSING_HOOKS"
+
+# A library function-name PREFIX is covered when some token on the list matches it as a
+# substring — `detect_` covers `_detect_`, which is why this asks about coverage rather
+# than about literal membership.
+MISSING_PREFIX=""
+for _pre in $(/usr/bin/grep -hoE '^_[a-z]+_' "${REPO}"/payload/scripts/lib/*.sh | sort -u); do
+  _hit=""
+  while IFS= read -r _tok; do
+    [ -n "$_tok" ] || continue
+    case "$_pre" in *"$_tok"*) _hit=1; break ;; esac
+  done < "$TMP/banned-tokens.txt"
+  [ -n "$_hit" ] || MISSING_PREFIX="${MISSING_PREFIX}${_pre} "
+done
+expect_eq "every library function-name prefix is covered by a token on the list" "" "$MISSING_PREFIX"
+
+# The address ruling, measured on the live report rather than asserted: the two paths the
+# critic found printed are still printed, and still pass the lint.
+expect_true "doctor.sh still addresses the reader to a shipped path (the ruling, not a leak)" \
+  /usr/bin/grep -q 'scripts/lib/deps.sh' "${REPO}/payload/scripts/doctor.sh"
 
 # ---------------------------------------------------------------------------
 echo ""
