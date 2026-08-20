@@ -62,6 +62,17 @@
 #                           obtained HERE and handed to `profile_apply` as a
 #                           token: the library never asks, so there is exactly
 #                           one place in the system where consent is decided.
+#                           The step ends with one more question about the same
+#                           settings file — whether Claude Code's default
+#                           permission mode should be auto (AC-12).
+#
+# AND TWO THINGS THAT ARE NOT STEPS, both between 1 and 2 (wave-06 S5). The
+# LOAD STATE is printed at step 1's indentation with no header of its own,
+# because it is not another thing setup does — it is the half of step 1 the
+# install's exit code cannot report (AC-13). DUPLICATES is a block that exists
+# only on a machine that has some: it carries no number precisely because it is
+# usually absent, and a numbered step missing from most transcripts would leave
+# a hole in the sequence the nine steps above are counted in (AC-8).
 #
 # WHICH TOOLS THIS SCRIPT IS ALLOWED TO ASK ABOUT (wave-06 D-B, spec AC-11).
 # Steps 3 and 4 walk `dep_names_class basic` and `dep_names_class extra`, and
@@ -154,8 +165,13 @@ done
 
 # ─── Constants ───────────────────────────────────────────────────────────────
 
-SETUP_PLUGIN_ID="${BIONIC_PLUGIN_ID:-bionic@bionic}"
 SETUP_DEP_MARKETPLACE="${BIONIC_DEP_MARKETPLACE:-bionic}"
+# The default is COMPOSED from the marketplace above rather than spelled whole,
+# because `install_plugin_native` composes the id it installs the same way. A
+# machine that re-points bionic's catalog moves both together; two independent
+# defaults would move one of them and leave the other naming a plugin nobody
+# installed.
+SETUP_PLUGIN_ID="${BIONIC_PLUGIN_ID:-bionic@${SETUP_DEP_MARKETPLACE}}"
 
 # bionic's own rc block. DISTINCT markers from the legacy alias block below on
 # purpose: step 5 removes that block by exact marker match, and sharing a marker
@@ -253,19 +269,167 @@ setup_plugin_install() {
       return 0 ;;
   esac
 
-  say "   bionic is not installed here."
-  say "   bionic would run: claude plugin install ${SETUP_PLUGIN_ID} --scope user --yes"
-  if ! consent "   Install the bionic plugin now?"; then
-    say "   declined — the plugin stays uninstalled."
-    action "run: claude plugin install ${SETUP_PLUGIN_ID} --scope user --yes"
-    return 0
-  fi
-  if claude plugin install "$SETUP_PLUGIN_ID" --scope user --yes; then
-    say "   installed."
-  else
-    say "   the install did not succeed."
+  # THE QUESTION AND THE INSTALL BOTH BELONG TO deps.sh NOW (wave-06 S5). This
+  # step used to carry its own copy of "name the command, ask, run it", which was
+  # fine while it was the only place a plugin got installed — and stopped being
+  # fine the moment a just-in-time offer needed the same three lines for a
+  # when-needed native row and had nothing to call. There is one such function
+  # and both callers reach it, so what a user is asked here and what a route asks
+  # mid-session cannot drift into two different conversations.
+  if ! install_plugin_native bionic; then
     action "run: claude plugin install ${SETUP_PLUGIN_ID} --scope user --yes (add bionic's marketplace first if it is not registered)"
   fi
+  return 0
+}
+
+# ─── After step 1 — is the CLI actually LOADING us? (AC-13, setup half) ──────
+#
+# THE FACT THE INSTALL'S OWN EXIT CODE CANNOT GIVE. Epic-17 W5 measured it four
+# times: `claude plugin install` exits 0, prints a success line and writes the
+# registry, and if a dependency is missing the plugin then loads NOTHING — no
+# hook, no command, no error anywhere a user would look. Every registry-reading
+# check on this machine stays green through it. So the step that installs is
+# followed by the one question the install cannot answer itself, asked of the
+# only surface that knows: the CLI's own listing.
+#
+# This prints at the install step's indentation and carries no header of its own,
+# because it is not another thing setup DOES — it is what step 1 amounts to.
+#
+# FOUR STATES, FOUR SENTENCES, and the two that are not good news carry the fix.
+# `unknown` renders its cause verbatim: the probe names why it could not look
+# (A-4.S2.4), and an unknown with no reason is a shrug the user cannot act on.
+
+setup_load_state() {
+  local line state err cause
+  line="$(detect_plugin_load_state "$SETUP_PLUGIN_ID")"
+  state="${line#load-state=}"; state="${state%% *}"
+  err="${line#*error=}";       err="${err%% cause=*}"
+  case "$line" in *cause=*) cause="${line#*cause=}" ;; *) cause="" ;; esac
+
+  case "$state" in
+    loaded)
+      say "   bionic: loaded."
+      ;;
+    failed)
+      # A real error, so it is reported the way the contract requires: the CLI's
+      # own words first, unedited, then one line naming what to do about them.
+      say "   bionic is installed but did not load. The CLI reports:"
+      say "   ${err}"
+      say "   Fix: install what the message names, then start a new session — or reinstall bionic with: claude plugin install ${SETUP_PLUGIN_ID} --scope user --yes"
+      action "bionic did not load: ${err}"
+      ;;
+    absent)
+      # Step 1 already owns the install and its action line; saying so twice
+      # would make one problem look like two.
+      say "   bionic is not in the plugin list, so nothing of it is loaded here yet."
+      ;;
+    *)
+      say "   bionic's load state is unknown — ${cause}"
+      action "check that bionic is loading: run claude plugin list and read the Status line for bionic"
+      ;;
+  esac
+  return 0
+}
+
+# ─── After the load state — two catalogs, one name (AC-8) ────────────────────
+#
+# WHY THIS COMES BEFORE ANYTHING IS INSTALLED. A machine can hold
+# `superpowers@bionic` and `superpowers@claude-plugins-official` at once, and
+# nothing tells the user which one a session loads. Installing more things beside
+# an unsettled duplicate just adds to the pile, so the question is asked here —
+# after the plugin is in place and before the dependency steps run.
+#
+# SILENT WHEN THERE IS NOTHING TO SAY. No duplicate means no header, no question,
+# no line: on the machines this will mostly run on, this step does not exist.
+# That is also why it carries no step NUMBER — a numbered step absent from most
+# transcripts leaves a hole in the sequence, and the numbers belong to the nine
+# things setup does every time.
+#
+# THE THREE ANSWERS, AND WHY THE PROMPT IS deps.sh's ONE SHAPE. Chris named
+# consolidate / coexist / skip. Setup persists no state of its own, so coexist
+# and skip leave the machine in the identical condition and are asked again on
+# the next run — two names for one outcome. Rather than invent a second prompt
+# mechanism to tell them apart, all three answers are named in the prose and the
+# gate is the same `[y/N]` every other question here uses: yes consolidates, no
+# leaves both installed and says so.
+#
+# `dup=unknown` IS NOT A DUPLICATE. It is the probe reporting that it could not
+# read the registry, and there is nothing to consolidate — so nothing is offered.
+# It is not silence either: silence is the claim "no duplicates", which a reader
+# that could not look has not earned.
+
+# The ids to uninstall, one per line, derived from the probe's own fix clause and
+# only when every piece of it is exactly `claude plugin uninstall <id>`. This is
+# what keeps the consented plan and the executed command the same text without
+# ever handing a composed string to a shell: an id is a registry key, and a
+# registry key is not something this script gets to trust into `eval`. Anything
+# else — notably the "choose one: …" clause the probe returns when bionic has no
+# standing to pick a winner — fails the shape test and is reported, not run.
+_setup_dup_uninstall_ids() {  # <fix-clause>
+  local fix="${1:-}" piece id out=""
+  [ -n "$fix" ] || return 1
+  while IFS= read -r piece; do
+    [ -n "$piece" ] || continue
+    case "$piece" in
+      "claude plugin uninstall "*) id="${piece#claude plugin uninstall }" ;;
+      *) return 1 ;;
+    esac
+    case "$id" in
+      ''|*[!A-Za-z0-9@._-]*) return 1 ;;
+    esac
+    out="${out}${id}
+"
+  done <<< "${fix//; /$'\n'}"
+  [ -n "$out" ] || return 1
+  printf '%s' "$out"
+  return 0
+}
+
+setup_duplicates() {
+  local line bare ids fix cause header=0 id losers
+  # fd 3, not stdin — the consent prompt below reads stdin, and a loop that fed
+  # its own list into it would answer every question with the next duplicate.
+  while IFS= read -r line <&3; do
+    [ -n "$line" ] || continue
+    bare="${line#dup=}"; bare="${bare%% *}"
+    ids="${line#*ids=}"; ids="${ids%% *}"
+    fix="${line#*fix=}"; fix="${fix%% cause=*}"
+    case "$line" in *cause=*) cause="${line#*cause=}" ;; *) cause="" ;; esac
+
+    if [ "$header" = "0" ]; then say ""; say "Duplicates"; header=1; fi
+
+    if [ "$bare" = "unknown" ]; then
+      say "   bionic could not check for duplicate copies — ${cause}"
+      action "install jq, then re-run /bionic:setup — duplicate copies could not be checked for"
+      continue
+    fi
+
+    say "   ${bare} is installed twice: ${ids}."
+    say "   A session loads one of them, and which one is not something you chose."
+    if ! losers="$(_setup_dup_uninstall_ids "$fix")"; then
+      # Both copies are somebody else's catalog: bionic has no standing to pick
+      # a winner, so it names the choice and does not offer to make it.
+      say "   ${fix}"
+      action "settle the duplicate copies of ${bare}: ${fix}"
+      continue
+    fi
+    say "   bionic would run: ${fix}"
+    say "   Saying no lets them coexist: nothing changes, and bionic asks again next run."
+    if ! consent "   Consolidate — remove the copy bionic did not install?"; then
+      say "   left as they are."
+      action "settle the duplicate copies of ${bare}: ${fix}"
+      continue
+    fi
+    while IFS= read -r id; do
+      [ -n "$id" ] || continue
+      if claude plugin uninstall "$id"; then
+        say "   removed ${id}."
+      else
+        say "   ${id} could not be removed."
+        action "remove the duplicate copy by hand: claude plugin uninstall ${id}"
+      fi
+    done <<< "$losers"
+  done 3< <(detect_plugin_duplicates)
   return 0
 }
 
@@ -603,6 +767,20 @@ setup_legacy_skill_copy() {
 setup_profile() {
   say ""
   say "9. Permission profile"
+  _setup_profile_block
+  _setup_default_mode
+  return 0
+}
+
+# THE STEP IS TWO DECISIONS, SO IT IS TWO FUNCTIONS. The profile block and the
+# default permission mode are both about the same settings file and both belong
+# in this step, but they are independent: a machine whose profile is applied and
+# current still has a mode question to answer, and the profile half returns early
+# on exactly that machine. Left inline, the second question would have been
+# unreachable on every machine that had already been set up once — which is most
+# of them, and the ones least likely to notice.
+
+_setup_profile_block() {
   local state applied stale template root settings rendered
   state="$(detect_profile_state)"
   applied="${state#*applied=}"; applied="${applied%% *}"
@@ -650,11 +828,57 @@ setup_profile() {
     action "apply the permission profile: see the message above (jq is required to edit ${settings} safely)"
   fi
   rm -f "$rendered"
-  # INSERTION POINT (wave-06 S5): the default-permission-mode question goes HERE,
-  # at the end of this step and after the profile decision — it is the second
-  # thing this step asks about the same settings file, and asking it before the
-  # profile would put the smaller question first. It is its own consent, whatever
-  # was answered above.
+  return 0
+}
+
+# ─── The default permission mode (AC-12) ─────────────────────────────────────
+#
+# ONE QUESTION, ASKED AFTER THE PROFILE AND NEVER ASSUMED. The profile decides
+# which of bionic's own commands run without a prompt; this decides whether the
+# machine asks about everything else once or every time. The smaller question
+# goes second on purpose, and it is its own consent whatever was answered above.
+#
+# NOT A RULE INSIDE THE MARKER BLOCK. `defaultMode` is a preference of the
+# machine's, not one of bionic's rendered rules — the template ships no
+# defaultMode and tests/profile.test.sh walls it out. Writing it inside the block
+# would mean /bionic:remove's strip silently reverted a decision the user was
+# asked for separately, which is not what either question promised.
+#
+# ALREADY-AUTO ASKS NOTHING. Every other step here is guarded by the fact that
+# owns its question, and this is no different: a machine already in auto has
+# nothing to decide, and asking anyway would be the interrogation this wave is
+# removing. Without jq the value cannot be read at all, so the honest answer is
+# to say so and change nothing — never to write over a mode we could not see.
+_setup_default_mode() {
+  local settings mode
+  settings="$(_dep_settings_file)"
+
+  if ! command -v jq >/dev/null 2>&1; then
+    say "   the default permission mode is unknown — jq is unavailable, so ${settings} was not parsed."
+    action "install jq, then re-run /bionic:setup — the default permission mode could not be read"
+    return 0
+  fi
+
+  if [ -f "$settings" ]; then
+    mode="$(jq -r '.permissions.defaultMode // ""' "$settings" 2>/dev/null)" || mode=""
+  else
+    mode=""
+  fi
+
+  if [ "$mode" = "auto" ]; then say "   the default permission mode is already auto — nothing to do."; return 0; fi  # idempotence guard: default mode
+
+  say "   Claude Code asks before each command unless a default mode says otherwise."
+  if ! consent "   Set Claude Code's default permission mode to auto? Recommended — you approve once, not on every command."; then say "   declined — the default permission mode is unchanged."; action "set Claude Code's default permission mode to auto in ${settings} (re-run /bionic:setup and answer y at the permission step)"; return 0; fi  # consent gate: default mode
+
+  # Created only AFTER consent: a declined run must leave a machine that has no
+  # settings file without one.
+  [ -f "$settings" ] || echo '{}' > "$settings"
+  if _dep_settings_write_jq "$settings" '.permissions.defaultMode = "auto"'; then
+    say "   set."
+  else
+    say "   the default permission mode could not be set."
+    action "set Claude Code's default permission mode to auto in ${settings} by hand"
+  fi
   return 0
 }
 
@@ -679,11 +903,8 @@ setup_summary() {
 say "bionic setup — every change below is asked for first, one item at a time."
 
 setup_plugin_install
-# INSERTION POINT (wave-06 S5): the load-state line and the duplicates step go
-# HERE, between the plugin install and the dependencies — the load state is a
-# fact about the install that just happened, and a duplicate has to be settled
-# before anything else is installed beside it. Adding them renumbers every step
-# below, headers included.
+setup_load_state
+setup_duplicates
 setup_dep_enable_verify
 setup_tools_loop
 setup_extras_loop

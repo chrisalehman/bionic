@@ -257,6 +257,74 @@ expect_true "excalidraw-diagram SKILL.md names jit_check" grep -q 'jit_check' "$
 expect_true "excalidraw-diagram SKILL.md names jit_offer" grep -q 'jit_offer' "$EXCALIDRAW_SKILL"
 
 echo ""
+echo "=== Group 9b: the native when-needed row — ONE question, ONE installer (AC-11) ==="
+#
+# THE RULING THIS PINS (plan A-4.S4.4-RULING). `impeccable` is `when-needed` AND
+# `native`: the moment to install it is the moment the design route asks, and
+# `install_dep` refuses every native row by design. S4 resolved that by printing
+# a command and asking nothing, which narrowed AC-11's "one question at the
+# moment of need" for exactly one row. The ruling put the fix at the layer it
+# lives instead — ONE native-plugin installer in deps.sh, called by BOTH setup's
+# first step and this offer — so AC-11 holds literally and jit.sh is still not a
+# second installer. This group asserts all three halves: the question is asked,
+# the CLI is what installs, and the function reached is deps.sh's by NAME.
+#
+# The offer still returns NON-ZERO on a successful install, and that is not a
+# leftover: a plugin the CLI installed mid-session is not loaded into the
+# session that asked for it until the plugins are re-read. Telling the route
+# "you have it now" would be the one lie this contract exists to prevent.
+
+NATIVE_BIN="$TMP/native-bin"; mkdir -p "$NATIVE_BIN"
+cp -R "$PRESENT_BIN/." "$NATIVE_BIN/"
+make_stub "$NATIVE_BIN" claude
+
+: > "$CALLS"
+NATIVE_YES_OUT="$(env -i HOME="$TMP/home" PATH="$NATIVE_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  bash -c 'echo y | { . "$1"; jit_offer impeccable design-route "design work" "the route continues without it"; }' \
+  _ "$JIT_SH" 2>&1)"
+expect_match "native row: the offer asks a question, with deps.sh's default-No prompt" \
+  '*\[y/N\]*' "$NATIVE_YES_OUT"
+expect_match "native row (yes): the install reaches the CLI, scoped to the marketplace id" \
+  "*plugin install impeccable@bionic*" "$(cat "$CALLS")"
+expect_match "native row (yes): the caveat names the reload the install needs" \
+  '*/reload-plugins*' "$NATIVE_YES_OUT"
+expect_match "native row (yes): the route is still told it degrades this session" \
+  "*design-route continues without design work*" "$NATIVE_YES_OUT"
+
+NATIVE_YES_RC="$(env -i HOME="$TMP/home" PATH="$NATIVE_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  bash -c 'echo y | { . "$1"; jit_offer impeccable design-route "design work" "the route continues without it"; }; echo $?' \
+  _ "$JIT_SH" 2>/dev/null | tail -1)"
+expect_true "native row (yes): returns non-zero — installed is not loaded in THIS session" \
+  test "$NATIVE_YES_RC" -ne 0
+
+: > "$CALLS"
+NATIVE_NO_OUT="$(env -i HOME="$TMP/home" PATH="$NATIVE_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  bash -c '. "$1"; jit_offer impeccable design-route "design work" "the route continues without it" </dev/null' \
+  _ "$JIT_SH" 2>&1)"
+expect_eq "native row (decline): nothing ran — no install, no CLI call" "0" \
+  "$(grep -c . "$CALLS" | tr -d ' ')"
+expect_match "native row (decline): the contracted degradation line still prints" \
+  "*design-route continues without design work: the route continues without it*" "$NATIVE_NO_OUT"
+
+# The ownership agreement, the same way Group 3 proves it for install_dep:
+# override the installer AFTER sourcing and watch the yes path land in it.
+NATIVE_TRACE="$TMP/native-installer-trace.log"; : > "$NATIVE_TRACE"
+env -i HOME="$TMP/home" PATH="$NATIVE_BIN" BIONIC_TEST_TRACE="$NATIVE_TRACE" BIONIC_TEST_CALLS="$CALLS" \
+  bash -c '
+    . "$1"
+    install_plugin_native() { echo "install_plugin_native-override $*" >> "$BIONIC_TEST_TRACE"; return 0; }
+    echo y | jit_offer impeccable design-route "design work" "it degrades"
+  ' _ "$JIT_SH" >/dev/null 2>&1
+expect_match "jit_offer reaches the function literally named install_plugin_native" \
+  "*install_plugin_native-override impeccable*" "$(cat "$NATIVE_TRACE")"
+
+# deps.sh keeps its refusal: the shared installer is a SIBLING of install_dep,
+# not a way in through it. If this ever passed, the kludge D1 rejected would be
+# back and the refusal would be decoration.
+expect_false "install_dep still refuses the native row outright" \
+  bash -c 'echo y | { . "$1"; install_dep impeccable; }' _ "$DEPS_SH"
+
+echo ""
 echo "=== Group 10: the suite is registered in tests/run.sh by name ==="
 
 expect_true "tests/run.sh names jit.test.sh" \
