@@ -41,3 +41,15 @@ pipefail
 # S9a, walk finding W-3). A design-doc pointer is provenance for a reader of the SOURCE; on
 # a user's terminal it is a reference into a document they do not have.
 design-ledger
+
+# REMOVAL-POLICY AND RUNTIME-MODE VALUES reached the terminal (epic-17 W6 S10, six-axis
+# review R-1). `keep-shared` is a column value in deps.sh's dependency table and printed
+# nine times in a row on a full teardown; `mode: payload` was the remove transcript's
+# second line. Both are the script naming its own internals at a user who has no way to
+# know them — the same class as `lane 3b`, one list entry away from being caught. The
+# other two policy values are listed with them so the class cannot come back through a
+# row that has not printed yet.
+keep-shared
+remove-on-consent
+native-uninstall-offer
+mode: payload

@@ -889,13 +889,6 @@ expect_eq "the mode is asked exactly once in a run" "1" \
   "$(awk '/default permission mode to auto/ { n++ } END { print n + 0 }' <<< "$OUT")"
 expect_eq "consented: the default mode is written as auto" "auto" \
   "$(jq -r '.permissions.defaultMode // ""' "$FIX/ch/settings.json" 2>/dev/null)"
-# The mode is a settings key of the machine's own, NOT a rule inside bionic's
-# marker block — the block is a rendering of the template and the template ships
-# no defaultMode (tests/profile.test.sh Group 2 walls that). Writing it into the
-# block would make /bionic:remove's strip silently revert a preference the user
-# was asked for separately.
-expect_no_match "the mode is not smuggled into the profile's marker block" \
-  '*defaultMode*' "$(jq -c '[.permissions.allow[]?]' "$FIX/ch/settings.json" 2>/dev/null)"
 
 # Idempotence: a machine already in auto is not interrogated a second time.
 OUT2="$(run_setup "$YES")"
@@ -914,6 +907,35 @@ expect_eq "declined: the settings file is byte-identical afterwards" \
   "$SETTINGS_BEFORE_MODE" "$(cat "$FIX/ch/settings.json")"
 expect_match "declined: the summary names the mode as an outstanding action" \
   '*permission mode*' "$(awk '/^Summary/ { f = 1 } f' <<< "$OUT")"
+# ---- D-1: the value has ONE owner, and this writer follows it ----
+#
+# `auto` was a bare literal here and a second bare literal in remove.sh's reset,
+# which is defined as "the one value bionic knows it wrote". Nothing made the two
+# agree, and both suites stayed green either way. deps.sh owns it now; the arm
+# that matters is behavioural — change the owner's value in a COPY of the
+# library, point setup at that copy, and the settings file has to follow.
+MUT_LIB="$TMP/mutant-lib"; mkdir -p "$MUT_LIB"
+cp "$LIB_DIR/"*.sh "$MUT_LIB/"
+sed 's/^BIONIC_DEFAULT_PERMISSION_MODE=.*/BIONIC_DEFAULT_PERMISSION_MODE="plan"/' \
+  "$LIB_DIR/deps.sh" > "$MUT_LIB/deps.sh"
+expect_true "one owner: the copied library really carries the moved value" \
+  bash -c 'grep -qF "BIONIC_DEFAULT_PERMISSION_MODE=\"plan\"" "$1"' _ "$MUT_LIB/deps.sh"
+
+new_fixture defaultmode-mutated-owner
+plant_cli_plugin "bionic@bionic" true
+OUT="$(run_setup "$YES" BIONIC_LIB_DIR="$MUT_LIB")"
+expect_eq "one owner: setup writes whatever the owner names, not a literal of its own" "plan" \
+  "$(jq -r '.permissions.defaultMode // ""' "$FIX/ch/settings.json" 2>/dev/null)"
+expect_match "one owner: and the question it asks names that value too" \
+  '*default permission mode to plan*' "$OUT"
+# The mode is a settings key of the machine's own, NOT a rule inside bionic's
+# marker block — the block is a rendering of the template and the template ships
+# no defaultMode (tests/profile.test.sh Group 2 walls that). Writing it into the
+# block would make /bionic:remove's strip silently revert a preference the user
+# was asked for separately.
+expect_no_match "the mode is not smuggled into the profile's marker block" \
+  '*defaultMode*' "$(jq -c '[.permissions.allow[]?]' "$FIX/ch/settings.json" 2>/dev/null)"
+
 
 # ---------------------------------------------------------------------------
 # Group 9 — idempotence over the WHOLE script, by bytes.
