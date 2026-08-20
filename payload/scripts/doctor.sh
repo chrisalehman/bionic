@@ -78,7 +78,7 @@
 # BIONIC_PLAYWRIGHT_CACHE). Doctor adds none of its own: a knob only doctor
 # honoured would be a second definition of where this machine keeps its state.
 #
-# Executed, never sourced:  bash "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh"
+# Executed, never sourced:  bash ${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh
 
 set -uo pipefail
 
