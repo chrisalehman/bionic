@@ -130,13 +130,32 @@ case "${1:-}" in
   plugin|plugins)
     case "${2:-}" in
       list)
-        sep=""; printf '['
-        while read -r id en; do
-          [ -n "$id" ] || continue
-          printf '%s{"id":"%s","version":"0.1.0","scope":"user","enabled":%s}' "$sep" "$id" "$en"
-          sep=","
-        done < "$STATE_FILE"
-        printf ']\n'
+        # TWO SHAPES, ONE STATE FILE. `--json` is what setup's own
+        # `_setup_cli_plugin` asks for; the BARE listing is what the CLI prints
+        # to a human and what the load-state probe parses (plan A-4.S2.1: one
+        # indented BLOCK per plugin, measured on this machine 2026-08-20, not
+        # the one-line reflow W5's report shows). Rendering both from the same
+        # state file is what keeps "installed" and "loaded" the same fixture's
+        # answer rather than two independent fictions.
+        case " $* " in
+          *" --json "*)
+            sep=""; printf '['
+            while read -r id en; do
+              [ -n "$id" ] || continue
+              printf '%s{"id":"%s","version":"0.1.0","scope":"user","enabled":%s}' "$sep" "$id" "$en"
+              sep=","
+            done < "$STATE_FILE"
+            printf ']\n'
+            ;;
+          *)
+            printf 'Installed plugins:\n\n'
+            while read -r id en; do
+              [ -n "$id" ] || continue
+              if [ "$en" = "true" ]; then st='✔ enabled'; else st='✘ not enabled'; fi
+              printf '  ❯ %s\n    Version: 0.1.0\n    Scope: user\n    Status: %s\n\n' "$id" "$st"
+            done < "$STATE_FILE"
+            ;;
+        esac
         exit 0 ;;
       install)
         id=""
@@ -298,6 +317,131 @@ expect_match "no jq: install state is reported unknown, never a confident answer
 expect_match "no jq: the summary names jq as the fix" '*jq*' "$OUT"
 
 # ---------------------------------------------------------------------------
+# Group 2b — AC-13's setup half: is the CLI actually LOADING us?
+#
+# THE FAILURE THIS EXISTS FOR (epic-17 W5, F12). `claude plugin install` exits 0,
+# prints a success line, writes the registry — and if a dependency is missing the
+# plugin loads NOTHING. Every registry-reading fact stays green. The only surface
+# that says so is the CLI's own listing, which is why setup reports it right after
+# the install step rather than trusting the step's own exit code.
+#
+# The healthy arm is driven through the stateful `claude` fake (installed by
+# setup's own step 1, then read back), so "loaded" is the fixture's answer to a
+# real question. The dep-broken arm cannot be made on a live machine mid-wave
+# (plan A-0.3), so it is driven through `BIONIC_PLUGIN_LIST_CMD` at the seam
+# detect.sh publishes for exactly this, pointed at the captured listing S2
+# fixtured — the Error line in it is verbatim from the W5 measurement.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 2b: load state reported after the install step (AC-13, setup half) ==="
+
+LIST_DEP_BROKEN="${REPO}/tests/fixtures/plugin-list-dep-broken.txt"
+expect_true "the dep-broken listing fixture exists" test -f "$LIST_DEP_BROKEN"
+
+new_fixture loadstate-healthy
+plant_cli_plugin "bionic@bionic" true
+OUT="$(run_setup "$NO")"
+expect_match "healthy machine: setup says bionic is loaded" '*bionic: loaded*' "$OUT"
+expect_no_match "healthy machine: no error text about loading" '*did not load*' "$OUT"
+
+# The load-state line belongs to the install step, not to the dependencies step:
+# it is a fact about the install that just happened. Asserted by ORDER against
+# the next step's header, which is the only delimiter the user can see.
+LOAD_BEFORE_DEPS="$(awk '/bionic: loaded/ { seen = 1 } /^2\. Dependencies/ { print (seen ? "before" : "after"); exit }' <<< "$OUT")"
+expect_eq "the load-state line is printed before the dependencies step" "before" "$LOAD_BEFORE_DEPS"
+
+new_fixture loadstate-broken
+plant_cli_plugin "bionic@bionic" true
+OUT="$(run_setup "$NO" BIONIC_PLUGIN_LIST_CMD="cat $LIST_DEP_BROKEN")"
+expect_match "dep-broken machine: the CLI's Error text is printed verbatim" \
+  '*Dependency "superpowers@bionic" is not installed*' "$OUT"
+expect_match "dep-broken machine: setup says the plugin did not load" '*did not load*' "$OUT"
+expect_match "dep-broken machine: a fix is named on its own line" '*Fix:*' "$OUT"
+expect_match "dep-broken machine: the summary carries the load failure as an action" \
+  '*Summary*' "$OUT"
+BROKEN_SUMMARY="$(awk '/^Summary/ { f = 1 } f' <<< "$OUT")"
+expect_match "dep-broken machine: the action line names the load failure" \
+  '*did not load*' "$BROKEN_SUMMARY"
+
+# An unreadable listing is `unknown` and says WHY — never a confident "loaded".
+# The cause is the third field S2 added (A-4.S2.4) and setup must render it,
+# because "unknown" with no reason is a shrug the user cannot act on.
+new_fixture loadstate-unknown
+plant_cli_plugin "bionic@bionic" true
+OUT="$(run_setup "$NO" BIONIC_PLUGIN_LIST_CMD="printf nonsense")"
+expect_match "unreadable listing: setup reports the load state as unknown" '*unknown*' "$OUT"
+expect_match "unreadable listing: the cause is rendered, not swallowed" \
+  '*is not a plugin listing*' "$OUT"
+expect_no_match "unreadable listing: never claims the plugin is loaded" '*bionic: loaded*' "$OUT"
+
+# ---------------------------------------------------------------------------
+# Group 2c — AC-8: no silent duplicates, and no noise when there are none.
+#
+# BOTH DIRECTIONS, because either alone is satisfiable by a broken step: a step
+# that never speaks passes "clean machine says nothing", and a step that always
+# speaks passes "planted duplicate is reported". The clean arm is asserted as
+# ZERO TEXT — not merely "no question" — because a header printed on every
+# machine is the noise the wave's principle is against.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 2c: duplicates are asked about, and only when they exist (AC-8) ==="
+
+# The duplicate is planted in the registry file `detect_plugin_duplicates` reads:
+# two catalogs, one bare name. That is the collision — the registry KEYS are
+# unique by construction, so nothing that compares keys can see it.
+new_fixture dup-planted
+plant_cli_plugin "bionic@bionic" true
+plant_installed "superpowers@bionic" "6.3.0"
+plant_installed "superpowers@claude-plugins-official" "6.2.0"
+plant_installed "agent-skills@bionic" "0.6.7"
+OUT="$(run_setup "$NO")"
+expect_match "planted duplicate: the duplicates step appears" '*Duplicates*' "$OUT"
+expect_match "planted duplicate: the colliding name is named" '*superpowers*' "$OUT"
+expect_match "planted duplicate: both catalog copies are named" \
+  '*superpowers@claude-plugins-official*' "$OUT"
+expect_match "planted duplicate: the consolidation command is named" \
+  '*claude plugin uninstall superpowers@claude-plugins-official*' "$OUT"
+# All three answers Chris named are visible at the moment of asking; the
+# question itself is deps.sh's one prompt shape, whose capital N is the default.
+expect_match "planted duplicate: consolidating is offered" '*onsolidat*' "$OUT"
+expect_match "planted duplicate: coexisting is offered as a legitimate answer" '*coexist*' "$OUT"
+expect_match "planted duplicate: the question is asked with a default-No prompt" '*\[y/N\]*' "$OUT"
+expect_no_match "declined duplicate: nothing was uninstalled" '*plugin uninstall*' "$(cat "$CALLS")"
+
+new_fixture dup-consented
+plant_cli_plugin "bionic@bionic" true
+plant_installed "superpowers@bionic" "6.3.0"
+plant_installed "superpowers@claude-plugins-official" "6.2.0"
+OUT="$(run_setup "$YES")"
+expect_match "consented duplicate: the loser's uninstall reaches the CLI" \
+  '*plugin uninstall superpowers@claude-plugins-official*' "$(cat "$CALLS")"
+expect_no_match "consented duplicate: bionic's own copy is never the one removed" \
+  '*plugin uninstall superpowers@bionic*' "$(cat "$CALLS")"
+
+new_fixture dup-clean
+plant_cli_plugin "bionic@bionic" true
+plant_installed "superpowers@bionic" "6.3.0"
+plant_installed "agent-skills@bionic" "0.6.7"
+OUT="$(run_setup "$NO")"
+expect_no_match "clean machine: not one word about duplicates" '*uplicat*' "$OUT"
+expect_no_match "clean machine: no consolidation command offered" '*plugin uninstall*' "$OUT"
+
+# `dup=unknown` is a FAILURE TO LOOK, not a duplicate (plan A-4.S2.8). Setup
+# must not ask about it — there is nothing to consolidate — and must not stay
+# silent either, because silence is the claim "no duplicates" that an unreadable
+# registry has not earned.
+new_fixture dup-unknown
+plant_cli_plugin "bionic@bionic" true
+printf '%s\n' 'not json at all' > "$FIX/ch/plugins/installed_plugins.json"
+OUT="$(run_setup "$NO")"
+expect_match "unreadable registry: setup renders the cause rather than claiming none" \
+  '*could not be parsed*' "$OUT"
+expect_no_match "unreadable registry: no consolidation is offered for a non-duplicate" \
+  '*plugin uninstall*' "$OUT"
+
+# ---------------------------------------------------------------------------
 # Group 3 — (b) core enable-verify, repair by explicit enable (P2).
 # ---------------------------------------------------------------------------
 
@@ -447,7 +591,7 @@ done
 # `[y/N]` is deps.sh's own prompt shape and the capital N IS the default, so
 # asserting it here asserts that an extra goes through the one consent gate
 # rather than through a second prompt written for this step.
-expect_match "extras are asked with a default-No prompt" '*[y/N]*' "$EXTRAS"
+expect_match "extras are asked with a default-No prompt" '*\[y/N\]*' "$EXTRAS"
 
 # One why line per extra and no more: a single shared sentence at the top of the
 # step would satisfy every per-row assertion above while telling the user
@@ -718,6 +862,58 @@ OUT="$(run_setup "$NO")"
 expect_match "declined apply: no block applied" \
   'profile: applied=no*' "$(lib_query "$LIB_DIR/profile.sh" detect_profile_state)"
 expect_match "declined apply: named as an action line" '*permission*' "$OUT"
+
+# ---------------------------------------------------------------------------
+# Group 8b — AC-12: ONE consented question about the default permission mode.
+#
+# WHY THE DECLINE ARM NEEDS A SETTLED FIXTURE. "No leaves the settings file
+# untouched" is only a real claim if something in that run COULD have written to
+# it. So the fixture is a machine that has already been set up — profile applied
+# and current, so the profile half of the step has nothing to do — with the mode
+# key removed again. The one question left in that step is this one, and the
+# file's bytes are the whole evidence either way.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 8b: the default permission mode (AC-12) ==="
+
+MODE_Q='*default permission mode to auto*'
+
+new_fixture defaultmode-yes
+plant_cli_plugin "bionic@bionic" true
+OUT="$(run_setup "$YES")"
+expect_match "the mode question is asked" "$MODE_Q" "$OUT"
+expect_match "the question says what it buys, in one line" '*Recommended*' "$OUT"
+expect_match "the question is asked with a default-No prompt" '*\[y/N\]*' "$OUT"
+expect_eq "the mode is asked exactly once in a run" "1" \
+  "$(awk '/default permission mode to auto/ { n++ } END { print n + 0 }' <<< "$OUT")"
+expect_eq "consented: the default mode is written as auto" "auto" \
+  "$(jq -r '.permissions.defaultMode // ""' "$FIX/ch/settings.json" 2>/dev/null)"
+# The mode is a settings key of the machine's own, NOT a rule inside bionic's
+# marker block — the block is a rendering of the template and the template ships
+# no defaultMode (tests/profile.test.sh Group 2 walls that). Writing it into the
+# block would make /bionic:remove's strip silently revert a preference the user
+# was asked for separately.
+expect_no_match "the mode is not smuggled into the profile's marker block" \
+  '*defaultMode*' "$(jq -c '[.permissions.allow[]?]' "$FIX/ch/settings.json" 2>/dev/null)"
+
+# Idempotence: a machine already in auto is not interrogated a second time.
+OUT2="$(run_setup "$YES")"
+expect_eq "a machine already in auto is not asked again" "0" \
+  "$(awk '/default permission mode to auto/ { n++ } END { print n + 0 }' <<< "$OUT2")"
+
+new_fixture defaultmode-declined
+plant_cli_plugin "bionic@bionic" true
+run_setup "$YES" >/dev/null 2>&1
+MODE_TMP="$FIX/ch/settings.json.modetmp"
+jq 'del(.permissions.defaultMode)' "$FIX/ch/settings.json" > "$MODE_TMP" && mv "$MODE_TMP" "$FIX/ch/settings.json"
+SETTINGS_BEFORE_MODE="$(cat "$FIX/ch/settings.json")"
+OUT="$(run_setup "$NO")"
+expect_match "settled machine: the mode question is still reached and asked" "$MODE_Q" "$OUT"
+expect_eq "declined: the settings file is byte-identical afterwards" \
+  "$SETTINGS_BEFORE_MODE" "$(cat "$FIX/ch/settings.json")"
+expect_match "declined: the summary names the mode as an outstanding action" \
+  '*permission mode*' "$(awk '/^Summary/ { f = 1 } f' <<< "$OUT")"
 
 # ---------------------------------------------------------------------------
 # Group 9 — idempotence over the WHOLE script, by bytes.
