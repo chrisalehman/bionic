@@ -289,6 +289,92 @@ else
   no "every hooks/*.sh names its registration channel in its header (missing: ${MISSING_CHANNEL})"
 fi
 
+# ---- B4: the header channel line is DERIVED and compared, not merely present ----
+#
+# CRITIC C-3 (W5). B3's positive form asks whether each hook SAYS which channel registers
+# it. It never asks whether the answer is true — a `grep -q` over the whole file against a
+# four-way alternation is satisfied by any of the four, on any line, including a false one.
+# The critic proved it: a planted false channel claim on a copy of execution-recorder.sh
+# left the suite 71/0 green, and agent-context-guard.sh had in fact been naming a RETIRED
+# registrar since the plugin cutover with nothing to catch it.
+#
+# So this arm DERIVES the truth from the two registries themselves and compares:
+#
+#   hooks/hooks.json                        -> every hooks/<name>.sh a command string names
+#   skills/canonical-sdlc/SKILL.md frontmatter -> the same, over its `command:` lines
+#
+# A hook in both sets is dual-channel, in one is single, in neither is on-demand. Note that
+# hooks.json's entries are counted through agent-context-guard.sh: the guard and the wall it
+# execs are both named on that command line and both ARE registered there, the wall behind
+# the guard. That is what "on both channels" means on the three files that carry it.
+#
+# EVERY `# Registered ` line in the file must agree, not just the first. agent-context-guard
+# carried two — a true one and a stale one — and a first-match test would have read whichever
+# came first and called it settled.
+derived_channel_mismatches() {  # <hooks-dir> <skill-md> -> one line per mismatch
+  local hooks_dir="$1" skill_md="$2" json="$1/hooks.json"
+  local h name json_set skill_set want line bad
+
+  json_set=" $($G -oE 'hooks/[a-z0-9-]+\.sh' "$json" 2>/dev/null | sort -u | tr '\n' ' ')"
+  skill_set=" $(awk 'NR>1 && /^---[[:space:]]*$/ {exit} {print}' "$skill_md" \
+                 | $G -oE 'hooks/[a-z0-9-]+\.sh' | sort -u | tr '\n' ' ')"
+
+  for h in "$hooks_dir"/*.sh; do
+    [ -f "$h" ] || continue
+    name="hooks/${h##*/}"
+    case "$json_set" in
+      *" $name "*)
+        case "$skill_set" in
+          *" $name "*) want='^# Registered on both channels' ;;
+          *)           want='^# Registered always-on in hooks/hooks\.json' ;;
+        esac ;;
+      *)
+        case "$skill_set" in
+          *" $name "*) want='^# Registered in skills/canonical-sdlc/SKILL\.md' ;;
+          *)           want='^# Registered on no channel' ;;
+        esac ;;
+    esac
+    bad=""
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      printf '%s\n' "$line" | $G -qE "$want" || bad="$line"
+    done <<< "$($G -E '^# Registered ' "$h" || true)"
+    if [ -z "$($G -E '^# Registered ' "$h" || true)" ]; then
+      bad="(no '# Registered' line at all)"
+    fi
+    [ -n "$bad" ] && printf '%s: derived %s, header says: %s\n' "${h##*/}" "$want" "$bad"
+  done
+}
+
+CHANNEL_MISMATCHES=$(derived_channel_mismatches "$BIONIC_HOOKS_DIR" "${REPO}/skills/canonical-sdlc/SKILL.md")
+if [ -z "$CHANNEL_MISMATCHES" ]; then
+  ok "every hooks/*.sh header channel line matches the channel the registries actually give it"
+else
+  no "every hooks/*.sh header channel line matches the channel the registries actually give it"
+  printf '%s\n' "$CHANNEL_MISMATCHES" | sed 's/^/       /'
+fi
+
+# THE MUTATION PROOF, because an agreement test that agrees with everything is what B3 was.
+# Plant the critic's exact false claim — execution-recorder.sh is SKILL-only, relabelled as
+# always-on in hooks.json — on a throwaway copy of the tree, and the arm above has to fire.
+B4_TREE=$(mktemp -d "${TMPDIR:-/tmp}/b4-channel-mutation.XXXXXX")
+cp "$BIONIC_HOOKS_DIR"/*.sh "$BIONIC_HOOKS_DIR"/hooks.json "$B4_TREE"/ 2>/dev/null
+sed -i.bak 's|^# Registered in skills/canonical-sdlc/SKILL\.md frontmatter.*|# Registered always-on in hooks/hooks.json; runs from the mounted plugin payload.|' \
+  "$B4_TREE/execution-recorder.sh"
+rm -f "$B4_TREE"/*.bak
+if $G -qE '^# Registered always-on in hooks/hooks\.json' "$B4_TREE/execution-recorder.sh"; then
+  ok "  B4 meta: the planted false channel claim landed on the throwaway copy"
+else
+  no "  B4 meta: the planted false claim did NOT land — the arm below proves nothing"
+fi
+B4_MUTATED=$(derived_channel_mismatches "$B4_TREE" "${REPO}/skills/canonical-sdlc/SKILL.md")
+if printf '%s' "$B4_MUTATED" | $G -q 'execution-recorder.sh'; then
+  ok "  B4 meta: the derived comparison FIRES on the planted false claim (B3 stayed green on it)"
+else
+  no "  B4 meta: the derived comparison did not fire on the planted false claim — it is as blind as B3"
+fi
+rm -rf "$B4_TREE"
+
 # ---- and the positive form: each command constant resolves from "$0" ----
 #
 # Asserting only the absence would pass if a constant were deleted outright. These pin what

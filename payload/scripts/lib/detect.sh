@@ -535,30 +535,6 @@ detect_plugin_registered() {
   return 0
 }
 
-# ─── The installed plugin root ───────────────────────────────────────────────
-#
-# WHERE THE PLUGIN ACTUALLY IS, answered out of the CLI's own record rather than guessed.
-#
-# THE PROBLEM THIS RETIRES. Payload-native scripts are typed into a model's own shell as
-# often as they are registered as commands, and `${CLAUDE_PLUGIN_ROOT}` is substituted only
-# in the latter. The old spelling covered the gap with `${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}`
-# — which always resolves, and resolves to a bootstrap-era copy that can be an OLDER BUILD
-# than the plugin the CLI loaded. A stale hook that runs is worse than a missing one: it
-# enforces a doctrine nobody is following and reports success doing it.
-#
-# THE ORACLE IS THE REGISTRY, ratified 2026-08-19 (design ledger D-B). Not because we own
-# it — we do not, its schema is CLI-internal — but because it is the same record the CLI
-# itself loads from, which is the only property that makes an answer here true. The schema
-# being someone else's is why the parse is pinned by tests and why an unreadable file
-# REFUSES instead of degrading.
-#
-# THIS IS THE ONE FUNCTION IN THIS FILE THAT DOES NOT ANSWER `unknown`, and the deviation is
-# the point. Every other fact here feeds a REPORT, where "I could not tell" is a legitimate
-# and useful value. This one feeds a PATH that something is about to execute, and there is
-# no honest degraded form of that: a caller handed a plausible directory cannot tell it
-# apart from a resolved one. So the contract is: the absolute installPath on stdout and exit
-# 0, or NOTHING on stdout, a named fix on stderr, and exit 1. No fallback exists anywhere in
-# this function, deliberately — including the one it was written to replace.
 # ─── THE PARSE ──────────────────────────────────────────────────────────────
 #
 # ONE reading of the registry's schema, for ANY plugin name. Generalized at W5 Step-6
@@ -661,10 +637,22 @@ detect_plugin_install_path() {  # <plugin-name>
 # enforces a doctrine nobody is following and reports success doing it.
 #
 # THE ORACLE IS THE REGISTRY, ratified 2026-08-19 (design ledger D-B). Not because we own
-# it — we do not, its schema is CLI-internal — but because it is the same record the CLI
-# itself loads from, which is the only property that makes an answer here true. The schema
-# being someone else's is why the parse is pinned by tests and why an unreadable file
-# REFUSES instead of degrading.
+# it — we do not, its schema is CLI-internal — but because it is the record the CLI's own
+# install wrote, which is the only property that makes an answer here true.
+#
+# AND THAT HOLDS BY TWO DIFFERENT ROUTES, which is worth a sentence because the difference
+# is what a stale-looking root turns on (measured W5 S7 §4.1/4.2). On a GIT-SOURCE feed —
+# the public install — the cache directory the registry names is exactly what the CLI
+# loads, so the registry is right by construction. On a DIRECTORY-SOURCE MARKETPLACE — a
+# local checkout registered as a feed, which is what every dogfood install is — the CLI
+# reads the marketplace SOURCE tree and never opens that cache at all; the two are the same
+# build only as of the last (re)install, and a reinstall is what re-converges them. The
+# answer this function gives is correct on both paths. What differs is what a divergence
+# means: on the first there cannot be one, on the second it means the source tree has moved
+# since the install.
+#
+# The schema being someone else's is why the parse is pinned by tests and why an unreadable
+# file REFUSES instead of degrading.
 #
 # THIS IS THE ONE FUNCTION IN THIS FILE THAT DOES NOT ANSWER `unknown`, and the deviation is
 # the point. Every other fact here feeds a REPORT, where "I could not tell" is a legitimate
@@ -700,6 +688,78 @@ detect_plugin_root() {
     *) _detect_plugin_root_refuse "no bionic entry in ${reg}, or the registry could not be read — bionic is not installed." ;;
   esac
   return 1
+}
+
+# ─── The installed build vs this repo's tip ──────────────────────────────────
+#
+# WHICH COMMIT IS ACTUALLY RUNNING, asked of a machine that is developing the plugin it is
+# running. The CLI records the commit each install came from (`gitCommitSha`); a checkout
+# knows its own HEAD; nothing until now compared them. Epic-17 W5 paid for that twice —
+# once at Step 5 and again at the Step-6 tip, 20 files apart — with a green suite, green
+# walls and a doctor reporting a healthy machine each time, because every one of those
+# reads the REPO while the harness runs the INSTALL.
+#
+# REPORTS, NEVER POLICES — the posture of the agent-files line, and for the same reason: an
+# install behind the tip is a completely ordinary state (you have not reinstalled since your
+# last commit), and a doctor that treated it as a fault would cry wolf on every developer
+# machine between two commits. So: one line, four states, no exit-code effect, no repair.
+#
+# `unknown` IS THE ORDINARY ANSWER FOR ORDINARY USERS, and it is correct rather than
+# apologetic. Installed from the public feed, there is no repo to compare against, and the
+# question genuinely has no answer here. Every `unknown` carries its cause, like every
+# other one in this file.
+#
+# TWO STATES FOR "NOT THE TIP", because they take different actions. `lag` — the recorded
+# sha IS a commit in this repo — means reinstall and you are current. `not-in-repo` means
+# the installed build came from somewhere this checkout has never seen, and reinstalling
+# would change what is running rather than refresh it.
+#
+# NO jq, NO ANSWER: unlike the installPath parse, there is no awk fallback here. That one
+# has a caller that must resolve a PATH or refuse; this one feeds a report line, where
+# `unknown` with a named cause is a legitimate value and a second hand-rolled reading of
+# someone else's schema is not worth its weight.
+DETECT_PLUGIN_SHA_JQ='.plugins // {} | to_entries[] | select(.key | split("@")[0] == $n) | .value[0].gitCommitSha // empty'
+
+detect_registry_sha_lag() {  # [<repo-dir>] -> one line, always exit 0
+  local dir="${1:-$PWD}" reg sha head
+
+  reg="$(_detect_installed_plugins_file)"
+  if [ ! -f "$reg" ]; then
+    echo "plugin:registry-sha state=unknown registry=- repo=- cause=no plugin registry at ${reg}"
+    return 0
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "plugin:registry-sha state=unknown registry=- repo=- cause=jq is not on PATH, so the registry cannot be read"
+    return 0
+  fi
+
+  sha="$(jq -r --arg n bionic "$DETECT_PLUGIN_SHA_JQ" "$reg" 2>/dev/null | head -1)"
+  case "$sha" in
+    ''|null)
+      echo "plugin:registry-sha state=unknown registry=- repo=- cause=the registry's bionic entry records no gitCommitSha"
+      return 0 ;;
+  esac
+
+  if ! command -v git >/dev/null 2>&1; then
+    echo "plugin:registry-sha state=unknown registry=${sha} repo=- cause=git is not on PATH, so this tree's tip cannot be read"
+    return 0
+  fi
+
+  head="$( cd "$dir" 2>/dev/null && git rev-parse HEAD 2>/dev/null )"
+  case "$head" in
+    ''|*[!0-9a-f]*)
+      echo "plugin:registry-sha state=unknown registry=${sha} repo=- cause=not run inside a git repository, so there is no tip to compare against"
+      return 0 ;;
+  esac
+
+  if [ "$head" = "$sha" ]; then
+    echo "plugin:registry-sha state=match registry=${sha} repo=${head} cause=-"
+  elif ( cd "$dir" 2>/dev/null && git cat-file -e "${sha}^{commit}" 2>/dev/null ); then
+    echo "plugin:registry-sha state=lag registry=${sha} repo=${head} cause=-"
+  else
+    echo "plugin:registry-sha state=not-in-repo registry=${sha} repo=${head} cause=-"
+  fi
+  return 0
 }
 
 # ─── Half-uninstalled ────────────────────────────────────────────────────────

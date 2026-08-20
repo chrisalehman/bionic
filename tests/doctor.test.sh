@@ -1123,6 +1123,88 @@ expect_eq "doctor.sh opens the plugin registry file nowhere in its own code" "" 
 
 # ---------------------------------------------------------------------------
 echo ""
+echo "=== Group 15: the registry-sha divergence line (W5 critic C-6) ==="
+# ---------------------------------------------------------------------------
+#
+# THE FACT IS detect.sh's (tests/plugin-lib.test.sh Group W owns its four states). What is
+# proven HERE is that doctor RENDERS it: in PLUGIN INTEGRITY, one line, naming the state,
+# both shas when it has them, and — on the one state a user can act on — the action, inline
+# and not in the SUMMARY. That last part is the agent-files precedent applied deliberately:
+# an install behind the tip is what every developer machine looks like between two commits,
+# and a SUMMARY action line would nag on all of them.
+#
+# REAL GIT, REAL REPO. The two records this line compares are a registry file and a git
+# tip; a stubbed git would substitute the value under test. The bin dir and the repo are
+# both built by this suite, so nothing here leaves the fixture tree.
+G15_BIN="$TMP/bin-git"; mkdir -p "$G15_BIN"; cp -R "$FULL_BIN"/. "$G15_BIN"/ 2>/dev/null
+rm -f "$G15_BIN/git"
+_g="$(command -v git 2>/dev/null)" && ln -sf "$_g" "$G15_BIN/git"
+
+G15_REPO="$TMP/g15-repo"; mkdir -p "$G15_REPO"
+( cd "$G15_REPO" && git init -q . && git config user.email t@t && git config user.name t \
+  && echo one > f && git add f && git commit -qm one \
+  && echo two > f && git commit -qam two ) >/dev/null 2>&1
+G15_TIP=$( cd "$G15_REPO" && git rev-parse HEAD )
+G15_PREV=$( cd "$G15_REPO" && git rev-parse HEAD~1 )
+
+# The healthy fixture's registry, re-pointed at a commit of the fixture repo. `jq` is in the
+# base bin dir, so this is the real file the real parse reads.
+g15_set_sha() {  # <sha>
+  jq --arg s "$1" '.plugins["bionic@bionic"][0].gitCommitSha = $s' \
+    "$HEALTHY/claude-home/plugins/installed_plugins.json" > "$TMP/g15-reg.json" \
+    && cp "$TMP/g15-reg.json" "$HEALTHY/claude-home/plugins/installed_plugins.json"
+}
+
+g15_run() {  # -> stdout, run FROM the fixture repo
+  ( cd "$G15_REPO" && doctor_run "$DOCTOR_SH" "$G15_BIN" "$HEALTHY" )
+}
+
+g15_set_sha "$G15_TIP"
+G15_MATCH_OUT="$TMP/g15-match.out"; g15_run > "$G15_MATCH_OUT" 2>&1
+G15_MATCH="$(line_of "$G15_MATCH_OUT" "registry sha")"
+expect_match "the registry-sha line renders when the install is at the tip" "*match*" "$G15_MATCH"
+expect_match "…naming the sha the two agreed on" "*${G15_TIP:0:12}*" "$G15_MATCH"
+expect_contains "…inside PLUGIN INTEGRITY, where the other install facts live" \
+  "registry sha" "$(sed -n '/=== PLUGIN INTEGRITY ===/,/=== TIER STATE ===/p' "$G15_MATCH_OUT")"
+
+g15_set_sha "$G15_PREV"
+G15_LAG_OUT="$TMP/g15-lag.out"; g15_run > "$G15_LAG_OUT" 2>&1
+G15_LAG="$(line_of "$G15_LAG_OUT" "registry sha")"
+expect_match "an install behind the tip renders as lag" "*behind*" "$G15_LAG"
+expect_match "…naming the installed sha" "*${G15_PREV:0:12}*" "$G15_LAG"
+expect_match "…and the tip it is behind" "*${G15_TIP:0:12}*" "$G15_LAG"
+expect_match "…and the action, inline" "*claude plugin install bionic@bionic*" "$G15_LAG"
+expect_eq "…and exactly one such line, not one per state" "1" \
+  "$(grep -c "registry sha" "$G15_LAG_OUT" | tr -d ' ')"
+expect_eq "doctor still exits 0 with a lagging install (a diagnosis is not a failure)" "0" \
+  "$( g15_run > /dev/null 2>&1; echo $? )"
+
+# A commit this checkout has never seen is a DIFFERENT answer from lag, because reinstalling
+# would change what is running rather than refresh it.
+g15_set_sha "0123456789abcdef0123456789abcdef01234567"
+G15_FOREIGN_OUT="$TMP/g15-foreign.out"; g15_run > "$G15_FOREIGN_OUT" 2>&1
+G15_FOREIGN="$(line_of "$G15_FOREIGN_OUT" "registry sha")"
+expect_match "a foreign sha is not reported as lag" "*not a commit in this repository*" "$G15_FOREIGN"
+expect_not_match "…and is not confused with the lag wording" "*behind*" "$G15_FOREIGN"
+
+# THE ORDINARY USER'S MACHINE: no repo under the cwd at all. `unknown` with a cause is the
+# right answer, and the suite's other arms all run this way — so the healthy machine above
+# has already rendered it, and this pins that it did rather than staying silent.
+expect_match "off a repo the line still renders, as unknown with a cause" \
+  "*unknown*" "$(line_of "$H_OUT" "registry sha")"
+# The cause is RENDERED, not the word "cause": doctor's contract is that every unknown it
+# prints carries a named reason, so what is pinned is that something follows the dash.
+G15_H_LINE="$(line_of "$H_OUT" "registry sha")"
+expect_eq "…naming why it could not tell, rather than shrugging" "0" \
+  "$([ -n "${G15_H_LINE##*unknown — }" ] && [ "${G15_H_LINE##*unknown — }" != "$G15_H_LINE" ] && echo 0 || echo 1)"
+
+# The minor from the same report: an assignment nothing reads is a fact the reader assumes
+# is used. Pinned as an absence so it cannot come back with the next edit to that block.
+expect_eq "doctor.sh carries no unread HOOK_FILES_NAMES assignment" "" \
+  "$(grep -n 'HOOK_FILES_NAMES' "$DOCTOR_SH" || true)"
+
+# ---------------------------------------------------------------------------
+echo ""
 echo "========================================"
 echo "Results: $PASS/$TOTAL passed, $FAIL failed"
 echo "========================================"
