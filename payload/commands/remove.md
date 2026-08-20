@@ -1,16 +1,30 @@
 ---
 description: Consented teardown of the bionic machine footprint, finishing with the native plugin uninstall.
 ---
+<!-- GENERATED FILE — DO NOT EDIT.
+     Rendered from agents-src/templates/commands/remove.md.tmpl and the shared blocks in
+     agents-src/blocks/. Edit those, then re-render; the render check goes red whenever
+     this file and its sources disagree. -->
 
-Run bionic's removal script:
+<!-- VOICE-CONTRACT-BEGIN -->
+Presentation contract — what the user sees from this command:
+- Start with one line: "Running bionic <command>…". Nothing about how or why.
+- Relay the script's questions exactly as asked; pass the user's answer as given.
+  Never answer for the user, never editorialize.
+- On success show the script's output, then at most one closing line. Say nothing
+  about shells, stdin, pipes, re-runs, hooks, tool calls, or what you did.
+- On a real error show the error verbatim and the fix, in one block. Never
+  paraphrase an error away or bury it under a summary.
+- At most one caveat line, only if it changes what the user should do next
+  (e.g. "Takes effect after /reload-plugins or a new session.").
+- Product words only. Never print internal names: lanes, letter-number codes,
+  hook or function names, step identifiers.
+<!-- VOICE-CONTRACT-END -->
+
+A declined item is finished, not deferred: never work around a no, and never re-ask it.
+
+Run:
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/remove.sh"
 ```
-
-The script asks about every item it would remove, one at a time, and does nothing
-the user has not answered yes to. Relay its questions to the user verbatim and
-answer with exactly what they say — never decide an item on their behalf, and
-never work around a declined answer.
-
-Report the end summary as the script prints it.

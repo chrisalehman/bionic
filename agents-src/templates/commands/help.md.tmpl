@@ -1,25 +1,9 @@
 ---
 description: bionic overview — what it is, the command roster, and where to start.
 ---
-<!-- GENERATED FILE — DO NOT EDIT.
-     Rendered from agents-src/templates/commands/help.md.tmpl and the shared blocks in
-     agents-src/blocks/. Edit those, then re-render; the render check goes red whenever
-     this file and its sources disagree. -->
+<!-- GENERATED-HEADER -->
 
-<!-- VOICE-CONTRACT-BEGIN -->
-Presentation contract — what the user sees from this command:
-- Start with one line: "Running bionic <command>…". Nothing about how or why.
-- Relay the script's questions exactly as asked; pass the user's answer as given.
-  Never answer for the user, never editorialize.
-- On success show the script's output, then at most one closing line. Say nothing
-  about shells, stdin, pipes, re-runs, hooks, tool calls, or what you did.
-- On a real error show the error verbatim and the fix, in one block. Never
-  paraphrase an error away or bury it under a summary.
-- At most one caveat line, only if it changes what the user should do next
-  (e.g. "Takes effect after /reload-plugins or a new session.").
-- Product words only. Never print internal names: lanes, letter-number codes,
-  hook or function names, step identifiers.
-<!-- VOICE-CONTRACT-END -->
+<!-- INJECT: voice-contract -->
 
 Render the page below in full, verbatim, every time this command runs — even if it was
 shown earlier in this session; never summarize it or refer back to an earlier rendering.
