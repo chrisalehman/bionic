@@ -90,17 +90,15 @@ run "cross-gate-agreement.test.sh" bash tests/cross-gate-agreement.test.sh
 run "fail-direction-table.test.sh" bash tests/fail-direction-table.test.sh
 # Epic-17 wave-01 slice S1: bionic plugin manifest + marketplace manifest + LICENSE.
 run "plugin-manifest.test.sh" bash tests/plugin-manifest.test.sh
-# hooks/hooks.json (plugin-format manifest, epic-17 wave-01 slice 2) is also
-# a cross-COMPONENT proof — it pins against claude-bootstrap.sh's
-# MANAGED_HOOKS array, not any single hook script.
 # Harness-on-harness (epic-17 W1). Pins the assertion helpers every suite above
 # hand-copies: under pipefail, `printf "$haystack" | grep -q` is a SIGPIPE race
 # that reports a present needle as missing and an absent-check as green. Also
 # hand-listed, same reason as the two lines above.
 run "assert-helper-race.test.sh" bash tests/assert-helper-race.test.sh
 # Cross-FILE proof (epic-17 W1 S3): the plugin-layout path rewrite, and the near-identical
-# state paths it must not have touched. Spans SKILL.md, hooks/ and claude-bootstrap.sh, so
-# like the two above it belongs to no single hook and must stay hand-listed.
+# state paths it must not have touched. Spans SKILL.md, hooks/ and the payload's own
+# registration surfaces, so like the two above it belongs to no single hook and must stay
+# hand-listed.
 run "plugin-paths.test.sh" bash tests/plugin-paths.test.sh
 # Cross-FILE proof (epic-17 W1 S6): the payload boundary — what the plugin ships and, more
 # to the point, what it must NOT. Pins marketplace.json's source field against the payload/

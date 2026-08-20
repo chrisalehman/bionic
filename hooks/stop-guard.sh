@@ -41,7 +41,7 @@
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
 # [WALL: tests/stop-guard.test.sh]
 #
-# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
+# Registered in skills/canonical-sdlc/SKILL.md frontmatter; live only while that skill is armed.
 
 set -uo pipefail
 

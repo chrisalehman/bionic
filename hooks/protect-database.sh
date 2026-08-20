@@ -4,7 +4,7 @@
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
 # Catches DROP, TRUNCATE, DELETE without WHERE, and ALTER TABLE...DROP
 # via psql, mysql, sqlite3, and other common DB CLIs.
-# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
+# Registered always-on in hooks/hooks.json; runs from the mounted plugin payload.
 
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')

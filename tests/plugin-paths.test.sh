@@ -45,8 +45,10 @@ no()  { echo "FAIL: $1"; FAIL=$((FAIL + 1)); }
 
 # The two spellings of the installed-hooks directory that a command literal can carry.
 # `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/` is deliberately NOT here: it is the
-# exotic-invocation fallback at dispatch-preflight.sh:302, which stays correct for as long
-# as claude-bootstrap.sh keeps installing to that directory (through W5).
+# exotic-invocation fallback at dispatch-preflight.sh:302, a distinct branch the gate takes
+# only when `$0` fails to locate its own sibling. Whether that branch still resolves to
+# anything now that the installer is gone is dispatch-preflight's question, not this wall's;
+# what this wall bans is the two spellings a COMMAND literal can carry.
 FORBIDDEN='~/\.claude/hooks/|\$HOME/\.claude/hooks/'
 
 # ============================================================
@@ -149,11 +151,14 @@ echo ""
 echo "=== B — the payload: no installed-path literal on any executable or normative line ==="
 # ============================================================
 #
-# Comments are exempt and only comments are. `# Installed globally by claude-bootstrap.sh to
-# ~/.claude/hooks/` is TRUE for as long as the bootstrap is the live install mechanism, which
-# this epic keeps through W5 — rewriting it in W1 would replace a true statement with a
-# false one. What may not survive is a literal on a line that RUNS or that the machinery
-# PRINTS as a command to run.
+# Comments are exempt and only comments are. The exemption was written in W1 around a
+# header — `# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/` — that was TRUE
+# while the bootstrap was the live install mechanism, so rewriting it then would have
+# replaced a true statement with a false one. W5 (4/6) deleted the installer and the Step-6
+# review (RV-1) swept all 13 copies onto the real channel; B3 below now pins that they stay
+# swept. The exemption itself survives on its own terms: what may not live on ANY line,
+# comment or not, is a literal on a line that RUNS or that the machinery PRINTS as a command
+# to run — and B1 is still the arm that decides that.
 
 check_script_at() {  # <absolute-path> <label>
   local file="$1" rel="$2" hits
@@ -243,6 +248,45 @@ if [ -z "$PROSE_HITS" ]; then
 else
   no "payload prose carries no installed-path literal at all"
   printf '%s' "$PROSE_HITS"
+fi
+
+# ---- B3: the swept install-channel header never comes back ----
+#
+# RV-1 (Step-6 review, W5). Thirteen hook files carried `# Installed globally by
+# claude-bootstrap.sh to ~/.claude/hooks/`. The B1 comment exemption above is what let the
+# line survive W1-W4 correctly — it was TRUE then — and it is also what would let it survive
+# now that 4/6 deleted the installer and made it FALSE. A comment exemption cannot tell a
+# true comment from a stale one, so the staleness needs its own arm.
+#
+# ABSENCE of the dead literal, over the same payload set B1 and B2 derive, plus tests/.
+# Deliberate historical notes are allowed to NAME the installer — several suites do, and
+# must, to explain what they retired — so the pin is the full header sentence, which is a
+# claim about the live mechanism and nothing else.
+SWEPT_HEADER='Installed globally by claude-bootstrap.sh to'
+SWEPT_HITS=$(printf '%s\n' "$PAYLOAD_TEXT" | while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  $G -nF -- "$SWEPT_HEADER" "$f" 2>/dev/null | sed "s|^|${f#${REPO}/}:|" || true
+done)
+if [ -z "$SWEPT_HITS" ]; then
+  ok "no payload file claims the deleted installer as its install channel"
+else
+  no "no payload file claims the deleted installer as its install channel"
+  printf '%s\n' "$SWEPT_HITS" | sed 's/^/       /'
+fi
+
+# And the POSITIVE form, because an absence alone passes if the header is simply deleted:
+# every registered hook has to SAY which channel registers it. The set is globbed, not
+# enumerated — same argument as B1's.
+MISSING_CHANNEL=""
+for _h in "${BIONIC_HOOKS_DIR}"/*.sh; do
+  [ -f "$_h" ] || continue
+  $G -qE '^# Registered (always-on in hooks/hooks\.json|in skills/canonical-sdlc/SKILL\.md|on both channels|on no channel)' "$_h" \
+    || MISSING_CHANNEL="${MISSING_CHANNEL}${_h##*/} "
+done
+if [ -z "$MISSING_CHANNEL" ]; then
+  ok "every hooks/*.sh names its registration channel in its header"
+else
+  no "every hooks/*.sh names its registration channel in its header (missing: ${MISSING_CHANNEL})"
 fi
 
 # ---- and the positive form: each command constant resolves from "$0" ----
