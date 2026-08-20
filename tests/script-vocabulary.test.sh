@@ -89,7 +89,6 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 # ---------------------------------------------------------------------------
 
 EXEMPTIONS="$(cat <<'EXEMPT'
-doctor.sh|' lane name present version constraint verdict|the dependency table's column header prints the word `lane`, and the column BELOW it prints the 3a/3b values `dep_field <row> lane` returns. Renaming the header alone would leave it labelling values it does not describe, so the fix is a data change (read `class` instead) inside doctor's own rendering — assigned to S6 by tests/doctor.test.sh:437-439 and plan assumption A-4.S3.7, both written before this slice.
 doctor.sh|set -o pipefail; curl|the half-uninstalled SUMMARY prints a command for the user to PASTE, and the wrapper is the fix half of a real error: without it `curl … | bash` reports bash's status, so a 404 leaves a command that looked like it worked and removed nothing (doctor.sh's own note above the line). The fixture's header excludes "the fix half of a real error message" from what the list is for; dropping the wrapper would change what the command does, not how it reads.
 EXEMPT
 )"
@@ -297,7 +296,7 @@ while IFS= read -r row; do
     grep -qF -- "$ex_needle" "${REPO}/payload/scripts/${ex_script}"
 done <<< "$EXEMPTIONS"
 
-expect_eq "there are exactly two exemptions" "2" \
+expect_eq "there is exactly one exemption (the lane header exemption retired when S6 landed the class column)" "1" \
   "$(printf '%s\n' "$EXEMPTIONS" | grep -c '|')"
 
 # ---------------------------------------------------------------------------
