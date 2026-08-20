@@ -6,7 +6,7 @@
 # order it comes back off in. One item at a time, each one announced before it is
 # asked about and asked about before it happens: the legacy `.zshrc` alias block,
 # the `CLAUDE_CODE_ENABLE_TODO_TOOLS` export, legacy-channel managed-hook entries in
-# settings, the permission marker block, lane-3b dependency installs, the plugin
+# settings, the permission marker block, the tools it installed, the plugin
 # data directory — and then the native plugin uninstall as the finisher.
 #
 # THE NEVER-LIST IS NOT A PREFERENCE. Three classes are excluded from removal and
@@ -121,6 +121,13 @@ RM_LEGACY_HOOK_SUBSTR='.claude/hooks/'
 # would recursively delete directories nobody has decided about, which is a larger defect
 # than the one it fixes.
 RM_LEGACY_SKILL_NAME='canonical-sdlc'
+# from deps.sh (BIONIC_DEFAULT_PERMISSION_MODE): the default permission mode
+# setup offers to write. In payload mode the OWNER's value is what this script
+# compares against — read at call time, below the source — and this fallback is
+# for the standalone door alone, where there is no deps.sh to read. It is pinned
+# to the original by tests/remove.test.sh, like every other literal here.
+_rm_default_mode() { echo "${BIONIC_DEFAULT_PERMISSION_MODE:-auto}"; }
+
 # from profile.sh: the sentinels bracketing the block bionic owns
 RM_PROFILE_BEGIN_PREFIX='Bash(: bionic-profile-begin version='
 RM_PROFILE_END='Bash(: bionic-profile-end)'
@@ -270,10 +277,13 @@ _rm_purge_dir() {  # <dir>
 
 echo ""
 echo "bionic remove — consented teardown of the machine footprint"
+# WHAT THIS LINE IS FOR (R-1). `mode: payload` named one of this script's own
+# branches at a user who has no way to know it has branches. What the line has to
+# answer is whether the teardown in front of them is the whole teardown.
 if [ "$RM_MODE" = "payload" ]; then
-  echo "mode: payload — the plugin's libraries are beside this script"
+  echo "running from the plugin — the full teardown is available."
 else
-  echo "mode: standalone — the payload libraries are not beside this script"
+  echo "running standalone — bionic's own files are not beside this script, so a few items can only be reported."
 fi
 echo ""
 
@@ -530,7 +540,8 @@ echo ""
 
 # ─── Item: the default permission mode ───────────────────────────────────────
 #
-# setup.sh's permission-mode step can write `.permissions.defaultMode = "auto"`
+# setup.sh's permission-mode step can write `.permissions.defaultMode` — the
+# value is deps.sh's, read here rather than spelled again (six-axis review D-1) —
 # OUTSIDE the marker block stripped above — a preference of the machine's, not
 # one of bionic's rendered rules (A-4.S5.6) — so that strip does not touch it
 # and a machine torn down after answering yes to that question keeps
@@ -547,10 +558,11 @@ echo ""
 # rather than guessing either way.
 
 echo "default permission mode:"
+rm_mode_value="$(_rm_default_mode)"
 if ! _rm_have jq; then
   _rm_leftover "jq is required to read ${RM_SETTINGS} — the default permission mode was not checked"
-elif [ -f "$RM_SETTINGS" ] && [ "$(jq -r '.permissions.defaultMode // ""' "$RM_SETTINGS" 2>/dev/null)" = "auto" ]; then
-  if _rm_consent "Reset Claude Code's default permission mode? bionic set it to auto at setup."; then
+elif [ -f "$RM_SETTINGS" ] && [ "$(jq -r '.permissions.defaultMode // ""' "$RM_SETTINGS" 2>/dev/null)" = "$rm_mode_value" ]; then
+  if _rm_consent "Reset Claude Code's default permission mode? bionic set it to ${rm_mode_value} at setup."; then
     rm_mode_nl=0
     # shellcheck disable=SC2154  # set by printf -v inside _rm_slurp_into
     _rm_slurp_into rm_mode_text "$RM_SETTINGS" && case "$rm_mode_text" in *$'\n') rm_mode_nl=1 ;; esac
@@ -568,16 +580,25 @@ else
 fi
 echo ""
 
-# ─── Item: lane-3b dependency installs ───────────────────────────────────────
+# ─── Item: the tools bionic installed ────────────────────────────────────────
 #
 # The table is the payload's, and there is no second copy of it — so this item
 # exists only in payload mode, and standalone says exactly that instead of
 # pretending the machine is clean.
 #
-# `remove_dep` is the SSoT for what happens to a dependency: `keep-shared`
-# declines with consent already given, `native-uninstall-offer` defers to the
-# finisher below, and only `remove-on-consent` rows ever reach a command. Presence
-# is asked first so a machine is not interrogated about packages it never had.
+# ENUMERATED BY CLASS: every class except `core` (six-axis review A-1). `core` is
+# the two plugins bionic DECLARES, which the uninstall and prune at the end of
+# this script take. Everything else — the substrate, the when-needed tools, the
+# extras — is a candidate here. This used to walk `dep_names_lane 3b`, the
+# retired view, whose rule was "kind != native": it dropped `impeccable`, the one
+# native row bionic does not declare, so the plugin a design route can install
+# mid-session survived a full, all-yes teardown with nothing even mentioning it.
+#
+# `remove_dep` is the SSoT for what happens to a dependency: a shared binary is
+# kept with consent already given, a plugin bionic declares is left to the
+# finisher below, a plugin nothing declares gets its own consented uninstall, and
+# only `remove-on-consent` rows reach a package-manager command. Presence is
+# asked first so a machine is not interrogated about packages it never had.
 #
 # The dep names are read on fd 3 deliberately: a `while read < <(...)` loop would
 # take the loop's stdin from the process substitution, and remove_dep's consent
@@ -589,7 +610,7 @@ if [ "$RM_MODE" != "payload" ]; then
   echo "  (reinstall bionic and run /bionic:remove for the dependency pass, or remove them by hand)"
   _rm_leftover "tool teardown was not attempted (standalone mode)"
 else
-  dep_lines="$(dep_names_lane 3b)"
+  dep_lines="$( { dep_names_class basic; dep_names_class when-needed; dep_names_class extra; } )"
   while IFS= read -r dep_name <&3; do
     [ -n "$dep_name" ] || continue
     dep_behavior="$(dep_field "$dep_name" removal_behavior)"

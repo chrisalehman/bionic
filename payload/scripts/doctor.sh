@@ -129,47 +129,97 @@ BIONIC_PLUGIN_ID="bionic@bionic"
 # a package manager waiting on its own lock, a CLI mid-update. Unbounded, the
 # diagnosis wedges with them.
 #
-# TWO MECHANISMS, ONE BOUND. `timeout` is the right tool and is not on a stock
-# macOS, so the fallback is a background job plus a poll: the same limit, reached
-# a different way. `timeout` cannot run a shell function, so a fact function goes
-# down the poll path by construction rather than by preference.
+# ONE MECHANISM, ONE BOUND: a background job in its own process group, plus a
+# poll that signals the group when the limit is up. It runs shell functions and
+# external commands alike, which `timeout(1)` cannot, and it reaches a forked
+# grandchild, which `timeout(1)` also cannot — see `_doctor_bounded` below for
+# why that second one is the difference between a bound and a bound that binds.
 #
-# KILLING IS THE POINT, so the child is started in a way that can be killed: its
-# stdout is this function's stdout (a caller's command substitution finishes the
-# moment the child dies) and its stdin is closed, so a probe can never eat the
-# answer to the question asked at the end of the report.
+# KILLING IS THE POINT, so the child is started in a way that can be killed AND
+# in a way that cannot hold the caller open: its stdout is a file this function
+# reads afterwards — never the caller's command-substitution pipe — and its stdin
+# is closed, so a probe can never eat the answer to the question asked at the end
+# of the report.
 #
 # NO `sleep`, NO BOUND — deliberately, and stated rather than hidden. On a
 # machine so bare that coreutils is missing, waiting on the probe is a better
 # failure than spinning a hot loop against it.
 _doctor_probe_seconds() { echo "${BIONIC_DOCTOR_PROBE_SECONDS:-15}"; }
 
+# WHAT A BOUND OWES, AND THE HALF THE FIRST CUT DID NOT PAY (six-axis review C-1).
+# A bound has to release the CALLER on time, not merely stop waiting on its own
+# child. The first cut did the second only, and the two come apart on exactly the
+# shape both real probes have: `brew` is a shell script that runs Ruby, `npm` a
+# shim that runs node. The child forks a grandchild, the grandchild inherits the
+# stdout it was started with — the caller's `$(…)` pipe — and killing the child
+# leaves that pipe open. Measured: `rc=124 elapsed=45s` against a three-second
+# bound. The row said "not checked" honestly and printed it forty-two seconds late.
+#
+# SO THE PROBE NEVER WRITES TO THE CALLER'S PIPE. Its stdout goes to a file that
+# this function alone reads, after the wait is over: whatever the grandchild does
+# next, it does to a file nobody is waiting on. That is what makes the bound bind.
+#
+# AND THE GROUP IS WHAT GETS SIGNALLED. `set -m` puts the job in a process group
+# of its own (pgid == pid), so `kill -TERM -$pid` reaches the grandchild too and
+# a probe that timed out is not left running on the machine afterwards. Monitor
+# mode is restored immediately: it is on for the launch, not for the script.
+#
+# ONE MECHANISM, NOT TWO. This used to hand external commands to `timeout` when
+# one existed. `timeout(1)` signals the child and not the group, so it carries
+# the same defect this function was just fixed for, and on bionic's platform it
+# never ran at all (`command -v timeout` is empty on stock macOS). A second
+# mechanism that cannot honour the contract is worse than no second mechanism.
+# Supersedes A-4.S6.5's two-mechanism note.
+#
+# THE TEMPORARY FILE IS NOT A CHANGE TO THIS MACHINE. It lives under $TMPDIR,
+# carries the pid so two doctors cannot collide, and is removed as it is read.
+# "Nothing on this machine is changed" is a claim about the user's configuration
+# — settings, plugins, dependencies — and no probe output ever reaches one.
+_DOCTOR_BOUND_SEQ=0
+
+_doctor_bound_read() {  # <file> — pass on what the probe managed to say, then forget it
+  local file="${1:-}" payload
+  # `$(<file)` is bash's own read: no `cat`, so a machine missing coreutils
+  # still gets the probe's answer rather than an empty one.
+  if [ -s "$file" ]; then payload="$(<"$file")"; printf '%s\n' "$payload"; fi
+  rm -f "$file" 2>/dev/null || true
+  return 0
+}
+
 _doctor_bounded() {  # <seconds> <command...> — passes stdout through; 124 on timeout
   local limit="${1:-15}"; shift
-  local pid waited=0
+  local pid waited=0 rc out_file had_monitor
 
-  if [ "$(type -t "${1:-}" 2>/dev/null)" = "file" ] && command -v timeout >/dev/null 2>&1; then
-    timeout "$limit" "$@" </dev/null
-    return $?
-  fi
+  _DOCTOR_BOUND_SEQ=$((_DOCTOR_BOUND_SEQ + 1))
+  out_file="${TMPDIR:-/tmp}/bionic-doctor-probe.$$.${_DOCTOR_BOUND_SEQ}"
+  : > "$out_file" 2>/dev/null || out_file="/dev/null"
 
-  "$@" </dev/null &
+  case "$-" in *m*) had_monitor=yes ;; *) had_monitor=no ;; esac
+  set -m
+  "$@" </dev/null > "$out_file" &
   pid=$!
+  [ "$had_monitor" = "yes" ] || set +m
+
   if ! command -v sleep >/dev/null 2>&1; then
-    wait "$pid"
-    return $?
+    wait "$pid"; rc=$?
+    _doctor_bound_read "$out_file"
+    return $rc
   fi
   while kill -0 "$pid" 2>/dev/null; do
     if [ "$waited" -ge "$limit" ]; then
-      kill -TERM "$pid" 2>/dev/null
+      # The group first — `-$pid` is the process group `set -m` gave this job —
+      # and the bare pid as the fallback for a kernel that refused the group.
+      kill -TERM "-${pid}" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
       wait "$pid" 2>/dev/null
+      _doctor_bound_read "$out_file"
       return 124
     fi
     sleep 1
     waited=$((waited + 1))
   done
-  wait "$pid"
-  return $?
+  wait "$pid"; rc=$?
+  _doctor_bound_read "$out_file"
+  return $rc
 }
 
 # ─── Small renderers ─────────────────────────────────────────────────────────
@@ -451,11 +501,20 @@ while IFS= read -r dep_name; do
     *)
       N_UNKNOWN=$((N_UNKNOWN + 1))
       cause="$(_doctor_unknown_cause "$kind")"
-      if [ "$kind" = "pnpm-store" ]; then
-        DEGRADATION="${DEGRADATION}  ${dep_name} presence is unknown (${cause}) → no action available; /bionic:setup re-warms the store either way"$'\n'
-      else
-        DEGRADATION="${DEGRADATION}  ${dep_name} presence is unknown (${cause}) → resolve the cause above, then re-run /bionic:doctor"$'\n'
-      fi
+      # KEYED ON THE CLASS, WHICH IS WHAT THE SENTENCE IS ABOUT (six-axis review
+      # C-2). This branch used to key on the mechanism — `pnpm-store` rows were
+      # told "/bionic:setup re-warms the store either way" — and that was true
+      # only while setup walked every non-native row. Setup now asks about
+      # `core|basic|extra` and AC-11 makes a when-needed tool nobody's to install
+      # until a route needs it, so the old clause named a command that would not
+      # touch the row. A when-needed unknown has the same non-action as a
+      # when-needed absence, and for the same reason.
+      case "$dep_class" in
+        when-needed)
+          DEGRADATION="${DEGRADATION}  ${dep_name} presence is unknown (${cause}) → no action needed; ${dep_name} is installed the first time a workflow needs it"$'\n' ;;
+        *)
+          DEGRADATION="${DEGRADATION}  ${dep_name} presence is unknown (${cause}) → resolve the cause above, then re-run /bionic:doctor"$'\n' ;;
+      esac
       ;;
   esac
 done < <(dep_names)

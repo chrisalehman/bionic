@@ -77,6 +77,22 @@ _dep_playwright_cache() {
   esac
 }
 
+# ─── The settings values bionic offers ───────────────────────────────────────
+#
+# THE DEFAULT PERMISSION MODE, OWNED HERE BECAUSE TWO SCRIPTS MUST AGREE ON IT
+# (six-axis review D-1). setup.sh offers to write it; remove.sh offers to reset
+# it, and that offer is DEFINED as "the one value bionic knows it wrote" — it
+# leaves any other value alone, because any other value is somebody else's
+# choice. So the two are one decision, and they used to be two bare literals
+# with nothing making them agree: a setup that started writing `acceptEdits`
+# would have left both suites green while the teardown quietly stopped matching
+# and the setting stayed behind on every machine.
+#
+# It is a plain variable rather than a function because remove.sh's standalone
+# door has to be able to fall back to a copy of it — see the shared literals in
+# that file, and the agreement arms in tests/remove.test.sh Group 19.
+BIONIC_DEFAULT_PERMISSION_MODE="auto"
+
 # ─── The table ───────────────────────────────────────────────────────────────
 #
 # FIELDS, in order:
@@ -184,26 +200,15 @@ dep_names_kind() {  # <native|brew-dep|npm-global|…>
   return 0
 }
 
-# DEPRECATED — the pre-wave-06 view, kept because setup.sh and remove.sh still
-# walk it and neither is this slice's to restructure (S4 and S7 retire the call
-# sites). It is a VIEW over class and kind, never a stored field:
-#   3a = the rows the harness installs  (class core)
-#   3b = the rows bionic installs itself (kind != native)
-# A native row outside `core` — impeccable — is in NEITHER list, and that is the
-# point rather than an oversight. Putting it in 3b would have setup offer a
-# when-needed tool it must not ask about (AC-11) and hand `install_dep` a row it
-# is required to refuse; putting it in 3a would have setup tell the user to
-# reinstall bionic so a dependency it never declares would resolve.
-dep_names_lane() {  # <3a|3b>
-  local want="${1:-}"
-  case "$want" in
-    3a) dep_names_class core ;;
-    3b) printf '%s\n' "$BIONIC_DEP_TABLE" | while IFS='|' read -r n _ _ _ _ kind _; do
-          [ -n "$n" ] && [ "$kind" != "native" ] && echo "$n"
-        done ;;
-  esac
-  return 0
-}
+# RETIRED — `dep_names_lane` (wave-06 S10, six-axis review A-1). S3 kept the
+# pre-wave-06 lane list as a deprecated view because setup.sh and remove.sh still
+# walked it; S4 retired setup's call and remove.sh now walks the CLASSES, so
+# nothing enumerates by lane any more. The list was never a stored field — it was
+# "class core" and "kind != native" under two old names — and keeping it meant a
+# second live taxonomy over one table, which is how the teardown came to be
+# computed as `kind != native` and silently miss the one native row outside core.
+# tests/plugin-lib.test.sh Group 3b pins the removal and states the set that
+# replaced it. The lane FIELD stays: see `dep_field` below.
 
 dep_row() {  # <name> — the whole row, verbatim. Non-zero if there is no such row.
   local want="${1:-}" line
@@ -226,9 +231,10 @@ dep_field() {  # <name> <field>
     constraint)          printf '%s\n' "$f_con" ;;
     kind|install_fn_or_check)      printf '%s\n' "$f_kind" ;;
     removal_behavior)    printf '%s\n' "$f_rem" ;;
-    # DEPRECATED, derived, and consistent with `dep_names_lane` by
-    # construction — the same rule computed the same way, so the field and the
-    # list can never disagree about a row. detect.sh is its only caller.
+    # DEPRECATED and derived — never a stored column. detect.sh's fact line is
+    # its one caller and renders it verbatim; the LIST that used to compute the
+    # same rule is retired (see above), so this is now the only place the old
+    # taxonomy is spoken at all.
     lane)
       if [ "$f_class" = "core" ]; then printf '3a\n'
       elif [ "$f_kind" != "native" ]; then printf '3b\n'
@@ -636,6 +642,29 @@ install_plugin_native() {  # <name>
 
 # ─── Remove ──────────────────────────────────────────────────────────────────
 
+# THE COUNTERPART TO `install_plugin_native`, and it exists because the installer
+# shipped without one (six-axis review A-2). Same shape, same rule, opposite
+# direction: the plan is printed before the question and run after it, from the
+# same string, and `--yes` suppresses the CLI's second prompt about a decision
+# this function has already had with the user — never the first one.
+#
+# NO PRESENCE CHECK HERE. The caller establishes presence (remove.sh asks
+# `check_dep` before it walks a row), exactly as it does for every other kind:
+# a function that re-probed would be a second opinion about a fact the table
+# already owns.
+remove_plugin_native() {  # <name>
+  local name="${1:-}" marketplace id
+  [ -n "$name" ] || { echo "deps.sh: remove_plugin_native needs a plugin name" >&2; return 1; }
+  marketplace="${BIONIC_DEP_MARKETPLACE:-bionic}"
+  id="${name}@${marketplace}"
+
+  echo "  ${name}: bionic would run: claude plugin uninstall ${id} --yes"
+  _dep_consent "  Remove ${name} now?" || { echo "  declined — ${name} left in place."; return 1; }
+
+  claude plugin uninstall "$id" --yes || return 1
+  return 0
+}
+
 _dep_remove_argv() {  # <name> — one token per line
   local name="$1" mech target
   mech="$(dep_field "$name" install_fn_or_check)"
@@ -655,12 +684,33 @@ remove_dep() {  # <name>
 
   case "$behavior" in
     keep-shared)
-      echo "  ${name}: keep-shared — bionic ensured this binary but does not own it; leaving it in place."
+      # R-1: `keep-shared` is this table's word for the policy, not the user's.
+      # What reaches the terminal is what was decided and why.
+      echo "  ${name}: kept — shared with other tools, bionic never removes it."
       return 0
       ;;
     native-uninstall-offer)
-      echo "  ${name}: removed by the plugin uninstall, not here."
-      return 0
+      # TWO NATIVE BEHAVIOURS, NOT ONE (six-axis review A-2). Both kinds of row
+      # are plugins the CLI installed, and that is where the resemblance ends.
+      #
+      #   a row bionic DECLARES (class core, in plugin.json's dependencies):
+      #     removing bionic removes it — the uninstall and prune at the end of
+      #     the teardown are what take it, and asking here would be a second
+      #     question about one decision.
+      #
+      #   a row bionic does NOT declare (impeccable, class when-needed):
+      #     `install_plugin_native` can put it on a machine mid-session from a
+      #     route's offer, and A-3.1 rules that the marketplace entry declares no
+      #     dependency. Nothing else will ever remove it. This branch used to
+      #     tell that user their plugin uninstall would take it, which was false
+      #     by construction and left the plugin behind after a full, all-yes
+      #     teardown.
+      if [ "$(dep_field "$name" class)" = "core" ]; then
+        echo "  ${name}: bionic declares this plugin, so removing bionic removes it too."
+        return 0
+      fi
+      remove_plugin_native "$name"
+      return $?
       ;;
   esac
 
