@@ -191,6 +191,49 @@ fi
 
 # ---------------------------------------------------------------------------
 echo ""
+echo "=== C2 — the two consenting commands relay one question at a time (critic F-1/F-2) ==="
+# ---------------------------------------------------------------------------
+#
+# THE DEFECT THESE PIN AGAINST is model behaviour, exactly like §C's: the answer
+# channel these scripts read is positional, so a model told only "pass the user's
+# answer as given" has one mechanism available and nothing telling it how the
+# mechanism behaves — and improvising it consents to whichever question came
+# first. The instruction is the fix, so the instruction is what a hermetic suite
+# can pin. tests/command-permissions.test.sh owns whether the invocation the
+# instruction names is authorised; this owns whether it is there and what it says.
+#
+# help.md and doctor.md are deliberately out: neither asks the user for anything.
+
+for c in setup remove; do
+  f="$COMMANDS_DIR/$c.md"
+  if [ ! -f "$f" ]; then
+    no "payload/commands/$c.md exists (§C2)"
+    continue
+  fi
+  t="$(cat "$f")"
+
+  expect_contains "$c.md: says to run the script once, with no flags" \
+    "with no flags" "$t"
+  expect_contains "$c.md: says to relay each question word for word" \
+    "word for word" "$t"
+  expect_contains "$c.md: says to relay them one at a time" \
+    "one at a time" "$t"
+  expect_contains "$c.md: forbids answering for the user" \
+    "Never answer" "$t"
+  expect_contains "$c.md: names the one-item route by flag" \
+    "--only" "$t"
+  expect_contains "$c.md: …with the answer delivered to it" \
+    "printf 'y" "$t"
+  expect_contains "$c.md: names where the item names come from" \
+    "--list" "$t"
+  expect_contains "$c.md: a no is finished, never worked around" \
+    "never work around" "$t"
+  expect_contains "$c.md: …and never re-asked" \
+    "never re-ask" "$t"
+done
+
+# ---------------------------------------------------------------------------
+echo ""
 echo "=== D — no internal vocabulary on the command surface (AC-6) ==="
 # ---------------------------------------------------------------------------
 
