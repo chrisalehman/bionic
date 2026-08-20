@@ -8,19 +8,13 @@ paths:
 Anchors for the recurring traps when changing hooks in `bionic/hooks/`. Migrated from
 `.bionic/memory/hooks-rules.md` (epic-12 wave-01 slice 6) with the correction ledger applied.
 
-## CI + bootstrap registration
+## Registration
 
-> **STALENESS NOTICE (self-retiring, ADR-003 pattern — see
-> `.bionic/docs/adrs/epic-17-plugin-conversion/adr-003-self-retiring-transitional-tests.md`
-> for the precedent this follows).** One clause of this section is bootstrap-era: the
-> `MANAGED_HOOKS` array, which lives in `claude-bootstrap.sh` and describes how a hook gets
-> installed into `~/.claude/hooks/`. **Retirement trigger: W5's deletion of
-> `claude-bootstrap.sh`.** When that lands, the `MANAGED_HOOKS` entry drops out of the
-> registration list below and the plugin-era `hooks/hooks.json` path (live since W3) is the
-> whole story. Everything else here — the run-line requirement, the test pairing, and the
-> rest of this file (false-positive traps, MCP dependency traps, hook-writing discipline) —
-> is NOT bootstrap-era and survives untouched. Added epic-17 W4 S4, 2026-08-18; re-scoped
-> W4 remediation fold after the glob claim below was corrected.
+*(The `MANAGED_HOOKS` clause retired here at epic-17 W5, 4/8. Its own staleness notice
+named the trigger — W5's deletion of `claude-bootstrap.sh` — and that fired in 4/6. The
+array described how the installer copied a hook into the machine's own hooks directory;
+the payload's `hooks/hooks.json`, live since W3, is the whole story now. The rest of this
+section, and of this file, was never bootstrap-era and is unchanged.)*
 
 - **STALE-CORRECTED 2026-07-20 (wave-02): there is NO CI — `.github/workflows/` does not
   exist** (CI excised 2026-06-27, "no CI by design"; the old file-listed ci.yml rule is dead).
@@ -28,14 +22,17 @@ Anchors for the recurring traps when changing hooks in `bionic/hooks/`. Migrated
   the hook tests out of `hooks/` into `tests/` and retired the `hooks/*.test.sh` glob-pick;
   `tests/run.sh` now hand-lists all 42 suites by name and discovers nothing.)* Registration
   coverage for a new hook is partly structural and partly manual. Structural:
-  `tests/scripts.test.sh` 4a/4b/4c enforce hook↔test pairing and `MANAGED_HOOKS` existence.
-  Manual, and enforced by nothing: the suite's own `run` line in `tests/run.sh`. **Adding a
-  hook = source file + `.test.sh` sibling + `MANAGED_HOOKS` entry + a `run "<name>.test.sh"`
-  line in `tests/run.sh`.** Omit that last one and 4a still passes — the pairing exists — but
-  the suite never executes and the gate stays green over nothing. Several suites defend
-  themselves by grepping `tests/run.sh` for their own `run` line as an assertion
-  (`tests/doctor.test.sh:907` is the pattern to copy); no arm checks the set as a whole, so
-  a new suite that skips both the `run` line and the self-check is invisible.
+  `tests/scripts.test.sh` 4a/4b/4c enforce hook↔test pairing and — for an always-on wall —
+  that every command in the payload's `hooks/hooks.json` names a file that exists and is
+  rooted at `${CLAUDE_PLUGIN_ROOT}`. Manual, and enforced by nothing: the suite's own `run`
+  line in `tests/run.sh`. **Adding a hook = source file + `.test.sh` sibling + a registration
+  (`hooks/hooks.json` for an always-on wall, the skill's own frontmatter for an armed-session
+  one) + a `run "<name>.test.sh"` line in `tests/run.sh`.** Omit that last one and 4a still
+  passes — the pairing exists — but the suite never executes and the gate stays green over
+  nothing. Several suites defend themselves by grepping `tests/run.sh` for their own `run`
+  line as an assertion (`tests/doctor.test.sh` carries the pattern to copy); no arm checks
+  the set as a whole, so a new suite that skips both the `run` line and the self-check is
+  invisible.
 
 - **Architecture diagram (`architecture.excalidraw`) is manually authored and needs
   regeneration for install-layer changes** (new hooks, new install types, new managed files).

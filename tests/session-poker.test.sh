@@ -188,6 +188,38 @@ poke "$R2" interval
 expect_eq "a malformed override REFUSES rather than silently defaulting (exit 2)" "2" "$RC"
 expect_contains "…and names where to fix it" "config.yaml" "$OUT"
 
+# ---------- interval-default: the constant, with the config taken out of the question ----------
+#
+# ADDED FOR THE ARMING WALL (critic C-2, W5). `interval` above is right to refuse a
+# malformed override — that is this repo's posture everywhere a prose value is read. But
+# hooks/dispatch-preflight.sh has to measure staleness even then, because `.bionic/config.yaml`
+# is machine-local and agent-writable and one bad line there must not be able to disarm a
+# wall. Rather than retype 1800 in the gate — two copies of a constant that drift the first
+# time either moves — the gate asks this verb.
+#
+# THE PROPERTY THAT MATTERS TO ITS CALLER is that the config cannot change the answer, so
+# every arm below is driven ON TOP of a config the `interval` verb refuses or overrides.
+poke "$R2" interval-default
+expect_eq "interval-default answers 0 even though the live config is malformed" "0" "$RC"
+expect_eq "…with this script's own default, in seconds (30m = 1800s)" "1800" "$OUT"
+
+printf 'poker-interval: 5m\n' > "$R2/.bionic/config.yaml"
+poke "$R2" interval-default
+expect_eq "…and a perfectly VALID override does not move it either" "1800" "$OUT"
+poke "$R2" interval
+expect_eq "…while `interval`, on the same repo, still reads that override (5m = 300s)" "300" "$OUT"
+
+poke "$R1"
+expect_contains "usage names interval-default" "interval-default" "$OUT"
+
+# The gate's fallback is only worth having if it tracks the constant. Mutation-proof: move
+# POKER_INTERVAL_DEFAULT on a copy and the verb has to move with it — a verb that printed a
+# literal 1800 would answer 1800 here.
+POKER_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-default-mut.XXXXXX")/session-poker.sh"
+sed 's/^POKER_INTERVAL_DEFAULT="30m"$/POKER_INTERVAL_DEFAULT="7m"/' "$POKER" > "$POKER_MUT"
+OUT="$( cd "$R2" && CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER_MUT" interval-default 2>&1 )"; RC=$?
+expect_eq "the verb answers from the CONSTANT, not from a literal (doctored 7m = 420s)" "420" "$OUT"
+
 # ============================================================
 section "Section 3: tick — the accelerated-clock decisions (AC-7, re-authored for the ack)"
 # ============================================================
@@ -456,6 +488,123 @@ poke "$R5B" tick
 expect_eq "an ABSENT roster REFUSES rather than silently DISARMing (exit 2)" "2" "$RC"
 expect_contains "…and says it is a refusal, not a decision line" "REFUSED" "$OUT"
 expect_absent "…never prints a decision line for a roster it never found" "decision=" "$OUT"
+
+
+# ============================================================
+section "Section 6: the Patrol stamp — the arm verb, and stamp-before-decide on every tick"
+# ============================================================
+#
+# epic-17 W5 slice 4/4, spec AC-6; design ledger D-C mechanics (2) and (3).
+#
+# WHAT THE STAMP MEASURES, and the whole reason it is written where it is written.
+# The stamp is the Patrol's liveness signal: a session-keyed file beside the roster whose
+# AGE says how long ago the Patrol last fired. hooks/dispatch-preflight.sh refuses a
+# dispatch when it is absent (never armed) or older than 2x the poker-interval
+# (armed-but-dead). That makes WHEN the stamp is written a correctness property, not a
+# detail: it is written the MOMENT the machinery runs, before the roster is read and
+# before any decision is reached. A stamp written only on a successful decision would
+# measure decisions-succeeding rather than firings-landing — and this wave's own
+# orchestrator session produced 10+ healthy-but-REFUSED pre-roster ticks during one long
+# interview, every one of which would have aged the stamp toward a false refusal of the
+# next dispatch.
+#
+# `arm` exists for the other end of the same asymmetry: arming precedes dispatch by
+# design (doctrine: arm at engagement, never on dispatch), so the first stamp cannot come
+# from a tick that has a roster to read. Without the verb the wall is a chicken-and-egg.
+
+stamp_of() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "${2:-$SID}"; }
+mtime_of() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
+
+# ---------- the arm verb ----------
+R6="$(make_repo s6-arm)"
+# Deliberately NO new_roster: arming happens at engagement, before anything is dispatched.
+poke "$R6" arm
+expect_eq "arm succeeds with no roster in existence at all (exit 0)" "0" "$RC"
+if [ -f "$(stamp_of "$R6")" ]; then
+  ok "arm writes the session-keyed stamp beside the roster"
+else
+  bad "arm writes the session-keyed stamp beside the roster" "no file at $(stamp_of "$R6")"
+fi
+S6_BODY="$(cat "$(stamp_of "$R6")" 2>/dev/null)"
+expect_contains "the stamp carries its own schema" "patrol-stamp/v1" "$S6_BODY"
+expect_contains "…and names the session it answers for" "session=$SID" "$S6_BODY"
+expect_contains "…and records which verb wrote it" "verb=arm" "$S6_BODY"
+expect_contains "arm reports what it did" "armed" "$OUT"
+
+# The stamp is machine-local state under .bionic/tmp, exactly like the roster and the
+# attestation, and gets the same mode.
+expect_eq "the stamp is owner-only, like every other .bionic/tmp record" "600" \
+  "$(stat -f '%OLp' "$(stamp_of "$R6")" 2>/dev/null || stat -c '%a' "$(stamp_of "$R6")" 2>/dev/null)"
+
+OUT="$( cd "$R6" && env -u CLAUDE_CODE_SESSION_ID bash "$POKER" arm 2>&1 )"; RC=$?
+expect_eq "arm without a session key refuses (exit 3) — a stamp answers for ONE session" "3" "$RC"
+
+poke "$R6"
+expect_contains "usage names the arm verb" "arm" "$OUT"
+
+# ---------- stamp-before-decide: the REFUSED tick still stamps ----------
+#
+# The no-roster refusal (Section 5's ap review A-1 case) is the strongest available
+# witness for ordering: the tick exits 2 having decided nothing, so a stamp on disk
+# afterwards can only have been written before the roster was reached.
+R6B="$(make_repo s6-refused-tick)"
+poke "$R6B" tick
+expect_eq "a pre-roster tick still REFUSES (exit 2)" "2" "$RC"
+if [ -f "$(stamp_of "$R6B")" ]; then
+  ok "…and it stamped anyway: liveness is firings landing, not decisions succeeding"
+else
+  bad "…and it stamped anyway: liveness is firings landing, not decisions succeeding" \
+      "no file at $(stamp_of "$R6B")"
+fi
+expect_contains "the refused tick's stamp records the verb that wrote it" "verb=tick" \
+  "$(cat "$(stamp_of "$R6B")" 2>/dev/null)"
+
+# A tick refused for a DIFFERENT reason stamps too — the no-session-key refusal is the one
+# exception, and it is the right one: without the key there is no stamp path to write.
+R6C="$(make_repo s6-nokey)"
+OUT="$( cd "$R6C" && env -u CLAUDE_CODE_SESSION_ID bash "$POKER" tick 2>&1 )"; RC=$?
+expect_eq "a keyless tick refuses (exit 3)" "3" "$RC"
+if [ -n "$(ls "$R6C/.bionic/tmp/" 2>/dev/null)" ]; then
+  bad "…and writes no stamp: a session-keyed file needs a session key" \
+      "wrote: $(ls "$R6C/.bionic/tmp/")"
+else
+  ok "…and writes no stamp: a session-keyed file needs a session key"
+fi
+
+# ---------- a healthy tick REFRESHES a stale stamp ----------
+R6D="$(make_repo s6-refresh)"; new_roster "$R6D"
+add_row "$R6D" name=live-one deliverable=out.md duration="30 minutes" \
+  launched_at="$(iso_ago 60)"
+poke "$R6D" arm
+backdate "$(stamp_of "$R6D")" 4000
+poke "$R6D" tick
+S6_AGE=$(( $(date +%s) - $(mtime_of "$(stamp_of "$R6D")") ))
+if [ "$S6_AGE" -lt 120 ]; then
+  ok "a tick refreshes the stamp it found stale (age ${S6_AGE}s)"
+else
+  bad "a tick refreshes the stamp it found stale" "age is still ${S6_AGE}s"
+fi
+
+# ---------- the stamp follows the PINNED root, exactly as the roster does ----------
+# Same worktree hazard Section 5 drove for the roster: a stamp written under a worktree
+# root while dispatch-preflight reads the main repository's would make the wall refuse a
+# perfectly live Patrol, permanently and silently.
+R6E="$(make_repo s6-worktree)"
+( cd "$R6E" && git add -A 2>/dev/null; git -c user.email=t@e -c user.name=T commit -qm seed --allow-empty ) >/dev/null 2>&1
+R6EWT="$TMPROOT/s6-worktree-wt"
+( cd "$R6E" && git worktree add -q -b s6-wt "$R6EWT" ) >/dev/null 2>&1
+if [ -d "$R6EWT" ]; then
+  poke "$R6EWT" arm
+  if [ -f "$(stamp_of "$R6E")" ]; then
+    ok "arming from a worktree cwd stamps the MAIN repository's .bionic/tmp"
+  else
+    bad "arming from a worktree cwd stamps the MAIN repository's .bionic/tmp" \
+        "not at $(stamp_of "$R6E"); worktree has: $(ls "$R6EWT/.bionic/tmp" 2>/dev/null)"
+  fi
+  ( cd "$R6E" && git worktree remove --force "$R6EWT" ) >/dev/null 2>&1
+else
+  ok "arming from a worktree cwd stamps the MAIN repository's .bionic/tmp (skipped: no worktree)"
+fi
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'

@@ -7,7 +7,7 @@
 #
 #     BIONIC_HOOKS_DIR    <repo>/hooks
 #     BIONIC_SKILLS_DIR   <repo>/skills
-#     BIONIC_SCRIPTS_DIR  <repo>            (root scripts, e.g. claude-bootstrap.sh)
+#     BIONIC_SCRIPTS_DIR  <repo>            (root scripts, e.g. wsl-setup.sh)
 #
 # It is mechanism-agnostic: it points at directories and knows nothing about how
 # those directories came to exist (installer tests own that).
@@ -31,8 +31,8 @@
 #
 # Location independence gets its own group: the helper is sourced from
 # tests/*.test.sh (including the hooks/*.test.sh suites moved under tests/ at
-# epic-17 W4 S9) and lib/platform.test.sh, by absolute and by relative
-# reference, from whatever cwd the runner happens to be in. It must derive
+# epic-17 W4 S9), by absolute and by relative reference, from whatever cwd the
+# runner happens to be in. It must derive
 # <repo> from its OWN path, never the caller's pwd — the naive implementation
 # is green from the repo root and wrong from anywhere else.
 #
@@ -70,7 +70,7 @@ DOC="$TMP/doctored"
 mkdir -p "$DOC/hooks" "$DOC/skills/canonical-sdlc" "$DOC/root"
 
 # hooks class — the real pin-sync subject. The repo copy says
-# SUPPORTED_SDLC_VERSION=13; the doctored copy says 99999. Neither value can be
+# SUPPORTED_SDLC_VERSION=14; the doctored copy says 99999. Neither value can be
 # read from the other file, so the named check's ANSWER names which file it read.
 cp "$REPO/hooks/canonical-sdlc-evidence-gate.sh" "$DOC/hooks/canonical-sdlc-evidence-gate.sh"
 sed -i.bak 's/^SUPPORTED_SDLC_VERSION=.*/SUPPORTED_SDLC_VERSION=99999/' "$DOC/hooks/canonical-sdlc-evidence-gate.sh"
@@ -81,9 +81,14 @@ printf '# %s\n' "$MARKER" >> "$DOC/hooks/canonical-sdlc-evidence-gate.sh"
 cp "$REPO/skills/canonical-sdlc/SKILL.md" "$DOC/skills/canonical-sdlc/SKILL.md"
 printf '\n<!-- %s -->\n' "$MARKER" >> "$DOC/skills/canonical-sdlc/SKILL.md"
 
-# root-scripts class — the real bootstrap, marker appended.
-cp "$REPO/claude-bootstrap.sh" "$DOC/root/claude-bootstrap.sh"
-printf '# %s\n' "$MARKER" >> "$DOC/root/claude-bootstrap.sh"
+# root-scripts class — a real root script, marker appended. This was
+# claude-bootstrap.sh until epic-17 W5 (4/6) deleted the installer; the class
+# under test is "scripts at the repo root", not that particular script, so the
+# representative moved to the root script that survived. Any root *.sh would
+# serve — what the fixture needs is a file the seam can resolve to and a marker
+# only the doctored copy carries.
+cp "$REPO/wsl-setup.sh" "$DOC/root/wsl-setup.sh"
+printf '# %s\n' "$MARKER" >> "$DOC/root/wsl-setup.sh"
 
 # ------------------------------------------------------------------
 # The probe: a stand-in consumer suite. Sources the seam exactly the way a real
@@ -107,7 +112,7 @@ case "$2" in
   # Marker reads: did the consumer land in the doctored copy or the repo copy?
   mark-hooks)   grep -c 'SEAM-DOCTORED-MARKER-b7f3' "${BIONIC_HOOKS_DIR}/canonical-sdlc-evidence-gate.sh" ;;
   mark-skills)  grep -c 'SEAM-DOCTORED-MARKER-b7f3' "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md" ;;
-  mark-scripts) grep -c 'SEAM-DOCTORED-MARKER-b7f3' "${BIONIC_SCRIPTS_DIR}/claude-bootstrap.sh" ;;
+  mark-scripts) grep -c 'SEAM-DOCTORED-MARKER-b7f3' "${BIONIC_SCRIPTS_DIR}/wsl-setup.sh" ;;
   *) echo "PROBE-UNKNOWN-CHECK"; exit 4 ;;
 esac
 PROBE
@@ -140,8 +145,13 @@ expect_eq "relative source from cwd=<repo>/tests resolves <repo>/hooks" \
   "$REPO/hooks" "$(probe "$REPO/tests" "lib/resolve-roots.sh" var-hooks)"
 expect_eq "relative source from cwd=<repo>/hooks resolves <repo>/skills" \
   "$REPO/skills" "$(probe "$REPO/hooks" "../tests/lib/resolve-roots.sh" var-skills)"
-expect_eq "relative source from cwd=<repo>/lib resolves <repo>" \
-  "$REPO" "$(probe "$REPO/lib" "../tests/lib/resolve-roots.sh" var-scripts)"
+# cwd was <repo>/lib until the W5 Step-6 review retired lib/platform.sh and left
+# that directory empty (and so untracked, and so absent from a fresh clone). What
+# the arm needs is only a directory ONE level below the repo, so the seam is
+# reached by the same `../tests/lib/...` spelling; skills/ is that, and unlike
+# lib/ it is a directory the payload itself ships.
+expect_eq "relative source from cwd=<repo>/skills resolves <repo>" \
+  "$REPO" "$(probe "$REPO/skills" "../tests/lib/resolve-roots.sh" var-scripts)"
 
 echo ""
 echo "=== Group 3: override set -> the named check reads the DOCTORED copy ==="
@@ -150,7 +160,7 @@ _v="$(BIONIC_HOOKS_DIR="$DOC/hooks" probe "$REPO" "$SEAM" read-hooks)"
 expect_eq "hooks override: named check reads the doctored constant" \
   "SUPPORTED_SDLC_VERSION=99999" "$_v"
 expect_absent "hooks override: named check does NOT read the repo constant" \
-  "SUPPORTED_SDLC_VERSION=13" "$_v"
+  "SUPPORTED_SDLC_VERSION=14" "$_v"
 expect_eq "hooks override: doctored marker is present in what was read" \
   "1" "$(BIONIC_HOOKS_DIR="$DOC/hooks" probe "$REPO" "$SEAM" mark-hooks)"
 expect_eq "skills override: marker is present in what was read" \
@@ -165,7 +175,7 @@ echo "=== Group 4: override unset -> the same check reads the REPO copy ==="
 
 _v="$(probe "$REPO" "$SEAM" read-hooks)"
 expect_eq "no override: named check reads the repo constant" \
-  "SUPPORTED_SDLC_VERSION=13" "$_v"
+  "SUPPORTED_SDLC_VERSION=14" "$_v"
 expect_absent "no override: named check does NOT read the doctored constant" \
   "SUPPORTED_SDLC_VERSION=99999" "$_v"
 expect_eq "no override: hooks read carries no doctored marker" \
@@ -201,8 +211,11 @@ UNSEAMED=""
 LEGACY_IDIOM=""
 # hooks/*.test.sh moved under tests/ at epic-17 W4 S9 (spec AC-9); hooks/ now
 # holds only the hook scripts themselves, so that glob element is retired
-# rather than kept as a permanently-vacuous no-op.
-for f in "$REPO"/tests/*.test.sh "$REPO"/lib/*.test.sh; do
+# rather than kept as a permanently-vacuous no-op. `lib/*.test.sh` went the same
+# way at the W5 Step-6 review, and for the same reason: lib/platform.sh and its
+# suite retired together, `lib/` is empty, and `[ -f ] || continue` would have
+# hidden the dead element forever rather than reporting it.
+for f in "$REPO"/tests/*.test.sh; do
   [ -f "$f" ] || continue
   case "$f" in */seam-resolution.test.sh) continue ;; esac   # documented exemption, :46
   /usr/bin/grep -q 'resolve-roots\.sh' "$f" || UNSEAMED="$UNSEAMED ${f#$REPO/}"

@@ -71,6 +71,7 @@
 # path this script writes is checked for symlink redirection first and the record is
 # installed through mktemp + rename. A hostile repo can make this check REFUSE; it cannot
 # make it attest.
+# Registered on no channel — invoked on demand from the mounted plugin payload.
 
 set -u
 

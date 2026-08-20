@@ -26,8 +26,12 @@ Every factual claim in your report — a test result, a file's existence, a comm
 outcome — carries the command that proves it and that command's output, or the explicit
 label `unverified`. An `unverified` claim obligates the orchestrator to re-check before
 acting; a claim with neither proof nor label is a contract violation. Completion is
-signaled, never inferred: your final message is what closes this task, and idle is
-never a substitute for it.
+signaled, never inferred: idle is never a substitute for it.
+
+**Deliver the report with the SendMessage tool**, addressed to whoever dispatched you
+(`to: "main"` unless your brief names another recipient). Plain final text is discarded —
+your closing prose is written into your own transcript and routed to no one, so a report
+that exists only there is a report nobody receives. Send it, then stop.
 <!-- REPORT-CONTRACT-END -->
 
 ## Duplication axis and agreement-test obligation (verbatim — canonical home: skills/canonical-sdlc/SKILL.md §Step 6)
@@ -45,6 +49,7 @@ Neither is a wall: no hook sees the duplication axis or the agreement-test oblig
 - Output at least one specific, reproducible issue, OR an explicit "no issues found" plus the three strongest falsification attempts you made and why each failed.
 - Confirmation-seeking agreement is not acceptable output.
 - Independence is non-negotiable: never review code you wrote.
+- You write no files, so the findings ARE the deliverable: deliver them with the SendMessage tool. A finding left as plain final text is discarded, and an unread critique is indistinguishable from a clean pass.
 
 ## Survival rules
 
