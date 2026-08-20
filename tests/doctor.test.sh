@@ -908,6 +908,89 @@ expect_true "tests/run.sh names doctor.test.sh" \
 
 # ---------------------------------------------------------------------------
 echo ""
+echo "=== Group 12: the installed agent role files — the legacy drift line (AC-13) ==="
+# ---------------------------------------------------------------------------
+#
+# WHAT THIS LINE IS FOR. Role files ship in the PAYLOAD; that is the plugin-era
+# truth and it is the half of this line a reader most needs, because the other
+# half is a directory that should not exist. The retired installer also copied
+# the six rendered role files into the CLI's own agents directory, and a
+# session that finds them there loads THOSE — so a machine can be running a
+# build of its subagent instructions that no plugin update will ever touch, and
+# nothing else on the machine says so.
+#
+# REPORTING, NOT POLICING — the same contract the agent-integrity line above it
+# keeps. It names the state and stops: no exit-code effect, no repair, and no
+# SUMMARY action line. Group 6's "action lines only" assertion and Group 3's
+# "nothing to do" summary are the wall that keeps it that way.
+#
+# THREE FIXTURE STATES, and the drift arm is what makes the other two mean
+# anything: a line that said "no drift" on a machine where two files differ
+# would pass an absent-check and a match-check both.
+
+# The healthy machine has no legacy agents directory at all — the cold, correct,
+# post-cutover state.
+H_LEGACY_AGENTS="$(line_of "$H_OUT" "installed agent role files")"
+expect_match "absent: the line says there are no installed copies" "*none*" "$H_LEGACY_AGENTS"
+expect_match "absent: and it states the plugin-era truth in the same breath" \
+  "*payload*" "$H_LEGACY_AGENTS"
+
+# A third machine, built only for this line, so the healthy and broken fixtures
+# every other group reads keep their exact shape.
+LEGACY="$TMP/machine-legacy"; plant_machine "$LEGACY" healthy
+mkdir -p "$LEGACY/claude-home/agents"
+for a in auditor critic implementor researcher senior-implementor test-runner; do
+  cp "$LEGACY/plugin/agents/${a}.md" "$LEGACY/claude-home/agents/${a}.md"
+done
+
+L_OUT="$TMP/legacy-match.out"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEGACY" > "$L_OUT" 2>&1
+L_MATCH="$(line_of "$L_OUT" "installed agent role files")"
+expect_match "match: the line counts the six installed copies" "*6*" "$L_MATCH"
+expect_match "match: none of them differs from the payload" "*none differ*" "$L_MATCH"
+expect_match "match: the plugin-era truth is stated even when the copies agree" \
+  "*payload*" "$L_MATCH"
+
+# Now two of them drift — the shape of a machine whose plugin updated while the
+# installed copies stayed at the build the installer left.
+printf '\nA line only the installed copy carries.\n' >> "$LEGACY/claude-home/agents/critic.md"
+printf '\nAnd another.\n' >> "$LEGACY/claude-home/agents/auditor.md"
+
+D_OUT="$TMP/legacy-drift.out"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEGACY" > "$D_OUT" 2>&1
+D_DRIFT="$(line_of "$D_OUT" "installed agent role files")"
+expect_match "drift: the line counts the two that differ" "*2*" "$D_DRIFT"
+expect_match "drift: and names them, so the reader can open the right file" \
+  "*critic.md*" "$D_DRIFT"
+expect_match "drift: both names, not just the first" "*auditor.md*" "$D_DRIFT"
+expect_not_match "drift: a drifting machine is not reported as agreeing" \
+  "*none differ*" "$D_DRIFT"
+
+# THE NO-MUTATION CONTRACT HOLDS OVER THE NEW READ TOO. doctor is read-only,
+# and a line that compares two trees is exactly the kind of line that grows a
+# temp file or a repair. Fingerprint the whole legacy machine across a run.
+L_FP_BEFORE="$(fingerprint "$LEGACY")"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEGACY" >/dev/null 2>&1
+expect_eq "the drift read changes nothing on the machine it reads" \
+  "$L_FP_BEFORE" "$(fingerprint "$LEGACY")"
+
+# AND IT STAYS OUT OF THE SUMMARY. Reporting a legacy directory is not the same
+# as telling the user to delete it — /bionic:setup owns that offer, under
+# consent. If this line ever grew an action line, the summary of a machine that
+# is otherwise fine would stop saying so.
+expect_contains "the drift line adds no action line — the summary still says nothing to do" \
+  "nothing to do" "$(cat "$D_OUT")"
+
+# The fact is detect.sh's, rendered here — doctor re-deriving it from the
+# filesystem is the defect Group 8 exists to prevent, and this line is a new
+# chance to commit it.
+expect_true "doctor renders the library fact rather than listing the directory itself" \
+  grep -q 'detect_installed_agent_copies' "$DOCTOR_SH"
+expect_true "the fact function lives in detect.sh" \
+  grep -q '^detect_installed_agent_copies()' "${REPO}/payload/scripts/lib/detect.sh"
+
+# ---------------------------------------------------------------------------
+echo ""
 echo "========================================"
 echo "Results: $PASS/$TOTAL passed, $FAIL failed"
 echo "========================================"

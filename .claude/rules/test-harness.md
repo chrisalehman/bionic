@@ -23,8 +23,10 @@ Migrated from `.bionic/memory/INDEX.md` (epic-12 wave-01 slice 6). Both entries 
   `hooks/` into `tests/` and retired the then-vacuous `hooks/*.test.sh` glob; `tests/run.sh`'s
   own header records it). See `tests/run.sh` for the current list — it is not repeated here
   to avoid a second stale count — plus the Docker mock e2e. There is no CI — this suite is
-  the gate. A green run still says nothing about the *installed* hooks under
-  `~/.claude/hooks/`; see `.claude/rules/bootstrap-install.md`.
+  the gate. A green run still says nothing about the hooks a SESSION actually loads: the
+  suite exercises `hooks/*.sh` in the tree, while what gates a tool call is the copy inside
+  the payload the CLI resolved for the installed plugin. After a hook change, install the
+  plugin and let `/bionic:doctor` say which root answered before believing a wall is live.
 
 - **Nothing is auto-discovered. Every suite is hand-listed by name.** A new
   `tests/foo.test.sh` is NOT picked up — it silently never runs, and the suite stays green
