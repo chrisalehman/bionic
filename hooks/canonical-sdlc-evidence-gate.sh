@@ -1337,15 +1337,31 @@ validate_matrix() {
     # `user-confirmed: <user> <date> <what>` now discharges on that value —
     # the same value keys_for_tier already demanded of it — and an
     # agent-shaped claim with no attributed human still meets the wall.
+    #
+    # WHAT THE EXEMPTION REPLACES IS THE WAIVER FORM, NOT THE AUDITOR (critic
+    # C-1, W5). Those are two authorities and only the first substitution was
+    # ratified. So the exemption is scoped to an auditor cell that is EMPTY —
+    # nobody has ruled, which is the ordinary state of a T4 row — or CONFIRMED,
+    # where the two authorities agree. A STANDING REFUTED or UNVERIFIABLE is a
+    # positive finding on the record (this wave's own first audit pass produced
+    # three), and a user's confirmation does not overturn one: the row meets
+    # the wall, and the refusal names the FINDING rather than the attribution,
+    # because the attribution is correct and sending the user to rewrite it
+    # would point them at the one thing that is not broken.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     if [ "$CURRENT" -gt 5 ] 2>/dev/null; then
       if [ "$status" = "waived" ] || echo "$ev" | grep -qE 'waiver:' \
          || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
         :
-      elif [ "$tier" = "T4" ] && user_confirmed_form_ok "$block_txt"; then
+      elif [ "$tier" = "T4" ] && user_confirmed_form_ok "$block_txt" \
+           && { [ -z "$aud" ] || [ "$aud" = "CONFIRMED" ]; }; then
         :
       elif [ "$aud" != "CONFIRMED" ]; then
         if [ "$tier" = "T4" ]; then
+          if user_confirmed_form_ok "$block_txt"; then
+            block_matrix "matrix row '${ac}' (T4) carries a well-formed 'user-confirmed:', but the independent auditor's standing verdict on it is '${aud}', at step ${CURRENT}." \
+              "a user's confirmation does not overturn an auditor's finding — it replaces the WAIVER a T4 row used to need, not the audit. Resolve the '${aud}' verdict (re-run the audit and record CONFIRMED, or clear the cell if the finding was withdrawn), or waive the row."
+          fi
           block_matrix "matrix row '${ac}' (T4) auditor verdict is '${aud:-empty}', not CONFIRMED, and its 'user-confirmed:' names no attributed user, at step ${CURRENT}." \
             "record the user's own confirmation as 'user-confirmed: <user> <date> <what they confirmed>' in the '${ac}:' block — a T4 row discharges on that, no waiver needed. An unattributed or agent-written claim is not one."
         fi
