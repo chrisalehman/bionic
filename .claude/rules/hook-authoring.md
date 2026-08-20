@@ -70,19 +70,31 @@ section, and of this file, was never bootstrap-era and is unchanged.)*
 
 - **`addy-agent-skills` ships skills with implicit MCP dependencies that the plugin metadata
   does not declare.** Confirmed 2026-04-26 with `browser-testing-with-devtools/SKILL.md`
-  (assumes a `chrome-devtools` MCP server is configured; bionic now ships
-  `chrome-devtools-mcp@latest` in `claude-config.txt` to satisfy it). When installing or
+  (assumes a `chrome-devtools` MCP server is configured; bionic ships
+  `chrome-devtools-mcp@latest` as a when-needed row in `payload/scripts/lib/deps.sh` to satisfy it). When installing or
   upgrading the `addy-agent-skills` plugin, grep its skill files for MCP server references
-  (`mcpServers`, `mcp__`, "MCP server") and ensure each referenced server is in
-  `claude-config.txt`. Note also: that same SKILL.md references
+  (`mcpServers`, `mcp__`, "MCP server") and ensure each referenced server has a row in
+  `payload/scripts/lib/deps.sh`, with its consumer named. Note also: that same SKILL.md references
   `@anthropic/chrome-devtools-mcp` — wrong package; the real npm name is `chrome-devtools-mcp`.
   Don't copy the bad name from the skill. **Update 2026-06-14:** canonical-sdlc Step 5 no
   longer *mandates* `browser-testing-with-devtools`/chrome-devtools MCP for routine browser
   verify — it now routes to the bionic-owned `browser-verify` skill, which drives via
   `playwright-cli` (CLI-first). The chrome-devtools MCP stays installed but is reserved as the
   deep-debug escalation only (Lighthouse, perf-trace analysis, profiling, network throttling).
-  The MCP remains a real dependency — keep it in `claude-config.txt`; `tests/scripts.test.sh`
-  3r/3s/3t still assert it.
+  The MCP remains a real dependency — keep its row in `deps.sh`; `tests/plugin-lib.test.sh`
+  pins the table. *(Corrected 2026-08-20, epic-17 W6 S3b: `claude-config.txt` and
+  `tests/scripts.test.sh` §3 are gone — the dependency roster has one owner.)*
+
+## Refusal voices
+
+- **Two refusal voices coexist; copy the one your hook's family uses.** `BLOCKED` is the
+  wall voice — evidence-gate, governing-skill, preflight-probe, protect-database: a write,
+  commit, or subagent start is refused fail-closed and the fix is named in the same message.
+  `checkpoint:` is the dispatch-discipline voice — farm-out-reminder and dispatch-preflight
+  (the Patrol arming wall speaks it even when it refuses). A new wall over an artifact or a
+  tool call copies `BLOCKED`; a new main-thread/dispatch gate copies `checkpoint:`. This is
+  a naming convention, not a mechanism — nothing parses either word. *(Added 2026-08-20,
+  epic-17 W6, discharging W5's trigger-armed note "which refusal voice to copy".)*
 
 ## Discriminators in enforcement hooks
 
