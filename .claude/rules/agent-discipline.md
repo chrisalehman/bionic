@@ -2,7 +2,6 @@
 paths:
   - "**/*.sh"
   - "**/*.md"
-  - "claude-global.md"
 ---
 
 # Agent-behavior discipline
@@ -43,8 +42,8 @@ at session start, so AC-2 is unaffected. The cost is ~8 KB whenever a matching f
 
 ## Discourse and judgment
 
-- **Instruction files for Claude** (`claude-global.md`, skills, agent prompts): sentences
-  naming Claude's default failure modes are TRIGGERS, not elaboration. "Obvious to a senior
+- **Instruction files for Claude** (skills, agent prompts, path-scoped rules like this one):
+  sentences naming Claude's default failure modes are TRIGGERS, not elaboration. "Obvious to a senior
   engineer" is the wrong rubric — the audience is the model, which needs the guardrail.
   Example: "Hypotheses without data produce circular debugging" earns its place because Claude
   defaults to hypothesis-patching without measuring, even though a human reader would already
