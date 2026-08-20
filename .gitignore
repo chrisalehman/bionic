@@ -6,13 +6,10 @@
 *.png
 *.excalidraw
 
-# Exception: architecture diagram for README
-!architecture.png
-!architecture.excalidraw
-
-# The canonical-sdlc diagrams need no exception: they are composed SVG, which is
-# neither generated nor ignored (epic-17 W4, 2026-08-18 — the .png/.excalidraw pair
-# retired with them, and tests/diagrams.test.sh refuses either coming back).
+# No exception: the architecture diagram is composed SVG under
+# skills/canonical-sdlc/diagrams/ (lifecycle.svg, hook-chain.svg), which is neither
+# generated nor ignored. The old .png/.excalidraw pair it replaced was deleted at
+# epic-17 W6 S14; tests/diagrams.test.sh refuses either coming back.
 
 # OS
 .DS_Store

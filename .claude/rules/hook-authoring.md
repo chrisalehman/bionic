@@ -34,9 +34,10 @@ section, and of this file, was never bootstrap-era and is unchanged.)*
   the set as a whole, so a new suite that skips both the `run` line and the self-check is
   invisible.
 
-- **Architecture diagram (`architecture.excalidraw`) is manually authored and needs
-  regeneration for install-layer changes** (new hooks, new install types, new managed files).
-  It's not generated from code.
+- **Architecture diagram policy: composed SVG, not hand-drawn.** The current diagrams
+  (`skills/canonical-sdlc/diagrams/lifecycle.svg`, `diagrams/hook-chain.svg`) are each their
+  own sole source — hand-composed text, no paired drawing file — so install-layer changes
+  (new hooks, new install types, new managed files) are edits to the SVG text itself.
 
 ## False-positives and merge-commit handling
 
