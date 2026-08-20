@@ -991,6 +991,138 @@ expect_true "the fact function lives in detect.sh" \
 
 # ---------------------------------------------------------------------------
 echo ""
+echo "=== Group 14: the two surfaces Step 9's referee needs — legacy skill copy, legacy hook files (W5 RV-5) ==="
+# ---------------------------------------------------------------------------
+#
+# THE FINDING. detect.sh already knew about the legacy skill copy — the fact function was
+# written in 4/6 and setup step 7 offers to remove it under consent — but doctor never
+# RENDERED it. So `/bionic:doctor` could report a clean machine that was arming eleven hook
+# registrations twice, through a channel the cutover was supposed to have retired. And
+# nothing at all knew about the leftover hook FILES. Those are the two surfaces the wave's
+# close-out has to referee, and the referee could not see either.
+#
+# THE TWO LINES ARE NOT THE SAME KIND OF LINE, and the split is deliberate:
+#
+#   skill copy   NOT INERT. It carries hook registrations in its own frontmatter, so a
+#                session that loads it arms the same walls a second time. There is a remedy
+#                under consent, so this one EARNS a summary action line.
+#   hook files   INERT once the registrations are gone. Disk, not behaviour. Reported and
+#                nothing more — the same read-only contract Group 12's line keeps, and for
+#                the same reason: turning "this exists" into "you should delete it" on an
+#                otherwise-fine machine is how a diagnosis becomes nagging.
+
+# ---- both absent: the cold, correct, post-cutover machine ----
+H_SKILL_COPY="$(line_of "$H_OUT" "legacy installed skill copy")"
+expect_match "absent: the skill-copy line reports none" "*none*" "$H_SKILL_COPY"
+expect_match "absent: and states the plugin-era truth in the same breath" \
+  "*payload*" "$H_SKILL_COPY"
+H_HOOK_FILES="$(line_of "$H_OUT" "legacy installed hook files")"
+expect_match "absent: the hook-files line reports none" "*none*" "$H_HOOK_FILES"
+
+# A machine carrying BOTH leftovers. Built on its own so the fixtures every other group
+# reads keep their exact shape.
+LEG2="$TMP/machine-leftovers"; plant_machine "$LEG2" healthy
+mkdir -p "$LEG2/claude-home/skills/canonical-sdlc" "$LEG2/claude-home/hooks"
+printf -- '---\nname: canonical-sdlc\nhooks:\n  PreToolUse: []\n---\nThe copy the installer rendered.\n' \
+  > "$LEG2/claude-home/skills/canonical-sdlc/SKILL.md"
+# Two of the payload's own hook names, plus one that is the user's and must NOT be counted.
+printf '#!/bin/bash\nexit 0\n' > "$LEG2/claude-home/hooks/protect-main.sh"
+printf '#!/bin/bash\nexit 0\n' > "$LEG2/plugin/hooks/landing-gate.sh"
+printf '#!/bin/bash\nexit 0\n' > "$LEG2/claude-home/hooks/landing-gate.sh"
+printf '#!/bin/bash\nexit 0\n' > "$LEG2/claude-home/hooks/my-own-hook.sh"
+
+G14_OUT="$TMP/leftovers.out"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEG2" > "$G14_OUT" 2>&1
+
+G14_SKILL="$(line_of "$G14_OUT" "legacy installed skill copy")"
+expect_match "present: the skill-copy line names the path, so the reader can go look" \
+  "*canonical-sdlc*" "$G14_SKILL"
+expect_not_match "present: and does not report it as absent" "*none*" "$G14_SKILL"
+
+G14_HOOKS="$(line_of "$G14_OUT" "legacy installed hook files")"
+# The COUNT FIELD, extracted — not a glob over the whole line. The line ends in a path
+# under $TMP, and $TMP is randomly named: a `*3*` match against the whole line passes or
+# fails depending on whether mktemp happened to put a 3 in the directory name, which is a
+# flake that reports as a real failure roughly one run in three. Pull the number out and
+# compare it as a number.
+hook_files_count_in() {  # <line> -> the count field alone
+  printf '%s\n' "$1" | sed -E 's/^.*legacy installed hook files[[:space:]]+([^ ]+).*$/\1/'
+}
+expect_eq "present: the hook-files line counts the two payload-named leftovers" \
+  "2" "$(hook_files_count_in "$G14_HOOKS")"
+# The discriminating arm, and it is the reason the count is derived from payload names:
+# THREE .sh files sit in that directory and only TWO are the payload's. A detector that
+# counted the directory would say 3, and would be telling a person their own hook is
+# bionic's litter — on a line they are reading in order to decide what to delete.
+expect_ne "present: the user's own hook is not counted as bionic's leftover" \
+  "3" "$(hook_files_count_in "$G14_HOOKS")"
+expect_match "present: and says they are inert, so nobody reads a count as an emergency" \
+  "*inert*" "$G14_HOOKS"
+
+# ---- the action asymmetry, stated as its own pair of arms ----
+expect_contains "present: the skill copy EARNS a setup action line (it is not inert)" \
+  "/bionic:setup" "$(cat "$G14_OUT")"
+expect_contains "…and the reason names the skill copy specifically" \
+  "legacy skill copy" "$(cat "$G14_OUT")"
+# The hook files must not have added one. A machine whose ONLY leftover is hook files is
+# the discriminating fixture: if that one grows an action line, the contract is broken.
+LEG3="$TMP/machine-hookfiles-only"; plant_machine "$LEG3" healthy
+mkdir -p "$LEG3/claude-home/hooks"
+printf '#!/bin/bash\nexit 0\n' > "$LEG3/claude-home/hooks/protect-main.sh"
+G14B_OUT="$TMP/hookfiles-only.out"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEG3" > "$G14B_OUT" 2>&1
+expect_eq "hook files alone: still counted" \
+  "1" "$(hook_files_count_in "$(line_of "$G14B_OUT" "legacy installed hook files")")"
+expect_contains "hook files alone: and the summary still says there is nothing to do" \
+  "nothing to do" "$(cat "$G14B_OUT")"
+
+# ---- read-only over both new reads ----
+LEG2_FP="$(fingerprint "$LEG2")"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEG2" >/dev/null 2>&1
+expect_eq "neither new read changes anything on the machine it reads" "$LEG2_FP" "$(fingerprint "$LEG2")"
+
+# ---- the facts are the library's, not re-derived here ----
+expect_true "doctor renders detect.sh's legacy-skill-copy fact rather than stat'ing the directory" \
+  grep -q 'detect_legacy_skill_copy' "$DOCTOR_SH"
+expect_true "doctor renders detect.sh's legacy-hook-files fact" \
+  grep -q 'detect_legacy_hook_files' "$DOCTOR_SH"
+expect_true "and the new fact function lives in detect.sh" \
+  grep -q '^detect_legacy_hook_files()' "${REPO}/payload/scripts/lib/detect.sh"
+
+# --- RV-7: the registry schema is read in ONE file, and it is not this one ---
+#
+# doctor.sh used to carry `_doctor_install_path`, its own jq program over the CLI's
+# `installed_plugins.json`. Same schema as detect_plugin_root's, different expression, and
+# neither side could notice the other drifting — a CLI field rename would be fixed in the
+# pinned copy and left standing in this one, answering just as confidently. Worse, it meant
+# detect_plugin_root had no production callsite at all: the parse the suite drove was not
+# the parse that ran.
+#
+# So the arm is a DUPLICATION wall, not a behaviour one. The behaviour is already covered by
+# the roster-footprint counts above (14 and 28, both read through the shared function now);
+# what this stops is the second reading coming back.
+expect_true "doctor resolves an install path through the shared library function" \
+  grep -q 'detect_plugin_install_path' "$DOCTOR_SH"
+expect_true "…and that function lives in detect.sh" \
+  grep -q '^detect_plugin_install_path()' "${REPO}/payload/scripts/lib/detect.sh"
+expect_true "the retired local parse is gone from doctor.sh" \
+  bash -c '! grep -q "^_doctor_install_path()" "$1"' _ "$DOCTOR_SH"
+# The schema itself, named as an absence — but the absence has to be of the PARSE, not of
+# the word. doctor legitimately says "installPath" out loud in two report strings, because
+# explaining where a count came from is its job; what it must never do again is run a
+# program over that field. So the pin is `jq` and `installPath` on one line, which is what
+# the retired copy was and what any re-fork would be.
+expect_eq "no jq program in doctor.sh reads the registry's installPath field" "" \
+  "$(grep -nE 'jq[^|]*installPath|installPath[^|]*jq' "$DOCTOR_SH" || true)"
+# And the multi-line form the retired copy actually used, caught by its other half: doctor
+# names the registry FILE nowhere except in prose. Selecting the file is detect.sh's job via
+# _detect_installed_plugins_file, which is the one expression that decides which registry
+# every answer in the payload comes from.
+expect_eq "doctor.sh opens the plugin registry file nowhere in its own code" "" \
+  "$(grep -n 'installed_plugins\.json' "$DOCTOR_SH" | grep -vE '^[0-9]+:[[:space:]]*(#|echo)' || true)"
+
+# ---------------------------------------------------------------------------
+echo ""
 echo "========================================"
 echo "Results: $PASS/$TOTAL passed, $FAIL failed"
 echo "========================================"

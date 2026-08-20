@@ -7,9 +7,9 @@
 # [WALL: tests/session-poker.test.sh]
 #
 # This is NOT a hook, exactly like hooks/session-sweeper.sh: it lives in hooks/ for
-# test-harness pairing and bootstrap installation only (claude-bootstrap.sh installs every
-# hooks/*.sh into ~/.claude/hooks/) and is never registered in MANAGED_HOOKS. It is invoked
-# ON DEMAND, one question per invocation, and holds no process open:
+# test-harness pairing and to ride the payload's hooks/ directory into the mounted plugin.
+# It is registered on NO channel — neither hooks/hooks.json nor a skill's frontmatter.
+# It is invoked ON DEMAND, one question per invocation, and holds no process open:
 #
 #     bash <plugin-root>/hooks/session-poker.sh tick       one decision over this roster (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh arm        stamp the Patrol as alive, at engagement
@@ -103,7 +103,8 @@
 # THE SWEEPER IS THIS SCRIPT'S SIBLING, resolved exactly as hooks/landing-gate.sh resolves
 # it: no PATH lookup (a hook's PATH is not ours to trust), no environment override (a seam on
 # the path under test would leave the production path unverified) — so the same resolution
-# holds in the repo and in ~/.claude/hooks/ once claude-bootstrap.sh installs both.
+# holds in the repo and under the mounted plugin's hooks/, which ships both side by side.
+# Registered on no channel — invoked on demand from the mounted plugin payload.
 
 set -u
 

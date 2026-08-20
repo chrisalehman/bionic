@@ -1292,6 +1292,201 @@ expect_eq "detect_plugin_root writes nothing into the config dir it read" \
   "installed_plugins.json" "$(ls "$R_CH/plugins")"
 
 echo ""
+echo "=== Group T: detect_legacy_hook_files — the other thing the installer left (W5 RV-5) ==="
+#
+# WHAT THIS SEES THAT NOTHING ELSE DID. The retired installer copied every hooks/*.sh into
+# the CLI's own hooks directory. `detect_legacy_channel_hooks` already counts the
+# REGISTRATIONS those copies were wired through, in settings.json — but a machine can be
+# cleaned of every registration and still carry the FILES, and the two states look identical
+# in the report. The files are the half a person can see in a directory listing and the half
+# the report never mentioned, which is exactly the shape of a diagnosis nobody trusts.
+#
+# PAYLOAD-SIDE NAMES ONLY, the same rule `detect_installed_agent_copies` states: a .sh in
+# that directory that the payload does not ship is somebody's OWN hook, and counting it would
+# report a person's work as bionic's leftover. It is the strictly safer error too — this
+# count is read by a human deciding whether to delete things.
+#
+# `unknown` WHERE THE COMPARISON CANNOT BE MADE, and it is a real state, not a defensive one:
+# a payload with no hooks/ directory gives nothing to match names against, and answering `0`
+# there would report "nothing left behind" on a machine nobody looked at.
+
+T_PAY="$TMP/legacy-hooks-payload"; mkdir -p "$T_PAY/hooks"
+for h in protect-main.sh landing-gate.sh stop-guard.sh; do
+  printf '#!/bin/bash\nexit 0\n' > "$T_PAY/hooks/$h"
+done
+
+# A CLI home carrying three of the payload's names plus one that is not bionic's at all.
+T_CH_PRESENT="$TMP/legacy-hooks-ch-present"; mkdir -p "$T_CH_PRESENT/hooks"
+for h in protect-main.sh landing-gate.sh my-own-hook.sh; do
+  printf '#!/bin/bash\nexit 0\n' > "$T_CH_PRESENT/hooks/$h"
+done
+
+T_CH_CLEAN="$TMP/legacy-hooks-ch-clean"; mkdir -p "$T_CH_CLEAN"   # no hooks/ at all
+T_CH_EMPTY="$TMP/legacy-hooks-ch-empty"; mkdir -p "$T_CH_EMPTY/hooks"
+
+t_run() {  # <claude-home> [payload-root]
+  detect_run BIONIC_PLUGIN_ROOT="${2:-$T_PAY}" BIONIC_CLAUDE_HOME="$1" -- detect_legacy_hook_files
+}
+
+expect_eq "legacy hook files: two payload-named leftovers counted, the user's own hook NOT" \
+  "env:legacy-hook-files count=2 path=${T_CH_PRESENT}/hooks names=landing-gate.sh,protect-main.sh" \
+  "$(t_run "$T_CH_PRESENT")"
+expect_eq "legacy hook files: no hooks directory at all is a clean 0, not an unknown" \
+  "env:legacy-hook-files count=0 path=${T_CH_CLEAN}/hooks names=-" \
+  "$(t_run "$T_CH_CLEAN")"
+expect_eq "legacy hook files: an empty hooks directory is 0 too (the directory is not the fact)" \
+  "env:legacy-hook-files count=0 path=${T_CH_EMPTY}/hooks names=-" \
+  "$(t_run "$T_CH_EMPTY")"
+
+# The unknown arm: nothing to match names against.
+T_PAY_BARE="$TMP/legacy-hooks-payload-bare"; mkdir -p "$T_PAY_BARE"
+expect_match "legacy hook files: a payload with no hooks/ cannot answer, and says so" \
+  "*count=unknown*" "$(t_run "$T_CH_PRESENT" "$T_PAY_BARE")"
+expect_match "…naming the reason rather than reporting a clean machine" \
+  "*ships no hooks/*" "$(t_run "$T_CH_PRESENT" "$T_PAY_BARE")"
+
+# READ-ONLY, and this one matters more than most: the line it produces is what a person
+# reads before deleting files.
+T_FP_BEFORE="$(find "$T_CH_PRESENT" | sort; find "$T_CH_PRESENT" -type f -exec shasum -a 256 {} \; 2>/dev/null | sort)"
+t_run "$T_CH_PRESENT" >/dev/null 2>&1
+T_FP_AFTER="$(find "$T_CH_PRESENT" | sort; find "$T_CH_PRESENT" -type f -exec shasum -a 256 {} \; 2>/dev/null | sort)"
+expect_eq "detect_legacy_hook_files changes nothing in the directory it counts" \
+  "$T_FP_BEFORE" "$T_FP_AFTER"
+
+# One line, exit 0 — the file's contract, which Group 16 asserts for the older functions.
+t_out="$(t_run "$T_CH_PRESENT")"; t_rc=$?
+expect_eq "detect_legacy_hook_files exits 0" "0" "$t_rc"
+expect_eq "detect_legacy_hook_files prints exactly one line" "1" "$(printf '%s\n' "$t_out" | grep -c .)"
+
+# And it joins the sweep, so `detect_all` is still the whole of what this library knows.
+T_ALL="$(detect_run BIONIC_PLUGIN_ROOT="$T_PAY" BIONIC_CLAUDE_HOME="$T_CH_PRESENT" \
+  BIONIC_SHELL_RC="$RC_LEGACY" BIONIC_SETTINGS_FILE="$SET_STALE" -- detect_all)"
+expect_match "detect_all emits the legacy-hook-files line" "*env:legacy-hook-files count=*" "$T_ALL"
+
+echo ""
+echo "=== Group S: detect_plugin_install_path — ONE registry parse, not two (W5 Step-6 RV-4/RV-7) ==="
+#
+# THE DEFECT THIS CLOSES. The Step-6 review found the registry schema being parsed in two
+# places: detect_plugin_root here, and doctor.sh's own _doctor_install_path. Two parses of a
+# schema we do not own is the exact shape of the duplication the ownership table exists to
+# prevent — the CLI changes `installPath`, one of them is fixed, and the other keeps
+# answering confidently with the old shape. Worse, detect_plugin_root had ZERO production
+# callsites (RV-4): it was tests plus a pinned doctrine copy, so the copy that mattered was
+# the UNPINNED one. Generalizing the pinned parse and giving it the callsite discharges both.
+#
+# THE SPLIT OF RESPONSIBILITY, and it is the judgment call this group pins:
+#
+#   detect_plugin_install_path <name>   the PARSE. Quiet — nothing on stderr, ever.
+#   detect_plugin_root                  bionic's specialization. Adds the LOUD refusal.
+#
+# Loudness belongs to the specialization and not the parse, because loudness is a claim
+# about CONSEQUENCE, not about failure. "bionic is not installed" is a catastrophe worth
+# three lines of stderr and a named fix — it feeds a path something is about to execute.
+# "superpowers is not installed" is an ORDINARY answer that doctor renders in a table cell
+# twenty times a run, and a parse that shouted it would make `/bionic:doctor` unreadable on
+# exactly the half-configured machine it exists to diagnose. The refusal text is bionic's
+# own besides ("run claude plugin install bionic@bionic"), and generalizing it would print
+# advice that is wrong for every other name.
+#
+# THE EXIT CODES CARRY WHAT THE STDERR NO LONGER DOES. detect_plugin_root reconstructs its
+# three distinct refusals from them, so no message was lost in the move:
+#   2 no registry file · 3 no entry, or unparseable · 4 entry present, directory gone.
+
+ip_run() {  # <env-assignments...> -- <name> ; sets S_OUT, S_ERR, S_ST
+  local -a envs=()
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
+  shift
+  S_OUT=$(env -i HOME="$TMP/home" PATH="${S_PATH:-$BASE_BIN}" "${envs[@]}" \
+    bash -c '. "$1"; shift; detect_plugin_install_path "$@"' _ "$DETECT_SH" "$@" 2>"$TMP/ip.err")
+  S_ST=$?
+  S_ERR=$(cat "$TMP/ip.err")
+}
+
+# A registry with TWO installed plugins, both pointing at trees that exist. The second one
+# is the arm that matters: a bionic-only parse cannot answer about it at all.
+S_SUP="$TMP/real-superpowers-root"; mkdir -p "$S_SUP/skills"
+S_CH="$TMP/ch-ip-ok"; mkdir -p "$S_CH/plugins"
+cat > "$S_CH/plugins/installed_plugins.json" <<JSON
+{
+  "version": 2,
+  "plugins": {
+    "superpowers@claude-plugins-official": [
+      { "scope": "user", "installPath": "${S_SUP}", "version": "6.3.0" }
+    ],
+    "bionic@bionic": [
+      { "scope": "user", "installPath": "${R_REAL}", "version": "0.1.0" }
+    ]
+  }
+}
+JSON
+
+ip_run BIONIC_CLAUDE_HOME="$S_CH" -- superpowers
+expect_eq "install_path: a NON-bionic plugin resolves by name (the whole point of RV-7)" \
+  "$S_SUP" "$S_OUT"
+expect_eq "…exit 0" "0" "$S_ST"
+ip_run BIONIC_CLAUDE_HOME="$S_CH" -- bionic
+expect_eq "install_path: and bionic resolves through the same one parse" "$R_REAL" "$S_OUT"
+
+# THE SPECIALIZATION IS THE SAME ANSWER. Not "agrees today" — detect_plugin_root is
+# implemented as this call, and this arm is what a future edit that re-forks them fails on.
+root_run BIONIC_CLAUDE_HOME="$S_CH" --
+expect_eq "install_path: detect_plugin_root returns exactly detect_plugin_install_path bionic" \
+  "$S_OUT" "$R_OUT"
+
+# ---- QUIET is a contract, because doctor calls this once per dependency row ----
+ip_run BIONIC_CLAUDE_HOME="$S_CH" -- not-a-plugin
+expect_eq "install_path: an absent plugin says NOTHING on stderr (doctor renders 20 rows)" \
+  "" "$S_ERR"
+expect_eq "…and hands back nothing on stdout" "" "$S_OUT"
+ip_run BIONIC_CLAUDE_HOME="$TMP/ch-nonexistent" -- superpowers
+expect_eq "install_path: a missing registry is quiet too" "" "$S_ERR"
+
+# ---- the exit codes detect_plugin_root rebuilds its three refusals from ----
+ip_run BIONIC_CLAUDE_HOME="$TMP/ch-nonexistent" -- bionic
+expect_eq "install_path: no registry file -> 2" "2" "$S_ST"
+ip_run BIONIC_CLAUDE_HOME="$CH_EMPTY" -- bionic
+expect_eq "install_path: registry with no such entry -> 3" "3" "$S_ST"
+ip_run BIONIC_CLAUDE_HOME="$CH_MALFORMED" -- bionic
+expect_eq "install_path: unparseable registry -> 3, never a guess" "3" "$S_ST"
+ip_run BIONIC_CLAUDE_HOME="$R_CH_GONE" -- bionic
+expect_eq "install_path: entry present but the directory is gone -> 4" "4" "$S_ST"
+expect_eq "…and 4 still hands back nothing, so a caller cannot execute out of it" "" "$S_OUT"
+
+# ---- whole-name match on BOTH lanes, for an arbitrary name ----
+S_CH_NEAR="$TMP/ch-ip-near"; mkdir -p "$S_CH_NEAR/plugins"
+cat > "$S_CH_NEAR/plugins/installed_plugins.json" <<JSON
+{ "version": 2, "plugins": {
+  "superpowers-extras@somewhere": [ { "installPath": "/wrong/one", "version": "9.9.9" } ] } }
+JSON
+ip_run BIONIC_CLAUDE_HOME="$S_CH_NEAR" -- superpowers
+expect_eq "install_path: 'superpowers-extras' is not 'superpowers' (jq lane)" "3" "$S_ST"
+S_PATH="$NOJQ_BIN" ip_run BIONIC_CLAUDE_HOME="$S_CH_NEAR" -- superpowers
+expect_eq "install_path: …nor on the no-jq lane, which is where a prefix match is easiest to write" \
+  "3" "$S_ST"
+S_PATH="$NOJQ_BIN" ip_run BIONIC_CLAUDE_HOME="$S_CH" -- superpowers
+expect_eq "install_path: the no-jq lane resolves a non-bionic name too" "$S_SUP" "$S_OUT"
+unset S_PATH
+
+# ---- read-only, like every other fact in this file ----
+expect_eq "install_path writes nothing into the config dir it read" \
+  "installed_plugins.json" "$(ls "$S_CH/plugins")"
+
+# ---- the doctrine seed stays a LITERAL, and stays derivable from the general program ----
+#
+# tests/dispatch-spans.test.sh §5i reads DETECT_PLUGIN_ROOT_JQ out of this file with a `sed`
+# that requires a single-quoted literal on one line, and demands it byte-identical inside
+# SKILL.md. That mechanism must survive generalization untouched: the doctrine has to carry
+# a program a model can PASTE, and `--arg n` is not pasteable. So the constant stays
+# bionic-shaped and literal — and this arm is what stops it from becoming a third parse,
+# by requiring it to be the general program with $n bound to "bionic" and nothing else.
+S_GEN="$(sed -n "s/^DETECT_PLUGIN_INSTALL_PATH_JQ='\(.*\)'\$/\1/p" "$DETECT_SH" | head -1)"
+S_LIT="$(sed -n "s/^DETECT_PLUGIN_ROOT_JQ='\(.*\)'\$/\1/p" "$DETECT_SH" | head -1)"
+expect_eq "the general jq program is readable as a one-line single-quoted literal" \
+  "0" "$([ -n "$S_GEN" ] && echo 0 || echo 1)"
+expect_eq "DETECT_PLUGIN_ROOT_JQ is the general program with \$n bound to \"bionic\", exactly" \
+  "${S_GEN//\$n/\"bionic\"}" "$S_LIT"
+
+echo ""
 echo "========================================"
 echo "Results: $PASS/$TOTAL passed, $FAIL failed"
 echo "========================================"
