@@ -41,11 +41,11 @@
 # tracks quote state, so a comment mentioning a lane is not a leak of it.
 #
 # THIS LEAVES ONE HONEST BLIND SPOT, stated rather than hidden: a banned token that only
-# ever appears as a runtime VALUE is invisible here. doctor's dependency table prints
-# `3a`/`3b` in its first column because `dep_field <row> lane` returns them, and no
-# source-text lint can catch that. It is recorded as a finding against S6 (which owns
-# doctor's display; tests/doctor.test.sh:437-439 and plan assumption A-4.S3.7 already
-# assign it) and as the second exemption below.
+# ever appears as a runtime VALUE is invisible here. (doctor's dependency table used to
+# print `3a`/`3b` that way; S6 replaced the column with `class` and the exemption that
+# covered it was retired at 55605d5 — the live captures under record/epic-17-w6/ were
+# re-grepped clean of every banned token by the Step-5 auditor, which is the only
+# measurement that closes a runtime-value gap.)
 #
 # EXEMPTIONS ARE PINNED TO THEIR OWN GAP. Section D asserts every exemption still MATCHES
 # something. The day the exempted line is fixed or deleted, this suite fails and the
