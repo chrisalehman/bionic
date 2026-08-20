@@ -5,8 +5,30 @@
 # number, verdict and state below is computed by detect.sh, deps.sh or
 # profile.sh and printed here in a shape a person can act on. The design's
 # ownership table says so in one word — doctor "diagnoses, never treats" — and
-# that word is the whole contract: no prompts, no mutations, no network, one
-# pass, exit 0.
+# that word is the whole contract: no mutations, one pass, exit 0.
+#
+# ONE QUESTION, ASKED LAST, AND ONLY WHERE SOMEBODY CAN ANSWER IT (wave-06,
+# ratified D-D). The instant report — everything this machine can be asked about
+# without leaving it — prints in full first. Then doctor asks whether to check
+# for tool updates, because that is the one fact that costs a network round trip
+# to two package managers and a user waiting on a diagnosis should not pay for it
+# unasked. The rejected shapes are what this one has to keep out: always-on is a
+# forced wait, an argument is forgettable, and a cache would make the read-only
+# report write a file. Answering yes appends UPDATES and nothing else changes:
+# doctor prints the upgrade command, and never runs it.
+#
+# UNATTENDED IS SILENT. Where stdin cannot carry an answer — a closed stream, or
+# the socket a tool harness hands a script — no question is printed, no manager
+# is asked, and nothing is said about why. A report nobody is reading must not
+# carry a question nobody can answer.
+#
+# EVERY SHELL-OUT IS BOUNDED. Three of the facts below leave this process: the
+# CLI's own plugin listing, `brew outdated`, `npm outdated -g`. Each runs under a
+# time limit (15 seconds; `BIONIC_DOCTOR_PROBE_SECONDS` accelerates it for the
+# suite), because the machine where a diagnosis matters most is exactly the one
+# where a CLI or a package manager hangs, and a doctor that hung with it would be
+# useless at the only moment it was needed. A probe that runs out of time is
+# `unknown` with a cause, never a confident answer.
 #
 # EXIT 0, ALWAYS. A diagnosis is not a failure. A machine with eleven absent
 # dependencies and a stale permission profile has been diagnosed *successfully*;
@@ -63,6 +85,62 @@ DOCTOR_LIB="$(cd "$(_doctor_self_dir)" && pwd -P)/lib"
 # script, and this constant is the one place doctor names its public location.
 BIONIC_REMOVE_RAW_URL="https://raw.githubusercontent.com/chrisalehman/bionic/main/payload/scripts/remove.sh"
 
+# The id the CLI knows this plugin by — `<name>@<catalog>`, which is the key the
+# listing prints and the argument an install command takes. Named once here
+# because it appears in a fact lookup and in two fix lines.
+BIONIC_PLUGIN_ID="bionic@bionic"
+
+# ─── Bounded probes ──────────────────────────────────────────────────────────
+#
+# THE ONLY THREE THINGS DOCTOR RUNS THAT IT DOES NOT CONTROL. Everything else in
+# this report is a file read. These three are other people's programs — the CLI,
+# Homebrew, npm — and any of them can wedge: a network mirror that never answers,
+# a package manager waiting on its own lock, a CLI mid-update. Unbounded, the
+# diagnosis wedges with them.
+#
+# TWO MECHANISMS, ONE BOUND. `timeout` is the right tool and is not on a stock
+# macOS, so the fallback is a background job plus a poll: the same limit, reached
+# a different way. `timeout` cannot run a shell function, so a fact function goes
+# down the poll path by construction rather than by preference.
+#
+# KILLING IS THE POINT, so the child is started in a way that can be killed: its
+# stdout is this function's stdout (a caller's command substitution finishes the
+# moment the child dies) and its stdin is closed, so a probe can never eat the
+# answer to the question asked at the end of the report.
+#
+# NO `sleep`, NO BOUND — deliberately, and stated rather than hidden. On a
+# machine so bare that coreutils is missing, waiting on the probe is a better
+# failure than spinning a hot loop against it.
+_doctor_probe_seconds() { echo "${BIONIC_DOCTOR_PROBE_SECONDS:-15}"; }
+
+_doctor_bounded() {  # <seconds> <command...> — passes stdout through; 124 on timeout
+  local limit="${1:-15}"; shift
+  local pid waited=0
+
+  if [ "$(type -t "${1:-}" 2>/dev/null)" = "file" ] && command -v timeout >/dev/null 2>&1; then
+    timeout "$limit" "$@" </dev/null
+    return $?
+  fi
+
+  "$@" </dev/null &
+  pid=$!
+  if ! command -v sleep >/dev/null 2>&1; then
+    wait "$pid"
+    return $?
+  fi
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$waited" -ge "$limit" ]; then
+      kill -TERM "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      return 124
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  wait "$pid"
+  return $?
+}
+
 # ─── Small renderers ─────────────────────────────────────────────────────────
 
 # yes/no/unknown as the words a person reads in a report.
@@ -82,7 +160,7 @@ _doctor_plural() {  # <count> <singular> <plural>
 # Why a value came back `unknown`. The mechanism decides: a cache has no
 # presence surface at all, and everything else is a missing tool the report can
 # name. Rendering-layer explanation only — the VALUE is always the library's.
-_doctor_unknown_cause() {  # <mechanism>
+_doctor_unknown_cause() {  # <kind> — the install mechanism the table names
   case "${1:-}" in
     pnpm-store) echo "the pnpm content-addressable store is a cache, not an install surface" ;;
     native)
@@ -162,6 +240,38 @@ fi
 
 HAVE_JQ=yes; command -v jq >/dev/null 2>&1 || HAVE_JQ=no
 
+# ─── The two facts that come from outside this machine's files ───────────────
+#
+# LOAD STATE is the CLI's own conclusion and is not written anywhere readable, so
+# the probe runs the listing — bounded, because a wedged CLI must not wedge the
+# diagnosis of the machine it is wedging.
+#
+# THE FIELD SPLIT. `load-state=<s> error=<e>` in the three determinate states;
+# `unknown` adds ` cause=<text>` (A-4.S2.4). `error` can hold spaces and the CLI's
+# own punctuation, so it is taken to the end of the line and then trimmed of the
+# cause suffix when there is one — the reverse order would truncate an error at
+# the first space.
+LOAD_FACT="$(_doctor_bounded "$(_doctor_probe_seconds)" detect_plugin_load_state "$BIONIC_PLUGIN_ID")"
+LOAD_RC=$?
+if [ "$LOAD_RC" = "124" ] || [ -z "$LOAD_FACT" ]; then
+  LOAD_STATE="unknown"
+  LOAD_ERROR="-"
+  LOAD_CAUSE="the plugin listing did not answer within $(_doctor_probe_seconds) seconds"
+else
+  LOAD_STATE="${LOAD_FACT#load-state=}"; LOAD_STATE="${LOAD_STATE%% *}"
+  LOAD_ERROR="${LOAD_FACT#*error=}"
+  case "$LOAD_FACT" in
+    *" cause="*) LOAD_CAUSE="${LOAD_FACT##* cause=}"; LOAD_ERROR="${LOAD_ERROR%% cause=*}" ;;
+    *)           LOAD_CAUSE="" ;;
+  esac
+fi
+
+# DUPLICATES is a registry read, so no bound: zero or more lines, each already
+# carrying its own consolidation command. Silence means none — except that the
+# probe never stays silent when it could not look (A-4.S2.8), which is why an
+# unreadable registry arrives here as a `dup=unknown` line rather than as nothing.
+DUP_LINES="$(detect_plugin_duplicates)"
+
 # ─── The dependency sweep ────────────────────────────────────────────────────
 #
 # One pass over the table produces three renderings at once — the dependency
@@ -194,8 +304,16 @@ HAVE_JQ=yes; command -v jq >/dev/null 2>&1 || HAVE_JQ=no
 # and agent entries it contributes, and the layout the CLI installs says exactly
 # where those live: one `skills/<slug>/SKILL.md` per skill, one `agents/<name>.md`
 # per agent, under the registry's `installPath`. Counting the files IS counting
-# the roster lines. Lane-3b dependencies are binaries, packages and MCP
-# registrations — no skill or agent metadata, so no roster cost at all.
+# the roster lines. A dependency that is not plugin-shaped — a binary, an npm
+# package, an MCP registration — carries no skill or agent metadata, so it costs
+# nothing at all.
+#
+# THE BRANCH IS ON SHAPE, NOT ON CLASS, and that distinction is a corrected bug
+# (S3's hand-on). It used to key on the old dependency-lane code, which meant
+# "installed by the harness" — and impeccable installs through the CLI exactly
+# like the two core plugins while belonging to a different class. Keyed the old
+# way, an INSTALLED plugin contributing a skill to every session was reported as
+# contributing zero.
 _doctor_roster_counts() {  # <install-path> -> "<skills> <agents>"
   local root="${1:-}" p skills=0 agents=0
   for p in "$root"/skills/*/SKILL.md; do [ -f "$p" ] && skills=$((skills + 1)); done
@@ -206,7 +324,9 @@ _doctor_roster_counts() {  # <install-path> -> "<skills> <agents>"
 DEP_ROWS=""
 ROSTER_ROWS=""
 DEGRADATION=""
+DEP_VERSIONS=""
 N_PRESENT=0; N_ABSENT=0; N_UNKNOWN=0; N_VIOLATION=0
+N_ABSENT_ACTIONABLE=0; N_ABSENT_WHEN_NEEDED=0
 ROSTER_TOTAL=0; ROSTER_TOTAL_KNOWN=yes
 CCSTATUSLINE_STATE="unknown"
 
@@ -214,27 +334,31 @@ while IFS= read -r dep_name; do
   [ -n "$dep_name" ] || continue
   fact="$(detect_dep "$dep_name")" || continue
 
-  lane="${fact#*lane=}";           lane="${lane%% *}"
   present="${fact#*present=}";     present="${present%% *}"
   dep_version="${fact#*version=}"; dep_version="${dep_version%% *}"
   constraint="${fact#*constraint=}"; constraint="${constraint%% *}"
   verdict="${fact##*verdict=}"
-  mechanism="$(dep_field "$dep_name" install_fn_or_check)"
+  # WHEN bionic installs it, and HOW. `class` is what the table now declares and
+  # what this report prints; `kind` names the install mechanism and decides the
+  # two branches below that are about shape rather than policy.
+  dep_class="$(dep_field "$dep_name" class)"
+  kind="$(dep_field "$dep_name" kind)"
 
   [ "$dep_name" = "ccstatusline" ] && CCSTATUSLINE_STATE="$present"
+  DEP_VERSIONS="${DEP_VERSIONS}${dep_name}	${dep_version}"$'\n'
 
-  DEP_ROWS="${DEP_ROWS}$(printf '  %-5s %-22s %-8s %-11s %-11s %s' \
-    "$lane" "$dep_name" "$present" "$dep_version" "$constraint" "$verdict")"$'\n'
+  DEP_ROWS="${DEP_ROWS}$(printf '  %-11s %-22s %-8s %-11s %-11s %s' \
+    "$dep_class" "$dep_name" "$present" "$dep_version" "$constraint" "$verdict")"$'\n'
 
   # ── roster footprint ──
-  if [ "$lane" != "3a" ]; then
-    # No parenthetical per row: the method paragraph above states once why every
-    # lane-3b dependency costs nothing, and repeating it twenty times would bury
-    # the two rows that carry an actual number.
+  if [ "$kind" != "native" ]; then
+    # No parenthetical per row: the method paragraph above states once why a
+    # dependency that is not plugin-shaped costs nothing, and repeating it twenty
+    # times would bury the rows that carry an actual number.
     ROSTER_ROWS="${ROSTER_ROWS}$(printf '  %-22s %s' "$dep_name" "0")"$'\n'
   elif [ "$present" = "unknown" ]; then
     ROSTER_ROWS="${ROSTER_ROWS}$(printf '  %-22s %-9s %s' \
-      "$dep_name" "unknown" "($(_doctor_unknown_cause "$mechanism"))")"$'\n'
+      "$dep_name" "unknown" "($(_doctor_unknown_cause "$kind"))")"$'\n'
     ROSTER_TOTAL_KNOWN=no
   elif [ "$present" = "no" ]; then
     ROSTER_ROWS="${ROSTER_ROWS}$(printf '  %-22s %-9s %s' \
@@ -250,36 +374,53 @@ while IFS= read -r dep_name; do
       n_skills="${counts%% *}"; n_agents="${counts##* }"
       roster_lines=$((n_skills + n_agents))
       ROSTER_ROWS="${ROSTER_ROWS}$(printf '  %-22s %-9s %s' \
-        "$dep_name" "$roster_lines" "(${n_skills} skills + ${n_agents} agents)")"$'\n'
+        "$dep_name" "$roster_lines" \
+        "(${n_skills} $(_doctor_plural "$n_skills" skill skills) + ${n_agents} $(_doctor_plural "$n_agents" agent agents))")"$'\n'
       ROSTER_TOTAL=$((ROSTER_TOTAL + roster_lines))
     fi
   fi
 
   # ── tallies and the degradation map ──
+  #
+  # AN ABSENT WHEN-NEEDED TOOL IS NOT A DEGRADATION (D-B, ratified 2026-08-20).
+  # Absence is its NORMAL state: these install at the moment a route first needs
+  # them, so a machine that has never run that route is correct to be without
+  # them. Doctor used to call every absence a degradation and raise a matching
+  # action, which told users to repair a machine that was working — and told them
+  # to run the one command that would not have installed it anyway, since setup
+  # deliberately never asks about these rows.
   case "$present" in
     yes)
       N_PRESENT=$((N_PRESENT + 1))
       if [ "$verdict" = "violation" ]; then
         N_VIOLATION=$((N_VIOLATION + 1))
-        if [ "$lane" = "3a" ]; then
-          DEGRADATION="${DEGRADATION}  ${dep_name} ${dep_version} violates constraint ${constraint} → run /bionic:setup — it wraps the native plugin install, which resolves the version"$'\n'
-        else
-          DEGRADATION="${DEGRADATION}  ${dep_name} ${dep_version} violates constraint ${constraint} → run /bionic:setup — it reinstalls ${dep_name} at a satisfying version"$'\n'
-        fi
+        case "$dep_class" in
+          core)
+            DEGRADATION="${DEGRADATION}  ${dep_name} ${dep_version} violates constraint ${constraint} → run /bionic:setup — it wraps the native plugin install, which resolves the version"$'\n' ;;
+          when-needed)
+            DEGRADATION="${DEGRADATION}  ${dep_name} ${dep_version} violates constraint ${constraint} → the next route that needs ${dep_name} offers to install a version that satisfies it"$'\n' ;;
+          *)
+            DEGRADATION="${DEGRADATION}  ${dep_name} ${dep_version} violates constraint ${constraint} → run /bionic:setup — it reinstalls ${dep_name} at a satisfying version"$'\n' ;;
+        esac
       fi
       ;;
     no)
       N_ABSENT=$((N_ABSENT + 1))
-      if [ "$lane" = "3a" ]; then
-        DEGRADATION="${DEGRADATION}  ${dep_name} is absent (installed with bionic) → run /bionic:setup — it wraps the native plugin install"$'\n'
-      else
-        DEGRADATION="${DEGRADATION}  ${dep_name} is absent (installed by bionic) → run /bionic:setup, or accept the just-in-time install offer the next route needing ${dep_name} makes"$'\n'
-      fi
+      case "$dep_class" in
+        when-needed)
+          N_ABSENT_WHEN_NEEDED=$((N_ABSENT_WHEN_NEEDED + 1)) ;;
+        core)
+          N_ABSENT_ACTIONABLE=$((N_ABSENT_ACTIONABLE + 1))
+          DEGRADATION="${DEGRADATION}  ${dep_name} is absent → run /bionic:setup — it wraps the native plugin install"$'\n' ;;
+        *)
+          N_ABSENT_ACTIONABLE=$((N_ABSENT_ACTIONABLE + 1))
+          DEGRADATION="${DEGRADATION}  ${dep_name} is absent → run /bionic:setup — it offers to install ${dep_name}"$'\n' ;;
+      esac
       ;;
     *)
       N_UNKNOWN=$((N_UNKNOWN + 1))
-      cause="$(_doctor_unknown_cause "$mechanism")"
-      if [ "$mechanism" = "pnpm-store" ]; then
+      cause="$(_doctor_unknown_cause "$kind")"
+      if [ "$kind" = "pnpm-store" ]; then
         DEGRADATION="${DEGRADATION}  ${dep_name} presence is unknown (${cause}) → no action available; /bionic:setup re-warms the store either way"$'\n'
       else
         DEGRADATION="${DEGRADATION}  ${dep_name} presence is unknown (${cause}) → resolve the cause above, then re-run /bionic:doctor"$'\n'
@@ -291,6 +432,30 @@ done < <(dep_names)
 # ─── The report ──────────────────────────────────────────────────────────────
 
 echo "bionic doctor — read-only diagnosis. Nothing on this machine is changed."
+echo ""
+# WHY THIS SECTION LEADS (AC-13, ratified D-D). Every section below describes a
+# payload on disk. Whether the CLI actually LOADED that payload is a separate
+# question with a separate answer, and when the answer is no, everything under
+# this line describes something the session is not running — commands that
+# silently do nothing, hooks that never fire, a machine that reads healthy by
+# every other measure. W5 measured exactly that machine.
+echo "=== LOAD STATE ==="
+case "$LOAD_STATE" in
+  loaded)
+    printf '  %-19s %s\n' "bionic" "loaded — the CLI reports it enabled" ;;
+  failed)
+    printf '  %-19s %s\n' "bionic" "failed to load — bionic's commands do nothing until this is resolved"
+    # VERBATIM, because the CLI's own sentence is the only one that names WHICH
+    # dependency, and a paraphrase is how a user reinstalls the wrong thing.
+    printf '  %-19s %s\n' "reported error" "$LOAD_ERROR"
+    printf '  %-19s %s\n' "fix" "install what the error names, then start a new session — or reinstall bionic: claude plugin install ${BIONIC_PLUGIN_ID}" ;;
+  absent)
+    printf '  %-19s %s\n' "bionic" "not installed — the CLI's plugin list does not name it"
+    printf '  %-19s %s\n' "fix" "claude plugin install ${BIONIC_PLUGIN_ID}" ;;
+  *)
+    printf '  %-19s %s\n' "bionic" "unknown — ${LOAD_CAUSE}" ;;
+esac
+
 echo ""
 echo "=== PLUGIN INTEGRITY ==="
 printf '  %-19s %s\n' "payload version" "$PLUGIN_VERSION"
@@ -350,16 +515,58 @@ printf '  %-28s %s\n' "tier 1 (plugin install)" \
   "payload ${PLUGIN_VERSION}, hooks ${PLUGIN_HOOKS}"
 printf '  %-28s %s\n' "tier 2 (environment setup)" \
   "${N_PRESENT} dependencies present, ${N_ABSENT} absent, ${N_UNKNOWN} unknown, ${N_VIOLATION} constraint $(_doctor_plural "$N_VIOLATION" violation violations)"
+# The absent count is the honest total; this line is what stops a reader acting
+# on it. A tool that installs itself the first time a route needs it is not
+# missing from a machine that has not run that route yet.
+if [ "$N_ABSENT_WHEN_NEEDED" -gt 0 ]; then
+  printf '  %-28s %s\n' "" \
+    "${N_ABSENT_WHEN_NEEDED} of the absent $(_doctor_plural "$N_ABSENT_WHEN_NEEDED" "installs itself" "install themselves") the first time a route needs $(_doctor_plural "$N_ABSENT_WHEN_NEEDED" it them)"
+fi
 printf '  %-28s %s\n' "half-uninstalled" "$HALF_STATE"
 
 echo ""
 echo "=== DEPENDENCIES ==="
-echo "  Every dependency bionic knows about. The constraint column is bionic's own"
-echo "  declaration of the version range a dependency must satisfy, and the verdict is"
-echo "  that range judged against what this machine actually has."
+echo "  The class column says WHEN bionic installs a tool: core with the plugin,"
+echo "  basic at setup, when-needed the first time a route asks for it, extra only"
+echo "  if you said yes. The constraint column is the table in scripts/lib/deps.sh —"
+echo "  the sole place a version range is declared — and the verdict is that range"
+echo "  judged against what this machine actually has."
 echo ""
-printf '  %-5s %-22s %-8s %-11s %-11s %s\n' lane name present version constraint verdict
+printf '  %-11s %-22s %-8s %-11s %-11s %s\n' class name present version constraint verdict
 printf '%s' "$DEP_ROWS"
+
+# ─── Two catalogs, one name ──────────────────────────────────────────────────
+#
+# SILENT DUPLICATION IS THE DEFECT (AC-9). Nothing stops a machine holding the
+# same plugin from two catalogs at once, and which copy a session loads is then a
+# coin flip nobody saw tossed. REPORTED, NOT RESOLVED, and not nagged about
+# either: coexistence can be a deliberate choice, so the row hands over the
+# consolidation command and stops rather than raising a SUMMARY action.
+echo ""
+echo "=== DUPLICATES ==="
+if [ -z "$DUP_LINES" ]; then
+  echo "  none — every plugin here comes from exactly one catalog."
+else
+  echo "  The same name installed from two catalogs. Which copy a session loads is"
+  echo "  not bionic's decision — consolidate, or keep both deliberately."
+  echo ""
+  while IFS= read -r _dup; do
+    [ -n "$_dup" ] || continue
+    _dup_name="${_dup#dup=}";  _dup_name="${_dup_name%% *}"
+    _dup_ids="${_dup#*ids=}";  _dup_ids="${_dup_ids%% *}"
+    _dup_fix="${_dup#*fix=}"
+    if [ "$_dup_name" = "unknown" ]; then
+      # A registry that could not be read has not been read clean. Silence here
+      # would be a claim of no duplicates that nobody earned.
+      _dup_cause="${_dup##*cause=}"
+      printf '  %-22s %s\n' "unknown" "— ${_dup_cause}"
+    else
+      _dup_fix="${_dup_fix%% cause=*}"
+      printf '  %-22s %s\n' "$_dup_name" "installed from ${_dup_ids//,/, }"
+      printf '  %-22s %s\n' "" "→ ${_dup_fix}"
+    fi
+  done <<< "$DUP_LINES"
+fi
 
 echo ""
 echo "=== ENVIRONMENT ==="
@@ -475,9 +682,9 @@ echo "  bodies are just-in-time. A dependency's standing session cost is therefo
 echo "  number of roster entries it contributes (design-ledger D6)."
 echo "  method: for a plugin-shaped dependency, roster lines = the count of"
 echo "          skills/*/SKILL.md plus agents/*.md under the installPath the CLI"
-echo "          recorded in plugins/installed_plugins.json. The others are"
-echo "          binaries, packages and MCP registrations: no skill or agent metadata,"
-echo "          so no roster cost."
+echo "          recorded for it. Everything else — binaries, packages, MCP"
+echo "          registrations — carries no skill or agent metadata, so it costs"
+echo "          nothing."
 echo ""
 printf '%s' "$ROSTER_ROWS"
 if [ "$ROSTER_TOTAL_KNOWN" = "yes" ]; then
@@ -489,7 +696,10 @@ fi
 echo ""
 echo "=== DEGRADATION MAP ==="
 if [ -z "$DEGRADATION" ]; then
-  echo "  Every dependency is present and within its declared constraint."
+  # Not "every dependency is present" — on a correct machine some are absent on
+  # purpose, and the tier line above has already said how many and why.
+  echo "  Nothing is degraded — every dependency this machine needs now is present"
+  echo "  and within its declared constraint."
 else
   printf '%s' "$DEGRADATION"
 fi
@@ -504,7 +714,22 @@ echo "=== SUMMARY ==="
 
 ACTED=no
 
-# Half-uninstalled first: it is the one state /bionic:setup cannot repair,
+# LOAD STATE FIRST, for the reason its section leads: on a machine where the
+# plugin did not load, every other action line below is advice about a payload
+# nothing is running. `unknown` earns no line — nobody can act on "I could not
+# tell", and the section already named why.
+case "$LOAD_STATE" in
+  failed)
+    echo "  → bionic is installed but the CLI refused to load it, so its commands do nothing."
+    echo "      The error above names what is missing; install that, then start a new session."
+    ACTED=yes ;;
+  absent)
+    echo "  → bionic is not installed for this CLI — install it with:"
+    echo "      claude plugin install ${BIONIC_PLUGIN_ID}"
+    ACTED=yes ;;
+esac
+
+# Half-uninstalled next: it is the one state /bionic:setup cannot repair,
 # because the command surface itself is gone. The curl door is the fix (D5a —
 # the remover must not depend on the thing it removes).
 if [ "$HALF_STATE" = "yes" ]; then
@@ -535,7 +760,9 @@ SETUP_REASONS=""
 add_setup_reason() {
   if [ -z "$SETUP_REASONS" ]; then SETUP_REASONS="$1"; else SETUP_REASONS="${SETUP_REASONS}, $1"; fi
 }
-[ "$N_ABSENT" -gt 0 ] && add_setup_reason "install ${N_ABSENT} absent $(_doctor_plural "$N_ABSENT" dependency dependencies)"
+# The ACTIONABLE absences, not every absence: a when-needed tool is absent by
+# design until a route asks for it, and setup would not install it if it ran.
+[ "$N_ABSENT_ACTIONABLE" -gt 0 ] && add_setup_reason "install ${N_ABSENT_ACTIONABLE} absent $(_doctor_plural "$N_ABSENT_ACTIONABLE" dependency dependencies)"
 [ "$N_VIOLATION" -gt 0 ] && add_setup_reason "repair ${N_VIOLATION} constraint $(_doctor_plural "$N_VIOLATION" violation violations)"
 [ "$TODO_STATE" = "no" ] && add_setup_reason "write the CLAUDE_CODE_ENABLE_TODO_TOOLS export"
 [ "$LEGACY_STATE" = "yes" ] && add_setup_reason "remove the legacy .zshrc alias block"
@@ -574,6 +801,152 @@ fi
 
 if [ "$ACTED" = "no" ]; then
   echo "  → nothing to do — this machine is fully set up."
+fi
+
+# ─── The one question, and the section it appends ────────────────────────────
+#
+# EVERYTHING ABOVE THIS LINE IS INSTANT. That is what earns the question its
+# place at the end: the report is already complete and already printed, so a user
+# who says no has lost nothing and a user who says yes knows exactly what they
+# are waiting for. The question states its own cost in the same breath, because a
+# prompt that hides a thirty-second wait is not a question, it is a trap.
+#
+# WHERE THE ANSWER CAN COME FROM. A terminal, a pipe, or a file — the three ways
+# a caller can actually answer. Anything else (a closed stream, the socket a tool
+# harness hands a script) gets no question at all: printing one there would put
+# an unanswerable prompt in a report and then, if this code read anyway, block
+# forever waiting for a reply nobody is going to send. Measured, not assumed —
+# an unguarded read against a harness-supplied stream does not return.
+#
+# THE PROMPT SHAPE IS deps.sh's, by eye and not by call: doctor is forbidden to
+# reach into the consent machinery (that library's asking function belongs to the
+# code that mutates things, and this code mutates nothing), so the shape is
+# reproduced here and the ban stays intact.
+_doctor_can_ask() {
+  [ -t 0 ] && return 0
+  [ -p /dev/stdin ] && return 0
+  [ -f /dev/stdin ] && return 0
+  return 1
+}
+
+# The version the dependency sweep already probed. Used only where a package
+# manager reports that a row is outdated without saying what is installed — the
+# answer is already in this report and asking twice could disagree with itself.
+_doctor_row_version() {  # <name>
+  local want="${1:-}" n v
+  while IFS="$(printf '\t')" read -r n v; do
+    [ "$n" = "$want" ] || continue
+    printf '%s' "${v:-unknown}"
+    return 0
+  done <<< "$DEP_VERSIONS"
+  printf '%s' "unknown"
+}
+
+# INTERSECTED WITH THE TABLE, ALWAYS. Both managers answer about the whole
+# machine; bionic reports only on the rows it manages. Anything else would make a
+# tool bionic never installed look like bionic's problem — including, on this
+# machine's own history, tools this wave deliberately dropped.
+_doctor_updates_brew() {
+  local out rc name target line cur latest
+  if ! command -v brew >/dev/null 2>&1; then
+    printf '  %-22s %s\n' "not checked" "— Homebrew is not on this machine"
+    return 0
+  fi
+  # HOMEBREW_NO_AUTO_UPDATE, and it is not a preference. `brew outdated` will
+  # otherwise fetch Homebrew's own repositories first — a write to the machine
+  # doctor promised not to change, and a fetch slow enough to spend the whole
+  # bound before the question even gets answered. The user asked what is
+  # outdated, not for Homebrew to update itself.
+  out="$(_doctor_bounded "$(_doctor_probe_seconds)" env HOMEBREW_NO_AUTO_UPDATE=1 brew outdated --verbose 2>/dev/null)"
+  rc=$?
+  if [ "$rc" = "124" ] || { [ "$rc" -ne 0 ] && [ -z "$out" ]; }; then
+    printf '  %-22s %s\n' "not checked" "— Homebrew offline or timed out"
+    return 0
+  fi
+  [ -n "$out" ] || return 0
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    target="$(_dep_locator_target "$(dep_field "$name" mechanism)")"
+    line="$(printf '%s\n' "$out" | awk -v t="$target" '$1 == t { print; exit }')"
+    [ -n "$line" ] || continue
+    # `<formula> (<installed>) < <latest>` is the verbose shape. A terser
+    # Homebrew that prints the bare name still gets a row — with the version this
+    # report already knows and an honest word for the half it was not told.
+    case "$line" in
+      *" < "*)
+        cur="${line%% <*}"; cur="${cur#* (}"; cur="${cur%)*}"
+        latest="${line##*< }" ;;
+      *)
+        cur="$(_doctor_row_version "$name")"; latest="a newer version" ;;
+    esac
+    printf '  %-22s %-11s → %-13s %s\n' "$name" "$cur" "$latest" "brew upgrade ${target}"
+  done < <(dep_names_kind brew-dep)
+  return 0
+}
+
+_doctor_updates_npm() {
+  local out rc parsed name target line cur latest
+  if ! command -v npm >/dev/null 2>&1; then
+    printf '  %-22s %s\n' "not checked" "— npm is not on this machine"
+    return 0
+  fi
+  out="$(_doctor_bounded "$(_doctor_probe_seconds)" npm outdated -g --json 2>/dev/null)"
+  rc=$?
+  # npm EXITS 1 WHEN IT FINDS SOMETHING OUTDATED. That is the answer, not a
+  # failure, and treating it as one would make the section silent on exactly the
+  # machines it exists for.
+  if [ "$rc" = "124" ] || { [ "$rc" -ne 0 ] && [ -z "$out" ]; }; then
+    printf '  %-22s %s\n' "not checked" "— npm offline or timed out"
+    return 0
+  fi
+  [ -n "$out" ] || return 0
+  if [ "$HAVE_JQ" = "no" ]; then
+    printf '  %-22s %s\n' "not checked" "— npm answers in JSON and jq is not on PATH"
+    return 0
+  fi
+  parsed="$(printf '%s' "$out" | jq -r 'to_entries[] | [.key, (.value.current // "unknown"), (.value.latest // "unknown")] | @tsv' 2>/dev/null)"
+  if [ -z "$parsed" ]; then
+    printf '  %-22s %s\n' "not checked" "— npm's report could not be read"
+    return 0
+  fi
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    target="$(_dep_locator_target "$(dep_field "$name" mechanism)")"
+    line="$(printf '%s\n' "$parsed" | awk -F'\t' -v t="$target" '$1 == t { print; exit }')"
+    [ -n "$line" ] || continue
+    cur="$(printf '%s' "$line" | awk -F'\t' '{print $2}')"
+    latest="$(printf '%s' "$line" | awk -F'\t' '{print $3}')"
+    [ "$cur" != "unknown" ] || cur="$(_doctor_row_version "$name")"
+    printf '  %-22s %-11s → %-13s %s\n' "$name" "$cur" "$latest" "npm install -g ${target}@latest"
+  done < <(dep_names_kind npm-global)
+  return 0
+}
+
+if _doctor_can_ask; then
+  echo ""
+  printf 'Check for tool updates? This asks Homebrew and npm and can take up to 30 seconds. [y/N] '
+  IFS= read -r DOCTOR_UPDATE_ANSWER || DOCTOR_UPDATE_ANSWER=""
+  echo ""
+  case "$DOCTOR_UPDATE_ANSWER" in
+    y|Y|yes|YES|Yes)
+      UPDATES_BREW="$(_doctor_updates_brew)"
+      UPDATES_NPM="$(_doctor_updates_npm)"
+      echo "=== UPDATES ==="
+      # THE COMMAND IS THE DELIVERABLE. Doctor diagnoses and never treats, so
+      # what a row hands over is the exact line to run, not an offer to run it.
+      echo "  Nothing is installed or upgraded here — each row is the command to run."
+      echo ""
+      if [ -z "$UPDATES_BREW" ] && [ -z "$UPDATES_NPM" ]; then
+        echo "  Every managed tool is at its latest version."
+      else
+        # `printf '%s\n'`, and only when there is something to print: command
+        # substitution eats the trailing newline, so the bare `%s` that every
+        # other block here uses would run the last brew row into the first npm one.
+        [ -n "$UPDATES_BREW" ] && printf '%s\n' "$UPDATES_BREW"
+        [ -n "$UPDATES_NPM" ] && printf '%s\n' "$UPDATES_NPM"
+      fi
+      ;;
+  esac
 fi
 
 exit 0
