@@ -268,7 +268,7 @@ echo "=== E — nothing outside the boundary is reachable through the payload ==
 
 if [ -d "$PAYLOAD" ]; then
   for bad in .bionic .claude .git tests claude-bootstrap.sh claude-reset.sh \
-             design architecture.png node_modules .venv .DS_Store \
+             design node_modules .venv .DS_Store \
              agents-src; do
     HITS="$(find -L "$PAYLOAD" -name "$bad" 2>/dev/null | head -5)"
     if [ -z "$HITS" ]; then

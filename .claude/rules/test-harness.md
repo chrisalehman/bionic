@@ -31,5 +31,6 @@ Migrated from `.bionic/memory/INDEX.md` (epic-12 wave-01 slice 6). Both entries 
 - **Nothing is auto-discovered. Every suite is hand-listed by name.** A new
   `tests/foo.test.sh` is NOT picked up — it silently never runs, and the suite stays green
   while covering nothing. Add the `run` line in `tests/run.sh` in the same commit as the suite.
-  This is a recorded failure on this repo, not a hypothetical: the retired root `./test.sh`
-  hand-listed and produced exactly this false green (`tests/run.sh:39-42` records it).
+  This is a recorded failure on this repo, not a hypothetical: a since-deleted root wrapper
+  script hand-listed its own suites and produced exactly this false green
+  (`tests/run.sh:39-42` records it).
