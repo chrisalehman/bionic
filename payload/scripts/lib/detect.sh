@@ -313,6 +313,112 @@ detect_legacy_channel_hooks() {
   return 0
 }
 
+# ─── The legacy installed skill copy ─────────────────────────────────────────
+#
+# The retired installer rendered bionic's skills into the CLI's OWN skills
+# directory. The plugin ships the same skill inside its payload, so after the
+# cutover the installed copy is a SECOND canonical-sdlc — and not an inert one.
+# Epic-17 W5 (4/6) measured eleven hook-registration lines in that copy's
+# frontmatter, every one of them spelled for the pre-plugin hooks directory: a
+# session that loads it arms the same walls twice, once through the channel the
+# cutover was supposed to have retired, and nothing in the output says so.
+#
+# ONE NAME, NOT A WILDCARD. The same installer left copies of bionic's other
+# skills behind. 4/6 measured those as registering nothing, and what to do with
+# them is the wave's close-out decision — a consented step reading a wildcard
+# would remove directories nobody has decided about, which is a larger defect
+# than the one it fixes. So the name is stated, and the caller offers exactly
+# what this function found.
+#
+# THE PREDICATE IS THE DIRECTORY PLUS ITS SKILL.md. A bare directory of that
+# name is not evidence of a rendered skill, and "present" is about to authorise
+# a recursive delete: the file the installer always wrote is what makes the
+# claim, not the directory alone.
+DETECT_LEGACY_SKILL_NAME='canonical-sdlc'
+
+detect_legacy_skill_copy() {
+  local dir present=no
+  dir="${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/skills/${DETECT_LEGACY_SKILL_NAME}"
+  if [ -d "$dir" ] && [ -f "${dir}/SKILL.md" ]; then
+    present=yes
+  fi
+  echo "env:legacy-skill-copy present=${present} path=${dir}"
+  return 0
+}
+
+# ─── The legacy installed agent role files ───────────────────────────────────
+#
+# The same installer copied the six rendered role files into the CLI's own
+# agents directory. Role files are instructions a dispatched subagent obeys, so
+# a machine carrying installed copies can be running a build of its own
+# dispatch discipline that no plugin update will ever reach — the payload moves,
+# the copies do not, and nothing else on the machine reports the gap.
+#
+# THIS IS THE OTHER QUESTION FROM `detect_agent_integrity`, and the two are
+# easy to confuse. That one asks whether the PAYLOAD's files still match the
+# checksums the payload shipped: a local-edit question, answered inside the
+# plugin. This one asks whether a SECOND, older set exists outside the plugin
+# at all. A machine can be perfectly stock by the first measure and two builds
+# behind by this one.
+#
+# DIGESTED, NOT DIFFED, and through the same `_detect_sha256` the integrity
+# function uses. A direct `cmp` would have been simpler to read and would have
+# added a tool this library does not otherwise require — measured absent from
+# the hermetic suite's own PATH, which is the fixture standing in for a machine
+# that lacks it. Reusing the digest helper means one dependency for both agent
+# questions and one `unknown` arm, phrased the same way, when it is missing.
+#
+# TWO UNKNOWNS, both real: no digest tool, and a payload with no agents/
+# directory to compare against. Answering `absent` for either would report the
+# state this function exists to detect as the state it exists to reassure about.
+detect_installed_agent_copies() {
+  local root dir f name total=0 drift=0 names="" payload_total=0 want got
+
+  root="$(_detect_plugin_root)"
+  dir="${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/agents"
+
+  for f in "${root}/agents/"*.md; do
+    [ -f "$f" ] || continue
+    payload_total=$((payload_total + 1))
+  done
+  if [ "$payload_total" = 0 ]; then
+    echo "env:installed-agents state=unknown total=0 drift=0 names=- cause=this payload ships no agents/ directory to compare against"
+    return 0
+  fi
+  if ! command -v shasum >/dev/null 2>&1 && ! command -v sha256sum >/dev/null 2>&1; then
+    echo "env:installed-agents state=unknown total=0 drift=0 names=- cause=neither shasum nor sha256sum is on PATH, so the installed copies cannot be compared"
+    return 0
+  fi
+
+  if [ ! -d "$dir" ]; then
+    echo "env:installed-agents state=absent total=0 drift=0 names=- cause=-"
+    return 0
+  fi
+
+  # Payload-side names only. A file in the installed directory that the payload
+  # does not ship is somebody else's agent, not bionic's leftover, and counting
+  # it would report a machine's own work as bionic drift.
+  for f in "${root}/agents/"*.md; do
+    [ -f "$f" ] || continue
+    name="${f##*/}"
+    [ -f "${dir}/${name}" ] || continue
+    total=$((total + 1))
+    want="$(_detect_sha256 "$f")"           || want=""
+    got="$(_detect_sha256 "${dir}/${name}")" || got=""
+    if [ -z "$want" ] || [ "$got" != "$want" ]; then
+      drift=$((drift + 1))
+      names="${names:+${names},}${name}"
+    fi
+  done
+
+  if [ "$total" = 0 ]; then
+    echo "env:installed-agents state=absent total=0 drift=0 names=- cause=-"
+  else
+    echo "env:installed-agents state=present total=${total} drift=${drift} names=${names:--} cause=-"
+  fi
+  return 0
+}
+
 # ─── Plugin registration ─────────────────────────────────────────────────────
 #
 # Is bionic registered with the CLI on this machine? This is the fact that says
@@ -515,6 +621,8 @@ detect_all() {
   detect_env_todo_tools
   detect_zshrc_legacy_block
   detect_legacy_channel_hooks
+  detect_legacy_skill_copy
+  detect_installed_agent_copies
   detect_plugin_registered
   detect_half_uninstalled
   while IFS= read -r name; do
