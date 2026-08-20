@@ -31,7 +31,7 @@
 #
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
 #
-# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
+# Registered on both channels: hooks/hooks.json (agent contexts, behind agent-context-guard.sh) and skills/canonical-sdlc/SKILL.md frontmatter (main thread).
 
 set -u
 

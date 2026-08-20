@@ -15,7 +15,7 @@
 # stdout (a Stop hook's stdout could carry a block payload).
 # [INSTRUMENT]
 #
-# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
+# Registered in skills/canonical-sdlc/SKILL.md frontmatter; live only while that skill is armed.
 
 set -u
 

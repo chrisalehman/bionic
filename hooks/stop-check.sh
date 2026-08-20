@@ -30,7 +30,7 @@
 # only. Producers may think and take seconds; gates may only read (§3.2).
 # [WALL: tests/stop-check.test.sh]
 #
-# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
+# Registered on no channel — invoked on demand from the mounted plugin payload.
 
 set -uo pipefail
 

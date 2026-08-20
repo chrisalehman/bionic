@@ -16,7 +16,7 @@
 #
 # Thread discrimination (epic-08 Q1 spike + hooks docs): agent_type
 # non-empty → subagent → silent. Missing keys classify as MAIN THREAD.
-# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
+# Registered in skills/canonical-sdlc/SKILL.md frontmatter; live only while that skill is armed.
 
 set -u
 

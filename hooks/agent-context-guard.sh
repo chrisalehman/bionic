@@ -58,7 +58,7 @@
 # Exit code 2 (from the wall behind it) = block the tool call entirely.
 # [WALL: tests/agent-context-guard.test.sh]
 #
-# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
+# Registered always-on in hooks/hooks.json, in front of the wall named by its argument.
 
 set -uo pipefail
 
