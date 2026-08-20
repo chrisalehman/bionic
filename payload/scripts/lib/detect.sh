@@ -22,6 +22,7 @@
 #   env:todo-tools present=<yes|no>
 #   env:zshrc-legacy present=<yes|no>
 #   env:legacy-channel-hooks count=<n|unknown>
+#   env:legacy-hook-files count=<n|unknown> path=<dir> names=<a.sh,b.sh|-> [cause=<text>]
 #   state:half-uninstalled=<yes|no>
 #
 # `unknown` APPEARS WHERE HONESTY REQUIRES IT. Two of these values can read
@@ -313,6 +314,167 @@ detect_legacy_channel_hooks() {
   return 0
 }
 
+# ─── The legacy installed skill copy ─────────────────────────────────────────
+#
+# The retired installer rendered bionic's skills into the CLI's OWN skills
+# directory. The plugin ships the same skill inside its payload, so after the
+# cutover the installed copy is a SECOND canonical-sdlc — and not an inert one.
+# Epic-17 W5 (4/6) measured eleven hook-registration lines in that copy's
+# frontmatter, every one of them spelled for the pre-plugin hooks directory: a
+# session that loads it arms the same walls twice, once through the channel the
+# cutover was supposed to have retired, and nothing in the output says so.
+#
+# ONE NAME, NOT A WILDCARD. The same installer left copies of bionic's other
+# skills behind. 4/6 measured those as registering nothing, and what to do with
+# them is the wave's close-out decision — a consented step reading a wildcard
+# would remove directories nobody has decided about, which is a larger defect
+# than the one it fixes. So the name is stated, and the caller offers exactly
+# what this function found.
+#
+# THE PREDICATE IS THE DIRECTORY PLUS ITS SKILL.md. A bare directory of that
+# name is not evidence of a rendered skill, and "present" is about to authorise
+# a recursive delete: the file the installer always wrote is what makes the
+# claim, not the directory alone.
+DETECT_LEGACY_SKILL_NAME='canonical-sdlc'
+
+detect_legacy_skill_copy() {
+  local dir present=no
+  dir="${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/skills/${DETECT_LEGACY_SKILL_NAME}"
+  if [ -d "$dir" ] && [ -f "${dir}/SKILL.md" ]; then
+    present=yes
+  fi
+  echo "env:legacy-skill-copy present=${present} path=${dir}"
+  return 0
+}
+
+# ─── The legacy installed hook FILES ─────────────────────────────────────────
+#
+# THE OTHER HALF OF A QUESTION THIS LIBRARY ONLY ANSWERED HALFWAY. The retired installer
+# copied every hooks/*.sh into the CLI's own hooks directory and then wired those copies
+# into settings.json. `detect_legacy_channel_hooks` above counts the REGISTRATIONS. Nothing
+# counted the FILES — so a machine cleaned of every registration and a machine still
+# carrying eighteen scripts read identically in the report, and the second one is the one
+# whose owner can SEE the directory. A diagnosis that does not mention what a person can
+# see with `ls` is the kind a person stops believing.
+#
+# INERT IS NOT ABSENT, which is why this is worth a line of its own. With the registrations
+# gone the files run nothing; they are disk, not behaviour. But they are also an OLDER BUILD
+# of every wall this repo ships, sitting under a path that four eras of documentation told
+# people to invoke, and the close-out that removes them needs to know they are there.
+#
+# PAYLOAD-SIDE NAMES ONLY — `detect_installed_agent_copies` states the rule and it binds
+# here for a sharper reason: this count is read by a person deciding what to delete. A .sh
+# in that directory the payload does not ship is somebody's OWN hook, and reporting it as
+# bionic's leftover invites them to delete their own work. Over-reporting and under-
+# reporting are not symmetric here, so the error is taken in the safe direction.
+#
+# `unknown` WHERE THE COMPARISON CANNOT BE MADE. A payload with no hooks/ directory gives
+# nothing to match names against, and `0` there would report "nothing was left behind" about
+# a machine nobody managed to look at — the same substitution of reassurance for measurement
+# the integrity functions above refuse.
+detect_legacy_hook_files() {
+  local root dir f name count=0 names="" payload_total=0
+
+  root="$(_detect_plugin_root)"
+  dir="${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/hooks"
+
+  for f in "${root}/hooks/"*.sh; do
+    [ -f "$f" ] || continue
+    payload_total=$((payload_total + 1))
+  done
+  if [ "$payload_total" = 0 ]; then
+    echo "env:legacy-hook-files count=unknown path=${dir} names=- cause=this payload ships no hooks/ directory to match names against"
+    return 0
+  fi
+
+  if [ -d "$dir" ]; then
+    for f in "${root}/hooks/"*.sh; do
+      [ -f "$f" ] || continue
+      name="${f##*/}"
+      if [ -f "${dir}/${name}" ]; then
+        count=$((count + 1))
+        names="${names}${names:+,}${name}"
+      fi
+    done
+  fi
+
+  echo "env:legacy-hook-files count=${count} path=${dir} names=${names:--}"
+  return 0
+}
+
+# ─── The legacy installed agent role files ───────────────────────────────────
+#
+# The same installer copied the six rendered role files into the CLI's own
+# agents directory. Role files are instructions a dispatched subagent obeys, so
+# a machine carrying installed copies can be running a build of its own
+# dispatch discipline that no plugin update will ever reach — the payload moves,
+# the copies do not, and nothing else on the machine reports the gap.
+#
+# THIS IS THE OTHER QUESTION FROM `detect_agent_integrity`, and the two are
+# easy to confuse. That one asks whether the PAYLOAD's files still match the
+# checksums the payload shipped: a local-edit question, answered inside the
+# plugin. This one asks whether a SECOND, older set exists outside the plugin
+# at all. A machine can be perfectly stock by the first measure and two builds
+# behind by this one.
+#
+# DIGESTED, NOT DIFFED, and through the same `_detect_sha256` the integrity
+# function uses. A direct `cmp` would have been simpler to read and would have
+# added a tool this library does not otherwise require — measured absent from
+# the hermetic suite's own PATH, which is the fixture standing in for a machine
+# that lacks it. Reusing the digest helper means one dependency for both agent
+# questions and one `unknown` arm, phrased the same way, when it is missing.
+#
+# TWO UNKNOWNS, both real: no digest tool, and a payload with no agents/
+# directory to compare against. Answering `absent` for either would report the
+# state this function exists to detect as the state it exists to reassure about.
+detect_installed_agent_copies() {
+  local root dir f name total=0 drift=0 names="" payload_total=0 want got
+
+  root="$(_detect_plugin_root)"
+  dir="${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/agents"
+
+  for f in "${root}/agents/"*.md; do
+    [ -f "$f" ] || continue
+    payload_total=$((payload_total + 1))
+  done
+  if [ "$payload_total" = 0 ]; then
+    echo "env:installed-agents state=unknown total=0 drift=0 names=- cause=this payload ships no agents/ directory to compare against"
+    return 0
+  fi
+  if ! command -v shasum >/dev/null 2>&1 && ! command -v sha256sum >/dev/null 2>&1; then
+    echo "env:installed-agents state=unknown total=0 drift=0 names=- cause=neither shasum nor sha256sum is on PATH, so the installed copies cannot be compared"
+    return 0
+  fi
+
+  if [ ! -d "$dir" ]; then
+    echo "env:installed-agents state=absent total=0 drift=0 names=- cause=-"
+    return 0
+  fi
+
+  # Payload-side names only. A file in the installed directory that the payload
+  # does not ship is somebody else's agent, not bionic's leftover, and counting
+  # it would report a machine's own work as bionic drift.
+  for f in "${root}/agents/"*.md; do
+    [ -f "$f" ] || continue
+    name="${f##*/}"
+    [ -f "${dir}/${name}" ] || continue
+    total=$((total + 1))
+    want="$(_detect_sha256 "$f")"           || want=""
+    got="$(_detect_sha256 "${dir}/${name}")" || got=""
+    if [ -z "$want" ] || [ "$got" != "$want" ]; then
+      drift=$((drift + 1))
+      names="${names:+${names},}${name}"
+    fi
+  done
+
+  if [ "$total" = 0 ]; then
+    echo "env:installed-agents state=absent total=0 drift=0 names=- cause=-"
+  else
+    echo "env:installed-agents state=present total=${total} drift=${drift} names=${names:--} cause=-"
+  fi
+  return 0
+}
+
 # ─── Plugin registration ─────────────────────────────────────────────────────
 #
 # Is bionic registered with the CLI on this machine? This is the fact that says
@@ -334,9 +496,17 @@ detect_legacy_channel_hooks() {
 # `yes` tells an uncovered one they are safe to delete their only enforcement.
 # A registry that is simply ABSENT is a different case — the CLI writes that
 # file when it installs anything, so its absence means nothing is installed.
+# The registry file, named ONCE. Both the registration fact and the root resolver below
+# read it through this expression, so a machine whose config dir moves cannot have the two
+# answering about different files — the drift that makes a "registered" plugin resolve to a
+# root nobody installed.
+_detect_installed_plugins_file() {
+  printf '%s' "${BIONIC_INSTALLED_PLUGINS_FILE:-${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/installed_plugins.json}"
+}
+
 detect_plugin_registered() {
   local installed_json count
-  installed_json="${BIONIC_INSTALLED_PLUGINS_FILE:-${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/installed_plugins.json}"
+  installed_json="$(_detect_installed_plugins_file)"
 
   if [ ! -f "$installed_json" ]; then
     echo "plugin:registered=no"
@@ -362,6 +532,233 @@ detect_plugin_registered() {
     0)           echo "plugin:registered=no" ;;
     *)           echo "plugin:registered=yes" ;;
   esac
+  return 0
+}
+
+# ─── THE PARSE ──────────────────────────────────────────────────────────────
+#
+# ONE reading of the registry's schema, for ANY plugin name. Generalized at W5 Step-6
+# (review RV-4/RV-7): doctor.sh had grown a second, unpinned parse of the same CLI-internal
+# shape, and the pinned one — detect_plugin_root — had no production callsite at all, so the
+# copy under test was the copy that did not run. Two readings of a schema we do not own is
+# the exact duplication this file's ownership rule exists to forbid: the CLI renames
+# `installPath`, one of them gets fixed, and the other keeps answering in the old shape with
+# no less confidence.
+#
+# QUIET, DELIBERATELY, and this is the one place this file's posture splits by CALLER rather
+# than by fact. Loudness is a claim about CONSEQUENCE, not about failure. Asking where
+# `superpowers` landed and finding it absent is an ORDINARY answer that `/bionic:doctor`
+# renders in a table cell twenty times a run; a parse that shouted it would bury the report
+# on exactly the half-configured machine the report exists for. So the parse says nothing and
+# the SPECIALIZATION below — bionic's own, feeding a path something is about to execute —
+# carries the three-line refusal and the named fix.
+#
+# THE EXIT CODE CARRIES WHAT THE STDERR NO LONGER DOES, so no distinction was lost in the
+# move; detect_plugin_root rebuilds its three refusal messages from these:
+#
+#   0  resolved; the absolute installPath is on stdout
+#   2  no registry file at all
+#   3  no entry for this name, or the registry could not be parsed
+#   4  the entry is there and names a directory that does not exist
+#
+# THE TWO JQ PROGRAMS ARE ONE PROGRAM. `DETECT_PLUGIN_ROOT_JQ` below stays a bionic-shaped
+# one-line literal because it is also the DOCTRINE SEED: skills/canonical-sdlc/SKILL.md
+# carries it verbatim for a model to paste at Patrol arming, which is the one moment nothing
+# in this file can be sourced yet (resolving the plugin root is precisely what you cannot do
+# from inside the plugin). `--arg n` is not pasteable, so the literal cannot simply become
+# the general form. tests/dispatch-spans.test.sh §5i reads it out of here with a `sed` that
+# requires exactly that spelling, and tests/plugin-lib.test.sh Group S pins the literal to be
+# this general program with `$n` bound to "bionic" and nothing else — so the seed cannot
+# quietly become a THIRD parse.
+DETECT_PLUGIN_INSTALL_PATH_JQ='.plugins // {} | to_entries[] | select(.key | split("@")[0] == $n) | .value[0].installPath // empty'
+DETECT_PLUGIN_ROOT_JQ='.plugins // {} | to_entries[] | select(.key | split("@")[0] == "bionic") | .value[0].installPath // empty'
+
+# The raw reading: what the registry RECORDS for this name, with no claim that the
+# directory is there. Split out from the public function for one reason — the refusal
+# detect_plugin_root prints when a recorded tree has vanished has to NAME the path it could
+# not find, and the public function deliberately hands back nothing in that case. One parse,
+# two questions: "what is written down" and "is it true".
+_detect_registry_install_path() {  # <plugin-name>
+  local name="${1:-}" reg path
+
+  [ -n "$name" ] || return 3
+
+  reg="$(_detect_installed_plugins_file)"
+  [ -f "$reg" ] || return 2
+
+  if command -v jq >/dev/null 2>&1; then
+    path="$(jq -r --arg n "$name" "$DETECT_PLUGIN_INSTALL_PATH_JQ" "$reg" 2>/dev/null | head -1)"
+  else
+    # No jq: the key is a literal string in the file, and the marketplace suffix follows the
+    # name rather than preceding it, so `"<name>@` is a whole-name match — `superpowers-extras@`
+    # does not carry the `@` in that position. `index()` and not a regex, on purpose: a plugin
+    # name is someone else's string and a `.` or `+` in it must be a character, not a
+    # metacharacter. The first installPath after the key is this entry's; `exit` stops before
+    # the next plugin's.
+    path="$(awk -v key="\"${name}@" '
+      index($0, key) { f = 1 }
+      f && /"installPath"/ {
+        line = $0
+        sub(/.*"installPath"[[:space:]]*:[[:space:]]*"/, "", line)
+        sub(/".*/, "", line)
+        print line
+        exit
+      }' "$reg" 2>/dev/null)"
+  fi
+
+  case "$path" in
+    ''|null) return 3 ;;
+  esac
+
+  printf '%s\n' "$path"
+  return 0
+}
+
+detect_plugin_install_path() {  # <plugin-name>
+  local path st
+  path="$(_detect_registry_install_path "${1:-}")"; st=$?
+  [ "$st" -eq 0 ] || return "$st"
+  [ -d "$path" ] || return 4
+  printf '%s\n' "$path"
+  return 0
+}
+
+# ─── The installed plugin root ───────────────────────────────────────────────
+#
+# WHERE THE PLUGIN ACTUALLY IS, answered out of the CLI's own record rather than guessed.
+# Bionic's specialization of the parse above; the reading is shared, the POSTURE is this
+# function's own.
+#
+# THE PROBLEM THIS RETIRES. Payload-native scripts are typed into a model's own shell as
+# often as they are registered as commands, and `${CLAUDE_PLUGIN_ROOT}` is substituted only
+# in the latter. The old spelling covered the gap with `${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}`
+# — which always resolves, and resolves to a bootstrap-era copy that can be an OLDER BUILD
+# than the plugin the CLI loaded. A stale hook that runs is worse than a missing one: it
+# enforces a doctrine nobody is following and reports success doing it.
+#
+# THE ORACLE IS THE REGISTRY, ratified 2026-08-19 (design ledger D-B). Not because we own
+# it — we do not, its schema is CLI-internal — but because it is the record the CLI's own
+# install wrote, which is the only property that makes an answer here true.
+#
+# AND THAT HOLDS BY TWO DIFFERENT ROUTES, which is worth a sentence because the difference
+# is what a stale-looking root turns on (measured W5 S7 §4.1/4.2). On a GIT-SOURCE feed —
+# the public install — the cache directory the registry names is exactly what the CLI
+# loads, so the registry is right by construction. On a DIRECTORY-SOURCE MARKETPLACE — a
+# local checkout registered as a feed, which is what every dogfood install is — the CLI
+# reads the marketplace SOURCE tree and never opens that cache at all; the two are the same
+# build only as of the last (re)install, and a reinstall is what re-converges them. The
+# answer this function gives is correct on both paths. What differs is what a divergence
+# means: on the first there cannot be one, on the second it means the source tree has moved
+# since the install.
+#
+# The schema being someone else's is why the parse is pinned by tests and why an unreadable
+# file REFUSES instead of degrading.
+#
+# THIS IS THE ONE FUNCTION IN THIS FILE THAT DOES NOT ANSWER `unknown`, and the deviation is
+# the point. Every other fact here feeds a REPORT, where "I could not tell" is a legitimate
+# and useful value. This one feeds a PATH that something is about to execute, and there is
+# no honest degraded form of that: a caller handed a plausible directory cannot tell it
+# apart from a resolved one. So the contract is: the absolute installPath on stdout and exit
+# 0, or NOTHING on stdout, a named fix on stderr, and exit 1. No fallback exists anywhere in
+# this function, deliberately — including the one it was written to replace.
+
+_detect_plugin_root_refuse() {  # <what went wrong>
+  echo "detect_plugin_root: REFUSED — $1" >&2
+  echo "  Fix: claude plugin install bionic@bionic" >&2
+  echo "  There is deliberately no fallback root: a guessed path can be an older build than" >&2
+  echo "  the one the CLI loads, and a stale hook that runs is worse than a missing one." >&2
+  return 1
+}
+
+detect_plugin_root() {
+  local root st reg
+
+  # The refusals name the file and the path, so the registry expression is re-read here for
+  # the MESSAGE only — never for a second answer. The parse below is the only reading that
+  # decides anything.
+  reg="$(_detect_installed_plugins_file)"
+
+  root="$(detect_plugin_install_path bionic)"
+  st=$?
+  [ "$st" -eq 0 ] && { printf '%s\n' "$root"; return 0; }
+
+  case "$st" in
+    2) _detect_plugin_root_refuse "no plugin registry at ${reg} — bionic is not installed." ;;
+    4) _detect_plugin_root_refuse "the registry names $(_detect_registry_install_path bionic) as bionic's install path, and no such directory exists — the install is broken or half-removed." ;;
+    *) _detect_plugin_root_refuse "no bionic entry in ${reg}, or the registry could not be read — bionic is not installed." ;;
+  esac
+  return 1
+}
+
+# ─── The installed build vs this repo's tip ──────────────────────────────────
+#
+# WHICH COMMIT IS ACTUALLY RUNNING, asked of a machine that is developing the plugin it is
+# running. The CLI records the commit each install came from (`gitCommitSha`); a checkout
+# knows its own HEAD; nothing until now compared them. Epic-17 W5 paid for that twice —
+# once at Step 5 and again at the Step-6 tip, 20 files apart — with a green suite, green
+# walls and a doctor reporting a healthy machine each time, because every one of those
+# reads the REPO while the harness runs the INSTALL.
+#
+# REPORTS, NEVER POLICES — the posture of the agent-files line, and for the same reason: an
+# install behind the tip is a completely ordinary state (you have not reinstalled since your
+# last commit), and a doctor that treated it as a fault would cry wolf on every developer
+# machine between two commits. So: one line, four states, no exit-code effect, no repair.
+#
+# `unknown` IS THE ORDINARY ANSWER FOR ORDINARY USERS, and it is correct rather than
+# apologetic. Installed from the public feed, there is no repo to compare against, and the
+# question genuinely has no answer here. Every `unknown` carries its cause, like every
+# other one in this file.
+#
+# TWO STATES FOR "NOT THE TIP", because they take different actions. `lag` — the recorded
+# sha IS a commit in this repo — means reinstall and you are current. `not-in-repo` means
+# the installed build came from somewhere this checkout has never seen, and reinstalling
+# would change what is running rather than refresh it.
+#
+# NO jq, NO ANSWER: unlike the installPath parse, there is no awk fallback here. That one
+# has a caller that must resolve a PATH or refuse; this one feeds a report line, where
+# `unknown` with a named cause is a legitimate value and a second hand-rolled reading of
+# someone else's schema is not worth its weight.
+DETECT_PLUGIN_SHA_JQ='.plugins // {} | to_entries[] | select(.key | split("@")[0] == $n) | .value[0].gitCommitSha // empty'
+
+detect_registry_sha_lag() {  # [<repo-dir>] -> one line, always exit 0
+  local dir="${1:-$PWD}" reg sha head
+
+  reg="$(_detect_installed_plugins_file)"
+  if [ ! -f "$reg" ]; then
+    echo "plugin:registry-sha state=unknown registry=- repo=- cause=no plugin registry at ${reg}"
+    return 0
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "plugin:registry-sha state=unknown registry=- repo=- cause=jq is not on PATH, so the registry cannot be read"
+    return 0
+  fi
+
+  sha="$(jq -r --arg n bionic "$DETECT_PLUGIN_SHA_JQ" "$reg" 2>/dev/null | head -1)"
+  case "$sha" in
+    ''|null)
+      echo "plugin:registry-sha state=unknown registry=- repo=- cause=the registry's bionic entry records no gitCommitSha"
+      return 0 ;;
+  esac
+
+  if ! command -v git >/dev/null 2>&1; then
+    echo "plugin:registry-sha state=unknown registry=${sha} repo=- cause=git is not on PATH, so this tree's tip cannot be read"
+    return 0
+  fi
+
+  head="$( cd "$dir" 2>/dev/null && git rev-parse HEAD 2>/dev/null )"
+  case "$head" in
+    ''|*[!0-9a-f]*)
+      echo "plugin:registry-sha state=unknown registry=${sha} repo=- cause=not run inside a git repository, so there is no tip to compare against"
+      return 0 ;;
+  esac
+
+  if [ "$head" = "$sha" ]; then
+    echo "plugin:registry-sha state=match registry=${sha} repo=${head} cause=-"
+  elif ( cd "$dir" 2>/dev/null && git cat-file -e "${sha}^{commit}" 2>/dev/null ); then
+    echo "plugin:registry-sha state=lag registry=${sha} repo=${head} cause=-"
+  else
+    echo "plugin:registry-sha state=not-in-repo registry=${sha} repo=${head} cause=-"
+  fi
   return 0
 }
 
@@ -430,6 +827,9 @@ detect_all() {
   detect_env_todo_tools
   detect_zshrc_legacy_block
   detect_legacy_channel_hooks
+  detect_legacy_hook_files
+  detect_legacy_skill_copy
+  detect_installed_agent_copies
   detect_plugin_registered
   detect_half_uninstalled
   while IFS= read -r name; do

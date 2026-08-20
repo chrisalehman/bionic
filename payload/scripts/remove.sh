@@ -114,6 +114,13 @@ RM_TODO_EXPORT_RE='^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=
 RM_LEGACY_ALIAS_RE='alias claude=.*dangerously-skip-permissions'
 # from detect.sh: the substring that puts a managed-hook entry on the legacy channel
 RM_LEGACY_HOOK_SUBSTR='.claude/hooks/'
+# from detect.sh (DETECT_LEGACY_SKILL_NAME): the one skill the retired installer rendered
+# into the CLI's own skills directory. ONE NAME, NOT A WILDCARD — the same installer left
+# copies of bionic's other skills behind, 4/6 measured those as registering nothing, and
+# what to do with them is the wave's close-out decision. A consented step reading a wildcard
+# would recursively delete directories nobody has decided about, which is a larger defect
+# than the one it fixes.
+RM_LEGACY_SKILL_NAME='canonical-sdlc'
 # from profile.sh: the sentinels bracketing the block bionic owns
 RM_PROFILE_BEGIN_PREFIX='Bash(: bionic-profile-begin version='
 RM_PROFILE_END='Bash(: bionic-profile-end)'
@@ -416,6 +423,52 @@ else
 fi
 echo ""
 
+# ─── Item: the legacy installed skill copy ───────────────────────────────────
+#
+# THE GAP THIS CLOSES (Step-6 review, RV-6). The retired installer rendered bionic's skills
+# into the CLI's OWN skills directory, and the plugin ships the same skill inside its
+# payload — so on a pre-plugin machine the installed copy is a SECOND canonical-sdlc, and
+# not an inert one: W5 4/6 measured eleven hook registrations in its frontmatter, every one
+# spelled for the pre-plugin hooks directory. Until now this script finished without ever
+# looking, and then told the user bionic was gone. They ran a teardown, believed it, and
+# kept arming bionic's walls every session.
+#
+# INLINE, NOT `detect_legacy_skill_copy`, and the constraint is this file's oldest one: the
+# standalone door. remove.sh is curl-fetchable onto a machine whose plugin is already gone,
+# where scripts/lib/ does not exist, so it may not source detect.sh. The established answer
+# is a shared literal pinned at both ends — RM_LEGACY_SKILL_NAME above — exactly as the rc
+# markers and the todo-tools regex are handled. tests/remove.test.sh Group 17 pins the
+# constant in both files and would go red if either moved alone.
+#
+# THE PREDICATE IS THE DIRECTORY PLUS ITS SKILL.md, copied from the fact function along with
+# the name, and it is not decoration: this is a recursive delete, and a bare directory of
+# that name is not evidence that the installer rendered anything into it. Re-checked at
+# DELETE time as well as at ASK time, the same way setup step 7 re-derives its guards, so a
+# resolution that went wrong between the prompt and the removal takes nothing with it.
+RM_LEGACY_SKILL_DIR="$(_rm_claude_home)/skills/${RM_LEGACY_SKILL_NAME}"
+
+echo "legacy installed skill copy:"
+if [ -d "$RM_LEGACY_SKILL_DIR" ] && [ -f "${RM_LEGACY_SKILL_DIR}/SKILL.md" ]; then
+  echo "  ${RM_LEGACY_SKILL_DIR} is a pre-plugin rendered copy of a skill the payload also ships."
+  echo "  Its frontmatter registers hooks through the pre-plugin channel, so a session that loads"
+  echo "  it arms the same walls twice — once from the plugin, once from this copy."
+  if _rm_consent "Remove ${RM_LEGACY_SKILL_DIR} and everything under it?"; then
+    if [ -d "$RM_LEGACY_SKILL_DIR" ] && [ -f "${RM_LEGACY_SKILL_DIR}/SKILL.md" ]; then
+      rm -rf "$RM_LEGACY_SKILL_DIR" 2>/dev/null
+    fi
+    if [ ! -e "$RM_LEGACY_SKILL_DIR" ]; then
+      _rm_removed "legacy installed skill copy at ${RM_LEGACY_SKILL_DIR}"
+    else
+      _rm_leftover "could not remove ${RM_LEGACY_SKILL_DIR} — the legacy skill copy is still there"
+    fi
+  else
+    _rm_skipped "legacy installed skill copy at ${RM_LEGACY_SKILL_DIR}"
+  fi
+else
+  _rm_clean "legacy installed skill copy"
+fi
+echo ""
+
 # ─── Item: the permission marker block ───────────────────────────────────────
 #
 # In payload mode the owner does it: profile.sh's `profile_strip` removes the
@@ -683,7 +736,16 @@ echo "    • the pnpm store — a shared cache other projects hard-link from (r
 echo ""
 echo "  Next steps"
 echo "    • Restart your shell if the rc file changed"
-echo "    • Claude Code still works, without bionic's skills, hooks and agents"
+# THE CLAIM HAS TO SURVIVE ITS OWN REPORT (RV-6). This line was printed unconditionally,
+# including four lines under a Skipped list naming the things still on the machine. A
+# summary that contradicts the list above it is worse than no summary: it teaches the
+# reader to stop reading it. So the unqualified sentence is now the CLEAN run's sentence,
+# and a run that left anything behind gets one that points at what it left.
+if [ "$RM_SKIPPED" -eq 0 ] && [ -z "$RM_LEFTOVERS" ]; then
+  echo "    • Claude Code still works, without bionic's skills, hooks and agents"
+else
+  echo "    • Claude Code still works — but the items listed above are still on this machine"
+fi
 echo "    • Reinstall anytime: claude plugin install bionic@bionic"
 echo ""
 

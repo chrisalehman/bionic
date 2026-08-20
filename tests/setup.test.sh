@@ -31,13 +31,17 @@
 # the recorder file the shims append to and the bytes of the fixture tree —
 # never a dry-run flag the production path would never set.
 #
-# FIXTURE FIDELITY. The legacy alias-block fixtures are DERIVED at run time
-# from claude-bootstrap.sh's own ALIAS_START/ALIAS_END/ALIAS_CONTENT
-# assignments rather than retyped here: a fixture that spells the box-drawing
-# markers by hand would keep passing after the installer's markers changed, and
-# the markers are the whole addressability of the block. The legacy-channel-hook
-# settings fixture copies the shape claude-bootstrap.sh's wire_managed_hooks
-# writes (matcher + hooks[].command + timeout).
+# FIXTURE FIDELITY. The legacy alias-block fixtures used to be DERIVED at run
+# time from claude-bootstrap.sh's own ALIAS_START/ALIAS_END/ALIAS_CONTENT
+# assignments. That installer retired at epic-17 W5 (4/6), and the only
+# remaining copies of those markers are the ones under test — deriving from
+# them would be a fixture that changes whenever the thing it checks changes.
+# So Group 6 now STATES the markers and pins all three production copies
+# (setup.sh, detect.sh, remove.sh) against that statement. The
+# legacy-channel-hook settings fixture keeps the settings.json shape the
+# retired installer used to write (matcher + hooks[].command + timeout) —
+# that shape is Claude Code's, not the installer's, and did not retire with
+# it.
 #
 # BOTH ARMS, ALWAYS. Every mutating step is asserted in its consented AND its
 # declined form, and the declined form is proven by bytes (the fixture tree is
@@ -59,7 +63,6 @@ SETUP_SH="${REPO}/payload/scripts/setup.sh"
 SETUP_MD="${REPO}/payload/commands/setup.md"
 LIB_DIR="${REPO}/payload/scripts/lib"
 TEMPLATE="${REPO}/payload/permissions/profile.template.json"
-BOOTSTRAP="${REPO}/claude-bootstrap.sh"
 
 PASS=0; FAIL=0; TOTAL=0
 ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
@@ -414,30 +417,54 @@ expect_eq "pre-existing export outside the markers: no block added" "$RC_BEFORE"
 # ---------------------------------------------------------------------------
 # Group 6 — (e) the ported legacy .zshrc alias removal, BOTH variants.
 #
-# Fixtures derived from claude-bootstrap.sh's own assignments, not retyped.
+# Fixture markers are STATED below and every production copy is pinned to them.
 # ---------------------------------------------------------------------------
 
 echo ""
 echo "=== Group 6: legacy alias-block removal (ported from the installer) ==="
 
-read_bootstrap_literal() {  # <VARNAME> — the RHS of `VARNAME="..."` in claude-bootstrap.sh
-  local var="$1" line
-  line="$(grep -m1 "^${var}=" "$BOOTSTRAP" 2>/dev/null)"
+# The installer these literals used to be read out of (claude-bootstrap.sh) was
+# deleted at epic-17 W5 (4/6). Deriving them from payload/scripts/setup.sh
+# instead would be deriving the fixture from the script under test: change the
+# markers there and the fixture would change with them and keep passing, which
+# is the discrimination this block exists to have. So the literals are STATED
+# here — the suite is now the independent statement of what the markers are —
+# and every production copy is pinned against that statement below.
+ALIAS_START='# ─── bionic:start ───'
+ALIAS_END='# ─── bionic:end ───'
+ALIAS_CONTENT="alias claude='claude --dangerously-skip-permissions'"
+
+read_script_literal() {  # <file> <VARNAME> — the RHS of `VARNAME='...'` in <file>
+  local file="$1" var="$2" line
+  line="$(grep -m1 "^${var}=" "$file" 2>/dev/null)"
   line="${line#*=}"
   line="${line#\"}"; line="${line%\"}"
   line="${line#\'}"; line="${line%\'}"
   printf '%s' "$line"
 }
 
-ALIAS_START="$(read_bootstrap_literal ALIAS_START)"
-ALIAS_END="$(read_bootstrap_literal ALIAS_END)"
-ALIAS_CONTENT="$(read_bootstrap_literal ALIAS_CONTENT)"
+# Pin 1 — the script under test agrees with the stated markers.
+expect_eq "marker pin: setup.sh SETUP_ALIAS_START is the stated start marker" \
+  "$ALIAS_START" "$(read_script_literal "$SETUP_SH" SETUP_ALIAS_START)"
+expect_eq "marker pin: setup.sh SETUP_ALIAS_END is the stated end marker" \
+  "$ALIAS_END" "$(read_script_literal "$SETUP_SH" SETUP_ALIAS_END)"
 
-expect_true "fixture fidelity: ALIAS_START read out of claude-bootstrap.sh" test -n "$ALIAS_START"
-expect_true "fixture fidelity: ALIAS_END read out of claude-bootstrap.sh" test -n "$ALIAS_END"
-expect_true "fixture fidelity: ALIAS_CONTENT read out of claude-bootstrap.sh" test -n "$ALIAS_CONTENT"
-expect_match "fixture fidelity: the alias content is the one the installer writes" \
-  '*dangerously-skip-permissions*' "$ALIAS_CONTENT"
+# Pin 2 — the other two surfaces that must address the same block agree too.
+# detect.sh decides whether the block is PRESENT and remove.sh's standalone
+# door strips it on a machine where these libraries are already gone; a marker
+# that drifts in any one of the three makes the block unaddressable from that
+# surface alone, which is exactly the failure no single-file check would see.
+expect_true "marker pin: detect.sh addresses the same start marker" \
+  grep -qF "$ALIAS_START" "${REPO}/payload/scripts/lib/detect.sh"
+expect_eq "marker pin: remove.sh RM_RC_START is the stated start marker" \
+  "$ALIAS_START" "$(read_script_literal "${REPO}/payload/scripts/remove.sh" RM_RC_START)"
+expect_eq "marker pin: remove.sh RM_RC_END is the stated end marker" \
+  "$ALIAS_END" "$(read_script_literal "${REPO}/payload/scripts/remove.sh" RM_RC_END)"
+
+# Pin 3 — the unmarked (pre-marker) spelling setup.sh migrates still matches
+# the alias line this fixture writes, or the UNMARKED variant below is inert.
+expect_true "marker pin: setup.sh's unmarked pattern matches the fixture alias line" \
+  bash -c 'printf "%s\n" "$1" | grep -qE "$(grep -m1 "^SETUP_ALIAS_PATTERN=" "$2" | sed "s/^[^=]*=//; s/^.//; s/.$//")"' _ "$ALIAS_CONTENT" "$SETUP_SH"
 
 new_fixture alias-marked
 plant_cli_plugin "bionic@bionic" true
@@ -479,7 +506,8 @@ expect_match "no legacy block: setup says there is nothing to remove" '*legacy*'
 echo ""
 echo "=== Group 7: legacy-channel managed-hook cleanup ==="
 
-# Shape copied from claude-bootstrap.sh's wire_managed_hooks output.
+# Shape of a settings.json managed-hook entry (matcher + hooks[].command +
+# timeout) — Claude Code's schema, formerly written by the retired installer.
 plant_legacy_channel_settings() {
   cat > "$FIX/ch/settings.json" <<'JSON'
 {
@@ -750,8 +778,145 @@ run_setup "$YES" >/dev/null 2>&1
 expect_eq "RESTORED (production setup.sh): the second run appends nothing" \
   "$RC_ONE" "$(cat "$FIX/rc")"
 
+# Mutation 4 — delete the legacy-skill-copy consent gate. A declined run must
+# now remove the directory; if it does not, the gate was never what stopped it.
+grep -v '# consent gate: legacy skill copy' "$SETUP_SH" > "$MUT"
+expect_true "mutation 4: the consent-gate line exists to delete" \
+  bash -c "[ \"\$(wc -l < '$MUT')\" -lt \"\$(wc -l < '$SETUP_SH')\" ]"
+new_fixture mut4
+plant_cli_plugin "bionic@bionic" true
+mkdir -p "$FIX/ch/skills/canonical-sdlc"
+printf -- '---\nname: canonical-sdlc\n---\nbody\n' > "$FIX/ch/skills/canonical-sdlc/SKILL.md"
+SETUP_UNDER_TEST="$MUT" run_setup "$NO" >/dev/null 2>&1
+expect_true "MUTATED (consent gate removed): a declined run now removes the skill copy" \
+  bash -c '[ ! -e "$1" ]' _ "$FIX/ch/skills/canonical-sdlc"
+
+new_fixture mut4-control
+plant_cli_plugin "bionic@bionic" true
+mkdir -p "$FIX/ch/skills/canonical-sdlc"
+printf -- '---\nname: canonical-sdlc\n---\nbody\n' > "$FIX/ch/skills/canonical-sdlc/SKILL.md"
+run_setup "$NO" >/dev/null 2>&1
+expect_true "RESTORED (production setup.sh): a declined run leaves the skill copy alone" \
+  test -f "$FIX/ch/skills/canonical-sdlc/SKILL.md"
+
 # The production file was never opened for writing above — only read.
 expect_true "production setup.sh still parses after the mutation arms" bash -n "$SETUP_SH"
+
+
+# ---------------------------------------------------------------------------
+# Group 13 — (h) the legacy installed skill copy (epic-17 W5, 4/6 concern C-1;
+# spec AC-8 names it as part of the shipped migration).
+#
+# WHY THIS STEP EXISTS AT ALL. The retired installer rendered bionic's skills
+# into the CLI's OWN skills directory. The plugin ships the same skill inside
+# its payload, so after the cutover that installed copy is a second
+# canonical-sdlc — and not an inert one: 4/6 measured eleven hook-registration
+# lines in its frontmatter, every one of them spelled for the pre-plugin hooks
+# directory. A session loading it arms the same walls twice, once through the
+# channel that was supposed to have retired, and nothing in the output says so.
+#
+# 4/6 removed that copy OUT OF BAND to keep its live-fire attribution clean and
+# reported the gap rather than papering over it. This group is the gap closing:
+# the removal is the SHIPPED migration's own act, under consent, idempotent.
+#
+# BOTH ARMS BY BYTES, as everywhere else here — the declined arm fingerprints
+# the whole fixture tree, so "left alone" is a measurement rather than the
+# absence of a log line.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 13: legacy installed skill copy (C-1 / AC-8) ==="
+
+# The shape the installer left: a skill directory under the CLI's config dir,
+# carrying a SKILL.md whose frontmatter registers hooks through the pre-plugin
+# channel. The registration lines are what made this copy dangerous rather than
+# merely redundant, so the fixture carries them.
+plant_legacy_skill_copy() {
+  mkdir -p "$FIX/ch/skills/canonical-sdlc"
+  cat > "$FIX/ch/skills/canonical-sdlc/SKILL.md" <<'SKILLMD'
+---
+name: canonical-sdlc
+description: bootstrap-era rendered copy
+hooks:
+  PreToolUse:
+    - matcher: Bash
+      hooks:
+        - type: command
+          command: ~/.claude/hooks/farm-out-reminder.sh
+---
+The pre-plugin rendered body.
+SKILLMD
+  printf 'a reference file the installer also rendered\n' > "$FIX/ch/skills/canonical-sdlc/reference.md"
+}
+
+new_fixture skill-copy-consented
+plant_cli_plugin "bionic@bionic" true
+plant_legacy_skill_copy
+_present_of() {  # <fact line> -> the present= field
+  local l="$1"; l="${l#*present=}"; printf %s "${l%% *}"
+}
+
+expect_eq "fixture: the library sees the planted copy before setup runs" \
+  "yes" "$(_present_of "$(lib_query "$LIB_DIR/detect.sh" detect_legacy_skill_copy)")"
+OUT="$(run_setup "$YES")"
+expect_true "consented: the legacy skill directory is gone" \
+  bash -c '[ ! -e "$1" ]' _ "$FIX/ch/skills/canonical-sdlc"
+expect_eq "consented: the library agrees the copy is gone" \
+  "no" "$(_present_of "$(lib_query "$LIB_DIR/detect.sh" detect_legacy_skill_copy)")"
+expect_match "consented: setup names the directory it removed" '*skills/canonical-sdlc*' "$OUT"
+expect_match "consented: setup says why the copy mattered (the second registration)" \
+  '*twice*' "$OUT"
+
+new_fixture skill-copy-declined
+plant_cli_plugin "bionic@bionic" true
+plant_legacy_skill_copy
+FP_BEFORE="$(fingerprint "$FIX")"
+OUT="$(run_setup "$NO")"
+expect_eq "declined: the whole fixture tree is byte-identical" "$FP_BEFORE" "$(fingerprint "$FIX")"
+expect_true "declined: the SKILL.md is still there" \
+  test -f "$FIX/ch/skills/canonical-sdlc/SKILL.md"
+expect_match "declined: the end summary carries the action line" \
+  '*pre-plugin skill copy*' "$OUT"
+
+# ABSENT IS A NO-OP, and specifically not a prompt. A machine that never ran
+# the installer — every machine a cold user brings — must not be asked about a
+# directory that does not exist, and must not collect an action line for it.
+new_fixture skill-copy-absent
+plant_cli_plugin "bionic@bionic" true
+OUT="$(run_setup "$NO")"
+expect_no_match "absent: setup does not ask about a copy that is not there" \
+  '*Remove *skills/canonical-sdlc*' "$OUT"
+expect_match "absent: setup says there is nothing to remove" \
+  '*no pre-plugin skill copy*' "$OUT"
+expect_true "absent: no skills directory was created" \
+  bash -c '[ ! -e "$1" ]' _ "$FIX/ch/skills"
+
+# Idempotence over this step specifically: a second consented run against an
+# already-clean machine performs no mutation and asks nothing.
+new_fixture skill-copy-idempotent
+plant_cli_plugin "bionic@bionic" true
+plant_legacy_skill_copy
+run_setup "$YES" >/dev/null 2>&1
+FP_ONE="$(fingerprint "$FIX")"
+OUT="$(run_setup "$YES")"
+expect_eq "idempotent: the second consented run mutates nothing" "$FP_ONE" "$(fingerprint "$FIX")"
+expect_match "idempotent: the second run reports nothing to remove" \
+  '*no pre-plugin skill copy*' "$OUT"
+
+# THE PREDICATE IS NARROW ON PURPOSE. The same installer left copies of
+# bionic's other two skills behind. 4/6 measured those as registering nothing,
+# and their disposition belongs to the wave's close-out — a consented step that
+# removed directories nobody has decided about would be the larger defect. So
+# a sibling directory is proof the step reads a NAME, not a wildcard.
+new_fixture skill-copy-siblings
+plant_cli_plugin "bionic@bionic" true
+plant_legacy_skill_copy
+mkdir -p "$FIX/ch/skills/browser-verify"
+printf -- '---\nname: browser-verify\n---\nbody\n' > "$FIX/ch/skills/browser-verify/SKILL.md"
+run_setup "$YES" >/dev/null 2>&1
+expect_true "the named copy went" bash -c '[ ! -e "$1" ]' _ "$FIX/ch/skills/canonical-sdlc"
+expect_true "a sibling skill directory is untouched" \
+  test -f "$FIX/ch/skills/browser-verify/SKILL.md"
 
 # ---------------------------------------------------------------------------
 # Results

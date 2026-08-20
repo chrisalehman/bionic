@@ -908,6 +908,303 @@ expect_true "tests/run.sh names doctor.test.sh" \
 
 # ---------------------------------------------------------------------------
 echo ""
+echo "=== Group 12: the installed agent role files — the legacy drift line (AC-13) ==="
+# ---------------------------------------------------------------------------
+#
+# WHAT THIS LINE IS FOR. Role files ship in the PAYLOAD; that is the plugin-era
+# truth and it is the half of this line a reader most needs, because the other
+# half is a directory that should not exist. The retired installer also copied
+# the six rendered role files into the CLI's own agents directory, and a
+# session that finds them there loads THOSE — so a machine can be running a
+# build of its subagent instructions that no plugin update will ever touch, and
+# nothing else on the machine says so.
+#
+# REPORTING, NOT POLICING — the same contract the agent-integrity line above it
+# keeps. It names the state and stops: no exit-code effect, no repair, and no
+# SUMMARY action line. Group 6's "action lines only" assertion and Group 3's
+# "nothing to do" summary are the wall that keeps it that way.
+#
+# THREE FIXTURE STATES, and the drift arm is what makes the other two mean
+# anything: a line that said "no drift" on a machine where two files differ
+# would pass an absent-check and a match-check both.
+
+# The healthy machine has no legacy agents directory at all — the cold, correct,
+# post-cutover state.
+H_LEGACY_AGENTS="$(line_of "$H_OUT" "installed agent role files")"
+expect_match "absent: the line says there are no installed copies" "*none*" "$H_LEGACY_AGENTS"
+expect_match "absent: and it states the plugin-era truth in the same breath" \
+  "*payload*" "$H_LEGACY_AGENTS"
+
+# A third machine, built only for this line, so the healthy and broken fixtures
+# every other group reads keep their exact shape.
+LEGACY="$TMP/machine-legacy"; plant_machine "$LEGACY" healthy
+mkdir -p "$LEGACY/claude-home/agents"
+for a in auditor critic implementor researcher senior-implementor test-runner; do
+  cp "$LEGACY/plugin/agents/${a}.md" "$LEGACY/claude-home/agents/${a}.md"
+done
+
+L_OUT="$TMP/legacy-match.out"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEGACY" > "$L_OUT" 2>&1
+L_MATCH="$(line_of "$L_OUT" "installed agent role files")"
+expect_match "match: the line counts the six installed copies" "*6*" "$L_MATCH"
+expect_match "match: none of them differs from the payload" "*none differ*" "$L_MATCH"
+expect_match "match: the plugin-era truth is stated even when the copies agree" \
+  "*payload*" "$L_MATCH"
+
+# Now two of them drift — the shape of a machine whose plugin updated while the
+# installed copies stayed at the build the installer left.
+printf '\nA line only the installed copy carries.\n' >> "$LEGACY/claude-home/agents/critic.md"
+printf '\nAnd another.\n' >> "$LEGACY/claude-home/agents/auditor.md"
+
+D_OUT="$TMP/legacy-drift.out"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEGACY" > "$D_OUT" 2>&1
+D_DRIFT="$(line_of "$D_OUT" "installed agent role files")"
+expect_match "drift: the line counts the two that differ" "*2*" "$D_DRIFT"
+expect_match "drift: and names them, so the reader can open the right file" \
+  "*critic.md*" "$D_DRIFT"
+expect_match "drift: both names, not just the first" "*auditor.md*" "$D_DRIFT"
+expect_not_match "drift: a drifting machine is not reported as agreeing" \
+  "*none differ*" "$D_DRIFT"
+
+# THE NO-MUTATION CONTRACT HOLDS OVER THE NEW READ TOO. doctor is read-only,
+# and a line that compares two trees is exactly the kind of line that grows a
+# temp file or a repair. Fingerprint the whole legacy machine across a run.
+L_FP_BEFORE="$(fingerprint "$LEGACY")"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEGACY" >/dev/null 2>&1
+expect_eq "the drift read changes nothing on the machine it reads" \
+  "$L_FP_BEFORE" "$(fingerprint "$LEGACY")"
+
+# AND IT STAYS OUT OF THE SUMMARY. Reporting a legacy directory is not the same
+# as telling the user to delete it — /bionic:setup owns that offer, under
+# consent. If this line ever grew an action line, the summary of a machine that
+# is otherwise fine would stop saying so.
+expect_contains "the drift line adds no action line — the summary still says nothing to do" \
+  "nothing to do" "$(cat "$D_OUT")"
+
+# The fact is detect.sh's, rendered here — doctor re-deriving it from the
+# filesystem is the defect Group 8 exists to prevent, and this line is a new
+# chance to commit it.
+expect_true "doctor renders the library fact rather than listing the directory itself" \
+  grep -q 'detect_installed_agent_copies' "$DOCTOR_SH"
+expect_true "the fact function lives in detect.sh" \
+  grep -q '^detect_installed_agent_copies()' "${REPO}/payload/scripts/lib/detect.sh"
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Group 14: the two surfaces Step 9's referee needs — legacy skill copy, legacy hook files (W5 RV-5) ==="
+# ---------------------------------------------------------------------------
+#
+# THE FINDING. detect.sh already knew about the legacy skill copy — the fact function was
+# written in 4/6 and setup step 7 offers to remove it under consent — but doctor never
+# RENDERED it. So `/bionic:doctor` could report a clean machine that was arming eleven hook
+# registrations twice, through a channel the cutover was supposed to have retired. And
+# nothing at all knew about the leftover hook FILES. Those are the two surfaces the wave's
+# close-out has to referee, and the referee could not see either.
+#
+# THE TWO LINES ARE NOT THE SAME KIND OF LINE, and the split is deliberate:
+#
+#   skill copy   NOT INERT. It carries hook registrations in its own frontmatter, so a
+#                session that loads it arms the same walls a second time. There is a remedy
+#                under consent, so this one EARNS a summary action line.
+#   hook files   INERT once the registrations are gone. Disk, not behaviour. Reported and
+#                nothing more — the same read-only contract Group 12's line keeps, and for
+#                the same reason: turning "this exists" into "you should delete it" on an
+#                otherwise-fine machine is how a diagnosis becomes nagging.
+
+# ---- both absent: the cold, correct, post-cutover machine ----
+H_SKILL_COPY="$(line_of "$H_OUT" "legacy installed skill copy")"
+expect_match "absent: the skill-copy line reports none" "*none*" "$H_SKILL_COPY"
+expect_match "absent: and states the plugin-era truth in the same breath" \
+  "*payload*" "$H_SKILL_COPY"
+H_HOOK_FILES="$(line_of "$H_OUT" "legacy installed hook files")"
+expect_match "absent: the hook-files line reports none" "*none*" "$H_HOOK_FILES"
+
+# A machine carrying BOTH leftovers. Built on its own so the fixtures every other group
+# reads keep their exact shape.
+LEG2="$TMP/machine-leftovers"; plant_machine "$LEG2" healthy
+mkdir -p "$LEG2/claude-home/skills/canonical-sdlc" "$LEG2/claude-home/hooks"
+printf -- '---\nname: canonical-sdlc\nhooks:\n  PreToolUse: []\n---\nThe copy the installer rendered.\n' \
+  > "$LEG2/claude-home/skills/canonical-sdlc/SKILL.md"
+# Two of the payload's own hook names, plus one that is the user's and must NOT be counted.
+printf '#!/bin/bash\nexit 0\n' > "$LEG2/claude-home/hooks/protect-main.sh"
+printf '#!/bin/bash\nexit 0\n' > "$LEG2/plugin/hooks/landing-gate.sh"
+printf '#!/bin/bash\nexit 0\n' > "$LEG2/claude-home/hooks/landing-gate.sh"
+printf '#!/bin/bash\nexit 0\n' > "$LEG2/claude-home/hooks/my-own-hook.sh"
+
+G14_OUT="$TMP/leftovers.out"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEG2" > "$G14_OUT" 2>&1
+
+G14_SKILL="$(line_of "$G14_OUT" "legacy installed skill copy")"
+expect_match "present: the skill-copy line names the path, so the reader can go look" \
+  "*canonical-sdlc*" "$G14_SKILL"
+expect_not_match "present: and does not report it as absent" "*none*" "$G14_SKILL"
+
+G14_HOOKS="$(line_of "$G14_OUT" "legacy installed hook files")"
+# The COUNT FIELD, extracted — not a glob over the whole line. The line ends in a path
+# under $TMP, and $TMP is randomly named: a `*3*` match against the whole line passes or
+# fails depending on whether mktemp happened to put a 3 in the directory name, which is a
+# flake that reports as a real failure roughly one run in three. Pull the number out and
+# compare it as a number.
+hook_files_count_in() {  # <line> -> the count field alone
+  printf '%s\n' "$1" | sed -E 's/^.*legacy installed hook files[[:space:]]+([^ ]+).*$/\1/'
+}
+expect_eq "present: the hook-files line counts the two payload-named leftovers" \
+  "2" "$(hook_files_count_in "$G14_HOOKS")"
+# The discriminating arm, and it is the reason the count is derived from payload names:
+# THREE .sh files sit in that directory and only TWO are the payload's. A detector that
+# counted the directory would say 3, and would be telling a person their own hook is
+# bionic's litter — on a line they are reading in order to decide what to delete.
+expect_ne "present: the user's own hook is not counted as bionic's leftover" \
+  "3" "$(hook_files_count_in "$G14_HOOKS")"
+expect_match "present: and says they are inert, so nobody reads a count as an emergency" \
+  "*inert*" "$G14_HOOKS"
+
+# ---- the action asymmetry, stated as its own pair of arms ----
+expect_contains "present: the skill copy EARNS a setup action line (it is not inert)" \
+  "/bionic:setup" "$(cat "$G14_OUT")"
+expect_contains "…and the reason names the skill copy specifically" \
+  "legacy skill copy" "$(cat "$G14_OUT")"
+# The hook files must not have added one. A machine whose ONLY leftover is hook files is
+# the discriminating fixture: if that one grows an action line, the contract is broken.
+LEG3="$TMP/machine-hookfiles-only"; plant_machine "$LEG3" healthy
+mkdir -p "$LEG3/claude-home/hooks"
+printf '#!/bin/bash\nexit 0\n' > "$LEG3/claude-home/hooks/protect-main.sh"
+G14B_OUT="$TMP/hookfiles-only.out"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEG3" > "$G14B_OUT" 2>&1
+expect_eq "hook files alone: still counted" \
+  "1" "$(hook_files_count_in "$(line_of "$G14B_OUT" "legacy installed hook files")")"
+expect_contains "hook files alone: and the summary still says there is nothing to do" \
+  "nothing to do" "$(cat "$G14B_OUT")"
+
+# ---- read-only over both new reads ----
+LEG2_FP="$(fingerprint "$LEG2")"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEG2" >/dev/null 2>&1
+expect_eq "neither new read changes anything on the machine it reads" "$LEG2_FP" "$(fingerprint "$LEG2")"
+
+# ---- the facts are the library's, not re-derived here ----
+expect_true "doctor renders detect.sh's legacy-skill-copy fact rather than stat'ing the directory" \
+  grep -q 'detect_legacy_skill_copy' "$DOCTOR_SH"
+expect_true "doctor renders detect.sh's legacy-hook-files fact" \
+  grep -q 'detect_legacy_hook_files' "$DOCTOR_SH"
+expect_true "and the new fact function lives in detect.sh" \
+  grep -q '^detect_legacy_hook_files()' "${REPO}/payload/scripts/lib/detect.sh"
+
+# --- RV-7: the registry schema is read in ONE file, and it is not this one ---
+#
+# doctor.sh used to carry `_doctor_install_path`, its own jq program over the CLI's
+# `installed_plugins.json`. Same schema as detect_plugin_root's, different expression, and
+# neither side could notice the other drifting — a CLI field rename would be fixed in the
+# pinned copy and left standing in this one, answering just as confidently. Worse, it meant
+# detect_plugin_root had no production callsite at all: the parse the suite drove was not
+# the parse that ran.
+#
+# So the arm is a DUPLICATION wall, not a behaviour one. The behaviour is already covered by
+# the roster-footprint counts above (14 and 28, both read through the shared function now);
+# what this stops is the second reading coming back.
+expect_true "doctor resolves an install path through the shared library function" \
+  grep -q 'detect_plugin_install_path' "$DOCTOR_SH"
+expect_true "…and that function lives in detect.sh" \
+  grep -q '^detect_plugin_install_path()' "${REPO}/payload/scripts/lib/detect.sh"
+expect_true "the retired local parse is gone from doctor.sh" \
+  bash -c '! grep -q "^_doctor_install_path()" "$1"' _ "$DOCTOR_SH"
+# The schema itself, named as an absence — but the absence has to be of the PARSE, not of
+# the word. doctor legitimately says "installPath" out loud in two report strings, because
+# explaining where a count came from is its job; what it must never do again is run a
+# program over that field. So the pin is `jq` and `installPath` on one line, which is what
+# the retired copy was and what any re-fork would be.
+expect_eq "no jq program in doctor.sh reads the registry's installPath field" "" \
+  "$(grep -nE 'jq[^|]*installPath|installPath[^|]*jq' "$DOCTOR_SH" || true)"
+# And the multi-line form the retired copy actually used, caught by its other half: doctor
+# names the registry FILE nowhere except in prose. Selecting the file is detect.sh's job via
+# _detect_installed_plugins_file, which is the one expression that decides which registry
+# every answer in the payload comes from.
+expect_eq "doctor.sh opens the plugin registry file nowhere in its own code" "" \
+  "$(grep -n 'installed_plugins\.json' "$DOCTOR_SH" | grep -vE '^[0-9]+:[[:space:]]*(#|echo)' || true)"
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Group 15: the registry-sha divergence line (W5 critic C-6) ==="
+# ---------------------------------------------------------------------------
+#
+# THE FACT IS detect.sh's (tests/plugin-lib.test.sh Group W owns its four states). What is
+# proven HERE is that doctor RENDERS it: in PLUGIN INTEGRITY, one line, naming the state,
+# both shas when it has them, and — on the one state a user can act on — the action, inline
+# and not in the SUMMARY. That last part is the agent-files precedent applied deliberately:
+# an install behind the tip is what every developer machine looks like between two commits,
+# and a SUMMARY action line would nag on all of them.
+#
+# REAL GIT, REAL REPO. The two records this line compares are a registry file and a git
+# tip; a stubbed git would substitute the value under test. The bin dir and the repo are
+# both built by this suite, so nothing here leaves the fixture tree.
+G15_BIN="$TMP/bin-git"; mkdir -p "$G15_BIN"; cp -R "$FULL_BIN"/. "$G15_BIN"/ 2>/dev/null
+rm -f "$G15_BIN/git"
+_g="$(command -v git 2>/dev/null)" && ln -sf "$_g" "$G15_BIN/git"
+
+G15_REPO="$TMP/g15-repo"; mkdir -p "$G15_REPO"
+( cd "$G15_REPO" && git init -q . && git config user.email t@t && git config user.name t \
+  && echo one > f && git add f && git commit -qm one \
+  && echo two > f && git commit -qam two ) >/dev/null 2>&1
+G15_TIP=$( cd "$G15_REPO" && git rev-parse HEAD )
+G15_PREV=$( cd "$G15_REPO" && git rev-parse HEAD~1 )
+
+# The healthy fixture's registry, re-pointed at a commit of the fixture repo. `jq` is in the
+# base bin dir, so this is the real file the real parse reads.
+g15_set_sha() {  # <sha>
+  jq --arg s "$1" '.plugins["bionic@bionic"][0].gitCommitSha = $s' \
+    "$HEALTHY/claude-home/plugins/installed_plugins.json" > "$TMP/g15-reg.json" \
+    && cp "$TMP/g15-reg.json" "$HEALTHY/claude-home/plugins/installed_plugins.json"
+}
+
+g15_run() {  # -> stdout, run FROM the fixture repo
+  ( cd "$G15_REPO" && doctor_run "$DOCTOR_SH" "$G15_BIN" "$HEALTHY" )
+}
+
+g15_set_sha "$G15_TIP"
+G15_MATCH_OUT="$TMP/g15-match.out"; g15_run > "$G15_MATCH_OUT" 2>&1
+G15_MATCH="$(line_of "$G15_MATCH_OUT" "registry sha")"
+expect_match "the registry-sha line renders when the install is at the tip" "*match*" "$G15_MATCH"
+expect_match "…naming the sha the two agreed on" "*${G15_TIP:0:12}*" "$G15_MATCH"
+expect_contains "…inside PLUGIN INTEGRITY, where the other install facts live" \
+  "registry sha" "$(sed -n '/=== PLUGIN INTEGRITY ===/,/=== TIER STATE ===/p' "$G15_MATCH_OUT")"
+
+g15_set_sha "$G15_PREV"
+G15_LAG_OUT="$TMP/g15-lag.out"; g15_run > "$G15_LAG_OUT" 2>&1
+G15_LAG="$(line_of "$G15_LAG_OUT" "registry sha")"
+expect_match "an install behind the tip renders as lag" "*behind*" "$G15_LAG"
+expect_match "…naming the installed sha" "*${G15_PREV:0:12}*" "$G15_LAG"
+expect_match "…and the tip it is behind" "*${G15_TIP:0:12}*" "$G15_LAG"
+expect_match "…and the action, inline" "*claude plugin install bionic@bionic*" "$G15_LAG"
+expect_eq "…and exactly one such line, not one per state" "1" \
+  "$(grep -c "registry sha" "$G15_LAG_OUT" | tr -d ' ')"
+expect_eq "doctor still exits 0 with a lagging install (a diagnosis is not a failure)" "0" \
+  "$( g15_run > /dev/null 2>&1; echo $? )"
+
+# A commit this checkout has never seen is a DIFFERENT answer from lag, because reinstalling
+# would change what is running rather than refresh it.
+g15_set_sha "0123456789abcdef0123456789abcdef01234567"
+G15_FOREIGN_OUT="$TMP/g15-foreign.out"; g15_run > "$G15_FOREIGN_OUT" 2>&1
+G15_FOREIGN="$(line_of "$G15_FOREIGN_OUT" "registry sha")"
+expect_match "a foreign sha is not reported as lag" "*not a commit in this repository*" "$G15_FOREIGN"
+expect_not_match "…and is not confused with the lag wording" "*behind*" "$G15_FOREIGN"
+
+# THE ORDINARY USER'S MACHINE: no repo under the cwd at all. `unknown` with a cause is the
+# right answer, and the suite's other arms all run this way — so the healthy machine above
+# has already rendered it, and this pins that it did rather than staying silent.
+expect_match "off a repo the line still renders, as unknown with a cause" \
+  "*unknown*" "$(line_of "$H_OUT" "registry sha")"
+# The cause is RENDERED, not the word "cause": doctor's contract is that every unknown it
+# prints carries a named reason, so what is pinned is that something follows the dash.
+G15_H_LINE="$(line_of "$H_OUT" "registry sha")"
+expect_eq "…naming why it could not tell, rather than shrugging" "0" \
+  "$([ -n "${G15_H_LINE##*unknown — }" ] && [ "${G15_H_LINE##*unknown — }" != "$G15_H_LINE" ] && echo 0 || echo 1)"
+
+# The minor from the same report: an assignment nothing reads is a fact the reader assumes
+# is used. Pinned as an absence so it cannot come back with the next edit to that block.
+expect_eq "doctor.sh carries no unread HOOK_FILES_NAMES assignment" "" \
+  "$(grep -n 'HOOK_FILES_NAMES' "$DOCTOR_SH" || true)"
+
+# ---------------------------------------------------------------------------
+echo ""
 echo "========================================"
 echo "Results: $PASS/$TOTAL passed, $FAIL failed"
 echo "========================================"

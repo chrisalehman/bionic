@@ -64,6 +64,11 @@ expect_match() {
   # shellcheck disable=SC2053  # RHS is a glob on purpose
   if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "'$actual' does not match '$pattern'"; fi
 }
+expect_no_match() {
+  local label="$1" pattern="$2" actual="$3"
+  # shellcheck disable=SC2053  # RHS is a glob on purpose
+  if [[ "$actual" == $pattern ]]; then no "$label" "'$actual' unexpectedly matches '$pattern'"; else ok "$label"; fi
+}
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
@@ -902,8 +907,12 @@ expect_match "detect_all emits a dep line per row"     "*dep:superpowers lane=3a
 echo ""
 echo "=== Group 16: every detect function prints exactly one line and exits 0 ==="
 
+# detect_registry_sha_lag is in this list deliberately, driven with NO git on PATH: this
+# group's contract is the shape of the answer, not the answer, and the unknown path is the
+# one an ordinary user's machine takes.
 for fn in detect_plugin_integrity detect_env_todo_tools detect_zshrc_legacy_block \
-          detect_legacy_channel_hooks detect_plugin_registered detect_half_uninstalled; do
+          detect_legacy_channel_hooks detect_plugin_registered detect_half_uninstalled \
+          detect_registry_sha_lag; do
   out="$(detect_run BIONIC_PLUGIN_ROOT="$PL_OK" BIONIC_CLAUDE_HOME="$CH_OK" \
     BIONIC_SHELL_RC="$RC_LEGACY" BIONIC_SETTINGS_FILE="$SET_STALE" -- "$fn")"
   rc=$?
@@ -1168,6 +1177,474 @@ echo "=== Group 21: the suite is registered in tests/run.sh by name ==="
 
 expect_true "tests/run.sh names plugin-lib.test.sh" \
   grep -q 'run "plugin-lib.test.sh" bash tests/plugin-lib.test.sh' "${REPO}/tests/run.sh"
+
+
+echo ""
+echo "=== Group R: detect_plugin_root — the CLI's registry is the only oracle (W5 4/4, AC-5) ==="
+#
+# WHY THIS FUNCTION EXISTS. Payload-native scripts are invoked from a model's own shell as
+# often as from a registered command file, and `${CLAUDE_PLUGIN_ROOT}` is set only in the
+# latter. The old spelling papered over that with `${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}`,
+# which resolves — silently, and to a bootstrap-era copy that may be an older build than the
+# plugin the CLI actually loaded. A wrong-version hook that runs is worse than no hook: it
+# reports on a doctrine nobody is following.
+#
+# So the root is RESOLVED, once per session at Patrol arming, out of the record the CLI
+# itself loads from: ~/.claude/plugins/installed_plugins.json. Ratified 2026-08-19 (design
+# ledger D-B, "the reliable source of truth we control" — with the correction that the
+# registry is CLI-owned, and reliable BECAUSE it is).
+#
+# EVERY FAILURE IS LOUD AND EVERY FAILURE IS EMPTY-HANDED. There is no fallback path in
+# this function, by design: the one thing it must never do is hand back a plausible
+# directory it did not read out of the registry.
+#
+# The chain is detect_plugin_registered's, SHARED not copied — one expression naming the
+# registry file, so a machine whose config dir moves cannot have the two answer about
+# different files.
+
+root_run() {  # <env-assignments...> -- [args] ; sets R_OUT, R_ERR, R_ST
+  local -a envs=()
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
+  shift
+  R_OUT=$(env -i HOME="$TMP/home" PATH="${R_PATH:-$BASE_BIN}" "${envs[@]}" \
+    bash -c '. "$1"; shift; detect_plugin_root "$@"' _ "$DETECT_SH" "$@" 2>"$TMP/root.err")
+  R_ST=$?
+  R_ERR=$(cat "$TMP/root.err")
+}
+
+# A registry whose installPath points at a tree that actually exists — the ordinary machine.
+R_REAL="$TMP/real-plugin-root"
+mkdir -p "$R_REAL/hooks" "$R_REAL/scripts/lib"
+R_CH="$TMP/ch-root-ok"; mkdir -p "$R_CH/plugins"
+cat > "$R_CH/plugins/installed_plugins.json" <<JSON
+{
+  "version": 2,
+  "plugins": {
+    "superpowers@claude-plugins-official": [
+      { "scope": "user", "installPath": "/elsewhere/superpowers", "version": "6.3.0" }
+    ],
+    "bionic@bionic": [
+      { "scope": "user", "installPath": "${R_REAL}", "version": "0.1.0" }
+    ]
+  }
+}
+JSON
+
+root_run BIONIC_CLAUDE_HOME="$R_CH" --
+expect_eq "detect_plugin_root: a registered bionic resolves to its installPath" "$R_REAL" "$R_OUT"
+expect_eq "…exit 0" "0" "$R_ST"
+expect_eq "…and says nothing on stderr on the success path" "" "$R_ERR"
+
+# The neighbouring entry is not bionic's, and a substring match would take it.
+R_CH_NEAR="$TMP/ch-root-near"; mkdir -p "$R_CH_NEAR/plugins"
+cat > "$R_CH_NEAR/plugins/installed_plugins.json" <<JSON
+{ "version": 2, "plugins": {
+  "bionic-extras@somewhere": [ { "installPath": "/wrong/one", "version": "9.9.9" } ] } }
+JSON
+root_run BIONIC_CLAUDE_HOME="$R_CH_NEAR" --
+expect_eq "detect_plugin_root: 'bionic-extras' is not bionic (name matched whole, not by prefix)" \
+  "1" "$R_ST"
+expect_eq "…and hands back nothing at all" "" "$R_OUT"
+
+# ---- every failure arm: loud, named fix, empty stdout, no $HOME/.claude anywhere ----
+root_run BIONIC_CLAUDE_HOME="$TMP/ch-nonexistent" --
+expect_eq "detect_plugin_root: no registry file -> refusal (exit 1)" "1" "$R_ST"
+expect_eq "…and prints NOTHING on stdout, so a caller cannot use a half-answer" "" "$R_OUT"
+expect_match "…and names the fix" "*claude plugin install bionic@bionic*" "$R_ERR"
+expect_no_match "…and never re-offers the retired \${CLAUDE_PLUGIN_ROOT:-\$HOME/.claude} fallback" \
+  "*CLAUDE_PLUGIN_ROOT:-\$HOME*" "$R_ERR"
+
+root_run BIONIC_CLAUDE_HOME="$CH_EMPTY" --
+expect_eq "detect_plugin_root: registry with no bionic entry -> refusal" "1" "$R_ST"
+expect_match "…named as not-installed rather than as a parse problem" "*not installed*" "$R_ERR"
+
+root_run BIONIC_CLAUDE_HOME="$CH_MALFORMED" --
+expect_eq "detect_plugin_root: unparseable registry -> refusal, never a guess" "1" "$R_ST"
+expect_eq "…and still hands back nothing" "" "$R_OUT"
+
+# The stale-install hazard AC-5 names: the registry says a tree is there and it is not.
+R_CH_GONE="$TMP/ch-root-gone"; mkdir -p "$R_CH_GONE/plugins"
+cat > "$R_CH_GONE/plugins/installed_plugins.json" <<JSON
+{ "version": 2, "plugins": {
+  "bionic@bionic": [ { "installPath": "$TMP/deleted-by-someone", "version": "0.1.0" } ] } }
+JSON
+root_run BIONIC_CLAUDE_HOME="$R_CH_GONE" --
+expect_eq "detect_plugin_root: a registered path that is GONE is a refusal, not a return" \
+  "1" "$R_ST"
+expect_match "…and names the path it could not find" "*deleted-by-someone*" "$R_ERR"
+
+# ---- the no-jq lane resolves the same path, not an unknown ----
+R_PATH="$NOJQ_BIN" root_run BIONIC_CLAUDE_HOME="$R_CH" --
+expect_eq "detect_plugin_root: no jq on PATH still resolves, by the grep lane" "$R_REAL" "$R_OUT"
+unset R_PATH
+
+# ---- the chain is honoured, and it is the SAME chain detect_plugin_registered walks ----
+root_run CLAUDE_CONFIG_DIR="$R_CH" --
+expect_eq "detect_plugin_root: CLAUDE_CONFIG_DIR is honoured when BIONIC_CLAUDE_HOME is not set" \
+  "$R_REAL" "$R_OUT"
+root_run BIONIC_INSTALLED_PLUGINS_FILE="$R_CH/plugins/installed_plugins.json" \
+         BIONIC_CLAUDE_HOME="$TMP/ch-nonexistent" --
+expect_eq "detect_plugin_root: the file override wins over the config dir, as it does for registration" \
+  "$R_REAL" "$R_OUT"
+expect_eq "…and detect_plugin_registered answers from that same overridden file" \
+  "plugin:registered=yes" \
+  "$(detect_run BIONIC_INSTALLED_PLUGINS_FILE="$R_CH/plugins/installed_plugins.json" \
+       BIONIC_CLAUDE_HOME="$TMP/ch-nonexistent" -- detect_plugin_registered)"
+
+# ---- read-only, like every other fact here ----
+expect_eq "detect_plugin_root writes nothing into the config dir it read" \
+  "installed_plugins.json" "$(ls "$R_CH/plugins")"
+
+echo ""
+echo "=== Group T: detect_legacy_hook_files — the other thing the installer left (W5 RV-5) ==="
+#
+# WHAT THIS SEES THAT NOTHING ELSE DID. The retired installer copied every hooks/*.sh into
+# the CLI's own hooks directory. `detect_legacy_channel_hooks` already counts the
+# REGISTRATIONS those copies were wired through, in settings.json — but a machine can be
+# cleaned of every registration and still carry the FILES, and the two states look identical
+# in the report. The files are the half a person can see in a directory listing and the half
+# the report never mentioned, which is exactly the shape of a diagnosis nobody trusts.
+#
+# PAYLOAD-SIDE NAMES ONLY, the same rule `detect_installed_agent_copies` states: a .sh in
+# that directory that the payload does not ship is somebody's OWN hook, and counting it would
+# report a person's work as bionic's leftover. It is the strictly safer error too — this
+# count is read by a human deciding whether to delete things.
+#
+# `unknown` WHERE THE COMPARISON CANNOT BE MADE, and it is a real state, not a defensive one:
+# a payload with no hooks/ directory gives nothing to match names against, and answering `0`
+# there would report "nothing left behind" on a machine nobody looked at.
+
+T_PAY="$TMP/legacy-hooks-payload"; mkdir -p "$T_PAY/hooks"
+for h in protect-main.sh landing-gate.sh stop-guard.sh; do
+  printf '#!/bin/bash\nexit 0\n' > "$T_PAY/hooks/$h"
+done
+
+# A CLI home carrying three of the payload's names plus one that is not bionic's at all.
+T_CH_PRESENT="$TMP/legacy-hooks-ch-present"; mkdir -p "$T_CH_PRESENT/hooks"
+for h in protect-main.sh landing-gate.sh my-own-hook.sh; do
+  printf '#!/bin/bash\nexit 0\n' > "$T_CH_PRESENT/hooks/$h"
+done
+
+T_CH_CLEAN="$TMP/legacy-hooks-ch-clean"; mkdir -p "$T_CH_CLEAN"   # no hooks/ at all
+T_CH_EMPTY="$TMP/legacy-hooks-ch-empty"; mkdir -p "$T_CH_EMPTY/hooks"
+
+t_run() {  # <claude-home> [payload-root]
+  detect_run BIONIC_PLUGIN_ROOT="${2:-$T_PAY}" BIONIC_CLAUDE_HOME="$1" -- detect_legacy_hook_files
+}
+
+expect_eq "legacy hook files: two payload-named leftovers counted, the user's own hook NOT" \
+  "env:legacy-hook-files count=2 path=${T_CH_PRESENT}/hooks names=landing-gate.sh,protect-main.sh" \
+  "$(t_run "$T_CH_PRESENT")"
+expect_eq "legacy hook files: no hooks directory at all is a clean 0, not an unknown" \
+  "env:legacy-hook-files count=0 path=${T_CH_CLEAN}/hooks names=-" \
+  "$(t_run "$T_CH_CLEAN")"
+expect_eq "legacy hook files: an empty hooks directory is 0 too (the directory is not the fact)" \
+  "env:legacy-hook-files count=0 path=${T_CH_EMPTY}/hooks names=-" \
+  "$(t_run "$T_CH_EMPTY")"
+
+# The unknown arm: nothing to match names against.
+T_PAY_BARE="$TMP/legacy-hooks-payload-bare"; mkdir -p "$T_PAY_BARE"
+expect_match "legacy hook files: a payload with no hooks/ cannot answer, and says so" \
+  "*count=unknown*" "$(t_run "$T_CH_PRESENT" "$T_PAY_BARE")"
+expect_match "…naming the reason rather than reporting a clean machine" \
+  "*ships no hooks/*" "$(t_run "$T_CH_PRESENT" "$T_PAY_BARE")"
+
+# READ-ONLY, and this one matters more than most: the line it produces is what a person
+# reads before deleting files.
+T_FP_BEFORE="$(find "$T_CH_PRESENT" | sort; find "$T_CH_PRESENT" -type f -exec shasum -a 256 {} \; 2>/dev/null | sort)"
+t_run "$T_CH_PRESENT" >/dev/null 2>&1
+T_FP_AFTER="$(find "$T_CH_PRESENT" | sort; find "$T_CH_PRESENT" -type f -exec shasum -a 256 {} \; 2>/dev/null | sort)"
+expect_eq "detect_legacy_hook_files changes nothing in the directory it counts" \
+  "$T_FP_BEFORE" "$T_FP_AFTER"
+
+# One line, exit 0 — the file's contract, which Group 16 asserts for the older functions.
+t_out="$(t_run "$T_CH_PRESENT")"; t_rc=$?
+expect_eq "detect_legacy_hook_files exits 0" "0" "$t_rc"
+expect_eq "detect_legacy_hook_files prints exactly one line" "1" "$(printf '%s\n' "$t_out" | grep -c .)"
+
+# And it joins the sweep, so `detect_all` is still the whole of what this library knows.
+T_ALL="$(detect_run BIONIC_PLUGIN_ROOT="$T_PAY" BIONIC_CLAUDE_HOME="$T_CH_PRESENT" \
+  BIONIC_SHELL_RC="$RC_LEGACY" BIONIC_SETTINGS_FILE="$SET_STALE" -- detect_all)"
+expect_match "detect_all emits the legacy-hook-files line" "*env:legacy-hook-files count=*" "$T_ALL"
+
+echo ""
+echo "=== Group S: detect_plugin_install_path — ONE registry parse, not two (W5 Step-6 RV-4/RV-7) ==="
+#
+# THE DEFECT THIS CLOSES. The Step-6 review found the registry schema being parsed in two
+# places: detect_plugin_root here, and doctor.sh's own _doctor_install_path. Two parses of a
+# schema we do not own is the exact shape of the duplication the ownership table exists to
+# prevent — the CLI changes `installPath`, one of them is fixed, and the other keeps
+# answering confidently with the old shape. Worse, detect_plugin_root had ZERO production
+# callsites (RV-4): it was tests plus a pinned doctrine copy, so the copy that mattered was
+# the UNPINNED one. Generalizing the pinned parse and giving it the callsite discharges both.
+#
+# THE SPLIT OF RESPONSIBILITY, and it is the judgment call this group pins:
+#
+#   detect_plugin_install_path <name>   the PARSE. Quiet — nothing on stderr, ever.
+#   detect_plugin_root                  bionic's specialization. Adds the LOUD refusal.
+#
+# Loudness belongs to the specialization and not the parse, because loudness is a claim
+# about CONSEQUENCE, not about failure. "bionic is not installed" is a catastrophe worth
+# three lines of stderr and a named fix — it feeds a path something is about to execute.
+# "superpowers is not installed" is an ORDINARY answer that doctor renders in a table cell
+# twenty times a run, and a parse that shouted it would make `/bionic:doctor` unreadable on
+# exactly the half-configured machine it exists to diagnose. The refusal text is bionic's
+# own besides ("run claude plugin install bionic@bionic"), and generalizing it would print
+# advice that is wrong for every other name.
+#
+# THE EXIT CODES CARRY WHAT THE STDERR NO LONGER DOES. detect_plugin_root reconstructs its
+# three distinct refusals from them, so no message was lost in the move:
+#   2 no registry file · 3 no entry, or unparseable · 4 entry present, directory gone.
+
+ip_run() {  # <env-assignments...> -- <name> ; sets S_OUT, S_ERR, S_ST
+  local -a envs=()
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
+  shift
+  S_OUT=$(env -i HOME="$TMP/home" PATH="${S_PATH:-$BASE_BIN}" "${envs[@]}" \
+    bash -c '. "$1"; shift; detect_plugin_install_path "$@"' _ "$DETECT_SH" "$@" 2>"$TMP/ip.err")
+  S_ST=$?
+  S_ERR=$(cat "$TMP/ip.err")
+}
+
+# A registry with TWO installed plugins, both pointing at trees that exist. The second one
+# is the arm that matters: a bionic-only parse cannot answer about it at all.
+S_SUP="$TMP/real-superpowers-root"; mkdir -p "$S_SUP/skills"
+S_CH="$TMP/ch-ip-ok"; mkdir -p "$S_CH/plugins"
+cat > "$S_CH/plugins/installed_plugins.json" <<JSON
+{
+  "version": 2,
+  "plugins": {
+    "superpowers@claude-plugins-official": [
+      { "scope": "user", "installPath": "${S_SUP}", "version": "6.3.0" }
+    ],
+    "bionic@bionic": [
+      { "scope": "user", "installPath": "${R_REAL}", "version": "0.1.0" }
+    ]
+  }
+}
+JSON
+
+ip_run BIONIC_CLAUDE_HOME="$S_CH" -- superpowers
+expect_eq "install_path: a NON-bionic plugin resolves by name (the whole point of RV-7)" \
+  "$S_SUP" "$S_OUT"
+expect_eq "…exit 0" "0" "$S_ST"
+ip_run BIONIC_CLAUDE_HOME="$S_CH" -- bionic
+expect_eq "install_path: and bionic resolves through the same one parse" "$R_REAL" "$S_OUT"
+
+# THE SPECIALIZATION IS THE SAME ANSWER. Not "agrees today" — detect_plugin_root is
+# implemented as this call, and this arm is what a future edit that re-forks them fails on.
+root_run BIONIC_CLAUDE_HOME="$S_CH" --
+expect_eq "install_path: detect_plugin_root returns exactly detect_plugin_install_path bionic" \
+  "$S_OUT" "$R_OUT"
+
+# ---- QUIET is a contract, because doctor calls this once per dependency row ----
+ip_run BIONIC_CLAUDE_HOME="$S_CH" -- not-a-plugin
+expect_eq "install_path: an absent plugin says NOTHING on stderr (doctor renders 20 rows)" \
+  "" "$S_ERR"
+expect_eq "…and hands back nothing on stdout" "" "$S_OUT"
+ip_run BIONIC_CLAUDE_HOME="$TMP/ch-nonexistent" -- superpowers
+expect_eq "install_path: a missing registry is quiet too" "" "$S_ERR"
+
+# ---- the exit codes detect_plugin_root rebuilds its three refusals from ----
+ip_run BIONIC_CLAUDE_HOME="$TMP/ch-nonexistent" -- bionic
+expect_eq "install_path: no registry file -> 2" "2" "$S_ST"
+ip_run BIONIC_CLAUDE_HOME="$CH_EMPTY" -- bionic
+expect_eq "install_path: registry with no such entry -> 3" "3" "$S_ST"
+ip_run BIONIC_CLAUDE_HOME="$CH_MALFORMED" -- bionic
+expect_eq "install_path: unparseable registry -> 3, never a guess" "3" "$S_ST"
+ip_run BIONIC_CLAUDE_HOME="$R_CH_GONE" -- bionic
+expect_eq "install_path: entry present but the directory is gone -> 4" "4" "$S_ST"
+expect_eq "…and 4 still hands back nothing, so a caller cannot execute out of it" "" "$S_OUT"
+
+# ---- whole-name match on BOTH lanes, for an arbitrary name ----
+S_CH_NEAR="$TMP/ch-ip-near"; mkdir -p "$S_CH_NEAR/plugins"
+cat > "$S_CH_NEAR/plugins/installed_plugins.json" <<JSON
+{ "version": 2, "plugins": {
+  "superpowers-extras@somewhere": [ { "installPath": "/wrong/one", "version": "9.9.9" } ] } }
+JSON
+ip_run BIONIC_CLAUDE_HOME="$S_CH_NEAR" -- superpowers
+expect_eq "install_path: 'superpowers-extras' is not 'superpowers' (jq lane)" "3" "$S_ST"
+S_PATH="$NOJQ_BIN" ip_run BIONIC_CLAUDE_HOME="$S_CH_NEAR" -- superpowers
+expect_eq "install_path: …nor on the no-jq lane, which is where a prefix match is easiest to write" \
+  "3" "$S_ST"
+S_PATH="$NOJQ_BIN" ip_run BIONIC_CLAUDE_HOME="$S_CH" -- superpowers
+expect_eq "install_path: the no-jq lane resolves a non-bionic name too" "$S_SUP" "$S_OUT"
+unset S_PATH
+
+# ---- read-only, like every other fact in this file ----
+expect_eq "install_path writes nothing into the config dir it read" \
+  "installed_plugins.json" "$(ls "$S_CH/plugins")"
+
+# ---- the doctrine seed stays a LITERAL, and stays derivable from the general program ----
+#
+# tests/dispatch-spans.test.sh §5i reads DETECT_PLUGIN_ROOT_JQ out of this file with a `sed`
+# that requires a single-quoted literal on one line, and demands it byte-identical inside
+# SKILL.md. That mechanism must survive generalization untouched: the doctrine has to carry
+# a program a model can PASTE, and `--arg n` is not pasteable. So the constant stays
+# bionic-shaped and literal — and this arm is what stops it from becoming a third parse,
+# by requiring it to be the general program with $n bound to "bionic" and nothing else.
+S_GEN="$(sed -n "s/^DETECT_PLUGIN_INSTALL_PATH_JQ='\(.*\)'\$/\1/p" "$DETECT_SH" | head -1)"
+S_LIT="$(sed -n "s/^DETECT_PLUGIN_ROOT_JQ='\(.*\)'\$/\1/p" "$DETECT_SH" | head -1)"
+expect_eq "the general jq program is readable as a one-line single-quoted literal" \
+  "0" "$([ -n "$S_GEN" ] && echo 0 || echo 1)"
+expect_eq "DETECT_PLUGIN_ROOT_JQ is the general program with \$n bound to \"bionic\", exactly" \
+  "${S_GEN//\$n/\"bionic\"}" "$S_LIT"
+
+echo ""
+echo "=== Group W: detect_registry_sha_lag — the installed build vs the repo tip (W5 critic C-6) ==="
+#
+# THE DEFECT THIS CLOSES. Twice in this epic the machine ran an installed payload built
+# from a commit the working tree had long since passed — F-1 at Step 5, and again at the
+# Step-6 tip, 20 files apart. Both times every wall, every suite and the doctor itself
+# reported a healthy machine, because nothing on it compares the two. The registry already
+# records which commit the install came from (`gitCommitSha`); the repo knows its own tip.
+# The whole fix is to ask.
+#
+# WHAT IT IS NOT. Not a verdict, not an exit code, and not a repair — the same posture the
+# agent-files line takes. A user who installed from the public feed has no repo here at
+# all and reads `unknown`, which is the correct answer and not a complaint. This matters to
+# exactly one machine shape — the one developing the plugin it is running — and for that
+# shape it is the difference between "my fix did not work" and "my fix is not installed".
+#
+# HERMETIC AND REAL: real `git init` fixtures, real commits, a real registry file. The
+# question is about two live records agreeing, and a stubbed git would be a seam standing
+# in for the very value under test.
+
+W_BIN="$TMP/bin-git"; mkdir -p "$W_BIN"; cp -R "$BASE_BIN/." "$W_BIN/" 2>/dev/null
+for real in git; do
+  p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${W_BIN}/${real}" 2>/dev/null
+done
+
+sha_run() {  # <cwd> <env-assignments...> -- ; sets W_OUT
+  local cwd="$1"; shift
+  local -a envs=()
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
+  shift
+  W_OUT=$(env -i HOME="$TMP/home" PATH="$W_BIN" "${envs[@]}" \
+    bash -c 'cd "$1" || exit 9; . "$2"; detect_registry_sha_lag' _ "$cwd" "$DETECT_SH" 2>&1)
+}
+
+w_registry() {  # <config-home> <sha-or-empty>
+  mkdir -p "$1/plugins"
+  if [ -n "${2:-}" ]; then
+    cat > "$1/plugins/installed_plugins.json" <<JSON
+{ "version": 2, "plugins": { "bionic@bionic": [
+  { "scope": "user", "installPath": "/somewhere/bionic/0.1.0", "version": "0.1.0",
+    "gitCommitSha": "$2" } ] } }
+JSON
+  else
+    cat > "$1/plugins/installed_plugins.json" <<JSON
+{ "version": 2, "plugins": { "bionic@bionic": [
+  { "scope": "user", "installPath": "/somewhere/bionic/0.1.0", "version": "0.1.0" } ] } }
+JSON
+  fi
+}
+
+# A repo with two commits, so "the tip" and "a commit this repo has" are different shas.
+W_REPO="$TMP/w-repo"; mkdir -p "$W_REPO"
+( cd "$W_REPO" \
+  && git init -q . \
+  && git config user.email t@t && git config user.name t \
+  && echo one > f && git add f && git commit -qm one \
+  && echo two > f && git commit -qam two ) >/dev/null 2>&1
+W_TIP=$( cd "$W_REPO" && git rev-parse HEAD )
+W_PREV=$( cd "$W_REPO" && git rev-parse HEAD~1 )
+expect_eq "fixture: the repo has two distinct commits" "0" \
+  "$([ -n "$W_TIP" ] && [ -n "$W_PREV" ] && [ "$W_TIP" != "$W_PREV" ] && echo 0 || echo 1)"
+
+# ---- match: the installed build IS the tip ----
+W_CH="$TMP/w-ch-match"; w_registry "$W_CH" "$W_TIP"
+sha_run "$W_REPO" BIONIC_CLAUDE_HOME="$W_CH" --
+expect_match "an install at the repo tip reads match" "*state=match*" "$W_OUT"
+expect_match "…and shows the sha it agreed on" "*registry=${W_TIP}*" "$W_OUT"
+expect_eq "…on exactly one line" "1" "$(printf '%s\n' "$W_OUT" | grep -c .)"
+
+# ---- lag: the installed build is a commit this repo has, but not the tip ----
+#
+# THE F-1 SHAPE, exactly: an install taken before the last few commits landed.
+W_CH="$TMP/w-ch-lag"; w_registry "$W_CH" "$W_PREV"
+sha_run "$W_REPO" BIONIC_CLAUDE_HOME="$W_CH" --
+expect_match "an install behind the tip reads lag" "*state=lag*" "$W_OUT"
+expect_match "…naming the installed sha" "*registry=${W_PREV}*" "$W_OUT"
+expect_match "…and the tip it is behind" "*repo=${W_TIP}*" "$W_OUT"
+
+# ---- not-in-repo: the recorded sha is not a commit here ----
+#
+# A DIFFERENT ANSWER FROM `lag`, and the distinction is the actionable one: lag means
+# reinstall, this means the installed build came from somewhere else entirely.
+W_CH="$TMP/w-ch-foreign"; w_registry "$W_CH" "0123456789abcdef0123456789abcdef01234567"
+sha_run "$W_REPO" BIONIC_CLAUDE_HOME="$W_CH" --
+expect_match "a sha this repo does not have reads not-in-repo" "*state=not-in-repo*" "$W_OUT"
+
+# ---- unknown, with a named cause, on each way of not being able to tell ----
+W_NOTREPO="$TMP/w-not-a-repo"; mkdir -p "$W_NOTREPO"
+W_CH="$TMP/w-ch-unknown"; w_registry "$W_CH" "$W_TIP"
+sha_run "$W_NOTREPO" BIONIC_CLAUDE_HOME="$W_CH" --
+expect_match "outside a git repository the answer is unknown" "*state=unknown*" "$W_OUT"
+expect_match "…with a named cause, never a bare shrug" "*cause=*repositor*" "$W_OUT"
+
+W_CH="$TMP/w-ch-nosha"; w_registry "$W_CH" ""
+sha_run "$W_REPO" BIONIC_CLAUDE_HOME="$W_CH" --
+expect_match "a registry entry with no gitCommitSha reads unknown" "*state=unknown*" "$W_OUT"
+expect_match "…and says the record carries no sha, naming the field" \
+  "*cause=*no gitCommitSha*" "$W_OUT"
+
+W_CH="$TMP/w-ch-absent"; mkdir -p "$W_CH/plugins"
+sha_run "$W_REPO" BIONIC_CLAUDE_HOME="$W_CH" --
+expect_match "no registry file at all reads unknown" "*state=unknown*" "$W_OUT"
+
+# ---- read-only, and exit 0, like every other fact in this file ----
+W_FP_BEFORE="$(find "$W_REPO" "$TMP/w-ch-lag" -type f 2>/dev/null | sort)"
+W_CH="$TMP/w-ch-lag"
+env -i HOME="$TMP/home" PATH="$W_BIN" BIONIC_CLAUDE_HOME="$W_CH" \
+  bash -c 'cd "$1" || exit 9; . "$2"; detect_registry_sha_lag' _ "$W_REPO" "$DETECT_SH" >/dev/null 2>&1
+expect_eq "detect_registry_sha_lag exits 0 even on the lag path" "0" "$?"
+expect_eq "…and adds no file to the repo or the config dir it read" \
+  "$W_FP_BEFORE" "$(find "$W_REPO" "$TMP/w-ch-lag" -type f 2>/dev/null | sort)"
+
+echo ""
+echo "=== Group U: the doctrine block appears ONCE (W5 critic C-4) ==="
+#
+# 6cc4f38 left a second, orphaned copy of the 24-line "installed plugin root" doctrine
+# block above THE PARSE — in the very commit whose message forbids duplicating a doctrine.
+# Nothing caught it, because a comment block has no behaviour to test. It is worth an arm
+# anyway: this file's whole argument is that one schema gets one reading, and a reader who
+# meets the doctrine twice cannot tell which function it governs.
+#
+# COUNTED, not diffed: the header line is the cheapest thing that is exactly as unique as
+# the block it opens, and a count is the assertion — "once" — stated directly.
+U_BLOCK_HEADER='─── The installed plugin root ───'
+U_COUNT=$(/usr/bin/grep -cF -- "$U_BLOCK_HEADER" "$DETECT_SH")
+expect_eq "the installed-plugin-root doctrine block opens exactly once in detect.sh" \
+  "1" "$U_COUNT"
+
+# The same question asked of the sentence deepest inside the block, so a future duplication
+# that renamed the header would still be caught by the body.
+U_BODY_COUNT=$(/usr/bin/grep -cF -- "No fallback exists anywhere in" "$DETECT_SH")
+expect_eq "…and its closing contract sentence appears exactly once too" "1" "$U_BODY_COUNT"
+
+echo ""
+echo "=== Group V: the registry's truth is two-path, and detect.sh says so (W5 critic C-5) ==="
+#
+# THE CLAIM THAT WAS TOO STRONG. The doctrine block above detect_plugin_root justifies the
+# registry as oracle by saying it is "the same record the CLI itself loads from". W5's S7
+# measured that: on a DIRECTORY-source marketplace the CLI reads the marketplace's source
+# tree and never opens the cache the registry names. The registry's ANSWER is still right —
+# the cache was written from that source at install — but the reason offered is not the
+# reason, and the difference is exactly what a user chasing a stale root has to know.
+#
+# Both halves are pinned, because the disclosure is only useful as a PAIR: the condition
+# under which the two paths diverge, and the fact that makes them agree anyway.
+# Case-INSENSITIVE on the condition term alone: this file writes its emphasis in capitals
+# ("a DIRECTORY-SOURCE MARKETPLACE"), and which words are shouted is a style choice that a
+# later edit is free to make differently. The disclosure is what is pinned, not the shouting.
+V_DOCTRINE_HITS=$(/usr/bin/grep -ci "directory-source marketplace" "$DETECT_SH")
+expect_eq "detect.sh discloses the directory-source condition" \
+  "0" "$([ "$V_DOCTRINE_HITS" -ge 1 ] && echo 0 || echo 1)"
+expect_eq "…and names what keeps the two paths in agreement" \
+  "0" "$(/usr/bin/grep -q "as of the last (re)install" "$DETECT_SH" && echo 0 || echo 1)"
+expect_eq "…and says the git-source feed is right by construction" \
+  "0" "$(/usr/bin/grep -q "right by construction" "$DETECT_SH" && echo 0 || echo 1)"
 
 echo ""
 echo "========================================"

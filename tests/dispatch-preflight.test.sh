@@ -203,11 +203,24 @@ make_repo() {
   git -C "$repo" add README.md
   git -C "$repo" commit -qm seed 2>/dev/null
   if [ "$wave" = "yes" ]; then
+    # A live wave has a live Patrol: it is armed at engagement, before the first dispatch
+    # (skills/canonical-sdlc/SKILL.md §Dispatch). Every wave-active fixture therefore
+    # carries a fresh stamp for the session ids this suite dispatches with, and the S21
+    # arms remove or backdate it to drive the arming wall. Without this the wall would be
+    # under test in every case in the file rather than in its own section.
+    mkdir -p "$repo/.bionic/tmp"
+    local _psid
+    for _psid in "${SID_A:-}" "${SID_B:-}" "${SID_DEAD:-}" "${SID_LIVE:-}"; do
+      [ -n "$_psid" ] || continue
+      printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_psid" > "$repo/.bionic/tmp/patrol-$_psid.state"
+      chmod 600 "$repo/.bionic/tmp/patrol-$_psid.state"
+    done
     mkdir -p "$repo/.bionic/docs/plans/epic-99-test"
     cat > "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" <<'PLAN'
 ---
 governing-skill: canonical-sdlc
-canonical_sdlc_version: 13
+canonical_sdlc_version: 14
 intent: build
 rigor: audited
 scale: wave
@@ -317,7 +330,7 @@ REPO_NOWAVE2=$(make_repo r3b yes)
 cat > "$REPO_NOWAVE2/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" <<'PLAN'
 ---
 governing-skill: canonical-sdlc
-canonical_sdlc_version: 13
+canonical_sdlc_version: 14
 ---
 # A plan with no SDLC State section
 PLAN
@@ -503,6 +516,9 @@ for _lvl in .bionic/tmp .bionic; do
     > "$ELSEWHERE/preflight-$SID_A.state"
   if [ "$_lvl" = ".bionic/tmp" ]; then
     mkdir -p "$REPO/.bionic"
+    # make_repo plants a real .bionic/tmp (the Patrol stamp lives there); it has to GO,
+    # or `ln -s` lands the link INSIDE it and the hostile shape under test never exists.
+    rm -rf "$REPO/.bionic/tmp"
     ln -s "$ELSEWHERE" "$REPO/.bionic/tmp"
   else
     # The whole `.bionic` redirected: the active plan has to travel with it, or
@@ -2216,6 +2232,212 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "an unrecognised channel value journals normally" "1" \
   "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
 GATE_ENV="$S20_SAVED_ENV"
+
+
+# ============================================================
+echo ""
+echo "=== S21: the arming wall — a dispatch needs a live Patrol (epic-17 W5 4/4, AC-6) ==="
+# ============================================================
+#
+# WHAT THIS WALL IS FOR. Every other wall on this path asks whether the dispatch is
+# well-formed or the environment is sound. This one asks whether anything is WATCHING the
+# fleet the dispatch is about to join. The Patrol is the run's one clock; when it is not
+# armed, or was armed and has silently stopped firing, a launched agent can die quiet and
+# nothing notices until a human wanders back. The stamp
+# (.bionic/tmp/patrol-<sid>.state, written by hooks/session-poker.sh's `arm` and by every
+# `tick` before it decides) is the liveness signal, and its AGE is the whole test:
+# absent = never armed, older than 2x the poker-interval = armed-but-dead.
+#
+# SCOPE IS THE HOOK'S EXISTING ACTIVE-RUN PREDICATE, deliberately — no second definition of
+# "active" (design ledger D-C mechanic 4). Outside a wave this gate has already exited long
+# before reaching here, which the no-wave arm below drives directly.
+#
+# THE INTERVAL IS THE POKER'S OWN, read by invoking the sibling `interval` verb rather than
+# by re-implementing the config knob. An interval this gate cannot read is an AMBIGUITY, not
+# a finding, and takes §7's start-side direction: warn and pass.
+
+s21_stamp_path() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "$2"; }
+
+s21_backdate() {  # <file> <seconds ago>
+  local ts
+  ts="$(date -v-"$2"S +%Y%m%d%H%M.%S 2>/dev/null || date -d "-$2 seconds" +%Y%m%d%H%M.%S)"
+  touch -t "$ts" "$1"
+}
+
+# ---------- absent stamp: never armed ----------
+REPO=$(make_repo r21a yes)
+write_attestation "$REPO" "$SID_A"
+rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "an ABSENT Patrol stamp refuses the dispatch" "2" "$GATE_ST"
+expect_contains "…in the checkpoint house style, not an alarm word" "patrol checkpoint" "$GATE_ERR"
+expect_contains "…naming the state it found" "never armed" "$GATE_ERR"
+expect_contains "…and naming the exact re-arm command, resolved" "session-poker.sh arm" "$GATE_ERR"
+expect_contains "…and the CronCreate half, so the stamp is not re-armed into a dead clock" \
+  "CronCreate" "$GATE_ERR"
+expect_contains "…and says what to do after" "retry the dispatch" "$GATE_ERR"
+expect_status "…and journals nothing: a refused dispatch is not a launch" "0" \
+  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ---------- stale stamp: armed, then died ----------
+REPO=$(make_repo r21b yes)
+write_attestation "$REPO" "$SID_A"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000   # > 2 x the 1800s default
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "a STALE Patrol stamp refuses the dispatch" "2" "$GATE_ST"
+expect_contains "…and names the armed-but-dead state, not the never-armed one" \
+  "stopped firing" "$GATE_ERR"
+expect_absent "…so the two arms cannot be confused in a transcript" "never armed" "$GATE_ERR"
+
+# ---------- fresh stamp: passes, silently ----------
+REPO=$(make_repo r21c yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "a FRESH Patrol stamp lets the dispatch through" "0" "$GATE_ST"
+expect_absent "…and the wall says nothing on the pass path" "patrol checkpoint" "$GATE_ERR"
+expect_status "…and the launch is journalled as usual" "1" \
+  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ---------- a stamp for ANOTHER session is not this session's liveness ----------
+REPO=$(make_repo r21d yes)
+write_attestation "$REPO" "$SID_A"
+rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "a stamp keyed to a DIFFERENT session does not arm this one" "2" "$GATE_ST"
+expect_contains "…and reads as never-armed here" "never armed" "$GATE_ERR"
+
+# ---------- the wall rides the active-run predicate and nothing else ----------
+REPO=$(make_repo r21e no)
+rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "with NO wave active an unarmed Patrol is not this gate's business" "0" "$GATE_ST"
+expect_empty "…and the gate is silent, as it is for every other check outside a wave" "$GATE_ERR"
+
+# ---------- the threshold is 2x the poker-interval, and follows the config knob ----------
+REPO=$(make_repo r21f yes)
+write_attestation "$REPO" "$SID_A"
+printf 'poker-interval: 1m\n' > "$REPO/.bionic/config.yaml"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 100     # inside 2 x 60s
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "a stamp inside 2x the CONFIGURED interval passes (100s of 120s)" "0" "$GATE_ST"
+
+REPO=$(make_repo r21g yes)
+write_attestation "$REPO" "$SID_A"
+printf 'poker-interval: 1m\n' > "$REPO/.bionic/config.yaml"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 200     # past 2 x 60s
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "…and one past it refuses, on the same fixture the default would have passed" \
+  "2" "$GATE_ST"
+expect_contains "…naming the interval it measured against" "120s" "$GATE_ERR"
+
+# ---------- a symlinked stamp is refused, never followed ----------
+REPO=$(make_repo r21h yes)
+write_attestation "$REPO" "$SID_A"
+printf 'patrol-stamp/v1|at=2099-01-01T00:00:00Z|session=%s|verb=arm\n' "$SID_A" \
+  > "$SANDBOX/planted-stamp"
+rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
+ln -s "$SANDBOX/planted-stamp" "$(s21_stamp_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "a SYMLINKED stamp cannot open this wall" "2" "$GATE_ST"
+
+# ---------- an unreadable interval falls back to the poker's own default ----------
+#
+# CRITIC C-2 (W5). This used to skip BOTH arms of the wall and pass. `poker-interval:` is
+# machine-local and agent-writable, so one line in a config file disabled an entire wall —
+# in a file whose own §8 says a hostile repo may CLOSE a wall and must never be able to
+# OPEN one. And the line that reaches it is the likeliest typo there is: a BARE NUMBER
+# (`poker-interval: 30`) makes the poker refuse, where `30m` and `30 minutes` both parse.
+#
+# The interval is a THRESHOLD, not a precondition, and only one of the two arms needs it.
+# So: the stamp-existence arm runs unconditionally (an absent stamp is absent at every
+# interval), and the staleness arm falls back to the poker's own POKER_INTERVAL_DEFAULT —
+# read from the poker, never retyped here, via its read-only `interval-default` verb. The
+# dispatch still passes, because the operator's config really is unreadable and that is an
+# ambiguity; what it no longer does is pass with nothing checked.
+REPO=$(make_repo r21i yes)
+write_attestation "$REPO" "$SID_A"
+printf 'poker-interval: whenever\n' > "$REPO/.bionic/config.yaml"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "an interval the poker refuses to read does not refuse the dispatch" "0" "$GATE_ST"
+expect_contains "…but says so, rather than passing a wall off as satisfied" \
+  "Patrol interval" "$GATE_ERR"
+expect_contains "…and says the wall RAN, at the default, rather than that it did not run" \
+  "wall ran at default" "$GATE_ERR"
+
+# r21j — THE MISSING COMBINATION, and the one that made C-2 a hole rather than a wording
+# problem: the same unreadable interval with NO stamp at all. r21i above drives a FRESH
+# stamp, so it can only ever show pass-stays-pass.
+REPO=$(make_repo r21j yes)
+write_attestation "$REPO" "$SID_A"
+printf 'poker-interval: 30\n' > "$REPO/.bionic/config.yaml"   # the bare-number typo: rc=2
+rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "an unreadable interval does NOT open the wall for an unarmed session" "2" "$GATE_ST"
+expect_contains "…the never-armed arm still fires" "never armed" "$GATE_ERR"
+
+# r21k — and the staleness arm runs too, measured against the fallback default.
+REPO=$(make_repo r21k yes)
+write_attestation "$REPO" "$SID_A"
+printf 'poker-interval: 30\n' > "$REPO/.bionic/config.yaml"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000   # > 2 x the 1800s default
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "a stale stamp under an unreadable interval refuses at the DEFAULT threshold" \
+  "2" "$GATE_ST"
+expect_contains "…naming the armed-but-dead state" "stopped firing" "$GATE_ERR"
+
+# r21l — the fallback is the POKER'S constant, not a number retyped in the gate. Proven
+# by MUTATION: change POKER_INTERVAL_DEFAULT on a doctored copy of the poker tree and the
+# threshold the gate measures against has to move with it. A gate carrying its own 1800
+# would pass this fixture unchanged.
+S21_TREE=$(mktemp -d "${TMPDIR:-/tmp}/s21-poker-tree.XXXXXX")
+cp "$GATE" "$S21_TREE/dispatch-preflight.sh"
+sed 's/^POKER_INTERVAL_DEFAULT="30m"$/POKER_INTERVAL_DEFAULT="10s"/' \
+  "${BIONIC_HOOKS_DIR}/session-poker.sh" > "$S21_TREE/session-poker.sh"
+TOTAL=$((TOTAL + 1))
+if grep -qF 'POKER_INTERVAL_DEFAULT="10s"' "$S21_TREE/session-poker.sh"; then
+  ok "r21l meta: the doctored poker default landed (the sed anchor still matches)"
+else
+  no "r21l meta: the doctored poker default did NOT land — the arm below proves nothing"
+fi
+REPO=$(make_repo r21l yes)
+write_attestation "$REPO" "$SID_A"
+printf 'poker-interval: 30\n' > "$REPO/.bionic/config.yaml"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 100   # fresh at 1800s, ancient at 10s
+S21_SAVED_GATE="$GATE"; GATE="$S21_TREE/dispatch-preflight.sh"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "r21l the fallback threshold moves with the POKER's constant, not the gate's" \
+  "2" "$GATE_ST"
+expect_contains "…and measures against 2x the doctored default" "20s" "$GATE_ERR"
+GATE="$S21_SAVED_GATE"
+
+# r21m — THE POKER ITSELF UNREACHABLE. `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/` is the
+# gate's second lane for its siblings, and after the Step-9 legacy teardown that directory
+# no longer holds hooks on any machine — so on a plugin-only install the only lane that
+# resolves is the sibling one. If BOTH miss, there is no interval and no default to be had,
+# and the honest degradation is per-arm: the existence half needs no threshold and still
+# refuses, and the staleness half says out loud that it did not run. What must never happen
+# is the whole wall going quiet, which is what a teardown would otherwise have bought.
+S21_LONE=$(mktemp -d "${TMPDIR:-/tmp}/s21-lone-gate.XXXXXX")
+cp "$GATE" "$S21_LONE/dispatch-preflight.sh"
+S21_EMPTY_CONFIG=$(mktemp -d "${TMPDIR:-/tmp}/s21-empty-config.XXXXXX")
+REPO=$(make_repo r21m yes)
+write_attestation "$REPO" "$SID_A"
+rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
+S21_SAVED_GATE="$GATE"; S21_SAVED_CONFIG="$GATE_CONFIG_DIR"
+GATE="$S21_LONE/dispatch-preflight.sh"; GATE_CONFIG_DIR="$S21_EMPTY_CONFIG"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "r21m with NO poker on either lane, the unarmed session is still refused" \
+  "2" "$GATE_ST"
+expect_contains "…by the existence arm, which never needed the interval" "never armed" "$GATE_ERR"
+
+# …and the staleness half, which genuinely cannot run, says so instead of passing quietly.
+REPO=$(make_repo r21n yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "r21n …and a stamped session passes, the staleness half unmeasured" "0" "$GATE_ST"
+expect_contains "…saying which half did not run, and why" \
+  "staleness half" "$GATE_ERR"
+GATE="$S21_SAVED_GATE"; GATE_CONFIG_DIR="$S21_SAVED_CONFIG"
 
 echo ""
 echo "----------------------------------------"

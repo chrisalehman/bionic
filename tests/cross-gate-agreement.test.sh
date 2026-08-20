@@ -435,7 +435,7 @@ write_plan() {  # <path> <state-body>
   mkdir -p "$(dirname "$1")"
   {
     printf -- '---\n'
-    printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 13\n'
+    printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
     printf 'intent: build\nrigor: audited\nscale: wave\n'
     printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\n'
     printf '%s\n' "$2"
@@ -443,10 +443,30 @@ write_plan() {  # <path> <state-body>
   } > "$1"
 }
 
+# A LIVE WAVE HAS A LIVE PATROL (epic-17 W5 4/4). hooks/dispatch-preflight.sh refuses a
+# dispatch whose session carries no fresh Patrol stamp, so a repo fixture without one answers
+# "refused" to every question this suite asks about roster rows, identity chains and progress
+# paths — the arming wall would be under test in every section instead of in its own (§P,
+# which removes the stamp deliberately). This is the fixture equivalent of an engagement
+# arming the Patrol before the first dispatch. Written under the MAIN repository always: the
+# stamp shares the roster's pinned root, which §N.3 depends on and would break by planting
+# a phantom `.bionic` in a worktree.
+arm_patrol() {  # <repo> <session-id>...
+  local repo="$1"; shift
+  mkdir -p "$repo/.bionic/tmp"
+  local sid
+  for sid in "$@"; do
+    printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sid" > "$repo/.bionic/tmp/patrol-$sid.state"
+    chmod 600 "$repo/.bionic/tmp/patrol-$sid.state"
+  done
+}
+
 new_repo() {  # <name> -> path
   local r="$SANDBOX/fx/$1/repo"
-  mkdir -p "$r/.bionic"
+  mkdir -p "$r/.bionic/tmp"
   git -C "$r" init -q 2>/dev/null
+  arm_patrol "$r" "$SID_A" "$SID_B" "$SID_LG"
   printf '%s' "$r"
 }
 
@@ -487,7 +507,7 @@ build_fixture() {  # <name> -> repo path
       mkdir -p "$repo/.bionic/docs" ;;
     no-sdlc-state)
       mkdir -p "$repo/.bionic/docs/plans/epic-99"
-      printf -- '---\ncanonical_sdlc_version: 13\n---\n\n# Notes\n\ncurrent: 4\n' \
+      printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# Notes\n\ncurrent: 4\n' \
         > "$repo/.bionic/docs/plans/epic-99/wave-01.md" ;;
 
     # --- A9's undiscriminated parser edges, each built so a mis-parse FLIPS ---
@@ -547,7 +567,7 @@ build_fixture() {  # <name> -> repo path
       # documents the schema rather than running it.
       mkdir -p "$repo/.bionic/docs/plans/epic-99"
       {
-        printf -- '---\ncanonical_sdlc_version: 13\nscale: wave\n---\n\n# Schema doc\n\n'
+        printf -- '---\ncanonical_sdlc_version: 14\nscale: wave\n---\n\n# Schema doc\n\n'
         printf 'The section looks like this:\n\n```\n## SDLC State\n\ncurrent: 4\n```\n'
       } > "$repo/.bionic/docs/plans/epic-99/wave-01.md" ;;
     newest-plan-wins)
@@ -571,7 +591,7 @@ build_fixture() {  # <name> -> repo path
       # 2026-08-15, twice, by two agents, neither trying. The real plan must win.
       write_plan "$repo/.bionic/docs/plans/epic-99/session.plan.md" "current: 4"
       touch -t 202001010000 "$repo/.bionic/docs/plans/epic-99/session.plan.md"
-      printf -- '---\ncanonical_sdlc_version: 13\n---\n\n# Continuation\n\ncurrent: 4\n' \
+      printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# Continuation\n\ncurrent: 4\n' \
         > "$repo/.bionic/docs/plans/epic-99/continuation.md"
       touch -t 203001010000 "$repo/.bionic/docs/plans/epic-99/continuation.md" ;;
     fenced-only-newest-loses)
@@ -584,7 +604,7 @@ build_fixture() {  # <name> -> repo path
       write_plan "$repo/.bionic/docs/plans/epic-99/session.plan.md" "current: 4"
       touch -t 202001010000 "$repo/.bionic/docs/plans/epic-99/session.plan.md"
       {
-        printf -- '---\ncanonical_sdlc_version: 13\n---\n\n# Schema notes\n\n'
+        printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# Schema notes\n\n'
         printf 'The section looks like this:\n\n```\n## SDLC State\n\ncurrent: 4\n```\n'
       } > "$repo/.bionic/docs/plans/epic-99/schema-notes.md"
       touch -t 203001010000 "$repo/.bionic/docs/plans/epic-99/schema-notes.md" ;;
@@ -594,7 +614,7 @@ build_fixture() {  # <name> -> repo path
       # the reason the fix is a candidate filter rather than a refusal: skipping
       # every candidate must land in the same place as finding none.
       mkdir -p "$repo/.bionic/docs/plans/epic-99"
-      printf -- '---\ncanonical_sdlc_version: 13\n---\n\n# Continuation\n' \
+      printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# Continuation\n' \
         > "$repo/.bionic/docs/plans/epic-99/continuation.md"
       printf '# Scratch\n\ncurrent: 4\n' \
         > "$repo/.bionic/docs/plans/epic-99/scratch.md" ;;
@@ -1282,8 +1302,10 @@ expect_eq "execution-recorder.sh is byte-identical after the instrumented copy r
 QREPO=$(new_repo "quiet")
 write_plan "$QREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 before=$(find "$QREPO" | sort)
-expected_after=$(printf '%s\n%s\n%s\n%s\n' "$before" \
-  "$QREPO/.bionic/tmp" \
+# `.bionic/tmp` is no longer among the gate's creations: the fixture arms the Patrol, which
+# makes the directory before the gate runs (arm_patrol). What the gate adds is still exactly
+# the attestation and the roster row.
+expected_after=$(printf '%s\n%s\n%s\n' "$before" \
   "$QREPO/.bionic/tmp/preflight-$SID_A.state" \
   "$QREPO/.bionic/tmp/roster-$SID_A.state" | sort)
 mk_agent_payload "$SID_A" "$QREPO" \
@@ -2620,11 +2642,10 @@ echo "=== L — the WIRING: registration is three-sided (frontmatter, absence, p
 #
 # THIS SECTION READS PAYLOAD FILES ONLY (epic-17 wave-02 S3, AC-1). Every assertion
 # that used to derive its expected shape from the condemned installer script's own
-# registration array now lives in tests/plugin-hooks.test.sh — the designated
-# transitional home, which retires whole when the installer does at W5. The two
-# always-on surfaces are pinned against each other there, so an assertion made here
-# against hooks/hooks.json still transitively binds the installer for as long as the
-# installer exists.
+# registration array lived in tests/plugin-hooks.test.sh — the designated transitional
+# home, which retired whole with the installer at W5 (4/6). hooks/hooks.json is the only
+# always-on surface left, so an assertion made here against it binds the whole channel
+# with nothing left to cross-check it against.
 SKILL_SRC="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
 HOOKS_JSON_SRC="$BIONIC_HOOKS_DIR/hooks.json"
 
@@ -2853,8 +2874,8 @@ expect_eq "the skill-scoped channel renders exactly one timeout value across all
 expect_eq "the always-on channel renders exactly one timeout value across all its rows" \
   "10" "$L4B_HJ_VALUES"
 expect_eq "…and the two channels AGREE on that ceiling" "$L4B_SKILL_VALUES" "$L4B_HJ_VALUES"
-# The ceiling the installer still writes into settings.json is driven end to end in
-# tests/plugin-hooks.test.sh, which retires with the installer at W5.
+# The ceiling the installer used to write into settings.json was driven end to end in
+# tests/plugin-hooks.test.sh, which retired with the installer at W5 (4/6).
 
 # --- L.6 THE AGENT-CONTEXT CHANNEL: one wall, two channels, one partition ---
 # (session-20260815-landing-supervision T6; design D1, plan AC-7/AC-8.)
@@ -2945,15 +2966,20 @@ expect_contains "…and the dispatch wall skips its roster append on exactly tha
 # dedupe holding at exactly the four sites AC-12 named — not the unrelated §L.5
 # SKILL_EVENT_KEYS extractor above, which shares the same block-entry prologue but was never
 # one of the tracked four and stays out of this wave's scope (flagged, not folded in blind).
+# One of AC-12's four sites — installer-behavior.test.sh — was DELETED at
+# epic-17 W5 (4/6) together with claude-bootstrap.sh, the installer it was the
+# behavioural test for. A dedupe claim about a file that no longer exists is
+# not a weaker claim, it is an unfalsifiable one, so that arm is dropped rather
+# than kept passing vacuously. The dedupe itself is unaffected: the remaining
+# sites still share the one implementation, and its ABSENCE from the deleted
+# file is now guaranteed by the file's absence.
 for _f in "$REPO_ROOT/tests/cross-gate-agreement.test.sh" \
-          "$REPO_ROOT/tests/installer-behavior.test.sh" \
           "$REPO_ROOT/tests/scripts.test.sh"; do
   expect_true "$(basename "$_f") sources the shared frontmatter-parser helper" \
     /usr/bin/grep -q 'lib/frontmatter-parser\.sh' "$_f"
 done
-expect_eq "installer-behavior.test.sh no longer hand-copies the hooks: block state machine" \
-  "0" "$(/usr/bin/grep -c '/\^hooks:\$/ { active=1; next }' \
-      "$REPO_ROOT/tests/installer-behavior.test.sh")"
+expect_false "installer-behavior.test.sh is gone (retired with claude-bootstrap.sh, W5 4/6)" \
+  test -e "$REPO_ROOT/tests/installer-behavior.test.sh"
 expect_eq "scripts.test.sh no longer hand-copies the hooks: block state machine (either site)" \
   "0" "$(/usr/bin/grep -c '/\^hooks:\$/ { active=1; next }' \
       "$REPO_ROOT/tests/scripts.test.sh")"
@@ -3313,6 +3339,9 @@ expect_eq "a resolver that stops mapping worktrees no longer answers the main re
 # and the drive lands on the refused path or the accepted one depending on whose machine runs
 # the suite. Only the accepted path writes anything, which is the path under test here.
 write_plan "$NREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+# Hand-built fixture, so it arms explicitly — under the MAIN repository, which is also the
+# only place the arming wall reads from a worktree cwd (the property N.1/N.2 measure).
+arm_patrol "$NREPO" "$SID_A"
 NENV=(env HOME="$SANDBOX/home" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR"
       ANTHROPIC_API_KEY="pinned-placeholder-not-a-credential")
 
@@ -3816,6 +3845,65 @@ for _q in "$PARTY_DP" "$PARTY_ER" "$PARTY_LG" "$PARTY_SG"; do
   expect_eq "$(basename "$_q")'s has_sdlc_state() is the evidence gate's, body for body" \
     "$(fn_body "$PARTY_EG" has_sdlc_state)" "$(fn_body "$_q" has_sdlc_state)"
 done
+
+
+# ============================================================
+echo ""
+echo "=== Section P — the Patrol stamp: the poker WRITES exactly the path the gate READS ==="
+# ============================================================
+#
+# epic-17 wave-05 slice 4/4 (spec AC-6). A producer/consumer pair with the path spelled
+# once on each side — hooks/session-poker.sh builds it out of PATROL_STAMP_PREFIX/SUFFIX
+# under the pinned project root, hooks/dispatch-preflight.sh builds it out of STATE_DIR and
+# the payload session id — and no single-component suite can see them disagree. A
+# disagreement is not loud: the gate refuses every dispatch of a run whose Patrol is firing
+# perfectly, and the named fix (`session-poker.sh arm`) writes to the other path and does
+# not clear it. That is an unrecoverable wall by inspection, which is exactly the class this
+# file exists for.
+#
+# Driven as a ROUND TRIP rather than as two greps, because the property is behavioural: the
+# gate is asked where it looked, the poker is asked to arm, and the gate is asked again.
+
+PARTY_PK="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
+P_SID="$SID_A"
+P_REPO=$(new_repo "patrol-stamp-pair")
+write_plan "$P_REPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+mkdir -p "$P_REPO/.bionic/tmp"
+# new_repo arms every fixture; this is the one section whose subject is an UNARMED session.
+rm -f "$P_REPO"/.bionic/tmp/patrol-*.state
+{
+  printf '# bionic environment attestation — machine-local, safe to delete\n'
+  printf 'version=1\nkind=preflight-attestation\nsession_id=%s\n' "$P_SID"
+  printf 'written_at=1785790000\nrepo=%s\n' "$P_REPO"
+} > "$P_REPO/.bionic/tmp/preflight-$P_SID.state"
+chmod 600 "$P_REPO/.bionic/tmp/preflight-$P_SID.state"
+
+P_OUT=$(mk_agent_payload "$P_SID" "$P_REPO" | bash "$PARTY_DP" 2>&1 >/dev/null); P_ST=$?
+expect_eq "the gate refuses a dispatch with no Patrol stamp" "2" "$P_ST"
+expect_contains "…and the refusal is the arming wall's" "patrol checkpoint" "$P_OUT"
+
+# The path the CONSUMER named, taken out of its own words rather than rebuilt here.
+P_READS=$(printf '%s\n' "$P_OUT" | grep -oE '/[^[:space:]]*/patrol-[^[:space:]]+\.state' | head -1)
+if [ -n "$P_READS" ]; then
+  ok "the refusal names the exact path it looked at"
+else
+  no "the refusal names the exact path it looked at" "no stamp path in: $P_OUT"
+fi
+
+# The path the PRODUCER wrote, discovered by running the named fix and looking.
+( cd "$P_REPO" && CLAUDE_CODE_SESSION_ID="$P_SID" bash "$PARTY_PK" arm ) >/dev/null 2>&1
+P_WRITES=$(ls "$P_REPO"/.bionic/tmp/patrol-*.state 2>/dev/null | head -1)
+if [ -n "$P_WRITES" ]; then
+  ok "the poker's arm verb wrote a stamp"
+else
+  no "the poker's arm verb wrote a stamp" "nothing matching .bionic/tmp/patrol-*.state"
+fi
+expect_eq "poker WRITES == gate READS (one stamp path, two spellings)" "$P_READS" "$P_WRITES"
+
+# The round trip closes: the fix the wall named actually opens the wall.
+P_OUT2=$(mk_agent_payload "$P_SID" "$P_REPO" | bash "$PARTY_DP" 2>&1 >/dev/null); P_ST2=$?
+expect_eq "…and the named fix opens it: the same dispatch now passes" "0" "$P_ST2"
+expect_absent "…with nothing further to say" "patrol checkpoint" "$P_OUT2"
 
 # ============================================================
 echo ""

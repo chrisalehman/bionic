@@ -163,7 +163,7 @@ make_world() {
     cat > "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" <<'PLAN'
 ---
 governing-skill: canonical-sdlc
-canonical_sdlc_version: 13
+canonical_sdlc_version: 14
 intent: build
 rigor: audited
 scale: wave
@@ -881,7 +881,7 @@ expect_contains "a real observation of a real log is still recorded" \
 # roster grows two rows per dispatch for the life of the session. The cost was
 # real: `line_field` is four processes, the loop ran three of them PER ROW, and a
 # single completion measured 696 ms at 200 rows, 3180 ms at 1000 and 9260 ms at
-# 3000 — against the 10 s hook timeout claude-bootstrap.sh registers. Past that
+# 3000 — against the 10 s hook timeout the registration declares. Past that
 # the completion arm times out, rows silently stop reaching `confirmed`, and the
 # operator's only symptom is by-name stops beginning to refuse.
 #

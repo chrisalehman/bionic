@@ -1,12 +1,18 @@
 #!/bin/bash
-# THE SETTINGS-CHANNEL PARTITION GUARD — session-20260815-landing-supervision, T6.
+# THE PLUGIN-CHANNEL PARTITION GUARD — session-20260815-landing-supervision, T6.
 #
-# Registered in settings.json in front of a wall that is ALREADY registered on the
-# skill channel, and its whole job is to make sure exactly one of those two
-# registrations is ever live for a given event:
+# It stands in hooks/hooks.json — four entries, one per event that needs it — in
+# front of a wall that is ALREADY registered on the skill channel, and its whole job
+# is to make sure exactly one of those two registrations is ever live for a given
+# event:
 #
-#     settings.json  ->  this guard  ->  exec the real wall   (agent contexts only)
+#     hooks.json     ->  this guard  ->  exec the real wall   (agent contexts only)
 #     SKILL.md hooks ->  the real wall                        (main thread, unchanged)
+#
+# (Historically that first lane was the CLI's own settings.json, which is how this
+# file was written and named; the epic-17 plugin conversion moved every always-on
+# registration into the payload's hooks.json and nothing on that channel is read out
+# of settings.json any more.)
 #
 # WHY A SECOND CHANNEL AT ALL. The skill-frontmatter channel is looked up by SESSION
 # key, and a tool-class event raised inside a teammate or subagent context is
@@ -15,15 +21,15 @@
 # Measured, both directions, with a same-session main-thread positive control:
 # .bionic/docs/record/session-20260815-landing-supervision/t1-probe-report.md §3
 # (CLI 2.1.233). Every wall this repo has ever installed therefore stopped at depth
-# one, and delegating was enough to escape it. The settings channel IS alive in
+# one, and delegating was enough to escape it. The plugin channel IS alive in
 # those contexts, which is what this file makes usable.
 #
-# WHY THE GUARD CANNOT LIVE INSIDE THE WALL. The settings channel is alive on the
-# main thread too, and in every session on this machine including the ones that
-# never invoked the governing skill. A wall invoked through it cannot tell which
+# WHY THE GUARD CANNOT LIVE INSIDE THE WALL. The plugin channel is alive on the
+# main thread too, and in every session that mounts the plugin including the ones
+# that never invoked the governing skill. A wall invoked through it cannot tell which
 # channel called it — same script, same payload — so a guard written into the wall
 # would answer the same way on both, and the only predicate that silences the
-# settings channel on a main-thread event (no top-level `agent_id`) would silence
+# plugin channel on a main-thread event (no top-level `agent_id`) would silence
 # the skill channel there too, disarming main-thread coverage outright. The guard
 # has to be the thing the channel points AT, and nothing else can be.
 #
@@ -36,7 +42,7 @@
 #      provably precedes any agent context: a teammate exists only after a
 #      main-thread dispatch, and that dispatch is what writes the file. An
 #      unarmed session therefore fails this check on one stat and pays nothing
-#      else, which is what keeps a machine-wide settings registration from
+#      else, which is what keeps an always-on hooks.json registration from
 #      re-globalising walls that were deliberately made skill-scoped.
 #
 # Anything else — ambiguity included — exits 0 in silence. This guard never
@@ -58,13 +64,13 @@
 # Exit code 2 (from the wall behind it) = block the tool call entirely.
 # [WALL: tests/agent-context-guard.test.sh]
 #
-# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
+# Registered always-on in hooks/hooks.json, in front of the wall named by its argument.
 
 set -uo pipefail
 
 # ---------- the wall this invocation guards ----------
 #
-# `~` is expanded by the shell that runs the settings.json command string, so the
+# `~` is expanded by the shell that runs the hooks.json command string, so the
 # argument normally arrives absolute; the expansion below only covers a literal
 # tilde surviving an exotic invocation. A target that is missing or unnamed is a
 # misconfiguration, and a misconfigured guard passes the tool call through rather

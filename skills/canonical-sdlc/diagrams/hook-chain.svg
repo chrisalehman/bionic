@@ -187,7 +187,7 @@
   <text x="58" y="1088" font-size="10.5" font-weight="700" fill="#3a424c">2</text>
   <text x="76" y="1088" font-size="10.5" fill="#3a424c">governing-skill: is present in the frontmatter</text>
   <text x="58" y="1106" font-size="10.5" font-weight="700" fill="#3a424c">3</text>
-  <text class="version-pin" data-pin="hook-chain-governing-ladder" x="76" y="1106" font-size="10.5" fill="#3a424c">canonical_sdlc_version == 13</text>
+  <text class="version-pin" data-pin="hook-chain-governing-ladder" x="76" y="1106" font-size="10.5" fill="#3a424c">canonical_sdlc_version == 14</text>
   <text x="58" y="1124" font-size="10.5" font-weight="700" fill="#3a424c">4</text>
   <text x="76" y="1124" font-size="10.5" fill="#3a424c">the triple is present and enum-valid — intent · rigor · scale</text>
   <text x="58" y="1142" font-size="10.5" font-weight="700" fill="#3a424c">5</text>
@@ -210,7 +210,7 @@
   <text x="728" y="1070" font-size="10.5" font-weight="700" fill="#3a424c">1</text>
   <text x="746" y="1070" font-size="10.5" fill="#3a424c">newest plan under the plan dirs → its ## SDLC State, fence-aware</text>
   <text x="728" y="1088" font-size="10.5" font-weight="700" fill="#3a424c">2</text>
-  <text class="version-pin" data-pin="hook-chain-evidence-ladder" x="746" y="1088" font-size="10.5" fill="#3a424c">canonical_sdlc_version == 13</text>
+  <text class="version-pin" data-pin="hook-chain-evidence-ladder" x="746" y="1088" font-size="10.5" fill="#3a424c">canonical_sdlc_version == 14</text>
   <text x="728" y="1106" font-size="10.5" font-weight="700" fill="#3a424c">3</text>
   <text x="746" y="1106" font-size="10.5" fill="#3a424c">current: N — or current: T&lt;n&gt; at scale: task</text>
   <text x="728" y="1124" font-size="10.5" font-weight="700" fill="#3a424c">4</text>
@@ -231,7 +231,7 @@
   <!-- ============================ closing callouts ============================ -->
   <rect x="40" y="1330" width="426" height="88" rx="8" fill="#f6f7f9" stroke="#dde1e6" stroke-width="1.2"/>
   <text x="58" y="1352" font-size="11.5" font-weight="700" letter-spacing="0.8" fill="#16191d">ONE SUPPORTED VERSION</text>
-  <text class="version-pin" data-pin="hook-chain-version-callout" x="58" y="1373" font-size="10.5" fill="#3a424c">canonical_sdlc_version: 13 is the only value either hook accepts.</text>
+  <text class="version-pin" data-pin="hook-chain-version-callout" x="58" y="1373" font-size="10.5" fill="#3a424c">canonical_sdlc_version: 14 is the only value either hook accepts.</text>
   <text x="58" y="1388" font-size="10.5" fill="#3a424c">Anything else — older, empty, malformed — exits 2 naming the value it</text>
   <text x="58" y="1403" font-size="10.5" fill="#3a424c">found. No grandfathering. This page's three renderings are pinned to it.</text>
 

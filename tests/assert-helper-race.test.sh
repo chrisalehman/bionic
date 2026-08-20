@@ -72,10 +72,11 @@ tests/stop-orders.test.sh
 # `printf | grep -q`) — nothing here to pin. Named rather than silently omitted
 # so this list stays an enumeration, not a judgment call (epic-17-w2 S1 concern,
 # resolved by S2).
-# tests/plugin-hooks.test.sh also sets pipefail and defines expect_contains_lit/
-# expect_absent_lit/expect_equal, but is pipe-free by construction (containment
-# via `case`, never `printf | grep -q`) — nothing here to pin. Named rather than
-# silently omitted so this list stays an enumeration, not a judgment call
+# tests/plugin-hooks.test.sh was the third such file (pipefail + its own
+# expect_contains_lit/expect_absent_lit/expect_equal, pipe-free by
+# construction). It retired at epic-17 W5 (4/6) with claude-bootstrap.sh, the
+# installer it pinned hooks.json against. Recorded rather than dropped so this
+# list stays an enumeration of what was considered, not a judgment call
 # (epic-17-w2 S3 concern, resolved by S5).
 
 # The haystack: 512 KiB, eight times the 64 KiB pipe buffer, with the needle in

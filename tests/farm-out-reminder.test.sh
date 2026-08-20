@@ -392,6 +392,73 @@ o2() {
 }
 o2
 
+echo ""
+echo "=== O3: cd /x && FARM_OUT_ALLOW=1 bash tests/run.sh (mid-chain, W4's false-fire shape) → override, silent ==="
+o3() {
+  setup
+  run_hook "$(stdin_for 'cd /x && FARM_OUT_ALLOW=1 bash tests/run.sh' '')"
+  assert_silent "O3 mid-chain override (2-seg &&) → exit 0, no decision"
+  assert_audit_has "O3 audit override line present" "farm-out override:"
+}
+o3
+
+echo ""
+echo "=== O4: npm install && FARM_OUT_ALLOW=1 (trailing position, tier-1 seg precedes) → override, silent ==="
+o4() {
+  setup
+  run_hook "$(stdin_for 'npm install && FARM_OUT_ALLOW=1' '')"
+  assert_silent "O4 trailing-position override → exit 0, no decision"
+  assert_audit_has "O4 audit override line present" "farm-out override:"
+}
+o4
+
+echo ""
+echo "=== O5: cd /x; env FARM_OUT_ALLOW=1 bash tests/run.sh (semicolon, env-prefixed, mid-chain) → override, silent ==="
+o5() {
+  setup
+  run_hook "$(stdin_for 'cd /x; env FARM_OUT_ALLOW=1 bash tests/run.sh' '')"
+  assert_silent "O5 semicolon env-prefixed mid-chain override → exit 0, no decision"
+  assert_audit_has "O5 audit override line present" "farm-out override:"
+}
+o5
+
+# ============================================================
+# Wall UX (AC-9) — deny/nudge wording reads checkpoint, not alarm;
+# named-fix styling consistent with the other walls: a "Fix:" clause,
+# never "BLOCKED …" language for correct-intent work (continuation.md
+# carry-over 10, Chris directive 2026-08-19).
+# ============================================================
+
+echo ""
+echo "=== C1: deny reason reads checkpoint-not-error — no BLOCKED, has a Fix: clause ==="
+c1() {
+  setup
+  run_hook "$(stdin_for 'bash test.sh' '')"
+  assert_deny "C1 denies"
+  local reason; reason=$(printf '%s' "$HOOK_STDOUT" \
+    | jq -r '.hookSpecificOutput.permissionDecisionReason' 2>/dev/null)
+  printf '%s' "$reason" | grep -qF "BLOCKED" \
+    && fail "C1 deny reason must not use alarm-language 'BLOCKED'" || pass
+  assert_reason_has "C1 deny reason names a Fix: clause" "Fix:"
+  assert_reason_has "C1 deny reason reads as a checkpoint" "checkpoint"
+}
+c1
+
+echo ""
+echo "=== C2: nudge wording reads checkpoint-not-error — no BLOCKED, has a Fix: clause ==="
+c2() {
+  setup
+  run_hook "$(stdin_for 'git clone https://github.com/foo/bar.git' '')"
+  assert_nudge "C2 nudges"
+  local nudge; nudge=$(printf '%s' "$HOOK_STDOUT" \
+    | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null)
+  printf '%s' "$nudge" | grep -qF "BLOCKED" \
+    && fail "C2 nudge must not use alarm-language 'BLOCKED'" || pass
+  assert_nudge_has "C2 nudge names a Fix: clause" "Fix:"
+  assert_nudge_has "C2 nudge reads as a checkpoint" "checkpoint"
+}
+c2
+
 # ============================================================
 # Audit shape (AC-5) — one line per event in the log_finding shape;
 # exempt commands never log.

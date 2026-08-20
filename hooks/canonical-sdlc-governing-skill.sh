@@ -19,7 +19,7 @@
 #   sdlc-step: 3
 #   epic: epic-02-checkout
 #   wave: wave-01-checkout-refactor
-#   canonical_sdlc_version: 13
+#   canonical_sdlc_version: 14
 #   intent: build
 #   rigor: audited
 #   scale: wave
@@ -31,7 +31,7 @@
 #
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
 #
-# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
+# Registered on both channels: hooks/hooks.json (agent contexts, behind agent-context-guard.sh) and skills/canonical-sdlc/SKILL.md frontmatter (main thread).
 
 set -u
 
@@ -459,7 +459,7 @@ if [ -z "$FRONTMATTER" ]; then
   echo "  sdlc-step: <step number>" >&2
   echo "  epic: epic-NN-<slug>" >&2
   echo "  wave: wave-NN-<slug>   # omit for epic-level and continuation" >&2
-  echo "  canonical_sdlc_version: 13" >&2
+  echo "  canonical_sdlc_version: 14" >&2
   echo "  intent: <build|bugfix|refactor|tune|spike|incident-response>" >&2
   echo "  rigor: <tested|peer-reviewed|audited>" >&2
   echo "  scale: <task|wave|epic>" >&2
@@ -505,7 +505,7 @@ SDLC_VERSION=$(yaml_get canonical_sdlc_version)
 # value, garbage — blocks. There is no version dispatch below this line and
 # no path that reaches `exit 0` without passing the whole contract.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-SUPPORTED_SDLC_VERSION=13
+SUPPORTED_SDLC_VERSION=14
 
 if [ "$SDLC_VERSION" != "$SUPPORTED_SDLC_VERSION" ]; then
   echo "BLOCKED: canonical-sdlc artifact '$BASENAME' declares canonical_sdlc_version: '$SDLC_VERSION'." >&2

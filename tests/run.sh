@@ -2,8 +2,8 @@
 #
 # tests/run.sh — one-command test runner for bionic.
 #
-# No CI needed: just `bash tests/run.sh`. Runs every hermetic suite (no network,
-# no auth) plus the Docker mock install e2e when docker is present.
+# No CI needed: just `bash tests/run.sh`. Every gating suite is hermetic — no
+# network, no auth, no daemon — and every one of them runs on every invocation.
 #
 #   GATING suites (set the exit code — must be green):
 #     the hand-listed `run` lines below, one per suite — nothing here is
@@ -15,7 +15,12 @@
 #                                      themselves, and tests/ is not
 #                                      hook-exclusive, so uniform hand-listing is
 #                                      the only honest discovery left)
-#     tests/bootstrap-e2e-docker.sh    whole bootstrap on a fresh OS (docker only)
+#
+# There is no conditional suite and no skip category. The last one was
+# tests/bootstrap-e2e-docker.sh, which ran the whole of claude-bootstrap.sh in a
+# container; the installer was deleted in epic-17 W5 (4/6) and the suite went
+# with it (W5 audit F-3) — it had been green only because the Docker daemon was
+# down, and would have gone red the moment a contributor ran it daemon-up.
 #
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -27,7 +32,7 @@ cd "$REPO"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
-pass=0; fail=0; skip=0; failed=""
+pass=0; fail=0; failed=""
 
 run() {  # run <label> <cmd...>   — gating
   local label="$1"; shift
@@ -64,7 +69,6 @@ run "stop-check.test.sh" bash tests/stop-check.test.sh
 run "stop-guard.test.sh" bash tests/stop-guard.test.sh
 run "stop-orders.test.sh" bash tests/stop-orders.test.sh
 run "scripts.test.sh" bash tests/scripts.test.sh
-run "installer-behavior.test.sh" bash tests/installer-behavior.test.sh
 run "agent-roles.test.sh" bash tests/agent-roles.test.sh
 # The agent-file render pipeline (epic-17 W4 S2, spec AC-2): agents-src/ blocks + templates
 # + render.sh against the committed finals under agents/. Cross-FILE by nature — it spans a
@@ -86,18 +90,15 @@ run "cross-gate-agreement.test.sh" bash tests/cross-gate-agreement.test.sh
 run "fail-direction-table.test.sh" bash tests/fail-direction-table.test.sh
 # Epic-17 wave-01 slice S1: bionic plugin manifest + marketplace manifest + LICENSE.
 run "plugin-manifest.test.sh" bash tests/plugin-manifest.test.sh
-# hooks/hooks.json (plugin-format manifest, epic-17 wave-01 slice 2) is also
-# a cross-COMPONENT proof — it pins against claude-bootstrap.sh's
-# MANAGED_HOOKS array, not any single hook script.
-run "plugin-hooks.test.sh" bash tests/plugin-hooks.test.sh
 # Harness-on-harness (epic-17 W1). Pins the assertion helpers every suite above
 # hand-copies: under pipefail, `printf "$haystack" | grep -q` is a SIGPIPE race
 # that reports a present needle as missing and an absent-check as green. Also
 # hand-listed, same reason as the two lines above.
 run "assert-helper-race.test.sh" bash tests/assert-helper-race.test.sh
 # Cross-FILE proof (epic-17 W1 S3): the plugin-layout path rewrite, and the near-identical
-# state paths it must not have touched. Spans SKILL.md, hooks/ and claude-bootstrap.sh, so
-# like the two above it belongs to no single hook and must stay hand-listed.
+# state paths it must not have touched. Spans SKILL.md, hooks/ and the payload's own
+# registration surfaces, so like the two above it belongs to no single hook and must stay
+# hand-listed.
 run "plugin-paths.test.sh" bash tests/plugin-paths.test.sh
 # Cross-FILE proof (epic-17 W1 S6): the payload boundary — what the plugin ships and, more
 # to the point, what it must NOT. Pins marketplace.json's source field against the payload/
@@ -154,19 +155,19 @@ run "doctor.test.sh" bash tests/doctor.test.sh
 # the standalone door (the script alone, no payload libraries beside it).
 # Hand-listed like every suite outside hooks/.
 run "remove.test.sh" bash tests/remove.test.sh
-# Adopted from the retired root ./test.sh (epic-11 W3). That runner hand-listed
-# 8 suites and omitted agent-roles, installer-behavior and marker-verify — a
-# false green — but it was the ONLY runner carrying lib/platform.test.sh, so
-# retiring it without this line would have traded one blind spot for another.
-run "platform.test.sh" bash lib/platform.test.sh
-if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  run "bootstrap-e2e-docker.sh (mock)" bash tests/bootstrap-e2e-docker.sh
-else
-  printf '  %-36s ' "bootstrap-e2e-docker.sh (mock)"; echo "⤼ SKIP (docker unavailable)"; skip=$((skip+1))
-fi
+# lib/platform.test.sh RETIRED at epic-17 W5 (Step-6 review). The library it
+# covered exported OS, BREW_PREFIX, SHELL_RC, PLAYWRIGHT_CACHE and sed_inplace
+# for exactly two consumers — claude-bootstrap.sh and claude-reset.sh — and 4/6
+# deleted both. Nothing in the payload ever sourced it, so from that commit its
+# own suite was its only consumer and the pair was a closed loop testing itself.
+# Where the facts went, so this is a move and not a loss: the shell rc lives in
+# detect.sh (_detect_shell_rc) and remove.sh (_rm_shell_rc), the Playwright cache
+# in the dep table's BIONIC_PLAYWRIGHT_CACHE probe, and the payload does its own
+# rewriting in bash rather than sed, so sed_inplace has no successor because it
+# has no question left to answer.
 
 echo "──────────────────────────────────────────────"
-echo "Gating: ${pass} passed, ${fail} failed, ${skip} skipped"
+echo "Gating: ${pass} passed, ${fail} failed"
 if [ "$fail" -ne 0 ]; then
   echo -e "Failed:${failed}"
   exit 1

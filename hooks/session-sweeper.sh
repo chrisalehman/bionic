@@ -5,7 +5,8 @@
 # [WALL: tests/session-sweeper.test.sh]
 #
 # This is NOT a hook. Like hooks/preflight-probe.sh it lives in hooks/ for test-harness
-# pairing and bootstrap installation only; it is never registered in MANAGED_HOOKS. It is
+# pairing and to ride the payload's hooks/ directory into the mounted plugin; it is
+# registered on NO channel. It is
 # invoked on demand, one question per invocation, and it holds no process open:
 #
 #     bash ~/.claude/hooks/session-sweeper.sh verdict [<name>]
@@ -67,6 +68,7 @@
 #
 # Hostile-repo posture (design §8): a repo controls its own .bionic/ contents, so every
 # path this script writes is checked for symlink redirection before anything is written.
+# Registered on no channel — invoked on demand from the mounted plugin payload.
 
 set -u
 
@@ -597,7 +599,7 @@ verdict_row() {  # <roster row>
 # One awk pass rather than a shell loop over `line_field`, which is four processes per field
 # per row: this verb runs from the Stop-sweep (`hooks/landing-gate.sh`, invoked on the
 # harness's Stop event, not SubagentStop — see that file's header) under the 10 s timeout
-# claude-bootstrap.sh registers, against a roster that is deliberately uncapped (the
+# the registration declares, against a roster that is deliberately uncapped (the
 # recorder's F-1 note says why). The fold is the reader-side twin of the recorder's
 # "take the LAST row for a tool_use_id".
 #

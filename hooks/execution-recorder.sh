@@ -45,7 +45,7 @@
 #
 # [WALL: tests/execution-recorder.test.sh]
 #
-# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
+# Registered in skills/canonical-sdlc/SKILL.md frontmatter; live only while that skill is armed.
 
 set -uo pipefail
 
@@ -405,7 +405,9 @@ if [ "$TOOL_NAME" = "Agent" ]; then
     # THE PREFILTER, and the whole reason this arm can afford an unbounded ledger
     # (Step-6 critic F-1). `line_field` is four processes per call and this loop
     # ran three of them on EVERY row of the file; at 3000 rows that measured
-    # 9260 ms against the 10 s hook timeout claude-bootstrap.sh registers, which
+    # 9260 ms against the 10 s hook timeout this script's registration declares
+    # (skills/canonical-sdlc/SKILL.md frontmatter; hooks/hooks.json carries the
+    # same ceiling, and tests/cross-gate-agreement.test.sh L.4b pins them equal), which
     # is what pushed the review toward capping the file instead. A `case` is
     # in-shell and matches only the row this event is about, so the expensive
     # reads run once per dispatch rather than once per row.

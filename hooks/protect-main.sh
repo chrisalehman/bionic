@@ -3,7 +3,7 @@
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
 # The user must push to main manually from their own terminal.
 # [WALL: tests/protect-main.test.sh]
-# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
+# Registered always-on in hooks/hooks.json; runs from the mounted plugin payload.
 
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')

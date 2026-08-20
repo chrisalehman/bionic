@@ -116,6 +116,24 @@ AGENT_CAUSE="${AGENT_FACT##*cause=}"
 TODO_FACT="$(detect_env_todo_tools)";        TODO_STATE="${TODO_FACT##*present=}"
 LEGACY_FACT="$(detect_zshrc_legacy_block)";  LEGACY_STATE="${LEGACY_FACT##*present=}"
 LEGACY_HOOK_FACT="$(detect_legacy_channel_hooks)"; LEGACY_HOOK_COUNT="${LEGACY_HOOK_FACT##*count=}"
+SKILL_COPY_FACT="$(detect_legacy_skill_copy)"
+SKILL_COPY_STATE="${SKILL_COPY_FACT#*present=}"; SKILL_COPY_STATE="${SKILL_COPY_STATE%% *}"
+SKILL_COPY_PATH="${SKILL_COPY_FACT##*path=}"
+HOOK_FILES_FACT="$(detect_legacy_hook_files)"
+HOOK_FILES_COUNT="${HOOK_FILES_FACT#*count=}"; HOOK_FILES_COUNT="${HOOK_FILES_COUNT%% *}"
+HOOK_FILES_CAUSE="${HOOK_FILES_FACT##*cause=}"
+REG_SHA_FACT="$(detect_registry_sha_lag)"
+REG_SHA_STATE="${REG_SHA_FACT#*state=}"; REG_SHA_STATE="${REG_SHA_STATE%% *}"
+REG_SHA_REG="${REG_SHA_FACT#*registry=}"; REG_SHA_REG="${REG_SHA_REG%% *}"
+REG_SHA_REPO="${REG_SHA_FACT#*repo=}";    REG_SHA_REPO="${REG_SHA_REPO%% *}"
+REG_SHA_CAUSE="${REG_SHA_FACT##*cause=}"
+
+INST_AGENT_FACT="$(detect_installed_agent_copies)"
+INST_AGENT_STATE="${INST_AGENT_FACT#*state=}"; INST_AGENT_STATE="${INST_AGENT_STATE%% *}"
+INST_AGENT_TOTAL="${INST_AGENT_FACT#*total=}"; INST_AGENT_TOTAL="${INST_AGENT_TOTAL%% *}"
+INST_AGENT_DRIFT="${INST_AGENT_FACT#*drift=}"; INST_AGENT_DRIFT="${INST_AGENT_DRIFT%% *}"
+INST_AGENT_NAMES="${INST_AGENT_FACT#*names=}"; INST_AGENT_NAMES="${INST_AGENT_NAMES%% *}"
+INST_AGENT_CAUSE="${INST_AGENT_FACT##*cause=}"
 HALF_FACT="$(detect_half_uninstalled)";      HALF_STATE="${HALF_FACT##*half-uninstalled=}"
 
 PROFILE_FACT="$(detect_profile_state)"
@@ -151,21 +169,24 @@ HAVE_JQ=yes; command -v jq >/dev/null 2>&1 || HAVE_JQ=no
 # three views of the same facts and a second pass would be a second chance to
 # disagree with the first.
 
-# The installed tree of a plugin-shaped dependency, as the CLI recorded it.
-# `installPath` is the registry's own answer to "where did this land", which is
-# what makes the roster count a measurement rather than a guess about layout.
-_doctor_install_path() {  # <name>
-  local name="${1:-}" file path
-  file="${BIONIC_INSTALLED_PLUGINS_FILE:-${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/installed_plugins.json}"
-  [ -f "$file" ] || return 1
-  command -v jq >/dev/null 2>&1 || return 1
-  path="$(jq -r --arg n "$name" '
-      [ (.plugins // {}) | to_entries[]
-        | select((.key | split("@")[0]) == $n)
-        | .value[0].installPath // empty ] | first // ""' "$file" 2>/dev/null)"
-  [ -n "$path" ] || return 1
-  echo "$path"
-}
+# The installed tree of a plugin-shaped dependency, as the CLI recorded it, comes from
+# detect.sh's `detect_plugin_install_path` — the same parse `detect_plugin_root` resolves
+# bionic through. `installPath` is the registry's own answer to "where did this land", which
+# is what makes the roster count a measurement rather than a guess about layout.
+#
+# THIS USED TO BE A SECOND PARSE (Step-6 review, RV-7). A local `_doctor_install_path` read
+# the same CLI-internal schema with its own jq program, which is a duplication that cannot
+# be noticed from either side: the CLI renames a field, the pinned copy in detect.sh gets
+# fixed, and this one keeps answering in the old shape just as confidently. It also left
+# detect_plugin_root with zero production callsites (RV-4) — the parse under test was the
+# parse nobody ran. Deleting the local copy discharges both: one reading, and it is the
+# reading the suite drives.
+#
+# TWO THINGS IMPROVED IN THE MOVE, both in the direction of answering rather than shrugging.
+# The local copy gave up outright without `jq`; the shared parse has an awk lane, so a
+# jq-less box now gets real roster counts instead of `unknown` wherever presence itself was
+# knowable. And the shared parse checks that the recorded directory EXISTS, so a stale
+# registry entry reports as unreadable here rather than as a confident count of zero.
 
 # ROSTER FOOTPRINT, the counting method (design-ledger D6). Skill and agent
 # METADATA — name plus description — is what loads into every session; the
@@ -219,7 +240,7 @@ while IFS= read -r dep_name; do
     ROSTER_ROWS="${ROSTER_ROWS}$(printf '  %-22s %-9s %s' \
       "$dep_name" "0" "(not installed — contributes nothing this session)")"$'\n'
   else
-    install_path="$(_doctor_install_path "$dep_name")" || install_path=""
+    install_path="$(detect_plugin_install_path "$dep_name")" || install_path=""
     if [ -z "$install_path" ] || [ ! -d "$install_path" ]; then
       ROSTER_ROWS="${ROSTER_ROWS}$(printf '  %-22s %-9s %s' \
         "$dep_name" "unknown" "(the registry records no readable installPath for it)")"$'\n'
@@ -298,6 +319,28 @@ case "$AGENT_STATE" in
 esac
 printf '  %-19s %s\n' "payload root" "$(_detect_plugin_root)"
 
+# WHICH COMMIT IS INSTALLED, against which commit this tree is on. ONE LINE, AND IT REPORTS
+# RATHER THAN POLICES — the agent-files posture, and deliberately: an install behind the tip
+# is what a developer machine looks like between any two commits, so a SUMMARY action line
+# would nag on every one of them. The action rides inline on the one state that has one.
+#
+# `unknown` is the ORDINARY answer here and carries no apology: installed from the public
+# feed, with no checkout of this repo under the cwd, the question genuinely has no answer.
+_doctor_sha12() { printf '%.12s' "${1:-}"; }
+case "$REG_SHA_STATE" in
+  match)
+    printf '  %-19s %s\n' "registry sha" \
+      "match — the installed build is this tree's HEAD ($(_doctor_sha12 "$REG_SHA_REG"))" ;;
+  lag)
+    printf '  %-19s %s\n' "registry sha" \
+      "installed at $(_doctor_sha12 "$REG_SHA_REG"), this tree is $(_doctor_sha12 "$REG_SHA_REPO") — the install is behind; re-run: claude plugin install bionic@bionic" ;;
+  not-in-repo)
+    printf '  %-19s %s\n' "registry sha" \
+      "installed at $(_doctor_sha12 "$REG_SHA_REG") — not a commit in this repository, so this tree is not what is running" ;;
+  *)
+    printf '  %-19s %s\n' "registry sha" "unknown — ${REG_SHA_CAUSE}" ;;
+esac
+
 echo ""
 echo "=== TIER STATE ==="
 # Labels here are deliberately ASCII: printf pads to a BYTE width, so a label
@@ -328,6 +371,71 @@ if [ "$LEGACY_HOOK_COUNT" = "unknown" ]; then
 else
   printf '  %-38s %s\n' "legacy-channel managed-hook entries" "$LEGACY_HOOK_COUNT"
 fi
+# THE SKILL COPY IS NOT INERT, and that is the whole reason it gets a line and an action
+# while the hook files below get only a line. The retired installer rendered canonical-sdlc
+# into the CLI's own skills directory, and W5 (4/6) measured eleven hook registrations in
+# that copy's frontmatter — every one spelled for the pre-plugin hooks directory. A session
+# that loads it arms the same walls twice, through the channel the cutover retired, and
+# until now nothing in this report said so: doctor could call a machine clean while it was
+# running two of everything.
+if [ "$SKILL_COPY_STATE" = "yes" ]; then
+  printf '  %-38s %s\n' "legacy installed skill copy" \
+    "${SKILL_COPY_PATH} — a second canonical-sdlc, arming the same walls again"
+else
+  printf '  %-38s %s\n' "legacy installed skill copy" \
+    "none — the skill ships in the payload"
+fi
+# THE HOOK FILES ARE THE OTHER HALF OF A QUESTION THIS REPORT ONLY ANSWERED HALFWAY. The
+# line above counts REGISTRATIONS in settings.json; the installer also left the scripts
+# themselves in the CLI's hooks directory, and a machine cleaned of every registration still
+# has them. That machine and a clean one read identically here until now — and the person
+# reading is the one who can see the directory with `ls`.
+#
+# REPORTED, NEVER PRESCRIBED — the same contract the agent-copies line keeps. With the
+# registrations gone these files run nothing: they are disk, not behaviour, and turning
+# "this exists" into "you should delete it" on an otherwise-fine machine is how a diagnosis
+# turns into nagging. The close-out that removes them is a decision, not a default.
+if [ "$HOOK_FILES_COUNT" = "unknown" ]; then
+  printf '  %-38s %s\n' "legacy installed hook files" "unknown — ${HOOK_FILES_CAUSE}"
+elif [ "$HOOK_FILES_COUNT" = "0" ]; then
+  printf '  %-38s %s\n' "legacy installed hook files" \
+    "none — hooks run from the payload"
+else
+  # The COUNT, and where to look — not the roster. A machine that never ran a cleanup
+  # carries sixteen of these, and sixteen filenames on one line is a paragraph nobody
+  # reads. The agent-copies line above names its files because it names only the ones that
+  # DRIFTED, which is a short and actionable set; here every leftover is the same leftover
+  # and the number is the whole finding. The names stay in the fact line for a caller that
+  # wants them.
+  printf '  %-38s %s\n' "legacy installed hook files" \
+    "${HOOK_FILES_COUNT} left by the retired installer, inert — see ${SKILL_COPY_PATH%/skills/*}/hooks"
+fi
+# THE PLUGIN-ERA TRUTH LEADS, because it is the half a reader needs whichever
+# state the machine is in: role files ship in the PAYLOAD, and anything in the
+# CLI's own agents directory is what the retired installer left. Those copies
+# are what a session actually loads, so a machine can be running dispatch
+# instructions two plugin updates old with no other symptom.
+#
+# READ-ONLY, AND NO ACTION LINE — the same contract the agent-integrity line
+# keeps. /bionic:setup owns the offer to remove a legacy copy, under consent;
+# doctor's job is to say the directory is there. A SUMMARY entry here would
+# turn "this exists" into "you should delete it" on a machine that is otherwise
+# fine.
+case "$INST_AGENT_STATE" in
+  absent)
+    printf '  %-38s %s\n' "installed agent role files" \
+      "none — role files ship in the payload" ;;
+  present)
+    if [ "$INST_AGENT_DRIFT" = "0" ]; then
+      printf '  %-38s %s\n' "installed agent role files" \
+        "${INST_AGENT_TOTAL} legacy copies, none differing from the payload (the payload is what ships)" ;
+    else
+      printf '  %-38s %s\n' "installed agent role files" \
+        "${INST_AGENT_TOTAL} legacy copies, ${INST_AGENT_DRIFT} differing from the payload (${INST_AGENT_NAMES//,/, }) — the payload is what ships" ;
+    fi ;;
+  *)
+    printf '  %-38s %s\n' "installed agent role files" "unknown — ${INST_AGENT_CAUSE}" ;;
+esac
 if [ "$CCSTATUSLINE_STATE" = "unknown" ]; then
   printf '  %-38s %s\n' "ccstatusline statusline" \
     "unknown — $(_doctor_unknown_cause statusline)"
@@ -435,6 +543,12 @@ case "$LEGACY_HOOK_COUNT" in
   unknown|0) ;;
   *) add_setup_reason "clean ${LEGACY_HOOK_COUNT} legacy-channel managed-hook $(_doctor_plural "$LEGACY_HOOK_COUNT" entry entries) out of settings.json" ;;
 esac
+# The skill copy, and NOT the hook files beside it. Setup step 7 owns the consented removal,
+# so there is a real thing to offer; and unlike the files, this copy is doing something —
+# arming eleven registrations a second time. The asymmetry is the point, and
+# tests/doctor.test.sh Group 14 pins it from the other side with a machine whose only
+# leftover is hook files and whose summary still reads "nothing to do".
+[ "$SKILL_COPY_STATE" = "yes" ] && add_setup_reason "remove the legacy skill copy at ${SKILL_COPY_PATH}"
 if [ -n "$SETUP_REASONS" ]; then
   echo "  → run /bionic:setup — it would ${SETUP_REASONS}."
   ACTED=yes
