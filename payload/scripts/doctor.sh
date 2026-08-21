@@ -230,6 +230,22 @@ fi
 
 HAVE_JQ=yes; command -v jq >/dev/null 2>&1 || HAVE_JQ=no
 
+# The default permission mode (item 1 + O-3): a fact of the SETTINGS file, not
+# of the marker block profile.sh renders — the same `.permissions.defaultMode`
+# key `_setup_default_mode` writes. `unset` means the key is genuinely absent;
+# `unknown` means jq is missing and the file could not be read at all, which is
+# a different claim and must not collapse into the same word.
+PROFILE_MODE="unknown"
+if [ "$HAVE_JQ" = "yes" ]; then
+  PROFILE_SETTINGS_PATH="$(_profile_settings_file)"
+  if [ -f "$PROFILE_SETTINGS_PATH" ]; then
+    PROFILE_MODE="$(jq -r '.permissions.defaultMode // ""' "$PROFILE_SETTINGS_PATH" 2>/dev/null)"
+  else
+    PROFILE_MODE=""
+  fi
+  [ -n "$PROFILE_MODE" ] || PROFILE_MODE="unset"
+fi
+
 # ─── The two facts that come from outside this machine's files ───────────────
 #
 # LOAD STATE is the CLI's own conclusion and is not written anywhere readable, so
@@ -682,6 +698,16 @@ else
   printf '  %-26s %s\n' "accretion outside block" \
     "${PROFILE_ACCRETION} $(_doctor_plural "$PROFILE_ACCRETION" rule rules) this machine owns"
 fi
+
+# The default permission mode (item 1 + O-3) — a setting of the machine's, not
+# a rule inside the block above, and it carries the one sentence that keeps a
+# Remote Control session from reading it as a stronger promise than it is.
+if [ "$PROFILE_MODE" = "unknown" ]; then
+  printf '  %-38s %s\n' "permission mode" "unknown — jq is not on PATH, so the default permission mode cannot be read"
+else
+  printf '  %-38s %s\n' "permission mode" "$PROFILE_MODE"
+fi
+echo "      ${PROFILE_RC_NOTE}"
 
 echo ""
 echo "=== ROSTER FOOTPRINT ==="

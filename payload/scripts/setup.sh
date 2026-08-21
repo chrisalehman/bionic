@@ -1029,7 +1029,14 @@ _setup_default_mode() {
   if [ "$mode" = "$want" ]; then say "   the default permission mode is already ${want} — nothing to do."; return 0; fi  # idempotence guard: default mode
 
   say "   Claude Code asks before each command unless a default mode says otherwise."
-  if ! consent "   Set Claude Code's default permission mode to ${want}? Recommended — you approve once, not on every command."; then say "   declined — the default permission mode is unchanged."; action "set Claude Code's default permission mode to ${want} in ${settings} — $(_setup_answer_yes permission-mode)"; return 0; fi  # consent gate: default mode
+  consent "   Set Claude Code's default permission mode to ${want}? Recommended — you approve once, not on every command."
+  local _setup_mode_consent=$?
+  # item 1: the note follows the question itself, whichever way it was
+  # answered — a Remote Control session overrides this either way, so a
+  # decline that leaves the setting unchanged and a yes that writes it both
+  # need the same one sentence.
+  say "   ${PROFILE_RC_NOTE}"
+  if [ "$_setup_mode_consent" -ne 0 ]; then say "   declined — the default permission mode is unchanged."; action "set Claude Code's default permission mode to ${want} in ${settings} — $(_setup_answer_yes permission-mode)"; return 0; fi  # consent gate: default mode
 
   # Created only AFTER consent: a declined run must leave a machine that has no
   # settings file without one.
