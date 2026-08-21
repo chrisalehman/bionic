@@ -507,6 +507,37 @@ _detect_installed_plugins_file() {
   printf '%s' "${BIONIC_INSTALLED_PLUGINS_FILE:-${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/installed_plugins.json}"
 }
 
+# The marketplace REGISTRATION file, a sibling of the plugin one above and named the
+# same way. `known_marketplaces.json` is keyed by marketplace name — bionic's own
+# marketplace manifest (`.claude-plugin/marketplace.json`) fixes that name to `bionic`,
+# so the lookup below is not a guess — and each entry's `source.source` is the CLI's own
+# record of how that feed was registered: `"directory"` for a local checkout (what a
+# dogfood install is) or a git kind (`"github"`, `"url"`, …) for anything fetched from a
+# repo. `detect_reconverge_hint` below is the one caller.
+_detect_known_marketplaces_file() {
+  printf '%s' "${BIONIC_KNOWN_MARKETPLACES_FILE:-${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/known_marketplaces.json}"
+}
+
+# WHICH FEED BIONIC CAME FROM, answered the same oracle-not-guess way as the install
+# path above: the file the CLI itself wrote when the marketplace was registered, read
+# once, here. `directory` on a local-checkout feed, `git` on anything fetched from a
+# repo, `unknown` when the file is missing, unparsable, or names no `bionic` entry —
+# `jq`-less machines get `unknown` too rather than a hand-rolled second reading, since
+# this only feeds an advisory hint and a wrong guess there is worse than an honest one.
+detect_marketplace_feed_kind() {
+  local mp kind
+  mp="$(_detect_known_marketplaces_file)"
+  [ -f "$mp" ] || { printf 'unknown\n'; return 0; }
+  command -v jq >/dev/null 2>&1 || { printf 'unknown\n'; return 0; }
+  kind="$(jq -r '.bionic.source.source // empty' "$mp" 2>/dev/null)"
+  case "$kind" in
+    directory) printf 'directory\n' ;;
+    ''|null)   printf 'unknown\n' ;;
+    *)         printf 'git\n' ;;
+  esac
+  return 0
+}
+
 detect_plugin_registered() {
   local installed_json count
   installed_json="$(_detect_installed_plugins_file)"
@@ -771,18 +802,31 @@ detect_registry_sha_lag() {  # [<repo-dir>] -> one line, always exit 0
   return 0
 }
 
-# ONE OWNER FOR THE RE-CONVERGE COMMAND (epic-17 W7 S2, AC-3). `claude plugin install
-# <id>` is the CLI's FIRST-time verb — on an id already registered it reports "already
-# installed" and does not refresh anything. On a directory-source install (a local
-# checkout registered as a marketplace feed, which is what a dogfood install is) the
-# registry can lag this tree between a merge and the next re-converge; that lag is a
-# NOMINAL state, not a defect, and the command that clears it is `update`, not
-# `install`. Every site that tells a user how to re-converge an already-installed
-# bionic reads this one function; a second copy of the literal is the defect this
-# function exists to prevent. Sites that report bionic NOT INSTALLED at all keep
-# `install` — that is the correct first-time verb for them and stays a separate,
-# uncoupled literal (setup.sh, remove.sh, detect_plugin_root_refuse below).
-detect_reconverge_hint() { printf 'claude plugin update bionic@bionic\n'; }
+# ONE OWNER FOR THE RE-CONVERGE SENTENCE (epic-17 W7 S2/S2b, AC-3). `claude plugin
+# install <id>` is the CLI's FIRST-time verb — on an id already registered it reports
+# "already installed" and does not refresh anything, so `update` is the re-converge verb
+# on a feed where the cache is what runs. That is true on a GIT-SOURCE feed, where the
+# cache the registry names is exactly what the CLI loads. It is NOT true on a
+# DIRECTORY-SOURCE marketplace (a local checkout registered as a feed, which is what a
+# dogfood install is): there `${CLAUDE_PLUGIN_ROOT}` resolves to the tree itself, the
+# cache is a side artifact nothing reads, and `update` at an unchanged plugin.json
+# version reports "already at the latest version" and touches nothing — measured
+# 2026-08-21, `.bionic/docs/record/epic-17-w7/ac2-relay-drive.md`. So S2's single literal
+# was right for one feed and false for the other; this stays the one function every site
+# that reports this state reads, and it now answers per feed instead of by one guess.
+# Sites that report bionic NOT INSTALLED at all keep `install` — that is the correct
+# first-time verb for them and stays a separate, uncoupled literal (setup.sh, remove.sh,
+# detect_plugin_root_refuse above). `unknown` feed kind (registry unreadable, no `jq`,
+# no bionic entry) defaults to the git-source line: that is the CLI's documented public
+# install path (README.md), so a wrong guess there is the rarer, safer failure.
+detect_reconverge_hint() {
+  case "$(detect_marketplace_feed_kind)" in
+    directory)
+      printf 'nothing to do — the CLI runs this tree directly; the registry copy catches up at the next version bump or reinstall\n' ;;
+    *)
+      printf 'claude plugin update bionic@bionic\n' ;;
+  esac
+}
 
 # ─── Bounded execution ───────────────────────────────────────────────────────
 #
