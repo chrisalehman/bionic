@@ -127,6 +127,15 @@ BIONIC_PROFILE_BEGIN_PREFIX='Bash(: bionic-profile-begin version='
 BIONIC_PROFILE_END='Bash(: bionic-profile-end)'
 BIONIC_PROFILE_CONSENT='--consented'
 
+# THE ONE SENTENCE ABOUT `.permissions.defaultMode` (epic-17 wave-07 item 1 +
+# O-3). A Remote Control session offers its own Manual / Accept edits / Plan
+# only choice and that choice wins over whatever this machine's settings file
+# says — so anywhere the default mode is shown or asked about has to say so on
+# the same screen, or the setting reads as a stronger promise than it is. One
+# literal, so doctor's line and setup's question can never drift apart the way
+# `BIONIC_DEFAULT_PERMISSION_MODE` used to before it had one owner.
+PROFILE_RC_NOTE='Remote Control sessions override this (Manual / Accept edits / Plan only).'
+
 # Removes the marker block, inclusive, and collapses the containers it created.
 # The collapse is what makes a machine that had no `permissions` key at all come
 # back byte-exact: apply created `.permissions.allow`, so strip must unmake it.
