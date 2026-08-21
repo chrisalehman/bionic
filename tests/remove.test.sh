@@ -95,6 +95,30 @@ for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat ls tr head ta
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BASE_BIN}/${real}" 2>/dev/null
 done
 
+# `mv` WITH A WITNESS. Every writer in the payload stages its work in a
+# `<file>.bionic.tmp` and renames it into place, so the mode the RENAME publishes
+# is the only mode that matters — a writer that publishes 0644 and chmods back to
+# 0600 afterwards passes an after-the-fact mode check while leaving the staged
+# copy of the user's file, secrets and all, readable under a predictable name for
+# the span before the rename (and permanently if the process dies in it). This
+# wrapper records the mode of what each `mv` is about to publish. It is inert
+# unless an arm sets BIONIC_TEST_MV_LOG, so every other arm on this PATH is
+# unaffected; `exec` hands off to the real binary, so nothing about the rename
+# itself changes.
+BASE_MV_REAL="$(command -v mv 2>/dev/null)"
+# The loop above left a SYMLINK to the real binary here; `cat >` would follow it
+# and try to write /bin/mv. Replace the link, do not write through it.
+rm -f "${BASE_BIN}/mv"
+cat > "${BASE_BIN}/mv" <<MVSTUB
+#!/bin/bash
+if [ -n "\${BIONIC_TEST_MV_LOG:-}" ] && [ -f "\$1" ]; then
+  printf '%s %s\n' "\$(stat -f '%Lp' "\$1" 2>/dev/null || stat -c '%a' "\$1" 2>/dev/null)" "\$1" \
+    >> "\$BIONIC_TEST_MV_LOG"
+fi
+exec "$BASE_MV_REAL" "\$@"
+MVSTUB
+chmod +x "${BASE_BIN}/mv"
+
 # Everything a fixture machine needs, built fresh per arm.
 #   <arm>/home/.zshrc
 #   <arm>/home/.claude/settings.json
@@ -295,6 +319,39 @@ case "$*" in
     # behind. Empty, because --keep-data means it deleted nothing to recreate.
     mkdir -p "${DATA_DIR}/bionic-bionic"
     ;;
+  "mcp get"*) exit 1 ;;
+esac
+exit 0
+STUB
+  chmod +x "$arm/bin/claude"
+}
+
+# `claude` stub in the LIVE shape the orphan question exists for: while bionic is
+# still installed the CLI's dry run names NOTHING, and only once the uninstall has
+# run does it name the auto-installed plugins that are now unreachable. The other
+# stubs above report orphans up front, which is a machine that cannot discriminate
+# a plan that names the follow-on honestly from one that got lucky.
+plant_claude_stub_orphans_after_uninstall() {  # <arm>
+  local arm="$1"
+  cat > "$arm/bin/claude" <<'STUB'
+#!/bin/bash
+echo "claude $*" >> "$BIONIC_TEST_CALLS"
+GONE="$HOME/.stub-uninstalled"
+case "$*" in
+  "plugin list --json")
+    if [ -e "$GONE" ]; then printf '%s\n' '[]'
+    else printf '%s\n' '[{"id":"bionic@bionic","version":"0.1.0","scope":"user","enabled":true}]'; fi ;;
+  "plugin prune --dry-run")
+    if [ -e "$GONE" ]; then
+      printf '%s\n' '3 auto-installed plugins no longer needed at user scope:
+  superpowers@bionic (6.3.0)
+  agent-skills@bionic (0.6.7)
+  impeccable@bionic (1.2.0)
+(dry run — nothing removed)'
+    else
+      printf '%s\n' 'No auto-installed plugins to prune.'
+    fi ;;
+  "plugin uninstall"*) : > "$GONE" ;;
   "mcp get"*) exit 1 ;;
 esac
 exit 0
@@ -739,6 +796,89 @@ chmod 644 "$ARM/home/.claude/settings.json"
 OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
 expect_eq "remove.sh does not narrow a 0644 settings.json either" \
   "644" "$(file_mode "$ARM/home/.claude/settings.json")"
+
+# ─── THE OTHER FILE THIS SCRIPT REWRITES (critic F2) ─────────────────────────
+#
+# The arms above cover settings.json, which is where the mode discipline was
+# first written down. W7 taught remove.sh to rewrite a SECOND file — the user's
+# shell rc — and carried none of that reasoning across. An rc is if anything the
+# likelier of the two to hold plaintext tokens: it is where people put
+# `export …_API_KEY=`. A teardown that answers one question about a retired
+# marker block must not, as a side effect, publish that file to every account on
+# the machine.
+#
+# Three writers reach the rc and all three are asserted: `_rm_strip_marker_block`
+# (the retired env block, and the alias block), and `_rm_filter_out_lines` (the
+# bare export). Both directions each, so no arm can pass by pinning one constant.
+
+# The env block, stripped by _rm_strip_marker_block, on a 0600 rc holding a secret.
+ARM="$(new_arm env-rc-mode-600)"
+printf 'export EDITOR=vim\nexport SOME_API_TOKEN=sk-fixture-not-a-real-secret\n' > "$ARM/home/.zshrc"
+RC_PRE_MODE="$(cat "$ARM/home/.zshrc")"
+plant_env_rc_block "$ARM"
+plant_env_settings "$ARM"
+plant_claude_stub "$ARM" no no
+chmod 600 "$ARM/home/.zshrc"
+expect_eq "fixture: the rc really starts at 0600 (the arm is not vacuous)" \
+  "600" "$(file_mode "$ARM/home/.zshrc")"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES" BIONIC_TEST_MV_LOG="$ARM/mv.log")"
+REMOVE_FLAGS=""
+expect_eq "rc mode arm: the block really was stripped (the arm is not vacuous)" \
+  "$RC_PRE_MODE" "$(cat "$ARM/home/.zshrc")"
+expect_eq "remove.sh's rc rewrite leaves a 0600 rc at 0600" \
+  "600" "$(file_mode "$ARM/home/.zshrc")"
+# R-1 for the rc: the mode is right AT THE RENAME, not repaired after it.
+expect_true "rc mode arm: the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q '\.zshrc\.bionic\.tmp' "$ARM/mv.log"
+expect_eq "…and every staged copy of the 0600 rc was itself 0600, before the rename" "" \
+  "$(/usr/bin/grep '\.zshrc\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
+
+# The same writer must not NARROW a file the user left at 0644.
+ARM="$(new_arm env-rc-mode-644)"
+printf 'export EDITOR=vim\n' > "$ARM/home/.zshrc"
+plant_env_rc_block "$ARM"
+plant_env_settings "$ARM"
+plant_claude_stub "$ARM" no no
+chmod 644 "$ARM/home/.zshrc"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+REMOVE_FLAGS=""
+expect_eq "remove.sh does not narrow a 0644 rc either" \
+  "644" "$(file_mode "$ARM/home/.zshrc")"
+
+# The bare export, stripped by _rm_filter_out_lines — a different function, the
+# same rename, and it is reached only when there is no marker block to strip.
+ARM="$(new_arm env-rc-filter-mode-600)"
+printf 'export EDITOR=vim\nexport SOME_API_TOKEN=sk-fixture-not-a-real-secret\n' > "$ARM/home/.zshrc"
+plant_todo_export "$ARM"
+plant_env_settings "$ARM"
+plant_claude_stub "$ARM" no no
+chmod 600 "$ARM/home/.zshrc"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES" BIONIC_TEST_MV_LOG="$ARM/mv.log")"
+REMOVE_FLAGS=""
+expect_not_contains "filter mode arm: the export really was removed (not vacuous)" \
+  "export CLAUDE_CODE_ENABLE_TODO_TOOLS=1"$'\n' "$(cat "$ARM/home/.zshrc")"
+expect_eq "_rm_filter_out_lines leaves a 0600 rc at 0600" \
+  "600" "$(file_mode "$ARM/home/.zshrc")"
+expect_eq "…and its staged copy was 0600 before the rename too" "" \
+  "$(/usr/bin/grep '\.zshrc\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
+
+# And the alias block, the other marker pair the same helper strips.
+ARM="$(new_arm alias-rc-mode-600)"
+plant_zshrc_marked "$ARM"
+plant_claude_stub "$ARM" no no
+chmod 600 "$ARM/home/.zshrc"
+REMOVE_FLAGS="--only legacy-alias"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES" BIONIC_TEST_MV_LOG="$ARM/mv.log")"
+REMOVE_FLAGS=""
+expect_not_contains "alias mode arm: the block really was stripped (not vacuous)" \
+  "bionic:start" "$(cat "$ARM/home/.zshrc")"
+expect_eq "the alias-block strip leaves a 0600 rc at 0600" \
+  "600" "$(file_mode "$ARM/home/.zshrc")"
+expect_eq "…and its staged copy was 0600 before the rename too" "" \
+  "$(/usr/bin/grep '\.zshrc\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
 
 ARM="$(new_arm lib-strip-mode)"
 LIB_MODE_SETTINGS="$ARM/home/.claude/settings.json"
@@ -2286,13 +2426,93 @@ expect_true "--all: the pre-plugin skill copy is gone" \
 expect_true "--all: the never-list still survives an --all run" \
   test -f "$ARM/home/.bionic/memory/note.md"
 
-# THE FOLLOW-ON RUNS INLINE, unnamed on the plan because it was not yet true.
-expect_not_contains "--all: the plan does not name a follow-on nothing has created yet" \
-  "• remove the dependencies nothing needs" "$ALL_OUT"
+# THE FOLLOW-ON IS NAMED BEFORE THE ANSWER, CONDITIONALLY (critic F1).
+#
+# `--all` collapses every question into one, so the page it is asked over has to
+# cover everything the run will do — "nothing runs that was not on it". The
+# orphan prune cannot name its SUBJECTS before the uninstall lands (nothing is
+# orphaned yet, and the CLI's dry run says so), but the run can name the ACT, and
+# it can say why the list is not there yet. That is what the one answer then
+# honestly covers. What it must never be is silent: `claude plugin prune --yes`
+# takes plugins the roster deliberately refuses to offer by name — the core rows
+# — so an unnamed prune removes things a per-item pass would have shown the user.
+expect_contains "--all: the plan names the follow-on the uninstall will create" \
+  "• remove any dependencies the uninstall leaves orphaned" "$ALL_OUT"
+expect_contains "--all: …and says why its subjects are not listed yet" \
+  "checked after the plugin is removed" "$ALL_OUT"
+expect_contains "--all: …the follow-on line is on the page, above the one question" \
+  "• remove any dependencies the uninstall leaves orphaned" "${ALL_OUT%%Do all of the above?*}"
 expect_contains "--all: …and it is still reached in the same run" \
   "orphaned dependencies:" "$ALL_OUT"
 expect_contains "--all: …and the one answer covers it, so the prune runs" \
   "plugin prune --yes" "$ALL_CALLS"
+
+# ---- the live shape: the CLI names orphans only AFTER the uninstall ----
+#
+# The arm above runs against a stub that reports an orphan from the first call, so
+# on its own it cannot tell a conditional plan line from one printed because the
+# dry run happened to answer early. This arm is the shape the critic reproduced:
+# nothing is orphaned until the plugin is gone. The plan must still name the act,
+# and `prune --yes` must not run unless it did.
+ARM="$(new_arm all-orphans-after-uninstall)"
+plant_never_list "$ARM"
+plant_zshrc_marked "$ARM"
+plant_claude_stub_orphans_after_uninstall "$ARM"
+REMOVE_FLAGS="--all"
+LATE_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_YES")"
+REMOVE_FLAGS=""
+printf '%s\n' "$LATE_OUT" > "$TMP/rm-all-late-orphans.txt"
+LATE_CALLS="$(cat "$ARM/calls.log")"
+LATE_PLAN="${LATE_OUT%%Do all of the above?*}"
+
+expect_contains "late orphans: the plan still names the plugin uninstall" \
+  "• remove the plugin bionic@bionic (claude plugin uninstall)" "$LATE_PLAN"
+expect_contains "late orphans: …and the orphan follow-on, before the one question" \
+  "• remove any dependencies the uninstall leaves orphaned" "$LATE_PLAN"
+expect_eq "late orphans: still exactly one question in the whole run" "1" \
+  "$(/usr/bin/grep -c '\[y/N\]' "$TMP/rm-all-late-orphans.txt" | tr -d ' ')"
+expect_contains "late orphans: the uninstall ran" \
+  "plugin uninstall bionic@bionic" "$LATE_CALLS"
+expect_contains "late orphans: the CLI's list is shown when it finally exists" \
+  "superpowers@bionic" "$LATE_OUT"
+# The wall: a prune that was never on the page must never have run.
+expect_true "late orphans: prune --yes ran ONLY because the plan named it" \
+  bash -c 'case "$1" in *"remove any dependencies the uninstall leaves orphaned"*) exit 0 ;; esac
+           case "$2" in *"plugin prune --yes"*) exit 1 ;; esac
+           exit 0' _ "$LATE_PLAN" "$LATE_CALLS"
+
+# ---- and the standalone case: the plugin is already gone, so the item is its own line ----
+#
+# With no `plugin` row on the page there is no parent to hang the conditional line
+# on, and the orphans are real NOW — so the roster entry names them the ordinary
+# way, with its own verb, and the same one answer covers it.
+ARM="$(new_arm all-orphans-standalone)"
+plant_never_list "$ARM"
+plant_zshrc_marked "$ARM"
+plant_claude_stub "$ARM" no yes
+REMOVE_FLAGS="--all"
+STANDALONE_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_YES")"
+REMOVE_FLAGS=""
+STANDALONE_PLAN="${STANDALONE_OUT%%Do all of the above?*}"
+expect_not_contains "orphans standalone: no plugin row, so no conditional line" \
+  "• remove any dependencies the uninstall leaves orphaned" "$STANDALONE_PLAN"
+expect_contains "orphans standalone: the roster entry names itself on the page" \
+  "• remove the dependencies nothing needs any more (claude plugin prune)" "$STANDALONE_PLAN"
+expect_contains "orphans standalone: and the one answer runs it" \
+  "plugin prune --yes" "$(cat "$ARM/calls.log")"
+
+# ---- a machine with no orphans does not get a line about them ----
+ARM="$(new_arm all-orphans-none)"
+plant_never_list "$ARM"
+plant_zshrc_marked "$ARM"
+plant_claude_stub "$ARM" no no
+REMOVE_FLAGS="--all"
+NONE_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_YES")"
+REMOVE_FLAGS=""
+expect_not_contains "no orphans, no plugin: the page says nothing about a prune" \
+  "claude plugin prune" "${NONE_OUT%%Do all of the above?*}"
+expect_not_contains "no orphans: and nothing was pruned" \
+  "plugin prune --yes" "$(cat "$ARM/calls.log")"
 
 # ---- a no runs nothing and says so ----
 ARM="$(new_arm all-declined)"
@@ -2376,8 +2596,12 @@ expect_contains "--all on a clean machine says the machine is already clean" \
 # The defect this walls off is drift: a plan built from its own idea of what is
 # pending would come to disagree with the run it is a plan FOR, and the user
 # would consent to one list and get another. The count is the check — one plan
-# line per question a whole per-item pass would ask, with the orphan follow-on
-# taken out because it is asked in place and never on the page.
+# line per question a whole per-item pass would ask, and now with NO exemption.
+# The orphan follow-on used to be subtracted here, because it was asked in place
+# and never on the page; under `--all` there is no "in place" to ask in, so the
+# subtraction was the arithmetic form of the consent hole (critic F1). The page
+# and the questions are the same length again, which is the property this arm was
+# always trying to state.
 ARM="$(new_arm all-agreement-plan)"
 plant_everything "$ARM"
 REMOVE_FLAGS="--all"
@@ -2394,8 +2618,8 @@ AGREE_PLAN_LINES="$(/usr/bin/grep -c '^  • ' "$TMP/rm-agree-plan.txt" | tr -d 
 AGREE_QUESTIONS="$(/usr/bin/grep -c '\[y/N\]' "$TMP/rm-agree-pass.txt" | tr -d ' ')"
 expect_true "agreement arm is not vacuous: the whole pass really did ask something" \
   bash -c '[ "$1" -gt 1 ]' _ "$AGREE_QUESTIONS"
-expect_eq "the plan names exactly the items a per-item pass asks about (the follow-on aside)" \
-  "$AGREE_PLAN_LINES" "$((AGREE_QUESTIONS - 1))"
+expect_eq "the plan names exactly the items a per-item pass asks about — every one of them" \
+  "$AGREE_PLAN_LINES" "$AGREE_QUESTIONS"
 
 # ---- --all and --only are two different narrowings and cannot be combined ----
 ARM="$(new_arm all-and-only)"

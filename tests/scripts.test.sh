@@ -776,9 +776,10 @@ echo "=== Section 9: tests/run.sh — the job runner (AC-16) ==="
 # roster; this pins the shape of the thing that RUNS the suite roster. Every other
 # suite asserts its own `run` line exists (A4.S4.1 — there is no count to bump);
 # nothing until now asserted what `tests/run.sh` DOES with those lines. S8's
-# isolation audit found all 44 suites hermetic under their own `mktemp -d`, which
-# is what licenses running them concurrently; this section is the wall that keeps
-# the two modes honest afterwards.
+# isolation audit found the 44 suites that existed when it ran hermetic under their
+# own `mktemp -d`, and S8b's delta covers the 45th (env.test.sh) the same wave
+# added; together that is what licenses running them concurrently, and this section
+# is the wall that keeps the two modes honest afterwards.
 #
 # HOW IT TESTS THE REAL FILE. Every arm drives a throwaway COPY of tests/run.sh in
 # which only the `run "…"` roster lines have been swapped for fixture ones. Flag
