@@ -165,6 +165,14 @@ _rm_wants() { [ -z "$RM_ONLY" ] || [ "$RM_ONLY" = "$1" ]; }
 # SECOND, third and ninth question about a decision already made — see the note
 # above `_rm_print_plan` for why the plan, and not the flag, is the consent.
 RM_ALL=0
+# BOTH NAMES, NOT JUST THIS SCRIPT'S (epic-17 W7 S11, six-axis review axis 4).
+# `_dep_consent` grants consent on `SETUP_ALL` OR `RM_ALL`, and every `tool:*` row
+# this script removes goes through it. Zeroing only the name this script sets left
+# the other one readable straight from the environment, so an exported
+# `SETUP_ALL=1` answered the dependency questions before a person could. Whatever
+# the environment carries for either name dies here, before the mode is even
+# resolved, so the only value this run can ever see is one this script wrote itself.
+SETUP_ALL=0
 
 # ─── The shared literals ─────────────────────────────────────────────────────
 #

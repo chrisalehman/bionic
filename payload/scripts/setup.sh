@@ -286,6 +286,14 @@ SETUP_ONLY=""
 # SECOND, third and ninth question about a decision already made — see the note
 # above `_setup_print_plan` for why the plan, and not the flag, is the consent.
 SETUP_ALL=0
+# BOTH NAMES, NOT JUST THIS SCRIPT'S (epic-17 W7 S11, six-axis review axis 4).
+# `_dep_consent` grants consent on `SETUP_ALL` OR `RM_ALL`, and every question this
+# script asks goes through it. Zeroing only the name this script sets left the other
+# one readable straight from the environment: `RM_ALL=1 bash setup.sh --only
+# environment < /dev/null` wrote both settings keys with nobody there to ask.
+# Whatever the environment carries for either name dies here, before the first
+# question, so the only value this run can ever see is one this script wrote itself.
+RM_ALL=0
 
 _setup_item_ids() {
   local n line bare

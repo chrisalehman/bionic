@@ -529,7 +529,7 @@ case "$REG_SHA_STATE" in
       "match — the installed build is this tree's HEAD ($(_doctor_sha12 "$REG_SHA_REG"))" ;;
   lag)
     printf '  %-19s %s\n' "installed commit" \
-      "installed at $(_doctor_sha12 "$REG_SHA_REG"), this tree is $(_doctor_sha12 "$REG_SHA_REPO") — the cache copy is behind this tree, which the CLI runs — nominal; re-converge with: $(detect_reconverge_hint)" ;;
+      "installed at $(_doctor_sha12 "$REG_SHA_REG"), this tree is $(_doctor_sha12 "$REG_SHA_REPO") — $(detect_reconverge_hint lag)" ;;
   not-in-repo)
     printf '  %-19s %s\n' "installed commit" \
       "installed at $(_doctor_sha12 "$REG_SHA_REG") — not a commit in this repository, so this tree is not what is running" ;;
@@ -871,8 +871,12 @@ elif [ "$PROFILE_APPLIED" = "no" ] && [ "$PROFILE_VERDICT" = "absent" ]; then
 fi
 
 if [ "$PLUGIN_HOOKS" = "degraded" ] || [ "$PLUGIN_HOOKS" = "absent" ]; then
-  echo "  → the payload's hook wiring is ${PLUGIN_HOOKS} — re-converge with:"
-  echo "      \`$(detect_reconverge_hint)\`, then re-run /bionic:doctor."
+  # THE HINT IS THE WHOLE SENTENCE, AND IT KNOWS WHICH STATE IS ASKING (W7 S11,
+  # six-axis review axis 2). This used to print `re-converge with:` and then the hint
+  # inside backticks — which on a directory-source machine handed a user whose tree is
+  # genuinely broken the words "nothing to do" formatted as a command to type.
+  echo "  → the payload's hook wiring is ${PLUGIN_HOOKS} —"
+  echo "      $(detect_reconverge_hint hooks)"
   ACTED=yes
 fi
 

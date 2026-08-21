@@ -2031,6 +2031,34 @@ expect_eq "remove.sh takes no assume-yes argument of its own" "" \
 expect_eq "remove.sh reads no assume-yes environment knob" "" \
   "$(/usr/bin/grep -niE 'BIONIC_(ASSUME_YES|YES|NONINTERACTIVE)' "$REMOVE_SH" || true)"
 
+# ---- NO ENVIRONMENT VALUE GRANTS CONSENT (W7 S11, six-axis review axis 4) ----
+#
+# The two greps above are a wall against a knob NAMED assume-yes. They cannot see
+# a knob spelled something else, and one was spelled something else: `_dep_consent`
+# short-circuits on `SETUP_ALL` OR `RM_ALL`, and this script used to zero only its
+# own name. An exported `SETUP_ALL=1` therefore reached every row this script
+# routes through deps.sh — the whole `tool:*` class — and answered its question
+# before a person could.
+#
+# So the wall becomes behavioural rather than lexical: both names arrive SET, the
+# answers file is empty, and the run must report "not asked" and uninstall
+# nothing. A grep can be routed around by renaming a variable; this arm cannot.
+ARM="$(new_arm env-consent-knob)"
+plant_never_list "$ARM"
+plant_claude_stub "$ARM" no no
+plant_native_plugin "$ARM" impeccable 4.1.1
+FP_KNOB_BEFORE="$(fingerprint "$ARM/home")"
+: > "$TMP/answers-knob"
+REMOVE_FLAGS="--only tool:impeccable"
+KNOB_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$TMP/answers-knob" SETUP_ALL=1 RM_ALL=1)"
+REMOVE_FLAGS=""
+expect_contains "an exported consent flag does not answer a deps.sh-routed row" \
+  "not asked —" "$KNOB_OUT"
+expect_not_contains "…and the row is never uninstalled" \
+  "plugin uninstall impeccable@bionic" "$(cat "$ARM/calls.log")"
+expect_eq "…and the fixture HOME is byte-identical" \
+  "$FP_KNOB_BEFORE" "$(fingerprint "$ARM/home")"
+
 echo ""
 echo "=== Group 20: a narrowed uninstall carries its follow-ons (AC-4) ==="
 #
@@ -2294,6 +2322,27 @@ expect_eq "--all with nobody there to ask: the fixture HOME is byte-identical" \
   "$FP_EOF_BEFORE" "$(fingerprint "$ARM/home")"
 expect_contains "--all with nobody there to ask: says nothing changed" \
   "nothing changed." "$EOF_OUT"
+
+# ---- AND NO ENVIRONMENT VALUE CAN ANSWER IT EITHER (W7 S11, review axis 4) ----
+#
+# `--all`'s one question goes through `_dep_consent`, which short-circuits on
+# `SETUP_ALL` OR `RM_ALL`. This script zeroed only `RM_ALL`, so an exported
+# `SETUP_ALL=1` reached the deps.sh-routed rows below — and, with the seam open,
+# any future caller of `_dep_consent` on this page. Both names arrive SET here and
+# the page must still end unanswered. Group 19 carries the per-row half of this.
+ARM="$(new_arm env-consent-knob-all)"
+plant_everything "$ARM"
+FP_KNOB_ALL_BEFORE="$(fingerprint "$ARM/home")"
+: > "$TMP/answers-knob-all"
+REMOVE_FLAGS="--all"
+KNOB_ALL_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$TMP/answers-knob-all" SETUP_ALL=1 RM_ALL=1)"
+REMOVE_FLAGS=""
+expect_contains "--all under exported consent flags changes nothing and says so" \
+  "nothing changed." "$KNOB_ALL_OUT"
+expect_eq "…and the entire fixture HOME is byte-identical" \
+  "$FP_KNOB_ALL_BEFORE" "$(fingerprint "$ARM/home")"
+expect_eq "…and no mutating call was ever made" "" \
+  "$(/usr/bin/grep -E 'plugin uninstall|plugin prune --yes' "$ARM/calls.log" || true)"
 
 # ---- the plan is the roster minus what is already done ----
 ARM="$(new_arm all-mostly-clean)"

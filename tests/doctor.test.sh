@@ -690,6 +690,23 @@ expect_eq "broken: the same ten sections still render, in the same order" \
 expect_match "broken: hooks.json naming a missing script renders degraded" \
   "*degraded*" "$(line_of "$B_OUT" "hooks ")"
 
+# W7 S11 (six-axis review axis 2). The SUMMARY's action line for degraded wiring
+# used to read `re-converge with:` and then the hint in backticks — which on a
+# directory-source machine handed a user with a genuinely broken tree the words
+# "nothing to do" formatted as a command to run. The hint answers per state now,
+# so this line gets a repair sentence instead of a re-converge fragment. This
+# fixture carries no marketplace registry, so the feed kind is unknown and the
+# git-source sentence is the one that renders — the documented default.
+B_HOOKFIX="$(awk '/=== SUMMARY ===/,0' "$B_OUT" | grep -A 1 "hook wiring")"
+expect_contains "broken: the hook-wiring action names the copy the CLI reads" \
+  "the installed copy is what the CLI reads" "$B_HOOKFIX"
+expect_contains "broken: …and the command that re-converges it" \
+  "claude plugin update bionic@bionic" "$B_HOOKFIX"
+expect_not_contains "broken: …and never offers 'nothing to do' to a broken machine" \
+  "nothing to do" "$B_HOOKFIX"
+expect_not_contains "broken: …with no re-converge prefix in front of the sentence" \
+  "re-converge with:" "$B_HOOKFIX"
+
 # AC-4, the MODIFIED-LOCALLY arm. The framing is fixed by the AC and is the
 # whole difference between a report and a scolding: an edited role file is a
 # legitimate thing for a user to have done, and the line says so before it says
@@ -1439,8 +1456,13 @@ expect_match "…and the tip it is behind" "*${G15_TIP:0:12}*" "$G15_LAG"
 # AC-3: on a GIT-SOURCE feed the cache the registry names is what the CLI loads, so
 # lagging is real staleness and `update` genuinely refreshes it — `install` on an
 # already-registered id is a CLI no-op/"already installed", not a refresh.
-expect_contains "…the framing names what the CLI actually runs" "this tree, which the CLI runs" "$G15_LAG"
+# W7 S11 (six-axis review axis 2): the hint is a WHOLE SENTENCE now, and doctor
+# prints it after the two shas rather than after a "re-converge with:" prefix that
+# said the words the sentence already carried.
+expect_contains "…the sentence names the state in its own words" "the installed copy is behind" "$G15_LAG"
 expect_contains "…and the action, inline, is update — not install" "claude plugin update bionic@bionic" "$G15_LAG"
+expect_contains "…and closes on the re-run that confirms it worked" "then re-run /bionic:doctor" "$G15_LAG"
+expect_not_contains "…with no prefix repeating what the sentence already says" "re-converge with: " "$G15_LAG"
 expect_not_contains "…never the install verb, which no-ops on an already-registered id" "plugin install bionic@bionic" "$G15_LAG"
 expect_eq "…and exactly one such line, not one per state" "1" \
   "$(grep -c "installed commit" "$G15_LAG_OUT" | tr -d ' ')"
@@ -1460,10 +1482,22 @@ G15_DIRLAG="$(line_of "$G15_DIRLAG_OUT" "installed commit")"
 expect_match "a directory-source lag still renders as lag" "*behind*" "$G15_DIRLAG"
 expect_not_contains "…but the update command is never offered — it would no-op there" \
   "claude plugin update bionic@bionic" "$G15_DIRLAG"
-expect_contains "…the true action is named instead: nothing to run" \
+# W7 S11: this used to read "re-converge with: nothing to do — the CLI runs this
+# tree directly", spliced after a prefix that had ALREADY said "the cache copy is
+# behind this tree, which the CLI runs" — the same clause twice, wrapped around a
+# non-command offered where a command belongs. One sentence, said once.
+expect_contains "…the state is called what it is: nominal" \
+  "nominal:" "$G15_DIRLAG"
+expect_contains "…naming why: the CLI already runs this tree" \
+  "the CLI runs this tree" "$G15_DIRLAG"
+expect_contains "…and when the copy does catch up" \
+  "the next version bump or reinstall" "$G15_DIRLAG"
+expect_not_contains "…never a bare 'nothing to do' handed over where a command belongs" \
   "nothing to do" "$G15_DIRLAG"
-expect_contains "…naming why: the CLI already runs this tree directly" \
-  "the CLI runs this tree directly" "$G15_DIRLAG"
+expect_not_contains "…and no prefix repeating the sentence's own words" \
+  "re-converge with: " "$G15_DIRLAG"
+expect_eq "…the clause naming what the CLI runs appears exactly once" "1" \
+  "$(printf '%s\n' "$G15_DIRLAG" | /usr/bin/grep -o 'the CLI runs this tree' | wc -l | tr -d ' ')"
 expect_not_contains "…never the install verb either" "plugin install bionic@bionic" "$G15_DIRLAG"
 expect_eq "doctor still exits 0 on a directory-source lag too" "0" \
   "$( g15_run > /dev/null 2>&1; echo $? )"
