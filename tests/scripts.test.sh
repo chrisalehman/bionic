@@ -686,6 +686,36 @@ expect_true "wsl-setup.sh points the user at /bionic:setup for the machine tier"
   /usr/bin/grep -qF -- "/bionic:setup" "$WSL"
 
 # ============================================================
+# SECTION 8: SKILL.md's re-converge sentence names update, not install (AC-3)
+# ============================================================
+
+echo ""
+echo "=== Section 8: SKILL.md re-converge sentence (AC-3) ==="
+
+# epic-17 W7 S2. `claude plugin install <id>` on an already-registered id reports
+# "already installed" and does NOT refresh a directory-source cache copy — the CLI's
+# own re-converge verb is `update`. SKILL.md's worktree-paragraph asserted the
+# install-vs-update semantics with the wrong verb in its own closing clause; this pins
+# the fix so the doc and the code (`detect_reconverge_hint`, doctor.sh) cannot drift
+# back apart independently.
+SKILL_S2="${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
+
+_reconverge_update_count="$(/usr/bin/grep -c 'claude plugin update bionic@bionic' "$SKILL_S2" 2>/dev/null || true)"
+expect_true "SKILL.md names the update verb for re-convergence at least once" \
+  [ "${_reconverge_update_count:-0}" -ge 1 ]
+
+# The specific defect: the closing clause of the worktree paragraph used to read
+# "...and `claude plugin install bionic@bionic` is what re-converges them." That exact
+# combination (install, immediately followed by "is what re-converges them") must be
+# gone — the earlier "plugin not installed — run `claude plugin install bionic@bionic`"
+# refusal message in the same paragraph is a DIFFERENT sentence (dispatch-spans.test.sh
+# pins it separately) and stays untouched.
+expect_false "…and no longer says install is what re-converges them" \
+  /usr/bin/grep -qF -- "install bionic@bionic\` is what re-converges them" "$SKILL_S2"
+expect_true "…the sentence now says update is what re-converges them" \
+  /usr/bin/grep -qF -- "update bionic@bionic\` is what re-converges them" "$SKILL_S2"
+
+# ============================================================
 # Results
 # ============================================================
 

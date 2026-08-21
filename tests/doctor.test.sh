@@ -1406,7 +1406,13 @@ G15_LAG="$(line_of "$G15_LAG_OUT" "installed commit")"
 expect_match "an install behind the tip renders as lag" "*behind*" "$G15_LAG"
 expect_match "…naming the installed sha" "*${G15_PREV:0:12}*" "$G15_LAG"
 expect_match "…and the tip it is behind" "*${G15_TIP:0:12}*" "$G15_LAG"
-expect_match "…and the action, inline" "*claude plugin install bionic@bionic*" "$G15_LAG"
+# AC-3: on a directory-source install this state is NOMINAL (the cache copy only ever
+# lags between a merge and the next install/update, and the CLI runs the tree, not the
+# cache), and the re-converge command is `update` — `install` on an already-registered
+# id is a CLI no-op/"already installed", not a refresh.
+expect_contains "…the framing names what the CLI actually runs" "this tree, which the CLI runs" "$G15_LAG"
+expect_contains "…and the action, inline, is update — not install" "claude plugin update bionic@bionic" "$G15_LAG"
+expect_not_contains "…never the install verb, which no-ops on an already-registered id" "plugin install bionic@bionic" "$G15_LAG"
 expect_eq "…and exactly one such line, not one per state" "1" \
   "$(grep -c "installed commit" "$G15_LAG_OUT" | tr -d ' ')"
 expect_eq "doctor still exits 0 with a lagging install (a diagnosis is not a failure)" "0" \
