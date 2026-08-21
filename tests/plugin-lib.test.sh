@@ -1603,6 +1603,42 @@ expect_eq "…and detect_plugin_registered answers from that same overridden fil
   "$(detect_run BIONIC_INSTALLED_PLUGINS_FILE="$R_CH/plugins/installed_plugins.json" \
        BIONIC_CLAUDE_HOME="$TMP/ch-nonexistent" -- detect_plugin_registered)"
 
+# ---- the refusal is a LINE FOR A PERSON, not a stack frame (epic-17 W6 S15, A-6.6 (a)) ----
+#
+# THE DEFECT. Every refusal above went out under the header `detect_plugin_root: REFUSED —`.
+# That is a function name and an internal verdict word printed at whoever ran
+# `/bionic:setup` — the exact class S11 was dispatched for and put on the wall for the three
+# payload scripts, found live in the library beneath them by S12's own §6 (hit #4).
+#
+# WHY THE ARM LIVES HERE and not in the two suites the brief offered. `tests/detect-probes.
+# test.sh` never drives this function — its subject is the load-state and duplicates probes,
+# and it has no fixture registry for the three refusal exits. `tests/script-vocabulary.test.
+# sh` is a STATIC lint whose roster is `setup.sh doctor.sh remove.sh`; extending it to
+# `payload/scripts/lib/*.sh` is A-6.S12.12, promoted out of this slice's scope as structural.
+# This group already drives all three refusal exits with their stderr captured in
+# `$TMP/root.err`, so the arm is one assertion away from evidence that already exists — and
+# it measures the RENDERED line rather than the source text, which is the stronger form.
+#
+# THE AUTHORITY IS THE SHARED LIST, not this suite's taste: `detect_` is a token in
+# tests/fixtures/banned-display-vocabulary.txt, checked here so the arm cannot outlive the
+# rule it enforces.
+R_BANNED_LIST="${BIONIC_SCRIPTS_DIR}/tests/fixtures/banned-display-vocabulary.txt"
+expect_true "the banned-vocabulary list still bans the function-name prefix this arm checks" \
+  /usr/bin/grep -qx 'detect_' "$R_BANNED_LIST"
+
+for _r_case in "$TMP/ch-nonexistent:no registry file" "$CH_EMPTY:no bionic entry" \
+               "$CH_MALFORMED:unparseable registry" "$R_CH_GONE:registered path gone"; do
+  _r_home="${_r_case%%:*}"; _r_what="${_r_case#*:}"
+  root_run BIONIC_CLAUDE_HOME="$_r_home" --
+  expect_no_match "refusal (${_r_what}) prints no function name at the user" \
+    "*detect_*" "$R_ERR"
+  expect_no_match "…and no internal verdict word either" "*REFUSED*" "$R_ERR"
+  expect_match "…and still says what is wrong, in product words" "*bionic*" "$R_ERR"
+  expect_match "…and still names the one fix" "*claude plugin install bionic@bionic*" "$R_ERR"
+  expect_eq "…and still hands back nothing on stdout" "" "$R_OUT"
+  expect_eq "…and still exits 1, so no caller reads a refusal as an answer" "1" "$R_ST"
+done
+
 # ---- read-only, like every other fact here ----
 expect_eq "detect_plugin_root writes nothing into the config dir it read" \
   "installed_plugins.json" "$(ls "$R_CH/plugins")"

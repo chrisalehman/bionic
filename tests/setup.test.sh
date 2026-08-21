@@ -1298,6 +1298,83 @@ expect_eq "setup.sh implements no bound of its own" "" \
 
 # ---------------------------------------------------------------------------
 echo ""
+echo "=== Group 14b: the DUPLICATES read is bounded on both doors (A-6.6 (b)) ==="
+# ---------------------------------------------------------------------------
+#
+# THE SECOND HALF OF GROUP 14's BOUND. Group 14 pins the load-state probe. The duplicates
+# probe was left unbounded because it reads a file — but the reader is `jq`, over a path
+# that can sit on a stalled mount, and S12 put that read on `--list`, which is the first
+# thing a stranger runs and the one door that prints nothing else first. Both doors are
+# measured here: the roster (`--list`) and the full pass, each against the same wedge.
+#
+# THE ANSWER ON TIMEOUT IS "NOT A DUPLICATE", never a hang and never an invented one:
+# `--list` publishes no `duplicate:` row it could not confirm, and the full pass says out
+# loud that it could not look, carrying the cause the bound gave it.
+
+new_fixture bounded-duplicates
+plant_cli_plugin "bionic@bionic" true
+# Two catalogs, one bare name — a real collision the unwedged probe would find.
+jq '.plugins["superpowers@claude-plugins-official"] = [{"scope":"user","installPath":"/fixture/sp2","version":"6.3.0"}]' \
+  "$FIX/ch/plugins/installed_plugins.json" > "$FIX/ch/plugins/installed_plugins.json.tmp" \
+  && mv "$FIX/ch/plugins/installed_plugins.json.tmp" "$FIX/ch/plugins/installed_plugins.json"
+plant_installed "superpowers@bionic" "6.3.0"
+
+# A jq that stalls on the duplicates program ONLY — every other registry parse the run
+# makes is the real jq, so this measures one probe's bound and not a broken PATH.
+SLOWJQ="$TMP/bin-slowjq"; mkdir -p "$SLOWJQ"
+for f in "$BIN"/*; do
+  case "${f##*/}" in jq) continue ;; esac
+  ln -sf "$(readlink "$f" 2>/dev/null || echo "$f")" "${SLOWJQ}/${f##*/}" 2>/dev/null
+done
+JQ_REAL="$(command -v jq)"
+cat > "${SLOWJQ}/jq" <<STUB
+#!/bin/bash
+case "\$*" in
+  *'group_by(split("@")[0])'*) /bin/sleep 45; echo "too late"; exit 0 ;;
+  *) exec "${JQ_REAL}" "\$@" ;;
+esac
+STUB
+chmod +x "${SLOWJQ}/jq"
+
+# ---- door 1: the roster ----
+SETUP_FLAGS="--list"
+DUPL_START="$(date +%s)"
+DUPL_LIST="$(SETUP_PATH="$SLOWJQ" run_setup "" BIONIC_DOCTOR_PROBE_SECONDS=2)"
+DUPL_LIST_ELAPSED=$(( $(date +%s) - DUPL_START ))
+SETUP_FLAGS=""
+
+expect_true "--list does not wedge on a stalled registry read: it returns inside 15s" \
+  bash -c '[ "$1" -le 15 ]' _ "$DUPL_LIST_ELAPSED"
+expect_match "…and still publishes the roster it can answer for" '*permission-mode*' "$DUPL_LIST"
+expect_no_match "…and names no duplicate it never confirmed" '*duplicate:*' "$DUPL_LIST"
+echo "      (bounded --list arm: elapsed=${DUPL_LIST_ELAPSED}s, bound=2s, probe sleeps 45s)"
+
+# ---- door 2: the full pass ----
+DUPF_START="$(date +%s)"
+DUPL_FULL="$(SETUP_PATH="$SLOWJQ" run_setup "$NO" BIONIC_DOCTOR_PROBE_SECONDS=2)"
+DUPL_FULL_ELAPSED=$(( $(date +%s) - DUPF_START ))
+
+expect_true "a full pass does not wedge on it either: inside 20s" \
+  bash -c '[ "$1" -le 20 ]' _ "$DUPL_FULL_ELAPSED"
+expect_match "…and says out loud that it could not look" \
+  '*could not check for duplicate copies*' "$DUPL_FULL"
+expect_match "…naming the bound in seconds, not a guess at the reason" \
+  '*did not answer within 2 seconds*' "$DUPL_FULL"
+expect_no_match "…and invents no collision out of a read it never finished" \
+  '*is installed twice*' "$DUPL_FULL"
+# THE ACTION LINE CARRIES THE CAUSE. It used to say "install jq" unconditionally, which is
+# the wrong instruction for a machine whose jq is present and whose registry stalled.
+expect_no_match "…and does not tell a user with jq installed to install jq" \
+  '*install jq, then re-run*' "$DUPL_FULL"
+echo "      (bounded full-pass arm: elapsed=${DUPL_FULL_ELAPSED}s, bound=2s, probe sleeps 45s)"
+
+# ---- and the unwedged run still finds the collision it is there to find ----
+DUPL_OK="$(run_setup "$NO")"
+expect_match "with a jq that answers, the full pass reports the duplicate" \
+  '*is installed twice*' "$DUPL_OK"
+
+# ---------------------------------------------------------------------------
+echo ""
 echo "=== Group 15: the instruction lines name a route that works (critic F-1) ==="
 # ---------------------------------------------------------------------------
 #

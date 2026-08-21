@@ -665,11 +665,17 @@ detect_plugin_install_path() {  # <plugin-name>
 # 0, or NOTHING on stdout, a named fix on stderr, and exit 1. No fallback exists anywhere in
 # this function, deliberately — including the one it was written to replace.
 
+# THE REFUSAL IS A LINE FOR A PERSON. It used to open `detect_plugin_root: REFUSED — …`,
+# which names this function and an internal verdict word at whoever ran /bionic:setup —
+# the same class the three payload scripts have had banned since W6 S11, found live here
+# by S12's own vocabulary sweep (§6 hit #4, A-6.6 (a)). The line now says what is wrong
+# and what to do; the exit code and the empty stdout, which are what the CALLERS read, are
+# untouched. Pinned by tests/plugin-lib.test.sh Group R against the shared banned list.
 _detect_plugin_root_refuse() {  # <what went wrong>
-  echo "detect_plugin_root: REFUSED — $1" >&2
+  echo "bionic could not find its own installed files — $1" >&2
   echo "  Fix: claude plugin install bionic@bionic" >&2
-  echo "  There is deliberately no fallback root: a guessed path can be an older build than" >&2
-  echo "  the one the CLI loads, and a stale hook that runs is worse than a missing one." >&2
+  echo "  bionic will not guess a location instead: a guessed one can be an older copy than" >&2
+  echo "  the plugin your session is running, and a stale copy that runs is worse than none." >&2
   return 1
 }
 
@@ -1115,7 +1121,35 @@ _detect_duplicate_fix() {  # <comma-separated ids> -> the fix clause
   return 0
 }
 
+# BOUNDED, THROUGH THE ONE RUNNER (epic-17 W6 S15, A-6.6 (b) / A-6.S15.2). The reading
+# below is a file read, which is why it was left unbounded when S11 bounded the load-state
+# probe — but the READER is `jq`, someone else's program, over a path that can sit on a
+# stalled mount, and S12 put this probe on `/bionic:setup --list`, where a stranger meets
+# it before anything else has printed. So the bound lives at the CALLEE: there are three
+# call sites (setup's roster, setup's duplicates step, doctor's report) and no single site
+# they share, and a bound only some callers take is the asymmetry S11 was dispatched to
+# end. The probe body is `_detect_plugin_duplicates_probe`; this is the only thing that
+# runs it.
+#
+# A TIMEOUT IS `unknown`, NEVER SILENCE. Zero lines means "no duplicates", which is a claim
+# a probe that could not look has not earned (A-4.S2.8). Whatever the cut-off probe managed
+# to write is DISCARDED rather than passed on: a half-read line is the one answer worse
+# than none. Every caller already reads the `dup=unknown … cause=` shape — setup's roster
+# skips it, setup's step prints the cause, doctor renders it — so nothing downstream needed
+# a new branch.
 detect_plugin_duplicates() {  # -> zero or more lines, always exit 0
+  local out st
+  out="$(detect_bounded "$(detect_probe_seconds)" _detect_plugin_duplicates_probe)"
+  st=$?
+  if [ "$st" -eq 124 ]; then
+    echo "dup=unknown ids=- fix=- cause=the plugin registry did not answer within $(detect_probe_seconds) seconds"
+    return 0
+  fi
+  [ -n "$out" ] && printf '%s\n' "$out"
+  return 0
+}
+
+_detect_plugin_duplicates_probe() {  # -> zero or more lines, always exit 0
   local reg out bare ids
 
   reg="$(_detect_installed_plugins_file)"

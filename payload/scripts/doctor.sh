@@ -256,10 +256,13 @@ else
   esac
 fi
 
-# DUPLICATES is a registry read, so no bound: zero or more lines, each already
-# carrying its own consolidation command. Silence means none — except that the
-# probe never stays silent when it could not look (A-4.S2.8), which is why an
-# unreadable registry arrives here as a `dup=unknown` line rather than as nothing.
+# DUPLICATES: zero or more lines, each already carrying its own consolidation
+# command. Silence means none — except that the probe never stays silent when it
+# could not look (A-4.S2.8), which is why an unreadable registry arrives here as
+# a `dup=unknown` line rather than as nothing. The bound is the probe's own now
+# (W6 S15): the registry read runs `jq` over a path that can stall, so it goes
+# through the same `detect_bounded` the listing does, and a stalled read arrives
+# here as one more `dup=unknown` line with the seconds in its cause.
 DUP_LINES="$(detect_plugin_duplicates)"
 
 # ─── The dependency sweep ────────────────────────────────────────────────────
