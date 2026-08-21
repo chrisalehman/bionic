@@ -8,7 +8,6 @@ description: bionic overview — what it is, the command roster, and where to st
 
 <!-- VOICE-CONTRACT-BEGIN -->
 Presentation contract — what the user sees from this command:
-- Start with one line: "Running bionic <command>…". Nothing about how or why.
 - Relay the script's questions exactly as asked; pass the user's answer as given.
   Never answer for the user, never editorialize.
 - On success show the script's output, then at most one closing line. Say nothing
