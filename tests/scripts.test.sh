@@ -715,6 +715,21 @@ expect_false "…and no longer says install is what re-converges them" \
 expect_true "…the sentence now says update is what re-converges them" \
   /usr/bin/grep -qF -- "update bionic@bionic\` is what re-converges them" "$SKILL_S2"
 
+# epic-17 W7 S2b. S2's fix above was still wrong on the OTHER half of the sentence: it
+# said `update` re-converges them UNCONDITIONALLY, but measured fact (2026-08-21,
+# .bionic/docs/record/epic-17-w7/ac2-relay-drive.md) is that on a directory-source
+# install — a local checkout registered as a feed, which is what a dogfood install is —
+# `claude plugin update bionic@bionic` at an unchanged plugin.json version reports
+# "already at the latest version" and refreshes nothing, because the CLI never reads the
+# cache it would refresh. The sentence must scope the update claim to a git-source feed
+# and say the true, separate thing for a directory-source one.
+expect_true "…the update claim is scoped to a git-source feed" \
+  /usr/bin/grep -qF -- "on a git-source feed \`claude plugin update bionic@bionic\` is what re-converges them" "$SKILL_S2"
+expect_true "…and a directory-source marketplace is told update does nothing for it" \
+  /usr/bin/grep -qF -- "on a directory-source marketplace there is nothing to re-converge with that command" "$SKILL_S2"
+expect_true "…naming the CLI's own words for that no-op" \
+  /usr/bin/grep -qF -- "already at the latest version" "$SKILL_S2"
+
 
 # ============================================================
 # SECTION 9: tests/run.sh — the job runner (epic-17 W7 S10, spec AC-16)

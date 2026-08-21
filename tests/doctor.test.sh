@@ -1399,6 +1399,23 @@ g15_run() {  # -> stdout, run FROM the fixture repo
   ( cd "$G15_REPO" && doctor_run "$DOCTOR_SH" "$G15_BIN" "$HEALTHY" )
 }
 
+# epic-17 W7 S2b (AC-3). Which re-converge command is TRUE differs by feed, so the lag
+# arm below drives both: a git-source marketplace (the cache the registry names is what
+# the CLI loads, so `update` really refreshes it) and a directory-source one (a local
+# checkout registered as a feed — every dogfood install, and this fixture repo stands in
+# for it — where the CLI never opens that cache, so `update` at an unchanged
+# plugin.json version is a no-op). `known_marketplaces.json` is the file the CLI itself
+# writes on `marketplace add`; this fixture is the real file the real parse
+# (`detect_marketplace_feed_kind`) reads, not a stubbed answer.
+g15_set_feed_kind() {  # <directory|git>
+  case "$1" in
+    directory)
+      jq -n '{"bionic":{"source":{"source":"directory","path":"/tmp/g15-fixture-bionic"},"installLocation":"/tmp/g15-fixture-bionic"}}' ;;
+    *)
+      jq -n '{"bionic":{"source":{"source":"github","repo":"chrisalehman/bionic"},"installLocation":"/tmp/g15-fixture-cache"}}' ;;
+  esac > "$HEALTHY/claude-home/plugins/known_marketplaces.json"
+}
+
 g15_set_sha "$G15_TIP"
 G15_MATCH_OUT="$TMP/g15-match.out"; g15_run > "$G15_MATCH_OUT" 2>&1
 G15_MATCH="$(line_of "$G15_MATCH_OUT" "installed commit")"
@@ -1412,22 +1429,43 @@ expect_contains "…inside PLUGIN INTEGRITY, where the other install facts live"
 expect_not_contains "…and never under the old registry-internals label" \
   "registry sha" "$G15_MATCH_OUT"
 
+g15_set_feed_kind git
 g15_set_sha "$G15_PREV"
 G15_LAG_OUT="$TMP/g15-lag.out"; g15_run > "$G15_LAG_OUT" 2>&1
 G15_LAG="$(line_of "$G15_LAG_OUT" "installed commit")"
 expect_match "an install behind the tip renders as lag" "*behind*" "$G15_LAG"
 expect_match "…naming the installed sha" "*${G15_PREV:0:12}*" "$G15_LAG"
 expect_match "…and the tip it is behind" "*${G15_TIP:0:12}*" "$G15_LAG"
-# AC-3: on a directory-source install this state is NOMINAL (the cache copy only ever
-# lags between a merge and the next install/update, and the CLI runs the tree, not the
-# cache), and the re-converge command is `update` — `install` on an already-registered
-# id is a CLI no-op/"already installed", not a refresh.
+# AC-3: on a GIT-SOURCE feed the cache the registry names is what the CLI loads, so
+# lagging is real staleness and `update` genuinely refreshes it — `install` on an
+# already-registered id is a CLI no-op/"already installed", not a refresh.
 expect_contains "…the framing names what the CLI actually runs" "this tree, which the CLI runs" "$G15_LAG"
 expect_contains "…and the action, inline, is update — not install" "claude plugin update bionic@bionic" "$G15_LAG"
 expect_not_contains "…never the install verb, which no-ops on an already-registered id" "plugin install bionic@bionic" "$G15_LAG"
 expect_eq "…and exactly one such line, not one per state" "1" \
   "$(grep -c "installed commit" "$G15_LAG_OUT" | tr -d ' ')"
 expect_eq "doctor still exits 0 with a lagging install (a diagnosis is not a failure)" "0" \
+  "$( g15_run > /dev/null 2>&1; echo $? )"
+
+# epic-17 W7 S2b (AC-3). Same lagging sha, but on a DIRECTORY-SOURCE marketplace — a
+# local checkout registered as a feed, which is what a dogfood install is — the CLI
+# never opens the cache the registry names, so `update` at an unchanged plugin.json
+# version is a no-op ("already at the latest version") and refreshes nothing. Measured
+# 2026-08-21, .bionic/docs/record/epic-17-w7/ac2-relay-drive.md. The false universal
+# claim S2 shipped — one `update` sentence for every feed — must be gone from THIS
+# state's rendering, replaced by the true one.
+g15_set_feed_kind directory
+G15_DIRLAG_OUT="$TMP/g15-dirlag.out"; g15_run > "$G15_DIRLAG_OUT" 2>&1
+G15_DIRLAG="$(line_of "$G15_DIRLAG_OUT" "installed commit")"
+expect_match "a directory-source lag still renders as lag" "*behind*" "$G15_DIRLAG"
+expect_not_contains "…but the update command is never offered — it would no-op there" \
+  "claude plugin update bionic@bionic" "$G15_DIRLAG"
+expect_contains "…the true action is named instead: nothing to run" \
+  "nothing to do" "$G15_DIRLAG"
+expect_contains "…naming why: the CLI already runs this tree directly" \
+  "the CLI runs this tree directly" "$G15_DIRLAG"
+expect_not_contains "…never the install verb either" "plugin install bionic@bionic" "$G15_DIRLAG"
+expect_eq "doctor still exits 0 on a directory-source lag too" "0" \
   "$( g15_run > /dev/null 2>&1; echo $? )"
 
 # A commit this checkout has never seen is a DIFFERENT answer from lag, because reinstalling
