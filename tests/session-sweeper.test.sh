@@ -536,6 +536,77 @@ sweep "$RV" verdict lander
 expect_eq "missing→written: the paired positive exits 0" "0" "$RC"
 expect_contains "missing→written: the paired positive is MET" "state=MET" "$OUT"
 
+# --- a RELATIVE deliverable resolves the way every brief spells it (A-6.6 (c)) ---
+#
+# WHAT WAS WRONG, measured on this wave's own dispatches. Slice briefs write
+# `Expected artifact: record/epic-NN-wM/x.md`, because that is the spelling the Step-5
+# contract and canonical-sdlc-evidence-gate.sh publish for an artifact under the docs root.
+# This gate resolved it against the REPO root, looked at `<repo>/record/…`, found nothing
+# and called the row missing while the file sat exactly where the brief meant. One slice
+# answered that by writing a second copy at the repo root to satisfy the gate — which is
+# what a wrong gate costs: it does not merely misreport, it teaches the work to be wrong.
+#
+# THREE ARMS, ONE RULE — the evidence gate's: `record/`-led is docs-root-relative, a bare
+# relative path is project-relative (unchanged), absolute stands (unchanged).
+RVR="$(make_repo vrel)"; new_roster "$RVR"
+L9R="$(iso_ago 600)"
+mkdir -p "$RVR/.bionic/docs/record/epic-17-w6"
+echo "the report, where the brief said to put it" > "$RVR/.bionic/docs/record/epic-17-w6/s15.md"
+add_row "$RVR" name=docsrooted deliverable="record/epic-17-w6/s15.md" duration="4 hours" \
+        launched_at="$L9R"
+sweep "$RVR" verdict docsrooted
+expect_eq "record/-led: a deliverable under the docs root is MET (exit 0)" "0" "$RC"
+expect_contains "record/-led: …and the readback names it as the brief spelled it" \
+  "delivered=record/epic-17-w6/s15.md" "$OUT"
+expect_absent "record/-led: …and it is not reported missing against the repo root" \
+  "missing=record/" "$OUT"
+
+# THE PAIRED NEGATIVE. The same row with nothing under the docs root is still missing —
+# the arm above must not be passing because the predicate stopped looking.
+rm -f "$RVR/.bionic/docs/record/epic-17-w6/s15.md"
+sweep "$RVR" verdict docsrooted
+expect_eq "record/-led: with nothing written there it is UNMET (exit 1)" "1" "$RC"
+expect_contains "record/-led: …and the conjunct names the contracted spelling" \
+  "missing=record/epic-17-w6/s15.md" "$OUT"
+
+# AND SPECIFICALLY NOT THE REPO-ROOT COPY. A file planted at <repo>/record/… must NOT
+# satisfy a `record/`-led row: that is the placement the old resolution taught, and if it
+# still passed, the fix would be an alias rather than a correction.
+mkdir -p "$RVR/record/epic-17-w6"
+echo "the appeasement copy" > "$RVR/record/epic-17-w6/s15.md"
+sweep "$RVR" verdict docsrooted
+expect_eq "record/-led: a repo-root copy does not satisfy it" "1" "$RC"
+expect_contains "record/-led: …still missing, and still named as contracted" \
+  "missing=record/epic-17-w6/s15.md" "$OUT"
+rm -rf "$RVR/record"
+
+# A BARE RELATIVE PATH IS UNCHANGED: still the project root's.
+echo "beside the repo root" > "$RVR/plain.md"
+add_row "$RVR" name=plainrel deliverable="plain.md" duration="4 hours" launched_at="$L9R"
+sweep "$RVR" verdict plainrel
+expect_eq "bare relative: still resolved against the project root (exit 0)" "0" "$RC"
+expect_contains "bare relative: …and named as contracted" "delivered=plain.md" "$OUT"
+
+# AN ABSOLUTE PATH IS UNCHANGED: it stands, wherever it points.
+echo "absolute" > "$RVR/abs.md"
+add_row "$RVR" name=absrow deliverable="$RVR/abs.md" duration="4 hours" launched_at="$L9R"
+sweep "$RVR" verdict absrow
+expect_eq "absolute: unchanged by the rule (exit 0)" "0" "$RC"
+expect_contains "absolute: …and named as contracted" "delivered=$RVR/abs.md" "$OUT"
+
+# `..` IS REFUSED, not normalized. A relative deliverable that climbs out of the root it is
+# relative to is a placement error whatever it lands on — the same call the evidence gate
+# makes about a walk artifact, and the reason resolution alone is not a verdict.
+echo "outside" > "$TMPROOT/escaped.md"
+add_row "$RVR" name=climber deliverable="record/../../escaped.md" duration="4 hours" \
+        launched_at="$L9R"
+sweep "$RVR" verdict climber
+expect_eq "..: a path that climbs out is UNMET (exit 1)" "1" "$RC"
+expect_contains "..: …and the conjunct says it was refused, not that it was missing" \
+  "refused=record/../../escaped.md" "$OUT"
+expect_absent "..: …and the refusal is not dressed up as an absent file" \
+  "missing=record/../../escaped.md" "$OUT"
+
 # --- a partial set names ONLY what failed ---
 RVP="$(make_repo vp)"; new_roster "$RVP"
 echo "the first half" > "$RVP/one.md"

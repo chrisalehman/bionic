@@ -3849,6 +3849,77 @@ done
 
 # ============================================================
 echo ""
+echo "=== R — where a contracted path resolves: three copies, one rule (epic-17 W6 S15) ==="
+# ============================================================
+#
+# THE DISAGREEMENT THIS ENDS, measured on this epic's own dispatches. A brief writes
+# `Expected artifact: record/epic-17-w6/x.md` because that is the spelling the Step-5
+# contract and canonical-sdlc-evidence-gate.sh publish for an artifact under the docs root.
+# The gate resolved it there. hooks/session-sweeper.sh resolved it against the REPO root
+# and reported the row missing; hooks/stop-check.sh resolved it against the observer's cwd
+# and printed `progress_state=absent` for a file that was present. Three readers of one
+# sentence, two of them wrong — and the cost was not just a wrong reading: one slice wrote
+# a duplicate copy at the repo root to satisfy the gate, so the wrong gate taught the work
+# to be wrong too.
+#
+# WHY A BODY-FOR-BODY WALL AND NOT A THIRD ROUND TRIP. There is no shared library under
+# hooks/ — every hook is a standalone script the CLI invokes by path — so the honest fix is
+# the smallest duplication plus a wall that keeps the copies one text. That is §N.1's and
+# §Q's method, and this is the same shape: `canonical-sdlc-evidence-gate.sh` is the
+# designated ORIGIN (the copy that documents the rule at its definition site), one
+# non-vacuity check proves the extractor pulls a real body from it, then each carrier is
+# compared against it. A per-hook suite cannot see this drift: each of the three is green
+# while all three disagree.
+#
+# TWO FAMILIES, both duplicated for the same reason:
+#   resolve_docs_root()   <docs-root:> in .bionic/config.yaml, else <project>/.bionic/docs
+#   the resolver itself   absolute stands · record/-led is docs-root-relative · else project
+# The resolver is named `resolve_walk_path` in the gate (its caller asks about a walk
+# artifact) and `abs_path` in the two hooks (theirs ask about a roster path). Same body,
+# different name — the `clean()`/`mline_value()` precedent in §N.1 above.
+
+expect_eq "the resolve_docs_root() extractor returns a body at all (this section is not vacuous)" "yes" \
+  "$([ -n "$(fn_body "$PARTY_EG" resolve_docs_root)" ] && echo yes || echo no)"
+for _r in "$SWEEPER" "$OBSERVE"; do
+  expect_eq "$(basename "$_r")'s resolve_docs_root() is the evidence gate's, body for body" \
+    "$(fn_body "$PARTY_EG" resolve_docs_root)" "$(fn_body "$_r" resolve_docs_root)"
+done
+
+expect_eq "the resolver extractor returns a body at all (this section is not vacuous)" "yes" \
+  "$([ -n "$(fn_body "$PARTY_EG" resolve_walk_path)" ] && echo yes || echo no)"
+for _r in "$SWEEPER" "$OBSERVE"; do
+  expect_eq "$(basename "$_r")'s abs_path() is the evidence gate's resolve_walk_path(), body for body" \
+    "$(fn_body "$PARTY_EG" resolve_walk_path)" "$(fn_body "$_r" abs_path)"
+done
+
+# THE BODY IS NOT ENOUGH ON ITS OWN: it reads two globals, and a carrier that defines
+# neither would be byte-identical and still resolve everything to `/record/...`. So each
+# carrier is asked whether it binds them, unconditionally — these hooks run under `set -u`
+# and a conditionally-bound global is the recorded recurrence in this repo.
+for _r in "$PARTY_EG" "$SWEEPER" "$OBSERVE"; do
+  expect_eq "$(basename "$_r") binds DOCS_ROOT for the resolver to read" "yes" \
+    "$(grep -qE '^DOCS_ROOT=' "$_r" && echo yes || echo no)"
+  expect_eq "$(basename "$_r") binds PROJECT_DIR for the resolver to read" "yes" \
+    "$(grep -qE '^PROJECT_DIR=' "$_r" && echo yes || echo no)"
+done
+
+# MUTATION, the discriminator: flip ONE copy's rule back to the repo-root-only form it had
+# and the wall must go red. Without this the section proves only that three files exist.
+R_MUT_DIR="$SANDBOX/resolver-mutant"; mkdir -p "$R_MUT_DIR"
+sed 's|record/\*) printf .%s/%s\\n. "$DOCS_ROOT" "$1" ;;||' "$SWEEPER" > "$R_MUT_DIR/session-sweeper.sh"
+if cmp -s "$SWEEPER" "$R_MUT_DIR/session-sweeper.sh"; then
+  no "the record/-arm mutation applies to session-sweeper.sh" \
+     "the mutation target matched nothing — this proof is vacuous"
+else
+  ok "the record/-arm mutation applies to session-sweeper.sh"
+fi
+expect_eq "…and with the record/ arm deleted from one copy, the wall goes red" "differ" \
+  "$([ "$(fn_body "$PARTY_EG" resolve_walk_path)" = "$(fn_body "$R_MUT_DIR/session-sweeper.sh" abs_path)" ] \
+     && echo same || echo differ)"
+
+
+# ============================================================
+echo ""
 echo "=== Section P — the Patrol stamp: the poker WRITES exactly the path the gate READS ==="
 # ============================================================
 #

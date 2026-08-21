@@ -418,6 +418,78 @@ expect_match "CLAUDE_CONFIG_DIR is honoured when BIONIC_CLAUDE_HOME is not set" 
   "$(probe_run CLAUDE_CONFIG_DIR="$CH_DIR" -- detect_plugin_duplicates)"
 
 echo ""
+echo "=== Group 6b: detect_plugin_duplicates is BOUNDED, by the same runner (A-6.6 (b)) ==="
+#
+# WHAT WAS UNBOUNDED. W6 S11 gave the load-state probe a bound and gave it ONE owner
+# (`detect_bounded`), on the stated ground that a probe bionic does not control can wedge
+# and take its caller with it. This probe was left out because it reads a file rather than
+# running the CLI — but the READ is `jq`, an external program, over a path that can sit on
+# a stalled mount, and S12 then put the probe on setup's `--list` path where a stranger
+# meets it before anything else has printed. A bound one of two probes has is a bound the
+# product does not have.
+#
+# WHAT THE ANSWER MUST BE. Not silence: silence means "no duplicates", which is a claim a
+# probe that could not look has not earned (A-4.S2.8, the same rule the no-jq lane obeys).
+# So a timeout renders as the `dup=unknown … cause=` line S2 established, and every caller
+# already knows that shape.
+
+SLOWJQ_BIN="$TMP/slowjq-bin"
+mkdir -p "$SLOWJQ_BIN"
+for f in "$BASE_BIN"/*; do ln -sf "$(readlink "$f")" "${SLOWJQ_BIN}/${f##*/}" 2>/dev/null; done
+# `sleep` is what the bound polls with, and BASE_BIN does not carry it — without it on PATH
+# `detect_bounded` degrades to an unbounded `wait` by design, which would make this arm
+# measure the degradation instead of the bound.
+SLEEP_REAL="$(command -v sleep 2>/dev/null)"
+[ -n "$SLEEP_REAL" ] && ln -sf "$SLEEP_REAL" "${SLOWJQ_BIN}/sleep"
+expect_true "the wedge lane carries sleep, so the bound is what is being measured" \
+  test -x "${SLOWJQ_BIN}/sleep"
+
+# A jq that stalls on THE DUPLICATES PROGRAM ONLY. Every other jq call in the library — the
+# registry parses the same run makes — is the real one, so the arm measures this probe's
+# bound and not a PATH that broke everything at once.
+JQ_REAL="$(command -v jq 2>/dev/null)"
+rm -f "${SLOWJQ_BIN}/jq"
+cat > "${SLOWJQ_BIN}/jq" <<STUB
+#!/bin/bash
+case "\$*" in
+  *'group_by(split("@")[0])'*) /bin/sleep 45; echo "too late"; exit 0 ;;
+  *) exec "${JQ_REAL}" "\$@" ;;
+esac
+STUB
+chmod +x "${SLOWJQ_BIN}/jq"
+
+DUP_START="$(date +%s)"
+R_PATH="$SLOWJQ_BIN" probe_run_st BIONIC_DOCTOR_PROBE_SECONDS=2 \
+  BIONIC_INSTALLED_PLUGINS_FILE="$FIX_DUP" -- detect_plugin_duplicates
+DUP_ELAPSED=$(( $(date +%s) - DUP_START ))
+unset R_PATH
+
+expect_true "a stalled registry read does not wedge the caller: it returns inside 10s" \
+  bash -c '[ "$1" -le 10 ]' _ "$DUP_ELAPSED"
+expect_match "…and the answer is unknown, carrying its cause" \
+  "dup=unknown ids=- fix=- cause=*" "$P_OUT"
+expect_match "…and the cause names the bound in seconds a reader can act on" \
+  "*did not answer within 2 seconds*" "$P_OUT"
+expect_eq "…and exits 0, like every other lane of this probe" "0" "$P_ST"
+# NEVER INVENTS ONE. The fixture registry holds two real collisions; a probe that was cut
+# off mid-parse must hand back none of them, not a half-read line.
+expect_eq "…and reports no duplicate it did not finish reading" "1" \
+  "$(printf '%s\n' "$P_OUT" | /usr/bin/grep -c .)"
+expect_no_match "…specifically not the collision the fixture holds" "*dup=bionic *" "$P_OUT"
+echo "      (bounded duplicates arm: elapsed=${DUP_ELAPSED}s, bound=2s, probe sleeps 45s)"
+
+# ONE OWNER. The bound is `detect_bounded`'s, reached from this probe — not a second
+# implementation beside it.
+expect_true "the duplicates probe reaches the shared bound rather than carrying its own" \
+  /usr/bin/grep -q 'detect_bounded "$(detect_probe_seconds)" _detect_plugin_duplicates_probe' \
+  "$DETECT_SH"
+
+# The unwedged lanes are unchanged by the bound: same lines, same silence.
+expect_match "with a jq that answers, the duplicate is still found" \
+  "*dup=bionic ids=bionic@bionic,bionic@claude-plugins-official*" \
+  "$(probe_run BIONIC_INSTALLED_PLUGINS_FILE="$FIX_DUP" -- detect_plugin_duplicates)"
+
+echo ""
 echo "=== Group 7: read-only is a contract, not an intention ==="
 #
 # Same wall the rest of detect.sh lives under: fingerprint the inputs, run
