@@ -522,24 +522,68 @@ echo "=== Group 7: install_dep — consent gates every mutation ==="
 # No dry-run seam: the stub `brew` on the fixture PATH is what install_dep
 # really invokes, and the recorder file is the only evidence considered.
 
+# ---- _dep_consent itself: three answers, three codes (AC-11, AC-12) ----
+#
+# 0 yes, 1 an explicit no, 2 the read failed (no terminal, nothing to read) —
+# and 1 and 2 used to be the same code, which is the O-2 defect: a dry,
+# non-interactive first pass cannot be told apart from a human who typed n.
+expect_eq "_dep_consent: an explicit yes returns 0" "0" \
+  "$(echo y | env -i HOME="$TMP/home" PATH="$BASE_BIN" bash -c '. "$1"; _dep_consent "x?" >/dev/null; echo $?' _ "$DEPS_SH")"
+expect_eq "_dep_consent: an explicit no returns 1 (declined)" "1" \
+  "$(echo n | env -i HOME="$TMP/home" PATH="$BASE_BIN" bash -c '. "$1"; _dep_consent "x?" >/dev/null; echo $?' _ "$DEPS_SH")"
+expect_eq "_dep_consent: EOF on stdin returns 2 (not asked)" "2" \
+  "$(env -i HOME="$TMP/home" PATH="$BASE_BIN" bash -c '. "$1"; _dep_consent "x?" >/dev/null </dev/null; echo $?' _ "$DEPS_SH")"
+
 : > "$CALLS"
 DECLINE_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
   bash -c '. "$1"; install_dep rg </dev/null' _ "$DEPS_SH" 2>&1)"
 DECLINE_RC=$?
-expect_true "install_dep with no answer on stdin exits non-zero (declined)" test "$DECLINE_RC" -ne 0
+expect_eq "install_dep with no answer on stdin exits 2 (not asked, not declined)" "2" "$DECLINE_RC"
 expect_eq "install_dep with no answer ran NOTHING (recorder empty)" "0" \
   "$(grep -c . "$CALLS" | tr -d ' ')"
 expect_match "install_dep names what it would run before asking" "*brew install ripgrep*" "$DECLINE_OUT"
+expect_match "install_dep with no answer says 'not asked', not 'declined' (AC-12)" \
+  "*not asked — rg stays absent*" "$DECLINE_OUT"
+expect_no_match "…and the word declined never appears" "*declined*" "$DECLINE_OUT"
 
 : > "$CALLS"
-env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
-  bash -c 'echo y | { . "$1"; install_dep rg; }' _ "$DEPS_SH" >/dev/null 2>&1
+YES_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  bash -c 'echo y | { . "$1"; install_dep rg; }' _ "$DEPS_SH" 2>&1)"
 expect_match "install_dep with an explicit y DOES invoke brew" "*brew install ripgrep*" "$(cat "$CALLS")"
+# A GLOB match on "*installed.*" would also match "rg is not installed." above
+# it — the success line has to be checked as its own line, not a substring.
+expect_true "…and confirms success with a standalone 'installed.' line (AC-11 — O-1)" \
+  bash -c 'printf "%s\n" "$1" | /usr/bin/grep -qx "  installed."' _ "$YES_OUT"
 
 : > "$CALLS"
-env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
-  bash -c 'echo n | { . "$1"; install_dep rg; }' _ "$DEPS_SH" >/dev/null 2>&1
+NO_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  bash -c 'echo n | { . "$1"; install_dep rg; }' _ "$DEPS_SH" 2>&1)"
+NO_RC=$?
 expect_eq "install_dep with an explicit n ran nothing" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
+expect_eq "install_dep with an explicit n exits 1 (declined, not 2)" "1" "$NO_RC"
+expect_match "…and still says 'declined' (a real no is a real decline)" \
+  "*declined — rg stays absent*" "$NO_OUT"
+expect_no_match "…and never says 'not asked' for a real no" "*not asked*" "$NO_OUT"
+
+# A mechanism that runs and FAILS is a third outcome, not a fourth spelling of
+# "no": install_dep must not print `installed.` over a non-zero exit, and the
+# mechanism's own error has to reach the transcript rather than be swallowed.
+FAIL_BIN="$TMP/fail-bin"; mkdir -p "$FAIL_BIN"; cp -R "$BASE_BIN/." "$FAIL_BIN/" 2>/dev/null
+cat > "${FAIL_BIN}/brew" <<'STUB'
+#!/bin/bash
+echo "brew $*" >> "$BIONIC_TEST_CALLS"
+echo "brew: this mechanism failed" >&2
+exit 1
+STUB
+chmod +x "${FAIL_BIN}/brew"
+: > "$CALLS"
+FAIL_OUT="$(env -i HOME="$TMP/home" PATH="$FAIL_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  bash -c 'echo y | { . "$1"; install_dep rg; }' _ "$DEPS_SH" 2>&1)"
+FAIL_RC=$?
+expect_true "a failing mechanism exits non-zero" test "$FAIL_RC" -ne 0
+expect_match "…and its own error reaches the transcript" "*brew: this mechanism failed*" "$FAIL_OUT"
+expect_false "…and install_dep never claims success over a failure" \
+  bash -c 'printf "%s\n" "$1" | /usr/bin/grep -qx "  installed."' _ "$FAIL_OUT"
 
 # A native-KIND row is the plugin harness's job — install_dep must refuse to
 # grow a second installer for it (that is exactly the D1 kludge the wave
