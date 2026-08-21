@@ -1960,6 +1960,49 @@ expect_eq "setup.sh takes no assume-yes argument" "" \
 expect_eq "setup.sh reads no assume-yes environment knob" "" \
   "$(/usr/bin/grep -niE 'BIONIC_(ASSUME_YES|YES|NONINTERACTIVE)' "$SETUP_SH" || true)"
 
+# ---- NO ENVIRONMENT VALUE GRANTS CONSENT (W7 S11, six-axis review axis 4) ----
+#
+# The two greps above are a wall against a knob NAMED assume-yes. They cannot see
+# a knob spelled something else, and one was spelled something else: `_dep_consent`
+# short-circuits on `SETUP_ALL` OR `RM_ALL`, and this script used to zero only its
+# own name. An exported `RM_ALL=1` therefore walked in from the environment and
+# answered every question here — proven by the reviewer, who wrote both settings
+# keys onto a scratch machine with the answer channel closed.
+#
+# So the wall becomes behavioural rather than lexical: both names arrive SET, there
+# is nothing on the standard input to answer with, and the machine must be
+# untouched afterwards. A grep can be routed around by renaming a variable; this
+# arm cannot.
+new_fixture env-consent-knob
+plant_cli_plugin "bionic@bionic" true
+FP_KNOB_BEFORE="$(fingerprint "$FIX")"
+SETUP_FLAGS="--only environment"
+KNOB_OUT="$(run_setup "" SETUP_ALL=1 RM_ALL=1)"
+SETUP_FLAGS=""
+expect_match "an exported consent flag does not answer the question" \
+  '*not asked —*' "$KNOB_OUT"
+expect_no_match "…and the environment item never reports itself written" \
+  '*Takes effect in a new session.*' "$KNOB_OUT"
+expect_eq "…and settings.json still holds nothing of bionic's" "$(printf '%s' '{}')" \
+  "$(cat "$FIX/ch/settings.json")"
+expect_eq "…and the whole fixture tree is byte-identical" \
+  "$FP_KNOB_BEFORE" "$(fingerprint "$FIX")"
+
+# The same over the whole page: `--all` under both exported names still ends at the
+# one question, unanswered, and therefore at "nothing changed."
+new_fixture env-consent-knob-all
+plant_everything_setup
+FP_KNOB_ALL_BEFORE="$(fingerprint "$FIX")"
+SETUP_FLAGS="--all"
+KNOB_ALL_OUT="$(run_setup "" SETUP_ALL=1 RM_ALL=1)"
+SETUP_FLAGS=""
+expect_match "--all under exported consent flags changes nothing and says so" \
+  '*nothing changed.*' "$KNOB_ALL_OUT"
+expect_eq "…and the whole fixture tree is byte-identical" \
+  "$FP_KNOB_ALL_BEFORE" "$(fingerprint "$FIX")"
+expect_eq "…and not one mutating command ran" "" \
+  "$(grep -E 'plugin install|plugin enable|brew install|npm install|uv tool install|mcp add' "$CALLS" 2>/dev/null || true)"
+
 # ---------------------------------------------------------------------------
 # Results
 # ---------------------------------------------------------------------------
