@@ -633,40 +633,102 @@ expect_no_match "declined extras: nothing was installed" '*npm install -g @penci
 expect_no_match "declined extras: no statusline recorded" '*statusLine*' "$(cat "$FIX/ch/settings.json")"
 
 # ---------------------------------------------------------------------------
-# Group 5 — (d) the CLAUDE_CODE_ENABLE_TODO_TOOLS export, marker-scoped.
+# Group 5 — (d) bionic's environment settings, in the CLI's own settings.json.
+#
+# THE DEFECT THIS GROUP REPLACES AN ARM FOR. Until W7 this step appended
+# `export CLAUDE_CODE_ENABLE_TODO_TOOLS=1` to the user's shell rc inside a
+# marker block, and on 2026-08-21 that export was measured NOT REACHING the
+# session it was written for: the host that launches the CLI runs its shell with
+# rc files disabled. settings.json is read by the CLI itself however the session
+# was started, so it is the one home that reaches every session — and the arms
+# below assert the shell rc is not written to AT ALL, which is the half a
+# "settings.json now carries it too" implementation would leave passing.
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "=== Group 5: shell-rc export ==="
+echo "=== Group 5: the environment settings ==="
 
-new_fixture rc-write
+new_fixture env-write
 plant_cli_plugin "bionic@bionic" true
+RC_BEFORE="$(cat "$FIX/rc")"
 OUT="$(run_setup "$YES")"
-expect_match "consented: the export lands in the rc" \
-  "env:todo-tools present=yes" "$(lib_query "$LIB_DIR/detect.sh" detect_env_todo_tools)"
-expect_match "the export is written inside a bionic marker block" '*bionic:env:start*' "$(cat "$FIX/rc")"
-expect_match "the rc the user already had is preserved" '*export PATH=*' "$(cat "$FIX/rc")"
+expect_eq "consented: the task-list name is in settings.json" "1" \
+  "$(jq -r '.env.CLAUDE_CODE_ENABLE_TODO_TOOLS // ""' "$FIX/ch/settings.json")"
+expect_eq "consented: the long-command ceiling is there beside it" "1800000" \
+  "$(jq -r '.env.BASH_MAX_TIMEOUT_MS // ""' "$FIX/ch/settings.json")"
+expect_match "consented: the item says what it did" '*set.*' "$OUT"
+expect_match "the step names itself in the user's words" '*5. Environment*' "$OUT"
+# THE HALF THAT MATTERS MOST. Not "settings.json was written" — "and the shell
+# rc was not", byte for byte. A machine that got both would still be carrying
+# the footprint remove now has to clean up.
+expect_eq "consented: the shell rc is untouched, byte for byte" "$RC_BEFORE" "$(cat "$FIX/rc")"
 
-RC_AFTER_FIRST="$(cat "$FIX/rc")"
+SETTINGS_AFTER_FIRST="$(cat "$FIX/ch/settings.json")"
 OUT="$(run_setup "$YES")"
-expect_eq "second run does not append a second block (byte-identical rc)" \
-  "$RC_AFTER_FIRST" "$(cat "$FIX/rc")"
-expect_match "second run says the export is already there" '*already*' "$OUT"
+expect_eq "second run writes nothing (byte-identical settings.json)" \
+  "$SETTINGS_AFTER_FIRST" "$(cat "$FIX/ch/settings.json")"
+expect_match "second run says there is nothing to do" '*nothing to do*' "$OUT"
+expect_no_match "…and asks no question it has no work behind" '*Write bionic*' "$OUT"
 
-new_fixture rc-declined
+new_fixture env-declined
 plant_cli_plugin "bionic@bionic" true
+SETTINGS_BEFORE="$(cat "$FIX/ch/settings.json")"
 RC_BEFORE="$(cat "$FIX/rc")"
 OUT="$(run_setup "$NO")"
-expect_eq "declined: the rc is untouched, byte for byte" "$RC_BEFORE" "$(cat "$FIX/rc")"
-expect_match "declined: the export is named as an action line" '*CLAUDE_CODE_ENABLE_TODO_TOOLS*' "$OUT"
+expect_eq "declined: settings.json is untouched, byte for byte" \
+  "$SETTINGS_BEFORE" "$(cat "$FIX/ch/settings.json")"
+expect_eq "declined: and so is the shell rc" "$RC_BEFORE" "$(cat "$FIX/rc")"
+expect_match "declined: the item is named as an action line" '*--only environment*' "$OUT"
 
-# A machine that already exports it OUTSIDE bionic's markers is already correct.
-new_fixture rc-preexisting
+# A settings.json that already carries the two names — written by hand, or by an
+# earlier run — is already correct, and the merge must not disturb what else is
+# in the file.
+new_fixture env-preexisting
 plant_cli_plugin "bionic@bionic" true
-printf 'export PATH="$HOME/bin:$PATH"\nexport CLAUDE_CODE_ENABLE_TODO_TOOLS=1\n' > "$FIX/rc"
+cat > "$FIX/ch/settings.json" <<'JSON'
+{"env":{"OTHER":"x","CLAUDE_CODE_ENABLE_TODO_TOOLS":"1","BASH_MAX_TIMEOUT_MS":"1800000"}}
+JSON
+SETTINGS_BEFORE="$(cat "$FIX/ch/settings.json")"
+# Narrowed to the item: a whole consented pass writes settings.json through the
+# permission steps too, and this arm is about THIS step writing nothing.
+SETUP_FLAGS="--only environment"
+OUT="$(run_setup "$YES")"
+SETUP_FLAGS=""
+expect_eq "pre-existing values: nothing rewritten" \
+  "$SETTINGS_BEFORE" "$(cat "$FIX/ch/settings.json")"
+
+# A partial machine — one name there, one missing — is the state a ceiling added
+# after the fact leaves behind, and it must be completed rather than skipped.
+new_fixture env-partial
+plant_cli_plugin "bionic@bionic" true
+printf '%s\n' '{"env":{"CLAUDE_CODE_ENABLE_TODO_TOOLS":"1"}}' > "$FIX/ch/settings.json"
+OUT="$(run_setup "$YES")"
+expect_eq "a half-configured machine gets the missing name" "1800000" \
+  "$(jq -r '.env.BASH_MAX_TIMEOUT_MS // ""' "$FIX/ch/settings.json")"
+expect_eq "…and keeps the one it had" "1" \
+  "$(jq -r '.env.CLAUDE_CODE_ENABLE_TODO_TOOLS // ""' "$FIX/ch/settings.json")"
+
+# The retired rc block is REMOVE's to clean up, not setup's. Setup must neither
+# write one nor delete one — an installer that tidied the rc would be mutating a
+# file outside the item the user consented to.
+new_fixture env-legacy-rc
+plant_cli_plugin "bionic@bionic" true
+# The block STATED, not derived from the script under test — the same discipline
+# Group 6 keeps for the alias markers. These are the bytes setup.sh used to
+# append, blank separator line included.
+cat > "$FIX/rc" <<'RC'
+export PATH="$HOME/bin:$PATH"
+
+# ─── bionic:env:start ───
+export CLAUDE_CODE_ENABLE_TODO_TOOLS=1
+# ─── bionic:env:end ───
+RC
 RC_BEFORE="$(cat "$FIX/rc")"
 OUT="$(run_setup "$YES")"
-expect_eq "pre-existing export outside the markers: no block added" "$RC_BEFORE" "$(cat "$FIX/rc")"
+expect_eq "a machine carrying the retired rc block: setup leaves it alone" \
+  "$RC_BEFORE" "$(cat "$FIX/rc")"
+expect_eq "…and still writes the settings names" "1800000" \
+  "$(jq -r '.env.BASH_MAX_TIMEOUT_MS // ""' "$FIX/ch/settings.json")"
 
 # ---------------------------------------------------------------------------
 # Group 6 — (e) the ported legacy .zshrc alias removal, BOTH variants.
@@ -1056,24 +1118,26 @@ echo "=== Group 12: mutation-and-restore ×3 ==="
 
 MUT="$TMP/setup-mutated.sh"
 
-# Mutation 1 — delete the rc-export consent gate. A declined run must now
-# mutate the rc; if it does not, the gate was never what stopped it.
-grep -v '# consent gate: rc export' "$SETUP_SH" > "$MUT"
+# Mutation 1 — delete the environment consent gate. A declined run must now
+# write settings.json; if it does not, the gate was never what stopped it.
+# (Retargeted at W7 S4: the step this gate belongs to writes settings.json now,
+# not a shell rc.)
+grep -v '# consent gate: settings env' "$SETUP_SH" > "$MUT"
 expect_true "mutation 1: the consent-gate line exists to delete" \
   bash -c "[ \"\$(wc -l < '$MUT')\" -lt \"\$(wc -l < '$SETUP_SH')\" ]"
 new_fixture mut1
 plant_cli_plugin "bionic@bionic" true
-RC_BEFORE="$(cat "$FIX/rc")"
+SETTINGS_BEFORE="$(cat "$FIX/ch/settings.json")"
 SETUP_UNDER_TEST="$MUT" run_setup "$NO" >/dev/null 2>&1
-expect_no_match "MUTATED (consent gate removed): a declined run now writes the rc" \
-  "$RC_BEFORE" "$(cat "$FIX/rc")"
+expect_no_match "MUTATED (consent gate removed): a declined run now writes settings.json" \
+  "$SETTINGS_BEFORE" "$(cat "$FIX/ch/settings.json")"
 
 new_fixture mut1-control
 plant_cli_plugin "bionic@bionic" true
-RC_BEFORE="$(cat "$FIX/rc")"
+SETTINGS_BEFORE="$(cat "$FIX/ch/settings.json")"
 run_setup "$NO" >/dev/null 2>&1
-expect_eq "RESTORED (production setup.sh): a declined run leaves the rc alone" \
-  "$RC_BEFORE" "$(cat "$FIX/rc")"
+expect_eq "RESTORED (production setup.sh): a declined run leaves settings.json alone" \
+  "$SETTINGS_BEFORE" "$(cat "$FIX/ch/settings.json")"
 
 # Mutation 2 — corrupt the legacy marker literal. The block must survive.
 sed 's/bionic:start/bionic:STARTX/' "$SETUP_SH" > "$MUT"
@@ -1091,26 +1155,31 @@ run_setup "$YES" >/dev/null 2>&1
 expect_no_match "RESTORED (production setup.sh): the legacy block is removed" \
   "*${ALIAS_START}*" "$(cat "$FIX/rc")"
 
-# Mutation 3 — delete the rc-export idempotence guard. A second run must now
-# append a second block; if it does not, the guard was not what prevented it.
-grep -v '# idempotence guard: rc export' "$SETUP_SH" > "$MUT"
+# Mutation 3 — delete the environment idempotence guard. A second run must now
+# ASK AGAIN; if it does not, the guard was not what prevented it.
+#
+# THE TELL IS THE QUESTION, NOT THE BYTES, and that is forced by what the step
+# writes. Re-writing the same two names produces a byte-identical settings.json,
+# so a bytes-only arm would pass with the guard deleted and prove nothing. What
+# the guard actually buys is that a user who is already configured is not asked
+# to consent to a write with nothing behind it — so that is what is measured.
+grep -v '# idempotence guard: settings env' "$SETUP_SH" > "$MUT"
 expect_true "mutation 3: the idempotence-guard line exists to delete" \
   bash -c "[ \"\$(wc -l < '$MUT')\" -lt \"\$(wc -l < '$SETUP_SH')\" ]"
 new_fixture mut3
 plant_cli_plugin "bionic@bionic" true
 SETUP_UNDER_TEST="$MUT" run_setup "$YES" >/dev/null 2>&1
-RC_ONE="$(cat "$FIX/rc")"
-SETUP_UNDER_TEST="$MUT" run_setup "$YES" >/dev/null 2>&1
-expect_no_match "MUTATED (idempotence guard removed): the second run appends again" \
-  "$RC_ONE" "$(cat "$FIX/rc")"
+MUT3_SECOND="$(SETUP_UNDER_TEST="$MUT" run_setup "$YES" 2>&1)"
+expect_match "MUTATED (idempotence guard removed): the second run asks again" \
+  '*Write bionic*environment settings*' "$MUT3_SECOND"
 
 new_fixture mut3-control
 plant_cli_plugin "bionic@bionic" true
 run_setup "$YES" >/dev/null 2>&1
-RC_ONE="$(cat "$FIX/rc")"
-run_setup "$YES" >/dev/null 2>&1
-expect_eq "RESTORED (production setup.sh): the second run appends nothing" \
-  "$RC_ONE" "$(cat "$FIX/rc")"
+CTRL3_SECOND="$(run_setup "$YES" 2>&1)"
+expect_no_match "RESTORED (production setup.sh): the second run asks nothing" \
+  '*Write bionic*environment settings*' "$CTRL3_SECOND"
+expect_match "…it says there is nothing to do instead" '*nothing to do*' "$CTRL3_SECOND"
 
 # Mutation 4 — delete the legacy-skill-copy consent gate. A declined run must
 # now remove the directory; if it does not, the gate was never what stopped it.
@@ -1436,6 +1505,12 @@ LIST_OUT="$(run_setup "")"
 SETUP_FLAGS=""
 
 expect_match "--list names the permission-mode item" '*permission-mode*' "$LIST_OUT"
+# THE NAME IS THE USER'S WORD FOR THE THING, and the thing stopped being a shell
+# file at W7: the item writes settings.json now, so `shell-env` named a mechanism
+# that is gone. A machine that kept the old name would take `--only shell-env`
+# and do something the name does not describe.
+expect_match "--list names the environment item" '*environment*' "$LIST_OUT"
+expect_no_match "…and no longer names it after a shell file" '*shell-env*' "$LIST_OUT"
 expect_match "--list names a tool row read from the dependency table" '*tool:git*' "$LIST_OUT"
 expect_match "--list names a core dependency row" '*dependency:superpowers*' "$LIST_OUT"
 
@@ -1516,7 +1591,7 @@ expect_true "…and that file is settings.json" \
 expect_match "…and the one question asked was that item's own" \
   '*default permission mode*' "$ONE_OUT"
 expect_no_match "…and no other step printed a header" '*3. Tools*' "$ONE_OUT"
-expect_no_match "…nor the shell-environment step" '*5. Shell environment*' "$ONE_OUT"
+expect_no_match "…nor the environment step" '*5. Environment*' "$ONE_OUT"
 expect_no_match "…nor the permission-profile half of its own step" \
   '*bionic ships a permission profile*' "$ONE_OUT"
 expect_no_match "…and the summary does not claim the whole machine is set up" \
@@ -1528,21 +1603,21 @@ expect_no_match "…and the summary does not claim the whole machine is set up" 
 # positional hazard; one question and one answer is the fix.
 new_fixture only-one-question
 plant_cli_plugin "bionic@bionic" true
-SETUP_FLAGS="--only shell-env"
+SETUP_FLAGS="--only environment"
 DECLINE_OUT="$(run_setup "")"
 SETUP_FLAGS=""
 printf '%s\n' "$DECLINE_OUT" > "$TMP/only-decline.txt"
 QCOUNT="$(/usr/bin/grep -c '\[y/N\]' "$TMP/only-decline.txt" | tr -d ' ')"
 expect_eq "--only asks exactly one question" "1" "$QCOUNT"
-expect_match "…the one it was told to ask" '*Add the export to*' "$DECLINE_OUT"
+expect_match "…the one it was told to ask" '*environment settings*' "$DECLINE_OUT"
 expect_match "…a run with nothing to answer with still declines" '*declined*' "$DECLINE_OUT"
-expect_eq "…and the rc file is untouched by the decline" "$(printf 'export PATH="$HOME/bin:$PATH"\n')" \
-  "$(cat "$FIX/rc")"
+expect_eq "…and settings.json is untouched by the decline" "$(printf '%s' '{}')" \
+  "$(cat "$FIX/ch/settings.json")"
 
 # ---- the declined action line carries the route, with the item's own name ----
-expect_match "the declined item's action line names the item" '*--only shell-env*' "$DECLINE_OUT"
+expect_match "the declined item's action line names the item" '*--only environment*' "$DECLINE_OUT"
 expect_match "…and the invocation that delivers one answer to it" \
-  '*| bash /*scripts/setup.sh --only shell-env*' "$DECLINE_OUT"
+  '*| bash /*scripts/setup.sh --only environment*' "$DECLINE_OUT"
 # The answer half, matched as a fixed string against a FILE: the route is only a
 # route if it actually carries a yes, and the newline in it is a literal
 # backslash-n that a glob pattern cannot state without escaping itself twice.
@@ -1554,7 +1629,7 @@ expect_true "…with the answer itself supplied on the input" \
 new_fixture only-route-everywhere
 plant_cli_plugin "bionic@bionic" true
 ALL_NO_OUT="$(run_setup "$NO")"
-for _item in shell-env permission-profile permission-mode; do
+for _item in environment permission-profile permission-mode; do
   expect_match "the whole-pass summary names --only ${_item}" "*--only ${_item}*" "$ALL_NO_OUT"
 done
 

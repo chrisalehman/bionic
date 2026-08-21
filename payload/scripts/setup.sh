@@ -148,7 +148,7 @@ _setup_self_dir() {
 
 SETUP_LIB_DIR="${BIONIC_LIB_DIR:-$(_setup_self_dir)/lib}"
 
-for _setup_lib in deps.sh detect.sh profile.sh hooks.sh jit.sh; do
+for _setup_lib in deps.sh detect.sh profile.sh hooks.sh jit.sh env.sh; do
   if [ ! -f "${SETUP_LIB_DIR}/${_setup_lib}" ]; then
     echo "setup.sh: cannot find ${SETUP_LIB_DIR}/${_setup_lib} — the payload looks incomplete." >&2
     echo "          reinstall with: claude plugin install bionic@bionic" >&2
@@ -163,6 +163,13 @@ done
 . "${SETUP_LIB_DIR}/profile.sh"
 # shellcheck source=/dev/null
 . "${SETUP_LIB_DIR}/hooks.sh"
+# env.sh, for the environment item below: the `env` object in the CLI's own
+# settings.json is the ONE home for the names bionic sets, and setup writes it
+# through env_set rather than reaching into the file itself. Doctor reads the
+# same names through the same file, remove deletes them through it, and the
+# roster they all walk (`ENV_KEYS`) is spelled exactly once, there.
+# shellcheck source=/dev/null
+. "${SETUP_LIB_DIR}/env.sh"
 # jit.sh, for ONE function: `_jit_fix_line`, which spells the command that would
 # install a row by hand. The summary needs that sentence and so does a route's
 # just-in-time offer, and it has to be the SAME sentence — an action line that
@@ -191,11 +198,13 @@ SETUP_DEP_MARKETPLACE="${BIONIC_DEP_MARKETPLACE:-bionic}"
 # installed.
 SETUP_PLUGIN_ID="${BIONIC_PLUGIN_ID:-bionic@${SETUP_DEP_MARKETPLACE}}"
 
-# bionic's own rc block. DISTINCT markers from the legacy alias block below on
-# purpose: step 5 removes that block by exact marker match, and sharing a marker
-# would have step 5 delete what step 4 just wrote.
-SETUP_ENV_START='# ─── bionic:env:start ───'
-SETUP_ENV_END='# ─── bionic:env:end ───'
+# THE ENV RC BLOCK IS GONE FROM THIS FILE, deliberately. Step 5 used to append a
+# `# ─── bionic:env:start/end ───` block here; it writes settings.json now (the
+# rc export was measured not reaching the session it was written for, 2026-08-21),
+# so this script has no marker pair of its own any more. The block a pre-W7
+# machine is still carrying is remove.sh's to clean up, and remove.sh owns those
+# two literals outright — a copy here would be a marker nothing writes, kept in
+# step with nothing.
 
 # The retired alias block's markers, verbatim from claude-bootstrap.sh —
 # box-drawing dashes included, because they are what makes the block
@@ -264,7 +273,7 @@ SETUP_SELF_CMD="bash $(_setup_self_path)"
 # walk, so the flag cannot reach a row the full pass would never offer.
 #
 # THE NAMES ARE THE USER'S WORDS. Each one names the item as the question that
-# gates it names it — `permission-mode`, `shell-env`, `tool:git` — never the
+# gates it names it — `permission-mode`, `environment`, `tool:git` — never the
 # function, the step number or the class behind it.
 
 SETUP_ONLY=""
@@ -283,7 +292,7 @@ _setup_item_ids() {
   while IFS= read -r n <&3; do [ -n "$n" ] && say "dependency:${n}"; done 3< <(dep_names_class core)
   while IFS= read -r n <&3; do [ -n "$n" ] && say "tool:${n}"; done 3< <(dep_names_class basic)
   while IFS= read -r n <&3; do [ -n "$n" ] && say "tool:${n}"; done 3< <(dep_names_class extra)
-  say "shell-env"
+  say "environment"
   say "legacy-alias"
   say "legacy-hooks"
   say "legacy-skill-copy"
@@ -710,32 +719,83 @@ setup_extras_loop() {
   _setup_install_class extra
 }
 
-# ─── Step 5 — the todo-tools export ──────────────────────────────────────────
+# ─── Step 5 — bionic's environment settings ──────────────────────────────────
+#
+# ONE HOME, AND WHY IT MOVED. This step used to append `export
+# CLAUDE_CODE_ENABLE_TODO_TOOLS=1` to the user's shell rc inside a marker block.
+# On 2026-08-21 that export was measured NOT REACHING the session it was written
+# for: the host that launches the CLI runs its shell with rc files disabled, so
+# the value was on disk, absent from the process, and nothing bionic printed
+# could tell those apart. settings.json is read by the CLI itself however the
+# session was started — it is the one home that reaches every session. This step
+# no longer writes to a shell rc at all; the block a pre-W7 machine is carrying
+# is footprint /bionic:remove cleans up.
+#
+# ONE QUESTION FOR THE WHOLE SET. The names are one decision — "let bionic
+# configure the environment it needs" — not one decision per name, and asking
+# twice for one decision is how a user ends up half-configured. What gets
+# written is stated before the question, so the single answer is still an
+# informed one.
+#
+# THE ROSTER IS ENV.SH'S. This function loops `ENV_KEYS` and asks `env_default`
+# for each value; a third name added there arrives here with no edit. It reads
+# what is already configured through `env_get`, so a machine that has both
+# already is told there is nothing to do rather than being asked to re-consent
+# to a write that would change no bytes.
 
-setup_env_export() {
-  _setup_wants shell-env || return 0
+setup_environment() {
+  _setup_wants environment || return 0
   say ""
-  say "5. Shell environment"
-  local rc line present
-  rc="$(_detect_shell_rc)"
-  line="$(detect_env_todo_tools)"; present="${line#*present=}"
+  say "5. Environment"
+  local settings key want have missing="" wrote=0
+  settings="$(_dep_settings_file)"
 
-  if [ "$present" = "yes" ]; then say "   CLAUDE_CODE_ENABLE_TODO_TOOLS=1 is already exported in ${rc} — nothing to do."; return 0; fi  # idempotence guard: rc export
+  for key in $ENV_KEYS; do
+    want="$(env_default "$key")" || continue
+    have="$(env_get "$key" 2>/dev/null)" || have=""
+    [ "$have" = "$want" ] && continue
+    missing="${missing}${missing:+ }${key}"
+  done
 
-  say "   ${rc} does not export CLAUDE_CODE_ENABLE_TODO_TOOLS=1 (current CLI builds need it for the native task tools)."
-  say "   bionic would append a marker-scoped block to ${rc}."
-  if ! consent "   Add the export to ${rc}?"; then say "   declined — ${rc} is unchanged."; action "add 'export CLAUDE_CODE_ENABLE_TODO_TOOLS=1' to ${rc} — $(_setup_answer_yes shell-env)"; return 0; fi  # consent gate: rc export
+  # ONE LINE, ON PURPOSE. Both gates below are single lines carrying a named
+  # tag, because tests/setup.test.sh proves each is load-bearing by DELETING its
+  # line from a copy of this file and re-running: a gate spread over an if/fi
+  # pair cannot be deleted that way without breaking the copy's syntax, and a
+  # mutation that turns the script into a parse error proves nothing.
+  [ -n "$missing" ] || { say "   ${settings} already carries bionic's environment settings — nothing to do."; return 0; }  # idempotence guard: settings env
 
-  # Replace rather than stack: a block whose export was commented out reads as
-  # absent above, and appending beside it would leave two blocks.
-  _setup_rc_strip_block "$rc" "$SETUP_ENV_START" "$SETUP_ENV_END"
-  if printf '\n%s\nexport CLAUDE_CODE_ENABLE_TODO_TOOLS=1\n%s\n' "$SETUP_ENV_START" "$SETUP_ENV_END" >> "$rc"; then
-    say "   added."
-  else
-    say "   could not write ${rc}."
-    action "add 'export CLAUDE_CODE_ENABLE_TODO_TOOLS=1' to ${rc} (bionic could not write the file)"
-  fi
+  say "   ${settings} does not carry all of bionic's environment settings."
+  for key in $missing; do
+    say "   ${key}=$(env_default "$key") — $(_setup_env_why "$key")"
+  done
+  if ! consent "   Write bionic's environment settings to ${settings}?"; then say "   declined — ${settings} is unchanged."; action "write bionic's environment settings to ${settings} — $(_setup_answer_yes environment)"; return 0; fi  # consent gate: settings env
+
+  for key in $missing; do
+    if env_set "$key" "$(env_default "$key")"; then
+      wrote=$((wrote + 1))
+    else
+      say "   could not write ${settings}."
+      action "write bionic's environment settings to ${settings} (bionic could not write the file)"
+      return 0
+    fi
+  done
+  say "   set."
+  # A value written now reaches the NEXT session and not this one — the same
+  # gap doctor reports as "live in this session: no". Saying so here is what
+  # stops a user re-running setup to fix something already fixed.
+  say "   Takes effect in a new session."
   return 0
+}
+
+# What each name is for, in the words the user reads. Kept beside the step
+# rather than in env.sh: env.sh owns the VALUES, this file owns the prose that
+# lands on a person's screen, and the vocabulary wall reads only this side.
+_setup_env_why() {  # <key>
+  case "${1:-}" in
+    CLAUDE_CODE_ENABLE_TODO_TOOLS) echo "the task list a plan's steps are tracked in" ;;
+    BASH_MAX_TIMEOUT_MS)           echo "how long a command may run before it is taken away from whoever started it" ;;
+    *)                             echo "a setting bionic needs" ;;
+  esac
 }
 
 # ─── Step 6 — the retired alias block ────────────────────────────────────────
@@ -1126,7 +1186,7 @@ setup_duplicates
 setup_dep_enable_verify
 setup_tools_loop
 setup_extras_loop
-setup_env_export
+setup_environment
 setup_legacy_alias
 setup_legacy_channel_hooks
 setup_legacy_skill_copy
