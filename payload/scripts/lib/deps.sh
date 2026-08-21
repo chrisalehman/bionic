@@ -485,6 +485,14 @@ _dep_indent() { printf '%s' "${BIONIC_DEP_INDENT:-  }"; }
 
 _dep_consent() {  # <prompt> -> 0 yes, 1 an explicit no, 2 EOF (nobody there to ask)
   local prompt="$1" answer=""
+  # THE ANSWER IS ALREADY GIVEN. `setup --all` and `remove --all` print every
+  # item their run would ask about — this one among them — and take a single
+  # explicit `y` over that printed page before either sets its flag. Asking
+  # again here would be asking a person to answer the same question twice. This
+  # is not an assume-yes knob: neither name is settable from outside those two
+  # scripts, and neither is set until a plan naming this item has been read and
+  # accepted.
+  if [ "${SETUP_ALL:-0}" = "1" ] || [ "${RM_ALL:-0}" = "1" ]; then return 0; fi
   printf '%s [y/N] ' "$prompt"
   IFS= read -r answer || { echo ""; return 2; }
   echo ""
