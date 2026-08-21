@@ -143,6 +143,50 @@ if [ -z "$REPO_REAL" ]; then
   exit 2
 fi
 
+# ---------------------------------------------------------------- where artifacts live
+#
+# THE DOCS ROOT, AND WHY THIS HOOK SUDDENLY NEEDS ONE (epic-17 W6 S15, A-6.6 (c)).
+# A roster deliverable is brief prose: `Expected artifact: record/epic-17-w6/x.md` is what
+# every slice brief in this epic actually writes, because that is the spelling the Step-5
+# contract and `canonical-sdlc-evidence-gate.sh` established for an artifact under the docs
+# root. This gate resolved it against the REPO root, looked at `<repo>/record/…`, found
+# nothing, and reported the row missing while the file sat where the brief meant. One wave
+# already answered that by writing a duplicate copy at the repo root to appease the gate,
+# which is the failure mode of a gate that is wrong: it teaches the work to be wrong too.
+#
+# `resolve_docs_root` is the evidence gate's, copied whole rather than approximated — the
+# same duplication that helper already lives under, and `tests/cross-gate-agreement.test.sh`
+# holds all three copies to one body so a change to the rule cannot land in only one.
+resolve_docs_root() {
+  local proj="$1"
+  local config="$proj/.bionic/config.yaml"
+  if [ -f "$config" ]; then
+    local override
+    override=$(grep -E '^[[:space:]]*docs-root[[:space:]]*:' "$config" 2>/dev/null \
+      | head -1 \
+      | sed -E 's/^[[:space:]]*docs-root[[:space:]]*:[[:space:]]*//' \
+      | sed -E "s/^['\"]//;s/['\"]\$//" \
+      | sed -E 's/[[:space:]]+$//')
+    if [ -n "$override" ]; then
+      case "$override" in
+        /*) echo "$override" ;;
+        *)  echo "$proj/$override" ;;
+      esac
+      return
+    fi
+  fi
+  echo "$proj/.bionic/docs"
+}
+
+# THE PROJECT ROOT, UNDER THE EVIDENCE GATE'S NAME FOR IT, because the resolver below is
+# that gate's body verbatim and a body-for-body wall cannot survive a renamed variable.
+# The VALUE is this hook's own and stays so: the gate folds a linked worktree back to the
+# main repo (its artifacts are written there), while this hook answers for the roster in
+# the tree it was run from. Same rule about which root a path is relative to; different
+# root, deliberately.
+PROJECT_DIR="$REPO_REAL"
+DOCS_ROOT="$(resolve_docs_root "$PROJECT_DIR")"
+
 BIONIC_DIR="$REPO_REAL/.bionic"
 STATE_DIR="$BIONIC_DIR/tmp"
 for _component in "$BIONIC_DIR" "$STATE_DIR"; do
@@ -207,10 +251,19 @@ clean() {  # <value>
     -e 's/^ *//' -e 's/ *$//' | cut -c 1-400
 }
 
-abs_path() {  # <path> — roster paths are usually absolute; a relative one is the repo's
+# THE ONE RESOLUTION RULE, and it is not this file's (epic-17 W6 S15, A-6.S15.4). Body for
+# body it is `resolve_walk_path()` in canonical-sdlc-evidence-gate.sh, which is the copy
+# that documents the rule at its definition site and the copy every brief was written
+# against: absolute stands; a value led by `record/` is docs-root-relative, because that is
+# the spelling the Step-5 contract publishes; anything else is project-relative, so a
+# fully-spelled `.bionic/docs/record/<file>.md` lands in the same place. Containment — a
+# `..` that climbs out — is the CALLER's question, exactly as it is in the gate; this only
+# resolves. tests/cross-gate-agreement.test.sh holds the three copies to one body.
+abs_path() {  # <path, as the roster spells it> -> absolute
   case "$1" in
-    /*) printf '%s' "$1" ;;
-    *)  printf '%s/%s' "$REPO_REAL" "$1" ;;
+    /*)       printf '%s\n' "$1" ;;
+    record/*) printf '%s/%s\n' "$DOCS_ROOT" "$1" ;;
+    *)        printf '%s/%s\n' "$PROJECT_DIR" "$1" ;;
   esac
 }
 
@@ -411,6 +464,15 @@ CONJUNCT=""
 landing_conjunct() {  # <path, as the roster spells it> <launched epoch|""> <launched ISO>
   local raw="$1" le="$2" liso="$3" p mtime newest f count=0 capped=0
   CONJUNCT=""
+  # A `..` COMPONENT IS REFUSED, not normalized — the same call the evidence gate makes
+  # about a walk artifact, taken at the same place: in the caller, over the raw value.
+  # A relative deliverable that climbs out of the root it is relative to is a placement
+  # error whatever it happens to land on, and normalizing it would hide which root the
+  # brief meant.
+  if echo "$raw" | grep -qE '(^|/)\.\.(/|$)'; then
+    CONJUNCT="refused=$raw (a deliverable path may not climb out of the project with '..' — name it as record/<file>, a project-relative path, or an absolute one)"
+    return 1
+  fi
   p="$(abs_path "$raw")"
   # A SYMBOLIC LINK IS NOT A DELIVERED ARTIFACT — asked FIRST, so both branches below are
   # held to one answer. The file branch used to follow the link ([ -e ], [ -s ] and stat all

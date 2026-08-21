@@ -540,8 +540,12 @@ setup_duplicates() {
     if [ "$header" = "0" ]; then say ""; say "Duplicates"; header=1; fi
 
     if [ "$bare" = "unknown" ]; then
+      # THE ACTION CARRIES THE CAUSE, it does not guess it (W6 S15, A-6.S15.3). This line
+      # used to say "install jq", which was the only way the read could fail when it was
+      # written. The read is bounded now, so a stalled registry is a second cause — and
+      # telling that user to install a tool they already have is worse than saying nothing.
       say "   bionic could not check for duplicate copies — ${cause}"
-      action "install jq, then re-run /bionic:setup — duplicate copies could not be checked for"
+      action "duplicate copies were not checked for — ${cause}; /bionic:doctor lists them once bionic can read the plugin registry"
       continue
     fi
 
