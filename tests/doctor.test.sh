@@ -624,6 +624,46 @@ expect_contains "healthy: summary says there is nothing to do" "nothing to do" "
 
 # ---------------------------------------------------------------------------
 echo ""
+echo "=== Group 3b: the permission mode line, and its Remote Control note (AC-10) ==="
+# ---------------------------------------------------------------------------
+#
+# item 1 + O-3: doctor had no permission-mode line at all (a grep for
+# `defaultMode`/`permission mode` came back empty). The fixture machine's
+# settings.json carries no `.permissions.defaultMode` key, so the honest first
+# reading is `unset` — never a bare blank, never a value doctor invented.
+
+RC_NOTE='Remote Control sessions override this (Manual / Accept edits / Plan only).'
+
+expect_match "healthy: permission mode reads unset when the machine has no key" \
+  "*unset*" "$(line_of "$H_OUT" "permission mode")"
+expect_contains "healthy: the permission mode line carries the Remote Control note" \
+  "$RC_NOTE" "$H"
+
+# A machine that HAS written a mode (the setup item's own effect) reports that
+# value verbatim, with the same note beside it — the note is about what
+# overrides the value, not about whether one happens to be set.
+MODE_MACHINE="$TMP/machine-mode-auto"; rm -rf "$MODE_MACHINE"; cp -R "$HEALTHY" "$MODE_MACHINE"
+jq '.permissions.defaultMode = "auto"' "$HEALTHY/claude-home/settings.json" \
+  > "$MODE_MACHINE/claude-home/settings.json"
+MODE_OUT="$TMP/mode-auto.out"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$MODE_MACHINE" > "$MODE_OUT" 2>&1
+MODE_RC=$?
+expect_eq "mode set: doctor still exits 0" "0" "$MODE_RC"
+expect_match "mode set: permission mode reads the value on the machine" \
+  "*auto*" "$(line_of "$MODE_OUT" "permission mode")"
+expect_contains "mode set: the Remote Control note is still printed" \
+  "$RC_NOTE" "$(cat "$MODE_OUT")"
+
+# jq absent: the value cannot be read at all, so `unknown` — never coerced to
+# `unset`, which would tell a machine that could not be read that it has
+# nothing configured.
+MODEQ_OUT="$TMP/mode-nojq.out"
+doctor_run "$DOCTOR_SH" "$NOJQ_BIN" "$HEALTHY" > "$MODEQ_OUT" 2>&1
+expect_match "no jq: permission mode renders unknown, not unset" \
+  "*unknown*" "$(line_of "$MODEQ_OUT" "permission mode")"
+
+# ---------------------------------------------------------------------------
+echo ""
 echo "=== Group 4: the broken machine — every failure renders WITH its named fix ==="
 # ---------------------------------------------------------------------------
 
