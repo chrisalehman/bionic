@@ -388,6 +388,75 @@ for verdict in "safe to stop" "recommend" "verdict" "you should" "hung" "stalled
   expect_absent "the progress section carries no verdict: '$verdict'" "$verdict" "$OUT6_FRESH"
 done
 
+# (d2) A CONTRACTED PATH IS RESOLVED, and by the evidence gate's rule (A-6.6 (c)).
+#
+# WHAT WAS WRONG. Every path this command stats arrives as brief prose, and the spelling
+# briefs use is `record/epic-NN-wM/x.md` — the form the Step-5 contract and the evidence
+# gate publish for an artifact under the docs root. This command resolved nothing: a
+# relative path was stat'd against whatever directory the observer stood in, so a present
+# progress artifact printed `ABSENT` and `progress_state=absent`. An observation that
+# decides nothing had still decided wrongly, and a reader acting on it would have stopped
+# an agent that was writing.
+#
+# THE RULE, THREE ARMS: `record/`-led resolves under the docs root, a bare relative path
+# against the project root (unchanged), absolute stands (unchanged). Each carries its
+# paired negative, because "it printed PRESENT" and "it stopped looking" render alike.
+mkdir -p "$R6/.bionic/docs/record/epic-17-w6"
+DOCS_PROG="$R6/.bionic/docs/record/epic-17-w6/w6.progress"
+printf 'step 1 done\n' > "$DOCS_PROG"
+
+OUT6_REC=$(run_check "$H6" "$R6" "long-runner" --progress "record/epic-17-w6/w6.progress")
+expect_matches "a record/-led progress path is found under the docs root" \
+  '^progress: record/epic-17-w6/w6\.progress  last-write' "$OUT6_REC"
+expect_contains "…and the machine line says present, not absent" "progress_state=present" "$OUT6_REC"
+expect_contains "…and the path is reported as the contract spelled it" \
+  "progress=record/epic-17-w6/w6.progress" "$OUT6_REC"
+
+# Paired negative: nothing under the docs root, and the same row reads ABSENT again.
+rm -f "$DOCS_PROG"
+OUT6_REC_GONE=$(run_check "$H6" "$R6" "long-runner" --progress "record/epic-17-w6/w6.progress")
+expect_matches "…and with nothing written there it is ABSENT again" \
+  '^progress: record/epic-17-w6/w6\.progress  ABSENT' "$OUT6_REC_GONE"
+expect_contains "…machine line agrees" "progress_state=absent" "$OUT6_REC_GONE"
+
+# NOT the repo-root copy. `<repo>/record/…` is the placement the old resolution taught;
+# if it satisfied a record/-led path the fix would be an alias, not a correction.
+mkdir -p "$R6/record/epic-17-w6"
+printf 'the appeasement copy\n' > "$R6/record/epic-17-w6/w6.progress"
+OUT6_REC_REPO=$(run_check "$H6" "$R6" "long-runner" --progress "record/epic-17-w6/w6.progress")
+expect_matches "a repo-root copy does not answer for a record/-led path" \
+  '^progress: record/epic-17-w6/w6\.progress  ABSENT' "$OUT6_REC_REPO"
+rm -rf "$R6/record"
+printf 'step 1 done\n' > "$DOCS_PROG"
+
+# A bare relative path is still the project root's — unchanged by the rule.
+printf 'plain\n' > "$R6/plain.progress"
+OUT6_PLAIN=$(run_check "$H6" "$R6" "long-runner" --progress "plain.progress")
+expect_matches "a bare relative progress path still resolves against the project root" \
+  '^progress: plain\.progress  last-write' "$OUT6_PLAIN"
+rm -f "$R6/plain.progress"
+OUT6_PLAIN_GONE=$(run_check "$H6" "$R6" "long-runner" --progress "plain.progress")
+expect_matches "…paired negative: removed, it reads ABSENT" \
+  '^progress: plain\.progress  ABSENT' "$OUT6_PLAIN_GONE"
+
+# An absolute path is unchanged: (b) above already proves the positive; this is the pin
+# that the new rule did not reach it.
+expect_matches "an absolute progress path is untouched by the rule" \
+  '^progress: .*w6\.progress  last-write' \
+  "$(run_check "$H6" "$R6" "long-runner" --progress "$PROG")"
+
+# THE DELIVERABLES OBEY THE SAME RULE, for the same reason and out of the same resolver:
+# `Expected artifact: record/<x>` is the line briefs actually write.
+OUT6_DEL=$(run_check "$H6" "$R6" "long-runner" "record/epic-17-w6/w6.progress")
+expect_matches "a record/-led deliverable is found under the docs root" \
+  'record/epic-17-w6/w6\.progress — PRESENT,' "$OUT6_DEL"
+expect_contains "…and the machine line names it present, as contracted" \
+  "present:record/epic-17-w6/w6.progress" "$OUT6_DEL"
+rm -f "$DOCS_PROG"
+OUT6_DEL_GONE=$(run_check "$H6" "$R6" "long-runner" "record/epic-17-w6/w6.progress")
+expect_matches "…paired negative: removed, the deliverable reads ABSENT" \
+  'record/epic-17-w6/w6\.progress — ABSENT' "$OUT6_DEL_GONE"
+
 # (e) One path, or it is a usage error — a second flag is ambiguous about which
 # artifact the contract named, and guessing is the failure this whole design
 # exists to prevent.
