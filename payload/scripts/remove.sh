@@ -340,6 +340,18 @@ _rm_purge_dir() {  # <dir>
   rm -rf "$target"
 }
 
+# Does this directory hold anything at all — dotfiles included? Bash 3.2 has no
+# option to make a glob see hidden entries and an unmatched glob comes back as
+# its own pattern, so each candidate is tested for existence rather than counted.
+_rm_dir_is_empty() {  # <dir> — true when nothing is inside
+  local d="${1:-}" entry
+  [ -d "$d" ] || return 1
+  for entry in "$d"/* "$d"/.[!.]* "$d"/..?*; do
+    if [ -e "$entry" ] || [ -L "$entry" ]; then return 1; fi
+  done
+  return 0
+}
+
 # ─── The roots every item reads ──────────────────────────────────────────────
 #
 # Resolved once, above the items, because more than one item reads each of them
@@ -351,6 +363,11 @@ RM_SETTINGS="$(_rm_settings_file)"
 RM_LEGACY_SKILL_DIR="$(_rm_claude_home)/skills/${RM_LEGACY_SKILL_NAME}"
 RM_DATA_ROOT="$(_rm_plugin_data_dir)"
 RM_DATA_DECLINED=0
+# ONE OFFER PER RUN. The orphan question has two callers — the uninstall that
+# creates the orphans, and the roster entry that owns the standalone case — and a
+# whole pass reaches both. Asking twice would be asking a person to answer the
+# same thing twice, so the first caller closes the door behind it.
+RM_ORPHANS_OFFERED=0
 
 # ─── The roster ──────────────────────────────────────────────────────────────
 #
@@ -892,6 +909,7 @@ _rm_item_plugin() {
   _rm_wants plugin-data || RM_DATA_DECLINED=1
   echo "native plugin uninstall:"
   rm_plugin_id=""
+  rm_uninstall_ok=0
   if ! _rm_have claude; then
     _rm_leftover "the claude CLI is not on PATH — the native plugin uninstall cannot be invoked here"
   else
@@ -913,8 +931,17 @@ _rm_item_plugin() {
       rm_uninstall_argv=(claude plugin uninstall "$rm_plugin_id" --yes)
       [ "$RM_DATA_DECLINED" = "1" ] && rm_uninstall_argv+=(--keep-data)
       echo "  bionic would run: ${rm_uninstall_argv[*]}"
+      # WHAT WAS ALREADY THERE, recorded before the call that may add to it. The
+      # re-check below removes an empty directory the UNINSTALL left; saying so
+      # truthfully means knowing which directories the uninstall did not leave.
+      rm_data_before=""
+      for rm_data_dir in "$RM_DATA_ROOT"/bionic-*; do
+        [ -d "$rm_data_dir" ] || continue
+        rm_data_before="${rm_data_before}${rm_data_dir}"$'\n'
+      done
       if _rm_consent "Uninstall ${rm_plugin_id} now?"; then
         if "${rm_uninstall_argv[@]}"; then
+          rm_uninstall_ok=1
           _rm_removed "plugin ${rm_plugin_id}"
           # ─── Re-check: plugin data, in case the uninstall recreated it ──────
           #
@@ -925,25 +952,48 @@ _rm_item_plugin() {
           # (r1-surface-map.md Item 4). The consent already given is honored
           # against what is actually on disk now, not re-asked: a user who
           # consented to removing bionic's plugin data gets that promise kept
-          # even if the CLI resurrects the directory afterward; a user who
-          # declined is left exactly as they asked, recreated or not.
-          if [ "$RM_DATA_DECLINED" = "0" ]; then
-            rm_data_recheck=""
-            for rm_data_dir in "$RM_DATA_ROOT"/bionic-*; do
-              [ -d "$rm_data_dir" ] || continue
-              rm_data_recheck="${rm_data_recheck}${rm_data_dir}"$'\n'
-            done
-            if [ -n "$rm_data_recheck" ]; then
-              rm_data_recheck_failed=0
-              while IFS= read -r rm_data_dir <&3; do
-                [ -n "$rm_data_dir" ] || continue
-                _rm_purge_dir "$rm_data_dir" || rm_data_recheck_failed=1
-              done 3<<< "$rm_data_recheck"
-              if [ "$rm_data_recheck_failed" = "0" ]; then
-                _rm_removed "plugin data under ${RM_DATA_ROOT} — recreated by the uninstall, removed again"
+          # even if the CLI resurrects the directory afterward.
+          #
+          # AND AN EMPTY DIRECTORY IS NOT THE USER'S DATA. The live teardown that
+          # found this took the OTHER path — the data question belonged to a
+          # different run, so this one told the uninstall to keep the data, and
+          # the CLI left an EMPTY directory behind anyway. Keeping nothing is not
+          # what "keep my data" asked for; it is just litter with bionic's name
+          # on it. So a directory that holds nothing goes either way, and a
+          # directory that holds something is removed only where the user said
+          # so. Nothing here re-asks, because neither branch takes anything the
+          # user has.
+          #
+          # AND THE CLAIM HAS TO BE TRUE. "The uninstall left this behind" is only
+          # sayable about a directory the uninstall actually left, so a directory
+          # that was already there when this run began is not taken on that
+          # ground — which is also what keeps this from removing something the
+          # user declined by name a few lines earlier in the same report.
+          rm_data_recheck=""
+          for rm_data_dir in "$RM_DATA_ROOT"/bionic-*; do
+            [ -d "$rm_data_dir" ] || continue
+            if [ "$RM_DATA_DECLINED" = "1" ]; then
+              case $'\n'"${rm_data_before}" in
+                *$'\n'"${rm_data_dir}"$'\n'*) continue ;;
+              esac
+              _rm_dir_is_empty "$rm_data_dir" || continue
+            fi
+            rm_data_recheck="${rm_data_recheck}${rm_data_dir}"$'\n'
+          done
+          if [ -n "$rm_data_recheck" ]; then
+            rm_data_recheck_failed=0
+            while IFS= read -r rm_data_dir <&3; do
+              [ -n "$rm_data_dir" ] || continue
+              _rm_purge_dir "$rm_data_dir" || rm_data_recheck_failed=1
+            done 3<<< "$rm_data_recheck"
+            if [ "$rm_data_recheck_failed" = "0" ]; then
+              if [ "$RM_DATA_DECLINED" = "1" ]; then
+                _rm_removed "an empty plugin data directory the uninstall left under ${RM_DATA_ROOT} — it held nothing of yours"
               else
-                _rm_leftover "some plugin data under ${RM_DATA_ROOT} could not be removed after the uninstall recreated it"
+                _rm_removed "plugin data under ${RM_DATA_ROOT} — recreated by the uninstall, removed again"
               fi
+            else
+              _rm_leftover "some plugin data under ${RM_DATA_ROOT} could not be removed after the uninstall recreated it"
             fi
           fi
         else
@@ -955,6 +1005,21 @@ _rm_item_plugin() {
     fi
   fi
   echo ""
+  # ─── The follow-on rides with the item that creates it ──────────────────────
+  #
+  # A DEPENDENT CHANGE IS CONSENTED WHEN IT BECOMES REAL. Nothing is orphaned
+  # until this uninstall lands, so a run narrowed to one item meets the orphan
+  # question BEFORE its own precondition exists: asked first, the CLI's dry run
+  # answers with bionic still installed, names nothing, and prints no question —
+  # and nobody comes back once the uninstall has made it true. So the offer is
+  # made here, by the item that made the orphans, in the run that made them.
+  #
+  # Only in a narrowed run, and only after a real uninstall: a whole pass already
+  # reaches the roster's own entry a moment later, and an uninstall that never
+  # happened orphaned nothing.
+  if [ "$RM_ONLY" = "plugin" ] && [ "$rm_uninstall_ok" = "1" ]; then
+    _rm_offer_orphans
+  fi
 }
 
 # ─── Finisher: orphaned dependencies ─────────────────────────────────────────
@@ -966,6 +1031,15 @@ _rm_item_plugin() {
 
 _rm_item_orphans() {
   _rm_wants orphaned-dependencies || return 0
+  _rm_offer_orphans
+}
+
+# The offer itself, callable by whoever gets there first. `_rm_item_plugin` calls
+# it because the uninstall is what MAKES these dependencies orphans; the roster
+# entry above calls it because a person may come back for them alone.
+_rm_offer_orphans() {
+  [ "$RM_ORPHANS_OFFERED" = "1" ] && return 0
+  RM_ORPHANS_OFFERED=1
   echo "orphaned dependencies:"
   if ! _rm_have claude; then
     _rm_clean "orphaned dependencies (no claude CLI to ask)"

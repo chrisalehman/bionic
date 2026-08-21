@@ -288,6 +288,13 @@ case "$*" in
     mkdir -p "${DATA_DIR}/bionic-bionic"
     printf 'recreated by uninstall\n' > "${DATA_DIR}/bionic-bionic/state.json"
     ;;
+  "plugin uninstall bionic@bionic --yes --keep-data")
+    # THE SHAPE THE LIVE TEARDOWN ACTUALLY TOOK. The data question had been
+    # answered in an earlier, separate run, so this run told the CLI to keep
+    # what it found — and the CLI still left an EMPTY bionic-bionic directory
+    # behind. Empty, because --keep-data means it deleted nothing to recreate.
+    mkdir -p "${DATA_DIR}/bionic-bionic"
+    ;;
   "mcp get"*) exit 1 ;;
 esac
 exit 0
@@ -1780,6 +1787,144 @@ expect_eq "remove.sh takes no assume-yes argument of its own" "" \
   "$(/usr/bin/grep -nE '^[[:space:]]*--(yes|all)\)' "$REMOVE_SH" || true)"
 expect_eq "remove.sh reads no assume-yes environment knob" "" \
   "$(/usr/bin/grep -niE 'BIONIC_(ASSUME_YES|YES|NONINTERACTIVE)' "$REMOVE_SH" || true)"
+
+echo ""
+echo "=== Group 20: a narrowed uninstall carries its follow-ons (AC-4) ==="
+#
+# A DEPENDENT CHANGE IS CONSENTED WHEN IT BECOMES REAL. The orphaned dependencies
+# do not exist until the uninstall creates them. A reader working the roster one
+# name at a time therefore meets that item BEFORE its own precondition: asked
+# early, `claude plugin prune --dry-run` answers with bionic still installed, finds
+# nothing orphaned, and the question is never printed — so nobody comes back to it
+# once the uninstall has made it true. The offer rides with the item that creates
+# it: a run narrowed to the finisher asks about the orphans it just made, in that
+# same run. `orphaned-dependencies` keeps its own name on the roster for the
+# standalone case, and a whole pass still asks exactly once.
+
+# ---- narrowed to the finisher: uninstall, then the offer it created ----
+ARM="$(new_arm only-plugin-followon)"
+plant_claude_stub_data_recreated "$ARM"
+printf 'y\ny\n' > "$ARM/answers-yy"
+REMOVE_FLAGS="--only plugin"
+FOLLOW_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ARM/answers-yy")"
+REMOVE_FLAGS=""
+FOLLOW_CALLS="$(cat "$ARM/calls.log")"
+printf '%s\n' "$FOLLOW_OUT" > "$TMP/rm-followon.txt"
+
+expect_contains "--only plugin: the native uninstall is the item that ran" \
+  "plugin uninstall bionic@bionic --yes" "$FOLLOW_CALLS"
+# AN ANSWER NOBODY GAVE IS STILL A NO: narrowed to the finisher, the plugin-data
+# question was never asked, so the uninstall is told to keep what it finds. This
+# is the path the live teardown took — and on it the CLI still left an EMPTY
+# bionic-bionic directory behind, which is what the fixture reproduces.
+expect_contains "--only plugin: the data nobody was asked about is kept" \
+  "--keep-data" "$FOLLOW_CALLS"
+expect_true "--only plugin: the empty directory the uninstall left is gone at exit" \
+  bash -c '[ ! -d "$1" ]' _ "$ARM/home/.claude/plugins/data/bionic-bionic"
+expect_contains "--only plugin: …and the report says what was taken and why" \
+  "it held nothing of yours" "$FOLLOW_OUT"
+expect_contains "--only plugin: the orphans the uninstall just made are named" \
+  "the CLI reports these auto-installed dependencies are no longer needed" "$FOLLOW_OUT"
+expect_contains "--only plugin: …and the question about them is asked in that same run" \
+  "Run claude plugin prune to remove them?" "$FOLLOW_OUT"
+expect_contains "--only plugin: …and a yes actually prunes" \
+  "plugin prune --yes" "$FOLLOW_CALLS"
+RM_FOLLOW_Q="$(/usr/bin/grep -c '\[y/N\]' "$TMP/rm-followon.txt" | tr -d ' ')"
+expect_eq "--only plugin asks two questions — the item, and the follow-on it created" "2" \
+  "$RM_FOLLOW_Q"
+
+# ---- the follow-on is a question, not a consequence: a no is recorded as a no ----
+ARM="$(new_arm only-plugin-followon-declined)"
+plant_claude_stub_data_recreated "$ARM"
+printf 'y\nn\n' > "$ARM/answers-yn"
+REMOVE_FLAGS="--only plugin"
+FOLLOW_NO_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ARM/answers-yn")"
+REMOVE_FLAGS=""
+FOLLOW_NO_CALLS="$(cat "$ARM/calls.log")"
+
+expect_contains "--only plugin: a declined follow-on says what was left" \
+  "declined — orphaned dependencies left in place." "$FOLLOW_NO_OUT"
+expect_contains "--only plugin: …and hands back the route to say yes later" \
+  "--only orphaned-dependencies" "$FOLLOW_NO_OUT"
+expect_contains "--only plugin: …and the run's own summary counts it" \
+  "1 skipped by you" "$FOLLOW_NO_OUT"
+expect_not_contains "--only plugin: …and nothing was pruned" \
+  "plugin prune --yes" "$FOLLOW_NO_CALLS"
+
+# ---- the fixture really does recreate it, or the row above proves nothing ----
+#
+# Driven directly, with the exact argv the narrowed run sends, so the absence
+# assertion cannot pass on a stub that simply never created the directory.
+ARM="$(new_arm stub-recreates-under-keep-data)"
+plant_claude_stub_data_recreated "$ARM"
+env BIONIC_TEST_CALLS="$ARM/calls.log" \
+    BIONIC_PLUGIN_DATA_DIR="$ARM/home/.claude/plugins/data" \
+    "$ARM/bin/claude" plugin uninstall bionic@bionic --yes --keep-data >/dev/null 2>&1
+expect_true "the fixture leaves a data directory behind even under --keep-data" \
+  test -d "$ARM/home/.claude/plugins/data/bionic-bionic"
+expect_eq "…and leaves it empty, which is the shape the live teardown found" "" \
+  "$(ls -A "$ARM/home/.claude/plugins/data/bionic-bionic")"
+
+# ---- --keep-data still keeps DATA: a directory with something in it survives ----
+ARM="$(new_arm only-plugin-keeps-real-data)"
+plant_plugin_data "$ARM"
+plant_claude_stub_data_recreated "$ARM"
+printf 'y\ny\n' > "$ARM/answers-yy"
+REMOVE_FLAGS="--only plugin"
+KEEP_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ARM/answers-yy")"
+REMOVE_FLAGS=""
+expect_contains "--only plugin: the uninstall is told to keep the data" \
+  "--keep-data" "$(cat "$ARM/calls.log")"
+expect_true "--only plugin: a data directory holding something survives" \
+  test -f "$ARM/home/.claude/plugins/data/bionic-bionic/state.json"
+expect_not_contains "…and nothing claims an empty directory was taken" \
+  "it held nothing of yours" "$KEEP_OUT"
+expect_true "…and a look-alike that is not bionic's is untouched either" \
+  test -f "$ARM/home/.claude/plugins/data/superpowers-bionic/state.json"
+
+# ---- an empty directory that was ALREADY there is not "left by the uninstall" ----
+#
+# The sentence this run prints is a claim about what the uninstall did. A
+# directory that predates the call is not that, and taking it on that ground
+# would let a whole pass remove something it had just been told to leave.
+ARM="$(new_arm only-plugin-preexisting-empty)"
+mkdir -p "$ARM/home/.claude/plugins/data/bionic-bionic"
+plant_claude_stub_data_recreated "$ARM"
+printf 'y\ny\n' > "$ARM/answers-yy"
+REMOVE_FLAGS="--only plugin"
+PRE_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ARM/answers-yy")"
+REMOVE_FLAGS=""
+expect_true "--only plugin: an empty directory that predates the run survives" \
+  test -d "$ARM/home/.claude/plugins/data/bionic-bionic"
+expect_not_contains "…and no claim is made that the uninstall left it" \
+  "it held nothing of yours" "$PRE_OUT"
+
+# ---- the standalone door still opens under its own name ----
+ARM="$(new_arm only-orphans-standalone)"
+plant_claude_stub "$ARM" no yes
+REMOVE_FLAGS="--only orphaned-dependencies"
+ORPH_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+REMOVE_FLAGS=""
+expect_contains "--only orphaned-dependencies still asks its own question" \
+  "Run claude plugin prune to remove them?" "$ORPH_OUT"
+expect_contains "…and a yes still prunes" "plugin prune --yes" "$(cat "$ARM/calls.log")"
+expect_not_contains "…without reaching the finisher it was not narrowed to" \
+  "plugin uninstall" "$(cat "$ARM/calls.log")"
+expect_true "--list still names orphaned-dependencies as a name of its own" \
+  /usr/bin/grep -qxF 'orphaned-dependencies' "$TMP/rm-list.txt"
+
+# ---- a whole pass asks ONCE: the parent's offer and the roster's must not stack ----
+ARM="$(new_arm one-pass-single-offer)"
+plant_plugin_data "$ARM"
+plant_claude_stub_data_recreated "$ARM"
+ONEPASS_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+printf '%s\n' "$ONEPASS_OUT" > "$TMP/rm-onepass-offer.txt"
+expect_eq "a whole pass prints the orphaned-dependencies header exactly once" "1" \
+  "$(/usr/bin/grep -cF 'orphaned dependencies:' "$TMP/rm-onepass-offer.txt" | tr -d ' ')"
+expect_eq "a whole pass asks the prune question exactly once" "1" \
+  "$(/usr/bin/grep -cF 'Run claude plugin prune to remove them?' "$TMP/rm-onepass-offer.txt" | tr -d ' ')"
+expect_eq "a whole pass runs the prune exactly once" "1" \
+  "$(/usr/bin/grep -cF 'plugin prune --yes' "$ARM/calls.log" | tr -d ' ')"
 
 echo ""
 echo "=== Group 16: the suite is registered in tests/run.sh by name ==="
