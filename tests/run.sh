@@ -37,15 +37,19 @@
 # scheduling choice and nothing else.
 #
 # WHY IT IS SAFE TO RUN THEM AT ONCE. Not by assumption — by audit. Epic-17 W7 S8
-# read all 44 suites for fixture root, every write outside it and every read of
-# machine state another suite could mutate, and found no shared write, no shared
-# lock, no fixed port and no fixed /tmp name: every suite that touches disk does so
-# under its own `mktemp -d`, and the one place many of them read concurrently (this
-# checkout, via tests/lib/resolve-roots.sh) has no writer in the roster at all.
-# `.bionic/docs/record/epic-17-w7/s8-isolation-audit.md` is that audit, suite by
-# suite. A new suite that writes outside its own mktemp root breaks this premise,
-# which is the other reason the roster is hand-listed: adding a line is the moment
-# to check.
+# read every suite in this roster for fixture root, every write outside it and every
+# read of machine state another suite could mutate, and found no shared write, no
+# shared lock, no fixed port and no fixed /tmp name: every suite that touches disk
+# does so under its own `mktemp -d`, and the one place many of them read concurrently
+# (this checkout, via tests/lib/resolve-roots.sh) has no writer in the roster at all.
+# THE AUDIT IS TWO FILES, and a maintainer needs both: S8 read the 44 suites that
+# existed when it ran (`.bionic/docs/record/epic-17-w7/s8-isolation-audit.md`), and
+# S8b read the one the same wave added, env.test.sh, which appears nowhere in the
+# first file (`.bionic/docs/record/epic-17-w7/s8b-isolation-delta.md`). The roster
+# below is 45. A new suite that writes outside its own mktemp root breaks this
+# premise, which is the other reason the roster is hand-listed: adding a line is the
+# moment to check — and to extend the audit, since neither existing file can cover
+# a suite written after it.
 #
 # WHY FOUR AND NOT FORTY-FIVE. Measured, not guessed. When seven of these slices
 # each ran a full suite concurrently on one machine, free memory fell to ~188 MB

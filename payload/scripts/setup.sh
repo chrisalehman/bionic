@@ -536,16 +536,44 @@ _setup_cli_plugin() {  # <name>
 # not — step 4 writes to the same file, and a setup that can delete a user's
 # shell rc is a setup nobody should run.
 
+# THE MODE TRAVELS WITH THE CONTENT (critic F2). Both rc rewriters in this script
+# stage the new file beside the old one and `mv` it into place, and `mv` replaces
+# the inode: without this, a shell rc the user deliberately kept at 0600 comes
+# back at whatever the umask says, because setup answered one question about a
+# retired alias block. That is the same defect `_dep_settings_write_jq` guards for
+# settings.json (see lib/env.sh's header), and an rc is if anything the likelier
+# of the two to hold plaintext tokens — it is where people put `export …_API_KEY=`.
+#
+# TWO HARMS, NOT ONE, WHICH IS WHY THE ORDER MATTERS. Repairing the mode after the
+# rename fixes the published file and still leaves the staged copy — the whole rc,
+# secrets included, under a predictable name — at the umask's mode for the span
+# before it, and makes the widening PERMANENT if the process dies in that window.
+# So `umask 077` and the `chmod` both stay ABOVE the `mv`. An absent `stat`
+# degrades to "write, don't chmod" rather than to a refusal to write at all; the
+# guard is spelled `-z … ||` for the same reason deps.sh spells it that way — this
+# is one `&&` chain, and an `-n` spelling would break it on a machine with no
+# `stat` and silently skip the rename.
+_setup_file_mode() {  # <file> — the file's mode as chmod digits, empty if unknowable
+  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null
+}
+
 _setup_rc_strip_block() {  # <file> <start-marker> <end-marker>
-  local file="${1:-}" start="${2:-}" end="${3:-}" tmp
+  local file="${1:-}" start="${2:-}" end="${3:-}" tmp mode
   [ -f "$file" ] || return 0
   grep -qF "$start" "$file" 2>/dev/null || return 0
   tmp="${file}.bionic.tmp"
-  awk -v start="$start" -v end="$end" '
-    $0 == start { skip=1; next }
-    $0 == end   { skip=0; next }
-    !skip { print }
-  ' "$file" > "$tmp" && mv "$tmp" "$file"
+  mode="$(_setup_file_mode "$file")"
+  if (umask 077; awk -v start="$start" -v end="$end" '
+        $0 == start { skip=1; next }
+        $0 == end   { skip=0; next }
+        !skip { print }
+      ' "$file" > "$tmp") \
+     && { [ -z "$mode" ] || chmod "$mode" "$tmp"; } \
+     && mv "$tmp" "$file"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
 }
 
 # ─── Step 1 — the native plugin install (tier 2 ⊃ tier 1) ────────────────────
@@ -972,7 +1000,7 @@ setup_legacy_alias() {
   _setup_wants legacy-alias || return 0
   say ""
   say "6. Legacy shell alias"
-  local rc line present tmp
+  local rc line present tmp _setup_rc_mode
   rc="$(_detect_shell_rc)"
   line="$(detect_zshrc_legacy_block)"; present="${line#*present=}"
 
@@ -1004,7 +1032,11 @@ setup_legacy_alias() {
       return 0
     fi
     tmp="${rc}.bionic.tmp"
-    if grep -vE "$SETUP_ALIAS_PATTERN" "$rc" > "$tmp" && mv "$tmp" "$rc"; then
+    # Same discipline as _setup_rc_strip_block above, and for the same file.
+    _setup_rc_mode="$(_setup_file_mode "$rc")"
+    if (umask 077; grep -vE "$SETUP_ALIAS_PATTERN" "$rc" > "$tmp") \
+       && { [ -z "$_setup_rc_mode" ] || chmod "$_setup_rc_mode" "$tmp"; } \
+       && mv "$tmp" "$rc"; then
       say "   removed (legacy unmarked alias)."
     else
       rm -f "$tmp"
