@@ -2017,8 +2017,17 @@ expect_eq "remove.sh composes the route sentence in one place" "1" \
 # ANCHORED, because `--yes)` also closes the uninstall argv array below: the
 # question is whether this script has an ARGUMENT arm called --yes, not whether
 # the four characters appear anywhere in it.
+#
+# `--all` USED TO BE ON THIS LIST AND IS NOT ANY MORE (W7, AC-8). It was there
+# while every shape anyone proposed for it was "answer the questions for me",
+# which is the thing this arm exists to keep out. What shipped instead is not
+# that: `--all` PRINTS the whole plan and asks one question over it, so the run
+# still turns on an explicit `y` read from this script's own input, and an item
+# added to the roster later still reaches the user's eyes before it reaches
+# their machine. Group 21 is the wall on that shape — one question, a plan that
+# matches the questions a per-item pass would ask, and nothing done on a no.
 expect_eq "remove.sh takes no assume-yes argument of its own" "" \
-  "$(/usr/bin/grep -nE '^[[:space:]]*--(yes|all)\)' "$REMOVE_SH" || true)"
+  "$(/usr/bin/grep -nE '^[[:space:]]*--yes\)' "$REMOVE_SH" || true)"
 expect_eq "remove.sh reads no assume-yes environment knob" "" \
   "$(/usr/bin/grep -niE 'BIONIC_(ASSUME_YES|YES|NONINTERACTIVE)' "$REMOVE_SH" || true)"
 
@@ -2159,6 +2168,207 @@ expect_eq "a whole pass asks the prune question exactly once" "1" \
   "$(/usr/bin/grep -cF 'Run claude plugin prune to remove them?' "$TMP/rm-onepass-offer.txt" | tr -d ' ')"
 expect_eq "a whole pass runs the prune exactly once" "1" \
   "$(/usr/bin/grep -cF 'plugin prune --yes' "$ARM/calls.log" | tr -d ' ')"
+
+echo ""
+echo "=== Group 21: one answer over a printed plan — --all (AC-8) ==="
+#
+# THE UNIT OF CONSENT IS A PLAN, NOT A FLAG THAT ANSWERS. Answering one question
+# at a time is the right default and a bad experience for the person who has
+# already decided to remove everything: nine questions is nine chances to lose
+# the thread, and the shape people reach for instead — an assume-yes flag — is
+# the hole in "consent per event, never silent, never unattended", because a
+# name added to the roster later would then run on a machine whose owner never
+# saw it.
+#
+# So the whole run is made into ONE event. `--all` prints every item it would
+# ask about, one line each naming what that item changes, and asks a single
+# question over that printed plan. Nothing runs that was not on the page the
+# user said yes to, and an item added next year appears there before it appears
+# on anybody's machine.
+#
+# WHAT IS NOT ON THE PLAN. A follow-on — an item whose precondition another item
+# CREATES — cannot be named honestly before its parent runs: nothing is orphaned
+# until the uninstall lands, and the CLI's dry run says so. Those still get asked
+# inside the run, in place, which is the rule D-B ratified for the class.
+
+# The full machine: every item this roster can be asked about has something to do.
+plant_everything() {  # <arm>
+  local arm="$1"
+  plant_never_list "$arm"
+  plant_zshrc_marked "$arm"
+  plant_todo_export "$arm"
+  plant_legacy_channel_hooks "$arm"
+  jq '.env = {"OTHER":"x","CLAUDE_CODE_ENABLE_TODO_TOOLS":"1","BASH_MAX_TIMEOUT_MS":"1800000"}' \
+    "$arm/home/.claude/settings.json" > "$arm/env.tmp" \
+    && mv "$arm/env.tmp" "$arm/home/.claude/settings.json"
+  plant_profile_block "$arm"
+  plant_default_mode "$arm" auto
+  plant_legacy_skill_copy "$arm"
+  plant_plugin_data "$arm"
+  plant_claude_stub_data_recreated "$arm"
+}
+
+ONE_YES="$TMP/answers-one-yes"; printf 'y\n' > "$ONE_YES"
+ONE_NO="$TMP/answers-one-no";   printf 'n\n' > "$ONE_NO"
+
+# ---- the plan is printed, one question is asked, and a yes runs everything ----
+ARM="$(new_arm all-everything)"
+plant_everything "$ARM"
+REMOVE_FLAGS="--all"
+ALL_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_YES")"
+REMOVE_FLAGS=""
+printf '%s\n' "$ALL_OUT" > "$TMP/rm-all-yes.txt"
+ALL_CALLS="$(cat "$ARM/calls.log")"
+
+expect_contains "--all: the run states what it would do before it asks anything" \
+  "bionic would:" "$ALL_OUT"
+expect_contains "--all: the plan names the plugin and the command that takes it" \
+  "• remove the plugin bionic@bionic (claude plugin uninstall)" "$ALL_OUT"
+expect_contains "--all: …the environment settings" \
+  "• delete bionic's environment settings from" "$ALL_OUT"
+expect_contains "--all: …the retired shell alias block" \
+  "• remove the retired shell alias block from" "$ALL_OUT"
+expect_contains "--all: …the retired hook entries" \
+  "• remove the retired hook entries from" "$ALL_OUT"
+expect_contains "--all: …the pre-plugin skill copy" \
+  "• remove the pre-plugin skill copy at" "$ALL_OUT"
+expect_contains "--all: …the permission marker block" \
+  "• remove bionic's permission marker block from" "$ALL_OUT"
+expect_contains "--all: …the default permission mode" \
+  "• reset Claude Code's default permission mode" "$ALL_OUT"
+expect_contains "--all: …and the plugin data" \
+  "• delete bionic's plugin data under" "$ALL_OUT"
+
+expect_eq "--all asks exactly one question for the whole run" "1" \
+  "$(/usr/bin/grep -c '\[y/N\]' "$TMP/rm-all-yes.txt" | tr -d ' ')"
+expect_contains "--all: and the one question is asked over the printed plan" \
+  "Do all of the above? [y/N]" "$ALL_OUT"
+
+expect_contains "--all: a yes still prints each item's own result line" \
+  "✓ plugin bionic@bionic" "$ALL_OUT"
+expect_contains "--all: …and the usual end summary" "removed ·" "$ALL_OUT"
+expect_contains "--all: the native uninstall ran" \
+  "plugin uninstall bionic@bionic --yes" "$ALL_CALLS"
+expect_not_contains "--all: the alias block is gone from the rc" \
+  "bionic:start" "$(cat "$ARM/home/.zshrc")"
+expect_eq "--all: bionic's environment names are gone from settings.json" "" \
+  "$(jq -r '.env.CLAUDE_CODE_ENABLE_TODO_TOOLS // ""' "$ARM/home/.claude/settings.json")"
+expect_true "--all: the pre-plugin skill copy is gone" \
+  bash -c '[ ! -e "$1" ]' _ "$ARM/home/.claude/skills/canonical-sdlc"
+expect_true "--all: the never-list still survives an --all run" \
+  test -f "$ARM/home/.bionic/memory/note.md"
+
+# THE FOLLOW-ON RUNS INLINE, unnamed on the plan because it was not yet true.
+expect_not_contains "--all: the plan does not name a follow-on nothing has created yet" \
+  "• remove the dependencies nothing needs" "$ALL_OUT"
+expect_contains "--all: …and it is still reached in the same run" \
+  "orphaned dependencies:" "$ALL_OUT"
+expect_contains "--all: …and the one answer covers it, so the prune runs" \
+  "plugin prune --yes" "$ALL_CALLS"
+
+# ---- a no runs nothing and says so ----
+ARM="$(new_arm all-declined)"
+plant_everything "$ARM"
+FP_ALL_BEFORE="$(fingerprint "$ARM/home")"
+REMOVE_FLAGS="--all"
+NO_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_NO")"; NO_RC=$?
+REMOVE_FLAGS=""
+expect_eq "--all declined: exits 0 — declining is not an error" "0" "$NO_RC"
+expect_contains "--all declined: says so in one line" "nothing changed." "$NO_OUT"
+expect_eq "--all declined: the entire fixture HOME is byte-identical" \
+  "$FP_ALL_BEFORE" "$(fingerprint "$ARM/home")"
+expect_eq "--all declined: no mutating call was ever made" "" \
+  "$(/usr/bin/grep -E 'plugin uninstall|plugin prune --yes' "$ARM/calls.log" || true)"
+
+# An unanswered first pass is a no as well — the same rule every other question
+# here holds to, and the one that keeps `--all` from being an assume-yes flag
+# wearing a plan.
+ARM="$(new_arm all-eof)"
+plant_everything "$ARM"
+FP_EOF_BEFORE="$(fingerprint "$ARM/home")"
+: > "$TMP/answers-none"
+REMOVE_FLAGS="--all"
+EOF_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$TMP/answers-none")"
+REMOVE_FLAGS=""
+expect_eq "--all with nobody there to ask: the fixture HOME is byte-identical" \
+  "$FP_EOF_BEFORE" "$(fingerprint "$ARM/home")"
+expect_contains "--all with nobody there to ask: says nothing changed" \
+  "nothing changed." "$EOF_OUT"
+
+# ---- the plan is the roster minus what is already done ----
+ARM="$(new_arm all-mostly-clean)"
+printf 'export EDITOR=vim\n' > "$ARM/home/.zshrc"
+plant_claude_stub "$ARM" yes no
+REMOVE_FLAGS="--all"
+CLEAN_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_NO")"
+REMOVE_FLAGS=""
+expect_contains "--all: an item with something to do is on the plan" \
+  "• remove the plugin bionic@bionic" "$CLEAN_OUT"
+expect_not_contains "--all: an item with nothing to do is not on the plan" \
+  "• remove the retired shell alias block" "$CLEAN_OUT"
+expect_not_contains "--all: …nor is one whose settings file holds nothing of bionic's" \
+  "• remove bionic's permission marker block" "$CLEAN_OUT"
+expect_not_contains "--all: …nor the plugin data that is not there" \
+  "• delete bionic's plugin data" "$CLEAN_OUT"
+
+# A machine with nothing left says so rather than asking about an empty plan.
+ARM="$(new_arm all-nothing)"
+printf 'export EDITOR=vim\n' > "$ARM/home/.zshrc"
+plant_claude_stub "$ARM" no no
+REMOVE_FLAGS="--all"
+EMPTY_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_YES")"
+REMOVE_FLAGS=""
+expect_not_contains "--all on a clean machine asks nothing" "[y/N]" "$EMPTY_OUT"
+expect_contains "--all on a clean machine says the machine is already clean" \
+  "already clean" "$EMPTY_OUT"
+
+# ---- THE PLAN AND THE QUESTIONS ARE ONE ROSTER, READ TWICE ----
+#
+# The defect this walls off is drift: a plan built from its own idea of what is
+# pending would come to disagree with the run it is a plan FOR, and the user
+# would consent to one list and get another. The count is the check — one plan
+# line per question a whole per-item pass would ask, with the orphan follow-on
+# taken out because it is asked in place and never on the page.
+ARM="$(new_arm all-agreement-plan)"
+plant_everything "$ARM"
+REMOVE_FLAGS="--all"
+AGREE_PLAN="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_NO")"
+REMOVE_FLAGS=""
+printf '%s\n' "$AGREE_PLAN" > "$TMP/rm-agree-plan.txt"
+
+ARM="$(new_arm all-agreement-pass)"
+plant_everything "$ARM"
+AGREE_PASS="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
+printf '%s\n' "$AGREE_PASS" > "$TMP/rm-agree-pass.txt"
+
+AGREE_PLAN_LINES="$(/usr/bin/grep -c '^  • ' "$TMP/rm-agree-plan.txt" | tr -d ' ')"
+AGREE_QUESTIONS="$(/usr/bin/grep -c '\[y/N\]' "$TMP/rm-agree-pass.txt" | tr -d ' ')"
+expect_true "agreement arm is not vacuous: the whole pass really did ask something" \
+  bash -c '[ "$1" -gt 1 ]' _ "$AGREE_QUESTIONS"
+expect_eq "the plan names exactly the items a per-item pass asks about (the follow-on aside)" \
+  "$AGREE_PLAN_LINES" "$((AGREE_QUESTIONS - 1))"
+
+# ---- --all and --only are two different narrowings and cannot be combined ----
+ARM="$(new_arm all-and-only)"
+plant_zshrc_marked "$ARM"
+plant_claude_stub "$ARM" yes no
+REMOVE_FLAGS="--all --only plugin"
+COMBO_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"; COMBO_RC=$?
+REMOVE_FLAGS=""
+expect_eq "--all with --only exits 2" "2" "$COMBO_RC"
+expect_contains "…and says why, in words" \
+  "--all and --only cannot be combined" "$COMBO_OUT"
+expect_not_contains "…and asks nothing before refusing" "[y/N]" "$COMBO_OUT"
+expect_true "…and removes nothing" \
+  /usr/bin/grep -qF 'bionic:start' "$ARM/home/.zshrc"
+expect_eq "…and invokes nothing" "" "$(cat "$ARM/calls.log")"
+
+# ---- --list is unchanged by the new flag ----
+REMOVE_FLAGS="--list"
+ALL_LIST_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+REMOVE_FLAGS=""
+expect_contains "--list still prints the roster --all reads" "plugin" "$ALL_LIST_OUT"
+expect_not_contains "--list prints names, never plan lines" "•" "$ALL_LIST_OUT"
 
 echo ""
 echo "=== Group 16: the suite is registered in tests/run.sh by name ==="

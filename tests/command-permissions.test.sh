@@ -375,6 +375,37 @@ for c in setup remove; do
     "$prefix" "$prod_seg"
 done
 
+
+# ---------------------------------------------------------------------------
+# Section 7 — the --all invocation is covered by the file's own rule (AC-9)
+# ---------------------------------------------------------------------------
+#
+# A flag does not change which rule a permission check reads — the prefix does —
+# but a command file that spelled the `--all` line any other way (an absolute
+# path, a quoted invocation) would prompt where every other route does not, and
+# the failure would land on the one run the user asked to be uninterrupted.
+
+echo ""
+echo "=== Section 7: the --all route runs under the same rule as every other ==="
+
+for c in setup remove; do
+  f="${COMMANDS_DIR}/${c}.md"
+  [ -f "$f" ] || continue
+  prefix="$(allowed_tools_rule_prefix "$f")"
+  if [ -z "$prefix" ]; then
+    no "${c}.md: rule prefix extractable (Section 7 arms need it)"
+    continue
+  fi
+  all_count=0
+  while IFS= read -r line; do
+    case "$line" in *" --all"*) ;; *) continue ;; esac
+    all_count=$((all_count + 1))
+    expect_prefix "${c}.md: the --all invocation is covered by the file's own rule" \
+      "$prefix" "$line"
+  done < <(fenced_bash_invocation_lines "$f")
+  expect_gt0 "${c}.md: the one-answer route is present at all" "$all_count"
+done
+
 # ---------------------------------------------------------------------------
 # Results
 # ---------------------------------------------------------------------------
