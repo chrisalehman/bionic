@@ -576,8 +576,9 @@ setup_duplicates() {
     fi
     say "   bionic would run: ${fix}"
     say "   Saying no lets them coexist: nothing changes, and bionic asks again next run."
-    if ! consent "   Consolidate — remove the copy bionic did not install?"; then
-      say "   left as they are."
+    consent "   Consolidate — remove the copy bionic did not install?"; _setup_consent_rc=$?
+    if [ "$_setup_consent_rc" -ne 0 ]; then
+      _setup_say_declined "$_setup_consent_rc" "left as they are."
       action "settle the duplicate copies of ${bare}: ${fix} — $(_setup_answer_yes "duplicate:${bare}")"
       continue
     fi
@@ -991,9 +992,10 @@ _setup_profile_block() {
     say "   bionic ships a permission profile for its own scripts and hooks, rendered for ${root}."
   fi
   say "   It goes into ${settings} inside a marker block; nothing outside that block is read or changed."
-  if ! consent "   Apply the permission profile to ${settings}?"; then
+  consent "   Apply the permission profile to ${settings}?"; _setup_consent_rc=$?
+  if [ "$_setup_consent_rc" -ne 0 ]; then
     rm -f "$rendered"
-    say "   declined — ${settings} is unchanged."
+    _setup_say_declined "$_setup_consent_rc" "${settings} is unchanged."
     action "apply the permission profile — $(_setup_answer_yes permission-profile)"
     return 0
   fi
