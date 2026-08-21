@@ -771,6 +771,19 @@ detect_registry_sha_lag() {  # [<repo-dir>] -> one line, always exit 0
   return 0
 }
 
+# ONE OWNER FOR THE RE-CONVERGE COMMAND (epic-17 W7 S2, AC-3). `claude plugin install
+# <id>` is the CLI's FIRST-time verb — on an id already registered it reports "already
+# installed" and does not refresh anything. On a directory-source install (a local
+# checkout registered as a marketplace feed, which is what a dogfood install is) the
+# registry can lag this tree between a merge and the next re-converge; that lag is a
+# NOMINAL state, not a defect, and the command that clears it is `update`, not
+# `install`. Every site that tells a user how to re-converge an already-installed
+# bionic reads this one function; a second copy of the literal is the defect this
+# function exists to prevent. Sites that report bionic NOT INSTALLED at all keep
+# `install` — that is the correct first-time verb for them and stays a separate,
+# uncoupled literal (setup.sh, remove.sh, detect_plugin_root_refuse below).
+detect_reconverge_hint() { printf 'claude plugin update bionic@bionic\n'; }
+
 # ─── Bounded execution ───────────────────────────────────────────────────────
 #
 # THE THINGS BIONIC RUNS THAT IT DOES NOT CONTROL. Almost every fact in this file
