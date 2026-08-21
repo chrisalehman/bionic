@@ -520,6 +520,11 @@ expect_match "an extra npm row installs through install_dep's own argv" '*npm in
 expect_match "an extra mcp row registers through install_dep's own argv" '*mcp add context7*' "$CALLTEXT"
 expect_no_match "native-kind rows never reach install_dep (the harness owns them)" \
   '*brew install superpowers*' "$CALLTEXT"
+# A glob on "*installed.*" would also match "ripgrep is not installed." two
+# lines up — the success line has to be checked as its own line (setup.sh sets
+# BIONIC_DEP_INDENT to three spaces, so that is what install_dep prints here).
+expect_true "a consented tool install confirms with a standalone 'installed.' line (AC-11 — O-1)" \
+  bash -c 'printf "%s\n" "$1" | /usr/bin/grep -qx "   installed."' _ "$OUT"
 # The list must be read on its own descriptor. A `while read ... done < <(list)`
 # loop hands the BODY the same stdin, so the consent prompt inside it eats the
 # next dependency NAME as the answer — declining every item and silently
@@ -1529,8 +1534,11 @@ printf '%s\n' "$DECLINE_OUT" > "$TMP/only-decline.txt"
 QCOUNT="$(/usr/bin/grep -c '\[y/N\]' "$TMP/only-decline.txt" | tr -d ' ')"
 expect_eq "--only asks exactly one question" "1" "$QCOUNT"
 expect_match "…the one it was told to ask" '*Add the export to*' "$DECLINE_OUT"
-expect_match "…a run with nothing to answer with still declines" '*declined*' "$DECLINE_OUT"
-expect_eq "…and the rc file is untouched by the decline" "$(printf 'export PATH="$HOME/bin:$PATH"\n')" \
+# EOF on the very first prompt is "not asked", not a recorded decline (AC-12):
+# nobody was there to answer, so the transcript must not say they said no.
+expect_match "…a run with nothing to answer with says 'not asked'" '*not asked —*' "$DECLINE_OUT"
+expect_no_match "…and never says 'declined' when nobody was asked" '*declined*' "$DECLINE_OUT"
+expect_eq "…and the rc file is untouched either way" "$(printf 'export PATH="$HOME/bin:$PATH"\n')" \
   "$(cat "$FIX/rc")"
 
 # ---- the declined action line carries the route, with the item's own name ----
@@ -1542,6 +1550,60 @@ expect_match "…and the invocation that delivers one answer to it" \
 # backslash-n that a glob pattern cannot state without escaping itself twice.
 expect_true "…with the answer itself supplied on the input" \
   /usr/bin/grep -qF "printf 'y\\n' |" "$TMP/only-decline.txt"
+
+# ---- AC-12 at the other named consent gates in this script ----
+#
+# shell-env above is the proof of the mechanism; this checks it actually
+# reached the rest of this script's own `consent()` call sites — a dependency
+# repair, both legacy items, and the default-mode question — each isolated with
+# `--only` so a truly-EOF first pass answers exactly one of them.
+
+new_fixture eof-dependency-enable
+plant_cli_plugin "bionic@bionic" true
+plant_cli_plugin "superpowers@bionic" false
+plant_installed "superpowers@bionic" "6.3.0"
+SETUP_FLAGS="--only dependency:superpowers"
+EOF_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_match "dependency-enable, EOF: not asked, not declined" \
+  '*not asked — superpowers stays disabled*' "$EOF_OUT"
+expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
+
+new_fixture eof-legacy-alias
+plant_cli_plugin "bionic@bionic" true
+printf 'export PATH="$HOME/bin:$PATH"\n\n%s\n%s\n%s\n' "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
+SETUP_FLAGS="--only legacy-alias"
+EOF_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_match "legacy-alias, EOF: not asked, not declined" '*not asked — the block stays*' "$EOF_OUT"
+expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
+
+new_fixture eof-legacy-hooks
+plant_cli_plugin "bionic@bionic" true
+plant_legacy_channel_settings
+SETUP_FLAGS="--only legacy-hooks"
+EOF_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_match "legacy-hooks, EOF: not asked, not declined" '*not asked — *is unchanged*' "$EOF_OUT"
+expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
+
+new_fixture eof-legacy-skill-copy
+plant_cli_plugin "bionic@bionic" true
+plant_legacy_skill_copy
+SETUP_FLAGS="--only legacy-skill-copy"
+EOF_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_match "legacy-skill-copy, EOF: not asked, not declined" '*not asked — *is unchanged*' "$EOF_OUT"
+expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
+
+new_fixture eof-permission-mode
+plant_cli_plugin "bionic@bionic" true
+SETUP_FLAGS="--only permission-mode"
+EOF_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_match "permission-mode, EOF: not asked, not declined" \
+  '*not asked — the default permission mode is unchanged*' "$EOF_OUT"
+expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
 
 # A whole declined pass carries the same route for every item it asked about, so
 # a user reading the summary can act on any line in it.

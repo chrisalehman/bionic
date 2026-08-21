@@ -208,16 +208,22 @@ RM_LEFTOVERS=""
 
 _rm_removed() { RM_REMOVED=$((RM_REMOVED + 1)); echo "  ✓ ${1}"; }
 _rm_clean()   { RM_CLEAN=$((RM_CLEAN + 1));     echo "  ✓ ${1} — already clean"; }
-_rm_skipped() {  # <name> <what was left>
-  local route
-  route="$(_rm_answer_yes "$1")"
+# <rc> is the caller's `$?` from the `_rm_consent` call it just lost — captured
+# at the call site, before any other command can overwrite it (AC-12). 1 is an
+# explicit no; 2 is EOF, nobody there to ask. Both are skipped in the same way
+# and land in the same Skipped list; only the leading word differs, so a reader
+# can tell a recorded decline from a first pass nobody answered.
+_rm_skipped() {  # <rc> <name> <what was left>
+  local rc="$1" name="$2" what="$3" route verb
+  route="$(_rm_answer_yes "$name")"
   RM_SKIPPED=$((RM_SKIPPED + 1))
   if [ -n "$route" ]; then
-    RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ ${2} — ${route}"$'\n'
+    RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ ${what} — ${route}"$'\n'
   else
-    RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ ${2}"$'\n'
+    RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ ${what}"$'\n'
   fi
-  echo "  declined — ${2} left in place."
+  if [ "$rc" = "2" ]; then verb="not asked"; else verb="declined"; fi
+  echo "  ${verb} — ${what} left in place."
   [ -n "$route" ] && echo "  ${route}"
   return 0
 }
@@ -228,10 +234,10 @@ _rm_leftover() { RM_LEFTOVERS="${RM_LEFTOVERS}    ✗ ${1}"$'\n'; echo "  ⚠ ${
 # Identical in shape to deps.sh's `_dep_consent`, and identical in rule: nothing
 # but an explicit yes counts, and EOF (a non-interactive stdin) counts as no.
 
-_rm_consent() {  # <prompt>
+_rm_consent() {  # <prompt> -> 0 yes, 1 an explicit no, 2 EOF (nobody there to ask)
   local prompt="$1" answer=""
   printf '  %s [y/N] ' "$prompt"
-  IFS= read -r answer || { echo ""; return 1; }
+  IFS= read -r answer || { echo ""; return 2; }
   echo ""
   case "$answer" in y|Y|yes|YES|Yes) return 0 ;; *) return 1 ;; esac
 }
@@ -474,7 +480,7 @@ _rm_item_legacy_alias() {
           _rm_leftover "could not rewrite ${RC_FILE} — the alias block is still there"
         fi
       else
-        _rm_skipped legacy-alias "legacy alias block in ${RC_FILE}"
+        _rm_skipped "$?" legacy-alias "legacy alias block in ${RC_FILE}"
       fi
       ;;
     legacy)
@@ -486,7 +492,7 @@ _rm_item_legacy_alias() {
           _rm_leftover "could not rewrite ${RC_FILE} — the legacy alias line is still there"
         fi
       else
-        _rm_skipped legacy-alias "legacy alias line in ${RC_FILE}"
+        _rm_skipped "$?" legacy-alias "legacy alias line in ${RC_FILE}"
       fi
       ;;
   esac
@@ -510,7 +516,7 @@ _rm_item_shell_env() {
         _rm_leftover "could not rewrite ${RC_FILE} — the export is still there"
       fi
     else
-      _rm_skipped shell-env "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
+      _rm_skipped "$?" shell-env "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
     fi
   else
     _rm_clean "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
@@ -583,7 +589,7 @@ _rm_item_legacy_hooks() {
         _rm_leftover "${RM_SETTINGS} is not valid JSON — refusing to write; the legacy-channel entries are still there"
       fi
     else
-      _rm_skipped legacy-hooks "legacy-channel managed-hook entries in ${RM_SETTINGS}"
+      _rm_skipped "$?" legacy-hooks "legacy-channel managed-hook entries in ${RM_SETTINGS}"
     fi
   fi
   echo ""
@@ -628,7 +634,7 @@ _rm_item_legacy_skill_copy() {
         _rm_leftover "could not remove ${RM_LEGACY_SKILL_DIR} — the legacy skill copy is still there"
       fi
     else
-      _rm_skipped legacy-skill-copy "legacy installed skill copy at ${RM_LEGACY_SKILL_DIR}"
+      _rm_skipped "$?" legacy-skill-copy "legacy installed skill copy at ${RM_LEGACY_SKILL_DIR}"
     fi
   else
     _rm_clean "legacy installed skill copy"
@@ -690,7 +696,7 @@ _rm_item_permission_profile() {
         fi
       fi
     else
-      _rm_skipped permission-profile "permission marker block in ${RM_SETTINGS}"
+      _rm_skipped "$?" permission-profile "permission marker block in ${RM_SETTINGS}"
     fi
   else
     _rm_clean "permission marker block in ${RM_SETTINGS}"
@@ -735,7 +741,7 @@ _rm_item_permission_mode() {
         _rm_leftover "${RM_SETTINGS} is not valid JSON — refusing to write; the default permission mode is unchanged"
       fi
     else
-      _rm_skipped permission-mode "default permission mode in ${RM_SETTINGS}"
+      _rm_skipped "$?" permission-mode "default permission mode in ${RM_SETTINGS}"
     fi
   else
     _rm_clean "default permission mode in ${RM_SETTINGS}"
@@ -865,8 +871,13 @@ _rm_item_plugin_data() {
         _rm_leftover "some plugin data under ${RM_DATA_ROOT} could not be removed"
       fi
     else
+      # $? has to be captured BEFORE the assignment below — an assignment's own
+      # exit status is 0 on success, which would silently turn every EOF into a
+      # false "declined" here (the one call site where something runs ahead of
+      # _rm_skipped).
+      rm_data_consent_rc=$?
       RM_DATA_DECLINED=1
-      _rm_skipped plugin-data "plugin data under ${RM_DATA_ROOT}"
+      _rm_skipped "$rm_data_consent_rc" plugin-data "plugin data under ${RM_DATA_ROOT}"
     fi
   fi
   echo ""
@@ -950,7 +961,7 @@ _rm_item_plugin() {
           _rm_leftover "claude plugin uninstall ${rm_plugin_id} failed — the plugin is still registered"
         fi
       else
-        _rm_skipped plugin "plugin ${rm_plugin_id}"
+        _rm_skipped "$?" plugin "plugin ${rm_plugin_id}"
       fi
     fi
   fi
@@ -982,7 +993,7 @@ _rm_item_orphans() {
             _rm_leftover "claude plugin prune failed — the orphaned dependencies are still installed"
           fi
         else
-          _rm_skipped orphaned-dependencies "orphaned dependencies"
+          _rm_skipped "$?" orphaned-dependencies "orphaned dependencies"
         fi
         ;;
       *)
