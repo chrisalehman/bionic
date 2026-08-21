@@ -291,9 +291,18 @@ if [ -f "$SETUP_MD" ]; then
   expect_match "setup.md invokes the script via the literal \${CLAUDE_PLUGIN_ROOT}" \
     '*${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh*' "$SETUP_MD_TEXT"
   expect_match "setup.md carries a frontmatter description" '*description:*' "$SETUP_MD_TEXT"
-  # The wrapper adds no logic: the only shell it names is the one invocation.
-  wrapper_cmds="$(grep -cE '^[[:space:]]*(bash|sh|claude|jq|npm|brew) ' "$SETUP_MD" 2>/dev/null | tr -d ' ')"
-  expect_eq "setup.md is a wrapper — exactly one command line, no second mechanism" "1" "$wrapper_cmds"
+  # THE WRAPPER ADDS NO LOGIC, and that is a claim about MECHANISMS, not about
+  # line counts. The page names two invocations now — the per-item run and the
+  # whole-plan run `--all` asks one question over (AC-8) — which is one script
+  # spelled twice. What must stay absent is a second mechanism: another program,
+  # or a bash line pointed at anything but this command's own script.
+  wrapper_cmds="$(grep -cE '^[[:space:]]*bash ' "$SETUP_MD" 2>/dev/null | tr -d ' ')"
+  expect_true "setup.md names at least one invocation of its own script" \
+    bash -c '[ "$1" -ge 1 ]' _ "$wrapper_cmds"
+  expect_eq "setup.md names no second mechanism" "" \
+    "$(grep -nE '^[[:space:]]*(sh|claude|jq|npm|brew) ' "$SETUP_MD" 2>/dev/null || true)"
+  expect_eq "setup.md is a wrapper — every command line it names is its own script" "" \
+    "$(grep -E '^[[:space:]]*bash ' "$SETUP_MD" 2>/dev/null | grep -vF '${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh' || true)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1747,14 +1756,207 @@ expect_eq "setup.sh composes the route sentence in one place" "1" \
 expect_eq "…and no other line in setup.sh spells the piped invocation" "1" \
   "$(/usr/bin/grep -c "printf 'y" "$SETUP_SH" | tr -d ' ')"
 
+# ---------------------------------------------------------------------------
+# Group 17 — one answer over a printed plan: --all (AC-8)
+# ---------------------------------------------------------------------------
+#
+# THE UNIT OF CONSENT IS A PLAN, NOT A FLAG THAT ANSWERS. Per-item consent is
+# the right default and a poor experience for the person who has already decided
+# to set the whole machine up: nine questions is nine chances to lose the
+# thread, and the shape people reach for instead — an assume-yes flag — is the
+# hole in "consent per event, never silent, never unattended", because a row
+# added to the roster later would run on a machine whose owner never saw it.
+#
+# So the whole run becomes ONE event. `--all` prints every item it would ask
+# about, one line each naming what that item changes, and asks a single question
+# over that printed page. Nothing runs that was not on it, and a new item shows
+# up there before it shows up on anybody's machine.
+
+echo ""
+echo "=== Group 17: one answer over a printed plan — --all (AC-8) ==="
+
+# ONE ANSWER, AND A SECOND LINE THE RUN MUST NEVER REACH FOR. A bare
+# `$(printf 'y\n')` loses its trailing newline to command substitution, and a
+# `read` on an unterminated line reports EOF — which this script treats as "not
+# asked", not as a yes. The second line keeps the first one terminated, and it
+# is a token no question here would accept: if a second question were ever
+# asked, it would be answered with it and declined, not silently consented to.
+ONE_YES="$(printf 'y\nunanswerable\n')"
+ONE_NO="$(printf 'n\nunanswerable\n')"
+
+# Every item on the roster with something to do: a disabled core dependency, no
+# environment settings, the retired alias block, legacy-channel hook entries, a
+# pre-plugin skill copy, no permission profile and no default mode.
+plant_everything_setup() {
+  plant_cli_plugin "bionic@bionic" true
+  plant_cli_plugin "superpowers@bionic" false
+  plant_cli_plugin "agent-skills@bionic" true
+  plant_installed "superpowers@bionic" "6.3.0"
+  plant_installed "agent-skills@bionic" "0.6.7"
+  plant_legacy_channel_settings
+  printf 'export PATH="$HOME/bin:$PATH"\n\n%s\n%s\n%s\n' "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
+  mkdir -p "$FIX/ch/skills/canonical-sdlc"
+  printf -- '---\nname: canonical-sdlc\n---\nbody\n' > "$FIX/ch/skills/canonical-sdlc/SKILL.md"
+}
+
+new_fixture all-everything
+plant_everything_setup
+SETUP_FLAGS="--all"
+ALL_OUT="$(run_setup "$ONE_YES")"
+SETUP_FLAGS=""
+printf '%s\n' "$ALL_OUT" > "$TMP/setup-all-yes.txt"
+
+expect_match "--all: the run states what it would do before it asks anything" \
+  '*bionic would:*' "$ALL_OUT"
+expect_match "--all: the plan names the dependency that is switched off" \
+  '*• enable the plugin superpowers*' "$ALL_OUT"
+expect_match "--all: …the environment settings" \
+  "*• write bionic's environment settings to*" "$ALL_OUT"
+expect_match "--all: …the retired shell alias block" \
+  '*• remove the retired shell alias block from*' "$ALL_OUT"
+expect_match "--all: …the retired hook entries" \
+  '*• remove the retired hook entries from*' "$ALL_OUT"
+expect_match "--all: …the pre-plugin skill copy" \
+  '*• remove the pre-plugin skill copy at*' "$ALL_OUT"
+expect_match "--all: …the permission profile" \
+  "*• apply bionic's permission profile to*" "$ALL_OUT"
+expect_match "--all: …and the default permission mode" \
+  "*• set Claude Code's default permission mode to auto*" "$ALL_OUT"
+
+expect_eq "--all asks exactly one question for the whole run" "1" \
+  "$(/usr/bin/grep -c '\[y/N\]' "$TMP/setup-all-yes.txt" | tr -d ' ')"
+expect_match "--all: and the one question is asked over the printed plan" \
+  '*Do all of the above? \[y/N\]*' "$ALL_OUT"
+
+expect_match "--all: a yes still prints each item's own result line" '*set.*' "$ALL_OUT"
+expect_match "--all: …and the usual end summary" '*Summary*' "$ALL_OUT"
+expect_eq "--all: the environment settings were written" "1800000" \
+  "$(jq -r '.env.BASH_MAX_TIMEOUT_MS // ""' "$FIX/ch/settings.json")"
+expect_eq "--all: the default permission mode was set" "auto" \
+  "$(jq -r '.permissions.defaultMode // ""' "$FIX/ch/settings.json")"
+expect_no_match "--all: the retired alias block is gone" "*${ALIAS_START}*" "$(cat "$FIX/rc")"
+expect_true "--all: the pre-plugin skill copy is gone" \
+  bash -c '[ ! -e "$1" ]' _ "$FIX/ch/skills/canonical-sdlc"
+expect_match "--all: the disabled dependency was enabled" \
+  '*plugin enable superpowers@bionic*' "$(cat "$CALLS")"
+expect_eq "--all: the legacy-channel hook entries are gone" "env:legacy-channel-hooks count=0" \
+  "$(lib_query "$LIB_DIR/detect.sh" detect_legacy_channel_hooks)"
+
+# ---- an absent plugin is on the plan too, in the words the install uses ----
+new_fixture all-plugin-absent
+SETUP_FLAGS="--all"
+ABSENT_OUT="$(run_setup "$ONE_NO")"
+SETUP_FLAGS=""
+expect_match "--all: an uninstalled plugin is named on the plan" \
+  '*• install the bionic plugin*' "$ABSENT_OUT"
+
+# ---- a no runs nothing and says so ----
+new_fixture all-declined
+plant_everything_setup
+FP_BEFORE="$(fingerprint "$FIX")"
+SETUP_FLAGS="--all"
+NO_OUT="$(run_setup "$ONE_NO")"
+SETUP_FLAGS=""
+expect_match "--all declined: says so in one line" '*nothing changed.*' "$NO_OUT"
+expect_eq "--all declined: the whole fixture tree is byte-identical" \
+  "$FP_BEFORE" "$(fingerprint "$FIX")"
+expect_eq "--all declined: not one mutating command ran" "" \
+  "$(grep -E 'plugin install|plugin enable|brew install|npm install|uv tool install|mcp add' "$CALLS" 2>/dev/null || true)"
+
+# An unanswered first pass is a no as well — the rule that keeps `--all` from
+# being an assume-yes flag wearing a plan.
+new_fixture all-eof
+plant_everything_setup
+FP_BEFORE="$(fingerprint "$FIX")"
+SETUP_FLAGS="--all"
+EOF_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_eq "--all with nobody there to ask: the fixture tree is byte-identical" \
+  "$FP_BEFORE" "$(fingerprint "$FIX")"
+expect_match "--all with nobody there to ask: says nothing changed" \
+  '*nothing changed.*' "$EOF_OUT"
+
+# ---- the plan is the roster minus what is already done ----
+new_fixture all-mostly-done
+plant_cli_plugin "bionic@bionic" true
+plant_cli_plugin "superpowers@bionic" true
+plant_cli_plugin "agent-skills@bionic" true
+plant_installed "superpowers@bionic" "6.3.0"
+plant_installed "agent-skills@bionic" "0.6.7"
+SETUP_FLAGS="--all"
+DONE_OUT="$(run_setup "$ONE_NO")"
+SETUP_FLAGS=""
+expect_no_match "--all: an already-installed plugin is not on the plan" \
+  '*• install the bionic plugin*' "$DONE_OUT"
+expect_no_match "--all: an enabled dependency is not on the plan" \
+  '*• enable the plugin superpowers*' "$DONE_OUT"
+expect_no_match "--all: an rc with no bionic block is not on the plan" \
+  '*• remove the retired shell alias block*' "$DONE_OUT"
+expect_no_match "--all: a settings file with no legacy entries is not on the plan" \
+  '*• remove the retired hook entries*' "$DONE_OUT"
+expect_match "--all: an item that IS outstanding still is" \
+  "*• write bionic's environment settings to*" "$DONE_OUT"
+
+# ---- THE PLAN AND THE QUESTIONS ARE ONE ROSTER, READ TWICE ----
+#
+# The defect this walls off is drift: a plan built from its own idea of what is
+# outstanding would come to disagree with the run it is a plan FOR, and the user
+# would consent to one list and get another. One plan line per question a whole
+# per-item pass asks is the check.
+new_fixture all-agreement-plan
+plant_everything_setup
+SETUP_FLAGS="--all"
+AGREE_PLAN="$(run_setup "$ONE_NO")"
+SETUP_FLAGS=""
+printf '%s\n' "$AGREE_PLAN" > "$TMP/setup-agree-plan.txt"
+
+new_fixture all-agreement-pass
+plant_everything_setup
+AGREE_PASS="$(run_setup "$NO")"
+printf '%s\n' "$AGREE_PASS" > "$TMP/setup-agree-pass.txt"
+
+AGREE_PLAN_LINES="$(/usr/bin/grep -c '^  • ' "$TMP/setup-agree-plan.txt" | tr -d ' ')"
+AGREE_QUESTIONS="$(/usr/bin/grep -c '\[y/N\]' "$TMP/setup-agree-pass.txt" | tr -d ' ')"
+expect_true "agreement arm is not vacuous: the per-item pass really did ask something" \
+  bash -c '[ "$1" -gt 1 ]' _ "$AGREE_QUESTIONS"
+expect_eq "the plan names exactly the items a per-item pass asks about" \
+  "$AGREE_PLAN_LINES" "$AGREE_QUESTIONS"
+
+# ---- --all and --only are two different narrowings and cannot be combined ----
+new_fixture all-and-only
+plant_everything_setup
+SETUP_FLAGS="--all --only environment"
+COMBO_OUT="$(run_setup "$YES")"; COMBO_RC=$?
+SETUP_FLAGS=""
+expect_eq "--all with --only exits 2" "2" "$COMBO_RC"
+expect_match "…and says why, in words" '*--all and --only cannot be combined*' "$COMBO_OUT"
+expect_no_match "…and asks nothing before refusing" '*\[y/N\]*' "$COMBO_OUT"
+expect_eq "…and changes nothing" "" \
+  "$(jq -r '.env // "" | tostring | select(. != "\"\"")' "$FIX/ch/settings.json" 2>/dev/null | grep -F 'BASH_MAX' || true)"
+
+# ---- --list is unchanged by the new flag ----
+SETUP_FLAGS="--list"
+ALL_LIST_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_match "--list still prints the roster --all reads" '*permission-mode*' "$ALL_LIST_OUT"
+expect_no_match "--list prints names, never plan lines" '*•*' "$ALL_LIST_OUT"
+
 # NO ASSUME-YES CAME IN WITH THE FLAG. The wave's ratified rule is consent per
 # item from the standard input, and the two shapes that would break it are a
 # flag and an environment knob. Neither exists, and this arm is what keeps it
 # that way when the next flag is added.
 # Anchored on an argument arm, not on the characters: `--yes)` also closes the
 # install argv this script prints.
+#
+# `--all` USED TO BE ON THIS LIST AND IS NOT ANY MORE (W7, AC-8). It was there
+# while every shape proposed for it was "answer the questions for me", which is
+# the thing this arm keeps out. What shipped is not that: `--all` PRINTS the
+# whole plan and asks one question over it, so the run still turns on an
+# explicit `y` read from this script's own input, and a row added to the roster
+# later still reaches the user's eyes before it reaches their machine. Group 17
+# is the wall on that shape.
 expect_eq "setup.sh takes no assume-yes argument" "" \
-  "$(/usr/bin/grep -nE '^[[:space:]]*--(yes|all)\)' "$SETUP_SH" || true)"
+  "$(/usr/bin/grep -nE '^[[:space:]]*--yes\)' "$SETUP_SH" || true)"
 expect_eq "setup.sh reads no assume-yes environment knob" "" \
   "$(/usr/bin/grep -niE 'BIONIC_(ASSUME_YES|YES|NONINTERACTIVE)' "$SETUP_SH" || true)"
 

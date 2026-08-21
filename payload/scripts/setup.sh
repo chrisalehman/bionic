@@ -278,6 +278,15 @@ SETUP_SELF_CMD="bash $(_setup_self_path)"
 
 SETUP_ONLY=""
 
+# ─── One answer over a printed plan ──────────────────────────────────────────
+#
+# 1 once the user has said yes to the plan `--all` printed. It is not an
+# assume-yes: nothing is set here until a person has read every item the run
+# would do and typed `y` at a question about that page. What it removes is the
+# SECOND, third and ninth question about a decision already made — see the note
+# above `_setup_print_plan` for why the plan, and not the flag, is the consent.
+SETUP_ALL=0
+
 _setup_item_ids() {
   local n line bare
   say "plugin"
@@ -318,6 +327,135 @@ _setup_class_wanted() {  # <class>
   [ "$(dep_field "${SETUP_ONLY#tool:}" class)" = "$1" ]
 }
 
+# ─── The plan `--all` prints ─────────────────────────────────────────────────
+#
+# WHY A PLAN AND NOT AN ASSUME-YES FLAG. Nine questions is a bad experience for
+# someone who has already decided to set the whole machine up, and the obvious
+# fix — a flag that answers them — is the hole in "consent per event, never
+# silent, never unattended": a row added to the roster next year would then run
+# on a machine whose owner never saw it named. So the whole run is made into ONE
+# event instead. Every item that would be asked about is printed with what it
+# changes, one line each, and the single question is asked over that page. The
+# user consents to a list they can read, and nothing runs that was not on it.
+#
+# ONE ROSTER, READ TWICE. The plan walks `_setup_item_ids` — the same list
+# `--list` prints and `--only` is checked against — and asks
+# `_setup_item_pending` the same question each step asks itself before it
+# prompts. A plan built from its own idea of what is outstanding would come to
+# disagree with the run it is a plan FOR, which is the one defect a consent
+# screen must not have.
+
+# What one item changes, in the words the item's own question uses. Product
+# words only: this lands on a person's screen, and it is the only description
+# of that item they get before they answer.
+_setup_item_verb() {  # <name>
+  case "${1:-}" in
+    plugin)             say "install the bionic plugin (claude plugin install)" ;;
+    duplicate:*)        say "settle the two copies of ${1#duplicate:} installed from different catalogs" ;;
+    dependency:*)       say "enable the plugin ${1#dependency:}, which is installed but switched off" ;;
+    tool:*)             say "install ${1#tool:}" ;;
+    environment)        say "write bionic's environment settings to $(_dep_settings_file)" ;;
+    legacy-alias)       say "remove the retired shell alias block from $(_detect_shell_rc)" ;;
+    legacy-hooks)       say "remove the retired hook entries from $(_dep_settings_file)" ;;
+    legacy-skill-copy)  say "remove the pre-plugin skill copy at $(_setup_legacy_skill_dir)" ;;
+    permission-profile) say "apply bionic's permission profile to $(_dep_settings_file)" ;;
+    permission-mode)    say "set Claude Code's default permission mode to ${BIONIC_DEFAULT_PERMISSION_MODE}" ;;
+    *)                  return 1 ;;
+  esac
+  return 0
+}
+
+# The one directory step 8 offers to remove, read from the fact function that
+# owns it so the plan names the path the step will name.
+_setup_legacy_skill_dir() {
+  local line
+  line="$(detect_legacy_skill_copy)"
+  printf '%s' "${line##*path=}"
+}
+
+# Whether this item would ask a question on this machine — the predicate each
+# step below runs before it prints anything, asked from the outside so the plan
+# and the run cannot come to differ about what is outstanding. Read-only: every
+# branch here is a file test or a listing, never a change.
+_setup_item_pending() {  # <name> -> 0 when the item has something to ask about
+  local name="${1:-}" state id line present count key want have mode settings
+  case "$name" in
+    plugin)
+      IFS='|' read -r state id <<< "$(_setup_cli_plugin bionic)"
+      [ "$state" = "absent" ] ;;
+    duplicate:*)
+      # The roster only names a duplicate this machine actually carries, so a
+      # name that reached here is a question the run would ask.
+      return 0 ;;
+    dependency:*)
+      IFS='|' read -r state id <<< "$(_setup_cli_plugin "${name#dependency:}")"
+      [ "$state" = "disabled" ] ;;
+    tool:*)
+      # An `unknown` presence is OFFERED, not skipped — some mechanisms have no
+      # surface to read and the step asks anyway, so the plan names them too.
+      present="$(check_dep "${name#tool:}")" || return 1
+      present="${present#present=}"; present="${present%%|*}"
+      [ "$present" != "yes" ] ;;
+    environment)
+      for key in $ENV_KEYS; do
+        want="$(env_default "$key")" || continue
+        have="$(env_get "$key" 2>/dev/null)" || have=""
+        [ "$have" = "$want" ] || return 0
+      done
+      return 1 ;;
+    legacy-alias)
+      line="$(detect_zshrc_legacy_block)"
+      [ "${line#*present=}" = "yes" ] && return 0
+      settings="$(_detect_shell_rc)"
+      [ -f "$settings" ] && grep -qE "$SETUP_ALIAS_PATTERN" "$settings" 2>/dev/null && return 0
+      return 1 ;;
+    legacy-hooks)
+      line="$(detect_legacy_channel_hooks)"; count="${line#*count=}"
+      case "$count" in ''|*[!0-9]*|0) return 1 ;; esac
+      return 0 ;;
+    legacy-skill-copy)
+      line="$(detect_legacy_skill_copy)"
+      present="${line#*present=}"; present="${present%% *}"
+      [ "$present" = "yes" ] ;;
+    permission-profile)
+      line="$(detect_profile_state)"
+      state="${line#*applied=}"; state="${state%% *}"
+      count="${line#*stale=}";   count="${count%% *}"
+      [ "$state" = "yes" ] && [ "$count" = "no" ] && return 1
+      return 0 ;;
+    permission-mode)
+      # No jq is not a question: the step says so and changes nothing.
+      command -v jq >/dev/null 2>&1 || return 1
+      settings="$(_dep_settings_file)"
+      if [ -f "$settings" ]; then
+        mode="$(jq -r '.permissions.defaultMode // ""' "$settings" 2>/dev/null)" || mode=""
+      else
+        mode=""
+      fi
+      [ "$mode" != "$BIONIC_DEFAULT_PERMISSION_MODE" ] ;;
+    *)
+      return 1 ;;
+  esac
+}
+
+# The whole page. Non-zero means there was nothing to print, which is a machine
+# with nothing left to set up rather than an error.
+_setup_print_plan() {
+  local id verb lines=""
+  # fd 3: the standard input belongs to the question this page is printed for.
+  while IFS= read -r id <&3; do
+    [ -n "$id" ] || continue
+    _setup_item_pending "$id" || continue
+    verb="$(_setup_item_verb "$id")" || continue
+    lines="${lines}  • ${verb}"$'\n'
+  done 3< <(_setup_item_ids)
+  [ -n "$lines" ] || return 1
+  say "bionic would:"
+  printf '%s' "$lines"
+  say ""
+  return 0
+}
+
 # ONE OWNER FOR THE SENTENCE THAT TELLS SOMEONE HOW TO SAY YES. Every declined
 # item ends up quoting this, and it must name a route that works: the item's own
 # name, and an invocation that delivers one answer to that one question. Written
@@ -331,7 +469,10 @@ _setup_answer_yes() {  # <name>
 
 say()    { printf '%s\n' "$*"; }
 action() { SETUP_ACTIONS="${SETUP_ACTIONS}${1}"$'\n'; }
-consent() { _dep_consent "$1"; }   # deps.sh owns the one prompt shape
+# deps.sh owns the one prompt shape — and the one short-circuit, because
+# `install_dep` and `install_plugin_native` ask through it directly and a
+# wrapper here could only cover the gates this file spells itself.
+consent() { _dep_consent "$1"; }
 
 # AC-12: `consent`'s non-zero used to mean one thing everywhere it was checked
 # — an explicit no — so every gate below printed the identical "declined —"
@@ -1164,10 +1305,13 @@ setup_summary() {
 # run that silently did nothing would look exactly like a machine with nothing
 # left to do, which is the one report this script must never fake.
 SETUP_LIST=0
+setup_all=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --list)
       SETUP_LIST=1; shift ;;
+    --all)
+      setup_all=1; shift ;;
     --only)
       if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
         say "setup: --only needs the name of the one item to set up."
@@ -1183,6 +1327,16 @@ while [ $# -gt 0 ]; do
       exit 2 ;;
   esac
 done
+
+# TWO NARROWINGS THAT CANNOT BOTH APPLY. `--only` runs one item; `--all` runs
+# every item over one answer. Together they would have to mean something, and
+# whatever that something was, half the people who typed it would mean the other
+# one — so it stops here, before anything is printed at the machine.
+if [ "$setup_all" = "1" ] && [ -n "$SETUP_ONLY" ]; then
+  say "setup: --all and --only cannot be combined — --all does every item, --only does exactly one."
+  say "       run ${SETUP_SELF_CMD} --list to see the names --only takes."
+  exit 2
+fi
 
 if [ "$SETUP_LIST" = "1" ]; then
   _setup_item_ids
@@ -1202,6 +1356,28 @@ if [ -n "$SETUP_ONLY" ]; then
 fi
 
 say "bionic setup — every change below is asked for first, one item at a time."
+
+# THE ONE EVENT, BEFORE ANY STEP SPEAKS. Under `--all` the whole page is printed
+# and answered here; every question below then finds the answer already given.
+# A no — or nobody there to answer — leaves the machine exactly as it was, which
+# is the same floor a per-item pass holds to.
+if [ "$setup_all" = "1" ]; then
+  say ""
+  # THE PAGE IS BUILT WITH THE ANSWER CHANNEL CLOSED. Every predicate behind it
+  # shells out — the CLI's listing, the dependency probes — and a child that
+  # reads its inherited stdin eats the one `y` this run is about to ask for.
+  # Nothing here needs stdin, so nothing here gets it.
+  if ! _setup_print_plan < /dev/null; then
+    say "   nothing left to do — this machine is set up."
+    exit 0
+  fi
+  consent "Do all of the above?"; setup_all_rc=$?
+  if [ "$setup_all_rc" -ne 0 ]; then
+    say "   nothing changed."
+    exit 0
+  fi
+  SETUP_ALL=1
+fi
 
 setup_plugin_install
 setup_load_state
