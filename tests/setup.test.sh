@@ -1605,6 +1605,48 @@ expect_match "permission-mode, EOF: not asked, not declined" \
   '*not asked — the default permission mode is unchanged*' "$EOF_OUT"
 expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
 
+new_fixture eof-duplicate
+plant_cli_plugin "bionic@bionic" true
+plant_installed "superpowers@bionic" "6.3.0"
+plant_installed "superpowers@claude-plugins-official" "6.2.0"
+SETUP_FLAGS="--only duplicate:superpowers"
+EOF_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_match "duplicate-consolidation, EOF: not asked, not declined" \
+  '*not asked — left as they are*' "$EOF_OUT"
+expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
+
+new_fixture eof-permission-profile
+plant_cli_plugin "bionic@bionic" true
+SETUP_FLAGS="--only permission-profile"
+EOF_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_match "permission-profile, EOF: not asked, not declined" \
+  '*not asked — *is unchanged*' "$EOF_OUT"
+expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
+
+# ---- AC-12 closes the whole class, not just the named sites (A4.S6.n) ----
+#
+# Every consent() call site in this script, exercised in ONE pass on a maximally
+# unsettled machine (bionic absent so step 1 asks too; a real duplicate; a
+# disabled core dependency; every legacy item present; the permission profile
+# unapplied; the mode unset) with a truly-EOF first pass. The word "declined"
+# must not appear anywhere in that transcript — not just at the sites the plan
+# named — because AC-12 is a rule about the word, not a list of line numbers.
+new_fixture eof-whole-pass
+plant_installed "superpowers@bionic" "6.3.0"
+plant_installed "superpowers@claude-plugins-official" "6.2.0"
+plant_cli_plugin "agent-skills@bionic" false
+plant_installed "agent-skills@bionic" "0.6.7"
+printf 'export PATH="$HOME/bin:$PATH"\n\n%s\n%s\n%s\n' "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
+plant_legacy_channel_settings
+plant_legacy_skill_copy
+WHOLE_EOF_OUT="$(run_setup "")"
+expect_match "whole pass, EOF: 'not asked' actually fired (the arm is not vacuous)" \
+  '*not asked —*' "$WHOLE_EOF_OUT"
+expect_no_match "whole pass, EOF: the word declined never appears, anywhere (AC-12)" \
+  '*declined*' "$WHOLE_EOF_OUT"
+
 # A whole declined pass carries the same route for every item it asked about, so
 # a user reading the summary can act on any line in it.
 new_fixture only-route-everywhere
