@@ -914,6 +914,12 @@ OUT="$(run_setup "$YES")"
 expect_match "the mode question is asked" "$MODE_Q" "$OUT"
 expect_match "the question says what it buys, in one line" '*Recommended*' "$OUT"
 expect_match "the question is asked with a default-No prompt" '*\[y/N\]*' "$OUT"
+# item 1: Remote Control sessions offer Manual / Accept edits / Plan only and
+# override whatever defaultMode bionic just wrote — the question that sets it
+# has to say so, on the same screen, or the setting reads as a stronger promise
+# than it is.
+expect_match "the question carries the Remote Control note" \
+  '*Remote Control sessions override this (Manual / Accept edits / Plan only).*' "$OUT"
 expect_eq "the mode is asked exactly once in a run" "1" \
   "$(awk '/default permission mode to auto/ { n++ } END { print n + 0 }' <<< "$OUT")"
 expect_eq "consented: the default mode is written as auto" "auto" \
