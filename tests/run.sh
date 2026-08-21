@@ -22,31 +22,157 @@
 # with it (W5 audit F-3) — it had been green only because the Docker daemon was
 # down, and would have gone red the moment a contributor ran it daemon-up.
 #
+# ── TWO MODES, ONE ROSTER (epic-17 W7 S10, spec AC-16) ───────────────────────
+#
+#   bash tests/run.sh              four suites at a time (the default)
+#   bash tests/run.sh --serial     one at a time, in roster order
+#   BIONIC_TEST_JOBS=8 bash tests/run.sh      a different width
+#   BIONIC_TEST_TIMING=t.tsv bash tests/run.sh   also write <label>TAB<seconds>
+#
+# The `run` lines below are the roster in BOTH modes — they are the only place a
+# suite is named, and neither mode has a list of its own. In --serial each line
+# runs where it stands; by default each line enqueues, the queue drains through
+# xargs -P, and the results print afterwards in roster order. Same labels, same
+# captured-output blocks, same `Gating:` line, same exit status: a mode is a
+# scheduling choice and nothing else.
+#
+# WHY IT IS SAFE TO RUN THEM AT ONCE. Not by assumption — by audit. Epic-17 W7 S8
+# read all 44 suites for fixture root, every write outside it and every read of
+# machine state another suite could mutate, and found no shared write, no shared
+# lock, no fixed port and no fixed /tmp name: every suite that touches disk does so
+# under its own `mktemp -d`, and the one place many of them read concurrently (this
+# checkout, via tests/lib/resolve-roots.sh) has no writer in the roster at all.
+# `.bionic/docs/record/epic-17-w7/s8-isolation-audit.md` is that audit, suite by
+# suite. A new suite that writes outside its own mktemp root breaks this premise,
+# which is the other reason the roster is hand-listed: adding a line is the moment
+# to check.
+#
+# WHY FOUR AND NOT FORTY-FIVE. Measured, not guessed. When seven of these slices
+# each ran a full suite concurrently on one machine, free memory fell to ~188 MB
+# and the kernel SIGKILLed a suite mid-run (W7 assumption A4.2). Four is a width
+# with headroom; BIONIC_TEST_JOBS is there for a machine with more.
+#
+# WHY A SIGNAL DEATH IS NOT A FAILED ASSERTION. That same kill was reported as a
+# plain ✗ FAIL, which reads as "this suite's assertions failed" and sends the
+# reader hunting a defect that is not there. A suite that dies by signal now says
+# so and names the signal. It still counts as failed and still fails the run —
+# what changed is that the report is true.
+#
 set -uo pipefail
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
+
+# ── one suite, in its own process ────────────────────────────────────────────
+# `run.sh --one <label>` is not a mode anyone types: it is what xargs forks for
+# each queued suite. It looks its command up in the queue by label, captures the
+# suite's output to <label>.out and leaves the exit status in <label>.rc and the
+# elapsed seconds in <label>.sec beside it.
+#
+# IT ALWAYS EXITS 0. A suite's verdict travels in its .rc file, never in this
+# process's status — xargs abandons a queue when a child exits nonzero, so a
+# worker that forwarded a red suite's status would stop the run at the first red
+# suite and leave the rest unreported.
+if [ "${1:-}" = "--one" ]; then
+  _one_label="${2:?run.sh --one needs a suite label}"
+  _one_queue="${BIONIC_TEST_QUEUE:?run.sh --one is an internal mode}"
+  _one_work="${BIONIC_TEST_WORK:?run.sh --one is an internal mode}"
+  _one_cmd="$(awk -F'\t' -v l="$_one_label" '$1 == l { print $2; exit }' "$_one_queue")"
+  _one_start="$(date +%s)"
+  # Deliberately unquoted. The queued string is a roster line's own words
+  # (`bash tests/foo.test.sh`), written in this file — never outside input.
+  # shellcheck disable=SC2086
+  $_one_cmd >"$_one_work/${_one_label}.out" 2>&1
+  _one_rc=$?
+  printf '%s\n' "$_one_rc" >"$_one_work/${_one_label}.rc"
+  printf '%s\n' "$(( $(date +%s) - _one_start ))" >"$_one_work/${_one_label}.sec"
+  exit 0
+fi
+
+# ── argv ─────────────────────────────────────────────────────────────────────
+# Refused, not ignored. Before this slice the runner read no argv at all, so
+# `bash tests/run.sh --serial` ran the whole roster and looked like it had
+# honoured a flag it had never heard of.
+SERIAL=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --serial) SERIAL=1 ;;
+    -h|--help)
+      echo "usage: bash tests/run.sh [--serial]"
+      echo "  --serial            one suite at a time, in roster order"
+      echo "  BIONIC_TEST_JOBS    how many at a time otherwise (default 4)"
+      echo "  BIONIC_TEST_TIMING  a file to append <label>TAB<seconds> to"
+      exit 0
+      ;;
+    *)
+      echo "tests/run.sh: unknown option: $1" >&2
+      echo "usage: bash tests/run.sh [--serial]" >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+JOBS="${BIONIC_TEST_JOBS:-4}"
 
 ( . tests/lib/resolve-roots.sh
   printf 'Roots: hooks=%s skills=%s scripts=%s\n\n' \
     "$BIONIC_HOOKS_DIR" "$BIONIC_SKILLS_DIR" "$BIONIC_SCRIPTS_DIR" )
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+QUEUE="$TMP/queue"; : >"$QUEUE"
+export BIONIC_TEST_QUEUE="$QUEUE" BIONIC_TEST_WORK="$TMP"
 
 pass=0; fail=0; failed=""
 
-run() {  # run <label> <cmd...>   — gating
-  local label="$1"; shift
-  printf '  %-36s ' "$label"
-  if "$@" >"$TMP/out" 2>&1; then
-    echo "✓ PASS"; pass=$((pass+1))
-  else
-    echo "✗ FAIL"; fail=$((fail+1)); failed="${failed}\n    - ${label}"
-    echo "───── ${label}: captured output ─────"
-    cat "$TMP/out"
-    echo "───── end ${label} ─────"
-  fi
+# Opt-in, and opt-in on purpose: no per-suite timing has ever existed (W7 S8
+# finding (c) had to answer "which suite is the long pole" with a line-count
+# proxy), and a gating run's output must not change just because someone wanted
+# the numbers.
+_timing() {  # _timing <label> <seconds>
+  [ -n "${BIONIC_TEST_TIMING:-}" ] || return 0
+  printf '%s\t%s\n' "$1" "$2" >>"$BIONIC_TEST_TIMING"
 }
 
+_label() { printf '  %-36s ' "$1"; }
+
+# _verdict <label> <exit-status-or-empty> <captured-output-file>
+# The one place a result is judged and printed, so the two modes cannot drift.
+_verdict() {
+  local label="$1" rc="$2" out="$3" sig=""
+  if [ "$rc" = "0" ]; then
+    echo "✓ PASS"; pass=$((pass+1)); return
+  fi
+  fail=$((fail+1))
+  if [ -z "$rc" ]; then
+    # No .rc file: the worker itself did not survive to write one.
+    echo "✗ KILLED (no exit status recorded)"
+    failed="${failed}\n    - ${label} (killed, no exit status)"
+  elif [ "$rc" -gt 128 ] 2>/dev/null && sig="$(kill -l $((rc - 128)) 2>/dev/null)" && [ -n "$sig" ]; then
+    echo "✗ KILLED (SIG${sig})"
+    failed="${failed}\n    - ${label} (killed by SIG${sig})"
+  else
+    echo "✗ FAIL"
+    failed="${failed}\n    - ${label}"
+  fi
+  echo "───── ${label}: captured output ─────"
+  [ -f "$out" ] && cat "$out"
+  echo "───── end ${label} ─────"
+}
+
+run() {  # run <label> <cmd...>   — gating
+  local label="$1"; shift
+  if [ "$SERIAL" -eq 1 ]; then
+    local start rc
+    _label "$label"
+    start="$(date +%s)"
+    "$@" >"$TMP/${label}.out" 2>&1
+    rc=$?
+    _timing "$label" "$(( $(date +%s) - start ))"
+    _verdict "$label" "$rc" "$TMP/${label}.out"
+  else
+    printf '%s\t%s\n' "$label" "$*" >>"$QUEUE"
+  fi
+}
 echo "Gating suites:"
 # Moved from hooks/*.test.sh (epic-17 W4 S9, spec AC-9 / D3 "move the tests"): one
 # hook behavior suite per hook script, hand-listed like every suite below —
@@ -201,6 +327,24 @@ run "remove.test.sh" bash tests/remove.test.sh
 # in the dep table's BIONIC_PLAYWRIGHT_CACHE probe, and the payload does its own
 # rewriting in bash rather than sed, so sed_inplace has no successor because it
 # has no question left to answer.
+
+
+# ── drain the queue, then report in roster order ─────────────────────────────
+# Nothing above printed a result in the default mode; every `run` line enqueued.
+# The suites run now, four at a time, each in its own process writing its own
+# files; then the queue is walked again IN ORDER so the report reads the same as
+# a serial one — a reader comparing two runs is comparing rosters, not schedules.
+if [ "$SERIAL" -eq 0 ]; then
+  cut -f1 "$QUEUE" | xargs -P "$JOBS" -n1 bash "$SELF" --one
+  while IFS="$(printf '\t')" read -r label _queued_cmd; do
+    [ -n "$label" ] || continue
+    _label "$label"
+    rc=""
+    [ -f "$TMP/${label}.rc" ] && rc="$(cat "$TMP/${label}.rc")"
+    [ -f "$TMP/${label}.sec" ] && _timing "$label" "$(cat "$TMP/${label}.sec")"
+    _verdict "$label" "$rc" "$TMP/${label}.out"
+  done <"$QUEUE"
+fi
 
 echo "──────────────────────────────────────────────"
 echo "Gating: ${pass} passed, ${fail} failed"
