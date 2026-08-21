@@ -10,7 +10,8 @@
 # WHY THEY ARE PINNED HERE AND NOT IN A COMMAND SUITE. The ownership table
 # (wave-03 spec §Design) makes deps.sh the single owner of the dependency set
 # and detect.sh the single owner of machine facts; plugin.json and
-# marketplace.json are RENDERINGS of the lane-3a rows. A rendering can only be
+# marketplace.json are RENDERINGS of the table's rows (the `core` rows and the
+# `native`-kind rows respectively, since wave-06 S3). A rendering can only be
 # pinned against a table whose own shape is already proven, so the table's
 # shape is proven first, here, and the two manifest-agreement pins land on top
 # of it (slice S3).
@@ -139,43 +140,237 @@ expect_true "dep_names returns at least 20 rows (got ${NAME_COUNT})" test "$NAME
 expect_true "dep_names has no duplicates" \
   bash -c 'test "$(printf "%s\n" "$1" | sort | uniq -d | wc -l | tr -d " ")" = 0' _ "$NAMES"
 
-# Every row carries exactly the six declared fields, in order.
+# Every row carries exactly the seven declared fields, in order (wave-06 S3:
+# `class` and `consumer` joined the schema; nothing else moved).
 FIELD_REPORT="$(deps_run -- dep_table_field_count_report)"
-expect_eq "every table row has exactly 6 pipe-separated fields" "" "$FIELD_REPORT"
+expect_eq "every table row has exactly 7 pipe-separated fields" "" "$FIELD_REPORT"
 
-expect_eq "dep_field superpowers lane" "3a" "$(deps_run -- dep_field superpowers lane)"
-expect_eq "dep_field superpowers source_url" "https://github.com/obra/superpowers.git" \
-  "$(deps_run -- dep_field superpowers source_url)"
+# …and the report can SEE a wrong-width row. Silence from a function that
+# reports nothing under any input is not evidence — and this exact assertion sat
+# green through the six-to-seven field change until the width it checks was
+# updated with it.
+# The table is assigned at SOURCE time, so the mutation has to land after the
+# source — an env override would simply be overwritten and the arm would prove
+# nothing.
+WIDTH_MUTANT="$(bash -c '. "$1"; BIONIC_DEP_TABLE="rg|basic|substrate|brew:ripgrep|any|brew-dep"; dep_table_field_count_report' _ "$DEPS_SH")"
+expect_match "the field-count report catches a row that lost a field" \
+  "*has 6 fields, want 7*" "$WIDTH_MUTANT"
+
+expect_eq "dep_field superpowers class" "core" "$(deps_run -- dep_field superpowers class)"
+expect_eq "dep_field superpowers consumer" "skills/canonical-sdlc/SKILL.md" \
+  "$(deps_run -- dep_field superpowers consumer)"
+expect_eq "dep_field superpowers mechanism" "https://github.com/obra/superpowers.git" \
+  "$(deps_run -- dep_field superpowers mechanism)"
 expect_eq "dep_field superpowers constraint" "^6.3.0" "$(deps_run -- dep_field superpowers constraint)"
-expect_eq "dep_field superpowers install_fn_or_check" "native" \
-  "$(deps_run -- dep_field superpowers install_fn_or_check)"
+expect_eq "dep_field superpowers kind" "native" "$(deps_run -- dep_field superpowers kind)"
 expect_eq "dep_field superpowers removal_behavior" "native-uninstall-offer" \
   "$(deps_run -- dep_field superpowers removal_behavior)"
-expect_eq "dep_field rg source_url" "brew:ripgrep" "$(deps_run -- dep_field rg source_url)"
-expect_eq "dep_field rg install_fn_or_check" "brew-dep" "$(deps_run -- dep_field rg install_fn_or_check)"
+expect_eq "dep_field rg mechanism" "brew:ripgrep" "$(deps_run -- dep_field rg mechanism)"
+expect_eq "dep_field rg kind" "brew-dep" "$(deps_run -- dep_field rg kind)"
+expect_eq "dep_field rg class" "basic" "$(deps_run -- dep_field rg class)"
+expect_eq "dep_field rg consumer" "substrate" "$(deps_run -- dep_field rg consumer)"
+
+# The pre-S3 field names stay readable so the callers this slice does not own
+# (detect.sh, setup.sh, remove.sh, jit.sh, doctor.sh) compile unchanged. They
+# are aliases of the columns above, not a second authority.
+expect_eq "deprecated alias: dep_field <n> source_url == mechanism" \
+  "$(deps_run -- dep_field rg mechanism)" "$(deps_run -- dep_field rg source_url)"
+expect_eq "deprecated alias: dep_field <n> install_fn_or_check == kind" \
+  "$(deps_run -- dep_field rg kind)" "$(deps_run -- dep_field rg install_fn_or_check)"
+expect_eq "deprecated alias: a core row still reads lane=3a" "3a" \
+  "$(deps_run -- dep_field superpowers lane)"
+expect_eq "deprecated alias: a bionic-installed row still reads lane=3b" "3b" \
+  "$(deps_run -- dep_field rg lane)"
+# A native-kind row outside `core` is installed by neither pathway the lane
+# taxonomy could name — the harness does not carry it (it is not a plugin.json
+# dependency) and bionic has no installer for it (the JIT offer hands the user
+# one command). `none` is the honest legacy answer, and it is what keeps the
+# deprecated FIELD and the deprecated LIST saying the same thing.
+expect_eq "deprecated alias: a when-needed native row belongs to neither lane" "none" \
+  "$(deps_run -- dep_field impeccable lane)"
 
 expect_false "dep_field on an unknown dep exits non-zero" \
-  bash -c '. "$1"; dep_field no-such-dep lane' _ "$DEPS_SH"
+  bash -c '. "$1"; dep_field no-such-dep class' _ "$DEPS_SH"
 expect_false "dep_field with an unknown field name exits non-zero" \
   bash -c '. "$1"; dep_field superpowers no_such_field' _ "$DEPS_SH"
 
-expect_eq "dep_names_lane 3a returns exactly the two plugin-shaped deps" \
-  "agent-skills superpowers" "$(deps_run -- dep_names_lane 3a | sort | tr '\n' ' ' | sed 's/ $//')"
+echo ""
+echo "=== Group 2b: the four classes (wave-06 D-B, AC-10) ==="
+#
+# `class` is the wave's answer to WHEN bionic installs a tool: core = the two
+# plugin dependencies the harness resolves; basic = the substrate asked for at
+# setup and never removed; when-needed = installed with one question the first
+# time a route needs it, never offered by setup; extra = offered once at setup,
+# default No. The roster below is D-B's, ratified 2026-08-20.
+
+# LC_ALL=C so the roster literals below do not depend on the runner's locale
+# (`@playwright/cli` sorts before `aws` only under the C collation).
+class_names() { deps_run -- dep_names_class "$1" | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//'; }
+
+expect_eq "dep_names_class core is exactly the two plugin dependencies" \
+  "agent-skills superpowers" "$(class_names core)"
+expect_eq "dep_names_class basic is the substrate roster" \
+  "aws docker gh git jq node pnpm rg uv" "$(class_names basic)"
+expect_eq "dep_names_class when-needed is the JIT roster" \
+  "@playwright/cli chrome-devtools impeccable motion playwright-chromium" "$(class_names when-needed)"
+expect_eq "dep_names_class extra is the optional roster" \
+  "@pencil.dev/cli ccstatusline context7 notebooklm" "$(class_names extra)"
+expect_eq "an unknown class returns nothing (and exits 0)" "" "$(class_names no-such-class)"
+
+# Every row lands in exactly one of the four. A fifth class value would leave
+# rows the setup loop and the JIT route both skip.
+CLASS_SUM=0
+for c in core basic when-needed extra; do
+  CLASS_SUM=$((CLASS_SUM + $(deps_run -- dep_names_class "$c" | grep -c .)))
+done
+expect_eq "the four classes partition the table (no row is unclassed)" \
+  "$NAME_COUNT" "$CLASS_SUM"
+
+# The two rows the traceability rule dropped: no route consumed them and no
+# test covered them (D-B: "DROP: yq, gcloud").
+expect_false "yq has no row (dropped, wave-06 D-B)" \
+  bash -c '. "$1"; dep_row yq' _ "$DEPS_SH"
+expect_false "gcloud has no row (dropped, wave-06 D-B)" \
+  bash -c '. "$1"; dep_row gcloud' _ "$DEPS_SH"
 
 echo ""
-echo "=== Group 3: lane-3a rows are byte-exact (the manifest renderings pin here) ==="
+echo "=== Group 3: native-kind rows are byte-exact (the manifest renderings pin here) ==="
 #
-# These two literals are the wave's ratified D1 values. agent-skills is ^0.6.0:
-# the ^1.0.0 that plugin.json carries today is stale and D3 ratified the
-# correction. Slice S3 renders plugin.json and marketplace.json FROM these
-# rows, so a silent edit here would silently move both manifests.
+# superpowers and agent-skills carry the wave-03 ratified D1 values —
+# agent-skills is ^0.6.0, the ^1.0.0 plugin.json once carried is stale.
+# impeccable joins them at wave-06 S3: `^4.1.0` is the range, verified live
+# against the upstream tags (`git ls-remote --tags` → skill-v4.1.1 is the
+# newest; that commit's .claude-plugin/plugin.json declares version 4.1.1).
+# marketplace.json is rendered FROM these three rows and plugin.json's
+# `dependencies` from the two `core` ones, so a silent edit here moves a
+# manifest.
 
-expect_eq "lane-3a row: superpowers (byte-exact)" \
-  "superpowers|3a|https://github.com/obra/superpowers.git|^6.3.0|native|native-uninstall-offer" \
+expect_eq "native row: superpowers (byte-exact)" \
+  "superpowers|core|skills/canonical-sdlc/SKILL.md|https://github.com/obra/superpowers.git|^6.3.0|native|native-uninstall-offer" \
   "$(deps_run -- dep_row superpowers)"
-expect_eq "lane-3a row: agent-skills (byte-exact, ^0.6.0 not ^1.0.0)" \
-  "agent-skills|3a|https://github.com/addyosmani/agent-skills.git|^0.6.0|native|native-uninstall-offer" \
+expect_eq "native row: agent-skills (byte-exact, ^0.6.0 not ^1.0.0)" \
+  "agent-skills|core|skills/canonical-sdlc/SKILL.md|https://github.com/addyosmani/agent-skills.git|^0.6.0|native|native-uninstall-offer" \
   "$(deps_run -- dep_row agent-skills)"
+expect_eq "native row: impeccable (byte-exact, when-needed — never a third core dep)" \
+  "impeccable|when-needed|skills/canonical-sdlc/SKILL.md|https://github.com/pbakaus/impeccable.git|^4.1.0|native|native-uninstall-offer" \
+  "$(deps_run -- dep_row impeccable)"
+
+echo ""
+echo "=== Group 3b: the lane view is retired (six-axis review A-1) ==="
+#
+# S3 kept `dep_names_lane` as a deprecated VIEW because setup.sh and remove.sh
+# still walked it, and said S4/S7 would retire the call sites. S4 did. S7 did
+# not, and the six-axis review found `remove.sh:592` still computing the teardown
+# set as "kind != native" — which silently dropped `impeccable`, the one native
+# row that is not core, and then printed the new taxonomy's words over the old
+# taxonomy's set. remove.sh walks the classes now, so the view has no caller and
+# is gone.
+#
+# THE FIELD IS NOT THE LIST, and only the list retired. `dep_field <n> lane` is
+# still detect.sh's (its fact line renders `lane=`), and it answers a different
+# question — which lane is this row in — from the one the list answered, which
+# was which rows do I walk. The arms above pin the field; these pin the removal.
+
+expect_false "dep_names_lane is gone — nothing enumerates by lane any more" \
+  bash -c '. "$1"; type dep_names_lane' _ "$DEPS_SH"
+# Calls, not mentions: two comments record the retirement, and a check that could
+# not tell those from a caller would forbid recording it.
+expect_eq "…and no payload script calls it" "" \
+  "$(/usr/bin/grep -rn 'dep_names_lane' "${REPO}/payload" | /usr/bin/grep -vE ':[[:space:]]*#' || true)"
+
+# The set remove.sh walks now, stated once: every class except core. `core` is
+# the plugin's own declared dependencies, which the native uninstall and prune
+# take — and `impeccable`, which the retired view dropped, is in this one.
+TEARDOWN_SET="$( { deps_run -- dep_names_class basic
+                   deps_run -- dep_names_class when-needed
+                   deps_run -- dep_names_class extra; } | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "the teardown set is every row outside core" \
+  "@pencil.dev/cli @playwright/cli aws ccstatusline chrome-devtools context7 docker gh git impeccable jq motion node notebooklm playwright-chromium pnpm rg uv" \
+  "$TEARDOWN_SET"
+
+echo ""
+echo "=== Group 3c: consumer agreement — every row names something real (AC-10) ==="
+#
+# The traceability rule the wave ratified: "every dependency-table row names the
+# doctrine route that consumes it, or gets dropped". A `consumer` is therefore
+# either a repo-relative path that RESOLVES, or one of exactly two literals —
+# `substrate` (the basics bionic ensures for every machine, which no single
+# route owns) and `extra` (offered once, wanted by the user rather than by a
+# route). Anything else is a row whose justification has gone stale.
+
+CONSUMER_REPORT=""
+while IFS= read -r dep_name; do
+  [ -n "$dep_name" ] || continue
+  c="$(deps_run -- dep_field "$dep_name" consumer)"
+  case "$c" in
+    substrate|extra) continue ;;
+    "") CONSUMER_REPORT="${CONSUMER_REPORT}${dep_name}: empty consumer"$'\n'; continue ;;
+  esac
+  [ -e "${REPO}/${c}" ] || CONSUMER_REPORT="${CONSUMER_REPORT}${dep_name}: consumer does not resolve: ${c}"$'\n'
+done <<< "$NAMES"
+expect_eq "every consumer resolves under the repo, or is substrate/extra" "" "$CONSUMER_REPORT"
+
+# The literals are only legitimate for the classes that earned them: a
+# when-needed row IS a route's dependency, so `substrate`/`extra` there would be
+# the traceability gap wearing a permitted value.
+LITERAL_REPORT=""
+while IFS= read -r dep_name; do
+  [ -n "$dep_name" ] || continue
+  c="$(deps_run -- dep_field "$dep_name" consumer)"
+  k="$(deps_run -- dep_field "$dep_name" class)"
+  case "${k}/${c}" in
+    basic/substrate|extra/extra) ;;
+    basic/*|extra/*) LITERAL_REPORT="${LITERAL_REPORT}${dep_name}: class ${k} wants its own literal, got ${c}"$'\n' ;;
+    */substrate|*/extra) LITERAL_REPORT="${LITERAL_REPORT}${dep_name}: class ${k} must name a route, got the literal ${c}"$'\n' ;;
+  esac
+done <<< "$NAMES"
+expect_eq "substrate/extra are used only by the basic/extra classes" "" "$LITERAL_REPORT"
+
+# Naming a path is not the same as that path knowing about the dependency. The
+# route file has to actually mention it, which is what makes the column a
+# traceability claim rather than a plausible-looking string.
+#
+# ONE declared exemption, and it is a finding rather than a convenience:
+# `motion` is a when-needed row by D-B's ratified roster, but no skill, rule or
+# agent file in this repo names the package today — it is pre-warmed into the
+# pnpm store for the design route and nothing writes that down. Either the
+# design route names it or it is an `extra`; that is a design call, not this
+# slice's, so the row keeps its class and the gap is visible here instead of
+# being hidden by dropping the pin.
+MENTION_EXEMPT=" motion "
+MENTION_REPORT=""
+while IFS= read -r dep_name; do
+  [ -n "$dep_name" ] || continue
+  case "$MENTION_EXEMPT" in *" ${dep_name} "*) continue ;; esac
+  c="$(deps_run -- dep_field "$dep_name" consumer)"
+  case "$c" in substrate|extra) continue ;; esac
+  grep -qF -- "$dep_name" "${REPO}/${c}" 2>/dev/null \
+    || MENTION_REPORT="${MENTION_REPORT}${dep_name}: named consumer ${c} never mentions it"$'\n'
+done <<< "$NAMES"
+expect_eq "every named consumer route mentions the dependency it consumes" "" "$MENTION_REPORT"
+
+# The exemption is itself pinned: if a later wave gives motion a route that
+# names it, this fails and the exemption comes out. Vendored trees (.venv,
+# node_modules) are excluded: they exist on a developer checkout and never in a
+# worktree, and a pin that flips with the machine is not an absence claim.
+# /usr/bin/grep, not the PATH one: this shell's `grep` is ugrep with
+# --ignore-files, and it reports zero hits inside .claude/ even when the
+# directory is named explicitly — an absence claim built on it would be a
+# guaranteed pass (memory: grep-skips-hidden-dirs).
+GREP_ABS="$(command -v /usr/bin/grep || echo grep)"
+expect_false "the one mention exemption (motion) is still needed — no repo file names the package" \
+  bash -c '"$2" -rIlw --include="*.md" --exclude-dir=.venv --exclude-dir=node_modules motion "$1/skills" "$1/agents-src" "$1/.claude/rules" 2>/dev/null | "$2" -q .' \
+  _ "$REPO" "$GREP_ABS"
+
+# Mutation-and-restore: the pin has to be able to SEE a bad consumer, or it is
+# three loops that always print nothing. A row pointing at a path that does not
+# exist is the failure the column exists to catch.
+MUT_TABLE="$(printf '%s\n' "$(deps_run -- dep_row rg)" | sed 's#|substrate|#|skills/no-such-route/SKILL.md|#')"
+MUT_C="$(printf '%s' "$MUT_TABLE" | cut -d'|' -f3)"
+expect_eq "mutation: the fixture row really carries the broken consumer" \
+  "skills/no-such-route/SKILL.md" "$MUT_C"
+expect_false "mutation: a consumer path that does not resolve is detectable" \
+  test -e "${REPO}/${MUT_C}"
 
 echo ""
 echo "=== Group 4: constraint-verdict logic (pure, fixture versions) ==="
@@ -212,7 +407,7 @@ expect_eq "prerelease tag tolerated: ^6.3.0 vs 6.4.0-beta.1 -> ok" "ok" "$(v '^6
 expect_eq "unparseable constraint -> unknown" "unknown" "$(v 'not-a-range' 1.0.0)"
 
 echo ""
-echo "=== Group 5: check_dep, lane-3a, against a fixture installed_plugins.json ==="
+echo "=== Group 5: check_dep, native kind, against a fixture installed_plugins.json ==="
 #
 # Fixture shape copied from the real file, trimmed to one entry — captured with
 #   jq '.plugins["superpowers@claude-plugins-official"]' \
@@ -255,7 +450,7 @@ expect_eq "check_dep superpowers, not installed -> absent/unknown" \
   "present=no|version=unknown|verdict=unknown" \
   "$(deps_run BIONIC_CLAUDE_HOME="$CH_EMPTY" -- check_dep superpowers)"
 
-# The lane-3a probe must be marketplace-agnostic: slice S3 re-points both deps
+# The native-kind probe must be marketplace-agnostic: slice S3 re-points both deps
 # at bionic's own marketplace, which rewrites the key's right-hand side.
 CH_REPOINTED="$TMP/ch-repointed"; plant_installed_plugins "$CH_REPOINTED" "superpowers@bionic" "6.3.0"
 expect_eq "check_dep superpowers finds it under a DIFFERENT marketplace key" \
@@ -346,11 +541,17 @@ env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
   bash -c 'echo n | { . "$1"; install_dep rg; }' _ "$DEPS_SH" >/dev/null 2>&1
 expect_eq "install_dep with an explicit n ran nothing" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
 
-# Lane-3a is the native mechanism's job — install_dep must refuse to grow a
-# second installer for it (that is exactly the D1 kludge the wave rejected).
+# A native-KIND row is the plugin harness's job — install_dep must refuse to
+# grow a second installer for it (that is exactly the D1 kludge the wave
+# rejected). The refusal keys on `kind`, not on the class: impeccable is
+# when-needed and equally native, and a class-keyed guard would have handed it
+# to a mechanism that has no argv for it.
 : > "$CALLS"
-expect_false "install_dep refuses lane-3a rows (native mechanism owns them)" \
+expect_false "install_dep refuses a core native row (the harness owns it)" \
   bash -c 'echo y | { . "$1"; install_dep superpowers; }' _ "$DEPS_SH"
+expect_false "install_dep refuses the when-needed native row too" \
+  bash -c 'echo y | { . "$1"; install_dep impeccable; }' _ "$DEPS_SH"
+expect_eq "…and neither refusal ran anything" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
 
 expect_false "install_dep on an unknown dep exits non-zero" \
   bash -c 'echo y | { . "$1"; install_dep no-such-dep; }' _ "$DEPS_SH"
@@ -376,7 +577,90 @@ KEEP_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALL
   bash -c 'echo y | { . "$1"; remove_dep git; }' _ "$DEPS_SH" 2>&1)"
 expect_eq "remove_dep git (keep-shared) removes nothing even with consent" "0" \
   "$(grep -c . "$CALLS" | tr -d ' ')"
-expect_match "remove_dep git says why it is keeping the binary" "*keep-shared*" "$KEEP_OUT"
+# R-1: the reason is stated in words a user can act on. `keep-shared` is a column
+# value in the table above — the transcript printed it nine times in a row.
+expect_match "remove_dep git says why it is keeping the binary" \
+  "*kept — shared with other tools, bionic never removes it*" "$KEEP_OUT"
+expect_no_match "…without printing the table's own value for the policy" "*keep-shared*" "$KEEP_OUT"
+
+# Three registry shapes, one per answer `_dep_native_registry_state` can give.
+# Written here rather than reused from Group 5 because the question is different:
+# Group 5 asks "is a plugin of this name present at all", these ask "whose".
+REG_OURS="$TMP/reg-ours.json"
+REG_OTHER="$TMP/reg-other.json"
+REG_EMPTY="$TMP/reg-empty.json"
+printf '%s\n' '{"version":2,"plugins":{"impeccable@bionic":[{"scope":"user","version":"4.1.1"}]}}' > "$REG_OURS"
+printf '%s\n' '{"version":2,"plugins":{"impeccable@claude-plugins-official":[{"scope":"user","version":"4.1.1"}]}}' > "$REG_OTHER"
+printf '%s\n' '{"version":2,"plugins":{}}' > "$REG_EMPTY"
+
+# ---- the two native behaviours, which are not one behaviour (A-2) ----
+#
+# `native-uninstall-offer` used to mean one sentence for every native row:
+# "removed by the plugin uninstall, not here". For `superpowers` that is true —
+# bionic's plugin.json declares it, so removing bionic takes it. For
+# `impeccable` it is false by construction (A-3.1: plugin.json declares the two
+# core rows only; the marketplace entry makes the JIT offer one command and
+# declares no dependency), and `install_plugin_native` can put it on a machine
+# mid-session from `jit_offer`. So the row that nothing declares gets an offer of
+# its own, and the rows bionic declares keep the deferral.
+: > "$CALLS"
+CORE_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  bash -c 'echo y | { . "$1"; remove_dep superpowers; }' _ "$DEPS_SH" 2>&1)"
+expect_eq "remove_dep on a declared plugin runs nothing itself" "0" \
+  "$(grep -c . "$CALLS" | tr -d ' ')"
+expect_match "…and says which step does take it" "*removing bionic removes it*" "$CORE_OUT"
+
+: > "$CALLS"
+JIT_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_INSTALLED_PLUGINS_FILE="$REG_OURS" \
+  bash -c 'echo y | { . "$1"; remove_dep impeccable; }' _ "$DEPS_SH" 2>&1)"
+expect_match "remove_dep on a plugin nothing declares offers the CLI's own uninstall" \
+  "*claude plugin uninstall impeccable@bionic*" "$(cat "$CALLS")"
+expect_no_match "…and never claims some other step already took it" \
+  "*removed by the plugin uninstall*" "$JIT_OUT"
+
+: > "$CALLS"
+JIT_NO="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_INSTALLED_PLUGINS_FILE="$REG_OURS" \
+  bash -c 'echo n | { . "$1"; remove_dep impeccable; }' _ "$DEPS_SH" 2>&1)"
+expect_eq "a declined offer uninstalls nothing" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
+expect_match "…and says so" "*declined — impeccable left in place.*" "$JIT_NO"
+
+# ---- and the offer is made about OUR copy only (critic F-4) ----
+#
+# The two arms above now plant the registry key, because that is what the offer
+# is derived from: `check_dep` matches the bare NAME across catalogs, so
+# "present" cannot answer "did bionic install this". The registry is asked the
+# exact-id question, and the two answers that are not `ours` produce a sentence
+# rather than a question — there is no question whose yes bionic could honour.
+: > "$CALLS"
+JIT_OTHER="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_INSTALLED_PLUGINS_FILE="$REG_OTHER" \
+  bash -c 'echo y | { . "$1"; remove_dep impeccable; }' _ "$DEPS_SH" 2>&1)"
+expect_eq "another catalog's copy: nothing reaches the CLI, on a yes" "0" \
+  "$(grep -c . "$CALLS" | tr -d ' ')"
+expect_match "another catalog's copy: the transcript says whose it is" \
+  "*installed from another catalog*" "$JIT_OTHER"
+expect_no_match "another catalog's copy: and no question was asked at all" \
+  "*Remove impeccable now?*" "$JIT_OTHER"
+
+: > "$CALLS"
+JIT_NONE="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_INSTALLED_PLUGINS_FILE="$REG_EMPTY" \
+  bash -c 'echo y | { . "$1"; remove_dep impeccable; }' _ "$DEPS_SH" 2>&1)"
+expect_eq "no copy at all: nothing reaches the CLI, on a yes" "0" \
+  "$(grep -c . "$CALLS" | tr -d ' ')"
+expect_match "no copy at all: and it is not described as somebody else's" \
+  "*nothing here to remove*" "$JIT_NONE"
+
+# ---- D-1: the default permission mode has an owner, and it is this file ----
+#
+# setup.sh writes it and remove.sh resets exactly this value and no other; the
+# two used to hold independent literals. The behavioural halves are pinned in
+# tests/setup.test.sh and tests/remove.test.sh (mutation arms, both directions);
+# what belongs here is that the owner exists and reads back.
+expect_eq "deps.sh owns the default permission mode bionic offers" "auto" \
+  "$(bash -c '. "$1"; printf "%s" "${BIONIC_DEFAULT_PERMISSION_MODE:-}"' _ "$DEPS_SH")"
 
 echo ""
 echo "=== Group 8b: the statusline writers preserve settings.json's MODE ==="
@@ -926,10 +1210,13 @@ expect_eq "detect_dep prints exactly one line" "1" "$(printf '%s\n' "$out" | gre
 echo ""
 echo "=== Group 18: manifest agreement — deps.sh table <-> plugin.json <-> marketplace.json (AC-8) ==="
 #
-# The dep table is the SSoT for lane-3a dependencies. plugin.json's
-# `dependencies` array and marketplace.json's url-sourced entries are
-# RENDERINGS of those rows, never independent authorities (ownership table,
-# wave-03 spec §Design). Version constraints are deliberately ABSENT from
+# The dep table is the SSoT. plugin.json's `dependencies` array renders the
+# `core` rows and marketplace.json's url-sourced entries render the
+# `native`-KIND rows — two different sets since wave-06 S3, because impeccable
+# is installable as `impeccable@bionic` (so it needs a marketplace entry) while
+# declaring it a plugin.json dependency would make it a third mandatory core
+# dep, which D-B ruled out. Neither manifest is an independent authority
+# (ownership table, wave-03 spec §Design). Version constraints are deliberately ABSENT from
 # plugin.json: the CLI cannot resolve a same-marketplace, version-constrained
 # dependency — reproduced on a fresh scratch config with a confirmed-existing
 # matching upstream tag (record/epic-17-w3/probe-ac6-marketplace-entry.md) — so
@@ -946,20 +1233,22 @@ MANIFEST_JSON_HELPER="$TMP/manifest_agreement.py"
 cat > "$MANIFEST_JSON_HELPER" <<'PYEOF'
 import json, sys
 
-plugin_path, marketplace_path, table_json = sys.argv[1], sys.argv[2], sys.argv[3]
-table = json.loads(table_json)  # {name: source_url}
+plugin_path, marketplace_path = sys.argv[1], sys.argv[2]
+core_json, native_json = sys.argv[3], sys.argv[4]
+core = json.loads(core_json)      # {name: mechanism}  class == core
+table = json.loads(native_json)   # {name: mechanism}  kind  == native (superset of core)
 plugin = json.load(open(plugin_path))
 mkt = json.load(open(marketplace_path))
 
 problems = []
 
 deps = {d.get('name'): d for d in plugin.get('dependencies', []) if isinstance(d, dict)}
-for name in table:
+for name in core:
     if name not in deps:
         problems.append("plugin.json missing dependency: %s" % name)
 for name, d in deps.items():
-    if name not in table:
-        problems.append("plugin.json has dependency with no table row: %s" % name)
+    if name not in core:
+        problems.append("plugin.json has dependency with no core row: %s" % name)
         continue
     if d.get('marketplace') != 'bionic':
         problems.append("plugin.json %s marketplace != bionic: %r" % (name, d.get('marketplace')))
@@ -990,15 +1279,26 @@ for name, p in entries.items():
 print('\n'.join(problems))
 PYEOF
 
-LANE3A_NAMES="$(deps_run -- dep_names_lane 3a | sort)"
-TABLE_JSON="$(python3 -c "
+names_to_json() {  # <newline-separated names> — {name: mechanism}
+  local names="$1"
+  python3 -c "
 import json, sys
 names = sys.argv[1].split()
 print(json.dumps({n: sys.argv[2 + i] for i, n in enumerate(names)}))
-" "$LANE3A_NAMES" $(while IFS= read -r n; do [ -n "$n" ] && deps_run -- dep_field "$n" source_url; done <<< "$LANE3A_NAMES"))"
+" "$names" $(while IFS= read -r n; do [ -n "$n" ] && deps_run -- dep_field "$n" mechanism; done <<< "$names")
+}
+
+CORE_NAMES="$(deps_run -- dep_names_class core | LC_ALL=C sort)"
+NATIVE_NAMES="$(deps_run -- dep_names_kind native | LC_ALL=C sort)"
+CORE_JSON="$(names_to_json "$CORE_NAMES")"
+NATIVE_JSON="$(names_to_json "$NATIVE_NAMES")"
+
+# The two sets are not the same set, and the difference is exactly impeccable.
+expect_eq "the marketplace-rendered set is the native-kind set, core plus impeccable" \
+  "agent-skills impeccable superpowers" "$(printf '%s' "$NATIVE_NAMES" | tr '\n' ' ' | sed 's/ $//')"
 
 manifest_agreement_report() {  # <plugin.json path> <marketplace.json path>
-  python3 "$MANIFEST_JSON_HELPER" "$1" "$2" "$TABLE_JSON"
+  python3 "$MANIFEST_JSON_HELPER" "$1" "$2" "$CORE_JSON" "$NATIVE_JSON"
 }
 
 expect_eq "table, plugin.json, and marketplace.json agree in both directions (golden case)" \
@@ -1095,8 +1395,20 @@ echo "=== Group 20: the sha ACTUATES the version the constraint JUDGES (C-4) ===
 #   3dcbd5c -> superpowers 6.2.0   the discriminating install under an isolated
 #                                  CLAUDE_CONFIG_DIR; installed_plugins.json read back
 #                                  {"version":"6.2.0","gitCommitSha":"3dcbd5c…"}
+#   5a149f3 -> impeccable 4.1.1    wave-06 S3, derived offline the same way a
+#                                  reviewer would: `git ls-remote --tags
+#                                  https://github.com/pbakaus/impeccable.git`
+#                                  → skill-v4.1.1 is the newest skill tag
+#                                  (peeled commit 5a149f3, "Release: skill
+#                                  v4.1.1"), and `git show
+#                                  skill-v4.1.1^{commit}:.claude-plugin/plugin.json`
+#                                  declares "version": "4.1.1". The pin is that
+#                                  commit rather than the branch head
+#                                  (f88b2837 on 2026-08-20) so the entry names
+#                                  a release, not whatever main happens to hold.
 SHA_VERSION_PAIRS='superpowers|b36e0829c6d0140e93cfef2ca599b1b07d4a7797|6.3.0
 agent-skills|df1edb2e05487d0aa6d93c747141e0aed1187f25|0.6.7
+impeccable|5a149f3fdb1b5793f10567233b1dcab98fc305fd|4.1.1
 superpowers|3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9|6.2.0'
 
 sha_to_version() {  # <plugin> <sha> -> the known version, or empty
@@ -1118,7 +1430,7 @@ while IFS= read -r dep_name; do
     test -n "$KNOWN_VERSION"
   expect_eq "${dep_name}: the version that sha installs satisfies the table's ${DEP_CONSTRAINT}" \
     "ok" "$(deps_run -- dep_constraint_verdict "$DEP_CONSTRAINT" "${KNOWN_VERSION:-0.0.0}")"
-done <<< "$(deps_run -- dep_names_lane 3a)"
+done <<< "$(deps_run -- dep_names_kind native)"
 
 # The judge is live, not decorative: the third fixture pair is a REAL sha that
 # installs a version the table would reject. Without this arm, a pair table
@@ -1290,6 +1602,42 @@ expect_eq "…and detect_plugin_registered answers from that same overridden fil
   "plugin:registered=yes" \
   "$(detect_run BIONIC_INSTALLED_PLUGINS_FILE="$R_CH/plugins/installed_plugins.json" \
        BIONIC_CLAUDE_HOME="$TMP/ch-nonexistent" -- detect_plugin_registered)"
+
+# ---- the refusal is a LINE FOR A PERSON, not a stack frame (epic-17 W6 S15, A-6.6 (a)) ----
+#
+# THE DEFECT. Every refusal above went out under the header `detect_plugin_root: REFUSED —`.
+# That is a function name and an internal verdict word printed at whoever ran
+# `/bionic:setup` — the exact class S11 was dispatched for and put on the wall for the three
+# payload scripts, found live in the library beneath them by S12's own §6 (hit #4).
+#
+# WHY THE ARM LIVES HERE and not in the two suites the brief offered. `tests/detect-probes.
+# test.sh` never drives this function — its subject is the load-state and duplicates probes,
+# and it has no fixture registry for the three refusal exits. `tests/script-vocabulary.test.
+# sh` is a STATIC lint whose roster is `setup.sh doctor.sh remove.sh`; extending it to
+# `payload/scripts/lib/*.sh` is A-6.S12.12, promoted out of this slice's scope as structural.
+# This group already drives all three refusal exits with their stderr captured in
+# `$TMP/root.err`, so the arm is one assertion away from evidence that already exists — and
+# it measures the RENDERED line rather than the source text, which is the stronger form.
+#
+# THE AUTHORITY IS THE SHARED LIST, not this suite's taste: `detect_` is a token in
+# tests/fixtures/banned-display-vocabulary.txt, checked here so the arm cannot outlive the
+# rule it enforces.
+R_BANNED_LIST="${BIONIC_SCRIPTS_DIR}/tests/fixtures/banned-display-vocabulary.txt"
+expect_true "the banned-vocabulary list still bans the function-name prefix this arm checks" \
+  /usr/bin/grep -qx 'detect_' "$R_BANNED_LIST"
+
+for _r_case in "$TMP/ch-nonexistent:no registry file" "$CH_EMPTY:no bionic entry" \
+               "$CH_MALFORMED:unparseable registry" "$R_CH_GONE:registered path gone"; do
+  _r_home="${_r_case%%:*}"; _r_what="${_r_case#*:}"
+  root_run BIONIC_CLAUDE_HOME="$_r_home" --
+  expect_no_match "refusal (${_r_what}) prints no function name at the user" \
+    "*detect_*" "$R_ERR"
+  expect_no_match "…and no internal verdict word either" "*REFUSED*" "$R_ERR"
+  expect_match "…and still says what is wrong, in product words" "*bionic*" "$R_ERR"
+  expect_match "…and still names the one fix" "*claude plugin install bionic@bionic*" "$R_ERR"
+  expect_eq "…and still hands back nothing on stdout" "" "$R_OUT"
+  expect_eq "…and still exits 1, so no caller reads a refusal as an answer" "1" "$R_ST"
+done
 
 # ---- read-only, like every other fact here ----
 expect_eq "detect_plugin_root writes nothing into the config dir it read" \

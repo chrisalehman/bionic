@@ -119,6 +119,13 @@ run "version-ssot.test.sh" bash tests/version-ssot.test.sh
 # payload/scripts/lib/detect.sh, driven against fixture roots and a fixture
 # PATH. Belongs to no single hook, so hand-listed like the rest.
 run "plugin-lib.test.sh" bash tests/plugin-lib.test.sh
+# The read-only probes added at epic-17 W6 S2 (spec R5/AC-8, AC-9; R8/AC-13):
+# detect_plugin_load_state and detect_plugin_duplicates, driven against the
+# `claude plugin list` transcripts captured during W5's F12 measurement and a
+# planted plugin registry. Its own suite rather than a group in plugin-lib —
+# different fixture regime (a captured CLI transcript, not a fixture tree) — and
+# so, like every suite outside hooks/, hand-listed here or it never runs.
+run "detect-probes.test.sh" bash tests/detect-probes.test.sh
 # The worktree contract (epic-17 W3 S2, spec AC-10 / D4): payload/scripts/spawn-worktree.sh
 # driven against scratch git repositories, with its attestation line pinned byte-exactly
 # because dispatchers quote that line into their ledger rows. Its own suite rather than a
@@ -136,6 +143,30 @@ run "profile.test.sh" bash tests/profile.test.sh
 run "jit.test.sh" bash tests/jit.test.sh
 # Command-file conventions (epic-17 W3 S9, spec AC-1): globs payload/commands/*.md.
 run "command-format.test.sh" bash tests/command-format.test.sh
+# Command PERMISSIONS (epic-17 W6 S9b, walk finding W-1 / plan A-5.4): the byte-for-byte
+# agreement between each command file's own `allowed-tools` rule prefix, every fenced
+# `bash` invocation in that same file, and profile.template.json's rule for the same
+# script. A permission rule prefix-matches the literal command string, so one quote
+# character in a body silently un-authorizes it — which is what walled bionic's own
+# commands. Hand-listed like every suite outside hooks/.
+run "command-permissions.test.sh" bash tests/command-permissions.test.sh
+# The end-user README (epic-17 W6 S8, spec AC-4): README.md's "## Installation
+# (30-second setup)" section pinned to the ratified reference shape — two
+# `claude plugin` command lines, the in-session twin, the `claude plugin list`
+# fallback, zero mechanism words. Hand-listed like every suite outside hooks/.
+run "readme.test.sh" bash tests/readme.test.sh
+# The presentation contract (epic-17 W6 S1, spec R3 / AC-5 / AC-6): the one voice block at
+# agents-src/blocks/voice-contract.md, its byte-identical presence in all four shipped
+# command files, help.md's render-in-full instruction, and the banned-display-vocabulary
+# lint over the command surface. Staleness of the render itself belongs to
+# agent-render.test.sh; this suite owns presence and content. Hand-listed like every suite
+# outside hooks/.
+run "voice-contract.test.sh" bash tests/voice-contract.test.sh
+# The other half of AC-6 (epic-17 W6 S4): every line setup.sh, doctor.sh and remove.sh PRINT
+# judged against the same one banned-vocabulary list voice-contract.test.sh reads — display
+# verbs, prompts, and the self-appending accumulators the action and degradation lines are
+# built in. Hand-listed like every suite outside hooks/.
+run "script-vocabulary.test.sh" bash tests/script-vocabulary.test.sh
 # The diagram pins (epic-17 W4 S8, spec AC-6 / design D4): the two composed-SVG diagrams
 # under skills/canonical-sdlc/diagrams/ read as text and compared against what they draw —
 # the hooks' SUPPORTED_SDLC_VERSION, hooks.json's six always-on entries, and SKILL.md's ten

@@ -24,6 +24,8 @@
 #   env:legacy-channel-hooks count=<n|unknown>
 #   env:legacy-hook-files count=<n|unknown> path=<dir> names=<a.sh,b.sh|-> [cause=<text>]
 #   state:half-uninstalled=<yes|no>
+#   load-state=<loaded|failed|absent|unknown> error=<CLI error text|-> [cause=<text>]
+#   dup=<bare-name> ids=<a@x>,<b@y> fix=<consolidation command>
 #
 # `unknown` APPEARS WHERE HONESTY REQUIRES IT. Two of these values can read
 # `unknown` where the spec's table sketched only yes/no: a dependency whose
@@ -45,6 +47,7 @@
 #   BIONIC_CLAUDE_HOME     the CLI's config dir        ${CLAUDE_CONFIG_DIR:-~/.claude}
 #   BIONIC_SETTINGS_FILE   user settings.json          <claude-home>/settings.json
 #   BIONIC_SHELL_RC        the shell rc bionic edits   ~/.zshrc or ~/.bashrc, per $SHELL
+#   BIONIC_PLUGIN_LIST_CMD the CLI's own listing       `claude plugin list`
 #
 # Sourced, never executed:  . "${CLAUDE_PLUGIN_ROOT}/scripts/lib/detect.sh"
 
@@ -662,11 +665,17 @@ detect_plugin_install_path() {  # <plugin-name>
 # 0, or NOTHING on stdout, a named fix on stderr, and exit 1. No fallback exists anywhere in
 # this function, deliberately — including the one it was written to replace.
 
+# THE REFUSAL IS A LINE FOR A PERSON. It used to open `detect_plugin_root: REFUSED — …`,
+# which names this function and an internal verdict word at whoever ran /bionic:setup —
+# the same class the three payload scripts have had banned since W6 S11, found live here
+# by S12's own vocabulary sweep (§6 hit #4, A-6.6 (a)). The line now says what is wrong
+# and what to do; the exit code and the empty stdout, which are what the CALLERS read, are
+# untouched. Pinned by tests/plugin-lib.test.sh Group R against the shared banned list.
 _detect_plugin_root_refuse() {  # <what went wrong>
-  echo "detect_plugin_root: REFUSED — $1" >&2
+  echo "bionic could not find its own installed files — $1" >&2
   echo "  Fix: claude plugin install bionic@bionic" >&2
-  echo "  There is deliberately no fallback root: a guessed path can be an older build than" >&2
-  echo "  the one the CLI loads, and a stale hook that runs is worse than a missing one." >&2
+  echo "  bionic will not guess a location instead: a guessed one can be an older copy than" >&2
+  echo "  the plugin your session is running, and a stale copy that runs is worse than none." >&2
   return 1
 }
 
@@ -759,6 +768,411 @@ detect_registry_sha_lag() {  # [<repo-dir>] -> one line, always exit 0
   else
     echo "plugin:registry-sha state=not-in-repo registry=${sha} repo=${head} cause=-"
   fi
+  return 0
+}
+
+# ─── Bounded execution ───────────────────────────────────────────────────────
+#
+# THE THINGS BIONIC RUNS THAT IT DOES NOT CONTROL. Almost every fact in this file
+# is a file read. A few are other people's programs — the CLI, Homebrew, npm —
+# and any of them can wedge: a network mirror that never answers, a package
+# manager waiting on its own lock, a CLI mid-update. Unbounded, whatever asked
+# the question wedges with them.
+#
+# ONE OWNER, TWO CALLERS (epic-17 W6 S11, critic F-3). This lived in doctor.sh,
+# so doctor's plugin listing was bounded and setup's — the SAME probe, the same
+# `claude plugin list` — was not. Setup is the command a stranger runs first, and
+# it ran it after the install with the report half-printed, where a wedge is
+# indistinguishable from a crash. A bound that only one of two callers has is a
+# bound the product does not have, so it lives here now, beside the probe, and
+# both scripts call it.
+#
+# ONE MECHANISM, ONE BOUND: a background job in its own process group, plus a
+# poll that signals the group when the limit is up. It runs shell functions and
+# external commands alike, which `timeout(1)` cannot, and it reaches a forked
+# grandchild, which `timeout(1)` also cannot — see `detect_bounded` below for
+# why that second one is the difference between a bound and a bound that binds.
+#
+# KILLING IS THE POINT, so the child is started in a way that can be killed AND
+# in a way that cannot hold the caller open: its stdout is a file this function
+# reads afterwards — never the caller's command-substitution pipe — and its stdin
+# is closed, so a probe can never eat the answer to a question the caller asks
+# later.
+#
+# NO `sleep`, NO BOUND — deliberately, and stated rather than hidden. On a
+# machine so bare that coreutils is missing, waiting on the probe is a better
+# failure than spinning a hot loop against it.
+#
+# THE SEAM KEEPS ITS NAME. `BIONIC_DOCTOR_PROBE_SECONDS` was named when doctor
+# was the only caller. It is cited by the Step-5 captures and by the suites that
+# accelerate it, and renaming it would invalidate evidence to buy nothing a
+# reader of this file cannot see in one line.
+detect_probe_seconds() { echo "${BIONIC_DOCTOR_PROBE_SECONDS:-15}"; }
+
+# WHAT A BOUND OWES, AND THE HALF THE FIRST CUT DID NOT PAY (six-axis review C-1).
+# A bound has to release the CALLER on time, not merely stop waiting on its own
+# child. The first cut did the second only, and the two come apart on exactly the
+# shape both real probes have: `brew` is a shell script that runs Ruby, `npm` a
+# shim that runs node. The child forks a grandchild, the grandchild inherits the
+# stdout it was started with — the caller's `$(…)` pipe — and killing the child
+# leaves that pipe open. Measured: `rc=124 elapsed=45s` against a three-second
+# bound. The row said "not checked" honestly and printed it forty-two seconds late.
+#
+# SO THE PROBE NEVER WRITES TO THE CALLER'S PIPE. Its stdout goes to a file that
+# this function alone reads, after the wait is over: whatever the grandchild does
+# next, it does to a file nobody is waiting on. That is what makes the bound bind.
+#
+# AND THE GROUP IS WHAT GETS SIGNALLED. `set -m` puts the job in a process group
+# of its own (pgid == pid), so `kill -TERM -$pid` reaches the grandchild too and
+# a probe that timed out is not left running on the machine afterwards. Monitor
+# mode is restored immediately: it is on for the launch, not for the script.
+#
+# ONE MECHANISM, NOT TWO. This used to hand external commands to `timeout` when
+# one existed. `timeout(1)` signals the child and not the group, so it carries
+# the same defect this function was just fixed for, and on bionic's platform it
+# never ran at all (`command -v timeout` is empty on stock macOS). A second
+# mechanism that cannot honour the contract is worse than no second mechanism.
+# Supersedes A-4.S6.5's two-mechanism note.
+#
+# THE TEMPORARY FILE IS NOT A CHANGE TO THIS MACHINE. It lives under $TMPDIR,
+# carries the pid so two callers cannot collide, and is removed as it is read.
+# "Nothing on this machine is changed" is a claim about the user's configuration
+# — settings, plugins, dependencies — and no probe output ever reaches one.
+_DETECT_BOUND_SEQ=0
+
+_detect_bound_read() {  # <file> — pass on what the probe managed to say, then forget it
+  local file="${1:-}" payload
+  # `$(<file)` is bash's own read: no `cat`, so a machine missing coreutils
+  # still gets the probe's answer rather than an empty one.
+  if [ -s "$file" ]; then payload="$(<"$file")"; printf '%s\n' "$payload"; fi
+  rm -f "$file" 2>/dev/null || true
+  return 0
+}
+
+detect_bounded() {  # <seconds> <command...> — passes stdout through; 124 on timeout
+  local limit="${1:-15}"; shift
+  local pid waited=0 rc out_file had_monitor
+
+  _DETECT_BOUND_SEQ=$((_DETECT_BOUND_SEQ + 1))
+  out_file="${TMPDIR:-/tmp}/bionic-probe.$$.${_DETECT_BOUND_SEQ}"
+  : > "$out_file" 2>/dev/null || out_file="/dev/null"
+
+  case "$-" in *m*) had_monitor=yes ;; *) had_monitor=no ;; esac
+  set -m
+  "$@" </dev/null > "$out_file" &
+  pid=$!
+  [ "$had_monitor" = "yes" ] || set +m
+
+  if ! command -v sleep >/dev/null 2>&1; then
+    wait "$pid"; rc=$?
+    _detect_bound_read "$out_file"
+    return $rc
+  fi
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$waited" -ge "$limit" ]; then
+      # The group first — `-$pid` is the process group `set -m` gave this job —
+      # and the bare pid as the fallback for a kernel that refused the group.
+      kill -TERM "-${pid}" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      _detect_bound_read "$out_file"
+      return 124
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  wait "$pid"; rc=$?
+  _detect_bound_read "$out_file"
+  return $rc
+}
+
+# ─── Is the CLI actually LOADING us? ─────────────────────────────────────────
+#
+# THE FACT NOTHING IN THIS FILE COULD ANSWER UNTIL NOW, and the most expensive
+# one to get wrong. Epic-17 W5's F12 measurement: `claude plugin install
+# bionic@bionic` exits 0, prints a green success line, writes the registry entry
+# — and if a dependency is missing the plugin loads NOTHING. No hook fires, no
+# command exists, and the only surface on the whole machine that says so is
+# `claude plugin list`. Four reproductions, all silent. Every other fact in this
+# file was measured healthy on that machine while the plugin was completely
+# inert, because they all read the REGISTRY and the registry was right: bionic
+# was installed. Installed and loaded are two different questions.
+#
+# WHY A COMMAND AND NOT A FILE. The load decision is the CLI's, taken at session
+# start from the dependency graph, and it is not written anywhere we can read.
+# The listing is the CLI reporting its own conclusion, which makes it the only
+# honest source — so this is the one fact function that SHELLS OUT.
+#
+# THE SEAM IS THE COMMAND ITSELF. `BIONIC_PLUGIN_LIST_CMD` (default
+# `claude plugin list`), split on whitespace and executed as argv — not `eval`,
+# which would make an env var a code-execution channel for no gain. The suite
+# points it at captured CLI transcripts; production never sets it.
+#
+# UNRECOGNIZED IS `unknown`, NEVER `loaded` (plan A-3.2). This probe exists to
+# be believed on a machine where everything else reads healthy, so the one
+# failure it must never have is optimism: a parser that shrugs at an output it
+# does not understand and calls it fine would report green on exactly the box
+# that is broken. Three separate honesty gates below — the command must run, the
+# output must be recognizable as a listing at all, and the status word must be
+# one of the two we have actually seen — and every one of them falls to
+# `unknown` with its cause named.
+#
+# ABSENT vs UNKNOWN is the distinction that gate two buys. "This listing is real
+# and your plugin is not in it" and "I cannot tell what I am reading" are
+# different answers with different fixes, and collapsing them would let a
+# garbled listing masquerade as a clean uninstall.
+
+detect_plugin_load_state() {  # <plugin-id> -> one line, always exit 0
+  local id="${1:-}" cmd out st parsed rows found status err
+  local -a argv=()
+
+  if [ -z "$id" ]; then
+    echo "load-state=unknown error=- cause=no plugin id was given"
+    return 0
+  fi
+
+  # `${VAR-default}`, NOT `${VAR:-default}` (six-axis review C-3). With the colon,
+  # an explicitly-empty seam counts as unset and falls back to the real CLI — so
+  # the empty-command guard three lines down was unreachable through the seam that
+  # is supposed to reach it, and a suite that CLEARED the variable instead of
+  # pointing it at a fixture would have run the live `claude plugin list` and
+  # passed. Without the colon, set-but-empty stays empty and meets the guard.
+  cmd="${BIONIC_PLUGIN_LIST_CMD-claude plugin list}"
+  # Whitespace split into argv. A command string is not a shell program here:
+  # no quoting, no operators, no eval. That is a deliberate ceiling on what a
+  # seam can do, and everything the seam is FOR fits under it.
+  read -r -a argv <<<"$cmd" || true
+  if [ "${#argv[@]}" -eq 0 ]; then
+    echo "load-state=unknown error=- cause=the plugin listing command is empty, so nothing could be asked"
+    return 0
+  fi
+
+  out="$( "${argv[@]}" 2>/dev/null )"
+  st=$?
+  if [ "$st" -ne 0 ]; then
+    echo "load-state=unknown error=- cause=\`${cmd}\` exited ${st}, so the plugin listing could not be read"
+    return 0
+  fi
+
+  # THE LISTING IS A BLOCK FORMAT, AND THIS WAS MEASURED, NOT ASSUMED. What the
+  # CLI prints today (measured on this machine, 2026-08-20) is one BLOCK per
+  # plugin — the id alone on a `❯` line, with Version / Scope / Status indented
+  # beneath it:
+  #
+  #   Installed plugins:
+  #
+  #     ❯ bionic@bionic
+  #       Version: 0.1.0
+  #       Scope: user
+  #       Status: ✔ enabled
+  #
+  # W5's F12 report renders the same listing as one line per plugin
+  # (`❯ bionic@bionic  0.1.0  user  Status: ✔ enabled`). That rendering is the
+  # report's own reflow, not CLI bytes — the first cut of this parser was
+  # written against it and answered `absent` for a plugin this machine had
+  # loaded, which is precisely the confident wrong answer this file forbids.
+  # BOTH shapes are parsed, because the elided one may equally be an older CLI's
+  # real output and neither is worth betting a silent `absent` on.
+  #
+  # ONE pass, four answers, on separate lines rather than tab-joined: a status
+  # line is someone else's string and may hold tabs, and `read` splitting on a
+  # whitespace IFS silently collapses empty fields. Line-per-field cannot.
+  #
+  #   rows    how many plugin entries were seen at all (gate two)
+  #   found   1 if one of them names this id
+  #   status  that entry's Status line, verbatim
+  #   error   the first Error: line inside that entry, prefix stripped
+  #
+  # `inblock` is what keeps a failing NEIGHBOUR's status and error off our
+  # answer: both belong to the last entry opened, and an entry that is not ours
+  # closes the block rather than leaving it open.
+  parsed="$(awk -v id="$id" '
+    {
+      isheader  = (index($0, "❯") > 0)
+      hasstatus = (index($0, "Status:") > 0)
+
+      # An entry opens on a `❯` line — or, if this listing has no glyph at all,
+      # on a Status line that carries its own id (the one-line shape).
+      if (isheader || (hasstatus && !anyheader)) {
+        rows++
+        hit = 0
+        n = split($0, f, /[ \t]+/)
+        for (i = 1; i <= n; i++) if (f[i] == id) hit = 1
+        inblock = hit
+        if (hit) found = 1
+      }
+      if (isheader) anyheader = 1
+
+      if (inblock && hasstatus && status == "") status = $0
+      if (inblock && err == "" && index($0, "Error:") > 0) {
+        line = $0
+        sub(/^[ \t]*/, "", line)
+        sub(/^Error:[ \t]*/, "", line)
+        err = line
+      }
+    }
+    END {
+      printf "%d\n%d\n%s\n%s\n", rows + 0, found + 0, status, err
+    }
+  ' <<<"$out")"
+
+  { IFS= read -r rows; IFS= read -r found; IFS= read -r status; IFS= read -r err; } <<<"$parsed"
+
+  if [ "${found:-0}" != "1" ]; then
+    if [ "${rows:-0}" -eq 0 ] 2>/dev/null; then
+      echo "load-state=unknown error=- cause=the output of \`${cmd}\` is not a plugin listing"
+    else
+      echo "load-state=absent error=-"
+    fi
+    return 0
+  fi
+
+  # Order matters: `failed to load` is checked before anything else because a
+  # status that says both is a failure, and `not enabled`/`disabled` are ruled
+  # out before the `enabled` substring can catch them.
+  if [ -z "$status" ]; then
+    echo "load-state=unknown error=- cause=the listing names ${id} but reports no status for it"
+    return 0
+  fi
+
+  case "$status" in
+    *"failed to load"*)
+      if [ -n "$err" ]; then
+        echo "load-state=failed error=${err}"
+      else
+        echo "load-state=failed error=-"
+      fi ;;
+    *"not enabled"*|*disabled*)
+      # Installed and switched off is a deliberate choice, not a failure — but
+      # it is not one of the four states either, and it is certainly not
+      # `loaded`. Named for what it is so the renderer can say so.
+      echo "load-state=unknown error=- cause=the CLI reports ${id} as not enabled: ${status}" ;;
+    *enabled*)
+      echo "load-state=loaded error=-" ;;
+    *)
+      echo "load-state=unknown error=- cause=the CLI reports ${id} in a state this reader does not know: ${status}" ;;
+  esac
+  return 0
+}
+
+# ─── Two catalogs, one name ──────────────────────────────────────────────────
+#
+# SILENT DUPLICATION IS THE DEFECT (spec R5). Nothing stops a machine holding
+# `superpowers@bionic` and `superpowers@claude-plugins-official` at once — or two
+# `bionic`s — and nothing tells the user, so which copy a session actually loads
+# becomes a coin flip they never saw tossed. The registry knows; nobody asked it.
+#
+# BARE NAME IS THE COLLISION, not the key. Registry keys are `<name>@<catalog>`
+# and are unique by construction, so the duplicate is invisible to any check that
+# compares keys. Two keys whose `split("@")[0]` match ARE the finding.
+#
+# REPORTS, NEVER RESOLVES. This hands back the consolidation command and stops.
+# Setup asks (consolidate / coexist / skip) and doctor lists; neither is this
+# function's business, and coexistence is a legitimate choice a user may make
+# deliberately — which is exactly why the answer is a question and not an action.
+#
+# WHO LOSES. When one side is `@bionic`, bionic's own catalog is the copy this
+# machine's install chose, so the fix names the OTHER one. With no `@bionic`
+# side, bionic has no standing to pick a winner and does not pretend to: the fix
+# names both and says to choose.
+#
+# NO jq, NO ANSWER — and specifically not silence. Zero lines means "no
+# duplicates", which is a claim; a reader that cannot parse the registry has not
+# earned it. So the honest degradation is one `dup=unknown` line carrying its
+# cause, and the same for a registry that is present and unparseable. A registry
+# that is simply ABSENT is different: the CLI writes that file when it installs
+# anything, so nothing installed means nothing duplicated, and zero lines is true.
+DETECT_PLUGIN_DUPLICATES_JQ='[ (.plugins // {}) | keys[] ]
+  | group_by(split("@")[0])
+  | map(select(length > 1))[]
+  | "\(.[0] | split("@")[0])\t\(join(","))"'
+
+_detect_duplicate_fix() {  # <comma-separated ids> -> the fix clause
+  local ids="$1" id bionic_side=0 losers="" all="" out=""
+
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    all="${all}${id}
+"
+    case "$id" in
+      *@bionic) bionic_side=$((bionic_side + 1)) ;;
+      *)        losers="${losers}${id}
+" ;;
+    esac
+  done <<<"${ids//,/$'\n'}"
+
+  if [ "$bionic_side" -ge 1 ] && [ -n "$losers" ]; then
+    while IFS= read -r id; do
+      [ -n "$id" ] || continue
+      out="${out}${out:+; }claude plugin uninstall ${id}"
+    done <<<"$losers"
+    printf '%s' "$out"
+    return 0
+  fi
+
+  while IFS= read -r id; do
+    [ -n "$id" ] || continue
+    if [ -z "$out" ]; then
+      out="choose one: claude plugin uninstall ${id}"
+    else
+      out="${out}, or claude plugin uninstall ${id}"
+    fi
+  done <<<"$all"
+  printf '%s' "$out"
+  return 0
+}
+
+# BOUNDED, THROUGH THE ONE RUNNER (epic-17 W6 S15, A-6.6 (b) / A-6.S15.2). The reading
+# below is a file read, which is why it was left unbounded when S11 bounded the load-state
+# probe — but the READER is `jq`, someone else's program, over a path that can sit on a
+# stalled mount, and S12 put this probe on `/bionic:setup --list`, where a stranger meets
+# it before anything else has printed. So the bound lives at the CALLEE: there are three
+# call sites (setup's roster, setup's duplicates step, doctor's report) and no single site
+# they share, and a bound only some callers take is the asymmetry S11 was dispatched to
+# end. The probe body is `_detect_plugin_duplicates_probe`; this is the only thing that
+# runs it.
+#
+# A TIMEOUT IS `unknown`, NEVER SILENCE. Zero lines means "no duplicates", which is a claim
+# a probe that could not look has not earned (A-4.S2.8). Whatever the cut-off probe managed
+# to write is DISCARDED rather than passed on: a half-read line is the one answer worse
+# than none. Every caller already reads the `dup=unknown … cause=` shape — setup's roster
+# skips it, setup's step prints the cause, doctor renders it — so nothing downstream needed
+# a new branch.
+detect_plugin_duplicates() {  # -> zero or more lines, always exit 0
+  local out st
+  out="$(detect_bounded "$(detect_probe_seconds)" _detect_plugin_duplicates_probe)"
+  st=$?
+  if [ "$st" -eq 124 ]; then
+    echo "dup=unknown ids=- fix=- cause=the plugin registry did not answer within $(detect_probe_seconds) seconds"
+    return 0
+  fi
+  [ -n "$out" ] && printf '%s\n' "$out"
+  return 0
+}
+
+_detect_plugin_duplicates_probe() {  # -> zero or more lines, always exit 0
+  local reg out bare ids
+
+  reg="$(_detect_installed_plugins_file)"
+  [ -f "$reg" ] || return 0
+
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "dup=unknown ids=- fix=- cause=jq is not on PATH, so the plugin registry cannot be read"
+    return 0
+  fi
+
+  if ! out="$(jq -r "$DETECT_PLUGIN_DUPLICATES_JQ" "$reg" 2>/dev/null)"; then
+    echo "dup=unknown ids=- fix=- cause=the plugin registry at ${reg} could not be parsed"
+    return 0
+  fi
+
+  [ -n "$out" ] || return 0
+
+  # Exactly two fields, neither ever empty, so a tab IFS is safe here in a way
+  # it would not be for the load-state parse above.
+  while IFS="$(printf '\t')" read -r bare ids; do
+    [ -n "$bare" ] || continue
+    echo "dup=${bare} ids=${ids} fix=$(_detect_duplicate_fix "$ids")"
+  done <<<"$out"
   return 0
 }
 

@@ -1,0 +1,3 @@
+  ❯ agent-skills@bionic  0.6.7  user  Status: ✔ enabled
+  ❯ bionic@bionic        0.1.0  user  Status: ✔ enabled
+  ❯ superpowers@bionic   6.3.0  user  Status: ✔ enabled

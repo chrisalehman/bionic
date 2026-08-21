@@ -12,8 +12,8 @@ Standing instructions for every agent working in this repo.
   tears the footprint back down. The bootstrap installer and its reset script were
   deleted at epic-17 W5 — a change to a hook or a skill is not live for a session until
   the plugin the CLI resolved carries it.
-- Test suite: `bash tests/run.sh` — runs every hermetic suite plus the Docker e2e when
-  Docker is present. Must be green before any commit.
+- Test suite: `bash tests/run.sh` — runs every hermetic suite. Must be green before any
+  commit.
 
 ## SDLC
 
