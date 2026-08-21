@@ -97,6 +97,28 @@ for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat ls tr head ta
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BIN}/${real}" 2>/dev/null
 done
 
+# `mv` WITH A WITNESS (critic F2). Every rc rewriter in the payload stages its
+# work in a `<file>.bionic.tmp` and renames it into place, so the mode the RENAME
+# publishes is the only mode that matters: a writer that publishes 0644 and
+# repairs it afterwards would still have exposed the whole file — a shell rc is
+# where people keep `export …_API_KEY=` — under a predictable name for the span
+# before the rename, and permanently if the process dies in it. This wrapper
+# records the mode of what each `mv` is about to publish. Inert unless an arm
+# sets BIONIC_TEST_MV_LOG; `exec` hands off to the real binary.
+SETUP_MV_REAL="$(command -v mv 2>/dev/null)"
+# The loop above left a SYMLINK to the real binary here; `cat >` would follow it
+# and try to write /bin/mv. Replace the link, do not write through it.
+rm -f "${BIN}/mv"
+cat > "${BIN}/mv" <<MVSTUB
+#!/bin/bash
+if [ -n "\${BIONIC_TEST_MV_LOG:-}" ] && [ -f "\$1" ]; then
+  printf '%s %s\n' "\$(stat -f '%Lp' "\$1" 2>/dev/null || stat -c '%a' "\$1" 2>/dev/null)" "\$1" \
+    >> "\$BIONIC_TEST_MV_LOG"
+fi
+exec "$SETUP_MV_REAL" "\$@"
+MVSTUB
+chmod +x "${BIN}/mv"
+
 # A bin dir with everything above EXCEPT jq — the honest-unknown arms.
 NOJQ_BIN="$TMP/bin-nojq"; mkdir -p "$NOJQ_BIN"
 for f in "$BIN"/*; do
@@ -816,6 +838,64 @@ RC_TEXT="$(cat "$FIX/rc")"
 expect_no_match "legacy UNMARKED variant: the bare alias is removed too" \
   '*dangerously-skip-permissions*' "$RC_TEXT"
 expect_match "legacy unmarked variant: the user's own rc lines survive" '*export PATH=*' "$RC_TEXT"
+
+# ─── THE MODE OF THE FILE SETUP REWRITES (critic F2) ─────────────────────────
+#
+# `_setup_rc_strip_block` and the unmarked-alias rewrite below it both build a
+# `<rc>.bionic.tmp` and rename it over the user's shell rc. `mv` replaces the
+# inode, so without a mode capture the rc comes back wearing the process umask
+# instead of its own — and a shell rc is where people keep plaintext tokens. The
+# same discipline `_dep_settings_write_jq` already carries for settings.json
+# (lib/env.sh's header states the reasoning): capture the mode, stage under
+# `umask 077`, chmod BEFORE the rename. Both directions, and the witness above
+# measures the staged copy rather than only the published one.
+file_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
+
+new_fixture alias-marked-mode-600
+plant_cli_plugin "bionic@bionic" true
+printf 'export PATH="$HOME/bin:$PATH"\nexport SOME_API_TOKEN=sk-fixture-not-a-real-secret\n\n%s\n%s\n%s\n' \
+  "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
+chmod 600 "$FIX/rc"
+expect_eq "fixture: the rc really starts at 0600 (the arm is not vacuous)" \
+  "600" "$(file_mode "$FIX/rc")"
+OUT="$(run_setup "$YES" BIONIC_TEST_MV_LOG="$TMP/mv-alias-600.log")"
+expect_no_match "marked variant at 0600: the block really was stripped (not vacuous)" \
+  "*${ALIAS_START}*" "$(cat "$FIX/rc")"
+expect_eq "setup's marked-block strip leaves a 0600 rc at 0600" \
+  "600" "$(file_mode "$FIX/rc")"
+expect_no_match "…and the mv witness really saw the rc rename" "" \
+  "$(grep 'rc\.bionic\.tmp' "$TMP/mv-alias-600.log" 2>/dev/null || true)"
+expect_eq "…and every staged copy of the 0600 rc was itself 0600, before the rename" "" \
+  "$(grep 'rc\.bionic\.tmp' "$TMP/mv-alias-600.log" 2>/dev/null | grep -v '^600 ' || true)"
+
+new_fixture alias-marked-mode-644
+plant_cli_plugin "bionic@bionic" true
+printf 'export PATH="$HOME/bin:$PATH"\n\n%s\n%s\n%s\n' "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
+chmod 644 "$FIX/rc"
+OUT="$(run_setup "$YES")"
+expect_eq "setup does not narrow a 0644 rc either" "644" "$(file_mode "$FIX/rc")"
+
+# The OTHER rewriter: the unmarked legacy alias line, filtered out with grep -v.
+new_fixture alias-unmarked-mode-600
+plant_cli_plugin "bionic@bionic" true
+printf 'export PATH="$HOME/bin:$PATH"\nexport SOME_API_TOKEN=sk-fixture-not-a-real-secret\n%s\n' \
+  "$ALIAS_CONTENT" > "$FIX/rc"
+chmod 600 "$FIX/rc"
+OUT="$(run_setup "$YES" BIONIC_TEST_MV_LOG="$TMP/mv-unmarked-600.log")"
+expect_no_match "unmarked variant at 0600: the alias really was removed (not vacuous)" \
+  '*dangerously-skip-permissions*' "$(cat "$FIX/rc")"
+expect_eq "setup's unmarked-alias rewrite leaves a 0600 rc at 0600" \
+  "600" "$(file_mode "$FIX/rc")"
+expect_eq "…and its staged copy was 0600 before the rename too" "" \
+  "$(grep 'rc\.bionic\.tmp' "$TMP/mv-unmarked-600.log" 2>/dev/null | grep -v '^600 ' || true)"
+
+new_fixture alias-unmarked-mode-644
+plant_cli_plugin "bionic@bionic" true
+printf 'export PATH="$HOME/bin:$PATH"\n%s\n' "$ALIAS_CONTENT" > "$FIX/rc"
+chmod 644 "$FIX/rc"
+OUT="$(run_setup "$YES")"
+expect_eq "setup does not narrow a 0644 rc on the unmarked path either" \
+  "644" "$(file_mode "$FIX/rc")"
 
 new_fixture alias-declined
 plant_cli_plugin "bionic@bionic" true

@@ -71,8 +71,14 @@ about doing the job well; they are about still being alive to report it.
   wake. Not to save tokens, not to be polite, not because the context is long.
 - **Suite output always goes to a file, with `set -o pipefail`.** `<command> 2>&1 | tee "$LOG"`;
   validate the FILE, name every log path in your report.
-- **Documented fallback, only when a brief says the ceiling is not in force:** you were dispatched
-  in the background, so a command you start keeps running after you stop — launch it to a record
-  file with `nohup … > "$LOG" 2>&1 &`, print the path, and stop; the orchestrator arms a Monitor
-  on the file's `EXIT=` line. Never arm a watcher and go idle yourself.
+- **Documented fallback, only when a brief says the ceiling is not in force:** **if** you were
+  dispatched in the background (the orchestrator's Agent call ran you as a background task), a
+  command you start keeps running after you stop. Launch it with the Bash tool's own
+  `run_in_background: true` — not a shell background job, which severs the harness's own
+  delivery-by-exit — and shape the command so the log ends with its own status line:
+  `<cmd> > "$LOG" 2>&1; echo "EXIT=$?" >> "$LOG"`. Nothing else writes that line, so a launch
+  without it is a Monitor that never fires. Then print the path and stop; the orchestrator arms
+  a Monitor on the file's `EXIT=` line. **Otherwise stay in the foreground and do not stop** — a
+  foreground agent's final response ENDS the command, so the fallback would kill the work it
+  exists to protect. Never arm a watcher and go idle yourself.
 <!-- SURVIVAL-END -->

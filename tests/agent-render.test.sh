@@ -299,6 +299,10 @@ for r in $ROLES; do
 explicit timeout sized to the command|explicit timeout sized to the command
 never end your turn while a command is running|Never end your turn while a command is running
 documented fallback arms a Monitor on the file's EXIT= line|the orchestrator arms a Monitor on the file's `EXIT=` line
+the fallback is CONDITIONAL on background dispatch|**if** you were dispatched in the background
+…and says what to do when it does not hold|Otherwise stay in the foreground and do not stop
+…and names the harness-native background mode|run_in_background
+…and its snippet actually writes the EXIT= line|echo "EXIT=$?" >> "$LOG"
 DOCTRINE_PRESENT
   while IFS='|' read -r label needle; do
     [ -z "$label" ] && continue
@@ -311,6 +315,8 @@ DOCTRINE_PRESENT
 no sleep-5 poll loop|sleep 5
 no fixed ~120-second threshold|roughly 120
 no auto-backgrounds framing|auto-backgrounds
+no nohup — a mechanism with no evidence and the wrong survival semantics|nohup
+no shell background job|disown
 DOCTRINE_ABSENT
 done
 

@@ -342,13 +342,44 @@ _rm_file_has_line_matching() {  # <file> <ere>
   return 1
 }
 
+# THE MODE TRAVELS WITH THE CONTENT (critic F2). Both rewriters below stage the
+# new file beside the old one and `mv` it into place, and `mv` replaces the inode:
+# without this, a shell rc the user deliberately kept at 0600 comes back at
+# whatever the umask says, because bionic answered one question about a retired
+# marker block. That is the same defect `_dep_settings_write_jq` and `_rm_write`
+# already guard for settings.json, and the rc is if anything the likelier of the
+# two to hold plaintext tokens — it is where people put `export …_API_KEY=`.
+#
+# TWO HARMS, NOT ONE, WHICH IS WHY THE ORDER MATTERS. Repairing the mode after the
+# rename would fix the published file and still leave the staged copy — the whole
+# rc, secrets included, under a predictable name — at the umask's mode for the
+# span before it, and would make the widening PERMANENT if the process died in
+# that window. So the tmp is CREATED under `umask 077` and chmodded to the
+# original's mode before a single line is written into it: nothing ever exists at
+# a mode wider than the file it is replacing. An absent `stat` degrades to
+# "write, don't chmod" rather than to a refusal — the standalone door runs on the
+# machine with the bare /bin.
+_rm_mode_of() {  # <file> — the file's mode as chmod digits, empty if unknowable
+  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null
+}
+
+# Creates <tmp> empty, owned by this user alone, then widened to no more than the
+# mode of <file>. Callers append to it and rename it over <file>.
+_rm_stage_tmp() {  # <tmp> <file>
+  local tmp="$1" file="$2" mode
+  mode="$(_rm_mode_of "$file")"
+  (umask 077; : > "$tmp") || return 1
+  [ -n "$mode" ] && chmod "$mode" "$tmp"
+  return 0
+}
+
 # Drops every line matching an ERE.
 _rm_filter_out_lines() {  # <file> <ere>
   local file="$1"
   local ere="$2"
   local tmp="${file}.bionic.tmp"
   local line
-  : > "$tmp" || return 1
+  _rm_stage_tmp "$tmp" "$file" || return 1
   while IFS= read -r line || [ -n "$line" ]; do
     [[ "$line" =~ $ere ]] && continue
     printf '%s\n' "$line" >> "$tmp"
@@ -376,7 +407,7 @@ _rm_strip_marker_block() {  # <file> <start-line> <end-line>
   local file="$1" start="$2" end="$3"
   local tmp="${file}.bionic.tmp"
   local line skip=0 pending=0
-  : > "$tmp" || return 1
+  _rm_stage_tmp "$tmp" "$file" || return 1
   while IFS= read -r line || [ -n "$line" ]; do
     if [ "$line" = "$start" ]; then skip=1; pending=0; continue; fi
     if [ "$line" = "$end" ];   then skip=0; continue; fi
@@ -567,10 +598,18 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
     plugin)
       [ -n "$(_rm_registered_plugin_id)" ] ;;
     orphaned-dependencies)
-      # NEVER ON THE PAGE. Nothing is orphaned until the uninstall above lands,
-      # so a plan printed now would either name nothing (the honest answer, and
-      # useless) or promise something that is not true yet. The offer is made
-      # inside the run, by the item that creates it.
+      # ON THE PAGE WHEN THE CLI CAN NAME IT NOW — which is the case where this
+      # row stands alone. Nothing is orphaned until the uninstall lands, so while
+      # the plugin is still installed the dry run honestly names nothing and this
+      # predicate is false; the plan carries the CONDITIONAL line `_rm_print_plan`
+      # writes for the parent instead. On a machine where the plugin is already
+      # gone there is no parent to hang that line on and the orphans are real
+      # right now, so the row names itself the ordinary way — a person who comes
+      # back for them alone gets them on the page like everything else.
+      _rm_have claude || return 1
+      case "$(claude plugin prune --dry-run 2>/dev/null)" in
+        *@*) return 0 ;;
+      esac
       return 1 ;;
     *)
       return 1 ;;
@@ -580,10 +619,29 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
 # The whole page. Non-zero means there was nothing to print, which is a machine
 # with nothing left to remove rather than an error.
 _rm_print_plan() {
-  local id verb lines=""
+  local id verb lines="" plugin_pending=""
+  # THE ONE ITEM THAT CANNOT NAME ITS SUBJECTS, AND WHY IT IS STILL ON THE PAGE.
+  # Nothing is orphaned until the uninstall lands, so the CLI's dry run — asked
+  # here, with bionic still installed — names nothing. The names are unknowable
+  # now; the ACT is not. And `--all` collapses every question in the run into the
+  # one asked over this page, so a prune that appeared nowhere on it would run on
+  # an answer nobody was asked for — the spec's own Never, "an assume-yes path
+  # with no printed plan". It is not a small silence either: `claude plugin prune`
+  # takes the auto-installed rows, which include the core plugins the roster
+  # deliberately refuses to offer BY NAME in any mode. So when the plugin item is
+  # on the page the follow-on goes on it too, worded for what is actually known —
+  # the act, and the honest reason the list is not here yet — and the one answer
+  # covers both. When the plugin is NOT pending there is no parent to hang it on,
+  # and `_rm_item_pending` above puts the row on the page under its own verb if
+  # the CLI names orphans now.
+  _rm_item_pending plugin && plugin_pending=1
   # fd 3: the standard input belongs to the question this page is printed for.
   while IFS= read -r id <&3; do
     [ -n "$id" ] || continue
+    if [ "$id" = "orphaned-dependencies" ] && [ -n "$plugin_pending" ]; then
+      lines="${lines}  • remove any dependencies the uninstall leaves orphaned (checked after the plugin is removed)"$'\n'
+      continue
+    fi
     _rm_item_pending "$id" || continue
     verb="$(_rm_item_verb "$id")" || continue
     lines="${lines}  • ${verb}"$'\n'
