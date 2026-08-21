@@ -447,6 +447,33 @@ expect_not_contains "all-no: the native uninstall was never invoked" "plugin uni
 expect_not_contains "all-no: prune was never executed" "plugin prune --yes" "$CALLS_ALLNO"
 expect_contains "all-no: declined items are reported as skipped" "skipped" "$OUT_ALLNO"
 
+# ---- the same fixture, but truly UNANSWERED (EOF on the very first prompt) ----
+#
+# AC-12: EOF and an explicit no used to print the identical "declined —"
+# sentence. A non-interactive first pass — nobody there to answer — has to say
+# so instead of putting a "no" in an absent user's mouth. An empty answers FILE
+# is real EOF from the first `read`, not a blank line: every question in this
+# run hits it, so the whole transcript has to read "not asked" and never
+# "declined".
+ARM="$(new_arm all-eof)"
+plant_never_list "$ARM"
+plant_zshrc_marked "$ARM"
+plant_todo_export "$ARM"
+plant_legacy_channel_hooks "$ARM"
+plant_profile_block "$ARM"
+plant_plugin_data "$ARM"
+plant_claude_stub "$ARM" yes yes
+make_stub "$ARM/bin" npm 'true'
+
+ALL_EOF="$TMP/answers-eof"; : > "$ALL_EOF"
+FP_HOME_BEFORE_EOF="$(fingerprint "$ARM/home")"
+OUT_ALLEOF="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_EOF")"
+expect_eq "EOF pass: the entire fixture HOME is byte-identical, same floor as all-no" \
+  "$FP_HOME_BEFORE_EOF" "$(fingerprint "$ARM/home")"
+expect_contains "EOF pass: says 'not asked' (AC-12)" "not asked —" "$OUT_ALLEOF"
+expect_not_contains "EOF pass: the word declined never appears" "declined" "$OUT_ALLEOF"
+expect_contains "EOF pass: still reported in the Skipped list" "skipped" "$OUT_ALLEOF"
+
 echo ""
 echo "=== Group 5: .zshrc strip — both variants, fixture-faithful to claude-reset.sh ==="
 
@@ -870,11 +897,14 @@ expect_eq "and hooks.sh does it in exactly one place too (a second writer inside
 # on the machine that door exists for, deps.sh is gone. Both gates are exercised
 # — Group 15's mutation 3 here, setup.test.sh's all-decline arms there — but
 # nothing asserted the two obey the SAME rule, so an edit to one was invisible
-# to the other. The rule has two halves and both are load-bearing: only an
-# explicit yes proceeds, and EOF on stdin declines (the fail-closed direction,
-# which is what makes an unattended run safe).
+# to the other. The rule has three parts and all three are load-bearing: only
+# an explicit yes proceeds (0); an explicit no is a real decline (1); EOF on
+# stdin (the fail-closed direction, what makes an unattended run safe) is
+# neither — it is "not asked", distinctly, because nobody was there to answer
+# (AC-12; 1 and 2 were the same code before this wave, which is why a dry
+# first pass read every question as a recorded "no").
 for consent_rule in \
-  'IFS= read -r answer || { echo ""; return 1; }' \
+  'IFS= read -r answer || { echo ""; return 2; }' \
   'case "$answer" in y|Y|yes|YES|Yes) return 0 ;; *) return 1 ;; esac'
 do
   expect_true "remove.sh's _rm_consent carries the rule verbatim: ${consent_rule}" \
@@ -1525,6 +1555,18 @@ expect_contains "default mode: declined — reported in the Skipped list" \
   "default permission mode" "$OUT"
 expect_contains "default mode: declined — the skipped-line shape the script already uses" \
   "declined — default permission mode" "$OUT"
+
+# ---- defaultMode=auto, EOF on the prompt: 'not asked', not 'declined' (AC-12) ----
+ARM="$(new_arm default-mode-auto-eof)"
+plant_default_mode "$ARM" auto
+plant_claude_stub "$ARM" no no
+EOF_ANSWERS="$TMP/answers-eof-mode"; : > "$EOF_ANSWERS"
+OUT_EOF="$(run_remove "$REMOVE_SH" "$ARM" "$EOF_ANSWERS")"
+expect_eq "default mode: not asked — the key is untouched" \
+  "auto" "$(jq -r '.permissions.defaultMode // ""' "$ARM/home/.claude/settings.json")"
+expect_contains "default mode: not asked — the not-asked shape the script uses" \
+  "not asked — default permission mode" "$OUT_EOF"
+expect_not_contains "default mode: EOF never says 'declined'" "declined" "$OUT_EOF"
 
 # ---- defaultMode=plan (not bionic's value): no question, untouched ----
 ARM="$(new_arm default-mode-plan)"
