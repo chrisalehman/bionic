@@ -157,6 +157,15 @@ _rm_answer_yes() {  # <name> — the route, or nothing when there is no path to 
 RM_ONLY=""
 _rm_wants() { [ -z "$RM_ONLY" ] || [ "$RM_ONLY" = "$1" ]; }
 
+# ─── One answer over a printed plan ──────────────────────────────────────────
+#
+# 1 once the user has said yes to the plan `--all` printed. It is not an
+# assume-yes: nothing is set here until a person has read every item the run
+# would do and typed `y` at a question about that page. What it removes is the
+# SECOND, third and ninth question about a decision already made — see the note
+# above `_rm_print_plan` for why the plan, and not the flag, is the consent.
+RM_ALL=0
+
 # ─── The shared literals ─────────────────────────────────────────────────────
 #
 # Each of these is a copy of a constant that lives in the payload libraries, and
@@ -259,6 +268,12 @@ _rm_leftover() { RM_LEFTOVERS="${RM_LEFTOVERS}    ✗ ${1}"$'\n'; echo "  ⚠ ${
 
 _rm_consent() {  # <prompt> -> 0 yes, 1 an explicit no, 2 EOF (nobody there to ask)
   local prompt="$1" answer=""
+  # THE ANSWER IS ALREADY GIVEN, AND IT WAS GIVEN TO THIS ITEM. Under `--all`
+  # the user read a plan naming every item below and consented to that page, so
+  # asking again is asking them to answer the same question twice. The plan is
+  # built from the same roster these questions come from, which is what makes
+  # the yes above cover the yes here rather than standing in for one.
+  [ "$RM_ALL" = "1" ] && return 0
   printf '  %s [y/N] ' "$prompt"
   IFS= read -r answer || { echo ""; return 2; }
   echo ""
@@ -441,6 +456,137 @@ _rm_item_ids() {
   return 0
 }
 
+# ─── The plan `--all` prints ─────────────────────────────────────────────────
+#
+# WHY A PLAN AND NOT AN ASSUME-YES FLAG. Nine questions is a bad experience for
+# someone who has already decided to remove everything, and the obvious fix —
+# a flag that answers them — is the hole in "consent per event, never silent,
+# never unattended": an item added to the roster next year would then run on a
+# machine whose owner never saw it named. So the whole run is made into ONE
+# event instead. Every item that would be asked about is printed with what it
+# changes, one line each, and the single question is asked over that page. The
+# user consents to a list they can read, and nothing runs that was not on it.
+#
+# ONE ROSTER, READ TWICE. The plan walks `_rm_item_ids` — the same list `--list`
+# prints and `--only` is checked against — and asks `_rm_item_pending` the same
+# question each item asks itself before it prompts. A plan built from its own
+# idea of what is outstanding would come to disagree with the run it is a plan
+# FOR, which is the one defect a consent screen must not have.
+#
+# WHAT IS NOT ON THE PAGE. A follow-on — an item whose precondition another item
+# CREATES — cannot be named honestly before its parent runs: nothing is orphaned
+# until the uninstall lands, and the CLI's dry run says exactly that if asked
+# early. Those keep being asked inside the run, in place, which is the rule for
+# the class.
+
+# What one item changes, in the words the item's own question uses. Product
+# words only: this lands on a person's screen, and it is the only description
+# of that item they get before they answer.
+_rm_item_verb() {  # <id>
+  case "${1:-}" in
+    legacy-alias)          echo "remove the retired shell alias block from ${RC_FILE}" ;;
+    environment)           echo "delete bionic's environment settings from ${RM_SETTINGS}" ;;
+    legacy-hooks)          echo "remove the retired hook entries from ${RM_SETTINGS}" ;;
+    legacy-skill-copy)     echo "remove the pre-plugin skill copy at ${RM_LEGACY_SKILL_DIR}" ;;
+    permission-profile)    echo "remove bionic's permission marker block from ${RM_SETTINGS}" ;;
+    permission-mode)       echo "reset Claude Code's default permission mode" ;;
+    plugin-data)           echo "delete bionic's plugin data under ${RM_DATA_ROOT}" ;;
+    plugin)                echo "remove the plugin $(_rm_registered_plugin_id) (claude plugin uninstall)" ;;
+    orphaned-dependencies) echo "remove the dependencies nothing needs any more (claude plugin prune)" ;;
+    tool:*)                echo "remove ${1#tool:}" ;;
+    *)                     return 1 ;;
+  esac
+  return 0
+}
+
+# Whether this item would ask a question on this machine — the predicate each
+# item below runs before it prints anything, asked from the outside so the plan
+# and the run cannot come to differ about what is outstanding. Read-only: every
+# branch here is a file test or a listing, never a change.
+_rm_item_pending() {  # <id> -> 0 when the item has something to ask about
+  local id="${1:-}" count keys present behavior
+  case "$id" in
+    legacy-alias)
+      [ -f "$RC_FILE" ] || return 1
+      _rm_file_has_literal "$RC_FILE" "$RM_RC_START" && return 0
+      _rm_file_has_line_matching "$RC_FILE" "$RM_LEGACY_ALIAS_RE" && return 0
+      return 1 ;;
+    environment)
+      keys="$(_rm_env_keys_present)" || keys=""
+      [ -n "$keys" ] && return 0
+      _rm_file_has_literal "$RC_FILE" "$RM_ENV_START" && return 0
+      _rm_file_has_line_matching "$RC_FILE" "$RM_TODO_EXPORT_RE" && return 0
+      return 1 ;;
+    legacy-hooks)
+      [ -f "$RM_SETTINGS" ] || return 1
+      _rm_have jq || return 1
+      count="$(jq "$RM_LEGACY_HOOK_COUNT_JQ" "$RM_SETTINGS" 2>/dev/null)"
+      case "$count" in ''|*[!0-9]*|0) return 1 ;; esac
+      return 0 ;;
+    legacy-skill-copy)
+      [ -d "$RM_LEGACY_SKILL_DIR" ] && [ -f "${RM_LEGACY_SKILL_DIR}/SKILL.md" ] ;;
+    permission-profile)
+      _rm_file_has_literal "$RM_SETTINGS" "$RM_PROFILE_BEGIN_PREFIX" ;;
+    permission-mode)
+      _rm_have jq || return 1
+      [ -f "$RM_SETTINGS" ] || return 1
+      [ "$(jq -r '.permissions.defaultMode // ""' "$RM_SETTINGS" 2>/dev/null)" = "$(_rm_default_mode)" ] ;;
+    tool:*)
+      # THE ROW'S OWN POLICY DECIDES WHETHER THERE IS A QUESTION. A shared
+      # binary is reported and kept; a plugin bionic declares goes with the
+      # uninstall below; somebody else's copy of a same-named plugin is left
+      # alone. None of those asks anything, so none of them belongs on a page
+      # headed "bionic would".
+      [ "$RM_MODE" = "payload" ] || return 1
+      present="$(check_dep "${id#tool:}")"
+      present="${present#present=}"; present="${present%%|*}"
+      [ "$present" = "yes" ] || return 1
+      behavior="$(dep_field "${id#tool:}" removal_behavior)"
+      case "$behavior" in
+        keep-shared) return 1 ;;
+        native-uninstall-offer)
+          [ "$(dep_field "${id#tool:}" class)" = "core" ] && return 1
+          [ "$(_dep_native_registry_state "${id#tool:}")" = "ours" ] || return 1
+          return 0 ;;
+      esac
+      return 0 ;;
+    plugin-data)
+      local dir
+      for dir in "$RM_DATA_ROOT"/bionic-*; do
+        [ -d "$dir" ] && return 0
+      done
+      return 1 ;;
+    plugin)
+      [ -n "$(_rm_registered_plugin_id)" ] ;;
+    orphaned-dependencies)
+      # NEVER ON THE PAGE. Nothing is orphaned until the uninstall above lands,
+      # so a plan printed now would either name nothing (the honest answer, and
+      # useless) or promise something that is not true yet. The offer is made
+      # inside the run, by the item that creates it.
+      return 1 ;;
+    *)
+      return 1 ;;
+  esac
+}
+
+# The whole page. Non-zero means there was nothing to print, which is a machine
+# with nothing left to remove rather than an error.
+_rm_print_plan() {
+  local id verb lines=""
+  # fd 3: the standard input belongs to the question this page is printed for.
+  while IFS= read -r id <&3; do
+    [ -n "$id" ] || continue
+    _rm_item_pending "$id" || continue
+    verb="$(_rm_item_verb "$id")" || continue
+    lines="${lines}  • ${verb}"$'\n'
+  done 3< <(_rm_item_ids)
+  [ -n "$lines" ] || return 1
+  echo "bionic would:"
+  printf '%s' "$lines"
+  echo ""
+  return 0
+}
+
 # ─── Arguments ───────────────────────────────────────────────────────────────
 #
 # Read here rather than in a wrapper, because the roster they are checked
@@ -450,10 +596,13 @@ _rm_item_ids() {
 # like a machine that was already clean.
 
 rm_list=0
+rm_all=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --list)
       rm_list=1; shift ;;
+    --all)
+      rm_all=1; shift ;;
     --only)
       if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
         echo "remove: --only needs the name of the one item to remove."
@@ -469,6 +618,16 @@ while [ $# -gt 0 ]; do
       exit 2 ;;
   esac
 done
+
+# TWO NARROWINGS THAT CANNOT BOTH APPLY. `--only` runs one item; `--all` runs
+# every item over one answer. Together they would have to mean something, and
+# whatever that something was, half the people who typed it would mean the other
+# one — so it stops here, before anything is printed at the machine.
+if [ "$rm_all" = "1" ] && [ -n "$RM_ONLY" ]; then
+  echo "remove: --all and --only cannot be combined — --all does every item, --only does exactly one."
+  echo "        run ${RM_SELF_CMD:-this script} --list to see the names --only takes."
+  exit 2
+fi
 
 if [ "$rm_list" = "1" ]; then
   _rm_item_ids
@@ -1057,6 +1216,29 @@ _rm_item_plugin_data() {
 # door's whole premise is a machine whose answer may be "nothing is registered" —
 # and because a machine could carry bionic from a differently-named marketplace.
 
+# THE ID THE REGISTRY HOLDS, asked of the CLI rather than assumed — a machine
+# could carry bionic from a differently-named marketplace, and the standalone
+# door's whole premise is a machine whose answer may be "nothing is registered".
+# ONE OWNER, because the plan `--all` prints has to name the same plugin the
+# uninstall takes: a plan that named a different id than the command that runs
+# would be a plan for a different machine.
+_rm_registered_plugin_id() {
+  local listing id=""
+  _rm_have claude || return 0
+  listing="$(claude plugin list --json 2>/dev/null)" || listing=""
+  [ -n "$listing" ] || return 0
+  if _rm_have jq; then
+    id="$(printf '%s' "$listing" \
+      | jq -r '[ .[]? | select((.id? // "" | split("@")[0]) == "bionic") | .id ][0] // empty' 2>/dev/null)"
+  else
+    # No jq: the id is pulled out of the listing text by bash's own regex
+    # engine. A machine missing jq is exactly the machine this door serves.
+    if [[ "$listing" =~ \"(bionic@[^\"]+)\" ]]; then id="${BASH_REMATCH[1]}"; fi
+  fi
+  printf '%s' "$id"
+  return 0
+}
+
 _rm_item_plugin() {
   _rm_wants plugin || return 0
   # AN ANSWER NOBODY GAVE IS A NO. The uninstall deletes the plugin data unless
@@ -1071,15 +1253,7 @@ _rm_item_plugin() {
   if ! _rm_have claude; then
     _rm_leftover "the claude CLI is not on PATH — the native plugin uninstall cannot be invoked here"
   else
-    rm_listing="$(claude plugin list --json 2>/dev/null)" || rm_listing=""
-    if [ -n "$rm_listing" ] && _rm_have jq; then
-      rm_plugin_id="$(printf '%s' "$rm_listing" \
-        | jq -r '[ .[]? | select((.id? // "" | split("@")[0]) == "bionic") | .id ][0] // empty' 2>/dev/null)"
-    elif [ -n "$rm_listing" ]; then
-      # No jq: the id is pulled out of the listing text by bash's own regex
-      # engine. A machine missing jq is exactly the machine this door serves.
-      if [[ "$rm_listing" =~ \"(bionic@[^\"]+)\" ]]; then rm_plugin_id="${BASH_REMATCH[1]}"; fi
-    fi
+    rm_plugin_id="$(_rm_registered_plugin_id)"
 
     if [ -z "$rm_plugin_id" ]; then
       _rm_clean "the bionic plugin (not registered with the CLI)"
@@ -1226,6 +1400,29 @@ _rm_offer_orphans() {
 }
 
 # ─── Run ─────────────────────────────────────────────────────────────────────
+
+# THE ONE EVENT, BEFORE ANY ITEM SPEAKS. Under `--all` the whole page is printed
+# and answered here; every question below then finds the answer already given.
+# A no — or nobody there to answer — leaves the machine exactly as it was, which
+# is the same floor a per-item pass holds to.
+if [ "$rm_all" = "1" ]; then
+  # THE PAGE IS BUILT WITH THE ANSWER CHANNEL CLOSED. Every predicate behind it
+  # shells out — the CLI's listing, the dependency probes — and a child that
+  # reads its inherited stdin eats the one `y` this run is about to ask for.
+  # Nothing here needs stdin, so nothing here gets it.
+  if ! _rm_print_plan < /dev/null; then
+    echo "  nothing to remove — this machine is already clean."
+    echo ""
+    exit 0
+  fi
+  _rm_consent "Do all of the above?"; rm_all_rc=$?
+  if [ "$rm_all_rc" -ne 0 ]; then
+    echo "  nothing changed."
+    echo ""
+    exit 0
+  fi
+  RM_ALL=1
+fi
 
 _rm_item_legacy_alias
 _rm_item_environment
