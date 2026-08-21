@@ -1,0 +1,30 @@
+---
+allowed-tools: Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/remove.sh:*)
+description: Consented teardown of the bionic machine footprint, finishing with the native plugin uninstall.
+---
+<!-- GENERATED-HEADER -->
+
+<!-- INJECT: voice-contract -->
+
+Run this once, with no flags:
+
+```bash
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/remove.sh
+```
+
+It asks about one item at a time and treats every question it cannot put to a person as a
+no, so a first run removes nothing and reports what it would have asked. Show the user each
+question it printed, word for word, one at a time, and wait for their answer. Never answer
+one for them and never guess which one they meant.
+
+When the user says yes to a question, do that one item and nothing else. Every question
+names its own item, and each declined line repeats the name beside the command that runs it:
+
+```bash
+printf 'y\n' | bash ${CLAUDE_PLUGIN_ROOT}/scripts/remove.sh --only <item>
+```
+
+`bash ${CLAUDE_PLUGIN_ROOT}/scripts/remove.sh --list` prints the item names on their own.
+
+A declined item is finished, not deferred: never work around a no, never re-ask it, and
+never remove something the user did not accept.

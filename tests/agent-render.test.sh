@@ -46,6 +46,39 @@ check() { if [ "$1" = 0 ]; then pass "$2"; else fail "$2" "${3:-}"; fi; }
 ROLES="auditor critic implementor researcher senior-implementor test-runner"
 BLOCKS="report-contract shared-core survival"
 
+# The pipeline's SECOND render unit, added at epic-17 W6 S1 (spec AC-6, ratified D-C): the
+# four shipped slash-command files under payload/commands/, rendered from
+# agents-src/templates/commands/ so that the presentation contract has one source instead of
+# four pasted copies. §I owns it; the arms above and below stay about the role files, whose
+# out-dir, checksum manifest and block roster are all their own.
+COMMANDS="help setup doctor remove"
+CMD_TMPL_DIR="$SRC/templates/commands"
+CMD_OUT="$REPO/payload/commands"
+
+# copy_tree <dest>: a hermetic copy of everything render.sh reads or writes — both template
+# directories, both output directories. render.sh resolves its repo root from its own
+# location, so a copy assembled this way exercises the production path with no seam, and a
+# mutation planted in it never touches the real tree. Both output directories have to exist
+# in the copy: render.sh refuses to run against a missing out-dir rather than inventing one.
+# payload/integrity/ comes along too: --check reads the committed manifest, so a copy without
+# one is a copy that reports staleness for a reason the mutation under test did not cause —
+# which is how a meta-arm can appear to prove something it never exercised. So does
+# payload/.claude-plugin/plugin.json, an INPUT since W6 S9a: help.md's opening version line
+# is substituted from it at render time, and a copy without it cannot render at all.
+copy_tree() {
+  local dest="$1"
+  mkdir -p "$dest/payload" || return 1
+  cp -R "$SRC" "$dest/agents-src" || return 1
+  cp -R "$OUT" "$dest/agents" || return 1
+  cp -R "$CMD_OUT" "$dest/payload/commands" || return 1
+  if [ -d "$REPO/payload/integrity" ]; then
+    cp -R "$REPO/payload/integrity" "$dest/payload/integrity" || return 1
+  fi
+  if [ -d "$REPO/payload/.claude-plugin" ]; then
+    cp -R "$REPO/payload/.claude-plugin" "$dest/payload/.claude-plugin" || return 1
+  fi
+}
+
 # marker_block <file> <NAME>: the lines between <!-- NAME-BEGIN --> and <!-- NAME-END -->.
 marker_block() {
   awk -v b="$2-BEGIN" -v e="$2-END" '
@@ -80,7 +113,9 @@ done
 
 # Six templates and no more: a seventh template with no rendered final would render into a
 # role file nothing tests, and a rendered final with no template is unreachable by --check.
-TMPL_COUNT="$(find "$SRC/templates" -name '*.md.tmpl' -type f 2>/dev/null | wc -l | tr -d ' ')"
+# `-maxdepth 1` since W6 S1: templates/commands/ is a second render unit living one level
+# down, and counting its four files here would report ten role templates.
+TMPL_COUNT="$(find "$SRC/templates" -maxdepth 1 -name '*.md.tmpl' -type f 2>/dev/null | wc -l | tr -d ' ')"
 if [ "$TMPL_COUNT" = 6 ]; then
   pass "exactly six templates (found $TMPL_COUNT)"
 else
@@ -157,7 +192,7 @@ echo "=== D — rendering is deterministic: a re-render changes nothing ==="
 # whole write path therefore runs against the same hermetic copy §F mutates — assembled
 # here, so §D and §F share one fixture and one copy step.
 
-cp -R "$SRC" "$TMP/agents-src" && cp -R "$OUT" "$TMP/agents"
+copy_tree "$TMP"
 FIXTURE_RENDER="$TMP/agents-src/render.sh"
 FIXTURE_OUT="$TMP/agents"
 
@@ -172,8 +207,10 @@ else
 fi
 
 # The repo tree is exactly where it was — the arm above proves the write path is a no-op on
-# a matching tree, and this proves the suite itself did not touch the real one.
+# a matching tree, and this proves the suite itself did not touch the real one. Both output
+# directories are fingerprinted, because since W6 S1 the write path can reach both.
 REPO_FP="$(fingerprint "$OUT")"
+CMD_FP="$(fingerprint "$CMD_OUT")"
 
 # ============================================================
 echo ""
@@ -324,7 +361,7 @@ REPO_MANIFEST="$REPO/payload/integrity/agents.sha256"
 
 # A fresh copy: §F's last mutation deliberately left the fixture broken.
 rm -rf "$TMP/m"; mkdir -p "$TMP/m"
-cp -R "$SRC" "$TMP/m/agents-src" && cp -R "$OUT" "$TMP/m/agents"
+copy_tree "$TMP/m"
 M_RENDER="$TMP/m/agents-src/render.sh"
 M_MANIFEST="$TMP/m/payload/integrity/agents.sha256"
 
@@ -483,6 +520,210 @@ if printf '%s' "$RULES_FLAT" | grep -qF 'agents-src/blocks/survival.md'; then
   pass "tombstone: agent-discipline.md names the block source as the content's new home"
 else
   fail "tombstone: agent-discipline.md names the block source as the content's new home"
+fi
+
+# ============================================================
+echo ""
+echo "=== I — the SECOND render unit: payload/commands/ (epic-17 W6 S1, spec AC-6) ==="
+# ============================================================
+#
+# The pipeline stopped being about agent role files at W6. The four shipped slash-command
+# files carry one presentation contract, and D-C chose to give it a single source rendered
+# into all four rather than four copies held equal by pairwise pins — the same argument, and
+# the same machinery, as §C's: identity by construction, staleness collapsed into --check.
+#
+# NAMED "I", NOT "H". The plan calls this section §H; two sections above already do, and a
+# third would make a failure report ambiguous about which one spoke. Recorded as assumption
+# A-4.S1.1 in the wave plan.
+#
+# WHAT THIS SECTION DOES NOT OWN. That the rendered block says the right thing, and that no
+# internal vocabulary leaks into the surrounding prose, belong to
+# tests/voice-contract.test.sh — a template that drops its INJECT directive renders happily
+# and --check stays green, because output and source still agree. The one arm here that
+# crosses that line is I4: block PRESENCE, stated where the pipeline is defined, because it
+# is the pipeline's own blind spot.
+
+[ -d "$CMD_TMPL_DIR" ]; check $? "agents-src/templates/commands/ exists"
+
+for c in $COMMANDS; do
+  [ -s "$CMD_TMPL_DIR/$c.md.tmpl" ]; check $? "agents-src/templates/commands/$c.md.tmpl exists and is non-empty"
+done
+
+[ -s "$SRC/blocks/voice-contract.md" ]; check $? "agents-src/blocks/voice-contract.md exists and is non-empty"
+
+CMD_TMPL_COUNT="$(find "$CMD_TMPL_DIR" -maxdepth 1 -name '*.md.tmpl' -type f 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$CMD_TMPL_COUNT" = 4 ]; then
+  pass "exactly four command templates (found $CMD_TMPL_COUNT)"
+else
+  fail "exactly four command templates (found $CMD_TMPL_COUNT)"
+fi
+CMD_OUT_COUNT="$(find "$CMD_OUT" -maxdepth 1 -name '*.md' -type f 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$CMD_OUT_COUNT" = 4 ]; then
+  pass "exactly four rendered command files (found $CMD_OUT_COUNT)"
+else
+  fail "exactly four rendered command files (found $CMD_OUT_COUNT)"
+fi
+
+# I3 — every rendered command file announces itself as generated and names its own source,
+# and the frontmatter still opens the file: Claude Code reads `description:` from a fence
+# that has to start on line 1, exactly as it reads a role's name/model from one.
+for c in $COMMANDS; do
+  if grep -qF "GENERATED FILE — DO NOT EDIT" "$CMD_OUT/$c.md" 2>/dev/null; then
+    pass "payload/commands/$c.md carries the GENERATED header"
+  else
+    fail "payload/commands/$c.md carries the GENERATED header"
+  fi
+  if grep -qF "agents-src/templates/commands/$c.md.tmpl" "$CMD_OUT/$c.md" 2>/dev/null; then
+    pass "payload/commands/$c.md's header names its own template"
+  else
+    fail "payload/commands/$c.md's header names its own template"
+  fi
+  if [ "$(head -1 "$CMD_OUT/$c.md" 2>/dev/null)" = "---" ]; then
+    pass "payload/commands/$c.md still opens with the frontmatter fence"
+  else
+    fail "payload/commands/$c.md still opens with the frontmatter fence (line 1: '$(head -1 "$CMD_OUT/$c.md" 2>/dev/null)')"
+  fi
+done
+
+# I4 — the block is actually THERE. §C cannot see a lost INJECT directive.
+for c in $COMMANDS; do
+  if [ -n "$(marker_block "$CMD_OUT/$c.md" VOICE-CONTRACT)" ]; then
+    pass "payload/commands/$c.md: VOICE-CONTRACT block present and non-empty"
+  else
+    fail "payload/commands/$c.md: VOICE-CONTRACT block present and non-empty"
+  fi
+done
+
+# I5 — meta: --check goes RED in both staleness directions for THIS unit too. §F proved it
+# for the role files; a render unit that --check silently skips would pass every arm above
+# and still ship a stale command file, which is the whole reason the unit was added.
+rm -rf "$TMP/c"; mkdir -p "$TMP/c"
+copy_tree "$TMP/c"
+C_RENDER="$TMP/c/agents-src/render.sh"
+
+C_BASE="$("$C_RENDER" --check 2>&1)"; C_BASE_RC=$?
+check "$C_BASE_RC" "meta: the untouched fixture copy is green before the command mutations" "$C_BASE"
+
+# I5a — a direct edit to a rendered command file.
+printf '%s\n' "A line nobody rendered." >> "$TMP/c/payload/commands/help.md"
+if ! "$C_RENDER" --check >/dev/null 2>&1; then
+  pass "meta: a direct edit to payload/commands/help.md turns --check RED"
+else
+  fail "meta: a direct edit to payload/commands/help.md turns --check RED"
+fi
+cp "$CMD_OUT/help.md" "$TMP/c/payload/commands/help.md"
+"$C_RENDER" --check >/dev/null 2>&1
+check $? "meta: restoring the command file returns the fixture to green"
+
+# I5b — an edit to the shared block with no re-render. The direction four pasted copies
+# could never expose: all four command files still agree with each other, and all four are
+# stale.
+printf '%s\n' "- A rule the command files have never heard of." >> "$TMP/c/agents-src/blocks/voice-contract.md"
+if ! "$C_RENDER" --check >/dev/null 2>&1; then
+  pass "meta: a voice-contract.md edit with no re-render turns --check RED"
+else
+  fail "meta: a voice-contract.md edit with no re-render turns --check RED"
+fi
+"$C_RENDER" >/dev/null 2>&1
+"$C_RENDER" --check >/dev/null 2>&1
+check $? "meta: re-rendering after the block edit returns the fixture to green"
+
+# ...and the re-render reached all four files, not just the one this suite happened to
+# check. A write path that rendered help.md and skipped the other three would satisfy every
+# arm above.
+C_PROPAGATED=""
+for c in $COMMANDS; do
+  grep -qF "A rule the command files have never heard of." "$TMP/c/payload/commands/$c.md" \
+    || C_PROPAGATED="$C_PROPAGATED $c"
+done
+if [ -z "$C_PROPAGATED" ]; then
+  pass "meta: the re-render propagated the block edit into all four command files"
+else
+  fail "meta: the re-render propagated the block edit into all four command files" "missing in:$C_PROPAGATED"
+fi
+
+# I5c/I5d/I5e — THE VERSION IS A THIRD KIND OF SOURCE (epic-17 W6 S9a, walk finding W-2).
+#
+# help.md opens with `bionic <version> (installed)`. Until S9a the page READ that at runtime
+# from ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json; the Step-5 walk measured the read
+# being refused from any session outside this repo, printing an error above the page and no
+# version at all. It is substituted at RENDER time now, which moves plugin.json from being a
+# file the shipped page reads into being a file the PIPELINE reads — a source like a block or
+# a template, and staleness against it has to be caught the same way or the baked value is
+# just a copy nothing checks. `plugin.json is the single owner` is the claim; --check going
+# red in both directions is what makes it true rather than aspirational.
+C_PJ="$TMP/c/payload/.claude-plugin/plugin.json"
+C_HELP="$TMP/c/payload/commands/help.md"
+
+[ -f "$C_PJ" ]; check $? "the hermetic copy carries payload/.claude-plugin/plugin.json (a render INPUT)"
+C_VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$C_PJ" 2>/dev/null | head -1)"
+if [ -n "$C_VERSION" ]; then
+  pass "plugin.json declares a version ($C_VERSION)"
+else
+  fail "plugin.json declares a version"
+fi
+if grep -qF "bionic $C_VERSION (installed)" "$C_HELP" 2>/dev/null; then
+  pass "the rendered help.md opens with the version plugin.json declares"
+else
+  fail "the rendered help.md opens with the version plugin.json declares" \
+    "wanted 'bionic $C_VERSION (installed)'"
+fi
+
+# I5c — the baked line edited in the OUTPUT. The "I'll just bump it in the file" direction.
+sed "s|^bionic $C_VERSION (installed)\$|bionic 9.9.9 (installed)|" "$C_HELP" > "$TMP/c-help.tmp" \
+  && cp "$TMP/c-help.tmp" "$C_HELP"
+if ! "$C_RENDER" --check >/dev/null 2>&1; then
+  pass "meta: editing the baked version line in help.md turns --check RED"
+else
+  fail "meta: editing the baked version line in help.md turns --check RED"
+fi
+"$C_RENDER" >/dev/null 2>&1
+"$C_RENDER" --check >/dev/null 2>&1
+check $? "meta: re-rendering restores the version line and returns the fixture to green"
+
+# I5d — the OWNER moved and nobody re-rendered. The direction that matters in practice: the
+# version is bumped in plugin.json at release time, and a page carrying the old one is a page
+# that lies to every user who runs it.
+sed 's|"version": "'"$C_VERSION"'"|"version": "9.9.9"|' "$C_PJ" > "$TMP/c-pj.tmp" \
+  && cp "$TMP/c-pj.tmp" "$C_PJ"
+if ! "$C_RENDER" --check >/dev/null 2>&1; then
+  pass "meta: bumping plugin.json's version with no re-render turns --check RED"
+else
+  fail "meta: bumping plugin.json's version with no re-render turns --check RED"
+fi
+"$C_RENDER" >/dev/null 2>&1
+"$C_RENDER" --check >/dev/null 2>&1
+check $? "meta: re-rendering after the version bump returns the fixture to green"
+if grep -qF "bionic 9.9.9 (installed)" "$C_HELP" 2>/dev/null; then
+  pass "meta: ...and the re-rendered help.md carries the bumped version"
+else
+  fail "meta: ...and the re-rendered help.md carries the bumped version"
+fi
+# ...and only help.md: the other three command files have no version line to bump.
+C_VERSION_LEAK=""
+for c in setup doctor remove; do
+  grep -qF "9.9.9" "$TMP/c/payload/commands/$c.md" 2>/dev/null && C_VERSION_LEAK="$C_VERSION_LEAK $c"
+done
+if [ -z "$C_VERSION_LEAK" ]; then
+  pass "meta: the version reaches help.md alone, not every command file"
+else
+  fail "meta: the version reaches help.md alone, not every command file" "also in:$C_VERSION_LEAK"
+fi
+
+# I5e — a missing owner must be LOUD, the same rule as a missing block (§F3): a render that
+# quietly emitted `bionic  (installed)` would leave --check green on a page with a hole in it.
+rm -f "$C_PJ"
+if ! "$C_RENDER" >/dev/null 2>&1; then
+  pass "meta: a missing plugin.json makes render.sh exit nonzero"
+else
+  fail "meta: a missing plugin.json makes render.sh exit nonzero"
+fi
+
+# I6 — and the real payload/commands/ is exactly where this suite found it.
+if [ "$CMD_FP" = "$(fingerprint "$CMD_OUT")" ]; then
+  pass "payload/commands/ is byte-identical to how this suite found it"
+else
+  fail "payload/commands/ is byte-identical to how this suite found it" "$(diff <(echo "$CMD_FP") <(fingerprint "$CMD_OUT"))"
 fi
 
 # ---------- summary ----------

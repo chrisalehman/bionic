@@ -1,0 +1,94 @@
+# BANNED DISPLAY VOCABULARY — epic-17 wave-06 slice S1 (spec AC-6).
+#
+# One list, two lints. tests/voice-contract.test.sh reads it to check the four shipped
+# command files; the script-output lint (slice S4) reads it to check every line
+# setup.sh/doctor.sh/remove.sh print. The ownership table names "one list file under
+# tests/" precisely so the two lints cannot drift to two opinions about what is internal.
+#
+# WHAT BELONGS HERE: vocabulary that exists only inside bionic's own machinery — the old
+# dependency-lane codes, script-internal function-name prefixes, and shell mechanism words
+# a user has no reason to meet. Chris, 2026-08-20: "This concept of 'lane' and in
+# particular references to '3b' are very confusing. Why are we exposing this to the user?"
+#
+# WHAT DOES NOT: ordinary product words that happen to name a bionic feature (hooks,
+# skills, agents, tiers), and the fix half of a real error message. The contract is loud on
+# real errors; it is silent about how the machine works when nothing is wrong.
+#
+# FORMAT — consumers must honour it:
+#   * one token per line;
+#   * a line whose first non-blank character is `#` is a comment;
+#   * blank lines are ignored;
+#   * matching is case-insensitive SUBSTRING matching, so `lane` also catches `lanes`
+#     and `Lane`. Add a token only when no legitimate product word contains it.
+#
+# The voice block itself quotes several of these tokens (it is the text that BANS them),
+# so both lints exempt the block's own body — see tests/voice-contract.test.sh.
+
+lane
+3a
+3b
+lane-3a
+lane-3b
+_setup_
+_rm_
+_doctor_
+detect_
+stdin
+non-interactive
+pipefail
+
+# ROSTER FOOTPRINT cited the design ledger by letter-number on a printed line (epic-17 W6
+# S9a, walk finding W-3). A design-doc pointer is provenance for a reader of the SOURCE; on
+# a user's terminal it is a reference into a document they do not have.
+design-ledger
+
+# REMOVAL-POLICY AND RUNTIME-MODE VALUES reached the terminal (epic-17 W6 S10, six-axis
+# review R-1). `keep-shared` is a column value in deps.sh's dependency table and printed
+# nine times in a row on a full teardown; `mode: payload` was the remove transcript's
+# second line. Both are the script naming its own internals at a user who has no way to
+# know them — the same class as `lane 3b`, one list entry away from being caught. The
+# other two policy values are listed with them so the class cannot come back through a
+# row that has not printed yet.
+keep-shared
+remove-on-consent
+native-uninstall-offer
+mode: payload
+
+# LIBRARY FUNCTION-NAME PREFIXES. The three payload scripts already had theirs on this
+# list (`_setup_`, `_rm_`, `_doctor_`, `detect_`); the libraries beneath them did not, so
+# `_dep_`, `_jit_` and `_profile_` could reach a terminal through any line the scripts
+# print. `_detect_` needs no entry — `detect_` already catches it as a substring.
+# tests/script-vocabulary.test.sh derives the roster from payload/scripts/lib/*.sh, so a
+# new library prefix arrives here deliberately rather than by somebody noticing.
+_dep_
+_jit_
+_profile_
+
+# HOOK FILE NAMES — AC-6's own words, and until epic-17 W6 S11 the list held no file name
+# of any kind, so that clause of the criterion was green by absence rather than by
+# measurement (critic F-6). These are the basenames bionic ships under payload/hooks/. A
+# user told that something is wrong needs to know which capability stopped, not which
+# script implements it.
+#
+# THIS IS NOT A BAN ON PATHS (plan A-6.3's ruling). A shipped file path printed as an
+# ADDRESS the reader is being pointed at — doctor's "the constraint column is the table in
+# scripts/lib/deps.sh", or "every hooks.json command resolves to a file on disk" — is
+# product information a person can act on. Neither line contains a hook basename, so the
+# ruling needs no exemption in the lint to hold; tests/script-vocabulary.test.sh measures
+# that it still does.
+agent-context-guard.sh
+canonical-sdlc-evidence-gate.sh
+canonical-sdlc-governing-skill.sh
+context-spend.sh
+dispatch-preflight.sh
+execution-recorder.sh
+farm-out-reminder.sh
+landing-gate.sh
+preflight-probe.sh
+protect-database.sh
+protect-main.sh
+session-poker.sh
+session-sweeper.sh
+stop-check.sh
+stop-guard.sh
+stop-orders.sh

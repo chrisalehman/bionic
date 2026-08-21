@@ -51,6 +51,9 @@ PROFILE_SH="${REPO}/payload/scripts/lib/profile.sh"
 DETECT_SH="${REPO}/payload/scripts/lib/detect.sh"
 HOOKS_SH="${REPO}/payload/scripts/lib/hooks.sh"
 DEPS_SH="${REPO}/payload/scripts/lib/deps.sh"
+# Read, never run: Group 19's ownership arms are about a value setup.sh WRITES and
+# this script resets, and a shared value with only one reader is not shared.
+SETUP_SH="${REPO}/payload/scripts/setup.sh"
 TEMPLATE="${REPO}/payload/permissions/profile.template.json"
 
 PASS=0; FAIL=0; TOTAL=0
@@ -58,6 +61,7 @@ ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
 no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
 
 expect_eq()    { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
+expect_ne()    { if [ "$2" != "$3" ]; then ok "$1"; else no "$1" "expected NOT '$2'"; fi; }
 expect_true()  { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
 expect_false() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then no "$label" "expected non-zero exit"; else ok "$label"; fi; }
 # In-process containment — no pipe into grep -q, so no SIGPIPE race.
@@ -200,6 +204,40 @@ plant_profile_block() {  # <arm> [with-accretion|block-only]
     bash -c '. "$1"; profile_apply "$2" --consented' _ "$PROFILE_SH" "$rendered" >/dev/null 2>&1
 }
 
+# A plugin in the CLI's own install registry — the file `check_dep` reads for a
+# `native` row. This is how a machine that took the design route's mid-session
+# offer looks afterwards: `impeccable@bionic` installed, declared by nobody.
+# The catalog is a parameter because the two cases that matter differ ONLY in it:
+# `impeccable@bionic` is a plugin bionic's own route installed, and
+# `impeccable@claude-plugins-official` is the user's own copy of a same-named
+# plugin. The presence probe matches on the NAME half and cannot tell them apart
+# (deliberately — S3 re-points bionic's catalog and that match is what survives
+# it), so the teardown has to ask the registry the exact-id question itself.
+plant_native_plugin() {  # <arm> <name> <version> [catalog=bionic]
+  local arm="$1" name="$2" version="$3" catalog="${4:-bionic}"
+  local file="$arm/home/.claude/plugins/installed_plugins.json"
+  mkdir -p "${file%/*}"
+  [ -f "$file" ] || printf '%s\n' '{"plugins":{}}' > "$file"
+  jq --arg k "${name}@${catalog}" --arg v "$version" \
+     '.plugins[$k] = [ { "scope": "user", "installPath": ("/fixture/" + $k), "version": $v } ]' \
+     "$file" > "$arm/reg.tmp" && mv "$arm/reg.tmp" "$file"
+}
+
+# One library function against one arm's roots — the shape the critic's own
+# reproduction took, and the only way to measure what a single deps.sh function
+# prints without the rest of the teardown's output around it.
+dep_query() {  # <arm> <function> [args] — PATH is the arm's bin, answers on stdin
+  local arm="$1"; shift
+  env -i \
+    HOME="$arm/home" \
+    PATH="$arm/bin" \
+    BIONIC_TEST_CALLS="$arm/calls.log" \
+    BIONIC_CLAUDE_HOME="$arm/home/.claude" \
+    BIONIC_SETTINGS_FILE="$arm/home/.claude/settings.json" \
+    BIONIC_INSTALLED_PLUGINS_FILE="$arm/home/.claude/plugins/installed_plugins.json" \
+    bash -c '. "$1"; shift; "$@"' _ "$DEPS_SH" "$@" 2>&1
+}
+
 plant_plugin_data() {  # <arm>
   local d="$1/home/.claude/plugins/data"
   mkdir -p "$d/bionic-bionic" "$d/superpowers-bionic"
@@ -231,6 +269,32 @@ STUB
   chmod +x "$arm/bin/claude"
 }
 
+# `claude` stub whose `plugin uninstall` recreates plugins/data/bionic-bionic
+# as a side effect — the exact shape of Chris's live-teardown finding
+# (r1-surface-map.md Item 4): bionic registered, one orphan to prune, and the
+# uninstall itself repopulates the data directory it was supposed to empty.
+plant_claude_stub_data_recreated() {  # <arm>
+  local arm="$1"
+  cat > "$arm/bin/claude" <<'STUB'
+#!/bin/bash
+echo "claude $*" >> "$BIONIC_TEST_CALLS"
+DATA_DIR="${BIONIC_PLUGIN_DATA_DIR:-$HOME/.claude/plugins/data}"
+case "$*" in
+  "plugin list --json") printf '%s\n' '[{"id":"bionic@bionic","version":"0.1.0","scope":"user","enabled":true}]' ;;
+  "plugin prune --dry-run") printf '%s\n' '1 auto-installed plugin no longer needed at user scope:
+  superpowers@bionic (6.3.0)
+(dry run — nothing removed)' ;;
+  "plugin uninstall bionic@bionic --yes")
+    mkdir -p "${DATA_DIR}/bionic-bionic"
+    printf 'recreated by uninstall\n' > "${DATA_DIR}/bionic-bionic/state.json"
+    ;;
+  "mcp get"*) exit 1 ;;
+esac
+exit 0
+STUB
+  chmod +x "$arm/bin/claude"
+}
+
 answers_file() {  # <path> <token> [count]
   local path="$1" token="$2" count="${3:-60}" i
   : > "$path"
@@ -242,6 +306,8 @@ ALL_NO="$TMP/answers-no";  answers_file "$ALL_NO" n
 
 # One run of a remove script against one arm. The env vars are exactly the
 # roots the payload libraries already read, plus the two this script adds.
+REMOVE_FLAGS=""
+
 run_remove() {  # <script> <arm> <answers-file> [extra env assignments...]
   local script="$1" arm="$2" answers="$3"; shift 3
   env -i \
@@ -256,7 +322,7 @@ run_remove() {  # <script> <arm> <answers-file> [extra env assignments...]
     BIONIC_PLAYWRIGHT_CACHE="$arm/home/.cache/ms-playwright" \
     BIONIC_PROFILE_TEMPLATE="$TEMPLATE" \
     "$@" \
-    bash "$script" < "$answers" 2>&1
+    bash "$script" ${REMOVE_FLAGS:-} < "$answers" 2>&1
 }
 
 # Names + content of every file under a directory, path-relative so two arms
@@ -340,11 +406,23 @@ expect_eq "all-yes: shared binary rg untouched" "$FP_RG_BEFORE" "$(shasum "$ARM/
 expect_eq "all-yes: shared binary git untouched" "$FP_GIT_BEFORE" "$(shasum "$ARM/bin/git" | awk '{print $1}')"
 expect_contains "all-yes: the summary names what is left in place by design" \
   "Left in place by design" "$OUT_ALLYES"
+# R-1: the transcript's second line used to be `mode: payload — the plugin's
+# libraries are beside this script`, which is the script telling the user which
+# of its own branches it took. What a user needs from that line is whether the
+# full teardown is available.
+expect_contains "all-yes: the run says what it can do, in words" \
+  "running from the plugin" "$OUT_ALLYES"
+expect_not_contains "all-yes: and not as an internal mode value" "mode: payload" "$OUT_ALLYES"
 
 # The keep-shared policy is three-valued: consent does not unlock it.
 CALLS_ALLYES="$(cat "$ARM/calls.log")"
 expect_not_contains "all-yes: no brew uninstall of a keep-shared row" "brew uninstall" "$CALLS_ALLYES"
-expect_contains "all-yes: keep-shared rows are reported, not removed" "keep-shared" "$OUT_ALLYES"
+expect_contains "all-yes: the shared binaries are reported, not removed" \
+  "kept — shared with other tools" "$OUT_ALLYES"
+# R-1: and the POLICY NAME never reaches the terminal — `keep-shared` is a column
+# value in deps.sh's table, not a thing a user has any way to know.
+expect_not_contains "all-yes: and the removal-policy value is not printed at the user" \
+  "keep-shared" "$OUT_ALLYES"
 
 echo ""
 echo "=== Group 4: per-item consent — an ALL-NO run leaves the machine byte-identical ==="
@@ -870,6 +948,9 @@ RC_TEXT="$(cat "$ARM/home/.zshrc")"
 SETTINGS_TEXT="$(cat "$ARM/home/.claude/settings.json")"
 
 expect_contains "standalone: announces the mode it is running in" "standalone" "$OUT_STANDALONE"
+# R-1: it announces it in words, not as `mode: <internal value>` — the transcript's
+# second line was the internal runtime word, printed before anything else.
+expect_not_contains "standalone: and not as an internal mode value" "mode: standalone" "$OUT_STANDALONE"
 expect_not_contains "standalone: the zshrc block was still removed" "bionic:start" "$RC_TEXT"
 expect_true "standalone: the todo-tools export was still removed" \
   bash -c '! grep -qE "^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=1" "$1"' _ "$ARM/home/.zshrc"
@@ -946,9 +1027,16 @@ expect_eq "bare PATH: the never-list still survives" \
   "$FP_NEVER_BEFORE" "$(fingerprint "$ARM/home/.bionic")"
 
 echo ""
-echo "=== Group 11: lane-3b dependencies via remove_dep (payload mode only) ==="
-
-ARM="$(new_arm lane3b)"
+echo "=== Group 11: the tool pass — every class bionic installs itself (payload mode only) ==="
+#
+# ENUMERATED BY CLASS, NOT BY THE RETIRED LANE VIEW (six-axis review A-1). The
+# teardown candidates are `basic|when-needed|extra` — every row except `core`,
+# which is the bionic plugin's own declared dependencies and belongs to the
+# native uninstall and prune in Group 12. `dep_names_lane 3b` used to compute
+# this set as "kind != native", which silently dropped the one native row that
+# is not core (A-2, below) and printed the new taxonomy's words over the old
+# taxonomy's set.
+ARM="$(new_arm toolpass)"
 plant_never_list "$ARM"
 plant_claude_stub "$ARM" no no
 # npm answers "installed" for the package probe, and records the uninstall.
@@ -965,12 +1053,131 @@ chmod +x "$ARM/bin/npm"
 
 OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
 CALLS="$(cat "$ARM/calls.log")"
-expect_contains "lane-3b: a present remove-on-consent dep reaches its real uninstall command" \
+expect_contains "tool pass: a present consented dep reaches its real uninstall command" \
   "npm uninstall -g @playwright/cli" "$CALLS"
-expect_not_contains "lane-3b: a keep-shared binary is never uninstalled, consent or not" \
+expect_not_contains "tool pass: a shared binary is never uninstalled, consent or not" \
   "brew uninstall" "$CALLS"
-expect_contains "lane-3b: the keep-shared policy is stated in the transcript" "keep-shared" "$OUT"
-expect_true "lane-3b: the keep-shared binary is still on the fixture PATH" test -x "$ARM/bin/rg"
+# R-1: the policy is stated in words the user can act on, and the table's own
+# value for it stays in the table.
+expect_contains "tool pass: the shared-binary policy is stated in the transcript" \
+  "kept — shared with other tools, bionic never removes it" "$OUT"
+expect_not_contains "tool pass: …and stated without the table's column value" "keep-shared" "$OUT"
+expect_true "tool pass: the shared binary is still on the fixture PATH" test -x "$ARM/bin/rg"
+
+# ---- A-2: the plugin the JIT route can install, and nothing could remove ----
+#
+# `install_plugin_native` puts `impeccable@bionic` on a machine mid-session, on
+# one consent, from `jit_offer`. It is `kind=native` and class `when-needed`, so
+# the old lane-3b walk never saw it — and its `native-uninstall-offer` arm said
+# "removed by the plugin uninstall, not here", which is false by construction:
+# A-3.1 rules that bionic's plugin.json declares the two core rows only, so
+# nothing about removing bionic touches this one. A machine that used the design
+# route once kept the plugin after a full, all-yes teardown.
+ARM="$(new_arm native-when-needed-present)"
+plant_never_list "$ARM"
+plant_claude_stub "$ARM" no no
+plant_native_plugin "$ARM" impeccable 4.1.1
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+CALLS="$(cat "$ARM/calls.log")"
+expect_contains "installed plugin: the teardown asks about it, in the same words as any other row" \
+  "Remove impeccable now?" "$OUT"
+expect_contains "installed plugin: a consented removal runs the CLI's own uninstall" \
+  "plugin uninstall impeccable@bionic" "$CALLS"
+expect_not_contains "installed plugin: and never claims some other step already took it" \
+  "removed by the plugin uninstall" "$OUT"
+# The counter is the only trace a dependency removal leaves in the summary, and
+# this arm plants exactly one removable thing, so the count is the assertion.
+expect_contains "installed plugin: counted as removed in the summary" "1 removed" "$OUT"
+
+# ---- declined: the offer is an offer ----
+ARM="$(new_arm native-when-needed-declined)"
+plant_never_list "$ARM"
+plant_claude_stub "$ARM" no no
+plant_native_plugin "$ARM" impeccable 4.1.1
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
+CALLS="$(cat "$ARM/calls.log")"
+expect_not_contains "installed plugin: a declined offer uninstalls nothing" \
+  "plugin uninstall impeccable@bionic" "$CALLS"
+expect_contains "installed plugin: and says so in the skipped shape the script already uses" \
+  "declined — impeccable left in place." "$OUT"
+
+# ---- absent: no question about a plugin this machine never installed ----
+ARM="$(new_arm native-when-needed-absent)"
+plant_never_list "$ARM"
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+CALLS="$(cat "$ARM/calls.log")"
+expect_not_contains "absent plugin: nothing is asked" "Remove impeccable now?" "$OUT"
+expect_not_contains "absent plugin: nothing is uninstalled" \
+  "plugin uninstall impeccable@bionic" "$CALLS"
+expect_contains "absent plugin: it opens already clean, like any absent row" \
+  "dependency impeccable (not installed)" "$OUT"
+
+# ---- F-4: a same-named plugin from ANOTHER catalog is not bionic's to remove ----
+#
+# The presence probe is marketplace-agnostic on purpose — it matches the bare
+# NAME across catalogs, which is what let S3 re-point bionic's own marketplace
+# without breaking every native row. The teardown composed the uninstall id as
+# `<name>@bionic` regardless, so a user's own `impeccable` from the official
+# catalog read as present and was offered for removal with an id that does not
+# exist: the CLI answered "not installed", the non-zero landed in the skipped
+# bucket, and a user who said YES was reported as having skipped it.
+#
+# The registry is asked the exact-id question now, and the other-catalog copy is
+# reported rather than asked about — there is no question whose yes bionic could
+# honour.
+ARM="$(new_arm native-other-catalog)"
+plant_never_list "$ARM"
+plant_claude_stub "$ARM" no no
+plant_native_plugin "$ARM" impeccable 4.1.1 claude-plugins-official
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+CALLS="$(cat "$ARM/calls.log")"
+expect_not_contains "another catalog: no question is asked about a plugin bionic did not install" \
+  "Remove impeccable now?" "$OUT"
+expect_not_contains "another catalog: nothing is uninstalled, on an ALL-YES run" \
+  "plugin uninstall impeccable" "$CALLS"
+expect_contains "another catalog: the transcript says whose plugin it is and what bionic did" \
+  "installed from another catalog" "$OUT"
+expect_not_contains "another catalog: it is never reported as skipped by the user" \
+  "⚠ dependency impeccable" "$OUT"
+
+# The positive half of the same discrimination, argv captured: the id bionic
+# composes is the id the registry actually holds.
+ARM="$(new_arm native-own-catalog-argv)"
+plant_never_list "$ARM"
+plant_claude_stub "$ARM" no no
+plant_native_plugin "$ARM" impeccable 4.1.1 bionic
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+CALLS="$(cat "$ARM/calls.log")"
+expect_contains "own catalog: the offer is made" "Remove impeccable now?" "$OUT"
+expect_contains "own catalog: the argv the CLI received names the key the registry holds" \
+  "claude plugin uninstall impeccable@bionic --yes" "$CALLS"
+
+# ---- F-5: `claude` off PATH is a product line, not a bash error ----
+#
+# `install_plugin_native` and `remove_plugin_native` were the only externals in
+# deps.sh called without a presence guard, so a machine without the CLI got a
+# library filename and a line number on its terminal — the exact class of display
+# this wave exists to remove, and one no source lint can see, because bash writes
+# the string at runtime. It matters most at remove's standalone door, whose whole
+# premise is a machine where bionic's world is partly gone.
+ARM="$(new_arm native-no-claude)"
+plant_never_list "$ARM"
+plant_native_plugin "$ARM" impeccable 4.1.1 bionic
+rm -f "$ARM/bin/claude"
+RM_NOCLI="$(printf 'y\n' | dep_query "$ARM" remove_dep impeccable)"
+expect_contains "no CLI: one product line naming what is missing and what it blocks" \
+  "the Claude Code CLI is not on PATH" "$RM_NOCLI"
+expect_not_contains "no CLI: no bash error reaches the terminal" "command not found" "$RM_NOCLI"
+expect_not_contains "no CLI: no library filename" "deps.sh" "$RM_NOCLI"
+expect_not_contains "no CLI: no line number" "line " "$RM_NOCLI"
+printf 'y\n' | dep_query "$ARM" remove_dep impeccable >/dev/null 2>&1; RM_NOCLI_ST=$?
+expect_ne "no CLI: and the function reports failure rather than a silent success" "0" "$RM_NOCLI_ST"
+
+IN_NOCLI="$(printf 'y\n' | dep_query "$ARM" install_plugin_native impeccable)"
+expect_contains "no CLI: the install side says the same thing" \
+  "the Claude Code CLI is not on PATH" "$IN_NOCLI"
+expect_not_contains "no CLI: …and no bash error there either" "command not found" "$IN_NOCLI"
 
 echo ""
 echo "=== Group 12: the native finisher — uninstall, --keep-data, prune ==="
@@ -1244,6 +1451,335 @@ plant_claude_stub "$ARM" no no
 OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
 expect_contains "closing claim: a run that finished everything still says so plainly" \
   "without bionic's skills, hooks and agents" "$OUT"
+
+echo ""
+echo "=== Group 18: remove.sh finishes in one pass — the uninstall recreates plugin data (AC-7) ==="
+#
+# r1-surface-map.md Item 4: `claude plugin uninstall` re-creates an empty
+# plugins/data/bionic-bionic directory as a side effect, and the plugin-data
+# question in this script only ever ran BEFORE the uninstall — so the
+# recreated directory had no code path checking it again before the summary.
+# The order is: native uninstall runs, then a re-check of the data directory,
+# then the prune offer — all in the same pass, with zero stray dirs left.
+
+ARM="$(new_arm one-pass-recreated-data)"
+plant_plugin_data "$ARM"
+plant_claude_stub_data_recreated "$ARM"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+CALLS="$(cat "$ARM/calls.log")"
+expect_true "one pass: the uninstall-recreated plugin data directory is gone at the end" \
+  bash -c '[ ! -d "$1" ]' _ "$ARM/home/.claude/plugins/data/bionic-bionic"
+expect_contains "one pass: the prune offer is reached in the same run" \
+  "the CLI reports these auto-installed dependencies are no longer needed" "$OUT"
+expect_contains "one pass: a consented prune actually runs" \
+  "plugin prune --yes" "$CALLS"
+expect_contains "one pass: the uninstall itself ran (this is not a no-op arm)" \
+  "plugin uninstall bionic@bionic --yes" "$CALLS"
+
+# ---- a second run over the same arm: the plugin-data item opens already clean ----
+OUT2="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+expect_contains "one pass: a second run finds the plugin-data item already clean" \
+  "plugin data under ${ARM}/home/.claude/plugins/data — already clean" "$OUT2"
+expect_true "one pass: the second run still ends with zero recreated data" \
+  bash -c '[ ! -d "$1" ]' _ "$ARM/home/.claude/plugins/data/bionic-bionic"
+
+echo ""
+echo "=== Group 19: bionic's default permission mode (A-4.S5.F-RULING (a)) ==="
+#
+# setup.sh's _setup_default_mode (AC-12) writes `.permissions.defaultMode = "auto"`
+# OUTSIDE the marker block the item above strips — a preference of the machine's, not
+# one of bionic's rendered rules — so a machine torn down after answering yes to that
+# question keeps `defaultMode: auto` behind. This item closes that footprint leftover:
+# ask to reset it only when the value is still exactly what bionic offers; any other
+# value, or no key at all, is left alone with no question at all.
+
+plant_default_mode() {  # <arm> <value>
+  local arm="$1" value="$2" settings="$1/home/.claude/settings.json"
+  if [ -f "$settings" ]; then
+    jq --arg v "$value" '.permissions.defaultMode = $v' "$settings" > "$arm/tmp.json" && mv "$arm/tmp.json" "$settings"
+  else
+    printf '{"permissions":{"defaultMode":"%s"}}\n' "$value" > "$settings"
+  fi
+}
+
+# ---- defaultMode=auto, consent given: the key goes, counted as removed ----
+ARM="$(new_arm default-mode-auto-yes)"
+plant_default_mode "$ARM" auto
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+expect_contains "default mode: asks the exact question when it is bionic's auto" \
+  "Reset Claude Code's default permission mode? bionic set it to auto at setup. [y/N]" "$OUT"
+expect_eq "default mode: consented — the key is gone" \
+  "" "$(jq -r '.permissions.defaultMode // ""' "$ARM/home/.claude/settings.json")"
+expect_contains "default mode: consented — counted as removed" \
+  "✓ default permission mode" "$OUT"
+
+# ---- defaultMode=auto, consent declined: the key stays, reported skipped ----
+ARM="$(new_arm default-mode-auto-no)"
+plant_default_mode "$ARM" auto
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
+expect_eq "default mode: declined — the key is untouched" \
+  "auto" "$(jq -r '.permissions.defaultMode // ""' "$ARM/home/.claude/settings.json")"
+expect_contains "default mode: declined — reported in the Skipped list" \
+  "default permission mode" "$OUT"
+expect_contains "default mode: declined — the skipped-line shape the script already uses" \
+  "declined — default permission mode" "$OUT"
+
+# ---- defaultMode=plan (not bionic's value): no question, untouched ----
+ARM="$(new_arm default-mode-plan)"
+plant_default_mode "$ARM" plan
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+expect_not_contains "default mode: a non-auto value is never asked about" \
+  "Reset Claude Code's default permission mode" "$OUT"
+expect_eq "default mode: a non-auto value is left exactly as it was" \
+  "plan" "$(jq -r '.permissions.defaultMode // ""' "$ARM/home/.claude/settings.json")"
+expect_contains "default mode: a non-auto value reports already clean" \
+  "default permission mode" "$OUT"
+
+# ---- no key at all: already clean, no question ----
+ARM="$(new_arm default-mode-absent)"
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+expect_not_contains "default mode: no key — never asked about" \
+  "Reset Claude Code's default permission mode" "$OUT"
+expect_contains "default mode: no key — already clean" \
+  "default permission mode" "$OUT"
+expect_contains "default mode: no key — the already-clean shape the script already uses" \
+  "default permission mode in ${ARM}/home/.claude/settings.json — already clean" "$OUT"
+
+# ---- D-1: ONE OWNER for the value, and both ends read it ----
+#
+# `auto` used to be a bare literal in two files — setup.sh wrote it, this script
+# compared against it — with nothing making them agree. The reset is DEFINED as
+# "the one value bionic knows it wrote", so a setup that started writing
+# `acceptEdits` would leave both suites green while the teardown silently matched
+# nothing and left the setting behind. deps.sh owns the value now.
+#
+# THE STANDALONE DOOR IS WHY THIS IS A FALLBACK AND NOT A SECOND OWNER. Fetched
+# by URL onto a machine with no payload beside it, this script has no deps.sh to
+# read — the same reason every literal in its "shared literals" section exists.
+# So: the owner's value when there is an owner, one declared fallback when there
+# is not, and the arms below pin the fallback to the owner and pin the BEHAVIOUR
+# to whatever the owner currently says.
+DEPS_MODE="$(bash -c '. "$1"; printf "%s" "${BIONIC_DEFAULT_PERMISSION_MODE:-}"' _ "$DEPS_SH")"
+expect_eq "one owner: deps.sh holds the default permission mode bionic offers" "auto" "$DEPS_MODE"
+
+# Non-comment lines carrying the value as a literal, in either script. The word
+# on its own — `automatic` and `auto-update` are not the value, and `${…:-auto}`
+# is. Comments are exempt: a comment is where the rule gets explained, and a lint
+# that could not tell a prohibition from a violation would forbid writing it down.
+auto_literals() {  # <script>
+  /usr/bin/grep -nE '(^|[^A-Za-z])auto([^A-Za-z-]|$)' "$1" \
+    | /usr/bin/grep -vE '^[0-9]+:[[:space:]]*#' || true
+}
+expect_eq "one owner: setup.sh carries the value nowhere — it reads the owner's" \
+  "" "$(auto_literals "$SETUP_SH")"
+RM_AUTO="$(auto_literals "$REMOVE_SH")"
+expect_eq "one owner: remove.sh carries exactly one, and it is the standalone fallback" "1" \
+  "$(printf '%s' "$RM_AUTO" | /usr/bin/grep -c 'BIONIC_DEFAULT_PERMISSION_MODE:-auto' | tr -d ' ')"
+expect_eq "one owner: …and nothing else in remove.sh spells the value out" "1" \
+  "$(printf '%s' "$RM_AUTO" | /usr/bin/grep -c . | tr -d ' ')"
+
+# ---- the mutation arm: move the owner's value, and the teardown follows it ----
+#
+# An agreement test that only reads source can be satisfied by a coincidence.
+# This one changes the constant in a COPY of the payload and drives the real
+# script against it: the value it resets, and the value it names in the question,
+# both have to move.
+MUT="$TMP/mutant-payload"; mkdir -p "$MUT/lib"
+cp "$REMOVE_SH" "$MUT/remove.sh"
+cp "${REPO}/payload/scripts/lib/"*.sh "$MUT/lib/"
+sed 's/^BIONIC_DEFAULT_PERMISSION_MODE=.*/BIONIC_DEFAULT_PERMISSION_MODE="plan"/' "$DEPS_SH" > "$MUT/lib/deps.sh"
+expect_true "mutation: the copy really carries the moved value" \
+  bash -c 'grep -qF "BIONIC_DEFAULT_PERMISSION_MODE=\"plan\"" "$1"' _ "$MUT/lib/deps.sh"
+
+ARM="$(new_arm mutated-owner-plan)"
+plant_default_mode "$ARM" plan
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$MUT/remove.sh" "$ARM" "$ALL_YES")"
+expect_eq "mutation: the teardown resets the value the owner now names" "" \
+  "$(jq -r '.permissions.defaultMode // ""' "$ARM/home/.claude/settings.json")"
+expect_contains "mutation: and the question it asks names that value too" \
+  "bionic set it to plan at setup." "$OUT"
+
+ARM="$(new_arm mutated-owner-auto)"
+plant_default_mode "$ARM" auto
+plant_claude_stub "$ARM" no no
+OUT="$(run_remove "$MUT/remove.sh" "$ARM" "$ALL_YES")"
+expect_eq "mutation: a planted auto is now somebody else's setting and is left alone" \
+  "auto" "$(jq -r '.permissions.defaultMode // ""' "$ARM/home/.claude/settings.json")"
+expect_not_contains "mutation: and it is not even asked about" \
+  "Reset Claude Code's default permission mode?" "$OUT"
+
+# ---- the one-pass property: the item sits with the profile strip, before the finisher ----
+expect_true "default mode: the item's source sits before the native-uninstall finisher" \
+  bash -c '
+    a=$(grep -n "default permission mode:" "$1" | head -1 | cut -d: -f1)
+    b=$(grep -n "native plugin uninstall:" "$1" | head -1 | cut -d: -f1)
+    [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]
+  ' _ "$REMOVE_SH"
+
+echo ""
+echo "=== Group 19: the yes is addressable — --list and --only (critic F-2) ==="
+#
+# THE SAME DEFECT THIS SCRIPT'S SIBLING HAS. An answer reaches this script on its
+# own input and nowhere else, and an answer delivered that way is POSITIONAL: it
+# lands on the FIRST question asked, which is whichever item this machine
+# happens to carry. A relayed "yes, take the permission block off" could uninstall
+# the plugin instead. `--only <name>` makes the yes aimable — one item asked
+# about, one answer possible — and `--list` publishes the names.
+#
+# NOTHING HERE ANSWERS A QUESTION. Group 4 above is the standing proof that an
+# all-no run leaves the machine byte-identical, and the arms below add no route
+# around it: the answer is still one `y` read from the input, per item.
+
+ARM="$(new_arm only-list)"
+plant_never_list "$ARM"
+plant_claude_stub "$ARM" yes no
+REMOVE_FLAGS="--list"
+LIST_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
+REMOVE_FLAGS=""
+
+printf '%s\n' "$LIST_OUT" > "$TMP/rm-list.txt"
+expect_contains "--list names the permission-mode item" "permission-mode" "$LIST_OUT"
+expect_contains "--list names a tool row read from the dependency table" "tool:git" "$LIST_OUT"
+# Whole-line matching, because `plugin` is a prefix of `plugin-data`: a
+# substring arm here would pass on a roster that never named the finisher.
+expect_true "--list names the finisher as a name of its own" \
+  /usr/bin/grep -qxF 'plugin' "$TMP/rm-list.txt"
+expect_true "--list names the plugin-data item as a name of its own" \
+  /usr/bin/grep -qxF 'plugin-data' "$TMP/rm-list.txt"
+LIST_JUNK=""
+while IFS= read -r rm_id; do
+  case "$rm_id" in ''|*' '*|*"$(printf '\t')"*) LIST_JUNK="${LIST_JUNK}[${rm_id}]" ;; esac
+done < "$TMP/rm-list.txt"
+expect_eq "--list prints names only — one per line, nothing a reader cannot paste" "" "$LIST_JUNK"
+
+# THE AGREEMENT ARM. One owner for the roster means every name a reader can see
+# is a name the dispatcher takes. Exit 2 is "no such item".
+LIST_REJECTED=""
+while IFS= read -r rm_id; do
+  [ -n "$rm_id" ] || continue
+  case "$rm_id" in *' '*) continue ;; esac
+  REMOVE_FLAGS="--only $rm_id"
+  run_remove "$REMOVE_SH" "$ARM" "$ALL_NO" >/dev/null 2>&1
+  [ "$?" = "2" ] && LIST_REJECTED="${LIST_REJECTED}${rm_id} "
+  REMOVE_FLAGS=""
+done < "$TMP/rm-list.txt"
+expect_eq "every name --list prints is a name --only accepts" "" "$LIST_REJECTED"
+
+# ---- an unknown name is refused before anything is asked ----
+ARM="$(new_arm only-unknown)"
+plant_zshrc_marked "$ARM"
+plant_claude_stub "$ARM" no no
+REMOVE_FLAGS="--only not-an-item"
+UNKNOWN_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"; UNKNOWN_RC=$?
+REMOVE_FLAGS=""
+expect_eq "--only with an unknown name exits 2" "2" "$UNKNOWN_RC"
+expect_contains "…and says so in words, naming what was asked for" "not-an-item" "$UNKNOWN_OUT"
+expect_contains "…and points at --list for the names" "--list" "$UNKNOWN_OUT"
+expect_not_contains "…and asks nothing before refusing" "[y/N]" "$UNKNOWN_OUT"
+expect_true "…and removes nothing: the planted alias block is still there" \
+  bash -c 'grep -qF "bionic:start" "$1"' _ "$ARM/home/.zshrc"
+
+# ---- one consented item, and NOTHING else, by bytes ----
+ARM="$(new_arm only-one-mutation)"
+plant_default_mode "$ARM" auto
+plant_zshrc_marked "$ARM"
+plant_todo_export "$ARM"
+plant_plugin_data "$ARM"
+plant_claude_stub "$ARM" yes yes
+RC_BEFORE="$(cat "$ARM/home/.zshrc")"
+FP_BEFORE="$(fingerprint "$ARM/home")"
+REMOVE_FLAGS="--only permission-mode"
+ONE_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+REMOVE_FLAGS=""
+FP_AFTER="$(fingerprint "$ARM/home")"
+
+expect_eq "--only permission-mode resets the value bionic wrote" "" \
+  "$(jq -r '.permissions.defaultMode // ""' "$ARM/home/.claude/settings.json")"
+expect_eq "…and the shell rc is byte-identical" "$RC_BEFORE" "$(cat "$ARM/home/.zshrc")"
+expect_true "…and the plugin data directory is still there" \
+  test -d "$ARM/home/.claude/plugins/data/bionic-bionic"
+printf '%s\n' "$FP_BEFORE" > "$TMP/rm-fp-before.txt"
+printf '%s\n' "$FP_AFTER"  > "$TMP/rm-fp-after.txt"
+diff "$TMP/rm-fp-before.txt" "$TMP/rm-fp-after.txt" > "$TMP/rm-fp-diff.txt" 2>&1
+RM_CHANGED="$(/usr/bin/grep -c '^[<>]' "$TMP/rm-fp-diff.txt" | tr -d ' ')"
+expect_eq "…and one file changed, no more" "2" "$RM_CHANGED"
+expect_true "…and that file is settings.json" \
+  /usr/bin/grep -q 'settings.json' "$TMP/rm-fp-diff.txt"
+expect_not_contains "…the finisher was never reached" "plugin uninstall" "$(cat "$ARM/calls.log")"
+expect_not_contains "…and no other item printed its header" "todo-tools export:" "$ONE_OUT"
+expect_not_contains "…and the closing claim is not made after one item" \
+  "without bionic's skills, hooks and agents" "$ONE_OUT"
+
+printf '%s\n' "$ONE_OUT" > "$TMP/rm-one.txt"
+RM_QCOUNT="$(/usr/bin/grep -c '\[y/N\]' "$TMP/rm-one.txt" | tr -d ' ')"
+expect_eq "--only asks exactly one question" "1" "$RM_QCOUNT"
+
+# ---- AN ANSWER NOBODY GAVE IS A NO ----
+#
+# The uninstall deletes the plugin data unless told to keep it, and the question
+# about that data is a DIFFERENT item — one a narrowed run never asked. Narrowed
+# to the finisher, the teardown must keep what it was given no permission to take.
+ARM="$(new_arm only-plugin-keeps-data)"
+plant_plugin_data "$ARM"
+plant_claude_stub "$ARM" yes no
+REMOVE_FLAGS="--only plugin"
+FINISH_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+REMOVE_FLAGS=""
+expect_contains "--only plugin uninstalls the plugin" "plugin uninstall bionic@bionic --yes" \
+  "$(cat "$ARM/calls.log")"
+expect_contains "…and keeps the data it was never asked about" "--keep-data" "$(cat "$ARM/calls.log")"
+expect_true "…so the data directory survives" \
+  test -d "$ARM/home/.claude/plugins/data/bionic-bionic"
+expect_not_contains "…and the data question was not asked either" "Remove bionic's plugin data?" "$FINISH_OUT"
+
+# ---- the declined line carries the route, with the item's own name ----
+ARM="$(new_arm only-declined-route)"
+plant_zshrc_marked "$ARM"
+plant_claude_stub "$ARM" no no
+REMOVE_FLAGS="--only legacy-alias"
+DECLINE_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
+REMOVE_FLAGS=""
+printf '%s\n' "$DECLINE_OUT" > "$TMP/rm-decline.txt"
+expect_contains "the declined item names itself" "--only legacy-alias" "$DECLINE_OUT"
+expect_contains "…in an unquoted invocation a person can paste" \
+  "| bash /" "$DECLINE_OUT"
+expect_true "…with the answer itself supplied on the input" \
+  /usr/bin/grep -qF "printf 'y\\n' |" "$TMP/rm-decline.txt"
+
+# A whole declined pass carries the route on every item it asked about, and the
+# end summary repeats it beside the thing that was left.
+ARM="$(new_arm route-everywhere)"
+plant_never_list "$ARM"
+plant_zshrc_marked "$ARM"
+plant_todo_export "$ARM"
+plant_profile_block "$ARM"
+plant_plugin_data "$ARM"
+plant_claude_stub "$ARM" yes yes
+ALL_NO_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
+for rm_item in legacy-alias shell-env permission-profile plugin-data plugin; do
+  expect_contains "the whole-pass output names --only ${rm_item}" "--only ${rm_item}" "$ALL_NO_OUT"
+done
+expect_contains "the Skipped list carries the route beside what was left" \
+  "⚠ legacy alias block in" "$ALL_NO_OUT"
+
+# ONE OWNER FOR THE SENTENCE, so a decline line and a summary line cannot come to
+# name two different commands.
+expect_eq "remove.sh composes the route sentence in one place" "1" \
+  "$(/usr/bin/grep -c 'answer yes to %s with' "$REMOVE_SH" | tr -d ' ')"
+
+# NO ASSUME-YES CAME IN WITH THE FLAGS. The header's own rule, kept a rule.
+# ANCHORED, because `--yes)` also closes the uninstall argv array below: the
+# question is whether this script has an ARGUMENT arm called --yes, not whether
+# the four characters appear anywhere in it.
+expect_eq "remove.sh takes no assume-yes argument of its own" "" \
+  "$(/usr/bin/grep -nE '^[[:space:]]*--(yes|all)\)' "$REMOVE_SH" || true)"
+expect_eq "remove.sh reads no assume-yes environment knob" "" \
+  "$(/usr/bin/grep -niE 'BIONIC_(ASSUME_YES|YES|NONINTERACTIVE)' "$REMOVE_SH" || true)"
 
 echo ""
 echo "=== Group 16: the suite is registered in tests/run.sh by name ==="

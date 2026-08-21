@@ -1,0 +1,13 @@
+Installed plugins:
+
+  ❯ agent-skills@bionic
+    Version: 0.6.7
+    Scope: user
+    Status: ✔ enabled
+
+  ❯ bionic@bionic
+    Version: 0.1.0
+    Scope: user
+    Status: ✘ failed to load
+    Error: Dependency "superpowers@bionic" is not installed — run `claude plugin install superpowers@bionic`, …
+
