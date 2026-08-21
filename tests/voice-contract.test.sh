@@ -166,6 +166,15 @@ for c in $COMMANDS; do
     no "$c.md: the contract body is byte-identical to blocks/voice-contract.md" \
        "$(diff -u "$TMP/block-canonical.txt" "$TMP/$c-body.txt" | head -20)"
   fi
+
+  body_text="$(cat "$TMP/$c-body.txt" 2>/dev/null)"
+  if [[ "$body_text" == *"- Show the script's output exactly as it came back, in one block, unchanged — never"* ]] \
+     && [[ "$body_text" == *"retype, trim, reorder or summarize it. Your own words are the one closing line."* ]]; then
+    ok "$c.md: the relay bullet — show the output unchanged, never retype/trim/reorder/summarize (AC-1)"
+  else
+    no "$c.md: the relay bullet — show the output unchanged, never retype/trim/reorder/summarize (AC-1)" \
+       "missing the literal line or its continuation in the contract body"
+  fi
 done
 
 # ---------------------------------------------------------------------------
