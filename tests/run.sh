@@ -141,6 +141,11 @@ run "profile.test.sh" bash tests/profile.test.sh
 # BY NAME (the ownership-table agreement) and mutates nothing on decline. Hand-listed like
 # every suite outside hooks/.
 run "jit.test.sh" bash tests/jit.test.sh
+# The environment settings (epic-17 W7 S4, spec R4 / AC-5..AC-7):
+# payload/scripts/lib/env.sh — the `env` object in settings.json, the merge that adds one
+# name without touching the rest of the file, and the difference between a value the FILE
+# carries and a value THIS PROCESS has. Hand-listed like every suite outside hooks/.
+run "env.test.sh" bash tests/env.test.sh
 # Command-file conventions (epic-17 W3 S9, spec AC-1): globs payload/commands/*.md.
 run "command-format.test.sh" bash tests/command-format.test.sh
 # Command PERMISSIONS (epic-17 W6 S9b, walk finding W-1 / plan A-5.4): the byte-for-byte

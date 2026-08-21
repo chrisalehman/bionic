@@ -168,6 +168,20 @@ _rm_wants() { [ -z "$RM_ONLY" ] || [ "$RM_ONLY" = "$1" ]; }
 RM_RC_START='# ─── bionic:start ───'
 RM_RC_END='# ─── bionic:end ───'
 RM_TODO_EXPORT_RE='^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=1'
+# The retired env block's markers. NOT a copy of a live constant — setup.sh
+# stopped writing this block at W7 (the names live in settings.json now), so
+# this script is the only place they are still spelled, and it spells them
+# because every machine set up before that carries the block. Verbatim,
+# box-drawing dashes included: they are what makes the block addressable.
+RM_ENV_START='# ─── bionic:env:start ───'
+RM_ENV_END='# ─── bionic:env:end ───'
+# from env.sh: the names bionic owns in settings.json `env`, and the program
+# that deletes one of them. The standalone door cannot source env.sh, so both
+# are copies — pinned to their originals by tests/remove.test.sh, like every
+# other literal here. A name that is in env.sh and not here is a name bionic
+# sets and never removes.
+RM_ENV_KEYS='CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS'
+RM_ENV_UNSET_JQ='if has("env") then (.env |= del(.[$k])) | (if (.env | length) == 0 then del(.env) else . end) else . end'
 RM_LEGACY_ALIAS_RE='alias claude=.*dangerously-skip-permissions'
 # from detect.sh: the substring that puts a managed-hook entry on the legacy channel
 RM_LEGACY_HOOK_SUBSTR='.claude/hooks/'
@@ -196,6 +210,15 @@ RM_MODE=standalone
 if [ -f "${RM_LIB_DIR}/deps.sh" ] && [ -f "${RM_LIB_DIR}/profile.sh" ]; then
   # shellcheck source=/dev/null
   . "${RM_LIB_DIR}/deps.sh" && . "${RM_LIB_DIR}/profile.sh" && RM_MODE=payload
+fi
+# env.sh, when it is there. The environment item deletes names out of
+# settings.json, and env.sh is the owner of which names those are and of the
+# delete itself — so the payload door calls it and the standalone door falls
+# back to its own copy of the same jq program, exactly as the profile strip
+# already does. tests/remove.test.sh drives both and compares the bytes.
+if [ "$RM_MODE" = "payload" ] && [ -f "${RM_LIB_DIR}/env.sh" ]; then
+  # shellcheck source=/dev/null
+  . "${RM_LIB_DIR}/env.sh"
 fi
 
 # ─── Outcome records ─────────────────────────────────────────────────────────
@@ -307,17 +330,33 @@ _rm_filter_out_lines() {  # <file> <ere>
 # Drops a marker-delimited block, markers included. Line equality is exact —
 # these markers carry box-drawing dashes, and a fuzzy match would be a rewrite
 # rule for lines nobody wrote.
+# THE BLANK LINE ABOVE THE BLOCK GOES WITH IT. Every block bionic ever appended
+# to a shell rc was written as `\n<start>\n…\n<end>\n` — a separator line first,
+# so the block did not butt up against whatever the user's last line was. A strip
+# that removes only the marked lines leaves that separator behind, and the file
+# the user gets back is one blank line different from the file they had. It reads
+# as nothing and it is nothing, right up until someone diffs a machine against a
+# clean one. So exactly ONE immediately-preceding blank line is dropped with the
+# block: a run of them keeps all but the last, which is the honest reading of
+# "bionic added one".
+#
+# The pending-line shape is what makes that possible in one pass: a blank line is
+# held rather than written, and either flushed when the next real line arrives or
+# discarded when the next line turns out to be the start marker.
 _rm_strip_marker_block() {  # <file> <start-line> <end-line>
   local file="$1" start="$2" end="$3"
   local tmp="${file}.bionic.tmp"
-  local line skip=0
+  local line skip=0 pending=0
   : > "$tmp" || return 1
   while IFS= read -r line || [ -n "$line" ]; do
-    if [ "$line" = "$start" ]; then skip=1; continue; fi
+    if [ "$line" = "$start" ]; then skip=1; pending=0; continue; fi
     if [ "$line" = "$end" ];   then skip=0; continue; fi
     [ "$skip" = "1" ] && continue
+    if [ "$pending" = "1" ]; then printf '\n' >> "$tmp"; pending=0; fi
+    if [ -z "$line" ]; then pending=1; continue; fi
     printf '%s\n' "$line" >> "$tmp"
   done < "$file"
+  [ "$pending" = "1" ] && printf '\n' >> "$tmp"
   mv "$tmp" "$file"
 }
 
@@ -379,7 +418,7 @@ RM_ORPHANS_OFFERED=0
 _rm_item_ids() {
   local n
   echo "legacy-alias"
-  echo "shell-env"
+  echo "environment"
   echo "legacy-hooks"
   echo "legacy-skill-copy"
   echo "permission-profile"
@@ -510,27 +549,131 @@ _rm_item_legacy_alias() {
   echo ""
 }
 
-# ─── Item: the CLAUDE_CODE_ENABLE_TODO_TOOLS export ──────────────────────────
+# ─── Item: bionic's environment settings ─────────────────────────────────────
 #
-# The predicate is detect.sh's, character for character: a commented-out export
-# is NOT present, so it is not removed either.
+# ONE ITEM OVER TWO SURFACES, AND WHY THAT IS STILL ONE QUESTION. bionic's
+# environment lives in settings.json `env` now, and every machine set up before
+# W7 is also carrying the retired `# ─── bionic:env:start/end ───` block the old
+# step appended to the shell rc. Those are two files, but they are one thing —
+# "the environment bionic configured" — and asking twice would make a user answer
+# the same question about the same decision in two places, which is how half a
+# teardown happens. So the run states everything it found and asks once.
+#
+# THE WHOLE BLOCK, NOT THE EXPORT INSIDE IT. The previous teardown matched the
+# export line and filtered it out, which left the marker pair sitting empty in
+# the user's rc — bionic footprint that reads like a bionic setting whose value
+# nobody can find. The block goes, markers and separator line included, and the
+# file comes back byte-identical to what it was before setup ever appended to it.
+#
+# AND THE BARE EXPORT TOO. A machine that was set up before the markers existed,
+# or whose user moved the line, carries the export with no block around it. That
+# was removable before and stays removable: the predicate is detect.sh's, so a
+# commented-out line is not present and is not removed.
+#
+# THE NAMES ARE ENV.SH'S. In payload mode the delete goes through `env_unset`,
+# the owner. Standalone there is no owner to call, so the copy of its jq program
+# above is used with this script's own writer — the same two-door shape the
+# profile strip has carried since W3, and tests/remove.test.sh compares the bytes
+# the two doors produce.
 
-_rm_item_shell_env() {
-  _rm_wants shell-env || return 0
-  echo "todo-tools export:"
-  if _rm_file_has_line_matching "$RC_FILE" "$RM_TODO_EXPORT_RE"; then
-    echo "  ${RC_FILE} exports CLAUDE_CODE_ENABLE_TODO_TOOLS=1; bionic would delete that line."
-    if _rm_consent "Remove the CLAUDE_CODE_ENABLE_TODO_TOOLS export from ${RC_FILE}?"; then
-      if _rm_filter_out_lines "$RC_FILE" "$RM_TODO_EXPORT_RE"; then
-        _rm_removed "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
-      else
-        _rm_leftover "could not rewrite ${RC_FILE} — the export is still there"
-      fi
-    else
-      _rm_skipped shell-env "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
+# Delete one name from settings.json `env`. Payload mode delegates; standalone
+# mode runs the copied program. Absent is success either way: a second teardown
+# reporting a problem where there is nothing left to do is a false alarm.
+_rm_env_unset() {  # <key>
+  local key="${1:-}" stripped nl rm_env_text
+  if [ "$RM_MODE" = "payload" ] && declare -F env_unset >/dev/null 2>&1; then
+    env_unset "$key"
+    return $?
+  fi
+  [ -f "$RM_SETTINGS" ] || return 0
+  _rm_have jq || return 1
+  # The trailing newline is preserved the way every other item here preserves
+  # it: read the file, look at its last byte, hand the answer to _rm_write.
+  nl=0
+  _rm_slurp_into rm_env_text "$RM_SETTINGS" && case "$rm_env_text" in *$'\n') nl=1 ;; esac
+  stripped="$(jq --arg k "$key" "$RM_ENV_UNSET_JQ" "$RM_SETTINGS" 2>/dev/null)" || return 1
+  _rm_write "$RM_SETTINGS" "$stripped" "$nl"
+}
+
+# Which of bionic's names this machine actually carries. Read through jq so a
+# machine without it says "cannot tell" rather than "clean".
+_rm_env_keys_present() {
+  local key found=""
+  _rm_have jq || return 1
+  [ -f "$RM_SETTINGS" ] || return 0
+  for key in $RM_ENV_KEYS; do
+    if [ "$(jq -r --arg k "$key" '.env[$k] // empty' "$RM_SETTINGS" 2>/dev/null)" != "" ]; then
+      found="${found}${found:+ }${key}"
     fi
-  else
-    _rm_clean "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
+  done
+  echo "$found"
+  return 0
+}
+
+_rm_item_environment() {
+  _rm_wants environment || return 0
+  echo "bionic's environment settings:"
+
+  local keys block=no bare=no question="" jq_missing=no
+  if ! keys="$(_rm_env_keys_present)"; then jq_missing=yes; keys=""; fi
+  _rm_file_has_literal "$RC_FILE" "$RM_ENV_START" && block=yes
+  if [ "$block" = "no" ] && _rm_file_has_line_matching "$RC_FILE" "$RM_TODO_EXPORT_RE"; then bare=yes; fi
+
+  if [ "$jq_missing" = "yes" ] && [ "$block" = "no" ] && [ "$bare" = "no" ]; then
+    _rm_leftover "cannot read ${RM_SETTINGS} without jq — bionic's environment settings were left as they are"
+    echo ""
+    return 0
+  fi
+
+  if [ -z "$keys" ] && [ "$block" = "no" ] && [ "$bare" = "no" ]; then
+    _rm_clean "bionic's environment settings"
+    echo ""
+    return 0
+  fi
+
+  # State every surface, then ask once. The question names the files rather than
+  # counting them: a user deciding this wants to know what gets touched.
+  if [ -n "$keys" ]; then
+    echo "  ${RM_SETTINGS} carries ${keys}; bionic would delete those names and leave the rest of the file alone."
+  fi
+  if [ "$block" = "yes" ]; then
+    echo "  ${RC_FILE} carries a retired bionic environment block; bionic would delete the block and everything between its markers."
+  elif [ "$bare" = "yes" ]; then
+    echo "  ${RC_FILE} exports CLAUDE_CODE_ENABLE_TODO_TOOLS=1; bionic would delete that line."
+  fi
+
+  question="Remove bionic's environment settings?"
+  if ! _rm_consent "$question"; then
+    _rm_skipped environment "bionic's environment settings"
+    echo ""
+    return 0
+  fi
+
+  local key failed=""
+  for key in $keys; do
+    if _rm_env_unset "$key"; then
+      _rm_removed "${key} in ${RM_SETTINGS}"
+    else
+      rm -f "${RM_SETTINGS}.bionic.tmp"
+      failed="${failed}${failed:+ }${key}"
+    fi
+  done
+  [ -n "$failed" ] && _rm_leftover "could not rewrite ${RM_SETTINGS} — ${failed} is still there"
+
+  if [ "$block" = "yes" ]; then
+    if _rm_strip_marker_block "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END"; then
+      _rm_removed "retired environment block in ${RC_FILE}"
+    else
+      rm -f "${RC_FILE}.bionic.tmp"
+      _rm_leftover "could not rewrite ${RC_FILE} — the environment block is still there"
+    fi
+  elif [ "$bare" = "yes" ]; then
+    if _rm_filter_out_lines "$RC_FILE" "$RM_TODO_EXPORT_RE"; then
+      _rm_removed "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
+    else
+      rm -f "${RC_FILE}.bionic.tmp"
+      _rm_leftover "could not rewrite ${RC_FILE} — the export is still there"
+    fi
   fi
   echo ""
 }
@@ -1070,7 +1213,7 @@ _rm_offer_orphans() {
 # ─── Run ─────────────────────────────────────────────────────────────────────
 
 _rm_item_legacy_alias
-_rm_item_shell_env
+_rm_item_environment
 _rm_item_legacy_hooks
 _rm_item_legacy_skill_copy
 _rm_item_permission_profile

@@ -486,19 +486,151 @@ expect_eq "clean rc: untouched (no rewrite that happens to produce the same text
   "$RC_BEFORE" "$(shasum "$ARM/home/.zshrc" | awk '{print $1}')"
 
 echo ""
-echo "=== Group 6: the TODO_TOOLS export ==="
+echo "=== Group 6: bionic's environment settings, and the retired rc block ==="
 
-ARM="$(new_arm todo-export)"
+# WHAT CHANGED AT W7 AND WHY THIS GROUP IS TWO HALVES NOW. The names bionic sets
+# live in settings.json, so the teardown deletes KEYS; and every machine set up
+# before W7 is carrying a `# ─── bionic:env:start/end ───` block in its shell rc
+# that the old teardown stripped the export out of and left the markers of. An
+# empty marker pair is bionic footprint that reads like a bionic setting, so the
+# item removes the WHOLE block — and the arm for that is byte-identity against
+# the file as it stood before setup ever appended to it, not the absence of a
+# marker.
+
+# The block STATED, verbatim, exactly as setup.sh used to append it: a blank
+# separator line, the two markers, the export between them. Stated here rather
+# than derived from the scripts under test, the same discipline Group 5 keeps
+# for the alias markers.
+plant_env_rc_block() {  # <arm>
+  cat >> "$1/home/.zshrc" <<'RC'
+
+# ─── bionic:env:start ───
+export CLAUDE_CODE_ENABLE_TODO_TOOLS=1
+# ─── bionic:env:end ───
+RC
+}
+
+# The two names in settings.json, beside a name that is NOT bionic's and a
+# permissions block — the shape of a real machine, and the whole risk surface: a
+# teardown that assigned `.env` would take the user's own names with it.
+plant_env_settings() {  # <arm>
+  cat > "$1/home/.claude/settings.json" <<'JSON'
+{
+  "env": {
+    "OTHER": "x",
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "BASH_MAX_TIMEOUT_MS": "1800000"
+  },
+  "permissions": {
+    "defaultMode": "auto"
+  }
+}
+JSON
+}
+
+ARM="$(new_arm env-settings)"
+printf 'export EDITOR=vim\n' > "$ARM/home/.zshrc"
+RC_PRE_BLOCK="$(cat "$ARM/home/.zshrc")"
+plant_env_rc_block "$ARM"
+plant_env_settings "$ARM"
+plant_claude_stub "$ARM" no no
+# NARROWED TO THE ITEM. A whole consented teardown also strips the permission
+# block and the default mode out of this same file, and an arm that ran the
+# whole roster could not tell "the environment item left permissions alone"
+# from "the permission item removed them".
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+REMOVE_FLAGS=""
+
+expect_eq "environment: the task-list name is gone from settings.json" "" \
+  "$(jq -r '.env.CLAUDE_CODE_ENABLE_TODO_TOOLS // ""' "$ARM/home/.claude/settings.json")"
+expect_eq "environment: the long-command ceiling is gone too" "" \
+  "$(jq -r '.env.BASH_MAX_TIMEOUT_MS // ""' "$ARM/home/.claude/settings.json")"
+expect_eq "environment: a name that is not bionic's survives" '{"OTHER":"x"}' \
+  "$(jq -c '.env' "$ARM/home/.claude/settings.json")"
+expect_eq "environment: the permissions block is untouched" "auto" \
+  "$(jq -r '.permissions.defaultMode // ""' "$ARM/home/.claude/settings.json")"
+expect_true "environment: the result is still valid JSON" jq -e . "$ARM/home/.claude/settings.json"
+
+# THE MARKER PAIR, AND THE BLANK LINE ABOVE IT. Byte-identity is the assertion —
+# an arm that only asked whether `bionic:env` was absent would pass on a file
+# left holding the empty separator setup appended with the block.
+expect_eq "environment: the rc is byte-identical to its pre-setup content" \
+  "$RC_PRE_BLOCK" "$(cat "$ARM/home/.zshrc")"
+
+# A machine that never carried the block: nothing to strip, and nothing written.
+# A rewrite that happened to produce the same text is still a rewrite of a file
+# the user did not consent to have touched.
+ARM="$(new_arm env-no-rc-block)"
+printf 'export EDITOR=vim\n' > "$ARM/home/.zshrc"
+plant_env_settings "$ARM"
+plant_claude_stub "$ARM" no no
+RC_SHA_BEFORE="$(shasum "$ARM/home/.zshrc" | awk '{print $1}')"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+REMOVE_FLAGS=""
+expect_eq "environment: an rc with no bionic block is untouched" \
+  "$RC_SHA_BEFORE" "$(shasum "$ARM/home/.zshrc" | awk '{print $1}')"
+expect_eq "…and the settings names were still removed" "false" \
+  "$(jq -r '.env | has("BASH_MAX_TIMEOUT_MS")' "$ARM/home/.claude/settings.json")"
+
+# The pre-marker shape: an export line a user (or a very old install) left bare
+# in the rc, with no block around it. The old teardown removed it by regex and
+# that capability does not retire with the block.
+ARM="$(new_arm env-bare-export)"
 printf 'export EDITOR=vim\n' > "$ARM/home/.zshrc"
 plant_todo_export "$ARM"
 plant_claude_stub "$ARM" no no
 OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
 RC_TEXT="$(cat "$ARM/home/.zshrc")"
-expect_true "todo export: the live export line is gone" \
+expect_true "bare export: the live export line is gone" \
   bash -c '! grep -qE "^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=1" "$1"' _ "$ARM/home/.zshrc"
-expect_contains "todo export: the commented-out line survives (detect.sh does not count it)" \
+expect_contains "bare export: the commented-out line survives (detect.sh does not count it)" \
   "# export CLAUDE_CODE_ENABLE_TODO_TOOLS=1" "$RC_TEXT"
-expect_contains "todo export: unrelated rc lines survive" "export EDITOR=vim" "$RC_TEXT"
+expect_contains "bare export: unrelated rc lines survive" "export EDITOR=vim" "$RC_TEXT"
+
+# Nothing to do at all — no names, no block — is reported clean, not as work.
+ARM="$(new_arm env-already-clean)"
+printf 'export EDITOR=vim\n' > "$ARM/home/.zshrc"
+printf '%s\n' '{"permissions":{}}' > "$ARM/home/.claude/settings.json"
+plant_claude_stub "$ARM" no no
+RC_SHA_BEFORE="$(shasum "$ARM/home/.zshrc" | awk '{print $1}')"
+SETTINGS_BEFORE="$(cat "$ARM/home/.claude/settings.json")"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+REMOVE_FLAGS=""
+expect_eq "already clean: the rc is untouched" \
+  "$RC_SHA_BEFORE" "$(shasum "$ARM/home/.zshrc" | awk '{print $1}')"
+expect_eq "already clean: settings.json is untouched" \
+  "$SETTINGS_BEFORE" "$(cat "$ARM/home/.claude/settings.json")"
+expect_contains "already clean: reported as already clean, not as a removal" \
+  "already clean" "$OUT"
+
+# A DECLINE CHANGES NOTHING, in both files at once. The item is one question
+# over two surfaces, so a partial application on decline is the failure this
+# arm exists to catch.
+ARM="$(new_arm env-declined)"
+printf 'export EDITOR=vim\n' > "$ARM/home/.zshrc"
+plant_env_rc_block "$ARM"
+plant_env_settings "$ARM"
+plant_claude_stub "$ARM" no no
+RC_SHA_BEFORE="$(shasum "$ARM/home/.zshrc" | awk '{print $1}')"
+SETTINGS_BEFORE="$(cat "$ARM/home/.claude/settings.json")"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
+REMOVE_FLAGS=""
+expect_eq "declined: the rc is untouched" \
+  "$RC_SHA_BEFORE" "$(shasum "$ARM/home/.zshrc" | awk '{print $1}')"
+expect_eq "declined: settings.json is untouched" \
+  "$SETTINGS_BEFORE" "$(cat "$ARM/home/.claude/settings.json")"
+expect_contains "declined: the route back names the item" "--only environment" "$OUT"
+
+# ONE ITEM, ONE QUESTION. Two surfaces do not make two questions — the count is
+# the assertion, because a second prompt is how one answer lands on the wrong
+# change.
+printf '%s\n' "$OUT" > "$TMP/env-decline.txt"
+expect_eq "--only environment asks exactly one question" "1" \
+  "$(/usr/bin/grep -c '\[y/N\]' "$TMP/env-decline.txt" | tr -d ' ')"
 
 # The removal predicate and detect.sh's presence predicate are the same regex.
 # remove.sh cannot SOURCE detect.sh (the standalone door forbids it), so the
@@ -508,6 +640,25 @@ expect_true "remove.sh carries detect.sh's todo-tools predicate verbatim" \
   bash -c 'grep -qF "$1" "$2"' _ "$TODO_PREDICATE" "$REMOVE_SH"
 expect_true "detect.sh carries the same predicate (the pin has two ends)" \
   bash -c 'grep -qF "$1" "$2"' _ "$TODO_PREDICATE" "$DETECT_SH"
+
+# The rc-block markers, pinned across the same seam: setup.sh wrote them,
+# remove.sh strips them, and the standalone door carries its own copy.
+ENV_START='# ─── bionic:env:start ───'
+ENV_END='# ─── bionic:env:end ───'
+expect_true "remove.sh carries the env block's start marker verbatim" \
+  bash -c 'grep -qF "$1" "$2"' _ "$ENV_START" "$REMOVE_SH"
+expect_true "remove.sh carries its end marker verbatim" \
+  bash -c 'grep -qF "$1" "$2"' _ "$ENV_END" "$REMOVE_SH"
+
+# The NAMES, pinned across the same seam: env.sh owns the roster, remove.sh's
+# standalone door carries a copy, and a name in one and not the other is a name
+# that gets set and never removed.
+for env_key in CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS; do
+  expect_true "remove.sh names the environment key ${env_key}" \
+    bash -c 'grep -qF "$1" "$2"' _ "$env_key" "$REMOVE_SH"
+  expect_true "env.sh names it too (the pin has two ends): ${env_key}" \
+    bash -c 'grep -qF "$1" "$2"' _ "$env_key" "${REPO}/payload/scripts/lib/env.sh"
+done
 
 echo ""
 echo "=== Group 7: legacy-channel managed-hook entries in settings.json ==="
@@ -934,6 +1085,47 @@ expect_eq "block-only: payload and standalone strips still produce byte-identica
 P2_TEXT="$(cat "$ARM_P2/home/.claude/settings.json")"
 expect_not_contains "block-only: the emptied permissions object is deleted, not left as {}" \
   '"permissions"' "$P2_TEXT"
+
+# THE SECOND TWO-DOOR BEHAVIOUR (W7 S4): deleting bionic's names out of `env`.
+# Payload mode calls env.sh's `env_unset`; standalone runs the copy of its jq
+# program this script carries, through its own writer. Same fixture in,
+# byte-identical settings file out — the only thing that keeps the copy honest.
+ARM_P3="$(new_arm env-strip-payload)"
+plant_claude_stub "$ARM_P3" no no; plant_env_settings "$ARM_P3"
+ARM_S3="$(new_arm env-strip-standalone)"
+plant_claude_stub "$ARM_S3" no no; plant_env_settings "$ARM_S3"
+expect_eq "env fixture parity: both arms start byte-identical" \
+  "$(shasum < "$ARM_P3/home/.claude/settings.json")" "$(shasum < "$ARM_S3/home/.claude/settings.json")"
+
+REMOVE_FLAGS="--only environment"
+run_remove "$REMOVE_SH" "$ARM_P3" "$ALL_YES" >/dev/null 2>&1
+run_remove "$STANDALONE_DIR/remove.sh" "$ARM_S3" "$ALL_YES" >/dev/null 2>&1
+REMOVE_FLAGS=""
+expect_eq "payload-mode env delete and standalone-mode env delete produce byte-identical settings" \
+  "$(shasum < "$ARM_P3/home/.claude/settings.json")" "$(shasum < "$ARM_S3/home/.claude/settings.json")"
+# And the delete actually happened — otherwise the arm proves only that two
+# implementations agree on doing nothing.
+expect_eq "…and bionic's names really are gone from both" '{"OTHER":"x"}' \
+  "$(jq -c '.env' "$ARM_P3/home/.claude/settings.json")"
+
+# The container-collapse branch, driven through both doors: a machine whose
+# `env` held ONLY bionic's names ends with no `env` object at all.
+ARM_P4="$(new_arm env-strip-payload-only)"
+plant_claude_stub "$ARM_P4" no no
+printf '%s\n' '{"env":{"CLAUDE_CODE_ENABLE_TODO_TOOLS":"1","BASH_MAX_TIMEOUT_MS":"1800000"}}' \
+  > "$ARM_P4/home/.claude/settings.json"
+ARM_S4="$(new_arm env-strip-standalone-only)"
+plant_claude_stub "$ARM_S4" no no
+printf '%s\n' '{"env":{"CLAUDE_CODE_ENABLE_TODO_TOOLS":"1","BASH_MAX_TIMEOUT_MS":"1800000"}}' \
+  > "$ARM_S4/home/.claude/settings.json"
+REMOVE_FLAGS="--only environment"
+run_remove "$REMOVE_SH" "$ARM_P4" "$ALL_YES" >/dev/null 2>&1
+run_remove "$STANDALONE_DIR/remove.sh" "$ARM_S4" "$ALL_YES" >/dev/null 2>&1
+REMOVE_FLAGS=""
+expect_eq "env-only: both doors still agree byte for byte" \
+  "$(shasum < "$ARM_P4/home/.claude/settings.json")" "$(shasum < "$ARM_S4/home/.claude/settings.json")"
+expect_eq "env-only: the emptied env object is deleted, not left as {}" "false" \
+  "$(jq -r 'has("env")' "$ARM_P4/home/.claude/settings.json")"
 expect_contains "block-only: the unrelated settings key survives" '"model"' "$P2_TEXT"
 
 echo ""
@@ -1768,7 +1960,7 @@ plant_profile_block "$ARM"
 plant_plugin_data "$ARM"
 plant_claude_stub "$ARM" yes yes
 ALL_NO_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
-for rm_item in legacy-alias shell-env permission-profile plugin-data plugin; do
+for rm_item in legacy-alias environment permission-profile plugin-data plugin; do
   expect_contains "the whole-pass output names --only ${rm_item}" "--only ${rm_item}" "$ALL_NO_OUT"
 done
 expect_contains "the Skipped list carries the route beside what was left" \
