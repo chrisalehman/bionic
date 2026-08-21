@@ -333,6 +333,22 @@ say()    { printf '%s\n' "$*"; }
 action() { SETUP_ACTIONS="${SETUP_ACTIONS}${1}"$'\n'; }
 consent() { _dep_consent "$1"; }   # deps.sh owns the one prompt shape
 
+# AC-12: `consent`'s non-zero used to mean one thing everywhere it was checked
+# — an explicit no — so every gate below printed the identical "declined —"
+# sentence whether a person typed n or a non-interactive first pass hit EOF on
+# the very first question. `_dep_consent` now tells the two apart (2 vs 1);
+# this is the one place each gate turns that code into the right leading word,
+# keeping its own tail sentence unchanged either way. Call with the consent
+# call's own `$?` as the first argument, captured before anything else runs.
+_setup_say_declined() {  # <rc> <tail sentence, already worded for "declined —">
+  local rc="$1" tail="$2"
+  if [ "$rc" = "2" ]; then
+    say "   not asked — ${tail}"
+  else
+    say "   declined — ${tail}"
+  fi
+}
+
 # ─── The CLI's own view of a plugin ──────────────────────────────────────────
 #
 # Presence of a core dependency is `check_dep`'s answer (it reads the install
@@ -569,8 +585,9 @@ setup_duplicates() {
     fi
     say "   bionic would run: ${fix}"
     say "   Saying no lets them coexist: nothing changes, and bionic asks again next run."
-    if ! consent "   Consolidate — remove the copy bionic did not install?"; then
-      say "   left as they are."
+    consent "   Consolidate — remove the copy bionic did not install?"; _setup_consent_rc=$?
+    if [ "$_setup_consent_rc" -ne 0 ]; then
+      _setup_say_declined "$_setup_consent_rc" "left as they are."
       action "settle the duplicate copies of ${bare}: ${fix} — $(_setup_answer_yes "duplicate:${bare}")"
       continue
     fi
@@ -619,8 +636,9 @@ setup_dep_enable_verify() {
       disabled)
         say "   ${name}: installed but DISABLED."
         say "   bionic would run: claude plugin enable ${id}"
-        if ! consent "   Enable ${name} now?"; then
-          say "   declined — ${name} stays disabled."
+        consent "   Enable ${name} now?"; _setup_consent_rc=$?
+        if [ "$_setup_consent_rc" -ne 0 ]; then
+          _setup_say_declined "$_setup_consent_rc" "${name} stays disabled."
           action "run: claude plugin enable ${id} — $(_setup_answer_yes "dependency:${name}")"
         elif claude plugin enable "$id"; then
           say "   enabled."
@@ -768,7 +786,8 @@ setup_environment() {
   for key in $missing; do
     say "   ${key}=$(env_default "$key") — $(_setup_env_why "$key")"
   done
-  if ! consent "   Write bionic's environment settings to ${settings}?"; then say "   declined — ${settings} is unchanged."; action "write bionic's environment settings to ${settings} — $(_setup_answer_yes environment)"; return 0; fi  # consent gate: settings env
+  consent "   Write bionic's environment settings to ${settings}?"; _setup_consent_rc=$?
+  if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "${settings} is unchanged."; action "write bionic's environment settings to ${settings} — $(_setup_answer_yes environment)"; return 0; fi  # consent gate: settings env
 
   for key in $missing; do
     if env_set "$key" "$(env_default "$key")"; then
@@ -811,8 +830,9 @@ setup_legacy_alias() {
   if [ "$present" = "yes" ]; then
     say "   ${rc} carries the legacy bionic alias block (claude --dangerously-skip-permissions)."
     say "   Auto mode is the default now and is the safer equivalent, so the block is retired footprint."
-    if ! consent "   Remove the legacy alias block from ${rc}?"; then
-      say "   declined — the block stays."
+    consent "   Remove the legacy alias block from ${rc}?"; _setup_consent_rc=$?
+    if [ "$_setup_consent_rc" -ne 0 ]; then
+      _setup_say_declined "$_setup_consent_rc" "the block stays."
       action "remove the legacy bionic alias block from ${rc} — $(_setup_answer_yes legacy-alias)"
       return 0
     fi
@@ -828,8 +848,9 @@ setup_legacy_alias() {
 
   if [ -f "$rc" ] && grep -qE "$SETUP_ALIAS_PATTERN" "$rc" 2>/dev/null; then
     say "   ${rc} carries the legacy UNMARKED alias — the spelling that predates the marker block."
-    if ! consent "   Remove the legacy alias line from ${rc}?"; then
-      say "   declined — the alias stays."
+    consent "   Remove the legacy alias line from ${rc}?"; _setup_consent_rc=$?
+    if [ "$_setup_consent_rc" -ne 0 ]; then
+      _setup_say_declined "$_setup_consent_rc" "the alias stays."
       action "remove the legacy 'alias claude=...--dangerously-skip-permissions' line from ${rc} — $(_setup_answer_yes legacy-alias)"
       return 0
     fi
@@ -901,8 +922,9 @@ setup_legacy_channel_hooks() {
     say "   The plugin is NOT registered with the CLI on this machine, so nothing takes their place:"
     say "   removing these entries leaves these hooks not firing at all until the plugin is installed."
   fi
-  if ! consent "   Remove the legacy-channel entries from ${settings}?"; then
-    say "   declined — ${settings} is unchanged."
+  consent "   Remove the legacy-channel entries from ${settings}?"; _setup_consent_rc=$?
+  if [ "$_setup_consent_rc" -ne 0 ]; then
+    _setup_say_declined "$_setup_consent_rc" "${settings} is unchanged."
     action "remove ${count} legacy-channel managed-hook entr(ies) from ${settings} — $(_setup_answer_yes legacy-hooks)"
     return 0
   fi
@@ -954,7 +976,8 @@ setup_legacy_skill_copy() {
   say "   loads it arms the same walls twice — once from the plugin, once from the retired copy."
   # The gate is one line so a mutation arm can delete it whole and watch the
   # decline stop protecting anything (tests/setup.test.sh Group 12, mutation 4).
-  if ! consent "   Remove ${dir} and everything under it?"; then say "   declined — ${dir} is unchanged."; action "remove the pre-plugin skill copy at ${dir} — $(_setup_answer_yes legacy-skill-copy)"; return 0; fi  # consent gate: legacy skill copy
+  consent "   Remove ${dir} and everything under it?"; _setup_consent_rc=$?
+  if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "${dir} is unchanged."; action "remove the pre-plugin skill copy at ${dir} — $(_setup_answer_yes legacy-skill-copy)"; return 0; fi  # consent gate: legacy skill copy
 
   # The guard is not decoration. This is the only recursive delete in the
   # script, and the path it takes comes from an environment the caller controls;
@@ -1029,9 +1052,10 @@ _setup_profile_block() {
     say "   bionic ships a permission profile for its own scripts and hooks, rendered for ${root}."
   fi
   say "   It goes into ${settings} inside a marker block; nothing outside that block is read or changed."
-  if ! consent "   Apply the permission profile to ${settings}?"; then
+  consent "   Apply the permission profile to ${settings}?"; _setup_consent_rc=$?
+  if [ "$_setup_consent_rc" -ne 0 ]; then
     rm -f "$rendered"
-    say "   declined — ${settings} is unchanged."
+    _setup_say_declined "$_setup_consent_rc" "${settings} is unchanged."
     action "apply the permission profile — $(_setup_answer_yes permission-profile)"
     return 0
   fi
@@ -1089,14 +1113,13 @@ _setup_default_mode() {
   if [ "$mode" = "$want" ]; then say "   the default permission mode is already ${want} — nothing to do."; return 0; fi  # idempotence guard: default mode
 
   say "   Claude Code asks before each command unless a default mode says otherwise."
-  consent "   Set Claude Code's default permission mode to ${want}? Recommended — you approve once, not on every command."
-  local _setup_mode_consent=$?
+  consent "   Set Claude Code's default permission mode to ${want}? Recommended — you approve once, not on every command."; _setup_consent_rc=$?
   # item 1: the note follows the question itself, whichever way it was
   # answered — a Remote Control session overrides this either way, so a
   # decline that leaves the setting unchanged and a yes that writes it both
   # need the same one sentence.
   say "   ${PROFILE_RC_NOTE}"
-  if [ "$_setup_mode_consent" -ne 0 ]; then say "   declined — the default permission mode is unchanged."; action "set Claude Code's default permission mode to ${want} in ${settings} — $(_setup_answer_yes permission-mode)"; return 0; fi  # consent gate: default mode
+  if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "the default permission mode is unchanged."; action "set Claude Code's default permission mode to ${want} in ${settings} — $(_setup_answer_yes permission-mode)"; return 0; fi  # consent gate: default mode
 
   # Created only AFTER consent: a declined run must leave a machine that has no
   # settings file without one.
