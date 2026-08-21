@@ -730,6 +730,40 @@ expect_true "…and a directory-source marketplace is told update does nothing f
 expect_true "…naming the CLI's own words for that no-op" \
   /usr/bin/grep -qF -- "already at the latest version" "$SKILL_S2"
 
+# epic-17 W7 S11 (six-axis review axis 2). Everything above pins the PROSE half of
+# this fact. This is the code half, and it is here because this section's whole
+# reason to exist is that the doc and the code must not drift apart independently.
+#
+# What changed: `detect_reconverge_hint` returned a FRAGMENT (`nothing to do — …`
+# on a directory source, a bare command on a git source) and doctor spliced it
+# after `re-converge with:` — so the directory-source rendering said "the CLI runs
+# this tree" twice and offered "nothing to do" inside backticks as if it were a
+# command to type. The hint answers with a whole sentence now, per feed AND per
+# state, and doctor prints it without a prefix.
+DETECT_S11="${REPO}/payload/scripts/lib/detect.sh"
+DOCTOR_S11="${REPO}/payload/scripts/doctor.sh"
+
+expect_true "the directory-source lag sentence calls the state nominal, in its own words" \
+  /usr/bin/grep -qF -- "nominal: the CLI runs this tree" "$DETECT_S11"
+expect_false "…and no longer hands back a bare 'nothing to do' as the hint" \
+  /usr/bin/grep -qE -- "printf 'nothing to do" "$DETECT_S11"
+expect_true "the git-source lag sentence carries the update command and the re-run" \
+  /usr/bin/grep -qF -- 'claude plugin update bionic@bionic`, then re-run /bionic:doctor.' "$DETECT_S11"
+expect_true "…and the hint answers per STATE, not one sentence for every site" \
+  /usr/bin/grep -qF -- 'detect_reconverge_hint() {  # <lag|hooks>' "$DETECT_S11"
+expect_true "a directory-source machine with broken wiring is told the tree is what is broken" \
+  /usr/bin/grep -qF -- "the broken wiring is in this tree" "$DETECT_S11"
+
+# Measured over the lines doctor PRINTS, not over its commentary: the comment at the
+# fixed call site quotes the retired prefix in order to say it is retired, and a pin
+# that cannot tell those apart would forbid the file from explaining itself.
+expect_eq "doctor prefixes the hint with nothing — the sentence is the whole line" "" \
+  "$(/usr/bin/grep -n 're-converge with:' "$DOCTOR_S11" | /usr/bin/grep -v '^[0-9]*:[[:space:]]*#' || true)"
+expect_eq "…and never wraps the hint in backticks, which made a sentence look like a command" "" \
+  "$(/usr/bin/grep -nF '`$(detect_reconverge_hint' "$DOCTOR_S11" || true)"
+expect_eq "…and both call sites ask for the state they are reporting" "2" \
+  "$(/usr/bin/grep -cE 'detect_reconverge_hint (lag|hooks)' "$DOCTOR_S11" | tr -d ' ')"
+
 
 # ============================================================
 # SECTION 9: tests/run.sh — the job runner (epic-17 W7 S10, spec AC-16)

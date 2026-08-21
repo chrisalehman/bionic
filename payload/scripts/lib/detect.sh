@@ -49,6 +49,14 @@
 #   BIONIC_SHELL_RC        the shell rc bionic edits   ~/.zshrc or ~/.bashrc, per $SHELL
 #   BIONIC_PLUGIN_LIST_CMD the CLI's own listing       `claude plugin list`
 #
+# WHAT THE SCRATCH-HOME KNOBS DO NOT ISOLATE (epic-17 W7, walk finding W-3).
+# `BIONIC_CLAUDE_HOME` and its two companions redirect the CLI's CONFIG DIRECTORY and
+# nothing else: the global tool probes (`npm -g`, `uv tool`, `brew`) still read the
+# real machine, so a plan printed against a scratch home names this machine's actual
+# tools and a `y` on a scratch-home `--all` run would install or remove them for real.
+# The suites stub those mechanisms, so a hermetic run cannot bite; a person driving a
+# scratch home by hand is looking at a plan that is only half scratch.
+#
 # Sourced, never executed:  . "${CLAUDE_PLUGIN_ROOT}/scripts/lib/detect.sh"
 
 # deps.sh is a sibling; the dependency table and the per-mechanism probes live
@@ -819,12 +827,38 @@ detect_registry_sha_lag() {  # [<repo-dir>] -> one line, always exit 0
 # detect_plugin_root_refuse above). `unknown` feed kind (registry unreadable, no `jq`,
 # no bionic entry) defaults to the git-source line: that is the CLI's documented public
 # install path (README.md), so a wrong guess there is the rarer, safer failure.
-detect_reconverge_hint() {
+#
+# A WHOLE SENTENCE, PER FEED AND PER STATE (epic-17 W7 S11, six-axis review axis 2).
+# This used to return a FRAGMENT and let each caller frame it, and the framing was
+# wrong at both callers. doctor's lag line printed `… the cache copy is behind this
+# tree, which the CLI runs — nominal; re-converge with: nothing to do — the CLI runs
+# this tree directly; …`: the same clause twice, and a prefix promising a command in
+# front of the words "nothing to do". Its hook-wiring line printed the fragment in
+# BACKTICKS, so a directory-source machine with genuinely broken wiring was handed
+# "nothing to do" formatted as something to type.
+#
+# Two different states ask this question and they do not have one answer. On a
+# directory source a lagging copy is NOMINAL — the CLI reads the tree, not the copy —
+# but broken hook wiring in that same tree is real, and telling that user nothing is
+# to be done would be false. So the state is an argument, the answer is a finished
+# sentence, and the callers print it with nothing in front of it.
+detect_reconverge_hint() {  # <lag|hooks> -> the whole sentence for that state, on this feed
+  local state="${1:-lag}"
   case "$(detect_marketplace_feed_kind)" in
     directory)
-      printf 'nothing to do — the CLI runs this tree directly; the registry copy catches up at the next version bump or reinstall\n' ;;
+      case "$state" in
+        hooks)
+          printf 'this tree is what the CLI reads, so the broken wiring is in this tree — repair hooks.json here and re-run /bionic:doctor; reinstalling the registry copy would change nothing.\n' ;;
+        *)
+          printf 'the registry copy is behind this tree — nominal: the CLI runs this tree, and the copy catches up at the next version bump or reinstall.\n' ;;
+      esac ;;
     *)
-      printf 'claude plugin update bionic@bionic\n' ;;
+      case "$state" in
+        hooks)
+          printf 'the installed copy is what the CLI reads — re-converge it with `claude plugin update bionic@bionic`, then re-run /bionic:doctor.\n' ;;
+        *)
+          printf 'the installed copy is behind — re-converge with `claude plugin update bionic@bionic`, then re-run /bionic:doctor.\n' ;;
+      esac ;;
   esac
 }
 

@@ -488,10 +488,22 @@ _dep_consent() {  # <prompt> -> 0 yes, 1 an explicit no, 2 EOF (nobody there to 
   # THE ANSWER IS ALREADY GIVEN. `setup --all` and `remove --all` print every
   # item their run would ask about — this one among them — and take a single
   # explicit `y` over that printed page before either sets its flag. Asking
-  # again here would be asking a person to answer the same question twice. This
-  # is not an assume-yes knob: neither name is settable from outside those two
-  # scripts, and neither is set until a plan naming this item has been read and
-  # accepted.
+  # again here would be asking a person to answer the same question twice.
+  #
+  # AND THE VALUE HERE IS ALWAYS THE SCRIPT'S OWN (epic-17 W7 S11, six-axis review
+  # axis 4). An earlier version of this comment claimed neither name was settable
+  # from outside those two scripts. That was FALSE, and it was the whole defect:
+  # this function reads BOTH names, setup.sh zeroed only `SETUP_ALL` and remove.sh
+  # only `RM_ALL`, so an exported `RM_ALL=1` answered every question in setup and
+  # an exported `SETUP_ALL=1` answered every deps.sh-routed row in remove — with
+  # the standard input closed and no page ever printed. What makes the claim true
+  # now is not this comment: each script zeroes BOTH names before anything can ask
+  # anything, so whatever the environment carries is overwritten by the script that
+  # owns the question, and the only writer of a 1 is that script's own `--all` `y`.
+  # The behavioural wall is one arm per suite (setup.test.sh / remove.test.sh, both
+  # names exported, nothing on stdin, the machine byte-identical afterwards) — a
+  # name grep cannot see this class, so the pin that could not see it is not the
+  # pin that guards it.
   if [ "${SETUP_ALL:-0}" = "1" ] || [ "${RM_ALL:-0}" = "1" ]; then return 0; fi
   printf '%s [y/N] ' "$prompt"
   IFS= read -r answer || { echo ""; return 2; }
