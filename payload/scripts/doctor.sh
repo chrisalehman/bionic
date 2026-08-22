@@ -672,14 +672,31 @@ while IFS= read -r dep_name; do
   # this report rather than as a property of the thing being reported.
   third_version="$dep_version"
   third_state=""
-  if [ "$present" = "yes" ] && [ "$third_version" = "unknown" ] && [ "$kind" = "statusline" ]; then
-    third_version="$(dep_npx_version "$(_dep_locator_target "$(dep_field "$dep_name" source_url)")")"
+  # MULTI-PART ROWS SAY WHAT IS PRESENT (Chris 2026-08-22: "Why is ccstatusline
+  # 'ok' for version, with no status?"). The two-half probes return a status word
+  # in the version slot — it is not a version and never prints as one. The
+  # version comes from wherever the mechanism actually keeps one (the npx cache,
+  # the clone's HEAD), and the state cell names the halves that are in place.
+  if [ "$present" = "yes" ]; then
+    case "$kind" in
+      statusline)
+        third_version="$(dep_npx_version "$(_dep_locator_target "$(dep_field "$dep_name" source_url)")")"
+        third_state="command + layout file match" ;;
+      mcp-server)
+        [ "$third_version" = "unknown" ] && \
+          third_version="$(dep_npx_version "$(_dep_locator_target "$(dep_field "$dep_name" source_url)")")" ;;
+      github-skill)
+        third_version="$(git -C "$(_dep_skills_dir)/${dep_name}" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+        third_state="skill installed" ;;
+      uv-tool)
+        [ "$dep_name" = "notebooklm" ] && third_state="CLI + skill installed" ;;
+    esac
   fi
   case "$present" in
     yes)
       if [ "$verdict" = "violation" ]; then
         third_state="violates ${constraint} → /bionic:setup"
-      elif [ "$third_version" = "unknown" ]; then
+      elif [ "$third_version" = "unknown" ] && [ -z "$third_state" ]; then
         third_state="$(_doctor_no_version_reason "$kind")"
       fi ;;
     no)
@@ -1261,10 +1278,11 @@ elif _doctor_can_ask; then
     y|Y|yes|YES|Yes) _doctor_render_updates ;;
   esac
 else
-  # Printed, not asked. Whoever is relaying this report can put the question to
-  # the person who can answer it and come back with `--updates`; the line itself
-  # says nothing about why nobody was waited for.
-  printf '%s\n' "$DOCTOR_UPDATES_QUESTION"
+  # Not a terminal: nothing is printed. The relaying command (commands/doctor.md)
+  # owns the question in that case and asks it once — printing it here too put
+  # the same line on the screen twice (Chris 2026-08-22, "the last line is
+  # repeated").
+  :
 fi
 
 exit 0
