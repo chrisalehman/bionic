@@ -69,6 +69,43 @@
 _dep_claude_home()      { echo "${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"; }
 _dep_settings_file()    { echo "${BIONIC_SETTINGS_FILE:-$(_dep_claude_home)/settings.json}"; }
 _dep_installed_json()   { echo "${BIONIC_INSTALLED_PLUGINS_FILE:-$(_dep_claude_home)/plugins/installed_plugins.json}"; }
+
+# THE PAYLOAD ROOT, one more root this file now reads FROM rather than only
+# writes to (epic-18 T1). Every other consumer of "where is the plugin"
+# (detect.sh's `_detect_plugin_root`, profile.sh's `_profile_plugin_root`)
+# carries its own byte-identical copy of this same three-step resolution for
+# the reason `bionic_link_target` already gives above: each file is sourced on
+# its own by something, so none may assume a sibling came first. No
+# `dirname`/`basename` here either — the self-locator has to survive the
+# half-broken machine it is most needed on.
+_dep_self_dir() {
+  local self="${BASH_SOURCE[0]}"
+  case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
+}
+_dep_plugin_root() {
+  if [ -n "${BIONIC_PLUGIN_ROOT:-}" ]; then echo "$BIONIC_PLUGIN_ROOT"; return; fi
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then echo "$CLAUDE_PLUGIN_ROOT"; return; fi
+  # lib -> scripts -> payload root
+  ( cd "$(_dep_self_dir)/../.." && pwd -P )
+}
+
+# ccstatusline ships TWO halves (epic-18-w1 handoff §3.1): the `.statusLine`
+# command that RENDERS the line, and the layout file that command reads. The
+# source is always the payload's own copy; the target defaults to the bare
+# path claude-bootstrap.sh always used, `~/.config/ccstatusline/settings.json`
+# — overridable for the same reason every other root here is.
+_dep_ccstatusline_config_source() { echo "$(_dep_plugin_root)/ccstatusline/settings.json"; }
+_dep_ccstatusline_config_target() { echo "${BIONIC_CCSTATUSLINE_CONFIG:-$HOME/.config/ccstatusline/settings.json}"; }
+_dep_ccstatusline_config_dir() {
+  local t; t="$(_dep_ccstatusline_config_target)"
+  echo "${t%/*}"
+}
+
+# Byte-identical, the same word AC-1 uses and the same tool
+# claude-bootstrap.sh's ccstatusline-config step used (`diff -q`) — not `cmp`,
+# so a hermetic suite need not add a second comparison binary to its curated
+# PATH beside the one every writer path already needs.
+_dep_files_match() { [ -f "${1:-}" ] && [ -f "${2:-}" ] && diff -q "$1" "$2" >/dev/null 2>&1; }
 _dep_playwright_cache() {
   if [ -n "${BIONIC_PLAYWRIGHT_CACHE:-}" ]; then echo "$BIONIC_PLAYWRIGHT_CACHE"; return; fi
   case "$(uname -s 2>/dev/null || echo Darwin)" in
@@ -425,16 +462,33 @@ _dep_check_playwright_browser() {
   echo "no|unknown"
 }
 
+# TWO HALVES, ONE ANSWER (epic-18 T1, AC-2). `present=yes` used to mean only
+# "the command is set" — the probe-contract violation that let a machine
+# report healthy while ccstatusline rendered its own stock default (handoff
+# §3.1). Now it means both: the command AND the layout file the command
+# reads. The second field carries WHICH half is missing when it is not
+# `yes`, so doctor's degradation line can name it rather than repeat the
+# generic "is absent" sentence over a dependency that is half there.
 _dep_check_statusline() {
-  local settings cmd
+  local settings cmd cmd_ok=no cfg_ok=no
   settings="$(_dep_settings_file)"
   _dep_have jq || { echo "unknown|unknown"; return 0; }
-  [ -f "$settings" ] || { echo "no|unknown"; return 0; }
-  cmd="$(jq -r '.statusLine.command // ""' "$settings" 2>/dev/null)"
-  case "$cmd" in
-    *ccstatusline*) echo "yes|unknown" ;;
-    *)              echo "no|unknown" ;;
-  esac
+  if [ -f "$settings" ]; then
+    cmd="$(jq -r '.statusLine.command // ""' "$settings" 2>/dev/null)"
+    case "$cmd" in *ccstatusline*) cmd_ok=yes ;; esac
+  fi
+  _dep_files_match "$(_dep_ccstatusline_config_source)" "$(_dep_ccstatusline_config_target)" \
+    && cfg_ok=yes
+
+  if [ "$cmd_ok" = "yes" ] && [ "$cfg_ok" = "yes" ]; then
+    echo "yes|ok"
+  elif [ "$cmd_ok" = "yes" ]; then
+    echo "no|config-missing"
+  elif [ "$cfg_ok" = "yes" ]; then
+    echo "no|command-missing"
+  else
+    echo "no|both-missing"
+  fi
 }
 
 # ─── check_dep ───────────────────────────────────────────────────────────────
@@ -673,8 +727,17 @@ _dep_settings_write_jq() {  # <settings-file> <jq-program> [jq-arg...]
 # ccstatusline@latest` is the command Claude Code runs to RENDER the line, and
 # installing it means recording that command. Ported from
 # claude-bootstrap.sh's do_set_statusline.
+#
+# BOTH HALVES (epic-18 T1, AC-1). Recording the command alone leaves
+# ccstatusline rendering its own stock default — handoff §3.1's incident —
+# because the LAYOUT (colors, field order) lives in a second file this
+# function now also copies: the payload's own
+# ${CLAUDE_PLUGIN_ROOT}/ccstatusline/settings.json, published to
+# ~/.config/ccstatusline/settings.json exactly as claude-bootstrap.sh's
+# ccstatusline-config step did. Skipped when already byte-identical, ported
+# from that same step's `diff -q` short-circuit.
 _dep_install_statusline() {
-  local settings cmd
+  local settings cmd source target
   settings="$(_dep_settings_file)"
   cmd="npx $(_dep_locator_target "$(dep_field ccstatusline source_url)")"
   _dep_have jq || { echo "$(_dep_indent)jq is not installed — cannot edit ${settings}" >&2; return 1; }
@@ -684,7 +747,16 @@ _dep_install_statusline() {
   # is a different decision, and not this fold's to make.
   [ -f "$settings" ] || echo '{}' > "$settings"
   _dep_settings_write_jq "$settings" \
-    '.statusLine = {"type": "command", "command": $c}' --arg c "$cmd"
+    '.statusLine = {"type": "command", "command": $c}' --arg c "$cmd" || return 1
+
+  source="$(_dep_ccstatusline_config_source)"
+  target="$(_dep_ccstatusline_config_target)"
+  if [ ! -f "$source" ]; then
+    echo "$(_dep_indent)shipped ccstatusline layout missing at ${source} — the statusline command is set but its config was not copied." >&2
+    return 1
+  fi
+  _dep_files_match "$source" "$target" && return 0
+  mkdir -p "$(_dep_ccstatusline_config_dir)" && cp "$source" "$target"
 }
 
 install_dep() {  # <name>
@@ -701,7 +773,18 @@ install_dep() {  # <name>
   fi
 
   if [ "$(dep_field "$name" install_fn_or_check)" = "statusline" ]; then
-    plan="record 'npx $(_dep_locator_target "$(dep_field "$name" source_url)")' as the statusline in $(_dep_settings_file)"
+    # BOTH HALVES, SURFACED BEFORE THE ONE QUESTION (AC-1: "never silently
+    # overwritten"). This is a single-item row like every other — one
+    # `_dep_consent` call below covers the whole plan — so a config file
+    # already there that DIFFERS from the shipped layout is named in the
+    # plan sentence itself rather than discovered only after a yes.
+    local cfg_source cfg_target cfg_note=""
+    cfg_source="$(_dep_ccstatusline_config_source)"
+    cfg_target="$(_dep_ccstatusline_config_target)"
+    if [ -f "$cfg_target" ] && ! _dep_files_match "$cfg_source" "$cfg_target"; then
+      cfg_note=" (a config file already there differs from the shipped layout and would be overwritten)"
+    fi
+    plan="record 'npx $(_dep_locator_target "$(dep_field "$name" source_url)")' as the statusline in $(_dep_settings_file), and copy ${cfg_source} to ${cfg_target}${cfg_note}"
   else
     while IFS= read -r line; do argv+=("$line"); done < <(_dep_install_argv "$name") || true
     [ "${#argv[@]}" -gt 0 ] || { echo "deps.sh: no install mechanism for ${name}" >&2; return 1; }
@@ -950,7 +1033,7 @@ remove_dep() {  # <name>
       return 0
       ;;
     statusline)
-      plan="clear .statusLine from $(_dep_settings_file)"
+      plan="clear .statusLine from $(_dep_settings_file), and remove $(_dep_ccstatusline_config_dir)"
       ;;
     *)
       while IFS= read -r line; do argv+=("$line"); done < <(_dep_remove_argv "$name") || true
@@ -973,11 +1056,28 @@ remove_dep() {  # <name>
     case "$(dep_field "$name" install_fn_or_check)" in
       playwright-browser) rm -rf "$(_dep_playwright_cache)" ;;
       statusline)
-        local settings
+        # BOTH HALVES (AC-3). The settings-clear used to `return 0` the
+        # instant settings.json was absent, which skipped the config purge
+        # below it entirely whenever the two halves came apart — exactly the
+        # shape a machine with the config directory but no `.statusLine` key
+        # is in. The two removals are independent now: an absent settings
+        # file is nothing to clear, not a reason to stop.
+        local settings dir
         settings="$(_dep_settings_file)"
-        _dep_have jq || return 1
-        [ -f "$settings" ] || return 0
-        _dep_settings_write_jq "$settings" 'del(.statusLine)'
+        if [ -f "$settings" ]; then
+          _dep_have jq || return 1
+          _dep_settings_write_jq "$settings" 'del(.statusLine)' || return 1
+        fi
+        # THE SAME NEVER-LIST remove.sh's `_rm_purge_dir` enforces, its own
+        # copy rather than a call across files — this library must stay
+        # sourceable with no remove.sh in the process (tests/plugin-lib.test.sh
+        # drives remove_dep directly), the same reason `bionic_link_target`
+        # is duplicated rather than shared.
+        dir="$(_dep_ccstatusline_config_dir)"
+        case "$dir" in
+          */.bionic|*/.bionic/*|""|/|"$HOME") ;;
+          *) rm -rf "$dir" ;;
+        esac
         ;;
     esac
   fi

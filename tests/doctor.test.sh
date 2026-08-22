@@ -113,7 +113,7 @@ BASE_BIN="$TMP/bin-base"; mkdir -p "$BASE_BIN"
 # hang (the plugin listing, brew, npm) and, with no `timeout` on a stock macOS,
 # the bound is a poll loop that needs it. Without `sleep` on PATH doctor runs the
 # probe unbounded, which is a different code path from the one under test.
-for real in bash sh env cat grep sed awk mkdir rm cp mv chmod ls tr head tail sort uniq wc jq python3 find shasum sleep; do
+for real in bash sh env cat grep sed awk mkdir rm cp mv chmod ls tr head tail sort uniq wc jq python3 find shasum sleep diff; do
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BASE_BIN}/${real}" 2>/dev/null
 done
 
@@ -245,7 +245,20 @@ print(json.dumps(json.loads(text)["permissions"]["allow"]))
 plant_machine() {  # <machine-root> <flavor>
   local m="$1" flavor="$2" block accretion
   mkdir -p "$m/home" "$m/plugin/.claude-plugin" "$m/plugin/hooks" \
-           "$m/claude-home/plugins" "$m/installs"
+           "$m/plugin/ccstatusline" "$m/claude-home/plugins" "$m/installs"
+
+  # ── ccstatusline's second half (epic-18 T1, AC-2) ────────────────────────
+  # The payload always ships the layout file, on both flavors — what differs
+  # is whether THIS MACHINE's copy under ~/.config matches it. healthy: it
+  # does, so the two-half check reads present. broken: it is simply absent
+  # (the settings.json below never sets .statusLine either, so this machine
+  # was never "installed" at all — the shape a fresh box is in before its
+  # first /bionic:setup, not a partial-install shape).
+  printf '{"version":3,"lines":[[{"id":"1","type":"model"}]]}' > "$m/plugin/ccstatusline/settings.json"
+  if [ "$flavor" = "healthy" ]; then
+    mkdir -p "$m/home/.config/ccstatusline"
+    cp "$m/plugin/ccstatusline/settings.json" "$m/home/.config/ccstatusline/settings.json"
+  fi
 
   # ── the payload tree doctor is diagnosing ────────────────────────────────
   printf '{ "name": "bionic", "version": "0.1.0" }\n' > "$m/plugin/.claude-plugin/plugin.json"
@@ -760,6 +773,11 @@ expect_not_contains "broken: no degradation line offers to wait for a route (tha
 expect_contains "broken: an absent basic dependency is offered the command that installs it" \
   "run /bionic:setup" "$DEG"
 expect_contains "broken: every degradation line names a fix (arrow-delimited)" "→" "$DEG"
+# AC-2's own line: ccstatusline is the one dependency with two halves, and the
+# generic "is absent" sentence does not say which one(s). Both are missing on
+# this fixture (no .statusLine key, no config file), so the reason names both.
+expect_contains "broken: the ccstatusline degradation line names which half is missing" \
+  "ccstatusline is absent (neither the statusLine command nor its config file is set)" "$DEG"
 
 # Environment class, the other way round from healthy.
 expect_match "broken: the task-list name reports absent" \

@@ -96,7 +96,7 @@ STUB
 # never be reached by accident.
 BASE_BIN="$TMP/base-bin"
 mkdir -p "$BASE_BIN"
-for real in bash sh env cat grep sed awk mkdir rm cp mv chmod ls dirname basename tr head tail sort uniq wc jq python3; do
+for real in bash sh env cat grep sed awk mkdir rm cp mv chmod ls dirname basename tr head tail sort uniq wc jq python3 diff; do
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BASE_BIN}/${real}" 2>/dev/null
 done
 
@@ -893,6 +893,131 @@ expect_match "with no stat on PATH the statusline is still recorded (write, don'
   '*ccstatusline*' "$(cat "$STL_NS")"
 expect_true "and the file is still valid JSON after that degraded write" \
   jq -e . "$STL_NS"
+
+echo ""
+echo "=== Group 8c: the ccstatusline CONFIG COPY — the second half (AC-1..4, epic-18 T1) ==="
+#
+# THE BUG (epic-18-w1 handoff §3.1). ccstatusline's actual LAYOUT (colors,
+# field order) is a second file, ${CLAUDE_PLUGIN_ROOT}/ccstatusline/settings.json,
+# copied to ~/.config/ccstatusline/settings.json — the file
+# `npx ccstatusline@latest` actually reads. `install_dep`/`check_dep`/
+# `remove_dep` used to know only about `.statusLine`, the command that RENDERS
+# the line, so a machine reported "present" while ccstatusline rendered its own
+# stock default. These arms drive the second half directly.
+#
+# EACH ARM GETS ITS OWN HOME AND PLUGIN ROOT. Group 8b's arms share $TMP/home
+# because the settings file they touch is named explicitly by
+# BIONIC_SETTINGS_FILE; the config file here lives under $HOME/.config, so a
+# shared home would leak one arm's config into the next.
+
+CCL_SHIPPED='{"version":3,"lines":[[{"id":"1","type":"model"}]]}'
+CCL_DIFFERENT='{"version":3,"lines":[[{"id":"1","type":"context-percentage"}]]}'
+
+# A fresh arm: its own $HOME, its own plugin root carrying the shipped layout
+# (the way BIONIC_PLUGIN_ROOT points at a fixture tree in doctor.test.sh).
+ccl_arm() {  # -> prints the arm's root
+  local root
+  root="$TMP/ccl-$(date +%s%N 2>/dev/null || echo $$)-$RANDOM"
+  mkdir -p "$root/home/.claude" "$root/plugin/ccstatusline"
+  printf '%s' "$CCL_SHIPPED" > "$root/plugin/ccstatusline/settings.json"
+  echo "$root"
+}
+
+ccl_config_path() { echo "$1/home/.config/ccstatusline/settings.json"; }  # <root>
+
+# One library function, one controlled environment, one arm — same shape as
+# `stl_run`, plus BIONIC_PLUGIN_ROOT so the config-copy half has a shipped file
+# to read.
+ccl_run() {  # <root> <answer|-> -- <fn> [args]
+  local root="$1" answer="$2"; shift 3
+  local prog='. "$1"; shift; "$@"'
+  if [ "$answer" = "-" ]; then
+    env -i HOME="$root/home" PATH="$STL_BIN" BIONIC_TEST_CALLS="$CALLS" \
+      BIONIC_PLUGIN_ROOT="$root/plugin" \
+      bash -c "$prog" _ "$DEPS_SH" "$@" 2>&1
+  else
+    echo "$answer" | env -i HOME="$root/home" PATH="$STL_BIN" BIONIC_TEST_CALLS="$CALLS" \
+      BIONIC_PLUGIN_ROOT="$root/plugin" \
+      bash -c "$prog" _ "$DEPS_SH" "$@" 2>&1
+  fi
+}
+
+ccl_present() {  # <check_dep output> -> yes|no|unknown
+  local out="$1"; out="${out#*present=}"; echo "${out%%|*}"
+}
+
+# --- case 1: command set, no config at all -> no --------------------------
+CCL1="$(ccl_arm)"
+mkdir -p "$CCL1/home/.claude"
+printf '{"statusLine":{"type":"command","command":"npx ccstatusline@latest"}}' \
+  > "$CCL1/home/.claude/settings.json"
+CCL1_OUT="$(ccl_run "$CCL1" - -- check_dep ccstatusline)"
+expect_eq "command set, config absent: check_dep says no" "no" "$(ccl_present "$CCL1_OUT")"
+
+# --- case 2: command set, config present but DIFFERS -> no ----------------
+CCL2="$(ccl_arm)"
+mkdir -p "$CCL2/home/.claude" "$(dirname "$(ccl_config_path "$CCL2")")"
+printf '{"statusLine":{"type":"command","command":"npx ccstatusline@latest"}}' \
+  > "$CCL2/home/.claude/settings.json"
+printf '%s' "$CCL_DIFFERENT" > "$(ccl_config_path "$CCL2")"
+CCL2_OUT="$(ccl_run "$CCL2" - -- check_dep ccstatusline)"
+expect_eq "command set, config differs from shipped: check_dep says no" "no" "$(ccl_present "$CCL2_OUT")"
+
+# --- case 3: both halves match -> yes --------------------------------------
+CCL3="$(ccl_arm)"
+mkdir -p "$CCL3/home/.claude" "$(dirname "$(ccl_config_path "$CCL3")")"
+printf '{"statusLine":{"type":"command","command":"npx ccstatusline@latest"}}' \
+  > "$CCL3/home/.claude/settings.json"
+printf '%s' "$CCL_SHIPPED" > "$(ccl_config_path "$CCL3")"
+CCL3_OUT="$(ccl_run "$CCL3" - -- check_dep ccstatusline)"
+expect_eq "both halves match: check_dep says yes" "yes" "$(ccl_present "$CCL3_OUT")"
+
+# --- case 4: install_dep writes BOTH halves, then check_dep says yes ------
+CCL4="$(ccl_arm)"
+CCL4_INSTALL_OUT="$(ccl_run "$CCL4" y -- install_dep ccstatusline)"
+expect_true "install_dep ccstatusline copied the shipped config into place" \
+  test -f "$(ccl_config_path "$CCL4")"
+expect_eq "and the copy is byte-identical to the shipped layout" \
+  "$CCL_SHIPPED" "$(cat "$(ccl_config_path "$CCL4")" 2>/dev/null)"
+CCL4_CHECK_OUT="$(ccl_run "$CCL4" - -- check_dep ccstatusline)"
+expect_eq "install then check: check_dep says yes" "yes" "$(ccl_present "$CCL4_CHECK_OUT")"
+
+# --- case 4b: installing over an existing, DIFFERING config never silently
+#              overwrites without having been consented — the plan is
+#              surfaced before the one item-level question, and a decline
+#              leaves the differing file exactly as it was. -----------------
+CCL4B="$(ccl_arm)"
+mkdir -p "$(dirname "$(ccl_config_path "$CCL4B")")"
+printf '%s' "$CCL_DIFFERENT" > "$(ccl_config_path "$CCL4B")"
+CCL4B_DECLINE_OUT="$(ccl_run "$CCL4B" n -- install_dep ccstatusline)"
+expect_eq "declined install: the differing config file is untouched" \
+  "$CCL_DIFFERENT" "$(cat "$(ccl_config_path "$CCL4B")" 2>/dev/null)"
+expect_match "declined install: the plan surfaced the config copy before asking" \
+  '*ccstatusline/settings.json*' "$CCL4B_DECLINE_OUT"
+
+# --- case 5: remove_dep purges the config dir, then check_dep says no -----
+CCL5="$(ccl_arm)"
+ccl_run "$CCL5" y -- install_dep ccstatusline >/dev/null
+expect_true "remove fixture: the config really landed first (not vacuous)" \
+  test -f "$(ccl_config_path "$CCL5")"
+CCL5_REMOVE_OUT="$(ccl_run "$CCL5" y -- remove_dep ccstatusline)"
+expect_false "remove_dep ccstatusline purged the config directory" \
+  test -e "$(dirname "$(ccl_config_path "$CCL5")")"
+CCL5_CHECK_OUT="$(ccl_run "$CCL5" - -- check_dep ccstatusline)"
+expect_eq "remove then check: check_dep says no" "no" "$(ccl_present "$CCL5_CHECK_OUT")"
+
+# --- the never-list: the config purge cannot be redirected onto a .bionic
+#     path (deps.sh's own copy of remove.sh's _rm_purge_dir guard) -----------
+CCL6="$(ccl_arm)"
+ccl_run "$CCL6" y -- install_dep ccstatusline >/dev/null
+mkdir -p "$CCL6/home/.bionic/memory"
+printf 'must survive\n' > "$CCL6/home/.bionic/memory/note.md"
+CCL6_OUT="$(echo y | env -i HOME="$CCL6/home" PATH="$STL_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_PLUGIN_ROOT="$CCL6/plugin" \
+  BIONIC_CCSTATUSLINE_CONFIG="$CCL6/home/.bionic/memory/settings.json" \
+  bash -c '. "$1"; remove_dep ccstatusline' _ "$DEPS_SH" 2>&1)"
+expect_true "the never-list holds even when the config target is redirected under .bionic" \
+  test -f "$CCL6/home/.bionic/memory/note.md"
 
 echo ""
 echo "=== Group 9: detect_plugin_integrity — all three hook states ==="
