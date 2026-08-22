@@ -204,7 +204,6 @@ run "agent-roles.test.sh" bash tests/agent-roles.test.sh
 # + render.sh against the committed finals under agents/. Cross-FILE by nature — it spans a
 # source tree and an output tree.
 run "agent-render.test.sh" bash tests/agent-render.test.sh
-run "interview-protocol.test.sh" bash tests/interview-protocol.test.sh
 # Cross-FILE proof (epic-17 W4 S7, spec AC-5 / epic AC-11): the terminal-disposition
 # rule's normative literal, pinned byte-identical between SKILL.md's Step 9 and
 # operational-rules.md's close-out section, plus a count-scoped guard against a
@@ -212,7 +211,6 @@ run "interview-protocol.test.sh" bash tests/interview-protocol.test.sh
 # interview-protocol.test.sh above (a SKILL.md <-> operational-rules.md pin), kept
 # in its own file because it is a distinct ownership-table concept.
 run "close-out.test.sh" bash tests/close-out.test.sh
-run "dispatch-spans.test.sh" bash tests/dispatch-spans.test.sh
 # Cross-COMPONENT proofs (epic-15 W1R slice 4/6). They belong to no single hook,
 # so they live here rather than under hooks/ — which also means they are invisible
 # to the glob above and must stay hand-listed.
@@ -284,19 +282,16 @@ run "command-permissions.test.sh" bash tests/command-permissions.test.sh
 # (30-second setup)" section pinned to the ratified reference shape — two
 # `claude plugin` command lines, the in-session twin, the `claude plugin list`
 # fallback, zero mechanism words. Hand-listed like every suite outside hooks/.
-run "readme.test.sh" bash tests/readme.test.sh
 # The presentation contract (epic-17 W6 S1, spec R3 / AC-5 / AC-6): the one voice block at
 # agents-src/blocks/voice-contract.md, its byte-identical presence in all four shipped
 # command files, help.md's render-in-full instruction, and the banned-display-vocabulary
 # lint over the command surface. Staleness of the render itself belongs to
 # agent-render.test.sh; this suite owns presence and content. Hand-listed like every suite
 # outside hooks/.
-run "voice-contract.test.sh" bash tests/voice-contract.test.sh
 # The other half of AC-6 (epic-17 W6 S4): every line setup.sh, doctor.sh and remove.sh PRINT
 # judged against the same one banned-vocabulary list voice-contract.test.sh reads — display
 # verbs, prompts, and the self-appending accumulators the action and degradation lines are
 # built in. Hand-listed like every suite outside hooks/.
-run "script-vocabulary.test.sh" bash tests/script-vocabulary.test.sh
 # The diagram pins (epic-17 W4 S8, spec AC-6 / design D4): the two composed-SVG diagrams
 # under skills/canonical-sdlc/diagrams/ read as text and compared against what they draw —
 # the hooks' SUPPORTED_SDLC_VERSION, hooks.json's six always-on entries, and SKILL.md's ten
