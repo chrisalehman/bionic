@@ -49,6 +49,14 @@
 #   BIONIC_SHELL_RC        the shell rc bionic edits   ~/.zshrc or ~/.bashrc, per $SHELL
 #   BIONIC_PLUGIN_LIST_CMD the CLI's own listing       `claude plugin list`
 #
+# WHAT THE SCRATCH-HOME KNOBS DO NOT ISOLATE (epic-17 W7, walk finding W-3).
+# `BIONIC_CLAUDE_HOME` and its two companions redirect the CLI's CONFIG DIRECTORY and
+# nothing else: the global tool probes (`npm -g`, `uv tool`, `brew`) still read the
+# real machine, so a plan printed against a scratch home names this machine's actual
+# tools and a `y` on a scratch-home `--all` run would install or remove them for real.
+# The suites stub those mechanisms, so a hermetic run cannot bite; a person driving a
+# scratch home by hand is looking at a plan that is only half scratch.
+#
 # Sourced, never executed:  . "${CLAUDE_PLUGIN_ROOT}/scripts/lib/detect.sh"
 
 # deps.sh is a sibling; the dependency table and the per-mechanism probes live
@@ -507,6 +515,37 @@ _detect_installed_plugins_file() {
   printf '%s' "${BIONIC_INSTALLED_PLUGINS_FILE:-${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/installed_plugins.json}"
 }
 
+# The marketplace REGISTRATION file, a sibling of the plugin one above and named the
+# same way. `known_marketplaces.json` is keyed by marketplace name — bionic's own
+# marketplace manifest (`.claude-plugin/marketplace.json`) fixes that name to `bionic`,
+# so the lookup below is not a guess — and each entry's `source.source` is the CLI's own
+# record of how that feed was registered: `"directory"` for a local checkout (what a
+# dogfood install is) or a git kind (`"github"`, `"url"`, …) for anything fetched from a
+# repo. `detect_reconverge_hint` below is the one caller.
+_detect_known_marketplaces_file() {
+  printf '%s' "${BIONIC_KNOWN_MARKETPLACES_FILE:-${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/known_marketplaces.json}"
+}
+
+# WHICH FEED BIONIC CAME FROM, answered the same oracle-not-guess way as the install
+# path above: the file the CLI itself wrote when the marketplace was registered, read
+# once, here. `directory` on a local-checkout feed, `git` on anything fetched from a
+# repo, `unknown` when the file is missing, unparsable, or names no `bionic` entry —
+# `jq`-less machines get `unknown` too rather than a hand-rolled second reading, since
+# this only feeds an advisory hint and a wrong guess there is worse than an honest one.
+detect_marketplace_feed_kind() {
+  local mp kind
+  mp="$(_detect_known_marketplaces_file)"
+  [ -f "$mp" ] || { printf 'unknown\n'; return 0; }
+  command -v jq >/dev/null 2>&1 || { printf 'unknown\n'; return 0; }
+  kind="$(jq -r '.bionic.source.source // empty' "$mp" 2>/dev/null)"
+  case "$kind" in
+    directory) printf 'directory\n' ;;
+    ''|null)   printf 'unknown\n' ;;
+    *)         printf 'git\n' ;;
+  esac
+  return 0
+}
+
 detect_plugin_registered() {
   local installed_json count
   installed_json="$(_detect_installed_plugins_file)"
@@ -769,6 +808,58 @@ detect_registry_sha_lag() {  # [<repo-dir>] -> one line, always exit 0
     echo "plugin:registry-sha state=not-in-repo registry=${sha} repo=${head} cause=-"
   fi
   return 0
+}
+
+# ONE OWNER FOR THE RE-CONVERGE SENTENCE (epic-17 W7 S2/S2b, AC-3). `claude plugin
+# install <id>` is the CLI's FIRST-time verb — on an id already registered it reports
+# "already installed" and does not refresh anything, so `update` is the re-converge verb
+# on a feed where the cache is what runs. That is true on a GIT-SOURCE feed, where the
+# cache the registry names is exactly what the CLI loads. It is NOT true on a
+# DIRECTORY-SOURCE marketplace (a local checkout registered as a feed, which is what a
+# dogfood install is): there `${CLAUDE_PLUGIN_ROOT}` resolves to the tree itself, the
+# cache is a side artifact nothing reads, and `update` at an unchanged plugin.json
+# version reports "already at the latest version" and touches nothing — measured
+# 2026-08-21, `.bionic/docs/record/epic-17-w7/ac2-relay-drive.md`. So S2's single literal
+# was right for one feed and false for the other; this stays the one function every site
+# that reports this state reads, and it now answers per feed instead of by one guess.
+# Sites that report bionic NOT INSTALLED at all keep `install` — that is the correct
+# first-time verb for them and stays a separate, uncoupled literal (setup.sh, remove.sh,
+# detect_plugin_root_refuse above). `unknown` feed kind (registry unreadable, no `jq`,
+# no bionic entry) defaults to the git-source line: that is the CLI's documented public
+# install path (README.md), so a wrong guess there is the rarer, safer failure.
+#
+# A WHOLE SENTENCE, PER FEED AND PER STATE (epic-17 W7 S11, six-axis review axis 2).
+# This used to return a FRAGMENT and let each caller frame it, and the framing was
+# wrong at both callers. doctor's lag line printed `… the cache copy is behind this
+# tree, which the CLI runs — nominal; re-converge with: nothing to do — the CLI runs
+# this tree directly; …`: the same clause twice, and a prefix promising a command in
+# front of the words "nothing to do". Its hook-wiring line printed the fragment in
+# BACKTICKS, so a directory-source machine with genuinely broken wiring was handed
+# "nothing to do" formatted as something to type.
+#
+# Two different states ask this question and they do not have one answer. On a
+# directory source a lagging copy is NOMINAL — the CLI reads the tree, not the copy —
+# but broken hook wiring in that same tree is real, and telling that user nothing is
+# to be done would be false. So the state is an argument, the answer is a finished
+# sentence, and the callers print it with nothing in front of it.
+detect_reconverge_hint() {  # <lag|hooks> -> the whole sentence for that state, on this feed
+  local state="${1:-lag}"
+  case "$(detect_marketplace_feed_kind)" in
+    directory)
+      case "$state" in
+        hooks)
+          printf 'this tree is what the CLI reads, so the broken wiring is in this tree — repair hooks.json here and re-run /bionic:doctor; reinstalling the registry copy would change nothing.\n' ;;
+        *)
+          printf 'the registry copy is behind this tree — nominal: the CLI runs this tree, and the copy catches up at the next version bump or reinstall.\n' ;;
+      esac ;;
+    *)
+      case "$state" in
+        hooks)
+          printf 'the installed copy is what the CLI reads — re-converge it with `claude plugin update bionic@bionic`, then re-run /bionic:doctor.\n' ;;
+        *)
+          printf 'the installed copy is behind — re-converge with `claude plugin update bionic@bionic`, then re-run /bionic:doctor.\n' ;;
+      esac ;;
+  esac
 }
 
 # ─── Bounded execution ───────────────────────────────────────────────────────

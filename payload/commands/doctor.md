@@ -11,8 +11,9 @@ description: Read-only diagnosis of the bionic install on this machine — plugi
 Presentation contract — what the user sees from this command:
 - Relay the script's questions exactly as asked; pass the user's answer as given.
   Never answer for the user, never editorialize.
-- On success show the script's output, then at most one closing line. Say nothing
-  about shells, stdin, pipes, re-runs, hooks, tool calls, or what you did.
+- Show the script's output exactly as it came back, in one block, unchanged — never
+  retype, trim, reorder or summarize it. Your own words are the one closing line. Say
+  nothing about shells, stdin, pipes, re-runs, hooks, tool calls, or what you did.
 - On a real error show the error verbatim and the fix, in one block. Never
   paraphrase an error away or bury it under a summary.
 - At most one caveat line, only if it changes what the user should do next

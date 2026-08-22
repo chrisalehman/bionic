@@ -148,7 +148,7 @@ _setup_self_dir() {
 
 SETUP_LIB_DIR="${BIONIC_LIB_DIR:-$(_setup_self_dir)/lib}"
 
-for _setup_lib in deps.sh detect.sh profile.sh hooks.sh jit.sh; do
+for _setup_lib in deps.sh detect.sh profile.sh hooks.sh jit.sh env.sh; do
   if [ ! -f "${SETUP_LIB_DIR}/${_setup_lib}" ]; then
     echo "setup.sh: cannot find ${SETUP_LIB_DIR}/${_setup_lib} — the payload looks incomplete." >&2
     echo "          reinstall with: claude plugin install bionic@bionic" >&2
@@ -163,6 +163,13 @@ done
 . "${SETUP_LIB_DIR}/profile.sh"
 # shellcheck source=/dev/null
 . "${SETUP_LIB_DIR}/hooks.sh"
+# env.sh, for the environment item below: the `env` object in the CLI's own
+# settings.json is the ONE home for the names bionic sets, and setup writes it
+# through env_set rather than reaching into the file itself. Doctor reads the
+# same names through the same file, remove deletes them through it, and the
+# roster they all walk (`ENV_KEYS`) is spelled exactly once, there.
+# shellcheck source=/dev/null
+. "${SETUP_LIB_DIR}/env.sh"
 # jit.sh, for ONE function: `_jit_fix_line`, which spells the command that would
 # install a row by hand. The summary needs that sentence and so does a route's
 # just-in-time offer, and it has to be the SAME sentence — an action line that
@@ -191,11 +198,13 @@ SETUP_DEP_MARKETPLACE="${BIONIC_DEP_MARKETPLACE:-bionic}"
 # installed.
 SETUP_PLUGIN_ID="${BIONIC_PLUGIN_ID:-bionic@${SETUP_DEP_MARKETPLACE}}"
 
-# bionic's own rc block. DISTINCT markers from the legacy alias block below on
-# purpose: step 5 removes that block by exact marker match, and sharing a marker
-# would have step 5 delete what step 4 just wrote.
-SETUP_ENV_START='# ─── bionic:env:start ───'
-SETUP_ENV_END='# ─── bionic:env:end ───'
+# THE ENV RC BLOCK IS GONE FROM THIS FILE, deliberately. Step 5 used to append a
+# `# ─── bionic:env:start/end ───` block here; it writes settings.json now (the
+# rc export was measured not reaching the session it was written for, 2026-08-21),
+# so this script has no marker pair of its own any more. The block a pre-W7
+# machine is still carrying is remove.sh's to clean up, and remove.sh owns those
+# two literals outright — a copy here would be a marker nothing writes, kept in
+# step with nothing.
 
 # The retired alias block's markers, verbatim from claude-bootstrap.sh —
 # box-drawing dashes included, because they are what makes the block
@@ -264,10 +273,27 @@ SETUP_SELF_CMD="bash $(_setup_self_path)"
 # walk, so the flag cannot reach a row the full pass would never offer.
 #
 # THE NAMES ARE THE USER'S WORDS. Each one names the item as the question that
-# gates it names it — `permission-mode`, `shell-env`, `tool:git` — never the
+# gates it names it — `permission-mode`, `environment`, `tool:git` — never the
 # function, the step number or the class behind it.
 
 SETUP_ONLY=""
+
+# ─── One answer over a printed plan ──────────────────────────────────────────
+#
+# 1 once the user has said yes to the plan `--all` printed. It is not an
+# assume-yes: nothing is set here until a person has read every item the run
+# would do and typed `y` at a question about that page. What it removes is the
+# SECOND, third and ninth question about a decision already made — see the note
+# above `_setup_print_plan` for why the plan, and not the flag, is the consent.
+SETUP_ALL=0
+# BOTH NAMES, NOT JUST THIS SCRIPT'S (epic-17 W7 S11, six-axis review axis 4).
+# `_dep_consent` grants consent on `SETUP_ALL` OR `RM_ALL`, and every question this
+# script asks goes through it. Zeroing only the name this script sets left the other
+# one readable straight from the environment: `RM_ALL=1 bash setup.sh --only
+# environment < /dev/null` wrote both settings keys with nobody there to ask.
+# Whatever the environment carries for either name dies here, before the first
+# question, so the only value this run can ever see is one this script wrote itself.
+RM_ALL=0
 
 _setup_item_ids() {
   local n line bare
@@ -283,7 +309,7 @@ _setup_item_ids() {
   while IFS= read -r n <&3; do [ -n "$n" ] && say "dependency:${n}"; done 3< <(dep_names_class core)
   while IFS= read -r n <&3; do [ -n "$n" ] && say "tool:${n}"; done 3< <(dep_names_class basic)
   while IFS= read -r n <&3; do [ -n "$n" ] && say "tool:${n}"; done 3< <(dep_names_class extra)
-  say "shell-env"
+  say "environment"
   say "legacy-alias"
   say "legacy-hooks"
   say "legacy-skill-copy"
@@ -309,6 +335,135 @@ _setup_class_wanted() {  # <class>
   [ "$(dep_field "${SETUP_ONLY#tool:}" class)" = "$1" ]
 }
 
+# ─── The plan `--all` prints ─────────────────────────────────────────────────
+#
+# WHY A PLAN AND NOT AN ASSUME-YES FLAG. Nine questions is a bad experience for
+# someone who has already decided to set the whole machine up, and the obvious
+# fix — a flag that answers them — is the hole in "consent per event, never
+# silent, never unattended": a row added to the roster next year would then run
+# on a machine whose owner never saw it named. So the whole run is made into ONE
+# event instead. Every item that would be asked about is printed with what it
+# changes, one line each, and the single question is asked over that page. The
+# user consents to a list they can read, and nothing runs that was not on it.
+#
+# ONE ROSTER, READ TWICE. The plan walks `_setup_item_ids` — the same list
+# `--list` prints and `--only` is checked against — and asks
+# `_setup_item_pending` the same question each step asks itself before it
+# prompts. A plan built from its own idea of what is outstanding would come to
+# disagree with the run it is a plan FOR, which is the one defect a consent
+# screen must not have.
+
+# What one item changes, in the words the item's own question uses. Product
+# words only: this lands on a person's screen, and it is the only description
+# of that item they get before they answer.
+_setup_item_verb() {  # <name>
+  case "${1:-}" in
+    plugin)             say "install the bionic plugin (claude plugin install)" ;;
+    duplicate:*)        say "settle the two copies of ${1#duplicate:} installed from different catalogs" ;;
+    dependency:*)       say "enable the plugin ${1#dependency:}, which is installed but switched off" ;;
+    tool:*)             say "install ${1#tool:}" ;;
+    environment)        say "write bionic's environment settings to $(_dep_settings_file)" ;;
+    legacy-alias)       say "remove the retired shell alias block from $(_detect_shell_rc)" ;;
+    legacy-hooks)       say "remove the retired hook entries from $(_dep_settings_file)" ;;
+    legacy-skill-copy)  say "remove the pre-plugin skill copy at $(_setup_legacy_skill_dir)" ;;
+    permission-profile) say "apply bionic's permission profile to $(_dep_settings_file)" ;;
+    permission-mode)    say "set Claude Code's default permission mode to ${BIONIC_DEFAULT_PERMISSION_MODE}" ;;
+    *)                  return 1 ;;
+  esac
+  return 0
+}
+
+# The one directory step 8 offers to remove, read from the fact function that
+# owns it so the plan names the path the step will name.
+_setup_legacy_skill_dir() {
+  local line
+  line="$(detect_legacy_skill_copy)"
+  printf '%s' "${line##*path=}"
+}
+
+# Whether this item would ask a question on this machine — the predicate each
+# step below runs before it prints anything, asked from the outside so the plan
+# and the run cannot come to differ about what is outstanding. Read-only: every
+# branch here is a file test or a listing, never a change.
+_setup_item_pending() {  # <name> -> 0 when the item has something to ask about
+  local name="${1:-}" state id line present count key want have mode settings
+  case "$name" in
+    plugin)
+      IFS='|' read -r state id <<< "$(_setup_cli_plugin bionic)"
+      [ "$state" = "absent" ] ;;
+    duplicate:*)
+      # The roster only names a duplicate this machine actually carries, so a
+      # name that reached here is a question the run would ask.
+      return 0 ;;
+    dependency:*)
+      IFS='|' read -r state id <<< "$(_setup_cli_plugin "${name#dependency:}")"
+      [ "$state" = "disabled" ] ;;
+    tool:*)
+      # An `unknown` presence is OFFERED, not skipped — some mechanisms have no
+      # surface to read and the step asks anyway, so the plan names them too.
+      present="$(check_dep "${name#tool:}")" || return 1
+      present="${present#present=}"; present="${present%%|*}"
+      [ "$present" != "yes" ] ;;
+    environment)
+      for key in $ENV_KEYS; do
+        want="$(env_default "$key")" || continue
+        have="$(env_get "$key" 2>/dev/null)" || have=""
+        [ "$have" = "$want" ] || return 0
+      done
+      return 1 ;;
+    legacy-alias)
+      line="$(detect_zshrc_legacy_block)"
+      [ "${line#*present=}" = "yes" ] && return 0
+      settings="$(_detect_shell_rc)"
+      [ -f "$settings" ] && grep -qE "$SETUP_ALIAS_PATTERN" "$settings" 2>/dev/null && return 0
+      return 1 ;;
+    legacy-hooks)
+      line="$(detect_legacy_channel_hooks)"; count="${line#*count=}"
+      case "$count" in ''|*[!0-9]*|0) return 1 ;; esac
+      return 0 ;;
+    legacy-skill-copy)
+      line="$(detect_legacy_skill_copy)"
+      present="${line#*present=}"; present="${present%% *}"
+      [ "$present" = "yes" ] ;;
+    permission-profile)
+      line="$(detect_profile_state)"
+      state="${line#*applied=}"; state="${state%% *}"
+      count="${line#*stale=}";   count="${count%% *}"
+      [ "$state" = "yes" ] && [ "$count" = "no" ] && return 1
+      return 0 ;;
+    permission-mode)
+      # No jq is not a question: the step says so and changes nothing.
+      command -v jq >/dev/null 2>&1 || return 1
+      settings="$(_dep_settings_file)"
+      if [ -f "$settings" ]; then
+        mode="$(jq -r '.permissions.defaultMode // ""' "$settings" 2>/dev/null)" || mode=""
+      else
+        mode=""
+      fi
+      [ "$mode" != "$BIONIC_DEFAULT_PERMISSION_MODE" ] ;;
+    *)
+      return 1 ;;
+  esac
+}
+
+# The whole page. Non-zero means there was nothing to print, which is a machine
+# with nothing left to set up rather than an error.
+_setup_print_plan() {
+  local id verb lines=""
+  # fd 3: the standard input belongs to the question this page is printed for.
+  while IFS= read -r id <&3; do
+    [ -n "$id" ] || continue
+    _setup_item_pending "$id" || continue
+    verb="$(_setup_item_verb "$id")" || continue
+    lines="${lines}  • ${verb}"$'\n'
+  done 3< <(_setup_item_ids)
+  [ -n "$lines" ] || return 1
+  say "bionic would:"
+  printf '%s' "$lines"
+  say ""
+  return 0
+}
+
 # ONE OWNER FOR THE SENTENCE THAT TELLS SOMEONE HOW TO SAY YES. Every declined
 # item ends up quoting this, and it must name a route that works: the item's own
 # name, and an invocation that delivers one answer to that one question. Written
@@ -322,7 +477,26 @@ _setup_answer_yes() {  # <name>
 
 say()    { printf '%s\n' "$*"; }
 action() { SETUP_ACTIONS="${SETUP_ACTIONS}${1}"$'\n'; }
-consent() { _dep_consent "$1"; }   # deps.sh owns the one prompt shape
+# deps.sh owns the one prompt shape — and the one short-circuit, because
+# `install_dep` and `install_plugin_native` ask through it directly and a
+# wrapper here could only cover the gates this file spells itself.
+consent() { _dep_consent "$1"; }
+
+# AC-12: `consent`'s non-zero used to mean one thing everywhere it was checked
+# — an explicit no — so every gate below printed the identical "declined —"
+# sentence whether a person typed n or a non-interactive first pass hit EOF on
+# the very first question. `_dep_consent` now tells the two apart (2 vs 1);
+# this is the one place each gate turns that code into the right leading word,
+# keeping its own tail sentence unchanged either way. Call with the consent
+# call's own `$?` as the first argument, captured before anything else runs.
+_setup_say_declined() {  # <rc> <tail sentence, already worded for "declined —">
+  local rc="$1" tail="$2"
+  if [ "$rc" = "2" ]; then
+    say "   not asked — ${tail}"
+  else
+    say "   declined — ${tail}"
+  fi
+}
 
 # ─── The CLI's own view of a plugin ──────────────────────────────────────────
 #
@@ -362,16 +536,93 @@ _setup_cli_plugin() {  # <name>
 # not — step 4 writes to the same file, and a setup that can delete a user's
 # shell rc is a setup nobody should run.
 
+# THE MODE TRAVELS WITH THE CONTENT (critic F2). Both rc rewriters in this script
+# stage the new file beside the old one and `mv` it into place, and `mv` replaces
+# the inode: without this, a shell rc the user deliberately kept at 0600 comes
+# back at whatever the umask says, because setup answered one question about a
+# retired alias block. That is the same defect `_dep_settings_write_jq` guards for
+# settings.json (see lib/env.sh's header), and an rc is if anything the likelier
+# of the two to hold plaintext tokens — it is where people put `export …_API_KEY=`.
+#
+# TWO HARMS, NOT ONE, WHICH IS WHY THE ORDER MATTERS. Repairing the mode after the
+# rename fixes the published file and still leaves the staged copy — the whole rc,
+# secrets included, under a predictable name — at the umask's mode for the span
+# before it, and makes the widening PERMANENT if the process dies in that window.
+# So the tmp is CREATED under `umask 077` and chmodded to the original's mode
+# BEFORE a single line is written into it — remove.sh's `_rm_stage_tmp` order,
+# spelled the same way here so the two doors cannot drift again. An absent `stat`
+# degrades to "write, don't chmod" rather than to a refusal to write at all.
+#
+# AND IT IS THE TARGET, NOT THE LINK — THE FILE AS WELL AS ITS MODE (critic delta
+# D1, then delta 2 N1). A `~/.zshrc` symlinked into a dotfiles repo is the
+# commonest way people manage an rc. A bare `stat` on a symlink reports the LINK's
+# own mode — 755 — never the file's, so capturing that and handing it to `chmod`
+# publishes the rc as `rwxr-xr-x`; `-L` is what makes the capture mean the file.
+# But the RENAME had the mirror-image bug: `mv` replaces the link with a regular
+# file, so setup wrote a detached copy at the link's path and left the dotfiles
+# repo holding the block it had just reported removing — one `stow` from being
+# back. `bionic_link_target` (lib/deps.sh) resolves the chain first and the write
+# lands on the target, so the link survives and the managed file is what changes.
+#
+# `-L` ALONE STILL LIES ABOUT ONE INPUT (delta 2 N4): on a DANGLING link BSD
+# `stat -L` falls back to the link and exits 0, reporting 755. `[ -e ]` turns that
+# into the empty "unknowable" answer the callers already handle.
+_setup_file_mode() {  # <file> — the mode of what <file> RESOLVES to, empty if unknowable
+  local mode
+  mode="$(stat -L -f '%Lp' "$1" 2>/dev/null || stat -L -c '%a' "$1" 2>/dev/null)"
+  [ -e "$1" ] || mode=""
+  printf '%s' "$mode"
+}
+
+# ONE STAGING ORDER, AND THE CHMOD IS AT THE END OF IT (critic delta 2 N5).
+# Create the tmp under `umask 077`, let the caller write the content into it, and
+# only then widen it to the target's mode and rename. Measured, that keeps the
+# staged copy at 0600 for the whole span in which it holds the user's rc — the
+# span that matters, because that is when the tmp is worth reading — and gives it
+# the target's mode at the instant of publication and not one moment sooner. The
+# order S13 shipped (chmod, THEN write) had the tmp already wearing a 0644 rc's
+# mode while the rc's own contents, tokens and all, were being written into it,
+# which is what the header above says the order exists to prevent. remove.sh's
+# `_rm_stage_tmp`/`_rm_publish_tmp` carry the same pair, spelled the same way, so
+# the two doors cannot drift again.
+#
+# A tmp left by an earlier interrupted run is REMOVED rather than truncated: `>`
+# on an existing file keeps that file's mode, so truncating one would carry a
+# stale width through the window `umask 077` exists to close.
+_setup_stage_tmp() {  # <tmp> — created empty at 0600; the caller writes, then publishes
+  local tmp="$1"
+  rm -f "$tmp"
+  (umask 077; : > "$tmp") || return 1
+  return 0
+}
+
+# The other half: widen <tmp> to <file>'s mode and rename it over <file>. <file>
+# is the RESOLVED target, so its mode is still readable here — the rename is what
+# replaces it.
+_setup_publish_tmp() {  # <tmp> <file>
+  local tmp="$1" file="$2" mode
+  mode="$(_setup_file_mode "$file")"
+  [ -n "$mode" ] && chmod "$mode" "$tmp"
+  mv "$tmp" "$file"
+}
+
 _setup_rc_strip_block() {  # <file> <start-marker> <end-marker>
-  local file="${1:-}" start="${2:-}" end="${3:-}" tmp
+  local file="${1:-}" start="${2:-}" end="${3:-}" tmp target
   [ -f "$file" ] || return 0
   grep -qF "$start" "$file" 2>/dev/null || return 0
-  tmp="${file}.bionic.tmp"
-  awk -v start="$start" -v end="$end" '
-    $0 == start { skip=1; next }
-    $0 == end   { skip=0; next }
-    !skip { print }
-  ' "$file" > "$tmp" && mv "$tmp" "$file"
+  target="$(bionic_link_target "$file")"
+  tmp="${target}.bionic.tmp"
+  if _setup_stage_tmp "$tmp" \
+     && awk -v start="$start" -v end="$end" '
+        $0 == start { skip=1; next }
+        $0 == end   { skip=0; next }
+        !skip { print }
+      ' "$file" > "$tmp" \
+     && _setup_publish_tmp "$tmp" "$target"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
 }
 
 # ─── Step 1 — the native plugin install (tier 2 ⊃ tier 1) ────────────────────
@@ -560,8 +811,9 @@ setup_duplicates() {
     fi
     say "   bionic would run: ${fix}"
     say "   Saying no lets them coexist: nothing changes, and bionic asks again next run."
-    if ! consent "   Consolidate — remove the copy bionic did not install?"; then
-      say "   left as they are."
+    consent "   Consolidate — remove the copy bionic did not install?"; _setup_consent_rc=$?
+    if [ "$_setup_consent_rc" -ne 0 ]; then
+      _setup_say_declined "$_setup_consent_rc" "left as they are."
       action "settle the duplicate copies of ${bare}: ${fix} — $(_setup_answer_yes "duplicate:${bare}")"
       continue
     fi
@@ -610,8 +862,9 @@ setup_dep_enable_verify() {
       disabled)
         say "   ${name}: installed but DISABLED."
         say "   bionic would run: claude plugin enable ${id}"
-        if ! consent "   Enable ${name} now?"; then
-          say "   declined — ${name} stays disabled."
+        consent "   Enable ${name} now?"; _setup_consent_rc=$?
+        if [ "$_setup_consent_rc" -ne 0 ]; then
+          _setup_say_declined "$_setup_consent_rc" "${name} stays disabled."
           action "run: claude plugin enable ${id} — $(_setup_answer_yes "dependency:${name}")"
         elif claude plugin enable "$id"; then
           say "   enabled."
@@ -710,32 +963,84 @@ setup_extras_loop() {
   _setup_install_class extra
 }
 
-# ─── Step 5 — the todo-tools export ──────────────────────────────────────────
+# ─── Step 5 — bionic's environment settings ──────────────────────────────────
+#
+# ONE HOME, AND WHY IT MOVED. This step used to append `export
+# CLAUDE_CODE_ENABLE_TODO_TOOLS=1` to the user's shell rc inside a marker block.
+# On 2026-08-21 that export was measured NOT REACHING the session it was written
+# for: the host that launches the CLI runs its shell with rc files disabled, so
+# the value was on disk, absent from the process, and nothing bionic printed
+# could tell those apart. settings.json is read by the CLI itself however the
+# session was started — it is the one home that reaches every session. This step
+# no longer writes to a shell rc at all; the block a pre-W7 machine is carrying
+# is footprint /bionic:remove cleans up.
+#
+# ONE QUESTION FOR THE WHOLE SET. The names are one decision — "let bionic
+# configure the environment it needs" — not one decision per name, and asking
+# twice for one decision is how a user ends up half-configured. What gets
+# written is stated before the question, so the single answer is still an
+# informed one.
+#
+# THE ROSTER IS ENV.SH'S. This function loops `ENV_KEYS` and asks `env_default`
+# for each value; a third name added there arrives here with no edit. It reads
+# what is already configured through `env_get`, so a machine that has both
+# already is told there is nothing to do rather than being asked to re-consent
+# to a write that would change no bytes.
 
-setup_env_export() {
-  _setup_wants shell-env || return 0
+setup_environment() {
+  _setup_wants environment || return 0
   say ""
-  say "5. Shell environment"
-  local rc line present
-  rc="$(_detect_shell_rc)"
-  line="$(detect_env_todo_tools)"; present="${line#*present=}"
+  say "5. Environment"
+  local settings key want have missing="" wrote=0
+  settings="$(_dep_settings_file)"
 
-  if [ "$present" = "yes" ]; then say "   CLAUDE_CODE_ENABLE_TODO_TOOLS=1 is already exported in ${rc} — nothing to do."; return 0; fi  # idempotence guard: rc export
+  for key in $ENV_KEYS; do
+    want="$(env_default "$key")" || continue
+    have="$(env_get "$key" 2>/dev/null)" || have=""
+    [ "$have" = "$want" ] && continue
+    missing="${missing}${missing:+ }${key}"
+  done
 
-  say "   ${rc} does not export CLAUDE_CODE_ENABLE_TODO_TOOLS=1 (current CLI builds need it for the native task tools)."
-  say "   bionic would append a marker-scoped block to ${rc}."
-  if ! consent "   Add the export to ${rc}?"; then say "   declined — ${rc} is unchanged."; action "add 'export CLAUDE_CODE_ENABLE_TODO_TOOLS=1' to ${rc} — $(_setup_answer_yes shell-env)"; return 0; fi  # consent gate: rc export
+  # ONE LINE, ON PURPOSE. Both gates below are single lines carrying a named
+  # tag, because tests/setup.test.sh proves each is load-bearing by DELETING its
+  # line from a copy of this file and re-running: a gate spread over an if/fi
+  # pair cannot be deleted that way without breaking the copy's syntax, and a
+  # mutation that turns the script into a parse error proves nothing.
+  [ -n "$missing" ] || { say "   ${settings} already carries bionic's environment settings — nothing to do."; return 0; }  # idempotence guard: settings env
 
-  # Replace rather than stack: a block whose export was commented out reads as
-  # absent above, and appending beside it would leave two blocks.
-  _setup_rc_strip_block "$rc" "$SETUP_ENV_START" "$SETUP_ENV_END"
-  if printf '\n%s\nexport CLAUDE_CODE_ENABLE_TODO_TOOLS=1\n%s\n' "$SETUP_ENV_START" "$SETUP_ENV_END" >> "$rc"; then
-    say "   added."
-  else
-    say "   could not write ${rc}."
-    action "add 'export CLAUDE_CODE_ENABLE_TODO_TOOLS=1' to ${rc} (bionic could not write the file)"
-  fi
+  say "   ${settings} does not carry all of bionic's environment settings."
+  for key in $missing; do
+    say "   ${key}=$(env_default "$key") — $(_setup_env_why "$key")"
+  done
+  consent "   Write bionic's environment settings to ${settings}?"; _setup_consent_rc=$?
+  if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "${settings} is unchanged."; action "write bionic's environment settings to ${settings} — $(_setup_answer_yes environment)"; return 0; fi  # consent gate: settings env
+
+  for key in $missing; do
+    if env_set "$key" "$(env_default "$key")"; then
+      wrote=$((wrote + 1))
+    else
+      say "   could not write ${settings}."
+      action "write bionic's environment settings to ${settings} (bionic could not write the file)"
+      return 0
+    fi
+  done
+  say "   set."
+  # A value written now reaches the NEXT session and not this one — the same
+  # gap doctor reports as "live in this session: no". Saying so here is what
+  # stops a user re-running setup to fix something already fixed.
+  say "   Takes effect in a new session."
   return 0
+}
+
+# What each name is for, in the words the user reads. Kept beside the step
+# rather than in env.sh: env.sh owns the VALUES, this file owns the prose that
+# lands on a person's screen, and the vocabulary wall reads only this side.
+_setup_env_why() {  # <key>
+  case "${1:-}" in
+    CLAUDE_CODE_ENABLE_TODO_TOOLS) echo "the task list a plan's steps are tracked in" ;;
+    BASH_MAX_TIMEOUT_MS)           echo "how long a command may run before it is taken away from whoever started it" ;;
+    *)                             echo "a setting bionic needs" ;;
+  esac
 }
 
 # ─── Step 6 — the retired alias block ────────────────────────────────────────
@@ -744,15 +1049,16 @@ setup_legacy_alias() {
   _setup_wants legacy-alias || return 0
   say ""
   say "6. Legacy shell alias"
-  local rc line present tmp
+  local rc line present tmp rc_target
   rc="$(_detect_shell_rc)"
   line="$(detect_zshrc_legacy_block)"; present="${line#*present=}"
 
   if [ "$present" = "yes" ]; then
     say "   ${rc} carries the legacy bionic alias block (claude --dangerously-skip-permissions)."
     say "   Auto mode is the default now and is the safer equivalent, so the block is retired footprint."
-    if ! consent "   Remove the legacy alias block from ${rc}?"; then
-      say "   declined — the block stays."
+    consent "   Remove the legacy alias block from ${rc}?"; _setup_consent_rc=$?
+    if [ "$_setup_consent_rc" -ne 0 ]; then
+      _setup_say_declined "$_setup_consent_rc" "the block stays."
       action "remove the legacy bionic alias block from ${rc} — $(_setup_answer_yes legacy-alias)"
       return 0
     fi
@@ -768,13 +1074,21 @@ setup_legacy_alias() {
 
   if [ -f "$rc" ] && grep -qE "$SETUP_ALIAS_PATTERN" "$rc" 2>/dev/null; then
     say "   ${rc} carries the legacy UNMARKED alias — the spelling that predates the marker block."
-    if ! consent "   Remove the legacy alias line from ${rc}?"; then
-      say "   declined — the alias stays."
+    consent "   Remove the legacy alias line from ${rc}?"; _setup_consent_rc=$?
+    if [ "$_setup_consent_rc" -ne 0 ]; then
+      _setup_say_declined "$_setup_consent_rc" "the alias stays."
       action "remove the legacy 'alias claude=...--dangerously-skip-permissions' line from ${rc} — $(_setup_answer_yes legacy-alias)"
       return 0
     fi
-    tmp="${rc}.bionic.tmp"
-    if grep -vE "$SETUP_ALIAS_PATTERN" "$rc" > "$tmp" && mv "$tmp" "$rc"; then
+    rc_target="$(bionic_link_target "$rc")"
+    tmp="${rc_target}.bionic.tmp"
+    # Same discipline as _setup_rc_strip_block above, and for the same file — the
+    # same two helpers too, so there is one staging order in this script rather
+    # than a second one that has to be kept in step by hand, and one place that
+    # decides a symlinked rc is rewritten rather than detached.
+    if _setup_stage_tmp "$tmp" \
+       && grep -vE "$SETUP_ALIAS_PATTERN" "$rc" > "$tmp" \
+       && _setup_publish_tmp "$tmp" "$rc_target"; then
       say "   removed (legacy unmarked alias)."
     else
       rm -f "$tmp"
@@ -841,8 +1155,9 @@ setup_legacy_channel_hooks() {
     say "   The plugin is NOT registered with the CLI on this machine, so nothing takes their place:"
     say "   removing these entries leaves these hooks not firing at all until the plugin is installed."
   fi
-  if ! consent "   Remove the legacy-channel entries from ${settings}?"; then
-    say "   declined — ${settings} is unchanged."
+  consent "   Remove the legacy-channel entries from ${settings}?"; _setup_consent_rc=$?
+  if [ "$_setup_consent_rc" -ne 0 ]; then
+    _setup_say_declined "$_setup_consent_rc" "${settings} is unchanged."
     action "remove ${count} legacy-channel managed-hook entr(ies) from ${settings} — $(_setup_answer_yes legacy-hooks)"
     return 0
   fi
@@ -894,7 +1209,8 @@ setup_legacy_skill_copy() {
   say "   loads it arms the same walls twice — once from the plugin, once from the retired copy."
   # The gate is one line so a mutation arm can delete it whole and watch the
   # decline stop protecting anything (tests/setup.test.sh Group 12, mutation 4).
-  if ! consent "   Remove ${dir} and everything under it?"; then say "   declined — ${dir} is unchanged."; action "remove the pre-plugin skill copy at ${dir} — $(_setup_answer_yes legacy-skill-copy)"; return 0; fi  # consent gate: legacy skill copy
+  consent "   Remove ${dir} and everything under it?"; _setup_consent_rc=$?
+  if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "${dir} is unchanged."; action "remove the pre-plugin skill copy at ${dir} — $(_setup_answer_yes legacy-skill-copy)"; return 0; fi  # consent gate: legacy skill copy
 
   # The guard is not decoration. This is the only recursive delete in the
   # script, and the path it takes comes from an environment the caller controls;
@@ -969,9 +1285,10 @@ _setup_profile_block() {
     say "   bionic ships a permission profile for its own scripts and hooks, rendered for ${root}."
   fi
   say "   It goes into ${settings} inside a marker block; nothing outside that block is read or changed."
-  if ! consent "   Apply the permission profile to ${settings}?"; then
+  consent "   Apply the permission profile to ${settings}?"; _setup_consent_rc=$?
+  if [ "$_setup_consent_rc" -ne 0 ]; then
     rm -f "$rendered"
-    say "   declined — ${settings} is unchanged."
+    _setup_say_declined "$_setup_consent_rc" "${settings} is unchanged."
     action "apply the permission profile — $(_setup_answer_yes permission-profile)"
     return 0
   fi
@@ -1029,7 +1346,13 @@ _setup_default_mode() {
   if [ "$mode" = "$want" ]; then say "   the default permission mode is already ${want} — nothing to do."; return 0; fi  # idempotence guard: default mode
 
   say "   Claude Code asks before each command unless a default mode says otherwise."
-  if ! consent "   Set Claude Code's default permission mode to ${want}? Recommended — you approve once, not on every command."; then say "   declined — the default permission mode is unchanged."; action "set Claude Code's default permission mode to ${want} in ${settings} — $(_setup_answer_yes permission-mode)"; return 0; fi  # consent gate: default mode
+  consent "   Set Claude Code's default permission mode to ${want}? Recommended — you approve once, not on every command."; _setup_consent_rc=$?
+  # item 1: the note follows the question itself, whichever way it was
+  # answered — a Remote Control session overrides this either way, so a
+  # decline that leaves the setting unchanged and a yes that writes it both
+  # need the same one sentence.
+  say "   ${PROFILE_RC_NOTE}"
+  if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "the default permission mode is unchanged."; action "set Claude Code's default permission mode to ${want} in ${settings} — $(_setup_answer_yes permission-mode)"; return 0; fi  # consent gate: default mode
 
   # Created only AFTER consent: a declined run must leave a machine that has no
   # settings file without one.
@@ -1074,10 +1397,13 @@ setup_summary() {
 # run that silently did nothing would look exactly like a machine with nothing
 # left to do, which is the one report this script must never fake.
 SETUP_LIST=0
+setup_all=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --list)
       SETUP_LIST=1; shift ;;
+    --all)
+      setup_all=1; shift ;;
     --only)
       if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
         say "setup: --only needs the name of the one item to set up."
@@ -1093,6 +1419,16 @@ while [ $# -gt 0 ]; do
       exit 2 ;;
   esac
 done
+
+# TWO NARROWINGS THAT CANNOT BOTH APPLY. `--only` runs one item; `--all` runs
+# every item over one answer. Together they would have to mean something, and
+# whatever that something was, half the people who typed it would mean the other
+# one — so it stops here, before anything is printed at the machine.
+if [ "$setup_all" = "1" ] && [ -n "$SETUP_ONLY" ]; then
+  say "setup: --all and --only cannot be combined — --all does every item, --only does exactly one."
+  say "       run ${SETUP_SELF_CMD} --list to see the names --only takes."
+  exit 2
+fi
 
 if [ "$SETUP_LIST" = "1" ]; then
   _setup_item_ids
@@ -1113,13 +1449,35 @@ fi
 
 say "bionic setup — every change below is asked for first, one item at a time."
 
+# THE ONE EVENT, BEFORE ANY STEP SPEAKS. Under `--all` the whole page is printed
+# and answered here; every question below then finds the answer already given.
+# A no — or nobody there to answer — leaves the machine exactly as it was, which
+# is the same floor a per-item pass holds to.
+if [ "$setup_all" = "1" ]; then
+  say ""
+  # THE PAGE IS BUILT WITH THE ANSWER CHANNEL CLOSED. Every predicate behind it
+  # shells out — the CLI's listing, the dependency probes — and a child that
+  # reads its inherited stdin eats the one `y` this run is about to ask for.
+  # Nothing here needs stdin, so nothing here gets it.
+  if ! _setup_print_plan < /dev/null; then
+    say "   nothing left to do — this machine is set up."
+    exit 0
+  fi
+  consent "Do all of the above?"; setup_all_rc=$?
+  if [ "$setup_all_rc" -ne 0 ]; then
+    say "   nothing changed."
+    exit 0
+  fi
+  SETUP_ALL=1
+fi
+
 setup_plugin_install
 setup_load_state
 setup_duplicates
 setup_dep_enable_verify
 setup_tools_loop
 setup_extras_loop
-setup_env_export
+setup_environment
 setup_legacy_alias
 setup_legacy_channel_hooks
 setup_legacy_skill_copy

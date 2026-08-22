@@ -334,6 +334,7 @@ JSON
 import json, sys
 allow = json.loads(sys.argv[2]) + json.loads(sys.argv[1])
 json.dump({"statusLine": {"type": "command", "command": "npx ccstatusline@latest"},
+           "env": {"CLAUDE_CODE_ENABLE_TODO_TOOLS": "1", "BASH_MAX_TIMEOUT_MS": "1800000"},
            "permissions": {"allow": allow},
            "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
                {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/protect-main.sh"}]}]}},
@@ -568,10 +569,19 @@ expect_match "healthy: playwright browser cache row renders present" \
   "*when-needed*playwright-chromium*yes*" "$(line_of "$H_OUT" "playwright-chromium")"
 
 # Environment class.
-expect_match "healthy: TODO_TOOLS export reported present" \
-  "*present*" "$(line_of "$H_OUT" "CLAUDE_CODE_ENABLE_TODO_TOOLS")"
+# CONFIGURED AND LIVE ARE TWO FACTS. The healthy machine's settings.json
+# carries both names; the process doctor ran in does not (doctor_run starts from
+# `env -i`), so the honest report is "configured, not live in this session" —
+# which is a restart, not a repair, and Group 21 below is where the pair is
+# driven end to end.
+expect_match "healthy: the task-list name reports its configured value" \
+  "*1*" "$(line_of "$H_OUT" "CLAUDE_CODE_ENABLE_TODO_TOOLS")"
+expect_match "healthy: …and says whether this session has it" \
+  "*live in this session*" "$(line_of "$H_OUT" "CLAUDE_CODE_ENABLE_TODO_TOOLS")"
+expect_match "healthy: the long-command ceiling reports its configured value" \
+  "*1800000*" "$(line_of "$H_OUT" "BASH_MAX_TIMEOUT_MS")"
 expect_match "healthy: legacy .zshrc alias block reported absent" \
-  "*absent*" "$(line_of "$H_OUT" "legacy .zshrc")"
+  "*absent*" "$(line_of "$H_OUT" "legacy .zshrc alias block")"
 expect_match "healthy: zero legacy-channel managed-hook entries" \
   "*0*" "$(line_of "$H_OUT" "legacy-channel managed-hook entries")"
 expect_match "healthy: ccstatusline reported present" \
@@ -624,6 +634,46 @@ expect_contains "healthy: summary says there is nothing to do" "nothing to do" "
 
 # ---------------------------------------------------------------------------
 echo ""
+echo "=== Group 3b: the permission mode line, and its Remote Control note (AC-10) ==="
+# ---------------------------------------------------------------------------
+#
+# item 1 + O-3: doctor had no permission-mode line at all (a grep for
+# `defaultMode`/`permission mode` came back empty). The fixture machine's
+# settings.json carries no `.permissions.defaultMode` key, so the honest first
+# reading is `unset` — never a bare blank, never a value doctor invented.
+
+RC_NOTE='Remote Control sessions override this (Manual / Accept edits / Plan only).'
+
+expect_match "healthy: permission mode reads unset when the machine has no key" \
+  "*unset*" "$(line_of "$H_OUT" "permission mode")"
+expect_contains "healthy: the permission mode line carries the Remote Control note" \
+  "$RC_NOTE" "$H"
+
+# A machine that HAS written a mode (the setup item's own effect) reports that
+# value verbatim, with the same note beside it — the note is about what
+# overrides the value, not about whether one happens to be set.
+MODE_MACHINE="$TMP/machine-mode-auto"; rm -rf "$MODE_MACHINE"; cp -R "$HEALTHY" "$MODE_MACHINE"
+jq '.permissions.defaultMode = "auto"' "$HEALTHY/claude-home/settings.json" \
+  > "$MODE_MACHINE/claude-home/settings.json"
+MODE_OUT="$TMP/mode-auto.out"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$MODE_MACHINE" > "$MODE_OUT" 2>&1
+MODE_RC=$?
+expect_eq "mode set: doctor still exits 0" "0" "$MODE_RC"
+expect_match "mode set: permission mode reads the value on the machine" \
+  "*auto*" "$(line_of "$MODE_OUT" "permission mode")"
+expect_contains "mode set: the Remote Control note is still printed" \
+  "$RC_NOTE" "$(cat "$MODE_OUT")"
+
+# jq absent: the value cannot be read at all, so `unknown` — never coerced to
+# `unset`, which would tell a machine that could not be read that it has
+# nothing configured.
+MODEQ_OUT="$TMP/mode-nojq.out"
+doctor_run "$DOCTOR_SH" "$NOJQ_BIN" "$HEALTHY" > "$MODEQ_OUT" 2>&1
+expect_match "no jq: permission mode renders unknown, not unset" \
+  "*unknown*" "$(line_of "$MODEQ_OUT" "permission mode")"
+
+# ---------------------------------------------------------------------------
+echo ""
 echo "=== Group 4: the broken machine — every failure renders WITH its named fix ==="
 # ---------------------------------------------------------------------------
 
@@ -639,6 +689,23 @@ expect_eq "broken: the same ten sections still render, in the same order" \
 
 expect_match "broken: hooks.json naming a missing script renders degraded" \
   "*degraded*" "$(line_of "$B_OUT" "hooks ")"
+
+# W7 S11 (six-axis review axis 2). The SUMMARY's action line for degraded wiring
+# used to read `re-converge with:` and then the hint in backticks — which on a
+# directory-source machine handed a user with a genuinely broken tree the words
+# "nothing to do" formatted as a command to run. The hint answers per state now,
+# so this line gets a repair sentence instead of a re-converge fragment. This
+# fixture carries no marketplace registry, so the feed kind is unknown and the
+# git-source sentence is the one that renders — the documented default.
+B_HOOKFIX="$(awk '/=== SUMMARY ===/,0' "$B_OUT" | grep -A 1 "hook wiring")"
+expect_contains "broken: the hook-wiring action names the copy the CLI reads" \
+  "the installed copy is what the CLI reads" "$B_HOOKFIX"
+expect_contains "broken: …and the command that re-converges it" \
+  "claude plugin update bionic@bionic" "$B_HOOKFIX"
+expect_not_contains "broken: …and never offers 'nothing to do' to a broken machine" \
+  "nothing to do" "$B_HOOKFIX"
+expect_not_contains "broken: …with no re-converge prefix in front of the sentence" \
+  "re-converge with:" "$B_HOOKFIX"
 
 # AC-4, the MODIFIED-LOCALLY arm. The framing is fixed by the AC and is the
 # whole difference between a report and a scolding: an edited role file is a
@@ -692,10 +759,12 @@ expect_contains "broken: an absent basic dependency is offered the command that 
 expect_contains "broken: every degradation line names a fix (arrow-delimited)" "→" "$DEG"
 
 # Environment class, the other way round from healthy.
-expect_match "broken: TODO_TOOLS export reported absent" \
+expect_match "broken: the task-list name reports absent" \
   "*absent*" "$(line_of "$B_OUT" "CLAUDE_CODE_ENABLE_TODO_TOOLS")"
+expect_match "broken: so does the long-command ceiling" \
+  "*absent*" "$(line_of "$B_OUT" "BASH_MAX_TIMEOUT_MS")"
 expect_match "broken: legacy .zshrc alias block reported present" \
-  "*present*" "$(line_of "$B_OUT" "legacy .zshrc")"
+  "*present*" "$(line_of "$B_OUT" "legacy .zshrc alias block")"
 expect_match "broken: two legacy-channel managed-hook entries counted" \
   "*2*" "$(line_of "$B_OUT" "legacy-channel managed-hook entries")"
 expect_match "broken: ccstatusline reported absent" \
@@ -1347,6 +1416,23 @@ g15_run() {  # -> stdout, run FROM the fixture repo
   ( cd "$G15_REPO" && doctor_run "$DOCTOR_SH" "$G15_BIN" "$HEALTHY" )
 }
 
+# epic-17 W7 S2b (AC-3). Which re-converge command is TRUE differs by feed, so the lag
+# arm below drives both: a git-source marketplace (the cache the registry names is what
+# the CLI loads, so `update` really refreshes it) and a directory-source one (a local
+# checkout registered as a feed — every dogfood install, and this fixture repo stands in
+# for it — where the CLI never opens that cache, so `update` at an unchanged
+# plugin.json version is a no-op). `known_marketplaces.json` is the file the CLI itself
+# writes on `marketplace add`; this fixture is the real file the real parse
+# (`detect_marketplace_feed_kind`) reads, not a stubbed answer.
+g15_set_feed_kind() {  # <directory|git>
+  case "$1" in
+    directory)
+      jq -n '{"bionic":{"source":{"source":"directory","path":"/tmp/g15-fixture-bionic"},"installLocation":"/tmp/g15-fixture-bionic"}}' ;;
+    *)
+      jq -n '{"bionic":{"source":{"source":"github","repo":"chrisalehman/bionic"},"installLocation":"/tmp/g15-fixture-cache"}}' ;;
+  esac > "$HEALTHY/claude-home/plugins/known_marketplaces.json"
+}
+
 g15_set_sha "$G15_TIP"
 G15_MATCH_OUT="$TMP/g15-match.out"; g15_run > "$G15_MATCH_OUT" 2>&1
 G15_MATCH="$(line_of "$G15_MATCH_OUT" "installed commit")"
@@ -1360,16 +1446,60 @@ expect_contains "…inside PLUGIN INTEGRITY, where the other install facts live"
 expect_not_contains "…and never under the old registry-internals label" \
   "registry sha" "$G15_MATCH_OUT"
 
+g15_set_feed_kind git
 g15_set_sha "$G15_PREV"
 G15_LAG_OUT="$TMP/g15-lag.out"; g15_run > "$G15_LAG_OUT" 2>&1
 G15_LAG="$(line_of "$G15_LAG_OUT" "installed commit")"
 expect_match "an install behind the tip renders as lag" "*behind*" "$G15_LAG"
 expect_match "…naming the installed sha" "*${G15_PREV:0:12}*" "$G15_LAG"
 expect_match "…and the tip it is behind" "*${G15_TIP:0:12}*" "$G15_LAG"
-expect_match "…and the action, inline" "*claude plugin install bionic@bionic*" "$G15_LAG"
+# AC-3: on a GIT-SOURCE feed the cache the registry names is what the CLI loads, so
+# lagging is real staleness and `update` genuinely refreshes it — `install` on an
+# already-registered id is a CLI no-op/"already installed", not a refresh.
+# W7 S11 (six-axis review axis 2): the hint is a WHOLE SENTENCE now, and doctor
+# prints it after the two shas rather than after a "re-converge with:" prefix that
+# said the words the sentence already carried.
+expect_contains "…the sentence names the state in its own words" "the installed copy is behind" "$G15_LAG"
+expect_contains "…and the action, inline, is update — not install" "claude plugin update bionic@bionic" "$G15_LAG"
+expect_contains "…and closes on the re-run that confirms it worked" "then re-run /bionic:doctor" "$G15_LAG"
+expect_not_contains "…with no prefix repeating what the sentence already says" "re-converge with: " "$G15_LAG"
+expect_not_contains "…never the install verb, which no-ops on an already-registered id" "plugin install bionic@bionic" "$G15_LAG"
 expect_eq "…and exactly one such line, not one per state" "1" \
   "$(grep -c "installed commit" "$G15_LAG_OUT" | tr -d ' ')"
 expect_eq "doctor still exits 0 with a lagging install (a diagnosis is not a failure)" "0" \
+  "$( g15_run > /dev/null 2>&1; echo $? )"
+
+# epic-17 W7 S2b (AC-3). Same lagging sha, but on a DIRECTORY-SOURCE marketplace — a
+# local checkout registered as a feed, which is what a dogfood install is — the CLI
+# never opens the cache the registry names, so `update` at an unchanged plugin.json
+# version is a no-op ("already at the latest version") and refreshes nothing. Measured
+# 2026-08-21, .bionic/docs/record/epic-17-w7/ac2-relay-drive.md. The false universal
+# claim S2 shipped — one `update` sentence for every feed — must be gone from THIS
+# state's rendering, replaced by the true one.
+g15_set_feed_kind directory
+G15_DIRLAG_OUT="$TMP/g15-dirlag.out"; g15_run > "$G15_DIRLAG_OUT" 2>&1
+G15_DIRLAG="$(line_of "$G15_DIRLAG_OUT" "installed commit")"
+expect_match "a directory-source lag still renders as lag" "*behind*" "$G15_DIRLAG"
+expect_not_contains "…but the update command is never offered — it would no-op there" \
+  "claude plugin update bionic@bionic" "$G15_DIRLAG"
+# W7 S11: this used to read "re-converge with: nothing to do — the CLI runs this
+# tree directly", spliced after a prefix that had ALREADY said "the cache copy is
+# behind this tree, which the CLI runs" — the same clause twice, wrapped around a
+# non-command offered where a command belongs. One sentence, said once.
+expect_contains "…the state is called what it is: nominal" \
+  "nominal:" "$G15_DIRLAG"
+expect_contains "…naming why: the CLI already runs this tree" \
+  "the CLI runs this tree" "$G15_DIRLAG"
+expect_contains "…and when the copy does catch up" \
+  "the next version bump or reinstall" "$G15_DIRLAG"
+expect_not_contains "…never a bare 'nothing to do' handed over where a command belongs" \
+  "nothing to do" "$G15_DIRLAG"
+expect_not_contains "…and no prefix repeating the sentence's own words" \
+  "re-converge with: " "$G15_DIRLAG"
+expect_eq "…the clause naming what the CLI runs appears exactly once" "1" \
+  "$(printf '%s\n' "$G15_DIRLAG" | /usr/bin/grep -o 'the CLI runs this tree' | wc -l | tr -d ' ')"
+expect_not_contains "…never the install verb either" "plugin install bionic@bionic" "$G15_DIRLAG"
+expect_eq "doctor still exits 0 on a directory-source lag too" "0" \
   "$( g15_run > /dev/null 2>&1; echo $? )"
 
 # A commit this checkout has never seen is a DIFFERENT answer from lag, because reinstalling
@@ -1845,6 +1975,83 @@ if [ -f "$DOCTOR_MD" ]; then
   expect_true "render.sh --check is green (the rendered file matches its sources)" \
     bash "${REPO}/agents-src/render.sh" --check
 fi
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Group 21: ENVIRONMENT — configured is not live (W7 S4, spec AC-7) ==="
+# ---------------------------------------------------------------------------
+#
+# THE DEFECT, VERBATIM. On 2026-08-21 a session ran with
+# CLAUDE_CODE_ENABLE_TODO_TOOLS written to disk and absent from the process — the
+# host had launched its shell with rc files disabled — and doctor could not say
+# so: it had one line, sourced from the shell rc, that answered neither question
+# well. A name in the file but not in the process is a RESTART; a name in
+# neither is a setup gap. Reporting them as one state sends a user to repair
+# something already repaired, or calls a session ready that is not.
+#
+# The three arms below plant each state independently: the file through the
+# fixture machine, the process through doctor_run's env assignments. An
+# implementation that answered one from the other fails at least one of them.
+
+ENV_M="$TMP/machine-env-liveness"; plant_machine "$ENV_M" healthy
+
+# (a) configured AND live — the session that will behave the way the file says.
+ENV_LIVE_OUT="$TMP/env-live.txt"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$ENV_M" \
+  BASH_MAX_TIMEOUT_MS=1800000 CLAUDE_CODE_ENABLE_TODO_TOOLS=1 > "$ENV_LIVE_OUT" 2>&1
+expect_match "configured and live: the value is reported" \
+  "*1800000*" "$(line_of "$ENV_LIVE_OUT" "BASH_MAX_TIMEOUT_MS")"
+expect_match "…and the session is reported as having it" \
+  "*live in this session: yes*" "$(line_of "$ENV_LIVE_OUT" "BASH_MAX_TIMEOUT_MS")"
+
+# (b) configured and NOT live — the state a restart fixes. The report has to say
+# restart, because "absent" would send the user to run setup again and setup
+# would find nothing to do.
+ENV_STALE_OUT="$TMP/env-stale.txt"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$ENV_M" > "$ENV_STALE_OUT" 2>&1
+expect_match "configured and not live: the value is still reported" \
+  "*1800000*" "$(line_of "$ENV_STALE_OUT" "BASH_MAX_TIMEOUT_MS")"
+expect_match "…and the session is reported as not having it" \
+  "*live in this session: no*" "$(line_of "$ENV_STALE_OUT" "BASH_MAX_TIMEOUT_MS")"
+expect_match "…named as a restart, not as a setup gap" \
+  "*restart*" "$(line_of "$ENV_STALE_OUT" "BASH_MAX_TIMEOUT_MS")"
+expect_not_contains "…and the summary does not ask for a setup run over it" \
+  "environment settings" "$(sed -n '/=== SUMMARY ===/,$p' "$ENV_STALE_OUT")"
+
+# (c) absent from the file — the real setup gap, and the one state that earns a
+# setup line in the summary.
+ENV_GAP_M="$TMP/machine-env-gap"; plant_machine "$ENV_GAP_M" healthy
+python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+d.pop("env", None)
+json.dump(d, open(sys.argv[1], "w"), indent=2)
+' "$ENV_GAP_M/claude-home/settings.json"
+ENV_GAP_OUT="$TMP/env-gap.txt"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$ENV_GAP_M" > "$ENV_GAP_OUT" 2>&1
+expect_match "absent: reported absent" \
+  "*absent*" "$(line_of "$ENV_GAP_OUT" "BASH_MAX_TIMEOUT_MS")"
+expect_contains "absent: the summary names it as something setup would write" \
+  "environment settings" "$(sed -n '/=== SUMMARY ===/,$p' "$ENV_GAP_OUT")"
+
+# (d) absent from the file but live in the process — the state the retired shell
+# export leaves behind. It must not read as configured: the value dies with this
+# session, and the next one will not have it.
+ENV_ORPHAN_OUT="$TMP/env-orphan.txt"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$ENV_GAP_M" BASH_MAX_TIMEOUT_MS=1800000 > "$ENV_ORPHAN_OUT" 2>&1
+expect_match "live but not configured: reported absent from the file" \
+  "*absent*" "$(line_of "$ENV_ORPHAN_OUT" "BASH_MAX_TIMEOUT_MS")"
+expect_match "…and the session is still credited with having it" \
+  "*live in this session*" "$(line_of "$ENV_ORPHAN_OUT" "BASH_MAX_TIMEOUT_MS")"
+expect_contains "…and setup is still named, because the next session will not have it" \
+  "environment settings" "$(sed -n '/=== SUMMARY ===/,$p' "$ENV_ORPHAN_OUT")"
+
+# READ-ONLY STILL HOLDS over the new reads. env.sh's write path exists; doctor
+# must never reach it.
+FP_ENV_BEFORE="$(fingerprint "$ENV_M")"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$ENV_M" > /dev/null 2>&1
+expect_eq "the environment section mutates nothing" \
+  "$FP_ENV_BEFORE" "$(fingerprint "$ENV_M")"
 
 # ---------------------------------------------------------------------------
 echo ""

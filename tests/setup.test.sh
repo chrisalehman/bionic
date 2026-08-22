@@ -92,10 +92,58 @@ BIN="$TMP/bin"; mkdir -p "$BIN"
 # `sleep` earns its place: it is what the probe bound polls with, and without it
 # on PATH `detect_bounded` degrades to an unbounded `wait` by design. A fixture
 # PATH missing it would make Group 14 measure the degradation instead of the bound.
-for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat ls tr head tail sort uniq wc \
+# `readlink` earns its place the same way (S15): both rc rewriters resolve a
+# symlinked rc to its final target before staging, so the dotfiles file is
+# rewritten rather than detached. Absent `readlink` they degrade to writing the
+# path as given, so a PATH without it measures the degradation, not the fix.
+for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail sort uniq wc \
             jq mktemp find xargs shasum uname date touch diff printf true false sleep; do
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BIN}/${real}" 2>/dev/null
 done
+
+# `mv` WITH A WITNESS (critic F2). Every rc rewriter in the payload stages its
+# work in a `<file>.bionic.tmp` and renames it into place, so the mode the RENAME
+# publishes is the only mode that matters: a writer that publishes 0644 and
+# repairs it afterwards would still have exposed the whole file — a shell rc is
+# where people keep `export …_API_KEY=` — under a predictable name for the span
+# before the rename, and permanently if the process dies in it. This wrapper
+# records the mode of what each `mv` is about to publish. Inert unless an arm
+# sets BIONIC_TEST_MV_LOG; `exec` hands off to the real binary.
+SETUP_MV_REAL="$(command -v mv 2>/dev/null)"
+# The loop above left a SYMLINK to the real binary here; `cat >` would follow it
+# and try to write /bin/mv. Replace the link, do not write through it.
+rm -f "${BIN}/mv"
+cat > "${BIN}/mv" <<MVSTUB
+#!/bin/bash
+if [ -n "\${BIONIC_TEST_MV_LOG:-}" ] && [ -f "\$1" ]; then
+  printf '%s %s\n' "\$(stat -f '%Lp' "\$1" 2>/dev/null || stat -c '%a' "\$1" 2>/dev/null)" "\$1" \
+    >> "\$BIONIC_TEST_MV_LOG"
+fi
+exec "$SETUP_MV_REAL" "\$@"
+MVSTUB
+chmod +x "${BIN}/mv"
+
+# `awk` WITH A DURING-WRITE WITNESS (critic delta 2 N5). The `mv` witness above
+# measures the staged copy at the RENAME, which is one instant too late to see
+# the window this staging order exists to close: the span in which the tmp file
+# already holds the whole rc — tokens included — but has not been published yet.
+# `_setup_rc_strip_block` writes that content with `awk … > "$tmp"`, and the
+# shell opens the redirect before `awk` is exec'd, so a wrapper on `awk` reads
+# the tmp's mode at exactly the moment it starts holding content. Inert unless an
+# arm sets both BIONIC_TEST_STAGE_LOG and BIONIC_TEST_STAGE_TMP.
+SETUP_AWK_REAL="$(command -v awk 2>/dev/null)"
+rm -f "${BIN}/awk"
+cat > "${BIN}/awk" <<AWKSTUB
+#!/bin/bash
+if [ -n "\${BIONIC_TEST_STAGE_LOG:-}" ] && [ -n "\${BIONIC_TEST_STAGE_TMP:-}" ] \
+   && [ -e "\$BIONIC_TEST_STAGE_TMP" ]; then
+  printf '%s %s\n' \
+    "\$(stat -f '%Lp' "\$BIONIC_TEST_STAGE_TMP" 2>/dev/null || stat -c '%a' "\$BIONIC_TEST_STAGE_TMP" 2>/dev/null)" \
+    "\$BIONIC_TEST_STAGE_TMP" >> "\$BIONIC_TEST_STAGE_LOG"
+fi
+exec "$SETUP_AWK_REAL" "\$@"
+AWKSTUB
+chmod +x "${BIN}/awk"
 
 # A bin dir with everything above EXCEPT jq — the honest-unknown arms.
 NOJQ_BIN="$TMP/bin-nojq"; mkdir -p "$NOJQ_BIN"
@@ -291,9 +339,18 @@ if [ -f "$SETUP_MD" ]; then
   expect_match "setup.md invokes the script via the literal \${CLAUDE_PLUGIN_ROOT}" \
     '*${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh*' "$SETUP_MD_TEXT"
   expect_match "setup.md carries a frontmatter description" '*description:*' "$SETUP_MD_TEXT"
-  # The wrapper adds no logic: the only shell it names is the one invocation.
-  wrapper_cmds="$(grep -cE '^[[:space:]]*(bash|sh|claude|jq|npm|brew) ' "$SETUP_MD" 2>/dev/null | tr -d ' ')"
-  expect_eq "setup.md is a wrapper — exactly one command line, no second mechanism" "1" "$wrapper_cmds"
+  # THE WRAPPER ADDS NO LOGIC, and that is a claim about MECHANISMS, not about
+  # line counts. The page names two invocations now — the per-item run and the
+  # whole-plan run `--all` asks one question over (AC-8) — which is one script
+  # spelled twice. What must stay absent is a second mechanism: another program,
+  # or a bash line pointed at anything but this command's own script.
+  wrapper_cmds="$(grep -cE '^[[:space:]]*bash ' "$SETUP_MD" 2>/dev/null | tr -d ' ')"
+  expect_true "setup.md names at least one invocation of its own script" \
+    bash -c '[ "$1" -ge 1 ]' _ "$wrapper_cmds"
+  expect_eq "setup.md names no second mechanism" "" \
+    "$(grep -nE '^[[:space:]]*(sh|claude|jq|npm|brew) ' "$SETUP_MD" 2>/dev/null || true)"
+  expect_eq "setup.md is a wrapper — every command line it names is its own script" "" \
+    "$(grep -E '^[[:space:]]*bash ' "$SETUP_MD" 2>/dev/null | grep -vF '${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh' || true)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -520,6 +577,11 @@ expect_match "an extra npm row installs through install_dep's own argv" '*npm in
 expect_match "an extra mcp row registers through install_dep's own argv" '*mcp add context7*' "$CALLTEXT"
 expect_no_match "native-kind rows never reach install_dep (the harness owns them)" \
   '*brew install superpowers*' "$CALLTEXT"
+# A glob on "*installed.*" would also match "ripgrep is not installed." two
+# lines up — the success line has to be checked as its own line (setup.sh sets
+# BIONIC_DEP_INDENT to three spaces, so that is what install_dep prints here).
+expect_true "a consented tool install confirms with a standalone 'installed.' line (AC-11 — O-1)" \
+  bash -c 'printf "%s\n" "$1" | /usr/bin/grep -qx "   installed."' _ "$OUT"
 # The list must be read on its own descriptor. A `while read ... done < <(list)`
 # loop hands the BODY the same stdin, so the consent prompt inside it eats the
 # next dependency NAME as the answer — declining every item and silently
@@ -633,40 +695,102 @@ expect_no_match "declined extras: nothing was installed" '*npm install -g @penci
 expect_no_match "declined extras: no statusline recorded" '*statusLine*' "$(cat "$FIX/ch/settings.json")"
 
 # ---------------------------------------------------------------------------
-# Group 5 — (d) the CLAUDE_CODE_ENABLE_TODO_TOOLS export, marker-scoped.
+# Group 5 — (d) bionic's environment settings, in the CLI's own settings.json.
+#
+# THE DEFECT THIS GROUP REPLACES AN ARM FOR. Until W7 this step appended
+# `export CLAUDE_CODE_ENABLE_TODO_TOOLS=1` to the user's shell rc inside a
+# marker block, and on 2026-08-21 that export was measured NOT REACHING the
+# session it was written for: the host that launches the CLI runs its shell with
+# rc files disabled. settings.json is read by the CLI itself however the session
+# was started, so it is the one home that reaches every session — and the arms
+# below assert the shell rc is not written to AT ALL, which is the half a
+# "settings.json now carries it too" implementation would leave passing.
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "=== Group 5: shell-rc export ==="
+echo "=== Group 5: the environment settings ==="
 
-new_fixture rc-write
+new_fixture env-write
 plant_cli_plugin "bionic@bionic" true
+RC_BEFORE="$(cat "$FIX/rc")"
 OUT="$(run_setup "$YES")"
-expect_match "consented: the export lands in the rc" \
-  "env:todo-tools present=yes" "$(lib_query "$LIB_DIR/detect.sh" detect_env_todo_tools)"
-expect_match "the export is written inside a bionic marker block" '*bionic:env:start*' "$(cat "$FIX/rc")"
-expect_match "the rc the user already had is preserved" '*export PATH=*' "$(cat "$FIX/rc")"
+expect_eq "consented: the task-list name is in settings.json" "1" \
+  "$(jq -r '.env.CLAUDE_CODE_ENABLE_TODO_TOOLS // ""' "$FIX/ch/settings.json")"
+expect_eq "consented: the long-command ceiling is there beside it" "1800000" \
+  "$(jq -r '.env.BASH_MAX_TIMEOUT_MS // ""' "$FIX/ch/settings.json")"
+expect_match "consented: the item says what it did" '*set.*' "$OUT"
+expect_match "the step names itself in the user's words" '*5. Environment*' "$OUT"
+# THE HALF THAT MATTERS MOST. Not "settings.json was written" — "and the shell
+# rc was not", byte for byte. A machine that got both would still be carrying
+# the footprint remove now has to clean up.
+expect_eq "consented: the shell rc is untouched, byte for byte" "$RC_BEFORE" "$(cat "$FIX/rc")"
 
-RC_AFTER_FIRST="$(cat "$FIX/rc")"
+SETTINGS_AFTER_FIRST="$(cat "$FIX/ch/settings.json")"
 OUT="$(run_setup "$YES")"
-expect_eq "second run does not append a second block (byte-identical rc)" \
-  "$RC_AFTER_FIRST" "$(cat "$FIX/rc")"
-expect_match "second run says the export is already there" '*already*' "$OUT"
+expect_eq "second run writes nothing (byte-identical settings.json)" \
+  "$SETTINGS_AFTER_FIRST" "$(cat "$FIX/ch/settings.json")"
+expect_match "second run says there is nothing to do" '*nothing to do*' "$OUT"
+expect_no_match "…and asks no question it has no work behind" '*Write bionic*' "$OUT"
 
-new_fixture rc-declined
+new_fixture env-declined
 plant_cli_plugin "bionic@bionic" true
+SETTINGS_BEFORE="$(cat "$FIX/ch/settings.json")"
 RC_BEFORE="$(cat "$FIX/rc")"
 OUT="$(run_setup "$NO")"
-expect_eq "declined: the rc is untouched, byte for byte" "$RC_BEFORE" "$(cat "$FIX/rc")"
-expect_match "declined: the export is named as an action line" '*CLAUDE_CODE_ENABLE_TODO_TOOLS*' "$OUT"
+expect_eq "declined: settings.json is untouched, byte for byte" \
+  "$SETTINGS_BEFORE" "$(cat "$FIX/ch/settings.json")"
+expect_eq "declined: and so is the shell rc" "$RC_BEFORE" "$(cat "$FIX/rc")"
+expect_match "declined: the item is named as an action line" '*--only environment*' "$OUT"
 
-# A machine that already exports it OUTSIDE bionic's markers is already correct.
-new_fixture rc-preexisting
+# A settings.json that already carries the two names — written by hand, or by an
+# earlier run — is already correct, and the merge must not disturb what else is
+# in the file.
+new_fixture env-preexisting
 plant_cli_plugin "bionic@bionic" true
-printf 'export PATH="$HOME/bin:$PATH"\nexport CLAUDE_CODE_ENABLE_TODO_TOOLS=1\n' > "$FIX/rc"
+cat > "$FIX/ch/settings.json" <<'JSON'
+{"env":{"OTHER":"x","CLAUDE_CODE_ENABLE_TODO_TOOLS":"1","BASH_MAX_TIMEOUT_MS":"1800000"}}
+JSON
+SETTINGS_BEFORE="$(cat "$FIX/ch/settings.json")"
+# Narrowed to the item: a whole consented pass writes settings.json through the
+# permission steps too, and this arm is about THIS step writing nothing.
+SETUP_FLAGS="--only environment"
+OUT="$(run_setup "$YES")"
+SETUP_FLAGS=""
+expect_eq "pre-existing values: nothing rewritten" \
+  "$SETTINGS_BEFORE" "$(cat "$FIX/ch/settings.json")"
+
+# A partial machine — one name there, one missing — is the state a ceiling added
+# after the fact leaves behind, and it must be completed rather than skipped.
+new_fixture env-partial
+plant_cli_plugin "bionic@bionic" true
+printf '%s\n' '{"env":{"CLAUDE_CODE_ENABLE_TODO_TOOLS":"1"}}' > "$FIX/ch/settings.json"
+OUT="$(run_setup "$YES")"
+expect_eq "a half-configured machine gets the missing name" "1800000" \
+  "$(jq -r '.env.BASH_MAX_TIMEOUT_MS // ""' "$FIX/ch/settings.json")"
+expect_eq "…and keeps the one it had" "1" \
+  "$(jq -r '.env.CLAUDE_CODE_ENABLE_TODO_TOOLS // ""' "$FIX/ch/settings.json")"
+
+# The retired rc block is REMOVE's to clean up, not setup's. Setup must neither
+# write one nor delete one — an installer that tidied the rc would be mutating a
+# file outside the item the user consented to.
+new_fixture env-legacy-rc
+plant_cli_plugin "bionic@bionic" true
+# The block STATED, not derived from the script under test — the same discipline
+# Group 6 keeps for the alias markers. These are the bytes setup.sh used to
+# append, blank separator line included.
+cat > "$FIX/rc" <<'RC'
+export PATH="$HOME/bin:$PATH"
+
+# ─── bionic:env:start ───
+export CLAUDE_CODE_ENABLE_TODO_TOOLS=1
+# ─── bionic:env:end ───
+RC
 RC_BEFORE="$(cat "$FIX/rc")"
 OUT="$(run_setup "$YES")"
-expect_eq "pre-existing export outside the markers: no block added" "$RC_BEFORE" "$(cat "$FIX/rc")"
+expect_eq "a machine carrying the retired rc block: setup leaves it alone" \
+  "$RC_BEFORE" "$(cat "$FIX/rc")"
+expect_eq "…and still writes the settings names" "1800000" \
+  "$(jq -r '.env.BASH_MAX_TIMEOUT_MS // ""' "$FIX/ch/settings.json")"
 
 # ---------------------------------------------------------------------------
 # Group 6 — (e) the ported legacy .zshrc alias removal, BOTH variants.
@@ -740,6 +864,188 @@ RC_TEXT="$(cat "$FIX/rc")"
 expect_no_match "legacy UNMARKED variant: the bare alias is removed too" \
   '*dangerously-skip-permissions*' "$RC_TEXT"
 expect_match "legacy unmarked variant: the user's own rc lines survive" '*export PATH=*' "$RC_TEXT"
+
+# ─── THE MODE OF THE FILE SETUP REWRITES (critic F2) ─────────────────────────
+#
+# `_setup_rc_strip_block` and the unmarked-alias rewrite below it both build a
+# `<rc>.bionic.tmp` and rename it over the user's shell rc. `mv` replaces the
+# inode, so without a mode capture the rc comes back wearing the process umask
+# instead of its own — and a shell rc is where people keep plaintext tokens. The
+# same discipline `_dep_settings_write_jq` already carries for settings.json
+# (lib/env.sh's header states the reasoning): capture the mode, stage under
+# `umask 077`, chmod BEFORE the rename. Both directions, and the witness above
+# measures the staged copy rather than only the published one.
+# DEREFERENCING, deliberately (critic delta 2 N1). The property under test is the
+# mode of the file the writer PUBLISHED, and for a symlinked rc or settings.json
+# that file is the link's target. The non-`-L` spelling reads the link's own 755
+# and is satisfiable only by a writer that DESTROYS the link — the exact
+# behaviour S15 fixed away from — so it would pin the defect. `link_own_mode`
+# below is the non-dereferencing reader, used only where the LINK's own mode is
+# the thing being asserted about (the "this is the trap" fixture lines).
+file_mode() { stat -L -f '%Lp' "$1" 2>/dev/null || stat -L -c '%a' "$1" 2>/dev/null; }
+link_own_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
+
+new_fixture alias-marked-mode-600
+plant_cli_plugin "bionic@bionic" true
+printf 'export PATH="$HOME/bin:$PATH"\nexport SOME_API_TOKEN=sk-fixture-not-a-real-secret\n\n%s\n%s\n%s\n' \
+  "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
+chmod 600 "$FIX/rc"
+expect_eq "fixture: the rc really starts at 0600 (the arm is not vacuous)" \
+  "600" "$(file_mode "$FIX/rc")"
+OUT="$(run_setup "$YES" BIONIC_TEST_MV_LOG="$TMP/mv-alias-600.log")"
+expect_no_match "marked variant at 0600: the block really was stripped (not vacuous)" \
+  "*${ALIAS_START}*" "$(cat "$FIX/rc")"
+expect_eq "setup's marked-block strip leaves a 0600 rc at 0600" \
+  "600" "$(file_mode "$FIX/rc")"
+# An empty log satisfies the emptiness assertion below, so the log is proved
+# non-empty first — and proved with a POSITIVE assertion: the earlier spelling
+# was `expect_no_match … ""`, an empty glob standing in for "is not empty",
+# which works only by accident of how the matcher treats the empty pattern.
+expect_true "…and the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q 'rc\.bionic\.tmp' "$TMP/mv-alias-600.log"
+expect_eq "…and every staged copy of the 0600 rc was itself 0600, before the rename" "" \
+  "$(/usr/bin/grep 'rc\.bionic\.tmp' "$TMP/mv-alias-600.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
+
+new_fixture alias-marked-mode-644
+plant_cli_plugin "bionic@bionic" true
+printf 'export PATH="$HOME/bin:$PATH"\n\n%s\n%s\n%s\n' "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
+chmod 644 "$FIX/rc"
+OUT="$(run_setup "$YES")"
+expect_eq "setup does not narrow a 0644 rc either" "644" "$(file_mode "$FIX/rc")"
+
+# The OTHER rewriter: the unmarked legacy alias line, filtered out with grep -v.
+new_fixture alias-unmarked-mode-600
+plant_cli_plugin "bionic@bionic" true
+printf 'export PATH="$HOME/bin:$PATH"\nexport SOME_API_TOKEN=sk-fixture-not-a-real-secret\n%s\n' \
+  "$ALIAS_CONTENT" > "$FIX/rc"
+chmod 600 "$FIX/rc"
+OUT="$(run_setup "$YES" BIONIC_TEST_MV_LOG="$TMP/mv-unmarked-600.log")"
+expect_no_match "unmarked variant at 0600: the alias really was removed (not vacuous)" \
+  '*dangerously-skip-permissions*' "$(cat "$FIX/rc")"
+expect_eq "setup's unmarked-alias rewrite leaves a 0600 rc at 0600" \
+  "600" "$(file_mode "$FIX/rc")"
+expect_true "unmarked mode arm: the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q 'rc\.bionic\.tmp' "$TMP/mv-unmarked-600.log"
+expect_eq "…and its staged copy was 0600 before the rename too" "" \
+  "$(/usr/bin/grep 'rc\.bionic\.tmp' "$TMP/mv-unmarked-600.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
+
+new_fixture alias-unmarked-mode-644
+plant_cli_plugin "bionic@bionic" true
+printf 'export PATH="$HOME/bin:$PATH"\n%s\n' "$ALIAS_CONTENT" > "$FIX/rc"
+chmod 644 "$FIX/rc"
+OUT="$(run_setup "$YES")"
+expect_eq "setup does not narrow a 0644 rc on the unmarked path either" \
+  "644" "$(file_mode "$FIX/rc")"
+
+# ─── ONE STAGING ORDER, MEASURED WHERE IT MATTERS (critic delta 2 N5) ────────
+#
+# S13 restructured both setup writers onto `_setup_stage_tmp` in the order
+# "create empty under `umask 077` → chmod to the target's mode → caller writes",
+# recorded as neutral. It was not neutral: on a 0644 rc under `umask 022` the tmp
+# was already 0644 at the instant it began holding the whole file, where the
+# pre-S13 order left it at 0600 until the publish. S14 then declined the same
+# reorder for the four one-shot writers on the opposite reading of the same
+# sentence, so the two doors disagreed about their own rule. S15 settles it in
+# one direction for every writer: create at 0600, WRITE, chmod to the target's
+# mode, rename. The tmp is never wider than 0600 while it holds content, and it
+# is never wider than the file it replaces once it does.
+#
+# Both instants are asserted here, because either alone is satisfiable by the
+# wrong order: 0600 DURING the write (the awk witness) and the target's 0644 AT
+# the rename (the mv witness). `umask 022` is set explicitly — the property is
+# about what the umask would otherwise have produced, so inheriting the runner's
+# is measuring nothing in particular.
+new_fixture stage-order-644
+plant_cli_plugin "bionic@bionic" true
+printf 'export PATH="$HOME/bin:$PATH"\nexport SOME_API_TOKEN=sk-fixture-not-a-real-secret\n\n%s\n%s\n%s\n' \
+  "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
+chmod 644 "$FIX/rc"
+STAGE_LOG="$TMP/stage-order-644.log";    : > "$STAGE_LOG"
+STAGE_MV_LOG="$TMP/stage-order-644-mv.log"; : > "$STAGE_MV_LOG"
+SAVED_UMASK="$(umask)"; umask 022
+OUT="$(run_setup "$YES" \
+  BIONIC_TEST_STAGE_LOG="$STAGE_LOG" \
+  BIONIC_TEST_STAGE_TMP="$FIX/rc.bionic.tmp" \
+  BIONIC_TEST_MV_LOG="$STAGE_MV_LOG")"
+umask "$SAVED_UMASK"
+expect_no_match "stage-order arm: the block really was stripped (not vacuous)" \
+  "*${ALIAS_START}*" "$(cat "$FIX/rc")"
+expect_true "stage-order arm: the during-write witness really fired (not vacuous)" \
+  test -s "$STAGE_LOG"
+expect_eq "the staged rc is 0600 while it HOLDS the content, whatever the umask says" "" \
+  "$(/usr/bin/grep -v '^600 ' "$STAGE_LOG" 2>/dev/null || true)"
+expect_true "stage-order arm: the mv witness really fired too (not vacuous)" \
+  /usr/bin/grep -q 'rc\.bionic\.tmp' "$STAGE_MV_LOG"
+expect_eq "…and it wears the target's 0644 at the RENAME, not one instant before it" "" \
+  "$(/usr/bin/grep 'rc\.bionic\.tmp' "$STAGE_MV_LOG" 2>/dev/null | /usr/bin/grep -v '^644 ' || true)"
+expect_eq "…and the published rc is the 0644 it started as" "644" "$(file_mode "$FIX/rc")"
+
+# ─── THE RC THAT IS A SYMLINK (critic delta D1) ──────────────────────────────
+#
+# `stat -f '%Lp' <symlink>` reports the LINK's own mode — 755 — and never consults
+# the file it points at. A `~/.zshrc` symlinked into a dotfiles repo is the
+# commonest way people manage an rc, so a mode capture that does not dereference
+# publishes the user's rc, tokens included, as `rwxr-xr-x`: WIDER than the file it
+# replaced, which is the one outcome the capture exists to prevent. Both setup
+# writers get an arm; `stat -L` is what makes them pass.
+#
+# AND THE LINK SURVIVES (critic delta 2 N1, decided at A6.S15.1). The rename used
+# to replace the link with a regular file, leaving the dotfiles repo still holding
+# the block setup had just reported removed. Both writers now resolve to the
+# link's final target and publish onto it; each arm asserts the link still exists,
+# still points where it did, and that the TARGET is what changed.
+symlink_rc() {  # turns $FIX/rc into a link to $FIX/dotfiles/rc
+  mkdir -p "$FIX/dotfiles"
+  command mv "$FIX/rc" "$FIX/dotfiles/rc"
+  ln -s "$FIX/dotfiles/rc" "$FIX/rc"
+}
+
+new_fixture alias-marked-symlink-600
+plant_cli_plugin "bionic@bionic" true
+printf 'export PATH="$HOME/bin:$PATH"\nexport SOME_API_TOKEN=sk-fixture-not-a-real-secret\n\n%s\n%s\n%s\n' \
+  "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
+symlink_rc
+chmod 600 "$FIX/dotfiles/rc"
+expect_eq "fixture: the symlinked rc's TARGET really is 0600" \
+  "600" "$(file_mode "$FIX/dotfiles/rc")"
+expect_no_match "fixture: …and the LINK's own mode is not it — this is the trap" \
+  "600" "$(link_own_mode "$FIX/rc")"
+OUT="$(run_setup "$YES" BIONIC_TEST_MV_LOG="$TMP/mv-alias-symlink-600.log")"
+expect_no_match "symlink arm: the block really was stripped (not vacuous)" \
+  "*${ALIAS_START}*" "$(cat "$FIX/rc")"
+expect_eq "a symlinked rc is published at its TARGET's 0600, never the link's 755" \
+  "600" "$(file_mode "$FIX/rc")"
+expect_true "symlink arm: the rc is STILL a symlink after the strip" test -L "$FIX/rc"
+expect_eq "…and still points where it did" "$FIX/dotfiles/rc" "$(readlink "$FIX/rc")"
+expect_no_match "…and it is the TARGET that was rewritten, not a detached copy" \
+  "*${ALIAS_START}*" "$(cat "$FIX/dotfiles/rc")"
+expect_true "symlink arm: the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q 'rc\.bionic\.tmp' "$TMP/mv-alias-symlink-600.log"
+expect_eq "…and no staged copy of it was ever wider than 0600 either" "" \
+  "$(/usr/bin/grep 'rc\.bionic\.tmp' "$TMP/mv-alias-symlink-600.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
+
+# The other writer: the unmarked legacy alias line, on the same shape.
+new_fixture alias-unmarked-symlink-600
+plant_cli_plugin "bionic@bionic" true
+printf 'export PATH="$HOME/bin:$PATH"\nexport SOME_API_TOKEN=sk-fixture-not-a-real-secret\n%s\n' \
+  "$ALIAS_CONTENT" > "$FIX/rc"
+symlink_rc
+chmod 600 "$FIX/dotfiles/rc"
+expect_eq "fixture: the unmarked symlink arm's target really is 0600" \
+  "600" "$(file_mode "$FIX/dotfiles/rc")"
+OUT="$(run_setup "$YES" BIONIC_TEST_MV_LOG="$TMP/mv-unmarked-symlink-600.log")"
+expect_no_match "unmarked symlink arm: the alias really was removed (not vacuous)" \
+  '*dangerously-skip-permissions*' "$(cat "$FIX/rc")"
+expect_eq "the unmarked-alias rewrite publishes a symlinked rc at its target's 0600 too" \
+  "600" "$(file_mode "$FIX/rc")"
+expect_true "unmarked symlink arm: the rc is STILL a symlink after the rewrite" test -L "$FIX/rc"
+expect_eq "…and still points where it did" "$FIX/dotfiles/rc" "$(readlink "$FIX/rc")"
+expect_no_match "…and it is the TARGET that lost the alias, not a detached copy" \
+  '*dangerously-skip-permissions*' "$(cat "$FIX/dotfiles/rc")"
+expect_true "unmarked symlink arm: the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q 'rc\.bionic\.tmp' "$TMP/mv-unmarked-symlink-600.log"
+expect_eq "…and its staged copy was never wider than 0600 either" "" \
+  "$(/usr/bin/grep 'rc\.bionic\.tmp' "$TMP/mv-unmarked-symlink-600.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
 
 new_fixture alias-declined
 plant_cli_plugin "bionic@bionic" true
@@ -914,6 +1220,12 @@ OUT="$(run_setup "$YES")"
 expect_match "the mode question is asked" "$MODE_Q" "$OUT"
 expect_match "the question says what it buys, in one line" '*Recommended*' "$OUT"
 expect_match "the question is asked with a default-No prompt" '*\[y/N\]*' "$OUT"
+# item 1: Remote Control sessions offer Manual / Accept edits / Plan only and
+# override whatever defaultMode bionic just wrote — the question that sets it
+# has to say so, on the same screen, or the setting reads as a stronger promise
+# than it is.
+expect_match "the question carries the Remote Control note" \
+  '*Remote Control sessions override this (Manual / Accept edits / Plan only).*' "$OUT"
 expect_eq "the mode is asked exactly once in a run" "1" \
   "$(awk '/default permission mode to auto/ { n++ } END { print n + 0 }' <<< "$OUT")"
 expect_eq "consented: the default mode is written as auto" "auto" \
@@ -1050,24 +1362,26 @@ echo "=== Group 12: mutation-and-restore ×3 ==="
 
 MUT="$TMP/setup-mutated.sh"
 
-# Mutation 1 — delete the rc-export consent gate. A declined run must now
-# mutate the rc; if it does not, the gate was never what stopped it.
-grep -v '# consent gate: rc export' "$SETUP_SH" > "$MUT"
+# Mutation 1 — delete the environment consent gate. A declined run must now
+# write settings.json; if it does not, the gate was never what stopped it.
+# (Retargeted at W7 S4: the step this gate belongs to writes settings.json now,
+# not a shell rc.)
+grep -v '# consent gate: settings env' "$SETUP_SH" > "$MUT"
 expect_true "mutation 1: the consent-gate line exists to delete" \
   bash -c "[ \"\$(wc -l < '$MUT')\" -lt \"\$(wc -l < '$SETUP_SH')\" ]"
 new_fixture mut1
 plant_cli_plugin "bionic@bionic" true
-RC_BEFORE="$(cat "$FIX/rc")"
+SETTINGS_BEFORE="$(cat "$FIX/ch/settings.json")"
 SETUP_UNDER_TEST="$MUT" run_setup "$NO" >/dev/null 2>&1
-expect_no_match "MUTATED (consent gate removed): a declined run now writes the rc" \
-  "$RC_BEFORE" "$(cat "$FIX/rc")"
+expect_no_match "MUTATED (consent gate removed): a declined run now writes settings.json" \
+  "$SETTINGS_BEFORE" "$(cat "$FIX/ch/settings.json")"
 
 new_fixture mut1-control
 plant_cli_plugin "bionic@bionic" true
-RC_BEFORE="$(cat "$FIX/rc")"
+SETTINGS_BEFORE="$(cat "$FIX/ch/settings.json")"
 run_setup "$NO" >/dev/null 2>&1
-expect_eq "RESTORED (production setup.sh): a declined run leaves the rc alone" \
-  "$RC_BEFORE" "$(cat "$FIX/rc")"
+expect_eq "RESTORED (production setup.sh): a declined run leaves settings.json alone" \
+  "$SETTINGS_BEFORE" "$(cat "$FIX/ch/settings.json")"
 
 # Mutation 2 — corrupt the legacy marker literal. The block must survive.
 sed 's/bionic:start/bionic:STARTX/' "$SETUP_SH" > "$MUT"
@@ -1085,26 +1399,31 @@ run_setup "$YES" >/dev/null 2>&1
 expect_no_match "RESTORED (production setup.sh): the legacy block is removed" \
   "*${ALIAS_START}*" "$(cat "$FIX/rc")"
 
-# Mutation 3 — delete the rc-export idempotence guard. A second run must now
-# append a second block; if it does not, the guard was not what prevented it.
-grep -v '# idempotence guard: rc export' "$SETUP_SH" > "$MUT"
+# Mutation 3 — delete the environment idempotence guard. A second run must now
+# ASK AGAIN; if it does not, the guard was not what prevented it.
+#
+# THE TELL IS THE QUESTION, NOT THE BYTES, and that is forced by what the step
+# writes. Re-writing the same two names produces a byte-identical settings.json,
+# so a bytes-only arm would pass with the guard deleted and prove nothing. What
+# the guard actually buys is that a user who is already configured is not asked
+# to consent to a write with nothing behind it — so that is what is measured.
+grep -v '# idempotence guard: settings env' "$SETUP_SH" > "$MUT"
 expect_true "mutation 3: the idempotence-guard line exists to delete" \
   bash -c "[ \"\$(wc -l < '$MUT')\" -lt \"\$(wc -l < '$SETUP_SH')\" ]"
 new_fixture mut3
 plant_cli_plugin "bionic@bionic" true
 SETUP_UNDER_TEST="$MUT" run_setup "$YES" >/dev/null 2>&1
-RC_ONE="$(cat "$FIX/rc")"
-SETUP_UNDER_TEST="$MUT" run_setup "$YES" >/dev/null 2>&1
-expect_no_match "MUTATED (idempotence guard removed): the second run appends again" \
-  "$RC_ONE" "$(cat "$FIX/rc")"
+MUT3_SECOND="$(SETUP_UNDER_TEST="$MUT" run_setup "$YES" 2>&1)"
+expect_match "MUTATED (idempotence guard removed): the second run asks again" \
+  '*Write bionic*environment settings*' "$MUT3_SECOND"
 
 new_fixture mut3-control
 plant_cli_plugin "bionic@bionic" true
 run_setup "$YES" >/dev/null 2>&1
-RC_ONE="$(cat "$FIX/rc")"
-run_setup "$YES" >/dev/null 2>&1
-expect_eq "RESTORED (production setup.sh): the second run appends nothing" \
-  "$RC_ONE" "$(cat "$FIX/rc")"
+CTRL3_SECOND="$(run_setup "$YES" 2>&1)"
+expect_no_match "RESTORED (production setup.sh): the second run asks nothing" \
+  '*Write bionic*environment settings*' "$CTRL3_SECOND"
+expect_match "…it says there is nothing to do instead" '*nothing to do*' "$CTRL3_SECOND"
 
 # Mutation 4 — delete the legacy-skill-copy consent gate. A declined run must
 # now remove the directory; if it does not, the gate was never what stopped it.
@@ -1430,6 +1749,12 @@ LIST_OUT="$(run_setup "")"
 SETUP_FLAGS=""
 
 expect_match "--list names the permission-mode item" '*permission-mode*' "$LIST_OUT"
+# THE NAME IS THE USER'S WORD FOR THE THING, and the thing stopped being a shell
+# file at W7: the item writes settings.json now, so `shell-env` named a mechanism
+# that is gone. A machine that kept the old name would take `--only shell-env`
+# and do something the name does not describe.
+expect_match "--list names the environment item" '*environment*' "$LIST_OUT"
+expect_no_match "…and no longer names it after a shell file" '*shell-env*' "$LIST_OUT"
 expect_match "--list names a tool row read from the dependency table" '*tool:git*' "$LIST_OUT"
 expect_match "--list names a core dependency row" '*dependency:superpowers*' "$LIST_OUT"
 
@@ -1510,7 +1835,7 @@ expect_true "…and that file is settings.json" \
 expect_match "…and the one question asked was that item's own" \
   '*default permission mode*' "$ONE_OUT"
 expect_no_match "…and no other step printed a header" '*3. Tools*' "$ONE_OUT"
-expect_no_match "…nor the shell-environment step" '*5. Shell environment*' "$ONE_OUT"
+expect_no_match "…nor the environment step" '*5. Environment*' "$ONE_OUT"
 expect_no_match "…nor the permission-profile half of its own step" \
   '*bionic ships a permission profile*' "$ONE_OUT"
 expect_no_match "…and the summary does not claim the whole machine is set up" \
@@ -1522,33 +1847,134 @@ expect_no_match "…and the summary does not claim the whole machine is set up" 
 # positional hazard; one question and one answer is the fix.
 new_fixture only-one-question
 plant_cli_plugin "bionic@bionic" true
-SETUP_FLAGS="--only shell-env"
+SETUP_FLAGS="--only environment"
 DECLINE_OUT="$(run_setup "")"
 SETUP_FLAGS=""
 printf '%s\n' "$DECLINE_OUT" > "$TMP/only-decline.txt"
 QCOUNT="$(/usr/bin/grep -c '\[y/N\]' "$TMP/only-decline.txt" | tr -d ' ')"
 expect_eq "--only asks exactly one question" "1" "$QCOUNT"
-expect_match "…the one it was told to ask" '*Add the export to*' "$DECLINE_OUT"
-expect_match "…a run with nothing to answer with still declines" '*declined*' "$DECLINE_OUT"
-expect_eq "…and the rc file is untouched by the decline" "$(printf 'export PATH="$HOME/bin:$PATH"\n')" \
+expect_match "…the one it was told to ask" '*environment settings*' "$DECLINE_OUT"
+# EOF on the very first prompt is "not asked", not a recorded decline (AC-12):
+# nobody was there to answer, so the transcript must not say they said no.
+expect_match "…a run with nothing to answer with says 'not asked'" '*not asked —*' "$DECLINE_OUT"
+expect_no_match "…and never says 'declined' when nobody was asked" '*declined*' "$DECLINE_OUT"
+expect_eq "…and settings.json is untouched when nobody answered" "$(printf '%s' '{}')" \
+  "$(cat "$FIX/ch/settings.json")"
+expect_eq "…and the rc file is untouched either way" "$(printf 'export PATH="$HOME/bin:$PATH"\n')" \
   "$(cat "$FIX/rc")"
 
 # ---- the declined action line carries the route, with the item's own name ----
-expect_match "the declined item's action line names the item" '*--only shell-env*' "$DECLINE_OUT"
+expect_match "the declined item's action line names the item" '*--only environment*' "$DECLINE_OUT"
 expect_match "…and the invocation that delivers one answer to it" \
-  '*| bash /*scripts/setup.sh --only shell-env*' "$DECLINE_OUT"
+  '*| bash /*scripts/setup.sh --only environment*' "$DECLINE_OUT"
 # The answer half, matched as a fixed string against a FILE: the route is only a
 # route if it actually carries a yes, and the newline in it is a literal
 # backslash-n that a glob pattern cannot state without escaping itself twice.
 expect_true "…with the answer itself supplied on the input" \
   /usr/bin/grep -qF "printf 'y\\n' |" "$TMP/only-decline.txt"
 
+# ---- AC-12 at the other named consent gates in this script ----
+#
+# environment above is the proof of the mechanism; this checks it actually
+# reached the rest of this script's own `consent()` call sites — a dependency
+# repair, both legacy items, and the default-mode question — each isolated with
+# `--only` so a truly-EOF first pass answers exactly one of them.
+
+new_fixture eof-dependency-enable
+plant_cli_plugin "bionic@bionic" true
+plant_cli_plugin "superpowers@bionic" false
+plant_installed "superpowers@bionic" "6.3.0"
+SETUP_FLAGS="--only dependency:superpowers"
+EOF_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_match "dependency-enable, EOF: not asked, not declined" \
+  '*not asked — superpowers stays disabled*' "$EOF_OUT"
+expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
+
+new_fixture eof-legacy-alias
+plant_cli_plugin "bionic@bionic" true
+printf 'export PATH="$HOME/bin:$PATH"\n\n%s\n%s\n%s\n' "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
+SETUP_FLAGS="--only legacy-alias"
+EOF_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_match "legacy-alias, EOF: not asked, not declined" '*not asked — the block stays*' "$EOF_OUT"
+expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
+
+new_fixture eof-legacy-hooks
+plant_cli_plugin "bionic@bionic" true
+plant_legacy_channel_settings
+SETUP_FLAGS="--only legacy-hooks"
+EOF_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_match "legacy-hooks, EOF: not asked, not declined" '*not asked — *is unchanged*' "$EOF_OUT"
+expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
+
+new_fixture eof-legacy-skill-copy
+plant_cli_plugin "bionic@bionic" true
+plant_legacy_skill_copy
+SETUP_FLAGS="--only legacy-skill-copy"
+EOF_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_match "legacy-skill-copy, EOF: not asked, not declined" '*not asked — *is unchanged*' "$EOF_OUT"
+expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
+
+new_fixture eof-permission-mode
+plant_cli_plugin "bionic@bionic" true
+SETUP_FLAGS="--only permission-mode"
+EOF_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_match "permission-mode, EOF: not asked, not declined" \
+  '*not asked — the default permission mode is unchanged*' "$EOF_OUT"
+expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
+
+new_fixture eof-duplicate
+plant_cli_plugin "bionic@bionic" true
+plant_installed "superpowers@bionic" "6.3.0"
+plant_installed "superpowers@claude-plugins-official" "6.2.0"
+SETUP_FLAGS="--only duplicate:superpowers"
+EOF_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_match "duplicate-consolidation, EOF: not asked, not declined" \
+  '*not asked — left as they are*' "$EOF_OUT"
+expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
+
+new_fixture eof-permission-profile
+plant_cli_plugin "bionic@bionic" true
+SETUP_FLAGS="--only permission-profile"
+EOF_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_match "permission-profile, EOF: not asked, not declined" \
+  '*not asked — *is unchanged*' "$EOF_OUT"
+expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
+
+# ---- AC-12 closes the whole class, not just the named sites (A4.S6.n) ----
+#
+# Every consent() call site in this script, exercised in ONE pass on a maximally
+# unsettled machine (bionic absent so step 1 asks too; a real duplicate; a
+# disabled core dependency; every legacy item present; the permission profile
+# unapplied; the mode unset) with a truly-EOF first pass. The word "declined"
+# must not appear anywhere in that transcript — not just at the sites the plan
+# named — because AC-12 is a rule about the word, not a list of line numbers.
+new_fixture eof-whole-pass
+plant_installed "superpowers@bionic" "6.3.0"
+plant_installed "superpowers@claude-plugins-official" "6.2.0"
+plant_cli_plugin "agent-skills@bionic" false
+plant_installed "agent-skills@bionic" "0.6.7"
+printf 'export PATH="$HOME/bin:$PATH"\n\n%s\n%s\n%s\n' "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
+plant_legacy_channel_settings
+plant_legacy_skill_copy
+WHOLE_EOF_OUT="$(run_setup "")"
+expect_match "whole pass, EOF: 'not asked' actually fired (the arm is not vacuous)" \
+  '*not asked —*' "$WHOLE_EOF_OUT"
+expect_no_match "whole pass, EOF: the word declined never appears, anywhere (AC-12)" \
+  '*declined*' "$WHOLE_EOF_OUT"
+
 # A whole declined pass carries the same route for every item it asked about, so
 # a user reading the summary can act on any line in it.
 new_fixture only-route-everywhere
 plant_cli_plugin "bionic@bionic" true
 ALL_NO_OUT="$(run_setup "$NO")"
-for _item in shell-env permission-profile permission-mode; do
+for _item in environment permission-profile permission-mode; do
   expect_match "the whole-pass summary names --only ${_item}" "*--only ${_item}*" "$ALL_NO_OUT"
 done
 
@@ -1560,16 +1986,252 @@ expect_eq "setup.sh composes the route sentence in one place" "1" \
 expect_eq "…and no other line in setup.sh spells the piped invocation" "1" \
   "$(/usr/bin/grep -c "printf 'y" "$SETUP_SH" | tr -d ' ')"
 
+# ---------------------------------------------------------------------------
+# Group 17 — one answer over a printed plan: --all (AC-8)
+# ---------------------------------------------------------------------------
+#
+# THE UNIT OF CONSENT IS A PLAN, NOT A FLAG THAT ANSWERS. Per-item consent is
+# the right default and a poor experience for the person who has already decided
+# to set the whole machine up: nine questions is nine chances to lose the
+# thread, and the shape people reach for instead — an assume-yes flag — is the
+# hole in "consent per event, never silent, never unattended", because a row
+# added to the roster later would run on a machine whose owner never saw it.
+#
+# So the whole run becomes ONE event. `--all` prints every item it would ask
+# about, one line each naming what that item changes, and asks a single question
+# over that printed page. Nothing runs that was not on it, and a new item shows
+# up there before it shows up on anybody's machine.
+
+echo ""
+echo "=== Group 17: one answer over a printed plan — --all (AC-8) ==="
+
+# ONE ANSWER, AND A SECOND LINE THE RUN MUST NEVER REACH FOR. A bare
+# `$(printf 'y\n')` loses its trailing newline to command substitution, and a
+# `read` on an unterminated line reports EOF — which this script treats as "not
+# asked", not as a yes. The second line keeps the first one terminated, and it
+# is a token no question here would accept: if a second question were ever
+# asked, it would be answered with it and declined, not silently consented to.
+ONE_YES="$(printf 'y\nunanswerable\n')"
+ONE_NO="$(printf 'n\nunanswerable\n')"
+
+# Every item on the roster with something to do: a disabled core dependency, no
+# environment settings, the retired alias block, legacy-channel hook entries, a
+# pre-plugin skill copy, no permission profile and no default mode.
+plant_everything_setup() {
+  plant_cli_plugin "bionic@bionic" true
+  plant_cli_plugin "superpowers@bionic" false
+  plant_cli_plugin "agent-skills@bionic" true
+  plant_installed "superpowers@bionic" "6.3.0"
+  plant_installed "agent-skills@bionic" "0.6.7"
+  plant_legacy_channel_settings
+  printf 'export PATH="$HOME/bin:$PATH"\n\n%s\n%s\n%s\n' "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
+  mkdir -p "$FIX/ch/skills/canonical-sdlc"
+  printf -- '---\nname: canonical-sdlc\n---\nbody\n' > "$FIX/ch/skills/canonical-sdlc/SKILL.md"
+}
+
+new_fixture all-everything
+plant_everything_setup
+SETUP_FLAGS="--all"
+ALL_OUT="$(run_setup "$ONE_YES")"
+SETUP_FLAGS=""
+printf '%s\n' "$ALL_OUT" > "$TMP/setup-all-yes.txt"
+
+expect_match "--all: the run states what it would do before it asks anything" \
+  '*bionic would:*' "$ALL_OUT"
+expect_match "--all: the plan names the dependency that is switched off" \
+  '*• enable the plugin superpowers*' "$ALL_OUT"
+expect_match "--all: …the environment settings" \
+  "*• write bionic's environment settings to*" "$ALL_OUT"
+expect_match "--all: …the retired shell alias block" \
+  '*• remove the retired shell alias block from*' "$ALL_OUT"
+expect_match "--all: …the retired hook entries" \
+  '*• remove the retired hook entries from*' "$ALL_OUT"
+expect_match "--all: …the pre-plugin skill copy" \
+  '*• remove the pre-plugin skill copy at*' "$ALL_OUT"
+expect_match "--all: …the permission profile" \
+  "*• apply bionic's permission profile to*" "$ALL_OUT"
+expect_match "--all: …and the default permission mode" \
+  "*• set Claude Code's default permission mode to auto*" "$ALL_OUT"
+
+expect_eq "--all asks exactly one question for the whole run" "1" \
+  "$(/usr/bin/grep -c '\[y/N\]' "$TMP/setup-all-yes.txt" | tr -d ' ')"
+expect_match "--all: and the one question is asked over the printed plan" \
+  '*Do all of the above? \[y/N\]*' "$ALL_OUT"
+
+expect_match "--all: a yes still prints each item's own result line" '*set.*' "$ALL_OUT"
+expect_match "--all: …and the usual end summary" '*Summary*' "$ALL_OUT"
+expect_eq "--all: the environment settings were written" "1800000" \
+  "$(jq -r '.env.BASH_MAX_TIMEOUT_MS // ""' "$FIX/ch/settings.json")"
+expect_eq "--all: the default permission mode was set" "auto" \
+  "$(jq -r '.permissions.defaultMode // ""' "$FIX/ch/settings.json")"
+expect_no_match "--all: the retired alias block is gone" "*${ALIAS_START}*" "$(cat "$FIX/rc")"
+expect_true "--all: the pre-plugin skill copy is gone" \
+  bash -c '[ ! -e "$1" ]' _ "$FIX/ch/skills/canonical-sdlc"
+expect_match "--all: the disabled dependency was enabled" \
+  '*plugin enable superpowers@bionic*' "$(cat "$CALLS")"
+expect_eq "--all: the legacy-channel hook entries are gone" "env:legacy-channel-hooks count=0" \
+  "$(lib_query "$LIB_DIR/detect.sh" detect_legacy_channel_hooks)"
+
+# ---- an absent plugin is on the plan too, in the words the install uses ----
+new_fixture all-plugin-absent
+SETUP_FLAGS="--all"
+ABSENT_OUT="$(run_setup "$ONE_NO")"
+SETUP_FLAGS=""
+expect_match "--all: an uninstalled plugin is named on the plan" \
+  '*• install the bionic plugin*' "$ABSENT_OUT"
+
+# ---- a no runs nothing and says so ----
+new_fixture all-declined
+plant_everything_setup
+FP_BEFORE="$(fingerprint "$FIX")"
+SETUP_FLAGS="--all"
+NO_OUT="$(run_setup "$ONE_NO")"
+SETUP_FLAGS=""
+expect_match "--all declined: says so in one line" '*nothing changed.*' "$NO_OUT"
+expect_eq "--all declined: the whole fixture tree is byte-identical" \
+  "$FP_BEFORE" "$(fingerprint "$FIX")"
+expect_eq "--all declined: not one mutating command ran" "" \
+  "$(grep -E 'plugin install|plugin enable|brew install|npm install|uv tool install|mcp add' "$CALLS" 2>/dev/null || true)"
+
+# An unanswered first pass is a no as well — the rule that keeps `--all` from
+# being an assume-yes flag wearing a plan.
+new_fixture all-eof
+plant_everything_setup
+FP_BEFORE="$(fingerprint "$FIX")"
+SETUP_FLAGS="--all"
+EOF_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_eq "--all with nobody there to ask: the fixture tree is byte-identical" \
+  "$FP_BEFORE" "$(fingerprint "$FIX")"
+expect_match "--all with nobody there to ask: says nothing changed" \
+  '*nothing changed.*' "$EOF_OUT"
+
+# ---- the plan is the roster minus what is already done ----
+new_fixture all-mostly-done
+plant_cli_plugin "bionic@bionic" true
+plant_cli_plugin "superpowers@bionic" true
+plant_cli_plugin "agent-skills@bionic" true
+plant_installed "superpowers@bionic" "6.3.0"
+plant_installed "agent-skills@bionic" "0.6.7"
+SETUP_FLAGS="--all"
+DONE_OUT="$(run_setup "$ONE_NO")"
+SETUP_FLAGS=""
+expect_no_match "--all: an already-installed plugin is not on the plan" \
+  '*• install the bionic plugin*' "$DONE_OUT"
+expect_no_match "--all: an enabled dependency is not on the plan" \
+  '*• enable the plugin superpowers*' "$DONE_OUT"
+expect_no_match "--all: an rc with no bionic block is not on the plan" \
+  '*• remove the retired shell alias block*' "$DONE_OUT"
+expect_no_match "--all: a settings file with no legacy entries is not on the plan" \
+  '*• remove the retired hook entries*' "$DONE_OUT"
+expect_match "--all: an item that IS outstanding still is" \
+  "*• write bionic's environment settings to*" "$DONE_OUT"
+
+# ---- THE PLAN AND THE QUESTIONS ARE ONE ROSTER, READ TWICE ----
+#
+# The defect this walls off is drift: a plan built from its own idea of what is
+# outstanding would come to disagree with the run it is a plan FOR, and the user
+# would consent to one list and get another. One plan line per question a whole
+# per-item pass asks is the check.
+new_fixture all-agreement-plan
+plant_everything_setup
+SETUP_FLAGS="--all"
+AGREE_PLAN="$(run_setup "$ONE_NO")"
+SETUP_FLAGS=""
+printf '%s\n' "$AGREE_PLAN" > "$TMP/setup-agree-plan.txt"
+
+new_fixture all-agreement-pass
+plant_everything_setup
+AGREE_PASS="$(run_setup "$NO")"
+printf '%s\n' "$AGREE_PASS" > "$TMP/setup-agree-pass.txt"
+
+AGREE_PLAN_LINES="$(/usr/bin/grep -c '^  • ' "$TMP/setup-agree-plan.txt" | tr -d ' ')"
+AGREE_QUESTIONS="$(/usr/bin/grep -c '\[y/N\]' "$TMP/setup-agree-pass.txt" | tr -d ' ')"
+expect_true "agreement arm is not vacuous: the per-item pass really did ask something" \
+  bash -c '[ "$1" -gt 1 ]' _ "$AGREE_QUESTIONS"
+expect_eq "the plan names exactly the items a per-item pass asks about" \
+  "$AGREE_PLAN_LINES" "$AGREE_QUESTIONS"
+
+# ---- --all and --only are two different narrowings and cannot be combined ----
+new_fixture all-and-only
+plant_everything_setup
+SETUP_FLAGS="--all --only environment"
+COMBO_OUT="$(run_setup "$YES")"; COMBO_RC=$?
+SETUP_FLAGS=""
+expect_eq "--all with --only exits 2" "2" "$COMBO_RC"
+expect_match "…and says why, in words" '*--all and --only cannot be combined*' "$COMBO_OUT"
+expect_no_match "…and asks nothing before refusing" '*\[y/N\]*' "$COMBO_OUT"
+expect_eq "…and changes nothing" "" \
+  "$(jq -r '.env // "" | tostring | select(. != "\"\"")' "$FIX/ch/settings.json" 2>/dev/null | grep -F 'BASH_MAX' || true)"
+
+# ---- --list is unchanged by the new flag ----
+SETUP_FLAGS="--list"
+ALL_LIST_OUT="$(run_setup "")"
+SETUP_FLAGS=""
+expect_match "--list still prints the roster --all reads" '*permission-mode*' "$ALL_LIST_OUT"
+expect_no_match "--list prints names, never plan lines" '*•*' "$ALL_LIST_OUT"
+
 # NO ASSUME-YES CAME IN WITH THE FLAG. The wave's ratified rule is consent per
 # item from the standard input, and the two shapes that would break it are a
 # flag and an environment knob. Neither exists, and this arm is what keeps it
 # that way when the next flag is added.
 # Anchored on an argument arm, not on the characters: `--yes)` also closes the
 # install argv this script prints.
+#
+# `--all` USED TO BE ON THIS LIST AND IS NOT ANY MORE (W7, AC-8). It was there
+# while every shape proposed for it was "answer the questions for me", which is
+# the thing this arm keeps out. What shipped is not that: `--all` PRINTS the
+# whole plan and asks one question over it, so the run still turns on an
+# explicit `y` read from this script's own input, and a row added to the roster
+# later still reaches the user's eyes before it reaches their machine. Group 17
+# is the wall on that shape.
 expect_eq "setup.sh takes no assume-yes argument" "" \
-  "$(/usr/bin/grep -nE '^[[:space:]]*--(yes|all)\)' "$SETUP_SH" || true)"
+  "$(/usr/bin/grep -nE '^[[:space:]]*--yes\)' "$SETUP_SH" || true)"
 expect_eq "setup.sh reads no assume-yes environment knob" "" \
   "$(/usr/bin/grep -niE 'BIONIC_(ASSUME_YES|YES|NONINTERACTIVE)' "$SETUP_SH" || true)"
+
+# ---- NO ENVIRONMENT VALUE GRANTS CONSENT (W7 S11, six-axis review axis 4) ----
+#
+# The two greps above are a wall against a knob NAMED assume-yes. They cannot see
+# a knob spelled something else, and one was spelled something else: `_dep_consent`
+# short-circuits on `SETUP_ALL` OR `RM_ALL`, and this script used to zero only its
+# own name. An exported `RM_ALL=1` therefore walked in from the environment and
+# answered every question here — proven by the reviewer, who wrote both settings
+# keys onto a scratch machine with the answer channel closed.
+#
+# So the wall becomes behavioural rather than lexical: both names arrive SET, there
+# is nothing on the standard input to answer with, and the machine must be
+# untouched afterwards. A grep can be routed around by renaming a variable; this
+# arm cannot.
+new_fixture env-consent-knob
+plant_cli_plugin "bionic@bionic" true
+FP_KNOB_BEFORE="$(fingerprint "$FIX")"
+SETUP_FLAGS="--only environment"
+KNOB_OUT="$(run_setup "" SETUP_ALL=1 RM_ALL=1)"
+SETUP_FLAGS=""
+expect_match "an exported consent flag does not answer the question" \
+  '*not asked —*' "$KNOB_OUT"
+expect_no_match "…and the environment item never reports itself written" \
+  '*Takes effect in a new session.*' "$KNOB_OUT"
+expect_eq "…and settings.json still holds nothing of bionic's" "$(printf '%s' '{}')" \
+  "$(cat "$FIX/ch/settings.json")"
+expect_eq "…and the whole fixture tree is byte-identical" \
+  "$FP_KNOB_BEFORE" "$(fingerprint "$FIX")"
+
+# The same over the whole page: `--all` under both exported names still ends at the
+# one question, unanswered, and therefore at "nothing changed."
+new_fixture env-consent-knob-all
+plant_everything_setup
+FP_KNOB_ALL_BEFORE="$(fingerprint "$FIX")"
+SETUP_FLAGS="--all"
+KNOB_ALL_OUT="$(run_setup "" SETUP_ALL=1 RM_ALL=1)"
+SETUP_FLAGS=""
+expect_match "--all under exported consent flags changes nothing and says so" \
+  '*nothing changed.*' "$KNOB_ALL_OUT"
+expect_eq "…and the whole fixture tree is byte-identical" \
+  "$FP_KNOB_ALL_BEFORE" "$(fingerprint "$FIX")"
+expect_eq "…and not one mutating command ran" "" \
+  "$(grep -E 'plugin install|plugin enable|brew install|npm install|uv tool install|mcp add' "$CALLS" 2>/dev/null || true)"
 
 # ---------------------------------------------------------------------------
 # Results

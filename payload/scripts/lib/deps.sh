@@ -483,12 +483,51 @@ _dep_indent() { printf '%s' "${BIONIC_DEP_INDENT:-  }"; }
 
 # ─── Consent ─────────────────────────────────────────────────────────────────
 
-_dep_consent() {  # <prompt> — non-zero unless the answer is an explicit yes
+_dep_consent() {  # <prompt> -> 0 yes, 1 an explicit no, 2 EOF (nobody there to ask)
   local prompt="$1" answer=""
+  # THE ANSWER IS ALREADY GIVEN. `setup --all` and `remove --all` print every
+  # item their run would ask about — this one among them — and take a single
+  # explicit `y` over that printed page before either sets its flag. Asking
+  # again here would be asking a person to answer the same question twice.
+  #
+  # AND THE VALUE HERE IS ALWAYS THE SCRIPT'S OWN (epic-17 W7 S11, six-axis review
+  # axis 4). An earlier version of this comment claimed neither name was settable
+  # from outside those two scripts. That was FALSE, and it was the whole defect:
+  # this function reads BOTH names, setup.sh zeroed only `SETUP_ALL` and remove.sh
+  # only `RM_ALL`, so an exported `RM_ALL=1` answered every question in setup and
+  # an exported `SETUP_ALL=1` answered every deps.sh-routed row in remove — with
+  # the standard input closed and no page ever printed. What makes the claim true
+  # now is not this comment: each script zeroes BOTH names before anything can ask
+  # anything, so whatever the environment carries is overwritten by the script that
+  # owns the question, and the only writer of a 1 is that script's own `--all` `y`.
+  # The behavioural wall is one arm per suite (setup.test.sh / remove.test.sh, both
+  # names exported, nothing on stdin, the machine byte-identical afterwards) — a
+  # name grep cannot see this class, so the pin that could not see it is not the
+  # pin that guards it.
+  if [ "${SETUP_ALL:-0}" = "1" ] || [ "${RM_ALL:-0}" = "1" ]; then return 0; fi
   printf '%s [y/N] ' "$prompt"
-  IFS= read -r answer || { echo ""; return 1; }
+  IFS= read -r answer || { echo ""; return 2; }
   echo ""
   case "$answer" in y|Y|yes|YES|Yes) return 0 ;; *) return 1 ;; esac
+}
+
+# THE OTHER HALF OF A "NO" (AC-12). `_dep_consent` returning non-zero used to
+# mean one thing — an explicit no — so every caller printed the same
+# "declined —" sentence whether a person typed n or a non-interactive first
+# pass hit EOF on the very first question. "declined" is a recorded choice;
+# EOF means nobody was there to make one. This is the one sentence for that
+# second case, so the transcript says so instead of putting a "no" in an
+# absent user's mouth.
+_dep_not_asked() {  # <name> — <name> stays absent, not asked
+  printf '%snot asked — %s stays absent.\n' "$(_dep_indent)" "$1"
+}
+
+# The removal-side counterpart: a row left in place because nobody was there
+# to answer, not because they said no. Same rule, opposite tail — every
+# `_dep_consent` caller in this file (installers AND removers) gets to tell
+# the two apart, not just `install_dep`.
+_dep_not_asked_left() {  # <name> — <name> left in place, not asked
+  printf '%snot asked — %s left in place.\n' "$(_dep_indent)" "$1"
 }
 
 # ─── Install ─────────────────────────────────────────────────────────────────
@@ -517,6 +556,60 @@ _dep_install_argv() {  # <name> — one token per line
   esac
 }
 
+# ─── Writing through a symlink ───────────────────────────────────────────────
+#
+# WHAT A DOTFILES USER GETS OTHERWISE (critic delta 2 N1). A `~/.zshrc` or a
+# `~/.claude/settings.json` symlinked into a dotfiles repo is a regular way to
+# manage those files. Every writer in this payload stages a `<file>.bionic.tmp`
+# and `mv`s it into place, and `mv` REPLACES the link with a regular file: the
+# rewrite lands in a fresh inode at the link's path, the dotfiles copy keeps the
+# content bionic just reported removing, `git status` in that repo shows nothing,
+# and the next `stow` puts the whole footprint back. The user is told the
+# footprint is gone while it is sitting in the file they actually manage. So the
+# writers resolve the path to the FINAL target of its symlink chain and publish
+# onto THAT: the link survives, still points where it did, and the file it names
+# is the one that changed.
+#
+# NO `realpath`, and no `readlink -f`. `realpath` is not on a bare macOS, and
+# BSD `readlink` has no `-f`. The loop below is the portable spelling: one hop at
+# a time, relative targets resolved against the LINK's own directory (that is
+# what the kernel does), with a hop cap so a symlink loop terminates instead of
+# spinning. Bash 3.2 — no `${var@…}`, no arrays, no `readarray`.
+#
+# HONEST DEGRADATION, the same contract `stat` already has here. If `readlink` is
+# not on the machine the loop breaks on the first hop and the caller writes to the
+# path as given, which is the behaviour every writer had before this existed — a
+# degradation, never a refusal. The standalone door runs on the box with the bare
+# /bin and must still write.
+#
+# THE ABSENT CASE IS NOT NEUTRAL (critic delta 3 F5). Absent `readlink`, the write
+# lands on the link's path as given, which replaces a symlink with a regular
+# file — the pre-S15 behaviour. `readlink` lives beside `stat` on both platforms
+# this payload targets, so the risk is negligible; it is recorded here because the
+# consequence, not just the mechanism, is what a reader of this comment needs.
+#
+# THREE OTHER FILES CARRY A BYTE-IDENTICAL COPY under the same name — hooks.sh,
+# profile.sh and remove.sh. Each is sourced on its own by something (the suites
+# load the two libraries directly; remove.sh's standalone door runs where
+# scripts/lib/ no longer exists), so none of them may assume this file came
+# first, and a `. deps.sh` inside a library also breaks every mutation arm that
+# runs a doctored COPY of it from a scratch directory. setup.sh sources this file
+# at load and uses this definition. tests/remove.test.sh pins all four against
+# each other, the same wall the settings writer's two copies stand behind.
+bionic_link_target() {  # <path> — the final target of a symlink chain, else <path>
+  local p="${1:-}" link dir n=0
+  while [ -L "$p" ] && [ "$n" -lt 40 ]; do
+    link="$(readlink "$p" 2>/dev/null)" || break
+    [ -n "$link" ] || break
+    case "$link" in
+      /*) p="$link" ;;
+      *)  dir="${p%/*}"; [ "$dir" = "$p" ] && dir="."; p="${dir}/${link}" ;;
+    esac
+    n=$((n + 1))
+  done
+  printf '%s\n' "$p"
+}
+
 # THE ONE SETTINGS WRITER IN THIS FILE. Both statusline arms — recording the
 # line on install and clearing it on removal — are jq rewrites of the same
 # ~/.claude/settings.json, so they are one function rather than two copies of
@@ -534,6 +627,14 @@ _dep_install_argv() {  # <name> — one token per line
 # an absent `stat` leaves `mode` empty and the rewrite still lands, which is the
 # same honest degradation this file already practises for `jq`.
 #
+# AND IT IS THE TARGET'S MODE, NOT THE LINK'S (S14, closing the class the S13
+# critic delta left standing here). A `~/.claude/settings.json` symlinked into a
+# dotfiles repo is the commonest way people manage it, and a bare `stat` on a
+# symlink reports the LINK's own mode — 755 — never the file's. Capturing that
+# and handing it to `chmod` publishes the rewrite as `rwxr-xr-x`: WIDER than the
+# file being replaced, which is the one outcome this capture exists to prevent.
+# `-L` is what makes the capture mean the file; both flavours take it.
+#
 # THE ORDER IS THE FIX. `umask 077` and the `chmod` both come BEFORE the `mv`, so
 # the rename publishes an already-correct inode. Repairing the mode afterwards —
 # the obvious spelling — leaves the tmp holding the tokens at 0644 under a
@@ -544,11 +645,21 @@ _dep_install_argv() {  # <name> — one token per line
 # rename entirely, turning honest degradation into a silent refusal to write.
 # hooks.sh's `hooks_strip_legacy_channel` carries the same shape for the same
 # reasons.
+#
+# THE STALE TMP IS REMOVED, NOT TRUNCATED. `>` on an existing file keeps that
+# file's mode, so a tmp left behind by an earlier interrupted run would carry
+# ITS width through the write, exposed until the chmod line below catches up —
+# the one hole S13's own header comment ("nothing ever exists at a mode wider
+# than the file it is replacing") did not cover for this writer.
 _dep_settings_write_jq() {  # <settings-file> <jq-program> [jq-arg...]
   local settings="${1:-}" program="${2:-}"
   shift 2 || return 1
-  local tmp="${settings}.bionic.tmp" mode
-  mode="$(stat -f '%Lp' "$settings" 2>/dev/null || stat -c '%a' "$settings" 2>/dev/null)"
+  local tmp mode
+  settings="$(bionic_link_target "$settings")"
+  tmp="${settings}.bionic.tmp"
+  mode="$(stat -L -f '%Lp' "$settings" 2>/dev/null || stat -L -c '%a' "$settings" 2>/dev/null)"
+  [ -e "$settings" ] || mode=""
+  rm -f "$tmp"
   if (umask 077; jq "$@" "$program" "$settings" > "$tmp") \
      && { [ -z "$mode" ] || chmod "$mode" "$tmp"; } \
      && mv "$tmp" "$settings"; then
@@ -598,9 +709,24 @@ install_dep() {  # <name>
   fi
 
   echo "$(_dep_indent)${name} is not installed. bionic would run: ${plan}"
-  _dep_consent "$(_dep_indent)Install ${name} now?" || { echo "$(_dep_indent)declined — ${name} stays absent."; return 1; }
+  _dep_consent "$(_dep_indent)Install ${name} now?"
+  case $? in
+    0) ;;
+    2) _dep_not_asked "$name"; return 2 ;;
+    *) echo "$(_dep_indent)declined — ${name} stays absent."; return 1 ;;
+  esac
 
-  if [ "${#argv[@]}" -gt 0 ]; then "${argv[@]}"; else _dep_install_statusline; fi
+  # THE SUCCESS LINE (AC-11 — O-1). Every other item kind confirms what it did
+  # ("added.", "applied.", "set."); a `tool:*` row used to run its mechanism and
+  # say nothing at all, so a consented install and a silently-absent tool read
+  # identically until the next `/bionic:doctor`. `install_dep`'s return value IS
+  # the mechanism's own exit code — this only speaks on the zero.
+  if [ "${#argv[@]}" -gt 0 ]; then
+    "${argv[@]}" && { echo "$(_dep_indent)installed."; return 0; }
+  else
+    _dep_install_statusline && { echo "$(_dep_indent)installed."; return 0; }
+  fi
+  return 1
 }
 
 # ─── The OTHER installer, and why there are exactly two ──────────────────────
@@ -654,7 +780,12 @@ install_plugin_native() {  # <name>
   id="${name}@${marketplace}"
 
   echo "$(_dep_indent)${name} is not installed. bionic would run: claude plugin install ${id} --scope user --yes"
-  _dep_consent "$(_dep_indent)Install ${name} now?" || { echo "$(_dep_indent)declined — ${name} stays absent."; return 1; }
+  _dep_consent "$(_dep_indent)Install ${name} now?"
+  case $? in
+    0) ;;
+    2) _dep_not_asked "$name"; return 2 ;;
+    *) echo "$(_dep_indent)declined — ${name} stays absent."; return 1 ;;
+  esac
 
   if claude plugin install "$id" --scope user --yes; then
     echo "$(_dep_indent)Takes effect after /reload-plugins or a new session."
@@ -689,7 +820,12 @@ remove_plugin_native() {  # <name>
   id="${name}@${marketplace}"
 
   echo "$(_dep_indent)${name}: bionic would run: claude plugin uninstall ${id} --yes"
-  _dep_consent "$(_dep_indent)Remove ${name} now?" || { echo "$(_dep_indent)declined — ${name} left in place."; return 1; }
+  _dep_consent "$(_dep_indent)Remove ${name} now?"
+  case $? in
+    0) ;;
+    2) _dep_not_asked_left "$name"; return 2 ;;
+    *) echo "$(_dep_indent)declined — ${name} left in place."; return 1 ;;
+  esac
 
   claude plugin uninstall "$id" --yes || return 1
   return 0
@@ -824,7 +960,12 @@ remove_dep() {  # <name>
   esac
 
   echo "$(_dep_indent)${name}: bionic would run: ${plan}"
-  _dep_consent "$(_dep_indent)Remove ${name} now?" || { echo "$(_dep_indent)declined — ${name} left in place."; return 1; }
+  _dep_consent "$(_dep_indent)Remove ${name} now?"
+  case $? in
+    0) ;;
+    2) _dep_not_asked_left "$name"; return 2 ;;
+    *) echo "$(_dep_indent)declined — ${name} left in place."; return 1 ;;
+  esac
 
   if [ "${#argv[@]}" -gt 0 ]; then
     "${argv[@]}"

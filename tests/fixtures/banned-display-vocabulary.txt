@@ -63,6 +63,11 @@ mode: payload
 _dep_
 _jit_
 _profile_
+# `env_` (epic-17 W7 S4, spec R4) covers the new settings-environment library both ways: its
+# internal prefix `_env_` and its public `env_get`/`env_set`/`env_unset`/`env_live`, exactly
+# as `detect_` covers `_detect_` and detect.sh's public probes. `environment` is a product
+# word and carries no underscore, so it is untouched by this token.
+env_
 
 # HOOK FILE NAMES — AC-6's own words, and until epic-17 W6 S11 the list held no file name
 # of any kind, so that clause of the criterion was green by absence rather than by

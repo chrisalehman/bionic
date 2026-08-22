@@ -348,6 +348,28 @@ else
   echo "SKIP: Section 4 (help.md missing)"
 fi
 
+
+# ---------------------------------------------------------------------------
+# Section 5 — the one-answer route is described where a model will read it (AC-9)
+# ---------------------------------------------------------------------------
+#
+# `--all` exists for the person who has already decided to do everything, and a
+# model that reached for it by default would have turned per-item consent into a
+# single blanket yes it chose on the user's behalf. So the command files carry
+# one sentence saying when it is allowed and what to do with the question it
+# asks: the flag is for a user who asked for everything, and its one question is
+# relayed word for word like every other.
+ALL_DOCTRINE="Use --all only when the user asks for everything; relay its one question verbatim."
+for c in setup remove; do
+  f="${COMMANDS_DIR}/${c}.md"
+  if [ ! -f "$f" ]; then
+    no "${c}.md exists (Section 5 needs it)"
+    continue
+  fi
+  expect_contains "${c}.md says when --all may be reached for, and what to do with its question" \
+    "$ALL_DOCTRINE" "$(cat "$f")"
+done
+
 # ---------------------------------------------------------------------------
 # Results
 # ---------------------------------------------------------------------------
