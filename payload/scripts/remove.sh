@@ -307,10 +307,13 @@ _rm_slurp_into() {  # <varname> <file>
 # profile.sh for why `stat` is spelled twice, why an absent `stat` degrades to
 # "write, don't chmod" rather than to a refusal — the standalone door runs on the
 # machine with the bare /bin — and why the `umask 077` and the `chmod` must both
-# stay ABOVE the `mv`.
+# stay ABOVE the `mv`. `-L` dereferences a symlinked settings.json instead of
+# reading the link's own mode (S14), and the stale tmp is `rm -f`'d rather than
+# truncated, for the same reason profile.sh's copy is.
 _rm_write() {  # <file> <content> <trailing-newline 0|1>
   local file="$1" content="$2" nl="$3" tmp="${1}.bionic.tmp" mode
-  mode="$(stat -f '%Lp' "$file" 2>/dev/null || stat -c '%a' "$file" 2>/dev/null)"
+  mode="$(stat -L -f '%Lp' "$file" 2>/dev/null || stat -L -c '%a' "$file" 2>/dev/null)"
+  rm -f "$tmp"
   if [ "$nl" = "1" ]; then (umask 077; printf '%s\n' "$content" > "$tmp"); else (umask 077; printf '%s' "$content" > "$tmp"); fi
   [ -n "$mode" ] && chmod "$mode" "$tmp"
   mv "$tmp" "$file" || return 1

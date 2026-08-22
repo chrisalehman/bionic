@@ -279,12 +279,20 @@ profile_apply() {  # <rendered-file> <consent-token>
 # honest degradation the rest of the payload practises rather than a hard new
 # dependency.
 #
+# AND IT IS THE TARGET'S MODE, NOT THE LINK'S (S14). A settings.json symlinked
+# into a dotfiles repo is the commonest way people manage it, and a bare `stat`
+# on a symlink reports the LINK's own mode — 755 — never the file's. `-L` makes
+# the capture mean the file; the stale tmp is `rm -f`'d rather than truncated,
+# because `>` on an existing file keeps that file's mode and would carry a
+# leftover wide mode through the write until the chmod below caught up.
+#
 # Byte-identical to remove.sh's `_rm_write` apart from the name, and pinned that
 # way in tests/remove.test.sh — the seam this crosses is the same one the strip
 # program crosses, for the same reason.
 _profile_write() {  # <file> <content> <trailing-newline 0|1>
   local file="$1" content="$2" nl="$3" tmp="${1}.bionic.tmp" mode
-  mode="$(stat -f '%Lp' "$file" 2>/dev/null || stat -c '%a' "$file" 2>/dev/null)"
+  mode="$(stat -L -f '%Lp' "$file" 2>/dev/null || stat -L -c '%a' "$file" 2>/dev/null)"
+  rm -f "$tmp"
   if [ "$nl" = "1" ]; then (umask 077; printf '%s\n' "$content" > "$tmp"); else (umask 077; printf '%s' "$content" > "$tmp"); fi
   [ -n "$mode" ] && chmod "$mode" "$tmp"
   mv "$tmp" "$file" || return 1

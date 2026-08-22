@@ -887,6 +887,32 @@ expect_eq "and a death right after profile_strip's rename leaves 0600" \
   "600" "$(file_mode "$S_INST_STRIP")"
 
 echo ""
+echo "=== Group 14c: the settings file is a symlink (S14, the S13 class) ==="
+#
+# `stat -f '%Lp' <symlink>` reports the LINK's own mode and never consults the
+# file it points at. A `~/.claude/settings.json` symlinked into a dotfiles repo
+# is the commonest way people manage it, and a mode capture that does not
+# dereference hands `chmod` the link's mode — 755 — publishing the rewrite,
+# tokens included, as `rwxr-xr-x`: WIDER than the file it replaced, which is
+# the one outcome the capture exists to prevent. `-L` is what makes this pass.
+# tests/remove.test.sh's rc arms are the same trap on the other two writers.
+
+S_SYMLINK_DIR="$TMP/s-symlink"; mkdir -p "$S_SYMLINK_DIR/dotfiles"
+cp "$SET_REAL" "$S_SYMLINK_DIR/dotfiles/settings.json"
+chmod 600 "$S_SYMLINK_DIR/dotfiles/settings.json"
+ln -s "$S_SYMLINK_DIR/dotfiles/settings.json" "$S_SYMLINK_DIR/settings-link.json"
+S_SYMLINK="$S_SYMLINK_DIR/settings-link.json"
+expect_eq "fixture: the symlinked settings.json TARGET really is 0600" \
+  "600" "$(file_mode "$S_SYMLINK_DIR/dotfiles/settings.json")"
+expect_nomatch "fixture: …and the LINK's own mode is not it — this is the trap" \
+  "600" "$(file_mode "$S_SYMLINK")"
+prof_run BIONIC_SETTINGS_FILE="$S_SYMLINK" -- profile_apply "$RENDERED" --consented >/dev/null 2>&1
+expect_true "symlink arm: profile_apply really wrote through the link (not vacuous)" \
+  bash -c 'grep -q "bionic-profile-begin" "$1"' _ "$S_SYMLINK"
+expect_eq "a symlinked settings.json is published at its TARGET's 0600, never the link's 755" \
+  "600" "$(file_mode "$S_SYMLINK")"
+
+echo ""
 echo "=== Group 15: mutation and restore — these assertions can go red ==="
 #
 # Each arm doctors a COPY, re-runs the assertion against the copy, and records
