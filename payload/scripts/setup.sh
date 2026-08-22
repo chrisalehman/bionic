@@ -1509,7 +1509,14 @@ if [ -n "$SETUP_ONLY" ]; then
   fi
 fi
 
-say "bionic setup — every change below is asked for first, one item at a time."
+# THE HEADER SAYS WHICH MODE THIS IS (Chris 2026-08-22: "it's NOT installing one
+# at a time; it's installing all in one go!"). Under --all there is one question
+# over the whole list; without it, one question per item.
+if [ "$setup_all" = "1" ]; then
+  say "bionic setup — the full list below runs after one question."
+else
+  say "bionic setup — every change below is asked for first, one item at a time."
+fi
 
 # THE ONE EVENT, BEFORE ANY STEP SPEAKS. Under `--all` the whole page is printed
 # and answered here; every question below then finds the answer already given.
@@ -1526,11 +1533,13 @@ if [ "$setup_all" = "1" ]; then
     exit 0
   fi
   consent "Do all of the above?"; setup_all_rc=$?
-  if [ "$setup_all_rc" -ne 0 ]; then
-    say "   nothing changed."
-    exit 0
-  fi
-  SETUP_ALL=1
+  case "$setup_all_rc" in
+    0) SETUP_ALL=1 ;;
+    2) exit 0 ;;   # nobody could answer: the question stands on screen for the
+                   # relaying command to put to the user — no "nothing changed"
+                   # under it (Chris 2026-08-22: that line read as a refusal)
+    *) say "   nothing changed."; exit 0 ;;
+  esac
 fi
 
 setup_plugin_install
