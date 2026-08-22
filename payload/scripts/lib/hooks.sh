@@ -44,6 +44,12 @@
 # lib/deps.sh carries the full reasoning, the portability note (no `realpath`, no
 # `readlink -f`) and the degradation contract.
 #
+# THE ABSENT CASE IS NOT NEUTRAL (critic delta 3 F5). Absent `readlink`, the write
+# lands on the link's path as given, which replaces a symlink with a regular
+# file — the pre-S15 behaviour. `readlink` lives beside `stat` on both platforms
+# this payload targets, so the risk is negligible; it is recorded here because the
+# consequence, not just the mechanism, is what a reader of this comment needs.
+#
 # WHY A COPY AND NOT A SOURCE. This file is sourced on its own — by the suites,
 # and by callers that load no other library — so it cannot assume deps.sh came
 # first; and remove.sh's standalone door runs where scripts/lib/ is already gone.
