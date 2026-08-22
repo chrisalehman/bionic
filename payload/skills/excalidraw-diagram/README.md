@@ -6,17 +6,11 @@ Generates Excalidraw diagrams that **argue visually**, with a Playwright render 
 
 **The pin lives at `references/render_template.html:16`** — `@excalidraw/excalidraw@0.18.0`. Bump it deliberately and verify a real render first. Do not re-clone from upstream; that reinstates the breakage.
 
-**Default-off, opt-in**: this skill is not part of bionic's plugin payload. Copy this directory to `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/excalidraw-diagram` to opt in.
+**Ships with the plugin**: this skill is part of bionic's payload, so installing bionic installs it. Nothing to copy, nothing to place.
 
 ## Renderer setup
 
-```bash
-cd ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/excalidraw-diagram/references
-uv sync
-uv run playwright install chromium
-```
-
-`uv` and `playwright-chromium` are bionic's dependency-table rows (`payload/scripts/lib/deps.sh`); SKILL.md routes the render workflow's assumption of them through `jit_check`/`jit_offer` (`payload/scripts/lib/jit.sh`) rather than assuming this setup already ran.
+Nothing here is run by hand. The renderer's two halves are rows in bionic's dependency table (`payload/scripts/lib/deps.sh`) — `excalidraw-renderer`, the synced uv project at `${CLAUDE_PLUGIN_ROOT}/skills/excalidraw-diagram/references`, offered the first time a render needs it; and `playwright-chromium`, the browser it drives, offered at `/bionic:setup` since 2026-08-22 — and SKILL.md routes the render workflow through `jit_check`/`jit_offer` (`payload/scripts/lib/jit.sh`), which offers each one on consent the first time a render needs it. `/bionic:doctor` reports both.
 
 ## Customize colors
 

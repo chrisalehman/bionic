@@ -116,7 +116,7 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-JOBS="${BIONIC_TEST_JOBS:-4}"
+JOBS="${BIONIC_TEST_JOBS:-8}"
 
 ( . tests/lib/resolve-roots.sh
   printf 'Roots: hooks=%s skills=%s scripts=%s\n\n' \
@@ -321,6 +321,14 @@ run "doctor.test.sh" bash tests/doctor.test.sh
 # the standalone door (the script alone, no payload libraries beside it).
 # Hand-listed like every suite outside hooks/.
 run "remove.test.sh" bash tests/remove.test.sh
+# The pristine-install suite (epic-18 T6, spec AC-10/AC-7): empty $HOME through
+# setup --all, doctor, remove --all, asserted against a manifest of bytes rather
+# than a report's own summary line. Registered at T10 per its own header — it was
+# deliberately kept out of the roster while the two arms it exercises
+# (ccstatusline's layout copy, notebooklm's skill install) were still unmerged,
+# so it would not sit red in a gating run. Hand-listed like every suite outside
+# hooks/.
+run "fresh-home.test.sh" bash tests/fresh-home.test.sh
 # lib/platform.test.sh RETIRED at epic-17 W5 (Step-6 review). The library it
 # covered exported OS, BREW_PREFIX, SHELL_RC, PLAYWRIGHT_CACHE and sed_inplace
 # for exactly two consumers — claude-bootstrap.sh and claude-reset.sh — and 4/6

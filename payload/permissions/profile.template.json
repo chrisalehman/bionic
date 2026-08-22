@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "_about": {
     "what": "bionic's shipped permission profile TEMPLATE. Rendered at setup by scripts/lib/profile.sh, applied into the USER settings layer under explicit consent, diffed by doctor, stripped by remove.",
     "token": "__BIONIC_PLUGIN_ROOT__ is replaced with this machine's concrete plugin root. Permission rules take literal paths and globs only — no variable expansion — so the token must never reach a settings file (record/epic-17-w3/probe-identity-match.md, design D2-final).",
@@ -11,7 +11,7 @@
   },
   "permissions": {
     "allow": [
-      "Bash(: bionic-profile-begin version=1.0.0)",
+      "Bash(: bionic-profile-begin version=1.1.0)",
       "Bash(bash __BIONIC_PLUGIN_ROOT__/scripts/setup.sh:*)",
       "Bash(bash __BIONIC_PLUGIN_ROOT__/scripts/doctor.sh:*)",
       "Bash(bash __BIONIC_PLUGIN_ROOT__/scripts/remove.sh:*)",

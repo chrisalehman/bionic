@@ -142,10 +142,10 @@ in_set() { case " $1 " in *" $2 "*) return 0;; esac; return 1; }
 # expected: file|model|effort
 EXPECT="implementor|sonnet|high
 senior-implementor|opus|high
-researcher|sonnet|medium
+researcher|opus|high
 auditor|opus|high
 critic|opus|high
-test-runner|sonnet|low"
+test-runner|haiku|medium"
 
 while IFS='|' read -r r m e; do
   f="$AGENTS/$r.md"
