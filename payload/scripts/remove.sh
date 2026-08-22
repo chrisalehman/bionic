@@ -244,6 +244,8 @@ RM_REMOVED=0
 RM_CLEAN=0
 RM_SKIPPED=0
 RM_SKIPPED_LIST=""
+RM_NOT_CHECKED=0
+RM_NOT_CHECKED_LIST=""
 RM_LEFTOVERS=""
 
 _rm_removed() { RM_REMOVED=$((RM_REMOVED + 1)); echo "  ✓ ${1}"; }
@@ -267,17 +269,20 @@ _rm_skipped() {  # <rc> <name> <what was left>
   [ -n "$route" ] && echo "  ${route}"
   return 0
 }
-# NOT CLEAN, AND NOT DECLINED EITHER — NOT LOOKED AT (critic delta 2 N2).
-# `_rm_clean` states a fact about the machine: this item was checked and there is
-# nothing there. A row whose check never RAN cannot say that, and saying it anyway
-# is worse than silence: it is false the moment something is there, it books the
-# row into the "already clean" tally, and it keeps the row out of the Leftovers
-# and Skipped blocks a reader scans for what to do next. This line reports what
-# happened instead. It counts with the skips, because that is what it is — a check
-# this run did not perform.
+# NOT CLEAN, AND NOT DECLINED EITHER — NOT LOOKED AT (critic delta 2 N2). AND NOT
+# THE USER'S CHOICE EITHER (critic delta 3 F2). `_rm_clean` states a fact about
+# the machine: this item was checked and there is nothing there. `_rm_skipped`
+# states a fact about the reader: they were asked and answered no (or were never
+# there to ask). This row is neither — the check never RAN, and on the `--all`
+# path that reaches it, the reader was never asked anything at all — so it gets
+# its own tally and its own list rather than being booked into either. Counting
+# it as a skip made the summary say "N skipped by you" and file it under
+# "Skipped (your choice — still on this machine)" for a choice nobody made; that
+# is the same class of defect as `_rm_clean` asserting a fact the run never
+# checked, moved one field over.
 _rm_not_checked() {  # <what was not checked> <why, in the user's terms>
-  RM_SKIPPED=$((RM_SKIPPED + 1))
-  RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ ${1} — not checked: ${2}"$'\n'
+  RM_NOT_CHECKED=$((RM_NOT_CHECKED + 1))
+  RM_NOT_CHECKED_LIST="${RM_NOT_CHECKED_LIST}    ⚠ ${1} — not checked: ${2}"$'\n'
   echo "  not checked — ${2}"
   return 0
 }
@@ -337,6 +342,12 @@ _rm_slurp_into() {  # <varname> <file>
 # machine means the loop breaks on the first hop and the caller writes to the path
 # as given — the behaviour every writer had before this existed. The standalone
 # door runs on the box with the bare /bin and must still write.
+#
+# THE ABSENT CASE IS NOT NEUTRAL (critic delta 3 F5). Absent `readlink`, the write
+# lands on the link's path as given, which replaces a symlink with a regular
+# file — the pre-S15 behaviour. `readlink` lives beside `stat` on both platforms
+# this payload targets, so the risk is negligible; it is recorded here because the
+# consequence, not just the mechanism, is what a reader of this comment needs.
 #
 # BYTE-IDENTICAL TO THE THREE COPIES IN scripts/lib/, name included, because the
 # standalone door runs where scripts/lib/ is already gone and the payload door
@@ -872,7 +883,7 @@ _rm_item_legacy_alias() {
         if _rm_strip_marker_block "$RC_FILE" "$RM_RC_START" "$RM_RC_END"; then
           _rm_removed "legacy alias block in ${RC_FILE}"
         else
-          rm -f "${RC_FILE}.bionic.tmp"
+          rm -f "$(bionic_link_target "$RC_FILE").bionic.tmp"
           _rm_leftover "could not rewrite ${RC_FILE} — the alias block is still there"
         fi
       else
@@ -1004,7 +1015,7 @@ _rm_item_environment() {
     if _rm_env_unset "$key"; then
       _rm_removed "${key} in ${RM_SETTINGS}"
     else
-      rm -f "${RM_SETTINGS}.bionic.tmp"
+      rm -f "$(bionic_link_target "$RM_SETTINGS").bionic.tmp"
       failed="${failed}${failed:+ }${key}"
     fi
   done
@@ -1014,14 +1025,14 @@ _rm_item_environment() {
     if _rm_strip_marker_block "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END"; then
       _rm_removed "retired environment block in ${RC_FILE}"
     else
-      rm -f "${RC_FILE}.bionic.tmp"
+      rm -f "$(bionic_link_target "$RC_FILE").bionic.tmp"
       _rm_leftover "could not rewrite ${RC_FILE} — the environment block is still there"
     fi
   elif [ "$bare" = "yes" ]; then
     if _rm_filter_out_lines "$RC_FILE" "$RM_TODO_EXPORT_RE"; then
       _rm_removed "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
     else
-      rm -f "${RC_FILE}.bionic.tmp"
+      rm -f "$(bionic_link_target "$RC_FILE").bionic.tmp"
       _rm_leftover "could not rewrite ${RC_FILE} — the export is still there"
     fi
   fi
@@ -1670,7 +1681,8 @@ _rm_item_orphans
 # print is what it did: the counts, and anything it could not finish.
 
 if [ -n "$RM_ONLY" ]; then
-  printf '  %d removed · %d already clean · %d skipped by you\n' "$RM_REMOVED" "$RM_CLEAN" "$RM_SKIPPED"
+  printf '  %d removed · %d already clean · %d skipped by you · %d not checked\n' \
+    "$RM_REMOVED" "$RM_CLEAN" "$RM_SKIPPED" "$RM_NOT_CHECKED"
   echo ""
   if [ -n "$RM_LEFTOVERS" ]; then
     echo "  Leftovers (bionic could not finish these)"
@@ -1686,12 +1698,19 @@ else
   echo "# ─── remove finished — leftovers present ──────────────────────"
 fi
 echo ""
-printf '  %d removed · %d already clean · %d skipped by you\n' "$RM_REMOVED" "$RM_CLEAN" "$RM_SKIPPED"
+printf '  %d removed · %d already clean · %d skipped by you · %d not checked\n' \
+  "$RM_REMOVED" "$RM_CLEAN" "$RM_SKIPPED" "$RM_NOT_CHECKED"
 echo ""
 
 if [ -n "$RM_SKIPPED_LIST" ]; then
   echo "  Skipped (your choice — still on this machine)"
   printf '%s' "$RM_SKIPPED_LIST"
+  echo ""
+fi
+
+if [ -n "$RM_NOT_CHECKED_LIST" ]; then
+  echo "  Not checked (bionic couldn't verify — still on this machine)"
+  printf '%s' "$RM_NOT_CHECKED_LIST"
   echo ""
 fi
 
@@ -1712,8 +1731,10 @@ echo "    • Restart your shell if the rc file changed"
 # including four lines under a Skipped list naming the things still on the machine. A
 # summary that contradicts the list above it is worse than no summary: it teaches the
 # reader to stop reading it. So the unqualified sentence is now the CLEAN run's sentence,
-# and a run that left anything behind gets one that points at what it left.
-if [ "$RM_SKIPPED" -eq 0 ] && [ -z "$RM_LEFTOVERS" ]; then
+# and a run that left anything behind gets one that points at what it left. A not-checked
+# row is exactly as unfinished as a skipped or leftover one — bionic never verified it is
+# gone — so it holds this gate too (critic delta 3 F2).
+if [ "$RM_SKIPPED" -eq 0 ] && [ "$RM_NOT_CHECKED" -eq 0 ] && [ -z "$RM_LEFTOVERS" ]; then
   echo "    • Claude Code still works, without bionic's skills, hooks and agents"
 else
   echo "    • Claude Code still works — but the items listed above are still on this machine"

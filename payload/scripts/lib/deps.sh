@@ -582,6 +582,12 @@ _dep_install_argv() {  # <name> — one token per line
 # degradation, never a refusal. The standalone door runs on the box with the bare
 # /bin and must still write.
 #
+# THE ABSENT CASE IS NOT NEUTRAL (critic delta 3 F5). Absent `readlink`, the write
+# lands on the link's path as given, which replaces a symlink with a regular
+# file — the pre-S15 behaviour. `readlink` lives beside `stat` on both platforms
+# this payload targets, so the risk is negligible; it is recorded here because the
+# consequence, not just the mechanism, is what a reader of this comment needs.
+#
 # THREE OTHER FILES CARRY A BYTE-IDENTICAL COPY under the same name — hooks.sh,
 # profile.sh and remove.sh. Each is sourced on its own by something (the suites
 # load the two libraries directly; remove.sh's standalone door runs where

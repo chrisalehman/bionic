@@ -111,12 +111,21 @@ done
 # unless an arm sets BIONIC_TEST_MV_LOG, so every other arm on this PATH is
 # unaffected; `exec` hands off to the real binary, so nothing about the rename
 # itself changes.
+#
+# BIONIC_TEST_MV_FAIL (critic delta 3 F3) makes every `mv` in the run fail the
+# way a `chflags uchg` target or a read-only destination directory does — the
+# real shape a writer's `mv "$tmp" "$file"` fails in — so an arm can drive a
+# writer down its failure branch without touching real filesystem permissions.
 BASE_MV_REAL="$(command -v mv 2>/dev/null)"
 # The loop above left a SYMLINK to the real binary here; `cat >` would follow it
 # and try to write /bin/mv. Replace the link, do not write through it.
 rm -f "${BASE_BIN}/mv"
 cat > "${BASE_BIN}/mv" <<MVSTUB
 #!/bin/bash
+if [ -n "\${BIONIC_TEST_MV_FAIL:-}" ]; then
+  echo "mv: rename \$1 to \$2: Operation not permitted" >&2
+  exit 1
+fi
 if [ -n "\${BIONIC_TEST_MV_LOG:-}" ] && [ -f "\$1" ]; then
   printf '%s %s\n' "\$(stat -f '%Lp' "\$1" 2>/dev/null || stat -c '%a' "\$1" 2>/dev/null)" "\$1" \
     >> "\$BIONIC_TEST_MV_LOG"
@@ -987,6 +996,77 @@ expect_true "symlink arm: the mv witness really saw the rc rename (not vacuous)"
 expect_eq "…and no staged copy of it was ever wider than 0600 either" "" \
   "$(/usr/bin/grep 'zshrc\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
 
+# ─── A FAILED PUBLISH LEAVES NO STAGED COPY BESIDE THE TARGET (critic delta 3 F3) ─
+#
+# S15 moved the tmp from `${link}.bionic.tmp` to `${target}.bionic.tmp` in the
+# writers, but the four post-failure `rm -f` cleanups at the CALL SITES were not
+# moved with it — they still `rm -f "${RC_FILE}.bionic.tmp"` /
+# `"${RM_SETTINGS}.bionic.tmp"`, the pre-S15 (unresolved, link) path. On an
+# unsymlinked rc that is the same path as the target and the bug is invisible;
+# on a symlinked one (the dotfiles-managed case this whole wave is about) the
+# staged copy of the user's file is left behind, inside the dotfiles repo the
+# user actually manages. `BIONIC_TEST_MV_FAIL` reproduces the `mv` failure a
+# `chflags uchg` target or a read-only destination directory produces, without
+# touching real filesystem permissions.
+
+# Site :875 — `_rm_strip_marker_block`, the legacy-alias marker block.
+ARM="$(new_arm alias-rc-symlink-mv-fails)"
+plant_zshrc_marked "$ARM"
+plant_claude_stub "$ARM" no no
+symlink_rc "$ARM"
+chmod 600 "$ARM/dotfiles/zshrc"
+REMOVE_FLAGS="--only legacy-alias"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES" BIONIC_TEST_MV_FAIL=1)"
+REMOVE_FLAGS=""
+expect_contains "mv-fails arm: the strip really did fail (not vacuous)" \
+  "could not rewrite" "$OUT"
+expect_eq "…and no staged copy is left beside the TARGET (not the link's own path)" \
+  "" "$(ls "$ARM/dotfiles/"*.bionic.tmp 2>/dev/null || true)"
+
+# Sites :1007 and :1017 — the environment item's settings-unset (`_rm_write`)
+# and its retired-env marker-block strip (`_rm_strip_marker_block`), both on
+# symlinked targets in the same run. `_rm_write` for the settings key is only
+# reached through the STANDALONE door (payload mode delegates to env.sh's
+# `env_unset` → `_dep_settings_write_jq`, which already self-cleans on
+# failure — not this defect), so this arm runs a standalone copy of remove.sh,
+# the same shape Group 9/10 below use.
+ENV_MVFAIL_STANDALONE="$TMP/env-mvfail-standalone"
+mkdir -p "$ENV_MVFAIL_STANDALONE"
+cp "$REMOVE_SH" "$ENV_MVFAIL_STANDALONE/remove.sh"
+ARM="$(new_arm env-symlink-mv-fails)"
+plant_env_rc_block "$ARM"
+plant_env_settings "$ARM"
+plant_claude_stub "$ARM" no no
+symlink_rc "$ARM"
+symlink_settings "$ARM"
+chmod 600 "$ARM/dotfiles/zshrc" "$ARM/dotfiles/settings.json"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$ENV_MVFAIL_STANDALONE/remove.sh" "$ARM" "$ALL_YES" BIONIC_TEST_MV_FAIL=1)"
+REMOVE_FLAGS=""
+expect_contains "env mv-fails arm: the settings unset really did fail (not vacuous)" \
+  "could not rewrite ${ARM}/home/.claude/settings.json" "$OUT"
+expect_contains "…and the rc marker-block strip really did fail too (not vacuous)" \
+  "could not rewrite ${ARM}/home/.zshrc" "$OUT"
+expect_eq "…and no staged copy is left beside the settings TARGET" \
+  "" "$(ls "$ARM/dotfiles/settings.json.bionic.tmp" 2>/dev/null || true)"
+expect_eq "…and no staged copy is left beside the rc TARGET" \
+  "" "$(ls "$ARM/dotfiles/zshrc.bionic.tmp" 2>/dev/null || true)"
+
+# Site :1024 — the environment item's bare (unmarked) TODO-export filter
+# (`_rm_filter_out_lines`), no settings.json at all so only this branch fires.
+ARM="$(new_arm env-bare-symlink-mv-fails)"
+plant_todo_export "$ARM"
+plant_claude_stub "$ARM" no no
+symlink_rc "$ARM"
+chmod 600 "$ARM/dotfiles/zshrc"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES" BIONIC_TEST_MV_FAIL=1)"
+REMOVE_FLAGS=""
+expect_contains "bare-export mv-fails arm: the filter really did fail (not vacuous)" \
+  "could not rewrite ${ARM}/home/.zshrc" "$OUT"
+expect_eq "…and no staged copy is left beside the rc TARGET" \
+  "" "$(ls "$ARM/dotfiles/zshrc.bionic.tmp" 2>/dev/null || true)"
+
 # The other writer, `_rm_filter_out_lines`, on the same shape.
 ARM="$(new_arm env-rc-filter-symlink-600)"
 printf 'export EDITOR=vim\nexport SOME_API_TOKEN=sk-fixture-not-a-real-secret\n' > "$ARM/home/.zshrc"
@@ -1315,11 +1395,38 @@ ${REPO}/payload/scripts/lib/profile.sh
 ${REPO}/payload/scripts/remove.sh" \
   "$RESOLVER_FILES"
 STAGERS="$(/usr/bin/grep -rl '\.bionic\.tmp' "${REPO}/payload" | sort)"
+# THE WALL READS CODE, NOT A COMMENT (critic delta 3 F4). A plain-text
+# `grep -q bionic_link_target` over the whole file is satisfied by a file that
+# only NAMES the resolver in a comment and never calls it — exactly the shape a
+# fifth, unresolved writer could ship in and still pass. Comment-only lines
+# (`#` as the first non-blank character) are stripped before this wall reads
+# for a real call.
+# ASSERTION-HELPER RACE (this file's own header rule): no `X | grep -q` — a
+# large file (remove.sh, setup.sh) makes `grep -q` close its end of the pipe the
+# instant it finds a match, SIGPIPE-ing the writer, and `pipefail` then reports
+# that SIGPIPE (141) as the pipeline's exit status regardless of the match. The
+# stripped text is captured into a variable first and matched with `case`
+# instead, the same idiom already used above for `$RESOLVER_DEPS`.
 UNRESOLVED=""
 for _f in $STAGERS; do
-  /usr/bin/grep -q 'bionic_link_target' "$_f" || UNRESOLVED="${UNRESOLVED}${_f} "
+  _f_code="$(/usr/bin/grep -v '^[[:space:]]*#' "$_f" 2>/dev/null || true)"
+  case "$_f_code" in
+    *bionic_link_target*) : ;;
+    *) UNRESOLVED="${UNRESOLVED}${_f} " ;;
+  esac
 done
 expect_eq "every payload file that stages a .bionic.tmp resolves the symlink first" "" "$UNRESOLVED"
+
+# Positive control: the critic's own repro shape — a resolver mentioned only in
+# a comment, never called — must be caught unresolved by the same stripping.
+N4_DIR="$TMP/n4"; mkdir -p "$N4_DIR"
+cat > "$N4_DIR/newwriter.sh" <<'NW'
+# a comment that mentions bionic_link_target but never calls it
+_new_write() { local f="$1" tmp="${1}.bionic.tmp"; printf '%s' "$2" > "$tmp"; mv "$tmp" "$f"; }
+NW
+N4_CODE="$(/usr/bin/grep -v '^[[:space:]]*#' "$N4_DIR/newwriter.sh" 2>/dev/null || true)"
+expect_not_contains "positive control: a resolver named only in a comment is caught unresolved" \
+  "bionic_link_target" "$N4_CODE"
 
 # R-1's pin, and the reason it is SHAPE rather than byte-identity. There is a
 # THIRD settings writer — hooks.sh's `hooks_strip_legacy_channel` — and the pin
@@ -2776,10 +2883,23 @@ expect_contains "…and the run says the check did not happen, not that nothing 
   "$FAILED_OUT"
 expect_eq "…and the orphan row is never booked as clean" "" \
   "$(printf '%s\n' "$FAILED_OUT" | /usr/bin/grep 'orphaned dependencies' | /usr/bin/grep 'already clean' || true)"
-expect_contains "…and it lands in the Skipped block, where a reader goes looking for leftovers" \
+expect_contains "…and it lands in the Leftovers/not-checked block, where a reader goes looking for it" \
   "⚠ orphaned dependencies — not checked" "$FAILED_OUT"
 expect_not_contains "…and the stub's own dry run proves the old sentence was falsifiable" \
   "so nothing is orphaned" "$FAILED_OUT"
+
+# THE ROW IS NOT BOOKED AS THE USER'S CHOICE EITHER (critic delta 3 F2). `--all`
+# asks nothing at all before this branch runs — `_rm_consent` is never called for
+# it — so a summary that calls the row "skipped by you" or files it under
+# "Skipped (your choice — still on this machine)" invents a decision the reader
+# never made. This fixture has exactly one non-clean, non-removed row (the
+# orphan check), so a correct run reports zero real declines.
+expect_contains "…and the tally says 0 skipped by you (no choice was offered here)" \
+  "0 skipped by you" "$FAILED_OUT"
+expect_contains "…and the tally counts it on its own line: 1 not checked" \
+  "1 not checked" "$FAILED_OUT"
+expect_not_contains "…and the summary heading never claims a choice on this row's account" \
+  "your choice" "$FAILED_OUT"
 
 # The same failure in a PER-ITEM pass still asks. The gate above exists because
 # `--all` collapses every question into one page, so the conditional line is the
