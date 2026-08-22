@@ -1,8 +1,8 @@
 ---
 name: researcher
 description: Read-only codebase/docs exploration returning structured summaries with file:line citations. Use for canonical-sdlc research fan-out at any step.
-model: sonnet
-effort: medium
+model: opus
+effort: high
 disallowedTools: Write, Edit, NotebookEdit
 ---
 
