@@ -119,6 +119,13 @@ DOCTOR_LIB="$(cd "$(_doctor_self_dir)" && pwd -P)/lib"
 # called from here, the same way this file never calls install_dep.
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/env.sh"
+# patrol.sh, which owns the ONE fact on this page that has no file behind it. The
+# CLI keeps its cron table in memory and writes none of it down, so "is the
+# Patrol armed, once, and firing" is reconstructed from a session file and a
+# transcript. Sourced after detect.sh because it borrows that library's bound
+# for the one shell-out it makes.
+# shellcheck source=/dev/null
+. "${DOCTOR_LIB}/patrol.sh"
 
 # The standalone removal door (design D5a: the remover must not depend on the
 # thing it removes). Printed as TEXT for the user to run — doctor never fetches
@@ -245,6 +252,20 @@ _doctor_word() {  # <yes|no|unknown>
     unknown) echo "unknown" ;;
     *)       echo "${1:-unknown}" ;;
   esac
+}
+
+# One field of a `|`-delimited machine line, BY KEY. The Patrol records are the
+# only input this report parses that it did not also print, and every other
+# reader of a line in this shape — five hooks — reads it the same way, by key
+# and never by position.
+_doctor_pfield() {  # <line> <key>
+  local f
+  while IFS= read -r f; do
+    case "$f" in "${2}="*) printf '%s' "${f#"${2}="}"; return 0 ;; esac
+  done <<EOF
+$(printf '%s' "${1:-}" | tr '|' '\n')
+EOF
+  printf ''
 }
 
 _doctor_plural() {  # <count> <singular> <plural>
@@ -781,6 +802,200 @@ while IFS= read -r dep_name; do
   esac
 done < <(dep_names)
 
+# ─── The Patrol, gathered and rendered before the fix accounting ─────────────
+#
+# ROWS BUILT HERE AND PRINTED FAR BELOW, the same shape THIRD_ROWS already has,
+# because two of the states this section discovers are PROBLEMS and FIX is the
+# second thing on the page. A section that printed its own findings where it
+# found them would put the duplicate-Patrol line eighty rows under the verdict
+# that is supposed to name it.
+#
+# WHICH OF THESE STATES IS A PROBLEM, and which is merely a fact. Two Patrols
+# firing into one session is a problem and its command is exact, so it takes a
+# fix line with the id in it. A stamp that has gone stale is a problem: the job
+# may still be in the table and the firings are not landing, which is the state
+# the arming wall refuses a dispatch on. A session with NO Patrol is NOT a
+# problem — doctor is run outside a run more often than inside one, and marking
+# every idle session broken would train a reader past the two lines that matter.
+# A blind dispatch wall is a problem, and the only one here whose cure is a
+# skill invocation rather than a command.
+PATROL_ROWS=""
+_patrol_add() { PATROL_ROWS="${PATROL_ROWS}$1"$'\n'; }
+_patrol_item() { _patrol_add "$(_doctor_item "$1" "$2" "${3:-}")"; }
+_patrol_detail() { _patrol_add "$(_doctor_rtrim "      ${1}")"; }
+
+# Cut to a column count, never to a byte count: every id, cron expression and
+# prompt head below can carry a multi-byte glyph, and `printf '%.Ns'` counts
+# bytes.
+_doctor_trunc() {  # <string> <cols>
+  local s="${1:-}" w="${2:-0}"
+  if [ "$(_doctor_cols "$s")" -le "$w" ]; then printf '%s' "$s"; return 0; fi
+  while [ "$(_doctor_cols "$s")" -gt "$((w - 1))" ] && [ -n "$s" ]; do s="${s%?}"; done
+  printf '%s…' "$s"
+}
+
+PATROL_LINES="$(patrol_report 2>/dev/null)"
+PATROL_LIVE=0
+PATROL_OTHER=""
+PATROL_OTHER_N=0
+
+_p_sid=""; _p_here=""; _p_cwd=""; _p_cause=""
+_p_jobs=""; _p_other_jobs=""; _p_n_patrol=0; _p_n_other=0
+_p_stamp=""; _p_age=""; _p_limit=""; _p_interval=""; _p_source=""
+_p_rows=""; _p_open=""; _p_closed=""; _p_present=""
+_p_disp=""; _p_rost=""; _p_blind=""; _p_wcause=""
+
+_patrol_flush() {
+  [ -n "$_p_sid" ] || return 0
+  local short="${_p_sid%%-*}" j id cron head extras n summary
+  PATROL_LIVE=$((PATROL_LIVE + 1))
+
+  # THE DUPLICATE VERDICT KEEPS THE NEWEST and names every older one. Creation
+  # order is what the transcript gives, and the newest job is the one whose
+  # prompt reflects the run as it now stands — an older duplicate is a leftover
+  # from an arming that was repeated, which is exactly how the second one gets
+  # there.
+  extras=""
+  if [ "$_p_n_patrol" -gt 1 ]; then
+    n=0
+    while IFS= read -r j; do
+      [ -n "$j" ] || continue
+      n=$((n + 1))
+      [ "$n" -lt "$_p_n_patrol" ] || continue
+      id="${j%%	*}"
+      [ "$id" = "?" ] && continue
+      extras="${extras}${extras:+ }${id}"
+    done <<EOF
+$_p_jobs
+EOF
+  fi
+
+  if [ "$_p_here" != "yes" ]; then
+    # ONE LINE FOR EVERY SESSION THAT IS NOT THIS REPO'S. They are on this page
+    # because a Patrol armed twice is a problem wherever it is armed, and
+    # because a reader wondering why nothing here matches what they remember is
+    # usually looking at a second session. Their detail is not this machine's
+    # question.
+    PATROL_OTHER_N=$((PATROL_OTHER_N + 1))
+    case "$_p_n_patrol" in
+      0) summary="none armed" ;;
+      1) summary="1 armed" ;;
+      *) summary="DUPLICATE (${_p_n_patrol})" ;;
+    esac
+    PATROL_OTHER="${PATROL_OTHER}${PATROL_OTHER:+, }${short}: ${summary}"
+  else
+    _patrol_item "$DOCTOR_OK" "session ${short}" \
+      "$(_doctor_trunc "$(_doctor_tilde "$_p_cwd")" 50) (this repo)"
+
+    case "$_p_n_patrol" in
+      0) _patrol_item "$DOCTOR_NIL" "patrol jobs" "none armed" ;;
+      1) _patrol_item "$DOCTOR_OK"  "patrol jobs" "1 armed" ;;
+      *) _patrol_item "$DOCTOR_BAD" "patrol jobs" \
+           "DUPLICATE (${_p_n_patrol}) — one Patrol per session, the rest are noise" ;;
+    esac
+    while IFS= read -r j; do
+      [ -n "$j" ] || continue
+      id="${j%%	*}"; cron="${j#*	}"; head="${cron#*	}"; cron="${cron%%	*}"
+      _patrol_detail "$(_doctor_trunc "${id} · ${cron} · ${head}" 92)"
+    done <<EOF
+$_p_jobs
+EOF
+    for id in $extras; do _patrol_detail "CronDelete ${id}"; done
+    if [ "$_p_n_other" -gt 0 ]; then
+      _patrol_item "$DOCTOR_NIL" "other jobs" \
+        "$(_doctor_trunc "${_p_n_other} — ${_p_other_jobs}" 60)"
+    fi
+
+    case "$_p_stamp" in
+      never-armed) _patrol_item "$DOCTOR_NIL" "patrol stamp" "never armed" ;;
+      firing)      _patrol_item "$DOCTOR_OK"  "patrol stamp" \
+                     "firing — ${_p_age}s old, limit ${_p_limit}s (2x ${_p_interval}s)" ;;
+      not-firing)  _patrol_item "$DOCTOR_BAD" "patrol stamp" \
+                     "NOT firing — ${_p_age}s old, past the ${_p_limit}s limit" ;;
+      *)           _patrol_item "$DOCTOR_NIL" "patrol stamp" "unknown — the stamp's age could not be read" ;;
+    esac
+    case "$_p_source" in
+      configured|'') : ;;
+      *) _patrol_detail "interval ${_p_interval}s came from the poker's ${_p_source} — this project configures none" ;;
+    esac
+
+    if [ "$_p_present" = "yes" ]; then
+      _patrol_item "$DOCTOR_OK" "roster" \
+        "${_p_rows} $(_doctor_plural "$_p_rows" dispatch dispatches) — ${_p_open} open, ${_p_closed} closed"
+    else
+      _patrol_item "$DOCTOR_NIL" "roster" "none — nothing was dispatched on this session"
+    fi
+
+    if [ -n "$_p_wcause" ]; then
+      _patrol_item "$DOCTOR_NIL" "dispatch wall" "unknown — ${_p_wcause}"
+    elif [ "${_p_blind:-0}" -gt 0 ]; then
+      _patrol_item "$DOCTOR_BAD" "dispatch wall" \
+        "${_p_blind} of ${_p_disp} dispatches never reached it — it is not registered"
+    else
+      _patrol_item "$DOCTOR_OK" "dispatch wall" "${_p_disp} dispatched, ${_p_rost} rostered"
+    fi
+  fi
+
+  # The findings, for the verdict at the top. Raised for EVERY live session,
+  # this repo's or not, because each names the session it is about.
+  if [ -n "$extras" ]; then
+    fix "session ${short} has ${_p_n_patrol} Patrol jobs armed → CronDelete ${extras}"
+  fi
+  if [ "$_p_stamp" = "not-firing" ]; then
+    fix "session ${short} armed the Patrol and it stopped firing → re-arm it, both halves"
+  fi
+  if [ -z "$_p_wcause" ] && [ "${_p_blind:-0}" -gt 0 ]; then
+    fix "session ${short}: ${_p_blind} dispatches bypassed the wall → re-invoke /bionic:canonical-sdlc"
+  fi
+}
+
+while IFS= read -r _p_line; do
+  [ -n "$_p_line" ] || continue
+  case "$_p_line" in
+    "patrol-session/v1|"*)
+      _patrol_flush
+      _p_sid="$(_doctor_pfield "$_p_line" session)"
+      _p_here="$(_doctor_pfield "$_p_line" here)"
+      _p_cwd="$(_doctor_pfield "$_p_line" cwd)"
+      _p_cause="$(_doctor_pfield "$_p_line" cause)"
+      _p_jobs=""; _p_other_jobs=""; _p_n_patrol=0; _p_n_other=0
+      _p_stamp=""; _p_age=""; _p_limit=""; _p_interval=""; _p_source=""
+      _p_rows=""; _p_open=""; _p_closed=""; _p_present=""
+      _p_disp=""; _p_rost=""; _p_blind=""; _p_wcause="" ;;
+    "patrol-job/v1|"*)
+      _p_id="$(_doctor_pfield "$_p_line" id)"
+      _p_cron="$(_doctor_pfield "$_p_line" cron)"
+      _p_kind="$(_doctor_pfield "$_p_line" kind)"
+      _p_prompt="$(_doctor_pfield "$_p_line" prompt)"
+      if [ "$_p_kind" = "patrol" ]; then
+        _p_n_patrol=$((_p_n_patrol + 1))
+        _p_jobs="${_p_jobs}${_p_id}	${_p_cron}	${_p_prompt}"$'\n'
+      else
+        _p_n_other=$((_p_n_other + 1))
+        _p_other_jobs="${_p_other_jobs}${_p_other_jobs:+, }${_p_id} · ${_p_cron}"
+      fi ;;
+    "patrol-stamp/v1|"*)
+      _p_stamp="$(_doctor_pfield "$_p_line" state)"
+      _p_age="$(_doctor_pfield "$_p_line" age)"
+      _p_limit="$(_doctor_pfield "$_p_line" limit)"
+      _p_interval="$(_doctor_pfield "$_p_line" interval)"
+      _p_source="$(_doctor_pfield "$_p_line" source)" ;;
+    "patrol-roster/v1|"*)
+      _p_rows="$(_doctor_pfield "$_p_line" rows)"
+      _p_open="$(_doctor_pfield "$_p_line" open)"
+      _p_closed="$(_doctor_pfield "$_p_line" closed)"
+      _p_present="$(_doctor_pfield "$_p_line" present)" ;;
+    "patrol-wall/v1|"*)
+      _p_disp="$(_doctor_pfield "$_p_line" dispatched)"
+      _p_rost="$(_doctor_pfield "$_p_line" rostered)"
+      _p_blind="$(_doctor_pfield "$_p_line" blind)"
+      _p_wcause="$(_doctor_pfield "$_p_line" cause)" ;;
+  esac
+done <<EOF
+$PATROL_LINES
+EOF
+_patrol_flush
+
 # ─── What is left to fix ─────────────────────────────────────────────────────
 #
 # COLLECTED BEFORE ANYTHING IS PRINTED, because FIX is the second section on the
@@ -1077,6 +1292,38 @@ esac
   _doctor_env_row "$DOCTOR_BAD" "legacy installed skill copy" \
     "arms the same walls twice → /bionic:setup"
 
+
+# ─── The Patrol ──────────────────────────────────────────────────────────────
+#
+# THE FOURTH TABLE, AND THE ONLY ONE WITH NO FILE UNDER IT. The three above read
+# a payload, a registry and a settings file — artifacts that exist to be read.
+# This one answers a question about something that was never written down: the
+# CLI holds its cron table in process memory, so "is the Patrol armed, once, and
+# firing" can only be RECONSTRUCTED, from the session files that name each live
+# process and from those sessions' own transcripts, where CronCreate and
+# CronDelete are recorded tool_uses like any other.
+#
+# SO THE LIMIT IS ON THE HEADING, not in a footnote. What follows is what the
+# transcript IMPLIES, and the process may hold something else — a job armed
+# before the transcript begins, a delete the platform refused, a build that
+# words its confirmation differently. A reader who acts on a `CronDelete` line
+# from here needs to know that before they act, not after.
+#
+# AND DOCTOR STILL CHANGES NOTHING. The delete line is PRINTED. Running it is
+# the reader's act in the session that owns the job, which is also the only
+# session that can: a cron job is session-scoped, and nothing on this page could
+# reach into another process's table even if it wanted to.
+echo ""
+echo "PATROL — reconstructed from the transcript: what it implies, not what the process holds"
+if [ "$PATROL_LIVE" = "0" ]; then
+  _doctor_item "$DOCTOR_NIL" "live sessions" "none — nothing to reconstruct"
+else
+  printf '%s' "$PATROL_ROWS"
+  if [ "$PATROL_OTHER_N" -gt 0 ]; then
+    _doctor_item "$DOCTOR_NIL" "other live sessions" \
+      "$(_doctor_trunc "${PATROL_OTHER_N} elsewhere — ${PATROL_OTHER}" 60)"
+  fi
+fi
 
 # ─── The one question, and the section it appends ────────────────────────────
 #
