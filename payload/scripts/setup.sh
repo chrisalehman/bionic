@@ -548,27 +548,46 @@ _setup_cli_plugin() {  # <name>
 # rename fixes the published file and still leaves the staged copy — the whole rc,
 # secrets included, under a predictable name — at the umask's mode for the span
 # before it, and makes the widening PERMANENT if the process dies in that window.
-# So `umask 077` and the `chmod` both stay ABOVE the `mv`. An absent `stat`
-# degrades to "write, don't chmod" rather than to a refusal to write at all; the
-# guard is spelled `-z … ||` for the same reason deps.sh spells it that way — this
-# is one `&&` chain, and an `-n` spelling would break it on a machine with no
-# `stat` and silently skip the rename.
-_setup_file_mode() {  # <file> — the file's mode as chmod digits, empty if unknowable
-  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null
+# So the tmp is CREATED under `umask 077` and chmodded to the original's mode
+# BEFORE a single line is written into it — remove.sh's `_rm_stage_tmp` order,
+# spelled the same way here so the two doors cannot drift again. An absent `stat`
+# degrades to "write, don't chmod" rather than to a refusal to write at all.
+#
+# AND IT IS THE TARGET'S MODE, NOT THE LINK'S (critic delta D1). A `~/.zshrc`
+# symlinked into a dotfiles repo is the commonest way people manage an rc, and a
+# bare `stat` on a symlink reports the LINK's own mode — 755 — never the file's.
+# Capturing that and handing it to `chmod` publishes the rc as `rwxr-xr-x`: WIDER
+# than the file being replaced, which is the one outcome this capture exists to
+# prevent. `-L` is what makes the capture mean the file; both flavours take it.
+_setup_file_mode() {  # <file> — the mode of what <file> RESOLVES to, empty if unknowable
+  stat -L -f '%Lp' "$1" 2>/dev/null || stat -L -c '%a' "$1" 2>/dev/null
+}
+
+# Creates <tmp> empty, owned by this user alone, then widened to no more than the
+# mode of <file>. Callers write over it and rename it onto <file>. A tmp left by
+# an earlier interrupted run is REMOVED rather than truncated: `>` on an existing
+# file keeps that file's mode, so truncating one would carry a stale width
+# through the window `umask 077` exists to close.
+_setup_stage_tmp() {  # <tmp> <file>
+  local tmp="$1" file="$2" mode
+  mode="$(_setup_file_mode "$file")"
+  rm -f "$tmp"
+  (umask 077; : > "$tmp") || return 1
+  [ -n "$mode" ] && chmod "$mode" "$tmp"
+  return 0
 }
 
 _setup_rc_strip_block() {  # <file> <start-marker> <end-marker>
-  local file="${1:-}" start="${2:-}" end="${3:-}" tmp mode
+  local file="${1:-}" start="${2:-}" end="${3:-}" tmp
   [ -f "$file" ] || return 0
   grep -qF "$start" "$file" 2>/dev/null || return 0
   tmp="${file}.bionic.tmp"
-  mode="$(_setup_file_mode "$file")"
-  if (umask 077; awk -v start="$start" -v end="$end" '
+  if _setup_stage_tmp "$tmp" "$file" \
+     && awk -v start="$start" -v end="$end" '
         $0 == start { skip=1; next }
         $0 == end   { skip=0; next }
         !skip { print }
-      ' "$file" > "$tmp") \
-     && { [ -z "$mode" ] || chmod "$mode" "$tmp"; } \
+      ' "$file" > "$tmp" \
      && mv "$tmp" "$file"; then
     return 0
   fi
@@ -1000,7 +1019,7 @@ setup_legacy_alias() {
   _setup_wants legacy-alias || return 0
   say ""
   say "6. Legacy shell alias"
-  local rc line present tmp _setup_rc_mode
+  local rc line present tmp
   rc="$(_detect_shell_rc)"
   line="$(detect_zshrc_legacy_block)"; present="${line#*present=}"
 
@@ -1032,10 +1051,11 @@ setup_legacy_alias() {
       return 0
     fi
     tmp="${rc}.bionic.tmp"
-    # Same discipline as _setup_rc_strip_block above, and for the same file.
-    _setup_rc_mode="$(_setup_file_mode "$rc")"
-    if (umask 077; grep -vE "$SETUP_ALIAS_PATTERN" "$rc" > "$tmp") \
-       && { [ -z "$_setup_rc_mode" ] || chmod "$_setup_rc_mode" "$tmp"; } \
+    # Same discipline as _setup_rc_strip_block above, and for the same file — the
+    # same helper too, so there is one staging order in this script rather than a
+    # second one that has to be kept in step by hand.
+    if _setup_stage_tmp "$tmp" "$rc" \
+       && grep -vE "$SETUP_ALIAS_PATTERN" "$rc" > "$tmp" \
        && mv "$tmp" "$rc"; then
       say "   removed (legacy unmarked alias)."
     else
