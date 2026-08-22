@@ -38,8 +38,10 @@
 #   3. tools                the substrate every machine needs — git, node, jq and
 #                           the rest — one row at a time through `install_dep`,
 #                           the same function a just-in-time offer calls.
-#   4. optional extras      the four tools nobody needs to work: offered once,
-#                           each with a line of what it is, default No.
+#   4. optional extras      everything offered once with a line of what it is and
+#                           a default of No — the conveniences nobody needs, and
+#                           (since 2026-08-22) the route tools that used to be
+#                           installed lazily mid-run.
 #   5. shell environment    CLAUDE_CODE_ENABLE_TODO_TOOLS=1, marker-scoped.
 #   6. legacy shell alias   the block claude-bootstrap.sh used to write. Auto
 #                           mode is the default now and the safer equivalent, so
@@ -74,15 +76,18 @@
 # usually absent, and a numbered step missing from most transcripts would leave
 # a hole in the sequence the nine steps above are counted in (AC-8).
 #
-# WHICH TOOLS THIS SCRIPT IS ALLOWED TO ASK ABOUT (wave-06 D-B, spec AC-11).
-# Steps 3 and 4 walk `dep_names_class basic` and `dep_names_class extra`, and
-# nothing here walks `when-needed`. That class exists because the moment to ask
-# about a headless browser is the moment a route wants one — `lib/jit.sh` makes
-# that offer, from the same `install_dep`. Setup asking would be asking about a
-# capability the user has not reached, and one of those rows (impeccable) is
-# native-kind, which `install_dep` is required to refuse outright. The classes
-# are read from the table, never restated here: a second roster is a second
-# opinion about what bionic depends on.
+# WHICH TOOLS THIS SCRIPT IS ALLOWED TO ASK ABOUT (wave-06 D-B, spec AC-11, as
+# narrowed by Chris's 2026-08-22 ruling). Steps 3 and 4 walk `dep_names_class
+# basic` and `dep_names_class extra`, and nothing here walks `when-needed`.
+# What changed on 2026-08-22 is the membership of those classes, not this rule:
+# four rows that were `when-needed` — the browser driver, the devtools server,
+# the chromium build and the pnpm-warmed animation library — are `extra` now, so
+# step 4 offers them here rather than leaving the first install to happen inside
+# the run that needed it. Two rows keep `when-needed` and this script still never
+# mentions them: `impeccable` is native-kind, which `install_dep` is required to
+# refuse outright, and `excalidraw-renderer` is a venv sync that means nothing to
+# a machine which never renders. The classes are read from the table, never
+# restated here: a second roster is a second opinion about what bionic depends on.
 #
 # CONSENT, AND WHY THERE IS ONE PROMPT SHAPE. Every mutation below is gated, per
 # item, on an explicit `y` on this script's own standard input, and the gate is
@@ -941,6 +946,13 @@ _setup_extra_why() {  # <name>
     notebooklm)      echo "a command-line client for Google NotebookLM, for research passes over sources." ;;
     context7)        echo "up-to-date documentation for libraries, fetched on demand inside a session." ;;
     '@pencil.dev/cli') echo "the Pencil design tool's command line, for turning design files into code." ;;
+    # The four rows the 2026-08-22 ruling promoted out of when-needed. Each one
+    # names the work it unblocks, because that is what a user is deciding about
+    # — a package name tells them nothing about which run stops without it.
+    '@playwright/cli') echo "the browser driver bionic's verification route uses; without it, browser checks are skipped rather than run." ;;
+    chrome-devtools) echo "the deep-inspection browser server (Lighthouse, traces, profiling) the verification route escalates to." ;;
+    playwright-chromium) echo "the headless Chromium build the diagram renderer drives; without it, diagrams cannot be rendered." ;;
+    motion)          echo "an animation library pre-warmed into the pnpm store so design work does not stop to fetch it." ;;
     *)               echo "an optional extra; bionic ships no description for it." ;;
   esac
 }
@@ -958,8 +970,10 @@ setup_extras_loop() {
   _setup_class_wanted extra || return 0
   say ""
   say "4. Optional extras"
-  say "   Nothing here is needed to use bionic. Each is offered once, with a line of"
-  say "   what it is, and the answer is No unless you say otherwise."
+  say "   Nothing here has to be answered yes. Each is offered once, with a line of"
+  say "   what it is, and the answer is No unless you say otherwise. Some are"
+  say "   conveniences; some are the tools a route needs, offered now so the route"
+  say "   does not stop to ask in the middle of your work."
   _setup_install_class extra
 }
 

@@ -467,9 +467,19 @@ while IFS= read -r dep_name; do
       # until a route needs it, so the old clause named a command that would not
       # touch the row. A when-needed unknown has the same non-action as a
       # when-needed absence, and for the same reason.
-      case "$dep_class" in
-        when-needed)
+      #
+      # AMENDED 2026-08-22: TWO FACTS DECIDE THIS SENTENCE, and they are
+      # orthogonal. The CLASS says whose job the row is. The MECHANISM says
+      # whether the unknown can ever be RESOLVED — the pnpm store is a cache with
+      # no installed-state to read, so "resolve the cause, then re-run doctor"
+      # names a repair that does not exist. Class alone was enough while the only
+      # such row was `when-needed`; the ruling that made `motion` an `extra` sent
+      # it straight to the sentence about a repair nobody can perform.
+      case "${dep_class}/${kind}" in
+        when-needed/*)
           DEGRADATION="${DEGRADATION}  ${dep_name} presence is unknown (${cause}) → no action needed; ${dep_name} is installed the first time a workflow needs it"$'\n' ;;
+        */pnpm-store)
+          DEGRADATION="${DEGRADATION}  ${dep_name} presence is unknown (${cause}) → no action needed; /bionic:setup offers ${dep_name} either way"$'\n' ;;
         *)
           DEGRADATION="${DEGRADATION}  ${dep_name} presence is unknown (${cause}) → resolve the cause above, then re-run /bionic:doctor"$'\n' ;;
       esac

@@ -310,14 +310,37 @@ exit 0
 NPMSHIM
 chmod +x "${BIN}/npm"
 
-# ─── npx and pnpm: plain recorders ───────────────────────────────────────────
-for s in npx pnpm; do
-  { printf '#!/bin/bash\n'
-    printf 'echo "%s $*" >> "$BIONIC_TEST_CALLS"\n' "$s"
-    printf 'exit 0\n'
-  } > "${BIN}/${s}"
-  chmod +x "${BIN}/${s}"
+# ─── pnpm: a plain recorder ──────────────────────────────────────────────────
+#
+# Nothing reads a pnpm store back: `_dep_check_pnpm_store` answers `unknown` by
+# construction, because a content-addressable cache has no installed-state. A
+# shim that faked one would be inventing a surface the payload does not have.
+{ printf '#!/bin/bash\n'
+  printf 'echo "pnpm $*" >> "$BIONIC_TEST_CALLS"\n'
+  printf 'exit 0\n'
+} > "${BIN}/pnpm"
+chmod +x "${BIN}/pnpm"
+
+# ─── npx, which has one machine effect the report reads back ─────────────────
+#
+# `npx --yes playwright@latest install chromium` is the `playwright-chromium`
+# row's install, and its probe is a filesystem marker under the browser cache —
+# so a pure recorder would leave that row absent after an all-yes setup and make
+# "present" unprovable in the wrong direction. The marker this writes is the same
+# one `_dep_check_playwright_browser` looks for, at the cache root the payload
+# resolves (overridden below so the path does not depend on the runner's OS).
+cat > "${BIN}/npx" <<'NPXSHIM'
+#!/bin/bash
+echo "npx $*" >> "$BIONIC_TEST_CALLS"
+for a in "$@"; do
+  if [ "$a" = "chromium" ]; then
+    d="${BIONIC_PLAYWRIGHT_CACHE:?}/chromium-1187"
+    mkdir -p "$d" && : > "${d}/INSTALLATION_COMPLETE"
+  fi
 done
+exit 0
+NPXSHIM
+chmod +x "${BIN}/npx"
 
 # ─── claude ──────────────────────────────────────────────────────────────────
 #
@@ -503,6 +526,7 @@ run_payload() {  # <script> [args...] — stdin carries the answers
     BIONIC_TEST_PKG_MAP="$PKG_MAP" \
     BIONIC_PLUGIN_ROOT="$PAYLOAD" \
     CLAUDE_PLUGIN_ROOT="$PAYLOAD" \
+    BIONIC_PLAYWRIGHT_CACHE="${HOME_FIX}/.cache/ms-playwright" \
     BIONIC_DOCTOR_PROBE_SECONDS=5 \
     bash "$script" "$@" 2>&1
 }
@@ -659,10 +683,23 @@ DOC1_RC=$?
 expect_eq "doctor exits 0" "0" "$DOC1_RC"
 
 # Every basic and extra row, read from the table rather than restated here.
+#
+# ONE MECHANISM ANSWERS SOMETHING OTHER THAN `yes`, and it is not an exception
+# made for a row that would not pass. `pnpm-store` has no presence surface at all
+# — a content-addressable cache is not an install — so `_dep_check_pnpm_store`
+# returns `unknown` on every machine, warm or cold. Asserting `yes` there would
+# demand a lie from the probe; asserting nothing would let a genuinely broken row
+# through. So the expectation is keyed on the KIND, read from the same table as
+# the roster, and it is still an equality against a stated value.
 for cls in basic extra; do
   while IFS= read -r name; do
     [ -n "$name" ] || continue
-    expect_eq "doctor: ${cls} row ${name} reports present" "yes" "$(dep_present "$DOC1" "$name")"
+    if [ "$(dep_query dep_field "$name" kind)" = "pnpm-store" ]; then
+      expect_eq "doctor: ${cls} row ${name} reports the honest unknown (a cache has no presence surface)" \
+        "unknown" "$(dep_present "$DOC1" "$name")"
+    else
+      expect_eq "doctor: ${cls} row ${name} reports present" "yes" "$(dep_present "$DOC1" "$name")"
+    fi
   done <<< "$(dep_query dep_names_class "$cls")"
 done
 

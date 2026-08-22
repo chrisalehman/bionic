@@ -590,8 +590,8 @@ expect_match "healthy: core agent-skills row satisfies the corrected ^0.6.0 cons
   "*core*agent-skills*yes*0.6.1*^0.6.0*ok*" "$(line_of "$H_OUT" "agent-skills")"
 expect_match "healthy: basic rg row renders present with its captured version" \
   "*basic*rg*yes*15.2.0*any*ok*" "$(line_of "$H_OUT" " rg ")"
-expect_match "healthy: when-needed npm-global row renders the package version npm reported" \
-  "*when-needed*@playwright/cli*yes*0.1.18*" "$(line_of "$H_OUT" "@playwright/cli")"
+expect_match "healthy: the npm-global row renders the package version npm reported" \
+  "*extra*@playwright/cli*yes*0.1.18*" "$(line_of "$H_OUT" "@playwright/cli")"
 DEP_SECTION_H="$(awk '/=== DEPENDENCIES ===/,/=== DUPLICATES ===/' "$H_OUT")"
 expect_match "healthy: the dependency table's own header names the class column" \
   "*class*name*present*version*constraint*verdict*" \
@@ -607,7 +607,7 @@ expect_match "healthy: when-needed impeccable row renders present at 4.1.1, verd
 expect_match "healthy: mcp-server row renders present" \
   "*extra*context7*yes*" "$(line_of "$H_OUT" "context7")"
 expect_match "healthy: playwright browser cache row renders present" \
-  "*when-needed*playwright-chromium*yes*" "$(line_of "$H_OUT" "playwright-chromium")"
+  "*extra*playwright-chromium*yes*" "$(line_of "$H_OUT" "playwright-chromium")"
 # THE RENDERER GETS ITS OWN ROW (epic-18 T3, AC-6). The excalidraw skill is plugin-native
 # now, so the skill itself is never a question — it arrives with bionic or bionic is not
 # installed. What IS a question is whether its renderer has been synced, and this row is the
@@ -966,17 +966,21 @@ expect_contains "healthy: the pnpm-store unknown carries its named cause" \
   "content-addressable store is a cache" "$H"
 expect_not_contains "healthy: a no-action unknown does not manufacture a setup reason" \
   "→ run /bionic:setup" "$H"
-# SIX-AXIS REVIEW C-2. The second clause used to read "/bionic:setup re-warms the
-# store either way". True at the wave base, where setup walked every non-native row;
-# false at the tip, where setup asks about `core|basic|extra` only and AC-11 makes a
-# when-needed tool nobody's to install until a route needs it. The string survived
-# because the display lint judges vocabulary, not truth — so the pin is on the
-# sentence, and it is keyed on the CLASS the claim is about rather than on the
-# mechanism that happens to produce the unknown.
-expect_not_contains "healthy: the unknown does not send the user to a command that no longer touches this row" \
-  "re-warms the store" "$H"
-expect_contains "healthy: it names what actually installs a when-needed row" \
-  "motion is installed the first time a workflow needs it" "$H"
+# SIX-AXIS REVIEW C-2, AMENDED 2026-08-22. The claim has moved twice and the pin
+# tracks it both times. It first read "/bionic:setup re-warms the store either
+# way" — true while setup walked every non-native row, false once AC-11 made a
+# when-needed tool nobody's until a route asked. C-2 keyed it on the CLASS. Chris
+# then promoted `motion` to `extra`, which makes /bionic:setup the installer again
+# and would have sent a permanently-unreadable presence to "resolve the cause
+# above, then re-run doctor" — a repair that does not exist for a cache. So the
+# sentence is keyed on class AND mechanism now, and what it must not do in either
+# case is manufacture a repair.
+MOTION_DEG="$(printf '%s\n' "$H" | /usr/bin/grep -F 'motion presence is unknown' || true)"
+expect_true "healthy: the pnpm-store unknown has a degradation line at all" test -n "$MOTION_DEG"
+expect_contains "healthy: the unknown names the command that does touch this row" \
+  "/bionic:setup offers motion either way" "$MOTION_DEG"
+expect_not_contains "healthy: …and never points at a cause a cache can never resolve" \
+  "resolve the cause above" "$MOTION_DEG"
 
 # ---------------------------------------------------------------------------
 echo ""
