@@ -212,7 +212,8 @@ expect_eq "dep_names_class core is exactly the two plugin dependencies" \
 expect_eq "dep_names_class basic is the substrate roster" \
   "aws docker gh git jq node pnpm rg uv" "$(class_names basic)"
 expect_eq "dep_names_class when-needed is the JIT roster" \
-  "@playwright/cli chrome-devtools impeccable motion playwright-chromium" "$(class_names when-needed)"
+  "@playwright/cli chrome-devtools excalidraw-renderer impeccable motion playwright-chromium" \
+  "$(class_names when-needed)"
 expect_eq "dep_names_class extra is the optional roster" \
   "@pencil.dev/cli ccstatusline context7 notebooklm" "$(class_names extra)"
 expect_eq "an unknown class returns nothing (and exits 0)" "" "$(class_names no-such-class)"
@@ -285,7 +286,7 @@ TEARDOWN_SET="$( { deps_run -- dep_names_class basic
                    deps_run -- dep_names_class when-needed
                    deps_run -- dep_names_class extra; } | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
 expect_eq "the teardown set is every row outside core" \
-  "@pencil.dev/cli @playwright/cli aws ccstatusline chrome-devtools context7 docker gh git impeccable jq motion node notebooklm playwright-chromium pnpm rg uv" \
+  "@pencil.dev/cli @playwright/cli aws ccstatusline chrome-devtools context7 docker excalidraw-renderer gh git impeccable jq motion node notebooklm playwright-chromium pnpm rg uv" \
   "$TEARDOWN_SET"
 
 echo ""
@@ -515,6 +516,59 @@ expect_eq "check_dep motion (pnpm store) -> presence honestly unknown" \
 
 expect_false "check_dep on an unknown dep exits non-zero" \
   bash -c '. "$1"; check_dep no-such-dep' _ "$DEPS_SH"
+
+echo ""
+echo "=== Group 6b: the excalidraw renderer is a when-needed row (epic-18 T3, AC-6) ==="
+#
+# WHAT THIS ROW REPLACES. The skill's README carried a "Renderer setup" block — `uv sync`
+# then `uv run playwright install chromium` — that a user was expected to find and run by
+# hand. The chromium half was already a table row (`playwright-chromium`); the venv half was
+# not, so it was the one piece of bionic's dependency surface with no probe, no consent
+# prompt and no doctor line. AC-6 makes it a row like any other: absent until a render needs
+# it, then ONE consented install.
+#
+# PRESENCE IS THE VENV, because that is the state `uv sync` leaves behind and the state the
+# render command needs. `uv` being on PATH is a different row (`uv`, class basic) and
+# answering this row's question with that one's fact is exactly the probe-contract error —
+# "is this dependency in the state setup leaves it in", not "is its tool available".
+
+expect_eq "excalidraw-renderer is a when-needed row" "when-needed" \
+  "$(deps_run -- dep_field excalidraw-renderer class)"
+expect_eq "excalidraw-renderer names the skill it serves, now inside the payload" \
+  "payload/skills/excalidraw-diagram/SKILL.md" \
+  "$(deps_run -- dep_field excalidraw-renderer consumer)"
+expect_eq "excalidraw-renderer installs by the uv-project mechanism" "uv-project" \
+  "$(deps_run -- dep_field excalidraw-renderer kind)"
+expect_eq "playwright-chromium's consumer moved into the payload with the skill" \
+  "payload/skills/excalidraw-diagram/SKILL.md" \
+  "$(deps_run -- dep_field playwright-chromium consumer)"
+
+# The probe, against a fixture references/ directory rather than the shipped one: a suite
+# that read the real payload would answer differently on a machine that had ever rendered.
+XR_REFS="$TMP/xr-refs"
+mkdir -p "$XR_REFS"
+expect_eq "check_dep excalidraw-renderer with no venv synced -> absent" \
+  "present=no|version=unknown|verdict=unknown" \
+  "$(deps_run BIONIC_EXCALIDRAW_REFS="$XR_REFS" -- check_dep excalidraw-renderer)"
+
+mkdir -p "$XR_REFS/.venv/bin"
+: > "$XR_REFS/.venv/bin/python"
+chmod +x "$XR_REFS/.venv/bin/python"
+printf 'home = /opt/homebrew/bin\nversion = 3.13.1\n' > "$XR_REFS/.venv/pyvenv.cfg"
+expect_eq "check_dep excalidraw-renderer with a synced venv -> present, version from pyvenv.cfg" \
+  "present=yes|version=3.13.1|verdict=ok" \
+  "$(deps_run BIONIC_EXCALIDRAW_REFS="$XR_REFS" -- check_dep excalidraw-renderer)"
+
+# The plan a user is shown before the question, which is also the command run after it.
+expect_eq "the install plan syncs the project, in place" \
+  "uv sync --project ${XR_REFS}" \
+  "$(deps_run BIONIC_EXCALIDRAW_REFS="$XR_REFS" -- _dep_install_argv excalidraw-renderer | tr '\n' ' ' | sed 's/ $//')"
+
+# And the teardown, which is the venv and nothing else: the skill's own files ship with the
+# plugin and leave when it does.
+expect_match "remove_dep names the venv it would delete, before asking" \
+  "*rm -rf ${XR_REFS}/.venv*" \
+  "$(printf '' | deps_run BIONIC_EXCALIDRAW_REFS="$XR_REFS" -- remove_dep excalidraw-renderer)"
 
 echo ""
 echo "=== Group 7: install_dep — consent gates every mutation ==="

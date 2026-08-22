@@ -165,6 +165,7 @@ _doctor_unknown_cause() {  # <kind> — the install mechanism the table names
       else echo "jq is not on PATH, so the plugin registry cannot be read"; fi ;;
     npm-global) echo "npm is not on PATH" ;;
     mcp-server) echo "the claude CLI is not on PATH" ;;
+    uv-project) echo "the plugin root is not set, so the project directory cannot be located" ;;
     statusline)
       if command -v jq >/dev/null 2>&1; then echo "settings.json could not be parsed"
       else echo "jq is not on PATH, so settings.json cannot be read"; fi ;;

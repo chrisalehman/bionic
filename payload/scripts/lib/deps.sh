@@ -114,6 +114,18 @@ _dep_playwright_cache() {
   esac
 }
 
+# The excalidraw skill's uv project, which lives INSIDE the plugin now (epic-18 T3, AC-6) —
+# so the directory `uv sync` writes its `.venv` into is plugin-root-relative, not
+# claude-home-relative. Empty when neither root is set, and that emptiness is deliberate: the
+# probe below turns it into `unknown` with a named cause rather than into a confident `no`
+# about a project directory nobody could locate. Same rule `_dep_check_pnpm_store` follows.
+_dep_excalidraw_refs() {
+  if [ -n "${BIONIC_EXCALIDRAW_REFS:-}" ]; then echo "$BIONIC_EXCALIDRAW_REFS"; return; fi
+  local root="${BIONIC_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}"
+  [ -n "$root" ] || { echo ""; return; }
+  echo "${root}/skills/excalidraw-diagram/references"
+}
+
 # ─── The settings values bionic offers ───────────────────────────────────────
 #
 # THE DEFAULT PERMISSION MODE, OWNED HERE BECAUSE TWO SCRIPTS MUST AGREE ON IT
@@ -140,9 +152,12 @@ BIONIC_DEFAULT_PERMISSION_MODE="auto"
 #   class                 core | basic | when-needed | extra — WHEN bionic installs it.
 #   consumer              the doctrine route that uses it: a repo-relative path
 #                         that resolves, or the literal `substrate` / `extra`.
-#                         Repo-relative, not payload-relative: the traceability
-#                         claim is about this repository's doctrine, and some
-#                         routes (excalidraw-diagram) ship outside the payload.
+#                         Repo-relative, not payload-relative, because the
+#                         traceability claim is about this repository's doctrine
+#                         — which is why a route inside the payload spells its
+#                         `payload/` prefix here rather than dropping it. Every
+#                         route now ships in the payload: excalidraw-diagram was
+#                         the last one outside it and moved in at epic-18 T3.
 #   mechanism             the install target. `scheme:target` for the package
 #                         managers (brew, brew-cask, npm, uv, pnpm, npx); a bare
 #                         https git URL for a native row, whose renderings need
@@ -192,7 +207,8 @@ aws|basic|substrate|brew:awscli|any|brew-dep|keep-shared
 impeccable|when-needed|skills/canonical-sdlc/SKILL.md|https://github.com/pbakaus/impeccable.git|^4.1.0|native|native-uninstall-offer
 @playwright/cli|when-needed|skills/browser-verify/SKILL.md|npm:@playwright/cli|any|npm-global|remove-on-consent
 chrome-devtools|when-needed|skills/browser-verify/SKILL.md|npm:chrome-devtools-mcp@latest|any|mcp-server|remove-on-consent
-playwright-chromium|when-needed|skills/excalidraw-diagram/SKILL.md|npx:playwright@latest|any|playwright-browser|remove-on-consent
+playwright-chromium|when-needed|payload/skills/excalidraw-diagram/SKILL.md|npx:playwright@latest|any|playwright-browser|remove-on-consent
+excalidraw-renderer|when-needed|payload/skills/excalidraw-diagram/SKILL.md|uv:sync|any|uv-project|remove-on-consent
 motion|when-needed|skills/canonical-sdlc/SKILL.md|pnpm:motion|any|pnpm-store|remove-on-consent
 ccstatusline|extra|extra|npx:ccstatusline@latest|any|statusline|remove-on-consent
 notebooklm|extra|extra|uv:notebooklm-py|any|uv-tool|remove-on-consent
@@ -211,6 +227,21 @@ TABLE
 # rule, no agent file, no test named either — and neither is universal enough to
 # justify as substrate. D-B dropped them by name. They are not commented out
 # here: a commented row is a row that comes back without a decision.
+#
+# `excalidraw-renderer` IS THE ROW THAT USED TO BE A README (epic-18 T3, AC-6). The skill's
+# render loop needs two things bionic does not ship: a chromium build, which has been the
+# `playwright-chromium` row all along, and a synced uv project, which was a "Renderer setup"
+# code block the user was expected to find and paste. That made it the one piece of bionic's
+# dependency surface with no probe, no consent prompt and no doctor line — invisible until a
+# render failed. It is a row now, `when-needed` like its sibling: absent until a render asks,
+# then ONE consented install.
+#
+# ITS `mechanism` IS `uv:sync` AND ITS TARGET IS NOT A PACKAGE. Every other row's locator
+# names a thing to fetch; this one names an operation on a project directory the plugin
+# already carries, and the directory comes from `_dep_excalidraw_refs` rather than from the
+# table because it is a machine path, not a declaration. The `uv:` scheme is still the honest
+# prefix — `uv` is what runs — and `_dep_locator_target` yields `sync`, which is exactly the
+# subcommand the argv below uses.
 #
 # `motion` is the one when-needed row whose consumer file does not yet name the
 # package (it is pre-warmed into the pnpm store for the design route). The class
@@ -510,6 +541,28 @@ _dep_check_playwright_browser() {
   echo "no|unknown"
 }
 
+# THE VENV IS THE STATE `uv sync` LEAVES BEHIND, so the venv is what this asks about. Not
+# whether `uv` is on PATH — that is the `uv` row's question, and answering this row with it
+# would report a renderer as ready on a machine that has never synced the project.
+#
+# The version reported is the venv's own interpreter, read out of `pyvenv.cfg`, because that
+# is the only version this mechanism HAS: there is no package and no release to name. The
+# constraint is `any`, so nothing is judged on it — it is there so the report says something
+# true rather than `unknown` about a directory it can plainly read.
+#
+# `unknown` when the project directory cannot be located at all (neither plugin-root name is
+# set), with the cause doctor renders beside it. A `no` there would be a confident answer
+# about a path nobody resolved.
+_dep_check_uv_project() {
+  local refs ver
+  refs="$(_dep_excalidraw_refs)"
+  [ -n "$refs" ] || { echo "unknown|unknown"; return 0; }
+  [ -x "${refs}/.venv/bin/python" ] || { echo "no|unknown"; return 0; }
+  ver="$(grep -E '^[[:space:]]*version[[:space:]]*=' "${refs}/.venv/pyvenv.cfg" 2>/dev/null \
+         | head -1 | sed 's/.*=[[:space:]]*//' | tr -d '[:space:]')"
+  echo "yes|${ver:-unknown}"
+}
+
 # TWO HALVES, ONE ANSWER (epic-18 T1, AC-2). `present=yes` used to mean only
 # "the command is set" — the probe-contract violation that let a machine
 # report healthy while ccstatusline rendered its own stock default (handoff
@@ -556,6 +609,7 @@ check_dep() {  # <name> -> present=<yes|no|unknown>|version=<v|unknown>|verdict=
     pnpm-store)         raw="$(_dep_check_pnpm_store "$name")" ;;
     mcp-server)         raw="$(_dep_check_mcp_server "$name")" ;;
     playwright-browser) raw="$(_dep_check_playwright_browser "$name")" ;;
+    uv-project)         raw="$(_dep_check_uv_project "$name")" ;;
     statusline)         raw="$(_dep_check_statusline "$name")" ;;
     *)                  raw="unknown|unknown" ;;
   esac
@@ -654,6 +708,14 @@ _dep_install_argv() {  # <name> — one token per line
     pnpm-store)         printf '%s\n' pnpm store add "${target}@latest" ;;
     mcp-server)         printf '%s\n' claude mcp add "$name" -s user -- npx -y "$target" ;;
     playwright-browser) printf '%s\n' npx --yes "$target" install chromium ;;
+    # `--project <dir>` rather than a `cd`: install_dep execs an argv, it does not run a
+    # shell line, so the directory has to be an argument. An unresolvable project directory
+    # yields no argv at all, which install_dep reports as "no install mechanism" instead of
+    # syncing whatever the current directory happens to be.
+    uv-project)
+      local refs; refs="$(_dep_excalidraw_refs)"
+      [ -n "$refs" ] || return 1
+      printf '%s\n' uv "$target" --project "$refs" ;;
     statusline)         return 1 ;;  # not an argv — see _dep_install_statusline
     *)                  return 1 ;;
   esac
@@ -1089,6 +1151,12 @@ remove_dep() {  # <name>
     playwright-browser)
       plan="rm -rf $(_dep_playwright_cache)"
       ;;
+    # THE VENV AND NOTHING ELSE. The skill's own files ship inside the plugin, so they leave
+    # when the plugin does; what a teardown has to account for here is the tree `uv sync`
+    # wrote into the plugin's copy, which no plugin uninstall knows about.
+    uv-project)
+      plan="rm -rf $(_dep_excalidraw_refs)/.venv"
+      ;;
     pnpm-store)
       echo "$(_dep_indent)${name}: lives in the shared pnpm store — removing it would evict a cache other projects hard-link from; leaving it."
       return 0
@@ -1122,6 +1190,11 @@ remove_dep() {  # <name>
   else
     case "$(dep_field "$name" install_fn_or_check)" in
       playwright-browser) rm -rf "$(_dep_playwright_cache)" ;;
+      uv-project)
+        local _xr_refs
+        _xr_refs="$(_dep_excalidraw_refs)"
+        [ -n "$_xr_refs" ] && rm -rf "${_xr_refs}/.venv"
+        ;;
       statusline)
         # BOTH HALVES (AC-3). The settings-clear used to `return 0` the
         # instant settings.json was absent, which skipped the config purge

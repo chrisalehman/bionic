@@ -247,7 +247,7 @@ echo "=== Group 9: route wiring — the two owner SKILL.md files name the contra
 
 CANONICAL_SKILL="${REPO}/skills/canonical-sdlc/SKILL.md"
 BROWSER_SKILL="${REPO}/skills/browser-verify/SKILL.md"
-EXCALIDRAW_SKILL="${REPO}/skills/excalidraw-diagram/SKILL.md"
+EXCALIDRAW_SKILL="${REPO}/payload/skills/excalidraw-diagram/SKILL.md"
 
 expect_true "canonical-sdlc SKILL.md names jit_check" grep -q 'jit_check' "$CANONICAL_SKILL"
 expect_true "canonical-sdlc SKILL.md names jit_offer" grep -q 'jit_offer' "$CANONICAL_SKILL"
@@ -333,33 +333,53 @@ expect_true "tests/run.sh names jit.test.sh" \
 echo ""
 echo "=== Group 11: excalidraw-diagram route fixes (epic-17 w4 S10, AC-10) ==="
 #
-# AC-10: the skill is a default-off opt-in (out of the payload since W1); its
-# hardcoded ~/.claude/skills/ literal (a bootstrap-era assumption — that path
-# is only where a manually-dropped personal skill happens to land, and hardcoding
-# it ignores CLAUDE_CONFIG_DIR the same way deps.sh's roots section guards
-# against) is replaced with the config-dir-aware form deps.sh already
-# establishes; uv and playwright-chromium are its two dependency-table rows and both
-# get the same one-sentence JIT-naming treatment as Group 9's two skills
-# (proven above); the skill states its own default-off/opt-in status so the
-# AC's language is traceable in the shipped doc, not just in this suite.
+# AC-10 pinned the skill as a default-off opt-in living outside the payload, with a
+# config-dir-aware render path because that is where a manually-copied personal skill lands.
+#
+# EPIC-18 T3 (AC-6) MOVED THE SKILL INTO THE PAYLOAD, and both halves of that pin invert with
+# it. The skill is no longer opt-in — installing bionic installs it — so a doc still calling
+# itself default-off would be telling users to copy a directory they already have. And
+# `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/excalidraw-diagram/references` is now the WRONG
+# render path on every plugin-installed machine: nothing puts the skill there, so the `cd`
+# fails and the renderer looks broken. `${CLAUDE_PLUGIN_ROOT}` is where the files actually
+# are, and it is the idiom the rest of the payload's prose already uses.
+#
+# What does NOT change: uv and playwright-chromium are still dependency-table rows the render
+# workflow must not assume, and they still get Group 9's one-sentence JIT treatment. The
+# renderer's own venv joins them as a third row (`excalidraw-renderer`) — the `uv sync` half
+# of the old First-Time Setup block, now a when-needed arm with the normal consent treatment
+# rather than a command block the user was expected to run by hand.
 
-EXCALIDRAW_README="${REPO}/skills/excalidraw-diagram/README.md"
+EXCALIDRAW_README="${REPO}/payload/skills/excalidraw-diagram/README.md"
 
 expect_true "excalidraw-diagram SKILL.md names uv's dependency-table row" grep -q '\buv\b' "$EXCALIDRAW_SKILL"
 expect_true "excalidraw-diagram SKILL.md names playwright-chromium" grep -q 'playwright-chromium' "$EXCALIDRAW_SKILL"
+expect_true "excalidraw-diagram SKILL.md names the excalidraw-renderer row" \
+  grep -q 'excalidraw-renderer' "$EXCALIDRAW_SKILL"
 
 expect_false "excalidraw-diagram SKILL.md carries no hardcoded ~/.claude/skills/ literal" \
   grep -q '~/\.claude/skills/' "$EXCALIDRAW_SKILL"
 expect_false "excalidraw-diagram README.md carries no hardcoded ~/.claude/skills/ literal" \
   grep -q '~/\.claude/skills/' "$EXCALIDRAW_README"
 
-expect_true "excalidraw-diagram SKILL.md uses the config-dir-aware path idiom" \
+# The config-dir form is now as wrong as the hardcoded one, and for the same reason: it
+# addresses a directory the plugin never writes to.
+expect_false "excalidraw-diagram SKILL.md no longer routes the renderer through CLAUDE_CONFIG_DIR" \
   grep -q 'CLAUDE_CONFIG_DIR' "$EXCALIDRAW_SKILL"
-expect_true "excalidraw-diagram README.md uses the config-dir-aware path idiom" \
+expect_false "excalidraw-diagram README.md no longer routes the renderer through CLAUDE_CONFIG_DIR" \
   grep -q 'CLAUDE_CONFIG_DIR' "$EXCALIDRAW_README"
 
-expect_true "excalidraw-diagram SKILL.md states its default-off/opt-in status" \
+expect_true "excalidraw-diagram SKILL.md addresses the renderer through CLAUDE_PLUGIN_ROOT" \
+  grep -q 'CLAUDE_PLUGIN_ROOT' "$EXCALIDRAW_SKILL"
+expect_true "excalidraw-diagram README.md addresses the renderer through CLAUDE_PLUGIN_ROOT" \
+  grep -q 'CLAUDE_PLUGIN_ROOT' "$EXCALIDRAW_README"
+
+expect_false "excalidraw-diagram SKILL.md no longer calls itself default-off" \
   grep -qi 'default-off' "$EXCALIDRAW_SKILL"
+expect_false "excalidraw-diagram README.md no longer calls itself default-off" \
+  grep -qi 'default-off' "$EXCALIDRAW_README"
+expect_true "excalidraw-diagram SKILL.md says it ships with the plugin" \
+  grep -qi 'ships with bionic' "$EXCALIDRAW_SKILL"
 
 echo ""
 echo "========================================"
