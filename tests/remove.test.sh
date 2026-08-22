@@ -47,14 +47,12 @@ set -uo pipefail
 REPO="${BIONIC_SCRIPTS_DIR}"
 REMOVE_SH="${REPO}/payload/scripts/remove.sh"
 REMOVE_MD="${REPO}/payload/commands/remove.md"
-PROFILE_SH="${REPO}/payload/scripts/lib/profile.sh"
 DETECT_SH="${REPO}/payload/scripts/lib/detect.sh"
 HOOKS_SH="${REPO}/payload/scripts/lib/hooks.sh"
 DEPS_SH="${REPO}/payload/scripts/lib/deps.sh"
 # Read, never run: Group 19's ownership arms are about a value setup.sh WRITES and
 # this script resets, and a shared value with only one reader is not shared.
 SETUP_SH="${REPO}/payload/scripts/setup.sh"
-TEMPLATE="${REPO}/payload/permissions/profile.template.json"
 
 PASS=0; FAIL=0; TOTAL=0
 ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
@@ -207,7 +205,14 @@ plant_legacy_channel_hooks() {  # <arm>
 JSON
 }
 
-# The rendered permission block, applied exactly as profile.sh would apply it.
+# The retired permission block, in the shape the deleted apply left on a machine.
+#
+# WRITTEN HERE, NOT RENDERED BY THE PAYLOAD (epic-18 T13). It used to be produced
+# by sourcing profile.sh and calling its own `render_profile`/`profile_apply`;
+# both are gone, and a fixture built by the code under test could pin the test
+# away regardless (memory: fixtures-can-pin-away-the-test). The literal below is
+# what an old machine actually carries, which is the only thing the cleanup has
+# to cope with.
 #
 # TWO SHAPES, because the strip has two branches an accretion rule hides. With a
 # rule outside the block, removing the block leaves `permissions.allow`
@@ -216,31 +221,33 @@ JSON
 # object does (`del(.permissions)`) — the branches that decide whether a cleaned
 # settings file is `{}`-littered or tidy. Mode `block-only` reaches them; the
 # default keeps the accretion rule and is what every earlier arm asserts on.
-plant_profile_block() {  # <arm> [with-accretion|block-only]
+plant_permission_block() {  # <arm> [with-accretion|block-only]
   # One `local` per line: `local a="$1" b="$a/x"` reads the OLD $a, which under
   # `set -u` is an unbound-variable abort (the trap the S8 brief names).
   local arm="$1"
   local mode="${2:-with-accretion}"
-  local rendered="${arm}/rendered.json"
-  BIONIC_PROFILE_TEMPLATE="$TEMPLATE" \
-  BIONIC_SETTINGS_FILE="$arm/home/.claude/settings.json" \
-    bash -c '. "$1"; render_profile "$2" "$3" > "$4"' _ \
-      "$PROFILE_SH" "$TEMPLATE" "/fixture/plugin/root" "$rendered"
+  local settings="$arm/home/.claude/settings.json"
   if [ "$mode" = "block-only" ]; then
     # A settings file with a key that is not permissions, so the arm proves
     # `.permissions` is deleted rather than the whole file being emptied.
-    printf '%s' '{"model":"opus"}' > "$arm/home/.claude/settings.json"
+    printf '%s' '{"model":"opus"}' > "$settings"
+    jq '.permissions.allow = [
+          "Bash(: bionic-profile-begin version=0.1.0)",
+          "Bash(bash /fixture/plugin/root/scripts/setup.sh:*)",
+          "Bash(bash /fixture/plugin/root/scripts/doctor.sh:*)",
+          "Bash(: bionic-profile-end)"
+        ]' "$settings" > "$arm/tmp.json" && mv "$arm/tmp.json" "$settings"
   else
-    # An accretion rule the machine owns, planted BEFORE the block goes in.
-    if [ -f "$arm/home/.claude/settings.json" ]; then
-      jq '.permissions.allow = ((.permissions.allow // []) + ["Bash(echo the-machines-own-rule)"])' \
-        "$arm/home/.claude/settings.json" > "$arm/tmp.json" && mv "$arm/tmp.json" "$arm/home/.claude/settings.json"
-    else
-      printf '%s' '{"permissions":{"allow":["Bash(echo the-machines-own-rule)"]}}' > "$arm/home/.claude/settings.json"
-    fi
+    # An accretion rule the machine owns, OUTSIDE the block on both sides.
+    [ -f "$settings" ] || printf '%s' '{}' > "$settings"
+    jq '.permissions.allow = ((.permissions.allow // []) + [
+          "Bash(echo the-machines-own-rule)",
+          "Bash(: bionic-profile-begin version=0.1.0)",
+          "Bash(bash /fixture/plugin/root/scripts/setup.sh:*)",
+          "Bash(bash /fixture/plugin/root/scripts/doctor.sh:*)",
+          "Bash(: bionic-profile-end)"
+        ])' "$settings" > "$arm/tmp.json" && mv "$arm/tmp.json" "$settings"
   fi
-  BIONIC_SETTINGS_FILE="$arm/home/.claude/settings.json" \
-    bash -c '. "$1"; profile_apply "$2" --consented' _ "$PROFILE_SH" "$rendered" >/dev/null 2>&1
 }
 
 # A plugin in the CLI's own install registry — the file `check_dep` reads for a
@@ -426,7 +433,6 @@ run_remove() {  # <script> <arm> <answers-file> [extra env assignments...]
     BIONIC_PLUGIN_DATA_DIR="$arm/home/.claude/plugins/data" \
     BIONIC_INSTALLED_PLUGINS_FILE="$arm/home/.claude/plugins/installed_plugins.json" \
     BIONIC_PLAYWRIGHT_CACHE="$arm/home/.cache/ms-playwright" \
-    BIONIC_PROFILE_TEMPLATE="$TEMPLATE" \
     "$@" \
     bash "$script" ${REMOVE_FLAGS:-} < "$answers" 2>&1
 }
@@ -490,7 +496,7 @@ plant_never_list "$ARM"
 plant_zshrc_marked "$ARM"
 plant_todo_export "$ARM"
 plant_legacy_channel_hooks "$ARM"
-plant_profile_block "$ARM"
+plant_permission_block "$ARM"
 plant_plugin_data "$ARM"
 plant_claude_stub "$ARM" yes yes
 # npm reports @playwright/cli present so the lane-3b removal path is live.
@@ -538,7 +544,7 @@ plant_never_list "$ARM"
 plant_zshrc_marked "$ARM"
 plant_todo_export "$ARM"
 plant_legacy_channel_hooks "$ARM"
-plant_profile_block "$ARM"
+plant_permission_block "$ARM"
 plant_plugin_data "$ARM"
 plant_claude_stub "$ARM" yes yes
 make_stub "$ARM/bin" npm 'true'
@@ -566,7 +572,7 @@ plant_never_list "$ARM"
 plant_zshrc_marked "$ARM"
 plant_todo_export "$ARM"
 plant_legacy_channel_hooks "$ARM"
-plant_profile_block "$ARM"
+plant_permission_block "$ARM"
 plant_plugin_data "$ARM"
 plant_claude_stub "$ARM" yes yes
 make_stub "$ARM/bin" npm 'true'
@@ -969,7 +975,7 @@ symlink_rc() {  # <arm> — makes <arm>/home/.zshrc a link to <arm>/dotfiles/zsh
 }
 
 # The same shape, for settings.json (S14, the S13 class applied to the three
-# settings writers the critic named at D1's tail: deps.sh, hooks.sh, profile.sh).
+# settings writers the critic named at D1's tail: deps.sh, hooks.sh, remove.sh).
 symlink_settings() {  # <arm> — makes <arm>/home/.claude/settings.json a link to <arm>/dotfiles/settings.json
   mkdir -p "$1/dotfiles"
   mv "$1/home/.claude/settings.json" "$1/dotfiles/settings.json"
@@ -1162,9 +1168,8 @@ expect_eq "…and no staged copy of it was ever wider than 0600 either" "" \
 # PERMANENT if the process dies between `mv` and `chmod`. That second case is the
 # very defect these arms were added to close, so the property is stronger than
 # they state: the inode the rename publishes is already correct and no repair is
-# owed. profile.test.sh Group 14b makes the same measurement on the shared
-# `_profile_write`/`_rm_write` body; this is the payload door's own writer, which
-# is a different function and cannot be covered by the byte-identity pin below.
+# owed. This is the payload door's own writer, a different function from
+# `_rm_write` and so not covered by the shape arms below.
 #
 # The shim shadows only `mv` and `chmod`, and only to observe and to stop the
 # clock — `hooks_strip_legacy_channel` itself is the shipped one doing real work.
@@ -1263,32 +1268,47 @@ expect_eq "and the chmod still hands the destination back its own 0644" \
   "644" "$(file_mode "$BIRTH_SETTINGS")"
 
 echo ""
-echo "=== Group 8: the permission marker block (profile_strip semantics) ==="
+echo "=== Group 8: the retired permission block, stripped ==="
 
-ARM="$(new_arm profile-block)"
+ARM="$(new_arm permission-block)"
 plant_claude_stub "$ARM" no no
-plant_profile_block "$ARM"
+plant_permission_block "$ARM"
 expect_contains "fixture: the marker block really was applied" \
   "bionic-profile-begin" "$(cat "$ARM/home/.claude/settings.json")"
 OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
 SETTINGS_TEXT="$(cat "$ARM/home/.claude/settings.json")"
-expect_not_contains "profile: the begin marker is gone" "bionic-profile-begin" "$SETTINGS_TEXT"
-expect_not_contains "profile: the end marker is gone" "bionic-profile-end" "$SETTINGS_TEXT"
-expect_not_contains "profile: a rendered rule inside the block is gone" \
+expect_not_contains "the begin marker is gone" "bionic-profile-begin" "$SETTINGS_TEXT"
+expect_not_contains "the end marker is gone" "bionic-profile-end" "$SETTINGS_TEXT"
+expect_not_contains "a rule inside the block is gone" \
   "/fixture/plugin/root/scripts/setup.sh" "$SETTINGS_TEXT"
-expect_contains "profile: the machine's own accretion rule survives" \
+expect_contains "the machine's own accretion rule survives" \
   "the-machines-own-rule" "$SETTINGS_TEXT"
-expect_true "profile: the result is still valid JSON" jq -e . "$ARM/home/.claude/settings.json"
+expect_true "the result is still valid JSON" jq -e . "$ARM/home/.claude/settings.json"
 
-# Same pin, other constant pair: the sentinels remove.sh matches on are
-# profile.sh's own. A block written under one spelling and hunted under another
-# would leave every machine's marker block orphaned in place.
+# Same pin, other constant pair: the sentinels remove.sh matches on are deps.sh's
+# own — setup.sh strips the block through deps.sh on the upgrade path, remove.sh
+# through its own copy on the teardown path. A block written under one spelling
+# and hunted under another would leave every machine's block orphaned in place.
 for sentinel in 'Bash(: bionic-profile-begin version=' 'Bash(: bionic-profile-end)'; do
-  expect_true "remove.sh carries profile.sh's sentinel verbatim: ${sentinel}" \
+  expect_true "remove.sh carries the sentinel verbatim: ${sentinel}" \
     bash -c 'grep -qF "$1" "$2"' _ "$sentinel" "$REMOVE_SH"
-  expect_true "profile.sh carries it too (the pin has two ends): ${sentinel}" \
-    bash -c 'grep -qF "$1" "$2"' _ "$sentinel" "$PROFILE_SH"
+  expect_true "deps.sh carries it too (the pin has two ends): ${sentinel}" \
+    bash -c 'grep -qF "$1" "$2"' _ "$sentinel" "$DEPS_SH"
 done
+
+# AND THE STRIP PROGRAM ITSELF, both ends. deps.sh runs it for /bionic:setup;
+# remove.sh carries its own copy because the standalone door has no library to
+# call. Compared with the interpolated variable NAMES neutralised, which is the
+# only legitimate difference between them.
+_strip_program_body() {  # <file> <var-name>
+  sed -n "/^$2='$/,/^'$/p" "$1" \
+    | sed -e 's/BIONIC_PERMISSION_BLOCK_/<BLOCK>_/g' -e 's/RM_PERMISSION_BLOCK_/<BLOCK>_/g'
+}
+DEPS_STRIP="$(_strip_program_body "$DEPS_SH" BIONIC_PERMISSION_BLOCK_STRIP_JQ)"
+RM_STRIP="$(_strip_program_body "$REMOVE_SH" RM_PERMISSION_BLOCK_STRIP_JQ)"
+expect_true "deps.sh's strip program was extracted (the pin is not vacuous)" test -n "$DEPS_STRIP"
+expect_true "remove.sh's strip program was extracted" test -n "$RM_STRIP"
+expect_eq "deps.sh and remove.sh carry the same permission-block strip" "$DEPS_STRIP" "$RM_STRIP"
 
 # And the third: the legacy-channel managed-hook substring detect.sh counts on.
 expect_true "remove.sh carries detect.sh's legacy-channel-hook predicate verbatim" \
@@ -1348,37 +1368,34 @@ expect_true "the extracted count program is the real one (it carries the predica
 expect_true "and it is the counting program, not the stripping one" \
   bash -c 'case "$1" in *"| length"*) exit 0 ;; esac; exit 1' _ "$COUNT_PROGRAM_DETECT"
 
-# C-1's corollary. The settings WRITER is the second thing duplicated across the
-# payload/standalone seam — profile.sh's `_profile_write` and remove.sh's
-# `_rm_write` are the same function under two names, and the mode-preservation
-# fix above had to be made in both. D-1's argument applies unchanged: pinning the
-# behaviour in one file and not the other is how the two drift. The only
-# legitimate difference is the function's NAME, so that is what gets neutralised.
+# C-1's corollary. `_rm_write` used to be one of a byte-identical PAIR — the
+# other half was profile.sh's `_profile_write`, and the mode-preservation fix had
+# to be made in both. profile.sh is deleted (epic-18 T13), so the byte-identity
+# pin has one end and is retired; what survives is the SHAPE arm below, which is
+# what the pin was protecting in the first place and which reaches hooks.sh's
+# writer too.
 sh_function_body() {  # <file> <fn-name>
   sed -n "/^$2() {/,/^}/p" "$1" | sed -e '1s/^[A-Za-z_][A-Za-z0-9_]*()/<WRITER>()/'
 }
-PROFILE_WRITER="$(sh_function_body "$PROFILE_SH" _profile_write)"
 RM_WRITER="$(sh_function_body "$REMOVE_SH" _rm_write)"
-expect_true "profile.sh's writer was extracted (the pin is not vacuous)" test -n "$PROFILE_WRITER"
-expect_true "remove.sh's writer was extracted" test -n "$RM_WRITER"
-expect_eq "profile.sh and remove.sh carry the same settings writer" "$PROFILE_WRITER" "$RM_WRITER"
+expect_true "remove.sh's writer was extracted (the pin is not vacuous)" test -n "$RM_WRITER"
 expect_true "the extracted writer is the real one (it carries the mode capture)" \
-  bash -c 'case "$1" in *"stat -L -f"*) exit 0 ;; esac; exit 1' _ "$PROFILE_WRITER"
+  bash -c 'case "$1" in *"stat -L -f"*) exit 0 ;; esac; exit 1' _ "$RM_WRITER"
 
-# C-1's SECOND corollary: the symlink RESOLVER, four copies of it (critic delta 2
-# N1). Every writer in the payload now resolves the path it is about to rewrite
-# to the final target of its symlink chain, so a dotfiles-managed rc or
-# settings.json is rewritten rather than replaced by a detached regular file. The
-# resolver cannot be sourced from one place — hooks.sh and profile.sh are loaded
-# on their own by these suites and by callers that load no other library, a
-# `. deps.sh` inside a library breaks the mutation arms that run a doctored COPY
-# of it from a scratch directory, and remove.sh's standalone door runs where
-# scripts/lib/ is gone entirely. So there are four, and the same argument D-1
-# makes for the writer applies unchanged: pinned against each other, or they
-# drift. Same name in all four, so nothing needs neutralising here.
+# C-1's SECOND corollary: the symlink RESOLVER, three copies of it (critic delta
+# 2 N1; a fourth lived in profile.sh until epic-18 T13 deleted that file). Every
+# writer in the payload resolves the path it is about to rewrite to the final
+# target of its symlink chain, so a dotfiles-managed rc or settings.json is
+# rewritten rather than replaced by a detached regular file. The resolver cannot
+# be sourced from one place — hooks.sh is loaded on its own by these suites and
+# by callers that load no other library, a `. deps.sh` inside a library breaks
+# the mutation arms that run a doctored COPY of it from a scratch directory, and
+# remove.sh's standalone door runs where scripts/lib/ is gone entirely. So there
+# are three, and the same argument D-1 makes for the writer applies unchanged:
+# pinned against each other, or they drift. Same name in all three, so nothing
+# needs neutralising here.
 RESOLVER_DEPS="$(sh_function_body "$DEPS_SH" bionic_link_target)"
 RESOLVER_HOOKS="$(sh_function_body "$HOOKS_SH" bionic_link_target)"
-RESOLVER_PROFILE="$(sh_function_body "$PROFILE_SH" bionic_link_target)"
 RESOLVER_RM="$(sh_function_body "$REMOVE_SH" bionic_link_target)"
 expect_true "deps.sh's symlink resolver was extracted (the pin is not vacuous)" \
   test -n "$RESOLVER_DEPS"
@@ -1386,8 +1403,6 @@ expect_true "the extracted resolver is the real one (it follows the chain with r
   bash -c 'case "$1" in *"readlink"*) exit 0 ;; esac; exit 1' _ "$RESOLVER_DEPS"
 expect_eq "hooks.sh carries the same symlink resolver as deps.sh" \
   "$RESOLVER_DEPS" "$RESOLVER_HOOKS"
-expect_eq "profile.sh carries the same symlink resolver as deps.sh" \
-  "$RESOLVER_DEPS" "$RESOLVER_PROFILE"
 expect_eq "remove.sh's standalone copy is the same symlink resolver too" \
   "$RESOLVER_DEPS" "$RESOLVER_RM"
 # The wall: a FIFTH copy, or a writer that never routes through one. Every file
@@ -1395,10 +1410,9 @@ expect_eq "remove.sh's standalone copy is the same symlink resolver too" \
 # a `.bionic.tmp` must name it — a writer added beside these without resolving is
 # the defect this pin exists to stop coming back.
 RESOLVER_FILES="$(/usr/bin/grep -rln '^bionic_link_target() {' "${REPO}/payload" | sort)"
-expect_eq "exactly four files in the payload define the symlink resolver" \
+expect_eq "exactly three files in the payload define the symlink resolver" \
   "${REPO}/payload/scripts/lib/deps.sh
 ${REPO}/payload/scripts/lib/hooks.sh
-${REPO}/payload/scripts/lib/profile.sh
 ${REPO}/payload/scripts/remove.sh" \
   "$RESOLVER_FILES"
 # THE WALL READS CODE, NOT A COMMENT (critic delta 3 F4; hardened critic delta
@@ -1442,7 +1456,7 @@ expect_eq "every payload file that stages a .bionic.tmp resolves the symlink fir
 # delta 4 G1 — the pre-fix wall (bare `*bionic_link_target*`) caught only the
 # first of these; the fix above catches all three.
 WALL_MIRROR="$TMP/wallmirror"; mkdir -p "$WALL_MIRROR"
-cp "${DEPS_SH}" "${HOOKS_SH}" "${PROFILE_SH}" "${REMOVE_SH}" "${SETUP_SH}" "$WALL_MIRROR/"
+cp "${DEPS_SH}" "${HOOKS_SH}" "${REMOVE_SH}" "${SETUP_SH}" "$WALL_MIRROR/"
 
 # Plant 1 — leading-comment mention (the original F4 shape).
 cat > "$WALL_MIRROR/plant.sh" <<'NW'
@@ -1508,9 +1522,7 @@ writer_shape_ok() {  # <label> <body>
 HOOKS_WRITER="$(sh_function_body "$HOOKS_SH" hooks_strip_legacy_channel)"
 expect_true "hooks.sh's writer was extracted (the third-writer pin is not vacuous)" \
   test -n "$HOOKS_WRITER"
-expect_true "profile.sh's writer chmods the tmp under umask 077 before the rename" \
-  writer_shape_ok profile "$PROFILE_WRITER"
-expect_true "remove.sh's writer does too" \
+expect_true "remove.sh's writer chmods the tmp under umask 077 before the rename" \
   writer_shape_ok remove "$RM_WRITER"
 expect_true "and so does hooks.sh's, which byte-identity cannot reach" \
   writer_shape_ok hooks "$HOOKS_WRITER"
@@ -1541,8 +1553,8 @@ expect_true "and deps.sh's writer chmods the tmp under umask 077 before the rena
 # beside them, and that is exactly how deps.sh's two came to be missed: nothing
 # failed when they were added. Every rename of a tmp over a settings file in the
 # payload is counted, and the count is pinned to the writers that are pinned
-# above — `_profile_write`/`_rm_write` rename over a generic `$file` and are held
-# by byte-identity, so the signature that matters here is the settings-named one.
+# above — `_rm_write` renames over a generic `$file` and is held by the shape
+# arms, so the signature that matters here is the settings-named one.
 # A new one fails this arm and its author has to route through a pinned writer or
 # extend the pin.
 SETTINGS_MV_LINES="$(/usr/bin/grep -rln 'mv "\$tmp" "\$settings"' "${REPO}/payload" | sort)"
@@ -1582,20 +1594,21 @@ do
 done
 
 echo ""
-echo "=== Group 9: payload mode and standalone mode agree on the profile strip ==="
+echo "=== Group 9: both doors strip the retired permission block the same way ==="
 
-# The one place remove.sh has two implementations: it calls profile.sh's
-# profile_strip when the library is beside it, and its own inline strip when it
-# is not. Two implementations of one behavior is exactly the drift the
-# ownership table exists to prevent, so the two are pinned against each other:
-# same fixture in, byte-identical settings file out.
+# remove.sh runs ONE strip in both modes (epic-18 T13: there is no library owner
+# left to delegate to, and the standalone door must carry it regardless). What
+# this group proves is therefore about the DOORS, not two implementations: a
+# remove.sh with no lib/ beside it reaches the same branch and produces the same
+# file as one with the payload around it. Same fixture in, byte-identical
+# settings file out — which is also the differential mutation 4 drives.
 STANDALONE_DIR="$TMP/standalone"
 mkdir -p "$STANDALONE_DIR"
 cp "$REMOVE_SH" "$STANDALONE_DIR/remove.sh" 2>/dev/null
 expect_true "standalone copy has NO lib/ directory beside it" bash -c '[ ! -d "$1/lib" ]' _ "$STANDALONE_DIR"
 
-ARM_P="$(new_arm strip-payload)"; plant_claude_stub "$ARM_P" no no; plant_profile_block "$ARM_P"
-ARM_S="$(new_arm strip-standalone)"; plant_claude_stub "$ARM_S" no no; plant_profile_block "$ARM_S"
+ARM_P="$(new_arm strip-payload)"; plant_claude_stub "$ARM_P" no no; plant_permission_block "$ARM_P"
+ARM_S="$(new_arm strip-standalone)"; plant_claude_stub "$ARM_S" no no; plant_permission_block "$ARM_S"
 expect_eq "fixture parity: both arms start byte-identical" \
   "$(shasum < "$ARM_P/home/.claude/settings.json")" "$(shasum < "$ARM_S/home/.claude/settings.json")"
 
@@ -1610,9 +1623,9 @@ expect_eq "payload-mode strip and standalone-mode strip produce byte-identical s
 # about them. This second arm plants the block as the ONLY allow entry, which
 # is the ordinary state of a machine that never added a rule of its own.
 ARM_P2="$(new_arm strip-payload-blockonly)"
-plant_claude_stub "$ARM_P2" no no; plant_profile_block "$ARM_P2" block-only
+plant_claude_stub "$ARM_P2" no no; plant_permission_block "$ARM_P2" block-only
 ARM_S2="$(new_arm strip-standalone-blockonly)"
-plant_claude_stub "$ARM_S2" no no; plant_profile_block "$ARM_S2" block-only
+plant_claude_stub "$ARM_S2" no no; plant_permission_block "$ARM_S2" block-only
 expect_eq "block-only fixture parity: both arms start byte-identical" \
   "$(shasum < "$ARM_P2/home/.claude/settings.json")" "$(shasum < "$ARM_S2/home/.claude/settings.json")"
 
@@ -1671,12 +1684,11 @@ expect_contains "block-only: the unrelated settings key survives" '"model"' "$P2
 # THE SAME TRAP, THROUGH THE STANDALONE DOOR (S14, the S13 class). Everything
 # above in this group proves payload and standalone modes agree byte-for-byte;
 # this proves the agreement holds when settings.json is a symlink too. The
-# standalone door runs `_rm_write` directly — profile.sh is not beside it to
-# delegate to `_profile_write` — so this is the one place in the suite that
-# reaches `_rm_write`'s own mode capture, which is byte-identical to
-# `_profile_write`'s (pinned earlier in this file) and must be fixed in lockstep.
+# standalone door runs `_rm_write` directly, so this is the place in the suite
+# that reaches `_rm_write`'s own mode capture — held to shape by the writer arms
+# earlier in this file.
 ARM_S5="$(new_arm strip-standalone-symlink)"
-plant_claude_stub "$ARM_S5" no no; plant_profile_block "$ARM_S5"
+plant_claude_stub "$ARM_S5" no no; plant_permission_block "$ARM_S5"
 symlink_settings "$ARM_S5"
 chmod 600 "$ARM_S5/dotfiles/settings.json"
 expect_eq "fixture: the standalone symlink arm's TARGET really is 0600" \
@@ -1701,7 +1713,7 @@ plant_never_list "$ARM"
 plant_zshrc_marked "$ARM"
 plant_todo_export "$ARM"
 plant_legacy_channel_hooks "$ARM"
-plant_profile_block "$ARM"
+plant_permission_block "$ARM"
 plant_plugin_data "$ARM"
 # The machine this door exists for: the plugin is already gone from the CLI.
 plant_claude_stub "$ARM" no no
@@ -1766,7 +1778,7 @@ plant_never_list "$ARM"
 plant_zshrc_marked "$ARM"
 plant_todo_export "$ARM"
 plant_legacy_channel_hooks "$ARM"
-plant_profile_block "$ARM"
+plant_permission_block "$ARM"
 plant_plugin_data "$ARM"
 plant_claude_stub "$ARM" no no
 # PATH is replaced wholesale, so even the fixture's own stubs are out of reach
@@ -2076,33 +2088,33 @@ else
   no "MUTANT (consent always yes): mutation did not apply — _rm_consent was renamed"
 fi
 
-# Mutation 4: perturb the INLINE profile-strip jq itself. The three mutations
-# above cover the never-list, the wrapper rule and the consent gate; none
-# touched RM_PROFILE_STRIP_JQ, so Group 9's differential — the only thing
-# standing between remove.sh's standalone copy and profile.sh's original — had
-# never been shown able to fail. Dropping the container-collapse step is the
+# Mutation 4: perturb the INLINE permission-block strip itself. The three
+# mutations above cover the never-list, the wrapper rule and the consent gate;
+# none touched RM_PERMISSION_BLOCK_STRIP_JQ, so the comparison Group 9 makes —
+# production against a doctored copy, run through the two doors — had never been
+# shown able to fail. Dropping the container-collapse step is the
 # smallest edit that changes the OUTPUT rather than crashing the program, and
 # it is invisible on a fixture carrying an accretion rule, which is why this
 # runs on the block-only shape.
 sed 's|^    then del(\.permissions) else \. end$|    then . else . end|' "$REMOVE_SH" > "$MUT/remove-weak-strip.sh"
 if [ "$(shasum < "$MUT/remove-weak-strip.sh")" != "$(shasum < "$REMOVE_SH")" ]; then
   ARM_MP="$(new_arm mutant-strip-payload)"
-  plant_claude_stub "$ARM_MP" no no; plant_profile_block "$ARM_MP" block-only
+  plant_claude_stub "$ARM_MP" no no; plant_permission_block "$ARM_MP" block-only
   ARM_MS="$(new_arm mutant-strip-standalone)"
-  plant_claude_stub "$ARM_MS" no no; plant_profile_block "$ARM_MS" block-only
+  plant_claude_stub "$ARM_MS" no no; plant_permission_block "$ARM_MS" block-only
   MUT_STANDALONE="$TMP/standalone-mutant"; mkdir -p "$MUT_STANDALONE"
   cp "$MUT/remove-weak-strip.sh" "$MUT_STANDALONE/remove.sh"
   run_remove "$REMOVE_SH" "$ARM_MP" "$ALL_YES" >/dev/null 2>&1
   run_remove "$MUT_STANDALONE/remove.sh" "$ARM_MS" "$ALL_YES" >/dev/null 2>&1
   if [ "$(shasum < "$ARM_MP/home/.claude/settings.json")" = "$(shasum < "$ARM_MS/home/.claude/settings.json")" ]; then
-    no "MUTANT (weakened profile strip): Group 9's differential failed to discriminate"
+    no "MUTANT (weakened permission-block strip): the production/mutant differential failed to discriminate"
   else
-    ok "MUTANT (weakened profile strip): Group 9's differential goes red as expected"
+    ok "MUTANT (weakened permission-block strip): the production/mutant differential goes red as expected"
   fi
-  expect_contains "MUTANT (weakened profile strip): the mutant leaves the empty permissions object behind" \
+  expect_contains "MUTANT (weakened permission-block strip): the mutant leaves the empty permissions object behind" \
     '"permissions"' "$(cat "$ARM_MS/home/.claude/settings.json")"
 else
-  no "MUTANT (weakened profile strip): mutation did not apply — RM_PROFILE_STRIP_JQ was reshaped"
+  no "MUTANT (weakened permission-block strip): mutation did not apply — RM_PERMISSION_BLOCK_STRIP_JQ was reshaped"
 fi
 
 # The production files are unchanged by every arm above.
@@ -2389,7 +2401,7 @@ expect_eq "mutation: a planted auto is now somebody else's setting and is left a
 expect_not_contains "mutation: and it is not even asked about" \
   "Reset Claude Code's default permission mode?" "$OUT"
 
-# ---- the one-pass property: the item sits with the profile strip, before the finisher ----
+# ---- the one-pass property: the item sits with the block strip, before the finisher ----
 expect_true "default mode: the item's source sits before the native-uninstall finisher" \
   bash -c '
     a=$(grep -n "default permission mode:" "$1" | head -1 | cut -d: -f1)
@@ -2533,11 +2545,11 @@ ARM="$(new_arm route-everywhere)"
 plant_never_list "$ARM"
 plant_zshrc_marked "$ARM"
 plant_todo_export "$ARM"
-plant_profile_block "$ARM"
+plant_permission_block "$ARM"
 plant_plugin_data "$ARM"
 plant_claude_stub "$ARM" yes yes
 ALL_NO_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
-for rm_item in legacy-alias environment permission-profile plugin-data plugin; do
+for rm_item in legacy-alias environment legacy-permission-block plugin-data plugin; do
   expect_contains "the whole-pass output names --only ${rm_item}" "--only ${rm_item}" "$ALL_NO_OUT"
 done
 expect_contains "the Skipped list carries the route beside what was left" \
@@ -2764,7 +2776,7 @@ plant_everything() {  # <arm>
   jq '.env = {"OTHER":"x","CLAUDE_CODE_ENABLE_TODO_TOOLS":"1","BASH_MAX_TIMEOUT_MS":"1800000"}' \
     "$arm/home/.claude/settings.json" > "$arm/env.tmp" \
     && mv "$arm/env.tmp" "$arm/home/.claude/settings.json"
-  plant_profile_block "$arm"
+  plant_permission_block "$arm"
   plant_default_mode "$arm" auto
   plant_legacy_skill_copy "$arm"
   plant_plugin_data "$arm"
@@ -2795,8 +2807,8 @@ expect_contains "--all: …the retired hook entries" \
   "• remove the retired hook entries from" "$ALL_OUT"
 expect_contains "--all: …the pre-plugin skill copy" \
   "• remove the pre-plugin skill copy at" "$ALL_OUT"
-expect_contains "--all: …the permission marker block" \
-  "• remove bionic's permission marker block from" "$ALL_OUT"
+expect_contains "--all: …the retired permission block" \
+  "• remove bionic's retired permission block from" "$ALL_OUT"
 expect_contains "--all: …the default permission mode" \
   "• reset Claude Code's default permission mode" "$ALL_OUT"
 expect_contains "--all: …and the plugin data" \

@@ -147,7 +147,6 @@ echo "=== C — one owner per file: link to the repo's owner, or BE the owner ==
 # root-level installer, retires at W5.
 #
 #   scripts/      the four commands and the libraries behind them (W3 S1)
-#   permissions/  the permission-profile template (W3 S5, spec AC-6)
 #   commands/     the shipped slash-command files (W3 S9)
 #   ccstatusline/ the ccstatusline widget-layout settings.json (W4 S11, spec AC-11 — moved
 #                 from a repo-root ccstatusline/ dir that had no other consumer)
@@ -173,7 +172,7 @@ echo "=== C — one owner per file: link to the repo's owner, or BE the owner ==
 # where a second owner for a skill would appear. It is a second list rather than a second
 # spelling inside the first because the exclusion path and the twin path both differ, and
 # folding them would mean a conditional in three places instead of a name in one.
-PAYLOAD_NATIVE_DIRS="scripts permissions commands ccstatusline integrity"
+PAYLOAD_NATIVE_DIRS="scripts commands ccstatusline integrity"
 PAYLOAD_NATIVE_SKILL_DIRS="$NATIVE_SKILLS"
 
 if [ ! -d "$PAYLOAD" ]; then

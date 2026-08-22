@@ -262,10 +262,6 @@ run "detect-probes.test.sh" bash tests/detect-probes.test.sh
 # section of plugin-lib.test.sh — different subject, different fixture regime — and so,
 # like every suite outside hooks/, hand-listed here or it never runs.
 run "spawn-worktree.test.sh" bash tests/spawn-worktree.test.sh
-# The permission pipeline (epic-17 W3 S5, spec AC-6 / D2-final): the shipped template in
-# payload/permissions/ and payload/scripts/lib/profile.sh, driven against fixture settings
-# files in a temp tree. Hand-listed like every suite outside hooks/.
-run "profile.test.sh" bash tests/profile.test.sh
 # The JIT / degradation contract (epic-17 W3 S10, spec AC-5): payload/scripts/lib/jit.sh's
 # jit_check + jit_offer, driven against a fixture PATH, proving jit_offer calls install_dep
 # BY NAME (the ownership-table agreement) and mutates nothing on decline. Hand-listed like
@@ -279,9 +275,8 @@ run "env.test.sh" bash tests/env.test.sh
 # Command-file conventions (epic-17 W3 S9, spec AC-1): globs payload/commands/*.md.
 run "command-format.test.sh" bash tests/command-format.test.sh
 # Command PERMISSIONS (epic-17 W6 S9b, walk finding W-1 / plan A-5.4): the byte-for-byte
-# agreement between each command file's own `allowed-tools` rule prefix, every fenced
-# `bash` invocation in that same file, and profile.template.json's rule for the same
-# script. A permission rule prefix-matches the literal command string, so one quote
+# agreement between each command file's own `allowed-tools` rule prefix and every fenced
+# `bash` invocation in that same file. A permission rule prefix-matches the literal command string, so one quote
 # character in a body silently un-authorizes it — which is what walled bionic's own
 # commands. Hand-listed like every suite outside hooks/.
 run "command-permissions.test.sh" bash tests/command-permissions.test.sh

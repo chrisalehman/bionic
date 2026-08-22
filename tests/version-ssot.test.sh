@@ -119,31 +119,10 @@ PLUGIN_MAJOR="${PLUGIN_VERSION%%.*}"
 expect_eq "(d) plugin.json major version is pinned at 1 (paired with SUPPORTED_SDLC_VERSION 14)" \
   "1" "$PLUGIN_MAJOR"
 
-echo ""
-echo "=== Arm (e): the permission profile template renders plugin.json's version ==="
-#
-# Added epic-17 W3 S5. The ownership table makes plugin.json the single version
-# owner and names "profile template version" as one of its rendering surfaces,
-# so the template joins the same agreement the dependency manifests are held to.
-# TWO copies live in that file and both are pinned: the `version` field, and the
-# version carried by the begin marker — the marker's copy is what an applied
-# block reports long after the payload has moved on, so a desync there would
-# make doctor confidently report the wrong installed version.
-
-PROFILE_TEMPLATE="${REPO}/payload/permissions/profile.template.json"
-expect_true "(e) payload/permissions/profile.template.json exists" test -f "$PROFILE_TEMPLATE"
-TEMPLATE_VERSION="$(python3 -c "import json; print(json.load(open('$PROFILE_TEMPLATE')).get('version',''))" 2>/dev/null)"
-expect_eq "(e) profile template version equals plugin.json version" "$PLUGIN_VERSION" "$TEMPLATE_VERSION"
-
-MARKER_VERSION="$(python3 -c "
-import json
-p='$PROFILE_TEMPLATE'
-rules=json.load(open(p)).get('permissions',{}).get('allow',[])
-pre='Bash(: bionic-profile-begin version='
-hits=[r for r in rules if isinstance(r,str) and r.startswith(pre)]
-print(hits[0][len(pre):].rstrip(')') if len(hits)==1 else '')
-" 2>/dev/null)"
-expect_eq "(e) the begin marker's version equals plugin.json version" "$PLUGIN_VERSION" "$MARKER_VERSION"
+# ARM (e) IS GONE (epic-18 T13). It pinned the permission-profile template's two
+# version copies to plugin.json's. bionic no longer ships a managed allow-list at
+# all, so that rendering surface no longer exists and plugin.json has one fewer
+# site to stay agreed with. The remaining sites are the arms above.
 
 echo ""
 echo "========================================"
