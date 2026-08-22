@@ -735,8 +735,11 @@ _dep_check_uv_project() {
   refs="$(_dep_excalidraw_refs)"
   [ -n "$refs" ] || { echo "unknown|unknown"; return 0; }
   [ -x "${refs}/.venv/bin/python" ] || { echo "no|unknown"; return 0; }
-  ver="$(grep -E '^[[:space:]]*version[[:space:]]*=' "${refs}/.venv/pyvenv.cfg" 2>/dev/null \
-         | head -1 | sed 's/.*=[[:space:]]*//' | tr -d '[:space:]')"
+  # The version that means something here is the renderer's driver — the
+  # playwright the sync pinned — not the venv's interpreter (Chris 2026-08-22:
+  # the row read "records no version" while a real one sat in the venv).
+  ver="$(cat "${refs}"/.venv/lib/python*/site-packages/playwright-*.dist-info/METADATA 2>/dev/null \
+         | /usr/bin/grep -m1 '^Version:' | sed 's/^Version:[[:space:]]*//' | tr -d '[:space:]')"
   echo "yes|${ver:-unknown}"
 }
 
