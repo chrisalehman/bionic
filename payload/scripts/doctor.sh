@@ -618,7 +618,6 @@ N_ABSENT_ACTIONABLE=0; N_ABSENT_WHEN_NEEDED=0
 ROSTER_TOTAL=0; ROSTER_TOTAL_KNOWN=yes
 ROSTER_ZERO=0
 ABSENT_NAMES=""
-CCSTATUSLINE_STATE="unknown"
 
 while IFS= read -r dep_name; do
   [ -n "$dep_name" ] || continue
@@ -634,7 +633,6 @@ while IFS= read -r dep_name; do
   dep_class="$(dep_field "$dep_name" class)"
   kind="$(dep_field "$dep_name" kind)"
 
-  [ "$dep_name" = "ccstatusline" ] && CCSTATUSLINE_STATE="$present"
   DEP_VERSIONS="${DEP_VERSIONS}${dep_name}	${dep_version}"$'\n'
 
   # THE SYMBOL IS THE VERDICT COLUMN (AC-15 rule 1). The table used to carry the
@@ -1121,11 +1119,6 @@ case "$PROFILE_VERDICT" in
   stale)     _doctor_env3 "$DOCTOR_BAD" "permission profile" "$PROFILE_VERSION" "applied, stale → /bionic:setup" ;;
   absent)    _doctor_env3 "$DOCTOR_BAD" "permission profile" "—" "none applied → /bionic:setup" ;;
   *)         _doctor_env3 "$DOCTOR_NIL" "permission profile" "—" "unknown — jq is not on PATH" ;;
-esac
-case "$CCSTATUSLINE_STATE" in
-  yes)     _doctor_env3 "$DOCTOR_OK"  "statusLine.command" "ccstatusline" "set" ;;
-  unknown) _doctor_env3 "$DOCTOR_NIL" "statusLine.command" "—" "unknown — $(_doctor_unknown_cause statusline)" ;;
-  *)       _doctor_env3 "$DOCTOR_BAD" "statusLine.command" "—" "not set → /bionic:setup" ;;
 esac
 # THE LEFTOVERS, AND ONLY WHEN THERE ARE ANY. Six checks ask the same kind of
 # question — did the retired installer leave something behind — and on a machine
