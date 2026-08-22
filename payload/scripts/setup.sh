@@ -294,6 +294,7 @@ SETUP_ONLY=""
 # SECOND, third and ninth question about a decision already made — see the note
 # above `_setup_print_plan` for why the plan, and not the flag, is the consent.
 SETUP_ALL=0
+SETUP_PLUGIN_CHANGED=no
 # BOTH NAMES, NOT JUST THIS SCRIPT'S (epic-17 W7 S11, six-axis review axis 4).
 # `_dep_consent` grants consent on `SETUP_ALL` OR `RM_ALL`, and every question this
 # script asks goes through it. Zeroing only the name this script sets left the other
@@ -951,18 +952,27 @@ _setup_install_class() {  # <class>
     _setup_wants "tool:${name}" || continue
     raw="$(check_dep "$name")" || continue
     present="${raw#present=}"; present="${present%%|*}"
-    [ "$present" != "yes" ] && [ "$(dep_field "$name" class)" = "extra" ] \
+    # ONE LINE PER ITEM (Chris 2026-08-22: "Step 4 is very difficult to read").
+    # The why-sentence is the question's context, so it prints only where a
+    # question is live — the per-item pass. Under --all the page already carried
+    # it and the item reports its result in one line.
+    [ "$present" != "yes" ] && [ "$(dep_field "$name" class)" = "extra" ] && [ "$SETUP_ALL" != "1" ] \
       && say "   ${name} — $(_setup_extra_why "$name")"
     case "$present" in
       yes)
         item "$SETUP_OK" "$name" "present"
         ;;
       unknown)
-        item "$SETUP_NIL" "$name" "presence unknown — bionic cannot read whether this one is here"
-        _setup_install_one "$name" || action "install ${name} by hand: $(_jit_fix_line "$name") — bionic could not confirm whether it is already there; $(_setup_answer_yes "tool:${name}")"
+        [ "$SETUP_ALL" = "1" ] || item "$SETUP_NIL" "$name" "presence unknown — bionic cannot read whether this one is here"
+        if _setup_install_one "$name"; then
+          [ "$SETUP_ALL" = "1" ] && item "$SETUP_OK" "$name" "installed — $(_setup_extra_why "$name")"
+        else
+          action "install ${name} by hand: $(_jit_fix_line "$name") — bionic could not confirm whether it is already there; $(_setup_answer_yes "tool:${name}")"
+        fi
         ;;
       *)
         if _setup_install_one "$name"; then
+          [ "$SETUP_ALL" = "1" ] && item "$SETUP_OK" "$name" "installed — $(_setup_extra_why "$name")"
           # THE ONE ITEM WHOSE RESULT THIS SESSION CANNOT SHOW. Everything else
           # setup installs is on PATH the moment it lands. The statusline is a
           # key in settings.json that the CLI read when it started, so a user who
@@ -1018,11 +1028,8 @@ setup_tools_loop() {
 setup_extras_loop() {
   _setup_class_wanted extra || return 0
   say ""
-  say "4. Optional extras"
-  say "   Nothing here has to be answered yes. Each is offered once, with a line of"
-  say "   what it is, and the answer is No unless you say otherwise. Some are"
-  say "   conveniences; some are the tools a route needs, offered now so the route"
-  say "   does not stop to ask in the middle of your work."
+  say "4. Workflow tools"
+  [ "$SETUP_ALL" = "1" ] || say "   Each is offered once with a line of what it is; the answer is No unless you say yes."
   _setup_install_class extra
 }
 
@@ -1433,6 +1440,8 @@ setup_summary() {
   # filing it among the failures would say the statusline did not get installed.
   [ "$SETUP_STATUSLINE_CHANGED" = "yes" ] && \
     say "   the status line appears after a restart of Claude Code."
+  [ "${SETUP_PLUGIN_CHANGED:-}" = "yes" ] && \
+    say "   newly installed plugins take effect after /reload-plugins or a new session."
   if [ -z "$SETUP_ACTIONS" ]; then
     # A NARROWED RUN MAY NOT CLAIM THE WHOLE MACHINE (the RV-6 class: a summary
     # that overreaches teaches the reader to stop reading it). One item finished
