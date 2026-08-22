@@ -42,6 +42,9 @@ It will ask about:
 - Optional extras, each with a one-line why — default no
 - Whether to set Claude Code's permission mode to auto (recommended)
 
+If you add the status line, restart your session before it shows — Claude Code reads it once
+at startup.
+
 ### 3. Done.
 
 `/bionic:help` for the tour, `/bionic:doctor` if anything looks off. If `/bionic:doctor`
