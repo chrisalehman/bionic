@@ -87,9 +87,14 @@ set -uo pipefail
 # Parsed FIRST, before a single fact is gathered: a caller who misspelled the one
 # flag should be told so immediately, not after a full report they will not read.
 DOCTOR_WANT_UPDATES=no
+# THE REPORT IS AN INVENTORY, NOT A DOSSIER (certified 2026-08-22; verbose arm
+# removed same day by owner order — the explainer prose is deleted, not parked).
+# Three tables answer the three questions a user has — what ships in the plugin,
+# what setup installed and at which version, what this machine's environment
+# carries.
 while [ $# -gt 0 ]; do
   case "$1" in
-    --updates) DOCTOR_WANT_UPDATES=yes ;;
+    --updates)          DOCTOR_WANT_UPDATES=yes ;;
     *)
       echo "doctor.sh: unknown option '$1' — the only option is --updates" >&2
       exit 2 ;;
@@ -139,6 +144,100 @@ BIONIC_PLUGIN_ID="bionic@bionic"
 # function.
 
 # ─── Small renderers ─────────────────────────────────────────────────────────
+#
+# THE FOUR FORMAT RULES (spec AC-15, approved 2026-08-22). This report used to
+# spend two lines on every fact — a value, then a sentence explaining the value —
+# and open each section with a paragraph about how the section works. Read down a
+# terminal that is eighty columns wide, a long line then wrapped into a second
+# one, and a twenty-row machine printed as a hundred and twelve lines nobody
+# could scan. The rules, in the shape they are implemented here:
+#
+#   1. ONE LINE PER ITEM, with a status symbol in column one. `_doctor_item` is
+#      the only way a fact reaches the page, so a row added by any future arm
+#      inherits the format without knowing it exists.
+#   2. NO PROSE ON A HEALTHY ITEM. A value that is fine is the value and nothing
+#      else; the sentence that used to follow it explained a state the symbol now
+#      carries. Section explainers are gone from the default output entirely —
+#      what the DEPENDENCIES class column means, how a roster line is counted,
+#      what the permission block is three-way between. That reasoning lives in
+#      the comments of this file, where the person it is addressed to is reading.
+#   3. THE VERDICT FIRST. SUMMARY is the first section and FIX is the second, so
+#      the two questions a reader actually has — is anything wrong, and what do I
+#      type — are answered before the detail they can skip.
+#   4. FILLER COLLAPSES TO A COUNT. Fourteen dependencies contributing zero
+#      roster lines, six legacy checks all clean: those are one line each about
+#      nothing. They are counted and summarised, and only the rows carrying a
+#      real value are printed.
+#
+# AND EVERY LINE FITS. Nothing printed below may exceed 100 columns —
+# tests/doctor.test.sh walls it for both fixture machines — because a wrapped
+# line is rule 1 broken by the terminal rather than by this file.
+
+# The three symbols, and the invariant that gives them meaning: ✗ is printed if
+# and only if the same run puts a matching line in FIX. Anything true but not
+# actionable — an install behind the tip, a locally edited role file, a
+# when-needed tool nobody has needed yet — is `–`, never ✗. A report that marked
+# every unusual fact as broken would be nagging a machine that is working, which
+# is the defect the degradation map already had to have designed out of it.
+DOCTOR_OK='✓'
+DOCTOR_BAD='✗'
+DOCTOR_NIL='–'
+
+# A padded column with nothing after it is trailing whitespace, which every diff
+# and every `git show` renders as an error. Rows are built and then trimmed.
+_doctor_rtrim() {  # <line>
+  local s="${1}"
+  printf '%s' "${s%"${s##*[! ]}"}"
+}
+
+# All three are three bytes, so `%s` in the symbol position pads the same width
+# for each and the label column below it stays straight. Padding the symbol
+# itself with `%-Ns` would NOT be safe: printf pads to a byte count, and a
+# multi-byte glyph in a padded field steps the whole column two places left.
+# 30, because the longest label this report prints is an environment name —
+# CLAUDE_CODE_ENABLE_TODO_TOOLS, 29 characters — and a label that overruns its
+# column pushes one row's value out of line with every other row's.
+_doctor_item() {  # <symbol> <label> <value>
+  local line
+  printf -v line '  %s %-30s %s' "$1" "$2" "${3:-}"
+  printf '%s\n' "$(_doctor_rtrim "$line")"
+}
+
+# A path under the user's home, written the way they would type it. Not
+# cosmetics: `/Users/<name>/…` costs a dozen columns before the interesting part
+# of the path starts, and those are the columns that decide whether the line
+# wraps. The substitution is exact-prefix only, so a path that merely begins with
+# the same letters is left alone.
+_doctor_tilde() {  # <path>
+  local p="${1:-}"
+  case "$p" in
+    "$HOME"/*) printf '~%s' "${p#"$HOME"}" ;;
+    *)         printf '%s' "$p" ;;
+  esac
+}
+
+# The FIX section, accumulated as the run discovers problems and printed near the
+# top — which is why it is collected rather than echoed where it is found. One
+# line per problem, and the line ENDS with what to type: a problem stated without
+# its command is the half of the job this report used to leave undone.
+FIX_LINES=""
+# THE VERDICT LINE NAMES THE PROBLEMS, so the problems have to be nameable. Each
+# fix sentence is `<what is wrong> → <what to type>`, and the half before the
+# arrow is already the name — accumulated here rather than re-derived later,
+# because a second parse of this report's own prose is exactly the kind of
+# reading that drifts. Problems /bionic:setup can repair are kept apart from the
+# ones it cannot: one command covers the first group and is said once, and the
+# rest each need their own line or they reach the user as a count with no cure.
+FIX_NAMES_SETUP=""
+FIX_LINES_OTHER=""
+fix() {  # <problem> → <command>
+  local line="${1}" name="${1%% → *}"
+  FIX_LINES="${FIX_LINES}  ${DOCTOR_BAD} ${line}"$'\n'
+  case "$line" in
+    *"/bionic:setup") FIX_NAMES_SETUP="${FIX_NAMES_SETUP}${FIX_NAMES_SETUP:+; }${name}" ;;
+    *)                FIX_LINES_OTHER="${FIX_LINES_OTHER}${line}"$'\n' ;;
+  esac
+}
 
 # yes/no/unknown as the words a person reads in a report.
 _doctor_word() {  # <yes|no|unknown>
@@ -157,18 +256,132 @@ _doctor_plural() {  # <count> <singular> <plural>
 # Why a value came back `unknown`. The mechanism decides: a cache has no
 # presence surface at all, and everything else is a missing tool the report can
 # name. Rendering-layer explanation only — the VALUE is always the library's.
+#
+# SHORT ENOUGH TO RIDE ON THE ROW (AC-15). These used to be sentences, printed on
+# a line of their own under the row they explained; they are now the row's last
+# column, so each has to leave the line inside 100 columns. Nothing was dropped
+# that a reader could act on: "the pnpm content-addressable store is a cache, not
+# an install surface" and "a cache, no presence surface" answer the same question,
+# and only one of them fits beside the fact it is about.
 _doctor_unknown_cause() {  # <kind> — the install mechanism the table names
   case "${1:-}" in
-    pnpm-store) echo "the pnpm content-addressable store is a cache, not an install surface" ;;
+    pnpm-store) echo "a cache, no presence surface" ;;
     native)
       if command -v jq >/dev/null 2>&1; then echo "the plugin registry could not be parsed"
-      else echo "jq is not on PATH, so the plugin registry cannot be read"; fi ;;
+      else echo "jq is not on PATH"; fi ;;
     npm-global) echo "npm is not on PATH" ;;
     mcp-server) echo "the claude CLI is not on PATH" ;;
     statusline)
       if command -v jq >/dev/null 2>&1; then echo "settings.json could not be parsed"
-      else echo "jq is not on PATH, so settings.json cannot be read"; fi ;;
-    *)          echo "this mechanism exposes no presence surface" ;;
+      else echo "jq is not on PATH"; fi ;;
+    *)          echo "no presence surface" ;;
+  esac
+}
+
+# ─── The three certified tables ──────────────────────────────────────────────
+#
+# ONE ROW BUILDER PER TABLE, and the widths live here rather than at each
+# callsite, because a column is only a column while every row agrees about it.
+# Each builder trims its own tail, so a row whose last cell is empty — the
+# healthy case, since rule 2 gives a working item no prose — leaves no trailing
+# whitespace behind.
+#
+# PRINTF PADS BYTES; A TERMINAL LAYS OUT COLUMNS, and every glyph this report
+# reaches for outside ASCII — ✓ ✗ – — ≥ … — is three bytes wide and one column
+# wide. A `%-11s` field holding one of them therefore comes out two columns
+# short, and the whole table steps left from that row down. It is not
+# hypothetical: `—` is the version cell of every row whose mechanism keeps no
+# version, which on an ordinary machine is a third of the table.
+#
+# SO CELLS ARE PADDED BY COLUMN COUNT. The multi-byte glyphs are a closed set —
+# this file names all of them — so measuring is a substitution away from being
+# exact, with no locale to depend on and no external process per cell.
+_doctor_cols() {  # <string> -> its width in terminal columns
+  local s="${1:-}"
+  s="${s//✓/.}"; s="${s//✗/.}"; s="${s//–/.}"; s="${s//—/.}"
+  s="${s//≥/.}"; s="${s//…/.}"; s="${s//·/.}"
+  printf '%s' "${#s}"
+}
+
+# One cell, padded to a column width. A cell already at or over its width is
+# printed whole and pushes its neighbours right — truncating a name to keep a
+# column straight would be choosing the table's looks over its content.
+_doctor_cell() {  # <string> <width>
+  local s="${1:-}" w="${2:-0}" n
+  n=$(( w - $(_doctor_cols "$s") ))
+  if [ "$n" -gt 0 ]; then printf '%s%*s' "$s" "$n" ""; else printf '%s' "$s"; fi
+}
+
+# `component  count  detail` — four rows on a healthy machine, so the count
+# column is narrow and the detail column gets the room.
+_doctor_native_row() {  # <symbol> <component> <count> <detail>
+  local line
+  line="  $1 $(_doctor_cell "$2" 10) $(_doctor_cell "$3" 8) ${4:-}"
+  printf '%s\n' "$(_doctor_rtrim "$line")"
+}
+
+# `name  version  source  state`. The source column is what makes this table
+# worth reading twice: two rows can both say `present 1.2.3` and be installed by
+# entirely different machinery, and which machinery it was decides what a user
+# types to repair or remove it.
+_doctor_third_row() {  # <symbol> <name> <version> <source> <state>
+  local line
+  line="  $1 $(_doctor_cell "$2" 21) $(_doctor_cell "$3" 11) $(_doctor_cell "$4" 17) ${5:-}"
+  printf '%s\n' "$(_doctor_rtrim "$line")"
+}
+
+# `KEY=value  state`. The left cell is one token on purpose — an environment
+# name and its value are a single fact, and splitting them into two columns made
+# a reader join them back up by eye on every row.
+_doctor_env_row() {  # <symbol> <key=value or label> <state>
+  local line
+  line="  $1 $(_doctor_cell "$2" 42) ${3:-}"
+  printf '%s\n' "$(_doctor_rtrim "$line")"
+}
+
+# WHICH MACHINERY PUT IT THERE, in the words a user would use for it. Keyed on
+# the table's `kind`, which IS the install mechanism, with one deliberate
+# exception: a `native` row's mechanism field holds the upstream git URL, but the
+# CLI installs it through a marketplace and records it in installed_plugins.json,
+# so `marketplace` is the honest answer for where that version came from. The
+# github fallback is not speculative — it reads the mechanism field a row
+# actually carries, so a source-of-truth that is a repository names the
+# repository rather than a scheme nobody would recognise.
+_doctor_source_of() {  # <name> -> one of the source words
+  local name="${1:-}" kind mech owner_repo
+  kind="$(dep_field "$name" kind)"
+  mech="$(dep_field "$name" source_url)"
+  case "$kind" in
+    native)             echo "marketplace" ;;
+    brew-dep|brew-cask) echo "brew" ;;
+    npm-global)         echo "npm -g" ;;
+    uv-tool)            echo "uv tool" ;;
+    mcp-server)         echo "MCP" ;;
+    statusline)         echo "npx" ;;
+    playwright-browser) echo "playwright cache" ;;
+    pnpm-store)         echo "pnpm" ;;
+    *)
+      case "$mech" in
+        https://github.com/*|http://github.com/*)
+          owner_repo="${mech#*github.com/}"; owner_repo="${owner_repo%.git}"
+          echo "github ${owner_repo}" ;;
+        *:*) echo "${mech%%:*}" ;;
+        *)   echo "${mech:-unknown}" ;;
+      esac ;;
+  esac
+}
+
+# WHY A ROW HAS NO VERSION, said in the version column's own terms. `—` is the
+# cell, and the state cell has to earn it: a reader who sees a dash where every
+# neighbouring row carries a number is owed the reason, and "unknown" alone is
+# the shrug this report is not allowed to make. Keyed on the mechanism, because
+# the mechanism is what does or does not keep a version.
+_doctor_no_version_reason() {  # <kind>
+  case "${1:-}" in
+    mcp-server) echo "an MCP registration records no version" ;;
+    statusline) echo "npx resolves at run time; nothing cached to read" ;;
+    pnpm-store) echo "a content-addressable cache, no version surface" ;;
+    *)          echo "this mechanism records no version" ;;
   esac
 }
 
@@ -202,6 +415,65 @@ REG_SHA_STATE="${REG_SHA_FACT#*state=}"; REG_SHA_STATE="${REG_SHA_STATE%% *}"
 REG_SHA_REG="${REG_SHA_FACT#*registry=}"; REG_SHA_REG="${REG_SHA_REG%% *}"
 REG_SHA_REPO="${REG_SHA_FACT#*repo=}";    REG_SHA_REPO="${REG_SHA_REPO%% *}"
 REG_SHA_CAUSE="${REG_SHA_FACT##*cause=}"
+
+# THE COMMIT THE HEADER NAMES IS THE ONE THE CLI IS RUNNING, which is not always
+# the one the registry recorded. On a directory-source feed the CLI reads the
+# TREE — the registry copy is a lagging snapshot nothing executes (W7 A5.1) — so
+# on that feed, and only on that feed, a lag resolves to the tree's own HEAD.
+# Printing the registry's sha there would put a commit in the header that no
+# behaviour on this machine comes from, which is the one thing a provenance line
+# must never do.
+_doctor_sha8() { printf '%.8s' "${1:-}"; }
+case "$REG_SHA_STATE" in
+  match)       PAYLOAD_SHA="$(_doctor_sha8 "$REG_SHA_REG")" ;;
+  lag)
+    if [ "$(detect_marketplace_feed_kind)" = "directory" ]; then
+      PAYLOAD_SHA="$(_doctor_sha8 "$REG_SHA_REPO")"
+    else
+      PAYLOAD_SHA="$(_doctor_sha8 "$REG_SHA_REG")"
+    fi ;;
+  not-in-repo) PAYLOAD_SHA="$(_doctor_sha8 "$REG_SHA_REG")" ;;
+  *)           PAYLOAD_SHA="unknown" ;;
+esac
+[ -n "$PAYLOAD_SHA" ] || PAYLOAD_SHA="unknown"
+
+HOOK_WIRING_FACT="$(detect_hook_wiring)"
+HOOK_TOTAL="${HOOK_WIRING_FACT#*total=}";     HOOK_TOTAL="${HOOK_TOTAL%% *}"
+HOOK_RESOLVING="${HOOK_WIRING_FACT##*resolving=}"
+
+# ─── What the payload itself carries ─────────────────────────────────────────
+#
+# THE PLUGIN'S OWN INVENTORY, counted from the tree the CLI resolved. Skills and
+# commands have no checksum manifest the way the role files do — nothing declares
+# how many there ought to be — so the denominator is what the payload directory
+# holds and the numerator is how much of it is actually usable: a skill directory
+# without its SKILL.md, a command file that is empty. On a whole payload those
+# are equal, which is the point of printing them as `n/n` rather than as `n`: the
+# reader sees at a glance both that the count is right and what it is counted
+# against.
+#
+# COUNTED HERE, not in a library, and that is the same judgement `_doctor_roster_counts`
+# already makes two hundred lines down for every OTHER plugin's install path.
+# This is a directory listing, not a schema parse — there is no second reading of
+# a format that could drift away from a first one, which is what the RV-7 rule
+# against re-deriving facts in this file is protecting against.
+_doctor_payload_root="$(_detect_plugin_root)"
+SKILLS_TOTAL=0; SKILLS_OK=0; SKILL_NAMES=""
+for _sk in "$_doctor_payload_root"/skills/*/; do
+  [ -d "$_sk" ] || continue
+  SKILLS_TOTAL=$((SKILLS_TOTAL + 1))
+  _sk_name="${_sk%/}"; _sk_name="${_sk_name##*/}"
+  SKILL_NAMES="${SKILL_NAMES}${SKILL_NAMES:+, }${_sk_name}"
+  [ -s "${_sk}SKILL.md" ] && SKILLS_OK=$((SKILLS_OK + 1))
+done
+COMMANDS_TOTAL=0; COMMANDS_OK=0; COMMAND_NAMES=""
+for _cm in "$_doctor_payload_root"/commands/*.md; do
+  [ -f "$_cm" ] || continue
+  COMMANDS_TOTAL=$((COMMANDS_TOTAL + 1))
+  _cm_name="${_cm##*/}"; _cm_name="${_cm_name%.md}"
+  COMMAND_NAMES="${COMMAND_NAMES}${COMMAND_NAMES:+, }${_cm_name}"
+  [ -s "$_cm" ] && COMMANDS_OK=$((COMMANDS_OK + 1))
+done
 
 INST_AGENT_FACT="$(detect_installed_agent_copies)"
 INST_AGENT_STATE="${INST_AGENT_FACT#*state=}"; INST_AGENT_STATE="${INST_AGENT_STATE%% *}"
@@ -338,12 +610,14 @@ _doctor_roster_counts() {  # <install-path> -> "<skills> <agents>"
 }
 
 DEP_ROWS=""
+THIRD_ROWS=""
 ROSTER_ROWS=""
-DEGRADATION=""
 DEP_VERSIONS=""
 N_PRESENT=0; N_ABSENT=0; N_UNKNOWN=0; N_VIOLATION=0
 N_ABSENT_ACTIONABLE=0; N_ABSENT_WHEN_NEEDED=0
 ROSTER_TOTAL=0; ROSTER_TOTAL_KNOWN=yes
+ROSTER_ZERO=0
+ABSENT_NAMES=""
 CCSTATUSLINE_STATE="unknown"
 
 while IFS= read -r dep_name; do
@@ -363,35 +637,94 @@ while IFS= read -r dep_name; do
   [ "$dep_name" = "ccstatusline" ] && CCSTATUSLINE_STATE="$present"
   DEP_VERSIONS="${DEP_VERSIONS}${dep_name}	${dep_version}"$'\n'
 
-  DEP_ROWS="${DEP_ROWS}$(printf '  %-11s %-22s %-8s %-11s %-11s %s' \
-    "$dep_class" "$dep_name" "$present" "$dep_version" "$constraint" "$verdict")"$'\n'
+  # THE SYMBOL IS THE VERDICT COLUMN (AC-15 rule 1). The table used to carry the
+  # word `ok`/`violation` in a sixth column; ✓/✗/– says the same thing in column
+  # one, where a reader scanning twenty rows for the one that is wrong is already
+  # looking. `violation` survives as the row's tail because it names WHICH kind of
+  # wrong, which a symbol cannot, and the unknown rows carry their cause there for
+  # the same reason.
+  case "$present" in
+    yes) if [ "$verdict" = "violation" ]; then dep_sym="$DOCTOR_BAD"; dep_tail="violation"
+         else dep_sym="$DOCTOR_OK"; dep_tail=""; fi ;;
+    no)  dep_tail=""
+         if [ "$dep_class" = "when-needed" ]; then dep_sym="$DOCTOR_NIL"; dep_tail="installs on first use"
+         else dep_sym="$DOCTOR_BAD"; fi ;;
+    *)   dep_tail="$(_doctor_unknown_cause "$kind")"
+         if [ "$dep_class" = "when-needed" ]; then dep_sym="$DOCTOR_NIL"; else dep_sym="$DOCTOR_BAD"; fi ;;
+  esac
+  [ "$present" = "no" ] && dep_version="-"
+  DEP_ROWS="${DEP_ROWS}$(_doctor_rtrim "$(printf '  %s %-12s %-20s %-8s %-9s %-11s %s' \
+    "$dep_sym" "$dep_class" "$dep_name" "$(_doctor_word "$present")" \
+    "$dep_version" "$constraint" "$dep_tail")")"$'\n'
+
+  # ── the certified THIRD PARTY row ──
+  #
+  # A LITERAL VERSION WHEREVER ONE EXISTS. That is the whole point of the table:
+  # `present` is a yes/no a user already assumed, and the version is the fact
+  # that settles whether the thing on this machine is the thing the constraint
+  # was written about. So a row reaches for a number twice — once through the
+  # library's own probe, and once more through the npx cache for the one
+  # mechanism whose probe cannot pin a version by construction — and only prints
+  # `—` when there is genuinely nothing on disk to read.
+  #
+  # AND THE DASH IS NEVER BARE. Where a version could not be had, the state cell
+  # says which mechanism could not keep one. A dash on its own reads as a bug in
+  # this report rather than as a property of the thing being reported.
+  third_version="$dep_version"
+  third_state=""
+  if [ "$present" = "yes" ] && [ "$third_version" = "unknown" ] && [ "$kind" = "statusline" ]; then
+    third_version="$(dep_npx_version "$(_dep_locator_target "$(dep_field "$dep_name" source_url)")")"
+  fi
+  case "$present" in
+    yes)
+      if [ "$verdict" = "violation" ]; then
+        third_state="violates ${constraint} → /bionic:setup"
+      elif [ "$third_version" = "unknown" ]; then
+        third_state="$(_doctor_no_version_reason "$kind")"
+      fi ;;
+    no)
+      if [ "$dep_class" = "when-needed" ]; then third_state="installs on demand"
+      else third_state="not installed → /bionic:setup"; fi ;;
+    *)
+      third_state="$(_doctor_unknown_cause "$kind")"
+      [ "$dep_class" = "when-needed" ] || third_state="${third_state} → /bionic:setup" ;;
+  esac
+  case "$third_version" in unknown|-|"") third_version="—" ;; esac
+  THIRD_ROWS="${THIRD_ROWS}$(_doctor_third_row "$dep_sym" "$dep_name" "$third_version" \
+    "$(_doctor_source_of "$dep_name")" "$third_state")"$'\n'
 
   # ── roster footprint ──
-  if [ "$kind" != "native" ]; then
-    # No parenthetical per row: the method paragraph above states once why a
-    # dependency that is not plugin-shaped costs nothing, and repeating it twenty
-    # times would bury the rows that carry an actual number.
-    ROSTER_ROWS="${ROSTER_ROWS}$(printf '  %-22s %s' "$dep_name" "0")"$'\n'
+  #
+  # ZERO IS FILLER (AC-15 rule 4). A dependency that is not plugin-shaped
+  # contributes nothing to the session roster, and so does one that is not
+  # installed — fourteen such rows on this machine, each a line saying nothing.
+  # They are counted here and printed as a single line below. An `unknown` is NOT
+  # filler and keeps its own row: it is a number this report could not take, and
+  # collapsing it into a count of zeroes would report an unreadable machine as a
+  # cheap one.
+  if [ "$kind" != "native" ] || [ "$present" = "no" ]; then
+    ROSTER_ZERO=$((ROSTER_ZERO + 1))
   elif [ "$present" = "unknown" ]; then
-    ROSTER_ROWS="${ROSTER_ROWS}$(printf '  %-22s %-9s %s' \
-      "$dep_name" "unknown" "($(_doctor_unknown_cause "$kind"))")"$'\n'
+    ROSTER_ROWS="${ROSTER_ROWS}$(_doctor_rtrim "$(printf '  %s %-21s %-9s %s' \
+      "$DOCTOR_NIL" "$dep_name" "unknown" "$(_doctor_unknown_cause "$kind")")")"$'\n'
     ROSTER_TOTAL_KNOWN=no
-  elif [ "$present" = "no" ]; then
-    ROSTER_ROWS="${ROSTER_ROWS}$(printf '  %-22s %-9s %s' \
-      "$dep_name" "0" "(not installed — contributes nothing this session)")"$'\n'
   else
     install_path="$(detect_plugin_install_path "$dep_name")" || install_path=""
     if [ -z "$install_path" ] || [ ! -d "$install_path" ]; then
-      ROSTER_ROWS="${ROSTER_ROWS}$(printf '  %-22s %-9s %s' \
-        "$dep_name" "unknown" "(the registry records no readable installPath for it)")"$'\n'
+      ROSTER_ROWS="${ROSTER_ROWS}$(_doctor_rtrim "$(printf '  %s %-21s %-9s %s' \
+        "$DOCTOR_NIL" "$dep_name" "unknown" "no readable installPath in the registry")")"$'\n'
       ROSTER_TOTAL_KNOWN=no
     else
       counts="$(_doctor_roster_counts "$install_path")"
       n_skills="${counts%% *}"; n_agents="${counts##* }"
       roster_lines=$((n_skills + n_agents))
-      ROSTER_ROWS="${ROSTER_ROWS}$(printf '  %-22s %-9s %s' \
-        "$dep_name" "$roster_lines" \
-        "(${n_skills} $(_doctor_plural "$n_skills" skill skills) + ${n_agents} $(_doctor_plural "$n_agents" agent agents))")"$'\n'
+      if [ "$roster_lines" = "0" ]; then
+        ROSTER_ZERO=$((ROSTER_ZERO + 1))
+      else
+        ROSTER_ROWS="${ROSTER_ROWS}$(_doctor_rtrim "$(printf '  %s %-21s %-9s %s' \
+          "$DOCTOR_OK" "$dep_name" "$roster_lines" \
+          "${n_skills} $(_doctor_plural "$n_skills" skill skills) + ${n_agents} $(_doctor_plural "$n_agents" agent agents)")")"$'\n'
+      fi
       ROSTER_TOTAL=$((ROSTER_TOTAL + roster_lines))
     fi
   fi
@@ -405,18 +738,22 @@ while IFS= read -r dep_name; do
   # action, which told users to repair a machine that was working — and told them
   # to run the one command that would not have installed it anyway, since setup
   # deliberately never asks about these rows.
+  #
+  # AND A NO-ACTION LINE IS NOT A FIX (AC-15 rule 2). The degradation map used to
+  # carry a line for every unusual row, including the when-needed ones whose line
+  # ended "no action needed" — a problem list with entries that are not problems,
+  # which is how a reader learns to skip the list. Those rows say what they are in
+  # the DEPENDENCIES table (`– … installs on first use`) and reach FIX never.
   case "$present" in
     yes)
       N_PRESENT=$((N_PRESENT + 1))
       if [ "$verdict" = "violation" ]; then
         N_VIOLATION=$((N_VIOLATION + 1))
         case "$dep_class" in
-          core)
-            DEGRADATION="${DEGRADATION}  ${dep_name} ${dep_version} violates constraint ${constraint} → run /bionic:setup — it wraps the native plugin install, which resolves the version"$'\n' ;;
           when-needed)
-            DEGRADATION="${DEGRADATION}  ${dep_name} ${dep_version} violates constraint ${constraint} → the next route that needs ${dep_name} offers to install a version that satisfies it"$'\n' ;;
+            fix "${dep_name} ${dep_version} violates constraint ${constraint} → the next route that needs it reinstalls it" ;;
           *)
-            DEGRADATION="${DEGRADATION}  ${dep_name} ${dep_version} violates constraint ${constraint} → run /bionic:setup — it reinstalls ${dep_name} at a satisfying version"$'\n' ;;
+            fix "${dep_name} ${dep_version} violates constraint ${constraint} → run /bionic:setup" ;;
         esac
       fi
       ;;
@@ -425,17 +762,17 @@ while IFS= read -r dep_name; do
       case "$dep_class" in
         when-needed)
           N_ABSENT_WHEN_NEEDED=$((N_ABSENT_WHEN_NEEDED + 1)) ;;
-        core)
-          N_ABSENT_ACTIONABLE=$((N_ABSENT_ACTIONABLE + 1))
-          DEGRADATION="${DEGRADATION}  ${dep_name} is absent → run /bionic:setup — it wraps the native plugin install"$'\n' ;;
         *)
           N_ABSENT_ACTIONABLE=$((N_ABSENT_ACTIONABLE + 1))
-          DEGRADATION="${DEGRADATION}  ${dep_name} is absent → run /bionic:setup — it offers to install ${dep_name}"$'\n' ;;
+          # NAMED HERE, PRINTED AS ONE LINE BELOW. Eleven absences on a cold
+          # machine are eleven problems with one identical command, and eleven
+          # copies of `run /bionic:setup` is the filler rule 4 exists to stop.
+          # The names are what the reader needs; the command is said once.
+          ABSENT_NAMES="${ABSENT_NAMES}${ABSENT_NAMES:+, }${dep_name}" ;;
       esac
       ;;
     *)
       N_UNKNOWN=$((N_UNKNOWN + 1))
-      cause="$(_doctor_unknown_cause "$kind")"
       # KEYED ON THE CLASS, WHICH IS WHAT THE SENTENCE IS ABOUT (six-axis review
       # C-2). This branch used to key on the mechanism — `pnpm-store` rows were
       # told "/bionic:setup re-warms the store either way" — and that was true
@@ -443,366 +780,58 @@ while IFS= read -r dep_name; do
       # `core|basic|extra` and AC-11 makes a when-needed tool nobody's to install
       # until a route needs it, so the old clause named a command that would not
       # touch the row. A when-needed unknown has the same non-action as a
-      # when-needed absence, and for the same reason.
-      case "$dep_class" in
-        when-needed)
-          DEGRADATION="${DEGRADATION}  ${dep_name} presence is unknown (${cause}) → no action needed; ${dep_name} is installed the first time a workflow needs it"$'\n' ;;
-        *)
-          DEGRADATION="${DEGRADATION}  ${dep_name} presence is unknown (${cause}) → resolve the cause above, then re-run /bionic:doctor"$'\n' ;;
+      # when-needed absence, and for the same reason — so it earns no FIX line.
+      #
+      # AMENDED 2026-08-22: TWO FACTS DECIDE THIS SENTENCE, and they are
+      # orthogonal. The CLASS says whose job the row is. The MECHANISM says
+      # whether the unknown can ever be RESOLVED — the pnpm store is a cache with
+      # no installed-state to read, so "resolve the cause, then re-run doctor"
+      # names a repair that does not exist. Class alone was enough while the only
+      # such row was `when-needed`; the ruling that made `motion` an `extra` sent
+      # it straight to the sentence about a repair nobody can perform.
+      case "${dep_class}/${kind}" in
+        when-needed/*) ;;
+        */pnpm-store)  ;;
+        *) fix "${dep_name} presence is unknown → resolve $(_doctor_unknown_cause "$kind"), then re-run /bionic:doctor" ;;
       esac
       ;;
   esac
 done < <(dep_names)
 
-# ─── The report ──────────────────────────────────────────────────────────────
-
-echo "bionic doctor — read-only diagnosis. Nothing on this machine is changed."
-echo ""
-# WHY THIS SECTION LEADS (AC-13, ratified D-D). Every section below describes a
-# payload on disk. Whether the CLI actually LOADED that payload is a separate
-# question with a separate answer, and when the answer is no, everything under
-# this line describes something the session is not running — commands that
-# silently do nothing, hooks that never fire, a machine that reads healthy by
-# every other measure. W5 measured exactly that machine.
-echo "=== LOAD STATE ==="
-case "$LOAD_STATE" in
-  loaded)
-    printf '  %-19s %s\n' "bionic" "loaded — the CLI reports it enabled" ;;
-  failed)
-    printf '  %-19s %s\n' "bionic" "failed to load — bionic's commands do nothing until this is resolved"
-    # VERBATIM, because the CLI's own sentence is the only one that names WHICH
-    # dependency, and a paraphrase is how a user reinstalls the wrong thing.
-    printf '  %-19s %s\n' "reported error" "$LOAD_ERROR"
-    printf '  %-19s %s\n' "fix" "install what the error names, then start a new session — or reinstall bionic: claude plugin install ${BIONIC_PLUGIN_ID}" ;;
-  absent)
-    printf '  %-19s %s\n' "bionic" "not installed — the CLI's plugin list does not name it"
-    printf '  %-19s %s\n' "fix" "claude plugin install ${BIONIC_PLUGIN_ID}" ;;
-  *)
-    printf '  %-19s %s\n' "bionic" "unknown — ${LOAD_CAUSE}" ;;
-esac
-
-echo ""
-echo "=== PLUGIN INTEGRITY ==="
-printf '  %-19s %s\n' "payload version" "$PLUGIN_VERSION"
-case "$PLUGIN_HOOKS" in
-  ok)       printf '  %-19s %s\n' "hooks" "ok — every hooks.json command resolves to a file on disk" ;;
-  degraded) printf '  %-19s %s\n' "hooks" "degraded — a hooks.json command names a script that is not on disk" ;;
-  absent)   printf '  %-19s %s\n' "hooks" "absent — the payload carries no hooks/hooks.json" ;;
-  *)        printf '  %-19s %s\n' "hooks" "$PLUGIN_HOOKS" ;;
-esac
-# ONE LINE, AND IT REPORTS RATHER THAN POLICES (spec AC-4). The six role files
-# are instructions subagents obey, so a hand-edit there changes behaviour with
-# no other symptom — worth a line. It is not worth a verdict: editing your own
-# installed files is allowed, so the line names the state, names the files, and
-# names the undo in the same breath. Deliberately absent: any exit-code effect,
-# any repair, and any second mention in the SUMMARY, whose action lines would
-# turn "you changed something" into "you should change it back".
-case "$AGENT_STATE" in
-  stock)
-    printf '  %-19s %s\n' "agent files" \
-      "stock — all ${AGENT_TOTAL} match the checksums this payload shipped" ;;
-  modified)
-    printf '  %-19s %s\n' "agent files" \
-      "${AGENT_MODIFIED} of ${AGENT_TOTAL} modified locally (${AGENT_NAMES//,/, }) — may be intentional; reinstall restores stock" ;;
-  *)
-    printf '  %-19s %s\n' "agent files" "unknown — ${AGENT_CAUSE}" ;;
-esac
-printf '  %-19s %s\n' "payload root" "$(_detect_plugin_root)"
-
-# WHICH COMMIT IS INSTALLED, against which commit this tree is on. The label says exactly
-# that: it read `registry sha` until epic-17 W6 S9a, which is the name of the FILE the fact
-# comes from rather than the name of the fact, and a user who never asked about a registry
-# reads it as git internals leaking into a report meant for them (walk finding W-3). Same
-# fact, same states, product word.
+# ─── What is left to fix ─────────────────────────────────────────────────────
 #
-# WHICH COMMIT IS INSTALLED, against which commit this tree is on. ONE LINE, AND IT REPORTS
-# RATHER THAN POLICES — the agent-files posture, and deliberately: an install behind the tip
-# is what a developer machine looks like between any two commits, so a SUMMARY action line
-# would nag on every one of them. The action rides inline on the one state that has one.
+# COLLECTED BEFORE ANYTHING IS PRINTED, because FIX is the second section on the
+# page and the facts that fill it are discovered all the way down this file. The
+# dependency sweep above has already contributed its lines; what follows is the
+# machine-level half — the states that are not about one dependency.
 #
-# `unknown` is the ORDINARY answer here and carries no apology: installed from the public
-# feed, with no checkout of this repo under the cwd, the question genuinely has no answer.
-_doctor_sha12() { printf '%.12s' "${1:-}"; }
-case "$REG_SHA_STATE" in
-  match)
-    printf '  %-19s %s\n' "installed commit" \
-      "match — the installed build is this tree's HEAD ($(_doctor_sha12 "$REG_SHA_REG"))" ;;
-  lag)
-    printf '  %-19s %s\n' "installed commit" \
-      "installed at $(_doctor_sha12 "$REG_SHA_REG"), this tree is $(_doctor_sha12 "$REG_SHA_REPO") — $(detect_reconverge_hint lag)" ;;
-  not-in-repo)
-    printf '  %-19s %s\n' "installed commit" \
-      "installed at $(_doctor_sha12 "$REG_SHA_REG") — not a commit in this repository, so this tree is not what is running" ;;
-  *)
-    printf '  %-19s %s\n' "installed commit" "unknown — ${REG_SHA_CAUSE}" ;;
-esac
-
-echo ""
-echo "=== TIER STATE ==="
-# Labels here are deliberately ASCII: printf pads to a BYTE width, so a label
-# carrying a multi-byte dash would be padded three bytes short of its neighbours
-# and the column would visibly step.
-printf '  %-28s %s\n' "tier 1 (plugin install)" \
-  "payload ${PLUGIN_VERSION}, hooks ${PLUGIN_HOOKS}"
-printf '  %-28s %s\n' "tier 2 (environment setup)" \
-  "${N_PRESENT} dependencies present, ${N_ABSENT} absent, ${N_UNKNOWN} unknown, ${N_VIOLATION} constraint $(_doctor_plural "$N_VIOLATION" violation violations)"
-# The absent count is the honest total; this line is what stops a reader acting
-# on it. A tool that installs itself the first time a route needs it is not
-# missing from a machine that has not run that route yet.
-if [ "$N_ABSENT_WHEN_NEEDED" -gt 0 ]; then
-  printf '  %-28s %s\n' "" \
-    "${N_ABSENT_WHEN_NEEDED} of the absent $(_doctor_plural "$N_ABSENT_WHEN_NEEDED" "installs itself" "install themselves") the first time a route needs $(_doctor_plural "$N_ABSENT_WHEN_NEEDED" it them)"
-fi
-printf '  %-28s %s\n' "half-uninstalled" "$HALF_STATE"
-
-echo ""
-echo "=== DEPENDENCIES ==="
-echo "  The class column says WHEN bionic installs a tool: core with the plugin,"
-echo "  basic at setup, when-needed the first time a route asks for it, extra only"
-echo "  if you said yes. The constraint column is the table in scripts/lib/deps.sh —"
-echo "  the sole place a version range is declared — and the verdict is that range"
-echo "  judged against what this machine actually has."
-echo ""
-printf '  %-11s %-22s %-8s %-11s %-11s %s\n' class name present version constraint verdict
-printf '%s' "$DEP_ROWS"
-
-# ─── Two catalogs, one name ──────────────────────────────────────────────────
-#
-# SILENT DUPLICATION IS THE DEFECT (AC-9). Nothing stops a machine holding the
-# same plugin from two catalogs at once, and which copy a session loads is then a
-# coin flip nobody saw tossed. REPORTED, NOT RESOLVED, and not nagged about
-# either: coexistence can be a deliberate choice, so the row hands over the
-# consolidation command and stops rather than raising a SUMMARY action.
-echo ""
-echo "=== DUPLICATES ==="
-if [ -z "$DUP_LINES" ]; then
-  echo "  none — every plugin here comes from exactly one catalog."
-else
-  echo "  The same name installed from two catalogs. Which copy a session loads is"
-  echo "  not bionic's decision — consolidate, or keep both deliberately."
-  echo ""
-  while IFS= read -r _dup; do
-    [ -n "$_dup" ] || continue
-    _dup_name="${_dup#dup=}";  _dup_name="${_dup_name%% *}"
-    _dup_ids="${_dup#*ids=}";  _dup_ids="${_dup_ids%% *}"
-    _dup_fix="${_dup#*fix=}"
-    if [ "$_dup_name" = "unknown" ]; then
-      # A registry that could not be read has not been read clean. Silence here
-      # would be a claim of no duplicates that nobody earned.
-      _dup_cause="${_dup##*cause=}"
-      printf '  %-22s %s\n' "unknown" "— ${_dup_cause}"
-    else
-      _dup_fix="${_dup_fix%% cause=*}"
-      printf '  %-22s %s\n' "$_dup_name" "installed from ${_dup_ids//,/, }"
-      printf '  %-22s %s\n' "" "→ ${_dup_fix}"
-    fi
-  done <<< "$DUP_LINES"
-fi
-
-echo ""
-echo "=== ENVIRONMENT ==="
-# TWO FACTS PER NAME, AND NEITHER ANSWERS THE OTHER. `env_get` reads the CLI's
-# settings.json — what a session started from now on will have. `env_live` reads
-# THIS process — what the session you are in has. On 2026-08-21 a session ran
-# with the task-list name written to disk and absent from the process (the host
-# launches its shell with rc files disabled, so the export bionic used to append
-# never arrived), and the one line this section carried could not say so: it read
-# the shell rc, which was the wrong file to ask. Configured-and-not-live is a
-# RESTART; absent is a setup gap; and telling a user to run setup over a restart
-# sends them to repair something already repaired.
-for _env_key in $ENV_KEYS; do
-  _env_configured="$(env_get "$_env_key" 2>/dev/null)" || _env_configured=""
-  if _env_live_value="$(env_live "$_env_key" 2>/dev/null)"; then _env_is_live=yes; else _env_is_live=no; fi
-  if [ -n "$_env_configured" ]; then
-    if [ "$_env_is_live" = "yes" ]; then
-      printf '  %-38s %s\n' "$_env_key" "${_env_configured}   live in this session: yes"
-    else
-      printf '  %-38s %s\n' "$_env_key" "${_env_configured}   live in this session: no — restart to pick it up"
-    fi
-  elif [ "$_env_is_live" = "yes" ]; then
-    # Live and not configured: the state the retired shell export leaves behind.
-    # It works right now and dies with this session, which is why setup is still
-    # named for it in the summary below.
-    printf '  %-38s %s\n' "$_env_key" "absent   live in this session: yes, from somewhere else"
-  else
-    printf '  %-38s %s\n' "$_env_key" "absent"
-  fi
-done
-printf '  %-38s %s\n' "legacy .zshrc export" "$(_doctor_word "$TODO_STATE")"
-printf '  %-38s %s\n' "legacy .zshrc alias block" "$(_doctor_word "$LEGACY_STATE")"
-if [ "$LEGACY_HOOK_COUNT" = "unknown" ]; then
-  printf '  %-38s %s\n' "legacy-channel managed-hook entries" \
-    "unknown — jq is not on PATH, so settings.json cannot be read"
-else
-  printf '  %-38s %s\n' "legacy-channel managed-hook entries" "$LEGACY_HOOK_COUNT"
-fi
-# THE SKILL COPY IS NOT INERT, and that is the whole reason it gets a line and an action
-# while the hook files below get only a line. The retired installer rendered canonical-sdlc
-# into the CLI's own skills directory, and W5 (4/6) measured eleven hook registrations in
-# that copy's frontmatter — every one spelled for the pre-plugin hooks directory. A session
-# that loads it arms the same walls twice, through the channel the cutover retired, and
-# until now nothing in this report said so: doctor could call a machine clean while it was
-# running two of everything.
-if [ "$SKILL_COPY_STATE" = "yes" ]; then
-  printf '  %-38s %s\n' "legacy installed skill copy" \
-    "${SKILL_COPY_PATH} — a second canonical-sdlc, arming the same walls again"
-else
-  printf '  %-38s %s\n' "legacy installed skill copy" \
-    "none — the skill ships in the payload"
-fi
-# THE HOOK FILES ARE THE OTHER HALF OF A QUESTION THIS REPORT ONLY ANSWERED HALFWAY. The
-# line above counts REGISTRATIONS in settings.json; the installer also left the scripts
-# themselves in the CLI's hooks directory, and a machine cleaned of every registration still
-# has them. That machine and a clean one read identically here until now — and the person
-# reading is the one who can see the directory with `ls`.
-#
-# REPORTED, NEVER PRESCRIBED — the same contract the agent-copies line keeps. With the
-# registrations gone these files run nothing: they are disk, not behaviour, and turning
-# "this exists" into "you should delete it" on an otherwise-fine machine is how a diagnosis
-# turns into nagging. The close-out that removes them is a decision, not a default.
-if [ "$HOOK_FILES_COUNT" = "unknown" ]; then
-  printf '  %-38s %s\n' "legacy installed hook files" "unknown — ${HOOK_FILES_CAUSE}"
-elif [ "$HOOK_FILES_COUNT" = "0" ]; then
-  printf '  %-38s %s\n' "legacy installed hook files" \
-    "none — hooks run from the payload"
-else
-  # The COUNT, and where to look — not the roster. A machine that never ran a cleanup
-  # carries sixteen of these, and sixteen filenames on one line is a paragraph nobody
-  # reads. The agent-copies line above names its files because it names only the ones that
-  # DRIFTED, which is a short and actionable set; here every leftover is the same leftover
-  # and the number is the whole finding. The names stay in the fact line for a caller that
-  # wants them.
-  printf '  %-38s %s\n' "legacy installed hook files" \
-    "${HOOK_FILES_COUNT} left by the retired installer, inert — see ${SKILL_COPY_PATH%/skills/*}/hooks"
-fi
-# THE PLUGIN-ERA TRUTH LEADS, because it is the half a reader needs whichever
-# state the machine is in: role files ship in the PAYLOAD, and anything in the
-# CLI's own agents directory is what the retired installer left. Those copies
-# are what a session actually loads, so a machine can be running dispatch
-# instructions two plugin updates old with no other symptom.
-#
-# READ-ONLY, AND NO ACTION LINE — the same contract the agent-integrity line
-# keeps. /bionic:setup owns the offer to remove a legacy copy, under consent;
-# doctor's job is to say the directory is there. A SUMMARY entry here would
-# turn "this exists" into "you should delete it" on a machine that is otherwise
-# fine.
-case "$INST_AGENT_STATE" in
-  absent)
-    printf '  %-38s %s\n' "installed agent role files" \
-      "none — role files ship in the payload" ;;
-  present)
-    if [ "$INST_AGENT_DRIFT" = "0" ]; then
-      printf '  %-38s %s\n' "installed agent role files" \
-        "${INST_AGENT_TOTAL} legacy copies, none differing from the payload (the payload is what ships)" ;
-    else
-      printf '  %-38s %s\n' "installed agent role files" \
-        "${INST_AGENT_TOTAL} legacy copies, ${INST_AGENT_DRIFT} differing from the payload (${INST_AGENT_NAMES//,/, }) — the payload is what ships" ;
-    fi ;;
-  *)
-    printf '  %-38s %s\n' "installed agent role files" "unknown — ${INST_AGENT_CAUSE}" ;;
-esac
-if [ "$CCSTATUSLINE_STATE" = "unknown" ]; then
-  printf '  %-38s %s\n' "ccstatusline statusline" \
-    "unknown — $(_doctor_unknown_cause statusline)"
-else
-  printf '  %-38s %s\n' "ccstatusline statusline" "$(_doctor_word "$CCSTATUSLINE_STATE")"
-fi
-
-echo ""
-echo "=== PERMISSION PROFILE ==="
-echo "  Three-way: what the payload SHIPS, what this machine has APPLIED, and"
-echo "  everything in permissions.allow OUTSIDE bionic's marker block."
-echo ""
-printf '  %-26s %s\n' "shipped template version" "$TEMPLATE_VERSION"
-if [ "$PROFILE_APPLIED" = "yes" ]; then
-  printf '  %-26s %s\n' "applied block version" "$PROFILE_VERSION"
-else
-  printf '  %-26s %s\n' "applied block version" "none — no bionic block is applied"
-fi
-case "$PROFILE_VERDICT" in
-  identical) printf '  %-26s %s\n' "render diff" "identical — the applied block matches a fresh render" ;;
-  stale)     printf '  %-26s %s\n' "render diff" "stale — the applied block differs from a fresh render" ;;
-  absent)    printf '  %-26s %s\n' "render diff" "absent — there is nothing applied to compare" ;;
-  *)         printf '  %-26s %s\n' "render diff" "unknown — jq is not on PATH, so the applied block cannot be compared" ;;
-esac
-if [ "$PROFILE_ACCRETION" = "unknown" ]; then
-  printf '  %-26s %s\n' "accretion outside block" \
-    "unknown — jq is not on PATH, so settings.json cannot be counted"
-else
-  printf '  %-26s %s\n' "accretion outside block" \
-    "${PROFILE_ACCRETION} $(_doctor_plural "$PROFILE_ACCRETION" rule rules) this machine owns"
-fi
-
-# The default permission mode (item 1 + O-3) — a setting of the machine's, not
-# a rule inside the block above, and it carries the one sentence that keeps a
-# Remote Control session from reading it as a stronger promise than it is.
-if [ "$PROFILE_MODE" = "unknown" ]; then
-  printf '  %-38s %s\n' "permission mode" "unknown — jq is not on PATH, so the default permission mode cannot be read"
-else
-  printf '  %-38s %s\n' "permission mode" "$PROFILE_MODE"
-fi
-echo "      ${PROFILE_RC_NOTE}"
-
-echo ""
-echo "=== ROSTER FOOTPRINT ==="
-echo "  Skill and agent METADATA — name plus description — loads into every session;"
-echo "  bodies are just-in-time. A dependency's standing session cost is therefore the"
-echo "  number of roster entries it contributes."
-echo "  method: for a plugin-shaped dependency, roster lines = the count of"
-echo "          skills/*/SKILL.md plus agents/*.md under the installPath the CLI"
-echo "          recorded for it. Everything else — binaries, packages, MCP"
-echo "          registrations — carries no skill or agent metadata, so it costs"
-echo "          nothing."
-echo ""
-printf '%s' "$ROSTER_ROWS"
-if [ "$ROSTER_TOTAL_KNOWN" = "yes" ]; then
-  printf '  %-22s %-9s %s\n' "total" "$ROSTER_TOTAL" "roster lines contributed by dependencies"
-else
-  printf '  %-22s %-9s %s\n' "total" "≥${ROSTER_TOTAL}" "roster lines (some counts unknown — see the causes above)"
-fi
-
-echo ""
-echo "=== DEGRADATION MAP ==="
-if [ -z "$DEGRADATION" ]; then
-  # Not "every dependency is present" — on a correct machine some are absent on
-  # purpose, and the tier line above has already said how many and why.
-  echo "  Nothing is degraded — every dependency this machine needs now is present"
-  echo "  and within its declared constraint."
-else
-  printf '%s' "$DEGRADATION"
-fi
-
-# ─── The summary ─────────────────────────────────────────────────────────────
-#
-# Action lines and nothing else. Facts live in the sections above; a summary
-# that restates them is a second report, and the reader stops trusting either.
-
-echo ""
-echo "=== SUMMARY ==="
-
-ACTED=no
+# ONE LINE PER PROBLEM, ENDING IN THE COMMAND (AC-15 rule 2). The report used to
+# say each of these twice: once in the degradation map as a fact, once in the
+# summary as an action. One section now, one line, and the line ends with what to
+# type.
 
 # LOAD STATE FIRST, for the reason its section leads: on a machine where the
-# plugin did not load, every other action line below is advice about a payload
-# nothing is running. `unknown` earns no line — nobody can act on "I could not
-# tell", and the section already named why.
+# plugin did not load, every other line here is advice about a payload nothing is
+# running. `unknown` earns no line — nobody can act on "I could not tell", and
+# the section names why.
 case "$LOAD_STATE" in
   failed)
-    echo "  → bionic is installed but the CLI refused to load it, so its commands do nothing."
-    echo "      The error above names what is missing; install that, then start a new session."
-    ACTED=yes ;;
+    fix "bionic is installed but the CLI refused to load it → install what LOAD STATE names" ;;
   absent)
-    echo "  → bionic is not installed for this CLI — install it with:"
-    echo "      claude plugin install ${BIONIC_PLUGIN_ID}"
-    ACTED=yes ;;
+    fix "bionic is not installed for this CLI → claude plugin install ${BIONIC_PLUGIN_ID}" ;;
 esac
 
-# Half-uninstalled next: it is the one state /bionic:setup cannot repair,
-# because the command surface itself is gone. The curl door is the fix (D5a —
-# the remover must not depend on the thing it removes).
+# Half-uninstalled next: it is the one state /bionic:setup cannot repair, because
+# the command surface itself is gone. The curl door is the fix (D5a — the remover
+# must not depend on the thing it removes).
+#
+# THE ONE FIX THAT TAKES TWO LINES, and deliberately. Every other line here fits
+# inside 100 columns; this one carries a raw GitHub URL inside a pipefail wrapper
+# and cannot. A command the reader has to unwrap from a wrapped line is worse
+# than a command on a line of its own, so the problem is stated and the command
+# is given whole underneath it.
 if [ "$HALF_STATE" = "yes" ]; then
-  echo "  → this machine is half-uninstalled: bionic is no longer registered with the CLI,"
-  echo "      but its footprint is still here. Finish the removal with:"
+  fix "this machine is half-uninstalled — the CLI no longer knows bionic. Finish with:"
   # The `set -o pipefail` wrapper is not decoration. `curl … | bash` reports
   # BASH's status, and bash handed an empty stream exits 0 — so a fetch that
   # 404s (a moved script, no network, a private repo) leaves the user with a
@@ -810,79 +839,271 @@ if [ "$HALF_STATE" = "yes" ]; then
   # subshell, so it fixes the status without touching the options of the shell
   # the user pasted it into. `-S` inside `-fsSL` is what puts curl's own error
   # on the terminal; the wrapper is what stops the pipe from swallowing it.
-  echo "      bash -c 'set -o pipefail; curl -fsSL ${BIONIC_REMOVE_RAW_URL} | bash'"
-  ACTED=yes
+  FIX_LINES="${FIX_LINES}      bash -c 'set -o pipefail; curl -fsSL ${BIONIC_REMOVE_RAW_URL} | bash'"$'\n'
 fi
 
 # jq next: it gates several of the facts above, so acting on anything else while
 # the report is partly unreadable is acting on half a diagnosis.
 if [ "$HAVE_JQ" = "no" ]; then
-  echo "  → install jq, then re-run /bionic:doctor — without it several facts above read"
-  echo "      \"unknown\" rather than a value (/bionic:setup installs jq)."
-  ACTED=yes
+  fix "several facts below read unknown without it → install jq (/bionic:setup does)"
 fi
 
-# One setup action carrying every reason it would repair. /bionic:setup is
-# idempotent, so a user with five problems runs one command, not five.
-SETUP_REASONS=""
-add_setup_reason() {
-  if [ -z "$SETUP_REASONS" ]; then SETUP_REASONS="$1"; else SETUP_REASONS="${SETUP_REASONS}, $1"; fi
-}
-# The ACTIONABLE absences, not every absence: a when-needed tool is absent by
-# design until a route asks for it, and setup would not install it if it ran.
-[ "$N_ABSENT_ACTIONABLE" -gt 0 ] && add_setup_reason "install ${N_ABSENT_ACTIONABLE} absent $(_doctor_plural "$N_ABSENT_ACTIONABLE" dependency dependencies)"
-[ "$N_VIOLATION" -gt 0 ] && add_setup_reason "repair ${N_VIOLATION} constraint $(_doctor_plural "$N_VIOLATION" violation violations)"
+# THE ABSENCES AS ONE LINE, NAMED. The ACTIONABLE absences, not every absence: a
+# when-needed tool is absent by design until a route asks for it, and setup would
+# not install it if it ran. The names are truncated rather than wrapped — a cold
+# machine has eleven of them and the line has 100 columns.
+if [ -n "$ABSENT_NAMES" ]; then
+  _doctor_absent_list="$ABSENT_NAMES"
+  if [ "${#_doctor_absent_list}" -gt 44 ]; then
+    _doctor_absent_list="$(printf '%.41s' "$_doctor_absent_list")…"
+  fi
+  fix "${N_ABSENT_ACTIONABLE} $(_doctor_plural "$N_ABSENT_ACTIONABLE" dependency dependencies) absent (${_doctor_absent_list}) → run /bionic:setup"
+fi
+
 # THE FILE IS WHAT SETUP CAN REPAIR. A name live in this process but absent from
 # settings.json still earns this line: the value dies with the session, and the
 # next one starts without it. A name configured and merely not live earns
-# NOTHING here — that is the restart the section above names, and setup would
-# find nothing to do.
+# NOTHING here — that is a restart, which the ENVIRONMENT section names, and
+# setup would find nothing to do.
 ENV_MISSING=0
 for _env_key in $ENV_KEYS; do
   env_get "$_env_key" >/dev/null 2>&1 || ENV_MISSING=$((ENV_MISSING + 1))
 done
-[ "$ENV_MISSING" -gt 0 ] && add_setup_reason "write ${ENV_MISSING} of bionic's environment settings"
-[ "$LEGACY_STATE" = "yes" ] && add_setup_reason "remove the legacy .zshrc alias block"
+if [ "$ENV_MISSING" -gt 0 ]; then
+  fix "${ENV_MISSING} of bionic's environment settings $(_doctor_plural "$ENV_MISSING" is are) not written → run /bionic:setup"
+fi
+
+[ "$LEGACY_STATE" = "yes" ] && fix "the legacy .zshrc alias block is still there → run /bionic:setup"
 case "$LEGACY_HOOK_COUNT" in
   unknown|0) ;;
-  *) add_setup_reason "clean ${LEGACY_HOOK_COUNT} legacy-channel managed-hook $(_doctor_plural "$LEGACY_HOOK_COUNT" entry entries) out of settings.json" ;;
+  *) fix "${LEGACY_HOOK_COUNT} legacy-channel managed-hook $(_doctor_plural "$LEGACY_HOOK_COUNT" entry entries) in settings.json → run /bionic:setup" ;;
 esac
 # The skill copy, and NOT the hook files beside it. Setup step 7 owns the consented removal,
 # so there is a real thing to offer; and unlike the files, this copy is doing something —
 # arming eleven registrations a second time. The asymmetry is the point, and
 # tests/doctor.test.sh Group 14 pins it from the other side with a machine whose only
 # leftover is hook files and whose summary still reads "nothing to do".
-[ "$SKILL_COPY_STATE" = "yes" ] && add_setup_reason "remove the legacy skill copy at ${SKILL_COPY_PATH}"
-if [ -n "$SETUP_REASONS" ]; then
-  echo "  → run /bionic:setup — it would ${SETUP_REASONS}."
-  ACTED=yes
-fi
+[ "$SKILL_COPY_STATE" = "yes" ] && fix "a legacy skill copy is installed, arming the same walls twice → run /bionic:setup"
 
-# The permission profile is its own action: it is repaired by the same command,
-# but the reason is a state a user should see named rather than folded into a
-# list of dependency counts.
+# The permission profile is its own line: it is repaired by the same command, but
+# the reason is a state a user should see named rather than folded into a count.
 if [ "$PROFILE_VERDICT" = "stale" ]; then
-  echo "  → the applied permission profile is stale — it was rendered for a different plugin"
-  echo "      path or an older rule set. Re-render it by running /bionic:setup."
-  ACTED=yes
+  fix "the applied permission profile is stale → run /bionic:setup"
 elif [ "$PROFILE_APPLIED" = "no" ] && [ "$PROFILE_VERDICT" = "absent" ]; then
-  echo "  → no permission profile is applied — run /bionic:setup to apply it under consent."
-  ACTED=yes
+  fix "no permission profile is applied → run /bionic:setup"
 fi
 
 if [ "$PLUGIN_HOOKS" = "degraded" ] || [ "$PLUGIN_HOOKS" = "absent" ]; then
-  # THE HINT IS THE WHOLE SENTENCE, AND IT KNOWS WHICH STATE IS ASKING (W7 S11,
+  # THE HINT IS THE WHOLE TAIL, AND IT KNOWS WHICH STATE IS ASKING (W7 S11,
   # six-axis review axis 2). This used to print `re-converge with:` and then the hint
   # inside backticks — which on a directory-source machine handed a user whose tree is
   # genuinely broken the words "nothing to do" formatted as a command to type.
-  echo "  → the payload's hook wiring is ${PLUGIN_HOOKS} —"
-  echo "      $(detect_reconverge_hint hooks)"
-  ACTED=yes
+  # TERSE ON PURPOSE (AC-15): the hint this line ends with is 76 columns of
+  # named copy and verbatim command, and the PLUGIN INTEGRITY row two sections
+  # down already spells out what "degraded" means. Anything longer here wraps.
+  fix "hooks ${PLUGIN_HOOKS} → $(detect_reconverge_hint hooks)"
 fi
 
-if [ "$ACTED" = "no" ]; then
-  echo "  → nothing to do — this machine is fully set up."
+# How many problems, for the summary line. Counted from the printed lines rather
+# than from a tally kept alongside them, so the number and the list cannot come
+# to disagree: the continuation line under the half-uninstalled fix is indented
+# and does not carry the symbol, which is exactly why the count keys on it.
+N_FIX=0
+if [ -n "$FIX_LINES" ]; then
+  while IFS= read -r _fix_line; do
+    case "$_fix_line" in "  ${DOCTOR_BAD} "*) N_FIX=$((N_FIX + 1)) ;; esac
+  done <<< "$FIX_LINES"
 fi
+
+# ─── The report ──────────────────────────────────────────────────────────────
+#
+# THE HEADER IS A PROVENANCE LINE, and it replaces a sentence that told the
+# reader what doctor does. They already know — they typed it. What they cannot
+# know without being told is WHICH payload just answered them, and on a machine
+# carrying a plugin install, a checkout and a marketplace copy of the same thing,
+# that is the fact every other line below is relative to.
+echo "Bionic Doctor — payload ${PLUGIN_VERSION} @ ${PAYLOAD_SHA}"
+
+# ─── The verdict, on the line under it ───────────────────────────────────────
+#
+# TWO QUESTIONS, ANSWERED BEFORE ANY EVIDENCE: is anything wrong, and what do I
+# type. The arrow is not decoration — it marks the only lines in this report that
+# are addressed to the reader as instructions rather than as facts, so a reader
+# scanning for "what am I supposed to do" has one shape to look for.
+#
+# THE SETUP-FIXABLE PROBLEMS COLLAPSE INTO ONE LINE and the rest each get their
+# own. Eleven absences on a cold machine are eleven problems with one identical
+# command; printing that command eleven times teaches a reader to stop reading
+# it. A problem setup CANNOT repair — a half-uninstalled machine, a CLI that
+# refused to load the plugin — would be buried by that collapse, so it stays a
+# line of its own with its own command on it.
+if [ "$N_FIX" = "0" ]; then
+  echo "→ Nothing to do. This machine is fully set up."
+else
+  _doctor_verdict="→ ${N_FIX} $(_doctor_plural "$N_FIX" problem problems)."
+  if [ -n "$FIX_NAMES_SETUP" ]; then
+    _doctor_verdict="${_doctor_verdict} Run /bionic:setup to fix: ${FIX_NAMES_SETUP}"
+    # TRUNCATED RATHER THAN WRAPPED. The names are what makes this line worth
+    # reading, and a cold machine has enough of them to run past a terminal's
+    # width — where the line would break into a second one and undo the whole
+    # rule. The count above is exact either way.
+    
+    if [ "${#_doctor_verdict}" -gt 99 ]; then
+      _doctor_verdict="$(printf '%.96s' "$_doctor_verdict")…"
+    fi
+  fi
+  printf '%s\n' "$_doctor_verdict"
+  if [ -n "$FIX_LINES_OTHER" ]; then
+    while IFS= read -r _fix_other; do
+      [ -n "$_fix_other" ] || continue
+      printf '→ %s\n' "$_fix_other"
+    done <<< "$FIX_LINES_OTHER"
+    # The one command that cannot ride on its own line: a raw URL inside a
+    # pipefail wrapper, printed whole underneath rather than wrapped by the
+    # terminal into something nobody can paste.
+    [ "$HALF_STATE" = "yes" ] && \
+      echo "   bash -c 'set -o pipefail; curl -fsSL ${BIONIC_REMOVE_RAW_URL} | bash'"
+  fi
+fi
+
+# ─── Table 1 — what ships inside the plugin ──────────────────────────────────
+#
+# THE OWNERSHIP SPLIT IS THE ORGANISING IDEA of all three tables, and it answers
+# the question the old section list never did: when something here is wrong, whose
+# machinery repairs it. Everything in this table arrived with the plugin install
+# and is repaired by re-installing the plugin; everything in the next arrived
+# through /bionic:setup and is repaired by running it again. A reader who knows
+# which table a broken row is in already knows what to type.
+echo ""
+echo "BIONIC NATIVE — ships inside the plugin"
+_doctor_native_row " " "component" "count" "detail"
+if [ "$SKILLS_OK" = "$SKILLS_TOTAL" ] && [ "$SKILLS_TOTAL" -gt 0 ]; then
+  _doctor_native_row "$DOCTOR_OK" "skills" "${SKILLS_OK}/${SKILLS_TOTAL}" "$SKILL_NAMES"
+else
+  _doctor_native_row "$DOCTOR_BAD" "skills" "${SKILLS_OK}/${SKILLS_TOTAL}" \
+    "a skill directory carries no SKILL.md → reinstall the plugin"
+fi
+case "$AGENT_STATE" in
+  stock)
+    _doctor_native_row "$DOCTOR_OK" "agents" "${AGENT_TOTAL}/${AGENT_TOTAL}" "stock" ;;
+  modified)
+    # `–`, NOT ✗, and nothing in the verdict above asks for these files back.
+    # Editing your own installed role files is allowed; the row says what the
+    # machine has and names the undo in the same breath.
+    _doctor_native_row "$DOCTOR_NIL" "agents" \
+      "$((AGENT_TOTAL - AGENT_MODIFIED))/${AGENT_TOTAL}" \
+      "${AGENT_MODIFIED} edited locally (${AGENT_NAMES//,/, }) — reinstall restores stock" ;;
+  *)
+    _doctor_native_row "$DOCTOR_NIL" "agents" "?/${AGENT_TOTAL}" "unknown — ${AGENT_CAUSE}" ;;
+esac
+case "$PLUGIN_HOOKS" in
+  ok)
+    _doctor_native_row "$DOCTOR_OK" "hooks" "${HOOK_RESOLVING}/${HOOK_TOTAL}" "" ;;
+  absent)
+    _doctor_native_row "$DOCTOR_BAD" "hooks" "0/0" \
+      "the payload carries no hooks/hooks.json → reinstall the plugin" ;;
+  *)
+    _doctor_native_row "$DOCTOR_BAD" "hooks" "${HOOK_RESOLVING}/${HOOK_TOTAL}" \
+      "$(detect_reconverge_hint hooks)" ;;
+esac
+if [ "$COMMANDS_OK" = "$COMMANDS_TOTAL" ] && [ "$COMMANDS_TOTAL" -gt 0 ]; then
+  _doctor_native_row "$DOCTOR_OK" "commands" "${COMMANDS_OK}/${COMMANDS_TOTAL}" "$COMMAND_NAMES"
+else
+  _doctor_native_row "$DOCTOR_BAD" "commands" "${COMMANDS_OK}/${COMMANDS_TOTAL}" \
+    "a command file is empty → reinstall the plugin"
+fi
+# THE TWO STATES THAT MAKE EVERY ROW ABOVE MOOT, and they are printed here only
+# when they are true. A payload can be whole on disk and not be running: the CLI
+# may have refused to load it, or a teardown may have taken the command surface
+# away and left the files. Either way the four rows above describe something this
+# session is not executing, and a table that did not say so would be four
+# confident answers to the wrong question.
+case "$LOAD_STATE" in
+  loaded) ;;
+  failed)
+    _doctor_native_row "$DOCTOR_BAD" "plugin" "—" "the CLI refused to load it: ${LOAD_ERROR}" ;;
+  absent)
+    _doctor_native_row "$DOCTOR_BAD" "plugin" "—" \
+      "not installed for this CLI → claude plugin install ${BIONIC_PLUGIN_ID}" ;;
+  *)
+    _doctor_native_row "$DOCTOR_NIL" "plugin" "—" "load state unknown — ${LOAD_CAUSE}" ;;
+esac
+[ "$HALF_STATE" = "yes" ] && \
+  _doctor_native_row "$DOCTOR_BAD" "install" "—" "half-uninstalled — the CLI no longer knows bionic"
+
+# ─── Table 2 — what /bionic:setup put on this machine ────────────────────────
+echo ""
+echo "THIRD PARTY — installed by /bionic:setup"
+_doctor_third_row " " "name" "version" "source" "state"
+printf '%s' "$THIRD_ROWS"
+
+# ─── Table 3 — the environment this machine runs bionic in ───────────────────
+#
+# TWO FACTS PER NAME, AND NEITHER ANSWERS THE OTHER. `env_get` reads the CLI's
+# settings.json — what a session started from now on will have. `env_live` reads
+# THIS process — what the session you are in has. On 2026-08-21 a session ran
+# with the task-list name written to disk and absent from the process (the host
+# launches its shell with rc files disabled, so the export bionic used to append
+# never arrived), and the one line this section carried could not say so.
+# Configured-and-not-live is a RESTART; absent is a setup gap; and telling a user
+# to run setup over a restart sends them to repair something already repaired.
+# Which is also why a restart-pending name is `–` and an absent one is ✗: only
+# one of them has a line in the verdict.
+echo ""
+echo "ENVIRONMENT"
+for _env_key in $ENV_KEYS; do
+  _env_configured="$(env_get "$_env_key" 2>/dev/null)" || _env_configured=""
+  if _env_live_value="$(env_live "$_env_key" 2>/dev/null)"; then _env_is_live=yes; else _env_is_live=no; fi
+  if [ -n "$_env_configured" ]; then
+    if [ "$_env_is_live" = "yes" ]; then
+      _doctor_env_row "$DOCTOR_OK" "${_env_key}=${_env_configured}" "live in session"
+    else
+      _doctor_env_row "$DOCTOR_NIL" "${_env_key}=${_env_configured}" "restart to pick it up"
+    fi
+  elif [ "$_env_is_live" = "yes" ]; then
+    # Live and not configured: the state the retired shell export leaves behind.
+    # It works right now and dies with this session, which is why setup is still
+    # named for it in the verdict above.
+    _doctor_env_row "$DOCTOR_BAD" "${_env_key}=${_env_live_value}" \
+      "live in session, not written → /bionic:setup"
+  else
+    _doctor_env_row "$DOCTOR_BAD" "${_env_key}" "not set → /bionic:setup"
+  fi
+done
+# The permission profile as ONE row. Three facts stand behind it — what the
+# payload ships, what this machine applied, and whether the applied block still
+# matches a fresh render — and on a healthy machine they agree, so the row is the
+# version and nothing else. They disagree in exactly two ways worth a user's
+# attention, and each of those has a line in the verdict.
+
+case "$PROFILE_VERDICT" in
+  identical) _doctor_env_row "$DOCTOR_OK"  "permission profile" "${PROFILE_VERSION} applied" ;;
+  stale)     _doctor_env_row "$DOCTOR_BAD" "permission profile" \
+               "${PROFILE_VERSION} applied, stale → /bionic:setup" ;;
+  absent)    _doctor_env_row "$DOCTOR_BAD" "permission profile" "none applied → /bionic:setup" ;;
+  *)         _doctor_env_row "$DOCTOR_NIL" "permission profile" "unknown — jq is not on PATH" ;;
+esac
+case "$CCSTATUSLINE_STATE" in
+  yes)     _doctor_env_row "$DOCTOR_OK"  "statusline" "ccstatusline" ;;
+  unknown) _doctor_env_row "$DOCTOR_NIL" "statusline" "unknown — $(_doctor_unknown_cause statusline)" ;;
+  *)       _doctor_env_row "$DOCTOR_BAD" "statusline" "not configured → /bionic:setup" ;;
+esac
+# THE LEFTOVERS, AND ONLY WHEN THERE ARE ANY. Six checks ask the same kind of
+# question — did the retired installer leave something behind — and on a machine
+# that never ran it, or has been cleaned once, all six answer no. Silence is the
+# right output for that.
+
+[ "$LEGACY_STATE" = "yes" ] && \
+  _doctor_env_row "$DOCTOR_BAD" "legacy .zshrc alias block" "present → /bionic:setup"
+case "$LEGACY_HOOK_COUNT" in
+  unknown|0) ;;
+  *) _doctor_env_row "$DOCTOR_BAD" "legacy-channel managed hooks" \
+       "${LEGACY_HOOK_COUNT} in settings.json → /bionic:setup" ;;
+esac
+[ "$SKILL_COPY_STATE" = "yes" ] && \
+  _doctor_env_row "$DOCTOR_BAD" "legacy installed skill copy" \
+    "arms the same walls twice → /bionic:setup"
+
 
 # ─── The one question, and the section it appends ────────────────────────────
 #

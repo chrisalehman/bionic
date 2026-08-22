@@ -38,8 +38,10 @@
 #   3. tools                the substrate every machine needs — git, node, jq and
 #                           the rest — one row at a time through `install_dep`,
 #                           the same function a just-in-time offer calls.
-#   4. optional extras      the four tools nobody needs to work: offered once,
-#                           each with a line of what it is, default No.
+#   4. optional extras      everything offered once with a line of what it is and
+#                           a default of No — the conveniences nobody needs, and
+#                           (since 2026-08-22) the route tools that used to be
+#                           installed lazily mid-run.
 #   5. shell environment    CLAUDE_CODE_ENABLE_TODO_TOOLS=1, marker-scoped.
 #   6. legacy shell alias   the block claude-bootstrap.sh used to write. Auto
 #                           mode is the default now and the safer equivalent, so
@@ -74,15 +76,18 @@
 # usually absent, and a numbered step missing from most transcripts would leave
 # a hole in the sequence the nine steps above are counted in (AC-8).
 #
-# WHICH TOOLS THIS SCRIPT IS ALLOWED TO ASK ABOUT (wave-06 D-B, spec AC-11).
-# Steps 3 and 4 walk `dep_names_class basic` and `dep_names_class extra`, and
-# nothing here walks `when-needed`. That class exists because the moment to ask
-# about a headless browser is the moment a route wants one — `lib/jit.sh` makes
-# that offer, from the same `install_dep`. Setup asking would be asking about a
-# capability the user has not reached, and one of those rows (impeccable) is
-# native-kind, which `install_dep` is required to refuse outright. The classes
-# are read from the table, never restated here: a second roster is a second
-# opinion about what bionic depends on.
+# WHICH TOOLS THIS SCRIPT IS ALLOWED TO ASK ABOUT (wave-06 D-B, spec AC-11, as
+# narrowed by Chris's 2026-08-22 ruling). Steps 3 and 4 walk `dep_names_class
+# basic` and `dep_names_class extra`, and nothing here walks `when-needed`.
+# What changed on 2026-08-22 is the membership of those classes, not this rule:
+# four rows that were `when-needed` — the browser driver, the devtools server,
+# the chromium build and the pnpm-warmed animation library — are `extra` now, so
+# step 4 offers them here rather than leaving the first install to happen inside
+# the run that needed it. Two rows keep `when-needed` and this script still never
+# mentions them: `impeccable` is native-kind, which `install_dep` is required to
+# refuse outright, and `excalidraw-renderer` is a venv sync that means nothing to
+# a machine which never renders. The classes are read from the table, never
+# restated here: a second roster is a second opinion about what bionic depends on.
 #
 # CONSENT, AND WHY THERE IS ONE PROMPT SHAPE. Every mutation below is gated, per
 # item, on an explicit `y` on this script's own standard input, and the gate is
@@ -223,6 +228,9 @@ SETUP_ALIAS_PATTERN='alias claude=.*dangerously-skip-permissions'
 # bash a stock macOS box runs this script with.
 
 SETUP_ACTIONS=""
+# Set by the statusline step, read by the summary. A note printed unconditionally
+# would tell every user to restart over a change they did not make.
+SETUP_STATUSLINE_CHANGED=no
 
 # THE INVOCATION A PERSON CAN TYPE (critic F-1). Consent reaches this script
 # through its standard input and nowhere else. The model runs it from a tool
@@ -476,6 +484,25 @@ _setup_answer_yes() {  # <name>
 }
 
 say()    { printf '%s\n' "$*"; }
+# ONE LINE PER ITEM, WITH A SYMBOL IN COLUMN ONE (spec AC-15, approved
+# 2026-08-22). Every step below reports what it did, skipped or asked about
+# through this one function, so a row added by a future arm inherits the format
+# without knowing it exists. ✓ done or already true · ✗ could not · – skipped,
+# declined or nothing to do. All three glyphs are three bytes, so the label
+# column stays straight; padding the SYMBOL would not be safe, because printf
+# pads to a byte count.
+SETUP_OK='✓'
+SETUP_BAD='✗'
+SETUP_NIL='–'
+# THE FOURTH STATE, AND IT IS NOT A FAILURE. Where the stream cannot carry an
+# answer, setup prints the question and moves on rather than blocking on a reply
+# nobody is going to send. That item was neither done nor declined — it is
+# OUTSTANDING, and the person relaying this output is the one who can settle it.
+# Rendering that as `–` alongside the items a user actively said no to would
+# lose the only distinction that matters here: one of them is a decision and the
+# other is a decision still waiting to be made.
+SETUP_ASK='?'
+item()   { printf '   %s %-22s %s\n' "$1" "$2" "${3:-}"; }
 action() { SETUP_ACTIONS="${SETUP_ACTIONS}${1}"$'\n'; }
 # deps.sh owns the one prompt shape — and the one short-circuit, because
 # `install_dep` and `install_plugin_native` ask through it directly and a
@@ -492,9 +519,9 @@ consent() { _dep_consent "$1"; }
 _setup_say_declined() {  # <rc> <tail sentence, already worded for "declined —">
   local rc="$1" tail="$2"
   if [ "$rc" = "2" ]; then
-    say "   not asked — ${tail}"
+    say "   ${SETUP_ASK} not asked — ${tail}"
   else
-    say "   declined — ${tail}"
+    say "   ${SETUP_NIL} declined — ${tail}"
   fi
 }
 
@@ -636,10 +663,10 @@ setup_plugin_install() {
 
   case "$state" in
     enabled|disabled)
-      say "   bionic is already installed (${id}) — nothing to do."
+      item "$SETUP_OK" "plugin" "already installed (${id}) — nothing to do"
       return 0 ;;
     unknown)
-      say "   plugin install state is unknown — the claude CLI or jq could not be used to read it."
+      item "$SETUP_NIL" "plugin" "install state unknown — the claude CLI or jq could not read it"
       action "install jq (and make sure the claude CLI is on PATH), then re-run /bionic:setup — the plugin install state read as unknown"
       return 0 ;;
   esac
@@ -698,7 +725,7 @@ setup_load_state() {
 
   case "$state" in
     loaded)
-      say "   bionic: loaded."
+      item "$SETUP_OK" "load state" "loaded"
       ;;
     failed)
       # A real error, so it is reported the way the contract requires: the CLI's
@@ -711,10 +738,10 @@ setup_load_state() {
     absent)
       # Step 1 already owns the install and its action line; saying so twice
       # would make one problem look like two.
-      say "   bionic is not in the plugin list, so nothing of it is loaded here yet."
+      item "$SETUP_NIL" "load state" "not in the plugin list, so nothing is loaded here yet"
       ;;
     *)
-      say "   bionic's load state is unknown — ${cause}"
+      item "$SETUP_NIL" "load state" "unknown — ${cause}"
       action "check that bionic is loading: run claude plugin list and read the Status line for bionic"
       ;;
   esac
@@ -795,13 +822,12 @@ setup_duplicates() {
       # used to say "install jq", which was the only way the read could fail when it was
       # written. The read is bounded now, so a stalled registry is a second cause — and
       # telling that user to install a tool they already have is worse than saying nothing.
-      say "   bionic could not check for duplicate copies — ${cause}"
+      item "$SETUP_NIL" "duplicates" "could not check — ${cause}"
       action "duplicate copies were not checked for — ${cause}; /bionic:doctor lists them once bionic can read the plugin registry"
       continue
     fi
 
-    say "   ${bare} is installed twice: ${ids}."
-    say "   A session loads one of them, and which one is not something you chose."
+    say "   ${bare} is installed twice (${ids}) — a session loads one, and you did not choose which."
     if ! losers="$(_setup_dup_uninstall_ids "$fix")"; then
       # Both copies are somebody else's catalog: bionic has no standing to pick
       # a winner, so it names the choice and does not offer to make it.
@@ -809,8 +835,7 @@ setup_duplicates() {
       action "settle the duplicate copies of ${bare}: ${fix}"
       continue
     fi
-    say "   bionic would run: ${fix}"
-    say "   Saying no lets them coexist: nothing changes, and bionic asks again next run."
+    say "   bionic would run: ${fix}   (no lets them coexist; bionic asks again next run)"
     consent "   Consolidate — remove the copy bionic did not install?"; _setup_consent_rc=$?
     if [ "$_setup_consent_rc" -ne 0 ]; then
       _setup_say_declined "$_setup_consent_rc" "left as they are."
@@ -820,9 +845,9 @@ setup_duplicates() {
     while IFS= read -r id; do
       [ -n "$id" ] || continue
       if claude plugin uninstall "$id"; then
-        say "   removed ${id}."
+        item "$SETUP_OK" "duplicate" "removed ${id}"
       else
-        say "   ${id} could not be removed."
+        item "$SETUP_BAD" "duplicate" "${id} could not be removed"
         action "remove the duplicate copy by hand: claude plugin uninstall ${id}"
       fi
     done <<< "$losers"
@@ -841,7 +866,6 @@ setup_dep_enable_verify() {
   case "$SETUP_ONLY" in ''|dependency:*) ;; *) return 0 ;; esac
   say ""
   say "2. Dependencies"
-  say "   The two plugins bionic depends on. They are installed with bionic itself."
   local name line present state id
   # The list is read on fd 3, NEVER on stdin. A `while read ... done < <(list)`
   # loop redirects the BODY's stdin too, so the consent prompt inside it would
@@ -857,27 +881,26 @@ setup_dep_enable_verify() {
 
     case "$state" in
       enabled)
-        say "   ${name}: installed and enabled."
+        item "$SETUP_OK" "$name" "installed and enabled"
         ;;
       disabled)
-        say "   ${name}: installed but DISABLED."
-        say "   bionic would run: claude plugin enable ${id}"
+        item "$SETUP_BAD" "$name" "installed but DISABLED — bionic would run: claude plugin enable ${id}"
         consent "   Enable ${name} now?"; _setup_consent_rc=$?
         if [ "$_setup_consent_rc" -ne 0 ]; then
           _setup_say_declined "$_setup_consent_rc" "${name} stays disabled."
           action "run: claude plugin enable ${id} — $(_setup_answer_yes "dependency:${name}")"
         elif claude plugin enable "$id"; then
-          say "   enabled."
+          item "$SETUP_OK" "$name" "enabled"
         else
           action "run: claude plugin enable ${id}"
         fi
         ;;
       absent)
-        say "   ${name}: not installed — it should have come with bionic, so this install is incomplete."
+        item "$SETUP_BAD" "$name" "not installed — it shipped with bionic, so this install is incomplete"
         action "reinstall bionic so its dependencies resolve: claude plugin install ${SETUP_PLUGIN_ID} --scope user --yes (${name} is missing)"
         ;;
       *)
-        say "   ${name}: enabled-state unknown (present=${present}) — the claude CLI or jq could not be used to read it."
+        item "$SETUP_NIL" "$name" "enabled-state unknown — the claude CLI or jq could not read it"
         action "install jq, then re-run /bionic:setup — ${name}'s enabled-state read as unknown"
         ;;
     esac
@@ -901,6 +924,24 @@ setup_dep_enable_verify() {
 # every other, and the unknown is named in the same breath so the user is
 # deciding with the real state in front of them.
 
+# WHICH INSTALLER A ROW GOES TO, and why this branch exists here as well as in
+# jit.sh. `install_dep` REFUSES every native row by design — installing a plugin
+# is the CLI's own act — so a loop that hands one to it prints a library's
+# refusal at a user who did nothing wrong. Until epic-18 T4 no native row was
+# ever offered by setup (impeccable is when-needed, and jit.sh carried the only
+# branch); `document-skills` and `example-skills` are native AND `extra`, so this
+# step needs the same two-line routing. It is deliberately not folded into
+# `install_dep`: the two installers differ in who runs the install and what the
+# result is in this session, and merging them is the kludge the ownership table
+# exists to prevent. Callers choose their entry point; there are now two callers.
+_setup_install_one() {  # <name>
+  if [ "$(dep_field "$1" kind)" = "native" ]; then
+    install_plugin_native "$1"
+  else
+    install_dep "$1"
+  fi
+}
+
 _setup_install_class() {  # <class>
   local name raw present
   # fd 3, not stdin — see the note in setup_dep_enable_verify. install_dep
@@ -908,19 +949,29 @@ _setup_install_class() {  # <class>
   while IFS= read -r name <&3; do
     [ -n "$name" ] || continue
     _setup_wants "tool:${name}" || continue
-    [ "$(dep_field "$name" class)" = "extra" ] && say "   ${name} — $(_setup_extra_why "$name")"
     raw="$(check_dep "$name")" || continue
     present="${raw#present=}"; present="${present%%|*}"
+    [ "$present" != "yes" ] && [ "$(dep_field "$name" class)" = "extra" ] \
+      && say "   ${name} — $(_setup_extra_why "$name")"
     case "$present" in
       yes)
-        say "   ${name}: present."
+        item "$SETUP_OK" "$name" "present"
         ;;
       unknown)
-        say "   ${name}: presence unknown — bionic has no way to read whether this one is here."
-        install_dep "$name" || action "install ${name} by hand: $(_jit_fix_line "$name") — bionic could not confirm whether it is already there; $(_setup_answer_yes "tool:${name}")"
+        item "$SETUP_NIL" "$name" "presence unknown — bionic cannot read whether this one is here"
+        _setup_install_one "$name" || action "install ${name} by hand: $(_jit_fix_line "$name") — bionic could not confirm whether it is already there; $(_setup_answer_yes "tool:${name}")"
         ;;
       *)
-        install_dep "$name" || action "install ${name} by hand: $(_jit_fix_line "$name") — $(_setup_answer_yes "tool:${name}")"
+        if _setup_install_one "$name"; then
+          # THE ONE ITEM WHOSE RESULT THIS SESSION CANNOT SHOW. Everything else
+          # setup installs is on PATH the moment it lands. The statusline is a
+          # key in settings.json that the CLI read when it started, so a user who
+          # just said yes looks at the bottom of their terminal, sees nothing
+          # different, and reasonably concludes it did not work.
+          [ "$(dep_field "$name" kind)" = "statusline" ] && SETUP_STATUSLINE_CHANGED=yes
+        else
+          action "install ${name} by hand: $(_jit_fix_line "$name") — $(_setup_answer_yes "tool:${name}")"
+        fi
         ;;
     esac
   done 3< <(dep_names_class "$1")
@@ -941,6 +992,16 @@ _setup_extra_why() {  # <name>
     notebooklm)      echo "a command-line client for Google NotebookLM, for research passes over sources." ;;
     context7)        echo "up-to-date documentation for libraries, fetched on demand inside a session." ;;
     '@pencil.dev/cli') echo "the Pencil design tool's command line, for turning design files into code." ;;
+    # The four rows the 2026-08-22 ruling promoted out of when-needed. Each one
+    # names the work it unblocks, because that is what a user is deciding about
+    # — a package name tells them nothing about which run stops without it.
+    '@playwright/cli') echo "the browser driver bionic's verification route uses; without it, browser checks are skipped rather than run." ;;
+    chrome-devtools) echo "the deep-inspection browser server (Lighthouse, traces, profiling) the verification route escalates to." ;;
+    playwright-chromium) echo "the headless Chromium build the diagram renderer drives; without it, diagrams cannot be rendered." ;;
+    motion)          echo "an animation library pre-warmed into the pnpm store so design work does not stop to fetch it." ;;
+    humanizer)       echo "a skill that rewrites text so it stops reading as though a model wrote it." ;;
+    document-skills) echo "skills for reading and writing Word, Excel, PowerPoint and PDF files." ;;
+    example-skills)  echo "Anthropic's own example skills — art, canvas design, brand guidelines and more." ;;
     *)               echo "an optional extra; bionic ships no description for it." ;;
   esac
 }
@@ -949,8 +1010,6 @@ setup_tools_loop() {
   _setup_class_wanted basic || return 0
   say ""
   say "3. Tools"
-  say "   The substrate bionic expects on a working machine. Asked one at a time;"
-  say "   bionic never removes these, because it did not put them on your machine to own."
   _setup_install_class basic
 }
 
@@ -958,8 +1017,10 @@ setup_extras_loop() {
   _setup_class_wanted extra || return 0
   say ""
   say "4. Optional extras"
-  say "   Nothing here is needed to use bionic. Each is offered once, with a line of"
-  say "   what it is, and the answer is No unless you say otherwise."
+  say "   Nothing here has to be answered yes. Each is offered once, with a line of"
+  say "   what it is, and the answer is No unless you say otherwise. Some are"
+  say "   conveniences; some are the tools a route needs, offered now so the route"
+  say "   does not stop to ask in the middle of your work."
   _setup_install_class extra
 }
 
@@ -1006,9 +1067,9 @@ setup_environment() {
   # line from a copy of this file and re-running: a gate spread over an if/fi
   # pair cannot be deleted that way without breaking the copy's syntax, and a
   # mutation that turns the script into a parse error proves nothing.
-  [ -n "$missing" ] || { say "   ${settings} already carries bionic's environment settings — nothing to do."; return 0; }  # idempotence guard: settings env
+  [ -n "$missing" ] || { item "$SETUP_OK" "environment" "already written to ${settings} — nothing to do"; return 0; }  # idempotence guard: settings env
 
-  say "   ${settings} does not carry all of bionic's environment settings."
+  say "   ${settings} does not carry all of bionic's environment settings:"
   for key in $missing; do
     say "   ${key}=$(env_default "$key") — $(_setup_env_why "$key")"
   done
@@ -1019,16 +1080,16 @@ setup_environment() {
     if env_set "$key" "$(env_default "$key")"; then
       wrote=$((wrote + 1))
     else
-      say "   could not write ${settings}."
+      item "$SETUP_BAD" "environment" "could not write ${settings}"
       action "write bionic's environment settings to ${settings} (bionic could not write the file)"
       return 0
     fi
   done
-  say "   set."
   # A value written now reaches the NEXT session and not this one — the same
   # gap doctor reports as "live in this session: no". Saying so here is what
-  # stops a user re-running setup to fix something already fixed.
-  say "   Takes effect in a new session."
+  # stops a user re-running setup to fix something already fixed, and it rides
+  # on the result line rather than under it.
+  item "$SETUP_OK" "environment" "set — takes effect in a new session"
   return 0
 }
 
@@ -1037,9 +1098,10 @@ setup_environment() {
 # lands on a person's screen, and the vocabulary wall reads only this side.
 _setup_env_why() {  # <key>
   case "${1:-}" in
-    CLAUDE_CODE_ENABLE_TODO_TOOLS) echo "the task list a plan's steps are tracked in" ;;
-    BASH_MAX_TIMEOUT_MS)           echo "how long a command may run before it is taken away from whoever started it" ;;
-    *)                             echo "a setting bionic needs" ;;
+    CLAUDE_CODE_ENABLE_TODO_TOOLS)        echo "the task list a plan's steps are tracked in" ;;
+    BASH_MAX_TIMEOUT_MS)                  echo "how long a command may run before it is taken away from whoever started it" ;;
+    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS) echo "the channel a dispatched agent reports back through" ;;
+    *)                                    echo "a setting bionic needs" ;;
   esac
 }
 
@@ -1054,8 +1116,7 @@ setup_legacy_alias() {
   line="$(detect_zshrc_legacy_block)"; present="${line#*present=}"
 
   if [ "$present" = "yes" ]; then
-    say "   ${rc} carries the legacy bionic alias block (claude --dangerously-skip-permissions)."
-    say "   Auto mode is the default now and is the safer equivalent, so the block is retired footprint."
+    say "   ${rc} carries the retired bionic alias block — auto mode is the safer equivalent now."
     consent "   Remove the legacy alias block from ${rc}?"; _setup_consent_rc=$?
     if [ "$_setup_consent_rc" -ne 0 ]; then
       _setup_say_declined "$_setup_consent_rc" "the block stays."
@@ -1064,10 +1125,10 @@ setup_legacy_alias() {
     fi
     _setup_rc_strip_block "$rc" "$SETUP_ALIAS_START" "$SETUP_ALIAS_END"
     if grep -qF "$SETUP_ALIAS_START" "$rc" 2>/dev/null; then
-      say "   the block could not be removed."
+      item "$SETUP_BAD" "legacy alias block" "could not be removed"
       action "remove the legacy bionic alias block from ${rc} by hand"
     else
-      say "   removed."
+      item "$SETUP_OK" "legacy alias block" "removed"
     fi
     return 0
   fi
@@ -1089,16 +1150,16 @@ setup_legacy_alias() {
     if _setup_stage_tmp "$tmp" \
        && grep -vE "$SETUP_ALIAS_PATTERN" "$rc" > "$tmp" \
        && _setup_publish_tmp "$tmp" "$rc_target"; then
-      say "   removed (legacy unmarked alias)."
+      item "$SETUP_OK" "legacy alias" "removed (the unmarked spelling)"
     else
       rm -f "$tmp"
-      say "   could not rewrite ${rc}."
+      item "$SETUP_BAD" "legacy alias" "could not rewrite ${rc}"
       action "remove the legacy 'alias claude=...--dangerously-skip-permissions' line from ${rc} by hand"
     fi
     return 0
   fi
 
-  say "   no legacy alias block in ${rc} — nothing to remove."
+  item "$SETUP_NIL" "legacy alias block" "none in ${rc} — nothing to remove"
   return 0
 }
 
@@ -1127,10 +1188,10 @@ setup_legacy_channel_hooks() {
 
   case "$count" in
     0)
-      say "   no legacy-channel managed-hook entries in ${settings} — nothing to remove."
+      item "$SETUP_NIL" "legacy-channel hooks" "no legacy-channel managed-hook entries — nothing to remove"
       return 0 ;;
     unknown)
-      say "   legacy-channel managed-hook entries: count unknown — jq is unavailable, so ${settings} was not parsed."
+      item "$SETUP_NIL" "legacy-channel hooks" "count unknown — jq is unavailable, so ${settings} was not parsed"
       action "install jq, then re-run /bionic:setup — legacy-channel managed-hook entries could not be counted"
       return 0 ;;
   esac
@@ -1138,8 +1199,7 @@ setup_legacy_channel_hooks() {
   # The pre-plugin hooks directory is named without a path literal on purpose:
   # tests/plugin-paths.test.sh forbids an installed-path literal on any
   # executable line in the payload, and a user-facing string is still one.
-  say "   ${count} hook entr(ies) in ${settings} still point into the machine's pre-plugin hooks directory."
-  say "   They are registered through the settings channel rather than the plugin channel."
+  say "   ${count} hook entr(ies) in ${settings} still point into the pre-plugin hooks directory."
   # WHAT THIS PROMPT IS ALLOWED TO PROMISE. Offering to delete a user's only
   # live hook registrations is safe when the plugin channel already carries the
   # same hooks and destructive when it does not, and which of those is true is a
@@ -1149,11 +1209,9 @@ setup_legacy_channel_hooks() {
   # falls to the cautious branch on purpose: an unreadable registry is not
   # evidence of coverage.
   if [ "$registered" = "yes" ]; then
-    say "   The plugin registers its own copy of each through the payload's hooks.json, so the same"
-    say "   hooks keep firing through the plugin channel once these are gone."
+    say "   The plugin registers its own copy of each, so the same hooks keep firing once these are gone."
   else
-    say "   The plugin is NOT registered with the CLI on this machine, so nothing takes their place:"
-    say "   removing these entries leaves these hooks not firing at all until the plugin is installed."
+    say "   The plugin is NOT registered here, so removing these leaves those hooks not firing at all."
   fi
   consent "   Remove the legacy-channel entries from ${settings}?"; _setup_consent_rc=$?
   if [ "$_setup_consent_rc" -ne 0 ]; then
@@ -1163,9 +1221,9 @@ setup_legacy_channel_hooks() {
   fi
 
   if hooks_strip_legacy_channel "$settings"; then
-    say "   removed."
+    item "$SETUP_OK" "legacy-channel hooks" "removed"
   else
-    say "   could not rewrite ${settings}."
+    item "$SETUP_BAD" "legacy-channel hooks" "could not rewrite ${settings}"
     action "remove ${count} legacy-channel managed-hook entr(ies) from ${settings} by hand"
   fi
   return 0
@@ -1200,13 +1258,12 @@ setup_legacy_skill_copy() {
   dir="${line##*path=}"
 
   if [ "$present" != "yes" ]; then
-    say "   no pre-plugin skill copy in the CLI's skills directory — nothing to remove."
+    item "$SETUP_NIL" "legacy skill copy" "no pre-plugin skill copy — nothing to remove"
     return 0
   fi
 
-  say "   ${dir} is a pre-plugin rendered copy of a skill this payload already ships."
-  say "   Its frontmatter registers hooks through the pre-plugin channel, so a session that"
-  say "   loads it arms the same walls twice — once from the plugin, once from the retired copy."
+  say "   ${dir} is a pre-plugin copy of a skill this payload ships — a session that loads it"
+  say "   arms the same walls twice, once from the plugin and once from the retired copy."
   # The gate is one line so a mutation arm can delete it whole and watch the
   # decline stop protecting anything (tests/setup.test.sh Group 12, mutation 4).
   consent "   Remove ${dir} and everything under it?"; _setup_consent_rc=$?
@@ -1220,9 +1277,9 @@ setup_legacy_skill_copy() {
     rm -rf "$dir" 2>/dev/null
   fi
   if [ ! -e "$dir" ]; then
-    say "   removed."
+    item "$SETUP_OK" "legacy skill copy" "removed ${dir}"
   else
-    say "   could not remove ${dir}."
+    item "$SETUP_BAD" "legacy skill copy" "could not remove ${dir}"
     action "remove the pre-plugin skill copy at ${dir} by hand"
   fi
   return 0
@@ -1259,7 +1316,7 @@ _setup_profile_block() {
   settings="$(_dep_settings_file)"
 
   if [ "$applied" = "yes" ] && [ "$stale" = "no" ]; then
-    say "   the permission profile is applied and current — nothing to do."
+    item "$SETUP_OK" "permission profile" "applied and current — nothing to do"
     return 0
   fi
 
@@ -1267,24 +1324,23 @@ _setup_profile_block() {
   root="$(_profile_plugin_root)"
   rendered="$(mktemp 2>/dev/null)" || rendered=""
   if [ -z "$rendered" ]; then
-    say "   could not create a temporary file to render the profile."
+    item "$SETUP_BAD" "permission profile" "could not create a temporary file to render it"
     action "apply the permission profile: re-run /bionic:setup once a temporary directory is writable"
     return 0
   fi
   if ! render_profile "$template" "$root" > "$rendered"; then
     rm -f "$rendered"
-    say "   the profile template could not be rendered."
+    item "$SETUP_BAD" "permission profile" "the template could not be rendered"
     action "apply the permission profile: reinstall bionic — ${template} is missing or unreadable"
     return 0
   fi
 
   if [ "$applied" = "yes" ]; then
-    say "   the applied permission profile is stale (${state})."
-    say "   A plugin update moves the install path, which is what stales the rendered rules."
+    say "   the applied permission profile is stale — a plugin update moved the install path."
   else
     say "   bionic ships a permission profile for its own scripts and hooks, rendered for ${root}."
   fi
-  say "   It goes into ${settings} inside a marker block; nothing outside that block is read or changed."
+  say "   It goes into ${settings} inside a marker block; nothing outside that block is touched."
   consent "   Apply the permission profile to ${settings}?"; _setup_consent_rc=$?
   if [ "$_setup_consent_rc" -ne 0 ]; then
     rm -f "$rendered"
@@ -1294,9 +1350,9 @@ _setup_profile_block() {
   fi
 
   if profile_apply "$rendered" "$BIONIC_PROFILE_CONSENT"; then
-    say "   applied."
+    item "$SETUP_OK" "permission profile" "applied"
   else
-    say "   the permission profile could not be applied."
+    item "$SETUP_BAD" "permission profile" "could not be applied"
     action "apply the permission profile: see the message above (jq is required to edit ${settings} safely)"
   fi
   rm -f "$rendered"
@@ -1327,7 +1383,7 @@ _setup_default_mode() {
   want="$BIONIC_DEFAULT_PERMISSION_MODE"
 
   if ! command -v jq >/dev/null 2>&1; then
-    say "   the default permission mode is unknown — jq is unavailable, so ${settings} was not parsed."
+    item "$SETUP_NIL" "permission mode" "unknown — jq is unavailable, so ${settings} was not parsed"
     action "install jq, then re-run /bionic:setup — the default permission mode could not be read"
     return 0
   fi
@@ -1343,9 +1399,8 @@ _setup_default_mode() {
   # so the two scripts are one decision; this used to be a bare literal here and
   # a second bare literal there, agreeing by luck. Written with `--arg` so a
   # value with a quote in it could never become part of the jq program.
-  if [ "$mode" = "$want" ]; then say "   the default permission mode is already ${want} — nothing to do."; return 0; fi  # idempotence guard: default mode
+  if [ "$mode" = "$want" ]; then item "$SETUP_OK" "permission mode" "already ${want} — nothing to do"; return 0; fi  # idempotence guard: default mode
 
-  say "   Claude Code asks before each command unless a default mode says otherwise."
   consent "   Set Claude Code's default permission mode to ${want}? Recommended — you approve once, not on every command."; _setup_consent_rc=$?
   # item 1: the note follows the question itself, whichever way it was
   # answered — a Remote Control session overrides this either way, so a
@@ -1358,9 +1413,9 @@ _setup_default_mode() {
   # settings file without one.
   [ -f "$settings" ] || echo '{}' > "$settings"
   if _dep_settings_write_jq "$settings" '.permissions.defaultMode = $m' --arg m "$want"; then
-    say "   set."
+    item "$SETUP_OK" "permission mode" "set to ${want}"
   else
-    say "   the default permission mode could not be set."
+    item "$SETUP_BAD" "permission mode" "could not be set"
     action "set Claude Code's default permission mode to ${want} in ${settings} by hand"
   fi
   return 0
@@ -1371,6 +1426,11 @@ _setup_default_mode() {
 setup_summary() {
   say ""
   say "Summary"
+  # THE RESTART NOTE COMES FIRST, and only when something this run did needs one.
+  # It is not an action line: there is nothing left for the user to fix, and
+  # filing it among the failures would say the statusline did not get installed.
+  [ "$SETUP_STATUSLINE_CHANGED" = "yes" ] && \
+    say "   the status line appears after a restart of Claude Code."
   if [ -z "$SETUP_ACTIONS" ]; then
     # A NARROWED RUN MAY NOT CLAIM THE WHOLE MACHINE (the RV-6 class: a summary
     # that overreaches teaches the reader to stop reading it). One item finished

@@ -779,7 +779,14 @@ expect_true "remove.sh carries its end marker verbatim" \
 # The NAMES, pinned across the same seam: env.sh owns the roster, remove.sh's
 # standalone door carries a copy, and a name in one and not the other is a name
 # that gets set and never removed.
-for env_key in CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS; do
+# The roster is READ from env.sh rather than retyped here, so a name added there
+# — `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` at epic-18 T4 — arrives on this pin
+# without an edit. A hand-typed list is a third copy of the roster, and the
+# defect this pin exists to catch is exactly a roster with copies that disagree.
+ENV_KEYS_FROM_LIB="$(bash -c '. "$1"; printf "%s" "$ENV_KEYS"' _ "${REPO}/payload/scripts/lib/env.sh")"
+expect_true "env.sh's roster reads back with at least three names" \
+  bash -c 'set -- $1; test "$#" -ge 3' _ "$ENV_KEYS_FROM_LIB"
+for env_key in $ENV_KEYS_FROM_LIB; do
   expect_true "remove.sh names the environment key ${env_key}" \
     bash -c 'grep -qF "$1" "$2"' _ "$env_key" "$REMOVE_SH"
   expect_true "env.sh names it too (the pin has two ends): ${env_key}" \

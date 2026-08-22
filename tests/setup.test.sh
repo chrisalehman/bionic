@@ -256,8 +256,12 @@ FIX=""
 new_fixture() {  # <name>
   FIX="$TMP/fix-$1"
   rm -rf "$FIX"
-  mkdir -p "$FIX/home" "$FIX/ch/plugins" "$FIX/root/.claude-plugin" "$FIX/root/hooks"
+  mkdir -p "$FIX/home" "$FIX/ch/plugins" "$FIX/root/.claude-plugin" "$FIX/root/hooks" "$FIX/root/ccstatusline"
   printf '%s\n' '{"version":"0.1.0","name":"bionic"}' > "$FIX/root/.claude-plugin/plugin.json"
+  # The shipped ccstatusline layout (epic-18 T1, AC-1): install_dep now copies
+  # this into place beside recording the command, so a fixture payload root
+  # with no ccstatusline/settings.json makes the install step fail outright.
+  printf '%s' '{"version":3,"lines":[[{"id":"1","type":"model"}]]}' > "$FIX/root/ccstatusline/settings.json"
   printf '%s' '{}' > "$FIX/ch/settings.json"
   printf '%s\n' '{"version":2,"plugins":{}}' > "$FIX/ch/plugins/installed_plugins.json"
   printf 'export PATH="$HOME/bin:$PATH"\n' > "$FIX/rc"
@@ -558,11 +562,17 @@ expect_match "absent dep: summary names it" '*agent-skills*' "$OUT"
 # AC-11 states the consequence: setup asks about the basics and the optional
 # extras, and about no `when-needed` row at all. The pre-S4 loop walked every
 # row whose kind was not native, which is the basics, the extras AND the
-# when-needed rows together — so a user setting up a machine was asked to
-# install a headless browser and an MCP server for routes they might never
-# take. Step 3 now walks `dep_names_class basic` and step 4 walks
-# `dep_names_class extra`; nothing walks `when-needed`, whose install offer
+# when-needed rows together. Step 3 now walks `dep_names_class basic` and step 4
+# walks `dep_names_class extra`; nothing walks `when-needed`, whose install offer
 # belongs to the route that needs it (lib/jit.sh).
+#
+# WHICH ROWS ARE IN WHICH CLASS CHANGED ON 2026-08-22 and this structure did not.
+# S4's own argument here was that a user should not be asked to install a headless
+# browser for a route they might never take; Chris ruled the other way after an
+# incident — an install that happens inside the run that needs it is an install
+# nobody can predict — so the browser driver, the devtools server, the chromium
+# build and the pnpm-warmed animation library are `extra` rows now and step 4
+# offers them. The loop that reads the class is untouched.
 # ---------------------------------------------------------------------------
 
 echo ""
@@ -604,8 +614,10 @@ expect_match "declined: the dependency is named in the summary" '*ripgrep*' "$OU
 # `ccstatusline` is the extras row whose presence probe needs jq (the statusline
 # lives in settings.json). Without jq its presence is unreadable, and the loop
 # must say so and OFFER rather than assume either way — the same honest-unknown
-# rule the rest of the script follows. This arm replaces the pre-S4 one, which
-# read `motion`: motion is `when-needed` now and setup never mentions it.
+# rule the rest of the script follows. (`motion` is the other row with an
+# unreadable presence, and since 2026-08-22 it is an `extra` too — the arm stays
+# on ccstatusline because its unknown is CAUSED by the missing jq this fixture
+# measures, where motion's is permanent whatever is on PATH.)
 new_fixture deps-unknown
 plant_cli_plugin "bionic@bionic" true
 OUT="$(SETUP_PATH="$NOJQ_BIN" run_setup "$NO")"
@@ -651,14 +663,32 @@ done
 # `impeccable` is the one that is also native-kind, so a loop keyed on class
 # rather than kind would hand it to install_dep, which is required to refuse it
 # — the failure would surface as an error message, not as an offer.
-for jit in impeccable "@playwright/cli" playwright-chromium chrome-devtools motion; do
+#
+# THE LIST SHRANK ON 2026-08-22, and both halves of that ruling are asserted:
+# these two rows must still be absent from the whole run, and the four rows that
+# left the class must now appear in step 4 (the roster below).
+for jit in impeccable excalidraw-renderer; do
   expect_no_match "when-needed row is NOT offered at setup: ${jit}" "*${jit}*" "$OUT"
 done
 
-for extra in ccstatusline notebooklm context7 "@pencil.dev/cli"; do
+# Restated here rather than read from the dependency table on purpose: this suite
+# measures a TRANSCRIPT, and a roster read from the table under test would keep
+# passing on a table that had silently lost a row.
+EXTRA_ROSTER="ccstatusline notebooklm context7 @pencil.dev/cli humanizer document-skills example-skills @playwright/cli chrome-devtools playwright-chromium motion"
+for extra in $EXTRA_ROSTER; do
   expect_match "extra offered at setup: ${extra}" "*${extra}*" "$EXTRAS"
   expect_match "extra carries its own line of why: ${extra}" "*   ${extra} — *" "$EXTRAS"
 done
+
+# A NATIVE ROW IN THE EXTRAS STEP, which is new at epic-18 T4 and is the one
+# shape this loop had never carried. `install_dep` refuses every native row by
+# design, so a loop that hands `document-skills` to it prints deps.sh's refusal
+# — a library error message — at a user who did nothing wrong. The route is the
+# CLI's own installer, the same one jit.sh reaches for `impeccable`.
+expect_match "a native extra is offered as the CLI's own plugin install" \
+  "*claude plugin install document-skills@anthropic-agent-skills*" "$EXTRAS"
+expect_no_match "…never as deps.sh's refusal to be a second installer" \
+  "*there is no second installer*" "$OUT"
 
 # `[y/N]` is deps.sh's own prompt shape and the capital N IS the default, so
 # asserting it here asserts that an extra goes through the one consent gate
@@ -667,14 +697,19 @@ expect_match "extras are asked with a default-No prompt" '*\[y/N\]*' "$EXTRAS"
 
 # One why line per extra and no more: a single shared sentence at the top of the
 # step would satisfy every per-row assertion above while telling the user
-# nothing about three of the four tools.
-# Keyed on the four NAMES, not on the shape `<word> — <text>`: deps.sh's own
+# nothing about the rest of the tools.
+# Keyed on the NAMES, not on the shape `<word> — <text>`: deps.sh's own
 # `declined — <name> stays absent.` has that shape too, and now sits at the same
 # indent (R-2), so a shape-only count would credit it as a why line.
-WHY_LINES="$(awk '
-  /^   (ccstatusline|notebooklm|context7|@pencil\.dev\/cli) — ./ { n++ }
-  END { print n + 0 }' <<< "$EXTRAS")"
-expect_eq "exactly one why line per extra, no shared sentence standing in" "4" "$WHY_LINES"
+# /usr/bin/grep because this shell's `grep` is ugrep (memory: grep-skips-hidden-dirs).
+WHY_LINES=0
+WHY_EXPECTED=0
+for extra in $EXTRA_ROSTER; do
+  WHY_EXPECTED=$((WHY_EXPECTED + 1))
+  WHY_LINES=$((WHY_LINES + $(/usr/bin/grep -c "^   ${extra} — " <<< "$EXTRAS" || true)))
+done
+expect_eq "exactly one why line per extra, no shared sentence standing in" \
+  "$WHY_EXPECTED" "$WHY_LINES"
 
 # ONE INDENT OWNER (six-axis review R-2). Step 4 is written by two files —
 # setup's own `say` lines and the install prose deps.sh prints — and the seam
@@ -742,13 +777,13 @@ expect_eq "declined: settings.json is untouched, byte for byte" \
 expect_eq "declined: and so is the shell rc" "$RC_BEFORE" "$(cat "$FIX/rc")"
 expect_match "declined: the item is named as an action line" '*--only environment*' "$OUT"
 
-# A settings.json that already carries the two names — written by hand, or by an
-# earlier run — is already correct, and the merge must not disturb what else is
-# in the file.
+# A settings.json that already carries every name bionic owns — written by hand,
+# or by an earlier run — is already correct, and the merge must not disturb what
+# else is in the file.
 new_fixture env-preexisting
 plant_cli_plugin "bionic@bionic" true
 cat > "$FIX/ch/settings.json" <<'JSON'
-{"env":{"OTHER":"x","CLAUDE_CODE_ENABLE_TODO_TOOLS":"1","BASH_MAX_TIMEOUT_MS":"1800000"}}
+{"env":{"OTHER":"x","CLAUDE_CODE_ENABLE_TODO_TOOLS":"1","BASH_MAX_TIMEOUT_MS":"1800000","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"1"}}
 JSON
 SETTINGS_BEFORE="$(cat "$FIX/ch/settings.json")"
 # Narrowed to the item: a whole consented pass writes settings.json through the

@@ -96,7 +96,7 @@ STUB
 # never be reached by accident.
 BASE_BIN="$TMP/base-bin"
 mkdir -p "$BASE_BIN"
-for real in bash sh env cat grep sed awk mkdir rm cp mv chmod ls dirname basename tr head tail sort uniq wc jq python3; do
+for real in bash sh env cat grep sed awk mkdir rm cp mv chmod ls dirname basename tr head tail sort uniq wc jq python3 diff; do
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BASE_BIN}/${real}" 2>/dev/null
 done
 
@@ -201,7 +201,13 @@ echo "=== Group 2b: the four classes (wave-06 D-B, AC-10) ==="
 # plugin dependencies the harness resolves; basic = the substrate asked for at
 # setup and never removed; when-needed = installed with one question the first
 # time a route needs it, never offered by setup; extra = offered once at setup,
-# default No. The roster below is D-B's, ratified 2026-08-20.
+# default No. The roster below is D-B's, ratified 2026-08-20, as narrowed by
+# Chris's 2026-08-22 ruling — determinism over lazy install: `@playwright/cli`,
+# `chrome-devtools`, `playwright-chromium` and `motion` moved to `extra`, so the
+# first install of a route's tool no longer happens inside the run that needs it.
+# `impeccable` (native-kind, which install_dep must refuse) and
+# `excalidraw-renderer` (a venv sync inside the plugin's own tree) are what is
+# left of `when-needed`.
 
 # LC_ALL=C so the roster literals below do not depend on the runner's locale
 # (`@playwright/cli` sorts before `aws` only under the C collation).
@@ -212,9 +218,18 @@ expect_eq "dep_names_class core is exactly the two plugin dependencies" \
 expect_eq "dep_names_class basic is the substrate roster" \
   "aws docker gh git jq node pnpm rg uv" "$(class_names basic)"
 expect_eq "dep_names_class when-needed is the JIT roster" \
-  "@playwright/cli chrome-devtools impeccable motion playwright-chromium" "$(class_names when-needed)"
-expect_eq "dep_names_class extra is the optional roster" \
-  "@pencil.dev/cli ccstatusline context7 notebooklm" "$(class_names extra)"
+  "excalidraw-renderer impeccable" \
+  "$(class_names when-needed)"
+expect_eq "dep_names_class extra is the setup-offered roster" \
+  "@pencil.dev/cli @playwright/cli ccstatusline chrome-devtools context7 document-skills example-skills humanizer motion notebooklm playwright-chromium" \
+  "$(class_names extra)"
+# The ruling from the other side: each promoted row is `extra` BY NAME, so a
+# revert that restored the class would fail here rather than only shifting a
+# roster string that a reader could mistake for a reordering.
+for _promoted in "@playwright/cli" chrome-devtools playwright-chromium motion; do
+  expect_eq "promoted 2026-08-22 — setup offers it: ${_promoted}" "extra" \
+    "$(deps_run -- dep_field "$_promoted" class)"
+done
 expect_eq "an unknown class returns nothing (and exits 0)" "" "$(class_names no-such-class)"
 
 # Every row lands in exactly one of the four. A fifth class value would leave
@@ -232,6 +247,29 @@ expect_false "yq has no row (dropped, wave-06 D-B)" \
   bash -c '. "$1"; dep_row yq' _ "$DEPS_SH"
 expect_false "gcloud has no row (dropped, wave-06 D-B)" \
   bash -c '. "$1"; dep_row gcloud' _ "$DEPS_SH"
+
+# A THIRD DROP, AND THE RECORD IS THE POINT (epic-18 T4, AC-8). The retired
+# installer's roster carried `frontend-design`; the port left it out with nothing
+# written down, which is indistinguishable from forgetting it — the defect this
+# task exists to close for four other rows. So the absence is pinned the way yq's
+# and gcloud's are, AND the comment that says why is pinned with it: a drop with
+# no recorded reason is the thing that gets silently re-added.
+expect_false "frontend-design has no row (dropped, epic-18 T4)" \
+  bash -c '. "$1"; dep_row frontend-design' _ "$DEPS_SH"
+#
+# The record is read as ONE PARAGRAPH, not as three independent greps over the
+# whole file: `impeccable` and a date both appear elsewhere in deps.sh, so
+# file-wide matches would go green on a drop record that said nothing.
+DROP_LINE="$(/usr/bin/grep -n 'frontend-design' "$DEPS_SH" | head -1 | cut -d: -f1)"
+DROP_TEXT=""
+[ -n "$DROP_LINE" ] && DROP_TEXT="$(sed -n "${DROP_LINE},$((DROP_LINE + 8))p" "$DEPS_SH")"
+expect_match "deps.sh records the frontend-design drop beside yq and gcloud" \
+  "*frontend-design*" "$DROP_TEXT"
+expect_match "…dated, in the same paragraph" "*2026-08-22*" "$DROP_TEXT"
+expect_match "…naming impeccable as what supersedes it" "*impeccable*" "$DROP_TEXT"
+expect_true "…as a comment, not a row that could come back" \
+  bash -c 'case "$1" in "#"*) exit 0 ;; *) exit 1 ;; esac' _ \
+  "$(printf '%s\n' "$DROP_TEXT" | head -1 | sed 's/^[[:space:]]*//')"
 
 echo ""
 echo "=== Group 3: native-kind rows are byte-exact (the manifest renderings pin here) ==="
@@ -254,6 +292,54 @@ expect_eq "native row: agent-skills (byte-exact, ^0.6.0 not ^1.0.0)" \
 expect_eq "native row: impeccable (byte-exact, when-needed — never a third core dep)" \
   "impeccable|when-needed|skills/canonical-sdlc/SKILL.md|https://github.com/pbakaus/impeccable.git|^4.1.0|native|native-uninstall-offer" \
   "$(deps_run -- dep_row impeccable)"
+
+echo ""
+echo "=== Group 3a2: the epic-18 roster rows, byte-exact (AC-8) ==="
+#
+# Four rows the port dropped without a decision, carried forward at Chris's
+# 2026-08-22 ruling. Three of them are table rows (the fourth,
+# CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS, is an environment name and belongs to
+# env.sh's roster, not to this table — a settings value is not a dependency, and
+# giving it a row here would be a second implementation of what env.sh owns).
+#
+# TWO OF THEM ARE NATIVE ROWS SERVED BY SOMEBODY ELSE'S CATALOG, which is new.
+# Every native row until now came from bionic's own marketplace, so the catalog
+# could be a constant; `document-skills` and `example-skills` live in
+# `anthropic-agent-skills` (repo `anthropics/skills`), so the catalog is a
+# property of the row and the mechanism carries it: `marketplace:<catalog>#<repo
+# the CLI adds>`. The `kind` stays `native` because the kind names HOW a row
+# installs — the CLI's own plugin install — and that has not changed; what
+# changed is which catalog answers.
+expect_eq "extra row: humanizer (byte-exact)" \
+  "humanizer|extra|extra|github:blader/humanizer|any|github-skill|remove-on-consent" \
+  "$(deps_run -- dep_row humanizer)"
+expect_eq "extra row: document-skills (byte-exact, foreign catalog)" \
+  "document-skills|extra|extra|marketplace:anthropic-agent-skills#anthropics/skills|any|native|native-uninstall-offer" \
+  "$(deps_run -- dep_row document-skills)"
+expect_eq "extra row: example-skills (byte-exact, same catalog)" \
+  "example-skills|extra|extra|marketplace:anthropic-agent-skills#anthropics/skills|any|native|native-uninstall-offer" \
+  "$(deps_run -- dep_row example-skills)"
+
+# The catalog accessors, both arms. A row bionic's own marketplace serves has no
+# `marketplace add` to do; a foreign one names the repo the CLI takes.
+expect_eq "dep_marketplace: a foreign native row names its catalog" \
+  "anthropic-agent-skills" "$(deps_run -- dep_marketplace document-skills)"
+expect_eq "dep_marketplace: bionic's own native row names bionic" \
+  "bionic" "$(deps_run -- dep_marketplace impeccable)"
+expect_false "dep_marketplace: a non-native row has no catalog at all" \
+  bash -c '. "$1"; dep_marketplace rg' _ "$DEPS_SH"
+expect_eq "dep_marketplace_source: the foreign row names the repo to add" \
+  "anthropics/skills" "$(deps_run -- dep_marketplace_source document-skills)"
+expect_false "dep_marketplace_source: bionic's own catalog needs no add" \
+  bash -c '. "$1"; dep_marketplace_source impeccable' _ "$DEPS_SH"
+
+# And the set view the manifest rendering is stated over (Group 18).
+expect_eq "dep_names_marketplace bionic is the set marketplace.json renders" \
+  "agent-skills impeccable superpowers" \
+  "$(deps_run -- dep_names_marketplace bionic | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "dep_names_marketplace anthropic-agent-skills is the two skill packs" \
+  "document-skills example-skills" \
+  "$(deps_run -- dep_names_marketplace anthropic-agent-skills | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
 
 echo ""
 echo "=== Group 3b: the lane view is retired (six-axis review A-1) ==="
@@ -285,7 +371,7 @@ TEARDOWN_SET="$( { deps_run -- dep_names_class basic
                    deps_run -- dep_names_class when-needed
                    deps_run -- dep_names_class extra; } | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
 expect_eq "the teardown set is every row outside core" \
-  "@pencil.dev/cli @playwright/cli aws ccstatusline chrome-devtools context7 docker gh git impeccable jq motion node notebooklm playwright-chromium pnpm rg uv" \
+  "@pencil.dev/cli @playwright/cli aws ccstatusline chrome-devtools context7 docker document-skills example-skills excalidraw-renderer gh git humanizer impeccable jq motion node notebooklm playwright-chromium pnpm rg uv" \
   "$TEARDOWN_SET"
 
 echo ""
@@ -310,38 +396,50 @@ while IFS= read -r dep_name; do
 done <<< "$NAMES"
 expect_eq "every consumer resolves under the repo, or is substrate/extra" "" "$CONSUMER_REPORT"
 
-# The literals are only legitimate for the classes that earned them: a
-# when-needed row IS a route's dependency, so `substrate`/`extra` there would be
-# the traceability gap wearing a permitted value.
+# The literals are only legitimate where they are TRUE, and each one is a claim:
+# `substrate` says no single route owns this, `extra` says no route wants it at
+# all. A core or when-needed row is a route's dependency by definition, so either
+# literal there is the traceability gap wearing a permitted value.
+#
+# AMENDED 2026-08-22. `extra` used to be REQUIRED of its class as well as
+# reserved to it, and that stopped being true the day the class stopped meaning
+# "nothing needs it": three of the promoted rows name a real route in `consumer`
+# and would lose that traceability by taking the literal. So the rule is one
+# directional pin now — the literal implies the class, the class does not imply
+# the literal — and `basic`, whose meaning did not change, keeps both halves.
 LITERAL_REPORT=""
 while IFS= read -r dep_name; do
   [ -n "$dep_name" ] || continue
   c="$(deps_run -- dep_field "$dep_name" consumer)"
   k="$(deps_run -- dep_field "$dep_name" class)"
-  case "${k}/${c}" in
-    basic/substrate|extra/extra) ;;
-    basic/*|extra/*) LITERAL_REPORT="${LITERAL_REPORT}${dep_name}: class ${k} wants its own literal, got ${c}"$'\n' ;;
-    */substrate|*/extra) LITERAL_REPORT="${LITERAL_REPORT}${dep_name}: class ${k} must name a route, got the literal ${c}"$'\n' ;;
+  case "$k" in
+    basic)
+      [ "$c" = "substrate" ] || LITERAL_REPORT="${LITERAL_REPORT}${dep_name}: class basic wants its own literal, got ${c}"$'\n' ;;
+    extra)
+      [ "$c" = "substrate" ] && LITERAL_REPORT="${LITERAL_REPORT}${dep_name}: class extra takes the literal extra or a route, never substrate"$'\n' ;;
+    *)
+      case "$c" in
+        substrate|extra) LITERAL_REPORT="${LITERAL_REPORT}${dep_name}: class ${k} must name a route, got the literal ${c}"$'\n' ;;
+      esac ;;
   esac
 done <<< "$NAMES"
-expect_eq "substrate/extra are used only by the basic/extra classes" "" "$LITERAL_REPORT"
+expect_eq "a consumer literal is used only where its claim is true" "" "$LITERAL_REPORT"
 
 # Naming a path is not the same as that path knowing about the dependency. The
 # route file has to actually mention it, which is what makes the column a
 # traceability claim rather than a plausible-looking string.
 #
-# ONE declared exemption, and it is a finding rather than a convenience:
-# `motion` is a when-needed row by D-B's ratified roster, but no skill, rule or
-# agent file in this repo names the package today — it is pre-warmed into the
-# pnpm store for the design route and nothing writes that down. Either the
-# design route names it or it is an `extra`; that is a design call, not this
-# slice's, so the row keeps its class and the gap is visible here instead of
-# being hidden by dropping the pin.
-MENTION_EXEMPT=" motion "
+# THE ONE DECLARED EXEMPTION IS GONE (2026-08-22), and it was closed the way it
+# said it would be. `motion` named `skills/canonical-sdlc/SKILL.md` as its
+# consumer while no skill, rule or agent file in the repo mentioned the package —
+# it is pre-warmed into the pnpm store for the design route and nothing wrote that
+# down. The note here stated the two ways out, "either the design route names it
+# or it is an `extra`", and Chris's ruling took the second: the row is an `extra`
+# whose consumer is the literal, so the loop below skips it on the same rule that
+# skips every other literal, and no name-keyed exemption survives.
 MENTION_REPORT=""
 while IFS= read -r dep_name; do
   [ -n "$dep_name" ] || continue
-  case "$MENTION_EXEMPT" in *" ${dep_name} "*) continue ;; esac
   c="$(deps_run -- dep_field "$dep_name" consumer)"
   case "$c" in substrate|extra) continue ;; esac
   grep -qF -- "$dep_name" "${REPO}/${c}" 2>/dev/null \
@@ -349,18 +447,12 @@ while IFS= read -r dep_name; do
 done <<< "$NAMES"
 expect_eq "every named consumer route mentions the dependency it consumes" "" "$MENTION_REPORT"
 
-# The exemption is itself pinned: if a later wave gives motion a route that
-# names it, this fails and the exemption comes out. Vendored trees (.venv,
-# node_modules) are excluded: they exist on a developer checkout and never in a
-# worktree, and a pin that flips with the machine is not an absence claim.
-# /usr/bin/grep, not the PATH one: this shell's `grep` is ugrep with
-# --ignore-files, and it reports zero hits inside .claude/ even when the
-# directory is named explicitly — an absence claim built on it would be a
-# guaranteed pass (memory: grep-skips-hidden-dirs).
-GREP_ABS="$(command -v /usr/bin/grep || echo grep)"
-expect_false "the one mention exemption (motion) is still needed — no repo file names the package" \
-  bash -c '"$2" -rIlw --include="*.md" --exclude-dir=.venv --exclude-dir=node_modules motion "$1/skills" "$1/agents-src" "$1/.claude/rules" 2>/dev/null | "$2" -q .' \
-  _ "$REPO" "$GREP_ABS"
+# The retirement is pinned from the row's own side: `motion` takes the literal,
+# which is the whole reason the name-keyed exemption above could go. A wave that
+# points the row back at a route file without teaching that file the package name
+# fails the mention loop, exactly as an unexempted row should.
+expect_eq "motion's consumer is the literal (what retired the exemption)" "extra" \
+  "$(deps_run -- dep_field motion consumer)"
 
 # Mutation-and-restore: the pin has to be able to SEE a bad consumer, or it is
 # three loops that always print nothing. A row pointing at a path that does not
@@ -468,6 +560,37 @@ expect_eq "check_dep superpowers with no jq on PATH -> version unknown, verdict 
   "$(env -i HOME="$TMP/home" PATH="$NOJQ_BIN" BIONIC_CLAUDE_HOME="$CH_OK" \
       bash -c '. "$1"; check_dep superpowers' _ "$DEPS_SH" 2>&1)"
 
+# The two foreign-catalog rows read out of the same registry, under the key their
+# own catalog writes. Both arms: a registry with no such plugin is `no`, and the
+# probe must not need bionic's marketplace name to find one it never installed.
+CH_ANTHROPIC="$TMP/ch-anthropic"
+plant_installed_plugins "$CH_ANTHROPIC" "document-skills@anthropic-agent-skills" "0.1.0"
+expect_eq "check_dep document-skills, installed from its own catalog -> present" \
+  "present=yes|version=0.1.0|verdict=ok" \
+  "$(deps_run BIONIC_CLAUDE_HOME="$CH_ANTHROPIC" -- check_dep document-skills)"
+expect_eq "check_dep example-skills, not installed -> absent" \
+  "present=no|version=unknown|verdict=unknown" \
+  "$(deps_run BIONIC_CLAUDE_HOME="$CH_ANTHROPIC" -- check_dep example-skills)"
+
+echo ""
+echo "=== Group 5b: check_dep, github-skill kind, against a fixture skills dir ==="
+#
+# THE PROBE IS THE STATE SETUP LEAVES, NOT THE DIRECTORY'S EXISTENCE. A skill is
+# usable when its SKILL.md is readable; an empty `~/.claude/skills/humanizer/`
+# left by an interrupted clone is exactly the half-installed shape this task's
+# sibling rows exist to stop reporting as present.
+CH_SKILL="$TMP/ch-skill"; mkdir -p "$CH_SKILL/skills/humanizer"
+expect_eq "check_dep humanizer with the skill dir absent -> no" \
+  "present=no|version=unknown|verdict=unknown" \
+  "$(deps_run BIONIC_CLAUDE_HOME="$TMP/ch-empty-skills" -- check_dep humanizer)"
+expect_eq "check_dep humanizer with a dir but no SKILL.md -> still no" \
+  "present=no|version=unknown|verdict=unknown" \
+  "$(deps_run BIONIC_CLAUDE_HOME="$CH_SKILL" -- check_dep humanizer)"
+printf '%s\n' "---" "name: humanizer" "---" > "$CH_SKILL/skills/humanizer/SKILL.md"
+expect_eq "check_dep humanizer with SKILL.md in place -> yes" \
+  "present=yes|version=unknown|verdict=ok" \
+  "$(deps_run BIONIC_CLAUDE_HOME="$CH_SKILL" -- check_dep humanizer)"
+
 echo ""
 echo "=== Group 6: check_dep, lane-3b, against a fixture PATH ==="
 
@@ -515,6 +638,59 @@ expect_eq "check_dep motion (pnpm store) -> presence honestly unknown" \
 
 expect_false "check_dep on an unknown dep exits non-zero" \
   bash -c '. "$1"; check_dep no-such-dep' _ "$DEPS_SH"
+
+echo ""
+echo "=== Group 6b: the excalidraw renderer is a when-needed row (epic-18 T3, AC-6) ==="
+#
+# WHAT THIS ROW REPLACES. The skill's README carried a "Renderer setup" block — `uv sync`
+# then `uv run playwright install chromium` — that a user was expected to find and run by
+# hand. The chromium half was already a table row (`playwright-chromium`); the venv half was
+# not, so it was the one piece of bionic's dependency surface with no probe, no consent
+# prompt and no doctor line. AC-6 makes it a row like any other: absent until a render needs
+# it, then ONE consented install.
+#
+# PRESENCE IS THE VENV, because that is the state `uv sync` leaves behind and the state the
+# render command needs. `uv` being on PATH is a different row (`uv`, class basic) and
+# answering this row's question with that one's fact is exactly the probe-contract error —
+# "is this dependency in the state setup leaves it in", not "is its tool available".
+
+expect_eq "excalidraw-renderer is a when-needed row" "when-needed" \
+  "$(deps_run -- dep_field excalidraw-renderer class)"
+expect_eq "excalidraw-renderer names the skill it serves, now inside the payload" \
+  "payload/skills/excalidraw-diagram/SKILL.md" \
+  "$(deps_run -- dep_field excalidraw-renderer consumer)"
+expect_eq "excalidraw-renderer installs by the uv-project mechanism" "uv-project" \
+  "$(deps_run -- dep_field excalidraw-renderer kind)"
+expect_eq "playwright-chromium's consumer moved into the payload with the skill" \
+  "payload/skills/excalidraw-diagram/SKILL.md" \
+  "$(deps_run -- dep_field playwright-chromium consumer)"
+
+# The probe, against a fixture references/ directory rather than the shipped one: a suite
+# that read the real payload would answer differently on a machine that had ever rendered.
+XR_REFS="$TMP/xr-refs"
+mkdir -p "$XR_REFS"
+expect_eq "check_dep excalidraw-renderer with no venv synced -> absent" \
+  "present=no|version=unknown|verdict=unknown" \
+  "$(deps_run BIONIC_EXCALIDRAW_REFS="$XR_REFS" -- check_dep excalidraw-renderer)"
+
+mkdir -p "$XR_REFS/.venv/bin"
+: > "$XR_REFS/.venv/bin/python"
+chmod +x "$XR_REFS/.venv/bin/python"
+printf 'home = /opt/homebrew/bin\nversion = 3.13.1\n' > "$XR_REFS/.venv/pyvenv.cfg"
+expect_eq "check_dep excalidraw-renderer with a synced venv -> present, version from pyvenv.cfg" \
+  "present=yes|version=3.13.1|verdict=ok" \
+  "$(deps_run BIONIC_EXCALIDRAW_REFS="$XR_REFS" -- check_dep excalidraw-renderer)"
+
+# The plan a user is shown before the question, which is also the command run after it.
+expect_eq "the install plan syncs the project, in place" \
+  "uv sync --project ${XR_REFS}" \
+  "$(deps_run BIONIC_EXCALIDRAW_REFS="$XR_REFS" -- _dep_install_argv excalidraw-renderer | tr '\n' ' ' | sed 's/ $//')"
+
+# And the teardown, which is the venv and nothing else: the skill's own files ship with the
+# plugin and leave when it does.
+expect_match "remove_dep names the venv it would delete, before asking" \
+  "*rm -rf ${XR_REFS}/.venv*" \
+  "$(printf '' | deps_run BIONIC_EXCALIDRAW_REFS="$XR_REFS" -- remove_dep excalidraw-renderer)"
 
 echo ""
 echo "=== Group 7: install_dep — consent gates every mutation ==="
@@ -599,6 +775,101 @@ expect_eq "…and neither refusal ran anything" "0" "$(grep -c . "$CALLS" | tr -
 
 expect_false "install_dep on an unknown dep exits non-zero" \
   bash -c 'echo y | { . "$1"; install_dep no-such-dep; }' _ "$DEPS_SH"
+
+echo ""
+echo "=== Group 7b: the github-skill kind installs into ~/.claude/skills (AC-8) ==="
+#
+# ONE ARGV, DELIBERATELY. The retired installer cloned to /tmp, copied the tree
+# into place and stripped `.git`; this is a single `git clone` into the
+# destination instead, so the row flows through the same print-the-plan /
+# consent / run-that-exact-plan path every other mechanism uses and the
+# just-in-time fix line is the command a user could paste. The `.git` left
+# behind costs nothing — removal is `rm -rf` of the whole directory either way.
+GIT_BIN="$TMP/git-bin"; mkdir -p "$GIT_BIN"; cp -R "$BASE_BIN/." "$GIT_BIN/"
+make_stub "$GIT_BIN" git
+SKILL_HOME="$TMP/skill-install-home"; mkdir -p "$SKILL_HOME"
+
+: > "$CALLS"
+HUM_OUT="$(env -i HOME="$TMP/home" PATH="$GIT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$SKILL_HOME" \
+  bash -c 'echo y | { . "$1"; install_dep humanizer; }' _ "$DEPS_SH" 2>&1)"
+expect_match "install_dep humanizer clones the repo into the skills dir" \
+  "*git clone --depth 1 https://github.com/blader/humanizer.git ${SKILL_HOME}/skills/humanizer*" \
+  "$(cat "$CALLS")"
+expect_match "…and the plan it printed is the command it ran" \
+  "*bionic would run: git clone --depth 1 https://github.com/blader/humanizer.git*" "$HUM_OUT"
+
+: > "$CALLS"
+HUM_NO="$(env -i HOME="$TMP/home" PATH="$GIT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$SKILL_HOME" \
+  bash -c 'echo n | { . "$1"; install_dep humanizer; }' _ "$DEPS_SH" 2>&1)"
+expect_eq "a declined humanizer install clones nothing" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
+expect_match "…and says so" "*declined — humanizer stays absent*" "$HUM_NO"
+
+: > "$CALLS"
+env -i HOME="$TMP/home" PATH="$GIT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$SKILL_HOME" \
+  bash -c '. "$1"; install_dep humanizer </dev/null' _ "$DEPS_SH" >/dev/null 2>&1
+expect_eq "an unanswered humanizer install clones nothing either" "0" \
+  "$(grep -c . "$CALLS" | tr -d ' ')"
+
+echo ""
+echo "=== Group 7c: a native row from somebody else's catalog (AC-8) ==="
+#
+# `install_dep` refuses every native row, this one included — the CLI installs
+# plugins. What is new is the catalog: `install_plugin_native` used to compose
+# `<name>@bionic` from a constant, and these two rows are served by
+# `anthropic-agent-skills`. So the id comes from the row, and the catalog has to
+# be REGISTERED before an install from it can resolve.
+: > "$CALLS"
+expect_false "install_dep refuses the foreign native row too" \
+  bash -c 'echo y | { . "$1"; install_dep document-skills; }' _ "$DEPS_SH"
+expect_eq "…and ran nothing" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
+
+MKT_NONE="$TMP/mkt-none"; mkdir -p "$MKT_NONE/plugins"
+printf '%s\n' '{}' > "$MKT_NONE/plugins/known_marketplaces.json"
+MKT_KNOWN="$TMP/mkt-known"; mkdir -p "$MKT_KNOWN/plugins"
+printf '%s\n' '{"anthropic-agent-skills":{"source":{"source":"github","repo":"anthropics/skills"}}}' \
+  > "$MKT_KNOWN/plugins/known_marketplaces.json"
+
+: > "$CALLS"
+FOREIGN_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$MKT_NONE" \
+  bash -c 'echo y | { . "$1"; install_plugin_native document-skills; }' _ "$DEPS_SH" 2>&1)"
+FOREIGN_CALLS="$(cat "$CALLS")"
+expect_match "an unregistered catalog is added first" \
+  "*claude plugin marketplace add anthropics/skills*" "$FOREIGN_CALLS"
+expect_match "…then the plugin installs under its own catalog's id" \
+  "*claude plugin install document-skills@anthropic-agent-skills --scope user --yes*" "$FOREIGN_CALLS"
+expect_match "…and both commands were printed before the question" \
+  "*bionic would run: claude plugin marketplace add anthropics/skills*" "$FOREIGN_OUT"
+
+: > "$CALLS"
+env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$MKT_NONE" \
+  bash -c '. "$1"; install_plugin_native document-skills </dev/null' _ "$DEPS_SH" >/dev/null 2>&1
+expect_eq "an unanswered offer adds no catalog and installs nothing" "0" \
+  "$(grep -c . "$CALLS" | tr -d ' ')"
+
+: > "$CALLS"
+env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$MKT_KNOWN" \
+  bash -c 'echo y | { . "$1"; install_plugin_native example-skills; }' _ "$DEPS_SH" >/dev/null 2>&1
+KNOWN_CALLS="$(cat "$CALLS")"
+expect_no_match "a catalog already registered is not added again" \
+  "*marketplace add*" "$KNOWN_CALLS"
+expect_match "…and the install still runs" \
+  "*claude plugin install example-skills@anthropic-agent-skills --scope user --yes*" "$KNOWN_CALLS"
+
+# bionic's own rows are unaffected by any of this: no catalog to add, same id.
+: > "$CALLS"
+env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$MKT_NONE" \
+  bash -c 'echo y | { . "$1"; install_plugin_native impeccable; }' _ "$DEPS_SH" >/dev/null 2>&1
+OWN_CALLS="$(cat "$CALLS")"
+expect_no_match "bionic's own native row adds no marketplace" "*marketplace add*" "$OWN_CALLS"
+expect_match "…and installs under bionic's id, exactly as before" \
+  "*claude plugin install impeccable@bionic --scope user --yes*" "$OWN_CALLS"
 
 echo ""
 echo "=== Group 8: remove_dep — consent-wrapped, policy-bounded ==="
@@ -696,6 +967,61 @@ expect_eq "no copy at all: nothing reaches the CLI, on a yes" "0" \
   "$(grep -c . "$CALLS" | tr -d ' ')"
 expect_match "no copy at all: and it is not described as somebody else's" \
   "*nothing here to remove*" "$JIT_NONE"
+
+# ---- and "ours" is asked of the ROW's catalog, not of bionic's (AC-8) ----
+#
+# `document-skills@anthropic-agent-skills` is a plugin bionic's own extras step
+# installs, so the teardown must offer to take it. Against a constant `@bionic`
+# id it reads as somebody else's copy and is left behind — the same class as the
+# critic-F-4 defect one catalog over.
+REG_FOREIGN="$TMP/reg-foreign.json"
+REG_FOREIGN_OTHER="$TMP/reg-foreign-other.json"
+printf '%s\n' '{"version":2,"plugins":{"document-skills@anthropic-agent-skills":[{"scope":"user","version":"0.1.0"}]}}' > "$REG_FOREIGN"
+printf '%s\n' '{"version":2,"plugins":{"document-skills@somebody-else":[{"scope":"user","version":"0.1.0"}]}}' > "$REG_FOREIGN_OTHER"
+
+: > "$CALLS"
+FOREIGN_RM="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_INSTALLED_PLUGINS_FILE="$REG_FOREIGN" \
+  bash -c 'echo y | { . "$1"; remove_dep document-skills; }' _ "$DEPS_SH" 2>&1)"
+expect_match "remove_dep offers the uninstall under the row's own catalog id" \
+  "*claude plugin uninstall document-skills@anthropic-agent-skills --yes*" "$(cat "$CALLS")"
+expect_no_match "…and never claims the bionic uninstall already took it" \
+  "*removing bionic removes it*" "$FOREIGN_RM"
+
+: > "$CALLS"
+FOREIGN_RM_OTHER="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_INSTALLED_PLUGINS_FILE="$REG_FOREIGN_OTHER" \
+  bash -c 'echo y | { . "$1"; remove_dep document-skills; }' _ "$DEPS_SH" 2>&1)"
+expect_eq "a copy from a third catalog: nothing reaches the CLI, on a yes" "0" \
+  "$(grep -c . "$CALLS" | tr -d ' ')"
+expect_match "…and the transcript says whose it is" \
+  "*installed from another catalog*" "$FOREIGN_RM_OTHER"
+
+# ---- the github-skill row's teardown is the directory it installed ----
+RM_SKILL_HOME="$TMP/rm-skill-home"
+plant_humanizer() { mkdir -p "$RM_SKILL_HOME/skills/humanizer"; : > "$RM_SKILL_HOME/skills/humanizer/SKILL.md"; }
+
+plant_humanizer
+env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$RM_SKILL_HOME" \
+  bash -c 'echo n | { . "$1"; remove_dep humanizer; }' _ "$DEPS_SH" >/dev/null 2>&1
+expect_true "a declined humanizer removal leaves the skill in place" \
+  test -f "$RM_SKILL_HOME/skills/humanizer/SKILL.md"
+
+env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$RM_SKILL_HOME" \
+  bash -c '. "$1"; remove_dep humanizer </dev/null' _ "$DEPS_SH" >/dev/null 2>&1
+expect_true "an unanswered humanizer removal leaves it in place too" \
+  test -f "$RM_SKILL_HOME/skills/humanizer/SKILL.md"
+
+RM_HUM_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$RM_SKILL_HOME" \
+  bash -c 'echo y | { . "$1"; remove_dep humanizer; }' _ "$DEPS_SH" 2>&1)"
+expect_false "a consented humanizer removal takes the whole skill directory" \
+  test -d "$RM_SKILL_HOME/skills/humanizer"
+expect_match "…having named the directory it would delete" \
+  "*${RM_SKILL_HOME}/skills/humanizer*" "$RM_HUM_OUT"
+expect_true "…and nothing outside the skills dir was touched" test -d "$RM_SKILL_HOME"
 
 # ---- D-1: the default permission mode has an owner, and it is this file ----
 #
@@ -893,6 +1219,223 @@ expect_match "with no stat on PATH the statusline is still recorded (write, don'
   '*ccstatusline*' "$(cat "$STL_NS")"
 expect_true "and the file is still valid JSON after that degraded write" \
   jq -e . "$STL_NS"
+
+echo ""
+echo "=== Group 8c: the ccstatusline CONFIG COPY — the second half (AC-1..4, epic-18 T1) ==="
+#
+# THE BUG (epic-18-w1 handoff §3.1). ccstatusline's actual LAYOUT (colors,
+# field order) is a second file, ${CLAUDE_PLUGIN_ROOT}/ccstatusline/settings.json,
+# copied to ~/.config/ccstatusline/settings.json — the file
+# `npx ccstatusline@latest` actually reads. `install_dep`/`check_dep`/
+# `remove_dep` used to know only about `.statusLine`, the command that RENDERS
+# the line, so a machine reported "present" while ccstatusline rendered its own
+# stock default. These arms drive the second half directly.
+#
+# EACH ARM GETS ITS OWN HOME AND PLUGIN ROOT. Group 8b's arms share $TMP/home
+# because the settings file they touch is named explicitly by
+# BIONIC_SETTINGS_FILE; the config file here lives under $HOME/.config, so a
+# shared home would leak one arm's config into the next.
+
+CCL_SHIPPED='{"version":3,"lines":[[{"id":"1","type":"model"}]]}'
+CCL_DIFFERENT='{"version":3,"lines":[[{"id":"1","type":"context-percentage"}]]}'
+
+# A fresh arm: its own $HOME, its own plugin root carrying the shipped layout
+# (the way BIONIC_PLUGIN_ROOT points at a fixture tree in doctor.test.sh).
+ccl_arm() {  # -> prints the arm's root
+  local root
+  root="$TMP/ccl-$(date +%s%N 2>/dev/null || echo $$)-$RANDOM"
+  mkdir -p "$root/home/.claude" "$root/plugin/ccstatusline"
+  printf '%s' "$CCL_SHIPPED" > "$root/plugin/ccstatusline/settings.json"
+  echo "$root"
+}
+
+ccl_config_path() { echo "$1/home/.config/ccstatusline/settings.json"; }  # <root>
+
+# One library function, one controlled environment, one arm — same shape as
+# `stl_run`, plus BIONIC_PLUGIN_ROOT so the config-copy half has a shipped file
+# to read.
+ccl_run() {  # <root> <answer|-> -- <fn> [args]
+  local root="$1" answer="$2"; shift 3
+  local prog='. "$1"; shift; "$@"'
+  if [ "$answer" = "-" ]; then
+    env -i HOME="$root/home" PATH="$STL_BIN" BIONIC_TEST_CALLS="$CALLS" \
+      BIONIC_PLUGIN_ROOT="$root/plugin" \
+      bash -c "$prog" _ "$DEPS_SH" "$@" 2>&1
+  else
+    echo "$answer" | env -i HOME="$root/home" PATH="$STL_BIN" BIONIC_TEST_CALLS="$CALLS" \
+      BIONIC_PLUGIN_ROOT="$root/plugin" \
+      bash -c "$prog" _ "$DEPS_SH" "$@" 2>&1
+  fi
+}
+
+ccl_present() {  # <check_dep output> -> yes|no|unknown
+  local out="$1"; out="${out#*present=}"; echo "${out%%|*}"
+}
+
+# --- case 1: command set, no config at all -> no --------------------------
+CCL1="$(ccl_arm)"
+mkdir -p "$CCL1/home/.claude"
+printf '{"statusLine":{"type":"command","command":"npx ccstatusline@latest"}}' \
+  > "$CCL1/home/.claude/settings.json"
+CCL1_OUT="$(ccl_run "$CCL1" - -- check_dep ccstatusline)"
+expect_eq "command set, config absent: check_dep says no" "no" "$(ccl_present "$CCL1_OUT")"
+
+# --- case 2: command set, config present but DIFFERS -> no ----------------
+CCL2="$(ccl_arm)"
+mkdir -p "$CCL2/home/.claude" "$(dirname "$(ccl_config_path "$CCL2")")"
+printf '{"statusLine":{"type":"command","command":"npx ccstatusline@latest"}}' \
+  > "$CCL2/home/.claude/settings.json"
+printf '%s' "$CCL_DIFFERENT" > "$(ccl_config_path "$CCL2")"
+CCL2_OUT="$(ccl_run "$CCL2" - -- check_dep ccstatusline)"
+expect_eq "command set, config differs from shipped: check_dep says no" "no" "$(ccl_present "$CCL2_OUT")"
+
+# --- case 3: both halves match -> yes --------------------------------------
+CCL3="$(ccl_arm)"
+mkdir -p "$CCL3/home/.claude" "$(dirname "$(ccl_config_path "$CCL3")")"
+printf '{"statusLine":{"type":"command","command":"npx ccstatusline@latest"}}' \
+  > "$CCL3/home/.claude/settings.json"
+printf '%s' "$CCL_SHIPPED" > "$(ccl_config_path "$CCL3")"
+CCL3_OUT="$(ccl_run "$CCL3" - -- check_dep ccstatusline)"
+expect_eq "both halves match: check_dep says yes" "yes" "$(ccl_present "$CCL3_OUT")"
+
+# --- case 4: install_dep writes BOTH halves, then check_dep says yes ------
+CCL4="$(ccl_arm)"
+CCL4_INSTALL_OUT="$(ccl_run "$CCL4" y -- install_dep ccstatusline)"
+expect_true "install_dep ccstatusline copied the shipped config into place" \
+  test -f "$(ccl_config_path "$CCL4")"
+expect_eq "and the copy is byte-identical to the shipped layout" \
+  "$CCL_SHIPPED" "$(cat "$(ccl_config_path "$CCL4")" 2>/dev/null)"
+CCL4_CHECK_OUT="$(ccl_run "$CCL4" - -- check_dep ccstatusline)"
+expect_eq "install then check: check_dep says yes" "yes" "$(ccl_present "$CCL4_CHECK_OUT")"
+
+# --- case 4b: installing over an existing, DIFFERING config never silently
+#              overwrites without having been consented — the plan is
+#              surfaced before the one item-level question, and a decline
+#              leaves the differing file exactly as it was. -----------------
+CCL4B="$(ccl_arm)"
+mkdir -p "$(dirname "$(ccl_config_path "$CCL4B")")"
+printf '%s' "$CCL_DIFFERENT" > "$(ccl_config_path "$CCL4B")"
+CCL4B_DECLINE_OUT="$(ccl_run "$CCL4B" n -- install_dep ccstatusline)"
+expect_eq "declined install: the differing config file is untouched" \
+  "$CCL_DIFFERENT" "$(cat "$(ccl_config_path "$CCL4B")" 2>/dev/null)"
+expect_match "declined install: the plan surfaced the config copy before asking" \
+  '*ccstatusline/settings.json*' "$CCL4B_DECLINE_OUT"
+
+# --- case 5: remove_dep purges the config dir, then check_dep says no -----
+CCL5="$(ccl_arm)"
+ccl_run "$CCL5" y -- install_dep ccstatusline >/dev/null
+expect_true "remove fixture: the config really landed first (not vacuous)" \
+  test -f "$(ccl_config_path "$CCL5")"
+CCL5_REMOVE_OUT="$(ccl_run "$CCL5" y -- remove_dep ccstatusline)"
+expect_false "remove_dep ccstatusline purged the config directory" \
+  test -e "$(dirname "$(ccl_config_path "$CCL5")")"
+CCL5_CHECK_OUT="$(ccl_run "$CCL5" - -- check_dep ccstatusline)"
+expect_eq "remove then check: check_dep says no" "no" "$(ccl_present "$CCL5_CHECK_OUT")"
+
+# --- the never-list: the config purge cannot be redirected onto a .bionic
+#     path (deps.sh's own copy of remove.sh's _rm_purge_dir guard) -----------
+CCL6="$(ccl_arm)"
+ccl_run "$CCL6" y -- install_dep ccstatusline >/dev/null
+mkdir -p "$CCL6/home/.bionic/memory"
+printf 'must survive\n' > "$CCL6/home/.bionic/memory/note.md"
+CCL6_OUT="$(echo y | env -i HOME="$CCL6/home" PATH="$STL_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_PLUGIN_ROOT="$CCL6/plugin" \
+  BIONIC_CCSTATUSLINE_CONFIG="$CCL6/home/.bionic/memory/settings.json" \
+  bash -c '. "$1"; remove_dep ccstatusline' _ "$DEPS_SH" 2>&1)"
+expect_true "the never-list holds even when the config target is redirected under .bionic" \
+  test -f "$CCL6/home/.bionic/memory/note.md"
+
+echo ""
+echo "=== Group 8d: notebooklm — the two-half probe, skill-install arm, remove purges the skill dir (AC-5) ==="
+#
+# notebooklm is a `uv-tool` kind row like any other, but its second half is a
+# skill file the CLI's own `skill install` subcommand writes
+# (~/.claude/skills/notebooklm/SKILL.md, ported from claude-bootstrap.sh
+# 1542-1550) — the CLI being on PATH says nothing about whether that step ever
+# ran, which is exactly the ccstatusline bug this wave exists to fix, one row
+# over. Four discriminating cases against a fake $HOME, per the handoff's
+# AC-5: CLI-no-skill -> no, both -> yes, install -> yes, remove -> no.
+
+NB_BIN="$TMP/nb-bin"; mkdir -p "$NB_BIN"; cp -R "$BASE_BIN/." "$NB_BIN/" 2>/dev/null
+make_stub "$NB_BIN" uv
+make_stub "$NB_BIN" notebooklm
+
+NB_HOME_NOSKILL="$TMP/nb-home-noskill"; mkdir -p "$NB_HOME_NOSKILL"
+NB_HOME_BOTH="$TMP/nb-home-both"; mkdir -p "$NB_HOME_BOTH/skills/notebooklm"
+echo "# notebooklm skill" > "$NB_HOME_BOTH/skills/notebooklm/SKILL.md"
+
+expect_eq "check_dep notebooklm: CLI on PATH, skill file absent -> no" \
+  "present=no|version=unknown|verdict=unknown" \
+  "$(env -i HOME="$TMP/home" PATH="$NB_BIN" BIONIC_CLAUDE_HOME="$NB_HOME_NOSKILL" \
+      bash -c '. "$1"; check_dep notebooklm' _ "$DEPS_SH" 2>&1)"
+expect_eq "check_dep notebooklm: CLI on PATH AND skill file present -> yes" \
+  "present=yes|version=unknown|verdict=ok" \
+  "$(env -i HOME="$TMP/home" PATH="$NB_BIN" BIONIC_CLAUDE_HOME="$NB_HOME_BOTH" \
+      bash -c '. "$1"; check_dep notebooklm' _ "$DEPS_SH" 2>&1)"
+expect_eq "check_dep notebooklm: no CLI at all -> no, regardless of the skill file" \
+  "present=no|version=unknown|verdict=unknown" \
+  "$(env -i HOME="$TMP/home" PATH="$BASE_BIN" BIONIC_CLAUDE_HOME="$NB_HOME_BOTH" \
+      bash -c '. "$1"; check_dep notebooklm' _ "$DEPS_SH" 2>&1)"
+
+# install_dep: the uv-tool install AND the skill-install step, one consent.
+: > "$CALLS"
+NB_INSTALL_HOME="$TMP/nb-install-home"; mkdir -p "$NB_INSTALL_HOME"
+INSTALL_OUT="$(env -i HOME="$TMP/home" PATH="$NB_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$NB_INSTALL_HOME" \
+  bash -c 'echo y | { . "$1"; install_dep notebooklm; }' _ "$DEPS_SH" 2>&1)"
+expect_match "install_dep notebooklm names both steps before asking (AC-5)" \
+  "*uv tool install notebooklm-py --quiet && notebooklm skill install*" "$INSTALL_OUT"
+expect_match "install_dep notebooklm really ran the uv-tool install (not vacuous)" \
+  "*uv tool install notebooklm-py --quiet*" "$(cat "$CALLS")"
+expect_match "install_dep notebooklm really ran 'notebooklm skill install' afterwards (AC-5)" \
+  "*notebooklm skill install*" "$(cat "$CALLS")"
+expect_true "…and confirms success with the standard 'installed.' line" \
+  bash -c 'printf "%s\n" "$1" | /usr/bin/grep -qx "  installed."' _ "$INSTALL_OUT"
+
+# A failing skill-install step must not be reported as a success — the CLI
+# installed, the skill did not, and that is not "installed." (the same rule
+# install_dep already enforces above for a failing brew/npm mechanism).
+NB_BIN_SKILLFAIL="$TMP/nb-bin-skillfail"; mkdir -p "$NB_BIN_SKILLFAIL"
+cp -R "$BASE_BIN/." "$NB_BIN_SKILLFAIL/" 2>/dev/null
+make_stub "$NB_BIN_SKILLFAIL" uv
+make_stub "$NB_BIN_SKILLFAIL" notebooklm 1
+: > "$CALLS"
+SKILLFAIL_OUT="$(env -i HOME="$TMP/home" PATH="$NB_BIN_SKILLFAIL" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$TMP/nb-skillfail-home" \
+  bash -c 'echo y | { . "$1"; install_dep notebooklm; }' _ "$DEPS_SH" 2>&1)"
+SKILLFAIL_RC=$?
+expect_true "a failing 'notebooklm skill install' exits non-zero" test "$SKILLFAIL_RC" -ne 0
+expect_false "…and is never reported as 'installed.'" \
+  bash -c 'printf "%s\n" "$1" | /usr/bin/grep -qx "  installed."' _ "$SKILLFAIL_OUT"
+
+# remove_dep: uv-tool uninstall AND the skill dir purged, one consent.
+NB_REMOVE_HOME="$TMP/nb-remove-home"; mkdir -p "$NB_REMOVE_HOME/skills/notebooklm"
+echo "# notebooklm skill" > "$NB_REMOVE_HOME/skills/notebooklm/SKILL.md"
+: > "$CALLS"
+REMOVE_OUT="$(env -i HOME="$TMP/home" PATH="$NB_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$NB_REMOVE_HOME" \
+  bash -c 'echo y | { . "$1"; remove_dep notebooklm; }' _ "$DEPS_SH" 2>&1)"
+expect_match "remove_dep notebooklm names both steps before asking" \
+  "*uv tool uninstall notebooklm-py && rm -rf*skills/notebooklm*" "$REMOVE_OUT"
+expect_match "remove_dep notebooklm really ran the uv-tool uninstall" \
+  "*uv tool uninstall notebooklm-py*" "$(cat "$CALLS")"
+expect_false "remove_dep notebooklm really removed the skill dir (not vacuous)" \
+  test -d "$NB_REMOVE_HOME/skills/notebooklm"
+expect_eq "check_dep notebooklm after remove -> no" \
+  "present=no|version=unknown|verdict=unknown" \
+  "$(env -i HOME="$TMP/home" PATH="$NB_BIN" BIONIC_CLAUDE_HOME="$NB_REMOVE_HOME" \
+      bash -c '. "$1"; check_dep notebooklm' _ "$DEPS_SH" 2>&1)"
+
+# A decline removes nothing — the skill dir survives, same consent gate as
+# every other mutation in this file.
+NB_DECLINE_HOME="$TMP/nb-decline-home"; mkdir -p "$NB_DECLINE_HOME/skills/notebooklm"
+echo "# notebooklm skill" > "$NB_DECLINE_HOME/skills/notebooklm/SKILL.md"
+: > "$CALLS"
+env -i HOME="$TMP/home" PATH="$NB_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$NB_DECLINE_HOME" \
+  bash -c 'echo n | { . "$1"; remove_dep notebooklm; }' _ "$DEPS_SH" >/dev/null 2>&1
+expect_eq "remove_dep notebooklm with a decline ran nothing" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
+expect_true "…and the skill dir survives a decline" test -d "$NB_DECLINE_HOME/skills/notebooklm"
 
 echo ""
 echo "=== Group 9: detect_plugin_integrity — all three hook states ==="
@@ -1333,13 +1876,25 @@ print(json.dumps({n: sys.argv[2 + i] for i, n in enumerate(names)}))
 }
 
 CORE_NAMES="$(deps_run -- dep_names_class core | LC_ALL=C sort)"
-NATIVE_NAMES="$(deps_run -- dep_names_kind native | LC_ALL=C sort)"
+# THE RENDERED SET IS THE ROWS BIONIC'S OWN CATALOG SERVES, not every native row
+# (narrowed at epic-18 T4). marketplace.json is bionic's catalog: it can only
+# declare plugins bionic serves, and `document-skills`/`example-skills` are
+# native rows the CLI installs from `anthropic-agent-skills` — an entry for them
+# here would be bionic claiming to serve somebody else's plugin from a repo whose
+# root is a marketplace, not a plugin. Stated over the catalog rather than over
+# the kind, so the agreement pin keeps meaning what it says.
+NATIVE_NAMES="$(deps_run -- dep_names_marketplace bionic | LC_ALL=C sort)"
 CORE_JSON="$(names_to_json "$CORE_NAMES")"
 NATIVE_JSON="$(names_to_json "$NATIVE_NAMES")"
 
 # The two sets are not the same set, and the difference is exactly impeccable.
-expect_eq "the marketplace-rendered set is the native-kind set, core plus impeccable" \
+expect_eq "the marketplace-rendered set is bionic's own native rows, core plus impeccable" \
   "agent-skills impeccable superpowers" "$(printf '%s' "$NATIVE_NAMES" | tr '\n' ' ' | sed 's/ $//')"
+# …and a foreign-catalog native row is deliberately NOT in it, which is the whole
+# reason the set was narrowed. If this goes green while the row is missing from
+# the table entirely, Group 3a2's byte-exact pin is the one that fails.
+expect_no_match "a foreign-catalog row is not rendered into bionic's marketplace" \
+  "*document-skills*" "$NATIVE_NAMES"
 
 manifest_agreement_report() {  # <plugin.json path> <marketplace.json path>
   python3 "$MANIFEST_JSON_HELPER" "$1" "$2" "$CORE_JSON" "$NATIVE_JSON"
@@ -1474,7 +2029,10 @@ while IFS= read -r dep_name; do
     test -n "$KNOWN_VERSION"
   expect_eq "${dep_name}: the version that sha installs satisfies the table's ${DEP_CONSTRAINT}" \
     "ok" "$(deps_run -- dep_constraint_verdict "$DEP_CONSTRAINT" "${KNOWN_VERSION:-0.0.0}")"
-done <<< "$(deps_run -- dep_names_kind native)"
+# The rows BIONIC'S catalog serves, for the reason Group 18 gives: a sha in
+# marketplace.json is bionic's supply-chain pin on a plugin bionic serves, and a
+# row another catalog serves has no entry here to pin (epic-18 T4).
+done <<< "$(deps_run -- dep_names_marketplace bionic)"
 
 # The judge is live, not decorative: the third fixture pair is a REAL sha that
 # installs a version the table would reject. Without this arm, a pair table

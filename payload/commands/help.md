@@ -24,49 +24,61 @@ Presentation contract — what the user sees from this command:
 Render the page below in full, verbatim, every time this command runs — even if it was
 shown earlier in this session; never summarize it or refer back to an earlier rendering.
 
-bionic 1.0.0 (installed)
+bionic 1.1.0 (installed)
 
 # bionic
 
-Bionic is a Claude Code plugin that carries canonical-sdlc guardrails, hooks, and
-agent-orchestration discipline into any project you work on with Claude Code. It travels
-with you rather than with a repository: install it once and every project you open gets
-the same working discipline.
+A Claude Code plugin that carries canonical-sdlc guardrails, hooks, and agent
+orchestration into any project you open. It travels with you, not with a repository:
+install it once and every project gets the same working discipline.
 
 ## Commands
 
-- `/bionic:help` — this page: what bionic is, the command roster, and where to start.
-- `/bionic:setup` — idempotent machine setup, one consented item at a time.
-- `/bionic:doctor` — read-only diagnosis of this machine; it changes nothing.
-- `/bionic:remove` — consented teardown, finishing with the plugin uninstall.
+| command | what it does |
+| --- | --- |
+| `/bionic:help` | this page — the roster, and where to start |
+| `/bionic:setup` | idempotent machine setup, one consented item at a time |
+| `/bionic:doctor` | read-only diagnosis of this machine; it changes nothing |
+| `/bionic:remove` | consented teardown, finishing with the plugin uninstall |
+| `/bionic:canonical-sdlc` | engage the engineering lifecycle on a task |
 
-## Skills
+## Skills — ship with the plugin
 
-Three skills ship with bionic and load into every session once it is installed:
+| skill | what it does |
+| --- | --- |
+| `/bionic:canonical-sdlc` | the governed lifecycle for non-trivial work — declares `intent · rigor · scale`, walks Steps 0–9, gates every commit on that step's evidence (`help` prints the axis tables) |
+| `/bionic:map-instrument-narrow` | diagnostic discipline when the cause is not obvious — map the system, instrument it, narrow to a root cause before writing a fix |
+| `/bionic:browser-verify` | verifies UI behavior in a real browser with semantic readback |
 
-- `/bionic:canonical-sdlc` — the governed lifecycle for non-trivial work. Declares
-  `intent · rigor · scale`, walks Steps 0–9, and gates every commit on the current
-  step's evidence. `/bionic:canonical-sdlc help` prints the axis tables.
-- `/bionic:map-instrument-narrow` — diagnostic discipline for when the code misbehaves
-  and the cause is not obvious: map the system, instrument it, narrow to a root cause
-  with data before writing any fix.
-- `/bionic:browser-verify` — verifies UI behavior in a real browser with semantic
-  readback; the Verify step's browser modality.
+## Agents — ship with the plugin
 
-Six agent roles ride alongside — researcher, implementor, senior-implementor,
-test-runner, auditor, critic — and canonical-sdlc dispatches them by step.
+Six roles canonical-sdlc dispatches by step. The model and effort each one runs at:
 
-## It arrives in two steps
+| role | runs at | what it is for |
+| --- | --- | --- |
+| `auditor` | opus · high | Independent Step-5 verification auditor — falsifies evidence at its declared tier, never reviews code |
+| `critic` | opus · high | Independent Step-6 adversarial critic — falsifies the code and the claim it is ready to merge |
+| `implementor` | sonnet · high | MECHANICAL slice execution under TDD discipline — the plan is literal, tests define done, ambiguity means stop and surface |
+| `researcher` | opus · high | Read-only codebase/docs exploration returning structured summaries with file:line citations |
+| `senior-implementor` | opus · high | DISCRETIONARY slice execution under TDD discipline — judgment and taste licensed within slice scope, every resolution logged to the plan's Assumptions before commit |
+| `test-runner` | haiku · low | Mechanical test-suite execution and full result reporting |
 
-- **Tier 1 — the plugin install.** Installing bionic gives you the whole core: the skill,
-  the hooks, the agent roster. Nothing further is required to start using it.
-- **Tier 2 — `/bionic:setup`.** Adds what installing a plugin cannot: the tools bionic's
-  workflows reach for, your shell environment, and a permission profile. It asks before
-  every change and can be run again any time.
+## Installed by setup (third party)
 
-## Where to start
+`/bionic:setup` adds what a plugin install cannot: the tools these workflows reach for,
+your shell environment, and a permission profile.
 
-- Run `/bionic:doctor` first. It reports what this machine already has and what is
-  missing, and it never changes anything.
-- Run `/bionic:setup` for anything doctor says is missing.
-- If something looks wrong later, `/bionic:doctor` again is the place to look.
+- **Plugins** — superpowers, agent-skills, impeccable.
+- **Command-line tools** — git, node, pnpm, gh, jq, rg, uv, docker, aws.
+- **On demand** — @playwright/cli, chrome-devtools, playwright-chromium, motion. These
+  install themselves the first time a route needs one.
+- **Optional** — ccstatusline, notebooklm, context7, @pencil.dev/cli.
+
+Run `/bionic:doctor` for what this machine actually has, at which version, and from
+which source.
+
+## Start here
+
+  fresh machine →  /bionic:setup           then restart the session
+  something off →  /bionic:doctor          read-only, tells you the fix
+  big task      →  /bionic:canonical-sdlc  declare intent · rigor · scale — the skill takes it from there

@@ -26,9 +26,16 @@
 # second-owner defect and fails here.
 #
 # RATIFIED PAYLOAD (epic-17 W1): .claude-plugin/plugin.json, LICENSE, hooks/ (scripts +
-# hooks.json), agents/, and the bionic-authored skills EXCLUDING excalidraw-diagram, which
-# is a vendored fork of coleam00/excalidraw-diagram-skill (repo-inventory.md §3) and carries
-# a uv project + .venv. `scripts/` joins in a later wave.
+# hooks.json), agents/, and the bionic-authored skills. `scripts/` joins in a later wave.
+#
+# EXCALIDRAW-DIAGRAM JOINED AT EPIC-18 T3 (AC-6), and it is the first PAYLOAD-NATIVE SKILL:
+# the payload owns the directory outright, with no repo-root twin. W1 held it out because it
+# is a vendored fork carrying a uv project, and a `uv sync` in that project writes a 134 MB
+# `.venv` beside it — which through a link would have arrived here as the payload's own size.
+# That risk did not move with the directory, it changed OWNER: the venv now belongs in the
+# INSTALLED plugin's copy (`${CLAUDE_PLUGIN_ROOT}/skills/excalidraw-diagram/references`),
+# armed on consent the first time a render needs it, and §E's `.venv` name check plus the
+# size ceiling are what fail loudly if one is ever synced into this repo instead.
 #
 # TRAVERSAL TRAP — `grep -r`/`-R` over payload/ is a FALSE-NEGATIVE ABSENCE MACHINE. payload/
 # is a tree of top-level symlinks (see §C above); `grep -r`/`-R` does not descend a symlinked
@@ -55,16 +62,21 @@ MARKETPLACE_JSON="${REPO}/.claude-plugin/marketplace.json"
 # so a 5 MB wall had stopped discriminating: the payload could quintuple without tripping it.
 #
 # RE-FIT ONCE, to 1.5 MB (spec AC-9's ratified ceiling, so the wall and the criterion are one
-# number rather than two constants free to disagree). That leaves ~57% headroom over today's
-# measurement — loose enough that ordinary doc and script growth never trips it, tight enough
+# number rather than two constants free to disagree). That left ~57% headroom over the 976 KB
+# measured then; epic-18 T3 moved the excalidraw skill in and the tree now measures 1328 KB,
+# so the headroom is ~16% — still loose enough that ordinary doc and script growth never trips
+# it, and the ceiling stays where AC-9 ratified it rather than moving to fit the payload; tight enough
 # that every failure mode this arm exists for still breaks it on contact: the retired PNG pair
 # alone was 2.5 MB, `tests/` is over 1 MB, and the excalidraw venv is 134 MB. The comparison is
 # `-le`, so the ceiling is inclusive, matching the "≤ 1.5M" the criterion states.
 MAX_PAYLOAD_KB=1536
 
-# Ratified payload skills, and the one bionic-authored skill deliberately held back.
-RATIFIED_SKILLS="browser-verify canonical-sdlc map-instrument-narrow"
-EXCLUDED_SKILL="excalidraw-diagram"
+# Ratified payload skills, in the two shapes single ownership permits: LINKED, where the
+# repo root owns the directory and payload/skills/ points at it, and NATIVE, where the
+# payload owns it outright and no repo-root twin exists. §D asserts the roster is exactly
+# their union, and each shape carries its own guards.
+LINKED_SKILLS="browser-verify canonical-sdlc map-instrument-narrow"
+NATIVE_SKILLS="excalidraw-diagram"
 
 PASS=0
 FAIL=0
@@ -155,7 +167,14 @@ echo "=== C — one owner per file: link to the repo's owner, or BE the owner ==
 # must be a symlink", which was true only because every payload file then had a repo-root
 # owner.
 
+# AMENDED epic-18 T3. A payload-native SKILL is the same carve-out one level down —
+# `payload/skills/<name>/` rather than `payload/<name>/` — so it gets its own list and the
+# same guard pair below, with the twin check pointed at `skills/<name>` because that is
+# where a second owner for a skill would appear. It is a second list rather than a second
+# spelling inside the first because the exclusion path and the twin path both differ, and
+# folding them would mean a conditional in three places instead of a name in one.
 PAYLOAD_NATIVE_DIRS="scripts permissions commands ccstatusline integrity"
+PAYLOAD_NATIVE_SKILL_DIRS="$NATIVE_SKILLS"
 
 if [ ! -d "$PAYLOAD" ]; then
   no "payload/ exists"
@@ -167,6 +186,9 @@ else
   FIND_EXCLUSIONS=(! -path "${PAYLOAD}/.claude-plugin/*")
   for native in $PAYLOAD_NATIVE_DIRS; do
     FIND_EXCLUSIONS+=(! -path "${PAYLOAD}/${native}/*")
+  done
+  for native in $PAYLOAD_NATIVE_SKILL_DIRS; do
+    FIND_EXCLUSIONS+=(! -path "${PAYLOAD}/skills/${native}/*")
   done
 
   STRAY="$(find "$PAYLOAD" -type f "${FIND_EXCLUSIONS[@]}" 2>/dev/null | sed "s|${REPO}/||" | sort)"
@@ -197,6 +219,23 @@ else
     fi
   done
 
+  # The same pair for a payload-native SKILL, one level down.
+  for native in $PAYLOAD_NATIVE_SKILL_DIRS; do
+    if [ -d "${PAYLOAD}/skills/${native}" ]; then
+      NATIVE_LINKS="$(find "${PAYLOAD}/skills/${native}" -type l 2>/dev/null | sed "s|${REPO}/||" | sort)"
+      if [ -z "$NATIVE_LINKS" ]; then
+        ok "payload/skills/${native}/ contains no symlinks (the payload owns these files outright)"
+      else
+        no "payload/skills/${native}/ contains no symlinks (found: $(echo "$NATIVE_LINKS" | tr '\n' ' '))"
+      fi
+    fi
+    if [ -e "${BIONIC_SKILLS_DIR}/${native}" ]; then
+      no "no repo-root skills/${native}/ twin beside payload/skills/${native}/ (found ${BIONIC_SKILLS_DIR}/${native})"
+    else
+      ok "no repo-root skills/${native}/ twin beside payload/skills/${native}/"
+    fi
+  done
+
   # Each link must resolve, and must resolve to the repo's single owner.
   for pair in "hooks:hooks" "agents:agents"; do
     link="${pair%%:*}"; target="${pair##*:}"
@@ -218,7 +257,7 @@ fi
 
 # ============================================================
 echo ""
-echo "=== D — exactly the ratified skills, and excalidraw-diagram is NOT among them ==="
+echo "=== D — exactly the ratified skills, linked ones linked and native ones owned ==="
 # ============================================================
 
 if [ ! -d "${PAYLOAD}/skills" ]; then
@@ -227,14 +266,14 @@ else
   ok "payload/skills/ exists"
 
   ACTUAL="$(cd "${PAYLOAD}/skills" && ls -1 2>/dev/null | sort | tr '\n' ' ' | sed 's/ $//')"
-  EXPECTED="$(echo "$RATIFIED_SKILLS" | tr ' ' '\n' | sort | tr '\n' ' ' | sed 's/ $//')"
+  EXPECTED="$(echo "$LINKED_SKILLS $NATIVE_SKILLS" | tr ' ' '\n' | grep -v '^$' | sort | tr '\n' ' ' | sed 's/ $//')"
   if [ "$ACTUAL" = "$EXPECTED" ]; then
     ok "payload/skills/ is exactly the ratified set: $EXPECTED"
   else
     no "payload/skills/ is exactly the ratified set (expected='$EXPECTED' actual='$ACTUAL')"
   fi
 
-  for s in $RATIFIED_SKILLS; do
+  for s in $LINKED_SKILLS; do
     if [ ! -L "${PAYLOAD}/skills/${s}" ]; then
       no "payload/skills/${s} is a symlink"
     elif [ "$(cd "${PAYLOAD}/skills" && cd "$(readlink "$s")" && pwd)" = "${BIONIC_SKILLS_DIR}/${s}" ]; then
@@ -246,15 +285,24 @@ else
     check $? "payload/skills/${s}/SKILL.md is reachable through the link"
   done
 
-  if [ -e "${PAYLOAD}/skills/${EXCLUDED_SKILL}" ]; then
-    no "${EXCLUDED_SKILL} is held out of the payload (vendored fork + uv .venv)"
-  else
-    ok "${EXCLUDED_SKILL} is held out of the payload (vendored fork + uv .venv)"
-  fi
-
-  # The holdout is a payload decision, not a deletion: the skill still lives in the repo.
-  [ -f "${BIONIC_SKILLS_DIR}/${EXCLUDED_SKILL}/SKILL.md" ]
-  check $? "${EXCLUDED_SKILL} still exists in the repo (held out, not removed)"
+  # THE NATIVE HALF (epic-18 T3, AC-6). A directory, not a link — the payload IS the owner,
+  # which is what makes the skill arrive on a plugin-installed machine at all. The link check
+  # above would pass on a native skill by failing it, so the shape is asserted directly here:
+  # a real directory whose SKILL.md is a real file, with §C's guard pair standing behind it.
+  for s in $NATIVE_SKILLS; do
+    if [ -L "${PAYLOAD}/skills/${s}" ]; then
+      no "payload/skills/${s} is a real directory, not a symlink (the payload owns it)"
+    elif [ -d "${PAYLOAD}/skills/${s}" ]; then
+      ok "payload/skills/${s} is a real directory, not a symlink (the payload owns it)"
+    else
+      no "payload/skills/${s} is a real directory, not a symlink (nothing at that path)"
+    fi
+    if [ -f "${PAYLOAD}/skills/${s}/SKILL.md" ] && [ ! -L "${PAYLOAD}/skills/${s}/SKILL.md" ]; then
+      ok "payload/skills/${s}/SKILL.md is a real file the payload ships"
+    else
+      no "payload/skills/${s}/SKILL.md is a real file the payload ships"
+    fi
+  done
 fi
 
 # ============================================================

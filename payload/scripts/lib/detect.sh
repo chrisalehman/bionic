@@ -148,6 +148,46 @@ detect_plugin_integrity() {
   return 0
 }
 
+# HOW MANY HOOK SCRIPTS, AND HOW MANY RESOLVE. `detect_plugin_integrity` answers
+# the yes/no question — is the wiring whole — which is the right answer for a
+# verdict and the wrong one for a table. The certified BIONIC NATIVE table prints
+# a count per component, and "hooks ok" cannot fill an `n/n` cell: a reader
+# looking at `16/17` learns both that something is missing and how much of the
+# payload is fine, which is the difference between a diagnosis and an alarm.
+#
+# THE SAME WALK, DELIBERATELY. Every token of every `command`, the same
+# `${CLAUDE_PLUGIN_ROOT}` substitution, the same `/*` guard — because a count
+# taken by a second, subtly different parse would disagree with the verdict above
+# it on exactly the machines where the disagreement matters. The two functions
+# stay side by side so a change to one is read against the other.
+#
+# DISTINCT PATHS, NOT MENTIONS. Four shipped entries chain the same guard script
+# in front of an inner one, so counting mentions would report seventeen scripts
+# on a payload that carries eleven files. The set is deduplicated.
+detect_hook_wiring() {  # -> "hooks: total=<n> resolving=<n>"
+  local root hooks_json cmd script tok seen="" total=0 resolving=0
+  local -a toks
+  root="$(_detect_plugin_root)"
+  hooks_json="${root}/hooks/hooks.json"
+  [ -f "$hooks_json" ] || { echo "hooks: total=0 resolving=0"; return 0; }
+  while IFS= read -r cmd; do
+    [ -n "$cmd" ] || continue
+    read -r -a toks <<<"$cmd"
+    for tok in "${toks[@]}"; do
+      script="${tok//\$\{CLAUDE_PLUGIN_ROOT\}/$root}"
+      script="${script//\$CLAUDE_PLUGIN_ROOT/$root}"
+      case "$script" in /*) ;; *) continue ;; esac
+      case "$seen" in *"|${script}|"*) continue ;; esac
+      seen="${seen}|${script}|"
+      total=$((total + 1))
+      [ -f "$script" ] && resolving=$((resolving + 1))
+    done
+  done < <(grep -oE '"command"[[:space:]]*:[[:space:]]*"[^"]+"' "$hooks_json" 2>/dev/null \
+           | sed -e 's/.*:[[:space:]]*"//' -e 's/"$//')
+  echo "hooks: total=${total} resolving=${resolving}"
+  return 0
+}
+
 # ─── Rendered-agent integrity ────────────────────────────────────────────────
 #
 # Has anything edited the role files this payload installed? The six agent files
@@ -841,23 +881,32 @@ detect_registry_sha_lag() {  # [<repo-dir>] -> one line, always exit 0
 # directory source a lagging copy is NOMINAL — the CLI reads the tree, not the copy —
 # but broken hook wiring in that same tree is real, and telling that user nothing is
 # to be done would be false. So the state is an argument, the answer is a finished
-# sentence, and the callers print it with nothing in front of it.
+# clause, and the callers print it with nothing in front of it.
+#
+# SHORTENED TO FIT THE LINE IT RIDES ON (epic-18 T7, spec AC-15). All four answers
+# were two-clause sentences ending in "then re-run /bionic:doctor", which put
+# doctor's own installed-commit row at 209 columns on a real machine — three
+# wrapped lines for one fact, which is the complaint AC-15 exists to answer. Each
+# now says the one thing a reader acts on, and the caller's line stays inside 100
+# columns. Nothing actionable was dropped: the command is still named verbatim
+# where there is one, and re-running doctor after a repair needed saying once, not
+# in every hint.
 detect_reconverge_hint() {  # <lag|hooks> -> the whole sentence for that state, on this feed
   local state="${1:-lag}"
   case "$(detect_marketplace_feed_kind)" in
     directory)
       case "$state" in
         hooks)
-          printf 'this tree is what the CLI reads, so the broken wiring is in this tree — repair hooks.json here and re-run /bionic:doctor; reinstalling the registry copy would change nothing.\n' ;;
+          printf 'repair hooks.json in this tree — the CLI reads this tree, not the copy\n' ;;
         *)
-          printf 'the registry copy is behind this tree — nominal: the CLI runs this tree, and the copy catches up at the next version bump or reinstall.\n' ;;
+          printf 'nominal, the CLI runs this tree\n' ;;
       esac ;;
     *)
       case "$state" in
         hooks)
-          printf 'the installed copy is what the CLI reads — re-converge it with `claude plugin update bionic@bionic`, then re-run /bionic:doctor.\n' ;;
+          printf 'the installed copy is what the CLI reads — claude plugin update bionic@bionic\n' ;;
         *)
-          printf 'the installed copy is behind — re-converge with `claude plugin update bionic@bionic`, then re-run /bionic:doctor.\n' ;;
+          printf 'claude plugin update bionic@bionic\n' ;;
       esac ;;
   esac
 }
