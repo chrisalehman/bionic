@@ -43,9 +43,9 @@
 # in one cheap test before that: anything that is not this script's business
 # leaves after a single fixed-string grep.
 #
-# [WALL: hooks/execution-recorder.test.sh]
+# [WALL: tests/execution-recorder.test.sh]
 #
-# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
+# Registered in skills/canonical-sdlc/SKILL.md frontmatter; live only while that skill is armed.
 
 set -uo pipefail
 
@@ -405,7 +405,9 @@ if [ "$TOOL_NAME" = "Agent" ]; then
     # THE PREFILTER, and the whole reason this arm can afford an unbounded ledger
     # (Step-6 critic F-1). `line_field` is four processes per call and this loop
     # ran three of them on EVERY row of the file; at 3000 rows that measured
-    # 9260 ms against the 10 s hook timeout claude-bootstrap.sh registers, which
+    # 9260 ms against the 10 s hook timeout this script's registration declares
+    # (skills/canonical-sdlc/SKILL.md frontmatter; hooks/hooks.json carries the
+    # same ceiling, and tests/cross-gate-agreement.test.sh L.4b pins them equal), which
     # is what pushed the review toward capping the file instead. A `case` is
     # in-shell and matches only the row this event is about, so the expensive
     # reads run once per dispatch rather than once per row.
@@ -501,7 +503,7 @@ if [ "$TOOL_NAME" = "Agent" ]; then
   # The cost the cap was bought with is paid at its source instead — the prefilter
   # above, which is what actually made this arm quadratic in session length. See
   # tests/cross-gate-agreement.test.sh §F for the survival case driven writer →
-  # recorder → gate, and hooks/execution-recorder.test.sh's P block for the budget.
+  # recorder → gate, and tests/execution-recorder.test.sh's P block for the budget.
   exit 0
 fi
 
@@ -629,7 +631,7 @@ if [ -n "$IS_START" ]; then
   # Assumptions A-D1): a teammate named `general-purpose` and an async dispatch of
   # TYPE `general-purpose` are the same string on this payload, and nothing on the
   # roster separates them. Accepted, and pinned from the residual side in
-  # hooks/execution-recorder.test.sh Section 10 so that un-accepting it is a design
+  # tests/execution-recorder.test.sh Section 10 so that un-accepting it is a design
   # change rather than a silent one.
   #
   # `intended` AND `confirmed` are both join targets, as they are for the id loop

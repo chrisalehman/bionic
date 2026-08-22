@@ -2,10 +2,11 @@
 # SESSION SWEEPER — the landing verdict, and the ack that closes a row.
 # Design: .bionic/docs/specs/epic-16-landing-contract/wave-02-fact-based-supervision.spec.md
 #         §Design ("Deletion inventory"), succeeding epic-15 wave-04's watcher design.
-# [WALL: hooks/session-sweeper.test.sh]
+# [WALL: tests/session-sweeper.test.sh]
 #
 # This is NOT a hook. Like hooks/preflight-probe.sh it lives in hooks/ for test-harness
-# pairing and bootstrap installation only; it is never registered in MANAGED_HOOKS. It is
+# pairing and to ride the payload's hooks/ directory into the mounted plugin; it is
+# registered on NO channel. It is
 # invoked on demand, one question per invocation, and it holds no process open:
 #
 #     bash ~/.claude/hooks/session-sweeper.sh verdict [<name>]
@@ -67,6 +68,7 @@
 #
 # Hostile-repo posture (design §8): a repo controls its own .bionic/ contents, so every
 # path this script writes is checked for symlink redirection before anything is written.
+# Registered on no channel — invoked on demand from the mounted plugin payload.
 
 set -u
 
@@ -79,8 +81,14 @@ ROSTER_VERSION="v1"
 ROSTER_PREFIX="roster-"
 ROSTER_SUFFIX=".state"
 
-ACK_COMMAND="bash ~/.claude/hooks/session-sweeper.sh ack"
-VERDICT_COMMAND="bash ~/.claude/hooks/session-sweeper.sh verdict"
+# THIS SCRIPT'S OWN PATH, so the usage it prints names the copy the operator actually
+# invoked — identical in a repo checkout, in a bootstrap-installed ~/.claude/hooks/, and in
+# an installed plugin payload. Deliberately NOT ${CLAUDE_PLUGIN_ROOT}: this script is run by
+# hand and by the harness outside any plugin context, where that variable does not exist.
+HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+[ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
+ACK_COMMAND="bash ${HOOK_DIR}/session-sweeper.sh ack"
+VERDICT_COMMAND="bash ${HOOK_DIR}/session-sweeper.sh verdict"
 
 say()  { printf 'sweeper: %s\n' "$1"; }
 die()  { printf 'sweeper: %s\n' "$1" >&2; }
@@ -134,6 +142,50 @@ if [ -z "$REPO_REAL" ]; then
   die "REFUSED — cannot resolve the working directory."
   exit 2
 fi
+
+# ---------------------------------------------------------------- where artifacts live
+#
+# THE DOCS ROOT, AND WHY THIS HOOK SUDDENLY NEEDS ONE (epic-17 W6 S15, A-6.6 (c)).
+# A roster deliverable is brief prose: `Expected artifact: record/epic-17-w6/x.md` is what
+# every slice brief in this epic actually writes, because that is the spelling the Step-5
+# contract and `canonical-sdlc-evidence-gate.sh` established for an artifact under the docs
+# root. This gate resolved it against the REPO root, looked at `<repo>/record/…`, found
+# nothing, and reported the row missing while the file sat where the brief meant. One wave
+# already answered that by writing a duplicate copy at the repo root to appease the gate,
+# which is the failure mode of a gate that is wrong: it teaches the work to be wrong too.
+#
+# `resolve_docs_root` is the evidence gate's, copied whole rather than approximated — the
+# same duplication that helper already lives under, and `tests/cross-gate-agreement.test.sh`
+# holds all three copies to one body so a change to the rule cannot land in only one.
+resolve_docs_root() {
+  local proj="$1"
+  local config="$proj/.bionic/config.yaml"
+  if [ -f "$config" ]; then
+    local override
+    override=$(grep -E '^[[:space:]]*docs-root[[:space:]]*:' "$config" 2>/dev/null \
+      | head -1 \
+      | sed -E 's/^[[:space:]]*docs-root[[:space:]]*:[[:space:]]*//' \
+      | sed -E "s/^['\"]//;s/['\"]\$//" \
+      | sed -E 's/[[:space:]]+$//')
+    if [ -n "$override" ]; then
+      case "$override" in
+        /*) echo "$override" ;;
+        *)  echo "$proj/$override" ;;
+      esac
+      return
+    fi
+  fi
+  echo "$proj/.bionic/docs"
+}
+
+# THE PROJECT ROOT, UNDER THE EVIDENCE GATE'S NAME FOR IT, because the resolver below is
+# that gate's body verbatim and a body-for-body wall cannot survive a renamed variable.
+# The VALUE is this hook's own and stays so: the gate folds a linked worktree back to the
+# main repo (its artifacts are written there), while this hook answers for the roster in
+# the tree it was run from. Same rule about which root a path is relative to; different
+# root, deliberately.
+PROJECT_DIR="$REPO_REAL"
+DOCS_ROOT="$(resolve_docs_root "$PROJECT_DIR")"
 
 BIONIC_DIR="$REPO_REAL/.bionic"
 STATE_DIR="$BIONIC_DIR/tmp"
@@ -199,10 +251,19 @@ clean() {  # <value>
     -e 's/^ *//' -e 's/ *$//' | cut -c 1-400
 }
 
-abs_path() {  # <path> — roster paths are usually absolute; a relative one is the repo's
+# THE ONE RESOLUTION RULE, and it is not this file's (epic-17 W6 S15, A-6.S15.4). Body for
+# body it is `resolve_walk_path()` in canonical-sdlc-evidence-gate.sh, which is the copy
+# that documents the rule at its definition site and the copy every brief was written
+# against: absolute stands; a value led by `record/` is docs-root-relative, because that is
+# the spelling the Step-5 contract publishes; anything else is project-relative, so a
+# fully-spelled `.bionic/docs/record/<file>.md` lands in the same place. Containment — a
+# `..` that climbs out — is the CALLER's question, exactly as it is in the gate; this only
+# resolves. tests/cross-gate-agreement.test.sh holds the three copies to one body.
+abs_path() {  # <path, as the roster spells it> -> absolute
   case "$1" in
-    /*) printf '%s' "$1" ;;
-    *)  printf '%s/%s' "$REPO_REAL" "$1" ;;
+    /*)       printf '%s\n' "$1" ;;
+    record/*) printf '%s/%s\n' "$DOCS_ROOT" "$1" ;;
+    *)        printf '%s/%s\n' "$PROJECT_DIR" "$1" ;;
   esac
 }
 
@@ -403,6 +464,15 @@ CONJUNCT=""
 landing_conjunct() {  # <path, as the roster spells it> <launched epoch|""> <launched ISO>
   local raw="$1" le="$2" liso="$3" p mtime newest f count=0 capped=0
   CONJUNCT=""
+  # A `..` COMPONENT IS REFUSED, not normalized — the same call the evidence gate makes
+  # about a walk artifact, taken at the same place: in the caller, over the raw value.
+  # A relative deliverable that climbs out of the root it is relative to is a placement
+  # error whatever it happens to land on, and normalizing it would hide which root the
+  # brief meant.
+  if echo "$raw" | grep -qE '(^|/)\.\.(/|$)'; then
+    CONJUNCT="refused=$raw (a deliverable path may not climb out of the project with '..' — name it as record/<file>, a project-relative path, or an absolute one)"
+    return 1
+  fi
   p="$(abs_path "$raw")"
   # A SYMBOLIC LINK IS NOT A DELIVERED ARTIFACT — asked FIRST, so both branches below are
   # held to one answer. The file branch used to follow the link ([ -e ], [ -s ] and stat all
@@ -591,7 +661,7 @@ verdict_row() {  # <roster row>
 # One awk pass rather than a shell loop over `line_field`, which is four processes per field
 # per row: this verb runs from the Stop-sweep (`hooks/landing-gate.sh`, invoked on the
 # harness's Stop event, not SubagentStop — see that file's header) under the 10 s timeout
-# claude-bootstrap.sh registers, against a roster that is deliberately uncapped (the
+# the registration declares, against a roster that is deliberately uncapped (the
 # recorder's F-1 note says why). The fold is the reader-side twin of the recorder's
 # "take the LAST row for a tool_use_id".
 #

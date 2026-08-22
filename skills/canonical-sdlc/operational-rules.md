@@ -14,7 +14,9 @@ nothing loads it unprompted, and being copied beside the skill is not the same a
 
 ## Engagement and the axis triple
 
-- **v13 is the ONLY supported version (2026-08-02, epic-14 wave-02 — design-before-build).** All backward compatibility was deleted again: v12 plans now block, no grandfathering, no version ladder. Both hooks check `SUPPORTED_SDLC_VERSION=13`. Four contract changes over v12, all landed this wave: (a) **Design back-half of Step 2** — SKILL.md now carries the full `## Design` contract (the ownership table, scaling by task/wave/epic, rejected alternatives, assumptions feeding the plan's `## Assumptions`) and the operational-rules companion below (`## Design section authoring`). (b) **Three-way design wall** — a `*.spec.md` write at `scale: wave` or `scale: epic` now blocks unless it satisfies one of three arms: a flush-left `## Design` section in place, a `design: <path>` pointer resolving to a real file that itself carries one, or a `design-waived: <user> <date> <reason>` token; the governing-skill hook enforces this at write time (SKILL.md §Artifact layout, §Step 5 → Waiver Protocol, §Hooks). (c) **6-axis Step-6 review** — the adversarial self-review grew a sixth axis, duplication (one implementation site per concept, anchored on the design's ownership table), alongside correctness/readability/architecture/security/performance; the critic mandate (`agents/critic.md`) carries the duplication axis and the agreement-test obligation verbatim. (d) **Auditor coverage-chain extension** — the Step-5 Verification Auditor mandate (`agents/auditor.md`) now walks the full chain top-down (requirement → design decision → criterion → evidence) as its first pass, before power and authenticity, seeded mechanically from the `provenance:` citation map and the design section's requirement references; an uncovered requirement is a wave-level finding the per-row verdict scheme can't otherwise express. v13's remaining contract is IDENTICAL to v12's — same triple, flags, `model_plan`, Verification Matrix, evidence shapes, `scale: task|wave|epic`; no new required frontmatter fields. (wave-03, 2026-08-02, this epic: layers one OPTIONAL key on top of that same v13 contract — `design-interview: true | false`, default `true`, recorded beside `walk:` — so a v13 plan predating this wave and one written after it both validate, and only the later one carries the key.) **Every version bullet below v13 in this file is historical record only — none of it is live behavior, and the `mode:` vocabulary of v≤10 is dead.**
+- **v14 is the ONLY supported version (2026-08-19, epic-17 wave-05 — the close-out contract).** All backward compatibility is deleted again: v13 plans now block, no grandfathering, no version ladder. Both hooks check `SUPPORTED_SDLC_VERSION=14`. **One contract change over v13, and it is Step 9's evidence shape.** `delivered:` is now required on every close-out — the terminal state of the work, which the lifecycle defines as a PR open and ready for a human to review, or commits landed locally and ready to push. `deployed:`, `verified:` and `monitored:` replace v13's `deploy:`/`verified-at:`/`monitor:` and are owed **exactly when `deploy_target` names a live surface**, which pairs with the second half of the change: `deploy_target` defaults to `n/a` at Step 0 and is **never inferred** — a live surface exists only where the user names one, and deploy-shaped signals in a repo are not that naming. What died: v13 owed the trio whenever any target existed and let `n/a:` discharge the step at `deploy_target: none`. That rule encoded wave==release — the exception, not the rule — and it let a run with no live surface close without ever naming what it delivered, while putting every ordinary run on the hook for a release it never performed. An unowed trio recorded anyway is tolerated, never refused: the wall is on the absent claim, not the extra one. Everything else in the contract is IDENTICAL to v13's below — same triple, flags, `model_plan`, Verification Matrix, design wall, `scale: task|wave|epic`; no new frontmatter fields. Same wave, same gate, one adjacent fix that is NOT a contract change: the post-Verify revalidation now accepts a well-formed `user-confirmed: <user> <date> <what>` on a **T4** row in place of an auditor's CONFIRMED, since the user's own confirmation is that tier's evidence and routing it through the Waiver Protocol recorded a waiver where none was owed. **Every version bullet below v14 in this file is historical record only — none of it is live behavior, and the `mode:` vocabulary of v≤10 is dead.**
+
+- **v13 (2026-08-02, epic-14 wave-02 — design-before-build; superseded by v14 on 2026-08-19 — see above).** All backward compatibility was deleted again: v12 plans blocked, no grandfathering, no version ladder. Both hooks checked `SUPPORTED_SDLC_VERSION=13`. Four contract changes over v12, all landed this wave: (a) **Design back-half of Step 2** — SKILL.md now carries the full `## Design` contract (the ownership table, scaling by task/wave/epic, rejected alternatives, assumptions feeding the plan's `## Assumptions`) and the operational-rules companion below (`## Design section authoring`). (b) **Three-way design wall** — a `*.spec.md` write at `scale: wave` or `scale: epic` now blocks unless it satisfies one of three arms: a flush-left `## Design` section in place, a `design: <path>` pointer resolving to a real file that itself carries one, or a `design-waived: <user> <date> <reason>` token; the governing-skill hook enforces this at write time (SKILL.md §Artifact layout, §Step 5 → Waiver Protocol, §Hooks). (c) **6-axis Step-6 review** — the adversarial self-review grew a sixth axis, duplication (one implementation site per concept, anchored on the design's ownership table), alongside correctness/readability/architecture/security/performance; the critic mandate (`agents/critic.md`) carries the duplication axis and the agreement-test obligation verbatim. (d) **Auditor coverage-chain extension** — the Step-5 Verification Auditor mandate (`agents/auditor.md`) now walks the full chain top-down (requirement → design decision → criterion → evidence) as its first pass, before power and authenticity, seeded mechanically from the `provenance:` citation map and the design section's requirement references; an uncovered requirement is a wave-level finding the per-row verdict scheme can't otherwise express. v13's remaining contract is IDENTICAL to v12's — same triple, flags, `model_plan`, Verification Matrix, evidence shapes, `scale: task|wave|epic`; no new required frontmatter fields. (wave-03, 2026-08-02, this epic: layers one OPTIONAL key on top of that same v13 contract — `design-interview: true | false`, default `true`, recorded beside `walk:` — so a v13 plan predating this wave and one written after it both validate, and only the later one carries the key.)
 
 - **v12 is the ONLY supported version (2026-07-26, epic-11; superseded by v13 on 2026-08-02 — see above).** All backward compatibility was deleted: no grandfathering, no version ladder, no per-version shape tables. Both hooks checked `SUPPORTED_SDLC_VERSION=12` and blocked loudly on anything else (previously the evidence gate fell through to a bare `exit 0` on an unrecognized version, so such a plan committed entirely ungated). v12's contract was IDENTICAL to v11's below — same triple, flags, `model_plan`, Verification Matrix, evidence shapes, `scale: task|wave|epic`; no new fields. It is v11 renumbered to mark the pruned-harness generation. The `continuous` scale from the different v12 on the deleted `wave-keepalive` branch is abandoned.
 
@@ -85,7 +87,7 @@ nothing loads it unprompted, and being copied beside the skill is not the same a
   sdlc-step: N
   epic: epic-NN-<slug>
   wave: wave-NN-<slug>
-  canonical_sdlc_version: 13
+  canonical_sdlc_version: 14
   intent: <intent>
   rigor: <rigor>
   scale: <scale>
@@ -265,7 +267,7 @@ column is the obligation the reviewer reads back. Shape:
 ```
 | concept | owning module (SSoT) | rendering surfaces | agreement test |
 |---|---|---|---|
-| version pin value | no single place — typed at each site; that IS the finding | both hooks · scripts.test.sh assertions · SKILL.md prose · this file's version history · hook-chain diagram | pin-sync rows in tests/scripts.test.sh pin the two hook sites; the prose and diagram sites drift silently |
+| version pin value | no single place — typed at each site; that IS the finding | both hooks · scripts.test.sh assertions · SKILL.md prose · this file's version history · the two SVG diagrams | pin-sync rows in tests/scripts.test.sh pin the two hook sites, and tests/diagrams.test.sh pins the four diagram renderings against the hook's value; the two prose sites drift silently |
 | agreement-test exemplar + authoring rules | SKILL.md §Step 6 | SKILL.md §Step 6 · agents/critic.md AXIS block · this section | AXIS-marker rows in tests/agent-roles.test.sh — the pin covers two of the three surfaces; this section is the unpinned one |
 ```
 
@@ -282,10 +284,13 @@ column is the obligation the reviewer reads back. Shape:
   `SUPPORTED_SDLC_VERSION` pin-sync rows in `tests/scripts.test.sh`: one logical constant, two
   rendering sites pinned — the two hooks — and one test that goes red the moment either moves
   alone. It is also the honest limit, and the limit is the half worth knowing while you write the
-  cell: the version paragraph in `SKILL.md`, the version-history bullet at the top of this file
-  and the version renderings in `diagrams/hook-chain.excalidraw` are rendering sites *outside*
-  that tuple, and they drift silently — which is exactly the row the table above writes down
-  rather than rounding up to "pinned". `none — <why>`
+  cell: the version paragraph in `SKILL.md` and the version-history bullet at the top of this file
+  are rendering sites *outside* that tuple, and they drift silently — which is exactly the row the
+  table above writes down rather than rounding up to "pinned". The diagrams used to sit in that
+  same unpinned set and no longer do: composing them as SVG made their four version renderings
+  greppable, and `tests/diagrams.test.sh` reads the hook's value rather than restating it. That is
+  the general move — a surface becomes pinnable by changing its format, not by promising to
+  remember it. `none — <why>`
   is a legitimate cell — some pairs are prose against prose, and a mandate dispatched verbatim
   has no seam to test — but it is a cell the reviewer will stop on, so give it the reason.
 
@@ -326,6 +331,62 @@ at the Step-3 approval alongside everything else.
 `design-waived:` is not a lighter version of the pointer. Waived means no design governs this
 artifact; a pointer means one does and here is where. Waiving because the design lives elsewhere
 destroys the one thing the approval display is built to carry — the path the user would open.
+
+## Close-out report (Step 9)
+
+SKILL.md carries the terminal-disposition rule and names the report's ten parts; this is the
+authoring detail — what each part is for, and the bound that keeps the whole thing from
+growing back into ceremony.
+
+<!-- TERMDISP-BEGIN -->
+> Abolish "continuation candidate." Every finding gets exactly one of three terminal
+> dispositions at wave close:
+> 1. **DO-NOW** — folded into the closing wave.
+> 2. **ACCEPT-CLOSED** — ruled won't-fix, recorded beside its reasoning, and never
+>    carried forward again. An accepted residual is knowledge, not work.
+> 3. **PROMOTE** — kept only with one of two homes: **(a) a trigger** — the named
+>    EVENT that reactivates it ("diagnose the flake when it next fires — output now
+>    preserved"), or **(b) a charter** — promotion into a named future effort (an
+>    ideas/ seed or epic charter) by the user's explicit materiality ruling at close.
+>    A charter costs a decision and gives the work its own document that competes
+>    for prioritization openly. What stays forbidden is the homeless deferral: an
+>    item on a wave's continuation list with no decision, no home, no identity —
+>    that is what schedules cleanup waves by momentum. (Amended 2026-08-16 on
+>    Chris's catch: the original trigger-only form had no bin for legitimately
+>    deferred major work — the plugin conversion itself is the proof case.)
+<!-- TERMDISP-END -->
+
+**The report is one turn.** Not a document, not a file the user has to open — it is the
+close-out message itself, sent once, at Step 9. A close-out that spans multiple turns or
+defers its verdict to a linked artifact has already become the ceremony the rule exists to
+forbid.
+
+**Ten parts, plain English, at the altitude of decisions:**
+
+- **Goal** — what this run set out to do, in one sentence.
+- **Accomplished** — what shipped, named plainly.
+- **Deferred, with dispositions** — every finding that did not ship, each carrying its
+  terminal disposition: DO-NOW (folded in already, so this list should hold none of them),
+  ACCEPT-CLOSED (won't-fix, with the one-line reason), or PROMOTE (its trigger event or its
+  chartered home, named). A finding with no disposition is the defect this template exists
+  to catch.
+- **Special attention** — anything the reader should look at closely before trusting the
+  rest of the report.
+- **Material risks** — what could still go wrong, named, not hedged.
+- **Challenges** — what made this run harder than the plan assumed.
+- **Decisions** — the calls made along the way that a later reader would want to know were
+  made on purpose.
+- **Success/failure verdict** — one plain sentence: did this run meet its goal.
+- **Learnings** — what this run taught that the next one should carry forward.
+- **Next** — the immediate next action, named.
+
+**The anti-ceremony bound.** The whole report is readable in the time it takes to read this
+paragraph twice. A per-AC breakdown, a restated Verification Matrix, a section for every
+step's evidence, or a sub-heading per finding are all the same failure — institutional
+confirmation dressed up as an audit. If a part has nothing to say, it gets one clause ("no
+material risks") rather than a heading with nothing under it. Plain English means no jargon a
+plain reader would have to look up, and conceptual altitude means decisions and outcomes, not
+diffs, commands, or file paths.
 
 ## Evidence gate
 

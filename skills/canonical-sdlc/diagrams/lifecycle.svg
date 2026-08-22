@@ -1,0 +1,215 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="920" viewBox="0 0 1400 920"
+     font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <!--
+    canonical-sdlc — lifecycle diagram.
+
+    THIS FILE IS THE SOURCE. There is no .excalidraw beside it and no export step:
+    the picture is composed text, which is what lets tests/diagrams.test.sh read it.
+    Pinned there against the doctrine it draws:
+      * the title's version rendering  == hooks' SUPPORTED_SDLC_VERSION
+      * the ten class="step" elements  == the ## Steps table in ../SKILL.md
+        (data-step / data-step-name are what the pin compares — edit them and the
+        step name in the same breath, or the suite goes red naming the pair)
+
+    LAYOUT CONTRACT (revised 2026-08-18 for legibility). A step node is 200 wide with
+    a 16px inset, so a bullet has ~168px — about 32 characters at font-size 10.5, and
+    ~31 at the monospace 9 used for skill names. Nothing wraps: a line that does not
+    fit gets shorter words, not a hanging continuation. That bound is why the copy
+    reads terse; keep it when editing, or the labels overflow their boxes again.
+  -->
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#8b949e"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1400" height="920" fill="#ffffff"/>
+
+  <!-- ============================ header ============================ -->
+  <text class="version-pin" data-pin="lifecycle-title" x="40" y="52" font-size="26" font-weight="700" fill="#16191d">Canonical SDLC — Lifecycle (v14)</text>
+  <text x="40" y="78" font-size="14" fill="#626b76">Ten steps · two quality gates · one approval checkpoint · intent × rigor × scale. Committing is a rhythm that crosses every step, never a step of its own.</text>
+  <line x1="40" y1="96" x2="1360" y2="96" stroke="#dde1e6" stroke-width="1"/>
+
+  <!-- ============================ band 1: define ============================ -->
+  <text x="40" y="124" font-size="11.5" font-weight="700" letter-spacing="1.4" fill="#626b76">DEFINE — INTERACTIVE</text>
+
+  <!-- step 0 -->
+  <rect x="40" y="138" width="200" height="146" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
+  <text class="step" data-step="0" data-step-name="Configure" x="56" y="164" font-size="16" fill="#16191d"><tspan font-weight="700">0</tspan><tspan dx="10" font-weight="600">Configure</tspan></text>
+  <text x="56" y="186" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">canonical-sdlc</text>
+  <text x="56" y="222" font-size="10.5" fill="#3a424c">· frontmatter complete</text>
+  <text x="56" y="238" font-size="10.5" fill="#3a424c">· matrix + task list derived</text>
+  <text x="56" y="254" font-size="10.5" fill="#3a424c">· user confirms — no timeout</text>
+
+  <!-- step 1 -->
+  <rect x="262" y="138" width="200" height="146" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
+  <text class="step" data-step="1" data-step-name="Scope" x="278" y="164" font-size="16" fill="#16191d"><tspan font-weight="700">1</tspan><tspan dx="10" font-weight="600">Scope</tspan></text>
+  <text x="278" y="186" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">agent-skills:idea-refine</text>
+  <text x="278" y="222" font-size="10.5" fill="#3a424c">· a refined idea</text>
+  <text x="278" y="238" font-size="10.5" fill="#3a424c">· an explicit "Not Doing"</text>
+  <text x="278" y="254" font-size="10.5" fill="#3a424c">· alternatives cite prior art</text>
+  <text x="278" y="270" font-size="10.5" fill="#3a424c">· never skipped</text>
+
+  <!-- step 2 -->
+  <rect x="484" y="138" width="200" height="146" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
+  <text class="step" data-step="2" data-step-name="Design" x="500" y="164" font-size="16" fill="#16191d"><tspan font-weight="700">2</tspan><tspan dx="10" font-weight="600">Design</tspan></text>
+  <text x="500" y="186" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">agent-skills:</text>
+  <text x="500" y="198" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">spec-driven-development</text>
+  <text x="500" y="222" font-size="10.5" fill="#3a424c">· criteria cite provenance</text>
+  <text x="500" y="238" font-size="10.5" fill="#3a424c">· wave+ carries a design</text>
+  <text x="500" y="254" font-size="10.5" fill="#3a424c">· an interview unless waived</text>
+
+  <!-- step 3 -->
+  <rect x="706" y="138" width="200" height="146" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
+  <text class="step" data-step="3" data-step-name="Plan" x="722" y="164" font-size="16" fill="#16191d"><tspan font-weight="700">3</tspan><tspan dx="10" font-weight="600">Plan</tspan></text>
+  <text x="722" y="186" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">superpowers:writing-plans</text>
+  <text x="722" y="222" font-size="10.5" fill="#3a424c">· no placeholders</text>
+  <text x="722" y="238" font-size="10.5" fill="#3a424c">· integration-branch named</text>
+  <text x="722" y="254" font-size="10.5" fill="#3a424c">· matrix locked, slices tagged</text>
+  <text x="722" y="270" font-size="10.5" fill="#3a424c">· epic stops right here</text>
+
+  <line x1="244" y1="211" x2="258" y2="211" stroke="#8b949e" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="466" y1="211" x2="480" y2="211" stroke="#8b949e" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="688" y1="211" x2="702" y2="211" stroke="#8b949e" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="910" y1="211" x2="924" y2="211" stroke="#8b949e" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- approval checkpoint -->
+  <rect x="928" y="138" width="432" height="146" rx="8" fill="#fef3f2" stroke="#b42318" stroke-width="2.2"/>
+  <text x="946" y="164" font-size="16" font-weight="600" fill="#b42318">Approval Checkpoint</text>
+  <text x="946" y="184" font-size="11" font-style="italic" fill="#b42318">the wave shape locks here, and the run goes quiet</text>
+  <text x="946" y="212" font-size="10.5" fill="#3a424c">· one checkpoint — not a series of small confirmations</text>
+  <text x="946" y="230" font-size="10.5" fill="#3a424c">· the user approves the plan, the slices, the locked matrix</text>
+  <text x="946" y="248" font-size="10.5" fill="#3a424c">· a rigor floor is advice: an override is recorded, never refused</text>
+  <text x="946" y="266" font-size="10.5" fill="#3a424c">· below this line the run is unattended, within stop-and-wake</text>
+
+  <!-- ============================ walk-away boundary ============================ -->
+  <line x1="40" y1="306" x2="1360" y2="306" stroke="#b42318" stroke-width="1.6" stroke-dasharray="7 6"/>
+  <rect x="596" y="295" width="208" height="22" rx="11" fill="#ffffff"/>
+  <text x="700" y="310" font-size="11" font-weight="600" letter-spacing="0.6" fill="#b42318" text-anchor="middle">walk-away boundary</text>
+
+  <!-- ============================ band 2: walk-away ============================ -->
+  <text x="40" y="336" font-size="11.5" font-weight="700" letter-spacing="1.4" fill="#626b76">WALK-AWAY — UNATTENDED, WITHIN THE STOP-AND-WAKE RULES</text>
+
+  <!-- step 4 -->
+  <rect x="40" y="350" width="200" height="146" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
+  <text class="step" data-step="4" data-step-name="Implement" x="56" y="376" font-size="16" fill="#16191d"><tspan font-weight="700">4</tspan><tspan dx="10" font-weight="600">Implement</tspan></text>
+  <text x="56" y="398" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">agent-skills:</text>
+  <text x="56" y="410" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">incremental-implementation</text>
+  <text x="56" y="434" font-size="10.5" fill="#3a424c">· RED before GREEN, every slice</text>
+  <text x="56" y="450" font-size="10.5" fill="#3a424c">· assumptions logged as taken</text>
+  <text x="56" y="466" font-size="10.5" fill="#3a424c">· parallel writers: worktrees</text>
+
+  <!-- step 5 — gate -->
+  <rect x="262" y="350" width="200" height="146" rx="8" fill="#fff8f1" stroke="#c4520a" stroke-width="2.4"/>
+  <text class="step" data-step="5" data-step-name="Verify" x="278" y="376" font-size="16" fill="#16191d"><tspan font-weight="700">5</tspan><tspan dx="10" font-weight="600">Verify</tspan></text>
+  <text x="278" y="392" font-size="10.5" font-style="italic" fill="#c4520a">gate — does it work?</text>
+  <text x="278" y="412" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">superpowers:</text>
+  <text x="278" y="424" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">verification-before-completion</text>
+  <text x="278" y="446" font-size="10.5" fill="#3a424c">· a walk artifact under record/</text>
+  <text x="278" y="462" font-size="10.5" fill="#3a424c">· matrix rows all discharged</text>
+  <text x="278" y="478" font-size="10.5" fill="#3a424c">· independent auditor CONFIRMED</text>
+
+  <!-- step 6 — gate -->
+  <rect x="484" y="350" width="200" height="146" rx="8" fill="#fff8f1" stroke="#c4520a" stroke-width="2.4"/>
+  <text class="step" data-step="6" data-step-name="Review" x="500" y="376" font-size="16" fill="#16191d"><tspan font-weight="700">6</tspan><tspan dx="10" font-weight="600">Review</tspan></text>
+  <text x="500" y="392" font-size="10.5" font-style="italic" fill="#c4520a">gate — is it well-made?</text>
+  <text x="500" y="412" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">agent-skills:</text>
+  <text x="500" y="424" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">code-review-and-quality</text>
+  <text x="500" y="446" font-size="10.5" fill="#3a424c">· six axes, each PASS/FLAG/FAIL</text>
+  <text x="500" y="462" font-size="10.5" fill="#3a424c">· duplication reads the design</text>
+  <text x="500" y="478" font-size="10.5" fill="#3a424c">· independent critic (audited)</text>
+
+  <!-- step 7 -->
+  <rect x="706" y="350" width="200" height="146" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
+  <text class="step" data-step="7" data-step-name="Document" x="722" y="376" font-size="16" fill="#16191d"><tspan font-weight="700">7</tspan><tspan dx="10" font-weight="600">Document</tspan></text>
+  <text x="722" y="398" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">agent-skills:</text>
+  <text x="722" y="410" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">documentation-and-adrs</text>
+  <text x="722" y="434" font-size="10.5" fill="#3a424c">· ADRs answer to significance</text>
+  <text x="722" y="450" font-size="10.5" fill="#3a424c">· momentous → always</text>
+  <text x="722" y="466" font-size="10.5" fill="#3a424c">· medium → if it shapes later</text>
+
+  <!-- step 8 -->
+  <rect x="928" y="350" width="200" height="146" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
+  <text class="step" data-step="8" data-step-name="Integrate" x="944" y="376" font-size="16" fill="#16191d"><tspan font-weight="700">8</tspan><tspan dx="10" font-weight="600">Integrate</tspan></text>
+  <text x="944" y="398" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">superpowers:</text>
+  <text x="944" y="410" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">finishing-a-development-branch</text>
+  <text x="944" y="434" font-size="10.5" fill="#3a424c">· merge into integration-branch</text>
+  <text x="944" y="450" font-size="10.5" fill="#3a424c">· pushing stays the user's gate</text>
+  <text x="944" y="466" font-size="10.5" fill="#3a424c">· worktree removed, tmp wiped</text>
+
+  <!-- step 9 -->
+  <rect x="1150" y="350" width="200" height="146" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.4"/>
+  <text class="step" data-step="9" data-step-name="Close-out" x="1166" y="376" font-size="16" fill="#16191d"><tspan font-weight="700">9</tspan><tspan dx="10" font-weight="600">Close-out</tspan></text>
+  <text x="1166" y="398" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">agent-skills:</text>
+  <text x="1166" y="410" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">shipping-and-launch</text>
+  <text x="1166" y="434" font-size="10.5" fill="#3a424c">· one terminal disposition each</text>
+  <text x="1166" y="450" font-size="10.5" fill="#3a424c">· no finding leaves homeless</text>
+  <text x="1166" y="466" font-size="10.5" fill="#3a424c">· close-out report + handoff</text>
+  <text x="1166" y="482" font-size="10.5" fill="#3a424c">· Patrol disarmed at close</text>
+
+  <line x1="244" y1="423" x2="258" y2="423" stroke="#8b949e" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="466" y1="423" x2="480" y2="423" stroke="#8b949e" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="688" y1="423" x2="702" y2="423" stroke="#8b949e" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="910" y1="423" x2="924" y2="423" stroke="#8b949e" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="1132" y1="423" x2="1146" y2="423" stroke="#8b949e" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- ============================ commit rhythm ============================ -->
+  <rect x="40" y="518" width="1320" height="48" rx="8" fill="#f6f7f9" stroke="#dde1e6" stroke-width="1.2"/>
+  <text x="58" y="540" font-size="11.5" font-weight="700" letter-spacing="1.2" fill="#16191d">COMMIT RHYTHM</text>
+  <text x="196" y="538" font-size="11" fill="#3a424c">Roughly one checkpoint commit per step, and every one of them passes canonical-sdlc-evidence-gate.sh. Not a numbered step — a rhythm the length of the row above.</text>
+  <text x="196" y="556" font-size="11" fill="#3a424c">Update <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">## SDLC State</tspan> BEFORE staging: the gate reads the file on disk, never the diff. There is no <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">commit:</tspan> field to fill in — the SHA lives in git.</text>
+
+  <!-- ============================ shape modifiers ============================ -->
+  <rect x="40" y="588" width="426" height="88" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.2"/>
+  <text x="58" y="610" font-size="12" font-weight="700" fill="#16191d"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11">scale: task</tspan> — the whole row, compressed</text>
+  <text x="58" y="632" font-size="10.5" fill="#3a424c">The ten steps collapse to one line each in a <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10">## Tasks</tspan> ledger, and</text>
+  <text x="58" y="647" font-size="10.5" fill="#3a424c">the gate reads <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10">current: T&lt;n&gt;</tspan> instead of a step number. Nothing</text>
+  <text x="58" y="662" font-size="10.5" fill="#3a424c">is dropped; the artifact is smaller, and the gates still bind.</text>
+
+  <rect x="487" y="588" width="426" height="88" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.2"/>
+  <text x="505" y="610" font-size="12" font-weight="700" fill="#16191d"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11">scale: epic</tspan> — stops after Step 3</text>
+  <text x="505" y="632" font-size="10.5" fill="#3a424c">An epic short-circuits any intent after Step 3: it emits</text>
+  <text x="505" y="647" font-size="10.5" fill="#3a424c"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10">epic.spec</tspan> and <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10">epic.plan</tspan>, carves waves, and hands each wave its</text>
+  <text x="505" y="662" font-size="10.5" fill="#3a424c">own run of this row. Steps 4–9 belong to the waves.</text>
+
+  <rect x="934" y="588" width="426" height="88" rx="8" fill="#ffffff" stroke="#c9ced6" stroke-width="1.2" stroke-dasharray="6 4"/>
+  <text x="952" y="610" font-size="12" font-weight="700" fill="#16191d"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11">intent: spike</tspan> — bypasses the lifecycle</text>
+  <text x="952" y="632" font-size="10.5" fill="#3a424c">A spike ships no code, so it has no plan file, no worktree, no</text>
+  <text x="952" y="647" font-size="10.5" fill="#3a424c">gates, no commits. It produces one writeup at</text>
+  <text x="952" y="662" font-size="10.5" fill="#3a424c"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10">&lt;docs-root&gt;/spikes/&lt;slug&gt;.md</tspan>, and the decision it bought is it.</text>
+
+  <!-- ============================ the triple ============================ -->
+  <text x="40" y="706" font-size="11.5" font-weight="700" letter-spacing="1.4" fill="#626b76">THE TRIPLE — THREE INDEPENDENT DIALS, DECLARED AT STEP 0 AND SHOWN BACK TO THE USER BEFORE ANYTHING RUNS</text>
+
+  <rect x="40" y="720" width="426" height="118" rx="8" fill="#f6f7f9" stroke="#dde1e6" stroke-width="1.2"/>
+  <text x="58" y="744" font-size="13" font-weight="700" fill="#16191d">INTENT — what kind of change</text>
+  <text x="58" y="766" font-size="10" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">build · bugfix · refactor · tune · spike · incident-response</text>
+  <text x="58" y="790" font-size="10.5" fill="#3a424c">The deltas are real, not labels: bugfix's Step-4 failing test IS</text>
+  <text x="58" y="805" font-size="10.5" fill="#3a424c">the repro; refactor's spec is "behavior preserved", and a new</text>
+  <text x="58" y="820" font-size="10.5" fill="#3a424c">criterion means reclassify as build.</text>
+
+  <rect x="487" y="720" width="426" height="118" rx="8" fill="#f6f7f9" stroke="#dde1e6" stroke-width="1.2"/>
+  <text x="505" y="744" font-size="13" font-weight="700" fill="#16191d">RIGOR — how much proof (cumulative)</text>
+  <text x="505" y="766" font-size="10" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">tested &#8834; peer-reviewed &#8834; audited</text>
+  <text x="505" y="790" font-size="10.5" fill="#3a424c">Each tier contains the one before it. audited is the tier that</text>
+  <text x="505" y="805" font-size="10.5" fill="#3a424c">adds the independent critic at Step 6. Floors advise; they never</text>
+  <text x="505" y="820" font-size="10.5" fill="#3a424c">refuse — the user's lower value is taken, and recorded.</text>
+
+  <rect x="934" y="720" width="426" height="118" rx="8" fill="#f6f7f9" stroke="#dde1e6" stroke-width="1.2"/>
+  <text x="952" y="744" font-size="13" font-weight="700" fill="#16191d">SCALE — how big</text>
+  <text x="952" y="766" font-size="10" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">task · wave · epic</text>
+  <text x="952" y="790" font-size="10.5" fill="#3a424c">Scale changes the artifact, not the discipline: a task keeps a</text>
+  <text x="952" y="805" font-size="10.5" fill="#3a424c">ledger line, a wave the full spec-and-plan pair, an epic only</text>
+  <text x="952" y="820" font-size="10.5" fill="#3a424c">what outlives its waves. A barred cell is rejected at Step 0.</text>
+
+  <!-- ============================ footer legend ============================ -->
+  <line x1="40" y1="862" x2="1360" y2="862" stroke="#dde1e6" stroke-width="1"/>
+  <rect x="40" y="876" width="18" height="12" rx="3" fill="#fff8f1" stroke="#c4520a" stroke-width="2"/>
+  <text x="66" y="886" font-size="10.5" fill="#3a424c">orange = quality gate (Steps 5 and 6)</text>
+  <rect x="316" y="876" width="18" height="12" rx="3" fill="#fef3f2" stroke="#b42318" stroke-width="2"/>
+  <text x="342" y="886" font-size="10.5" fill="#3a424c">red = approval checkpoint, and the walk-away boundary it opens</text>
+  <rect x="716" y="876" width="18" height="12" rx="3" fill="#f6f7f9" stroke="#dde1e6" stroke-width="1.2"/>
+  <text x="742" y="886" font-size="10.5" fill="#3a424c">grey = context that shapes the row rather than sitting in it</text>
+  <text x="1360" y="904" font-size="10" text-anchor="end" fill="#626b76">composed SVG — this file is the source · pinned by tests/diagrams.test.sh</text>
+</svg>

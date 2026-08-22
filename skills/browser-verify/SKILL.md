@@ -104,6 +104,8 @@ playwright-cli install            # initialize the workspace
 playwright-cli install-browser    # install the browser binary (chromium)
 ```
 
+`@playwright/cli` is bionic's canonical environment-class dependency: before assuming it, detect its absence with `jit_check`, and on absence offer a consented install with `jit_offer` (`payload/scripts/lib/jit.sh`) — a decline degrades to "T2/T3 rows blocked, not silently skipped," never a cryptic failure.
+
 ### Server lifecycle (local apps)
 
 Never drive a URL that isn't answering yet — a race against server startup is the most common false failure. Start the server, **wait for the port**, drive, then tear it down so you don't leak a process (a leaked server poisons the next run's port):

@@ -4,29 +4,72 @@
 #         §Design ("Poker"), succeeding epic-09/epic-10's resident cron poker — deliberately
 #         NOT resurrected (spec §Rejected alternatives: "OS cron / launchd for the tick" is
 #         residency in configuration form, ratified against).
-# [WALL: hooks/session-poker.test.sh]
+# [WALL: tests/session-poker.test.sh]
 #
 # This is NOT a hook, exactly like hooks/session-sweeper.sh: it lives in hooks/ for
-# test-harness pairing and bootstrap installation only (claude-bootstrap.sh installs every
-# hooks/*.sh into ~/.claude/hooks/) and is never registered in MANAGED_HOOKS. It is invoked
-# ON DEMAND, one question per invocation, and holds no process open:
+# test-harness pairing and to ride the payload's hooks/ directory into the mounted plugin.
+# It is registered on NO channel — neither hooks/hooks.json nor a skill's frontmatter.
+# It is invoked ON DEMAND, one question per invocation, and holds no process open:
 #
-#     bash ~/.claude/hooks/session-poker.sh tick       one decision over this roster (read-only)
-#     bash ~/.claude/hooks/session-poker.sh interval    the configured self-wake interval, seconds
+#     bash <plugin-root>/hooks/session-poker.sh tick       one decision over this roster (read-only)
+#     bash <plugin-root>/hooks/session-poker.sh arm        stamp the Patrol as alive, at engagement
+#     bash <plugin-root>/hooks/session-poker.sh interval   the configured Patrol interval, seconds
 #
-# WHAT IT IS. The poker is a session-scoped self-wake, not a resident process (spec R1). The
-# doctrine that ARMS it lives in skills/canonical-sdlc/SKILL.md §Dispatch: the orchestrator's
-# own harness self-wake primitive sleeps `interval` seconds and calls `tick`; THIS SCRIPT
-# DECIDES, the harness schedules. `tick` is exactly ONE `verdict` read over the whole roster,
-# plus — for any UNMET row only — a direct roster lookup of that one row's own
-# `duration=`/`launched_at=` fields (verdict's own output carries neither). Never a per-row
-# verdict call, never a second judgment of MET/UNMET/STILL-LIVE: that judgment belongs to
-# `verdict` alone (ownership table, spec §Design) and this script only consumes it.
+# `<plugin-root>` IS A PLACEHOLDER, NOT A SPELLING TO PASTE (epic-17 W5, spec AC-5). These
+# are commands a MODEL types into its own shell, where `${CLAUDE_PLUGIN_ROOT}` is unset —
+# the CLI substitutes that variable inside registered command files and nowhere else. The
+# root is resolved ONCE PER SESSION, at Patrol arming, out of the CLI's own registry
+# (`installed_plugins.json`, via `detect_plugin_root` in scripts/lib/detect.sh) and the
+# resolved absolute path is baked into the session's own text from there on. The old
+# `${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}` fallback is retired: it silently resolved to a
+# bootstrap-era `~/.claude` copy that could be an older build than the installed plugin.
 #
-# WHAT IT NEVER DOES. It never stops, kills, arms, or notifies on its own authority. The
-# decision is printed on stdout as ONE machine-readable line, and the caller (the doctrine's
-# self-wake loop) is what turns a NOTIFY line into an actual push. Zero authority, exactly
-# like `verdict` (ADR-003) — this verb cannot even record that it ran.
+# WHAT IT IS. The poker is the decision brain of THE PATROL, not a resident process
+# (spec R1). The doctrine that ARMS it lives in skills/canonical-sdlc/SKILL.md
+# §Dispatch, and the mechanism is a session-scoped cron job: One clock per run, and only one.
+# Arm it at engagement — never on dispatch, never one per unit — and then
+# `CronDelete` the job at run close. Wakeups are recurring, never date-pinned: a one-shot
+# `CronCreate` pinned to a wall-clock minute is banned, because
+# a busy minute DROPS the tick rather than queuing it — so a one-shot whose single match
+# minute finds the session working dies silently and never fires again. A run that needs a
+# wake creates a SHORT RECURRING job and `CronDelete`s it on its first fire.
+# Each Patrol tick delivers the patrol prompt, whose FIRST duty is `tick` and whose LAST is
+# to continue the run's actual work rather than report on it; THIS SCRIPT DECIDES, the cron
+# schedules. (Epic-17 W4 superseded the earlier mechanism, a harness self-wake primitive
+# that slept `interval` seconds between calls; `interval` survives it as the cron's period.)
+# `tick` is exactly ONE `verdict` read over the whole roster, plus — for any UNMET row only —
+# a direct roster lookup of that one row's own `duration=`/`launched_at=` fields (verdict's
+# own output carries neither). Never a per-row verdict call, never a second judgment of
+# MET/UNMET/STILL-LIVE: that judgment belongs to `verdict` alone (ownership table,
+# spec §Design) and this script only consumes it.
+#
+# WHAT IT NEVER DOES. It never stops, kills, or notifies on its own authority. The
+# decision is printed on stdout as ONE machine-readable line, and the caller (the patrol
+# prompt the Patrol delivers) is what turns a NOTIFY line into an actual push. Zero
+# authority, exactly like `verdict` (ADR-003).
+#
+# THE ONE THING IT DOES RECORD IS THAT IT RAN. Every invocation of `tick` and every `arm`
+# writes a session-keyed Patrol stamp beside the roster — `.bionic/tmp/patrol-<sid>.state`,
+# schema `patrol-stamp/v1` — and hooks/dispatch-preflight.sh refuses a dispatch when that
+# stamp is absent (the Patrol was never armed) or older than 2x the poker-interval (it was
+# armed and has stopped firing). Two properties make that wall honest, and both are pinned
+# by tests/session-poker.test.sh §6:
+#
+#   THE STAMP IS WRITTEN BEFORE ANYTHING IS DECIDED — before the sibling sweeper is even
+#   located, before the roster is read, before any exit path branches. What it attests is
+#   FIRINGS LANDING, not decisions succeeding. A stamp written on success would measure the
+#   wrong thing: this wave's own orchestrator session produced 10+ healthy-but-REFUSED
+#   pre-roster ticks across one long interview, and stamp-on-success would have aged the
+#   stamp into a false refusal of the wave's first dispatch. The single exception is a tick
+#   with no session key at all, which has no stamp path to write.
+#
+#   `arm` EXISTS BECAUSE ARMING PRECEDES DISPATCH. The doctrine arms at engagement, never on
+#   dispatch, so the first stamp cannot come from a tick that has a roster to read; without
+#   this verb the wall is a chicken-and-egg that refuses every first dispatch of a run.
+#   `arm` therefore needs no roster and asks for none.
+#
+# The stamp is a LIVENESS signal, not an authority: it says the Patrol fired, and it cannot
+# say the CLI's cron table still holds the job. That honest limit is the wall's too.
 #
 # AN ACKED ROW IS CLOSED HERE, exactly as it is for the other three consumers of the
 # verdict line (hooks/landing-gate.sh, hooks/stop-orders.sh, hooks/stop-guard.sh): it is
@@ -60,12 +103,27 @@
 # THE SWEEPER IS THIS SCRIPT'S SIBLING, resolved exactly as hooks/landing-gate.sh resolves
 # it: no PATH lookup (a hook's PATH is not ours to trust), no environment override (a seam on
 # the path under test would leave the production path unverified) — so the same resolution
-# holds in the repo and in ~/.claude/hooks/ once claude-bootstrap.sh installs both.
+# holds in the repo and under the mounted plugin's hooks/, which ships both side by side.
+# Registered on no channel — invoked on demand from the mounted plugin payload.
 
 set -u
 
+# THIS SCRIPT'S OWN PATH, so the usage it prints names the copy the operator actually
+# invoked — identical in a repo checkout, in a bootstrap-installed ~/.claude/hooks/, and in
+# an installed plugin payload. Deliberately NOT ${CLAUDE_PLUGIN_ROOT}: this script is run by
+# hand and by the harness outside any plugin context, where that variable does not exist.
+HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+[ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
+
 POKER_DECISION_SCHEMA="poker-tick/v1"
 POKER_INTERVAL_DEFAULT="30m"
+
+# The Patrol stamp — schema, and the two halves of its per-session filename. Read back by
+# hooks/dispatch-preflight.sh's arming wall; the two spellings are held together by
+# tests/cross-gate-agreement.test.sh §P, so a rename on one side cannot go quiet on the other.
+PATROL_STAMP_SCHEMA="patrol-stamp/v1"
+PATROL_STAMP_PREFIX="patrol-"
+PATROL_STAMP_SUFFIX=".state"
 
 say()  { printf 'poker: %s\n' "$1"; }
 die()  { printf 'poker: %s\n' "$1" >&2; }
@@ -73,15 +131,17 @@ die()  { printf 'poker: %s\n' "$1" >&2; }
 usage() {  # [message]
   [ $# -gt 0 ] && die "$1"
   die "Usage:"
-  die "  bash ~/.claude/hooks/session-poker.sh tick       one decision over this session's roster (read-only)"
-  die "  bash ~/.claude/hooks/session-poker.sh interval    the configured self-wake interval, in seconds"
+  die "  bash ${HOOK_DIR}/session-poker.sh tick       one decision over this session's roster (read-only)"
+  die "  bash ${HOOK_DIR}/session-poker.sh arm        stamp the Patrol as alive for this session (no roster needed)"
+  die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
+  die "  bash ${HOOK_DIR}/session-poker.sh interval-default   this script's built-in default interval, in seconds (ignores config)"
   exit 2
 }
 
 [ $# -eq 1 ] || usage "exactly one verb required."
 VERB="$1"
 case "$VERB" in
-  tick|interval) : ;;
+  tick|arm|interval|interval-default) : ;;
   *) usage "unknown verb: $VERB" ;;
 esac
 
@@ -158,7 +218,7 @@ parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be 
 # closing ap review A-1: this script used to answer `git rev-parse --show-toplevel`, which
 # names the WORKTREE root. A worktree cwd would then poll a roster file that only ever
 # existed under the MAIN repository, read it as empty, and DISARM — silently and
-# permanently, since DISARM ends the self-wake for the rest of the session (doctrine,
+# permanently, since DISARM ends the Patrol for the rest of the session (doctrine,
 # skills/canonical-sdlc/SKILL.md §Dispatch). `--git-common-dir` maps a worktree back onto its
 # main repository, so both this script and the roster's writer land on one address space.
 resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default pwd)
@@ -223,6 +283,46 @@ poker_interval_seconds() {
   parse_seconds "$raw"
 }
 
+# ---------------------------------------------------------------- the Patrol stamp
+#
+# One session-keyed file beside the roster, at the SAME pinned root the roster uses — a
+# stamp written under a worktree root while the wall reads the main repository's would
+# refuse a perfectly live Patrol, silently and for the rest of the run (the exact shape of
+# the worktree bug ap review A-1 fixed for the roster read, epic-16 w2).
+#
+# Never fatal to a tick. A tick that could not stamp has still decided, and turning a
+# stamp-write failure into a refused tick would hand the arming wall a second way to say
+# "dead" about a Patrol that is firing fine. `arm` is the exception and checks the return:
+# arming is an explicit act whose whole product is the stamp, so a silent no-op there would
+# leave the operator believing a wall is satisfied when it is not.
+#
+# Symlinks are refused rather than followed, the same posture every other .bionic/tmp
+# writer takes: a hostile repo may make this fail, and must not gain a write through a path
+# it aims.
+patrol_stamp_file() {  # <session-id> -> absolute path, or empty
+  local repo real
+  repo="$(resolve_project_root "$PWD/." "$PWD")"
+  real="$(cd "$repo" 2>/dev/null && pwd -P)"
+  [ -n "$real" ] || return 1
+  printf '%s/.bionic/tmp/%s%s%s' "$real" "$PATROL_STAMP_PREFIX" "$1" "$PATROL_STAMP_SUFFIX"
+}
+
+write_patrol_stamp() {  # <session-id> <verb> -> 0 written, 1 not
+  local sid="$1" verb="$2" f d
+  f="$(patrol_stamp_file "$sid")" || return 1
+  [ -n "$f" ] || return 1
+  d="${f%/*}"
+  case "$d" in */.bionic/tmp) : ;; *) return 1 ;; esac
+  [ -L "${d%/tmp}" ] && return 1
+  [ -L "$d" ] && return 1
+  mkdir -p "$d" 2>/dev/null || return 1
+  [ -L "$f" ] && return 1
+  printf '%s|at=%s|session=%s|verb=%s\n' "$PATROL_STAMP_SCHEMA" "$(iso_now)" "$sid" "$verb" \
+    > "$f" 2>/dev/null || return 1
+  chmod 600 "$f" 2>/dev/null
+  return 0
+}
+
 # ---------------------------------------------------------------- verbs
 
 case "$VERB" in
@@ -237,6 +337,41 @@ case "$VERB" in
     exit 0
     ;;
 
+  # THE DEFAULT, WITHOUT THE CONFIG — added for hooks/dispatch-preflight.sh's arming wall
+  # (critic C-2, W5). That wall needs a threshold even when `interval` above REFUSES,
+  # because a project's config file is machine-local and agent-writable and one unparseable
+  # line there must not be able to disarm a wall. It could have retyped 1800; then this
+  # script's constant and the gate's would drift the first time either moved, which is the
+  # duplication this repo's ownership rule exists to forbid. So the constant and the
+  # duration parse stay here, where they already lived, and the gate asks.
+  #
+  # NOTHING ELSE READS THE CONFIG ON THIS PATH, deliberately: the whole value of this verb
+  # to its caller is that a hostile or broken config.yaml cannot change what it answers.
+  interval-default)
+    SECS="$(parse_seconds "$POKER_INTERVAL_DEFAULT")" || {
+      die "REFUSED — this script's own POKER_INTERVAL_DEFAULT ('$POKER_INTERVAL_DEFAULT') is not a duration."
+      exit 2
+    }
+    printf '%s\n' "$SECS"
+    exit 0
+    ;;
+
+  arm)
+    SESSION_ID="${CLAUDE_CODE_SESSION_ID:-}"
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "A Patrol stamp answers for ONE session, so without the key there is nothing to write."
+      exit 3
+    fi
+    if ! write_patrol_stamp "$SESSION_ID" arm; then
+      die "REFUSED — the Patrol stamp could not be written; this session is NOT armed."
+      die "Check that .bionic/tmp is a writable real directory under the project root."
+      exit 2
+    fi
+    say "armed — the Patrol stamp is fresh for this session: $(patrol_stamp_file "$SESSION_ID")"
+    exit 0
+    ;;
+
   tick)
     SESSION_ID="${CLAUDE_CODE_SESSION_ID:-}"
     if [ -z "$SESSION_ID" ]; then
@@ -244,6 +379,13 @@ case "$VERB" in
       die "A tick answers for ONE session's roster, so without the key there is nothing to read."
       exit 3
     fi
+
+    # STAMP FIRST, BEFORE ANYTHING IS READ OR DECIDED. Every line below this one can end in
+    # a refusal, and each of those refusals is a HEALTHY Patrol firing into a state it has
+    # nothing to say about. What the stamp attests is the firing, so it is taken here — the
+    # first thing after the session key exists to name the file with.
+    write_patrol_stamp "$SESSION_ID" tick \
+      || die "WARN — the Patrol stamp could not be written; the tick itself is unaffected."
 
     # The sweeper is this script's sibling — same resolution as hooks/landing-gate.sh's.
     SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
@@ -301,7 +443,7 @@ case "$VERB" in
       # self-wake — was unreachable by the ordinary path that closes an artifact-less row;
       # and every tick re-notified the same closed work, growing the NOTIFY set
       # monotonically across a wave. AC-7's contract moves with this (assumption 41), which
-      # is why hooks/session-poker.test.sh §3 re-authors the accelerated-clock cases rather
+      # is why tests/session-poker.test.sh §3 re-authors the accelerated-clock cases rather
       # than re-running them.
       #
       # TOTAL still counts an acked row: it is on the roster, and "how many contracts does
@@ -345,13 +487,13 @@ EOF
     # and legitimately has nothing open yet — but the first case is usually the wrong project
     # root having been resolved, and DISARM is silent and terminal for the rest of the
     # session (doctrine, skills/canonical-sdlc/SKILL.md §Dispatch: "DISARM also ends the
-    # self-wake"). Checked only on the TOTAL=0 path: any row at all on the roster proves the
+    # Patrol"). Checked only on the TOTAL=0 path: any row at all on the roster proves the
     # file exists, so OPEN=0-with-TOTAL>0 can never be the absent-file case.
     if [ "$TOTAL" -eq 0 ] && [ ! -e "$ROSTER_FILE" ]; then
       die "REFUSED — no roster at $ROSTER_FILE; this is not the same as an empty one."
       die "An absent roster usually means the wrong project root was resolved, or nothing has"
       die "been dispatched yet on this session — either way, nothing was read to decide DISARM"
-      die "from, and DISARM ends the self-wake for the rest of this session."
+      die "from, and DISARM ends the Patrol for the rest of this session."
       exit 2
     fi
 
@@ -361,7 +503,7 @@ EOF
     if [ "$TOTAL" -eq 0 ] || [ "$OPEN" -eq 0 ]; then
       printf '%s|at=%s|session=%s|decision=DISARM|total=%s|open=%s\n' \
         "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN"
-      say "DISARM — no open row on this roster; the self-wake may stop."
+      say "DISARM — no open row on this roster; the Patrol may stop."
       exit 0
     fi
 

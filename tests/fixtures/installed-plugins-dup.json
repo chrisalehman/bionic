@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "plugins": {
+    "agent-skills@bionic": [
+      { "scope": "user", "installPath": "/tmp/fixture/plugins/cache/bionic/agent-skills/0.6.7", "version": "0.6.7" }
+    ],
+    "bionic@bionic": [
+      { "scope": "user", "installPath": "/tmp/fixture/plugins/cache/bionic/bionic/0.1.0", "version": "0.1.0" }
+    ],
+    "bionic@claude-plugins-official": [
+      { "scope": "user", "installPath": "/tmp/fixture/plugins/cache/claude-plugins-official/bionic/0.0.9", "version": "0.0.9" }
+    ],
+    "superpowers@bionic": [
+      { "scope": "user", "installPath": "/tmp/fixture/plugins/cache/bionic/superpowers/6.3.0", "version": "6.3.0" }
+    ],
+    "superpowers@claude-plugins-official": [
+      { "scope": "user", "installPath": "/tmp/fixture/plugins/cache/claude-plugins-official/superpowers/6.2.0", "version": "6.2.0" }
+    ]
+  }
+}

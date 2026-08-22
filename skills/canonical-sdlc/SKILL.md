@@ -6,54 +6,54 @@ hooks:
     - matcher: "Bash"
       hooks:
         - type: command
-          command: ~/.claude/hooks/canonical-sdlc-evidence-gate.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-evidence-gate.sh
           timeout: 10
         - type: command
-          command: ~/.claude/hooks/farm-out-reminder.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/farm-out-reminder.sh
           timeout: 10
     - matcher: "TaskStop"
       hooks:
         - type: command
-          command: ~/.claude/hooks/stop-guard.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.sh
           timeout: 10
     - matcher: "Agent"
       hooks:
         - type: command
-          command: ~/.claude/hooks/dispatch-preflight.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh
           timeout: 10
     - matcher: "Write"
       hooks:
         - type: command
-          command: ~/.claude/hooks/canonical-sdlc-governing-skill.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh
           timeout: 10
     - matcher: "Edit"
       hooks:
         - type: command
-          command: ~/.claude/hooks/canonical-sdlc-governing-skill.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh
           timeout: 10
   PostToolUse:
     - matcher: "Bash"
       hooks:
         - type: command
-          command: ~/.claude/hooks/execution-recorder.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh
           timeout: 10
     - matcher: "Agent"
       hooks:
         - type: command
-          command: ~/.claude/hooks/execution-recorder.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh
           timeout: 10
   SubagentStart:
     - hooks:
         - type: command
-          command: ~/.claude/hooks/execution-recorder.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh
           timeout: 10
   Stop:
     - hooks:
         - type: command
-          command: ~/.claude/hooks/context-spend.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/context-spend.sh
           timeout: 10
         - type: command
-          command: ~/.claude/hooks/landing-gate.sh
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh
           timeout: 10
 layer: governance
 needs:
@@ -119,7 +119,7 @@ Triple not yet declared → say so and list the axes. Invoked as `help` → rend
 | `refactor` | Change structure, preserve behavior. Covers upgrades, migrations, removals/deprecations. | `behavior-preservation:` in the Step-5 block; migrations add `compat-matrix:`/`revert-plan:` (or `n/a: not a migration`). Log-only. |
 | `tune` | Move a NAMED measurement toward a target. If you cannot name the measurement, it is not tune. | `baseline:`/`target:`/`re-measure:` in the Step-5 block, all three. Log-only. |
 | `spike` | Timeboxed research. **Ships no code at any rigor.** | Writeup only at `<docs-root>/spikes/spike-<slug>-<YYYYMMDD>.md`. No plan file, no spec, no ADR, no commits to the integration branch. |
-| `incident-response` | A live deployed surface — production or tooling — is broken for its users. The clock matters. | RCA, not ADR. Floors at `audited`. Monitoring-gap closure is part of Ship. |
+| `incident-response` | A live deployed surface — production or tooling — is broken for its users. The clock matters. | RCA, not ADR. Floors at `audited`. Monitoring-gap closure is part of Close-out. |
 
 **rigor** — how hard the evidence tries to lie. Cumulative.
 
@@ -176,7 +176,7 @@ artifacts that the plan pointed at. The reasoning survived in the plan's own pro
 evidence did not, which turns an audited record into testimony. Give an agent a `record/` path
 in its brief, or you will pay this once too.
 
-Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 13`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`. Plan files additionally carry `walk: required | exempt` — Step 0's derivation, and the key the Verify gate reads — Step 0's `design-interview:` value beside it, and, where the run's rigor sits below its derived floor, `rigor-override:` beside those. None of the three is required to write, but a `walk:` value outside the enum blocks. Spec files at `scale: wave` or `scale: epic` carry `design: <path>` or `design-waived: <user> <date> <reason>` unless the `## Design` section is in place — the three-way rule, Step 2.
+Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 14`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`. Plan files additionally carry `walk: required | exempt` — Step 0's derivation, and the key the Verify gate reads — Step 0's `design-interview:` value beside it, and, where the run's rigor sits below its derived floor, `rigor-override:` beside those. None of the three is required to write, but a `walk:` value outside the enum blocks. Spec files at `scale: wave` or `scale: epic` carry `design: <path>` or `design-waived: <user> <date> <reason>` unless the `## Design` section is in place — the three-way rule, Step 2.
 
 **13 is the only supported version.** Any other value — an older number, an empty value, a typo — blocks at both hooks. There is one contract; an artifact either meets it or does not write. A run that predates it is brought forward to 13, not exempted.
 
@@ -193,7 +193,7 @@ Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `inten
 | 6 Review | `agent-skills:code-review-and-quality` | Every axis has a verdict; independent critic attached |
 | 7 Document | `agent-skills:documentation-and-adrs` | Every decision at medium significance or above is recorded |
 | 8 Integrate | `superpowers:finishing-a-development-branch` | Wave reachable from the integration branch; worktree removed; tmp wiped |
-| 9 Ship | `agent-skills:shipping-and-launch` | Checklist + rollback; `continuation.md` written |
+| 9 Close-out | `agent-skills:shipping-and-launch` | Checklist + rollback; `continuation.md` written |
 
 Committing is a cross-cutting rhythm (~once per step), not a numbered step. Update `## SDLC State` **before staging** — the gate reads the file, not the diff. Do not add a `commit:` field; the SHA lives in git.
 
@@ -207,7 +207,7 @@ Committing is a cross-cutting rhythm (~once per step), not a numbered step. Upda
 
 1. **Pre-flight.** `.bionic/` exists; `docs-root:` read from `.bionic/config.yaml` (default `.bionic/docs`) with `{specs,plans,adrs,incidents}/` present; `mkdir -p .bionic/tmp/`; both hooks installed and executable (if not, warn and record in `## Assumptions`).
 2. **Classify the triple silently.** Infer from the request's verbs and named artifacts. Do NOT interrogate. Interview by exception only, 1–3 questions, on exactly three conditions: a genuine intent collision the classification rules do not resolve (the standing gray zones are **mechanism-swap** and **reference-content**); a suspected but unconfirmed security/privacy surface; or a scale that could be one session or several.
-3. **Infer the flags.** `language` from repo files; `surface_type`/`has_ui` from the request; `multi_agent` defaults **true** (infer `false` only when there is genuinely nothing to offload — never key it off an installed plugin catalog, which silently disables the dispatched-task ledger guard); `deploy_target` from deploy signals; `cleanup_on_finish` true; `use_worktree` false; `integration_branch` from the epic plan, else the current mainline, else `main` — print it as `unknown` rather than dropping it; `model_plan` from `multi_agent` and the detected session model.
+3. **Infer the flags.** `language` from repo files; `surface_type`/`has_ui` from the request; `multi_agent` defaults **true** (infer `false` only when there is genuinely nothing to offload — never key it off an installed plugin catalog, which silently disables the dispatched-task ledger guard); `deploy_target` **defaults to `n/a` and is never inferred** — a live surface exists only where the user names one, in the request or at this step's confirmation, and deploy-shaped signals in the repo are not that naming; `cleanup_on_finish` true; `use_worktree` false; `integration_branch` from the epic plan, else the current mainline, else `main` — print it as `unknown` rather than dropping it; `model_plan` from `multi_agent` and the detected session model.
 4. **Derive the walk requirement.** From the declared surface flags: a surface an agent can open and drive → `walk: required`; nothing drivable → `walk: exempt`. It prints in the confirmation display and is recorded as plan-frontmatter `walk:`. **Exemptions derive from declared configuration and are ratified at Step 0, never invented mid-run** — there is no mid-run `n/a`, and the Verify gate reads an absent or unrecognized key as `required`, so an omission never becomes an exemption.
 5. **Derive the Verification Matrix.** One row per acceptance criterion. Tier defaults: user-visible behavior → **T3**; engine-divergent → **T2 both engines** plus **T3** for the user-visible AC; pure substrate with no runtime surface → **T1/T2** with a one-line justification; perceptual fidelity → **T3**, T4 available; docs → **T0/none**.
 6. **Present the confirmation display in full, in the layout below.** Every section, every flag, every inference rationale, every matrix row, the `integration-branch:` line. Never elide, sample, summarize, defer, or restate it as prose — the user is approving exactly what they can see, and an abbreviated display invalidates the confirmation. Print every matrix row even past 12 ACs; a matrix is precisely what must not be sampled. An unknown value prints as `unknown` rather than dropping its line.
@@ -238,7 +238,7 @@ Discriminator flags:
   language:        <value>      [inferred: <evidence>]
   has_ui:          <value>      [inferred: <evidence>]
   multi_agent:     <value>      [inferred: <evidence>]
-  deploy_target:   <value>      [inferred: <evidence>]
+  deploy_target:   <value>      [n/a unless you name a live surface — never inferred]
 
 Opt-in flags:
   cleanup_on_finish: <value>    [<consequence at Step 8>]
@@ -401,7 +401,7 @@ A lower tier passing while a higher one fails is a **locator, not a contradictio
 | T3 | `tier-run`, `fresh`, `cold-client`, `contact`, `readback` |
 | T4 | `user-confirmed` |
 
-**Tier-Discharge Rule.** Lower-tier evidence never discharges a higher-tier row; higher-tier evidence discharges lower-tier rows for the same AC. A green suite can never stand in for a T3 row — a suite run cannot honestly produce `fresh`/`cold-client`/`contact`. T3's validity conditions live in `browser-verify`; do not restate them. An undrivable T3 row is **blocked**, loudly, never silently skipped. T4 rows are discharged by `user-confirmed: <user> <date> <what was walked>` — agents never self-confirm one.
+**Tier-Discharge Rule.** Lower-tier evidence never discharges a higher-tier row; higher-tier evidence discharges lower-tier rows for the same AC. A green suite can never stand in for a T3 row — a suite run cannot honestly produce `fresh`/`cold-client`/`contact`. T3's validity conditions live in `browser-verify`; do not restate them. An undrivable T3 row is **blocked**, loudly, never silently skipped. T4 rows are discharged by `user-confirmed: <user> <date> <what was walked>` — agents never self-confirm one. The browser modality's `playwright-cli` is an environment-class dependency: absence is detected via `jit_check`, offered via `jit_offer` (`payload/scripts/lib/jit.sh`), and a decline degrades cleanly per its printed line rather than a row silently going unattempted.
 
 **Absence-readback rule.** A readback that is zero, empty, or not-present proves nothing on its own — an all-zero observation reads identically whether the code works or was deleted. Such a row needs a paired positive case: the same readback returning a non-empty result where the behavior says it should. Without one the row is presumed powerless and cannot discharge, at any tier. No hook reads this; the auditor mandate carries it as judgment.
 
@@ -425,6 +425,8 @@ Row verdicts land in the matrix `auditor` column; the wave verdict lands on its 
 
 Three moves are the user's, never an agent's: a tier **downgrade**, an **`n/a` on a live tier (T3/T4)**, and **closing over a non-CONFIRMED row**. Each is recorded as `waiver: <user> <date> <reason>` in the row. A waived row is exempt from its per-tier keys and from CONFIRMED. Agents never self-write `n/a` on a live-tier field.
 
+**A user-confirmed T4 row is none of those moves, and needs no waiver.** T4's evidence *is* the user's confirmation, so an auditor sent at it can only re-read what the user said — transcription, not independence. A T4 row whose block carries `user-confirmed: <user> <date> <what they confirmed>` therefore discharges past the Verify gate on that value alone, with no auditor verdict and no waiver. Reaching for the Waiver Protocol here records a waiver where nothing was waived, and the row then reads forever as a criterion that was let go. The attribution is the whole test: an unattributed or agent-written claim ("confirmed after the re-render") is not a user confirmation and still meets the CONFIRMED wall.
+
 Note the hole: the hook checks only that the token `waiver` is present — not who, when, or why. And retyping a tier cell from T3 to T2 is a downgrade no hook sees.
 
 **Design waiver.** A fourth user-only move, sitting on the artifact rather than on a matrix row: `design-waived: <user> <date> <reason>` in a wave-or-epic spec's frontmatter, quieting the design wall for that artifact. Recorded, not validated — presence is the whole check, matching the `waiver:` and `rigor-override:` precedent, and the fields are written for the next reader. An agent never writes one. It means *no design governs this artifact*, which is not the same claim as "the design lives elsewhere" — that one is the `design:` pointer, and reaching for the waiver instead throws away the path the approval display exists to show.
@@ -437,7 +439,7 @@ Note the hole: the hook checks only that the token `waiver` is present — not w
 
 **Duplication axis — one implementation site per concept.** The design's ownership table is the anchor: its owner column already says where each concept lives, so the axis is a comparison, not a hunt. A second site computing or deciding the same thing is a FLAG; a concept the table gives two owners is a FAIL; a concept the wave introduced and the table never named is a FLAG against the design, not against the code.
 
-**Agreement tests.** Each shared-truth pair in the ownership table — one concept, more than one rendering surface — names one hermetic test that fails when the surfaces disagree. The standing exemplar is the `SUPPORTED_SDLC_VERSION` pin-sync rows in `tests/scripts.test.sh`: one logical constant, two rendering sites pinned — the two hooks — and a test that goes red the moment either moves alone. It is also the honest limit: the version paragraph in `SKILL.md` and the version renderings in `diagrams/hook-chain.excalidraw` are rendering sites *outside* that tuple, and they drift silently — the prose-drift class this axis exists to catch, in the exemplar named to teach it. A listed pair with no named test is a FLAG, and "the suite covers it" is not a named test.
+**Agreement tests.** Each shared-truth pair in the ownership table — one concept, more than one rendering surface — names one hermetic test that fails when the surfaces disagree. The standing exemplar is the `SUPPORTED_SDLC_VERSION` pin-sync rows in `tests/scripts.test.sh`: one logical constant, two rendering sites pinned — the two hooks — and a test that goes red the moment either moves alone. The same constant's four diagram renderings — three in `diagrams/hook-chain.svg`, one in `diagrams/lifecycle.svg`'s title — are pinned the same way in `tests/diagrams.test.sh`, which reads the value out of the hook rather than restating it; composing those pictures as text is what moved them out of the unpinnable set, and a picture is worth pinning precisely because nobody re-reads it. It is also the honest limit: the version paragraph in `SKILL.md` and the version-history bullet in `operational-rules.md` are rendering sites *outside* both tuples, and they drift silently — the prose-drift class this axis exists to catch, in the exemplar named to teach it. A listed pair with no named test is a FLAG, and "the suite covers it" is not a named test.
 
 Neither of these is a wall. **No hook sees the duplication axis or the agreement-test obligation** — they are carried by the reviewer and critic mandates and enforced by judgment, which is the whole reason the ownership table is authored at Step 2 where a human ratifies it.
 
@@ -457,6 +459,34 @@ This test used to live in the always-loaded global config, which is where a prec
 
 Atomic, one task. Merge the wave into the declared integration branch (local merge; pushing is the user's gate) and remove the worktree. Default is merge — parking requires an explicit `## Wake Note`. Then, when `cleanup_on_finish: true`: skip if frontmatter already has `cleaned:`; wipe `.bionic/tmp/*`; assert zero non-completed tasks; strip stray `continuation-checkpoint.md`/`handoff-*.md`; set `cleaned: <today>`.
 
+### Step 9 — Close-out
+
+**Close-out is an institution, not a courtesy.** Every finding this run's rigor machinery surfaced — walk, matrix discharge, auditor, critic — gets exactly one terminal disposition. "Continuation candidate" is abolished; nothing leaves this step homeless.
+
+<!-- TERMDISP-BEGIN -->
+> Abolish "continuation candidate." Every finding gets exactly one of three terminal
+> dispositions at wave close:
+> 1. **DO-NOW** — folded into the closing wave.
+> 2. **ACCEPT-CLOSED** — ruled won't-fix, recorded beside its reasoning, and never
+>    carried forward again. An accepted residual is knowledge, not work.
+> 3. **PROMOTE** — kept only with one of two homes: **(a) a trigger** — the named
+>    EVENT that reactivates it ("diagnose the flake when it next fires — output now
+>    preserved"), or **(b) a charter** — promotion into a named future effort (an
+>    ideas/ seed or epic charter) by the user's explicit materiality ruling at close.
+>    A charter costs a decision and gives the work its own document that competes
+>    for prioritization openly. What stays forbidden is the homeless deferral: an
+>    item on a wave's continuation list with no decision, no home, no identity —
+>    that is what schedules cleanup waves by momentum. (Amended 2026-08-16 on
+>    Chris's catch: the original trigger-only form had no bin for legitimately
+>    deferred major work — the plugin conversion itself is the proof case.)
+<!-- TERMDISP-END -->
+
+The vehicle is a single-turn close-out report, sent to the user at Step 9 and never re-run as ceremony: plain English, at the altitude of decisions rather than of code, covering ten parts — goal, accomplished, deferred-with-dispositions (each finding's DO-NOW / ACCEPT-CLOSED / PROMOTE named), special attention, material risks, challenges, decisions, success/failure verdict, learnings, next. Authoring detail per part and the anti-ceremony bound live in `operational-rules.md`. Write `continuation.md` (§Handoff above) alongside it — the report is what the user reads; the file is what the next wave opens.
+
+**Where the run ends.** Every close-out records `delivered:` — the terminal state of the work, which is a PR open and ready for a human to review, or commits landed locally and ready to push. That boundary is the default endpoint of the lifecycle: what happens past it is the human's process, and a run that claims it has overstated what it did.
+
+Where — and only where — `deploy_target` names a live surface this run operates, the close-out also carries `deployed:`, `verified:`, and `monitored:`: the release lands, it is verified on the surface, and it is watched for one cycle before the report claims done. `deploy_target` defaults to `n/a` and is never inferred (Step 0), so this trio is strictly opt-in — the ordinary run owes nothing past delivery.
+
 ## Evidence shapes
 
 One evidence artifact per step under `Step N:` in `## SDLC State`. The gate validates the current step only.
@@ -470,7 +500,7 @@ One evidence artifact per step under `Step N:` in `## SDLC State`. The gate vali
 | 6 | pointer to the 6-axis body + critic findings; matrix re-validated here |
 | 7 | `adr:` OR `rca:` OR `n/a:` |
 | 8 | `merge:`, `worktree-removed:`, and (`cleanup:`, `tmp-wiped:`, `tasks-completed:` OR `cleanup: n/a`) |
-| 9 | `deploy:`, `verified-at:`, `monitor:` OR `n/a:` (only when `deploy_target: none`) |
+| 9 | `delivered:` always; plus `deployed:`, `verified:`, `monitored:` exactly when `deploy_target` names a live surface |
 
 **Placeholder ban.** These exact values are rejected anywhere evidence is required: `todo`, `pending`, `in progress`, `inprogress`, `xxx`, `tbd`, `placeholder`.
 
@@ -490,29 +520,56 @@ The orchestrator stays free: it keeps Steps 0–3, slice decomposition, and ever
 
 Roles, by `subagent_type`: `researcher` and `test-runner` for exploration and mechanical work; `implementor` for `standard` slices; `senior-implementor` for `complex` slices and root-cause debugging; `auditor` for Step 5; `critic` for Step 6. Each role file carries its own invariant duties and model default — the dispatch prompt carries the seven things the role file cannot know: current step, the triple, scope constraint, expected artifact, exit condition, an expected duration, and — when that duration is 15 minutes or longer — a progress-artifact path the task appends to as it works (D-6). A phase-gated brief (below) adds the deliverable-phase/bookkeeping split and the gate's position to that list — the role file cannot know where its own gate sits any more than it knows its own deadline.
 
-**The brief declares its deliverable under a canonical label — the wall never guesses one from prose.** `Expected artifact:` (or `Deliverable:`) names the one durable path the dispatch is contracted to produce; the label's span must yield exactly one path — zero refuses naming what to add, more than one refuses naming every candidate rather than picking among them. References and inputs the agent should read go outside that span: their own line, under `Read first:` or `Scope constraint:`, or after a blank line — never folded into the deliverable sentence, which is read as the contract, not as narration. A dispatch with genuinely nothing durable to produce declares `Deliverable-waiver: <reason>` instead; the waiver is recorded on the roster beside the absence it excuses, so read-only dispatches (research, review, audit) that return findings in a message rather than a file still land a clean row. A missing or ambiguous deliverable refuses at dispatch with the fix named — never a warning that lets the launch through anyway.
+**The brief declares its deliverable under a canonical label — the wall never guesses one from prose.** `Expected artifact:` (or `Deliverable:`) names the one durable path the dispatch is contracted to produce; the label's span must yield exactly one path — zero refuses naming what to add, more than one refuses naming every candidate rather than picking among them. References and inputs the agent should read go outside that span: their own line, under `Read first:` or `Scope constraint:`, or after a blank line — never folded into the deliverable sentence, which is read as the contract, not as narration. A dispatch with genuinely nothing durable to produce declares `Deliverable-waiver: <reason>` instead; the waiver is recorded on the roster beside the absence it excuses, so read-only dispatches (research, review, audit) that return findings in a `SendMessage` rather than a file still land a clean row. A missing or ambiguous deliverable refuses at dispatch with the fix named — never a warning that lets the launch through anyway.
 
 **Liveness fields.** The progress-artifact path carries a `cadence` alongside it — how often the task is expected to write there, extending the 15-minute rule by one number: "too quiet" means quieter than the author's own declaration, not a fixed clock. A subprocess claim — a process pattern plus its output file — is conditional-required: declared only when the task backgrounds a long-running command. While the claimed process exists, quiescence is irrelevant; its absence with no deliverable is what the landing verdict reads as a broken contract. No shape label rides beside these fields — shape emerges from which are present: no progress path is short/turns, progress-plus-cadence is long in-agent, adding a subprocess claim is a delegated command.
 
-**The poker duty.** Dispatching a long-shape unit arms a session-scoped self-wake at the interval `bash ~/.claude/hooks/session-poker.sh interval` reports (config knob `poker-interval:` in `.bionic/config.yaml`, default 30m) — never an OS cron, never a resident process; the wake dies with the session, and the roster on disk is the record that survives it. Each wake ticks: `bash ~/.claude/hooks/session-poker.sh tick`. A QUIET or DISARM decision is a no-op; DISARM also ends the self-wake. A NOTIFY decision surfaces the named row through the non-response procedure below — the poker only decides, it never stops or messages on its own.
+**The Patrol.** One clock per run, and only one. **Arm it at engagement** — the Step-0 confirmation of a new run, or the resume ritual of an open one, in every session of that run — as a session-scoped cron job (`CronCreate`) at the interval `bash <plugin-root>/hooks/session-poker.sh interval` reports (config knob `poker-interval:` in `.bionic/config.yaml`, default 30m), and stamp it alive in the same breath with `bash <plugin-root>/hooks/session-poker.sh arm`. Arming is not conditional on having dispatched anything: the Patrol carries the run, not the roster, and a session that waits for a subagent to exist has no pulse for every stretch it works alone. Never an OS cron, never a resident process — the job is session-scoped, dies with the session, and the roster on disk is the record that survives it; its 7-day auto-expiry is the forgotten-disarm backstop, not the disarm. `CronDelete` the job at run close. **Subagents stay timerless:** a dispatched agent arms nothing — it holds its turn and polls its own output, and the one Patrol lives in the session that dispatched it. The manual `/loop` poke ritual is retired with the old poker duty it carried: its work is the patrol prompt's now, and a second timer is a second answer to "what should I be doing right now."
+
+**The arming wall.** `arm` is not bookkeeping. Every Patrol firing stamps a session-keyed file beside the roster before the poker decides anything, and during an active run `dispatch-preflight` REFUSES a dispatch whose stamp is absent (never armed) or older than twice the poker-interval (armed, then silently stopped firing) — a dispatch with no Patrol behind it is an agent nobody is waiting on. The refusal names both halves of the fix. What the stamp attests is that firings are landing; it cannot see the CLI's cron table, so a job deleted moments ago still looks alive for up to one stale window.
+
+**`<plugin-root>` is a placeholder, and it is resolved once — at arming.** Payload paths are written that way throughout this section because these are commands a MODEL types into its own shell, where `${CLAUDE_PLUGIN_ROOT}` is unset: the CLI substitutes that variable inside registered command files and nowhere else. The retired spelling papered over the gap with `${CLAUDE_PLUGIN_ROOT:-$HOME/.claude}`, which always resolved and could resolve to an older build than the plugin the CLI actually loads. So resolve the root ONCE per session, at Patrol arming, out of the CLI's own registry, and bake the resulting ABSOLUTE path into everything the session writes afterwards — the patrol prompt first, because a cron job carrying a placeholder fires into a `command not found` every 30 minutes and reports nothing:
+
+```
+jq -r '.plugins // {} | to_entries[] | select(.key | split("@")[0] == "bionic") | .value[0].installPath // empty' \
+  "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json"
+```
+
+That expression is `detect_plugin_root`'s own, held byte-identical to the copy in `<plugin-root>/scripts/lib/detect.sh` by the span suite. That function is bionic's specialization of the single registry parse the payload has — `/bionic:doctor` resolves every dependency's install path through the same reading — and where the shared parse is quiet, this one refuses loudly: *plugin not installed — run `claude plugin install bionic@bionic`*, rather than falling back to anything. Empty output above means exactly that, and no other root is substituted for it. **Why the registry can be trusted differs by how bionic was installed,** and that is what a root which looks stale turns on: on a git-source (public) feed the cache directory the registry names is what the CLI loads, so the registry is right by construction; on a directory-source marketplace — a local checkout registered as a feed, which is what a dogfood install is — the CLI reads the marketplace SOURCE tree and never opens that cache, so the two are the same build only as of the last (re)install, and on a git-source feed `claude plugin update bionic@bionic` is what re-converges them; on a directory-source marketplace there is nothing to re-converge with that command — it reports "already at the latest version" at an unchanged plugin.json version and leaves the untouched cache exactly where it was, since the CLI never reads it — so the tree and the cache catch up only at the next version bump or reinstall (an already-installed plugin reports "already installed" on `install`).
+
+**Wakeups are recurring, never date-pinned.** A one-shot `CronCreate` pinned to a wall-clock minute is banned: a busy minute DROPS the tick rather than queuing it, so a one-shot whose single match minute finds the session working dies silently and never fires again (re-measured epic-17 W4 S6, alongside the 1m floor and the 7-day expiry). When a run needs a wake, create a SHORT RECURRING job and `CronDelete` it on its first fire — a recurring job that loses a busy tick simply fires on the next one, which is the whole difference between a wake that survives contention and one that does not.
+
+**The patrol prompt.** The armed job carries ONE prompt, idempotent by construction so that firing at an awkward moment costs a no-op rather than a duplicate action, and it ends by continuing the run rather than by reporting on it. Four reads, then the work:
+
+- **Tick the poker.** `bash <plugin-root>/hooks/session-poker.sh tick` is the decision brain — the prompt gathers, the poker decides, per row. The tick stamps the Patrol alive before it decides, so a tick that finds nothing to say has still done that job. A QUIET or DISARM decision is a no-op; DISARM also ends the Patrol. A NOTIFY decision surfaces the named row through the non-response procedure below — the poker only decides, it never stops or messages on its own.
+- **Read liveness against the contracted cadence,** never against the tick interval: a row is quiet when it is quieter than the `cadence` its own brief declared (Liveness fields, above), so a tick that finds every progress file inside its declared cadence has found nothing and says nothing.
+- **Keep the panel and the task list honest.** Both duties are TOOL-GROUNDED, never judgment-worded:
+  - *Panel refresh* = ListAgents, then TaskStop on each listed lineage whose ledger row is fact-discharged (CLOSED / MET / acked). A listed agent with NO ledger row is surfaced as a duplicate-session tell, never silently stopped.
+  - *Task-list refresh* = TaskList, then chronological display order (current-step slice entries first, dependency order, later-step entries after) restored mechanically — TaskCreate fresh copies of every entry that must sort later, TaskUpdate status=deleted on the stale originals, no-op when ascending-ID order already matches — then statuses reconciled with verified reality.
+  - *Fallback:* where the task tools are absent (version-gated), the plan ledger stands in as the task list.
+- **Then continue toward the goal until a wall.** The tick is not a status report. After the reads, resume the run's actual work and keep going until something genuinely blocks — a decision only the user can take, a gate whose evidence is not yet earned, a dependency not yet merged. An interactive stretch is already standing at the blocked-on-user wall, so the tick no-ops quietly there rather than manufacturing activity.
 
 **Phase-gated dispatch.** A brief for slice work splits into a deliverable phase and bookkeeping, with a hard report gate between them: the writer stops at the gate and sends the completion message before touching bookkeeping. A redirect sent mid-phase is read at the gate — not before, and not after the whole task — bounding the steering race instead of pretending mail delivery is instant. Expected-duration estimates quote the deliverable phase only; bookkeeping is not the writer's clock to keep.
 
-**Completion-by-artifact.** A writer's final act is a message naming the artifact path(s) it produced. Idle is never a completion signal — a quiet agent might be thinking, might be dead, might be between phases; only the message closes the phase. Done is established by the artifact existing on disk, which the landing verdict already checks — no new machinery re-derives it.
+**Completion-by-artifact.** A writer's final act is a `SendMessage` naming the artifact path(s) it produced — the report is DELIVERED by that tool, and plain final text is discarded: a subagent's closing prose is written into its own transcript and routed to no one, so a brief that contracts for the report as a final message is contracting for a report that never arrives. Idle is no more a completion signal than that — a quiet agent might be thinking, might be dead, might be between phases; only the sent message closes the phase. Done is established by the artifact existing on disk, which the landing verdict already checks — no new machinery re-derives it.
+
+**When a report is lost anyway.** The artifacts, the ledger row, and the contracted progress file are the safety net and remain the primary proof — the message is the latency channel, not the evidence, so losing it delays a run rather than voiding it. Recovery is mechanical: a dispatched agent's turns are on disk at `~/.claude/projects/<slugged-cwd>/<session-id>/subagents/agent-*.jsonl`, one JSON object per line, and the report is the last long `assistant` text block in that agent's file. Extract it and persist it under `<docs-root>/record/` before acting on it — a transcript is not an artifact, and a read-only dispatch whose findings live only in a transcript is one cleanup away from having produced nothing.
 
 **Fresh by default; fork only** when hand-feeding context would cost more than the fork's inheritance — a fork re-pays the whole main-thread context AND the orchestrator's effort, and ignores `model`. Never fork a mechanical task, and never fork to reach a cheaper model. **Dispatch is always background when `multi_agent: true`** — attended or not. A synchronous dispatch freezes the session, and a user who cannot type cannot steer. Serialize dependent units by dispatching the next one on the previous one's completion notification, never by blocking. Synchronous main-thread execution exists only under `multi_agent: false`, where there are no subagents at all.
 
 **Parallel by default, justify sequential** — but dispatch serially when units share state (one local DB, a shared reset, count-based assertions).
 
+**Parallel writers work in spawned worktrees.** Whoever dispatches a parallel writer creates that writer's tree first: creation authority follows dispatch authority at every level, orchestrator included — during a parallel-writer phase an orchestrator that writes tracked files takes a tree of its own, and `.bionic` plan and ledger writes remain a file-ownership question rather than an exemption from this one. The tree comes from `${CLAUDE_PLUGIN_ROOT}/scripts/spawn-worktree.sh`, which verifies what it built and attests it in a single line; that path is written the way the CLI substitutes it inside a registered command file, so a model running the script from its own shell — where `${CLAUDE_PLUGIN_ROOT}` is unset — uses the root already resolved at Patrol arming (above); the dispatcher quotes that line into the unit's ledger row, so what the row claims about a base commit is something the machine measured rather than something the brief asked for. Teardown is never automatic — the merge decision is the dispatcher's, taken later. The harness `isolation: worktree` param is retired from bionic briefs at every level: it creates trees no ledger row can account for.
+
 **The starting standard.** A subagent may be dispatched only when: the environment attestation from this session is present; a work contract exists at launch, naming the task and a durable deliverable path; and the launch is ledgered the moment it happens.
 
 **Ledger the dispatch, not the return.** Write the unit's row the moment you dispatch it, status `active`. An outstanding agent has to exist as a row you can be blocked on, not as something you intend to remember — a dispatch held only in working memory is lost the moment the conversation turns, which is the normal case, not the exception. The row is also what lets you answer "what's still running" without guessing. On the completion notification, verify that the named artifact exists before believing the report, then update the row. The roster the dispatch hook writes at launch and completes at execution-confirmation is the authoritative launch record; the plan's dispatch ledger renders it, not the reverse.
 
-**The reporting contract.** Every factual claim in a subagent's report — a test result, a file's existence, a command's outcome — carries the command that proves it and that command's output, or the explicit label `unverified`. An `unverified` claim obligates the orchestrator to re-check before acting; a claim with neither proof nor label is a contract violation.
+**The reporting contract.** Every factual claim in a subagent's report — a test result, a file's existence, a command's outcome — carries the command that proves it and that command's output, or the explicit label `unverified`. An `unverified` claim obligates the orchestrator to re-check before acting; a claim with neither proof nor label is a contract violation. The contract governs what a report says; Completion-by-artifact, below, governs how it arrives.
 
 **Facts discharge stops.** A row whose verdict reads MET, WAIVED, or acked is stopped by a single TaskStop with no observation call first. A user-ordered stop executes at once regardless of verdict; an unmet contract yields one informational line naming what was missing, never a refusal. The ceremony below survives only for a live agent with an unmet contract.
 
-Two operator commands carry the fact-discharged paths: `bash ~/.claude/hooks/stop-orders.sh standdown` computes the batch of landed/acked rows with stoppable addresses (and names what it will not touch) before closing a batch or wave; `bash ~/.claude/hooks/stop-orders.sh order <target>` records a human stop order the gate honors immediately (30-minute validity; expiry fails closed). Addressing rule: **observe by the long transcript id, stop by `name@session-xxxxxxxx`** — different namespaces, and the machinery prints both.
+Two operator commands carry the fact-discharged paths: `bash <plugin-root>/hooks/stop-orders.sh standdown` computes the batch of landed/acked rows with stoppable addresses (and names what it will not touch) before closing a batch or wave; `bash <plugin-root>/hooks/stop-orders.sh order <target>` records a human stop order the gate honors immediately (30-minute validity; expiry fails closed). Addressing rule: **observe by the long transcript id, stop by `name@session-xxxxxxxx`** — different namespaces, and the machinery prints both.
 
 **The stopping standard.** For a live agent with an unmet contract, a subagent may be stopped only when a fresh observation of that target has been recorded first. Freshness is the activity boundary, not a clock (D-1): a stop is permitted only if the target's last working-log activity is no later than what the observation recorded — anything written since is stale by definition, dormancy since the observation is valid however old. One observation discharges exactly one stop (D-2); a second stop needs a fresh observation. Where the brief contracted a progress artifact, the observation of that target names that path — the D-6 channel is evidence the contract already promised, and an observation that omits it is the agent-level look that was insufficient before. The observation that discharges a stop is the stopper's own — a look recorded by a different actor does not close it. What this session did not launch, it does not stop by name; the full agent id is the deliberate path past that refusal. Never on an idle notification, never on elapsed silence alone.
 
@@ -534,4 +591,6 @@ Before ending a turn, reconcile: every `active` row either has a verified result
 
 ## Diagrams
 
-`diagrams/lifecycle.png` — the 10 steps, the two gates, and the commit rhythm. `diagrams/hook-chain.png` — which hook fires on which tool event, and which arms block versus log. Sources are the paired `.excalidraw` files.
+`diagrams/lifecycle.svg` — the 10 steps, the two gates, and the commit rhythm. `diagrams/hook-chain.svg` — which hook fires on which tool event, and which arms block versus log. Each file is its own sole source: hand-composed text, no paired drawing file, no export step, and so nothing that can be stale relative to it. Because the text is greppable, `tests/diagrams.test.sh` pins what the pictures claim — the four version renderings against the hooks' `SUPPORTED_SDLC_VERSION`, the six always-on entries against `hooks/hooks.json`, the ten steps and the armed hook set against this file — and every pin re-proves itself against a doctored copy on each run.
+
+**Format policy.** Composed SVG is the default for a diagram here, because it is the only format that is simultaneously the editable source, the shipped artifact, and a test surface. Excalidraw (`bionic:excalidraw-diagram`) is the backup, for a drawing whose layout is genuinely hand-arranged rather than composed; it ships an export beside its source and re-accepts the is-that-current relationship, so reach for it when the picture is worth that cost. Any other format is a judgment call, argued at the time against one question: what will pin this picture to the truth after its author has moved on.

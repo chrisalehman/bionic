@@ -28,11 +28,18 @@
 #
 # This is a PRODUCER, not a hook — it lives in hooks/ for test-harness pairing
 # only. Producers may think and take seconds; gates may only read (§3.2).
-# [WALL: hooks/stop-check.test.sh]
+# [WALL: tests/stop-check.test.sh]
 #
-# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
+# Registered on no channel — invoked on demand from the mounted plugin payload.
 
 set -uo pipefail
+
+# THIS SCRIPT'S OWN PATH, so the usage it prints names the copy the operator actually
+# invoked — identical in a repo checkout, in a bootstrap-installed ~/.claude/hooks/, and in
+# an installed plugin payload. Deliberately NOT ${CLAUDE_PLUGIN_ROOT}: this script is run by
+# hand and by the harness outside any plugin context, where that variable does not exist.
+HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+[ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
 
 MAX_MESSAGE_CHARS=600
 
@@ -43,7 +50,7 @@ MACHINE_SCHEMA="stop-check-observation/v1"
 
 usage() {  # [reason]
   [ -n "${1:-}" ] && echo "$1" >&2
-  echo "Usage: bash ~/.claude/hooks/stop-check.sh <agent-name-or-id> [deliverable-path ...] [--progress <path>]" >&2
+  echo "Usage: bash ${HOOK_DIR}/stop-check.sh <agent-name-or-id> [deliverable-path ...] [--progress <path>]" >&2
   echo "" >&2
   echo "Prints one subagent's evidence tier. Decides nothing." >&2
   exit 1
@@ -172,7 +179,7 @@ fmt_age() {  # <seconds> -> "3m 12s"
 # A typed reference is a NAME, an agent id, or `name@team` — all three are legal
 # TaskStop inputs, and none of them is resolved for us. Comparison is LITERAL:
 # a target string is never treated as a pattern.
-# [WALL: hooks/stop-check.test.sh]
+# [WALL: tests/stop-check.test.sh]
 
 slugify() { printf '%s' "$1" | sed 's/[^a-zA-Z0-9]/-/g'; }
 
@@ -217,6 +224,59 @@ if [ -n "$REPO_ROOT" ] && [ "$REPO_ROOT" != "$CWD" ]; then
   SLUGS="${SLUGS}
 $(slugify "$REPO_ROOT")"
 fi
+
+# ---------- resolving a contracted path (epic-17 W6 S15, A-6.6 (c)) ----------
+#
+# WHAT WAS WRONG. The paths this command stats — the deliverables, and the `--progress`
+# artifact — arrive as brief prose, and the spelling every slice brief in this epic uses is
+# `record/epic-NN-wM/x.md`, because that is the form the Step-5 contract and
+# `canonical-sdlc-evidence-gate.sh` publish for an artifact under the docs root. This
+# command resolved nothing at all: a relative path was stat'd against whatever directory
+# the observer happened to be standing in, so a present progress file read `absent` and a
+# landed deliverable read `ABSENT` — an observation that decides nothing, deciding wrongly.
+#
+# THE RULE IS THE EVIDENCE GATE'S, and so is the body of both functions below: they are
+# `resolve_docs_root()` and `resolve_walk_path()` copied whole, held to one text by
+# tests/cross-gate-agreement.test.sh. `PROJECT_DIR` and `DOCS_ROOT` carry the gate's names
+# for the same reason. The VALUE of PROJECT_DIR is this command's own — the repo it was run
+# from, falling back to the cwd when that is not a repository, which is the root every
+# other path in this file is already read against.
+#
+# WHAT IS STILL NOT JUDGED. Resolution is not a verdict. A path that climbs out with `..`
+# resolves and is reported like any other: §4's rule is that this command decides nothing,
+# and refusing a contract here would be deciding. The landing gate is where a deliverable
+# is judged, and hooks/session-sweeper.sh refuses `..` there.
+resolve_docs_root() {
+  local proj="$1"
+  local config="$proj/.bionic/config.yaml"
+  if [ -f "$config" ]; then
+    local override
+    override=$(grep -E '^[[:space:]]*docs-root[[:space:]]*:' "$config" 2>/dev/null \
+      | head -1 \
+      | sed -E 's/^[[:space:]]*docs-root[[:space:]]*:[[:space:]]*//' \
+      | sed -E "s/^['\"]//;s/['\"]\$//" \
+      | sed -E 's/[[:space:]]+$//')
+    if [ -n "$override" ]; then
+      case "$override" in
+        /*) echo "$override" ;;
+        *)  echo "$proj/$override" ;;
+      esac
+      return
+    fi
+  fi
+  echo "$proj/.bionic/docs"
+}
+
+PROJECT_DIR="${REPO_ROOT:-$CWD}"
+DOCS_ROOT="$(resolve_docs_root "$PROJECT_DIR")"
+
+abs_path() {  # <path, as the roster spells it> -> absolute
+  case "$1" in
+    /*)       printf '%s\n' "$1" ;;
+    record/*) printf '%s/%s\n' "$DOCS_ROOT" "$1" ;;
+    *)        printf '%s/%s\n' "$PROJECT_DIR" "$1" ;;
+  esac
+}
 
 IN_PROJECT_DIRS=""
 while IFS= read -r slug; do
@@ -567,9 +627,14 @@ if [ "$#" -eq 0 ]; then
   echo "  (none named on the command line — pass each contracted path as an argument)"
 else
   NOW=$(date -u +%s)
+  # STAT THE RESOLVED PATH, REPORT THE CONTRACTED ONE. `$dp` is where this command looked;
+  # `$d` is what the contract spelled, and it is what the readback and the machine line
+  # carry — so the roster, the brief and this output all name the artifact the same way,
+  # which is the property the mismatch note above depends on.
   for d in "$@"; do
-    if [ -f "$d" ]; then
-      DSIZE=$(file_size "$d"); DMTIME=$(file_mtime "$d")
+    dp="$(abs_path "$d")"
+    if [ -f "$dp" ]; then
+      DSIZE=$(file_size "$dp"); DMTIME=$(file_mtime "$dp")
       if [ "$DSIZE" -eq 0 ]; then
         echo "  ${d} — PRESENT but EMPTY, 0 bytes"
         add_deliv empty "$d"
@@ -577,8 +642,8 @@ else
         echo "  ${d} — PRESENT, ${DSIZE} bytes, last write $(fmt_epoch "$DMTIME") (age $(fmt_age $((NOW - DMTIME))))"
         add_deliv present "$d"
       fi
-    elif [ -d "$d" ]; then
-      echo "  ${d} — PRESENT as a directory, $(find "$d" -type f 2>/dev/null | grep -c .) file(s)"
+    elif [ -d "$dp" ]; then
+      echo "  ${d} — PRESENT as a directory, $(find "$dp" -type f 2>/dev/null | grep -c .) file(s)"
       add_deliv dir "$d"
     else
       echo "  ${d} — ABSENT"
@@ -607,9 +672,11 @@ if [ "$PROGRESS_NAMED" -eq 1 ]; then
   if [ -n "$PROGRESS_MISMATCH" ]; then
     echo "  (note: the roster recorded a different progress path: ${PROGRESS_MISMATCH} — not judged)"
   fi
-  if [ -e "$PROGRESS_PATH" ]; then
-    PMTIME=$(file_mtime "$PROGRESS_PATH")
-    PSIZE=$(file_size "$PROGRESS_PATH")
+  # Same rule as the deliverables above: stat the resolved path, print the contracted one.
+  PROGRESS_ABS="$(abs_path "$PROGRESS_PATH")"
+  if [ -e "$PROGRESS_ABS" ]; then
+    PMTIME=$(file_mtime "$PROGRESS_ABS")
+    PSIZE=$(file_size "$PROGRESS_ABS")
     NOW=$(date -u +%s)
     echo "progress: ${PROGRESS_PATH}  last-write $(fmt_epoch "$PMTIME") ($(fmt_age $((NOW - PMTIME))) ago)  size ${PSIZE}B"
     PROGRESS_STATE="present"; PROGRESS_MTIME="$PMTIME"
