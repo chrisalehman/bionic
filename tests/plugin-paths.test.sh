@@ -155,10 +155,20 @@ echo "=== B — the payload: no installed-path literal on any executable or norm
 # header — `# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/` — that was TRUE
 # while the bootstrap was the live install mechanism, so rewriting it then would have
 # replaced a true statement with a false one. W5 (4/6) deleted the installer and the Step-6
-# review (RV-1) swept all 13 copies onto the real channel; B3 below now pins that they stay
-# swept. The exemption itself survives on its own terms: what may not live on ANY line,
-# comment or not, is a literal on a line that RUNS or that the machinery PRINTS as a command
-# to run — and B1 is still the arm that decides that.
+# review (RV-1) swept all 13 copies onto the real channel. The exemption itself survives on
+# its own terms: what may not live on ANY line, comment or not, is a literal on a line that
+# RUNS or that the machinery PRINTS as a command to run — and B1 is still the arm that
+# decides that.
+#
+# RETIRED epic-18 T14 (2026-08-22): B3 and B4. B3 pinned the absence of the swept
+# `# Installed globally by claude-bootstrap.sh to` header sentence and the presence of a
+# `# Registered <channel>` header line on every hook; B4 derived each hook's true channel
+# from hooks.json and SKILL.md's frontmatter and compared it to that header line, with a
+# planted-false-claim mutation proof behind it. Both had a COMMENT's wording as their
+# subject — nothing reads those headers, so their only consequence is what a human sees —
+# and they are retired under the ratified doctrine that output-text pins are bad tests.
+# What each hook is actually registered as remains asserted where it binds: hooks.json and
+# the SKILL.md frontmatter themselves, in section A above and tests/diagrams.test.sh §C/§E.
 
 check_script_at() {  # <absolute-path> <label>
   local file="$1" rel="$2" hits
@@ -249,131 +259,6 @@ else
   no "payload prose carries no installed-path literal at all"
   printf '%s' "$PROSE_HITS"
 fi
-
-# ---- B3: the swept install-channel header never comes back ----
-#
-# RV-1 (Step-6 review, W5). Thirteen hook files carried `# Installed globally by
-# claude-bootstrap.sh to ~/.claude/hooks/`. The B1 comment exemption above is what let the
-# line survive W1-W4 correctly — it was TRUE then — and it is also what would let it survive
-# now that 4/6 deleted the installer and made it FALSE. A comment exemption cannot tell a
-# true comment from a stale one, so the staleness needs its own arm.
-#
-# ABSENCE of the dead literal, over the same payload set B1 and B2 derive, plus tests/.
-# Deliberate historical notes are allowed to NAME the installer — several suites do, and
-# must, to explain what they retired — so the pin is the full header sentence, which is a
-# claim about the live mechanism and nothing else.
-SWEPT_HEADER='Installed globally by claude-bootstrap.sh to'
-SWEPT_HITS=$(printf '%s\n' "$PAYLOAD_TEXT" | while IFS= read -r f; do
-  [ -n "$f" ] || continue
-  $G -nF -- "$SWEPT_HEADER" "$f" 2>/dev/null | sed "s|^|${f#${REPO}/}:|" || true
-done)
-if [ -z "$SWEPT_HITS" ]; then
-  ok "no payload file claims the deleted installer as its install channel"
-else
-  no "no payload file claims the deleted installer as its install channel"
-  printf '%s\n' "$SWEPT_HITS" | sed 's/^/       /'
-fi
-
-# And the POSITIVE form, because an absence alone passes if the header is simply deleted:
-# every registered hook has to SAY which channel registers it. The set is globbed, not
-# enumerated — same argument as B1's.
-MISSING_CHANNEL=""
-for _h in "${BIONIC_HOOKS_DIR}"/*.sh; do
-  [ -f "$_h" ] || continue
-  $G -qE '^# Registered (always-on in hooks/hooks\.json|in skills/canonical-sdlc/SKILL\.md|on both channels|on no channel)' "$_h" \
-    || MISSING_CHANNEL="${MISSING_CHANNEL}${_h##*/} "
-done
-if [ -z "$MISSING_CHANNEL" ]; then
-  ok "every hooks/*.sh names its registration channel in its header"
-else
-  no "every hooks/*.sh names its registration channel in its header (missing: ${MISSING_CHANNEL})"
-fi
-
-# ---- B4: the header channel line is DERIVED and compared, not merely present ----
-#
-# CRITIC C-3 (W5). B3's positive form asks whether each hook SAYS which channel registers
-# it. It never asks whether the answer is true — a `grep -q` over the whole file against a
-# four-way alternation is satisfied by any of the four, on any line, including a false one.
-# The critic proved it: a planted false channel claim on a copy of execution-recorder.sh
-# left the suite 71/0 green, and agent-context-guard.sh had in fact been naming a RETIRED
-# registrar since the plugin cutover with nothing to catch it.
-#
-# So this arm DERIVES the truth from the two registries themselves and compares:
-#
-#   hooks/hooks.json                        -> every hooks/<name>.sh a command string names
-#   skills/canonical-sdlc/SKILL.md frontmatter -> the same, over its `command:` lines
-#
-# A hook in both sets is dual-channel, in one is single, in neither is on-demand. Note that
-# hooks.json's entries are counted through agent-context-guard.sh: the guard and the wall it
-# execs are both named on that command line and both ARE registered there, the wall behind
-# the guard. That is what "on both channels" means on the three files that carry it.
-#
-# EVERY `# Registered ` line in the file must agree, not just the first. agent-context-guard
-# carried two — a true one and a stale one — and a first-match test would have read whichever
-# came first and called it settled.
-derived_channel_mismatches() {  # <hooks-dir> <skill-md> -> one line per mismatch
-  local hooks_dir="$1" skill_md="$2" json="$1/hooks.json"
-  local h name json_set skill_set want line bad
-
-  json_set=" $($G -oE 'hooks/[a-z0-9-]+\.sh' "$json" 2>/dev/null | sort -u | tr '\n' ' ')"
-  skill_set=" $(awk 'NR>1 && /^---[[:space:]]*$/ {exit} {print}' "$skill_md" \
-                 | $G -oE 'hooks/[a-z0-9-]+\.sh' | sort -u | tr '\n' ' ')"
-
-  for h in "$hooks_dir"/*.sh; do
-    [ -f "$h" ] || continue
-    name="hooks/${h##*/}"
-    case "$json_set" in
-      *" $name "*)
-        case "$skill_set" in
-          *" $name "*) want='^# Registered on both channels' ;;
-          *)           want='^# Registered always-on in hooks/hooks\.json' ;;
-        esac ;;
-      *)
-        case "$skill_set" in
-          *" $name "*) want='^# Registered in skills/canonical-sdlc/SKILL\.md' ;;
-          *)           want='^# Registered on no channel' ;;
-        esac ;;
-    esac
-    bad=""
-    while IFS= read -r line; do
-      [ -n "$line" ] || continue
-      printf '%s\n' "$line" | $G -qE "$want" || bad="$line"
-    done <<< "$($G -E '^# Registered ' "$h" || true)"
-    if [ -z "$($G -E '^# Registered ' "$h" || true)" ]; then
-      bad="(no '# Registered' line at all)"
-    fi
-    [ -n "$bad" ] && printf '%s: derived %s, header says: %s\n' "${h##*/}" "$want" "$bad"
-  done
-}
-
-CHANNEL_MISMATCHES=$(derived_channel_mismatches "$BIONIC_HOOKS_DIR" "${REPO}/skills/canonical-sdlc/SKILL.md")
-if [ -z "$CHANNEL_MISMATCHES" ]; then
-  ok "every hooks/*.sh header channel line matches the channel the registries actually give it"
-else
-  no "every hooks/*.sh header channel line matches the channel the registries actually give it"
-  printf '%s\n' "$CHANNEL_MISMATCHES" | sed 's/^/       /'
-fi
-
-# THE MUTATION PROOF, because an agreement test that agrees with everything is what B3 was.
-# Plant the critic's exact false claim — execution-recorder.sh is SKILL-only, relabelled as
-# always-on in hooks.json — on a throwaway copy of the tree, and the arm above has to fire.
-B4_TREE=$(mktemp -d "${TMPDIR:-/tmp}/b4-channel-mutation.XXXXXX")
-cp "$BIONIC_HOOKS_DIR"/*.sh "$BIONIC_HOOKS_DIR"/hooks.json "$B4_TREE"/ 2>/dev/null
-sed -i.bak 's|^# Registered in skills/canonical-sdlc/SKILL\.md frontmatter.*|# Registered always-on in hooks/hooks.json; runs from the mounted plugin payload.|' \
-  "$B4_TREE/execution-recorder.sh"
-rm -f "$B4_TREE"/*.bak
-if $G -qE '^# Registered always-on in hooks/hooks\.json' "$B4_TREE/execution-recorder.sh"; then
-  ok "  B4 meta: the planted false channel claim landed on the throwaway copy"
-else
-  no "  B4 meta: the planted false claim did NOT land — the arm below proves nothing"
-fi
-B4_MUTATED=$(derived_channel_mismatches "$B4_TREE" "${REPO}/skills/canonical-sdlc/SKILL.md")
-if printf '%s' "$B4_MUTATED" | $G -q 'execution-recorder.sh'; then
-  ok "  B4 meta: the derived comparison FIRES on the planted false claim (B3 stayed green on it)"
-else
-  no "  B4 meta: the derived comparison did not fire on the planted false claim — it is as blind as B3"
-fi
-rm -rf "$B4_TREE"
 
 # ---- and the positive form: each command constant resolves from "$0" ----
 #

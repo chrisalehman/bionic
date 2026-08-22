@@ -13,10 +13,6 @@
 # (`payload missing its session key`) adjacent so that start=open and stop=closed
 # are one artefact.
 #
-# It is also a doc/behaviour pin: the design's own table text is asserted
-# verbatim, so a direction cannot be quietly reversed in the document and left
-# green here, nor changed here while the document still promises the old one.
-#
 # HERMETIC: throwaway git repos under a mktemp'd sandbox, redirected HOME.
 #
 # Usage: bash tests/fail-direction-table.test.sh
@@ -26,7 +22,6 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 
-REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 # Overridable so the table can be driven against a MUTATED COPY without the
 # shipped file ever being modified — §9's mutation-and-restore proof, repeatable
 # by hand: W1R_PARTY_SG=/tmp/mutant.sh bash tests/fail-direction-table.test.sh
@@ -36,7 +31,6 @@ STOP_GATE="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop-guard.sh}"
 OBSERVER="$BIONIC_HOOKS_DIR/stop-check.sh"
 RECORDER="${W1R_PARTY_ER:-$BIONIC_HOOKS_DIR/execution-recorder.sh}"
 PROBE="${W1R_PARTY_PROBE:-$BIONIC_HOOKS_DIR/preflight-probe.sh}"
-DESIGN="$REPO_ROOT/design/orchestrator-subagent-coordination.md"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/w1r-faildir.XXXXXX")" && pwd -P)"
 BG_PIDS=""
@@ -79,7 +73,6 @@ PASS=0; FAIL=0; TOTAL=0
 ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
 no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
 expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
 
 SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
@@ -510,24 +503,6 @@ else
   no "the directions differ" "both gates answered $S_START"
 fi
 expect_eq "the open side stays silent about it" "" "$S_START_ERR"
-expect_contains "the closed side names the missing key" "session key" "$S_STOP_ERR"
-
-# The cost asymmetry §7 derives the whole table from, asserted where a reader
-# meets it: the stop refusal must always name the way forward.
-drive stop:no-observation
-# Since epic-17 W1 S3 both gates resolve the script they name beside themselves from "$0"
-# rather than spelling an installed-path literal — still absolute, so §7's requirement that
-# a refusal name a way forward runnable from any cwd is unchanged, and it survives a plugin
-# payload where ~/.claude/hooks/ holds nothing.
-expect_contains "every stop refusal names the observation command" \
-  "$BIONIC_HOOKS_DIR/stop-check.sh" "$DRV_ERR"
-# R5: start:unattested no longer refuses (it auto-probes and passes silently-with-
-# announce, per the table above) — start:probe-refuses is now the row that carries
-# a genuine start-gate refusal, so it is what exercises this "every refusal names
-# the fix" claim.
-drive start:probe-refuses
-expect_contains "every start refusal names the environment check" \
-  "$BIONIC_HOOKS_DIR/preflight-probe.sh" "$DRV_ERR"
 
 # ============================================================
 echo ""
@@ -552,7 +527,6 @@ PRIOR_SUM=$(shasum "$PRIOR_B")
 OUT=$( cd "$P_REPO" && env -u CLAUDE_CODE_SESSION_ID ANTHROPIC_API_KEY=x \
        HOME="$HOME" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" bash "$PROBE" 2>&1 ); ST=$?
 expect_eq "environment check with no session key REFUSES (exit 3)" "3" "$ST"
-expect_contains "…and says so" "REFUSED" "$OUT"
 expect_eq "…and leaves existing state byte-identical" "$PRIOR_SUM" "$(shasum "$PRIOR_B")"
 
 # Row 5 — a blocking probe fails: NO ATTESTATION, and the prior one is deleted.
@@ -565,23 +539,6 @@ OUT=$( cd "$P_REPO" && env -u ANTHROPIC_API_KEY CLAUDE_CODE_SESSION_ID="$SID_A" 
        PATH="$SANDBOX/stub:$PATH" bash "$PROBE" 2>&1 ); ST=$?
 expect_eq "environment check with a failing blocking probe exits 1" "1" "$ST"
 expect_eq "…and no attestation is on disk" "no" "$([ -e "$PRIOR_A" ] && echo yes || echo no)"
-expect_contains "…and the prior attestation was deleted, loudly" "deleted" "$OUT"
-
-# ============================================================
-echo ""
-echo "=== doc/behaviour pin: §7's own table text ==="
-# ============================================================
-#
-# Pinning the normative CELLS, not the section name: a direction reversed in the
-# document must break this suite (checklist A12 / the pins-guard-spans rule).
-
-pin() { expect_contains "design §7 still says: $1" "$1" "$(cat "$DESIGN")"; }
-pin '| Start gate — any ambiguity, anywhere | OPEN, silent |'
-pin '| Stop gate — before the active-wave verdict | OPEN, silent |'
-pin '| Stop gate — after the verdict | CLOSED, loud |'
-pin '| Environment check — no session key | REFUSE |'
-pin '| Environment check — blocking probe fails | NO ATTESTATION + delete prior |'
-pin '| Payload missing its session key | start: open / stop: closed |'
 
 echo ""
 echo "──────────────────────────────────────────────"
