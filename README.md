@@ -56,12 +56,12 @@ available. Nothing else about your session changes until you ask for it.
 
 `/bionic:help` prints what bionic is and the command roster. `/bionic:doctor` inspects this
 machine and reports plugin integrity, which dependencies are present at which versions,
-duplicate installs, your shell environment, the permission profile, and what degrades if
+duplicate installs, your shell environment, and what degrades if
 something is missing. It changes nothing, and its closing summary is a menu rather than a
 to-do list.
 
 The plugin install stands alone. `/bionic:setup` adds what it cannot: the tools bionic's
-workflows shell out to, one shell export, and a permission profile. Setup is idempotent, so
+workflows shell out to, one shell export, and your default permission mode. Setup is idempotent, so
 re-running it after six months is the normal way to catch up.
 
 ## The skills
@@ -218,11 +218,11 @@ declines everything.
 - Optional extras, each with a line of what it is and a default of no: a status line, a
   NotebookLM client, the Context7 documentation server, and the Pencil CLI.
 - Your shell environment, which is one export written inside a marked block.
-- A permission profile, applied only if you say yes. It pre-approves bionic's own scripts and
-  hooks by absolute path, the three `claude plugin` commands scoped to bionic itself, and one
-  MCP server it offers: no wildcards, no whole-tool grants, nothing that skips a permission
-  check. It sits between two marker lines in your settings and nothing outside them is read
-  or changed. Setup then offers to set Claude Code's default permission mode to auto.
+- Claude Code's default permission mode, offered as auto only if you say yes. Bionic does not
+  exempt itself from whatever you choose: the mode you set governs bionic's own scripts and
+  hooks exactly as it governs everything else. (Earlier versions applied a managed allow-list
+  that pre-approved them. That is gone; if this machine still carries the block, setup and
+  remove each offer once to take it back out.)
 
 Tools that only some work needs — the Playwright CLI and a headless Chromium, the Chrome
 DevTools server, the design skill, an animation package — are never asked about here. Each is

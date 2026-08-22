@@ -21,7 +21,7 @@
 # refuses to run at all without the libraries beside it. remove.sh does have
 # one: its standalone door (design D5a) must work on a machine where this file
 # is already gone, so remove.sh keeps an inline copy and the two programs are
-# pinned against each other the way the profile strip's two copies are.
+# pinned against each other.
 #
 # THE REWRITE'S SHAPE, and why it is not simply `del`. The filter reaches INSIDE
 # each matcher group rather than dropping the group: a group can hold a bionic
@@ -120,9 +120,9 @@ BIONIC_LEGACY_HOOK_STRIP_JQ='
 # the rename publishes an already-correct inode. Repairing the mode afterwards —
 # the obvious spelling — leaves the tmp holding the tokens at 0644 under a
 # predictable name, and makes the widening PERMANENT if the process dies in the
-# window between the two. Do not move either below the rename. profile.sh's
-# `_profile_write` carries the same ordering, and tests/remove.test.sh pins the
-# shape across all three writers.
+# window between the two. Do not move either below the rename. remove.sh's
+# `_rm_write` carries the same ordering, and tests/remove.test.sh pins the
+# shape across both writers.
 #
 # THE STALE TMP IS REMOVED, NOT TRUNCATED. `>` on an existing file keeps that
 # file's mode, so a tmp left behind by an earlier interrupted run would carry

@@ -1,6 +1,6 @@
 ---
 allowed-tools: Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh:*)
-description: Read-only diagnosis of the bionic install on this machine — plugin integrity, tier state, dependencies, environment, permission profile, and what to do about anything broken. Changes nothing.
+description: Read-only diagnosis of the bionic install on this machine — plugin integrity, tier state, dependencies, environment, and what to do about anything broken. Changes nothing.
 ---
 <!-- GENERATED FILE — DO NOT EDIT.
      Rendered from agents-src/templates/commands/doctor.md.tmpl and the shared blocks in

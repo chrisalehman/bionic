@@ -104,7 +104,7 @@ _dep_installed_json()   { echo "${BIONIC_INSTALLED_PLUGINS_FILE:-$(_dep_claude_h
 
 # THE PAYLOAD ROOT, one more root this file now reads FROM rather than only
 # writes to (epic-18 T1). Every other consumer of "where is the plugin"
-# (detect.sh's `_detect_plugin_root`, profile.sh's `_profile_plugin_root`)
+# (detect.sh's `_detect_plugin_root`)
 # carries its own byte-identical copy of this same three-step resolution for
 # the reason `bionic_link_target` already gives above: each file is sourced on
 # its own by something, so none may assume a sibling came first. No
@@ -184,6 +184,15 @@ _dep_excalidraw_refs() {
 # door has to be able to fall back to a copy of it — see the shared literals in
 # that file, and the agreement arms in tests/remove.test.sh Group 19.
 BIONIC_DEFAULT_PERMISSION_MODE="auto"
+
+# THE ONE SENTENCE ABOUT `.permissions.defaultMode` (epic-17 wave-07 item 1 +
+# O-3; rehomed here at epic-18 T13 when profile.sh was deleted). A Remote
+# Control session offers its own Manual / Accept edits / Plan only choice and
+# that choice wins over whatever this machine's settings file says — so anywhere
+# the default mode is shown or asked about has to say so on the same screen, or
+# the setting reads as a stronger promise than it is. One literal, beside the
+# value it is about, so the sentence and the mode can never drift apart.
+BIONIC_PERMISSION_MODE_RC_NOTE='Remote Control sessions override this (Manual / Accept edits / Plan only).'
 
 # ─── The table ───────────────────────────────────────────────────────────────
 #
@@ -958,14 +967,14 @@ _dep_install_argv() {  # <name> — one token per line
 # this payload targets, so the risk is negligible; it is recorded here because the
 # consequence, not just the mechanism, is what a reader of this comment needs.
 #
-# THREE OTHER FILES CARRY A BYTE-IDENTICAL COPY under the same name — hooks.sh,
-# profile.sh and remove.sh. Each is sourced on its own by something (the suites
-# load the two libraries directly; remove.sh's standalone door runs where
-# scripts/lib/ no longer exists), so none of them may assume this file came
-# first, and a `. deps.sh` inside a library also breaks every mutation arm that
-# runs a doctored COPY of it from a scratch directory. setup.sh sources this file
-# at load and uses this definition. tests/remove.test.sh pins all four against
-# each other, the same wall the settings writer's two copies stand behind.
+# TWO OTHER FILES CARRY A BYTE-IDENTICAL COPY under the same name — hooks.sh
+# and remove.sh. Each is sourced on its own by something (the suites load the
+# libraries directly; remove.sh's standalone door runs where scripts/lib/ no
+# longer exists), so neither may assume this file came first, and a `. deps.sh`
+# inside a library also breaks every mutation arm that runs a doctored COPY of it
+# from a scratch directory. setup.sh sources this file at load and uses this
+# definition. tests/remove.test.sh pins all three against each other, the same
+# wall the settings writer's two copies stand behind.
 bionic_link_target() {  # <path> — the final target of a symlink chain, else <path>
   local p="${1:-}" link dir n=0
   while [ -L "$p" ] && [ "$n" -lt 40 ]; do
@@ -1037,6 +1046,76 @@ _dep_settings_write_jq() {  # <settings-file> <jq-program> [jq-arg...]
   fi
   rm -f "$tmp"
   return 1
+}
+
+# ─── The retired permission block, and stripping it back out ─────────────────
+#
+# BIONIC NO LONGER SHIPS AN ALLOW-LIST (epic-18 T13). It used to render a
+# managed block of `permissions.allow` rules into the user's settings.json, so
+# that its own scripts and hooks ran without a prompt. That is deleted: a
+# permission MODE is the user's answer to "how much do I want to be asked", and
+# a product that quietly exempts itself from the manual mode they chose has
+# overridden the choice rather than honoured it. Setup still offers to set the
+# mode; it no longer carves itself out of it.
+#
+# WHAT REMAINS IS CLEANUP, AND ONLY CLEANUP. Machines set up before this change
+# carry the block, and nothing in the product would ever mention it again — a
+# silent leftover granting permissions its owner can no longer see named. So
+# both doors offer to strip it once, consented: /bionic:setup on the upgrade
+# path and /bionic:remove on the teardown path. Neither writes it back.
+#
+# THE SENTINELS ARE THE OLD SPELLING, VERBATIM, and must stay that way: they are
+# what is already in the files being cleaned. remove.sh's standalone door
+# carries its own copy of both literals and of the program below, because it
+# runs where scripts/lib/ is already gone; tests/remove.test.sh pins the copies
+# against these originals and drives both doors over the same fixture.
+BIONIC_PERMISSION_BLOCK_BEGIN_PREFIX='Bash(: bionic-profile-begin version='
+BIONIC_PERMISSION_BLOCK_END='Bash(: bionic-profile-end)'
+
+# Removes the marker block, inclusive, and collapses the containers the old
+# apply created. The collapse is what makes a machine that had no `permissions`
+# key at all come back the way it started: apply created `.permissions.allow`,
+# so the strip must unmake it. (The one case this cannot distinguish is a file
+# that already carried an EMPTY allow array before bionic ever ran; such a file
+# comes back semantically identical with the empty container removed.) Rules
+# OUTSIDE the block are the machine's own and are never touched.
+BIONIC_PERMISSION_BLOCK_STRIP_JQ='
+  if (.permissions | type) != "object" then .
+  elif (.permissions.allow | type) != "array" then .
+  else
+    .permissions.allow as $a
+    | ($a | map(type == "string" and startswith("'"${BIONIC_PERMISSION_BLOCK_BEGIN_PREFIX}"'")) | index(true)) as $b
+    | ($a | map(. == "'"${BIONIC_PERMISSION_BLOCK_END}"'") | index(true)) as $e
+    | if $b == null or $e == null or $e < $b then .
+      else .permissions.allow = ($a[0:$b] + $a[$e+1:]) end
+  end
+  | if (.permissions | type) == "object"
+       and (.permissions.allow | type) == "array"
+       and (.permissions.allow | length) == 0
+    then del(.permissions.allow) else . end
+  | if (.permissions | type) == "object" and (.permissions | length) == 0
+    then del(.permissions) else . end
+'
+
+# True when this machine still carries a block. Read TEXTUALLY, so it survives a
+# machine with no `jq` — the state where an unremovable leftover matters most.
+# The strip itself refuses without jq, and says so; it never guesses.
+bionic_has_permission_block() {  # [settings-file]
+  local settings="${1:-$(_dep_settings_file)}"
+  [ -f "$settings" ] || return 1
+  grep -qF "$BIONIC_PERMISSION_BLOCK_BEGIN_PREFIX" "$settings" 2>/dev/null
+}
+
+# No consent gate here, by design — the same reasoning the old strip carried:
+# this only ever removes what bionic itself put there, and the CALLER owns the
+# conversation with the user. A strip on a machine that never applied one is a
+# genuine no-op rather than a rewrite that happens to produce the same JSON, so
+# it returns before touching the file.
+bionic_strip_permission_block() {  # [settings-file]
+  local settings="${1:-$(_dep_settings_file)}"
+  bionic_has_permission_block "$settings" || return 0
+  _dep_have jq || return 1
+  _dep_settings_write_jq "$settings" "$BIONIC_PERMISSION_BLOCK_STRIP_JQ"
 }
 
 # The statusline is a settings.json edit, not a package install: `npx
