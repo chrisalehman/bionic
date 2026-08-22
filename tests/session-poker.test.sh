@@ -81,10 +81,14 @@ new_roster() {  # <repo>
 mkrow() {  # <key=value>...
   local status=confirmed session="$SID" name=agent agent_id=a000 launched_at=""
   local deliverable="" duration="" progress="" claims="" cadence="" waiver=""
+  local subagent_type=implementor
   local tool_use_id=toolu_x source=declared kv
   for kv in "$@"; do
     case "$kv" in
       status=*)      status="${kv#*=}" ;;
+      session=*)     session="${kv#*=}" ;;
+      agent_id=*)    agent_id="${kv#*=}" ;;
+      subagent_type=*) subagent_type="${kv#*=}" ;;
       name=*)        name="${kv#*=}" ;;
       launched_at=*) launched_at="${kv#*=}" ;;
       deliverable=*) deliverable="${kv#*=}" ;;
@@ -97,14 +101,25 @@ mkrow() {  # <key=value>...
     esac
   done
   [ -n "$launched_at" ] || launched_at="$(iso_ago 60)"
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=implementor|model=opus|deliverable=%s|source=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|waiver=%s|tool_use_id=%s\n' \
-    "$status" "$session" "$name" "$agent_id" "$launched_at" "$deliverable" "$source" \
+  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=opus|deliverable=%s|source=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|waiver=%s|tool_use_id=%s\n' \
+    "$status" "$session" "$name" "$agent_id" "$launched_at" "$subagent_type" "$deliverable" "$source" \
     "$duration" "$progress" "$claims" "$cadence" "$waiver" "$tool_use_id"
 }
 
 add_row() {  # <repo> <key=value>...
   local repo="$1"; shift
   mkrow "$@" >> "$(roster_of "$repo")"
+}
+
+# The same, onto ANOTHER session's roster file in the same .bionic/tmp — the shape §8's
+# `adopt` reads. `session=` is forced to match the filename, because that is the invariant
+# the writer keeps and a fixture that broke it would be testing a state the fleet cannot
+# produce.
+add_row_to() {  # <repo> <session-id> <key=value>...
+  local repo="$1" sid="$2"; shift 2
+  local f; f="$(roster_of "$repo" "$sid")"
+  [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
+  mkrow session="$sid" "$@" >> "$f"
 }
 
 # THE ACK IS PLANTED THROUGH THE REAL VERB, never by hand-writing a ledger line. `acked=`
@@ -704,6 +719,170 @@ poke "$R7E" tick
 expect_contains "an absent roster with dispatches behind it is diagnosed, not just refused" \
   "wall-blind" "$OUT"
 expect_contains "the absent-roster refusal still stands" "REFUSED" "$OUT"
+
+# ============================================================
+section "Section 8: adopt — the agents a predecessor session left behind"
+# ============================================================
+#
+# WHAT IS LOST ON `/clear`+resume and WHAT IS NOT. Lost: the completion message (delivered
+# to a conversation that no longer exists) and the orchestrator's in-memory ledger. NOT
+# lost: the agent itself (same process), its artifacts, its transcript under
+# `<config>/projects/<slug>/<old-sid>/subagents/agent-<id>.jsonl`, and its roster row. The
+# rolled-over session is missing exactly one thing it cannot re-derive — THE AGENT ID — and
+# without it the successor can read an agent's files but cannot message or stop it.
+#
+# So these cases pin `adopt`: every OPEN row on every OTHER session's roster in this
+# project, each with its id and the three addresses derived from it, and a verdict taken
+# from disk. They also pin the two silences that matter: this session's own rows never
+# appear (they are not adopted, they are held), and nothing on disk is written.
+
+ADOPT_A="11111111-aaaa-4bbb-8ccc-000000000001"
+ADOPT_B="22222222-aaaa-4bbb-8ccc-000000000002"
+ID_LANDED="alanded-one-1111111111111111"
+ID_RUNNING="arunning-one-222222222222222a"
+ID_SILENT="asilent-one-3333333333333333"
+ID_CLOSED="aclosed-one-4444444444444444"
+
+R8="$(make_repo s8-adopt)"; new_roster "$R8"
+mkdir -p "$R8/.bionic/docs/record"
+
+# This session's own open row — the control. `adopt` is about OTHER sessions' work.
+add_row "$R8" name=mine-current status=identified agent_id=amine-current-5555555555555555 \
+  deliverable="$R8/.bionic/docs/record/mine.md" duration="30 minutes" cadence="10 minutes"
+
+# ---- predecessor A: one landed, one running, one silent, one already swept MET ----
+for _n in landed-one running-one silent-one closed-one; do
+  add_row_to "$R8" "$ADOPT_A" name="$_n" status=intended agent_id="" \
+    subagent_type=bionic:senior-implementor duration="45 minutes" cadence="10 minutes"
+done
+add_row_to "$R8" "$ADOPT_A" name=landed-one status=identified agent_id="$ID_LANDED" \
+  subagent_type=bionic:senior-implementor duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R8/.bionic/docs/record/landed-one.md" \
+  progress="$R8/.bionic/tmp/progress-landed.md"
+add_row_to "$R8" "$ADOPT_A" name=running-one status=identified agent_id="$ID_RUNNING" \
+  subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R8/.bionic/docs/record/running-one.md" \
+  progress="$R8/.bionic/tmp/progress-running.md"
+add_row_to "$R8" "$ADOPT_A" name=silent-one status=identified agent_id="$ID_SILENT" \
+  subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R8/.bionic/docs/record/silent-one.md" \
+  progress="$R8/.bionic/tmp/progress-silent.md"
+add_row_to "$R8" "$ADOPT_A" name=closed-one status=identified agent_id="$ID_CLOSED" \
+  subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R8/.bionic/docs/record/closed-one.md"
+# The terminal row: hooks/landing-gate.sh's own marker, the only thing that closes a row
+# without an ack. Written by hand here for the same reason the ack above is NOT — this
+# marker's writer is a Stop hook with a whole payload contract, and the shape is one line.
+printf 'landing-swept/v1|at=%s|session=%s|name=closed-one|agent_id=%s|state=MET\n' \
+  "$(iso_ago 300)" "$ADOPT_A" "$ID_CLOSED" >> "$(roster_of "$R8" "$ADOPT_A")"
+
+printf 'the report\n' > "$R8/.bionic/docs/record/landed-one.md"
+printf 'progress\n'   > "$R8/.bionic/tmp/progress-landed.md"
+printf 'progress\n'   > "$R8/.bionic/tmp/progress-running.md"
+printf 'progress\n'   > "$R8/.bionic/tmp/progress-silent.md"
+backdate "$R8/.bionic/tmp/progress-running.md" 60      # inside 2x a 10-minute cadence
+backdate "$R8/.bionic/tmp/progress-silent.md" 5400     # far outside it
+
+# ---- predecessor B: a row the recorder never identified ----
+add_row_to "$R8" "$ADOPT_B" name=orphan-one status=intended agent_id="" \
+  subagent_type=bionic:researcher duration="20 minutes" cadence="10 minutes" \
+  deliverable="$R8/.bionic/docs/record/orphan-one.md"
+
+# AN ID ON AN `intended` ROW IS NOT AN IDENTITY. hooks/dispatch-preflight.sh writes that
+# field empty on its own append and the id arrives one state later, so a non-empty one here
+# is a forgery or a bug — and hooks/stop-guard.sh already refuses to establish ownership
+# from it for exactly that reason ("an intended row carrying an id walked a foreign agent
+# past the ownership rule"). `adopt` reads the same accepted set, so this row is
+# UNADDRESSABLE and the id it carries is never handed out as an address.
+add_row_to "$R8" "$ADOPT_B" name=phantom-id status=intended \
+  agent_id=aphantom-id-7777777777777777 \
+  subagent_type=bionic:researcher duration="20 minutes" cadence="10 minutes" \
+  deliverable="$R8/.bionic/docs/record/phantom-id.md"
+
+# ---- the transcript of the landed agent, under the PREDECESSOR's session dir ----
+C8="$(fake_config_dir s8)"
+mkdir -p "$C8/projects/-fixture-project/$ADOPT_A/subagents"
+
+long_text() {  # <marker> -> one line well past the "long enough to be a report" floor
+  local i=0
+  printf '%s ' "$1"
+  while [ "$i" -lt 40 ]; do printf 'lorem ipsum dolor sit amet '; i=$((i+1)); done
+}
+tx_text() {  # <text> — one assistant entry carrying one text block
+  printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"%s"}]}}\n' "$1"
+}
+{
+  tx_text "$(long_text EARLIER-LONG-BLOCK)"
+  printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_z","name":"Bash","input":{"command":"ls"}}]}}\n'
+  tx_text "$(long_text ADOPT-FIXTURE-REPORT-TAIL)"
+  tx_text "SHORT-SIGNOFF-MARKER"
+} > "$C8/projects/-fixture-project/$ADOPT_A/subagents/agent-${ID_LANDED}.jsonl"
+
+export CLAUDE_CONFIG_DIR="$C8"
+
+_before="$(cd "$R8/.bionic/tmp" && cksum roster-*.state | sort)"
+poke "$R8" adopt
+_after="$(cd "$R8/.bionic/tmp" && cksum roster-*.state | sort)"
+
+# ---------- 8a: the id and the three addresses it buys ----------
+expect_contains "the landed agent's id is printed" "$ID_LANDED" "$OUT"
+expect_contains "the observe address is the predecessor's own subagent transcript" \
+  "$C8/projects/-fixture-project/$ADOPT_A/subagents/agent-${ID_LANDED}.jsonl" "$OUT"
+expect_contains "the message address is a SendMessage by id" "SendMessage to:$ID_LANDED" "$OUT"
+expect_contains "the stop address is a TaskStop by full id" "TaskStop $ID_LANDED" "$OUT"
+expect_contains "the row names the predecessor session it came from" "from=$ADOPT_A" "$OUT"
+expect_contains "the row carries its subagent_type" "bionic:senior-implementor" "$OUT"
+
+# ---------- 8b: the four verdicts ----------
+expect_contains "a deliverable on disk reads LANDED" "name=landed-one|verdict=LANDED" "$OUT"
+expect_contains "a fresh progress file inside its cadence reads RUNNING" \
+  "name=running-one|verdict=RUNNING" "$OUT"
+expect_contains "a stale progress file reads SILENT" "name=silent-one|verdict=SILENT" "$OUT"
+expect_contains "a row with no identified line reads UNADDRESSABLE" \
+  "name=orphan-one|verdict=UNADDRESSABLE" "$OUT"
+expect_contains "…and names the cure rather than skipping the row" \
+  "re-invoke /bionic:canonical-sdlc" "$OUT"
+expect_contains "the second predecessor roster is scanned too" "from=$ADOPT_B" "$OUT"
+expect_contains "an id on an intended row is no identity — that row is UNADDRESSABLE too" \
+  "name=phantom-id|verdict=UNADDRESSABLE" "$OUT"
+expect_absent "…and its id is never handed out as an address" \
+  "TaskStop aphantom-id-7777777777777777" "$OUT"
+
+# ---------- 8c: the report tail, extracted from the transcript ----------
+expect_contains "the landed agent's report tail is printed" "ADOPT-FIXTURE-REPORT-TAIL" "$OUT"
+expect_absent "…the LAST long block, not an earlier one" "EARLIER-LONG-BLOCK" "$OUT"
+expect_absent "…and not a short sign-off that followed it" "SHORT-SIGNOFF-MARKER" "$OUT"
+expect_contains "an agent with no transcript on disk says so" "transcript_present=no" "$OUT"
+
+# ---------- 8d: what adopt must NOT do ----------
+expect_absent "this session's own rows are never adopted" "mine-current" "$OUT"
+expect_absent "a row already swept MET is closed, not adopted" "closed-one" "$OUT"
+expect_eq "no roster file is modified" "$_before" "$_after"
+expect_eq "adopt writes no Patrol stamp — it is not a tick" "no" \
+  "$([ -e "$R8/.bionic/tmp/patrol-${SID}.state" ] && echo yes || echo no)"
+expect_eq "open predecessor rows exit in the NOTIFY band" 1 "$RC"
+
+# ---------- 8e: an ack taken in the dead session still closes its row ----------
+# "An ack taken in a session that has since died is still in force in its successor"
+# (hooks/session-sweeper.sh's own ledger comment). The ack is planted through the real verb
+# under the PREDECESSOR's session key, never by hand-writing a ledger line.
+( cd "$R8" && env CLAUDE_CODE_SESSION_ID="$ADOPT_A" bash "$SWEEPER_FOR_ACK" ack silent-one ) \
+  >/dev/null 2>&1
+poke "$R8" adopt
+expect_absent "an acked predecessor row is closed for adopt too" "name=silent-one" "$OUT"
+expect_contains "…and its unacked siblings still adopt" "name=landed-one" "$OUT"
+
+# ---------- 8f: nothing to adopt, and no session key ----------
+R8B="$(make_repo s8-alone)"; new_roster "$R8B"
+add_row "$R8B" name=only-mine status=identified agent_id=aonly-mine-6666666666666666
+poke "$R8B" adopt
+expect_eq "a project with no predecessor roster exits 0" 0 "$RC"
+expect_contains "…and says so rather than printing nothing" "nothing to adopt" "$OUT"
+
+OUT="$( cd "$R8" && CLAUDE_CODE_SESSION_ID="" bash "$POKER" adopt 2>&1 )"; RC=$?
+expect_eq "adopt with no session key REFUSES with exit 3" "3" "$RC"
+
+unset CLAUDE_CONFIG_DIR
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'

@@ -14,6 +14,7 @@
 #     bash <plugin-root>/hooks/session-poker.sh tick       one decision over this roster (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh arm        stamp the Patrol as alive, at engagement
 #     bash <plugin-root>/hooks/session-poker.sh interval   the configured Patrol interval, seconds
+#     bash <plugin-root>/hooks/session-poker.sh adopt      what OTHER sessions launched here (read-only)
 #
 # `<plugin-root>` IS A PLACEHOLDER, NOT A SPELLING TO PASTE (epic-17 W5, spec AC-5). These
 # are commands a MODEL types into its own shell, where `${CLAUDE_PLUGIN_ROOT}` is unset —
@@ -125,6 +126,15 @@ PATROL_STAMP_SCHEMA="patrol-stamp/v1"
 PATROL_STAMP_PREFIX="patrol-"
 PATROL_STAMP_SUFFIX=".state"
 
+# `adopt`'s own schema, and the two numbers its report tail is cut with. The floor is what
+# separates a REPORT from the one-line sign-offs that usually follow it in an agent's
+# transcript ("done", "no task tools here"); the cap is what keeps a 40 KB report out of a
+# terminal the operator has to read. Both are display constants: no decision is taken from
+# either, so a bad guess costs legibility and never a wrong verdict.
+ADOPT_SCHEMA="poker-adopt/v1"
+ADOPT_TAIL_MIN=400
+ADOPT_TAIL_CAP=2000
+
 say()  { printf 'poker: %s\n' "$1"; }
 die()  { printf 'poker: %s\n' "$1" >&2; }
 
@@ -135,13 +145,14 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh arm        stamp the Patrol as alive for this session (no roster needed)"
   die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
   die "  bash ${HOOK_DIR}/session-poker.sh interval-default   this script's built-in default interval, in seconds (ignores config)"
+  die "  bash ${HOOK_DIR}/session-poker.sh adopt      every open row a PREDECESSOR session left on this project's rosters (read-only)"
   exit 2
 }
 
 [ $# -eq 1 ] || usage "exactly one verb required."
 VERB="$1"
 case "$VERB" in
-  tick|arm|interval|interval-default) : ;;
+  tick|arm|interval|interval-default|adopt) : ;;
   *) usage "unknown verb: $VERB" ;;
 esac
 
@@ -154,13 +165,16 @@ esac
 # library the installer misses is a silently inert consumer, and every duplicate here answers
 # the SAME question its sibling answers so the two cannot quietly drift into different
 # readings of one fact. `parse_seconds` is duplicated post-fix (epic-16 w2 S2, same commit
-# that fixed the original). The five are held together by tests/cross-gate-agreement.test.sh
+# that fixed the original); `file_mtime` joined them for `adopt`, which reads a predecessor
+# agent's progress file the way the sweeper reads a live one. The six are held together by
+# tests/cross-gate-agreement.test.sh
 # §O, which compares executable text with every pure-comment line stripped from both sides —
 # epic-16 w2 Step-6 remediation R3, closing rd review D-1 (this claim used to name no test,
 # and was already false for parse_seconds before that fix).
 
 now_epoch() { date -u +%s; }
 iso_now()   { date -u +%Y-%m-%dT%H:%M:%SZ; }
+file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
 
 iso_epoch() {  # <ISO-8601 Z> -> epoch seconds, empty if unreadable
   date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s 2>/dev/null \
@@ -411,6 +425,168 @@ count_rostered_dispatches() {  # <roster file> <session-id> -> count on stdout
     | grep -c -F "|status=intended|"
 }
 
+# ---------------------------------------------------------------- adoption
+#
+# WHAT A `/clear`+RESUME ACTUALLY LOSES, and what it does not. Lost: the completion message
+# (the CLI delivers it to the conversation that dispatched, and that conversation is gone)
+# and the orchestrator's in-memory dispatch ledger. NOT lost: the agent itself — same
+# process, still working — its artifacts, its transcript under
+# `<config>/projects/<slug>/<old-sid>/subagents/agent-<id>.jsonl`, and its roster row, which
+# lives in the PROJECT's `.bionic/tmp` rather than in any session.
+#
+# So the successor session can read every one of those files and still be unable to ACT on
+# the agent, because the one thing it cannot re-derive is the AGENT ID — the identity the
+# CLI handed back at launch and only the dead conversation held. `SendMessage` and
+# `TaskStop` both take it, and hooks/stop-guard.sh refuses a stop by NAME for exactly this
+# reason ("a NAME is not an identity — it is reused across waves"), naming the full agent id
+# as the deliberate way through. The id is on disk the whole time: hooks/execution-recorder.sh
+# writes it onto the row as `status=identified|agent_id=`.
+#
+# `adopt` is the verb that reads it back. For every roster in this project's `.bionic/tmp`
+# that belongs to some OTHER session, it prints each row that is still open, its id, and the
+# three addresses derived from that id — observe, message, stop — plus a verdict taken from
+# disk rather than from memory.
+#
+# IT IS READ-ONLY, ABSOLUTELY. No roster is written (not even the current session's), no
+# Patrol stamp is taken (this is not a tick and must not age the arming wall's clock), and
+# nothing is stopped or messaged. The verb's whole product is text the operator ledgers.
+#
+# THIS SESSION'S OWN ROWS ARE NEVER ADOPTED. They are not lost — the running session still
+# holds them — and printing them would invite the successor to re-ledger work it is already
+# tracking, which is the double-counting the roster exists to prevent.
+
+# `<config>/projects/<slug>/<sid>/subagents` — the same walk session_transcript does, one
+# level deeper, and keyed on the DIRECTORY rather than the session's own `.jsonl`: an old
+# session's transcript can be reclaimed while its agents' files survive, and the agents are
+# what this verb is about.
+session_subagent_dir() {  # <session-id> -> path on stdout, nonzero if none
+  local sid="$1" cfg d
+  [ -n "$sid" ] || return 1
+  cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  [ -d "$cfg/projects" ] || return 1
+  for d in "$cfg"/projects/*/; do
+    if [ -d "${d}${sid}/subagents" ]; then
+      printf '%s' "${d}${sid}/subagents"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# THE REPORT, RECOVERED FROM THE TRANSCRIPT — the recovery skills/canonical-sdlc/SKILL.md
+# §Dispatch already prescribes by hand ("the report is the last long `assistant` text block
+# in that agent's file"), done by machine. Each assistant entry's text blocks are joined and
+# re-emitted as ONE JSON string per entry, because a text block spans lines and a
+# line-oriented pass would cut a report in half. The LAST block over the floor wins; if
+# nothing clears it, the last block of any size does, so a short-report agent is quoted
+# rather than dropped.
+#
+# It is a QUOTE, not an artifact. SKILL.md's own rule stands: persist it under
+# `<docs-root>/record/` before acting on it — a transcript is one cleanup away from gone.
+agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing to quote
+  local raw
+  [ -f "$1" ] || return 1
+  command -v jq >/dev/null 2>&1 || {
+    printf '(report tail unavailable: jq is not on PATH)'
+    return 0
+  }
+  raw="$(jq -r 'select(.type == "assistant")
+                | ((.message.content // []) | map(select(.type == "text") | .text) | join("\n"))
+                | select(length > 0)
+                | @json' "$1" 2>/dev/null \
+    | awk -v min="$ADOPT_TAIL_MIN" '
+        { any = $0 }
+        length($0) - 2 >= min { last = $0 }
+        END { if (last != "") print last; else if (any != "") print any }')"
+  [ -n "$raw" ] || return 1
+  printf '%s' "$raw" | jq -r '.' 2>/dev/null | head -c "$ADOPT_TAIL_CAP"
+}
+
+# ONE FOLD PER PREDECESSOR ROSTER, and the same rule the fleet's other three folds keep: the
+# file is append-only, a contract advances along it (`intended` -> `confirmed` ->
+# `identified`), every writer copies the contract fields forward, so the LAST row carrying a
+# name is the authoritative one (tests/cross-gate-agreement.test.sh §P). Two departures,
+# both because this fold answers a question the others do not:
+#
+#   THE ID IS TAKEN OFF `identified`/`confirmed` ONLY, never off `intended` — the same
+#   accepted set hooks/stop-guard.sh and hooks/stop-check.sh use for ownership, and for the
+#   same reason: `intended` carries `agent_id=` empty by design, and a row that never
+#   advanced past it has no identity to offer. That row is the UNADDRESSABLE case, reported
+#   with its cure rather than skipped, because a silent skip is how a predecessor's agent
+#   becomes invisible twice.
+#
+#   A ROW IS CLOSED BY A LANDED MARKER OR BY AN ACK, and by nothing else. `landing-swept/v1`
+#   with `state=MET` is hooks/landing-gate.sh saying the contract landed; the ack ledger is
+#   the orchestrator saying so by hand, and the sweeper's own ledger comment already binds
+#   it across sessions ("an ack taken in a session that has since died is still in force in
+#   its successor"). A `landing-swept` marker reading UNMET closes NOTHING here: an answered
+#   failure is exactly the row a resumed session most needs to see.
+#
+# Output is one `|`-delimited record per open row. `|` rather than a tab because every value
+# on a roster row is cleaned of `|` at write time, while the shell collapses runs of tabs
+# and would silently merge two empty fields into one.
+adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|progress|cadence|launched_at
+  awk -v ackfile="$2" '
+    function kv(line, key,   n, a, i, eq, k) {
+      n = split(line, a, "|")
+      for (i = 1; i <= n; i++) {
+        eq = index(a[i], "=")
+        if (eq == 0) continue
+        k = substr(a[i], 1, eq - 1)
+        if (k == key) return substr(a[i], eq + 1)
+      }
+      return ""
+    }
+    BEGIN {
+      if (ackfile != "") {
+        while ((getline l < ackfile) > 0) {
+          if (l !~ /^sweeper-ledger\/v1\|/) continue
+          if (kv(l, "event") != "ack") continue
+          an = kv(l, "name")
+          if (an != "") acked[an] = 1
+        }
+        close(ackfile)
+      }
+    }
+    /^roster-state\/v1\|/ {
+      n = kv($0, "name"); if (n == "") next
+      if (!(n in seen)) { seen[n] = 1; order[++cnt] = n }
+      v = kv($0, "subagent_type"); if (v != "") stype[n] = v
+      v = kv($0, "deliverable");   if (v != "") deliv[n] = v
+      v = kv($0, "progress");      if (v != "") prog[n]  = v
+      v = kv($0, "cadence");       if (v != "") cad[n]   = v
+      v = kv($0, "launched_at");   if (v != "") launch[n] = v
+      st = kv($0, "status")
+      if (st == "identified" || st == "confirmed") {
+        v = kv($0, "agent_id"); if (v != "") id[n] = v
+      }
+      next
+    }
+    /^landing-swept\/v1\|/ {
+      n = kv($0, "name")
+      if (n != "" && kv($0, "state") == "MET") met[n] = 1
+      next
+    }
+    END {
+      for (i = 1; i <= cnt; i++) {
+        n = order[i]
+        if (n in met) continue
+        if (n in acked) continue
+        printf "%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], launch[n]
+      }
+    }
+  ' "$1" 2>/dev/null
+}
+
+# A roster path is absolute or project-relative, exactly as the row's writer left it.
+adopt_abs() {  # <path> <repo root>
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    '') : ;;
+    *)  printf '%s/%s' "$2" "$1" ;;
+  esac
+}
+
 # ---------------------------------------------------------------- verbs
 
 case "$VERB" in
@@ -458,6 +634,146 @@ case "$VERB" in
     fi
     say "armed — the Patrol stamp is fresh for this session: $(patrol_stamp_file "$SESSION_ID")"
     exit 0
+    ;;
+
+  adopt)
+    SESSION_ID="${CLAUDE_CODE_SESSION_ID:-}"
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "adopt answers 'what did the OTHER sessions launch here', and without this session's"
+      die "own key it cannot tell their rows from ours."
+      exit 3
+    fi
+
+    REPO="$(resolve_project_root "$PWD/." "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+    ADOPT_DIR="$REPO_REAL/.bionic/tmp"
+    ADOPT_ROWS=0
+    ADOPT_SESSIONS=0
+    ADOPT_NOW="$(now_epoch)"
+
+    for ADOPT_RF in "$ADOPT_DIR"/roster-*.state; do
+      [ -f "$ADOPT_RF" ] || continue
+      # Symlinks are not followed, the same posture every other .bionic/tmp reader takes.
+      [ -L "$ADOPT_RF" ] && continue
+      OSID="${ADOPT_RF##*/}"; OSID="${OSID#roster-}"; OSID="${OSID%.state}"
+      [ -n "$OSID" ] || continue
+      [ "$OSID" = "$SESSION_ID" ] && continue
+
+      ADOPT_LEDGER="$ADOPT_DIR/sweeper-${OSID}.state"
+      [ -f "$ADOPT_LEDGER" ] && [ ! -L "$ADOPT_LEDGER" ] || ADOPT_LEDGER=""
+      ADOPT_OUT="$(adopt_fold "$ADOPT_RF" "$ADOPT_LEDGER")"
+      [ -n "$ADOPT_OUT" ] || continue
+      ADOPT_SESSIONS=$((ADOPT_SESSIONS + 1))
+
+      # Resolved ONCE per predecessor session, not once per row: the walk is the same for
+      # every agent that session launched.
+      OSUB="$(session_subagent_dir "$OSID")" || OSUB=""
+
+      while IFS='|' read -r RNAME RID RTYPE RDELIV RPROG RCAD RLAUNCH; do
+        [ -n "$RNAME" ] || continue
+        ADOPT_ROWS=$((ADOPT_ROWS + 1))
+
+        # ---- the deliverable, on disk or not
+        RDELIV_ABS="$(adopt_abs "$RDELIV" "$REPO_REAL")"
+        DELIV_PRESENT=no
+        [ -n "$RDELIV_ABS" ] && [ -e "$RDELIV_ABS" ] && DELIV_PRESENT=yes
+
+        # ---- the progress file's age against the cadence its own row declared
+        RPROG_ABS="$(adopt_abs "$RPROG" "$REPO_REAL")"
+        PROG_AGE=""
+        [ -n "$RPROG_ABS" ] && [ -f "$RPROG_ABS" ] \
+          && PROG_AGE=$(( ADOPT_NOW - $(file_mtime "$RPROG_ABS") ))
+        CAD_S="$(parse_seconds "$RCAD")" || CAD_S=""
+
+        # ---- the three addresses, all of them derived from the one id
+        TX=""
+        TX_PRESENT=no
+        if [ -n "$RID" ]; then
+          if [ -n "$OSUB" ]; then
+            TX="$OSUB/agent-${RID}.jsonl"
+            [ -f "$TX" ] && TX_PRESENT=yes
+          else
+            # The slug could not be resolved — say where to look rather than inventing a
+            # path that would read as a fact.
+            TX="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/*/${OSID}/subagents/agent-${RID}.jsonl"
+          fi
+        fi
+
+        # ---- the verdict
+        #
+        # UNADDRESSABLE OUTRANKS THE REST, because it is the only one of the four that is
+        # about this verb's own subject — the id. A row without one cannot be messaged or
+        # stopped whatever its artifacts say, and the cure is prospective (it fixes the NEXT
+        # dispatch, not this row). The deliverable's state is still printed underneath, so
+        # nothing is hidden by the ordering.
+        if [ -z "$RID" ]; then
+          VERDICT=UNADDRESSABLE
+        elif [ "$DELIV_PRESENT" = yes ]; then
+          VERDICT=LANDED
+        elif [ -n "$PROG_AGE" ] && [ -n "$CAD_S" ] && [ "$PROG_AGE" -le $(( CAD_S * 2 )) ]; then
+          # TWICE the cadence, not once. A row promising a line every 10 minutes is, at any
+          # random instant, up to 10 minutes stale while perfectly healthy; a threshold set
+          # at the cadence itself would call half the live fleet SILENT. Twice the declared
+          # interval is the same slack hooks/dispatch-preflight.sh allows the Patrol stamp.
+          VERDICT=RUNNING
+        else
+          VERDICT=SILENT
+        fi
+
+        printf '%s|at=%s|session=%s|from=%s|name=%s|verdict=%s|agent_id=%s|subagent_type=%s|deliverable=%s|deliverable_present=%s|progress=%s|progress_age=%s|cadence=%s|transcript=%s|transcript_present=%s\n' \
+          "$ADOPT_SCHEMA" "$(iso_now)" "$SESSION_ID" "$OSID" "$(clean "$RNAME")" "$VERDICT" \
+          "$RID" "$(clean "$RTYPE")" "$(clean "$RDELIV_ABS")" "$DELIV_PRESENT" \
+          "$(clean "$RPROG_ABS")" "${PROG_AGE:-unknown}" "${CAD_S:-unknown}" \
+          "$(clean "$TX")" "$TX_PRESENT"
+
+        say "$(clean "$RNAME") ($(clean "$RTYPE")) from session $OSID — $VERDICT"
+        if [ -n "$RID" ]; then
+          printf '  agent id    : %s\n' "$RID"
+          printf '  observe     : %s (%s)\n' "$TX" \
+            "$([ "$TX_PRESENT" = yes ] && echo 'on disk' || echo 'not on disk')"
+          printf '  message     : SendMessage to:%s\n' "$RID"
+          printf '  stop        : TaskStop %s\n' "$RID"
+        else
+          printf '  agent id    : (none — no identified row on that roster)\n'
+          printf '  observe     : unavailable without an id\n'
+          printf '  message     : unavailable without an id\n'
+          printf '  stop        : unavailable without an id\n'
+          printf '  cure        : the predecessor'"'"'s dispatch wall or execution recorder was dead when\n'
+          printf '                this row was written — re-invoke /bionic:canonical-sdlc before\n'
+          printf '                dispatching, or the same thing happens again.\n'
+        fi
+        printf '  launched    : %s\n' "${RLAUNCH:-unknown}"
+        printf '  deliverable : %s (%s)\n' "${RDELIV_ABS:-none declared}" \
+          "$([ "$DELIV_PRESENT" = yes ] && echo 'on disk' || echo 'not on disk')"
+        printf '  progress    : %s (%s)\n' "${RPROG_ABS:-none declared}" \
+          "$([ -n "$PROG_AGE" ] && printf '%ss old, cadence %ss' "$PROG_AGE" "${CAD_S:-unknown}" || echo 'not on disk')"
+        if [ "$TX_PRESENT" = yes ]; then
+          TAIL_TEXT="$(agent_report_tail "$TX")" || TAIL_TEXT=""
+          if [ -n "$TAIL_TEXT" ]; then
+            printf '  report tail (last long assistant block, capped at %s chars — quote it into\n' "$ADOPT_TAIL_CAP"
+            printf '  the record before acting on it; a transcript is not an artifact):\n'
+            printf '%s\n' "$TAIL_TEXT" | sed 's/^/    | /'
+          fi
+        fi
+        printf '\n'
+      done <<EOF
+$ADOPT_OUT
+EOF
+    done
+
+    printf '%s|at=%s|session=%s|scanned=%s|open=%s\n' \
+      "$ADOPT_SCHEMA" "$(iso_now)" "$SESSION_ID" "$ADOPT_SESSIONS" "$ADOPT_ROWS"
+    if [ "$ADOPT_ROWS" -eq 0 ]; then
+      say "nothing to adopt — no other session has an open row on this project's rosters."
+      exit 0
+    fi
+    say "$ADOPT_ROWS open row(s) from $ADOPT_SESSIONS predecessor session(s) — ledger every one BY AGENT ID before dispatching anything new."
+    exit 1
     ;;
 
   tick)

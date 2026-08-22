@@ -3597,7 +3597,7 @@ fn_code() {  # <file> <function name> -> fn_body with pure-comment lines strippe
 
 expect_eq "the extractor returns code at all (this section is not vacuous)" "yes" \
   "$([ -n "$(fn_code "$SWEEPER" parse_seconds)" ] && echo yes || echo no)"
-for _fn in now_epoch iso_now line_field clean parse_seconds; do
+for _fn in now_epoch iso_now file_mtime line_field clean parse_seconds; do
   expect_eq "the poker's ${_fn}() is the sweeper's, CODE for code" \
     "$(fn_code "$SWEEPER" "$_fn")" "$(fn_code "$SPO" "$_fn")"
 done
