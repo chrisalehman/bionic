@@ -33,6 +33,7 @@ install it once and every project gets the same working discipline.
 | `/bionic:canonical-sdlc` | the governed lifecycle for non-trivial work — declares `intent · rigor · scale`, walks Steps 0–9, gates every commit on that step's evidence (`help` prints the axis tables) |
 | `/bionic:map-instrument-narrow` | diagnostic discipline when the cause is not obvious — map the system, instrument it, narrow to a root cause before writing a fix |
 | `/bionic:browser-verify` | verifies UI behavior in a real browser with semantic readback |
+| `/bionic:excalidraw-diagram` | hand-arranged Excalidraw diagrams that make a visual argument, rendered to PNG by a bundled renderer (installed by setup) |
 
 ## Agents — ship with the plugin
 
@@ -47,11 +48,12 @@ Six roles canonical-sdlc dispatches by step. The model and effort each one runs 
 `/bionic:setup` adds what a plugin install cannot: the tools these workflows reach for,
 your shell environment, and a permission profile.
 
-- **Plugins** — superpowers, agent-skills, impeccable.
+- **Plugins** — superpowers, agent-skills, impeccable, document-skills, example-skills.
 - **Command-line tools** — git, node, pnpm, gh, jq, rg, uv, docker, aws.
-- **On demand** — @playwright/cli, chrome-devtools, playwright-chromium, motion. These
-  install themselves the first time a route needs one.
-- **Optional** — ccstatusline, notebooklm, context7, @pencil.dev/cli.
+- **Browser & rendering** — @playwright/cli, chrome-devtools, playwright-chromium, motion,
+  the excalidraw renderer. Offered at setup; nothing installs on demand.
+- **Skills & services** — ccstatusline, notebooklm, context7, @pencil.dev/cli, humanizer.
+- **Notifications** — your ntfy topic, carried into `~/.claude/cron.env`.
 
 Run `/bionic:doctor` for what this machine actually has, at which version, and from
 which source.
