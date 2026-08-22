@@ -15,8 +15,9 @@ Run:
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh
 ```
 
-Doctor ends with one question about checking for tool updates.
-Ask the user that question, verbatim. If they say yes, run:
+After the report, ask the user exactly once: "Check for tool updates? This asks
+Homebrew and npm and can take up to 30 seconds." (The script prints no question
+of its own when it is not running in a terminal.) If they say yes, run:
 
 ```bash
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh --updates

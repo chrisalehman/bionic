@@ -162,7 +162,9 @@ _dep_playwright_cache() {
 # about a project directory nobody could locate. Same rule `_dep_check_pnpm_store` follows.
 _dep_excalidraw_refs() {
   if [ -n "${BIONIC_EXCALIDRAW_REFS:-}" ]; then echo "$BIONIC_EXCALIDRAW_REFS"; return; fi
-  local root="${BIONIC_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}"
+  # Self-locating like every other root here (Chris 2026-08-22: doctor reported
+  # "no presence surface" for a directory that was sitting in the plugin).
+  local root; root="$(_dep_plugin_root)"
   [ -n "$root" ] || { echo ""; return; }
   echo "${root}/skills/excalidraw-diagram/references"
 }
