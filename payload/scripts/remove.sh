@@ -267,6 +267,20 @@ _rm_skipped() {  # <rc> <name> <what was left>
   [ -n "$route" ] && echo "  ${route}"
   return 0
 }
+# NOT CLEAN, AND NOT DECLINED EITHER — NOT LOOKED AT (critic delta 2 N2).
+# `_rm_clean` states a fact about the machine: this item was checked and there is
+# nothing there. A row whose check never RAN cannot say that, and saying it anyway
+# is worse than silence: it is false the moment something is there, it books the
+# row into the "already clean" tally, and it keeps the row out of the Leftovers
+# and Skipped blocks a reader scans for what to do next. This line reports what
+# happened instead. It counts with the skips, because that is what it is — a check
+# this run did not perform.
+_rm_not_checked() {  # <what was not checked> <why, in the user's terms>
+  RM_SKIPPED=$((RM_SKIPPED + 1))
+  RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ ${1} — not checked: ${2}"$'\n'
+  echo "  not checked — ${2}"
+  return 0
+}
 _rm_leftover() { RM_LEFTOVERS="${RM_LEFTOVERS}    ✗ ${1}"$'\n'; echo "  ⚠ ${1}"; }
 
 # ─── Consent ─────────────────────────────────────────────────────────────────
@@ -300,6 +314,50 @@ _rm_slurp_into() {  # <varname> <file>
   printf -v "$__rm_var" '%s' "$__rm_text"
 }
 
+# ─── Writing through a symlink ───────────────────────────────────────────────
+#
+# WHAT A DOTFILES USER GETS OTHERWISE (critic delta 2 N1). A `~/.zshrc` or a
+# `~/.claude/settings.json` symlinked into a dotfiles repo is a regular way to
+# manage those files. Every writer below stages a `<file>.bionic.tmp` and `mv`s
+# it into place, and `mv` REPLACES the link with a regular file: the rewrite
+# lands in a fresh inode at the link's path, the dotfiles copy keeps the content
+# this script just reported REMOVING, `git status` in that repo shows nothing,
+# and the next `stow` puts the whole footprint back. For a remover that is the
+# worst shape the defect can take — the summary says the machine is clean and the
+# file the user actually manages still holds the block. So every writer resolves
+# the path to the FINAL target of its symlink chain and publishes onto THAT: the
+# link survives, still points where it did, and the file it names is what changed.
+#
+# NO `realpath`, and no `readlink -f`. `realpath` is not on a bare macOS, and BSD
+# `readlink` has no `-f`. One hop at a time, relative targets resolved against the
+# LINK's own directory (what the kernel does), with a hop cap so a symlink loop
+# terminates instead of spinning. Bash 3.2 throughout.
+#
+# HONEST DEGRADATION, the contract `stat` already has here: no `readlink` on the
+# machine means the loop breaks on the first hop and the caller writes to the path
+# as given — the behaviour every writer had before this existed. The standalone
+# door runs on the box with the bare /bin and must still write.
+#
+# BYTE-IDENTICAL TO THE THREE COPIES IN scripts/lib/, name included, because the
+# standalone door runs where scripts/lib/ is already gone and the payload door
+# must not get a different resolver. When deps.sh IS beside this script it is
+# sourced first and this definition replaces it with the same bytes;
+# tests/remove.test.sh pins all four against each other the way it pins the
+# settings writer.
+bionic_link_target() {  # <path> — the final target of a symlink chain, else <path>
+  local p="${1:-}" link dir n=0
+  while [ -L "$p" ] && [ "$n" -lt 40 ]; do
+    link="$(readlink "$p" 2>/dev/null)" || break
+    [ -n "$link" ] || break
+    case "$link" in
+      /*) p="$link" ;;
+      *)  dir="${p%/*}"; [ "$dir" = "$p" ] && dir="."; p="${dir}/${link}" ;;
+    esac
+    n=$((n + 1))
+  done
+  printf '%s\n' "$p"
+}
+
 # Byte-identical to profile.sh's `_profile_write` apart from the name, which is
 # what tests/remove.test.sh pins. The mode capture is not decoration: `mv`
 # replaces the inode, so a settings.json the user kept at 0600 would come back at
@@ -307,12 +365,18 @@ _rm_slurp_into() {  # <varname> <file>
 # profile.sh for why `stat` is spelled twice, why an absent `stat` degrades to
 # "write, don't chmod" rather than to a refusal — the standalone door runs on the
 # machine with the bare /bin — and why the `umask 077` and the `chmod` must both
-# stay ABOVE the `mv`. `-L` dereferences a symlinked settings.json instead of
-# reading the link's own mode (S14), and the stale tmp is `rm -f`'d rather than
-# truncated, for the same reason profile.sh's copy is.
+# stay ABOVE the `mv`. The path is resolved through `bionic_link_target` first,
+# so a symlinked settings.json is REWRITTEN rather than detached from the repo
+# that manages it (critic delta 2 N1); `-L` then reads the resolved file's mode,
+# and `[ -e ]` catches the one input `-L` lies about — a dangling link, which BSD
+# `stat -L` reports as the LINK's 755 with exit 0 (N4). The stale tmp is `rm -f`'d
+# rather than truncated, for the same reason profile.sh's copy is.
 _rm_write() {  # <file> <content> <trailing-newline 0|1>
-  local file="$1" content="$2" nl="$3" tmp="${1}.bionic.tmp" mode
+  local file content="$2" nl="$3" tmp mode
+  file="$(bionic_link_target "$1")"
+  tmp="${file}.bionic.tmp"
   mode="$(stat -L -f '%Lp' "$file" 2>/dev/null || stat -L -c '%a' "$file" 2>/dev/null)"
+  [ -e "$file" ] || mode=""
   rm -f "$tmp"
   if [ "$nl" = "1" ]; then (umask 077; printf '%s\n' "$content" > "$tmp"); else (umask 077; printf '%s' "$content" > "$tmp"); fi
   [ -n "$mode" ] && chmod "$mode" "$tmp"
@@ -370,37 +434,63 @@ _rm_file_has_line_matching() {  # <file> <ere>
 # `rwxr-xr-x`: WIDER than the file being replaced, which is the one outcome this
 # capture exists to prevent, and wider than the no-capture code produced before
 # it (the tmp was simply born at the process umask). `-L` is what makes the
-# capture mean the file. Both flavours of `stat` take it.
+# capture mean the file — except on a DANGLING link, where BSD `stat -L` falls
+# back to reporting the link's own 755 and exits 0 rather than failing (critic
+# delta 2 N4). `[ -e ]` is what turns that into the empty "unknowable" answer the
+# callers already handle. Both flavours of `stat` take `-L`.
+#
+# AND THE WRITE ITSELF GOES TO THE TARGET, not to the link — see the resolver's
+# header above. The two are one act: resolve, then read the resolved file's mode.
 _rm_mode_of() {  # <file> — the mode of what <file> RESOLVES to, empty if unknowable
-  stat -L -f '%Lp' "$1" 2>/dev/null || stat -L -c '%a' "$1" 2>/dev/null
+  local mode
+  mode="$(stat -L -f '%Lp' "$1" 2>/dev/null || stat -L -c '%a' "$1" 2>/dev/null)"
+  [ -e "$1" ] || mode=""
+  printf '%s' "$mode"
 }
 
-# Creates <tmp> empty, owned by this user alone, then widened to no more than the
-# mode of <file>. Callers append to it and rename it over <file>. A tmp left
-# behind by an earlier interrupted run is REMOVED rather than truncated: `>` on an
-# existing file keeps that file's mode, so truncating one would carry a stale
-# width through the window `umask 077` exists to close.
-_rm_stage_tmp() {  # <tmp> <file>
-  local tmp="$1" file="$2" mode
-  mode="$(_rm_mode_of "$file")"
+# ONE STAGING ORDER, AND THE CHMOD IS AT THE END OF IT (critic delta 2 N5).
+# Create the tmp under `umask 077`, let the caller write the content into it, and
+# only then widen it to the target's mode and rename. Measured, that keeps the
+# staged copy at 0600 for the whole span in which it holds the user's file — the
+# span that matters, because that is when the tmp is worth reading — and gives it
+# the target's mode at the instant of publication and not one moment sooner. The
+# order S13 shipped (chmod, THEN write) had the tmp already wearing a 0644 rc's
+# mode while the rc's own contents, tokens and all, were being written into it.
+#
+# A tmp left behind by an earlier interrupted run is REMOVED rather than
+# truncated: `>` on an existing file keeps that file's mode, so truncating one
+# would carry a stale width through the window `umask 077` exists to close.
+_rm_stage_tmp() {  # <tmp> — created empty at 0600; the caller writes, then publishes
+  local tmp="$1"
   rm -f "$tmp"
   (umask 077; : > "$tmp") || return 1
-  [ -n "$mode" ] && chmod "$mode" "$tmp"
   return 0
+}
+
+# The other half: widen <tmp> to <file>'s mode and rename it over <file>. <file>
+# is the RESOLVED target, so its mode is still readable here — the rename is what
+# replaces it.
+_rm_publish_tmp() {  # <tmp> <file>
+  local tmp="$1" file="$2" mode
+  mode="$(_rm_mode_of "$file")"
+  [ -n "$mode" ] && chmod "$mode" "$tmp"
+  mv "$tmp" "$file"
 }
 
 # Drops every line matching an ERE.
 _rm_filter_out_lines() {  # <file> <ere>
   local file="$1"
   local ere="$2"
-  local tmp="${file}.bionic.tmp"
+  local target
+  target="$(bionic_link_target "$file")"
+  local tmp="${target}.bionic.tmp"
   local line
-  _rm_stage_tmp "$tmp" "$file" || return 1
+  _rm_stage_tmp "$tmp" || return 1
   while IFS= read -r line || [ -n "$line" ]; do
     [[ "$line" =~ $ere ]] && continue
     printf '%s\n' "$line" >> "$tmp"
   done < "$file"
-  mv "$tmp" "$file"
+  _rm_publish_tmp "$tmp" "$target"
 }
 
 # Drops a marker-delimited block, markers included. Line equality is exact —
@@ -420,10 +510,11 @@ _rm_filter_out_lines() {  # <file> <ere>
 # held rather than written, and either flushed when the next real line arrives or
 # discarded when the next line turns out to be the start marker.
 _rm_strip_marker_block() {  # <file> <start-line> <end-line>
-  local file="$1" start="$2" end="$3"
-  local tmp="${file}.bionic.tmp"
+  local file="$1" start="$2" end="$3" target
+  target="$(bionic_link_target "$file")"
+  local tmp="${target}.bionic.tmp"
   local line skip=0 pending=0
-  _rm_stage_tmp "$tmp" "$file" || return 1
+  _rm_stage_tmp "$tmp" || return 1
   while IFS= read -r line || [ -n "$line" ]; do
     if [ "$line" = "$start" ]; then skip=1; pending=0; continue; fi
     if [ "$line" = "$end" ];   then skip=0; continue; fi
@@ -433,7 +524,7 @@ _rm_strip_marker_block() {  # <file> <start-line> <end-line>
     printf '%s\n' "$line" >> "$tmp"
   done < "$file"
   [ "$pending" = "1" ] && printf '\n' >> "$tmp"
-  mv "$tmp" "$file"
+  _rm_publish_tmp "$tmp" "$target"
 }
 
 _rm_indent() {  # <text> — four spaces on every line, no sed
@@ -1480,9 +1571,21 @@ _rm_item_orphans() {
   # dependencies they can read is consenting to exactly what happens, and this
   # item's standalone case (coming back for orphans alone) lives on that path.
   # Gating there would refuse a question nobody has a reason to refuse.
+  #
+  # AND WHAT IT SAYS IS WHAT HAPPENED, NOT WHAT IS TRUE (critic delta 2 N2). This
+  # branch returns before `_rm_offer_orphans` ever asks the CLI, so it has no
+  # standing to report the machine — and "nothing is orphaned" is plainly false
+  # whenever orphans predate this run (a previous partial teardown, a plugin
+  # removed by hand): `claude plugin prune --dry-run` will name them a second
+  # later. Booking that as `already clean` also counted it into the clean tally
+  # and kept it out of the blocks a reader scans, so a user with real orphans was
+  # told there was nothing there. The honest line is that the check did not run,
+  # and why, and it is counted with the skips.
   if [ "$RM_ALL" = "1" ] && [ "$RM_PLUGIN_STILL_INSTALLED" = "1" ]; then
     echo "orphaned dependencies:"
-    _rm_clean "orphaned dependencies (the plugin is still installed, so nothing is orphaned)"
+    _rm_not_checked "orphaned dependencies" \
+      "the plugin uninstall did not land, so orphaned dependencies were not looked at"
+    echo "  re-run the removal once the uninstall succeeds and this item will be checked."
     echo ""
     return 0
   fi
