@@ -1123,7 +1123,7 @@ case "$PROFILE_VERDICT" in
   *)         _doctor_env3 "$DOCTOR_NIL" "permission profile" "—" "unknown — jq is not on PATH" ;;
 esac
 case "$CCSTATUSLINE_STATE" in
-  yes)     _doctor_env3 "$DOCTOR_OK"  "statusLine.command" "ccstatusline" "set, shows after a restart" ;;
+  yes)     _doctor_env3 "$DOCTOR_OK"  "statusLine.command" "ccstatusline" "set" ;;
   unknown) _doctor_env3 "$DOCTOR_NIL" "statusLine.command" "—" "unknown — $(_doctor_unknown_cause statusline)" ;;
   *)       _doctor_env3 "$DOCTOR_BAD" "statusLine.command" "—" "not set → /bionic:setup" ;;
 esac
