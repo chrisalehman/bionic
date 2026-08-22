@@ -61,7 +61,7 @@ Six roles canonical-sdlc dispatches by step. The model and effort each one runs 
 | `implementor` | sonnet · high | MECHANICAL slice execution under TDD discipline — the plan is literal, tests define done, ambiguity means stop and surface |
 | `researcher` | opus · high | Read-only codebase/docs exploration returning structured summaries with file:line citations |
 | `senior-implementor` | opus · high | DISCRETIONARY slice execution under TDD discipline — judgment and taste licensed within slice scope, every resolution logged to the plan's Assumptions before commit |
-| `test-runner` | haiku · low | Mechanical test-suite execution and full result reporting |
+| `test-runner` | haiku · medium | Mechanical test-suite execution and full result reporting |
 
 ## Installed by setup (third party)
 
