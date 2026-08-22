@@ -15,12 +15,4 @@ Run:
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh
 ```
 
-After the report, ask the user exactly once: "Check for tool updates? This asks
-Homebrew and npm and can take up to 30 seconds." (The script prints no question
-of its own when it is not running in a terminal.) If they say yes, run:
-
-```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/doctor.sh --updates
-```
-
-and show its UPDATES section.
+Show the report as printed. Ask nothing afterwards.

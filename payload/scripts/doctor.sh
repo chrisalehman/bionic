@@ -650,7 +650,13 @@ while IFS= read -r dep_name; do
          if [ "$dep_class" = "when-needed" ]; then dep_sym="$DOCTOR_NIL"; dep_tail="installs on first use"
          else dep_sym="$DOCTOR_BAD"; fi ;;
     *)   dep_tail="$(_doctor_unknown_cause "$kind")"
-         if [ "$dep_class" = "when-needed" ]; then dep_sym="$DOCTOR_NIL"; else dep_sym="$DOCTOR_BAD"; fi ;;
+         # A cache with no presence surface is never a ✗: nothing can make it
+         # readable, so marking it broken would keep doctor from ever saying
+         # "nothing to do" (Chris 2026-08-22).
+         case "${dep_class}/${kind}" in
+           when-needed/*|*/pnpm-store) dep_sym="$DOCTOR_NIL" ;;
+           *)                          dep_sym="$DOCTOR_BAD" ;;
+         esac ;;
   esac
   [ "$present" = "no" ] && dep_version="-"
   DEP_ROWS="${DEP_ROWS}$(_doctor_rtrim "$(printf '  %s %-12s %-20s %-8s %-9s %-11s %s' \
@@ -704,7 +710,11 @@ while IFS= read -r dep_name; do
       else third_state="not installed → /bionic:setup"; fi ;;
     *)
       third_state="$(_doctor_unknown_cause "$kind")"
-      [ "$dep_class" = "when-needed" ] || third_state="${third_state} → /bionic:setup" ;;
+      case "${dep_class}/${kind}" in
+        when-needed/*) ;;
+        */pnpm-store)  third_state="${third_state} — setup pre-warms it" ;;
+        *)             third_state="${third_state} → /bionic:setup" ;;
+      esac ;;
   esac
   case "$third_version" in unknown|-|"") third_version="—" ;; esac
   THIRD_ROWS="${THIRD_ROWS}$(_doctor_third_row "$dep_sym" "$dep_name" "$third_version" \
@@ -931,6 +941,16 @@ if [ -n "$FIX_LINES" ]; then
     case "$_fix_line" in "  ${DOCTOR_BAD} "*) N_FIX=$((N_FIX + 1)) ;; esac
   done <<< "$FIX_LINES"
 fi
+# THE COUNT IS ROWS, NOT CATEGORIES (Chris 2026-08-22: "2 problems" above seven ✗
+# rows). The absent dependencies collapse into ONE fix line below, so that line
+# is swapped for the number of ✗ dependency rows it stands for.
+N_BAD_DEPS=0
+if [ -n "$THIRD_ROWS" ]; then
+  while IFS= read -r _third_line; do
+    case "$_third_line" in "  ${DOCTOR_BAD} "*) N_BAD_DEPS=$((N_BAD_DEPS + 1)) ;; esac
+  done <<< "$THIRD_ROWS"
+fi
+case "$FIX_NAMES_SETUP" in *"dependenc"*) N_FIX=$((N_FIX - 1 + N_BAD_DEPS)) ;; esac
 
 # ─── The report ──────────────────────────────────────────────────────────────
 #
@@ -1266,23 +1286,11 @@ _doctor_render_updates() {
 # that waits, the line that does not, and a caller trying to match it.
 DOCTOR_UPDATES_QUESTION="Check for tool updates? This asks Homebrew and npm and can take up to 30 seconds. [y/N]"
 
-echo ""
+# No question is asked (Chris 2026-08-22: "There's not much value of that").
+# `--updates` remains an explicit opt-in for whoever wants the Homebrew/npm check.
 if [ "$DOCTOR_WANT_UPDATES" = "yes" ]; then
-  # The answer already given, coming back as a second run. No question, no read.
-  _doctor_render_updates
-elif _doctor_can_ask; then
-  printf '%s ' "$DOCTOR_UPDATES_QUESTION"
-  IFS= read -r DOCTOR_UPDATE_ANSWER || DOCTOR_UPDATE_ANSWER=""
   echo ""
-  case "$DOCTOR_UPDATE_ANSWER" in
-    y|Y|yes|YES|Yes) _doctor_render_updates ;;
-  esac
-else
-  # Not a terminal: nothing is printed. The relaying command (commands/doctor.md)
-  # owns the question in that case and asks it once — printing it here too put
-  # the same line on the screen twice (Chris 2026-08-22, "the last line is
-  # repeated").
-  :
+  _doctor_render_updates
 fi
 
 exit 0
