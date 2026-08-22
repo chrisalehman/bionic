@@ -1020,6 +1020,98 @@ expect_true "the never-list holds even when the config target is redirected unde
   test -f "$CCL6/home/.bionic/memory/note.md"
 
 echo ""
+echo "=== Group 8d: notebooklm — the two-half probe, skill-install arm, remove purges the skill dir (AC-5) ==="
+#
+# notebooklm is a `uv-tool` kind row like any other, but its second half is a
+# skill file the CLI's own `skill install` subcommand writes
+# (~/.claude/skills/notebooklm/SKILL.md, ported from claude-bootstrap.sh
+# 1542-1550) — the CLI being on PATH says nothing about whether that step ever
+# ran, which is exactly the ccstatusline bug this wave exists to fix, one row
+# over. Four discriminating cases against a fake $HOME, per the handoff's
+# AC-5: CLI-no-skill -> no, both -> yes, install -> yes, remove -> no.
+
+NB_BIN="$TMP/nb-bin"; mkdir -p "$NB_BIN"; cp -R "$BASE_BIN/." "$NB_BIN/" 2>/dev/null
+make_stub "$NB_BIN" uv
+make_stub "$NB_BIN" notebooklm
+
+NB_HOME_NOSKILL="$TMP/nb-home-noskill"; mkdir -p "$NB_HOME_NOSKILL"
+NB_HOME_BOTH="$TMP/nb-home-both"; mkdir -p "$NB_HOME_BOTH/skills/notebooklm"
+echo "# notebooklm skill" > "$NB_HOME_BOTH/skills/notebooklm/SKILL.md"
+
+expect_eq "check_dep notebooklm: CLI on PATH, skill file absent -> no" \
+  "present=no|version=unknown|verdict=unknown" \
+  "$(env -i HOME="$TMP/home" PATH="$NB_BIN" BIONIC_CLAUDE_HOME="$NB_HOME_NOSKILL" \
+      bash -c '. "$1"; check_dep notebooklm' _ "$DEPS_SH" 2>&1)"
+expect_eq "check_dep notebooklm: CLI on PATH AND skill file present -> yes" \
+  "present=yes|version=unknown|verdict=ok" \
+  "$(env -i HOME="$TMP/home" PATH="$NB_BIN" BIONIC_CLAUDE_HOME="$NB_HOME_BOTH" \
+      bash -c '. "$1"; check_dep notebooklm' _ "$DEPS_SH" 2>&1)"
+expect_eq "check_dep notebooklm: no CLI at all -> no, regardless of the skill file" \
+  "present=no|version=unknown|verdict=unknown" \
+  "$(env -i HOME="$TMP/home" PATH="$BASE_BIN" BIONIC_CLAUDE_HOME="$NB_HOME_BOTH" \
+      bash -c '. "$1"; check_dep notebooklm' _ "$DEPS_SH" 2>&1)"
+
+# install_dep: the uv-tool install AND the skill-install step, one consent.
+: > "$CALLS"
+NB_INSTALL_HOME="$TMP/nb-install-home"; mkdir -p "$NB_INSTALL_HOME"
+INSTALL_OUT="$(env -i HOME="$TMP/home" PATH="$NB_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$NB_INSTALL_HOME" \
+  bash -c 'echo y | { . "$1"; install_dep notebooklm; }' _ "$DEPS_SH" 2>&1)"
+expect_match "install_dep notebooklm names both steps before asking (AC-5)" \
+  "*uv tool install notebooklm-py --quiet && notebooklm skill install*" "$INSTALL_OUT"
+expect_match "install_dep notebooklm really ran the uv-tool install (not vacuous)" \
+  "*uv tool install notebooklm-py --quiet*" "$(cat "$CALLS")"
+expect_match "install_dep notebooklm really ran 'notebooklm skill install' afterwards (AC-5)" \
+  "*notebooklm skill install*" "$(cat "$CALLS")"
+expect_true "…and confirms success with the standard 'installed.' line" \
+  bash -c 'printf "%s\n" "$1" | /usr/bin/grep -qx "  installed."' _ "$INSTALL_OUT"
+
+# A failing skill-install step must not be reported as a success — the CLI
+# installed, the skill did not, and that is not "installed." (the same rule
+# install_dep already enforces above for a failing brew/npm mechanism).
+NB_BIN_SKILLFAIL="$TMP/nb-bin-skillfail"; mkdir -p "$NB_BIN_SKILLFAIL"
+cp -R "$BASE_BIN/." "$NB_BIN_SKILLFAIL/" 2>/dev/null
+make_stub "$NB_BIN_SKILLFAIL" uv
+make_stub "$NB_BIN_SKILLFAIL" notebooklm 1
+: > "$CALLS"
+SKILLFAIL_OUT="$(env -i HOME="$TMP/home" PATH="$NB_BIN_SKILLFAIL" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$TMP/nb-skillfail-home" \
+  bash -c 'echo y | { . "$1"; install_dep notebooklm; }' _ "$DEPS_SH" 2>&1)"
+SKILLFAIL_RC=$?
+expect_true "a failing 'notebooklm skill install' exits non-zero" test "$SKILLFAIL_RC" -ne 0
+expect_false "…and is never reported as 'installed.'" \
+  bash -c 'printf "%s\n" "$1" | /usr/bin/grep -qx "  installed."' _ "$SKILLFAIL_OUT"
+
+# remove_dep: uv-tool uninstall AND the skill dir purged, one consent.
+NB_REMOVE_HOME="$TMP/nb-remove-home"; mkdir -p "$NB_REMOVE_HOME/skills/notebooklm"
+echo "# notebooklm skill" > "$NB_REMOVE_HOME/skills/notebooklm/SKILL.md"
+: > "$CALLS"
+REMOVE_OUT="$(env -i HOME="$TMP/home" PATH="$NB_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$NB_REMOVE_HOME" \
+  bash -c 'echo y | { . "$1"; remove_dep notebooklm; }' _ "$DEPS_SH" 2>&1)"
+expect_match "remove_dep notebooklm names both steps before asking" \
+  "*uv tool uninstall notebooklm-py && rm -rf*skills/notebooklm*" "$REMOVE_OUT"
+expect_match "remove_dep notebooklm really ran the uv-tool uninstall" \
+  "*uv tool uninstall notebooklm-py*" "$(cat "$CALLS")"
+expect_false "remove_dep notebooklm really removed the skill dir (not vacuous)" \
+  test -d "$NB_REMOVE_HOME/skills/notebooklm"
+expect_eq "check_dep notebooklm after remove -> no" \
+  "present=no|version=unknown|verdict=unknown" \
+  "$(env -i HOME="$TMP/home" PATH="$NB_BIN" BIONIC_CLAUDE_HOME="$NB_REMOVE_HOME" \
+      bash -c '. "$1"; check_dep notebooklm' _ "$DEPS_SH" 2>&1)"
+
+# A decline removes nothing — the skill dir survives, same consent gate as
+# every other mutation in this file.
+NB_DECLINE_HOME="$TMP/nb-decline-home"; mkdir -p "$NB_DECLINE_HOME/skills/notebooklm"
+echo "# notebooklm skill" > "$NB_DECLINE_HOME/skills/notebooklm/SKILL.md"
+: > "$CALLS"
+env -i HOME="$TMP/home" PATH="$NB_BIN" BIONIC_TEST_CALLS="$CALLS" \
+  BIONIC_CLAUDE_HOME="$NB_DECLINE_HOME" \
+  bash -c 'echo n | { . "$1"; remove_dep notebooklm; }' _ "$DEPS_SH" >/dev/null 2>&1
+expect_eq "remove_dep notebooklm with a decline ran nothing" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
+expect_true "…and the skill dir survives a decline" test -d "$NB_DECLINE_HOME/skills/notebooklm"
+
+echo ""
 echo "=== Group 9: detect_plugin_integrity — all three hook states ==="
 
 plant_hook_scripts() {  # <root> <name>...
