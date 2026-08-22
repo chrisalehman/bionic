@@ -359,15 +359,28 @@ _rm_file_has_line_matching() {  # <file> <ere>
 # a mode wider than the file it is replacing. An absent `stat` degrades to
 # "write, don't chmod" rather than to a refusal — the standalone door runs on the
 # machine with the bare /bin.
-_rm_mode_of() {  # <file> — the file's mode as chmod digits, empty if unknowable
-  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null
+#
+# AND IT IS THE TARGET'S MODE, NOT THE LINK'S (critic delta D1). A `~/.zshrc`
+# symlinked into a dotfiles repo is the commonest way people manage an rc, and a
+# bare `stat` on a symlink reports the LINK's own mode — 755 — never the file's.
+# Capturing that and handing it to `chmod` publishes the user's rc as
+# `rwxr-xr-x`: WIDER than the file being replaced, which is the one outcome this
+# capture exists to prevent, and wider than the no-capture code produced before
+# it (the tmp was simply born at the process umask). `-L` is what makes the
+# capture mean the file. Both flavours of `stat` take it.
+_rm_mode_of() {  # <file> — the mode of what <file> RESOLVES to, empty if unknowable
+  stat -L -f '%Lp' "$1" 2>/dev/null || stat -L -c '%a' "$1" 2>/dev/null
 }
 
 # Creates <tmp> empty, owned by this user alone, then widened to no more than the
-# mode of <file>. Callers append to it and rename it over <file>.
+# mode of <file>. Callers append to it and rename it over <file>. A tmp left
+# behind by an earlier interrupted run is REMOVED rather than truncated: `>` on an
+# existing file keeps that file's mode, so truncating one would carry a stale
+# width through the window `umask 077` exists to close.
 _rm_stage_tmp() {  # <tmp> <file>
   local tmp="$1" file="$2" mode
   mode="$(_rm_mode_of "$file")"
+  rm -f "$tmp"
   (umask 077; : > "$tmp") || return 1
   [ -n "$mode" ] && chmod "$mode" "$tmp"
   return 0
@@ -467,6 +480,10 @@ RM_DATA_DECLINED=0
 # whole pass reaches both. Asking twice would be asking a person to answer the
 # same thing twice, so the first caller closes the door behind it.
 RM_ORPHANS_OFFERED=0
+# THE FOLLOW-ON'S PRECONDITION, VISIBLE TO THE ITEM THAT IS NOT ITS PARENT
+# (critic delta D2). Set by the plugin item when its uninstall was owed and did
+# not land, and read by the roster's orphan entry a moment later.
+RM_PLUGIN_STILL_INSTALLED=0
 
 # ─── The roster ──────────────────────────────────────────────────────────────
 #
@@ -512,11 +529,15 @@ _rm_item_ids() {
 # idea of what is outstanding would come to disagree with the run it is a plan
 # FOR, which is the one defect a consent screen must not have.
 #
-# WHAT IS NOT ON THE PAGE. A follow-on — an item whose precondition another item
-# CREATES — cannot be named honestly before its parent runs: nothing is orphaned
-# until the uninstall lands, and the CLI's dry run says exactly that if asked
-# early. Those keep being asked inside the run, in place, which is the rule for
-# the class.
+# A FOLLOW-ON IS NAMED BY ITS ACT, NOT BY ITS SUBJECTS. An item whose precondition
+# another item CREATES cannot list what it will touch before its parent runs —
+# nothing is orphaned until the uninstall lands, and the CLI's dry run says
+# exactly that if asked early. What it CAN state is the act and the honest reason
+# the list is not here yet, and under `--all` it must: the one question is asked
+# over this page, so an act missing from it would run on an answer nobody was
+# asked for. `_rm_print_plan` below prints that conditional line under the parent
+# it depends on; the run then holds to the condition the line states, and skips
+# the follow-on when the parent did not land.
 
 # What one item changes, in the words the item's own question uses. Product
 # words only: this lands on a person's screen, and it is the only description
@@ -1415,6 +1436,16 @@ _rm_item_plugin() {
   # Only in a narrowed run, and only after a real uninstall: a whole pass already
   # reaches the roster's own entry a moment later, and an uninstall that never
   # happened orphaned nothing.
+  #
+  # THE SAME CONDITION, HANDED TO THE ROSTER ENTRY. A whole pass reaches
+  # `_rm_item_orphans` next, and that entry has no `rm_uninstall_ok` of its own —
+  # so it is told here, by the item that knows. "The uninstall was owed and did
+  # not land" covers a failure, a decline, and an EOF alike: in all three the
+  # plugin is still installed, and the page's sentence is about what removing it
+  # would leave behind.
+  if [ -n "$rm_plugin_id" ] && [ "$rm_uninstall_ok" != "1" ]; then
+    RM_PLUGIN_STILL_INSTALLED=1
+  fi
   if [ "$RM_ONLY" = "plugin" ] && [ "$rm_uninstall_ok" = "1" ]; then
     _rm_offer_orphans
   fi
@@ -1429,6 +1460,29 @@ _rm_item_plugin() {
 
 _rm_item_orphans() {
   _rm_wants orphaned-dependencies || return 0
+  # THE PAGE SAID "THE UNINSTALL LEAVES", SO THE RUN WAITS FOR THE UNINSTALL
+  # (critic delta D2). Under `--all` the plugin row's presence replaces this
+  # item's own line with a conditional one — "remove any dependencies the
+  # uninstall leaves orphaned (checked after the plugin is removed)" — and that
+  # sentence is the ENTIRE consent obtained for the prune. If the uninstall did
+  # not land, the condition it names did not happen, so nothing the CLI reports
+  # now was left by it; running `claude plugin prune` anyway takes precisely the
+  # auto-installed rows the roster refuses to offer BY NAME in any mode, on an
+  # answer given for a different event. `--only plugin` already gates its own
+  # offer on the same fact.
+  #
+  # ONLY UNDER `--all`, BECAUSE THAT IS WHERE THE CONSENT WAS COLLAPSED. A
+  # per-item pass asks this item's own question in place, with the CLI's list of
+  # names printed above it — a person declining the uninstall and then pruning
+  # dependencies they can read is consenting to exactly what happens, and this
+  # item's standalone case (coming back for orphans alone) lives on that path.
+  # Gating there would refuse a question nobody has a reason to refuse.
+  if [ "$RM_ALL" = "1" ] && [ "$RM_PLUGIN_STILL_INSTALLED" = "1" ]; then
+    echo "orphaned dependencies:"
+    _rm_clean "orphaned dependencies (the plugin is still installed, so nothing is orphaned)"
+    echo ""
+    return 0
+  fi
   _rm_offer_orphans
 }
 
