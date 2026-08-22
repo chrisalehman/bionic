@@ -753,7 +753,7 @@ BARRIER
 # have each fixture drive append its labels to the operator's timing file — a
 # write outside the fixture root, which is the one thing S8's isolation audit
 # exists to forbid. Empty means "as shipped": the runner's own
-# `${BIONIC_TEST_JOBS:-4}` reads an empty value as unset.
+# `${BIONIC_TEST_JOBS:-8}` reads an empty value as unset.
 DRIVE_RC=0
 DRIVE_JOBS=""      # per-arm job count; "" = the runner's shipped default
 DRIVE_TIMING=""    # per-arm timing file; "" = timing off
@@ -858,38 +858,49 @@ expect_eq "…and it still fails the run (parallel)" "1" "$_a4_parallel_rc"
 
 # ---------- 9.5 the default job count is exactly 4 ----------
 
-# Four barrier suites needing four peers: passes only if four ran at once.
+# Eight barrier suites needing eight peers: passes only if eight ran at once.
+# This is the FLOOR half of the fingerprint — A6 below is the ceiling half, and
+# only the pair pins the default to exactly eight. A floor alone would still be
+# green on a runner that ran the whole roster at once.
 A5="$RUNNER_TMP/a5"
 mk_runner "$A5" \
   'run "b1.test.sh" bash tests/fx/barrier.sh' \
   'run "b2.test.sh" bash tests/fx/barrier.sh' \
   'run "b3.test.sh" bash tests/fx/barrier.sh' \
-  'run "b4.test.sh" bash tests/fx/barrier.sh'
+  'run "b4.test.sh" bash tests/fx/barrier.sh' \
+  'run "b5.test.sh" bash tests/fx/barrier.sh' \
+  'run "b6.test.sh" bash tests/fx/barrier.sh' \
+  'run "b7.test.sh" bash tests/fx/barrier.sh' \
+  'run "b8.test.sh" bash tests/fx/barrier.sh'
 mk_fixture_suites "$A5"
-export BARRIER_FILE="$A5/barrier" BARRIER_N=4
+export BARRIER_FILE="$A5/barrier" BARRIER_N=8
 drive "$A5" "$A5/out.txt"
 unset BARRIER_FILE BARRIER_N
-expect_true "the default mode really runs four suites at once" \
-  /usr/bin/grep -qF "Gating: 4 passed, 0 failed" "$A5/out.txt"
+expect_true "the default mode really runs eight suites at once" \
+  /usr/bin/grep -qF "Gating: 8 passed, 0 failed" "$A5/out.txt"
 
-# Five barrier suites needing five peers: the first four time out together, the
-# fifth starts as they die and sees all five lines. `1 passed, 4 failed` is the
-# fingerprint of a job count of exactly four — a count of five would be 5 passed.
+# Nine barrier suites needing nine peers: the first eight time out together, the
+# ninth starts as they die and sees all nine lines. `1 passed, 8 failed` is the
+# fingerprint of a job count of exactly eight — a count of nine would be 9 passed.
 A6="$RUNNER_TMP/a6"
 mk_runner "$A6" \
   'run "b1.test.sh" bash tests/fx/barrier.sh' \
   'run "b2.test.sh" bash tests/fx/barrier.sh' \
   'run "b3.test.sh" bash tests/fx/barrier.sh' \
   'run "b4.test.sh" bash tests/fx/barrier.sh' \
-  'run "b5.test.sh" bash tests/fx/barrier.sh'
+  'run "b5.test.sh" bash tests/fx/barrier.sh' \
+  'run "b6.test.sh" bash tests/fx/barrier.sh' \
+  'run "b7.test.sh" bash tests/fx/barrier.sh' \
+  'run "b8.test.sh" bash tests/fx/barrier.sh' \
+  'run "b9.test.sh" bash tests/fx/barrier.sh'
 mk_fixture_suites "$A6"
-export BARRIER_FILE="$A6/barrier" BARRIER_N=5
+export BARRIER_FILE="$A6/barrier" BARRIER_N=9
 drive "$A6" "$A6/out.txt"
 unset BARRIER_FILE BARRIER_N
-expect_true "…and not five — the default is bounded, well below the roster size (A4.2)" \
-  /usr/bin/grep -qF "Gating: 1 passed, 4 failed" "$A6/out.txt"
+expect_true "…and not nine — the default is bounded, well below the roster size (A4.2)" \
+  /usr/bin/grep -qF "Gating: 1 passed, 8 failed" "$A6/out.txt"
 expect_true "the default job count is named as a settable knob in the runner" \
-  /usr/bin/grep -qF 'BIONIC_TEST_JOBS:-4' "$RUN_SH_UNDER_TEST"
+  /usr/bin/grep -qF 'BIONIC_TEST_JOBS:-8' "$RUN_SH_UNDER_TEST"
 
 # ---------- 9.6 BIONIC_TEST_JOBS overrides it, and --serial means one ----------
 
@@ -996,8 +1007,8 @@ expect_false "…and does not run a single suite" \
 _run_helper_count="$(/usr/bin/grep -c '^run() {' "$RUN_SH_UNDER_TEST" || true)"
 expect_eq "exactly one roster helper defines what gets run" "1" "$_run_helper_count"
 _roster_lines="$(/usr/bin/grep -c '^run "' "$RUN_SH_UNDER_TEST" || true)"
-expect_true "the roster is still the hand-listed run lines (45 of them today)" \
-  [ "$_roster_lines" -ge 45 ]
+expect_true "the roster is still the hand-listed run lines (40 of them today)" \
+  [ "$_roster_lines" -ge 40 ]
 expect_false "no discovery glob has crept in beside them" \
   /usr/bin/grep -qE '^[^#]*for .* in .*tests/\*\.test\.sh' "$RUN_SH_UNDER_TEST"
 
