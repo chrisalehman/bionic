@@ -359,6 +359,33 @@ STUB
   chmod +x "$arm/bin/claude"
 }
 
+# `claude` stub whose UNINSTALL FAILS while the dry run still names orphans. The
+# combination is deliberate: a gate that merely echoed the CLI's own answer would
+# pass against a stub that goes quiet after a failure. Here the CLI keeps offering
+# the prune, and the only thing that may stop it is remove.sh knowing its own
+# uninstall did not land.
+plant_claude_stub_uninstall_fails() {  # <arm>
+  local arm="$1"
+  cat > "$arm/bin/claude" <<'STUB'
+#!/bin/bash
+echo "claude $*" >> "$BIONIC_TEST_CALLS"
+case "$*" in
+  "plugin list --json")
+    printf '%s\n' '[{"id":"bionic@bionic","version":"0.1.0","scope":"user","enabled":true}]' ;;
+  "plugin prune --dry-run")
+    printf '%s\n' '2 auto-installed plugins no longer needed at user scope:
+  superpowers@bionic (6.3.0)
+  agent-skills@bionic (0.6.7)
+(dry run — nothing removed)' ;;
+  "plugin uninstall"*)
+    echo "error: the plugin could not be uninstalled" >&2; exit 1 ;;
+  "mcp get"*) exit 1 ;;
+esac
+exit 0
+STUB
+  chmod +x "$arm/bin/claude"
+}
+
 answers_file() {  # <path> <token> [count]
   local path="$1" token="$2" count="${3:-60}" i
   : > "$path"
@@ -862,6 +889,10 @@ expect_not_contains "filter mode arm: the export really was removed (not vacuous
   "export CLAUDE_CODE_ENABLE_TODO_TOOLS=1"$'\n' "$(cat "$ARM/home/.zshrc")"
 expect_eq "_rm_filter_out_lines leaves a 0600 rc at 0600" \
   "600" "$(file_mode "$ARM/home/.zshrc")"
+# An empty log satisfies the emptiness assertion below, so the log is proved
+# non-empty first — this fixture passed three arms vacuously once already.
+expect_true "filter mode arm: the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q '\.zshrc\.bionic\.tmp' "$ARM/mv.log"
 expect_eq "…and its staged copy was 0600 before the rename too" "" \
   "$(/usr/bin/grep '\.zshrc\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
 
@@ -877,7 +908,76 @@ expect_not_contains "alias mode arm: the block really was stripped (not vacuous)
   "bionic:start" "$(cat "$ARM/home/.zshrc")"
 expect_eq "the alias-block strip leaves a 0600 rc at 0600" \
   "600" "$(file_mode "$ARM/home/.zshrc")"
+expect_true "alias mode arm: the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q '\.zshrc\.bionic\.tmp' "$ARM/mv.log"
 expect_eq "…and its staged copy was 0600 before the rename too" "" \
+  "$(/usr/bin/grep '\.zshrc\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
+
+# ─── THE RC THAT IS A SYMLINK (critic delta D1) ──────────────────────────────
+#
+# `stat -f '%Lp' <symlink>` reports the LINK's own mode and never consults the
+# file it points at. A `~/.zshrc` symlinked into a dotfiles repo is the commonest
+# way people manage an rc, so a mode capture that does not dereference hands
+# `chmod` the link's mode — 755 — and the rewrite publishes the user's rc, tokens
+# included, as `rwxr-xr-x`. That is WIDER than the file it replaced, which is the
+# one outcome the capture exists to prevent; before the mode was captured at all
+# the same run produced 0600, because the tmp was simply born at `umask 077`. So
+# both remove.sh writers get an arm, and `stat -L` is what makes them pass.
+#
+# WHAT THESE ARMS DO NOT CLAIM. `mv` has always replaced the link with a regular
+# file — pre-S12's `_rm_filter_out_lines` (`git show 273d3c5:payload/scripts/remove.sh`)
+# staged and renamed exactly the same way — so the rewrite detaches the rc from
+# the dotfiles repo. That is recorded here as standing behaviour, not endorsed:
+# changing it is a separate act, and an arm that pinned the link's survival today
+# would be pinning a fix nobody has made.
+symlink_rc() {  # <arm> — makes <arm>/home/.zshrc a link to <arm>/dotfiles/zshrc
+  mkdir -p "$1/dotfiles"
+  mv "$1/home/.zshrc" "$1/dotfiles/zshrc"
+  ln -s "$1/dotfiles/zshrc" "$1/home/.zshrc"
+}
+
+# The marker-block writer, `_rm_strip_marker_block`, on a symlinked 0600 rc.
+ARM="$(new_arm alias-rc-symlink-600)"
+plant_zshrc_marked "$ARM"
+plant_claude_stub "$ARM" no no
+symlink_rc "$ARM"
+chmod 600 "$ARM/dotfiles/zshrc"
+expect_eq "fixture: the symlinked rc's TARGET really is 0600" \
+  "600" "$(file_mode "$ARM/dotfiles/zshrc")"
+expect_not_contains "fixture: …and the LINK's own mode is not it — this is the trap" \
+  "600" "$(file_mode "$ARM/home/.zshrc")"
+REMOVE_FLAGS="--only legacy-alias"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES" BIONIC_TEST_MV_LOG="$ARM/mv.log")"
+REMOVE_FLAGS=""
+expect_not_contains "symlink arm: the block really was stripped (not vacuous)" \
+  "bionic:start" "$(cat "$ARM/home/.zshrc")"
+expect_eq "a symlinked rc is published at its TARGET's 0600, never the link's 755" \
+  "600" "$(file_mode "$ARM/home/.zshrc")"
+expect_true "symlink arm: the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q '\.zshrc\.bionic\.tmp' "$ARM/mv.log"
+expect_eq "…and no staged copy of it was ever wider than 0600 either" "" \
+  "$(/usr/bin/grep '\.zshrc\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
+
+# The other writer, `_rm_filter_out_lines`, on the same shape.
+ARM="$(new_arm env-rc-filter-symlink-600)"
+printf 'export EDITOR=vim\nexport SOME_API_TOKEN=sk-fixture-not-a-real-secret\n' > "$ARM/home/.zshrc"
+plant_todo_export "$ARM"
+plant_env_settings "$ARM"
+plant_claude_stub "$ARM" no no
+symlink_rc "$ARM"
+chmod 600 "$ARM/dotfiles/zshrc"
+expect_eq "fixture: the filter arm's symlink target really is 0600" \
+  "600" "$(file_mode "$ARM/dotfiles/zshrc")"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES" BIONIC_TEST_MV_LOG="$ARM/mv.log")"
+REMOVE_FLAGS=""
+expect_not_contains "symlink filter arm: the export really was removed (not vacuous)" \
+  "export CLAUDE_CODE_ENABLE_TODO_TOOLS=1"$'\n' "$(cat "$ARM/home/.zshrc")"
+expect_eq "_rm_filter_out_lines publishes a symlinked rc at its target's 0600 too" \
+  "600" "$(file_mode "$ARM/home/.zshrc")"
+expect_true "symlink filter arm: the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q '\.zshrc\.bionic\.tmp' "$ARM/mv.log"
+expect_eq "…and its staged copy was never wider than 0600 either" "" \
   "$(/usr/bin/grep '\.zshrc\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
 
 ARM="$(new_arm lib-strip-mode)"
@@ -2499,6 +2599,53 @@ expect_not_contains "orphans standalone: no plugin row, so no conditional line" 
 expect_contains "orphans standalone: the roster entry names itself on the page" \
   "• remove the dependencies nothing needs any more (claude plugin prune)" "$STANDALONE_PLAN"
 expect_contains "orphans standalone: and the one answer runs it" \
+  "plugin prune --yes" "$(cat "$ARM/calls.log")"
+
+# ---- the uninstall FAILED, so nothing it would have orphaned is orphaned ----
+#
+# The page's only sentence about this act is "remove any dependencies the uninstall
+# leaves orphaned (checked after the plugin is removed)". If the plugin was not
+# removed, a prune run anyway is an act the user consented to on a condition that
+# did not happen — and `claude plugin prune` takes precisely the core rows the
+# roster refuses to offer by name in any mode. `--only plugin` already gates its
+# offer on the uninstall landing; the whole pass reaches the roster's own entry a
+# moment later and must hold to the same rule.
+ARM="$(new_arm all-uninstall-fails-no-prune)"
+plant_never_list "$ARM"
+plant_zshrc_marked "$ARM"
+plant_claude_stub_uninstall_fails "$ARM"
+REMOVE_FLAGS="--all"
+FAILED_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_YES")"
+REMOVE_FLAGS=""
+FAILED_CALLS="$(cat "$ARM/calls.log")"
+expect_contains "failed uninstall: the plan still named the follow-on (arm is on the right path)" \
+  "• remove any dependencies the uninstall leaves orphaned" "${FAILED_OUT%%Do all of the above?*}"
+expect_contains "failed uninstall: the uninstall really was attempted (not vacuous)" \
+  "plugin uninstall bionic@bionic" "$FAILED_CALLS"
+expect_contains "failed uninstall: …and it really failed" \
+  "the plugin is still registered" "$FAILED_OUT"
+expect_not_contains "a failed uninstall orphans nothing: prune --yes must not run" \
+  "plugin prune --yes" "$FAILED_CALLS"
+expect_contains "…and the run says why the follow-on was skipped" \
+  "the plugin is still installed, so nothing is orphaned" "$FAILED_OUT"
+
+# The same failure in a PER-ITEM pass still asks. The gate above exists because
+# `--all` collapses every question into one page, so the conditional line is the
+# only consent the prune ever gets. Here the item asks in place, with the CLI's
+# list of names printed above the question — a person who reads those names and
+# says yes consented to exactly what runs, and this item's standalone case
+# (coming back for the orphans alone) lives on this path. Suppressing it here
+# would refuse a question nobody has a reason to refuse.
+ARM="$(new_arm peritem-uninstall-fails-still-asks)"
+plant_never_list "$ARM"
+plant_zshrc_marked "$ARM"
+plant_claude_stub_uninstall_fails "$ARM"
+PERITEM_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+expect_contains "per-item pass: a failed uninstall really did happen here too (not vacuous)" \
+  "the plugin is still registered" "$PERITEM_OUT"
+expect_contains "per-item pass: the orphan question is still asked, with its names" \
+  "superpowers@bionic" "$PERITEM_OUT"
+expect_contains "…and the answer given in place is what runs it" \
   "plugin prune --yes" "$(cat "$ARM/calls.log")"
 
 # ---- a machine with no orphans does not get a line about them ----

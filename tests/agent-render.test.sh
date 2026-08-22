@@ -311,12 +311,16 @@ DOCTRINE_PRESENT
     else
       pass "agents/$r.md: retired doctrine is gone: $label"
     fi
+  # THE MECHANISM, NOT THE WORD (critic delta D5). The `disown` needle is spelled
+  # `& disown` — the forbidden SHAPE — because a bare `disown` also fails any role
+  # file that merely states the standing rule ("never arm a sweeper with
+  # `& disown`"). A retirement pin must not forbid saying what was retired.
   done <<'DOCTRINE_ABSENT'
 no sleep-5 poll loop|sleep 5
 no fixed ~120-second threshold|roughly 120
 no auto-backgrounds framing|auto-backgrounds
 no nohup — a mechanism with no evidence and the wrong survival semantics|nohup
-no shell background job|disown
+no shell background job|& disown
 DOCTRINE_ABSENT
 done
 
