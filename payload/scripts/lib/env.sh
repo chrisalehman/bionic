@@ -54,12 +54,12 @@ fi
 
 # ─── The names bionic owns ───────────────────────────────────────────────────
 #
-# TWO, AND THE LIST IS THE ROSTER. setup writes this list, remove deletes this
-# list, doctor reports this list. A third name is added here and reaches all
-# three; a name added in one of them and not here is a name nothing else can
-# see. Space-separated rather than an array because bash 3.2 is the floor and a
-# word-split loop is the one form every caller can write identically.
-ENV_KEYS="CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS"
+# THE LIST IS THE ROSTER. setup writes this list, remove deletes this list,
+# doctor reports this list. A name added here reaches all three; a name added in
+# one of them and not here is a name nothing else can see. Space-separated rather
+# than an array because bash 3.2 is the floor and a word-split loop is the one
+# form every caller can write identically.
+ENV_KEYS="CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
 
 # The value each name carries, and why:
 #
@@ -76,11 +76,23 @@ ENV_KEYS="CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS"
 #                                      and its result is lost. Thirty minutes is
 #                                      the smallest value larger than the
 #                                      longest command bionic runs.
+#   CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+#                                    — the teammate channel a dispatched agent
+#                                      reports back through. bionic's whole
+#                                      orchestration model is a session that
+#                                      dispatches writers and reads their
+#                                      deliveries; without this the CLI gates
+#                                      that off and the model has no channel.
+#                                      Carried forward at epic-18 T4 from the
+#                                      retired installer's roster, where it was
+#                                      an `env-var` line the port dropped in
+#                                      silence (AC-8).
 env_default() {  # <key> — prints the value, exit 1 if the key is not bionic's
   case "${1:-}" in
-    CLAUDE_CODE_ENABLE_TODO_TOOLS) echo "1" ;;
-    BASH_MAX_TIMEOUT_MS)           echo "1800000" ;;
-    *)                             return 1 ;;
+    CLAUDE_CODE_ENABLE_TODO_TOOLS)        echo "1" ;;
+    BASH_MAX_TIMEOUT_MS)                  echo "1800000" ;;
+    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS) echo "1" ;;
+    *)                                    return 1 ;;
   esac
   return 0
 }
