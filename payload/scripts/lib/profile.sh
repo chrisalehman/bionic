@@ -76,6 +76,35 @@ _profile_self_dir() {
   case "$self" in */*) echo "${self%/*}" ;; *) echo "." ;; esac
 }
 
+# THE SYMLINK RESOLVER, one of four byte-identical copies (critic delta 2 N1).
+# Every writer in this payload resolves the path it is about to rewrite to the
+# final target of its symlink chain and publishes onto THAT, so a `~/.zshrc` or
+# `~/.claude/settings.json` symlinked into a dotfiles repo is REWRITTEN rather
+# than replaced by a detached regular file while the repo keeps the old content.
+# lib/deps.sh carries the full reasoning, the portability note (no `realpath`, no
+# `readlink -f`) and the degradation contract.
+#
+# WHY A COPY AND NOT A SOURCE. This file is sourced on its own — by the suites,
+# and by callers that load no other library — so it cannot assume deps.sh came
+# first; and remove.sh's standalone door runs where scripts/lib/ is already gone.
+# A `. deps.sh` here would also break every mutation arm that runs a doctored
+# COPY of this file from a scratch directory. The four copies are pinned
+# byte-identical in tests/remove.test.sh, which is the same wall the settings
+# writer's two copies stand behind.
+bionic_link_target() {  # <path> — the final target of a symlink chain, else <path>
+  local p="${1:-}" link dir n=0
+  while [ -L "$p" ] && [ "$n" -lt 40 ]; do
+    link="$(readlink "$p" 2>/dev/null)" || break
+    [ -n "$link" ] || break
+    case "$link" in
+      /*) p="$link" ;;
+      *)  dir="${p%/*}"; [ "$dir" = "$p" ] && dir="."; p="${dir}/${link}" ;;
+    esac
+    n=$((n + 1))
+  done
+  printf '%s\n' "$p"
+}
+
 # The render target: where this machine keeps the plugin.
 _profile_plugin_root() {
   if [ -n "${BIONIC_PLUGIN_ROOT:-}" ]; then echo "$BIONIC_PLUGIN_ROOT"; return; fi
@@ -279,10 +308,20 @@ profile_apply() {  # <rendered-file> <consent-token>
 # honest degradation the rest of the payload practises rather than a hard new
 # dependency.
 #
-# AND IT IS THE TARGET'S MODE, NOT THE LINK'S (S14). A settings.json symlinked
-# into a dotfiles repo is the commonest way people manage it, and a bare `stat`
-# on a symlink reports the LINK's own mode — 755 — never the file's. `-L` makes
-# the capture mean the file; the stale tmp is `rm -f`'d rather than truncated,
+# AND IT IS THE TARGET, NOT THE LINK — THE FILE AS WELL AS ITS MODE (S14, then
+# critic delta 2 N1/N4). A settings.json symlinked into a dotfiles repo is the
+# commonest way people manage it. `bionic_link_target` resolves the chain first,
+# so the tmp is staged beside the TARGET and the rename lands on it: the link
+# survives and the dotfiles file is what changes, instead of the link being
+# replaced by a regular file while the repo keeps the old content. The mode is
+# then read off that resolved path.
+#
+# `-L` ALONE IS NOT ENOUGH, WHICH IS WHY `[ -e ]` IS THERE. BSD `stat -L` on a
+# link whose target does not exist falls back to the LINK and exits 0 — it
+# reports 755, not an error — so `-L` by itself would hand `chmod` a 755 for a
+# dangling link and publish this file, tokens included, world-readable. `[ -e ]`
+# routes that into the "no mode" path the writer already has, where the tmp keeps
+# the 0600 `umask 077` gave it. The stale tmp is `rm -f`'d rather than truncated,
 # because `>` on an existing file keeps that file's mode and would carry a
 # leftover wide mode through the write until the chmod below caught up.
 #
@@ -290,8 +329,11 @@ profile_apply() {  # <rendered-file> <consent-token>
 # way in tests/remove.test.sh — the seam this crosses is the same one the strip
 # program crosses, for the same reason.
 _profile_write() {  # <file> <content> <trailing-newline 0|1>
-  local file="$1" content="$2" nl="$3" tmp="${1}.bionic.tmp" mode
+  local file content="$2" nl="$3" tmp mode
+  file="$(bionic_link_target "$1")"
+  tmp="${file}.bionic.tmp"
   mode="$(stat -L -f '%Lp' "$file" 2>/dev/null || stat -L -c '%a' "$file" 2>/dev/null)"
+  [ -e "$file" ] || mode=""
   rm -f "$tmp"
   if [ "$nl" = "1" ]; then (umask 077; printf '%s\n' "$content" > "$tmp"); else (umask 077; printf '%s' "$content" > "$tmp"); fi
   [ -n "$mode" ] && chmod "$mode" "$tmp"

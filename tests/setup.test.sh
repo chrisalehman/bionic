@@ -92,7 +92,11 @@ BIN="$TMP/bin"; mkdir -p "$BIN"
 # `sleep` earns its place: it is what the probe bound polls with, and without it
 # on PATH `detect_bounded` degrades to an unbounded `wait` by design. A fixture
 # PATH missing it would make Group 14 measure the degradation instead of the bound.
-for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat ls tr head tail sort uniq wc \
+# `readlink` earns its place the same way (S15): both rc rewriters resolve a
+# symlinked rc to its final target before staging, so the dotfiles file is
+# rewritten rather than detached. Absent `readlink` they degrade to writing the
+# path as given, so a PATH without it measures the degradation, not the fix.
+for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail sort uniq wc \
             jq mktemp find xargs shasum uname date touch diff printf true false sleep; do
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BIN}/${real}" 2>/dev/null
 done
@@ -118,6 +122,28 @@ fi
 exec "$SETUP_MV_REAL" "\$@"
 MVSTUB
 chmod +x "${BIN}/mv"
+
+# `awk` WITH A DURING-WRITE WITNESS (critic delta 2 N5). The `mv` witness above
+# measures the staged copy at the RENAME, which is one instant too late to see
+# the window this staging order exists to close: the span in which the tmp file
+# already holds the whole rc — tokens included — but has not been published yet.
+# `_setup_rc_strip_block` writes that content with `awk … > "$tmp"`, and the
+# shell opens the redirect before `awk` is exec'd, so a wrapper on `awk` reads
+# the tmp's mode at exactly the moment it starts holding content. Inert unless an
+# arm sets both BIONIC_TEST_STAGE_LOG and BIONIC_TEST_STAGE_TMP.
+SETUP_AWK_REAL="$(command -v awk 2>/dev/null)"
+rm -f "${BIN}/awk"
+cat > "${BIN}/awk" <<AWKSTUB
+#!/bin/bash
+if [ -n "\${BIONIC_TEST_STAGE_LOG:-}" ] && [ -n "\${BIONIC_TEST_STAGE_TMP:-}" ] \
+   && [ -e "\$BIONIC_TEST_STAGE_TMP" ]; then
+  printf '%s %s\n' \
+    "\$(stat -f '%Lp' "\$BIONIC_TEST_STAGE_TMP" 2>/dev/null || stat -c '%a' "\$BIONIC_TEST_STAGE_TMP" 2>/dev/null)" \
+    "\$BIONIC_TEST_STAGE_TMP" >> "\$BIONIC_TEST_STAGE_LOG"
+fi
+exec "$SETUP_AWK_REAL" "\$@"
+AWKSTUB
+chmod +x "${BIN}/awk"
 
 # A bin dir with everything above EXCEPT jq — the honest-unknown arms.
 NOJQ_BIN="$TMP/bin-nojq"; mkdir -p "$NOJQ_BIN"
@@ -849,7 +875,15 @@ expect_match "legacy unmarked variant: the user's own rc lines survive" '*export
 # (lib/env.sh's header states the reasoning): capture the mode, stage under
 # `umask 077`, chmod BEFORE the rename. Both directions, and the witness above
 # measures the staged copy rather than only the published one.
-file_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
+# DEREFERENCING, deliberately (critic delta 2 N1). The property under test is the
+# mode of the file the writer PUBLISHED, and for a symlinked rc or settings.json
+# that file is the link's target. The non-`-L` spelling reads the link's own 755
+# and is satisfiable only by a writer that DESTROYS the link — the exact
+# behaviour S15 fixed away from — so it would pin the defect. `link_own_mode`
+# below is the non-dereferencing reader, used only where the LINK's own mode is
+# the thing being asserted about (the "this is the trap" fixture lines).
+file_mode() { stat -L -f '%Lp' "$1" 2>/dev/null || stat -L -c '%a' "$1" 2>/dev/null; }
+link_own_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
 
 new_fixture alias-marked-mode-600
 plant_cli_plugin "bionic@bionic" true
@@ -903,6 +937,49 @@ OUT="$(run_setup "$YES")"
 expect_eq "setup does not narrow a 0644 rc on the unmarked path either" \
   "644" "$(file_mode "$FIX/rc")"
 
+# ─── ONE STAGING ORDER, MEASURED WHERE IT MATTERS (critic delta 2 N5) ────────
+#
+# S13 restructured both setup writers onto `_setup_stage_tmp` in the order
+# "create empty under `umask 077` → chmod to the target's mode → caller writes",
+# recorded as neutral. It was not neutral: on a 0644 rc under `umask 022` the tmp
+# was already 0644 at the instant it began holding the whole file, where the
+# pre-S13 order left it at 0600 until the publish. S14 then declined the same
+# reorder for the four one-shot writers on the opposite reading of the same
+# sentence, so the two doors disagreed about their own rule. S15 settles it in
+# one direction for every writer: create at 0600, WRITE, chmod to the target's
+# mode, rename. The tmp is never wider than 0600 while it holds content, and it
+# is never wider than the file it replaces once it does.
+#
+# Both instants are asserted here, because either alone is satisfiable by the
+# wrong order: 0600 DURING the write (the awk witness) and the target's 0644 AT
+# the rename (the mv witness). `umask 022` is set explicitly — the property is
+# about what the umask would otherwise have produced, so inheriting the runner's
+# is measuring nothing in particular.
+new_fixture stage-order-644
+plant_cli_plugin "bionic@bionic" true
+printf 'export PATH="$HOME/bin:$PATH"\nexport SOME_API_TOKEN=sk-fixture-not-a-real-secret\n\n%s\n%s\n%s\n' \
+  "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
+chmod 644 "$FIX/rc"
+STAGE_LOG="$TMP/stage-order-644.log";    : > "$STAGE_LOG"
+STAGE_MV_LOG="$TMP/stage-order-644-mv.log"; : > "$STAGE_MV_LOG"
+SAVED_UMASK="$(umask)"; umask 022
+OUT="$(run_setup "$YES" \
+  BIONIC_TEST_STAGE_LOG="$STAGE_LOG" \
+  BIONIC_TEST_STAGE_TMP="$FIX/rc.bionic.tmp" \
+  BIONIC_TEST_MV_LOG="$STAGE_MV_LOG")"
+umask "$SAVED_UMASK"
+expect_no_match "stage-order arm: the block really was stripped (not vacuous)" \
+  "*${ALIAS_START}*" "$(cat "$FIX/rc")"
+expect_true "stage-order arm: the during-write witness really fired (not vacuous)" \
+  test -s "$STAGE_LOG"
+expect_eq "the staged rc is 0600 while it HOLDS the content, whatever the umask says" "" \
+  "$(/usr/bin/grep -v '^600 ' "$STAGE_LOG" 2>/dev/null || true)"
+expect_true "stage-order arm: the mv witness really fired too (not vacuous)" \
+  /usr/bin/grep -q 'rc\.bionic\.tmp' "$STAGE_MV_LOG"
+expect_eq "…and it wears the target's 0644 at the RENAME, not one instant before it" "" \
+  "$(/usr/bin/grep 'rc\.bionic\.tmp' "$STAGE_MV_LOG" 2>/dev/null | /usr/bin/grep -v '^644 ' || true)"
+expect_eq "…and the published rc is the 0644 it started as" "644" "$(file_mode "$FIX/rc")"
+
 # ─── THE RC THAT IS A SYMLINK (critic delta D1) ──────────────────────────────
 #
 # `stat -f '%Lp' <symlink>` reports the LINK's own mode — 755 — and never consults
@@ -912,8 +989,11 @@ expect_eq "setup does not narrow a 0644 rc on the unmarked path either" \
 # replaced, which is the one outcome the capture exists to prevent. Both setup
 # writers get an arm; `stat -L` is what makes them pass.
 #
-# The rename detaching the link from the dotfiles repo is standing behaviour and
-# is not asserted either way here — see remove.test.sh's note on the same shape.
+# AND THE LINK SURVIVES (critic delta 2 N1, decided at A6.S15.1). The rename used
+# to replace the link with a regular file, leaving the dotfiles repo still holding
+# the block setup had just reported removed. Both writers now resolve to the
+# link's final target and publish onto it; each arm asserts the link still exists,
+# still points where it did, and that the TARGET is what changed.
 symlink_rc() {  # turns $FIX/rc into a link to $FIX/dotfiles/rc
   mkdir -p "$FIX/dotfiles"
   command mv "$FIX/rc" "$FIX/dotfiles/rc"
@@ -929,12 +1009,16 @@ chmod 600 "$FIX/dotfiles/rc"
 expect_eq "fixture: the symlinked rc's TARGET really is 0600" \
   "600" "$(file_mode "$FIX/dotfiles/rc")"
 expect_no_match "fixture: …and the LINK's own mode is not it — this is the trap" \
-  "600" "$(file_mode "$FIX/rc")"
+  "600" "$(link_own_mode "$FIX/rc")"
 OUT="$(run_setup "$YES" BIONIC_TEST_MV_LOG="$TMP/mv-alias-symlink-600.log")"
 expect_no_match "symlink arm: the block really was stripped (not vacuous)" \
   "*${ALIAS_START}*" "$(cat "$FIX/rc")"
 expect_eq "a symlinked rc is published at its TARGET's 0600, never the link's 755" \
   "600" "$(file_mode "$FIX/rc")"
+expect_true "symlink arm: the rc is STILL a symlink after the strip" test -L "$FIX/rc"
+expect_eq "…and still points where it did" "$FIX/dotfiles/rc" "$(readlink "$FIX/rc")"
+expect_no_match "…and it is the TARGET that was rewritten, not a detached copy" \
+  "*${ALIAS_START}*" "$(cat "$FIX/dotfiles/rc")"
 expect_true "symlink arm: the mv witness really saw the rc rename (not vacuous)" \
   /usr/bin/grep -q 'rc\.bionic\.tmp' "$TMP/mv-alias-symlink-600.log"
 expect_eq "…and no staged copy of it was ever wider than 0600 either" "" \
@@ -954,6 +1038,10 @@ expect_no_match "unmarked symlink arm: the alias really was removed (not vacuous
   '*dangerously-skip-permissions*' "$(cat "$FIX/rc")"
 expect_eq "the unmarked-alias rewrite publishes a symlinked rc at its target's 0600 too" \
   "600" "$(file_mode "$FIX/rc")"
+expect_true "unmarked symlink arm: the rc is STILL a symlink after the rewrite" test -L "$FIX/rc"
+expect_eq "…and still points where it did" "$FIX/dotfiles/rc" "$(readlink "$FIX/rc")"
+expect_no_match "…and it is the TARGET that lost the alias, not a detached copy" \
+  '*dangerously-skip-permissions*' "$(cat "$FIX/dotfiles/rc")"
 expect_true "unmarked symlink arm: the mv witness really saw the rc rename (not vacuous)" \
   /usr/bin/grep -q 'rc\.bionic\.tmp' "$TMP/mv-unmarked-symlink-600.log"
 expect_eq "…and its staged copy was never wider than 0600 either" "" \

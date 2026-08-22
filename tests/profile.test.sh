@@ -74,7 +74,10 @@ mkdir -p "$TMP/home"
 # REPLACED, never prefixed, so nothing on this machine's real PATH can be
 # reached by accident.
 BASE_BIN="$TMP/base-bin"; mkdir -p "$BASE_BIN"
-for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat ls tr head tail sort uniq wc diff jq python3; do
+# `readlink` (S15): `_profile_write` resolves a symlinked settings.json to its
+# final target before staging, so a dotfiles-managed file is rewritten rather than
+# detached. Absent `readlink` it degrades to writing the path as given.
+for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail sort uniq wc diff jq python3; do
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BASE_BIN}/${real}" 2>/dev/null
 done
 # The same bin dir minus jq — the honest-degradation arms run against this one.
@@ -767,7 +770,15 @@ echo "=== Group 14: the write preserves the settings file's own mode ==="
 # Both mutating paths are asserted: apply and strip reach _profile_write
 # independently, and a fix applied to one call site would not cover the other.
 
-file_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
+# DEREFERENCING, deliberately (critic delta 2 N1). The property under test is the
+# mode of the file the writer PUBLISHED, and for a symlinked rc or settings.json
+# that file is the link's target. The non-`-L` spelling reads the link's own 755
+# and is satisfiable only by a writer that DESTROYS the link — the exact
+# behaviour S15 fixed away from — so it would pin the defect. `link_own_mode`
+# below is the non-dereferencing reader, used only where the LINK's own mode is
+# the thing being asserted about (the "this is the trap" fixture lines).
+file_mode() { stat -L -f '%Lp' "$1" 2>/dev/null || stat -L -c '%a' "$1" 2>/dev/null; }
+link_own_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
 
 S_MODE="$TMP/s-mode.json"; cp "$SET_REAL" "$S_MODE"; chmod 600 "$S_MODE"
 expect_eq "the fixture really starts at 0600 (the arm is not vacuous)" "600" "$(file_mode "$S_MODE")"
@@ -896,6 +907,11 @@ echo "=== Group 14c: the settings file is a symlink (S14, the S13 class) ==="
 # tokens included, as `rwxr-xr-x`: WIDER than the file it replaced, which is
 # the one outcome the capture exists to prevent. `-L` is what makes this pass.
 # tests/remove.test.sh's rc arms are the same trap on the other two writers.
+#
+# "WROTE THROUGH THE LINK" IS LITERAL HERE (critic delta 2 N1, A6.S15.1). Until
+# S15 the rename replaced the link with a regular file and left the dotfiles
+# target untouched, so the label below was false about its own run. The writer now
+# resolves to the final target, and the three arms after it say so.
 
 S_SYMLINK_DIR="$TMP/s-symlink"; mkdir -p "$S_SYMLINK_DIR/dotfiles"
 cp "$SET_REAL" "$S_SYMLINK_DIR/dotfiles/settings.json"
@@ -905,12 +921,60 @@ S_SYMLINK="$S_SYMLINK_DIR/settings-link.json"
 expect_eq "fixture: the symlinked settings.json TARGET really is 0600" \
   "600" "$(file_mode "$S_SYMLINK_DIR/dotfiles/settings.json")"
 expect_nomatch "fixture: …and the LINK's own mode is not it — this is the trap" \
-  "600" "$(file_mode "$S_SYMLINK")"
+  "600" "$(link_own_mode "$S_SYMLINK")"
 prof_run BIONIC_SETTINGS_FILE="$S_SYMLINK" -- profile_apply "$RENDERED" --consented >/dev/null 2>&1
 expect_true "symlink arm: profile_apply really wrote through the link (not vacuous)" \
   bash -c 'grep -q "bionic-profile-begin" "$1"' _ "$S_SYMLINK"
 expect_eq "a symlinked settings.json is published at its TARGET's 0600, never the link's 755" \
   "600" "$(file_mode "$S_SYMLINK")"
+expect_true "symlink arm: settings.json is STILL a symlink after profile_apply" test -L "$S_SYMLINK"
+expect_eq "…and still points where it did" \
+  "$S_SYMLINK_DIR/dotfiles/settings.json" "$(readlink "$S_SYMLINK")"
+expect_true "…and it is the dotfiles TARGET that carries the block, not a detached copy" \
+  bash -c 'grep -q "bionic-profile-begin" "$1"' _ "$S_SYMLINK_DIR/dotfiles/settings.json"
+
+# THE DANGLING SYMLINK (critic delta 2 N4). BSD `stat -L` on a link whose target
+# does not exist falls back to the LINK and exits 0 — it reports 755, not an
+# error — so a writer that trusted `-L` alone would `chmod 755` a file holding
+# the user's key. `[ -e ]` is what turns that into the "no mode" path the writer
+# already has, and the resolver makes the published path the TARGET's, so the
+# link survives and its target is born at `umask 077`.
+S_DANGLE_DIR="$TMP/s-dangling"; mkdir -p "$S_DANGLE_DIR/dotfiles"
+ln -s "$S_DANGLE_DIR/dotfiles/settings.json" "$S_DANGLE_DIR/link.json"
+expect_true "fixture: the link really is dangling (its target does not exist)" \
+  bash -c 'test -L "$1" && ! test -e "$1"' _ "$S_DANGLE_DIR/link.json"
+expect_eq "fixture: …and BSD stat -L reports the LINK's own mode for it — this is the trap" \
+  "$(link_own_mode "$S_DANGLE_DIR/link.json")" \
+  "$(stat -L -f '%Lp' "$S_DANGLE_DIR/link.json" 2>/dev/null || echo NOMODE)"
+prof_run -- _profile_write "$S_DANGLE_DIR/link.json" '{"env":{"ANTHROPIC_API_KEY":"sk-fixture-not-a-real-secret"}}' 1 >/dev/null 2>&1
+expect_true "dangling arm: _profile_write really wrote (not vacuous)" \
+  bash -c 'grep -q "sk-fixture-not-a-real-secret" "$1"' _ "$S_DANGLE_DIR/link.json"
+expect_true "dangling arm: the link survives — the target is what got created" \
+  test -L "$S_DANGLE_DIR/link.json"
+expect_true "…and the target now exists" test -f "$S_DANGLE_DIR/dotfiles/settings.json"
+expect_eq "a dangling symlink is never published at the link's 755" \
+  "600" "$(file_mode "$S_DANGLE_DIR/link.json")"
+
+# HONEST DEGRADATION WHEN `readlink` IS NOT ON THE MACHINE. The resolver is a new
+# PATH dependency, and the payload's rule for those is the one `stat` already
+# follows: absent, the writer still writes. It writes to the path as given —
+# which for a symlink is the pre-S15 behaviour, not a refusal and not a crash.
+NOLINK_BIN="$TMP/nolink-bin"; mkdir -p "$NOLINK_BIN"
+for f in "$BASE_BIN"/*; do
+  case "${f##*/}" in readlink) continue ;; esac
+  ln -sf "$(command readlink "$f")" "${NOLINK_BIN}/${f##*/}" 2>/dev/null
+done
+expect_true "degradation fixture: readlink really is absent from this PATH" \
+  bash -c '! test -e "$1/readlink"' _ "$NOLINK_BIN"
+S_NOLINK_DIR="$TMP/s-nolink"; mkdir -p "$S_NOLINK_DIR/dotfiles"
+cp "$SET_REAL" "$S_NOLINK_DIR/dotfiles/settings.json"
+chmod 600 "$S_NOLINK_DIR/dotfiles/settings.json"
+ln -s "$S_NOLINK_DIR/dotfiles/settings.json" "$S_NOLINK_DIR/link.json"
+env -i HOME="$TMP/home" PATH="$NOLINK_BIN" \
+  bash -c '. "$1"; shift; "$@"' _ "$PROFILE_SH" \
+  _profile_write "$S_NOLINK_DIR/link.json" '{"env":{"X":"1"}}' 1 >/dev/null 2>&1
+expect_true "no readlink: the write still lands (degradation, not refusal)" \
+  bash -c 'grep -q "\"X\"" "$1"' _ "$S_NOLINK_DIR/link.json"
 
 echo ""
 echo "=== Group 15: mutation and restore — these assertions can go red ==="

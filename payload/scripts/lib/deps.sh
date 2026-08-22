@@ -556,6 +556,54 @@ _dep_install_argv() {  # <name> — one token per line
   esac
 }
 
+# ─── Writing through a symlink ───────────────────────────────────────────────
+#
+# WHAT A DOTFILES USER GETS OTHERWISE (critic delta 2 N1). A `~/.zshrc` or a
+# `~/.claude/settings.json` symlinked into a dotfiles repo is a regular way to
+# manage those files. Every writer in this payload stages a `<file>.bionic.tmp`
+# and `mv`s it into place, and `mv` REPLACES the link with a regular file: the
+# rewrite lands in a fresh inode at the link's path, the dotfiles copy keeps the
+# content bionic just reported removing, `git status` in that repo shows nothing,
+# and the next `stow` puts the whole footprint back. The user is told the
+# footprint is gone while it is sitting in the file they actually manage. So the
+# writers resolve the path to the FINAL target of its symlink chain and publish
+# onto THAT: the link survives, still points where it did, and the file it names
+# is the one that changed.
+#
+# NO `realpath`, and no `readlink -f`. `realpath` is not on a bare macOS, and
+# BSD `readlink` has no `-f`. The loop below is the portable spelling: one hop at
+# a time, relative targets resolved against the LINK's own directory (that is
+# what the kernel does), with a hop cap so a symlink loop terminates instead of
+# spinning. Bash 3.2 — no `${var@…}`, no arrays, no `readarray`.
+#
+# HONEST DEGRADATION, the same contract `stat` already has here. If `readlink` is
+# not on the machine the loop breaks on the first hop and the caller writes to the
+# path as given, which is the behaviour every writer had before this existed — a
+# degradation, never a refusal. The standalone door runs on the box with the bare
+# /bin and must still write.
+#
+# THREE OTHER FILES CARRY A BYTE-IDENTICAL COPY under the same name — hooks.sh,
+# profile.sh and remove.sh. Each is sourced on its own by something (the suites
+# load the two libraries directly; remove.sh's standalone door runs where
+# scripts/lib/ no longer exists), so none of them may assume this file came
+# first, and a `. deps.sh` inside a library also breaks every mutation arm that
+# runs a doctored COPY of it from a scratch directory. setup.sh sources this file
+# at load and uses this definition. tests/remove.test.sh pins all four against
+# each other, the same wall the settings writer's two copies stand behind.
+bionic_link_target() {  # <path> — the final target of a symlink chain, else <path>
+  local p="${1:-}" link dir n=0
+  while [ -L "$p" ] && [ "$n" -lt 40 ]; do
+    link="$(readlink "$p" 2>/dev/null)" || break
+    [ -n "$link" ] || break
+    case "$link" in
+      /*) p="$link" ;;
+      *)  dir="${p%/*}"; [ "$dir" = "$p" ] && dir="."; p="${dir}/${link}" ;;
+    esac
+    n=$((n + 1))
+  done
+  printf '%s\n' "$p"
+}
+
 # THE ONE SETTINGS WRITER IN THIS FILE. Both statusline arms — recording the
 # line on install and clearing it on removal — are jq rewrites of the same
 # ~/.claude/settings.json, so they are one function rather than two copies of
@@ -600,8 +648,11 @@ _dep_install_argv() {  # <name> — one token per line
 _dep_settings_write_jq() {  # <settings-file> <jq-program> [jq-arg...]
   local settings="${1:-}" program="${2:-}"
   shift 2 || return 1
-  local tmp="${settings}.bionic.tmp" mode
+  local tmp mode
+  settings="$(bionic_link_target "$settings")"
+  tmp="${settings}.bionic.tmp"
   mode="$(stat -L -f '%Lp' "$settings" 2>/dev/null || stat -L -c '%a' "$settings" 2>/dev/null)"
+  [ -e "$settings" ] || mode=""
   rm -f "$tmp"
   if (umask 077; jq "$@" "$program" "$settings" > "$tmp") \
      && { [ -z "$mode" ] || chmod "$mode" "$tmp"; } \

@@ -553,42 +553,72 @@ _setup_cli_plugin() {  # <name>
 # spelled the same way here so the two doors cannot drift again. An absent `stat`
 # degrades to "write, don't chmod" rather than to a refusal to write at all.
 #
-# AND IT IS THE TARGET'S MODE, NOT THE LINK'S (critic delta D1). A `~/.zshrc`
-# symlinked into a dotfiles repo is the commonest way people manage an rc, and a
-# bare `stat` on a symlink reports the LINK's own mode — 755 — never the file's.
-# Capturing that and handing it to `chmod` publishes the rc as `rwxr-xr-x`: WIDER
-# than the file being replaced, which is the one outcome this capture exists to
-# prevent. `-L` is what makes the capture mean the file; both flavours take it.
+# AND IT IS THE TARGET, NOT THE LINK — THE FILE AS WELL AS ITS MODE (critic delta
+# D1, then delta 2 N1). A `~/.zshrc` symlinked into a dotfiles repo is the
+# commonest way people manage an rc. A bare `stat` on a symlink reports the LINK's
+# own mode — 755 — never the file's, so capturing that and handing it to `chmod`
+# publishes the rc as `rwxr-xr-x`; `-L` is what makes the capture mean the file.
+# But the RENAME had the mirror-image bug: `mv` replaces the link with a regular
+# file, so setup wrote a detached copy at the link's path and left the dotfiles
+# repo holding the block it had just reported removing — one `stow` from being
+# back. `bionic_link_target` (lib/deps.sh) resolves the chain first and the write
+# lands on the target, so the link survives and the managed file is what changes.
+#
+# `-L` ALONE STILL LIES ABOUT ONE INPUT (delta 2 N4): on a DANGLING link BSD
+# `stat -L` falls back to the link and exits 0, reporting 755. `[ -e ]` turns that
+# into the empty "unknowable" answer the callers already handle.
 _setup_file_mode() {  # <file> — the mode of what <file> RESOLVES to, empty if unknowable
-  stat -L -f '%Lp' "$1" 2>/dev/null || stat -L -c '%a' "$1" 2>/dev/null
+  local mode
+  mode="$(stat -L -f '%Lp' "$1" 2>/dev/null || stat -L -c '%a' "$1" 2>/dev/null)"
+  [ -e "$1" ] || mode=""
+  printf '%s' "$mode"
 }
 
-# Creates <tmp> empty, owned by this user alone, then widened to no more than the
-# mode of <file>. Callers write over it and rename it onto <file>. A tmp left by
-# an earlier interrupted run is REMOVED rather than truncated: `>` on an existing
-# file keeps that file's mode, so truncating one would carry a stale width
-# through the window `umask 077` exists to close.
-_setup_stage_tmp() {  # <tmp> <file>
-  local tmp="$1" file="$2" mode
-  mode="$(_setup_file_mode "$file")"
+# ONE STAGING ORDER, AND THE CHMOD IS AT THE END OF IT (critic delta 2 N5).
+# Create the tmp under `umask 077`, let the caller write the content into it, and
+# only then widen it to the target's mode and rename. Measured, that keeps the
+# staged copy at 0600 for the whole span in which it holds the user's rc — the
+# span that matters, because that is when the tmp is worth reading — and gives it
+# the target's mode at the instant of publication and not one moment sooner. The
+# order S13 shipped (chmod, THEN write) had the tmp already wearing a 0644 rc's
+# mode while the rc's own contents, tokens and all, were being written into it,
+# which is what the header above says the order exists to prevent. remove.sh's
+# `_rm_stage_tmp`/`_rm_publish_tmp` carry the same pair, spelled the same way, so
+# the two doors cannot drift again.
+#
+# A tmp left by an earlier interrupted run is REMOVED rather than truncated: `>`
+# on an existing file keeps that file's mode, so truncating one would carry a
+# stale width through the window `umask 077` exists to close.
+_setup_stage_tmp() {  # <tmp> — created empty at 0600; the caller writes, then publishes
+  local tmp="$1"
   rm -f "$tmp"
   (umask 077; : > "$tmp") || return 1
-  [ -n "$mode" ] && chmod "$mode" "$tmp"
   return 0
 }
 
+# The other half: widen <tmp> to <file>'s mode and rename it over <file>. <file>
+# is the RESOLVED target, so its mode is still readable here — the rename is what
+# replaces it.
+_setup_publish_tmp() {  # <tmp> <file>
+  local tmp="$1" file="$2" mode
+  mode="$(_setup_file_mode "$file")"
+  [ -n "$mode" ] && chmod "$mode" "$tmp"
+  mv "$tmp" "$file"
+}
+
 _setup_rc_strip_block() {  # <file> <start-marker> <end-marker>
-  local file="${1:-}" start="${2:-}" end="${3:-}" tmp
+  local file="${1:-}" start="${2:-}" end="${3:-}" tmp target
   [ -f "$file" ] || return 0
   grep -qF "$start" "$file" 2>/dev/null || return 0
-  tmp="${file}.bionic.tmp"
-  if _setup_stage_tmp "$tmp" "$file" \
+  target="$(bionic_link_target "$file")"
+  tmp="${target}.bionic.tmp"
+  if _setup_stage_tmp "$tmp" \
      && awk -v start="$start" -v end="$end" '
         $0 == start { skip=1; next }
         $0 == end   { skip=0; next }
         !skip { print }
       ' "$file" > "$tmp" \
-     && mv "$tmp" "$file"; then
+     && _setup_publish_tmp "$tmp" "$target"; then
     return 0
   fi
   rm -f "$tmp"
@@ -1019,7 +1049,7 @@ setup_legacy_alias() {
   _setup_wants legacy-alias || return 0
   say ""
   say "6. Legacy shell alias"
-  local rc line present tmp
+  local rc line present tmp rc_target
   rc="$(_detect_shell_rc)"
   line="$(detect_zshrc_legacy_block)"; present="${line#*present=}"
 
@@ -1050,13 +1080,15 @@ setup_legacy_alias() {
       action "remove the legacy 'alias claude=...--dangerously-skip-permissions' line from ${rc} — $(_setup_answer_yes legacy-alias)"
       return 0
     fi
-    tmp="${rc}.bionic.tmp"
+    rc_target="$(bionic_link_target "$rc")"
+    tmp="${rc_target}.bionic.tmp"
     # Same discipline as _setup_rc_strip_block above, and for the same file — the
-    # same helper too, so there is one staging order in this script rather than a
-    # second one that has to be kept in step by hand.
-    if _setup_stage_tmp "$tmp" "$rc" \
+    # same two helpers too, so there is one staging order in this script rather
+    # than a second one that has to be kept in step by hand, and one place that
+    # decides a symlinked rc is rewritten rather than detached.
+    if _setup_stage_tmp "$tmp" \
        && grep -vE "$SETUP_ALIAS_PATTERN" "$rc" > "$tmp" \
-       && mv "$tmp" "$rc"; then
+       && _setup_publish_tmp "$tmp" "$rc_target"; then
       say "   removed (legacy unmarked alias)."
     else
       rm -f "$tmp"
