@@ -685,7 +685,7 @@ while IFS= read -r dep_name; do
     case "$kind" in
       statusline)
         third_version="$(dep_npx_version "$(_dep_locator_target "$(dep_field "$dep_name" source_url)")")"
-        third_state="command + layout file match" ;;
+        third_state="command set, layout file in place" ;;
       mcp-server)
         [ "$third_version" = "unknown" ] && \
           third_version="$(dep_npx_version "$(_dep_locator_target "$(dep_field "$dep_name" source_url)")")" ;;
@@ -693,7 +693,7 @@ while IFS= read -r dep_name; do
         third_version="$(git -C "$(_dep_skills_dir)/${dep_name}" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
         ;;
       uv-tool)
-        [ "$dep_name" = "notebooklm" ] && third_state="CLI + skill installed" ;;
+        [ "$dep_name" = "notebooklm" ] && third_state="tool and Claude skill both installed" ;;
     esac
   fi
   case "$present" in
