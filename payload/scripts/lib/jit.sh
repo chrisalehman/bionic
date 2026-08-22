@@ -65,6 +65,14 @@ _jit_fix_line() {  # <dep-name>
     echo "record 'npx $(_dep_locator_target "$(dep_field "$name" source_url)")' as the statusline"
     return 0
   fi
+  # A native row has no argv of bionic's, but it does have a command the USER can
+  # run — which is what this line is for. Before epic-18 T4 every native row fell
+  # through to "see /bionic:setup", a redirection back to the step that just
+  # failed rather than the one thing that would fix it.
+  if [ "$mech" = "native" ]; then
+    echo "claude plugin install ${name}@$(dep_marketplace "$name") --scope user"
+    return 0
+  fi
   while IFS= read -r line; do argv+=("$line"); done < <(_dep_install_argv "$name" 2>/dev/null) || true
   if [ "${#argv[@]}" -gt 0 ]; then
     printf '%s\n' "${argv[*]}"

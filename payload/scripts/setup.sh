@@ -79,10 +79,14 @@
 # nothing here walks `when-needed`. That class exists because the moment to ask
 # about a headless browser is the moment a route wants one — `lib/jit.sh` makes
 # that offer, from the same `install_dep`. Setup asking would be asking about a
-# capability the user has not reached, and one of those rows (impeccable) is
-# native-kind, which `install_dep` is required to refuse outright. The classes
-# are read from the table, never restated here: a second roster is a second
-# opinion about what bionic depends on.
+# capability the user has not reached. The classes are read from the table, never
+# restated here: a second roster is a second opinion about what bionic depends on.
+#
+# A NATIVE ROW CAN NOW APPEAR IN STEP 4 (epic-18 T4). `install_dep` refuses every
+# native row — installing a plugin is the CLI's own act — so step 3/4's walk
+# routes by kind through `_setup_install_one` below, exactly as jit.sh routes
+# `impeccable`. Before T4 the question never came up here, because every native
+# row was `core` or `when-needed`.
 #
 # CONSENT, AND WHY THERE IS ONE PROMPT SHAPE. Every mutation below is gated, per
 # item, on an explicit `y` on this script's own standard input, and the gate is
@@ -901,6 +905,24 @@ setup_dep_enable_verify() {
 # every other, and the unknown is named in the same breath so the user is
 # deciding with the real state in front of them.
 
+# WHICH INSTALLER A ROW GOES TO, and why this branch exists here as well as in
+# jit.sh. `install_dep` REFUSES every native row by design — installing a plugin
+# is the CLI's own act — so a loop that hands one to it prints a library's
+# refusal at a user who did nothing wrong. Until epic-18 T4 no native row was
+# ever offered by setup (impeccable is when-needed, and jit.sh carried the only
+# branch); `document-skills` and `example-skills` are native AND `extra`, so this
+# step needs the same two-line routing. It is deliberately not folded into
+# `install_dep`: the two installers differ in who runs the install and what the
+# result is in this session, and merging them is the kludge the ownership table
+# exists to prevent. Callers choose their entry point; there are now two callers.
+_setup_install_one() {  # <name>
+  if [ "$(dep_field "$1" kind)" = "native" ]; then
+    install_plugin_native "$1"
+  else
+    install_dep "$1"
+  fi
+}
+
 _setup_install_class() {  # <class>
   local name raw present
   # fd 3, not stdin — see the note in setup_dep_enable_verify. install_dep
@@ -917,10 +939,10 @@ _setup_install_class() {  # <class>
         ;;
       unknown)
         say "   ${name}: presence unknown — bionic has no way to read whether this one is here."
-        install_dep "$name" || action "install ${name} by hand: $(_jit_fix_line "$name") — bionic could not confirm whether it is already there; $(_setup_answer_yes "tool:${name}")"
+        _setup_install_one "$name" || action "install ${name} by hand: $(_jit_fix_line "$name") — bionic could not confirm whether it is already there; $(_setup_answer_yes "tool:${name}")"
         ;;
       *)
-        install_dep "$name" || action "install ${name} by hand: $(_jit_fix_line "$name") — $(_setup_answer_yes "tool:${name}")"
+        _setup_install_one "$name" || action "install ${name} by hand: $(_jit_fix_line "$name") — $(_setup_answer_yes "tool:${name}")"
         ;;
     esac
   done 3< <(dep_names_class "$1")
@@ -941,6 +963,9 @@ _setup_extra_why() {  # <name>
     notebooklm)      echo "a command-line client for Google NotebookLM, for research passes over sources." ;;
     context7)        echo "up-to-date documentation for libraries, fetched on demand inside a session." ;;
     '@pencil.dev/cli') echo "the Pencil design tool's command line, for turning design files into code." ;;
+    humanizer)       echo "a skill that rewrites text so it stops reading as though a model wrote it." ;;
+    document-skills) echo "skills for reading and writing Word, Excel, PowerPoint and PDF files." ;;
+    example-skills)  echo "Anthropic's own example skills — art, canvas design, brand guidelines and more." ;;
     *)               echo "an optional extra; bionic ships no description for it." ;;
   esac
 }
@@ -1037,9 +1062,10 @@ setup_environment() {
 # lands on a person's screen, and the vocabulary wall reads only this side.
 _setup_env_why() {  # <key>
   case "${1:-}" in
-    CLAUDE_CODE_ENABLE_TODO_TOOLS) echo "the task list a plan's steps are tracked in" ;;
-    BASH_MAX_TIMEOUT_MS)           echo "how long a command may run before it is taken away from whoever started it" ;;
-    *)                             echo "a setting bionic needs" ;;
+    CLAUDE_CODE_ENABLE_TODO_TOOLS)        echo "the task list a plan's steps are tracked in" ;;
+    BASH_MAX_TIMEOUT_MS)                  echo "how long a command may run before it is taken away from whoever started it" ;;
+    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS) echo "the channel a dispatched agent reports back through" ;;
+    *)                                    echo "a setting bionic needs" ;;
   esac
 }
 

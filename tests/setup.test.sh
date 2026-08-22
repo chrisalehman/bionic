@@ -655,10 +655,20 @@ for jit in impeccable "@playwright/cli" playwright-chromium chrome-devtools moti
   expect_no_match "when-needed row is NOT offered at setup: ${jit}" "*${jit}*" "$OUT"
 done
 
-for extra in ccstatusline notebooklm context7 "@pencil.dev/cli"; do
+for extra in ccstatusline notebooklm context7 "@pencil.dev/cli" humanizer document-skills example-skills; do
   expect_match "extra offered at setup: ${extra}" "*${extra}*" "$EXTRAS"
   expect_match "extra carries its own line of why: ${extra}" "*   ${extra} — *" "$EXTRAS"
 done
+
+# A NATIVE ROW IN THE EXTRAS STEP, which is new at epic-18 T4 and is the one
+# shape this loop had never carried. `install_dep` refuses every native row by
+# design, so a loop that hands `document-skills` to it prints deps.sh's refusal
+# — a library error message — at a user who did nothing wrong. The route is the
+# CLI's own installer, the same one jit.sh reaches for `impeccable`.
+expect_match "a native extra is offered as the CLI's own plugin install" \
+  "*claude plugin install document-skills@anthropic-agent-skills*" "$EXTRAS"
+expect_no_match "…never as deps.sh's refusal to be a second installer" \
+  "*there is no second installer*" "$OUT"
 
 # `[y/N]` is deps.sh's own prompt shape and the capital N IS the default, so
 # asserting it here asserts that an extra goes through the one consent gate
@@ -672,9 +682,13 @@ expect_match "extras are asked with a default-No prompt" '*\[y/N\]*' "$EXTRAS"
 # `declined — <name> stays absent.` has that shape too, and now sits at the same
 # indent (R-2), so a shape-only count would credit it as a why line.
 WHY_LINES="$(awk '
-  /^   (ccstatusline|notebooklm|context7|@pencil\.dev\/cli) — ./ { n++ }
+  /^   (ccstatusline|notebooklm|context7|@pencil\.dev\/cli|humanizer|document-skills|example-skills) — ./ { n++ }
   END { print n + 0 }' <<< "$EXTRAS")"
-expect_eq "exactly one why line per extra, no shared sentence standing in" "4" "$WHY_LINES"
+expect_eq "exactly one why line per extra, no shared sentence standing in" "7" "$WHY_LINES"
+# And none of the seven falls through to the table's own no-description
+# sentence: an extra with no why is an offer the user cannot judge.
+expect_no_match "every extra has a real sentence, not the fallback" \
+  "*bionic ships no description for it*" "$EXTRAS"
 
 # ONE INDENT OWNER (six-axis review R-2). Step 4 is written by two files —
 # setup's own `say` lines and the install prose deps.sh prints — and the seam
@@ -742,13 +756,13 @@ expect_eq "declined: settings.json is untouched, byte for byte" \
 expect_eq "declined: and so is the shell rc" "$RC_BEFORE" "$(cat "$FIX/rc")"
 expect_match "declined: the item is named as an action line" '*--only environment*' "$OUT"
 
-# A settings.json that already carries the two names — written by hand, or by an
-# earlier run — is already correct, and the merge must not disturb what else is
-# in the file.
+# A settings.json that already carries every name bionic owns — written by hand,
+# or by an earlier run — is already correct, and the merge must not disturb what
+# else is in the file.
 new_fixture env-preexisting
 plant_cli_plugin "bionic@bionic" true
 cat > "$FIX/ch/settings.json" <<'JSON'
-{"env":{"OTHER":"x","CLAUDE_CODE_ENABLE_TODO_TOOLS":"1","BASH_MAX_TIMEOUT_MS":"1800000"}}
+{"env":{"OTHER":"x","CLAUDE_CODE_ENABLE_TODO_TOOLS":"1","BASH_MAX_TIMEOUT_MS":"1800000","CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"1"}}
 JSON
 SETTINGS_BEFORE="$(cat "$FIX/ch/settings.json")"
 # Narrowed to the item: a whole consented pass writes settings.json through the

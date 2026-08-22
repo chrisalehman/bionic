@@ -139,12 +139,18 @@ echo "=== Group 1: the roster and the defaults ==="
 # ONE LIST, THREE READERS. setup writes it, remove deletes it, doctor reports
 # it, and all three walk this string. A name that lives in one of them and not
 # here is a name the other two cannot see.
-expect_eq "ENV_KEYS is exactly the two names bionic owns" \
-  "CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS" \
+expect_eq "ENV_KEYS is exactly the three names bionic owns" \
+  "CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS" \
   "$(env_run "$TMP/nonexistent.json" -- eval 'echo "$ENV_KEYS"')"
 
 expect_eq "the task-list name defaults to 1" "1" \
   "$(env_run "$TMP/nonexistent.json" -- env_default CLAUDE_CODE_ENABLE_TODO_TOOLS)"
+# The third name, carried forward from the retired installer's roster at epic-18
+# T4 (AC-8). It was an `env-var | CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS | 1` line
+# in claude-config.txt that the port dropped silently, which is the whole class
+# this task exists to close.
+expect_eq "the agent-teams name defaults to 1" "1" \
+  "$(env_run "$TMP/nonexistent.json" -- env_default CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS)"
 expect_eq "the long-command ceiling defaults to thirty minutes, in milliseconds" "1800000" \
   "$(env_run "$TMP/nonexistent.json" -- env_default BASH_MAX_TIMEOUT_MS)"
 expect_false "a name that is not bionic's has no default" \
