@@ -40,6 +40,22 @@ the same working discipline.
 - `/bionic:doctor` — read-only diagnosis of this machine; it changes nothing.
 - `/bionic:remove` — consented teardown, finishing with the plugin uninstall.
 
+## Skills
+
+Three skills ship with bionic and load into every session once it is installed:
+
+- `/bionic:canonical-sdlc` — the governed lifecycle for non-trivial work. Declares
+  `intent · rigor · scale`, walks Steps 0–9, and gates every commit on the current
+  step's evidence. `/bionic:canonical-sdlc help` prints the axis tables.
+- `/bionic:map-instrument-narrow` — diagnostic discipline for when the code misbehaves
+  and the cause is not obvious: map the system, instrument it, narrow to a root cause
+  with data before writing any fix.
+- `/bionic:browser-verify` — verifies UI behavior in a real browser with semantic
+  readback; the Verify step's browser modality.
+
+Six agent roles ride alongside — researcher, implementor, senior-implementor,
+test-runner, auditor, critic — and canonical-sdlc dispatches them by step.
+
 ## It arrives in two steps
 
 - **Tier 1 — the plugin install.** Installing bionic gives you the whole core: the skill,
