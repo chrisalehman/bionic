@@ -219,11 +219,41 @@ render_one() {
   [ -f "$tmpl" ] || { echo "render.sh: no template at $tmpl" >&2; return 1; }
 
   local line name upper block version saw_header=0
+  local role role_tmpl role_model role_effort role_what
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       "<!-- GENERATED-HEADER -->")
         generated_header "$tmpl_rel"
         saw_header=$((saw_header + 1))
+        ;;
+      "<!-- AGENT-ROSTER -->")
+        # THE ROSTER IS READ, NEVER TRANSCRIBED. help.md names six roles and the
+        # model and effort each one runs at, and those are values that change —
+        # a role gets raised to opus, an effort drops to low — in the role
+        # sources, where the change is the point. A hand-written table in the
+        # help page would be a seventh copy of six facts, and the copy that is
+        # wrong is always the one nobody re-read. So the row is generated from
+        # the same frontmatter the role file itself is rendered from, and a
+        # model change reaches the help page by re-rendering and by nothing else.
+        #
+        # THE TEMPLATES, NOT THE FINALS, and the ordering is why: this same run
+        # is rewriting agents/*.md, and a directive that read the finals would
+        # report whatever the PREVIOUS render left there. The template is the
+        # source both readings share.
+        for role in $ROLES; do
+          role_tmpl="$SRC_DIR/templates/$role.md.tmpl"
+          [ -f "$role_tmpl" ] || { echo "render.sh: AGENT-ROSTER wants $role_tmpl" >&2; return 1; }
+          role_model="$(awk -F': *' '/^model:/ { print $2; exit }' "$role_tmpl")"
+          role_effort="$(awk -F': *' '/^effort:/ { print $2; exit }' "$role_tmpl")"
+          # The first sentence of the description, which is the half that says
+          # what the role is FOR; the rest tells canonical-sdlc when to dispatch
+          # it, which is not a thing a user of this page acts on.
+          role_what="$(awk -F': *' '/^description:/ { sub(/^description: */, ""); print; exit }' "$role_tmpl" \
+                       | awk -F'\\. ' '{ print $1 }')"
+          [ -n "$role_model" ] && [ -n "$role_effort" ] && [ -n "$role_what" ] || {
+            echo "render.sh: $role.md.tmpl is missing model, effort or description" >&2; return 1; }
+          printf '| `%s` | %s · %s | %s |\n' "$role" "$role_model" "$role_effort" "$role_what"
+        done
         ;;
       "<!-- INJECT: "*" -->")
         name="${line#<!-- INJECT: }"; name="${name% -->}"

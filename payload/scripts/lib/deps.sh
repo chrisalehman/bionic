@@ -353,6 +353,47 @@ _dep_version_from_probe() {  # <argv...>
   echo "${tok:-unknown}"
 }
 
+# THE VERSION AN `npx <pkg>@latest` ROW IS ACTUALLY RUNNING. An npx row pins
+# nothing: the recorded command names `@latest`, so the version in play is
+# whatever npm resolved into its `_npx` cache the last time the command ran.
+# That cache IS a version surface — each entry is an ordinary node_modules tree
+# with the package's own package.json in it — and the certified doctor table asks
+# for a literal version wherever one exists rather than a dash where one could be
+# read.
+#
+# A READ, NEVER A FETCH. Doctor calls this, and doctor is read-only and offline
+# by contract, so this looks only at what is already on disk. A machine that has
+# never run the command has no cache entry and gets `unknown` — which is the
+# honest answer, not a failure: the row's presence is decided elsewhere, and this
+# function only ever decorates it.
+#
+# NEWEST ENTRY WINS. npx keys its cache by a hash of the install request, so a
+# package upgraded over time leaves several trees behind. The most recently
+# modified one is the one the last run used.
+dep_npx_version() {  # <package-name> -> the cached version, or `unknown`
+  local pkg="${1:-}" root newest="" pj ver
+  [ -n "$pkg" ] || { echo unknown; return 0; }
+  # `@latest` and friends are part of the install request, never of the path.
+  case "$pkg" in
+    @*/*) pkg="${pkg%@*}" ;;   # a scoped name keeps its leading @
+    *@*)  pkg="${pkg%@*}" ;;
+  esac
+  root="${BIONIC_NPX_CACHE:-$HOME/.npm/_npx}"
+  [ -d "$root" ] || { echo unknown; return 0; }
+  for pj in "$root"/*/node_modules/"$pkg"/package.json; do
+    [ -f "$pj" ] || continue
+    if [ -z "$newest" ] || [ "$pj" -nt "$newest" ]; then newest="$pj"; fi
+  done
+  [ -n "$newest" ] || { echo unknown; return 0; }
+  if _dep_have jq; then
+    ver="$(jq -r '.version // ""' "$newest" 2>/dev/null)"
+  else
+    ver="$(grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]+"' "$newest" 2>/dev/null \
+           | head -1 | grep -oE '"[^"]+"$' | tr -d '"')"
+  fi
+  echo "${ver:-unknown}"
+}
+
 # ─── Per-mechanism probes ────────────────────────────────────────────────────
 #
 # Each prints `<present>|<version>` where present is yes | no | unknown.
