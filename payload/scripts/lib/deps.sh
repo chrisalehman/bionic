@@ -7,8 +7,12 @@
 # installed, and what happens to it when bionic is removed. One row per
 # dependency. Nothing else in the repo may author that set — `plugin.json`'s
 # `dependencies` array renders the `core` rows and `marketplace.json`'s
-# url-sourced entries render the `native`-kind rows, both pinned by agreement
-# tests that fail on drift.
+# url-sourced entries render the native rows BIONIC'S OWN CATALOG SERVES, both
+# pinned by agreement tests that fail on drift. (The second half of that
+# sentence narrowed at epic-18 T4: marketplace.json is bionic's catalog, and
+# `document-skills`/`example-skills` are native rows another catalog serves —
+# an entry for them here would be bionic declaring it serves somebody else's
+# plugin. See `dep_marketplace` below.)
 #
 # WHAT IT DOES NOT OWN. Machine facts. "Is superpowers installed on THIS box"
 # is a question about a machine, not about the dependency set; `detect.sh` owns
@@ -106,6 +110,15 @@ _dep_ccstatusline_config_dir() {
 # so a hermetic suite need not add a second comparison binary to its curated
 # PATH beside the one every writer path already needs.
 _dep_files_match() { [ -f "${1:-}" ] && [ -f "${2:-}" ] && diff -q "$1" "$2" >/dev/null 2>&1; }
+
+# The catalogs this machine has registered. Read-only here, and read for exactly
+# one question: does an install from a foreign catalog need a `marketplace add`
+# in front of it (see `install_plugin_native`).
+_dep_known_marketplaces() { echo "${BIONIC_KNOWN_MARKETPLACES_FILE:-$(_dep_claude_home)/plugins/known_marketplaces.json}"; }
+# Where the CLI reads loose skills from — the destination of a `github-skill`
+# row. Derived from the claude home rather than given its own override, so a
+# suite that re-points the home moves this with it and nothing else has to know.
+_dep_skills_dir()       { echo "$(_dep_claude_home)/skills"; }
 _dep_playwright_cache() {
   if [ -n "${BIONIC_PLAYWRIGHT_CACHE:-}" ]; then echo "$BIONIC_PLAYWRIGHT_CACHE"; return; fi
   case "$(uname -s 2>/dev/null || echo Darwin)" in
@@ -159,9 +172,15 @@ BIONIC_DEFAULT_PERMISSION_MODE="auto"
 #                         route now ships in the payload: excalidraw-diagram was
 #                         the last one outside it and moved in at epic-18 T3.
 #   mechanism             the install target. `scheme:target` for the package
-#                         managers (brew, brew-cask, npm, uv, pnpm, npx); a bare
-#                         https git URL for a native row, whose renderings need
-#                         it verbatim.
+#                         managers (brew, brew-cask, npm, uv, pnpm, npx);
+#                         `github:owner/repo` for a skill cloned into the CLI's
+#                         own skills directory; a bare https git URL for a native
+#                         row bionic's marketplace serves, whose renderings need
+#                         it verbatim; and `marketplace:<catalog>#<repo>` for a
+#                         native row somebody else's catalog serves, which names
+#                         the catalog the install id needs and the repo spec
+#                         `claude plugin marketplace add` takes (see
+#                         `dep_marketplace`).
 #   constraint            a semver range, or `any` where no range is declared.
 #                         `any` is a real declaration — it says the dependency
 #                         is unpinned — not a missing value.
@@ -214,6 +233,9 @@ ccstatusline|extra|extra|npx:ccstatusline@latest|any|statusline|remove-on-consen
 notebooklm|extra|extra|uv:notebooklm-py|any|uv-tool|remove-on-consent
 context7|extra|extra|npm:@upstash/context7-mcp@latest|any|mcp-server|remove-on-consent
 @pencil.dev/cli|extra|extra|npm:@pencil.dev/cli|any|npm-global|remove-on-consent
+humanizer|extra|extra|github:blader/humanizer|any|github-skill|remove-on-consent
+document-skills|extra|extra|marketplace:anthropic-agent-skills#anthropics/skills|any|native|native-uninstall-offer
+example-skills|extra|extra|marketplace:anthropic-agent-skills#anthropics/skills|any|native|native-uninstall-offer
 TABLE
 )"
 
@@ -242,6 +264,18 @@ TABLE
 # table because it is a machine path, not a declaration. The `uv:` scheme is still the honest
 # prefix — `uv` is what runs — and `_dep_locator_target` yields `sync`, which is exactly the
 # subcommand the argv below uses.
+#
+# AND ONE LEFT AT EPIC-18 T4, 2026-08-22 (owner ruling, AC-8). `frontend-design`
+# was on the retired installer's roster and does not come back: design work in
+# this repo routes to `impeccable` alone, which is a properly-attributed superset
+# of it and already has its own `when-needed` row above. The evaluation behind
+# that is `.claude/rules/agent-discipline.md` ("Design work routes to impeccable
+# only", 2026-04-18), and the same file forbids re-installing frontend-design
+# without redoing the research. What is new here is only the RECORD: four other
+# rows from that roster (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`, `humanizer`,
+# `document-skills`, `example-skills`) turned out to have been dropped by nobody
+# — they were simply not ported, and an unrecorded drop is indistinguishable
+# from forgetting. This one was decided.
 #
 # `motion` is the one when-needed row whose consumer file does not yet name the
 # package (it is pre-warmed into the pnpm store for the design route). The class
@@ -309,6 +343,61 @@ dep_field() {  # <name> <field>
       else printf 'none\n'; fi ;;
     *) echo "deps.sh: no such field: ${field}" >&2; return 1 ;;
   esac
+}
+
+# ─── Which catalog installs a native row ─────────────────────────────────────
+#
+# THE CATALOG USED TO BE A CONSTANT, and it could be: every native row came from
+# bionic's own marketplace, so `install_plugin_native` composed `<name>@bionic`
+# and the teardown asked the registry about that id. epic-18 T4 carries two rows
+# the CLI installs from `anthropic-agent-skills` (the `anthropics/skills` repo),
+# and a constant would have installed them under an id that does not resolve and
+# then read the user's own copies as somebody else's.
+#
+# So the catalog is a property of the ROW, spelled in the mechanism. `kind` stays
+# `native` for all of them, deliberately: kind names HOW a row installs — the
+# CLI's own plugin install, which `install_dep` must refuse for every one of them
+# — and that has not changed. What changed is which catalog answers.
+#
+# NON-ZERO FOR A ROW NO CATALOG SERVES, rather than a default. Every non-native
+# row would otherwise read as "bionic's", and the manifest-agreement pin is
+# stated over this function's answer: a brew row silently claiming a catalog is
+# how marketplace.json would come to be rendered from rows it cannot serve.
+dep_marketplace() {  # <name> -> the catalog the CLI installs this row from
+  local name="${1:-}" mech target
+  [ "$(dep_field "$name" kind 2>/dev/null)" = "native" ] || return 1
+  mech="$(dep_field "$name" mechanism)" || return 1
+  case "$mech" in
+    marketplace:*) target="${mech#marketplace:}"; printf '%s\n' "${target%%#*}" ;;
+    *)             printf '%s\n' "${BIONIC_DEP_MARKETPLACE:-bionic}" ;;
+  esac
+}
+
+# The repo spec `claude plugin marketplace add` takes, for a row whose catalog is
+# not bionic's own. Non-zero for bionic's rows, and that non-zero IS the answer:
+# bionic's marketplace is registered by the time any of this runs (the user added
+# it to install bionic), so there is nothing to add and no command to print.
+dep_marketplace_source() {  # <name>
+  local name="${1:-}" mech target
+  mech="$(dep_field "$name" mechanism 2>/dev/null)" || return 1
+  case "$mech" in
+    marketplace:*)
+      target="${mech#marketplace:}"
+      case "$target" in *#*) printf '%s\n' "${target#*#}" ;; *) return 1 ;; esac ;;
+    *) return 1 ;;
+  esac
+}
+
+# The rows a given catalog serves. bionic's own answer is what marketplace.json
+# is rendered from and what tests/plugin-lib.test.sh Group 18 pins in both
+# directions.
+dep_names_marketplace() {  # <catalog>
+  local want="${1:-}" n
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    [ "$(dep_marketplace "$n" 2>/dev/null)" = "$want" ] && echo "$n"
+  done <<< "$(dep_names_kind native)"
+  return 0
 }
 
 # Reports any row whose field count is not exactly 7. Silence means the table
@@ -569,6 +658,23 @@ _dep_check_uv_project() {
 # §3.1). Now it means both: the command AND the layout file the command
 # reads. The second field carries WHICH half is missing when it is not
 # `yes`, so doctor's degradation line can name it rather than repeat the
+# A skill is present when the file that MAKES it a skill is readable, not when a
+# directory of its name exists. An interrupted clone leaves the directory and
+# nothing in it, and reporting that as installed is the half-installed shape this
+# task's sibling rows exist to stop reporting (AC-9's rule: a probe answers "is
+# this in the state setup leaves it in", never "is there something by this name").
+# No version: a cloned skill carries no version anywhere the probe could read.
+_dep_check_github_skill() {
+  local name="$1"
+  if [ -f "$(_dep_skills_dir)/${name}/SKILL.md" ]; then echo "yes|unknown"; else echo "no|unknown"; fi
+}
+
+# TWO HALVES, ONE ANSWER (epic-18 T1, AC-2). `present=yes` used to mean only
+# "the command is set" — the probe-contract violation that let a machine
+# report healthy while ccstatusline rendered its own stock default (handoff
+# §3.1). Now it means both: the command AND the layout file the command
+# reads. The second field carries WHICH half is missing when it is not
+# `yes`, so doctor's degradation line can name it rather than repeat the
 # generic "is absent" sentence over a dependency that is half there.
 # (T5's probe audit deferred this row to T1's landing — satisfied above.)
 _dep_check_statusline() {
@@ -610,6 +716,7 @@ check_dep() {  # <name> -> present=<yes|no|unknown>|version=<v|unknown>|verdict=
     mcp-server)         raw="$(_dep_check_mcp_server "$name")" ;;
     playwright-browser) raw="$(_dep_check_playwright_browser "$name")" ;;
     uv-project)         raw="$(_dep_check_uv_project "$name")" ;;
+    github-skill)       raw="$(_dep_check_github_skill "$name")" ;;
     statusline)         raw="$(_dep_check_statusline "$name")" ;;
     *)                  raw="unknown|unknown" ;;
   esac
@@ -716,6 +823,13 @@ _dep_install_argv() {  # <name> — one token per line
       local refs; refs="$(_dep_excalidraw_refs)"
       [ -n "$refs" ] || return 1
       printf '%s\n' uv "$target" --project "$refs" ;;
+    # ONE COMMAND, AND THAT IS THE POINT. The retired installer cloned to /tmp,
+    # copied the tree into place and stripped `.git`; a single clone into the
+    # destination keeps this row on the same print-the-plan / consent / run-that
+    # -exact-plan path every other mechanism uses, and makes jit.sh's one-line
+    # fix a command the user can paste. The `.git` left behind costs nothing:
+    # the teardown removes the whole directory either way.
+    github-skill)       printf '%s\n' git clone --depth 1 "https://github.com/${target}.git" "$(_dep_skills_dir)/${name}" ;;
     statusline)         return 1 ;;  # not an argv — see _dep_install_statusline
     *)                  return 1 ;;
   esac
@@ -968,8 +1082,25 @@ install_dep() {  # <name>
 # Callers: setup.sh's first step (bionic itself) and jit.sh's `jit_offer` for a
 # native `when-needed` row. Both reach the CLI through this function and nowhere
 # else.
+# Is this catalog registered on this machine? Read from the CLI's own list, not
+# guessed from a re-add's error text: `claude plugin marketplace add` on an
+# already-registered catalog exits NON-ZERO with "already" in the message, and a
+# routine that reads success out of that string is a routine that reads success
+# out of any message containing it. jq missing, or the file missing, both mean
+# "cannot tell" — non-zero, so the add is attempted; an add that turns out to be
+# unnecessary is a no-op, while a skipped add that was necessary is an install
+# that cannot resolve.
+_dep_marketplace_known() {  # <catalog>
+  local catalog="${1:-}" file
+  [ -n "$catalog" ] || return 1
+  _dep_have jq || return 1
+  file="$(_dep_known_marketplaces)"
+  [ -f "$file" ] || return 1
+  [ "$(jq -r --arg n "$catalog" 'has($n)' "$file" 2>/dev/null)" = "true" ]
+}
+
 install_plugin_native() {  # <name>
-  local name="${1:-}" marketplace id
+  local name="${1:-}" marketplace id source add_first=no
   [ -n "$name" ] || { echo "deps.sh: install_plugin_native needs a plugin name" >&2; return 1; }
   # THE ONE EXTERNAL THIS FILE USED TO CALL UNGUARDED (critic F-5). `jq`, `npm`
   # and `brew` all pass through `_dep_have` first; these two did not, so a machine
@@ -982,16 +1113,40 @@ install_plugin_native() {  # <name>
     echo "$(_dep_indent)the Claude Code CLI is not on PATH — bionic cannot install a plugin without it."
     return 1
   }
-  marketplace="${BIONIC_DEP_MARKETPLACE:-bionic}"
+  # The row's own catalog, with the constant as the fallback for the one caller
+  # that has no row at all: setup's first step installs `bionic` itself.
+  marketplace="$(dep_marketplace "$name" 2>/dev/null)" || marketplace=""
+  [ -n "$marketplace" ] || marketplace="${BIONIC_DEP_MARKETPLACE:-bionic}"
   id="${name}@${marketplace}"
 
-  echo "$(_dep_indent)${name} is not installed. bionic would run: claude plugin install ${id} --scope user --yes"
+  # A CATALOG THE CLI HAS NEVER HEARD OF CANNOT RESOLVE AN INSTALL FROM IT, so
+  # the registration is part of this plan rather than a prerequisite the user is
+  # left to discover from an error. It is printed in the same sentence and
+  # covered by the same single question: one decision — "put this plugin on my
+  # machine" — never two.
+  source="$(dep_marketplace_source "$name" 2>/dev/null)" || source=""
+  if [ -n "$source" ] && ! _dep_marketplace_known "$marketplace"; then add_first=yes; fi
+
+  if [ "$add_first" = "yes" ]; then
+    echo "$(_dep_indent)${name} is not installed. bionic would run: claude plugin marketplace add ${source} && claude plugin install ${id} --scope user --yes"
+  else
+    echo "$(_dep_indent)${name} is not installed. bionic would run: claude plugin install ${id} --scope user --yes"
+  fi
   _dep_consent "$(_dep_indent)Install ${name} now?"
   case $? in
     0) ;;
     2) _dep_not_asked "$name"; return 2 ;;
     *) echo "$(_dep_indent)declined — ${name} stays absent."; return 1 ;;
   esac
+
+  # The add's own exit status is NOT the verdict. It fails on an
+  # already-registered catalog — which is the case `_dep_marketplace_known` could
+  # not read on a machine without jq — and the install below is the honest test
+  # of whether the catalog is usable. The CLI's own stderr has already reached
+  # the transcript either way, so nothing is swallowed silently.
+  if [ "$add_first" = "yes" ]; then
+    claude plugin marketplace add "$source" || true
+  fi
 
   if claude plugin install "$id" --scope user --yes; then
     echo "$(_dep_indent)Takes effect after /reload-plugins or a new session."
@@ -1022,7 +1177,11 @@ remove_plugin_native() {  # <name>
     echo "$(_dep_indent)the Claude Code CLI is not on PATH — bionic cannot uninstall a plugin without it."
     return 1
   }
-  marketplace="${BIONIC_DEP_MARKETPLACE:-bionic}"
+  # The row's catalog, for the reason the installer takes it from there: an id
+  # composed against a constant is an id the CLI cannot resolve for the two rows
+  # another catalog serves.
+  marketplace="$(dep_marketplace "$name" 2>/dev/null)" || marketplace=""
+  [ -n "$marketplace" ] || marketplace="${BIONIC_DEP_MARKETPLACE:-bionic}"
   id="${name}@${marketplace}"
 
   echo "$(_dep_indent)${name}: bionic would run: claude plugin uninstall ${id} --yes"
@@ -1052,10 +1211,18 @@ remove_plugin_native() {  # <name>
 #   other    the name is there, under somebody else's catalog
 #   absent   no key of that name at all
 #   unknown  the registry could not be read (no jq)
+#
+# "OURS" IS THE ROW'S CATALOG, NOT A CONSTANT (epic-18 T4). `document-skills` is
+# a plugin bionic's own extras step installs, from `anthropic-agent-skills`.
+# Asked about `document-skills@bionic` it would answer `other` — somebody else's
+# copy — and the teardown would leave behind a plugin bionic put there, which is
+# the same defect one catalog over from the one this function was written for.
 _dep_native_registry_state() {  # <name> -> ours|other|absent|unknown
-  local name="${1:-}" id file out
+  local name="${1:-}" id file out marketplace
   [ -n "$name" ] || { echo unknown; return 0; }
-  id="${name}@${BIONIC_DEP_MARKETPLACE:-bionic}"
+  marketplace="$(dep_marketplace "$name" 2>/dev/null)" || marketplace=""
+  [ -n "$marketplace" ] || marketplace="${BIONIC_DEP_MARKETPLACE:-bionic}"
+  id="${name}@${marketplace}"
   _dep_have jq || { echo unknown; return 0; }
   file="$(_dep_installed_json)"
   [ -f "$file" ] || { echo absent; return 0; }
@@ -1075,6 +1242,11 @@ _dep_remove_argv() {  # <name> — one token per line
     npm-global) printf '%s\n' npm uninstall -g "$target" ;;
     uv-tool)    printf '%s\n' uv tool uninstall "$target" ;;
     mcp-server) printf '%s\n' claude mcp remove "$name" -s user ;;
+    # The whole directory the install created, and nothing above it. Named in
+    # the plan the user consents to, exactly as `playwright-browser`'s cache
+    # removal is — a recursive delete the user cannot see the path of is not a
+    # consented delete.
+    github-skill) printf '%s\n' rm -rf "$(_dep_skills_dir)/${name}" ;;
     *)          return 1 ;;
   esac
 }
@@ -1110,7 +1282,8 @@ remove_dep() {  # <name>
       #     the teardown are what take it, and asking here would be a second
       #     question about one decision.
       #
-      #   a row bionic does NOT declare (impeccable, class when-needed):
+      #   a row bionic does NOT declare (impeccable at class when-needed, and
+      #   the two anthropic-agent-skills packs at class extra):
       #     `install_plugin_native` can put it on a machine mid-session from a
       #     route's offer, and A-3.1 rules that the marketplace entry declares no
       #     dependency. Nothing else will ever remove it. This branch used to
