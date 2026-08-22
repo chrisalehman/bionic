@@ -53,8 +53,9 @@
 #
 # WHY FOUR AND NOT FORTY-FIVE. Measured, not guessed. When seven of these slices
 # each ran a full suite concurrently on one machine, free memory fell to ~188 MB
-# and the kernel SIGKILLed a suite mid-run (W7 assumption A4.2). Four is a width
-# with headroom; BIONIC_TEST_JOBS is there for a machine with more.
+# and the kernel SIGKILLed a suite mid-run (W7 assumption A4.2). Four was the width
+# with headroom on that measurement; the default was raised to eight on 2026-08-22
+# (ef23f75, user's call) and BIONIC_TEST_JOBS is there for a machine with less or more.
 #
 # WHY A SIGNAL DEATH IS NOT A FAILED ASSERTION. That same kill was reported as a
 # plain ✗ FAIL, which reads as "this suite's assertions failed" and sends the
@@ -104,7 +105,7 @@ while [ $# -gt 0 ]; do
     -h|--help)
       echo "usage: bash tests/run.sh [--serial]"
       echo "  --serial            one suite at a time, in roster order"
-      echo "  BIONIC_TEST_JOBS    how many at a time otherwise (default 4)"
+      echo "  BIONIC_TEST_JOBS    how many at a time otherwise (default 8)"
       echo "  BIONIC_TEST_TIMING  a file to append <label>TAB<seconds> to"
       exit 0
       ;;
