@@ -1394,39 +1394,84 @@ ${REPO}/payload/scripts/lib/hooks.sh
 ${REPO}/payload/scripts/lib/profile.sh
 ${REPO}/payload/scripts/remove.sh" \
   "$RESOLVER_FILES"
-STAGERS="$(/usr/bin/grep -rl '\.bionic\.tmp' "${REPO}/payload" | sort)"
-# THE WALL READS CODE, NOT A COMMENT (critic delta 3 F4). A plain-text
-# `grep -q bionic_link_target` over the whole file is satisfied by a file that
-# only NAMES the resolver in a comment and never calls it — exactly the shape a
-# fifth, unresolved writer could ship in and still pass. Comment-only lines
-# (`#` as the first non-blank character) are stripped before this wall reads
-# for a real call.
+# THE WALL READS CODE, NOT A COMMENT (critic delta 3 F4; hardened critic delta
+# 4 G1). A plain-text `grep -q bionic_link_target` over the whole file is
+# satisfied by a file that only NAMES the resolver — in a comment, a heredoc,
+# or anywhere else that isn't a call — and never calls it. Comment-only lines
+# (`#` as the first non-blank character) are stripped first, but that alone
+# still lets a TRAILING comment or a heredoc mention through, since neither is
+# a full-line comment. The match itself must therefore require a real CALL
+# shape, not just the identifier: `bionic_link_target "` (the resolver name
+# followed by its opening quote) is how all four real files invoke it —
+# `$(bionic_link_target "$RC_FILE")`, `bionic_link_target "$rc"` — and no bare
+# mention, trailing-comment or heredoc, produces that substring.
 # ASSERTION-HELPER RACE (this file's own header rule): no `X | grep -q` — a
 # large file (remove.sh, setup.sh) makes `grep -q` close its end of the pipe the
 # instant it finds a match, SIGPIPE-ing the writer, and `pipefail` then reports
 # that SIGPIPE (141) as the pipeline's exit status regardless of the match. The
 # stripped text is captured into a variable first and matched with `case`
 # instead, the same idiom already used above for `$RESOLVER_DEPS`.
-UNRESOLVED=""
-for _f in $STAGERS; do
-  _f_code="$(/usr/bin/grep -v '^[[:space:]]*#' "$_f" 2>/dev/null || true)"
-  case "$_f_code" in
-    *bionic_link_target*) : ;;
-    *) UNRESOLVED="${UNRESOLVED}${_f} " ;;
-  esac
-done
+_wall_unresolved() {  # <dir> — stagers under <dir> whose only mention of
+                      # bionic_link_target is not a real call; factored so the
+                      # positive controls below exercise this exact logic
+                      # rather than a re-typed copy of it (critic delta 4 G1)
+  local _dir="$1" _f _f_code _unresolved=""
+  for _f in $(/usr/bin/grep -rl '\.bionic\.tmp' "$_dir" 2>/dev/null | sort); do
+    _f_code="$(/usr/bin/grep -v '^[[:space:]]*#' "$_f" 2>/dev/null || true)"
+    case "$_f_code" in
+      *'bionic_link_target "'*) : ;;
+      *) _unresolved="${_unresolved}${_f} " ;;
+    esac
+  done
+  printf '%s' "$_unresolved"
+}
+UNRESOLVED="$(_wall_unresolved "${REPO}/payload")"
 expect_eq "every payload file that stages a .bionic.tmp resolves the symlink first" "" "$UNRESOLVED"
 
-# Positive control: the critic's own repro shape — a resolver mentioned only in
-# a comment, never called — must be caught unresolved by the same stripping.
-N4_DIR="$TMP/n4"; mkdir -p "$N4_DIR"
-cat > "$N4_DIR/newwriter.sh" <<'NW'
+# Positive controls: mirror the five real stager files (their real content, so
+# "the real files pass" is proven on the genuine call sites, not a summary of
+# them) plus one plant at a time, and assert the SAME `_wall_unresolved`
+# function used above separates them. Three plant shapes, all from critic
+# delta 4 G1 — the pre-fix wall (bare `*bionic_link_target*`) caught only the
+# first of these; the fix above catches all three.
+WALL_MIRROR="$TMP/wallmirror"; mkdir -p "$WALL_MIRROR"
+cp "${DEPS_SH}" "${HOOKS_SH}" "${PROFILE_SH}" "${REMOVE_SH}" "${SETUP_SH}" "$WALL_MIRROR/"
+
+# Plant 1 — leading-comment mention (the original F4 shape).
+cat > "$WALL_MIRROR/plant.sh" <<'NW'
 # a comment that mentions bionic_link_target but never calls it
 _new_write() { local f="$1" tmp="${1}.bionic.tmp"; printf '%s' "$2" > "$tmp"; mv "$tmp" "$f"; }
 NW
-N4_CODE="$(/usr/bin/grep -v '^[[:space:]]*#' "$N4_DIR/newwriter.sh" 2>/dev/null || true)"
-expect_not_contains "positive control: a resolver named only in a comment is caught unresolved" \
-  "bionic_link_target" "$N4_CODE"
+expect_eq "positive control: a resolver named only in a leading comment is caught unresolved, real files pass" \
+  "${WALL_MIRROR}/plant.sh " "$(_wall_unresolved "$WALL_MIRROR")"
+
+# Plant 2 — TRAILING comment mention (critic delta 4 G1's own repro shape: the
+# `#` is not the first non-blank character, so the leading-comment strip never
+# touches this line).
+cat > "$WALL_MIRROR/plant.sh" <<'NW'
+_new_write() {
+  local f="$1" tmp="${1}.bionic.tmp"   # not resolved: see bionic_link_target
+  printf '%s' "$2" > "$tmp"
+  mv "$tmp" "$f"
+}
+NW
+expect_eq "positive control: a resolver named only in a trailing comment is caught unresolved (critic delta 4 G1), real files pass" \
+  "${WALL_MIRROR}/plant.sh " "$(_wall_unresolved "$WALL_MIRROR")"
+
+# Plant 3 — heredoc mention: not a comment at all, so the strip never applies.
+cat > "$WALL_MIRROR/plant.sh" <<'NW'
+_new_write() {
+  local f="$1" tmp="${1}.bionic.tmp"
+  cat <<'EOF'
+does not use bionic_link_target at all
+EOF
+  printf '%s' "$2" > "$tmp"
+  mv "$tmp" "$f"
+}
+NW
+expect_eq "positive control: a resolver named only inside a heredoc is caught unresolved (critic delta 4 G1), real files pass" \
+  "${WALL_MIRROR}/plant.sh " "$(_wall_unresolved "$WALL_MIRROR")"
+rm -f "$WALL_MIRROR/plant.sh"
 
 # R-1's pin, and the reason it is SHAPE rather than byte-identity. There is a
 # THIRD settings writer — hooks.sh's `hooks_strip_legacy_channel` — and the pin

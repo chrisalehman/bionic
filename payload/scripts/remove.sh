@@ -1591,7 +1591,7 @@ _rm_item_orphans() {
   # later. Booking that as `already clean` also counted it into the clean tally
   # and kept it out of the blocks a reader scans, so a user with real orphans was
   # told there was nothing there. The honest line is that the check did not run,
-  # and why, and it is counted with the skips.
+  # and why, and it is counted on its own line, not with the skips (critic delta 3 F2).
   if [ "$RM_ALL" = "1" ] && [ "$RM_PLUGIN_STILL_INSTALLED" = "1" ]; then
     echo "orphaned dependencies:"
     _rm_not_checked "orphaned dependencies" \
@@ -1681,8 +1681,13 @@ _rm_item_orphans
 # print is what it did: the counts, and anything it could not finish.
 
 if [ -n "$RM_ONLY" ]; then
-  printf '  %d removed · %d already clean · %d skipped by you · %d not checked\n' \
-    "$RM_REMOVED" "$RM_CLEAN" "$RM_SKIPPED" "$RM_NOT_CHECKED"
+  # NO "not checked" SEGMENT HERE (critic delta 4 G4). `_rm_not_checked`'s one
+  # call site is gated on `RM_ALL = 1`, and `--all`/`--only` are mutually
+  # exclusive (checked above) — so RM_NOT_CHECKED is always 0 on this branch. A
+  # fourth segment that can never read anything but "0 not checked" is not
+  # information; it stays on the whole-pass line below, where it can.
+  printf '  %d removed · %d already clean · %d skipped by you\n' \
+    "$RM_REMOVED" "$RM_CLEAN" "$RM_SKIPPED"
   echo ""
   if [ -n "$RM_LEFTOVERS" ]; then
     echo "  Leftovers (bionic could not finish these)"
@@ -1733,8 +1738,14 @@ echo "    • Restart your shell if the rc file changed"
 # reader to stop reading it. So the unqualified sentence is now the CLEAN run's sentence,
 # and a run that left anything behind gets one that points at what it left. A not-checked
 # row is exactly as unfinished as a skipped or leftover one — bionic never verified it is
-# gone — so it holds this gate too (critic delta 3 F2).
-if [ "$RM_SKIPPED" -eq 0 ] && [ "$RM_NOT_CHECKED" -eq 0 ] && [ -z "$RM_LEFTOVERS" ]; then
+# gone — but there is no `RM_NOT_CHECKED -eq 0` clause here: RM_NOT_CHECKED can only become
+# non-zero via `_rm_not_checked`'s one call site, gated on RM_PLUGIN_STILL_INSTALLED=1, which
+# is itself only ever set alongside a leftover (uninstall failed) or a skip (declined/EOF) —
+# so this gate's other two clauses already fail on every reachable not-checked run. A prior
+# revision added a third clause here that no fixture could ever make the deciding one;
+# removed rather than shipped as decoration (critic delta 4 G2). If a second
+# `_rm_not_checked` caller is ever added without that entailment, re-add the clause then.
+if [ "$RM_SKIPPED" -eq 0 ] && [ -z "$RM_LEFTOVERS" ]; then
   echo "    • Claude Code still works, without bionic's skills, hooks and agents"
 else
   echo "    • Claude Code still works — but the items listed above are still on this machine"

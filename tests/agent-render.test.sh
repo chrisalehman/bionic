@@ -303,23 +303,66 @@ DOCTRINE_FLAT() { tr '\n' ' ' < "$1" | tr -s ' '; }
 # `echo "EXIT=$?" >> "$LOG"` snippet, both asserted in DOCTRINE_PRESENT below), and
 # retire the code-span/blockquote stripper along with the `& disown` needle.
 #
+# The single source of truth for what DOCTRINE_PRESENT checks, hoisted into a
+# variable so the positive control below and the per-role loop after it read
+# the SAME list rather than two independently-typed copies of it (critic delta
+# 4 G5: the pre-fix control hardcoded two of these seven needles a second time,
+# so it could not notice this list changing underneath it).
+DOCTRINE_PRESENT_LIST="$(cat <<'DOCTRINE_PRESENT'
+explicit timeout sized to the command|explicit timeout sized to the command
+never end your turn while a command is running|Never end your turn while a command is running
+documented fallback arms a Monitor on the file's EXIT= line|the orchestrator arms a Monitor on the file's `EXIT=` line
+the fallback is CONDITIONAL on background dispatch|**if** you were dispatched in the background
+…and says what to do when it does not hold|Otherwise stay in the foreground and do not stop
+…and names the harness-native background mode|run_in_background
+…and its snippet actually writes the EXIT= line|echo "EXIT=$?" >> "$LOG"
+DOCTRINE_PRESENT
+)"
+
 # Positive control, run once rather than per role, because it measures the
-# matcher and not the files: a role fixture missing the snippet must be caught
-# missing by the exact substring the DOCTRINE_PRESENT loop below checks for.
+# matcher and not the files. Two fixtures, both built from DOCTRINE_PRESENT_LIST
+# rather than re-typed literals: one holding every needle (a sanity check — it
+# must pass all seven), and then, one needle at a time, a fixture holding every
+# OTHER needle but that one — which must be caught missing ON THAT NEEDLE
+# specifically. The pre-fix control's fixture ("the fallback bullet says
+# nothing about backgrounding or exit codes.") never contained ANY of the seven
+# needles, so its two hardcoded assertions were true by construction and could
+# not go red on a real near-miss (critic delta 4 G5).
 N3_DIR="$TMP/n3"; mkdir -p "$N3_DIR"
-printf 'the fallback bullet says nothing about backgrounding or exit codes.\n' > "$N3_DIR/missing-positive.md"
-if printf '%s' "$(DOCTRINE_FLAT "$N3_DIR/missing-positive.md")" | grep -qF 'run_in_background'; then
-  fail "positive control: a role fixture without run_in_background is caught missing" \
-    "the planted fixture matched anyway"
-else
-  pass "positive control: a role fixture without run_in_background is caught missing"
-fi
-if printf '%s' "$(DOCTRINE_FLAT "$N3_DIR/missing-positive.md")" | grep -qF 'echo "EXIT=$?" >> "$LOG"'; then
-  fail "positive control: a role fixture without the EXIT= snippet is caught missing" \
-    "the planted fixture matched anyway"
-else
-  pass "positive control: a role fixture without the EXIT= snippet is caught missing"
-fi
+N3_ALL="$N3_DIR/all-present.md"
+: > "$N3_ALL"
+while IFS='|' read -r _n3_label _n3_needle; do
+  [ -z "$_n3_label" ] && continue
+  printf '%s\n' "$_n3_needle" >> "$N3_ALL"
+done <<<"$DOCTRINE_PRESENT_LIST"
+N3_ALL_FLAT="$(DOCTRINE_FLAT "$N3_ALL")"
+while IFS='|' read -r _n3_label _n3_needle; do
+  [ -z "$_n3_label" ] && continue
+  if printf '%s' "$N3_ALL_FLAT" | grep -qF "$_n3_needle"; then
+    pass "positive control sanity: a fixture holding every needle matches: $_n3_label"
+  else
+    fail "positive control sanity: a fixture holding every needle matches: $_n3_label" \
+      "missing: $_n3_needle"
+  fi
+done <<<"$DOCTRINE_PRESENT_LIST"
+
+while IFS='|' read -r _n3_miss_label _n3_miss_needle; do
+  [ -z "$_n3_miss_label" ] && continue
+  N3_MISS="$N3_DIR/missing-one.md"
+  : > "$N3_MISS"
+  while IFS='|' read -r _n3_label _n3_needle; do
+    [ -z "$_n3_label" ] && continue
+    [ "$_n3_needle" = "$_n3_miss_needle" ] && continue
+    printf '%s\n' "$_n3_needle" >> "$N3_MISS"
+  done <<<"$DOCTRINE_PRESENT_LIST"
+  N3_MISS_FLAT="$(DOCTRINE_FLAT "$N3_MISS")"
+  if printf '%s' "$N3_MISS_FLAT" | grep -qF "$_n3_miss_needle"; then
+    fail "positive control: a role fixture missing only '$_n3_miss_label' is caught missing" \
+      "the planted fixture matched anyway"
+  else
+    pass "positive control: a role fixture missing only '$_n3_miss_label' is caught missing"
+  fi
+done <<<"$DOCTRINE_PRESENT_LIST"
 
 for r in $ROLES; do
   R_FLAT="$(DOCTRINE_FLAT "$OUT/$r.md")"
@@ -330,15 +373,7 @@ for r in $ROLES; do
     else
       fail "agents/$r.md: doctrine states: $label" "missing: $needle"
     fi
-  done <<'DOCTRINE_PRESENT'
-explicit timeout sized to the command|explicit timeout sized to the command
-never end your turn while a command is running|Never end your turn while a command is running
-documented fallback arms a Monitor on the file's EXIT= line|the orchestrator arms a Monitor on the file's `EXIT=` line
-the fallback is CONDITIONAL on background dispatch|**if** you were dispatched in the background
-…and says what to do when it does not hold|Otherwise stay in the foreground and do not stop
-…and names the harness-native background mode|run_in_background
-…and its snippet actually writes the EXIT= line|echo "EXIT=$?" >> "$LOG"
-DOCTRINE_PRESENT
+  done <<<"$DOCTRINE_PRESENT_LIST"
   while IFS='|' read -r label needle; do
     [ -z "$label" ] && continue
     if printf '%s' "$R_FLAT" | grep -qF "$needle"; then
