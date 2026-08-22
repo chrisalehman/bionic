@@ -138,6 +138,21 @@ the state you were about to measure.
 `/bionic:map-instrument-narrow` starts it. It produces a written architectural model,
 captured measurements, and a named root cause, each one written down before the next begins.
 
+### `excalidraw-diagram` — diagrams that argue
+
+Generates Excalidraw JSON for a picture that makes an argument — fan-out for one-to-many, a
+timeline for a sequence, convergence for aggregation — rather than a grid of labelled boxes.
+It then renders the diagram to PNG, looks at the render, and fixes what it sees, in a loop
+until the picture matches the design.
+
+Reach for it when a layout is genuinely hand-arranged. For a diagram whose structure can be
+composed, canonical-sdlc's own format policy prefers SVG, which is simultaneously the source,
+the shipped artifact and a test surface.
+
+`/bionic:excalidraw-diagram` starts it. The renderer it drives — a Python environment and a
+headless Chromium — is not installed with the plugin: the first render offers each half once,
+on consent, and `/bionic:doctor` reports both.
+
 ## The commands
 
 - `/bionic:help` — what bionic is, the command roster, where to start.
