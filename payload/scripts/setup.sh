@@ -1522,7 +1522,7 @@ fi
 # at a time; it's installing all in one go!"). Under --all there is one question
 # over the whole list; without it, one question per item.
 if [ "$setup_all" = "1" ]; then
-  say "bionic setup — the full list below runs after one question."
+  say "bionic setup"
 else
   say "bionic setup — every change below is asked for first, one item at a time."
 fi
@@ -1541,6 +1541,8 @@ if [ "$setup_all" = "1" ]; then
     say "   nothing left to do — this machine is set up."
     exit 0
   fi
+  say ""
+  say "   The whole list runs after one question."
   consent "Do all of the above?"; setup_all_rc=$?
   case "$setup_all_rc" in
     0) SETUP_ALL=1 ;;
