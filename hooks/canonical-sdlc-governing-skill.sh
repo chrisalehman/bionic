@@ -546,13 +546,6 @@ case "$SCALE" in
   task|wave|epic) ;;
   *) block "invalid scale: '$SCALE' — allowed: task|wave|epic" ;;
 esac
-# Intent × scale validity: barred cells derivable from the two enums.
-if [ "$SCALE" = "epic" ]; then
-  case "$INTENT" in
-    bugfix|spike|incident-response)
-      block "barred cell: $INTENT × epic (§Intent × scale validity)" ;;
-  esac
-fi
 
 # ---------- walk: enum (epic-14 AC-3) ----------
 #
