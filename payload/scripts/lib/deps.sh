@@ -573,6 +573,14 @@ _dep_install_argv() {  # <name> — one token per line
 # an absent `stat` leaves `mode` empty and the rewrite still lands, which is the
 # same honest degradation this file already practises for `jq`.
 #
+# AND IT IS THE TARGET'S MODE, NOT THE LINK'S (S14, closing the class the S13
+# critic delta left standing here). A `~/.claude/settings.json` symlinked into a
+# dotfiles repo is the commonest way people manage it, and a bare `stat` on a
+# symlink reports the LINK's own mode — 755 — never the file's. Capturing that
+# and handing it to `chmod` publishes the rewrite as `rwxr-xr-x`: WIDER than the
+# file being replaced, which is the one outcome this capture exists to prevent.
+# `-L` is what makes the capture mean the file; both flavours take it.
+#
 # THE ORDER IS THE FIX. `umask 077` and the `chmod` both come BEFORE the `mv`, so
 # the rename publishes an already-correct inode. Repairing the mode afterwards —
 # the obvious spelling — leaves the tmp holding the tokens at 0644 under a
@@ -583,11 +591,18 @@ _dep_install_argv() {  # <name> — one token per line
 # rename entirely, turning honest degradation into a silent refusal to write.
 # hooks.sh's `hooks_strip_legacy_channel` carries the same shape for the same
 # reasons.
+#
+# THE STALE TMP IS REMOVED, NOT TRUNCATED. `>` on an existing file keeps that
+# file's mode, so a tmp left behind by an earlier interrupted run would carry
+# ITS width through the write, exposed until the chmod line below catches up —
+# the one hole S13's own header comment ("nothing ever exists at a mode wider
+# than the file it is replacing") did not cover for this writer.
 _dep_settings_write_jq() {  # <settings-file> <jq-program> [jq-arg...]
   local settings="${1:-}" program="${2:-}"
   shift 2 || return 1
   local tmp="${settings}.bionic.tmp" mode
-  mode="$(stat -f '%Lp' "$settings" 2>/dev/null || stat -c '%a' "$settings" 2>/dev/null)"
+  mode="$(stat -L -f '%Lp' "$settings" 2>/dev/null || stat -L -c '%a' "$settings" 2>/dev/null)"
+  rm -f "$tmp"
   if (umask 077; jq "$@" "$program" "$settings" > "$tmp") \
      && { [ -z "$mode" ] || chmod "$mode" "$tmp"; } \
      && mv "$tmp" "$settings"; then
