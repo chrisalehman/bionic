@@ -359,6 +359,35 @@ _dep_version_from_probe() {  # <argv...>
 # `unknown` is used only where the mechanism genuinely has no presence surface
 # — reporting `no` there would be a confident wrong answer, and doctor would
 # nag about a dependency that is in fact fine.
+#
+# THE PROBE CONTRACT (epic-18 AC-9). A probe answers "is this dependency in
+# the state setup leaves it in", not "is it registered". Those two questions
+# only coincide where setup's own act of installing IS the registration
+# (native, mcp-server below) — everywhere else, checking a registry as a
+# stand-in for the state is a wrong-answer waiting to happen: the registry can
+# say yes while the route that actually needs the dependency gets nothing.
+# Audited against this at T5, one line per kind:
+#   native              registration IS the installed state (a plugin's key in
+#                        installed_plugins.json is not a proxy for anything
+#                        else) — fine.
+#   brew-dep/brew-cask   the binary on PATH is the state itself, not a lookup
+#                        in some brew ledger — fine.
+#   npm-global           `npm list -g` reads npm's own record of what its
+#                        install left behind; for a global package that record
+#                        IS the state, there is no second question to ask —
+#                        fine.
+#   mcp-server           registration via `claude mcp add` is genuinely the
+#                        entire state a route consumes; no other installed
+#                        surface exists to probe instead — fine.
+#   pnpm-store           no presence surface exists at all (see
+#                        _dep_check_pnpm_store below); `unknown` is the honest
+#                        answer, never a registration stand-in — fine.
+#   playwright-browser   a filesystem marker left by the actual install, not a
+#                        network --dry-run check — fine.
+#   statusline           being fixed in flight — see the note at
+#                        _dep_check_statusline below (epic-18 T1, parallel).
+#   uv-tool (notebooklm) being fixed in flight — see the note at
+#                        _dep_check_uv_tool below (epic-18 T2, parallel).
 
 _dep_check_native() {  # native kind: the harness's own install registry
   local name="$1" file ver
@@ -383,6 +412,11 @@ _dep_check_brew_dep() {  # presence is the binary on PATH, exactly as bootstrap 
   if _dep_have "$name"; then echo "yes|$(_dep_version_from_probe "$name" --version)"; else echo "no|unknown"; fi
 }
 _dep_check_brew_cask() { _dep_check_brew_dep "$@"; }
+# PROBE-CONTRACT NOTE (epic-18 T5, AC-9): aliased to the binary-on-PATH check
+# above, keyed on the dep's own `name` — for notebooklm that's a bet that
+# `uv tool install notebooklm-py` leaves a `notebooklm` binary on PATH. Being
+# fixed in flight by epic-18 T2, which lands this row's actual state; the
+# audit here is deferred to that landing rather than re-litigated by T5.
 _dep_check_uv_tool()   { _dep_check_brew_dep "$@"; }
 
 _dep_check_npm_global() {  # the PACKAGE is the probe target, not a binary name
@@ -425,6 +459,11 @@ _dep_check_playwright_browser() {
   echo "no|unknown"
 }
 
+# PROBE-CONTRACT NOTE (epic-18 T5, AC-9): checks `.statusLine.command` in
+# settings.json against a substring match, which is the state setup's own
+# writer (_dep_install_statusline below) leaves — not a separate registry.
+# Being fixed in flight by epic-18 T1, which lands this row's actual half-fix;
+# the audit here is deferred to that landing rather than re-litigated by T5.
 _dep_check_statusline() {
   local settings cmd
   settings="$(_dep_settings_file)"
