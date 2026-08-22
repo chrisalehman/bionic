@@ -323,6 +323,94 @@ write_patrol_stamp() {  # <session-id> <verb> -> 0 written, 1 not
   return 0
 }
 
+# ---------------------------------------------------------------- the blind wall
+#
+# THE WALL THAT ROSTERS A DISPATCH IS REGISTERED ON THE SKILL CHANNEL, not in hooks.json:
+# skills/canonical-sdlc/SKILL.md's own frontmatter registers hooks/dispatch-preflight.sh
+# (that partition is deliberate — the wall is armed-scoped, not always-on). A skill-channel
+# registration lives in the process's `sessionHooks` table and does NOT survive a session
+# continue, a `/clear`+resume, or `/reload-plugins`. When it is gone, NOTHING SAYS SO:
+# dispatches launch normally, no row is written, and the first symptom is a tick REFUSING
+# with "no roster" — which reads as "nothing has been dispatched yet", the exact opposite of
+# what happened. Measured live 2026-08-22; the same symptom is recorded unresolved at
+# .bionic/docs/record/session-20260814-wave-detector-terminal-state/min-interactive-agent-hook.md
+# §6, and the cure proven the same day is to re-invoke the skill in the same process.
+#
+# So the tick — which already runs inside the session and already holds its session id —
+# compares TWO records of the same event:
+#
+#   the transcript, which the CLI writes whatever the hooks do:  every `Agent` tool_use
+#   the roster,     which only the wall writes:                  every dispatch it saw
+#
+# A gap between them is the wall's absence, observed rather than assumed. This is a
+# DIAGNOSIS, not a gate: it never refuses anything, and it never touches the roster.
+#
+# WHAT IS DELIBERATELY NOT COUNTED, each because counting it would make a live wall look
+# blind: a tool_use inside an agent context (`isSidechain`, or an explicit agent key) — a
+# teammate's dispatch never reaches this wall at all (record §5a), so it can never be
+# rostered and its absence is not news; and a dispatch the wall REFUSED, which exits before
+# the roster append and is therefore a wall doing its job, recognized by the CLI's own
+# `PreToolUse:Agent hook error:` marker in the tool result.
+#
+# TWO HONEST LIMITS, both a false ALARM rather than a false silence, and both cheap because
+# the cure is idempotent (re-invoking the skill changes nothing when the wall is live):
+# a Step-8 cleanup that wipes `.bionic/tmp` mid-session leaves the transcript's dispatches
+# with no rows to match; and a transcript that quotes the refusal marker verbatim (a record
+# file read into context) inflates the refusal count, which suppresses rather than raises.
+#
+# The transcript is resolved EXACTLY as hooks/dispatch-preflight.sh resolves it for its own
+# liveness question (`roster_session_live`): a session's transcript is `<sid>.jsonl` under
+# some project directory of CLAUDE_CONFIG_DIR/projects. Not resolvable means SILENT — a
+# detector that cannot read cannot report.
+
+session_transcript() {  # <session-id> -> path on stdout, nonzero if none
+  local sid="$1" cfg d f
+  [ -n "$sid" ] || return 1
+  cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  [ -d "$cfg/projects" ] || return 1
+  for d in "$cfg"/projects/*/; do
+    f="${d}${sid}.jsonl"
+    if [ -f "$f" ] && [ ! -L "$f" ]; then
+      printf '%s' "$f"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Occurrences, never lines: a parallel fan-out puts several `Agent` tool_uses in ONE
+# assistant entry, and a line-counting read would report that batch as a single dispatch.
+# The literal `"name":"Agent"` cannot be forged from prose quoting it, because inside a JSON
+# string every quote is backslash-escaped and the escaped form does not contain it.
+count_main_thread_dispatches() {  # <transcript> -> count on stdout
+  awk '
+    /"isSidechain"[[:space:]]*:[[:space:]]*true/          { next }
+    /"agent_?[Ii][dD]"[[:space:]]*:[[:space:]]*"[^"]/     { next }
+    { n += gsub(/"name"[[:space:]]*:[[:space:]]*"Agent"/, "") }
+    END { print n+0 }
+  ' "$1" 2>/dev/null
+}
+
+count_refused_dispatches() {  # <transcript> -> count on stdout
+  awk '
+    { n += gsub(/PreToolUse:Agent hook error:/, "") }
+    END { print n+0 }
+  ' "$1" 2>/dev/null
+}
+
+# One row per dispatch, and only the row the WALL itself writes: `status=intended` is
+# hooks/dispatch-preflight.sh's own append (its ROW, one per Agent PreToolUse). The later
+# `status=confirmed` / `status=identified` copies hooks/execution-recorder.sh appends are
+# the SAME dispatch re-stated on an append-only file, so counting them would inflate the
+# rostered side threefold and hide every real gap. Schema-prefix filtered first, the same
+# discipline every other roster reader in the fleet follows.
+count_rostered_dispatches() {  # <roster file> <session-id> -> count on stdout
+  [ -f "$1" ] || { printf '0'; return 0; }
+  grep -F "roster-state/v1|" "$1" 2>/dev/null \
+    | grep -F "|session=$2|" \
+    | grep -c -F "|status=intended|"
+}
+
 # ---------------------------------------------------------------- verbs
 
 case "$VERB" in
@@ -401,6 +489,37 @@ case "$VERB" in
       exit 2
     fi
     ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
+
+    # ---------- THE BLIND-WALL CHECK, BEFORE ANYTHING IS DECIDED FROM THE ROSTER ----------
+    #
+    # It runs here, ahead of the read, because the loudest symptom of a blind wall is the
+    # absent-roster REFUSAL at the bottom of this verb — a message that names the wrong
+    # cause ("nothing has been dispatched yet") for the one state where the diagnosis
+    # matters most. Emitting first means the diagnosis travels WITH that refusal instead of
+    # being lost behind it. It decides nothing else: the roster's own verdict is untouched,
+    # and a session whose transcript cannot be resolved is silent rather than alarmed.
+    WALL_BLIND=0
+    TRANSCRIPT="$(session_transcript "$SESSION_ID")" || TRANSCRIPT=""
+    if [ -n "$TRANSCRIPT" ]; then
+      TX_DISPATCHES="$(count_main_thread_dispatches "$TRANSCRIPT")"
+      TX_REFUSED="$(count_refused_dispatches "$TRANSCRIPT")"
+      ROSTERED="$(count_rostered_dispatches "$ROSTER_FILE" "$SESSION_ID")"
+      [ -n "$TX_DISPATCHES" ] || TX_DISPATCHES=0
+      [ -n "$TX_REFUSED" ]    || TX_REFUSED=0
+      [ -n "$ROSTERED" ]      || ROSTERED=0
+      case "${TX_DISPATCHES}${TX_REFUSED}${ROSTERED}" in
+        *[!0-9]*) : ;;   # an unreadable count is no count — refuse rather than guess
+        *)
+          if [ "$TX_DISPATCHES" -gt "$(( ROSTERED + TX_REFUSED ))" ]; then
+            WALL_BLIND=1
+            printf '%s|at=%s|session=%s|decision=NOTIFY|check=wall-blind|dispatches=%s|rostered=%s|refused=%s|cure=re-invoke /bionic:canonical-sdlc\n' \
+              "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" \
+              "$TX_DISPATCHES" "$ROSTERED" "$TX_REFUSED"
+            say "NOTIFY wall-blind: ${TX_DISPATCHES} dispatches, ${ROSTERED} rostered — re-invoke /bionic:canonical-sdlc (hooks do not survive continue, /clear+resume, or /reload-plugins)"
+          fi
+          ;;
+      esac
+    fi
 
     # EXACTLY ONE verdict read over the whole roster (no name argument), run from the repo
     # root exactly as landing-gate.sh runs it. `|| exit 9` keeps a failed `cd` out of the
@@ -504,6 +623,11 @@ EOF
       printf '%s|at=%s|session=%s|decision=DISARM|total=%s|open=%s\n' \
         "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN"
       say "DISARM — no open row on this roster; the Patrol may stop."
+      # A blind wall outranks a quiet roster on the EXIT CODE alone — the decision line
+      # above still says what the roster says. Silence here would be the detector's own
+      # failure mode: the roster of a session whose wall is blind is exactly the roster
+      # that looks finished.
+      [ "$WALL_BLIND" -eq 1 ] && exit 1
       exit 0
     fi
 
@@ -518,6 +642,7 @@ EOF
     printf '%s|at=%s|session=%s|decision=QUIET|total=%s|open=%s\n' \
       "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN"
     say "QUIET — $OPEN open row(s) on this roster, none past their declared duration."
+    [ "$WALL_BLIND" -eq 1 ] && exit 1
     exit 0
     ;;
 esac
