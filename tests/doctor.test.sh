@@ -374,6 +374,18 @@ RC
     mkdir -p "$m/playwright-cache/chromium-1187"
     : > "$m/playwright-cache/chromium-1187/INSTALLATION_COMPLETE"
   fi
+
+  # ── notebooklm's second half ─────────────────────────────────────────────
+  # _dep_check_uv_tool's two-half probe (deps.sh) treats notebooklm as present
+  # only when the CLI is on PATH AND this skill file exists under the claude
+  # home the fixture points BIONIC_CLAUDE_HOME at. The healthy machine's PATH
+  # already stubs the CLI (FULL_BIN, above); without this file a healthy
+  # machine now probes as needing setup.
+  if [ "$flavor" = "healthy" ]; then
+    mkdir -p "$m/claude-home/skills/notebooklm"
+    printf -- '---\nname: notebooklm\n---\nFixture notebooklm skill.\n' \
+      > "$m/claude-home/skills/notebooklm/SKILL.md"
+  fi
 }
 
 # The CLI listing every arm reads unless it says otherwise (wave-06 S6). The
