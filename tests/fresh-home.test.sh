@@ -209,10 +209,34 @@ case "${1:-}" in
       uninstall) _rmfake "${3:-}"; exit $? ;;
     esac
     exit 1 ;;
+  sync)
+    # The `uv-project` kind (epic-18 T3's excalidraw-renderer row): the argv is
+    # `uv sync --project <dir>`, and what makes the row PRESENT is a real venv at
+    # `<dir>/.venv`, because `_dep_check_uv_project` is a filesystem test, not a
+    # call back into this binary. A recorder that only logged the call would leave
+    # the row permanently absent no matter how many times it "installed".
+    proj=""; prev=""
+    for a in "$@"; do
+      [ "$prev" = "--project" ] && proj="$a"
+      prev="$a"
+    done
+    if [ -n "$proj" ]; then
+      mkdir -p "${proj}/.venv/bin"
+      printf '#!/bin/bash\nexit 0\n' > "${proj}/.venv/bin/python"
+      chmod +x "${proj}/.venv/bin/python"
+      printf 'version = 9.9.9\n' > "${proj}/.venv/pyvenv.cfg"
+    fi
+    exit 0 ;;
 esac
 exit 0
 UVSHIM
 chmod +x "${SHIMSRC}/uv"
+
+# TODO(T10 final regression, once T4 and T12 merge): two more dep `kind`s arrive with
+# those merges — T4's roster rows add a `github-skill` kind and T12's notification
+# channel row adds a `marketplace-plugin` kind. Neither has a shim arm yet. If this
+# suite reds on a row of either kind, add its arm here the same way `sync` was added
+# above — that is the one place this suite is extended by hand (see the file header).
 
 # ─── notebooklm, and the one thing it does that matters here ─────────────────
 #
