@@ -116,7 +116,7 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-JOBS="${BIONIC_TEST_JOBS:-4}"
+JOBS="${BIONIC_TEST_JOBS:-8}"
 
 ( . tests/lib/resolve-roots.sh
   printf 'Roots: hooks=%s skills=%s scripts=%s\n\n' \
