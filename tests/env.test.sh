@@ -325,6 +325,11 @@ expect_eq "…and after env_unset" "600" \
 # the link's mode (755) and publish the rewrite, tokens included, as
 # `rwxr-xr-x`. `stat -L` is what makes this pass; tests/remove.test.sh carries
 # the same arm for the writer's other two siblings.
+#
+# AND THE LINK SURVIVES (critic delta 2 N1, A6.S15.1): "wrote through the link"
+# was false of this run until S15 — the rename detached the link and left the
+# dotfiles copy holding the old content. `_dep_settings_write_jq` now resolves to
+# the final target, and the three arms below assert it.
 S8_DIR="$TMP/symlink-mode"; mkdir -p "$S8_DIR/dotfiles" "$S8_DIR/home"
 plant_settings_populated "$S8_DIR/dotfiles/settings.json"
 chmod 600 "$S8_DIR/dotfiles/settings.json"
@@ -336,7 +341,12 @@ env_status "$S8_LINK" -- env_set BASH_MAX_TIMEOUT_MS 1800000
 expect_true "symlink arm: env_set really wrote through the link (not vacuous)" \
   bash -c 'jq -e ".env.BASH_MAX_TIMEOUT_MS == \"1800000\"" "$1" >/dev/null' _ "$S8_LINK"
 expect_eq "a symlinked settings.json is published at its TARGET's 0600, never the link's 755" \
-  "600" "$(stat -f '%Lp' "$S8_LINK" 2>/dev/null || stat -c '%a' "$S8_LINK" 2>/dev/null)"
+  "600" "$(stat -L -f '%Lp' "$S8_LINK" 2>/dev/null || stat -L -c '%a' "$S8_LINK" 2>/dev/null)"
+expect_true "symlink arm: settings.json is STILL a symlink after env_set" test -L "$S8_LINK"
+expect_eq "…and still points where it did" \
+  "$S8_DIR/dotfiles/settings.json" "$(readlink "$S8_LINK")"
+expect_true "…and it is the dotfiles TARGET that carries the new key, not a detached copy" \
+  bash -c 'jq -e ".env.BASH_MAX_TIMEOUT_MS == \"1800000\"" "$1" >/dev/null' _ "$S8_DIR/dotfiles/settings.json"
 
 # The wall, from this side: env.sh renames no tmp over a settings file of its
 # own. tests/remove.test.sh counts the payload's settings writers and pins the
