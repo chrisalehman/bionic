@@ -32,8 +32,15 @@ When the user asks for the whole setup rather than one item, one run can carry i
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh --all
 ```
 
-It prints everything it would do and asks one question over that list.
-Use --all only when the user asks for everything; relay its one question verbatim.
+It prints everything it would do and ends with its one question over that list. That
+question is already the last line of the output — do not print it a second time; wait
+for the user's answer. On a yes, run the whole list in one go:
+
+```bash
+printf 'y\n' | bash ${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh --all
+```
+
+Use --all only when the user asks for everything.
 
 A no is finished: never work around it, never re-ask it, and never run an item the user did
 not accept.
