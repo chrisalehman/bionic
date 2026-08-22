@@ -172,6 +172,20 @@ _doctor_unknown_cause() {  # <kind> — the install mechanism the table names
   esac
 }
 
+# WHICH HALF (epic-18 T1, AC-2). ccstatusline's `check_dep` names the missing
+# half in its version field when `present=no` — this is that code's rendering,
+# for the one degradation line that needs it. Every other absent dependency
+# has one thing to be absent; this one has two, and "ccstatusline is absent"
+# alone does not say whether /bionic:setup has one thing to fix or both.
+_doctor_ccstatusline_reason() {  # <check_dep's version field for the no case>
+  case "${1:-}" in
+    command-missing) echo "the statusLine command is not set" ;;
+    config-missing)  echo "its config file is missing or does not match the shipped layout" ;;
+    both-missing)    echo "neither the statusLine command nor its config file is set" ;;
+    *)               echo "$1" ;;
+  esac
+}
+
 # ─── Facts, gathered once ────────────────────────────────────────────────────
 #
 # Every function called here is one of detect.sh's or profile.sh's. Nothing
@@ -430,7 +444,15 @@ while IFS= read -r dep_name; do
           DEGRADATION="${DEGRADATION}  ${dep_name} is absent → run /bionic:setup — it wraps the native plugin install"$'\n' ;;
         *)
           N_ABSENT_ACTIONABLE=$((N_ABSENT_ACTIONABLE + 1))
-          DEGRADATION="${DEGRADATION}  ${dep_name} is absent → run /bionic:setup — it offers to install ${dep_name}"$'\n' ;;
+          # ccstatusline is the one row with two halves (AC-2) — name which
+          # one is missing rather than repeating the generic sentence over a
+          # dependency that may be half there.
+          if [ "$dep_name" = "ccstatusline" ]; then
+            DEGRADATION="${DEGRADATION}  ${dep_name} is absent ($(_doctor_ccstatusline_reason "$dep_version")) → run /bionic:setup — it offers to install ${dep_name}"$'\n'
+          else
+            DEGRADATION="${DEGRADATION}  ${dep_name} is absent → run /bionic:setup — it offers to install ${dep_name}"$'\n'
+          fi
+          ;;
       esac
       ;;
     *)

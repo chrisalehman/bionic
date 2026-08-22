@@ -256,8 +256,12 @@ FIX=""
 new_fixture() {  # <name>
   FIX="$TMP/fix-$1"
   rm -rf "$FIX"
-  mkdir -p "$FIX/home" "$FIX/ch/plugins" "$FIX/root/.claude-plugin" "$FIX/root/hooks"
+  mkdir -p "$FIX/home" "$FIX/ch/plugins" "$FIX/root/.claude-plugin" "$FIX/root/hooks" "$FIX/root/ccstatusline"
   printf '%s\n' '{"version":"0.1.0","name":"bionic"}' > "$FIX/root/.claude-plugin/plugin.json"
+  # The shipped ccstatusline layout (epic-18 T1, AC-1): install_dep now copies
+  # this into place beside recording the command, so a fixture payload root
+  # with no ccstatusline/settings.json makes the install step fail outright.
+  printf '%s' '{"version":3,"lines":[[{"id":"1","type":"model"}]]}' > "$FIX/root/ccstatusline/settings.json"
   printf '%s' '{}' > "$FIX/ch/settings.json"
   printf '%s\n' '{"version":2,"plugins":{}}' > "$FIX/ch/plugins/installed_plugins.json"
   printf 'export PATH="$HOME/bin:$PATH"\n' > "$FIX/rc"
