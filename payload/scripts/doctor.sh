@@ -1123,9 +1123,9 @@ case "$PROFILE_VERDICT" in
   *)         _doctor_env3 "$DOCTOR_NIL" "permission profile" "—" "unknown — jq is not on PATH" ;;
 esac
 case "$CCSTATUSLINE_STATE" in
-  yes)     _doctor_env3 "$DOCTOR_OK"  "statusline" "ccstatusline" "configured, shows after a restart" ;;
-  unknown) _doctor_env3 "$DOCTOR_NIL" "statusline" "—" "unknown — $(_doctor_unknown_cause statusline)" ;;
-  *)       _doctor_env3 "$DOCTOR_BAD" "statusline" "—" "not configured → /bionic:setup" ;;
+  yes)     _doctor_env3 "$DOCTOR_OK"  "statusLine.command" "ccstatusline" "set, shows after a restart" ;;
+  unknown) _doctor_env3 "$DOCTOR_NIL" "statusLine.command" "—" "unknown — $(_doctor_unknown_cause statusline)" ;;
+  *)       _doctor_env3 "$DOCTOR_BAD" "statusLine.command" "—" "not set → /bionic:setup" ;;
 esac
 # THE LEFTOVERS, AND ONLY WHEN THERE ARE ANY. Six checks ask the same kind of
 # question — did the retired installer leave something behind — and on a machine
