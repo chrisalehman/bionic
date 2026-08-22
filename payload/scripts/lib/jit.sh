@@ -2,8 +2,16 @@
 # jit.sh — the route-facing degradation contract (epic-17 wave-03, spec AC-5).
 #
 # WHAT THIS FILE OWNS. The two functions a route calls when it needs a
-# `when-needed` dependency it cannot assume is there: "is it present"
-# (jit_check) and "offer to install it, on consent, right now" (jit_offer).
+# dependency it cannot assume is there: "is it present" (jit_check) and "offer
+# to install it, on consent, right now" (jit_offer).
+#
+# THE CLASS IS NOT THE TRIGGER, and it never was — presence is (2026-08-22).
+# These functions were written for the `when-needed` class and the promotion of
+# four rows to `extra` that day did not touch a line of them: a row setup offers
+# can still be declined at setup, and a machine can lose it afterwards, so the
+# route's own offer is what stands between an absent tool and a cryptic failure.
+# What changed is which of the two it usually is — the ordinary first install for
+# a `when-needed` row, the self-heal for a promoted one.
 # Both lean entirely on
 # deps.sh's own table and its ONE mutating entry point, install_dep. jit_offer
 # is not a second installer: it calls install_dep BY NAME, so a route's JIT
