@@ -1,12 +1,12 @@
 #!/bin/bash
 # DOCTOR — epic-17 wave-03 slice S7 (spec AC-3; design ownership table: doctor is
-# the RENDERING SURFACE of detect.sh's facts, the dependency-constraint agreement
-# surface, and the permission-profile diff).
+# the RENDERING SURFACE of detect.sh's facts and the dependency-constraint
+# agreement surface).
 #
 # WHAT THIS SUITE OWNS. payload/scripts/doctor.sh and payload/commands/doctor.md
 # — the read-only diagnosis and its thin wrapper. Not the facts themselves:
-# detect.sh's and deps.sh's behaviour is tests/plugin-lib.test.sh's subject and
-# profile.sh's is tests/profile.test.sh's. What is proven HERE is that doctor
+# detect.sh's and deps.sh's behaviour is tests/plugin-lib.test.sh's subject.
+# What is proven HERE is that doctor
 # renders those facts honestly, names a fix for every broken one, and touches
 # nothing.
 #
@@ -27,8 +27,8 @@
 # unmodified.
 #
 # BOTH ARMS, ALWAYS — plus the third. Every section is rendered on a fully
-# HEALTHY machine and on a BROKEN one (absences, a constraint violation, a stale
-# profile, a legacy rc block, legacy-channel hook entries, half-uninstalled). A
+# HEALTHY machine and on a BROKEN one (absences, a constraint violation, a
+# legacy rc block, legacy-channel hook entries, half-uninstalled). A
 # section that only ever renders one way proves nothing. The third arm is
 # UNKNOWN: S1's resolution makes `present=unknown` and `count=unknown` legal
 # values, and a doctor that coerced them to `no`/`0` would report a machine it
@@ -67,7 +67,6 @@ exec < /dev/null
 REPO="${BIONIC_SCRIPTS_DIR}"
 DOCTOR_SH="${REPO}/payload/scripts/doctor.sh"
 DOCTOR_MD="${REPO}/payload/commands/doctor.md"
-TEMPLATE="${REPO}/payload/permissions/profile.template.json"
 
 PASS=0; FAIL=0; TOTAL=0
 ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
@@ -209,8 +208,8 @@ make_version_stub "$BROKEN_BIN" node "v26.7.0"
 make_version_stub "$BROKEN_BIN" rg   "ripgrep 15.2.0"
 
 # The unknown machine's PATH: the healthy one with jq removed. jq is itself a row
-# in the dependency table, and without it the plugin registry, settings.json and
-# the applied permission block are all unreadable.
+# in the dependency table, and without it the plugin registry and settings.json
+# are unreadable.
 NOJQ_BIN="$TMP/bin-nojq"; mkdir -p "$NOJQ_BIN"; cp -R "$FULL_BIN"/. "$NOJQ_BIN"/; rm -f "$NOJQ_BIN/jq"
 
 # A machine with no sha256 tool at all. The integrity check is the only fact
@@ -238,20 +237,9 @@ plant_installed_tree() {  # <dir> <skill-count> <agent-count>
   fi
 }
 
-# The rendered marker block, produced INDEPENDENTLY of profile.sh's
-# render_profile — a fixture built by the code under test could pin the test away
-# (memory: fixtures-can-pin-away-the-test). Plain text substitution in python3.
-render_block_json() {  # <template> <root> -> the allow array as JSON
-  python3 -c '
-import json, sys
-text = open(sys.argv[1]).read().replace("__BIONIC_PLUGIN_ROOT__", sys.argv[2].rstrip("/"))
-print(json.dumps(json.loads(text)["permissions"]["allow"]))
-' "$1" "$2"
-}
-
 # A whole fixture machine. `flavor` is healthy | broken.
 plant_machine() {  # <machine-root> <flavor>
-  local m="$1" flavor="$2" block accretion
+  local m="$1" flavor="$2"
   mkdir -p "$m/home" "$m/plugin/.claude-plugin" "$m/plugin/hooks" \
            "$m/plugin/ccstatusline" "$m/claude-home/plugins" "$m/installs"
 
@@ -347,35 +335,29 @@ JSON
 
   # ── user settings.json ───────────────────────────────────────────────────
   if [ "$flavor" = "healthy" ]; then
-    # The applied block is rendered against THIS machine's plugin root, so the
-    # re-render doctor performs must come back `identical`.
-    block="$(render_block_json "$TEMPLATE" "$m/plugin")"
-    accretion='["Bash(ls:*)","Bash(git status:*)"]'
+    # The machine's OWN permission rules, which bionic neither writes nor reads
+    # any more: they are here so a run that touched them would be visible.
     python3 -c '
 import json, sys
-allow = json.loads(sys.argv[2]) + json.loads(sys.argv[1])
 json.dump({"statusLine": {"type": "command", "command": "npx ccstatusline@latest"},
            "env": {"CLAUDE_CODE_ENABLE_TODO_TOOLS": "1", "BASH_MAX_TIMEOUT_MS": "1800000",
                    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"},
-           "permissions": {"allow": allow},
+           "permissions": {"allow": ["Bash(ls:*)", "Bash(git status:*)"]},
            "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
                {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/protect-main.sh"}]}]}},
-          open(sys.argv[3], "w"), indent=2)
-' "$block" "$accretion" "$m/claude-home/settings.json"
+          open(sys.argv[1], "w"), indent=2)
+' "$m/claude-home/settings.json"
   else
-    # Rendered against a DIFFERENT root — the post-update staleness case — plus
-    # two legacy managed-hook entries and no statusline.
-    block="$(render_block_json "$TEMPLATE" "/opt/old/bionic-install")"
-    accretion='["Bash(ls:*)","Bash(git status:*)","Bash(make:*)"]'
+    # Two legacy managed-hook entries, no statusline, and the machine's own
+    # permission rules.
     python3 -c '
 import json, sys
-allow = json.loads(sys.argv[2]) + json.loads(sys.argv[1])
-json.dump({"permissions": {"allow": allow},
+json.dump({"permissions": {"allow": ["Bash(ls:*)", "Bash(git status:*)", "Bash(make:*)"]},
            "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
                {"type": "command", "command": "~/.claude/hooks/protect-main.sh"},
                {"type": "command", "command": "~/.claude/hooks/protect-database.sh"}]}]}},
-          open(sys.argv[3], "w"), indent=2)
-' "$block" "$accretion" "$m/claude-home/settings.json"
+          open(sys.argv[1], "w"), indent=2)
+' "$m/claude-home/settings.json"
   fi
 
   # ── shell rc ─────────────────────────────────────────────────────────────
@@ -465,7 +447,6 @@ doctor_run() {  # <doctor.sh> <bin-dir> <machine-root> [env assignments...] [-- 
     BIONIC_SETTINGS_FILE="$m/claude-home/settings.json" \
     BIONIC_INSTALLED_PLUGINS_FILE="$m/claude-home/plugins/installed_plugins.json" \
     BIONIC_SHELL_RC="$m/rc" \
-    BIONIC_PROFILE_TEMPLATE="$TEMPLATE" \
     BIONIC_PLAYWRIGHT_CACHE="$m/playwright-cache" \
     ${envs[@]+"${envs[@]}"} \
     bash "$sh" ${args[@]+"${args[@]}"} 2>&1
@@ -580,7 +561,6 @@ TIER STATE
 DEPENDENCIES
 DUPLICATES
 ENVIRONMENT
-PERMISSION PROFILE
 ROSTER FOOTPRINT"
 EXPECTED_ROSTER_BROKEN="FIX
 LOAD STATE
@@ -589,7 +569,6 @@ TIER STATE
 DEPENDENCIES
 DUPLICATES
 ENVIRONMENT
-PERMISSION PROFILE
 ROSTER FOOTPRINT"
 expect_eq "healthy: no FIX section on a machine with nothing to fix" \
   "" "$(grep -c '^=== FIX ===$' "$H_OUT" | grep -v '^0$' || true)"
@@ -681,11 +660,11 @@ expect_eq "healthy: no internal lane vocabulary reaches the report at all" "" "$
 expect_eq "healthy: a clean legacy check gets no row of its own" \
   "" "$(line_of "$H_OUT" "legacy .zshrc alias block")"
 
-# Permission profile — the three-way diff. The version is read from the shipped
-# template, never pinned as a literal: plugin.json owns it and the template
-# renders it (version-ssot arm (e)), so a release bump must not go red here.
-TPL_VERSION="$(jq -r .version "$TEMPLATE")"
-expect_not_contains "healthy: no staleness action line" "the applied permission profile is stale" "$H"
+# THE PERMISSION-PROFILE ROW IS GONE (epic-18 T13). bionic ships no managed
+# allow-list, so doctor has no block to diff and no staleness to name. What is
+# pinned instead is the ABSENCE: a report that started mentioning one again would
+# be reporting a feature the product does not have.
+expect_not_contains "healthy: doctor names no permission profile at all" "permission profile" "$H"
 
 # Roster footprint — the D6 admission criterion, counted from the installed layout.
 #
@@ -737,7 +716,7 @@ RC_NOTE='Remote Control sessions override this (Manual / Accept edits / Plan onl
 # THE CAVEAT RIDES ON THE ROW (AC-15 rule 1). The full sentence — which also
 # names the three modes — was a second line under the value, the exact shape of
 # the complaint this AC answers. Doctor prints the half that changes what a
-# reader would do; /bionic:setup still prints PROFILE_RC_NOTE whole, beside the
+# reader would do; /bionic:setup still prints the note whole, beside the
 # question where there is room for it.
 
 # A machine that HAS written a mode (the setup item's own effect) reports that
@@ -856,13 +835,10 @@ expect_match "broken: two legacy-channel managed-hook entries counted" \
 expect_match "broken: ccstatusline reported absent" \
   "*absent*" "$(line_of "$B_OUT" "ccstatusline statusline")"
 
-# Stale permission profile — the post-update path-drift case, named with its fix.
-expect_match "broken: a block rendered for another root reads stale" \
-  "*stale*" "$(line_of "$B_OUT" "render diff")"
-expect_match "broken: accretion counts the three rules outside bionic's block" \
-  "*3*" "$(line_of "$B_OUT" "accretion outside block")"
-expect_contains "broken: staleness names /bionic:setup as the action" \
-  "the applied permission profile is stale" "$B"
+# The broken machine names no permission profile either — the absence holds on
+# both arms, which is what keeps this from passing on a report that simply had
+# nothing to say.
+expect_not_contains "broken: doctor names no permission profile at all" "permission profile" "$B"
 
 # Half-uninstalled — the curl fallback one-liner is its action line (D5a: the
 # remover must not depend on the thing it removes).
@@ -945,9 +921,6 @@ expect_not_match "no jq: that presence is NOT coerced to no" "*superpowers* abse
 LEGACY_HOOK_LINE="$(line_of "$U_OUT" "legacy-channel managed-hook entries")"
 expect_match "no jq: the legacy-channel hook COUNT renders unknown" "*unknown*" "$LEGACY_HOOK_LINE"
 expect_not_match "no jq: the legacy-channel hook count is NOT coerced to 0" "*entries*0*" "$LEGACY_HOOK_LINE"
-
-ACC_LINE="$(line_of "$U_OUT" "accretion outside block")"
-expect_match "no jq: accretion renders unknown" "*unknown*" "$ACC_LINE"
 
 expect_match "no jq: the roster count renders unknown, not 0" "*unknown*" \
   "$(roster_line_of "$U_OUT" "superpowers")"
@@ -1121,7 +1094,7 @@ MUTATING_VERBS="$(grep -nE '(brew|npm|uv|claude|pnpm|npx)[[:space:]]+(install|up
 expect_eq "doctor.sh never runs a mutating package-manager verb (the commands it prints are text)" \
   "" "$MUTATING_VERBS"
 TREAT_FUNCTIONS="$(grep -vE '^[[:space:]]*#' "$DOCTOR_SH" \
-  | grep -nE '(profile_apply|profile_strip|install_dep|remove_dep|_profile_write|_dep_install|_dep_consent)' || true)"
+  | grep -nE '(bionic_strip_permission_block|install_dep|remove_dep|_dep_install|_dep_consent)' || true)"
 expect_eq "doctor.sh calls no mutating function from any library" "" "$TREAT_FUNCTIONS"
 
 # ---------------------------------------------------------------------------
@@ -1136,15 +1109,13 @@ echo "=== Group 8: doctor renders detect.sh's facts — it does not re-derive th
 
 for fn in detect_plugin_integrity detect_agent_integrity detect_dep detect_env_todo_tools \
           detect_zshrc_legacy_block detect_legacy_channel_hooks \
-          detect_half_uninstalled detect_profile_state profile_diff; do
+          detect_half_uninstalled; do
   expect_true "doctor.sh calls ${fn} from the libraries" grep -q "${fn}" "$DOCTOR_SH"
 done
 # A `.` in command position naming the file — the source itself, not a mention
 # of the path in prose.
 expect_true "doctor.sh sources detect.sh rather than reimplementing it" \
   grep -qE '^[[:space:]]*\.[[:space:]].*detect\.sh' "$DOCTOR_SH"
-expect_true "doctor.sh sources profile.sh rather than reimplementing it" \
-  grep -qE '^[[:space:]]*\.[[:space:]].*profile\.sh' "$DOCTOR_SH"
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -1172,7 +1143,7 @@ done
 
 # The suite's own subject is untouched too — doctor must not rewrite the payload
 # it is diagnosing.
-PAYLOAD_CKSUM_BEFORE="$(shasum -a 256 "$DOCTOR_SH" "$TEMPLATE" 2>/dev/null)"
+PAYLOAD_CKSUM_BEFORE="$(shasum -a 256 "$DOCTOR_SH" 2>/dev/null)"
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -1210,11 +1181,11 @@ python3 - "$DOCTOR_SH" "$MUT2" <<'PY'
 import sys
 src, dest = sys.argv[1], sys.argv[2]
 lines = open(src).readlines()
-# The last `. <something>/profile.sh` line: the override must land AFTER the
+# The last `. <something>/detect.sh` line: the override must land AFTER the
 # library defines the function it replaces, or the source would simply undo it.
-anchors = [i for i, l in enumerate(lines) if 'profile.sh' in l and l.lstrip().startswith('. ')]
+anchors = [i for i, l in enumerate(lines) if 'detect.sh' in l and l.lstrip().startswith('. ')]
 if not anchors:
-    raise SystemExit("mutation 2: no source-of-profile.sh line to anchor the override on")
+    raise SystemExit("mutation 2: no source-of-detect.sh line to anchor the override on")
 lines.insert(anchors[-1] + 1,
              'detect_dep() { echo "dep:$1 lane=3b present=yes version=9.9.9 constraint=any verdict=ok"; }\n')
 open(dest, 'w').writelines(lines)
@@ -1241,8 +1212,8 @@ expect_match "MUTATION 3: the half-uninstalled STATE is still detected (only the
   "*yes*" "$(awk '/=== TIER STATE ===/{f=1;next} f && /^=== /{f=0} f' "$MUT3_OUT" | grep -F -m1 -- "half-uninstalled" || true)"
 
 # ── Restore proof ────────────────────────────────────────────────────────────
-expect_eq "the shipped doctor.sh and profile template are byte-identical after all three mutations" \
-  "$PAYLOAD_CKSUM_BEFORE" "$(shasum -a 256 "$DOCTOR_SH" "$TEMPLATE" 2>/dev/null)"
+expect_eq "the shipped doctor.sh is byte-identical after all three mutations" \
+  "$PAYLOAD_CKSUM_BEFORE" "$(shasum -a 256 "$DOCTOR_SH" 2>/dev/null)"
 
 R_OUT="$TMP/restored.out"
 doctor_run "$DOCTOR_SH" "$BROKEN_BIN" "$BROKEN"  > "$R_OUT" 2>&1

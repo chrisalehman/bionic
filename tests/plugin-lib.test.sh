@@ -44,10 +44,6 @@ set -uo pipefail
 REPO="${BIONIC_SCRIPTS_DIR}"
 DEPS_SH="${REPO}/payload/scripts/lib/deps.sh"
 DETECT_SH="${REPO}/payload/scripts/lib/detect.sh"
-# profile.sh is tests/profile.test.sh's subject; it is named here only for the
-# one arm that needs doctor's load-out — both libraries sourced together — to
-# reach detect_half_uninstalled's fourth term (Group 14, R-2).
-PROFILE_SH="${REPO}/payload/scripts/lib/profile.sh"
 PLUGIN_JSON="${REPO}/payload/.claude-plugin/plugin.json"
 MARKETPLACE_JSON="${REPO}/.claude-plugin/marketplace.json"
 
@@ -1650,19 +1646,15 @@ expect_eq "detect_half_uninstalled: plugin still installed, same footprint -> no
   "$(detect_run BIONIC_CLAUDE_HOME="$CH_BIONIC" BIONIC_SHELL_RC="$RC_LEGACY" \
       BIONIC_SETTINGS_FILE="$SET_STALE" -- detect_half_uninstalled)"
 
-# R-2 — the FOURTH term. detect.sh owns three pieces of footprint; the applied
-# permission block is profile.sh's, and it is reachable on its own: a user who
-# runs /bionic:remove, declines the permission-block question and accepts the
-# uninstall lands with the block as the only leftover. Both files' headers said
-# the disjunction joined there and neither joined it, so doctor read
-# half-uninstalled=no and withheld the one fix that machine has.
-#
-# The consult is SOFT — `declare -F` — because detect.sh must stay sourceable
-# alone. That is not a nicety here: the standalone remove.sh door exists for
-# exactly the machine where the payload (and so profile.sh) is gone. Hence two
-# arms on one machine state, differing only in which libraries are loaded.
-SET_PROFILE_ONLY="$TMP/settings-profile-only.json"
-cat > "$SET_PROFILE_ONLY" <<'JSON'
+# R-2 IS GONE (epic-18 T13). It proved a FOURTH term in the disjunction: an
+# applied permission marker block, consulted softly through `declare -F` when the
+# caller had profile.sh loaded. bionic no longer applies a block, so it is no
+# longer footprint this verdict has to reach — the three terms below are the
+# whole of it, and the settings file with a leftover block now reads
+# half-uninstalled=no, correctly. The one-time cleanup that removes such a block
+# lives in setup.sh and remove.sh and is proven by their own suites.
+SET_BLOCK_ONLY="$TMP/settings-block-only.json"
+cat > "$SET_BLOCK_ONLY" <<'JSON'
 {
   "permissions": {
     "allow": [
@@ -1674,26 +1666,10 @@ cat > "$SET_PROFILE_ONLY" <<'JSON'
 }
 JSON
 
-detect_and_profile_run() {  # <env-assignments...> -- <function> [args]
-  local -a envs=()
-  while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
-  shift
-  env -i HOME="$TMP/home" PATH="$BASE_BIN" BIONIC_TEST_CALLS="$CALLS" "${envs[@]}" \
-    bash -c '. "$1"; . "$2"; shift 2; "$@"' _ "$DETECT_SH" "$PROFILE_SH" "$@" 2>&1
-}
-
-expect_eq "detect_half_uninstalled: doctor's load-out (detect+profile) sees the permission block as footprint" \
-  "state:half-uninstalled=yes" \
-  "$(detect_and_profile_run BIONIC_CLAUDE_HOME="$CH_EMPTY" BIONIC_SHELL_RC="$RC_WITHOUT" \
-      BIONIC_SETTINGS_FILE="$SET_PROFILE_ONLY" -- detect_half_uninstalled)"
-expect_eq "detect_half_uninstalled: detect.sh ALONE degrades to its own three terms, same machine" \
+expect_eq "detect_half_uninstalled: a leftover permission block is NOT footprint this verdict counts" \
   "state:half-uninstalled=no" \
   "$(detect_run BIONIC_CLAUDE_HOME="$CH_EMPTY" BIONIC_SHELL_RC="$RC_WITHOUT" \
-      BIONIC_SETTINGS_FILE="$SET_PROFILE_ONLY" -- detect_half_uninstalled)"
-expect_eq "detect_half_uninstalled: detect+profile, plugin still registered -> still no" \
-  "state:half-uninstalled=no" \
-  "$(detect_and_profile_run BIONIC_CLAUDE_HOME="$CH_BIONIC" BIONIC_SHELL_RC="$RC_WITHOUT" \
-      BIONIC_SETTINGS_FILE="$SET_PROFILE_ONLY" -- detect_half_uninstalled)"
+      BIONIC_SETTINGS_FILE="$SET_BLOCK_ONLY" -- detect_half_uninstalled)"
 
 # C-2 — REGISTRATION AS A FACT OF ITS OWN. The registration probe above was
 # computed inside detect_half_uninstalled and reachable nowhere else, so setup's

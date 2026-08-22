@@ -8,7 +8,7 @@
 # and the same body unquoted RAN
 # (record/epic-17-w6/r2-control-quoted.txt vs r2-control-unquoted.txt). Every
 # bionic command file shipped the quoted spelling while every rule was
-# unquoted, in frontmatter and in the profile template alike, which is the
+# unquoted, which is the
 # first-order reason bionic's own slash commands prompted their own user.
 #
 # The same measurement established the fix that works from any cwd, headless:
@@ -18,13 +18,16 @@
 # prints its full report with no prompt
 # (record/epic-17-w6/r2-variant4-subst-unquoted.txt).
 #
-# WHAT THIS SUITE OWNS. The AGREEMENT between three strings that must stay
+# WHAT THIS SUITE OWNS. The AGREEMENT between two strings that must stay
 # byte-identical or the wall returns, for each of setup, doctor and remove:
 #
 #   1. the command file's own frontmatter rule prefix — between `Bash(` and `:*)`
 #   2. the start of every fenced `bash ` invocation line in that same file
-#   3. the profile template's rule for the same script, once
-#      `__BIONIC_PLUGIN_ROOT__` is read as `${CLAUDE_PLUGIN_ROOT}`
+#
+# There was a third — the permission-profile template's rule for the same
+# script, which tier 2 applied machine-wide. bionic ships no allow-list any more
+# (epic-18 T13), so the frontmatter rule is the only grant, and the section that
+# held the two agreed is gone with the template.
 #
 # and, across the whole command surface, the absence of the regression class
 # itself: no `bash "` anywhere in a command file. Nothing here judges what a
@@ -37,8 +40,8 @@
 # it invokes no script (its one line reads plugin.json), so it has nothing to
 # authorize.
 #
-# HERMETIC. No network, no `claude` CLI, no daemon. Reads four committed files
-# plus a copy of each in a scratch dir for the mutation arms.
+# HERMETIC. No network, no `claude` CLI, no daemon. Reads the committed command
+# files plus a copy of each in a scratch dir for the mutation arms.
 #
 # ASSERTION-HELPER RACE. No `printf | grep -q` anywhere below
 # (tests/assert-helper-race.test.sh). Containment uses bash `[[ == * ]]`
@@ -54,7 +57,6 @@ set -uo pipefail
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 COMMANDS_DIR="${REPO}/payload/commands"
-PROFILE="${REPO}/payload/permissions/profile.template.json"
 
 # The three commands that RUN a script and therefore need a rule.
 SCRIPTED_COMMANDS="setup doctor remove"
@@ -129,15 +131,6 @@ fenced_bash_invocation_lines() {
   ' "$1"
 }
 
-# The profile template's rule prefix for one payload script, with the shipped
-# token read as the frontmatter spelling. grep runs against the FILE.
-profile_rule_prefix() {
-  local script="$1"
-  grep -oE 'Bash\(bash __BIONIC_PLUGIN_ROOT__/scripts/'"${script}"'\.sh:\*\)' "$PROFILE" 2>/dev/null \
-    | head -1 \
-    | sed -e 's/^Bash(//' -e 's/:\*)$//' -e 's/__BIONIC_PLUGIN_ROOT__/${CLAUDE_PLUGIN_ROOT}/'
-}
-
 # ---------------------------------------------------------------------------
 # Section 1: the rule exists, in the ratified shape and position.
 # ---------------------------------------------------------------------------
@@ -146,7 +139,6 @@ echo ""
 echo "=== Section 1: frontmatter allowed-tools rule (setup, doctor, remove) ==="
 
 expect_true "payload/commands/ exists" test -d "$COMMANDS_DIR"
-expect_true "payload/permissions/profile.template.json exists" test -f "$PROFILE"
 
 for c in $SCRIPTED_COMMANDS; do
   f="${COMMANDS_DIR}/${c}.md"
@@ -204,31 +196,10 @@ for c in $SCRIPTED_COMMANDS; do
   expect_gt0 "${c}.md: at least one fenced bash invocation exists" "$inv_count"
 done
 
-# ---------------------------------------------------------------------------
-# Section 3: the profile template's rule for the same script agrees.
-#
-# Two grants, one string. The frontmatter rule is what makes the command work
-# for a user who never ran /bionic:setup; the profile rule is what tier 2
-# applies machine-wide. They authorize the same invocation, so they must spell
-# it the same way — and the profile's rules were already unquoted, which is
-# what made the command bodies the half that was wrong.
-# ---------------------------------------------------------------------------
-
-echo ""
-echo "=== Section 3: profile.template.json rule ↔ the same prefix ==="
-
-for c in $SCRIPTED_COMMANDS; do
-  f="${COMMANDS_DIR}/${c}.md"
-  [ -f "$f" ] || continue
-
-  fm_prefix="$(allowed_tools_rule_prefix "$f")"
-  pf_prefix="$(profile_rule_prefix "$c")"
-
-  expect_true "profile.template.json carries a rule for scripts/${c}.sh" \
-    test -n "$pf_prefix"
-  expect_eq "${c}: profile rule prefix == frontmatter rule prefix (token substituted)" \
-    "$fm_prefix" "$pf_prefix"
-done
+# SECTION 3 IS GONE (epic-18 T13). It held the profile template's machine-wide
+# rule for each script byte-identical to the same file's frontmatter rule. There
+# is no template and no second grant any more, so the frontmatter rule Sections 1
+# and 2 prove is the whole authorization.
 
 # ---------------------------------------------------------------------------
 # Section 4: the regression class, walled across the whole surface.

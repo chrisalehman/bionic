@@ -5,15 +5,14 @@
 # WHAT THIS SUITE OWNS. payload/scripts/setup.sh — the whole of `/bionic:setup`:
 # the native plugin install wrapper, core enable-verify, the bionic-installed
 # loop, the shell-rc export, the two ported bootstrap obligations (legacy alias
-# block, legacy-channel managed-hook entries), the consented permission-profile apply,
-# and the end summary. It also owns payload/commands/setup.md's existence and
+# block, legacy-channel managed-hook entries, the retired permission block), the
+# consented default-permission-mode offer, and the end summary. It also owns payload/commands/setup.md's existence and
 # its one structural rule that command-format.test.sh cannot state (the wrapper
 # adds no logic — it invokes the script and nothing else).
 #
 # WHAT IT DOES NOT OWN. The libraries setup consumes. deps.sh's table, its
 # per-dep install functions and their consent gate are pinned by
-# tests/plugin-lib.test.sh; profile.sh's render/apply/strip/diff by
-# tests/profile.test.sh. This suite asserts that setup CALLS them and that the
+# tests/plugin-lib.test.sh. This suite asserts that setup CALLS them and that the
 # call carries consent — never that they work, which is already proven.
 #
 # HERMETIC, AND WHAT THAT COSTS. No network, no live `claude`, no live
@@ -62,7 +61,6 @@ REPO="${BIONIC_SCRIPTS_DIR}"
 SETUP_SH="${REPO}/payload/scripts/setup.sh"
 SETUP_MD="${REPO}/payload/commands/setup.md"
 LIB_DIR="${REPO}/payload/scripts/lib"
-TEMPLATE="${REPO}/payload/permissions/profile.template.json"
 
 PASS=0; FAIL=0; TOTAL=0
 ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
@@ -300,7 +298,6 @@ run_setup() {  # <answers> [extra env assignments...] — stdout+stderr of one s
     BIONIC_TEST_STATE="$STATE" \
     BIONIC_LIB_DIR="$LIB_DIR" \
     BIONIC_PLUGIN_ROOT="$FIX/root" \
-    BIONIC_PROFILE_TEMPLATE="$TEMPLATE" \
     BIONIC_CLAUDE_HOME="$FIX/ch" \
     BIONIC_SETTINGS_FILE="$FIX/ch/settings.json" \
     BIONIC_INSTALLED_PLUGINS_FILE="$FIX/ch/plugins/installed_plugins.json" \
@@ -320,7 +317,7 @@ fingerprint() {  # <dir>
 lib_query() {  # <lib> <function> [args] — read one fact back out of the fixture
   local lib="$1"; shift
   env -i HOME="$FIX/home" PATH="$BIN" \
-    BIONIC_PLUGIN_ROOT="$FIX/root" BIONIC_PROFILE_TEMPLATE="$TEMPLATE" \
+    BIONIC_PLUGIN_ROOT="$FIX/root" \
     BIONIC_CLAUDE_HOME="$FIX/ch" BIONIC_SETTINGS_FILE="$FIX/ch/settings.json" \
     BIONIC_INSTALLED_PLUGINS_FILE="$FIX/ch/plugins/installed_plugins.json" \
     BIONIC_SHELL_RC="$FIX/rc" \
@@ -1204,43 +1201,85 @@ expect_eq "no jq: settings.json is never edited blind" "$SETTINGS_BEFORE" "$(cat
 expect_match "no jq: the unknown is reported honestly" '*unknown*' "$OUT"
 
 # ---------------------------------------------------------------------------
-# Group 8 — (g) the consented permission-profile apply (AC-6).
+# Group 8 — the retired permission block, cleaned once (epic-18 T13).
+#
+# bionic no longer applies a managed allow-list; what this group used to prove —
+# the consented apply — describes a feature that is gone. What replaced it is the
+# UPGRADE PATH: a machine set up before the change carries the block, and setup
+# offers once to take it back out. The rules OUTSIDE the block are the machine's
+# own and must survive, which is the half a careless strip would get wrong.
 # ---------------------------------------------------------------------------
 
 echo ""
-echo "=== Group 8: permission profile apply ==="
+echo "=== Group 8: the retired permission block, cleaned once ==="
 
-new_fixture profile-apply
+# The marker block the retired apply left behind, with a rule of the machine's
+# own on either side of it. MERGED into whatever settings.json the fixture
+# already has rather than written over it, so this composes with the other
+# planters instead of racing them for the same file.
+plant_permission_block() {
+  local tmp="$FIX/ch/settings.json.tmp"
+  jq '.permissions.allow = [
+        "Bash(ls:*)",
+        "Bash(: bionic-profile-begin version=0.1.0)",
+        "Bash(bash /old/install/scripts/setup.sh:*)",
+        "Bash(: bionic-profile-end)",
+        "Bash(git status:*)"
+      ]' "$FIX/ch/settings.json" > "$tmp" && mv "$tmp" "$FIX/ch/settings.json"
+}
+
+new_fixture permission-block-strip
 plant_cli_plugin "bionic@bionic" true
+plant_permission_block
 OUT="$(run_setup "$YES")"
-expect_match "consented apply: the marker block is in user settings" \
-  'profile: applied=yes*' "$(lib_query "$LIB_DIR/profile.sh" detect_profile_state)"
-expect_match "consented apply: rendered against THIS machine's plugin root" \
-  "*${FIX}/root/scripts/setup.sh*" "$(cat "$FIX/ch/settings.json")"
-expect_no_match "consented apply: the render token never reaches settings" \
-  '*__BIONIC_PLUGIN_ROOT__*' "$(cat "$FIX/ch/settings.json")"
+BLOCK_SETTINGS="$(cat "$FIX/ch/settings.json")"
+expect_no_match "consented cleanup: the begin marker is gone" \
+  '*bionic-profile-begin*' "$BLOCK_SETTINGS"
+expect_no_match "consented cleanup: the end marker is gone" \
+  '*bionic-profile-end*' "$BLOCK_SETTINGS"
+expect_no_match "consented cleanup: the rule inside the block is gone" \
+  '*/old/install/scripts/setup.sh*' "$BLOCK_SETTINGS"
+expect_match "consented cleanup: the machine's own rule before the block survives" \
+  '*Bash(ls:*)*' "$BLOCK_SETTINGS"
+expect_match "consented cleanup: …and the one after it" \
+  '*Bash(git status:*)*' "$BLOCK_SETTINGS"
+expect_true "consented cleanup: the result is still valid JSON" \
+  jq -e . "$FIX/ch/settings.json"
 
-SETTINGS_AFTER_FIRST="$(cat "$FIX/ch/settings.json")"
+# A second pass has nothing to strip and must not ask again.
+SETTINGS_AFTER_STRIP="$(cat "$FIX/ch/settings.json")"
 OUT="$(run_setup "$YES")"
-expect_eq "second apply is a no-op (byte-identical settings)" \
-  "$SETTINGS_AFTER_FIRST" "$(cat "$FIX/ch/settings.json")"
-expect_match "second run reports the profile as already current" '*profile*' "$OUT"
+expect_eq "a second pass is a no-op (byte-identical settings)" \
+  "$SETTINGS_AFTER_STRIP" "$(cat "$FIX/ch/settings.json")"
+expect_no_match "…and says nothing about a block that is not there" \
+  '*retired permission block*' "$OUT"
 
-new_fixture profile-declined
+# Declined: the file is untouched, and the summary names how to do it later.
+new_fixture permission-block-declined
+plant_cli_plugin "bionic@bionic" true
+plant_permission_block
+SETTINGS_BEFORE_DECLINE="$(cat "$FIX/ch/settings.json")"
+OUT="$(run_setup "$NO")"
+expect_eq "declined cleanup: settings.json is byte-identical" \
+  "$SETTINGS_BEFORE_DECLINE" "$(cat "$FIX/ch/settings.json")"
+expect_match "declined cleanup: named as an action line" \
+  '*retired permission block*' "$OUT"
+
+# A machine that never carried one is silent about it — a clean state reported
+# as a row is the interrogation this step is not.
+new_fixture permission-block-absent
 plant_cli_plugin "bionic@bionic" true
 OUT="$(run_setup "$NO")"
-expect_match "declined apply: no block applied" \
-  'profile: applied=no*' "$(lib_query "$LIB_DIR/profile.sh" detect_profile_state)"
-expect_match "declined apply: named as an action line" '*permission*' "$OUT"
-
+expect_no_match "no block: the arm prints nothing at all" \
+  '*retired permission block*' "$OUT"
 # ---------------------------------------------------------------------------
 # Group 8b — AC-12: ONE consented question about the default permission mode.
 #
 # WHY THE DECLINE ARM NEEDS A SETTLED FIXTURE. "No leaves the settings file
 # untouched" is only a real claim if something in that run COULD have written to
-# it. So the fixture is a machine that has already been set up — profile applied
-# and current, so the profile half of the step has nothing to do — with the mode
-# key removed again. The one question left in that step is this one, and the
+# it. So the fixture is a machine that has already been set up — no retired
+# permission block, so the cleanup half of the step has nothing to do — with the
+# mode key removed again. The one question left in that step is this one, and the
 # file's bytes are the whole evidence either way.
 # ---------------------------------------------------------------------------
 
@@ -1304,12 +1343,10 @@ expect_eq "one owner: setup writes whatever the owner names, not a literal of it
   "$(jq -r '.permissions.defaultMode // ""' "$FIX/ch/settings.json" 2>/dev/null)"
 expect_match "one owner: and the question it asks names that value too" \
   '*default permission mode to plan*' "$OUT"
-# The mode is a settings key of the machine's own, NOT a rule inside bionic's
-# marker block — the block is a rendering of the template and the template ships
-# no defaultMode (tests/profile.test.sh Group 2 walls that). Writing it into the
-# block would make /bionic:remove's strip silently revert a preference the user
-# was asked for separately.
-expect_no_match "the mode is not smuggled into the profile's marker block" \
+# The mode is a settings key of the machine's own, never an `allow` RULE. Writing
+# it as a rule would put a preference the user was asked for separately inside
+# the array the cleanup arm rewrites — and would authorize nothing besides.
+expect_no_match "the mode is written as a settings key, never as a permission rule" \
   '*defaultMode*' "$(jq -c '[.permissions.allow[]?]' "$FIX/ch/settings.json" 2>/dev/null)"
 
 
@@ -1370,7 +1407,7 @@ new_fixture summary
 OUT="$(run_setup "$NO")"
 expect_match "summary block is printed" '*Summary*' "$OUT"
 expect_match "summary names the declined plugin install" '*claude plugin install bionic@bionic*' "$OUT"
-expect_match "summary names the declined permission profile" '*permission*' "$OUT"
+expect_match "summary names the declined permission mode" '*permission*' "$OUT"
 new_fixture summary-rc
 run_setup "$NO" >/dev/null 2>&1
 expect_eq "a fully-declined run still exits 0 (warn-and-continue)" "0" "$?"
@@ -1747,7 +1784,7 @@ OUT="$(run_setup "$NO")"
 
 expect_no_match "no action line promises that re-running the command can be answered" \
   '*re-run /bionic:setup and answer y*' "$OUT"
-expect_match "the permission-profile action names the terminal invocation instead" \
+expect_match "the action line names the terminal invocation instead" \
   '*scripts/setup.sh*' "$OUT"
 expect_match "…in the unquoted form a person can paste" '*bash /*scripts/setup.sh*' "$OUT"
 expect_match "…and still says which answer applies it" '*answer y*' "$OUT"
@@ -1871,8 +1908,8 @@ expect_match "…and the one question asked was that item's own" \
   '*default permission mode*' "$ONE_OUT"
 expect_no_match "…and no other step printed a header" '*3. Tools*' "$ONE_OUT"
 expect_no_match "…nor the environment step" '*5. Environment*' "$ONE_OUT"
-expect_no_match "…nor the permission-profile half of its own step" \
-  '*bionic ships a permission profile*' "$ONE_OUT"
+expect_no_match "…nor the cleanup half of its own step" \
+  '*retired permission block*' "$ONE_OUT"
 expect_no_match "…and the summary does not claim the whole machine is set up" \
   '*this machine is set up*' "$ONE_OUT"
 
@@ -1973,12 +2010,13 @@ expect_match "duplicate-consolidation, EOF: not asked, not declined" \
   '*not asked — left as they are*' "$EOF_OUT"
 expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
 
-new_fixture eof-permission-profile
+new_fixture eof-permission-block
 plant_cli_plugin "bionic@bionic" true
-SETUP_FLAGS="--only permission-profile"
+plant_permission_block
+SETUP_FLAGS="--only legacy-permission-block"
 EOF_OUT="$(run_setup "")"
 SETUP_FLAGS=""
-expect_match "permission-profile, EOF: not asked, not declined" \
+expect_match "legacy-permission-block, EOF: not asked, not declined" \
   '*not asked — *is unchanged*' "$EOF_OUT"
 expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
 
@@ -1986,8 +2024,8 @@ expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OU
 #
 # Every consent() call site in this script, exercised in ONE pass on a maximally
 # unsettled machine (bionic absent so step 1 asks too; a real duplicate; a
-# disabled core dependency; every legacy item present; the permission profile
-# unapplied; the mode unset) with a truly-EOF first pass. The word "declined"
+# disabled core dependency; every legacy item present; the retired permission
+# block still there; the mode unset) with a truly-EOF first pass. The word "declined"
 # must not appear anywhere in that transcript — not just at the sites the plan
 # named — because AC-12 is a rule about the word, not a list of line numbers.
 new_fixture eof-whole-pass
@@ -1997,6 +2035,7 @@ plant_cli_plugin "agent-skills@bionic" false
 plant_installed "agent-skills@bionic" "0.6.7"
 printf 'export PATH="$HOME/bin:$PATH"\n\n%s\n%s\n%s\n' "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
 plant_legacy_channel_settings
+plant_permission_block
 plant_legacy_skill_copy
 WHOLE_EOF_OUT="$(run_setup "")"
 expect_match "whole pass, EOF: 'not asked' actually fired (the arm is not vacuous)" \
@@ -2008,8 +2047,9 @@ expect_no_match "whole pass, EOF: the word declined never appears, anywhere (AC-
 # a user reading the summary can act on any line in it.
 new_fixture only-route-everywhere
 plant_cli_plugin "bionic@bionic" true
+plant_permission_block
 ALL_NO_OUT="$(run_setup "$NO")"
-for _item in environment permission-profile permission-mode; do
+for _item in environment legacy-permission-block permission-mode; do
   expect_match "the whole-pass summary names --only ${_item}" "*--only ${_item}*" "$ALL_NO_OUT"
 done
 
@@ -2051,7 +2091,7 @@ ONE_NO="$(printf 'n\nunanswerable\n')"
 
 # Every item on the roster with something to do: a disabled core dependency, no
 # environment settings, the retired alias block, legacy-channel hook entries, a
-# pre-plugin skill copy, no permission profile and no default mode.
+# pre-plugin skill copy, a retired permission block and no default mode.
 plant_everything_setup() {
   plant_cli_plugin "bionic@bionic" true
   plant_cli_plugin "superpowers@bionic" false
@@ -2059,6 +2099,7 @@ plant_everything_setup() {
   plant_installed "superpowers@bionic" "6.3.0"
   plant_installed "agent-skills@bionic" "0.6.7"
   plant_legacy_channel_settings
+  plant_permission_block
   printf 'export PATH="$HOME/bin:$PATH"\n\n%s\n%s\n%s\n' "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
   mkdir -p "$FIX/ch/skills/canonical-sdlc"
   printf -- '---\nname: canonical-sdlc\n---\nbody\n' > "$FIX/ch/skills/canonical-sdlc/SKILL.md"
@@ -2083,8 +2124,8 @@ expect_match "--all: …the retired hook entries" \
   '*• remove the retired hook entries from*' "$ALL_OUT"
 expect_match "--all: …the pre-plugin skill copy" \
   '*• remove the pre-plugin skill copy at*' "$ALL_OUT"
-expect_match "--all: …the permission profile" \
-  "*• apply bionic's permission profile to*" "$ALL_OUT"
+expect_match "--all: …the retired permission block" \
+  "*• remove bionic's retired permission block from*" "$ALL_OUT"
 expect_match "--all: …and the default permission mode" \
   "*• set Claude Code's default permission mode to auto*" "$ALL_OUT"
 

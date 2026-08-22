@@ -56,13 +56,12 @@ mode: payload
 
 # LIBRARY FUNCTION-NAME PREFIXES. The three payload scripts already had theirs on this
 # list (`_setup_`, `_rm_`, `_doctor_`, `detect_`); the libraries beneath them did not, so
-# `_dep_`, `_jit_` and `_profile_` could reach a terminal through any line the scripts
+# `_dep_` and `_jit_` could reach a terminal through any line the scripts
 # print. `_detect_` needs no entry — `detect_` already catches it as a substring.
 # tests/script-vocabulary.test.sh derives the roster from payload/scripts/lib/*.sh, so a
 # new library prefix arrives here deliberately rather than by somebody noticing.
 _dep_
 _jit_
-_profile_
 # `env_` (epic-17 W7 S4, spec R4) covers the new settings-environment library both ways: its
 # internal prefix `_env_` and its public `env_get`/`env_set`/`env_unset`/`env_live`, exactly
 # as `detect_` covers `_detect_` and detect.sh's public probes. `environment` is a product

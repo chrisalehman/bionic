@@ -677,11 +677,15 @@ done <<< "$(env -i HOME="$HOME_FIX" PATH="$BIN" bash -c '. "$1"; printf "%s\n" $
 expect_eq "manifest: settings.json carries every one of bionic's environment names" "yes" "$ENV_OK"
 [ "$ENV_OK" = "yes" ] || echo "      $ENV_DETAIL"
 
-# ── the permission block and the default mode ──
-expect_match "manifest: settings.json carries bionic's permission marker block" \
-  '*bionic-profile-begin*bionic-profile-end*' \
-  "$(jqf '[.permissions.allow[]? | select(test("bionic-profile-"))] | join(" ")')"
+# ── the default permission mode, and the allow-list bionic does NOT write ──
+#
+# Setup writes the MODE and nothing else about permissions (epic-18 T13). The
+# negative rides beside the positive on purpose: a pristine install that came
+# back with rules in `permissions.allow` would be bionic exempting itself from
+# the very mode it just asked about.
 expect_eq "manifest: the default permission mode is auto" "auto" "$(jqf '.permissions.defaultMode // ""')"
+expect_eq "manifest: setup wrote NO permission rules of its own" "" \
+  "$(jqf '[.permissions.allow[]?] | join(" ")')"
 
 # ── AC-7: the negative, deliberately beside the positives above ──
 #
@@ -729,8 +733,6 @@ done
 
 expect_match "doctor: the load state is loaded" \
   '*loaded*' "$(doctor_section "$DOC1" "LOAD STATE")"
-expect_match "doctor: the permission profile is applied and current" \
-  '*identical*' "$(doctor_section "$DOC1" "PERMISSION PROFILE")"
 
 SUMMARY1="$(doctor_section "$DOC1" "SUMMARY")"
 expect_match "doctor: SUMMARY is \"nothing to do\"" \
@@ -766,7 +768,7 @@ expect_eq "remove: the statusLine record is gone from settings.json" "" \
   "$(jqf 'if has("statusLine") then "statusLine is still recorded" else "" end')"
 expect_eq "remove: bionic's environment names are gone from settings.json" "" \
   "$(jqf '[.env // {} | keys[] | select(startswith("CLAUDE_CODE_") or startswith("BASH_MAX_"))] | join(" ")')"
-expect_eq "remove: the permission marker block is gone from settings.json" "" \
+expect_eq "remove: no permission rule of bionic's is left in settings.json" "" \
   "$(jqf '[.permissions.allow[]? | select(test("bionic-profile-"))] | join(" ")')"
 
 # AC-7 again, from the other direction: a teardown that removed a file the plugin
@@ -784,8 +786,6 @@ expect_false "doctor: the two SUMMARY blocks differ" \
   test "$SUMMARY1" = "$SUMMARY2"
 expect_match "doctor: SUMMARY now names the dependencies the teardown took" \
   '*run /bionic:setup*absent dependencies*' "$SUMMARY2"
-expect_match "doctor: SUMMARY now names the stripped permission profile" \
-  '*no permission profile is applied*' "$SUMMARY2"
 
 # ---------------------------------------------------------------------------
 # Results
