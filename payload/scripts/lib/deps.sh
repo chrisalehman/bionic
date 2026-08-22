@@ -684,11 +684,22 @@ _dep_check_mcp_server() {
   if claude mcp get "$name" >/dev/null 2>&1; then echo "yes|unknown"; else echo "no|unknown"; fi
 }
 
-# The pnpm content-addressable store is a cache, never an import path: there is
-# no global "already installed" state to read, which is why bootstrap re-warms
-# it unconditionally rather than checking. `no` would be a lie on a warm
-# machine, so the honest answer is that presence is not knowable here.
-_dep_check_pnpm_store() { echo "unknown|unknown"; }
+# THE STORE HAS A SURFACE AFTER ALL (Chris 2026-08-22: "Why didn't the previous
+# one install motion?" — it had; the probe just could not see it, so setup
+# re-offered it forever). pnpm's store keeps an index.db naming every cached
+# `<name>@<version>`; a package is present when its name is in that index, and
+# the newest recorded version rides along. `unknown` only when pnpm itself, or
+# the store, cannot be found — that is a cause doctor can name, not a shrug.
+_dep_check_pnpm_store() {
+  local name="$1" store idx ver
+  _dep_have pnpm || { echo "unknown|unknown"; return 0; }
+  store="${BIONIC_PNPM_STORE:-$(pnpm store path 2>/dev/null)}"
+  idx="${store}/index.db"
+  [ -n "$store" ] && [ -f "$idx" ] || { echo "unknown|unknown"; return 0; }
+  ver="$(/usr/bin/strings "$idx" 2>/dev/null | /usr/bin/grep -o "${name}@[0-9][0-9A-Za-z.+-]*" \
+         | sed "s/^${name}@//" | sort -V | tail -1)"
+  if [ -n "$ver" ]; then echo "yes|${ver}"; else echo "no|unknown"; fi
+}
 
 # A filesystem probe rather than bootstrap's `--dry-run` walk: doctor is
 # read-only and must not shell out to the network. Same caveat bootstrap's own
