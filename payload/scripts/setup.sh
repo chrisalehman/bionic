@@ -1438,8 +1438,6 @@ setup_summary() {
   # THE RESTART NOTE COMES FIRST, and only when something this run did needs one.
   # It is not an action line: there is nothing left for the user to fix, and
   # filing it among the failures would say the statusline did not get installed.
-  [ "$SETUP_STATUSLINE_CHANGED" = "yes" ] && \
-    say "   the status line appears after a restart of Claude Code."
   [ "${SETUP_PLUGIN_CHANGED:-}" = "yes" ] && \
     say "   newly installed plugins take effect after /reload-plugins or a new session."
   if [ -z "$SETUP_ACTIONS" ]; then
