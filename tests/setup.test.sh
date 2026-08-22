@@ -863,10 +863,14 @@ expect_no_match "marked variant at 0600: the block really was stripped (not vacu
   "*${ALIAS_START}*" "$(cat "$FIX/rc")"
 expect_eq "setup's marked-block strip leaves a 0600 rc at 0600" \
   "600" "$(file_mode "$FIX/rc")"
-expect_no_match "…and the mv witness really saw the rc rename" "" \
-  "$(grep 'rc\.bionic\.tmp' "$TMP/mv-alias-600.log" 2>/dev/null || true)"
+# An empty log satisfies the emptiness assertion below, so the log is proved
+# non-empty first — and proved with a POSITIVE assertion: the earlier spelling
+# was `expect_no_match … ""`, an empty glob standing in for "is not empty",
+# which works only by accident of how the matcher treats the empty pattern.
+expect_true "…and the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q 'rc\.bionic\.tmp' "$TMP/mv-alias-600.log"
 expect_eq "…and every staged copy of the 0600 rc was itself 0600, before the rename" "" \
-  "$(grep 'rc\.bionic\.tmp' "$TMP/mv-alias-600.log" 2>/dev/null | grep -v '^600 ' || true)"
+  "$(/usr/bin/grep 'rc\.bionic\.tmp' "$TMP/mv-alias-600.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
 
 new_fixture alias-marked-mode-644
 plant_cli_plugin "bionic@bionic" true
@@ -886,8 +890,10 @@ expect_no_match "unmarked variant at 0600: the alias really was removed (not vac
   '*dangerously-skip-permissions*' "$(cat "$FIX/rc")"
 expect_eq "setup's unmarked-alias rewrite leaves a 0600 rc at 0600" \
   "600" "$(file_mode "$FIX/rc")"
+expect_true "unmarked mode arm: the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q 'rc\.bionic\.tmp' "$TMP/mv-unmarked-600.log"
 expect_eq "…and its staged copy was 0600 before the rename too" "" \
-  "$(grep 'rc\.bionic\.tmp' "$TMP/mv-unmarked-600.log" 2>/dev/null | grep -v '^600 ' || true)"
+  "$(/usr/bin/grep 'rc\.bionic\.tmp' "$TMP/mv-unmarked-600.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
 
 new_fixture alias-unmarked-mode-644
 plant_cli_plugin "bionic@bionic" true
@@ -896,6 +902,62 @@ chmod 644 "$FIX/rc"
 OUT="$(run_setup "$YES")"
 expect_eq "setup does not narrow a 0644 rc on the unmarked path either" \
   "644" "$(file_mode "$FIX/rc")"
+
+# ─── THE RC THAT IS A SYMLINK (critic delta D1) ──────────────────────────────
+#
+# `stat -f '%Lp' <symlink>` reports the LINK's own mode — 755 — and never consults
+# the file it points at. A `~/.zshrc` symlinked into a dotfiles repo is the
+# commonest way people manage an rc, so a mode capture that does not dereference
+# publishes the user's rc, tokens included, as `rwxr-xr-x`: WIDER than the file it
+# replaced, which is the one outcome the capture exists to prevent. Both setup
+# writers get an arm; `stat -L` is what makes them pass.
+#
+# The rename detaching the link from the dotfiles repo is standing behaviour and
+# is not asserted either way here — see remove.test.sh's note on the same shape.
+symlink_rc() {  # turns $FIX/rc into a link to $FIX/dotfiles/rc
+  mkdir -p "$FIX/dotfiles"
+  command mv "$FIX/rc" "$FIX/dotfiles/rc"
+  ln -s "$FIX/dotfiles/rc" "$FIX/rc"
+}
+
+new_fixture alias-marked-symlink-600
+plant_cli_plugin "bionic@bionic" true
+printf 'export PATH="$HOME/bin:$PATH"\nexport SOME_API_TOKEN=sk-fixture-not-a-real-secret\n\n%s\n%s\n%s\n' \
+  "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
+symlink_rc
+chmod 600 "$FIX/dotfiles/rc"
+expect_eq "fixture: the symlinked rc's TARGET really is 0600" \
+  "600" "$(file_mode "$FIX/dotfiles/rc")"
+expect_no_match "fixture: …and the LINK's own mode is not it — this is the trap" \
+  "600" "$(file_mode "$FIX/rc")"
+OUT="$(run_setup "$YES" BIONIC_TEST_MV_LOG="$TMP/mv-alias-symlink-600.log")"
+expect_no_match "symlink arm: the block really was stripped (not vacuous)" \
+  "*${ALIAS_START}*" "$(cat "$FIX/rc")"
+expect_eq "a symlinked rc is published at its TARGET's 0600, never the link's 755" \
+  "600" "$(file_mode "$FIX/rc")"
+expect_true "symlink arm: the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q 'rc\.bionic\.tmp' "$TMP/mv-alias-symlink-600.log"
+expect_eq "…and no staged copy of it was ever wider than 0600 either" "" \
+  "$(/usr/bin/grep 'rc\.bionic\.tmp' "$TMP/mv-alias-symlink-600.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
+
+# The other writer: the unmarked legacy alias line, on the same shape.
+new_fixture alias-unmarked-symlink-600
+plant_cli_plugin "bionic@bionic" true
+printf 'export PATH="$HOME/bin:$PATH"\nexport SOME_API_TOKEN=sk-fixture-not-a-real-secret\n%s\n' \
+  "$ALIAS_CONTENT" > "$FIX/rc"
+symlink_rc
+chmod 600 "$FIX/dotfiles/rc"
+expect_eq "fixture: the unmarked symlink arm's target really is 0600" \
+  "600" "$(file_mode "$FIX/dotfiles/rc")"
+OUT="$(run_setup "$YES" BIONIC_TEST_MV_LOG="$TMP/mv-unmarked-symlink-600.log")"
+expect_no_match "unmarked symlink arm: the alias really was removed (not vacuous)" \
+  '*dangerously-skip-permissions*' "$(cat "$FIX/rc")"
+expect_eq "the unmarked-alias rewrite publishes a symlinked rc at its target's 0600 too" \
+  "600" "$(file_mode "$FIX/rc")"
+expect_true "unmarked symlink arm: the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q 'rc\.bionic\.tmp' "$TMP/mv-unmarked-symlink-600.log"
+expect_eq "…and its staged copy was never wider than 0600 either" "" \
+  "$(/usr/bin/grep 'rc\.bionic\.tmp' "$TMP/mv-unmarked-symlink-600.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
 
 new_fixture alias-declined
 plant_cli_plugin "bionic@bionic" true
