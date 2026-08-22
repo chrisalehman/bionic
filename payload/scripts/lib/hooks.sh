@@ -76,6 +76,11 @@ BIONIC_LEGACY_HOOK_STRIP_JQ='
 # the other's; an absent `stat` leaves `mode` empty and the rewrite still lands,
 # which is the same honest degradation this file already practises for `jq`.
 #
+# AND IT IS THE TARGET'S MODE, NOT THE LINK'S (S14). A settings.json symlinked
+# into a dotfiles repo is the commonest way people manage it, and a bare `stat`
+# on a symlink reports the LINK's own mode — 755 — never the file's. `-L` makes
+# the capture mean the file.
+#
 # THE ORDER IS THE FIX. `umask 077` and the `chmod` both come BEFORE the `mv`, so
 # the rename publishes an already-correct inode. Repairing the mode afterwards —
 # the obvious spelling — leaves the tmp holding the tokens at 0644 under a
@@ -83,6 +88,10 @@ BIONIC_LEGACY_HOOK_STRIP_JQ='
 # window between the two. Do not move either below the rename. profile.sh's
 # `_profile_write` carries the same ordering, and tests/remove.test.sh pins the
 # shape across all three writers.
+#
+# THE STALE TMP IS REMOVED, NOT TRUNCATED. `>` on an existing file keeps that
+# file's mode, so a tmp left behind by an earlier interrupted run would carry
+# ITS width through the write until the chmod line below caught up.
 hooks_strip_legacy_channel() {  # <settings-file>
   local settings="${1:-}"
   local tmp mode
@@ -91,7 +100,8 @@ hooks_strip_legacy_channel() {  # <settings-file>
   command -v jq >/dev/null 2>&1 || return 1
 
   tmp="${settings}.bionic.tmp"
-  mode="$(stat -f '%Lp' "$settings" 2>/dev/null || stat -c '%a' "$settings" 2>/dev/null)"
+  mode="$(stat -L -f '%Lp' "$settings" 2>/dev/null || stat -L -c '%a' "$settings" 2>/dev/null)"
+  rm -f "$tmp"
   if (umask 077; jq "$BIONIC_LEGACY_HOOK_STRIP_JQ" "$settings" > "$tmp") \
      && { [ -z "$mode" ] || chmod "$mode" "$tmp"; } \
      && mv "$tmp" "$settings"; then

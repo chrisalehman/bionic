@@ -936,6 +936,14 @@ symlink_rc() {  # <arm> — makes <arm>/home/.zshrc a link to <arm>/dotfiles/zsh
   ln -s "$1/dotfiles/zshrc" "$1/home/.zshrc"
 }
 
+# The same shape, for settings.json (S14, the S13 class applied to the three
+# settings writers the critic named at D1's tail: deps.sh, hooks.sh, profile.sh).
+symlink_settings() {  # <arm> — makes <arm>/home/.claude/settings.json a link to <arm>/dotfiles/settings.json
+  mkdir -p "$1/dotfiles"
+  mv "$1/home/.claude/settings.json" "$1/dotfiles/settings.json"
+  ln -s "$1/dotfiles/settings.json" "$1/home/.claude/settings.json"
+}
+
 # The marker-block writer, `_rm_strip_marker_block`, on a symlinked 0600 rc.
 ARM="$(new_arm alias-rc-symlink-600)"
 plant_zshrc_marked "$ARM"
@@ -997,6 +1005,34 @@ expect_true "hooks_strip_legacy_channel rewrote the 0644 fixture too" \
   bash -c '. "$1"; hooks_strip_legacy_channel "$2"' _ "$HOOKS_SH" "$LIB_MODE_SETTINGS"
 expect_eq "hooks_strip_legacy_channel does not narrow a 0644 file" \
   "644" "$(file_mode "$LIB_MODE_SETTINGS")"
+
+# THE SETTINGS FILE THAT IS A SYMLINK (S14 — the S13 class, closed for the
+# remaining settings.json writers). `stat -f '%Lp' <symlink>` reports the
+# LINK's own mode, never the file it points at — a `~/.claude/settings.json`
+# symlinked into a dotfiles repo hands `chmod` the link's mode (755) and
+# publishes the rewrite, tokens included, as `rwxr-xr-x`. `stat -L` is what
+# makes this pass; see tests/remove.test.sh's rc arms above for the same trap
+# on the other two writers.
+ARM="$(new_arm lib-strip-mode-symlink-600)"
+SETTINGS_TARGET="$ARM/dotfiles/settings.json"
+plant_legacy_channel_hooks "$ARM"
+symlink_settings "$ARM"
+chmod 600 "$SETTINGS_TARGET"
+expect_eq "fixture: the symlinked settings.json TARGET really is 0600" \
+  "600" "$(file_mode "$SETTINGS_TARGET")"
+expect_not_contains "fixture: …and the LINK's own mode is not it — this is the trap" \
+  "600" "$(file_mode "$ARM/home/.claude/settings.json")"
+expect_true "hooks_strip_legacy_channel rewrote the symlinked fixture" \
+  env PATH="$ARM/bin:$PATH" BIONIC_TEST_MV_LOG="$ARM/mv.log" \
+    bash -c '. "$1"; hooks_strip_legacy_channel "$2"' _ "$HOOKS_SH" "$ARM/home/.claude/settings.json"
+expect_not_contains "symlink arm: the library really did rewrite the file (not vacuous)" \
+  ".claude/hooks/protect-main.sh" "$(cat "$ARM/home/.claude/settings.json")"
+expect_eq "a symlinked settings.json is published at its TARGET's 0600, never the link's 755" \
+  "600" "$(file_mode "$ARM/home/.claude/settings.json")"
+expect_true "symlink arm: the mv witness really saw the settings rename (not vacuous)" \
+  /usr/bin/grep -q '\.claude/settings\.json\.bionic\.tmp' "$ARM/mv.log"
+expect_eq "…and no staged copy of it was ever wider than 0600 either" "" \
+  "$(/usr/bin/grep 'settings\.json\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
 
 # R-1. The mode must be right AT THE RENAME, not repaired after it.
 #
@@ -1208,7 +1244,7 @@ expect_true "profile.sh's writer was extracted (the pin is not vacuous)" test -n
 expect_true "remove.sh's writer was extracted" test -n "$RM_WRITER"
 expect_eq "profile.sh and remove.sh carry the same settings writer" "$PROFILE_WRITER" "$RM_WRITER"
 expect_true "the extracted writer is the real one (it carries the mode capture)" \
-  bash -c 'case "$1" in *"stat -f"*) exit 0 ;; esac; exit 1' _ "$PROFILE_WRITER"
+  bash -c 'case "$1" in *"stat -L -f"*) exit 0 ;; esac; exit 1' _ "$PROFILE_WRITER"
 
 # R-1's pin, and the reason it is SHAPE rather than byte-identity. There is a
 # THIRD settings writer — hooks.sh's `hooks_strip_legacy_channel` — and the pin
@@ -1397,6 +1433,25 @@ expect_eq "env-only: both doors still agree byte for byte" \
 expect_eq "env-only: the emptied env object is deleted, not left as {}" "false" \
   "$(jq -r 'has("env")' "$ARM_P4/home/.claude/settings.json")"
 expect_contains "block-only: the unrelated settings key survives" '"model"' "$P2_TEXT"
+
+# THE SAME TRAP, THROUGH THE STANDALONE DOOR (S14, the S13 class). Everything
+# above in this group proves payload and standalone modes agree byte-for-byte;
+# this proves the agreement holds when settings.json is a symlink too. The
+# standalone door runs `_rm_write` directly — profile.sh is not beside it to
+# delegate to `_profile_write` — so this is the one place in the suite that
+# reaches `_rm_write`'s own mode capture, which is byte-identical to
+# `_profile_write`'s (pinned earlier in this file) and must be fixed in lockstep.
+ARM_S5="$(new_arm strip-standalone-symlink)"
+plant_claude_stub "$ARM_S5" no no; plant_profile_block "$ARM_S5"
+symlink_settings "$ARM_S5"
+chmod 600 "$ARM_S5/dotfiles/settings.json"
+expect_eq "fixture: the standalone symlink arm's TARGET really is 0600" \
+  "600" "$(file_mode "$ARM_S5/dotfiles/settings.json")"
+run_remove "$STANDALONE_DIR/remove.sh" "$ARM_S5" "$ALL_YES" >/dev/null 2>&1
+expect_not_contains "standalone symlink arm: the block really was stripped (not vacuous)" \
+  "bionic-profile-begin" "$(cat "$ARM_S5/home/.claude/settings.json")"
+expect_eq "_rm_write publishes a symlinked settings.json at its target's 0600, never the link's 755" \
+  "600" "$(file_mode "$ARM_S5/home/.claude/settings.json")"
 
 echo ""
 echo "=== Group 10: the STANDALONE door (no payload libraries anywhere) ==="

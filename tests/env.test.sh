@@ -319,6 +319,25 @@ env_status "$S8" -- env_unset BASH_MAX_TIMEOUT_MS
 expect_eq "…and after env_unset" "600" \
   "$(stat -f '%Lp' "$S8" 2>/dev/null || stat -c '%a' "$S8" 2>/dev/null)"
 
+# THE SETTINGS FILE THAT IS A SYMLINK (S14, the S13 class). `stat -f '%Lp'` on a
+# symlink reports the LINK's own mode, never the file it points at — a
+# `~/.claude/settings.json` symlinked into a dotfiles repo would hand `chmod`
+# the link's mode (755) and publish the rewrite, tokens included, as
+# `rwxr-xr-x`. `stat -L` is what makes this pass; tests/remove.test.sh carries
+# the same arm for the writer's other two siblings.
+S8_DIR="$TMP/symlink-mode"; mkdir -p "$S8_DIR/dotfiles" "$S8_DIR/home"
+plant_settings_populated "$S8_DIR/dotfiles/settings.json"
+chmod 600 "$S8_DIR/dotfiles/settings.json"
+ln -s "$S8_DIR/dotfiles/settings.json" "$S8_DIR/home/settings.json"
+S8_LINK="$S8_DIR/home/settings.json"
+expect_eq "fixture: the symlink target really is 0600" "600" \
+  "$(stat -f '%Lp' "$S8_DIR/dotfiles/settings.json" 2>/dev/null || stat -c '%a' "$S8_DIR/dotfiles/settings.json" 2>/dev/null)"
+env_status "$S8_LINK" -- env_set BASH_MAX_TIMEOUT_MS 1800000
+expect_true "symlink arm: env_set really wrote through the link (not vacuous)" \
+  bash -c 'jq -e ".env.BASH_MAX_TIMEOUT_MS == \"1800000\"" "$1" >/dev/null' _ "$S8_LINK"
+expect_eq "a symlinked settings.json is published at its TARGET's 0600, never the link's 755" \
+  "600" "$(stat -f '%Lp' "$S8_LINK" 2>/dev/null || stat -c '%a' "$S8_LINK" 2>/dev/null)"
+
 # The wall, from this side: env.sh renames no tmp over a settings file of its
 # own. tests/remove.test.sh counts the payload's settings writers and pins the
 # list; a private writer here would be a fifth.
