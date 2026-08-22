@@ -1090,13 +1090,19 @@ install_dep() {  # <name>
   else
     while IFS= read -r line; do argv+=("$line"); done < <(_dep_install_argv "$name") || true
     [ "${#argv[@]}" -gt 0 ] || { echo "deps.sh: no install mechanism for ${name}" >&2; return 1; }
-    plan="${argv[*]}"
+    # Joined with a literal space whatever IFS the caller left behind — a
+    # read-loop's IFS= once printed the humanizer clone as one run-together word
+    # (Chris 2026-08-22).
+    plan="$(printf '%s ' "${argv[@]}")"; plan="${plan% }"
     # AC-5: notebooklm's second half, named in the plan the user consents to
     # rather than run silently behind it (see _dep_check_uv_tool above).
     [ "$name" = "notebooklm" ] && plan="${plan} && notebooklm skill install"
   fi
 
-  echo "$(_dep_indent)${name} is not installed. bionic would run: ${plan}"
+  # Under --all the page already named this item and the user already said yes;
+  # the plan line is for the per-item pass where the question is live.
+  [ "${SETUP_ALL:-0}" = "1" ] || [ "${RM_ALL:-0}" = "1" ] || \
+    echo "$(_dep_indent)${name} — not installed; bionic would run: ${plan}"
   _dep_consent "$(_dep_indent)Install ${name} now?"
   case $? in
     0) ;;
@@ -1109,19 +1115,24 @@ install_dep() {  # <name>
   # say nothing at all, so a consented install and a silently-absent tool read
   # identically until the next `/bionic:doctor`. `install_dep`'s return value IS
   # the mechanism's own exit code — this only speaks on the zero.
+  # THE MECHANISM'S OWN CHATTER IS NOT THE REPORT (Chris 2026-08-22: "Step 4 is
+  # very difficult to read"). Download bars and package lists go to the log
+  # file; the user sees one line per item. stderr stays, so a failure still
+  # shows its reason.
+  local quiet_log="${BIONIC_INSTALL_LOG:-${TMPDIR:-/tmp}/bionic-install.log}"
   if [ "${#argv[@]}" -gt 0 ]; then
-    if "${argv[@]}"; then
+    if "${argv[@]}" >>"$quiet_log" 2>&1; then
       if [ "$name" = "notebooklm" ]; then
-        notebooklm skill install || {
+        notebooklm skill install >>"$quiet_log" 2>&1 || {
           echo "$(_dep_indent)installed, but 'notebooklm skill install' failed." >&2
           return 1
         }
       fi
-      echo "$(_dep_indent)installed."
+      [ "${SETUP_ALL:-0}" = "1" ] || echo "$(_dep_indent)installed."
       return 0
     fi
   else
-    _dep_install_statusline && { echo "$(_dep_indent)installed."; return 0; }
+    _dep_install_statusline && { [ "${SETUP_ALL:-0}" = "1" ] || echo "$(_dep_indent)installed."; return 0; }
   fi
   return 1
 }
@@ -1204,10 +1215,12 @@ install_plugin_native() {  # <name>
   source="$(dep_marketplace_source "$name" 2>/dev/null)" || source=""
   if [ -n "$source" ] && ! _dep_marketplace_known "$marketplace"; then add_first=yes; fi
 
-  if [ "$add_first" = "yes" ]; then
-    echo "$(_dep_indent)${name} is not installed. bionic would run: claude plugin marketplace add ${source} && claude plugin install ${id} --scope user --yes"
-  else
-    echo "$(_dep_indent)${name} is not installed. bionic would run: claude plugin install ${id} --scope user --yes"
+  if [ "${SETUP_ALL:-0}" != "1" ]; then
+    if [ "$add_first" = "yes" ]; then
+      echo "$(_dep_indent)${name} — not installed; bionic would run: claude plugin marketplace add ${source} && claude plugin install ${id} --scope user --yes"
+    else
+      echo "$(_dep_indent)${name} — not installed; bionic would run: claude plugin install ${id} --scope user --yes"
+    fi
   fi
   _dep_consent "$(_dep_indent)Install ${name} now?"
   case $? in
@@ -1221,12 +1234,14 @@ install_plugin_native() {  # <name>
   # not read on a machine without jq — and the install below is the honest test
   # of whether the catalog is usable. The CLI's own stderr has already reached
   # the transcript either way, so nothing is swallowed silently.
+  local quiet_log="${BIONIC_INSTALL_LOG:-${TMPDIR:-/tmp}/bionic-install.log}"
   if [ "$add_first" = "yes" ]; then
-    claude plugin marketplace add "$source" || true
+    claude plugin marketplace add "$source" >>"$quiet_log" 2>&1 || true
   fi
 
-  if claude plugin install "$id" --scope user --yes; then
-    echo "$(_dep_indent)Takes effect after /reload-plugins or a new session."
+  if claude plugin install "$id" --scope user --yes >>"$quiet_log" 2>&1; then
+    [ "${SETUP_ALL:-0}" = "1" ] || echo "$(_dep_indent)Takes effect after /reload-plugins or a new session."
+    SETUP_PLUGIN_CHANGED=yes
     return 0
   fi
   return 1
