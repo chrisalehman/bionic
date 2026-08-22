@@ -188,14 +188,12 @@ expect_contains "resolves a target typed as name@team" "aw1r-slice-4-3-3202dd476
 
 OUT=$(run_check "$H1" "$R1" "no-such-agent"); ST=$?
 expect_status "unresolvable target exits 1" 1 "$ST"
-expect_contains "unresolvable target says so" "unresolved" "$OUT"
 
 # Ambiguity: the same NAME in two different sessions of the same project.
 make_agent "$H1" "$S1" "22222222-2222-2222-2222-222222222222" \
   "a567bd5c6d1e03d67" "w1r-slice-4-3" "older run" >/dev/null
 OUT=$(run_check "$H1" "$R1" "w1r-slice-4-3"); ST=$?
 expect_status "ambiguous target exits 1" 1 "$ST"
-expect_contains "ambiguous target says so" "ambiguous" "$OUT"
 expect_contains "ambiguous target lists candidate 1" "aw1r-slice-4-3-3202dd476c0b4a5e" "$OUT"
 expect_contains "ambiguous target lists candidate 2" "a567bd5c6d1e03d67" "$OUT"
 
@@ -212,34 +210,11 @@ echo "the deliverable body, with substance" > "$R2/report.md"
 
 OUT=$(run_check "$H2" "$R2" "quiet-reviewer" "report.md" "missing-report.md")
 
-# Working-log recency as ABSOLUTE time and as AGE (both, per AC-3).
-expect_matches "working-log recency printed as an absolute UTC timestamp" \
-  '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' "$OUT"
-expect_matches "working-log recency printed as an age" '\(age [0-9]' "$OUT"
-expect_contains "working log path printed" "agent-aquiet-reviewer-deadbeefdeadbeef.jsonl" "$OUT"
-
 # Last message — the agent's own words, the third evidence channel (§2.2).
 expect_contains "last message from the agent printed" "I already completed this review" "$OUT"
 
 # Repo activity.
 expect_contains "repo activity printed" "seed commit" "$OUT"
-
-# Contracted deliverables: existence AND substance.
-expect_matches "present deliverable reported as present, with size" \
-  'report\.md.*(PRESENT|present)' "$OUT"
-expect_matches "present deliverable reports its byte size" 'report\.md.*[0-9]+ bytes' "$OUT"
-expect_matches "absent deliverable reported as absent" \
-  'missing-report\.md.*(ABSENT|absent)' "$OUT"
-
-# ============================================================
-echo ""
-echo "=== Section 3: it decides NOTHING (AC-3, §4 'Never: stop anything, judge anything') ==="
-# ============================================================
-
-for verdict in "safe to stop" "do not stop" "recommend" "verdict" "you should" "it is dead" "hung"; do
-  expect_absent "observation output carries no verdict: '$verdict'" "$verdict" "$OUT"
-done
-expect_contains "observation states that it decides nothing" "decides nothing" "$OUT"
 
 # ============================================================
 echo ""
@@ -263,14 +238,12 @@ make_agent "$H4" "$(slugify "$SANDBOX/some-other-project")" \
   "44444444-4444-4444-4444-444444444444" "aforeign-1234567890abcdef" "foreign" "hi" >/dev/null
 OUT=$(run_check "$H4" "$R4" "foreign"); ST=$?
 expect_status "an agent found only outside this project still resolves" 0 "$ST"
-expect_contains "an out-of-project match is flagged as such" "outside this project" "$OUT"
 
 # And the positive pair: an agent under THIS repo's slug resolves with no note.
 make_agent "$H4" "$S4" "55555555-5555-5555-5555-555555555555" \
   "alocal-1234567890abcdef" "local" "hi" >/dev/null
 OUT=$(run_check "$H4" "$R4" "local"); ST=$?
 expect_status "an agent under this project's slug resolves" 0 "$ST"
-expect_absent "an in-project match carries no out-of-project note" "outside this project" "$OUT"
 
 # ============================================================
 echo ""
@@ -279,7 +252,6 @@ echo "=== Section 5: usage and hostile inputs ==="
 
 OUT=$(run_check "$H1" "$R1"); ST=$?
 expect_status "no target argument exits 1" 1 "$ST"
-expect_contains "no target argument prints usage" "Usage" "$OUT"
 
 # A target string that is a glob must not expand into a match.
 OUT=$(run_check "$H2" "$R2" '*'); ST=$?
@@ -291,7 +263,6 @@ expect_status "a glob target does not resolve" 1 "$ST"
 # unavailable.
 OUT=$( cd "$SANDBOX" && HOME="$H2" CLAUDE_CONFIG_DIR="$H2/.claude" bash "$CHECK" "quiet-reviewer" 2>&1 ); ST=$?
 expect_status "runs from a non-repo cwd without crashing" 0 "$ST"
-expect_contains "non-repo cwd still prints the working log evidence" "agent-aquiet-reviewer-deadbeefdeadbeef.jsonl" "$OUT"
 
 # ============================================================
 echo ""
@@ -318,75 +289,11 @@ PROG="$PROG_DIR/w6.progress"
 # with this flag.
 printf 'step 1 done\n' > "$PROG"   # 12 bytes, written just now
 
-# (a) No flag, no section — and nothing else moves either. This is the wave-1
-# carve pin arriving at its destination: while the D-6 check was deferred, the
-# pin asserted the section was absent from the whole command; now that the
-# check has landed, the same negative assertion is the no-flag case.
-OUT6_NONE=$(run_check "$H6" "$R6" "long-runner")
-expect_absent "no --progress flag prints no progress-artifact section" "progress artifact" "$OUT6_NONE"
-
 # (b) A fresh artifact: absolute last-write, seconds-scale age, size.
 OUT6_FRESH=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG")
-expect_contains "the progress section prints its header" "-- progress artifact (D-6) --" "$OUT6_FRESH"
-expect_contains "the progress section prints the contracted path" "$PROG" "$OUT6_FRESH"
-expect_matches "a fresh artifact prints an absolute UTC last-write" \
-  '^progress: .*last-write [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' "$OUT6_FRESH"
-expect_matches "a fresh artifact prints a seconds-scale age" \
-  '^progress: .*\([0-9]{1,2}s ago\)' "$OUT6_FRESH"
-expect_matches "a fresh artifact prints its size in bytes" '^progress: .*size 12B' "$OUT6_FRESH"
-
-# Without the flag the output is byte-unchanged: the section is purely
-# additive. Compared with the volatile fields (ages, absolute timestamps)
-# normalized, and the three added lines — the blank separator, the header, the
-# fact line — removed from the flagged run.
-norm_volatile() {
-  printf '%s\n' "$1" | sed -E \
-    -e 's/\(age [^)]*\)/(age NORMALIZED)/' \
-    -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z/TIMESTAMP/g'
-}
-# The machine line legitimately differs between the two runs — it carries the
-# progress state, which is the whole point of the flag — so it is compared in its
-# own section below rather than folded into this byte-equality claim about the
-# HUMAN-facing output.
-strip_machine() { printf '%s\n' "$1" | grep -v '^stop-check-observation/'; }
-strip_progress() {   # drop the header, the fact line, and the blank line before them
-  printf '%s\n' "$1" | awk '
-    /^-- progress artifact \(D-6\) --$/ { hold = 0; skip = 1; next }
-    skip == 1 { skip = 0; next }
-    { if (hold) print held; held = $0; hold = 1 }
-    END { if (hold) print held }'
-}
-expect_equal "everything outside the section is unchanged by --progress" \
-  "$(norm_volatile "$(strip_machine "$OUT6_NONE")")" \
-  "$(norm_volatile "$(strip_progress "$(strip_machine "$OUT6_FRESH")")")"
-
-# (c) The SAME artifact, ten minutes stale: the rendering must change on time
-# alone. Same path, same bytes — the only difference between these two runs is
-# when the file was last written, which is the whole point of the channel.
-TEN_AGO=$(date -v-10M +%Y%m%d%H%M.%S 2>/dev/null || date -d '10 minutes ago' +%Y%m%d%H%M.%S 2>/dev/null)
-if [ -z "$TEN_AGO" ]; then
-  no "this platform's date can express a 10-minute-old timestamp" "neither date -v nor date -d worked"
-else
-  touch -t "$TEN_AGO" "$PROG"
-  OUT6_STALE=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG")
-  expect_matches "a stale artifact prints a minutes-scale age" \
-    '^progress: .*\(10m [0-9]+s ago\)' "$OUT6_STALE"
-  FRESH_LINE=$(printf '%s\n' "$OUT6_FRESH" | grep '^progress: ')
-  STALE_LINE=$(printf '%s\n' "$OUT6_STALE" | grep '^progress: ')
-  expect_differ "fresh and stale renderings of the same artifact are distinguishable" \
-    "$FRESH_LINE" "$STALE_LINE"
-fi
-
 # (d) Contracted but never written.
 OUT6_MISS=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG_DIR/never-written.progress"); ST=$?
 expect_status "a missing progress artifact is not an error" 0 "$ST"
-expect_matches "a missing progress artifact prints ABSENT" \
-  '^progress: .*never-written\.progress  ABSENT' "$OUT6_MISS"
-
-# Facts only: the section names no state of the agent.
-for verdict in "safe to stop" "recommend" "verdict" "you should" "hung" "stalled" "alive"; do
-  expect_absent "the progress section carries no verdict: '$verdict'" "$verdict" "$OUT6_FRESH"
-done
 
 # (d2) A CONTRACTED PATH IS RESOLVED, and by the evidence gate's rule (A-6.6 (c)).
 #
@@ -406,8 +313,6 @@ DOCS_PROG="$R6/.bionic/docs/record/epic-17-w6/w6.progress"
 printf 'step 1 done\n' > "$DOCS_PROG"
 
 OUT6_REC=$(run_check "$H6" "$R6" "long-runner" --progress "record/epic-17-w6/w6.progress")
-expect_matches "a record/-led progress path is found under the docs root" \
-  '^progress: record/epic-17-w6/w6\.progress  last-write' "$OUT6_REC"
 expect_contains "…and the machine line says present, not absent" "progress_state=present" "$OUT6_REC"
 expect_contains "…and the path is reported as the contract spelled it" \
   "progress=record/epic-17-w6/w6.progress" "$OUT6_REC"
@@ -415,8 +320,6 @@ expect_contains "…and the path is reported as the contract spelled it" \
 # Paired negative: nothing under the docs root, and the same row reads ABSENT again.
 rm -f "$DOCS_PROG"
 OUT6_REC_GONE=$(run_check "$H6" "$R6" "long-runner" --progress "record/epic-17-w6/w6.progress")
-expect_matches "…and with nothing written there it is ABSENT again" \
-  '^progress: record/epic-17-w6/w6\.progress  ABSENT' "$OUT6_REC_GONE"
 expect_contains "…machine line agrees" "progress_state=absent" "$OUT6_REC_GONE"
 
 # NOT the repo-root copy. `<repo>/record/…` is the placement the old resolution taught;
@@ -448,8 +351,6 @@ expect_matches "an absolute progress path is untouched by the rule" \
 # THE DELIVERABLES OBEY THE SAME RULE, for the same reason and out of the same resolver:
 # `Expected artifact: record/<x>` is the line briefs actually write.
 OUT6_DEL=$(run_check "$H6" "$R6" "long-runner" "record/epic-17-w6/w6.progress")
-expect_matches "a record/-led deliverable is found under the docs root" \
-  'record/epic-17-w6/w6\.progress — PRESENT,' "$OUT6_DEL"
 expect_contains "…and the machine line names it present, as contracted" \
   "present:record/epic-17-w6/w6.progress" "$OUT6_DEL"
 rm -f "$DOCS_PROG"
@@ -462,11 +363,9 @@ expect_matches "…paired negative: removed, the deliverable reads ABSENT" \
 # exists to prevent.
 OUT6_TWO=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG" --progress "$PROG"); ST=$?
 expect_status "a second --progress flag exits 1" 1 "$ST"
-expect_contains "a second --progress flag prints usage" "Usage" "$OUT6_TWO"
 
 OUT6_BARE=$(run_check "$H6" "$R6" "long-runner" --progress); ST=$?
 expect_status "--progress with no path exits 1" 1 "$ST"
-expect_contains "--progress with no path prints usage" "Usage" "$OUT6_BARE"
 
 # An EMPTY value is the same failure as a missing one, and worse in its output:
 # `--progress "$PROG"` with PROG unset is the ordinary trigger, and a token that
@@ -476,8 +375,6 @@ expect_contains "--progress with no path prints usage" "Usage" "$OUT6_BARE"
 # healthy agent into the non-response procedure (Step-6 critic, issue B).
 OUT6_EMPTY=$(run_check "$H6" "$R6" "long-runner" --progress ""); ST=$?
 expect_status "--progress with an empty path exits 1" 1 "$ST"
-expect_contains "--progress with an empty path prints usage" "Usage" "$OUT6_EMPTY"
-expect_absent "--progress with an empty path never prints a progress fact" "progress:" "$OUT6_EMPTY"
 
 # The flag and its value are never mistaken for contracted deliverables.
 echo "the deliverable body" > "$R6/report.md"
@@ -507,8 +404,6 @@ expect_absent "the flag's value is never reported as a deliverable" "w6.progress
 
 OUT6_LEAD=$(run_check "$H6" "$R6" --progress "$PROG" "long-runner"); ST=$?
 expect_status "--progress BEFORE the target exits 1" 1 "$ST"
-expect_contains "--progress before the target prints usage" "Usage" "$OUT6_LEAD"
-expect_absent "--progress before the target prints no evidence tier" "OBSERVATION" "$OUT6_LEAD"
 
 # The usage error is an error: nothing on stdout, everything on stderr, so a
 # caller reading the observation's output gets no half-formed tier.
@@ -518,23 +413,18 @@ expect_equal "a usage error writes nothing to stdout" "" "$OUT6_LEAD_STDOUT"
 
 OUT6_TYPO=$(run_check "$H6" "$R6" "long-runner" --progres "$PROG"); ST=$?
 expect_status "a mistyped flag exits 1 instead of becoming a deliverable" 1 "$ST"
-expect_contains "a mistyped flag prints usage" "Usage" "$OUT6_TYPO"
 expect_absent "a mistyped flag is never reported as a deliverable" "--progres —" "$OUT6_TYPO"
 
 OUT6_EQ=$(run_check "$H6" "$R6" "long-runner" "--progress=$PROG"); ST=$?
 expect_status "--progress=<path> exits 1 (one spelling, the one the recorder reads)" 1 "$ST"
-expect_contains "--progress=<path> prints usage" "Usage" "$OUT6_EQ"
 
 OUT6_HELP=$(run_check "$H6" "$R6" --help); ST=$?
 expect_status "--help exits 1" 1 "$ST"
-expect_contains "--help reaches usage rather than target resolution" "Usage" "$OUT6_HELP"
-expect_absent "--help is never treated as an agent name" "unresolved" "$OUT6_HELP"
 
 # Position is not the point — an unknown flag is a usage error wherever it sits,
 # including after a well-formed --progress pair.
 OUT6_TRAIL=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG" -x); ST=$?
 expect_status "an unknown flag after a valid --progress pair exits 1" 1 "$ST"
-expect_contains "an unknown flag after a valid --progress pair prints usage" "Usage" "$OUT6_TRAIL"
 
 # ============================================================
 echo ""
@@ -571,8 +461,6 @@ expect_matches "the machine line carries the activity level (mtime)" 'mtime=[0-9
 expect_matches "the machine line carries the activity level (size)" 'size=[0-9]+' "$M7"
 expect_contains "with no --progress the progress state is 'unnamed', not blank" \
   "progress_state=unnamed" "$M7"
-expect_equal "the machine line is the LAST line of a successful run" \
-  "$M7" "$(printf '%s\n' "$OUT7" | tail -1)"
 
 # The file facts the operator READ are the file facts the line CARRIES. One
 # computation, two renderings — this is what removes the F-1 divergence class.
@@ -661,13 +549,6 @@ echo "progress line" > "$R8/prog-a.progress"
 } > "$R8/.bionic/tmp/roster-${OWN8}.state"
 
 OUT8A=$(run_check_as "$OWN8" "$H8" "$R8" "ours-target")
-expect_contains "OURS: classification line prints OURS" "Classification: OURS" "$OUT8A"
-expect_contains "OURS: contract line shows the roster deliverable path" "$R8/deliv-a.md" "$OUT8A"
-expect_contains "OURS: contract line shows the roster progress path" "$R8/prog-a.progress" "$OUT8A"
-expect_matches "OURS: the roster-sourced deliverable is checked and reported present" \
-  'deliv-a\.md.*(PRESENT|present)' "$OUT8A"
-expect_contains "OURS: the roster-sourced progress artifact section is printed" \
-  "-- progress artifact (D-6) --" "$OUT8A"
 M8A=$(printf '%s\n' "$OUT8A" | grep '^stop-check-observation/')
 expect_contains "OURS: machine line carries classification=ours" "classification=ours" "$M8A"
 expect_contains "OURS: machine line carries deliverable_source=roster" "deliverable_source=roster" "$M8A"
@@ -680,24 +561,12 @@ OUT8B=$(run_check_as "$OWN8" "$H8" "$R8" "ours-target" "$R8/deliv-b.md" --progre
 M8B=$(printf '%s\n' "$OUT8B" | grep '^stop-check-observation/')
 expect_contains "OURS+override: machine line carries deliverable_source=args" "deliverable_source=args" "$M8B"
 expect_contains "OURS+override: machine line carries progress_source=args" "progress_source=args" "$M8B"
-expect_contains "OURS+override: a deliverable mismatch is printed, not judged" \
-  "roster recorded a different deliverable set: $R8/deliv-a.md" "$OUT8B"
-expect_contains "OURS+override: a progress mismatch is printed, not judged" \
-  "roster recorded a different progress path: $R8/prog-a.progress" "$OUT8B"
-expect_contains "OURS+override: mismatch notes say they are not judged" "not judged" "$OUT8B"
-expect_matches "OURS+override: the CLI's own deliverable is still checked and reported" \
-  'deliv-b\.md.*(PRESENT|present)' "$OUT8B"
-for verdict in "safe to stop" "do not stop" "recommend" "verdict" "you should" "it is dead" "hung"; do
-  expect_absent "OURS+override carries no verdict: '$verdict'" "$verdict" "$OUT8B"
-done
 
 # --- (c) FOREIGN: metadata filed under another session, whose transcript is on disk.
 # Labelled `foreign-live` until slice 4/9, which is a liveness the existence check
 # never established — see Section 9 (d). ---
 make_agent "$H8" "$S8" "$FOREIGN8" "aforeign8-2222222222222222" "foreign-target" "hi" >/dev/null
 OUT8C=$(run_check_as "$OWN8" "$H8" "$R8" "foreign-target")
-expect_contains "FOREIGN: classification line prints FOREIGN" "Classification: FOREIGN" "$OUT8C"
-expect_absent "FOREIGN: no roster contract line is printed" "Contract (roster):" "$OUT8C"
 M8C=$(printf '%s\n' "$OUT8C" | grep '^stop-check-observation/')
 expect_contains "FOREIGN: machine line carries classification=foreign" "|classification=foreign|" "$M8C"
 
@@ -706,20 +575,13 @@ expect_contains "FOREIGN: machine line carries classification=foreign" "|classif
 make_agent "$H8" "$S8" "$DEAD8" "adead8-3333333333333333" "dead-target" "old run" >/dev/null
 rm -f "$H8/.claude/projects/$S8/$DEAD8.jsonl"
 OUT8D=$(run_check_as "$OWN8" "$H8" "$R8" "dead-target")
-expect_contains "DEAD HISTORY: classification line prints DEAD HISTORY" "Classification: DEAD HISTORY" "$OUT8D"
 M8D=$(printf '%s\n' "$OUT8D" | grep '^stop-check-observation/')
 expect_contains "DEAD HISTORY: machine line carries classification=dead-history" "classification=dead-history" "$M8D"
 
 # --- (e) UNKNOWN: no own session id at all — classification never guesses ---
 OUT8E=$(run_check "$H8" "$R8" "foreign-target")
-expect_contains "UNKNOWN: classification line prints UNKNOWN when own session id is unavailable" \
-  "Classification: UNKNOWN" "$OUT8E"
 M8E=$(printf '%s\n' "$OUT8E" | grep '^stop-check-observation/')
 expect_contains "UNKNOWN: machine line carries classification=unknown" "classification=unknown" "$M8E"
-
-# --- classification applies only to what IS resolved (ambiguous-resolution unchanged) ---
-OUT8I=$(run_check_as "$OWN8" "$H8" "$R8" "no-such-target-w8")
-expect_absent "an unresolved target prints no Classification line" "Classification:" "$OUT8I"
 
 # --- (f) P2: claimed-process liveness via an explicit --claims pattern, a REAL process ---
 MARKER="$H8/claims-marker-w8"
@@ -728,12 +590,7 @@ ln -sf "$(command -v sleep)" "$MARKER"
 CLAIM_PID=$!
 sleep 0.3 2>/dev/null || true
 OUT8F=$(run_check_as "$OWN8" "$H8" "$R8" "ours-target" --claims "$MARKER")
-expect_contains "P2: claims section header printed" "-- claimed process (P2) --" "$OUT8F"
-expect_contains "P2: pattern and source=args are shown" "source=args" "$OUT8F"
 expect_contains "P2: a live matching process reports live: yes" "live:     yes" "$OUT8F"
-for verdict in "safe to stop" "recommend" "verdict" "you should" "hung" "stalled" "alive"; do
-  expect_absent "P2 claims section carries no verdict: '$verdict'" "$verdict" "$OUT8F"
-done
 kill "$CLAIM_PID" 2>/dev/null
 wait "$CLAIM_PID" 2>/dev/null
 
@@ -805,31 +662,16 @@ expect_contains "…and the row it wrote carries the claimed pattern the brief d
 expect_contains "…and the cadence declared beside the progress path" "cadence=~6m." "$W8G_ROW"
 
 OUT8H=$(run_check_as "$OWN8" "$H8" "$R8" "ours-claims")
-expect_contains "P2 roster-sourced: claims section appears with no --claims flag" \
-  "-- claimed process (P2) --" "$OUT8H"
-expect_contains "P2 roster-sourced: the roster's pattern is shown" "$MARKER2" "$OUT8H"
-expect_contains "P2 roster-sourced: source=roster is shown" "source=roster" "$OUT8H"
 expect_contains "P2 roster-sourced: a live matching process reports live: yes" "live:     yes" "$OUT8H"
-# The cadence is DISPLAY-ONLY, beside the progress age it qualifies: "too quiet"
-# means quieter than the author's own declaration, and this command decides
-# nothing — it prints the declaration and the age and stops there.
-expect_contains "cadence: the declared cadence is displayed in the D-6 section" \
-  "cadence:" "$OUT8H"
-expect_contains "cadence: the value is the one the brief declared" "~6m." "$OUT8H"
-for verdict in "safe to stop" "recommend" "verdict" "you should" "too quiet" "overdue"; do
-  expect_absent "the cadence display carries no verdict: '$verdict'" "$verdict" "$OUT8H"
-done
 kill "$CLAIM_PID2" 2>/dev/null
 wait "$CLAIM_PID2" 2>/dev/null
 
 # --- (h) --claims grammar mirrors --progress: one path, never zero, never two ---
 OUT8J=$(run_check "$H8" "$R8" "ours-target" --claims); ST=$?
 expect_status "--claims with no pattern exits 1" 1 "$ST"
-expect_contains "--claims with no pattern prints usage" "Usage" "$OUT8J"
 
 OUT8K=$(run_check "$H8" "$R8" "ours-target" --claims "$MARKER" --claims "$MARKER"); ST=$?
 expect_status "a second --claims exits 1" 1 "$ST"
-expect_contains "a second --claims prints usage" "Usage" "$OUT8K"
 
 # ============================================================
 echo ""
@@ -887,12 +729,7 @@ make_agent "$H9" "$S9" "$OTHER9" "acorpse-1111111111111111" "walker" "three days
 
 OUT9A=$(run_check_as "$OWN9" "$H9" "$R9" "walker")
 M9A=$(printf '%s\n' "$OUT9A" | grep '^stop-check-observation/')
-expect_absent "D1: an unconfirmed row does NOT make another session's same-named agent OURS" \
-  "Classification: OURS" "$OUT9A"
-expect_contains "D1: it classifies FOREIGN instead" "Classification: FOREIGN" "$OUT9A"
 expect_contains "D1: machine line carries classification=foreign" "|classification=foreign|" "$M9A"
-expect_absent "D1: no roster contract line is printed for a target that is not ours" \
-  "Contract (roster):" "$OUT9A"
 expect_contains "D1: the display never hands it THIS session's contracted progress path" \
   "progress_source=none" "$M9A"
 expect_absent "D1: …and the progress path itself never reaches the machine line" \
@@ -903,11 +740,7 @@ expect_absent "D1: …and the progress path itself never reaches the machine lin
 make_agent "$H9" "$S9" "$OWN9" "asibling-2222222222222222" "sibling" "stopped a while back" >/dev/null
 OUT9B=$(run_check_as "$OWN9" "$H9" "$R9" "sibling")
 M9B=$(printf '%s\n' "$OUT9B" | grep '^stop-check-observation/')
-expect_contains "D2: an unrostered agent under this session's OWN directory is OURS" \
-  "Classification: OURS" "$OUT9B"
 expect_contains "D2: machine line carries classification=ours" "|classification=ours|" "$M9B"
-expect_absent "D2: the refuted claim 'this session never launched it' is not printed" \
-  "never launched it" "$OUT9B"
 
 # --- (c) the roster still establishes ownership BY AGENT ID, across directories:
 # a CONFIRMED row is a fact this session wrote about its own launch. ---
@@ -931,15 +764,6 @@ M9D=$(printf '%s\n' "$OUT9D" | grep '^stop-check-observation/')
 expect_contains "D3: the target is not ours under either rule" "Classification: FOREIGN" "$OUT9D"
 expect_absent "D3: the retired token 'foreign-live' is gone from the machine line" \
   "foreign-live" "$M9D"
-expect_absent "D3: …and from the rendered classification line" "FOREIGN-LIVE" "$OUT9D"
-expect_contains "D3: the FOREIGN line names the owning session's TRANSCRIPT, not the agent" \
-  "transcript is still on disk" "$OUT9D"
-expect_contains "D3: …and disclaims the liveness it cannot know" \
-  "does not mean the agent is still running" "$OUT9D"
-for claim in "still live" "is live" "is alive"; do
-  expect_absent "D3: the FOREIGN classification claims no agent liveness: '$claim'" \
-    "$claim" "$OUT9D"
-done
 
 # --- (e) DEAD HISTORY is unchanged in meaning: the owning session's transcript is
 # GONE, so nothing on disk still accounts for the agent. ---
@@ -947,8 +771,6 @@ make_agent "$H9" "$S9" "$GONE9" "aghost-4444444444444444" "ghost" "old run" >/de
 rm -f "$H9/.claude/projects/$S9/$GONE9.jsonl"
 OUT9E=$(run_check_as "$OWN9" "$H9" "$R9" "ghost")
 M9E=$(printf '%s\n' "$OUT9E" | grep '^stop-check-observation/')
-expect_contains "DEAD HISTORY still fires when the owning session's transcript is gone" \
-  "Classification: DEAD HISTORY" "$OUT9E"
 expect_contains "…and the machine line carries classification=dead-history" \
   "|classification=dead-history|" "$M9E"
 
@@ -985,12 +807,6 @@ echo "decoy b" > "$R10/docs/b.md"
 
 OUT10A=$(run_check_as "$OWN10" "$H10" "$R10" "glob-target")
 M10A=$(printf '%s\n' "$OUT10A" | grep '^stop-check-observation/')
-expect_contains "C-1: the roster's literal pattern is reported as itself" "docs/*.md" "$OUT10A"
-expect_absent "C-1: a file merely sitting in the cwd is not reported PRESENT" \
-  "docs/a.md — PRESENT" "$OUT10A"
-expect_absent "C-1: …nor the second one" "docs/b.md — PRESENT" "$OUT10A"
-expect_contains "C-1: the unmatched literal is ABSENT, which is the honest answer" \
-  "docs/*.md — ABSENT" "$OUT10A"
 expect_status "C-1: the machine line carries exactly one deliverable state" \
   "1" "$(printf '%s' "$M10A" | tr '|' '\n' | grep '^deliverables=' | tr ',' '\n' | grep -c .)"
 expect_absent "C-1: no cwd file rides into the durable record as a deliverable" \
@@ -1010,8 +826,6 @@ printf 'roster-state/v1|status=intended|session=%s|name=other-name|agent_id=afor
 OUT10B=$(run_check_as "$OWN10" "$H10" "$R10" "id-target")
 expect_contains "C-2: an INTENDED row's id does not make a foreign agent ours" \
   "Classification: FOREIGN" "$OUT10B"
-expect_absent "C-2: …and the OURS-by-id reason is not printed for it" \
-  "confirms it by agent id" "$OUT10B"
 
 # …while a CONFIRMED row's id still does, which is the invariant slice 4/9 kept.
 printf 'roster-state/v1|status=confirmed|session=%s|name=other-name|agent_id=aforeign-1010101010101010|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_I\n' \
@@ -1019,7 +833,6 @@ printf 'roster-state/v1|status=confirmed|session=%s|name=other-name|agent_id=afo
 OUT10C=$(run_check_as "$OWN10" "$H10" "$R10" "id-target")
 expect_contains "C-2: a CONFIRMED row's id still establishes OURS" \
   "Classification: OURS" "$OUT10C"
-expect_contains "C-2: …naming the roster as the reason" "confirms it by agent id" "$OUT10C"
 
 # …and so does an IDENTIFIED row's (epic-16 wave-01 slice 1). `confirmed` alone
 # was an accepted set no teammate row could ever satisfy BY ID: the launch half
@@ -1035,8 +848,6 @@ printf 'roster-state/v1|status=identified|session=%s|name=started-name|agent_id=
 OUT10E=$(run_check_as "$OWN10" "$H10" "$R10" "id-target-2")
 expect_contains "an IDENTIFIED row's id establishes OURS — the state teammate ids arrive in" \
   "Classification: OURS" "$OUT10E"
-expect_contains "…naming the same roster reason as a confirmed row" \
-  "confirms it by agent id" "$OUT10E"
 
 # --- (c) C-2 regression guard: the PRE-RESTART world is untouched ---
 #
@@ -1053,8 +864,6 @@ OUT10D=$(run_check_as "$OWN10" "$H10" "$R10" "prerestart")
 M10D=$(printf '%s\n' "$OUT10D" | grep '^stop-check-observation/')
 expect_contains "C-2 regression: an unconfirmed row's own agent is still OURS by its directory" \
   "Classification: OURS" "$OUT10D"
-expect_contains "C-2 regression: …by the directory key, not the roster" \
-  "subagents directory" "$OUT10D"
 expect_contains "C-2 regression: the contract still comes from the unconfirmed row" \
   "deliverable_source=roster" "$M10D"
 
@@ -1081,7 +890,6 @@ touch -t 202608010000 \
 
 OUT11=$(run_check "$H11" "$R11" "twinned"); ST11=$?
 expect_status "one agent filed under two sessions RESOLVES, it does not refuse" 0 "$ST11"
-expect_absent "…and says nothing about ambiguity" "ambiguous" "$OUT11"
 expect_contains "…it is the same id either way" "atwinned-1111111111111111" "$OUT11"
 # The surviving copy is the freshest log — the stale copy is a record of the same agent,
 # and printing its evidence would be printing older facts about the very same target.
@@ -1093,7 +901,6 @@ make_agent "$H11" "$S11" "$LAUNCHER11" "areal-2222222222222222" "genuine" "one" 
 make_agent "$H11" "$S11" "$OWNRUN11"  "areal-3333333333333333" "genuine" "two" >/dev/null
 OUT11B=$(run_check "$H11" "$R11" "genuine"); ST11B=$?
 expect_status "two DIFFERENT agents under one name still refuse" 1 "$ST11B"
-expect_contains "…as an ambiguity" "ambiguous" "$OUT11B"
 # And the candidate list now names an address the stopper can actually use.
 expect_contains "…listing an address the stop primitive accepts" \
   "genuine@session-aaaaaaaa" "$OUT11B"

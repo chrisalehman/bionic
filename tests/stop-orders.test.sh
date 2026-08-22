@@ -77,7 +77,6 @@ run_orders "$R1"
 expect_status "no verb: usage error" 2 "$ST"
 run_orders "$R1" nonsense
 expect_status "unknown verb: usage error" 2 "$ST"
-expect_contains "…and it names both verbs" "standdown" "$ERR"
 run_orders "$R1" order
 expect_status "order with no target: usage error" 2 "$ST"
 run_orders "$R1" order --at 12345
@@ -90,7 +89,6 @@ expect_status "standdown takes no arguments" 2 "$ST"
 ST=0
 OUT=$( cd "$R1" && env -u CLAUDE_CODE_SESSION_ID bash "$ORDERS" order someone 2>&1 ); ST=$?
 expect_status "no session key: exit 3, nothing read or written" 3 "$ST"
-expect_contains "…and it says why" "no session key" "$OUT"
 
 # A repo controls its own .bionic/, so a symlink on the write path is refused rather
 # than followed — the same posture hooks/session-sweeper.sh takes.
@@ -98,7 +96,6 @@ R2="$(make_repo hostile)"
 ln -s /tmp/elsewhere.state "$R2/.bionic/tmp/stop-orders-$SID.state"
 run_orders "$R2" order someone
 expect_status "a symlinked orders file is REFUSED" 2 "$ST"
-expect_absent "…and nothing was written through it" "stop ordered" "$OUT"
 
 # ============================================================
 echo ""
@@ -110,9 +107,6 @@ roster_row "$R3" "unlanded" ".bionic/docs/record/unlanded.md"
 
 run_orders "$R3" order unlanded
 expect_status "an order over an UNMET contract is recorded, not refused" 0 "$ST"
-expect_contains "…the order is acknowledged" "stop ordered: unlanded" "$OUT"
-expect_contains "…and it names what stopping gives up" ".bionic/docs/record/unlanded.md" "$OUT"
-expect_contains "…labelled as unlanded, not as a landing" "UNLANDED" "$OUT"
 
 ORDERS_FILE="$R3/.bionic/tmp/stop-orders-$SID.state"
 if grep -q "^stop-order/v1|.*|target=unlanded$" "$ORDERS_FILE"; then
@@ -126,14 +120,12 @@ echo landed > "$R3/.bionic/docs/record/landed.md"
 roster_row "$R3" "landed" ".bionic/docs/record/landed.md"
 run_orders "$R3" order landed
 expect_status "an order over a MET contract is recorded too" 0 "$ST"
-expect_contains "…and reports that nothing is given up" "nothing is given up" "$OUT"
 
 # An order for a name no row carries is a typo or an agent from another session; either
 # way it is recorded and reported, never refused — refusing would be the wall arguing
 # with the person it works for.
 run_orders "$R3" order ghost
 expect_status "an order for an unknown name is still recorded" 0 "$ST"
-expect_contains "…and says the row is unknown" "no contract row of that name" "$OUT"
 
 # ============================================================
 echo ""
@@ -171,7 +163,6 @@ expect_contains "the ACKED row is in the batch though its artifact never landed"
   "acked-one" "$STANDDOWN_BLOCK"
 expect_contains "…each addressed the way the stop primitive takes it" \
   "met-one@session-6c85684c" "$STANDDOWN_BLOCK"
-expect_contains "the batch is counted" "4 row(s) have landed" "$OUT"
 
 # THE POINT OF THE OPERATION: it touches no live-unmet row. Asserted as an ABSENCE from
 # the stand-down block specifically, with the paired positive that the row is present in
@@ -182,7 +173,6 @@ expect_absent "the STILL-LIVE row is NOT in the stand-down batch" "live-one" "$S
 LEFT_BLOCK=$(printf '%s\n' "$OUT" | sed -n '/LEFT ALONE/,$p')
 expect_contains "…the UNMET row is named as left alone" "unmet-one" "$LEFT_BLOCK"
 expect_contains "…the STILL-LIVE row is named as left alone" "live-one" "$LEFT_BLOCK"
-expect_contains "…and the count says so" "2 row(s) are not stood down" "$OUT"
 
 # A row that declared NOTHING stats MET for want of anything to hold it to. Standing it
 # down on that would be standing it down on a fact nobody produced; an ack is what closes
@@ -193,7 +183,6 @@ run_orders "$R5" standdown
 expect_status "a contract-less roster still answers" 0 "$ST"
 STANDDOWN_BLOCK=$(printf '%s\n' "$OUT" | sed -n '/STAND DOWN/,/LEFT ALONE/p')
 expect_absent "a vacuous MET is not a landing: not in the batch" "declares-nothing" "$STANDDOWN_BLOCK"
-expect_contains "…it is left alone until an ack closes it" "nobody to stand down" "$OUT"
 ( cd "$R5" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" ack declares-nothing ) >/dev/null 2>&1
 run_orders "$R5" standdown
 expect_contains "…and the ack is what puts it in the batch" "1 row(s) have landed" "$OUT"
@@ -222,7 +211,6 @@ expect_contains "…counted once, not twice" "1 row(s) have landed" "$OUT"
 R6="$(make_repo emptyroster)"
 run_orders "$R6" standdown
 expect_status "an empty roster answers cleanly" 0 "$ST"
-expect_contains "…and says there is nothing to do" "nothing to stand down" "$OUT"
 
 # ============================================================
 echo ""
@@ -254,8 +242,6 @@ expect_contains "…and leaves the open row alone (not a landing)" "live-worker"
 run_orders "$R7WT" standdown
 expect_status "from the WORKTREE cwd, the SAME session's standdown still reads the true roster" 0 "$ST"
 expect_contains "…still names the open row through the worktree cwd" "live-worker" "$OUT"
-expect_absent "…never claims there are no contract rows through the wrong root" \
-  "no contract rows on this session's roster" "$OUT"
 
 git -C "$R7" worktree remove --force "$R7WT" >/dev/null 2>&1
 

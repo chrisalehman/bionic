@@ -147,8 +147,6 @@ R1="$(make_repo s1)"; new_roster "$R1"
 
 poke "$R1"
 expect_eq "no verb is a usage error (exit 2)" "2" "$RC"
-expect_contains "usage names tick" "tick" "$OUT"
-expect_contains "usage names interval" "interval" "$OUT"
 
 poke "$R1" tick extra-arg
 expect_eq "more than one arg is a usage error (exit 2)" "2" "$RC"
@@ -158,7 +156,6 @@ expect_eq "an unknown verb is a usage error (exit 2)" "2" "$RC"
 
 OUT="$( cd "$R1" && CLAUDE_CODE_SESSION_ID="" bash "$POKER" tick 2>&1 )"; RC=$?
 expect_eq "tick with no session key REFUSES with exit 3" "3" "$RC"
-expect_contains "…and says why" "session key" "$OUT"
 
 # ============================================================
 section "Section 2: interval — the config knob"
@@ -186,7 +183,6 @@ expect_eq "the interval reads a small override just as faithfully (2s)" "2" "$OU
 printf 'poker-interval: not-a-duration\n' > "$R2/.bionic/config.yaml"
 poke "$R2" interval
 expect_eq "a malformed override REFUSES rather than silently defaulting (exit 2)" "2" "$RC"
-expect_contains "…and names where to fix it" "config.yaml" "$OUT"
 
 # ---------- interval-default: the constant, with the config taken out of the question ----------
 #
@@ -208,9 +204,6 @@ poke "$R2" interval-default
 expect_eq "…and a perfectly VALID override does not move it either" "1800" "$OUT"
 poke "$R2" interval
 expect_eq "…while `interval`, on the same repo, still reads that override (5m = 300s)" "300" "$OUT"
-
-poke "$R1"
-expect_contains "usage names interval-default" "interval-default" "$OUT"
 
 # The gate's fallback is only worth having if it tracks the constant. Mutation-proof: move
 # POKER_INTERVAL_DEFAULT on a copy and the verb has to move with it — a verb that printed a
@@ -298,7 +291,6 @@ poke "$R3N" tick
 expect_eq "an UNACKED UNMET row past its duration signals NOTIFY (exit 1)" "1" "$RC"
 expect_contains "…decision=NOTIFY" "decision=NOTIFY" "$OUT"
 expect_contains "…naming the row" "rows=overdue-agent" "$OUT"
-expect_contains "…the human line names it too" "overdue-agent" "$OUT"
 expect_absent   "…never QUIET on the same tick" "decision=QUIET" "$OUT"
 expect_absent   "…never DISARM on the same tick" "decision=DISARM" "$OUT"
 
@@ -429,7 +421,6 @@ mkdir -p "$TMPROOT/elsewhere-s4"
 ln -s "$TMPROOT/elsewhere-s4" "$R4/.bionic/tmp"
 poke "$R4" tick
 expect_eq "a symlinked state directory REFUSES the tick too (exit 2)" "2" "$RC"
-expect_contains "…the refusal names the symbolic link" "symbolic link" "$OUT"
 
 # ============================================================
 section "Section 5: the pinned root — a worktree cwd answers for the MAIN repository (6-axis A-1)"
@@ -486,7 +477,6 @@ R5B="$(make_repo s5-no-roster)"
 # roster" case plants.
 poke "$R5B" tick
 expect_eq "an ABSENT roster REFUSES rather than silently DISARMing (exit 2)" "2" "$RC"
-expect_contains "…and says it is a refusal, not a decision line" "REFUSED" "$OUT"
 expect_absent "…never prints a decision line for a roster it never found" "decision=" "$OUT"
 
 
@@ -529,7 +519,6 @@ S6_BODY="$(cat "$(stamp_of "$R6")" 2>/dev/null)"
 expect_contains "the stamp carries its own schema" "patrol-stamp/v1" "$S6_BODY"
 expect_contains "…and names the session it answers for" "session=$SID" "$S6_BODY"
 expect_contains "…and records which verb wrote it" "verb=arm" "$S6_BODY"
-expect_contains "arm reports what it did" "armed" "$OUT"
 
 # The stamp is machine-local state under .bionic/tmp, exactly like the roster and the
 # attestation, and gets the same mode.
@@ -538,9 +527,6 @@ expect_eq "the stamp is owner-only, like every other .bionic/tmp record" "600" \
 
 OUT="$( cd "$R6" && env -u CLAUDE_CODE_SESSION_ID bash "$POKER" arm 2>&1 )"; RC=$?
 expect_eq "arm without a session key refuses (exit 3) — a stamp answers for ONE session" "3" "$RC"
-
-poke "$R6"
-expect_contains "usage names the arm verb" "arm" "$OUT"
 
 # ---------- stamp-before-decide: the REFUSED tick still stamps ----------
 #

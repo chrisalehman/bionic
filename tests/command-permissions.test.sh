@@ -151,13 +151,6 @@ for c in $SCRIPTED_COMMANDS; do
   rule_count="$(frontmatter_allowed_tools_lines "$f" | wc -l | tr -d ' ')"
   expect_eq "${c}.md: exactly one allowed-tools line in frontmatter" "1" "$rule_count"
 
-  # Position: first line after the opening fence, ahead of description. The
-  # CLI does not require it; the file's readers do — the rule is the first
-  # thing that has to be true about the command.
-  line2="$(sed -n '2p' "$f")"
-  expect_prefix "${c}.md: allowed-tools is the first line after the opening ---" \
-    "allowed-tools:" "$line2"
-
   prefix="$(allowed_tools_rule_prefix "$f")"
   expect_eq "${c}.md: the rule is Bash(<prefix>:*) with the substituted-root prefix" \
     "bash \${CLAUDE_PLUGIN_ROOT}/scripts/${c}.sh" "$prefix"

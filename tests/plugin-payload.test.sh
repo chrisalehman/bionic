@@ -488,14 +488,12 @@ else
     no "every manifest digest matches the file that ships beside it (stale: $STALE_ROWS) — re-run bash agents-src/render.sh"
   fi
 
-  # The manifest is an OUTPUT of the render pipeline, and the pipeline is repo-side. This is
-  # the one place that pairing is visible from the payload: the file names its writer, so a
-  # user who finds a mismatch is told what regenerates it rather than left to guess.
-  if grep -qF "agents-src/render.sh" "$MANIFEST"; then
-    ok "the manifest names the script that regenerates it"
-  else
-    no "the manifest names the script that regenerates it"
-  fi
+  # RETIRED epic-18 T14 (2026-08-22): "the manifest names the script that regenerates it",
+  # a grep for the literal `agents-src/render.sh` in the manifest's comment header. Its
+  # stated purpose was reader-facing — telling a user who hits a mismatch what to re-run —
+  # so its only possible failure was that a comment got reworded. Output-text pin, deleted
+  # under the ratified doctrine. The manifest's CONTENT is still fully asserted above:
+  # which files it covers, and that every digest matches what ships beside it.
 fi
 
 # ============================================================

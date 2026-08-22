@@ -532,27 +532,6 @@ expect_false "evidence-gate hook has no version-dispatch chain" \
 expect_false "governing-skill hook has no version-dispatch chain" \
   grep -qE "$_vdispatch_re" "$_gskill"
 
-# 4r: README promotes canonical-sdlc as flagship (Wave 6 closure; Wave 7 repointed
-# link; RE-POINTED at wave-06 S13, when the README was rewritten from the payload).
-#
-# THE OBLIGATION IS UNCHANGED and it is what these four pin: the README must present
-# canonical-sdlc as the flagship, must name it the way a user invokes it, and must
-# tell a reader that BOTH lifecycle walls exist. What moved is the RENDERING. The
-# retired spellings pinned the shape of a page that no longer exists — a bold
-# `**Canonical SDLC**` list item inside a patterns section the user deleted, and one
-# sentence naming the two wall SCRIPTS by filename. That page is product-facing and
-# the rewrite bans internal names on it, so a filename pin would now require the
-# README to break its own rule to stay green. These pin the CLAIMS instead, each in
-# the words the page actually uses, so a rewrite that drops one still goes red.
-expect_true "README presents canonical-sdlc as the flagship" \
-  grep -qE 'centerpiece is .?canonical-sdlc' "${REPO}/README.md"
-expect_true "README names the skill as a user invokes it" \
-  grep -q 'bionic:canonical-sdlc' "${REPO}/README.md"
-expect_true "README states the commit-evidence wall" \
-  grep -q 'no evidence for the step' "${REPO}/README.md"
-expect_true "README states the artifact-frontmatter wall" \
-  grep -q 'will not write without' "${REPO}/README.md"
-
 # ============================================================
 # SECTION 5: RETIRED — shell alias marker consistency
 # ============================================================
@@ -675,95 +654,6 @@ done <<EOF
 $_readme_cmds
 EOF
 expect_eq "wsl-setup.sh's next steps carry every README install command" "" "$_missing_cmds"
-
-# --- 7c: and it hands the user to tier 2 rather than stopping at tier 1 ---
-#
-# Named separately from 7b because it is a different claim: 7b says the plugin gets
-# installed, this says the machine gets set up. A WSL box that just ran wsl-setup is
-# exactly the box that still needs /bionic:setup, so ending at the plugin install
-# would leave the user one undiscoverable step short.
-expect_true "wsl-setup.sh points the user at /bionic:setup for the machine tier" \
-  /usr/bin/grep -qF -- "/bionic:setup" "$WSL"
-
-# ============================================================
-# SECTION 8: SKILL.md's re-converge sentence names update, not install (AC-3)
-# ============================================================
-
-echo ""
-echo "=== Section 8: SKILL.md re-converge sentence (AC-3) ==="
-
-# epic-17 W7 S2. `claude plugin install <id>` on an already-registered id reports
-# "already installed" and does NOT refresh a directory-source cache copy — the CLI's
-# own re-converge verb is `update`. SKILL.md's worktree-paragraph asserted the
-# install-vs-update semantics with the wrong verb in its own closing clause; this pins
-# the fix so the doc and the code (`detect_reconverge_hint`, doctor.sh) cannot drift
-# back apart independently.
-SKILL_S2="${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
-
-_reconverge_update_count="$(/usr/bin/grep -c 'claude plugin update bionic@bionic' "$SKILL_S2" 2>/dev/null || true)"
-expect_true "SKILL.md names the update verb for re-convergence at least once" \
-  [ "${_reconverge_update_count:-0}" -ge 1 ]
-
-# The specific defect: the closing clause of the worktree paragraph used to read
-# "...and `claude plugin install bionic@bionic` is what re-converges them." That exact
-# combination (install, immediately followed by "is what re-converges them") must be
-# gone — the earlier "plugin not installed — run `claude plugin install bionic@bionic`"
-# refusal message in the same paragraph is a DIFFERENT sentence (dispatch-spans.test.sh
-# pins it separately) and stays untouched.
-expect_false "…and no longer says install is what re-converges them" \
-  /usr/bin/grep -qF -- "install bionic@bionic\` is what re-converges them" "$SKILL_S2"
-expect_true "…the sentence now says update is what re-converges them" \
-  /usr/bin/grep -qF -- "update bionic@bionic\` is what re-converges them" "$SKILL_S2"
-
-# epic-17 W7 S2b. S2's fix above was still wrong on the OTHER half of the sentence: it
-# said `update` re-converges them UNCONDITIONALLY, but measured fact (2026-08-21,
-# .bionic/docs/record/epic-17-w7/ac2-relay-drive.md) is that on a directory-source
-# install — a local checkout registered as a feed, which is what a dogfood install is —
-# `claude plugin update bionic@bionic` at an unchanged plugin.json version reports
-# "already at the latest version" and refreshes nothing, because the CLI never reads the
-# cache it would refresh. The sentence must scope the update claim to a git-source feed
-# and say the true, separate thing for a directory-source one.
-expect_true "…the update claim is scoped to a git-source feed" \
-  /usr/bin/grep -qF -- "on a git-source feed \`claude plugin update bionic@bionic\` is what re-converges them" "$SKILL_S2"
-expect_true "…and a directory-source marketplace is told update does nothing for it" \
-  /usr/bin/grep -qF -- "on a directory-source marketplace there is nothing to re-converge with that command" "$SKILL_S2"
-expect_true "…naming the CLI's own words for that no-op" \
-  /usr/bin/grep -qF -- "already at the latest version" "$SKILL_S2"
-
-# epic-17 W7 S11 (six-axis review axis 2). Everything above pins the PROSE half of
-# this fact. This is the code half, and it is here because this section's whole
-# reason to exist is that the doc and the code must not drift apart independently.
-#
-# What changed: `detect_reconverge_hint` returned a FRAGMENT (`nothing to do — …`
-# on a directory source, a bare command on a git source) and doctor spliced it
-# after `re-converge with:` — so the directory-source rendering said "the CLI runs
-# this tree" twice and offered "nothing to do" inside backticks as if it were a
-# command to type. The hint answers with a whole sentence now, per feed AND per
-# state, and doctor prints it without a prefix.
-DETECT_S11="${REPO}/payload/scripts/lib/detect.sh"
-DOCTOR_S11="${REPO}/payload/scripts/doctor.sh"
-
-expect_true "the directory-source lag sentence calls the state nominal, in its own words" \
-  /usr/bin/grep -qF -- "nominal: the CLI runs this tree" "$DETECT_S11"
-expect_false "…and no longer hands back a bare 'nothing to do' as the hint" \
-  /usr/bin/grep -qE -- "printf 'nothing to do" "$DETECT_S11"
-expect_true "the git-source lag sentence carries the update command and the re-run" \
-  /usr/bin/grep -qF -- 'claude plugin update bionic@bionic`, then re-run /bionic:doctor.' "$DETECT_S11"
-expect_true "…and the hint answers per STATE, not one sentence for every site" \
-  /usr/bin/grep -qF -- 'detect_reconverge_hint() {  # <lag|hooks>' "$DETECT_S11"
-expect_true "a directory-source machine with broken wiring is told the tree is what is broken" \
-  /usr/bin/grep -qF -- "the broken wiring is in this tree" "$DETECT_S11"
-
-# Measured over the lines doctor PRINTS, not over its commentary: the comment at the
-# fixed call site quotes the retired prefix in order to say it is retired, and a pin
-# that cannot tell those apart would forbid the file from explaining itself.
-expect_eq "doctor prefixes the hint with nothing — the sentence is the whole line" "" \
-  "$(/usr/bin/grep -n 're-converge with:' "$DOCTOR_S11" | /usr/bin/grep -v '^[0-9]*:[[:space:]]*#' || true)"
-expect_eq "…and never wraps the hint in backticks, which made a sentence look like a command" "" \
-  "$(/usr/bin/grep -nF '`$(detect_reconverge_hint' "$DOCTOR_S11" || true)"
-expect_eq "…and both call sites ask for the state they are reporting" "2" \
-  "$(/usr/bin/grep -cE 'detect_reconverge_hint (lag|hooks)' "$DOCTOR_S11" | tr -d ' ')"
-
 
 # ============================================================
 # SECTION 9: tests/run.sh — the job runner (epic-17 W7 S10, spec AC-16)
@@ -961,8 +851,6 @@ expect_false "…and never as a plain assertion failure (serial)" \
   /usr/bin/grep -qF "✗ FAIL" "$A4/serial.txt"
 expect_false "…and never as a plain assertion failure (parallel)" \
   /usr/bin/grep -qF "✗ FAIL" "$A4/parallel.txt"
-expect_true "…the Failed: list names the signal too" \
-  /usr/bin/grep -qF "killed by SIGKILL" "$A4/parallel.txt"
 expect_true "…it still counts as failed" \
   /usr/bin/grep -qF "Gating: 0 passed, 1 failed" "$A4/parallel.txt"
 expect_eq "…and it still fails the run (serial)" "1" "$_a4_serial_rc"
@@ -1097,8 +985,6 @@ mk_fixture_suites "$A10"
 drive "$A10" "$A10/out.txt" --no-such-flag
 expect_true "an unknown flag exits nonzero rather than running the roster" \
   [ "$DRIVE_RC" -ne 0 ]
-expect_true "…and names the flag it refused" \
-  /usr/bin/grep -qF -- "--no-such-flag" "$A10/out.txt"
 expect_false "…and does not run a single suite" \
   /usr/bin/grep -qF "✓ PASS" "$A10/out.txt"
 

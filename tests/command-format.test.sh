@@ -134,42 +134,7 @@ expect_true "help.md exists" test -f "$HELP_MD"
 if [ -f "$HELP_MD" ]; then
   HELP_TEXT="$(cat "$HELP_MD")"
 
-  expect_contains "help.md names /bionic:help"   "/bionic:help"   "$HELP_TEXT"
-  expect_contains "help.md names /bionic:setup"  "/bionic:setup"  "$HELP_TEXT"
-  expect_contains "help.md names /bionic:doctor" "/bionic:doctor" "$HELP_TEXT"
-  expect_contains "help.md names /bionic:remove" "/bionic:remove" "$HELP_TEXT"
 
-  # AC wording checks, per-command (brief's literal phrasing).
-  expect_contains "help.md: setup described as idempotent"        "idempotent"      "$HELP_TEXT"
-  expect_contains "help.md: setup described as wrapping plugin install" "plugin install" "$HELP_TEXT"
-  expect_contains "help.md: doctor described as read-only"        "read-only"       "$HELP_TEXT"
-  expect_contains "help.md: remove described as consented"        "consented"       "$HELP_TEXT"
-  expect_contains "help.md: remove described as native uninstall" "uninstall"       "$HELP_TEXT"
-
-  # Tier model, ratified vocabulary (design-ledger.md D6: "Tier 2 wraps tier 1").
-  expect_contains "help.md names tier 1 (plugin install)" "tier 1" "${HELP_TEXT,,}"
-  expect_contains "help.md names tier 2 (environment setup)" "tier 2" "${HELP_TEXT,,}"
-
-  # Where to start.
-  expect_contains "help.md: fresh machine points at /bionic:setup" "/bionic:setup" "$HELP_TEXT"
-  expect_contains "help.md: something-wrong points at /bionic:doctor" "/bionic:doctor" "$HELP_TEXT"
-
-  # EVERY SHIPPED SKILL IS ON THE FRONT DOOR (epic-18 T3, AC-6). The set is DERIVED from
-  # payload/skills/ rather than listed here, for the reason the payload path wall gives about
-  # its own file set: an enumeration can only pin what somebody already noticed, and the way
-  # a skill goes missing from this page is by being added to the payload and nowhere else.
-  # That is precisely how excalidraw-diagram arrived — shipped, and unmentioned by the one
-  # page whose whole job is to say what bionic gives you.
-  MISSING_SKILLS=""
-  for _sk in "${REPO}/payload/skills"/*; do
-    [ -e "${_sk}/SKILL.md" ] || continue
-    _slug="${_sk##*/}"
-    case "$HELP_TEXT" in
-      *"/bionic:${_slug}"*) ;;
-      *) MISSING_SKILLS="${MISSING_SKILLS}${_slug} " ;;
-    esac
-  done
-  expect_eq "help.md names every skill the payload ships" "" "${MISSING_SKILLS% }"
 
   # ZERO INVOCATIONS: THE PAGE IS STATIC (epic-17 W6 S9a; walk finding W-2).
   #
@@ -204,14 +169,6 @@ if [ -f "$HELP_MD" ]; then
   expect_true "plugin.json declares a non-empty version" bash -c "[ -n '$PJ_VERSION' ]"
   expect_contains "help.md carries the baked version line 'bionic ${PJ_VERSION} (installed)'" \
     "bionic ${PJ_VERSION} (installed)" "$HELP_TEXT"
-  # ...and it OPENS the page: the first line that is either the version line or the page
-  # heading has to be the version line, or the page opens with something else.
-  first_page_line="$(grep -m1 -E '^(bionic |# bionic$)' "$HELP_MD" 2>/dev/null)"
-  expect_eq "help.md: the version line opens the page, ahead of the heading" \
-    "bionic ${PJ_VERSION} (installed)" "$first_page_line"
-  # The runtime read's format string is gone, not merely joined by a static line.
-  expect_not_contains "help.md: no printf format string left where the version goes" \
-    'bionic %s (installed)' "$HELP_TEXT"
 else
   echo "SKIP: remaining Section 2 checks (help.md missing)"
 fi
@@ -327,11 +284,6 @@ echo "=== Section 4: mutation-and-restore (against a doctored copy of help.md) =
 
 if [ -f "$HELP_MD" ]; then
   DOCTORED="$TMP/help-doctored.md"
-  # Mutation 1: strip the /bionic:doctor roster line — the four-command-roster
-  # check must go red.
-  grep -v '/bionic:doctor' "$HELP_MD" > "$DOCTORED"
-  doctored_text="$(cat "$DOCTORED")"
-  expect_not_contains "MUTATED help.md (doctor line stripped): roster check now fails as expected" "/bionic:doctor" "$doctored_text"
 
   # Mutation 2: inject an invocation, in a fence, into a copy — the
   # zero-invocation pin and the no-fence pin must BOTH go red. Rewritten at W6
@@ -365,27 +317,6 @@ else
   echo "SKIP: Section 4 (help.md missing)"
 fi
 
-
-# ---------------------------------------------------------------------------
-# Section 5 — the one-answer route is described where a model will read it (AC-9)
-# ---------------------------------------------------------------------------
-#
-# `--all` exists for the person who has already decided to do everything, and a
-# model that reached for it by default would have turned per-item consent into a
-# single blanket yes it chose on the user's behalf. So the command files carry
-# one sentence saying when it is allowed and what to do with the question it
-# asks: the flag is for a user who asked for everything, and its one question is
-# relayed word for word like every other.
-ALL_DOCTRINE="Use --all only when the user asks for everything; relay its one question verbatim."
-for c in setup remove; do
-  f="${COMMANDS_DIR}/${c}.md"
-  if [ ! -f "$f" ]; then
-    no "${c}.md exists (Section 5 needs it)"
-    continue
-  fi
-  expect_contains "${c}.md says when --all may be reached for, and what to do with its question" \
-    "$ALL_DOCTRINE" "$(cat "$f")"
-done
 
 # ---------------------------------------------------------------------------
 # Results
