@@ -91,7 +91,13 @@ make_stub() {  # <bindir> <name> [body]
 # REPLACED, never prefixed, so a real brew/npm/claude can never be reached.
 BASE_BIN="$TMP/base-bin"
 mkdir -p "$BASE_BIN"
-for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat ls tr head tail sort uniq wc find jq shasum date; do
+# `readlink` earns its place the same way `stat` did (S15). Every writer resolves
+# a symlinked rc or settings.json to its final target before staging, so that a
+# dotfiles-managed file is REWRITTEN rather than detached and left stale. Absent
+# `readlink` the resolvers degrade to "write to the path as given" — today's
+# behaviour — so a fixture PATH without it would measure the degradation instead
+# of the fix, exactly as a PATH without `stat` would measure "write, don't chmod".
+for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail sort uniq wc find jq shasum date; do
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BASE_BIN}/${real}" 2>/dev/null
 done
 
@@ -802,7 +808,15 @@ expect_eq "legacy-channel hooks: detect.sh now counts zero" "env:legacy-channel-
 # Both directions are asserted for each, so neither arm can pass by pinning one
 # constant: a writer that narrowed every file to 0600 fails the 0644 arm.
 
-file_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
+# DEREFERENCING, deliberately (critic delta 2 N1). The property under test is the
+# mode of the file the writer PUBLISHED, and for a symlinked rc or settings.json
+# that file is the link's target. The non-`-L` spelling reads the link's own 755
+# and is satisfiable only by a writer that DESTROYS the link — the exact
+# behaviour S15 fixed away from — so it would pin the defect. `link_own_mode`
+# below is the non-dereferencing reader, used only where the LINK's own mode is
+# the thing being asserted about (the "this is the trap" fixture lines).
+file_mode() { stat -L -f '%Lp' "$1" 2>/dev/null || stat -L -c '%a' "$1" 2>/dev/null; }
+link_own_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
 
 ARM="$(new_arm hook-strip-mode-600)"
 plant_legacy_channel_hooks "$ARM"
@@ -924,12 +938,14 @@ expect_eq "…and its staged copy was 0600 before the rename too" "" \
 # the same run produced 0600, because the tmp was simply born at `umask 077`. So
 # both remove.sh writers get an arm, and `stat -L` is what makes them pass.
 #
-# WHAT THESE ARMS DO NOT CLAIM. `mv` has always replaced the link with a regular
-# file — pre-S12's `_rm_filter_out_lines` (`git show 273d3c5:payload/scripts/remove.sh`)
-# staged and renamed exactly the same way — so the rewrite detaches the rc from
-# the dotfiles repo. That is recorded here as standing behaviour, not endorsed:
-# changing it is a separate act, and an arm that pinned the link's survival today
-# would be pinning a fix nobody has made.
+# AND THE LINK SURVIVES THE REWRITE (critic delta 2 N1, decided at A6.S15.1).
+# `mv` used to replace the link with a regular file — pre-S12's
+# `_rm_filter_out_lines` (`git show 273d3c5:payload/scripts/remove.sh`) staged and
+# renamed exactly the same way — which left the dotfiles repo still carrying the
+# footprint bionic had just reported removed, and the next `stow` put it back. So
+# every writer now resolves the link to its FINAL target and publishes onto that,
+# and each arm below asserts all three halves: the link still exists, it still
+# points where it did, and the TARGET is the file that changed.
 symlink_rc() {  # <arm> — makes <arm>/home/.zshrc a link to <arm>/dotfiles/zshrc
   mkdir -p "$1/dotfiles"
   mv "$1/home/.zshrc" "$1/dotfiles/zshrc"
@@ -953,7 +969,7 @@ chmod 600 "$ARM/dotfiles/zshrc"
 expect_eq "fixture: the symlinked rc's TARGET really is 0600" \
   "600" "$(file_mode "$ARM/dotfiles/zshrc")"
 expect_not_contains "fixture: …and the LINK's own mode is not it — this is the trap" \
-  "600" "$(file_mode "$ARM/home/.zshrc")"
+  "600" "$(link_own_mode "$ARM/home/.zshrc")"
 REMOVE_FLAGS="--only legacy-alias"
 OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES" BIONIC_TEST_MV_LOG="$ARM/mv.log")"
 REMOVE_FLAGS=""
@@ -961,10 +977,15 @@ expect_not_contains "symlink arm: the block really was stripped (not vacuous)" \
   "bionic:start" "$(cat "$ARM/home/.zshrc")"
 expect_eq "a symlinked rc is published at its TARGET's 0600, never the link's 755" \
   "600" "$(file_mode "$ARM/home/.zshrc")"
+expect_true "symlink arm: the rc is STILL a symlink after the strip" test -L "$ARM/home/.zshrc"
+expect_eq "…and still points where it did" \
+  "$ARM/dotfiles/zshrc" "$(readlink "$ARM/home/.zshrc")"
+expect_not_contains "…and it is the TARGET that was rewritten, not a detached copy" \
+  "bionic:start" "$(cat "$ARM/dotfiles/zshrc")"
 expect_true "symlink arm: the mv witness really saw the rc rename (not vacuous)" \
-  /usr/bin/grep -q '\.zshrc\.bionic\.tmp' "$ARM/mv.log"
+  /usr/bin/grep -q 'dotfiles/zshrc\.bionic\.tmp' "$ARM/mv.log"
 expect_eq "…and no staged copy of it was ever wider than 0600 either" "" \
-  "$(/usr/bin/grep '\.zshrc\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
+  "$(/usr/bin/grep 'zshrc\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
 
 # The other writer, `_rm_filter_out_lines`, on the same shape.
 ARM="$(new_arm env-rc-filter-symlink-600)"
@@ -983,10 +1004,15 @@ expect_not_contains "symlink filter arm: the export really was removed (not vacu
   "export CLAUDE_CODE_ENABLE_TODO_TOOLS=1"$'\n' "$(cat "$ARM/home/.zshrc")"
 expect_eq "_rm_filter_out_lines publishes a symlinked rc at its target's 0600 too" \
   "600" "$(file_mode "$ARM/home/.zshrc")"
+expect_true "symlink filter arm: the rc is STILL a symlink after the filter" test -L "$ARM/home/.zshrc"
+expect_eq "…and still points where it did" \
+  "$ARM/dotfiles/zshrc" "$(readlink "$ARM/home/.zshrc")"
+expect_not_contains "…and it is the TARGET that lost the export, not a detached copy" \
+  "export CLAUDE_CODE_ENABLE_TODO_TOOLS=1"$'\n' "$(cat "$ARM/dotfiles/zshrc")"
 expect_true "symlink filter arm: the mv witness really saw the rc rename (not vacuous)" \
-  /usr/bin/grep -q '\.zshrc\.bionic\.tmp' "$ARM/mv.log"
+  /usr/bin/grep -q 'dotfiles/zshrc\.bionic\.tmp' "$ARM/mv.log"
 expect_eq "…and its staged copy was never wider than 0600 either" "" \
-  "$(/usr/bin/grep '\.zshrc\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
+  "$(/usr/bin/grep 'zshrc\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
 
 ARM="$(new_arm lib-strip-mode)"
 LIB_MODE_SETTINGS="$ARM/home/.claude/settings.json"
@@ -1021,7 +1047,7 @@ chmod 600 "$SETTINGS_TARGET"
 expect_eq "fixture: the symlinked settings.json TARGET really is 0600" \
   "600" "$(file_mode "$SETTINGS_TARGET")"
 expect_not_contains "fixture: …and the LINK's own mode is not it — this is the trap" \
-  "600" "$(file_mode "$ARM/home/.claude/settings.json")"
+  "600" "$(link_own_mode "$ARM/home/.claude/settings.json")"
 expect_true "hooks_strip_legacy_channel rewrote the symlinked fixture" \
   env PATH="$ARM/bin:$PATH" BIONIC_TEST_MV_LOG="$ARM/mv.log" \
     bash -c '. "$1"; hooks_strip_legacy_channel "$2"' _ "$HOOKS_SH" "$ARM/home/.claude/settings.json"
@@ -1029,8 +1055,14 @@ expect_not_contains "symlink arm: the library really did rewrite the file (not v
   ".claude/hooks/protect-main.sh" "$(cat "$ARM/home/.claude/settings.json")"
 expect_eq "a symlinked settings.json is published at its TARGET's 0600, never the link's 755" \
   "600" "$(file_mode "$ARM/home/.claude/settings.json")"
+expect_true "symlink arm: settings.json is STILL a symlink after the strip" \
+  test -L "$ARM/home/.claude/settings.json"
+expect_eq "…and still points where it did" \
+  "$ARM/dotfiles/settings.json" "$(readlink "$ARM/home/.claude/settings.json")"
+expect_not_contains "…and it is the dotfiles TARGET that lost the legacy hook, not a detached copy" \
+  ".claude/hooks/protect-main.sh" "$(cat "$ARM/dotfiles/settings.json")"
 expect_true "symlink arm: the mv witness really saw the settings rename (not vacuous)" \
-  /usr/bin/grep -q '\.claude/settings\.json\.bionic\.tmp' "$ARM/mv.log"
+  /usr/bin/grep -q 'dotfiles/settings\.json\.bionic\.tmp' "$ARM/mv.log"
 expect_eq "…and no staged copy of it was ever wider than 0600 either" "" \
   "$(/usr/bin/grep 'settings\.json\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
 
@@ -1246,6 +1278,49 @@ expect_eq "profile.sh and remove.sh carry the same settings writer" "$PROFILE_WR
 expect_true "the extracted writer is the real one (it carries the mode capture)" \
   bash -c 'case "$1" in *"stat -L -f"*) exit 0 ;; esac; exit 1' _ "$PROFILE_WRITER"
 
+# C-1's SECOND corollary: the symlink RESOLVER, four copies of it (critic delta 2
+# N1). Every writer in the payload now resolves the path it is about to rewrite
+# to the final target of its symlink chain, so a dotfiles-managed rc or
+# settings.json is rewritten rather than replaced by a detached regular file. The
+# resolver cannot be sourced from one place — hooks.sh and profile.sh are loaded
+# on their own by these suites and by callers that load no other library, a
+# `. deps.sh` inside a library breaks the mutation arms that run a doctored COPY
+# of it from a scratch directory, and remove.sh's standalone door runs where
+# scripts/lib/ is gone entirely. So there are four, and the same argument D-1
+# makes for the writer applies unchanged: pinned against each other, or they
+# drift. Same name in all four, so nothing needs neutralising here.
+RESOLVER_DEPS="$(sh_function_body "$DEPS_SH" bionic_link_target)"
+RESOLVER_HOOKS="$(sh_function_body "$HOOKS_SH" bionic_link_target)"
+RESOLVER_PROFILE="$(sh_function_body "$PROFILE_SH" bionic_link_target)"
+RESOLVER_RM="$(sh_function_body "$REMOVE_SH" bionic_link_target)"
+expect_true "deps.sh's symlink resolver was extracted (the pin is not vacuous)" \
+  test -n "$RESOLVER_DEPS"
+expect_true "the extracted resolver is the real one (it follows the chain with readlink)" \
+  bash -c 'case "$1" in *"readlink"*) exit 0 ;; esac; exit 1' _ "$RESOLVER_DEPS"
+expect_eq "hooks.sh carries the same symlink resolver as deps.sh" \
+  "$RESOLVER_DEPS" "$RESOLVER_HOOKS"
+expect_eq "profile.sh carries the same symlink resolver as deps.sh" \
+  "$RESOLVER_DEPS" "$RESOLVER_PROFILE"
+expect_eq "remove.sh's standalone copy is the same symlink resolver too" \
+  "$RESOLVER_DEPS" "$RESOLVER_RM"
+# The wall: a FIFTH copy, or a writer that never routes through one. Every file
+# under payload/ that defines the resolver is counted, and every file that stages
+# a `.bionic.tmp` must name it — a writer added beside these without resolving is
+# the defect this pin exists to stop coming back.
+RESOLVER_FILES="$(/usr/bin/grep -rln '^bionic_link_target() {' "${REPO}/payload" | sort)"
+expect_eq "exactly four files in the payload define the symlink resolver" \
+  "${REPO}/payload/scripts/lib/deps.sh
+${REPO}/payload/scripts/lib/hooks.sh
+${REPO}/payload/scripts/lib/profile.sh
+${REPO}/payload/scripts/remove.sh" \
+  "$RESOLVER_FILES"
+STAGERS="$(/usr/bin/grep -rl '\.bionic\.tmp' "${REPO}/payload" | sort)"
+UNRESOLVED=""
+for _f in $STAGERS; do
+  /usr/bin/grep -q 'bionic_link_target' "$_f" || UNRESOLVED="${UNRESOLVED}${_f} "
+done
+expect_eq "every payload file that stages a .bionic.tmp resolves the symlink first" "" "$UNRESOLVED"
+
 # R-1's pin, and the reason it is SHAPE rather than byte-identity. There is a
 # THIRD settings writer — hooks.sh's `hooks_strip_legacy_channel` — and the pin
 # above cannot reach it: it is a jq rewrite with its own failure cleanup, not the
@@ -1452,6 +1527,12 @@ expect_not_contains "standalone symlink arm: the block really was stripped (not 
   "bionic-profile-begin" "$(cat "$ARM_S5/home/.claude/settings.json")"
 expect_eq "_rm_write publishes a symlinked settings.json at its target's 0600, never the link's 755" \
   "600" "$(file_mode "$ARM_S5/home/.claude/settings.json")"
+expect_true "standalone symlink arm: settings.json is STILL a symlink after _rm_write" \
+  test -L "$ARM_S5/home/.claude/settings.json"
+expect_eq "…and still points where it did" \
+  "$ARM_S5/dotfiles/settings.json" "$(readlink "$ARM_S5/home/.claude/settings.json")"
+expect_not_contains "…and it is the dotfiles TARGET that lost the block, not a detached copy" \
+  "bionic-profile-begin" "$(cat "$ARM_S5/dotfiles/settings.json")"
 
 echo ""
 echo "=== Group 10: the STANDALONE door (no payload libraries anywhere) ==="
@@ -2681,8 +2762,24 @@ expect_contains "failed uninstall: …and it really failed" \
   "the plugin is still registered" "$FAILED_OUT"
 expect_not_contains "a failed uninstall orphans nothing: prune --yes must not run" \
   "plugin prune --yes" "$FAILED_CALLS"
-expect_contains "…and the run says why the follow-on was skipped" \
-  "the plugin is still installed, so nothing is orphaned" "$FAILED_OUT"
+# WHAT THE RUN SAYS ABOUT IT (critic delta 2 N2). The skip is right; the sentence
+# was not. This branch returns BEFORE `_rm_offer_orphans` ever asks the CLI, so
+# "nothing is orphaned" is a claim about the machine that this run never checked —
+# and it is false the moment orphans predate the run (a previous partial teardown,
+# a hand-removed plugin), which this fixture's own stub reproduces: its
+# `prune --dry-run` names two. Booking that as `✓ … already clean` also counts it
+# into the clean tally and keeps it out of the Skipped block, so the summary tells
+# a user with real orphans there is nothing there. The line now reports what
+# happened instead of asserting what is true.
+expect_contains "…and the run says the check did not happen, not that nothing is there" \
+  "not checked — the plugin uninstall did not land, so orphaned dependencies were not looked at" \
+  "$FAILED_OUT"
+expect_eq "…and the orphan row is never booked as clean" "" \
+  "$(printf '%s\n' "$FAILED_OUT" | /usr/bin/grep 'orphaned dependencies' | /usr/bin/grep 'already clean' || true)"
+expect_contains "…and it lands in the Skipped block, where a reader goes looking for leftovers" \
+  "⚠ orphaned dependencies — not checked" "$FAILED_OUT"
+expect_not_contains "…and the stub's own dry run proves the old sentence was falsifiable" \
+  "so nothing is orphaned" "$FAILED_OUT"
 
 # The same failure in a PER-ITEM pass still asks. The gate above exists because
 # `--all` collapses every question into one page, so the conditional line is the
