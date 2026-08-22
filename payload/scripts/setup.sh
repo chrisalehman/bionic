@@ -999,6 +999,8 @@ _setup_extra_why() {  # <name>
     chrome-devtools) echo "the deep-inspection browser server (Lighthouse, traces, profiling) the verification route escalates to." ;;
     playwright-chromium) echo "the headless Chromium build the diagram renderer drives; without it, diagrams cannot be rendered." ;;
     motion)          echo "an animation library pre-warmed into the pnpm store so design work does not stop to fetch it." ;;
+    impeccable)      echo "the design skill pack every UI route uses; without it, design work runs on defaults." ;;
+    excalidraw-renderer) echo "the synced uv project that renders excalidraw diagrams to PNG; without it, diagrams cannot be rendered." ;;
     humanizer)       echo "a skill that rewrites text so it stops reading as though a model wrote it." ;;
     document-skills) echo "skills for reading and writing Word, Excel, PowerPoint and PDF files." ;;
     example-skills)  echo "Anthropic's own example skills — art, canvas design, brand guidelines and more." ;;
