@@ -251,8 +251,8 @@ rg|basic|substrate|brew:ripgrep|any|brew-dep|keep-shared
 uv|basic|substrate|brew:uv|any|brew-dep|keep-shared
 docker|basic|substrate|brew:docker|any|brew-dep|keep-shared
 aws|basic|substrate|brew:awscli|any|brew-dep|keep-shared
-impeccable|when-needed|skills/canonical-sdlc/SKILL.md|https://github.com/pbakaus/impeccable.git|^4.1.0|native|native-uninstall-offer
-excalidraw-renderer|when-needed|payload/skills/excalidraw-diagram/SKILL.md|uv:sync|any|uv-project|remove-on-consent
+impeccable|extra|skills/canonical-sdlc/SKILL.md|https://github.com/pbakaus/impeccable.git|^4.1.0|native|native-uninstall-offer
+excalidraw-renderer|extra|payload/skills/excalidraw-diagram/SKILL.md|uv:sync|any|uv-project|remove-on-consent
 @playwright/cli|extra|skills/browser-verify/SKILL.md|npm:@playwright/cli|any|npm-global|remove-on-consent
 chrome-devtools|extra|skills/browser-verify/SKILL.md|npm:chrome-devtools-mcp@latest|any|mcp-server|remove-on-consent
 playwright-chromium|extra|payload/skills/excalidraw-diagram/SKILL.md|npx:playwright@latest|any|playwright-browser|remove-on-consent
