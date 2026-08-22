@@ -259,8 +259,7 @@ while IFS='|' read -r blockfile label needle; do
     fail "$blockfile block states: $label (missing literal '$needle')"
   fi
 done <<'LITERALS'
-survival|poll-don't-watch|poll the output file
-survival|foreground-first with an explicit generous timeout|600000 ms
+survival|foreground with an explicit timeout sized to the command|explicit timeout sized to the command
 survival|the farm-out wall binds the orchestrator, not a dispatched agent|FARM_OUT_ALLOW=1
 survival|never end your turn while a command is running|Never end your turn while a command is running
 survival|suite output always goes to a file|validate the FILE
@@ -272,6 +271,128 @@ shared-core|RED before GREEN|never write implementation before a red test
 shared-core|completion-by-artifact|that message, not going idle, is what closes the phase
 shared-core|the closing act is a sent message, not closing prose|your closing act is a SendMessage
 LITERALS
+
+# ---------- E1b: the doctrine says what the harness does (epic-17 W7 S7, spec AC-13) ----
+#
+# R2b's harness facts (record/epic-17-w7/r2b-harness-facts.md) corrected two things the old
+# survival block asserted wrong: there is no fixed ~120-second auto-background threshold to
+# poll around, and a foreground agent's final response ENDS its running command rather than
+# leaving it to finish while a watcher polls. The old "poll, don't watch" bullet, its
+# `sleep 5` poll loop, and the "roughly 120 seconds" threshold are retired whole, replaced by
+# an explicit timeout sized to the command plus a documented fallback for when a brief says
+# the ceiling is not in force. This checks the readback surface the spec cites (AC-13): the
+# six rendered role files, not just the block source, because that is what a dispatched agent
+# actually reads. `flat()` (defined in §H below) neutralizes the hard-wrap so a phrase that
+# crosses a line break in the committed prose still matches as one sentence.
+DOCTRINE_FLAT() { tr '\n' ' ' < "$1" | tr -s ' '; }
+
+# THE RETIREMENT PIN READS THE POSITIVE (critic delta 3 F1 — supersedes A6.S15.6).
+# S15's `DOCTRINE_CODE` surface dropped inline code spans and blockquote lines to
+# tell a MENTION of `& disown` from a real instruction. Both shapes it dropped are
+# the house style for a REAL instruction in these very files: survival.md gives
+# its own operative commands in backticks (measured: stripping code spans erases
+# `run_in_background` from a fenced-free reading of survival.md), and the whole
+# Critic Mandate (`agents/critic.md:21`) and Auditor Mandate (`agents/auditor.md:21`)
+# are single blockquote lines — dropping `^\s*>` deletes them outright. Measured
+# on the shipped matcher: 35-37% of the two most instruction-dense rendered role
+# files (auditor.md, critic.md) went unread. There is also no historical `disown`
+# anywhere under `agents/` or `agents-src/` (`/usr/bin/grep -rn disown` → nothing),
+# so the needle was never protecting a live defect — it is cheaper to stop looking
+# for the negative than to keep widening a surface that costs real coverage. Pin
+# the POSITIVE the S12 needles already state instead (`run_in_background` and the
+# `echo "EXIT=$?" >> "$LOG"` snippet, both asserted in DOCTRINE_PRESENT below), and
+# retire the code-span/blockquote stripper along with the `& disown` needle.
+#
+# The single source of truth for what DOCTRINE_PRESENT checks, hoisted into a
+# variable so the positive control below and the per-role loop after it read
+# the SAME list rather than two independently-typed copies of it (critic delta
+# 4 G5: the pre-fix control hardcoded two of these seven needles a second time,
+# so it could not notice this list changing underneath it).
+DOCTRINE_PRESENT_LIST="$(cat <<'DOCTRINE_PRESENT'
+explicit timeout sized to the command|explicit timeout sized to the command
+never end your turn while a command is running|Never end your turn while a command is running
+documented fallback arms a Monitor on the file's EXIT= line|the orchestrator arms a Monitor on the file's `EXIT=` line
+the fallback is CONDITIONAL on background dispatch|**if** you were dispatched in the background
+…and says what to do when it does not hold|Otherwise stay in the foreground and do not stop
+…and names the harness-native background mode|run_in_background
+…and its snippet actually writes the EXIT= line|echo "EXIT=$?" >> "$LOG"
+DOCTRINE_PRESENT
+)"
+
+# Positive control, run once rather than per role, because it measures the
+# matcher and not the files. Two fixtures, both built from DOCTRINE_PRESENT_LIST
+# rather than re-typed literals: one holding every needle (a sanity check — it
+# must pass all seven), and then, one needle at a time, a fixture holding every
+# OTHER needle but that one — which must be caught missing ON THAT NEEDLE
+# specifically. The pre-fix control's fixture ("the fallback bullet says
+# nothing about backgrounding or exit codes.") never contained ANY of the seven
+# needles, so its two hardcoded assertions were true by construction and could
+# not go red on a real near-miss (critic delta 4 G5).
+N3_DIR="$TMP/n3"; mkdir -p "$N3_DIR"
+N3_ALL="$N3_DIR/all-present.md"
+: > "$N3_ALL"
+while IFS='|' read -r _n3_label _n3_needle; do
+  [ -z "$_n3_label" ] && continue
+  printf '%s\n' "$_n3_needle" >> "$N3_ALL"
+done <<<"$DOCTRINE_PRESENT_LIST"
+N3_ALL_FLAT="$(DOCTRINE_FLAT "$N3_ALL")"
+while IFS='|' read -r _n3_label _n3_needle; do
+  [ -z "$_n3_label" ] && continue
+  if printf '%s' "$N3_ALL_FLAT" | grep -qF "$_n3_needle"; then
+    pass "positive control sanity: a fixture holding every needle matches: $_n3_label"
+  else
+    fail "positive control sanity: a fixture holding every needle matches: $_n3_label" \
+      "missing: $_n3_needle"
+  fi
+done <<<"$DOCTRINE_PRESENT_LIST"
+
+while IFS='|' read -r _n3_miss_label _n3_miss_needle; do
+  [ -z "$_n3_miss_label" ] && continue
+  N3_MISS="$N3_DIR/missing-one.md"
+  : > "$N3_MISS"
+  while IFS='|' read -r _n3_label _n3_needle; do
+    [ -z "$_n3_label" ] && continue
+    [ "$_n3_needle" = "$_n3_miss_needle" ] && continue
+    printf '%s\n' "$_n3_needle" >> "$N3_MISS"
+  done <<<"$DOCTRINE_PRESENT_LIST"
+  N3_MISS_FLAT="$(DOCTRINE_FLAT "$N3_MISS")"
+  if printf '%s' "$N3_MISS_FLAT" | grep -qF "$_n3_miss_needle"; then
+    fail "positive control: a role fixture missing only '$_n3_miss_label' is caught missing" \
+      "the planted fixture matched anyway"
+  else
+    pass "positive control: a role fixture missing only '$_n3_miss_label' is caught missing"
+  fi
+done <<<"$DOCTRINE_PRESENT_LIST"
+
+for r in $ROLES; do
+  R_FLAT="$(DOCTRINE_FLAT "$OUT/$r.md")"
+  while IFS='|' read -r label needle; do
+    [ -z "$label" ] && continue
+    if printf '%s' "$R_FLAT" | grep -qF "$needle"; then
+      pass "agents/$r.md: doctrine states: $label"
+    else
+      fail "agents/$r.md: doctrine states: $label" "missing: $needle"
+    fi
+  done <<<"$DOCTRINE_PRESENT_LIST"
+  while IFS='|' read -r label needle; do
+    [ -z "$label" ] && continue
+    if printf '%s' "$R_FLAT" | grep -qF "$needle"; then
+      fail "agents/$r.md: retired doctrine is gone: $label" "still present: $needle"
+    else
+      pass "agents/$r.md: retired doctrine is gone: $label"
+    fi
+  # The `& disown` absent-needle retired at S16 (critic delta 3 F1): there is no
+  # historical `disown` anywhere under agents/ or agents-src/, so it protected no
+  # live defect, and its DOCTRINE_CODE surface cost real coverage of a real
+  # instruction (see the comment above this loop). The positive pin above —
+  # `run_in_background` and the EXIT= snippet present — is what stands guard now.
+  done <<'DOCTRINE_ABSENT'
+no sleep-5 poll loop|sleep 5
+no fixed ~120-second threshold|roughly 120
+no auto-backgrounds framing|auto-backgrounds
+no nohup — a mechanism with no evidence and the wrong survival semantics|nohup
+DOCTRINE_ABSENT
+done
 
 # ---------- E2: the read-only roles' delivery duty (epic-17 W5 slice 4/1, spec AC-1) ----
 #
@@ -486,11 +607,14 @@ while IFS='|' read -r label absorbed_span rules_span; do
   else
     pass "absorbed ($label): the duplicate is gone from agent-discipline.md"
   fi
+# poll-don't-watch is not in this list any more (epic-17 W7 S7): R2b's harness facts showed
+# there is no fixed ~120-second threshold to poll around, and the whole poll-loop rule was
+# retired from blocks/survival.md rather than reworded — its absence is covered by §E1b's
+# DOCTRINE_ABSENT arm, which checks the rendered finals directly.
 done <<'ABSORBED'
-foreground-first|runs in the FOREGROUND|A command with a known bound under 10 minutes runs FOREGROUND
-timeout-ceiling|not a ceiling|2-minute default is a default, not a ceiling
-poll-don't-watch|a foreground command that outlives roughly 120 seconds|Poll-don't-watch when the tool auto-backgrounds you
-lost-wake|the wake is the thing that gets lost|the wake is what gets lost
+foreground-first|in the foreground with an explicit timeout sized to the command|A command with a known bound under 10 minutes runs FOREGROUND
+timeout-ceiling|No timeout means two minutes|2-minute default is a default, not a ceiling
+lost-wake|stopping to wait kills the work and gets no wake|the wake is what gets lost
 ABSORBED
 
 # H2 — NOT absorbed: these must survive the prune. survival.md is addressed to a dispatched

@@ -109,6 +109,13 @@ DOCTOR_LIB="$(cd "$(_doctor_self_dir)" && pwd -P)/lib"
 . "${DOCTOR_LIB}/detect.sh"
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/profile.sh"
+# env.sh, for its READ half only — `env_get` (what settings.json says) and
+# `env_live` (what THIS process has). Those are two different facts and the gap
+# between them is a restart, not a repair; a report that collapsed them is the
+# 2026-08-21 defect this section exists to end. env.sh's write half is never
+# called from here, the same way this file never calls install_dep.
+# shellcheck source=/dev/null
+. "${DOCTOR_LIB}/env.sh"
 
 # The standalone removal door (design D5a: the remover must not depend on the
 # thing it removes). Printed as TEXT for the user to run — doctor never fetches
@@ -229,6 +236,22 @@ if [ -f "$TEMPLATE_PATH" ]; then
 fi
 
 HAVE_JQ=yes; command -v jq >/dev/null 2>&1 || HAVE_JQ=no
+
+# The default permission mode (item 1 + O-3): a fact of the SETTINGS file, not
+# of the marker block profile.sh renders — the same `.permissions.defaultMode`
+# key `_setup_default_mode` writes. `unset` means the key is genuinely absent;
+# `unknown` means jq is missing and the file could not be read at all, which is
+# a different claim and must not collapse into the same word.
+PROFILE_MODE="unknown"
+if [ "$HAVE_JQ" = "yes" ]; then
+  PROFILE_SETTINGS_PATH="$(_profile_settings_file)"
+  if [ -f "$PROFILE_SETTINGS_PATH" ]; then
+    PROFILE_MODE="$(jq -r '.permissions.defaultMode // ""' "$PROFILE_SETTINGS_PATH" 2>/dev/null)"
+  else
+    PROFILE_MODE=""
+  fi
+  [ -n "$PROFILE_MODE" ] || PROFILE_MODE="unset"
+fi
 
 # ─── The two facts that come from outside this machine's files ───────────────
 #
@@ -506,7 +529,7 @@ case "$REG_SHA_STATE" in
       "match — the installed build is this tree's HEAD ($(_doctor_sha12 "$REG_SHA_REG"))" ;;
   lag)
     printf '  %-19s %s\n' "installed commit" \
-      "installed at $(_doctor_sha12 "$REG_SHA_REG"), this tree is $(_doctor_sha12 "$REG_SHA_REPO") — the install is behind; re-run: claude plugin install bionic@bionic" ;;
+      "installed at $(_doctor_sha12 "$REG_SHA_REG"), this tree is $(_doctor_sha12 "$REG_SHA_REPO") — $(detect_reconverge_hint lag)" ;;
   not-in-repo)
     printf '  %-19s %s\n' "installed commit" \
       "installed at $(_doctor_sha12 "$REG_SHA_REG") — not a commit in this repository, so this tree is not what is running" ;;
@@ -578,7 +601,34 @@ fi
 
 echo ""
 echo "=== ENVIRONMENT ==="
-printf '  %-38s %s\n' "CLAUDE_CODE_ENABLE_TODO_TOOLS export" "$(_doctor_word "$TODO_STATE")"
+# TWO FACTS PER NAME, AND NEITHER ANSWERS THE OTHER. `env_get` reads the CLI's
+# settings.json — what a session started from now on will have. `env_live` reads
+# THIS process — what the session you are in has. On 2026-08-21 a session ran
+# with the task-list name written to disk and absent from the process (the host
+# launches its shell with rc files disabled, so the export bionic used to append
+# never arrived), and the one line this section carried could not say so: it read
+# the shell rc, which was the wrong file to ask. Configured-and-not-live is a
+# RESTART; absent is a setup gap; and telling a user to run setup over a restart
+# sends them to repair something already repaired.
+for _env_key in $ENV_KEYS; do
+  _env_configured="$(env_get "$_env_key" 2>/dev/null)" || _env_configured=""
+  if _env_live_value="$(env_live "$_env_key" 2>/dev/null)"; then _env_is_live=yes; else _env_is_live=no; fi
+  if [ -n "$_env_configured" ]; then
+    if [ "$_env_is_live" = "yes" ]; then
+      printf '  %-38s %s\n' "$_env_key" "${_env_configured}   live in this session: yes"
+    else
+      printf '  %-38s %s\n' "$_env_key" "${_env_configured}   live in this session: no — restart to pick it up"
+    fi
+  elif [ "$_env_is_live" = "yes" ]; then
+    # Live and not configured: the state the retired shell export leaves behind.
+    # It works right now and dies with this session, which is why setup is still
+    # named for it in the summary below.
+    printf '  %-38s %s\n' "$_env_key" "absent   live in this session: yes, from somewhere else"
+  else
+    printf '  %-38s %s\n' "$_env_key" "absent"
+  fi
+done
+printf '  %-38s %s\n' "legacy .zshrc export" "$(_doctor_word "$TODO_STATE")"
 printf '  %-38s %s\n' "legacy .zshrc alias block" "$(_doctor_word "$LEGACY_STATE")"
 if [ "$LEGACY_HOOK_COUNT" = "unknown" ]; then
   printf '  %-38s %s\n' "legacy-channel managed-hook entries" \
@@ -683,6 +733,16 @@ else
     "${PROFILE_ACCRETION} $(_doctor_plural "$PROFILE_ACCRETION" rule rules) this machine owns"
 fi
 
+# The default permission mode (item 1 + O-3) — a setting of the machine's, not
+# a rule inside the block above, and it carries the one sentence that keeps a
+# Remote Control session from reading it as a stronger promise than it is.
+if [ "$PROFILE_MODE" = "unknown" ]; then
+  printf '  %-38s %s\n' "permission mode" "unknown — jq is not on PATH, so the default permission mode cannot be read"
+else
+  printf '  %-38s %s\n' "permission mode" "$PROFILE_MODE"
+fi
+echo "      ${PROFILE_RC_NOTE}"
+
 echo ""
 echo "=== ROSTER FOOTPRINT ==="
 echo "  Skill and agent METADATA — name plus description — loads into every session;"
@@ -772,7 +832,16 @@ add_setup_reason() {
 # design until a route asks for it, and setup would not install it if it ran.
 [ "$N_ABSENT_ACTIONABLE" -gt 0 ] && add_setup_reason "install ${N_ABSENT_ACTIONABLE} absent $(_doctor_plural "$N_ABSENT_ACTIONABLE" dependency dependencies)"
 [ "$N_VIOLATION" -gt 0 ] && add_setup_reason "repair ${N_VIOLATION} constraint $(_doctor_plural "$N_VIOLATION" violation violations)"
-[ "$TODO_STATE" = "no" ] && add_setup_reason "write the CLAUDE_CODE_ENABLE_TODO_TOOLS export"
+# THE FILE IS WHAT SETUP CAN REPAIR. A name live in this process but absent from
+# settings.json still earns this line: the value dies with the session, and the
+# next one starts without it. A name configured and merely not live earns
+# NOTHING here — that is the restart the section above names, and setup would
+# find nothing to do.
+ENV_MISSING=0
+for _env_key in $ENV_KEYS; do
+  env_get "$_env_key" >/dev/null 2>&1 || ENV_MISSING=$((ENV_MISSING + 1))
+done
+[ "$ENV_MISSING" -gt 0 ] && add_setup_reason "write ${ENV_MISSING} of bionic's environment settings"
 [ "$LEGACY_STATE" = "yes" ] && add_setup_reason "remove the legacy .zshrc alias block"
 case "$LEGACY_HOOK_COUNT" in
   unknown|0) ;;
@@ -802,8 +871,12 @@ elif [ "$PROFILE_APPLIED" = "no" ] && [ "$PROFILE_VERDICT" = "absent" ]; then
 fi
 
 if [ "$PLUGIN_HOOKS" = "degraded" ] || [ "$PLUGIN_HOOKS" = "absent" ]; then
-  echo "  → the payload's hook wiring is ${PLUGIN_HOOKS} — reinstall the plugin"
-  echo "      (\`claude plugin install bionic@bionic\`), then re-run /bionic:doctor."
+  # THE HINT IS THE WHOLE SENTENCE, AND IT KNOWS WHICH STATE IS ASKING (W7 S11,
+  # six-axis review axis 2). This used to print `re-converge with:` and then the hint
+  # inside backticks — which on a directory-source machine handed a user whose tree is
+  # genuinely broken the words "nothing to do" formatted as a command to type.
+  echo "  → the payload's hook wiring is ${PLUGIN_HOOKS} —"
+  echo "      $(detect_reconverge_hint hooks)"
   ACTED=yes
 fi
 

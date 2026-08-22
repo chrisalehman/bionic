@@ -91,9 +91,48 @@ make_stub() {  # <bindir> <name> [body]
 # REPLACED, never prefixed, so a real brew/npm/claude can never be reached.
 BASE_BIN="$TMP/base-bin"
 mkdir -p "$BASE_BIN"
-for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat ls tr head tail sort uniq wc find jq shasum date; do
+# `readlink` earns its place the same way `stat` did (S15). Every writer resolves
+# a symlinked rc or settings.json to its final target before staging, so that a
+# dotfiles-managed file is REWRITTEN rather than detached and left stale. Absent
+# `readlink` the resolvers degrade to "write to the path as given" — today's
+# behaviour — so a fixture PATH without it would measure the degradation instead
+# of the fix, exactly as a PATH without `stat` would measure "write, don't chmod".
+for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail sort uniq wc find jq shasum date; do
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BASE_BIN}/${real}" 2>/dev/null
 done
+
+# `mv` WITH A WITNESS. Every writer in the payload stages its work in a
+# `<file>.bionic.tmp` and renames it into place, so the mode the RENAME publishes
+# is the only mode that matters — a writer that publishes 0644 and chmods back to
+# 0600 afterwards passes an after-the-fact mode check while leaving the staged
+# copy of the user's file, secrets and all, readable under a predictable name for
+# the span before the rename (and permanently if the process dies in it). This
+# wrapper records the mode of what each `mv` is about to publish. It is inert
+# unless an arm sets BIONIC_TEST_MV_LOG, so every other arm on this PATH is
+# unaffected; `exec` hands off to the real binary, so nothing about the rename
+# itself changes.
+#
+# BIONIC_TEST_MV_FAIL (critic delta 3 F3) makes every `mv` in the run fail the
+# way a `chflags uchg` target or a read-only destination directory does — the
+# real shape a writer's `mv "$tmp" "$file"` fails in — so an arm can drive a
+# writer down its failure branch without touching real filesystem permissions.
+BASE_MV_REAL="$(command -v mv 2>/dev/null)"
+# The loop above left a SYMLINK to the real binary here; `cat >` would follow it
+# and try to write /bin/mv. Replace the link, do not write through it.
+rm -f "${BASE_BIN}/mv"
+cat > "${BASE_BIN}/mv" <<MVSTUB
+#!/bin/bash
+if [ -n "\${BIONIC_TEST_MV_FAIL:-}" ]; then
+  echo "mv: rename \$1 to \$2: Operation not permitted" >&2
+  exit 1
+fi
+if [ -n "\${BIONIC_TEST_MV_LOG:-}" ] && [ -f "\$1" ]; then
+  printf '%s %s\n' "\$(stat -f '%Lp' "\$1" 2>/dev/null || stat -c '%a' "\$1" 2>/dev/null)" "\$1" \
+    >> "\$BIONIC_TEST_MV_LOG"
+fi
+exec "$BASE_MV_REAL" "\$@"
+MVSTUB
+chmod +x "${BASE_BIN}/mv"
 
 # Everything a fixture machine needs, built fresh per arm.
 #   <arm>/home/.zshrc
@@ -288,6 +327,73 @@ case "$*" in
     mkdir -p "${DATA_DIR}/bionic-bionic"
     printf 'recreated by uninstall\n' > "${DATA_DIR}/bionic-bionic/state.json"
     ;;
+  "plugin uninstall bionic@bionic --yes --keep-data")
+    # THE SHAPE THE LIVE TEARDOWN ACTUALLY TOOK. The data question had been
+    # answered in an earlier, separate run, so this run told the CLI to keep
+    # what it found — and the CLI still left an EMPTY bionic-bionic directory
+    # behind. Empty, because --keep-data means it deleted nothing to recreate.
+    mkdir -p "${DATA_DIR}/bionic-bionic"
+    ;;
+  "mcp get"*) exit 1 ;;
+esac
+exit 0
+STUB
+  chmod +x "$arm/bin/claude"
+}
+
+# `claude` stub in the LIVE shape the orphan question exists for: while bionic is
+# still installed the CLI's dry run names NOTHING, and only once the uninstall has
+# run does it name the auto-installed plugins that are now unreachable. The other
+# stubs above report orphans up front, which is a machine that cannot discriminate
+# a plan that names the follow-on honestly from one that got lucky.
+plant_claude_stub_orphans_after_uninstall() {  # <arm>
+  local arm="$1"
+  cat > "$arm/bin/claude" <<'STUB'
+#!/bin/bash
+echo "claude $*" >> "$BIONIC_TEST_CALLS"
+GONE="$HOME/.stub-uninstalled"
+case "$*" in
+  "plugin list --json")
+    if [ -e "$GONE" ]; then printf '%s\n' '[]'
+    else printf '%s\n' '[{"id":"bionic@bionic","version":"0.1.0","scope":"user","enabled":true}]'; fi ;;
+  "plugin prune --dry-run")
+    if [ -e "$GONE" ]; then
+      printf '%s\n' '3 auto-installed plugins no longer needed at user scope:
+  superpowers@bionic (6.3.0)
+  agent-skills@bionic (0.6.7)
+  impeccable@bionic (1.2.0)
+(dry run — nothing removed)'
+    else
+      printf '%s\n' 'No auto-installed plugins to prune.'
+    fi ;;
+  "plugin uninstall"*) : > "$GONE" ;;
+  "mcp get"*) exit 1 ;;
+esac
+exit 0
+STUB
+  chmod +x "$arm/bin/claude"
+}
+
+# `claude` stub whose UNINSTALL FAILS while the dry run still names orphans. The
+# combination is deliberate: a gate that merely echoed the CLI's own answer would
+# pass against a stub that goes quiet after a failure. Here the CLI keeps offering
+# the prune, and the only thing that may stop it is remove.sh knowing its own
+# uninstall did not land.
+plant_claude_stub_uninstall_fails() {  # <arm>
+  local arm="$1"
+  cat > "$arm/bin/claude" <<'STUB'
+#!/bin/bash
+echo "claude $*" >> "$BIONIC_TEST_CALLS"
+case "$*" in
+  "plugin list --json")
+    printf '%s\n' '[{"id":"bionic@bionic","version":"0.1.0","scope":"user","enabled":true}]' ;;
+  "plugin prune --dry-run")
+    printf '%s\n' '2 auto-installed plugins no longer needed at user scope:
+  superpowers@bionic (6.3.0)
+  agent-skills@bionic (0.6.7)
+(dry run — nothing removed)' ;;
+  "plugin uninstall"*)
+    echo "error: the plugin could not be uninstalled" >&2; exit 1 ;;
   "mcp get"*) exit 1 ;;
 esac
 exit 0
@@ -447,6 +553,33 @@ expect_not_contains "all-no: the native uninstall was never invoked" "plugin uni
 expect_not_contains "all-no: prune was never executed" "plugin prune --yes" "$CALLS_ALLNO"
 expect_contains "all-no: declined items are reported as skipped" "skipped" "$OUT_ALLNO"
 
+# ---- the same fixture, but truly UNANSWERED (EOF on the very first prompt) ----
+#
+# AC-12: EOF and an explicit no used to print the identical "declined —"
+# sentence. A non-interactive first pass — nobody there to answer — has to say
+# so instead of putting a "no" in an absent user's mouth. An empty answers FILE
+# is real EOF from the first `read`, not a blank line: every question in this
+# run hits it, so the whole transcript has to read "not asked" and never
+# "declined".
+ARM="$(new_arm all-eof)"
+plant_never_list "$ARM"
+plant_zshrc_marked "$ARM"
+plant_todo_export "$ARM"
+plant_legacy_channel_hooks "$ARM"
+plant_profile_block "$ARM"
+plant_plugin_data "$ARM"
+plant_claude_stub "$ARM" yes yes
+make_stub "$ARM/bin" npm 'true'
+
+ALL_EOF="$TMP/answers-eof"; : > "$ALL_EOF"
+FP_HOME_BEFORE_EOF="$(fingerprint "$ARM/home")"
+OUT_ALLEOF="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_EOF")"
+expect_eq "EOF pass: the entire fixture HOME is byte-identical, same floor as all-no" \
+  "$FP_HOME_BEFORE_EOF" "$(fingerprint "$ARM/home")"
+expect_contains "EOF pass: says 'not asked' (AC-12)" "not asked —" "$OUT_ALLEOF"
+expect_not_contains "EOF pass: the word declined never appears" "declined" "$OUT_ALLEOF"
+expect_contains "EOF pass: still reported in the Skipped list" "skipped" "$OUT_ALLEOF"
+
 echo ""
 echo "=== Group 5: .zshrc strip — both variants, fixture-faithful to claude-reset.sh ==="
 
@@ -479,19 +612,151 @@ expect_eq "clean rc: untouched (no rewrite that happens to produce the same text
   "$RC_BEFORE" "$(shasum "$ARM/home/.zshrc" | awk '{print $1}')"
 
 echo ""
-echo "=== Group 6: the TODO_TOOLS export ==="
+echo "=== Group 6: bionic's environment settings, and the retired rc block ==="
 
-ARM="$(new_arm todo-export)"
+# WHAT CHANGED AT W7 AND WHY THIS GROUP IS TWO HALVES NOW. The names bionic sets
+# live in settings.json, so the teardown deletes KEYS; and every machine set up
+# before W7 is carrying a `# ─── bionic:env:start/end ───` block in its shell rc
+# that the old teardown stripped the export out of and left the markers of. An
+# empty marker pair is bionic footprint that reads like a bionic setting, so the
+# item removes the WHOLE block — and the arm for that is byte-identity against
+# the file as it stood before setup ever appended to it, not the absence of a
+# marker.
+
+# The block STATED, verbatim, exactly as setup.sh used to append it: a blank
+# separator line, the two markers, the export between them. Stated here rather
+# than derived from the scripts under test, the same discipline Group 5 keeps
+# for the alias markers.
+plant_env_rc_block() {  # <arm>
+  cat >> "$1/home/.zshrc" <<'RC'
+
+# ─── bionic:env:start ───
+export CLAUDE_CODE_ENABLE_TODO_TOOLS=1
+# ─── bionic:env:end ───
+RC
+}
+
+# The two names in settings.json, beside a name that is NOT bionic's and a
+# permissions block — the shape of a real machine, and the whole risk surface: a
+# teardown that assigned `.env` would take the user's own names with it.
+plant_env_settings() {  # <arm>
+  cat > "$1/home/.claude/settings.json" <<'JSON'
+{
+  "env": {
+    "OTHER": "x",
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1",
+    "BASH_MAX_TIMEOUT_MS": "1800000"
+  },
+  "permissions": {
+    "defaultMode": "auto"
+  }
+}
+JSON
+}
+
+ARM="$(new_arm env-settings)"
+printf 'export EDITOR=vim\n' > "$ARM/home/.zshrc"
+RC_PRE_BLOCK="$(cat "$ARM/home/.zshrc")"
+plant_env_rc_block "$ARM"
+plant_env_settings "$ARM"
+plant_claude_stub "$ARM" no no
+# NARROWED TO THE ITEM. A whole consented teardown also strips the permission
+# block and the default mode out of this same file, and an arm that ran the
+# whole roster could not tell "the environment item left permissions alone"
+# from "the permission item removed them".
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+REMOVE_FLAGS=""
+
+expect_eq "environment: the task-list name is gone from settings.json" "" \
+  "$(jq -r '.env.CLAUDE_CODE_ENABLE_TODO_TOOLS // ""' "$ARM/home/.claude/settings.json")"
+expect_eq "environment: the long-command ceiling is gone too" "" \
+  "$(jq -r '.env.BASH_MAX_TIMEOUT_MS // ""' "$ARM/home/.claude/settings.json")"
+expect_eq "environment: a name that is not bionic's survives" '{"OTHER":"x"}' \
+  "$(jq -c '.env' "$ARM/home/.claude/settings.json")"
+expect_eq "environment: the permissions block is untouched" "auto" \
+  "$(jq -r '.permissions.defaultMode // ""' "$ARM/home/.claude/settings.json")"
+expect_true "environment: the result is still valid JSON" jq -e . "$ARM/home/.claude/settings.json"
+
+# THE MARKER PAIR, AND THE BLANK LINE ABOVE IT. Byte-identity is the assertion —
+# an arm that only asked whether `bionic:env` was absent would pass on a file
+# left holding the empty separator setup appended with the block.
+expect_eq "environment: the rc is byte-identical to its pre-setup content" \
+  "$RC_PRE_BLOCK" "$(cat "$ARM/home/.zshrc")"
+
+# A machine that never carried the block: nothing to strip, and nothing written.
+# A rewrite that happened to produce the same text is still a rewrite of a file
+# the user did not consent to have touched.
+ARM="$(new_arm env-no-rc-block)"
+printf 'export EDITOR=vim\n' > "$ARM/home/.zshrc"
+plant_env_settings "$ARM"
+plant_claude_stub "$ARM" no no
+RC_SHA_BEFORE="$(shasum "$ARM/home/.zshrc" | awk '{print $1}')"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+REMOVE_FLAGS=""
+expect_eq "environment: an rc with no bionic block is untouched" \
+  "$RC_SHA_BEFORE" "$(shasum "$ARM/home/.zshrc" | awk '{print $1}')"
+expect_eq "…and the settings names were still removed" "false" \
+  "$(jq -r '.env | has("BASH_MAX_TIMEOUT_MS")' "$ARM/home/.claude/settings.json")"
+
+# The pre-marker shape: an export line a user (or a very old install) left bare
+# in the rc, with no block around it. The old teardown removed it by regex and
+# that capability does not retire with the block.
+ARM="$(new_arm env-bare-export)"
 printf 'export EDITOR=vim\n' > "$ARM/home/.zshrc"
 plant_todo_export "$ARM"
 plant_claude_stub "$ARM" no no
 OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
 RC_TEXT="$(cat "$ARM/home/.zshrc")"
-expect_true "todo export: the live export line is gone" \
+expect_true "bare export: the live export line is gone" \
   bash -c '! grep -qE "^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=1" "$1"' _ "$ARM/home/.zshrc"
-expect_contains "todo export: the commented-out line survives (detect.sh does not count it)" \
+expect_contains "bare export: the commented-out line survives (detect.sh does not count it)" \
   "# export CLAUDE_CODE_ENABLE_TODO_TOOLS=1" "$RC_TEXT"
-expect_contains "todo export: unrelated rc lines survive" "export EDITOR=vim" "$RC_TEXT"
+expect_contains "bare export: unrelated rc lines survive" "export EDITOR=vim" "$RC_TEXT"
+
+# Nothing to do at all — no names, no block — is reported clean, not as work.
+ARM="$(new_arm env-already-clean)"
+printf 'export EDITOR=vim\n' > "$ARM/home/.zshrc"
+printf '%s\n' '{"permissions":{}}' > "$ARM/home/.claude/settings.json"
+plant_claude_stub "$ARM" no no
+RC_SHA_BEFORE="$(shasum "$ARM/home/.zshrc" | awk '{print $1}')"
+SETTINGS_BEFORE="$(cat "$ARM/home/.claude/settings.json")"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+REMOVE_FLAGS=""
+expect_eq "already clean: the rc is untouched" \
+  "$RC_SHA_BEFORE" "$(shasum "$ARM/home/.zshrc" | awk '{print $1}')"
+expect_eq "already clean: settings.json is untouched" \
+  "$SETTINGS_BEFORE" "$(cat "$ARM/home/.claude/settings.json")"
+expect_contains "already clean: reported as already clean, not as a removal" \
+  "already clean" "$OUT"
+
+# A DECLINE CHANGES NOTHING, in both files at once. The item is one question
+# over two surfaces, so a partial application on decline is the failure this
+# arm exists to catch.
+ARM="$(new_arm env-declined)"
+printf 'export EDITOR=vim\n' > "$ARM/home/.zshrc"
+plant_env_rc_block "$ARM"
+plant_env_settings "$ARM"
+plant_claude_stub "$ARM" no no
+RC_SHA_BEFORE="$(shasum "$ARM/home/.zshrc" | awk '{print $1}')"
+SETTINGS_BEFORE="$(cat "$ARM/home/.claude/settings.json")"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
+REMOVE_FLAGS=""
+expect_eq "declined: the rc is untouched" \
+  "$RC_SHA_BEFORE" "$(shasum "$ARM/home/.zshrc" | awk '{print $1}')"
+expect_eq "declined: settings.json is untouched" \
+  "$SETTINGS_BEFORE" "$(cat "$ARM/home/.claude/settings.json")"
+expect_contains "declined: the route back names the item" "--only environment" "$OUT"
+
+# ONE ITEM, ONE QUESTION. Two surfaces do not make two questions — the count is
+# the assertion, because a second prompt is how one answer lands on the wrong
+# change.
+printf '%s\n' "$OUT" > "$TMP/env-decline.txt"
+expect_eq "--only environment asks exactly one question" "1" \
+  "$(/usr/bin/grep -c '\[y/N\]' "$TMP/env-decline.txt" | tr -d ' ')"
 
 # The removal predicate and detect.sh's presence predicate are the same regex.
 # remove.sh cannot SOURCE detect.sh (the standalone door forbids it), so the
@@ -501,6 +766,25 @@ expect_true "remove.sh carries detect.sh's todo-tools predicate verbatim" \
   bash -c 'grep -qF "$1" "$2"' _ "$TODO_PREDICATE" "$REMOVE_SH"
 expect_true "detect.sh carries the same predicate (the pin has two ends)" \
   bash -c 'grep -qF "$1" "$2"' _ "$TODO_PREDICATE" "$DETECT_SH"
+
+# The rc-block markers, pinned across the same seam: setup.sh wrote them,
+# remove.sh strips them, and the standalone door carries its own copy.
+ENV_START='# ─── bionic:env:start ───'
+ENV_END='# ─── bionic:env:end ───'
+expect_true "remove.sh carries the env block's start marker verbatim" \
+  bash -c 'grep -qF "$1" "$2"' _ "$ENV_START" "$REMOVE_SH"
+expect_true "remove.sh carries its end marker verbatim" \
+  bash -c 'grep -qF "$1" "$2"' _ "$ENV_END" "$REMOVE_SH"
+
+# The NAMES, pinned across the same seam: env.sh owns the roster, remove.sh's
+# standalone door carries a copy, and a name in one and not the other is a name
+# that gets set and never removed.
+for env_key in CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS; do
+  expect_true "remove.sh names the environment key ${env_key}" \
+    bash -c 'grep -qF "$1" "$2"' _ "$env_key" "$REMOVE_SH"
+  expect_true "env.sh names it too (the pin has two ends): ${env_key}" \
+    bash -c 'grep -qF "$1" "$2"' _ "$env_key" "${REPO}/payload/scripts/lib/env.sh"
+done
 
 echo ""
 echo "=== Group 7: legacy-channel managed-hook entries in settings.json ==="
@@ -533,7 +817,15 @@ expect_eq "legacy-channel hooks: detect.sh now counts zero" "env:legacy-channel-
 # Both directions are asserted for each, so neither arm can pass by pinning one
 # constant: a writer that narrowed every file to 0600 fails the 0644 arm.
 
-file_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
+# DEREFERENCING, deliberately (critic delta 2 N1). The property under test is the
+# mode of the file the writer PUBLISHED, and for a symlinked rc or settings.json
+# that file is the link's target. The non-`-L` spelling reads the link's own 755
+# and is satisfiable only by a writer that DESTROYS the link — the exact
+# behaviour S15 fixed away from — so it would pin the defect. `link_own_mode`
+# below is the non-dereferencing reader, used only where the LINK's own mode is
+# the thing being asserted about (the "this is the trap" fixture lines).
+file_mode() { stat -L -f '%Lp' "$1" 2>/dev/null || stat -L -c '%a' "$1" 2>/dev/null; }
+link_own_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null; }
 
 ARM="$(new_arm hook-strip-mode-600)"
 plant_legacy_channel_hooks "$ARM"
@@ -555,6 +847,253 @@ OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
 expect_eq "remove.sh does not narrow a 0644 settings.json either" \
   "644" "$(file_mode "$ARM/home/.claude/settings.json")"
 
+# ─── THE OTHER FILE THIS SCRIPT REWRITES (critic F2) ─────────────────────────
+#
+# The arms above cover settings.json, which is where the mode discipline was
+# first written down. W7 taught remove.sh to rewrite a SECOND file — the user's
+# shell rc — and carried none of that reasoning across. An rc is if anything the
+# likelier of the two to hold plaintext tokens: it is where people put
+# `export …_API_KEY=`. A teardown that answers one question about a retired
+# marker block must not, as a side effect, publish that file to every account on
+# the machine.
+#
+# Three writers reach the rc and all three are asserted: `_rm_strip_marker_block`
+# (the retired env block, and the alias block), and `_rm_filter_out_lines` (the
+# bare export). Both directions each, so no arm can pass by pinning one constant.
+
+# The env block, stripped by _rm_strip_marker_block, on a 0600 rc holding a secret.
+ARM="$(new_arm env-rc-mode-600)"
+printf 'export EDITOR=vim\nexport SOME_API_TOKEN=sk-fixture-not-a-real-secret\n' > "$ARM/home/.zshrc"
+RC_PRE_MODE="$(cat "$ARM/home/.zshrc")"
+plant_env_rc_block "$ARM"
+plant_env_settings "$ARM"
+plant_claude_stub "$ARM" no no
+chmod 600 "$ARM/home/.zshrc"
+expect_eq "fixture: the rc really starts at 0600 (the arm is not vacuous)" \
+  "600" "$(file_mode "$ARM/home/.zshrc")"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES" BIONIC_TEST_MV_LOG="$ARM/mv.log")"
+REMOVE_FLAGS=""
+expect_eq "rc mode arm: the block really was stripped (the arm is not vacuous)" \
+  "$RC_PRE_MODE" "$(cat "$ARM/home/.zshrc")"
+expect_eq "remove.sh's rc rewrite leaves a 0600 rc at 0600" \
+  "600" "$(file_mode "$ARM/home/.zshrc")"
+# R-1 for the rc: the mode is right AT THE RENAME, not repaired after it.
+expect_true "rc mode arm: the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q '\.zshrc\.bionic\.tmp' "$ARM/mv.log"
+expect_eq "…and every staged copy of the 0600 rc was itself 0600, before the rename" "" \
+  "$(/usr/bin/grep '\.zshrc\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
+
+# The same writer must not NARROW a file the user left at 0644.
+ARM="$(new_arm env-rc-mode-644)"
+printf 'export EDITOR=vim\n' > "$ARM/home/.zshrc"
+plant_env_rc_block "$ARM"
+plant_env_settings "$ARM"
+plant_claude_stub "$ARM" no no
+chmod 644 "$ARM/home/.zshrc"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+REMOVE_FLAGS=""
+expect_eq "remove.sh does not narrow a 0644 rc either" \
+  "644" "$(file_mode "$ARM/home/.zshrc")"
+
+# The bare export, stripped by _rm_filter_out_lines — a different function, the
+# same rename, and it is reached only when there is no marker block to strip.
+ARM="$(new_arm env-rc-filter-mode-600)"
+printf 'export EDITOR=vim\nexport SOME_API_TOKEN=sk-fixture-not-a-real-secret\n' > "$ARM/home/.zshrc"
+plant_todo_export "$ARM"
+plant_env_settings "$ARM"
+plant_claude_stub "$ARM" no no
+chmod 600 "$ARM/home/.zshrc"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES" BIONIC_TEST_MV_LOG="$ARM/mv.log")"
+REMOVE_FLAGS=""
+expect_not_contains "filter mode arm: the export really was removed (not vacuous)" \
+  "export CLAUDE_CODE_ENABLE_TODO_TOOLS=1"$'\n' "$(cat "$ARM/home/.zshrc")"
+expect_eq "_rm_filter_out_lines leaves a 0600 rc at 0600" \
+  "600" "$(file_mode "$ARM/home/.zshrc")"
+# An empty log satisfies the emptiness assertion below, so the log is proved
+# non-empty first — this fixture passed three arms vacuously once already.
+expect_true "filter mode arm: the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q '\.zshrc\.bionic\.tmp' "$ARM/mv.log"
+expect_eq "…and its staged copy was 0600 before the rename too" "" \
+  "$(/usr/bin/grep '\.zshrc\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
+
+# And the alias block, the other marker pair the same helper strips.
+ARM="$(new_arm alias-rc-mode-600)"
+plant_zshrc_marked "$ARM"
+plant_claude_stub "$ARM" no no
+chmod 600 "$ARM/home/.zshrc"
+REMOVE_FLAGS="--only legacy-alias"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES" BIONIC_TEST_MV_LOG="$ARM/mv.log")"
+REMOVE_FLAGS=""
+expect_not_contains "alias mode arm: the block really was stripped (not vacuous)" \
+  "bionic:start" "$(cat "$ARM/home/.zshrc")"
+expect_eq "the alias-block strip leaves a 0600 rc at 0600" \
+  "600" "$(file_mode "$ARM/home/.zshrc")"
+expect_true "alias mode arm: the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q '\.zshrc\.bionic\.tmp' "$ARM/mv.log"
+expect_eq "…and its staged copy was 0600 before the rename too" "" \
+  "$(/usr/bin/grep '\.zshrc\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
+
+# ─── THE RC THAT IS A SYMLINK (critic delta D1) ──────────────────────────────
+#
+# `stat -f '%Lp' <symlink>` reports the LINK's own mode and never consults the
+# file it points at. A `~/.zshrc` symlinked into a dotfiles repo is the commonest
+# way people manage an rc, so a mode capture that does not dereference hands
+# `chmod` the link's mode — 755 — and the rewrite publishes the user's rc, tokens
+# included, as `rwxr-xr-x`. That is WIDER than the file it replaced, which is the
+# one outcome the capture exists to prevent; before the mode was captured at all
+# the same run produced 0600, because the tmp was simply born at `umask 077`. So
+# both remove.sh writers get an arm, and `stat -L` is what makes them pass.
+#
+# AND THE LINK SURVIVES THE REWRITE (critic delta 2 N1, decided at A6.S15.1).
+# `mv` used to replace the link with a regular file — pre-S12's
+# `_rm_filter_out_lines` (`git show 273d3c5:payload/scripts/remove.sh`) staged and
+# renamed exactly the same way — which left the dotfiles repo still carrying the
+# footprint bionic had just reported removed, and the next `stow` put it back. So
+# every writer now resolves the link to its FINAL target and publishes onto that,
+# and each arm below asserts all three halves: the link still exists, it still
+# points where it did, and the TARGET is the file that changed.
+symlink_rc() {  # <arm> — makes <arm>/home/.zshrc a link to <arm>/dotfiles/zshrc
+  mkdir -p "$1/dotfiles"
+  mv "$1/home/.zshrc" "$1/dotfiles/zshrc"
+  ln -s "$1/dotfiles/zshrc" "$1/home/.zshrc"
+}
+
+# The same shape, for settings.json (S14, the S13 class applied to the three
+# settings writers the critic named at D1's tail: deps.sh, hooks.sh, profile.sh).
+symlink_settings() {  # <arm> — makes <arm>/home/.claude/settings.json a link to <arm>/dotfiles/settings.json
+  mkdir -p "$1/dotfiles"
+  mv "$1/home/.claude/settings.json" "$1/dotfiles/settings.json"
+  ln -s "$1/dotfiles/settings.json" "$1/home/.claude/settings.json"
+}
+
+# The marker-block writer, `_rm_strip_marker_block`, on a symlinked 0600 rc.
+ARM="$(new_arm alias-rc-symlink-600)"
+plant_zshrc_marked "$ARM"
+plant_claude_stub "$ARM" no no
+symlink_rc "$ARM"
+chmod 600 "$ARM/dotfiles/zshrc"
+expect_eq "fixture: the symlinked rc's TARGET really is 0600" \
+  "600" "$(file_mode "$ARM/dotfiles/zshrc")"
+expect_not_contains "fixture: …and the LINK's own mode is not it — this is the trap" \
+  "600" "$(link_own_mode "$ARM/home/.zshrc")"
+REMOVE_FLAGS="--only legacy-alias"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES" BIONIC_TEST_MV_LOG="$ARM/mv.log")"
+REMOVE_FLAGS=""
+expect_not_contains "symlink arm: the block really was stripped (not vacuous)" \
+  "bionic:start" "$(cat "$ARM/home/.zshrc")"
+expect_eq "a symlinked rc is published at its TARGET's 0600, never the link's 755" \
+  "600" "$(file_mode "$ARM/home/.zshrc")"
+expect_true "symlink arm: the rc is STILL a symlink after the strip" test -L "$ARM/home/.zshrc"
+expect_eq "…and still points where it did" \
+  "$ARM/dotfiles/zshrc" "$(readlink "$ARM/home/.zshrc")"
+expect_not_contains "…and it is the TARGET that was rewritten, not a detached copy" \
+  "bionic:start" "$(cat "$ARM/dotfiles/zshrc")"
+expect_true "symlink arm: the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q 'dotfiles/zshrc\.bionic\.tmp' "$ARM/mv.log"
+expect_eq "…and no staged copy of it was ever wider than 0600 either" "" \
+  "$(/usr/bin/grep 'zshrc\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
+
+# ─── A FAILED PUBLISH LEAVES NO STAGED COPY BESIDE THE TARGET (critic delta 3 F3) ─
+#
+# S15 moved the tmp from `${link}.bionic.tmp` to `${target}.bionic.tmp` in the
+# writers, but the four post-failure `rm -f` cleanups at the CALL SITES were not
+# moved with it — they still `rm -f "${RC_FILE}.bionic.tmp"` /
+# `"${RM_SETTINGS}.bionic.tmp"`, the pre-S15 (unresolved, link) path. On an
+# unsymlinked rc that is the same path as the target and the bug is invisible;
+# on a symlinked one (the dotfiles-managed case this whole wave is about) the
+# staged copy of the user's file is left behind, inside the dotfiles repo the
+# user actually manages. `BIONIC_TEST_MV_FAIL` reproduces the `mv` failure a
+# `chflags uchg` target or a read-only destination directory produces, without
+# touching real filesystem permissions.
+
+# Site :875 — `_rm_strip_marker_block`, the legacy-alias marker block.
+ARM="$(new_arm alias-rc-symlink-mv-fails)"
+plant_zshrc_marked "$ARM"
+plant_claude_stub "$ARM" no no
+symlink_rc "$ARM"
+chmod 600 "$ARM/dotfiles/zshrc"
+REMOVE_FLAGS="--only legacy-alias"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES" BIONIC_TEST_MV_FAIL=1)"
+REMOVE_FLAGS=""
+expect_contains "mv-fails arm: the strip really did fail (not vacuous)" \
+  "could not rewrite" "$OUT"
+expect_eq "…and no staged copy is left beside the TARGET (not the link's own path)" \
+  "" "$(ls "$ARM/dotfiles/"*.bionic.tmp 2>/dev/null || true)"
+
+# Sites :1007 and :1017 — the environment item's settings-unset (`_rm_write`)
+# and its retired-env marker-block strip (`_rm_strip_marker_block`), both on
+# symlinked targets in the same run. `_rm_write` for the settings key is only
+# reached through the STANDALONE door (payload mode delegates to env.sh's
+# `env_unset` → `_dep_settings_write_jq`, which already self-cleans on
+# failure — not this defect), so this arm runs a standalone copy of remove.sh,
+# the same shape Group 9/10 below use.
+ENV_MVFAIL_STANDALONE="$TMP/env-mvfail-standalone"
+mkdir -p "$ENV_MVFAIL_STANDALONE"
+cp "$REMOVE_SH" "$ENV_MVFAIL_STANDALONE/remove.sh"
+ARM="$(new_arm env-symlink-mv-fails)"
+plant_env_rc_block "$ARM"
+plant_env_settings "$ARM"
+plant_claude_stub "$ARM" no no
+symlink_rc "$ARM"
+symlink_settings "$ARM"
+chmod 600 "$ARM/dotfiles/zshrc" "$ARM/dotfiles/settings.json"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$ENV_MVFAIL_STANDALONE/remove.sh" "$ARM" "$ALL_YES" BIONIC_TEST_MV_FAIL=1)"
+REMOVE_FLAGS=""
+expect_contains "env mv-fails arm: the settings unset really did fail (not vacuous)" \
+  "could not rewrite ${ARM}/home/.claude/settings.json" "$OUT"
+expect_contains "…and the rc marker-block strip really did fail too (not vacuous)" \
+  "could not rewrite ${ARM}/home/.zshrc" "$OUT"
+expect_eq "…and no staged copy is left beside the settings TARGET" \
+  "" "$(ls "$ARM/dotfiles/settings.json.bionic.tmp" 2>/dev/null || true)"
+expect_eq "…and no staged copy is left beside the rc TARGET" \
+  "" "$(ls "$ARM/dotfiles/zshrc.bionic.tmp" 2>/dev/null || true)"
+
+# Site :1024 — the environment item's bare (unmarked) TODO-export filter
+# (`_rm_filter_out_lines`), no settings.json at all so only this branch fires.
+ARM="$(new_arm env-bare-symlink-mv-fails)"
+plant_todo_export "$ARM"
+plant_claude_stub "$ARM" no no
+symlink_rc "$ARM"
+chmod 600 "$ARM/dotfiles/zshrc"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES" BIONIC_TEST_MV_FAIL=1)"
+REMOVE_FLAGS=""
+expect_contains "bare-export mv-fails arm: the filter really did fail (not vacuous)" \
+  "could not rewrite ${ARM}/home/.zshrc" "$OUT"
+expect_eq "…and no staged copy is left beside the rc TARGET" \
+  "" "$(ls "$ARM/dotfiles/zshrc.bionic.tmp" 2>/dev/null || true)"
+
+# The other writer, `_rm_filter_out_lines`, on the same shape.
+ARM="$(new_arm env-rc-filter-symlink-600)"
+printf 'export EDITOR=vim\nexport SOME_API_TOKEN=sk-fixture-not-a-real-secret\n' > "$ARM/home/.zshrc"
+plant_todo_export "$ARM"
+plant_env_settings "$ARM"
+plant_claude_stub "$ARM" no no
+symlink_rc "$ARM"
+chmod 600 "$ARM/dotfiles/zshrc"
+expect_eq "fixture: the filter arm's symlink target really is 0600" \
+  "600" "$(file_mode "$ARM/dotfiles/zshrc")"
+REMOVE_FLAGS="--only environment"
+OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES" BIONIC_TEST_MV_LOG="$ARM/mv.log")"
+REMOVE_FLAGS=""
+expect_not_contains "symlink filter arm: the export really was removed (not vacuous)" \
+  "export CLAUDE_CODE_ENABLE_TODO_TOOLS=1"$'\n' "$(cat "$ARM/home/.zshrc")"
+expect_eq "_rm_filter_out_lines publishes a symlinked rc at its target's 0600 too" \
+  "600" "$(file_mode "$ARM/home/.zshrc")"
+expect_true "symlink filter arm: the rc is STILL a symlink after the filter" test -L "$ARM/home/.zshrc"
+expect_eq "…and still points where it did" \
+  "$ARM/dotfiles/zshrc" "$(readlink "$ARM/home/.zshrc")"
+expect_not_contains "…and it is the TARGET that lost the export, not a detached copy" \
+  "export CLAUDE_CODE_ENABLE_TODO_TOOLS=1"$'\n' "$(cat "$ARM/dotfiles/zshrc")"
+expect_true "symlink filter arm: the mv witness really saw the rc rename (not vacuous)" \
+  /usr/bin/grep -q 'dotfiles/zshrc\.bionic\.tmp' "$ARM/mv.log"
+expect_eq "…and its staged copy was never wider than 0600 either" "" \
+  "$(/usr/bin/grep 'zshrc\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
+
 ARM="$(new_arm lib-strip-mode)"
 LIB_MODE_SETTINGS="$ARM/home/.claude/settings.json"
 plant_legacy_channel_hooks "$ARM"
@@ -572,6 +1111,40 @@ expect_true "hooks_strip_legacy_channel rewrote the 0644 fixture too" \
   bash -c '. "$1"; hooks_strip_legacy_channel "$2"' _ "$HOOKS_SH" "$LIB_MODE_SETTINGS"
 expect_eq "hooks_strip_legacy_channel does not narrow a 0644 file" \
   "644" "$(file_mode "$LIB_MODE_SETTINGS")"
+
+# THE SETTINGS FILE THAT IS A SYMLINK (S14 — the S13 class, closed for the
+# remaining settings.json writers). `stat -f '%Lp' <symlink>` reports the
+# LINK's own mode, never the file it points at — a `~/.claude/settings.json`
+# symlinked into a dotfiles repo hands `chmod` the link's mode (755) and
+# publishes the rewrite, tokens included, as `rwxr-xr-x`. `stat -L` is what
+# makes this pass; see tests/remove.test.sh's rc arms above for the same trap
+# on the other two writers.
+ARM="$(new_arm lib-strip-mode-symlink-600)"
+SETTINGS_TARGET="$ARM/dotfiles/settings.json"
+plant_legacy_channel_hooks "$ARM"
+symlink_settings "$ARM"
+chmod 600 "$SETTINGS_TARGET"
+expect_eq "fixture: the symlinked settings.json TARGET really is 0600" \
+  "600" "$(file_mode "$SETTINGS_TARGET")"
+expect_not_contains "fixture: …and the LINK's own mode is not it — this is the trap" \
+  "600" "$(link_own_mode "$ARM/home/.claude/settings.json")"
+expect_true "hooks_strip_legacy_channel rewrote the symlinked fixture" \
+  env PATH="$ARM/bin:$PATH" BIONIC_TEST_MV_LOG="$ARM/mv.log" \
+    bash -c '. "$1"; hooks_strip_legacy_channel "$2"' _ "$HOOKS_SH" "$ARM/home/.claude/settings.json"
+expect_not_contains "symlink arm: the library really did rewrite the file (not vacuous)" \
+  ".claude/hooks/protect-main.sh" "$(cat "$ARM/home/.claude/settings.json")"
+expect_eq "a symlinked settings.json is published at its TARGET's 0600, never the link's 755" \
+  "600" "$(file_mode "$ARM/home/.claude/settings.json")"
+expect_true "symlink arm: settings.json is STILL a symlink after the strip" \
+  test -L "$ARM/home/.claude/settings.json"
+expect_eq "…and still points where it did" \
+  "$ARM/dotfiles/settings.json" "$(readlink "$ARM/home/.claude/settings.json")"
+expect_not_contains "…and it is the dotfiles TARGET that lost the legacy hook, not a detached copy" \
+  ".claude/hooks/protect-main.sh" "$(cat "$ARM/dotfiles/settings.json")"
+expect_true "symlink arm: the mv witness really saw the settings rename (not vacuous)" \
+  /usr/bin/grep -q 'dotfiles/settings\.json\.bionic\.tmp' "$ARM/mv.log"
+expect_eq "…and no staged copy of it was ever wider than 0600 either" "" \
+  "$(/usr/bin/grep 'settings\.json\.bionic\.tmp' "$ARM/mv.log" 2>/dev/null | /usr/bin/grep -v '^600 ' || true)"
 
 # R-1. The mode must be right AT THE RENAME, not repaired after it.
 #
@@ -783,7 +1356,122 @@ expect_true "profile.sh's writer was extracted (the pin is not vacuous)" test -n
 expect_true "remove.sh's writer was extracted" test -n "$RM_WRITER"
 expect_eq "profile.sh and remove.sh carry the same settings writer" "$PROFILE_WRITER" "$RM_WRITER"
 expect_true "the extracted writer is the real one (it carries the mode capture)" \
-  bash -c 'case "$1" in *"stat -f"*) exit 0 ;; esac; exit 1' _ "$PROFILE_WRITER"
+  bash -c 'case "$1" in *"stat -L -f"*) exit 0 ;; esac; exit 1' _ "$PROFILE_WRITER"
+
+# C-1's SECOND corollary: the symlink RESOLVER, four copies of it (critic delta 2
+# N1). Every writer in the payload now resolves the path it is about to rewrite
+# to the final target of its symlink chain, so a dotfiles-managed rc or
+# settings.json is rewritten rather than replaced by a detached regular file. The
+# resolver cannot be sourced from one place — hooks.sh and profile.sh are loaded
+# on their own by these suites and by callers that load no other library, a
+# `. deps.sh` inside a library breaks the mutation arms that run a doctored COPY
+# of it from a scratch directory, and remove.sh's standalone door runs where
+# scripts/lib/ is gone entirely. So there are four, and the same argument D-1
+# makes for the writer applies unchanged: pinned against each other, or they
+# drift. Same name in all four, so nothing needs neutralising here.
+RESOLVER_DEPS="$(sh_function_body "$DEPS_SH" bionic_link_target)"
+RESOLVER_HOOKS="$(sh_function_body "$HOOKS_SH" bionic_link_target)"
+RESOLVER_PROFILE="$(sh_function_body "$PROFILE_SH" bionic_link_target)"
+RESOLVER_RM="$(sh_function_body "$REMOVE_SH" bionic_link_target)"
+expect_true "deps.sh's symlink resolver was extracted (the pin is not vacuous)" \
+  test -n "$RESOLVER_DEPS"
+expect_true "the extracted resolver is the real one (it follows the chain with readlink)" \
+  bash -c 'case "$1" in *"readlink"*) exit 0 ;; esac; exit 1' _ "$RESOLVER_DEPS"
+expect_eq "hooks.sh carries the same symlink resolver as deps.sh" \
+  "$RESOLVER_DEPS" "$RESOLVER_HOOKS"
+expect_eq "profile.sh carries the same symlink resolver as deps.sh" \
+  "$RESOLVER_DEPS" "$RESOLVER_PROFILE"
+expect_eq "remove.sh's standalone copy is the same symlink resolver too" \
+  "$RESOLVER_DEPS" "$RESOLVER_RM"
+# The wall: a FIFTH copy, or a writer that never routes through one. Every file
+# under payload/ that defines the resolver is counted, and every file that stages
+# a `.bionic.tmp` must name it — a writer added beside these without resolving is
+# the defect this pin exists to stop coming back.
+RESOLVER_FILES="$(/usr/bin/grep -rln '^bionic_link_target() {' "${REPO}/payload" | sort)"
+expect_eq "exactly four files in the payload define the symlink resolver" \
+  "${REPO}/payload/scripts/lib/deps.sh
+${REPO}/payload/scripts/lib/hooks.sh
+${REPO}/payload/scripts/lib/profile.sh
+${REPO}/payload/scripts/remove.sh" \
+  "$RESOLVER_FILES"
+# THE WALL READS CODE, NOT A COMMENT (critic delta 3 F4; hardened critic delta
+# 4 G1). A plain-text `grep -q bionic_link_target` over the whole file is
+# satisfied by a file that only NAMES the resolver — in a comment, a heredoc,
+# or anywhere else that isn't a call — and never calls it. Comment-only lines
+# (`#` as the first non-blank character) are stripped first, but that alone
+# still lets a TRAILING comment or a heredoc mention through, since neither is
+# a full-line comment. The match itself must therefore require a real CALL
+# shape, not just the identifier: `bionic_link_target "` (the resolver name
+# followed by its opening quote) is how all four real files invoke it —
+# `$(bionic_link_target "$RC_FILE")`, `bionic_link_target "$rc"` — and no bare
+# mention, trailing-comment or heredoc, produces that substring.
+# ASSERTION-HELPER RACE (this file's own header rule): no `X | grep -q` — a
+# large file (remove.sh, setup.sh) makes `grep -q` close its end of the pipe the
+# instant it finds a match, SIGPIPE-ing the writer, and `pipefail` then reports
+# that SIGPIPE (141) as the pipeline's exit status regardless of the match. The
+# stripped text is captured into a variable first and matched with `case`
+# instead, the same idiom already used above for `$RESOLVER_DEPS`.
+_wall_unresolved() {  # <dir> — stagers under <dir> whose only mention of
+                      # bionic_link_target is not a real call; factored so the
+                      # positive controls below exercise this exact logic
+                      # rather than a re-typed copy of it (critic delta 4 G1)
+  local _dir="$1" _f _f_code _unresolved=""
+  for _f in $(/usr/bin/grep -rl '\.bionic\.tmp' "$_dir" 2>/dev/null | sort); do
+    _f_code="$(/usr/bin/grep -v '^[[:space:]]*#' "$_f" 2>/dev/null || true)"
+    case "$_f_code" in
+      *'bionic_link_target "'*) : ;;
+      *) _unresolved="${_unresolved}${_f} " ;;
+    esac
+  done
+  printf '%s' "$_unresolved"
+}
+UNRESOLVED="$(_wall_unresolved "${REPO}/payload")"
+expect_eq "every payload file that stages a .bionic.tmp resolves the symlink first" "" "$UNRESOLVED"
+
+# Positive controls: mirror the five real stager files (their real content, so
+# "the real files pass" is proven on the genuine call sites, not a summary of
+# them) plus one plant at a time, and assert the SAME `_wall_unresolved`
+# function used above separates them. Three plant shapes, all from critic
+# delta 4 G1 — the pre-fix wall (bare `*bionic_link_target*`) caught only the
+# first of these; the fix above catches all three.
+WALL_MIRROR="$TMP/wallmirror"; mkdir -p "$WALL_MIRROR"
+cp "${DEPS_SH}" "${HOOKS_SH}" "${PROFILE_SH}" "${REMOVE_SH}" "${SETUP_SH}" "$WALL_MIRROR/"
+
+# Plant 1 — leading-comment mention (the original F4 shape).
+cat > "$WALL_MIRROR/plant.sh" <<'NW'
+# a comment that mentions bionic_link_target but never calls it
+_new_write() { local f="$1" tmp="${1}.bionic.tmp"; printf '%s' "$2" > "$tmp"; mv "$tmp" "$f"; }
+NW
+expect_eq "positive control: a resolver named only in a leading comment is caught unresolved, real files pass" \
+  "${WALL_MIRROR}/plant.sh " "$(_wall_unresolved "$WALL_MIRROR")"
+
+# Plant 2 — TRAILING comment mention (critic delta 4 G1's own repro shape: the
+# `#` is not the first non-blank character, so the leading-comment strip never
+# touches this line).
+cat > "$WALL_MIRROR/plant.sh" <<'NW'
+_new_write() {
+  local f="$1" tmp="${1}.bionic.tmp"   # not resolved: see bionic_link_target
+  printf '%s' "$2" > "$tmp"
+  mv "$tmp" "$f"
+}
+NW
+expect_eq "positive control: a resolver named only in a trailing comment is caught unresolved (critic delta 4 G1), real files pass" \
+  "${WALL_MIRROR}/plant.sh " "$(_wall_unresolved "$WALL_MIRROR")"
+
+# Plant 3 — heredoc mention: not a comment at all, so the strip never applies.
+cat > "$WALL_MIRROR/plant.sh" <<'NW'
+_new_write() {
+  local f="$1" tmp="${1}.bionic.tmp"
+  cat <<'EOF'
+does not use bionic_link_target at all
+EOF
+  printf '%s' "$2" > "$tmp"
+  mv "$tmp" "$f"
+}
+NW
+expect_eq "positive control: a resolver named only inside a heredoc is caught unresolved (critic delta 4 G1), real files pass" \
+  "${WALL_MIRROR}/plant.sh " "$(_wall_unresolved "$WALL_MIRROR")"
+rm -f "$WALL_MIRROR/plant.sh"
 
 # R-1's pin, and the reason it is SHAPE rather than byte-identity. There is a
 # THIRD settings writer — hooks.sh's `hooks_strip_legacy_channel` — and the pin
@@ -870,11 +1558,14 @@ expect_eq "and hooks.sh does it in exactly one place too (a second writer inside
 # on the machine that door exists for, deps.sh is gone. Both gates are exercised
 # — Group 15's mutation 3 here, setup.test.sh's all-decline arms there — but
 # nothing asserted the two obey the SAME rule, so an edit to one was invisible
-# to the other. The rule has two halves and both are load-bearing: only an
-# explicit yes proceeds, and EOF on stdin declines (the fail-closed direction,
-# which is what makes an unattended run safe).
+# to the other. The rule has three parts and all three are load-bearing: only
+# an explicit yes proceeds (0); an explicit no is a real decline (1); EOF on
+# stdin (the fail-closed direction, what makes an unattended run safe) is
+# neither — it is "not asked", distinctly, because nobody was there to answer
+# (AC-12; 1 and 2 were the same code before this wave, which is why a dry
+# first pass read every question as a recorded "no").
 for consent_rule in \
-  'IFS= read -r answer || { echo ""; return 1; }' \
+  'IFS= read -r answer || { echo ""; return 2; }' \
   'case "$answer" in y|Y|yes|YES|Yes) return 0 ;; *) return 1 ;; esac'
 do
   expect_true "remove.sh's _rm_consent carries the rule verbatim: ${consent_rule}" \
@@ -927,7 +1618,73 @@ expect_eq "block-only: payload and standalone strips still produce byte-identica
 P2_TEXT="$(cat "$ARM_P2/home/.claude/settings.json")"
 expect_not_contains "block-only: the emptied permissions object is deleted, not left as {}" \
   '"permissions"' "$P2_TEXT"
+
+# THE SECOND TWO-DOOR BEHAVIOUR (W7 S4): deleting bionic's names out of `env`.
+# Payload mode calls env.sh's `env_unset`; standalone runs the copy of its jq
+# program this script carries, through its own writer. Same fixture in,
+# byte-identical settings file out — the only thing that keeps the copy honest.
+ARM_P3="$(new_arm env-strip-payload)"
+plant_claude_stub "$ARM_P3" no no; plant_env_settings "$ARM_P3"
+ARM_S3="$(new_arm env-strip-standalone)"
+plant_claude_stub "$ARM_S3" no no; plant_env_settings "$ARM_S3"
+expect_eq "env fixture parity: both arms start byte-identical" \
+  "$(shasum < "$ARM_P3/home/.claude/settings.json")" "$(shasum < "$ARM_S3/home/.claude/settings.json")"
+
+REMOVE_FLAGS="--only environment"
+run_remove "$REMOVE_SH" "$ARM_P3" "$ALL_YES" >/dev/null 2>&1
+run_remove "$STANDALONE_DIR/remove.sh" "$ARM_S3" "$ALL_YES" >/dev/null 2>&1
+REMOVE_FLAGS=""
+expect_eq "payload-mode env delete and standalone-mode env delete produce byte-identical settings" \
+  "$(shasum < "$ARM_P3/home/.claude/settings.json")" "$(shasum < "$ARM_S3/home/.claude/settings.json")"
+# And the delete actually happened — otherwise the arm proves only that two
+# implementations agree on doing nothing.
+expect_eq "…and bionic's names really are gone from both" '{"OTHER":"x"}' \
+  "$(jq -c '.env' "$ARM_P3/home/.claude/settings.json")"
+
+# The container-collapse branch, driven through both doors: a machine whose
+# `env` held ONLY bionic's names ends with no `env` object at all.
+ARM_P4="$(new_arm env-strip-payload-only)"
+plant_claude_stub "$ARM_P4" no no
+printf '%s\n' '{"env":{"CLAUDE_CODE_ENABLE_TODO_TOOLS":"1","BASH_MAX_TIMEOUT_MS":"1800000"}}' \
+  > "$ARM_P4/home/.claude/settings.json"
+ARM_S4="$(new_arm env-strip-standalone-only)"
+plant_claude_stub "$ARM_S4" no no
+printf '%s\n' '{"env":{"CLAUDE_CODE_ENABLE_TODO_TOOLS":"1","BASH_MAX_TIMEOUT_MS":"1800000"}}' \
+  > "$ARM_S4/home/.claude/settings.json"
+REMOVE_FLAGS="--only environment"
+run_remove "$REMOVE_SH" "$ARM_P4" "$ALL_YES" >/dev/null 2>&1
+run_remove "$STANDALONE_DIR/remove.sh" "$ARM_S4" "$ALL_YES" >/dev/null 2>&1
+REMOVE_FLAGS=""
+expect_eq "env-only: both doors still agree byte for byte" \
+  "$(shasum < "$ARM_P4/home/.claude/settings.json")" "$(shasum < "$ARM_S4/home/.claude/settings.json")"
+expect_eq "env-only: the emptied env object is deleted, not left as {}" "false" \
+  "$(jq -r 'has("env")' "$ARM_P4/home/.claude/settings.json")"
 expect_contains "block-only: the unrelated settings key survives" '"model"' "$P2_TEXT"
+
+# THE SAME TRAP, THROUGH THE STANDALONE DOOR (S14, the S13 class). Everything
+# above in this group proves payload and standalone modes agree byte-for-byte;
+# this proves the agreement holds when settings.json is a symlink too. The
+# standalone door runs `_rm_write` directly — profile.sh is not beside it to
+# delegate to `_profile_write` — so this is the one place in the suite that
+# reaches `_rm_write`'s own mode capture, which is byte-identical to
+# `_profile_write`'s (pinned earlier in this file) and must be fixed in lockstep.
+ARM_S5="$(new_arm strip-standalone-symlink)"
+plant_claude_stub "$ARM_S5" no no; plant_profile_block "$ARM_S5"
+symlink_settings "$ARM_S5"
+chmod 600 "$ARM_S5/dotfiles/settings.json"
+expect_eq "fixture: the standalone symlink arm's TARGET really is 0600" \
+  "600" "$(file_mode "$ARM_S5/dotfiles/settings.json")"
+run_remove "$STANDALONE_DIR/remove.sh" "$ARM_S5" "$ALL_YES" >/dev/null 2>&1
+expect_not_contains "standalone symlink arm: the block really was stripped (not vacuous)" \
+  "bionic-profile-begin" "$(cat "$ARM_S5/home/.claude/settings.json")"
+expect_eq "_rm_write publishes a symlinked settings.json at its target's 0600, never the link's 755" \
+  "600" "$(file_mode "$ARM_S5/home/.claude/settings.json")"
+expect_true "standalone symlink arm: settings.json is STILL a symlink after _rm_write" \
+  test -L "$ARM_S5/home/.claude/settings.json"
+expect_eq "…and still points where it did" \
+  "$ARM_S5/dotfiles/settings.json" "$(readlink "$ARM_S5/home/.claude/settings.json")"
+expect_not_contains "…and it is the dotfiles TARGET that lost the block, not a detached copy" \
+  "bionic-profile-begin" "$(cat "$ARM_S5/dotfiles/settings.json")"
 
 echo ""
 echo "=== Group 10: the STANDALONE door (no payload libraries anywhere) ==="
@@ -1526,6 +2283,18 @@ expect_contains "default mode: declined — reported in the Skipped list" \
 expect_contains "default mode: declined — the skipped-line shape the script already uses" \
   "declined — default permission mode" "$OUT"
 
+# ---- defaultMode=auto, EOF on the prompt: 'not asked', not 'declined' (AC-12) ----
+ARM="$(new_arm default-mode-auto-eof)"
+plant_default_mode "$ARM" auto
+plant_claude_stub "$ARM" no no
+EOF_ANSWERS="$TMP/answers-eof-mode"; : > "$EOF_ANSWERS"
+OUT_EOF="$(run_remove "$REMOVE_SH" "$ARM" "$EOF_ANSWERS")"
+expect_eq "default mode: not asked — the key is untouched" \
+  "auto" "$(jq -r '.permissions.defaultMode // ""' "$ARM/home/.claude/settings.json")"
+expect_contains "default mode: not asked — the not-asked shape the script uses" \
+  "not asked — default permission mode" "$OUT_EOF"
+expect_not_contains "default mode: EOF never says 'declined'" "declined" "$OUT_EOF"
+
 # ---- defaultMode=plan (not bionic's value): no question, untouched ----
 ARM="$(new_arm default-mode-plan)"
 plant_default_mode "$ARM" plan
@@ -1761,7 +2530,7 @@ plant_profile_block "$ARM"
 plant_plugin_data "$ARM"
 plant_claude_stub "$ARM" yes yes
 ALL_NO_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
-for rm_item in legacy-alias shell-env permission-profile plugin-data plugin; do
+for rm_item in legacy-alias environment permission-profile plugin-data plugin; do
   expect_contains "the whole-pass output names --only ${rm_item}" "--only ${rm_item}" "$ALL_NO_OUT"
 done
 expect_contains "the Skipped list carries the route beside what was left" \
@@ -1776,10 +2545,567 @@ expect_eq "remove.sh composes the route sentence in one place" "1" \
 # ANCHORED, because `--yes)` also closes the uninstall argv array below: the
 # question is whether this script has an ARGUMENT arm called --yes, not whether
 # the four characters appear anywhere in it.
+#
+# `--all` USED TO BE ON THIS LIST AND IS NOT ANY MORE (W7, AC-8). It was there
+# while every shape anyone proposed for it was "answer the questions for me",
+# which is the thing this arm exists to keep out. What shipped instead is not
+# that: `--all` PRINTS the whole plan and asks one question over it, so the run
+# still turns on an explicit `y` read from this script's own input, and an item
+# added to the roster later still reaches the user's eyes before it reaches
+# their machine. Group 21 is the wall on that shape — one question, a plan that
+# matches the questions a per-item pass would ask, and nothing done on a no.
 expect_eq "remove.sh takes no assume-yes argument of its own" "" \
-  "$(/usr/bin/grep -nE '^[[:space:]]*--(yes|all)\)' "$REMOVE_SH" || true)"
+  "$(/usr/bin/grep -nE '^[[:space:]]*--yes\)' "$REMOVE_SH" || true)"
 expect_eq "remove.sh reads no assume-yes environment knob" "" \
   "$(/usr/bin/grep -niE 'BIONIC_(ASSUME_YES|YES|NONINTERACTIVE)' "$REMOVE_SH" || true)"
+
+# ---- NO ENVIRONMENT VALUE GRANTS CONSENT (W7 S11, six-axis review axis 4) ----
+#
+# The two greps above are a wall against a knob NAMED assume-yes. They cannot see
+# a knob spelled something else, and one was spelled something else: `_dep_consent`
+# short-circuits on `SETUP_ALL` OR `RM_ALL`, and this script used to zero only its
+# own name. An exported `SETUP_ALL=1` therefore reached every row this script
+# routes through deps.sh — the whole `tool:*` class — and answered its question
+# before a person could.
+#
+# So the wall becomes behavioural rather than lexical: both names arrive SET, the
+# answers file is empty, and the run must report "not asked" and uninstall
+# nothing. A grep can be routed around by renaming a variable; this arm cannot.
+ARM="$(new_arm env-consent-knob)"
+plant_never_list "$ARM"
+plant_claude_stub "$ARM" no no
+plant_native_plugin "$ARM" impeccable 4.1.1
+FP_KNOB_BEFORE="$(fingerprint "$ARM/home")"
+: > "$TMP/answers-knob"
+REMOVE_FLAGS="--only tool:impeccable"
+KNOB_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$TMP/answers-knob" SETUP_ALL=1 RM_ALL=1)"
+REMOVE_FLAGS=""
+expect_contains "an exported consent flag does not answer a deps.sh-routed row" \
+  "not asked —" "$KNOB_OUT"
+expect_not_contains "…and the row is never uninstalled" \
+  "plugin uninstall impeccable@bionic" "$(cat "$ARM/calls.log")"
+expect_eq "…and the fixture HOME is byte-identical" \
+  "$FP_KNOB_BEFORE" "$(fingerprint "$ARM/home")"
+
+echo ""
+echo "=== Group 20: a narrowed uninstall carries its follow-ons (AC-4) ==="
+#
+# A DEPENDENT CHANGE IS CONSENTED WHEN IT BECOMES REAL. The orphaned dependencies
+# do not exist until the uninstall creates them. A reader working the roster one
+# name at a time therefore meets that item BEFORE its own precondition: asked
+# early, `claude plugin prune --dry-run` answers with bionic still installed, finds
+# nothing orphaned, and the question is never printed — so nobody comes back to it
+# once the uninstall has made it true. The offer rides with the item that creates
+# it: a run narrowed to the finisher asks about the orphans it just made, in that
+# same run. `orphaned-dependencies` keeps its own name on the roster for the
+# standalone case, and a whole pass still asks exactly once.
+
+# ---- narrowed to the finisher: uninstall, then the offer it created ----
+ARM="$(new_arm only-plugin-followon)"
+plant_claude_stub_data_recreated "$ARM"
+printf 'y\ny\n' > "$ARM/answers-yy"
+REMOVE_FLAGS="--only plugin"
+FOLLOW_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ARM/answers-yy")"
+REMOVE_FLAGS=""
+FOLLOW_CALLS="$(cat "$ARM/calls.log")"
+printf '%s\n' "$FOLLOW_OUT" > "$TMP/rm-followon.txt"
+
+expect_contains "--only plugin: the native uninstall is the item that ran" \
+  "plugin uninstall bionic@bionic --yes" "$FOLLOW_CALLS"
+# AN ANSWER NOBODY GAVE IS STILL A NO: narrowed to the finisher, the plugin-data
+# question was never asked, so the uninstall is told to keep what it finds. This
+# is the path the live teardown took — and on it the CLI still left an EMPTY
+# bionic-bionic directory behind, which is what the fixture reproduces.
+expect_contains "--only plugin: the data nobody was asked about is kept" \
+  "--keep-data" "$FOLLOW_CALLS"
+expect_true "--only plugin: the empty directory the uninstall left is gone at exit" \
+  bash -c '[ ! -d "$1" ]' _ "$ARM/home/.claude/plugins/data/bionic-bionic"
+expect_contains "--only plugin: …and the report says what was taken and why" \
+  "it held nothing of yours" "$FOLLOW_OUT"
+expect_contains "--only plugin: the orphans the uninstall just made are named" \
+  "the CLI reports these auto-installed dependencies are no longer needed" "$FOLLOW_OUT"
+expect_contains "--only plugin: …and the question about them is asked in that same run" \
+  "Run claude plugin prune to remove them?" "$FOLLOW_OUT"
+expect_contains "--only plugin: …and a yes actually prunes" \
+  "plugin prune --yes" "$FOLLOW_CALLS"
+RM_FOLLOW_Q="$(/usr/bin/grep -c '\[y/N\]' "$TMP/rm-followon.txt" | tr -d ' ')"
+expect_eq "--only plugin asks two questions — the item, and the follow-on it created" "2" \
+  "$RM_FOLLOW_Q"
+
+# ---- the follow-on is a question, not a consequence: a no is recorded as a no ----
+ARM="$(new_arm only-plugin-followon-declined)"
+plant_claude_stub_data_recreated "$ARM"
+printf 'y\nn\n' > "$ARM/answers-yn"
+REMOVE_FLAGS="--only plugin"
+FOLLOW_NO_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ARM/answers-yn")"
+REMOVE_FLAGS=""
+FOLLOW_NO_CALLS="$(cat "$ARM/calls.log")"
+
+expect_contains "--only plugin: a declined follow-on says what was left" \
+  "declined — orphaned dependencies left in place." "$FOLLOW_NO_OUT"
+expect_contains "--only plugin: …and hands back the route to say yes later" \
+  "--only orphaned-dependencies" "$FOLLOW_NO_OUT"
+expect_contains "--only plugin: …and the run's own summary counts it" \
+  "1 skipped by you" "$FOLLOW_NO_OUT"
+expect_not_contains "--only plugin: …and nothing was pruned" \
+  "plugin prune --yes" "$FOLLOW_NO_CALLS"
+
+# ---- the fixture really does recreate it, or the row above proves nothing ----
+#
+# Driven directly, with the exact argv the narrowed run sends, so the absence
+# assertion cannot pass on a stub that simply never created the directory.
+ARM="$(new_arm stub-recreates-under-keep-data)"
+plant_claude_stub_data_recreated "$ARM"
+env BIONIC_TEST_CALLS="$ARM/calls.log" \
+    BIONIC_PLUGIN_DATA_DIR="$ARM/home/.claude/plugins/data" \
+    "$ARM/bin/claude" plugin uninstall bionic@bionic --yes --keep-data >/dev/null 2>&1
+expect_true "the fixture leaves a data directory behind even under --keep-data" \
+  test -d "$ARM/home/.claude/plugins/data/bionic-bionic"
+expect_eq "…and leaves it empty, which is the shape the live teardown found" "" \
+  "$(ls -A "$ARM/home/.claude/plugins/data/bionic-bionic")"
+
+# ---- --keep-data still keeps DATA: a directory with something in it survives ----
+ARM="$(new_arm only-plugin-keeps-real-data)"
+plant_plugin_data "$ARM"
+plant_claude_stub_data_recreated "$ARM"
+printf 'y\ny\n' > "$ARM/answers-yy"
+REMOVE_FLAGS="--only plugin"
+KEEP_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ARM/answers-yy")"
+REMOVE_FLAGS=""
+expect_contains "--only plugin: the uninstall is told to keep the data" \
+  "--keep-data" "$(cat "$ARM/calls.log")"
+expect_true "--only plugin: a data directory holding something survives" \
+  test -f "$ARM/home/.claude/plugins/data/bionic-bionic/state.json"
+expect_not_contains "…and nothing claims an empty directory was taken" \
+  "it held nothing of yours" "$KEEP_OUT"
+expect_true "…and a look-alike that is not bionic's is untouched either" \
+  test -f "$ARM/home/.claude/plugins/data/superpowers-bionic/state.json"
+
+# ---- an empty directory that was ALREADY there is not "left by the uninstall" ----
+#
+# The sentence this run prints is a claim about what the uninstall did. A
+# directory that predates the call is not that, and taking it on that ground
+# would let a whole pass remove something it had just been told to leave.
+ARM="$(new_arm only-plugin-preexisting-empty)"
+mkdir -p "$ARM/home/.claude/plugins/data/bionic-bionic"
+plant_claude_stub_data_recreated "$ARM"
+printf 'y\ny\n' > "$ARM/answers-yy"
+REMOVE_FLAGS="--only plugin"
+PRE_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ARM/answers-yy")"
+REMOVE_FLAGS=""
+expect_true "--only plugin: an empty directory that predates the run survives" \
+  test -d "$ARM/home/.claude/plugins/data/bionic-bionic"
+expect_not_contains "…and no claim is made that the uninstall left it" \
+  "it held nothing of yours" "$PRE_OUT"
+
+# ---- the standalone door still opens under its own name ----
+ARM="$(new_arm only-orphans-standalone)"
+plant_claude_stub "$ARM" no yes
+REMOVE_FLAGS="--only orphaned-dependencies"
+ORPH_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+REMOVE_FLAGS=""
+expect_contains "--only orphaned-dependencies still asks its own question" \
+  "Run claude plugin prune to remove them?" "$ORPH_OUT"
+expect_contains "…and a yes still prunes" "plugin prune --yes" "$(cat "$ARM/calls.log")"
+expect_not_contains "…without reaching the finisher it was not narrowed to" \
+  "plugin uninstall" "$(cat "$ARM/calls.log")"
+expect_true "--list still names orphaned-dependencies as a name of its own" \
+  /usr/bin/grep -qxF 'orphaned-dependencies' "$TMP/rm-list.txt"
+
+# ---- a whole pass asks ONCE: the parent's offer and the roster's must not stack ----
+ARM="$(new_arm one-pass-single-offer)"
+plant_plugin_data "$ARM"
+plant_claude_stub_data_recreated "$ARM"
+ONEPASS_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+printf '%s\n' "$ONEPASS_OUT" > "$TMP/rm-onepass-offer.txt"
+expect_eq "a whole pass prints the orphaned-dependencies header exactly once" "1" \
+  "$(/usr/bin/grep -cF 'orphaned dependencies:' "$TMP/rm-onepass-offer.txt" | tr -d ' ')"
+expect_eq "a whole pass asks the prune question exactly once" "1" \
+  "$(/usr/bin/grep -cF 'Run claude plugin prune to remove them?' "$TMP/rm-onepass-offer.txt" | tr -d ' ')"
+expect_eq "a whole pass runs the prune exactly once" "1" \
+  "$(/usr/bin/grep -cF 'plugin prune --yes' "$ARM/calls.log" | tr -d ' ')"
+
+echo ""
+echo "=== Group 21: one answer over a printed plan — --all (AC-8) ==="
+#
+# THE UNIT OF CONSENT IS A PLAN, NOT A FLAG THAT ANSWERS. Answering one question
+# at a time is the right default and a bad experience for the person who has
+# already decided to remove everything: nine questions is nine chances to lose
+# the thread, and the shape people reach for instead — an assume-yes flag — is
+# the hole in "consent per event, never silent, never unattended", because a
+# name added to the roster later would then run on a machine whose owner never
+# saw it.
+#
+# So the whole run is made into ONE event. `--all` prints every item it would
+# ask about, one line each naming what that item changes, and asks a single
+# question over that printed plan. Nothing runs that was not on the page the
+# user said yes to, and an item added next year appears there before it appears
+# on anybody's machine.
+#
+# WHAT IS NOT ON THE PLAN. A follow-on — an item whose precondition another item
+# CREATES — cannot be named honestly before its parent runs: nothing is orphaned
+# until the uninstall lands, and the CLI's dry run says so. Those still get asked
+# inside the run, in place, which is the rule D-B ratified for the class.
+
+# The full machine: every item this roster can be asked about has something to do.
+plant_everything() {  # <arm>
+  local arm="$1"
+  plant_never_list "$arm"
+  plant_zshrc_marked "$arm"
+  plant_todo_export "$arm"
+  plant_legacy_channel_hooks "$arm"
+  jq '.env = {"OTHER":"x","CLAUDE_CODE_ENABLE_TODO_TOOLS":"1","BASH_MAX_TIMEOUT_MS":"1800000"}' \
+    "$arm/home/.claude/settings.json" > "$arm/env.tmp" \
+    && mv "$arm/env.tmp" "$arm/home/.claude/settings.json"
+  plant_profile_block "$arm"
+  plant_default_mode "$arm" auto
+  plant_legacy_skill_copy "$arm"
+  plant_plugin_data "$arm"
+  plant_claude_stub_data_recreated "$arm"
+}
+
+ONE_YES="$TMP/answers-one-yes"; printf 'y\n' > "$ONE_YES"
+ONE_NO="$TMP/answers-one-no";   printf 'n\n' > "$ONE_NO"
+
+# ---- the plan is printed, one question is asked, and a yes runs everything ----
+ARM="$(new_arm all-everything)"
+plant_everything "$ARM"
+REMOVE_FLAGS="--all"
+ALL_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_YES")"
+REMOVE_FLAGS=""
+printf '%s\n' "$ALL_OUT" > "$TMP/rm-all-yes.txt"
+ALL_CALLS="$(cat "$ARM/calls.log")"
+
+expect_contains "--all: the run states what it would do before it asks anything" \
+  "bionic would:" "$ALL_OUT"
+expect_contains "--all: the plan names the plugin and the command that takes it" \
+  "• remove the plugin bionic@bionic (claude plugin uninstall)" "$ALL_OUT"
+expect_contains "--all: …the environment settings" \
+  "• delete bionic's environment settings from" "$ALL_OUT"
+expect_contains "--all: …the retired shell alias block" \
+  "• remove the retired shell alias block from" "$ALL_OUT"
+expect_contains "--all: …the retired hook entries" \
+  "• remove the retired hook entries from" "$ALL_OUT"
+expect_contains "--all: …the pre-plugin skill copy" \
+  "• remove the pre-plugin skill copy at" "$ALL_OUT"
+expect_contains "--all: …the permission marker block" \
+  "• remove bionic's permission marker block from" "$ALL_OUT"
+expect_contains "--all: …the default permission mode" \
+  "• reset Claude Code's default permission mode" "$ALL_OUT"
+expect_contains "--all: …and the plugin data" \
+  "• delete bionic's plugin data under" "$ALL_OUT"
+
+expect_eq "--all asks exactly one question for the whole run" "1" \
+  "$(/usr/bin/grep -c '\[y/N\]' "$TMP/rm-all-yes.txt" | tr -d ' ')"
+expect_contains "--all: and the one question is asked over the printed plan" \
+  "Do all of the above? [y/N]" "$ALL_OUT"
+
+expect_contains "--all: a yes still prints each item's own result line" \
+  "✓ plugin bionic@bionic" "$ALL_OUT"
+expect_contains "--all: …and the usual end summary" "removed ·" "$ALL_OUT"
+expect_contains "--all: the native uninstall ran" \
+  "plugin uninstall bionic@bionic --yes" "$ALL_CALLS"
+expect_not_contains "--all: the alias block is gone from the rc" \
+  "bionic:start" "$(cat "$ARM/home/.zshrc")"
+expect_eq "--all: bionic's environment names are gone from settings.json" "" \
+  "$(jq -r '.env.CLAUDE_CODE_ENABLE_TODO_TOOLS // ""' "$ARM/home/.claude/settings.json")"
+expect_true "--all: the pre-plugin skill copy is gone" \
+  bash -c '[ ! -e "$1" ]' _ "$ARM/home/.claude/skills/canonical-sdlc"
+expect_true "--all: the never-list still survives an --all run" \
+  test -f "$ARM/home/.bionic/memory/note.md"
+
+# THE FOLLOW-ON IS NAMED BEFORE THE ANSWER, CONDITIONALLY (critic F1).
+#
+# `--all` collapses every question into one, so the page it is asked over has to
+# cover everything the run will do — "nothing runs that was not on it". The
+# orphan prune cannot name its SUBJECTS before the uninstall lands (nothing is
+# orphaned yet, and the CLI's dry run says so), but the run can name the ACT, and
+# it can say why the list is not there yet. That is what the one answer then
+# honestly covers. What it must never be is silent: `claude plugin prune --yes`
+# takes plugins the roster deliberately refuses to offer by name — the core rows
+# — so an unnamed prune removes things a per-item pass would have shown the user.
+expect_contains "--all: the plan names the follow-on the uninstall will create" \
+  "• remove any dependencies the uninstall leaves orphaned" "$ALL_OUT"
+expect_contains "--all: …and says why its subjects are not listed yet" \
+  "checked after the plugin is removed" "$ALL_OUT"
+expect_contains "--all: …the follow-on line is on the page, above the one question" \
+  "• remove any dependencies the uninstall leaves orphaned" "${ALL_OUT%%Do all of the above?*}"
+expect_contains "--all: …and it is still reached in the same run" \
+  "orphaned dependencies:" "$ALL_OUT"
+expect_contains "--all: …and the one answer covers it, so the prune runs" \
+  "plugin prune --yes" "$ALL_CALLS"
+
+# ---- the live shape: the CLI names orphans only AFTER the uninstall ----
+#
+# The arm above runs against a stub that reports an orphan from the first call, so
+# on its own it cannot tell a conditional plan line from one printed because the
+# dry run happened to answer early. This arm is the shape the critic reproduced:
+# nothing is orphaned until the plugin is gone. The plan must still name the act,
+# and `prune --yes` must not run unless it did.
+ARM="$(new_arm all-orphans-after-uninstall)"
+plant_never_list "$ARM"
+plant_zshrc_marked "$ARM"
+plant_claude_stub_orphans_after_uninstall "$ARM"
+REMOVE_FLAGS="--all"
+LATE_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_YES")"
+REMOVE_FLAGS=""
+printf '%s\n' "$LATE_OUT" > "$TMP/rm-all-late-orphans.txt"
+LATE_CALLS="$(cat "$ARM/calls.log")"
+LATE_PLAN="${LATE_OUT%%Do all of the above?*}"
+
+expect_contains "late orphans: the plan still names the plugin uninstall" \
+  "• remove the plugin bionic@bionic (claude plugin uninstall)" "$LATE_PLAN"
+expect_contains "late orphans: …and the orphan follow-on, before the one question" \
+  "• remove any dependencies the uninstall leaves orphaned" "$LATE_PLAN"
+expect_eq "late orphans: still exactly one question in the whole run" "1" \
+  "$(/usr/bin/grep -c '\[y/N\]' "$TMP/rm-all-late-orphans.txt" | tr -d ' ')"
+expect_contains "late orphans: the uninstall ran" \
+  "plugin uninstall bionic@bionic" "$LATE_CALLS"
+expect_contains "late orphans: the CLI's list is shown when it finally exists" \
+  "superpowers@bionic" "$LATE_OUT"
+# The wall: a prune that was never on the page must never have run.
+expect_true "late orphans: prune --yes ran ONLY because the plan named it" \
+  bash -c 'case "$1" in *"remove any dependencies the uninstall leaves orphaned"*) exit 0 ;; esac
+           case "$2" in *"plugin prune --yes"*) exit 1 ;; esac
+           exit 0' _ "$LATE_PLAN" "$LATE_CALLS"
+
+# ---- and the standalone case: the plugin is already gone, so the item is its own line ----
+#
+# With no `plugin` row on the page there is no parent to hang the conditional line
+# on, and the orphans are real NOW — so the roster entry names them the ordinary
+# way, with its own verb, and the same one answer covers it.
+ARM="$(new_arm all-orphans-standalone)"
+plant_never_list "$ARM"
+plant_zshrc_marked "$ARM"
+plant_claude_stub "$ARM" no yes
+REMOVE_FLAGS="--all"
+STANDALONE_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_YES")"
+REMOVE_FLAGS=""
+STANDALONE_PLAN="${STANDALONE_OUT%%Do all of the above?*}"
+expect_not_contains "orphans standalone: no plugin row, so no conditional line" \
+  "• remove any dependencies the uninstall leaves orphaned" "$STANDALONE_PLAN"
+expect_contains "orphans standalone: the roster entry names itself on the page" \
+  "• remove the dependencies nothing needs any more (claude plugin prune)" "$STANDALONE_PLAN"
+expect_contains "orphans standalone: and the one answer runs it" \
+  "plugin prune --yes" "$(cat "$ARM/calls.log")"
+
+# ---- the uninstall FAILED, so nothing it would have orphaned is orphaned ----
+#
+# The page's only sentence about this act is "remove any dependencies the uninstall
+# leaves orphaned (checked after the plugin is removed)". If the plugin was not
+# removed, a prune run anyway is an act the user consented to on a condition that
+# did not happen — and `claude plugin prune` takes precisely the core rows the
+# roster refuses to offer by name in any mode. `--only plugin` already gates its
+# offer on the uninstall landing; the whole pass reaches the roster's own entry a
+# moment later and must hold to the same rule.
+ARM="$(new_arm all-uninstall-fails-no-prune)"
+plant_never_list "$ARM"
+plant_zshrc_marked "$ARM"
+plant_claude_stub_uninstall_fails "$ARM"
+REMOVE_FLAGS="--all"
+FAILED_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_YES")"
+REMOVE_FLAGS=""
+FAILED_CALLS="$(cat "$ARM/calls.log")"
+expect_contains "failed uninstall: the plan still named the follow-on (arm is on the right path)" \
+  "• remove any dependencies the uninstall leaves orphaned" "${FAILED_OUT%%Do all of the above?*}"
+expect_contains "failed uninstall: the uninstall really was attempted (not vacuous)" \
+  "plugin uninstall bionic@bionic" "$FAILED_CALLS"
+expect_contains "failed uninstall: …and it really failed" \
+  "the plugin is still registered" "$FAILED_OUT"
+expect_not_contains "a failed uninstall orphans nothing: prune --yes must not run" \
+  "plugin prune --yes" "$FAILED_CALLS"
+# WHAT THE RUN SAYS ABOUT IT (critic delta 2 N2). The skip is right; the sentence
+# was not. This branch returns BEFORE `_rm_offer_orphans` ever asks the CLI, so
+# "nothing is orphaned" is a claim about the machine that this run never checked —
+# and it is false the moment orphans predate the run (a previous partial teardown,
+# a hand-removed plugin), which this fixture's own stub reproduces: its
+# `prune --dry-run` names two. Booking that as `✓ … already clean` also counts it
+# into the clean tally and keeps it out of the Skipped block, so the summary tells
+# a user with real orphans there is nothing there. The line now reports what
+# happened instead of asserting what is true.
+expect_contains "…and the run says the check did not happen, not that nothing is there" \
+  "not checked — the plugin uninstall did not land, so orphaned dependencies were not looked at" \
+  "$FAILED_OUT"
+expect_eq "…and the orphan row is never booked as clean" "" \
+  "$(printf '%s\n' "$FAILED_OUT" | /usr/bin/grep 'orphaned dependencies' | /usr/bin/grep 'already clean' || true)"
+expect_contains "…and it lands in the Leftovers/not-checked block, where a reader goes looking for it" \
+  "⚠ orphaned dependencies — not checked" "$FAILED_OUT"
+expect_not_contains "…and the stub's own dry run proves the old sentence was falsifiable" \
+  "so nothing is orphaned" "$FAILED_OUT"
+
+# THE ROW IS NOT BOOKED AS THE USER'S CHOICE EITHER (critic delta 3 F2). `--all`
+# asks nothing at all before this branch runs — `_rm_consent` is never called for
+# it — so a summary that calls the row "skipped by you" or files it under
+# "Skipped (your choice — still on this machine)" invents a decision the reader
+# never made. This fixture has exactly one non-clean, non-removed row (the
+# orphan check), so a correct run reports zero real declines.
+expect_contains "…and the tally says 0 skipped by you (no choice was offered here)" \
+  "0 skipped by you" "$FAILED_OUT"
+expect_contains "…and the tally counts it on its own line: 1 not checked" \
+  "1 not checked" "$FAILED_OUT"
+expect_not_contains "…and the summary heading never claims a choice on this row's account" \
+  "your choice" "$FAILED_OUT"
+
+# The same failure in a PER-ITEM pass still asks. The gate above exists because
+# `--all` collapses every question into one page, so the conditional line is the
+# only consent the prune ever gets. Here the item asks in place, with the CLI's
+# list of names printed above the question — a person who reads those names and
+# says yes consented to exactly what runs, and this item's standalone case
+# (coming back for the orphans alone) lives on this path. Suppressing it here
+# would refuse a question nobody has a reason to refuse.
+ARM="$(new_arm peritem-uninstall-fails-still-asks)"
+plant_never_list "$ARM"
+plant_zshrc_marked "$ARM"
+plant_claude_stub_uninstall_fails "$ARM"
+PERITEM_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+expect_contains "per-item pass: a failed uninstall really did happen here too (not vacuous)" \
+  "the plugin is still registered" "$PERITEM_OUT"
+expect_contains "per-item pass: the orphan question is still asked, with its names" \
+  "superpowers@bionic" "$PERITEM_OUT"
+expect_contains "…and the answer given in place is what runs it" \
+  "plugin prune --yes" "$(cat "$ARM/calls.log")"
+
+# ---- a machine with no orphans does not get a line about them ----
+ARM="$(new_arm all-orphans-none)"
+plant_never_list "$ARM"
+plant_zshrc_marked "$ARM"
+plant_claude_stub "$ARM" no no
+REMOVE_FLAGS="--all"
+NONE_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_YES")"
+REMOVE_FLAGS=""
+expect_not_contains "no orphans, no plugin: the page says nothing about a prune" \
+  "claude plugin prune" "${NONE_OUT%%Do all of the above?*}"
+expect_not_contains "no orphans: and nothing was pruned" \
+  "plugin prune --yes" "$(cat "$ARM/calls.log")"
+
+# ---- a no runs nothing and says so ----
+ARM="$(new_arm all-declined)"
+plant_everything "$ARM"
+FP_ALL_BEFORE="$(fingerprint "$ARM/home")"
+REMOVE_FLAGS="--all"
+NO_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_NO")"; NO_RC=$?
+REMOVE_FLAGS=""
+expect_eq "--all declined: exits 0 — declining is not an error" "0" "$NO_RC"
+expect_contains "--all declined: says so in one line" "nothing changed." "$NO_OUT"
+expect_eq "--all declined: the entire fixture HOME is byte-identical" \
+  "$FP_ALL_BEFORE" "$(fingerprint "$ARM/home")"
+expect_eq "--all declined: no mutating call was ever made" "" \
+  "$(/usr/bin/grep -E 'plugin uninstall|plugin prune --yes' "$ARM/calls.log" || true)"
+
+# An unanswered first pass is a no as well — the same rule every other question
+# here holds to, and the one that keeps `--all` from being an assume-yes flag
+# wearing a plan.
+ARM="$(new_arm all-eof)"
+plant_everything "$ARM"
+FP_EOF_BEFORE="$(fingerprint "$ARM/home")"
+: > "$TMP/answers-none"
+REMOVE_FLAGS="--all"
+EOF_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$TMP/answers-none")"
+REMOVE_FLAGS=""
+expect_eq "--all with nobody there to ask: the fixture HOME is byte-identical" \
+  "$FP_EOF_BEFORE" "$(fingerprint "$ARM/home")"
+expect_contains "--all with nobody there to ask: says nothing changed" \
+  "nothing changed." "$EOF_OUT"
+
+# ---- AND NO ENVIRONMENT VALUE CAN ANSWER IT EITHER (W7 S11, review axis 4) ----
+#
+# `--all`'s one question goes through `_dep_consent`, which short-circuits on
+# `SETUP_ALL` OR `RM_ALL`. This script zeroed only `RM_ALL`, so an exported
+# `SETUP_ALL=1` reached the deps.sh-routed rows below — and, with the seam open,
+# any future caller of `_dep_consent` on this page. Both names arrive SET here and
+# the page must still end unanswered. Group 19 carries the per-row half of this.
+ARM="$(new_arm env-consent-knob-all)"
+plant_everything "$ARM"
+FP_KNOB_ALL_BEFORE="$(fingerprint "$ARM/home")"
+: > "$TMP/answers-knob-all"
+REMOVE_FLAGS="--all"
+KNOB_ALL_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$TMP/answers-knob-all" SETUP_ALL=1 RM_ALL=1)"
+REMOVE_FLAGS=""
+expect_contains "--all under exported consent flags changes nothing and says so" \
+  "nothing changed." "$KNOB_ALL_OUT"
+expect_eq "…and the entire fixture HOME is byte-identical" \
+  "$FP_KNOB_ALL_BEFORE" "$(fingerprint "$ARM/home")"
+expect_eq "…and no mutating call was ever made" "" \
+  "$(/usr/bin/grep -E 'plugin uninstall|plugin prune --yes' "$ARM/calls.log" || true)"
+
+# ---- the plan is the roster minus what is already done ----
+ARM="$(new_arm all-mostly-clean)"
+printf 'export EDITOR=vim\n' > "$ARM/home/.zshrc"
+plant_claude_stub "$ARM" yes no
+REMOVE_FLAGS="--all"
+CLEAN_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_NO")"
+REMOVE_FLAGS=""
+expect_contains "--all: an item with something to do is on the plan" \
+  "• remove the plugin bionic@bionic" "$CLEAN_OUT"
+expect_not_contains "--all: an item with nothing to do is not on the plan" \
+  "• remove the retired shell alias block" "$CLEAN_OUT"
+expect_not_contains "--all: …nor is one whose settings file holds nothing of bionic's" \
+  "• remove bionic's permission marker block" "$CLEAN_OUT"
+expect_not_contains "--all: …nor the plugin data that is not there" \
+  "• delete bionic's plugin data" "$CLEAN_OUT"
+
+# A machine with nothing left says so rather than asking about an empty plan.
+ARM="$(new_arm all-nothing)"
+printf 'export EDITOR=vim\n' > "$ARM/home/.zshrc"
+plant_claude_stub "$ARM" no no
+REMOVE_FLAGS="--all"
+EMPTY_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_YES")"
+REMOVE_FLAGS=""
+expect_not_contains "--all on a clean machine asks nothing" "[y/N]" "$EMPTY_OUT"
+expect_contains "--all on a clean machine says the machine is already clean" \
+  "already clean" "$EMPTY_OUT"
+
+# ---- THE PLAN AND THE QUESTIONS ARE ONE ROSTER, READ TWICE ----
+#
+# The defect this walls off is drift: a plan built from its own idea of what is
+# pending would come to disagree with the run it is a plan FOR, and the user
+# would consent to one list and get another. The count is the check — one plan
+# line per question a whole per-item pass would ask, and now with NO exemption.
+# The orphan follow-on used to be subtracted here, because it was asked in place
+# and never on the page; under `--all` there is no "in place" to ask in, so the
+# subtraction was the arithmetic form of the consent hole (critic F1). The page
+# and the questions are the same length again, which is the property this arm was
+# always trying to state.
+ARM="$(new_arm all-agreement-plan)"
+plant_everything "$ARM"
+REMOVE_FLAGS="--all"
+AGREE_PLAN="$(run_remove "$REMOVE_SH" "$ARM" "$ONE_NO")"
+REMOVE_FLAGS=""
+printf '%s\n' "$AGREE_PLAN" > "$TMP/rm-agree-plan.txt"
+
+ARM="$(new_arm all-agreement-pass)"
+plant_everything "$ARM"
+AGREE_PASS="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_NO")"
+printf '%s\n' "$AGREE_PASS" > "$TMP/rm-agree-pass.txt"
+
+AGREE_PLAN_LINES="$(/usr/bin/grep -c '^  • ' "$TMP/rm-agree-plan.txt" | tr -d ' ')"
+AGREE_QUESTIONS="$(/usr/bin/grep -c '\[y/N\]' "$TMP/rm-agree-pass.txt" | tr -d ' ')"
+expect_true "agreement arm is not vacuous: the whole pass really did ask something" \
+  bash -c '[ "$1" -gt 1 ]' _ "$AGREE_QUESTIONS"
+expect_eq "the plan names exactly the items a per-item pass asks about — every one of them" \
+  "$AGREE_PLAN_LINES" "$AGREE_QUESTIONS"
+
+# ---- --all and --only are two different narrowings and cannot be combined ----
+ARM="$(new_arm all-and-only)"
+plant_zshrc_marked "$ARM"
+plant_claude_stub "$ARM" yes no
+REMOVE_FLAGS="--all --only plugin"
+COMBO_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"; COMBO_RC=$?
+REMOVE_FLAGS=""
+expect_eq "--all with --only exits 2" "2" "$COMBO_RC"
+expect_contains "…and says why, in words" \
+  "--all and --only cannot be combined" "$COMBO_OUT"
+expect_not_contains "…and asks nothing before refusing" "[y/N]" "$COMBO_OUT"
+expect_true "…and removes nothing" \
+  /usr/bin/grep -qF 'bionic:start' "$ARM/home/.zshrc"
+expect_eq "…and invokes nothing" "" "$(cat "$ARM/calls.log")"
+
+# ---- --list is unchanged by the new flag ----
+REMOVE_FLAGS="--list"
+ALL_LIST_OUT="$(run_remove "$REMOVE_SH" "$ARM" "$ALL_YES")"
+REMOVE_FLAGS=""
+expect_contains "--list still prints the roster --all reads" "plugin" "$ALL_LIST_OUT"
+expect_not_contains "--list prints names, never plan lines" "•" "$ALL_LIST_OUT"
 
 echo ""
 echo "=== Group 16: the suite is registered in tests/run.sh by name ==="

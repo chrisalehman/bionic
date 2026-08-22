@@ -36,6 +36,41 @@
 #
 # Sourced, never executed:  . "${CLAUDE_PLUGIN_ROOT}/scripts/lib/hooks.sh"
 
+# THE SYMLINK RESOLVER, one of four byte-identical copies (critic delta 2 N1).
+# Every writer in this payload resolves the path it is about to rewrite to the
+# final target of its symlink chain and publishes onto THAT, so a `~/.zshrc` or
+# `~/.claude/settings.json` symlinked into a dotfiles repo is REWRITTEN rather
+# than replaced by a detached regular file while the repo keeps the old content.
+# lib/deps.sh carries the full reasoning, the portability note (no `realpath`, no
+# `readlink -f`) and the degradation contract.
+#
+# THE ABSENT CASE IS NOT NEUTRAL (critic delta 3 F5). Absent `readlink`, the write
+# lands on the link's path as given, which replaces a symlink with a regular
+# file — the pre-S15 behaviour. `readlink` lives beside `stat` on both platforms
+# this payload targets, so the risk is negligible; it is recorded here because the
+# consequence, not just the mechanism, is what a reader of this comment needs.
+#
+# WHY A COPY AND NOT A SOURCE. This file is sourced on its own — by the suites,
+# and by callers that load no other library — so it cannot assume deps.sh came
+# first; and remove.sh's standalone door runs where scripts/lib/ is already gone.
+# A `. deps.sh` here would also break every mutation arm that runs a doctored
+# COPY of this file from a scratch directory. The four copies are pinned
+# byte-identical in tests/remove.test.sh, which is the same wall the settings
+# writer's two copies stand behind.
+bionic_link_target() {  # <path> — the final target of a symlink chain, else <path>
+  local p="${1:-}" link dir n=0
+  while [ -L "$p" ] && [ "$n" -lt 40 ]; do
+    link="$(readlink "$p" 2>/dev/null)" || break
+    [ -n "$link" ] || break
+    case "$link" in
+      /*) p="$link" ;;
+      *)  dir="${p%/*}"; [ "$dir" = "$p" ] && dir="."; p="${dir}/${link}" ;;
+    esac
+    n=$((n + 1))
+  done
+  printf '%s\n' "$p"
+}
+
 # The substring that puts a managed-hook entry on the legacy settings channel.
 # detect.sh spells it inside its own count program; remove.sh spells it in its
 # standalone copy. All three must agree or a machine gets counted under one
@@ -76,6 +111,11 @@ BIONIC_LEGACY_HOOK_STRIP_JQ='
 # the other's; an absent `stat` leaves `mode` empty and the rewrite still lands,
 # which is the same honest degradation this file already practises for `jq`.
 #
+# AND IT IS THE TARGET'S MODE, NOT THE LINK'S (S14). A settings.json symlinked
+# into a dotfiles repo is the commonest way people manage it, and a bare `stat`
+# on a symlink reports the LINK's own mode — 755 — never the file's. `-L` makes
+# the capture mean the file.
+#
 # THE ORDER IS THE FIX. `umask 077` and the `chmod` both come BEFORE the `mv`, so
 # the rename publishes an already-correct inode. Repairing the mode afterwards —
 # the obvious spelling — leaves the tmp holding the tokens at 0644 under a
@@ -83,6 +123,10 @@ BIONIC_LEGACY_HOOK_STRIP_JQ='
 # window between the two. Do not move either below the rename. profile.sh's
 # `_profile_write` carries the same ordering, and tests/remove.test.sh pins the
 # shape across all three writers.
+#
+# THE STALE TMP IS REMOVED, NOT TRUNCATED. `>` on an existing file keeps that
+# file's mode, so a tmp left behind by an earlier interrupted run would carry
+# ITS width through the write until the chmod line below caught up.
 hooks_strip_legacy_channel() {  # <settings-file>
   local settings="${1:-}"
   local tmp mode
@@ -90,8 +134,11 @@ hooks_strip_legacy_channel() {  # <settings-file>
   [ -f "$settings" ] || return 1
   command -v jq >/dev/null 2>&1 || return 1
 
+  settings="$(bionic_link_target "$settings")"
   tmp="${settings}.bionic.tmp"
-  mode="$(stat -f '%Lp' "$settings" 2>/dev/null || stat -c '%a' "$settings" 2>/dev/null)"
+  mode="$(stat -L -f '%Lp' "$settings" 2>/dev/null || stat -L -c '%a' "$settings" 2>/dev/null)"
+  [ -e "$settings" ] || mode=""
+  rm -f "$tmp"
   if (umask 077; jq "$BIONIC_LEGACY_HOOK_STRIP_JQ" "$settings" > "$tmp") \
      && { [ -z "$mode" ] || chmod "$mode" "$tmp"; } \
      && mv "$tmp" "$settings"; then

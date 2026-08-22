@@ -686,6 +686,436 @@ expect_true "wsl-setup.sh points the user at /bionic:setup for the machine tier"
   /usr/bin/grep -qF -- "/bionic:setup" "$WSL"
 
 # ============================================================
+# SECTION 8: SKILL.md's re-converge sentence names update, not install (AC-3)
+# ============================================================
+
+echo ""
+echo "=== Section 8: SKILL.md re-converge sentence (AC-3) ==="
+
+# epic-17 W7 S2. `claude plugin install <id>` on an already-registered id reports
+# "already installed" and does NOT refresh a directory-source cache copy — the CLI's
+# own re-converge verb is `update`. SKILL.md's worktree-paragraph asserted the
+# install-vs-update semantics with the wrong verb in its own closing clause; this pins
+# the fix so the doc and the code (`detect_reconverge_hint`, doctor.sh) cannot drift
+# back apart independently.
+SKILL_S2="${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
+
+_reconverge_update_count="$(/usr/bin/grep -c 'claude plugin update bionic@bionic' "$SKILL_S2" 2>/dev/null || true)"
+expect_true "SKILL.md names the update verb for re-convergence at least once" \
+  [ "${_reconverge_update_count:-0}" -ge 1 ]
+
+# The specific defect: the closing clause of the worktree paragraph used to read
+# "...and `claude plugin install bionic@bionic` is what re-converges them." That exact
+# combination (install, immediately followed by "is what re-converges them") must be
+# gone — the earlier "plugin not installed — run `claude plugin install bionic@bionic`"
+# refusal message in the same paragraph is a DIFFERENT sentence (dispatch-spans.test.sh
+# pins it separately) and stays untouched.
+expect_false "…and no longer says install is what re-converges them" \
+  /usr/bin/grep -qF -- "install bionic@bionic\` is what re-converges them" "$SKILL_S2"
+expect_true "…the sentence now says update is what re-converges them" \
+  /usr/bin/grep -qF -- "update bionic@bionic\` is what re-converges them" "$SKILL_S2"
+
+# epic-17 W7 S2b. S2's fix above was still wrong on the OTHER half of the sentence: it
+# said `update` re-converges them UNCONDITIONALLY, but measured fact (2026-08-21,
+# .bionic/docs/record/epic-17-w7/ac2-relay-drive.md) is that on a directory-source
+# install — a local checkout registered as a feed, which is what a dogfood install is —
+# `claude plugin update bionic@bionic` at an unchanged plugin.json version reports
+# "already at the latest version" and refreshes nothing, because the CLI never reads the
+# cache it would refresh. The sentence must scope the update claim to a git-source feed
+# and say the true, separate thing for a directory-source one.
+expect_true "…the update claim is scoped to a git-source feed" \
+  /usr/bin/grep -qF -- "on a git-source feed \`claude plugin update bionic@bionic\` is what re-converges them" "$SKILL_S2"
+expect_true "…and a directory-source marketplace is told update does nothing for it" \
+  /usr/bin/grep -qF -- "on a directory-source marketplace there is nothing to re-converge with that command" "$SKILL_S2"
+expect_true "…naming the CLI's own words for that no-op" \
+  /usr/bin/grep -qF -- "already at the latest version" "$SKILL_S2"
+
+# epic-17 W7 S11 (six-axis review axis 2). Everything above pins the PROSE half of
+# this fact. This is the code half, and it is here because this section's whole
+# reason to exist is that the doc and the code must not drift apart independently.
+#
+# What changed: `detect_reconverge_hint` returned a FRAGMENT (`nothing to do — …`
+# on a directory source, a bare command on a git source) and doctor spliced it
+# after `re-converge with:` — so the directory-source rendering said "the CLI runs
+# this tree" twice and offered "nothing to do" inside backticks as if it were a
+# command to type. The hint answers with a whole sentence now, per feed AND per
+# state, and doctor prints it without a prefix.
+DETECT_S11="${REPO}/payload/scripts/lib/detect.sh"
+DOCTOR_S11="${REPO}/payload/scripts/doctor.sh"
+
+expect_true "the directory-source lag sentence calls the state nominal, in its own words" \
+  /usr/bin/grep -qF -- "nominal: the CLI runs this tree" "$DETECT_S11"
+expect_false "…and no longer hands back a bare 'nothing to do' as the hint" \
+  /usr/bin/grep -qE -- "printf 'nothing to do" "$DETECT_S11"
+expect_true "the git-source lag sentence carries the update command and the re-run" \
+  /usr/bin/grep -qF -- 'claude plugin update bionic@bionic`, then re-run /bionic:doctor.' "$DETECT_S11"
+expect_true "…and the hint answers per STATE, not one sentence for every site" \
+  /usr/bin/grep -qF -- 'detect_reconverge_hint() {  # <lag|hooks>' "$DETECT_S11"
+expect_true "a directory-source machine with broken wiring is told the tree is what is broken" \
+  /usr/bin/grep -qF -- "the broken wiring is in this tree" "$DETECT_S11"
+
+# Measured over the lines doctor PRINTS, not over its commentary: the comment at the
+# fixed call site quotes the retired prefix in order to say it is retired, and a pin
+# that cannot tell those apart would forbid the file from explaining itself.
+expect_eq "doctor prefixes the hint with nothing — the sentence is the whole line" "" \
+  "$(/usr/bin/grep -n 're-converge with:' "$DOCTOR_S11" | /usr/bin/grep -v '^[0-9]*:[[:space:]]*#' || true)"
+expect_eq "…and never wraps the hint in backticks, which made a sentence look like a command" "" \
+  "$(/usr/bin/grep -nF '`$(detect_reconverge_hint' "$DOCTOR_S11" || true)"
+expect_eq "…and both call sites ask for the state they are reporting" "2" \
+  "$(/usr/bin/grep -cE 'detect_reconverge_hint (lag|hooks)' "$DOCTOR_S11" | tr -d ' ')"
+
+
+# ============================================================
+# SECTION 9: tests/run.sh — the job runner (epic-17 W7 S10, spec AC-16)
+# ============================================================
+
+echo ""
+echo "=== Section 9: tests/run.sh — the job runner (AC-16) ==="
+
+# WHY THIS LIVES HERE. Section 4 pins the hook roster and Section 6 the rules
+# roster; this pins the shape of the thing that RUNS the suite roster. Every other
+# suite asserts its own `run` line exists (A4.S4.1 — there is no count to bump);
+# nothing until now asserted what `tests/run.sh` DOES with those lines. S8's
+# isolation audit found the 44 suites that existed when it ran hermetic under their
+# own `mktemp -d`, and S8b's delta covers the 45th (env.test.sh) the same wave
+# added; together that is what licenses running them concurrently, and this section
+# is the wall that keeps the two modes honest afterwards.
+#
+# HOW IT TESTS THE REAL FILE. Every arm drives a throwaway COPY of tests/run.sh in
+# which only the `run "…"` roster lines have been swapped for fixture ones. Flag
+# parsing, the queue, the worker fork, the verdict printer, the summary line and
+# the exit status are the real file's own code — a fixture roster is the only way
+# to get a deterministic, seconds-long drive of a runner whose real roster takes a
+# quarter of an hour.
+#
+# WHY THE CONCURRENCY ARMS USE A BARRIER AND NOT A STOPWATCH. "Parallel is faster"
+# is a wall-clock claim, and wall-clock under a loaded machine is exactly the
+# flaky-test shape this repo keeps banning. A barrier is load-independent: each
+# fixture suite appends a line and then passes only if it can SEE N lines while it
+# is still running. N suites can only all pass if N of them were alive at once, and
+# a suite that runs alone can never see a second line. The pass/fail SIGNATURE is
+# therefore a direct read of the job count, with no timing assumption in it.
+
+RUNNER_TMP="$(mktemp -d)"
+
+cleanup() {
+  rm -f "$S1_TMPFILE" "$S1_TMPFILE2"
+  rm -rf "$RUNNER_TMP"
+}
+
+RUN_SH_UNDER_TEST="${REPO}/tests/run.sh"
+
+# mk_runner <dir> <roster-line>...
+# A copy of the real runner whose roster block is the lines given here. The awk
+# splices the fixture roster in at the position of the first real `run` line and
+# drops every other one, so the surrounding code — including the comments that
+# explain the hand-listing discipline — is byte-for-byte the shipped file.
+mk_runner() {
+  local dir="$1"; shift
+  mkdir -p "$dir/tests/lib" "$dir/tests/fx"
+  cp "$RUN_SH_UNDER_TEST" "$dir/tests/run.sh.orig"
+  cp "${REPO}/tests/lib/resolve-roots.sh" "$dir/tests/lib/resolve-roots.sh"
+  local roster="$dir/roster.txt"
+  : > "$roster"
+  local line
+  for line in "$@"; do printf '%s\n' "$line" >> "$roster"; done
+  awk -v roster="$roster" '
+    /^run "/ {
+      if (!spliced) { while ((getline l < roster) > 0) print l; spliced = 1 }
+      next
+    }
+    { print }
+  ' "$dir/tests/run.sh.orig" > "$dir/tests/run.sh"
+  rm -f "$dir/tests/run.sh.orig"
+}
+
+# mk_fixture_suites <dir> — the fixture suites every arm below draws from.
+mk_fixture_suites() {
+  local d="$1/tests/fx"
+  printf '%s\n' '#!/bin/bash' 'exit 0' > "$d/green.sh"
+  printf '%s\n' '#!/bin/bash' 'echo "fixture: an assertion failed"' 'exit 1' > "$d/red.sh"
+  printf '%s\n' '#!/bin/bash' 'echo "fixture: about to die"' 'kill -9 $$' > "$d/killer.sh"
+  printf '%s\n' '#!/bin/bash' 'sleep 1' 'exit 0' > "$d/slow.sh"
+  # The barrier: appears alive to its peers, then passes only if BARRIER_N of them
+  # are alive at the same time. 4 s ceiling, polled — never a bare sleep of the
+  # length being measured.
+  cat > "$d/barrier.sh" <<'BARRIER'
+#!/bin/bash
+echo "$$" >> "$BARRIER_FILE"
+i=0
+while [ "$i" -lt 40 ]; do
+  n="$(wc -l < "$BARRIER_FILE" | tr -d ' ')"
+  [ "$n" -ge "$BARRIER_N" ] && exit 0
+  sleep 0.1
+  i=$((i + 1))
+done
+exit 1
+BARRIER
+}
+
+# drive <dir> <outfile> [args...] — run the fixture runner, capture everything,
+# leave its exit status in DRIVE_RC. Never lets a red fixture abort this suite.
+#
+# EVERY KNOB THE RUNNER READS IS SET HERE, ON EVERY CALL — never inherited. The
+# arms below fingerprint the job count by how many barrier suites can see one
+# another, so a `BIONIC_TEST_JOBS=2` already in the operator's shell would report
+# a perfectly-behaving runner as red; and an inherited BIONIC_TEST_TIMING would
+# have each fixture drive append its labels to the operator's timing file — a
+# write outside the fixture root, which is the one thing S8's isolation audit
+# exists to forbid. Empty means "as shipped": the runner's own
+# `${BIONIC_TEST_JOBS:-4}` reads an empty value as unset.
+DRIVE_RC=0
+DRIVE_JOBS=""      # per-arm job count; "" = the runner's shipped default
+DRIVE_TIMING=""    # per-arm timing file; "" = timing off
+drive() {
+  local dir="$1" out="$2"; shift 2
+  DRIVE_RC=0
+  ( cd "$dir" \
+      && BIONIC_TEST_JOBS="$DRIVE_JOBS" BIONIC_TEST_TIMING="$DRIVE_TIMING" \
+         bash tests/run.sh "$@" ) > "$out" 2>&1 || DRIVE_RC=$?
+}
+
+# ---------- 9.1 the two modes agree, all green ----------
+
+A1="$RUNNER_TMP/a1"
+mk_runner "$A1" \
+  'run "one.test.sh" bash tests/fx/green.sh' \
+  'run "two.test.sh" bash tests/fx/green.sh' \
+  'run "three.test.sh" bash tests/fx/green.sh'
+mk_fixture_suites "$A1"
+
+drive "$A1" "$A1/serial.txt" --serial
+_a1_serial_rc="$DRIVE_RC"
+drive "$A1" "$A1/parallel.txt"
+_a1_parallel_rc="$DRIVE_RC"
+
+expect_eq "--serial is a recognised flag (an all-green roster exits 0)" \
+  "0" "$_a1_serial_rc"
+expect_eq "the default mode exits 0 on the same all-green roster" \
+  "0" "$_a1_parallel_rc"
+expect_true "an all-green run is byte-identical in both modes" \
+  diff -q "$A1/serial.txt" "$A1/parallel.txt"
+expect_true "…and it is the real summary line, not a stub" \
+  /usr/bin/grep -qF "Gating: 3 passed, 0 failed" "$A1/parallel.txt"
+
+# ---------- 9.2 the two modes agree with a failure in the roster ----------
+
+A2="$RUNNER_TMP/a2"
+mk_runner "$A2" \
+  'run "one.test.sh" bash tests/fx/green.sh' \
+  'run "two.test.sh" bash tests/fx/red.sh' \
+  'run "three.test.sh" bash tests/fx/green.sh'
+mk_fixture_suites "$A2"
+
+drive "$A2" "$A2/serial.txt" --serial
+_a2_serial_rc="$DRIVE_RC"
+drive "$A2" "$A2/parallel.txt"
+_a2_parallel_rc="$DRIVE_RC"
+
+expect_eq "a red suite fails the serial run" "1" "$_a2_serial_rc"
+expect_eq "a red suite fails the default run identically" "1" "$_a2_parallel_rc"
+expect_true "a red roster is byte-identical in both modes, captured output included" \
+  diff -q "$A2/serial.txt" "$A2/parallel.txt"
+expect_true "…the captured-output block survives the parallel path" \
+  /usr/bin/grep -qF "fixture: an assertion failed" "$A2/parallel.txt"
+expect_true "…and the summary counts it" \
+  /usr/bin/grep -qF "Gating: 2 passed, 1 failed" "$A2/parallel.txt"
+
+# ---------- 9.3 results print in roster order, not completion order ----------
+
+A3="$RUNNER_TMP/a3"
+mk_runner "$A3" \
+  'run "slow.test.sh" bash tests/fx/slow.sh' \
+  'run "quick.test.sh" bash tests/fx/green.sh'
+mk_fixture_suites "$A3"
+drive "$A3" "$A3/parallel.txt"
+
+_slow_line="$(/usr/bin/grep -n 'slow.test.sh' "$A3/parallel.txt" | head -1 | cut -d: -f1 || true)"
+_quick_line="$(/usr/bin/grep -n 'quick.test.sh' "$A3/parallel.txt" | head -1 | cut -d: -f1 || true)"
+_order_ok=0
+if [ -n "$_slow_line" ] && [ -n "$_quick_line" ] && [ "$_slow_line" -lt "$_quick_line" ]; then
+  _order_ok=1
+fi
+expect_eq "the slow suite still prints first — roster order, not finish order" "1" "$_order_ok"
+
+# ---------- 9.4 a suite killed by a signal is reported as KILLED ----------
+
+A4="$RUNNER_TMP/a4"
+mk_runner "$A4" \
+  'run "killer.test.sh" bash tests/fx/killer.sh'
+mk_fixture_suites "$A4"
+
+drive "$A4" "$A4/serial.txt" --serial
+_a4_serial_rc="$DRIVE_RC"
+drive "$A4" "$A4/parallel.txt"
+_a4_parallel_rc="$DRIVE_RC"
+
+# A4.2: with seven full suites running concurrently the kernel SIGKILLed one of
+# them and the old runner printed a plain ✗ FAIL, which reads as "this suite's
+# assertions failed" and sent the reader looking for a defect that was not there.
+expect_true "a SIGKILLed suite reports KILLED, with the signal named (serial)" \
+  /usr/bin/grep -qF "✗ KILLED (SIGKILL)" "$A4/serial.txt"
+expect_true "a SIGKILLed suite reports KILLED, with the signal named (parallel)" \
+  /usr/bin/grep -qF "✗ KILLED (SIGKILL)" "$A4/parallel.txt"
+expect_false "…and never as a plain assertion failure (serial)" \
+  /usr/bin/grep -qF "✗ FAIL" "$A4/serial.txt"
+expect_false "…and never as a plain assertion failure (parallel)" \
+  /usr/bin/grep -qF "✗ FAIL" "$A4/parallel.txt"
+expect_true "…the Failed: list names the signal too" \
+  /usr/bin/grep -qF "killed by SIGKILL" "$A4/parallel.txt"
+expect_true "…it still counts as failed" \
+  /usr/bin/grep -qF "Gating: 0 passed, 1 failed" "$A4/parallel.txt"
+expect_eq "…and it still fails the run (serial)" "1" "$_a4_serial_rc"
+expect_eq "…and it still fails the run (parallel)" "1" "$_a4_parallel_rc"
+
+# ---------- 9.5 the default job count is exactly 4 ----------
+
+# Four barrier suites needing four peers: passes only if four ran at once.
+A5="$RUNNER_TMP/a5"
+mk_runner "$A5" \
+  'run "b1.test.sh" bash tests/fx/barrier.sh' \
+  'run "b2.test.sh" bash tests/fx/barrier.sh' \
+  'run "b3.test.sh" bash tests/fx/barrier.sh' \
+  'run "b4.test.sh" bash tests/fx/barrier.sh'
+mk_fixture_suites "$A5"
+export BARRIER_FILE="$A5/barrier" BARRIER_N=4
+drive "$A5" "$A5/out.txt"
+unset BARRIER_FILE BARRIER_N
+expect_true "the default mode really runs four suites at once" \
+  /usr/bin/grep -qF "Gating: 4 passed, 0 failed" "$A5/out.txt"
+
+# Five barrier suites needing five peers: the first four time out together, the
+# fifth starts as they die and sees all five lines. `1 passed, 4 failed` is the
+# fingerprint of a job count of exactly four — a count of five would be 5 passed.
+A6="$RUNNER_TMP/a6"
+mk_runner "$A6" \
+  'run "b1.test.sh" bash tests/fx/barrier.sh' \
+  'run "b2.test.sh" bash tests/fx/barrier.sh' \
+  'run "b3.test.sh" bash tests/fx/barrier.sh' \
+  'run "b4.test.sh" bash tests/fx/barrier.sh' \
+  'run "b5.test.sh" bash tests/fx/barrier.sh'
+mk_fixture_suites "$A6"
+export BARRIER_FILE="$A6/barrier" BARRIER_N=5
+drive "$A6" "$A6/out.txt"
+unset BARRIER_FILE BARRIER_N
+expect_true "…and not five — the default is bounded, well below the roster size (A4.2)" \
+  /usr/bin/grep -qF "Gating: 1 passed, 4 failed" "$A6/out.txt"
+expect_true "the default job count is named as a settable knob in the runner" \
+  /usr/bin/grep -qF 'BIONIC_TEST_JOBS:-4' "$RUN_SH_UNDER_TEST"
+
+# ---------- 9.6 BIONIC_TEST_JOBS overrides it, and --serial means one ----------
+
+A7="$RUNNER_TMP/a7"
+mk_runner "$A7" \
+  'run "b1.test.sh" bash tests/fx/barrier.sh' \
+  'run "b2.test.sh" bash tests/fx/barrier.sh' \
+  'run "b3.test.sh" bash tests/fx/barrier.sh'
+mk_fixture_suites "$A7"
+export BARRIER_FILE="$A7/barrier" BARRIER_N=3
+DRIVE_JOBS=2
+drive "$A7" "$A7/out.txt"
+DRIVE_JOBS=""
+unset BARRIER_FILE BARRIER_N
+expect_true "BIONIC_TEST_JOBS caps the run (2 jobs, 3 suites needing 3 peers)" \
+  /usr/bin/grep -qF "Gating: 1 passed, 2 failed" "$A7/out.txt"
+
+A8="$RUNNER_TMP/a8"
+mk_runner "$A8" \
+  'run "b1.test.sh" bash tests/fx/barrier.sh' \
+  'run "b2.test.sh" bash tests/fx/barrier.sh'
+mk_fixture_suites "$A8"
+export BARRIER_FILE="$A8/barrier" BARRIER_N=2
+drive "$A8" "$A8/out.txt" --serial
+unset BARRIER_FILE BARRIER_N
+expect_true "--serial runs one at a time — the first suite never sees a peer" \
+  /usr/bin/grep -qF "Gating: 1 passed, 1 failed" "$A8/out.txt"
+
+# ---------- 9.6b the fingerprints do not depend on the operator's environment ----------
+
+# The two knobs the runner reads are the two knobs an operator may already have
+# set in the shell that runs this suite. Both would corrupt the section silently:
+# an ambient BIONIC_TEST_JOBS re-fingerprints every barrier arm above, so a
+# runner behaving exactly as specified would report red; an ambient
+# BIONIC_TEST_TIMING makes each fixture drive append its labels to a file outside
+# its own fixture root — the one thing S8's isolation audit exists to forbid, and
+# it is this suite that would be committing it. `drive` therefore sets both on
+# every call rather than letting either through.
+A11="$RUNNER_TMP/a11"
+mk_runner "$A11" \
+  'run "b1.test.sh" bash tests/fx/barrier.sh' \
+  'run "b2.test.sh" bash tests/fx/barrier.sh' \
+  'run "b3.test.sh" bash tests/fx/barrier.sh' \
+  'run "b4.test.sh" bash tests/fx/barrier.sh'
+mk_fixture_suites "$A11"
+export BARRIER_FILE="$A11/barrier" BARRIER_N=4
+export BIONIC_TEST_JOBS=2 BIONIC_TEST_TIMING="$A11/leaked.tsv"
+drive "$A11" "$A11/out.txt"
+unset BARRIER_FILE BARRIER_N BIONIC_TEST_JOBS BIONIC_TEST_TIMING
+expect_true "an ambient BIONIC_TEST_JOBS never reaches a fixture drive" \
+  /usr/bin/grep -qF "Gating: 4 passed, 0 failed" "$A11/out.txt"
+expect_false "…nor does an ambient BIONIC_TEST_TIMING — no fixture writes outside its root" \
+  [ -e "$A11/leaked.tsv" ]
+
+# ---------- 9.7 per-suite wall-clock is recordable ----------
+
+# S8 finding (c): no per-suite timing has ever existed, so "which suite is the long
+# pole" was answerable only by a line-count proxy. BIONIC_TEST_TIMING is the seam
+# that answers it for real; it is opt-in so that setting it cannot change what the
+# gating run prints.
+A9="$RUNNER_TMP/a9"
+mk_runner "$A9" \
+  'run "slow.test.sh" bash tests/fx/slow.sh' \
+  'run "quick.test.sh" bash tests/fx/green.sh'
+mk_fixture_suites "$A9"
+
+DRIVE_TIMING="$A9/timing-parallel.tsv"
+drive "$A9" "$A9/parallel.txt"
+DRIVE_TIMING="$A9/timing-serial.tsv"
+drive "$A9" "$A9/serial.txt" --serial
+DRIVE_TIMING=""
+
+_tp="$(wc -l < "$A9/timing-parallel.tsv" 2>/dev/null | tr -d ' ' || echo 0)"
+_ts="$(wc -l < "$A9/timing-serial.tsv" 2>/dev/null | tr -d ' ' || echo 0)"
+expect_eq "the default mode records one timing row per suite" "2" "$_tp"
+expect_eq "--serial records one timing row per suite" "2" "$_ts"
+expect_true "…each row is <label>TAB<seconds>" \
+  awk -F'\t' 'NF != 2 || $2 !~ /^[0-9]+$/ { bad = 1 } END { exit bad ? 1 : 0 }' "$A9/timing-parallel.tsv"
+expect_true "…and the one-second fixture is measured as at least a second" \
+  awk -F'\t' '$1 == "slow.test.sh" && $2 >= 1 { found = 1 } END { exit found ? 0 : 1 }' "$A9/timing-parallel.tsv"
+expect_true "setting it does not change what the run prints" \
+  diff -q "$A9/serial.txt" "$A9/parallel.txt"
+
+# ---------- 9.8 an unknown flag is refused, not ignored ----------
+
+# The old runner ignored argv outright, so `bash tests/run.sh --serial` before this
+# slice ran the whole roster and looked like it had honoured a flag it had never
+# heard of. A runner that silently accepts any word is a runner whose mode nobody
+# can prove.
+A10="$RUNNER_TMP/a10"
+mk_runner "$A10" 'run "one.test.sh" bash tests/fx/green.sh'
+mk_fixture_suites "$A10"
+drive "$A10" "$A10/out.txt" --no-such-flag
+expect_true "an unknown flag exits nonzero rather than running the roster" \
+  [ "$DRIVE_RC" -ne 0 ]
+expect_true "…and names the flag it refused" \
+  /usr/bin/grep -qF -- "--no-such-flag" "$A10/out.txt"
+expect_false "…and does not run a single suite" \
+  /usr/bin/grep -qF "✓ PASS" "$A10/out.txt"
+
+# ---------- 9.9 one roster, read by both modes ----------
+
+# The roster stays the hand-listed `run` lines (the whole discipline the runner's
+# own header describes). Both modes go through the same helper, so a suite cannot
+# be present in one mode and absent from the other.
+_run_helper_count="$(/usr/bin/grep -c '^run() {' "$RUN_SH_UNDER_TEST" || true)"
+expect_eq "exactly one roster helper defines what gets run" "1" "$_run_helper_count"
+_roster_lines="$(/usr/bin/grep -c '^run "' "$RUN_SH_UNDER_TEST" || true)"
+expect_true "the roster is still the hand-listed run lines (45 of them today)" \
+  [ "$_roster_lines" -ge 45 ]
+expect_false "no discovery glob has crept in beside them" \
+  /usr/bin/grep -qE '^[^#]*for .* in .*tests/\*\.test\.sh' "$RUN_SH_UNDER_TEST"
+
+# ============================================================
 # Results
 # ============================================================
 

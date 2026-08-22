@@ -157,6 +157,23 @@ _rm_answer_yes() {  # <name> — the route, or nothing when there is no path to 
 RM_ONLY=""
 _rm_wants() { [ -z "$RM_ONLY" ] || [ "$RM_ONLY" = "$1" ]; }
 
+# ─── One answer over a printed plan ──────────────────────────────────────────
+#
+# 1 once the user has said yes to the plan `--all` printed. It is not an
+# assume-yes: nothing is set here until a person has read every item the run
+# would do and typed `y` at a question about that page. What it removes is the
+# SECOND, third and ninth question about a decision already made — see the note
+# above `_rm_print_plan` for why the plan, and not the flag, is the consent.
+RM_ALL=0
+# BOTH NAMES, NOT JUST THIS SCRIPT'S (epic-17 W7 S11, six-axis review axis 4).
+# `_dep_consent` grants consent on `SETUP_ALL` OR `RM_ALL`, and every `tool:*` row
+# this script removes goes through it. Zeroing only the name this script sets left
+# the other one readable straight from the environment, so an exported
+# `SETUP_ALL=1` answered the dependency questions before a person could. Whatever
+# the environment carries for either name dies here, before the mode is even
+# resolved, so the only value this run can ever see is one this script wrote itself.
+SETUP_ALL=0
+
 # ─── The shared literals ─────────────────────────────────────────────────────
 #
 # Each of these is a copy of a constant that lives in the payload libraries, and
@@ -168,6 +185,20 @@ _rm_wants() { [ -z "$RM_ONLY" ] || [ "$RM_ONLY" = "$1" ]; }
 RM_RC_START='# ─── bionic:start ───'
 RM_RC_END='# ─── bionic:end ───'
 RM_TODO_EXPORT_RE='^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=1'
+# The retired env block's markers. NOT a copy of a live constant — setup.sh
+# stopped writing this block at W7 (the names live in settings.json now), so
+# this script is the only place they are still spelled, and it spells them
+# because every machine set up before that carries the block. Verbatim,
+# box-drawing dashes included: they are what makes the block addressable.
+RM_ENV_START='# ─── bionic:env:start ───'
+RM_ENV_END='# ─── bionic:env:end ───'
+# from env.sh: the names bionic owns in settings.json `env`, and the program
+# that deletes one of them. The standalone door cannot source env.sh, so both
+# are copies — pinned to their originals by tests/remove.test.sh, like every
+# other literal here. A name that is in env.sh and not here is a name bionic
+# sets and never removes.
+RM_ENV_KEYS='CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS'
+RM_ENV_UNSET_JQ='if has("env") then (.env |= del(.[$k])) | (if (.env | length) == 0 then del(.env) else . end) else . end'
 RM_LEGACY_ALIAS_RE='alias claude=.*dangerously-skip-permissions'
 # from detect.sh: the substring that puts a managed-hook entry on the legacy channel
 RM_LEGACY_HOOK_SUBSTR='.claude/hooks/'
@@ -197,6 +228,15 @@ if [ -f "${RM_LIB_DIR}/deps.sh" ] && [ -f "${RM_LIB_DIR}/profile.sh" ]; then
   # shellcheck source=/dev/null
   . "${RM_LIB_DIR}/deps.sh" && . "${RM_LIB_DIR}/profile.sh" && RM_MODE=payload
 fi
+# env.sh, when it is there. The environment item deletes names out of
+# settings.json, and env.sh is the owner of which names those are and of the
+# delete itself — so the payload door calls it and the standalone door falls
+# back to its own copy of the same jq program, exactly as the profile strip
+# already does. tests/remove.test.sh drives both and compares the bytes.
+if [ "$RM_MODE" = "payload" ] && [ -f "${RM_LIB_DIR}/env.sh" ]; then
+  # shellcheck source=/dev/null
+  . "${RM_LIB_DIR}/env.sh"
+fi
 
 # ─── Outcome records ─────────────────────────────────────────────────────────
 
@@ -204,21 +244,46 @@ RM_REMOVED=0
 RM_CLEAN=0
 RM_SKIPPED=0
 RM_SKIPPED_LIST=""
+RM_NOT_CHECKED=0
+RM_NOT_CHECKED_LIST=""
 RM_LEFTOVERS=""
 
 _rm_removed() { RM_REMOVED=$((RM_REMOVED + 1)); echo "  ✓ ${1}"; }
 _rm_clean()   { RM_CLEAN=$((RM_CLEAN + 1));     echo "  ✓ ${1} — already clean"; }
-_rm_skipped() {  # <name> <what was left>
-  local route
-  route="$(_rm_answer_yes "$1")"
+# <rc> is the caller's `$?` from the `_rm_consent` call it just lost — captured
+# at the call site, before any other command can overwrite it (AC-12). 1 is an
+# explicit no; 2 is EOF, nobody there to ask. Both are skipped in the same way
+# and land in the same Skipped list; only the leading word differs, so a reader
+# can tell a recorded decline from a first pass nobody answered.
+_rm_skipped() {  # <rc> <name> <what was left>
+  local rc="$1" name="$2" what="$3" route verb
+  route="$(_rm_answer_yes "$name")"
   RM_SKIPPED=$((RM_SKIPPED + 1))
   if [ -n "$route" ]; then
-    RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ ${2} — ${route}"$'\n'
+    RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ ${what} — ${route}"$'\n'
   else
-    RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ ${2}"$'\n'
+    RM_SKIPPED_LIST="${RM_SKIPPED_LIST}    ⚠ ${what}"$'\n'
   fi
-  echo "  declined — ${2} left in place."
+  if [ "$rc" = "2" ]; then verb="not asked"; else verb="declined"; fi
+  echo "  ${verb} — ${what} left in place."
   [ -n "$route" ] && echo "  ${route}"
+  return 0
+}
+# NOT CLEAN, AND NOT DECLINED EITHER — NOT LOOKED AT (critic delta 2 N2). AND NOT
+# THE USER'S CHOICE EITHER (critic delta 3 F2). `_rm_clean` states a fact about
+# the machine: this item was checked and there is nothing there. `_rm_skipped`
+# states a fact about the reader: they were asked and answered no (or were never
+# there to ask). This row is neither — the check never RAN, and on the `--all`
+# path that reaches it, the reader was never asked anything at all — so it gets
+# its own tally and its own list rather than being booked into either. Counting
+# it as a skip made the summary say "N skipped by you" and file it under
+# "Skipped (your choice — still on this machine)" for a choice nobody made; that
+# is the same class of defect as `_rm_clean` asserting a fact the run never
+# checked, moved one field over.
+_rm_not_checked() {  # <what was not checked> <why, in the user's terms>
+  RM_NOT_CHECKED=$((RM_NOT_CHECKED + 1))
+  RM_NOT_CHECKED_LIST="${RM_NOT_CHECKED_LIST}    ⚠ ${1} — not checked: ${2}"$'\n'
+  echo "  not checked — ${2}"
   return 0
 }
 _rm_leftover() { RM_LEFTOVERS="${RM_LEFTOVERS}    ✗ ${1}"$'\n'; echo "  ⚠ ${1}"; }
@@ -228,10 +293,16 @@ _rm_leftover() { RM_LEFTOVERS="${RM_LEFTOVERS}    ✗ ${1}"$'\n'; echo "  ⚠ ${
 # Identical in shape to deps.sh's `_dep_consent`, and identical in rule: nothing
 # but an explicit yes counts, and EOF (a non-interactive stdin) counts as no.
 
-_rm_consent() {  # <prompt>
+_rm_consent() {  # <prompt> -> 0 yes, 1 an explicit no, 2 EOF (nobody there to ask)
   local prompt="$1" answer=""
+  # THE ANSWER IS ALREADY GIVEN, AND IT WAS GIVEN TO THIS ITEM. Under `--all`
+  # the user read a plan naming every item below and consented to that page, so
+  # asking again is asking them to answer the same question twice. The plan is
+  # built from the same roster these questions come from, which is what makes
+  # the yes above cover the yes here rather than standing in for one.
+  [ "$RM_ALL" = "1" ] && return 0
   printf '  %s [y/N] ' "$prompt"
-  IFS= read -r answer || { echo ""; return 1; }
+  IFS= read -r answer || { echo ""; return 2; }
   echo ""
   case "$answer" in y|Y|yes|YES|Yes) return 0 ;; *) return 1 ;; esac
 }
@@ -248,6 +319,56 @@ _rm_slurp_into() {  # <varname> <file>
   printf -v "$__rm_var" '%s' "$__rm_text"
 }
 
+# ─── Writing through a symlink ───────────────────────────────────────────────
+#
+# WHAT A DOTFILES USER GETS OTHERWISE (critic delta 2 N1). A `~/.zshrc` or a
+# `~/.claude/settings.json` symlinked into a dotfiles repo is a regular way to
+# manage those files. Every writer below stages a `<file>.bionic.tmp` and `mv`s
+# it into place, and `mv` REPLACES the link with a regular file: the rewrite
+# lands in a fresh inode at the link's path, the dotfiles copy keeps the content
+# this script just reported REMOVING, `git status` in that repo shows nothing,
+# and the next `stow` puts the whole footprint back. For a remover that is the
+# worst shape the defect can take — the summary says the machine is clean and the
+# file the user actually manages still holds the block. So every writer resolves
+# the path to the FINAL target of its symlink chain and publishes onto THAT: the
+# link survives, still points where it did, and the file it names is what changed.
+#
+# NO `realpath`, and no `readlink -f`. `realpath` is not on a bare macOS, and BSD
+# `readlink` has no `-f`. One hop at a time, relative targets resolved against the
+# LINK's own directory (what the kernel does), with a hop cap so a symlink loop
+# terminates instead of spinning. Bash 3.2 throughout.
+#
+# HONEST DEGRADATION, the contract `stat` already has here: no `readlink` on the
+# machine means the loop breaks on the first hop and the caller writes to the path
+# as given — the behaviour every writer had before this existed. The standalone
+# door runs on the box with the bare /bin and must still write.
+#
+# THE ABSENT CASE IS NOT NEUTRAL (critic delta 3 F5). Absent `readlink`, the write
+# lands on the link's path as given, which replaces a symlink with a regular
+# file — the pre-S15 behaviour. `readlink` lives beside `stat` on both platforms
+# this payload targets, so the risk is negligible; it is recorded here because the
+# consequence, not just the mechanism, is what a reader of this comment needs.
+#
+# BYTE-IDENTICAL TO THE THREE COPIES IN scripts/lib/, name included, because the
+# standalone door runs where scripts/lib/ is already gone and the payload door
+# must not get a different resolver. When deps.sh IS beside this script it is
+# sourced first and this definition replaces it with the same bytes;
+# tests/remove.test.sh pins all four against each other the way it pins the
+# settings writer.
+bionic_link_target() {  # <path> — the final target of a symlink chain, else <path>
+  local p="${1:-}" link dir n=0
+  while [ -L "$p" ] && [ "$n" -lt 40 ]; do
+    link="$(readlink "$p" 2>/dev/null)" || break
+    [ -n "$link" ] || break
+    case "$link" in
+      /*) p="$link" ;;
+      *)  dir="${p%/*}"; [ "$dir" = "$p" ] && dir="."; p="${dir}/${link}" ;;
+    esac
+    n=$((n + 1))
+  done
+  printf '%s\n' "$p"
+}
+
 # Byte-identical to profile.sh's `_profile_write` apart from the name, which is
 # what tests/remove.test.sh pins. The mode capture is not decoration: `mv`
 # replaces the inode, so a settings.json the user kept at 0600 would come back at
@@ -255,10 +376,19 @@ _rm_slurp_into() {  # <varname> <file>
 # profile.sh for why `stat` is spelled twice, why an absent `stat` degrades to
 # "write, don't chmod" rather than to a refusal — the standalone door runs on the
 # machine with the bare /bin — and why the `umask 077` and the `chmod` must both
-# stay ABOVE the `mv`.
+# stay ABOVE the `mv`. The path is resolved through `bionic_link_target` first,
+# so a symlinked settings.json is REWRITTEN rather than detached from the repo
+# that manages it (critic delta 2 N1); `-L` then reads the resolved file's mode,
+# and `[ -e ]` catches the one input `-L` lies about — a dangling link, which BSD
+# `stat -L` reports as the LINK's 755 with exit 0 (N4). The stale tmp is `rm -f`'d
+# rather than truncated, for the same reason profile.sh's copy is.
 _rm_write() {  # <file> <content> <trailing-newline 0|1>
-  local file="$1" content="$2" nl="$3" tmp="${1}.bionic.tmp" mode
-  mode="$(stat -f '%Lp' "$file" 2>/dev/null || stat -c '%a' "$file" 2>/dev/null)"
+  local file content="$2" nl="$3" tmp mode
+  file="$(bionic_link_target "$1")"
+  tmp="${file}.bionic.tmp"
+  mode="$(stat -L -f '%Lp' "$file" 2>/dev/null || stat -L -c '%a' "$file" 2>/dev/null)"
+  [ -e "$file" ] || mode=""
+  rm -f "$tmp"
   if [ "$nl" = "1" ]; then (umask 077; printf '%s\n' "$content" > "$tmp"); else (umask 077; printf '%s' "$content" > "$tmp"); fi
   [ -n "$mode" ] && chmod "$mode" "$tmp"
   mv "$tmp" "$file" || return 1
@@ -290,35 +420,122 @@ _rm_file_has_line_matching() {  # <file> <ere>
   return 1
 }
 
+# THE MODE TRAVELS WITH THE CONTENT (critic F2). Both rewriters below stage the
+# new file beside the old one and `mv` it into place, and `mv` replaces the inode:
+# without this, a shell rc the user deliberately kept at 0600 comes back at
+# whatever the umask says, because bionic answered one question about a retired
+# marker block. That is the same defect `_dep_settings_write_jq` and `_rm_write`
+# already guard for settings.json, and the rc is if anything the likelier of the
+# two to hold plaintext tokens — it is where people put `export …_API_KEY=`.
+#
+# TWO HARMS, NOT ONE, WHICH IS WHY THE ORDER MATTERS. Repairing the mode after the
+# rename would fix the published file and still leave the staged copy — the whole
+# rc, secrets included, under a predictable name — at the umask's mode for the
+# span before it, and would make the widening PERMANENT if the process died in
+# that window. So the tmp is CREATED under `umask 077` and chmodded to the
+# original's mode before a single line is written into it: nothing ever exists at
+# a mode wider than the file it is replacing. An absent `stat` degrades to
+# "write, don't chmod" rather than to a refusal — the standalone door runs on the
+# machine with the bare /bin.
+#
+# AND IT IS THE TARGET'S MODE, NOT THE LINK'S (critic delta D1). A `~/.zshrc`
+# symlinked into a dotfiles repo is the commonest way people manage an rc, and a
+# bare `stat` on a symlink reports the LINK's own mode — 755 — never the file's.
+# Capturing that and handing it to `chmod` publishes the user's rc as
+# `rwxr-xr-x`: WIDER than the file being replaced, which is the one outcome this
+# capture exists to prevent, and wider than the no-capture code produced before
+# it (the tmp was simply born at the process umask). `-L` is what makes the
+# capture mean the file — except on a DANGLING link, where BSD `stat -L` falls
+# back to reporting the link's own 755 and exits 0 rather than failing (critic
+# delta 2 N4). `[ -e ]` is what turns that into the empty "unknowable" answer the
+# callers already handle. Both flavours of `stat` take `-L`.
+#
+# AND THE WRITE ITSELF GOES TO THE TARGET, not to the link — see the resolver's
+# header above. The two are one act: resolve, then read the resolved file's mode.
+_rm_mode_of() {  # <file> — the mode of what <file> RESOLVES to, empty if unknowable
+  local mode
+  mode="$(stat -L -f '%Lp' "$1" 2>/dev/null || stat -L -c '%a' "$1" 2>/dev/null)"
+  [ -e "$1" ] || mode=""
+  printf '%s' "$mode"
+}
+
+# ONE STAGING ORDER, AND THE CHMOD IS AT THE END OF IT (critic delta 2 N5).
+# Create the tmp under `umask 077`, let the caller write the content into it, and
+# only then widen it to the target's mode and rename. Measured, that keeps the
+# staged copy at 0600 for the whole span in which it holds the user's file — the
+# span that matters, because that is when the tmp is worth reading — and gives it
+# the target's mode at the instant of publication and not one moment sooner. The
+# order S13 shipped (chmod, THEN write) had the tmp already wearing a 0644 rc's
+# mode while the rc's own contents, tokens and all, were being written into it.
+#
+# A tmp left behind by an earlier interrupted run is REMOVED rather than
+# truncated: `>` on an existing file keeps that file's mode, so truncating one
+# would carry a stale width through the window `umask 077` exists to close.
+_rm_stage_tmp() {  # <tmp> — created empty at 0600; the caller writes, then publishes
+  local tmp="$1"
+  rm -f "$tmp"
+  (umask 077; : > "$tmp") || return 1
+  return 0
+}
+
+# The other half: widen <tmp> to <file>'s mode and rename it over <file>. <file>
+# is the RESOLVED target, so its mode is still readable here — the rename is what
+# replaces it.
+_rm_publish_tmp() {  # <tmp> <file>
+  local tmp="$1" file="$2" mode
+  mode="$(_rm_mode_of "$file")"
+  [ -n "$mode" ] && chmod "$mode" "$tmp"
+  mv "$tmp" "$file"
+}
+
 # Drops every line matching an ERE.
 _rm_filter_out_lines() {  # <file> <ere>
   local file="$1"
   local ere="$2"
-  local tmp="${file}.bionic.tmp"
+  local target
+  target="$(bionic_link_target "$file")"
+  local tmp="${target}.bionic.tmp"
   local line
-  : > "$tmp" || return 1
+  _rm_stage_tmp "$tmp" || return 1
   while IFS= read -r line || [ -n "$line" ]; do
     [[ "$line" =~ $ere ]] && continue
     printf '%s\n' "$line" >> "$tmp"
   done < "$file"
-  mv "$tmp" "$file"
+  _rm_publish_tmp "$tmp" "$target"
 }
 
 # Drops a marker-delimited block, markers included. Line equality is exact —
 # these markers carry box-drawing dashes, and a fuzzy match would be a rewrite
 # rule for lines nobody wrote.
+# THE BLANK LINE ABOVE THE BLOCK GOES WITH IT. Every block bionic ever appended
+# to a shell rc was written as `\n<start>\n…\n<end>\n` — a separator line first,
+# so the block did not butt up against whatever the user's last line was. A strip
+# that removes only the marked lines leaves that separator behind, and the file
+# the user gets back is one blank line different from the file they had. It reads
+# as nothing and it is nothing, right up until someone diffs a machine against a
+# clean one. So exactly ONE immediately-preceding blank line is dropped with the
+# block: a run of them keeps all but the last, which is the honest reading of
+# "bionic added one".
+#
+# The pending-line shape is what makes that possible in one pass: a blank line is
+# held rather than written, and either flushed when the next real line arrives or
+# discarded when the next line turns out to be the start marker.
 _rm_strip_marker_block() {  # <file> <start-line> <end-line>
-  local file="$1" start="$2" end="$3"
-  local tmp="${file}.bionic.tmp"
-  local line skip=0
-  : > "$tmp" || return 1
+  local file="$1" start="$2" end="$3" target
+  target="$(bionic_link_target "$file")"
+  local tmp="${target}.bionic.tmp"
+  local line skip=0 pending=0
+  _rm_stage_tmp "$tmp" || return 1
   while IFS= read -r line || [ -n "$line" ]; do
-    if [ "$line" = "$start" ]; then skip=1; continue; fi
+    if [ "$line" = "$start" ]; then skip=1; pending=0; continue; fi
     if [ "$line" = "$end" ];   then skip=0; continue; fi
     [ "$skip" = "1" ] && continue
+    if [ "$pending" = "1" ]; then printf '\n' >> "$tmp"; pending=0; fi
+    if [ -z "$line" ]; then pending=1; continue; fi
     printf '%s\n' "$line" >> "$tmp"
   done < "$file"
-  mv "$tmp" "$file"
+  [ "$pending" = "1" ] && printf '\n' >> "$tmp"
+  _rm_publish_tmp "$tmp" "$target"
 }
 
 _rm_indent() {  # <text> — four spaces on every line, no sed
@@ -340,6 +557,18 @@ _rm_purge_dir() {  # <dir>
   rm -rf "$target"
 }
 
+# Does this directory hold anything at all — dotfiles included? Bash 3.2 has no
+# option to make a glob see hidden entries and an unmatched glob comes back as
+# its own pattern, so each candidate is tested for existence rather than counted.
+_rm_dir_is_empty() {  # <dir> — true when nothing is inside
+  local d="${1:-}" entry
+  [ -d "$d" ] || return 1
+  for entry in "$d"/* "$d"/.[!.]* "$d"/..?*; do
+    if [ -e "$entry" ] || [ -L "$entry" ]; then return 1; fi
+  done
+  return 0
+}
+
 # ─── The roots every item reads ──────────────────────────────────────────────
 #
 # Resolved once, above the items, because more than one item reads each of them
@@ -351,6 +580,15 @@ RM_SETTINGS="$(_rm_settings_file)"
 RM_LEGACY_SKILL_DIR="$(_rm_claude_home)/skills/${RM_LEGACY_SKILL_NAME}"
 RM_DATA_ROOT="$(_rm_plugin_data_dir)"
 RM_DATA_DECLINED=0
+# ONE OFFER PER RUN. The orphan question has two callers — the uninstall that
+# creates the orphans, and the roster entry that owns the standalone case — and a
+# whole pass reaches both. Asking twice would be asking a person to answer the
+# same thing twice, so the first caller closes the door behind it.
+RM_ORPHANS_OFFERED=0
+# THE FOLLOW-ON'S PRECONDITION, VISIBLE TO THE ITEM THAT IS NOT ITS PARENT
+# (critic delta D2). Set by the plugin item when its uninstall was owed and did
+# not land, and read by the roster's orphan entry a moment later.
+RM_PLUGIN_STILL_INSTALLED=0
 
 # ─── The roster ──────────────────────────────────────────────────────────────
 #
@@ -362,7 +600,7 @@ RM_DATA_DECLINED=0
 _rm_item_ids() {
   local n
   echo "legacy-alias"
-  echo "shell-env"
+  echo "environment"
   echo "legacy-hooks"
   echo "legacy-skill-copy"
   echo "permission-profile"
@@ -379,6 +617,168 @@ _rm_item_ids() {
   return 0
 }
 
+# ─── The plan `--all` prints ─────────────────────────────────────────────────
+#
+# WHY A PLAN AND NOT AN ASSUME-YES FLAG. Nine questions is a bad experience for
+# someone who has already decided to remove everything, and the obvious fix —
+# a flag that answers them — is the hole in "consent per event, never silent,
+# never unattended": an item added to the roster next year would then run on a
+# machine whose owner never saw it named. So the whole run is made into ONE
+# event instead. Every item that would be asked about is printed with what it
+# changes, one line each, and the single question is asked over that page. The
+# user consents to a list they can read, and nothing runs that was not on it.
+#
+# ONE ROSTER, READ TWICE. The plan walks `_rm_item_ids` — the same list `--list`
+# prints and `--only` is checked against — and asks `_rm_item_pending` the same
+# question each item asks itself before it prompts. A plan built from its own
+# idea of what is outstanding would come to disagree with the run it is a plan
+# FOR, which is the one defect a consent screen must not have.
+#
+# A FOLLOW-ON IS NAMED BY ITS ACT, NOT BY ITS SUBJECTS. An item whose precondition
+# another item CREATES cannot list what it will touch before its parent runs —
+# nothing is orphaned until the uninstall lands, and the CLI's dry run says
+# exactly that if asked early. What it CAN state is the act and the honest reason
+# the list is not here yet, and under `--all` it must: the one question is asked
+# over this page, so an act missing from it would run on an answer nobody was
+# asked for. `_rm_print_plan` below prints that conditional line under the parent
+# it depends on; the run then holds to the condition the line states, and skips
+# the follow-on when the parent did not land.
+
+# What one item changes, in the words the item's own question uses. Product
+# words only: this lands on a person's screen, and it is the only description
+# of that item they get before they answer.
+_rm_item_verb() {  # <id>
+  case "${1:-}" in
+    legacy-alias)          echo "remove the retired shell alias block from ${RC_FILE}" ;;
+    environment)           echo "delete bionic's environment settings from ${RM_SETTINGS}" ;;
+    legacy-hooks)          echo "remove the retired hook entries from ${RM_SETTINGS}" ;;
+    legacy-skill-copy)     echo "remove the pre-plugin skill copy at ${RM_LEGACY_SKILL_DIR}" ;;
+    permission-profile)    echo "remove bionic's permission marker block from ${RM_SETTINGS}" ;;
+    permission-mode)       echo "reset Claude Code's default permission mode" ;;
+    plugin-data)           echo "delete bionic's plugin data under ${RM_DATA_ROOT}" ;;
+    plugin)                echo "remove the plugin $(_rm_registered_plugin_id) (claude plugin uninstall)" ;;
+    orphaned-dependencies) echo "remove the dependencies nothing needs any more (claude plugin prune)" ;;
+    tool:*)                echo "remove ${1#tool:}" ;;
+    *)                     return 1 ;;
+  esac
+  return 0
+}
+
+# Whether this item would ask a question on this machine — the predicate each
+# item below runs before it prints anything, asked from the outside so the plan
+# and the run cannot come to differ about what is outstanding. Read-only: every
+# branch here is a file test or a listing, never a change.
+_rm_item_pending() {  # <id> -> 0 when the item has something to ask about
+  local id="${1:-}" count keys present behavior
+  case "$id" in
+    legacy-alias)
+      [ -f "$RC_FILE" ] || return 1
+      _rm_file_has_literal "$RC_FILE" "$RM_RC_START" && return 0
+      _rm_file_has_line_matching "$RC_FILE" "$RM_LEGACY_ALIAS_RE" && return 0
+      return 1 ;;
+    environment)
+      keys="$(_rm_env_keys_present)" || keys=""
+      [ -n "$keys" ] && return 0
+      _rm_file_has_literal "$RC_FILE" "$RM_ENV_START" && return 0
+      _rm_file_has_line_matching "$RC_FILE" "$RM_TODO_EXPORT_RE" && return 0
+      return 1 ;;
+    legacy-hooks)
+      [ -f "$RM_SETTINGS" ] || return 1
+      _rm_have jq || return 1
+      count="$(jq "$RM_LEGACY_HOOK_COUNT_JQ" "$RM_SETTINGS" 2>/dev/null)"
+      case "$count" in ''|*[!0-9]*|0) return 1 ;; esac
+      return 0 ;;
+    legacy-skill-copy)
+      [ -d "$RM_LEGACY_SKILL_DIR" ] && [ -f "${RM_LEGACY_SKILL_DIR}/SKILL.md" ] ;;
+    permission-profile)
+      _rm_file_has_literal "$RM_SETTINGS" "$RM_PROFILE_BEGIN_PREFIX" ;;
+    permission-mode)
+      _rm_have jq || return 1
+      [ -f "$RM_SETTINGS" ] || return 1
+      [ "$(jq -r '.permissions.defaultMode // ""' "$RM_SETTINGS" 2>/dev/null)" = "$(_rm_default_mode)" ] ;;
+    tool:*)
+      # THE ROW'S OWN POLICY DECIDES WHETHER THERE IS A QUESTION. A shared
+      # binary is reported and kept; a plugin bionic declares goes with the
+      # uninstall below; somebody else's copy of a same-named plugin is left
+      # alone. None of those asks anything, so none of them belongs on a page
+      # headed "bionic would".
+      [ "$RM_MODE" = "payload" ] || return 1
+      present="$(check_dep "${id#tool:}")"
+      present="${present#present=}"; present="${present%%|*}"
+      [ "$present" = "yes" ] || return 1
+      behavior="$(dep_field "${id#tool:}" removal_behavior)"
+      case "$behavior" in
+        keep-shared) return 1 ;;
+        native-uninstall-offer)
+          [ "$(dep_field "${id#tool:}" class)" = "core" ] && return 1
+          [ "$(_dep_native_registry_state "${id#tool:}")" = "ours" ] || return 1
+          return 0 ;;
+      esac
+      return 0 ;;
+    plugin-data)
+      local dir
+      for dir in "$RM_DATA_ROOT"/bionic-*; do
+        [ -d "$dir" ] && return 0
+      done
+      return 1 ;;
+    plugin)
+      [ -n "$(_rm_registered_plugin_id)" ] ;;
+    orphaned-dependencies)
+      # ON THE PAGE WHEN THE CLI CAN NAME IT NOW — which is the case where this
+      # row stands alone. Nothing is orphaned until the uninstall lands, so while
+      # the plugin is still installed the dry run honestly names nothing and this
+      # predicate is false; the plan carries the CONDITIONAL line `_rm_print_plan`
+      # writes for the parent instead. On a machine where the plugin is already
+      # gone there is no parent to hang that line on and the orphans are real
+      # right now, so the row names itself the ordinary way — a person who comes
+      # back for them alone gets them on the page like everything else.
+      _rm_have claude || return 1
+      case "$(claude plugin prune --dry-run 2>/dev/null)" in
+        *@*) return 0 ;;
+      esac
+      return 1 ;;
+    *)
+      return 1 ;;
+  esac
+}
+
+# The whole page. Non-zero means there was nothing to print, which is a machine
+# with nothing left to remove rather than an error.
+_rm_print_plan() {
+  local id verb lines="" plugin_pending=""
+  # THE ONE ITEM THAT CANNOT NAME ITS SUBJECTS, AND WHY IT IS STILL ON THE PAGE.
+  # Nothing is orphaned until the uninstall lands, so the CLI's dry run — asked
+  # here, with bionic still installed — names nothing. The names are unknowable
+  # now; the ACT is not. And `--all` collapses every question in the run into the
+  # one asked over this page, so a prune that appeared nowhere on it would run on
+  # an answer nobody was asked for — the spec's own Never, "an assume-yes path
+  # with no printed plan". It is not a small silence either: `claude plugin prune`
+  # takes the auto-installed rows, which include the core plugins the roster
+  # deliberately refuses to offer BY NAME in any mode. So when the plugin item is
+  # on the page the follow-on goes on it too, worded for what is actually known —
+  # the act, and the honest reason the list is not here yet — and the one answer
+  # covers both. When the plugin is NOT pending there is no parent to hang it on,
+  # and `_rm_item_pending` above puts the row on the page under its own verb if
+  # the CLI names orphans now.
+  _rm_item_pending plugin && plugin_pending=1
+  # fd 3: the standard input belongs to the question this page is printed for.
+  while IFS= read -r id <&3; do
+    [ -n "$id" ] || continue
+    if [ "$id" = "orphaned-dependencies" ] && [ -n "$plugin_pending" ]; then
+      lines="${lines}  • remove any dependencies the uninstall leaves orphaned (checked after the plugin is removed)"$'\n'
+      continue
+    fi
+    _rm_item_pending "$id" || continue
+    verb="$(_rm_item_verb "$id")" || continue
+    lines="${lines}  • ${verb}"$'\n'
+  done 3< <(_rm_item_ids)
+  [ -n "$lines" ] || return 1
+  echo "bionic would:"
+  printf '%s' "$lines"
+  echo ""
+  return 0
+}
+
 # ─── Arguments ───────────────────────────────────────────────────────────────
 #
 # Read here rather than in a wrapper, because the roster they are checked
@@ -388,10 +788,13 @@ _rm_item_ids() {
 # like a machine that was already clean.
 
 rm_list=0
+rm_all=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --list)
       rm_list=1; shift ;;
+    --all)
+      rm_all=1; shift ;;
     --only)
       if [ $# -lt 2 ] || [ -z "${2:-}" ]; then
         echo "remove: --only needs the name of the one item to remove."
@@ -407,6 +810,16 @@ while [ $# -gt 0 ]; do
       exit 2 ;;
   esac
 done
+
+# TWO NARROWINGS THAT CANNOT BOTH APPLY. `--only` runs one item; `--all` runs
+# every item over one answer. Together they would have to mean something, and
+# whatever that something was, half the people who typed it would mean the other
+# one — so it stops here, before anything is printed at the machine.
+if [ "$rm_all" = "1" ] && [ -n "$RM_ONLY" ]; then
+  echo "remove: --all and --only cannot be combined — --all does every item, --only does exactly one."
+  echo "        run ${RM_SELF_CMD:-this script} --list to see the names --only takes."
+  exit 2
+fi
 
 if [ "$rm_list" = "1" ]; then
   _rm_item_ids
@@ -470,11 +883,11 @@ _rm_item_legacy_alias() {
         if _rm_strip_marker_block "$RC_FILE" "$RM_RC_START" "$RM_RC_END"; then
           _rm_removed "legacy alias block in ${RC_FILE}"
         else
-          rm -f "${RC_FILE}.bionic.tmp"
+          rm -f "$(bionic_link_target "$RC_FILE").bionic.tmp"
           _rm_leftover "could not rewrite ${RC_FILE} — the alias block is still there"
         fi
       else
-        _rm_skipped legacy-alias "legacy alias block in ${RC_FILE}"
+        _rm_skipped "$?" legacy-alias "legacy alias block in ${RC_FILE}"
       fi
       ;;
     legacy)
@@ -486,34 +899,142 @@ _rm_item_legacy_alias() {
           _rm_leftover "could not rewrite ${RC_FILE} — the legacy alias line is still there"
         fi
       else
-        _rm_skipped legacy-alias "legacy alias line in ${RC_FILE}"
+        _rm_skipped "$?" legacy-alias "legacy alias line in ${RC_FILE}"
       fi
       ;;
   esac
   echo ""
 }
 
-# ─── Item: the CLAUDE_CODE_ENABLE_TODO_TOOLS export ──────────────────────────
+# ─── Item: bionic's environment settings ─────────────────────────────────────
 #
-# The predicate is detect.sh's, character for character: a commented-out export
-# is NOT present, so it is not removed either.
+# ONE ITEM OVER TWO SURFACES, AND WHY THAT IS STILL ONE QUESTION. bionic's
+# environment lives in settings.json `env` now, and every machine set up before
+# W7 is also carrying the retired `# ─── bionic:env:start/end ───` block the old
+# step appended to the shell rc. Those are two files, but they are one thing —
+# "the environment bionic configured" — and asking twice would make a user answer
+# the same question about the same decision in two places, which is how half a
+# teardown happens. So the run states everything it found and asks once.
+#
+# THE WHOLE BLOCK, NOT THE EXPORT INSIDE IT. The previous teardown matched the
+# export line and filtered it out, which left the marker pair sitting empty in
+# the user's rc — bionic footprint that reads like a bionic setting whose value
+# nobody can find. The block goes, markers and separator line included, and the
+# file comes back byte-identical to what it was before setup ever appended to it.
+#
+# AND THE BARE EXPORT TOO. A machine that was set up before the markers existed,
+# or whose user moved the line, carries the export with no block around it. That
+# was removable before and stays removable: the predicate is detect.sh's, so a
+# commented-out line is not present and is not removed.
+#
+# THE NAMES ARE ENV.SH'S. In payload mode the delete goes through `env_unset`,
+# the owner. Standalone there is no owner to call, so the copy of its jq program
+# above is used with this script's own writer — the same two-door shape the
+# profile strip has carried since W3, and tests/remove.test.sh compares the bytes
+# the two doors produce.
 
-_rm_item_shell_env() {
-  _rm_wants shell-env || return 0
-  echo "todo-tools export:"
-  if _rm_file_has_line_matching "$RC_FILE" "$RM_TODO_EXPORT_RE"; then
-    echo "  ${RC_FILE} exports CLAUDE_CODE_ENABLE_TODO_TOOLS=1; bionic would delete that line."
-    if _rm_consent "Remove the CLAUDE_CODE_ENABLE_TODO_TOOLS export from ${RC_FILE}?"; then
-      if _rm_filter_out_lines "$RC_FILE" "$RM_TODO_EXPORT_RE"; then
-        _rm_removed "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
-      else
-        _rm_leftover "could not rewrite ${RC_FILE} — the export is still there"
-      fi
-    else
-      _rm_skipped shell-env "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
+# Delete one name from settings.json `env`. Payload mode delegates; standalone
+# mode runs the copied program. Absent is success either way: a second teardown
+# reporting a problem where there is nothing left to do is a false alarm.
+_rm_env_unset() {  # <key>
+  local key="${1:-}" stripped nl rm_env_text
+  if [ "$RM_MODE" = "payload" ] && declare -F env_unset >/dev/null 2>&1; then
+    env_unset "$key"
+    return $?
+  fi
+  [ -f "$RM_SETTINGS" ] || return 0
+  _rm_have jq || return 1
+  # The trailing newline is preserved the way every other item here preserves
+  # it: read the file, look at its last byte, hand the answer to _rm_write.
+  nl=0
+  _rm_slurp_into rm_env_text "$RM_SETTINGS" && case "$rm_env_text" in *$'\n') nl=1 ;; esac
+  stripped="$(jq --arg k "$key" "$RM_ENV_UNSET_JQ" "$RM_SETTINGS" 2>/dev/null)" || return 1
+  _rm_write "$RM_SETTINGS" "$stripped" "$nl"
+}
+
+# Which of bionic's names this machine actually carries. Read through jq so a
+# machine without it says "cannot tell" rather than "clean".
+_rm_env_keys_present() {
+  local key found=""
+  _rm_have jq || return 1
+  [ -f "$RM_SETTINGS" ] || return 0
+  for key in $RM_ENV_KEYS; do
+    if [ "$(jq -r --arg k "$key" '.env[$k] // empty' "$RM_SETTINGS" 2>/dev/null)" != "" ]; then
+      found="${found}${found:+ }${key}"
     fi
-  else
-    _rm_clean "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
+  done
+  echo "$found"
+  return 0
+}
+
+_rm_item_environment() {
+  _rm_wants environment || return 0
+  echo "bionic's environment settings:"
+
+  local keys block=no bare=no question="" jq_missing=no consent_rc=0
+  if ! keys="$(_rm_env_keys_present)"; then jq_missing=yes; keys=""; fi
+  _rm_file_has_literal "$RC_FILE" "$RM_ENV_START" && block=yes
+  if [ "$block" = "no" ] && _rm_file_has_line_matching "$RC_FILE" "$RM_TODO_EXPORT_RE"; then bare=yes; fi
+
+  if [ "$jq_missing" = "yes" ] && [ "$block" = "no" ] && [ "$bare" = "no" ]; then
+    _rm_leftover "cannot read ${RM_SETTINGS} without jq — bionic's environment settings were left as they are"
+    echo ""
+    return 0
+  fi
+
+  if [ -z "$keys" ] && [ "$block" = "no" ] && [ "$bare" = "no" ]; then
+    _rm_clean "bionic's environment settings"
+    echo ""
+    return 0
+  fi
+
+  # State every surface, then ask once. The question names the files rather than
+  # counting them: a user deciding this wants to know what gets touched.
+  if [ -n "$keys" ]; then
+    echo "  ${RM_SETTINGS} carries ${keys}; bionic would delete those names and leave the rest of the file alone."
+  fi
+  if [ "$block" = "yes" ]; then
+    echo "  ${RC_FILE} carries a retired bionic environment block; bionic would delete the block and everything between its markers."
+  elif [ "$bare" = "yes" ]; then
+    echo "  ${RC_FILE} exports CLAUDE_CODE_ENABLE_TODO_TOOLS=1; bionic would delete that line."
+  fi
+
+  question="Remove bionic's environment settings?"
+  # The rc is captured from _rm_consent's OWN call, not read after an `if !`
+  # test — `!` reports its own 0/1 and would flatten an unanswered first pass
+  # (2) into a false "declined" (S6, AC-12).
+  _rm_consent "$question"; consent_rc=$?
+  if [ "$consent_rc" -ne 0 ]; then
+    _rm_skipped "$consent_rc" environment "bionic's environment settings"
+    echo ""
+    return 0
+  fi
+
+  local key failed=""
+  for key in $keys; do
+    if _rm_env_unset "$key"; then
+      _rm_removed "${key} in ${RM_SETTINGS}"
+    else
+      rm -f "$(bionic_link_target "$RM_SETTINGS").bionic.tmp"
+      failed="${failed}${failed:+ }${key}"
+    fi
+  done
+  [ -n "$failed" ] && _rm_leftover "could not rewrite ${RM_SETTINGS} — ${failed} is still there"
+
+  if [ "$block" = "yes" ]; then
+    if _rm_strip_marker_block "$RC_FILE" "$RM_ENV_START" "$RM_ENV_END"; then
+      _rm_removed "retired environment block in ${RC_FILE}"
+    else
+      rm -f "$(bionic_link_target "$RC_FILE").bionic.tmp"
+      _rm_leftover "could not rewrite ${RC_FILE} — the environment block is still there"
+    fi
+  elif [ "$bare" = "yes" ]; then
+    if _rm_filter_out_lines "$RC_FILE" "$RM_TODO_EXPORT_RE"; then
+      _rm_removed "CLAUDE_CODE_ENABLE_TODO_TOOLS export in ${RC_FILE}"
+    else
+      rm -f "$(bionic_link_target "$RC_FILE").bionic.tmp"
+      _rm_leftover "could not rewrite ${RC_FILE} — the export is still there"
+    fi
   fi
   echo ""
 }
@@ -583,7 +1104,7 @@ _rm_item_legacy_hooks() {
         _rm_leftover "${RM_SETTINGS} is not valid JSON — refusing to write; the legacy-channel entries are still there"
       fi
     else
-      _rm_skipped legacy-hooks "legacy-channel managed-hook entries in ${RM_SETTINGS}"
+      _rm_skipped "$?" legacy-hooks "legacy-channel managed-hook entries in ${RM_SETTINGS}"
     fi
   fi
   echo ""
@@ -628,7 +1149,7 @@ _rm_item_legacy_skill_copy() {
         _rm_leftover "could not remove ${RM_LEGACY_SKILL_DIR} — the legacy skill copy is still there"
       fi
     else
-      _rm_skipped legacy-skill-copy "legacy installed skill copy at ${RM_LEGACY_SKILL_DIR}"
+      _rm_skipped "$?" legacy-skill-copy "legacy installed skill copy at ${RM_LEGACY_SKILL_DIR}"
     fi
   else
     _rm_clean "legacy installed skill copy"
@@ -690,7 +1211,7 @@ _rm_item_permission_profile() {
         fi
       fi
     else
-      _rm_skipped permission-profile "permission marker block in ${RM_SETTINGS}"
+      _rm_skipped "$?" permission-profile "permission marker block in ${RM_SETTINGS}"
     fi
   else
     _rm_clean "permission marker block in ${RM_SETTINGS}"
@@ -735,7 +1256,7 @@ _rm_item_permission_mode() {
         _rm_leftover "${RM_SETTINGS} is not valid JSON — refusing to write; the default permission mode is unchanged"
       fi
     else
-      _rm_skipped permission-mode "default permission mode in ${RM_SETTINGS}"
+      _rm_skipped "$?" permission-mode "default permission mode in ${RM_SETTINGS}"
     fi
   else
     _rm_clean "default permission mode in ${RM_SETTINGS}"
@@ -865,8 +1386,13 @@ _rm_item_plugin_data() {
         _rm_leftover "some plugin data under ${RM_DATA_ROOT} could not be removed"
       fi
     else
+      # $? has to be captured BEFORE the assignment below — an assignment's own
+      # exit status is 0 on success, which would silently turn every EOF into a
+      # false "declined" here (the one call site where something runs ahead of
+      # _rm_skipped).
+      rm_data_consent_rc=$?
       RM_DATA_DECLINED=1
-      _rm_skipped plugin-data "plugin data under ${RM_DATA_ROOT}"
+      _rm_skipped "$rm_data_consent_rc" plugin-data "plugin data under ${RM_DATA_ROOT}"
     fi
   fi
   echo ""
@@ -882,6 +1408,29 @@ _rm_item_plugin_data() {
 # door's whole premise is a machine whose answer may be "nothing is registered" —
 # and because a machine could carry bionic from a differently-named marketplace.
 
+# THE ID THE REGISTRY HOLDS, asked of the CLI rather than assumed — a machine
+# could carry bionic from a differently-named marketplace, and the standalone
+# door's whole premise is a machine whose answer may be "nothing is registered".
+# ONE OWNER, because the plan `--all` prints has to name the same plugin the
+# uninstall takes: a plan that named a different id than the command that runs
+# would be a plan for a different machine.
+_rm_registered_plugin_id() {
+  local listing id=""
+  _rm_have claude || return 0
+  listing="$(claude plugin list --json 2>/dev/null)" || listing=""
+  [ -n "$listing" ] || return 0
+  if _rm_have jq; then
+    id="$(printf '%s' "$listing" \
+      | jq -r '[ .[]? | select((.id? // "" | split("@")[0]) == "bionic") | .id ][0] // empty' 2>/dev/null)"
+  else
+    # No jq: the id is pulled out of the listing text by bash's own regex
+    # engine. A machine missing jq is exactly the machine this door serves.
+    if [[ "$listing" =~ \"(bionic@[^\"]+)\" ]]; then id="${BASH_REMATCH[1]}"; fi
+  fi
+  printf '%s' "$id"
+  return 0
+}
+
 _rm_item_plugin() {
   _rm_wants plugin || return 0
   # AN ANSWER NOBODY GAVE IS A NO. The uninstall deletes the plugin data unless
@@ -892,18 +1441,11 @@ _rm_item_plugin() {
   _rm_wants plugin-data || RM_DATA_DECLINED=1
   echo "native plugin uninstall:"
   rm_plugin_id=""
+  rm_uninstall_ok=0
   if ! _rm_have claude; then
     _rm_leftover "the claude CLI is not on PATH — the native plugin uninstall cannot be invoked here"
   else
-    rm_listing="$(claude plugin list --json 2>/dev/null)" || rm_listing=""
-    if [ -n "$rm_listing" ] && _rm_have jq; then
-      rm_plugin_id="$(printf '%s' "$rm_listing" \
-        | jq -r '[ .[]? | select((.id? // "" | split("@")[0]) == "bionic") | .id ][0] // empty' 2>/dev/null)"
-    elif [ -n "$rm_listing" ]; then
-      # No jq: the id is pulled out of the listing text by bash's own regex
-      # engine. A machine missing jq is exactly the machine this door serves.
-      if [[ "$rm_listing" =~ \"(bionic@[^\"]+)\" ]]; then rm_plugin_id="${BASH_REMATCH[1]}"; fi
-    fi
+    rm_plugin_id="$(_rm_registered_plugin_id)"
 
     if [ -z "$rm_plugin_id" ]; then
       _rm_clean "the bionic plugin (not registered with the CLI)"
@@ -913,8 +1455,17 @@ _rm_item_plugin() {
       rm_uninstall_argv=(claude plugin uninstall "$rm_plugin_id" --yes)
       [ "$RM_DATA_DECLINED" = "1" ] && rm_uninstall_argv+=(--keep-data)
       echo "  bionic would run: ${rm_uninstall_argv[*]}"
+      # WHAT WAS ALREADY THERE, recorded before the call that may add to it. The
+      # re-check below removes an empty directory the UNINSTALL left; saying so
+      # truthfully means knowing which directories the uninstall did not leave.
+      rm_data_before=""
+      for rm_data_dir in "$RM_DATA_ROOT"/bionic-*; do
+        [ -d "$rm_data_dir" ] || continue
+        rm_data_before="${rm_data_before}${rm_data_dir}"$'\n'
+      done
       if _rm_consent "Uninstall ${rm_plugin_id} now?"; then
         if "${rm_uninstall_argv[@]}"; then
+          rm_uninstall_ok=1
           _rm_removed "plugin ${rm_plugin_id}"
           # ─── Re-check: plugin data, in case the uninstall recreated it ──────
           #
@@ -925,36 +1476,84 @@ _rm_item_plugin() {
           # (r1-surface-map.md Item 4). The consent already given is honored
           # against what is actually on disk now, not re-asked: a user who
           # consented to removing bionic's plugin data gets that promise kept
-          # even if the CLI resurrects the directory afterward; a user who
-          # declined is left exactly as they asked, recreated or not.
-          if [ "$RM_DATA_DECLINED" = "0" ]; then
-            rm_data_recheck=""
-            for rm_data_dir in "$RM_DATA_ROOT"/bionic-*; do
-              [ -d "$rm_data_dir" ] || continue
-              rm_data_recheck="${rm_data_recheck}${rm_data_dir}"$'\n'
-            done
-            if [ -n "$rm_data_recheck" ]; then
-              rm_data_recheck_failed=0
-              while IFS= read -r rm_data_dir <&3; do
-                [ -n "$rm_data_dir" ] || continue
-                _rm_purge_dir "$rm_data_dir" || rm_data_recheck_failed=1
-              done 3<<< "$rm_data_recheck"
-              if [ "$rm_data_recheck_failed" = "0" ]; then
-                _rm_removed "plugin data under ${RM_DATA_ROOT} — recreated by the uninstall, removed again"
+          # even if the CLI resurrects the directory afterward.
+          #
+          # AND AN EMPTY DIRECTORY IS NOT THE USER'S DATA. The live teardown that
+          # found this took the OTHER path — the data question belonged to a
+          # different run, so this one told the uninstall to keep the data, and
+          # the CLI left an EMPTY directory behind anyway. Keeping nothing is not
+          # what "keep my data" asked for; it is just litter with bionic's name
+          # on it. So a directory that holds nothing goes either way, and a
+          # directory that holds something is removed only where the user said
+          # so. Nothing here re-asks, because neither branch takes anything the
+          # user has.
+          #
+          # AND THE CLAIM HAS TO BE TRUE. "The uninstall left this behind" is only
+          # sayable about a directory the uninstall actually left, so a directory
+          # that was already there when this run began is not taken on that
+          # ground — which is also what keeps this from removing something the
+          # user declined by name a few lines earlier in the same report.
+          rm_data_recheck=""
+          for rm_data_dir in "$RM_DATA_ROOT"/bionic-*; do
+            [ -d "$rm_data_dir" ] || continue
+            if [ "$RM_DATA_DECLINED" = "1" ]; then
+              case $'\n'"${rm_data_before}" in
+                *$'\n'"${rm_data_dir}"$'\n'*) continue ;;
+              esac
+              _rm_dir_is_empty "$rm_data_dir" || continue
+            fi
+            rm_data_recheck="${rm_data_recheck}${rm_data_dir}"$'\n'
+          done
+          if [ -n "$rm_data_recheck" ]; then
+            rm_data_recheck_failed=0
+            while IFS= read -r rm_data_dir <&3; do
+              [ -n "$rm_data_dir" ] || continue
+              _rm_purge_dir "$rm_data_dir" || rm_data_recheck_failed=1
+            done 3<<< "$rm_data_recheck"
+            if [ "$rm_data_recheck_failed" = "0" ]; then
+              if [ "$RM_DATA_DECLINED" = "1" ]; then
+                _rm_removed "an empty plugin data directory the uninstall left under ${RM_DATA_ROOT} — it held nothing of yours"
               else
-                _rm_leftover "some plugin data under ${RM_DATA_ROOT} could not be removed after the uninstall recreated it"
+                _rm_removed "plugin data under ${RM_DATA_ROOT} — recreated by the uninstall, removed again"
               fi
+            else
+              _rm_leftover "some plugin data under ${RM_DATA_ROOT} could not be removed after the uninstall recreated it"
             fi
           fi
         else
           _rm_leftover "claude plugin uninstall ${rm_plugin_id} failed — the plugin is still registered"
         fi
       else
-        _rm_skipped plugin "plugin ${rm_plugin_id}"
+        _rm_skipped "$?" plugin "plugin ${rm_plugin_id}"
       fi
     fi
   fi
   echo ""
+  # ─── The follow-on rides with the item that creates it ──────────────────────
+  #
+  # A DEPENDENT CHANGE IS CONSENTED WHEN IT BECOMES REAL. Nothing is orphaned
+  # until this uninstall lands, so a run narrowed to one item meets the orphan
+  # question BEFORE its own precondition exists: asked first, the CLI's dry run
+  # answers with bionic still installed, names nothing, and prints no question —
+  # and nobody comes back once the uninstall has made it true. So the offer is
+  # made here, by the item that made the orphans, in the run that made them.
+  #
+  # Only in a narrowed run, and only after a real uninstall: a whole pass already
+  # reaches the roster's own entry a moment later, and an uninstall that never
+  # happened orphaned nothing.
+  #
+  # THE SAME CONDITION, HANDED TO THE ROSTER ENTRY. A whole pass reaches
+  # `_rm_item_orphans` next, and that entry has no `rm_uninstall_ok` of its own —
+  # so it is told here, by the item that knows. "The uninstall was owed and did
+  # not land" covers a failure, a decline, and an EOF alike: in all three the
+  # plugin is still installed, and the page's sentence is about what removing it
+  # would leave behind.
+  if [ -n "$rm_plugin_id" ] && [ "$rm_uninstall_ok" != "1" ]; then
+    RM_PLUGIN_STILL_INSTALLED=1
+  fi
+  if [ "$RM_ONLY" = "plugin" ] && [ "$rm_uninstall_ok" = "1" ]; then
+    _rm_offer_orphans
+  fi
 }
 
 # ─── Finisher: orphaned dependencies ─────────────────────────────────────────
@@ -966,6 +1565,50 @@ _rm_item_plugin() {
 
 _rm_item_orphans() {
   _rm_wants orphaned-dependencies || return 0
+  # THE PAGE SAID "THE UNINSTALL LEAVES", SO THE RUN WAITS FOR THE UNINSTALL
+  # (critic delta D2). Under `--all` the plugin row's presence replaces this
+  # item's own line with a conditional one — "remove any dependencies the
+  # uninstall leaves orphaned (checked after the plugin is removed)" — and that
+  # sentence is the ENTIRE consent obtained for the prune. If the uninstall did
+  # not land, the condition it names did not happen, so nothing the CLI reports
+  # now was left by it; running `claude plugin prune` anyway takes precisely the
+  # auto-installed rows the roster refuses to offer BY NAME in any mode, on an
+  # answer given for a different event. `--only plugin` already gates its own
+  # offer on the same fact.
+  #
+  # ONLY UNDER `--all`, BECAUSE THAT IS WHERE THE CONSENT WAS COLLAPSED. A
+  # per-item pass asks this item's own question in place, with the CLI's list of
+  # names printed above it — a person declining the uninstall and then pruning
+  # dependencies they can read is consenting to exactly what happens, and this
+  # item's standalone case (coming back for orphans alone) lives on that path.
+  # Gating there would refuse a question nobody has a reason to refuse.
+  #
+  # AND WHAT IT SAYS IS WHAT HAPPENED, NOT WHAT IS TRUE (critic delta 2 N2). This
+  # branch returns before `_rm_offer_orphans` ever asks the CLI, so it has no
+  # standing to report the machine — and "nothing is orphaned" is plainly false
+  # whenever orphans predate this run (a previous partial teardown, a plugin
+  # removed by hand): `claude plugin prune --dry-run` will name them a second
+  # later. Booking that as `already clean` also counted it into the clean tally
+  # and kept it out of the blocks a reader scans, so a user with real orphans was
+  # told there was nothing there. The honest line is that the check did not run,
+  # and why, and it is counted on its own line, not with the skips (critic delta 3 F2).
+  if [ "$RM_ALL" = "1" ] && [ "$RM_PLUGIN_STILL_INSTALLED" = "1" ]; then
+    echo "orphaned dependencies:"
+    _rm_not_checked "orphaned dependencies" \
+      "the plugin uninstall did not land, so orphaned dependencies were not looked at"
+    echo "  re-run the removal once the uninstall succeeds and this item will be checked."
+    echo ""
+    return 0
+  fi
+  _rm_offer_orphans
+}
+
+# The offer itself, callable by whoever gets there first. `_rm_item_plugin` calls
+# it because the uninstall is what MAKES these dependencies orphans; the roster
+# entry above calls it because a person may come back for them alone.
+_rm_offer_orphans() {
+  [ "$RM_ORPHANS_OFFERED" = "1" ] && return 0
+  RM_ORPHANS_OFFERED=1
   echo "orphaned dependencies:"
   if ! _rm_have claude; then
     _rm_clean "orphaned dependencies (no claude CLI to ask)"
@@ -982,7 +1625,7 @@ _rm_item_orphans() {
             _rm_leftover "claude plugin prune failed — the orphaned dependencies are still installed"
           fi
         else
-          _rm_skipped orphaned-dependencies "orphaned dependencies"
+          _rm_skipped "$?" orphaned-dependencies "orphaned dependencies"
         fi
         ;;
       *)
@@ -995,8 +1638,31 @@ _rm_item_orphans() {
 
 # ─── Run ─────────────────────────────────────────────────────────────────────
 
+# THE ONE EVENT, BEFORE ANY ITEM SPEAKS. Under `--all` the whole page is printed
+# and answered here; every question below then finds the answer already given.
+# A no — or nobody there to answer — leaves the machine exactly as it was, which
+# is the same floor a per-item pass holds to.
+if [ "$rm_all" = "1" ]; then
+  # THE PAGE IS BUILT WITH THE ANSWER CHANNEL CLOSED. Every predicate behind it
+  # shells out — the CLI's listing, the dependency probes — and a child that
+  # reads its inherited stdin eats the one `y` this run is about to ask for.
+  # Nothing here needs stdin, so nothing here gets it.
+  if ! _rm_print_plan < /dev/null; then
+    echo "  nothing to remove — this machine is already clean."
+    echo ""
+    exit 0
+  fi
+  _rm_consent "Do all of the above?"; rm_all_rc=$?
+  if [ "$rm_all_rc" -ne 0 ]; then
+    echo "  nothing changed."
+    echo ""
+    exit 0
+  fi
+  RM_ALL=1
+fi
+
 _rm_item_legacy_alias
-_rm_item_shell_env
+_rm_item_environment
 _rm_item_legacy_hooks
 _rm_item_legacy_skill_copy
 _rm_item_permission_profile
@@ -1015,7 +1681,13 @@ _rm_item_orphans
 # print is what it did: the counts, and anything it could not finish.
 
 if [ -n "$RM_ONLY" ]; then
-  printf '  %d removed · %d already clean · %d skipped by you\n' "$RM_REMOVED" "$RM_CLEAN" "$RM_SKIPPED"
+  # NO "not checked" SEGMENT HERE (critic delta 4 G4). `_rm_not_checked`'s one
+  # call site is gated on `RM_ALL = 1`, and `--all`/`--only` are mutually
+  # exclusive (checked above) — so RM_NOT_CHECKED is always 0 on this branch. A
+  # fourth segment that can never read anything but "0 not checked" is not
+  # information; it stays on the whole-pass line below, where it can.
+  printf '  %d removed · %d already clean · %d skipped by you\n' \
+    "$RM_REMOVED" "$RM_CLEAN" "$RM_SKIPPED"
   echo ""
   if [ -n "$RM_LEFTOVERS" ]; then
     echo "  Leftovers (bionic could not finish these)"
@@ -1031,12 +1703,19 @@ else
   echo "# ─── remove finished — leftovers present ──────────────────────"
 fi
 echo ""
-printf '  %d removed · %d already clean · %d skipped by you\n' "$RM_REMOVED" "$RM_CLEAN" "$RM_SKIPPED"
+printf '  %d removed · %d already clean · %d skipped by you · %d not checked\n' \
+  "$RM_REMOVED" "$RM_CLEAN" "$RM_SKIPPED" "$RM_NOT_CHECKED"
 echo ""
 
 if [ -n "$RM_SKIPPED_LIST" ]; then
   echo "  Skipped (your choice — still on this machine)"
   printf '%s' "$RM_SKIPPED_LIST"
+  echo ""
+fi
+
+if [ -n "$RM_NOT_CHECKED_LIST" ]; then
+  echo "  Not checked (bionic couldn't verify — still on this machine)"
+  printf '%s' "$RM_NOT_CHECKED_LIST"
   echo ""
 fi
 
@@ -1057,7 +1736,15 @@ echo "    • Restart your shell if the rc file changed"
 # including four lines under a Skipped list naming the things still on the machine. A
 # summary that contradicts the list above it is worse than no summary: it teaches the
 # reader to stop reading it. So the unqualified sentence is now the CLEAN run's sentence,
-# and a run that left anything behind gets one that points at what it left.
+# and a run that left anything behind gets one that points at what it left. A not-checked
+# row is exactly as unfinished as a skipped or leftover one — bionic never verified it is
+# gone — but there is no `RM_NOT_CHECKED -eq 0` clause here: RM_NOT_CHECKED can only become
+# non-zero via `_rm_not_checked`'s one call site, gated on RM_PLUGIN_STILL_INSTALLED=1, which
+# is itself only ever set alongside a leftover (uninstall failed) or a skip (declined/EOF) —
+# so this gate's other two clauses already fail on every reachable not-checked run. A prior
+# revision added a third clause here that no fixture could ever make the deciding one;
+# removed rather than shipped as decoration (critic delta 4 G2). If a second
+# `_rm_not_checked` caller is ever added without that entailment, re-add the clause then.
 if [ "$RM_SKIPPED" -eq 0 ] && [ -z "$RM_LEFTOVERS" ]; then
   echo "    • Claude Code still works, without bionic's skills, hooks and agents"
 else
