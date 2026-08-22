@@ -286,68 +286,43 @@ LITERALS
 # crosses a line break in the committed prose still matches as one sentence.
 DOCTRINE_FLAT() { tr '\n' ' ' < "$1" | tr -s ' '; }
 
-# THE RETIREMENT PIN READS CODE, NOT PROSE (critic delta 2 N3 — D5, reopened).
-# D5 widened the `disown` needle to `& disown` so a role file could still STATE
-# the standing never-disown rule. It cannot: the rule's own text is "never arm a
-# sweeper with `& disown`", and `grep -F '& disown'` matches that sentence too.
-# The needle was never the problem — the SURFACE was. A retirement pin must fire
-# on an instruction to do the thing and stay silent on a sentence about it, so
-# the surface it reads drops the two shapes a mention takes in these files:
+# THE RETIREMENT PIN READS THE POSITIVE (critic delta 3 F1 — supersedes A6.S15.6).
+# S15's `DOCTRINE_CODE` surface dropped inline code spans and blockquote lines to
+# tell a MENTION of `& disown` from a real instruction. Both shapes it dropped are
+# the house style for a REAL instruction in these very files: survival.md gives
+# its own operative commands in backticks (measured: stripping code spans erases
+# `run_in_background` from a fenced-free reading of survival.md), and the whole
+# Critic Mandate (`agents/critic.md:21`) and Auditor Mandate (`agents/auditor.md:21`)
+# are single blockquote lines — dropping `^\s*>` deletes them outright. Measured
+# on the shipped matcher: 35-37% of the two most instruction-dense rendered role
+# files (auditor.md, critic.md) went unread. There is also no historical `disown`
+# anywhere under `agents/` or `agents-src/` (`/usr/bin/grep -rn disown` → nothing),
+# so the needle was never protecting a live defect — it is cheaper to stop looking
+# for the negative than to keep widening a surface that costs real coverage. Pin
+# the POSITIVE the S12 needles already state instead (`run_in_background` and the
+# `echo "EXIT=$?" >> "$LOG"` snippet, both asserted in DOCTRINE_PRESENT below), and
+# retire the code-span/blockquote stripper along with the `& disown` needle.
 #
-#   * an inline `code span` — how every role file quotes a forbidden literal; and
-#   * a blockquote line — how a block quotes a rule it is citing.
-#
-# Fenced code blocks are kept verbatim: a fenced block is an instruction, and a
-# pin that skipped it would be blind to the only place a real `& disown` would
-# plausibly be written. The controls below prove both directions.
-DOCTRINE_CODE() {  # <file> — the role file with its MENTIONS removed and its USES kept
-  awk '
-    /^[[:space:]]*```/ { fence = !fence; print; next }
-    fence              { print; next }
-    /^[[:space:]]*>/   { next }
-    { gsub(/`[^`]*`/, ""); print }
-  ' "$1" | tr '\n' ' ' | tr -s ' '
-}
-
-# The controls, run once rather than per role, because they measure the matcher
-# and not the files. A pin that cannot go red on a planted defect is decoration.
+# Positive control, run once rather than per role, because it measures the
+# matcher and not the files: a role fixture missing the snippet must be caught
+# missing by the exact substring the DOCTRINE_PRESENT loop below checks for.
 N3_DIR="$TMP/n3"; mkdir -p "$N3_DIR"
-printf 'Never arm a sweeper with `& disown` — it severs delivery-by-exit.\n' > "$N3_DIR/mention.md"
-printf '> never arm a sweeper with & disown\n' > "$N3_DIR/quoted.md"
-printf 'Arm the sweeper now: bash sweeper.sh & disown\n'                     > "$N3_DIR/use.md"
-printf 'Run it like this:\n\n```\nbash sweeper.sh & disown\n```\n'          > "$N3_DIR/fenced.md"
-if printf '%s' "$(DOCTRINE_CODE "$N3_DIR/mention.md")" | grep -qF '& disown'; then
-  fail "N3 control: a role file may STATE the never-disown rule in a code span" "the mention still matches"
+printf 'the fallback bullet says nothing about backgrounding or exit codes.\n' > "$N3_DIR/missing-positive.md"
+if printf '%s' "$(DOCTRINE_FLAT "$N3_DIR/missing-positive.md")" | grep -qF 'run_in_background'; then
+  fail "positive control: a role fixture without run_in_background is caught missing" \
+    "the planted fixture matched anyway"
 else
-  pass "N3 control: a role file may STATE the never-disown rule in a code span"
+  pass "positive control: a role fixture without run_in_background is caught missing"
 fi
-if printf '%s' "$(DOCTRINE_CODE "$N3_DIR/quoted.md")" | grep -qF '& disown'; then
-  fail "N3 control: …or quote it in a blockquote" "the quoted rule still matches"
+if printf '%s' "$(DOCTRINE_FLAT "$N3_DIR/missing-positive.md")" | grep -qF 'echo "EXIT=$?" >> "$LOG"'; then
+  fail "positive control: a role fixture without the EXIT= snippet is caught missing" \
+    "the planted fixture matched anyway"
 else
-  pass "N3 control: …or quote it in a blockquote"
-fi
-if printf '%s' "$(DOCTRINE_CODE "$N3_DIR/use.md")" | grep -qF '& disown'; then
-  pass "N3 control: a real prose INSTRUCTION to disown is still caught (the pin discriminates)"
-else
-  fail "N3 control: a real prose INSTRUCTION to disown is still caught (the pin discriminates)" "the planted use went unseen"
-fi
-if printf '%s' "$(DOCTRINE_CODE "$N3_DIR/fenced.md")" | grep -qF '& disown'; then
-  pass "N3 control: …and so is one inside a fenced code block"
-else
-  fail "N3 control: …and so is one inside a fenced code block" "the planted use went unseen"
-fi
-# And the discrimination is REAL rather than incidental: the surface this needle
-# used to read matches the mention too, which is the defect being closed.
-if printf '%s' "$(DOCTRINE_FLAT "$N3_DIR/mention.md")" | grep -qF '& disown'; then
-  pass "N3 control: the pre-S15 flat surface DID match the mention (this is what was broken)"
-else
-  fail "N3 control: the pre-S15 flat surface DID match the mention (this is what was broken)" \
-    "the flat surface no longer reproduces the defect — the two surfaces are not distinguishable"
+  pass "positive control: a role fixture without the EXIT= snippet is caught missing"
 fi
 
 for r in $ROLES; do
   R_FLAT="$(DOCTRINE_FLAT "$OUT/$r.md")"
-  R_CODE="$(DOCTRINE_CODE "$OUT/$r.md")"
   while IFS='|' read -r label needle; do
     [ -z "$label" ] && continue
     if printf '%s' "$R_FLAT" | grep -qF "$needle"; then
@@ -371,22 +346,17 @@ DOCTRINE_PRESENT
     else
       pass "agents/$r.md: retired doctrine is gone: $label"
     fi
-  # The `& disown` needle moved out of this list at S15 — see DOCTRINE_CODE above
-  # for why a shape alone could not tell the rule's mention from its use.
+  # The `& disown` absent-needle retired at S16 (critic delta 3 F1): there is no
+  # historical `disown` anywhere under agents/ or agents-src/, so it protected no
+  # live defect, and its DOCTRINE_CODE surface cost real coverage of a real
+  # instruction (see the comment above this loop). The positive pin above —
+  # `run_in_background` and the EXIT= snippet present — is what stands guard now.
   done <<'DOCTRINE_ABSENT'
 no sleep-5 poll loop|sleep 5
 no fixed ~120-second threshold|roughly 120
 no auto-backgrounds framing|auto-backgrounds
 no nohup — a mechanism with no evidence and the wrong survival semantics|nohup
 DOCTRINE_ABSENT
-  # The one needle that has to tell a mention from an instruction reads the
-  # code-only surface instead of the flat one; everything above is a phrase no
-  # role file would quote, so the flat surface is right for it.
-  if printf '%s' "$R_CODE" | grep -qF '& disown'; then
-    fail "agents/$r.md: retired doctrine is gone: no shell background job" "still instructed: & disown"
-  else
-    pass "agents/$r.md: retired doctrine is gone: no shell background job"
-  fi
 done
 
 # ---------- E2: the read-only roles' delivery duty (epic-17 W5 slice 4/1, spec AC-1) ----
