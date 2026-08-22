@@ -328,13 +328,18 @@ assert_contains "absent version names 14 as the supported value" \
 # ============================================================
 #
 # Governance keys off the triple: presence + whole-value enum validation,
-# the `mode:` split-brain guard, barred intent × scale cells, the 5
-# discriminator + 2 opt-in flags, `model_plan`, and a `## Verification
-# Matrix` at sdlc-step >= 3 for wave/epic plans.
+# the `mode:` split-brain guard, the 5 discriminator + 2 opt-in flags,
+# `model_plan`, and a `## Verification Matrix` at sdlc-step >= 3 for
+# wave/epic plans.
 #
 # Enums: intent ∈ {build,bugfix,refactor,tune,spike,incident-response};
 #        rigor ∈ {tested,peer-reviewed,audited}; scale ∈ {task,wave,epic}.
-# Barred intent × scale cells: bugfix·epic, spike·epic, incident-response·epic.
+#
+# No intent × scale cell is barred (T9, epic-18-w1): every combination that
+# clears the enum + flag + matrix checks writes cleanly, including the three
+# cells a prior version refused (bugfix·epic, spike·epic,
+# incident-response·epic) — the triple is the user's whole call, not a
+# derivable refusal.
 
 project=$(make_project)
 
@@ -382,20 +387,17 @@ run_write "$project/.bionic/docs/plans/epic-01-demo/mode.plan.md" "$(build_plan 
 assert_eq "blocks_mode_present exit 2" 2 "$HOOK_EXIT"
 assert_contains "blocks_mode_present names mode" "mode" "$HOOK_STDERR"
 
-echo "barred cell bugfix × epic → block"
+echo "formerly-barred cell bugfix × epic → allow (T9: barred-cell check removed)"
 run_write "$project/.bionic/docs/plans/epic-01-demo/bugfix-epic.plan.md" "$(build_plan intent=bugfix scale=epic)"
-assert_eq "blocks_barred_bugfix_epic exit 2" 2 "$HOOK_EXIT"
-assert_contains "blocks_barred_bugfix_epic says barred" "barred" "$HOOK_STDERR"
+assert_eq "allows_formerly_barred_bugfix_epic exit 0" 0 "$HOOK_EXIT"
 
-echo "barred cell spike × epic → block"
+echo "formerly-barred cell spike × epic → allow (T9: barred-cell check removed)"
 run_write "$project/.bionic/docs/plans/epic-01-demo/spike-epic.plan.md" "$(build_plan intent=spike scale=epic)"
-assert_eq "blocks_barred_spike_epic exit 2" 2 "$HOOK_EXIT"
-assert_contains "blocks_barred_spike_epic says barred" "barred" "$HOOK_STDERR"
+assert_eq "allows_formerly_barred_spike_epic exit 0" 0 "$HOOK_EXIT"
 
-echo "barred cell incident-response × epic → block"
+echo "formerly-barred cell incident-response × epic → allow (T9: barred-cell check removed)"
 run_write "$project/.bionic/docs/plans/epic-01-demo/incident-epic.plan.md" "$(build_plan intent=incident-response scale=epic)"
-assert_eq "blocks_barred_incident_epic exit 2" 2 "$HOOK_EXIT"
-assert_contains "blocks_barred_incident_epic says barred" "barred" "$HOOK_STDERR"
+assert_eq "allows_formerly_barred_incident_epic exit 0" 0 "$HOOK_EXIT"
 
 echo "allowed cell build × epic → allow"
 run_write "$project/.bionic/docs/plans/epic-01-demo/build-epic.plan.md" "$(build_plan intent=build scale=epic)"
