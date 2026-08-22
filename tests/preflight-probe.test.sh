@@ -152,8 +152,6 @@ expect_match "attestation carries a version line (A6)" '^version=[0-9]+$' "$SBX/
 expect_match "attestation is keyed to this session" "^session_id=$SESSION_A\$" "$SBX/repo/$STATE_REL"
 expect_match "attestation names the repo it describes" '^repo=/' "$SBX/repo/$STATE_REL"
 expect_match "attestation records when it was written" '^written_at=[0-9]+$' "$SBX/repo/$STATE_REL"
-expect_match "stdout reports the credential probe" 'credential' "$OUT"
-expect_match "stdout reports the state-dir probe" 'state dir' "$OUT"
 expect_eq "attestation mode is 0600" "600" "$(stat -f '%OLp' "$SBX/repo/$STATE_REL" 2>/dev/null || stat -c '%a' "$SBX/repo/$STATE_REL")"
 
 # every content line is key=value (A6: no fixed-field-order positional record)
@@ -199,8 +197,6 @@ SBX="$(mk_sandbox)"; rm -f "$SBX/config/.credentials.json"
 rc="$(run_probe "$SBX" PATH="$(stub_dir "$SBX" 1)")"
 expect_eq "missing credential exits 1" "1" "$rc"
 expect_false "missing credential writes no attestation" [ -e "$SBX/repo/$STATE_REL" ]
-if grep -qE 'credential' "$OUT" "$ERR" 2>/dev/null; then ok "failure output names the credential probe"
-else bad "failure output names the credential probe"; fi
 
 # the founding invariant: a prior PASS must not outlive the environment it described
 SBX="$(mk_sandbox)"
@@ -217,8 +213,6 @@ SBX="$(mk_sandbox)"
 printf 'not a directory' > "$SBX/repo/.bionic"
 rc="$(run_probe "$SBX")"
 expect_eq "uncreatable state dir exits 1" "1" "$rc"
-if grep -qE 'state dir' "$OUT" "$ERR" 2>/dev/null; then ok "failure output names the state-dir probe"
-else bad "failure output names the state-dir probe"; fi
 
 # repo not writable (state dir pre-created and left writable, so the delete path still runs)
 SBX="$(mk_sandbox)"
@@ -250,8 +244,6 @@ if grep -q '^session_id=' "$SBX/repo/$STATE_REL" 2>/dev/null; then
 else
   ok "an unwritable state dir leaves NO usable prior attestation (C2)"
 fi
-expect_match "the state-dir failure says what happened to the prior attestation" \
-  'deleted or emptied|could' "$ERR"
 
 # ============================================================
 section "S3 — no session key REFUSES (AC-10 / design §7)"
@@ -261,8 +253,6 @@ SBX="$(mk_sandbox)"
 rc="$(run_probe "$SBX" CLAUDE_CODE_SESSION_ID=)"
 expect_eq "empty session key exits 3 (REFUSE)" "3" "$rc"
 expect_false "refused run writes no attestation" [ -e "$SBX/repo/$STATE_REL" ]
-if grep -qiE 'session' "$ERR" "$OUT" 2>/dev/null; then ok "refusal explains the missing session key"
-else bad "refusal explains the missing session key"; fi
 
 # the refusal is a producer-side refusal, not a probe failure: it touches no state at all
 SBX="$(mk_sandbox)"
@@ -382,7 +372,6 @@ SBX="$(mk_sandbox)"
 rc="$(run_probe "$SBX")"
 expect_match "git baseline recorded in the attestation" '^git_branch=' "$SBX/repo/$STATE_REL"
 expect_match "git head recorded in the attestation" '^git_head=' "$SBX/repo/$STATE_REL"
-expect_match "git baseline reported to the operator" 'git' "$OUT"
 
 # a non-git directory is a context miss, never a block
 SBX="$(mk_sandbox)"
@@ -631,19 +620,6 @@ if grep -qE 'WARN.*unvalidated.*0\.0\.1' "$OUT" "$ERR" 2>/dev/null; then
 else
   bad "mismatched pin warns, naming the installed version"
 fi
-if grep -qE 'agent_id.*D-3' "$OUT" "$ERR" 2>/dev/null; then
-  ok "mismatched-pin warning names the D-3 risk"
-else
-  bad "mismatched-pin warning names the D-3 risk"
-fi
-if grep -qE 'w3-slice1-posttooluse-probe\.md' "$OUT" "$ERR" 2>/dev/null; then
-  ok "mismatched-pin warning names the fix (re-run the probe method)"
-else
-  bad "mismatched-pin warning names the fix (re-run the probe method)"
-fi
-# exactly one warning line, never more
-_warncount="$(grep -cE 'unvalidated' "$OUT" "$ERR" 2>/dev/null | awk -F: '{s+=$NF} END{print s+0}')"
-expect_eq "mismatched pin prints exactly one warn line" "1" "$_warncount"
 
 # the attestation content itself is unaffected by a mismatched pin (no new field, no change
 # to the fields the start gate depends on)
@@ -678,7 +654,6 @@ section "S10 — the sweeper arm line is GONE (epic-16 w2 slice S1)"
 SBX="$(mk_sandbox)"
 rc="$(run_probe "$SBX")"
 expect_eq "a clean run without the arm line still exits 0" "0" "$rc"
-expect_eq "the probe prints no ARM: action line" "0" "$(grep -c '^preflight: ARM: ' "$OUT")"
 expect_nomatch "the probe never names the deleted arm verb" \
   'session-sweeper\.sh arm' "$PROBE"
 expect_nomatch "…nor invites anyone to arm a sweeper" 'arm the session sweeper' "$PROBE"

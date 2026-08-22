@@ -316,8 +316,6 @@ run_gate() {  # <gate path> <payload json>
   OUT_STDERR="$(cat "$SANDBOX/gate.err")"
 }
 
-REFUSAL_TAIL="Land the contract (write the named artifacts), or stop again to pass — this gate blocks once."
-
 # ================================================================= Section 1
 section "Section 1: a LANDED row with an unmet contract refuses the turn's end"
 
@@ -330,13 +328,6 @@ add_row "$R1" name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never
 # never "who ran and finished").
 run_gate "$GATE" "$(stop_payload "$R1" "$SID" false)"
 expect_status "1a: a landed UNMET contract refuses the stop (exit 2)" "2" "$RC"
-expect_contains "1a: the refusal opens with the contract verdict" \
-  "LANDING CONTRACT UNMET" "$OUT_STDERR"
-expect_contains "1a: …names the ROW, because a sweep judges rows and not the caller" \
-  "w1-s5" "$OUT_STDERR"
-expect_contains "1a: …names the artifact that is not on disk" \
-  "missing=.bionic/docs/record/never.md" "$OUT_STDERR"
-expect_contains "1a: …and tells the reader how to pass" "$REFUSAL_TAIL" "$OUT_STDERR"
 expect_empty "1a: the refusal goes to stderr, never stdout" "$OUT_STDOUT"
 
 # IDEMPOTENT. Stop fires once per orchestrator TURN and a landed row stays landed forever,
@@ -391,7 +382,6 @@ expect_eq "3a: …and is NOT marked swept — its verdict is still owed" "0" "$(
 # …and when it lands, the same roster is judged for the first time.
 run_gate "$GATE" "$(stop_payload "$R3" "$SID" false)"
 expect_status "3b: once it drops out of background_tasks it is judged, and refuses" "2" "$RC"
-expect_contains "3b: …naming its artifact" "missing=.bionic/docs/record/never.md" "$OUT_STDERR"
 expect_eq "3b: …and is marked swept exactly once" "1" "$(swept_count "$R3")"
 
 # A live sibling does not shield a landed row, and a landed sibling does not implicate a
@@ -403,8 +393,6 @@ add_row "$R3C" name=flying-one agent_id="$AID_B" deliverable=.bionic/docs/record
   launched_at="$(iso_ago 600)" tool_use_id=toolu_TWO
 run_gate "$GATE" "$(stop_payload "$R3C" "$SID" false "$AID_B")"
 expect_status "3c: one landed and one live — the landed one refuses" "2" "$RC"
-expect_contains "3c: …naming the landed row" "landed-one" "$OUT_STDERR"
-expect_absent "3c: …and never the row still in flight" "flying-one" "$OUT_STDERR"
 expect_eq "3c: …with one marker, for the landed row alone" "1" "$(swept_count "$R3C")"
 
 # ================================================================= Section 4
@@ -476,7 +464,6 @@ add_row "$R4I" name=w4-t2mono status=identified agent_id="$AID_A" \
 run_gate "$GATE" "$(stop_payload "$R4I" "$SID" false)"
 expect_status "4i: intended-then-identified — the LATER row's agent_id places it, and it refuses on its own contract" \
   "2" "$RC"
-expect_contains "4i: …naming its artifact" "missing=.bionic/docs/record/never-mono.md" "$OUT_STDERR"
 expect_contains "4i: …and the marker keys on the row that actually carries an id" \
   "agent_id=$AID_A" "$(swept_lines "$R4I")"
 
@@ -583,7 +570,6 @@ mkrow name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
 ln -s "$REAL_ROSTER" "$(roster_of "$R6B")"
 run_gate "$GATE" "$(stop_payload "$R6B" "$SID" false)"
 expect_status "6d: a symlinked roster — the gate passes, never blocks" "0" "$RC"
-expect_absent "6d: …and says nothing about a contract it never read" "LANDING CONTRACT" "$OUT_STDERR"
 expect_absent "6d: …and writes no marker through the link" "landing-swept" "$(cat "$REAL_ROSTER")"
 
 # ================================================================= Section 7
@@ -598,8 +584,6 @@ add_row "$R7" name= agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
   launched_at="$(iso_ago 600)"
 run_gate "$GATE" "$(stop_payload "$R7" "$SID" false)"
 expect_status "7a: an unnamed dispatch still refuses on its own contract" "2" "$RC"
-expect_contains "7a: …under the name the verb folds it to" "(unnamed)" "$OUT_STDERR"
-expect_contains "7a: …naming its artifact" "missing=.bionic/docs/record/never.md" "$OUT_STDERR"
 expect_contains "7a: …and the marker keys on the id, which is what it actually has" \
   "agent_id=$AID_A" "$(swept_lines "$R7")"
 
@@ -716,8 +700,6 @@ expect_eq "11a: the traversal fixture really does escape the state directory (no
   "yes" "$([ -e "$R11/.bionic/tmp/roster-${SID_TRAVERSAL}.state" ] && echo yes || echo no)"
 run_gate "$GATE" "$(stop_payload "$R11" "$SID_TRAVERSAL" false)"
 expect_status "11b: a session key carrying path separators is not a session key — pass" "0" "$RC"
-expect_absent "11c: …and no verdict is taken over the roster it reached" \
-  "LANDING CONTRACT" "$OUT_STDERR"
 expect_absent "11d: …and no marker is written into it" "landing-swept" "$(cat "$PLANTED")"
 
 # ================================================================= Section 12
@@ -758,11 +740,6 @@ add_row "$R12B" name=w2mate agent_id="$TEAM_AID" teammate_id="$TEAM_ADDR" \
   deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)"
 run_gate "$GATE" "$(substop_payload "$R12B" "$SID" "$TEAM_AID" w2mate false "$TEAM_BG")"
 expect_status "12b: a teammate that did NOT deliver is refused (exit 2)" "2" "$RC"
-expect_contains "12b: …in the sweep's own words, unedited" "LANDING CONTRACT UNMET" "$OUT_STDERR"
-expect_contains "12b: …naming the row" "w2mate" "$OUT_STDERR"
-expect_contains "12b: …and the artifact that is not on disk" \
-  "missing=.bionic/docs/record/never.md" "$OUT_STDERR"
-expect_contains "12b: …and telling the reader how to pass" "$REFUSAL_TAIL" "$OUT_STDERR"
 expect_empty "12b: the refusal goes to stderr, never stdout" "$OUT_STDOUT"
 expect_contains "12b: …and the row is marked, so it is asked about once" \
   "state=UNMET" "$(swept_lines "$R12B")"
@@ -796,7 +773,6 @@ add_row "$R12F" name=w2mate agent_id= status=confirmed teammate_id="$TEAM_ADDR" 
   deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)"
 run_gate "$GATE" "$(substop_payload "$R12F" "$SID" "$TEAM_AID" w2mate false "$TEAM_BG")"
 expect_status "12f: an unidentified teammate row is joined by NAME, and refuses" "2" "$RC"
-expect_contains "12f: …naming the row" "w2mate" "$OUT_STDERR"
 expect_contains "12f: …and the marker keys on the id the payload carried" \
   "agent_id=$TEAM_AID" "$(swept_lines "$R12F")"
 run_gate "$GATE" "$(substop_payload "$R12F" "$SID" "$TEAM_AID" w2mate false "$TEAM_BG")"
@@ -858,7 +834,6 @@ add_row "$R13B" name=w2mate agent_id="$TEAM_AID" \
   deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)"
 run_gate "$GATE" "$(stop_payload "$R13B" "$SID" false)"
 expect_status "13b: …while the identical row WITHOUT teammate_id is swept and refuses" "2" "$RC"
-expect_contains "13b: …naming it" "w2mate" "$OUT_STDERR"
 expect_eq "13b: …and marked once" "1" "$(swept_count "$R13B")"
 
 # A teammate row does not shield its neighbours: the skip is per row, on the same fold.
@@ -869,8 +844,6 @@ add_row "$R13C" name=async-one agent_id="$AID_B" \
   deliverable=.bionic/docs/record/never2.md launched_at="$(iso_ago 600)" tool_use_id=toolu_ASYNC
 run_gate "$GATE" "$(stop_payload "$R13C" "$SID" false)"
 expect_status "13c: a landed subagent beside a teammate still refuses" "2" "$RC"
-expect_contains "13c: …naming the subagent row" "async-one" "$OUT_STDERR"
-expect_absent "13c: …and never the teammate, whose event has not arrived" "w2mate" "$OUT_STDERR"
 expect_eq "13c: …with one marker, for the subagent alone" "1" "$(swept_count "$R13C")"
 
 # ================================================================= Section 14

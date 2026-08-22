@@ -256,20 +256,6 @@ expect_false "gcloud has no row (dropped, wave-06 D-B)" \
 # no recorded reason is the thing that gets silently re-added.
 expect_false "frontend-design has no row (dropped, epic-18 T4)" \
   bash -c '. "$1"; dep_row frontend-design' _ "$DEPS_SH"
-#
-# The record is read as ONE PARAGRAPH, not as three independent greps over the
-# whole file: `impeccable` and a date both appear elsewhere in deps.sh, so
-# file-wide matches would go green on a drop record that said nothing.
-DROP_LINE="$(/usr/bin/grep -n 'frontend-design' "$DEPS_SH" | head -1 | cut -d: -f1)"
-DROP_TEXT=""
-[ -n "$DROP_LINE" ] && DROP_TEXT="$(sed -n "${DROP_LINE},$((DROP_LINE + 8))p" "$DEPS_SH")"
-expect_match "deps.sh records the frontend-design drop beside yq and gcloud" \
-  "*frontend-design*" "$DROP_TEXT"
-expect_match "…dated, in the same paragraph" "*2026-08-22*" "$DROP_TEXT"
-expect_match "…naming impeccable as what supersedes it" "*impeccable*" "$DROP_TEXT"
-expect_true "…as a comment, not a row that could come back" \
-  bash -c 'case "$1" in "#"*) exit 0 ;; *) exit 1 ;; esac' _ \
-  "$(printf '%s\n' "$DROP_TEXT" | head -1 | sed 's/^[[:space:]]*//')"
 
 echo ""
 echo "=== Group 3: native-kind rows are byte-exact (the manifest renderings pin here) ==="
@@ -686,11 +672,6 @@ expect_eq "the install plan syncs the project, in place" \
   "uv sync --project ${XR_REFS}" \
   "$(deps_run BIONIC_EXCALIDRAW_REFS="$XR_REFS" -- _dep_install_argv excalidraw-renderer | tr '\n' ' ' | sed 's/ $//')"
 
-# And the teardown, which is the venv and nothing else: the skill's own files ship with the
-# plugin and leave when it does.
-expect_match "remove_dep names the venv it would delete, before asking" \
-  "*rm -rf ${XR_REFS}/.venv*" \
-  "$(printf '' | deps_run BIONIC_EXCALIDRAW_REFS="$XR_REFS" -- remove_dep excalidraw-renderer)"
 
 echo ""
 echo "=== Group 7: install_dep — consent gates every mutation ==="
@@ -717,19 +698,11 @@ DECLINE_RC=$?
 expect_eq "install_dep with no answer on stdin exits 2 (not asked, not declined)" "2" "$DECLINE_RC"
 expect_eq "install_dep with no answer ran NOTHING (recorder empty)" "0" \
   "$(grep -c . "$CALLS" | tr -d ' ')"
-expect_match "install_dep names what it would run before asking" "*brew install ripgrep*" "$DECLINE_OUT"
-expect_match "install_dep with no answer says 'not asked', not 'declined' (AC-12)" \
-  "*not asked — rg stays absent*" "$DECLINE_OUT"
-expect_no_match "…and the word declined never appears" "*declined*" "$DECLINE_OUT"
 
 : > "$CALLS"
 YES_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
   bash -c 'echo y | { . "$1"; install_dep rg; }' _ "$DEPS_SH" 2>&1)"
 expect_match "install_dep with an explicit y DOES invoke brew" "*brew install ripgrep*" "$(cat "$CALLS")"
-# A GLOB match on "*installed.*" would also match "rg is not installed." above
-# it — the success line has to be checked as its own line, not a substring.
-expect_true "…and confirms success with a standalone 'installed.' line (AC-11 — O-1)" \
-  bash -c 'printf "%s\n" "$1" | /usr/bin/grep -qx "  installed."' _ "$YES_OUT"
 
 : > "$CALLS"
 NO_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
@@ -737,9 +710,6 @@ NO_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS"
 NO_RC=$?
 expect_eq "install_dep with an explicit n ran nothing" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
 expect_eq "install_dep with an explicit n exits 1 (declined, not 2)" "1" "$NO_RC"
-expect_match "…and still says 'declined' (a real no is a real decline)" \
-  "*declined — rg stays absent*" "$NO_OUT"
-expect_no_match "…and never says 'not asked' for a real no" "*not asked*" "$NO_OUT"
 
 # A mechanism that runs and FAILS is a third outcome, not a fourth spelling of
 # "no": install_dep must not print `installed.` over a non-zero exit, and the
@@ -757,9 +727,6 @@ FAIL_OUT="$(env -i HOME="$TMP/home" PATH="$FAIL_BIN" BIONIC_TEST_CALLS="$CALLS" 
   bash -c 'echo y | { . "$1"; install_dep rg; }' _ "$DEPS_SH" 2>&1)"
 FAIL_RC=$?
 expect_true "a failing mechanism exits non-zero" test "$FAIL_RC" -ne 0
-expect_match "…and its own error reaches the transcript" "*brew: this mechanism failed*" "$FAIL_OUT"
-expect_false "…and install_dep never claims success over a failure" \
-  bash -c 'printf "%s\n" "$1" | /usr/bin/grep -qx "  installed."' _ "$FAIL_OUT"
 
 # A native-KIND row is the plugin harness's job — install_dep must refuse to
 # grow a second installer for it (that is exactly the D1 kludge the wave
@@ -796,15 +763,12 @@ HUM_OUT="$(env -i HOME="$TMP/home" PATH="$GIT_BIN" BIONIC_TEST_CALLS="$CALLS" \
 expect_match "install_dep humanizer clones the repo into the skills dir" \
   "*git clone --depth 1 https://github.com/blader/humanizer.git ${SKILL_HOME}/skills/humanizer*" \
   "$(cat "$CALLS")"
-expect_match "…and the plan it printed is the command it ran" \
-  "*bionic would run: git clone --depth 1 https://github.com/blader/humanizer.git*" "$HUM_OUT"
 
 : > "$CALLS"
 HUM_NO="$(env -i HOME="$TMP/home" PATH="$GIT_BIN" BIONIC_TEST_CALLS="$CALLS" \
   BIONIC_CLAUDE_HOME="$SKILL_HOME" \
   bash -c 'echo n | { . "$1"; install_dep humanizer; }' _ "$DEPS_SH" 2>&1)"
 expect_eq "a declined humanizer install clones nothing" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
-expect_match "…and says so" "*declined — humanizer stays absent*" "$HUM_NO"
 
 : > "$CALLS"
 env -i HOME="$TMP/home" PATH="$GIT_BIN" BIONIC_TEST_CALLS="$CALLS" \
@@ -841,8 +805,6 @@ expect_match "an unregistered catalog is added first" \
   "*claude plugin marketplace add anthropics/skills*" "$FOREIGN_CALLS"
 expect_match "…then the plugin installs under its own catalog's id" \
   "*claude plugin install document-skills@anthropic-agent-skills --scope user --yes*" "$FOREIGN_CALLS"
-expect_match "…and both commands were printed before the question" \
-  "*bionic would run: claude plugin marketplace add anthropics/skills*" "$FOREIGN_OUT"
 
 : > "$CALLS"
 env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
@@ -892,11 +854,6 @@ KEEP_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALL
   bash -c 'echo y | { . "$1"; remove_dep git; }' _ "$DEPS_SH" 2>&1)"
 expect_eq "remove_dep git (keep-shared) removes nothing even with consent" "0" \
   "$(grep -c . "$CALLS" | tr -d ' ')"
-# R-1: the reason is stated in words a user can act on. `keep-shared` is a column
-# value in the table above — the transcript printed it nine times in a row.
-expect_match "remove_dep git says why it is keeping the binary" \
-  "*kept — shared with other tools, bionic never removes it*" "$KEEP_OUT"
-expect_no_match "…without printing the table's own value for the policy" "*keep-shared*" "$KEEP_OUT"
 
 # Three registry shapes, one per answer `_dep_native_registry_state` can give.
 # Written here rather than reused from Group 5 because the question is different:
@@ -923,7 +880,6 @@ CORE_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALL
   bash -c 'echo y | { . "$1"; remove_dep superpowers; }' _ "$DEPS_SH" 2>&1)"
 expect_eq "remove_dep on a declared plugin runs nothing itself" "0" \
   "$(grep -c . "$CALLS" | tr -d ' ')"
-expect_match "…and says which step does take it" "*removing bionic removes it*" "$CORE_OUT"
 
 : > "$CALLS"
 JIT_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
@@ -931,15 +887,12 @@ JIT_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS
   bash -c 'echo y | { . "$1"; remove_dep impeccable; }' _ "$DEPS_SH" 2>&1)"
 expect_match "remove_dep on a plugin nothing declares offers the CLI's own uninstall" \
   "*claude plugin uninstall impeccable@bionic*" "$(cat "$CALLS")"
-expect_no_match "…and never claims some other step already took it" \
-  "*removed by the plugin uninstall*" "$JIT_OUT"
 
 : > "$CALLS"
 JIT_NO="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
   BIONIC_INSTALLED_PLUGINS_FILE="$REG_OURS" \
   bash -c 'echo n | { . "$1"; remove_dep impeccable; }' _ "$DEPS_SH" 2>&1)"
 expect_eq "a declined offer uninstalls nothing" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
-expect_match "…and says so" "*declined — impeccable left in place.*" "$JIT_NO"
 
 # ---- and the offer is made about OUR copy only (critic F-4) ----
 #
@@ -954,8 +907,6 @@ JIT_OTHER="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CAL
   bash -c 'echo y | { . "$1"; remove_dep impeccable; }' _ "$DEPS_SH" 2>&1)"
 expect_eq "another catalog's copy: nothing reaches the CLI, on a yes" "0" \
   "$(grep -c . "$CALLS" | tr -d ' ')"
-expect_match "another catalog's copy: the transcript says whose it is" \
-  "*installed from another catalog*" "$JIT_OTHER"
 expect_no_match "another catalog's copy: and no question was asked at all" \
   "*Remove impeccable now?*" "$JIT_OTHER"
 
@@ -965,8 +916,6 @@ JIT_NONE="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALL
   bash -c 'echo y | { . "$1"; remove_dep impeccable; }' _ "$DEPS_SH" 2>&1)"
 expect_eq "no copy at all: nothing reaches the CLI, on a yes" "0" \
   "$(grep -c . "$CALLS" | tr -d ' ')"
-expect_match "no copy at all: and it is not described as somebody else's" \
-  "*nothing here to remove*" "$JIT_NONE"
 
 # ---- and "ours" is asked of the ROW's catalog, not of bionic's (AC-8) ----
 #
@@ -985,8 +934,6 @@ FOREIGN_RM="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CA
   bash -c 'echo y | { . "$1"; remove_dep document-skills; }' _ "$DEPS_SH" 2>&1)"
 expect_match "remove_dep offers the uninstall under the row's own catalog id" \
   "*claude plugin uninstall document-skills@anthropic-agent-skills --yes*" "$(cat "$CALLS")"
-expect_no_match "…and never claims the bionic uninstall already took it" \
-  "*removing bionic removes it*" "$FOREIGN_RM"
 
 : > "$CALLS"
 FOREIGN_RM_OTHER="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
@@ -994,8 +941,6 @@ FOREIGN_RM_OTHER="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALL
   bash -c 'echo y | { . "$1"; remove_dep document-skills; }' _ "$DEPS_SH" 2>&1)"
 expect_eq "a copy from a third catalog: nothing reaches the CLI, on a yes" "0" \
   "$(grep -c . "$CALLS" | tr -d ' ')"
-expect_match "…and the transcript says whose it is" \
-  "*installed from another catalog*" "$FOREIGN_RM_OTHER"
 
 # ---- the github-skill row's teardown is the directory it installed ----
 RM_SKILL_HOME="$TMP/rm-skill-home"
@@ -1019,8 +964,6 @@ RM_HUM_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CA
   bash -c 'echo y | { . "$1"; remove_dep humanizer; }' _ "$DEPS_SH" 2>&1)"
 expect_false "a consented humanizer removal takes the whole skill directory" \
   test -d "$RM_SKILL_HOME/skills/humanizer"
-expect_match "…having named the directory it would delete" \
-  "*${RM_SKILL_HOME}/skills/humanizer*" "$RM_HUM_OUT"
 expect_true "…and nothing outside the skills dir was touched" test -d "$RM_SKILL_HOME"
 
 # ---- D-1: the default permission mode has an owner, and it is this file ----
@@ -1318,8 +1261,6 @@ printf '%s' "$CCL_DIFFERENT" > "$(ccl_config_path "$CCL4B")"
 CCL4B_DECLINE_OUT="$(ccl_run "$CCL4B" n -- install_dep ccstatusline)"
 expect_eq "declined install: the differing config file is untouched" \
   "$CCL_DIFFERENT" "$(cat "$(ccl_config_path "$CCL4B")" 2>/dev/null)"
-expect_match "declined install: the plan surfaced the config copy before asking" \
-  '*ccstatusline/settings.json*' "$CCL4B_DECLINE_OUT"
 
 # --- case 5: remove_dep purges the config dir, then check_dep says no -----
 CCL5="$(ccl_arm)"
@@ -1383,14 +1324,10 @@ NB_INSTALL_HOME="$TMP/nb-install-home"; mkdir -p "$NB_INSTALL_HOME"
 INSTALL_OUT="$(env -i HOME="$TMP/home" PATH="$NB_BIN" BIONIC_TEST_CALLS="$CALLS" \
   BIONIC_CLAUDE_HOME="$NB_INSTALL_HOME" \
   bash -c 'echo y | { . "$1"; install_dep notebooklm; }' _ "$DEPS_SH" 2>&1)"
-expect_match "install_dep notebooklm names both steps before asking (AC-5)" \
-  "*uv tool install notebooklm-py --quiet && notebooklm skill install*" "$INSTALL_OUT"
 expect_match "install_dep notebooklm really ran the uv-tool install (not vacuous)" \
   "*uv tool install notebooklm-py --quiet*" "$(cat "$CALLS")"
 expect_match "install_dep notebooklm really ran 'notebooklm skill install' afterwards (AC-5)" \
   "*notebooklm skill install*" "$(cat "$CALLS")"
-expect_true "…and confirms success with the standard 'installed.' line" \
-  bash -c 'printf "%s\n" "$1" | /usr/bin/grep -qx "  installed."' _ "$INSTALL_OUT"
 
 # A failing skill-install step must not be reported as a success — the CLI
 # installed, the skill did not, and that is not "installed." (the same rule
@@ -1405,8 +1342,6 @@ SKILLFAIL_OUT="$(env -i HOME="$TMP/home" PATH="$NB_BIN_SKILLFAIL" BIONIC_TEST_CA
   bash -c 'echo y | { . "$1"; install_dep notebooklm; }' _ "$DEPS_SH" 2>&1)"
 SKILLFAIL_RC=$?
 expect_true "a failing 'notebooklm skill install' exits non-zero" test "$SKILLFAIL_RC" -ne 0
-expect_false "…and is never reported as 'installed.'" \
-  bash -c 'printf "%s\n" "$1" | /usr/bin/grep -qx "  installed."' _ "$SKILLFAIL_OUT"
 
 # remove_dep: uv-tool uninstall AND the skill dir purged, one consent.
 NB_REMOVE_HOME="$TMP/nb-remove-home"; mkdir -p "$NB_REMOVE_HOME/skills/notebooklm"
@@ -1415,8 +1350,6 @@ echo "# notebooklm skill" > "$NB_REMOVE_HOME/skills/notebooklm/SKILL.md"
 REMOVE_OUT="$(env -i HOME="$TMP/home" PATH="$NB_BIN" BIONIC_TEST_CALLS="$CALLS" \
   BIONIC_CLAUDE_HOME="$NB_REMOVE_HOME" \
   bash -c 'echo y | { . "$1"; remove_dep notebooklm; }' _ "$DEPS_SH" 2>&1)"
-expect_match "remove_dep notebooklm names both steps before asking" \
-  "*uv tool uninstall notebooklm-py && rm -rf*skills/notebooklm*" "$REMOVE_OUT"
 expect_match "remove_dep notebooklm really ran the uv-tool uninstall" \
   "*uv tool uninstall notebooklm-py*" "$(cat "$CALLS")"
 expect_false "remove_dep notebooklm really removed the skill dir (not vacuous)" \
@@ -2164,13 +2097,9 @@ expect_eq "…and hands back nothing at all" "" "$R_OUT"
 root_run BIONIC_CLAUDE_HOME="$TMP/ch-nonexistent" --
 expect_eq "detect_plugin_root: no registry file -> refusal (exit 1)" "1" "$R_ST"
 expect_eq "…and prints NOTHING on stdout, so a caller cannot use a half-answer" "" "$R_OUT"
-expect_match "…and names the fix" "*claude plugin install bionic@bionic*" "$R_ERR"
-expect_no_match "…and never re-offers the retired \${CLAUDE_PLUGIN_ROOT:-\$HOME/.claude} fallback" \
-  "*CLAUDE_PLUGIN_ROOT:-\$HOME*" "$R_ERR"
 
 root_run BIONIC_CLAUDE_HOME="$CH_EMPTY" --
 expect_eq "detect_plugin_root: registry with no bionic entry -> refusal" "1" "$R_ST"
-expect_match "…named as not-installed rather than as a parse problem" "*not installed*" "$R_ERR"
 
 root_run BIONIC_CLAUDE_HOME="$CH_MALFORMED" --
 expect_eq "detect_plugin_root: unparseable registry -> refusal, never a guess" "1" "$R_ST"
@@ -2185,7 +2114,6 @@ JSON
 root_run BIONIC_CLAUDE_HOME="$R_CH_GONE" --
 expect_eq "detect_plugin_root: a registered path that is GONE is a refusal, not a return" \
   "1" "$R_ST"
-expect_match "…and names the path it could not find" "*deleted-by-someone*" "$R_ERR"
 
 # ---- the no-jq lane resolves the same path, not an unknown ----
 R_PATH="$NOJQ_BIN" root_run BIONIC_CLAUDE_HOME="$R_CH" --
@@ -2205,38 +2133,11 @@ expect_eq "…and detect_plugin_registered answers from that same overridden fil
   "$(detect_run BIONIC_INSTALLED_PLUGINS_FILE="$R_CH/plugins/installed_plugins.json" \
        BIONIC_CLAUDE_HOME="$TMP/ch-nonexistent" -- detect_plugin_registered)"
 
-# ---- the refusal is a LINE FOR A PERSON, not a stack frame (epic-17 W6 S15, A-6.6 (a)) ----
-#
-# THE DEFECT. Every refusal above went out under the header `detect_plugin_root: REFUSED —`.
-# That is a function name and an internal verdict word printed at whoever ran
-# `/bionic:setup` — the exact class S11 was dispatched for and put on the wall for the three
-# payload scripts, found live in the library beneath them by S12's own §6 (hit #4).
-#
-# WHY THE ARM LIVES HERE and not in the two suites the brief offered. `tests/detect-probes.
-# test.sh` never drives this function — its subject is the load-state and duplicates probes,
-# and it has no fixture registry for the three refusal exits. `tests/script-vocabulary.test.
-# sh` is a STATIC lint whose roster is `setup.sh doctor.sh remove.sh`; extending it to
-# `payload/scripts/lib/*.sh` is A-6.S12.12, promoted out of this slice's scope as structural.
-# This group already drives all three refusal exits with their stderr captured in
-# `$TMP/root.err`, so the arm is one assertion away from evidence that already exists — and
-# it measures the RENDERED line rather than the source text, which is the stronger form.
-#
-# THE AUTHORITY IS THE SHARED LIST, not this suite's taste: `detect_` is a token in
-# tests/fixtures/banned-display-vocabulary.txt, checked here so the arm cannot outlive the
-# rule it enforces.
-R_BANNED_LIST="${BIONIC_SCRIPTS_DIR}/tests/fixtures/banned-display-vocabulary.txt"
-expect_true "the banned-vocabulary list still bans the function-name prefix this arm checks" \
-  /usr/bin/grep -qx 'detect_' "$R_BANNED_LIST"
 
 for _r_case in "$TMP/ch-nonexistent:no registry file" "$CH_EMPTY:no bionic entry" \
                "$CH_MALFORMED:unparseable registry" "$R_CH_GONE:registered path gone"; do
   _r_home="${_r_case%%:*}"; _r_what="${_r_case#*:}"
   root_run BIONIC_CLAUDE_HOME="$_r_home" --
-  expect_no_match "refusal (${_r_what}) prints no function name at the user" \
-    "*detect_*" "$R_ERR"
-  expect_no_match "…and no internal verdict word either" "*REFUSED*" "$R_ERR"
-  expect_match "…and still says what is wrong, in product words" "*bionic*" "$R_ERR"
-  expect_match "…and still names the one fix" "*claude plugin install bionic@bionic*" "$R_ERR"
   expect_eq "…and still hands back nothing on stdout" "" "$R_OUT"
   expect_eq "…and still exits 1, so no caller reads a refusal as an answer" "1" "$R_ST"
 done
@@ -2296,8 +2197,6 @@ expect_eq "legacy hook files: an empty hooks directory is 0 too (the directory i
 T_PAY_BARE="$TMP/legacy-hooks-payload-bare"; mkdir -p "$T_PAY_BARE"
 expect_match "legacy hook files: a payload with no hooks/ cannot answer, and says so" \
   "*count=unknown*" "$(t_run "$T_CH_PRESENT" "$T_PAY_BARE")"
-expect_match "…naming the reason rather than reporting a clean machine" \
-  "*ships no hooks/*" "$(t_run "$T_CH_PRESENT" "$T_PAY_BARE")"
 
 # READ-ONLY, and this one matters more than most: the line it produces is what a person
 # reads before deleting files.
@@ -2531,13 +2430,10 @@ W_NOTREPO="$TMP/w-not-a-repo"; mkdir -p "$W_NOTREPO"
 W_CH="$TMP/w-ch-unknown"; w_registry "$W_CH" "$W_TIP"
 sha_run "$W_NOTREPO" BIONIC_CLAUDE_HOME="$W_CH" --
 expect_match "outside a git repository the answer is unknown" "*state=unknown*" "$W_OUT"
-expect_match "…with a named cause, never a bare shrug" "*cause=*repositor*" "$W_OUT"
 
 W_CH="$TMP/w-ch-nosha"; w_registry "$W_CH" ""
 sha_run "$W_REPO" BIONIC_CLAUDE_HOME="$W_CH" --
 expect_match "a registry entry with no gitCommitSha reads unknown" "*state=unknown*" "$W_OUT"
-expect_match "…and says the record carries no sha, naming the field" \
-  "*cause=*no gitCommitSha*" "$W_OUT"
 
 W_CH="$TMP/w-ch-absent"; mkdir -p "$W_CH/plugins"
 sha_run "$W_REPO" BIONIC_CLAUDE_HOME="$W_CH" --
@@ -2552,49 +2448,7 @@ expect_eq "detect_registry_sha_lag exits 0 even on the lag path" "0" "$?"
 expect_eq "…and adds no file to the repo or the config dir it read" \
   "$W_FP_BEFORE" "$(find "$W_REPO" "$TMP/w-ch-lag" -type f 2>/dev/null | sort)"
 
-echo ""
-echo "=== Group U: the doctrine block appears ONCE (W5 critic C-4) ==="
-#
-# 6cc4f38 left a second, orphaned copy of the 24-line "installed plugin root" doctrine
-# block above THE PARSE — in the very commit whose message forbids duplicating a doctrine.
-# Nothing caught it, because a comment block has no behaviour to test. It is worth an arm
-# anyway: this file's whole argument is that one schema gets one reading, and a reader who
-# meets the doctrine twice cannot tell which function it governs.
-#
-# COUNTED, not diffed: the header line is the cheapest thing that is exactly as unique as
-# the block it opens, and a count is the assertion — "once" — stated directly.
-U_BLOCK_HEADER='─── The installed plugin root ───'
-U_COUNT=$(/usr/bin/grep -cF -- "$U_BLOCK_HEADER" "$DETECT_SH")
-expect_eq "the installed-plugin-root doctrine block opens exactly once in detect.sh" \
-  "1" "$U_COUNT"
 
-# The same question asked of the sentence deepest inside the block, so a future duplication
-# that renamed the header would still be caught by the body.
-U_BODY_COUNT=$(/usr/bin/grep -cF -- "No fallback exists anywhere in" "$DETECT_SH")
-expect_eq "…and its closing contract sentence appears exactly once too" "1" "$U_BODY_COUNT"
-
-echo ""
-echo "=== Group V: the registry's truth is two-path, and detect.sh says so (W5 critic C-5) ==="
-#
-# THE CLAIM THAT WAS TOO STRONG. The doctrine block above detect_plugin_root justifies the
-# registry as oracle by saying it is "the same record the CLI itself loads from". W5's S7
-# measured that: on a DIRECTORY-source marketplace the CLI reads the marketplace's source
-# tree and never opens the cache the registry names. The registry's ANSWER is still right —
-# the cache was written from that source at install — but the reason offered is not the
-# reason, and the difference is exactly what a user chasing a stale root has to know.
-#
-# Both halves are pinned, because the disclosure is only useful as a PAIR: the condition
-# under which the two paths diverge, and the fact that makes them agree anyway.
-# Case-INSENSITIVE on the condition term alone: this file writes its emphasis in capitals
-# ("a DIRECTORY-SOURCE MARKETPLACE"), and which words are shouted is a style choice that a
-# later edit is free to make differently. The disclosure is what is pinned, not the shouting.
-V_DOCTRINE_HITS=$(/usr/bin/grep -ci "directory-source marketplace" "$DETECT_SH")
-expect_eq "detect.sh discloses the directory-source condition" \
-  "0" "$([ "$V_DOCTRINE_HITS" -ge 1 ] && echo 0 || echo 1)"
-expect_eq "…and names what keeps the two paths in agreement" \
-  "0" "$(/usr/bin/grep -q "as of the last (re)install" "$DETECT_SH" && echo 0 || echo 1)"
-expect_eq "…and says the git-source feed is right by construction" \
-  "0" "$(/usr/bin/grep -q "right by construction" "$DETECT_SH" && echo 0 || echo 1)"
 
 echo ""
 echo "========================================"

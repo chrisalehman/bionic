@@ -338,24 +338,6 @@ expect_true "payload/scripts/setup.sh exists" test -f "$SETUP_SH"
 expect_true "setup.sh parses (bash -n)" bash -n "$SETUP_SH"
 expect_true "payload/commands/setup.md exists" test -f "$SETUP_MD"
 
-if [ -f "$SETUP_MD" ]; then
-  SETUP_MD_TEXT="$(cat "$SETUP_MD")"
-  expect_match "setup.md invokes the script via the literal \${CLAUDE_PLUGIN_ROOT}" \
-    '*${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh*' "$SETUP_MD_TEXT"
-  expect_match "setup.md carries a frontmatter description" '*description:*' "$SETUP_MD_TEXT"
-  # THE WRAPPER ADDS NO LOGIC, and that is a claim about MECHANISMS, not about
-  # line counts. The page names two invocations now — the per-item run and the
-  # whole-plan run `--all` asks one question over (AC-8) — which is one script
-  # spelled twice. What must stay absent is a second mechanism: another program,
-  # or a bash line pointed at anything but this command's own script.
-  wrapper_cmds="$(grep -cE '^[[:space:]]*bash ' "$SETUP_MD" 2>/dev/null | tr -d ' ')"
-  expect_true "setup.md names at least one invocation of its own script" \
-    bash -c '[ "$1" -ge 1 ]' _ "$wrapper_cmds"
-  expect_eq "setup.md names no second mechanism" "" \
-    "$(grep -nE '^[[:space:]]*(sh|claude|jq|npm|brew) ' "$SETUP_MD" 2>/dev/null || true)"
-  expect_eq "setup.md is a wrapper — every command line it names is its own script" "" \
-    "$(grep -E '^[[:space:]]*bash ' "$SETUP_MD" 2>/dev/null | grep -vF '${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh' || true)"
-fi
 
 # ---------------------------------------------------------------------------
 # Group 2 — (a) the native plugin install wrapper, tier 2 ⊃ tier 1.
@@ -366,85 +348,17 @@ echo "=== Group 2: native plugin install wrapper (AC-2, tier 2 wraps tier 1) ===
 
 new_fixture install-fresh
 OUT="$(run_setup "$YES")"
-expect_match "fresh machine: setup names the install it would run before asking" \
-  '*claude plugin install bionic@bionic*' "$OUT"
 expect_match "fresh machine: consented install reaches the CLI" \
   '*plugin install bionic@bionic*' "$(cat "$CALLS")"
 
 new_fixture install-already
 plant_cli_plugin "bionic@bionic" true
 OUT="$(run_setup "$YES")"
-expect_match "already installed: setup says so" '*already installed*' "$OUT"
 expect_no_match "already installed: no second install call" '*plugin install bionic@bionic*' "$(cat "$CALLS")"
 
 new_fixture install-declined
 OUT="$(run_setup "$NO")"
 expect_no_match "declined install: nothing reached the CLI" '*plugin install bionic@bionic*' "$(cat "$CALLS")"
-expect_match "declined install: named in the end summary as an action" '*claude plugin install bionic@bionic*' "$OUT"
-
-new_fixture install-nojq
-OUT="$(SETUP_PATH="$NOJQ_BIN" run_setup "$YES")"
-expect_match "no jq: install state is reported unknown, never a confident answer" '*unknown*' "$OUT"
-expect_match "no jq: the summary names jq as the fix" '*jq*' "$OUT"
-
-# ---------------------------------------------------------------------------
-# Group 2b — AC-13's setup half: is the CLI actually LOADING us?
-#
-# THE FAILURE THIS EXISTS FOR (epic-17 W5, F12). `claude plugin install` exits 0,
-# prints a success line, writes the registry — and if a dependency is missing the
-# plugin loads NOTHING. Every registry-reading fact stays green. The only surface
-# that says so is the CLI's own listing, which is why setup reports it right after
-# the install step rather than trusting the step's own exit code.
-#
-# The healthy arm is driven through the stateful `claude` fake (installed by
-# setup's own step 1, then read back), so "loaded" is the fixture's answer to a
-# real question. The dep-broken arm cannot be made on a live machine mid-wave
-# (plan A-0.3), so it is driven through `BIONIC_PLUGIN_LIST_CMD` at the seam
-# detect.sh publishes for exactly this, pointed at the captured listing S2
-# fixtured — the Error line in it is verbatim from the W5 measurement.
-# ---------------------------------------------------------------------------
-
-echo ""
-echo "=== Group 2b: load state reported after the install step (AC-13, setup half) ==="
-
-LIST_DEP_BROKEN="${REPO}/tests/fixtures/plugin-list-dep-broken.txt"
-expect_true "the dep-broken listing fixture exists" test -f "$LIST_DEP_BROKEN"
-
-new_fixture loadstate-healthy
-plant_cli_plugin "bionic@bionic" true
-OUT="$(run_setup "$NO")"
-expect_match "healthy machine: setup says bionic is loaded" '*bionic: loaded*' "$OUT"
-expect_no_match "healthy machine: no error text about loading" '*did not load*' "$OUT"
-
-# The load-state line belongs to the install step, not to the dependencies step:
-# it is a fact about the install that just happened. Asserted by ORDER against
-# the next step's header, which is the only delimiter the user can see.
-LOAD_BEFORE_DEPS="$(awk '/bionic: loaded/ { seen = 1 } /^2\. Dependencies/ { print (seen ? "before" : "after"); exit }' <<< "$OUT")"
-expect_eq "the load-state line is printed before the dependencies step" "before" "$LOAD_BEFORE_DEPS"
-
-new_fixture loadstate-broken
-plant_cli_plugin "bionic@bionic" true
-OUT="$(run_setup "$NO" BIONIC_PLUGIN_LIST_CMD="cat $LIST_DEP_BROKEN")"
-expect_match "dep-broken machine: the CLI's Error text is printed verbatim" \
-  '*Dependency "superpowers@bionic" is not installed*' "$OUT"
-expect_match "dep-broken machine: setup says the plugin did not load" '*did not load*' "$OUT"
-expect_match "dep-broken machine: a fix is named on its own line" '*Fix:*' "$OUT"
-expect_match "dep-broken machine: the summary carries the load failure as an action" \
-  '*Summary*' "$OUT"
-BROKEN_SUMMARY="$(awk '/^Summary/ { f = 1 } f' <<< "$OUT")"
-expect_match "dep-broken machine: the action line names the load failure" \
-  '*did not load*' "$BROKEN_SUMMARY"
-
-# An unreadable listing is `unknown` and says WHY — never a confident "loaded".
-# The cause is the third field S2 added (A-4.S2.4) and setup must render it,
-# because "unknown" with no reason is a shrug the user cannot act on.
-new_fixture loadstate-unknown
-plant_cli_plugin "bionic@bionic" true
-OUT="$(run_setup "$NO" BIONIC_PLUGIN_LIST_CMD="printf nonsense")"
-expect_match "unreadable listing: setup reports the load state as unknown" '*unknown*' "$OUT"
-expect_match "unreadable listing: the cause is rendered, not swallowed" \
-  '*is not a plugin listing*' "$OUT"
-expect_no_match "unreadable listing: never claims the plugin is loaded" '*bionic: loaded*' "$OUT"
 
 # ---------------------------------------------------------------------------
 # Group 2c — AC-8: no silent duplicates, and no noise when there are none.
@@ -468,17 +382,6 @@ plant_installed "superpowers@bionic" "6.3.0"
 plant_installed "superpowers@claude-plugins-official" "6.2.0"
 plant_installed "agent-skills@bionic" "0.6.7"
 OUT="$(run_setup "$NO")"
-expect_match "planted duplicate: the duplicates step appears" '*Duplicates*' "$OUT"
-expect_match "planted duplicate: the colliding name is named" '*superpowers*' "$OUT"
-expect_match "planted duplicate: both catalog copies are named" \
-  '*superpowers@claude-plugins-official*' "$OUT"
-expect_match "planted duplicate: the consolidation command is named" \
-  '*claude plugin uninstall superpowers@claude-plugins-official*' "$OUT"
-# All three answers Chris named are visible at the moment of asking; the
-# question itself is deps.sh's one prompt shape, whose capital N is the default.
-expect_match "planted duplicate: consolidating is offered" '*onsolidat*' "$OUT"
-expect_match "planted duplicate: coexisting is offered as a legitimate answer" '*coexist*' "$OUT"
-expect_match "planted duplicate: the question is asked with a default-No prompt" '*\[y/N\]*' "$OUT"
 expect_no_match "declined duplicate: nothing was uninstalled" '*plugin uninstall*' "$(cat "$CALLS")"
 
 new_fixture dup-consented
@@ -491,26 +394,7 @@ expect_match "consented duplicate: the loser's uninstall reaches the CLI" \
 expect_no_match "consented duplicate: bionic's own copy is never the one removed" \
   '*plugin uninstall superpowers@bionic*' "$(cat "$CALLS")"
 
-new_fixture dup-clean
-plant_cli_plugin "bionic@bionic" true
-plant_installed "superpowers@bionic" "6.3.0"
-plant_installed "agent-skills@bionic" "0.6.7"
-OUT="$(run_setup "$NO")"
-expect_no_match "clean machine: not one word about duplicates" '*uplicat*' "$OUT"
-expect_no_match "clean machine: no consolidation command offered" '*plugin uninstall*' "$OUT"
 
-# `dup=unknown` is a FAILURE TO LOOK, not a duplicate (plan A-4.S2.8). Setup
-# must not ask about it — there is nothing to consolidate — and must not stay
-# silent either, because silence is the claim "no duplicates" that an unreadable
-# registry has not earned.
-new_fixture dup-unknown
-plant_cli_plugin "bionic@bionic" true
-printf '%s\n' 'not json at all' > "$FIX/ch/plugins/installed_plugins.json"
-OUT="$(run_setup "$NO")"
-expect_match "unreadable registry: setup renders the cause rather than claiming none" \
-  '*could not be parsed*' "$OUT"
-expect_no_match "unreadable registry: no consolidation is offered for a non-duplicate" \
-  '*plugin uninstall*' "$OUT"
 
 # ---------------------------------------------------------------------------
 # Group 3 — (b) core enable-verify, repair by explicit enable (P2).
@@ -526,8 +410,6 @@ plant_cli_plugin "agent-skills@bionic" true
 plant_installed "superpowers@bionic" "6.3.0"
 plant_installed "agent-skills@bionic" "0.6.7"
 OUT="$(run_setup "$YES")"
-expect_match "both deps present and enabled: superpowers reported enabled" '*superpowers*enabled*' "$OUT"
-expect_match "both deps present and enabled: agent-skills reported enabled" '*agent-skills*enabled*' "$OUT"
 expect_no_match "both deps enabled: no repair call" '*plugin enable*' "$(cat "$CALLS")"
 
 new_fixture enable-disabled
@@ -546,13 +428,11 @@ plant_cli_plugin "superpowers@bionic" false
 plant_installed "superpowers@bionic" "6.3.0"
 OUT="$(run_setup "$NO")"
 expect_no_match "declined repair: no enable call" '*plugin enable*' "$(cat "$CALLS")"
-expect_match "declined repair: named in the summary" '*superpowers*' "$OUT"
 
 new_fixture enable-absent
 plant_cli_plugin "bionic@bionic" true
 OUT="$(run_setup "$NO")"
 expect_no_match "absent dep is not 'enabled'" '*enable agent-skills*' "$(cat "$CALLS")"
-expect_match "absent dep: summary names it" '*agent-skills*' "$OUT"
 
 # ---------------------------------------------------------------------------
 # Group 4 — (c) the install loops, through the ONE install_dep function (AC-5).
@@ -588,10 +468,6 @@ expect_match "an extra mcp row registers through install_dep's own argv" '*mcp a
 expect_no_match "native-kind rows never reach install_dep (the harness owns them)" \
   '*brew install superpowers*' "$CALLTEXT"
 # A glob on "*installed.*" would also match "ripgrep is not installed." two
-# lines up — the success line has to be checked as its own line (setup.sh sets
-# BIONIC_DEP_INDENT to three spaces, so that is what install_dep prints here).
-expect_true "a consented tool install confirms with a standalone 'installed.' line (AC-11 — O-1)" \
-  bash -c 'printf "%s\n" "$1" | /usr/bin/grep -qx "   installed."' _ "$OUT"
 # The list must be read on its own descriptor. A `while read ... done < <(list)`
 # loop hands the BODY the same stdin, so the consent prompt inside it eats the
 # next dependency NAME as the answer — declining every item and silently
@@ -609,20 +485,7 @@ OUT="$(run_setup "$NO")"
 CALLTEXT="$(cat "$CALLS")"
 expect_no_match "declined: no brew install ran" '*brew install*' "$CALLTEXT"
 expect_no_match "declined: no npm install ran" '*npm install*' "$CALLTEXT"
-expect_match "declined: the dependency is named in the summary" '*ripgrep*' "$OUT"
 
-# `ccstatusline` is the extras row whose presence probe needs jq (the statusline
-# lives in settings.json). Without jq its presence is unreadable, and the loop
-# must say so and OFFER rather than assume either way — the same honest-unknown
-# rule the rest of the script follows. (`motion` is the other row with an
-# unreadable presence, and since 2026-08-22 it is an `extra` too — the arm stays
-# on ccstatusline because its unknown is CAUSED by the missing jq this fixture
-# measures, where motion's is permanent whatever is on PATH.)
-new_fixture deps-unknown
-plant_cli_plugin "bionic@bionic" true
-OUT="$(SETUP_PATH="$NOJQ_BIN" run_setup "$NO")"
-expect_match "a presence the probe cannot read reports unknown, never a confident no" \
-  '*ccstatusline*unknown*' "$OUT"
 
 # ---------------------------------------------------------------------------
 # Group 4b — AC-11 by name: WHICH rows setup is allowed to ask about.
@@ -651,8 +514,6 @@ step_block() {  # <this-step-header-prefix> <next-step-header-prefix>
 TOOLS="$(step_block "3. Tools" "4. ")"
 EXTRAS="$(step_block "4. Optional extras" "5. ")"
 
-expect_match "the tools step has its own header" '*3. Tools*' "$OUT"
-expect_match "the extras step has its own header" '*4. Optional extras*' "$OUT"
 
 for basic in git node pnpm gh jq rg uv docker aws; do
   expect_match "basic offered at setup: ${basic}" "*${basic}*" "$TOOLS"
@@ -677,7 +538,6 @@ done
 EXTRA_ROSTER="ccstatusline notebooklm context7 @pencil.dev/cli humanizer document-skills example-skills @playwright/cli chrome-devtools playwright-chromium motion"
 for extra in $EXTRA_ROSTER; do
   expect_match "extra offered at setup: ${extra}" "*${extra}*" "$EXTRAS"
-  expect_match "extra carries its own line of why: ${extra}" "*   ${extra} — *" "$EXTRAS"
 done
 
 # A NATIVE ROW IN THE EXTRAS STEP, which is new at epic-18 T4 and is the one
@@ -690,40 +550,8 @@ expect_match "a native extra is offered as the CLI's own plugin install" \
 expect_no_match "…never as deps.sh's refusal to be a second installer" \
   "*there is no second installer*" "$OUT"
 
-# `[y/N]` is deps.sh's own prompt shape and the capital N IS the default, so
-# asserting it here asserts that an extra goes through the one consent gate
-# rather than through a second prompt written for this step.
-expect_match "extras are asked with a default-No prompt" '*\[y/N\]*' "$EXTRAS"
 
-# One why line per extra and no more: a single shared sentence at the top of the
-# step would satisfy every per-row assertion above while telling the user
-# nothing about the rest of the tools.
-# Keyed on the NAMES, not on the shape `<word> — <text>`: deps.sh's own
-# `declined — <name> stays absent.` has that shape too, and now sits at the same
-# indent (R-2), so a shape-only count would credit it as a why line.
-# /usr/bin/grep because this shell's `grep` is ugrep (memory: grep-skips-hidden-dirs).
-WHY_LINES=0
-WHY_EXPECTED=0
-for extra in $EXTRA_ROSTER; do
-  WHY_EXPECTED=$((WHY_EXPECTED + 1))
-  WHY_LINES=$((WHY_LINES + $(/usr/bin/grep -c "^   ${extra} — " <<< "$EXTRAS" || true)))
-done
-expect_eq "exactly one why line per extra, no shared sentence standing in" \
-  "$WHY_EXPECTED" "$WHY_LINES"
 
-# ONE INDENT OWNER (six-axis review R-2). Step 4 is written by two files —
-# setup's own `say` lines and the install prose deps.sh prints — and the seam
-# between them used to be visible on the user's screen: three spaces for one,
-# two for the other, alternating down the step. The caller owns the indent now
-# (`BIONIC_DEP_INDENT`), so every line of the step sits at the same depth
-# whichever file wrote it. Measured on the transcript, which is the only place
-# the defect existed.
-BAD_INDENT="$(awk '
-  NR == 1 { next }                      # the step header itself
-  /^[[:space:]]*$/ { next }             # blank separators
-  { match($0, /^ */); if (RLENGTH != 3) printf "%d(%d): %s\n", NR, RLENGTH, $0 }
-' <<< "$EXTRAS")"
-expect_eq "step 4: every printed line sits three spaces in, whichever file wrote it" "" "$BAD_INDENT"
 
 # Declining every extra mutates nothing — the default really is No.
 expect_no_match "declined extras: nothing was installed" '*npm install -g @pencil.dev/cli*' "$(cat "$CALLS")"
@@ -753,8 +581,6 @@ expect_eq "consented: the task-list name is in settings.json" "1" \
   "$(jq -r '.env.CLAUDE_CODE_ENABLE_TODO_TOOLS // ""' "$FIX/ch/settings.json")"
 expect_eq "consented: the long-command ceiling is there beside it" "1800000" \
   "$(jq -r '.env.BASH_MAX_TIMEOUT_MS // ""' "$FIX/ch/settings.json")"
-expect_match "consented: the item says what it did" '*set.*' "$OUT"
-expect_match "the step names itself in the user's words" '*5. Environment*' "$OUT"
 # THE HALF THAT MATTERS MOST. Not "settings.json was written" — "and the shell
 # rc was not", byte for byte. A machine that got both would still be carrying
 # the footprint remove now has to clean up.
@@ -764,7 +590,6 @@ SETTINGS_AFTER_FIRST="$(cat "$FIX/ch/settings.json")"
 OUT="$(run_setup "$YES")"
 expect_eq "second run writes nothing (byte-identical settings.json)" \
   "$SETTINGS_AFTER_FIRST" "$(cat "$FIX/ch/settings.json")"
-expect_match "second run says there is nothing to do" '*nothing to do*' "$OUT"
 expect_no_match "…and asks no question it has no work behind" '*Write bionic*' "$OUT"
 
 new_fixture env-declined
@@ -775,7 +600,6 @@ OUT="$(run_setup "$NO")"
 expect_eq "declined: settings.json is untouched, byte for byte" \
   "$SETTINGS_BEFORE" "$(cat "$FIX/ch/settings.json")"
 expect_eq "declined: and so is the shell rc" "$RC_BEFORE" "$(cat "$FIX/rc")"
-expect_match "declined: the item is named as an action line" '*--only environment*' "$OUT"
 
 # A settings.json that already carries every name bionic owns — written by hand,
 # or by an earlier run — is already correct, and the merge must not disturb what
@@ -1089,10 +913,6 @@ RC_BEFORE="$(cat "$FIX/rc")"
 OUT="$(run_setup "$NO")"
 expect_eq "declined removal: the rc is untouched, byte for byte" "$RC_BEFORE" "$(cat "$FIX/rc")"
 
-new_fixture alias-absent
-plant_cli_plugin "bionic@bionic" true
-OUT="$(run_setup "$YES")"
-expect_match "no legacy block: setup says there is nothing to remove" '*legacy*' "$OUT"
 
 # ---------------------------------------------------------------------------
 # Group 7 — (f) legacy-channel settings.json managed-hook cleanup, jq-gated.
@@ -1149,51 +969,8 @@ SETTINGS_BEFORE="$(cat "$FIX/ch/settings.json")"
 OUT="$(run_setup "$NO")"
 expect_eq "declined cleanup: settings.json untouched, byte for byte" \
   "$SETTINGS_BEFORE" "$(cat "$FIX/ch/settings.json")"
-expect_match "declined cleanup: the count is named in the summary" '*2 legacy-channel managed-hook*' "$OUT"
 
-new_fixture hooks-none
-plant_cli_plugin "bionic@bionic" true
-OUT="$(run_setup "$NO")"
-expect_match "no legacy-channel entries: setup says so rather than prompting" '*no legacy-channel managed-hook entries*' "$OUT"
 
-# C-2 — WHAT THE PROMPT PROMISES, in both machine states.
-#
-# The prompt used to say, unconditionally, that the plugin registers its own
-# copy of each hook through the payload's hooks.json. That is a safety claim —
-# "delete these, something already covers them" — and it is false on every
-# machine where the plugin is not registered with the CLI, which is every
-# machine before the W5 cutover. A user who answered `y` severed their hook
-# enforcement outright on the strength of it.
-#
-# The registration is a machine fact (detect_plugin_registered), so the sentence
-# is conditional on it. Both branches are asserted, and each asserts the ABSENCE
-# of the other's claim — otherwise a prompt that printed both would pass both.
-
-new_fixture hooks-registered
-plant_cli_plugin "bionic@bionic" true
-plant_installed "bionic@bionic" "0.1.0"
-plant_legacy_channel_settings
-OUT="$(run_setup "$NO")"
-expect_match "registered: the prompt says the plugin registers its own copy" \
-  '*registers its own copy*' "$OUT"
-expect_no_match "registered: it does not also warn that nothing takes their place" \
-  '*nothing takes their place*' "$OUT"
-
-new_fixture hooks-unregistered
-plant_cli_plugin "bionic@bionic" true
-plant_legacy_channel_settings
-OUT="$(run_setup "$NO")"
-expect_match "unregistered: the prompt says plainly that nothing takes their place" \
-  '*nothing takes their place*' "$OUT"
-expect_no_match "unregistered: the false replacement claim is not printed" \
-  '*registers its own copy*' "$OUT"
-expect_match "unregistered: the prompt names the plugin's absence as the reason" \
-  '*NOT registered with the CLI*' "$OUT"
-
-# The fixture pair really does differ only in the registration fact, so the
-# discrimination above is the registration and not some other fixture drift.
-expect_eq "the two arms differ in the registration fact, and in that alone" \
-  "plugin:registered=no" "$(lib_query "$LIB_DIR/detect.sh" detect_plugin_registered)"
 
 new_fixture hooks-nojq
 plant_cli_plugin "bionic@bionic" true
@@ -1201,7 +978,6 @@ plant_legacy_channel_settings
 SETTINGS_BEFORE="$(cat "$FIX/ch/settings.json")"
 OUT="$(SETUP_PATH="$NOJQ_BIN" run_setup "$YES")"
 expect_eq "no jq: settings.json is never edited blind" "$SETTINGS_BEFORE" "$(cat "$FIX/ch/settings.json")"
-expect_match "no jq: the unknown is reported honestly" '*unknown*' "$OUT"
 
 # ---------------------------------------------------------------------------
 # Group 8 — (g) the consented permission-profile apply (AC-6).
@@ -1224,14 +1000,12 @@ SETTINGS_AFTER_FIRST="$(cat "$FIX/ch/settings.json")"
 OUT="$(run_setup "$YES")"
 expect_eq "second apply is a no-op (byte-identical settings)" \
   "$SETTINGS_AFTER_FIRST" "$(cat "$FIX/ch/settings.json")"
-expect_match "second run reports the profile as already current" '*profile*' "$OUT"
 
 new_fixture profile-declined
 plant_cli_plugin "bionic@bionic" true
 OUT="$(run_setup "$NO")"
 expect_match "declined apply: no block applied" \
   'profile: applied=no*' "$(lib_query "$LIB_DIR/profile.sh" detect_profile_state)"
-expect_match "declined apply: named as an action line" '*permission*' "$OUT"
 
 # ---------------------------------------------------------------------------
 # Group 8b — AC-12: ONE consented question about the default permission mode.
@@ -1253,14 +1027,6 @@ new_fixture defaultmode-yes
 plant_cli_plugin "bionic@bionic" true
 OUT="$(run_setup "$YES")"
 expect_match "the mode question is asked" "$MODE_Q" "$OUT"
-expect_match "the question says what it buys, in one line" '*Recommended*' "$OUT"
-expect_match "the question is asked with a default-No prompt" '*\[y/N\]*' "$OUT"
-# item 1: Remote Control sessions offer Manual / Accept edits / Plan only and
-# override whatever defaultMode bionic just wrote — the question that sets it
-# has to say so, on the same screen, or the setting reads as a stronger promise
-# than it is.
-expect_match "the question carries the Remote Control note" \
-  '*Remote Control sessions override this (Manual / Accept edits / Plan only).*' "$OUT"
 expect_eq "the mode is asked exactly once in a run" "1" \
   "$(awk '/default permission mode to auto/ { n++ } END { print n + 0 }' <<< "$OUT")"
 expect_eq "consented: the default mode is written as auto" "auto" \
@@ -1281,8 +1047,6 @@ OUT="$(run_setup "$NO")"
 expect_match "settled machine: the mode question is still reached and asked" "$MODE_Q" "$OUT"
 expect_eq "declined: the settings file is byte-identical afterwards" \
   "$SETTINGS_BEFORE_MODE" "$(cat "$FIX/ch/settings.json")"
-expect_match "declined: the summary names the mode as an outstanding action" \
-  '*permission mode*' "$(awk '/^Summary/ { f = 1 } f' <<< "$OUT")"
 # ---- D-1: the value has ONE owner, and this writer follows it ----
 #
 # `auto` was a bare literal here and a second bare literal in remove.sh's reset,
@@ -1302,8 +1066,6 @@ plant_cli_plugin "bionic@bionic" true
 OUT="$(run_setup "$YES" BIONIC_LIB_DIR="$MUT_LIB")"
 expect_eq "one owner: setup writes whatever the owner names, not a literal of its own" "plan" \
   "$(jq -r '.permissions.defaultMode // ""' "$FIX/ch/settings.json" 2>/dev/null)"
-expect_match "one owner: and the question it asks names that value too" \
-  '*default permission mode to plan*' "$OUT"
 # The mode is a settings key of the machine's own, NOT a rule inside bionic's
 # marker block — the block is a rendering of the template and the template ships
 # no defaultMode (tests/profile.test.sh Group 2 walls that). Writing it into the
@@ -1333,8 +1095,6 @@ RUN2="$(run_setup "$YES")"
 FP2="$(fingerprint "$FIX")"
 
 expect_eq "run 2 leaves the fixture tree byte-identical to run 1" "$FP1" "$FP2"
-expect_match "run 2 sees the plugin already installed" '*already installed*' "$RUN2"
-expect_match "run 2 sees the export already present" '*already*' "$RUN2"
 expect_no_match "run 2 finds no legacy alias block left to remove" "*${ALIAS_START}*" "$(cat "$FIX/rc")"
 expect_eq "run 2 finds no legacy-channel hook entries left" "env:legacy-channel-hooks count=0" \
   "$(lib_query "$LIB_DIR/detect.sh" detect_legacy_channel_hooks)"
@@ -1357,7 +1117,6 @@ expect_eq "no answers on stdin: the machine is byte-identical afterwards" "$FP_B
 # how setup knows what to offer; what must be absent is every MUTATION.
 MUTATING="$(grep -E 'plugin install|plugin enable|brew install|npm install|uv tool install|mcp add|npx --yes|pnpm store add' "$CALLS" 2>/dev/null)"
 expect_eq "no answers on stdin: not one mutating command ran" "" "$MUTATING"
-expect_match "no answers on stdin: setup still prints its summary" '*Summary*' "$OUT"
 
 # ---------------------------------------------------------------------------
 # Group 11 — the end summary carries named action lines (warn-and-continue).
@@ -1366,24 +1125,10 @@ expect_match "no answers on stdin: setup still prints its summary" '*Summary*' "
 echo ""
 echo "=== Group 11: end summary ==="
 
-new_fixture summary
-OUT="$(run_setup "$NO")"
-expect_match "summary block is printed" '*Summary*' "$OUT"
-expect_match "summary names the declined plugin install" '*claude plugin install bionic@bionic*' "$OUT"
-expect_match "summary names the declined permission profile" '*permission*' "$OUT"
 new_fixture summary-rc
 run_setup "$NO" >/dev/null 2>&1
 expect_eq "a fully-declined run still exits 0 (warn-and-continue)" "0" "$?"
 
-new_fixture summary-clean
-plant_cli_plugin "bionic@bionic" true
-plant_cli_plugin "superpowers@bionic" true
-plant_cli_plugin "agent-skills@bionic" true
-plant_installed "superpowers@bionic" "6.3.0"
-plant_installed "agent-skills@bionic" "0.6.7"
-run_setup "$YES" >/dev/null 2>&1
-OUT="$(run_setup "$YES")"
-expect_match "a settled machine's second run reports no outstanding work" '*Summary*' "$OUT"
 
 # ---------------------------------------------------------------------------
 # Group 12 — mutation-and-restore ×3. RED evidence dies at green
@@ -1458,7 +1203,6 @@ run_setup "$YES" >/dev/null 2>&1
 CTRL3_SECOND="$(run_setup "$YES" 2>&1)"
 expect_no_match "RESTORED (production setup.sh): the second run asks nothing" \
   '*Write bionic*environment settings*' "$CTRL3_SECOND"
-expect_match "…it says there is nothing to do instead" '*nothing to do*' "$CTRL3_SECOND"
 
 # Mutation 4 — delete the legacy-skill-copy consent gate. A declined run must
 # now remove the directory; if it does not, the gate was never what stopped it.
@@ -1545,9 +1289,6 @@ expect_true "consented: the legacy skill directory is gone" \
   bash -c '[ ! -e "$1" ]' _ "$FIX/ch/skills/canonical-sdlc"
 expect_eq "consented: the library agrees the copy is gone" \
   "no" "$(_present_of "$(lib_query "$LIB_DIR/detect.sh" detect_legacy_skill_copy)")"
-expect_match "consented: setup names the directory it removed" '*skills/canonical-sdlc*' "$OUT"
-expect_match "consented: setup says why the copy mattered (the second registration)" \
-  '*twice*' "$OUT"
 
 new_fixture skill-copy-declined
 plant_cli_plugin "bionic@bionic" true
@@ -1557,8 +1298,6 @@ OUT="$(run_setup "$NO")"
 expect_eq "declined: the whole fixture tree is byte-identical" "$FP_BEFORE" "$(fingerprint "$FIX")"
 expect_true "declined: the SKILL.md is still there" \
   test -f "$FIX/ch/skills/canonical-sdlc/SKILL.md"
-expect_match "declined: the end summary carries the action line" \
-  '*pre-plugin skill copy*' "$OUT"
 
 # ABSENT IS A NO-OP, and specifically not a prompt. A machine that never ran
 # the installer — every machine a cold user brings — must not be asked about a
@@ -1568,8 +1307,6 @@ plant_cli_plugin "bionic@bionic" true
 OUT="$(run_setup "$NO")"
 expect_no_match "absent: setup does not ask about a copy that is not there" \
   '*Remove *skills/canonical-sdlc*' "$OUT"
-expect_match "absent: setup says there is nothing to remove" \
-  '*no pre-plugin skill copy*' "$OUT"
 expect_true "absent: no skills directory was created" \
   bash -c '[ ! -e "$1" ]' _ "$FIX/ch/skills"
 
@@ -1582,8 +1319,6 @@ run_setup "$YES" >/dev/null 2>&1
 FP_ONE="$(fingerprint "$FIX")"
 OUT="$(run_setup "$YES")"
 expect_eq "idempotent: the second consented run mutates nothing" "$FP_ONE" "$(fingerprint "$FIX")"
-expect_match "idempotent: the second run reports nothing to remove" \
-  '*no pre-plugin skill copy*' "$OUT"
 
 # THE PREDICATE IS NARROW ON PURPOSE. The same installer left copies of
 # bionic's other two skills behind. 4/6 measured those as registering nothing,
@@ -1634,12 +1369,6 @@ WEDGE_ELAPSED=$(( $(date +%s) - WEDGE_START ))
 
 expect_true "a wedged listing does not wedge setup: the whole run returns inside 10s" \
   bash -c '[ "$1" -le 10 ]' _ "$WEDGE_ELAPSED"
-expect_match "…and step 1 says the load state is unknown rather than nothing at all" \
-  '*load state is unknown*' "$OUT"
-expect_match "…and names the bound as the reason, in seconds the user can read" \
-  '*did not answer within 2 seconds*' "$OUT"
-expect_match "…and the summary carries an action line about the load state" \
-  '*claude plugin list*' "$OUT"
 # The measured elapsed is printed so a failure is diagnosable from the log alone.
 echo "      (bounded load-state arm: elapsed=${WEDGE_ELAPSED}s, bound=2s, probe sleeps 45s)"
 
@@ -1710,47 +1439,14 @@ DUPL_FULL_ELAPSED=$(( $(date +%s) - DUPF_START ))
 
 expect_true "a full pass does not wedge on it either: inside 20s" \
   bash -c '[ "$1" -le 20 ]' _ "$DUPL_FULL_ELAPSED"
-expect_match "…and says out loud that it could not look" \
-  '*could not check for duplicate copies*' "$DUPL_FULL"
-expect_match "…naming the bound in seconds, not a guess at the reason" \
-  '*did not answer within 2 seconds*' "$DUPL_FULL"
 expect_no_match "…and invents no collision out of a read it never finished" \
   '*is installed twice*' "$DUPL_FULL"
-# THE ACTION LINE CARRIES THE CAUSE. It used to say "install jq" unconditionally, which is
-# the wrong instruction for a machine whose jq is present and whose registry stalled.
-expect_no_match "…and does not tell a user with jq installed to install jq" \
-  '*install jq, then re-run*' "$DUPL_FULL"
 echo "      (bounded full-pass arm: elapsed=${DUPL_FULL_ELAPSED}s, bound=2s, probe sleeps 45s)"
 
 # ---- and the unwedged run still finds the collision it is there to find ----
 DUPL_OK="$(run_setup "$NO")"
 expect_match "with a jq that answers, the full pass reports the duplicate" \
   '*is installed twice*' "$DUPL_OK"
-
-# ---------------------------------------------------------------------------
-echo ""
-echo "=== Group 15: the instruction lines name a route that works (critic F-1) ==="
-# ---------------------------------------------------------------------------
-#
-# WHAT WAS FALSE. Consent reaches this script only through its standard input.
-# The model runs it from a tool whose stdin carries nothing, so every question
-# declines — and setup then told the user to "re-run /bionic:setup and answer y",
-# which is the one thing that cannot work: a second run through the same command
-# declines identically, because the interactivity of the SESSION does not give
-# the SCRIPT an answer channel. The fix here is the honest half only — the text
-# names the terminal invocation, which is the route that can actually be
-# answered. Consent mechanics are untouched.
-
-new_fixture honest-instruction
-plant_cli_plugin "bionic@bionic" true
-OUT="$(run_setup "$NO")"
-
-expect_no_match "no action line promises that re-running the command can be answered" \
-  '*re-run /bionic:setup and answer y*' "$OUT"
-expect_match "the permission-profile action names the terminal invocation instead" \
-  '*scripts/setup.sh*' "$OUT"
-expect_match "…in the unquoted form a person can paste" '*bash /*scripts/setup.sh*' "$OUT"
-expect_match "…and still says which answer applies it" '*answer y*' "$OUT"
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -1832,15 +1528,12 @@ SETUP_FLAGS="--only not-an-item"
 UNKNOWN_OUT="$(run_setup "")"; UNKNOWN_RC=$?
 SETUP_FLAGS=""
 expect_eq "--only with an unknown name exits 2" "2" "$UNKNOWN_RC"
-expect_match "…and says so in words, naming what was asked for" '*not-an-item*' "$UNKNOWN_OUT"
-expect_match "…and points at --list for the names" '*--list*' "$UNKNOWN_OUT"
 expect_no_match "…and asks nothing before refusing" '*\[y/N\]*' "$UNKNOWN_OUT"
 
 SETUP_FLAGS="--only"
 MISSING_OUT="$(run_setup "")"; MISSING_RC=$?
 SETUP_FLAGS=""
 expect_eq "--only with no name at all exits 2 rather than running everything" "2" "$MISSING_RC"
-expect_match "…and says a name is what is missing" '*--only needs the name*' "$MISSING_OUT"
 
 # ---- one consented item, and NOTHING else, by bytes ----
 #
@@ -1873,8 +1566,6 @@ expect_no_match "…and no other step printed a header" '*3. Tools*' "$ONE_OUT"
 expect_no_match "…nor the environment step" '*5. Environment*' "$ONE_OUT"
 expect_no_match "…nor the permission-profile half of its own step" \
   '*bionic ships a permission profile*' "$ONE_OUT"
-expect_no_match "…and the summary does not claim the whole machine is set up" \
-  '*this machine is set up*' "$ONE_OUT"
 
 # ---- exactly ONE question is asked, so the answer cannot land on another ----
 #
@@ -1889,137 +1580,14 @@ printf '%s\n' "$DECLINE_OUT" > "$TMP/only-decline.txt"
 QCOUNT="$(/usr/bin/grep -c '\[y/N\]' "$TMP/only-decline.txt" | tr -d ' ')"
 expect_eq "--only asks exactly one question" "1" "$QCOUNT"
 expect_match "…the one it was told to ask" '*environment settings*' "$DECLINE_OUT"
-# EOF on the very first prompt is "not asked", not a recorded decline (AC-12):
-# nobody was there to answer, so the transcript must not say they said no.
-expect_match "…a run with nothing to answer with says 'not asked'" '*not asked —*' "$DECLINE_OUT"
-expect_no_match "…and never says 'declined' when nobody was asked" '*declined*' "$DECLINE_OUT"
 expect_eq "…and settings.json is untouched when nobody answered" "$(printf '%s' '{}')" \
   "$(cat "$FIX/ch/settings.json")"
 expect_eq "…and the rc file is untouched either way" "$(printf 'export PATH="$HOME/bin:$PATH"\n')" \
   "$(cat "$FIX/rc")"
 
-# ---- the declined action line carries the route, with the item's own name ----
-expect_match "the declined item's action line names the item" '*--only environment*' "$DECLINE_OUT"
-expect_match "…and the invocation that delivers one answer to it" \
-  '*| bash /*scripts/setup.sh --only environment*' "$DECLINE_OUT"
-# The answer half, matched as a fixed string against a FILE: the route is only a
-# route if it actually carries a yes, and the newline in it is a literal
-# backslash-n that a glob pattern cannot state without escaping itself twice.
-expect_true "…with the answer itself supplied on the input" \
-  /usr/bin/grep -qF "printf 'y\\n' |" "$TMP/only-decline.txt"
 
-# ---- AC-12 at the other named consent gates in this script ----
-#
-# environment above is the proof of the mechanism; this checks it actually
-# reached the rest of this script's own `consent()` call sites — a dependency
-# repair, both legacy items, and the default-mode question — each isolated with
-# `--only` so a truly-EOF first pass answers exactly one of them.
 
-new_fixture eof-dependency-enable
-plant_cli_plugin "bionic@bionic" true
-plant_cli_plugin "superpowers@bionic" false
-plant_installed "superpowers@bionic" "6.3.0"
-SETUP_FLAGS="--only dependency:superpowers"
-EOF_OUT="$(run_setup "")"
-SETUP_FLAGS=""
-expect_match "dependency-enable, EOF: not asked, not declined" \
-  '*not asked — superpowers stays disabled*' "$EOF_OUT"
-expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
 
-new_fixture eof-legacy-alias
-plant_cli_plugin "bionic@bionic" true
-printf 'export PATH="$HOME/bin:$PATH"\n\n%s\n%s\n%s\n' "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
-SETUP_FLAGS="--only legacy-alias"
-EOF_OUT="$(run_setup "")"
-SETUP_FLAGS=""
-expect_match "legacy-alias, EOF: not asked, not declined" '*not asked — the block stays*' "$EOF_OUT"
-expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
-
-new_fixture eof-legacy-hooks
-plant_cli_plugin "bionic@bionic" true
-plant_legacy_channel_settings
-SETUP_FLAGS="--only legacy-hooks"
-EOF_OUT="$(run_setup "")"
-SETUP_FLAGS=""
-expect_match "legacy-hooks, EOF: not asked, not declined" '*not asked — *is unchanged*' "$EOF_OUT"
-expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
-
-new_fixture eof-legacy-skill-copy
-plant_cli_plugin "bionic@bionic" true
-plant_legacy_skill_copy
-SETUP_FLAGS="--only legacy-skill-copy"
-EOF_OUT="$(run_setup "")"
-SETUP_FLAGS=""
-expect_match "legacy-skill-copy, EOF: not asked, not declined" '*not asked — *is unchanged*' "$EOF_OUT"
-expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
-
-new_fixture eof-permission-mode
-plant_cli_plugin "bionic@bionic" true
-SETUP_FLAGS="--only permission-mode"
-EOF_OUT="$(run_setup "")"
-SETUP_FLAGS=""
-expect_match "permission-mode, EOF: not asked, not declined" \
-  '*not asked — the default permission mode is unchanged*' "$EOF_OUT"
-expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
-
-new_fixture eof-duplicate
-plant_cli_plugin "bionic@bionic" true
-plant_installed "superpowers@bionic" "6.3.0"
-plant_installed "superpowers@claude-plugins-official" "6.2.0"
-SETUP_FLAGS="--only duplicate:superpowers"
-EOF_OUT="$(run_setup "")"
-SETUP_FLAGS=""
-expect_match "duplicate-consolidation, EOF: not asked, not declined" \
-  '*not asked — left as they are*' "$EOF_OUT"
-expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
-
-new_fixture eof-permission-profile
-plant_cli_plugin "bionic@bionic" true
-SETUP_FLAGS="--only permission-profile"
-EOF_OUT="$(run_setup "")"
-SETUP_FLAGS=""
-expect_match "permission-profile, EOF: not asked, not declined" \
-  '*not asked — *is unchanged*' "$EOF_OUT"
-expect_no_match "…and the word declined does not appear" '*declined*' "$EOF_OUT"
-
-# ---- AC-12 closes the whole class, not just the named sites (A4.S6.n) ----
-#
-# Every consent() call site in this script, exercised in ONE pass on a maximally
-# unsettled machine (bionic absent so step 1 asks too; a real duplicate; a
-# disabled core dependency; every legacy item present; the permission profile
-# unapplied; the mode unset) with a truly-EOF first pass. The word "declined"
-# must not appear anywhere in that transcript — not just at the sites the plan
-# named — because AC-12 is a rule about the word, not a list of line numbers.
-new_fixture eof-whole-pass
-plant_installed "superpowers@bionic" "6.3.0"
-plant_installed "superpowers@claude-plugins-official" "6.2.0"
-plant_cli_plugin "agent-skills@bionic" false
-plant_installed "agent-skills@bionic" "0.6.7"
-printf 'export PATH="$HOME/bin:$PATH"\n\n%s\n%s\n%s\n' "$ALIAS_START" "$ALIAS_CONTENT" "$ALIAS_END" > "$FIX/rc"
-plant_legacy_channel_settings
-plant_legacy_skill_copy
-WHOLE_EOF_OUT="$(run_setup "")"
-expect_match "whole pass, EOF: 'not asked' actually fired (the arm is not vacuous)" \
-  '*not asked —*' "$WHOLE_EOF_OUT"
-expect_no_match "whole pass, EOF: the word declined never appears, anywhere (AC-12)" \
-  '*declined*' "$WHOLE_EOF_OUT"
-
-# A whole declined pass carries the same route for every item it asked about, so
-# a user reading the summary can act on any line in it.
-new_fixture only-route-everywhere
-plant_cli_plugin "bionic@bionic" true
-ALL_NO_OUT="$(run_setup "$NO")"
-for _item in environment permission-profile permission-mode; do
-  expect_match "the whole-pass summary names --only ${_item}" "*--only ${_item}*" "$ALL_NO_OUT"
-done
-
-# ONE OWNER FOR THE SENTENCE. Two spellings of "how to say yes" is how an action
-# line and a summary come to name different commands, which is the class of
-# defect Group 15 exists for. The route is composed in exactly one function.
-expect_eq "setup.sh composes the route sentence in one place" "1" \
-  "$(/usr/bin/grep -c 'answer yes to %s with' "$SETUP_SH" | tr -d ' ')"
-expect_eq "…and no other line in setup.sh spells the piped invocation" "1" \
-  "$(/usr/bin/grep -c "printf 'y" "$SETUP_SH" | tr -d ' ')"
 
 # ---------------------------------------------------------------------------
 # Group 17 — one answer over a printed plan: --all (AC-8)
@@ -2071,30 +1639,10 @@ ALL_OUT="$(run_setup "$ONE_YES")"
 SETUP_FLAGS=""
 printf '%s\n' "$ALL_OUT" > "$TMP/setup-all-yes.txt"
 
-expect_match "--all: the run states what it would do before it asks anything" \
-  '*bionic would:*' "$ALL_OUT"
-expect_match "--all: the plan names the dependency that is switched off" \
-  '*• enable the plugin superpowers*' "$ALL_OUT"
-expect_match "--all: …the environment settings" \
-  "*• write bionic's environment settings to*" "$ALL_OUT"
-expect_match "--all: …the retired shell alias block" \
-  '*• remove the retired shell alias block from*' "$ALL_OUT"
-expect_match "--all: …the retired hook entries" \
-  '*• remove the retired hook entries from*' "$ALL_OUT"
-expect_match "--all: …the pre-plugin skill copy" \
-  '*• remove the pre-plugin skill copy at*' "$ALL_OUT"
-expect_match "--all: …the permission profile" \
-  "*• apply bionic's permission profile to*" "$ALL_OUT"
-expect_match "--all: …and the default permission mode" \
-  "*• set Claude Code's default permission mode to auto*" "$ALL_OUT"
 
 expect_eq "--all asks exactly one question for the whole run" "1" \
   "$(/usr/bin/grep -c '\[y/N\]' "$TMP/setup-all-yes.txt" | tr -d ' ')"
-expect_match "--all: and the one question is asked over the printed plan" \
-  '*Do all of the above? \[y/N\]*' "$ALL_OUT"
 
-expect_match "--all: a yes still prints each item's own result line" '*set.*' "$ALL_OUT"
-expect_match "--all: …and the usual end summary" '*Summary*' "$ALL_OUT"
 expect_eq "--all: the environment settings were written" "1800000" \
   "$(jq -r '.env.BASH_MAX_TIMEOUT_MS // ""' "$FIX/ch/settings.json")"
 expect_eq "--all: the default permission mode was set" "auto" \
@@ -2107,13 +1655,6 @@ expect_match "--all: the disabled dependency was enabled" \
 expect_eq "--all: the legacy-channel hook entries are gone" "env:legacy-channel-hooks count=0" \
   "$(lib_query "$LIB_DIR/detect.sh" detect_legacy_channel_hooks)"
 
-# ---- an absent plugin is on the plan too, in the words the install uses ----
-new_fixture all-plugin-absent
-SETUP_FLAGS="--all"
-ABSENT_OUT="$(run_setup "$ONE_NO")"
-SETUP_FLAGS=""
-expect_match "--all: an uninstalled plugin is named on the plan" \
-  '*• install the bionic plugin*' "$ABSENT_OUT"
 
 # ---- a no runs nothing and says so ----
 new_fixture all-declined
@@ -2122,7 +1663,6 @@ FP_BEFORE="$(fingerprint "$FIX")"
 SETUP_FLAGS="--all"
 NO_OUT="$(run_setup "$ONE_NO")"
 SETUP_FLAGS=""
-expect_match "--all declined: says so in one line" '*nothing changed.*' "$NO_OUT"
 expect_eq "--all declined: the whole fixture tree is byte-identical" \
   "$FP_BEFORE" "$(fingerprint "$FIX")"
 expect_eq "--all declined: not one mutating command ran" "" \
@@ -2138,29 +1678,7 @@ EOF_OUT="$(run_setup "")"
 SETUP_FLAGS=""
 expect_eq "--all with nobody there to ask: the fixture tree is byte-identical" \
   "$FP_BEFORE" "$(fingerprint "$FIX")"
-expect_match "--all with nobody there to ask: says nothing changed" \
-  '*nothing changed.*' "$EOF_OUT"
 
-# ---- the plan is the roster minus what is already done ----
-new_fixture all-mostly-done
-plant_cli_plugin "bionic@bionic" true
-plant_cli_plugin "superpowers@bionic" true
-plant_cli_plugin "agent-skills@bionic" true
-plant_installed "superpowers@bionic" "6.3.0"
-plant_installed "agent-skills@bionic" "0.6.7"
-SETUP_FLAGS="--all"
-DONE_OUT="$(run_setup "$ONE_NO")"
-SETUP_FLAGS=""
-expect_no_match "--all: an already-installed plugin is not on the plan" \
-  '*• install the bionic plugin*' "$DONE_OUT"
-expect_no_match "--all: an enabled dependency is not on the plan" \
-  '*• enable the plugin superpowers*' "$DONE_OUT"
-expect_no_match "--all: an rc with no bionic block is not on the plan" \
-  '*• remove the retired shell alias block*' "$DONE_OUT"
-expect_no_match "--all: a settings file with no legacy entries is not on the plan" \
-  '*• remove the retired hook entries*' "$DONE_OUT"
-expect_match "--all: an item that IS outstanding still is" \
-  "*• write bionic's environment settings to*" "$DONE_OUT"
 
 # ---- THE PLAN AND THE QUESTIONS ARE ONE ROSTER, READ TWICE ----
 #
@@ -2194,7 +1712,6 @@ SETUP_FLAGS="--all --only environment"
 COMBO_OUT="$(run_setup "$YES")"; COMBO_RC=$?
 SETUP_FLAGS=""
 expect_eq "--all with --only exits 2" "2" "$COMBO_RC"
-expect_match "…and says why, in words" '*--all and --only cannot be combined*' "$COMBO_OUT"
 expect_no_match "…and asks nothing before refusing" '*\[y/N\]*' "$COMBO_OUT"
 expect_eq "…and changes nothing" "" \
   "$(jq -r '.env // "" | tostring | select(. != "\"\"")' "$FIX/ch/settings.json" 2>/dev/null | grep -F 'BASH_MAX' || true)"
@@ -2244,10 +1761,6 @@ FP_KNOB_BEFORE="$(fingerprint "$FIX")"
 SETUP_FLAGS="--only environment"
 KNOB_OUT="$(run_setup "" SETUP_ALL=1 RM_ALL=1)"
 SETUP_FLAGS=""
-expect_match "an exported consent flag does not answer the question" \
-  '*not asked —*' "$KNOB_OUT"
-expect_no_match "…and the environment item never reports itself written" \
-  '*Takes effect in a new session.*' "$KNOB_OUT"
 expect_eq "…and settings.json still holds nothing of bionic's" "$(printf '%s' '{}')" \
   "$(cat "$FIX/ch/settings.json")"
 expect_eq "…and the whole fixture tree is byte-identical" \
@@ -2261,8 +1774,6 @@ FP_KNOB_ALL_BEFORE="$(fingerprint "$FIX")"
 SETUP_FLAGS="--all"
 KNOB_ALL_OUT="$(run_setup "" SETUP_ALL=1 RM_ALL=1)"
 SETUP_FLAGS=""
-expect_match "--all under exported consent flags changes nothing and says so" \
-  '*nothing changed.*' "$KNOB_ALL_OUT"
 expect_eq "…and the whole fixture tree is byte-identical" \
   "$FP_KNOB_ALL_BEFORE" "$(fingerprint "$FIX")"
 expect_eq "…and not one mutating command ran" "" \

@@ -4576,15 +4576,9 @@ write_plan "$h30i" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 UNVERIFIABLE "$G
 expect_block "30i T4 + well-formed user-confirmed + auditor UNVERIFIABLE → block" \
   "$h30i" 'git commit -m "x"' "UNVERIFIABLE"
 
-# 30j — the refusal has to say WHAT is wrong. 30h asserts the verdict token
-# appears; this asserts the sentence is about the standing refutation and not
-# about the attribution the row got right. A message that told the user to
-# re-write a correct `user-confirmed:` line would send them to fix the one
-# thing that is not broken.
-h30j=$(make_home)
-write_plan "$h30j" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 REFUTED "$GOOD_CONFIRM")")" > /dev/null
-expect_block "30j the refusal names the standing auditor finding, not the attribution" \
-  "$h30j" 'git commit -m "x"' "does not overturn"
+# (30j — an arm asserting the refusal SENTENCE ("does not overturn") on the same
+# fixture 30h already blocks on — deleted at epic-18 W1: its only failure mode
+# was a reworded message.)
 
 # 30k — and the positive twin, so the pair discriminates: the SAME row with the
 # SAME confirmation and a CONFIRMED verdict passes. (30e proves the well-formed
