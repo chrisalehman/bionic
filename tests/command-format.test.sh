@@ -154,6 +154,23 @@ if [ -f "$HELP_MD" ]; then
   expect_contains "help.md: fresh machine points at /bionic:setup" "/bionic:setup" "$HELP_TEXT"
   expect_contains "help.md: something-wrong points at /bionic:doctor" "/bionic:doctor" "$HELP_TEXT"
 
+  # EVERY SHIPPED SKILL IS ON THE FRONT DOOR (epic-18 T3, AC-6). The set is DERIVED from
+  # payload/skills/ rather than listed here, for the reason the payload path wall gives about
+  # its own file set: an enumeration can only pin what somebody already noticed, and the way
+  # a skill goes missing from this page is by being added to the payload and nowhere else.
+  # That is precisely how excalidraw-diagram arrived — shipped, and unmentioned by the one
+  # page whose whole job is to say what bionic gives you.
+  MISSING_SKILLS=""
+  for _sk in "${REPO}/payload/skills"/*; do
+    [ -e "${_sk}/SKILL.md" ] || continue
+    _slug="${_sk##*/}"
+    case "$HELP_TEXT" in
+      *"/bionic:${_slug}"*) ;;
+      *) MISSING_SKILLS="${MISSING_SKILLS}${_slug} " ;;
+    esac
+  done
+  expect_eq "help.md names every skill the payload ships" "" "${MISSING_SKILLS% }"
+
   # ZERO INVOCATIONS: THE PAGE IS STATIC (epic-17 W6 S9a; walk finding W-2).
   #
   # The runtime read this pin was narrowed for is gone. What the walk measured: run
