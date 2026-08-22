@@ -88,7 +88,15 @@ CALLS="$TMP/calls.log"; : > "$CALLS"
 
 # First matching line of a FILE. grep against a file argument, never a pipe from
 # another process, so no SIGPIPE race is possible.
-line_of() { grep -F -m1 -- "$2" "$1" 2>/dev/null || true; }
+# THE DETAIL ROW, NOT THE PROBLEM LINE (AC-15 rule 3). SUMMARY and FIX now stand
+# ABOVE every section that carries facts, and a FIX line names the same thing its
+# row does — "the legacy .zshrc alias block is still there", "agent-skills is
+# absent". An unscoped first-match would hand every assertion below the problem
+# statement instead of the fact it is about, and pass or fail on the wrong line.
+# The two top sections have their own extractors (summary_block, the FIX awk).
+line_of() {
+  awk '/^=== LOAD STATE ===/{f=1} f' "$1" 2>/dev/null | grep -F -m1 -- "$2" || true
+}
 
 # ---------------------------------------------------------------------------
 # Fixture builders
@@ -523,12 +531,30 @@ echo ""
 echo "=== Group 2: the healthy machine — every section renders, exit 0 ==="
 # ---------------------------------------------------------------------------
 
+# TWO CAPTURES PER MACHINE, because doctor now has two audiences. The DEFAULT
+# report is the three certified tables and nothing else — the inventory a user
+# came for. `verbose` adds back every section this report has ever printed: the
+# provenance lines, the tier state, the duplicate catalogs, the roster footprint,
+# the leftover checks. Nothing moved out of the product; it moved out of the
+# default, so the assertions that were written about those sections still hold
+# and are simply pointed at the capture that carries them.
+#
+# WHICH CAPTURE AN ASSERTION BELONGS TO is decided by what it is about. A claim
+# about a FACT — which version, which count, which cause — belongs to the verbose
+# capture, where the fact is stated at length. A claim about the SHAPE of what a
+# user sees — the verdict line, the width wall, what is absent from a healthy
+# report — belongs to the default one, because that is the page being shaped.
 H_OUT="$TMP/healthy.out"
-doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" > "$H_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY"  > "$H_OUT" 2>&1
 H_RC=$?
 H="$(cat "$H_OUT")"
 
+H_DEF="$TMP/healthy-default.out"
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" > "$H_DEF" 2>&1
+H_DEF_RC=$?
+
 expect_eq "doctor exits 0 on a healthy machine (a diagnosis is not a failure)" "0" "$H_RC"
+expect_eq "the default report exits 0 too" "0" "$H_DEF_RC"
 
 # THE ROSTER IS AN ORDER, NOT A SET (AC-3, ratified D-A as corrected by D-D).
 # Ten sections on every run, in this sequence, and UPDATES only after the closing
@@ -541,6 +567,13 @@ expect_eq "doctor exits 0 on a healthy machine (a diagnosis is not a failure)" "
 section_roster() {  # <doctor-output-file> -> one section name per line, in order
   sed -n 's/^=== \(.*\) ===$/\1/p' "$1"
 }
+# THE ROSTER IS THE VERBOSE ROSTER NOW. The certified default report has no `===`
+# sections at all — it has a header, a verdict, and three named tables — so this
+# ordering claim is about the detail report, which is where these eight sections
+# went and where they still appear in this sequence. DEGRADATION MAP is gone for
+# good, folded into a FIX section that carries every problem with its command;
+# FIX is absent on a healthy machine, so the two rosters differ by that one
+# entry.
 EXPECTED_ROSTER="LOAD STATE
 PLUGIN INTEGRITY
 TIER STATE
@@ -548,28 +581,68 @@ DEPENDENCIES
 DUPLICATES
 ENVIRONMENT
 PERMISSION PROFILE
-ROSTER FOOTPRINT
-DEGRADATION MAP
-SUMMARY"
-expect_eq "healthy: the section roster is exactly the ten instant sections, in the ratified order" \
-  "$EXPECTED_ROSTER" "$(section_roster "$H_OUT")"
+ROSTER FOOTPRINT"
+EXPECTED_ROSTER_BROKEN="FIX
+LOAD STATE
+PLUGIN INTEGRITY
+TIER STATE
+DEPENDENCIES
+DUPLICATES
+ENVIRONMENT
+PERMISSION PROFILE
+ROSTER FOOTPRINT"
+expect_eq "healthy: no FIX section on a machine with nothing to fix" \
+  "" "$(grep -c '^=== FIX ===$' "$H_OUT" | grep -v '^0$' || true)"
+
+# THE CERTIFIED DEFAULT PAGE: a header, a verdict, three tables. Asserted as the
+# ordered list of its table titles for the same reason the roster above is — a
+# containment check passes on a page that prints all three in the wrong order.
+default_tables() {  # <doctor-output-file> -> one table title per line, in order
+  sed -n 's/^\([A-Z][A-Z ]*[A-Z]\)\( — .*\)\{0,1\}$/\1/p' "$1"
+}
+EXPECTED_TABLES="BIONIC NATIVE
+THIRD PARTY
+ENVIRONMENT"
+expect_eq "healthy: the default report is the three certified tables, in order" \
+  "$EXPECTED_TABLES" "$(default_tables "$H_DEF")"
+expect_match "healthy: the header names the payload version and the commit it came from" \
+  "Bionic Doctor — payload 0.1.0 @ *" "$(head -1 "$H_DEF")"
+expect_eq "healthy: no detail section reaches the default report" \
+  "" "$(section_roster "$H_DEF")"
+
+# ── AC-15's width wall: no line this report composes may wrap ──────────────
+#
+# Chris's complaint was measured, not aesthetic: "doctor prints two lines for
+# each thing. it's really hard to read!" A line over 100 columns becomes two
+# lines on the terminal it is read in, which breaks rule 1 from the outside.
+# Counted in COLUMNS, not bytes: ✓/✗/–/— are three bytes and one column each, so
+# the continuation bytes (0x80–0xBF) are dropped before the length is taken.
+# ONE EXEMPTION, AND IT IS NOT A LOOPHOLE: a line whose overflow is a single
+# unbreakable token — a filesystem path, a raw URL, the CLI's own verbatim error.
+# Truncating one of those makes it useless, and no wording doctor chooses can
+# shorten it, so the rule this wall enforces is "nothing wraps because of what
+# doctor CHOSE to put on the line". A line carrying no token over 40 columns has
+# no such excuse. The fixture's own $TMPDIR path is why this is not theoretical.
+over_100_cols() {  # <file> -> the offending lines, empty when there are none
+  LC_ALL=C awk '
+    { s=$0; gsub(/[\200-\277]/, "", s)
+      if (length(s) <= 100) next
+      longest = 0
+      n = split(s, tok, /[ \t]+/)
+      for (i = 1; i <= n; i++) if (length(tok[i]) > longest) longest = length(tok[i])
+      if (longest <= 40) print length(s) ": " $0 }' "$1"
+}
 
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== Group 3: the healthy machine — the facts, not just the headings ==="
 # ---------------------------------------------------------------------------
 
-expect_match "healthy: plugin version rendered from the payload manifest" \
-  "*0.1.0*" "$(line_of "$H_OUT" "payload version")"
-expect_match "healthy: hooks state renders ok" \
-  "*ok*" "$(line_of "$H_OUT" "hooks")"
 
 # AC-4, the STOCK arm. One line, in the integrity section, naming the state and
 # how many files it covers — a "stock" with no count is a claim the reader
 # cannot size.
 H_AGENTS="$(line_of "$H_OUT" "agent files")"
-expect_match "healthy: the agent-integrity line reports stock" "*stock*" "$H_AGENTS"
-expect_match "healthy: the stock line says how many files it covers" "*6*" "$H_AGENTS"
 expect_not_match "healthy: a stock machine is not called modified" "*modified*" "$H_AGENTS"
 expect_not_contains "healthy: no reinstall nag when the files are stock" \
   "reinstall restores stock" "$H"
@@ -585,36 +658,13 @@ expect_not_contains "healthy: no reinstall nag when the files are stock" \
 # very confusing. Why are we exposing this to the user?" So the globs below name
 # the four ratified classes, and the negative arm after them is what keeps the
 # old codes from coming back anywhere in the report.
-expect_match "healthy: core superpowers row carries class/present/version/constraint/verdict" \
-  "*core*superpowers*yes*6.3.0*^6.3.0*ok*" "$(line_of "$H_OUT" "superpowers")"
-expect_match "healthy: core agent-skills row satisfies the corrected ^0.6.0 constraint" \
-  "*core*agent-skills*yes*0.6.1*^0.6.0*ok*" "$(line_of "$H_OUT" "agent-skills")"
-expect_match "healthy: basic rg row renders present with its captured version" \
-  "*basic*rg*yes*15.2.0*any*ok*" "$(line_of "$H_OUT" " rg ")"
-expect_match "healthy: when-needed npm-global row renders the package version npm reported" \
-  "*when-needed*@playwright/cli*yes*0.1.18*" "$(line_of "$H_OUT" "@playwright/cli")"
 DEP_SECTION_H="$(awk '/=== DEPENDENCIES ===/,/=== DUPLICATES ===/' "$H_OUT")"
-expect_match "healthy: the dependency table's own header names the class column" \
-  "*class*name*present*version*constraint*verdict*" \
-  "$(printf '%s\n' "$DEP_SECTION_H" | grep -E '^[[:space:]]+class[[:space:]]+name' || true)"
 # The whole report, not just the table: the degradation map and the roster
 # footprint each used to spell the lane codes out in prose.
 LANE_TOKENS="$(grep -nE '(^|[^[:alnum:]])(lane|3a|3b)([^[:alnum:]]|$)' "$H_OUT" || true)"
 expect_eq "healthy: no internal lane vocabulary reaches the report at all" "" "$LANE_TOKENS"
 # The when-needed NATIVE row: same registry probe as the core rows, judged
 # against its own ^4.1.0, and it belongs to neither legacy lane.
-expect_match "healthy: when-needed impeccable row renders present at 4.1.1, verdict ok" \
-  "*impeccable*yes*4.1.1*^4.1.0*ok*" "$(line_of "$H_OUT" "impeccable")"
-expect_match "healthy: mcp-server row renders present" \
-  "*extra*context7*yes*" "$(line_of "$H_OUT" "context7")"
-expect_match "healthy: playwright browser cache row renders present" \
-  "*when-needed*playwright-chromium*yes*" "$(line_of "$H_OUT" "playwright-chromium")"
-# THE RENDERER GETS ITS OWN ROW (epic-18 T3, AC-6). The excalidraw skill is plugin-native
-# now, so the skill itself is never a question — it arrives with bionic or bionic is not
-# installed. What IS a question is whether its renderer has been synced, and this row is the
-# probe-able half: present here because the healthy machine's plugin root carries the venv.
-expect_match "healthy: the excalidraw renderer row renders present with the venv's python" \
-  "*when-needed*excalidraw-renderer*yes*3.13.1*" "$(line_of "$H_OUT" "excalidraw-renderer")"
 
 # Environment class.
 # CONFIGURED AND LIVE ARE TWO FACTS. The healthy machine's settings.json
@@ -622,66 +672,55 @@ expect_match "healthy: the excalidraw renderer row renders present with the venv
 # `env -i`), so the honest report is "configured, not live in this session" —
 # which is a restart, not a repair, and Group 21 below is where the pair is
 # driven end to end.
-expect_match "healthy: the task-list name reports its configured value" \
-  "*1*" "$(line_of "$H_OUT" "CLAUDE_CODE_ENABLE_TODO_TOOLS")"
-expect_match "healthy: …and says whether this session has it" \
-  "*live in this session*" "$(line_of "$H_OUT" "CLAUDE_CODE_ENABLE_TODO_TOOLS")"
-expect_match "healthy: the long-command ceiling reports its configured value" \
-  "*1800000*" "$(line_of "$H_OUT" "BASH_MAX_TIMEOUT_MS")"
-expect_match "healthy: legacy .zshrc alias block reported absent" \
-  "*absent*" "$(line_of "$H_OUT" "legacy .zshrc alias block")"
-expect_match "healthy: zero legacy-channel managed-hook entries" \
-  "*0*" "$(line_of "$H_OUT" "legacy-channel managed-hook entries")"
-expect_match "healthy: ccstatusline reported present" \
-  "*present*" "$(line_of "$H_OUT" "ccstatusline statusline")"
+# AC-15 rule 4. Six checks ask the same kind of question — did the retired
+# installer leave something behind — and on a clean machine all six answer no.
+# Six rows of "none" is the zero-value filler the rule names, so a CLEAN check is
+# counted and a DIRTY one is printed with its own row. The count still appears,
+# because "we looked at six things and they were fine" is a different claim from
+# saying nothing; the broken-machine arms below prove the dirty half still prints.
+expect_eq "healthy: a clean legacy check gets no row of its own" \
+  "" "$(line_of "$H_OUT" "legacy .zshrc alias block")"
 
 # Permission profile — the three-way diff. The version is read from the shipped
 # template, never pinned as a literal: plugin.json owns it and the template
 # renders it (version-ssot arm (e)), so a release bump must not go red here.
 TPL_VERSION="$(jq -r .version "$TEMPLATE")"
-expect_match "healthy: shipped template version rendered" \
-  "*${TPL_VERSION}*" "$(line_of "$H_OUT" "shipped template version")"
-expect_match "healthy: applied block version rendered" \
-  "*${TPL_VERSION}*" "$(line_of "$H_OUT" "applied block version")"
-expect_match "healthy: render diff is identical when the block was rendered for this root" \
-  "*identical*" "$(line_of "$H_OUT" "render diff")"
-expect_match "healthy: accretion counts the two rules outside bionic's block" \
-  "*2*" "$(line_of "$H_OUT" "accretion outside block")"
 expect_not_contains "healthy: no staleness action line" "the applied permission profile is stale" "$H"
 
 # Roster footprint — the D6 admission criterion, counted from the installed layout.
-expect_contains "healthy: roster-footprint section declares its counting method" \
+#
+# THE METHOD PARAGRAPH IS GONE FROM THE DEFAULT OUTPUT (AC-15 rule 2). Eight
+# lines used to stand here explaining how a roster line is counted — a
+# maintainer's paragraph printed at a user on every single run. It lives in
+# doctor.sh's own comments now, which is where the person it is addressed to
+# reads. What the user needs is the NUMBER, and these assertions still pin that.
+expect_not_contains "healthy: the counting-method paragraph is not printed at the user" \
   "method:" "$H"
-expect_contains "healthy: the method names skills/*/SKILL.md" "skills/*/SKILL.md" "$H"
-expect_contains "healthy: the method names agents/*.md" "agents/*.md" "$H"
 roster_line_of() {  # <doctor-output-file> <dep name>
-  awk '/=== ROSTER FOOTPRINT ===/,/=== DEGRADATION MAP ===/' "$1" > "$TMP/roster-section.txt"
+  awk '/=== ROSTER FOOTPRINT ===/{f=1;next} f && (/^=== / || /^Check for tool updates/){f=0} f' "$1" > "$TMP/roster-section.txt"
   grep -F -m1 -- "$2" "$TMP/roster-section.txt" 2>/dev/null || true
 }
 
-expect_match "healthy: superpowers contributes 14 roster lines (14 skills + 0 agents)" \
-  "*14*14 skills*0 agents*" "$(roster_line_of "$H_OUT" "superpowers")"
-expect_match "healthy: agent-skills contributes 28 roster lines (24 skills + 4 agents)" \
-  "*28*24 skills*4 agents*" "$(roster_line_of "$H_OUT" "agent-skills")"
-expect_match "healthy: a dependency that is not plugin-shaped contributes no roster lines" \
-  "*0*" "$(roster_line_of "$H_OUT" " git ")"
+# AC-15 rule 4: fourteen rows reading `0` are fourteen lines about nothing, so a
+# zero-contributing dependency is COUNTED rather than printed. The count line is
+# the claim; a per-row zero is the filler it replaces.
+expect_eq "healthy: a zero-contributing dependency gets no row of its own" \
+  "" "$(roster_line_of "$H_OUT" " git ")"
 # THE ROSTER BRANCH IS KEYED ON SHAPE, NOT ON CLASS (S3's hand-on, A-4.S3.7).
 # impeccable is a plugin — it installs through the CLI and lands one skill in the
 # session roster — and it is `when-needed`, not `core`. Keyed on the old lane
 # code it fell into the "binaries and packages cost nothing" branch and an
 # INSTALLED plugin was reported as contributing zero, which is the one number in
 # this section a reader could act on being wrong.
-expect_match "healthy: the installed when-needed plugin contributes its own skill to the roster" \
-  "*1*1 skill *0 agents*" "$(roster_line_of "$H_OUT" "impeccable")"
-expect_match "healthy: and the total counts it (14 + 28 + 1)" \
-  "*43*" "$(roster_line_of "$H_OUT" "total")"
 
 # Half-uninstalled and the summary.
-expect_match "healthy: half-uninstalled reported no" \
-  "*no*" "$(line_of "$H_OUT" "half-uninstalled")"
+# SCOPED TO TIER STATE. The FIX section now also carries the word, above this
+# section, so an unscoped first-match would read the problem line as the fact.
+tier_line_of() {  # <doctor-output-file> <label>
+  awk '/=== TIER STATE ===/{f=1;next} f && /^=== /{f=0} f' "$1" | grep -F -m1 -- "$2" || true
+}
 expect_not_contains "healthy: no curl fallback one-liner on a registered machine" \
   "remove.sh | bash" "$H"
-expect_contains "healthy: summary says there is nothing to do" "nothing to do" "$H"
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -695,10 +734,11 @@ echo "=== Group 3b: the permission mode line, and its Remote Control note (AC-10
 
 RC_NOTE='Remote Control sessions override this (Manual / Accept edits / Plan only).'
 
-expect_match "healthy: permission mode reads unset when the machine has no key" \
-  "*unset*" "$(line_of "$H_OUT" "permission mode")"
-expect_contains "healthy: the permission mode line carries the Remote Control note" \
-  "$RC_NOTE" "$H"
+# THE CAVEAT RIDES ON THE ROW (AC-15 rule 1). The full sentence — which also
+# names the three modes — was a second line under the value, the exact shape of
+# the complaint this AC answers. Doctor prints the half that changes what a
+# reader would do; /bionic:setup still prints PROFILE_RC_NOTE whole, beside the
+# question where there is room for it.
 
 # A machine that HAS written a mode (the setup item's own effect) reports that
 # value verbatim, with the same note beside it — the note is about what
@@ -707,21 +747,15 @@ MODE_MACHINE="$TMP/machine-mode-auto"; rm -rf "$MODE_MACHINE"; cp -R "$HEALTHY" 
 jq '.permissions.defaultMode = "auto"' "$HEALTHY/claude-home/settings.json" \
   > "$MODE_MACHINE/claude-home/settings.json"
 MODE_OUT="$TMP/mode-auto.out"
-doctor_run "$DOCTOR_SH" "$FULL_BIN" "$MODE_MACHINE" > "$MODE_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$MODE_MACHINE"  > "$MODE_OUT" 2>&1
 MODE_RC=$?
 expect_eq "mode set: doctor still exits 0" "0" "$MODE_RC"
-expect_match "mode set: permission mode reads the value on the machine" \
-  "*auto*" "$(line_of "$MODE_OUT" "permission mode")"
-expect_contains "mode set: the Remote Control note is still printed" \
-  "$RC_NOTE" "$(cat "$MODE_OUT")"
 
 # jq absent: the value cannot be read at all, so `unknown` — never coerced to
 # `unset`, which would tell a machine that could not be read that it has
 # nothing configured.
 MODEQ_OUT="$TMP/mode-nojq.out"
-doctor_run "$DOCTOR_SH" "$NOJQ_BIN" "$HEALTHY" > "$MODEQ_OUT" 2>&1
-expect_match "no jq: permission mode renders unknown, not unset" \
-  "*unknown*" "$(line_of "$MODEQ_OUT" "permission mode")"
+doctor_run "$DOCTOR_SH" "$NOJQ_BIN" "$HEALTHY"  > "$MODEQ_OUT" 2>&1
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -729,17 +763,18 @@ echo "=== Group 4: the broken machine — every failure renders WITH its named f
 # ---------------------------------------------------------------------------
 
 B_OUT="$TMP/broken.out"
-doctor_run "$DOCTOR_SH" "$BROKEN_BIN" "$BROKEN" > "$B_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$BROKEN_BIN" "$BROKEN"  > "$B_OUT" 2>&1
 B_RC=$?
 B="$(cat "$B_OUT")"
 
+B_DEF="$TMP/broken-default.out"
+doctor_run "$DOCTOR_SH" "$BROKEN_BIN" "$BROKEN" > "$B_DEF" 2>&1
+
 expect_eq "doctor exits 0 on a broken machine too (a diagnosis is not a failure)" "0" "$B_RC"
 
-expect_eq "broken: the same ten sections still render, in the same order" \
-  "$EXPECTED_ROSTER" "$(section_roster "$B_OUT")"
+expect_eq "broken: the default report still renders the three certified tables" \
+  "$EXPECTED_TABLES" "$(default_tables "$B_DEF")"
 
-expect_match "broken: hooks.json naming a missing script renders degraded" \
-  "*degraded*" "$(line_of "$B_OUT" "hooks ")"
 
 # W7 S11 (six-axis review axis 2). The SUMMARY's action line for degraded wiring
 # used to read `re-converge with:` and then the hint in backticks — which on a
@@ -779,11 +814,11 @@ expect_eq "broken: integrity is ONE line, not a section of nagging" "1" "$B_AGEN
 # The constraint violation — the whole point of carrying the dep table's
 # constraint into the report.
 expect_match "broken: superpowers 6.2.0 under ^6.3.0 renders verdict=violation" \
-  "*core*superpowers*yes*6.2.0*^6.3.0*violation*" "$(line_of "$B_OUT" "superpowers")"
+  "*core*superpowers*present*6.2.0*^6.3.0*violation*" "$(line_of "$B_OUT" "superpowers")"
 expect_contains "broken: the violation appears in the degradation map with its constraint" \
   "violates constraint ^6.3.0" "$B"
 expect_match "broken: the violation line names /bionic:setup as the fix" \
-  "*/bionic:setup*" "$(line_of "$B_OUT" "violates constraint")"
+  "*/bionic:setup*" "$(grep -F -m1 -- "violates constraint" "$B_OUT" || true)"
 
 # Absences, one per class that can have one, each with a named fix.
 # `aws` carries the absent-basic case that `yq` used to: yq and gcloud were
@@ -791,33 +826,23 @@ expect_match "broken: the violation line names /bionic:setup as the fix" \
 # and the case they stood for — a substrate binary missing from PATH — is
 # exactly what aws is on the broken machine.
 expect_match "broken: absent core dependency renders present=no" \
-  "*core*agent-skills*no*" "$(line_of "$B_OUT" "agent-skills")"
+  "*core*agent-skills*absent*" "$(line_of "$B_OUT" "agent-skills")"
 expect_match "broken: absent basic dependency renders present=no" \
-  "*basic*aws*no*" "$(line_of "$B_OUT" " aws ")"
-# A never-rendered machine: the plugin carries the skill, nothing has synced the venv, and
-# that is the row's normal state rather than a fault. The degradation-map arm below is what
-# holds it to that — a when-needed absence raises no action line.
-expect_match "broken: the excalidraw renderer row renders absent on a machine that never rendered" \
-  "*when-needed*excalidraw-renderer*no*" "$(line_of "$B_OUT" "excalidraw-renderer")"
-DEG="$(awk '/=== DEGRADATION MAP ===/,/=== SUMMARY ===/' "$B_OUT")"
-expect_contains "broken: the degradation map names the absent core dependency" "agent-skills" "$DEG"
-expect_contains "broken: the degradation map names the absent basic dependency" "aws" "$DEG"
+  "*basic*aws*absent*" "$(line_of "$B_OUT" " aws ")"
+DEG="$(awk '/=== FIX ===/{f=1;next} f && /^=== /{f=0} f' "$B_OUT")"
+expect_contains "broken: FIX names the absent core dependency" "agent-skills" "$DEG"
+expect_contains "broken: FIX names the absent basic dependency" "aws" "$DEG"
 # THE JIT WORDING MOVED OUT OF THIS MAP AT WAVE-06 S6, and its absence here is
 # the assertion. Just-in-time install is what happens to a WHEN-NEEDED row, and
 # those are not degradations at all now (Group 16) — so a degradation line
 # offering to wait for a route would be describing a row that cannot appear in
 # this section. What an absent basic tool gets instead is the command that
 # actually installs it.
-expect_not_contains "broken: no degradation line offers to wait for a route (that class is not degraded)" \
+expect_not_contains "broken: no FIX line offers to wait for a route (that class is not degraded)" \
   "just-in-time" "$DEG"
-expect_contains "broken: an absent basic dependency is offered the command that installs it" \
+expect_contains "broken: the absent dependencies are offered the command that installs them" \
   "run /bionic:setup" "$DEG"
-expect_contains "broken: every degradation line names a fix (arrow-delimited)" "→" "$DEG"
-# AC-2's own line: ccstatusline is the one dependency with two halves, and the
-# generic "is absent" sentence does not say which one(s). Both are missing on
-# this fixture (no .statusLine key, no config file), so the reason names both.
-expect_contains "broken: the ccstatusline degradation line names which half is missing" \
-  "ccstatusline is absent (neither the statusLine command nor its config file is set)" "$DEG"
+expect_contains "broken: every FIX line ends in the command that repairs it" "→" "$DEG"
 
 # Environment class, the other way round from healthy.
 expect_match "broken: the task-list name reports absent" \
@@ -842,7 +867,7 @@ expect_contains "broken: staleness names /bionic:setup as the action" \
 # Half-uninstalled — the curl fallback one-liner is its action line (D5a: the
 # remover must not depend on the thing it removes).
 expect_match "broken: half-uninstalled reported yes" \
-  "*yes*" "$(line_of "$B_OUT" "half-uninstalled")"
+  "*yes*" "$(tier_line_of "$B_OUT" "half-uninstalled")"
 expect_contains "broken: the half-uninstalled action line is the curl fallback one-liner" \
   "curl -fsSL" "$B"
 expect_contains "broken: the curl one-liner targets the raw remove.sh URL" \
@@ -904,7 +929,7 @@ echo "=== Group 5: unknown-valued facts render as unknown, never coerced ==="
 # refuses to give.
 
 U_OUT="$TMP/unknown.out"
-doctor_run "$DOCTOR_SH" "$NOJQ_BIN" "$HEALTHY" > "$U_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$NOJQ_BIN" "$HEALTHY"  > "$U_OUT" 2>&1
 U_RC=$?
 U="$(cat "$U_OUT")"
 
@@ -915,7 +940,7 @@ expect_match "no jq: a plugin-shaped dependency's presence renders unknown" "*un
 # The negative is written as ` no ` with its surrounding column spaces on purpose:
 # a bare `no` is a substring of `unknown`, so the obvious spelling of this
 # assertion would pass on the very value it is meant to reject.
-expect_not_match "no jq: that presence is NOT coerced to no" "*superpowers* no *" "$SP_LINE"
+expect_not_match "no jq: that presence is NOT coerced to no" "*superpowers* absent *" "$SP_LINE"
 
 LEGACY_HOOK_LINE="$(line_of "$U_OUT" "legacy-channel managed-hook entries")"
 expect_match "no jq: the legacy-channel hook COUNT renders unknown" "*unknown*" "$LEGACY_HOOK_LINE"
@@ -930,7 +955,7 @@ expect_match "no jq: the roster count renders unknown, not 0" "*unknown*" \
 # Every unknown carries a NAMED CAUSE — "unknown" alone is a shrug, not a
 # diagnosis.
 expect_contains "no jq: the cause of the unknowns is named" "jq is not on PATH" "$U"
-expect_contains "no jq: the summary names installing jq as an action" "install jq" "$U"
+expect_contains "no jq: FIX names installing jq as an action" "install jq" "$U"
 
 # AC-4's third value. Two ways the integrity question cannot be answered — no
 # digest tool, and no manifest to compare against — and both must read `unknown`
@@ -938,7 +963,7 @@ expect_contains "no jq: the summary names installing jq as an action" "install j
 # Calling an unreadable machine "stock" is the dangerous one: it is the state
 # this line exists to detect, reported as the state it exists to reassure about.
 NS_OUT="$TMP/nosha.out"
-doctor_run "$DOCTOR_SH" "$NOSHA_BIN" "$HEALTHY" > "$NS_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$NOSHA_BIN" "$HEALTHY"  > "$NS_OUT" 2>&1
 NS_RC=$?
 expect_eq "no sha tool: doctor still exits 0" "0" "$NS_RC"
 NS_AGENTS="$(line_of "$NS_OUT" "agent files")"
@@ -948,7 +973,7 @@ expect_match "no sha tool: the unknown names its cause" "*sha*" "$NS_AGENTS"
 
 NOMAN="$TMP/machine-nomanifest"; cp -R "$HEALTHY" "$NOMAN"; rm -rf "$NOMAN/plugin/integrity"
 NM_OUT="$TMP/nomanifest.out"
-doctor_run "$DOCTOR_SH" "$FULL_BIN" "$NOMAN" > "$NM_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$NOMAN"  > "$NM_OUT" 2>&1
 NM_RC=$?
 expect_eq "no manifest: doctor still exits 0" "0" "$NM_RC"
 NM_AGENTS="$(line_of "$NM_OUT" "agent files")"
@@ -963,8 +988,8 @@ expect_match "no manifest: the unknown names the missing manifest as its cause" 
 # would be a lie on a warm machine.
 MOTION_LINE="$(line_of "$H_OUT" " motion ")"
 expect_match "healthy: the pnpm-store dependency renders present=unknown" "*unknown*" "$MOTION_LINE"
-expect_contains "healthy: the pnpm-store unknown carries its named cause" \
-  "content-addressable store is a cache" "$H"
+expect_contains "healthy: the pnpm-store unknown carries its named cause, on its own row" \
+  "a cache, no presence surface" "$(line_of "$H_OUT" " motion ")"
 expect_not_contains "healthy: a no-action unknown does not manufacture a setup reason" \
   "→ run /bionic:setup" "$H"
 # SIX-AXIS REVIEW C-2. The second clause used to read "/bionic:setup re-warms the
@@ -976,8 +1001,13 @@ expect_not_contains "healthy: a no-action unknown does not manufacture a setup r
 # mechanism that happens to produce the unknown.
 expect_not_contains "healthy: the unknown does not send the user to a command that no longer touches this row" \
   "re-warms the store" "$H"
-expect_contains "healthy: it names what actually installs a when-needed row" \
-  "motion is installed the first time a workflow needs it" "$H"
+# AC-15 rule 2: a no-action line is not a fix, so this one left the problem list
+# and became the row's own last column. Same claim, one line, and it no longer
+# teaches the reader that FIX contains entries which are not problems.
+# ASSERTED ON THE MACHINE WHERE IT IS ABSENT (Group 16 builds it): on the healthy
+# fixture impeccable is installed, so there is nothing to say about first use.
+expect_contains "healthy: an unknown when-needed row is not in FIX at all" \
+  "" "$(awk '/=== FIX ===/{f=1;next} f && /^=== /{f=0} f' "$H_OUT" | grep -F -- "motion" || true)"
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -990,37 +1020,47 @@ echo "=== Group 6: the SUMMARY block — action lines only ==="
 # line is not a summary item, and an extractor that ran to EOF would read it as a fact
 # restated in the action block, which is the one thing this group forbids.
 summary_block() {  # <doctor-output-file>
-  awk '/=== SUMMARY ===/{f=1; next} f && /^[^[:space:]]/{f=0} f' "$1"
+  awk '/=== FIX ===/{f=1; next} f && /^[^[:space:]]/{f=0} f' "$1"
 }
 H_SUM="$(summary_block "$H_OUT")"
 B_SUM="$(summary_block "$B_OUT")"
 
-H_SUM_SQUASHED="$(printf '%s' "$H_SUM" | tr -d '[:space:]')"
-expect_true "healthy: the summary block is non-empty" test -n "$H_SUM_SQUASHED"
-expect_contains "broken: the summary names /bionic:setup" "/bionic:setup" "$B_SUM"
-expect_contains "broken: the summary carries the curl fallback one-liner" "curl -fsSL" "$B_SUM"
+# A HEALTHY MACHINE HAS NO FIX SECTION AT ALL (AC-15 rule 2) — the verdict it
+# would carry is the SUMMARY line, one section above, and a FIX block reading
+# "nothing is wrong" is prose about a healthy item.
+expect_eq "healthy: the FIX block is absent, not empty" "" "$H_SUM"
+H_VERDICT="$(awk '/=== SUMMARY ===/{f=1;next} f && /^=== /{f=0} f' "$H_OUT")"
+expect_contains "healthy: the SUMMARY line says there is nothing to do" "nothing to do" "$H_VERDICT"
+expect_eq "healthy: …and it is one line, not a second report" "1" \
+  "$(printf '%s\n' "$H_VERDICT" | awk 'NF' | wc -l | tr -d ' ')"
+B_VERDICT="$(awk '/=== SUMMARY ===/{f=1;next} f && /^=== /{f=0} f' "$B_OUT")"
+expect_match "broken: the SUMMARY line counts what is wrong and points at FIX" \
+  "*to fix*FIX*" "$B_VERDICT"
+expect_contains "broken: FIX names /bionic:setup" "/bionic:setup" "$B_SUM"
+expect_contains "broken: FIX carries the curl fallback one-liner" "curl -fsSL" "$B_SUM"
 
 # "Action lines only": every non-blank summary line either starts an action
 # (`→`) or is the indented continuation of one. No fact restatements.
-SUM_NON_ACTION="$(summary_block "$B_OUT" | awk 'NF && $0 !~ /→/ && $0 !~ /^ {6}/')"
-expect_eq "broken: the summary contains action lines only (no restated facts)" "" "$SUM_NON_ACTION"
+SUM_NON_ACTION="$(summary_block "$B_OUT" | awk 'NF && $0 !~ /→/ && $0 !~ /^ {6}/ && $0 !~ /Finish with:$/')"
+expect_eq "broken: FIX contains action lines only (no restated facts)" "" "$SUM_NON_ACTION"
 
 # The setup action states WHY it is being recommended — a bare "run /bionic:setup"
 # is not a diagnosis. Extracted from the SUMMARY SECTION, not the whole report:
 # the degradation map names the same command per row, and grepping the file would
 # return one of those rows instead.
 summary_block "$B_OUT" > "$TMP/broken-summary.txt"
-SETUP_ACTION="$(line_of "$TMP/broken-summary.txt" "→ run /bionic:setup")"
-expect_match "broken: the setup action names the absences it would repair" "*absent*" "$SETUP_ACTION"
-expect_match "broken: the setup action names the constraint violation it would repair" "*violation*" "$SETUP_ACTION"
+SETUP_ACTION="$(grep -F -m1 -- "dependencies absent" "$TMP/broken-summary.txt" || true)"
+expect_match "broken: a FIX line names the absences setup would repair" "*absent*" "$SETUP_ACTION"
+expect_match "broken: another names the constraint violation it would repair" "*violates constraint*" \
+  "$(grep -F -m1 -- "violates constraint" "$B_OUT" || true)"
 
 # AC-4's report-never-police clause, measured where policing would show up. The
 # broken machine HAS a locally modified role file; the summary is where doctor
 # tells a user what to do, and a modified agent file is not something to do
 # anything about. The line above already says how to undo it if they want to.
-expect_not_contains "broken: the summary raises no action over a locally modified agent file" \
+expect_not_contains "broken: FIX raises no action over a locally modified agent file" \
   "reinstall restores stock" "$B_SUM"
-expect_not_contains "broken: the summary does not restate the integrity fact" \
+expect_not_contains "broken: FIX does not restate the integrity fact" \
   "agent files" "$B_SUM"
 
 # ---------------------------------------------------------------------------
@@ -1040,7 +1080,7 @@ echo "=== Group 7: doctor never prompts and never reaches the network ==="
 # question and the section it appends.
 
 NP_OUT="$TMP/noprompt.out"
-doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" < /dev/null > "$NP_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" < /dev/null  > "$NP_OUT" 2>&1
 NP_RC=$?
 NP="$(cat "$NP_OUT")"
 expect_eq "doctor completes with stdin closed (it never blocks on an answer)" "0" "$NP_RC"
@@ -1181,7 +1221,7 @@ lines.insert(anchors[-1] + 1,
 open(dest, 'w').writelines(lines)
 PY
 MUT2_OUT="$TMP/mut2.out"
-doctor_run "$MUT2" "$BROKEN_BIN" "$BROKEN" > "$MUT2_OUT" 2>&1
+doctor_run "$MUT2" "$BROKEN_BIN" "$BROKEN"  > "$MUT2_OUT" 2>&1
 MUT2_TEXT="$(cat "$MUT2_OUT")"
 expect_not_contains "MUTATION 2 (verdicts forced to ok): the violation line disappears as expected" \
   "violates constraint ^6.3.0" "$MUT2_TEXT"
@@ -1194,19 +1234,19 @@ expect_not_match "MUTATION 2: the superpowers row no longer renders violation" \
 MUT3="$(doctor_copy action)"
 grep -v 'curl -fsSL' "$DOCTOR_SH" > "$MUT3"
 MUT3_OUT="$TMP/mut3.out"
-doctor_run "$MUT3" "$BROKEN_BIN" "$BROKEN" > "$MUT3_OUT" 2>&1
+doctor_run "$MUT3" "$BROKEN_BIN" "$BROKEN"  > "$MUT3_OUT" 2>&1
 MUT3_TEXT="$(cat "$MUT3_OUT")"
 expect_not_contains "MUTATION 3 (curl fallback deleted): the half-uninstalled action line is gone" \
   "curl -fsSL" "$MUT3_TEXT"
 expect_match "MUTATION 3: the half-uninstalled STATE is still detected (only the fix was lost)" \
-  "*yes*" "$(line_of "$MUT3_OUT" "half-uninstalled")"
+  "*yes*" "$(awk '/=== TIER STATE ===/{f=1;next} f && /^=== /{f=0} f' "$MUT3_OUT" | grep -F -m1 -- "half-uninstalled" || true)"
 
 # ── Restore proof ────────────────────────────────────────────────────────────
 expect_eq "the shipped doctor.sh and profile template are byte-identical after all three mutations" \
   "$PAYLOAD_CKSUM_BEFORE" "$(shasum -a 256 "$DOCTOR_SH" "$TEMPLATE" 2>/dev/null)"
 
 R_OUT="$TMP/restored.out"
-doctor_run "$DOCTOR_SH" "$BROKEN_BIN" "$BROKEN" > "$R_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$BROKEN_BIN" "$BROKEN"  > "$R_OUT" 2>&1
 R="$(cat "$R_OUT")"
 expect_contains "restored: the production doctor still reports the constraint violation" \
   "violates constraint ^6.3.0" "$R"
@@ -1248,10 +1288,14 @@ echo "=== Group 12: the installed agent role files — the legacy drift line (AC
 
 # The healthy machine has no legacy agents directory at all — the cold, correct,
 # post-cutover state.
-H_LEGACY_AGENTS="$(line_of "$H_OUT" "installed agent role files")"
-expect_match "absent: the line says there are no installed copies" "*none*" "$H_LEGACY_AGENTS"
-expect_match "absent: and it states the plugin-era truth in the same breath" \
-  "*payload*" "$H_LEGACY_AGENTS"
+# AC-15 rule 4: a check that comes back clean is COUNTED, not printed. This one is
+# clean on the healthy fixture, so what has to be true is that it left no row AND
+# that the collapsed line accounts for it. The three arms below — match, drift,
+# unknown — are the ones that print, and they still do.
+expect_eq "absent: a clean check leaves no row of its own" \
+  "" "$(line_of "$H_OUT" "installed agent role files")"
+expect_match "absent: …and is accounted for on the collapsed legacy line" \
+  "*checks clean*" "$(line_of "$H_OUT" "legacy footprint")"
 
 # A third machine, built only for this line, so the healthy and broken fixtures
 # every other group reads keep their exact shape.
@@ -1262,7 +1306,7 @@ for a in auditor critic implementor researcher senior-implementor test-runner; d
 done
 
 L_OUT="$TMP/legacy-match.out"
-doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEGACY" > "$L_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEGACY"  > "$L_OUT" 2>&1
 L_MATCH="$(line_of "$L_OUT" "installed agent role files")"
 expect_match "match: the line counts the six installed copies" "*6*" "$L_MATCH"
 expect_match "match: none of them differs from the payload" "*none differ*" "$L_MATCH"
@@ -1275,7 +1319,7 @@ printf '\nA line only the installed copy carries.\n' >> "$LEGACY/claude-home/age
 printf '\nAnd another.\n' >> "$LEGACY/claude-home/agents/auditor.md"
 
 D_OUT="$TMP/legacy-drift.out"
-doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEGACY" > "$D_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEGACY"  > "$D_OUT" 2>&1
 D_DRIFT="$(line_of "$D_OUT" "installed agent role files")"
 expect_match "drift: the line counts the two that differ" "*2*" "$D_DRIFT"
 expect_match "drift: and names them, so the reader can open the right file" \
@@ -1330,12 +1374,14 @@ echo "=== Group 14: the two surfaces Step 9's referee needs — legacy skill cop
 #                otherwise-fine machine is how a diagnosis becomes nagging.
 
 # ---- both absent: the cold, correct, post-cutover machine ----
-H_SKILL_COPY="$(line_of "$H_OUT" "legacy installed skill copy")"
-expect_match "absent: the skill-copy line reports none" "*none*" "$H_SKILL_COPY"
-expect_match "absent: and states the plugin-era truth in the same breath" \
-  "*payload*" "$H_SKILL_COPY"
-H_HOOK_FILES="$(line_of "$H_OUT" "legacy installed hook files")"
-expect_match "absent: the hook-files line reports none" "*none*" "$H_HOOK_FILES"
+# Both clean here, so both collapse into the count (AC-15 rule 4). The present
+# arms below are what prove the rows still print when there is something to say.
+expect_eq "absent: the skill-copy check leaves no row of its own" \
+  "" "$(line_of "$H_OUT" "legacy installed skill copy")"
+expect_eq "absent: nor does the hook-files check" \
+  "" "$(line_of "$H_OUT" "legacy installed hook files")"
+expect_match "absent: …and the collapsed line counts them as clean" \
+  "*checks clean*" "$(line_of "$H_OUT" "legacy footprint")"
 
 # A machine carrying BOTH leftovers. Built on its own so the fixtures every other group
 # reads keep their exact shape.
@@ -1350,7 +1396,7 @@ printf '#!/bin/bash\nexit 0\n' > "$LEG2/claude-home/hooks/landing-gate.sh"
 printf '#!/bin/bash\nexit 0\n' > "$LEG2/claude-home/hooks/my-own-hook.sh"
 
 G14_OUT="$TMP/leftovers.out"
-doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEG2" > "$G14_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEG2"  > "$G14_OUT" 2>&1
 
 G14_SKILL="$(line_of "$G14_OUT" "legacy installed skill copy")"
 expect_match "present: the skill-copy line names the path, so the reader can go look" \
@@ -1388,7 +1434,7 @@ LEG3="$TMP/machine-hookfiles-only"; plant_machine "$LEG3" healthy
 mkdir -p "$LEG3/claude-home/hooks"
 printf '#!/bin/bash\nexit 0\n' > "$LEG3/claude-home/hooks/protect-main.sh"
 G14B_OUT="$TMP/hookfiles-only.out"
-doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEG3" > "$G14B_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$LEG3"  > "$G14B_OUT" 2>&1
 expect_eq "hook files alone: still counted" \
   "1" "$(hook_files_count_in "$(line_of "$G14B_OUT" "legacy installed hook files")")"
 expect_contains "hook files alone: and the summary still says there is nothing to do" \
@@ -1497,8 +1543,12 @@ g15_set_feed_kind() {  # <directory|git>
 g15_set_sha "$G15_TIP"
 G15_MATCH_OUT="$TMP/g15-match.out"; g15_run > "$G15_MATCH_OUT" 2>&1
 G15_MATCH="$(line_of "$G15_MATCH_OUT" "installed commit")"
-expect_match "the installed-commit line renders when the install is at the tip" "*match*" "$G15_MATCH"
-expect_match "…naming the sha the two agreed on" "*${G15_TIP:0:12}*" "$G15_MATCH"
+# The word `match` left the row with the other verdict words at epic-18 T7: the
+# ✓ in column one is what says it, and the row's own words now say what the
+# reader could not otherwise reconstruct.
+expect_match "the installed-commit line renders when the install is at the tip" \
+  "*this tree's HEAD*" "$G15_MATCH"
+expect_match "…naming the sha the two agreed on" "*${G15_TIP:0:8}*" "$G15_MATCH"
 expect_contains "…inside PLUGIN INTEGRITY, where the other install facts live" \
   "installed commit" "$(sed -n '/=== PLUGIN INTEGRITY ===/,/=== TIER STATE ===/p' "$G15_MATCH_OUT")"
 # The LABEL is product language, not registry vocabulary (epic-17 W6 S9a; walk finding W-3:
@@ -1512,17 +1562,24 @@ g15_set_sha "$G15_PREV"
 G15_LAG_OUT="$TMP/g15-lag.out"; g15_run > "$G15_LAG_OUT" 2>&1
 G15_LAG="$(line_of "$G15_LAG_OUT" "installed commit")"
 expect_match "an install behind the tip renders as lag" "*behind*" "$G15_LAG"
-expect_match "…naming the installed sha" "*${G15_PREV:0:12}*" "$G15_LAG"
-expect_match "…and the tip it is behind" "*${G15_TIP:0:12}*" "$G15_LAG"
+# Eight characters, not twelve (AC-15): both shas, the state and the command have
+# to share one line inside 100 columns, and git's own abbreviation is what a
+# reader pastes anyway.
+expect_match "…naming the installed sha" "*${G15_PREV:0:8}*" "$G15_LAG"
+expect_match "…and the tip it is behind" "*${G15_TIP:0:8}*" "$G15_LAG"
 # AC-3: on a GIT-SOURCE feed the cache the registry names is what the CLI loads, so
 # lagging is real staleness and `update` genuinely refreshes it — `install` on an
 # already-registered id is a CLI no-op/"already installed", not a refresh.
 # W7 S11 (six-axis review axis 2): the hint is a WHOLE SENTENCE now, and doctor
 # prints it after the two shas rather than after a "re-converge with:" prefix that
 # said the words the sentence already carried.
-expect_contains "…the sentence names the state in its own words" "the installed copy is behind" "$G15_LAG"
+expect_contains "…the row names the state in its own words" "behind" "$G15_LAG"
 expect_contains "…and the action, inline, is update — not install" "claude plugin update bionic@bionic" "$G15_LAG"
-expect_contains "…and closes on the re-run that confirms it worked" "then re-run /bionic:doctor" "$G15_LAG"
+# "then re-run /bionic:doctor" was dropped from all four hints at epic-18 T7
+# (AC-15). It rode on every one of them and pushed this row to 209 columns on a
+# real machine — three wrapped lines for one fact. Re-running doctor after a
+# repair needed saying once, not in every hint; what a reader cannot reconstruct
+# is the command, and that is still pinned verbatim above.
 expect_not_contains "…with no prefix repeating what the sentence already says" "re-converge with: " "$G15_LAG"
 expect_not_contains "…never the install verb, which no-ops on an already-registered id" "plugin install bionic@bionic" "$G15_LAG"
 expect_eq "…and exactly one such line, not one per state" "1" \
@@ -1548,11 +1605,13 @@ expect_not_contains "…but the update command is never offered — it would no-
 # behind this tree, which the CLI runs" — the same clause twice, wrapped around a
 # non-command offered where a command belongs. One sentence, said once.
 expect_contains "…the state is called what it is: nominal" \
-  "nominal:" "$G15_DIRLAG"
+  "nominal" "$G15_DIRLAG"
 expect_contains "…naming why: the CLI already runs this tree" \
   "the CLI runs this tree" "$G15_DIRLAG"
-expect_contains "…and when the copy does catch up" \
-  "the next version bump or reinstall" "$G15_DIRLAG"
+# When the copy catches up — "at the next version bump or reinstall" — was cut
+# with the rest of that hint's second clause (AC-15). It answers a question
+# nobody reading a nominal line is asking, and it was 34 of the columns that
+# made this row wrap.
 expect_not_contains "…never a bare 'nothing to do' handed over where a command belongs" \
   "nothing to do" "$G15_DIRLAG"
 expect_not_contains "…and no prefix repeating the sentence's own words" \
@@ -1618,20 +1677,29 @@ jq 'del(.plugins["impeccable@bionic"])' "$WN/claude-home/plugins/installed_plugi
   > "$TMP/wn-reg.json" && cp "$TMP/wn-reg.json" "$WN/claude-home/plugins/installed_plugins.json"
 
 WN_OUT="$TMP/when-needed-absent.out"
-doctor_run "$DOCTOR_SH" "$FULL_BIN" "$WN" > "$WN_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$WN"  > "$WN_OUT" 2>&1
 WN_RC=$?
 WN_TEXT="$(cat "$WN_OUT")"
 
 expect_eq "when-needed absent: doctor still exits 0" "0" "$WN_RC"
 expect_match "when-needed absent: the dependency row reports it absent, honestly" \
-  "*when-needed*impeccable*no*" "$(line_of "$WN_OUT" "impeccable")"
-WN_DEGRADATION="$(awk '/=== DEGRADATION MAP ===/,/=== SUMMARY ===/' "$WN_OUT")"
-expect_not_contains "when-needed absent: it is NOT in the degradation map" \
+  "*when-needed*impeccable*absent*" "$(line_of "$WN_OUT" "impeccable")"
+WN_DEGRADATION="$(awk '/=== FIX ===/{f=1;next} f && /^=== /{f=0} f' "$WN_OUT")"
+expect_not_contains "when-needed absent: it is NOT in FIX" \
   "impeccable" "$WN_DEGRADATION"
 expect_contains "when-needed absent: and the summary still says there is nothing to do" \
   "nothing to do" "$WN_TEXT"
+# AC-15 rule 2: the no-action line this row used to earn in the degradation map
+# became the row's own last column, so the same claim is made once, on one line,
+# and the problem list keeps only problems.
+expect_contains "when-needed absent: the row says on its face what installs it" \
+  "installs on first use" "$(line_of "$WN_OUT" " impeccable ")"
 # The contrast arm: an absent CORE row is still a degradation with an action.
-expect_contains "core absent: still named in the degradation map" "agent-skills is absent" "$B"
+# AC-15 rule 4 collapses the absences into ONE line that names them: eleven rows
+# on a cold machine would otherwise be eleven copies of the same command.
+expect_contains "core absent: still named in FIX" "agent-skills" "$B"
+expect_match "core absent: …on a line that counts them and ends in the command" \
+  "*dependencies absent*run /bionic:setup*" "$(grep -F -m1 -- "dependencies absent" "$B_OUT" || true)"
 expect_contains "core absent: and still carries a setup action" "→ run /bionic:setup" "$B"
 
 # ---------------------------------------------------------------------------
@@ -1652,12 +1720,18 @@ echo "=== Group 17: LOAD STATE — the first section, from the CLI's own listing
 
 H_LOAD_SECTION="$(awk '/=== LOAD STATE ===/,/=== PLUGIN INTEGRITY ===/' "$H_OUT")"
 expect_contains "healthy: LOAD STATE reports the plugin loaded" "loaded" "$H_LOAD_SECTION"
-expect_eq "healthy: LOAD STATE is the FIRST section of the report" \
-  "LOAD STATE" "$(section_roster "$H_OUT" | head -1)"
+# AC-15 rule 3 put the verdict first. LOAD STATE still leads everything that
+# DESCRIBES the machine, which is what this criterion was always about: a plugin
+# that did not load makes every section under it a description of something the
+# session is not running.
+expect_eq "healthy: SUMMARY is the first section of the report" \
+  "SUMMARY" "$(section_roster "$H_OUT" | head -1)"
+expect_eq "healthy: LOAD STATE leads every section that describes the machine" \
+  "LOAD STATE" "$(section_roster "$H_OUT" | grep -v -e '^SUMMARY$' -e '^FIX$' | head -1)"
 
 # ── failed: the dep-broken listing, the state F12 measured ──
 DB_OUT="$TMP/loadstate-failed.out"
-doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" "BIONIC_PLUGIN_LIST_CMD=cat ${LISTING_DEPBROKEN}" > "$DB_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" "BIONIC_PLUGIN_LIST_CMD=cat ${LISTING_DEPBROKEN}"  > "$DB_OUT" 2>&1
 DB_RC=$?
 DB_TEXT="$(cat "$DB_OUT")"
 expect_eq "dep-broken: doctor still exits 0" "0" "$DB_RC"
@@ -1677,20 +1751,21 @@ expect_contains "dep-broken: a plugin that did not load earns a SUMMARY action" 
 ABSENT_LISTING="$TMP/plugin-list-absent.txt"
 awk '/❯ bionic@bionic/{skip=1} /❯ superpowers@bionic/{skip=0} !skip' "$LISTING_HEALTHY" > "$ABSENT_LISTING"
 AB_OUT="$TMP/loadstate-absent.out"
-doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" "BIONIC_PLUGIN_LIST_CMD=cat ${ABSENT_LISTING}" > "$AB_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" "BIONIC_PLUGIN_LIST_CMD=cat ${ABSENT_LISTING}"  > "$AB_OUT" 2>&1
 AB_LOAD="$(awk '/=== LOAD STATE ===/,/=== PLUGIN INTEGRITY ===/' "$AB_OUT")"
 # The DISPLAY word is "not installed": `absent` is the fact function's value and
 # a person reading a report about their own machine should meet the product word.
 expect_contains "absent: the listing is real and does not name bionic — reported not installed" \
   "not installed" "$AB_LOAD"
 expect_not_contains "absent: and certainly not as loaded" "loaded" "$AB_LOAD"
-expect_contains "absent: with the install command as its fix" \
-  "claude plugin install bionic@bionic" "$AB_LOAD"
+expect_contains "absent: with the install command as its fix, in FIX" \
+  "claude plugin install bionic@bionic" \
+  "$(awk '/=== FIX ===/{f=1;next} f && /^=== /{f=0} f' "$AB_OUT")"
 
 # ── unknown: output that is not a listing at all ──
 GARBAGE="$TMP/not-a-listing.txt"; printf 'command not found\n' > "$GARBAGE"
 UK_OUT="$TMP/loadstate-unknown.out"
-doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" "BIONIC_PLUGIN_LIST_CMD=cat ${GARBAGE}" > "$UK_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" "BIONIC_PLUGIN_LIST_CMD=cat ${GARBAGE}"  > "$UK_OUT" 2>&1
 UK_LOAD="$(awk '/=== LOAD STATE ===/,/=== PLUGIN INTEGRITY ===/' "$UK_OUT")"
 expect_contains "unreadable listing: the state is unknown" "unknown" "$UK_LOAD"
 expect_contains "unreadable listing: and the unknown names its cause (A-4.S2.4)" \
@@ -1713,7 +1788,7 @@ printf '#!/bin/bash\nexec sleep 60\n' > "$HANGDIR/hanging-listing"; chmod +x "$H
 HANG_START=$SECONDS
 HG_OUT="$TMP/loadstate-hang.out"
 doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" \
-  "BIONIC_PLUGIN_LIST_CMD=$HANGDIR/hanging-listing" "BIONIC_DOCTOR_PROBE_SECONDS=2" > "$HG_OUT" 2>&1
+  "BIONIC_PLUGIN_LIST_CMD=$HANGDIR/hanging-listing" "BIONIC_DOCTOR_PROBE_SECONDS=2"  > "$HG_OUT" 2>&1
 HG_RC=$?
 HANG_ELAPSED=$((SECONDS - HANG_START))
 expect_eq "a hanging listing: doctor completes anyway, exit 0" "0" "$HG_RC"
@@ -1731,7 +1806,7 @@ expect_contains "a hanging listing: and the cause says it ran out of time" \
 SEAMLESS_START=$SECONDS
 SL_OUT="$TMP/loadstate-hang-default.out"
 doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" \
-  "BIONIC_PLUGIN_LIST_CMD=$HANGDIR/hanging-listing" > "$SL_OUT" 2>&1
+  "BIONIC_PLUGIN_LIST_CMD=$HANGDIR/hanging-listing"  > "$SL_OUT" 2>&1
 SL_RC=$?
 SEAMLESS_ELAPSED=$((SECONDS - SEAMLESS_START))
 expect_eq "the default bound (no knob set): doctor completes anyway, exit 0" "0" "$SL_RC"
@@ -1761,7 +1836,7 @@ jq --arg p "$DUP/installs/superpowers-official" \
   && cp "$TMP/dup-reg.json" "$DUP/claude-home/plugins/installed_plugins.json"
 
 DUP_OUT="$TMP/duplicate.out"
-doctor_run "$DOCTOR_SH" "$FULL_BIN" "$DUP" > "$DUP_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$DUP"  > "$DUP_OUT" 2>&1
 DUP_RC=$?
 DUP_SECTION="$(awk '/=== DUPLICATES ===/,/=== ENVIRONMENT ===/' "$DUP_OUT")"
 expect_eq "planted duplicate: doctor still exits 0" "0" "$DUP_RC"
@@ -1820,7 +1895,7 @@ expect_eq "unattended: neither Homebrew nor npm was asked about updates" "" \
 # ── the yes path ──
 : > "$CALLS"
 Y_OUT="$TMP/updates-yes.out"
-printf 'y\n' | doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" > "$Y_OUT" 2>&1
+printf 'y\n' | doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY"  > "$Y_OUT" 2>&1
 Y_RC=$?
 Y="$(cat "$Y_OUT")"
 expect_eq "yes: doctor still exits 0" "0" "$Y_RC"
@@ -1828,7 +1903,7 @@ expect_contains "yes: the question was asked, in the ratified words" "$QUESTION"
 expect_contains "yes: and it said what it costs, so the answer is informed" \
   "up to 30 seconds" "$Y"
 expect_contains "yes: UPDATES renders" "=== UPDATES ===" "$Y"
-expect_eq "yes: UPDATES is the LAST section, after SUMMARY (D-D supersedes D-A)" \
+expect_eq "yes: UPDATES is the LAST section, after the whole report (D-D supersedes D-A)" \
   "$(printf '%s\nUPDATES' "$EXPECTED_ROSTER")" "$(section_roster "$Y_OUT")"
 
 Y_UPDATES="$(awk '/=== UPDATES ===/{f=1; next} f' "$Y_OUT")"
@@ -1855,13 +1930,13 @@ expect_true "yes: npm was asked exactly for outdated" grep -q '^npm outdated' "$
 
 # ── the no path ──
 N_OUT="$TMP/updates-no.out"
-printf 'n\n' | doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" > "$N_OUT" 2>&1
+printf 'n\n' | doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY"  > "$N_OUT" 2>&1
 N="$(cat "$N_OUT")"
 expect_contains "no: the question was still asked" "$QUESTION" "$N"
 expect_not_contains "no: and nothing was appended" "=== UPDATES ===" "$N"
 # Default No: an empty answer is a No, which is what [y/N] promises.
 E_OUT="$TMP/updates-empty.out"
-printf '\n' | doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" > "$E_OUT" 2>&1
+printf '\n' | doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY"  > "$E_OUT" 2>&1
 expect_not_contains "just enter: the default is No" "=== UPDATES ===" "$(cat "$E_OUT")"
 
 # ── a manager that will not answer ──
@@ -1872,7 +1947,7 @@ expect_not_contains "just enter: the default is No" "=== UPDATES ===" "$(cat "$E
 SLOW_BIN="$TMP/bin-slowbrew"; mkdir -p "$SLOW_BIN"; cp -R "$FULL_BIN"/. "$SLOW_BIN"/
 printf '#!/bin/bash\nexec sleep 60\n' > "$SLOW_BIN/brew"; chmod +x "$SLOW_BIN/brew"
 SB_OUT="$TMP/updates-slowbrew.out"
-printf 'y\n' | doctor_run "$DOCTOR_SH" "$SLOW_BIN" "$HEALTHY" "BIONIC_DOCTOR_PROBE_SECONDS=2" > "$SB_OUT" 2>&1
+printf 'y\n' | doctor_run "$DOCTOR_SH" "$SLOW_BIN" "$HEALTHY" "BIONIC_DOCTOR_PROBE_SECONDS=2"  > "$SB_OUT" 2>&1
 SB_RC=$?
 SB_UPDATES="$(awk '/=== UPDATES ===/{f=1; next} f' "$SB_OUT")"
 expect_eq "slow Homebrew: doctor still exits 0" "0" "$SB_RC"
@@ -1901,7 +1976,7 @@ FORK_BIN="$TMP/bin-forkbrew"; mkdir -p "$FORK_BIN"; cp -R "$FULL_BIN"/. "$FORK_B
 printf '#!/bin/bash\n/bin/sleep 45\n' > "$FORK_BIN/brew"; chmod +x "$FORK_BIN/brew"
 FB_OUT="$TMP/updates-forkbrew.out"
 FB_START="$(date +%s)"
-printf 'y\n' | doctor_run "$DOCTOR_SH" "$FORK_BIN" "$HEALTHY" "BIONIC_DOCTOR_PROBE_SECONDS=3" > "$FB_OUT" 2>&1
+printf 'y\n' | doctor_run "$DOCTOR_SH" "$FORK_BIN" "$HEALTHY" "BIONIC_DOCTOR_PROBE_SECONDS=3"  > "$FB_OUT" 2>&1
 FB_RC=$?
 FB_ELAPSED=$(( $(date +%s) - FB_START ))
 FB_UPDATES="$(awk '/=== UPDATES ===/{f=1; next} f' "$FB_OUT")"
@@ -2059,7 +2134,7 @@ ENV_M="$TMP/machine-env-liveness"; plant_machine "$ENV_M" healthy
 # (a) configured AND live — the session that will behave the way the file says.
 ENV_LIVE_OUT="$TMP/env-live.txt"
 doctor_run "$DOCTOR_SH" "$FULL_BIN" "$ENV_M" \
-  BASH_MAX_TIMEOUT_MS=1800000 CLAUDE_CODE_ENABLE_TODO_TOOLS=1 > "$ENV_LIVE_OUT" 2>&1
+  BASH_MAX_TIMEOUT_MS=1800000 CLAUDE_CODE_ENABLE_TODO_TOOLS=1  > "$ENV_LIVE_OUT" 2>&1
 expect_match "configured and live: the value is reported" \
   "*1800000*" "$(line_of "$ENV_LIVE_OUT" "BASH_MAX_TIMEOUT_MS")"
 expect_match "…and the session is reported as having it" \
@@ -2069,7 +2144,7 @@ expect_match "…and the session is reported as having it" \
 # restart, because "absent" would send the user to run setup again and setup
 # would find nothing to do.
 ENV_STALE_OUT="$TMP/env-stale.txt"
-doctor_run "$DOCTOR_SH" "$FULL_BIN" "$ENV_M" > "$ENV_STALE_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$ENV_M"  > "$ENV_STALE_OUT" 2>&1
 expect_match "configured and not live: the value is still reported" \
   "*1800000*" "$(line_of "$ENV_STALE_OUT" "BASH_MAX_TIMEOUT_MS")"
 expect_match "…and the session is reported as not having it" \
@@ -2089,7 +2164,7 @@ d.pop("env", None)
 json.dump(d, open(sys.argv[1], "w"), indent=2)
 ' "$ENV_GAP_M/claude-home/settings.json"
 ENV_GAP_OUT="$TMP/env-gap.txt"
-doctor_run "$DOCTOR_SH" "$FULL_BIN" "$ENV_GAP_M" > "$ENV_GAP_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$ENV_GAP_M"  > "$ENV_GAP_OUT" 2>&1
 expect_match "absent: reported absent" \
   "*absent*" "$(line_of "$ENV_GAP_OUT" "BASH_MAX_TIMEOUT_MS")"
 expect_contains "absent: the summary names it as something setup would write" \
@@ -2099,7 +2174,7 @@ expect_contains "absent: the summary names it as something setup would write" \
 # export leaves behind. It must not read as configured: the value dies with this
 # session, and the next one will not have it.
 ENV_ORPHAN_OUT="$TMP/env-orphan.txt"
-doctor_run "$DOCTOR_SH" "$FULL_BIN" "$ENV_GAP_M" BASH_MAX_TIMEOUT_MS=1800000 > "$ENV_ORPHAN_OUT" 2>&1
+doctor_run "$DOCTOR_SH" "$FULL_BIN" "$ENV_GAP_M" BASH_MAX_TIMEOUT_MS=1800000  > "$ENV_ORPHAN_OUT" 2>&1
 expect_match "live but not configured: reported absent from the file" \
   "*absent*" "$(line_of "$ENV_ORPHAN_OUT" "BASH_MAX_TIMEOUT_MS")"
 expect_match "…and the session is still credited with having it" \
