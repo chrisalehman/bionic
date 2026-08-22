@@ -37,13 +37,14 @@
 #   (d) the bridge pair: hooks/canonical-sdlc-evidence-gate.sh and
 #       hooks/canonical-sdlc-governing-skill.sh equality-check the same
 #       SUPPORTED_SDLC_VERSION; that value is pinned against plugin.json's
-#       major version as the literal pair 14 <-> 0. The pair moves only by a
+#       major version as the literal pair 14 <-> 1. The pair moves only by a
 #       conscious edit to this file, never silently. Moved 13 -> 14 on
 #       2026-08-19 (epic-17 W5, close-out contract v14) with the major left at
 #       0: the bridge rule reads contract-bump => major-bump, and pre-1.0 is
 #       exactly where that rule has nothing to say — every 0.x release is
-#       already licensed to break. The first 1.0.0 is Chris's publish package,
-#       and the rule binds from there.
+#       already licensed to break. Major moved 0 -> 1 on 2026-08-21 (the
+#       publish package, plugin.json 0.1.0 -> 1.0.0) with the contract held at
+#       14: the rule binds from here — the next contract bump is a major bump.
 #
 # HERMETIC. Reads plugin.json, marketplace.json and the two hook files by
 # path; no network, no install, no mutation of the repo tree.
@@ -115,8 +116,8 @@ expect_eq "(d) evidence-gate SUPPORTED_SDLC_VERSION equals governing-skill's" \
 expect_eq "(d) SUPPORTED_SDLC_VERSION is pinned at 14" "14" "$EVIDENCE_GATE_VERSION"
 
 PLUGIN_MAJOR="${PLUGIN_VERSION%%.*}"
-expect_eq "(d) plugin.json major version is pinned at 0 (paired with SUPPORTED_SDLC_VERSION 14)" \
-  "0" "$PLUGIN_MAJOR"
+expect_eq "(d) plugin.json major version is pinned at 1 (paired with SUPPORTED_SDLC_VERSION 14)" \
+  "1" "$PLUGIN_MAJOR"
 
 echo ""
 echo "=== Arm (e): the permission profile template renders plugin.json's version ==="

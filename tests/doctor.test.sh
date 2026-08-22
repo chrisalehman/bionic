@@ -587,11 +587,14 @@ expect_match "healthy: zero legacy-channel managed-hook entries" \
 expect_match "healthy: ccstatusline reported present" \
   "*present*" "$(line_of "$H_OUT" "ccstatusline statusline")"
 
-# Permission profile — the three-way diff.
+# Permission profile — the three-way diff. The version is read from the shipped
+# template, never pinned as a literal: plugin.json owns it and the template
+# renders it (version-ssot arm (e)), so a release bump must not go red here.
+TPL_VERSION="$(jq -r .version "$TEMPLATE")"
 expect_match "healthy: shipped template version rendered" \
-  "*0.1.0*" "$(line_of "$H_OUT" "shipped template version")"
+  "*${TPL_VERSION}*" "$(line_of "$H_OUT" "shipped template version")"
 expect_match "healthy: applied block version rendered" \
-  "*0.1.0*" "$(line_of "$H_OUT" "applied block version")"
+  "*${TPL_VERSION}*" "$(line_of "$H_OUT" "applied block version")"
 expect_match "healthy: render diff is identical when the block was rendered for this root" \
   "*identical*" "$(line_of "$H_OUT" "render diff")"
 expect_match "healthy: accretion counts the two rules outside bionic's block" \
