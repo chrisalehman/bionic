@@ -197,7 +197,7 @@ RM_ENV_END='# ─── bionic:env:end ───'
 # are copies — pinned to their originals by tests/remove.test.sh, like every
 # other literal here. A name that is in env.sh and not here is a name bionic
 # sets and never removes.
-RM_ENV_KEYS='CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS'
+RM_ENV_KEYS='CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS'
 RM_ENV_UNSET_JQ='if has("env") then (.env |= del(.[$k])) | (if (.env | length) == 0 then del(.env) else . end) else . end'
 RM_LEGACY_ALIAS_RE='alias claude=.*dangerously-skip-permissions'
 # from detect.sh: the substring that puts a managed-hook entry on the legacy channel

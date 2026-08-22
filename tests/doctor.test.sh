@@ -347,7 +347,8 @@ JSON
 import json, sys
 allow = json.loads(sys.argv[2]) + json.loads(sys.argv[1])
 json.dump({"statusLine": {"type": "command", "command": "npx ccstatusline@latest"},
-           "env": {"CLAUDE_CODE_ENABLE_TODO_TOOLS": "1", "BASH_MAX_TIMEOUT_MS": "1800000"},
+           "env": {"CLAUDE_CODE_ENABLE_TODO_TOOLS": "1", "BASH_MAX_TIMEOUT_MS": "1800000",
+                   "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"},
            "permissions": {"allow": allow},
            "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
                {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/protect-main.sh"}]}]}},
