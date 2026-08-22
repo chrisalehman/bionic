@@ -145,7 +145,7 @@ senior-implementor|opus|high
 researcher|opus|high
 auditor|opus|high
 critic|opus|high
-test-runner|haiku|low"
+test-runner|haiku|medium"
 
 while IFS='|' read -r r m e; do
   f="$AGENTS/$r.md"
