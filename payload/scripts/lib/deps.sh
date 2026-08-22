@@ -449,12 +449,26 @@ _dep_check_brew_dep() {  # presence is the binary on PATH, exactly as bootstrap 
   if _dep_have "$name"; then echo "yes|$(_dep_version_from_probe "$name" --version)"; else echo "no|unknown"; fi
 }
 _dep_check_brew_cask() { _dep_check_brew_dep "$@"; }
-# PROBE-CONTRACT NOTE (epic-18 T5, AC-9): aliased to the binary-on-PATH check
-# above, keyed on the dep's own `name` — for notebooklm that's a bet that
-# `uv tool install notebooklm-py` leaves a `notebooklm` binary on PATH. Being
-# fixed in flight by epic-18 T2, which lands this row's actual state; the
-# audit here is deferred to that landing rather than re-litigated by T5.
-_dep_check_uv_tool()   { _dep_check_brew_dep "$@"; }
+
+# uv-tool's default probe is the brew-dep one — CLI on PATH — and that is
+# right for the mechanism in general. notebooklm is the one row with a second
+# half: `notebooklm skill install` (ported from claude-bootstrap.sh
+# 1542-1550) writes ~/.claude/skills/notebooklm/SKILL.md, and the CLI being on
+# PATH says nothing about whether that step ever ran — the ccstatusline bug
+# this wave exists to fix, one row over (handoff §3.1 vs §3.2, AC-5). A new
+# `kind` for one row would be the second-installer-shaped kludge the ownership
+# table exists to prevent, so the name check lives here instead, the same way
+# `_dep_install_statusline` is a whole dedicated function for its one row.
+# (T5's probe audit deferred this row to T2's landing — satisfied here.)
+_dep_check_uv_tool() {
+  local name="$1" raw present version
+  raw="$(_dep_check_brew_dep "$name")"
+  present="${raw%%|*}"; version="${raw##*|}"
+  if [ "$name" = "notebooklm" ] && [ "$present" = "yes" ]; then
+    [ -f "$(_dep_claude_home)/skills/notebooklm/SKILL.md" ] || present=no
+  fi
+  printf '%s|%s\n' "$present" "$version"
+}
 
 _dep_check_npm_global() {  # the PACKAGE is the probe target, not a binary name
   local name="$1" pkg out
@@ -824,6 +838,9 @@ install_dep() {  # <name>
     while IFS= read -r line; do argv+=("$line"); done < <(_dep_install_argv "$name") || true
     [ "${#argv[@]}" -gt 0 ] || { echo "deps.sh: no install mechanism for ${name}" >&2; return 1; }
     plan="${argv[*]}"
+    # AC-5: notebooklm's second half, named in the plan the user consents to
+    # rather than run silently behind it (see _dep_check_uv_tool above).
+    [ "$name" = "notebooklm" ] && plan="${plan} && notebooklm skill install"
   fi
 
   echo "$(_dep_indent)${name} is not installed. bionic would run: ${plan}"
@@ -840,7 +857,16 @@ install_dep() {  # <name>
   # identically until the next `/bionic:doctor`. `install_dep`'s return value IS
   # the mechanism's own exit code — this only speaks on the zero.
   if [ "${#argv[@]}" -gt 0 ]; then
-    "${argv[@]}" && { echo "$(_dep_indent)installed."; return 0; }
+    if "${argv[@]}"; then
+      if [ "$name" = "notebooklm" ]; then
+        notebooklm skill install || {
+          echo "$(_dep_indent)installed, but 'notebooklm skill install' failed." >&2
+          return 1
+        }
+      fi
+      echo "$(_dep_indent)installed."
+      return 0
+    fi
   else
     _dep_install_statusline && { echo "$(_dep_indent)installed."; return 0; }
   fi
@@ -1002,7 +1028,7 @@ _dep_remove_argv() {  # <name> — one token per line
 # The caller counts 0 and 2 as settled and 1 as outstanding; remove.sh's summary
 # is built on that split.
 remove_dep() {  # <name>
-  local name="${1:-}" behavior plan line
+  local name="${1:-}" behavior plan line rc
   local -a argv=()
   behavior="$(dep_field "$name" removal_behavior)" || return 1
 
@@ -1074,6 +1100,9 @@ remove_dep() {  # <name>
       while IFS= read -r line; do argv+=("$line"); done < <(_dep_remove_argv "$name") || true
       [ "${#argv[@]}" -gt 0 ] || { echo "deps.sh: no removal mechanism for ${name}" >&2; return 1; }
       plan="${argv[*]}"
+      # AC-5: notebooklm's skill dir, named in the plan alongside the uv-tool
+      # uninstall — one consent covers both halves, same as the install arm.
+      [ "$name" = "notebooklm" ] && plan="${plan} && rm -rf $(_dep_claude_home)/skills/notebooklm"
       ;;
   esac
 
@@ -1087,6 +1116,9 @@ remove_dep() {  # <name>
 
   if [ "${#argv[@]}" -gt 0 ]; then
     "${argv[@]}"
+    rc=$?
+    [ "$name" = "notebooklm" ] && rm -rf "$(_dep_claude_home)/skills/notebooklm"
+    return "$rc"
   else
     case "$(dep_field "$name" install_fn_or_check)" in
       playwright-browser) rm -rf "$(_dep_playwright_cache)" ;;
