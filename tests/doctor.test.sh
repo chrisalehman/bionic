@@ -374,6 +374,22 @@ RC
     mkdir -p "$m/playwright-cache/chromium-1187"
     : > "$m/playwright-cache/chromium-1187/INSTALLATION_COMPLETE"
   fi
+
+  # ── the excalidraw renderer's venv (epic-18 T3, AC-6) ────────────────────
+  #
+  # The skill ships INSIDE the plugin now, so its uv project lives under the plugin root and
+  # the venv `uv sync` leaves there is what the row's probe reads. The healthy machine has
+  # rendered a diagram at some point; the broken one never has, which is the ordinary state
+  # of a when-needed row rather than a defect.
+  if [ "$flavor" = "healthy" ]; then
+    mkdir -p "$m/plugin/skills/excalidraw-diagram/references/.venv/bin"
+    : > "$m/plugin/skills/excalidraw-diagram/references/.venv/bin/python"
+    chmod +x "$m/plugin/skills/excalidraw-diagram/references/.venv/bin/python"
+    printf 'home = /opt/homebrew/bin\nversion = 3.13.1\n' \
+      > "$m/plugin/skills/excalidraw-diagram/references/.venv/pyvenv.cfg"
+  else
+    mkdir -p "$m/plugin/skills/excalidraw-diagram/references"
+  fi
 }
 
 # The CLI listing every arm reads unless it says otherwise (wave-06 S6). The
@@ -567,6 +583,12 @@ expect_match "healthy: mcp-server row renders present" \
   "*extra*context7*yes*" "$(line_of "$H_OUT" "context7")"
 expect_match "healthy: playwright browser cache row renders present" \
   "*when-needed*playwright-chromium*yes*" "$(line_of "$H_OUT" "playwright-chromium")"
+# THE RENDERER GETS ITS OWN ROW (epic-18 T3, AC-6). The excalidraw skill is plugin-native
+# now, so the skill itself is never a question — it arrives with bionic or bionic is not
+# installed. What IS a question is whether its renderer has been synced, and this row is the
+# probe-able half: present here because the healthy machine's plugin root carries the venv.
+expect_match "healthy: the excalidraw renderer row renders present with the venv's python" \
+  "*when-needed*excalidraw-renderer*yes*3.13.1*" "$(line_of "$H_OUT" "excalidraw-renderer")"
 
 # Environment class.
 # CONFIGURED AND LIVE ARE TWO FACTS. The healthy machine's settings.json
@@ -746,6 +768,11 @@ expect_match "broken: absent core dependency renders present=no" \
   "*core*agent-skills*no*" "$(line_of "$B_OUT" "agent-skills")"
 expect_match "broken: absent basic dependency renders present=no" \
   "*basic*aws*no*" "$(line_of "$B_OUT" " aws ")"
+# A never-rendered machine: the plugin carries the skill, nothing has synced the venv, and
+# that is the row's normal state rather than a fault. The degradation-map arm below is what
+# holds it to that — a when-needed absence raises no action line.
+expect_match "broken: the excalidraw renderer row renders absent on a machine that never rendered" \
+  "*when-needed*excalidraw-renderer*no*" "$(line_of "$B_OUT" "excalidraw-renderer")"
 DEG="$(awk '/=== DEGRADATION MAP ===/,/=== SUMMARY ===/' "$B_OUT")"
 expect_contains "broken: the degradation map names the absent core dependency" "agent-skills" "$DEG"
 expect_contains "broken: the degradation map names the absent basic dependency" "aws" "$DEG"

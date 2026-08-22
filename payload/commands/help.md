@@ -42,7 +42,7 @@ the same working discipline.
 
 ## Skills
 
-Three skills ship with bionic and load into every session once it is installed:
+Four skills ship with bionic and load into every session once it is installed:
 
 - `/bionic:canonical-sdlc` — the governed lifecycle for non-trivial work. Declares
   `intent · rigor · scale`, walks Steps 0–9, and gates every commit on the current
@@ -52,6 +52,9 @@ Three skills ship with bionic and load into every session once it is installed:
   with data before writing any fix.
 - `/bionic:browser-verify` — verifies UI behavior in a real browser with semantic
   readback; the Verify step's browser modality.
+- `/bionic:excalidraw-diagram` — draws Excalidraw diagrams that make a visual argument,
+  rendering each one and correcting what the render shows. The renderer it drives installs
+  itself, on consent, the first time you ask for a diagram.
 
 Six agent roles ride alongside — researcher, implementor, senior-implementor,
 test-runner, auditor, critic — and canonical-sdlc dispatches them by step.
