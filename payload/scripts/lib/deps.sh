@@ -22,8 +22,9 @@
 # formatting, and `detect.sh`'s `detect_dep` is its only formatter. There is no
 # second implementation of either half.
 #
-# THE FOUR CLASSES (wave-06 D-B, ratified 2026-08-20). `class` answers WHEN
-# bionic installs a tool, which is the question the old two-lane split could not
+# THE FOUR CLASSES (wave-06 D-B, ratified 2026-08-20; the when-needed roster
+# narrowed 2026-08-22 — see the ruling below). `class` answers WHEN bionic
+# installs a tool, which is the question the old two-lane split could not
 # express — it named the install MECHANISM and let the moment be implied.
 #   core        — the two plugin dependencies the CLI's own mechanism resolves.
 #                 bionic declares them; the harness installs them. Nothing else
@@ -34,6 +35,33 @@
 #   when-needed — installed with ONE question the first time a route actually
 #                 needs the tool. Setup never asks about these rows.
 #   extra       — offered once at setup with a line of why, default No.
+#
+# DETERMINISM OVER LAZY INSTALL (Chris, 2026-08-22, post-incident). Four rows
+# that were `when-needed` are `extra` now: `@playwright/cli`, `chrome-devtools`,
+# `playwright-chromium` and `motion`. Lazy install put the FIRST install of a
+# route's tool inside the run that needed it — a consent prompt and a package
+# download in the middle of the work, on a machine whose readiness nobody could
+# state beforehand. Offered at setup, the answer is settled before any route
+# depends on it, and `/bionic:doctor` can be read as a claim about what will
+# work rather than about what has been reached so far.
+#
+# WHAT `extra` MEANS AFTER THAT RULING. Mechanically, unchanged: offered once at
+# setup, one line of why, default No. What it no longer means is "no route wants
+# it" — three of its rows name a real route in `consumer`. So the literal `extra`
+# in that column is a class-`extra` row's OPTION, not its obligation, and the
+# traceability pin says so (tests/plugin-lib.test.sh Group 3c).
+#
+# AND THE JIT ARMS STAY (lib/jit.sh). A row being offered at setup is not a row
+# being present: the user may decline it, and a machine may lose it later. Every
+# route that uses one of the four still calls `jit_check`/`jit_offer` first —
+# that offer is the self-heal now rather than the ordinary first install.
+#
+# WHAT IS LEFT IN `when-needed`. `impeccable`, because it is native-kind and
+# `install_dep` — the function both setup loops call — is required to refuse
+# every native row, so an offer there would print a refusal at the user; and
+# `excalidraw-renderer`, a `uv sync` into the plugin's own tree that means
+# nothing to a machine which never renders a diagram. Chris's list named four
+# rows and neither of these.
 #
 # `kind` is the orthogonal question — HOW a row installs — and it is what
 # `install_dep` and `check_dep` dispatch on. `native` means the plugin harness
@@ -224,11 +252,11 @@ uv|basic|substrate|brew:uv|any|brew-dep|keep-shared
 docker|basic|substrate|brew:docker|any|brew-dep|keep-shared
 aws|basic|substrate|brew:awscli|any|brew-dep|keep-shared
 impeccable|when-needed|skills/canonical-sdlc/SKILL.md|https://github.com/pbakaus/impeccable.git|^4.1.0|native|native-uninstall-offer
-@playwright/cli|when-needed|skills/browser-verify/SKILL.md|npm:@playwright/cli|any|npm-global|remove-on-consent
-chrome-devtools|when-needed|skills/browser-verify/SKILL.md|npm:chrome-devtools-mcp@latest|any|mcp-server|remove-on-consent
-playwright-chromium|when-needed|payload/skills/excalidraw-diagram/SKILL.md|npx:playwright@latest|any|playwright-browser|remove-on-consent
 excalidraw-renderer|when-needed|payload/skills/excalidraw-diagram/SKILL.md|uv:sync|any|uv-project|remove-on-consent
-motion|when-needed|skills/canonical-sdlc/SKILL.md|pnpm:motion|any|pnpm-store|remove-on-consent
+@playwright/cli|extra|skills/browser-verify/SKILL.md|npm:@playwright/cli|any|npm-global|remove-on-consent
+chrome-devtools|extra|skills/browser-verify/SKILL.md|npm:chrome-devtools-mcp@latest|any|mcp-server|remove-on-consent
+playwright-chromium|extra|payload/skills/excalidraw-diagram/SKILL.md|npx:playwright@latest|any|playwright-browser|remove-on-consent
+motion|extra|extra|pnpm:motion|any|pnpm-store|remove-on-consent
 ccstatusline|extra|extra|npx:ccstatusline@latest|any|statusline|remove-on-consent
 notebooklm|extra|extra|uv:notebooklm-py|any|uv-tool|remove-on-consent
 context7|extra|extra|npm:@upstash/context7-mcp@latest|any|mcp-server|remove-on-consent
@@ -255,8 +283,10 @@ TABLE
 # `playwright-chromium` row all along, and a synced uv project, which was a "Renderer setup"
 # code block the user was expected to find and paste. That made it the one piece of bionic's
 # dependency surface with no probe, no consent prompt and no doctor line — invisible until a
-# render failed. It is a row now, `when-needed` like its sibling: absent until a render asks,
-# then ONE consented install.
+# render failed. It is a row now: absent until a render asks, then ONE consented install. Its
+# sibling `playwright-chromium` went to `extra` at the 2026-08-22 ruling and this one did not
+# — a chromium build is a machine-wide thing worth having ahead of time; a venv inside this
+# plugin's own tree is not.
 #
 # ITS `mechanism` IS `uv:sync` AND ITS TARGET IS NOT A PACKAGE. Every other row's locator
 # names a thing to fetch; this one names an operation on a project directory the plugin
@@ -277,10 +307,14 @@ TABLE
 # — they were simply not ported, and an unrecorded drop is indistinguishable
 # from forgetting. This one was decided.
 #
-# `motion` is the one when-needed row whose consumer file does not yet name the
-# package (it is pre-warmed into the pnpm store for the design route). The class
-# is D-B's ratified call; the gap is recorded as the single declared exemption
-# in tests/plugin-lib.test.sh Group 3c, so it fails loudly the day it is fixed.
+# `motion` WAS THE TABLE'S ONE DECLARED EXEMPTION and the 2026-08-22 ruling closed
+# it. The row named `skills/canonical-sdlc/SKILL.md` as its consumer while no file
+# in this repo mentioned the package — it is pre-warmed into the pnpm store for the
+# design route, and nothing wrote that down — so the traceability pin carried a
+# named exemption for exactly one row. Group 3c stated the two ways out: "either
+# the design route names it or it is an `extra`". It is an `extra` now, so the
+# consumer is the literal, the exemption is gone from the suite, and the row claims
+# nothing it cannot show.
 
 # ─── Table access ────────────────────────────────────────────────────────────
 

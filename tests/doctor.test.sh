@@ -992,22 +992,21 @@ expect_contains "healthy: the pnpm-store unknown carries its named cause, on its
   "a cache, no presence surface" "$(line_of "$H_OUT" " motion ")"
 expect_not_contains "healthy: a no-action unknown does not manufacture a setup reason" \
   "→ run /bionic:setup" "$H"
-# SIX-AXIS REVIEW C-2. The second clause used to read "/bionic:setup re-warms the
-# store either way". True at the wave base, where setup walked every non-native row;
-# false at the tip, where setup asks about `core|basic|extra` only and AC-11 makes a
-# when-needed tool nobody's to install until a route needs it. The string survived
-# because the display lint judges vocabulary, not truth — so the pin is on the
-# sentence, and it is keyed on the CLASS the claim is about rather than on the
-# mechanism that happens to produce the unknown.
-expect_not_contains "healthy: the unknown does not send the user to a command that no longer touches this row" \
-  "re-warms the store" "$H"
-# AC-15 rule 2: a no-action line is not a fix, so this one left the problem list
-# and became the row's own last column. Same claim, one line, and it no longer
-# teaches the reader that FIX contains entries which are not problems.
-# ASSERTED ON THE MACHINE WHERE IT IS ABSENT (Group 16 builds it): on the healthy
-# fixture impeccable is installed, so there is nothing to say about first use.
-expect_contains "healthy: an unknown when-needed row is not in FIX at all" \
-  "" "$(awk '/=== FIX ===/{f=1;next} f && /^=== /{f=0} f' "$H_OUT" | grep -F -- "motion" || true)"
+# SIX-AXIS REVIEW C-2, AMENDED 2026-08-22. The claim has moved twice and the pin
+# tracks it both times. It first read "/bionic:setup re-warms the store either
+# way" — true while setup walked every non-native row, false once AC-11 made a
+# when-needed tool nobody's until a route asked. C-2 keyed it on the CLASS. Chris
+# then promoted `motion` to `extra`, which makes /bionic:setup the installer again
+# and would have sent a permanently-unreadable presence to "resolve the cause
+# above, then re-run doctor" — a repair that does not exist for a cache. So the
+# sentence is keyed on class AND mechanism now, and what it must not do in either
+# case is manufacture a repair.
+MOTION_DEG="$(printf '%s\n' "$H" | /usr/bin/grep -F 'motion presence is unknown' || true)"
+expect_true "healthy: the pnpm-store unknown has a degradation line at all" test -n "$MOTION_DEG"
+expect_contains "healthy: the unknown names the command that does touch this row" \
+  "/bionic:setup offers motion either way" "$MOTION_DEG"
+expect_not_contains "healthy: …and never points at a cause a cache can never resolve" \
+  "resolve the cause above" "$MOTION_DEG"
 
 # ---------------------------------------------------------------------------
 echo ""

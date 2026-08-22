@@ -201,7 +201,13 @@ echo "=== Group 2b: the four classes (wave-06 D-B, AC-10) ==="
 # plugin dependencies the harness resolves; basic = the substrate asked for at
 # setup and never removed; when-needed = installed with one question the first
 # time a route needs it, never offered by setup; extra = offered once at setup,
-# default No. The roster below is D-B's, ratified 2026-08-20.
+# default No. The roster below is D-B's, ratified 2026-08-20, as narrowed by
+# Chris's 2026-08-22 ruling — determinism over lazy install: `@playwright/cli`,
+# `chrome-devtools`, `playwright-chromium` and `motion` moved to `extra`, so the
+# first install of a route's tool no longer happens inside the run that needs it.
+# `impeccable` (native-kind, which install_dep must refuse) and
+# `excalidraw-renderer` (a venv sync inside the plugin's own tree) are what is
+# left of `when-needed`.
 
 # LC_ALL=C so the roster literals below do not depend on the runner's locale
 # (`@playwright/cli` sorts before `aws` only under the C collation).
@@ -212,11 +218,18 @@ expect_eq "dep_names_class core is exactly the two plugin dependencies" \
 expect_eq "dep_names_class basic is the substrate roster" \
   "aws docker gh git jq node pnpm rg uv" "$(class_names basic)"
 expect_eq "dep_names_class when-needed is the JIT roster" \
-  "@playwright/cli chrome-devtools excalidraw-renderer impeccable motion playwright-chromium" \
+  "excalidraw-renderer impeccable" \
   "$(class_names when-needed)"
-expect_eq "dep_names_class extra is the optional roster" \
-  "@pencil.dev/cli ccstatusline context7 document-skills example-skills humanizer notebooklm" \
+expect_eq "dep_names_class extra is the setup-offered roster" \
+  "@pencil.dev/cli @playwright/cli ccstatusline chrome-devtools context7 document-skills example-skills humanizer motion notebooklm playwright-chromium" \
   "$(class_names extra)"
+# The ruling from the other side: each promoted row is `extra` BY NAME, so a
+# revert that restored the class would fail here rather than only shifting a
+# roster string that a reader could mistake for a reordering.
+for _promoted in "@playwright/cli" chrome-devtools playwright-chromium motion; do
+  expect_eq "promoted 2026-08-22 — setup offers it: ${_promoted}" "extra" \
+    "$(deps_run -- dep_field "$_promoted" class)"
+done
 expect_eq "an unknown class returns nothing (and exits 0)" "" "$(class_names no-such-class)"
 
 # Every row lands in exactly one of the four. A fifth class value would leave
@@ -383,38 +396,50 @@ while IFS= read -r dep_name; do
 done <<< "$NAMES"
 expect_eq "every consumer resolves under the repo, or is substrate/extra" "" "$CONSUMER_REPORT"
 
-# The literals are only legitimate for the classes that earned them: a
-# when-needed row IS a route's dependency, so `substrate`/`extra` there would be
-# the traceability gap wearing a permitted value.
+# The literals are only legitimate where they are TRUE, and each one is a claim:
+# `substrate` says no single route owns this, `extra` says no route wants it at
+# all. A core or when-needed row is a route's dependency by definition, so either
+# literal there is the traceability gap wearing a permitted value.
+#
+# AMENDED 2026-08-22. `extra` used to be REQUIRED of its class as well as
+# reserved to it, and that stopped being true the day the class stopped meaning
+# "nothing needs it": three of the promoted rows name a real route in `consumer`
+# and would lose that traceability by taking the literal. So the rule is one
+# directional pin now — the literal implies the class, the class does not imply
+# the literal — and `basic`, whose meaning did not change, keeps both halves.
 LITERAL_REPORT=""
 while IFS= read -r dep_name; do
   [ -n "$dep_name" ] || continue
   c="$(deps_run -- dep_field "$dep_name" consumer)"
   k="$(deps_run -- dep_field "$dep_name" class)"
-  case "${k}/${c}" in
-    basic/substrate|extra/extra) ;;
-    basic/*|extra/*) LITERAL_REPORT="${LITERAL_REPORT}${dep_name}: class ${k} wants its own literal, got ${c}"$'\n' ;;
-    */substrate|*/extra) LITERAL_REPORT="${LITERAL_REPORT}${dep_name}: class ${k} must name a route, got the literal ${c}"$'\n' ;;
+  case "$k" in
+    basic)
+      [ "$c" = "substrate" ] || LITERAL_REPORT="${LITERAL_REPORT}${dep_name}: class basic wants its own literal, got ${c}"$'\n' ;;
+    extra)
+      [ "$c" = "substrate" ] && LITERAL_REPORT="${LITERAL_REPORT}${dep_name}: class extra takes the literal extra or a route, never substrate"$'\n' ;;
+    *)
+      case "$c" in
+        substrate|extra) LITERAL_REPORT="${LITERAL_REPORT}${dep_name}: class ${k} must name a route, got the literal ${c}"$'\n' ;;
+      esac ;;
   esac
 done <<< "$NAMES"
-expect_eq "substrate/extra are used only by the basic/extra classes" "" "$LITERAL_REPORT"
+expect_eq "a consumer literal is used only where its claim is true" "" "$LITERAL_REPORT"
 
 # Naming a path is not the same as that path knowing about the dependency. The
 # route file has to actually mention it, which is what makes the column a
 # traceability claim rather than a plausible-looking string.
 #
-# ONE declared exemption, and it is a finding rather than a convenience:
-# `motion` is a when-needed row by D-B's ratified roster, but no skill, rule or
-# agent file in this repo names the package today — it is pre-warmed into the
-# pnpm store for the design route and nothing writes that down. Either the
-# design route names it or it is an `extra`; that is a design call, not this
-# slice's, so the row keeps its class and the gap is visible here instead of
-# being hidden by dropping the pin.
-MENTION_EXEMPT=" motion "
+# THE ONE DECLARED EXEMPTION IS GONE (2026-08-22), and it was closed the way it
+# said it would be. `motion` named `skills/canonical-sdlc/SKILL.md` as its
+# consumer while no skill, rule or agent file in the repo mentioned the package —
+# it is pre-warmed into the pnpm store for the design route and nothing wrote that
+# down. The note here stated the two ways out, "either the design route names it
+# or it is an `extra`", and Chris's ruling took the second: the row is an `extra`
+# whose consumer is the literal, so the loop below skips it on the same rule that
+# skips every other literal, and no name-keyed exemption survives.
 MENTION_REPORT=""
 while IFS= read -r dep_name; do
   [ -n "$dep_name" ] || continue
-  case "$MENTION_EXEMPT" in *" ${dep_name} "*) continue ;; esac
   c="$(deps_run -- dep_field "$dep_name" consumer)"
   case "$c" in substrate|extra) continue ;; esac
   grep -qF -- "$dep_name" "${REPO}/${c}" 2>/dev/null \
@@ -422,18 +447,12 @@ while IFS= read -r dep_name; do
 done <<< "$NAMES"
 expect_eq "every named consumer route mentions the dependency it consumes" "" "$MENTION_REPORT"
 
-# The exemption is itself pinned: if a later wave gives motion a route that
-# names it, this fails and the exemption comes out. Vendored trees (.venv,
-# node_modules) are excluded: they exist on a developer checkout and never in a
-# worktree, and a pin that flips with the machine is not an absence claim.
-# /usr/bin/grep, not the PATH one: this shell's `grep` is ugrep with
-# --ignore-files, and it reports zero hits inside .claude/ even when the
-# directory is named explicitly — an absence claim built on it would be a
-# guaranteed pass (memory: grep-skips-hidden-dirs).
-GREP_ABS="$(command -v /usr/bin/grep || echo grep)"
-expect_false "the one mention exemption (motion) is still needed — no repo file names the package" \
-  bash -c '"$2" -rIlw --include="*.md" --exclude-dir=.venv --exclude-dir=node_modules motion "$1/skills" "$1/agents-src" "$1/.claude/rules" 2>/dev/null | "$2" -q .' \
-  _ "$REPO" "$GREP_ABS"
+# The retirement is pinned from the row's own side: `motion` takes the literal,
+# which is the whole reason the name-keyed exemption above could go. A wave that
+# points the row back at a route file without teaching that file the package name
+# fails the mention loop, exactly as an unexempted row should.
+expect_eq "motion's consumer is the literal (what retired the exemption)" "extra" \
+  "$(deps_run -- dep_field motion consumer)"
 
 # Mutation-and-restore: the pin has to be able to SEE a bad consumer, or it is
 # three loops that always print nothing. A row pointing at a path that does not
