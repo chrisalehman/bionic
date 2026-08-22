@@ -1324,19 +1324,16 @@ _detect_plugin_duplicates_probe() {  # -> zero or more lines, always exit 0
 # being detected the payload tree is exactly what is missing — but "is bionic
 # still registered with the CLI, and is there anything left behind".
 #
-# Three of the four pieces of footprint are detect.sh's own: the legacy rc
-# block, stale managed-hook entries, and the todo-tools export setup writes.
-# The fourth — the applied permission marker block — is profile.sh's fact, and
-# it is reachable ALONE: decline the permission-block question during
-# /bionic:remove, accept the uninstall, and it is the only thing left.
+# All three pieces of footprint are detect.sh's own: the legacy rc block, stale
+# managed-hook entries, and the todo-tools export setup writes.
 #
-# So the fourth term is consulted SOFTLY. `declare -F` asks whether the caller
-# has profile.sh loaded and uses the fact when it does (doctor sources both);
-# when it does not, the disjunction is the three terms it has always been.
-# That is not defensive habit — this function's whole reason to exist is the
-# machine where the payload is gone, and a hard dependency on a sibling library
-# would fail exactly there. profile.sh's line wears this file's shape on
-# purpose, so `applied=` reads the way `present=` does.
+# THERE USED TO BE A FOURTH, softly consulted through `declare -F`: the applied
+# permission marker block, which was profile.sh's fact. The managed allow-list is
+# gone from the product entirely (epic-18 T13 — the user's permission MODE
+# governs bionic like anything else), so the block is no longer footprint bionic
+# creates, and the term went with it. remove.sh still offers to strip a block
+# left behind by an older install; that is a one-time cleanup, not a state this
+# verdict has to reach.
 detect_half_uninstalled() {
   local registered footprint=no line
 
@@ -1357,10 +1354,6 @@ detect_half_uninstalled() {
     line="$(detect_env_todo_tools)";       [ "$line" = "env:todo-tools present=yes" ] && footprint=yes
     line="$(detect_legacy_channel_hooks)"
     case "$line" in *"count=0"|*"count=unknown") ;; *) footprint=yes ;; esac
-    if declare -F detect_profile_state >/dev/null 2>&1; then
-      line="$(detect_profile_state)"
-      case "$line" in *"applied=yes"*) footprint=yes ;; esac
-    fi
   fi
 
   if [ "$registered" = "no" ] && [ "$footprint" = "yes" ]; then

@@ -6,7 +6,7 @@
 # order it comes back off in. One item at a time, each one announced before it is
 # asked about and asked about before it happens: the legacy `.zshrc` alias block,
 # the `CLAUDE_CODE_ENABLE_TODO_TOOLS` export, legacy-channel managed-hook entries in
-# settings, the permission marker block, the tools it installed, the plugin
+# settings, the retired permission block, the tools it installed, the plugin
 # data directory — and then the native plugin uninstall as the finisher.
 #
 # THE NEVER-LIST IS NOT A PREFERENCE. Three classes are excluded from removal and
@@ -28,14 +28,17 @@
 #   * Every fact this script needs, it establishes itself. It does not source
 #     detect.sh. The predicates are deliberately the SAME predicates detect.sh
 #     uses — the todo-tools export regex, the `bionic:start` marker, the
-#     `.claude/hooks/` substring, the profile begin/end sentinels — and
-#     tests/remove.test.sh pins them against detect.sh and profile.sh so the two
-#     cannot drift apart silently.
-#   * Where a library IS beside the script, the library owner does the work:
-#     `profile_strip` strips the permission block and `remove_dep` applies the
-#     three-valued removal policy. The inline strip below is the standalone
-#     fallback for the first of those, and the two are pinned to produce
-#     byte-identical output from the same input.
+#     `.claude/hooks/` substring, the retired permission block's begin/end
+#     sentinels — and tests/remove.test.sh pins them against detect.sh and
+#     deps.sh so the two cannot drift apart silently.
+#   * Where a library IS beside the script AND still owns the behaviour, the
+#     owner does the work: `env_unset` deletes an environment name and
+#     `remove_dep` applies the three-valued removal policy. The permission block
+#     is the exception, and deliberately so: bionic no longer applies one at all
+#     (epic-18 T13), so there is no live owner to delegate to — only a leftover
+#     to clean off machines set up before the change. The strip below is that
+#     cleanup, used by BOTH doors rather than shadowing a payload-mode twin,
+#     because a second call path would serve no door this one does not.
 #   * The one thing that genuinely cannot be reconstructed standalone is the
 #     dependency TABLE — it ships with the payload and there is no second copy of
 #     it, by design (AC-8). Standalone says so, out loud, and moves on. A silently
@@ -216,23 +219,26 @@ RM_LEGACY_SKILL_NAME='canonical-sdlc'
 # to the original by tests/remove.test.sh, like every other literal here.
 _rm_default_mode() { echo "${BIONIC_DEFAULT_PERMISSION_MODE:-auto}"; }
 
-# from profile.sh: the sentinels bracketing the block bionic owns
-RM_PROFILE_BEGIN_PREFIX='Bash(: bionic-profile-begin version='
-RM_PROFILE_END='Bash(: bionic-profile-end)'
+# from deps.sh: the sentinels bracketing the retired permission block. They are
+# the OLD spelling, verbatim and permanently so — they are what is already in
+# the files being cleaned, and renaming them would orphan every block still out
+# there rather than remove it.
+RM_PERMISSION_BLOCK_BEGIN_PREFIX='Bash(: bionic-profile-begin version='
+RM_PERMISSION_BLOCK_END='Bash(: bionic-profile-end)'
 
 # ─── Mode ────────────────────────────────────────────────────────────────────
 
 RM_LIB_DIR="$(_rm_self_dir)/lib"
 RM_MODE=standalone
-if [ -f "${RM_LIB_DIR}/deps.sh" ] && [ -f "${RM_LIB_DIR}/profile.sh" ]; then
+if [ -f "${RM_LIB_DIR}/deps.sh" ]; then
   # shellcheck source=/dev/null
-  . "${RM_LIB_DIR}/deps.sh" && . "${RM_LIB_DIR}/profile.sh" && RM_MODE=payload
+  . "${RM_LIB_DIR}/deps.sh" && RM_MODE=payload
 fi
 # env.sh, when it is there. The environment item deletes names out of
 # settings.json, and env.sh is the owner of which names those are and of the
 # delete itself — so the payload door calls it and the standalone door falls
-# back to its own copy of the same jq program, exactly as the profile strip
-# already does. tests/remove.test.sh drives both and compares the bytes.
+# back to its own copy of the same jq program. tests/remove.test.sh drives both
+# and compares the bytes.
 if [ "$RM_MODE" = "payload" ] && [ -f "${RM_LIB_DIR}/env.sh" ]; then
   # shellcheck source=/dev/null
   . "${RM_LIB_DIR}/env.sh"
@@ -310,8 +316,8 @@ _rm_consent() {  # <prompt> -> 0 yes, 1 an explicit no, 2 EOF (nobody there to a
 # ─── File helpers ────────────────────────────────────────────────────────────
 
 # Whole-file read that keeps the trailing byte, so a rewrite can reproduce the
-# file's own newline shape. Same mechanism profile.sh uses and for the same
-# reason: `$(...)` would strip the very byte the round trip turns on.
+# file's own newline shape: `$(...)` would strip the very byte the round trip
+# turns on.
 _rm_slurp_into() {  # <varname> <file>
   local __rm_var="$1" __rm_file="$2" __rm_text
   [ -f "$__rm_file" ] || return 1
@@ -369,19 +375,25 @@ bionic_link_target() {  # <path> — the final target of a symlink chain, else <
   printf '%s\n' "$p"
 }
 
-# Byte-identical to profile.sh's `_profile_write` apart from the name, which is
-# what tests/remove.test.sh pins. The mode capture is not decoration: `mv`
-# replaces the inode, so a settings.json the user kept at 0600 would come back at
-# whatever the umask says, and this script's whole job is editing that file. See
-# profile.sh for why `stat` is spelled twice, why an absent `stat` degrades to
-# "write, don't chmod" rather than to a refusal — the standalone door runs on the
-# machine with the bare /bin — and why the `umask 077` and the `chmod` must both
-# stay ABOVE the `mv`. The path is resolved through `bionic_link_target` first,
+# The settings writer, whose shape tests/remove.test.sh pins. The mode capture is
+# not decoration: `mv` replaces the inode, so a settings.json the user kept at
+# 0600 would come back at whatever the umask says, and this script's whole job is
+# editing that file.
+#
+# `stat` is spelled both ways because BSD and GNU disagree and neither accepts
+# the other's flag; `chmod --reference` is GNU-only and is not an option. An
+# absent `stat` degrades to "write, don't chmod" rather than to a refusal — the
+# standalone door runs on the machine with the bare /bin. And the `umask 077` and
+# the `chmod` must both stay ABOVE the `mv`: repairing the mode after the rename
+# leaves the tmp holding the whole file's contents at 0644 under a predictable
+# name, and makes the widening permanent if the process dies in the window
+# between the two. The path is resolved through `bionic_link_target` first,
 # so a symlinked settings.json is REWRITTEN rather than detached from the repo
 # that manages it (critic delta 2 N1); `-L` then reads the resolved file's mode,
 # and `[ -e ]` catches the one input `-L` lies about — a dangling link, which BSD
 # `stat -L` reports as the LINK's 755 with exit 0 (N4). The stale tmp is `rm -f`'d
-# rather than truncated, for the same reason profile.sh's copy is.
+# rather than truncated, because `>` on an existing file keeps that file's mode
+# and would carry a leftover wide mode through the write until the chmod caught up.
 _rm_write() {  # <file> <content> <trailing-newline 0|1>
   local file content="$2" nl="$3" tmp mode
   file="$(bionic_link_target "$1")"
@@ -603,7 +615,7 @@ _rm_item_ids() {
   echo "environment"
   echo "legacy-hooks"
   echo "legacy-skill-copy"
-  echo "permission-profile"
+  echo "legacy-permission-block"
   echo "permission-mode"
   if [ "$RM_MODE" = "payload" ]; then
     # fd 3: the standard input belongs to the questions, never to a list.
@@ -653,7 +665,7 @@ _rm_item_verb() {  # <id>
     environment)           echo "delete bionic's environment settings from ${RM_SETTINGS}" ;;
     legacy-hooks)          echo "remove the retired hook entries from ${RM_SETTINGS}" ;;
     legacy-skill-copy)     echo "remove the pre-plugin skill copy at ${RM_LEGACY_SKILL_DIR}" ;;
-    permission-profile)    echo "remove bionic's permission marker block from ${RM_SETTINGS}" ;;
+    legacy-permission-block) echo "remove bionic's retired permission block from ${RM_SETTINGS}" ;;
     permission-mode)       echo "reset Claude Code's default permission mode" ;;
     plugin-data)           echo "delete bionic's plugin data under ${RM_DATA_ROOT}" ;;
     plugin)                echo "remove the plugin $(_rm_registered_plugin_id) (claude plugin uninstall)" ;;
@@ -690,8 +702,8 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
       return 0 ;;
     legacy-skill-copy)
       [ -d "$RM_LEGACY_SKILL_DIR" ] && [ -f "${RM_LEGACY_SKILL_DIR}/SKILL.md" ] ;;
-    permission-profile)
-      _rm_file_has_literal "$RM_SETTINGS" "$RM_PROFILE_BEGIN_PREFIX" ;;
+    legacy-permission-block)
+      _rm_file_has_literal "$RM_SETTINGS" "$RM_PERMISSION_BLOCK_BEGIN_PREFIX" ;;
     permission-mode)
       _rm_have jq || return 1
       [ -f "$RM_SETTINGS" ] || return 1
@@ -929,9 +941,8 @@ _rm_item_legacy_alias() {
 #
 # THE NAMES ARE ENV.SH'S. In payload mode the delete goes through `env_unset`,
 # the owner. Standalone there is no owner to call, so the copy of its jq program
-# above is used with this script's own writer — the same two-door shape the
-# profile strip has carried since W3, and tests/remove.test.sh compares the bytes
-# the two doors produce.
+# above is used with this script's own writer, and tests/remove.test.sh compares
+# the bytes the two doors produce.
 
 # Delete one name from settings.json `env`. Payload mode delegates; standalone
 # mode runs the copied program. Absent is success either way: a second teardown
@@ -1157,23 +1168,31 @@ _rm_item_legacy_skill_copy() {
   echo ""
 }
 
-# ─── Item: the permission marker block ───────────────────────────────────────
+# ─── Item: the retired permission block ──────────────────────────────────────
 #
-# In payload mode the owner does it: profile.sh's `profile_strip` removes the
-# block, collapses the containers it created, and preserves the file's newline
-# shape. Standalone there is no owner to call, so the jq program below is a
-# verbatim copy of profile.sh's `_PROFILE_STRIP_JQ`. Two implementations of one
-# behavior is precisely the drift the ownership table exists to prevent, which is
-# why tests/remove.test.sh drives the same fixture through both and requires
-# byte-identical output.
+# bionic used to render a managed allow-list into settings.json so its own
+# scripts ran without a prompt. It no longer ships one at all (epic-18 T13) —
+# the permission MODE the user chose governs bionic like anything else — so what
+# is left is a leftover on machines set up before the change, and this item is
+# the teardown door's offer to clean it off. /bionic:setup carries the same offer
+# for the upgrade path.
+#
+# ONE IMPLEMENTATION, BOTH DOORS. Every other two-door item here delegates to a
+# library in payload mode and falls back standalone, because the library still
+# owns a live behaviour. Nothing owns this one any more: there is no apply to
+# stay agreed with, and the standalone door must carry the strip regardless. A
+# payload-mode branch would be a second call path serving no machine this one
+# does not. deps.sh carries the same program for /bionic:setup, and
+# tests/remove.test.sh pins the two against each other the way it pins every
+# other literal this script copies.
 
-RM_PROFILE_STRIP_JQ='
+RM_PERMISSION_BLOCK_STRIP_JQ='
   if (.permissions | type) != "object" then .
   elif (.permissions.allow | type) != "array" then .
   else
     .permissions.allow as $a
-    | ($a | map(type == "string" and startswith("'"${RM_PROFILE_BEGIN_PREFIX}"'")) | index(true)) as $b
-    | ($a | map(. == "'"${RM_PROFILE_END}"'") | index(true)) as $e
+    | ($a | map(type == "string" and startswith("'"${RM_PERMISSION_BLOCK_BEGIN_PREFIX}"'")) | index(true)) as $b
+    | ($a | map(. == "'"${RM_PERMISSION_BLOCK_END}"'") | index(true)) as $e
     | if $b == null or $e == null or $e < $b then .
       else .permissions.allow = ($a[0:$b] + $a[$e+1:]) end
   end
@@ -1185,36 +1204,30 @@ RM_PROFILE_STRIP_JQ='
     then del(.permissions) else . end
 '
 
-_rm_item_permission_profile() {
-  _rm_wants permission-profile || return 0
-  echo "permission marker block:"
-  if _rm_file_has_literal "$RM_SETTINGS" "$RM_PROFILE_BEGIN_PREFIX"; then
-    echo "  ${RM_SETTINGS} carries bionic's permission marker block; bionic would remove the block and leave every rule outside it."
-    if _rm_consent "Remove bionic's permission marker block from ${RM_SETTINGS}?"; then
-      if [ "$RM_MODE" = "payload" ]; then
-        if profile_strip; then
-          _rm_removed "permission marker block in ${RM_SETTINGS}"
-        else
-          _rm_leftover "could not strip the permission marker block from ${RM_SETTINGS}"
-        fi
-      elif ! _rm_have jq; then
+_rm_item_permission_block() {
+  _rm_wants legacy-permission-block || return 0
+  echo "retired permission block:"
+  if _rm_file_has_literal "$RM_SETTINGS" "$RM_PERMISSION_BLOCK_BEGIN_PREFIX"; then
+    echo "  ${RM_SETTINGS} carries bionic's retired permission block; bionic would remove the block and leave every rule outside it."
+    if _rm_consent "Remove bionic's retired permission block from ${RM_SETTINGS}?"; then
+      if ! _rm_have jq; then
         _rm_leftover "jq is required to edit ${RM_SETTINGS} safely — the permission block is still applied"
       else
-        rm_profile_nl=0
+        rm_block_nl=0
         # shellcheck disable=SC2154  # set by printf -v inside _rm_slurp_into
-        _rm_slurp_into rm_profile_text "$RM_SETTINGS" && case "$rm_profile_text" in *$'\n') rm_profile_nl=1 ;; esac
-        if rm_profile_stripped="$(jq "$RM_PROFILE_STRIP_JQ" "$RM_SETTINGS" 2>/dev/null)"; then
-          _rm_write "$RM_SETTINGS" "$rm_profile_stripped" "$rm_profile_nl"
-          _rm_removed "permission marker block in ${RM_SETTINGS}"
+        _rm_slurp_into rm_block_text "$RM_SETTINGS" && case "$rm_block_text" in *$'\n') rm_block_nl=1 ;; esac
+        if rm_block_stripped="$(jq "$RM_PERMISSION_BLOCK_STRIP_JQ" "$RM_SETTINGS" 2>/dev/null)"; then
+          _rm_write "$RM_SETTINGS" "$rm_block_stripped" "$rm_block_nl"
+          _rm_removed "retired permission block in ${RM_SETTINGS}"
         else
           _rm_leftover "${RM_SETTINGS} is not valid JSON — refusing to write; the permission block is still applied"
         fi
       fi
     else
-      _rm_skipped "$?" permission-profile "permission marker block in ${RM_SETTINGS}"
+      _rm_skipped "$?" legacy-permission-block "retired permission block in ${RM_SETTINGS}"
     fi
   else
-    _rm_clean "permission marker block in ${RM_SETTINGS}"
+    _rm_clean "retired permission block in ${RM_SETTINGS}"
   fi
   echo ""
 }
@@ -1665,7 +1678,7 @@ _rm_item_legacy_alias
 _rm_item_environment
 _rm_item_legacy_hooks
 _rm_item_legacy_skill_copy
-_rm_item_permission_profile
+_rm_item_permission_block
 _rm_item_permission_mode
 _rm_item_tools
 _rm_item_plugin_data

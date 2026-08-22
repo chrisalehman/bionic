@@ -2,8 +2,8 @@
 # doctor.sh — the read-only diagnosis (epic-17 wave-03 slice S7, spec AC-3).
 #
 # WHAT THIS FILE OWNS. Nothing factual. Doctor is a RENDERING SURFACE: every
-# number, verdict and state below is computed by detect.sh, deps.sh or
-# profile.sh and printed here in a shape a person can act on. The design's
+# number, verdict and state below is computed by detect.sh, deps.sh or env.sh
+# and printed here in a shape a person can act on. The design's
 # ownership table says so in one word — doctor "diagnoses, never treats" — and
 # that word is the whole contract: no mutations, one pass, exit 0.
 #
@@ -43,7 +43,7 @@
 # `unknown` with a cause, never a confident answer.
 #
 # EXIT 0, ALWAYS — FOR A DIAGNOSIS. A diagnosis is not a failure. A machine with
-# eleven absent dependencies and a stale permission profile has been diagnosed
+# eleven absent dependencies and a broken hook channel has been diagnosed
 # *successfully*; reporting that as a non-zero exit would make every caller treat
 # a working doctor as a broken one. The report's content is the signal, never the
 # status. The one exception is an option this script does not know, which has
@@ -52,9 +52,9 @@
 # well. That exits 2, before any fact is gathered.
 #
 # WHY READ-ONLY IS STRUCTURAL AND NOT MERELY INTENDED. Doctor calls only the
-# read-only half of each library — detect.sh's fact functions, profile.sh's
-# `profile_diff` / `detect_profile_state`, deps.sh's table accessors. It never
-# calls `install_dep`, `remove_dep`, `profile_apply` or `profile_strip`, and it
+# read-only half of each library — detect.sh's fact functions, env.sh's
+# `env_get` / `env_live`, deps.sh's table accessors. It never
+# calls `install_dep`, `remove_dep` or `bionic_strip_permission_block`, and it
 # never shells out to brew/npm/uv/claude for anything but a version probe the
 # libraries already own. tests/doctor.test.sh fingerprints a whole fixture
 # machine — every file's sha256 AND every path — before and after a full run.
@@ -74,7 +74,7 @@
 #
 # ROOTS ARE OVERRIDABLE — the same env knobs the libraries read
 # (BIONIC_PLUGIN_ROOT, BIONIC_CLAUDE_HOME, BIONIC_SETTINGS_FILE,
-# BIONIC_INSTALLED_PLUGINS_FILE, BIONIC_SHELL_RC, BIONIC_PROFILE_TEMPLATE,
+# BIONIC_INSTALLED_PLUGINS_FILE, BIONIC_SHELL_RC,
 # BIONIC_PLAYWRIGHT_CACHE). Doctor adds none of its own: a knob only doctor
 # honoured would be a second definition of where this machine keeps its state.
 #
@@ -112,8 +112,6 @@ DOCTOR_LIB="$(cd "$(_doctor_self_dir)" && pwd -P)/lib"
 
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/detect.sh"
-# shellcheck source=/dev/null
-. "${DOCTOR_LIB}/profile.sh"
 # env.sh, for its READ half only — `env_get` (what settings.json says) and
 # `env_live` (what THIS process has). Those are two different facts and the gap
 # between them is a restart, not a repair; a report that collapsed them is the
@@ -158,8 +156,8 @@ BIONIC_PLUGIN_ID="bionic@bionic"
 #   2. NO PROSE ON A HEALTHY ITEM. A value that is fine is the value and nothing
 #      else; the sentence that used to follow it explained a state the symbol now
 #      carries. Section explainers are gone from the default output entirely —
-#      what the DEPENDENCIES class column means, how a roster line is counted,
-#      what the permission block is three-way between. That reasoning lives in
+#      what the DEPENDENCIES class column means, how a roster line is counted.
+#      That reasoning lives in
 #      the comments of this file, where the person it is addressed to is reading.
 #   3. THE VERDICT FIRST. SUMMARY is the first section and FIX is the second, so
 #      the two questions a reader actually has — is anything wrong, and what do I
@@ -387,7 +385,7 @@ _doctor_no_version_reason() {  # <kind>
 
 # ─── Facts, gathered once ────────────────────────────────────────────────────
 #
-# Every function called here is one of detect.sh's or profile.sh's. Nothing
+# Every function called here is one of detect.sh's, deps.sh's or env.sh's. Nothing
 # below re-derives a fact from the filesystem that a library already owns.
 
 PLUGIN_FACT="$(detect_plugin_integrity)"
@@ -483,47 +481,7 @@ INST_AGENT_NAMES="${INST_AGENT_FACT#*names=}"; INST_AGENT_NAMES="${INST_AGENT_NA
 INST_AGENT_CAUSE="${INST_AGENT_FACT##*cause=}"
 HALF_FACT="$(detect_half_uninstalled)";      HALF_STATE="${HALF_FACT##*half-uninstalled=}"
 
-PROFILE_FACT="$(detect_profile_state)"
-PROFILE_APPLIED="${PROFILE_FACT#*applied=}";     PROFILE_APPLIED="${PROFILE_APPLIED%% *}"
-PROFILE_VERSION="${PROFILE_FACT#*version=}";     PROFILE_VERSION="${PROFILE_VERSION%% *}"
-PROFILE_ACCRETION="${PROFILE_FACT##*accretion=}"
-
-PROFILE_VERDICT="unknown"
-while IFS= read -r _pline; do
-  case "$_pline" in "profile:diff verdict="*) PROFILE_VERDICT="${_pline#profile:diff verdict=}" ;; esac
-done < <(profile_diff "$(_profile_template_path)" "$(_profile_plugin_root)")
-
-# The version the payload SHIPS, as distinct from the version a machine has
-# applied. They differ exactly when a plugin update has outrun /bionic:setup.
-TEMPLATE_PATH="$(_profile_template_path)"
-TEMPLATE_VERSION="unknown"
-if [ -f "$TEMPLATE_PATH" ]; then
-  if command -v jq >/dev/null 2>&1; then
-    TEMPLATE_VERSION="$(jq -r '.version // "unknown"' "$TEMPLATE_PATH" 2>/dev/null)"
-  else
-    TEMPLATE_VERSION="$(grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]+"' "$TEMPLATE_PATH" 2>/dev/null \
-                        | head -1 | grep -oE '"[^"]+"$' | tr -d '"')"
-  fi
-  [ -n "$TEMPLATE_VERSION" ] || TEMPLATE_VERSION="unknown"
-fi
-
 HAVE_JQ=yes; command -v jq >/dev/null 2>&1 || HAVE_JQ=no
-
-# The default permission mode (item 1 + O-3): a fact of the SETTINGS file, not
-# of the marker block profile.sh renders — the same `.permissions.defaultMode`
-# key `_setup_default_mode` writes. `unset` means the key is genuinely absent;
-# `unknown` means jq is missing and the file could not be read at all, which is
-# a different claim and must not collapse into the same word.
-PROFILE_MODE="unknown"
-if [ "$HAVE_JQ" = "yes" ]; then
-  PROFILE_SETTINGS_PATH="$(_profile_settings_file)"
-  if [ -f "$PROFILE_SETTINGS_PATH" ]; then
-    PROFILE_MODE="$(jq -r '.permissions.defaultMode // ""' "$PROFILE_SETTINGS_PATH" 2>/dev/null)"
-  else
-    PROFILE_MODE=""
-  fi
-  [ -n "$PROFILE_MODE" ] || PROFILE_MODE="unset"
-fi
 
 # ─── The two facts that come from outside this machine's files ───────────────
 #
@@ -910,14 +868,6 @@ esac
 # leftover is hook files and whose summary still reads "nothing to do".
 [ "$SKILL_COPY_STATE" = "yes" ] && fix "a legacy skill copy is installed, arming the same walls twice → run /bionic:setup"
 
-# The permission profile is its own line: it is repaired by the same command, but
-# the reason is a state a user should see named rather than folded into a count.
-if [ "$PROFILE_VERDICT" = "stale" ]; then
-  fix "the applied permission profile is stale → run /bionic:setup"
-elif [ "$PROFILE_APPLIED" = "no" ] && [ "$PROFILE_VERDICT" = "absent" ]; then
-  fix "no permission profile is applied → run /bionic:setup"
-fi
-
 if [ "$PLUGIN_HOOKS" = "degraded" ] || [ "$PLUGIN_HOOKS" = "absent" ]; then
   # THE HINT IS THE WHOLE TAIL, AND IT KNOWS WHICH STATE IS ASKING (W7 S11,
   # six-axis review axis 2). This used to print `re-converge with:` and then the hint
@@ -1088,7 +1038,7 @@ echo ""
 echo "ENVIRONMENT"
 # THREE COLUMNS, LIKE THE TABLES ABOVE (Chris 2026-08-22): setting · value · state.
 # An env var's value is the configured one; its state says whether this session
-# carries it. The profile's value is its version; the statusline's is the command.
+# carries it; the statusline's value is the command.
 _doctor_env3() {  # <symbol> <setting> <value> <state>
   printf '%s\n' "$(_doctor_rtrim "  $1 $(_doctor_cell "$2" 36) $(_doctor_cell "$3" 13) ${4:-}")"
 }
@@ -1111,15 +1061,6 @@ for _env_key in $ENV_KEYS; do
     _doctor_env3 "$DOCTOR_BAD" "$_env_key" "—" "not set → /bionic:setup"
   fi
 done
-# The permission profile as ONE row. Three facts stand behind it — what the
-# payload ships, what this machine applied, and whether the applied block still
-# matches a fresh render — and on a healthy machine they agree.
-case "$PROFILE_VERDICT" in
-  identical) _doctor_env3 "$DOCTOR_OK"  "permission profile" "$PROFILE_VERSION" "applied, matches shipped" ;;
-  stale)     _doctor_env3 "$DOCTOR_BAD" "permission profile" "$PROFILE_VERSION" "applied, stale → /bionic:setup" ;;
-  absent)    _doctor_env3 "$DOCTOR_BAD" "permission profile" "—" "none applied → /bionic:setup" ;;
-  *)         _doctor_env3 "$DOCTOR_NIL" "permission profile" "—" "unknown — jq is not on PATH" ;;
-esac
 # THE LEFTOVERS, AND ONLY WHEN THERE ARE ANY. Six checks ask the same kind of
 # question — did the retired installer leave something behind — and on a machine
 # that never ran it, or has been cleaned once, all six answer no. Silence is the

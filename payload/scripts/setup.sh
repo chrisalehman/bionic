@@ -20,8 +20,8 @@
 # WHAT IT DOES NOT OWN. Facts and mechanisms. Whether a dependency is present is
 # `detect.sh`/`deps.sh`'s answer; HOW a dependency installs is `deps.sh`'s
 # `install_dep`, the same function a just-in-time offer calls (AC-5: one owner,
-# no second installer); how the permission profile renders and applies is
-# `profile.sh`. This script decides ORDER, asks the questions, and reports. Any
+# no second installer); how a retired permission block is stripped back out is
+# `deps.sh`. This script decides ORDER, asks the questions, and reports. Any
 # fact it recomputed itself would be a second implementation of somebody else's
 # truth, which is the defect the wave's ownership table exists to prevent.
 #
@@ -59,14 +59,16 @@
 #                           same skill, so the installed copy is a second one that
 #                           still registers hooks through the pre-plugin channel.
 #                           Named by AC-8; the gap 4/6 found and reported.
-#   9. permission profile   rendered against this machine's plugin root and
-#                           applied under explicit consent (AC-6). Consent is
-#                           obtained HERE and handed to `profile_apply` as a
-#                           token: the library never asks, so there is exactly
-#                           one place in the system where consent is decided.
-#                           The step ends with one more question about the same
-#                           settings file — whether Claude Code's default
-#                           permission mode should be auto (AC-12).
+#   9. permission mode      whether Claude Code's default permission mode should
+#                           be auto (AC-12) — one question, its own consent.
+#                           bionic used to apply a managed allow-list here as
+#                           well, exempting its own scripts from whatever mode
+#                           the user had chosen; that is deleted (epic-18 T13),
+#                           and the mode the user picks now governs bionic like
+#                           everything else. A machine set up before the change
+#                           still carries the old block, so the step opens with
+#                           a one-time offer to strip it — same settings file,
+#                           same subject, its own consent.
 #
 # AND TWO THINGS THAT ARE NOT STEPS, both between 1 and 2 (wave-06 S5). The
 # LOAD STATE is printed at step 1's indentation with no header of its own,
@@ -123,8 +125,7 @@
 # whole script at a fixture tree:
 #
 #   BIONIC_LIB_DIR        where scripts/lib/*.sh live   (default: beside this file)
-#   BIONIC_PLUGIN_ROOT    the payload / render target   (or ${CLAUDE_PLUGIN_ROOT})
-#   BIONIC_PROFILE_TEMPLATE  the profile template
+#   BIONIC_PLUGIN_ROOT    the payload root              (or ${CLAUDE_PLUGIN_ROOT})
 #   BIONIC_CLAUDE_HOME    the CLI config dir            (or ${CLAUDE_CONFIG_DIR})
 #   BIONIC_SETTINGS_FILE  user settings.json
 #   BIONIC_INSTALLED_PLUGINS_FILE  the CLI's install registry
@@ -153,7 +154,7 @@ _setup_self_dir() {
 
 SETUP_LIB_DIR="${BIONIC_LIB_DIR:-$(_setup_self_dir)/lib}"
 
-for _setup_lib in deps.sh detect.sh profile.sh hooks.sh jit.sh env.sh; do
+for _setup_lib in deps.sh detect.sh hooks.sh jit.sh env.sh; do
   if [ ! -f "${SETUP_LIB_DIR}/${_setup_lib}" ]; then
     echo "setup.sh: cannot find ${SETUP_LIB_DIR}/${_setup_lib} — the payload looks incomplete." >&2
     echo "          reinstall with: claude plugin install bionic@bionic" >&2
@@ -164,8 +165,6 @@ done
 . "${SETUP_LIB_DIR}/deps.sh"
 # shellcheck source=/dev/null
 . "${SETUP_LIB_DIR}/detect.sh"
-# shellcheck source=/dev/null
-. "${SETUP_LIB_DIR}/profile.sh"
 # shellcheck source=/dev/null
 . "${SETUP_LIB_DIR}/hooks.sh"
 # env.sh, for the environment item below: the `env` object in the CLI's own
@@ -322,7 +321,7 @@ _setup_item_ids() {
   say "legacy-alias"
   say "legacy-hooks"
   say "legacy-skill-copy"
-  say "permission-profile"
+  say "legacy-permission-block"
   say "permission-mode"
   return 0
 }
@@ -375,7 +374,7 @@ _setup_item_verb() {  # <name>
     legacy-alias)       say "remove the retired shell alias block from $(_detect_shell_rc)" ;;
     legacy-hooks)       say "remove the retired hook entries from $(_dep_settings_file)" ;;
     legacy-skill-copy)  say "remove the pre-plugin skill copy at $(_setup_legacy_skill_dir)" ;;
-    permission-profile) say "apply bionic's permission profile to $(_dep_settings_file)" ;;
+    legacy-permission-block) say "remove bionic's retired permission block from $(_dep_settings_file)" ;;
     permission-mode)    say "set Claude Code's default permission mode to ${BIONIC_DEFAULT_PERMISSION_MODE}" ;;
     *)                  return 1 ;;
   esac
@@ -434,12 +433,8 @@ _setup_item_pending() {  # <name> -> 0 when the item has something to ask about
       line="$(detect_legacy_skill_copy)"
       present="${line#*present=}"; present="${present%% *}"
       [ "$present" = "yes" ] ;;
-    permission-profile)
-      line="$(detect_profile_state)"
-      state="${line#*applied=}"; state="${state%% *}"
-      count="${line#*stale=}";   count="${count%% *}"
-      [ "$state" = "yes" ] && [ "$count" = "no" ] && return 1
-      return 0 ;;
+    legacy-permission-block)
+      bionic_has_permission_block "$(_dep_settings_file)" ;;
     permission-mode)
       # No jq is not a question: the step says so and changes nothing.
       command -v jq >/dev/null 2>&1 || return 1
@@ -1294,92 +1289,60 @@ setup_legacy_skill_copy() {
   return 0
 }
 
-# ─── Step 9 — the permission profile ─────────────────────────────────────────
+# ─── Step 9 — the permission mode ────────────────────────────────────────────
 #
-# Consent is obtained here and handed to `profile_apply` as a token. The library
-# refuses to write without it and never prompts, so there is one conversation
-# with the user and one gate, not two.
+# THE STEP IS TWO DECISIONS, SO IT IS TWO FUNCTIONS, and they are independent: a
+# machine with no leftover block still has a mode question to answer, and the
+# cleanup half returns early on exactly that machine. Left inline, the second
+# question would have been unreachable on most machines — the ones least likely
+# to notice.
 
-setup_profile() {
-  _setup_wants permission-profile || _setup_wants permission-mode || return 0
+setup_permission_mode() {
+  _setup_wants legacy-permission-block || _setup_wants permission-mode || return 0
   say ""
-  say "9. Permission profile"
-  _setup_wants permission-profile && _setup_profile_block
+  say "9. Permission mode"
+  _setup_wants legacy-permission-block && _setup_legacy_permission_block
   _setup_wants permission-mode && _setup_default_mode
   return 0
 }
 
-# THE STEP IS TWO DECISIONS, SO IT IS TWO FUNCTIONS. The profile block and the
-# default permission mode are both about the same settings file and both belong
-# in this step, but they are independent: a machine whose profile is applied and
-# current still has a mode question to answer, and the profile half returns early
-# on exactly that machine. Left inline, the second question would have been
-# unreachable on every machine that had already been set up once — which is most
-# of them, and the ones least likely to notice.
-
-_setup_profile_block() {
-  local state applied stale template root settings rendered
-  state="$(detect_profile_state)"
-  applied="${state#*applied=}"; applied="${applied%% *}"
-  stale="${state#*stale=}";     stale="${stale%% *}"
+# ─── The retired permission block, stripped once ─────────────────────────────
+#
+# bionic used to render a managed allow-list into this same settings file so its
+# own scripts ran without a prompt. That is deleted (epic-18 T13): the mode
+# below is the user's answer to how much they want to be asked, and a product
+# that exempts itself from it has overridden the choice rather than honoured it.
+#
+# NOTHING WRITES THE BLOCK ANY MORE, so this is cleanup and only cleanup — the
+# upgrade path's half of it, with /bionic:remove carrying the teardown path's.
+# Without it a machine set up before the change would keep granting permissions
+# under a marker nothing in the product would ever name again. deps.sh owns the
+# strip; this asks the question. On a machine that never carried one, the whole
+# arm is silent rather than reporting a clean state nobody asked about.
+_setup_legacy_permission_block() {
+  local settings
   settings="$(_dep_settings_file)"
+  bionic_has_permission_block "$settings" || return 0
 
-  if [ "$applied" = "yes" ] && [ "$stale" = "no" ]; then
-    item "$SETUP_OK" "permission profile" "applied and current — nothing to do"
-    return 0
-  fi
+  say "   ${settings} carries bionic's retired permission block — an allow-list bionic no"
+  say "   longer ships. Removing it leaves every rule outside the block untouched."
+  consent "   Remove the retired permission block from ${settings}?"; _setup_consent_rc=$?
+  if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "${settings} is unchanged."; action "remove the retired permission block from ${settings} — $(_setup_answer_yes legacy-permission-block)"; return 0; fi  # consent gate: legacy permission block
 
-  template="$(_profile_template_path)"
-  root="$(_profile_plugin_root)"
-  rendered="$(mktemp 2>/dev/null)" || rendered=""
-  if [ -z "$rendered" ]; then
-    item "$SETUP_BAD" "permission profile" "could not create a temporary file to render it"
-    action "apply the permission profile: re-run /bionic:setup once a temporary directory is writable"
-    return 0
-  fi
-  if ! render_profile "$template" "$root" > "$rendered"; then
-    rm -f "$rendered"
-    item "$SETUP_BAD" "permission profile" "the template could not be rendered"
-    action "apply the permission profile: reinstall bionic — ${template} is missing or unreadable"
-    return 0
-  fi
-
-  if [ "$applied" = "yes" ]; then
-    say "   the applied permission profile is stale — a plugin update moved the install path."
+  if bionic_strip_permission_block "$settings"; then
+    item "$SETUP_OK" "retired permission block" "removed"
   else
-    say "   bionic ships a permission profile for its own scripts and hooks, rendered for ${root}."
+    item "$SETUP_BAD" "retired permission block" "could not be removed"
+    action "remove the retired permission block from ${settings} by hand (jq is required to edit it safely)"
   fi
-  say "   It goes into ${settings} inside a marker block; nothing outside that block is touched."
-  consent "   Apply the permission profile to ${settings}?"; _setup_consent_rc=$?
-  if [ "$_setup_consent_rc" -ne 0 ]; then
-    rm -f "$rendered"
-    _setup_say_declined "$_setup_consent_rc" "${settings} is unchanged."
-    action "apply the permission profile — $(_setup_answer_yes permission-profile)"
-    return 0
-  fi
-
-  if profile_apply "$rendered" "$BIONIC_PROFILE_CONSENT"; then
-    item "$SETUP_OK" "permission profile" "applied"
-  else
-    item "$SETUP_BAD" "permission profile" "could not be applied"
-    action "apply the permission profile: see the message above (jq is required to edit ${settings} safely)"
-  fi
-  rm -f "$rendered"
   return 0
 }
 
 # ─── The default permission mode (AC-12) ─────────────────────────────────────
 #
-# ONE QUESTION, ASKED AFTER THE PROFILE AND NEVER ASSUMED. The profile decides
-# which of bionic's own commands run without a prompt; this decides whether the
-# machine asks about everything else once or every time. The smaller question
-# goes second on purpose, and it is its own consent whatever was answered above.
-#
-# NOT A RULE INSIDE THE MARKER BLOCK. `defaultMode` is a preference of the
-# machine's, not one of bionic's rendered rules — the template ships no
-# defaultMode and tests/profile.test.sh walls it out. Writing it inside the block
-# would mean /bionic:remove's strip silently reverted a decision the user was
-# asked for separately, which is not what either question promised.
+# ONE QUESTION, NEVER ASSUMED. It decides whether the machine asks about
+# everything once or every time — bionic's own commands included, now that
+# nothing carves them out.
 #
 # ALREADY-AUTO ASKS NOTHING. Every other step here is guarded by the fact that
 # owns its question, and this is no different: a machine already in auto has
@@ -1415,7 +1378,7 @@ _setup_default_mode() {
   # answered — a Remote Control session overrides this either way, so a
   # decline that leaves the setting unchanged and a yes that writes it both
   # need the same one sentence.
-  say "   ${PROFILE_RC_NOTE}"
+  say "   ${BIONIC_PERMISSION_MODE_RC_NOTE}"
   if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "the default permission mode is unchanged."; action "set Claude Code's default permission mode to ${want} in ${settings} — $(_setup_answer_yes permission-mode)"; return 0; fi  # consent gate: default mode
 
   # Created only AFTER consent: a declined run must leave a machine that has no
@@ -1561,7 +1524,7 @@ setup_environment
 setup_legacy_alias
 setup_legacy_channel_hooks
 setup_legacy_skill_copy
-setup_profile
+setup_permission_mode
 setup_summary
 
 exit 0
