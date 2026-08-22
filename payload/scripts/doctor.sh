@@ -693,7 +693,7 @@ while IFS= read -r dep_name; do
           third_version="$(dep_npx_version "$(_dep_locator_target "$(dep_field "$dep_name" source_url)")")" ;;
       github-skill)
         third_version="$(git -C "$(_dep_skills_dir)/${dep_name}" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
-        third_state="skill installed" ;;
+        ;;
       uv-tool)
         [ "$dep_name" = "notebooklm" ] && third_state="CLI + skill installed" ;;
     esac
@@ -1088,42 +1088,44 @@ printf '%s' "$THIRD_ROWS"
 # one of them has a line in the verdict.
 echo ""
 echo "ENVIRONMENT"
+# THREE COLUMNS, LIKE THE TABLES ABOVE (Chris 2026-08-22): setting · value · state.
+# An env var's value is the configured one; its state says whether this session
+# carries it. The profile's value is its version; the statusline's is the command.
+_doctor_env3() {  # <symbol> <setting> <value> <state>
+  printf '%s\n' "$(_doctor_rtrim "  $1 $(_doctor_cell "$2" 36) $(_doctor_cell "$3" 13) ${4:-}")"
+}
+printf '    %-36s %-13s %s\n' "setting" "value" "state"
 for _env_key in $ENV_KEYS; do
   _env_configured="$(env_get "$_env_key" 2>/dev/null)" || _env_configured=""
   if _env_live_value="$(env_live "$_env_key" 2>/dev/null)"; then _env_is_live=yes; else _env_is_live=no; fi
   if [ -n "$_env_configured" ]; then
     if [ "$_env_is_live" = "yes" ]; then
-      _doctor_env_row "$DOCTOR_OK" "${_env_key}=${_env_configured}" "live in session"
+      _doctor_env3 "$DOCTOR_OK" "$_env_key" "$_env_configured" "live in session"
     else
-      _doctor_env_row "$DOCTOR_NIL" "${_env_key}=${_env_configured}" "restart to pick it up"
+      _doctor_env3 "$DOCTOR_NIL" "$_env_key" "$_env_configured" "written, restart to pick it up"
     fi
   elif [ "$_env_is_live" = "yes" ]; then
     # Live and not configured: the state the retired shell export leaves behind.
     # It works right now and dies with this session, which is why setup is still
     # named for it in the verdict above.
-    _doctor_env_row "$DOCTOR_BAD" "${_env_key}=${_env_live_value}" \
-      "live in session, not written → /bionic:setup"
+    _doctor_env3 "$DOCTOR_BAD" "$_env_key" "$_env_live_value" "live in session, not written → /bionic:setup"
   else
-    _doctor_env_row "$DOCTOR_BAD" "${_env_key}" "not set → /bionic:setup"
+    _doctor_env3 "$DOCTOR_BAD" "$_env_key" "—" "not set → /bionic:setup"
   fi
 done
 # The permission profile as ONE row. Three facts stand behind it — what the
 # payload ships, what this machine applied, and whether the applied block still
-# matches a fresh render — and on a healthy machine they agree, so the row is the
-# version and nothing else. They disagree in exactly two ways worth a user's
-# attention, and each of those has a line in the verdict.
-
+# matches a fresh render — and on a healthy machine they agree.
 case "$PROFILE_VERDICT" in
-  identical) _doctor_env_row "$DOCTOR_OK"  "permission profile" "${PROFILE_VERSION} applied" ;;
-  stale)     _doctor_env_row "$DOCTOR_BAD" "permission profile" \
-               "${PROFILE_VERSION} applied, stale → /bionic:setup" ;;
-  absent)    _doctor_env_row "$DOCTOR_BAD" "permission profile" "none applied → /bionic:setup" ;;
-  *)         _doctor_env_row "$DOCTOR_NIL" "permission profile" "unknown — jq is not on PATH" ;;
+  identical) _doctor_env3 "$DOCTOR_OK"  "permission profile" "$PROFILE_VERSION" "applied, matches shipped" ;;
+  stale)     _doctor_env3 "$DOCTOR_BAD" "permission profile" "$PROFILE_VERSION" "applied, stale → /bionic:setup" ;;
+  absent)    _doctor_env3 "$DOCTOR_BAD" "permission profile" "—" "none applied → /bionic:setup" ;;
+  *)         _doctor_env3 "$DOCTOR_NIL" "permission profile" "—" "unknown — jq is not on PATH" ;;
 esac
 case "$CCSTATUSLINE_STATE" in
-  yes)     _doctor_env_row "$DOCTOR_OK"  "statusline" "ccstatusline" ;;
-  unknown) _doctor_env_row "$DOCTOR_NIL" "statusline" "unknown — $(_doctor_unknown_cause statusline)" ;;
-  *)       _doctor_env_row "$DOCTOR_BAD" "statusline" "not configured → /bionic:setup" ;;
+  yes)     _doctor_env3 "$DOCTOR_OK"  "statusline" "ccstatusline" "configured, shows after a restart" ;;
+  unknown) _doctor_env3 "$DOCTOR_NIL" "statusline" "—" "unknown — $(_doctor_unknown_cause statusline)" ;;
+  *)       _doctor_env3 "$DOCTOR_BAD" "statusline" "—" "not configured → /bionic:setup" ;;
 esac
 # THE LEFTOVERS, AND ONLY WHEN THERE ARE ANY. Six checks ask the same kind of
 # question — did the retired installer leave something behind — and on a machine
