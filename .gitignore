@@ -6,13 +6,10 @@
 *.png
 *.excalidraw
 
-# Exception: architecture diagram for README
-!architecture.png
-!architecture.excalidraw
-
-# Exception: canonical-sdlc skill diagrams (lifecycle, hook chain)
-!skills/canonical-sdlc/diagrams/*.png
-!skills/canonical-sdlc/diagrams/*.excalidraw
+# No exception: the architecture diagram is composed SVG under
+# skills/canonical-sdlc/diagrams/ (lifecycle.svg, hook-chain.svg), which is neither
+# generated nor ignored. The old .png/.excalidraw pair it replaced was deleted at
+# epic-17 W6 S14; tests/diagrams.test.sh refuses either coming back.
 
 # OS
 .DS_Store
@@ -22,8 +19,11 @@
 *.swo
 *~
 
-# Claude Code local state (worktrees, settings)
-.claude/
+# Claude Code local state (worktrees, settings) — .claude/rules/ ships committed
+# (epic-17 W4 S4: process-load-bearing rules reach every clone/subagent); the rest of
+# .claude/ (settings, local worktree state) stays machine-local.
+.claude/*
+!.claude/rules/
 
 # Direnv (machine-specific env vars)
 .envrc
@@ -37,8 +37,10 @@ node_modules/
 # Git worktrees
 .worktrees/
 
-# Project notebook (local, not shared)
-.bionic/
+# Project notebook (local, not shared) — no trailing slash: worktrees carry
+# .bionic as a SYMLINK to the main checkout's dir, and the dir-only `.bionic/`
+# pattern misses it (flagged by two W4 slices)
+.bionic
 
 # playwright
 .playwright-cli

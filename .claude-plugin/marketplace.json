@@ -1,0 +1,36 @@
+{
+  "name": "bionic",
+  "description": "Bionic's own plugin marketplace — hooks, skills, and agent-orchestration guardrails for Claude Code.",
+  "owner": {
+    "name": "Chris Lehman"
+  },
+  "plugins": [
+    {
+      "name": "bionic",
+      "source": "./payload",
+      "description": "Bionic — hooks, skills, and agent-orchestration guardrails for Claude Code."
+    },
+    {
+      "name": "superpowers",
+      "description": "Superpowers teaches Claude brainstorming, subagent driven development with built in code review, systematic debugging, and red/green TDD. Additionally, it teaches Claude how to author and test new skills.",
+      "category": "development",
+      "source": { "source": "url", "url": "https://github.com/obra/superpowers.git", "sha": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797" },
+      "homepage": "https://github.com/obra/superpowers.git"
+    },
+    {
+      "name": "agent-skills",
+      "description": "Production-grade engineering skills covering every phase of software development: spec, plan, build, verify, review, and ship.",
+      "source": { "source": "url", "url": "https://github.com/addyosmani/agent-skills.git", "sha": "df1edb2e05487d0aa6d93c747141e0aed1187f25" },
+      "homepage": "https://github.com/addyosmani/agent-skills",
+      "license": "MIT"
+    },
+    {
+      "name": "impeccable",
+      "description": "Design fluency for frontend development — the design route canonical-sdlc sends UX work to. Installed the first time a route needs it, never as a mandatory dependency.",
+      "category": "development",
+      "source": { "source": "url", "url": "https://github.com/pbakaus/impeccable.git", "sha": "5a149f3fdb1b5793f10567233b1dcab98fc305fd" },
+      "homepage": "https://impeccable.style",
+      "license": "Apache-2.0"
+    }
+  ]
+}

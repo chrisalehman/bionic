@@ -11,9 +11,11 @@
 
 set -uo pipefail
 
-REPO="$(cd "$(dirname "$0")/.." && pwd)"
-SKILL="${REPO}/skills/canonical-sdlc/SKILL.md"
-RULES="${REPO}/skills/canonical-sdlc/operational-rules.md"
+. "$(dirname "$0")/lib/resolve-roots.sh"
+
+REPO="${BIONIC_SCRIPTS_DIR}"
+SKILL="${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
+RULES="${BIONIC_SKILLS_DIR}/canonical-sdlc/operational-rules.md"
 README="${REPO}/README.md"
 
 PASS=0
@@ -175,8 +177,12 @@ expect_pin_in_file "SKILL.md pin: steps table row '2 Design'" "2 Design" "$SKILL
 # pair for this concept — the absence checks below guard files that render no
 # step names at all. Without this pin a README revert to "ideate → spec" leaves
 # the suite green while the two surfaces disagree (Step-6 review FLAG 3).
-expect_pin_in_file "README.md pin: lifecycle line carries 'scope → design'" \
-  "scope → design" "$README"
+#
+# The separator changed at wave-06 S13 (arrows → a prose list) when the README was
+# rewritten; the step NAMES and their order are what this pin was ever about, and
+# the needle still fails on the "ideate"/"spec" revert it was written to catch.
+expect_pin_in_file "README.md pin: lifecycle line carries 'scope, design'" \
+  "scope, design" "$README"
 
 # expect_zero_occurrences_in_file <label> <needle> <file>
 # Fixed-string absence check. On failure, names every offending file:line so
@@ -223,23 +229,21 @@ fi
 # ============================================================
 
 echo ""
-echo "=== Section 5: lifecycle diagram pins ==="
+echo "=== Section 5: lifecycle diagram pins — MOVED (epic-17 W4 S8) ==="
 
-# Critic Issue 3 (Step-6 remediation): the spec's ownership table declared the
-# diagram "recorded unpinned" — retire that by pinning the renamed step labels
-# and the version-stamped title directly against the raw JSON. The file is
-# plain JSON text; each label's newline is the literal two-character sequence
-# backslash-n, not an actual line break, so grep -F matches it as written here.
-DIAGRAM="${REPO}/skills/canonical-sdlc/diagrams/lifecycle.excalidraw"
-
-expect_pin_in_file "lifecycle.excalidraw pin: '1\\nScope' label" \
-  '1\nScope' "$DIAGRAM"
-
-expect_pin_in_file "lifecycle.excalidraw pin: '2\\nDesign' label" \
-  '2\nDesign' "$DIAGRAM"
-
-expect_pin_in_file "lifecycle.excalidraw pin: 'Lifecycle (v13)' title" \
-  'Lifecycle (v13)' "$DIAGRAM"
+# This section used to pin three literals against diagrams/lifecycle.excalidraw:
+# the '1\nScope' and '2\nDesign' step labels and the 'Lifecycle (v13)' title.
+# That file no longer exists. The diagram is now a composed SVG that is its own
+# sole source (spec AC-6 / design D4), and the same three claims are pinned far
+# harder in tests/diagrams.test.sh: the step labels against SKILL.md's whole
+# ## Steps table rather than two hand-picked rows, and the title's version
+# against the hooks' SUPPORTED_SDLC_VERSION rather than a typed literal that
+# would need editing on every contract bump.
+#
+# Nothing is asserted here. Re-adding a diagram pin to THIS suite would give the
+# concept two owners — exactly the duplication the diagram suite was written to
+# resolve. The pointer stays because a reader who remembers Section 5 needs to
+# find where it went.
 
 # ============================================================
 # Results

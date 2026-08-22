@@ -16,7 +16,7 @@
 #
 # Thread discrimination (epic-08 Q1 spike + hooks docs): agent_type
 # non-empty → subagent → silent. Missing keys classify as MAIN THREAD.
-# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
+# Registered in skills/canonical-sdlc/SKILL.md frontmatter; live only while that skill is armed.
 
 set -u
 
@@ -76,7 +76,7 @@ log_event() {  # $1=event $2=class
   return 0
 }
 
-# [WALL: hooks/farm-out-reminder.test.sh]
+# [WALL: tests/farm-out-reminder.test.sh]
 emit_deny() {  # $1=class $2=role
   jq -n --arg r "$(deny_reason "$1" "$2")" \
     '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}' 2>/dev/null
@@ -84,7 +84,7 @@ emit_deny() {  # $1=class $2=role
 }
 
 emit_nudge() {  # $1=class $2=role
-  jq -n --arg c "farm-out reminder: $1-class command on the main thread — production-shaped work belongs in a subagent (subagent_type: $2). This protects your own context budget; a stuck orchestrator cannot process completions. Advisory only." \
+  jq -n --arg c "farm-out checkpoint: $1-class command on the main thread — production-shaped work belongs in a subagent. Fix: dispatch via Agent(subagent_type: $2) when you can. This protects your own context budget; a stuck orchestrator cannot process completions. Advisory only." \
     '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$c}}' 2>/dev/null
   return 0
 }
@@ -102,7 +102,7 @@ deny_reason() {  # $1=class $2=role
   # Scrub BEFORE truncating: truncating first can split a hex run below the
   # 32-char threshold and leak a prefix.
   local safe; safe=$(printf '%s' "$FLAT" | scrub_secrets | cut -c1-120)
-  printf '%s' "farm-out policy: this is a long-running $1-class command; it must not run on the orchestrator thread (a stuck orchestrator is unavailable and cannot process subagent completions — this protects your own context budget). Dispatch it instead: Agent(subagent_type: $2, prompt carrying the command from this tool call): $safe — scrubbed and truncated for the log; the agent returns the result summary. If this genuinely cannot be dispatched (needs this session's state), re-run prefixed FARM_OUT_ALLOW=1 — the override is sanctioned and audited."
+  printf '%s' "farm-out checkpoint: this $1-class command doesn't belong on the orchestrator thread (a stuck orchestrator is unavailable and cannot process subagent completions — this protects your own context budget). Fix: dispatch it — Agent(subagent_type: $2, prompt carrying the command from this tool call): $safe — scrubbed and truncated for the log; the agent returns the result summary. If this genuinely cannot be dispatched (needs this session's state), re-run prefixed FARM_OUT_ALLOW=1 — the override is sanctioned and audited."
 }
 
 # ── classification (4/2 tier-1; classify_tier2 lands in 4/3) ─────────────
@@ -135,7 +135,7 @@ classify_tier1() {  # $1=flat cmd → sets CLASS ROLE, rc 0 on match
   # inside a word (`echo remake`) never matches. A short (<3-segment) chain
   # that carries a tier-1 token thus denies here on purpose; the ≥3-segment
   # &&-chain is a separate arm (class=chain) reached only when this one skips.
-  # [WALL: hooks/farm-out-reminder.test.sh]
+  # [WALL: tests/farm-out-reminder.test.sh]
   if printf '%s' "$c" | grep -qE '(^|[;&| ])bash +([^ ]*/)?(test\.sh|tests/run\.sh)([;&| ]|$)|(^|[;&| ])bash +[^ ]+\.test\.sh([;&| ]|$)|^(npm|pnpm|yarn) +test([;&| ]|$)|^pytest([;&| ]|$)|^go +test([;&| ]|$)|^cargo +test([;&| ]|$)|^make +test([;&| ]|$)'; then
     CLASS="suite"; ROLE="test-runner"; return 0; fi
   # Command position only: start-of-command or after a real separator
@@ -181,10 +181,14 @@ nudge_once() {  # $1=class $2=role — ONE nudge per (session, class); repeat = 
 }
 
 # ── main flow: override → unwrap → tier-1 deny → tier-2 nudge (single + chain) ──
-case "$FLAT" in
-  "FARM_OUT_ALLOW=1 "*|"env FARM_OUT_ALLOW=1 "*)
-    log_event "override" "user-sanctioned"; exit 0 ;;
-esac
+# Chain-aware: the override token is honored ANYWHERE in the invocation —
+# leading, after a separator (;/&/|), or as an env-prefix mid-chain
+# (`cd x && FARM_OUT_ALLOW=1 bash tests/run.sh`) — not only in leading
+# position. W4's false fire was exactly this shape: a 2-segment &&-chain hit
+# the single-command tier-1 arm before the old leading-only case ever ran.
+if printf '%s' "$FLAT" | grep -qE '(^|[;&| ])FARM_OUT_ALLOW=1([;&| ]|$)'; then
+  log_event "override" "user-sanctioned"; exit 0
+fi
 
 TARGET=$(unwrap "$(strip_prefixes "$FLAT")")
 CLASS=""; ROLE=""

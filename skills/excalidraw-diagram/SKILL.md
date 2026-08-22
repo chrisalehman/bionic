@@ -7,6 +7,7 @@ description: Create Excalidraw diagram JSON files that make visual arguments. Us
 
 > **VENDORED FORK — do not re-clone upstream.** This is a fork of `coleam00/excalidraw-diagram-skill`, which is unmaintained (2 commits) and broken: it imports `@excalidraw/excalidraw?bundle` **unpinned** from esm.sh, whose transitive-dep resolution drifted and now 404s `@braintree/sanitize-url` `constants.mjs` — so the renderer fails on every diagram. Upstream HEAD is still unpinned and won't be fixed.
 > **The fix is a version pin at `references/render_template.html:16` (`@excalidraw/excalidraw@0.18.0`).** Bump it deliberately, and verify a real render before trusting a new version. Installing this skill from upstream reinstates the breakage.
+> **Default-off, opt-in.** This skill ships outside bionic's plugin payload — installing bionic does not install this. Copy this directory to `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/excalidraw-diagram` yourself to opt in; nothing here runs unless you take that step.
 
 Generate `.excalidraw` JSON files that **argue visually**, not just display information.
 
@@ -53,8 +54,10 @@ You cannot judge a diagram from JSON alone. After generating or editing the Exca
 ### How to Render
 
 ```bash
-cd ~/.claude/skills/excalidraw-diagram/references && uv run python render_excalidraw.py <path-to-file.excalidraw>
+cd ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/excalidraw-diagram/references && uv run python render_excalidraw.py <path-to-file.excalidraw>
 ```
+
+`uv` and the `playwright-chromium` browser it drives are bionic's own dependency-table rows: before assuming either, detect absence with `jit_check` and, on absence, offer a consented install with `jit_offer` (`payload/scripts/lib/jit.sh`) — a decline degrades to "render is unavailable until installed," never a cryptic failure.
 
 This outputs a PNG next to the `.excalidraw` file. Then use the **Read tool** on the PNG to actually view it.
 
@@ -88,7 +91,7 @@ The loop is done when the rendered diagram matches the conceptual design; no tex
 ### First-Time Setup
 If the render script hasn't been set up yet:
 ```bash
-cd ~/.claude/skills/excalidraw-diagram/references
+cd ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/excalidraw-diagram/references
 uv sync
 uv run playwright install chromium
 ```

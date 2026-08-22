@@ -1,7 +1,7 @@
 #!/bin/bash
 # GOVERNING-SKILL GATE: Blocks Write and Edit to canonical-sdlc artifact
 # files that lack the required governing-skill frontmatter.
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
 # Scope: files under <project>/docs/bionic/{specs,plans,adrs}/ matching
 #   *.plan.md | *.spec.md | adr-*.md | continuation*.md
@@ -12,14 +12,14 @@
 # own naming gates catch artifacts that aren't named correctly.
 #
 # Required frontmatter block at the top of the file:
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
 #   ---
 #   governing-skill: superpowers:writing-plans
 #   sdlc-step: 3
 #   epic: epic-02-checkout
 #   wave: wave-01-checkout-refactor
-#   canonical_sdlc_version: 13
+#   canonical_sdlc_version: 14
 #   intent: build
 #   rigor: audited
 #   scale: wave
@@ -31,7 +31,7 @@
 #
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
 #
-# Installed globally by claude-bootstrap.sh to ~/.claude/hooks/
+# Registered on both channels: hooks/hooks.json (agent contexts, behind agent-context-guard.sh) and skills/canonical-sdlc/SKILL.md frontmatter (main thread).
 
 set -u
 
@@ -51,7 +51,7 @@ fi
 
 # Is the path under a canonical-sdlc artifact directory AND does the
 # basename match an enforced extension? Both must be true.
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 # Match files under the project's docs root (default <project>/.bionic/
 # docs/, configurable via <project>/.bionic/config.yaml `docs-root:`).
 #
@@ -68,7 +68,7 @@ fi
 # returns a RELATIVE path (`.git` at the root, `../.git` one level down),
 # whose dirname is `.` or `..` — a cwd-dependent string, not a root. It landed
 # in git 2.31.
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
 # OLD-GIT FALLBACK (Step-6 finding K2). On git < 2.31 `--path-format` is an
 # unknown option and rev-parse exits 129 — which the single-branch predecessor
@@ -85,7 +85,7 @@ fi
 # It answers RELATIVE inside the main repo and ABSOLUTE from a linked worktree,
 # hence the `case`. Only when BOTH forms fail is this genuinely not a
 # repository, and the supplied fallback wins as before.
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
 # `git -C` needs a directory that EXISTS, and this is a PreToolUse gate: on
 # the first artifact write into a project the target's parent directories have
@@ -267,7 +267,7 @@ case "$BASENAME" in
 esac
 
 # ---------- AC-13: misplacement blocks; absence never does ----------
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
 # Two facts about the target path, kept separate because they answer different
 # questions:
@@ -297,7 +297,7 @@ FILE_PATH_MATCH=$(physicalize "$FILE_PATH")
 DOCS_ROOT_MATCH=$(physicalize "$DOCS_ROOT")
 
 # ---------- R9/AC-13: pinned-root wall ----------
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
 # The `.bionic` tree is pinned to ONE physical location per project:
 # PROJECT_ROOT_FROM_PATH already resolves there via --git-common-dir,
@@ -351,7 +351,7 @@ fi
 #   subsequent Edit inherits it. If an Edit targets a file that never
 #   had the frontmatter, the hook blocks and directs the user to Write
 #   the artifact from scratch with the required frontmatter block.
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 CONTENT=""
 if [ "$TOOL" = "Write" ]; then
   CONTENT=$(echo "$INPUT" | jq -r '.tool_input.content // empty')
@@ -375,7 +375,7 @@ fi
 # (classic-Mac CR-only: \r without \n) into a real newline. Every parse below
 # is line-anchored (the exact-match `$0 == "---"` frontmatter delimiter,
 # yaml_get, the matrix grep), so it must see real newlines.
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
 # `tr -d '\r'` (the prior normalization) merely DELETED every \r. On a CRLF
 # artifact that happened to work, but on a CR-only artifact it removed every
@@ -384,12 +384,12 @@ fi
 # frontmatter block". awk splits on \n by default, so a CR-only file arrives as
 # a single record that gsub re-splits into real lines; LF and CRLF files are
 # unaffected. Twin of the evidence-gate hook's normalize_newlines.
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 CONTENT=$(printf '%s' "$CONTENT" | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }')
 
 # Extract the leading YAML frontmatter block (between the first two `---`
 # lines at column 0). If absent, block.
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 FRONTMATTER=$(echo "$CONTENT" | awk '
   NR == 1 && $0 == "---" { inside = 1; next }
   inside && $0 == "---" { exit }
@@ -397,7 +397,7 @@ FRONTMATTER=$(echo "$CONTENT" | awk '
 ')
 
 # The misplacement verdict, now that the frontmatter is in hand.
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
 # Reading the LEADING block (and only the leading block) is what keeps a
 # documentation page that shows the frontmatter inside a fence from being
@@ -432,7 +432,7 @@ if [ "$UNDER_DOCS_ROOT" -eq 0 ]; then
   # through here unblocked — the exact gap this wall closes. A write whose
   # own path carries no `.bionic` segment at all (an ordinary project file)
   # is untouched: TARGET_BIONIC is empty and this arm is silent.
-  # [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+  # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
   if [ -n "$TARGET_BIONIC" ] && [ "$TARGET_BIONIC" != "$PINNED_BIONIC" ]; then
     echo "BLOCKED: artifact write targets '$TARGET_BIONIC', not this project's pinned .bionic root." >&2
     echo "Path: $FILE_PATH" >&2
@@ -459,7 +459,7 @@ if [ -z "$FRONTMATTER" ]; then
   echo "  sdlc-step: <step number>" >&2
   echo "  epic: epic-NN-<slug>" >&2
   echo "  wave: wave-NN-<slug>   # omit for epic-level and continuation" >&2
-  echo "  canonical_sdlc_version: 13" >&2
+  echo "  canonical_sdlc_version: 14" >&2
   echo "  intent: <build|bugfix|refactor|tune|spike|incident-response>" >&2
   echo "  rigor: <tested|peer-reviewed|audited>" >&2
   echo "  scale: <task|wave|epic>" >&2
@@ -468,7 +468,7 @@ if [ -z "$FRONTMATTER" ]; then
 fi
 
 # Enforce presence of the governing-skill field with a non-empty value.
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 GOVERNING=$(echo "$FRONTMATTER" \
             | grep -E '^[[:space:]]*governing-skill[[:space:]]*:' \
             | head -1 \
@@ -504,8 +504,8 @@ SDLC_VERSION=$(yaml_get canonical_sdlc_version)
 # ONE supported version. Anything else — an older number, a typo, an empty
 # value, garbage — blocks. There is no version dispatch below this line and
 # no path that reaches `exit 0` without passing the whole contract.
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
-SUPPORTED_SDLC_VERSION=13
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
+SUPPORTED_SDLC_VERSION=14
 
 if [ "$SDLC_VERSION" != "$SUPPORTED_SDLC_VERSION" ]; then
   echo "BLOCKED: canonical-sdlc artifact '$BASENAME' declares canonical_sdlc_version: '$SDLC_VERSION'." >&2
@@ -520,7 +520,7 @@ fi
 # whole-value enum validation is blocking; CONTENT is already CR-stripped
 # (line 143), so whole-line yaml_get reads compare cleanly under CRLF too.
 # The triple's presence is the gate — there is no separate mode axis.
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 block() {
   echo "BLOCKED: canonical-sdlc artifact '$BASENAME': $1" >&2
   echo "Path: $FILE_PATH" >&2
@@ -528,7 +528,7 @@ block() {
 }
 
 # Split-brain guard: an artifact declares the triple, never mode.
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 [ -z "$(yaml_get mode)" ] || block "artifacts declare intent:/rigor:/scale:, never mode:"
 INTENT=$(yaml_get intent); RIGOR=$(yaml_get rigor); SCALE=$(yaml_get scale)
 [ -n "$INTENT" ] || block "requires intent: (build|bugfix|refactor|tune|spike|incident-response)"
@@ -561,7 +561,7 @@ fi
 # epic-14-verification-power wave-01 plan). When present, only the literal
 # values `required` and `exempt` are legal — anything else (typo, other
 # value) blocks, naming both legal values.
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 WALK=$(yaml_get walk)
 if [ -n "$WALK" ]; then
   case "$WALK" in
@@ -611,7 +611,7 @@ log_finding() {  # $1=check-id $2=detail — never blocks, always returns 0
 # does NOT cover the "invalid rigor-floor value in config.yaml" finding below
 # — that is a data-quality problem in the floor itself, not a user choosing a
 # rigor below a valid floor, so the marker does not suppress it.
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 RIGOR_OVERRIDE=$(yaml_get rigor-override)
 log_floor_finding() {  # $1=check-id $2=violation-detail
   if [ -n "$RIGOR_OVERRIDE" ]; then
@@ -657,7 +657,7 @@ if [ -n "$EPIC" ] && [ -r "$DOCS_ROOT/plans/$EPIC/epic.plan.md" ]; then
 fi
 
 # ---------- required frontmatter flags + model_plan ----------
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 REQUIRED_OPT_IN=("cleanup_on_finish" "use_worktree")
 REQUIRED_DISCRIMINATORS=("surface_type" "language" "has_ui" "multi_agent" "deploy_target")
 
@@ -686,7 +686,7 @@ if [ "${#MISSING[@]}" -gt 0 ]; then
 fi
 
 # ---------- pre-registered Verification Matrix required at Step 3+ ----------
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
 # Step 0 derives a "## Verification Matrix" section (per-AC tier + status +
 # evidence, locked at Step 3 approval — see canonical-sdlc SKILL.md's
@@ -719,7 +719,7 @@ case "$BASENAME" in
 esac
 
 # ---------- design wall: the three-way rule (wave-02 AC-2/AC-3/AC-4) ----------
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
 # A wave-or-epic-scale SPEC blocks unless it carries one of three things: a
 # flush-left `## Design` section in place; a frontmatter `design:` pointer that
@@ -810,7 +810,7 @@ case "$BASENAME" in
       # ONE record, so no `## Design` is ever at a line start and a legitimate
       # target false-BLOCKs. CRLF coverage does not catch this class — see
       # `.claude/rules/hook-authoring.md`, and c14 for the case that does.
-      # [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+      # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
       normalize_newlines() {  # a document on stdin → the same document, LF-split
         awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }'
       }
@@ -829,7 +829,7 @@ case "$BASENAME" in
       # `design:` pointer validates unconditionally — resolved, existence-checked
       # and `..`-refused whether or not the spec also carries its own section —
       # and only the absence of a pointer falls through to the in-place read.
-      # [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+      # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
       #
       # The order matters because the pointer is not one of three interchangeable
       # ways to be quiet: it is the path the Step-3 approval display prints for
@@ -868,7 +868,7 @@ case "$BASENAME" in
 esac
 
 # ---------- AC-11 / AC-12: tree creation on first lifecycle use ----------
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
 # Slice 2 (F4): neither hook has an entry point that fires on true first
 # lifecycle use without requiring `.bionic/` to pre-exist — except this one.
@@ -911,7 +911,7 @@ esac
 # redirection is performed before `printf` runs, so `printf 2>/dev/null` would
 # silence nothing) is suppressed too — matching the `mkdir -p ... 2>/dev/null`
 # beside it. An allowed tool call must leave stderr clean.
-# [WALL: hooks/canonical-sdlc-governing-skill.test.sh]
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 if [ -n "$SDLC_VERSION" ]; then
   mkdir -p \
     "$PROJECT_ROOT_FROM_PATH/.bionic/tmp" \

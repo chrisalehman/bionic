@@ -43,27 +43,30 @@
 
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+. "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/frontmatter-parser.sh"
+
+REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 
 # The four parties. Overridable so the suite can be driven against a MUTATED
 # COPY of any one of them without the shipped file ever being modified — that
 # substitution is how §9's mutation-and-restore proof is taken here, and how a
 # reviewer can re-take it by hand:
 #   W1R_PARTY_DP=/tmp/mutant.sh bash tests/cross-gate-agreement.test.sh
-PARTY_DP="${W1R_PARTY_DP:-$REPO_ROOT/hooks/dispatch-preflight.sh}"
-PARTY_SG="${W1R_PARTY_SG:-$REPO_ROOT/hooks/stop-guard.sh}"
-PARTY_EG="${W1R_PARTY_EG:-$REPO_ROOT/hooks/canonical-sdlc-evidence-gate.sh}"
+PARTY_DP="${W1R_PARTY_DP:-$BIONIC_HOOKS_DIR/dispatch-preflight.sh}"
+PARTY_SG="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop-guard.sh}"
+PARTY_EG="${W1R_PARTY_EG:-$BIONIC_HOOKS_DIR/canonical-sdlc-evidence-gate.sh}"
 # The recorder moved out of the stop gate at slice 4/4: observations are written
 # post-execution by their own script, from the producer's own printed output.
-PARTY_ER="${W1R_PARTY_ER:-$REPO_ROOT/hooks/execution-recorder.sh}"
+PARTY_ER="${W1R_PARTY_ER:-$BIONIC_HOOKS_DIR/execution-recorder.sh}"
 
-PROBE="$REPO_ROOT/hooks/preflight-probe.sh"
-OBSERVE="$REPO_ROOT/hooks/stop-check.sh"
-SWEEPER="$REPO_ROOT/hooks/session-sweeper.sh"
+PROBE="$BIONIC_HOOKS_DIR/preflight-probe.sh"
+OBSERVE="$BIONIC_HOOKS_DIR/stop-check.sh"
+SWEEPER="$BIONIC_HOOKS_DIR/session-sweeper.sh"
 # The landing gate (epic-16 wave-01) is a fifth party and an overridable one for
 # the same reason the four above are: §J drives a MUTATED COPY of it to prove the
 # verdict/gate battery discriminates, and the shipped file is never touched.
-PARTY_LG="${W1R_PARTY_LG:-$REPO_ROOT/hooks/landing-gate.sh}"
+PARTY_LG="${W1R_PARTY_LG:-$BIONIC_HOOKS_DIR/landing-gate.sh}"
 # §J also drives a mutated copy of the SWEEPER, to prove the opposite direction:
 # a change to the predicate moves both answers rather than splitting them.
 PARTY_SW="$SWEEPER"
@@ -92,8 +95,19 @@ PASS=0; FAIL=0; TOTAL=0
 ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
 no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
 expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-expect_contains() { if printf '%s' "$3" | grep -qF -- "$2"; then ok "$1"; else no "$1" "missing: $2"; fi; }
-expect_absent()   { if printf '%s' "$3" | grep -qF -- "$2"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
+# The haystack reaches grep by here-string, NOT by `printf ... | grep -q`. Under
+# the `set -o pipefail` above, that pipe is a race: `grep -q` exits on the first
+# match without draining stdin, so for any haystack past the 64 KiB pipe buffer
+# — every whole-hook-file assertion in §F/§G/§H/§L below — the printf builtin is
+# still mid-write when grep leaves, takes SIGPIPE, and reports 141. pipefail
+# then makes 141 the PIPELINE status even though grep exited 0 having FOUND the
+# needle, so expect_contains reports `missing:` for a needle that is present and
+# expect_absent returns a false GREEN on a needle that is. That is the whole of
+# the epic-17-w1 "cross-gate flake" — an in-process scheduling race, not state
+# pollution. expect_contains/expect_absent here are pinned by
+# tests/assert-helper-race.test.sh; expect_absent_ug below (§L) is pinned there too.
+expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
+expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
 
 SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
@@ -115,7 +129,7 @@ SID_LG="2ae9d613-4c07-4b8a-9f51-7d02ac86be40"
 # about on stderr. This suite's claim is producer/consumer AGREEMENT ON THE
 # ATTESTATION — "passes in silence" below means the attestation raised nothing —
 # so the fixture is the ordinary dispatch, not a malformed one. The warning
-# itself is driven where it belongs, in hooks/dispatch-preflight.test.sh S10c.
+# itself is driven where it belongs, in tests/dispatch-preflight.test.sh S10c.
 
 mk_agent_payload() {  # <sid> <cwd>
   jq -n --arg s "$1" --arg c "$2" \
@@ -421,7 +435,7 @@ write_plan() {  # <path> <state-body>
   mkdir -p "$(dirname "$1")"
   {
     printf -- '---\n'
-    printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 13\n'
+    printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
     printf 'intent: build\nrigor: audited\nscale: wave\n'
     printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\n'
     printf '%s\n' "$2"
@@ -429,10 +443,30 @@ write_plan() {  # <path> <state-body>
   } > "$1"
 }
 
+# A LIVE WAVE HAS A LIVE PATROL (epic-17 W5 4/4). hooks/dispatch-preflight.sh refuses a
+# dispatch whose session carries no fresh Patrol stamp, so a repo fixture without one answers
+# "refused" to every question this suite asks about roster rows, identity chains and progress
+# paths — the arming wall would be under test in every section instead of in its own (§P,
+# which removes the stamp deliberately). This is the fixture equivalent of an engagement
+# arming the Patrol before the first dispatch. Written under the MAIN repository always: the
+# stamp shares the roster's pinned root, which §N.3 depends on and would break by planting
+# a phantom `.bionic` in a worktree.
+arm_patrol() {  # <repo> <session-id>...
+  local repo="$1"; shift
+  mkdir -p "$repo/.bionic/tmp"
+  local sid
+  for sid in "$@"; do
+    printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sid" > "$repo/.bionic/tmp/patrol-$sid.state"
+    chmod 600 "$repo/.bionic/tmp/patrol-$sid.state"
+  done
+}
+
 new_repo() {  # <name> -> path
   local r="$SANDBOX/fx/$1/repo"
-  mkdir -p "$r/.bionic"
+  mkdir -p "$r/.bionic/tmp"
   git -C "$r" init -q 2>/dev/null
+  arm_patrol "$r" "$SID_A" "$SID_B" "$SID_LG"
   printf '%s' "$r"
 }
 
@@ -473,7 +507,7 @@ build_fixture() {  # <name> -> repo path
       mkdir -p "$repo/.bionic/docs" ;;
     no-sdlc-state)
       mkdir -p "$repo/.bionic/docs/plans/epic-99"
-      printf -- '---\ncanonical_sdlc_version: 13\n---\n\n# Notes\n\ncurrent: 4\n' \
+      printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# Notes\n\ncurrent: 4\n' \
         > "$repo/.bionic/docs/plans/epic-99/wave-01.md" ;;
 
     # --- A9's undiscriminated parser edges, each built so a mis-parse FLIPS ---
@@ -533,7 +567,7 @@ build_fixture() {  # <name> -> repo path
       # documents the schema rather than running it.
       mkdir -p "$repo/.bionic/docs/plans/epic-99"
       {
-        printf -- '---\ncanonical_sdlc_version: 13\nscale: wave\n---\n\n# Schema doc\n\n'
+        printf -- '---\ncanonical_sdlc_version: 14\nscale: wave\n---\n\n# Schema doc\n\n'
         printf 'The section looks like this:\n\n```\n## SDLC State\n\ncurrent: 4\n```\n'
       } > "$repo/.bionic/docs/plans/epic-99/wave-01.md" ;;
     newest-plan-wins)
@@ -557,7 +591,7 @@ build_fixture() {  # <name> -> repo path
       # 2026-08-15, twice, by two agents, neither trying. The real plan must win.
       write_plan "$repo/.bionic/docs/plans/epic-99/session.plan.md" "current: 4"
       touch -t 202001010000 "$repo/.bionic/docs/plans/epic-99/session.plan.md"
-      printf -- '---\ncanonical_sdlc_version: 13\n---\n\n# Continuation\n\ncurrent: 4\n' \
+      printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# Continuation\n\ncurrent: 4\n' \
         > "$repo/.bionic/docs/plans/epic-99/continuation.md"
       touch -t 203001010000 "$repo/.bionic/docs/plans/epic-99/continuation.md" ;;
     fenced-only-newest-loses)
@@ -570,7 +604,7 @@ build_fixture() {  # <name> -> repo path
       write_plan "$repo/.bionic/docs/plans/epic-99/session.plan.md" "current: 4"
       touch -t 202001010000 "$repo/.bionic/docs/plans/epic-99/session.plan.md"
       {
-        printf -- '---\ncanonical_sdlc_version: 13\n---\n\n# Schema notes\n\n'
+        printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# Schema notes\n\n'
         printf 'The section looks like this:\n\n```\n## SDLC State\n\ncurrent: 4\n```\n'
       } > "$repo/.bionic/docs/plans/epic-99/schema-notes.md"
       touch -t 203001010000 "$repo/.bionic/docs/plans/epic-99/schema-notes.md" ;;
@@ -580,7 +614,7 @@ build_fixture() {  # <name> -> repo path
       # the reason the fix is a candidate filter rather than a refusal: skipping
       # every candidate must land in the same place as finding none.
       mkdir -p "$repo/.bionic/docs/plans/epic-99"
-      printf -- '---\ncanonical_sdlc_version: 13\n---\n\n# Continuation\n' \
+      printf -- '---\ncanonical_sdlc_version: 14\n---\n\n# Continuation\n' \
         > "$repo/.bionic/docs/plans/epic-99/continuation.md"
       printf '# Scratch\n\ncurrent: 4\n' \
         > "$repo/.bionic/docs/plans/epic-99/scratch.md" ;;
@@ -1268,8 +1302,10 @@ expect_eq "execution-recorder.sh is byte-identical after the instrumented copy r
 QREPO=$(new_repo "quiet")
 write_plan "$QREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 before=$(find "$QREPO" | sort)
-expected_after=$(printf '%s\n%s\n%s\n%s\n' "$before" \
-  "$QREPO/.bionic/tmp" \
+# `.bionic/tmp` is no longer among the gate's creations: the fixture arms the Patrol, which
+# makes the directory before the gate runs (arm_patrol). What the gate adds is still exactly
+# the attestation and the roster row.
+expected_after=$(printf '%s\n%s\n%s\n' "$before" \
   "$QREPO/.bionic/tmp/preflight-$SID_A.state" \
   "$QREPO/.bionic/tmp/roster-$SID_A.state" | sort)
 mk_agent_payload "$SID_A" "$QREPO" \
@@ -1444,7 +1480,7 @@ expect_contains "…and the gate names the same path the writer wrote" \
 # This is the row that failed. It belongs in THIS suite rather than the
 # recorder's own, because the property is cross-script: the file the recorder
 # writes is the file the gate reads, and the recorder alone cannot see that
-# dropping a row disarms another program. `hooks/execution-recorder.test.sh`
+# dropping a row disarms another program. `tests/execution-recorder.test.sh`
 # asserted only that the row THIS event confirmed survived the fold, which is why
 # 110/110 was green over the defect.
 F4_ROSTER="$IREPO/.bionic/tmp/roster-$SID_A.state"
@@ -2223,7 +2259,13 @@ DL_LAUNCHED=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
 # FRESH progress written now, well inside the declared cadence; a DEAD claim no live process
 # carries; an ABSENT deliverable so the row has not landed and is genuinely judged.
 printf 'stage 1\n' > "$DLREPO/.bionic/tmp/dl.progress"
-DL_CLAIM="bionic-xgate-D2-deadclaim-no-such-process-9f5c1a2b"
+# `-$$` is load-bearing, not decoration. This claim exists to be DEAD — the arm below asserts
+# `pgrep -f` matches nothing, and hooks/stop-check.sh reads liveness the same way. `pgrep -f`
+# matches on full argv, and a concurrent `tests/run.sh` running this very file carries the
+# literal in its own argv, so a fixed string makes each run's shell satisfy the other run's
+# "no such process" claim. The pid suffix gives every run a private literal that no sibling's
+# argv can contain, which is what makes the claim's deadness a property of this run alone.
+DL_CLAIM="bionic-xgate-D2-deadclaim-no-such-process-9f5c1a2b-$$"
 {
   printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
   printf 'roster-state/v1|status=confirmed|session=%s|name=dl-row|agent_id=adl-row-0001|launched_at=%s|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-dl.md|source=declared|duration=|progress=%s|claims=%s|cadence=~5m|absent=|waiver=|tool_use_id=toolu_DL\n' \
@@ -2325,7 +2367,7 @@ expect_contains "…carrying the deliverable the brief declared" \
 # here is the same string SubagentStart carries below and the same string the landing
 # sweep matches against `background_tasks[].id` (t4b-probe-report.md §4). The TEAMMATE
 # shape — addressing id recorded, `agent_id=` deliberately left empty, and therefore
-# never identified — is pinned in hooks/execution-recorder.test.sh Section 10.
+# never identified — is pinned in tests/execution-recorder.test.sh Section 10.
 mk_agent_post "$SID_A" "$KTR" "$KREPO" "toolu_01CHAIN" "w16-chain" "$KID" \
   | bash "$PARTY_ER" >/dev/null 2>&1
 K_CONFIRMED=$(grep 'status=confirmed|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tail -1)
@@ -2583,73 +2625,78 @@ echo "=== L — the WIRING: registration is three-sided (frontmatter, absence, p
 #
 # A hook that reads an event nobody registered it for is inert, and inert in the
 # quietest possible way: it is installed, it is syntactically fine, its own suite is
-# green, and it never runs. Epic-16 wave-2 moves the seven sdlc hook scripts' ten
-# event/matcher registrations OUT of MANAGED_HOOKS/settings.json and INTO the
-# `hooks:` frontmatter block of skills/canonical-sdlc/SKILL.md, so the walls bind
-# only in sessions that actually invoke the skill (R1). Three sides now have to
-# agree or the move is silently wrong in one of three ways: the frontmatter could
-# name the wrong shape, a moved script could linger behind in MANAGED_HOOKS (firing
-# in EVERY session, defeating R1), or a script that should stay global could get
-# swept out by mistake.
-BOOTSTRAP_SRC=$(cat "$REPO_ROOT/claude-bootstrap.sh")
-SKILL_SRC="$REPO_ROOT/skills/canonical-sdlc/SKILL.md"
-MANAGED_HOOKS_SRC=$(awk '/^MANAGED_HOOKS=\(/{f=1} f{print} f&&/^\)$/{exit}' "$REPO_ROOT/claude-bootstrap.sh")
+# green, and it never runs. The registration surface this repo SHIPS is two payload
+# manifests, and only those two:
+#
+#   the SKILL-SCOPED channel — the `hooks:` frontmatter block of
+#     skills/canonical-sdlc/SKILL.md, carrying the seven sdlc hook scripts' eleven
+#     event/matcher registrations, which bind only in sessions that actually invoke
+#     the skill (epic-16 wave-2 R1).
+#   the ALWAYS-ON channel — hooks/hooks.json, the plugin hook manifest, carrying the
+#     six walls that must bind in every session no matter what skill is armed.
+#
+# Three sides have to agree or the partition is silently wrong in one of three ways:
+# the frontmatter could name the wrong shape, a skill-scoped script could linger in
+# the always-on manifest (firing in EVERY session, defeating R1), or a script that
+# has to stay global could get swept out by mistake.
+#
+# THIS SECTION READS PAYLOAD FILES ONLY (epic-17 wave-02 S3, AC-1). Every assertion
+# that used to derive its expected shape from the condemned installer script's own
+# registration array lived in tests/plugin-hooks.test.sh — the designated transitional
+# home, which retired whole with the installer at W5 (4/6). hooks/hooks.json is the only
+# always-on surface left, so an assertion made here against it binds the whole channel
+# with nothing left to cross-check it against.
+SKILL_SRC="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
+HOOKS_JSON_SRC="$BIONIC_HOOKS_DIR/hooks.json"
 
 # the shell's bare `grep` is ugrep with ignore-files active and lies about absence
 # (reports 0 hits inside paths it silently skips) — every absence check below goes
 # through /usr/bin/grep instead.
 expect_absent_ug() {
-  if printf '%s' "$3" | /usr/bin/grep -qF -- "$2"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi
+  if /usr/bin/grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi
 }
 
 # --- L.1 frontmatter <-> script: the eleven sdlc-scoped registrations live in
-# SKILL.md's `hooks:` frontmatter block, same event/matcher/command shape MANAGED_HOOKS
-# used to carry, each entry bounded by the same timeout: 10 the Step-6 review demanded.
+# SKILL.md's `hooks:` frontmatter block, in the same event/matcher/command shape the
+# always-on channel uses, each entry bounded by the same timeout: 10 the Step-6 review
+# demanded.
 # farm-out-reminder.sh joined this block at session-20260815 T5 — it guards a
 # workflow preference, not irreversible damage, so it binds only in armed sessions
 # now, sharing the PreToolUse|Bash matcher entry with the evidence gate (two
 # commands under one matcher, same shape the Stop event already uses for its two
 # no-matcher hooks).
 # Line-anchored extraction of the pinned shape — pin the span, not the label.
-SKILL_HOOKS_ROWS=$(awk '
-  /^hooks:$/ { active=1; next }
-  active && /^---$/ { active=0 }
-  active && /^[A-Za-z]/ { active=0 }
-  !active { next }
-  /^  [A-Za-z]+:$/ { event=$0; sub(/^  /,"",event); sub(/:$/,"",event); matcher=""; next }
-  /^    - matcher: "/ { matcher=$0; sub(/^    - matcher: "/,"",matcher); sub(/"$/,"",matcher); next }
-  /^    - hooks:$/ { matcher=""; next }
-  /^          command: / { cmd=$0; sub(/^          command: /,"",cmd); next }
-  /^          timeout: / { t=$0; sub(/^          timeout: /,"",t); print event "|" matcher "|" cmd "|" t }
-' "$SKILL_SRC")
+# Shared with installer-behavior.test.sh and scripts.test.sh via
+# tests/lib/frontmatter-parser.sh (epic-17 W4 AC-12 dedupe — see §L.7 below).
+SKILL_HOOKS_ROWS=$(skill_hooks_rows "$SKILL_SRC")
 
 expect_contains "frontmatter registers the evidence gate on PreToolUse|Bash, timeout 10" \
-  "PreToolUse|Bash|~/.claude/hooks/canonical-sdlc-evidence-gate.sh|10" "$SKILL_HOOKS_ROWS"
+  "PreToolUse|Bash|\${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-evidence-gate.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…and farm-out-reminder on PreToolUse|Bash, timeout 10 (session-20260815 T5)" \
-  "PreToolUse|Bash|~/.claude/hooks/farm-out-reminder.sh|10" "$SKILL_HOOKS_ROWS"
+  "PreToolUse|Bash|\${CLAUDE_PLUGIN_ROOT}/hooks/farm-out-reminder.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…the stop guard on PreToolUse|TaskStop, timeout 10" \
-  "PreToolUse|TaskStop|~/.claude/hooks/stop-guard.sh|10" "$SKILL_HOOKS_ROWS"
+  "PreToolUse|TaskStop|\${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…dispatch-preflight on PreToolUse|Agent, timeout 10" \
-  "PreToolUse|Agent|~/.claude/hooks/dispatch-preflight.sh|10" "$SKILL_HOOKS_ROWS"
+  "PreToolUse|Agent|\${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…the governing-skill gate on PreToolUse|Write, timeout 10" \
-  "PreToolUse|Write|~/.claude/hooks/canonical-sdlc-governing-skill.sh|10" "$SKILL_HOOKS_ROWS"
+  "PreToolUse|Write|\${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…and on PreToolUse|Edit, timeout 10" \
-  "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh|10" "$SKILL_HOOKS_ROWS"
+  "PreToolUse|Edit|\${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…the recorder's observation arm on PostToolUse|Bash, timeout 10" \
-  "PostToolUse|Bash|~/.claude/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
+  "PostToolUse|Bash|\${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…its completion arm on PostToolUse|Agent, timeout 10" \
-  "PostToolUse|Agent|~/.claude/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
+  "PostToolUse|Agent|\${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…its identification arm on SubagentStart (no matcher), timeout 10" \
-  "SubagentStart||~/.claude/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
+  "SubagentStart||\${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
 expect_contains "…context-spend on Stop (no matcher), timeout 10" \
-  "Stop||~/.claude/hooks/context-spend.sh|10" "$SKILL_HOOKS_ROWS"
+  "Stop||\${CLAUDE_PLUGIN_ROOT}/hooks/context-spend.sh|10" "$SKILL_HOOKS_ROWS"
 # THE LANDING SWEEP MOVED TO Stop (epic-16 wave-03, T4c). SubagentStop is dispatched in the
 # SUBAGENT's context, and skill-frontmatter hooks are looked up by SESSION id — so no
 # subagent-context event can ever reach this channel (T4b §3, from the shipped binary). A
 # registration left on SubagentStop is a wall that is installed, syntactically fine, green in
 # its own suite, and never runs.
 expect_contains "…and the landing sweep on Stop (no matcher), timeout 10" \
-  "Stop||~/.claude/hooks/landing-gate.sh|10" "$SKILL_HOOKS_ROWS"
+  "Stop||\${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh|10" "$SKILL_HOOKS_ROWS"
 expect_absent_ug "…with NOTHING left registered on SubagentStop" \
   "SubagentStop" "$SKILL_HOOKS_ROWS"
 expect_eq "…exactly eleven registrations in the frontmatter block, nothing extra" \
@@ -2691,13 +2738,15 @@ expect_contains "…and the recorder's identification arm guards on that same ev
 # This test is therefore the only detector, and it is a WHITELIST rather than a blacklist:
 # the failure is silent, so the safe default for an unrecognised key is red.
 VALID_HOOK_EVENTS="PreToolUse PostToolUse Notification UserPromptSubmit Stop SubagentStop SubagentStart PreCompact SessionStart SessionEnd"
-SKILL_EVENT_KEYS=$(awk '
-  /^hooks:$/ { active=1; next }
-  active && /^---$/ { active=0 }
-  active && /^[A-Za-z]/ { active=0 }
-  !active { next }
-  /^  [A-Za-z]+:$/ { k=$0; sub(/^  /,"",k); sub(/:$/,"",k); print k }
-' "$SKILL_SRC")
+# epic-17 W4 S9 A5 fold: this hand-copied the 4-line hooks: prologue as the fifth
+# call site (skill_hooks_rows itself, skill_block_count, installer-behavior.test.sh's
+# _skill_frontmatter_has, and scripts.test.sh's two inline checks were the four AC-12
+# named) — now shares tests/lib/frontmatter-parser.sh's skill_hooks_event_keys, which
+# is the same prologue+key-line logic, not skill_hooks_rows (that helper only emits a
+# key once a FULL event/matcher/command/timeout chain follows it, which would silently
+# under-detect an incomplete malformed entry under a bad key — the exact silent-miss
+# this test exists to make impossible).
+SKILL_EVENT_KEYS=$(skill_hooks_event_keys "$SKILL_SRC")
 expect_eq "the frontmatter block declares at least one event key (this test is not vacuous)" \
   "yes" "$([ -n "$SKILL_EVENT_KEYS" ] && echo yes || echo no)"
 L5_BAD=""
@@ -2710,78 +2759,123 @@ done
 expect_eq "every top-level key in the hooks: block is a hook event the harness knows" \
   "" "$L5_BAD"
 
-# --- L.2 MANAGED_HOOKS absence: none of the five sdlc scripts that stayed
-# skill-only appears ANYWHERE in the array bootstrap still converges on install — a
-# lingering entry would fire the wall in every session, defeating R1 even after the
-# frontmatter side is right.
+# THE ALWAYS-ON MANIFEST, flattened to the SAME event|matcher|command|timeout row shape
+# L.1 extracts from the frontmatter block, so the two channels are read the same way and
+# compared without translation. The plugin format makes both `matcher` and `timeout`
+# optional at the group/leaf level; an absent key yields an empty field rather than a
+# missing column, so a row is always four fields wide.
+HOOKS_JSON_ROWS=$(jq -r '
+  .hooks | to_entries[] | .key as $ev | .value[]
+  | (.matcher // "") as $mt
+  | .hooks[] | "\($ev)|\($mt)|\(.command)|\(.timeout // "")"
+' "$HOOKS_JSON_SRC" 2>/dev/null)
+expect_eq "the always-on manifest parses into rows at all (§L.2/L.3/L.6 are not vacuous)" "yes" \
+  "$([ -n "$HOOKS_JSON_ROWS" ] && echo yes || echo no)"
+
+# --- L.2 ALWAYS-ON ABSENCE: none of the four sdlc scripts that stayed skill-only
+# appears ANYWHERE in hooks/hooks.json — a lingering entry would fire the wall in every
+# session, defeating R1 even after the frontmatter side is right.
 for script in canonical-sdlc-evidence-gate.sh stop-guard.sh \
               execution-recorder.sh context-spend.sh; do
-  expect_absent_ug "MANAGED_HOOKS no longer names $script (moved to frontmatter)" \
-    "hooks/$script" "$MANAGED_HOOKS_SRC"
+  expect_absent_ug "the always-on manifest no longer names $script (skill frontmatter only)" \
+    "hooks/$script" "$HOOKS_JSON_ROWS"
 done
 # THE THREE WALLS THAT CAME BACK (session-20260815 T6, then T2) are a conditional
-# absence, not an absence: they are named in this array again, and every occurrence
+# absence, not an absence: they are named in this manifest again, and every occurrence
 # must sit behind hooks/agent-context-guard.sh. A bare entry would be the R1
 # regression this section was written to catch — the wall firing in every session on
 # the machine — wearing the new registration's clothes, and §L.6 below (which asserts
 # the guarded form is PRESENT) would still pass beside it. The landing gate joined
 # them when teammates got their landing verdict: its Stop arm stays skill-scoped, and
 # only the SubagentStop arm needs the channel that reaches an agent context.
-L2_UNGUARDED=$(printf '%s\n' "$MANAGED_HOOKS_SRC" \
+L2_UNGUARDED=$(printf '%s\n' "$HOOKS_JSON_ROWS" \
   | /usr/bin/grep -E 'dispatch-preflight\.sh|canonical-sdlc-governing-skill\.sh|landing-gate\.sh' \
   | /usr/bin/grep -v 'agent-context-guard\.sh')
 expect_eq "…and the three walls that returned are never named UNGUARDED" "" "$L2_UNGUARDED"
 # The landing gate is the one wall registered on TWO events across the two channels, so
-# its settings entry must not drift onto the event the skill channel already owns: a
+# its always-on entry must not drift onto the event the skill channel already owns: a
 # second Stop registration would sweep twice per turn and journal two markers.
-expect_eq "…and the landing gate is registered here for SubagentStop alone" "1" \
-  "$(printf '%s\n' "$MANAGED_HOOKS_SRC" | /usr/bin/grep -c 'landing-gate\.sh')"
-expect_eq "…never for Stop, which the skill channel owns" "0" \
-  "$(printf '%s\n' "$MANAGED_HOOKS_SRC" | /usr/bin/grep -c '"Stop|')"
+expect_eq "…and the landing gate is registered here exactly once" "1" \
+  "$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -c 'landing-gate\.sh')"
+expect_eq "…that one registration sitting on SubagentStop" "1" \
+  "$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -c '^SubagentStop|.*landing-gate\.sh')"
+expect_eq "…never on Stop, which the skill channel owns" "0" \
+  "$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -c '^Stop|')"
 
-# --- L.3 MANAGED_HOOKS presence: the two irreversible-damage guards are untouched
+# --- L.3 ALWAYS-ON PRESENCE: the two irreversible-damage guards are untouched
 # by the move (R2: guard-set parity for the hooks that stay global no matter what)
 # — exact set, not just "still there somewhere among leftovers."
-expect_contains "MANAGED_HOOKS keeps protect-main.sh on PreToolUse|Bash" \
-  '"PreToolUse|Bash|~/.claude/hooks/protect-main.sh"' "$MANAGED_HOOKS_SRC"
+#
+# Pinned BY VALUE including the ${CLAUDE_PLUGIN_ROOT} spelling, because the manifest is
+# what the harness executes: a command that reverted to a machine-local ~ path is a wall
+# that cannot resolve inside an installed plugin, and it fails in the quiet direction.
+expect_contains "the always-on manifest keeps protect-main.sh on PreToolUse|Bash" \
+  'PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/protect-main.sh|' "$HOOKS_JSON_ROWS"
 expect_contains "…protect-database.sh on PreToolUse|Bash" \
-  '"PreToolUse|Bash|~/.claude/hooks/protect-database.sh"' "$MANAGED_HOOKS_SRC"
-# farm-out-reminder.sh moved OUT of this array at session-20260815 T5 (AC-6):
+  'PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/protect-database.sh|' "$HOOKS_JSON_ROWS"
+# farm-out-reminder.sh moved OUT of the always-on set at session-20260815 T5 (AC-6):
 # unlike the three walls above it, it guards a workflow preference rather than
 # irreversible damage, so it now binds only in armed sessions, registered once
 # through the skill frontmatter (pinned in L.1) with no agent-context twin here.
 expect_absent_ug "…and farm-out-reminder.sh is no longer here at all (moved to skill frontmatter, T5)" \
-  "hooks/farm-out-reminder.sh" "$MANAGED_HOOKS_SRC"
-expect_eq "…and exactly six entries total — two unconditional, four guarded" \
-  "6" "$(printf '%s\n' "$MANAGED_HOOKS_SRC" | /usr/bin/grep -c '"')"
+  "hooks/farm-out-reminder.sh" "$HOOKS_JSON_ROWS"
+expect_eq "…and exactly six registrations total — two unconditional, four guarded" \
+  "6" "$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -c '|')"
+expect_eq "…every one of them resolving through \${CLAUDE_PLUGIN_ROOT}, never a machine-local path" \
+  "0" "$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -cvF '${CLAUDE_PLUGIN_ROOT}/hooks/')"
 
-# --- L.4 EVERY registration is bounded by a timeout, whichever branch writes it ---
+# --- L.4 EVERY registration is bounded by a timeout ---
 #
-# The Step-6 review's C-4: `wire_managed_hooks` attached `"timeout": 10` only on the
-# matcher branch, so the two events this wave added — the ones that carry no matcher —
+# The Step-6 review's C-4: the settings writer attached `"timeout": 10` only on the
+# matcher branch, so the two events that wave added — the ones that carry no matcher —
 # registered with no ceiling at all, and the platform default was the only thing in front
 # of the landing gate's verdict subprocess. A timeout is the safe direction here precisely
 # because the gate is fail-open: a hook that is killed lets the stop through.
 #
-# Driven rather than grepped: the real function is extracted from the real script and run
-# against a sandboxed settings file, the same convention tests/installer-behavior.test.sh
-# uses, so this asserts what bootstrap WRITES and not what its source looks like.
-LSBX="$SANDBOX/wiring"
-mkdir -p "$LSBX"
-LCODE="$LSBX/wire.sh"
-awk '/^wire_managed_hooks\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$REPO_ROOT/claude-bootstrap.sh" > "$LCODE"
-awk '/^MANAGED_HOOKS=\(/{f=1} f{print} f&&/^\)$/{exit}' "$REPO_ROOT/claude-bootstrap.sh" >> "$LCODE"
-LSETTINGS="$LSBX/settings.json"
-echo '{}' > "$LSETTINGS"
-# shellcheck disable=SC1090
-( . "$LCODE"; settings="$LSETTINGS"; wire_managed_hooks ) >/dev/null 2>&1
-L_RC=$?
-expect_eq "wire_managed_hooks runs against a sandboxed settings file" "0" "$L_RC"
-expect_eq "…and registers every managed hook (this section is not vacuous)" \
-  "$(printf '%s\n' "$BOOTSTRAP_SRC" | awk '/^MANAGED_HOOKS=\(/{f=1;next} f&&/^\)$/{exit} f&&/"/{n++} END{print n+0}')" \
-  "$(jq '[.hooks[][].hooks[]] | length' "$LSETTINGS" 2>/dev/null)"
-expect_eq "EVERY registered hook carries a timeout — the no-matcher branch included" "0" \
-  "$(jq '[.hooks[][].hooks[] | select(has("timeout") | not)] | length' "$LSETTINGS" 2>/dev/null)"
+# SKILL-SCOPED CHANNEL: already exhaustively pinned by L.1 — each of the eleven literal
+# rows carries `|10` (2653-2679 above) and the total-row-count assertion (2682-2683) catches
+# a stripped `timeout:` line the same way a dedicated pairing arm would: that row's
+# extractor only emits once it reaches a `timeout:` line, so a stripped bound drops the
+# whole row out of SKILL_HOOKS_ROWS, failing BOTH the per-command literal and the total
+# count. No separate arm needed here for that channel. (The `skill_block_count` leftover
+# this section used to point at was retired at §L.7 below, epic-17 W4 AC-12 dedupe.)
+#
+# ALWAYS-ON CHANNEL — RE-DERIVED epic-17 wave-03 S4, closing the gap wave-02's A13/A17
+# flagged (`.bionic/docs/record/epic-17-w3/probe-hooks-timeout.md`, VERDICT: HONORED at
+# hook-object/entry level — the plugin-channel field is enforced identically to the
+# settings-channel field: silent kill at the declared ceiling, tool call proceeds, no error
+# surfaced). `hooks/hooks.json` now carries `"timeout": 10` on all six entries. Asserted
+# structurally over the parsed JSON, not over HOOKS_JSON_ROWS' flattened text — the same
+# anti-vacuity reasoning the retired skill-side arm used: a leaf missing its `timeout` key
+# must fail a presence count taken over ALL leaves, not just the ones that happen to render
+# one.
+L4_HJ_TOTAL=$(jq '[.hooks | to_entries[] | .value[] | .hooks[]] | length' "$HOOKS_JSON_SRC")
+L4_HJ_TIMED=$(jq '[.hooks | to_entries[] | .value[] | .hooks[] | select(has("timeout"))] | length' "$HOOKS_JSON_SRC")
+expect_eq "the always-on manifest: EVERY hook entry carries a timeout key — none unbounded" \
+  "$L4_HJ_TOTAL" "$L4_HJ_TIMED"
+expect_eq "…and it still declares all six of them (the pairing is not vacuous)" "6" "$L4_HJ_TOTAL"
+expect_eq "…each bounded by the ceiling the Step-6 review demanded: 10" "0" \
+  "$(jq '[.hooks | to_entries[] | .value[] | .hooks[] | select(.timeout != 10)] | length' "$HOOKS_JSON_SRC")"
+
+# --- L.4b CROSS-CHANNEL RENDERING AGREEMENT (S4, logged call) ---
+#
+# Both channels now render a timeout for every registration they carry. The dispatch brief's
+# scope note invited this specific check: if the two channels both state 10, pin their
+# agreement rather than leaving it coincidental — a future edit to one channel's ceiling
+# without the other should go red, not silently fork the value. Computed off the
+# already-extracted row sets (L.1's SKILL_HOOKS_ROWS, L.2/L.3's HOOKS_JSON_ROWS) rather than
+# re-reading either source: each channel's value set collapses to a single value if every
+# row in it agrees with its neighbors, so "one value, and it's 10" on each side plus "the two
+# single values match" is the whole agreement claim in three checks.
+L4B_SKILL_VALUES=$(printf '%s\n' "$SKILL_HOOKS_ROWS" | awk -F'|' '{print $4}' | sort -u)
+L4B_HJ_VALUES=$(printf '%s\n' "$HOOKS_JSON_ROWS" | awk -F'|' '{print $4}' | sort -u)
+expect_eq "the skill-scoped channel renders exactly one timeout value across all its rows" \
+  "10" "$L4B_SKILL_VALUES"
+expect_eq "the always-on channel renders exactly one timeout value across all its rows" \
+  "10" "$L4B_HJ_VALUES"
+expect_eq "…and the two channels AGREE on that ceiling" "$L4B_SKILL_VALUES" "$L4B_HJ_VALUES"
+# The ceiling the installer used to write into settings.json was driven end to end in
+# tests/plugin-hooks.test.sh, which retired with the installer at W5 (4/6).
 
 # --- L.6 THE AGENT-CONTEXT CHANNEL: one wall, two channels, one partition ---
 # (session-20260815-landing-supervision T6; design D1, plan AC-7/AC-8.)
@@ -2795,36 +2889,41 @@ expect_eq "EVERY registered hook carries a timeout — the no-matcher branch inc
 # roster on disk.
 #
 # THE TOPOLOGY IS THE THING THIS SECTION OWNS, and it has three ways to be silently
-# wrong, one per assertion below: the settings entry could point straight at a wall
+# wrong, one per assertion below: the always-on entry could point straight at a wall
 # (that wall then fires in every session on the machine — L.2 above), the guard could
 # ALSO be registered on the skill channel (both channels live on one event, so a
 # main-thread refusal prints twice and a dispatch journals twice), or the two channels
 # could drift onto different events (a wall covering the main thread on one event and
 # agent contexts on another, which reads as coverage and is not).
-ACG_PATH="$REPO_ROOT/hooks/agent-context-guard.sh"
+#
+# The four guarded entries are pinned as WHOLE ROWS, which asserts two things at once:
+# that the guard fronts the wall, and that the pair is ONE command string carrying both
+# paths — the shape a shell executes and the shape that hands the guard its argument. In
+# the plugin manifest that shape is the stored form, so it is read, not driven.
+ACG_PATH="$BIONIC_HOOKS_DIR/agent-context-guard.sh"
 expect_eq "the partition guard exists as a hook script" "yes" \
   "$([ -f "$ACG_PATH" ] && echo yes || echo no)"
-expect_contains "MANAGED_HOOKS registers the DISPATCH wall for agent contexts, behind the guard" \
-  '"PreToolUse|Agent|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/dispatch-preflight.sh"' \
-  "$MANAGED_HOOKS_SRC"
+expect_contains "the always-on manifest registers the DISPATCH wall for agent contexts, behind the guard" \
+  'PreToolUse|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|' \
+  "$HOOKS_JSON_ROWS"
 expect_contains "…the ARTIFACT wall on Write, behind the guard" \
-  '"PreToolUse|Write|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/canonical-sdlc-governing-skill.sh"' \
-  "$MANAGED_HOOKS_SRC"
+  'PreToolUse|Write|${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|' \
+  "$HOOKS_JSON_ROWS"
 expect_contains "…and on Edit, behind the guard" \
-  '"PreToolUse|Edit|~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/canonical-sdlc-governing-skill.sh"' \
-  "$MANAGED_HOOKS_SRC"
-expect_contains "…and the LANDING verdict on SubagentStop, behind the guard" \
-  '"SubagentStop||~/.claude/hooks/agent-context-guard.sh ~/.claude/hooks/landing-gate.sh"' \
-  "$MANAGED_HOOKS_SRC"
+  'PreToolUse|Edit|${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|' \
+  "$HOOKS_JSON_ROWS"
+expect_contains "…and the LANDING verdict on SubagentStop, behind the guard, with no matcher" \
+  'SubagentStop||${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh|' \
+  "$HOOKS_JSON_ROWS"
 expect_absent_ug "…and the guard itself is NOT on the skill channel (no event has two live channels)" \
   "agent-context-guard" "$SKILL_HOOKS_ROWS"
 
-# The two channels cover the SAME three events: for each guarded settings entry there is
+# The two channels cover the SAME three events: for each guarded always-on entry there is
 # a frontmatter row registering the same wall on the same event/matcher, straight (that
 # is the main-thread half, asserted by value in L.1 and re-read here as a pair).
-for _pair in "PreToolUse|Agent|~/.claude/hooks/dispatch-preflight.sh|10" \
-             "PreToolUse|Write|~/.claude/hooks/canonical-sdlc-governing-skill.sh|10" \
-             "PreToolUse|Edit|~/.claude/hooks/canonical-sdlc-governing-skill.sh|10"; do
+for _pair in "PreToolUse|Agent|\${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|10" \
+             "PreToolUse|Write|\${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10" \
+             "PreToolUse|Edit|\${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10"; do
   expect_contains "the skill channel still covers the main thread for ${_pair%%|*}|$(echo "$_pair" | cut -d'|' -f2)" \
     "$_pair" "$SKILL_HOOKS_ROWS"
 done
@@ -2833,21 +2932,11 @@ done
 # events exist on both sides of the depth line — a Write happens on the main thread and
 # inside an agent — so each needs a channel for each. SubagentStop only ever fires in an
 # agent context: there is no main-thread half to cover, and a frontmatter row for it would
-# be a registration that can never be delivered (asserted absent in L.1). The settings entry
-# is therefore the whole of that event's coverage, which is why the guarded form above is
-# pinned by value.
+# be a registration that can never be delivered (asserted absent in L.1). The always-on
+# entry is therefore the whole of that event's coverage, which is why the guarded form
+# above is pinned by value.
 expect_eq "the SubagentStop entry has no skill-channel twin, and needs none" "0" \
   "$(printf '%s\n' "$SKILL_HOOKS_ROWS" | /usr/bin/grep -c '^SubagentStop|')"
-
-# Driven, not grepped: what bootstrap WRITES for a guarded entry is one command string
-# carrying both paths, with its matcher and its timeout — the shape the harness executes
-# through a shell, and the shape that hands the guard its argument.
-L6_CMDS=$(jq -r '.hooks.PreToolUse[]? | select(.matcher=="Agent") | .hooks[].command' "$LSETTINGS" 2>/dev/null)
-expect_contains "wire_managed_hooks writes the guarded dispatch entry as ONE command with the wall as its argument" \
-  "agent-context-guard.sh ~/.claude/hooks/dispatch-preflight.sh" "$L6_CMDS"
-expect_eq "…and the guarded entries are bounded by the same timeout: 10" "0" \
-  "$(jq '[.hooks.PreToolUse[]? | select(.matcher=="Agent" or .matcher=="Write" or .matcher=="Edit")
-         | .hooks[] | select(.timeout != 10)] | length' "$LSETTINGS" 2>/dev/null)"
 
 # The wall behind the guard is the one that skips its JOURNAL in an agent context —
 # the reader and the writer of BIONIC_HOOK_CHANNEL are one pair across two files, and a
@@ -2857,47 +2946,45 @@ expect_contains "the guard sets the channel marker the dispatch wall reads" \
 expect_contains "…and the dispatch wall skips its roster append on exactly that value" \
   '"${BIONIC_HOOK_CHANNEL:-}" = "agent-context"' "$(cat "$PARTY_DP")"
 
-# --- L.7 the frontmatter PARSER itself: three copies in TEST CODE, no agreement (t6-review.md
-# F-5, low severity but real). §L.1's own row-extractor (above), installer-behavior.test.sh's
-# `_skill_frontmatter_has`, and scripts.test.sh's inline check all walk the `hooks:` block the
-# same way before diverging into their own caller's shape (row-collector vs point predicate) —
-# drift here makes a TEST go vacuous rather than production wrong, and silently: a parser that
-# stops matching just answers "not found", indistinguishable from a parser correctly reporting
-# a registration that is genuinely absent. What the three share BYTE FOR BYTE is the state
-# machine that walks the block, so that is what is pinned — as a SPAN, on the same precedent
-# §O uses for code shared by legitimately different callers — extracted from each file's own
-# source on disk rather than retyped by hand.
-frontmatter_parser_span() {  # <file> -> the 6-line `hooks:` state-machine prologue, ws-normalized
-  awk '
-    p == 0 && index($0, "/^hooks:$/ { active=1; next }") > 0 { p = 1 }
-    p { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; c++; if (c == 6) exit }
-  ' "$1"
-}
-L7_CG=$(frontmatter_parser_span "$REPO_ROOT/tests/cross-gate-agreement.test.sh")
-L7_IB=$(frontmatter_parser_span "$REPO_ROOT/tests/installer-behavior.test.sh")
-L7_SC=$(frontmatter_parser_span "$REPO_ROOT/tests/scripts.test.sh")
-expect_eq "the span extractor found something at all (this section is not vacuous)" "yes" \
-  "$([ -n "$L7_CG" ] && echo yes || echo no)"
-expect_eq "installer-behavior.test.sh's frontmatter parser opens the SAME state machine, span for span" \
-  "$L7_CG" "$L7_IB"
-expect_eq "scripts.test.sh's frontmatter parser opens the SAME state machine, span for span" \
-  "$L7_CG" "$L7_SC"
-
-# THE DISCRIMINATING HALF: a copy of scripts.test.sh with one clause in the shared span
-# dropped (the `!active { next }` early exit), driven through the SAME extractor — proving
-# the pin catches a real divergence rather than comparing three empty strings.
-L7_MUT="$SANDBOX/fx/l7-drifted-scripts.test.sh"
-mkdir -p "$SANDBOX/fx"
-awk '{ if ($0 ~ /!active \{ next \}/) next; print }' \
-  "$REPO_ROOT/tests/scripts.test.sh" > "$L7_MUT"
-if cmp -s "$REPO_ROOT/tests/scripts.test.sh" "$L7_MUT"; then
-  no "the dropped-clause mutation applies to scripts.test.sh" \
-     "the mutation target matched nothing — the parser moved and this proof is vacuous"
-else
-  ok "the dropped-clause mutation applies to scripts.test.sh"
-fi
-expect_eq "…and the drifted copy no longer agrees with the other two (§L.7 discriminates)" \
-  "no" "$([ "$L7_CG" = "$(frontmatter_parser_span "$L7_MUT")" ] && echo yes || echo no)"
+# --- L.7 the frontmatter PARSER, deduplicated (epic-17 W4, AC-12) ---
+#
+# Formerly three pinned copies plus a known-unpinned fourth (t6-review.md F-5, W2 review
+# DO-NOW 7, W3 close disposition #9): this file's own L.1 row-extractor, a dead
+# `skill_block_count` left over from the retired §L.4 pairing arm (defined, never called),
+# installer-behavior.test.sh's `_skill_frontmatter_has`, and scripts.test.sh's two inline
+# checks all hand-copied the same `hooks:` block entry/exit state machine before diverging
+# into their own caller's shape.
+#
+# AC-12 collapses all four into ONE shared implementation — tests/lib/frontmatter-parser.sh's
+# `skill_hooks_rows`/`skill_hooks_has`, sourced by this file, installer-behavior.test.sh and
+# scripts.test.sh (design D5, wave-04-content-moves.spec.md's ownership table: "dedupe removes
+# the plurality"). There is no second copy left to drift out of step with a first, so the
+# byte-identity span pin this section used to carry has nothing left to compare — extending it
+# instead (the W2-preferred fallback: parameterise the span extractor by occurrence and add a
+# fourth comparison arm) would have kept four hand-copies alive under one more layer of
+# machinery, exactly the fragility R9 forbids extending. What is asserted instead is the
+# dedupe holding at exactly the four sites AC-12 named — not the unrelated §L.5
+# SKILL_EVENT_KEYS extractor above, which shares the same block-entry prologue but was never
+# one of the tracked four and stays out of this wave's scope (flagged, not folded in blind).
+# One of AC-12's four sites — installer-behavior.test.sh — was DELETED at
+# epic-17 W5 (4/6) together with claude-bootstrap.sh, the installer it was the
+# behavioural test for. A dedupe claim about a file that no longer exists is
+# not a weaker claim, it is an unfalsifiable one, so that arm is dropped rather
+# than kept passing vacuously. The dedupe itself is unaffected: the remaining
+# sites still share the one implementation, and its ABSENCE from the deleted
+# file is now guaranteed by the file's absence.
+for _f in "$REPO_ROOT/tests/cross-gate-agreement.test.sh" \
+          "$REPO_ROOT/tests/scripts.test.sh"; do
+  expect_true "$(basename "$_f") sources the shared frontmatter-parser helper" \
+    /usr/bin/grep -q 'lib/frontmatter-parser\.sh' "$_f"
+done
+expect_false "installer-behavior.test.sh is gone (retired with claude-bootstrap.sh, W5 4/6)" \
+  test -e "$REPO_ROOT/tests/installer-behavior.test.sh"
+expect_eq "scripts.test.sh no longer hand-copies the hooks: block state machine (either site)" \
+  "0" "$(/usr/bin/grep -c '/\^hooks:\$/ { active=1; next }' \
+      "$REPO_ROOT/tests/scripts.test.sh")"
+expect_eq "…and this file's own dead \`skill_block_count\` copy (the known-unpinned fourth) is gone" \
+  "0" "$(/usr/bin/grep -c '^skill_block_count() {' "$REPO_ROOT/tests/cross-gate-agreement.test.sh")"
 
 # ============================================================
 echo ""
@@ -2923,9 +3010,9 @@ echo "=== M — THE ACK, and the stop order: ONE owner, three consumers (epic-16
 # the window is the same number, and that all three answer the same about one ledger the
 # real writer wrote — including when the single owner is mutated to lie (§M.5).
 
-SG_M="$REPO_ROOT/hooks/stop-guard.sh"
-LG_M="$REPO_ROOT/hooks/landing-gate.sh"
-SO_M="$REPO_ROOT/hooks/stop-orders.sh"
+SG_M="$BIONIC_HOOKS_DIR/stop-guard.sh"
+LG_M="$BIONIC_HOOKS_DIR/landing-gate.sh"
+SO_M="$BIONIC_HOOKS_DIR/stop-orders.sh"
 
 # --- M.1 ONE OWNER: no consumer reads the ledger, in any of the three ways it could ---
 #
@@ -2972,7 +3059,7 @@ printf 'roster-state/v1|status=confirmed|session=%s|name=finished|agent_id=afini
 # The landing sweep answers for each row ONCE, ever, and journals a marker into the roster
 # to keep that promise. Each of the three drives below is a separate question about the same
 # fixture, so the marker is cleared first — the property under test is what the consumers
-# read off ONE ledger, not the sweep's idempotency (which hooks/landing-gate.test.sh owns).
+# read off ONE ledger, not the sweep's idempotency (which tests/landing-gate.test.sh owns).
 MROSTER="$MREPO/.bionic/tmp/roster-$SID_A.state"
 #
 # THE FIXTURE ROW IS A TEAMMATE ROW — it carries a `teammate_id=`, as every row the
@@ -3137,13 +3224,13 @@ echo "=== N — the wave-02 facts: one root, one vocabulary, one launch referenc
 # a session is armed by stating a roster under the project root, and a guard that rooted a
 # worktree at its own tree would answer "unarmed" for every agent context inside a worktree
 # of an armed session — a wall that goes quiet exactly where it was added to bind.
-DP_N="$REPO_ROOT/hooks/dispatch-preflight.sh"
-PB_N="$REPO_ROOT/hooks/preflight-probe.sh"
-GS_N="$REPO_ROOT/hooks/canonical-sdlc-governing-skill.sh"
-EG_N="$REPO_ROOT/hooks/canonical-sdlc-evidence-gate.sh"
-SP_N="$REPO_ROOT/hooks/session-poker.sh"
-SO_N="$REPO_ROOT/hooks/stop-orders.sh"
-ACG_N="$REPO_ROOT/hooks/agent-context-guard.sh"
+DP_N="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
+PB_N="$BIONIC_HOOKS_DIR/preflight-probe.sh"
+GS_N="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
+EG_N="$BIONIC_HOOKS_DIR/canonical-sdlc-evidence-gate.sh"
+SP_N="$BIONIC_HOOKS_DIR/session-poker.sh"
+SO_N="$BIONIC_HOOKS_DIR/stop-orders.sh"
+ACG_N="$BIONIC_HOOKS_DIR/agent-context-guard.sh"
 
 expect_eq "the root resolver extracts at all (this section is not vacuous)" "yes" \
   "$([ -n "$(fn_body "$GS_N" resolve_project_root)" ] && echo yes || echo no)"
@@ -3252,6 +3339,9 @@ expect_eq "a resolver that stops mapping worktrees no longer answers the main re
 # and the drive lands on the refused path or the accepted one depending on whose machine runs
 # the suite. Only the accepted path writes anything, which is the path under test here.
 write_plan "$NREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+# Hand-built fixture, so it arms explicitly — under the MAIN repository, which is also the
+# only place the arming wall reads from a worktree cwd (the property N.1/N.2 measure).
+arm_patrol "$NREPO" "$SID_A"
 NENV=(env HOME="$SANDBOX/home" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR"
       ANTHROPIC_API_KEY="pinned-placeholder-not-a-credential")
 
@@ -3297,7 +3387,7 @@ N_SRC_VALUES=$(grep -oE '^[[:space:]]*C_SOURCE="[a-z]*"' "$DP_N" \
   | sed -E 's/.*"([a-z]*)"/\1/' | grep -v '^$' | sort -u | tr '\n' ' ' | sed 's/ $//')
 expect_eq "the writer's vocabulary is one word" "declared" "$N_SRC_VALUES"
 expect_eq "…and the sweeper is the only script that reads the field" "1" \
-  "$(grep -rlF 'line_field "$row" source' "$REPO_ROOT/hooks" | grep -c .)"
+  "$(grep -rlF 'line_field "$row" source' "$BIONIC_HOOKS_DIR" | grep -c .)"
 expect_eq "…reading it exactly once" "1" "$(grep -cF 'line_field "$row" source' "$SWEEPER")"
 
 # Driven, not just grepped: three briefs, three routes to a path, and what the writer does with
@@ -3409,7 +3499,7 @@ n_row_keys() {  # <file> -> the keys the roster ROW template emits, in order
 N_KEYS=$(n_row_keys "$DP_N")
 expect_contains "the writer's row template carries launched_at at all" "launched_at" "$N_KEYS"
 expect_contains "…and the recorder's immutability helper scans for that exact spelling" \
-  "launched_at" "$(fn_body "$REPO_ROOT/hooks/execution-recorder.sh" prior_launch_for_agent)"
+  "launched_at" "$(fn_body "$BIONIC_HOOKS_DIR/execution-recorder.sh" prior_launch_for_agent)"
 expect_contains "…and the verdict dates its staleness conjunct against it" \
   'line_field "$row" launched_at' "$(cat "$SWEEPER")"
 # Proven loud by mutation: rename the key at the writer and the first assertion above is the
@@ -3527,8 +3617,8 @@ expect_eq "…and AMBIGUOUS is the state the landing gate passes, so R6 still ho
 N_MUT_ER="$SANDBOX/fx/unpinned-recorder.sh"
 awk '{ if (index($0, "PRIOR_LAUNCH=$(prior_launch_for_agent") > 0)
          sub(/prior_launch_for_agent/, "true prior_launch_for_agent")
-       print }' "$REPO_ROOT/hooks/execution-recorder.sh" > "$N_MUT_ER"
-if cmp -s "$REPO_ROOT/hooks/execution-recorder.sh" "$N_MUT_ER"; then
+       print }' "$BIONIC_HOOKS_DIR/execution-recorder.sh" > "$N_MUT_ER"
+if cmp -s "$BIONIC_HOOKS_DIR/execution-recorder.sh" "$N_MUT_ER"; then
   no "the launch-pin mutation applies to execution-recorder.sh" \
      "the mutation target matched nothing — the code moved and this proof is vacuous"
 else
@@ -3563,7 +3653,7 @@ echo "=== O — session-poker's copied primitives, CODE-identical (6-axis D-1) =
 # the EXECUTABLE TEXT, so that is what is compared — epic-16 w2 Step-6 remediation R3, and
 # the two header comments this closes (session-poker.sh:84-88, :109-111) now say exactly
 # this: code-identical, not byte-identical (R-3).
-SPO="$REPO_ROOT/hooks/session-poker.sh"
+SPO="$BIONIC_HOOKS_DIR/session-poker.sh"
 
 fn_code() {  # <file> <function name> -> fn_body with pure-comment lines stripped too
   fn_body "$1" "$2" | grep -v '^#'
@@ -3608,8 +3698,8 @@ echo "=== P — the three roster folds agree that the LATER row wins (ap review 
 # never touched. A mutant copy must sit in a directory that also carries session-sweeper.sh,
 # since both scripts resolve it as a sibling:
 #   W2_PARTY_ORD=/tmp/mut/stop-orders.sh bash tests/cross-gate-agreement.test.sh
-PORD="${W2_PARTY_ORD:-$REPO_ROOT/hooks/stop-orders.sh}"
-PPOKE="${W2_PARTY_POKE:-$REPO_ROOT/hooks/session-poker.sh}"
+PORD="${W2_PARTY_ORD:-$BIONIC_HOOKS_DIR/stop-orders.sh}"
+PPOKE="${W2_PARTY_POKE:-$BIONIC_HOOKS_DIR/session-poker.sh}"
 PREPO=$(new_repo "fold-agreement")
 mkdir -p "$PREPO/.bionic/tmp" "$PREPO/.bionic/docs/record"
 PROSTER="$PREPO/.bionic/tmp/roster-$SID_A.state"
@@ -3755,6 +3845,136 @@ for _q in "$PARTY_DP" "$PARTY_ER" "$PARTY_LG" "$PARTY_SG"; do
   expect_eq "$(basename "$_q")'s has_sdlc_state() is the evidence gate's, body for body" \
     "$(fn_body "$PARTY_EG" has_sdlc_state)" "$(fn_body "$_q" has_sdlc_state)"
 done
+
+
+# ============================================================
+echo ""
+echo "=== R — where a contracted path resolves: three copies, one rule (epic-17 W6 S15) ==="
+# ============================================================
+#
+# THE DISAGREEMENT THIS ENDS, measured on this epic's own dispatches. A brief writes
+# `Expected artifact: record/epic-17-w6/x.md` because that is the spelling the Step-5
+# contract and canonical-sdlc-evidence-gate.sh publish for an artifact under the docs root.
+# The gate resolved it there. hooks/session-sweeper.sh resolved it against the REPO root
+# and reported the row missing; hooks/stop-check.sh resolved it against the observer's cwd
+# and printed `progress_state=absent` for a file that was present. Three readers of one
+# sentence, two of them wrong — and the cost was not just a wrong reading: one slice wrote
+# a duplicate copy at the repo root to satisfy the gate, so the wrong gate taught the work
+# to be wrong too.
+#
+# WHY A BODY-FOR-BODY WALL AND NOT A THIRD ROUND TRIP. There is no shared library under
+# hooks/ — every hook is a standalone script the CLI invokes by path — so the honest fix is
+# the smallest duplication plus a wall that keeps the copies one text. That is §N.1's and
+# §Q's method, and this is the same shape: `canonical-sdlc-evidence-gate.sh` is the
+# designated ORIGIN (the copy that documents the rule at its definition site), one
+# non-vacuity check proves the extractor pulls a real body from it, then each carrier is
+# compared against it. A per-hook suite cannot see this drift: each of the three is green
+# while all three disagree.
+#
+# TWO FAMILIES, both duplicated for the same reason:
+#   resolve_docs_root()   <docs-root:> in .bionic/config.yaml, else <project>/.bionic/docs
+#   the resolver itself   absolute stands · record/-led is docs-root-relative · else project
+# The resolver is named `resolve_walk_path` in the gate (its caller asks about a walk
+# artifact) and `abs_path` in the two hooks (theirs ask about a roster path). Same body,
+# different name — the `clean()`/`mline_value()` precedent in §N.1 above.
+
+expect_eq "the resolve_docs_root() extractor returns a body at all (this section is not vacuous)" "yes" \
+  "$([ -n "$(fn_body "$PARTY_EG" resolve_docs_root)" ] && echo yes || echo no)"
+for _r in "$SWEEPER" "$OBSERVE"; do
+  expect_eq "$(basename "$_r")'s resolve_docs_root() is the evidence gate's, body for body" \
+    "$(fn_body "$PARTY_EG" resolve_docs_root)" "$(fn_body "$_r" resolve_docs_root)"
+done
+
+expect_eq "the resolver extractor returns a body at all (this section is not vacuous)" "yes" \
+  "$([ -n "$(fn_body "$PARTY_EG" resolve_walk_path)" ] && echo yes || echo no)"
+for _r in "$SWEEPER" "$OBSERVE"; do
+  expect_eq "$(basename "$_r")'s abs_path() is the evidence gate's resolve_walk_path(), body for body" \
+    "$(fn_body "$PARTY_EG" resolve_walk_path)" "$(fn_body "$_r" abs_path)"
+done
+
+# THE BODY IS NOT ENOUGH ON ITS OWN: it reads two globals, and a carrier that defines
+# neither would be byte-identical and still resolve everything to `/record/...`. So each
+# carrier is asked whether it binds them, unconditionally — these hooks run under `set -u`
+# and a conditionally-bound global is the recorded recurrence in this repo.
+for _r in "$PARTY_EG" "$SWEEPER" "$OBSERVE"; do
+  expect_eq "$(basename "$_r") binds DOCS_ROOT for the resolver to read" "yes" \
+    "$(grep -qE '^DOCS_ROOT=' "$_r" && echo yes || echo no)"
+  expect_eq "$(basename "$_r") binds PROJECT_DIR for the resolver to read" "yes" \
+    "$(grep -qE '^PROJECT_DIR=' "$_r" && echo yes || echo no)"
+done
+
+# MUTATION, the discriminator: flip ONE copy's rule back to the repo-root-only form it had
+# and the wall must go red. Without this the section proves only that three files exist.
+R_MUT_DIR="$SANDBOX/resolver-mutant"; mkdir -p "$R_MUT_DIR"
+sed 's|record/\*) printf .%s/%s\\n. "$DOCS_ROOT" "$1" ;;||' "$SWEEPER" > "$R_MUT_DIR/session-sweeper.sh"
+if cmp -s "$SWEEPER" "$R_MUT_DIR/session-sweeper.sh"; then
+  no "the record/-arm mutation applies to session-sweeper.sh" \
+     "the mutation target matched nothing — this proof is vacuous"
+else
+  ok "the record/-arm mutation applies to session-sweeper.sh"
+fi
+expect_eq "…and with the record/ arm deleted from one copy, the wall goes red" "differ" \
+  "$([ "$(fn_body "$PARTY_EG" resolve_walk_path)" = "$(fn_body "$R_MUT_DIR/session-sweeper.sh" abs_path)" ] \
+     && echo same || echo differ)"
+
+
+# ============================================================
+echo ""
+echo "=== Section P — the Patrol stamp: the poker WRITES exactly the path the gate READS ==="
+# ============================================================
+#
+# epic-17 wave-05 slice 4/4 (spec AC-6). A producer/consumer pair with the path spelled
+# once on each side — hooks/session-poker.sh builds it out of PATROL_STAMP_PREFIX/SUFFIX
+# under the pinned project root, hooks/dispatch-preflight.sh builds it out of STATE_DIR and
+# the payload session id — and no single-component suite can see them disagree. A
+# disagreement is not loud: the gate refuses every dispatch of a run whose Patrol is firing
+# perfectly, and the named fix (`session-poker.sh arm`) writes to the other path and does
+# not clear it. That is an unrecoverable wall by inspection, which is exactly the class this
+# file exists for.
+#
+# Driven as a ROUND TRIP rather than as two greps, because the property is behavioural: the
+# gate is asked where it looked, the poker is asked to arm, and the gate is asked again.
+
+PARTY_PK="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
+P_SID="$SID_A"
+P_REPO=$(new_repo "patrol-stamp-pair")
+write_plan "$P_REPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+mkdir -p "$P_REPO/.bionic/tmp"
+# new_repo arms every fixture; this is the one section whose subject is an UNARMED session.
+rm -f "$P_REPO"/.bionic/tmp/patrol-*.state
+{
+  printf '# bionic environment attestation — machine-local, safe to delete\n'
+  printf 'version=1\nkind=preflight-attestation\nsession_id=%s\n' "$P_SID"
+  printf 'written_at=1785790000\nrepo=%s\n' "$P_REPO"
+} > "$P_REPO/.bionic/tmp/preflight-$P_SID.state"
+chmod 600 "$P_REPO/.bionic/tmp/preflight-$P_SID.state"
+
+P_OUT=$(mk_agent_payload "$P_SID" "$P_REPO" | bash "$PARTY_DP" 2>&1 >/dev/null); P_ST=$?
+expect_eq "the gate refuses a dispatch with no Patrol stamp" "2" "$P_ST"
+expect_contains "…and the refusal is the arming wall's" "patrol checkpoint" "$P_OUT"
+
+# The path the CONSUMER named, taken out of its own words rather than rebuilt here.
+P_READS=$(printf '%s\n' "$P_OUT" | grep -oE '/[^[:space:]]*/patrol-[^[:space:]]+\.state' | head -1)
+if [ -n "$P_READS" ]; then
+  ok "the refusal names the exact path it looked at"
+else
+  no "the refusal names the exact path it looked at" "no stamp path in: $P_OUT"
+fi
+
+# The path the PRODUCER wrote, discovered by running the named fix and looking.
+( cd "$P_REPO" && CLAUDE_CODE_SESSION_ID="$P_SID" bash "$PARTY_PK" arm ) >/dev/null 2>&1
+P_WRITES=$(ls "$P_REPO"/.bionic/tmp/patrol-*.state 2>/dev/null | head -1)
+if [ -n "$P_WRITES" ]; then
+  ok "the poker's arm verb wrote a stamp"
+else
+  no "the poker's arm verb wrote a stamp" "nothing matching .bionic/tmp/patrol-*.state"
+fi
+expect_eq "poker WRITES == gate READS (one stamp path, two spellings)" "$P_READS" "$P_WRITES"
+
+# The round trip closes: the fix the wall named actually opens the wall.
+P_OUT2=$(mk_agent_payload "$P_SID" "$P_REPO" | bash "$PARTY_DP" 2>&1 >/dev/null); P_ST2=$?
+expect_eq "…and the named fix opens it: the same dispatch now passes" "0" "$P_ST2"
+expect_absent "…with nothing further to say" "patrol checkpoint" "$P_OUT2"
 
 # ============================================================
 echo ""

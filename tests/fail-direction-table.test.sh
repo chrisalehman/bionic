@@ -24,16 +24,18 @@
 
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+. "$(dirname "$0")/lib/resolve-roots.sh"
+
+REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 # Overridable so the table can be driven against a MUTATED COPY without the
 # shipped file ever being modified — §9's mutation-and-restore proof, repeatable
 # by hand: W1R_PARTY_SG=/tmp/mutant.sh bash tests/fail-direction-table.test.sh
-START_GATE="${W1R_PARTY_DP:-$REPO_ROOT/hooks/dispatch-preflight.sh}"
-STOP_GATE="${W1R_PARTY_SG:-$REPO_ROOT/hooks/stop-guard.sh}"
+START_GATE="${W1R_PARTY_DP:-$BIONIC_HOOKS_DIR/dispatch-preflight.sh}"
+STOP_GATE="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop-guard.sh}"
 # The producer and the writer that stand behind the stop gate's positive pair.
-OBSERVER="$REPO_ROOT/hooks/stop-check.sh"
-RECORDER="${W1R_PARTY_ER:-$REPO_ROOT/hooks/execution-recorder.sh}"
-PROBE="${W1R_PARTY_PROBE:-$REPO_ROOT/hooks/preflight-probe.sh}"
+OBSERVER="$BIONIC_HOOKS_DIR/stop-check.sh"
+RECORDER="${W1R_PARTY_ER:-$BIONIC_HOOKS_DIR/execution-recorder.sh}"
+PROBE="${W1R_PARTY_PROBE:-$BIONIC_HOOKS_DIR/preflight-probe.sh}"
 DESIGN="$REPO_ROOT/design/orchestrator-subagent-coordination.md"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/w1r-faildir.XXXXXX")" && pwd -P)"
@@ -43,7 +45,7 @@ cleanup() {
   for p in $BG_PIDS; do kill -9 "$p" 2>/dev/null; done
   # the probe-refuses fixture below leaves .bionic/tmp chmod 500 (unwritable) —
   # restore write perms first or rm -rf cannot unlink inside it (same technique
-  # hooks/preflight-probe.test.sh's cleanup() uses for the same reason).
+  # tests/preflight-probe.test.sh's cleanup() uses for the same reason).
   chmod -R u+rwX "$SANDBOX" 2>/dev/null
   rm -rf "$SANDBOX"
 }
@@ -56,7 +58,7 @@ mkdir -p "$CLAUDE_CONFIG_DIR" "$SANDBOX/plain" "$SANDBOX/stub" "$SANDBOX/nocred/
 # would satisfy the producer's credential probe and the row-5 case below could
 # never fail its blocking probe. Substituting the COMMAND (an environment
 # substitution via PATH, not a seam inside the script) is the same technique
-# hooks/preflight-probe.test.sh uses.
+# tests/preflight-probe.test.sh uses.
 printf '#!/bin/bash\nexit 1\n' > "$SANDBOX/stub/security"
 chmod +x "$SANDBOX/stub/security"
 
@@ -65,7 +67,7 @@ chmod +x "$SANDBOX/stub/security"
 # succeed DETERMINISTICALLY — not depend on this machine's real login keychain,
 # which is exactly the trap the `security` stub above exists to avoid for the
 # producer's own suite. The sandboxed-probe-environment technique
-# (hooks/preflight-probe.test.sh's mk_sandbox) is a credentials-file source: a
+# (tests/preflight-probe.test.sh's mk_sandbox) is a credentials-file source: a
 # non-empty `.credentials.json` under the shared CLAUDE_CONFIG_DIR satisfies
 # credential source 2 before the probe ever reaches `security`, so every world
 # below auto-probes successfully unless a fixture deliberately breaks a
@@ -77,7 +79,7 @@ PASS=0; FAIL=0; TOTAL=0
 ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
 no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
 expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-expect_contains() { if printf '%s' "$3" | grep -qF -- "$2"; then ok "$1"; else no "$1" "missing: $2"; fi; }
+expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
 
 SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
@@ -92,7 +94,7 @@ SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
 write_plan() {  # <path> <current-line>
   mkdir -p "$(dirname "$1")"
   {
-    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 13\n'
+    printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
     printf 'intent: build\nrigor: audited\nscale: wave\n---\n\n# Fixture plan\n\n'
     printf '## SDLC State\n\nintegration-branch: main\n%s\n\n- Step 4: evidence\n' "$2"
   } > "$1"
@@ -121,7 +123,19 @@ make_world() {
   printf '{}\n' > "$cfg/projects/$slug/$SID_A.jsonl"
   printf '{}\n' > "$cfg/projects/$slug/$SID_B.jsonl"
   case "$wave" in
-    yes)       write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: 4" ;;
+    yes)       write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+               # A LIVE WAVE HAS A LIVE PATROL (epic-17 W5 4/4). The arming wall refuses a
+               # dispatch whose session carries no fresh Patrol stamp, and every start-gate
+               # row below rides an active world — so an unarmed fixture would rewrite this
+               # whole table to one answer. The unarmed direction gets its OWN row
+               # (start|patrol-unarmed), driven against a world built without this.
+               mkdir -p "$repo/.bionic/tmp"
+               for _psid in "$SID_A" "$SID_B"; do
+                 printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
+                   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_psid" \
+                   > "$repo/.bionic/tmp/patrol-$_psid.state"
+                 chmod 600 "$repo/.bionic/tmp/patrol-$_psid.state"
+               done ;;
     nocurrent) write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: pending" ;;
     no)        mkdir -p "$repo/.bionic/docs" ;;
   esac
@@ -158,7 +172,7 @@ payload() {  # <tool_name> <sid|-> <transcript|-> <cwd> <task_id-or-command|->
     # brief names none of them. The `start|attested` row below is THE POSITIVE
     # PAIR — an ordinary, well-formed dispatch — and its §7 direction is
     # "pass in silence"; a fieldless brief is a malformed dispatch, whose warning
-    # is a different claim, driven in hooks/dispatch-preflight.test.sh S10c.
+    # is a different claim, driven in tests/dispatch-preflight.test.sh S10c.
     Agent)    input=$(jq -n --arg d "a dispatch" --arg p 'Expected artifact: .bionic/docs/record/w99.txt
 Expected duration: ~25 minutes.
 Progress artifact: .bionic/tmp/w99.progress' \
@@ -308,13 +322,26 @@ plant_agent "$L_SUB" "aworker-1111111111111111" "worker"
 mkdir -p "$L_REPO/.bionic/tmp"
 ln -s "$SANDBOX/elsewhere.state" "$L_REPO/.bionic/tmp/stop-check.state"
 
+# AN ATTESTED ACTIVE WORLD WHOSE PATROL WAS NEVER ARMED (epic-17 W5 4/4, spec AC-6). The
+# environment is sound and the brief is well-formed; what is missing is the clock that would
+# notice the dispatched agent dying. Its direction is REFUSE, LOUD — the second surviving
+# refusal on this path, and the only one that is not about the environment.
+IFS='|' read -r Q_REPO Q_TR Q_SUB <<< "$(make_world patrol-unarmed yes)"
+mkdir -p "$Q_REPO/.bionic/tmp"
+printf '# attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\n' "$SID_A" \
+  > "$Q_REPO/.bionic/tmp/preflight-$SID_A.state"
+rm -f "$Q_REPO"/.bionic/tmp/patrol-*.state
+Q_SLUG=$(printf '%s' "$Q_REPO" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$CLAUDE_CONFIG_DIR/projects/$Q_SLUG"
+printf '{}\n' > "$CLAUDE_CONFIG_DIR/projects/$Q_SLUG/$SID_A.jsonl"
+
 # An unattested world whose STATE DIRECTORY is unwritable — the environment probe's
 # own state-dir blocking check genuinely fails (w2-s45-wallfacts.md §5 judgment call 9:
 # never an absent credential, since the third credential source is the machine login
 # keychain and no sandbox can take that away). This is the row that carries the
 # surviving REFUSE direction under R5: unlike start|unattested/foreign-attestation
 # above, the auto-probe here has a real, deterministic reason to refuse. Same
-# chmod-500 technique hooks/preflight-probe.test.sh uses for its own state-dir case.
+# chmod-500 technique tests/preflight-probe.test.sh uses for its own state-dir case.
 IFS='|' read -r U_REPO U_TR U_SUB <<< "$(make_world probeblocked yes)"
 plant_agent "$U_SUB" "aworker-1111111111111111" "worker"
 mkdir -p "$U_REPO/.bionic/tmp"
@@ -337,6 +364,7 @@ drive() {  # <condition>
     start:foreign-attestation) p=$(payload Agent "$SID_B" "$T_TR" "$T_REPO" -) ;;
     start:attested)         p=$(payload Agent "$SID_A" "$T_TR" "$T_REPO" -) ;;
     start:probe-refuses)    p=$(payload Agent "$SID_A" "$U_TR" "$U_REPO" -) ;;
+    start:patrol-unarmed)   p=$(payload Agent "$SID_A" "$Q_TR" "$Q_REPO" -) ;;
     # --- stop gate ----------------------------------------------------------
     stop:irrelevant-tool)   p=$(payload Read "$SID_A" "$A_TR" "$A_REPO" -) ;;
     stop:empty-cwd)         p=$(payload TaskStop "$SID_A" "$A_TR" "" worker) ;;
@@ -394,7 +422,8 @@ start|no-session-key|0|silent|Payload missing its session key — start: OPEN
 start|unattested|0|silent-with-announce|Start gate — R5 attestation never blocks: the wall auto-runs the probe, the probe succeeds, and the dispatch proceeds with one announce line
 start|foreign-attestation|0|silent-with-announce|Start gate — R5 attestation never blocks: a foreign-only attestation does not belong to this session, so the wall auto-probes exactly as unattested does and proceeds
 start|attested|0|silent|Start gate — the positive pair: pass in silence
-start|probe-refuses|2|loud|Start gate — the one surviving refusal under R5: the auto-probe itself genuinely fails (unwritable state dir), so the dispatch is REFUSED quoting the reason the probe gives
+start|probe-refuses|2|loud|Start gate — one of two surviving refusals under R5: the auto-probe itself genuinely fails (unwritable state dir), so the dispatch is REFUSED quoting the reason the probe gives
+start|patrol-unarmed|2|loud|Start gate — the arming wall: environment sound, brief well-formed, but no Patrol has stamped this session, so nothing would notice the dispatched agent dying — REFUSED with both re-arm commands named
 stop|irrelevant-tool|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
 stop|empty-cwd|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
 stop|non-git-cwd|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
@@ -486,15 +515,19 @@ expect_contains "the closed side names the missing key" "session key" "$S_STOP_E
 # The cost asymmetry §7 derives the whole table from, asserted where a reader
 # meets it: the stop refusal must always name the way forward.
 drive stop:no-observation
+# Since epic-17 W1 S3 both gates resolve the script they name beside themselves from "$0"
+# rather than spelling an installed-path literal — still absolute, so §7's requirement that
+# a refusal name a way forward runnable from any cwd is unchanged, and it survives a plugin
+# payload where ~/.claude/hooks/ holds nothing.
 expect_contains "every stop refusal names the observation command" \
-  "~/.claude/hooks/stop-check.sh" "$DRV_ERR"
+  "$BIONIC_HOOKS_DIR/stop-check.sh" "$DRV_ERR"
 # R5: start:unattested no longer refuses (it auto-probes and passes silently-with-
 # announce, per the table above) — start:probe-refuses is now the row that carries
 # a genuine start-gate refusal, so it is what exercises this "every refusal names
 # the fix" claim.
 drive start:probe-refuses
 expect_contains "every start refusal names the environment check" \
-  "~/.claude/hooks/preflight-probe.sh" "$DRV_ERR"
+  "$BIONIC_HOOKS_DIR/preflight-probe.sh" "$DRV_ERR"
 
 # ============================================================
 echo ""
