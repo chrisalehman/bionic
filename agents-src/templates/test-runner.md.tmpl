@@ -1,7 +1,7 @@
 ---
 name: test-runner
 description: Mechanical test-suite execution and full result reporting. Never fixes, never edits, never re-runs to green.
-model: sonnet
+model: haiku
 effort: low
 disallowedTools: Write, Edit, NotebookEdit
 ---
