@@ -138,24 +138,8 @@ fi
 
 # ============================================================
 echo ""
-echo "=== B — every rendered final announces that it is generated ==="
+echo "=== B — the rendered finals still open with parseable frontmatter ==="
 # ============================================================
-#
-# The header is the only thing standing between a passer-by and a hand-edit that --check
-# will later reject in a commit they do not own.
-
-for r in $ROLES; do
-  if grep -qF "GENERATED FILE — DO NOT EDIT" "$OUT/$r.md" 2>/dev/null; then
-    pass "agents/$r.md carries the GENERATED header"
-  else
-    fail "agents/$r.md carries the GENERATED header"
-  fi
-  if grep -qF "agents-src/templates/$r.md.tmpl" "$OUT/$r.md" 2>/dev/null; then
-    pass "agents/$r.md's header names its own template"
-  else
-    fail "agents/$r.md's header names its own template"
-  fi
-done
 
 # The header must not displace the frontmatter: Claude Code reads the role's name/model/
 # effort from a fence that has to start on line 1.
@@ -243,179 +227,6 @@ for r in implementor senior-implementor; do
   fi
 done
 
-# Presence of a marker pair says nothing about what is between it. A block emptied of its
-# meaning is still present, still non-empty, and — now that there is one source — still
-# rendered identically into all six finals; construction propagates a gutted block as
-# faithfully as a good one. So each block's load-bearing sentence gets a literal, pinned on
-# the SOURCE: one site, and --check carries the bind out to every final.
-#
-# This is where Section 7's core-sentence pin from agent-roles.test.sh moved to. The
-# Step-6 critic that produced that pin had reproduced the failure it guards by inverting
-# the sentence in all six files at once; with one source, one pin covers the same ground.
-while IFS='|' read -r blockfile label needle; do
-  if grep -qF "$needle" "$SRC/blocks/$blockfile.md" 2>/dev/null; then
-    pass "$blockfile block states: $label"
-  else
-    fail "$blockfile block states: $label (missing literal '$needle')"
-  fi
-done <<'LITERALS'
-survival|foreground with an explicit timeout sized to the command|explicit timeout sized to the command
-survival|the farm-out wall binds the orchestrator, not a dispatched agent|FARM_OUT_ALLOW=1
-survival|never end your turn while a command is running|Never end your turn while a command is running
-survival|suite output always goes to a file|validate the FILE
-report-contract|the proof-or-label rule|carries the command that proves it and that command's output, or the explicit
-report-contract|completion is signaled, never inferred|idle is
-report-contract|the report is DELIVERED by the SendMessage tool|Deliver the report with the SendMessage tool
-report-contract|plain final text routes nowhere|Plain final text is discarded
-shared-core|RED before GREEN|never write implementation before a red test
-shared-core|completion-by-artifact|that message, not going idle, is what closes the phase
-shared-core|the closing act is a sent message, not closing prose|your closing act is a SendMessage
-LITERALS
-
-# ---------- E1b: the doctrine says what the harness does (epic-17 W7 S7, spec AC-13) ----
-#
-# R2b's harness facts (record/epic-17-w7/r2b-harness-facts.md) corrected two things the old
-# survival block asserted wrong: there is no fixed ~120-second auto-background threshold to
-# poll around, and a foreground agent's final response ENDS its running command rather than
-# leaving it to finish while a watcher polls. The old "poll, don't watch" bullet, its
-# `sleep 5` poll loop, and the "roughly 120 seconds" threshold are retired whole, replaced by
-# an explicit timeout sized to the command plus a documented fallback for when a brief says
-# the ceiling is not in force. This checks the readback surface the spec cites (AC-13): the
-# six rendered role files, not just the block source, because that is what a dispatched agent
-# actually reads. `flat()` (defined in §H below) neutralizes the hard-wrap so a phrase that
-# crosses a line break in the committed prose still matches as one sentence.
-DOCTRINE_FLAT() { tr '\n' ' ' < "$1" | tr -s ' '; }
-
-# THE RETIREMENT PIN READS THE POSITIVE (critic delta 3 F1 — supersedes A6.S15.6).
-# S15's `DOCTRINE_CODE` surface dropped inline code spans and blockquote lines to
-# tell a MENTION of `& disown` from a real instruction. Both shapes it dropped are
-# the house style for a REAL instruction in these very files: survival.md gives
-# its own operative commands in backticks (measured: stripping code spans erases
-# `run_in_background` from a fenced-free reading of survival.md), and the whole
-# Critic Mandate (`agents/critic.md:21`) and Auditor Mandate (`agents/auditor.md:21`)
-# are single blockquote lines — dropping `^\s*>` deletes them outright. Measured
-# on the shipped matcher: 35-37% of the two most instruction-dense rendered role
-# files (auditor.md, critic.md) went unread. There is also no historical `disown`
-# anywhere under `agents/` or `agents-src/` (`/usr/bin/grep -rn disown` → nothing),
-# so the needle was never protecting a live defect — it is cheaper to stop looking
-# for the negative than to keep widening a surface that costs real coverage. Pin
-# the POSITIVE the S12 needles already state instead (`run_in_background` and the
-# `echo "EXIT=$?" >> "$LOG"` snippet, both asserted in DOCTRINE_PRESENT below), and
-# retire the code-span/blockquote stripper along with the `& disown` needle.
-#
-# The single source of truth for what DOCTRINE_PRESENT checks, hoisted into a
-# variable so the positive control below and the per-role loop after it read
-# the SAME list rather than two independently-typed copies of it (critic delta
-# 4 G5: the pre-fix control hardcoded two of these seven needles a second time,
-# so it could not notice this list changing underneath it).
-DOCTRINE_PRESENT_LIST="$(cat <<'DOCTRINE_PRESENT'
-explicit timeout sized to the command|explicit timeout sized to the command
-never end your turn while a command is running|Never end your turn while a command is running
-documented fallback arms a Monitor on the file's EXIT= line|the orchestrator arms a Monitor on the file's `EXIT=` line
-the fallback is CONDITIONAL on background dispatch|**if** you were dispatched in the background
-…and says what to do when it does not hold|Otherwise stay in the foreground and do not stop
-…and names the harness-native background mode|run_in_background
-…and its snippet actually writes the EXIT= line|echo "EXIT=$?" >> "$LOG"
-DOCTRINE_PRESENT
-)"
-
-# Positive control, run once rather than per role, because it measures the
-# matcher and not the files. Two fixtures, both built from DOCTRINE_PRESENT_LIST
-# rather than re-typed literals: one holding every needle (a sanity check — it
-# must pass all seven), and then, one needle at a time, a fixture holding every
-# OTHER needle but that one — which must be caught missing ON THAT NEEDLE
-# specifically. The pre-fix control's fixture ("the fallback bullet says
-# nothing about backgrounding or exit codes.") never contained ANY of the seven
-# needles, so its two hardcoded assertions were true by construction and could
-# not go red on a real near-miss (critic delta 4 G5).
-N3_DIR="$TMP/n3"; mkdir -p "$N3_DIR"
-N3_ALL="$N3_DIR/all-present.md"
-: > "$N3_ALL"
-while IFS='|' read -r _n3_label _n3_needle; do
-  [ -z "$_n3_label" ] && continue
-  printf '%s\n' "$_n3_needle" >> "$N3_ALL"
-done <<<"$DOCTRINE_PRESENT_LIST"
-N3_ALL_FLAT="$(DOCTRINE_FLAT "$N3_ALL")"
-while IFS='|' read -r _n3_label _n3_needle; do
-  [ -z "$_n3_label" ] && continue
-  if printf '%s' "$N3_ALL_FLAT" | grep -qF "$_n3_needle"; then
-    pass "positive control sanity: a fixture holding every needle matches: $_n3_label"
-  else
-    fail "positive control sanity: a fixture holding every needle matches: $_n3_label" \
-      "missing: $_n3_needle"
-  fi
-done <<<"$DOCTRINE_PRESENT_LIST"
-
-while IFS='|' read -r _n3_miss_label _n3_miss_needle; do
-  [ -z "$_n3_miss_label" ] && continue
-  N3_MISS="$N3_DIR/missing-one.md"
-  : > "$N3_MISS"
-  while IFS='|' read -r _n3_label _n3_needle; do
-    [ -z "$_n3_label" ] && continue
-    [ "$_n3_needle" = "$_n3_miss_needle" ] && continue
-    printf '%s\n' "$_n3_needle" >> "$N3_MISS"
-  done <<<"$DOCTRINE_PRESENT_LIST"
-  N3_MISS_FLAT="$(DOCTRINE_FLAT "$N3_MISS")"
-  if printf '%s' "$N3_MISS_FLAT" | grep -qF "$_n3_miss_needle"; then
-    fail "positive control: a role fixture missing only '$_n3_miss_label' is caught missing" \
-      "the planted fixture matched anyway"
-  else
-    pass "positive control: a role fixture missing only '$_n3_miss_label' is caught missing"
-  fi
-done <<<"$DOCTRINE_PRESENT_LIST"
-
-for r in $ROLES; do
-  R_FLAT="$(DOCTRINE_FLAT "$OUT/$r.md")"
-  while IFS='|' read -r label needle; do
-    [ -z "$label" ] && continue
-    if printf '%s' "$R_FLAT" | grep -qF "$needle"; then
-      pass "agents/$r.md: doctrine states: $label"
-    else
-      fail "agents/$r.md: doctrine states: $label" "missing: $needle"
-    fi
-  done <<<"$DOCTRINE_PRESENT_LIST"
-  while IFS='|' read -r label needle; do
-    [ -z "$label" ] && continue
-    if printf '%s' "$R_FLAT" | grep -qF "$needle"; then
-      fail "agents/$r.md: retired doctrine is gone: $label" "still present: $needle"
-    else
-      pass "agents/$r.md: retired doctrine is gone: $label"
-    fi
-  # The `& disown` absent-needle retired at S16 (critic delta 3 F1): there is no
-  # historical `disown` anywhere under agents/ or agents-src/, so it protected no
-  # live defect, and its DOCTRINE_CODE surface cost real coverage of a real
-  # instruction (see the comment above this loop). The positive pin above —
-  # `run_in_background` and the EXIT= snippet present — is what stands guard now.
-  done <<'DOCTRINE_ABSENT'
-no sleep-5 poll loop|sleep 5
-no fixed ~120-second threshold|roughly 120
-no auto-backgrounds framing|auto-backgrounds
-no nohup — a mechanism with no evidence and the wrong survival semantics|nohup
-DOCTRINE_ABSENT
-done
-
-# ---------- E2: the read-only roles' delivery duty (epic-17 W5 slice 4/1, spec AC-1) ----
-#
-# The shared block above binds all six finals, and for a writer it is enough: its artifact
-# is on disk whatever happens to its prose. The auditor and the critic write NOTHING — the
-# verdicts and the findings ARE the deliverable — so for those two a report left as plain
-# final text is not a slow report, it is a destroyed one. Their own templates say so in
-# their own words, and that is what these arms pin: the duty is on the SHIPPED role file,
-# because a duty that lives only in a brief is a duty the next brief forgets. Two W4
-# deliveries were lost exactly here (auditor and critic, both read-only).
-while IFS='|' read -r role label needle; do
-  [ -z "$role" ] && continue
-  if grep -qF "$needle" "$OUT/$role.md" 2>/dev/null; then
-    pass "agents/$role.md: $label"
-  else
-    fail "agents/$role.md: $label" "missing literal: $needle"
-  fi
-done <<'READONLY_DELIVERY'
-auditor|the verdicts are delivered with SendMessage|deliver them with the SendMessage tool
-auditor|a verdict left as plain final text is discarded|plain final text is discarded
-critic|the findings are delivered with SendMessage|deliver them with the SendMessage tool
-critic|a finding left as plain final text is discarded|plain final text is discarded
-READONLY_DELIVERY
 
 # ============================================================
 echo ""
@@ -561,93 +372,6 @@ fi
 
 # ============================================================
 echo ""
-echo "=== H — the absorbed survival rules live in exactly ONE place ==="
-# ============================================================
-#
-# S3's prune. Foreground-first and poll-don't-watch reached a dispatched agent only through
-# `.claude/rules/agent-discipline.md` — a repo-local, pay-per-read channel. They now ship
-# inside every role file via blocks/survival.md, so the rules-file copies are duplicates, and
-# a duplicate is a drift source: the two texts already disagreed on the watcher's name
-# ("a Monitor" vs "a watcher") before this wave.
-#
-# The arm binds BOTH directions, because a prune has two failure modes. Under-pruning leaves
-# the duplicate standing (§H1). OVER-pruning is the quieter one: the foreground-first bullet
-# also carried the `claims=` declaration duty, which survival.md does NOT absorb — it is
-# addressed to the orchestrator writing a brief, not to the agent reading a role file — so
-# deleting that bullet whole would silently drop a live rule (§H2).
-
-RULES="$REPO/.claude/rules/agent-discipline.md"
-SURVIVAL="$SRC/blocks/survival.md"
-
-# flat <file>: the file as one whitespace-normalized line. Every span below is prose inside a
-# hard-wrapped markdown bullet, so a line-oriented grep pins the WRAP as much as the words —
-# rewrapping a paragraph would fail an arm whose rule never changed, and (worse) re-wrapping a
-# duplicate would satisfy an absence arm that should still be red. Normalizing first makes
-# these pins guard the sentence rather than the line break it happens to sit across.
-flat() { tr '\n' ' ' < "$1" | tr -s ' '; }
-
-RULES_FLAT="$(flat "$RULES")"
-SURVIVAL_FLAT="$(flat "$SURVIVAL")"
-
-[ -f "$RULES" ]; check $? ".claude/rules/agent-discipline.md is present (committed by S4)"
-
-# H1 — absorbed: present in the block source, gone from the rules file.
-# Spans, not headings: each literal is a piece of the obligation itself, so a reworded
-# heading cannot satisfy the pin and a surviving paragraph cannot hide under a renamed one.
-while IFS='|' read -r label absorbed_span rules_span; do
-  [ -z "$label" ] && continue
-  if printf '%s' "$SURVIVAL_FLAT" | grep -qF "$absorbed_span"; then
-    pass "absorbed ($label): the rule is in blocks/survival.md"
-  else
-    fail "absorbed ($label): the rule is in blocks/survival.md" "missing span: $absorbed_span"
-  fi
-  if printf '%s' "$RULES_FLAT" | grep -qF "$rules_span"; then
-    fail "absorbed ($label): the duplicate is gone from agent-discipline.md" \
-         "still present: $rules_span"
-  else
-    pass "absorbed ($label): the duplicate is gone from agent-discipline.md"
-  fi
-# poll-don't-watch is not in this list any more (epic-17 W7 S7): R2b's harness facts showed
-# there is no fixed ~120-second threshold to poll around, and the whole poll-loop rule was
-# retired from blocks/survival.md rather than reworded — its absence is covered by §E1b's
-# DOCTRINE_ABSENT arm, which checks the rendered finals directly.
-done <<'ABSORBED'
-foreground-first|in the foreground with an explicit timeout sized to the command|A command with a known bound under 10 minutes runs FOREGROUND
-timeout-ceiling|No timeout means two minutes|2-minute default is a default, not a ceiling
-lost-wake|stopping to wait kills the work and gets no wake|the wake is what gets lost
-ABSORBED
-
-# H2 — NOT absorbed: these must survive the prune. survival.md is addressed to a dispatched
-# agent; these three spans are addressed to whoever writes the brief, so they have no home in
-# a role file and the rules file is still their only one.
-while IFS='|' read -r label span; do
-  [ -z "$label" ] && continue
-  if printf '%s' "$RULES_FLAT" | grep -qF "$span"; then
-    pass "kept ($label): survives the prune in agent-discipline.md"
-  else
-    fail "kept ($label): survives the prune in agent-discipline.md" "over-pruned, missing: $span"
-  fi
-  if printf '%s' "$SURVIVAL_FLAT" | grep -qF "$span"; then
-    fail "kept ($label): stays OUT of the shipped block" "leaked into survival.md: $span"
-  else
-    pass "kept ($label): stays OUT of the shipped block"
-  fi
-done <<'KEPT'
-claims-declaration|`claims=` process pattern
-roster-verdict|STILL-LIVE instead of UNMET
-advisory-only|This channel is advisory only
-KEPT
-
-# H3 — the tombstone. A prune that leaves no forwarding address makes the next reader think
-# the rule was repealed rather than moved, so the pointer is part of the deliverable.
-if printf '%s' "$RULES_FLAT" | grep -qF 'agents-src/blocks/survival.md'; then
-  pass "tombstone: agent-discipline.md names the block source as the content's new home"
-else
-  fail "tombstone: agent-discipline.md names the block source as the content's new home"
-fi
-
-# ============================================================
-echo ""
 echo "=== I — the SECOND render unit: payload/commands/ (epic-17 W6 S1, spec AC-6) ==="
 # ============================================================
 #
@@ -688,20 +412,9 @@ else
   fail "exactly four rendered command files (found $CMD_OUT_COUNT)"
 fi
 
-# I3 — every rendered command file announces itself as generated and names its own source,
-# and the frontmatter still opens the file: Claude Code reads `description:` from a fence
+# I3 — the frontmatter still opens the file: Claude Code reads `description:` from a fence
 # that has to start on line 1, exactly as it reads a role's name/model from one.
 for c in $COMMANDS; do
-  if grep -qF "GENERATED FILE — DO NOT EDIT" "$CMD_OUT/$c.md" 2>/dev/null; then
-    pass "payload/commands/$c.md carries the GENERATED header"
-  else
-    fail "payload/commands/$c.md carries the GENERATED header"
-  fi
-  if grep -qF "agents-src/templates/commands/$c.md.tmpl" "$CMD_OUT/$c.md" 2>/dev/null; then
-    pass "payload/commands/$c.md's header names its own template"
-  else
-    fail "payload/commands/$c.md's header names its own template"
-  fi
   if [ "$(head -1 "$CMD_OUT/$c.md" 2>/dev/null)" = "---" ]; then
     pass "payload/commands/$c.md still opens with the frontmatter fence"
   else

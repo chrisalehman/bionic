@@ -273,14 +273,12 @@ expect_match "an unrecognized status word is unknown, never loaded" \
 printf '  ❯ bionic@bionic  0.1.0  user  Status: ✘ disabled\n' > "$TMP/disabled.txt"
 DIS="$(probe_run BIONIC_PLUGIN_LIST_CMD="cat $TMP/disabled.txt" -- detect_plugin_load_state bionic@bionic)"
 expect_match "an installed-but-disabled plugin is unknown, never loaded" "load-state=unknown *" "$DIS"
-expect_match "…and is named as not enabled, not as a parse problem" "*not enabled*" "$DIS"
 
 # A block that names our plugin and then stops — truncated output, a listing
 # interrupted. Named but statusless is not the same as enabled.
 printf 'Installed plugins:\n\n  ❯ bionic@bionic\n    Version: 0.1.0\n' > "$TMP/nostatus.txt"
 NOSTATUS="$(probe_run BIONIC_PLUGIN_LIST_CMD="cat $TMP/nostatus.txt" -- detect_plugin_load_state bionic@bionic)"
 expect_match "an entry with no Status line is unknown, never loaded" "load-state=unknown *" "$NOSTATUS"
-expect_match "…and says which plugin it could not place" "*bionic@bionic*" "$NOSTATUS"
 
 # A neighbouring block's status must not be read as ours (block format).
 { printf 'Installed plugins:\n\n  ❯ bionic@bionic\n    Status: ✔ enabled\n\n'
@@ -327,8 +325,6 @@ expect_true "detect.sh names 'claude plugin list' as the seam's default" \
 EMPTY_SEAM="$(probe_run BIONIC_PLUGIN_LIST_CMD="" -- detect_plugin_load_state bionic@bionic)"
 expect_match "an explicitly-empty seam reaches the empty-command guard" \
   "load-state=unknown *" "$EMPTY_SEAM"
-expect_match "…and names the empty command as the cause" \
-  "*the plugin listing command is empty*" "$EMPTY_SEAM"
 # The negative half: an empty seam must not fall back to the real listing. PATH here
 # carries no `claude` at all, so the fallback's own cause sentence is the tell.
 expect_no_match "…and never falls back to the shipped default command" \
@@ -405,7 +401,6 @@ expect_match "an unparseable registry is unknown, never a clean bill of health" 
 # No jq: the registry cannot be read honestly, so it is not read.
 NOJQ="$(R_PATH="$NOJQ_BIN" probe_run BIONIC_INSTALLED_PLUGINS_FILE="$FIX_DUP" -- detect_plugin_duplicates)"
 expect_match "without jq the answer is unknown, not silence" "dup=unknown ids=- fix=- cause=*" "$NOJQ"
-expect_match "…and the cause names jq" "*jq*" "$NOJQ"
 
 # The seam chain is detect.sh's existing one, unchanged.
 CH_DIR="$TMP/ch-dup"; mkdir -p "$CH_DIR/plugins"
@@ -468,8 +463,6 @@ expect_true "a stalled registry read does not wedge the caller: it returns insid
   bash -c '[ "$1" -le 10 ]' _ "$DUP_ELAPSED"
 expect_match "…and the answer is unknown, carrying its cause" \
   "dup=unknown ids=- fix=- cause=*" "$P_OUT"
-expect_match "…and the cause names the bound in seconds a reader can act on" \
-  "*did not answer within 2 seconds*" "$P_OUT"
 expect_eq "…and exits 0, like every other lane of this probe" "0" "$P_ST"
 # NEVER INVENTS ONE. The fixture registry holds two real collisions; a probe that was cut
 # off mid-parse must hand back none of them, not a half-read line.

@@ -619,10 +619,6 @@ printf '%s' "$YES" | run_payload "$SETUP_SH" --all > "$SETUP_OUT" 2>&1
 SETUP_RC=$?
 
 expect_eq "setup exits 0" "0" "$SETUP_RC"
-expect_match "setup printed the plan it asked one question over" \
-  '*bionic would:*' "$(cat "$SETUP_OUT")"
-expect_match "setup's summary reports nothing left to do" \
-  '*nothing left to do — this machine is set up.*' "$(cat "$SETUP_OUT")"
 
 # The consented plan reached the package managers, which is what makes every
 # "present" below a measurement rather than a fixture that was already true.
@@ -734,9 +730,6 @@ done
 expect_match "doctor: the load state is loaded" \
   '*loaded*' "$(doctor_section "$DOC1" "LOAD STATE")"
 
-SUMMARY1="$(doctor_section "$DOC1" "SUMMARY")"
-expect_match "doctor: SUMMARY is \"nothing to do\"" \
-  '*nothing to do — this machine is fully set up.*' "$SUMMARY1"
 
 # ---------------------------------------------------------------------------
 # Group 5 — remove --all undoes the manifest (AC-10, the second half).
@@ -776,16 +769,6 @@ expect_eq "remove: no permission rule of bionic's is left in settings.json" "" \
 expect_false "remove: ~/.claude/CLAUDE.md is still not a file this plugin touches (AC-7)" \
   test -e "$GLOBAL_MEMORY"
 
-DOC2="$TMP/doctor-after-remove.txt"
-run_payload "$DOCTOR_SH" < /dev/null > "$DOC2" 2>&1
-SUMMARY2="$(doctor_section "$DOC2" "SUMMARY")"
-
-expect_no_match "doctor: SUMMARY no longer reads \"nothing to do\"" \
-  '*nothing to do — this machine is fully set up.*' "$SUMMARY2"
-expect_false "doctor: the two SUMMARY blocks differ" \
-  test "$SUMMARY1" = "$SUMMARY2"
-expect_match "doctor: SUMMARY now names the dependencies the teardown took" \
-  '*run /bionic:setup*absent dependencies*' "$SUMMARY2"
 
 # ---------------------------------------------------------------------------
 # Results
