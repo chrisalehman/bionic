@@ -2361,10 +2361,16 @@ expect_eq "one owner: deps.sh holds the default permission mode bionic offers" "
 # So is the string body of a `say`/`echo` call — that's user-facing prose, not a
 # place the value gets written or compared, and "auto mode" reads fine in a
 # sentence without being the literal this lint exists to catch.
+# THE PROSE EXEMPTION NAMES THE ONE PHRASE, NOT THE WHOLE CHANNEL (Step-6 critic,
+# carried note 1). Exempting every `say`/`echo` line meant a real violation —
+# `say "BIONIC_DEFAULT_PERMISSION_MODE=auto"`, the value spelled out in a second
+# place — was invisible to the lint. What actually needs the exemption is the
+# user-facing phrase "auto mode", which is prose about the setting rather than a
+# second copy of its value.
 auto_literals() {  # <script>
   /usr/bin/grep -nE '(^|[^A-Za-z])auto([^A-Za-z-]|$)' "$1" \
     | /usr/bin/grep -vE '^[0-9]+:[[:space:]]*#' \
-    | /usr/bin/grep -vE '^[0-9]+:[[:space:]]*(say|echo)[[:space:]]+"' || true
+    | /usr/bin/grep -vE 'auto mode' || true
 }
 expect_eq "one owner: setup.sh carries the value nowhere — it reads the owner's" \
   "" "$(auto_literals "$SETUP_SH")"

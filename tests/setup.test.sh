@@ -525,8 +525,12 @@ done
 # 41110bd PROMOTED BOTH TO `extra`, closing out the when-needed class this
 # suite once had to check was empty at every step: these two rows are now
 # offered like every other extra, in step 4 (the roster below covers the rest).
+# STEP 4, NOT THE WHOLE TRANSCRIPT (Step-6 critic F3). 41110bd moved both rows
+# into `extra`, and `extra` is step 4 — so `$EXTRAS` is the claim the promotion
+# actually makes, and `$OUT` was a weaker one that any mention anywhere would
+# satisfy.
 for jit in impeccable excalidraw-renderer; do
-  expect_match "when-needed row is offered at setup: ${jit}" "*${jit}*" "$OUT"
+  expect_match "when-needed row is offered at setup: ${jit}" "*${jit}*" "$EXTRAS"
 done
 
 # Restated here rather than read from the dependency table on purpose: this suite

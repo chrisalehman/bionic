@@ -337,9 +337,18 @@ chmod +x "${BIN}/npm"
 
 # ─── pnpm: a plain recorder ──────────────────────────────────────────────────
 #
-# Nothing reads a pnpm store back: `_dep_check_pnpm_store` answers `unknown` by
-# construction, because a content-addressable cache has no installed-state. A
-# shim that faked one would be inventing a surface the payload does not have.
+# CORRECTED 2026-08-22 (Step-6 critic F1). What this note used to say — that
+# `_dep_check_pnpm_store` answers `unknown` by construction because a
+# content-addressable cache has no installed-state — is exactly the premise the
+# 2026-08-22 ruling reversed: the probe reads `pnpm store path` and then
+# index.db, and answers a real yes/no like every other row.
+#
+# The true statement is narrower, and it is about THIS FIXTURE rather than about
+# the product: the shim is a recorder, so `pnpm store path` prints nothing, the
+# probe stops at its "no store to read" guard, and the `motion` row renders `–`.
+# Group 4 expects `unknown` for that one row for this reason and no other. A
+# shim that faked a store would be building an index.db, not a fake surface —
+# worth doing when a wave wants `motion` measured; it is not this wave.
 { printf '#!/bin/bash\n'
   printf 'echo "pnpm $*" >> "$BIONIC_TEST_CALLS"\n'
   printf 'exit 0\n'
@@ -591,9 +600,13 @@ doctor_section() {  # <file> <name>
 dep_present() {  # <report-file> <name>
   doctor_section "$1" "THIRD PARTY" | awk -v n="$2" '
     NF >= 4 && $2 == n {
-      if ($1 == "✓")      print "yes";
-      else if ($1 == "✗") print "no";
-      else                 print "unknown";
+      # NOT `$1 == "✓"`. macOS /usr/bin/awk (20200816) compares these multibyte
+      # glyphs byte-blind: `$1 == "✓"` is true for ✗ and – as well, so the first
+      # branch always fired and every row read "yes" — 23 assertions vacuous
+      # (Step-6 critic F1). index(…)==1 discriminates all three.
+      if (index($1, "✓") == 1)      print "yes";
+      else if (index($1, "✗") == 1) print "no";
+      else                          print "unknown";
       exit
     }'
 }
@@ -724,18 +737,49 @@ expect_eq "doctor exits 0" "0" "$DOC1_RC"
 
 # Every basic and extra row, read from the table rather than restated here.
 #
-# `pnpm-store` NO LONGER GETS AN EXEMPTION HERE (2026-08-22 ruling, recorded at
-# `payload/scripts/lib/deps.sh` above `_dep_check_pnpm_store`): the "a
-# content-addressable cache has no presence surface" premise this loop used to
-# carry is exactly what that ruling reversed — `pnpm store`'s own index.db names
-# every cached `<name>@<version>`, so presence is a real yes/no like every other
-# row, and Group 2's consented install put motion in that index same as
-# everything else. Asserting `yes` uniformly is not a relaxation of the claim;
-# it is the claim catching up to the probe it was written to distrust.
+# PER-ROW TRUTH, NOT A BLANKET `yes` (Step-6 critic F1). This loop asserted
+# `yes` for all 23 rows and got it from a parser that could not tell ✓ from ✗
+# from – (see `dep_present` above): every one of those assertions was vacuous.
+# Three of the rows are genuinely NOT present on this fixture, and in all three
+# cases that is a property of how deep the SHIM goes, not of the product — each
+# one still proves setup ISSUED the install, which is what Group 2 is about:
+#
+#   impeccable → no.      `claude plugin install impeccable@bionic` ran (it is in
+#                         $BIONIC_TEST_CALLS), but the claude shim reports every
+#                         installed plugin at version 1.0.0 and this row
+#                         constrains `^4.1.0`, so doctor renders
+#                         `✗ … violates ^4.1.0`. The row pins the version GATE
+#                         on top of the install, and pins an absent `impeccable`
+#                         — the one state the old blanket loop could not see.
+#   motion → unknown.     `pnpm store add motion@latest` ran too. The pnpm shim
+#                         is a recorder (see its note above), `pnpm store path`
+#                         prints nothing, and `_dep_check_pnpm_store` stops at
+#                         its "no store to read" guard. `unknown` was the right
+#                         expectation all along; the wave briefly "corrected" it
+#                         to `yes` on the strength of the vacuous parser.
+#   humanizer → no.       `git clone … ~/.claude/skills/humanizer` ran; the
+#                         fixture's git is a recorder, so no SKILL.md lands and
+#                         `_dep_check_github_skill` answers no. This is the
+#                         `github-skill` shim arm the TODO near the top of the
+#                         shim block still names as unwritten.
+#
+# Every other row installs through a shim that really writes, so `yes` there is
+# a measurement.
+dep_expected_present() {  # <name> — the state THIS fixture can produce
+  case "$1" in
+    impeccable) echo no ;;
+    motion)     echo unknown ;;
+    humanizer)  echo no ;;
+    *)          echo yes ;;
+  esac
+}
+
 for cls in basic extra; do
   while IFS= read -r name; do
     [ -n "$name" ] || continue
-    expect_eq "doctor: ${cls} row ${name} reports present" "yes" "$(dep_present "$DOC1" "$name")"
+    WANT="$(dep_expected_present "$name")"
+    expect_eq "doctor: ${cls} row ${name} reports present=${WANT}" \
+      "$WANT" "$(dep_present "$DOC1" "$name")"
   done <<< "$(dep_query dep_names_class "$cls")"
 done
 
