@@ -2358,9 +2358,13 @@ expect_eq "one owner: deps.sh holds the default permission mode bionic offers" "
 # on its own — `automatic` and `auto-update` are not the value, and `${…:-auto}`
 # is. Comments are exempt: a comment is where the rule gets explained, and a lint
 # that could not tell a prohibition from a violation would forbid writing it down.
+# So is the string body of a `say`/`echo` call — that's user-facing prose, not a
+# place the value gets written or compared, and "auto mode" reads fine in a
+# sentence without being the literal this lint exists to catch.
 auto_literals() {  # <script>
   /usr/bin/grep -nE '(^|[^A-Za-z])auto([^A-Za-z-]|$)' "$1" \
-    | /usr/bin/grep -vE '^[0-9]+:[[:space:]]*#' || true
+    | /usr/bin/grep -vE '^[0-9]+:[[:space:]]*#' \
+    | /usr/bin/grep -vE '^[0-9]+:[[:space:]]*(say|echo)[[:space:]]+"' || true
 }
 expect_eq "one owner: setup.sh carries the value nowhere — it reads the owner's" \
   "" "$(auto_literals "$SETUP_SH")"
