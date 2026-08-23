@@ -90,6 +90,7 @@ ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
 no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
 
 expect_eq()    { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
+expect_ne()    { if [ "$2" != "$3" ]; then ok "$1"; else no "$1" "expected NOT '$2'"; fi; }
 expect_true()  { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
 expect_false() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then no "$label" "expected non-zero exit"; else ok "$label"; fi; }
 expect_match() {
@@ -747,6 +748,8 @@ done
 # states the deleted assertion named.
 expect_eq "doctor: the load state is loaded (no plugin-load row in BIONIC NATIVE)" "" \
   "$(doctor_section "$DOC1" "BIONIC NATIVE" | awk '$2 == "plugin"')"
+expect_ne "doctor: the BIONIC NATIVE table is present (positive pair for the load-state row)" "" \
+  "$(doctor_section "$DOC1" "BIONIC NATIVE")"
 
 
 # ---------------------------------------------------------------------------
