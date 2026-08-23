@@ -165,12 +165,22 @@ patrol_transcript() {  # <sid> -> path, or empty
 # megabytes and slurping it costs the memory of the whole file to answer a
 # question about a dozen lines of it.
 #
-# MAIN THREAD ONLY. A subagent's turns are written to `<sid>/subagents/*.jsonl`
-# on this machine, but `isSidechain` is the field that SAYS so, and filtering on
-# the fact rather than on the layout keeps this correct if the layout moves.
+# MAIN THREAD ONLY, BY THE POKER'S OWN TWO RULES. A subagent's turns are written
+# to `<sid>/subagents/*.jsonl` on this machine, but `isSidechain` is the field
+# that SAYS so, and filtering on the fact rather than on the layout keeps this
+# correct if the layout moves. The second rule — an entry carrying an explicit
+# agent-id key is somebody's agent turn, not this thread's — is
+# hooks/session-poker.sh's `count_main_thread_dispatches`, adopted here verbatim
+# so the two readers partition the transcript identically; it is matched over the
+# whole serialized entry rather than over top-level keys because that is where the
+# poker's line regex matches it, and on this machine's transcripts every such key
+# is NESTED (12 entries, 0 top-level). Two readers with different partitions are
+# two answers, which is the defect this shape exists to prevent
+# (tests/cross-gate-agreement.test.sh §Q).
 _patrol_scan_jq='
   select(type == "object")
   | select(.isSidechain != true)
+  | select((tostring | test("\"agent_?[Ii][dD]\"[ \t]*:[ \t]*\"[^\"]")) | not)
   | select((.message.content? | type) == "array")
   | .message.content[]
   | if (.type == "tool_use" and .name == "CronCreate") then
@@ -181,13 +191,15 @@ _patrol_scan_jq='
        ((.input.prompt // "") | gsub("[\n\r\t|]"; " ") | .[0:160])]
     elif (.type == "tool_use" and .name == "CronDelete") then
       ["D", ((.input.id // "") | tostring)]
-    elif (.type == "tool_use" and (.name == "Agent" or .name == "Task")) then
+    elif (.type == "tool_use" and .name == "Agent") then
       ["A", .id]
     elif (.type == "tool_result") then
-      ["R", (.tool_use_id // ""),
-       ((if (.content | type) == "string" then .content
-         elif (.content | type) == "array" then ([.content[]? | select(.type == "text") | .text] | join(" "))
-         else "" end) | gsub("[\n\r\t|]"; " ") | .[0:200])]
+      ((if (.content | type) == "string" then .content
+        elif (.content | type) == "array" then ([.content[]? | select(.type == "text") | .text] | join(" "))
+        else "" end) | gsub("[\n\r\t|]"; " ")) as $full
+      | ["R", (.tool_use_id // ""),
+         (if ($full | test("PreToolUse:Agent hook error:")) then "1" else "0" end),
+         ($full | .[0:200])]
     else empty end
   | @tsv
 '
@@ -206,15 +218,26 @@ _patrol_scan_jq='
 # reconstruction inside a jq/awk join that already has the `R` record in hand,
 # and a sourced library the installer misses would make either copy a silently
 # inert consumer (the same reasoning hooks/session-poker.sh's own header gives
-# for its `parse_seconds` duplicate). Recognized by the identical CLI marker,
-# `PreToolUse:Agent hook error:`, which the hook error path — and nothing
-# else — writes into a tool_result.
+# for its `parse_seconds` duplicate).
+#
+# THE MARKER IS NOT THE RULE — THE JOIN IS. `PreToolUse:Agent hook error:` is
+# what the CLI writes into a refused dispatch's tool_result, but it is ordinary
+# text everywhere else: the plan that specifies this behaviour, the reports that
+# review it and every brief that quotes it all carry the literal, and reading a
+# file with one in it puts it in a tool_result of that read. So a refusal is
+# credited only when the tool_result carrying it JOINS BY tool_use_id to an
+# `Agent` tool_use — the refused dispatch's own result — which is the rule
+# hooks/session-poker.sh now applies too, on the same fixture
+# (tests/cross-gate-agreement.test.sh §Q). The test is taken on the UNTRUNCATED
+# content: a real refusal carries the marker at offset 482 (the CLI prefixes the
+# hook's own stderr with the tool name and the hook's path), so the 200-character
+# cut the job join reads by belongs after the test, never before it.
 _patrol_join_awk='
   BEGIN { FS = "\t"; n = 0; agents = 0; refused = 0 }
   $1 == "C" { ord[++n] = $2; cron[$2] = $3; rec[$2] = $4; kind[$2] = $5; head[$2] = $6 }
   $1 == "D" { del[$2] = 1 }
-  $1 == "R" { res[$2] = $3; if (index($3, "PreToolUse:Agent hook error:") > 0) refused++ }
-  $1 == "A" { agents++ }
+  $1 == "R" { res[$2] = $4; if ($3 == "1" && ($2 in isagent)) refused++ }
+  $1 == "A" { agents++; isagent[$2] = 1 }
   END {
     for (i = 1; i <= n; i++) {
       tid = ord[i]

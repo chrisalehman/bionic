@@ -3904,6 +3904,173 @@ expect_eq "…and the named fix opens it: the same dispatch now passes" "0" "$P_
 
 # ============================================================
 echo ""
+echo "=== Section Q — refusal credit: one rule, two readers ==="
+# ============================================================
+#
+# Step-6 findings C1/C2/C3, .bionic/docs/record/task-dispatch-wall-channel-loss/
+# review-close.md. "How many dispatches did the wall REFUSE this session" has TWO owners —
+# hooks/session-poker.sh's count_refused_dispatches, answering for the live tick, and
+# payload/scripts/lib/patrol.sh's _patrol_scan, answering for doctor's reconstruction — and
+# on this machine's own transcript they answered 13 and 1 against a truth of 1. Neither
+# number was a rounding error. The poker greped the WHOLE transcript for the CLI's marker,
+# which the plan, the reports and every brief that quotes it carry too, so the detector was
+# inert in the repository that builds it; patrol cut each tool_result to 200 characters
+# BEFORE looking for a marker real refusals carry at offset 482.
+#
+# THE RULE, now single and shared: a refusal is credited only when a tool_result carrying
+# `PreToolUse:Agent hook error:` JOINS BY tool_use_id to an `Agent` tool_use in the same
+# transcript — the refused dispatch's own result. A literal quoted inside a file read, a
+# brief or a report joins to nothing; truncation moves to the display side, after the test.
+# The main-thread filter is the poker's, on both sides: `isSidechain:true` OR an explicit
+# agent-id key is not this session's own dispatch.
+#
+# ONE FIXTURE, BOTH READERS, ONE (dispatches, refused) PAIR. The two answers are compared
+# to EACH OTHER first — that is what goes red on the next divergence, whichever side moves
+# — and only then to the number the rule implies. Neither reader may source the other
+# (hooks/ ships as hooks, scripts/lib/ as payload), so the copies stay two and this section
+# is what holds them together.
+
+PARTY_PT="${W1R_PARTY_PT:-$REPO_ROOT/payload/scripts/lib/patrol.sh}"
+
+# The transcript shapes, captured off this machine 2026-08-23 with:
+#   jq -c 'select((.message.content?|type)=="array") | .message.content[]' <transcript>
+# Two of them are the false positives that were being counted as refusals: a `Read`/`Bash`
+# result whose text quotes the marker out of a file, and an Agent spawn whose SIBLING
+# `toolUseResult` field echoes the brief back (the CLI writes the brief there verbatim, so
+# a brief that quotes the marker — this task's own — planted one in the transcript).
+q_agent() {  # <tx> <tool-use-id>
+  jq -nc --arg id "$2" '{type:"assistant",isSidechain:false,message:{role:"assistant",
+    content:[{type:"tool_use",id:$id,name:"Agent",
+              input:{name:"q-agent",subagent_type:"bionic:implementor",prompt:"…"}}]}}' >> "$1"
+}
+q_agent_pair() {  # <tx> <id> <id> — a parallel fan-out: two dispatches in ONE entry
+  jq -nc --arg a "$2" --arg b "$3" '{type:"assistant",isSidechain:false,message:{role:"assistant",
+    content:[{type:"tool_use",id:$a,name:"Agent",input:{name:"q-alpha",prompt:"…"}},
+             {type:"tool_use",id:$b,name:"Agent",input:{name:"q-beta",prompt:"…"}}]}}' >> "$1"
+}
+q_agent_ctx() {  # <tx> <id> — an entry carrying an explicit agent-id key: not this thread's
+  jq -nc --arg id "$2" '{type:"assistant",isSidechain:false,agentId:"agent-inner-1",
+    message:{role:"assistant",content:[{type:"tool_use",id:$id,name:"Agent",
+      input:{name:"q-inner",prompt:"…"}}]}}' >> "$1"
+}
+q_agent_side() {  # <tx> <id> — a subagent's own dispatch
+  jq -nc --arg id "$2" '{type:"assistant",isSidechain:true,message:{role:"assistant",
+    content:[{type:"tool_use",id:$id,name:"Agent",input:{name:"q-side",prompt:"…"}}]}}' >> "$1"
+}
+q_read() {  # <tx> <id> — a NON-Agent tool_use, the thing a quoted marker belongs to
+  jq -nc --arg id "$2" '{type:"assistant",isSidechain:false,message:{role:"assistant",
+    content:[{type:"tool_use",id:$id,name:"Read",input:{file_path:"/p/wave.plan.md"}}]}}' >> "$1"
+}
+q_result() {  # <tx> <id> <text>
+  jq -nc --arg id "$2" --arg t "$3" '{type:"user",isSidechain:false,message:{role:"user",
+    content:[{type:"tool_result",tool_use_id:$id,content:$t}]}}' >> "$1"
+}
+q_spawn_echo() {  # <tx> <id> <brief-text> — a SUCCESSFUL spawn whose sibling field echoes the brief
+  jq -nc --arg id "$2" --arg b "$3" '{type:"user",isSidechain:false,
+    message:{role:"user",content:[{type:"tool_result",tool_use_id:$id,
+      content:[{type:"text",text:"Spawned successfully."}]}]},
+    toolUseResult:{status:"teammate_spawned",prompt:$b}}' >> "$1"
+}
+
+Q_MARK='PreToolUse:Agent hook error:'
+# Past patrol's 200-character display cut. Real refusals carry the marker at 482 and 628 —
+# the CLI prefixes the hook's own stderr with the tool name and the hook path.
+Q_PAD="$(printf 'x%.0s' $(seq 1 400))"
+Q_REFUSAL="$Q_PAD $Q_MARK [dispatch-preflight.sh]: BLOCKED: this dispatch brief names no deliverable."
+Q_QUOTE="the review says the marker is \`$Q_MARK\` and the poker greps for it"
+
+mkdir -p "$SANDBOX/fx/refusal-credit"
+Q_TX="$SANDBOX/fx/refusal-credit/all.jsonl"; : > "$Q_TX"
+q_agent_pair "$Q_TX" toolu_q1 toolu_q2      # two main-thread dispatches, one entry
+q_agent_ctx  "$Q_TX" toolu_q3               # C2: an agent-context entry — not a dispatch
+q_agent_side "$Q_TX" toolu_q5               # a subagent's own dispatch — not a dispatch
+q_result     "$Q_TX" toolu_q1 "$Q_REFUSAL"  # C1: the ONE real refusal, marker past 200
+q_result     "$Q_TX" toolu_q2 "Spawned successfully."
+q_read       "$Q_TX" toolu_q4
+q_result     "$Q_TX" toolu_q4 "$Q_QUOTE"    # C3: the marker quoted out of a plan
+q_agent      "$Q_TX" toolu_q6
+q_spawn_echo "$Q_TX" toolu_q6 "Read first: review-close.md. The marker is $Q_MARK — join it."
+
+# Each reader answers from ITS OWN file, in its own subshell: the poker's counters are
+# extracted and called for real (§I.1's precedent), patrol is sourced as doctor sources it.
+q_poker() {  # <fn-name> <transcript>
+  ( eval "$(awk -v n="$1" '$0 ~ "^" n "\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$PARTY_PK")"
+    "$1" "$2" ) 2>/dev/null
+}
+q_patrol() {  # <transcript> -> "<dispatches> <refused>"
+  ( . "$PARTY_PT" >/dev/null 2>&1
+    _patrol_scan "$1" ) 2>/dev/null \
+  | awk -F'\t' '$1=="AGENTS"{a=$2} $1=="REFUSED"{r=$2} END{printf "%d %d", a+0, r+0}'
+}
+
+Q_PK_D="$(q_poker count_main_thread_dispatches "$Q_TX")"
+Q_PK_R="$(q_poker count_refused_dispatches "$Q_TX")"
+Q_PT="$(q_patrol "$Q_TX")"; Q_PT_D="${Q_PT%% *}"; Q_PT_R="${Q_PT##* }"
+
+expect_eq "fixture: the poker's extracted counter runs at all (this section is not vacuous)" \
+  "yes" "$([ -n "$Q_PK_D" ] && [ "$Q_PK_D" != 0 ] && echo yes || echo no)"
+expect_eq "fixture: patrol's scan runs at all" \
+  "yes" "$([ -n "$Q_PT_D" ] && [ "$Q_PT_D" != 0 ] && echo yes || echo no)"
+expect_eq "DISPATCHES: the poker and patrol return one number, not two" "$Q_PK_D" "$Q_PT_D"
+expect_eq "REFUSED: the poker and patrol return one number, not two" "$Q_PK_R" "$Q_PT_R"
+expect_eq "…and that dispatch count is the main-thread Agent tool_uses (fan-out counted per use)" \
+  "3" "$Q_PK_D"
+expect_eq "…and exactly the one refusal whose result joins its own Agent tool_use is credited" \
+  "1" "$Q_PK_R"
+
+# --- Q.1 the three findings, one transcript each -----------------------------
+# Asked separately so a regression names the defect that came back rather than a total.
+
+Q_C1="$SANDBOX/fx/refusal-credit/c1.jsonl"; : > "$Q_C1"
+q_agent  "$Q_C1" toolu_c1
+q_result "$Q_C1" toolu_c1 "$Q_REFUSAL"
+expect_eq "C1 poker: a marker past the 200-character cut is still a refusal" "1" \
+  "$(q_poker count_refused_dispatches "$Q_C1")"
+expect_eq "C1 patrol: the same, from the untruncated content" "1" \
+  "$(q_patrol "$Q_C1" | cut -d' ' -f2)"
+
+Q_C3="$SANDBOX/fx/refusal-credit/c3.jsonl"; : > "$Q_C3"
+q_agent  "$Q_C3" toolu_d1
+q_result "$Q_C3" toolu_d1 "Spawned successfully."
+q_read   "$Q_C3" toolu_d2
+q_result "$Q_C3" toolu_d2 "$Q_QUOTE"
+expect_eq "C3 poker: the marker quoted out of a file read joins no Agent and is not credited" "0" \
+  "$(q_poker count_refused_dispatches "$Q_C3")"
+expect_eq "C3 patrol: the same" "0" "$(q_patrol "$Q_C3" | cut -d' ' -f2)"
+
+Q_C3B="$SANDBOX/fx/refusal-credit/c3b.jsonl"; : > "$Q_C3B"
+q_agent      "$Q_C3B" toolu_e1
+q_spawn_echo "$Q_C3B" toolu_e1 "the marker is $Q_MARK and this brief quotes it"
+expect_eq "C3 poker: a SPAWNED agent whose brief quotes the marker is not a refusal" "0" \
+  "$(q_poker count_refused_dispatches "$Q_C3B")"
+expect_eq "C3 patrol: the same" "0" "$(q_patrol "$Q_C3B" | cut -d' ' -f2)"
+
+Q_C2="$SANDBOX/fx/refusal-credit/c2.jsonl"; : > "$Q_C2"
+q_agent_ctx  "$Q_C2" toolu_f1
+q_agent_side "$Q_C2" toolu_f2
+expect_eq "C2 poker: an agent-context entry and a sidechain entry are not this thread's dispatches" \
+  "0" "$(q_poker count_main_thread_dispatches "$Q_C2")"
+expect_eq "C2 patrol: the same exclusion, both halves" "0" "$(q_patrol "$Q_C2" | cut -d' ' -f1)"
+
+# --- Q.2 the discriminator: blind ONE reader and the pair must split ---------
+# Without this the section proves only that two files agree on a fixture neither is
+# sensitive to. The mutation is the defect ITSELF — patrol's pre-test truncation, restored
+# to a copy — so the assertion is that C1's fixture separates the copies again.
+Q_MUT="$SANDBOX/fx/refusal-credit/patrol-truncating.sh"
+sed 's/(if ($full | test(/(if (($full | .[0:200]) | test(/' "$PARTY_PT" > "$Q_MUT"
+if cmp -s "$PARTY_PT" "$Q_MUT"; then
+  no "the pre-test truncation mutation applies to patrol.sh" \
+     "the mutation target matched nothing — this proof is vacuous"
+else
+  ok "the pre-test truncation mutation applies to patrol.sh"
+fi
+Q_MUT_R="$( ( . "$Q_MUT" >/dev/null 2>&1; _patrol_scan "$Q_C1" ) 2>/dev/null \
+            | awk -F'\t' '$1=="REFUSED"{print $2+0}' )"
+expect_eq "…and the truncating copy misses the late marker, so the pair splits (§Q discriminates)" \
+  "0" "$Q_MUT_R"
+
+# ============================================================
+echo ""
 echo "──────────────────────────────────────────────"
 echo "cross-gate-agreement: ${PASS} passed, ${FAIL} failed, ${TOTAL} total"
 [ "$FAIL" -eq 0 ]
