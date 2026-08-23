@@ -2236,6 +2236,22 @@ tx_agent_sidechain() {  # <transcript> <tool_use_id> <agent-name>
     '{type:"assistant",isSidechain:true,message:{role:"assistant",content:[
        {type:"tool_use",id:$id,name:"Agent",input:{name:$nm,subagent_type:"bionic:implementor",prompt:"…"}}]}}' >> "$1"
 }
+# A dispatch the WALL REFUSED — the CLI still writes the Agent tool_use (the
+# dispatch was attempted), but the wall's PreToolUse hook exits before
+# dispatch-preflight.sh's roster append, so this tool_use has a tool_result
+# carrying the CLI's own `PreToolUse:Agent hook error:` marker instead of a
+# normal completion. It must be credited to the walled side, not counted as a
+# gap — a refusal is the wall doing its job (session-poker.sh's
+# `count_refused_dispatches`, mirrored here).
+tx_agent_refused() {  # <transcript> <tool_use_id> <agent-name>
+  jq -nc --arg id "$2" --arg nm "$3" \
+    '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[
+       {type:"tool_use",id:$id,name:"Agent",input:{name:$nm,subagent_type:"bionic:implementor",prompt:"…"}}]}}' >> "$1"
+  jq -nc --arg id "$2" \
+    --arg txt "PreToolUse:Agent hook error: dispatch refused by dispatch-preflight.sh" \
+    '{type:"user",isSidechain:false,message:{role:"user",content:[
+       {type:"tool_result",tool_use_id:$id,content:$txt}]}}' >> "$1"
+}
 
 # THE PATROL PROMPT IS NOT MATCHED BY ITS WORDING. It is composed per session by
 # a model, so its prose is not a fact anything may key on. What it must CONTAIN
@@ -2459,6 +2475,52 @@ expect_match "three dispatches against one roster row: the wall is reported blin
 expect_contains "…and the cure named in the verdict is the skill re-invocation" \
   "/bionic:canonical-sdlc" "$(head -5 "$PAT_B_OUT")"
 
+# ── (h) a refused dispatch is not a blind wall ────────────────────────────────
+# One dispatch the wall REFUSED (still a tool_use, but its tool_result carries
+# the CLI's `PreToolUse:Agent hook error:` marker instead of a normal
+# completion) plus two real dispatches that both reach the roster. The wall
+# saw 3 tool_uses against 2 rostered rows, and the gap is fully explained by
+# the refusal — this must NOT read as blind.
+PAT_RF="$TMP/machine-patrol-refused-ok"; plant_patrol_machine "$PAT_RF"
+SID_RF="11111111-0000-4000-8000-000000000000"
+plant_patrol_session "$PAT_RF" "$SID_RF" "$$"
+TXRF="$PAT_RF/claude-home/projects/-fixture-repo/$SID_RF.jsonl"
+tx_create "$TXRF" "toolu_rf1" "7,37 * * * *" "$PATROL_PROMPT" true "6d3b6356" "recurring job"
+tx_agent_refused "$TXRF" "toolu_rf2" "w1-refused"
+tx_agent         "$TXRF" "toolu_rf3" "w1-alpha"
+tx_agent         "$TXRF" "toolu_rf4" "w1-beta"
+plant_patrol_stamp  "$PAT_RF" "$SID_RF" 30
+plant_patrol_roster "$PAT_RF" "$SID_RF" w1-alpha w1-beta
+PAT_RF_OUT="$TMP/patrol-refused-ok.txt"
+doctor_run_at "$PAT_RF/repo" "$DOCTOR_SH" "$FULL_BIN" "$PAT_RF" > "$PAT_RF_OUT" 2>&1
+expect_not_contains "a refused dispatch is credited to the wall, not read as a gap" \
+  "never reached it" "$(patrol_line "$PAT_RF_OUT" "dispatch wall")"
+expect_match "the wall line names the refusal explicitly" \
+  "*1 refused*" "$(patrol_line "$PAT_RF_OUT" "dispatch wall")"
+
+# ── (i) a refusal AND a genuinely missing dispatch, together ─────────────────
+# Same one refused dispatch, but now a THIRD real dispatch never lands on the
+# roster at all — a genuine gap the refusal does not explain. 4 tool_uses (1
+# refused, 3 real) against 2 rostered rows: net of the refusal, exactly 1
+# dispatch never reached the wall.
+PAT_RB="$TMP/machine-patrol-refused-blind"; plant_patrol_machine "$PAT_RB"
+SID_RB="22222222-0000-4000-8000-000000000000"
+plant_patrol_session "$PAT_RB" "$SID_RB" "$$"
+TXRB="$PAT_RB/claude-home/projects/-fixture-repo/$SID_RB.jsonl"
+tx_create "$TXRB" "toolu_rb1" "7,37 * * * *" "$PATROL_PROMPT" true "6d3b6356" "recurring job"
+tx_agent_refused "$TXRB" "toolu_rb2" "w1-refused"
+tx_agent         "$TXRB" "toolu_rb3" "w1-alpha"
+tx_agent         "$TXRB" "toolu_rb4" "w1-beta"
+tx_agent         "$TXRB" "toolu_rb5" "w1-gamma"
+plant_patrol_stamp  "$PAT_RB" "$SID_RB" 30
+plant_patrol_roster "$PAT_RB" "$SID_RB" w1-alpha w1-beta
+PAT_RB_OUT="$TMP/patrol-refused-blind.txt"
+doctor_run_at "$PAT_RB/repo" "$DOCTOR_SH" "$FULL_BIN" "$PAT_RB" > "$PAT_RB_OUT" 2>&1
+expect_match "the genuinely missing dispatch is still reported, net of the refusal" \
+  "*1 of 4*" "$(patrol_line "$PAT_RB_OUT" "dispatch wall")"
+expect_match "…and the refusal is still named on that same line" \
+  "*1 refused*" "$(patrol_line "$PAT_RB_OUT" "dispatch wall")"
+
 # ── the format rules hold over the new section ───────────────────────────────
 #
 # AC-15's width wall, applied to every arm above rather than to one: the lines
@@ -2466,7 +2528,7 @@ expect_contains "…and the cure named in the verdict is the skill re-invocation
 # prompt head, a cwd, a list of ids — and each of those appears in only some
 # arms.
 PAT_ALL="$TMP/patrol-all-blocks.txt"; : > "$PAT_ALL"
-for _po in "$PAT_NONE_OUT" "$PAT_0_OUT" "$PAT_1_OUT" "$PAT_2_OUT" "$PAT_S_OUT" "$PAT_N_OUT" "$PAT_B_OUT"; do
+for _po in "$PAT_NONE_OUT" "$PAT_0_OUT" "$PAT_1_OUT" "$PAT_2_OUT" "$PAT_S_OUT" "$PAT_N_OUT" "$PAT_B_OUT" "$PAT_RF_OUT" "$PAT_RB_OUT"; do
   awk '/^PATROL —/{f=1} f' "$_po" >> "$PAT_ALL"
 done
 PAT_WIDE=""
