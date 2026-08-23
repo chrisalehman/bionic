@@ -24,7 +24,7 @@
 #
 # ── TWO MODES, ONE ROSTER (epic-17 W7 S10, spec AC-16) ───────────────────────
 #
-#   bash tests/run.sh              four suites at a time (the default)
+#   bash tests/run.sh              eight suites at a time (the default)
 #   bash tests/run.sh --serial     one at a time, in roster order
 #   BIONIC_TEST_JOBS=8 bash tests/run.sh      a different width
 #   BIONIC_TEST_TIMING=t.tsv bash tests/run.sh   also write <label>TAB<seconds>
@@ -45,17 +45,26 @@
 # THE AUDIT IS TWO FILES, and a maintainer needs both: S8 read the 44 suites that
 # existed when it ran (`.bionic/docs/record/epic-17-w7/s8-isolation-audit.md`), and
 # S8b read the one the same wave added, env.test.sh, which appears nowhere in the
-# first file (`.bionic/docs/record/epic-17-w7/s8b-isolation-delta.md`). The roster
-# below is 45. A new suite that writes outside its own mktemp root breaks this
+# first file (`.bionic/docs/record/epic-17-w7/s8b-isolation-delta.md`). Neither file
+# covers the roster as it stands now: epic-18 wave-03 deleted nineteen of those
+# suites on the reliability ruling (commit 8582861), one of the nineteen
+# (fresh-home.test.sh) was later revived, and rc-item.test.sh was added new — 24
+# `run` lines as of this writing (`grep -c '^run "' tests/run.sh` equals
+# `ls tests/*.test.sh | wc -l`; a maintainer re-derives the count rather than
+# trusting a number in a comment, this one included). Neither audit file re-covers
+# what changed since it ran; a suite added or restored after S8b carries no
+# isolation proof beyond its own file. A suite that writes outside its
+# own mktemp root breaks this
 # premise, which is the other reason the roster is hand-listed: adding a line is the
 # moment to check — and to extend the audit, since neither existing file can cover
 # a suite written after it.
 #
-# WHY FOUR AND NOT FORTY-FIVE. Measured, not guessed. When seven of these slices
-# each ran a full suite concurrently on one machine, free memory fell to ~188 MB
-# and the kernel SIGKILLed a suite mid-run (W7 assumption A4.2). Four was the width
-# with headroom on that measurement; the default was raised to eight on 2026-08-22
-# (ef23f75, user's call) and BIONIC_TEST_JOBS is there for a machine with less or more.
+# WHY EIGHT (FOUR AT MEASUREMENT TIME) AND NOT FORTY-FIVE. Measured, not guessed. When
+# seven of these slices each ran a full suite concurrently on one machine, free memory
+# fell to ~188 MB and the kernel SIGKILLed a suite mid-run (W7 assumption A4.2). Four was
+# the width with headroom on that measurement; the default was raised to eight on
+# 2026-08-22 (ef23f75, user's call) and BIONIC_TEST_JOBS is there for a machine with less
+# or more.
 #
 # WHY A SIGNAL DEATH IS NOT A FAILED ASSERTION. That same kill was reported as a
 # plain ✗ FAIL, which reads as "this suite's assertions failed" and sends the
@@ -186,10 +195,8 @@ echo "Gating suites:"
 run "agent-context-guard.test.sh" bash tests/agent-context-guard.test.sh
 run "canonical-sdlc-evidence-gate.test.sh" bash tests/canonical-sdlc-evidence-gate.test.sh
 run "canonical-sdlc-governing-skill.test.sh" bash tests/canonical-sdlc-governing-skill.test.sh
-run "context-spend.test.sh" bash tests/context-spend.test.sh
 run "dispatch-preflight.test.sh" bash tests/dispatch-preflight.test.sh
 run "execution-recorder.test.sh" bash tests/execution-recorder.test.sh
-run "farm-out-reminder.test.sh" bash tests/farm-out-reminder.test.sh
 run "landing-gate.test.sh" bash tests/landing-gate.test.sh
 run "patrol-duties-gate.test.sh" bash tests/patrol-duties-gate.test.sh
 run "preflight-probe.test.sh" bash tests/preflight-probe.test.sh
@@ -200,67 +207,41 @@ run "session-sweeper.test.sh" bash tests/session-sweeper.test.sh
 run "stop-check.test.sh" bash tests/stop-check.test.sh
 run "stop-guard.test.sh" bash tests/stop-guard.test.sh
 run "stop-orders.test.sh" bash tests/stop-orders.test.sh
-run "scripts.test.sh" bash tests/scripts.test.sh
-run "agent-roles.test.sh" bash tests/agent-roles.test.sh
-# The agent-file render pipeline (epic-17 W4 S2, spec AC-2): agents-src/ blocks + templates
-# + render.sh against the committed finals under agents/. Cross-FILE by nature — it spans a
-# source tree and an output tree.
-run "agent-render.test.sh" bash tests/agent-render.test.sh
-# Cross-FILE proof (epic-17 W4 S7, spec AC-5 / epic AC-11): the terminal-disposition
-# rule's normative literal, pinned byte-identical between SKILL.md's Step 9 and
-# operational-rules.md's close-out section, plus a count-scoped guard against a
-# third, unpinned copy landing under skills/ or agents/. Same class as
-# interview-protocol.test.sh above (a SKILL.md <-> operational-rules.md pin), kept
-# in its own file because it is a distinct ownership-table concept.
-run "close-out.test.sh" bash tests/close-out.test.sh
+# agent-render.test.sh (the agent-file render pipeline, epic-17 W4 S2) and its terminal-
+# disposition cross-file pin (epic-17 W4 S7) were deleted at 8582861 (epic-18 wave-03);
+# nothing replaced either.
 # Cross-COMPONENT proofs (epic-15 W1R slice 4/6). They belong to no single hook,
 # so they live here rather than under hooks/ — which also means they are invisible
 # to the glob above and must stay hand-listed.
 run "cross-gate-agreement.test.sh" bash tests/cross-gate-agreement.test.sh
 run "fail-direction-table.test.sh" bash tests/fail-direction-table.test.sh
-# Epic-17 wave-01 slice S1: bionic plugin manifest + marketplace manifest + LICENSE.
-run "plugin-manifest.test.sh" bash tests/plugin-manifest.test.sh
-# Harness-on-harness (epic-17 W1). Pins the assertion helpers every suite above
-# hand-copies: under pipefail, `printf "$haystack" | grep -q` is a SIGPIPE race
-# that reports a present needle as missing and an absent-check as green. Also
-# hand-listed, same reason as the two lines above.
-run "assert-helper-race.test.sh" bash tests/assert-helper-race.test.sh
-# Cross-FILE proof (epic-17 W1 S3): the plugin-layout path rewrite, and the near-identical
-# state paths it must not have touched. Spans SKILL.md, hooks/ and the payload's own
-# registration surfaces, so like the two above it belongs to no single hook and must stay
-# hand-listed.
-run "plugin-paths.test.sh" bash tests/plugin-paths.test.sh
-# Cross-FILE proof (epic-17 W1 S6): the payload boundary — what the plugin ships and, more
-# to the point, what it must NOT. Pins marketplace.json's source field against the payload/
-# link tree and the repo's single-owner layout, so it too is hand-listed.
-run "plugin-payload.test.sh" bash tests/plugin-payload.test.sh
+# plugin-manifest.test.sh (epic-17 wave-01 S1), assert-helper-race.test.sh (epic-17 W1,
+# the SIGPIPE-race lesson every suite above still cites), plugin-paths.test.sh (epic-17
+# W1 S3, the plugin-layout path rewrite) and plugin-payload.test.sh (epic-17 W1 S6, the
+# payload-boundary pin) were all deleted at 8582861 (epic-18 wave-03); nothing replaced
+# any of them.
 # Harness-on-harness (epic-17 W2 S1). Catch-proof for tests/lib/resolve-roots.sh, the
 # path-resolution seam every suite sources: plants a doctored tree and proves the
 # override binds in BOTH directions. Belongs to no single hook, so hand-listed.
 run "seam-resolution.test.sh" bash tests/seam-resolution.test.sh
-# Cross-FILE proof (epic-17 W2 S4): plugin.json is the single version owner
-# (public semver + dependency ranges); the marketplace entry abstains; the
-# SUPPORTED_SDLC_VERSION bridge pair is pinned against the plugin major. Spans
-# payload/.claude-plugin/plugin.json, .claude-plugin/marketplace.json and two
-# hooks, so like the others it belongs to no single hook and stays hand-listed.
-run "version-ssot.test.sh" bash tests/version-ssot.test.sh
-# Payload libraries (epic-17 W3 S1): the dependency SSoT table in
-# payload/scripts/lib/deps.sh and the machine-fact functions in
-# payload/scripts/lib/detect.sh, driven against fixture roots and a fixture
-# PATH. Belongs to no single hook, so hand-listed like the rest.
-run "plugin-lib.test.sh" bash tests/plugin-lib.test.sh
+# version-ssot.test.sh (epic-17 W2 S4, the plugin.json version-owner pin) and
+# plugin-lib.test.sh ("Payload libraries", epic-17 W3 S1 — the deps.sh SSoT table and
+# detect.sh's machine-fact functions, driven against fixture roots and a fixture PATH)
+# were both deleted at 8582861 (epic-18 wave-03); nothing replaced either.
 # The read-only probes added at epic-17 W6 S2 (spec R5/AC-8, AC-9; R8/AC-13):
 # detect_plugin_load_state and detect_plugin_duplicates, driven against the
 # `claude plugin list` transcripts captured during W5's F12 measurement and a
-# planted plugin registry. Its own suite rather than a group in plugin-lib —
-# different fixture regime (a captured CLI transcript, not a fixture tree) — and
-# so, like every suite outside hooks/, hand-listed here or it never runs.
+# planted plugin registry. Its own suite rather than a group in plugin-lib.test.sh
+# (deleted at 8582861, epic-18 wave-03) — different fixture regime (a captured CLI
+# transcript, not a fixture tree) — and so, like every suite outside hooks/,
+# hand-listed here or it never runs.
 run "detect-probes.test.sh" bash tests/detect-probes.test.sh
 # The worktree contract (epic-17 W3 S2, spec AC-10 / D4): payload/scripts/spawn-worktree.sh
 # driven against scratch git repositories, with its attestation line pinned byte-exactly
 # because dispatchers quote that line into their ledger rows. Its own suite rather than a
-# section of plugin-lib.test.sh — different subject, different fixture regime — and so,
-# like every suite outside hooks/, hand-listed here or it never runs.
+# section of plugin-lib.test.sh (deleted at 8582861, epic-18 wave-03) — different subject,
+# different fixture regime — and so, like every suite outside hooks/, hand-listed here or
+# it never runs.
 run "spawn-worktree.test.sh" bash tests/spawn-worktree.test.sh
 # The JIT / degradation contract (epic-17 W3 S10, spec AC-5): payload/scripts/lib/jit.sh's
 # jit_check + jit_offer, driven against a fixture PATH, proving jit_offer calls install_dep
@@ -272,55 +253,35 @@ run "jit.test.sh" bash tests/jit.test.sh
 # name without touching the rest of the file, and the difference between a value the FILE
 # carries and a value THIS PROCESS has. Hand-listed like every suite outside hooks/.
 run "env.test.sh" bash tests/env.test.sh
-# Command-file conventions (epic-17 W3 S9, spec AC-1): globs payload/commands/*.md.
-run "command-format.test.sh" bash tests/command-format.test.sh
-# Command PERMISSIONS (epic-17 W6 S9b, walk finding W-1 / plan A-5.4): the byte-for-byte
-# agreement between each command file's own `allowed-tools` rule prefix and every fenced
-# `bash` invocation in that same file. A permission rule prefix-matches the literal command string, so one quote
-# character in a body silently un-authorizes it — which is what walled bionic's own
-# commands. Hand-listed like every suite outside hooks/.
-run "command-permissions.test.sh" bash tests/command-permissions.test.sh
-# The end-user README (epic-17 W6 S8, spec AC-4): README.md's "## Installation
-# (30-second setup)" section pinned to the ratified reference shape — two
-# `claude plugin` command lines, the in-session twin, the `claude plugin list`
-# fallback, zero mechanism words. Hand-listed like every suite outside hooks/.
-# The presentation contract (epic-17 W6 S1, spec R3 / AC-5 / AC-6): the one voice block at
-# agents-src/blocks/voice-contract.md, its byte-identical presence in all four shipped
-# command files, help.md's render-in-full instruction, and the banned-display-vocabulary
-# lint over the command surface. Staleness of the render itself belongs to
-# agent-render.test.sh; this suite owns presence and content. Hand-listed like every suite
-# outside hooks/.
-# The other half of AC-6 (epic-17 W6 S4): every line setup.sh, doctor.sh and remove.sh PRINT
-# judged against the same one banned-vocabulary list voice-contract.test.sh reads — display
-# verbs, prompts, and the self-appending accumulators the action and degradation lines are
-# built in. Hand-listed like every suite outside hooks/.
-# The diagram pins (epic-17 W4 S8, spec AC-6 / design D4): the two composed-SVG diagrams
-# under skills/canonical-sdlc/diagrams/ read as text and compared against what they draw —
-# the hooks' SUPPORTED_SDLC_VERSION, hooks.json's six always-on entries, and SKILL.md's ten
-# steps and frontmatter hook set. Spans hooks/, skills/ and the SVGs.
-run "diagrams.test.sh" bash tests/diagrams.test.sh
-# /bionic:setup (epic-17 W3 S6, spec AC-2 / AC-6): payload/scripts/setup.sh driven end to
-# end against fixture trees and a stateful `claude` shim on a replaced PATH, with the
-# fixture bytes as the evidence for every consented, declined and idempotent claim.
-# Hand-listed like every suite outside hooks/.
-run "setup.test.sh" bash tests/setup.test.sh
-# The read-only diagnosis (epic-17 W3 S7, spec AC-3): payload/scripts/doctor.sh driven over
-# whole fixture MACHINES — payload tree, plugin registry, settings, rc, caches — with a
-# no-mutation wall (sha256 + path enumeration, before and after) as its axis test.
-run "doctor.test.sh" bash tests/doctor.test.sh
-# Footprint removal (epic-17 W3 S8, spec AC-4): payload/scripts/remove.sh driven
-# against fixture machines — the never-list wall, the per-item consent gates, and
-# the standalone door (the script alone, no payload libraries beside it).
-# Hand-listed like every suite outside hooks/.
-run "remove.test.sh" bash tests/remove.test.sh
-# The pristine-install suite (epic-18 T6, spec AC-10/AC-7): empty $HOME through
-# setup --all, doctor, remove --all, asserted against a manifest of bytes rather
-# than a report's own summary line. Registered at T10 per its own header — it was
-# deliberately kept out of the roster while the two arms it exercises
-# (ccstatusline's layout copy, notebooklm's skill install) were still unmerged,
-# so it would not sit red in a gating run. Hand-listed like every suite outside
-# hooks/.
+# The rc item (epic-18 wave-03 slice 4/7, spec R6 / AC-5, AC-6): the `claude()`
+# shell function as a setup-managed item — env.sh's roster and rc write/read/delete,
+# the consented step in setup.sh, doctor's row, and remove.sh's strip through both
+# of its doors, driven against sandbox HOMEs with a planted .zshrc and read back
+# through a real `zsh -ic 'type claude'`. Hand-listed like every suite outside hooks/.
+run "rc-item.test.sh" bash tests/rc-item.test.sh
+# The pristine-install suite (epic-18 T6, spec AC-10/AC-7; revived and raised at
+# wave-03 on Chris's D2): an empty $HOME through `setup --all` all-yes, `doctor`,
+# and `remove --all`, asserted against a MANIFEST of bytes rather than against a
+# report's own summary line. It is the only suite that starts from nothing and
+# the only one that reads all three scripts in one machine's lifetime, which is
+# also why it now carries the rc item — setup's newest write target, and the one
+# that lands in a file the user already owned. Hand-listed like every suite here.
 run "fresh-home.test.sh" bash tests/fresh-home.test.sh
+# The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
+# ruling) and nothing replaced their coverage:
+#   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
+#   - command-permissions.test.sh (epic-17 W6 S9b) — allowed-tools <-> fenced-command agreement
+#   - diagrams.test.sh (epic-17 W4 S8) — the two composed-SVG diagram pins
+#   - setup.test.sh (epic-17 W3 S6) — payload/scripts/setup.sh driven end to end
+#   - doctor.test.sh (epic-17 W3 S7) — the read-only diagnosis, no-mutation wall
+#   - remove.test.sh (epic-17 W3 S8) — footprint removal, the never-list wall, the
+#     standalone door (this is the suite the epic-18 wave-03 citesweep started from)
+#   - close-out.test.sh, agent-roles.test.sh — no live description survived in this file
+# voice-contract.test.sh (epic-17 W6 S1, the presentation contract) and
+# script-vocabulary.test.sh (epic-17 W6 S4, the same banned-vocabulary lint applied to
+# setup.sh/doctor.sh/remove.sh's own print output) were deleted earlier still, in an
+# unrelated purge, commit b959b5e.
+# See `git show --stat 8582861 -- tests/` for the full list of nineteen deleted files.
 # lib/platform.test.sh RETIRED at epic-17 W5 (Step-6 review). The library it
 # covered exported OS, BREW_PREFIX, SHELL_RC, PLAYWRIGHT_CACHE and sed_inplace
 # for exactly two consumers — claude-bootstrap.sh and claude-reset.sh — and 4/6
@@ -335,8 +296,8 @@ run "fresh-home.test.sh" bash tests/fresh-home.test.sh
 
 # ── drain the queue, then report in roster order ─────────────────────────────
 # Nothing above printed a result in the default mode; every `run` line enqueued.
-# The suites run now, four at a time, each in its own process writing its own
-# files; then the queue is walked again IN ORDER so the report reads the same as
+# The suites run now, $JOBS at a time (eight by default), each in its own process
+# writing its own files; then the queue is walked again IN ORDER so the report reads the same as
 # a serial one — a reader comparing two runs is comparing rosters, not schedules.
 if [ "$SERIAL" -eq 0 ]; then
   cut -f1 "$QUEUE" | xargs -P "$JOBS" -n1 bash "$SELF" --one

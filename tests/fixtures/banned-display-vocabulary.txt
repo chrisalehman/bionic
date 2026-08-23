@@ -1,7 +1,8 @@
 # BANNED DISPLAY VOCABULARY — epic-17 wave-06 slice S1 (spec AC-6).
 #
-# One list, two lints. tests/voice-contract.test.sh reads it to check the four shipped
-# command files; the script-output lint (slice S4) reads it to check every line
+# One list, two lints. tests/voice-contract.test.sh used to read it to check the four
+# shipped command files (that suite was deleted in an earlier purge, commit b959b5e, and
+# nothing replaced its arm); the script-output lint (slice S4) reads it to check every line
 # setup.sh/doctor.sh/remove.sh print. The ownership table names "one list file under
 # tests/" precisely so the two lints cannot drift to two opinions about what is internal.
 #
@@ -22,7 +23,8 @@
 #     and `Lane`. Add a token only when no legitimate product word contains it.
 #
 # The voice block itself quotes several of these tokens (it is the text that BANS them),
-# so both lints exempt the block's own body — see tests/voice-contract.test.sh.
+# so both lints exempt the block's own body — tests/voice-contract.test.sh used to be the
+# second lint's home; it was deleted in an earlier purge (commit b959b5e).
 
 lane
 3a
@@ -58,8 +60,9 @@ mode: payload
 # list (`_setup_`, `_rm_`, `_doctor_`, `detect_`); the libraries beneath them did not, so
 # `_dep_` and `_jit_` could reach a terminal through any line the scripts
 # print. `_detect_` needs no entry — `detect_` already catches it as a substring.
-# tests/script-vocabulary.test.sh derives the roster from payload/scripts/lib/*.sh, so a
-# new library prefix arrives here deliberately rather than by somebody noticing.
+# tests/script-vocabulary.test.sh used to derive the roster from payload/scripts/lib/*.sh, so a
+# new library prefix arrived here deliberately rather than by somebody noticing; that suite
+# was deleted in an earlier purge (commit b959b5e) and nothing replaced the derivation check.
 _dep_
 _jit_
 # `env_` (epic-17 W7 S4, spec R4) covers the new settings-environment library both ways: its
@@ -78,8 +81,9 @@ env_
 # ADDRESS the reader is being pointed at — doctor's "the constraint column is the table in
 # scripts/lib/deps.sh", or "every hooks.json command resolves to a file on disk" — is
 # product information a person can act on. Neither line contains a hook basename, so the
-# ruling needs no exemption in the lint to hold; tests/script-vocabulary.test.sh measures
-# that it still does.
+# ruling needs no exemption in the lint to hold; tests/script-vocabulary.test.sh used to
+# measure that it still does — that suite was deleted in an earlier purge (commit b959b5e)
+# and nothing replaced the measurement.
 agent-context-guard.sh
 canonical-sdlc-evidence-gate.sh
 canonical-sdlc-governing-skill.sh

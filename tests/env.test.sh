@@ -7,11 +7,14 @@
 # the object with it when it empties, and the difference between a value the
 # FILE carries and a value THIS PROCESS has.
 #
-# WHAT IT DOES NOT OWN. How setup asks for the write (tests/setup.test.sh), how
-# remove asks for the delete or migrates the retired ~/.zshrc block
-# (tests/remove.test.sh), how doctor renders the pair (tests/doctor.test.sh),
-# and the settings-writer shape env.sh delegates to (tests/remove.test.sh's
-# four-writer pin, which this file's writes route through rather than restate).
+# WHAT IT DOES NOT OWN. How setup asks for the write, how remove asks for the
+# delete or migrates the retired ~/.zshrc block, how doctor renders the pair,
+# and the settings-writer shape env.sh delegates to. tests/setup.test.sh,
+# tests/remove.test.sh, and tests/doctor.test.sh used to cover those in turn —
+# all three were deleted at 8582861 (epic-18 wave-03) and nothing replaced
+# them, so none of this is tested from outside this file today. This file's
+# writes still route through env.sh's own writer rather than restating it,
+# same as always.
 #
 # WHY "CONFIGURED" AND "LIVE" ARE TWO ARMS EVERYWHERE BELOW. On 2026-08-21 a
 # session ran with `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` written to disk and absent
@@ -26,8 +29,9 @@
 # override deps.sh reads in production. jq is the real jq — it is a hard
 # dependency of the thing under test, not a seam.
 #
-# ASSERTION-HELPER RACE. No `printf | grep -q` anywhere below
-# (tests/assert-helper-race.test.sh): containment is bash `[[ == * ]]`
+# ASSERTION-HELPER RACE. No `printf | grep -q` anywhere below — the lesson
+# tests/assert-helper-race.test.sh used to pin (deleted at 8582861, epic-18
+# wave-03; nothing replaced the pin): containment is bash `[[ == * ]]`
 # in-process, and grep runs against FILE arguments only.
 #
 # Usage: bash tests/env.test.sh
@@ -313,8 +317,9 @@ echo "=== Group 7: the file's mode survives a write ==="
 # The `env` block is where tokens live on a lot of machines, so a settings.json
 # a user deliberately kept at 0600 must not come back at 0644 because bionic
 # wrote two of its own names into it. env.sh adds no writer of its own — it
-# calls deps.sh's, whose shape tests/remove.test.sh pins — and this arm is the
-# behavioural end of that pin.
+# calls deps.sh's. tests/remove.test.sh used to pin that writer's shape from
+# the other side; it was deleted at 8582861, so this arm is now the only test
+# exercising the mode-survival behaviour at all.
 S8="$TMP/mode.json"
 plant_settings_populated "$S8"
 chmod 600 "$S8"
@@ -329,8 +334,10 @@ expect_eq "…and after env_unset" "600" \
 # symlink reports the LINK's own mode, never the file it points at — a
 # `~/.claude/settings.json` symlinked into a dotfiles repo would hand `chmod`
 # the link's mode (755) and publish the rewrite, tokens included, as
-# `rwxr-xr-x`. `stat -L` is what makes this pass; tests/remove.test.sh carries
-# the same arm for the writer's other two siblings.
+# `rwxr-xr-x`. `stat -L` is what makes this pass; tests/remove.test.sh used to
+# carry the same arm for the writer's other two siblings, but that suite was
+# deleted at 8582861 and nothing replaced it — this arm is now the only one
+# testing the symlink case.
 #
 # AND THE LINK SURVIVES (critic delta 2 N1, A6.S15.1): "wrote through the link"
 # was false of this run until S15 — the rename detached the link and left the
@@ -341,8 +348,7 @@ plant_settings_populated "$S8_DIR/dotfiles/settings.json"
 chmod 600 "$S8_DIR/dotfiles/settings.json"
 ln -s "$S8_DIR/dotfiles/settings.json" "$S8_DIR/home/settings.json"
 S8_LINK="$S8_DIR/home/settings.json"
-expect_eq "fixture: the symlink target really is 0600" "600" \
-  "$(stat -f '%Lp' "$S8_DIR/dotfiles/settings.json" 2>/dev/null || stat -c '%a' "$S8_DIR/dotfiles/settings.json" 2>/dev/null)"
+# (fixture sanity check removed epic-18 W3 4/6: no production subject -- see ledger-env.md)
 env_status "$S8_LINK" -- env_set BASH_MAX_TIMEOUT_MS 1800000
 expect_true "symlink arm: env_set really wrote through the link (not vacuous)" \
   bash -c 'jq -e ".env.BASH_MAX_TIMEOUT_MS == \"1800000\"" "$1" >/dev/null' _ "$S8_LINK"
@@ -355,8 +361,10 @@ expect_true "…and it is the dotfiles TARGET that carries the new key, not a de
   bash -c 'jq -e ".env.BASH_MAX_TIMEOUT_MS == \"1800000\"" "$1" >/dev/null' _ "$S8_DIR/dotfiles/settings.json"
 
 # The wall, from this side: env.sh renames no tmp over a settings file of its
-# own. tests/remove.test.sh counts the payload's settings writers and pins the
-# list; a private writer here would be a fifth.
+# own. tests/remove.test.sh used to count the payload's settings writers and
+# pin the list, so a private writer here would have been a fifth; that suite
+# was deleted at 8582861 and nothing replaced the count, so this local check is
+# now the only wall against env.sh growing one.
 expect_eq "env.sh contains no settings writer of its own" "0" \
   "$(/usr/bin/grep -c 'mv "\$tmp" "\$settings"' "$ENV_SH" | tr -d ' ')"
 expect_true "…it calls the pinned one by name" \
@@ -370,9 +378,11 @@ echo "=== Group 8: the three callers reach this file and not around it ==="
 # which is the defect this file exists to end.
 # remove.sh is the DOCUMENTED EXEMPTION and not an oversight: its standalone
 # door runs on a machine where scripts/lib/ no longer exists, so it cannot
-# source this file and carries a copy of the delete program instead — pinned to
-# the original by tests/remove.test.sh, the same way six other literals in that
-# script are. setup and doctor have no such door and have no excuse.
+# source this file and carries a copy of the delete program instead. That copy
+# used to be pinned to the original by tests/remove.test.sh, the same way six
+# other literals in that script were; the suite was deleted at 8582861 and
+# nothing replaced any of those pins. setup and doctor have no such door and
+# have no excuse.
 for caller in "$SETUP_SH" "$DOCTOR_SH"; do
   expect_eq "$(basename "$caller") reaches .env through no jq of its own" "" \
     "$(/usr/bin/grep -n '\.env\[\|\.env\.\|\.env //' "$caller" || true)"

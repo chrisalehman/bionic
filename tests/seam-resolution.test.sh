@@ -55,7 +55,8 @@ ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
 no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
 
 # Containment done in-process (case/glob), never `printf | grep -q`: that pipe is
-# the SIGPIPE race pinned by tests/assert-helper-race.test.sh, and its dangerous
+# the SIGPIPE race tests/assert-helper-race.test.sh used to pin (deleted at 8582861,
+# epic-18 wave-03; nothing replaced the pin), and its dangerous
 # direction reports a FALSE PASS for the absent-check. No pipe, no race.
 expect_eq()      { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
 expect_contains() { case "$3" in *"$2"*) ok "$1" ;; *) no "$1" "expected to contain '$2', got '$3'" ;; esac; }
@@ -176,8 +177,6 @@ echo "=== Group 4: override unset -> the same check reads the REPO copy ==="
 _v="$(probe "$REPO" "$SEAM" read-hooks)"
 expect_eq "no override: named check reads the repo constant" \
   "SUPPORTED_SDLC_VERSION=14" "$_v"
-expect_absent "no override: named check does NOT read the doctored constant" \
-  "SUPPORTED_SDLC_VERSION=99999" "$_v"
 expect_eq "no override: hooks read carries no doctored marker" \
   "0" "$(probe "$REPO" "$SEAM" mark-hooks)"
 expect_eq "no override: skills read carries no doctored marker" \

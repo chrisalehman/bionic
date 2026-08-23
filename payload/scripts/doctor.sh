@@ -56,8 +56,10 @@
 # `env_get` / `env_live`, deps.sh's table accessors. It never
 # calls `install_dep`, `remove_dep` or `bionic_strip_permission_block`, and it
 # never shells out to brew/npm/uv/claude for anything but a version probe the
-# libraries already own. tests/doctor.test.sh fingerprints a whole fixture
-# machine — every file's sha256 AND every path — before and after a full run.
+# libraries already own. tests/doctor.test.sh used to fingerprint a whole
+# fixture machine — every file's sha256 AND every path — before and after a
+# full run; it was deleted at 8582861 (epic-18 wave-03) and nothing replaced
+# the fingerprint wall.
 #
 # THE THREE-VALUED WORLD. `present`, `absent` and `unknown` are three answers,
 # not two-plus-an-error. A dependency whose mechanism has no presence surface
@@ -175,8 +177,10 @@ BIONIC_PLUGIN_ID="bionic@bionic"
 #      real value are printed.
 #
 # AND EVERY LINE FITS. Nothing printed below may exceed 100 columns —
-# tests/doctor.test.sh walls it for both fixture machines — because a wrapped
-# line is rule 1 broken by the terminal rather than by this file.
+# tests/doctor.test.sh used to wall it for both fixture machines; that suite
+# was deleted at 8582861 (epic-18 wave-03) and nothing replaced the wall —
+# because a wrapped line is rule 1 broken by the terminal rather than by this
+# file.
 
 # The three symbols, and the invariant that gives them meaning: ✗ is printed if
 # and only if the same run puts a matching line in FIX. Anything true but not
@@ -421,6 +425,7 @@ AGENT_NAMES="${AGENT_FACT#*names=}";       AGENT_NAMES="${AGENT_NAMES%% *}"
 AGENT_CAUSE="${AGENT_FACT##*cause=}"
 
 TODO_FACT="$(detect_env_todo_tools)";        TODO_STATE="${TODO_FACT##*present=}"
+RC_PROXY_FACT="$(detect_rc_claude_proxy)";   RC_PROXY_STATE="${RC_PROXY_FACT##*present=}"
 LEGACY_FACT="$(detect_zshrc_legacy_block)";  LEGACY_STATE="${LEGACY_FACT##*present=}"
 LEGACY_HOOK_FACT="$(detect_legacy_channel_hooks)"; LEGACY_HOOK_COUNT="${LEGACY_HOOK_FACT##*count=}"
 SKILL_COPY_FACT="$(detect_legacy_skill_copy)"
@@ -1089,9 +1094,10 @@ case "$LEGACY_HOOK_COUNT" in
 esac
 # The skill copy, and NOT the hook files beside it. Setup step 7 owns the consented removal,
 # so there is a real thing to offer; and unlike the files, this copy is doing something —
-# arming eleven registrations a second time. The asymmetry is the point, and
-# tests/doctor.test.sh Group 14 pins it from the other side with a machine whose only
-# leftover is hook files and whose summary still reads "nothing to do".
+# arming eleven registrations a second time. The asymmetry is the point.
+# tests/doctor.test.sh Group 14 used to pin it from the other side with a machine whose only
+# leftover is hook files and whose summary still reads "nothing to do"; that suite was
+# deleted at 8582861 (epic-18 wave-03) and nothing replaced the pin.
 [ "$SKILL_COPY_STATE" = "yes" ] && fix "a legacy skill copy is installed, arming the same walls twice → run /bionic:setup"
 
 if [ "$PLUGIN_HOOKS" = "degraded" ] || [ "$PLUGIN_HOOKS" = "absent" ]; then
@@ -1287,6 +1293,19 @@ for _env_key in $ENV_KEYS; do
     _doctor_env3 "$DOCTOR_BAD" "$_env_key" "—" "not set → /bionic:setup"
   fi
 done
+# THE THIRD KIND OF ROW IN THIS TABLE, and the only one whose absence is not a
+# fault. The two above are settings bionic needs to work; this is an OFFER — a
+# `claude()` function that puts the bypass mode in reach of the command a person
+# types — and someone who was asked and said no has a correctly configured
+# machine, not a broken one. So absent is `–` with the route to say yes, never
+# `✗` with a repair. Present is read from the MARKERS (detect.sh), so a claude()
+# function a user wrote for themselves is neither claimed here nor removable by
+# /bionic:remove.
+if [ "$RC_PROXY_STATE" = "yes" ]; then
+  _doctor_env3 "$DOCTOR_OK" "claude() shell proxy" "on" "in $(_detect_shell_rc) — new shells pick it up"
+else
+  _doctor_env3 "$DOCTOR_NIL" "claude() shell proxy" "—" "not set — /bionic:setup offers it"
+fi
 # THE LEFTOVERS, AND ONLY WHEN THERE ARE ANY. Six checks ask the same kind of
 # question — did the retired installer leave something behind — and on a machine
 # that never ran it, or has been cleaned once, all six answer no. Silence is the

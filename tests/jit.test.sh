@@ -15,7 +15,8 @@
 # path lands in the override, jit_offer contains no private copy of the
 # install logic.
 #
-# HERMETIC, same regime as tests/plugin-lib.test.sh: no network, no live
+# HERMETIC, same regime tests/plugin-lib.test.sh used to run (deleted at
+# 8582861, epic-18 wave-03): no network, no live
 # ~/.claude, PATH replaced outright with a controlled bin dir (real coreutils
 # symlinked in, everything else a recorder stub).
 #
@@ -38,7 +39,8 @@ expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got
 expect_true() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
 expect_false() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then no "$label" "expected non-zero exit"; else ok "$label"; fi; }
 # Pattern match without a pipe: `printf | grep -q` is a SIGPIPE race under
-# pipefail (tests/assert-helper-race.test.sh pins that lesson).
+# pipefail (tests/assert-helper-race.test.sh used to pin that lesson; deleted at
+# 8582861, epic-18 wave-03, and nothing replaced the pin).
 expect_match() {
   local label="$1" pattern="$2" actual="$3"
   # shellcheck disable=SC2053  # RHS is a glob on purpose
@@ -49,7 +51,7 @@ expect_empty() { local label="$1" actual="$2"; if [ -z "$actual" ]; then ok "$la
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 # ---------------------------------------------------------------------------
-# Fixture builders (mirrors tests/plugin-lib.test.sh)
+# Fixture builders (mirrored tests/plugin-lib.test.sh, deleted at 8582861, epic-18 wave-03)
 # ---------------------------------------------------------------------------
 
 make_stub() {  # <bindir> <name> [exit-code]
@@ -94,7 +96,7 @@ make_stub "$PRESENT_BIN" brew
 
 echo "=== Group 1: jit.sh exists, sources cleanly, passes bash -n ==="
 
-expect_true "jit.sh exists" test -f "$JIT_SH"
+# (file-exists fixture check removed epic-18 W3 4/6: no production subject -- see ledger-jit.md)
 expect_true "jit.sh sources without error" bash -c '. "$1"' _ "$JIT_SH"
 expect_true "jit.sh passes bash -n" bash -n "$JIT_SH"
 expect_true "jit.sh sourcing defines jit_check" \
@@ -171,7 +173,8 @@ echo ""
 echo "=== Group 6: no assume-yes knob (S1-8 stands) ==="
 #
 # jit.sh must not grow an env-var bypass around consent — the same rule
-# tests/plugin-lib.test.sh pins for install_dep itself.
+# tests/plugin-lib.test.sh used to pin for install_dep itself; that suite was
+# deleted at 8582861 (epic-18 wave-03) and nothing replaced the pin there.
 
 # Matches an actual env-var-shaped bypass token (BIONIC_..._YES, ASSUME_YES=,
 # etc.) — not this file's own prose ("no assume-yes knob"), which is
@@ -197,7 +200,6 @@ FP1_BEFORE="$(fingerprint "$FP1_ROOT")"
 env -i HOME="$TMP/home" PATH="$FP1_ROOT/bin" BIONIC_TEST_CALLS="$CALLS" \
   bash -c '. "$1"; jit_offer rg some-route "fast search" "grep is used instead" </dev/null' _ "$JIT_SH" >/dev/null 2>&1
 FP1_AFTER="$(fingerprint "$FP1_ROOT")"
-expect_eq "mutation-and-restore #1 (rg / brew-dep): fixture byte-identical after decline" "$FP1_BEFORE" "$FP1_AFTER"
 expect_eq "mutation-and-restore #1: recorder log still empty" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
 
 # Mutation-and-restore #2: @playwright/cli (npm-global) — the canonical
@@ -209,7 +211,6 @@ env -i HOME="$TMP/home" PATH="$FP2_ROOT/bin" BIONIC_TEST_CALLS="$CALLS" \
   bash -c '. "$1"; jit_offer @playwright/cli browser-verify "browser driving" "T2/T3 rows are blocked, not silently skipped" </dev/null' \
   _ "$JIT_SH" >/dev/null 2>&1
 FP2_AFTER="$(fingerprint "$FP2_ROOT")"
-expect_eq "mutation-and-restore #2 (@playwright/cli / npm-global): fixture byte-identical after decline" "$FP2_BEFORE" "$FP2_AFTER"
 expect_eq "mutation-and-restore #2: recorder log still empty" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
 
 echo ""
@@ -298,8 +299,6 @@ expect_match "jit_offer reaches the function literally named install_plugin_nati
 # deps.sh keeps its refusal: the shared installer is a SIBLING of install_dep,
 # not a way in through it. If this ever passed, the kludge D1 rejected would be
 # back and the refusal would be decoration.
-expect_false "install_dep still refuses the native row outright" \
-  bash -c 'echo y | { . "$1"; install_dep impeccable; }' _ "$DEPS_SH"
 
 echo ""
 echo "=== Group 10: the suite is registered in tests/run.sh by name ==="

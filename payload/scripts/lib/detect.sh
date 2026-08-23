@@ -20,6 +20,7 @@
 #   agents: state=<stock|modified|unknown> total=<n|unknown> modified=<n|unknown> names=<a.md,b.md|-> cause=<text|->
 #   dep:<name> lane=<3a|3b> present=<yes|no|unknown> version=<v|unknown> constraint=<c> verdict=<ok|violation|unknown>
 #   env:todo-tools present=<yes|no>
+#   env:rc-claude-proxy present=<yes|no>
 #   env:zshrc-legacy present=<yes|no>
 #   env:legacy-channel-hooks count=<n|unknown>
 #   env:legacy-hook-files count=<n|unknown> path=<dir> names=<a.sh,b.sh|-> [cause=<text>]
@@ -37,8 +38,9 @@
 #
 # READ-ONLY IS A CONTRACT, NOT AN INTENTION. Nothing here writes, creates,
 # moves, or removes anything, and `/bionic:doctor` is built entirely on it.
-# tests/plugin-lib.test.sh fingerprints a fixture tree before and after a full
-# sweep to keep that true.
+# tests/plugin-lib.test.sh used to fingerprint a fixture tree before and after
+# a full sweep to keep that true; it was deleted at 8582861 (epic-18 wave-03)
+# and nothing replaced the fingerprint wall.
 #
 # ROOTS ARE OVERRIDABLE, read at CALL time so one sourced copy can be pointed
 # at several roots in turn (the suite does exactly that):
@@ -296,6 +298,33 @@ detect_env_todo_tools() {
   return 0
 }
 
+# The rc item bionic OWNS, as opposed to the two retired ones below it: the
+# `claude()` proxy setup writes, inside its own marker pair:
+#
+#     # ─── bionic:rc:start ───
+#     claude() { command claude --dangerously-skip-permissions "$@"; }
+#     # ─── bionic:rc:end ───
+#
+# THE MARKERS ARE THE PREDICATE, and only the markers. A `claude()` function a
+# user wrote for themselves is not bionic's footprint, must not be reported as
+# bionic's, and must not be removed as bionic's — so this asks whether the START
+# MARKER is there, exactly as detect_zshrc_legacy_block does for the retired
+# block, and never whether the file mentions the flag.
+#
+# The literals are env.sh's (RC_START); this file cannot source env.sh — env.sh
+# sources deps.sh and detect.sh is loaded by doors that have not — so the marker
+# is spelled here and tests/rc-item.test.sh pins the pair. Verbatim,
+# box-drawing dashes included.
+detect_rc_claude_proxy() {
+  local rc present=no
+  rc="$(_detect_shell_rc)"
+  if [ -f "$rc" ] && grep -qF '# ─── bionic:rc:start ───' "$rc" 2>/dev/null; then
+    present=yes
+  fi
+  echo "env:rc-claude-proxy present=${present}"
+  return 0
+}
+
 # The legacy alias block claude-bootstrap.sh used to write:
 #
 #     # ─── bionic:start ───
@@ -332,12 +361,10 @@ detect_zshrc_legacy_block() {
 # THE PREDICATE AND THE PROGRAM ARE NAMED, not inline, because remove.sh's
 # standalone door carries a second copy of both — legitimately, since that door
 # has to run on the machine where these libraries are already gone. A copy that
-# is entitled to exist still has to be pinned against its original, and an
-# inline program is a program the pin cannot reach: tests/remove.test.sh
-# extracts these two assignments, neutralises the one difference the two files
-# are entitled to (the variable's name), and requires the rest to be equal.
-# hooks.sh's header makes the same argument for the STRIP program; this is the
-# other half of the same channel.
+# is entitled to exist still has to be pinned against its original — no test
+# pins this since tests/remove.test.sh was deleted at 8582861. hooks.sh's
+# header makes the same argument for the STRIP program; this is the other half
+# of the same channel.
 DETECT_LEGACY_HOOK_SUBSTR='.claude/hooks/'
 
 DETECT_LEGACY_HOOK_COUNT_JQ='
@@ -648,10 +675,11 @@ detect_plugin_registered() {
 # carries it verbatim for a model to paste at Patrol arming, which is the one moment nothing
 # in this file can be sourced yet (resolving the plugin root is precisely what you cannot do
 # from inside the plugin). `--arg n` is not pasteable, so the literal cannot simply become
-# the general form. tests/dispatch-spans.test.sh §5i reads it out of here with a `sed` that
-# requires exactly that spelling, and tests/plugin-lib.test.sh Group S pins the literal to be
-# this general program with `$n` bound to "bionic" and nothing else — so the seed cannot
-# quietly become a THIRD parse.
+# the general form. tests/dispatch-spans.test.sh §5i used to read it out of here with a `sed`
+# that required exactly that spelling (that suite was deleted in an earlier purge, commit
+# b959b5e), and tests/plugin-lib.test.sh Group S used to pin the literal to be this general
+# program with `$n` bound to "bionic" and nothing else (deleted at 8582861, epic-18 wave-03).
+# Neither pin survives; the seed's spelling could now drift to a THIRD parse unnoticed.
 DETECT_PLUGIN_INSTALL_PATH_JQ='.plugins // {} | to_entries[] | select(.key | split("@")[0] == $n) | .value[0].installPath // empty'
 DETECT_PLUGIN_ROOT_JQ='.plugins // {} | to_entries[] | select(.key | split("@")[0] == "bionic") | .value[0].installPath // empty'
 
@@ -749,7 +777,8 @@ detect_plugin_install_path() {  # <plugin-name>
 # the same class the three payload scripts have had banned since W6 S11, found live here
 # by S12's own vocabulary sweep (§6 hit #4, A-6.6 (a)). The line now says what is wrong
 # and what to do; the exit code and the empty stdout, which are what the CALLERS read, are
-# untouched. Pinned by tests/plugin-lib.test.sh Group R against the shared banned list.
+# untouched. Used to be pinned by tests/plugin-lib.test.sh Group R against the shared banned
+# list; that suite was deleted at 8582861 (epic-18 wave-03) and nothing replaced the pin.
 _detect_plugin_root_refuse() {  # <what went wrong>
   echo "bionic could not find its own installed files — $1" >&2
   echo "  Fix: claude plugin install bionic@bionic" >&2
@@ -1372,6 +1401,7 @@ detect_all() {
   local name
   detect_plugin_integrity
   detect_env_todo_tools
+  detect_rc_claude_proxy
   detect_zshrc_legacy_block
   detect_legacy_channel_hooks
   detect_legacy_hook_files

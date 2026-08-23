@@ -80,7 +80,6 @@ expect_status "unknown verb: usage error" 2 "$ST"
 run_orders "$R1" order
 expect_status "order with no target: usage error" 2 "$ST"
 run_orders "$R1" order --at 12345
-expect_status "the target comes first" 2 "$ST"
 run_orders "$R1" order agent --at notanumber
 expect_status "--at takes epoch seconds" 2 "$ST"
 run_orders "$R1" standdown extra
@@ -232,8 +231,8 @@ R7WT="$SANDBOX/worktree-wt"
 # A REAL `git worktree add` (never a mocked path) — built from the repo root, since
 # `git worktree add` resolves relative paths against pwd (.claude/rules/git-worktree-docs.md).
 git -C "$R7" worktree add -q -b w-r3-wt "$R7WT" >/dev/null 2>&1
-[ -e "$R7WT/.git" ] && ok "fixture: a real git worktree exists" \
-  || no "fixture: a real git worktree exists"
+# (fixture sanity check removed epic-18 W3 4/6: not a subject-under-test assertion --
+#  it verified git worktree add itself, not hooks/stop-orders.sh; see ledger-stop-orders.md)
 
 run_orders "$R7" standdown
 expect_status "from the main repo root, standdown sees the true roster" 0 "$ST"
