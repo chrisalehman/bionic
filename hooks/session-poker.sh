@@ -327,7 +327,15 @@ write_patrol_stamp() {  # <session-id> <verb> -> 0 written, 1 not
   [ -n "$f" ] || return 1
   d="${f%/*}"
   case "$d" in */.bionic/tmp) : ;; *) return 1 ;; esac
-  [ -L "${d%/tmp}" ] && return 1
+  if [ -L "${d%/tmp}" ]; then
+    # The spawned-worktree link (.bionic -> main checkout's) is trusted only when its
+    # target resolves inside this same repo — mirrors stop-guard's _bionic_symlink_in_repo.
+    local _repo="${d%/.bionic/tmp}" _target _common _root
+    _target="$(cd "${d%/tmp}" 2>/dev/null && pwd -P)" || return 1
+    _common="$(git -C "$_repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+    _root="$(cd "${_common%/.git}" 2>/dev/null && pwd -P)" || return 1
+    case "$_target/" in "$_root"/*) : ;; *) return 1 ;; esac
+  fi
   [ -L "$d" ] && return 1
   mkdir -p "$d" 2>/dev/null || return 1
   [ -L "$f" ] && return 1
