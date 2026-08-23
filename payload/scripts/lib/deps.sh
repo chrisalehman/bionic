@@ -56,12 +56,10 @@
 # route that uses one of the four still calls `jit_check`/`jit_offer` first —
 # that offer is the self-heal now rather than the ordinary first install.
 #
-# WHAT IS LEFT IN `when-needed`. `impeccable`, because it is native-kind and
-# `install_dep` — the function both setup loops call — is required to refuse
-# every native row, so an offer there would print a refusal at the user; and
-# `excalidraw-renderer`, a `uv sync` into the plugin's own tree that means
-# nothing to a machine which never renders a diagram. Chris's list named four
-# rows and neither of these.
+# `WHEN-NEEDED` IS NOW EMPTY. `impeccable` and `excalidraw-renderer` were the two
+# rows this ruling had left there — Chris's list named four rows and neither of
+# these — but commit `41110bd` (2026-08-22) promoted both to `extra` as well:
+# zero on-demand rows, so the roster below reflects it.
 #
 # `kind` is the orthogonal question — HOW a row installs — and it is what
 # `install_dep` and `check_dep` dispatch on. `native` means the plugin harness
@@ -71,10 +69,12 @@
 # the same function for the setup loop and for a just-in-time offer (AC-5).
 #
 # CLASS AND KIND ARE NOT THE SAME CUT, and impeccable is the row that proves it:
-# it is `when-needed` (a route asks for it at the moment of use) and `native`
-# (the harness installs it, from bionic's own marketplace). That is why the
-# marketplace rendering rule is stated over `kind` and the plugin.json
-# dependency rule over `class`.
+# it is `extra` (offered once at setup, same as document-skills and
+# example-skills) and `native` (the harness installs it, from bionic's own
+# marketplace, the same mechanism superpowers and agent-skills use at class
+# `core`) — three different classes, one kind. That is why the marketplace
+# rendering rule is stated over `kind` and the plugin.json dependency rule over
+# `class`.
 #
 # TRACEABILITY. Every row names its `consumer`: the repo-relative path of the
 # doctrine file that uses it, or one of exactly two literals — `substrate` for

@@ -90,6 +90,7 @@ ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
 no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
 
 expect_eq()    { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
+expect_ne()    { if [ "$2" != "$3" ]; then ok "$1"; else no "$1" "expected NOT '$2'"; fi; }
 expect_true()  { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
 expect_false() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then no "$label" "expected non-zero exit"; else ok "$label"; fi; }
 expect_match() {
@@ -336,9 +337,18 @@ chmod +x "${BIN}/npm"
 
 # ─── pnpm: a plain recorder ──────────────────────────────────────────────────
 #
-# Nothing reads a pnpm store back: `_dep_check_pnpm_store` answers `unknown` by
-# construction, because a content-addressable cache has no installed-state. A
-# shim that faked one would be inventing a surface the payload does not have.
+# CORRECTED 2026-08-22 (Step-6 critic F1). What this note used to say — that
+# `_dep_check_pnpm_store` answers `unknown` by construction because a
+# content-addressable cache has no installed-state — is exactly the premise the
+# 2026-08-22 ruling reversed: the probe reads `pnpm store path` and then
+# index.db, and answers a real yes/no like every other row.
+#
+# The true statement is narrower, and it is about THIS FIXTURE rather than about
+# the product: the shim is a recorder, so `pnpm store path` prints nothing, the
+# probe stops at its "no store to read" guard, and the `motion` row renders `–`.
+# Group 4 expects `unknown` for that one row for this reason and no other. A
+# shim that faked a store would be building an index.db, not a fake surface —
+# worth doing when a wave wants `motion` measured; it is not this wave.
 { printf '#!/bin/bash\n'
   printf 'echo "pnpm $*" >> "$BIONIC_TEST_CALLS"\n'
   printf 'exit 0\n'
@@ -567,19 +577,38 @@ jqf() {  # <jq-program> — read one value out of the fixture settings.json
   jq -r "$1" "$SETTINGS" 2>/dev/null || echo "<unreadable>"
 }
 
-# One `=== SECTION ===` block out of a doctor report, by name.
+# One table/section out of a doctor report, by its flush-left heading (doctor
+# no longer delimits sections with `=== NAME ===`; a heading is a line with no
+# leading whitespace — "THIRD PARTY — installed by /bionic:setup", "ENVIRONMENT",
+# "BIONIC NATIVE — ships inside the plugin" — and every row under it is indented).
+# The heading itself is matched by PREFIX, since most of them carry an em-dash
+# tagline after the name, and it is never printed back; capture runs until the
+# blank line doctor always prints before the next heading.
 doctor_section() {  # <file> <name>
-  awk -v want="=== $2 ===" '
-    $0 == want { on = 1; next }
-    on && /^=== / { on = 0 }
-    on { print }
+  awk -v want="$2" '
+    on && $0 == "" { on = 0 }
+    on { print; next }
+    index($0, want) == 1 { on = 1 }
   ' "$1"
 }
 
-# The `present` column of one DEPENDENCIES row. Read out of that section only,
-# so a name appearing in the degradation map cannot answer for it.
+# The `present` column of one THIRD PARTY row, read as yes/no/unknown off that
+# row's own verdict symbol (✓/✗/–) — the table that replaced DEPENDENCIES still
+# names each row by dependency name in column 2, so the same "find this name,
+# report its state" claim holds, just against `_doctor_third_row`'s columns
+# (symbol name version source state) instead of the deleted class-keyed table.
 dep_present() {  # <report-file> <name>
-  doctor_section "$1" "DEPENDENCIES" | awk -v n="$2" 'NF >= 6 && $2 == n { print $3; exit }'
+  doctor_section "$1" "THIRD PARTY" | awk -v n="$2" '
+    NF >= 4 && $2 == n {
+      # NOT `$1 == "✓"`. macOS /usr/bin/awk (20200816) compares these multibyte
+      # glyphs byte-blind: `$1 == "✓"` is true for ✗ and – as well, so the first
+      # branch always fired and every row read "yes" — 23 assertions vacuous
+      # (Step-6 critic F1). index(…)==1 discriminates all three.
+      if (index($1, "✓") == 1)      print "yes";
+      else if (index($1, "✗") == 1) print "no";
+      else                          print "unknown";
+      exit
+    }'
 }
 
 # ---------------------------------------------------------------------------
@@ -708,27 +737,63 @@ expect_eq "doctor exits 0" "0" "$DOC1_RC"
 
 # Every basic and extra row, read from the table rather than restated here.
 #
-# ONE MECHANISM ANSWERS SOMETHING OTHER THAN `yes`, and it is not an exception
-# made for a row that would not pass. `pnpm-store` has no presence surface at all
-# — a content-addressable cache is not an install — so `_dep_check_pnpm_store`
-# returns `unknown` on every machine, warm or cold. Asserting `yes` there would
-# demand a lie from the probe; asserting nothing would let a genuinely broken row
-# through. So the expectation is keyed on the KIND, read from the same table as
-# the roster, and it is still an equality against a stated value.
+# PER-ROW TRUTH, NOT A BLANKET `yes` (Step-6 critic F1). This loop asserted
+# `yes` for all 23 rows and got it from a parser that could not tell ✓ from ✗
+# from – (see `dep_present` above): every one of those assertions was vacuous.
+# Three of the rows are genuinely NOT present on this fixture, and in all three
+# cases that is a property of how deep the SHIM goes, not of the product — each
+# one still proves setup ISSUED the install, which is what Group 2 is about:
+#
+#   impeccable → no.      `claude plugin install impeccable@bionic` ran (it is in
+#                         $BIONIC_TEST_CALLS), but the claude shim reports every
+#                         installed plugin at version 1.0.0 and this row
+#                         constrains `^4.1.0`, so doctor renders
+#                         `✗ … violates ^4.1.0`. The row pins the version GATE
+#                         on top of the install, and pins an absent `impeccable`
+#                         — the one state the old blanket loop could not see.
+#   motion → unknown.     `pnpm store add motion@latest` ran too. The pnpm shim
+#                         is a recorder (see its note above), `pnpm store path`
+#                         prints nothing, and `_dep_check_pnpm_store` stops at
+#                         its "no store to read" guard. `unknown` was the right
+#                         expectation all along; the wave briefly "corrected" it
+#                         to `yes` on the strength of the vacuous parser.
+#   humanizer → no.       `git clone … ~/.claude/skills/humanizer` ran; the
+#                         fixture's git is a recorder, so no SKILL.md lands and
+#                         `_dep_check_github_skill` answers no. This is the
+#                         `github-skill` shim arm the TODO near the top of the
+#                         shim block still names as unwritten.
+#
+# Every other row installs through a shim that really writes, so `yes` there is
+# a measurement.
+dep_expected_present() {  # <name> — the state THIS fixture can produce
+  case "$1" in
+    impeccable) echo no ;;
+    motion)     echo unknown ;;
+    humanizer)  echo no ;;
+    *)          echo yes ;;
+  esac
+}
+
 for cls in basic extra; do
   while IFS= read -r name; do
     [ -n "$name" ] || continue
-    if [ "$(dep_query dep_field "$name" kind)" = "pnpm-store" ]; then
-      expect_eq "doctor: ${cls} row ${name} reports the honest unknown (a cache has no presence surface)" \
-        "unknown" "$(dep_present "$DOC1" "$name")"
-    else
-      expect_eq "doctor: ${cls} row ${name} reports present" "yes" "$(dep_present "$DOC1" "$name")"
-    fi
+    WANT="$(dep_expected_present "$name")"
+    expect_eq "doctor: ${cls} row ${name} reports present=${WANT}" \
+      "$WANT" "$(dep_present "$DOC1" "$name")"
   done <<< "$(dep_query dep_names_class "$cls")"
 done
 
-expect_match "doctor: the load state is loaded" \
-  '*loaded*' "$(doctor_section "$DOC1" "LOAD STATE")"
+# Doctor no longer prints a LOAD STATE section or the word "loaded" anywhere —
+# `case "$LOAD_STATE" in loaded) ;; ...` is a deliberate no-op, so a healthy
+# load leaves nothing to grep for directly. What IS still true, and testable:
+# BIONIC NATIVE only grows a "plugin" row for the other three states (failed,
+# absent, unknown — payload/scripts/doctor.sh:1232-1240), so the row's absence
+# is the positive proof the CLI loaded bionic, by exhaustion over the same four
+# states the deleted assertion named.
+expect_eq "doctor: the load state is loaded (no plugin-load row in BIONIC NATIVE)" "" \
+  "$(doctor_section "$DOC1" "BIONIC NATIVE" | awk '$2 == "plugin"')"
+expect_ne "doctor: the BIONIC NATIVE table is present (positive pair for the load-state row)" "" \
+  "$(doctor_section "$DOC1" "BIONIC NATIVE")"
 
 
 # ---------------------------------------------------------------------------
