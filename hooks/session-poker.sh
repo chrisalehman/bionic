@@ -405,9 +405,55 @@ count_main_thread_dispatches() {  # <transcript> -> count on stdout
   ' "$1" 2>/dev/null
 }
 
+# A REFUSAL IS A JOIN, NOT A LITERAL. `PreToolUse:Agent hook error:` is what the CLI writes
+# into a refused dispatch's tool_result — and it is ordinary text everywhere else. The plan
+# that specifies this check, the reviews of it and every brief that quotes it carry the
+# literal, so reading one of those files puts the marker in a tool_result of THAT read, and
+# a transcript-wide grep for it counted 19 refusals in the session that wrote this line
+# against a truth of 1 — the detector inert in the repository that builds it. So the marker
+# is credited only where it joins BY tool_use_id to an `Agent` tool_use of this thread: the
+# refused dispatch's own result. payload/scripts/lib/patrol.sh applies the identical rule
+# for doctor's reconstruction, and tests/cross-gate-agreement.test.sh §Q asks both copies
+# the same fixture and compares their two answers to each other.
+#
+# TWO REGIONS OF THE LINE, and only one of them is the result. Beside `message` the CLI
+# writes a sibling `toolUseResult` field restating the same result — and for a SPAWN it
+# writes the whole brief there, so a brief that quotes the marker (this one does) plants
+# one on a successful dispatch's own line. The scan therefore stops at that key: `message`
+# precedes it on every entry this machine has written (34k records, 0 counterexamples), and
+# a tool_result never appears twice in one entry, which is what lets one line credit at
+# most one refusal. If the CLI ever reorders those keys this over-credits again rather than
+# going quiet — §Q's spawn-echo fixture is what would say so.
+#
+# ONE PASS is enough: a result cannot be written before the call it answers, so every Agent
+# id is already known by the time its tool_result is read.
 count_refused_dispatches() {  # <transcript> -> count on stdout
   awk '
-    { n += gsub(/PreToolUse:Agent hook error:/, "") }
+    function quoted_value(seg,   v) {     # `"key" : "value"` -> value
+      v = seg; sub(/^.*:[[:space:]]*"/, "", v); sub(/"$/, "", v); return v
+    }
+    /"isSidechain"[[:space:]]*:[[:space:]]*true/          { next }
+    /"agent_?[Ii][dD]"[[:space:]]*:[[:space:]]*"[^"]/     { next }
+    {
+      # Every `Agent` tool_use on this line, by id. The CLI writes a tool_use as
+      # {"type","id","name","input",...}, so the id is the last one before the name.
+      rest = $0
+      while (match(rest, /"name"[[:space:]]*:[[:space:]]*"Agent"/)) {
+        head = substr(rest, 1, RSTART - 1)
+        rest = substr(rest, RSTART + RLENGTH)
+        if (match(head, /.*"id"[[:space:]]*:[[:space:]]*"[^"]+"/))
+          isagent[quoted_value(substr(head, RSTART, RLENGTH))] = 1
+      }
+
+      cut = index($0, "\"toolUseResult\"")
+      region = (cut > 0) ? substr($0, 1, cut - 1) : $0
+      if (index(region, "PreToolUse:Agent hook error:") > 0) {
+        while (match(region, /"tool_use_id"[[:space:]]*:[[:space:]]*"[^"]+"/)) {
+          if (quoted_value(substr(region, RSTART, RLENGTH)) in isagent) { n++; break }
+          region = substr(region, RSTART + RLENGTH)
+        }
+      }
+    }
     END { print n+0 }
   ' "$1" 2>/dev/null
 }
@@ -483,6 +529,12 @@ session_subagent_dir() {  # <session-id> -> path on stdout, nonzero if none
 #
 # It is a QUOTE, not an artifact. SKILL.md's own rule stands: persist it under
 # `<docs-root>/record/` before acting on it — a transcript is one cleanup away from gone.
+#
+# AND IT IS UNTRUSTED TEXT. What is quoted here is whatever the agent typed, printed into
+# the operator's terminal by a verb they ran to find out what a predecessor left behind —
+# an escape sequence in it would repaint or rewrite that terminal rather than be read. The
+# control characters are stripped for that reason, tab and newline excepted because the
+# report's own line structure is what the caller indents.
 agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing to quote
   local raw
   [ -f "$1" ] || return 1
@@ -499,7 +551,7 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
         length($0) - 2 >= min { last = $0 }
         END { if (last != "") print last; else if (any != "") print any }')"
   [ -n "$raw" ] || return 1
-  printf '%s' "$raw" | jq -r '.' 2>/dev/null | head -c "$ADOPT_TAIL_CAP"
+  printf '%s' "$raw" | jq -r '.' 2>/dev/null | tr -d '\000-\010\013-\037\177' | head -c "$ADOPT_TAIL_CAP"
 }
 
 # ONE FOLD PER PREDECESSOR ROSTER, and the same rule the fleet's other three folds keep: the
