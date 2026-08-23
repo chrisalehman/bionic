@@ -130,13 +130,28 @@ record_field() {  # <record-line> <key>
 
 record_version() { printf '%s' "$1" | cut -d'|' -f1; }
 
+_bionic_symlink_in_repo() {  # <repo> -> 0 iff $repo/.bionic resolves under this repo's own root
+  # spawn-worktree.sh links every spawned tree's .bionic to the main checkout's so a wave
+  # shares one plan tree. That one link is trusted when its target resolves INSIDE the
+  # same repository — under the parent of the git common dir — which a hostile repo cannot
+  # point at another repo's tree (Chris, 2026-08-23, epic-18 w3).
+  local repo="$1" target common root
+  target="$(cd "$repo/.bionic" 2>/dev/null && pwd -P)" || return 1
+  common="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  root="$(cd "${common%/.git}" 2>/dev/null && pwd -P)" || return 1
+  case "$target/" in "$root"/*) return 0 ;; *) return 1 ;; esac
+}
+
 state_paths() {  # <repo> -> echoes "<state-dir>|<state-file>"; nonzero if unsafe
   local repo="$1"
   # A hostile repo controls its own .bionic/ contents (TDD §8). A symlink at
   # any level lets a repo choose which file this gate reads its evidence out of —
   # the OPEN direction, which §8 forbids a repo from reaching. Refuse rather than
-  # follow: this gate refuses the stop, which is the safe side.
-  [ -L "$repo/.bionic" ] && return 1
+  # follow: this gate refuses the stop, which is the safe side. The one exception
+  # is the spawned-worktree link, accepted only when it stays inside this repo.
+  if [ -L "$repo/.bionic" ]; then
+    _bionic_symlink_in_repo "$repo" || return 1
+  fi
   [ -L "$repo/.bionic/tmp" ] && return 1
   local dir="$repo/.bionic/tmp"
   [ -L "$dir/stop-check.state" ] && return 1
