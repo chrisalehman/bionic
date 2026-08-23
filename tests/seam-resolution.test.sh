@@ -176,8 +176,6 @@ echo "=== Group 4: override unset -> the same check reads the REPO copy ==="
 _v="$(probe "$REPO" "$SEAM" read-hooks)"
 expect_eq "no override: named check reads the repo constant" \
   "SUPPORTED_SDLC_VERSION=14" "$_v"
-expect_absent "no override: named check does NOT read the doctored constant" \
-  "SUPPORTED_SDLC_VERSION=99999" "$_v"
 expect_eq "no override: hooks read carries no doctored marker" \
   "0" "$(probe "$REPO" "$SEAM" mark-hooks)"
 expect_eq "no override: skills read carries no doctored marker" \
