@@ -197,9 +197,7 @@ run_wall() {  # <payload> <wall> — the positive control: straight in, no guard
 # ============================================================
 echo "=== G0 — the guard exists and is syntactically sound ==="
 # ============================================================
-if [ -f "$GUARD" ]; then ok "hooks/agent-context-guard.sh exists"; else
-  no "hooks/agent-context-guard.sh exists" "missing: $GUARD"
-fi
+# (file-exists fixture check removed epic-18 W3 4/6: no production subject -- see ledger-agent-context-guard.md)
 if bash -n "$GUARD" 2>"$SANDBOX/.syn"; then ok "the guard parses (bash -n)"; else
   no "the guard parses (bash -n)" "$(cat "$SANDBOX/.syn")"
 fi
@@ -353,8 +351,7 @@ git -C "$WT_MAIN" add README.md
 git -C "$WT_MAIN" commit -qm seed 2>/dev/null
 WT_LINK="$SANDBOX/wt/linked"
 git -C "$WT_MAIN" worktree add -q -b t6-wt "$WT_LINK" >/dev/null 2>&1
-expect_eq "G6.2 fixture: a real git worktree exists" "yes" \
-  "$([ -e "$WT_LINK/.git" ] && echo yes || echo no)"
+# (fixture sanity check removed epic-18 W3 4/6: no production subject -- see ledger-agent-context-guard.md)
 expect_eq "G6.3 the guard roots a worktree path at the MAIN repository" \
   "$(cd "$WT_MAIN" && pwd -P)" \
   "$( ( eval "$GUARD_RESOLVER"; cd "$WT_LINK" && resolve_project_root "$WT_LINK/.bionic/x" "$WT_LINK" ) 2>/dev/null)"

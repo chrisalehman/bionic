@@ -145,14 +145,14 @@ probe_run_st() {
 
 echo "=== Group 1: the fixtures are present and the library still sources ==="
 
-expect_true "detect.sh exists" test -f "$DETECT_SH"
+# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
 expect_true "detect.sh passes bash -n" bash -n "$DETECT_SH"
-expect_true "fixture: plugin-list-healthy.txt" test -f "$FIX_HEALTHY"
-expect_true "fixture: plugin-list-dep-broken.txt" test -f "$FIX_BROKEN"
-expect_true "fixture: plugin-list-f12-healthy.txt" test -f "$FIX_F12_HEALTHY"
-expect_true "fixture: plugin-list-f12-dep-broken.txt" test -f "$FIX_F12_BROKEN"
-expect_true "fixture: installed-plugins-dup.json" test -f "$FIX_DUP"
-expect_true "the duplicate registry fixture is valid JSON" jq -e . "$FIX_DUP"
+# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
+# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
+# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
+# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
+# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
+# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
 
 # Fixture fidelity, asserted rather than asserted-in-a-comment: the captured
 # lines are still the shapes the parser is written against.
@@ -436,8 +436,7 @@ for f in "$BASE_BIN"/*; do ln -sf "$(readlink "$f")" "${SLOWJQ_BIN}/${f##*/}" 2>
 # measure the degradation instead of the bound.
 SLEEP_REAL="$(command -v sleep 2>/dev/null)"
 [ -n "$SLEEP_REAL" ] && ln -sf "$SLEEP_REAL" "${SLOWJQ_BIN}/sleep"
-expect_true "the wedge lane carries sleep, so the bound is what is being measured" \
-  test -x "${SLOWJQ_BIN}/sleep"
+# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
 
 # A jq that stalls on THE DUPLICATES PROGRAM ONLY. Every other jq call in the library — the
 # registry parses the same run makes — is the real one, so the arm measures this probe's

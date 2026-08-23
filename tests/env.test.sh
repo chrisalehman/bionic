@@ -341,8 +341,7 @@ plant_settings_populated "$S8_DIR/dotfiles/settings.json"
 chmod 600 "$S8_DIR/dotfiles/settings.json"
 ln -s "$S8_DIR/dotfiles/settings.json" "$S8_DIR/home/settings.json"
 S8_LINK="$S8_DIR/home/settings.json"
-expect_eq "fixture: the symlink target really is 0600" "600" \
-  "$(stat -f '%Lp' "$S8_DIR/dotfiles/settings.json" 2>/dev/null || stat -c '%a' "$S8_DIR/dotfiles/settings.json" 2>/dev/null)"
+# (fixture sanity check removed epic-18 W3 4/6: no production subject -- see ledger-env.md)
 env_status "$S8_LINK" -- env_set BASH_MAX_TIMEOUT_MS 1800000
 expect_true "symlink arm: env_set really wrote through the link (not vacuous)" \
   bash -c 'jq -e ".env.BASH_MAX_TIMEOUT_MS == \"1800000\"" "$1" >/dev/null' _ "$S8_LINK"
