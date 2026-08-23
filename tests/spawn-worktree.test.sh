@@ -5,7 +5,8 @@
 #
 #   payload/scripts/spawn-worktree.sh   the universal worktree contract
 #
-# WHY IT IS NOT IN tests/plugin-lib.test.sh. That suite's header names its
+# WHY IT IS NOT IN tests/plugin-lib.test.sh (deleted at 8582861, epic-18 wave-03;
+# the rationale below is historical). That suite's header named its
 # subject: the two SOURCED libraries every command consumes, driven through a
 # `lib_run` harness that sources a file and calls a function. This subject is an
 # EXECUTED script whose whole behavior is mutation of a real git repository, and
@@ -56,7 +57,8 @@ expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got
 expect_true() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
 expect_false() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then no "$label" "expected non-zero exit"; else ok "$label"; fi; }
 # Pattern match without a pipe: `printf | grep -q` is a SIGPIPE race under
-# pipefail (tests/assert-helper-race.test.sh pins that lesson).
+# pipefail (tests/assert-helper-race.test.sh used to pin that lesson; deleted at
+# 8582861, epic-18 wave-03, and nothing replaced the pin).
 expect_match() {
   local label="$1" pattern="$2" actual="$3"
   # shellcheck disable=SC2053  # RHS is a glob on purpose

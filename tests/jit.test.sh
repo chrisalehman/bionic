@@ -15,7 +15,8 @@
 # path lands in the override, jit_offer contains no private copy of the
 # install logic.
 #
-# HERMETIC, same regime as tests/plugin-lib.test.sh: no network, no live
+# HERMETIC, same regime tests/plugin-lib.test.sh used to run (deleted at
+# 8582861, epic-18 wave-03): no network, no live
 # ~/.claude, PATH replaced outright with a controlled bin dir (real coreutils
 # symlinked in, everything else a recorder stub).
 #
@@ -38,7 +39,8 @@ expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got
 expect_true() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
 expect_false() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then no "$label" "expected non-zero exit"; else ok "$label"; fi; }
 # Pattern match without a pipe: `printf | grep -q` is a SIGPIPE race under
-# pipefail (tests/assert-helper-race.test.sh pins that lesson).
+# pipefail (tests/assert-helper-race.test.sh used to pin that lesson; deleted at
+# 8582861, epic-18 wave-03, and nothing replaced the pin).
 expect_match() {
   local label="$1" pattern="$2" actual="$3"
   # shellcheck disable=SC2053  # RHS is a glob on purpose
@@ -49,7 +51,7 @@ expect_empty() { local label="$1" actual="$2"; if [ -z "$actual" ]; then ok "$la
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
 # ---------------------------------------------------------------------------
-# Fixture builders (mirrors tests/plugin-lib.test.sh)
+# Fixture builders (mirrored tests/plugin-lib.test.sh, deleted at 8582861, epic-18 wave-03)
 # ---------------------------------------------------------------------------
 
 make_stub() {  # <bindir> <name> [exit-code]
@@ -171,7 +173,8 @@ echo ""
 echo "=== Group 6: no assume-yes knob (S1-8 stands) ==="
 #
 # jit.sh must not grow an env-var bypass around consent — the same rule
-# tests/plugin-lib.test.sh pins for install_dep itself.
+# tests/plugin-lib.test.sh used to pin for install_dep itself; that suite was
+# deleted at 8582861 (epic-18 wave-03) and nothing replaced the pin there.
 
 # Matches an actual env-var-shaped bypass token (BIONIC_..._YES, ASSUME_YES=,
 # etc.) — not this file's own prose ("no assume-yes knob"), which is

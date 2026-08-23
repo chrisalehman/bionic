@@ -12,7 +12,8 @@
 # fallback for sessions where the task tools are absent — see
 # memory/task-tools-tengu-gate).
 #
-# HARNESS IDIOM mirrors tests/context-spend.test.sh: PASS/FAIL counters, mktemp
+# HARNESS IDIOM mirrored tests/context-spend.test.sh (deleted at 8582861, epic-18
+# wave-03): PASS/FAIL counters, mktemp
 # projects, resolve-roots for the hook path, real-shape Stop stdin JSON. The
 # transcript fixtures replay the JSONL shapes read out of live transcripts under
 # ~/.claude/projects/-Users-admin-workspace-personal-bionic/ on 2026-08-22:
@@ -320,7 +321,8 @@ fi
 
 # 24: THE SUITE IS REGISTERED. tests/*.test.sh is NOT globbed by the runner — an
 # unregistered suite is a silent false green, and this gate would then be a wall
-# nothing drives. (The pattern is tests/doctor.test.sh Group 11.)
+# nothing drives. (The pattern was tests/doctor.test.sh Group 11, deleted at
+# 8582861, epic-18 wave-03.)
 TOTAL=$((TOTAL + 1))
 if grep -q 'run "patrol-duties-gate.test.sh" bash tests/patrol-duties-gate.test.sh' \
      "${BIONIC_SCRIPTS_DIR}/tests/run.sh"; then

@@ -56,8 +56,10 @@
 # `env_get` / `env_live`, deps.sh's table accessors. It never
 # calls `install_dep`, `remove_dep` or `bionic_strip_permission_block`, and it
 # never shells out to brew/npm/uv/claude for anything but a version probe the
-# libraries already own. tests/doctor.test.sh fingerprints a whole fixture
-# machine — every file's sha256 AND every path — before and after a full run.
+# libraries already own. tests/doctor.test.sh used to fingerprint a whole
+# fixture machine — every file's sha256 AND every path — before and after a
+# full run; it was deleted at 8582861 (epic-18 wave-03) and nothing replaced
+# the fingerprint wall.
 #
 # THE THREE-VALUED WORLD. `present`, `absent` and `unknown` are three answers,
 # not two-plus-an-error. A dependency whose mechanism has no presence surface
@@ -175,8 +177,10 @@ BIONIC_PLUGIN_ID="bionic@bionic"
 #      real value are printed.
 #
 # AND EVERY LINE FITS. Nothing printed below may exceed 100 columns —
-# tests/doctor.test.sh walls it for both fixture machines — because a wrapped
-# line is rule 1 broken by the terminal rather than by this file.
+# tests/doctor.test.sh used to wall it for both fixture machines; that suite
+# was deleted at 8582861 (epic-18 wave-03) and nothing replaced the wall —
+# because a wrapped line is rule 1 broken by the terminal rather than by this
+# file.
 
 # The three symbols, and the invariant that gives them meaning: ✗ is printed if
 # and only if the same run puts a matching line in FIX. Anything true but not
@@ -1090,9 +1094,10 @@ case "$LEGACY_HOOK_COUNT" in
 esac
 # The skill copy, and NOT the hook files beside it. Setup step 7 owns the consented removal,
 # so there is a real thing to offer; and unlike the files, this copy is doing something —
-# arming eleven registrations a second time. The asymmetry is the point, and
-# tests/doctor.test.sh Group 14 pins it from the other side with a machine whose only
-# leftover is hook files and whose summary still reads "nothing to do".
+# arming eleven registrations a second time. The asymmetry is the point.
+# tests/doctor.test.sh Group 14 used to pin it from the other side with a machine whose only
+# leftover is hook files and whose summary still reads "nothing to do"; that suite was
+# deleted at 8582861 (epic-18 wave-03) and nothing replaced the pin.
 [ "$SKILL_COPY_STATE" = "yes" ] && fix "a legacy skill copy is installed, arming the same walls twice → run /bionic:setup"
 
 if [ "$PLUGIN_HOOKS" = "degraded" ] || [ "$PLUGIN_HOOKS" = "absent" ]; then

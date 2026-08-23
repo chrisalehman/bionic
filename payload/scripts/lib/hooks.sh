@@ -6,11 +6,13 @@
 # directory. Nothing else — no counting, no prompting, no reporting.
 #
 # WHY THE CHANNEL'S TWO HALVES LIVE IN TWO FILES. The COUNT is
-# `detect_legacy_channel_hooks`, and detect.sh is read-only by contract with a
-# fingerprint wall enforcing it (tests/plugin-lib.test.sh Group 15). A rewrite
+# `detect_legacy_channel_hooks`, and detect.sh is read-only by contract — a
+# fingerprint wall used to enforce it (tests/plugin-lib.test.sh Group 15,
+# deleted at 8582861, epic-18 wave-03; nothing replaced the wall). A rewrite
 # cannot live there. So the read half stays in detect.sh, the write half is
-# here, and what joins them is the predicate substring both spell — pinned
-# two-ended in tests/remove.test.sh.
+# here, and what joins them is the predicate substring both spell — no test
+# pins this two-ended agreement since tests/remove.test.sh was deleted at
+# 8582861.
 #
 # WHY THIS FILE EXISTS AT ALL. The rewrite used to be inline in setup.sh, while
 # remove.sh carried its own structurally different spelling of the same
@@ -54,9 +56,10 @@
 # and by callers that load no other library — so it cannot assume deps.sh came
 # first; and remove.sh's standalone door runs where scripts/lib/ is already gone.
 # A `. deps.sh` here would also break every mutation arm that runs a doctored
-# COPY of this file from a scratch directory. The four copies are pinned
-# byte-identical in tests/remove.test.sh, which is the same wall the settings
-# writer's two copies stand behind.
+# COPY of this file from a scratch directory. The four copies used to be
+# pinned byte-identical in tests/remove.test.sh, the same wall the settings
+# writer's two copies stood behind; that suite was deleted at 8582861 and
+# nothing replaced either wall.
 bionic_link_target() {  # <path> — the final target of a symlink chain, else <path>
   local p="${1:-}" link dir n=0
   while [ -L "$p" ] && [ "$n" -lt 40 ]; do
@@ -78,9 +81,10 @@ bionic_link_target() {  # <path> — the final target of a symlink chain, else <
 BIONIC_LEGACY_HOOK_SUBSTR='.claude/hooks/'
 
 # Byte-identical to remove.sh's RM_LEGACY_HOOK_STRIP_JQ apart from the name of
-# the variable interpolated into it. tests/remove.test.sh Group 8 extracts both
-# and compares them, which is what makes "remove.sh keeps a copy" a decision
-# rather than a drift.
+# the variable interpolated into it. tests/remove.test.sh Group 8 used to
+# extract both and compare them, which made "remove.sh keeps a copy" a
+# decision rather than a drift; that suite was deleted at 8582861 and nothing
+# replaced the check.
 BIONIC_LEGACY_HOOK_STRIP_JQ='
   if (.hooks | type) != "object" then .
   else
@@ -121,8 +125,8 @@ BIONIC_LEGACY_HOOK_STRIP_JQ='
 # the obvious spelling — leaves the tmp holding the tokens at 0644 under a
 # predictable name, and makes the widening PERMANENT if the process dies in the
 # window between the two. Do not move either below the rename. remove.sh's
-# `_rm_write` carries the same ordering, and tests/remove.test.sh pins the
-# shape across both writers.
+# `_rm_write` carries the same ordering; no test pins the shape across both
+# writers since tests/remove.test.sh was deleted at 8582861.
 #
 # THE STALE TMP IS REMOVED, NOT TRUNCATED. `>` on an existing file keeps that
 # file's mode, so a tmp left behind by an earlier interrupted run would carry

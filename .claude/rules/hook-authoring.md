@@ -22,15 +22,18 @@ section, and of this file, was never bootstrap-era and is unchanged.)*
   the hook tests out of `hooks/` into `tests/` and retired the `hooks/*.test.sh` glob-pick;
   `tests/run.sh` now hand-lists all 42 suites by name and discovers nothing.)* Registration
   coverage for a new hook is partly structural and partly manual. Structural:
-  `tests/scripts.test.sh` 4a/4b/4c enforce hook↔test pairing and — for an always-on wall —
-  that every command in the payload's `hooks/hooks.json` names a file that exists and is
-  rooted at `${CLAUDE_PLUGIN_ROOT}`. Manual, and enforced by nothing: the suite's own `run`
+  `tests/scripts.test.sh` 4a/4b/4c used to enforce hook↔test pairing and — for an always-on
+  wall — that every command in the payload's `hooks/hooks.json` names a file that exists and is
+  rooted at `${CLAUDE_PLUGIN_ROOT}`. That suite was deleted at 8582861 (epic-18 wave-03) and
+  nothing replaced either wall — both are logged debt now. Manual, and enforced by nothing: the suite's own `run`
   line in `tests/run.sh`. **Adding a hook = source file + `.test.sh` sibling + a registration
   (`hooks/hooks.json` for an always-on wall, the skill's own frontmatter for an armed-session
   one) + a `run "<name>.test.sh"` line in `tests/run.sh`.** Omit that last one and 4a still
   passes — the pairing exists — but the suite never executes and the gate stays green over
   nothing. Several suites defend themselves by grepping `tests/run.sh` for their own `run`
-  line as an assertion (`tests/doctor.test.sh` carries the pattern to copy); no arm checks
+  line as an assertion (`tests/doctor.test.sh` used to carry the pattern to copy; it was
+  deleted at 8582861, epic-18 wave-03 — `tests/patrol-duties-gate.test.sh` Group 24 is the
+  current example); no arm checks
   the set as a whole, so a new suite that skips both the `run` line and the self-check is
   invisible.
 
@@ -83,7 +86,8 @@ section, and of this file, was never bootstrap-era and is unchanged.)*
   `playwright-cli` (CLI-first). The chrome-devtools MCP stays installed but is reserved as the
   deep-debug escalation only (Lighthouse, perf-trace analysis, profiling, network throttling).
   The MCP remains a real dependency — keep its row in `deps.sh`; `tests/plugin-lib.test.sh`
-  pins the table. *(Corrected 2026-08-20, epic-17 W6 S3b: `claude-config.txt` and
+  used to pin the table (deleted at 8582861, epic-18 wave-03; nothing replaced the pin).
+  *(Corrected 2026-08-20, epic-17 W6 S3b: `claude-config.txt` and
   `tests/scripts.test.sh` §3 are gone — the dependency roster has one owner.)*
 
 ## Refusal voices

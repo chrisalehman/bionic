@@ -109,8 +109,9 @@ env_default() {  # <key> — prints the value, exit 1 if the key is not bionic's
 #
 # NAMED CONSTANTS, NOT INLINE TEXT, because remove.sh's standalone door cannot
 # source this file and has to carry a copy — a copy of a named literal is
-# pinnable (tests/remove.test.sh does exactly that for six other literals), and
-# a copy of an inline expression is not.
+# pinnable in principle (tests/remove.test.sh used to do exactly that for six
+# other literals; it was deleted at 8582861 and nothing replaced it), and a
+# copy of an inline expression is not.
 #
 # `(.env // {})` on the write side: a settings.json with no `env` object at all
 # is the ordinary shape of a machine that never ran setup, and `+` on `null`
