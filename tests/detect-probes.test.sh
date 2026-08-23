@@ -7,7 +7,8 @@
 #   detect_plugin_load_state <plugin-id>   is the CLI actually loading this plugin
 #   detect_plugin_duplicates               two catalogs, one bare name
 #
-# WHY ITS OWN SUITE RATHER THAN A GROUP IN plugin-lib.test.sh. Different
+# WHY ITS OWN SUITE RATHER THAN A GROUP IN plugin-lib.test.sh (that suite was deleted
+# at 8582861, epic-18 wave-03; the rationale below is historical). Different
 # fixture regime. Every other detect function is driven against a fixture
 # TREE; these two are driven against a captured CLI TRANSCRIPT and a planted
 # registry, and the transcript fixtures are the evidence for the whole slice.
@@ -88,7 +89,8 @@ no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" 
 expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
 expect_true() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
 # Pattern match without a pipe: `printf | grep -q` is a SIGPIPE race under
-# pipefail (tests/assert-helper-race.test.sh pins that lesson).
+# pipefail (tests/assert-helper-race.test.sh used to pin that lesson; deleted at
+# 8582861, epic-18 wave-03, and nothing replaced the pin).
 expect_match() {
   local label="$1" pattern="$2" actual="$3"
   # shellcheck disable=SC2053  # RHS is a glob on purpose

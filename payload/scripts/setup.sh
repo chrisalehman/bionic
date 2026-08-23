@@ -1075,10 +1075,11 @@ setup_environment() {
   done
 
   # ONE LINE, ON PURPOSE. Both gates below are single lines carrying a named
-  # tag, because tests/setup.test.sh proves each is load-bearing by DELETING its
+  # tag, because tests/setup.test.sh used to prove each is load-bearing by DELETING its
   # line from a copy of this file and re-running: a gate spread over an if/fi
   # pair cannot be deleted that way without breaking the copy's syntax, and a
-  # mutation that turns the script into a parse error proves nothing.
+  # mutation that turns the script into a parse error proves nothing. That suite
+  # was deleted at 8582861 (epic-18 wave-03) and nothing replaced the mutation proof.
   [ -n "$missing" ] || { item "$SETUP_OK" "environment" "already written to ${settings} — nothing to do"; return 0; }  # idempotence guard: settings env
 
   say "   ${settings} does not carry all of bionic's environment settings:"
@@ -1286,8 +1287,10 @@ setup_legacy_channel_hooks() {
   esac
 
   # The pre-plugin hooks directory is named without a path literal on purpose:
-  # tests/plugin-paths.test.sh forbids an installed-path literal on any
-  # executable line in the payload, and a user-facing string is still one.
+  # tests/plugin-paths.test.sh used to forbid an installed-path literal on any
+  # executable line in the payload, and a user-facing string is still one. That
+  # suite was deleted at 8582861 (epic-18 wave-03) and nothing replaced the
+  # forbid; the discipline is kept here on trust, not enforcement.
   say "   ${count} hook entr(ies) in ${settings} still point into the pre-plugin hooks directory."
   # WHAT THIS PROMPT IS ALLOWED TO PROMISE. Offering to delete a user's only
   # live hook registrations is safe when the plugin channel already carries the
@@ -1354,7 +1357,9 @@ setup_legacy_skill_copy() {
   say "   ${dir} is a pre-plugin copy of a skill this payload ships — a session that loads it"
   say "   arms the same walls twice, once from the plugin and once from the retired copy."
   # The gate is one line so a mutation arm can delete it whole and watch the
-  # decline stop protecting anything (tests/setup.test.sh Group 12, mutation 4).
+  # decline stop protecting anything. tests/setup.test.sh Group 12, mutation 4
+  # used to run exactly that arm; it was deleted at 8582861 (epic-18 wave-03)
+  # and nothing replaced it.
   consent "   Remove ${dir} and everything under it?"; _setup_consent_rc=$?
   if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "${dir} is unchanged."; action "remove the pre-plugin skill copy at ${dir} — $(_setup_answer_yes legacy-skill-copy)"; return 0; fi  # consent gate: legacy skill copy
 

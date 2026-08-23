@@ -78,8 +78,9 @@ expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no outp
 #   * dispatch brief text (BRIEF_FULL / the compact variant) — SYNTHESIZED,
 #     but its LABEL GRAMMAR is the shipped one: skills/canonical-sdlc/SKILL.md
 #     §Dispatch's seven-field sentence (span-pinned by
-#     tests/dispatch-spans.test.sh §5d) and the exemplar brief recorded
-#     verbatim at .bionic/docs/record/w2-ac3-run.md:25-40.
+#     tests/dispatch-spans.test.sh §5d — that suite was deleted in an earlier
+#     purge, commit b959b5e, and nothing replaced the span pin) and the
+#     exemplar brief recorded verbatim at .bionic/docs/record/w2-ac3-run.md:25-40.
 #   * attestation record — FAITHFUL to hooks/preflight-probe.sh's own
 #     schema/comment block: `# comment` + `key=value` lines, read BY KEY
 #     (checklist A6), `session_id=` the field this gate keys on (Slice 4/1
