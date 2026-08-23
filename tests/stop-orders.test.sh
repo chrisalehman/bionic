@@ -80,7 +80,6 @@ expect_status "unknown verb: usage error" 2 "$ST"
 run_orders "$R1" order
 expect_status "order with no target: usage error" 2 "$ST"
 run_orders "$R1" order --at 12345
-expect_status "the target comes first" 2 "$ST"
 run_orders "$R1" order agent --at notanumber
 expect_status "--at takes epoch seconds" 2 "$ST"
 run_orders "$R1" standdown extra

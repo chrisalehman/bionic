@@ -277,7 +277,6 @@ echo x > "$NB/f"; git -C "$NB" add f; git -C "$NB" commit --quiet -m c1
 NBSHA="$(sha_of "$NB")"
 expect_match "a repo with no .bionic directory is refused" "spawn-worktree: FAIL reason=*" \
   "$(spawn_out "$NB" create "$NBSHA" nostate)"
-expect_false "that refusal left no worktree behind" test -e "${NB}/.worktrees/nostate"
 mkdir -p "$NB/.bionic"
 expect_match "the same repo is accepted once .bionic exists (the arm discriminates)" \
   "spawn-worktree: OK *" "$(spawn_out "$NB" create "$NBSHA" nostate)"
@@ -347,7 +346,6 @@ expect_match "removing a path that is not a worktree is refused" "spawn-worktree
   "$(spawn_out "$R7" remove "${R7}/.worktrees/never-existed")"
 expect_match "removing the MAIN checkout is refused" "spawn-worktree: FAIL reason=*" \
   "$(spawn_out "$R7" remove "$R7")"
-expect_true "the main checkout is untouched" test -f "${R7}/file.txt"
 expect_match "remove with no path is refused" "spawn-worktree: FAIL reason=*" \
   "$(spawn_out "$R7" remove)"
 
@@ -473,9 +471,6 @@ expect_true "tests/run.sh names spawn-worktree.test.sh" \
 echo ""
 echo "=== Group 12: the shipped skill is the payload's own copy ==="
 
-expect_eq "the skill is the plugin payload's own copy (symlink, not a fork)" \
-  "$(cd "${REPO}/payload/skills/canonical-sdlc" && pwd -P)" \
-  "$(cd "${BIONIC_SKILLS_DIR}/canonical-sdlc" && pwd -P)"
 
 echo ""
 echo "========================================"

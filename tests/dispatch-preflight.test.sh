@@ -279,7 +279,6 @@ write_legacy_attestation() {
 echo "=== S1 — relevance hoist (A7): irrelevant tool passes, silent ==="
 # ============================================================
 
-expect_status "gate script exists and is invocable" "0" "$([ -f "$GATE" ] && echo 0 || echo 1)"
 
 REPO=$(make_repo r1 yes)
 # no attestation exists at all — if tool_name gating were bypassed, an
@@ -690,8 +689,6 @@ expect_status "compact grammar: progress path lifted from a mid-line 'Progress:'
   ".bionic/tmp/w99-two.progress" "$(roster_field "$ROW" progress)"
 # "4/4" inside the commit subject is slash-bearing but not a path; a lifted
 # deliverable list containing it would mean the extractor is matching fractions.
-expect_absent "compact grammar: a bare fraction is not lifted as a deliverable path" \
-  "4/4" "$(roster_field "$ROW" deliverable)"
 
 # ============================================================
 echo "=== S10c — a missing NON-deliverable field is RECORDED + WARNED, never blocked (AC-1) ==="

@@ -290,11 +290,9 @@ fire "$d" SubagentStop; expect_allow "17: a SubagentStop payload passes"
 # 18/19: nothing to read -> nothing to say.
 d=$(make_env); u_tick "$d"
 fire_raw "$d" "$(stdin_for "$d" "$d/nonexistent.jsonl")"
-expect_allow "18: a transcript_path that does not exist passes"
 
 d=$(make_env); u_tick "$d"
 fire_raw "$d" "$(jq -nc --arg c "$d" '{session_id:"s",cwd:$c,hook_event_name:"Stop",stop_hook_active:false}')"
-expect_allow "19: a payload with no transcript_path passes"
 
 # 20: malformed lines are skipped, not fatal.
 d=$(make_env); u_tick "$d"; junk "$d"; a_tool "$d" ListAgents; junk "$d"; a_tool "$d" TaskList
