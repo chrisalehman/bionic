@@ -120,7 +120,13 @@ BASE_BIN="$TMP/bin-base"; mkdir -p "$BASE_BIN"
 # hang (the plugin listing, brew, npm) and, with no `timeout` on a stock macOS,
 # the bound is a poll loop that needs it. Without `sleep` on PATH doctor runs the
 # probe unbounded, which is a different code path from the one under test.
-for real in bash sh env cat grep sed awk mkdir rm cp mv chmod ls tr head tail sort uniq wc jq python3 find shasum sleep diff; do
+# `date` and `stat` joined the list for the Patrol section (T2): a stamp's age
+# is `now` minus its mtime, and both spellings of `stat` are tried in turn.
+# `dirname`/`basename` are here because hooks/session-poker.sh — which doctor
+# asks for the Patrol interval, rather than keeping a second copy of that
+# constant — resolves a project root with them, and reads its own machine
+# lines with `cut`.
+for real in bash sh env cat grep sed awk mkdir rm cp mv chmod ls tr head tail sort uniq wc jq python3 find shasum sleep diff date stat dirname basename cut; do
   p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BASE_BIN}/${real}" 2>/dev/null
 done
 
@@ -573,16 +579,22 @@ ROSTER FOOTPRINT"
 expect_eq "healthy: no FIX section on a machine with nothing to fix" \
   "" "$(grep -c '^=== FIX ===$' "$H_OUT" | grep -v '^0$' || true)"
 
-# THE CERTIFIED DEFAULT PAGE: a header, a verdict, three tables. Asserted as the
+# THE CERTIFIED DEFAULT PAGE: a header, a verdict, four tables. Asserted as the
 # ordered list of its table titles for the same reason the roster above is — a
-# containment check passes on a page that prints all three in the wrong order.
+# containment check passes on a page that prints all four in the wrong order.
+#
+# PATROL JOINED THE PAGE 2026-08-22 (task T2, plan task-dispatch-wall-channel-loss),
+# and it comes LAST on purpose: the three above it read files that exist, and it
+# reads a reconstruction of something no file holds. A section whose answer is
+# inferred belongs under the sections whose answers are read.
 default_tables() {  # <doctor-output-file> -> one table title per line, in order
   sed -n 's/^\([A-Z][A-Z ]*[A-Z]\)\( — .*\)\{0,1\}$/\1/p' "$1"
 }
 EXPECTED_TABLES="BIONIC NATIVE
 THIRD PARTY
-ENVIRONMENT"
-expect_eq "healthy: the default report is the three certified tables, in order" \
+ENVIRONMENT
+PATROL"
+expect_eq "healthy: the default report is the four certified tables, in order" \
   "$EXPECTED_TABLES" "$(default_tables "$H_DEF")"
 expect_match "healthy: the header names the payload version and the commit it came from" \
   "Bionic Doctor — payload 0.1.0 @ *" "$(head -1 "$H_DEF")"
@@ -751,7 +763,7 @@ doctor_run "$DOCTOR_SH" "$BROKEN_BIN" "$BROKEN" > "$B_DEF" 2>&1
 
 expect_eq "doctor exits 0 on a broken machine too (a diagnosis is not a failure)" "0" "$B_RC"
 
-expect_eq "broken: the default report still renders the three certified tables" \
+expect_eq "broken: the default report still renders the four certified tables" \
   "$EXPECTED_TABLES" "$(default_tables "$B_DEF")"
 
 
@@ -2158,6 +2170,378 @@ FP_ENV_BEFORE="$(fingerprint "$ENV_M")"
 doctor_run "$DOCTOR_SH" "$FULL_BIN" "$ENV_M" > /dev/null 2>&1
 expect_eq "the environment section mutates nothing" \
   "$FP_ENV_BEFORE" "$(fingerprint "$ENV_M")"
+
+
+# ---------------------------------------------------------------------------
+echo "=== Group 22: PATROL — the reconstruction, its duplicates, its stamp, its wall ==="
+# ---------------------------------------------------------------------------
+#
+# WHAT THIS GROUP OWNS. The one section on the page with no file under it. The
+# CLI keeps its cron table in process memory and writes none of it down, so
+# doctor reconstructs it from two things that ARE on disk — the session files
+# that name each live process, and those sessions' transcripts, where
+# `CronCreate` and `CronDelete` are recorded tool_uses. Every fixture below is
+# built from shapes captured off this machine on 2026-08-22; the capture
+# commands are quoted at each builder.
+#
+# BEHAVIOUR, NOT PROSE. The output-text pins were purged from this suite on
+# 2026-08-22 (b959b5e). What is asserted here is a VERDICT (`none armed`,
+# `1 armed`, `DUPLICATE (n)`, `firing`, `NOT firing`) and a COUNT, plus one
+# literal: the `CronDelete <id>` line, which is a command a reader pastes and
+# is therefore load-bearing text rather than decoration.
+#
+# EVERY ARM IS A DIFFERENT MACHINE, because a live session is keyed by the pid
+# of a process that must actually exist. The suite's own pid is used for the
+# live one — `kill -0` is what doctor asks, and the suite is by definition
+# alive while it asks.
+
+# The transcript shapes, captured with:
+#   jq -c 'select(.type=="assistant") | .message.content[]?
+#          | select(.type=="tool_use" and (.name|test("^Cron")))' <transcript>
+#   jq -c 'select(.type=="user") | .message.content[]?
+#          | select(.type=="tool_result" and .tool_use_id=="toolu_…")' <transcript>
+# The job id is NOT in the request — the platform mints it and names it in the
+# result prose, in one of the two forms measured on this machine:
+#   "Scheduled recurring job b63afd05 (13,43 * * * *). Session-only …"
+#   "Scheduled one-shot task 1037a802 (46 10 18 8 *). Session-only …"
+tx_create() {  # <transcript> <tool_use_id> <cron> <prompt> <recurring:true|false> <job-id> <kind-word>
+  jq -nc --arg id "$2" --arg cron "$3" --arg prompt "$4" --argjson rec "$5" \
+    '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[
+       {type:"tool_use",id:$id,name:"CronCreate",input:{cron:$cron,prompt:$prompt,recurring:$rec}}]}}' >> "$1"
+  jq -nc --arg id "$2" \
+    --arg txt "Scheduled $7 $6 ($3). Session-only (not written to disk, dies when Claude exits)." \
+    '{type:"user",isSidechain:false,message:{role:"user",content:[
+       {type:"tool_result",tool_use_id:$id,content:$txt}]}}' >> "$1"
+}
+tx_delete() {  # <transcript> <tool_use_id> <job-id>
+  jq -nc --arg id "$2" --arg jid "$3" \
+    '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[
+       {type:"tool_use",id:$id,name:"CronDelete",input:{id:$jid}}]}}' >> "$1"
+  jq -nc --arg id "$2" --arg txt "Cancelled job $3." \
+    '{type:"user",isSidechain:false,message:{role:"user",content:[
+       {type:"tool_result",tool_use_id:$id,content:$txt}]}}' >> "$1"
+}
+# A main-thread dispatch. `isSidechain:false` is what makes it main-thread; a
+# subagent's own turns carry `true` and are not dispatches this session made.
+tx_agent() {  # <transcript> <tool_use_id> <agent-name>
+  jq -nc --arg id "$2" --arg nm "$3" \
+    '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[
+       {type:"tool_use",id:$id,name:"Agent",input:{name:$nm,subagent_type:"bionic:implementor",prompt:"…"}}]}}' >> "$1"
+}
+# A SIDECHAIN dispatch — a subagent dispatching in its own turn. It is NOT a
+# main-thread dispatch and must not be counted as one, which is the only thing
+# keeping the wall-blindness number from drifting upward on every fan-out.
+tx_agent_sidechain() {  # <transcript> <tool_use_id> <agent-name>
+  jq -nc --arg id "$2" --arg nm "$3" \
+    '{type:"assistant",isSidechain:true,message:{role:"assistant",content:[
+       {type:"tool_use",id:$id,name:"Agent",input:{name:$nm,subagent_type:"bionic:implementor",prompt:"…"}}]}}' >> "$1"
+}
+# A dispatch the WALL REFUSED — the CLI still writes the Agent tool_use (the
+# dispatch was attempted), but the wall's PreToolUse hook exits before
+# dispatch-preflight.sh's roster append, so this tool_use has a tool_result
+# carrying the CLI's own `PreToolUse:Agent hook error:` marker instead of a
+# normal completion. It must be credited to the walled side, not counted as a
+# gap — a refusal is the wall doing its job (session-poker.sh's
+# `count_refused_dispatches`, mirrored here).
+tx_agent_refused() {  # <transcript> <tool_use_id> <agent-name>
+  jq -nc --arg id "$2" --arg nm "$3" \
+    '{type:"assistant",isSidechain:false,message:{role:"assistant",content:[
+       {type:"tool_use",id:$id,name:"Agent",input:{name:$nm,subagent_type:"bionic:implementor",prompt:"…"}}]}}' >> "$1"
+  jq -nc --arg id "$2" \
+    --arg txt "PreToolUse:Agent hook error: dispatch refused by dispatch-preflight.sh" \
+    '{type:"user",isSidechain:false,message:{role:"user",content:[
+       {type:"tool_result",tool_use_id:$id,content:$txt}]}}' >> "$1"
+}
+
+# THE PATROL PROMPT IS NOT MATCHED BY ITS WORDING. It is composed per session by
+# a model, so its prose is not a fact anything may key on. What it must CONTAIN
+# is fixed by skills/canonical-sdlc/SKILL.md §Dispatch, whose first of four
+# reads is `session-poker.sh tick` — so that is the marker, and the arm below
+# with a job carrying a different prompt proves a non-Patrol timer is not
+# counted as one.
+PATROL_PROMPT='PATROL TICK — run `bash /p/hooks/session-poker.sh tick` and act on its decision. Then continue.'
+OTHER_PROMPT='One-shot: check the 529 backoff and resume the dead lineage if it is still dead.'
+
+# machine + a project repo that is not this repository + the poker the interval
+# comes from. `poker-interval: 60s` makes the staleness limit 120s, so an arm
+# can plant a stamp past it without waiting (memory: accelerate-clocks-under-test).
+plant_patrol_machine() {  # <machine-root>
+  local m="$1"
+  plant_machine "$m" healthy
+  cp "${REPO}/payload/hooks/session-poker.sh" "$m/plugin/hooks/session-poker.sh"
+  mkdir -p "$m/repo/.bionic/tmp" "$m/claude-home/sessions" "$m/claude-home/projects/-fixture-repo"
+  printf 'poker-interval: 60s\n' > "$m/repo/.bionic/config.yaml"
+}
+
+plant_patrol_session() {  # <machine-root> <sid> <pid>
+  jq -nc --argjson pid "$3" --arg sid "$2" --arg cwd "$1/repo" \
+    '{pid:$pid,sessionId:$sid,cwd:$cwd,version:"2.1.240",kind:"interactive"}' \
+    > "$1/claude-home/sessions/$3.json"
+  : > "$1/claude-home/projects/-fixture-repo/$2.jsonl"
+}
+
+plant_patrol_stamp() {  # <machine-root> <sid> <age-seconds>
+  local f="$1/repo/.bionic/tmp/patrol-$2.state"
+  printf 'patrol-stamp/v1|at=2026-08-22T00:00:00Z|session=%s|verb=tick\n' "$2" > "$f"
+  python3 -c 'import os,sys,time; p=sys.argv[1]; a=int(sys.argv[2]); os.utime(p,(time.time()-a,time.time()-a))' "$f" "$3"
+}
+
+# The roster, in the shape hooks/dispatch-preflight.sh writes it — captured with
+#   head -3 .bionic/tmp/roster-<sid>.state
+# The file is APPEND-ONLY and gains a row per status transition (`intended` at
+# the wall, then `confirmed`, then `identified`), which is why the dispatch
+# count is the number of `intended` rows and not the number of rows.
+plant_patrol_roster() {  # <machine-root> <sid> <name>...
+  local m="$1" sid="$2" nm; shift 2
+  local f="$m/repo/.bionic/tmp/roster-$sid.state"
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
+  for nm in "$@"; do
+    printf 'roster-state/v1|status=intended|session=%s|name=%s|agent_id=|launched_at=2026-08-22T00:00:00Z|subagent_type=bionic:implementor|model=|deliverable=/tmp/%s.md|source=declared|duration=20 minutes.|progress=/tmp/p-%s.md|claims=|cadence=5m|absent=|waiver=|tool_use_id=toolu_%s\n' \
+      "$sid" "$nm" "$nm" "$nm" "$nm" >> "$f"
+    printf 'roster-state/v1|status=identified|session=%s|name=%s|agent_id=a%s-deadbeef|launched_at=2026-08-22T00:00:00Z|subagent_type=bionic:implementor|model=|deliverable=/tmp/%s.md|source=declared|duration=20 minutes.|progress=/tmp/p-%s.md|claims=|cadence=5m|absent=|waiver=|tool_use_id=toolu_%s\n' \
+      "$sid" "$nm" "$nm" "$nm" "$nm" "$nm" >> "$f"
+  done
+}
+# The one marker hooks/landing-gate.sh writes, and the only thing that closes a
+# row for a reader that is not the sweeper.
+plant_patrol_swept() {  # <machine-root> <sid> <name>
+  printf 'landing-swept/v1|at=2026-08-22T00:10:00Z|session=%s|name=%s|agent_id=a%s-deadbeef|state=MET\n' \
+    "$2" "$3" "$3" >> "$1/repo/.bionic/tmp/roster-$2.state"
+}
+
+# Doctor, run FROM the fixture project — `here` is decided by comparing the
+# session's repo with doctor's own, so a run from anywhere else would report
+# every fixture session as somebody else's.
+doctor_run_at() {  # <cwd> <doctor.sh> <bin> <machine> [env…]
+  local d="$1"; shift
+  ( cd "$d" && doctor_run "$@" )
+}
+
+PATROL_BLOCK="$TMP/patrol-block.txt"
+patrol_block() {  # <doctor-output-file>
+  awk '/^PATROL —/{f=1} f' "$1" > "$PATROL_BLOCK" 2>/dev/null
+}
+# First matching line of the section, read from a FILE — never `awk … | grep -m1`,
+# which under `pipefail` kills the producer with SIGPIPE and answers 141
+# (memory: grep-q-sigpipe-under-pipefail).
+patrol_line() {  # <doctor-output-file> <needle>
+  patrol_block "$1"
+  grep -F -m1 -- "$2" "$PATROL_BLOCK" || true
+}
+patrol_count() {  # <doctor-output-file> <needle>
+  local c
+  patrol_block "$1"
+  # `grep -c` PRINTS 0 and EXITS 1 on no match, so an `|| echo 0` fallback
+  # prints a second zero and every count assertion compares against "0\n0".
+  c="$(grep -c -F -- "$2" "$PATROL_BLOCK" 2>/dev/null || true)"
+  printf '%s' "${c:-0}"
+}
+
+# ── (a) a machine with no live session at all ────────────────────────────────
+PAT_NONE="$TMP/machine-patrol-none"; plant_patrol_machine "$PAT_NONE"
+PAT_NONE_OUT="$TMP/patrol-none.txt"
+doctor_run_at "$PAT_NONE/repo" "$DOCTOR_SH" "$FULL_BIN" "$PAT_NONE" > "$PAT_NONE_OUT" 2>&1
+expect_contains "no live session: the section is still printed" \
+  "PATROL" "$(cat "$PAT_NONE_OUT")"
+expect_match "no live session: it says there is nothing to reconstruct" \
+  "*none*" "$(patrol_line "$PAT_NONE_OUT" "live sessions")"
+expect_eq "no live session: no delete line is offered" \
+  "0" "$(patrol_count "$PAT_NONE_OUT" "CronDelete")"
+
+# ── (b) zero Patrol jobs, one timer that is not the Patrol ───────────────────
+PAT_0="$TMP/machine-patrol-0"; plant_patrol_machine "$PAT_0"
+SID_0="aaaaaaaa-0000-4000-8000-000000000000"
+plant_patrol_session "$PAT_0" "$SID_0" "$$"
+TX0="$PAT_0/claude-home/projects/-fixture-repo/$SID_0.jsonl"
+tx_create "$TX0" "toolu_o1" "46 10 18 8 *" "$OTHER_PROMPT" false "1037a802" "one-shot task"
+PAT_0_OUT="$TMP/patrol-0.txt"
+doctor_run_at "$PAT_0/repo" "$DOCTOR_SH" "$FULL_BIN" "$PAT_0" > "$PAT_0_OUT" 2>&1
+expect_match "0 patrol jobs: the verdict is none armed" \
+  "*none armed*" "$(patrol_line "$PAT_0_OUT" "patrol jobs")"
+expect_match "0 patrol jobs: the non-Patrol timer is still reported, as another job" \
+  "*1*" "$(patrol_line "$PAT_0_OUT" "other jobs")"
+expect_eq "0 patrol jobs: no delete line" \
+  "0" "$(patrol_count "$PAT_0_OUT" "CronDelete")"
+expect_not_contains "0 patrol jobs: an unarmed session is not a problem in the verdict" \
+  "Patrol job" "$(head -3 "$PAT_0_OUT")"
+
+# ── (c) one Patrol job, stamped fresh, roster clean ──────────────────────────
+PAT_1="$TMP/machine-patrol-1"; plant_patrol_machine "$PAT_1"
+SID_1="bbbbbbbb-0000-4000-8000-000000000000"
+plant_patrol_session "$PAT_1" "$SID_1" "$$"
+TX1="$PAT_1/claude-home/projects/-fixture-repo/$SID_1.jsonl"
+tx_create "$TX1" "toolu_p1" "7,37 * * * *" "$PATROL_PROMPT" true "6d3b6356" "recurring job"
+tx_agent  "$TX1" "toolu_a1" "w1-alpha"
+tx_agent  "$TX1" "toolu_a2" "w1-beta"
+tx_agent_sidechain "$TX1" "toolu_a3" "w1-gamma-from-a-subagent"
+plant_patrol_stamp  "$PAT_1" "$SID_1" 30
+plant_patrol_roster "$PAT_1" "$SID_1" w1-alpha w1-beta
+plant_patrol_swept  "$PAT_1" "$SID_1" w1-beta
+PAT_1_OUT="$TMP/patrol-1.txt"
+doctor_run_at "$PAT_1/repo" "$DOCTOR_SH" "$FULL_BIN" "$PAT_1" > "$PAT_1_OUT" 2>&1
+expect_match "1 patrol job: the verdict is 1 armed" \
+  "*1 armed*" "$(patrol_line "$PAT_1_OUT" "patrol jobs")"
+expect_contains "1 patrol job: its id and cron are on the page" \
+  "6d3b6356" "$(cat "$PATROL_BLOCK")"
+expect_contains "1 patrol job: …with the cron expression beside it" \
+  "7,37 * * * *" "$(cat "$PATROL_BLOCK")"
+expect_eq "1 patrol job: nothing to delete" \
+  "0" "$(patrol_count "$PAT_1_OUT" "CronDelete")"
+expect_match "a fresh stamp reads firing" \
+  "*firing*" "$(patrol_line "$PAT_1_OUT" "patrol stamp")"
+expect_not_match "…and not NOT-firing" \
+  "*NOT firing*" "$(patrol_line "$PAT_1_OUT" "patrol stamp")"
+expect_match "the roster is counted by dispatch, not by row" \
+  "*2 dispatches*" "$(patrol_line "$PAT_1_OUT" "roster")"
+expect_match "…split into the open ones and the swept ones" \
+  "*1 open, 1 closed*" "$(patrol_line "$PAT_1_OUT" "roster")"
+expect_match "the wall saw every main-thread dispatch" \
+  "*2 dispatched, 2 rostered*" "$(patrol_line "$PAT_1_OUT" "dispatch wall")"
+expect_not_contains "a sidechain dispatch is not counted against the wall" \
+  "never reached it" "$(cat "$PATROL_BLOCK")"
+
+# ── (d) two Patrol jobs live, a third created and deleted ────────────────────
+PAT_2="$TMP/machine-patrol-2"; plant_patrol_machine "$PAT_2"
+SID_2="cccccccc-0000-4000-8000-000000000000"
+plant_patrol_session "$PAT_2" "$SID_2" "$$"
+TX2="$PAT_2/claude-home/projects/-fixture-repo/$SID_2.jsonl"
+tx_create "$TX2" "toolu_q0" "13,43 * * * *" "$PATROL_PROMPT" true "b63afd05" "recurring job"
+tx_delete "$TX2" "toolu_qd" "b63afd05"
+tx_create "$TX2" "toolu_q1" "11,41 * * * *" "$PATROL_PROMPT" true "5f6fdf96" "recurring job"
+tx_create "$TX2" "toolu_q2" "17,47 * * * *" "$PATROL_PROMPT" true "e34c715d" "recurring job"
+plant_patrol_stamp "$PAT_2" "$SID_2" 30
+PAT_2_OUT="$TMP/patrol-2.txt"
+doctor_run_at "$PAT_2/repo" "$DOCTOR_SH" "$FULL_BIN" "$PAT_2" > "$PAT_2_OUT" 2>&1
+expect_match "two live Patrol jobs: the verdict names the duplication and its count" \
+  "*DUPLICATE (2)*" "$(patrol_line "$PAT_2_OUT" "patrol jobs")"
+expect_eq "…and exactly one delete line is offered, for the one extra" \
+  "1" "$(patrol_count "$PAT_2_OUT" "CronDelete")"
+expect_contains "…naming the OLDER live job" \
+  "CronDelete 5f6fdf96" "$(cat "$PATROL_BLOCK")"
+expect_not_contains "…never the newest, which is the one that stays" \
+  "CronDelete e34c715d" "$(cat "$PATROL_BLOCK")"
+expect_not_contains "…and never the job that was already deleted" \
+  "b63afd05" "$(cat "$PATROL_BLOCK")"
+expect_contains "the duplication reaches the verdict at the top of the report" \
+  "CronDelete 5f6fdf96" "$(head -4 "$PAT_2_OUT")"
+
+# ── (e) armed, then stopped firing ───────────────────────────────────────────
+PAT_S="$TMP/machine-patrol-stale"; plant_patrol_machine "$PAT_S"
+SID_S="dddddddd-0000-4000-8000-000000000000"
+plant_patrol_session "$PAT_S" "$SID_S" "$$"
+TXS="$PAT_S/claude-home/projects/-fixture-repo/$SID_S.jsonl"
+tx_create "$TXS" "toolu_s1" "7,37 * * * *" "$PATROL_PROMPT" true "6d3b6356" "recurring job"
+# 600s against a 120s limit — 2x the 60s this project's config.yaml configures.
+plant_patrol_stamp "$PAT_S" "$SID_S" 600
+PAT_S_OUT="$TMP/patrol-stale.txt"
+doctor_run_at "$PAT_S/repo" "$DOCTOR_SH" "$FULL_BIN" "$PAT_S" > "$PAT_S_OUT" 2>&1
+expect_match "a stale stamp reads NOT firing" \
+  "*NOT firing*" "$(patrol_line "$PAT_S_OUT" "patrol stamp")"
+expect_match "…measured against 2x the interval this project configures" \
+  "*120s*" "$(patrol_line "$PAT_S_OUT" "patrol stamp")"
+expect_contains "…and it reaches the verdict at the top" \
+  "stopped firing" "$(head -5 "$PAT_S_OUT")"
+# A job in the table and a stamp that is not landing are two facts, not one
+# verdict: the section says the job is armed AND that nothing is firing.
+expect_match "…while the job table still reports the job as armed" \
+  "*1 armed*" "$(patrol_line "$PAT_S_OUT" "patrol jobs")"
+
+# ── (f) never armed: a stamp that was never written ──────────────────────────
+PAT_N="$TMP/machine-patrol-neverarmed"; plant_patrol_machine "$PAT_N"
+SID_N="eeeeeeee-0000-4000-8000-000000000000"
+plant_patrol_session "$PAT_N" "$SID_N" "$$"
+PAT_N_OUT="$TMP/patrol-neverarmed.txt"
+doctor_run_at "$PAT_N/repo" "$DOCTOR_SH" "$FULL_BIN" "$PAT_N" > "$PAT_N_OUT" 2>&1
+expect_match "no stamp at all reads never armed" \
+  "*never armed*" "$(patrol_line "$PAT_N_OUT" "patrol stamp")"
+expect_match "…and an empty roster says so rather than reporting zero contracts" \
+  "*none*" "$(patrol_line "$PAT_N_OUT" "roster")"
+
+# ── (g) the blind wall: dispatches the roster never saw ──────────────────────
+PAT_B="$TMP/machine-patrol-blind"; plant_patrol_machine "$PAT_B"
+SID_B="ffffffff-0000-4000-8000-000000000000"
+plant_patrol_session "$PAT_B" "$SID_B" "$$"
+TXB="$PAT_B/claude-home/projects/-fixture-repo/$SID_B.jsonl"
+tx_create "$TXB" "toolu_b1" "7,37 * * * *" "$PATROL_PROMPT" true "6d3b6356" "recurring job"
+tx_agent "$TXB" "toolu_b2" "w1-alpha"
+tx_agent "$TXB" "toolu_b3" "w1-beta"
+tx_agent "$TXB" "toolu_b4" "w1-gamma"
+plant_patrol_stamp  "$PAT_B" "$SID_B" 30
+plant_patrol_roster "$PAT_B" "$SID_B" w1-alpha
+PAT_B_OUT="$TMP/patrol-blind.txt"
+doctor_run_at "$PAT_B/repo" "$DOCTOR_SH" "$FULL_BIN" "$PAT_B" > "$PAT_B_OUT" 2>&1
+expect_match "three dispatches against one roster row: the wall is reported blind" \
+  "*2 of 3*" "$(patrol_line "$PAT_B_OUT" "dispatch wall")"
+expect_contains "…and the cure named in the verdict is the skill re-invocation" \
+  "/bionic:canonical-sdlc" "$(head -5 "$PAT_B_OUT")"
+
+# ── (h) a refused dispatch is not a blind wall ────────────────────────────────
+# One dispatch the wall REFUSED (still a tool_use, but its tool_result carries
+# the CLI's `PreToolUse:Agent hook error:` marker instead of a normal
+# completion) plus two real dispatches that both reach the roster. The wall
+# saw 3 tool_uses against 2 rostered rows, and the gap is fully explained by
+# the refusal — this must NOT read as blind.
+PAT_RF="$TMP/machine-patrol-refused-ok"; plant_patrol_machine "$PAT_RF"
+SID_RF="11111111-0000-4000-8000-000000000000"
+plant_patrol_session "$PAT_RF" "$SID_RF" "$$"
+TXRF="$PAT_RF/claude-home/projects/-fixture-repo/$SID_RF.jsonl"
+tx_create "$TXRF" "toolu_rf1" "7,37 * * * *" "$PATROL_PROMPT" true "6d3b6356" "recurring job"
+tx_agent_refused "$TXRF" "toolu_rf2" "w1-refused"
+tx_agent         "$TXRF" "toolu_rf3" "w1-alpha"
+tx_agent         "$TXRF" "toolu_rf4" "w1-beta"
+plant_patrol_stamp  "$PAT_RF" "$SID_RF" 30
+plant_patrol_roster "$PAT_RF" "$SID_RF" w1-alpha w1-beta
+PAT_RF_OUT="$TMP/patrol-refused-ok.txt"
+doctor_run_at "$PAT_RF/repo" "$DOCTOR_SH" "$FULL_BIN" "$PAT_RF" > "$PAT_RF_OUT" 2>&1
+expect_not_contains "a refused dispatch is credited to the wall, not read as a gap" \
+  "never reached it" "$(patrol_line "$PAT_RF_OUT" "dispatch wall")"
+expect_match "the wall line names the refusal explicitly" \
+  "*1 refused*" "$(patrol_line "$PAT_RF_OUT" "dispatch wall")"
+
+# ── (i) a refusal AND a genuinely missing dispatch, together ─────────────────
+# Same one refused dispatch, but now a THIRD real dispatch never lands on the
+# roster at all — a genuine gap the refusal does not explain. 4 tool_uses (1
+# refused, 3 real) against 2 rostered rows: net of the refusal, exactly 1
+# dispatch never reached the wall.
+PAT_RB="$TMP/machine-patrol-refused-blind"; plant_patrol_machine "$PAT_RB"
+SID_RB="22222222-0000-4000-8000-000000000000"
+plant_patrol_session "$PAT_RB" "$SID_RB" "$$"
+TXRB="$PAT_RB/claude-home/projects/-fixture-repo/$SID_RB.jsonl"
+tx_create "$TXRB" "toolu_rb1" "7,37 * * * *" "$PATROL_PROMPT" true "6d3b6356" "recurring job"
+tx_agent_refused "$TXRB" "toolu_rb2" "w1-refused"
+tx_agent         "$TXRB" "toolu_rb3" "w1-alpha"
+tx_agent         "$TXRB" "toolu_rb4" "w1-beta"
+tx_agent         "$TXRB" "toolu_rb5" "w1-gamma"
+plant_patrol_stamp  "$PAT_RB" "$SID_RB" 30
+plant_patrol_roster "$PAT_RB" "$SID_RB" w1-alpha w1-beta
+PAT_RB_OUT="$TMP/patrol-refused-blind.txt"
+doctor_run_at "$PAT_RB/repo" "$DOCTOR_SH" "$FULL_BIN" "$PAT_RB" > "$PAT_RB_OUT" 2>&1
+expect_match "the genuinely missing dispatch is still reported, net of the refusal" \
+  "*1 of 4*" "$(patrol_line "$PAT_RB_OUT" "dispatch wall")"
+expect_match "…and the refusal is still named on that same line" \
+  "*1 refused*" "$(patrol_line "$PAT_RB_OUT" "dispatch wall")"
+
+# ── the format rules hold over the new section ───────────────────────────────
+#
+# AC-15's width wall, applied to every arm above rather than to one: the lines
+# that can run long are exactly the ones carrying reconstructed values — a
+# prompt head, a cwd, a list of ids — and each of those appears in only some
+# arms.
+PAT_ALL="$TMP/patrol-all-blocks.txt"; : > "$PAT_ALL"
+for _po in "$PAT_NONE_OUT" "$PAT_0_OUT" "$PAT_1_OUT" "$PAT_2_OUT" "$PAT_S_OUT" "$PAT_N_OUT" "$PAT_B_OUT" "$PAT_RF_OUT" "$PAT_RB_OUT"; do
+  awk '/^PATROL —/{f=1} f' "$_po" >> "$PAT_ALL"
+done
+PAT_WIDE=""
+while IFS= read -r _pl; do
+  [ "$(printf '%s' "$_pl" | wc -m | tr -d ' ')" -gt 100 ] && PAT_WIDE="${PAT_WIDE}${_pl}"$'\n'
+done < "$PAT_ALL"
+expect_eq "every Patrol line fits inside 100 columns" "" "$PAT_WIDE"
+
+# ── READ-ONLY, over a machine with everything to read ────────────────────────
+FP_PAT_BEFORE="$(fingerprint "$PAT_2")"
+doctor_run_at "$PAT_2/repo" "$DOCTOR_SH" "$FULL_BIN" "$PAT_2" > /dev/null 2>&1
+expect_eq "the Patrol section mutates nothing — not the transcript, not the state files" \
+  "$FP_PAT_BEFORE" "$(fingerprint "$PAT_2")"
 
 # ---------------------------------------------------------------------------
 echo ""
