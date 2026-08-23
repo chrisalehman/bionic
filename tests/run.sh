@@ -46,7 +46,10 @@
 # existed when it ran (`.bionic/docs/record/epic-17-w7/s8-isolation-audit.md`), and
 # S8b read the one the same wave added, env.test.sh, which appears nowhere in the
 # first file (`.bionic/docs/record/epic-17-w7/s8b-isolation-delta.md`). The roster
-# below is 45. A new suite that writes outside its own mktemp root breaks this
+# below is no longer the 45 those two files read — epic-18 wave-03 deleted nineteen
+# suites on the reliability ruling and revived one — so a maintainer counts the `run`
+# lines rather than trusting a number in a comment. A suite that writes outside its
+# own mktemp root breaks this
 # premise, which is the other reason the roster is hand-listed: adding a line is the
 # moment to check — and to extend the audit, since neither existing file can cover
 # a suite written after it.
@@ -266,6 +269,14 @@ run "env.test.sh" bash tests/env.test.sh
 # of its doors, driven against sandbox HOMEs with a planted .zshrc and read back
 # through a real `zsh -ic 'type claude'`. Hand-listed like every suite outside hooks/.
 run "rc-item.test.sh" bash tests/rc-item.test.sh
+# The pristine-install suite (epic-18 T6, spec AC-10/AC-7; revived and raised at
+# wave-03 on Chris's D2): an empty $HOME through `setup --all` all-yes, `doctor`,
+# and `remove --all`, asserted against a MANIFEST of bytes rather than against a
+# report's own summary line. It is the only suite that starts from nothing and
+# the only one that reads all three scripts in one machine's lifetime, which is
+# also why it now carries the rc item — setup's newest write target, and the one
+# that lands in a file the user already owned. Hand-listed like every suite here.
+run "fresh-home.test.sh" bash tests/fresh-home.test.sh
 # Command-file conventions (epic-17 W3 S9, spec AC-1): globs payload/commands/*.md.
 # Command PERMISSIONS (epic-17 W6 S9b, walk finding W-1 / plan A-5.4): the byte-for-byte
 # agreement between each command file's own `allowed-tools` rule prefix and every fenced

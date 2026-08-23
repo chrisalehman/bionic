@@ -1,0 +1,1205 @@
+#!/bin/bash
+# FRESH HOME — the pristine-install suite (epic-18 T6; spec AC-10, AC-7).
+#
+# WHAT THIS SUITE OWNS, AND WHY IT EXISTS. Every other suite here drives ONE
+# script against a fixture built to exercise that script's own branches. None of
+# them ever asked the whole-product question: take a machine with NOTHING on it,
+# run `/bionic:setup` and answer yes to everything, and is the machine then in
+# the state the plugin claims to leave it in? On 2026-08-22 the answer was no —
+# ccstatusline's layout file was never copied and the notebooklm skill was never
+# installed — and `/bionic:doctor` said "nothing to do" over both, because every
+# probe asked "is this registered" rather than "is this in the state setup leaves
+# it in". Nothing in the suite could see it, because nothing in the suite ever
+# started from an empty $HOME.
+#
+# So this suite is the missing one: empty $HOME → `setup.sh --all` all-yes →
+# `doctor.sh` → assert against a MANIFEST of files, not against a report's own
+# summary line → `remove.sh --all` all-yes → assert the manifest is gone.
+#
+# THE MANIFEST IS THE POINT. A report that says "present" is the thing under
+# test, so it cannot also be the evidence. Every claim below that matters is a
+# claim about BYTES on the fixture filesystem — the ccstatusline layout is
+# compared to the shipped file with `cmp`, the notebooklm SKILL.md is a file test,
+# settings.json's three blocks are read back with jq. Doctor's own rows are
+# asserted too, but as a SECOND question ("does the report agree with the
+# machine"), never as the first.
+#
+# AND ONE ASSERTION IS NEGATIVE, DELIBERATELY BESIDE THE POSITIVE ONES (AC-7).
+# `~/.claude/CLAUDE.md` is the user's own file: bionic gave up managing memory on
+# 2026-08-20 and delegates it entirely to the harness. Nothing the plugin does may
+# create it. An absence proves nothing on its own — an empty $HOME is full of
+# absences, and a suite whose setup silently did nothing would pass such a check
+# perfectly. It earns its keep only because it sits in the SAME run as the
+# positive manifest above it: the run that proves setup wrote seven things is the
+# run that proves it did not write this eighth.
+#
+# HERMETIC, AND WHAT THAT COSTS. `$HOME` is a fixture directory and PATH is
+# REPLACED (not prefixed) by a bin dir this suite builds, so a real brew, npm, uv
+# or claude on this machine can never be reached by accident. Nothing here
+# touches the network and nothing here touches the real $HOME. The roots the
+# payload reads are NOT overridden one by one — HOME is set and every default
+# hangs off it, which is the whole point: the production path is what resolves
+# `~/.claude/settings.json`, `~/.config/ccstatusline/settings.json` and
+# `~/.claude/skills/`, and a suite that pointed each of them somewhere by hand
+# would be testing its own env block instead of the product's path resolution.
+#
+# THE SHIMS ARE PACKAGE MANAGERS, NOT SEAMS. `brew`, `npm`, `uv`, `npx` and
+# `claude` are faked, because installing nine Homebrew formulae is not what this
+# suite is measuring and because a suite that reached the network would not be a
+# suite. What is NOT faked is anything inside the payload: setup.sh, doctor.sh,
+# remove.sh and every library run exactly as shipped, `check_dep` really probes
+# the fixture machine, and the answers are read out of the fixture's own files.
+# The fakes are STATEFUL — `brew install ripgrep` really puts an `rg` on the
+# fixture PATH, `npm install -g` is visible to a later `npm list -g`, `claude
+# plugin install` writes the registry a later `plugin list` renders — because a
+# stateless stub would make every "then doctor reports it present" assertion
+# vacuous.
+#
+# THE PACKAGE→BINARY MAP IS READ FROM THE DEPENDENCY TABLE, never restated. The
+# table says `rg` installs from `brew:ripgrep` and `notebooklm` from
+# `uv:notebooklm-py`; the shims resolve a target back to the name doctor will
+# probe by reading that table. A row added to deps.sh therefore arrives here with
+# no edit, as long as its KIND is one the shims below already speak. A row of a
+# NEW kind (a github-skill, a marketplace plugin) needs a new arm in the shim
+# block — that is the one place this suite has to be extended by hand.
+#
+# REVIVED AND RAISED, epic-18 wave-03 (Chris D2, 2026-08-23). This suite was
+# deleted with eighteen others on the reliability ruling — "if the tests cannot
+# be made to fail, then the tests are no good" — and brought back on the
+# condition that it be fixed in the same act. Three things changed. The rows that
+# pinned a REPORT'S WORDING were rewritten to read a row's state marker, or
+# deleted where the claim was already carried by a claim about bytes. Every
+# negative now has a positive on the same extractor and the same fixture, and no
+# extractor's empty return is read as an answer before that extractor has been
+# seen to return something (.claude/rules test-authoring rule; memory
+# `no-vacuous-tests-at-authoring`). And the manifest grew the rc item — the
+# `claude()` shell function wave-03 added to setup's roster — because a
+# pristine-install manifest that does not carry setup's newest write target is
+# describing last month's product.
+#
+# WHY THE FIXTURE $HOME IS NOT QUITE EMPTY ANY MORE. It starts empty, and that is
+# still asserted; then exactly ONE file is planted, a `.zshrc` holding three lines
+# that are not bionic's. An rc item cannot be measured on a machine with no rc,
+# and a machine with no rc is not the pristine case anyway — a zsh user has a
+# .zshrc before they have bionic. The plant is the USER'S file, and every rc
+# assertion below is about what bionic did, and did not do, to it.
+#
+# ASSERTION-HELPER RACE. No `printf | grep -q` anywhere below
+# (tests/assert-helper-race.test.sh): containment is bash `[[ == * ]]` in-process,
+# and grep runs against FILE arguments only.
+#
+# Usage: bash tests/fresh-home.test.sh
+
+set -uo pipefail
+
+. "$(dirname "$0")/lib/resolve-roots.sh"
+
+REPO="${BIONIC_SCRIPTS_DIR}"
+PAYLOAD="${REPO}/payload"
+SETUP_SH="${PAYLOAD}/scripts/setup.sh"
+DOCTOR_SH="${PAYLOAD}/scripts/doctor.sh"
+REMOVE_SH="${PAYLOAD}/scripts/remove.sh"
+LIB_DIR="${PAYLOAD}/scripts/lib"
+CCSTATUSLINE_SHIPPED="${PAYLOAD}/ccstatusline/settings.json"
+
+PASS=0; FAIL=0; TOTAL=0
+ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
+no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
+
+expect_eq()    { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
+expect_ne()    { if [ "$2" != "$3" ]; then ok "$1"; else no "$1" "expected NOT '$2'"; fi; }
+expect_true()  { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
+expect_false() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then no "$label" "expected non-zero exit"; else ok "$label"; fi; }
+expect_match() {
+  local label="$1" pattern="$2" actual="$3"
+  # shellcheck disable=SC2053  # RHS is a glob on purpose
+  if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "no match for '$pattern' in: $(printf '%.400s' "$actual")"; fi
+}
+expect_no_match() {
+  local label="$1" pattern="$2" actual="$3"
+  # shellcheck disable=SC2053  # RHS is a glob on purpose
+  if [[ "$actual" == $pattern ]]; then no "$label" "unexpected match for '$pattern'"; else ok "$label"; fi
+}
+
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+
+# HARD REQUIREMENTS, NOT ASSERTIONS. A machine without these cannot answer the
+# suite's questions at all, and a red row would report a missing tool as a defect
+# in the product. Same guard shape as tests/rc-item.test.sh, which needs zsh for
+# the same reason: the rc rows ask the shell's own parser whether the file it
+# would source is still a shell script.
+command -v jq  >/dev/null 2>&1 || { echo "fresh-home.test.sh: jq is required"; exit 1; }
+command -v zsh >/dev/null 2>&1 || { echo "fresh-home.test.sh: zsh is required — the rc rows run the shell's parser"; exit 1; }
+
+HOME_FIX="$TMP/home"
+BIN="$TMP/bin"
+SHIMSRC="$TMP/shimsrc"
+STATE="$TMP/state"          # OUTSIDE the fixture HOME: never part of the manifest
+CALLS="$TMP/calls.log"
+TMPDIR_FIX="$TMP/tmpdir"
+mkdir -p "$BIN" "$SHIMSRC" "$STATE" "$TMPDIR_FIX"
+
+# ---------------------------------------------------------------------------
+# The bin dir: real tools the payload legitimately needs, then the fakes.
+# ---------------------------------------------------------------------------
+#
+# PATH is REPLACED by this directory for every run below, so this list is the
+# complete set of programs the payload can reach. `sleep` earns its place because
+# `detect_bounded` degrades to an unbounded wait without it; `readlink` because
+# every writer resolves a symlinked target before staging, and a PATH without it
+# would measure the degradation rather than the behaviour.
+for real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail sort uniq wc \
+            jq mktemp find xargs shasum uname date touch diff cmp printf true false sleep; do
+  p="$(command -v "$real" 2>/dev/null)" && ln -sf "$p" "${BIN}/${real}" 2>/dev/null
+done
+
+# ─── The package→binary map, read from the dependency table ──────────────────
+#
+# One `<install-target> <probe-name>` line per installable row. `brew:ripgrep`
+# installs the binary doctor probes as `rg`; `uv:notebooklm-py` installs the one
+# probed as `notebooklm`. The shims resolve through this file rather than
+# carrying a second copy of the roster.
+PKG_MAP="$TMP/pkg-map"
+build_pkg_map() {
+  : > "$PKG_MAP"
+  local n mech target
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    mech="$(dep_query dep_field "$n" mechanism)"
+    case "$mech" in http*) continue ;; esac
+    target="${mech#*:}"
+    printf '%s %s\n' "$target" "$n" >> "$PKG_MAP"
+  done <<< "$( { dep_query dep_names_class basic; dep_query dep_names_class extra; } )"
+}
+
+# Read one fact back out of the dependency table, with the fixture's own roots.
+dep_query() {
+  env -i HOME="$HOME_FIX" PATH="$BIN" \
+    bash -c '. "$1"; shift; "$@"' _ "${LIB_DIR}/deps.sh" "$@" 2>/dev/null
+}
+
+# ─── The fake-binary factory ─────────────────────────────────────────────────
+#
+# `_mkfake <install-target>` materialises the binary that target installs, and
+# `_rmfake <install-target>` takes it away. Both are on the fixture PATH because
+# the package-manager shims call them; nothing in the payload can reach them by
+# accident, since nothing in the payload knows the names.
+#
+# A target with a hand-written shim in $BIONIC_TEST_SHIMSRC gets that shim (the
+# tools whose sub-commands matter: `uv`, `notebooklm`). Everything else gets a
+# recorder that answers `--version` and exits 0, which is all `_dep_check_brew_dep`
+# and `_dep_version_from_probe` ever ask of it.
+cat > "${BIN}/_mkfake" <<'MKFAKE'
+#!/bin/bash
+target="${1:-}"; [ -n "$target" ] || exit 1
+name="$(awk -v t="$target" '$1 == t { print $2; exit }' "$BIONIC_TEST_PKG_MAP")"
+[ -n "$name" ] || name="$target"
+if [ -f "${BIONIC_TEST_SHIMSRC}/${name}" ]; then
+  cp "${BIONIC_TEST_SHIMSRC}/${name}" "${BIONIC_TEST_BIN}/${name}"
+else
+  { printf '#!/bin/bash\n'
+    printf 'echo "%s $*" >> "$BIONIC_TEST_CALLS"\n' "$name"
+    printf 'case "${1:-}" in --version|-V|-v|version) echo "%s 9.9.9" ;; esac\n' "$name"
+    printf 'exit 0\n'
+  } > "${BIONIC_TEST_BIN}/${name}"
+fi
+chmod +x "${BIONIC_TEST_BIN}/${name}"
+exit 0
+MKFAKE
+chmod +x "${BIN}/_mkfake"
+
+cat > "${BIN}/_rmfake" <<'RMFAKE'
+#!/bin/bash
+target="${1:-}"; [ -n "$target" ] || exit 1
+name="$(awk -v t="$target" '$1 == t { print $2; exit }' "$BIONIC_TEST_PKG_MAP")"
+[ -n "$name" ] || name="$target"
+rm -f "${BIONIC_TEST_BIN}/${name}"
+exit 0
+RMFAKE
+chmod +x "${BIN}/_rmfake"
+
+# ─── uv, and why it is hand-written ──────────────────────────────────────────
+#
+# `uv` is installed by brew (a `basic` row) AND is the mechanism the notebooklm
+# extra installs through, so the binary brew materialises has to know `tool
+# install`. It is written into the shim source rather than generated, and
+# `_mkfake uv` copies it.
+cat > "${SHIMSRC}/uv" <<'UVSHIM'
+#!/bin/bash
+echo "uv $*" >> "$BIONIC_TEST_CALLS"
+case "${1:-}" in
+  --version|version) echo "uv 9.9.9"; exit 0 ;;
+  tool)
+    case "${2:-}" in
+      install)   _mkfake "${3:-}"; exit $? ;;
+      uninstall) _rmfake "${3:-}"; exit $? ;;
+    esac
+    exit 1 ;;
+  sync)
+    # The `uv-project` kind (epic-18 T3's excalidraw-renderer row): the argv is
+    # `uv sync --project <dir>`, and what makes the row PRESENT is a real venv at
+    # `<dir>/.venv`, because `_dep_check_uv_project` is a filesystem test, not a
+    # call back into this binary. A recorder that only logged the call would leave
+    # the row permanently absent no matter how many times it "installed".
+    proj=""; prev=""
+    for a in "$@"; do
+      [ "$prev" = "--project" ] && proj="$a"
+      prev="$a"
+    done
+    if [ -n "$proj" ]; then
+      mkdir -p "${proj}/.venv/bin"
+      printf '#!/bin/bash\nexit 0\n' > "${proj}/.venv/bin/python"
+      chmod +x "${proj}/.venv/bin/python"
+      printf 'version = 9.9.9\n' > "${proj}/.venv/pyvenv.cfg"
+    fi
+    exit 0 ;;
+esac
+exit 0
+UVSHIM
+chmod +x "${SHIMSRC}/uv"
+
+# TODO(T10 final regression, once T4 and T12 merge): two more dep `kind`s arrive with
+# those merges — T4's roster rows add a `github-skill` kind and T12's notification
+# channel row adds a `marketplace-plugin` kind. Neither has a shim arm yet. If this
+# suite reds on a row of either kind, add its arm here the same way `sync` was added
+# above — that is the one place this suite is extended by hand (see the file header).
+
+# ─── notebooklm, and the one thing it does that matters here ─────────────────
+#
+# THE SECOND HALF OF THE INSTALL. `uv tool install notebooklm-py` puts a CLI on
+# PATH; the old bootstrap then ran `notebooklm skill install`, which is what wrote
+# `~/.claude/skills/notebooklm/SKILL.md`. That second command is the step the
+# plugin port dropped. This shim implements it — writing a real file into the
+# fixture HOME — so the assertion "the SKILL.md is there after setup" measures
+# whether SETUP RAN THE COMMAND, and nothing else. It is the same reason the brew
+# shim really creates binaries: a stub that wrote nothing would make the
+# assertion unfalsifiable in the wrong direction.
+cat > "${SHIMSRC}/notebooklm" <<'NBSHIM'
+#!/bin/bash
+echo "notebooklm $*" >> "$BIONIC_TEST_CALLS"
+case "${1:-}" in
+  --version|version) echo "notebooklm 9.9.9"; exit 0 ;;
+  skill)
+    case "${2:-}" in
+      install)
+        d="${HOME}/.claude/skills/notebooklm"
+        mkdir -p "$d" || exit 1
+        { printf -- '---\n'
+          printf 'name: notebooklm\n'
+          printf 'description: NotebookLM client — written by the notebooklm CLI shim.\n'
+          printf -- '---\n'
+        } > "${d}/SKILL.md" || exit 1
+        echo "installed the notebooklm skill into ${d}"
+        exit 0 ;;
+    esac
+    exit 1 ;;
+esac
+exit 0
+NBSHIM
+chmod +x "${SHIMSRC}/notebooklm"
+
+# ─── brew ────────────────────────────────────────────────────────────────────
+cat > "${BIN}/brew" <<'BREWSHIM'
+#!/bin/bash
+echo "brew $*" >> "$BIONIC_TEST_CALLS"
+case "${1:-}" in
+  install)
+    for a in "$@"; do
+      case "$a" in install|--cask|--quiet|-*) continue ;; esac
+      _mkfake "$a"
+    done
+    exit 0 ;;
+  outdated) exit 0 ;;
+esac
+exit 0
+BREWSHIM
+chmod +x "${BIN}/brew"
+
+# ─── npm ─────────────────────────────────────────────────────────────────────
+#
+# Stateful, because `_dep_check_npm_global` reads `npm list -g`'s EXIT CODE as
+# the presence answer: a recorder that exited 0 with no output would report every
+# npm package as already installed and skip the arm that proves they install.
+cat > "${BIN}/npm" <<'NPMSHIM'
+#!/bin/bash
+echo "npm $*" >> "$BIONIC_TEST_CALLS"
+S="${BIONIC_TEST_STATE}/npm-global"
+[ -f "$S" ] || : > "$S"
+sub="${1:-}"; shift 2>/dev/null || true
+pkgs=""
+for a in "$@"; do
+  case "$a" in -*) continue ;; esac
+  pkgs="${pkgs}${a}"$'\n'
+done
+case "$sub" in
+  list)
+    p="${pkgs%%$'\n'*}"
+    [ -n "$p" ] || exit 0
+    if grep -qxF -- "$p" "$S"; then
+      echo "/fixture/lib"
+      echo "└── ${p}@1.0.0"
+      exit 0
+    fi
+    exit 1 ;;
+  install)
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      grep -qxF -- "$p" "$S" || printf '%s\n' "$p" >> "$S"
+    done <<< "$pkgs"
+    exit 0 ;;
+  uninstall)
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      grep -vxF -- "$p" "$S" > "${S}.t" 2>/dev/null
+      mv "${S}.t" "$S"
+    done <<< "$pkgs"
+    exit 0 ;;
+  outdated) exit 0 ;;
+esac
+exit 0
+NPMSHIM
+chmod +x "${BIN}/npm"
+
+# ─── pnpm: a plain recorder ──────────────────────────────────────────────────
+#
+# CORRECTED 2026-08-22 (Step-6 critic F1). What this note used to say — that
+# `_dep_check_pnpm_store` answers `unknown` by construction because a
+# content-addressable cache has no installed-state — is exactly the premise the
+# 2026-08-22 ruling reversed: the probe reads `pnpm store path` and then
+# index.db, and answers a real yes/no like every other row.
+#
+# The true statement is narrower, and it is about THIS FIXTURE rather than about
+# the product: the shim is a recorder, so `pnpm store path` prints nothing, the
+# probe stops at its "no store to read" guard, and the `motion` row renders `–`.
+# Group 4 expects `unknown` for that one row for this reason and no other. A
+# shim that faked a store would be building an index.db, not a fake surface —
+# worth doing when a wave wants `motion` measured; it is not this wave.
+{ printf '#!/bin/bash\n'
+  printf 'echo "pnpm $*" >> "$BIONIC_TEST_CALLS"\n'
+  printf 'exit 0\n'
+} > "${BIN}/pnpm"
+chmod +x "${BIN}/pnpm"
+
+# ─── npx, which has one machine effect the report reads back ─────────────────
+#
+# `npx --yes playwright@latest install chromium` is the `playwright-chromium`
+# row's install, and its probe is a filesystem marker under the browser cache —
+# so a pure recorder would leave that row absent after an all-yes setup and make
+# "present" unprovable in the wrong direction. The marker this writes is the same
+# one `_dep_check_playwright_browser` looks for, at the cache root the payload
+# resolves (overridden below so the path does not depend on the runner's OS).
+cat > "${BIN}/npx" <<'NPXSHIM'
+#!/bin/bash
+echo "npx $*" >> "$BIONIC_TEST_CALLS"
+for a in "$@"; do
+  if [ "$a" = "chromium" ]; then
+    d="${BIONIC_PLAYWRIGHT_CACHE:?}/chromium-1187"
+    mkdir -p "$d" && : > "${d}/INSTALLATION_COMPLETE"
+  fi
+done
+exit 0
+NPXSHIM
+chmod +x "${BIN}/npx"
+
+# ─── claude ──────────────────────────────────────────────────────────────────
+#
+# The stateful CLI fake. Three pieces of state, all outside the fixture HOME
+# except the one the CLI genuinely owns there:
+#
+#   $BIONIC_TEST_STATE/plugins   one `<id> <enabled>` line per installed plugin —
+#                                what `plugin list` renders, in both shapes
+#   $BIONIC_TEST_STATE/mcp       one server name per line
+#   ~/.claude/plugins/installed_plugins.json
+#                                the registry the payload's own probes read. The
+#                                real CLI writes it, so the fake writes it too —
+#                                and it is inside HOME on purpose, because that
+#                                is where `_dep_installed_json` looks.
+#
+# INSTALLING BIONIC BRINGS ITS DECLARED DEPENDENCIES, because that is what the
+# harness does: the two `core` rows are resolved by the CLI, not by setup. The
+# versions are chosen to satisfy the table's own constraints, so a `violation`
+# verdict in the report would be a real finding rather than a fixture artefact.
+cat > "${BIN}/claude" <<'CLAUDESHIM'
+#!/bin/bash
+echo "claude $*" >> "$BIONIC_TEST_CALLS"
+STATE_FILE="${BIONIC_TEST_STATE}/plugins"
+MCP_FILE="${BIONIC_TEST_STATE}/mcp"
+REG="${HOME}/.claude/plugins/installed_plugins.json"
+[ -f "$STATE_FILE" ] || : > "$STATE_FILE"
+[ -f "$MCP_FILE" ] || : > "$MCP_FILE"
+
+_reg_init() {
+  mkdir -p "${REG%/*}"
+  [ -f "$REG" ] || printf '%s\n' '{"version":2,"plugins":{}}' > "$REG"
+}
+_dep_version_for() {
+  case "${1:-}" in
+    superpowers)  echo "6.3.0" ;;
+    agent-skills) echo "0.6.0" ;;
+    *)            echo "1.0.0" ;;
+  esac
+}
+_reg_add() {  # <id>
+  local id="$1" name="${1%%@*}" ver path tmp
+  ver="$(_dep_version_for "$name")"
+  path="${BIONIC_TEST_STATE}/installed/${name}"
+  mkdir -p "$path"
+  _reg_init
+  tmp="${REG}.tmp"
+  jq --arg k "$id" --arg v "$ver" --arg p "$path" \
+    '.plugins[$k] = [{"scope":"user","installPath":$p,"version":$v}]' "$REG" > "$tmp" && mv "$tmp" "$REG"
+}
+_reg_del() {  # <id>
+  local id="$1" tmp
+  _reg_init
+  tmp="${REG}.tmp"
+  jq --arg k "$id" 'del(.plugins[$k])' "$REG" > "$tmp" && mv "$tmp" "$REG"
+}
+_state_add() {  # <id>
+  grep -q "^$1 " "$STATE_FILE" 2>/dev/null || printf '%s true\n' "$1" >> "$STATE_FILE"
+}
+_state_del() {  # <id>
+  grep -v "^$1 " "$STATE_FILE" > "${STATE_FILE}.t" 2>/dev/null
+  mv "${STATE_FILE}.t" "$STATE_FILE"
+}
+_install_one() {  # <id>
+  _state_add "$1"; _reg_add "$1"
+}
+# Whatever is installed and is not bionic, once bionic is gone: the CLI's own
+# notion of an orphaned auto-installed dependency.
+_orphans() {
+  grep -q '^bionic@' "$STATE_FILE" 2>/dev/null && return 0
+  awk '{ print $1 }' "$STATE_FILE"
+}
+
+case "${1:-}" in
+  plugin|plugins)
+    case "${2:-}" in
+      list)
+        case " $* " in
+          *" --json "*)
+            sep=""; printf '['
+            while read -r id en; do
+              [ -n "$id" ] || continue
+              printf '%s{"id":"%s","version":"1.0.0","scope":"user","enabled":%s}' "$sep" "$id" "$en"
+              sep=","
+            done < "$STATE_FILE"
+            printf ']\n'
+            ;;
+          *)
+            printf 'Installed plugins:\n\n'
+            while read -r id en; do
+              [ -n "$id" ] || continue
+              if [ "$en" = "true" ]; then st='✔ enabled'; else st='✘ not enabled'; fi
+              printf '  ❯ %s\n    Version: 1.0.0\n    Scope: user\n    Status: %s\n\n' "$id" "$st"
+            done < "$STATE_FILE"
+            ;;
+        esac
+        exit 0 ;;
+      install)
+        id=""
+        for a in "$@"; do case "$a" in *@*) id="$a"; break ;; esac; done
+        [ -n "$id" ] || exit 1
+        _install_one "$id"
+        case "$id" in
+          bionic@*)
+            mk="${id#*@}"
+            _install_one "superpowers@${mk}"
+            _install_one "agent-skills@${mk}"
+            ;;
+        esac
+        exit 0 ;;
+      uninstall)
+        id=""
+        for a in "$@"; do case "$a" in *@*) id="$a"; break ;; esac; done
+        [ -n "$id" ] || exit 1
+        grep -q "^${id} " "$STATE_FILE" 2>/dev/null || exit 1
+        _state_del "$id"; _reg_del "$id"
+        exit 0 ;;
+      enable)
+        id=""
+        for a in "$@"; do case "$a" in *@*) id="$a"; break ;; esac; done
+        [ -n "$id" ] || exit 1
+        awk -v id="$id" '{ if ($1 == id) print $1, "true"; else print }' "$STATE_FILE" > "${STATE_FILE}.t" \
+          && mv "${STATE_FILE}.t" "$STATE_FILE"
+        exit 0 ;;
+      prune)
+        case " $* " in
+          *" --dry-run "*) _orphans; exit 0 ;;
+        esac
+        for id in $(_orphans); do _state_del "$id"; _reg_del "$id"; done
+        exit 0 ;;
+    esac
+    exit 1 ;;
+  mcp)
+    case "${2:-}" in
+      get)
+        [ -n "${3:-}" ] || exit 1
+        grep -qxF -- "$3" "$MCP_FILE" && exit 0
+        exit 1 ;;
+      add)
+        [ -n "${3:-}" ] || exit 1
+        grep -qxF -- "$3" "$MCP_FILE" || printf '%s\n' "$3" >> "$MCP_FILE"
+        exit 0 ;;
+      remove)
+        [ -n "${3:-}" ] || exit 1
+        grep -vxF -- "$3" "$MCP_FILE" > "${MCP_FILE}.t" 2>/dev/null
+        mv "${MCP_FILE}.t" "$MCP_FILE"
+        exit 0 ;;
+    esac
+    exit 0 ;;
+esac
+exit 0
+CLAUDESHIM
+chmod +x "${BIN}/claude"
+
+# ---------------------------------------------------------------------------
+# The fixture, and the one way anything is run against it.
+# ---------------------------------------------------------------------------
+#
+# `fresh_home` is the whole premise: a directory with NOTHING in it. No
+# `.claude`, no `.config`, no rc file, no CLAUDE.md. Every path the payload
+# touches below is one it created itself.
+
+fresh_home() {
+  rm -rf "$HOME_FIX" "$STATE" "$TMPDIR_FIX"
+  mkdir -p "$HOME_FIX" "$STATE" "$TMPDIR_FIX"
+  : > "$CALLS"
+}
+
+# ONE ENV BLOCK FOR ALL THREE SCRIPTS, and it deliberately overrides no root.
+# `HOME` is the fixture and everything else defaults off it — which is exactly
+# the resolution the incident happened in. `CLAUDE_PLUGIN_ROOT` and its BIONIC_
+# twin name the real payload, because that is what an installed plugin's scripts
+# see and what the ccstatusline layout is copied FROM.
+#
+# `SHELL` IS SET AND `BIONIC_SHELL_RC` IS NOT. env.sh's `rc_file` and remove.sh's
+# `_rm_shell_rc` each pick the rc file off `$SHELL`, and each takes a
+# `BIONIC_SHELL_RC` override — which this suite refuses for the same reason it
+# overrides no other root: pointing the door straight at a fixture path would
+# test this env block instead of the resolution a real machine performs. `env -i`
+# means the value below is the only one the payload can see, so `/bin/zsh` makes
+# it resolve `$HOME_FIX/.zshrc` exactly the way a zsh user's machine resolves
+# theirs.
+run_payload() {  # <script> [args...] — stdin carries the answers
+  local script="$1"; shift
+  env -i \
+    HOME="$HOME_FIX" \
+    PATH="$BIN" \
+    SHELL=/bin/zsh \
+    TMPDIR="$TMPDIR_FIX" \
+    BIONIC_TEST_CALLS="$CALLS" \
+    BIONIC_TEST_STATE="$STATE" \
+    BIONIC_TEST_BIN="$BIN" \
+    BIONIC_TEST_SHIMSRC="$SHIMSRC" \
+    BIONIC_TEST_PKG_MAP="$PKG_MAP" \
+    BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+    CLAUDE_PLUGIN_ROOT="$PAYLOAD" \
+    BIONIC_PLAYWRIGHT_CACHE="${HOME_FIX}/.cache/ms-playwright" \
+    BIONIC_DOCTOR_PROBE_SECONDS=5 \
+    bash "$script" "$@" 2>&1
+}
+
+YES="$(for _ in $(seq 1 80); do printf 'y\n'; done)"
+
+SETTINGS="${HOME_FIX}/.claude/settings.json"
+CCS_CONFIG="${HOME_FIX}/.config/ccstatusline/settings.json"
+NB_SKILL="${HOME_FIX}/.claude/skills/notebooklm/SKILL.md"
+GLOBAL_MEMORY="${HOME_FIX}/.claude/CLAUDE.md"
+RC_FILE_FIX="${HOME_FIX}/.zshrc"
+
+jqf() {  # <jq-program> — read one value out of the fixture settings.json
+  [ -f "$SETTINGS" ] || { echo "<no settings.json>"; return 0; }
+  jq -r "$1" "$SETTINGS" 2>/dev/null || echo "<unreadable>"
+}
+
+# One table/section out of a doctor report, by its flush-left heading (doctor
+# no longer delimits sections with `=== NAME ===`; a heading is a line with no
+# leading whitespace — "THIRD PARTY — installed by /bionic:setup", "ENVIRONMENT",
+# "BIONIC NATIVE — ships inside the plugin" — and every row under it is indented).
+# The heading itself is matched by PREFIX, since most of them carry an em-dash
+# tagline after the name, and it is never printed back; capture runs until the
+# blank line doctor always prints before the next heading.
+doctor_section() {  # <file> <name>
+  awk -v want="$2" '
+    on && $0 == "" { on = 0 }
+    on { print; next }
+    index($0, want) == 1 { on = 1 }
+  ' "$1"
+}
+
+# The `present` column of one THIRD PARTY row, read as yes/no/unknown off that
+# row's own verdict symbol (✓/✗/–) — the table that replaced DEPENDENCIES still
+# names each row by dependency name in column 2, so the same "find this name,
+# report its state" claim holds, just against `_doctor_third_row`'s columns
+# (symbol name version source state) instead of the deleted class-keyed table.
+dep_present() {  # <report-file> <name>
+  doctor_section "$1" "THIRD PARTY" | awk -v n="$2" '
+    NF >= 4 && $2 == n {
+      # NOT `$1 == "✓"`. macOS /usr/bin/awk (20200816) compares these multibyte
+      # glyphs byte-blind: `$1 == "✓"` is true for ✗ and – as well, so the first
+      # branch always fired and every row read "yes" — 23 assertions vacuous
+      # (Step-6 critic F1). index(…)==1 discriminates all three.
+      if (index($1, "✓") == 1)      print "yes";
+      else if (index($1, "✗") == 1) print "no";
+      else                          print "unknown";
+      exit
+    }'
+}
+
+# Does a path exist, as a word rather than as an exit status. Every "bionic did
+# not write this" claim below goes through it, and so does at least one "bionic
+# did write this" claim in the same group — which is the only thing that makes
+# the first kind of claim mean anything (memory `no-vacuous-tests-at-authoring`).
+path_exists() {  # <path> -> yes|no
+  if [ -e "$1" ]; then printf 'yes'; else printf 'no'; fi
+}
+
+# Non-emptiness as a word, for the same reason.
+yn() {  # <string> -> yes|no
+  if [ -n "${1:-}" ]; then printf 'yes'; else printf 'no'; fi
+}
+
+# The permission rules a settings.json carries, joined. Read from a FILE argument
+# so the same extractor can be pointed at a planted file that does carry rules —
+# without which "setup wrote none" is a sentence about an extractor that might
+# never return anything at all.
+perm_allow_join() {  # <settings-file>
+  [ -f "$1" ] || return 0
+  jq -r '[.permissions.allow[]?] | join(" ")' "$1" 2>/dev/null
+}
+
+# The environment names bionic owns, as settings.json carries them.
+settings_env_names() {  # <settings-file>
+  [ -f "$1" ] || return 0
+  jq -r '[.env // {} | keys[] | select(startswith("CLAUDE_CODE_") or startswith("BASH_MAX_"))] | join(" ")' \
+    "$1" 2>/dev/null
+}
+
+# --- The verdict glyphs, read from doctor.sh rather than restated -----------
+#
+# A single-quoted shell constant's contents, in pure bash. These values are
+# box-drawing and check glyphs, and neither awk nor sed may be asked to compare
+# them: macOS /usr/bin/awk compares multibyte glyphs byte-blind, which is how 23
+# rows of Group 4 came to be vacuous once already (Step-6 critic F1).
+const_from() {  # <file> <name>
+  local file="$1" name="$2" line v
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      "${name}='"*)
+        v="${line#${name}=\'}"; v="${v%\'}"
+        printf '%s' "$v"; return 0 ;;
+    esac
+  done < "$file"
+  return 1
+}
+DOCTOR_OK_GLYPH="$(const_from "$DOCTOR_SH" DOCTOR_OK)"   || DOCTOR_OK_GLYPH=""
+DOCTOR_BAD_GLYPH="$(const_from "$DOCTOR_SH" DOCTOR_BAD)" || DOCTOR_BAD_GLYPH=""
+DOCTOR_NIL_GLYPH="$(const_from "$DOCTOR_SH" DOCTOR_NIL)" || DOCTOR_NIL_GLYPH=""
+
+# The STATE MARKER of one ENVIRONMENT row, found by the setting name in its
+# second column. NOT the row's trailing sentence: doctor writes that sentence to
+# be read by a person, and a suite that pinned it would go red the day somebody
+# improved the wording and stay green the day the answer itself was wrong. The
+# symbol is where the answer lives. Comparison is bash `case`, in-process.
+env_row_state() {  # <report-file> <setting> -> yes|no|unknown|"" (no such row)
+  local want="$2" line sym rest
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    sym="${line%%[[:space:]]*}"
+    rest="${line#"$sym"}"
+    rest="${rest#"${rest%%[![:space:]]*}"}"
+    case "$rest" in "$want"*) ;; *) continue ;; esac
+    case "$sym" in
+      "$DOCTOR_OK_GLYPH")  printf 'yes' ;;
+      "$DOCTOR_BAD_GLYPH") printf 'no' ;;
+      "$DOCTOR_NIL_GLYPH") printf 'unknown' ;;
+      *)                   printf 'unrecognised-symbol' ;;
+    esac
+    return 0
+  done <<< "$(doctor_section "$1" "ENVIRONMENT")"
+  return 0
+}
+
+# The BIONIC NATIVE row whose component is `plugin`, if the report has one.
+# doctor prints it only when the plugin is NOT loaded, so its absence is the
+# positive proof of a healthy load — a claim that needs the row to be visible to
+# this extractor when it IS printed, which Group 5 proves after the teardown.
+# `$2` is an ASCII component name; the verdict glyph is `$1` and is not compared.
+native_plugin_row() {  # <report-file>
+  doctor_section "$1" "BIONIC NATIVE" | awk '$2 == "plugin" { print; exit }'
+}
+
+# --- The rc item's extractors ------------------------------------------------
+#
+# REUSED FROM tests/rc-item.test.sh, deliberately and without variation. That
+# suite owns the rc item's BEHAVIOUR under a driven $HOME; this one owns whether
+# an all-yes setup on a pristine machine leaves the block behind and a
+# `remove --all` takes it back off. Same walk, same in-process comparisons, so a
+# reader who knows one file knows the other.
+#
+# The marker literals are READ FROM env.sh, never restated here: rc-item.test.sh
+# is where they are pinned to the spec's text, and this suite only needs to know
+# what the payload will write.
+env_sh() {  # <function> [args...] — one env.sh call against the fixture machine
+  env -i HOME="$HOME_FIX" PATH="$BIN" SHELL=/bin/zsh \
+    bash -c '. "$1"; shift; "$@"' _ "${LIB_DIR}/env.sh" "$@" 2>/dev/null
+}
+env_sh_var() {  # <name> — the value of one variable env.sh defines
+  env -i HOME="$HOME_FIX" PATH="$BIN" SHELL=/bin/zsh \
+    bash -c '. "$1"; n="$2"; printf "%s" "${!n}"' _ "${LIB_DIR}/env.sh" "$1" 2>/dev/null
+}
+RC_START_LIT="$(env_sh_var RC_START)"
+RC_END_LIT="$(env_sh_var RC_END)"
+RC_PROXY_LINE="$(env_sh rc_default claude-proxy)"
+
+# The lines BETWEEN bionic's markers, in order. Not "does the file contain the
+# proxy line": a proxy line outside the markers is a line bionic does not own.
+rc_block_lines() {  # <file>
+  local file="$1" line inside=0 out=""
+  [ -f "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$line" = "$RC_START_LIT" ]; then inside=1; continue; fi
+    if [ "$line" = "$RC_END_LIT" ];   then inside=0; continue; fi
+    [ "$inside" = "1" ] && out="${out}${line}"$'\n'
+  done < "$file"
+  printf '%s' "$out"
+}
+
+# Every line NOT between the markers, the markers themselves excluded: what the
+# user's rc held before bionic touched it, and must still hold afterwards.
+rc_nonblock_lines() {  # <file>
+  local file="$1" line inside=0 out=""
+  [ -f "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$line" = "$RC_START_LIT" ]; then inside=1; continue; fi
+    if [ "$line" = "$RC_END_LIT" ];   then inside=0; continue; fi
+    [ "$inside" = "0" ] && out="${out}${line}"$'\n'
+  done < "$file"
+  printf '%s' "$out"
+}
+
+# How many whole lines equal <literal>.
+count_lines_equal() {  # <file> <literal>
+  local file="$1" want="$2" line n=0
+  [ -f "$file" ] || { printf '0'; return 0; }
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ "$line" = "$want" ] && n=$((n + 1))
+  done < "$file"
+  printf '%s' "$n"
+}
+
+# Does the SHELL agree the file is still a shell script — `ok`, or the parser's
+# own complaint. An rc that no longer parses is the failure mode that locks a
+# user out of their login shell, and no assertion about bytes or blocks sees it.
+# This runs the REAL zsh, outside the fixture PATH, because it is a question
+# about the file rather than about the payload.
+zsh_syntax_rc() {  # <file>
+  local out
+  if out="$(zsh -n "$1" 2>&1)"; then printf 'ok'; else printf '%s' "${out:-nonzero}"; fi
+}
+
+# The rc the fixture machine starts with: three lines that are not bionic's, the
+# same shape tests/rc-item.test.sh plants, so a reader comparing the two suites
+# is not also reconciling two fixtures.
+plant_rc() {  # <file>
+  cat > "$1" <<'RC'
+# a line that was here before bionic
+export EDITOR=vim
+alias ll='ls -la'
+RC
+}
+
+# ---------------------------------------------------------------------------
+# Group 1 — the suite's own preconditions.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 1: preconditions ==="
+
+expect_true "payload/scripts/setup.sh exists"  test -f "$SETUP_SH"
+expect_true "payload/scripts/doctor.sh exists" test -f "$DOCTOR_SH"
+expect_true "payload/scripts/remove.sh exists" test -f "$REMOVE_SH"
+expect_true "the shipped ccstatusline layout exists" test -f "$CCSTATUSLINE_SHIPPED"
+# DELETED AT THE REVIVE (epic-18 wave-03): a row asserting `command -v jq`. The
+# hard guard above the fixture block now exits the suite when jq is missing, so
+# this row is reached only on a machine that has it — it could not fail, which is
+# the definition of the assertion this wave was told to delete. The four rows
+# beside it stay because they still can: with those files removed from a copy of
+# the checkout, each one goes red (captures/freshhome--payload-files-missing.txt).
+
+fresh_home
+build_pkg_map
+expect_true "the package→binary map was built from the dependency table" test -s "$PKG_MAP"
+expect_eq "the map resolves brew:ripgrep to the name doctor probes" "rg" \
+  "$(awk '$1 == "ripgrep" { print $2 }' "$PKG_MAP")"
+expect_eq "the map resolves uv:notebooklm-py to the name doctor probes" "notebooklm" \
+  "$(awk '$1 == "notebooklm-py" { print $2 }' "$PKG_MAP")"
+
+# The premise, asserted rather than assumed: a $HOME with nothing in it.
+expect_eq "the fixture HOME starts empty" "" \
+  "$(find "$HOME_FIX" -mindepth 1 2>/dev/null)"
+
+# ...and then exactly ONE thing in it, read back through the same walk that just
+# reported the directory empty — so "empty" is a reading this fixture can change
+# rather than a fact about a `find` call that never returns anything.
+plant_rc "$RC_FILE_FIX"
+cp "$RC_FILE_FIX" "$TMP/rc-planted.zshrc"
+expect_eq "the planted shell rc is the only thing in the fixture HOME" \
+  "$RC_FILE_FIX" "$(find "$HOME_FIX" -mindepth 1 2>/dev/null)"
+
+# The rc literals, taken from the payload rather than restated here, and proven
+# non-empty before one assertion reads through them: an empty RC_START would make
+# `rc_block_lines` walk straight past every marker and hand back an answer no
+# later row could tell from the truth.
+expect_ne "env.sh names a start marker" "" "$RC_START_LIT"
+expect_ne "env.sh names an end marker"  "" "$RC_END_LIT"
+expect_ne "env.sh names a line for the claude-proxy item" "" "$RC_PROXY_LINE"
+
+# The verdict glyphs doctor's rows are read by, likewise: read out of doctor.sh,
+# proven present, and proven to be different characters — an `env_row_state` whose
+# three cases all held the same string would answer `yes` to every row, which is
+# the exact shape of the defect that made 23 of Group 4's rows vacuous once.
+expect_ne "doctor.sh's OK verdict glyph was read out of the script"  "" "$DOCTOR_OK_GLYPH"
+expect_ne "doctor.sh's NIL verdict glyph was read out of the script" "" "$DOCTOR_NIL_GLYPH"
+expect_ne "the OK and NIL verdict glyphs are different characters" \
+  "$DOCTOR_OK_GLYPH" "$DOCTOR_NIL_GLYPH"
+
+# And the shell's parser is proven to discriminate before the rc is handed to it:
+# it calls the planted file well-formed and a deliberately broken one broken,
+# through the same function.
+printf '%s\n' 'if [ 1 = 1 ]' > "$TMP/broken.zshrc"
+expect_eq "zsh -n calls the planted rc well-formed" "ok" \
+  "$(zsh_syntax_rc "$TMP/rc-planted.zshrc")"
+expect_ne "zsh -n calls a deliberately broken rc broken" "ok" \
+  "$(zsh_syntax_rc "$TMP/broken.zshrc")"
+
+# The rc's state before setup ever runs, captured through the extractors the
+# manifest will use afterwards. These are the negative half of Group 3's rc rows,
+# and they are read HERE so the positive half is measured against a fixture whose
+# starting state was seen rather than assumed.
+RC_BLOCK_BEFORE="$(rc_block_lines "$RC_FILE_FIX")"
+RC_STARTS_BEFORE="$(count_lines_equal "$RC_FILE_FIX" "$RC_START_LIT")"
+
+# ---------------------------------------------------------------------------
+# Group 2 — setup --all against an empty $HOME.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 2: setup --all on a pristine machine ==="
+
+SETUP_OUT="$TMP/setup.txt"
+printf '%s' "$YES" | run_payload "$SETUP_SH" --all > "$SETUP_OUT" 2>&1
+SETUP_RC=$?
+
+expect_eq "setup exits 0" "0" "$SETUP_RC"
+
+# The consented plan reached the package managers, which is what makes every
+# "present" below a measurement rather than a fixture that was already true.
+expect_match "the plugin install reached the CLI" \
+  '*plugin install bionic@bionic*' "$(cat "$CALLS")"
+expect_match "the substrate install reached brew" '*brew install*' "$(cat "$CALLS")"
+
+# ---------------------------------------------------------------------------
+# Group 3 — THE MANIFEST (AC-10b, AC-7).
+#
+# THE TWO ROWS THIS SUITE WAS WRITTEN FOR still carry their incident tags in
+# their labels. Both were red the day it was written — `_dep_install_statusline`
+# recorded the statusLine COMMAND and never copied the layout the payload ships,
+# and the uv-tool arm installed the notebooklm CLI without ever running
+# `notebooklm skill install` — and T1/T2 fixed both. The tags stay so that a
+# future red on either is recognisable as the same defect coming back rather than
+# as a new one.
+#
+# THE RC ITEM JOINED THE MANIFEST AT THE REVIVE (epic-18 wave-03). It is the
+# newest thing setup writes and the only write target that is a file the USER
+# already owned, which makes it two claims rather than one: bionic's block holds
+# what env.sh says it holds, AND every byte that was not bionic's is still where
+# the user left it.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 3: the manifest setup is supposed to leave ==="
+
+# ── ccstatusline: both halves ──
+expect_true "manifest: settings.json exists" test -f "$SETTINGS"
+expect_match "manifest: settings.json records the ccstatusline statusLine command" \
+  '*ccstatusline*' "$(jqf '.statusLine.command // ""')"
+expect_true "manifest: ~/.config/ccstatusline/settings.json exists [ccstatusline-config-missing]" \
+  test -f "$CCS_CONFIG"
+expect_true "manifest: ~/.config/ccstatusline/settings.json matches the shipped layout [ccstatusline-config-missing]" \
+  cmp -s "$CCSTATUSLINE_SHIPPED" "$CCS_CONFIG"
+
+# ── notebooklm: both halves ──
+expect_match "manifest: the notebooklm CLI install reached uv" \
+  '*uv tool install notebooklm-py*' "$(cat "$CALLS")"
+expect_true "manifest: ~/.claude/skills/notebooklm/SKILL.md exists [notebooklm-skill-missing]" \
+  test -f "$NB_SKILL"
+
+# ── the environment block ──
+ENV_OK=yes; ENV_DETAIL=""
+while IFS= read -r key; do
+  [ -n "$key" ] || continue
+  want="$(env -i HOME="$HOME_FIX" PATH="$BIN" bash -c '. "$1"; env_default "$2"' _ "${LIB_DIR}/env.sh" "$key" 2>/dev/null)"
+  have="$(jqf ".env.\"${key}\" // \"\"")"
+  [ "$have" = "$want" ] || { ENV_OK=no; ENV_DETAIL="${ENV_DETAIL}${key}: want '${want}', got '${have}'; "; }
+done <<< "$(env -i HOME="$HOME_FIX" PATH="$BIN" bash -c '. "$1"; printf "%s\n" $ENV_KEYS' _ "${LIB_DIR}/env.sh" 2>/dev/null)"
+expect_eq "manifest: settings.json carries every one of bionic's environment names" "yes" "$ENV_OK"
+[ "$ENV_OK" = "yes" ] || echo "      $ENV_DETAIL"
+
+# ── the default permission mode, and the allow-list bionic does NOT write ──
+#
+# Setup writes the MODE and nothing else about permissions (epic-18 T13). The
+# negative rides beside the positive on purpose: a pristine install that came
+# back with rules in `permissions.allow` would be bionic exempting itself from
+# the very mode it just asked about.
+expect_eq "manifest: the default permission mode is auto" "auto" "$(jqf '.permissions.defaultMode // ""')"
+
+# THE EXTRACTOR IS PROVEN TO SEE A RULE BEFORE ITS SILENCE IS READ AS "none".
+# A planted settings.json that does carry one goes through the same function; an
+# extractor that returned the empty string whatever it was handed would fail the
+# line below and take the assertion after it down too.
+printf '%s\n' '{"permissions":{"allow":["Bash(ls:*)"],"defaultMode":"auto"}}' \
+  > "$TMP/settings-with-rules.json"
+expect_eq "the permission-rule extractor reads a rule out of a settings.json that has one" \
+  "Bash(ls:*)" "$(perm_allow_join "$TMP/settings-with-rules.json")"
+expect_eq "manifest: setup wrote NO permission rules of its own" "" \
+  "$(perm_allow_join "$SETTINGS")"
+
+# ── AC-7: the negative, deliberately beside the positives above ──
+#
+# Absence proves nothing on its own; it proves something HERE because the same
+# run just proved setup wrote the six things above it.
+# The same extractor, in the same run, on the same fixture machine, says `yes` to
+# a file setup did write — which is the only thing that makes the two `no`s below
+# it mean anything at all.
+expect_eq "the path extractor says yes to a file setup did write" "yes" \
+  "$(path_exists "$SETTINGS")"
+expect_eq "manifest: ~/.claude/CLAUDE.md was NOT created — the plugin never touches it (AC-7)" \
+  "no" "$(path_exists "$GLOBAL_MEMORY")"
+expect_eq "manifest: no CLAUDE.md was written at the top of \$HOME either (AC-7)" \
+  "no" "$(path_exists "${HOME_FIX}/CLAUDE.md")"
+
+# DELETED AT THE REVIVE (epic-18 wave-03): a third AC-7 row that grepped setup's
+# PRINTED OUTPUT for the string `CLAUDE.md`. It pinned wording rather than
+# behaviour in both directions — setup could name the file in a sentence and
+# touch nothing, or touch it and say nothing — and the two file claims above
+# carry the whole of AC-7 without it.
+
+# ── the rc item: bionic's block, and the user's file around it ──
+#
+# THE POSITIVE AND THE NEGATIVE ARE THE SAME EXTRACTOR ON THE SAME FILE, one
+# reading taken before setup ran (Group 1) and one after.
+expect_eq "manifest: the rc carried no bionic block before setup" "" "$RC_BLOCK_BEFORE"
+expect_ne "manifest: the rc carries a bionic block after setup" "" \
+  "$(rc_block_lines "$RC_FILE_FIX")"
+expect_eq "manifest: the block holds exactly env.sh's claude-proxy line" \
+  "$RC_PROXY_LINE" "$(rc_block_lines "$RC_FILE_FIX")"
+expect_eq "manifest: no start marker was in the rc before setup" "0" "$RC_STARTS_BEFORE"
+RC_STARTS_AFTER_SETUP="$(count_lines_equal "$RC_FILE_FIX" "$RC_START_LIT")"
+expect_eq "manifest: the start marker appears exactly once after setup" "1" \
+  "$RC_STARTS_AFTER_SETUP"
+expect_eq "manifest: the proxy line appears exactly once in the whole rc" "1" \
+  "$(count_lines_equal "$RC_FILE_FIX" "$RC_PROXY_LINE")"
+
+# The user's own lines. First as a walk — both sides through the same extractor,
+# and the extractor proven to return the planted file's lines rather than nothing
+# — then as bytes, which is the claim that would catch a rewrite that reordered
+# or re-spaced them.
+expect_ne "the non-block extractor sees the planted rc's own lines" "" \
+  "$(rc_nonblock_lines "$TMP/rc-planted.zshrc")"
+expect_eq "manifest: every line outside the block is the planted rc, in order" \
+  "$(rc_nonblock_lines "$TMP/rc-planted.zshrc")" "$(rc_nonblock_lines "$RC_FILE_FIX")"
+
+{ cat "$TMP/rc-planted.zshrc"
+  printf '%s\n' "$RC_START_LIT"
+  printf '%s\n' "$RC_PROXY_LINE"
+  printf '%s\n' "$RC_END_LIT"
+} > "$TMP/rc-expected.zshrc"
+expect_true "manifest: the rc is the planted file plus bionic's block, byte for byte" \
+  cmp -s "$TMP/rc-expected.zshrc" "$RC_FILE_FIX"
+
+# The claim no byte comparison can make: the file the login shell would source is
+# still a file the login shell can parse.
+expect_eq "manifest: the rc still parses as a shell script after setup wrote to it" \
+  "ok" "$(zsh_syntax_rc "$RC_FILE_FIX")"
+
+# ---------------------------------------------------------------------------
+# Group 4 — doctor agrees with the machine (AC-10a, AC-10c).
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 4: doctor on the machine setup just built ==="
+
+DOC1="$TMP/doctor-after-setup.txt"
+run_payload "$DOCTOR_SH" < /dev/null > "$DOC1" 2>&1
+DOC1_RC=$?
+expect_eq "doctor exits 0" "0" "$DOC1_RC"
+
+# Every basic and extra row, read from the table rather than restated here.
+#
+# PER-ROW TRUTH, NOT A BLANKET `yes` (Step-6 critic F1). This loop asserted
+# `yes` for all 23 rows and got it from a parser that could not tell ✓ from ✗
+# from – (see `dep_present` above): every one of those assertions was vacuous.
+# Three of the rows are genuinely NOT present on this fixture, and in all three
+# cases that is a property of how deep the SHIM goes, not of the product — each
+# one still proves setup ISSUED the install, which is what Group 2 is about:
+#
+#   impeccable → no.      `claude plugin install impeccable@bionic` ran (it is in
+#                         $BIONIC_TEST_CALLS), but the claude shim reports every
+#                         installed plugin at version 1.0.0 and this row
+#                         constrains `^4.1.0`, so doctor renders
+#                         `✗ … violates ^4.1.0`. The row pins the version GATE
+#                         on top of the install, and pins an absent `impeccable`
+#                         — the one state the old blanket loop could not see.
+#   motion → unknown.     `pnpm store add motion@latest` ran too. The pnpm shim
+#                         is a recorder (see its note above), `pnpm store path`
+#                         prints nothing, and `_dep_check_pnpm_store` stops at
+#                         its "no store to read" guard. `unknown` was the right
+#                         expectation all along; the wave briefly "corrected" it
+#                         to `yes` on the strength of the vacuous parser.
+#   humanizer → no.       `git clone … ~/.claude/skills/humanizer` ran; the
+#                         fixture's git is a recorder, so no SKILL.md lands and
+#                         `_dep_check_github_skill` answers no. This is the
+#                         `github-skill` shim arm the TODO near the top of the
+#                         shim block still names as unwritten.
+#
+# Every other row installs through a shim that really writes, so `yes` there is
+# a measurement.
+dep_expected_present() {  # <name> — the state THIS fixture can produce
+  case "$1" in
+    impeccable) echo no ;;
+    motion)     echo unknown ;;
+    humanizer)  echo no ;;
+    *)          echo yes ;;
+  esac
+}
+
+for cls in basic extra; do
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    WANT="$(dep_expected_present "$name")"
+    expect_eq "doctor: ${cls} row ${name} reports present=${WANT}" \
+      "$WANT" "$(dep_present "$DOC1" "$name")"
+  done <<< "$(dep_query dep_names_class "$cls")"
+done
+
+# Doctor no longer prints a LOAD STATE section or the word "loaded" anywhere —
+# `case "$LOAD_STATE" in loaded) ;; ...` is a deliberate no-op, so a healthy
+# load leaves nothing to grep for directly. What IS still true, and testable:
+# BIONIC NATIVE only grows a "plugin" row for the other three states (failed,
+# absent, unknown — payload/scripts/doctor.sh:1232-1240), so the row's absence
+# is the positive proof the CLI loaded bionic, by exhaustion over the same four
+# states the deleted assertion named.
+expect_ne "doctor: the BIONIC NATIVE table is present at all" "" \
+  "$(doctor_section "$DOC1" "BIONIC NATIVE")"
+expect_eq "doctor: the load state is loaded (no plugin-load row in BIONIC NATIVE)" "" \
+  "$(native_plugin_row "$DOC1")"
+# THE POSITIVE TWIN FOR THE LINE ABOVE IS IN GROUP 5, on the same extractor and
+# the same fixture machine: once remove has uninstalled the plugin, doctor prints
+# that row and `native_plugin_row` finds it. Without that assertion passing,
+# "no row" here would be indistinguishable from an extractor that never returns.
+
+# ── doctor agrees with the rc on disk ──
+#
+# READ AS A STATE MARKER, never as the row's sentence. The trailing text is prose
+# for a person ("in <rc> — new shells pick it up"); the symbol is the answer, and
+# the answer is what has to agree with the block Group 3 just found on disk. Its
+# negative twin — the same extractor, same row name, `unknown` once the block is
+# gone — is in Group 5.
+expect_eq "doctor: the claude() shell proxy row agrees the block is on disk" \
+  "yes" "$(env_row_state "$DOC1" "claude() shell proxy")"
+
+
+# ---------------------------------------------------------------------------
+# Group 5 — remove --all undoes the manifest (AC-10, the second half).
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 5: remove --all takes the manifest back off ==="
+
+# Captured BEFORE the teardown, because the post-remove absence of a file that
+# was never created proves nothing. Each removal claim below is the conjunction:
+# it was there after setup, AND it is gone after remove.
+CCS_WAS_THERE=no; [ -f "$CCS_CONFIG" ] && CCS_WAS_THERE=yes
+NB_WAS_THERE=no;  [ -f "$NB_SKILL" ]   && NB_WAS_THERE=yes
+RC_BLOCK_WAS="$(yn "$(rc_block_lines "$RC_FILE_FIX")")"
+SL_WAS="$(yn "$(jqf '.statusLine.command // ""')")"
+ENV_NAMES_WAS="$(yn "$(settings_env_names "$SETTINGS")")"
+
+REMOVE_OUT="$TMP/remove.txt"
+printf '%s' "$YES" | run_payload "$REMOVE_SH" --all > "$REMOVE_OUT" 2>&1
+REMOVE_RC=$?
+expect_eq "remove exits 0" "0" "$REMOVE_RC"
+
+CCS_GONE=no; [ -e "$CCS_CONFIG" ] || CCS_GONE=yes
+NB_GONE=no;  [ -e "$NB_SKILL" ]   || NB_GONE=yes
+
+expect_eq "remove: the ccstatusline layout was installed and is now gone [ccstatusline-config-missing]" \
+  "yes yes" "${CCS_WAS_THERE} ${CCS_GONE}"
+expect_eq "remove: the notebooklm skill was installed and is now gone [notebooklm-skill-missing]" \
+  "yes yes" "${NB_WAS_THERE} ${NB_GONE}"
+
+# EACH OF THESE IS A CONJUNCTION, never a bare absence. "Was it there" was read
+# before the teardown through the same extractor that reads "is it gone" after
+# it, so a run in which setup had quietly written nothing fails the first half
+# instead of sailing through the second.
+expect_eq "remove: settings.json carried a statusLine command and no longer does" \
+  "yes no" "${SL_WAS} $(yn "$(jqf '.statusLine.command // ""')")"
+expect_eq "remove: settings.json carried bionic's environment names and no longer does" \
+  "yes no" "${ENV_NAMES_WAS} $(yn "$(settings_env_names "$SETTINGS")")"
+
+# DELETED AT THE REVIVE (epic-18 wave-03): a row asserting that no
+# `bionic-profile-` permission rule survived the teardown. Group 3 asserts setup
+# writes NO permission rules at all, so that extractor's input was empty by
+# construction and the row could not have gone red for any defect in any door —
+# the precise shape of assertion this wave was told to delete rather than keep.
+
+# ── the rc item comes back off ──
+RC_BLOCK_AFTER="$(rc_block_lines "$RC_FILE_FIX")"
+expect_eq "remove: the rc carried bionic's block and no longer does" \
+  "yes no" "${RC_BLOCK_WAS} $(yn "$RC_BLOCK_AFTER")"
+expect_eq "remove: one start marker was there, and neither marker survives" \
+  "1 0 0" "${RC_STARTS_AFTER_SETUP} $(count_lines_equal "$RC_FILE_FIX" "$RC_START_LIT") $(count_lines_equal "$RC_FILE_FIX" "$RC_END_LIT")"
+expect_true "remove: the rc is byte-identical to the file the user planted" \
+  cmp -s "$TMP/rc-planted.zshrc" "$RC_FILE_FIX"
+expect_eq "remove: the rc still parses as a shell script after the teardown" \
+  "ok" "$(zsh_syntax_rc "$RC_FILE_FIX")"
+
+# ── doctor on the torn-down machine ──
+#
+# It runs again for two reasons, and both are the positive twins Group 4's
+# negatives were promised. Its exit status is not asserted: a machine that has
+# just had the plugin taken off it is a machine doctor is entitled to have
+# findings about.
+DOC2="$TMP/doctor-after-remove.txt"
+run_payload "$DOCTOR_SH" < /dev/null > "$DOC2" 2>&1
+
+expect_ne "doctor: the BIONIC NATIVE table is still rendered after the teardown" "" \
+  "$(doctor_section "$DOC2" "BIONIC NATIVE")"
+expect_ne "doctor: the plugin-load row IS visible to the extractor once bionic is uninstalled" \
+  "" "$(native_plugin_row "$DOC2")"
+expect_eq "doctor: the claude() shell proxy row follows the block back off the disk" \
+  "unknown" "$(env_row_state "$DOC2" "claude() shell proxy")"
+
+# AC-7 again, from the other direction: a teardown that deleted a file the plugin
+# never wrote would be the 2026-08-20 mistake repeated. The positive twin is the
+# line above it, on the same extractor — a file that IS still there afterwards.
+expect_eq "remove: the user's own shell rc survives the teardown" "yes" \
+  "$(path_exists "$RC_FILE_FIX")"
+expect_eq "remove: ~/.claude/CLAUDE.md is still not a file this plugin touches (AC-7)" \
+  "no" "$(path_exists "$GLOBAL_MEMORY")"
+
+
+# ---------------------------------------------------------------------------
+# Results
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "========================================"
+echo "Results: $PASS/$TOTAL passed, $FAIL failed"
+echo "========================================"
+
+if [ "$FAIL" -gt 0 ]; then
+  exit 1
+fi
