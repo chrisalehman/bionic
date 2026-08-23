@@ -55,6 +55,9 @@ hooks:
         - type: command
           command: ${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh
           timeout: 10
+        - type: command
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate.sh
+          timeout: 10
 layer: governance
 needs:
   - agent-skills:context-engineering
@@ -540,7 +543,7 @@ That expression is `detect_plugin_root`'s own, held byte-identical to the copy i
 
 - **Tick the poker.** `bash <plugin-root>/hooks/session-poker.sh tick` is the decision brain — the prompt gathers, the poker decides, per row. The tick stamps the Patrol alive before it decides, so a tick that finds nothing to say has still done that job. A QUIET or DISARM decision is a no-op; DISARM also ends the Patrol. A NOTIFY decision surfaces the named row through the non-response procedure below — the poker only decides, it never stops or messages on its own.
 - **Read liveness against the contracted cadence,** never against the tick interval: a row is quiet when it is quieter than the `cadence` its own brief declared (Liveness fields, above), so a tick that finds every progress file inside its declared cadence has found nothing and says nothing.
-- **Keep the panel and the task list honest.** Both duties are TOOL-GROUNDED, never judgment-worded:
+- **Keep the panel and the task list honest.** Both duties are TOOL-GROUNDED, never judgment-worded, and they are WALLED: `hooks/patrol-duties-gate.sh` refuses the end of a tick's turn — once — until the transcript shows both since the tick fired, naming whichever is missing.
   - *Panel refresh* = ListAgents, then TaskStop on each listed lineage whose ledger row is fact-discharged (CLOSED / MET / acked). A listed agent with NO ledger row is surfaced as a duplicate-session tell, never silently stopped.
   - *Task-list refresh* = TaskList, then chronological display order (current-step slice entries first, dependency order, later-step entries after) restored mechanically — TaskCreate fresh copies of every entry that must sort later, TaskUpdate status=deleted on the stale originals, no-op when ascending-ID order already matches — then statuses reconciled with verified reality.
   - *Fallback:* where the task tools are absent (version-gated), the plan ledger stands in as the task list.
