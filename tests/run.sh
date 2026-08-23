@@ -260,6 +260,12 @@ run "jit.test.sh" bash tests/jit.test.sh
 # name without touching the rest of the file, and the difference between a value the FILE
 # carries and a value THIS PROCESS has. Hand-listed like every suite outside hooks/.
 run "env.test.sh" bash tests/env.test.sh
+# The rc item (epic-18 wave-03 slice 4/7, spec R6 / AC-5, AC-6): the `claude()`
+# shell function as a setup-managed item — env.sh's roster and rc write/read/delete,
+# the consented step in setup.sh, doctor's row, and remove.sh's strip through both
+# of its doors, driven against sandbox HOMEs with a planted .zshrc and read back
+# through a real `zsh -ic 'type claude'`. Hand-listed like every suite outside hooks/.
+run "rc-item.test.sh" bash tests/rc-item.test.sh
 # Command-file conventions (epic-17 W3 S9, spec AC-1): globs payload/commands/*.md.
 # Command PERMISSIONS (epic-17 W6 S9b, walk finding W-1 / plan A-5.4): the byte-for-byte
 # agreement between each command file's own `allowed-tools` rule prefix and every fenced
