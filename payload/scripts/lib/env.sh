@@ -185,3 +185,215 @@ env_live() {  # <key>
   eval "printf '%s\\n' \"\${${key}}\""
   return 0
 }
+
+# ─── The rc item ─────────────────────────────────────────────────────────────
+#
+# A SECOND KIND OF SETTING, AND WHY IT LIVES BESIDE THE FIRST. Everything above
+# is a NAME AND A VALUE in the CLI's settings.json. This is a LINE OF SHELL, and
+# no `env` object can hold one: `claude` has to become a function in the user's
+# own interactive shell or `--dangerously-skip-permissions` never reaches the
+# command they type. The rc channel was retired for exports (see the header) and
+# it comes back here for the one thing only it can carry — not as a fourth
+# `ENV_KEYS` entry, which would put a shell function through a jq writer aimed at
+# a JSON object, but as its own item kind with its own roster and its own
+# markers.
+#
+# WRITTEN ONLY BY SETUP, AFTER CONSENT (Chris 2026-08-23: "Don't you dare make
+# the change directly. It may only be made if it is permanently added"). A line
+# put into someone's rc by hand is footprint doctor cannot report and remove
+# cannot strip. Inside these markers it is an item with an owner: offered with a
+# why, reported present or absent, and taken back out on request.
+#
+# THE MARKERS ARE THE ONLY THING ANY DOOR MATCHES ON. Not the function name, not
+# the flag — the marker pair. A `claude()` function a user wrote themselves sits
+# outside them and is invisible to `rc_get`, untouched by `rc_unset`, and
+# unreported by doctor, which is the whole difference between bionic's footprint
+# and someone else's file.
+
+# THE LIST IS THE ROSTER, exactly as ENV_KEYS is for settings.json: setup writes
+# this list, remove deletes this list, doctor reports this list.
+RC_ITEMS="claude-proxy"
+
+# Verbatim, box-drawing dashes included — they are what makes the block
+# addressable, and remove.sh's standalone door carries byte-equal copies
+# (RM_RC_START / RM_RC_END) because it cannot source this file.
+RC_START='# ─── bionic:rc:start ───'
+RC_END='# ─── bionic:rc:end ───'
+
+# WHICH FILE, AND WHY IT CAN REFUSE. `$SHELL` is what the user's terminal starts,
+# and zsh and bash are the two shells bionic knows the rc name of. Anything else
+# gets a printed skip and a non-zero exit rather than a guess: writing a bash
+# function into a fish rc would break the shell it was meant to help. The
+# override is read first and at call time, the same convention detect.sh and
+# deps.sh use, so a suite can point every door at one fixture file.
+rc_file() {
+  if [ -n "${BIONIC_SHELL_RC:-}" ]; then printf '%s\n' "$BIONIC_SHELL_RC"; return 0; fi
+  case "${SHELL:-}" in
+    */zsh)  printf '%s\n' "${HOME}/.zshrc" ;;
+    */bash) printf '%s\n' "${HOME}/.bashrc" ;;
+    *)
+      # To stderr, so the one thing this function writes to stdout is a path.
+      printf 'bionic: %s is not a shell bionic writes an rc for — zsh and bash are.\n' \
+        "${SHELL:-<unset>}" >&2
+      return 1 ;;
+  esac
+  return 0
+}
+
+# The line each item carries, and why:
+#
+#   claude-proxy — `claude` typed at a prompt launches with the bypass mode
+#                  AVAILABLE in the mode cycle. `command claude` inside the body
+#                  is what stops the function calling itself, and is also why a
+#                  script or a hook that runs `claude` in a non-interactive shell
+#                  is unaffected: the rc is never sourced there, so the function
+#                  does not exist and the binary is reached directly.
+rc_default() {  # <item> — prints the line, exit 1 if the item is not bionic's
+  case "${1:-}" in
+    claude-proxy) printf '%s\n' 'claude() { command claude --dangerously-skip-permissions "$@"; }' ;;
+    *)            return 1 ;;
+  esac
+  return 0
+}
+
+# Is the item's line INSIDE bionic's markers. The two halves both matter: a line
+# that is not there, and a line that is there but outside the block, are both
+# "bionic has not written this" — the second because it is somebody else's line.
+rc_get() {  # <item>
+  local item="${1:-}" want file line inside=0
+  want="$(rc_default "$item")" || return 1
+  file="$(rc_file)" || return 1
+  [ -f "$file" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$line" = "$RC_START" ]; then inside=1; continue; fi
+    if [ "$line" = "$RC_END" ];   then inside=0; continue; fi
+    if [ "$inside" = "1" ] && [ "$line" = "$want" ]; then return 0; fi
+  done < "$file"
+  return 1
+}
+
+# ─── The rc writer ───────────────────────────────────────────────────────────
+#
+# THE MODE TRAVELS WITH THE CONTENT. Staged beside the target under `umask 077`,
+# widened to the target's mode only at the instant of publication, and renamed
+# over the RESOLVED target rather than a symlink — setup.sh's `_setup_stage_tmp`
+# / `_setup_publish_tmp` pair and remove.sh's `_rm_stage_tmp` / `_rm_publish_tmp`
+# pair, spelled the same way here so a third door cannot drift from the other
+# two. A shell rc is if anything the likeliest of bionic's three write targets to
+# hold a plaintext token — it is where people put `export …_API_KEY=` — and `mv`
+# replaces the inode, so without this a file a user deliberately kept at 0600
+# comes back at whatever the umask says.
+
+_rc_file_mode() {  # <file> — the mode of what <file> RESOLVES to, empty if unknowable
+  local mode
+  mode="$(stat -L -f '%Lp' "$1" 2>/dev/null || stat -L -c '%a' "$1" 2>/dev/null)"
+  [ -e "$1" ] || mode=""
+  printf '%s' "$mode"
+}
+
+_rc_stage_tmp() {  # <tmp> — created empty at 0600; the caller writes, then publishes
+  local tmp="$1"
+  rm -f "$tmp"
+  (umask 077; : > "$tmp") || return 1
+  return 0
+}
+
+_rc_publish_tmp() {  # <tmp> <file> — <file> is the resolved target
+  local tmp="$1" file="$2" mode
+  mode="$(_rc_file_mode "$file")"
+  [ -n "$mode" ] && chmod "$mode" "$tmp"
+  mv "$tmp" "$file"
+}
+
+# Everything the file holds EXCEPT bionic's block, and — when <keep> is `keep` —
+# the block's own non-roster lines are kept inside a rebuilt block. One walk, so
+# `rc_set` and `rc_unset` cannot come to disagree about what the block is.
+#
+# WHY A LINE INSIDE THE BLOCK CAN SURVIVE. `RC_ITEMS` is a roster and rosters
+# grow. Deleting one item must not take a second item's line with it, so
+# `rc_unset` filters only the line it was asked about and drops the markers when
+# what is left inside them is nothing. A line inside the markers that is no
+# item's default is bionic's own footprint from an older payload; it goes with
+# the block rather than being stranded in a file with no markers around it.
+_rc_rewrite() {  # <file> <tmp> <drop-line> <mode: all|one>
+  local file="$1" tmp="$2" drop="$3" mode="$4"
+  local line inside=0 kept="" pending=0 body=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$line" = "$RC_START" ]; then inside=1; continue; fi
+    if [ "$line" = "$RC_END" ];   then inside=0; continue; fi
+    if [ "$inside" = "1" ]; then
+      # Inside the block: `all` drops everything, `one` keeps what it was not
+      # asked about.
+      if [ "$mode" = "one" ] && [ "$line" != "$drop" ] && [ -n "$line" ]; then
+        body="${body}${line}"$'\n'
+      fi
+      continue
+    fi
+    # Outside the block, the file is reproduced line for line. Blank lines are
+    # deferred so a run of them survives exactly as it was — the same shape
+    # remove.sh's `_rm_strip_marker_block` holds to.
+    if [ "$pending" = "1" ]; then printf '\n' >> "$tmp"; pending=0; fi
+    if [ -z "$line" ]; then pending=1; continue; fi
+    printf '%s\n' "$line" >> "$tmp"
+    kept=1
+  done < "$file"
+  [ "$pending" = "1" ] && printf '\n' >> "$tmp"
+  printf '%s' "$body"
+  [ -n "$kept" ] || true
+  return 0
+}
+
+# IDEMPOTENT BY CONSTRUCTION, not by a guard that could be wrong: the block is
+# removed and rewritten whole on every call, so a second run produces the same
+# bytes and a block left half-written by an interrupted run is repaired rather
+# than appended beside.
+rc_set() {  # <item>
+  local item="${1:-}" want file target tmp body
+  want="$(rc_default "$item")" || return 1
+  file="$(rc_file)" || return 1
+  target="$(bionic_link_target "$file")"
+  tmp="${target}.bionic.tmp"
+  _rc_stage_tmp "$tmp" || return 1
+  if [ -f "$file" ]; then
+    body="$(_rc_rewrite "$file" "$tmp" "$want" one)" || { rm -f "$tmp"; return 1; }
+  else
+    body=""
+  fi
+  {
+    printf '%s\n' "$RC_START"
+    [ -n "$body" ] && printf '%s' "$body"
+    printf '%s\n' "$want"
+    printf '%s\n' "$RC_END"
+  } >> "$tmp" || { rm -f "$tmp"; return 1; }
+  _rc_publish_tmp "$tmp" "$target" || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+# Absent is success, for env_unset's reason: a teardown that failed because there
+# was nothing to tear down would make every second `/bionic:remove` report a
+# problem. The rc FILE is never deleted, even if the block was all it held — a
+# script that can be curl-fetched onto an unknown machine does not delete a
+# user's shell rc.
+rc_unset() {  # <item>
+  local item="${1:-}" want file target tmp body
+  want="$(rc_default "$item")" || return 1
+  file="$(rc_file)" || return 1
+  [ -f "$file" ] || return 0
+  target="$(bionic_link_target "$file")"
+  tmp="${target}.bionic.tmp"
+  _rc_stage_tmp "$tmp" || return 1
+  body="$(_rc_rewrite "$file" "$tmp" "$want" one)" || { rm -f "$tmp"; return 1; }
+  # THE BLOCK GOES WHEN IT EMPTIES. An empty marker pair left in a user's rc is
+  # bionic footprint that reads as a bionic setting whose value nobody can find —
+  # the same defect the retired env block left behind, and the reason remove
+  # strips markers rather than filtering the line between them.
+  if [ -n "$body" ]; then
+    {
+      printf '%s\n' "$RC_START"
+      printf '%s' "$body"
+      printf '%s\n' "$RC_END"
+    } >> "$tmp" || { rm -f "$tmp"; return 1; }
+  fi
+  _rc_publish_tmp "$tmp" "$target" || { rm -f "$tmp"; return 1; }
+  return 0
+}

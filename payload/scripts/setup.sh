@@ -318,6 +318,7 @@ _setup_item_ids() {
   while IFS= read -r n <&3; do [ -n "$n" ] && say "tool:${n}"; done 3< <(dep_names_class basic)
   while IFS= read -r n <&3; do [ -n "$n" ] && say "tool:${n}"; done 3< <(dep_names_class extra)
   say "environment"
+  say "claude-proxy"
   say "legacy-alias"
   say "legacy-hooks"
   say "legacy-skill-copy"
@@ -371,6 +372,7 @@ _setup_item_verb() {  # <name>
     dependency:*)       say "enable the plugin ${1#dependency:}, which is installed but switched off" ;;
     tool:*)             say "install ${1#tool:}" ;;
     environment)        say "write bionic's environment settings to $(_dep_settings_file)" ;;
+    claude-proxy)       say "add bionic's claude() shell function to $(rc_file 2>/dev/null || echo 'the shell rc')" ;;
     legacy-alias)       say "remove the retired shell alias block from $(_detect_shell_rc)" ;;
     legacy-hooks)       say "remove the retired hook entries from $(_dep_settings_file)" ;;
     legacy-skill-copy)  say "remove the pre-plugin skill copy at $(_setup_legacy_skill_dir)" ;;
@@ -381,7 +383,7 @@ _setup_item_verb() {  # <name>
   return 0
 }
 
-# The one directory step 8 offers to remove, read from the fact function that
+# The one directory step 9 offers to remove, read from the fact function that
 # owns it so the plan names the path the step will name.
 _setup_legacy_skill_dir() {
   local line
@@ -419,6 +421,12 @@ _setup_item_pending() {  # <name> -> 0 when the item has something to ask about
         [ "$have" = "$want" ] || return 0
       done
       return 1 ;;
+    claude-proxy)
+      # A shell bionic writes no rc for is not a question: the step says so and
+      # changes nothing, so the plan must not name it either.
+      rc_file >/dev/null 2>&1 || return 1
+      rc_get claude-proxy && return 1
+      return 0 ;;
     legacy-alias)
       line="$(detect_zshrc_legacy_block)"
       [ "${line#*present=}" = "yes" ] && return 0
@@ -1109,12 +1117,89 @@ _setup_env_why() {  # <key>
   esac
 }
 
-# ─── Step 6 — the retired alias block ────────────────────────────────────────
+# ─── Step 6 — the claude() shell function ────────────────────────────────────
+#
+# THE ONE THING settings.json CANNOT HOLD. Every name step 5 writes is a value in
+# a JSON object the CLI reads for itself. This is a LINE OF SHELL — `claude` has
+# to become a function in the user's own interactive shell, or the flag never
+# reaches the command they type — and the rc file is the only place that can
+# happen. The channel was retired for exports at W7 because they did not reach
+# the session; it comes back here for the one thing only it can carry.
+#
+# ASKED, AND ASKED WITH ITS REASON. A flag that lets a session skip permission
+# prompts is a decision about how someone's own machine behaves, so it is offered
+# with one line of what it does and written only on an explicit yes. Declining
+# writes nothing at all — not an empty block, not a commented line.
+#
+# THE ROSTER AND THE WRITE ARE ENV.SH'S. This step loops `RC_ITEMS`, asks
+# `rc_default` for the line and `rc_get` whether it is already there, and writes
+# through `rc_set`. A second item added to that roster arrives here with no edit,
+# and nothing in this file matches the rc itself.
+
+setup_claude_proxy() {
+  _setup_wants claude-proxy || return 0
+  say ""
+  say "6. Shell function"
+  local rc item_name missing="" wrote=0
+
+  # A shell bionic has no rc name for is reported, never guessed at: writing a
+  # bash function into a fish rc would break the shell it was meant to help.
+  if ! rc="$(rc_file 2>/dev/null)"; then
+    item "$SETUP_NIL" "claude() function" "${SHELL:-the shell} is not one bionic writes an rc for"
+    return 0
+  fi
+
+  for item_name in $RC_ITEMS; do
+    rc_default "$item_name" >/dev/null 2>&1 || continue
+    rc_get "$item_name" && continue
+    missing="${missing}${missing:+ }${item_name}"
+  done
+
+  # ONE LINE, ON PURPOSE — the same discipline step 5's gates carry, and for the
+  # same reason: tests prove a gate load-bearing by DELETING its line from a copy
+  # of this file, and a gate spread over an if/fi pair cannot be deleted that way
+  # without turning the copy into a parse error.
+  [ -n "$missing" ] || { item "$SETUP_OK" "claude() function" "already in ${rc} — nothing to do"; return 0; }  # idempotence guard: rc item
+
+  say "   ${rc} does not carry bionic's claude() shell function:"
+  for item_name in $missing; do
+    say "   $(rc_default "$item_name")"
+    say "   — $(_setup_rc_why "$item_name")"
+  done
+  consent "   Add it to ${rc}?"; _setup_consent_rc=$?
+  if [ "$_setup_consent_rc" -ne 0 ]; then _setup_say_declined "$_setup_consent_rc" "${rc} is unchanged."; action "add bionic's claude() shell function to ${rc} — $(_setup_answer_yes claude-proxy)"; return 0; fi  # consent gate: rc item
+
+  for item_name in $missing; do
+    if rc_set "$item_name"; then
+      wrote=$((wrote + 1))
+    else
+      item "$SETUP_BAD" "claude() function" "could not write ${rc}"
+      action "add bionic's claude() shell function to ${rc} (bionic could not write the file)"
+      return 0
+    fi
+  done
+  # Same gap step 5 reports: an rc is read when a shell STARTS, so the function
+  # is in the next terminal and not in the one running this.
+  item "$SETUP_OK" "claude() function" "added to ${rc} — takes effect in a new shell"
+  return 0
+}
+
+# What each rc item is for, in the words the user reads. Beside the step for
+# _setup_env_why's reason: env.sh owns the LINE, this file owns the prose that
+# lands on a person's screen.
+_setup_rc_why() {  # <item>
+  case "${1:-}" in
+    claude-proxy) echo "launches claude with bypass available in the mode cycle" ;;
+    *)            echo "a shell line bionic needs" ;;
+  esac
+}
+
+# ─── Step 7 — the retired alias block ────────────────────────────────────────
 
 setup_legacy_alias() {
   _setup_wants legacy-alias || return 0
   say ""
-  say "6. Legacy shell alias"
+  say "7. Legacy shell alias"
   local rc line present tmp rc_target
   rc="$(_detect_shell_rc)"
   line="$(detect_zshrc_legacy_block)"; present="${line#*present=}"
@@ -1167,7 +1252,7 @@ setup_legacy_alias() {
   return 0
 }
 
-# ─── Step 7 — legacy-channel managed-hook entries ────────────────────────────
+# ─── Step 8 — legacy-channel managed-hook entries ────────────────────────────
 #
 # COUNT here, REWRITE in hooks.sh. This step decides whether to ask and what to
 # say; it does not carry a jq program of its own, because it used to and
@@ -1184,7 +1269,7 @@ setup_legacy_alias() {
 setup_legacy_channel_hooks() {
   _setup_wants legacy-hooks || return 0
   say ""
-  say "7. Legacy-channel managed-hook entries"
+  say "8. Legacy-channel managed-hook entries"
   local line count settings registered
   line="$(detect_legacy_channel_hooks)"; count="${line#*count=}"
   settings="$(_dep_settings_file)"
@@ -1233,7 +1318,7 @@ setup_legacy_channel_hooks() {
   return 0
 }
 
-# ─── Step 8 — the legacy installed skill copy ────────────────────────────────
+# ─── Step 9 — the legacy installed skill copy ────────────────────────────────
 #
 # The third ported obligation, and the one the installer never had: it CREATED
 # this. `claude-bootstrap.sh` rendered bionic's skills into the CLI's own
@@ -1255,7 +1340,7 @@ setup_legacy_channel_hooks() {
 setup_legacy_skill_copy() {
   _setup_wants legacy-skill-copy || return 0
   say ""
-  say "8. Legacy installed skill copy"
+  say "9. Legacy installed skill copy"
   local line present dir
   line="$(detect_legacy_skill_copy)"
   present="${line#*present=}"; present="${present%% *}"
@@ -1289,7 +1374,7 @@ setup_legacy_skill_copy() {
   return 0
 }
 
-# ─── Step 9 — the permission mode ────────────────────────────────────────────
+# ─── Step 10 — the permission mode ───────────────────────────────────────────
 #
 # THE STEP IS TWO DECISIONS, SO IT IS TWO FUNCTIONS, and they are independent: a
 # machine with no leftover block still has a mode question to answer, and the
@@ -1300,7 +1385,7 @@ setup_legacy_skill_copy() {
 setup_permission_mode() {
   _setup_wants legacy-permission-block || _setup_wants permission-mode || return 0
   say ""
-  say "9. Permission mode"
+  say "10. Permission mode"
   _setup_wants legacy-permission-block && _setup_legacy_permission_block
   _setup_wants permission-mode && _setup_default_mode
   return 0
@@ -1521,6 +1606,7 @@ setup_dep_enable_verify
 setup_tools_loop
 setup_extras_loop
 setup_environment
+setup_claude_proxy
 setup_legacy_alias
 setup_legacy_channel_hooks
 setup_legacy_skill_copy

@@ -20,6 +20,7 @@
 #   agents: state=<stock|modified|unknown> total=<n|unknown> modified=<n|unknown> names=<a.md,b.md|-> cause=<text|->
 #   dep:<name> lane=<3a|3b> present=<yes|no|unknown> version=<v|unknown> constraint=<c> verdict=<ok|violation|unknown>
 #   env:todo-tools present=<yes|no>
+#   env:rc-claude-proxy present=<yes|no>
 #   env:zshrc-legacy present=<yes|no>
 #   env:legacy-channel-hooks count=<n|unknown>
 #   env:legacy-hook-files count=<n|unknown> path=<dir> names=<a.sh,b.sh|-> [cause=<text>]
@@ -293,6 +294,33 @@ detect_env_todo_tools() {
     present=yes
   fi
   echo "env:todo-tools present=${present}"
+  return 0
+}
+
+# The rc item bionic OWNS, as opposed to the two retired ones below it: the
+# `claude()` proxy setup writes, inside its own marker pair:
+#
+#     # ─── bionic:rc:start ───
+#     claude() { command claude --dangerously-skip-permissions "$@"; }
+#     # ─── bionic:rc:end ───
+#
+# THE MARKERS ARE THE PREDICATE, and only the markers. A `claude()` function a
+# user wrote for themselves is not bionic's footprint, must not be reported as
+# bionic's, and must not be removed as bionic's — so this asks whether the START
+# MARKER is there, exactly as detect_zshrc_legacy_block does for the retired
+# block, and never whether the file mentions the flag.
+#
+# The literals are env.sh's (RC_START); this file cannot source env.sh — env.sh
+# sources deps.sh and detect.sh is loaded by doors that have not — so the marker
+# is spelled here and tests/rc-item.test.sh pins the pair. Verbatim,
+# box-drawing dashes included.
+detect_rc_claude_proxy() {
+  local rc present=no
+  rc="$(_detect_shell_rc)"
+  if [ -f "$rc" ] && grep -qF '# ─── bionic:rc:start ───' "$rc" 2>/dev/null; then
+    present=yes
+  fi
+  echo "env:rc-claude-proxy present=${present}"
   return 0
 }
 
@@ -1372,6 +1400,7 @@ detect_all() {
   local name
   detect_plugin_integrity
   detect_env_todo_tools
+  detect_rc_claude_proxy
   detect_zshrc_legacy_block
   detect_legacy_channel_hooks
   detect_legacy_hook_files
