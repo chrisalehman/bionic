@@ -509,24 +509,28 @@ step_block() {  # <this-step-header-prefix> <next-step-header-prefix>
   awk -v a="$1" -v b="$2" 'index($0, a) == 1 { f = 1 } f && index($0, b) == 1 { f = 0 } f' <<< "$OUT"
 }
 TOOLS="$(step_block "3. Tools" "4. ")"
-EXTRAS="$(step_block "4. Optional extras" "5. ")"
+EXTRAS="$(step_block "4. Workflow tools" "5. ")"
 
 
 for basic in git node pnpm gh jq rg uv docker aws; do
   expect_match "basic offered at setup: ${basic}" "*${basic}*" "$TOOLS"
 done
 
-# The when-needed rows, checked against the WHOLE transcript: "setup asks about
-# no when-needed tool" is a claim about the run, not about one step.
+# Checked against the WHOLE transcript: "setup offers this row" is a claim
+# about the run, not about one step.
 # `impeccable` is the one that is also native-kind, so a loop keyed on class
 # rather than kind would hand it to install_dep, which is required to refuse it
 # — the failure would surface as an error message, not as an offer.
 #
-# THE LIST SHRANK ON 2026-08-22, and both halves of that ruling are asserted:
-# these two rows must still be absent from the whole run, and the four rows that
-# left the class must now appear in step 4 (the roster below).
+# 41110bd PROMOTED BOTH TO `extra`, closing out the when-needed class this
+# suite once had to check was empty at every step: these two rows are now
+# offered like every other extra, in step 4 (the roster below covers the rest).
+# STEP 4, NOT THE WHOLE TRANSCRIPT (Step-6 critic F3). 41110bd moved both rows
+# into `extra`, and `extra` is step 4 — so `$EXTRAS` is the claim the promotion
+# actually makes, and `$OUT` was a weaker one that any mention anywhere would
+# satisfy.
 for jit in impeccable excalidraw-renderer; do
-  expect_no_match "when-needed row is NOT offered at setup: ${jit}" "*${jit}*" "$OUT"
+  expect_match "when-needed row is offered at setup: ${jit}" "*${jit}*" "$EXTRAS"
 done
 
 # Restated here rather than read from the dependency table on purpose: this suite
@@ -1026,7 +1030,7 @@ expect_true "consented cleanup: the result is still valid JSON" \
 SETTINGS_AFTER_STRIP="$(cat "$FIX/ch/settings.json")"
 OUT="$(run_setup "$YES")"
 expect_eq "second apply is a no-op (byte-identical settings)" \
-  "$SETTINGS_AFTER_FIRST" "$(cat "$FIX/ch/settings.json")"
+  "$SETTINGS_AFTER_STRIP" "$(cat "$FIX/ch/settings.json")"
 
 # Declined: the file is untouched, and the summary names how to do it later.
 new_fixture permission-block-declined
@@ -1536,10 +1540,11 @@ while IFS= read -r _id; do
 done <<< "$LIST_OUT"
 expect_eq "--list prints names only — one per line, nothing a reader cannot paste" "" "$LIST_JUNK"
 
-# AC-11 still holds through the new door: the flag cannot reach a row the full
-# pass would never offer. `impeccable` is when-needed and native-kind, which
-# install_dep is required to refuse outright.
-expect_no_match "--list offers no when-needed row (AC-11 holds through the flag)" \
+# AC-11 still holds through the new door: the flag reaches exactly what the
+# full pass would offer, no more and no less. `impeccable` left when-needed for
+# `extra` at 41110bd, so it is no longer the row this door must refuse to
+# open — it is now a plain extra, and --list prints it like any other.
+expect_match "--list offers the row 41110bd promoted out of when-needed (AC-11 holds through the flag)" \
   '*tool:impeccable*' "$LIST_OUT"
 
 # THE AGREEMENT ARM. One owner for the roster means every printed name is a name

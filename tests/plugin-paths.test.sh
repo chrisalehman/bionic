@@ -74,16 +74,17 @@ else
 fi
 
 N_ROOT=$(printf '%s\n' "$FM" | $G -cF -- 'command: ${CLAUDE_PLUGIN_ROOT}/hooks/')
-if [ "$N_ROOT" = "11" ]; then
-  ok "frontmatter registers exactly 11 commands under \${CLAUDE_PLUGIN_ROOT}/hooks/"
+if [ "$N_ROOT" = "12" ]; then
+  ok "frontmatter registers exactly 12 commands under \${CLAUDE_PLUGIN_ROOT}/hooks/"
 else
-  no "frontmatter registers exactly 11 commands under \${CLAUDE_PLUGIN_ROOT}/hooks/ (got ${N_ROOT})"
+  no "frontmatter registers exactly 12 commands under \${CLAUDE_PLUGIN_ROOT}/hooks/ (got ${N_ROOT})"
 fi
 
 # Each registered script, by name — a count alone would pass if one command were duplicated
 # and another dropped.
 for s in canonical-sdlc-evidence-gate farm-out-reminder stop-guard dispatch-preflight \
-         canonical-sdlc-governing-skill execution-recorder context-spend landing-gate; do
+         canonical-sdlc-governing-skill execution-recorder context-spend landing-gate \
+         patrol-duties-gate; do
   if printf '%s\n' "$FM" | $G -qF -- "command: \${CLAUDE_PLUGIN_ROOT}/hooks/${s}.sh"; then
     ok "  registered: ${s}.sh"
   else

@@ -313,8 +313,8 @@ for c in $SCRIPTED_COMMANDS; do
     piped_count=$((piped_count + 1))
     expect_prefix "${c}.md: piped invocation ${piped_count} is covered by the file's own rule" \
       "$prefix" "$seg"
-    expect_true "${c}.md: piped invocation ${piped_count} carries the --only flag" \
-      bash -c 'case "$1" in *" --only "*) exit 0 ;; *) exit 1 ;; esac' _ "$seg"
+    expect_true "${c}.md: piped invocation ${piped_count} carries --only or --all (one bulk consent)" \
+      bash -c 'case "$1" in *" --only "*|*" --all"|*" --all "*) exit 0 ;; *) exit 1 ;; esac' _ "$seg"
   done < <(fenced_piped_bash_segments "$f")
 
   expect_gt0 "${c}.md: the addressable-consent route is present at all" "$piped_count"

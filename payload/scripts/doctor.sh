@@ -1476,10 +1476,6 @@ _doctor_render_updates() {
   return 0
 }
 
-# The question, written once. Three places would otherwise spell it: the prompt
-# that waits, the line that does not, and a caller trying to match it.
-DOCTOR_UPDATES_QUESTION="Check for tool updates? This asks Homebrew and npm and can take up to 30 seconds. [y/N]"
-
 # No question is asked (Chris 2026-08-22: "There's not much value of that").
 # `--updates` remains an explicit opt-in for whoever wants the Homebrew/npm check.
 if [ "$DOCTOR_WANT_UPDATES" = "yes" ]; then
