@@ -108,6 +108,14 @@ expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2
 # tests/assert-helper-race.test.sh; expect_absent_ug below (§L) is pinned there too.
 expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
 expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
+# expect_true/expect_false take a COMMAND as the assertion. Added epic-18 W3 slice 4/3:
+# §L.7 called both against a helper that was never defined in this file, so under the
+# `set -uo pipefail` above (no `-e`) each call died on stderr as `command not found`,
+# incremented no counter and rendered no verdict — three assertions that had never once
+# been evaluated (s1-probe-report F2). Defined here so a call site is either a real
+# verdict or a hard error, never silence.
+expect_true()     { local _l="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$_l"; else no "$_l" "command failed: $*"; fi; }
+expect_false()    { local _l="$1"; shift; if "$@" >/dev/null 2>&1; then no "$_l" "command unexpectedly succeeded: $*"; else ok "$_l"; fi; }
 
 SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
@@ -2913,25 +2921,33 @@ expect_contains "…and the dispatch wall skips its roster append on exactly tha
 # dedupe holding at exactly the four sites AC-12 named — not the unrelated §L.5
 # SKILL_EVENT_KEYS extractor above, which shares the same block-entry prologue but was never
 # one of the tracked four and stays out of this wave's scope (flagged, not folded in blind).
-# One of AC-12's four sites — installer-behavior.test.sh — was DELETED at
-# epic-17 W5 (4/6) together with claude-bootstrap.sh, the installer it was the
-# behavioural test for. A dedupe claim about a file that no longer exists is
-# not a weaker claim, it is an unfalsifiable one, so that arm is dropped rather
-# than kept passing vacuously. The dedupe itself is unaffected: the remaining
-# sites still share the one implementation, and its ABSENCE from the deleted
-# file is now guaranteed by the file's absence.
-for _f in "$REPO_ROOT/tests/cross-gate-agreement.test.sh" \
-          "$REPO_ROOT/tests/scripts.test.sh"; do
-  expect_true "$(basename "$_f") sources the shared frontmatter-parser helper" \
-    /usr/bin/grep -q 'lib/frontmatter-parser\.sh' "$_f"
-done
-expect_false "installer-behavior.test.sh is gone (retired with claude-bootstrap.sh, W5 4/6)" \
-  test -e "$REPO_ROOT/tests/installer-behavior.test.sh"
-expect_eq "scripts.test.sh no longer hand-copies the hooks: block state machine (either site)" \
-  "0" "$(/usr/bin/grep -c '/\^hooks:\$/ { active=1; next }' \
-      "$REPO_ROOT/tests/scripts.test.sh")"
-expect_eq "…and this file's own dead \`skill_block_count\` copy (the known-unpinned fourth) is gone" \
-  "0" "$(/usr/bin/grep -c '^skill_block_count() {' "$REPO_ROOT/tests/cross-gate-agreement.test.sh")"
+# TWO of AC-12's four sites are now DELETED: installer-behavior.test.sh went at
+# epic-17 W5 (4/6) with claude-bootstrap.sh, and scripts.test.sh went at epic-18
+# W3 (8582861) with the MEDIUM/LOW reliability tier. A dedupe claim about a file
+# that does not exist is not a weaker claim, it is an unfalsifiable one, so those
+# arms are gone rather than kept passing vacuously — and the `grep -c` against
+# the missing scripts.test.sh was not even passing vacuously: it printed nothing
+# where the row expected "0" and stood RED at 8582861, the one thing between this
+# roster and a green tests/run.sh (epic-18 W3 s1-probe-report F1).
+#
+# What is left of AC-12 that a test can still falsify is the property the dedupe
+# was FOR: the `hooks:` block state machine has exactly ONE implementation in this
+# tree. That is what is asserted now — the POSITIVE (the shared parser is where it
+# lives) beside the NEGATIVE (nowhere else does), off ONE extractor and ONE
+# fixture, so the negative cannot pass by the extractor coming back empty. Both
+# rows go red together when tests/lib/frontmatter-parser.sh's walker is mutated.
+# The retired rows' subjects — a second and third hand-copy — are now guaranteed
+# absent by the absence of the files that held them.
+_FM_SITES="$(cd "$REPO_ROOT" && /usr/bin/grep -rl '/\^hooks:\$/ { active=1; next }' tests/ | sort)"
+expect_contains "the hooks: block state machine is implemented in the shared parser" \
+  "tests/lib/frontmatter-parser.sh" "$_FM_SITES"
+expect_eq "…and in NO other file under tests/ — one owner, which is the whole of AC-12" \
+  "1" "$(printf '%s\n' "$_FM_SITES" | /usr/bin/grep -c .)"
+# …and the shared implementation is not merely present, it is the one this suite calls:
+# every §L row above reads its rows through skill_hooks_rows, which only exists here
+# because line 47 sourced the parser.
+expect_true "the shared parser is sourced and live in this suite (skill_hooks_rows defined)" \
+  declare -F skill_hooks_rows
 
 # ============================================================
 echo ""
@@ -3225,6 +3241,31 @@ done
 # Without it the seven could agree by having all stopped resolving anything.
 NOUT="$SANDBOX/fx/nroot/notarepo"
 mkdir -p "$NOUT"
+# HERMETICITY PRECONDITION (epic-18 W3, slice 4/3). The seven rows below assert what
+# resolve_project_root answers when there is no git repository AND no `.bionic/` anywhere
+# above the target — only then does the supplied fallback win. That second half is a fact
+# about the MACHINE, not about the code: $SANDBOX lives under $TMPDIR, which every other
+# bionic suite on this machine shares, and the resolver's no-git arm walks all the way up
+# to `/` looking for a directory carrying `.bionic/`.
+#
+# Measured 2026-08-23: a stray `$TMPDIR/.bionic/tmp/preflight-<sid>.state`, left there by a
+# SIBLING suite's run (this suite creates no such thing — proven by a full solo run that
+# left $TMPDIR clean), turned this battery red 7-of-7 with `expected '<sandbox>/fx/nroot/
+# notarepo', got '/private/var/.../T'` — seven failures naming neither the leak nor the
+# leaker, on a tree whose code under test had not been touched. Removing that one directory
+# took the suite from 564/7 back to 571/0.
+#
+# This row measures the precondition FIRST and names the offending ancestor. It cannot make
+# the battery immune — nothing here can stop another process writing into a shared $TMPDIR —
+# but it turns "seven mysterious diffs" into one row that says which directory is dirty.
+NOUT_DIRTY=""
+_anc="$NOUT"
+while [ -n "$_anc" ] && [ "$_anc" != "/" ] && [ "$_anc" != "." ]; do
+  if [ -d "$_anc/.bionic" ]; then NOUT_DIRTY="$_anc"; fi
+  _anc=$(dirname "$_anc")
+done
+expect_eq "fixture precondition: no .bionic above the no-repo fixture (else the seven rows below measure the machine, not the resolver)" \
+  "" "$NOUT_DIRTY"
 for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N" "$ACG_N"; do
   expect_eq "$(basename "$_n") falls back outside any repository" \
     "$NOUT" "$(cd "$NOUT" && root_via "$_n" "$NOUT/x.md" "$NOUT")"

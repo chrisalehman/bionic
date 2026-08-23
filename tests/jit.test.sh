@@ -94,7 +94,7 @@ make_stub "$PRESENT_BIN" brew
 
 echo "=== Group 1: jit.sh exists, sources cleanly, passes bash -n ==="
 
-expect_true "jit.sh exists" test -f "$JIT_SH"
+# (file-exists fixture check removed epic-18 W3 4/6: no production subject -- see ledger-jit.md)
 expect_true "jit.sh sources without error" bash -c '. "$1"' _ "$JIT_SH"
 expect_true "jit.sh passes bash -n" bash -n "$JIT_SH"
 expect_true "jit.sh sourcing defines jit_check" \

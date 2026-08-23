@@ -125,8 +125,7 @@ spawn_out_with() {  # <script> <cwd> <args...>
 
 echo "=== Group 1: the script exists, is executable, and parses ==="
 
-expect_true "spawn-worktree.sh exists"          test -f "$SPAWN"
-expect_true "spawn-worktree.sh is executable"   test -x "$SPAWN"
+# (file-exists/executable fixture checks removed epic-18 W3 4/6: no production subject -- see ledger-spawn-worktree.md)
 expect_true "spawn-worktree.sh passes bash -n"  bash -n "$SPAWN"
 
 echo ""
@@ -170,7 +169,7 @@ HEAD2="$(sha_of "$R2")"
 spawn_out "$R2" create "$OLD2" older >/dev/null
 expect_eq   "the worktree really is at the older sha" "$OLD2" "$(sha_of "${R2}/.worktrees/older")"
 expect_true "the older sha is not HEAD (the arm discriminates)" test "$OLD2" != "$HEAD2"
-
+# (fixture self-check removed epic-18 W3 4/6: not testing the script -- see ledger-spawn-worktree.md)
 echo ""
 echo "=== Group 5: create — where the worktree lands ==="
 #

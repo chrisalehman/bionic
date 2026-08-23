@@ -264,6 +264,13 @@ fire "$d"; expect_block "13: a ListAgents carrying an agentId does not count" "$
 d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; u_result "$d"; a_tool "$d" TaskList
 fire "$d"; expect_allow "14: tool_result entries do not end the tick's turn"
 
+# 14b: a tool_result carrier must not reset internal duty/tick bookkeeping either
+# -- same fixture family as 14, but only ONE duty is done, so a wrongful reset
+# (tick lost -> quiet/allow) is DISCRIMINABLE from the correct outcome (block,
+# naming the missing duty), unlike 14 where both outcomes coincide at allow.
+d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; u_result "$d"
+fire "$d"; expect_block "14b: a tool_result carrier does not clear an already-done duty" "$TL_MISSING" "$LA_MISSING"
+
 # 15: a batch — two tool_uses in one assistant entry.
 d=$(make_env); u_tick "$d"; a_tool_batch "$d" ListAgents TaskList
 fire "$d"; expect_allow "15: both duties in ONE assistant entry pass"
