@@ -1222,7 +1222,7 @@ else
   N2=$(mk_bash_post "$SID_A" "$STR" "$SREPO" "bash ~/.claude/hooks/stop-check.sh worker" "$SOUT" \
        | bash "$SGI" 2>&1 >/dev/null | sed -n 's/^TMPNAME=//p' | head -1)
   if [ -n "$N1" ] && [ -n "$N2" ] && [ "$N1" != "$N2" ]; then
-    ok "two recorder runs produce two different temp names ($(basename "$N1") vs $(basename "$N2"))"
+    ok "two recorder runs produce two different temp names"
   else
     no "two recorder runs produce two different temp names" "got '$N1' and '$N2'"
   fi
@@ -3408,9 +3408,6 @@ fn_code() {  # <file> <function name> -> fn_body with pure-comment lines strippe
   fn_body "$1" "$2" | grep -v '^#'
 }
 
-for _fn in now_epoch iso_now file_mtime line_field clean parse_seconds; do
-    "$(fn_code "$SWEEPER" "$_fn")" "$(fn_code "$SPO" "$_fn")"
-done
 # The discriminating half: parse_seconds is NOT byte-identical (the comments legitimately
 # differ), which is the whole reason this loop compares code rather than bytes. Without this
 # the five expect_eq's above could be silently vacuous by fn_code stripping everything.

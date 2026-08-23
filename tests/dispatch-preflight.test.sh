@@ -597,7 +597,7 @@ RUN9_ST=$?
 if [ "$RUN9_ST" -eq 127 ] || [ "$RUN9_ST" -eq 126 ]; then
   no "fix command runs from a non-repo cwd" "exit $RUN9_ST (not found/not executable): $(cat "$RUN9_ERR")"
 else
-  ok "fix command runs from a non-repo cwd (exit $RUN9_ST, a preflight-probe.sh code)"
+  ok "fix command runs from a non-repo cwd "
 fi
 # `$RUN9_ERR` is the PATH of the capture file; these two used to pass it as the
 # HAYSTACK, so they asked whether the string "/tmp/.../run9.err" contains "No such
@@ -646,7 +646,7 @@ expect_status "row's agent_id is empty at launch (slice 4/4 fills it)" "" "$(ros
 
 LAUNCHED=$(roster_field "$ROW" launched_at)
 if printf '%s' "$LAUNCHED" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'; then
-  ok "row carries a UTC ISO launch timestamp ($LAUNCHED)"
+  ok "row carries a UTC ISO launch timestamp"
 else
   no "row carries a UTC ISO launch timestamp" "got '$LAUNCHED'"
 fi
