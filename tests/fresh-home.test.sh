@@ -567,19 +567,34 @@ jqf() {  # <jq-program> — read one value out of the fixture settings.json
   jq -r "$1" "$SETTINGS" 2>/dev/null || echo "<unreadable>"
 }
 
-# One `=== SECTION ===` block out of a doctor report, by name.
+# One table/section out of a doctor report, by its flush-left heading (doctor
+# no longer delimits sections with `=== NAME ===`; a heading is a line with no
+# leading whitespace — "THIRD PARTY — installed by /bionic:setup", "ENVIRONMENT",
+# "BIONIC NATIVE — ships inside the plugin" — and every row under it is indented).
+# The heading itself is matched by PREFIX, since most of them carry an em-dash
+# tagline after the name, and it is never printed back; capture runs until the
+# blank line doctor always prints before the next heading.
 doctor_section() {  # <file> <name>
-  awk -v want="=== $2 ===" '
-    $0 == want { on = 1; next }
-    on && /^=== / { on = 0 }
-    on { print }
+  awk -v want="$2" '
+    on && $0 == "" { on = 0 }
+    on { print; next }
+    index($0, want) == 1 { on = 1 }
   ' "$1"
 }
 
-# The `present` column of one DEPENDENCIES row. Read out of that section only,
-# so a name appearing in the degradation map cannot answer for it.
+# The `present` column of one THIRD PARTY row, read as yes/no/unknown off that
+# row's own verdict symbol (✓/✗/–) — the table that replaced DEPENDENCIES still
+# names each row by dependency name in column 2, so the same "find this name,
+# report its state" claim holds, just against `_doctor_third_row`'s columns
+# (symbol name version source state) instead of the deleted class-keyed table.
 dep_present() {  # <report-file> <name>
-  doctor_section "$1" "DEPENDENCIES" | awk -v n="$2" 'NF >= 6 && $2 == n { print $3; exit }'
+  doctor_section "$1" "THIRD PARTY" | awk -v n="$2" '
+    NF >= 4 && $2 == n {
+      if ($1 == "✓")      print "yes";
+      else if ($1 == "✗") print "no";
+      else                 print "unknown";
+      exit
+    }'
 }
 
 # ---------------------------------------------------------------------------
@@ -708,27 +723,30 @@ expect_eq "doctor exits 0" "0" "$DOC1_RC"
 
 # Every basic and extra row, read from the table rather than restated here.
 #
-# ONE MECHANISM ANSWERS SOMETHING OTHER THAN `yes`, and it is not an exception
-# made for a row that would not pass. `pnpm-store` has no presence surface at all
-# — a content-addressable cache is not an install — so `_dep_check_pnpm_store`
-# returns `unknown` on every machine, warm or cold. Asserting `yes` there would
-# demand a lie from the probe; asserting nothing would let a genuinely broken row
-# through. So the expectation is keyed on the KIND, read from the same table as
-# the roster, and it is still an equality against a stated value.
+# `pnpm-store` NO LONGER GETS AN EXEMPTION HERE (2026-08-22 ruling, recorded at
+# `payload/scripts/lib/deps.sh` above `_dep_check_pnpm_store`): the "a
+# content-addressable cache has no presence surface" premise this loop used to
+# carry is exactly what that ruling reversed — `pnpm store`'s own index.db names
+# every cached `<name>@<version>`, so presence is a real yes/no like every other
+# row, and Group 2's consented install put motion in that index same as
+# everything else. Asserting `yes` uniformly is not a relaxation of the claim;
+# it is the claim catching up to the probe it was written to distrust.
 for cls in basic extra; do
   while IFS= read -r name; do
     [ -n "$name" ] || continue
-    if [ "$(dep_query dep_field "$name" kind)" = "pnpm-store" ]; then
-      expect_eq "doctor: ${cls} row ${name} reports the honest unknown (a cache has no presence surface)" \
-        "unknown" "$(dep_present "$DOC1" "$name")"
-    else
-      expect_eq "doctor: ${cls} row ${name} reports present" "yes" "$(dep_present "$DOC1" "$name")"
-    fi
+    expect_eq "doctor: ${cls} row ${name} reports present" "yes" "$(dep_present "$DOC1" "$name")"
   done <<< "$(dep_query dep_names_class "$cls")"
 done
 
-expect_match "doctor: the load state is loaded" \
-  '*loaded*' "$(doctor_section "$DOC1" "LOAD STATE")"
+# Doctor no longer prints a LOAD STATE section or the word "loaded" anywhere —
+# `case "$LOAD_STATE" in loaded) ;; ...` is a deliberate no-op, so a healthy
+# load leaves nothing to grep for directly. What IS still true, and testable:
+# BIONIC NATIVE only grows a "plugin" row for the other three states (failed,
+# absent, unknown — payload/scripts/doctor.sh:1232-1240), so the row's absence
+# is the positive proof the CLI loaded bionic, by exhaustion over the same four
+# states the deleted assertion named.
+expect_eq "doctor: the load state is loaded (no plugin-load row in BIONIC NATIVE)" "" \
+  "$(doctor_section "$DOC1" "BIONIC NATIVE" | awk '$2 == "plugin"')"
 
 
 # ---------------------------------------------------------------------------
