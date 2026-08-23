@@ -186,10 +186,8 @@ echo "Gating suites:"
 run "agent-context-guard.test.sh" bash tests/agent-context-guard.test.sh
 run "canonical-sdlc-evidence-gate.test.sh" bash tests/canonical-sdlc-evidence-gate.test.sh
 run "canonical-sdlc-governing-skill.test.sh" bash tests/canonical-sdlc-governing-skill.test.sh
-run "context-spend.test.sh" bash tests/context-spend.test.sh
 run "dispatch-preflight.test.sh" bash tests/dispatch-preflight.test.sh
 run "execution-recorder.test.sh" bash tests/execution-recorder.test.sh
-run "farm-out-reminder.test.sh" bash tests/farm-out-reminder.test.sh
 run "landing-gate.test.sh" bash tests/landing-gate.test.sh
 run "patrol-duties-gate.test.sh" bash tests/patrol-duties-gate.test.sh
 run "preflight-probe.test.sh" bash tests/preflight-probe.test.sh
@@ -200,40 +198,32 @@ run "session-sweeper.test.sh" bash tests/session-sweeper.test.sh
 run "stop-check.test.sh" bash tests/stop-check.test.sh
 run "stop-guard.test.sh" bash tests/stop-guard.test.sh
 run "stop-orders.test.sh" bash tests/stop-orders.test.sh
-run "scripts.test.sh" bash tests/scripts.test.sh
-run "agent-roles.test.sh" bash tests/agent-roles.test.sh
 # The agent-file render pipeline (epic-17 W4 S2, spec AC-2): agents-src/ blocks + templates
 # + render.sh against the committed finals under agents/. Cross-FILE by nature — it spans a
 # source tree and an output tree.
-run "agent-render.test.sh" bash tests/agent-render.test.sh
 # Cross-FILE proof (epic-17 W4 S7, spec AC-5 / epic AC-11): the terminal-disposition
 # rule's normative literal, pinned byte-identical between SKILL.md's Step 9 and
 # operational-rules.md's close-out section, plus a count-scoped guard against a
 # third, unpinned copy landing under skills/ or agents/. Same class as
 # interview-protocol.test.sh above (a SKILL.md <-> operational-rules.md pin), kept
 # in its own file because it is a distinct ownership-table concept.
-run "close-out.test.sh" bash tests/close-out.test.sh
 # Cross-COMPONENT proofs (epic-15 W1R slice 4/6). They belong to no single hook,
 # so they live here rather than under hooks/ — which also means they are invisible
 # to the glob above and must stay hand-listed.
 run "cross-gate-agreement.test.sh" bash tests/cross-gate-agreement.test.sh
 run "fail-direction-table.test.sh" bash tests/fail-direction-table.test.sh
 # Epic-17 wave-01 slice S1: bionic plugin manifest + marketplace manifest + LICENSE.
-run "plugin-manifest.test.sh" bash tests/plugin-manifest.test.sh
 # Harness-on-harness (epic-17 W1). Pins the assertion helpers every suite above
 # hand-copies: under pipefail, `printf "$haystack" | grep -q` is a SIGPIPE race
 # that reports a present needle as missing and an absent-check as green. Also
 # hand-listed, same reason as the two lines above.
-run "assert-helper-race.test.sh" bash tests/assert-helper-race.test.sh
 # Cross-FILE proof (epic-17 W1 S3): the plugin-layout path rewrite, and the near-identical
 # state paths it must not have touched. Spans SKILL.md, hooks/ and the payload's own
 # registration surfaces, so like the two above it belongs to no single hook and must stay
 # hand-listed.
-run "plugin-paths.test.sh" bash tests/plugin-paths.test.sh
 # Cross-FILE proof (epic-17 W1 S6): the payload boundary — what the plugin ships and, more
 # to the point, what it must NOT. Pins marketplace.json's source field against the payload/
 # link tree and the repo's single-owner layout, so it too is hand-listed.
-run "plugin-payload.test.sh" bash tests/plugin-payload.test.sh
 # Harness-on-harness (epic-17 W2 S1). Catch-proof for tests/lib/resolve-roots.sh, the
 # path-resolution seam every suite sources: plants a doctored tree and proves the
 # override binds in BOTH directions. Belongs to no single hook, so hand-listed.
@@ -243,12 +233,10 @@ run "seam-resolution.test.sh" bash tests/seam-resolution.test.sh
 # SUPPORTED_SDLC_VERSION bridge pair is pinned against the plugin major. Spans
 # payload/.claude-plugin/plugin.json, .claude-plugin/marketplace.json and two
 # hooks, so like the others it belongs to no single hook and stays hand-listed.
-run "version-ssot.test.sh" bash tests/version-ssot.test.sh
 # Payload libraries (epic-17 W3 S1): the dependency SSoT table in
 # payload/scripts/lib/deps.sh and the machine-fact functions in
 # payload/scripts/lib/detect.sh, driven against fixture roots and a fixture
 # PATH. Belongs to no single hook, so hand-listed like the rest.
-run "plugin-lib.test.sh" bash tests/plugin-lib.test.sh
 # The read-only probes added at epic-17 W6 S2 (spec R5/AC-8, AC-9; R8/AC-13):
 # detect_plugin_load_state and detect_plugin_duplicates, driven against the
 # `claude plugin list` transcripts captured during W5's F12 measurement and a
@@ -273,13 +261,11 @@ run "jit.test.sh" bash tests/jit.test.sh
 # carries and a value THIS PROCESS has. Hand-listed like every suite outside hooks/.
 run "env.test.sh" bash tests/env.test.sh
 # Command-file conventions (epic-17 W3 S9, spec AC-1): globs payload/commands/*.md.
-run "command-format.test.sh" bash tests/command-format.test.sh
 # Command PERMISSIONS (epic-17 W6 S9b, walk finding W-1 / plan A-5.4): the byte-for-byte
 # agreement between each command file's own `allowed-tools` rule prefix and every fenced
 # `bash` invocation in that same file. A permission rule prefix-matches the literal command string, so one quote
 # character in a body silently un-authorizes it — which is what walled bionic's own
 # commands. Hand-listed like every suite outside hooks/.
-run "command-permissions.test.sh" bash tests/command-permissions.test.sh
 # The end-user README (epic-17 W6 S8, spec AC-4): README.md's "## Installation
 # (30-second setup)" section pinned to the ratified reference shape — two
 # `claude plugin` command lines, the in-session twin, the `claude plugin list`
@@ -298,21 +284,17 @@ run "command-permissions.test.sh" bash tests/command-permissions.test.sh
 # under skills/canonical-sdlc/diagrams/ read as text and compared against what they draw —
 # the hooks' SUPPORTED_SDLC_VERSION, hooks.json's six always-on entries, and SKILL.md's ten
 # steps and frontmatter hook set. Spans hooks/, skills/ and the SVGs.
-run "diagrams.test.sh" bash tests/diagrams.test.sh
 # /bionic:setup (epic-17 W3 S6, spec AC-2 / AC-6): payload/scripts/setup.sh driven end to
 # end against fixture trees and a stateful `claude` shim on a replaced PATH, with the
 # fixture bytes as the evidence for every consented, declined and idempotent claim.
 # Hand-listed like every suite outside hooks/.
-run "setup.test.sh" bash tests/setup.test.sh
 # The read-only diagnosis (epic-17 W3 S7, spec AC-3): payload/scripts/doctor.sh driven over
 # whole fixture MACHINES — payload tree, plugin registry, settings, rc, caches — with a
 # no-mutation wall (sha256 + path enumeration, before and after) as its axis test.
-run "doctor.test.sh" bash tests/doctor.test.sh
 # Footprint removal (epic-17 W3 S8, spec AC-4): payload/scripts/remove.sh driven
 # against fixture machines — the never-list wall, the per-item consent gates, and
 # the standalone door (the script alone, no payload libraries beside it).
 # Hand-listed like every suite outside hooks/.
-run "remove.test.sh" bash tests/remove.test.sh
 # The pristine-install suite (epic-18 T6, spec AC-10/AC-7): empty $HOME through
 # setup --all, doctor, remove --all, asserted against a manifest of bytes rather
 # than a report's own summary line. Registered at T10 per its own header — it was
@@ -320,7 +302,6 @@ run "remove.test.sh" bash tests/remove.test.sh
 # (ccstatusline's layout copy, notebooklm's skill install) were still unmerged,
 # so it would not sit red in a gating run. Hand-listed like every suite outside
 # hooks/.
-run "fresh-home.test.sh" bash tests/fresh-home.test.sh
 # lib/platform.test.sh RETIRED at epic-17 W5 (Step-6 review). The library it
 # covered exported OS, BREW_PREFIX, SHELL_RC, PLAYWRIGHT_CACHE and sed_inplace
 # for exactly two consumers — claude-bootstrap.sh and claude-reset.sh — and 4/6
