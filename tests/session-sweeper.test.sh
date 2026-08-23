@@ -987,6 +987,16 @@ expect_eq "…and the exit code is unchanged: an ack does not close a contract h
 sweep "$R18" verdict w4-s10
 expect_contains "an ack of w4-s1 does not mark w4-s10 acked" "name=w4-s10|state=UNMET|acked=no|" "$OUT"
 
+# --- the risky direction: "w4-s10" is a literal PREFIX of "w4-s100", so a substring
+# match (rather than whole-line) would let acking the LONGER name close the SHORTER one.
+# w4-s10 is still unacked at this point in the file, which is what makes it a clean probe.
+add_row "$R18" name=w4-s100 deliverable="$R18/absent-100.md" duration="4 hours" launched_at="$(iso_ago 600)"
+sweep "$R18" ack w4-s100
+expect_eq "acking the longer name (w4-s100) records" "0" "$RC"
+sweep "$R18" verdict w4-s10
+expect_contains "…and its shorter prefix (w4-s10) does not read as acked" \
+  "name=w4-s10|state=UNMET|acked=no|" "$OUT"
+
 # --- a MET row can be acked too, and the two facts stay separate ---
 sweep "$R18" ack lander
 sweep "$R18" verdict lander

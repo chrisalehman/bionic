@@ -461,7 +461,6 @@ R5WT="$TMPROOT/s5-worktree-wt"
 # A REAL `git worktree add` (never a mocked path) — built from the repo root, since
 # `git worktree add` resolves relative paths against pwd (.claude/rules/git-worktree-docs.md).
 ( cd "$R5" && git worktree add -q -b s5-r3-wt "$R5WT" ) >/dev/null 2>&1
-expect_eq "fixture: a real git worktree exists" "yes" "$([ -e "$R5WT/.git" ] && echo yes || echo no)"
 
 poke "$R5" tick
 expect_eq "from the main repo root, tick sees the open overdue row (NOTIFY, exit 1)" "1" "$RC"

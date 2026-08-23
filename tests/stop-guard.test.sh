@@ -716,6 +716,8 @@ expect_contains "a planted state symlink is not written through (file level)" \
 # path is the writer's row, in tests/execution-recorder.test.sh §7.
 run_guard "$(mk_stop_payload "$SID_A" "$S_TR" "$S_REPO" "victim")"
 expect_status "a symlinked state path refuses the stop" 2 "$GUARD_ST"
+expect_contains "…for the symlink reason specifically, not a fallback missing-observation one" \
+  "nothing here will read or write through it" "$GUARD_ERR"
 
 IFS='|' read -r S2_REPO S2_TR S2_SUB <<< "$(make_world sec2 yes)"
 plant_agent "$S2_SUB" "avictim-ffffffffffffffff" "victim"
@@ -730,6 +732,8 @@ else
 fi
 run_guard "$(mk_stop_payload "$SID_A" "$S2_TR" "$S2_REPO" "victim")"
 expect_status "a symlinked state DIRECTORY refuses the stop too" 2 "$GUARD_ST"
+expect_contains "…for the symlink reason specifically, not a fallback missing-observation one" \
+  "nothing here will read or write through it" "$GUARD_ERR"
 
 # The ROSTER is repo-controlled state too, so a symlink at its own level would let
 # a repo choose which file answers a question the gate asks — the OPEN direction §8
