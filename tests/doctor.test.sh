@@ -1020,17 +1020,28 @@ expect_not_match "no manifest: a payload with nothing to compare is NOT reported
 expect_match "no manifest: the unknown names the missing manifest as its cause" \
   "*manifest*" "$NM_AGENTS"
 
-# The mechanism-level unknown, present on a fully healthy machine: the pnpm
-# content-addressable store is a cache with no installed-state to read, so `no`
-# would be a lie on a warm machine.
+# The mechanism-level unknown. CORRECTED 2026-08-22 (Step-6 critic): the premise
+# this block used to carry — "the pnpm store is a cache with no installed-state
+# to read" — is what that day's ruling reversed. `_dep_check_pnpm_store` locates
+# the store and reads index.db, which names every cached `<name>@<version>`, so
+# `yes`/`no` is a real answer on a machine that has one.
+#
+# What this arm actually exercises is the OTHER branch, and it does so by
+# accident of the fixture: `$FULL_BIN`'s pnpm is a version stub
+# (make_version_stub, :153) that prints nothing for `pnpm store path`, so the
+# probe finds no store and answers `unknown`. So this is not "unknown on a fully
+# healthy machine" — it is "unknown when the store cannot be located", which is
+# the branch a machine with pnpm-but-no-store really hits, and it must not be
+# reported as an absence.
 MOTION_LINE="$(line_of "$H_OUT" " motion ")"
 # THE THREE-VALUED ANSWER IS THE SYMBOL IN COLUMN ONE. `–` is doctor's `unknown`
 # in every table it prints — ✓ present, ✗ absent, – neither — and the row's own
 # state column names the cause beside it. The word "unknown" was the DEPENDENCIES
 # table's spelling of the same value, and that table is gone; what must still be
-# true, and is what this arm was written for, is that a cache is not reported as
-# an absence.
-expect_match "healthy: the pnpm-store dependency renders present=unknown" "  – motion*" "$MOTION_LINE"
+# true, and is what this arm was written for, is that a store the probe cannot
+# read is not reported as an absence.
+expect_match "healthy: the pnpm-store row renders present=unknown when no store can be located" \
+  "  – motion*" "$MOTION_LINE"
 expect_contains "healthy: the pnpm-store unknown carries its named cause, on its own row" \
   "a cache, no presence surface" "$(line_of "$H_OUT" " motion ")"
 expect_not_contains "healthy: a no-action unknown does not manufacture a setup reason" \
@@ -2049,7 +2060,12 @@ doctor_run "$DOCTOR_SH" "$FULL_BIN" "$HEALTHY" -- --uptades > "$BAD_OUT" 2>&1
 BAD_RC=$?
 expect_ne "an unknown option does not exit 0" "0" "$BAD_RC"
 expect_contains "an unknown option says which option exists" "--updates" "$(cat "$BAD_OUT")"
-expect_not_contains "an unknown option prints no report" "=== LOAD STATE ===" "$(cat "$BAD_OUT")"
+# NEEDLE RETARGETED (Step-6 critic F2). `=== LOAD STATE ===` renders nowhere in
+# this product any more — the section was deleted — so this arm passed on a
+# mutant that answered `--uptades` with the whole 52-line report. `BIONIC NATIVE`
+# is a heading the report always prints, so the negative now has something to
+# fail on.
+expect_not_contains "an unknown option prints no report" "BIONIC NATIVE" "$(cat "$BAD_OUT")"
 
 # ---- the command file no longer carries a relay instruction ----
 #
