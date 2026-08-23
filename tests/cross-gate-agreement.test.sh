@@ -2570,7 +2570,7 @@ echo "=== L — the WIRING: registration is three-sided (frontmatter, absence, p
 # manifests, and only those two:
 #
 #   the SKILL-SCOPED channel — the `hooks:` frontmatter block of
-#     skills/canonical-sdlc/SKILL.md, carrying the seven sdlc hook scripts' eleven
+#     skills/canonical-sdlc/SKILL.md, carrying the nine sdlc hook scripts' twelve
 #     event/matcher registrations, which bind only in sessions that actually invoke
 #     the skill (epic-16 wave-2 R1).
 #   the ALWAYS-ON channel — hooks/hooks.json, the plugin hook manifest, carrying the
@@ -2640,8 +2640,14 @@ expect_contains "…and the landing sweep on Stop (no matcher), timeout 10" \
   "Stop||\${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh|10" "$SKILL_HOOKS_ROWS"
 expect_absent_ug "…with NOTHING left registered on SubagentStop" \
   "SubagentStop" "$SKILL_HOOKS_ROWS"
-expect_eq "…exactly eleven registrations in the frontmatter block, nothing extra" \
-  "11" "$(printf '%s\n' "$SKILL_HOOKS_ROWS" | /usr/bin/grep -c '|')"
+# THE PATROL-DUTIES WALL joined the Stop channel at task-dispatch-wall-channel-loss T5. It is
+# the third no-matcher Stop hook, and it is registered HERE rather than in hooks/hooks.json for
+# the reason the D1 partition states: it binds a duty of the governing skill's own Patrol, so it
+# must be live exactly while that skill is and dead otherwise.
+expect_contains "…and the Patrol-duties wall on Stop (no matcher), timeout 10" \
+  "Stop||\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate.sh|10" "$SKILL_HOOKS_ROWS"
+expect_eq "…exactly twelve registrations in the frontmatter block, nothing extra" \
+  "12" "$(printf '%s\n' "$SKILL_HOOKS_ROWS" | /usr/bin/grep -c '|')"
 
 # THE EVENT NAMES THE GATE ANSWERS TO, pinned as the SPAN that decides them rather than as a
 # literal comparison that a refactor can move: the relevance hoist is one `case` over
@@ -2773,7 +2779,7 @@ expect_eq "…every one of them resolving through \${CLAUDE_PLUGIN_ROOT}, never 
 # of the landing gate's verdict subprocess. A timeout is the safe direction here precisely
 # because the gate is fail-open: a hook that is killed lets the stop through.
 #
-# SKILL-SCOPED CHANNEL: already exhaustively pinned by L.1 — each of the eleven literal
+# SKILL-SCOPED CHANNEL: already exhaustively pinned by L.1 — each of the twelve literal
 # rows carries `|10` (2653-2679 above) and the total-row-count assertion (2682-2683) catches
 # a stripped `timeout:` line the same way a dedicated pairing arm would: that row's
 # extractor only emits once it reaches a `timeout:` line, so a stripped bound drops the

@@ -372,7 +372,7 @@ echo "=== Section 4: Hook file consistency ==="
 # that fact, fixed at the move and re-checked below for drift rather than
 # re-derived from directory placement.
 TESTS_DIR="${REPO}/tests"
-HOOK_TEST_NAMES="agent-context-guard canonical-sdlc-evidence-gate canonical-sdlc-governing-skill context-spend dispatch-preflight execution-recorder farm-out-reminder landing-gate preflight-probe protect-database protect-main session-poker session-sweeper stop-check stop-guard stop-orders"
+HOOK_TEST_NAMES="agent-context-guard canonical-sdlc-evidence-gate canonical-sdlc-governing-skill context-spend dispatch-preflight execution-recorder farm-out-reminder landing-gate patrol-duties-gate preflight-probe protect-database protect-main session-poker session-sweeper stop-check stop-guard stop-orders"
 
 # 4a: Every non-test .sh in hooks/ has a matching tests/<name>.test.sh
 _hooks_missing_tests=""
