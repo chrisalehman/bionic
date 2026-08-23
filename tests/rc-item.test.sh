@@ -115,12 +115,36 @@ alias ll='ls -la'
 RC
 }
 
+# THE STALE-BLOCK FIXTURE. bionic's markers around an OLDER payload's proxy
+# text, with non-bionic lines above AND below the block. Every install already
+# on disk takes this shape the day `rc_default claude-proxy`'s text changes, and
+# a user who hand-edits between the markers has it today.
+STALE_LINE='claude() { command claude --old-flavour "$@"; }'
+plant_stale_rc() {  # <file>
+  {
+    printf '%s\n' '# a line that was here before bionic'
+    printf '%s\n' 'export EDITOR=vim'
+    printf '%s\n' "$RC_START_LIT"
+    printf '%s\n' "$STALE_LINE"
+    printf '%s\n' "$RC_END_LIT"
+    printf '%s\n' "alias ll='ls -la'"
+    printf '%s\n' 'export PAGER=less'
+  } > "$1"
+}
+
 SANDBOX_N=0
 new_sandbox() {  # -> prints a fresh $HOME with a planted .zshrc
   SANDBOX_N=$((SANDBOX_N + 1))
   local sb="$TMP/home-${SANDBOX_N}"
   mkdir -p "$sb/.claude"
   plant_rc "$sb/.zshrc"
+  printf '%s' "$sb"
+}
+
+new_stale_sandbox() {  # -> a fresh $HOME whose .zshrc already holds a stale block
+  local sb
+  sb="$(new_sandbox)"
+  plant_stale_rc "$sb/.zshrc"
   printf '%s' "$sb"
 }
 
@@ -140,6 +164,29 @@ rc_block_lines() {  # <file>
     [ "$inside" = "1" ] && out="${out}${line}"$'\n'
   done < "$file"
   printf '%s' "$out"
+}
+
+# Every line NOT between bionic's markers, in order, the markers themselves
+# excluded. The other half of `rc_block_lines`: what the user's rc held before
+# bionic ever touched it, and must still hold afterwards whatever bionic did to
+# its own block.
+rc_nonblock_lines() {  # <file>
+  local file="$1" line inside=0 out=""
+  [ -f "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$line" = "$RC_START_LIT" ]; then inside=1; continue; fi
+    if [ "$line" = "$RC_END_LIT" ];   then inside=0; continue; fi
+    [ "$inside" = "0" ] && out="${out}${line}"$'\n'
+  done < "$file"
+  printf '%s' "$out"
+}
+
+# Does the SHELL agree the file is a shell script -- `ok`, or the parser's own
+# complaint. An rc that no longer parses is the failure mode that locks a user
+# out of their own login shell, and no assertion about bytes or blocks sees it.
+zsh_syntax_rc() {  # <file>
+  local out
+  if out="$(zsh -n "$1" 2>&1)"; then printf 'ok'; else printf '%s' "${out:-nonzero}"; fi
 }
 
 # How many times a whole line equals <literal>. The idempotence arm reads this.
@@ -405,6 +452,85 @@ SB_H="$(new_sandbox)"
 printf '%s\n' "$PROXY_LINE" >> "$SB_H/.zshrc"
 env_run "$SB_H" /bin/zsh -- rc_get claude-proxy >/dev/null 2>&1
 expect_ne "rc_get is non-zero for the same line outside the markers" "0" "$?"
+
+echo "── a stale in-block line: the block is rebuilt, never filtered ──────────"
+
+# WHAT THIS SECTION OWNS. What setup and remove do to a marker block that holds
+# something other than the current `rc_default` line. Everything above this
+# point runs on a block that is either empty or exactly that line, so nothing
+# above it can see a rebuild go wrong (epic-18 wave-03 critic F1/F2).
+
+# THE SYNTAX EXTRACTOR IS PROVED TO DISCRIMINATE BEFORE ANYTHING IS ASKED OF IT:
+# it calls the planted fixture well-formed and a deliberately broken file
+# broken, through the same function.
+printf '%s\n' 'if [ 1 = 1 ]' > "$TMP/broken.zshrc"
+
+SB_ST1="$(new_stale_sandbox)"
+cp "$SB_ST1/.zshrc" "$TMP/stale-before.zshrc"
+expect_eq "zsh -n calls the planted stale rc well-formed" \
+  "ok" "$(zsh_syntax_rc "$TMP/stale-before.zshrc")"
+expect_ne "zsh -n calls a deliberately broken rc broken" \
+  "ok" "$(zsh_syntax_rc "$TMP/broken.zshrc")"
+
+STALE_BLOCK_BEFORE="$(rc_block_lines "$SB_ST1/.zshrc")"
+STALE_OUTSIDE_BEFORE="$(rc_nonblock_lines "$SB_ST1/.zshrc")"
+env_run "$SB_ST1" /bin/zsh -- rc_get claude-proxy >/dev/null 2>&1
+STALE_GET_BEFORE=$?
+
+setup_run "$SB_ST1" y >/dev/null 2>&1
+env_run "$SB_ST1" /bin/zsh -- rc_get claude-proxy >/dev/null 2>&1
+STALE_GET_AFTER=$?
+
+expect_eq "a consented setup over a stale block leaves the rc well-formed" \
+  "ok" "$(zsh_syntax_rc "$SB_ST1/.zshrc")"
+expect_nonempty "the stale fixture had a block before setup" "$STALE_BLOCK_BEFORE"
+expect_eq "after setup the block holds exactly the proxy function" \
+  "$PROXY_LINE" "$(rc_block_lines "$SB_ST1/.zshrc")"
+expect_eq "after setup the proxy line appears exactly once" "1" \
+  "$(count_lines_equal "$SB_ST1/.zshrc" "$PROXY_LINE")"
+expect_eq "after setup the stale line is gone" "0" \
+  "$(count_lines_equal "$SB_ST1/.zshrc" "$STALE_LINE")"
+expect_eq "the stale line was in the fixture to go" "1" \
+  "$(count_lines_equal "$TMP/stale-before.zshrc" "$STALE_LINE")"
+expect_eq "rc_get sees the line setup wrote over the stale block" "0" "$STALE_GET_AFTER"
+expect_ne "rc_get did not read the stale line as bionic's" "0" "$STALE_GET_BEFORE"
+expect_nonempty "the stale fixture has lines outside the block" "$STALE_OUTSIDE_BEFORE"
+expect_eq "setup leaves every line outside the block untouched" \
+  "$STALE_OUTSIDE_BEFORE" "$(rc_nonblock_lines "$SB_ST1/.zshrc")"
+
+# What the file must be once bionic's block is out of it: the four non-bionic
+# lines, in the order they were planted, and nothing else.
+{
+  printf '%s\n' '# a line that was here before bionic'
+  printf '%s\n' 'export EDITOR=vim'
+  printf '%s\n' "alias ll='ls -la'"
+  printf '%s\n' 'export PAGER=less'
+} > "$TMP/stale-after-remove.zshrc"
+
+SB_ST2="$(new_stale_sandbox)"
+cp "$SB_ST2/.zshrc" "$TMP/stale2-before.zshrc"
+STALE_BLOCK_BEFORE_RM="$(rc_block_lines "$SB_ST2/.zshrc")"
+remove_run "$SB_ST2" y >/dev/null 2>&1
+
+expect_nonempty "the stale block was there for remove to strip" "$STALE_BLOCK_BEFORE_RM"
+expect_empty "after remove the stale block is gone" "$(rc_block_lines "$SB_ST2/.zshrc")"
+expect_eq "after remove no start marker survives a stale block" "0" \
+  "$(count_lines_equal "$SB_ST2/.zshrc" "$RC_START_LIT")"
+expect_eq "after remove no end marker survives a stale block" "0" \
+  "$(count_lines_equal "$SB_ST2/.zshrc" "$RC_END_LIT")"
+expect_eq "the end marker was in the fixture to go" "1" \
+  "$(count_lines_equal "$TMP/stale2-before.zshrc" "$RC_END_LIT")"
+expect_same_bytes "remove leaves a stale rc as its non-bionic lines, byte for byte" \
+  "$TMP/stale-after-remove.zshrc" "$SB_ST2/.zshrc"
+expect_eq "remove over a stale block leaves the rc well-formed" \
+  "ok" "$(zsh_syntax_rc "$SB_ST2/.zshrc")"
+
+# The standalone door has no env.sh to call, so it strips the block with its own
+# copy of the walk; on this fixture the two doors must land on the same bytes.
+SB_ST3="$(new_stale_sandbox)"
+remove_run "$SB_ST3" y "$TMP/standalone/remove.sh" >/dev/null 2>&1
+expect_same_bytes "the standalone door strips a stale block to the same bytes" \
+  "$TMP/stale-after-remove.zshrc" "$SB_ST3/.zshrc"
 
 echo "──────────────────────────────────────────────"
 echo "rc-item.test.sh: ${PASS}/${TOTAL} passed, ${FAIL} failed"
