@@ -30,9 +30,17 @@
 # replacement under `umask 077` and chmods it BEFORE the rename, so a settings
 # file a user deliberately kept at 0600 — it routinely holds tokens — never
 # comes back wider as a side effect of bionic writing two of its own names into
-# it. tests/remove.test.sh pins that writer's shape and walls the payload
-# against a second one appearing beside it; this file adds no writer, it calls
-# that one.
+# it. This file adds no second settings.json writer — it calls that one.
+#
+# NO CROSS-WRITER PIN, AND THAT IS LOGGED DEBT RATHER THAN AN OVERSIGHT.
+# tests/remove.test.sh used to pin that writer's shape and wall the payload
+# against a second one appearing beside it. It was deleted at epic-18 wave-03
+# and nothing replaced it. In the same wave this file grew a staging pair of its
+# own for the shell rc (`_rc_stage_tmp` / `_rc_publish_tmp`, below), which makes
+# three copies of the stage-then-publish shape in the payload — setup.sh's,
+# remove.sh's, and this one. They are spelled alike on purpose and today they
+# are held together by nothing but that: wave-03 plan residual (b), weighed by
+# its critic at F4 as acceptable debt. Do not read the resemblance as a pin.
 #
 # ROOTS. The settings path is deps.sh's `_dep_settings_file`, so a suite that
 # points the payload at a fixture machine moves this file with it and no seam
@@ -278,8 +286,9 @@ rc_get() {  # <item>
 # widened to the target's mode only at the instant of publication, and renamed
 # over the RESOLVED target rather than a symlink — setup.sh's `_setup_stage_tmp`
 # / `_setup_publish_tmp` pair and remove.sh's `_rm_stage_tmp` / `_rm_publish_tmp`
-# pair, spelled the same way here so a third door cannot drift from the other
-# two. A shell rc is if anything the likeliest of bionic's three write targets to
+# pair, spelled the same way here so a reader of any one of the three finds the
+# same shape — a convention, not a wall: nothing tests the three against each
+# other (see the header). A shell rc is if anything the likeliest of bionic's three write targets to
 # hold a plaintext token — it is where people put `export …_API_KEY=` — and `mv`
 # replaces the inode, so without this a file a user deliberately kept at 0600
 # comes back at whatever the umask says.
@@ -305,41 +314,37 @@ _rc_publish_tmp() {  # <tmp> <file> — <file> is the resolved target
   mv "$tmp" "$file"
 }
 
-# Everything the file holds EXCEPT bionic's block, and — when <keep> is `keep` —
-# the block's own non-roster lines are kept inside a rebuilt block. One walk, so
-# `rc_set` and `rc_unset` cannot come to disagree about what the block is.
+# Everything the file holds EXCEPT bionic's block. One walk, so `rc_set` and
+# `rc_unset` cannot come to disagree about what the block is.
 #
-# WHY A LINE INSIDE THE BLOCK CAN SURVIVE. `RC_ITEMS` is a roster and rosters
-# grow. Deleting one item must not take a second item's line with it, so
-# `rc_unset` filters only the line it was asked about and drops the markers when
-# what is left inside them is nothing. A line inside the markers that is no
-# item's default is bionic's own footprint from an older payload; it goes with
-# the block rather than being stranded in a file with no markers around it.
-_rc_rewrite() {  # <file> <tmp> <drop-line> <mode: all|one>
-  local file="$1" tmp="$2" drop="$3" mode="$4"
-  local line inside=0 kept="" pending=0 body=""
+# THE BLOCK IS REBUILT WHOLESALE, NEVER FILTERED. Whatever sits between the
+# markers goes — an older payload's proxy text, a line somebody hand-edited in
+# there, the half of a block an interrupted run left behind. `rc_set` then
+# writes the block back as exactly `rc_default`'s line and `rc_unset` writes no
+# block at all, so what the markers hold is always a function of the roster and
+# never of what was found on disk. Carrying unrecognised in-block lines forward
+# was tried and deleted: it round-tripped the block body out through a command
+# substitution, which strips the trailing newline, so a surviving line fused
+# with whatever was printed after it and the user's rc came back syntactically
+# invalid — `zsh -n` parse error, `rc_get` then reporting absent while doctor
+# reported present (epic-18 wave-03, critic F1/F2). The day `RC_ITEMS` grows a
+# second entry, both items are written from the roster here; nothing inside
+# bionic's own markers is salvaged out of the file.
+_rc_rewrite() {  # <file> <tmp> — <tmp> gets every line of <file> outside the block
+  local file="$1" tmp="$2"
+  local line inside=0 pending=0
   while IFS= read -r line || [ -n "$line" ]; do
     if [ "$line" = "$RC_START" ]; then inside=1; continue; fi
     if [ "$line" = "$RC_END" ];   then inside=0; continue; fi
-    if [ "$inside" = "1" ]; then
-      # Inside the block: `all` drops everything, `one` keeps what it was not
-      # asked about.
-      if [ "$mode" = "one" ] && [ "$line" != "$drop" ] && [ -n "$line" ]; then
-        body="${body}${line}"$'\n'
-      fi
-      continue
-    fi
+    [ "$inside" = "1" ] && continue
     # Outside the block, the file is reproduced line for line. Blank lines are
     # deferred so a run of them survives exactly as it was — the same shape
     # remove.sh's `_rm_strip_marker_block` holds to.
     if [ "$pending" = "1" ]; then printf '\n' >> "$tmp"; pending=0; fi
     if [ -z "$line" ]; then pending=1; continue; fi
     printf '%s\n' "$line" >> "$tmp"
-    kept=1
   done < "$file"
   [ "$pending" = "1" ] && printf '\n' >> "$tmp"
-  printf '%s' "$body"
-  [ -n "$kept" ] || true
   return 0
 }
 
@@ -348,20 +353,17 @@ _rc_rewrite() {  # <file> <tmp> <drop-line> <mode: all|one>
 # bytes and a block left half-written by an interrupted run is repaired rather
 # than appended beside.
 rc_set() {  # <item>
-  local item="${1:-}" want file target tmp body
+  local item="${1:-}" want file target tmp
   want="$(rc_default "$item")" || return 1
   file="$(rc_file)" || return 1
   target="$(bionic_link_target "$file")"
   tmp="${target}.bionic.tmp"
   _rc_stage_tmp "$tmp" || return 1
   if [ -f "$file" ]; then
-    body="$(_rc_rewrite "$file" "$tmp" "$want" one)" || { rm -f "$tmp"; return 1; }
-  else
-    body=""
+    _rc_rewrite "$file" "$tmp" || { rm -f "$tmp"; return 1; }
   fi
   {
     printf '%s\n' "$RC_START"
-    [ -n "$body" ] && printf '%s' "$body"
     printf '%s\n' "$want"
     printf '%s\n' "$RC_END"
   } >> "$tmp" || { rm -f "$tmp"; return 1; }
@@ -374,26 +376,21 @@ rc_set() {  # <item>
 # problem. The rc FILE is never deleted, even if the block was all it held — a
 # script that can be curl-fetched onto an unknown machine does not delete a
 # user's shell rc.
+#
+# THE BLOCK GOES WHOLE. An empty marker pair left in a user's rc is bionic
+# footprint that reads as a bionic setting whose value nobody can find — the
+# same defect the retired env block left behind, and the reason remove strips
+# markers rather than filtering the line between them. `_rc_rewrite` drops the
+# markers with their contents, so there is nothing left to decide about here.
 rc_unset() {  # <item>
-  local item="${1:-}" want file target tmp body
-  want="$(rc_default "$item")" || return 1
+  local item="${1:-}" file target tmp
+  rc_default "$item" >/dev/null || return 1
   file="$(rc_file)" || return 1
   [ -f "$file" ] || return 0
   target="$(bionic_link_target "$file")"
   tmp="${target}.bionic.tmp"
   _rc_stage_tmp "$tmp" || return 1
-  body="$(_rc_rewrite "$file" "$tmp" "$want" one)" || { rm -f "$tmp"; return 1; }
-  # THE BLOCK GOES WHEN IT EMPTIES. An empty marker pair left in a user's rc is
-  # bionic footprint that reads as a bionic setting whose value nobody can find —
-  # the same defect the retired env block left behind, and the reason remove
-  # strips markers rather than filtering the line between them.
-  if [ -n "$body" ]; then
-    {
-      printf '%s\n' "$RC_START"
-      printf '%s' "$body"
-      printf '%s\n' "$RC_END"
-    } >> "$tmp" || { rm -f "$tmp"; return 1; }
-  fi
+  _rc_rewrite "$file" "$tmp" || { rm -f "$tmp"; return 1; }
   _rc_publish_tmp "$tmp" "$target" || { rm -f "$tmp"; return 1; }
   return 0
 }
