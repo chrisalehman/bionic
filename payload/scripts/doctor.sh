@@ -843,7 +843,7 @@ _p_sid=""; _p_here=""; _p_cwd=""; _p_cause=""
 _p_jobs=""; _p_other_jobs=""; _p_n_patrol=0; _p_n_other=0
 _p_stamp=""; _p_age=""; _p_limit=""; _p_interval=""; _p_source=""
 _p_rows=""; _p_open=""; _p_closed=""; _p_present=""
-_p_disp=""; _p_rost=""; _p_blind=""; _p_wcause=""
+_p_disp=""; _p_rost=""; _p_blind=""; _p_refused=""; _p_wcause=""
 
 _patrol_flush() {
   [ -n "$_p_sid" ] || return 0
@@ -926,13 +926,23 @@ EOF
       _patrol_item "$DOCTOR_NIL" "roster" "none — nothing was dispatched on this session"
     fi
 
+    # REFUSED, NAMED EXPLICITLY on both branches: a refusal is credited out of
+    # $_p_blind before this ever runs (patrol.sh does the subtraction), but a
+    # reader comparing $_p_disp against $_p_rost by hand needs the refused
+    # count on the line too, or the arithmetic looks wrong even though the
+    # verdict is right.
+    _p_refused_suffix=""
+    case "${_p_refused:-0}" in
+      0|'') : ;;
+      *) _p_refused_suffix=" (${_p_refused} refused)" ;;
+    esac
     if [ -n "$_p_wcause" ]; then
       _patrol_item "$DOCTOR_NIL" "dispatch wall" "unknown — ${_p_wcause}"
     elif [ "${_p_blind:-0}" -gt 0 ]; then
       _patrol_item "$DOCTOR_BAD" "dispatch wall" \
-        "${_p_blind} of ${_p_disp} dispatches never reached it — it is not registered"
+        "${_p_blind} of ${_p_disp} dispatches never reached it${_p_refused_suffix} — not registered"
     else
-      _patrol_item "$DOCTOR_OK" "dispatch wall" "${_p_disp} dispatched, ${_p_rost} rostered"
+      _patrol_item "$DOCTOR_OK" "dispatch wall" "${_p_disp} dispatched, ${_p_rost} rostered${_p_refused_suffix}"
     fi
   fi
 
@@ -961,7 +971,7 @@ while IFS= read -r _p_line; do
       _p_jobs=""; _p_other_jobs=""; _p_n_patrol=0; _p_n_other=0
       _p_stamp=""; _p_age=""; _p_limit=""; _p_interval=""; _p_source=""
       _p_rows=""; _p_open=""; _p_closed=""; _p_present=""
-      _p_disp=""; _p_rost=""; _p_blind=""; _p_wcause="" ;;
+      _p_disp=""; _p_rost=""; _p_blind=""; _p_refused=""; _p_wcause="" ;;
     "patrol-job/v1|"*)
       _p_id="$(_doctor_pfield "$_p_line" id)"
       _p_cron="$(_doctor_pfield "$_p_line" cron)"
@@ -989,6 +999,7 @@ while IFS= read -r _p_line; do
       _p_disp="$(_doctor_pfield "$_p_line" dispatched)"
       _p_rost="$(_doctor_pfield "$_p_line" rostered)"
       _p_blind="$(_doctor_pfield "$_p_line" blind)"
+      _p_refused="$(_doctor_pfield "$_p_line" refused)"
       _p_wcause="$(_doctor_pfield "$_p_line" cause)" ;;
   esac
 done <<EOF

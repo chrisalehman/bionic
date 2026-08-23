@@ -197,11 +197,23 @@ _patrol_scan_jq='
 # left is the job table as the transcript implies it. Creation order is
 # preserved, which is what lets the duplicate verdict keep the NEWEST job and
 # name the older ones for deletion.
+#
+# REFUSED DISPATCHES ARE COUNTED HERE TOO, off the same `R` records the job
+# join already reads — no second pass over the transcript. This is a
+# DELIBERATE second copy of hooks/session-poker.sh's own
+# `count_refused_dispatches`, not a shared helper: that script answers for the
+# live tick from a bare transcript scan, this one answers for doctor's
+# reconstruction inside a jq/awk join that already has the `R` record in hand,
+# and a sourced library the installer misses would make either copy a silently
+# inert consumer (the same reasoning hooks/session-poker.sh's own header gives
+# for its `parse_seconds` duplicate). Recognized by the identical CLI marker,
+# `PreToolUse:Agent hook error:`, which the hook error path — and nothing
+# else — writes into a tool_result.
 _patrol_join_awk='
-  BEGIN { FS = "\t"; n = 0; agents = 0 }
+  BEGIN { FS = "\t"; n = 0; agents = 0; refused = 0 }
   $1 == "C" { ord[++n] = $2; cron[$2] = $3; rec[$2] = $4; kind[$2] = $5; head[$2] = $6 }
   $1 == "D" { del[$2] = 1 }
-  $1 == "R" { res[$2] = $3 }
+  $1 == "R" { res[$2] = $3; if (index($3, "PreToolUse:Agent hook error:") > 0) refused++ }
   $1 == "A" { agents++ }
   END {
     for (i = 1; i <= n; i++) {
@@ -218,6 +230,7 @@ _patrol_join_awk='
       printf "JOB\t%s\t%s\t%s\t%s\t%s\n", (id == "" ? "?" : id), cron[tid], rec[tid], kind[tid], head[tid]
     }
     printf "AGENTS\t%d\n", agents
+    printf "REFUSED\t%d\n", refused
   }
 '
 
@@ -320,7 +333,7 @@ EOF
 # machine. Emitted as keyed records rather than prose so the renderer decides
 # what a reader sees and this file decides nothing about presentation.
 patrol_report() {  # -> patrol-session/v1 … patrol-job/v1 … patrol-stamp/v1 … patrol-roster/v1 … patrol-wall/v1
-  local sess sid pid cwd repo here_repo tr scan agents cause blind
+  local sess sid pid cwd repo here_repo tr scan agents refused cause blind
   local id cron rec kind phead rline dispatches tag a b c d e
 
   here_repo="$(_patrol_repo_root "$PWD")"
@@ -342,7 +355,7 @@ patrol_report() {  # -> patrol-session/v1 … patrol-job/v1 … patrol-stamp/v1 
       "$PATROL_SCHEMA" "$sid" "$pid" "$cwd" "$repo" \
       "$( [ "$repo" = "$here_repo" ] && echo yes || echo no )" "$cause"
 
-    agents=""
+    agents=""; refused=""
     if [ -n "$tr" ] && [ -z "$cause" ]; then
       scan="$(_patrol_scan "$tr")"
       while IFS=$'\t' read -r tag a b c d e; do
@@ -353,11 +366,13 @@ patrol_report() {  # -> patrol-session/v1 … patrol-job/v1 … patrol-stamp/v1 
               "$PATROL_JOB_SCHEMA" "$sid" "$id" "$(_patrol_clean "$cron" 40)" \
               "$rec" "$kind" "$(_patrol_clean "$phead" 160)" ;;
           AGENTS) agents="$a" ;;
+          REFUSED) refused="$a" ;;
         esac
       done <<EOF
 $scan
 EOF
     fi
+    case "$refused" in ''|*[!0-9]*) refused=0 ;; esac
 
     printf '%s|session=%s|%s\n' "$PATROL_STAMP_SCHEMA_OUT" "$sid" "$(patrol_stamp_state "$repo" "$sid")"
 
@@ -367,13 +382,19 @@ EOF
     dispatches="$(_patrol_field "$rline" rows)"
     case "$agents" in ''|*[!0-9]*) agents="" ;; esac
     if [ -z "$agents" ]; then
-      printf '%s|session=%s|dispatched=|rostered=%s|blind=|cause=%s\n' \
-        "$PATROL_WALL_SCHEMA" "$sid" "$dispatches" "${cause:-the transcript could not be read}"
+      printf '%s|session=%s|dispatched=|rostered=%s|blind=|refused=%s|cause=%s\n' \
+        "$PATROL_WALL_SCHEMA" "$sid" "$dispatches" "$refused" "${cause:-the transcript could not be read}"
     else
-      blind=$(( agents - dispatches ))
+      # NET OF REFUSALS. A dispatch the wall REFUSED still shows up as an
+      # `Agent`/`Task` tool_use in $agents (the attempt happened), but it exits
+      # before dispatch-preflight.sh's roster append and so is never in
+      # $dispatches either — a refusal is the wall doing its job, not a gap in
+      # it, and crediting it here is what keeps a session full of healthy
+      # refusals from reading as a wall that never saw them.
+      blind=$(( agents - dispatches - refused ))
       [ "$blind" -lt 0 ] && blind=0
-      printf '%s|session=%s|dispatched=%s|rostered=%s|blind=%s|cause=\n' \
-        "$PATROL_WALL_SCHEMA" "$sid" "$agents" "$dispatches" "$blind"
+      printf '%s|session=%s|dispatched=%s|rostered=%s|blind=%s|refused=%s|cause=\n' \
+        "$PATROL_WALL_SCHEMA" "$sid" "$agents" "$dispatches" "$blind" "$refused"
     fi
   done <<EOF
 $(patrol_live_sessions)
