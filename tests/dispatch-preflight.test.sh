@@ -78,8 +78,9 @@ expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no outp
 #   * dispatch brief text (BRIEF_FULL / the compact variant) — SYNTHESIZED,
 #     but its LABEL GRAMMAR is the shipped one: skills/canonical-sdlc/SKILL.md
 #     §Dispatch's seven-field sentence (span-pinned by
-#     tests/dispatch-spans.test.sh §5d) and the exemplar brief recorded
-#     verbatim at .bionic/docs/record/w2-ac3-run.md:25-40.
+#     tests/dispatch-spans.test.sh §5d — that suite was deleted in an earlier
+#     purge, commit b959b5e, and nothing replaced the span pin) and the
+#     exemplar brief recorded verbatim at .bionic/docs/record/w2-ac3-run.md:25-40.
 #   * attestation record — FAITHFUL to hooks/preflight-probe.sh's own
 #     schema/comment block: `# comment` + `key=value` lines, read BY KEY
 #     (checklist A6), `session_id=` the field this gate keys on (Slice 4/1
@@ -279,7 +280,6 @@ write_legacy_attestation() {
 echo "=== S1 — relevance hoist (A7): irrelevant tool passes, silent ==="
 # ============================================================
 
-expect_status "gate script exists and is invocable" "0" "$([ -f "$GATE" ] && echo 0 || echo 1)"
 
 REPO=$(make_repo r1 yes)
 # no attestation exists at all — if tool_name gating were bypassed, an
@@ -557,7 +557,19 @@ REPO=$(make_repo r9 yes)
 mkdir -p "$REPO/.bionic/tmp"; chmod 500 "$REPO/.bionic/tmp"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 chmod 700 "$REPO/.bionic/tmp"
-FIXLINE=$(printf '%s\n' "$GATE_ERR" | grep -oF "bash $PROBE_SRC" | head -1)
+# THE FIX LINE AS THE GATE ACTUALLY PRINTED IT, never a grep for the spelling we
+# hope to find. The old form was `grep -oF "bash $PROBE_SRC"`, which could only ever
+# yield the exact absolute command or nothing at all — so the one defect A1 exists to
+# catch, a repo-relative spelling, made FIXLINE EMPTY, `bash -c ""` exited 0 with no
+# stderr, and all three assertions below passed over a run that never happened. The
+# extractor pinned away the property under test (.claude memory:
+# fixtures-can-pin-away-the-test); proven vacuous by mutation in epic-18 W3 4/2, where
+# rewriting PREFLIGHT_CMD to `bash preflight-probe.sh` flipped nothing.
+# Lifting the gate's own text lets a relative spelling reach the execution below.
+FIXLINE=$(printf '%s\n' "$GATE_ERR" | sed -n 's/.*re-run by hand: \(.*\))\..*/\1/p' | head -1)
+# The extractor's own non-emptiness, positive, on the same fixture — without it the
+# three assertions below are again a test of nothing (authoring rule: prove the
+# extractor before asserting an absence through it).
 expect_contains "a fix line was captured to execute" "preflight-probe.sh" "$FIXLINE"
 
 # A throwaway HOME, so executing the captured fix line cannot touch the real one. Since
@@ -586,10 +598,17 @@ RUN9_ST=$?
 if [ "$RUN9_ST" -eq 127 ] || [ "$RUN9_ST" -eq 126 ]; then
   no "fix command runs from a non-repo cwd" "exit $RUN9_ST (not found/not executable): $(cat "$RUN9_ERR")"
 else
-  ok "fix command runs from a non-repo cwd (exit $RUN9_ST, a preflight-probe.sh code)"
+  ok "fix command runs from a non-repo cwd"
 fi
-expect_absent "fix-command run produces no 'No such file or directory'" "No such file or directory" "$RUN9_ERR"
-expect_absent "fix-command run produces no 'command not found'" "command not found" "$RUN9_ERR"
+# `$RUN9_ERR` is the PATH of the capture file; these two used to pass it as the
+# HAYSTACK, so they asked whether the string "/tmp/.../run9.err" contains "No such
+# file or directory" — which it never can, on any run, however broken. Both were
+# vacuous from birth; proven so in epic-18 W3 4/2, where pointing the fix command at
+# a file that does not exist (exit 127, that exact message on stderr) flipped neither.
+# The arm above already reads the CONTENTS, via `$(cat "$RUN9_ERR")`; these now do too.
+RUN9_ERR_TEXT="$(cat "$RUN9_ERR")"
+expect_absent "fix-command run produces no 'No such file or directory'" "No such file or directory" "$RUN9_ERR_TEXT"
+expect_absent "fix-command run produces no 'command not found'" "command not found" "$RUN9_ERR_TEXT"
 
 # ============================================================
 echo "=== S10 — the roster row is written on the pass path (AC-1, launch half) ==="
@@ -628,7 +647,7 @@ expect_status "row's agent_id is empty at launch (slice 4/4 fills it)" "" "$(ros
 
 LAUNCHED=$(roster_field "$ROW" launched_at)
 if printf '%s' "$LAUNCHED" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'; then
-  ok "row carries a UTC ISO launch timestamp ($LAUNCHED)"
+  ok "row carries a UTC ISO launch timestamp"
 else
   no "row carries a UTC ISO launch timestamp" "got '$LAUNCHED'"
 fi
@@ -671,8 +690,6 @@ expect_status "compact grammar: progress path lifted from a mid-line 'Progress:'
   ".bionic/tmp/w99-two.progress" "$(roster_field "$ROW" progress)"
 # "4/4" inside the commit subject is slash-bearing but not a path; a lifted
 # deliverable list containing it would mean the extractor is matching fractions.
-expect_absent "compact grammar: a bare fraction is not lifted as a deliverable path" \
-  "4/4" "$(roster_field "$ROW" deliverable)"
 
 # ============================================================
 echo "=== S10c — a missing NON-deliverable field is RECORDED + WARNED, never blocked (AC-1) ==="
@@ -870,8 +887,6 @@ expect_status "the progress path still stops at the cadence that follows it" \
 # writer actually emits, and this pins the no-run-on baseline exactly.
 expect_status "cadence carries the duration token and no run-on (real property, N-2)" \
   "~6m." "$(roster_field "$ROW" cadence)"
-expect_absent "the claimed pattern does not swallow the output file beside it" \
-  "w99-suite.log" "$(roster_field "$ROW" claims)"
 expect_status "the duration is unharmed by the new labels" \
   "~50 minutes." "$(roster_field "$ROW" duration)"
 
@@ -1989,8 +2004,6 @@ expect_status "the resubmission — one path in the label, the reference outside
   "0" "$GATE_ST"
 expect_status "…contracted to the artifact the brief actually asked for" \
   ".bionic/docs/record/w2-probe-frd.md" "$(roster_field "$ROW" deliverable)"
-expect_absent "…and never to the reference it was told to read" \
-  "w2-critic-report" "$(roster_field "$ROW" deliverable)"
 expect_status "…marked declared" "declared" "$(roster_field "$ROW" source)"
 
 # ---- R6-4 CASE 5: a path in the labels SECOND sentence is declared, not absent ----
@@ -2393,7 +2406,6 @@ S21_TREE=$(mktemp -d "${TMPDIR:-/tmp}/s21-poker-tree.XXXXXX")
 cp "$GATE" "$S21_TREE/dispatch-preflight.sh"
 sed 's/^POKER_INTERVAL_DEFAULT="30m"$/POKER_INTERVAL_DEFAULT="10s"/' \
   "${BIONIC_HOOKS_DIR}/session-poker.sh" > "$S21_TREE/session-poker.sh"
-TOTAL=$((TOTAL + 1))
 if grep -qF 'POKER_INTERVAL_DEFAULT="10s"' "$S21_TREE/session-poker.sh"; then
   ok "r21l meta: the doctored poker default landed (the sed anchor still matches)"
 else

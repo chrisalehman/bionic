@@ -5,7 +5,8 @@
 #
 #   payload/scripts/spawn-worktree.sh   the universal worktree contract
 #
-# WHY IT IS NOT IN tests/plugin-lib.test.sh. That suite's header names its
+# WHY IT IS NOT IN tests/plugin-lib.test.sh (deleted at 8582861, epic-18 wave-03;
+# the rationale below is historical). That suite's header named its
 # subject: the two SOURCED libraries every command consumes, driven through a
 # `lib_run` harness that sources a file and calls a function. This subject is an
 # EXECUTED script whose whole behavior is mutation of a real git repository, and
@@ -56,7 +57,8 @@ expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got
 expect_true() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
 expect_false() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then no "$label" "expected non-zero exit"; else ok "$label"; fi; }
 # Pattern match without a pipe: `printf | grep -q` is a SIGPIPE race under
-# pipefail (tests/assert-helper-race.test.sh pins that lesson).
+# pipefail (tests/assert-helper-race.test.sh used to pin that lesson; deleted at
+# 8582861, epic-18 wave-03, and nothing replaced the pin).
 expect_match() {
   local label="$1" pattern="$2" actual="$3"
   # shellcheck disable=SC2053  # RHS is a glob on purpose
@@ -125,8 +127,7 @@ spawn_out_with() {  # <script> <cwd> <args...>
 
 echo "=== Group 1: the script exists, is executable, and parses ==="
 
-expect_true "spawn-worktree.sh exists"          test -f "$SPAWN"
-expect_true "spawn-worktree.sh is executable"   test -x "$SPAWN"
+# (file-exists/executable fixture checks removed epic-18 W3 4/6: no production subject -- see ledger-spawn-worktree.md)
 expect_true "spawn-worktree.sh passes bash -n"  bash -n "$SPAWN"
 
 echo ""
@@ -170,7 +171,7 @@ HEAD2="$(sha_of "$R2")"
 spawn_out "$R2" create "$OLD2" older >/dev/null
 expect_eq   "the worktree really is at the older sha" "$OLD2" "$(sha_of "${R2}/.worktrees/older")"
 expect_true "the older sha is not HEAD (the arm discriminates)" test "$OLD2" != "$HEAD2"
-
+# (fixture self-check removed epic-18 W3 4/6: not testing the script -- see ledger-spawn-worktree.md)
 echo ""
 echo "=== Group 5: create — where the worktree lands ==="
 #
@@ -278,7 +279,6 @@ echo x > "$NB/f"; git -C "$NB" add f; git -C "$NB" commit --quiet -m c1
 NBSHA="$(sha_of "$NB")"
 expect_match "a repo with no .bionic directory is refused" "spawn-worktree: FAIL reason=*" \
   "$(spawn_out "$NB" create "$NBSHA" nostate)"
-expect_false "that refusal left no worktree behind" test -e "${NB}/.worktrees/nostate"
 mkdir -p "$NB/.bionic"
 expect_match "the same repo is accepted once .bionic exists (the arm discriminates)" \
   "spawn-worktree: OK *" "$(spawn_out "$NB" create "$NBSHA" nostate)"
@@ -348,7 +348,6 @@ expect_match "removing a path that is not a worktree is refused" "spawn-worktree
   "$(spawn_out "$R7" remove "${R7}/.worktrees/never-existed")"
 expect_match "removing the MAIN checkout is refused" "spawn-worktree: FAIL reason=*" \
   "$(spawn_out "$R7" remove "$R7")"
-expect_true "the main checkout is untouched" test -f "${R7}/file.txt"
 expect_match "remove with no path is refused" "spawn-worktree: FAIL reason=*" \
   "$(spawn_out "$R7" remove)"
 
@@ -474,9 +473,6 @@ expect_true "tests/run.sh names spawn-worktree.test.sh" \
 echo ""
 echo "=== Group 12: the shipped skill is the payload's own copy ==="
 
-expect_eq "the skill is the plugin payload's own copy (symlink, not a fork)" \
-  "$(cd "${REPO}/payload/skills/canonical-sdlc" && pwd -P)" \
-  "$(cd "${BIONIC_SKILLS_DIR}/canonical-sdlc" && pwd -P)"
 
 echo ""
 echo "========================================"

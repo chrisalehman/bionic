@@ -48,8 +48,9 @@
 # WHAT `extra` MEANS AFTER THAT RULING. Mechanically, unchanged: offered once at
 # setup, one line of why, default No. What it no longer means is "no route wants
 # it" — three of its rows name a real route in `consumer`. So the literal `extra`
-# in that column is a class-`extra` row's OPTION, not its obligation, and the
-# traceability pin says so (tests/plugin-lib.test.sh Group 3c).
+# in that column is a class-`extra` row's OPTION, not its obligation. The
+# traceability pin used to say so (tests/plugin-lib.test.sh Group 3c; deleted
+# at 8582861, epic-18 wave-03, and nothing replaced it).
 #
 # AND THE JIT ARMS STAY (lib/jit.sh). A row being offered at setup is not a row
 # being present: the user may decline it, and a machine may lose it later. Every
@@ -81,7 +82,8 @@
 # the basics no single route owns, `extra` for the optional offers. A row with
 # no consumer is a row nobody can justify, and the wave dropped two of them
 # (`yq`, `gcloud`) on exactly that test. tests/plugin-lib.test.sh Group 3c
-# resolves every path.
+# used to resolve every path; it was deleted at 8582861 (epic-18 wave-03) and
+# nothing replaced the check.
 #
 # CONSENT. `install_dep` and `remove_dep` are the only mutating entry points,
 # and neither mutates before an explicit answer on stdin. No assume-yes knob
@@ -182,7 +184,8 @@ _dep_excalidraw_refs() {
 #
 # It is a plain variable rather than a function because remove.sh's standalone
 # door has to be able to fall back to a copy of it — see the shared literals in
-# that file, and the agreement arms in tests/remove.test.sh Group 19.
+# that file. tests/remove.test.sh Group 19 used to arm the agreement between
+# them; it was deleted at 8582861 and nothing replaced it.
 BIONIC_DEFAULT_PERMISSION_MODE="auto"
 
 # THE ONE SENTENCE ABOUT `.permissions.defaultMode` (epic-17 wave-07 item 1 +
@@ -235,8 +238,9 @@ BIONIC_PERMISSION_MODE_RC_NOTE='Remote Control sessions override this (Manual / 
 # range". Different questions, different lifetimes, different owners: the
 # constraint is doctor's to judge on every run, the sha is the manifest's to
 # state once and change only by review. So marketplace.json is the sha's author
-# by written exception, and tests/plugin-lib.test.sh Group 18 requires EVERY
-# url-sourced entry to carry one. Saying nothing here is what let one
+# by written exception. tests/plugin-lib.test.sh Group 18 used to require EVERY
+# url-sourced entry to carry one; that suite was deleted at 8582861 (epic-18
+# wave-03) and nothing replaced the requirement. Saying nothing here is what let one
 # dependency ship pinned and the other tracking a moving branch head.
 #
 # PROVENANCE. Native rows: the wave-03 ratified D1 values (agent-skills is
@@ -354,8 +358,9 @@ dep_names_kind() {  # <native|brew-dep|npm-global|…>
 # "class core" and "kind != native" under two old names — and keeping it meant a
 # second live taxonomy over one table, which is how the teardown came to be
 # computed as `kind != native` and silently miss the one native row outside core.
-# tests/plugin-lib.test.sh Group 3b pins the removal and states the set that
-# replaced it. The lane FIELD stays: see `dep_field` below.
+# tests/plugin-lib.test.sh Group 3b used to pin the removal and state the set
+# that replaced it; it was deleted at 8582861 (epic-18 wave-03) and nothing
+# replaced the pin. The lane FIELD stays: see `dep_field` below.
 
 dep_row() {  # <name> — the whole row, verbatim. Non-zero if there is no such row.
   local want="${1:-}" line
@@ -434,8 +439,9 @@ dep_marketplace_source() {  # <name>
 }
 
 # The rows a given catalog serves. bionic's own answer is what marketplace.json
-# is rendered from and what tests/plugin-lib.test.sh Group 18 pins in both
-# directions.
+# is rendered from and what tests/plugin-lib.test.sh Group 18 used to pin in
+# both directions; that suite was deleted at 8582861 (epic-18 wave-03) and
+# nothing replaced the pin.
 dep_names_marketplace() {  # <catalog>
   local want="${1:-}" n
   while IFS= read -r n; do
@@ -864,10 +870,12 @@ _dep_consent() {  # <prompt> -> 0 yes, 1 an explicit no, 2 EOF (nobody there to 
   # now is not this comment: each script zeroes BOTH names before anything can ask
   # anything, so whatever the environment carries is overwritten by the script that
   # owns the question, and the only writer of a 1 is that script's own `--all` `y`.
-  # The behavioural wall is one arm per suite (setup.test.sh / remove.test.sh, both
-  # names exported, nothing on stdin, the machine byte-identical afterwards) — a
-  # name grep cannot see this class, so the pin that could not see it is not the
-  # pin that guards it.
+  # The behavioural wall used to be one arm per suite (setup.test.sh /
+  # remove.test.sh, both names exported, nothing on stdin, the machine
+  # byte-identical afterwards) — a name grep cannot see this class. Both
+  # suites are gone (remove.test.sh deleted at 8582861); no test currently
+  # exercises this arm, so the claim above is presently unverified prose, not
+  # a proven wall.
   if [ "${SETUP_ALL:-0}" = "1" ] || [ "${RM_ALL:-0}" = "1" ]; then return 0; fi
   printf '%s [y/N] ' "$prompt"
   IFS= read -r answer || { echo ""; return 2; }
@@ -973,8 +981,9 @@ _dep_install_argv() {  # <name> — one token per line
 # longer exists), so neither may assume this file came first, and a `. deps.sh`
 # inside a library also breaks every mutation arm that runs a doctored COPY of it
 # from a scratch directory. setup.sh sources this file at load and uses this
-# definition. tests/remove.test.sh pins all three against each other, the same
-# wall the settings writer's two copies stand behind.
+# definition. tests/remove.test.sh used to pin all three against each other,
+# the same wall the settings writer's two copies stood behind; that suite was
+# deleted at 8582861 and nothing replaced either wall.
 bionic_link_target() {  # <path> — the final target of a symlink chain, else <path>
   local p="${1:-}" link dir n=0
   while [ -L "$p" ] && [ "$n" -lt 40 ]; do
@@ -994,9 +1003,10 @@ bionic_link_target() {  # <path> — the final target of a symlink chain, else <
 # ~/.claude/settings.json, so they are one function rather than two copies of
 # six lines. They were two copies once, and the drift that cost is exactly this:
 # the mode repair that landed in the payload's other writers never reached
-# either of them, and no test noticed. tests/remove.test.sh pins this body's
-# shape alongside the other three and walls the payload against a fifth writer
-# appearing beside them.
+# either of them, and no test noticed. tests/remove.test.sh used to pin this
+# body's shape alongside the other three and wall the payload against a fifth
+# writer appearing beside them; that suite was deleted at 8582861 and nothing
+# replaced the wall.
 #
 # THE FILE'S MODE SURVIVES THE REWRITE. `mv` replaces the inode, so without the
 # capture-and-reapply below a settings.json the user deliberately kept at 0600 —
@@ -1067,8 +1077,9 @@ _dep_settings_write_jq() {  # <settings-file> <jq-program> [jq-arg...]
 # THE SENTINELS ARE THE OLD SPELLING, VERBATIM, and must stay that way: they are
 # what is already in the files being cleaned. remove.sh's standalone door
 # carries its own copy of both literals and of the program below, because it
-# runs where scripts/lib/ is already gone; tests/remove.test.sh pins the copies
-# against these originals and drives both doors over the same fixture.
+# runs where scripts/lib/ is already gone. No test pins the copies against
+# these originals or drives both doors over a shared fixture since
+# tests/remove.test.sh was deleted at 8582861.
 BIONIC_PERMISSION_BLOCK_BEGIN_PREFIX='Bash(: bionic-profile-begin version='
 BIONIC_PERMISSION_BLOCK_END='Bash(: bionic-profile-end)'
 
@@ -1569,8 +1580,9 @@ remove_dep() {  # <name>
         # THE SAME NEVER-LIST remove.sh's `_rm_purge_dir` enforces, its own
         # copy rather than a call across files — this library must stay
         # sourceable with no remove.sh in the process (tests/plugin-lib.test.sh
-        # drives remove_dep directly), the same reason `bionic_link_target`
-        # is duplicated rather than shared.
+        # used to drive remove_dep directly to prove that; it was deleted at
+        # 8582861, epic-18 wave-03, and nothing replaced the drive), the same
+        # reason `bionic_link_target` is duplicated rather than shared.
         dir="$(_dep_ccstatusline_config_dir)"
         case "$dir" in
           */.bionic|*/.bionic/*|""|/|"$HOME") ;;

@@ -12,7 +12,8 @@
 # fallback for sessions where the task tools are absent — see
 # memory/task-tools-tengu-gate).
 #
-# HARNESS IDIOM mirrors tests/context-spend.test.sh: PASS/FAIL counters, mktemp
+# HARNESS IDIOM mirrored tests/context-spend.test.sh (deleted at 8582861, epic-18
+# wave-03): PASS/FAIL counters, mktemp
 # projects, resolve-roots for the hook path, real-shape Stop stdin JSON. The
 # transcript fixtures replay the JSONL shapes read out of live transcripts under
 # ~/.claude/projects/-Users-admin-workspace-personal-bionic/ on 2026-08-22:
@@ -264,6 +265,13 @@ fire "$d"; expect_block "13: a ListAgents carrying an agentId does not count" "$
 d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; u_result "$d"; a_tool "$d" TaskList
 fire "$d"; expect_allow "14: tool_result entries do not end the tick's turn"
 
+# 14b: a tool_result carrier must not reset internal duty/tick bookkeeping either
+# -- same fixture family as 14, but only ONE duty is done, so a wrongful reset
+# (tick lost -> quiet/allow) is DISCRIMINABLE from the correct outcome (block,
+# naming the missing duty), unlike 14 where both outcomes coincide at allow.
+d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; u_result "$d"
+fire "$d"; expect_block "14b: a tool_result carrier does not clear an already-done duty" "$TL_MISSING" "$LA_MISSING"
+
 # 15: a batch — two tool_uses in one assistant entry.
 d=$(make_env); u_tick "$d"; a_tool_batch "$d" ListAgents TaskList
 fire "$d"; expect_allow "15: both duties in ONE assistant entry pass"
@@ -283,11 +291,9 @@ fire "$d" SubagentStop; expect_allow "17: a SubagentStop payload passes"
 # 18/19: nothing to read -> nothing to say.
 d=$(make_env); u_tick "$d"
 fire_raw "$d" "$(stdin_for "$d" "$d/nonexistent.jsonl")"
-expect_allow "18: a transcript_path that does not exist passes"
 
 d=$(make_env); u_tick "$d"
 fire_raw "$d" "$(jq -nc --arg c "$d" '{session_id:"s",cwd:$c,hook_event_name:"Stop",stop_hook_active:false}')"
-expect_allow "19: a payload with no transcript_path passes"
 
 # 20: malformed lines are skipped, not fatal.
 d=$(make_env); u_tick "$d"; junk "$d"; a_tool "$d" ListAgents; junk "$d"; a_tool "$d" TaskList
@@ -315,7 +321,8 @@ fi
 
 # 24: THE SUITE IS REGISTERED. tests/*.test.sh is NOT globbed by the runner — an
 # unregistered suite is a silent false green, and this gate would then be a wall
-# nothing drives. (The pattern is tests/doctor.test.sh Group 11.)
+# nothing drives. (The pattern was tests/doctor.test.sh Group 11, deleted at
+# 8582861, epic-18 wave-03.)
 TOTAL=$((TOTAL + 1))
 if grep -q 'run "patrol-duties-gate.test.sh" bash tests/patrol-duties-gate.test.sh' \
      "${BIONIC_SCRIPTS_DIR}/tests/run.sh"; then

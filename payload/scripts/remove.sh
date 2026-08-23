@@ -29,8 +29,9 @@
 #     detect.sh. The predicates are deliberately the SAME predicates detect.sh
 #     uses — the todo-tools export regex, the `bionic:start` marker, the
 #     `.claude/hooks/` substring, the retired permission block's begin/end
-#     sentinels — and tests/remove.test.sh pins them against detect.sh and
-#     deps.sh so the two cannot drift apart silently.
+#     sentinels — no test pins these against detect.sh and deps.sh since
+#     tests/remove.test.sh was deleted at 8582861; drift between them would go
+#     unnoticed until it broke a real teardown.
 #   * Where a library IS beside the script AND still owns the behaviour, the
 #     owner does the work: `env_unset` deletes an environment name and
 #     `remove_dep` applies the three-valued removal policy. The permission block
@@ -181,12 +182,24 @@ SETUP_ALL=0
 #
 # Each of these is a copy of a constant that lives in the payload libraries, and
 # each copy exists because the standalone door cannot read those libraries. They
-# are pinned to their originals by tests/remove.test.sh; changing one without the
-# other is what that pin exists to catch.
+# used to be pinned to their originals by tests/remove.test.sh; changing one
+# without the other was what that pin caught. The suite was deleted at
+# 8582861 and nothing replaced it — see tests/rc-item.test.sh below for the one
+# pair (RM_RC_START/RM_RC_END) that got a new pin instead of losing one.
 
-# from detect.sh: the rc block markers and the two rc predicates
-RM_RC_START='# ─── bionic:start ───'
-RM_RC_END='# ─── bionic:end ───'
+# from detect.sh: the RETIRED alias block's markers, and the two rc predicates.
+# Named for the alias, not for the rc: this script now knows two marker pairs in
+# the same file, and the pair below (RM_RC_*) is the live one. They were both
+# called RM_RC_* until epic-18 W3, which is exactly the confusion the rename
+# exists to end.
+RM_ALIAS_START='# ─── bionic:start ───'
+RM_ALIAS_END='# ─── bionic:end ───'
+# from env.sh: the LIVE rc item's markers — the block setup writes and this
+# script strips. Copies, like every literal here, because the standalone door
+# cannot source env.sh; tests/rc-item.test.sh pins them byte-equal to
+# env.sh's RC_START / RC_END. Verbatim, box-drawing dashes included.
+RM_RC_START='# ─── bionic:rc:start ───'
+RM_RC_END='# ─── bionic:rc:end ───'
 RM_TODO_EXPORT_RE='^[[:space:]]*export[[:space:]]+CLAUDE_CODE_ENABLE_TODO_TOOLS=1'
 # The retired env block's markers. NOT a copy of a live constant — setup.sh
 # stopped writing this block at W7 (the names live in settings.json now), so
@@ -197,7 +210,8 @@ RM_ENV_START='# ─── bionic:env:start ───'
 RM_ENV_END='# ─── bionic:env:end ───'
 # from env.sh: the names bionic owns in settings.json `env`, and the program
 # that deletes one of them. The standalone door cannot source env.sh, so both
-# are copies — pinned to their originals by tests/remove.test.sh, like every
+# are copies. No test compares these copies' bytes against env.sh's originals
+# since tests/remove.test.sh was deleted at 8582861 — logged debt, like every
 # other literal here. A name that is in env.sh and not here is a name bionic
 # sets and never removes.
 RM_ENV_KEYS='CLAUDE_CODE_ENABLE_TODO_TOOLS BASH_MAX_TIMEOUT_MS CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS'
@@ -215,8 +229,9 @@ RM_LEGACY_SKILL_NAME='canonical-sdlc'
 # from deps.sh (BIONIC_DEFAULT_PERMISSION_MODE): the default permission mode
 # setup offers to write. In payload mode the OWNER's value is what this script
 # compares against — read at call time, below the source — and this fallback is
-# for the standalone door alone, where there is no deps.sh to read. It is pinned
-# to the original by tests/remove.test.sh, like every other literal here.
+# for the standalone door alone, where there is no deps.sh to read. No test
+# pins it to the original since tests/remove.test.sh was deleted at 8582861 —
+# logged debt, like every other literal here.
 _rm_default_mode() { echo "${BIONIC_DEFAULT_PERMISSION_MODE:-auto}"; }
 
 # from deps.sh: the sentinels bracketing the retired permission block. They are
@@ -237,8 +252,8 @@ fi
 # env.sh, when it is there. The environment item deletes names out of
 # settings.json, and env.sh is the owner of which names those are and of the
 # delete itself — so the payload door calls it and the standalone door falls
-# back to its own copy of the same jq program. tests/remove.test.sh drives both
-# and compares the bytes.
+# back to its own copy of the same jq program. No test drives both doors and
+# compares the bytes since tests/remove.test.sh was deleted at 8582861.
 if [ "$RM_MODE" = "payload" ] && [ -f "${RM_LIB_DIR}/env.sh" ]; then
   # shellcheck source=/dev/null
   . "${RM_LIB_DIR}/env.sh"
@@ -358,9 +373,9 @@ _rm_slurp_into() {  # <varname> <file>
 # BYTE-IDENTICAL TO THE THREE COPIES IN scripts/lib/, name included, because the
 # standalone door runs where scripts/lib/ is already gone and the payload door
 # must not get a different resolver. When deps.sh IS beside this script it is
-# sourced first and this definition replaces it with the same bytes;
-# tests/remove.test.sh pins all four against each other the way it pins the
-# settings writer.
+# sourced first and this definition replaces it with the same bytes; no test
+# pins all four against each other since tests/remove.test.sh was deleted at
+# 8582861, the same debt as the settings writer below.
 bionic_link_target() {  # <path> — the final target of a symlink chain, else <path>
   local p="${1:-}" link dir n=0
   while [ -L "$p" ] && [ "$n" -lt 40 ]; do
@@ -375,7 +390,8 @@ bionic_link_target() {  # <path> — the final target of a symlink chain, else <
   printf '%s\n' "$p"
 }
 
-# The settings writer, whose shape tests/remove.test.sh pins. The mode capture is
+# The settings writer. Its shape used to be pinned by tests/remove.test.sh;
+# that suite was deleted at 8582861 and nothing replaced it. The mode capture is
 # not decoration: `mv` replaces the inode, so a settings.json the user kept at
 # 0600 would come back at whatever the umask says, and this script's whole job is
 # editing that file.
@@ -613,6 +629,7 @@ _rm_item_ids() {
   local n
   echo "legacy-alias"
   echo "environment"
+  echo "claude-proxy"
   echo "legacy-hooks"
   echo "legacy-skill-copy"
   echo "legacy-permission-block"
@@ -667,6 +684,7 @@ _rm_item_verb() {  # <id>
     legacy-skill-copy)     echo "remove the pre-plugin skill copy at ${RM_LEGACY_SKILL_DIR}" ;;
     legacy-permission-block) echo "remove bionic's retired permission block from ${RM_SETTINGS}" ;;
     permission-mode)       echo "reset Claude Code's default permission mode" ;;
+    claude-proxy)          echo "remove bionic's claude() shell function from ${RC_FILE}" ;;
     plugin-data)           echo "delete bionic's plugin data under ${RM_DATA_ROOT}" ;;
     plugin)                echo "remove the plugin $(_rm_registered_plugin_id) (claude plugin uninstall)" ;;
     orphaned-dependencies) echo "remove the dependencies nothing needs any more (claude plugin prune)" ;;
@@ -685,7 +703,7 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
   case "$id" in
     legacy-alias)
       [ -f "$RC_FILE" ] || return 1
-      _rm_file_has_literal "$RC_FILE" "$RM_RC_START" && return 0
+      _rm_file_has_literal "$RC_FILE" "$RM_ALIAS_START" && return 0
       _rm_file_has_line_matching "$RC_FILE" "$RM_LEGACY_ALIAS_RE" && return 0
       return 1 ;;
     environment)
@@ -694,6 +712,8 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
       _rm_file_has_literal "$RC_FILE" "$RM_ENV_START" && return 0
       _rm_file_has_line_matching "$RC_FILE" "$RM_TODO_EXPORT_RE" && return 0
       return 1 ;;
+    claude-proxy)
+      _rm_file_has_literal "$RC_FILE" "$RM_RC_START" ;;
     legacy-hooks)
       [ -f "$RM_SETTINGS" ] || return 1
       _rm_have jq || return 1
@@ -877,7 +897,7 @@ _rm_item_legacy_alias() {
   _rm_wants legacy-alias || return 0
   rc_variant=none
   if [ -f "$RC_FILE" ]; then
-    if _rm_file_has_literal "$RC_FILE" "$RM_RC_START"; then
+    if _rm_file_has_literal "$RC_FILE" "$RM_ALIAS_START"; then
       rc_variant=marked
     elif _rm_file_has_line_matching "$RC_FILE" "$RM_LEGACY_ALIAS_RE"; then
       rc_variant=legacy
@@ -892,7 +912,7 @@ _rm_item_legacy_alias() {
     marked)
       echo "  ${RC_FILE} carries the bionic marker block; bionic would delete the block and everything between its markers."
       if _rm_consent "Remove the marker block from ${RC_FILE}?"; then
-        if _rm_strip_marker_block "$RC_FILE" "$RM_RC_START" "$RM_RC_END"; then
+        if _rm_strip_marker_block "$RC_FILE" "$RM_ALIAS_START" "$RM_ALIAS_END"; then
           _rm_removed "legacy alias block in ${RC_FILE}"
         else
           rm -f "$(bionic_link_target "$RC_FILE").bionic.tmp"
@@ -941,8 +961,8 @@ _rm_item_legacy_alias() {
 #
 # THE NAMES ARE ENV.SH'S. In payload mode the delete goes through `env_unset`,
 # the owner. Standalone there is no owner to call, so the copy of its jq program
-# above is used with this script's own writer, and tests/remove.test.sh compares
-# the bytes the two doors produce.
+# above is used with this script's own writer. No test compares the bytes the
+# two doors produce since tests/remove.test.sh was deleted at 8582861.
 
 # Delete one name from settings.json `env`. Payload mode delegates; standalone
 # mode runs the copied program. Absent is success either way: a second teardown
@@ -1050,6 +1070,58 @@ _rm_item_environment() {
   echo ""
 }
 
+# ─── Item: bionic's claude() shell function ──────────────────────────────────
+#
+# THE LIVE RC ITEM, not a retired one. Everything else this script takes out of a
+# shell rc is footprint from an installer that no longer exists; this block is
+# written by `/bionic:setup` on this payload, today, and it comes out the same
+# way it went in — by its markers.
+#
+# THE MARKERS ARE THE WHOLE PREDICATE. A `claude()` function a user wrote for
+# themselves sits outside them, and this item must never see it: removing a line
+# bionic did not write is the one failure a teardown cannot apologise for.
+#
+# TWO DOORS, ONE RESULT. In payload mode the delete goes through `rc_unset`, the
+# owner in env.sh — which also knows to leave the markers standing if a second rc
+# item is still inside them. Standalone there is no owner to call, so the copied
+# marker pair goes to this script's own block strip. tests/rc-item.test.sh drives
+# both and compares the bytes.
+
+_rm_rc_unset() {  # <item>
+  if [ "$RM_MODE" = "payload" ] && declare -F rc_unset >/dev/null 2>&1; then
+    rc_unset "$1"
+    return $?
+  fi
+  _rm_strip_marker_block "$RC_FILE" "$RM_RC_START" "$RM_RC_END"
+}
+
+_rm_item_claude_proxy() {
+  _rm_wants claude-proxy || return 0
+  echo "bionic's claude() shell function:"
+
+  if ! _rm_file_has_literal "$RC_FILE" "$RM_RC_START"; then
+    _rm_clean "bionic's claude() shell function in ${RC_FILE}"
+    echo ""
+    return 0
+  fi
+
+  echo "  ${RC_FILE} carries bionic's claude() block; bionic would delete the block and everything between its markers."
+  _rm_consent "Remove bionic's claude() shell function from ${RC_FILE}?"; rm_rc_consent_rc=$?
+  if [ "$rm_rc_consent_rc" -ne 0 ]; then
+    _rm_skipped "$rm_rc_consent_rc" claude-proxy "bionic's claude() shell function in ${RC_FILE}"
+    echo ""
+    return 0
+  fi
+
+  if _rm_rc_unset claude-proxy; then
+    _rm_removed "bionic's claude() shell function in ${RC_FILE}"
+  else
+    rm -f "$(bionic_link_target "$RC_FILE").bionic.tmp"
+    _rm_leftover "could not rewrite ${RC_FILE} — bionic's claude() block is still there"
+  fi
+  echo ""
+}
+
 # ─── Item: legacy-channel managed-hook entries in settings ───────────────────
 #
 # Entries whose command still names the pre-plugin `~/.claude/hooks/` copies. The
@@ -1135,8 +1207,9 @@ _rm_item_legacy_hooks() {
 # standalone door. remove.sh is curl-fetchable onto a machine whose plugin is already gone,
 # where scripts/lib/ does not exist, so it may not source detect.sh. The established answer
 # is a shared literal pinned at both ends — RM_LEGACY_SKILL_NAME above — exactly as the rc
-# markers and the todo-tools regex are handled. tests/remove.test.sh Group 17 pins the
-# constant in both files and would go red if either moved alone.
+# markers and the todo-tools regex are handled. tests/remove.test.sh Group 17 used to pin the
+# constant in both files and would go red if either moved alone; that suite was deleted at
+# 8582861 and nothing replaced the check.
 #
 # THE PREDICATE IS THE DIRECTORY PLUS ITS SKILL.md, copied from the fact function along with
 # the name, and it is not decoration: this is a recursive delete, and a bare directory of
@@ -1182,9 +1255,9 @@ _rm_item_legacy_skill_copy() {
 # owns a live behaviour. Nothing owns this one any more: there is no apply to
 # stay agreed with, and the standalone door must carry the strip regardless. A
 # payload-mode branch would be a second call path serving no machine this one
-# does not. deps.sh carries the same program for /bionic:setup, and
-# tests/remove.test.sh pins the two against each other the way it pins every
-# other literal this script copies.
+# does not. deps.sh carries the same program for /bionic:setup; no test pins
+# the two against each other since tests/remove.test.sh was deleted at
+# 8582861, the same debt as every other literal this script copies.
 
 RM_PERMISSION_BLOCK_STRIP_JQ='
   if (.permissions | type) != "object" then .
@@ -1676,6 +1749,7 @@ fi
 
 _rm_item_legacy_alias
 _rm_item_environment
+_rm_item_claude_proxy
 _rm_item_legacy_hooks
 _rm_item_legacy_skill_copy
 _rm_item_permission_block

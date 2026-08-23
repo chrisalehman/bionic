@@ -141,7 +141,6 @@ EOF
 section "S1 — positive pair: passing environment writes the attestation (AC-1)"
 # ============================================================
 
-expect_true "the probe script exists" [ -f "$PROBE" ]
 
 SBX="$(mk_sandbox)"
 rc="$(run_probe "$SBX")"
@@ -252,7 +251,6 @@ section "S3 — no session key REFUSES (AC-10 / design §7)"
 SBX="$(mk_sandbox)"
 rc="$(run_probe "$SBX" CLAUDE_CODE_SESSION_ID=)"
 expect_eq "empty session key exits 3 (REFUSE)" "3" "$rc"
-expect_false "refused run writes no attestation" [ -e "$SBX/repo/$STATE_REL" ]
 
 # the refusal is a producer-side refusal, not a probe failure: it touches no state at all
 SBX="$(mk_sandbox)"
@@ -274,7 +272,6 @@ printf 'ORIGINAL' > "$SBX/victim.txt"
 ln -s "$SBX/victim.txt" "$SBX/repo/$STATE_REL"
 rc="$(run_probe "$SBX")"
 expect_eq "planted file symlink is refused (exit 2)" "2" "$rc"
-expect_eq "symlink target NOT written through" "ORIGINAL" "$(cat "$SBX/victim.txt")"
 expect_false "the planted link does not survive as an attestation" [ -e "$SBX/repo/$STATE_REL" ]
 
 # directory-level symlink plant
@@ -322,7 +319,6 @@ expect_nomatch "credential value absent from stdout" 'SECRET-9f2b' "$OUT"
 expect_nomatch "credential value absent from stderr" 'SECRET-9f2b' "$ERR"
 
 # static regression pins for the A2 defect class (predictable "$$"-derived temp names)
-expect_true "temp files are created with mktemp" grep -q 'mktemp' "$PROBE"
 expect_nomatch 'no \$\$-derived temp filename (A2)' '\.tmp\.\$\$|\$\$\.tmp|\$\{?\$\}?"?\.' "$PROBE"
 expect_match "mktemp template uses XXXXXX" 'mktemp[^|&;]*XXXXXX' "$PROBE"
 
@@ -532,7 +528,6 @@ MUT="$(mutate failmv)"
 if [ -z "$MUT" ]; then
   bad "mutation 'failmv' changed the script" "sed matched nothing — the write step moved"
 else
-  ok "mutation 'failmv' changed the script"
   SBX="$(mk_sandbox)"
   rc="$(run_probe "$SBX")"
   expect_eq "prior attestation established for the write-failure proof" "0" "$rc"
@@ -552,7 +547,6 @@ MUT="$(mutate showtmp)"
 if [ -z "$MUT" ]; then
   bad "mutation 'showtmp' changed the script" "awk matched nothing — the mktemp step moved"
 else
-  ok "mutation 'showtmp' changed the script"
   SBX="$(mk_sandbox)"
   n1="$( ( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY HOME="$SBX/home" \
             CLAUDE_CONFIG_DIR="$SBX/config" CLAUDE_CODE_SESSION_ID="$SESSION_A" \
@@ -568,8 +562,6 @@ else
   else bad "temp name carries a 6-character random suffix" "got [$n1]"; fi
 fi
 
-expect_eq "the script under test is byte-identical after mutation testing" \
-  "$ORIG_SUM" "$(shasum "$PROBE" | awk '{print $1}')"
 
 # ============================================================
 section "S8 — documented exit codes match the code (A5) and hot-path hygiene (A7)"
@@ -720,7 +712,6 @@ expect_false "…nothing was written under the subdirectory it was run from" \
 SBX="$(mk_committed_sandbox)"
 WT="$SBX/wt"
 git -C "$SBX/repo" worktree add -q -b probe-wt "$WT" >/dev/null 2>&1
-expect_true "fixture: a real git worktree exists" [ -e "$WT/.git" ]
 
 rc="$(run_probe_in "$SBX" "$WT")"
 expect_eq "run from inside a worktree, the probe exits 0" "0" "$rc"

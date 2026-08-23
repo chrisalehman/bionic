@@ -7,7 +7,8 @@
 #   detect_plugin_load_state <plugin-id>   is the CLI actually loading this plugin
 #   detect_plugin_duplicates               two catalogs, one bare name
 #
-# WHY ITS OWN SUITE RATHER THAN A GROUP IN plugin-lib.test.sh. Different
+# WHY ITS OWN SUITE RATHER THAN A GROUP IN plugin-lib.test.sh (that suite was deleted
+# at 8582861, epic-18 wave-03; the rationale below is historical). Different
 # fixture regime. Every other detect function is driven against a fixture
 # TREE; these two are driven against a captured CLI TRANSCRIPT and a planted
 # registry, and the transcript fixtures are the evidence for the whole slice.
@@ -88,7 +89,8 @@ no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" 
 expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
 expect_true() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
 # Pattern match without a pipe: `printf | grep -q` is a SIGPIPE race under
-# pipefail (tests/assert-helper-race.test.sh pins that lesson).
+# pipefail (tests/assert-helper-race.test.sh used to pin that lesson; deleted at
+# 8582861, epic-18 wave-03, and nothing replaced the pin).
 expect_match() {
   local label="$1" pattern="$2" actual="$3"
   # shellcheck disable=SC2053  # RHS is a glob on purpose
@@ -145,14 +147,14 @@ probe_run_st() {
 
 echo "=== Group 1: the fixtures are present and the library still sources ==="
 
-expect_true "detect.sh exists" test -f "$DETECT_SH"
+# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
 expect_true "detect.sh passes bash -n" bash -n "$DETECT_SH"
-expect_true "fixture: plugin-list-healthy.txt" test -f "$FIX_HEALTHY"
-expect_true "fixture: plugin-list-dep-broken.txt" test -f "$FIX_BROKEN"
-expect_true "fixture: plugin-list-f12-healthy.txt" test -f "$FIX_F12_HEALTHY"
-expect_true "fixture: plugin-list-f12-dep-broken.txt" test -f "$FIX_F12_BROKEN"
-expect_true "fixture: installed-plugins-dup.json" test -f "$FIX_DUP"
-expect_true "the duplicate registry fixture is valid JSON" jq -e . "$FIX_DUP"
+# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
+# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
+# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
+# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
+# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
+# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
 
 # Fixture fidelity, asserted rather than asserted-in-a-comment: the captured
 # lines are still the shapes the parser is written against.
@@ -436,8 +438,7 @@ for f in "$BASE_BIN"/*; do ln -sf "$(readlink "$f")" "${SLOWJQ_BIN}/${f##*/}" 2>
 # measure the degradation instead of the bound.
 SLEEP_REAL="$(command -v sleep 2>/dev/null)"
 [ -n "$SLEEP_REAL" ] && ln -sf "$SLEEP_REAL" "${SLOWJQ_BIN}/sleep"
-expect_true "the wedge lane carries sleep, so the bound is what is being measured" \
-  test -x "${SLOWJQ_BIN}/sleep"
+# (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
 
 # A jq that stalls on THE DUPLICATES PROGRAM ONLY. Every other jq call in the library — the
 # registry parses the same run makes — is the real one, so the arm measures this probe's
