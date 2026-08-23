@@ -606,7 +606,7 @@ R2_ST=$?
 if [ "$R2_ST" -eq 127 ] || [ "$R2_ST" -eq 126 ]; then
   no "the captured fix line executes from a non-repo cwd" "exit $R2_ST: $R2_OUT"
 else
-  ok "the captured fix line executes from a non-repo cwd (exit $R2_ST)"
+  ok "the captured fix line executes from a non-repo cwd "
 fi
 expect_absent "running the fix line as printed produces no usage error" "Usage:" "$R2_OUT"
 
