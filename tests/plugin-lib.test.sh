@@ -201,9 +201,10 @@ echo "=== Group 2b: the four classes (wave-06 D-B, AC-10) ==="
 # Chris's 2026-08-22 ruling — determinism over lazy install: `@playwright/cli`,
 # `chrome-devtools`, `playwright-chromium` and `motion` moved to `extra`, so the
 # first install of a route's tool no longer happens inside the run that needs it.
-# `impeccable` (native-kind, which install_dep must refuse) and
-# `excalidraw-renderer` (a venv sync inside the plugin's own tree) are what is
-# left of `when-needed`.
+# Commit `41110bd` (Chris, 2026-08-22) then moved the two rows that ruling had left
+# behind — `impeccable` (native-kind, which install_dep must refuse) and
+# `excalidraw-renderer` (a venv sync inside the plugin's own tree) — to `extra` as
+# well, so `when-needed` is empty.
 
 # LC_ALL=C so the roster literals below do not depend on the runner's locale
 # (`@playwright/cli` sorts before `aws` only under the C collation).
@@ -214,10 +215,10 @@ expect_eq "dep_names_class core is exactly the two plugin dependencies" \
 expect_eq "dep_names_class basic is the substrate roster" \
   "aws docker gh git jq node pnpm rg uv" "$(class_names basic)"
 expect_eq "dep_names_class when-needed is the JIT roster" \
-  "excalidraw-renderer impeccable" \
+  "" \
   "$(class_names when-needed)"
 expect_eq "dep_names_class extra is the setup-offered roster" \
-  "@pencil.dev/cli @playwright/cli ccstatusline chrome-devtools context7 document-skills example-skills humanizer motion notebooklm playwright-chromium" \
+  "@pencil.dev/cli @playwright/cli ccstatusline chrome-devtools context7 document-skills example-skills excalidraw-renderer humanizer impeccable motion notebooklm playwright-chromium" \
   "$(class_names extra)"
 # The ruling from the other side: each promoted row is `extra` BY NAME, so a
 # revert that restored the class would fail here rather than only shifting a
@@ -271,8 +272,8 @@ expect_eq "native row: superpowers (byte-exact)" \
 expect_eq "native row: agent-skills (byte-exact, ^0.6.0 not ^1.0.0)" \
   "agent-skills|core|skills/canonical-sdlc/SKILL.md|https://github.com/addyosmani/agent-skills.git|^0.6.0|native|native-uninstall-offer" \
   "$(deps_run -- dep_row agent-skills)"
-expect_eq "native row: impeccable (byte-exact, when-needed — never a third core dep)" \
-  "impeccable|when-needed|skills/canonical-sdlc/SKILL.md|https://github.com/pbakaus/impeccable.git|^4.1.0|native|native-uninstall-offer" \
+expect_eq "native row: impeccable (byte-exact, extra since 41110bd — never a third core dep)" \
+  "impeccable|extra|skills/canonical-sdlc/SKILL.md|https://github.com/pbakaus/impeccable.git|^4.1.0|native|native-uninstall-offer" \
   "$(deps_run -- dep_row impeccable)"
 
 echo ""
@@ -622,7 +623,7 @@ expect_false "check_dep on an unknown dep exits non-zero" \
   bash -c '. "$1"; check_dep no-such-dep' _ "$DEPS_SH"
 
 echo ""
-echo "=== Group 6b: the excalidraw renderer is a when-needed row (epic-18 T3, AC-6) ==="
+echo "=== Group 6b: the excalidraw renderer row (epic-18 T3, AC-6; extra since 41110bd) ==="
 #
 # WHAT THIS ROW REPLACES. The skill's README carried a "Renderer setup" block — `uv sync`
 # then `uv run playwright install chromium` — that a user was expected to find and run by
@@ -636,7 +637,7 @@ echo "=== Group 6b: the excalidraw renderer is a when-needed row (epic-18 T3, AC
 # answering this row's question with that one's fact is exactly the probe-contract error —
 # "is this dependency in the state setup leaves it in", not "is its tool available".
 
-expect_eq "excalidraw-renderer is a when-needed row" "when-needed" \
+expect_eq "excalidraw-renderer is an extra row" "extra" \
   "$(deps_run -- dep_field excalidraw-renderer class)"
 expect_eq "excalidraw-renderer names the skill it serves, now inside the payload" \
   "payload/skills/excalidraw-diagram/SKILL.md" \
@@ -658,8 +659,15 @@ expect_eq "check_dep excalidraw-renderer with no venv synced -> absent" \
 mkdir -p "$XR_REFS/.venv/bin"
 : > "$XR_REFS/.venv/bin/python"
 chmod +x "$XR_REFS/.venv/bin/python"
-printf 'home = /opt/homebrew/bin\nversion = 3.13.1\n' > "$XR_REFS/.venv/pyvenv.cfg"
-expect_eq "check_dep excalidraw-renderer with a synced venv -> present, version from pyvenv.cfg" \
+printf 'home = /opt/homebrew/bin\nversion = 3.12.4\n' > "$XR_REFS/.venv/pyvenv.cfg"
+# The version reported is the playwright driver's, not the venv interpreter's
+# (deps.sh:747-752, Chris 2026-08-22) — plant the dist-info METADATA the probe
+# actually reads. pyvenv.cfg's version (3.12.4) is present too, so the assertion
+# below only passes if the probe reads the METADATA and not the venv config.
+PW_DIST="$XR_REFS/.venv/lib/python3.12/site-packages/playwright-3.13.1.dist-info"
+mkdir -p "$PW_DIST"
+printf 'Metadata-Version: 2.1\nName: playwright\nVersion: 3.13.1\n' > "$PW_DIST/METADATA"
+expect_eq "check_dep excalidraw-renderer with a synced venv -> present, version from the playwright dist-info" \
   "present=yes|version=3.13.1|verdict=ok" \
   "$(deps_run BIONIC_EXCALIDRAW_REFS="$XR_REFS" -- check_dep excalidraw-renderer)"
 
