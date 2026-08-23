@@ -219,7 +219,7 @@ printf 'poker-interval: 5m\n' > "$R2/.bionic/config.yaml"
 poke "$R2" interval-default
 expect_eq "…and a perfectly VALID override does not move it either" "1800" "$OUT"
 poke "$R2" interval
-expect_eq "…while `interval`, on the same repo, still reads that override (5m = 300s)" "300" "$OUT"
+expect_eq "…while interval, on the same repo, still reads that override (5m = 300s)" "300" "$OUT"
 
 # The gate's fallback is only worth having if it tracks the constant. Mutation-proof: move
 # POKER_INTERVAL_DEFAULT on a copy and the verb has to move with it — a verb that printed a
