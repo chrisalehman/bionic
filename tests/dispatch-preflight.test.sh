@@ -597,7 +597,7 @@ RUN9_ST=$?
 if [ "$RUN9_ST" -eq 127 ] || [ "$RUN9_ST" -eq 126 ]; then
   no "fix command runs from a non-repo cwd" "exit $RUN9_ST (not found/not executable): $(cat "$RUN9_ERR")"
 else
-  ok "fix command runs from a non-repo cwd "
+  ok "fix command runs from a non-repo cwd"
 fi
 # `$RUN9_ERR` is the PATH of the capture file; these two used to pass it as the
 # HAYSTACK, so they asked whether the string "/tmp/.../run9.err" contains "No such
