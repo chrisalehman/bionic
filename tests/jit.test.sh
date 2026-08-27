@@ -350,6 +350,24 @@ expect_true "excalidraw-diagram SKILL.md addresses the renderer through CLAUDE_P
 expect_true "excalidraw-diagram README.md addresses the renderer through CLAUDE_PLUGIN_ROOT" \
   grep -q 'CLAUDE_PLUGIN_ROOT' "$EXCALIDRAW_README"
 
+echo ""
+echo "=== Group 12: Step-0 model_plan derivation is mechanical, not invented (epic-19 F1) ==="
+#
+# AC-F1: the orchestrator reads agents/*.md frontmatter for the six dispatched-role
+# tiers; the confirmation display cites each line's source. Before this fix the whole
+# derivation rule was "model_plan from multi_agent and the detected session model" —
+# no route to the role files existed anywhere in the skill (grounding:
+# .bionic/docs/record/epic-19/step1-fixes-grounding.md §1). Reuses $CANONICAL_SKILL
+# from Group 9 above rather than re-deriving the path — this suite is otherwise about
+# jit/degradation, but it is the one place in the roster already set up to pin literal
+# prose spans of this SKILL.md.
+
+expect_true "canonical-sdlc SKILL.md: model_plan derivation is never invented or recalled from memory" \
+  grep -q 'never invented or recalled from memory' "$CANONICAL_SKILL"
+expect_true "canonical-sdlc SKILL.md: model_plan derivation names the rendered role files as the source" \
+  grep -q 'rendered role files' "$CANONICAL_SKILL"
+expect_eq "canonical-sdlc SKILL.md: all 6 dispatched-role lines in the confirmation display cite a role-file source" \
+  "6" "$(grep -c 'role-file default: agents/' "$CANONICAL_SKILL")"
 
 echo ""
 echo "========================================"

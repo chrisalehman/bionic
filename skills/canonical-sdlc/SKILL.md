@@ -208,7 +208,7 @@ Committing is a cross-cutting rhythm (~once per step), not a numbered step. Upda
 
 1. **Pre-flight.** `.bionic/` exists; `docs-root:` read from `.bionic/config.yaml` (default `.bionic/docs`) with `{specs,plans,adrs,incidents}/` present; `mkdir -p .bionic/tmp/`; both hooks installed and executable (if not, warn and record in `## Assumptions`).
 2. **Classify the triple silently.** Infer from the request's verbs and named artifacts. Do NOT interrogate. Interview by exception only, 1–3 questions, on exactly three conditions: a genuine intent collision the classification rules do not resolve (the standing gray zones are **mechanism-swap** and **reference-content**); a suspected but unconfirmed security/privacy surface; or a scale that could be one session or several.
-3. **Infer the flags.** `language` from repo files; `surface_type`/`has_ui` from the request; `multi_agent` defaults **true** (infer `false` only when there is genuinely nothing to offload — never key it off an installed plugin catalog, which silently disables the dispatched-task ledger guard); `deploy_target` **defaults to `n/a` and is never inferred** — a live surface exists only where the user names one, in the request or at this step's confirmation, and deploy-shaped signals in the repo are not that naming; `cleanup_on_finish` true; `use_worktree` false; `integration_branch` from the epic plan, else the current mainline, else `main` — print it as `unknown` rather than dropping it; `model_plan` from `multi_agent` and the detected session model.
+3. **Infer the flags.** `language` from repo files; `surface_type`/`has_ui` from the request; `multi_agent` defaults **true** (infer `false` only when there is genuinely nothing to offload — never key it off an installed plugin catalog, which silently disables the dispatched-task ledger guard); `deploy_target` **defaults to `n/a` and is never inferred** — a live surface exists only where the user names one, in the request or at this step's confirmation, and deploy-shaped signals in the repo are not that naming; `cleanup_on_finish` true; `use_worktree` false; `integration_branch` from the epic plan, else the current mainline, else `main` — print it as `unknown` rather than dropping it; `model_plan` is mechanical, never invented or recalled from memory: the orchestrator tier is the detected session model, and every other tier (implementor, senior-implementor, researcher, test-runner, auditor, critic) is read verbatim from that role's `model:` + `effort:` frontmatter in the rendered role files — `agents/*.md` in this repo, or `${CLAUDE_PLUGIN_ROOT}/agents/*.md` for an installed run.
 4. **Derive the walk requirement.** From the declared surface flags: a surface an agent can open and drive → `walk: required`; nothing drivable → `walk: exempt`. It prints in the confirmation display and is recorded as plan-frontmatter `walk:`. **Exemptions derive from declared configuration and are ratified at Step 0, never invented mid-run** — there is no mid-run `n/a`, and the Verify gate reads an absent or unrecognized key as `required`, so an omission never becomes an exemption.
 5. **Derive the Verification Matrix.** One row per acceptance criterion. Tier defaults: user-visible behavior → **T3**; engine-divergent → **T2 both engines** plus **T3** for the user-visible AC; pure substrate with no runtime surface → **T1/T2** with a one-line justification; perceptual fidelity → **T3**, T4 available; docs → **T0/none**.
 6. **Present the confirmation display in full, in the layout below.** Every section, every flag, every inference rationale, every matrix row, the `integration-branch:` line. Never elide, sample, summarize, defer, or restate it as prose — the user is approving exactly what they can see, and an abbreviated display invalidates the confirmation. Print every matrix row even past 12 ACs; a matrix is precisely what must not be sampled. An unknown value prints as `unknown` rather than dropping its line.
@@ -250,14 +250,14 @@ Walk requirement:                [Step 5 opens with it — decided here, no mid-
 Design interview:                [Step 2's mandate — the user's to waive, never derived]
   design-interview: <true | false>   [default true; false = the user has waived the interview]
 
-Model plan:                      [multi_agent=<value> → <tiered dispatch | single-thread>]
-  orchestrator:       <detected session model>   [main thread, fixed all wave]
-  implementor:        <model>    [standard slices]
-  senior-implementor: <model>    [complex slices, root-cause debugging]
-  researcher:         <model>    [exploration]
-  test-runner:        <model>    [mechanical + test execution]
-  auditor:            <model>    [Step 5 — fresh, independent, never the implementer]
-  critic:             <model>    [Step 6 — fresh, independent, never the author]
+Model plan:                      [multi_agent=<value> → <tiered dispatch | single-thread>; every tier below read from agents/*.md, never invented]
+  orchestrator:       <detected session model>   [main thread, fixed all wave — detected, not a role file]
+  implementor:        <model>    [standard slices — role-file default: agents/implementor.md]
+  senior-implementor: <model>    [complex slices, root-cause debugging — role-file default: agents/senior-implementor.md]
+  researcher:         <model>    [exploration — role-file default: agents/researcher.md]
+  test-runner:        <model>    [mechanical + test execution — role-file default: agents/test-runner.md]
+  auditor:            <model>    [Step 5 — fresh, independent, never the implementer — role-file default: agents/auditor.md]
+  critic:             <model>    [Step 6 — fresh, independent, never the author — role-file default: agents/critic.md]
 
 Verification Matrix:            [locked at Step 3 approval — every row shown, never sampled]
   stack-health: <PENDING — taken at Step 5 | snapshot | n/a: reason>
