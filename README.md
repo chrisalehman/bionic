@@ -90,7 +90,10 @@ design, the plan and the verification matrix together. Steps 4 onward run unatte
 at anything only you can decide.
 
 Use it when the change is large enough that you would want a spec, a plan, and a record of
-what was verified. Chores and documentation stay out.
+what was verified. Chores and documentation stay out — and so do document and research
+deliverables like writeups and research reports, which plain plan mode serves better than any
+intent here, `spike` included: it ships no code, but its writeup is a timeboxed research
+artifact, not a document-production mode.
 
 Start it by naming it with the work:
 
@@ -195,8 +198,8 @@ own standing duties and model:
 
 | Role | Model | What it does |
 |---|---|---|
-| `researcher` | Sonnet | Reads code and docs, returns a summary with `file:line` citations. Cannot write. |
-| `test-runner` | Sonnet | Runs suites and reports every result. Never fixes, never re-runs to green. |
+| `researcher` | Opus | Reads code and docs, returns a summary with `file:line` citations. Cannot write. |
+| `test-runner` | Haiku | Runs suites and reports every result. Never fixes, never re-runs to green. |
 | `implementor` | Sonnet | Executes a slice mechanically. The plan is literal; ambiguity means stop and ask. |
 | `senior-implementor` | Opus | Executes slices that need judgment, and root-cause debugging. Logs every call it made. |
 | `auditor` | Opus | At the verify gate, tries to falsify the evidence, never the code. Cannot write. |
