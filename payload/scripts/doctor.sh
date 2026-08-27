@@ -212,19 +212,6 @@ _doctor_item() {  # <symbol> <label> <value>
   printf '%s\n' "$(_doctor_rtrim "$line")"
 }
 
-# A path under the user's home, written the way they would type it. Not
-# cosmetics: `/Users/<name>/…` costs a dozen columns before the interesting part
-# of the path starts, and those are the columns that decide whether the line
-# wraps. The substitution is exact-prefix only, so a path that merely begins with
-# the same letters is left alone.
-_doctor_tilde() {  # <path>
-  local p="${1:-}"
-  case "$p" in
-    "$HOME"/*) printf '~%s' "${p#"$HOME"}" ;;
-    *)         printf '%s' "$p" ;;
-  esac
-}
-
 # The FIX section, accumulated as the run discovers problems and printed near the
 # top — which is why it is collected rather than echoed where it is found. One
 # line per problem, and the line ENDS with what to type: a problem stated without
@@ -809,158 +796,54 @@ done < <(dep_names)
 
 # ─── The Patrol, gathered and rendered before the fix accounting ─────────────
 #
-# ROWS BUILT HERE AND PRINTED FAR BELOW, the same shape THIRD_ROWS already has,
-# because two of the states this section discovers are PROBLEMS and FIX is the
-# second thing on the page. A section that printed its own findings where it
-# found them would put the duplicate-Patrol line eighty rows under the verdict
-# that is supposed to name it.
-#
-# WHICH OF THESE STATES IS A PROBLEM, and which is merely a fact. Two Patrols
-# firing into one session is a problem and its command is exact, so it takes a
-# fix line with the id in it. A stamp that has gone stale is a problem: the job
-# may still be in the table and the firings are not landing, which is the state
-# the arming wall refuses a dispatch on. A session with NO Patrol is NOT a
-# problem — doctor is run outside a run more often than inside one, and marking
-# every idle session broken would train a reader past the two lines that matter.
-# A blind dispatch wall is a problem, and the only one here whose cure is a
-# skill invocation rather than a command.
+# RUNNING PATROLS OR NOTHING (F3, epic-19 wave-01 — design ledger ratification
+# round 2, 2026-08-27). Chris's own invariant is the whole rationale: an
+# active run has exactly one Patrol armed, and F6 makes a dead one self-healing
+# — the dispatch wall re-arms it the moment a dispatch needs it — so a reader
+# of this page has nothing to act on beyond "is one running, and how much is
+# it carrying". Everything this section used to reconstruct beyond that — the
+# session's cwd, cron ids and prompt heads, the stamp's firing/not-firing state
+# and its interval provenance, the dispatch-wall tally — answered a question
+# this page no longer asks; that machinery still lives in lib/patrol.sh for
+# whichever consumer wants it (none does today), doctor just stops rendering
+# it. The one exception ratified to survive: TWO Patrols armed on one session
+# is always wrong regardless of how minimal this page gets, so its fix line
+# stays — and it costs nothing in the healthy, single-Patrol case.
 PATROL_ROWS=""
 _patrol_add() { PATROL_ROWS="${PATROL_ROWS}$1"$'\n'; }
-_patrol_item() { _patrol_add "$(_doctor_item "$1" "$2" "${3:-}")"; }
-_patrol_detail() { _patrol_add "$(_doctor_rtrim "      ${1}")"; }
-
-# Cut to a column count, never to a byte count: every id, cron expression and
-# prompt head below can carry a multi-byte glyph, and `printf '%.Ns'` counts
-# bytes.
-_doctor_trunc() {  # <string> <cols>
-  local s="${1:-}" w="${2:-0}"
-  if [ "$(_doctor_cols "$s")" -le "$w" ]; then printf '%s' "$s"; return 0; fi
-  while [ "$(_doctor_cols "$s")" -gt "$((w - 1))" ] && [ -n "$s" ]; do s="${s%?}"; done
-  printf '%s…' "$s"
-}
+PATROL_LIVE=0
 
 PATROL_LINES="$(patrol_report 2>/dev/null)"
-PATROL_LIVE=0
-PATROL_OTHER=""
-PATROL_OTHER_N=0
 
-_p_sid=""; _p_here=""; _p_cwd=""; _p_cause=""
-_p_jobs=""; _p_other_jobs=""; _p_n_patrol=0; _p_n_other=0
-_p_stamp=""; _p_age=""; _p_limit=""; _p_interval=""; _p_source=""
-_p_rows=""; _p_open=""; _p_closed=""; _p_present=""
-_p_disp=""; _p_rost=""; _p_blind=""; _p_refused=""; _p_wcause=""
+_p_sid=""; _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""
 
 _patrol_flush() {
   [ -n "$_p_sid" ] || return 0
-  local short="${_p_sid%%-*}" j id cron head extras n summary
+  [ "$_p_n_patrol" -gt 0 ] || return 0
+  local short="${_p_sid%%-*}" j id extras="" n open=0
   PATROL_LIVE=$((PATROL_LIVE + 1))
+  [ "$_p_present" = "yes" ] && open="$_p_open"
+  _patrol_add "  ${DOCTOR_OK} session ${short} · ${open} open $(_doctor_plural "$open" dispatch dispatches)"
 
   # THE DUPLICATE VERDICT KEEPS THE NEWEST and names every older one. Creation
   # order is what the transcript gives, and the newest job is the one whose
   # prompt reflects the run as it now stands — an older duplicate is a leftover
   # from an arming that was repeated, which is exactly how the second one gets
   # there.
-  extras=""
   if [ "$_p_n_patrol" -gt 1 ]; then
     n=0
     while IFS= read -r j; do
       [ -n "$j" ] || continue
       n=$((n + 1))
       [ "$n" -lt "$_p_n_patrol" ] || continue
-      id="${j%%	*}"
+      id="$j"
       [ "$id" = "?" ] && continue
       extras="${extras}${extras:+ }${id}"
     done <<EOF
 $_p_jobs
 EOF
-  fi
-
-  if [ "$_p_here" != "yes" ]; then
-    # ONE LINE FOR EVERY SESSION THAT IS NOT THIS REPO'S. They are on this page
-    # because a Patrol armed twice is a problem wherever it is armed, and
-    # because a reader wondering why nothing here matches what they remember is
-    # usually looking at a second session. Their detail is not this machine's
-    # question.
-    PATROL_OTHER_N=$((PATROL_OTHER_N + 1))
-    case "$_p_n_patrol" in
-      0) summary="none armed" ;;
-      1) summary="1 armed" ;;
-      *) summary="DUPLICATE (${_p_n_patrol})" ;;
-    esac
-    PATROL_OTHER="${PATROL_OTHER}${PATROL_OTHER:+, }${short}: ${summary}"
-  else
-    _patrol_item "$DOCTOR_OK" "session ${short}" \
-      "$(_doctor_trunc "$(_doctor_tilde "$_p_cwd")" 50) (this repo)"
-
-    case "$_p_n_patrol" in
-      0) _patrol_item "$DOCTOR_NIL" "patrol jobs" "none armed" ;;
-      1) _patrol_item "$DOCTOR_OK"  "patrol jobs" "1 armed" ;;
-      *) _patrol_item "$DOCTOR_BAD" "patrol jobs" \
-           "DUPLICATE (${_p_n_patrol}) — one Patrol per session, the rest are noise" ;;
-    esac
-    while IFS= read -r j; do
-      [ -n "$j" ] || continue
-      id="${j%%	*}"; cron="${j#*	}"; head="${cron#*	}"; cron="${cron%%	*}"
-      _patrol_detail "$(_doctor_trunc "${id} · ${cron} · ${head}" 92)"
-    done <<EOF
-$_p_jobs
-EOF
-    for id in $extras; do _patrol_detail "CronDelete ${id}"; done
-    if [ "$_p_n_other" -gt 0 ]; then
-      _patrol_item "$DOCTOR_NIL" "other jobs" \
-        "$(_doctor_trunc "${_p_n_other} — ${_p_other_jobs}" 60)"
-    fi
-
-    case "$_p_stamp" in
-      never-armed) _patrol_item "$DOCTOR_NIL" "patrol stamp" "never armed" ;;
-      firing)      _patrol_item "$DOCTOR_OK"  "patrol stamp" \
-                     "firing — ${_p_age}s old, limit ${_p_limit}s (2x ${_p_interval}s)" ;;
-      not-firing)  _patrol_item "$DOCTOR_BAD" "patrol stamp" \
-                     "NOT firing — ${_p_age}s old, past the ${_p_limit}s limit" ;;
-      *)           _patrol_item "$DOCTOR_NIL" "patrol stamp" "unknown — the stamp's age could not be read" ;;
-    esac
-    case "$_p_source" in
-      configured|'') : ;;
-      *) _patrol_detail "interval ${_p_interval}s came from the poker's ${_p_source} — this project configures none" ;;
-    esac
-
-    if [ "$_p_present" = "yes" ]; then
-      _patrol_item "$DOCTOR_OK" "roster" \
-        "${_p_rows} $(_doctor_plural "$_p_rows" dispatch dispatches) — ${_p_open} open, ${_p_closed} closed"
-    else
-      _patrol_item "$DOCTOR_NIL" "roster" "none — nothing was dispatched on this session"
-    fi
-
-    # REFUSED, NAMED EXPLICITLY on both branches: a refusal is credited out of
-    # $_p_blind before this ever runs (patrol.sh does the subtraction), but a
-    # reader comparing $_p_disp against $_p_rost by hand needs the refused
-    # count on the line too, or the arithmetic looks wrong even though the
-    # verdict is right.
-    _p_refused_suffix=""
-    case "${_p_refused:-0}" in
-      0|'') : ;;
-      *) _p_refused_suffix=" (${_p_refused} refused)" ;;
-    esac
-    if [ -n "$_p_wcause" ]; then
-      _patrol_item "$DOCTOR_NIL" "dispatch wall" "unknown — ${_p_wcause}"
-    elif [ "${_p_blind:-0}" -gt 0 ]; then
-      _patrol_item "$DOCTOR_BAD" "dispatch wall" \
-        "${_p_blind} of ${_p_disp} dispatches never reached it${_p_refused_suffix} — not registered"
-    else
-      _patrol_item "$DOCTOR_OK" "dispatch wall" "${_p_disp} dispatched, ${_p_rost} rostered${_p_refused_suffix}"
-    fi
-  fi
-
-  # The findings, for the verdict at the top. Raised for EVERY live session,
-  # this repo's or not, because each names the session it is about.
-  if [ -n "$extras" ]; then
-    fix "session ${short} has ${_p_n_patrol} Patrol jobs armed → CronDelete ${extras}"
-  fi
-  if [ "$_p_stamp" = "not-firing" ]; then
-    fix "session ${short} armed the Patrol and it stopped firing → re-arm it, both halves"
-  fi
-  if [ -z "$_p_wcause" ] && [ "${_p_blind:-0}" -gt 0 ]; then
-    fix "session ${short}: ${_p_blind} dispatches bypassed the wall → re-invoke /bionic:canonical-sdlc"
+    [ -n "$extras" ] && \
+      fix "session ${short} has ${_p_n_patrol} Patrol jobs armed → CronDelete ${extras}"
   fi
 }
 
@@ -970,42 +853,15 @@ while IFS= read -r _p_line; do
     "patrol-session/v1|"*)
       _patrol_flush
       _p_sid="$(_doctor_pfield "$_p_line" session)"
-      _p_here="$(_doctor_pfield "$_p_line" here)"
-      _p_cwd="$(_doctor_pfield "$_p_line" cwd)"
-      _p_cause="$(_doctor_pfield "$_p_line" cause)"
-      _p_jobs=""; _p_other_jobs=""; _p_n_patrol=0; _p_n_other=0
-      _p_stamp=""; _p_age=""; _p_limit=""; _p_interval=""; _p_source=""
-      _p_rows=""; _p_open=""; _p_closed=""; _p_present=""
-      _p_disp=""; _p_rost=""; _p_blind=""; _p_refused=""; _p_wcause="" ;;
+      _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present="" ;;
     "patrol-job/v1|"*)
-      _p_id="$(_doctor_pfield "$_p_line" id)"
-      _p_cron="$(_doctor_pfield "$_p_line" cron)"
-      _p_kind="$(_doctor_pfield "$_p_line" kind)"
-      _p_prompt="$(_doctor_pfield "$_p_line" prompt)"
-      if [ "$_p_kind" = "patrol" ]; then
+      if [ "$(_doctor_pfield "$_p_line" kind)" = "patrol" ]; then
         _p_n_patrol=$((_p_n_patrol + 1))
-        _p_jobs="${_p_jobs}${_p_id}	${_p_cron}	${_p_prompt}"$'\n'
-      else
-        _p_n_other=$((_p_n_other + 1))
-        _p_other_jobs="${_p_other_jobs}${_p_other_jobs:+, }${_p_id} · ${_p_cron}"
+        _p_jobs="${_p_jobs}$(_doctor_pfield "$_p_line" id)"$'\n'
       fi ;;
-    "patrol-stamp/v1|"*)
-      _p_stamp="$(_doctor_pfield "$_p_line" state)"
-      _p_age="$(_doctor_pfield "$_p_line" age)"
-      _p_limit="$(_doctor_pfield "$_p_line" limit)"
-      _p_interval="$(_doctor_pfield "$_p_line" interval)"
-      _p_source="$(_doctor_pfield "$_p_line" source)" ;;
     "patrol-roster/v1|"*)
-      _p_rows="$(_doctor_pfield "$_p_line" rows)"
       _p_open="$(_doctor_pfield "$_p_line" open)"
-      _p_closed="$(_doctor_pfield "$_p_line" closed)"
       _p_present="$(_doctor_pfield "$_p_line" present)" ;;
-    "patrol-wall/v1|"*)
-      _p_disp="$(_doctor_pfield "$_p_line" dispatched)"
-      _p_rost="$(_doctor_pfield "$_p_line" rostered)"
-      _p_blind="$(_doctor_pfield "$_p_line" blind)"
-      _p_refused="$(_doctor_pfield "$_p_line" refused)"
-      _p_wcause="$(_doctor_pfield "$_p_line" cause)" ;;
   esac
 done <<EOF
 $PATROL_LINES
@@ -1325,34 +1181,16 @@ esac
 
 # ─── The Patrol ──────────────────────────────────────────────────────────────
 #
-# THE FOURTH TABLE, AND THE ONLY ONE WITH NO FILE UNDER IT. The three above read
-# a payload, a registry and a settings file — artifacts that exist to be read.
-# This one answers a question about something that was never written down: the
-# CLI holds its cron table in process memory, so "is the Patrol armed, once, and
-# firing" can only be RECONSTRUCTED, from the session files that name each live
-# process and from those sessions' own transcripts, where CronCreate and
-# CronDelete are recorded tool_uses like any other.
-#
-# SO THE LIMIT IS ON THE HEADING, not in a footnote. What follows is what the
-# transcript IMPLIES, and the process may hold something else — a job armed
-# before the transcript begins, a delete the platform refused, a build that
-# words its confirmation differently. A reader who acts on a `CronDelete` line
-# from here needs to know that before they act, not after.
-#
-# AND DOCTOR STILL CHANGES NOTHING. The delete line is PRINTED. Running it is
-# the reader's act in the session that owns the job, which is also the only
-# session that can: a cron job is session-scoped, and nothing on this page could
-# reach into another process's table even if it wanted to.
+# RUNNING PATROLS OR NOTHING. See the gathering comment above for the full
+# rationale; this is just its render. Doctor still changes nothing here — a
+# `CronDelete` fix line is PRINTED, never run, and running it is the reader's
+# act in the session that owns the job.
 echo ""
-echo "PATROL — reconstructed from the transcript: what it implies, not what the process holds"
+echo "PATROL"
 if [ "$PATROL_LIVE" = "0" ]; then
-  _doctor_item "$DOCTOR_NIL" "live sessions" "none — nothing to reconstruct"
+  _doctor_item "$DOCTOR_NIL" "none running" ""
 else
   printf '%s' "$PATROL_ROWS"
-  if [ "$PATROL_OTHER_N" -gt 0 ]; then
-    _doctor_item "$DOCTOR_NIL" "other live sessions" \
-      "$(_doctor_trunc "${PATROL_OTHER_N} elsewhere — ${PATROL_OTHER}" 60)"
-  fi
 fi
 
 # ─── The one question, and the section it appends ────────────────────────────
