@@ -124,6 +124,11 @@ Triple not yet declared → say so and list the axes. Invoked as `help` → rend
 | `spike` | Timeboxed research. **Ships no code at any rigor.** | Writeup only at `<docs-root>/spikes/spike-<slug>-<YYYYMMDD>.md`. No plan file, no spec, no ADR, no commits to the integration branch. |
 | `incident-response` | A live deployed surface — production or tooling — is broken for its users. The clock matters. | RCA, not ADR. Floors at `audited`. Monitoring-gap closure is part of Close-out. |
 
+**Document and research deliverables — writeups, research reports — don't belong here.** Plain
+plan mode serves them better than any row in this table, `spike` included: it ships no code at
+any rigor, but its writeup is a timeboxed research artifact, not a general document-production
+mode.
+
 **rigor** — how hard the evidence tries to lie. Cumulative.
 
 | Rigor | What you get | What you skip |
@@ -179,7 +184,7 @@ in its brief, or you will pay this once too.
 
 Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 14`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`. Plan files additionally carry `walk: required | exempt` — Step 0's derivation, and the key the Verify gate reads — Step 0's `design-interview:` value beside it, and, where the run's rigor sits below its derived floor, `rigor-override:` beside those. None of the three is required to write, but a `walk:` value outside the enum blocks. Spec files at `scale: wave` or `scale: epic` carry `design: <path>` or `design-waived: <user> <date> <reason>` unless the `## Design` section is in place — the three-way rule, Step 2.
 
-**13 is the only supported version.** Any other value — an older number, an empty value, a typo — blocks at both hooks. There is one contract; an artifact either meets it or does not write. A run that predates it is brought forward to 13, not exempted.
+**14 is the only supported version.** Any other value — an older number, an empty value, a typo — blocks at both hooks. There is one contract; an artifact either meets it or does not write. A run that predates it is brought forward to 14, not exempted.
 
 ## Steps
 
