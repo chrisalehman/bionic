@@ -200,8 +200,8 @@ env_live() {  # <key>
 # A SECOND KIND OF SETTING, AND WHY IT LIVES BESIDE THE FIRST. Everything above
 # is a NAME AND A VALUE in the CLI's settings.json. This is a LINE OF SHELL, and
 # no `env` object can hold one: `claude` has to become a function in the user's
-# own interactive shell or `--dangerously-skip-permissions` never reaches the
-# command they type. The rc channel was retired for exports (see the header) and
+# own interactive shell or the launch flag never reaches the command they type.
+# The rc channel was retired for exports (see the header) and
 # it comes back here for the one thing only it can carry — not as a fourth
 # `ENV_KEYS` entry, which would put a shell function through a jq writer aimed at
 # a JSON object, but as its own item kind with its own roster and its own
@@ -251,15 +251,32 @@ rc_file() {
 
 # The line each item carries, and why:
 #
-#   claude-proxy — `claude` typed at a prompt launches with the bypass mode
-#                  AVAILABLE in the mode cycle. `command claude` inside the body
-#                  is what stops the function calling itself, and is also why a
-#                  script or a hook that runs `claude` in a non-interactive shell
-#                  is unaffected: the rc is never sourced there, so the function
-#                  does not exist and the binary is reached directly.
+#   claude-proxy — `claude` typed at a prompt STARTS in whatever
+#                  `permissions.defaultMode` says (setup writes `auto`) and can
+#                  reach the bypass mode from the Shift+Tab cycle. Those are two
+#                  different flags and bionic carries the second one:
+#                  `--dangerously-skip-permissions` STARTS the session in bypass,
+#                  which is what this item used to do and is not what anyone
+#                  asked for; `--allow-dangerously-skip-permissions` only puts
+#                  bypass in the cycle and leaves the starting mode alone.
+#                  MEASURED, not assumed — three PTY arms against CLI 2.1.248 in
+#                  record/epic-19/w1/s1-f2-probe.md: without one of those two
+#                  flags the cycle is default → acceptEdits → plan → auto and
+#                  bypass is not in it at all, so dropping the flag outright
+#                  would have taken the capability away with the default.
+#                  A SETTING CANNOT DO THIS, which is the whole reason the item
+#                  is a line of shell: bypass availability is decided from the
+#                  argv at launch, and the only settings key in that decision
+#                  (`disableBypassPermissionsMode`, managed-settings-only) can
+#                  turn it off and never on.
+#                  `command claude` inside the body is what stops the function
+#                  calling itself, and is also why a script or a hook that runs
+#                  `claude` in a non-interactive shell is unaffected: the rc is
+#                  never sourced there, so the function does not exist and the
+#                  binary is reached directly.
 rc_default() {  # <item> — prints the line, exit 1 if the item is not bionic's
   case "${1:-}" in
-    claude-proxy) printf '%s\n' 'claude() { command claude --dangerously-skip-permissions "$@"; }' ;;
+    claude-proxy) printf '%s\n' 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }' ;;
     *)            return 1 ;;
   esac
   return 0
