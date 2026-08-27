@@ -370,6 +370,28 @@ expect_eq "canonical-sdlc SKILL.md: all 6 dispatched-role lines in the confirmat
   "6" "$(grep -c 'role-file default: agents/' "$CANONICAL_SKILL")"
 
 echo ""
+echo "=== Group 13: README roster table agrees with agents/*.md frontmatter (epic-19 F9) ==="
+#
+# AC-F9: README.md's roster table (step1-model-surfaces.md §6) is the one copy render.sh's
+# AGENT-ROSTER directive does not reach — it is hand-written and had already drifted
+# (researcher/test-runner both wrong). This pin reads the model value FROM each role file's
+# own frontmatter and checks README's row for the SAME role names it — never a restated
+# literal here — so a future role-file change and a stale README both go red without
+# touching this test.
+
+README="${REPO}/README.md"
+AGENTS_DIR="${REPO}/agents"
+
+for role in researcher test-runner implementor senior-implementor auditor critic; do
+  role_file="${AGENTS_DIR}/${role}.md"
+  model_raw="$(awk -F': *' '/^model:/ { print $2; exit }' "$role_file")"
+  model_title="$(printf '%s' "$model_raw" | awk '{ print toupper(substr($0,1,1)) substr($0,2) }')"
+  readme_row="$(grep "| \`${role}\` " "$README")"
+  expect_match "README roster table: \`${role}\` row names its agents/${role}.md model" \
+    "*${model_title}*" "$readme_row"
+done
+
+echo ""
 echo "========================================"
 echo "Results: $PASS/$TOTAL passed, $FAIL failed"
 echo "========================================"
