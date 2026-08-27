@@ -199,6 +199,7 @@ run "dispatch-preflight.test.sh" bash tests/dispatch-preflight.test.sh
 run "execution-recorder.test.sh" bash tests/execution-recorder.test.sh
 run "landing-gate.test.sh" bash tests/landing-gate.test.sh
 run "patrol-duties-gate.test.sh" bash tests/patrol-duties-gate.test.sh
+run "patrol-revive.test.sh" bash tests/patrol-revive.test.sh
 run "preflight-probe.test.sh" bash tests/preflight-probe.test.sh
 run "protect-database.test.sh" bash tests/protect-database.test.sh
 run "protect-main.test.sh" bash tests/protect-main.test.sh

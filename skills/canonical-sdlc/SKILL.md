@@ -58,6 +58,9 @@ hooks:
         - type: command
           command: ${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate.sh
           timeout: 10
+        - type: command
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive.sh
+          timeout: 10
 layer: governance
 needs:
   - agent-skills:context-engineering
