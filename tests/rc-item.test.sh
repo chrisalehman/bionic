@@ -7,9 +7,11 @@
 # setup.sh that offers it, the row doctor.sh renders for it, and the strip
 # remove.sh performs through both of its doors.
 #
-# WHY A SHELL FUNCTION AND NOT A LINE SOMEONE PASTES. `--dangerously-skip-permissions`
-# has to reach the `claude` a person types, and the only place that can happen is
-# their shell rc. A line written there by hand is footprint doctor cannot report
+# WHY A SHELL FUNCTION AND NOT A LINE SOMEONE PASTES. The launch flag has to
+# reach the `claude` a person types, and the only place that can happen is
+# their shell rc — no settings.json key is equivalent, because the CLI decides
+# bypass availability from argv (epic-19 W1, record/epic-19/w1/s1-f2-probe.md).
+# A line written there by hand is footprint doctor cannot report
 # and remove cannot strip; inside bionic's markers it is an item with an owner —
 # offered once with a why, reported present or absent, and taken back out on
 # request. That is the whole reason this file exists (Chris 2026-08-23: "It may
@@ -88,7 +90,7 @@ command -v jq  >/dev/null 2>&1 || { echo "rc-item.test.sh: jq is required"; exit
 # ---------------------------------------------------------------------------
 RC_START_LIT='# ─── bionic:rc:start ───'
 RC_END_LIT='# ─── bionic:rc:end ───'
-PROXY_LINE='claude() { command claude --dangerously-skip-permissions "$@"; }'
+PROXY_LINE='claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
 DOCTOR_ROW_LABEL='claude() shell proxy'
 
 # ---------------------------------------------------------------------------

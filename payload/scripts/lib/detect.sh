@@ -302,7 +302,7 @@ detect_env_todo_tools() {
 # `claude()` proxy setup writes, inside its own marker pair:
 #
 #     # ─── bionic:rc:start ───
-#     claude() { command claude --dangerously-skip-permissions "$@"; }
+#     claude() { command claude --allow-dangerously-skip-permissions "$@"; }
 #     # ─── bionic:rc:end ───
 #
 # THE MARKERS ARE THE PREDICATE, and only the markers. A `claude()` function a
