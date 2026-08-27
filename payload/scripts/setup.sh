@@ -1190,7 +1190,7 @@ setup_claude_proxy() {
 # lands on a person's screen.
 _setup_rc_why() {  # <item>
   case "${1:-}" in
-    claude-proxy) echo "launches claude with bypass available in the mode cycle" ;;
+    claude-proxy) echo "keeps the bypass mode selectable in the shift+tab cycle; the session still starts in your default mode" ;;
     *)            echo "a shell line bionic needs" ;;
   esac
 }
