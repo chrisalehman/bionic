@@ -48,13 +48,13 @@
 # first file (`.bionic/docs/record/epic-17-w7/s8b-isolation-delta.md`). Neither file
 # covers the roster as it stands now: epic-18 wave-03 deleted nineteen of those
 # suites on the reliability ruling (commit 8582861), one of the nineteen
-# (fresh-home.test.sh) was later revived, and rc-item.test.sh was added new — 24
-# `run` lines as of this writing (`grep -c '^run "' tests/run.sh` equals
-# `ls tests/*.test.sh | wc -l`; a maintainer re-derives the count rather than
-# trusting a number in a comment, this one included). Neither audit file re-covers
-# what changed since it ran; a suite added or restored after S8b carries no
-# isolation proof beyond its own file. A suite that writes outside its
-# own mktemp root breaks this
+# (fresh-home.test.sh) was later revived, rc-item.test.sh was added new, and
+# epic-19 wave-01 added doctor-patrol.test.sh (F3) — 25 `run` lines as of this
+# writing (`grep -c '^run "' tests/run.sh` equals `ls tests/*.test.sh | wc -l`;
+# a maintainer re-derives the count rather than trusting a number in a
+# comment, this one included). Neither audit file re-covers what changed since
+# it ran; a suite added or restored after S8b carries no isolation proof
+# beyond its own file. A suite that writes outside its own mktemp root breaks this
 # premise, which is the other reason the roster is hand-listed: adding a line is the
 # moment to check — and to extend the audit, since neither existing file can cover
 # a suite written after it.
@@ -268,6 +268,13 @@ run "rc-item.test.sh" bash tests/rc-item.test.sh
 # also why it now carries the rc item — setup's newest write target, and the one
 # that lands in a file the user already owned. Hand-listed like every suite here.
 run "fresh-home.test.sh" bash tests/fresh-home.test.sh
+# The PATROL section (F3, epic-19 wave-01, spec AC-F3): payload/scripts/doctor.sh's
+# running-Patrols-or-nothing render, driven against a fixture claude-home (a real
+# spawned process + a planted transcript) and a fixture repo's roster file — no
+# doctor.test.sh existed before this suite (the broad one, epic-17 W3 S7, was
+# deleted at 8582861 for fingerprinting the whole machine). Hand-listed like every
+# suite outside hooks/.
+run "doctor-patrol.test.sh" bash tests/doctor-patrol.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
