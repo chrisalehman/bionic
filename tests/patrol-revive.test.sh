@@ -374,6 +374,25 @@ else
   fail "28: the hook is not registered in SKILL.md — it would never fire"
 fi
 
+# 29: THE ASSERTION THAT WOULD HAVE CAUGHT THIS. SKILL.md's frontmatter registers
+# this hook as a BARE PATH — `command: ${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive.sh`,
+# no interpreter — and that is exactly how the CLI's own hook runner invokes it: a
+# shell handed the literal path as the command, which requires the tracked file
+# itself to carry the execute bit. Every other assertion in this suite drives the
+# hook through `bash "$HOOK"`, which reads the file regardless of its mode bits and
+# would stay green even if the tracked file were not executable — the walk that
+# found this bug caught it by reproducing the registration exactly, and that is
+# what this assertion now does: a bare path handed to `sh -c`, matching
+# `sh -c ".../patrol-revive.sh"` verbatim.
+TOTAL=$((TOTAL + 1))
+sh -c "$HOOK" <<< '{"hook_event_name":"Stop"}' >/dev/null 2>&1
+REGISTERED_RC=$?
+if [ "$REGISTERED_RC" -ne 126 ]; then
+  pass "29: the hook runs when invoked exactly as registered (bare path via sh -c, rc=$REGISTERED_RC)"
+else
+  fail "29: rc=126 (Permission denied) invoking the hook as SKILL.md registers it — the tracked file lost its execute bit"
+fi
+
 echo ""
 echo "========================================"
 echo "patrol-revive: $PASS/$TOTAL passed"
