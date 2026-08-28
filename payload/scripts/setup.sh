@@ -1623,8 +1623,6 @@ if [ "$setup_all" = "1" ]; then
     say "   nothing left to do — this machine is set up."
     exit 0
   fi
-  say ""
-  say "   The whole list runs after one question."
   consent "Do all of the above?"; setup_all_rc=$?
   case "$setup_all_rc" in
     0) SETUP_ALL=1 ;;
