@@ -342,6 +342,28 @@ else
   fail "25: the gate is not registered in SKILL.md — it would never fire"
 fi
 
+# 26/26b: THE HEADER'S OWN HONESTY ABOUT ITS BACKSTOP. This file used to cite the
+# hooks reference — "Claude Code overrides the hook and ends the turn after 8
+# consecutive blocks" — as the net under both of its accepted limits. It cannot
+# be: `stop_hook_active` guarantees exactly one block per turn and the re-entry
+# always passes, so the blocks are never consecutive and that override can never
+# engage here. hooks/patrol-revive.sh carried the identical claim and lost it at
+# S10 (critic C-2); this is the same correction on the other hook that makes it,
+# pinned the same way — as a PAIR, so the absence rests on an extractor proven to
+# find text in this very file.
+TOTAL=$((TOTAL + 1))
+if grep -q 'never consecutive' "$HOOK"; then
+  pass "26: the header states why the CLI's consecutive-block override cannot engage here"
+else
+  fail "26: the header does not say why the consecutive-block override cannot engage"
+fi
+TOTAL=$((TOTAL + 1))
+if grep -q 'Backstop above ours, from the same reference' "$HOOK"; then
+  fail "26b: the header still claims a backstop that cannot fire for this hook"
+else
+  pass "26b: …and no longer claims that backstop as its own"
+fi
+
 echo ""
 echo "========================================"
 echo "patrol-duties-gate: $PASS/$TOTAL passed"

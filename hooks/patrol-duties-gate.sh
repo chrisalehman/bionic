@@ -63,8 +63,16 @@
 # last act of the turn may not be on disk when this reads it. Second, a Patrol
 # tick that legitimately has nothing to do still owes both duties under this
 # gate — which is the contract SKILL.md states, not an accident of the read.
-# Backstop above ours, from the same reference: "Claude Code overrides the hook
-# and ends the turn after 8 consecutive blocks."
+#
+# AND THERE IS NO BACKSTOP ABOVE OURS. This used to cite the hooks reference —
+# "Claude Code overrides the hook and ends the turn after 8 consecutive blocks"
+# — as the net under both limits. It is not one, for the same reason the same
+# claim was struck from hooks/patrol-revive.sh (critic C-2, epic-19 w1): this
+# gate blocks ONCE PER TURN by design (`stop_hook_active` → pass, below), and
+# blocks one per turn are never consecutive, so that override can never engage
+# above a hook shaped like this one. What bounds the refusal is the thing
+# the reason line already names — do the two duties and stop again — not a
+# counter in the CLI.
 #
 # IT WRITES NOTHING AND DECIDES NOTHING ELSE. No state file, no roster append, no
 # stamp: this is a gate, and gates may only read (TDD §3.2). It takes no view on
