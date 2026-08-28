@@ -878,6 +878,129 @@ expect_eq "adopt with no session key REFUSES with exit 3" "3" "$RC"
 unset CLAUDE_CONFIG_DIR
 
 # ============================================================
+section "Section 9: disarm — the deliberate stop, made readable"
+# ============================================================
+#
+# epic-19 wave-01 Step-6 repair, critic C-2.
+#
+# WHY THE VERB EXISTS. hooks/patrol-revive.sh blocks a turn whenever THIS session's stamp
+# is older than 2x the interval, and it repeats that on every turn — `stop_hook_active`
+# suppresses only the second stop inside one turn, and it resets at the next. Nothing in
+# production ever REMOVED a stamp, so the two ordinary ways a run ends its own Patrol — the
+# run-close `CronDelete` skills/canonical-sdlc/SKILL.md mandates, and this script's own
+# DISARM decision, reached on every quiet stretch between dispatch batches — each left an
+# aging stamp behind and turned a deliberate stop into an unbounded per-turn death notice
+# demanding the re-arm the poker had just said was unnecessary.
+#
+# The stamp is the only record on disk that a Patrol runs here, so removing it is the
+# readable fact "this one was ended on purpose", and the revive hook's ABSENT state is
+# silent by design. Every case below drives the REAL verb: nothing here removes a stamp by
+# hand, because what is being pinned is that the poker owns both ends of its own liveness
+# record.
+
+R9="$(make_repo s9-disarm)"
+poke "$R9" arm
+expect_eq "the fixture arms first (exit 0)" "0" "$RC"
+expect_eq "…and the stamp is on disk before the disarm — the precondition, proven" "yes" \
+  "$([ -f "$(stamp_of "$R9")" ] && echo yes || echo no)"
+
+poke "$R9" disarm
+expect_eq "disarm exits 0" "0" "$RC"
+expect_eq "…and the stamp is gone" "no" \
+  "$([ -e "$(stamp_of "$R9")" ] && echo yes || echo no)"
+expect_contains "…and the message names the stamp it removed" "$(stamp_of "$R9")" "$OUT"
+
+# IDEMPOTENT. A run-close ritual run twice, or a session that never armed at all, must not
+# turn a no-op into a failure the operator has to interpret.
+poke "$R9" disarm
+expect_eq "a second disarm is a no-op success (exit 0)" "0" "$RC"
+expect_contains "…and says the Patrol was already disarmed" "already disarmed" "$OUT"
+
+OUT="$( cd "$R9" && env -u CLAUDE_CODE_SESSION_ID bash "$POKER" disarm 2>&1 )"; RC=$?
+expect_eq "disarm without a session key refuses (exit 3) — a stamp answers for ONE session" \
+  "3" "$RC"
+
+# ONE SESSION'S STAMP, never the neighbour's: the same scoping `arm` and the revive hook
+# both keep, and the reason a shared .bionic/tmp is safe for parallel sessions.
+R9B="$(make_repo s9-neighbour)"
+OTHER9="99999999-8888-7777-6666-555555555555"
+poke "$R9B" arm
+printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' "$(iso_ago 30)" "$OTHER9" \
+  > "$(stamp_of "$R9B" "$OTHER9")"
+poke "$R9B" disarm
+expect_eq "disarm removes THIS session's stamp" "no" \
+  "$([ -e "$(stamp_of "$R9B")" ] && echo yes || echo no)"
+expect_eq "…and leaves another session's stamp exactly where it was" "yes" \
+  "$([ -f "$(stamp_of "$R9B" "$OTHER9")" ] && echo yes || echo no)"
+
+# A verb nobody can find is a verb nobody types, and the run-close ritual is a model
+# reading this usage.
+poke "$R9" nonsense-verb
+expect_contains "the usage surface names the disarm verb" "session-poker.sh disarm" "$OUT"
+
+# ---------- the DISARM decision removes the stamp as its LAST act ----------
+#
+# This is the producer the plan missed: DISARM is not a run-close ceremony, it is the
+# decision every quiet stretch reaches. The decision line still prints — the removal is
+# after it, so nothing above can be skipped by it.
+R9C="$(make_repo s9-tick-disarm)"; new_roster "$R9C"
+poke "$R9C" arm
+poke "$R9C" tick
+expect_contains "an empty roster still decides DISARM" "decision=DISARM" "$OUT"
+expect_eq "…and that tick removed the stamp it wrote: the decision and the disk agree" "no" \
+  "$([ -e "$(stamp_of "$R9C")" ] && echo yes || echo no)"
+
+# THE PAIRED POSITIVE. The removal is bound to the DISARM decision, not to ticking at all:
+# a tick that finds open work must leave the stamp exactly where a live Patrol needs it,
+# or every tick would disarm the wall it exists to keep honest.
+R9D="$(make_repo s9-tick-quiet)"; new_roster "$R9D"
+add_row "$R9D" name=fresh-unmet deliverable="$R9D/absent-fresh.md" \
+  duration="4 hours" launched_at="$(iso_ago 60)"
+poke "$R9D" arm
+poke "$R9D" tick
+expect_contains "a roster with open work decides QUIET" "decision=QUIET" "$OUT"
+expect_eq "…and that tick KEEPS the stamp" "yes" \
+  "$([ -f "$(stamp_of "$R9D")" ] && echo yes || echo no)"
+
+# ---------- a blind wall outranks the DISARM, and the stamp stays with it ----------
+#
+# SKILL.md §Dispatch states the precedence for the model: a `wall-blind` NOTIFY on the same
+# tick outranks the DISARM line, because an empty roster is exactly what a session whose
+# dispatch wall died looks like. The stamp follows that precedence rather than the decision
+# line — stopping the clock on the one tick that says "your wall is gone" would take the
+# monitor down with it.
+R9E="$(make_repo s9-blind)"; new_roster "$R9E"
+C9E="$(fake_config_dir s9e)"
+tx_dispatch 2 | write_transcript "$C9E" "$SID"
+export CLAUDE_CONFIG_DIR="$C9E"
+poke "$R9E" arm
+poke "$R9E" tick
+expect_contains "an empty roster under a blind wall still prints its DISARM line" \
+  "decision=DISARM" "$OUT"
+expect_contains "…beside the wall-blind NOTIFY that outranks it" "wall-blind" "$OUT"
+expect_eq "…and the stamp STAYS: the run is not over, the wall is" "yes" \
+  "$([ -f "$(stamp_of "$R9E")" ] && echo yes || echo no)"
+unset CLAUDE_CONFIG_DIR
+
+# ---------- disarm follows the PINNED root, exactly as arm does ----------
+# The mirror of Section 6's worktree case: a disarm that removed a stamp under the worktree
+# root would leave the main repository's stamp — the one every reader looks at — untouched,
+# and the death notice would keep firing for the rest of the session.
+R9F="$(make_repo s9-worktree)"
+( cd "$R9F" && git add -A 2>/dev/null; git -c user.email=t@e -c user.name=T commit -qm seed --allow-empty ) >/dev/null 2>&1
+R9FWT="$TMPROOT/s9-worktree-wt"
+( cd "$R9F" && git worktree add -q -b s9-wt "$R9FWT" ) >/dev/null 2>&1
+if [ -d "$R9FWT" ]; then
+  poke "$R9F" arm
+  poke "$R9FWT" disarm
+  expect_eq "disarming from a worktree cwd removes the MAIN repository's stamp" "no" \
+    "$([ -e "$(stamp_of "$R9F")" ] && echo yes || echo no)"
+  ( cd "$R9F" && git worktree remove --force "$R9FWT" ) >/dev/null 2>&1
+else
+  ok "disarming from a worktree cwd removes the MAIN repository's stamp (skipped: no worktree)"
+fi
+
+# ============================================================
 printf '\n──────────────────────────────────────────────\n'
 printf 'session-poker: %d passed, %d failed, %d total\n' "$PASS" "$FAIL" "$TOTAL"
 [ "$FAIL" -eq 0 ]
