@@ -42,7 +42,9 @@
 # pins the stamp's mtime across a firing.
 #
 # THE THREE STAMP STATES, and why only one of them speaks:
-#   absent  -> silent. Never armed. That is a real finding, but it is the ARMING
+#   absent  -> silent. Never armed, OR deliberately disarmed — `session-poker.sh
+#              disarm` removes the stamp, which is how a run says its Patrol was
+#              ended on purpose. Never-armed is a real finding, but it is the ARMING
 #              WALL's to make at the moment a dispatch is attempted; raised here it
 #              would nag every session that has the skill armed and has not engaged
 #              a run yet, which is the first turn of every run.
@@ -70,10 +72,12 @@
 # FAIL DIRECTIONS (pinned by tests/patrol-revive.test.sh):
 #   - jq absent                                       -> pass, silent
 #   - not a Stop payload (SubagentStop included)      -> pass, silent
-#   - stop_hook_active true                           -> pass, silent (blocks ONCE)
+#   - stop_hook_active true                           -> pass, silent (ONE block per
+#                                                        turn, not one per session)
 #   - no session_id, or one not shaped like one       -> pass, silent
 #   - no cwd, or no resolvable project root           -> pass, silent
-#   - no stamp, or a symlink where the stamp goes     -> pass, silent (never armed)
+#   - no stamp, or a symlink where the stamp goes     -> pass, silent (never armed,
+#                                                        or deliberately disarmed)
 #   - no poker on either lane, or no readable interval-> pass, silent (no threshold)
 #   - the stamp's mtime unreadable                    -> pass, silent
 #   - stamp age within 2x the poker-interval          -> pass, silent
@@ -82,13 +86,23 @@
 # THREE ACCEPTED LIMITS. First, inherited from the stamp and shared with the arming
 # wall: this attests that Patrol FIRINGS ARE LANDING and cannot see the cron table,
 # so a job deleted moments ago still looks alive for up to one stale window — the
-# notice is late by design rather than wrong. Second, a Patrol the operator
-# DELIBERATELY disarmed (`CronDelete` at run close) while the session keeps ending
-# turns will be reported dead, because no readable fact distinguishes a deliberate
-# disarm from a plugin update. The cost is one re-armed clock on a run that was
-# nearly over; the cost of the opposite error is a fleet nobody is waiting on. The
-# backstop above ours is the CLI's own: it overrides the hook and ends the turn
-# after 8 consecutive blocks. Third, THIS HOOK SHARES THE FAILURE MODE IT MONITORS.
+# notice is late by design rather than wrong. Second, and now CLOSED where it
+# used to be unbounded: a deliberate stop was indistinguishable from a death.
+# Nothing in production removed a stamp, so a Patrol the run ended on purpose —
+# the run-close `CronDelete`, or the poker's own DISARM decision, which is reached
+# on every quiet stretch between dispatch batches — left an aging stamp behind and
+# was reported dead here on EVERY remaining turn of the session. This notice does
+# not "block once" in the sense that matters: `stop_hook_active` suppresses only
+# the second stop WITHIN one turn and resets at the next, so the blocks are one
+# per turn, forever, and the CLI's own override after 8 CONSECUTIVE blocks can
+# never engage above us because one-per-turn blocks are never consecutive. There
+# is no backstop; the stamp going away is the whole of the exit (critic C-2,
+# epic-19 w1). `session-poker.sh disarm` is what makes it go away: the run-close
+# ritual (SKILL.md §Dispatch) and a DISARM tick both take it, and an ABSENT stamp
+# is silent here by design. WHAT REMAINS is a disarm that FORGOT the verb — a
+# `CronDelete` with no `disarm` beside it — which still reads as a death; its cost
+# is one re-armed clock on a run that was nearly over, against a fleet nobody is
+# waiting on for the opposite error. Third, THIS HOOK SHARES THE FAILURE MODE IT MONITORS.
 # It is registered in skills/canonical-sdlc/SKILL.md's own frontmatter, so it is
 # live exactly while the governing skill is armed — and a skill's hooks die with
 # the conversation that armed them (SKILL.md §Dispatch). Three of the four events
@@ -125,11 +139,14 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # its dispatcher's obligations.
 [ "$(_jq '.hook_event_name')" = "Stop" ] || exit 0
 
-# BLOCKS ONCE. Claude Code re-enters the stop with stop_hook_active true after a
-# hook blocked it; refusing a second time would wedge the turn with no way out.
-# One refusal names the re-arm; the second stop is the orchestrator's to decide
-# about. That re-entry is also this hook's safety valve — nothing it demands can
-# ever be unsatisfiable, because stopping again always passes.
+# BLOCKS ONCE PER TURN, which is not the same as once. Claude Code re-enters the
+# stop with stop_hook_active true after a hook blocked it; refusing a second time
+# would wedge the turn with no way out. One refusal names the re-arm; the second
+# stop is the orchestrator's to decide about. That re-entry is this hook's safety
+# valve — nothing it demands can ever be unsatisfiable, because stopping again
+# always passes — but the flag resets at the NEXT turn, so a stamp that stays
+# stale is a notice that returns turn after turn. What ends it is the stamp: a
+# re-arm freshens it, `session-poker.sh disarm` removes it, and nothing else does.
 [ "$(_jq '.stop_hook_active')" = "true" ] && exit 0
 
 # Every path below interpolates the session key, and the stamp filename is the
@@ -259,7 +276,14 @@ AGE=$(( $(date -u +%s) - MTIME ))
 # already knows the answer).
 #
 # THE CRON HALF IS FIRST because the order is a safety property, not a style: `arm`
-# alone freshens the stamp and buys a Patrol that reads alive and never fires.
+# alone freshens the stamp and buys a Patrol that reads alive and never fires. And
+# FIRST IS NOT ENOUGH, because step 1 is the refusable half — `CronCreate` is measured
+# non-deterministically refused by the auto-mode classifier
+# (.bionic/docs/record/epic-19/w1/t3-probes.md finding 1) — so the conditional is stated
+# in the text a model acts on, not only in this header a model never reads. A step 2 run
+# after a refused step 1 produces the exact state the header above argues is worse than
+# the death: an undetectably dead Patrol. The way OUT is named too, because a notice that
+# offers only "re-arm" to a run that meant to stop is the loop critic C-2 found.
 REASON="The Patrol died mid-run and nothing said so.
 
 Its last stamp is ${AGE}s old — past the ${LIMIT}s limit, which is 2x the ${INTERVAL}s poker-interval in force for this project:
@@ -269,9 +293,13 @@ The CLI holds its cron table in process memory with no file behind it, so a plug
 
 Re-arm it — both halves, the clock FIRST, because arming the stamp over an empty cron table buys a Patrol that reads alive and never fires:
   1. CronCreate a RECURRING session job at the interval \`bash ${POKER} interval\` reports, carrying the patrol prompt (the canonical-sdlc skill's Dispatch section).
-  2. bash ${POKER} arm
+  2. ONLY IF step 1 succeeded and returned a job: bash ${POKER} arm
 
-Then stop again — this notice blocks once."
+If step 1 is refused or fails, do NOT run step 2 — a fresh stamp over an empty cron table reads ALIVE to this hook, to the dispatch wall and to /bionic:doctor while nothing fires again, which is worse than the death this notice is reporting. Tell the user the Patrol is down and that CronCreate was refused, and leave the stamp stale.
+
+If this Patrol was stopped ON PURPOSE, record that instead of re-arming: \`bash ${POKER} disarm\` removes the stamp, and this notice goes with it.
+
+Then stop again — this notice blocks once per turn, and it returns on the next turn until the stamp is re-armed or removed."
 
 # The JSON decision payload on STDOUT with exit 0 — the same Stop-hook block
 # channel hooks/patrol-duties-gate.sh uses. (hooks/landing-gate.sh refuses through
