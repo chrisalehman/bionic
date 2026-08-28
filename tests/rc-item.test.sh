@@ -134,10 +134,17 @@ plant_stale_rc() {  # <file>
   } > "$1"
 }
 
-SANDBOX_N=0
+# FRESH MEANS FRESH, AND A COUNTER COULD NOT DELIVER IT. Every call site is
+# `SB="$(new_sandbox)"`, which runs this function in a COMMAND SUBSTITUTION —
+# its own subshell — so a `SANDBOX_N=$((SANDBOX_N + 1))` here incremented a
+# variable that died with the subshell and every sandbox in the suite was the
+# same directory, re-planted in place. Arms that write and read in immediate
+# succession never noticed; an arm that needs two fixtures alive AT ONCE (the
+# agreement section below holds three) got one directory wearing three names.
+# `mktemp -d` keeps no state to lose (epic-19 W1 S9).
 new_sandbox() {  # -> prints a fresh $HOME with a planted .zshrc
-  SANDBOX_N=$((SANDBOX_N + 1))
-  local sb="$TMP/home-${SANDBOX_N}"
+  local sb
+  sb="$(mktemp -d "$TMP/home-XXXXXX")"
   mkdir -p "$sb/.claude"
   plant_rc "$sb/.zshrc"
   printf '%s' "$sb"
@@ -400,6 +407,81 @@ expect_eq "detect_rc_claude_proxy reports present after setup" \
   "env:rc-claude-proxy present=yes" "$DET_PRESENT"
 expect_eq "detect_rc_claude_proxy reports absent before setup" \
   "env:rc-claude-proxy present=no" "$DET_ABSENT"
+
+echo "── the two doors answer the same question the same way ──────────────────"
+
+# WHAT THIS SECTION OWNS. "Is bionic's `claude()` proxy in place" is asked by
+# two doors — setup decides whether to offer the item (`rc_get`), doctor decides
+# what to print (`detect_rc_claude_proxy`) — and one concept answered two ways is
+# a concept that can disagree. The two arms above drive both predicates already,
+# but only on the states where they cannot differ: a file with no block, and a
+# file whose block holds exactly the current line.
+#
+# THE THIRD FIXTURE IS THE ONLY ONE THAT SEPARATES THEM: bionic's markers around
+# an OLDER payload's proxy text, which is the state every install already on disk
+# entered the day `rc_default`'s line changed (epic-19 W1 slice 4/1 changed it).
+# A marker-only predicate calls that machine done; a line-comparing predicate
+# calls it pending. Whoever is wrong, they must not be wrong differently — this
+# is the agreement pin the Step-6 DUPLICATION review found missing.
+
+# Setup's own predicate, as setup consumes it (setup.sh:1194 `rc_get … && continue`).
+setup_says() {  # <sandbox> -> in-place | pending
+  if env_run "$1" /bin/zsh -- rc_get claude-proxy >/dev/null 2>&1
+  then printf 'in-place'; else printf 'pending'; fi
+}
+# Doctor's, as doctor consumes it (doctor.sh: `[ "$RC_PROXY_STATE" = "yes" ]`).
+doctor_says() {  # <sandbox> -> in-place | pending
+  case "$(detect_run "$1")" in
+    *present=yes) printf 'in-place' ;;
+    *)            printf 'pending' ;;
+  esac
+}
+
+SB_AG_ABSENT="$(new_sandbox)"
+SB_AG_CURRENT="$(new_sandbox)"; setup_run "$SB_AG_CURRENT" y >/dev/null 2>&1
+SB_AG_STALE="$(new_stale_sandbox)"
+
+# The extractors are proved to discriminate before the third fixture is asked
+# anything: each one answers both words, on the two fixtures where the answer is
+# not in dispute. A predicate stuck on one value would fail here and take the
+# stale arm's meaning with it.
+expect_eq "setup's predicate says pending on an rc with no block" \
+  "pending" "$(setup_says "$SB_AG_ABSENT")"
+expect_eq "setup's predicate says in-place after a consented setup" \
+  "in-place" "$(setup_says "$SB_AG_CURRENT")"
+expect_eq "doctor's predicate says pending on an rc with no block" \
+  "pending" "$(doctor_says "$SB_AG_ABSENT")"
+expect_eq "doctor's predicate says in-place after a consented setup" \
+  "in-place" "$(doctor_says "$SB_AG_CURRENT")"
+
+expect_eq "the two predicates agree on an rc with no block" \
+  "$(setup_says "$SB_AG_ABSENT")" "$(doctor_says "$SB_AG_ABSENT")"
+expect_eq "the two predicates agree after a consented setup" \
+  "$(setup_says "$SB_AG_CURRENT")" "$(doctor_says "$SB_AG_CURRENT")"
+expect_eq "the two predicates agree on a STALE block — the state that separates them" \
+  "$(setup_says "$SB_AG_STALE")" "$(doctor_says "$SB_AG_STALE")"
+
+# The fixture is the stale one it claims to be, read through the same extractor
+# the rebuild section uses — otherwise the agreement above could be agreement
+# about a file that holds no block at all.
+expect_eq "the stale fixture holds an older payload's line inside the markers" \
+  "$STALE_LINE" "$(rc_block_lines "$SB_AG_STALE/.zshrc")"
+
+# STALE IS ITS OWN ANSWER, not a second spelling of absent. Markers with a
+# foreign line is a machine that consented and now carries a line bionic no
+# longer writes; markers absent is a machine that was never asked or said no.
+# Doctor routes the first to a rewrite and leaves the second alone, so the fact
+# function has to tell them apart.
+expect_eq "detect reports a stale block as stale" \
+  "env:rc-claude-proxy present=stale" "$(detect_run "$SB_AG_STALE")"
+expect_eq "detect still reports no block at all as absent" \
+  "env:rc-claude-proxy present=no" "$(detect_run "$SB_AG_ABSENT")"
+
+ROW_STALE="$(report_row "$(doctor_run "$SB_AG_STALE")" "$DOCTOR_ROW_LABEL")"
+expect_nonempty "doctor renders a proxy row on a stale block" "$ROW_STALE"
+expect_contains "the stale row says stale"                     "stale"         "$ROW_STALE"
+expect_contains "the stale row routes the reader to setup"     "/bionic:setup" "$ROW_STALE"
+expect_ne "the stale row is not the healthy row" "$ROW_PRESENT" "$ROW_STALE"
 
 echo "── remove: the block goes, every other line stays ───────────────────────"
 
