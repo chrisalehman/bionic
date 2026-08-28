@@ -13,6 +13,7 @@
 #
 #     bash <plugin-root>/hooks/session-poker.sh tick       one decision over this roster (read-only)
 #     bash <plugin-root>/hooks/session-poker.sh arm        stamp the Patrol as alive, at engagement
+#     bash <plugin-root>/hooks/session-poker.sh disarm     remove that stamp — this Patrol was ended on purpose
 #     bash <plugin-root>/hooks/session-poker.sh interval   the configured Patrol interval, seconds
 #     bash <plugin-root>/hooks/session-poker.sh adopt      what OTHER sessions launched here (read-only)
 #
@@ -29,7 +30,11 @@
 # (spec R1). The doctrine that ARMS it lives in skills/canonical-sdlc/SKILL.md
 # §Dispatch, and the mechanism is a session-scoped cron job: One clock per run, and only one.
 # Arm it at engagement — never on dispatch, never one per unit — and then
-# `CronDelete` the job at run close. Wakeups are recurring, never date-pinned: a one-shot
+# `CronDelete` the job at run close WITH `disarm` beside it, which removes the stamp: the
+# cron half stops the firing and the stamp half is what says the stop was deliberate, and a
+# `CronDelete` alone leaves a Patrol that every reader — hooks/patrol-revive.sh loudest —
+# has to read as a death (critic C-2, epic-19 w1).
+# Wakeups are recurring, never date-pinned: a one-shot
 # `CronCreate` pinned to a wall-clock minute is banned, because
 # a busy minute DROPS the tick rather than queuing it — so a one-shot whose single match
 # minute finds the session working dies silently and never fires again. A run that needs a
@@ -69,6 +74,14 @@
 #   this verb the wall is a chicken-and-egg that refuses every first dispatch of a run.
 #   `arm` therefore needs no roster and asks for none.
 #
+#   `disarm` EXISTS BECAUSE A DELIBERATE STOP HAS TO BE READABLE. It removes the stamp, and
+#   nothing else in production ever did — so an aging stamp meant "the Patrol died" and
+#   "the run ended its own Patrol" indistinguishably, and hooks/patrol-revive.sh reported
+#   the second as the first on EVERY remaining turn of the session (critic C-2, epic-19 w1).
+#   Its two callers are the two deliberate stops there are: the run-close ritual in
+#   skills/canonical-sdlc/SKILL.md §Dispatch, beside the `CronDelete`, and the DISARM
+#   decision below, which takes it as the last act of its own tick.
+#
 # The stamp is a LIVENESS signal, not an authority: it says the Patrol fired, and it cannot
 # say the CLI's cron table still holds the job. That honest limit is the wall's too.
 #
@@ -82,7 +95,11 @@
 #            roster" invariant, literally) generalizes here to the roster having nothing
 #            open at all: every row MET, WAIVED or ACKED is the same "nothing left to wait
 #            for" as no rows existing, so all read DISARM (S2 design decision plus epic-16
-#            w2 Step-6 remediation R4, both logged to the plan).
+#            w2 Step-6 remediation R4, both logged to the plan). A DISARM tick REMOVES this
+#            session's stamp as its last act — the decision is terminal, so the disk record
+#            that a Patrol runs here has to stop saying so — except on a tick that also
+#            found the dispatch wall blind, where the wall-blind NOTIFY outranks the DISARM
+#            and the stamp stays.
 #   NOTIFY   at least one UNACKED UNMET row's elapsed time (now − launched_at) exceeds its own
 #            declared `duration=`, read by the same parser `verdict` uses for `cadence=`
 #            (hooks/session-sweeper.sh's parse_seconds, duplicated below — see that file's
@@ -143,6 +160,7 @@ usage() {  # [message]
   die "Usage:"
   die "  bash ${HOOK_DIR}/session-poker.sh tick       one decision over this session's roster (read-only)"
   die "  bash ${HOOK_DIR}/session-poker.sh arm        stamp the Patrol as alive for this session (no roster needed)"
+  die "  bash ${HOOK_DIR}/session-poker.sh disarm     remove that stamp at run close — this Patrol was ended on purpose"
   die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
   die "  bash ${HOOK_DIR}/session-poker.sh interval-default   this script's built-in default interval, in seconds (ignores config)"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt      every open row a PREDECESSOR session left on this project's rosters (read-only)"
@@ -152,7 +170,7 @@ usage() {  # [message]
 [ $# -eq 1 ] || usage "exactly one verb required."
 VERB="$1"
 case "$VERB" in
-  tick|arm|interval|interval-default|adopt) : ;;
+  tick|arm|disarm|interval|interval-default|adopt) : ;;
   *) usage "unknown verb: $VERB" ;;
 esac
 
@@ -342,6 +360,35 @@ write_patrol_stamp() {  # <session-id> <verb> -> 0 written, 1 not
   printf '%s|at=%s|session=%s|verb=%s\n' "$PATROL_STAMP_SCHEMA" "$(iso_now)" "$sid" "$verb" \
     > "$f" 2>/dev/null || return 1
   chmod 600 "$f" 2>/dev/null
+  return 0
+}
+
+# THE OTHER END OF THE SAME RECORD, and the only writer in production that ever removes a
+# stamp. Until it existed, an aging stamp had exactly one reading available to every
+# consumer — "the Patrol died" — and the two deliberate stops this system takes routinely
+# (the run-close `CronDelete`, and the DISARM decision below) produced that reading on a
+# run that had simply finished. hooks/patrol-revive.sh then blocked the stop of EVERY
+# remaining turn of the session, since one block per turn is not a block that stops
+# repeating. Removing the stamp is the readable fact that closes it: the revive hook's
+# ABSENT state is silent by design, so a stamp that is gone ends the notice rather than
+# restarting it, and the arming wall's never-armed refusal is exactly the right thing to
+# say to the next dispatch on a run whose clock was deliberately stopped.
+#
+# A SYMLINK IS NOT A STAMP, here as everywhere else under .bionic/tmp. It is left alone
+# rather than unlinked: every reader in the fleet already treats it as absent, so there is
+# nothing to close, and a script that deletes files it never wrote is a worse trade than a
+# no-op. The directory shape is checked exactly as the writer checks it, so a resolution
+# that landed somewhere else removes nothing.
+remove_patrol_stamp() {  # <session-id> -> 0 gone (removed, or never there), 1 could not
+  local sid="$1" f d
+  f="$(patrol_stamp_file "$sid")" || return 1
+  [ -n "$f" ] || return 1
+  d="${f%/*}"
+  case "$d" in */.bionic/tmp) : ;; *) return 1 ;; esac
+  [ -L "$f" ] && return 0
+  [ -e "$f" ] || return 0
+  rm -f "$f" 2>/dev/null
+  [ -e "$f" ] && return 1
   return 0
 }
 
@@ -696,6 +743,37 @@ case "$VERB" in
     exit 0
     ;;
 
+  # THE DELIBERATE STOP. Paired with `CronDelete` at run close (the ritual is stated in
+  # skills/canonical-sdlc/SKILL.md §Dispatch, and both halves belong to it): `CronDelete`
+  # stops the firing, this stops the CLAIM that something is still firing. Either half
+  # alone leaves a Patrol that is half-stopped in the direction that lies.
+  #
+  # IDEMPOTENT, AND SILENT ABOUT NOTHING. A ritual is a thing a model runs from a list, so
+  # running it twice, or on a session that never armed, answers 0 and says which of the two
+  # it was — a no-op reported as a failure is a line the operator has to stop and interpret
+  # at exactly the moment the run is trying to end.
+  disarm)
+    SESSION_ID="${CLAUDE_CODE_SESSION_ID:-}"
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "A Patrol stamp answers for ONE session, so without the key there is nothing to remove."
+      exit 3
+    fi
+    DISARM_STAMP="$(patrol_stamp_file "$SESSION_ID")" || DISARM_STAMP=""
+    if [ -n "$DISARM_STAMP" ] && [ -f "$DISARM_STAMP" ] && [ ! -L "$DISARM_STAMP" ]; then
+      if remove_patrol_stamp "$SESSION_ID"; then
+        say "disarmed — the Patrol stamp for this session is removed: $DISARM_STAMP"
+        say "CronDelete the Patrol job too if it is still in the table; this half only stops the claim that it fires."
+        exit 0
+      fi
+      die "REFUSED — the Patrol stamp could not be removed, so this session still reads as armed."
+      die "Remove it by hand or the death notice keeps firing every turn: $DISARM_STAMP"
+      exit 2
+    fi
+    say "already disarmed — no Patrol stamp for this session${DISARM_STAMP:+: $DISARM_STAMP}"
+    exit 0
+    ;;
+
   adopt)
     SESSION_ID="${CLAUDE_CODE_SESSION_ID:-}"
     if [ -z "$SESSION_ID" ]; then
@@ -1003,7 +1081,24 @@ EOF
       # above still says what the roster says. Silence here would be the detector's own
       # failure mode: the roster of a session whose wall is blind is exactly the roster
       # that looks finished.
+      #
+      # AND IT OUTRANKS THE STAMP REMOVAL OUTRIGHT, which is the one place the precedence
+      # is more than an exit code. An empty roster under a blind wall is not a finished
+      # run, it is a run whose dispatches stopped being recorded — so the clock is the last
+      # thing that should stop, and the stamp stays exactly where the re-invoke the NOTIFY
+      # names will need it. SKILL.md §Dispatch states this order for the model; this is the
+      # same order taken on disk.
       [ "$WALL_BLIND" -eq 1 ] && exit 1
+
+      # THE LAST ACT OF A DISARM TICK. The decision is terminal — "the Patrol may stop" —
+      # so the stamp this very tick wrote before it decided has to stop claiming a live
+      # clock, or hooks/patrol-revive.sh reads the stop this line just chose as a death and
+      # blocks every remaining turn of the session demanding a re-arm nobody wants (critic
+      # C-2, epic-19 w1). It is LAST so that nothing above it can be skipped by it: the
+      # decision line is already printed, and a removal that fails costs a late notice
+      # rather than a lost decision.
+      remove_patrol_stamp "$SESSION_ID" \
+        || die "WARN — the Patrol stamp could not be removed; the death notice may fire on later turns."
       exit 0
     fi
 
