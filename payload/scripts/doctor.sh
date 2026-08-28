@@ -960,6 +960,14 @@ if [ "$ENV_MISSING" -gt 0 ]; then
   fix "${ENV_MISSING} of bionic's environment settings $(_doctor_plural "$ENV_MISSING" is are) not written → run /bionic:setup"
 fi
 
+# A STALE PROXY BLOCK IS THE ONE STATE OF THIS ITEM THAT EARNS A FIX LINE.
+# Absent is an offer nobody took, and never a problem (see the row itself, in
+# ENVIRONMENT below); stale is bionic's OWN block, consented to, carrying a line
+# this payload no longer writes. Setup rewrites the block wholesale, so the
+# repair is the same command as the offer — but this time there is something
+# broken to repair, which is what makes the row ✗ instead of `–`.
+[ "$RC_PROXY_STATE" = "stale" ] && fix "the claude() shell proxy is an older line → run /bionic:setup"
+
 [ "$LEGACY_STATE" = "yes" ] && fix "the legacy .zshrc alias block is still there → run /bionic:setup"
 case "$LEGACY_HOOK_COUNT" in
   unknown|0) ;;
@@ -1213,11 +1221,19 @@ done
 # `claude()` function that puts the bypass mode in reach of the command a person
 # types — and someone who was asked and said no has a correctly configured
 # machine, not a broken one. So absent is `–` with the route to say yes, never
-# `✗` with a repair. Present is read from the MARKERS (detect.sh), so a claude()
-# function a user wrote for themselves is neither claimed here nor removable by
-# /bionic:remove.
+# `✗` with a repair. Presence is env.sh's `rc_get` (through detect.sh), so a
+# claude() function a user wrote for themselves — outside bionic's markers — is
+# neither claimed here nor removable by /bionic:remove.
+#
+# AND THE THIRD STATE IS NOT ABSENCE. `stale` is bionic's own block holding a
+# line this payload no longer writes, on a machine that already said yes. That
+# person is owed the truth and a command, not a green tick: the ✗ here is
+# matched by the fix line gathered above, which is the invariant those symbols
+# are worth anything under.
 if [ "$RC_PROXY_STATE" = "yes" ]; then
   _doctor_env3 "$DOCTOR_OK" "claude() shell proxy" "on" "in $(_detect_shell_rc) — new shells pick it up"
+elif [ "$RC_PROXY_STATE" = "stale" ]; then
+  _doctor_env3 "$DOCTOR_BAD" "claude() shell proxy" "stale" "in $(_detect_shell_rc) — /bionic:setup rewrites it"
 else
   _doctor_env3 "$DOCTOR_NIL" "claude() shell proxy" "—" "not set — /bionic:setup offers it"
 fi
