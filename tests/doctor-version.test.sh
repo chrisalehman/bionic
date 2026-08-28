@@ -338,13 +338,65 @@ expect_match "25: and the sentence after the path survived the cut whole" \
   "* — new shells pick it up" "$RC_ROW"
 
 echo ""
-echo "=== Section 6: registration ==="
+echo "=== Section 6: a version that is not version-shaped is not printed ==="
+
+# WHAT THIS SECTION OWNS. `latest` is the one field on the version row that
+# comes out of a file bionic does not write — the marketplace clone's
+# plugin.json — and it is printed verbatim into the row, the FIX section, and
+# from there into a relayed block a person pastes from. detect.sh's fact line is
+# `key=value` separated by spaces and every reader splits on that, so a version
+# carrying a space or a newline fabricates a second fact line without anyone
+# intending harm. Same trust domain as the install, so this is grammar
+# hardening, not a threat model (Step-6 security review, §S).
+#
+# THE POSITIVE IS SECTION 2, on this same fixture builder: a well-formed 9.9.9
+# reaches the row and the fix line whole. This section is its twin — the same
+# builder, a crafted value, and nothing of it on the page.
+
+# A NEWLINE AND NO SPACES, which is what makes this fixture discriminate. The
+# fact line's readers cut a field at the first space (`${LATEST_LATEST%% *}`),
+# so a value carrying spaces is merely mangled — bad enough, it still fabricates
+# "9.9.9 available" out of a manifest that says no such thing, and assertions 26
+# and 28 catch that. A space-free value survives that cut intact and carries its
+# own LINE onto a page whose every other line is a fact bionic vouched for.
+CRAFTED='9.9.9
+✗dep-sudo-fabricated-by-a-crafted-version'
+CLONE7="$(make_git_marketplace_clone "$CRAFTED")"
+HOME7="$(make_registry_home)"
+write_known_marketplaces "$HOME7" '{"source":"github","repo":"example/bionic"}' "$CLONE7"
+
+OUT7="$(run_doctor "$HOME7")"
+ROW7="$(version_row "$OUT7")"
+
+# The cause is asserted by its opening, not whole: this row is subject to the
+# same column budget as every other, and the sentence is long enough to be
+# elided on a narrow prefix. What must be there is that it says unknown and
+# says why.
+expect_match "26: a malformed version reads unknown with a stated cause" \
+  "*version*unknown — the marketplace's plugin.json version is not*" "$ROW7"
+expect_no_match "27: the line the value tried to fabricate never reaches the page" \
+  "*✗dep-sudo-fabricated*" "$OUT7"
+expect_no_match "28: and it never becomes a fix line" \
+  "*claude plugin update bionic@bionic*" "$OUT7"
+expect_all_lines_fit "29: the malformed-version page still fits the budget" "$OUT7"
+
+# A version-SHAPED token is still accepted — the guard rejects by shape, not by
+# novelty, and a prerelease tag must keep working.
+CLONE8="$(make_git_marketplace_clone "9.9.9-rc.1")"
+HOME8="$(make_registry_home)"
+write_known_marketplaces "$HOME8" '{"source":"github","repo":"example/bionic"}' "$CLONE8"
+ROW8="$(version_row "$(run_doctor "$HOME8")")"
+expect_match "30: a dotted/dashed prerelease version is still reported" \
+  "*9.9.9-rc.1 available*" "$ROW8"
+
+echo ""
+echo "=== Section 7: registration ==="
 
 # THE SUITE IS REGISTERED. tests/*.test.sh is NOT globbed by the runner
 # (tests/run.sh hand-lists every suite by name) — see
 # tests/doctor-patrol.test.sh's own registration case for the prior instance
 # of this lesson.
-expect_true "26: tests/run.sh names doctor-version.test.sh" \
+expect_true "31: tests/run.sh names doctor-version.test.sh" \
   grep -q 'run "doctor-version.test.sh" bash tests/doctor-version.test.sh' "${BIONIC_SCRIPTS_DIR}/tests/run.sh"
 
 echo ""
