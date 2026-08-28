@@ -1,0 +1,407 @@
+#!/bin/bash
+# tests/doctor-version.test.sh — doctor.sh's installed-vs-latest version row
+# (F5, epic-19 wave-01, spec AC-F5; design ledger
+# .bionic/docs/record/epic-19/step2-design-ledger.md, T4 "OK"; grounding
+# .bionic/docs/record/epic-19/step1-fixes-grounding.md item 5).
+#
+# THE CONTRACT UNDER TEST. Doctor's BIONIC NATIVE table carries a `version`
+# row, answered per feed kind (payload/scripts/lib/detect.sh:detect_
+# marketplace_feed_kind):
+#   - git feed: compares the installed plugin.json against the marketplace's
+#     CACHED CLONE (known_marketplaces.json's `installLocation`) — current is
+#     one quiet ✓ line, lag names the exact repair command and also earns a
+#     FIX_LINES_OTHER verdict line (`claude plugin update bionic@bionic`).
+#   - directory feed: a remote-latest compare is meaningless there (the CLI
+#     already runs that tree) — the row instead reuses the EXISTING registry-
+#     sha/reconverge machinery (detect_registry_sha_lag +
+#     detect_reconverge_hint), consumed rather than duplicated.
+#   - feed kind unknown (no registry, no jq, no bionic entry): an honest
+#     `unknown` line, never a guessed verdict.
+#
+# EXECUTED, NOT SOURCED — same posture as tests/doctor-patrol.test.sh: this
+# drives the real payload/scripts/doctor.sh through the seams detect.sh
+# already offers every caller (BIONIC_CLAUDE_HOME, BIONIC_PLUGIN_ROOT), with
+# fixture `plugins/known_marketplaces.json` / `plugins/installed_plugins.json`
+# files under a fixture claude-home rather than any mock of detect.sh itself.
+#
+# WHY THE DIRECTORY-FEED CASE FORCES ITS OWN PWD. detect_registry_sha_lag()
+# compares `installed_plugins.json`'s recorded gitCommitSha against `git
+# rev-parse HEAD` **of the caller's own $PWD** (doctor.sh calls it with no
+# argument) — so that one case runs doctor from an explicit `(cd "$REPO" &&
+# ...)` subshell rather than trusting how this suite itself was invoked.
+#
+# ASSERTION-HELPER RACE. No `printf | grep -q` anywhere below (tests/
+# assert-helper-race.test.sh): containment is bash `[[ == * ]]` in-process,
+# and the one awk extraction below (like doctor-patrol.test.sh's) reads to
+# EOF rather than closing early.
+#
+# Usage: bash tests/doctor-version.test.sh
+
+set -uo pipefail
+
+. "$(dirname "$0")/lib/resolve-roots.sh"
+
+REPO="${BIONIC_SCRIPTS_DIR}"
+PAYLOAD="${REPO}/payload"
+DOCTOR_SH="${PAYLOAD}/scripts/doctor.sh"
+
+command -v jq >/dev/null 2>&1 || { echo "doctor-version.test.sh: jq is required"; exit 1; }
+command -v git >/dev/null 2>&1 || { echo "doctor-version.test.sh: git is required"; exit 1; }
+
+PASS=0; FAIL=0; TOTAL=0
+ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
+no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
+
+expect_true()  { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
+expect_match() {
+  local label="$1" pattern="$2" actual="$3"
+  # shellcheck disable=SC2053  # RHS is a glob on purpose
+  if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "no match for '$pattern' in: $(printf '%.400s' "$actual")"; fi
+}
+expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
+expect_no_match() {
+  local label="$1" pattern="$2" actual="$3"
+  # shellcheck disable=SC2053  # RHS is a glob on purpose
+  if [[ "$actual" == $pattern ]]; then no "$label" "unexpected match for '$pattern'"; else ok "$label"; fi
+}
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+expect_true "payload/scripts/doctor.sh exists" test -f "$DOCTOR_SH"
+
+REAL_VERSION="$(jq -r '.version // empty' "${PAYLOAD}/.claude-plugin/plugin.json")"
+expect_true "the real payload plugin.json carries a version" test -n "$REAL_VERSION"
+
+# ---------- fixture builders ----------
+
+# A claude-home carrying only the two registry files detect.sh's marketplace
+# facts read (`_detect_known_marketplaces_file` / `_detect_installed_plugins_file`'s
+# defaults, both under `<claude-home>/plugins/`).
+make_registry_home() {  # -> claude-home dir on stdout
+  local dir
+  dir="$(mktemp -d -p "$TMP")"
+  mkdir -p "$dir/plugins"
+  printf '%s' "$dir"
+}
+
+write_known_marketplaces() {  # <claude-home> <source-json> <installLocation>
+  jq -nc --argjson src "$2" --arg loc "$3" \
+    '{bionic:{source:$src, installLocation:$loc, lastUpdated:"2026-08-27T00:00:00Z"}}' \
+    > "$1/plugins/known_marketplaces.json"
+}
+
+write_empty_known_marketplaces() {  # <claude-home> — no bionic entry at all
+  printf '{}' > "$1/plugins/known_marketplaces.json"
+}
+
+write_installed_plugins_sha() {  # <claude-home> <installPath> <gitCommitSha>
+  jq -nc --arg path "$2" --arg sha "$3" \
+    '{plugins:{"bionic@bionic":[{installPath:$path, gitCommitSha:$sha}]}}' \
+    > "$1/plugins/installed_plugins.json"
+}
+
+# A git-feed marketplace's cached clone: `.claude-plugin/marketplace.json`
+# naming bionic's plugin source (bionic ships this as the plain relative path
+# "./payload" — .claude-plugin/marketplace.json in this very repo does the
+# same), plus the plugin.json that source resolves to.
+make_git_marketplace_clone() {  # <version> -> clone dir on stdout
+  local version="$1" dir
+  dir="$(mktemp -d -p "$TMP")"
+  mkdir -p "$dir/.claude-plugin" "$dir/payload/.claude-plugin"
+  jq -nc '{plugins:[{name:"bionic", source:"./payload"}]}' \
+    > "$dir/.claude-plugin/marketplace.json"
+  jq -nc --arg v "$version" '{name:"bionic", version:$v}' \
+    > "$dir/payload/.claude-plugin/plugin.json"
+  printf '%s' "$dir"
+}
+
+# ---------- driving doctor ----------
+
+# A LONG PATH SEGMENT, used by the fixture rc below and by Section 5's clone.
+LONGSEG="$(printf 'segment-%.0s' $(seq 1 8))"
+
+# THE SHELL RC IS A FIXTURE, NOT THE MACHINE'S (added at S9 with Section 5).
+# doctor's ENVIRONMENT section names the rc it read, and until this existed the
+# suite read the real `$HOME/.zshrc` — so that row's width, and whether it said
+# the proxy was on, depended on whose machine ran the suite. It is now bionic's
+# own block at a deliberately long path: deterministic, and long enough that the
+# row it renders needs the column budget to survive.
+FIXTURE_RC="${TMP}/${LONGSEG}/${LONGSEG}/dot.zshrc"
+mkdir -p "$(dirname "$FIXTURE_RC")"
+{
+  echo '# ─── bionic:rc:start ───'
+  echo 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
+  echo '# ─── bionic:rc:end ───'
+} > "$FIXTURE_RC"
+
+# `(cd "$REPO" && ...)` UNCONDITIONALLY, not only for the directory-feed case:
+# it costs nothing for the git-feed/unknown cases and removes any dependence
+# on how this suite itself was invoked, matching REPO's `git rev-parse HEAD`
+# to what a run through tests/run.sh (which itself `cd`s to $REPO) would see.
+run_doctor() {  # <claude-home> [shell-rc]
+  ( cd "$REPO" && HOME="$TMP" BIONIC_SHELL_RC="${2:-$FIXTURE_RC}" \
+      BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      bash "$DOCTOR_SH" < /dev/null 2>&1 )
+}
+
+# The version row alone — the one line in BIONIC NATIVE beginning with one of
+# the three status glyphs followed by "version". Read to EOF (no `grep -q`
+# early close, per assert-helper-race.test.sh).
+version_row() {  # <full-output>
+  printf '%s\n' "$1" | awk '/^  . version /'
+}
+
+echo "=== Section 1: git feed, installed == marketplace latest ==="
+
+CLONE1="$(make_git_marketplace_clone "$REAL_VERSION")"
+HOME1="$(make_registry_home)"
+write_known_marketplaces "$HOME1" '{"source":"github","repo":"example/bionic"}' "$CLONE1"
+
+OUT1="$(run_doctor "$HOME1")"
+ROW1="$(version_row "$OUT1")"
+
+expect_match "1: the row is a quiet checkmark" "*✓ version*${REAL_VERSION}*up to date*" "$ROW1"
+expect_no_match "2: no update command rides the row when current" "*claude plugin update*" "$ROW1"
+expect_no_match "3: no update-command verdict line prints when current" \
+  "*claude plugin update bionic@bionic*" "$OUT1"
+
+echo ""
+echo "=== Section 2: git feed, installed lags the marketplace ==="
+
+CLONE2="$(make_git_marketplace_clone "9.9.9")"
+HOME2="$(make_registry_home)"
+write_known_marketplaces "$HOME2" '{"source":"github","repo":"example/bionic"}' "$CLONE2"
+
+OUT2="$(run_doctor "$HOME2")"
+ROW2="$(version_row "$OUT2")"
+
+expect_match "4: the row names installed and the exact update command" \
+  "*✗ version*${REAL_VERSION}*9.9.9 available*claude plugin update bionic@bionic*" "$ROW2"
+expect_match "5: the verdict area carries a matching fix line" \
+  "*bionic ${REAL_VERSION} installed, 9.9.9 available*claude plugin update bionic@bionic*" "$OUT2"
+
+echo ""
+echo "=== Section 3: directory feed — reconverge integration, not a remote compare ==="
+
+HOME3="$(make_registry_home)"
+write_known_marketplaces "$HOME3" '{"source":"directory","path":"'"$REPO"'"}' "$REPO"
+REPO_HEAD="$(git -C "$REPO" rev-parse HEAD)"
+write_installed_plugins_sha "$HOME3" "$REPO" "$REPO_HEAD"
+
+OUT3="$(run_doctor "$HOME3")"
+ROW3="$(version_row "$OUT3")"
+
+expect_match "6: a directory feed at the registered sha reads as a match, not a compare" \
+  "*✓ version*${REAL_VERSION}*tree matches the registered cache*" "$ROW3"
+expect_no_match "7: no marketplace-latest language leaks into the directory-feed row" \
+  "*available*claude plugin update*" "$ROW3"
+
+echo ""
+echo "=== Section 4: feed kind cannot be determined — honest unknown, never a guess ==="
+
+HOME4="$(make_registry_home)"
+write_empty_known_marketplaces "$HOME4"
+
+OUT4="$(run_doctor "$HOME4")"
+ROW4="$(version_row "$OUT4")"
+
+expect_match "8: the degraded case reads unknown with a stated cause" \
+  "*– version*unknown —*" "$ROW4"
+expect_no_match "9: a degraded feed kind never claims current or lag" \
+  "*up to date*" "$ROW4"
+expect_no_match "10: a degraded feed kind never prints an update command" \
+  "*claude plugin update*" "$ROW4"
+
+echo ""
+echo "=== Section 5: every line doctor prints fits the column budget ==="
+
+# WHY THIS SECTION IS IN THIS SUITE. doctor.sh's format rules have always stated
+# the budget — nothing printed may exceed 100 columns, because a wrapped line is
+# one row turned into two — and nothing has enforced it since
+# tests/doctor.test.sh was deleted at 8582861 (epic-18 wave-03). The row F5 added
+# is what found the gap: on the wave's own T3 capture it measured 104 columns,
+# because `unknown — ${LATEST_CAUSE}` interpolates free text nobody bounded.
+# Slice 4/3 had built exactly this wall for setup.sh (tests/command-relay.test.sh
+# Group B) one slice earlier. This is that wall, on the other script, driving the
+# four feed-kind arms above plus the worst case below.
+#
+# THE RULER IS THE PRODUCT'S OWN (`bionic_cols`, payload/scripts/lib/width.sh) —
+# the same function doctor truncates with, because a wall measured in bytes
+# while the script budgets in columns is a wall with a gap in it. That ruler is
+# pinned directly, positives and negatives, in command-relay.test.sh Group B0.
+# shellcheck source=/dev/null
+. "${PAYLOAD}/scripts/lib/width.sh"
+
+# ONE EXEMPTION, NAMED AND NEVER SILENT. The half-uninstalled teardown line is a
+# raw URL inside a pipefail wrapper that a person has to PASTE — 132 columns, and
+# eliding it would hand them a command that fails instead of a line that wraps.
+# doctor.sh says so where it prints it. So the rule this suite walls is "every
+# line fits except that one", and the arms below prove the exemption is load-
+# bearing rather than a hole: on a fixture that prints it, at least one
+# over-budget line must exist and every over-budget line must BE it.
+REMOVE_CMD_LINE='*curl -fsSL *remove.sh | bash'"'"
+
+over_budget_lines() {  # <text> -> every line wider than the budget
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ "$(bionic_cols "$line")" -gt "$BIONIC_LINE_WIDTH" ] && printf '%s\n' "$line"
+  done <<< "$1"
+  return 0
+}
+
+expect_all_lines_fit() {  # <label> <text>
+  local label="$1" over line bad=""
+  over="$(over_budget_lines "$2")"
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    # shellcheck disable=SC2254  # RHS is a glob on purpose
+    case "$line" in $REMOVE_CMD_LINE) continue ;; esac
+    bad="$line"; break
+  done <<< "$over"
+  if [ -z "$bad" ]; then ok "$label"
+  else no "$label" "$(bionic_cols "$bad") columns (budget ${BIONIC_LINE_WIDTH}): ${bad}"; fi
+}
+
+# THE WORST CASE THE REVIEW NAMED, built rather than argued: a git feed whose
+# marketplace clone has no plugin.json, so `detect_plugin_latest`'s cause is
+# `no plugin.json at <installLocation>/payload/.claude-plugin/plugin.json` —
+# an absolute path inside a sentence inside a row that already spends 25 columns
+# on its prefix. The clone lives under a deliberately long directory so the
+# untruncated row would run past 280 columns.
+CLONE5="${TMP}/${LONGSEG}/${LONGSEG}/clone"
+mkdir -p "$CLONE5/.claude-plugin"
+jq -nc '{plugins:[{name:"bionic", source:"./payload"}]}' \
+  > "$CLONE5/.claude-plugin/marketplace.json"
+HOME5="$(make_registry_home)"
+write_known_marketplaces "$HOME5" '{"source":"github","repo":"example/bionic"}' "$CLONE5"
+
+OUT5="$(run_doctor "$HOME5")"
+ROW5="$(version_row "$OUT5")"
+
+# The positive the wall means nothing without: this fixture really does reach
+# the unbounded arm, and really does carry the long path into the row.
+expect_match "12: the missing-manifest fixture reaches the unknown arm" \
+  "*version*unknown — no plugin.json at *" "$ROW5"
+# The long clone path is no longer READABLE in the row — that is the point:
+# it was elided to fit. The elision itself is the assertion.
+expect_match "13: and the long clone path was elided rather than printed whole" \
+  "*…" "$ROW5"
+
+expect_all_lines_fit "14: git feed, current — every line fits the budget"          "$OUT1"
+expect_all_lines_fit "15: git feed, lagging — every line fits the budget"          "$OUT2"
+expect_all_lines_fit "16: directory feed — every line fits the budget"             "$OUT3"
+expect_all_lines_fit "17: unknown feed kind — every line fits the budget"          "$OUT4"
+expect_all_lines_fit "18: git feed, missing manifest, long path — every line fits" "$OUT5"
+
+# THE EXEMPTION IS LOAD-BEARING, and this is the arm that says so. These
+# fixtures have no bionic entry in installed_plugins.json, so doctor calls the
+# machine half-uninstalled and prints the teardown command — over the budget, on
+# purpose, and the only thing above it. Delete the exemption and 14/15/17 go
+# red; delete the reason for it and this arm does.
+# A HALF-UNINSTALLED MACHINE: no bionic entry in the registry (registered=no)
+# and a legacy footprint in the rc (`detect_env_todo_tools`), which is the
+# disjunction detect_half_uninstalled asks for. Only that machine prints the
+# teardown command.
+HALF_RC="${TMP}/${LONGSEG}/half.zshrc"
+{
+  echo '# ─── bionic:rc:start ───'
+  echo 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
+  echo '# ─── bionic:rc:end ───'
+  echo 'export CLAUDE_CODE_ENABLE_TODO_TOOLS=1'
+} > "$HALF_RC"
+HOME6="$(make_registry_home)"
+write_empty_known_marketplaces "$HOME6"
+OUT6="$(run_doctor "$HOME6" "$HALF_RC")"
+OVER6="$(over_budget_lines "$OUT6")"
+
+expect_match "20: the half-uninstalled fixture prints the teardown command" \
+  "*curl -fsSL *remove.sh | bash*" "$OUT6"
+# COUNTED, not pattern-matched against the whole blob: "every over-budget line
+# is that command" is only asserted if the number of them is asserted too — a
+# glob with a leading `*` would happily skip past a second offending line.
+OVER6_N="$(printf '%s\n' "$OVER6" | awk 'NF { n++ } END { print n + 0 }')"
+expect_eq "21: exactly one line on that machine is over the budget" "1" "$OVER6_N"
+expect_match "22: and it is that paste-verbatim command" \
+  "$REMOVE_CMD_LINE" "$OVER6"
+expect_all_lines_fit "23: half-uninstalled — every other line still fits" "$OUT6"
+
+# The rc row is the other line the walk found over the budget (101 columns on a
+# short $HOME). The fixture rc path is far longer than that, so this proves the
+# row is elided rather than merely short.
+RC_ROW="$(printf '%s\n' "$OUT1" | awk '/claude\(\) shell proxy/')"
+expect_match "24: the proxy row's rc path was elided to fit" "*…*" "$RC_ROW"
+# AND THE HALF THAT SURVIVED IS THE HALF THAT MATTERS. Truncation takes the end
+# of a string; a row that elided its own closing sentence would state a fact and
+# withhold what to do about it. The path gives way, the sentence does not.
+expect_match "25: and the sentence after the path survived the cut whole" \
+  "* — new shells pick it up" "$RC_ROW"
+
+echo ""
+echo "=== Section 6: a version that is not version-shaped is not printed ==="
+
+# WHAT THIS SECTION OWNS. `latest` is the one field on the version row that
+# comes out of a file bionic does not write — the marketplace clone's
+# plugin.json — and it is printed verbatim into the row, the FIX section, and
+# from there into a relayed block a person pastes from. detect.sh's fact line is
+# `key=value` separated by spaces and every reader splits on that, so a version
+# carrying a space or a newline fabricates a second fact line without anyone
+# intending harm. Same trust domain as the install, so this is grammar
+# hardening, not a threat model (Step-6 security review, §S).
+#
+# THE POSITIVE IS SECTION 2, on this same fixture builder: a well-formed 9.9.9
+# reaches the row and the fix line whole. This section is its twin — the same
+# builder, a crafted value, and nothing of it on the page.
+
+# A NEWLINE AND NO SPACES, which is what makes this fixture discriminate. The
+# fact line's readers cut a field at the first space (`${LATEST_LATEST%% *}`),
+# so a value carrying spaces is merely mangled — bad enough, it still fabricates
+# "9.9.9 available" out of a manifest that says no such thing, and assertions 26
+# and 28 catch that. A space-free value survives that cut intact and carries its
+# own LINE onto a page whose every other line is a fact bionic vouched for.
+CRAFTED='9.9.9
+✗dep-sudo-fabricated-by-a-crafted-version'
+CLONE7="$(make_git_marketplace_clone "$CRAFTED")"
+HOME7="$(make_registry_home)"
+write_known_marketplaces "$HOME7" '{"source":"github","repo":"example/bionic"}' "$CLONE7"
+
+OUT7="$(run_doctor "$HOME7")"
+ROW7="$(version_row "$OUT7")"
+
+# The cause is asserted by its opening, not whole: this row is subject to the
+# same column budget as every other, and the sentence is long enough to be
+# elided on a narrow prefix. What must be there is that it says unknown and
+# says why.
+expect_match "26: a malformed version reads unknown with a stated cause" \
+  "*version*unknown — the marketplace's plugin.json version is not*" "$ROW7"
+expect_no_match "27: the line the value tried to fabricate never reaches the page" \
+  "*✗dep-sudo-fabricated*" "$OUT7"
+expect_no_match "28: and it never becomes a fix line" \
+  "*claude plugin update bionic@bionic*" "$OUT7"
+expect_all_lines_fit "29: the malformed-version page still fits the budget" "$OUT7"
+
+# A version-SHAPED token is still accepted — the guard rejects by shape, not by
+# novelty, and a prerelease tag must keep working.
+CLONE8="$(make_git_marketplace_clone "9.9.9-rc.1")"
+HOME8="$(make_registry_home)"
+write_known_marketplaces "$HOME8" '{"source":"github","repo":"example/bionic"}' "$CLONE8"
+ROW8="$(version_row "$(run_doctor "$HOME8")")"
+expect_match "30: a dotted/dashed prerelease version is still reported" \
+  "*9.9.9-rc.1 available*" "$ROW8"
+
+echo ""
+echo "=== Section 7: registration ==="
+
+# THE SUITE IS REGISTERED. tests/*.test.sh is NOT globbed by the runner
+# (tests/run.sh hand-lists every suite by name) — see
+# tests/doctor-patrol.test.sh's own registration case for the prior instance
+# of this lesson.
+expect_true "31: tests/run.sh names doctor-version.test.sh" \
+  grep -q 'run "doctor-version.test.sh" bash tests/doctor-version.test.sh' "${BIONIC_SCRIPTS_DIR}/tests/run.sh"
+
+echo ""
+echo "========================================"
+echo "doctor-version: $PASS/$TOTAL passed"
+echo "========================================"
+
+[ "$FAIL" -eq 0 ] || exit 1

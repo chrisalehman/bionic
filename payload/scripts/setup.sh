@@ -154,7 +154,7 @@ _setup_self_dir() {
 
 SETUP_LIB_DIR="${BIONIC_LIB_DIR:-$(_setup_self_dir)/lib}"
 
-for _setup_lib in deps.sh detect.sh hooks.sh jit.sh env.sh; do
+for _setup_lib in deps.sh detect.sh hooks.sh jit.sh env.sh width.sh; do
   if [ ! -f "${SETUP_LIB_DIR}/${_setup_lib}" ]; then
     echo "setup.sh: cannot find ${SETUP_LIB_DIR}/${_setup_lib} — the payload looks incomplete." >&2
     echo "          reinstall with: claude plugin install bionic@bionic" >&2
@@ -184,6 +184,12 @@ done
 # table stores and nobody can type.
 # shellcheck source=/dev/null
 . "${SETUP_LIB_DIR}/jit.sh"
+# width.sh, for the column budget every line below is held inside. The rule is
+# doctor's (spec AC-15, 100 columns) and so is the file — one number and one
+# truncator, consumed by both scripts, rather than the copy-per-script this
+# wave shipped at slice 4/3 and then broke at slice 4/4.
+# shellcheck source=/dev/null
+. "${SETUP_LIB_DIR}/width.sh"
 
 # ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -461,13 +467,14 @@ _setup_item_pending() {  # <name> -> 0 when the item has something to ask about
 # The whole page. Non-zero means there was nothing to print, which is a machine
 # with nothing left to set up rather than an error.
 _setup_print_plan() {
-  local id verb lines=""
+  local id verb prefix lines=""
+  prefix="  • "
   # fd 3: the standard input belongs to the question this page is printed for.
   while IFS= read -r id <&3; do
     [ -n "$id" ] || continue
     _setup_item_pending "$id" || continue
     verb="$(_setup_item_verb "$id")" || continue
-    lines="${lines}  • ${verb}"$'\n'
+    lines="${lines}$(bionic_line "$prefix" "$verb")"$'\n'
   done 3< <(_setup_item_ids)
   [ -n "$lines" ] || return 1
   say "bionic would:"
@@ -506,7 +513,23 @@ SETUP_NIL='–'
 # lose the only distinction that matters here: one of them is a decision and the
 # other is a decision still waiting to be made.
 SETUP_ASK='?'
-item()   { printf '   %s %-22s %s\n' "$1" "$2" "${3:-}"; }
+
+# THE COLUMN BUDGET IS NOT THIS FILE'S (epic-19 AC-F4, grounding §4(a); moved
+# out at S9). item()'s third field and the --all plan's verb lines both
+# interpolate absolute paths — settings.json, a shell rc, the legacy skill
+# directory — with no bound, and none of them wrap cleanly inside the command
+# relay's fenced block. The rule they answer to is doctor's: spec AC-15 holds
+# every line doctor prints to 100 columns, and this script has the identical
+# reason to.
+#
+# SO THE NUMBER AND THE TRUNCATOR LIVE IN lib/width.sh, sourced above, and both
+# scripts consume them. Slice 4/3 built this budget for setup.sh alone and slice
+# 4/4 then broke it in doctor.sh in the same wave — the same number written
+# twice in two files with nothing binding them, which is what the Step-6 review
+# called out and what one owner ends. `bionic_line` is where the prefix-aware
+# arithmetic lives now; nothing about the shape below changed except who owns it.
+
+item() { printf '%s\n' "$(bionic_line "$(printf '   %s %-22s ' "$1" "$2")" "${3:-}")"; }
 action() { SETUP_ACTIONS="${SETUP_ACTIONS}${1}"$'\n'; }
 # deps.sh owns the one prompt shape — and the one short-circuit, because
 # `install_dep` and `install_plugin_native` ask through it directly and a
@@ -1190,7 +1213,15 @@ setup_claude_proxy() {
 # lands on a person's screen.
 _setup_rc_why() {  # <item>
   case "${1:-}" in
-    claude-proxy) echo "launches claude with bypass available in the mode cycle" ;;
+    # WRITTEN TO RIDE ON THE LINE IT PRINTS ON (AC-F4/AC-15). Its caller is a
+    # bare `say "   — …"`, five columns of lead-in and no truncator between this
+    # string and the screen, so the budget is kept HERE, by the length of the
+    # sentence: 93 characters, 98 columns printed. Slice 4/1 replaced the old
+    # 55-character line ("launches claude with bypass available in the mode
+    # cycle") with this longer and more exact one — the flag stopped starting
+    # the session in bypass and started only offering it — which is what spends
+    # most of the room. There is none left for another clause.
+    claude-proxy) echo "keeps bypass selectable in the shift+tab cycle; the session still starts in your default mode" ;;
     *)            echo "a shell line bionic needs" ;;
   esac
 }

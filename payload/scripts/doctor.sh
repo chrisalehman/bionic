@@ -128,6 +128,12 @@ DOCTOR_LIB="$(cd "$(_doctor_self_dir)" && pwd -P)/lib"
 # for the one shell-out it makes.
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/patrol.sh"
+# width.sh, which owns the 100-column rule this file's format rules state and
+# every row builder below now enforces. It was prose here and a constant in
+# setup.sh until S9 — the same number in two files with nothing binding them,
+# and the copy nothing walled (this one) was the one that broke.
+# shellcheck source=/dev/null
+. "${DOCTOR_LIB}/width.sh"
 
 # The standalone removal door (design D5a: the remover must not depend on the
 # thing it removes). Printed as TEXT for the user to run — doctor never fetches
@@ -176,11 +182,17 @@ BIONIC_PLUGIN_ID="bionic@bionic"
 #      nothing. They are counted and summarised, and only the rows carrying a
 #      real value are printed.
 #
-# AND EVERY LINE FITS. Nothing printed below may exceed 100 columns —
-# tests/doctor.test.sh used to wall it for both fixture machines; that suite
-# was deleted at 8582861 (epic-18 wave-03) and nothing replaced the wall —
-# because a wrapped line is rule 1 broken by the terminal rather than by this
-# file.
+# AND EVERY LINE FITS. Nothing printed below may exceed `BIONIC_LINE_WIDTH`
+# columns (lib/width.sh, 100) — because a wrapped line is rule 1 broken by the
+# terminal rather than by this file. This used to be a sentence and nothing
+# else: tests/doctor.test.sh walled it for both fixture machines until that
+# suite was deleted at 8582861 (epic-18 wave-03), and the next row added to this
+# file — F5's version row, slice 4/4 of this very wave — came out at 104 columns
+# on the wave's own T3 capture and past 130 in its worst case. The rule is now
+# enforced where rows are BUILT (the three builders below, plus the verdict
+# line), so a row added by a future arm inherits the bound the same way it
+# inherits the format, and walled from outside by an all-lines-fit assertion on
+# real output in tests/doctor-version.test.sh and tests/command-relay.test.sh.
 
 # The three symbols, and the invariant that gives them meaning: ✗ is printed if
 # and only if the same run puts a matching line in FIX. Anything true but not
@@ -207,22 +219,9 @@ _doctor_rtrim() {  # <line>
 # CLAUDE_CODE_ENABLE_TODO_TOOLS, 29 characters — and a label that overruns its
 # column pushes one row's value out of line with every other row's.
 _doctor_item() {  # <symbol> <label> <value>
-  local line
-  printf -v line '  %s %-30s %s' "$1" "$2" "${3:-}"
-  printf '%s\n' "$(_doctor_rtrim "$line")"
-}
-
-# A path under the user's home, written the way they would type it. Not
-# cosmetics: `/Users/<name>/…` costs a dozen columns before the interesting part
-# of the path starts, and those are the columns that decide whether the line
-# wraps. The substitution is exact-prefix only, so a path that merely begins with
-# the same letters is left alone.
-_doctor_tilde() {  # <path>
-  local p="${1:-}"
-  case "$p" in
-    "$HOME"/*) printf '~%s' "${p#"$HOME"}" ;;
-    *)         printf '%s' "$p" ;;
-  esac
+  local prefix
+  printf -v prefix '  %s %-30s ' "$1" "$2"
+  printf '%s\n' "$(_doctor_rtrim "$(bionic_line "$prefix" "${3:-}")")"
 }
 
 # The FIX section, accumulated as the run discovers problems and printed near the
@@ -316,31 +315,27 @@ _doctor_unknown_cause() {  # <kind> — the install mechanism the table names
 # hypothetical: `—` is the version cell of every row whose mechanism keeps no
 # version, which on an ordinary machine is a third of the table.
 #
-# SO CELLS ARE PADDED BY COLUMN COUNT. The multi-byte glyphs are a closed set —
-# this file names all of them — so measuring is a substitution away from being
-# exact, with no locale to depend on and no external process per cell.
-_doctor_cols() {  # <string> -> its width in terminal columns
-  local s="${1:-}"
-  s="${s//✓/.}"; s="${s//✗/.}"; s="${s//–/.}"; s="${s//—/.}"
-  s="${s//≥/.}"; s="${s//…/.}"; s="${s//·/.}"
-  printf '%s' "${#s}"
-}
+# SO CELLS ARE PADDED BY COLUMN COUNT, and the counter is `bionic_cols`
+# (lib/width.sh) — the same one the budget below is measured with, because a
+# report that padded in one unit and truncated in another is a table that can
+# still come out crooked. This file used to carry its own copy (`_doctor_cols`);
+# it was deleted at S9 with the shared owner it duplicated.
 
 # One cell, padded to a column width. A cell already at or over its width is
 # printed whole and pushes its neighbours right — truncating a name to keep a
 # column straight would be choosing the table's looks over its content.
 _doctor_cell() {  # <string> <width>
   local s="${1:-}" w="${2:-0}" n
-  n=$(( w - $(_doctor_cols "$s") ))
+  n=$(( w - $(bionic_cols "$s") ))
   if [ "$n" -gt 0 ]; then printf '%s%*s' "$s" "$n" ""; else printf '%s' "$s"; fi
 }
 
 # `component  count  detail` — four rows on a healthy machine, so the count
 # column is narrow and the detail column gets the room.
 _doctor_native_row() {  # <symbol> <component> <count> <detail>
-  local line
-  line="  $1 $(_doctor_cell "$2" 10) $(_doctor_cell "$3" 8) ${4:-}"
-  printf '%s\n' "$(_doctor_rtrim "$line")"
+  local prefix
+  prefix="  $1 $(_doctor_cell "$2" 10) $(_doctor_cell "$3" 8) "
+  printf '%s\n' "$(_doctor_rtrim "$(bionic_line "$prefix" "${4:-}" "${5:-}")")"
 }
 
 # `name  version  source  state`. The source column is what makes this table
@@ -348,18 +343,18 @@ _doctor_native_row() {  # <symbol> <component> <count> <detail>
 # entirely different machinery, and which machinery it was decides what a user
 # types to repair or remove it.
 _doctor_third_row() {  # <symbol> <name> <version> <source> <state>
-  local line
-  line="  $1 $(_doctor_cell "$2" 21) $(_doctor_cell "$3" 11) $(_doctor_cell "$4" 17) ${5:-}"
-  printf '%s\n' "$(_doctor_rtrim "$line")"
+  local prefix
+  prefix="  $1 $(_doctor_cell "$2" 21) $(_doctor_cell "$3" 11) $(_doctor_cell "$4" 17) "
+  printf '%s\n' "$(_doctor_rtrim "$(bionic_line "$prefix" "${5:-}")")"
 }
 
 # `KEY=value  state`. The left cell is one token on purpose — an environment
 # name and its value are a single fact, and splitting them into two columns made
 # a reader join them back up by eye on every row.
 _doctor_env_row() {  # <symbol> <key=value or label> <state>
-  local line
-  line="  $1 $(_doctor_cell "$2" 42) ${3:-}"
-  printf '%s\n' "$(_doctor_rtrim "$line")"
+  local prefix
+  prefix="  $1 $(_doctor_cell "$2" 42) "
+  printf '%s\n' "$(_doctor_rtrim "$(bionic_line "$prefix" "${3:-}")")"
 }
 
 # WHICH MACHINERY PUT IT THERE, in the words a user would use for it. Keyed on
@@ -440,6 +435,11 @@ REG_SHA_REG="${REG_SHA_FACT#*registry=}"; REG_SHA_REG="${REG_SHA_REG%% *}"
 REG_SHA_REPO="${REG_SHA_FACT#*repo=}";    REG_SHA_REPO="${REG_SHA_REPO%% *}"
 REG_SHA_CAUSE="${REG_SHA_FACT##*cause=}"
 
+# WHICH FEED THIS MACHINE CAME FROM, read once and reused everywhere below that
+# branches on it (the header's sha choice, and F5's version row) — the same
+# "gather once" discipline as every other fact on this page.
+FEED_KIND="$(detect_marketplace_feed_kind)"
+
 # THE COMMIT THE HEADER NAMES IS THE ONE THE CLI IS RUNNING, which is not always
 # the one the registry recorded. On a directory-source feed the CLI reads the
 # TREE — the registry copy is a lagging snapshot nothing executes (W7 A5.1) — so
@@ -451,7 +451,7 @@ _doctor_sha8() { printf '%.8s' "${1:-}"; }
 case "$REG_SHA_STATE" in
   match)       PAYLOAD_SHA="$(_doctor_sha8 "$REG_SHA_REG")" ;;
   lag)
-    if [ "$(detect_marketplace_feed_kind)" = "directory" ]; then
+    if [ "$FEED_KIND" = "directory" ]; then
       PAYLOAD_SHA="$(_doctor_sha8 "$REG_SHA_REPO")"
     else
       PAYLOAD_SHA="$(_doctor_sha8 "$REG_SHA_REG")"
@@ -460,6 +460,18 @@ case "$REG_SHA_STATE" in
   *)           PAYLOAD_SHA="unknown" ;;
 esac
 [ -n "$PAYLOAD_SHA" ] || PAYLOAD_SHA="unknown"
+
+# INSTALLED-VS-LATEST, PER FEED KIND (F5, epic-19 wave-01, spec AC-F5). Only
+# the git feed needs the marketplace-clone compare — a directory feed's
+# version row is built straight from REG_SHA_STATE + detect_reconverge_hint
+# above, so nothing new is gathered for it here.
+if [ "$FEED_KIND" = "git" ]; then
+  LATEST_FACT="$(detect_plugin_latest)"
+  LATEST_STATE="${LATEST_FACT#*state=}";         LATEST_STATE="${LATEST_STATE%% *}"
+  LATEST_INSTALLED="${LATEST_FACT#*installed=}"; LATEST_INSTALLED="${LATEST_INSTALLED%% *}"
+  LATEST_LATEST="${LATEST_FACT#*latest=}";       LATEST_LATEST="${LATEST_LATEST%% *}"
+  LATEST_CAUSE="${LATEST_FACT##*cause=}"
+fi
 
 HOOK_WIRING_FACT="$(detect_hook_wiring)"
 HOOK_TOTAL="${HOOK_WIRING_FACT#*total=}";     HOOK_TOTAL="${HOOK_TOTAL%% *}"
@@ -809,158 +821,92 @@ done < <(dep_names)
 
 # ─── The Patrol, gathered and rendered before the fix accounting ─────────────
 #
-# ROWS BUILT HERE AND PRINTED FAR BELOW, the same shape THIRD_ROWS already has,
-# because two of the states this section discovers are PROBLEMS and FIX is the
-# second thing on the page. A section that printed its own findings where it
-# found them would put the duplicate-Patrol line eighty rows under the verdict
-# that is supposed to name it.
+# RUNNING PATROLS OR NOTHING (F3, epic-19 wave-01 — design ledger ratification
+# round 2, 2026-08-27). Chris's own invariant is the whole rationale: an
+# active run has exactly one Patrol armed, and F6 makes a dead one self-healing
+# — the dispatch wall re-arms it the moment a dispatch needs it — so a reader
+# of this page has nothing to act on beyond "is one running, and how much is
+# it carrying". Everything this section used to reconstruct beyond that — the
+# session's cwd, cron ids and prompt heads, the stamp's age and interval
+# provenance, the dispatch-wall tally — answered a question this page no longer
+# asks; that machinery still lives in lib/patrol.sh, doctor just stops rendering
+# it. Two exceptions, both ratified:
 #
-# WHICH OF THESE STATES IS A PROBLEM, and which is merely a fact. Two Patrols
-# firing into one session is a problem and its command is exact, so it takes a
-# fix line with the id in it. A stamp that has gone stale is a problem: the job
-# may still be in the table and the firings are not landing, which is the state
-# the arming wall refuses a dispatch on. A session with NO Patrol is NOT a
-# problem — doctor is run outside a run more often than inside one, and marking
-# every idle session broken would train a reader past the two lines that matter.
-# A blind dispatch wall is a problem, and the only one here whose cure is a
-# skill invocation rather than a command.
+#   - TWO Patrols armed on one session is always wrong regardless of how minimal
+#     this page gets, so its fix line stays — and it costs nothing in the
+#     healthy, single-Patrol case.
+#   - THE STAMP'S STATE IS READ AGAIN, and rendered nowhere. Minimising this
+#     section deleted the parse arm along with the row, and with it the only
+#     fact that could tell an armed Patrol from a dead one — see the gate on
+#     `_patrol_flush` below, which is where the whole argument lives. "Running
+#     Patrols or nothing" needs a way to know which; this is the only one.
 PATROL_ROWS=""
 _patrol_add() { PATROL_ROWS="${PATROL_ROWS}$1"$'\n'; }
-_patrol_item() { _patrol_add "$(_doctor_item "$1" "$2" "${3:-}")"; }
-_patrol_detail() { _patrol_add "$(_doctor_rtrim "      ${1}")"; }
-
-# Cut to a column count, never to a byte count: every id, cron expression and
-# prompt head below can carry a multi-byte glyph, and `printf '%.Ns'` counts
-# bytes.
-_doctor_trunc() {  # <string> <cols>
-  local s="${1:-}" w="${2:-0}"
-  if [ "$(_doctor_cols "$s")" -le "$w" ]; then printf '%s' "$s"; return 0; fi
-  while [ "$(_doctor_cols "$s")" -gt "$((w - 1))" ] && [ -n "$s" ]; do s="${s%?}"; done
-  printf '%s…' "$s"
-}
+PATROL_LIVE=0
 
 PATROL_LINES="$(patrol_report 2>/dev/null)"
-PATROL_LIVE=0
-PATROL_OTHER=""
-PATROL_OTHER_N=0
 
-_p_sid=""; _p_here=""; _p_cwd=""; _p_cause=""
-_p_jobs=""; _p_other_jobs=""; _p_n_patrol=0; _p_n_other=0
-_p_stamp=""; _p_age=""; _p_limit=""; _p_interval=""; _p_source=""
-_p_rows=""; _p_open=""; _p_closed=""; _p_present=""
-_p_disp=""; _p_rost=""; _p_blind=""; _p_refused=""; _p_wcause=""
+_p_sid=""; _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""
 
+# WHY THE JOB COUNT ALONE CANNOT ANSWER "IS IT RUNNING" (Step-6 correctness C1,
+# a FAIL against AC-F3). The jobs on this page are RECONSTRUCTED FROM THE
+# TRANSCRIPT — `CronCreate` tool_uses minus the ids a `CronDelete` names
+# (lib/patrol.sh) — and the four events that actually kill a Patrol delete the
+# job from the CLI's in-memory cron table with no tool call behind them: a
+# `claude plugin update`, a `/reload-plugins`, a session continue, a `/clear`
+# and resume. The transcript cannot observe any of them. So after any one, the
+# count is still positive and this section printed `✓ session … · N open
+# dispatches` for a Patrol that no longer exists — the very failure F6 shipped a
+# whole hook to detect, with doctor contradicting that hook on the same machine.
+#
+# THE STAMP IS THE ONLY FACT ON THIS PAGE THAT KNOWS. hooks/session-poker.sh
+# touches it on every tick, so its age answers "did this thing fire recently"
+# where the transcript answers only "was it ever asked for". Slice 4/2 removed
+# this parse arm while minimising the section; lib/patrol.sh never stopped
+# emitting it. Restored here with a smaller job than it had — it renders
+# nothing, it GATES.
+#
+#   firing      — the row prints, exactly as before.
+#   not-firing  — a stamp that has gone stale: armed, and no longer ticking.
+#                 No row (F3's ratified rule is running-or-nothing, and a dead
+#                 Patrol is nothing), and one FIX line, because this is the one
+#                 state of the three that a person can and should act on.
+#   anything else — never armed, or deliberately ended: the disarm verb REMOVES
+#                 the stamp (S10), so an absent stamp is a decision, not a
+#                 fault. No row and no fix line, which is what the section
+#                 already does for a machine with no Patrol at all.
 _patrol_flush() {
   [ -n "$_p_sid" ] || return 0
-  local short="${_p_sid%%-*}" j id cron head extras n summary
-  PATROL_LIVE=$((PATROL_LIVE + 1))
+  [ "$_p_n_patrol" -gt 0 ] || return 0
+  local short="${_p_sid%%-*}" j id extras="" n open=0
+  case "$_p_stamp" in
+    firing)
+      PATROL_LIVE=$((PATROL_LIVE + 1))
+      [ "$_p_present" = "yes" ] && open="$_p_open"
+      _patrol_add "  ${DOCTOR_OK} session ${short} · ${open} open $(_doctor_plural "$open" dispatch dispatches)" ;;
+    not-firing)
+      fix "session ${short}: the Patrol is armed but not firing → ask Claude to re-arm the Patrol" ;;
+  esac
 
   # THE DUPLICATE VERDICT KEEPS THE NEWEST and names every older one. Creation
   # order is what the transcript gives, and the newest job is the one whose
   # prompt reflects the run as it now stands — an older duplicate is a leftover
   # from an arming that was repeated, which is exactly how the second one gets
   # there.
-  extras=""
   if [ "$_p_n_patrol" -gt 1 ]; then
     n=0
     while IFS= read -r j; do
       [ -n "$j" ] || continue
       n=$((n + 1))
       [ "$n" -lt "$_p_n_patrol" ] || continue
-      id="${j%%	*}"
+      id="$j"
       [ "$id" = "?" ] && continue
       extras="${extras}${extras:+ }${id}"
     done <<EOF
 $_p_jobs
 EOF
-  fi
-
-  if [ "$_p_here" != "yes" ]; then
-    # ONE LINE FOR EVERY SESSION THAT IS NOT THIS REPO'S. They are on this page
-    # because a Patrol armed twice is a problem wherever it is armed, and
-    # because a reader wondering why nothing here matches what they remember is
-    # usually looking at a second session. Their detail is not this machine's
-    # question.
-    PATROL_OTHER_N=$((PATROL_OTHER_N + 1))
-    case "$_p_n_patrol" in
-      0) summary="none armed" ;;
-      1) summary="1 armed" ;;
-      *) summary="DUPLICATE (${_p_n_patrol})" ;;
-    esac
-    PATROL_OTHER="${PATROL_OTHER}${PATROL_OTHER:+, }${short}: ${summary}"
-  else
-    _patrol_item "$DOCTOR_OK" "session ${short}" \
-      "$(_doctor_trunc "$(_doctor_tilde "$_p_cwd")" 50) (this repo)"
-
-    case "$_p_n_patrol" in
-      0) _patrol_item "$DOCTOR_NIL" "patrol jobs" "none armed" ;;
-      1) _patrol_item "$DOCTOR_OK"  "patrol jobs" "1 armed" ;;
-      *) _patrol_item "$DOCTOR_BAD" "patrol jobs" \
-           "DUPLICATE (${_p_n_patrol}) — one Patrol per session, the rest are noise" ;;
-    esac
-    while IFS= read -r j; do
-      [ -n "$j" ] || continue
-      id="${j%%	*}"; cron="${j#*	}"; head="${cron#*	}"; cron="${cron%%	*}"
-      _patrol_detail "$(_doctor_trunc "${id} · ${cron} · ${head}" 92)"
-    done <<EOF
-$_p_jobs
-EOF
-    for id in $extras; do _patrol_detail "CronDelete ${id}"; done
-    if [ "$_p_n_other" -gt 0 ]; then
-      _patrol_item "$DOCTOR_NIL" "other jobs" \
-        "$(_doctor_trunc "${_p_n_other} — ${_p_other_jobs}" 60)"
-    fi
-
-    case "$_p_stamp" in
-      never-armed) _patrol_item "$DOCTOR_NIL" "patrol stamp" "never armed" ;;
-      firing)      _patrol_item "$DOCTOR_OK"  "patrol stamp" \
-                     "firing — ${_p_age}s old, limit ${_p_limit}s (2x ${_p_interval}s)" ;;
-      not-firing)  _patrol_item "$DOCTOR_BAD" "patrol stamp" \
-                     "NOT firing — ${_p_age}s old, past the ${_p_limit}s limit" ;;
-      *)           _patrol_item "$DOCTOR_NIL" "patrol stamp" "unknown — the stamp's age could not be read" ;;
-    esac
-    case "$_p_source" in
-      configured|'') : ;;
-      *) _patrol_detail "interval ${_p_interval}s came from the poker's ${_p_source} — this project configures none" ;;
-    esac
-
-    if [ "$_p_present" = "yes" ]; then
-      _patrol_item "$DOCTOR_OK" "roster" \
-        "${_p_rows} $(_doctor_plural "$_p_rows" dispatch dispatches) — ${_p_open} open, ${_p_closed} closed"
-    else
-      _patrol_item "$DOCTOR_NIL" "roster" "none — nothing was dispatched on this session"
-    fi
-
-    # REFUSED, NAMED EXPLICITLY on both branches: a refusal is credited out of
-    # $_p_blind before this ever runs (patrol.sh does the subtraction), but a
-    # reader comparing $_p_disp against $_p_rost by hand needs the refused
-    # count on the line too, or the arithmetic looks wrong even though the
-    # verdict is right.
-    _p_refused_suffix=""
-    case "${_p_refused:-0}" in
-      0|'') : ;;
-      *) _p_refused_suffix=" (${_p_refused} refused)" ;;
-    esac
-    if [ -n "$_p_wcause" ]; then
-      _patrol_item "$DOCTOR_NIL" "dispatch wall" "unknown — ${_p_wcause}"
-    elif [ "${_p_blind:-0}" -gt 0 ]; then
-      _patrol_item "$DOCTOR_BAD" "dispatch wall" \
-        "${_p_blind} of ${_p_disp} dispatches never reached it${_p_refused_suffix} — not registered"
-    else
-      _patrol_item "$DOCTOR_OK" "dispatch wall" "${_p_disp} dispatched, ${_p_rost} rostered${_p_refused_suffix}"
-    fi
-  fi
-
-  # The findings, for the verdict at the top. Raised for EVERY live session,
-  # this repo's or not, because each names the session it is about.
-  if [ -n "$extras" ]; then
-    fix "session ${short} has ${_p_n_patrol} Patrol jobs armed → CronDelete ${extras}"
-  fi
-  if [ "$_p_stamp" = "not-firing" ]; then
-    fix "session ${short} armed the Patrol and it stopped firing → re-arm it, both halves"
-  fi
-  if [ -z "$_p_wcause" ] && [ "${_p_blind:-0}" -gt 0 ]; then
-    fix "session ${short}: ${_p_blind} dispatches bypassed the wall → re-invoke /bionic:canonical-sdlc"
+    [ -n "$extras" ] && \
+      fix "session ${short} has ${_p_n_patrol} Patrol jobs armed → CronDelete ${extras}"
   fi
 }
 
@@ -970,42 +916,19 @@ while IFS= read -r _p_line; do
     "patrol-session/v1|"*)
       _patrol_flush
       _p_sid="$(_doctor_pfield "$_p_line" session)"
-      _p_here="$(_doctor_pfield "$_p_line" here)"
-      _p_cwd="$(_doctor_pfield "$_p_line" cwd)"
-      _p_cause="$(_doctor_pfield "$_p_line" cause)"
-      _p_jobs=""; _p_other_jobs=""; _p_n_patrol=0; _p_n_other=0
-      _p_stamp=""; _p_age=""; _p_limit=""; _p_interval=""; _p_source=""
-      _p_rows=""; _p_open=""; _p_closed=""; _p_present=""
-      _p_disp=""; _p_rost=""; _p_blind=""; _p_refused=""; _p_wcause="" ;;
+      _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp="" ;;
     "patrol-job/v1|"*)
-      _p_id="$(_doctor_pfield "$_p_line" id)"
-      _p_cron="$(_doctor_pfield "$_p_line" cron)"
-      _p_kind="$(_doctor_pfield "$_p_line" kind)"
-      _p_prompt="$(_doctor_pfield "$_p_line" prompt)"
-      if [ "$_p_kind" = "patrol" ]; then
+      if [ "$(_doctor_pfield "$_p_line" kind)" = "patrol" ]; then
         _p_n_patrol=$((_p_n_patrol + 1))
-        _p_jobs="${_p_jobs}${_p_id}	${_p_cron}	${_p_prompt}"$'\n'
-      else
-        _p_n_other=$((_p_n_other + 1))
-        _p_other_jobs="${_p_other_jobs}${_p_other_jobs:+, }${_p_id} · ${_p_cron}"
+        _p_jobs="${_p_jobs}$(_doctor_pfield "$_p_line" id)"$'\n'
       fi ;;
     "patrol-stamp/v1|"*)
-      _p_stamp="$(_doctor_pfield "$_p_line" state)"
-      _p_age="$(_doctor_pfield "$_p_line" age)"
-      _p_limit="$(_doctor_pfield "$_p_line" limit)"
-      _p_interval="$(_doctor_pfield "$_p_line" interval)"
-      _p_source="$(_doctor_pfield "$_p_line" source)" ;;
+      # Read for the gate above and rendered nowhere — the stamp's age,
+      # interval and provenance stay deleted (spec AC-F3).
+      _p_stamp="$(_doctor_pfield "$_p_line" state)" ;;
     "patrol-roster/v1|"*)
-      _p_rows="$(_doctor_pfield "$_p_line" rows)"
       _p_open="$(_doctor_pfield "$_p_line" open)"
-      _p_closed="$(_doctor_pfield "$_p_line" closed)"
       _p_present="$(_doctor_pfield "$_p_line" present)" ;;
-    "patrol-wall/v1|"*)
-      _p_disp="$(_doctor_pfield "$_p_line" dispatched)"
-      _p_rost="$(_doctor_pfield "$_p_line" rostered)"
-      _p_blind="$(_doctor_pfield "$_p_line" blind)"
-      _p_refused="$(_doctor_pfield "$_p_line" refused)"
-      _p_wcause="$(_doctor_pfield "$_p_line" cause)" ;;
   esac
 done <<EOF
 $PATROL_LINES
@@ -1087,6 +1010,14 @@ if [ "$ENV_MISSING" -gt 0 ]; then
   fix "${ENV_MISSING} of bionic's environment settings $(_doctor_plural "$ENV_MISSING" is are) not written → run /bionic:setup"
 fi
 
+# A STALE PROXY BLOCK IS THE ONE STATE OF THIS ITEM THAT EARNS A FIX LINE.
+# Absent is an offer nobody took, and never a problem (see the row itself, in
+# ENVIRONMENT below); stale is bionic's OWN block, consented to, carrying a line
+# this payload no longer writes. Setup rewrites the block wholesale, so the
+# repair is the same command as the offer — but this time there is something
+# broken to repair, which is what makes the row ✗ instead of `–`.
+[ "$RC_PROXY_STATE" = "stale" ] && fix "the claude() shell proxy is an older line → run /bionic:setup"
+
 [ "$LEGACY_STATE" = "yes" ] && fix "the legacy .zshrc alias block is still there → run /bionic:setup"
 case "$LEGACY_HOOK_COUNT" in
   unknown|0) ;;
@@ -1109,6 +1040,13 @@ if [ "$PLUGIN_HOOKS" = "degraded" ] || [ "$PLUGIN_HOOKS" = "absent" ]; then
   # named copy and verbatim command, and the PLUGIN INTEGRITY row two sections
   # down already spells out what "degraded" means. Anything longer here wraps.
   fix "hooks ${PLUGIN_HOOKS} → $(detect_reconverge_hint hooks)"
+fi
+
+# F5's fix line, GIT FEED ONLY. A directory feed's lag/not-in-repo states are
+# NOMINAL (the CLI runs the tree, not the cache — same doctrine as the header's
+# sha choice above), so they earn a report row, never a fix line.
+if [ "$FEED_KIND" = "git" ] && [ "$LATEST_STATE" = "lag" ]; then
+  fix "bionic ${LATEST_INSTALLED} installed, ${LATEST_LATEST} available → claude plugin update bionic@bionic"
 fi
 
 # How many problems, for the summary line. Counted from the printed lines rather
@@ -1164,10 +1102,10 @@ else
     # reading, and a cold machine has enough of them to run past a terminal's
     # width — where the line would break into a second one and undo the whole
     # rule. The count above is exact either way.
-    
-    if [ "${#_doctor_verdict}" -gt 99 ]; then
-      _doctor_verdict="$(printf '%.96s' "$_doctor_verdict")…"
-    fi
+    # Through the shared truncator (lib/width.sh), which is where the budget
+    # lives — this line used to carry its own pair of literals, 99 and 96, which
+    # were the 100-column rule written a third time in a third unit.
+    _doctor_verdict="$(bionic_trunc "$_doctor_verdict" "$BIONIC_LINE_WIDTH")"
   fi
   printf '%s\n' "$_doctor_verdict"
   if [ -n "$FIX_LINES_OTHER" ]; then
@@ -1194,6 +1132,41 @@ fi
 echo ""
 echo "BIONIC NATIVE — ships inside the plugin"
 _doctor_native_row " " "component" "count" "detail"
+# F5 — IS THE INSTALLED BUILD THE LATEST, per feed kind (spec AC-F5). A git
+# feed compares against the marketplace clone's own plugin.json (detect_
+# plugin_latest, above) and names the exact repair command on lag. A
+# directory feed has no remote "latest" to compare against — reading the
+# same tree's plugin.json against itself would only ever say "current" — so
+# it consumes the tree-vs-cache fact and guidance this page already gathers
+# (REG_SHA_STATE + detect_reconverge_hint) rather than re-deriving one.
+case "$FEED_KIND" in
+  git)
+    case "$LATEST_STATE" in
+      current)
+        _doctor_native_row "$DOCTOR_OK" "version" "$LATEST_INSTALLED" "up to date" ;;
+      lag)
+        _doctor_native_row "$DOCTOR_BAD" "version" "$LATEST_INSTALLED" \
+          "${LATEST_LATEST} available" " → claude plugin update bionic@bionic" ;;
+      *)
+        _doctor_native_row "$DOCTOR_NIL" "version" "?" "unknown — ${LATEST_CAUSE}" ;;
+    esac ;;
+  directory)
+    case "$REG_SHA_STATE" in
+      match)
+        _doctor_native_row "$DOCTOR_OK" "version" "$PLUGIN_VERSION" "tree matches the registered cache" ;;
+      lag)
+        _doctor_native_row "$DOCTOR_NIL" "version" "$PLUGIN_VERSION" \
+          "cache lags this tree — $(detect_reconverge_hint lag)" ;;
+      not-in-repo)
+        _doctor_native_row "$DOCTOR_NIL" "version" "$PLUGIN_VERSION" \
+          "registered build not in this tree — $(detect_reconverge_hint lag)" ;;
+      *)
+        _doctor_native_row "$DOCTOR_NIL" "version" "?" "unknown — ${REG_SHA_CAUSE}" ;;
+    esac ;;
+  *)
+    _doctor_native_row "$DOCTOR_NIL" "version" "?" \
+      "unknown — the marketplace feed kind could not be determined" ;;
+esac
 if [ "$SKILLS_OK" = "$SKILLS_TOTAL" ] && [ "$SKILLS_TOTAL" -gt 0 ]; then
   _doctor_native_row "$DOCTOR_OK" "skills" "${SKILLS_OK}/${SKILLS_TOTAL}" "$SKILL_NAMES"
 else
@@ -1271,8 +1244,11 @@ echo "ENVIRONMENT"
 # THREE COLUMNS, LIKE THE TABLES ABOVE (Chris 2026-08-22): setting · value · state.
 # An env var's value is the configured one; its state says whether this session
 # carries it; the statusline's value is the command.
-_doctor_env3() {  # <symbol> <setting> <value> <state>
-  printf '%s\n' "$(_doctor_rtrim "  $1 $(_doctor_cell "$2" 36) $(_doctor_cell "$3" 13) ${4:-}")"
+# The fifth argument is the instruction the cut may not eat (lib/width.sh) — the
+# rc rows name a path of unbounded length and then say what to do about it.
+_doctor_env3() {  # <symbol> <setting> <value> <state> [<instruction>]
+  printf '%s\n' "$(_doctor_rtrim \
+    "$(bionic_line "  $1 $(_doctor_cell "$2" 36) $(_doctor_cell "$3" 13) " "${4:-}" "${5:-}")")"
 }
 printf '    %-36s %-13s %s\n' "setting" "value" "state"
 for _env_key in $ENV_KEYS; do
@@ -1298,11 +1274,21 @@ done
 # `claude()` function that puts the bypass mode in reach of the command a person
 # types — and someone who was asked and said no has a correctly configured
 # machine, not a broken one. So absent is `–` with the route to say yes, never
-# `✗` with a repair. Present is read from the MARKERS (detect.sh), so a claude()
-# function a user wrote for themselves is neither claimed here nor removable by
-# /bionic:remove.
+# `✗` with a repair. Presence is env.sh's `rc_get` (through detect.sh), so a
+# claude() function a user wrote for themselves — outside bionic's markers — is
+# neither claimed here nor removable by /bionic:remove.
+#
+# AND THE THIRD STATE IS NOT ABSENCE. `stale` is bionic's own block holding a
+# line this payload no longer writes, on a machine that already said yes. That
+# person is owed the truth and a command, not a green tick: the ✗ here is
+# matched by the fix line gathered above, which is the invariant those symbols
+# are worth anything under.
 if [ "$RC_PROXY_STATE" = "yes" ]; then
-  _doctor_env3 "$DOCTOR_OK" "claude() shell proxy" "on" "in $(_detect_shell_rc) — new shells pick it up"
+  _doctor_env3 "$DOCTOR_OK" "claude() shell proxy" "on" \
+    "in $(_detect_shell_rc)" " — new shells pick it up"
+elif [ "$RC_PROXY_STATE" = "stale" ]; then
+  _doctor_env3 "$DOCTOR_BAD" "claude() shell proxy" "stale" \
+    "in $(_detect_shell_rc)" " — /bionic:setup rewrites it"
 else
   _doctor_env3 "$DOCTOR_NIL" "claude() shell proxy" "—" "not set — /bionic:setup offers it"
 fi
@@ -1325,34 +1311,16 @@ esac
 
 # ─── The Patrol ──────────────────────────────────────────────────────────────
 #
-# THE FOURTH TABLE, AND THE ONLY ONE WITH NO FILE UNDER IT. The three above read
-# a payload, a registry and a settings file — artifacts that exist to be read.
-# This one answers a question about something that was never written down: the
-# CLI holds its cron table in process memory, so "is the Patrol armed, once, and
-# firing" can only be RECONSTRUCTED, from the session files that name each live
-# process and from those sessions' own transcripts, where CronCreate and
-# CronDelete are recorded tool_uses like any other.
-#
-# SO THE LIMIT IS ON THE HEADING, not in a footnote. What follows is what the
-# transcript IMPLIES, and the process may hold something else — a job armed
-# before the transcript begins, a delete the platform refused, a build that
-# words its confirmation differently. A reader who acts on a `CronDelete` line
-# from here needs to know that before they act, not after.
-#
-# AND DOCTOR STILL CHANGES NOTHING. The delete line is PRINTED. Running it is
-# the reader's act in the session that owns the job, which is also the only
-# session that can: a cron job is session-scoped, and nothing on this page could
-# reach into another process's table even if it wanted to.
+# RUNNING PATROLS OR NOTHING. See the gathering comment above for the full
+# rationale; this is just its render. Doctor still changes nothing here — a
+# `CronDelete` fix line is PRINTED, never run, and running it is the reader's
+# act in the session that owns the job.
 echo ""
-echo "PATROL — reconstructed from the transcript: what it implies, not what the process holds"
+echo "PATROL"
 if [ "$PATROL_LIVE" = "0" ]; then
-  _doctor_item "$DOCTOR_NIL" "live sessions" "none — nothing to reconstruct"
+  _doctor_item "$DOCTOR_NIL" "none running" ""
 else
   printf '%s' "$PATROL_ROWS"
-  if [ "$PATROL_OTHER_N" -gt 0 ]; then
-    _doctor_item "$DOCTOR_NIL" "other live sessions" \
-      "$(_doctor_trunc "${PATROL_OTHER_N} elsewhere — ${PATROL_OTHER}" 60)"
-  fi
 fi
 
 # ─── The one question, and the section it appends ────────────────────────────
