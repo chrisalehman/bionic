@@ -27,6 +27,7 @@
 #   state:half-uninstalled=<yes|no>
 #   load-state=<loaded|failed|absent|unknown> error=<CLI error text|-> [cause=<text>]
 #   dup=<bare-name> ids=<a@x>,<b@y> fix=<consolidation command>
+#   plugin:latest state=<current|lag|unknown> installed=<v|-> latest=<v|-> cause=<text|->
 #
 # `unknown` APPEARS WHERE HONESTY REQUIRES IT. Two of these values can read
 # `unknown` where the spec's table sketched only yes/no: a dependency whose
@@ -938,6 +939,106 @@ detect_reconverge_hint() {  # <lag|hooks> -> the whole sentence for that state, 
           printf 'claude plugin update bionic@bionic\n' ;;
       esac ;;
   esac
+}
+
+# ─── Installed vs the marketplace's latest (git-feed installs only) ──────────
+#
+# THE GENUINE ABSENCE THIS CLOSES (F5, epic-19 wave-01, spec AC-F5; grounding
+# item 5, record/epic-19/step1-fixes-grounding.md, found no plugin-version-vs-
+# latest check anywhere in the shipped surface). On a GIT-SOURCE feed the CLI
+# already keeps a cached clone of the marketplace repo at
+# `known_marketplaces.json`'s `installLocation` — that clone IS the CLI's own
+# record of what the marketplace currently offers, so reading its
+# `plugin.json` answers "what's latest" from a file already on disk. No
+# network fetch, no timeout to design, no request that can hang doctor —
+# exactly the local-registry route the epic's grounding preferred over a live
+# check (detect_reconverge_hint's `installLocation`/`gitCommitSha` reads are
+# the precedent this follows).
+#
+# NOT FOR DIRECTORY FEEDS, and this function does not self-guard that: on a
+# directory-source marketplace `installLocation` names the SAME tree the CLI
+# already runs (detect_reconverge_hint's doctrine, above), so comparing its
+# plugin.json against itself would report "current" unconditionally and
+# answer nothing. Callers branch on `detect_marketplace_feed_kind` themselves
+# and reach for `detect_registry_sha_lag` + `detect_reconverge_hint` on that
+# feed instead (doctor.sh's version row does exactly this) — a caller that
+# gets the branch wrong fails LOUD, as an always-"current" row, rather than
+# silently degrading to `unknown`.
+#
+# A CACHED ANSWER, NOT A LIVE ONE. The clone updates on `claude plugin
+# marketplace update` (or a fresh install), not on every doctor run, so a
+# `lag` verdict here can also mean "the cache itself is stale" — one layer
+# removed from "you are behind the true latest". That is still strictly more
+# honest than no check at all, and it costs zero network round-trips.
+DETECT_MARKETPLACE_SOURCE_JQ='.plugins[]? | select(.name == $n) | .source // empty'
+
+detect_plugin_latest() {  # -> one line, always exit 0
+  local mp loc mp_json source_field plugin_json latest fact installed
+
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "plugin:latest state=unknown installed=- latest=- cause=jq is not on PATH, so the marketplace clone cannot be read"
+    return 0
+  fi
+
+  mp="$(_detect_known_marketplaces_file)"
+  if [ ! -f "$mp" ]; then
+    echo "plugin:latest state=unknown installed=- latest=- cause=no marketplace registry at ${mp}"
+    return 0
+  fi
+
+  loc="$(jq -r '.bionic.installLocation // empty' "$mp" 2>/dev/null)"
+  if [ -z "$loc" ]; then
+    echo "plugin:latest state=unknown installed=- latest=- cause=known_marketplaces.json has no bionic entry"
+    return 0
+  fi
+
+  mp_json="${loc}/.claude-plugin/marketplace.json"
+  if [ ! -f "$mp_json" ]; then
+    echo "plugin:latest state=unknown installed=- latest=- cause=no marketplace.json in the cached clone at ${loc}"
+    return 0
+  fi
+
+  source_field="$(jq -r --arg n bionic "$DETECT_MARKETPLACE_SOURCE_JQ" "$mp_json" 2>/dev/null | head -1)"
+  case "$source_field" in
+    ''|null)
+      echo "plugin:latest state=unknown installed=- latest=- cause=marketplace.json names no bionic plugin entry"
+      return 0 ;;
+    \{*)
+      # A source OBJECT (url/github kind) names a SEPARATE repo this clone does
+      # not itself contain — bionic's own manifest uses a plain relative path
+      # ("./payload") because the plugin ships from the same repo as the
+      # marketplace; a fork that re-points the plugin at another repo has no
+      # local answer without a second fetch.
+      echo "plugin:latest state=unknown installed=- latest=- cause=bionic's marketplace entry names a separate-repo source; no local clone to read"
+      return 0 ;;
+  esac
+
+  plugin_json="${loc}/${source_field#./}/.claude-plugin/plugin.json"
+  if [ ! -f "$plugin_json" ]; then
+    echo "plugin:latest state=unknown installed=- latest=- cause=no plugin.json at ${plugin_json}"
+    return 0
+  fi
+
+  latest="$(jq -r '.version // empty' "$plugin_json" 2>/dev/null)"
+  if [ -z "$latest" ]; then
+    echo "plugin:latest state=unknown installed=- latest=- cause=the marketplace's plugin.json has no version field"
+    return 0
+  fi
+
+  fact="$(detect_plugin_integrity)"
+  installed="${fact#plugin: version=}"; installed="${installed%% *}"
+  case "$installed" in
+    ''|unknown)
+      echo "plugin:latest state=unknown installed=- latest=${latest} cause=the installed plugin's own version could not be read"
+      return 0 ;;
+  esac
+
+  if [ "$installed" = "$latest" ]; then
+    echo "plugin:latest state=current installed=${installed} latest=${latest} cause=-"
+  else
+    echo "plugin:latest state=lag installed=${installed} latest=${latest} cause=-"
+  fi
+  return 0
 }
 
 # ─── Bounded execution ───────────────────────────────────────────────────────

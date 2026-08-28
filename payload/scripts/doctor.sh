@@ -427,6 +427,11 @@ REG_SHA_REG="${REG_SHA_FACT#*registry=}"; REG_SHA_REG="${REG_SHA_REG%% *}"
 REG_SHA_REPO="${REG_SHA_FACT#*repo=}";    REG_SHA_REPO="${REG_SHA_REPO%% *}"
 REG_SHA_CAUSE="${REG_SHA_FACT##*cause=}"
 
+# WHICH FEED THIS MACHINE CAME FROM, read once and reused everywhere below that
+# branches on it (the header's sha choice, and F5's version row) — the same
+# "gather once" discipline as every other fact on this page.
+FEED_KIND="$(detect_marketplace_feed_kind)"
+
 # THE COMMIT THE HEADER NAMES IS THE ONE THE CLI IS RUNNING, which is not always
 # the one the registry recorded. On a directory-source feed the CLI reads the
 # TREE — the registry copy is a lagging snapshot nothing executes (W7 A5.1) — so
@@ -438,7 +443,7 @@ _doctor_sha8() { printf '%.8s' "${1:-}"; }
 case "$REG_SHA_STATE" in
   match)       PAYLOAD_SHA="$(_doctor_sha8 "$REG_SHA_REG")" ;;
   lag)
-    if [ "$(detect_marketplace_feed_kind)" = "directory" ]; then
+    if [ "$FEED_KIND" = "directory" ]; then
       PAYLOAD_SHA="$(_doctor_sha8 "$REG_SHA_REPO")"
     else
       PAYLOAD_SHA="$(_doctor_sha8 "$REG_SHA_REG")"
@@ -447,6 +452,18 @@ case "$REG_SHA_STATE" in
   *)           PAYLOAD_SHA="unknown" ;;
 esac
 [ -n "$PAYLOAD_SHA" ] || PAYLOAD_SHA="unknown"
+
+# INSTALLED-VS-LATEST, PER FEED KIND (F5, epic-19 wave-01, spec AC-F5). Only
+# the git feed needs the marketplace-clone compare — a directory feed's
+# version row is built straight from REG_SHA_STATE + detect_reconverge_hint
+# above, so nothing new is gathered for it here.
+if [ "$FEED_KIND" = "git" ]; then
+  LATEST_FACT="$(detect_plugin_latest)"
+  LATEST_STATE="${LATEST_FACT#*state=}";         LATEST_STATE="${LATEST_STATE%% *}"
+  LATEST_INSTALLED="${LATEST_FACT#*installed=}"; LATEST_INSTALLED="${LATEST_INSTALLED%% *}"
+  LATEST_LATEST="${LATEST_FACT#*latest=}";       LATEST_LATEST="${LATEST_LATEST%% *}"
+  LATEST_CAUSE="${LATEST_FACT##*cause=}"
+fi
 
 HOOK_WIRING_FACT="$(detect_hook_wiring)"
 HOOK_TOTAL="${HOOK_WIRING_FACT#*total=}";     HOOK_TOTAL="${HOOK_TOTAL%% *}"
@@ -967,6 +984,13 @@ if [ "$PLUGIN_HOOKS" = "degraded" ] || [ "$PLUGIN_HOOKS" = "absent" ]; then
   fix "hooks ${PLUGIN_HOOKS} → $(detect_reconverge_hint hooks)"
 fi
 
+# F5's fix line, GIT FEED ONLY. A directory feed's lag/not-in-repo states are
+# NOMINAL (the CLI runs the tree, not the cache — same doctrine as the header's
+# sha choice above), so they earn a report row, never a fix line.
+if [ "$FEED_KIND" = "git" ] && [ "$LATEST_STATE" = "lag" ]; then
+  fix "bionic ${LATEST_INSTALLED} installed, ${LATEST_LATEST} available → claude plugin update bionic@bionic"
+fi
+
 # How many problems, for the summary line. Counted from the printed lines rather
 # than from a tally kept alongside them, so the number and the list cannot come
 # to disagree: the continuation line under the half-uninstalled fix is indented
@@ -1050,6 +1074,41 @@ fi
 echo ""
 echo "BIONIC NATIVE — ships inside the plugin"
 _doctor_native_row " " "component" "count" "detail"
+# F5 — IS THE INSTALLED BUILD THE LATEST, per feed kind (spec AC-F5). A git
+# feed compares against the marketplace clone's own plugin.json (detect_
+# plugin_latest, above) and names the exact repair command on lag. A
+# directory feed has no remote "latest" to compare against — reading the
+# same tree's plugin.json against itself would only ever say "current" — so
+# it consumes the tree-vs-cache fact and guidance this page already gathers
+# (REG_SHA_STATE + detect_reconverge_hint) rather than re-deriving one.
+case "$FEED_KIND" in
+  git)
+    case "$LATEST_STATE" in
+      current)
+        _doctor_native_row "$DOCTOR_OK" "version" "$LATEST_INSTALLED" "up to date" ;;
+      lag)
+        _doctor_native_row "$DOCTOR_BAD" "version" "$LATEST_INSTALLED" \
+          "${LATEST_LATEST} available → claude plugin update bionic@bionic" ;;
+      *)
+        _doctor_native_row "$DOCTOR_NIL" "version" "?" "unknown — ${LATEST_CAUSE}" ;;
+    esac ;;
+  directory)
+    case "$REG_SHA_STATE" in
+      match)
+        _doctor_native_row "$DOCTOR_OK" "version" "$PLUGIN_VERSION" "tree matches the registered cache" ;;
+      lag)
+        _doctor_native_row "$DOCTOR_NIL" "version" "$PLUGIN_VERSION" \
+          "cache lags this tree — $(detect_reconverge_hint lag)" ;;
+      not-in-repo)
+        _doctor_native_row "$DOCTOR_NIL" "version" "$PLUGIN_VERSION" \
+          "registered build not in this tree — $(detect_reconverge_hint lag)" ;;
+      *)
+        _doctor_native_row "$DOCTOR_NIL" "version" "?" "unknown — ${REG_SHA_CAUSE}" ;;
+    esac ;;
+  *)
+    _doctor_native_row "$DOCTOR_NIL" "version" "?" \
+      "unknown — the marketplace feed kind could not be determined" ;;
+esac
 if [ "$SKILLS_OK" = "$SKILLS_TOTAL" ] && [ "$SKILLS_TOTAL" -gt 0 ]; then
   _doctor_native_row "$DOCTOR_OK" "skills" "${SKILLS_OK}/${SKILLS_TOTAL}" "$SKILL_NAMES"
 else
