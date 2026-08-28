@@ -63,8 +63,10 @@
 # last act of the turn may not be on disk when this reads it. Second, a Patrol
 # tick that legitimately has nothing to do still owes both duties under this
 # gate — which is the contract SKILL.md states, not an accident of the read.
-# Backstop above ours, from the same reference: "Claude Code overrides the hook
-# and ends the turn after 8 consecutive blocks."
+# The reference's own backstop — "Claude Code overrides the hook and ends the
+# turn after 8 consecutive blocks" — cannot engage here: this gate blocks once per
+# turn and passes the re-entry, so its blocks are never consecutive. The
+# once-only refusal above is the whole bound.
 #
 # IT WRITES NOTHING AND DECIDES NOTHING ELSE. No state file, no roster append, no
 # stamp: this is a gate, and gates may only read (TDD §3.2). It takes no view on
