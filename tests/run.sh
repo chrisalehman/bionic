@@ -50,7 +50,7 @@
 # suites on the reliability ruling (commit 8582861), one of the nineteen
 # (fresh-home.test.sh) was later revived, rc-item.test.sh was added new, and
 # epic-19 wave-01 added doctor-patrol.test.sh (F3) and command-relay.test.sh
-# (F4) — 27 `run` lines as of this writing (`grep -c '^run "' tests/run.sh`
+# (F4) — 28 `run` lines as of this writing (`grep -c '^run "' tests/run.sh`
 # equals `ls tests/*.test.sh | wc -l`;
 # a maintainer re-derives the count rather than trusting a number in a
 # comment, this one included). Neither audit file re-covers what changed since
