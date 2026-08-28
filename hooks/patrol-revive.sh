@@ -79,7 +79,7 @@
 #   - stamp age within 2x the poker-interval          -> pass, silent
 #   - stamp age past it                               -> BLOCK, naming the re-arm
 #
-# TWO ACCEPTED LIMITS. First, inherited from the stamp and shared with the arming
+# THREE ACCEPTED LIMITS. First, inherited from the stamp and shared with the arming
 # wall: this attests that Patrol FIRINGS ARE LANDING and cannot see the cron table,
 # so a job deleted moments ago still looks alive for up to one stale window — the
 # notice is late by design rather than wrong. Second, a Patrol the operator
@@ -88,7 +88,16 @@
 # disarm from a plugin update. The cost is one re-armed clock on a run that was
 # nearly over; the cost of the opposite error is a fleet nobody is waiting on. The
 # backstop above ours is the CLI's own: it overrides the hook and ends the turn
-# after 8 consecutive blocks.
+# after 8 consecutive blocks. Third, THIS HOOK SHARES THE FAILURE MODE IT MONITORS.
+# It is registered in skills/canonical-sdlc/SKILL.md's own frontmatter, so it is
+# live exactly while the governing skill is armed — and a skill's hooks die with
+# the conversation that armed them (SKILL.md §Dispatch). Three of the four events
+# that kill the Patrol — a session continue, a `/clear`+resume, a `/reload-plugins`
+# — also deregister this hook itself, silently and at the same moment. The resume
+# ritual's re-invoke of the governing skill is the standing cure for those three,
+# re-arming this hook along with everything else it re-arms; a `claude plugin
+# update` mid-session, which leaves the skill armed and the hook alone stale, is
+# this hook's real coverage.
 #
 # Registered on the Stop channel in skills/canonical-sdlc/SKILL.md; live only while
 # that skill is armed.
@@ -259,7 +268,7 @@ Its last stamp is ${AGE}s old — past the ${LIMIT}s limit, which is 2x the ${IN
 The CLI holds its cron table in process memory with no file behind it, so a plugin update, a /reload-plugins, a session continue or a /clear+resume deletes the job and leaves the stamp as the only trace. Nothing is ticking the poker now: no dispatched row is being judged against its declared duration, and anything this run launched is waiting on a clock that stopped.
 
 Re-arm it — both halves, the clock FIRST, because arming the stamp over an empty cron table buys a Patrol that reads alive and never fires:
-  1. CronCreate a RECURRING session job at the interval \`bash ${POKER} interval\` reports, carrying the patrol prompt (skills/canonical-sdlc/SKILL.md §Dispatch).
+  1. CronCreate a RECURRING session job at the interval \`bash ${POKER} interval\` reports, carrying the patrol prompt (the canonical-sdlc skill's Dispatch section).
   2. bash ${POKER} arm
 
 Then stop again — this notice blocks once."
