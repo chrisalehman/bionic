@@ -827,28 +827,66 @@ done < <(dep_names)
 # — the dispatch wall re-arms it the moment a dispatch needs it — so a reader
 # of this page has nothing to act on beyond "is one running, and how much is
 # it carrying". Everything this section used to reconstruct beyond that — the
-# session's cwd, cron ids and prompt heads, the stamp's firing/not-firing state
-# and its interval provenance, the dispatch-wall tally — answered a question
-# this page no longer asks; that machinery still lives in lib/patrol.sh for
-# whichever consumer wants it (none does today), doctor just stops rendering
-# it. The one exception ratified to survive: TWO Patrols armed on one session
-# is always wrong regardless of how minimal this page gets, so its fix line
-# stays — and it costs nothing in the healthy, single-Patrol case.
+# session's cwd, cron ids and prompt heads, the stamp's age and interval
+# provenance, the dispatch-wall tally — answered a question this page no longer
+# asks; that machinery still lives in lib/patrol.sh, doctor just stops rendering
+# it. Two exceptions, both ratified:
+#
+#   - TWO Patrols armed on one session is always wrong regardless of how minimal
+#     this page gets, so its fix line stays — and it costs nothing in the
+#     healthy, single-Patrol case.
+#   - THE STAMP'S STATE IS READ AGAIN, and rendered nowhere. Minimising this
+#     section deleted the parse arm along with the row, and with it the only
+#     fact that could tell an armed Patrol from a dead one — see the gate on
+#     `_patrol_flush` below, which is where the whole argument lives. "Running
+#     Patrols or nothing" needs a way to know which; this is the only one.
 PATROL_ROWS=""
 _patrol_add() { PATROL_ROWS="${PATROL_ROWS}$1"$'\n'; }
 PATROL_LIVE=0
 
 PATROL_LINES="$(patrol_report 2>/dev/null)"
 
-_p_sid=""; _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""
+_p_sid=""; _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""
 
+# WHY THE JOB COUNT ALONE CANNOT ANSWER "IS IT RUNNING" (Step-6 correctness C1,
+# a FAIL against AC-F3). The jobs on this page are RECONSTRUCTED FROM THE
+# TRANSCRIPT — `CronCreate` tool_uses minus the ids a `CronDelete` names
+# (lib/patrol.sh) — and the four events that actually kill a Patrol delete the
+# job from the CLI's in-memory cron table with no tool call behind them: a
+# `claude plugin update`, a `/reload-plugins`, a session continue, a `/clear`
+# and resume. The transcript cannot observe any of them. So after any one, the
+# count is still positive and this section printed `✓ session … · N open
+# dispatches` for a Patrol that no longer exists — the very failure F6 shipped a
+# whole hook to detect, with doctor contradicting that hook on the same machine.
+#
+# THE STAMP IS THE ONLY FACT ON THIS PAGE THAT KNOWS. hooks/session-poker.sh
+# touches it on every tick, so its age answers "did this thing fire recently"
+# where the transcript answers only "was it ever asked for". Slice 4/2 removed
+# this parse arm while minimising the section; lib/patrol.sh never stopped
+# emitting it. Restored here with a smaller job than it had — it renders
+# nothing, it GATES.
+#
+#   firing      — the row prints, exactly as before.
+#   not-firing  — a stamp that has gone stale: armed, and no longer ticking.
+#                 No row (F3's ratified rule is running-or-nothing, and a dead
+#                 Patrol is nothing), and one FIX line, because this is the one
+#                 state of the three that a person can and should act on.
+#   anything else — never armed, or deliberately ended: the disarm verb REMOVES
+#                 the stamp (S10), so an absent stamp is a decision, not a
+#                 fault. No row and no fix line, which is what the section
+#                 already does for a machine with no Patrol at all.
 _patrol_flush() {
   [ -n "$_p_sid" ] || return 0
   [ "$_p_n_patrol" -gt 0 ] || return 0
   local short="${_p_sid%%-*}" j id extras="" n open=0
-  PATROL_LIVE=$((PATROL_LIVE + 1))
-  [ "$_p_present" = "yes" ] && open="$_p_open"
-  _patrol_add "  ${DOCTOR_OK} session ${short} · ${open} open $(_doctor_plural "$open" dispatch dispatches)"
+  case "$_p_stamp" in
+    firing)
+      PATROL_LIVE=$((PATROL_LIVE + 1))
+      [ "$_p_present" = "yes" ] && open="$_p_open"
+      _patrol_add "  ${DOCTOR_OK} session ${short} · ${open} open $(_doctor_plural "$open" dispatch dispatches)" ;;
+    not-firing)
+      fix "session ${short}: the Patrol is armed but not firing → ask Claude to re-arm the Patrol" ;;
+  esac
 
   # THE DUPLICATE VERDICT KEEPS THE NEWEST and names every older one. Creation
   # order is what the transcript gives, and the newest job is the one whose
@@ -878,12 +916,16 @@ while IFS= read -r _p_line; do
     "patrol-session/v1|"*)
       _patrol_flush
       _p_sid="$(_doctor_pfield "$_p_line" session)"
-      _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present="" ;;
+      _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp="" ;;
     "patrol-job/v1|"*)
       if [ "$(_doctor_pfield "$_p_line" kind)" = "patrol" ]; then
         _p_n_patrol=$((_p_n_patrol + 1))
         _p_jobs="${_p_jobs}$(_doctor_pfield "$_p_line" id)"$'\n'
       fi ;;
+    "patrol-stamp/v1|"*)
+      # Read for the gate above and rendered nowhere — the stamp's age,
+      # interval and provenance stay deleted (spec AC-F3).
+      _p_stamp="$(_doctor_pfield "$_p_line" state)" ;;
     "patrol-roster/v1|"*)
       _p_open="$(_doctor_pfield "$_p_line" open)"
       _p_present="$(_doctor_pfield "$_p_line" present)" ;;

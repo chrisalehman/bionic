@@ -239,6 +239,77 @@ ALL_OUT="$(run_setup BIONIC_SETTINGS_FILE="$TMP/${LONGSEG}/${LONGSEG}/settings.j
 expect_contains      "B13: --all plan reaches the environment/claude-proxy verb lines" "bionic would:" "$ALL_OUT"
 expect_all_lines_fit "B14: --all plan, long paths pending — every line fits 100 columns" "$BIONIC_LINE_WIDTH" "$ALL_OUT"
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Group C — the cut is a CHARACTER cut, under the locale the product runs in
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# WHAT THIS GROUP EXISTS TO CATCH, and why nothing above it could. Group B runs
+# setup under `env -i` with no LANG — the C locale, where bash's `${#s}` counts
+# BYTES. The predecessor truncator tested length one way and cut the other
+# (`${#s}` characters, `printf '%.*s'` bytes); under C those two units are the
+# same and the bug is invisible, while under the UTF-8 locale a real user's
+# shell exports it slices a multi-byte glyph in half and emits invalid UTF-8.
+# Same code, same input, two locales, two answers: the hermetic fixture was
+# exercising a different code path than the one that ships (Step-6 critic C-1,
+# reproduced on 3 of 5 cut offsets).
+#
+# SO THIS GROUP SETS THE LOCALE and walks the cut across successive offsets.
+# One offset could pass by luck — a cut landing on a character boundary is
+# valid whatever the unit — so the loop moves the boundary one column at a time
+# through a run of accented characters, which is what makes a byte cut fail on
+# two of every three.
+#
+# `iconv -f UTF-8 -t UTF-8` IS THE ORACLE: it succeeds only if its input is
+# well-formed UTF-8. Nothing bash can measure about a string tells you whether
+# it ends mid-sequence.
+
+# Bash `case` over the locale list, not `grep`: the assertion-helper race rule
+# forbids `producer | grep -q` here, and the shell grep on this machine is ugrep,
+# which answers differently enough to have cost a false negative already.
+have_utf8_locale() {
+  local l
+  while IFS= read -r l || [ -n "$l" ]; do
+    case "$l" in en_US.UTF-8|en_US.utf8) return 0 ;; esac
+  done <<< "$(locale -a 2>/dev/null)"
+  return 1
+}
+
+if ! command -v iconv >/dev/null 2>&1; then
+  no "C: iconv is required to validate encoding and is not on PATH"
+elif ! have_utf8_locale; then
+  no "C: an en_US.UTF-8 locale is required and this machine has none"
+else
+  # A run of 3-byte characters long enough to be crossed by the cut, behind a
+  # pad whose length moves the cut through it one column per iteration.
+  UTF8_ACC="$(printf 'é%.0s' $(seq 1 40))"
+  UTF8_BAD=0; UTF8_ELIDED=0; UTF8_N=0
+  for _pad_n in 0 1 2 3 4 5; do
+    UTF8_PAD="$(printf 'x%.0s' $(seq 1 $((20 + _pad_n))))"
+    UTF8_DIR="${TMP}/u${_pad_n}/${UTF8_PAD}${UTF8_ACC}"
+    mkdir -p "$UTF8_DIR"
+    UTF8_SETTINGS="${UTF8_DIR}/s.json"
+    write_env_fixture "$UTF8_SETTINGS"
+    UTF8_OUT="$(run_setup LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 \
+                          BIONIC_SETTINGS_FILE="$UTF8_SETTINGS" -- --only environment)"
+    UTF8_N=$((UTF8_N + 1))
+    printf '%s' "$UTF8_OUT" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1 || UTF8_BAD=$((UTF8_BAD + 1))
+    case "$UTF8_OUT" in *…*) UTF8_ELIDED=$((UTF8_ELIDED + 1)) ;; esac
+  done
+
+  # THE POSITIVE THE ENCODING ARM MEANS NOTHING WITHOUT: every one of these
+  # runs actually reached the truncator. A fixture short enough to print whole
+  # would pass the iconv check without the cut ever happening.
+  expect_eq "C1: every UTF-8 offset drove a line that needed eliding" \
+    "$UTF8_N" "$UTF8_ELIDED"
+  expect_eq "C2: and every one of them is well-formed UTF-8" "0" "$UTF8_BAD"
+
+  # The cut is a cut, not a pass-through: the untruncated path is gone and the
+  # budget still holds under a locale where a glyph is one column, not three.
+  expect_not_contains "C3: the untruncated accented path is gone" "$UTF8_DIR" "$UTF8_OUT"
+  expect_all_lines_fit "C4: and every line still fits the budget under UTF-8" \
+    "$BIONIC_LINE_WIDTH" "$UTF8_OUT"
+fi
+
 echo ""
 echo "command-relay.test.sh: ${PASS}/${TOTAL} passed"
 [ "$FAIL" -eq 0 ]

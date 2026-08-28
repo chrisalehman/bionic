@@ -1062,6 +1062,21 @@ detect_plugin_latest() {  # -> one line, always exit 0
     echo "plugin:latest state=unknown installed=- latest=- cause=the marketplace's plugin.json has no version field"
     return 0
   fi
+  # THE ONE FIELD ON THIS PAGE THAT COMES OUT OF SOMEBODY ELSE'S FILE AND IS
+  # PRINTED VERBATIM. It reaches doctor's FIX section and, from there, a relayed
+  # block a person is invited to paste from. This line's own grammar is
+  # `key=value` separated by spaces, and every reader of it splits on that — so
+  # a `version` carrying a space, a newline or a backtick does not need an
+  # author with bad intent to fabricate a second fact line or break out of a
+  # fence; a typo in a fork's manifest does it. A version is a short token of
+  # digits, letters, dots and dashes. Anything else is not a version bionic can
+  # report, and `unknown` with a cause is the honest answer — the same answer
+  # every other unreadable input on this page gets.
+  case "$latest" in
+    *[!0-9A-Za-z.-]*|????????????????????????????????*)
+      echo "plugin:latest state=unknown installed=- latest=- cause=the marketplace's plugin.json version is not a version-shaped token"
+      return 0 ;;
+  esac
 
   fact="$(detect_plugin_integrity)"
   installed="${fact#plugin: version=}"; installed="${installed%% *}"
