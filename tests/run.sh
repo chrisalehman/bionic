@@ -285,6 +285,14 @@ run "doctor-patrol.test.sh" bash tests/doctor-patrol.test.sh
 # doctor.sh already holds itself to (AC-15). Hand-listed like every suite
 # outside hooks/.
 run "command-relay.test.sh" bash tests/command-relay.test.sh
+# The installed-vs-latest version row (F5, epic-19 wave-01, spec AC-F5):
+# doctor.sh's BIONIC NATIVE table gains a per-feed-kind `version` row — a git
+# feed compares against the marketplace's cached clone and names the exact
+# repair command on lag, a directory feed consumes the existing registry-sha
+# lag/reconverge machinery instead of a meaningless self-compare, and an
+# undeterminable feed kind degrades to an honest `unknown` line. Hand-listed
+# like every suite outside hooks/.
+run "doctor-version.test.sh" bash tests/doctor-version.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
