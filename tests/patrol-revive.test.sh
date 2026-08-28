@@ -394,6 +394,122 @@ else
 fi
 
 echo ""
+echo "=== Group 7: the deliberate stop — a removed stamp is what ends the notice ==="
+
+# THE NOTICE IS PER-TURN, NOT ONCE PER SESSION, and that is the whole reason
+# `session-poker.sh disarm` exists (critic C-2, epic-19 w1 Step 6). `stop_hook_active`
+# suppresses the SECOND stop inside ONE turn; it resets at the next turn, so a stamp left
+# stale blocks turn after turn with no operator action that stops it — and there is no CLI
+# backstop above this hook, because blocks that are one-per-turn are never CONSECUTIVE.
+#
+# Nothing in production removed a stamp before the disarm verb, so both routine ways a run
+# ends its own Patrol — the run-close `CronDelete` and the poker's own DISARM decision —
+# produced exactly that unbounded loop. These cases drive it: five turns, five blocks, and
+# then the two things that stop it.
+POKER_FOR_DISARM="${BIONIC_HOOKS_DIR}/session-poker.sh"
+
+D=$(make_env 1m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 600
+G7_BLOCKS=0
+for _t in 1 2 3 4 5; do
+  fire "$D"
+  [ "$(decision_of)" = "block" ] && G7_BLOCKS=$((G7_BLOCKS + 1))
+done
+TOTAL=$((TOTAL + 1))
+if [ "$G7_BLOCKS" -eq 5 ]; then
+  pass "30: a stale stamp blocks EVERY turn — five turns, five blocks (the notice is per-turn)"
+else
+  fail "30: the per-turn block is not what this hook does" "blocked $G7_BLOCKS of 5 turns"
+fi
+
+# THE CURE, THROUGH THE REAL VERB — never an `rm` in the test, which would pin this suite to
+# its own idea of where the stamp lives instead of to the poker that owns it.
+TOTAL=$((TOTAL + 1))
+( cd "$D" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER_FOR_DISARM" disarm ) >/dev/null 2>&1
+G7_RC=$?
+if [ "$G7_RC" -eq 0 ] && [ ! -e "$(stamp_path "$D" "$SID")" ]; then
+  pass "31: session-poker.sh disarm removes this session's stamp (rc=0)"
+else
+  fail "31: disarm did not remove the stamp" \
+       "rc=$G7_RC; still at $(stamp_path "$D" "$SID")"
+fi
+
+fire "$D"; expect_quiet "32: …and the very next turn is silent — the forever-block is over"
+
+# THE OTHER PRODUCER, end to end. The poker's own DISARM decision — "the Patrol may stop" —
+# is reached on every quiet stretch between dispatch batches, not only at run close. Its
+# tick removes the stamp as its last act, so the turn that follows it is silent rather than
+# a death notice demanding the re-arm the tick just said was unnecessary.
+D=$(make_env 1m)
+printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+  > "$D/.bionic/tmp/roster-$SID.state"
+write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 600
+G7_TICK=$( cd "$D" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$D/no-config" \
+             bash "$POKER_FOR_DISARM" tick 2>&1 )
+TOTAL=$((TOTAL + 1))
+case "$G7_TICK" in
+  *decision=DISARM*)
+    if [ ! -e "$(stamp_path "$D" "$SID")" ]; then
+      pass "33: a DISARM tick removes the stamp it wrote — the decision and the disk agree"
+    else
+      fail "33: a DISARM tick left its stamp behind — the death notice fires on the next turn"
+    fi
+    ;;
+  *) fail "33: the fixture roster did not reach a DISARM decision" "$G7_TICK" ;;
+esac
+
+# THE DEATH NOTICE AFTER A DISARM IS LATE, NEVER ABSENT, and that is what this case has to
+# reach. The tick stamps BEFORE it decides (liveness is firings landing), so a DISARM tick
+# that left its stamp behind leaves a FRESH one: the session is quiet for one whole stale
+# window and only then starts blocking on every turn, forever. A fire taken immediately
+# after the tick is therefore silent whether or not the stamp was removed, and would pin
+# nothing. Aging whatever survived the tick is what puts the two outcomes apart — with the
+# stamp gone there is nothing to age and the hook is silent for good.
+if [ -e "$(stamp_path "$D" "$SID")" ]; then
+  backdate "$(stamp_path "$D" "$SID")" 600
+fi
+fire "$D"; expect_quiet "34: …and one stale window later there is still no notice to fire"
+
+# ---------- what the notice says about the footgun in its own step 2 ----------
+#
+# STEP 1 IS THE REFUSABLE HALF. `CronCreate` is measured non-deterministically refusable by
+# the auto-mode classifier (.bionic/docs/record/epic-19/w1/t3-probes.md finding 1), and a
+# model that runs step 2 alone freshens the stamp over an EMPTY cron table — a Patrol that
+# reads alive to this hook, to the arming wall and to /bionic:doctor, and never fires again.
+# The header argues at length that this is strictly worse than the death it heals; the text
+# has to carry that argument to the reader who acts on it, not just to the reader of the
+# source.
+D=$(make_env 1m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 600
+fire "$D"
+expect_block "35: the stale fixture blocks, so there is a notice to read"
+expect_reason_names "36: step 2 is conditional on step 1 in the text itself" \
+  "ONLY IF step 1 succeeded"
+expect_reason_names "37: …and a refused CronCreate is told to stop, not to arm" \
+  "do NOT run step 2"
+expect_reason_names "38: …and the deliberate-stop path is named, not left to be guessed" \
+  "session-poker.sh disarm"
+
+# ---------- the header's own honesty about its backstop ----------
+#
+# The retired sentence claimed the CLI overrides this hook "after 8 consecutive blocks".
+# It cannot: `stop_hook_active` guarantees exactly one block per turn and the re-entry
+# always passes, so the blocks are never consecutive and that override can never engage
+# here. A limit accepted against a safety net that does not exist is the thing this pin
+# exists to keep out — asserted as a PAIR, so the absence rests on an extractor proven to
+# find text in this file.
+TOTAL=$((TOTAL + 1))
+if grep -q 'never consecutive' "$HOOK"; then
+  pass "39: the header states why the CLI's consecutive-block override cannot engage here"
+else
+  fail "39: the header does not say why the consecutive-block override cannot engage"
+fi
+TOTAL=$((TOTAL + 1))
+if grep -q 'backstop above ours is the CLI' "$HOOK"; then
+  fail "39b: the header still claims a backstop that cannot fire for this hook"
+else
+  pass "39b: …and no longer claims that backstop as its own"
+fi
+
+echo ""
 echo "========================================"
 echo "patrol-revive: $PASS/$TOTAL passed"
 echo "========================================"
