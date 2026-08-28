@@ -19,15 +19,23 @@
 # number written twice, and the copy nothing walled was the one that broke. The
 # number and the truncator live here now, so there is one of each.
 #
-# MEASURED IN COLUMNS, CUT IN BYTES, AND THAT ASYMMETRY IS DELIBERATE. A
-# terminal lays out COLUMNS, so the budget is a column count; but `printf`'s
-# precision counts BYTES, and no byte count is ever smaller than the column
-# count of the same string. Cutting to N bytes therefore yields AT MOST N
-# columns — the error can only ever be a line shorter than it needed to be,
-# never one past the budget. The alternative (walking characters) buys back a
-# few columns on the rare row carrying a dash or an ellipsis, and costs a
-# locale dependency: `${s:0:n}` slices characters under a UTF-8 locale and
-# bytes under C, and the suites run under `env -i`.
+# ONE UNIT ON BOTH SIDES OF THE CUT, AND THIS IS THE WHOLE POINT OF THE FILE.
+# The budget is a column count, the test is a column count, and the cut removes
+# one CHARACTER at a time (`${s%?}`) until the count fits. It is not
+# `printf '%.*s'`, and that is a correction, not a preference: precision on
+# `%s` counts BYTES, so a length test in characters against a cut in bytes
+# slices a multi-byte glyph in half and emits invalid UTF-8. The wave's Step-6
+# critic reproduced exactly that in `_setup_trunc` — 3 of 5 cut offsets
+# corrupted, on any `$HOME` carrying an accent — and the truncator this file
+# replaces had been deleted four commits earlier carrying a comment warning
+# against it: *"Cut to a column count, never to a byte count."* Restored here,
+# once, for both scripts.
+#
+# THE LOOP FORKS NOTHING. `$(bionic_cols "$s")` inside a shrink loop is a
+# subshell per iteration — hundreds of forks on a long path, on a page that
+# already spends its budget on real probes. `_bionic_cols_into` writes the
+# answer to a variable instead, so the loop is pure bash string work and the
+# glyph set is still spelled exactly once.
 #
 # Sourced, never executed:  . "${CLAUDE_PLUGIN_ROOT}/scripts/lib/width.sh"
 
@@ -44,11 +52,16 @@ BIONIC_LINE_WIDTH=100
 # exact — no locale to depend on, and no external process per cell. A glyph
 # added to a report and not to this list measures three columns too wide, and
 # the effect is a column that pads short, never a line that overflows.
-bionic_cols() {  # <string> -> its width in terminal columns
+_bionic_cols_into() {  # <string> — sets BIONIC_COLS; no subshell, for the loop below
   local s="${1:-}"
   s="${s//✓/.}"; s="${s//✗/.}"; s="${s//–/.}"; s="${s//—/.}"
   s="${s//≥/.}"; s="${s//…/.}"; s="${s//·/.}"
-  printf '%s' "${#s}"
+  BIONIC_COLS="${#s}"
+}
+
+bionic_cols() {  # <string> -> its width in terminal columns
+  _bionic_cols_into "${1:-}"
+  printf '%s' "$BIONIC_COLS"
 }
 
 # One string, held inside a column budget, elided with `…` when it does not fit.
@@ -56,13 +69,18 @@ bionic_cols() {  # <string> -> its width in terminal columns
 # caller whose prefix already ate the whole line still gets its content — a row
 # that printed an ellipsis and no fact would be worse than a long row.
 bionic_trunc() {  # <string> <column-budget> -> string
-  local s="${1:-}" max="${2:-0}" cut
+  local s="${1:-}" max="${2:-0}" want
   [ "$max" -gt 0 ] || { printf '%s' "$s"; return 0; }
-  [ "$(bionic_cols "$s")" -le "$max" ] && { printf '%s' "$s"; return 0; }
-  # One column for the ellipsis. The cut is bytes (see the header), so the
-  # result is at most `max - 1` columns and the whole string at most `max`.
-  cut=$(( max - 1 )); [ "$cut" -gt 0 ] || cut=0
-  printf '%.*s…' "$cut" "$s"
+  _bionic_cols_into "$s"
+  [ "$BIONIC_COLS" -le "$max" ] && { printf '%s' "$s"; return 0; }
+  # One column of the budget goes to the ellipsis. `${s%?}` drops the last
+  # CHARACTER, so a multi-byte glyph leaves whole or not at all.
+  want=$(( max - 1 )); [ "$want" -gt 0 ] || want=0
+  while [ -n "$s" ] && [ "$BIONIC_COLS" -gt "$want" ]; do
+    s="${s%?}"
+    _bionic_cols_into "$s"
+  done
+  printf '%s…' "$s"
 }
 
 # A whole row, from a fixed prefix and a free-form tail: the shape both callers
@@ -82,8 +100,8 @@ bionic_trunc() {  # <string> <column-budget> -> string
 # `— /bionic:setup rewrites it` clean off (epic-19 W1 S9).
 bionic_line() {  # <prefix> <tail> [<instruction that must survive>]
   local prefix="${1:-}" tail="${2:-}" keep="${3:-}" room budget
-  room=$(( BIONIC_LINE_WIDTH - $(bionic_cols "$prefix") ))
-  budget=$(( room - $(bionic_cols "$keep") ))
+  _bionic_cols_into "$prefix"; room=$(( BIONIC_LINE_WIDTH - BIONIC_COLS ))
+  _bionic_cols_into "$keep";   budget=$(( room - BIONIC_COLS ))
   if [ -z "$keep" ] || [ "$budget" -lt 1 ]; then
     # Nothing to protect, or no room to protect it in. One bound over the whole
     # tail: a truncated instruction still beats a line the terminal wraps.
