@@ -140,6 +140,20 @@ make_repo_with_roster() {  # <sid> <open-names...> -- <closed-names...> -> repo 
   printf '%s' "$dir"
 }
 
+# THE STAMP hooks/session-poker.sh touches on every tick, and the ONE fact that
+# separates an armed Patrol from a dead one. `patrol_stamp_state` reads only its
+# mtime against 2x the poker interval (30m default → a 3600s limit), so a file
+# written now is `firing` and one backdated past that is `not-firing`. Absent is
+# a third answer, `never-armed`, and it needs no builder — it is what every
+# fixture here had before this existed.
+plant_patrol_stamp() {  # <repo> <sid> [<backdate-hours>]
+  local repo="$1" sid="$2" hours="${3:-}" f="$1/.bionic/tmp/patrol-$2.state"
+  mkdir -p "$repo/.bionic/tmp"
+  printf 'patrol-stamp/v1|verb=arm|ts=fixture\n' > "$f"
+  [ -n "$hours" ] && touch -t "$(date -v-"${hours}"H +%Y%m%d%H%M.%S)" "$f"
+  return 0
+}
+
 # ---------- driving doctor ----------
 
 run_doctor() {  # <claude-home>
@@ -175,6 +189,10 @@ REPO2="$(make_repo_with_roster "$SID2" beta -- alpha)"
 HOME2="$(make_claude_home "$SID2" "$PID2" "$REPO2")"
 TR2="$(transcript_of "$HOME2" "$SID2")"
 plant_patrol_job "$TR2" "toolu_1" "abc12345"
+# A FRESH STAMP, because a transcript-visible job is not a running Patrol. The
+# row is gated on this file's age (doctor.sh, `_patrol_flush`); Sections 4 and 5
+# below are the same fixture with the stamp stale and with it absent.
+plant_patrol_stamp "$REPO2" "$SID2"
 
 OUT2="$(run_doctor "$HOME2")"
 PB2="$(patrol_block "$OUT2")"
@@ -209,6 +227,7 @@ HOME3="$(make_claude_home "$SID3" "$PID3" "$REPO3")"
 TR3="$(transcript_of "$HOME3" "$SID3")"
 plant_patrol_job "$TR3" "toolu_1" "old11111"
 plant_patrol_job "$TR3" "toolu_2" "new22222"
+plant_patrol_stamp "$REPO3" "$SID3"
 
 OUT3="$(run_doctor "$HOME3")"
 PB3="$(patrol_block "$OUT3")"
@@ -223,13 +242,74 @@ expect_no_match "15: the Patrol block itself carries no per-job detail" \
   "*old11111*" "$PB3"
 
 echo ""
-echo "=== Section 4: registration ==="
+echo "=== Section 4: the job is in the transcript and the Patrol is DEAD ==="
+
+# WHAT THIS SECTION OWNS, and why nothing above it could see it. Jobs are
+# reconstructed from the transcript — CronCreate minus CronDelete — and the four
+# events that kill a Patrol (a plugin update, /reload-plugins, a continue, a
+# /clear and resume) take the job out of the CLI's in-memory cron table with no
+# tool call behind them. So the count stays positive on a machine where nothing
+# is firing, and doctor printed `✓ session … · N open dispatches` for it: the
+# Step-6 correctness FAIL against AC-F3. The fixture is Section 2's, with one
+# thing changed — the stamp is three hours old, well past the 3600s limit.
+
+SID4="dddddddd-1111-2222-3333-444455556666"
+SHORT4="${SID4%%-*}"
+spawn_live_pid; PID4="$LIVE_PID"
+REPO4="$(make_repo_with_roster "$SID4" beta -- alpha)"
+HOME4="$(make_claude_home "$SID4" "$PID4" "$REPO4")"
+TR4="$(transcript_of "$HOME4" "$SID4")"
+plant_patrol_job "$TR4" "toolu_1" "abc12345"
+plant_patrol_stamp "$REPO4" "$SID4" 3
+
+OUT4="$(run_doctor "$HOME4")"
+PB4="$(patrol_block "$OUT4")"
+
+expect_no_match "17: a dead Patrol prints no running line" "*✓ session ${SHORT4}*" "$PB4"
+expect_no_match "18: and no session line of any kind" "*session ${SHORT4}*" "$PB4"
+expect_match    "19: the section falls back to none running" "*none running*" "$PB4"
+# NOT SILENCE. Running-or-nothing governs the SECTION; a Patrol that was armed
+# and stopped ticking is the one state a person can act on, and the fix channel
+# is where doctor says so.
+expect_match    "20: the fix section names the session and what to do" \
+  "*session ${SHORT4}: the Patrol is armed but not firing*" "$OUT4"
+# The deleted detail stays deleted — the stamp is read, not rendered.
+expect_no_match "21: the stamp state itself is still not printed" "*not-firing*" "$OUT4"
+expect_no_match "22: nor its age or interval provenance" "*came from the poker*" "$OUT4"
+
+echo ""
+echo "=== Section 5: the job is in the transcript and there is no stamp ==="
+
+# THE THIRD STATE, AND IT IS NOT A FAULT. An absent stamp means never armed —
+# or deliberately ended, because the poker's `disarm` verb REMOVES this file
+# (S10). Both are decisions, so this machine gets the same quiet page as one
+# with no Patrol at all: no row, and no fix line either. This is the assertion
+# that keeps Section 4's fix line from becoming noise on every stopped run.
+
+SID5="eeeeeeee-1111-2222-3333-444455556666"
+SHORT5="${SID5%%-*}"
+spawn_live_pid; PID5="$LIVE_PID"
+REPO5="$(make_repo_with_roster "$SID5" beta -- alpha)"
+HOME5="$(make_claude_home "$SID5" "$PID5" "$REPO5")"
+TR5="$(transcript_of "$HOME5" "$SID5")"
+plant_patrol_job "$TR5" "toolu_1" "abc12345"
+
+OUT5="$(run_doctor "$HOME5")"
+PB5="$(patrol_block "$OUT5")"
+
+expect_no_match "23: a never-armed session prints no running line" "*session ${SHORT5}*" "$PB5"
+expect_match    "24: the section falls back to none running" "*none running*" "$PB5"
+expect_no_match "25: and a deliberate stop earns no fix line" \
+  "*session ${SHORT5}: the Patrol*" "$OUT5"
+
+echo ""
+echo "=== Section 6: registration ==="
 
 # THE SUITE IS REGISTERED. tests/*.test.sh is NOT globbed by the runner — see
 # tests/patrol-duties-gate.test.sh's own case 24 for the prior instance of this
 # lesson (doctor.test.sh, deleted at 8582861, was never re-registered because
 # nothing needed to be — this is that suite's live successor).
-expect_true "16: tests/run.sh names doctor-patrol.test.sh" \
+expect_true "26: tests/run.sh names doctor-patrol.test.sh" \
   grep -q 'run "doctor-patrol.test.sh" bash tests/doctor-patrol.test.sh' "${BIONIC_SCRIPTS_DIR}/tests/run.sh"
 
 echo ""
